@@ -80,13 +80,6 @@
         "target": null,
         "detail": "registry TTL guard passed",
         "evidence": null
-      },
-      {
-        "id": "observe_blocking_interpretation",
-        "status": "pass",
-        "target": null,
-        "detail": "observe-vs-blocking interpretation consistent (enforcement=observe, would_block=false)",
-        "evidence": null
       }
     ],
     "summary": {

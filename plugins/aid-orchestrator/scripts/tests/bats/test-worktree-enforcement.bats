@@ -158,13 +158,13 @@ _seed_completed_epic() {
 
 # ─── 1-3. the redirect: the worktree moves, the primary checkout does not ──
 
-@test "P074 Step 8: plan-finalize --stage sync invoked FROM THE PRIMARY CHECKOUT executes in the plan worktree" {
+@test "P074 Step 8: plan-finalize --stage freeze invoked FROM THE PRIMARY CHECKOUT executes in the plan worktree" {
   _mk_project
   _seed_plan 1
   local before_head before_branch
   before_head="$(_primary_head)"; before_branch="$(_primary_branch)"
 
-  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage freeze --project-root "$ROOT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"executes in its own worktree"* ]]
   [[ "$output" == *"$(_phys "$(_wt)")"* ]]
@@ -234,7 +234,7 @@ _seed_completed_epic() {
 @test "P074 Step 8: a command run FROM INSIDE the plan worktree does not redirect" {
   _mk_project
   _seed_plan 1
-  run _from "$(_wt)" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  run _from "$(_wt)" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage freeze --project-root "$ROOT"
   [ "$status" -eq 0 ]
   [[ "$output" != *"executes in its own worktree"* ]]
 }
@@ -246,7 +246,7 @@ _seed_completed_epic() {
   _seed_plan 1
   # Remove the tree behind git's back — the crash/manual-rm shape.
   rm -rf "$(_wt)"
-  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage freeze --project-root "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"missing or is no longer registered"* ]]
   [[ "$output" == *"--recreate-worktree"* ]]
@@ -271,7 +271,7 @@ _seed_completed_epic() {
   _seed_plan 1 ""
   _in_root "source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-state.sh'
             plan_state_set_worktree_path ${PLAN_ID} ''"
-  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage freeze --project-root "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"records NO execution worktree, but one exists"* ]]
   [[ "$output" == *"plan-start"* ]]
@@ -284,7 +284,7 @@ _seed_completed_epic() {
   _mk_project
   _seed_plan 0
   local before_branch; before_branch="$(_primary_branch)"
-  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage freeze --project-root "$ROOT"
   [ "$status" -eq 0 ]
   [[ "$output" != *"executes in its own worktree"* ]]
   [[ "$output" == *"no execution worktree"* ]]
@@ -312,7 +312,7 @@ _seed_completed_epic() {
   # The guard must TERMINATE here; the failure mode it exists for is unbounded
   # recursion, so "refuses" is the assertion, and the exit is what proves it.
   run bash -c "cd '$ROOT' && AID_WT_REDIRECTED=1 exec bash '$PLAN_FSM' \
-    plan-finalize '$PLAN_ID' --stage sync --project-root '$ROOT'" 3>&-
+    plan-finalize '$PLAN_ID' --stage freeze --project-root '$ROOT'" 3>&-
   [ "$status" -ne 0 ]
   [[ "$output" == *"worktree redirect loop"* ]]
   [[ "$output" == *"--recreate-worktree"* ]]
@@ -355,7 +355,7 @@ _seed_completed_epic() {
   _mk_project
   _seed_plan 0 "$ROOT"
   local before_branch; before_branch="$(_primary_branch)"
-  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage freeze --project-root "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"not a LINKED worktree"* ]]
   [[ "$output" == *"--recreate-worktree"* ]]
@@ -507,7 +507,7 @@ _from_no_yq() {
   run bash -c "cd '$ROOT' && PATH='$shim' command -v yq" 3>&-
   [ "$status" -ne 0 ] || skip "yq is still reachable through the shim PATH — the degradation cannot be staged here"
 
-  run _from_no_yq "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  run _from_no_yq "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage freeze --project-root "$ROOT"
   # THE ASSERTION: no false forensics. It must not claim a killed plan-start,
   # and must not name --recreate-worktree as the repair for a missing binary.
   [[ "$output" != *"records NO execution worktree"* ]]
@@ -521,7 +521,7 @@ _from_no_yq() {
   _mk_project
   _seed_plan 0
   local before_branch; before_branch="$(_primary_branch)"
-  run _from_no_yq "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  run _from_no_yq "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage freeze --project-root "$ROOT"
   [[ "$output" != *"records NO execution worktree"* ]]
   [[ "$output" != *"executes in its own worktree"* ]]
   # Nothing was redirected and the PM's checkout never moved.
@@ -557,7 +557,7 @@ _from_no_yq() {
   [[ "$output" == *"restored ${PLAN_ID}'s execution worktree pointer"* ]]
   # The pointer is really back, so the next plan-linked command redirects
   # instead of firing the crash-window refusal.
-  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  run _from "$ROOT" "$PLAN_FSM" plan-finalize "$PLAN_ID" --stage freeze --project-root "$ROOT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"executes in its own worktree"* ]]
   [[ "$output" != *"records NO execution worktree"* ]]
@@ -600,24 +600,3 @@ _from_no_yq() {
   [[ "$output" == *"executes in its own worktree"* ]]
 }
 
-@test "v2.95.8 (agents #8): aid-delivery-gate.sh measures AID_GIT_TREE (the worktree), evidence stays in the state root" {
-  _mk_project
-  _seed_plan 1
-  local wt; wt="$(_wt)"
-  ( cd "$wt" && echo change > tree-change.txt && git add tree-change.txt && git -c user.email=t@t -c user.name=t commit -qm "on the plan branch" )
-  local tree_head; tree_head="$(git -C "$wt" rev-parse HEAD)"
-  local root_head; root_head="$(git -C "$ROOT" rev-parse HEAD)"
-  [ "$tree_head" != "$root_head" ]
-  mkdir -p "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-x"
-  run env AID_PROJECT_ROOT="$ROOT" AID_GIT_TREE="$wt" AID_EVIDENCE_BASE="$ROOT/.aid-o/work/evidence" \
-      bash "$AID_PLUGIN_PATH/scripts/aid-delivery-gate.sh" --epic "$EPIC_ID" --run R-x --base "$root_head" --phase D0
-  [ -f "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-x/delivery-gate.json" ]
-  [ "$(jq -r '.revision.head_sha' "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-x/delivery-gate.json")" = "$tree_head" ]
-  # run FROM the worktree by hand (no AID_GIT_TREE, no AID_PROJECT_ROOT): the tree is the
-  # cwd's checkout, not the script's install dir — this used to die with "cannot determine
-  # project root". (With AID_PROJECT_ROOT set, that root is the tree unless AID_GIT_TREE says
-  # otherwise — the FSM always passes AID_GIT_TREE.)
-  run bash -c "cd '$wt' && AID_EVIDENCE_BASE='$ROOT/.aid-o/work/evidence' bash '$AID_PLUGIN_PATH/scripts/aid-delivery-gate.sh' --epic '$EPIC_ID' --run R-y --base '$root_head' --phase D0"
-  [[ "$output" != *"cannot determine"* ]]
-  [ "$(jq -r '.revision.head_sha' "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-y/delivery-gate.json")" = "$tree_head" ]
-}

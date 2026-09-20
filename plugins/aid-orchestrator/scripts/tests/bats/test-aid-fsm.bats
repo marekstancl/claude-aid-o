@@ -1326,51 +1326,6 @@ YAML
   [[ "$output" == *"blocking_findings"* ]]
 }
 
-@test "D0 gate point: advance-to-gates logs d0_delivery_gate event (observe, non-blocking)" {
-  local td; td="$(mktemp -d)"
-  mkdir -p "$td/.aid-o/work/evidence/E-D0/R-D0T/gates"
-  # P074 Step 1: $td is passed as AID_PROJECT_ROOT below. It is a legitimate
-  # standalone dogfood state root (not a git repo), so it must carry the
-  # plan-state dir that lib/aid-roots.sh's dogfood escape keys on — the
-  # resolver deliberately refuses roots identifiable by neither repo nor
-  # plan-state.
-  mkdir -p "$td/.aid-o/work/plan-state"
-  cat > "$td/.aid-o/work/evidence/E-D0/R-D0T/fsm-state.yaml" <<'EOF'
-epic_id: E-D0
-run_id: R-D0T
-state: EXECUTE
-current_step: 1
-total_steps: 1
-base_commit: HEAD
-branch: integration/gui-control-v2
-streamlined_mode: false
-EOF
-  cat > "$td/.aid-o/work/evidence/E-D0/R-D0T/timeline.jsonl" <<'EOF'
-{"ts":"2026-06-23T00:00:00Z","event":"run_started"}
-EOF
-  mkdir -p "$td/.aid-o/config"
-  cat > "$td/.aid-o/config/execution.yaml" <<'EOF'
-version: '1.0'
-gates:
-  smoke:
-    command: "echo 'smoke'"
-    required: true
-    timeout_seconds: 10
-    max_retries: 0
-EOF
-  # $td is no repository, so the EXECUTE→GATES cp3 round check (bound to HEAD)
-  # is switched off here — an audited pass, never a fabricated round (P094).
-  local ev="$td/.aid-o/work/evidence/E-D0/R-D0T"
-  mkdir -p "$td/.aid-o/config/policies"
-  printf 'review_checkpoints:\n  cp3_integration_review: false\n' > "$td/.aid-o/config/policies/review-checkpoints.yaml"
-
-  # cmd_transition reads evidence_dir as relative ".aid-o/..." so CWD must be $td
-  AID_PROJECT_ROOT="$td" run bash -c "cd '$td' && bash '$FSM' advance-to-gates '$ev/fsm-state.yaml'"
-  [ "$status" -eq 0 ]
-  grep -q "d0_delivery_gate" "$ev/timeline.jsonl"
-  rm -rf "$td"
-}
-
 # ─── E5 C2 Semantic Wiring-Gate (observe mode) ───────────────────────────────
 
 @test "E5 wiring-gate observe: Critical finding logged but increment proceeds" {

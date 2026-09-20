@@ -1198,6 +1198,46 @@
      "evidence": "see source_file"
     }
    ]
+  },
+  {
+   "id": "s21-aid-orchestrator-needless-complexity-step0",
+   "project": "aid-orchestrator",
+   "repo_path": "/opt/eco/projects/aid-orchestrator",
+   "checkpoint": "cp2",
+   "epic": "E-096-1_2",
+   "run": "R-E096-sample",
+   "step": 0,
+   "source_file": "branch scratch/p096-needless-complexity (a sabotaged diff written for P096 Step 9, not a recorded run)",
+   "head_sha": "424bf32c4d39612b2d5120a6296ac4ce91457113",
+   "range": "bdb2602d4cf292d579803968ed8d3aee41a4161e..424bf32c4d39612b2d5120a6296ac4ce91457113",
+   "range_source": "base_commit",
+   "size": {
+    "files": 2,
+    "lines": 31
+   },
+   "step_files": {
+    "outputs": [
+     "Create: `plugins/aid-orchestrator/scripts/lib/aid-report-names.sh` — base names of report paths",
+     "Test: `plugins/aid-orchestrator/scripts/tests/bats/test-report-names.bats` — the two-path case"
+    ],
+    "allowed_paths": [
+     "plugins/aid-orchestrator/scripts/lib/aid-report-names.sh",
+     "plugins/aid-orchestrator/scripts/tests/bats/test-report-names.bats"
+    ],
+    "forbidden_paths": []
+   },
+   "dod": {
+    "objective": "Print the base name of every given report path, one per line.",
+    "acceptance_criteria": [
+     "`aid_report_names a/b.json c.md` prints `b.json` and `c.md`, one per line."
+    ]
+   },
+   "original_verdict": null,
+   "original_findings": [],
+   "modes": [
+    "new"
+   ],
+   "planted": "needless complexity: a hand-written basename loop and a one-use wrapper (step_generalist question 7)"
   }
  ]
 }

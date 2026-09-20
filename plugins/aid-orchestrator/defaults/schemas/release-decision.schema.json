@@ -94,7 +94,7 @@
             ],
             "properties": {
               "input_id": {
-                "$comment": "P068 E-068-1_2 Step 4 — CLOSED oneOf, not a widened enum. A finite enum cannot express `epic_rollup:<epic_id>` for arbitrary future EPIC IDs, so the second branch is a pattern rather than more members. It stays closed in both directions: a typo in a canonical id still fails (branch 1), and a malformed EPIC id in a roll-up blocker still fails (branch 2). `delivery_report` joins branch 1 because plan mode's Reporter input is the run-scoped delivery-report.json.",
+                "$comment": "CLOSED oneOf, not a widened enum. A finite enum cannot express `epic_rollup:<epic_id>` for arbitrary future EPIC IDs, so the second branch is a pattern rather than more members. It stays closed in both directions: a typo in a canonical id still fails (branch 1), and a malformed EPIC id in a roll-up blocker still fails (branch 2). `final_review` is the whole-plan round (cp7; the EPIC's cp3 round in EPIC mode), `obligations` the plan's open release blockers.",
                 "oneOf": [
                   {
                     "enum": [
@@ -103,14 +103,11 @@
                       "semantic_review_final",
                       "acceptance_evidence",
                       "gates_report",
-                      "curator_report",
                       "plan_review",
                       "verification_report",
-                      "audit_report",
                       "invalidation_map",
-                      "reporter",
-                      "simplifier",
-                      "delivery_report"
+                      "final_review",
+                      "obligations"
                     ]
                   },
                   {
@@ -226,36 +223,6 @@
           ],
           "$comment": "enforced (exit 16) — D11"
         },
-        "reporter_status": {
-          "enum": [
-            "pass",
-            "fail",
-            "missing",
-            "not_applicable",
-            "disabled"
-          ],
-          "$comment": "enforced (exit 16) — D11"
-        },
-        "reporter_reason": {
-          "type": "string",
-          "minLength": 1,
-          "$comment": "enforced (exit 16) — D11 non-empty string"
-        },
-        "simplifier_status": {
-          "enum": [
-            "pass",
-            "fail",
-            "missing",
-            "not_applicable",
-            "disabled"
-          ],
-          "$comment": "enforced (exit 16) — D11"
-        },
-        "simplifier_reason": {
-          "type": "string",
-          "minLength": 1,
-          "$comment": "enforced (exit 16) — D11 non-empty string"
-        },
         "delivered_summary_ref": {
           "type": [
             "string",
@@ -311,6 +278,37 @@
             },
             "remaining_backlog": {
               "type": "array"
+            },
+            "close": {
+              "type": "object",
+              "description": "What closing the plan has cost over every plan-final attempt on disk (aid_plan_close_cost).",
+              "required": [
+                "attempts",
+                "minutes",
+                "usd",
+                "usd_unknown_roles"
+              ],
+              "properties": {
+                "attempts": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "minutes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "usd": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "usd_unknown_roles": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "$comment": "roles whose USD is unknown; never counted as zero"
+                }
+              }
             }
           }
         }
@@ -327,10 +325,6 @@
         "pm_brief_status",
         "evidence_verified_at_head",
         "evidence_verification_status",
-        "reporter_status",
-        "reporter_reason",
-        "simplifier_status",
-        "simplifier_reason",
         "delivered_summary_ref",
         "summary_for_pm"
       ]

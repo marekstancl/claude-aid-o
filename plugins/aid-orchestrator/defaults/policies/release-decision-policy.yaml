@@ -14,7 +14,7 @@
 #              telemetry event (match / divergence_class / head_sha) comparing the
 #              C4 release_ready verdict to the COMPLETE legacy verdict, and lets the
 #              transition follow the legacy tally. The transition is UNAFFECTED.
-#              (default — staged-wake, mirrors the DG-07 / C3 observe rows.)
+#              (default — staged-wake.)
 #   blocking → additionally, a C4 release_ready=false blocks review→release
 #              (counts toward the done-advance error tally → exit 1). E10 path.
 #

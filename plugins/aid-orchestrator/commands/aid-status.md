@@ -474,6 +474,23 @@ review_line() {
   [ "$_line" = "review: none" ] || printf '  %s\n' "$_line"
 }
 
+# recipe: final-review-line — defines final_review_line <plan_id>: the plan
+# close so far — attempts, minutes and USD over every plan-final run directory,
+# the whole-plan round (cp7) of the newest one, and a waived review when the PM
+# recorded one. A plan that has not started closing renders NOTHING.
+final_review_line() {
+  local _root _dir _last _cost
+  _root="$(aid_state_root)" || return 0
+  _dir="$_root/.aid-o/work/evidence/${1:?final_review_line: plan id required}"
+  _last="$(ls -d "$_dir"/R-"$1"-final-* 2>/dev/null | sort -t- -k4 -n | tail -n1)"
+  [ -n "$_last" ] || return 0
+  # shellcheck source=/dev/null
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-review-summary.sh" 2>/dev/null || return 0
+  _cost="$(aid_plan_close_cost "$_dir" "$1" | jq -r '"\(.attempts) attempt(s), \(.minutes) min, \(.usd) USD" + (if (.usd_unknown_roles | length) > 0 then " + unknown: " + (.usd_unknown_roles | join(", ")) else "" end)')"
+  printf '  close: %s; whole-plan %s%s\n' "$_cost" "$(AID_PROJECT_ROOT="$_root" aid_review_summary "$_last/cp7")" \
+    "$([ -f "$_last/final-review-waiver.json" ] && printf ' — WAIVED by the PM: %s' "$(jq -r .reason "$_last/final-review-waiver.json")")"
+}
+
 # recipe: epic-review-line — defines epic_review_line <epic_id> <run_id>: what
 # the run's step reviews (cp2) and EPIC review (cp3) cost, in tokens and USD
 # from defaults/prices.yaml (a project's .aid-o/config/prices.yaml wins), from
@@ -1060,6 +1077,7 @@ render_overview() {
         printf 'Plan %s — %s\n  worktree: %s\n' "$_id" "$_phase" "$_wt"
       fi
       review_line "$_id"
+      final_review_line "$_id"
       printf '  EPICs:\n'
       _body="$(plan_epics "$_id")"
       printf '%s\n' "${_body:-    (none active)}"

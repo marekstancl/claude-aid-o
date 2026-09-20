@@ -140,6 +140,7 @@ that the change delivers its acceptance criteria and nothing else, correctly.
 4. Does the change break a caller, a consumer of a file it edits or deletes, or a contract another module relies on?
 5. Is there an error, retry or concurrency path the change opens that ends in a silent wrong result?
 6. Does any name, path, number or claim in the diff (code, comment, doc) disagree with the repository at this commit?
+7. Is anything here more than the step needs: a hand-written replacement of a standard function, an abstraction with one use, a dependency for a few lines, scaffolding for later? Name what to delete or what replaces it. `major` when the diff would be materially shorter, else `minor`; a criterion that asks for the abstraction wins.
 
 ### Stop rule
 

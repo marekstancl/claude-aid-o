@@ -136,6 +136,20 @@ aid_step_review_role_section() {
   ' "$AID_SR_ROLES_SKILL"
 }
 
+# _aid_sr_patch <file> <title> — a patch inline when one prompt can carry it,
+# else its file list and where to read it: a whole-plan or whole-EPIC range can
+# be a megabyte (ACTA P024: 1.1 MB), and a prompt that large is never read.
+_aid_sr_patch() {
+  local f="$1" title="$2" bytes; bytes="$(wc -c < "$f")"
+  if (( bytes <= ${AID_REVIEW_INLINE_MAX_BYTES:-150000} )); then
+    echo "## ${title} (also on disk: ${f})"
+    echo '```diff'; cat "$f"; echo '```'
+  else
+    echo "## ${title}: ${bytes} bytes, too large to inline. READ IT FROM DISK with read-only tools, file by file: ${f}"
+    grep '^diff --git' "$f" | sed -E 's|^diff --git a/(.*) b/.*|- \1|'
+  fi
+}
+
 aid_step_review_prompt_render() {
   local role="$1" round="$2" dir="$3" cp="$4" step="${5:-}" section vars out note=""
   section="$(aid_step_review_role_section "$role")"
@@ -171,8 +185,7 @@ aid_step_review_prompt_render() {
       echo "### Findings still open"
       jq -r '.findings[] | "- [\(.severity)] \(.claim) (evidence: \(.evidence); fix asked: \(.fix))"' "${dir}/packet/open-findings.json"
       echo
-      echo "### What the author changed (fix.patch)"
-      echo '```diff'; cat "${dir}/packet/fix.patch"; echo '```'
+      _aid_sr_patch "${dir}/packet/fix.patch" "What the author changed (fix.patch)" | sed 's/^## /### /'
       echo
     fi
     echo "## Deterministic step check (already reported, do not repeat)"
@@ -191,8 +204,7 @@ aid_step_review_prompt_render() {
       echo
       echo "## Executed tests per criterion: ${dir}/packet/plan-diff.json"
       echo
-      echo "## claims.patch (CHANGELOG, README and docs hunks of the range; also on disk: ${dir}/packet/claims.patch)"
-      echo '```diff'; cat "${dir}/packet/claims.patch"; echo '```'
+      _aid_sr_patch "${dir}/packet/claims.patch" "claims.patch (CHANGELOG, README and docs hunks of the range)"
       echo
       local part
       for part in "${dir}"/packet/diff-*.patch; do
@@ -202,8 +214,7 @@ aid_step_review_prompt_render() {
     echo "## Declared scope (files.json)"
     jq -r '"outputs:\n" + ((.outputs // []) | map("- " + .) | join("\n")) + "\nallowed_paths: " + ((.allowed_paths // []) | join(", ")) + "\nforbidden_paths: " + ((.forbidden_paths // []) | join(", "))' "${dir}/packet/files.json"
     echo
-    echo "## diff.patch (also on disk: ${dir}/packet/diff.patch)"
-    echo '```diff'; cat "${dir}/packet/diff.patch"; echo '```'
+    _aid_sr_patch "${dir}/packet/diff.patch" "diff.patch"
   } >> "$out"
 }
 

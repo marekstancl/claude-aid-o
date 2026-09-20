@@ -11,10 +11,6 @@
     "merge_mode": "auto",
     "evidence_verification_status": "pass",
     "evidence_verified_at_head": true,
-    "reporter_status": "ok",
-    "reporter_reason": "",
-    "simplifier_status": "ok",
-    "simplifier_reason": "",
     "summary_for_pm": "Plán je hotový: všechny EPIKY prošly, evidence sedí na HEAD, blokátory žádné.",
     "delivered_summary_ref": ".aid-o/work/evidence/P080/delivery.md"
   }

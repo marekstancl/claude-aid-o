@@ -598,14 +598,13 @@ _seal_minimal_receipt() {
   local h64="sha256:0000000000000000000000000000000000000000000000000000000000000000"
   jq -nc --arg p "$plan_id" --arg c "$receipt_candidate" --arg r "$run_id" --arg ref "$ref" \
         --arg b "$base" --arg t "$target" --arg th "$target_head" --arg fa "$frozen_at" --arg h "$h64" \
-    '{schema_version:"aid-plan-final-evidence-1", artifact_type:"plan_final_evidence_receipt",
+    '{schema_version:"aid-plan-final-evidence-2", artifact_type:"plan_final_evidence_receipt",
       review_verdict:"accepted", plan_id:$p, plan_base_commit:$b, candidate_sha:$c,
       candidate_frozen_at:$fa, target_branch:$t, target_head_at_freeze:$th, run_id:$r,
       evidence_ref:$ref, outputs:{
-        "semantic-review-final.json":$h, "audit-report.json":$h, "curator-report.json":$h,
-        "simplifier-report.md":$h, "delivery-report.json":$h, "review-profile.json":$h,
-        "plan-diff.json":$h, "audit-input-manifest.json":$h, "delivery-gate.json":$h,
-        "acceptance-evidence.json":$h, "dispatch-record.json":$h}}' \
+        "acceptance-evidence.json":$h, "cp7/rounds.json":$h,
+        "gates_report.json":$h, "plan-diff.json":$h, "release-decision.json":$h,
+        "review-profile.json":$h, "semantic-review-final.json":$h}}' \
     > "$tmp"
   local hash; hash="sha256:$(sha256sum "$tmp" | awk '{print $1}')"
   local blob; blob=$(git -C "$TEST_PROJECT_ROOT" hash-object -w "$tmp")
@@ -732,7 +731,7 @@ EOF
   local tmp; tmp=$(mktemp)
   # Missing review_verdict, plan_base_commit, target_branch, etc. — a
   # single-file ref with a matching hash, but NOT the D1 receipt schema.
-  printf '{"schema_version":"aid-plan-final-evidence-1","artifact_type":"plan_final_evidence_receipt","plan_id":"P467","candidate_sha":"%s"}\n' \
+  printf '{"schema_version":"aid-plan-final-evidence-2","artifact_type":"plan_final_evidence_receipt","plan_id":"P467","candidate_sha":"%s"}\n' \
     "$candidate" > "$tmp"
   local hash; hash="sha256:$(sha256sum "$tmp" | awk '{print $1}')"
   local blob; blob=$(git -C "$TEST_PROJECT_ROOT" hash-object -w "$tmp")

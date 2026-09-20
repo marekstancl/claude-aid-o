@@ -6,7 +6,7 @@
 # registry-ids-pre-P094.txt, committed), compares it with the live registry
 # and requires a row in reference/review-successors.md for every id that is
 # gone or `removed_scoped`, whose successor cell is an ACTIVE registry id or
-# the literal `none (PM 2026-09-19 7A)`. Fails when the fixture is missing:
+# a recorded decision of the form `none (<who, when or where>)`. Fails when the fixture is missing:
 # a comparison against nothing proves nothing.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,20 +32,19 @@ retired_p094="$(comm -12 <(sort -u "$FIX") <(printf '%s\n' "$retired") | grep -v
   | grep -vE '^(scheduler_|test_audit_|test_catalog_|test_lane_|plan_start_clean|epic_start_clean|plan_merge_to_main|delegated_suite)' || true)"
 
 echo "TEST: every removed or retired id has a successor row"
-LITERAL='none (PM 2026-09-19 7A)'
 while IFS= read -r id; do
   [[ -n "$id" ]] || continue
   row="$(grep -E "^\| \`${id}\` \|" "$TABLE" || true)"
   if [[ -z "$row" ]]; then bad "no successor row for ${id}"; continue; fi
   succ="$(printf '%s' "$row" | awk -F'|' '{print $3}' | sed 's/^ *//;s/ *$//;s/`//g')"
-  if [[ "$succ" == "$LITERAL" ]]; then ok "${id} → ${LITERAL}"
+  if [[ "$succ" == "none ("*")" ]]; then ok "${id} → ${succ}"
   elif grep -qxF "$succ" <<< "$live_active"; then ok "${id} → ${succ} (active)"
-  else bad "${id} → '${succ}' is neither an active registry id nor the 7A literal"; fi
+  else bad "${id} → '${succ}' is neither an active registry id nor a recorded 'none (…)' decision"; fi
 done <<< "$(printf '%s\n%s\n' "$gone" "$retired_p094" | sort -u)"
 
 echo "TEST: the table names no successor that does not exist"
 while IFS= read -r succ; do
-  [[ -n "$succ" && "$succ" != "$LITERAL" ]] || continue
+  [[ -n "$succ" && "$succ" != "none ("*")" ]] || continue
   grep -qxF "$succ" <<< "$live_all" && ok "successor ${succ} exists" || bad "successor ${succ} is not a registry id"
-done <<< "$(awk -F'|' '/^## Mechanisms/ { exit } /^\| `/ { print $3 }' "$TABLE" | sed 's/^ *//;s/ *$//;s/`//g' | grep -v '^Successor$' | sort -u)"
+done <<< "$(awk -F'|' '/^## Mechanisms/ { skip = 1 } /^## Registry ids/ { skip = 0 } !skip && /^\| `/ { print $3 }' "$TABLE" | sed 's/^ *//;s/ *$//;s/`//g' | grep -v '^Successor$' | sort -u)"
 [[ "$fail" -eq 0 ]]

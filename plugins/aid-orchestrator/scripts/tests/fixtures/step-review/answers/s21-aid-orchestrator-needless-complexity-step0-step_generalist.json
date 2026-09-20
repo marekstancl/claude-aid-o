@@ -1,0 +1,16 @@
+{
+  "role": "step_generalist",
+  "checkpoint": "cp2",
+  "findings": [
+    {
+      "id": "step_generalist-1",
+      "checkpoint": "cp2",
+      "step": 0,
+      "severity": "major",
+      "claim": "question 7: _strip_dir re-implements basename character by character and _name_of is a wrapper with one use; the step needs one line",
+      "command": "grep -n \"_strip_dir\\|_name_of\" plugins/aid-orchestrator/scripts/lib/aid-report-names.sh",
+      "evidence": "plugins/aid-orchestrator/scripts/lib/aid-report-names.sh:6-14",
+      "fix": "delete _strip_dir and _name_of; aid_report_names is `local f; for f in \"$@\"; do basename -- \"$f\"; done`"
+    }
+  ]
+}

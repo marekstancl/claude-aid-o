@@ -1225,7 +1225,10 @@ fsm_count_recent_fails_epic() {
   fsm_count_fails_matching '.reason==$r' --arg r "$1"
 }
 
-# fsm_check_review_round <evidence_dir> <checkpoint> [<step>] [--freshness [<tree_root>]]
+# fsm_check_review_round <evidence_dir> <checkpoint> [<step>] [--freshness [<tree_root>]] [--head <sha>]
+#   --head: the commit the round must have read, when it is not the tree's HEAD
+#   (plan close: the frozen candidate, while the tree may stand on an accepted
+#   ancillary-only move past it).
 #   The one precondition of the step review (cp2), the EPIC review (cp3) and
 #   the whole-plan review (cp7, <evidence_dir> = the plan-final run directory,
 #   called by plan-finalize --stage decide). Reads <cp dir>/rounds.json written by aid-step-check.sh (a
@@ -1249,11 +1252,12 @@ fsm_count_recent_fails_epic() {
 #   Registry: fsm_review_round_required, fsm_review_round_head_bound,
 #   fsm_review_round_skip_bound. Tested by test-review-round-fsm.bats.
 fsm_check_review_round() {
-  local evidence_dir="$1" cp="$2" step="${3:-}" freshness=0 tree_root="$PWD"
+  local evidence_dir="$1" cp="$2" step="${3:-}" freshness=0 tree_root="$PWD" expected_head=""
   shift 3 2>/dev/null || shift $#
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --freshness) freshness=1; [[ -n "${2:-}" && "${2:-}" != --* ]] && { tree_root="$2"; shift; }; shift ;;
+      --head) expected_head="${2:-}"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -1301,7 +1305,8 @@ fsm_check_review_round() {
   local verdict head_sha
   verdict="$(jq -r '.verdict // ""' "$index" 2>/dev/null)" || { echo "PRECONDITION FAIL: ${index} does not parse" >&2; return 1; }
   head_sha="$(jq -r '.head_sha // ""' "$index" 2>/dev/null)"
-  local current_head; current_head="$(git -C "$tree_root" rev-parse HEAD 2>/dev/null || echo "")"
+  local current_head="$expected_head"
+  [[ -n "$current_head" ]] || current_head="$(git -C "$tree_root" rev-parse HEAD 2>/dev/null || echo "")"
 
   case "$verdict" in
     skip|no_change)
@@ -5198,41 +5203,6 @@ cmd_advance_to_gates() {
     # check_preconditions re-validates _generated_by, CP3 outputs, grandfather logic.
     # The runner just wrote gates_report.json with _generated_by, so the check passes.
     if cmd_transition EXECUTE GATES "$state_file"; then
-      # D0 gate point — observe-mode delivery gate (E2, E-050).
-      # Runs after last EXECUTE step and successful EXECUTE→GATES transition.
-      # Non-blocking: never fails the transition regardless of exit code or findings.
-      local _d0_script="${SCRIPT_DIR}/aid-delivery-gate.sh"
-      local _d0_policy="${SCRIPT_DIR}/../defaults/policies/delivery-gate.yaml"
-      if [[ -f "$_d0_script" ]]; then
-        local _d0_base_sha _d0_output _d0_exit=0
-        _d0_base_sha=$(yaml_field "$state_file" base_commit)
-        # P074 Step 1 (review round 2): canonicalize before exporting to the
-        # D0 subprocess — a raw worktree path must never be handed down as
-        # AID_PROJECT_ROOT. Legacy expression kept only when nothing resolves.
-        local _d0_project_root
-        _d0_project_root="$(aid_state_root 2>/dev/null || pwd)"
-        # The tree the gate MEASURES is this run's checkout (after the
-        # worktree re-exec above, $PWD); the state root only says where the
-        # evidence and the delivery map live. Before this the gate read HEAD
-        # from the primary checkout and stamped the artifact head_is_current
-        # against a tree the run never touched (agents #8).
-        _d0_output=$(
-          DELIVERY_GATE_POLICY="$_d0_policy" \
-          AID_EVIDENCE_BASE="${_d0_project_root}/.aid-o/work/evidence" \
-          AID_PROJECT_ROOT="$_d0_project_root" \
-          AID_GIT_TREE="$PWD" \
-          timeout 300 bash "$_d0_script" \
-            --epic "$epic_id" --run "$run_id" \
-            --base "${_d0_base_sha:-HEAD~1}" \
-            --phase D0 2>&1
-        ) || _d0_exit=$?
-        [[ -n "$timeline" ]] && log_event "$timeline" "d0_delivery_gate" \
-          exit_code="${_d0_exit}" \
-          observe="true" \
-          epic="${epic_id}" \
-          run="${run_id}"
-      fi
-      # D0 is observe-only — never fail the transition
       echo "advance-to-gates: SUCCESS — gates passed, state=GATES"
       return 0
     else
@@ -6373,7 +6343,7 @@ _c4_divergence_class() {
       verification_report) printf 'verification_only';  return 0 ;;
       reporter)            printf 'reporter_missing';   return 0 ;;
       simplifier)          printf 'simplifier_missing'; return 0 ;;
-      review_profile|gates_report|plan_review|delivery_gate|semantic_review_final|acceptance_evidence|curator_report|audit_report)
+      review_profile|gates_report|plan_review|semantic_review_final|acceptance_evidence|final_review)
                            printf 'required_input';     return 0 ;;
       *)                   printf 'unclassified';       return 0 ;;  # an unknown id
     esac
@@ -6407,8 +6377,8 @@ _c4_divergence_class() {
 # plan_branch mode: the streamlined integration review (which, under
 # `streamlined_mode: true`, still HARD-REQUIRES this EPIC's own CP3 code-review
 # + CP3 security outputs — only the CP3 FRESHNESS RE-CHECK is skipped, never
-# the CP3 pair itself), the abandoned-but-shipped check, the DG-07 delivery
-# gate, the tiered-severity compliance precondition (which is what reads the
+# the CP3 pair itself), the abandoned-but-shipped check, the tiered-severity
+# compliance precondition (which is what reads the
 # run's CP2 verifier outputs), `pm_decision == merge`, the archived-task-file
 # check, and the auditor's `blocking_findings` verdict when an audit-report
 # exists at all (Step 4 CP2 finding 1 — a PM-blessed mid-plan Auditor run must
@@ -6829,50 +6799,6 @@ cmd_done_advance() {
       if ! fsm_check_streamlined_abandoned "$evidence_dir" "$state_file"; then
         return 1
       fi
-
-      # E2 DG-07 hook: state-consistency delivery check (observe mode by default)
-      # Reads enforcement from delivery-gate.yaml policy:
-      #   observe  → write delivery_gate_would_block telemetry only (no block)
-      #   blocking → block done-advance if DG-07 fails (E10 promotion path)
-      # Fail-safe: if policy is missing or unreadable, default to observe (never block).
-      local _dg07_enforcement _dg07_policy _dg07_script _dg07_exit _dg07_output
-      local _dg07_timeline="${evidence_dir}/timeline.jsonl"
-      # DELIVERY_GATE_POLICY env var allows test/CI override of the policy path.
-      _dg07_policy="${DELIVERY_GATE_POLICY:-${SCRIPT_DIR}/../defaults/policies/delivery-gate.yaml}"
-      _dg07_enforcement="observe"   # fail-safe default
-      if [[ -f "$_dg07_policy" ]] && command -v yq >/dev/null 2>&1; then
-        local _pol_enforcement
-        _pol_enforcement=$(aid_control_enforcement "$_dg07_policy" "c1_delivery_gate")
-        [[ "$_pol_enforcement" == "blocking" ]] && _dg07_enforcement="blocking"
-      fi
-
-      _dg07_script="${SCRIPT_DIR}/lib/delivery-checks/dg07-state-consistency.sh"
-      if [[ -f "$_dg07_script" ]]; then
-        _dg07_exit=0
-        _dg07_output=$(AID_PROJECT_ROOT="$project_root" \
-                       AID_EPIC_ID="$epic_id" \
-                       AID_RUN_ID="$run_id" \
-                       bash "$_dg07_script" 2>&1) || _dg07_exit=$?
-
-        if [[ "$_dg07_exit" -eq 1 ]]; then
-          # DG-07 detected an inconsistency
-          log_event "$_dg07_timeline" "delivery_gate_would_block" \
-            check="dg07" enforcement="$_dg07_enforcement" output="$_dg07_output"
-
-          if [[ "$_dg07_enforcement" == "blocking" ]]; then
-            echo "ERROR: DG-07 state-consistency check failed (enforcement=blocking):" >&2
-            echo "$_dg07_output" >&2
-            echo "" >&2
-            echo "Run with --force to override (PM-authorized, audited)." >&2
-            log_event "$_dg07_timeline" "fsm_done_advance_fail" check="dg07" reason="state_inconsistency"
-            exit 2
-          else
-            log_warn "DG-07 state-consistency would_block (enforcement=observe, delivery_ready will be false)"
-          fi
-        fi
-        # exit 2 (unverifiable) or 0 (pass): no block, no event
-      fi
-      # End DG-07 E2 hook
 
       # E3 review_profile hook: missing_lenses observe telemetry
       # REVIEW_PROFILE_POLICY env overrides policy path for test/CI.

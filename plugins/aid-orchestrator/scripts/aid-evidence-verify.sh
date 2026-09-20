@@ -60,9 +60,6 @@ CHECK_ttl_registry_STATUS=""
 CHECK_ttl_registry_DETAIL=""
 CHECK_ttl_registry_EVIDENCE=""
 
-CHECK_observe_blocking_interpretation_STATUS=""
-CHECK_observe_blocking_interpretation_DETAIL=""
-CHECK_observe_blocking_interpretation_EVIDENCE=""
 
 PACK_HEAD=""
 EVIDENCE_DIR=""
@@ -678,62 +675,6 @@ run_ttl_registry_check() {
 }
 
 # ---------------------------------------------------------------------------
-# Check 7: observe_blocking_interpretation
-# ---------------------------------------------------------------------------
-run_observe_blocking_check() {
-  local dg_file="$EVIDENCE_DIR/delivery-gate.json"
-
-  if [[ ! -f "$dg_file" ]]; then
-    CHECK_observe_blocking_interpretation_STATUS="skip"
-    CHECK_observe_blocking_interpretation_DETAIL="no delivery-gate.json in evidence pack"
-    CHECK_observe_blocking_interpretation_EVIDENCE=""
-    return
-  fi
-
-  # Read fields with jq — use has() for presence check, separate read for raw value
-  # IMPORTANT: enforcement field may be ABSENT (not just null). Check with has().
-  # IMPORTANT: would_block may be false (bool), so use has() not //, which treats false as falsy.
-  local has_enforcement enforcement has_would_block would_block_raw
-  has_enforcement=$(jq '.delivery_gate.summary | has("enforcement")' "$dg_file" 2>/dev/null) || has_enforcement="false"
-  enforcement=$(jq -r '.delivery_gate.summary.enforcement // "null"' "$dg_file" 2>/dev/null) || enforcement="null"
-  has_would_block=$(jq '.delivery_gate.summary | has("would_block")' "$dg_file" 2>/dev/null) || has_would_block="false"
-  would_block_raw=$(jq -r '.delivery_gate.summary.would_block' "$dg_file" 2>/dev/null) || would_block_raw="null"
-
-  # Rule 1: enforcement key MUST be present AND not null
-  if [[ "$has_enforcement" != "true" || "$enforcement" == "null" ]]; then
-    CHECK_observe_blocking_interpretation_STATUS="fail"
-    CHECK_observe_blocking_interpretation_DETAIL="enforcement key absent or null in delivery_gate.summary (expected: observe|dual_run|blocking)"
-    CHECK_observe_blocking_interpretation_EVIDENCE="has_enforcement=$has_enforcement enforcement=$enforcement"
-    return
-  fi
-
-  # Rule 2: enforcement must be a valid value
-  case "$enforcement" in
-    observe|dual_run|blocking) ;;  # valid
-    *)
-      CHECK_observe_blocking_interpretation_STATUS="fail"
-      CHECK_observe_blocking_interpretation_DETAIL="enforcement value '$enforcement' not in {observe, dual_run, blocking}"
-      CHECK_observe_blocking_interpretation_EVIDENCE="enforcement=$enforcement"
-      return
-      ;;
-  esac
-
-  # Rule 3: if enforcement=observe, would_block must be present (bool, not absent/null)
-  if [[ "$enforcement" == "observe" ]]; then
-    if [[ "$has_would_block" != "true" || "$would_block_raw" == "null" ]]; then
-      CHECK_observe_blocking_interpretation_STATUS="fail"
-      CHECK_observe_blocking_interpretation_DETAIL="enforcement=observe but would_block is absent/null (must be bool)"
-      CHECK_observe_blocking_interpretation_EVIDENCE="has_would_block=$has_would_block would_block=$would_block_raw"
-      return
-    fi
-  fi
-
-  CHECK_observe_blocking_interpretation_STATUS="pass"
-  CHECK_observe_blocking_interpretation_DETAIL="observe-vs-blocking interpretation consistent (enforcement=$enforcement, would_block=$would_block_raw)"
-  CHECK_observe_blocking_interpretation_EVIDENCE=""
-}
-
-# ---------------------------------------------------------------------------
 # Step 4: emit_report — write protocol-v2 verification-report.json
 # ---------------------------------------------------------------------------
 emit_report() {
@@ -741,7 +682,6 @@ emit_report() {
   created_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
   # --- Determine overall status and verified flag ---
-  # Required checks: all except observe_blocking_interpretation when skip=no_delivery_gate
   local all_pass=true
   local -a blocking_check_ids=()
 
@@ -758,13 +698,6 @@ emit_report() {
     fi
   done
 
-  # observe_blocking_interpretation: skip is OK, fail/unverifiable blocks
-  if [[ "$CHECK_observe_blocking_interpretation_STATUS" != "pass" && \
-        "$CHECK_observe_blocking_interpretation_STATUS" != "skip" ]]; then
-    all_pass=false
-    blocking_check_ids+=("observe_blocking_interpretation")
-  fi
-
   if $all_pass; then
     status="pass"
     verified="true"
@@ -777,7 +710,7 @@ emit_report() {
   local checks_json="[]"
   local all_check_ids=(
     git_clean evidence_pack_found artifact_head_freshness
-    protocol_validate fingerprint ttl_registry observe_blocking_interpretation
+    protocol_validate fingerprint ttl_registry
   )
   for check_id in "${all_check_ids[@]}"; do
     local status_var="CHECK_${check_id}_STATUS"
@@ -815,7 +748,7 @@ emit_report() {
 
   # --- Build findings[] for failed/unverifiable checks ---
   local findings_json="[]"
-  local -a check_ids_for_findings=(git_clean evidence_pack_found artifact_head_freshness protocol_validate fingerprint ttl_registry observe_blocking_interpretation)
+  local -a check_ids_for_findings=(git_clean evidence_pack_found artifact_head_freshness protocol_validate fingerprint ttl_registry)
 
   for check_id in "${check_ids_for_findings[@]}"; do
     local var_status="CHECK_${check_id}_STATUS"
@@ -974,10 +907,6 @@ print_human_summary() {
     local s="${!var:-}"
     [[ "$s" == "fail" || "$s" == "unverifiable" ]] && failures+=("$check_id")
   done
-  if [[ "$CHECK_observe_blocking_interpretation_STATUS" == "fail" || \
-        "$CHECK_observe_blocking_interpretation_STATUS" == "unverifiable" ]]; then
-    failures+=("observe_blocking_interpretation")
-  fi
 
   if [[ ${#failures[@]} -eq 0 ]]; then
     overall_status="VERIFIED"
@@ -996,8 +925,7 @@ print_human_summary() {
   echo "--------------------------------------------"
   echo " Checks:"
   for check_id in git_clean evidence_pack_found artifact_head_freshness \
-                  protocol_validate fingerprint ttl_registry \
-                  observe_blocking_interpretation; do
+                  protocol_validate fingerprint ttl_registry; do
     local var="CHECK_${check_id}_STATUS"
     local s="${!var:-n/a}"
     local icon
@@ -1054,9 +982,6 @@ print_check_summary() {
   [[ -n "$CHECK_ttl_registry_DETAIL" ]] && printf "    detail: %s\n" "$CHECK_ttl_registry_DETAIL"
   [[ -n "$CHECK_ttl_registry_EVIDENCE" ]] && printf "    evidence: %s\n" "$CHECK_ttl_registry_EVIDENCE"
 
-  printf "  %-35s %s\n" "observe_blocking_interpretation:" "$CHECK_observe_blocking_interpretation_STATUS"
-  [[ -n "$CHECK_observe_blocking_interpretation_DETAIL" ]] && printf "    detail: %s\n" "$CHECK_observe_blocking_interpretation_DETAIL"
-  [[ -n "$CHECK_observe_blocking_interpretation_EVIDENCE" ]] && printf "    evidence: %s\n" "$CHECK_observe_blocking_interpretation_EVIDENCE"
 
   if [[ -n "$PACK_HEAD" ]]; then
     echo ""
@@ -1087,13 +1012,6 @@ compute_exit_code() {
     fi
   done
 
-  # observe_blocking_interpretation: skip (reason: no_delivery_gate) is NOT a failure
-  # Any other non-pass, non-skip value is a failure
-  if [[ "$CHECK_observe_blocking_interpretation_STATUS" != "pass" && \
-        "$CHECK_observe_blocking_interpretation_STATUS" != "skip" ]]; then
-    all_pass=false
-  fi
-
   if $all_pass; then
     return 0
   else
@@ -1113,7 +1031,6 @@ main() {
   run_freshness_check
   run_protocol_checks
   run_ttl_registry_check
-  run_observe_blocking_check
   emit_report
   print_human_summary
   compute_exit_code

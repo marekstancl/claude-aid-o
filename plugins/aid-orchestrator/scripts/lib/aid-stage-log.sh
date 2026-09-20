@@ -143,3 +143,36 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]] && [[ $# -gt 0 ]]; then
   esac
 fi
 
+# ── stage-writes.jsonl: which stage wrote which file of a plan-final run ─────
+# Every stage of the plan close (and the cp7 round's close) records the files it
+# writes into the run directory with their digests; the decision refuses an
+# input whose digest is not the LAST one recorded for it. A file rewritten by a
+# later stage is a recorded write; a hand-edit is not. Tamper evidence, not
+# tamper proofing: whoever can edit the file can edit this journal too.
+#
+# aid_stage_writes_inputs <run_dir> — the decision inputs, relative, one per line.
+aid_stage_writes_inputs() {
+  ( cd "$1" && find . -type f \( -path './cp7/*' -o -path './gates_rows/*' -o -name gates_report.json \
+      -o -name semantic-review-final.json -o -name acceptance-evidence.json -o -name review-profile.json \
+      -o -name plan-diff.json \) \
+      ! -name '*.md' ! -name 'vars-*.json' ! -path '*/packet/*' ! -path '*/repro/*' | sed 's|^\./||' | sort )
+}
+# aid_stage_writes_record <run_dir> <stage> <file>... — append {path, sha256, stage, at}.
+aid_stage_writes_record() {
+  local run_dir="$1" stage="$2" f; shift 2
+  for f in "$@"; do
+    [[ -f "${run_dir}/${f}" ]] || continue
+    jq -nc --arg p "$f" --arg s "sha256:$(sha256sum "${run_dir}/${f}" | cut -d' ' -f1)" --arg st "$stage" \
+       --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{path: $p, sha256: $s, stage: $st, at: $at}'
+  done >> "${run_dir}/stage-writes.jsonl"
+}
+# aid_stage_writes_verify <run_dir> — prints the first input that fails and returns 1.
+aid_stage_writes_verify() {
+  local run_dir="$1" f recorded
+  [[ -s "${run_dir}/stage-writes.jsonl" ]] || { echo "stage-writes.jsonl (no stage recorded its writes)"; return 1; }
+  while IFS= read -r f; do
+    recorded="$(jq -rs --arg p "$f" 'map(select(.path == $p)) | last | .sha256 // ""' "${run_dir}/stage-writes.jsonl")"
+    [[ "$recorded" == "sha256:$(sha256sum "${run_dir}/${f}" | cut -d' ' -f1)" ]] || { echo "$f"; return 1; }
+  done < <(aid_stage_writes_inputs "$run_dir")
+  return 0
+}

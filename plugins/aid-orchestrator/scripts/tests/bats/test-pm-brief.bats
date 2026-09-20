@@ -80,7 +80,7 @@ _d() { jq -r "$1" "$DEC"; }
 @test "(b) no-optimism: tampered brief (blocker removed) → --validate FAIL (exit!=0)" {
   _seed '.release_decision.release_ready=false
          | .release_decision.merge_mode="blocked"
-         | .release_decision.blockers=[{"input_id":"delivery_gate","severity":"blocking","reason":"gates red"}]'
+         | .release_decision.blockers=[{"input_id":"gates_report","severity":"blocking","reason":"gates red"}]'
   _run "$DIR"
   [ "$status" -eq 0 ]                                  # a not-ready decision STILL yields a brief
   [ "$(_b '.pm_decision_brief.blockers | length')" -eq 1 ]
@@ -208,22 +208,20 @@ _d() { jq -r "$1" "$DEC"; }
   _run "$DIR"
   [ "$status" -eq 0 ]
   grep -qi "auto-merge"           "$BM"
-  grep -qi "Reporter"             "$BM"
-  grep -qi "Simplifier"           "$BM"
+  grep -qi "Whole-delivery review" "$BM"
   grep -qi "Evidence verification" "$BM"
 }
 
 # ─── mechanical honesty: every status legible in pm-summary.md (any merge mode) ──
 
-@test "pm-summary.md legibly shows evidence/Reporter/Simplifier/blocker/waiver status" {
+@test "pm-summary.md legibly shows evidence, whole-delivery review, blocker and waiver status" {
   _seed_valid
   _run "$DIR"
   [ "$status" -eq 0 ]
   grep -q  "Release ready"         "$BM"
   grep -q  "Merge mode"            "$BM"
   grep -qi "Evidence verification" "$BM"
-  grep -qi "Reporter"              "$BM"
-  grep -qi "Simplifier"            "$BM"
+  grep -qi "Whole-delivery review" "$BM"
   grep -qi "Blockers"              "$BM"
   grep -qi "Waivers applied"       "$BM"
   grep -qi "Summary for PM"        "$BM"

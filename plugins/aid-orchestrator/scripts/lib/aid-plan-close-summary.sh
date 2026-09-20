@@ -24,9 +24,8 @@
 #     from RELEASE-DECISION → .release_decision.plan_summary
 #                      reviewed_candidate_sha, approved_target_sha, target_ref,
 #                      final_merge_sha, release_tag_status, epics[],
-#                      plan_final_gates.{report,result}, specialist_review,
-#                      remaining_backlog
-#                      (producer: scripts/aid-release-policy.sh:1107-1136,
+#                      plan_final_gates.{report,result}, close, remaining_backlog
+#                      (producer: scripts/aid-release-policy.sh, plan_summary_json,
 #                      emitted in PLAN mode only — EPIC mode has plan_summary: null)
 #
 #   This is the SAME release-decision.json the brief was generated from, and NO
@@ -50,9 +49,8 @@
 #   summary of nine nulls rendered a confident, complete-looking page of
 #   invented defaults. A degraded input therefore produces NO page at all rather
 #   than a page that looks complete with em dashes where the SHAs should be.
-#   The two fields whose null IS a state — `final_merge_sha` (nothing merged
-#   yet) and `specialist_review` (did not run) — are exempt by name, plus
-#   `delivered_summary_ref` on the brief side.
+#   The one field whose null IS a state — `final_merge_sha` (nothing merged
+#   yet) — is exempt by name, plus `delivered_summary_ref` on the brief side.
 #
 # TAG VOCABULARY — `not_tagged` (the default until the release step runs) /
 #   `none` / `v<version>`. There is no `tagged` and no `pending`; the tile shows
@@ -98,11 +96,12 @@ source "${_APCS_LIB_DIR}/aid-roots.sh"   # aid_state_root for the plugin-issues 
 # produces — "brief malformed" is not an actionable message.
 
 # The nine plan_summary fields this renderer READS, from the producer's field
-# set (scripts/aid-release-policy.sh:1107-1136):
+# set (scripts/aid-release-policy.sh, plan_summary_json):
 #
 #   reviewed_candidate_sha  approved_target_sha  target_ref  release_tag_status
-#   final_merge_sha  epics  plan_final_gates  specialist_review
-#   remaining_backlog
+#   final_merge_sha  epics  plan_final_gates  close  remaining_backlog
+#
+# plus the verdict of the decision's `final_review` input (the whole-plan round).
 #
 # They are validated in aid_plan_close_render, by VALUE and not merely by
 # presence — the check lives next to the failure message it produces, and the
@@ -226,7 +225,8 @@ aid_plan_close_render() {
   #   final_merge_sha — null is LEGITIMATE (nothing merged yet) but a present
   #     value must be a non-empty string, because it is interpolated into the
   #     rollback command this card offers.
-  #   specialist_review — null is LEGITIMATE and renders as "neproběhl".
+  #   close — an object: attempts, minutes and USD are computed by the producer,
+  #     never defaulted here.
   #   epics / remaining_backlog — arrays; `epics: "none"` counted zero EPIKŮ
   #     just as silently as a missing key.
   #   plan_final_gates — an object that CARRIES ITS VERDICT: `{}` is not a gate
@@ -250,7 +250,7 @@ aid_plan_close_render() {
          elif (.final_merge_sha != null)
               and (((.final_merge_sha | type) != "string") or ((.final_merge_sha | length) == 0))
          then bad("final_merge_sha"; "present but not a usable sha") else empty end),
-        (if (has("specialist_review") | not) then bad("specialist_review"; "missing") else empty end),
+        (if ((.close | type) != "object") then bad("close"; "missing — attempts, minutes and USD of the close would be invented") else empty end),
         (if (has("epics") | not) then bad("epics"; "missing")
          elif ((.epics | type) != "array") then bad("epics"; "not an array") else empty end),
         (if (has("remaining_backlog") | not) then bad("remaining_backlog"; "missing")
@@ -317,11 +317,11 @@ aid_plan_close_render() {
                              + (if (.skipped // false) then " (přeskočen)" else "" end))} ]}]' \
           <<<"$ps" 2>/dev/null)" && [[ -n "$_pcd" ]] && deliverables_json="$_pcd"
 
-  local specialist
-  specialist="$(jq -r 'if .specialist_review == null then "neproběhl"
-                       elif (.specialist_review | type) == "object"
-                       then (.specialist_review.status // .specialist_review.verdict // "zaznamenán" | tostring)
-                       else (.specialist_review | tostring) end' <<<"$ps")"
+  # The whole-plan round's verdict, and what closing the plan cost so far.
+  local final_review close_cost
+  final_review="$(jq -r '[.release_decision.inputs[]? | select(.id == "final_review") | .verdict] | first // "nezaznamenáno"' <<<"$decision_raw")"
+  close_cost="$(jq -r '.close | "\(.attempts) pokus(ů), \(.minutes) min, \(.usd) USD"
+                       + (if (.usd_unknown_roles | length) > 0 then " + neznámá cena u: " + (.usd_unknown_roles | join(", ")) else "" end)' <<<"$ps")"
 
   # ── card class ────────────────────────────────────────────────────────────
   # Decision-required when the plan is not release-ready, or the merge mode is
@@ -404,13 +404,13 @@ aid_plan_close_render() {
     --arg merge "$(_apcs_short "$merge_sha")" \
     --arg gres "$gates_result" \
     --arg grep_ "${gates_report:-—}" \
-    --arg spec "$specialist" \
+    --arg fr "$final_review" --arg cost "$close_cost" \
     --arg ev "$ev_status" --arg evh "$ev_at_head" \
     --arg wv "$waivers_n" --arg bl "$backlog_n" '[
       "Recenzovaný kandidát: " + $cand + " → schválený cíl " + $tgt + " (" + $tref + ")",
       "Merge do main: " + $merge,
       "Plan-final brány: " + $gres + " (report: " + $grep_ + ")",
-      "Specialistická revize: " + $spec,
+      "Čtení celku: " + $fr + "; uzavření: " + $cost,
       "Evidence: " + $ev + " (ověřeno na HEAD: " + $evh + "), waiverů " + $wv + ", zbývá v backlogu " + $bl
     ]')"
 

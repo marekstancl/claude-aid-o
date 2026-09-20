@@ -853,10 +853,10 @@ check5_plan_branch_boundary() {
        && ce_tree="$(git ls-tree -r --name-only "${ce_ref}" 2>/dev/null)" && [[ "$ce_tree" == "receipt.json" ]] \
        && [[ "sha256:$(printf '%s\n' "$ce_receipt" | sha256sum | awk '{print $1}')" == "$ce_hash" ]] \
        && jq -e --arg p "$PLAN_ID" --arg c "$candidate" --arg r "$run_id" --arg tb "$target_branch" \
-            '((keys | sort) as $k | ($k == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort)) or ($k == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","merged_head","review_equivalence","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort))) and (if has("merged_head") then (.merged_head | test("^[0-9a-f]{40}$")) and (.review_equivalence == true) else true end) and (.schema_version == "aid-plan-final-close-evidence-1") and (.artifact_type == "plan_final_close_evidence_receipt") and (.plan_id == $p) and (.candidate_sha == $c) and (.run_id == $r) and (.target_branch == $tb) and (.gates_verdict == "pass") and (.c4_decision.release_ready == true) and (.c4_decision.blockers_count == 0) and (.c4_decision.dual_run_match == true) and (.pm_decision.decision == "MERGE")' \
+            '((keys | sort) as $k | ($k == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort)) or ($k == (["artifact_type","candidate_sha","gates_verdict","merge_commit","merged_tree","merged_head","review_equivalence","pm_decision","c4_decision","plan_id","run_id","schema_version","tag","target_branch","target_head_before"] | sort))) and (if has("merged_head") then (.merged_head | test("^[0-9a-f]{40}$")) and (.review_equivalence == true) else true end) and (.schema_version == "aid-plan-final-close-evidence-1" or .schema_version == "aid-plan-final-close-evidence-2") and (.artifact_type == "plan_final_close_evidence_receipt") and (.plan_id == $p) and (.candidate_sha == $c) and (.run_id == $r) and (.target_branch == $tb) and (.gates_verdict == "pass") and (.c4_decision.release_ready == true) and (.c4_decision.blockers_count == 0) and (.pm_decision.decision == "MERGE")' \
             <<< "$ce_receipt" >/dev/null 2>&1; then
       close_evidence_ok=1
-      _pass "check5" "the plan-final run directory is gone, but a verified durable close-evidence receipt (${ce_ref}) attests gates=pass, C4 release_ready with a matched dual-run, and a PM MERGE decision"
+      _pass "check5" "the plan-final run directory is gone, but a verified durable close-evidence receipt (${ce_ref}) attests gates=pass, a release_ready decision with no blocker, and a PM MERGE decision"
     else
       _fail "check5" "the plan-final run directory ${run_dir} does not exist and no valid durable close-evidence receipt covers it — the evidence this close would attest to is gone"
     fi
@@ -880,6 +880,15 @@ check5_plan_branch_boundary() {
     elif [[ "$rev_run" != "$run_id" || "$rev_cand" != "$candidate" ]]; then
       _fail "check5" "the recorded plan_final_review is bound to run '${rev_run}' / candidate ${rev_cand:0:8}, not to this attempt '${run_id}' / candidate ${candidate:0:8}"
     else
+      # The sealed receipt behind the recorded review: its version and its inventory.
+      local sealed_ref sealed
+      sealed_ref="$(_pbm '.plan_boundary_manifest.plan_final_evidence_ref')"
+      sealed="$(git show "${sealed_ref}:receipt.json" 2>/dev/null || true)"
+      if [[ "$(jq -r '.schema_version // ""' <<< "$sealed" 2>/dev/null)" == "aid-plan-final-evidence-1" ]]; then
+        _fail "check5" "the plan-final receipt at ${sealed_ref} is version 1 (the close that read curator, auditor and reporter outputs); this plan was not closed by the current flow — re-close with: plan-finalize ${PLAN_ID} --stage freeze"
+      elif [[ -n "$sealed" ]] && ! _pfsm_receipt_has_exact_review_inventory "$sealed"; then
+        _fail "check5" "the plan-final receipt at ${sealed_ref} is a short pack: its outputs are not the version-2 inventory (missing: $(jq -r --argjson want "$(_pfsm_review_required_outputs | jq -R . | jq -sc .)" '($want - (.outputs | keys)) | join(", ")' <<< "$sealed"))"
+      fi
       local rf rsha actual missing="" corrupt=""
       while read -r rf rsha; do
         [[ -n "$rf" ]] || continue
@@ -899,24 +908,19 @@ check5_plan_branch_boundary() {
         _pass "check5" "every required plan-final review output is present and bound to candidate ${candidate:0:8}"
     fi
 
-    # ── 5.4 the plan-mode C4 decision, and the legacy release path ────────
+    # ── 5.4 the plan-final decision ───────────────────────────────────────
     local c4_run c4_cand
     c4_run="$(_pbm '.plan_boundary_manifest.plan_final_c4.run_id')"
     c4_cand="$(_pbm '.plan_boundary_manifest.plan_final_c4.candidate_sha')"
     if [[ ! -f "${run_dir}/release-decision.json" ]]; then
-      _fail "check5" "no plan-mode C4 decision at ${run_dir}/release-decision.json"
+      _fail "check5" "no plan-final decision at ${run_dir}/release-decision.json"
     elif [[ "$c4_run" != "$run_id" || "$c4_cand" != "$candidate" ]]; then
       _fail "check5" "the recorded plan_final_c4 is bound to run '${c4_run}' / candidate ${c4_cand:0:8}, not to this attempt"
     else
-      _pass "check5" "a plan-mode C4 decision exists for this attempt's candidate"
+      _pass "check5" "a plan-final decision exists for this attempt's candidate"
     fi
-    local dual="${run_dir}/release-decision-dual-run.json"
-    if [[ ! -f "$dual" ]]; then
-      _fail "check5" "no ${dual} — the currently authoritative legacy release path has no recorded verdict"
-    elif ! jq -e '.legacy_verdict == true' "$dual" >/dev/null 2>&1; then
-      _fail "check5" "${dual} records legacy_verdict != true — the currently authoritative legacy release path did NOT pass"
-    else
-      _pass "check5" "the legacy release path recorded a pass for this attempt"
+    if [[ -f "${run_dir}/release-decision.json" ]] && ! jq -e '.release_decision.release_ready == true' "${run_dir}/release-decision.json" >/dev/null 2>&1; then
+      _fail "check5" "${run_dir}/release-decision.json does not say release_ready: true — the plan was not decided ready"
     fi
   fi
 

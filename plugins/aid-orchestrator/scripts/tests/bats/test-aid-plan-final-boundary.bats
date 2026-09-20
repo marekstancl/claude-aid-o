@@ -363,39 +363,41 @@ _finalize() {
 }
 
 # =============================================================================
-# ─── aid-plan-fsm.sh plan-finalize --stage sync ──────────────────────────
+# ─── plan-finalize --stage freeze, first half: the sync ───────────────────
 # =============================================================================
 
 # ─── AC3: sync refuses to proceed while any EPIC is pending or running,
 #          NAMING it ────────────────────────────────────────────────────────
-@test "AC3: --stage sync refuses while an EPIC is still running, and names it" {
+@test "AC3: the sync of --stage freeze refuses while an EPIC is still running, and names it" {
   _bootstrap
   _add_epic "$PLAN_ID" "E-068-1_2"     # created as `running`
 
-  _finalize "$PLAN_ID" sync
+  _finalize "$PLAN_ID" freeze
   [ "$status" -eq 1 ]
   [[ "$output" == *"non-terminal EPICs"* ]]
   [[ "$output" == *"E-068-1_2"* ]]
   [[ "$output" == *"running"* ]]
 
-  # Nothing moved: still not PLAN_SYNC.
+  # Nothing moved and nothing was frozen.
   run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" != "PLAN_SYNC" ]
+  [ "$output" != "PLAN_SYNC" ] && [ "$output" != "PLAN_GATES" ]
+  run _manifest_field "$PLAN_ID" candidate_sha
+  [ "$output" = "null" ]
 }
 
-@test "AC3: --stage sync names a pending EPIC too (not only a running one)" {
+@test "AC3: the sync of --stage freeze names a pending EPIC too (not only a running one)" {
   _bootstrap
   _add_epic "$PLAN_ID" "E-068-1_2"
   # running → blocked is legal; blocked is equally non-terminal.
   plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "blocked"
 
-  _finalize "$PLAN_ID" sync
+  _finalize "$PLAN_ID" freeze
   [ "$status" -eq 1 ]
   [[ "$output" == *"E-068-1_2"* ]]
   [[ "$output" == *"blocked"* ]]
 }
 
-@test "--stage sync proceeds once every EPIC is terminal, and moves the plan to PLAN_SYNC" {
+@test "the sync of --stage freeze proceeds once every EPIC is terminal, and freezes the candidate (PLAN_GATES)" {
   _bootstrap
   _add_epic "$PLAN_ID" "E-068-1_2"
   # A real merge commit is required for merged_to_plan; the plan branch head
@@ -404,49 +406,49 @@ _finalize() {
   local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
   plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
 
-  _finalize "$PLAN_ID" sync
+  _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
 
   run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_SYNC" ]
+  [ "$output" = "PLAN_GATES" ]
 }
 
 # ─── Edge case: an abandoned EPIC with no recorded PM reason ──────────────
-@test "--stage sync refuses an abandoned EPIC that carries no recorded reason" {
+@test "the sync of --stage freeze refuses an abandoned EPIC that carries no recorded reason" {
   _bootstrap
   _add_epic "$PLAN_ID" "E-068-1_2"
   # Set the status directly, WITHOUT going through epic-complete --reason —
   # i.e. exactly the undocumented abandonment this guard exists to catch.
   plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "abandoned"
 
-  _finalize "$PLAN_ID" sync
+  _finalize "$PLAN_ID" freeze
   [ "$status" -eq 1 ]
   [[ "$output" == *"no recorded reason"* ]]
   [[ "$output" == *"E-068-1_2"* ]]
 }
 
-@test "--stage sync accepts an abandoned EPIC once a terminal_reason is recorded" {
+@test "the sync of --stage freeze accepts an abandoned EPIC once a terminal_reason is recorded" {
   _bootstrap
   _add_epic "$PLAN_ID" "E-068-1_2"
   plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "abandoned"
   plan_manifest_update "$PLAN_ID" \
     '(.plan_boundary_manifest.epic_runs = [.plan_boundary_manifest.epic_runs[] | if .epic_id == "E-068-1_2" then (.terminal_reason = "superseded by a different approach") else . end])'
 
-  _finalize "$PLAN_ID" sync
+  _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
   run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_SYNC" ]
+  [ "$output" = "PLAN_GATES" ]
 }
 
 # ─── The merge is a MERGE, not a rebase (roadmap resolved decision 4) ─────
-@test "--stage sync merges the target branch into the plan branch with --no-ff and preserves prior plan commits" {
+@test "the sync of --stage freeze merges the target branch into the plan branch with --no-ff and preserves prior plan commits" {
   _bootstrap
   _commit_on "plan/$PLAN_ID" "plan-work.txt" "plan side work"
   local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
   _commit_on "main" "main-work.txt" "target side work"
   local target_head; target_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
 
-  _finalize "$PLAN_ID" sync
+  _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
 
   local plan_after; plan_after="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
@@ -466,12 +468,12 @@ _finalize() {
   [ "$output" = "main" ]
 }
 
-@test "--stage sync on a conflicting target transitions the plan to CONFLICT and exits 4" {
+@test "the sync of --stage freeze on a conflicting target transitions the plan to CONFLICT and exits 4" {
   _bootstrap
   _commit_on "plan/$PLAN_ID" "contested.txt" "plan version"
   _commit_on "main" "contested.txt" "target version"
 
-  _finalize "$PLAN_ID" sync
+  _finalize "$PLAN_ID" freeze
   [ "$status" -eq 4 ]
   [[ "$output" == *"MERGE CONFLICT"* ]]
 
@@ -492,8 +494,6 @@ _finalize() {
 #          directory exists ────────────────────────────────────────────────
 @test "AC4: --stage freeze records candidate_sha + target_branch_head_at_candidate_freeze as exact 40-hex and creates the run directory" {
   _bootstrap
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
 
   local plan_head target_head
   plan_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
@@ -527,7 +527,6 @@ _finalize() {
 #          other absent, in EITHER direction ────────────────────────────────
 @test "AC5: the freeze write records candidate_frozen_at as an RFC 3339 UTC instant in the RUNTIME manifest" {
   _bootstrap
-  _finalize "$PLAN_ID" sync
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
 
@@ -598,9 +597,8 @@ _finalize() {
 # ─── AC1 (freeze/invalidation): a candidate change after freeze goes to
 #          PLAN_FIX and clears ALL FOUR plan-final fields (plus the freeze
 #          time, which is cleared with candidate_sha) ────────────────────────
-@test "AC1: a candidate change after freeze transitions the plan to PLAN_FIX and clears every plan-final field" {
+@test "AC1: a candidate change after freeze mints a new attempt in the same call and records what the fix touched" {
   _bootstrap
-  _finalize "$PLAN_ID" sync
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
   local first_candidate; first_candidate="$(_manifest_field "$PLAN_ID" candidate_sha)"
@@ -610,30 +608,19 @@ _finalize() {
   _commit_on "plan/$PLAN_ID" "late.txt" "a commit after the freeze"
 
   _finalize "$PLAN_ID" freeze
-  [ "$status" -eq 6 ]
-  [[ "$output" == *"CANDIDATE INVALIDATED"* ]]
-
-  run _manifest_field "$PLAN_ID" candidate_sha
-  [ "$output" = "null" ]
-  run _manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze
-  [ "$output" = "null" ]
-  run _manifest_field "$PLAN_ID" plan_final_run_id
-  [ "$output" = "null" ]
-  run _manifest_field "$PLAN_ID" plan_final_evidence_dir
-  [ "$output" = "null" ]
-  # Cleared in the SAME write as candidate_sha — never left dangling.
-  run _manifest_field "$PLAN_ID" candidate_frozen_at
-  [ "$output" = "null" ]
-  run _manifest_field "$PLAN_ID" candidate_invalidation_reason
-  [ "$output" = "candidate_changed_after_freeze" ]
-
+  [ "$status" -eq 0 ]
+  [ "$(_manifest_field "$PLAN_ID" candidate_sha)" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")" ]
+  [ "$(_manifest_field "$PLAN_ID" plan_final_run_id)" = "R-${PLAN_ID}-final-2" ]
+  local fc; fc="$(_run_dir)/fix-class.json"
+  [ "$(jq -r .previous_candidate "$fc")" = "$first_candidate" ]
+  [ "$(jq -r .class "$fc")" = delivery ]
+  [ "$(jq -c .invalidated_feeds "$fc")" = '["diff"]' ]
   run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_FIX" ]
+  [ "$output" = "PLAN_GATES" ]
 }
 
 @test "AC5: an invalidation clears candidate_sha and candidate_frozen_at TOGETHER — never one without the other" {
   _bootstrap
-  _finalize "$PLAN_ID" sync
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
 
@@ -667,7 +654,6 @@ _finalize() {
 
 @test "plan_final_invalidate refuses an illegal target state and clears NOTHING" {
   _bootstrap
-  _finalize "$PLAN_ID" sync
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
   local sha1; sha1="$(_manifest_field "$PLAN_ID" candidate_sha)"
@@ -687,7 +673,6 @@ _finalize() {
 
 @test "a refreeze rewrites candidate_sha and candidate_frozen_at TOGETHER (both change, neither is stale)" {
   _bootstrap
-  _finalize "$PLAN_ID" sync
   _finalize "$PLAN_ID" freeze --frozen-at "2026-07-25T10:00:00Z"
   [ "$status" -eq 0 ]
   local sha1 at1
@@ -696,12 +681,6 @@ _finalize() {
   [ "$at1" = "2026-07-25T10:00:00Z" ]
 
   _commit_on "plan/$PLAN_ID" "late.txt" "moves the candidate"
-  _finalize "$PLAN_ID" freeze                   # invalidates → PLAN_FIX
-  [ "$status" -eq 6 ]
-  run plan_state_transition "$PLAN_ID" "PLAN_FIX" "PLAN_SYNC"
-  [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
   _finalize "$PLAN_ID" freeze --frozen-at "2026-07-25T11:00:00Z"
   [ "$status" -eq 0 ]
 
@@ -717,7 +696,6 @@ _finalize() {
 #          byte-identical ──────────────────────────────────────────────────
 @test "AC7: a second freeze allocates R-<plan_id>-final-2 and leaves R-<plan_id>-final-1 byte-identical" {
   _bootstrap
-  _finalize "$PLAN_ID" sync
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
 
@@ -727,10 +705,6 @@ _finalize() {
   local before; before="$(sha256sum "$ev/R-${PLAN_ID}-final-1/report.txt" | awk '{print $1}')"
 
   _commit_on "plan/$PLAN_ID" "fix.txt" "the review fix"
-  _finalize "$PLAN_ID" freeze                   # invalidate → PLAN_FIX
-  [ "$status" -eq 6 ]
-  plan_state_transition "$PLAN_ID" "PLAN_FIX" "PLAN_SYNC"
-  _finalize "$PLAN_ID" sync
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
 
@@ -744,46 +718,21 @@ _finalize() {
   [ "$after" = "$before" ]
 }
 
-# ─── AC8: target-branch advance between sync and freeze returns the plan to
-#          PLAN_SYNC instead of freezing ─────────────────────────────────────
-@test "AC8: a target-branch advance between sync and freeze returns the plan to PLAN_SYNC and freezes nothing" {
+# ─── AC8: a target branch that advanced is merged in before the freeze ─────
+@test "AC8: freeze merges a target branch that advanced, so the candidate contains the hotfix" {
   _bootstrap
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
-
-  # The hotfix lands on the target branch AFTER the sync merge.
   _commit_on "main" "hotfix.txt" "an urgent hotfix"
 
-  _finalize "$PLAN_ID" freeze
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"target_drift_during_freeze"* ]]
-
-  # Nothing frozen — recording the newer head and freezing anyway would bind a
-  # candidate that does NOT contain the hotfix to a target head that DOES.
-  run _manifest_field "$PLAN_ID" candidate_sha
-  [ "$output" = "null" ]
-  run _manifest_field "$PLAN_ID" candidate_frozen_at
-  [ "$output" = "null" ]
-  [ ! -d "$TEST_PROJECT_ROOT/.aid-o/work/evidence/${PLAN_ID}/R-${PLAN_ID}-final-1" ]
-
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_SYNC" ]
-
-  # And the documented loop closes: sync again, then the freeze succeeds and
-  # the candidate DOES contain the hotfix.
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
   local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
   run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" "$cand"
   [ "$status" -eq 0 ]
+  [ "$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" ]
 }
 
 @test "--stage freeze refuses a dirty worktree, so a half-applied prepare-plan can never be frozen over" {
   _bootstrap
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
 
   # Simulate prepare-plan having written one version file and then failed.
   printf 'half-written\n' > "$TEST_PROJECT_ROOT/.gitkeep"
@@ -795,19 +744,8 @@ _finalize() {
   [ "$output" = "null" ]
 }
 
-@test "--stage freeze refuses out of a state that is not PLAN_SYNC" {
-  _bootstrap
-  # Still OPEN — sync has not run.
-  _finalize "$PLAN_ID" freeze
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"freeze runs only out of PLAN_SYNC"* ]]
-  run _manifest_field "$PLAN_ID" candidate_sha
-  [ "$output" = "null" ]
-}
-
 @test "--stage freeze re-run at the SAME plan head is an idempotent no-op — no second candidate, no second run dir" {
   _bootstrap
-  _finalize "$PLAN_ID" sync
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
   local sha1 at1
@@ -1012,20 +950,15 @@ _prepare() {
 }
 
 # =============================================================================
-# ─── the full Step 1 order: sync → prepare-plan → freeze ─────────────────
+# ─── the order: prepare-plan, then freeze (which syncs first) ───────────
 # =============================================================================
 
-@test "the frozen candidate CONTAINS the version commit — sync, then prepare, then freeze" {
+@test "the frozen candidate CONTAINS the version commit — prepare, then freeze" {
   _bootstrap
   _seed_version_project
 
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_SYNC" ]
-
-  # prepare-plan runs while the state is STILL PLAN_SYNC — it never needs a
-  # candidate_sha that does not exist yet.
+  # prepare-plan runs BEFORE the freeze — it never needs a candidate_sha that
+  # does not exist yet.
   _prepare "$PLAN_ID"
   [ "$status" -eq 0 ]
   local prepare_commit; prepare_commit="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
@@ -1138,7 +1071,6 @@ _seed_gates_project_build() {
   git -C "$TEST_PROJECT_ROOT" add -- ".aid-o/plans/${PLAN_ID}-test-plan.md"
   git -C "$TEST_PROJECT_ROOT" commit -q -m "the plan file"
   git -C "$TEST_PROJECT_ROOT" branch -f "plan/${PLAN_ID}" main
-  _finalize "$PLAN_ID" sync
   _finalize "$PLAN_ID" freeze
 }
 
@@ -1507,8 +1439,7 @@ _reuse_project() {
 _second_attempt() {
   mkdir -p "$TEST_PROJECT_ROOT/$(dirname "$1")"
   _commit_on "plan/${PLAN_ID}" "$1" "$2"
-  _finalize "$PLAN_ID" freeze                       # notices the moved head and invalidates the old candidate
-  _finalize "$PLAN_ID" sync; _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -eq 0 ]
   RECEIPT_ARGS=(--substitute-receipt "bats_all=$(_write_receipt bats_all)")
   _gates "${RECEIPT_ARGS[@]}"
 }
@@ -1573,620 +1504,11 @@ _ran() { wc -l < "$TEST_PROJECT_ROOT/.aid-o/work/ran_$1" | tr -d ' '; }
 }
 
 # =============================================================================
-# ─── aid-plan-fsm.sh plan-finalize --stage review (Step 3) ───────────────
-# =============================================================================
-#
-# AC3 — the plan-level review boundary. The FSM dispatches nothing; it declares
-# the required outputs, blocks on exit 7 until they exist, refuses a stale /
-# wrong-plan / wrong-candidate output with exit 1, and invalidates the candidate
-# with exit 6 when a tracked write proves a fix was accepted.
-#
-# The fixtures below build REAL protocol-v2 artifacts (the same envelope
-# aid-protocol-validate.sh enforces) rather than stubs, so a change to the
-# validator's contract breaks these tests instead of silently passing them.
-
-# _seed_review_project — a plan with ONE merged EPIC, gated green, in
-# PLAN_REVIEW at a frozen candidate.
-# _seed_review_project — snapshot-backed (IMP-505): the builder below is unchanged and
-# runs once per file; every later case restores its byte copy.
-_seed_review_project() { _snap_fixture "review_project${1:+:$1}" _seed_review_project_build "$@"; }
-
-_seed_review_project_build() {
-  _bootstrap
-  _add_epic "$PLAN_ID" "E-068-1_2"
-  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
-  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
-  printf '# %s\n\n## Acceptance Criteria\n- [ ] something\n' "$PLAN_ID" \
-    > "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-test-plan.md"
-  git -C "$TEST_PROJECT_ROOT" add -- ".aid-o/plans/${PLAN_ID}-test-plan.md"
-  git -C "$TEST_PROJECT_ROOT" commit -q -m "the plan file"
-  git -C "$TEST_PROJECT_ROOT" branch -f "plan/${PLAN_ID}" main
-  _write_exec_yaml
-  _finalize "$PLAN_ID" sync
-  _finalize "$PLAN_ID" freeze
-  local receipt; receipt="$(_write_receipt bats_all)"
-  _gates --substitute-receipt "bats_all=${receipt}"
-  [ "$status" -eq 0 ]
-}
-
-# _review [extra args...] — the stage under test.
-_review() {
-  # CP2 F1: the review boundary requires the worktree to BE the candidate — the
-  # stage's drift detection is baselined on it and the plan-level specialists
-  # review it. That is the CONTROLLER's job (it dispatches between the exit-7 and
-  # the validating invocation), so this helper does what the controller must do.
-  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}" 2>/dev/null || true
-  run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage review \
-    --project-root "$TEST_PROJECT_ROOT" "$@"
-}
-
-# _p2 <filename> <artifact_type> <payload_key> [jq_override]
-#   One protocol-v2 artifact in the plan-final run directory, bound to the
-#   frozen candidate and to this plan. `jq_override` is applied last, so a test
-#   can corrupt exactly one binding and leave the rest valid.
-_p2() {
-  local fname="$1" atype="$2" pkey="$3" override="${4:-.}"
-  local dir; dir="$(_run_dir)"
-  mkdir -p "$dir"
-  local cand base
-  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
-  # CP2 F2: stamp the ACTUAL plan-final run id, never a hard-coded -final-1 —
-  # the stage now binds outputs to the attempt, so a re-frozen candidate in
-  # R-<plan>-final-2 must carry that run id.
-  local rid; rid="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
-  local sh; sh="$(printf '%s' "$fname" | sha256sum | cut -d' ' -f1)"
-  jq -n --arg t "$atype" --arg pk "$pkey" --arg h "$cand" --arg b "$base" \
-        --arg plan "$PLAN_ID" --arg sh "sha256:${sh}" --arg rid "$rid" \
-    '{schema_version:"aid-2.0", artifact_type:$t, producer:"aid-test@2.0",
-      created_at:"2026-07-25T00:00:00Z", control_protocol:"aid-2.0",
-      identity:{project_id:"aid-orchestrator", epic_id:null, plan_id:$plan,
-                run_id:$rid},
-      subject:{subject_hash:$sh},
-      revision:{head_sha:$h, base_sha:$b, head_is_current:true, freshness:"current"},
-      status:"pass", verdict:{kind:"none"},
-      provenance:{dispatch_mode:"subagent", generated_by_tool:"aid-test"}}
-     | .[$pk] = {}' \
-    | jq "$override" > "${dir}/${fname}"
-}
-
-# _write_review_outputs — every required output, valid and correctly ordered
-# (the Reporter's delivery-report.json written LAST).
-_write_review_outputs() {
-  local dir; dir="$(_run_dir)"
-  local cand base
-  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
-
-  _p2 semantic-review-final.json semantic_review semantic_review \
-    ".semantic_review.range = \"${base}..${cand}\""
-  # plan-diff.json is written BEFORE audit-input-manifest.json so the real
-  # producer-sealed hash is known when building the manifest's evidence_hashes[].
-  jq -n --arg b "$base" --arg h "$cand" \
-    '{base_commit:$b, head_commit:$h, overall_verdict:"pass", results:[], summary:{present_count:0,absent_count:0}}' \
-    > "${dir}/plan-diff.json"
-  local pd_hash; pd_hash="sha256:$(sha256sum "${dir}/plan-diff.json" | awk '{print $1}')"
-  plan_manifest_update "$PLAN_ID" \
-    ".plan_boundary_manifest.plan_final_inputs = {plan_diff_sha256: \"${pd_hash}\", candidate_sha: \"${cand}\", run_id: \"$(_manifest_field "$PLAN_ID" plan_final_run_id)\", ac_lens_required: false, plan_diff_verdict: \"present\"}" >/dev/null
-  # D2 / IMP-464 round-2/3: audit-input-manifest.json is now a required
-  # plan-final output, and audit-report.json's input_manifest_hash must
-  # equal its audit_input_manifest.input_hash exactly (the provenance chain
-  # the manifest's own schema documents). Its evidence_hashes[] plan-diff.json
-  # entry is now MANDATORY (not merely checked-if-present) whenever
-  # plan-diff.json carries a real verdict, which this fixture's does.
-  local aim_hash="sha256:1111111111111111111111111111111111111111111111111111111111111111"
-  jq -n --arg h "$aim_hash" --arg pdh "$pd_hash" \
-    '{schema_version:"aid-2.0", artifact_type:"audit_input_manifest",
-      audit_input_manifest:{input_hash:$h,
-        allowlist:[], prior_pass_summaries:"untrusted", required_independence_level:"context_only",
-        evidence_hashes:[{path:"plan-diff.json", sha256:$pdh, size:1}]}}' \
-    > "${dir}/audit-input-manifest.json"
-  _p2 audit-report.json audit_report audit_report \
-    ".audit_report.reviewed_head = \"${cand}\" | .audit_report.input_manifest_hash = \"${aim_hash}\" | .audit_report.blocking_findings = false | .audit_report.provider = \"test-provider\" | .audit_report.model = \"test-model\" | .audit_report.process_id = \"plan-final-audit\" | .audit_report.required_independence_level = \"context_only\" | .audit_report.independence_level = \"context_only\" | .audit_report.advisory = false"
-  local ahash; ahash="$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  _p2 curator-report.json curator curator \
-    ".curator.audit_report_ref = \"sha256:${ahash}\""
-  printf '# Simplifier report\n\nHead: %s\n\nNo proposals.\n' "$cand" > "${dir}/simplifier-report.md"
-  _p2 review-profile.json review_profile review_profile \
-    '.review_profile.required_lenses = ["correctness"]'
-  _p2 delivery-gate.json delivery_gate delivery_gate \
-    '.sources = ["E-068-1_2"]'
-  _p2 acceptance-evidence.json acceptance_evidence acceptance_evidence \
-    '.sources = ["E-068-1_2"]'
-  local drid; drid="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
-  jq -n --arg c "$cand" --arg r "$drid" \
-    '{candidate_sha:$c, run_id:$r,
-      dispatches:[{agent:"auditor",count:1},{agent:"curator",count:1},
-                  {agent:"simplifier",count:1},{agent:"reporter",count:1}],
-      utilities:[{id:"scanner_memory_scan",count:1}]}' > "${dir}/dispatch-record.json"
-  # The Reporter is dispatched LAST, after the final non-mutating pass.
-  sleep 1
-  _p2 delivery-report.json delivery_report delivery_report
-  # D3: seal the plan_final_skeletons generation record for the 3 specialist
-  # outputs this fixture hand-writes via _p2 (rather than through the real
-  # `--stage inputs` generator), so _pfsm_verify_plan_final_skeleton_envelope
-  # treats them as legitimately-generated-then-filled specialist outputs.
-  local _sk_kind _sk_fname _sk_pkey _sk_hash
-  for _sk_kind in curator verifier reporter; do
-    case "$_sk_kind" in
-      curator)  _sk_fname="curator-report.json";        _sk_pkey="curator" ;;
-      verifier) _sk_fname="semantic-review-final.json"; _sk_pkey="semantic_review" ;;
-      reporter) _sk_fname="delivery-report.json";        _sk_pkey="delivery_report" ;;
-    esac
-    _sk_hash="sha256:$(jq -S -c --arg pk "$_sk_pkey" '.[$pk] = null' "${dir}/${_sk_fname}" | sha256sum | awk '{print $1}')"
-    plan_manifest_update "$PLAN_ID" \
-      ".plan_boundary_manifest.plan_final_skeletons.${_sk_kind} = {sha256: \"${_sk_hash}\", candidate_sha: \"${cand}\", run_id: \"${drid}\"}" >/dev/null
-  done
-}
-
-# ─── AC3.3: the FSM dispatches nothing — it BLOCKS with exit 7 and names
-#     exactly what the controller must produce ─────────────────────────────
-@test "AC3: --stage review blocks with exit 7 and writes review-requirements.json naming every required output" {
-  _seed_review_project
-
-  _review
-  [ "$status" -eq 7 ]
-  [[ "$output" == *"awaiting_review_outputs"* ]]
-  [[ "$output" == *"semantic-review-final.json"* ]]
-  [[ "$output" == *"audit-report.json"* ]]
-  [[ "$output" == *"curator-report.json"* ]]
-  [[ "$output" == *"simplifier-report.md"* ]]
-  [[ "$output" == *"delivery-report.json"* ]]
-  [[ "$output" == *"review-profile.json"* ]]
-  [[ "$output" == *"delivery-gate.json"* ]]
-  [[ "$output" == *"acceptance-evidence.json"* ]]
-
-  # The contract is on disk and carries the PLAN range, not an EPIC diff.
-  local req="$(_run_dir)/review-requirements.json"
-  [ -f "$req" ]
-  local cand base
-  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
-  run jq -r '.review_range' "$req"
-  [ "$output" = "${base}..${cand}" ]
-  run jq -r '.required_outputs | length' "$req"
-  [ "$output" = "11" ]
-
-  # Blocked, not failed: the plan is still PLAN_REVIEW.
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_REVIEW" ]
-}
-
-# ─── AC3.1 + AC3.4 + AC3.5: a full, valid review pass ─────────────────────
-@test "AC3: a complete review pass transitions PLAN_REVIEW -> AWAITING_PM and leaves candidate_sha and the worktree unchanged" {
-  _seed_review_project
-  local cand_before; cand_before="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  local head_before; head_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
-  _write_review_outputs
-
-  _review
-  [ "$status" -eq 0 ]
-
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "AWAITING_PM" ]
-
-  # AC3.5: candidate and product worktree untouched by a full review pass.
-  [ "$(_manifest_field "$PLAN_ID" candidate_sha)" = "$cand_before" ]
-  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")" = "$head_before" ]
-  run git -C "$TEST_PROJECT_ROOT" status --porcelain --untracked-files=no
-  [ -z "$output" ]
-
-  # IMP-466: review proof survives outside the ignored run directory.  The
-  # sidecar is technical-only and must not smuggle arbitrary evidence files.
-  local ref receipt_hash
-  ref="$(_manifest_field "$PLAN_ID" plan_final_evidence_ref)"
-  receipt_hash="$(_manifest_field "$PLAN_ID" plan_final_evidence_receipt_sha256)"
-  [[ "$ref" == refs/heads/aid-evidence/${PLAN_ID}/${cand_before}/* ]]
-  [[ "$receipt_hash" =~ ^sha256:[0-9a-f]{64}$ ]]
-  run git -C "$TEST_PROJECT_ROOT" ls-tree -r --name-only "$ref"
-  [ "$output" = "receipt.json" ]
-  run git -C "$TEST_PROJECT_ROOT" show "${ref}:receipt.json"
-  [ "sha256:$(printf '%s\n' "$output" | sha256sum | awk '{print $1}')" = "$receipt_hash" ]
-  run jq -r '.outputs | keys | length' <<< "$output"
-  [ "$output" = "11" ]
-}
-
-# ─── AC3.1: the C2 final review's recorded range covers the FIRST EPIC's
-#     commit even though it is detected only after the LAST one is
-#     integrated ─────────────────────────────────────────────────────────
-@test "AC3: the recorded C2 range spans plan_base_commit..candidate, so a defect from the first EPIC is still in range after the last EPIC merges" {
-  _seed_review_project
-  # Two more commits on the plan branch AFTER the seeded one — the analogue of
-  # a second and third EPIC landing. The candidate is re-frozen over them.
-  _commit_on "plan/${PLAN_ID}" defect.txt "the defect seeded by the first EPIC"
-  _commit_on "plan/${PLAN_ID}" later.txt "a later EPIC's change"
-  _finalize "$PLAN_ID" freeze   # invalidates: the candidate moved
-  [ "$status" -eq 6 ]
-  _finalize "$PLAN_ID" sync
-  _finalize "$PLAN_ID" freeze
-  [ "$status" -eq 0 ]
-  local receipt; receipt="$(_write_receipt bats_all)"
-  _gates --substitute-receipt "bats_all=${receipt}"
-  [ "$status" -eq 0 ]
-
-  local base cand
-  base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
-  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-
-  # The defect commit is INSIDE base..candidate — the range the stage requires
-  # the C2 final review to record.
-  run git -C "$TEST_PROJECT_ROOT" log --format=%s "${base}..${cand}"
-  [[ "$output" == *"the defect seeded by the first EPIC"* ]]
-
-  _write_review_outputs
-  _review
-  [ "$status" -eq 0 ]
-
-  run jq -r '.plan_boundary_manifest.plan_final_review.review_range' \
-    "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
-  [ "$output" = "${base}..${cand}" ]
-}
-
-@test "AC3: a C2 final review recording an EPIC-sized range (not plan_base_commit) is refused" {
-  _seed_review_project
-  _write_review_outputs
-  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  _p2 semantic-review-final.json semantic_review semantic_review \
-    ".revision.base_sha = \"${cand}\" | .semantic_review.range = \"${cand}..${cand}\""
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"expected plan_base_commit"* ]]
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_REVIEW" ]
-}
-
-# ─── AC3.2: dispatch counts — exactly once each, utilities counted
-#     explicitly ─────────────────────────────────────────────────────────
-@test "AC3: each plan-boundary specialist must dispatch exactly once — a second Curator dispatch is refused" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  jq '.dispatches |= map(if .agent == "curator" then .count = 2 else . end)' \
-    "${dir}/dispatch-record.json" > "${dir}/dr.tmp" && mv "${dir}/dr.tmp" "${dir}/dispatch-record.json"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"2 dispatch(es) of 'curator'"* ]]
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_REVIEW" ]
-}
-
-@test "AC3: a missing specialist dispatch (0 for the reporter) is refused" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  jq '.dispatches |= map(select(.agent != "reporter"))' \
-    "${dir}/dispatch-record.json" > "${dir}/dr.tmp" && mv "${dir}/dr.tmp" "${dir}/dispatch-record.json"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"0 dispatch(es) of 'reporter'"* ]]
-}
-
-@test "AC3: a registered plan utility that did not run blocks, and a successful pass counts it explicitly in utilities_run[]" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  jq '.utilities = []' "${dir}/dispatch-record.json" > "${dir}/dr.tmp" \
-    && mv "${dir}/dr.tmp" "${dir}/dispatch-record.json"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"scanner_memory_scan"* ]]
-
-  # Restored → the pass records it explicitly.
-  jq '.utilities = [{id:"scanner_memory_scan",count:1}]' "${dir}/dispatch-record.json" \
-    > "${dir}/dr.tmp" && mv "${dir}/dr.tmp" "${dir}/dispatch-record.json"
-  _review
-  [ "$status" -eq 0 ]
-  run jq -c '.plan_boundary_manifest.plan_final_review.utilities_run' \
-    "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
-  [ "$output" = '[{"id":"scanner_memory_scan","count":1}]' ]
-  run jq -c '.plan_boundary_manifest.plan_final_review.dispatch_counts' \
-    "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
-  [ "$output" = '{"auditor":1,"curator":1,"simplifier":1,"reporter":1}' ]
-}
-
-@test "AC3: a utility registered in execution.yaml but never run blocks the stage (registration is config, enforcement is not optional)" {
-  _seed_review_project
-  _write_review_outputs
-  printf '\nplan_final_utilities:\n  - scanner_memory_scan\n  - some_new_utility\n' \
-    >> "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"some_new_utility"* ]]
-}
-
-# ─── AC3.3: stale / wrong-plan / wrong-candidate outputs ─────────────────
-@test "AC3: an output bound to any head other than the frozen candidate is refused, never warned" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  jq '.revision.head_sha = "0000000000000000000000000000000000000000"' \
-    "${dir}/audit-report.json" > "${dir}/x.tmp" && mv "${dir}/x.tmp" "${dir}/audit-report.json"
-  # keep the curator ref consistent so ONLY the head binding is wrong
-  local ah; ah="$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  jq --arg a "sha256:${ah}" '.curator.audit_report_ref = $a' "${dir}/curator-report.json" \
-    > "${dir}/x.tmp" && mv "${dir}/x.tmp" "${dir}/curator-report.json"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"expected the frozen candidate"* ]]
-  [[ "$output" == *"stale evidence"* ]]
-}
-
-@test "AC3: an EPIC evidence pack copied in (no identity.plan_id) cannot satisfy a requirement" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  # exactly the shape of a per-EPIC artifact: epic_id set, plan_id absent
-  jq 'del(.identity.plan_id) | .identity.epic_id = "E-068-1_2"' \
-    "${dir}/delivery-gate.json" > "${dir}/x.tmp" && mv "${dir}/x.tmp" "${dir}/delivery-gate.json"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"identity.plan_id"* ]]
-  [[ "$output" == *"bound to the PLAN"* ]]
-}
-
-@test "AC3: an output belonging to ANOTHER plan is refused" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  jq '.identity.plan_id = "P999"' "${dir}/review-profile.json" \
-    > "${dir}/x.tmp" && mv "${dir}/x.tmp" "${dir}/review-profile.json"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"P999"* ]]
-  [[ "$output" == *"does not belong to this plan"* ]]
-}
-
-@test "AC3: a Curator report referencing a DIFFERENT audit report is refused" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  jq '.curator.audit_report_ref = "sha256:0000000000000000000000000000000000000000000000000000000000000000"' \
-    "${dir}/curator-report.json" > "${dir}/x.tmp" && mv "${dir}/x.tmp" "${dir}/curator-report.json"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"reviewed a DIFFERENT audit report"* ]]
-}
-
-@test "AC3: a Simplifier report whose Head: provenance line is not the candidate is refused" {
-  _seed_review_project
-  _write_review_outputs
-  printf '# Simplifier report\n\nHead: 1111111111111111111111111111111111111111\n' \
-    > "$(_run_dir)/simplifier-report.md"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"provenance line"* ]]
-}
-
-@test "AC3: an output that fails aid-protocol-validate.sh is refused with the validator's exit code echoed" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  jq '.subject.subject_hash = "not-a-hash"' "${dir}/semantic-review-final.json" \
-    > "${dir}/x.tmp" && mv "${dir}/x.tmp" "${dir}/semantic-review-final.json"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"aid-protocol-validate.sh"* ]]
-  [[ "$output" == *"validator exit 7"* ]]
-}
-
-# ─── AC3.4: the plan-level aggregates C4 consumes ────────────────────────
-@test "AC3: the plan-final run carries review-profile, delivery-gate and acceptance-evidence bound to the PLAN (epic_id null, plan_id set)" {
-  _seed_review_project
-  _write_review_outputs
-  _review
-  [ "$status" -eq 0 ]
-
-  local dir f; dir="$(_run_dir)"
-  for f in review-profile.json delivery-gate.json acceptance-evidence.json; do
-    [ -f "${dir}/${f}" ]
-    run jq -r '.identity.epic_id' "${dir}/${f}"
-    [ "$output" = "null" ]
-    run jq -r '.identity.plan_id' "${dir}/${f}"
-    [ "$output" = "$PLAN_ID" ]
-  done
-  # review-profile.json is a satisfiable input for lib/review-profile-check.sh
-  # (_c3_gate_active): required_lenses[] is present, so it is not "unverifiable".
-  run jq -r '.review_profile.required_lenses | length' "${dir}/review-profile.json"
-  [ "$output" = "1" ]
-}
-
-@test "AC3: the plan-level delivery-gate validates against the widened delivery-gate schema (identity.epic_id string-or-null)" {
-  run jq -e '.properties.identity.properties.epic_id.type | index("null")' \
-    "$AID_PLUGIN_PATH/defaults/schemas/delivery-gate.schema.json"
-  [ "$status" -eq 0 ]
-  run jq -e '.properties.identity.required | index("epic_id")' \
-    "$AID_PLUGIN_PATH/defaults/schemas/delivery-gate.schema.json"
-  [ "$status" -eq 0 ]
-}
-
-@test "AC3: an aggregate missing a contributing EPIC is a blocker that NAMES that EPIC" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  jq '.sources = ["E-999-1_1"]' "${dir}/acceptance-evidence.json" \
-    > "${dir}/x.tmp" && mv "${dir}/x.tmp" "${dir}/acceptance-evidence.json"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"missing a per-EPIC contribution for: E-068-1_2"* ]]
-}
-
-# ─── AC3.6: an accepted fix that changes the candidate ───────────────────
-@test "AC3: an accepted Curator fix that changes the candidate invalidates the gate report and every review output, and the FULL loop re-runs" {
-  _seed_review_project
-  _write_review_outputs
-  local cand1 run1
-  cand1="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  run1="$(_manifest_field "$PLAN_ID" plan_final_evidence_dir)"
-
-  # The Curator's fix is ACCEPTED and committed on the plan branch.
-  _commit_on "plan/${PLAN_ID}" curator-fix.txt "accepted curator fix"
-
-  _review
-  [ "$status" -eq 6 ]
-  [[ "$output" == *"CANDIDATE INVALIDATED"* ]]
-
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_FIX" ]
-  [ "$(_manifest_field "$PLAN_ID" candidate_sha)" = "null" ]
-  [ "$(_manifest_field "$PLAN_ID" candidate_frozen_at)" = "null" ]
-  [ "$(_manifest_field "$PLAN_ID" plan_final_evidence_dir)" = "null" ]
-
-  # The prior run directory — gate report AND review outputs — is left
-  # byte-identical, but it is no longer authoritative for any candidate.
-  [ -f "$TEST_PROJECT_ROOT/${run1}/gates_report.json" ]
-  [ -f "$TEST_PROJECT_ROOT/${run1}/delivery-report.json" ]
-
-  # THE FULL LOOP, not just the transition: gates and every review output must
-  # re-run against the NEW candidate, in a NEW run directory.
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze
-  [ "$status" -eq 0 ]
-  local cand2 run2
-  cand2="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  run2="$(_manifest_field "$PLAN_ID" plan_final_evidence_dir)"
-  [ "$cand2" != "$cand1" ]
-  [ "$run2" != "$run1" ]
-
-  # The stale outputs did not follow the candidate: the new run blocks on 7.
-  _review
-  [ "$status" -eq 1 ]           # still PLAN_GATES — gates come before reviews
-  [[ "$output" == *"runs only out of PLAN_REVIEW"* ]]
-
-  local receipt; receipt="$(_write_receipt bats_all)"
-  _gates --substitute-receipt "bats_all=${receipt}"
-  [ "$status" -eq 0 ]
-  _review
-  [ "$status" -eq 7 ]
-  [[ "$output" == *"awaiting_review_outputs"* ]]
-
-  _write_review_outputs
-  _review
-  [ "$status" -eq 0 ]
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "AWAITING_PM" ]
-}
-
-@test "AC3: an UNCOMMITTED tracked write during the review boundary invalidates the candidate rather than being reported as a dirty tree" {
-  _seed_review_project
-  _write_review_outputs
-  # A utility wrote a tracked file and did not commit it.
-  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}"
-  printf 'utility touched this\n' >> "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-test-plan.md"
-
-  _review
-  [ "$status" -eq 6 ]
-  [[ "$output" == *"uncommitted TRACKED changes"* ]]
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_FIX" ]
-}
-
-@test "AC3: outputs written ONLY into the run directory are not a candidate change — untracked run-dir writes never invalidate" {
-  _seed_review_project
-  local cand_before; cand_before="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  _write_review_outputs
-
-  _review
-  [ "$status" -eq 0 ]
-  [ "$(_manifest_field "$PLAN_ID" candidate_sha)" = "$cand_before" ]
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "AWAITING_PM" ]
-}
-
-# ─── Edge case: the Reporter must be LAST ────────────────────────────────
-@test "AC3: a delivery report older than the Simplifier report is refused — the Reporter re-runs last" {
-  _seed_review_project
-  _write_review_outputs
-  # A Simplifier fix accepted AFTER the Reporter already ran.
-  sleep 1
-  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  printf '# Simplifier report\n\nHead: %s\n\nOne proposal, applied.\n' "$cand" \
-    > "$(_run_dir)/simplifier-report.md"
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Reporter must be dispatched last"* ]]
-}
-
-# ─── State machine ───────────────────────────────────────────────────────
-@test "AC3: --stage review refuses out of any state other than PLAN_REVIEW" {
-  _bootstrap
-  _write_exec_yaml
-
-  _review
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"no frozen candidate"* ]]
-}
-
-@test "AC3: a re-run in AWAITING_PM is an idempotent no-op — nothing is re-validated into a second pass" {
-  _seed_review_project
-  _write_review_outputs
-  _review
-  [ "$status" -eq 0 ]
-
-  _review
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"already in AWAITING_PM"* ]]
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "AWAITING_PM" ]
-}
-
-# ── CP2 F2 regression: outputs are bound to the ATTEMPT, not only the candidate ──
-# The verifier's concrete attack: a review pass completes in R-<plan>-final-1, a
-# stray tracked write triggers invalidation, the operator REVERTS it instead of
-# committing a fix, so sync/freeze re-freeze the SAME commit into
-# R-<plan>-final-2 — and copying the old directory reproduces every file with
-# matching heads, a self-consistent curator ref and preserved mtimes.
-@test "CP2 F2: a previous attempt's outputs copied into a new run dir are refused (run_id binding)" {
-  _seed_review_project
-  _write_review_outputs
-  _review
-  [ "$status" -eq 0 ]
-  local first_dir; first_dir="$(_run_dir)"
-
-  # A stray tracked write, then a REVERT (not a fix): the candidate commit is
-  # unchanged, so the re-freeze mints the SAME sha under a new attempt.
-  echo "stray" >> "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-test-plan.md"
-  _review
-  [ "$status" -eq 6 ]
-  git -C "$TEST_PROJECT_ROOT" checkout -- ".aid-o/plans/${PLAN_ID}-test-plan.md"
-
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze
-  [ "$status" -eq 0 ]
-  local receipt; receipt="$(_write_receipt bats_all)"
-  _gates --substitute-receipt "bats_all=${receipt}"
-  [ "$status" -eq 0 ]
-
-  local second_dir; second_dir="$(_run_dir)"
-  [ "$second_dir" != "$first_dir" ]
-
-  # Carry the whole previous attempt over, mtimes preserved.
-  cp -rp "$first_dir"/. "$second_dir"/
-
-  _review
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"run_id"* ]]
-}
-
-# =============================================================================
-# ─── aid-plan-fsm.sh plan-finalize --stage c4 / --stage summary ───────────
-#     (P068 Step 4 — the plan-mode C4 decision + the plan-level PM summary)
-# =============================================================================
+# The review and decision of a plan are covered end to end, on the real stages,
+# by test-plan-final-decide.bats (freeze, gates, produce, the cp7 round, decide,
+# the sabotage set, fix classes, the waiver, the integrity journal). This suite
+# keeps what surrounds them: the freeze and gate stages above, the merge and the
+# close below, which start from a SEEDED decided plan (_seed_plan_final_evidence).
 
 # _write_plan_review [head_override] — the plan's sealed generation authority, which
 # carries the plan review (CP1) verdict the aggregator reads. Its target_head is
@@ -2198,288 +1520,7 @@ _write_plan_review() {
   local h="${1:-$(_manifest_field "$PLAN_ID" plan_base_commit)}"
   jq -n --arg h "$h" '{cp1: {verdict: "pass"}, target_head: $h}' > "$dir/generation-authority.json"
 }
-
-# _seed_c4_project — a plan that has passed the FULL review boundary, plus the two
-# things C4 reads that the review stage does not produce: the plan's sealed review
-# and the per-EPIC evidence directories the roll-up checks for on disk.
-_seed_c4_project() {
-  _seed_review_project
-  _write_review_outputs
-  _review
-  [ "$status" -eq 0 ]
-  _write_plan_review
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-068-1_2/R-E-068-1_2-1"
-  # The at-HEAD verifier subprocess is stubbed (double-gated seam) — this suite
-  # exercises the plan-mode RESOLUTION layer, not aid-evidence-verify.sh itself,
-  # which has its own suite and costs ~9s per invocation.
-  export AID_TEST_MODE=1
-  export AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB=pass
-}
-
-# _c4 / _summary — the stages under test. The controller keeps the worktree on the
-# candidate across the whole review->c4->summary boundary; _review already did the
-# checkout, so these do not move HEAD.
-_c4()      { run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage c4      --project-root "$TEST_PROJECT_ROOT" "$@"; }
-_summary() { run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage summary --project-root "$TEST_PROJECT_ROOT" "$@"; }
 _decision() { printf '%s/release-decision.json' "$(_run_dir)"; }
-
-# ─── AC4.1: every plan-mode input names the plan, the attempt, the candidate,
-#     the target ref and the target head ─────────────────────────────────────
-@test "AC4: the plan-mode C4 decision names plan id, run id, candidate SHA, target ref and target head SHA" {
-  _seed_c4_project
-  local cand thead run
-  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  thead="$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)"
-  run="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
-
-  _c4
-  [ "$status" -eq 0 ]
-
-  local d; d="$(_decision)"
-  [ -f "$d" ]
-  # identity: the PLAN, this attempt, and epic_id explicitly null.
-  [ "$(jq -r '.identity.plan_id' "$d")" = "$PLAN_ID" ]
-  [ "$(jq -r '.identity.run_id' "$d")" = "$run" ]
-  [ "$(jq -r '.identity.epic_id' "$d")" = "null" ]
-  [ "$(jq -r '.revision.head_sha' "$d")" = "$cand" ]
-  # the five identity facts, as data the PM brief renders from
-  [ "$(jq -r '.release_decision.plan_summary.plan_id' "$d")" = "$PLAN_ID" ]
-  [ "$(jq -r '.release_decision.plan_summary.plan_final_run_id' "$d")" = "$run" ]
-  [ "$(jq -r '.release_decision.plan_summary.reviewed_candidate_sha' "$d")" = "$cand" ]
-  [ "$(jq -r '.release_decision.plan_summary.target_ref' "$d")" = "main" ]
-  [ "$(jq -r '.release_decision.plan_summary.approved_target_sha' "$d")" = "$thead" ]
-  # and in the PM-facing one-liner, so a summary can never be read plan-agnostically
-  [[ "$(jq -r '.release_decision.summary_for_pm' "$d")" == *"plan=${PLAN_ID}"* ]]
-  [[ "$(jq -r '.release_decision.summary_for_pm' "$d")" == *"reviewed_candidate=${cand}"* ]]
-
-  # a complete plan-final pack releases
-  [ "$(jq -r '.release_decision.release_ready' "$d")" = "true" ]
-  [ "$(jq -r '.release_decision.blockers | length' "$d")" = "0" ]
-
-  # dual-run evidence, exactly as the EPIC hook emits it
-  local dr; dr="$(_run_dir)/release-decision-dual-run.json"
-  [ -f "$dr" ]
-  [ "$(jq -r '.event' "$dr")" = "release_policy_dual_run" ]
-  [ "$(jq -r '.candidate_sha' "$dr")" = "$cand" ]
-  [ "$(jq -r '.target_head_sha' "$dr")" = "$thead" ]
-  [ "$(jq -r '.enforcement' "$dr")" = "observe" ]
-
-  # the stage does not move the plan on: PM authorization is Step 5's
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "AWAITING_PM" ]
-}
-
-# ─── AC4.2: the Reporter and Simplifier are MANDATORY here — the EPIC
-#     `ca-review-complete` marker must not be able to make them a silent skip ──
-@test "AC4: C4 reads the run-scoped delivery-report.json — a ca-review-complete marker cannot demote a missing Reporter to not_applicable" {
-  _seed_c4_project
-  # The EPIC-mode escape hatch, planted deliberately: marker present, report gone.
-  rm -f "$(_run_dir)/delivery-report.json"
-  : > "$(_run_dir)/ca-review-complete"
-
-  _c4
-  [ "$status" -eq 0 ]   # observe mode records the decision; it does not fail the stage
-  local d; d="$(_decision)"
-  [ "$(jq -r '.release_decision.reporter_status' "$d")" = "missing" ]
-  [ "$(jq -r '.release_decision.release_ready' "$d")" = "false" ]
-  run jq -r '[.release_decision.blockers[].input_id] | join(",")' "$d"
-  [[ "$output" == *"reporter"* ]]
-  # and NOT the EPIC-mode inversion
-  [ "$(jq -r '.release_decision.reporter_reason' "$d")" != "not_plan_boundary" ]
-}
-
-@test "AC4: a Simplifier report whose Head: provenance is not the candidate blocks, never skips" {
-  _seed_c4_project
-  printf '# Simplifier report\n\nHead: %s\n' "$(_manifest_field "$PLAN_ID" plan_base_commit)" \
-    > "$(_run_dir)/simplifier-report.md"
-
-  _c4
-  [ "$status" -eq 0 ]
-  local d; d="$(_decision)"
-  [ "$(jq -r '.release_decision.simplifier_status' "$d")" = "fail" ]
-  [ "$(jq -r '.release_decision.release_ready' "$d")" = "false" ]
-}
-
-# ─── AC4.3: identity validation — an EPIC evidence directory, and a copy of a
-#     valid EPIC pack placed at the plan path ────────────────────────────────
-@test "AC4: passing an EPIC evidence directory fails plan-mode identity validation and writes NO decision" {
-  _seed_c4_project
-  local epic_dir=".aid-o/work/evidence/E-068-1_2/R-E-068-1_2-1"
-  local out="$TEST_PROJECT_ROOT/${epic_dir}/release-decision.json"
-
-  run env AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" \
-    bash "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh" \
-      --plan "$PLAN_ID" --run-id "$(_manifest_field "$PLAN_ID" plan_final_run_id)" \
-      --evidence-dir "$epic_dir" \
-      --candidate-sha "$(_manifest_field "$PLAN_ID" candidate_sha)" \
-      --target-ref main \
-      --target-head-sha "$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)" \
-      --out "$out"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"IDENTITY MISMATCH"* ]]
-  [[ "$output" == *"not the plan-final run directory recorded in the manifest"* ]]
-  [ ! -f "$out" ]
-}
-
-@test "AC4: a mismatched --target-head-sha exits 1 regardless of policy mode, and reads no evidence" {
-  _seed_c4_project
-  run env AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" \
-    bash "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh" \
-      --plan "$PLAN_ID" --run-id "$(_manifest_field "$PLAN_ID" plan_final_run_id)" \
-      --evidence-dir "$(_manifest_field "$PLAN_ID" plan_final_evidence_dir)" \
-      --candidate-sha "$(_manifest_field "$PLAN_ID" candidate_sha)" \
-      --target-ref main \
-      --target-head-sha "0000000000000000000000000000000000000000"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"target_branch_head_at_candidate_freeze"* ]]
-  [ ! -f "$(_decision)" ]
-}
-
-@test "AC4: a copy of a valid EPIC artifact placed at the plan path is blocked on identity, not accepted" {
-  _seed_c4_project
-  # A complete, protocol-valid delivery-gate — but an EPIC's, carrying identity.epic_id
-  # and the EPIC's run id. The path is right; the binding is not.
-  local dir; dir="$(_run_dir)"
-  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  jq --arg e "E-068-1_2" --arg r "R-E-068-1_2-1" \
-     '.identity.epic_id = $e | .identity.run_id = $r | del(.identity.plan_id)' \
-     "$dir/delivery-gate.json" > "$dir/delivery-gate.json.tmp"
-  mv "$dir/delivery-gate.json.tmp" "$dir/delivery-gate.json"
-
-  _c4
-  [ "$status" -eq 0 ]
-  local d; d="$(_decision)"
-  [ "$(jq -r '.release_decision.release_ready' "$d")" = "false" ]
-  run jq -r '[.release_decision.blockers[] | select(.input_id == "delivery_gate") | .reason] | join(" ")' "$d"
-  [[ "$output" == *"not bound to this plan-final attempt"* ]]
-}
-
-# ─── AC4: the per-EPIC roll-up blocker NAMES the EPIC ──────────────────────
-@test "AC4: an EPIC whose roll-up contribution is missing is a blocker naming that EPIC" {
-  _seed_c4_project
-  local dir; dir="$(_run_dir)"
-  jq '.sources = []' "$dir/acceptance-evidence.json" > "$dir/ae.tmp" && mv "$dir/ae.tmp" "$dir/acceptance-evidence.json"
-
-  _c4
-  [ "$status" -eq 0 ]
-  local d; d="$(_decision)"
-  run jq -r '[.release_decision.blockers[].input_id] | join(",")' "$d"
-  [[ "$output" == *"epic_rollup:E-068-1_2"* ]]
-  [ "$(jq -r '.release_decision.release_ready' "$d")" = "false" ]
-}
-
-# ─── AC4.4: a retry writes -final-2 and leaves run 1 byte-identical ─────────
-@test "AC4: a retry after a PLAN_FIX writes R-<plan>-final-2 and never overwrites run 1's decision" {
-  _seed_c4_project
-  _c4
-  [ "$status" -eq 0 ]
-  local first_dir; first_dir="$(_run_dir)"
-  local first_sha; first_sha="$(sha256sum "$first_dir/release-decision.json" | awk '{print $1}')"
-  [[ "$(_manifest_field "$PLAN_ID" plan_final_run_id)" == *"-final-1" ]]
-
-  # A fix lands on the plan branch → the candidate is invalidated on the next stage.
-  _commit_on "plan/${PLAN_ID}" fix.txt "an accepted specialist fix"
-  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}"
-  _c4
-  [ "$status" -eq 6 ]
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_FIX" ]
-
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze
-  [ "$status" -eq 0 ]
-  [ "$(_manifest_field "$PLAN_ID" plan_final_run_id)" = "R-${PLAN_ID}-final-2" ]
-  local second_dir; second_dir="$(_run_dir)"
-  [ "$second_dir" != "$first_dir" ]
-
-  # Run 1 is untouched by everything that followed it.
-  [ "$(sha256sum "$first_dir/release-decision.json" | awk '{print $1}')" = "$first_sha" ]
-  [ ! -f "$second_dir/release-decision.json" ]
-}
-
-# ─── AC4.5: the PM summary keeps the four facts SEPARATE ───────────────────
-@test "AC4: the PM plan-final summary renders reviewed candidate, approved target, final merge SHA and tag status as four distinct fields" {
-  _seed_c4_project
-  _c4
-  [ "$status" -eq 0 ]
-
-  _summary
-  [ "$status" -eq 0 ]
-
-  local md; md="$(_run_dir)/pm-summary.md"
-  [ -f "$md" ]
-  local cand thead
-  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  thead="$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)"
-
-  grep -Fq "Reviewed candidate SHA:" "$md"
-  grep -Fq "Approved target SHA:" "$md"
-  grep -Fq "Final main merge SHA:" "$md"
-  grep -Fq "Release / tag status:" "$md"
-  grep -Fq "$cand" "$md"
-  grep -Fq "$thead" "$md"
-  # the merge has NOT happened — the summary must say so, not imply a release
-  grep -Fq "Final main merge SHA:** _not yet recorded_" "$md"
-  grep -Fq "not_tagged" "$md"
-  # roadmap §8 sections
-  grep -Fq "## What the plan delivered" "$md"
-  grep -Fq "### Skipped at EPIC level" "$md"
-  grep -Fq "## Plan-final gate results" "$md"
-  grep -Fq "## Specialist review summary" "$md"
-  grep -Fq "## Remaining backlog" "$md"
-  grep -Fq "## Merge decision" "$md"
-  # and it is the PLAN's summary, never an EPIC's
-  grep -Fq "# PM Plan-Final Summary — ${PLAN_ID}" "$md"
-  grep -Fq "E-068-1_2" "$md"
-
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "AWAITING_PM" ]
-}
-
-@test "AC4: --stage summary refuses when no plan-mode decision exists (it reports the decision, never substitutes for it)" {
-  _seed_c4_project
-  _summary
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"run '--stage c4' first"* ]]
-}
-
-@test "AC4: --stage summary refuses a decision bound to another plan-final attempt" {
-  _seed_c4_project
-  _c4
-  [ "$status" -eq 0 ]
-  local d; d="$(_decision)"
-  jq '.identity.run_id = "R-P068-final-9"' "$d" > "${d}.tmp" && mv "${d}.tmp" "$d"
-
-  _summary
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"never be able to imply an intermediate EPIC was released"* ]]
-}
-
-# ─── the release-decision schema's blockers[].input_id oneOf ───────────────
-@test "AC4: blockers[].input_id accepts canonical ids and well-formed epic_rollup ids, and rejects both malformed branches" {
-  local schema="$AID_PLUGIN_PATH/defaults/schemas/release-decision.schema.json"
-  run python3 - "$schema" <<'PY'
-import json, sys
-from jsonschema import Draft202012Validator
-schema = json.load(open(sys.argv[1]))
-sub = schema["properties"]["release_decision"]["properties"]["blockers"]["items"]["properties"]["input_id"]
-v = Draft202012Validator(sub)
-cases = {
-    "delivery_gate": True,          # canonical (branch 1)
-    "delivery_report": True,        # plan-mode Reporter input (branch 1)
-    "epic_rollup:E-068-1_2": True,  # well-formed EPIC id (branch 2)
-    "epic_rollup:E-999-12_34": True,
-    "delivery_gates": False,        # typo in a canonical id still fails
-    "epic_rollup:E-68-1_2": False,  # malformed EPIC id still fails
-    "epic_rollup:*": False,
-}
-bad = [k for k, want in cases.items() if v.is_valid(k) != want]
-print("MISMATCH:", bad) if bad else print("ALL_OK")
-PY
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"ALL_OK"* ]]
-}
 
 # =============================================================================
 # ─── aid-plan-fsm.sh plan-merge-to-main (Step 5) ─────────────────────────
@@ -2524,25 +1565,10 @@ _seed_merge_project_build() {
   plan_manifest_update "$PLAN_ID" \
     '(.plan_boundary_manifest.epic_runs[] | select(.epic_id == "E-068-2_2") | .terminal_reason) = "PM dropped it"' >/dev/null
 
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
   plan_state_transition "$PLAN_ID" "PLAN_GATES" "PLAN_REVIEW" >/dev/null
   plan_state_transition "$PLAN_ID" "PLAN_REVIEW" "AWAITING_PM" >/dev/null
-
-  # The ONE plan-level review the binder derives every EPIC's verdict from.
-  local dir; dir="$(_run_dir)"
-  mkdir -p "$dir"
-  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  jq -n --arg h "$cand" \
-    '{schema_version:"aid-2.0", artifact_type:"audit_report",
-      revision:{head_sha:$h}, status:"pass",
-      audit_report:{reviewed_head:$h, blocking_findings:false}}' \
-    > "${dir}/audit-report.json"
-  jq -n '{schema_version:"aid-2.0", artifact_type:"curator",
-          status:"pass", curator:{blocking_findings:false}}' \
-    > "${dir}/curator-report.json"
 
   # The controller keeps the worktree on the candidate across the PM boundary.
   git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}"
@@ -2550,11 +1576,8 @@ _seed_merge_project_build() {
 }
 
 # _seed_merge_project_pre_review — identical to _seed_merge_project up to a
-# frozen candidate in PLAN_REVIEW, WITHOUT sealing a plan-final review. Tests
-# of `--stage inputs`'s OWN production (AC11) must run against a plan that has
-# not yet had its outputs hash-bound by a completed review — `--stage inputs`
-# correctly refuses to re-produce them once review has sealed the candidate's
-# outputs (see "already has a RECORDED plan-final review" in aid-plan-fsm.sh).
+# frozen candidate in PLAN_REVIEW, WITHOUT a decision: where `--stage produce`
+# runs (AC11).
 # _seed_merge_project_pre_review — snapshot-backed (IMP-505): the builder below is unchanged and
 # runs once per file; every later case restores its byte copy.
 _seed_merge_project_pre_review() { _snap_fixture "merge_project_pre_review${1:+:$1}" _seed_merge_project_pre_review_build "$@"; }
@@ -2571,12 +1594,11 @@ _seed_merge_project_pre_review_build() {
   plan_manifest_update "$PLAN_ID" \
     '(.plan_boundary_manifest.epic_runs[] | select(.epic_id == "E-068-2_2") | .terminal_reason) = "PM dropped it"' >/dev/null
 
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
+  plan_state_transition "$PLAN_ID" "PLAN_GATES" "PLAN_REVIEW" >/dev/null
   # The controller keeps the worktree ON the candidate for every plan-final
-  # stage (--stage inputs' aid-plan-diff.sh reads HEAD to bind head_commit).
+  # stage (--stage produce's aid-plan-diff.sh reads HEAD to bind head_commit).
   git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}"
 }
 
@@ -3048,7 +2070,7 @@ _merge() {
   [ ! -f "$TEST_PROJECT_ROOT/.git/MERGE_HEAD" ]
 }
 
-@test "AC5: resolving a CONFLICT by re-syncing INVALIDATES the frozen candidate and returns the plan to PLAN_SYNC" {
+@test "AC5: resolving a CONFLICT by freezing again INVALIDATES the held candidate and mints a new attempt" {
   _seed_merge_project
   local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
   # Drive the plan into CONFLICT the way plan-merge-to-main does.
@@ -3056,12 +2078,13 @@ _merge() {
   run plan_state_get "$PLAN_ID" "plan_state"
   [ "$output" = "CONFLICT" ]
 
-  _finalize "$PLAN_ID" sync
+  local run_before; run_before="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
+  _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
   [[ "$output" == *"CANDIDATE INVALIDATED"* ]]
-  [ "$(_manifest_field "$PLAN_ID" candidate_sha)" = "null" ]
+  [ "$(_manifest_field "$PLAN_ID" plan_final_run_id)" != "$run_before" ]
   run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" = "PLAN_SYNC" ]
+  [ "$output" = "PLAN_GATES" ]
 }
 
 # ─── aid-release.sh tag-plan ───────────────────────────────────────────────
@@ -3319,76 +2342,12 @@ _close() {
 # coverage above; re-running them here would cost a full release gate profile
 # per test and prove nothing about close.)
 _seed_plan_final_evidence() {
-  local dir; dir="$(_run_dir)"
-  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  local run_id; run_id="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
-  local base; base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
-  local thead; thead="$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)"
-  mkdir -p "$dir"
-
-  jq -n '{overall:"pass", gates:[]}' > "${dir}/gates_report.json"
-
-  local f outputs='{}'
-  for f in semantic-review-final.json audit-report.json audit-input-manifest.json curator-report.json \
-           simplifier-report.md delivery-report.json review-profile.json \
-           plan-diff.json delivery-gate.json acceptance-evidence.json dispatch-record.json; do
-    if [[ ! -f "${dir}/${f}" ]]; then
-      if [[ "$f" == *.md ]]; then
-        printf 'Head: %s\n' "$cand" > "${dir}/${f}"
-      elif [[ "$f" == "plan-diff.json" ]]; then
-        jq -n --arg b "$base" --arg h "$cand" \
-          '{base_commit:$b, head_commit:$h, overall_verdict:"pass", results:[], summary:{present_count:0,absent_count:0}}' > "${dir}/${f}"
-      else
-        jq -n --arg h "$cand" '{schema_version:"aid-2.0", revision:{head_sha:$h}}' > "${dir}/${f}"
-      fi
-    fi
-    outputs="$(jq -c --arg k "$f" --arg v "sha256:$(sha256sum "${dir}/${f}" | awk '{print $1}')" \
-      '. + {($k): $v}' <<<"$outputs")"
-  done
-
-  plan_manifest_update "$PLAN_ID" \
-    ".plan_boundary_manifest.plan_final_inputs = {plan_diff_sha256: \"sha256:$(sha256sum "${dir}/plan-diff.json" | awk '{print $1}')\", candidate_sha: \"${cand}\", run_id: \"${run_id}\", ac_lens_required: false, plan_diff_verdict: \"present\"}" >/dev/null
-
-  plan_manifest_update "$PLAN_ID" \
-    ".plan_boundary_manifest.plan_final_review = $(jq -nc --arg c "$cand" --arg b "$base" \
-      --arg r "$run_id" --argjson o "$outputs" \
-      '{candidate_sha:$c, review_range:($b + ".." + $c), run_id:$r, outputs:$o,
-        dispatch_counts:{}, utilities_run:[]}')" >/dev/null
-
-  # The production review stage seals its accepted technical output inventory
-  # outside the candidate.  Seeds that model an already-complete review must
-  # do the same; otherwise merge tests would accidentally exercise the legacy
-  # runtime-only path that production now refuses.
-  local sealed ref receipt_commit receipt_hash
-  local target_head
-  target_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
-  local frozen_at
-  frozen_at="$(_manifest_field "$PLAN_ID" candidate_frozen_at)"
-  sealed="$(bash -c 'source "$1"; _pfsm_seal_plan_final_review "$2" "$3" "$4" "$5" main "$6" "$7" "$8" "$9"' \
-    _ "$PLAN_FSM_CLI" "$TEST_PROJECT_ROOT" "$PLAN_ID" "$base" "$cand" "$target_head" "$frozen_at" "$run_id" "$outputs")"
-  IFS='|' read -r ref receipt_commit receipt_hash <<< "$sealed"
-  [[ -n "$ref" && -n "$receipt_hash" ]] || return 1
-  plan_manifest_update "$PLAN_ID" \
-    ".plan_boundary_manifest.plan_final_evidence_ref = \"${ref}\" | .plan_boundary_manifest.plan_final_evidence_receipt_sha256 = \"${receipt_hash}\"" >/dev/null
-
-  jq -n --arg c "$cand" '{schema_version:"aid-2.0", artifact_type:"release_decision",
-    release_decision:{release_ready:true, blockers:[], candidate_sha:$c}}' \
-    > "${dir}/release-decision.json"
-  jq -n --arg p "$PLAN_ID" --arg r "$run_id" --arg c "$cand" --arg t "$thead" \
-    '{event:"release_policy_dual_run", plan_id:$p, run_id:$r, candidate_sha:$c,
-      target_head_sha:$t, enforcement:"observe", c4_release_ready:true,
-      legacy_verdict:true, legacy_checks:{gates_report:"pass", plan_final_review:"pass"},
-      match:true, divergence_class:"none"}' > "${dir}/release-decision-dual-run.json"
-  plan_manifest_update "$PLAN_ID" \
-    ".plan_boundary_manifest.plan_final_c4 = $(jq -nc --arg r "$run_id" --arg c "$cand" --arg t "$thead" \
-      '{run_id:$r, candidate_sha:$c, target_head_sha:$t, enforcement:"observe",
-        release_ready:true, blockers:0, dual_run:{match:true, divergence_class:"none"}}')" >/dev/null
-
+  aid_fixture_seed_plan_decided "$TEST_PROJECT_ROOT" "$PLAN_ID" || return 1
   # The private, gitignored human projection. Its Head is the candidate, which
   # IS the worktree HEAD across the close (the close moves the TARGET ref by
   # plumbing and never touches HEAD), so Check 2 sees a fresh report.
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/reports"
-  printf -- '---\nHead: %s\n---\n\n# %s delivery\n' "$cand" "$PLAN_ID" \
+  printf -- '---\nHead: %s\n---\n\n# %s delivery\n' "$(_manifest_field "$PLAN_ID" candidate_sha)" "$PLAN_ID" \
     > "$TEST_PROJECT_ROOT/.aid-o/reports/${PLAN_ID}-delivery.md"
 }
 
@@ -3676,591 +2635,35 @@ _seed_plan_final_evidence() {
   [[ "$output" == *"neither the frozen pre-merge state nor a discoverable merge"* ]]
 }
 
-# ─── D3 / IMP-465: generated protocol-v2 scaffolds ─────────────────────────
-
-# _skel_ctx — echoes "root project_id plan_id base candidate run_id run_dir_abs"
-# for the currently frozen candidate, for direct calls into the skeleton
-# generator/verifier functions (sourced, not shelled through the CLI).
-_skel_ctx() {
-  local dir; dir="$(_run_dir)"
-  printf '%s|%s|%s|%s|%s|%s|%s' \
-    "$TEST_PROJECT_ROOT" "$(basename "$TEST_PROJECT_ROOT")" "$PLAN_ID" \
-    "$(_manifest_field "$PLAN_ID" plan_base_commit)" \
-    "$(_manifest_field "$PLAN_ID" candidate_sha)" \
-    "$(_manifest_field "$PLAN_ID" plan_final_run_id)" \
-    "$dir"
-}
-
-@test "D3: generating a skeleton produces a schema-valid envelope with a null payload key" {
-  _bootstrap
-  _add_epic "$PLAN_ID" "E-068-1_2"
-  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
-  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
-  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
-  local ctx root pid plan base cand run dir
-  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
-  run bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
-  [ "$status" -eq 0 ]
-  [ -s "${dir}/curator-report.json" ]
-  [ "$(jq -r '.schema_version' "${dir}/curator-report.json")" = "aid-2.0" ]
-  [ "$(jq -r '.artifact_type' "${dir}/curator-report.json")" = "curator" ]
-  [ "$(jq -r '.identity.plan_id' "${dir}/curator-report.json")" = "$plan" ]
-  [ "$(jq -r '.identity.run_id' "${dir}/curator-report.json")" = "$run" ]
-  [ "$(jq -r '.revision.head_sha' "${dir}/curator-report.json")" = "$cand" ]
-  [ "$(jq -r '.revision.base_sha' "${dir}/curator-report.json")" = "$base" ]
-  [ "$(jq -r '.curator' "${dir}/curator-report.json")" = "null" ]
-  # aid-protocol-validate.sh correctly refuses a null payload (missing_type_
-  # payload) — a skeleton is intentionally incomplete until the specialist
-  # fills it; only THAT is the point where full protocol validation applies.
-  run bash "$AID_PLUGIN_PATH/scripts/aid-protocol-validate.sh" "${dir}/curator-report.json"
-  [ "$status" -ne 0 ]
-  jq '.curator = {blocking_findings: false}' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
-    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-  run bash "$AID_PLUGIN_PATH/scripts/aid-protocol-validate.sh" "${dir}/curator-report.json"
-  [ "$status" -eq 0 ]
-}
-
-@test "D3: generation is idempotent — an existing file (specialist work in progress) is never overwritten" {
-  _bootstrap
-  _add_epic "$PLAN_ID" "E-068-1_2"
-  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
-  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
-  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
-  local ctx root pid plan base cand run dir
-  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
-  mkdir -p "$dir"
-  printf 'NOT A SKELETON — real specialist work already in progress\n' > "${dir}/curator-report.json"
-  run bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
-  [ "$status" -eq 0 ]
-  [ "$(cat "${dir}/curator-report.json")" = "NOT A SKELETON — real specialist work already in progress" ]
-}
-
-@test "D3: an unfilled skeleton (payload still null) is refused, never read as a completed specialist output" {
-  _bootstrap
-  _add_epic "$PLAN_ID" "E-068-1_2"
-  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
-  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
-  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
-  local ctx root pid plan base cand run dir
-  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
-  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton verifier "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
-  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope verifier "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"is not an object"* ]]
-}
-
-@test "D3: a payload-filled skeleton with the envelope left exactly as generated is accepted" {
-  _bootstrap
-  _add_epic "$PLAN_ID" "E-068-1_2"
-  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
-  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
-  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
-  local ctx root pid plan base cand run dir
-  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
-  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton reporter "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
-  jq '.delivery_report = {summary: "done"}' "${dir}/delivery-report.json" > "${dir}/delivery-report.json.tmp" \
-    && mv "${dir}/delivery-report.json.tmp" "${dir}/delivery-report.json"
-  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope reporter "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
-  [ "$status" -eq 0 ]
-}
-
-@test "D3: an envelope field altered by the specialist (identity.plan_id) is refused, payload edit alone is not enough" {
-  _bootstrap
-  _add_epic "$PLAN_ID" "E-068-1_2"
-  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
-  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
-  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
-  local ctx root pid plan base cand run dir
-  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
-  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
-  jq '.curator = {blocking_findings: false} | .identity.plan_id = "P999"' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
-    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"altered"* ]]
-}
-
-@test "D3: a skeleton copied from a DIFFERENT candidate/run (stale attempt) is refused as a candidate/run mismatch" {
-  _bootstrap
-  _add_epic "$PLAN_ID" "E-068-1_2"
-  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
-  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
-  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
-  local ctx root pid plan base cand run dir
-  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
-  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton verifier "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
-  jq '.semantic_review = {range: "x"}' "${dir}/semantic-review-final.json" > "${dir}/semantic-review-final.json.tmp" \
-    && mv "${dir}/semantic-review-final.json.tmp" "${dir}/semantic-review-final.json"
-  # A different (stale) run_id claims to have produced this exact file.
-  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope verifier "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "R-stale-1" "$dir"
-  [ "$status" -ne 0 ]
-}
-
-@test "D3: a falsy non-object payload (false/0/an array) is refused, never read as a completed specialist output" {
-  _bootstrap
-  _add_epic "$PLAN_ID" "E-068-1_2"
-  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
-  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
-  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
-  local ctx root pid plan base cand run dir
-  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
-  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
-  local bad
-  for bad in 'false' '0' '""' '[]' '"a string"'; do
-    jq --argjson v "$bad" '.curator = $v' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
-      && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-    run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-      _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"is not an object"* ]]
-  done
-}
-
-@test "D3: no recorded skeleton hash (e.g. a hand-built or legacy file) fails closed with an explicit run-inputs message" {
-  _bootstrap
-  _add_epic "$PLAN_ID" "E-068-1_2"
-  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
-  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
-  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
-  local ctx root pid plan base cand run dir
-  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
-  mkdir -p "$dir"
-  jq -n --arg t "delivery_report" --arg plan "$plan" --arg run "$run" --arg h "$cand" --arg b "$base" \
-    '{schema_version:"aid-2.0", artifact_type:$t, producer:"hand-written", created_at:"2026-01-01T00:00:00Z",
-      control_protocol:"aid-2.0", identity:{project_id:"x", epic_id:null, plan_id:$plan, run_id:$run},
-      subject:{subject_hash:"sha256:0000000000000000000000000000000000000000000000000000000000000000"},
-      revision:{head_sha:$h, base_sha:$b, head_is_current:true, freshness:"current"},
-      status:"pass", verdict:{kind:"none", ready:false},
-      provenance:{dispatch_mode:"subagent", generated_by_tool:"hand"},
-      delivery_report:{summary:"hand-built, never generated by --stage inputs"}}' \
-    > "${dir}/delivery-report.json"
-  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope reporter "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"run \"plan-finalize --stage inputs\""* ]]
-}
-
-@test "D3: a crash between writing the skeleton and sealing its hash self-heals on the next generate call" {
-  _bootstrap
-  _add_epic "$PLAN_ID" "E-068-1_2"
-  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
-  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
-  _finalize "$PLAN_ID" sync; [ "$status" -eq 0 ]
-  _finalize "$PLAN_ID" freeze; [ "$status" -eq 0 ]
-  local ctx root pid plan base cand run dir
-  ctx="$(_skel_ctx)"; IFS='|' read -r root pid plan base cand run dir <<< "$ctx"
-  # Simulate the crash: generate for real, then WIPE the manifest's record of
-  # it, leaving the file (still with a null payload) but no seal — exactly
-  # what a crash between `mv -f "$tmp" "$out"` and `plan_manifest_update`
-  # would leave behind.
-  bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir" >/dev/null
-  plan_manifest_update "$PLAN_ID" '.plan_boundary_manifest.plan_final_skeletons = {}' >/dev/null
-  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"run \"plan-finalize --stage inputs\""* ]]
-
-  # The next call to the generator (idempotent per file-exists, but must
-  # self-heal the missing record since the payload is still untouched/null).
-  run bash -c 'source "$1"; _pfsm_generate_plan_final_skeleton curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
-  [ "$status" -eq 0 ]
-  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"is not an object"* ]]
-
-  jq '.curator = {blocking_findings: false}' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
-    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-  run bash -c 'source "$1"; _pfsm_verify_plan_final_skeleton_envelope curator "$2" "$3" "$4" "$5" "$6" "$7" "$8"' \
-    _ "$PLAN_FSM_CLI" "$root" "$pid" "$plan" "$base" "$cand" "$run" "$dir"
-  [ "$status" -eq 0 ]
-}
-
-# ─── D5 / IMP-468: formal Curator adjudication ─────────────────────────────
-
-# _write_audit_finding <dir> <severity> [action_owner] — echoes "fingerprint occurrence_id"
-_write_audit_finding() {
-  local dir="$1" severity="$2" owner="${3:-}"
-  local fp="sha256:$(printf '%s-%s' "$severity" "$RANDOM" | sha256sum | awk '{print $1}')"
-  local oid="occ-$RANDOM"
-  jq --arg fp "$fp" --arg oid "$oid" --arg sev "$severity" --arg own "$owner" \
-    '.findings = ((.findings // []) + [{fingerprint:$fp, occurrence_id:$oid, severity:$sev}
-      + (if $own != "" then {action_owner:$own} else {} end)])' \
-    "${dir}/audit-report.json" > "${dir}/audit-report.json.tmp" && mv "${dir}/audit-report.json.tmp" "${dir}/audit-report.json"
-  printf '%s %s\n' "$fp" "$oid"
-}
-
-# _write_adjudication <dir> <fingerprint> <occurrence_id> <disposition> [override_jq]
-_write_adjudication() {
-  local dir="$1" fp="$2" oid="$3" disp="$4" override="${5:-.}"
-  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  local cand run
-  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  run="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
-  jq --arg fp "$fp" --arg oid "$oid" --arg disp "$disp" --arg h "$ahash" --arg c "$cand" --arg r "$run" '
-    .curator.adjudications = ((.curator.adjudications // []) + [
-      {finding_fingerprint:$fp, finding_occurrence_id:$oid, disposition:$disp,
-       audit_report_sha256:$h, candidate_sha:$c, run_id:$r, evidence_ref:"commit:deadbeef"}
-      | '"$override"'
-    ])' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-}
-
-@test "D5: a complete, exact, fresh adjudication for a blocking finding allows review to complete" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  local fp oid; read -r fp oid < <(_write_audit_finding "$dir" high implementer)
-  # curator-report.json must be RE-BOUND after audit-report.json changes.
-  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
-    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-  _write_adjudication "$dir" "$fp" "$oid" confirmed
-  sleep 1; touch "${dir}/delivery-report.json"
-  _review
-  [ "$status" -eq 0 ]
-}
-
-@test "D5: a blocking finding with NO adjudication blocks review" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  _write_audit_finding "$dir" critical >/dev/null
-  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
-    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-  sleep 1; touch "${dir}/delivery-report.json"
-  _review
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"never resolved by a bare curator.blocking_findings:false"* ]]
-}
-
-@test "D5: an adjudication bound to a DIFFERENT (stale) candidate/run blocks review" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  local fp oid; read -r fp oid < <(_write_audit_finding "$dir" high)
-  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
-    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-  _write_adjudication "$dir" "$fp" "$oid" confirmed '.candidate_sha = "0000000000000000000000000000000000000000"'
-  sleep 1; touch "${dir}/delivery-report.json"
-  _review
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"partial or stale adjudication is refused"* ]]
-}
-
-@test "D5: a security-tier (critical) finding disposed as false_positive is refused — must escalate" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  local fp oid; read -r fp oid < <(_write_audit_finding "$dir" critical)
-  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
-    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-  _write_adjudication "$dir" "$fp" "$oid" false_positive
-  sleep 1; touch "${dir}/delivery-report.json"
-  _review
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"can never self-clear"* ]]
-}
-
-@test "D5: a PM-required finding (action_owner=pm) disposed as false_positive is refused" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  local fp oid; read -r fp oid < <(_write_audit_finding "$dir" high pm)
-  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
-    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-  _write_adjudication "$dir" "$fp" "$oid" false_positive
-  sleep 1; touch "${dir}/delivery-report.json"
-  _review
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"can never self-clear"* ]]
-}
-
-@test "D5: a non-security high finding disposed as false_positive is legitimately allowed (not overly strict)" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  local fp oid; read -r fp oid < <(_write_audit_finding "$dir" high implementer)
-  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
-    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-  _write_adjudication "$dir" "$fp" "$oid" false_positive
-  sleep 1; touch "${dir}/delivery-report.json"
-  _review
-  [ "$status" -eq 0 ]
-}
-
-# ─── D2 / IMP-464 round-2: audit-input-manifest.json is a required output,
-#     and its provenance chain to audit-report.json is verified ───────────
-
-@test "D2: a missing audit-input-manifest.json blocks with exit 7 and names it" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  rm -f "${dir}/audit-input-manifest.json"
-  _review
-  [ "$status" -eq 7 ]
-  [[ "$output" == *"audit-input-manifest.json"* ]]
-}
-
-@test "D2: audit-report.json's input_manifest_hash NOT matching the real manifest's input_hash blocks review" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  jq '.audit_report.input_manifest_hash = "sha256:2222222222222222222222222222222222222222222222222222222222222222"' \
-    "${dir}/audit-report.json" > "${dir}/audit-report.json.tmp" && mv "${dir}/audit-report.json.tmp" "${dir}/audit-report.json"
-  # curator-report.json's audit_report_ref must still bind to the (now
-  # modified) audit-report.json bytes, or that check fails first and masks
-  # the one this test targets.
-  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  jq --arg h "$ahash" '.curator.audit_report_ref = $h' "${dir}/curator-report.json" > "${dir}/curator-report.json.tmp" \
-    && mv "${dir}/curator-report.json.tmp" "${dir}/curator-report.json"
-  sleep 1; touch "${dir}/delivery-report.json"
-  _review
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"does not equal audit-input-manifest.json's own audit_input_manifest.input_hash"* ]]
-}
-
-@test "D2: an unconnected C3 dispatch (manifest's plan-diff.json snapshot disagrees with the producer-sealed hash) blocks review" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  jq '.audit_input_manifest.evidence_hashes = [{path:"plan-diff.json", sha256:"sha256:3333333333333333333333333333333333333333333333333333333333333333", size:1}]' \
-    "${dir}/audit-input-manifest.json" > "${dir}/audit-input-manifest.json.tmp" && mv "${dir}/audit-input-manifest.json.tmp" "${dir}/audit-input-manifest.json"
-  _review
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"C3 may have dispatched over swapped evidence"* ]]
-}
-
-@test "D2 round-3: a REAL plan-diff.json verdict with NO evidence_hashes[] entry at all is refused, not silently trusted" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  # plan-diff.json's overall_verdict is "pass" (a real, meaningful C3 AC
-  # verdict) — the manifest omitting any record of having read it must
-  # block, not be treated the same as a legitimate no-AC-lens "skipped".
-  jq 'del(.audit_input_manifest.evidence_hashes)' \
-    "${dir}/audit-input-manifest.json" > "${dir}/audit-input-manifest.json.tmp" && mv "${dir}/audit-input-manifest.json.tmp" "${dir}/audit-input-manifest.json"
-  _review
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"C3 must record what it actually read, not omit it"* ]]
-}
-
-@test "D2 round-3: a non-array evidence_hashes despite a real plan-diff.json verdict is refused" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  jq '.audit_input_manifest.evidence_hashes = "not-an-array"' \
-    "${dir}/audit-input-manifest.json" > "${dir}/audit-input-manifest.json.tmp" && mv "${dir}/audit-input-manifest.json.tmp" "${dir}/audit-input-manifest.json"
-  _review
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"is missing or not an array"* ]]
-}
-
-# ─── D5 follow-up: lib/aid-lifecycle.sh's _aid_lc_plan_review_status now
-#     consults the SAME shared resolver (lib/aid-adjudication.sh) the
-#     plan-final review boundary uses, instead of rejecting on a raw Auditor
-#     blocking_findings:true regardless of a legitimate Curator adjudication.
-
-# _lc_git_repo — a throwaway git repo so _aid_lc_plan_final_trusted_candidate
-# has somewhere to seal a real (git-tracked) receipt ref.
-_lc_git_repo() {
-  local d; d="$(mktemp -d "$TEST_TMPDIR/lc-repo.XXXXXX")"
-  git init -q "$d"
-  git -C "$d" config user.email test@test
-  git -C "$d" config user.name test
-  printf 'x' > "$d/x.txt"; git -C "$d" add x.txt; git -C "$d" commit -q -m init >/dev/null
-  printf '%s' "$d"
-}
-
-# _lc_seal_receipt <root> <plan_id> <candidate> <run_id> — a FULL, schema-valid
-# D1 receipt (D5 lifecycle-audit round-2 LOW: conforms to the real
-# _pfsm_validate_plan_final_receipt_json grammar exactly — every required
-# key, not a reduced subset — so these tests prove compatibility with what
-# _pfsm_seal_plan_final_review actually produces, not merely with a looser
-# shape the test-side reader happens to accept) at the ref
-# _aid_lc_plan_final_trusted_candidate discovers.
-_lc_seal_receipt() {
-  local root="$1" plan_id="$2" cand="$3" run="$4"
-  local ref="refs/heads/aid-evidence/${plan_id}/${cand}/${run}"
-  local base="0000000000000000000000000000000000000000"
-  local target_head="1111111111111111111111111111111111111111"
-  local tmp; tmp="$(mktemp)"
-  local h64="sha256:0000000000000000000000000000000000000000000000000000000000000000"
-  jq -n --arg p "$plan_id" --arg c "$cand" --arg r "$run" --arg ref "$ref" \
-        --arg b "$base" --arg th "$target_head" --arg h "$h64" \
-    '{schema_version:"aid-plan-final-evidence-1", artifact_type:"plan_final_evidence_receipt",
-      review_verdict:"accepted", plan_id:$p, plan_base_commit:$b, candidate_sha:$c,
-      candidate_frozen_at:"2026-01-01T00:00:00Z", target_branch:"main",
-      target_head_at_freeze:$th, run_id:$r, evidence_ref:$ref,
-      outputs:{
-        "semantic-review-final.json":$h, "audit-report.json":$h, "curator-report.json":$h,
-        "simplifier-report.md":$h, "delivery-report.json":$h, "review-profile.json":$h,
-        "plan-diff.json":$h, "audit-input-manifest.json":$h, "delivery-gate.json":$h,
-        "acceptance-evidence.json":$h, "dispatch-record.json":$h}}' \
-    > "$tmp"
-  local blob; blob="$(git -C "$root" hash-object -w "$tmp")"
-  rm -f "$tmp"
-  local tree; tree="$(printf '100644 blob %s\treceipt.json\n' "$blob" | git -C "$root" mktree)"
-  local commit; commit="$(git -C "$root" commit-tree "$tree" -m "seal ${plan_id} ${run}")"
-  git -C "$root" update-ref "$ref" "$commit"
-}
-
-# _lc_write_audit_and_curator <root> <dir> <disposition> [candidate_override] [run_override]
-# — one HIGH finding in audit-report.json, top-level blocking_findings:true
-# (the shape _aid_lc_plan_review_status reads first), and ONE adjudication
-# entry in curator-report.json bound to it. A REAL receipt is sealed for the
-# trusted candidate/run (P999/R-lc-test-1); overrides let a test make the
-# ADJUDICATION stale (bound to a candidate/run the receipt does NOT attest
-# to) without touching the finding or the receipt itself.
-_lc_write_audit_and_curator() {
-  local root="$1" dir="$2" disposition="$3" cand_override="${4:-}" run_override="${5:-}"
-  mkdir -p "$dir"
-  local cand="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" run="R-lc-test-1"
-  _lc_seal_receipt "$root" "P999" "$cand" "$run"
-  jq -n --arg h "$cand" --arg r "$run" \
-    '{revision:{head_sha:$h}, identity:{run_id:$r}, blocking_findings:true,
-      findings:[{fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                 occurrence_id:"occ-1", severity:"high"}]}' \
-    > "${dir}/audit-report.json"
-  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  local adj_cand="${cand_override:-$cand}" adj_run="${run_override:-$run}"
-  jq -n --arg h "$ahash" --arg c "$adj_cand" --arg r "$adj_run" --arg d "$disposition" \
-    '{curator:{adjudications:[{finding_fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      finding_occurrence_id:"occ-1", audit_report_sha256:$h, candidate_sha:$c, run_id:$r,
-      disposition:$d, evidence_ref:"commit:deadbeef"}]}}' \
-    > "${dir}/curator-report.json"
-}
-
-_lc_review_status() {
-  local root="$1" dir="$2"
-  bash -c 'source "$1"; _AID_LC_PLAN_RUN_DIR="$2"; _aid_lc_plan_review_status "$3" "$4"' \
-    _ "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" "$dir" "$root" "P999"
-}
-
-@test "D5 lifecycle: a HIGH finding disposed as a valid, exactly-bound false_positive is NOT rejected" {
-  local root; root="$(_lc_git_repo)"
-  local dir="${root}/.aid-o/work/evidence/P999/R-lc-test-1"
-  _lc_write_audit_and_curator "$root" "$dir" "false_positive"
-  run _lc_review_status "$root" "$dir"
-  [ "$status" -eq 0 ]
-  [ "$output" = "accepted" ]
-}
-
-@test "D5 lifecycle: an adjudication bound to a DIFFERENT (stale) candidate leaves the plan rejected" {
-  local root; root="$(_lc_git_repo)"
-  local dir="${root}/.aid-o/work/evidence/P999/R-lc-test-1"
-  _lc_write_audit_and_curator "$root" "$dir" "confirmed" "0000000000000000000000000000000000000000"
-  run _lc_review_status "$root" "$dir"
-  [ "$status" -eq 0 ]
-  [ "$output" = "rejected" ]
-}
-
-@test "D5 lifecycle: no adjudication at all for a raw blocking finding leaves the plan rejected" {
-  local root; root="$(_lc_git_repo)"
-  local dir="${root}/.aid-o/work/evidence/P999/R-lc-test-1"
-  mkdir -p "$dir"
-  _lc_seal_receipt "$root" "P999" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" "R-lc-test-1"
-  jq -n '{revision:{head_sha:"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}, identity:{run_id:"R-lc-test-1"},
-          blocking_findings:true,
-          findings:[{fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                     occurrence_id:"occ-1", severity:"high"}]}' \
-    > "${dir}/audit-report.json"
-  jq -n '{curator:{}}' > "${dir}/curator-report.json"
-  run _lc_review_status "$root" "$dir"
-  [ "$status" -eq 0 ]
-  [ "$output" = "rejected" ]
-}
-
-@test "D5 lifecycle: NO discoverable receipt at all (unpublished plan) leaves the plan rejected, never accepted on faith" {
-  local root; root="$(_lc_git_repo)"
-  local dir="${root}/.aid-o/work/evidence/P999/R-lc-test-1"
-  mkdir -p "$dir"
-  # No _lc_seal_receipt call — audit-report.json/curator-report.json are
-  # internally self-consistent with each other, but there is no durable
-  # receipt anywhere to anchor trust in their claimed candidate/run.
-  local cand="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" run="R-lc-test-1"
-  jq -n --arg h "$cand" --arg r "$run" \
-    '{revision:{head_sha:$h}, identity:{run_id:$r}, blocking_findings:true,
-      findings:[{fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                 occurrence_id:"occ-1", severity:"high"}]}' \
-    > "${dir}/audit-report.json"
-  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  jq -n --arg h "$ahash" --arg c "$cand" --arg r "$run" \
-    '{curator:{adjudications:[{finding_fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      finding_occurrence_id:"occ-1", audit_report_sha256:$h, candidate_sha:$c, run_id:$r,
-      disposition:"confirmed", evidence_ref:"commit:deadbeef"}]}}' \
-    > "${dir}/curator-report.json"
-  run _lc_review_status "$root" "$dir"
-  [ "$status" -eq 0 ]
-  [ "$output" = "rejected" ]
-}
-
-@test "D5 lifecycle: a receipt sealed for a DIFFERENT plan at the same candidate/run does not leak in via a spoofed run-directory path" {
-  local root; root="$(_lc_git_repo)"
-  # P998 has ITS OWN real, unrelated receipt for the SAME candidate/run
-  # shape. The run directory being classified lives under a P998-shaped
-  # path (as if the mutable plan_final_evidence_dir field were pointed
-  # there), but the plan actually being processed — and the ONLY
-  # trustworthy source of plan_id now — is P999 (_lc_review_status's
-  # hardcoded trusted parameter), which has NO receipt at all. Before the
-  # round-2 fix, a path-derived plan_id guess would have resolved to
-  # "P998" here and incorrectly anchored trust in P998's unrelated receipt
-  # for what is actually a P999 classification.
-  _lc_seal_receipt "$root" "P998" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" "R-lc-test-1"
-  local dir="${root}/.aid-o/work/evidence/P998/R-lc-test-1"
-  mkdir -p "$dir"
-  local cand="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" run="R-lc-test-1"
-  jq -n --arg h "$cand" --arg r "$run" \
-    '{revision:{head_sha:$h}, identity:{run_id:$r}, blocking_findings:true,
-      findings:[{fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                 occurrence_id:"occ-1", severity:"high"}]}' \
-    > "${dir}/audit-report.json"
-  local ahash; ahash="sha256:$(sha256sum "${dir}/audit-report.json" | awk '{print $1}')"
-  jq -n --arg h "$ahash" --arg c "$cand" --arg r "$run" \
-    '{curator:{adjudications:[{finding_fingerprint:"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      finding_occurrence_id:"occ-1", audit_report_sha256:$h, candidate_sha:$c, run_id:$r,
-      disposition:"false_positive", evidence_ref:"commit:deadbeef"}]}}' \
-    > "${dir}/curator-report.json"
-  run _lc_review_status "$root" "$dir"
-  [ "$status" -eq 0 ]
-  [ "$output" = "rejected" ]
-}
-
-# _seed_closable — a plan that has really merged and is therefore closable.
-# _seed_closable — snapshot-backed (IMP-505): the builder below is unchanged and
-# runs once per file; every later case restores its byte copy.
-_seed_closable() { _snap_fixture "closable${1:+:$1}" _seed_closable_build "$@"; }
-
-_seed_closable_build() {
+# ─── lib/aid-lifecycle.sh: the plan-level review verdict is the sealed cp7 index ──
+# _lc_status <verdict> [edit] — a run directory whose cp7/rounds.json says
+# <verdict>, sealed into a real receipt; [edit] changes the index AFTER the seal.
+_lc_status() {
   _seed_merge_project
-  _seed_plan_final_evidence
-  _merge
-  [ "$status" -eq 0 ]
+  local dir cand run base; dir="$(_run_dir)"
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"; run="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
+  base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
+  git -C "$TEST_PROJECT_ROOT" update-ref -d "$(_manifest_field "$PLAN_ID" plan_final_evidence_ref)"
+  jq -n --arg v "$1" --arg h "$cand" '{verdict: $v, head_sha: $h, rounds: []}' > "$dir/cp7/rounds.json"
+  local outputs; outputs="$(cd "$dir" && for f in acceptance-evidence.json cp7/rounds.json gates_report.json plan-diff.json release-decision.json review-profile.json semantic-review-final.json; do
+      jq -n --arg k "$f" --arg v "sha256:$(sha256sum "$f" | cut -d' ' -f1)" '{($k): $v}'; done | jq -sc add)"
+  bash -c 'source "$1"; _pfsm_seal_plan_final_review "$2" "$3" "$4" "$5" main "$6" "$7" "$8" "$9"' _ "$PLAN_FSM_CLI" \
+    "$TEST_PROJECT_ROOT" "$PLAN_ID" "$base" "$cand" "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" "$(_manifest_field "$PLAN_ID" candidate_frozen_at)" "$run" "$outputs" >/dev/null
+  [[ -z "${2:-}" ]] || { jq "$2" "$dir/cp7/rounds.json" > "$dir/cp7/r" && mv "$dir/cp7/r" "$dir/cp7/rounds.json"; }
+  run bash -c 'source "$1"; _AID_LC_PLAN_RUN_DIR="$2" _aid_lc_plan_review_status "$3" "$4"' _ "$LIFECYCLE_LIB" "$dir" "$TEST_PROJECT_ROOT" "$PLAN_ID"
+}
+
+@test "lifecycle: a passed whole-plan round sealed in the receipt reads accepted; a failed one rejected; a waived one accepted" {
+  _lc_status pass;   [ "$output" = accepted ]
+  _lc_status fail;   [ "$output" = rejected ]
+  _lc_status waived; [ "$output" = accepted ]
+}
+
+@test "lifecycle: an index edited after the seal, or one naming another candidate, is unverifiable; no index is none" {
+  _lc_status fail '.verdict = "pass"'; [ "$output" = unverifiable ]
+  _lc_status pass '.head_sha = "0000000000000000000000000000000000000000"'; [ "$output" = unverifiable ]
+  run bash -c 'source "$1"; _AID_LC_PLAN_RUN_DIR="$2" _aid_lc_plan_review_status "$3" "$4"' _ "$LIFECYCLE_LIB" "$TEST_TMPDIR/nowhere" "$TEST_PROJECT_ROOT" "$PLAN_ID"
+  [ "$output" = none ]
 }
 
 # ─── AC7: the happy path ───────────────────────────────────────────────────
@@ -4346,10 +2749,10 @@ _seed_closable_build() {
 
 @test "AC7: CORRUPTING a required review output blocks close (the recorded hash no longer matches)" {
   _seed_closable
-  printf '{"tampered":true}\n' > "$(_run_dir)/curator-report.json"
+  printf '{"tampered":true}\n' > "$(_run_dir)/review-profile.json"
   _close
   [ "$status" -eq 1 ]
-  [[ "$output" == *"curator-report.json"* ]]
+  [[ "$output" == *"review-profile.json"* ]]
   [ ! -f "$(_marker)" ]
 }
 
@@ -4362,22 +2765,22 @@ _seed_closable_build() {
   [ ! -f "$(_marker)" ]
 }
 
-@test "AC7: removing the C4 decision blocks close" {
+@test "AC7: removing the plan-final decision blocks close" {
   _seed_closable
   rm -f "$(_run_dir)/release-decision.json"
   _close
   [ "$status" -eq 1 ]
-  [[ "$output" == *"C4 decision"* ]]
+  [[ "$output" == *"plan-final decision"* ]]
   [ ! -f "$(_marker)" ]
 }
 
-@test "AC7: a legacy release path that did NOT pass blocks close" {
+@test "AC7: a decision that does not say release_ready blocks close" {
   _seed_closable
-  local d; d="$(_run_dir)/release-decision-dual-run.json"
-  jq '.legacy_verdict = false' "$d" > "${d}.t" && mv "${d}.t" "$d"
+  local d; d="$(_run_dir)/release-decision.json"
+  jq '.release_decision.release_ready = false' "$d" > "${d}.t" && mv "${d}.t" "$d"
   _close
   [ "$status" -eq 1 ]
-  [[ "$output" == *"legacy_verdict"* ]]
+  [[ "$output" == *"release_ready: true"* ]]
   [ ! -f "$(_marker)" ]
 }
 
@@ -5075,37 +3478,8 @@ _crash_merge() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# AC10 — the cadence, asserted over the STRUCTURED record (E-068-2_2 Step 5).
-#
-# "Each specialist ran exactly once, at plan final" is the claim the whole
-# plan-boundary model rests on, and it is the easiest claim in the system to
-# assert falsely: nothing about a finished run looks different when a role ran
-# twice, or ran per EPIC. So it is asserted over dispatch_counts in the RUNTIME
-# manifest, which the review stage writes from the dispatch record it validated.
+# AC10 — the review that was recorded is the review of what was merged.
 # ═══════════════════════════════════════════════════════════════════════════
-
-_review_counts() {
-  jq -r ".plan_boundary_manifest.plan_final_review.dispatch_counts.\"$1\" // \"absent\"" \
-    "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
-}
-
-@test "AC10: a REAL review pass records the cadence — exactly one dispatch per specialist" {
-  _seed_review_project
-  _write_review_outputs
-  _review
-  [ "$status" -eq 0 ]
-
-  # The counts come from the production stage, not from the fixture: the refusal
-  # side is covered by AC3, and this is its positive twin — proof that a passing
-  # run actually WRITES the cadence rather than merely not objecting to it. A
-  # cadence nobody records is a cadence nobody can audit afterwards.
-  local a
-  for a in auditor curator simplifier reporter; do
-    local n; n="$(_review_counts "$a")"
-    [ "$n" != "absent" ]
-    [ "$n" = "1" ]
-  done
-}
 
 @test "AC10: the recorded review is bound to the SAME candidate the merge published" {
   _seed_closable
@@ -5119,22 +3493,6 @@ _review_counts() {
   # review that proves nothing.
   [ -n "$recorded_cand" ]
   [ "$recorded_cand" = "$merged_cand" ]
-}
-
-@test "AC10: a REAL review pass records every output bound by content hash" {
-  _seed_review_project
-  _write_review_outputs
-  _review
-  [ "$status" -eq 0 ]
-
-  local m="${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
-  # Every recorded output carries a sha256, which is what lets plan-close
-  # re-verify the review instead of trusting that it happened.
-  run jq -r '[.plan_boundary_manifest.plan_final_review.outputs | to_entries[]
-              | select((.value | startswith("sha256:")) | not)] | length' "$m"
-  [ "$output" = "0" ]
-  run jq -r '.plan_boundary_manifest.plan_final_review.outputs | length' "$m"
-  [ "$output" -ge 1 ]
 }
 
 @test "AC10: EPIC work reaches the target branch ONLY through the plan branch" {
@@ -5175,24 +3533,20 @@ _review_counts() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# AC11 — the C4 inputs have a PRODUCER (P068 follow-up, 2026-07-27).
-#
-# The registry recorded `plan_finalize_c4_reader_gap` honestly: the review and
-# c4 stages validated three artifacts that nothing in the plan produced — a
-# reader with no writer, so the boundary could not complete end-to-end. These
-# tests assert the producer exists, derives rather than fabricates, and that the
-# validating stage accepts what it wrote.
+# AC11 — the decision's derived inputs have a PRODUCER: --stage produce.
+# It derives rather than fabricates: the review profile over the whole plan
+# range, and the two plan-level aggregates naming every contributing EPIC.
 # ═══════════════════════════════════════════════════════════════════════════
 
 _inputs() {
-  run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage inputs \
+  run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage produce \
     --project-root "$TEST_PROJECT_ROOT"
 }
 
-@test "AC11: --stage inputs produces all three C4 inputs, bound to the plan and the frozen candidate" {
+@test "AC11: --stage produce writes the derived inputs, bound to the plan and the frozen candidate" {
   _seed_merge_project_pre_review
   local dir; dir="$(_run_dir)"
-  rm -f "${dir}/review-profile.json" "${dir}/delivery-gate.json" "${dir}/acceptance-evidence.json"
+  rm -f "${dir}/review-profile.json" "${dir}/acceptance-evidence.json"
 
   _inputs
   [ "$status" -eq 0 ]
@@ -5206,37 +3560,17 @@ _inputs() {
   [ "$(jq -r '.revision.base_sha' "${dir}/review-profile.json")" = "$base" ]
   [ "$(jq -r '.review_profile.required_lenses | type' "${dir}/review-profile.json")" = "array" ]
 
-  # The two aggregates: bound to the PLAN, never to one EPIC.
-  local agg
-  for agg in delivery-gate acceptance-evidence; do
-    [ -s "${dir}/${agg}.json" ]
-    [ "$(jq -r '.identity.epic_id' "${dir}/${agg}.json")" = "null" ]
-    [ "$(jq -r '.identity.plan_id' "${dir}/${agg}.json")" = "$PLAN_ID" ]
-    [ "$(jq -r '.subject.candidate_sha' "${dir}/${agg}.json")" = "$cand" ]
-    # sources[] names every contributing EPIC — an empty one would assert a
-    # delivery nobody made.
-    [ "$(jq -r '.sources | length' "${dir}/${agg}.json")" -ge 1 ]
-    [ "$(jq -r '[.sources[] | select(.epic_id == "E-068-1_2")] | length' "${dir}/${agg}.json")" = "1" ]
-  done
+  # The acceptance evidence: bound to the PLAN, never to one EPIC, and naming
+  # every contributing EPIC — an empty list would assert a delivery nobody made.
+  local ae="${dir}/acceptance-evidence.json"
+  [ "$(jq -r '.identity.epic_id' "$ae")" = "null" ]
+  [ "$(jq -r '.identity.plan_id' "$ae")" = "$PLAN_ID" ]
+  [ "$(jq -r '.subject.candidate_sha' "$ae")" = "$cand" ]
+  [ "$(jq -r '[.sources[] | select(.epic_id == "E-068-1_2")] | length' "$ae")" = "1" ]
+  [ -s "${dir}/cp7/criteria.md" ] && [ -s "${dir}/cp7/step-check.json" ]
 }
 
-@test "AC11: an EPIC with no artifact is recorded ABSENT in sources[], not silently dropped" {
-  _seed_merge_project_pre_review
-  _inputs
-  [ "$status" -eq 0 ]
-  local dir; dir="$(_run_dir)"
-
-  # The fixture's EPIC has no delivery-gate.json of its own, so the aggregate
-  # must say so. "No EPIC produced this" is a fact the PM should see; an
-  # aggregate that hides it would report a completeness it does not have.
-  [ "$(jq -r '[.sources[] | select(.status == "absent")] | length' "${dir}/delivery-gate.json")" -ge 1 ]
-  # verdict.kind is a closed protocol enum, so the aggregation outcome lives
-  # beside it rather than being smuggled into it.
-  [ "$(jq -r '.verdict.kind' "${dir}/delivery-gate.json")" = "none" ]
-  [ "$(jq -r '.verdict.aggregation' "${dir}/delivery-gate.json")" = "aggregated_with_gaps" ]
-}
-
-@test "AC11: --stage inputs REFUSES before the candidate is frozen" {
+@test "AC11: --stage produce REFUSES before the candidate is frozen" {
   _bootstrap
   _add_epic "$PLAN_ID" "E-068-1_2"
   _inputs
@@ -5244,7 +3578,7 @@ _inputs() {
   [[ "$output" == *"frozen candidate"* ]]
 }
 
-@test "AC11: --stage inputs REFUSES when no EPIC has merged into the plan" {
+@test "AC11: --stage produce REFUSES when no EPIC has merged into the plan" {
   _seed_merge_project_pre_review
   # `merged_to_plan -> abandoned` is not a legal transition, and rightly so — a
   # delivered EPIC cannot be un-delivered. So the subject is a plan whose only
@@ -5257,64 +3591,6 @@ _inputs() {
   _inputs
   [ "$status" -ne 0 ]
   [[ "$output" == *"nothing to aggregate"* ]]
-}
-
-@test "AC11: what the producer writes is ACCEPTED by the validating review stage" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  # Replace the fixture's hand-written three with the real producer's output:
-  # the point of the follow-up is that production and validation agree.
-  rm -f "${dir}/review-profile.json" "${dir}/delivery-gate.json" "${dir}/acceptance-evidence.json"
-  _inputs
-  [ "$status" -eq 0 ]
-  # --stage inputs also regenerates plan-diff.json for real, which no longer
-  # matches the hash _write_review_outputs sealed into audit-input-manifest.json
-  # against its own fabricated plan-diff.json above. Re-seal it against the
-  # producer's real output — the point of this test is round-tripping the
-  # PRODUCER's outputs, not proving a stale manifest is rejected (that is D2's
-  # own coverage elsewhere).
-  local real_pd_hash; real_pd_hash="sha256:$(sha256sum "${dir}/plan-diff.json" | awk '{print $1}')"
-  jq --arg h "$real_pd_hash" '.audit_input_manifest.evidence_hashes = [{path:"plan-diff.json", sha256:$h, size:1}]' \
-    "${dir}/audit-input-manifest.json" > "${dir}/audit-input-manifest.json.tmp" && mv "${dir}/audit-input-manifest.json.tmp" "${dir}/audit-input-manifest.json"
-  # The Reporter is dispatched LAST, after the inputs exist — that is the real
-  # cadence, and the review stage enforces it by mtime. Re-emitting the delivery
-  # report here reproduces the ordering rather than working around the check.
-  command sleep 1
-  touch "${dir}/delivery-report.json"
-
-  _review
-  [ "$status" -eq 0 ]
-}
-
-@test "AC11: --stage inputs REFUSES once the review has recorded hash-bound outputs" {
-  _seed_review_project
-  _write_review_outputs
-  local dir; dir="$(_run_dir)"
-  rm -f "${dir}/review-profile.json" "${dir}/delivery-gate.json" "${dir}/acceptance-evidence.json"
-  _inputs
-  [ "$status" -eq 0 ]
-  # See the sibling AC11 test above: --stage inputs regenerates plan-diff.json
-  # for real, so the manifest _write_review_outputs sealed against its own
-  # fabricated plan-diff.json must be re-sealed against the producer's actual
-  # output before review — this test is about the SECOND _inputs call being
-  # refused, not about a stale manifest.
-  local real_pd_hash; real_pd_hash="sha256:$(sha256sum "${dir}/plan-diff.json" | awk '{print $1}')"
-  jq --arg h "$real_pd_hash" '.audit_input_manifest.evidence_hashes = [{path:"plan-diff.json", sha256:$h, size:1}]' \
-    "${dir}/audit-input-manifest.json" > "${dir}/audit-input-manifest.json.tmp" && mv "${dir}/audit-input-manifest.json.tmp" "${dir}/audit-input-manifest.json"
-  command sleep 1
-  touch "${dir}/delivery-report.json"
-  _review
-  [ "$status" -eq 0 ]
-
-  # The review is recorded and its outputs are hash-bound. Re-running the
-  # producer would rewrite them, and close would then report them as ALTERED —
-  # true, but a diagnosis of tampering for what was really a repeated stage.
-  local before; before="$(sha256sum "${dir}/delivery-gate.json" | awk '{print $1}')"
-  _inputs
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"already has a RECORDED plan-final review"* ]]
-  [ "$(sha256sum "${dir}/delivery-gate.json" | awk '{print $1}')" = "$before" ]
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -5493,21 +3769,6 @@ _seed_startable_epic() {
   [[ "$output" == *"not DONE"* ]]
 }
 
-@test "AC11: the delivery-gate aggregate carries the enforcement interpretation" {
-  _seed_merge_project_pre_review
-  _inputs
-  [ "$status" -eq 0 ]
-  local dir; dir="$(_run_dir)"
-
-  # `aid-evidence-verify.sh --at-head` fails observe_blocking_interpretation when
-  # this key is absent, and that failure blocks C4 — found by the P075 dogfood,
-  # where it was the last standing blocker. A delivery gate that does not say HOW
-  # it is enforced is not a usable input, however complete it otherwise looks.
-  run jq -r '.delivery_gate.summary.enforcement // "absent"' "${dir}/delivery-gate.json"
-  [ "$output" != "absent" ]
-  [[ "$output" == "observe" || "$output" == "dual_run" || "$output" == "blocking" ]]
-}
-
 @test "AC5: after a MERGE, plan-state agrees with the authoritative state file" {
   _seed_closable
   # The merge moves the plan to PLAN_MERGING. `plan-state` answers from the
@@ -5537,8 +3798,6 @@ _seed_startable_epic() {
   [[ "$output" != *"not a legal plan-state transition"* ]]
 
   # And the plan can now genuinely re-freeze — no hand-edited state in between.
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
   run plan_state_get "$PLAN_ID" "plan_state"
@@ -6350,7 +4609,7 @@ $1
 EOF
 }
 
-@test "P095: a plan with no verification_pattern yields prose_only, and --stage inputs accepts it" {
+@test "P095: a plan with no verification_pattern yields prose_only, and --stage produce accepts it" {
   _seed_merge_project_pre_review
   _inputs
   echo "$output"; [ "$status" -eq 0 ]

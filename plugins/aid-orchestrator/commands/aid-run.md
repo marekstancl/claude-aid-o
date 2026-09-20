@@ -709,7 +709,7 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
     index (`cp3/rounds.json`) remains a hard precondition of `done-advance`.
     `pm_decision=merge`, the archived-task-file check, the auditor's `blocking_findings`
     verdict whenever an `audit-report` exists at all, and the other EPIC-local checks
-    (streamlined integration review, abandoned check, DG-07, tiered compliance) still apply.
+    (streamlined integration review, abandoned check, tiered compliance) still apply.
 
 **Sub-phase: `release`** (after `done-advance review release`)
 
@@ -758,6 +758,79 @@ repair the lifecycle manifest — never fall back to the legacy branch.
 2. Update `fsm-state.yaml`: `state: ERROR`
 3. Preserve all evidence for debugging
 4. Report to PM with error context
+
+## Closing a plan (plan-final)
+
+When every EPIC of a `plan_branch` plan is `merged_to_plan`, abandoned with a
+reason, or superseded, the plan is closed ONCE, as a whole, in four stages and
+one review round. Every stage is bound to one frozen candidate, records what it
+wrote, and ends its output with `next:` or names what it refuses and what to
+run instead. Follow what the tool prints; this section is the map.
+
+`<fsm>` is `bash "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"`, `<round>` is
+`bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh"`. Stay in the plan's
+worktree (`.aid-worktrees/plan-<id>`) on `plan/<id>` for the whole close.
+
+| # | Command | What it does | It refuses when |
+|---|---------|--------------|-----------------|
+| 0 | `bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" prepare-plan <plan> --bump auto --plan-branch plan/<plan>` | the version commit, BEFORE the freeze, so the candidate already contains the release metadata | the tree is dirty; HEAD is not the plan branch |
+| 1 | `<fsm> plan-finalize <plan> --stage freeze` | merges the target branch into `plan/<plan>`, freezes the candidate, mints `R-<plan>-final-<N>` | an EPIC is not terminal; the merge conflicts (exit 4, state CONFLICT); the tree is dirty |
+| 2 | `<fsm> plan-finalize <plan> --stage gates` | the plan-final gate run; a gate that passed in the previous attempt and whose `inputs:` did not change is copied (`reused_from`), not executed | a gate fails (the report names it); the branch moved off the candidate |
+| 3 | `<fsm> plan-finalize <plan> --stage produce` | review profile, plan-diff, acceptance evidence, and what the round reads (`cp7/`) | gates have not passed; the candidate moved |
+| 4 | `<round> prepare\|collect\|close --checkpoint cp7 --evidence-dir <run dir> --project-root <plan worktree> --round 1` | the whole-plan review: `final_criteria`, `final_claims`, `final_generalist` | `produce` has not run; HEAD is not the candidate; a reviewer file has no dispatch bracket |
+| 5 | `<fsm> plan-finalize <plan> --stage decide` | the one aggregate: `release-decision.json`, the sealed receipt, the PM page with attempts, minutes and USD | the round is not closed; a decision input was edited by hand (named); the candidate moved |
+
+**The round (row 4)** is dispatched exactly as a step or EPIC round: the
+procedure, the prompt files, the dispatch bracket (`aid-emit-dispatch.sh start` …
+`complete`, focus `cp7-<role>`), the Codex role and its stand-in are the ones in
+"Step review (CP2) and EPIC review (CP3)" and "Stand-in for a Codex role" above.
+`prepare` prints one prompt per role it asks; a role it lists as *carried* is not
+dispatched. `produce` prints the exact `prepare` command with the run directory.
+A plan has one round per attempt: a fix moves the candidate, so its confirmation
+is round 1 of the next attempt.
+
+**When something is open.** `close` reports `fail`, or `decide` prints
+`NOT READY` with the blockers:
+
+1. The role that wrote the code fixes it, on the plan branch:
+   ```
+   Agent(subagent_type: "aid-orchestrator:implementer", model: <the model of that role's card in skills/role-cards.md>,
+         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the fingerprints you addressed. Touch nothing a finding does not name.")
+   ```
+   The owning step is the one whose declared files cover the path (`plan.json` of the EPIC whose commit last touched it: `git log -1 -- <path>`).
+2. `--stage freeze` again. It mints the next attempt and writes `fix-class.json`:
+   what the fix touched decides what is read again. A change to CHANGELOG, README
+   or docs re-asks `final_claims`; an edit of the plan's criteria re-asks
+   `final_criteria`; code re-asks everyone; a role whose inputs were not touched
+   and which had no finding is carried. The round's packet shows the re-asked
+   reviewers what stayed open and the fix diff.
+3. `gates` (unchanged gates are copied), `produce`, the round, `decide`.
+
+An ancillary-only move after the freeze (AID's own bookkeeping, e.g. the id
+counter) costs nothing: `freeze` names `--stage freeze --accept-ancillary`, which
+writes the equivalence receipt and keeps the gates, the round and the decision.
+
+**When to go to the PM, and with which card** (`skills/communication.md`). Try the
+fix path once first; escalate when it does not apply or did not help.
+
+| Refusal | Try once | Then show the PM |
+|---------|----------|------------------|
+| a gate is red and the failure is real | the fix path above | **Blocked** card: the gate, what it printed, the smallest fix |
+| a cp7 blocker is still open after a fixed attempt | one more fix when the finding changed; else stop | **Decision** card: FIX (what it costs) / accept with a recorded dispute / ABORT |
+| the project disputes a finding | `<round> dispute` is CP1-only: do not edit the finding | **Decision** card quoting the finding and its evidence |
+| the branch was rewritten (`fix-class.json` reason `rewritten_branch`) | nothing is carried; run the full attempt | none, unless it repeats: then **Blocked** |
+| `verification_report` blocks | read its `git_clean` evidence: commit or discard the named tracked file | **Blocked** card naming the file |
+| `final_review_disabled` | switch `cp7_plan_final_review` back on | **Decision** card; only the PM's words go into `--stage decide --waive-final-review --reason "<words>"`, and the page then says the plan was NOT read as a whole |
+
+**At the end.** `decide` prints `READY` and the plan is `AWAITING_PM`. Render the
+page and the card from the two files it wrote, publish the page with the
+Artifact tool and present the card verbatim (`commands/aid-plan.md`, "Plan-final
+/ close boundary"); state no number yourself. MERGE runs
+`<fsm> plan-merge-to-main <plan> --decision <file>`; FIX is the fix path; ABORT is
+`plan-abort` with the PM's reason.
+
+`legacy_epic_release_mode` has no plan close: each EPIC releases at its own DONE,
+and the whole-delivery review the decision reads there is the EPIC's own cp3 round.
 
 ## Reference Files
 

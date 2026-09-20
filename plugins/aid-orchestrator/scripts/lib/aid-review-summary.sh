@@ -154,3 +154,22 @@ aid_epic_review_summary() {
   aid_review_prices_file >/dev/null || line+=", prices.yaml missing"
   printf '%s\n' "${line:0:120}"
 }
+
+# aid_plan_close_cost <plan evidence dir> <plan_id> — what closing the plan has
+# cost so far, over every plan-final attempt on disk: {attempts, minutes (from
+# the first attempt's first file to now), usd (the cp7 rounds, fixers included),
+# usd_unknown_roles (roles whose figure is unknown; never counted as zero)}.
+aid_plan_close_cost() {
+  local dir="$1" plan_id="$2" first
+  local -a runs=() files=()
+  mapfile -t runs < <(ls -d "$dir"/R-"${plan_id}"-final-* 2>/dev/null | sort -t- -k4 -n)
+  mapfile -t files < <(ls "$dir"/R-"${plan_id}"-final-*/cp7/round-*/measurement.json 2>/dev/null)
+  first="$(find "${runs[0]:-/nonexistent}" -maxdepth 1 -type f -printf '%T@\n' 2>/dev/null | sort -n | head -n1)"
+  first="${first%.*}"; first="${first:-null}"
+  jq -n --argjson attempts "${#runs[@]}" --argjson first "$first" --argjson now "$(date +%s)" \
+        --slurpfile m <(cat /dev/null "${files[@]}") '
+    ([$m[] | (.reviewers | to_entries[]), (.fixer // empty | {key: "fixer:\(.role)", value: .})]) as $r
+    | {attempts: $attempts, minutes: (if $first then (($now - $first) / 60 | floor) else 0 end),
+       usd: ([$r[].value.usd | select(type == "number")] | add // 0 | . * 10000 | round / 10000),
+       usd_unknown_roles: ([$r[] | select((.value.usd | type) != "number") | .key] | unique)}'
+}

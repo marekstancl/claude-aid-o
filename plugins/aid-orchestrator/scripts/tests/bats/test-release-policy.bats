@@ -25,13 +25,13 @@
 #
 #   Row  Fixture                                        Disposition (where it lives here)
 #   ───  ─────────────────────────────────────────────  ─────────────────────────────────────────
-#    1   missing delivery-gate → rejected               ADAPTED  → "REQUIRED removed: delivery-gate …"
+#    1   missing delivery-gate → rejected               RETIRED  → the C1 delivery gate is gone (P096 Step 8)
 #    2   nested-missing fields → rejected               ADAPTED  → protocol field checks (Step 3 suite)
 #    3   missing behavior_trace                         N/A      → C2/E5 owns its own hooks (not C4)
 #    4   CP3 fail → fix loop not GATES                  SKIP-REF → C2/FSM checkpoint, outside C4
 #    5   CP4 pass w/o rerun → CP5 rejected              ADAPTED-ADVISORY → invalidation require_rerun
 #                                                                 advisory in release-decision (E10 blocks)
-#    6   Auditor High+score95 → blocked                 ADAPTED  → "profile-gating ACTIVE … audit … blocked"
+#    6   Auditor High+score95 → blocked                 RETIRED  → the whole-delivery round (final_review input) replaced the auditor
 #    7   score60 no blockers → proceed+warning          ADAPTED  → healthy/advisory positive control
 #    8   Curator APPROVED → rejected                    ADAPTED  → schema/enum validation (Step 3 suite)
 #   9-10 CP6 prod/docs                                  SKIP-REF → fast-profile follow-up (D6)
@@ -40,13 +40,9 @@
 #  13-16 profile/IR/lens cadence                        N/A      → C2/E3 review-profile hooks (E10 promotion)
 #   17   unit pass, prod wiring fail → blocked          ADAPTED  → semantic-review-final presence/stale-blocking (E9); content-verdict blocking deferred to E10
 #   18   auto-merge eligible EPIC w/o PM brief          NEW (D11)→ "d11 [18] …" (pm_brief_status seam)
-#   19   per-EPIC release without Reporter              NEW (D11)→ "d11 [19] …" (not_applicable)
-#   20   plan-boundary w/o Reporter, NOT disabled       NEW (D11)→ "d11 [20] …" (missing → false)
-#   21   per-EPIC release without Simplifier            NEW (D11)→ "d11 [21] …" (not_applicable)
-#   22   plan-boundary w/o Simplifier, NOT disabled     NEW (D11)→ "d11 [22] …" (missing → false)
+#  19-22 Reporter / Simplifier at the boundary          RETIRED  → both left the flow (P096)
 #   23   stale evidence pack (--at-head mismatch)       NEW (D11)→ "d11 [23] …" (evs=fail, NOT unverifiable)
-#   24   force/waiver on Reporter/Simplifier blocker    NEW (D11)→ "d11 [24] waiver …" (waived != pass, via brief)
-#   25   plan-boundary w/o Reporter AND Simplifier      NEW (D11)→ "d11 [25] dual …" (both missing → mixed)
+#  24-25 waiver on / pair of Reporter+Simplifier blockers RETIRED → "F4(d)" keeps waived != pass on a required input
 #   26   review_profile as the SOLE C4 blocker          COVERED  → Step-5 "dual: … required_input (sole review_profile — DOMINANT)"
 #   27   C4 more lenient than legacy / same-cat multi   COVERED  → Step-5 "dual: … c4_permissive" + "dual: … mixed"
 #
@@ -84,7 +80,6 @@ setup() {
   EPIC="E-059-2_2"
   RUN="R-E059-2_2-1"
   PLANREF_ID="P059-release-policy"     # basename(plan_ref) minus .md
-  REPORT_PLAN_ID="P059"                # P<num> from epic_id → delivery-report filename
 
   TEST_TMPDIR="$(mktemp -d)"
   export TEST_TMPDIR
@@ -94,7 +89,6 @@ setup() {
   # Plan review is read from the plan's sealed generation authority (P093).
   AUTH="$PROJ/.aid-o/work/evidence/$PLANREF_ID/generation/generation-authority.json"
   CFG="$PROJ/.aid-o/config"
-  REPORTS="$PROJ/.aid-o/reports"
   OUT="$EVID/release-decision.json"
   HEAD_SHA=""
 }
@@ -128,13 +122,12 @@ _rewrite_head() {
 # _cp_head <src> <dst> — copy a v2 fixture and align its head_sha with HEAD_SHA.
 _cp_head() { cp "$1" "$2"; _rewrite_head "$2" "$HEAD_SHA"; }
 
-# Full release_ready:true layout (off-boundary reporter/simplifier). Sets HEAD_SHA.
+# Full release_ready:true layout. Sets HEAD_SHA.
 _build_healthy() {
-  mkdir -p "$EVID/gates" "$C0" "$CFG" "$REPORTS"
+  mkdir -p "$EVID/gates" "$C0" "$CFG"
   # Fixture run-evidence artifacts live under fixtures/release-policy/pack/ (NOT evidence/ —
   # .gitignore line 30 `evidence/` would silently untrack them, the same class of trap as .aid-o/).
   cp "$FIX/pack/review-profile.json"        "$EVID/review-profile.json"
-  cp "$FIX/pack/delivery-gate.json"         "$EVID/delivery-gate.json"
   cp "$FIX/pack/semantic-review-final.json" "$EVID/semantic-review-final.json"
   cp "$FIX/pack/acceptance-evidence.json"   "$EVID/acceptance-evidence.json"
   cp "$FIX/pack/gates_report.json"          "$EVID/gates_report.json"
@@ -143,22 +136,13 @@ _build_healthy() {
   cp "$FIX/config/permissions-auto.yaml"        "$CFG/permissions.yaml"
   HEAD_SHA="$(_git_init_commit)"
   local f
-  for f in "$EVID/review-profile.json" "$EVID/delivery-gate.json" \
-           "$EVID/semantic-review-final.json" "$EVID/acceptance-evidence.json"; do
+  for f in "$EVID/review-profile.json" "$EVID/semantic-review-final.json" "$EVID/acceptance-evidence.json"; do
     _rewrite_head "$f" "$HEAD_SHA"
   done
   mkdir -p "$(dirname "$AUTH")"
   jq -n --arg h "$HEAD_SHA" '{cp1: {verdict: "pass"}, target_head: $h}' > "$AUTH"
-}
-
-# On-boundary layout with BOTH reporter + simplifier VALID (each maps to pass).
-_on_boundary_both_valid() {
-  _build_healthy
-  touch "$EVID/ca-review-complete"
-  cp "$FIX/reports/P059-delivery-valid.md" "$REPORTS/${REPORT_PLAN_ID}-delivery.md"
-  mkdir -p "$EVID/reporter"
-  echo "smoke ok" > "$EVID/reporter/smoke.txt"
-  cp "$FIX/simplifier/simplifier-report.md" "$EVID/simplifier-report.md"
+  # the EPIC's own whole-diff round (cp3), closed and passed at HEAD: the final_review input in EPIC mode
+  mkdir -p "$EVID/cp3"; jq -n --arg h "$HEAD_SHA" '{verdict: "pass", head_sha: $h, rounds: []}' > "$EVID/cp3/rounds.json"
 }
 
 # Run the aggregator to $OUT (bats `run` sets $status/$output).
@@ -199,7 +183,7 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
   # A project that tracks its counter: AID rewrote it during the run. amend keeps HEAD_SHA's artifacts honest.
   echo "plan: 1" > "$CFG/counter.yaml"; git -C "$PROJ" add -f .aid-o/config/counter.yaml
   git -C "$PROJ" commit -q --amend --no-edit; HEAD_SHA="$(git -C "$PROJ" rev-parse HEAD)"
-  local f; for f in "$EVID"/review-profile.json "$EVID"/delivery-gate.json "$EVID"/semantic-review-final.json "$EVID"/acceptance-evidence.json; do _rewrite_head "$f" "$HEAD_SHA"; done
+  local f; for f in "$EVID"/review-profile.json "$EVID"/semantic-review-final.json "$EVID"/acceptance-evidence.json; do _rewrite_head "$f" "$HEAD_SHA"; done
   jq --arg h "$HEAD_SHA" '.target_head = $h' "$AUTH" > "$AUTH.t" && mv "$AUTH.t" "$AUTH"
   echo "plan: 2" > "$CFG/counter.yaml"
   _run_agg
@@ -223,13 +207,6 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
   [ "$(_rd '.release_decision.release_ready')" == "false" ]
   _has_blocker review_profile
   [ "$(_input_verdict review_profile)" == "blocked" ]
-}
-
-@test "REQUIRED removed: delivery-gate → release_ready:false + blocker delivery_gate" {
-  _build_healthy; rm -f "$EVID/delivery-gate.json"
-  _run_agg
-  [ "$(_rd '.release_decision.release_ready')" == "false" ]
-  _has_blocker delivery_gate
 }
 
 @test "REQUIRED removed: semantic-review-final → release_ready:false + blocker semantic_review_final" {
@@ -264,7 +241,7 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
   # REAL E2E anchor (not stubbed) — proves the actual subprocess detects a dirty tree.
   unset AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB
   _build_healthy
-  echo "dirty" > "$PROJ/untracked.txt"     # untracked, not under .aid-o → git_clean fail
+  echo "dirty" >> "$PROJ/README.md"        # a modified TRACKED file → git_clean fail (untracked files are not dirt)
   _run_agg
   [ "$(_rd '.release_decision.release_ready')" == "false" ]
   _has_blocker verification_report
@@ -330,38 +307,6 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
 
 # ─── audit-report + curator-report profile-gating (symmetric) ────────────────
 
-@test "profile-gating INACTIVE (risk low) + audit/curator missing → advisory, not required" {
-  _build_healthy   # review-profile risk_profile=low → C3 gate inactive; no audit/curator files
-  _run_agg
-  [ "$(_rd '.release_decision.release_ready')" == "true" ]
-  [ "$(_input_verdict audit_report)" == "advisory" ]
-  [ "$(_input_verdict curator_report)" == "advisory" ]
-  ! _has_blocker audit_report
-  ! _has_blocker curator_report
-}
-
-@test "profile-gating ACTIVE (risk high) + audit/curator missing → blocked (both)" {
-  _build_healthy
-  _cp_head "$FIX/c3/review-profile-high.json" "$EVID/review-profile.json"
-  _run_agg
-  [ "$(_rd '.release_decision.release_ready')" == "false" ]
-  _has_blocker audit_report
-  _has_blocker curator_report
-  [ "$(_input_verdict audit_report)" == "blocked" ]
-  [ "$(_input_verdict curator_report)" == "blocked" ]
-}
-
-@test "profile-gating ACTIVE (risk high) + audit/curator PRESENT → not blocked (release_ready true)" {
-  _build_healthy
-  _cp_head "$FIX/c3/review-profile-high.json" "$EVID/review-profile.json"
-  _cp_head "$FIX/c3/audit-report.json"        "$EVID/audit-report.json"
-  _cp_head "$FIX/c3/curator-report.json"      "$EVID/curator-report.json"
-  _run_agg
-  [ "$(_rd '.release_decision.release_ready')" == "true" ]
-  [ "$(_input_verdict audit_report)" == "pass" ]
-  [ "$(_input_verdict curator_report)" == "pass" ]
-}
-
 # ─── --at-head stale ─────────────────────────────────────────────────────────
 
 @test "--at-head stale (pack_head reachable but != HEAD) → evah false + evs fail + blocked" {
@@ -378,99 +323,7 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
   _has_blocker verification_report
 }
 
-# ─── Reporter CONDITIONAL ×4 ─────────────────────────────────────────────────
 
-@test "reporter CONDITIONAL: off-boundary (no marker) → not_applicable, unaffected" {
-  _build_healthy   # no ca-review-complete
-  _run_agg
-  [ "$(_rd '.release_decision.reporter_status')" == "not_applicable" ]
-  [ "$(_rd '.release_decision.release_ready')" == "true" ]
-  ! _has_blocker reporter
-}
-
-@test "reporter CONDITIONAL: on-boundary + enabled + report missing → missing + blocker" {
-  _on_boundary_both_valid
-  rm -f "$REPORTS/${REPORT_PLAN_ID}-delivery.md"   # simplifier stays valid → isolates reporter
-  _run_agg
-  [ "$(_rd '.release_decision.reporter_status')" == "missing" ]
-  [ "$(_rd '.release_decision.release_ready')" == "false" ]
-  _has_blocker reporter
-}
-
-@test "reporter CONDITIONAL: on-boundary + reporter.enabled:false → disabled, unaffected" {
-  _on_boundary_both_valid
-  rm -f "$REPORTS/${REPORT_PLAN_ID}-delivery.md"           # would be missing if enabled…
-  cp "$FIX/config/execution-reporter-off.yaml" "$CFG/execution.yaml"   # …but disabled → N/A
-  _run_agg
-  [ "$(_rd '.release_decision.reporter_status')" == "disabled" ]
-  [ "$(_rd '.release_decision.release_ready')" == "true" ]
-  ! _has_blocker reporter
-}
-
-@test "P083 Step 6: on-boundary + reporter.enabled: maybe (unreadable toggle) → toggle_unreadable, BLOCKS release" {
-  # The whole point of Step 6: a toggle the runtime cannot evaluate must
-  # never let release_ready stay true just because it also isn't "disabled".
-  _on_boundary_both_valid
-  cp "$FIX/config/execution-reporter-toggle-malformed.yaml" "$CFG/execution.yaml"
-  _run_agg
-  [ "$(_rd '.release_decision.reporter_status')" == "toggle_unreadable" ]
-  [ "$(_rd '.release_decision.release_ready')" == "false" ]
-  _has_blocker reporter
-}
-
-@test "reporter CONDITIONAL: on-boundary + enabled + valid report → pass" {
-  _on_boundary_both_valid
-  _run_agg
-  [ "$(_rd '.release_decision.reporter_status')" == "pass" ]
-  [ "$(_rd '.release_decision.release_ready')" == "true" ]
-  ! _has_blocker reporter
-}
-
-@test "reporter CONDITIONAL: on-boundary + enabled + invalid _test_evidence → fail + blocker" {
-  _on_boundary_both_valid
-  cp "$FIX/reports/P059-delivery-invalid.md" "$REPORTS/${REPORT_PLAN_ID}-delivery.md"
-  _run_agg
-  [ "$(_rd '.release_decision.reporter_status')" == "fail" ]
-  [ "$(_rd '.release_decision.release_ready')" == "false" ]
-  _has_blocker reporter
-}
-
-# ─── Simplifier CONDITIONAL ×4 ───────────────────────────────────────────────
-
-@test "simplifier CONDITIONAL: off-boundary (no marker) → not_applicable, unaffected" {
-  _build_healthy
-  _run_agg
-  [ "$(_rd '.release_decision.simplifier_status')" == "not_applicable" ]
-  [ "$(_rd '.release_decision.release_ready')" == "true" ]
-  ! _has_blocker simplifier
-}
-
-@test "simplifier CONDITIONAL: on-boundary + enabled + report missing → missing + blocker" {
-  _on_boundary_both_valid
-  rm -f "$EVID/simplifier-report.md"     # reporter stays valid → isolates simplifier
-  _run_agg
-  [ "$(_rd '.release_decision.simplifier_status')" == "missing" ]
-  [ "$(_rd '.release_decision.release_ready')" == "false" ]
-  _has_blocker simplifier
-}
-
-@test "simplifier CONDITIONAL: on-boundary + simplifier.enabled:false → disabled, unaffected" {
-  _on_boundary_both_valid
-  rm -f "$EVID/simplifier-report.md"
-  cp "$FIX/config/execution-simplifier-off.yaml" "$CFG/execution.yaml"
-  _run_agg
-  [ "$(_rd '.release_decision.simplifier_status')" == "disabled" ]
-  [ "$(_rd '.release_decision.release_ready')" == "true" ]
-  ! _has_blocker simplifier
-}
-
-@test "simplifier CONDITIONAL: on-boundary + enabled + present report → pass" {
-  _on_boundary_both_valid
-  _run_agg
-  [ "$(_rd '.release_decision.simplifier_status')" == "pass" ]
-  [ "$(_rd '.release_decision.release_ready')" == "true" ]
-  ! _has_blocker simplifier
-}
 
 # ─── merge_mode ×3 + fail-closed ─────────────────────────────────────────────
 
@@ -490,7 +343,7 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
 
 @test "merge_mode: not release_ready → blocked (regardless of autonomous_mode)" {
   _build_healthy
-  rm -f "$EVID/delivery-gate.json"     # force a blocker
+  rm -f "$EVID/review-profile.json"    # force a blocker
   _run_agg
   [ "$(_rd '.release_decision.release_ready')" == "false" ]
   [ "$(_rd '.release_decision.merge_mode')" == "blocked" ]
@@ -563,67 +416,6 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
   [ "$status" -eq 1 ]
 }
 
-@test "B1 cross-check (true substrate): aggregator lib result == fsm_eval internal (reporter/simplifier valid)" {
-  _on_boundary_both_valid
-  # aid-fsm.sh source shim — set positional params to a harmless dispatcher cmd (delivery-report.bats pattern).
-  cat > "$EVID/fsm-state.yaml" <<EOF
-epic_id: ${EPIC}
-run_id: ${RUN}
-branch: task/${EPIC}/main
-state: GATES
-created_at: 2026-07-09T10:00:00Z
-current_step: 1
-total_steps: 5
-EOF
-  set -- "verify-state" "$EVID/fsm-state.yaml"
-  source "$SCRIPTS/aid-fsm.sh" >/dev/null
-
-  # Reporter substrate: the aggregator calls _aid_validate_test_evidence on the SAME report
-  # path (P<num>-delivery.md) that fsm_eval_delivery_report_present derives internally.
-  local sub_valid fsm_deliv
-  sub_valid="$(_aid_validate_test_evidence "$REPORTS/${REPORT_PLAN_ID}-delivery.md" "$EVID")"
-  fsm_deliv="$(fsm_eval_delivery_report_present "$EPIC" "$EVID" "$PROJ")"
-  [ "$sub_valid" == "true" ]
-  [ "$fsm_deliv" == "true" ]              # fsm true-substrate agrees with the shared lib
-
-  # Simplifier substrate: shared toggle + file existence (fsm_eval_simplifier_present uses both).
-  local fsm_simp
-  _aid_read_toggle "$CFG/execution.yaml" "simplifier"   # exit 0 = enabled (asserted via $?)
-  [ "$?" -eq 0 ]
-  fsm_simp="$(fsm_eval_simplifier_present "$EPIC" "$EVID" "$PROJ")"
-  [ "$fsm_simp" == "true" ]
-
-  # And the aggregator's 5-enum status is layered on that same substrate.
-  _run_agg
-  [ "$(_rd '.release_decision.reporter_status')" == "pass" ]
-  [ "$(_rd '.release_decision.simplifier_status')" == "pass" ]
-}
-
-@test "B1 cross-check (false substrate): invalid _test_evidence → lib false == fsm false == aggregator fail" {
-  _on_boundary_both_valid
-  cp "$FIX/reports/P059-delivery-invalid.md" "$REPORTS/${REPORT_PLAN_ID}-delivery.md"
-  cat > "$EVID/fsm-state.yaml" <<EOF
-epic_id: ${EPIC}
-run_id: ${RUN}
-branch: task/${EPIC}/main
-state: GATES
-created_at: 2026-07-09T10:00:00Z
-current_step: 1
-total_steps: 5
-EOF
-  set -- "verify-state" "$EVID/fsm-state.yaml"
-  source "$SCRIPTS/aid-fsm.sh" >/dev/null
-
-  local sub_valid fsm_deliv
-  sub_valid="$(_aid_validate_test_evidence "$REPORTS/${REPORT_PLAN_ID}-delivery.md" "$EVID")"
-  fsm_deliv="$(fsm_eval_delivery_report_present "$EPIC" "$EVID" "$PROJ")"
-  [ "$sub_valid" == "false" ]
-  [ "$fsm_deliv" == "false" ]
-
-  _run_agg
-  [ "$(_rd '.release_decision.reporter_status')" == "fail" ]
-}
-
 # ─── fixture hygiene ─────────────────────────────────────────────────────────
 
 @test "every release-policy fixture file is git-tracked (no .aid-o/ gitignore trap)" {
@@ -683,7 +475,7 @@ _divclass() {
   # Canonical literal is semantic_review_final (NOT semantic_review).
   [ "$(_divclass false false 1 'semantic_review_final')" == "required_input" ]
   [ "$(_divclass false false 1 'gates_report')" == "required_input" ]
-  [ "$(_divclass false false 1 'curator_report')" == "required_input" ]
+  [ "$(_divclass false false 1 'final_review')" == "required_input" ]
 }
 
 @test "dual: divergence_class=c4_permissive (C4 ready, legacy blocked, no C4 blocker)" {
@@ -1002,42 +794,6 @@ EOF
   [ "$(_rd '.release_decision.merge_mode')" == "auto" ]
 }
 
-@test "d11 [19]: per-EPIC (off-boundary) release without Reporter → reporter_status not_applicable + reason not_plan_boundary, release_ready unaffected" {
-  _build_healthy   # no ca-review-complete marker → off the plan boundary
-  _run_agg
-  [ "$(_rd '.release_decision.reporter_status')" == "not_applicable" ]
-  [ "$(_rd '.release_decision.reporter_reason')" == "not_plan_boundary" ]
-  [ "$(_rd '.release_decision.release_ready')" == "true" ]
-  ! _has_blocker reporter
-}
-
-@test "d11 [20]: plan-boundary without Reporter (enabled, NOT disabled) → reporter_status missing → release_ready=false + blocker" {
-  _on_boundary_both_valid
-  rm -f "$REPORTS/${REPORT_PLAN_ID}-delivery.md"   # simplifier stays valid → isolates reporter
-  _run_agg
-  [ "$(_rd '.release_decision.reporter_status')" == "missing" ]
-  [ "$(_rd '.release_decision.release_ready')" == "false" ]
-  _has_blocker reporter
-}
-
-@test "d11 [21]: per-EPIC (off-boundary) release without Simplifier → simplifier_status not_applicable + reason not_plan_boundary, release_ready unaffected" {
-  _build_healthy
-  _run_agg
-  [ "$(_rd '.release_decision.simplifier_status')" == "not_applicable" ]
-  [ "$(_rd '.release_decision.simplifier_reason')" == "not_plan_boundary" ]
-  [ "$(_rd '.release_decision.release_ready')" == "true" ]
-  ! _has_blocker simplifier
-}
-
-@test "d11 [22]: plan-boundary without Simplifier (enabled, NOT disabled) → simplifier_status missing → release_ready=false + blocker" {
-  _on_boundary_both_valid
-  rm -f "$EVID/simplifier-report.md"   # reporter stays valid → isolates simplifier
-  _run_agg
-  [ "$(_rd '.release_decision.simplifier_status')" == "missing" ]
-  [ "$(_rd '.release_decision.release_ready')" == "false" ]
-  _has_blocker simplifier
-}
-
 @test "d11 [23]: stale evidence pack (--at-head mismatch) → evidence_verified_at_head=false + evidence_verification_status=fail (NOT unverifiable) → release_ready=false" {
   # REAL E2E anchor (not stubbed) — CP1 L1-B3 regression: proves the actual subprocess
   # maps a stale HEAD to fail, never unverifiable.
@@ -1053,47 +809,6 @@ EOF
   [ "$(_rd '.release_decision.evidence_verification_status')" != "unverifiable" ]
   [ "$(_rd '.release_decision.release_ready')" == "false" ]
   _has_blocker verification_report
-}
-
-@test "d11 [24] waiver: force/waiver on a Reporter-missing blocker → waiver surfaced in release-decision.json AND pm-decision-brief.json; reporter_status stays missing (waived != pass)" {
-  _on_boundary_both_valid
-  rm -f "$REPORTS/${REPORT_PLAN_ID}-delivery.md"   # reporter → missing (blocker)
-  # A PM waiver artifact sits in the evidence dir (the aggregator globs waiver-*.json).
-  cat > "$EVID/waiver-reporter.json" <<'EOF'
-{"schema_version":"aid-2.0","artifact_type":"waiver","waiver":{"visible":true,"reason":"PM waived the missing Reporter delivery report for this release (d11 fixture)."}}
-EOF
-  _run_agg
-  # waived != pass: the status is still missing and the blocker is still present…
-  [ "$(_rd '.release_decision.reporter_status')" == "missing" ]
-  _has_blocker reporter
-  # …but the waiver is visible in waivers_applied[].
-  jq -e '.release_decision.waivers_applied | index("waiver-reporter.json")' "$OUT" >/dev/null
-  # …and the brief (Step 6) echoes BOTH the waiver AND the still-missing reporter_status.
-  run bash "$PMBRIEF" "$EVID"
-  local brief="$EVID/pm-decision-brief.json"
-  [ -f "$brief" ]
-  [ "$(jq -r '.pm_decision_brief.reporter_status' "$brief")" == "missing" ]
-  jq -e '.pm_decision_brief.waivers_applied | index("waiver-reporter.json")' "$brief" >/dev/null
-}
-
-@test "d11 [25] dual: plan-boundary without Reporter AND Simplifier at once → both missing → release_ready=false + divergence_class=mixed (multi-blocker never undefined)" {
-  _on_boundary_both_valid
-  rm -f "$REPORTS/${REPORT_PLAN_ID}-delivery.md"   # reporter → missing
-  rm -f "$EVID/simplifier-report.md"               # simplifier → missing
-  _run_agg
-  [ "$(_rd '.release_decision.reporter_status')" == "missing" ]
-  [ "$(_rd '.release_decision.simplifier_status')" == "missing" ]
-  [ "$(_rd '.release_decision.release_ready')" == "false" ]
-  _has_blocker reporter
-  _has_blocker simplifier
-  # Feed the REAL aggregator blocker set into the SAME classifier the FSM dual-run hook uses:
-  # 2+ C4 blockers → mixed, and NEVER empty/null (fail-closed multi-blocker case).
-  local bcount blk dc
-  bcount="$(_rd '.release_decision.blockers | length')"
-  blk="$(jq -r '.release_decision.blockers[].input_id' "$OUT")"
-  dc="$(_divclass false false "$bcount" "$blk")"
-  [ -n "$dc" ] && [ "$dc" != "null" ]
-  [ "$dc" == "mixed" ]
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1135,36 +850,22 @@ EOF
   [ -n "$(echo "$ev" | jq -r '.input_id')" ]
 }
 
-# F4(c) — our own markdown producer WITHOUT the `Head:` provenance line → unknown → the
-# MANDATORY pm-brief "At-HEAD verification warnings" line (never a silent true).
-@test "F4(c) markdown delivery report WITHOUT Head: provenance → head_match unknown + mandatory pm-brief warning line" {
-  _on_boundary_both_valid                               # valid fixtures carry no `Head:` line
-  _run_agg
-  [ "$(_input_head_match reporter)" == "unknown" ]
-  run bash "$PMBRIEF" "$EVID"
-  [ -f "$EVID/pm-summary.md" ]
-  grep -qi 'At-HEAD verification warnings' "$EVID/pm-summary.md"
-  grep -qi 'head_match could not be verified (unknown)' "$EVID/pm-summary.md"
-  grep -q 'reporter' "$EVID/pm-summary.md"
-}
-
 # F4(d) — a waiver mapped to a blocked input DOCUMENTS but never unblocks: the inputs[] row flips
 # blocked→waived, the blocker line STAYS, the D11 *_status stays, release_ready stays false.
-@test "F4(d) waiver mapped to a blocked input → row waived, blocker STAYS, release_ready false, D11 status unchanged" {
-  _on_boundary_both_valid
-  rm -f "$REPORTS/${REPORT_PLAN_ID}-delivery.md"         # reporter → missing → blocked
+@test "F4(d) waiver mapped to a blocked input → row waived, blocker STAYS, release_ready false" {
+  _build_healthy
+  rm -f "$EVID/review-profile.json"                      # review_profile → missing → blocked
   # The aggregator's waiver mapping reads only .waiver.waived_check (+ the filename), so the fixture
   # carries no v2 envelope — that also keeps it out of aid-evidence-verify's v2-artifact scan, so
-  # the reporter blocker is the SOLE blocker and this isolates the waiver-never-unblocks semantics.
-  cat > "$EVID/waiver-reporter.json" <<'EOF'
-{"waiver":{"waived_check":"reporter","reason":"PM waived the missing Reporter delivery report for this release (F4d fixture).","waived_by":"pm","waived_at":"2026-07-10T00:00:00Z","scope":"run","visible":true}}
+  # the review_profile blocker is the SOLE blocker and this isolates the waiver-never-unblocks semantics.
+  cat > "$EVID/waiver-review_profile.json" <<'EOF'
+{"waiver":{"waived_check":"review_profile","reason":"PM waived the missing review profile for this release (F4d fixture).","waived_by":"pm","waived_at":"2026-07-10T00:00:00Z","scope":"run","visible":true}}
 EOF
   _run_agg
-  [ "$(_input_verdict reporter)" == "waived" ]           # row blocked→waived
-  _has_blocker reporter                                  # blocker line STAYS
+  [ "$(_input_verdict review_profile)" == "waived" ]     # row blocked→waived
+  _has_blocker review_profile                            # blocker line STAYS
   [ "$(_rd '.release_decision.release_ready')" == "false" ]   # waiver NEVER unblocks
-  [ "$(jq -r '.release_decision.reporter_status' "$OUT")" == "missing" ]  # D11 status UNCHANGED
-  [ "$(jq -r '.release_decision.waiver_findings[]|select(.waiver=="waiver-reporter.json")|.finding' "$OUT")" == "applied" ]
+  [ "$(jq -r '.release_decision.waiver_findings[]|select(.waiver=="waiver-review_profile.json")|.finding' "$OUT")" == "applied" ]
 }
 
 # F4(e) — a waiver targeting a NON-blocked input is an orphan_waiver; verdicts unchanged.
@@ -1225,19 +926,3 @@ EOF
 
 # F4(i) — positive provenance fixture: a markdown report WITH a `Head:` line → head_match computed
 # true/false (never unknown), end-to-end through the aid-release-policy.sh parsing.
-@test "F4(i) markdown delivery report WITH a Head: provenance line → head_match computed true/false (not unknown)" {
-  _on_boundary_both_valid
-  local rep="$REPORTS/${REPORT_PLAN_ID}-delivery.md"
-  # Matching provenance (appended at EOF; frontmatter/_test_evidence untouched) → true.
-  printf 'Head: %s\n' "$HEAD_SHA" >> "$rep"
-  _run_agg
-  [ "$(_input_head_match reporter)" == "true" ]
-  [ "$(_input_verdict reporter)" == "pass" ]
-  # Mismatching provenance → false → blocked (stale report must not look usable).
-  cp "$FIX/reports/P059-delivery-valid.md" "$rep"
-  printf 'Head: %s\n' "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" >> "$rep"
-  _run_agg
-  [ "$(_input_head_match reporter)" == "false" ]
-  [ "$(_input_verdict reporter)" == "blocked" ]
-  _has_blocker reporter
-}

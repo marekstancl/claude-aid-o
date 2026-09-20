@@ -13,10 +13,6 @@
     "merge_mode": "blocked",
     "evidence_verification_status": "fail",
     "evidence_verified_at_head": false,
-    "reporter_status": "ok",
-    "reporter_reason": "",
-    "simplifier_status": "ok",
-    "simplifier_reason": "",
     "summary_for_pm": "Běh spadl na autentizaci, v logu zůstalo password=hunter2 a ghp_0123456789abcdefghijklmnopqrstuvwxyz.",
     "delivered_summary_ref": ".aid-o/work/evidence/P080/delivery.md"
   }

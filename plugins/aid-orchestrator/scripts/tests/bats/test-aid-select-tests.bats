@@ -161,16 +161,6 @@ commit_change() {
   [ "$selected" = '["plugins/aid-orchestrator/scripts/tests/test-protocol-validate.sh"]' ]
 }
 
-@test "delivery-gate.yaml change selects test-delivery-gate.sh" {
-  stub_bash "scripts/tests/test-delivery-gate.sh" 0
-  commit_change "plugins/aid-orchestrator/defaults/policies/delivery-gate.yaml"
-
-  run "$SELECTOR" --base "$BASE_SHA"
-  [ "$status" -eq 0 ]
-  selected="$(jq -c '.selected_tests' <<< "$output")"
-  [ "$selected" = '["plugins/aid-orchestrator/scripts/tests/test-delivery-gate.sh"]' ]
-}
-
 @test "lib/ui-fidelity/** change selects both ui-fidelity guard-chain suites" {
   stub_bash "scripts/tests/test-ui-fidelity-e2e.sh" 0
   stub_bash "scripts/tests/test-fsm-ui-fidelity.sh" 0

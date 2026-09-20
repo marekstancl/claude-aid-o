@@ -586,7 +586,6 @@ _pm_check_invariants() {
       ($pi.run_id | type == "string" and length > 0) and
       (.plan_boundary_manifest.candidate_sha == null or $pi.candidate_sha == .plan_boundary_manifest.candidate_sha) and
       (.plan_boundary_manifest.plan_final_run_id == null or $pi.run_id == .plan_boundary_manifest.plan_final_run_id) and
-      ($pi.ac_lens_required | type == "boolean") and
       ($pi.plan_diff_verdict | type == "string" and (. == "present" or . == "absent" or . == "skipped"))
     )
   ' "$file" >/dev/null 2>&1; then

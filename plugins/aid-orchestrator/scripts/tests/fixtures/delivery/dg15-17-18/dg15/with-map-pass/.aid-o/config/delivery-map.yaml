@@ -1,4 +1,0 @@
-routes:
-  framework: react-router
-  route_files: ["src/routes/*.tsx"]
-  link_globs: ["src/components/*.tsx"]

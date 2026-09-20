@@ -695,11 +695,15 @@ reads.
 criteria is judged on what it edited), else from the state root; `execution.yaml` and the
 evidence are **always the state root's** — a plan branch's copy of `.aid-o/config` is never
 read, edit it in the primary checkout. `--stage gates` prints both paths before it runs
-anything; `--stage inputs` prints the plan it used (it reads no gate config).
+anything; `--stage produce` prints the plan it used (it reads no gate config).
+
+The stages, the whole-plan review round, the fix path and the escalation table
+are in ONE place: `commands/aid-run.md`, "Closing a plan (plan-final)". This
+section is only about what the PM sees at the end.
 
 Under `plan_branch`, the plan-final boundary is the PM's decision moment — so it
-gets a card and a one-screen page, not a file listing. After `aid-pm-brief.sh`
-has produced the handoff pair, render both from it:
+gets a card and a one-screen page, not a file listing. `plan-finalize --stage
+decide` has produced the handoff pair; render both from it:
 
 ```bash
 source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-close-summary.sh"

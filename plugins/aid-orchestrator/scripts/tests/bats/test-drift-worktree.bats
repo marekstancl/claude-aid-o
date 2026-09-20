@@ -220,7 +220,7 @@ YAML
     git -C '$(_wt)' add epic-work.txt
     git -C '$(_wt)' commit -q -m 'the EPIC delivery'"
 
-  run _pf plan-finalize "$PLAN_ID" --stage sync --project-root "$ROOT"
+  run _pf plan-finalize "$PLAN_ID" --stage freeze --project-root "$ROOT"
   [ "$status" -eq 0 ]
   run _pf plan-finalize "$PLAN_ID" --stage freeze --project-root "$ROOT"
   [ "$status" -eq 0 ]

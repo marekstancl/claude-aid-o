@@ -92,8 +92,7 @@
 #
 # ── SOURCEABLE-SAFE CONVENTION ───────────────────────────────────────────────
 # NO top-level `set -e`/`set -euo pipefail` (matches aid-gate-profile.sh:142-146,
-# aid-cache-preflight.sh:54-56, aid-delivery-profile.sh:33-34,
-# aid-review-signals.sh:14-16). `aid-run-gates.sh` sources libraries directly
+# aid-cache-preflight.sh:54-56, aid-review-signals.sh:14-16). `aid-run-gates.sh` sources libraries directly
 # into its own `set -euo pipefail` shell — an unguarded non-zero return here
 # would abort its entire run_all_gates() per-gate loop. Every fallible call
 # (every yq/jq invocation) is individually guarded; every public function

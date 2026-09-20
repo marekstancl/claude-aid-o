@@ -58,3 +58,31 @@ an active id or that literal.
 | `review-profile.json` producer (the retired pre-filter's `profile` subcommand) | `scripts/aid-review-profile.sh` (split out in Step 14; same output) |
 | `c2_acceptance_evidence` | `acceptance_evidence_from_plan_diff` |
 | `c2_acceptance_deviation` | `acceptance_evidence_from_plan_diff` |
+
+# Plan-final mechanisms: today → successor (P096)
+
+One row per registry id retired by the plan-final rebuild. A successor is an
+ACTIVE registry id, or `none (…)` naming the recorded decision.
+
+## Registry ids retired by P096
+
+| Removed or retired id | Successor | Note |
+|-----------------------|-----------|------|
+| `DG-01-dependency-consistency` | `gates_overall_pass` | the project's own blocking gates (docs/plans/P096-delivery-gate-triage.md) |
+| `DG-02-build` | `gates_overall_pass` | the project's `build` gate |
+| `DG-03-typecheck` | `gates_overall_pass` | the project's `type_check` gate |
+| `DG-04-test` | `gates_overall_pass` | the required `tests_pass` gate, which ran the same command |
+| `DG-05-consumer-compile` | `gates_overall_pass` | the project's build gate |
+| `DG-06-removed-dep` | `gates_overall_pass` | project gates, and the cp3 and cp7 diff reviews |
+| `DG-07-fsm-hook` | `execute_gates_all_steps` | step completeness already blocks upstream |
+| `DG-07-state-consistency` | `execute_gates_all_steps` | same; open dispatches and compliance are FSM preconditions of their own |
+| `DG-08-runtime-env` | `gates_overall_pass` | npm-specific; a project that needs it declares a gate |
+| `DG-09-static-coverage` | `gates_overall_pass` | the idea ("0 files checked is not a pass") is backlog IMP-618 |
+| `DG-10-startup-smoke` | `gates_overall_pass` | a project gate |
+| `DG-11-build-config` | `gates_overall_pass` | a project gate |
+| `DG-12-authority` | `policy_enforcement_values_lint` | the two rules kept as a merge-path lint |
+| `DG-15-route-resolve` | `gates_overall_pass` | needed a delivery map no project had |
+| `DG-17-independent-oracle-nodrop` | `gates_overall_pass` | needed oracle baselines no project had |
+| `DG-18-acceptance-struct` | `final_review_round_required` | provenance only; the `final_criteria` role ties criteria to executed tests |
+| `ev-observe-blocking-interpretation` | none (P096 Step 8 triage) | read only the removed gate's output |
+

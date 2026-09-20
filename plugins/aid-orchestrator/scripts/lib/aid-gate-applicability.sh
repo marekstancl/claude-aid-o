@@ -25,12 +25,6 @@
 # Nothing else. An unknown syntax is REFUSED, never quietly read as false:
 # "I could not understand when this gate applies" and "this gate does not
 # apply" are the two readings whose conflation caused the original defect.
-#
-# A NOTE ON THE SAME NAME ELSEWHERE. `aid-delivery-gate.sh` also reads a
-# `required_when`, from the delivery-gate POLICY file, shaped as a list of
-# condition objects (`always: true`, `has_lockfile: true`, …). Same word,
-# different file, different schema, different reader. Reviewed and left as
-# is: renaming either would cost a migration and resolve no runtime ambiguity.
 
 _AID_GA_ERROR=""
 _AID_GA_GLOBS=""

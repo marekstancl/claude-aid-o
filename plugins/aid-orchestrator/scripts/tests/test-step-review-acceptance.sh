@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # aid-tier: t2
-# test-step-review-acceptance.sh — replay 20 recorded step diffs through a review
+# test-step-review-acceptance.sh — replay the recorded step diffs of the sample through a review
 # flow and record what each review found and cost (P094 Steps 1 and 13).
 #
 # Modes
@@ -47,12 +47,14 @@ verifier_header() {
     "$PLUGIN_DIR/agents/verifier.md"
 }
 
-entries() { jq -c '.entries[]' "$SAMPLE"; }
+# entries [<mode>] — the sample's entries; an entry may name the modes it belongs
+# to (`modes`), e.g. a sabotaged diff written for the new flow has no baseline run.
+entries() { jq -c --arg m "${1:-}" '.entries[] | select($m == "" or ((.modes // ["baseline", "new"]) | index($m)))' "$SAMPLE"; }
 
 cmd_prepare() {
   local mode="$1" out="$2" only="${3:-}"
   mkdir -p "$out"
-  entries | while read -r e; do
+  entries "$mode" | while read -r e; do
     local id repo range head step dod files
     id="$(jq -r .id <<<"$e")"; [[ -z "$only" || "$only" == "$id" ]] || continue
     repo="$(jq -r .repo_path <<<"$e")"; range="$(jq -r .range <<<"$e")"; head="$(jq -r .head_sha <<<"$e")"
@@ -148,7 +150,7 @@ cmd_collect() {
   for kv in "$@"; do TOK["${kv%%=*}"]="${kv#*=}"; done
   local results="$out/results-$mode-$model.json" rows="[]"
   if [[ "$mode" == new ]]; then
-    entries | while read -r e; do collect_new_row "$e" "$out"; done | jq -s --arg mode "$mode" --arg model "$model" \
+    entries "$mode" | while read -r e; do collect_new_row "$e" "$out"; done | jq -s --arg mode "$mode" --arg model "$model" \
       '{mode:$mode, model:$model, entries:., totals:{answered:([.[]|select(.answered)]|length), rounds:([.[]|select(.verdict=="pass" or .verdict=="fail")]|length),
         skipped:([.[]|select(.verdict=="skip" or .verdict=="no_change")]|length), reported:([.[].findings_reported|numbers]|add // 0),
         tokens_total:([.[].tokens_total|numbers]|add // 0), unknown:([.[]|select(.tokens_total=="unknown")]|length),
@@ -220,7 +222,7 @@ cmd_stub() {
   local out; out="$(mktemp -d)"
   cmd_prepare "$mode" "$out" "$only" >/dev/null
   local missing=0
-  entries | while read -r e; do
+  entries "$mode" | while read -r e; do
     local id; id="$(jq -r .id <<<"$e")"; [[ -z "$only" || "$only" == "$id" ]] || continue
     if [[ "$mode" == new ]]; then
       local step cp r; step="$(jq -r .step <<<"$e")"; cp="$out/$id/ev/$(jq -r .epic <<<"$e")/$(jq -r .run <<<"$e")/cp2/step-$step"
@@ -237,7 +239,13 @@ cmd_stub() {
   cmd_collect "$mode" "$out" "$model" >/dev/null
   local results="$out/results-$mode-$model.json"
   local answered; answered="$(jq -r '.totals.answered' "$results")"
-  if [[ -n "$only" ]]; then [[ "$answered" -eq 1 ]] || die "stub: expected 1 answer for $only, got $answered"; else [[ "$answered" -eq 20 ]] || die "stub: expected 20 answers, got $answered"; fi
+  local expected=1; [[ -n "$only" ]] || expected="$(entries "$mode" | wc -l)"
+  [[ "$answered" -eq "$expected" ]] || die "stub: expected $expected answer(s)${only:+ for $only}, got $answered"
+  # An entry with a planted defect proves something only when the defect comes out as an accepted finding.
+  local unfound
+  unfound="$(jq -r --slurpfile s "$SAMPLE" '[$s[0].entries[] | select(.planted) | .id] as $p
+    | [.entries[] | select((.id | IN($p[])) and ((.findings_reported // 0) == 0)) | .id] | join(", ")' "$results")"
+  [[ -z "$unfound" ]] || die "stub: the planted defect was not reported for: $unfound"
   # the guard is the proof: had anything called claude/codex, exit 99 would have failed above
   [[ "$mode" == new ]] && cmd_cleanup "$out"
   rm -rf "$guard" "$out"

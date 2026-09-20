@@ -160,7 +160,7 @@ VALID_ARTIFACT_TYPES=(
   plan_graph
   contract_manifest
   review_profile
-  delivery_gate
+  delivery_gate        # retired producer (the C1 delivery gate, removed in 2.101.0); kept so evidence written before it still validates
   ui_fidelity
   semantic_review
   acceptance_evidence
@@ -482,17 +482,16 @@ fi
 
 # ---------------------------------------------------------------------------
 # Step 16: release_decision D11 explicit state fields (E-059-2). release-decision.json
-# must carry all 11 D11 fields with valid enums/types so the FSM merge gate and the PM
+# must carry all 7 D11 fields with valid enums/types so the FSM merge gate and the PM
 # brief never infer state. dual_run is OPTIONAL (FSM-patched in a later step) and is
 # NOT checked here. Runs after Step 15 so a missing release_ready reports as exit 15.
 # Only applies to artifact_type == release_decision.
 # ---------------------------------------------------------------------------
 if [[ "$artifact_type" == "release_decision" ]]; then
-  # 16a — presence of all 11 D11 fields (delivered_summary_ref is required-but-nullable,
+  # 16a — presence of all 7 D11 fields (delivered_summary_ref is required-but-nullable,
   # so presence is a has() check; its value may legitimately be null).
   for d11_field in merge_mode pm_brief_required pm_brief_status evidence_verified_at_head \
-                   evidence_verification_status reporter_status reporter_reason \
-                   simplifier_status simplifier_reason delivered_summary_ref summary_for_pm; do
+                   evidence_verification_status delivered_summary_ref summary_for_pm; do
     d11_present=$(jq -r --arg f "$d11_field" 'if (.release_decision | has($f)) then "yes" else "no" end' "$ARTIFACT_FILE")
     if [[ "$d11_present" != "yes" ]]; then
       echo "missing_d11_field:${d11_field}" >&2
@@ -510,15 +509,6 @@ if [[ "$artifact_type" == "release_decision" ]]; then
   d11_evs=$(jq -r '.release_decision.evidence_verification_status // ""' "$ARTIFACT_FILE")
   case "$d11_evs" in pass|fail|unverifiable) ;; *) echo "bad_d11_enum:evidence_verification_status" >&2; exit 16 ;; esac
 
-  # 16c — enum validation (reporter/simplifier share one enum)
-  for d11_status_field in reporter_status simplifier_status; do
-    d11_status_val=$(jq -r --arg f "$d11_status_field" '.release_decision[$f] // ""' "$ARTIFACT_FILE")
-    case "$d11_status_val" in
-      pass|fail|missing|not_applicable|disabled) ;;
-      *) echo "bad_d11_enum:${d11_status_field}" >&2; exit 16 ;;
-    esac
-  done
-
   # 16d — boolean type validation
   for d11_bool_field in pm_brief_required evidence_verified_at_head; do
     d11_bool_type=$(jq -r --arg f "$d11_bool_field" '.release_decision[$f] | type' "$ARTIFACT_FILE")
@@ -529,7 +519,7 @@ if [[ "$artifact_type" == "release_decision" ]]; then
   done
 
   # 16e — non-empty string validation
-  for d11_str_field in reporter_reason simplifier_reason summary_for_pm; do
+  for d11_str_field in summary_for_pm; do
     d11_str_ok=$(jq -r --arg f "$d11_str_field" 'if (.release_decision[$f] | type) == "string" and (.release_decision[$f] | length) > 0 then "yes" else "no" end' "$ARTIFACT_FILE")
     if [[ "$d11_str_ok" != "yes" ]]; then
       echo "bad_d11_type:${d11_str_field}" >&2

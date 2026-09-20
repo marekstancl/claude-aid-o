@@ -50,7 +50,7 @@ jobs:
       - name: Install jq + bats + yq
         # bats is required for the FSM / release / integration suites; without it
         # run-all-tests.sh silently SKIPS them (they look green but never run).
-        # yq is required for dg12-authority.sh to parse YAML authority files.
+        # yq is required by every script that reads a policy or the registry.
         run: |
           command -v jq >/dev/null 2>&1 && command -v bats >/dev/null 2>&1 && command -v yq >/dev/null 2>&1 || {
             sudo apt-get install -y jq bats

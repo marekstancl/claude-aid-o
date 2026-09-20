@@ -29,6 +29,8 @@
 #   aid_fixture_seed_plan <project_root> <plan_source> [plan_basename]
 #   aid_fixture_seed_plan_review <project_root> <plan>   (the round alone, for a
 #     suite that places its plan itself)
+#   aid_fixture_seed_plan_decided <project_root> <plan_id>   (a plan whose close
+#     has been decided ready: what plan-merge-to-main and plan-close read)
 #
 # Sourced, never executed.
 # =============================================================================
@@ -212,4 +214,51 @@ aid_fixture_seed_plan_review() {
   bash "$plugin/scripts/aid-cp1-gate.sh" --plan "$plan" --project-root "$root" >/dev/null 2>&1 || {
     echo "aid_fixture_seed_plan_review: the seeded round does not pass aid-cp1-gate.sh — the fixture is not generation-ready" >&2
     return 1; }
+}
+
+# aid_fixture_seed_plan_decided <project_root> <plan_id>
+#
+# Leaves a FROZEN plan in the state `plan-finalize --stage decide` leaves it in
+# when the answer is yes, without paying for the gates and the round: the
+# version-2 inventory as REAL files with their REAL sha256, the receipt sealed
+# by the production sealer, and the manifest pointers. The stages themselves are
+# covered end to end by test-plan-final-decide.bats; the merge and close suites
+# start from here. The caller has sourced lib/aid-plan-manifest.sh (it froze the
+# plan through it) and exported AID_PLAN_MANIFEST_PROJECT_ROOT.
+aid_fixture_seed_plan_decided() {
+  local root="${1:?aid_fixture_seed_plan_decided: project root required}" plan_id="${2:?plan id required}"
+  local plugin="${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must name the plugin}" m f outputs='{}'
+  m="${root}/.aid-o/work/plan-state/${plan_id}/plan-boundary-manifest.json"
+  local cand run_id base thead frozen_at dir
+  cand="$(jq -r '.plan_boundary_manifest.candidate_sha' "$m")"; run_id="$(jq -r '.plan_boundary_manifest.plan_final_run_id' "$m")"
+  base="$(jq -r '.plan_boundary_manifest.plan_base_commit' "$m")"; thead="$(jq -r '.plan_boundary_manifest.target_branch_head_at_candidate_freeze' "$m")"
+  frozen_at="$(jq -r '.plan_boundary_manifest.candidate_frozen_at' "$m")"
+  dir="${root}/$(jq -r '.plan_boundary_manifest.plan_final_evidence_dir' "$m")"
+  [[ "$cand" =~ ^[0-9a-f]{40}$ ]] || { echo "aid_fixture_seed_plan_decided: ${plan_id} has no frozen candidate" >&2; return 2; }
+  mkdir -p "$dir/cp7"
+
+  jq -n '{overall: "pass", gates: []}' > "${dir}/gates_report.json"
+  jq -n --arg h "$cand" '{verdict: "pass", head_sha: $h, rounds: []}' > "${dir}/cp7/rounds.json"
+  jq -n --arg b "$base" --arg h "$cand" \
+    '{base_commit: $b, head_commit: $h, overall_verdict: "pass", results: [], summary: {present_count: 0, absent_count: 0}}' > "${dir}/plan-diff.json"
+  jq -n --arg c "$cand" '{schema_version: "aid-2.0", artifact_type: "release_decision",
+    release_decision: {release_ready: true, blockers: [], candidate_sha: $c}}' > "${dir}/release-decision.json"
+  # The inventory is read from the production list, so a change there is one edit.
+  while IFS= read -r f; do
+    [[ -f "${dir}/${f}" ]] || jq -n --arg h "$cand" '{schema_version: "aid-2.0", revision: {head_sha: $h}}' > "${dir}/${f}"
+    outputs="$(jq -c --arg k "$f" --arg v "sha256:$(sha256sum "${dir}/${f}" | cut -d' ' -f1)" '. + {($k): $v}' <<< "$outputs")"
+  done < <(bash -c 'source "$1"; _pfsm_review_required_outputs' _ "${plugin}/scripts/aid-plan-fsm.sh")
+
+  local sealed ref receipt_hash
+  sealed="$(bash -c 'source "$1"; _pfsm_seal_plan_final_review "$2" "$3" "$4" "$5" main "$6" "$7" "$8" "$9"' _ "${plugin}/scripts/aid-plan-fsm.sh" \
+    "$root" "$plan_id" "$base" "$cand" "$(git -C "$root" rev-parse main)" "$frozen_at" "$run_id" "$outputs")" || return 1
+  IFS='|' read -r ref _ receipt_hash <<< "$sealed"
+  [[ -n "$ref" && -n "$receipt_hash" ]] || { echo "aid_fixture_seed_plan_decided: the receipt was not sealed" >&2; return 1; }
+
+  plan_manifest_update "$plan_id" "
+      .plan_boundary_manifest.plan_final_inputs = {plan_diff_sha256: \"sha256:$(sha256sum "${dir}/plan-diff.json" | cut -d' ' -f1)\", candidate_sha: \"${cand}\", run_id: \"${run_id}\", plan_diff_verdict: \"present\"}
+    | .plan_boundary_manifest.plan_final_review = {candidate_sha: \"${cand}\", review_range: \"${base}..${cand}\", run_id: \"${run_id}\", outputs: ${outputs}}
+    | .plan_boundary_manifest.plan_final_evidence_ref = \"${ref}\"
+    | .plan_boundary_manifest.plan_final_evidence_receipt_sha256 = \"${receipt_hash}\"
+    | .plan_boundary_manifest.plan_final_c4 = {run_id: \"${run_id}\", candidate_sha: \"${cand}\", target_head_sha: \"${thead}\", enforcement: \"blocking\", release_ready: true, blockers: 0}" >/dev/null
 }

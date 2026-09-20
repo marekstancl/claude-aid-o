@@ -288,6 +288,33 @@ else
   fail "aid-run.md review section is ${SECTION_LINES} lines (must exist and be ≤ 150)"
 fi
 
+# ─── 11. Clean code at the source (P096) ──────────────────────────────────
+# The role that writes a step is told how to write less, and the step reviewer
+# asks about needless complexity while the diff is small: there is no cleanup
+# pass at the plan boundary to rely on.
+
+echo ""
+echo "=== 11. Clean code at the source (P096) ==="
+
+CARDS="$PLUGIN_DIR/skills/role-cards.md"
+if [[ "$(grep -c '^### Write the least code that works$' "$CARDS")" -eq 1 ]]; then
+  pass "the least-code ladder exists exactly once in role-cards.md"
+else
+  fail "role-cards.md must carry the '### Write the least code that works' ladder exactly once"
+fi
+for role in $(awk '/^## Step Roles/{on=1} /^## Verifier Focus Cards/{on=0} on && /^## Role: /{print $3}' "$CARDS"); do
+  if awk -v h="## Role: ${role}" '$0 == h {on=1; next} on && /^## /{exit} on' "$CARDS" | grep -q 'Write the least code that works'; then
+    pass "step role ${role} references the ladder"
+  else
+    fail "step role ${role} does not reference the least-code ladder"
+  fi
+done
+if awk '/^## Role: step_generalist$/{on=1; next} on && /^## /{exit} on' "$PLUGIN_DIR/skills/step-review-roles.md" | grep -q '^7\. Is anything here more than the step needs'; then
+  pass "step_generalist asks question 7 (needless complexity)"
+else
+  fail "step_generalist in step-review-roles.md lacks question 7 (needless complexity)"
+fi
+
 # ─── Summary ───────────────────────────────────────────────────────────────
 
 # AUTO liveness and role ownership

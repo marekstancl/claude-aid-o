@@ -722,6 +722,12 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [[ "$output" == *"focus cp7-final-criteria"* && "$output" == *"focus cp7-final-claims"* && "$output" == *"focus cp7-final-generalist"* ]]
   grep -q "CHANGELOG" "$(FD 1)/packet/claims.patch"
   grep -q "every EPIC together" "$(FD 1)/prompt-final_claims.md"
+  grep -q '^+60$' "$(FD 1)/prompt-final_claims.md"                       # a small diff is inline
+  # a diff too large for one prompt is pointed at, with its files, never truncated
+  rm -rf "$E/cp7/round-1" "$E/cp7/rounds.json"
+  AID_REVIEW_INLINE_MAX_BYTES=100 run _F prepare --round 1; [ "$status" -eq 0 ]
+  grep -q "too large to inline. READ IT FROM DISK" "$(FD 1)/prompt-final_claims.md"
+  grep -q '^- src/app.py$' "$(FD 1)/prompt-final_claims.md"; ! grep -q '^+60$' "$(FD 1)/prompt-final_claims.md"
 }
 
 @test "cp7: a closed round writes rounds.json and a schema-shaped semantic file over base..candidate, lenses = the round's roles" {
@@ -763,21 +769,52 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]
 }
 
-@test "cp7: an open blocker fails the round and stays open; the confirmation round carries it and the fix diff, and asks only its reporter" {
+@test "cp7: an open blocker fails the round; round 2 is refused because a fix moves the candidate; the next attempt's round 1 shows what stayed open and the fix" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   _fanswer 1 final_criteria; _fanswer 1 final_generalist; _fanswer 1 final_claims "$_BLOCKER"
   _F collect --round 1 >/dev/null
   run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5; [ "$status" -eq 0 ]
-  [ "$(jq -r .verdict "$E/cp7/rounds.json")" = fail ]
+  [[ "$output" == *"decide blocks on them"* ]]; [ "$(jq -r .verdict "$E/cp7/rounds.json")" = fail ]
   [ "$(jq -r '.findings[0].status' "$(FD 1)/merged.json")" = open ]
   run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' && fsm_check_review_round '$E' cp7"; [ "$status" -eq 1 ]
   sed -i '1i import new' "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"; _fsc
-  run _F prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
-  [ "$(jq -c .reviewers_expected "$(FD 2)/round.json")" = '["final_claims"]' ]
-  [ -s "$(FD 2)/packet/fix.patch" ]; [ "$(jq '.findings | length' "$(FD 2)/packet/open-findings.json")" -eq 1 ]
+  run _F prepare --round 2; [ "$status" -eq 1 ]; [[ "$output" == *"--stage freeze"* ]]
+  # the next attempt, as freeze and produce leave it after a code fix
+  local first="$E"; E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E/cp7"
+  cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$E/cp7/"; : > "$E/timeline.jsonl"
+  jq -n '{previous_run_dir: ".aid-o/work/evidence/P901/R-P901-final-1", class: "delivery", docs_only: false, invalidated_feeds: ["diff"]}' > "$E/fix-class.json"
+  _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]           # a code fix carries nobody
+  [ -s "$(FD 1)/packet/fix.patch" ]; [ "$(jq '.findings | length' "$(FD 1)/packet/open-findings.json")" -eq 1 ]
+  grep -q "This is a confirmation round" "$(FD 1)/prompt-final_claims.md"
 }
 
 @test "cp7: a finding of a final role validates against the finding schema's checkpoint and role lists" {
   jq -e '."$defs".checkpoint.enum | index("cp7")' "$AID_PLUGIN_PATH/defaults/schemas/review-finding.schema.json"
   jq -e '."$defs".roles_step.enum | (index("final_criteria") and index("final_claims") and index("final_generalist"))' "$AID_PLUGIN_PATH/defaults/schemas/review-finding.schema.json"
+}
+
+@test "cp7: after a docs-only fix the next attempt carries the clean roles the fix did not touch and asks only final_claims" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  local r; for r in final_criteria final_claims final_generalist; do _fanswer 1 "$r"; done
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5 >/dev/null
+  grep -q '"path":"cp7/round-1/merged.json"' "$E/stage-writes.jsonl"          # the close recorded what it wrote
+  # the fix, and the second attempt's run directory as freeze and produce leave it
+  local first="$E"; echo "- **Fix** — wording" >> "$R/CHANGELOG.md"; git -C "$R" commit -qam "docs: wording"
+  E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E"; cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; : > "$E/timeline.jsonl"
+  mkdir -p "$E/cp7"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$E/cp7/"
+  jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: true, invalidated_feeds: ["claims"]}' > "$E/fix-class.json"
+  _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"final_criteria: carried"* && "$output" == *"final_generalist: carried"* && "$output" == *"prompt-final_claims.md"* ]]
+  [ "$(jq -r '.carried_from | keys | join(",")' "$(FD 1)/round.json")" = "final_criteria,final_generalist" ]
+  [ ! -f "$(FD 1)/prompt-final_criteria.md" ]
+  _fanswer 1 final_claims; _F collect --round 1 >/dev/null
+  run _F close --round 1 --tokens final_claims=7; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.reviewers.final_criteria | "\(.tokens) \(.usd)"' "$(FD 1)/measurement.json")" = "0 0" ]
+  # a role that reported a finding is never carried
+  jq "$_BLOCKER" "$first/cp7/round-1/reviewer-final_criteria.json" > "$first/x" && mv "$first/x" "$first/cp7/round-1/reviewer-final_criteria.json"
+  rm -rf "$E/cp7/round-1" "$E/cp7/rounds.json"
+  run _F prepare --round 1; [ "$status" -eq 0 ]; [[ "$output" == *"prompt-final_criteria.md"* ]]
 }
