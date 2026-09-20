@@ -604,7 +604,9 @@ EPIC (`routed`) and done-advance refuses until the PM resolves or backlogs it
 
 Never edit a reviewer's file, never write one on a reviewer's behalf, and never
 dispatch a role twice: a role `collect` lists as invalid or missing goes
-through `retry`, then this procedure for that role alone.
+through `retry`, then this procedure for that role alone. A reason that starts
+`form:` means a finding would have been dropped for its form: quote that reason
+to the same reviewer; it is asked once, and a second malformed finding is dropped.
 <!-- adapter:end -->
 
 4. When `collect` reports the round invalid, retry only the roles it names,

@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 538          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 540          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -1070,7 +1070,7 @@ enforcements:
   # Eight OBS-ledger-backed fixes shipped in P060 EPIC 1+2. Rows 1,2,6,7 are hard
   # structural/blocking (active). Rows 3,4,5 are observe-gated mechanisms that are
   # active but downgrade to telemetry under their *_POLICY seam. Row 8
-  # (c4_head_match_policy) is planned/observe until E10 promotion. Per the DG-07
+  # (c4_head_match_policy) is active and unconditional. Per the DG-07
   # convention above these rows carry NO verdict field.
   - id: gates_count_integrity
     type: 4
@@ -1135,16 +1135,14 @@ enforcements:
     description: "at EPIC start (queue pickup) each depends_on dependency is re-checked via git merge-base --is-ancestor; a queue that cannot be parsed (queue_parse_failed) or an unresolved dependency (queue_dep_unresolved) fails loud, otherwise the revalidation result is advisory telemetry; closes OBS-20260709-06"
   - id: c4_head_match_policy
     type: 9
-    source: "scripts/aid-release-policy.sh (grep: 'head_match')"
+    source: "scripts/aid-release-policy.sh (grep: 'stale (head_match=false)')"
     instruction: n/a
     severity: blocking
     surface: "C4-release-decision"
-    enforcement: observe
-    status: planned
-    deadline: "2026-12-31"
-    promotion_phase: E10
-    deferred_until: "2026-12-31"
-    description: "the release decision makes head_match consequential: an out-of-pack required input with head_match==false is classified blocking (release_ready=false) once head_match_policy is promoted from observe; until then it stays observe and the input row carries the verdict without gating"
+    status: active
+    description: "A required input produced at another commit cannot look usable: gates_report.json whose recorded head_sha is not the judged head, and a plan-review authority whose target_head is not in its ancestry, each become a `blocked` inputs[] row plus a blocker, so release_ready is false; in-pack artifacts are covered by aid-evidence-verify.sh --at-head, whose failure blocks the same way. An input that carries no head at all is `unknown`: never counted as at-head, surfaced in the PM brief, never blocking. Unconditional — the former head_match_policy key had no reader and is gone (PM decision 2026-09-20)."
+    recovery: "Re-run the stage that produces the stale input at the judged head (gates, or the plan review), then the decision."
+    test: "scripts/tests/bats/test-release-policy.bats (cases: 'F4(a)', 'F4(f)', 'F4(g)', 'F4(h)')"
   - id: profile_selection
     type: 4
     source: "scripts/aid-run-gates.sh (grep: 'Gate profile resolution')"
@@ -3792,3 +3790,27 @@ enforcements:
     description: "P096 Step 12 — every Codex call of AID (review rounds, the brainstorm opponent, the recovery adjudicator) goes through one function: a fresh process with --sandbox read-only, rooted in the project, stdin closed, no --output-schema, the CLI's exit code returned. Sourcing the file sets no shell option and no variable of the caller."
     recovery: "n/a — a property of the transport, not a refusal."
     test: "scripts/tests/bats/test-codex-transport.bats"
+
+  - id: gate_vacuous_pass_refused
+    type: 1
+    source: "scripts/aid-run-gates.sh:run_gate (grep: 'vacuous_pass')"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "A gate whose command exits 0 while its own output says it looked at nothing (0 files checked, collected 0 items, no tests ran, an empty TAP plan) is recorded as fail with reason vacuous_pass. The signature list is closed and literal: a count of zero errors is a result, a count of zero files is an absence. Any positive count in the output clears the match, so a fan-out gate with one empty sub-run passes. The one idea kept from the retired C1 delivery gate (DG-09)."
+    recovery: "Fix the gate's command or path so it reaches the files it is meant to check; the row's output shows what the tool printed."
+    test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'vacuous pass')"
+
+  - id: review_form_reask_once
+    type: 1
+    source: "scripts/aid-review-round.sh:cmd_collect (grep: 'form-asked')"
+    instruction: "scripts/lib/aid-review-adapter-claude.md (grep: 'form:')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "An answer carrying a finding whose command or evidence breaks the form is listed by collect as invalid, once per role and round, with the reason naming the finding (form: <id> missing_evidence …), so it goes back to its reviewer through the existing retry path instead of being dropped silently by the adjudicator. The round is invalid while that re-ask is owed, even when the remaining answers meet min_answers, so it is never adjudicated without the role. A second malformed answer is accepted and that finding is dropped as before. Found by the P096 acceptance run, where a true blocker was dropped for a bracketed note after a citation."
+    recovery: "aid-review-round.sh retry --role <role>, re-dispatch the same prompt with the reason quoted, collect again."
+    test: "scripts/tests/bats/test-review-round.bats (grep: 'breaks the form')"

@@ -219,7 +219,9 @@ run_pattern() {
       # expansion aborts) stay contained in the child and remain catchable via the
       # exit code — the guarantee the old ( eval ) sub-subshell gave, now also
       # kill-able (PM fix 2026-07-08; per-AC timeout added 2026-07-10).
-      timeout "$AC_CMD_TIMEOUT" bash -c "$cmd" >/dev/null 2>&1 || actual_exit=$?
+      # </dev/null: a command that reads stdin would eat the remaining criteria of
+      # the loop's here-string (the same guard run_gate carries).
+      timeout "$AC_CMD_TIMEOUT" bash -c "$cmd" </dev/null >/dev/null 2>&1 || actual_exit=$?
       if [[ "$actual_exit" -eq 124 && "$expected_exit" -ne 124 ]]; then
         verdict="absent"; evidence="timeout after ${AC_CMD_TIMEOUT}s (reason=timeout)"
       elif [[ "$actual_exit" -eq "$expected_exit" ]]; then
@@ -332,9 +334,18 @@ else
   results_json=$(printf '%s\n' "${ac_result_lines[@]}" | jq -sc '.')
 fi
 
+# `pass` means EVERY criterion was checked and found. A skipped criterion (prose,
+# or a pattern that produced no result) makes the run `partial`, however many
+# others passed: ACTA P024 read `pass` with 4 of 9 criteria never looked at. A
+# criterion with no result row at all is a broken run, never a pass.
 overall="pass"
+[[ "$skipped_count" -gt 0 ]] && overall="partial"
+missing_rows=$(( ac_count - ${#ac_result_lines[@]} ))
+if (( missing_rows > 0 )); then
+  echo "ERROR: aid-plan-diff: ${missing_rows} of ${ac_count} acceptance criteria produced no result row" >&2
+  absent_count=$(( absent_count + missing_rows ))
+fi
 [[ "$absent_count" -gt 0 ]] && overall="fail"
-[[ "$overall" == "pass" && "$skipped_count" -gt 0 && "$present_count" -eq 0 ]] && overall="partial"
 
 jq -n \
   --arg gb "aid-plan-diff.sh@${PLUGIN_VERSION}" \

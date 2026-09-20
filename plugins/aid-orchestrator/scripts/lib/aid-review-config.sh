@@ -58,6 +58,25 @@ aid_policy_file() {
   echo "${_AID_RC_PLUGIN}/defaults/policies/${2}"
 }
 
+# aid_review_switched_off <project_root> <toggle> — the ONE reader of the two
+# review switches (`enabled` and the checkpoint's own key). Per switch the first
+# file that sets it decides, the project's before the plugin default. Prints
+# "<switch>\t<file>" and returns 0 when one of them is false; returns 1 otherwise.
+aid_review_switched_off() {
+  local flag file value
+  for flag in enabled "$2"; do
+    [[ -n "$flag" ]] || continue
+    value=""
+    for file in "${1}/.aid-o/config/policies/review-checkpoints.yaml" "${_AID_RC_PLUGIN}/defaults/policies/review-checkpoints.yaml"; do
+      [[ -f "$file" ]] || continue
+      value="$(yq -r ".review_checkpoints.${flag}" "$file" 2>/dev/null)"
+      [[ "$value" == true || "$value" == false ]] && break
+    done
+    [[ "$value" == false ]] && { printf '%s\t%s\n' "$flag" "$file"; return 0; }
+  done
+  return 1
+}
+
 _aid_rc_toggle_key() {
   case "$1" in
     plan_review) echo cp1_plan_review ;;
@@ -76,7 +95,6 @@ aid_review_config_load() {
   [[ -f "$skill" ]] || { echo "${block} config: roles skill not found: ${skill}" >&2; return 1; }
   RC_BLOCK="$block"; RC_ROLES_SKILL="$skill"
 
-  local default="${_AID_RC_PLUGIN}/defaults/policies/review-checkpoints.yaml"
   local project="${root}/.aid-o/config/policies/review-checkpoints.yaml"
   RC_CONFIG_FILE="$(aid_policy_file "$root" review-checkpoints.yaml ".review_checkpoints.${block}" "${block} config")"
 
@@ -120,17 +138,7 @@ aid_review_config_load() {
   # The two switches are read where the PM sets them: the project file first,
   # whether or not it carries the block. Either one off is off.
   RC_ENABLED=1
-  local flag file value
-  for flag in enabled "$(_aid_rc_toggle_key "$block")"; do
-    [[ -n "$flag" ]] || continue
-    value=""
-    for file in "$project" "$default"; do
-      [[ -f "$file" ]] || continue
-      value="$(yq -r ".review_checkpoints.${flag}" "$file" 2>/dev/null)"
-      [[ "$value" == true || "$value" == false ]] && break
-    done
-    [[ "$value" == false ]] && RC_ENABLED=0
-  done
+  aid_review_switched_off "$root" "$(_aid_rc_toggle_key "$block")" >/dev/null && RC_ENABLED=0
 
   RC_DEGRADED=0
   local pair a b_

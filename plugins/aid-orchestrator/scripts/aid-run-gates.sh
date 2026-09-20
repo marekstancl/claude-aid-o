@@ -242,8 +242,17 @@ run_gate() {
   end_ms=$(date +%s%3N)
   local duration_ms=$(( end_ms - start_ms ))
 
-  local result="pass"
+  local result="pass" reason=""
   [[ $exit_code -ne 0 ]] && result="fail"
+  # A gate that exits 0 while its own output says it looked at nothing did not
+  # pass, it did not run. The list is closed and literal on purpose: "0 errors"
+  # is a result, "0 files checked" is an absence. A fan-out gate with one empty
+  # sub-run among real ones is not vacuous: any positive count clears it.
+  if [[ "$result" == pass ]] && grep -qiE \
+       '(^|[^0-9])0 (source )?files (checked|processed|linted|scanned)|(checked|found|in) 0 (source )?files|collected 0 items|no tests (ran|found)|ran 0 tests|^1\.\.0( |$)|\[no test files\]' <<<"$output" \
+     && ! grep -qiE '(^|[^0-9])[1-9][0-9]* (source )?(files?|tests?|items?|passed)|^ok( |$)' <<<"$output"; then
+    result="fail"; reason="vacuous_pass"
+  fi
 
   # Truncate output to 2000 chars for JSON safety
   local output_truncated="${output:0:2000}"
@@ -253,13 +262,13 @@ run_gate() {
   output_truncated="${output_truncated//$'\n'/\\n}"
   output_truncated="${output_truncated//$'\t'/\\t}"
 
-  local json="{\"gate\":\"${gate_name}\",\"result\":\"${result}\",\"exit_code\":${exit_code},\"duration_ms\":${duration_ms},\"output\":\"${output_truncated}\"}"
+  local json="{\"gate\":\"${gate_name}\",\"result\":\"${result}\"${reason:+,\"reason\":\"${reason}\"},\"exit_code\":${exit_code},\"duration_ms\":${duration_ms},\"output\":\"${output_truncated}\"}"
   echo "$json"
 
   # Log to file if provided
   [[ "$log_file" != "/dev/null" ]] && echo "$json" >> "$log_file"
 
-  [[ $exit_code -eq 0 ]] && return 0 || return 1
+  [[ "$result" == pass ]] && return 0 || return 1
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
