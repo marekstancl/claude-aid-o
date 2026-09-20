@@ -1,0 +1,32 @@
+{"role": "final_criteria", "checkpoint": "cp7",
+ "findings": [
+  {"id": "final_criteria-1", "checkpoint": "cp7", "step": 3, "severity": "blocker",
+   "claim": "Step 3's four (t2) acceptance criteria have no executed proof at the candidate: the merge-path gate runs only tests/meta/ and tests/unit/, tests_full_portfolio is in no profile, and the plan's AC3 substitutes a grep for four function names in tests/integration/test_llm_budget_fallback.py for actually running them.",
+   "command": "grep -n \"tests/meta/ tests/unit/\" .aid-o/config/execution.yaml",
+   "evidence": ".aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md:311-315; .aid-o/config/execution.yaml:92; .aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md:770",
+   "fix": "Either run tests/integration/test_llm_budget_fallback.py at the candidate and record its result as the proof of the four criteria, or re-tier the file to the merge path; a grep for def names is not an executed proof of behaviour."},
+
+  {"id": "final_criteria-2", "checkpoint": "cp7", "step": 6, "severity": "blocker",
+   "claim": "Step 6's three (t2) criteria (server lifted, timeout lifted, deferred batch NOT lifted) are recorded verified by AC5, which only greps REOCR_INFRA_ERROR_KINDS in wan/api/admin.py; tests/integration/test_admin_reocr_failed.py — the only test that asserts what the sweep actually lifts — was never selected by any gate at the candidate.",
+   "command": "grep -n \"REOCR_INFRA_ERROR_KINDS\" .aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md",
+   "evidence": ".aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md:475-477; .aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md:793; .aid-o/config/execution.yaml:102",
+   "fix": "Run tests/integration/test_admin_reocr_failed.py at the candidate (or move it to the merge path) and cite its result; the negative criterion (deferred batch NOT lifted) in particular cannot be proven by a constant grep."},
+
+  {"id": "final_criteria-3", "checkpoint": "cp7", "step": 8, "severity": "blocker",
+   "claim": "Step 8's three (t2) criteria — and with them the plan success criterion that an app/gateway mismatch is caught before production — rest solely on tests/integration/test_model_map_drift.py, which needs a live gateway, was never executed at the candidate, and which the repository's own backlog records as currently RED in the nightly tier (IMP-631).",
+   "command": "sed -n '4137,4155p' .aid-o/work/backlog.md",
+   "evidence": ".aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md:589-591; .aid-o/work/backlog.md:4153; tests/integration/test_model_map_drift.py:19-20",
+   "fix": "Close IMP-631 (or scope the check) so the drift test is green, then execute it at the candidate and cite the run; a criterion whose only proof is a test known to be failing is not verified."},
+
+  {"id": "final_criteria-4", "checkpoint": "cp7", "step": 2, "severity": "blocker",
+   "claim": "The manual criteria of Steps 2 and 7 (GET /model/info returns both WAN cheap aliases after restart; a cheap-alias call returns a non-empty answer) are contradicted at the same commit by IMP-633, which records that svc-litellm was never recreated, so neither num_retries: 0 nor reasoning_effort is live in the gateway — the criteria depend on a deployment the range does not contain.",
+   "command": "sed -n '4214,4232p' .aid-o/work/backlog.md",
+   "evidence": ".aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md:254; .aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md:544; .aid-o/work/backlog.md:4214-4222",
+   "fix": "Do not mark Steps 2 and 7 verified until svc-litellm is force-recreated and both checks are recorded with date and output; until then mark them explicitly as pending deployment, since the backlog also forbids deploying wan-api without _REASONING_EFFORT_OVERRIDE before that."},
+
+  {"id": "final_criteria-5", "checkpoint": "cp7", "step": null, "severity": "major",
+   "claim": "Three of the six plan-level acceptance criteria (AC1, AC2, AC6) are proven by patterns that read files outside the reviewed range — /opt/eco/docs/... and /opt/eco/services/litellm/litellm_config.yaml — so plan_diff: pass cannot be reproduced from the candidate and says nothing about what the range contains.",
+   "command": "grep -n \"/opt/eco/docs\\|/opt/eco/services\" .aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md",
+   "evidence": ".aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md:727; .aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md:749; .aid-o/plans/P101-casovy-rozpocet-llm-pokusu.md:801",
+   "fix": "Record, next to each out-of-repo AC, the commit or hash of the file in the docs/services repository that satisfied it, so the proof is pinned to a state someone can re-check later instead of to whatever those shared files happened to contain at gate time."}
+ ]}

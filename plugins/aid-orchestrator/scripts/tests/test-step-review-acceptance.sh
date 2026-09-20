@@ -18,6 +18,8 @@
 #            [--tokens ID=total ...]               subagent token totals from the Agent tool result ("unknown" allowed)
 #                                                  (new mode: ID:ROLE=total, one per dispatched role)
 #   stub     --mode M --model NAME [--only ID]     replay fixtures/step-review/answers/ with the guard
+#   final prepare|collect|stub [--out DIR] …        the retired auditor's recorded findings replayed
+#                                                   through the whole-plan round (cp7); see "final" below
 #   replay-do  --evidence DIR --project-root DIR    re-adjudicate the recorded cp6 rounds under
 #                                                   DIR/do/*/cp6/round-1 with THIS tree's adjudicator
 #                                                   and print one line per round. A measurement, not
@@ -252,8 +254,125 @@ cmd_stub() {
   echo "Results: 1/1 passed, 0 failed"
 }
 
+# ── final: the auditor's recorded findings replayed through the whole-plan round ──
+# fixtures/plan-final/sample.json holds real high findings of the retired plan-final
+# auditor with the commits they were made at. `final prepare` materialises each
+# reviewed candidate in a --shared clone (the source repository is never written
+# to), builds the cp7 packet over base..candidate and prints the prompts; the
+# controller dispatches them; `final collect` closes the rounds and reports, per
+# entry, whether the finding recorded as its match (acceptance.json `matched_by`)
+# is among the ACCEPTED findings. `final stub` does the same from the recorded
+# answers, with the no-model guard, which is what the nightly run asserts.
+FINAL_SAMPLE="$PLUGIN_DIR/scripts/tests/fixtures/plan-final/sample.json"
+FINAL_FIX="$PLUGIN_DIR/scripts/tests/fixtures/plan-final"
+
+# final_rounds — one line per distinct reviewed candidate: <key>\t<project>\t<plan>\t<run>\t<base>\t<candidate>
+final_rounds() {
+  jq -r '.entries | group_by(.project + .plan + .candidate_sha)[] | .[0]
+         | ["\(.project)-\(.plan)-\(.candidate_sha[0:8])", .project, .plan, .run, .base_sha, .candidate_sha] | @tsv' "$FINAL_SAMPLE"
+}
+
+# cmd_final_prepare <out> [<only key>] [<key>=<role>[,<role>…] …] — a round may be
+# limited to the roles its findings belong to (a paid run need not ask all three).
+cmd_final_prepare() {
+  local out="$1" only="${2:-}"; shift 2 || shift $#
+  declare -A ROLES; local kv; for kv in "$@"; do ROLES["${kv%%=*}"]="${kv#*=}"; done
+  local key project plan run base cand
+  mkdir -p "$out"
+  while IFS=$'\t' read -r key project plan run base cand; do
+    [[ -z "$only" || "$only" == "$key" ]] || continue
+    local src="/opt/eco/projects/${project}" clone="$out/$key/repo"
+    git -C "$src" cat-file -e "${cand}^{commit}" 2>/dev/null || die "$key: candidate $cand does not resolve in $src"
+    [[ -d "$clone" ]] || { git clone -q --shared --no-checkout "$src" "$clone" && git -C "$clone" checkout -q --detach "$cand"; } || die "$key: cannot materialise $cand"
+    local ev="$clone/.aid-o/work/evidence/${plan}/R-${plan}-final-replay" rec="$src/.aid-o/work/evidence/${plan}/${run}" planfile
+    mkdir -p "$ev" "$clone/.aid-o/config/policies"
+    cp "$rec/gates_report.json" "$rec/plan-diff.json" "$ev/" || die "$key: the recorded run has no gates_report.json or plan-diff.json"
+    : > "$ev/timeline.jsonl"
+    planfile="$({ ls "$src/.aid-o/plans/${plan}"-*.md "$src/.aid-o/plans/archive/${plan}"-*.md 2>/dev/null || true; } | head -n1)"
+    [[ -n "$planfile" ]] || die "$key: no plan file for ${plan} in $src"
+    # every role on claude at the configured model: the stand-in rule, applied up front
+    ROLES_CSV="${ROLES[$key]:-}" yq '.review_checkpoints.final_review.reviewers |= map(.model = (select(.provider == "codex") | "sonnet") // .model | .provider = "claude")
+        | .review_checkpoints.final_review.reviewers |= map(select(strenv(ROLES_CSV) == "" or (.role as $r | strenv(ROLES_CSV) | split(",") | contains([$r]))))' \
+      "$PLUGIN_DIR/defaults/policies/review-checkpoints.yaml" > "$clone/.aid-o/config/policies/review-checkpoints.yaml"
+    ( source "$PLUGIN_DIR/scripts/lib/aid-step-review-packet.sh" && aid_final_review_inputs_build "$src" "$ev" "$planfile" "$plan" ) || die "$key: inputs"
+    bash "$PLUGIN_DIR/scripts/aid-step-check.sh" --checkpoint cp7 --base "$base" --evidence-dir "$ev" --project-root "$clone" >/dev/null || die "$key: step check"
+    bash "$PLUGIN_DIR/scripts/aid-review-round.sh" prepare --checkpoint cp7 --evidence-dir "$ev" --project-root "$clone" --round 1 \
+      $([[ "${STUB:-0}" == 1 ]] && echo --stub) | sed "s|^|$key: |"
+  done < <(final_rounds)
+}
+
+# cmd_final_collect <out> [<key>:<role>=<tokens> …] — close every prepared round, then one row per sample entry
+cmd_final_collect() {
+  local out="$1"; shift
+  declare -A TOK; local kv; for kv in "$@"; do TOK["${kv%%=*}"]="${kv#*=}"; done
+  local key project plan run base cand
+  while IFS=$'\t' read -r key project plan run base cand; do
+    local clone="$out/$key/repo" ev r; ev="$clone/.aid-o/work/evidence/${plan}/R-${plan}-final-replay"
+    [[ -d "$ev/cp7/round-1" && ! -f "$ev/cp7/round-1/measurement.json" ]] || continue
+    local roles=(); for r in $(jq -r '.reviewers_expected[]' "$ev/cp7/round-1/round.json"); do roles+=("$r=${TOK["$key:$r"]:-unknown}"); done
+    bash "$PLUGIN_DIR/scripts/aid-review-round.sh" collect --checkpoint cp7 --evidence-dir "$ev" --project-root "$clone" --round 1 >/dev/null 2>&1 || true
+    bash "$PLUGIN_DIR/scripts/aid-review-round.sh" close --checkpoint cp7 --evidence-dir "$ev" --project-root "$clone" --round 1 --tokens "${roles[@]}" >/dev/null 2>&1 \
+      || echo "$key: close failed (round invalid or a role unanswered)" >&2
+  done < <(final_rounds)
+  jq -c '.entries[]' "$FINAL_SAMPLE" | while read -r e; do
+    local id key merged; id="$(jq -r .id <<<"$e")"
+    key="$(jq -r '"\(.project)-\(.plan)-\(.candidate_sha[0:8])"' <<<"$e")"
+    merged="$out/$key/repo/.aid-o/work/evidence/$(jq -r .plan <<<"$e")/R-$(jq -r .plan <<<"$e")-final-replay/cp7/round-1"
+    jq -n --arg id "$id" --arg key "$key" --slurpfile acc "$FINAL_FIX/acceptance.json" \
+       --slurpfile m <(cat "$merged/merged.json" 2>/dev/null || echo '{"findings": []}') \
+       --slurpfile rej <(cat "$merged/rejected.json" 2>/dev/null || echo '[]') \
+       --slurpfile meas <(cat "$merged/measurement.json" 2>/dev/null || echo '{}') '
+      ($acc[0].entries[] | select(.id == $id)) as $a
+      | {id: $id, round: $key, matched_by: $a.matched_by, mechanism: $a.mechanism,
+         matched: ($a.mechanism != null or ($a.matched_by != null and any($m[0].findings[]; .id == $a.matched_by or .fingerprint == $a.matched_by))),
+         accepted: ($m[0].findings | length), rejected: ($rej[0] | length),
+         usd: ([$meas[0].reviewers[]?.usd | numbers] | add // 0)}'
+  done | jq -s '{entries: ., matched: ([.[] | select(.matched)] | length), of: length}'
+}
+
+cmd_final_stub() {
+  local guard out b; guard="$(mktemp -d)"; out="$(mktemp -d)"
+  for b in claude codex; do printf '#!/usr/bin/env bash\necho "guard: %s must not be called in stub mode" >&2\nexit 99\n' "$b" > "$guard/$b"; chmod +x "$guard/$b"; done
+  export PATH="$guard:$PATH" AID_REVIEW_DISPATCH_STUB=1 STUB=1
+  # a round asks exactly the roles whose answers were recorded for it
+  local key project plan run base cand a asked=()
+  while IFS=$'\t' read -r key _; do
+    asked+=("$key=$({ ls "$FINAL_FIX/answers/$key"-*.json 2>/dev/null || true; } | sed "s|.*/$key-||; s|\.json$||" | paste -sd,)")
+  done < <(final_rounds)
+  cmd_final_prepare "$out" "" "${asked[@]}" >/dev/null
+  while IFS=$'\t' read -r key project plan run base cand; do
+    for a in "$FINAL_FIX/answers/$key"-*.json; do
+      [[ -f "$a" ]] || continue
+      cp "$a" "$out/$key/repo/.aid-o/work/evidence/${plan}/R-${plan}-final-replay/cp7/round-1/reviewer-$(basename "$a" .json | sed "s/^$key-//").json"
+    done
+  done < <(final_rounds)
+  local results want; results="$(cmd_final_collect "$out")"
+  want="$(jq -c '[.entries[] | {id, matched}] | sort_by(.id)' "$FINAL_FIX/acceptance.json")"
+  rm -rf "$guard" "$out"
+  [[ "$(jq -c '[.entries[] | {id, matched}] | sort_by(.id)' <<<"$results")" == "$want" ]] \
+    || die "final stub: the replay does not reproduce acceptance.json's matched column: $(jq -c '[.entries[] | {id, matched}]' <<<"$results")"
+  echo "Results: 1/1 passed, 0 failed"
+}
+
 main() {
   local sub="${1:-}"; shift || true
+  if [[ "$sub" == final ]]; then
+    local fsub="${1:-}" fout="" fonly=""; shift || true; local -a ftok=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --out) fout="$2"; shift 2 ;; --only) fonly="$2"; shift 2 ;;
+        --tokens|--roles) shift; while [[ $# -gt 0 && "$1" != --* ]]; do ftok+=("$1"); shift; done ;;
+        *) die "final: unknown option $1" ;;
+      esac
+    done
+    case "$fsub" in
+      prepare) [[ -n "$fout" ]] || die "final prepare needs --out"; cmd_final_prepare "$fout" "$fonly" "${ftok[@]}" ;;
+      collect) [[ -n "$fout" ]] || die "final collect needs --out"; cmd_final_collect "$fout" "${ftok[@]}" ;;
+      stub)    cmd_final_stub ;;
+      *) die "usage: $0 final prepare|collect|stub [--out DIR] [--only KEY] [--roles KEY=role,… …] [--tokens KEY:ROLE=n …]" ;;
+    esac
+    return
+  fi
   local mode="" out="" model="" only="" evidence="" root=""; local -a tokens=()
   while [[ $# -gt 0 ]]; do
     case "$1" in

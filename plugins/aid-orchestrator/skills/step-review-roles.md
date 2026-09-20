@@ -73,7 +73,9 @@ A finding exists only with both:
 - `evidence` — `path:line` or `path:first-last` at the reviewed commit,
   `<sha>:path:line` for a line of a file the diff deleted or moved (the
   pre-image at that commit), or `absent:path` for a file the step should have
-  produced and did not; several separated by `;`. A range stands on its first
+  produced and did not; several separated by `;`. Citations only: a word or a
+  bracketed note after a line number makes the field unreadable and the finding
+  is dropped, so what the line shows goes in `claim`. A range stands on its first
   line, which is what the finding is matched by across rounds. Every file used must be cited. The finding stands when at
   least one citation resolves, so cite the exact line: a wrong number wastes
   that citation.
@@ -285,6 +287,7 @@ broken consumer, an unwired half, or a behaviour lost that nobody asked to lose.
 | Repeating what `step-check.json` already reports | trust the script; review what it cannot see |
 | Answering another role's questions | stay in the role; the others cover the rest |
 | `evidence` pointing at a directory, a whole file or a line of the diff | `path:line` or `path:first-last` at the reviewed commit, `<sha>:path:line` for a deleted line, `absent:path` for a missing file |
+| `evidence` with a note after the citation, `a.py:12 (the removed call)` | the citation alone; the note belongs in `claim` |
 | "It is probably covered somewhere" as the answer to the test question | the covering test's file and case, or the finding that the test is missing |
 
 **Last Updated:** 2026-09-20

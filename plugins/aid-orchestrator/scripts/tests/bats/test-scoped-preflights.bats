@@ -99,7 +99,7 @@ _seed_lifecycle() {
   run _pf plan-start "$PLAN_ID" --mode legacy_epic_release_mode
   [ "$status" -eq 0 ]
   _dirty
-  run _pf epic-start "$PLAN_ID" E-900-1_1
+  run _pf epic-start "$PLAN_ID" E-900-1_1 --run-id R-E900-1
   [ "$status" -eq 0 ]
   [[ "$output" != *"uncommitted changes present"* ]]
   # The task branch was created as a ref — no checkout happened, HEAD stayed

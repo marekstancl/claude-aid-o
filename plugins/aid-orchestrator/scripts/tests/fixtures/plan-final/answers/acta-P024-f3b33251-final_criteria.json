@@ -1,0 +1,44 @@
+{"role": "final_criteria", "checkpoint": "cp7",
+ "findings": [
+  {"id": "final_criteria-1", "checkpoint": "cp7", "step": 14, "severity": "blocker",
+   "claim": "AC1 (pokrytí: žádná tuzemská protistrana s platným IČO bez snapshotu po dvou nočních oknech) nemá u kandidáta žádný vykonaný důkaz — plan-diff ho vede jako 'skipped' a protokol E2E bod 3 sám říká, že ověřený není.",
+   "command": "grep -n \"AC1\\|neověřeno\" .aid-o/plans/P024-registrni-vrstva-enablement.md docs/plans/evidence/2026-08-31-P024-registry-e2e.md",
+   "evidence": ".aid-o/plans/P024-registrni-vrstva-enablement.md:1263-1265; docs/plans/evidence/2026-08-31-P024-registry-e2e.md:163; .aid-o/work/evidence/P024/R-P024-final-replay/cp7/round-1/packet/plan-diff.json:11-17",
+   "fix": "Buď doložit měření po dvou nočních oknech (SQL výstup počtu protistran bez snapshotu v protokolu), nebo AC1 explicitně přeformulovat na to, co je v rozsahu ověřitelné (mechanismus výběru + count_unseeded), a živé měření vyvést jako samostatnou poimplementační položku s termínem — ne ho vydávat za splněné kritérium plánu."},
+
+  {"id": "final_criteria-2", "checkpoint": "cp7", "step": 14, "severity": "blocker",
+   "claim": "AC2 (zahraniční EU protistrana má vies_checked_at mladší 30 dní) nemá žádný vykonaný důkaz a podle vlastního textu ho ani mít nemůže — v registru na eco-dev žádná zahraniční protistrana neexistuje.",
+   "command": "sed -n '1266,1268p' .aid-o/plans/P024-registrni-vrstva-enablement.md",
+   "evidence": ".aid-o/plans/P024-registrni-vrstva-enablement.md:1266-1268; docs/plans/evidence/2026-08-31-P024-registry-e2e.md:164; .aid-o/work/evidence/P024/R-P024-final-replay/cp7/round-1/packet/plan-diff.json:18-24",
+   "fix": "Nahradit AC2 kritériem, které jde doložit (nasazený testovací zahraniční subjekt s doloženým vies_checked_at, nebo integrační test nad VIES větví s nafejkovaným klientem), jinak kritérium zůstane trvale neproveditelné a bude se přenášet z plánu do plánu."},
+
+  {"id": "final_criteria-3", "checkpoint": "cp7", "step": 14, "severity": "blocker",
+   "claim": "AC3 (víc než 90 % protistran s platným IČO má ares_status='AKTIVNÍ') nemá vykonaný důkaz; doložené je jen to, že mechanismus umí AKTIVNÍ vrátit na jednom subjektu, což je jiné tvrzení než procentní pokrytí populace.",
+   "command": "sed -n '1269,1271p' .aid-o/plans/P024-registrni-vrstva-enablement.md",
+   "evidence": ".aid-o/plans/P024-registrni-vrstva-enablement.md:1269-1271; docs/plans/evidence/2026-08-31-P024-registry-e2e.md:167; .aid-o/work/evidence/P024/R-P024-final-replay/cp7/round-1/packet/plan-diff.json:25-31",
+   "fix": "Po prvním ARES TTL okně doplnit do protokolu skutečný dotaz s podílem AKTIVNÍ a teprve pak AC3 odškrtnout; do té doby vést AC3 jako otevřené, ne jako součást hotového plánu."},
+
+  {"id": "final_criteria-4", "checkpoint": "cp7", "step": 13, "severity": "blocker",
+   "claim": "AC8 (dokumentace /acta/registry, navigace, validace docs repa) se odvolává na důkaz 'npm run docs:check v evidenci kroku 2', který v rozsahu neexistuje — pod .aid-o/work/evidence/P024 není žádná evidence kroků, jen balíček tohoto replaye, a brána docs_updated skončila jako skip.",
+   "command": "bash -c 'ls .aid-o/work/evidence/P024 && grep -rn \"docs:check\" .aid-o/work/evidence || echo NOEVIDENCE'",
+   "evidence": ".aid-o/plans/P024-registrni-vrstva-enablement.md:1300-1302; absent:.aid-o/work/evidence/P024/step-13; .aid-o/work/evidence/P024/R-P024-final-replay/cp7/round-1/packet/gates_report.json:1",
+   "fix": "Doložit výstup `npm run docs:check` a `git -C /opt/eco/docs log --oneline -1 -- docs/acta/registry.md` do souboru evidence, který v tomto repozitáři zůstane (protokol nebo .aid-o/work/evidence/P024/), a teprve pak AC8 považovat za prokázané."},
+
+  {"id": "final_criteria-5", "checkpoint": "cp7", "step": null, "severity": "major",
+   "claim": "Brána plan_diff je zapsaná jako pass, ačkoli 4 z 9 akceptačních kritérií plánu (AC1, AC2, AC3, AC8) nemají žádný důkaz — 'skipped' se do absent_count nepočítá, takže brána, která má kritéria prokazovat, projde s 44 % neprokázaných.",
+   "command": "bash -c 'grep -n \"skipped_count\\|absent_count\\|overall_verdict\" .aid-o/work/evidence/P024/R-P024-final-replay/cp7/round-1/packet/plan-diff.json'",
+   "evidence": ".aid-o/work/evidence/P024/R-P024-final-replay/cp7/round-1/packet/plan-diff.json:63-69",
+   "fix": "Kritérium bez vzoru musí vést k jinému verdiktu než pass (fail nebo aspoň výslovné 'pass_with_unproven N'), aby uzavření plánu nešlo opřít o zelenou bránu, která polovinu slibů nekontrolovala."},
+
+  {"id": "final_criteria-6", "checkpoint": "cp7", "step": 10, "severity": "major",
+   "claim": "AC6 slibuje, že se badge po ručním spuštění obnovy z karty protistrany překreslí bez reloadu; prokázáno je jen to, že v souborech existují jména komponent a že hook zavolá zamockované invalidateQueries — žádný test nevykreslí tlačítko v kartě a neověří změnu chipu, a živé ověření protokol výslovně nemá.",
+   "command": "sed -n '283,308p' frontend/src/components/registry/__tests__/registryChips.test.ts",
+   "evidence": ".aid-o/plans/P024-registrni-vrstva-enablement.md:1286-1292; frontend/src/components/registry/__tests__/registryChips.test.ts:283-308; docs/plans/evidence/2026-08-31-P024-registry-e2e.md:151",
+   "fix": "Přidat render test (karta protistrany → stisk tlačítka → nová data → jiný chip, bez reloadu) nebo ho doplnit e2e krokem; grep na název komponenty není důkaz překreslení."},
+
+  {"id": "final_criteria-7", "checkpoint": "cp7", "step": null, "severity": "minor",
+   "claim": "AC7 ('existující testy badge procházejí beze změny očekávání') je prokázán vzorem, který jen ověřuje existenci dvou souborů — `test -f` projde i u prázdného nebo přepsaného testu.",
+   "command": "sed -n '1293,1299p' .aid-o/plans/P024-registrni-vrstva-enablement.md",
+   "evidence": ".aid-o/plans/P024-registrni-vrstva-enablement.md:1293-1299",
+   "fix": "Vzor opřít o to, co kritérium tvrdí: doložit, že oba soubory nejsou v diffu rozsahu (git diff --name-only base..head -- <cesty> je prázdný) a že v běhu py_test prošly."}
+ ]}

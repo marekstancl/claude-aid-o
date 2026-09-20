@@ -6410,11 +6410,13 @@ cmd_plan_finalize() {
   # there first (or refuses naming the repair), so the review/c4 "stay on the
   # candidate" contract binds the plan's own tree and the PM's primary checkout
   # is free during the review window. `project_root` remains the STATE root.
-  _pfsm_require_plan_worktree "$plan_id" "$project_root" || exit 1
+  # Every refusal below ends with the same `next:` line a refused stage prints.
+  _refuse() { _pfsm_refusal_next "$plan_id" "$stage" 1; exit 1; }
+  _pfsm_require_plan_worktree "$plan_id" "$project_root" || _refuse
   local tree_root
   tree_root="$(_pfsm_plan_tree_root "$project_root" "$plan_id")"
-  _pfsm_check_detached_head "$tree_root" || exit 1
-  _pfsm_check_no_merge_in_progress "$tree_root" || exit 1
+  _pfsm_check_detached_head "$tree_root" || _refuse
+  _pfsm_check_no_merge_in_progress "$tree_root" || _refuse
   # A dirty tree blocks freeze and gates: it is an operator mistake to correct
   # before anything is frozen or gated. `produce` and `decide` run inside the
   # review boundary, where a tracked write MEANS the candidate changed: their
@@ -6423,13 +6425,13 @@ cmd_plan_finalize() {
   if [[ "$stage" == gates || ( "$stage" == freeze && "$accept_ancillary" -eq 0 ) ]]; then
     # Forceable: a dirty tree or an unproven lineage is a bookkeeping obstacle,
     # not a physical impossibility, so an audited --force may pass it.
-    _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$tree_root" || exit 1
-    _pfsm_commit_force "plan-finalize" "$plan_id" "$project_root" || exit 1
+    _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$tree_root" || _refuse
+    _pfsm_commit_force "plan-finalize" "$plan_id" "$project_root" || _refuse
   fi
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
     echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
-    exit 1
+    _refuse
   fi
 
   local rc=0

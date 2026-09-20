@@ -1,0 +1,9 @@
+{"role": "final_generalist", "checkpoint": "cp7",
+ "findings": [{"id": "final_generalist-1", "checkpoint": "cp7",
+               "step": 8,
+               "severity": "major",
+               "claim": "backlog.md's IMP-631 entry (delivered in this same diff) tells the reader the model-map drift is unresolved, 'mimo rozsah' (out of scope) and that the nightly check is currently RED — but the code in this very diff already closes the drift (adds wan-source-checker to the map and splits it out of the escalator roster), so the check is expected to pass and the PM 'out of scope' framing no longer matches reality.",
+               "command": "grep -n 'wan-source-checker\\|_MIMO_NABIDKU_ESKALATORU' wan/pipeline/extractor.py",
+               "evidence": "wan/pipeline/extractor.py:181; wan/pipeline/extractor.py:196; .aid-o/work/backlog.md:4153; .aid-o/work/backlog.md:4171-4172",
+               "fix": "Update or retire the IMP-631 backlog entry to reflect that the drift was closed in this same range (map now carries wan-source-checker and OCR_MODEL_ROSTER excludes it via _MIMO_NABIDKU_ESKALATORU), instead of leaving a stale 'PM decided out of scope, check stays red' record that will mislead whoever reads the backlog next."}],
+ "no_findings_reason": null}

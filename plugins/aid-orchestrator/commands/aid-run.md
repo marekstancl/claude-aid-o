@@ -403,9 +403,9 @@ reviews (`commands/aid-run.md` "Step review (CP2) and EPIC review (CP3)",
 `commands/aid-do.md`) include this text verbatim. `<round dir>` is the
 directory `prepare` printed, and `prepare` prints each role's `<focus>` next
 to its prompt: `cp1-<role>` for a plan, `cp2-step-<N>-<role>` for a step,
-`cp3-<role>` for an EPIC, `cp6-<role>` in fast mode, the role with `_`
-replaced by `-` (the dispatch wrapper allows no underscore in `--focus` or
-`--agent-id`).
+`cp3-<role>` for an EPIC, `cp6-<role>` in fast mode, `cp7-<role>` at plan
+close, the role with `_` replaced by `-` (the dispatch wrapper allows no
+underscore in `--focus` or `--agent-id`).
 
 For EACH expected role with `provider: claude` in `<round dir>/round.json`,
 one at a time:

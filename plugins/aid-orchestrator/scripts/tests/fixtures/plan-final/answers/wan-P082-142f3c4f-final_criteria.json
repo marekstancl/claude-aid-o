@@ -1,0 +1,38 @@
+{"role": "final_criteria", "checkpoint": "cp7",
+ "findings": [
+  {"id": "final_criteria-1", "checkpoint": "cp7", "step": null, "severity": "blocker",
+   "claim": "plan-diff.json declares ac_count 9 but carries only 7 result rows (AC1..AC7); two acceptance criteria were never evaluated, yet the summary reports absent_count 0 / skipped_count 0 and overall_verdict pass.",
+   "command": "grep -n \"ac_count\\|ac_label\\|present_count\\|absent_count\\|skipped_count\\|overall_verdict\" .aid-o/work/evidence/P082/R-P082-final-replay/cp7/round-1/packet/plan-diff.json",
+   "evidence": ".aid-o/work/evidence/P082/R-P082-final-replay/cp7/round-1/packet/plan-diff.json:7; .aid-o/work/evidence/P082/R-P082-final-replay/cp7/round-1/packet/plan-diff.json:67-71",
+   "fix": "Run and record a result row for all 9 declared acceptance criteria, or reduce ac_count to the criteria actually checked; the summary must not report absent_count 0 while results are missing, and overall_verdict must not be pass with unevaluated criteria."},
+
+  {"id": "final_criteria-2", "checkpoint": "cp7", "step": 11, "severity": "blocker",
+   "claim": "Step 11 (declared a blocking GATE) has no executed proof in the range: its DB count=0 and MinIO-empty criteria rest only on a hand-written narrative about a live database and object store, whose own before-value is recorded as unknown and whose cited backing evidence file does not exist at the candidate.",
+   "command": "grep -n \"MINIO_COUNT_BEFORE\\|DB_COUNT_AFTER\\|step-9-verify\\|help-profile\" .aid-o/work/evidence/P082-step11-cleanup-verification.md",
+   "evidence": ".aid-o/work/evidence/P082-step11-cleanup-verification.md:33; .aid-o/work/evidence/P082-step11-cleanup-verification.md:4; absent:.aid-o/work/evidence/E-082-1_1/R-E082-1/step-9-verify.md; absent:docs/wan/help-profile.md",
+   "fix": "Back the gate with a re-runnable check committed in the range (a script or test that queries the marker count and the dev-seed prefix and fails on non-zero), and cite evidence files that exist at the candidate; a prose assertion about a live system cannot close a blocking gate."},
+
+  {"id": "final_criteria-3", "checkpoint": "cp7", "step": null, "severity": "major",
+   "claim": "Success criteria of the plan as a whole ('all 9 pages pass the §7 checklist', '0 findings of the original audit left unfixed', 'grep of the Glossary's forbidden words = 0') have no proof at all in the range, because the plan and EPIC task files that define the §7 checklist, the audit finding list and the Glossary are absent at the candidate.",
+   "command": "bash -c 'ls .aid-o/plans .aid-o/tasks | grep -c 082'",
+   "evidence": "absent:.aid-o/plans/P082-napoveda-remediace-a-pwa.md; .aid-o/work/evidence/P082/R-P082-final-replay/cp7/round-1/packet/plan-diff.json:4; .aid-o/work/evidence/P082/R-P082-final-replay/cp7/round-1/packet/dod.md:70",
+   "fix": "Restore the plan and EPIC specification into the range (or commit an equivalent checklist/glossary artefact) and record a per-criterion pass against it; success criteria that point at a document not present at the candidate are unverifiable."},
+
+  {"id": "final_criteria-4", "checkpoint": "cp7", "step": null, "severity": "major",
+   "claim": "Every step criterion worded 'vitest ... zelené' is proven by the frontend_tests gate, which passed with 10 failing vitest tests tolerated as a baseline — the proof is weaker than the wording it is credited against.",
+   "command": "grep -n \"vitest failed tests\" .aid-o/work/evidence/P082/R-P082-final-replay/cp7/round-1/packet/gates_report.json",
+   "evidence": ".aid-o/work/evidence/P082/R-P082-final-replay/cp7/round-1/packet/gates_report.json:170; .aid-o/work/evidence/P082/R-P082-final-replay/cp7/round-1/packet/dod.md:7",
+   "fix": "Either scope the criterion's proof to the help suites alone and show that scope green with zero failures, or restate the criterion as 'within the IMP-138 baseline' so the wording matches the gate that actually runs."},
+
+  {"id": "final_criteria-5", "checkpoint": "cp7", "step": 9, "severity": "major",
+   "claim": "Step 9's criteria for the new PWA page (page exists with HelpPageShell, H1 == title, sections[] 1:1 with the ids in the component) are credited to 'vitest run src/pages/help', but no test in that scope renders or references HelpInstalacePwaPage, so the criteria are asserted by nothing.",
+   "command": "bash -c 'ls ui/src/pages/help/__tests__ && grep -rln InstalacePwa ui/src --include=*.test.tsx | wc -l'",
+   "evidence": ".aid-o/work/evidence/P082/R-P082-final-replay/cp7/round-1/packet/dod.md:56-61; ui/src/pages/help/HelpInstalacePwaPage.tsx:26",
+   "fix": "Add a test for the new page that renders it and asserts the H1 equals the configured title and that the rendered section ids match HELP_SECTIONS['instalace-pwa'].sections one-to-one, then cite that test as the proof."},
+
+  {"id": "final_criteria-6", "checkpoint": "cp7", "step": 10, "severity": "major",
+   "claim": "Step 10's criteria on the four re-shot screenshots (images match the current app UI; cache-bust ?v= is a new date on all four) are provable only by a person looking at binary images — the one existing cache-bust test asserts a different pair of screenshots and none of the four.",
+   "command": "grep -n \"help/screenshots\" ui/src/pages/help/__tests__/HelpSkenyPage.test.tsx",
+   "evidence": "ui/src/pages/help/__tests__/HelpSkenyPage.test.tsx:92-93; .aid-o/work/evidence/P082/R-P082-final-replay/cp7/round-1/packet/dod.md:67-68",
+   "fix": "Extend the cache-bust assertion to cover klient-karta, nav-zpracovani, detail-elektrina and detail-podpis (so the ?v= date criterion is executed), and record the visual-match criterion explicitly as a PM-confirmed manual check rather than as a verified one."}
+ ]}
