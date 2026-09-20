@@ -55,9 +55,14 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+# Sourced FIRST and its own SCRIPT_DIR/PLUGIN_ROOT overwritten afterwards: that
+# library sets both unconditionally from its own BASH_SOURCE, so sourcing it
+# after the assignment would silently repoint this file at the installed plugin
+# even when AID_PLUGIN_PATH names another tree.
 # shellcheck source=aid-c3-dispatch.sh
 source "${SCRIPT_DIR}/aid-c3-dispatch.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
 VERBOSE=false
 

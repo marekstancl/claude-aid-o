@@ -56,3 +56,4 @@ an active id or that literal.
 | routing of open findings (`aid_finding_route`, instruction) | `review_open_findings_routed` (mechanical, in `close`) |
 | carried obligations (`aid_obligation_add`, instruction) | `review_open_findings_routed` (a cp2 finding a later step covers) |
 | `review-profile.json` producer (the retired pre-filter's `profile` subcommand) | `scripts/aid-review-profile.sh` (split out in Step 14; same output) |
+| `scripts/aid-acceptance-evidence.sh` (`reconstruct`, `c2_acceptance_evidence`, `c2_acceptance_deviation`) | the plan-level producer in `aid-plan-fsm.sh plan-finalize --stage inputs`, built from `plan-diff.json` `results[]` (`acceptance_evidence_from_plan_diff`); it had no runtime caller and read `verifier-output-step-N.md` files P094 removed |

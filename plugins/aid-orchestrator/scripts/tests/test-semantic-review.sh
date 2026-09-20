@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # aid-tier: t2
 # test-semantic-review.sh — E5 C2 Semantic Review Engine test harness
-# Tests: aid-finding-merge.sh, aid-acceptance-evidence.sh, aid-consumption-proof.sh,
+# Tests: aid-finding-merge.sh, aid-consumption-proof.sh,
 #        review-profile-check.sh (completed_lenses E5 path)
 # Exit: 0=all pass, 1=failures
 
@@ -46,38 +46,9 @@ MERGE2=$(bash "$PLUGIN_DIR/scripts/lib/aid-finding-merge.sh" merge_findings "$TM
 COUNT=$(echo "$MERGE2" | jq '.findings | length' 2>/dev/null)
 if [[ "$COUNT" -eq 2 ]]; then _pass "2 unique fingerprints → 2 findings"; else _fail "expected 2 findings, got: $COUNT"; fi
 
-# --- T3: aid-acceptance-evidence.sh — covered=true from verifier output ---
-echo "T3: acceptance-evidence covered=true"
-cat > "$TMPDIR/plan.json" <<'J'
-{"steps":[{"id":"step-0","title":"Test step","acceptance_criteria":["The feature works correctly"]}]}
-J
-mkdir -p "$TMPDIR/evidence"
-# Compute ac_id: sha256[:12] of the AC text + step_num (1-indexed, no zero-padding)
-AC_TEXT="The feature works correctly"
-AC_HASH=$(printf '%s' "$AC_TEXT" | sha256sum | cut -c1-12)
-AC_ID="${AC_HASH}_1"
-cat > "$TMPDIR/evidence/verifier-output-step-1.md" <<MD
-## AC Coverage
-ac_coverage:
-  - ac_id: "${AC_ID}"
-    ac_text: "The feature works correctly"
-    covered: true
-    evidence: "diff shows feature implementation"
-    deviation: none
-MD
-bash "$PLUGIN_DIR/scripts/aid-acceptance-evidence.sh" reconstruct "$TMPDIR/plan.json" "$TMPDIR/evidence" 2>/dev/null
-ACC_FILE="$TMPDIR/evidence/acceptance-evidence.json"
-if [[ -f "$ACC_FILE" ]]; then
-  COVERED=$(jq -r '.acceptance_evidence.criteria[0].covered' "$ACC_FILE" 2>/dev/null)
-  DEV=$(jq -r '.acceptance_evidence.criteria[0].deviation' "$ACC_FILE" 2>/dev/null)
-  if [[ "$COVERED" == "true" ]]; then _pass "acceptance-evidence covered=true"; else _fail "expected covered=true, got: $COVERED"; fi
-  if [[ "$DEV" == "none" ]]; then _pass "acceptance-evidence deviation=none"; else _fail "expected deviation=none, got: $DEV"; fi
-else
-  _fail "acceptance-evidence.json not created"
-fi
-
 # --- T4: aid-consumption-proof.sh — all bindings verified ---
 echo "T4: consumption-proof all verified"
+mkdir -p "$TMPDIR/evidence"
 cat > "$TMPDIR/manifest.json" <<'J'
 {"bindings":[{"id":"B-001","contract_ref":"auth.contract.json","status":"pending"}]}
 J
@@ -192,20 +163,6 @@ cat > "$T10_DIR/plan.json" <<'J'
 {"steps":[{"id":"step-1","title":"SHA test","acceptance_criteria":["SHA must be full 40 chars"]}]}
 J
 # Create step-1 verifier output
-T10_HASH=$(printf '%s' "SHA must be full 40 chars" | sha256sum | cut -c1-12)
-cat > "$T10_DIR/ev/verifier-output-step-1.md" <<MD
-## AC Coverage
-ac_coverage:
-  - ac_id: "${T10_HASH}_1"
-    ac_text: "SHA must be full 40 chars"
-    covered: true
-    evidence: "test"
-    deviation: none
-MD
-bash "$PLUGIN_DIR/scripts/aid-acceptance-evidence.sh" reconstruct "$T10_DIR/plan.json" "$T10_DIR/ev" 2>/dev/null
-bash "$PLUGIN_DIR/scripts/aid-protocol-validate.sh" "$T10_DIR/ev/acceptance-evidence.json" --current-head "$T10_HEAD" 2>/dev/null
-if [[ $? -eq 0 ]]; then _pass "acceptance-evidence passes --current-head validation"; else _fail "acceptance-evidence fails --current-head (short SHA in head_sha?)"; fi
-
 # consumption-proof
 cat > "$T10_DIR/manifest.json" <<'J'
 {"bindings":[{"id":"SHA-BIND","contract_ref":"x.json","status":"pending"}]}

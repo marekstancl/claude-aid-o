@@ -235,7 +235,8 @@ aid_brainstorm_opponent_run() {
 
   # No codex is not a monologue any more: a claude agent answers the same brief.
   # The PM is told which provider answered and why, and is never asked to choose.
-  local probe; probe="$(aid_codex_probe)"
+  local probe _bo_root; _bo_root="$(aid_state_root 2>/dev/null)" || _bo_root="$PWD"
+  probe="$(AID_PROJECT_ROOT="$_bo_root" aid_codex_probe)"
   if [[ "$(jq -r '.available' <<< "$probe")" != true ]]; then
     local why; why="$(jq -r '.reason' <<< "$probe")"
     _aid_bo_prompt "$brief" > "${out_dir}/opponent-prompt.txt" \
@@ -243,6 +244,14 @@ aid_brainstorm_opponent_run() {
     jq -n --arg r "$why" --arg m "${AID_BO_STAND_IN_MODEL:-opus}" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       '{stand_in: "claude", reason: $r, model: $m, asked_at: $at}' > "$standin" \
       || { echo "opponent: cannot write ${standin}" >&2; return 1; }
+    # An asked-for stand-in that nobody dispatched must not look like a
+    # brainstorm where the opponent never ran. `stand_in_pending` is neither
+    # `answered` nor `unreached`, so aid-brainstorm-state.sh refuses to close on
+    # it — the record says "asked, not yet answered", which is the truth.
+    jq -n --arg p "$plan_id" --arg r "$why" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{opponent: "stand_in_pending", plan_id: $p, reason: ("no codex reachable (" + $r + "); a claude stand-in was asked for and has not answered yet"),
+        created_at: $at, provider: "claude", agree: [], disagree: [], missing: []}' > "$dispute" \
+      || { echo "opponent: cannot write ${dispute}" >&2; return 1; }
     echo "STAND-IN: codex is unavailable (${why}); dispatch ${out_dir}/opponent-prompt.txt to a general-purpose agent (model ${AID_BO_STAND_IN_MODEL:-opus}) and pass its answer back with --answer <file>" >&2
     return 4
   fi

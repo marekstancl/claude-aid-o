@@ -164,7 +164,25 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   [[ "$output" == *"codex_absent"* ]]
   [ -s "$TMP/out/opponent-prompt.txt" ]
   [ "$(jq -r '.stand_in' "$TMP/out/stand-in.json")" = "claude" ]
-  [ ! -e "$TMP/out/dispute.json" ]
+  # the attempt IS recorded, and in a shape that cannot close the brainstorm
+  [ "$(jq -r '.opponent' "$TMP/out/dispute.json")" = "stand_in_pending" ]
+  [ "$(jq -r '.agree | length' "$TMP/out/dispute.json")" = "0" ]
+}
+
+@test "a stand-in that was asked for and never answered does not close the brainstorm" {
+  approve_vision
+  path_without_codex
+  run_opponent; [ "$status" -eq 4 ]
+  # approve is where the opponent's record is required, and it reads the run's
+  # own state directory; a pending stand-in is neither answered nor unreached,
+  # so it refuses and says how to finish it
+  local sdir="$ROOT/.aid-o/work/brainstorm/P900"
+  [ -d "$sdir" ]
+  cp "$TMP/out/dispute.json" "$sdir/dispute.json"
+  printf '<html></html>' > "$sdir/brainstorm-summary-artifact.html"
+  run bash "$BS" approve P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--answer"* ]]
 }
 
 @test "the stand-in's answer is recorded as a claude answer with the reason codex was not used" {
@@ -200,9 +218,14 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   printf '#!/usr/bin/env bash\ncase "$1" in --version) echo "codex-cli 0.1.0"; exit 0;; esac\nexit 9\n' > "$older/codex"
   chmod +x "$older/codex"
   export PATH="$older:$PATH"
+  # the ranking itself, not only its consequence: the chooser must name the
+  # 9.9.9 shim although the 0.1.0 one comes first on PATH
+  run bash -c "source '$PLUGIN_ROOT/scripts/lib/aid-c3-dispatch.sh'; aid_codex_binary"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$BIN/codex"*9.9.9* ]]
+  [[ "$output" != *"$older"* ]]
+  # and the consequence: the older shim exits 9 on everything but --version
   run_opponent
-  # the older shim exits 9 on everything but --version, so reaching the
-  # opponent at all proves the newer one was chosen
   [ "$status" -eq 0 ]
 }
 

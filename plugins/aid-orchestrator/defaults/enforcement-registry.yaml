@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 522          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 523          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -784,7 +784,18 @@ enforcements:
     status: active
     verdict: ALIGNED
     test: "scripts/tests/bats/test-review-adjudicate.bats (case: 'command: an inline read-only reproduction is accepted, one that writes or runs another file is not')"
-    description: "P095: a reviewer may carry the reproduction inline as `bash -c '<pipeline>'` instead of a file under repro/, because Sonnet wrote the inline form in three of four P094 acceptance rounds with the file rule in its prompt. The body is bounded: every segment (split on ;, |, && and ||) must start with one of grep rg ls find sed git wc head tail cat cd mkdir mktemp touch printf echo export jq yq test [[ [ for do done if then else fi, `git` only with grep|log|show|diff|blame|rev-parse|status; a redirection to a file, a command substitution, `source`, a nested `bash` and `eval` refuse. A refused body is rejected with the reason command_not_read_only, distinct from missing_command."
+    description: "P095: a reviewer may carry the reproduction inline as `bash -c '<pipeline>'` instead of a file under repro/, because Sonnet wrote the inline form in three of four P094 acceptance rounds with the file rule in its prompt. The body is bounded and the bound is the point: the segment splitter breaks on every unquoted ; | and & character, and each resulting segment's FIRST word must be one of grep rg ls git wc head tail cat printf echo jq test [[ [ , with `git` restricted to grep|log|show|diff|blame|rev-parse|status. A body containing a newline, a backslash, a redirection (> or <), a command substitution ($( or backtick), a process substitution (<( or >(), or an in-place flag (-i, --in-place) on any word is refused outright. No verb with a write mode is on the list at all: an independent review of 2026-09-20 showed that mkdir/touch/export and the shell keywords if/then/for/do turned a first-word check into no check (`if true; then rm -rf x; fi` passed, and a newline hid a whole second command from the splitter), and that find/sed/yq need a flag vocabulary that rots. A refused body is rejected with the reason command_not_read_only, distinct from missing_command."
+
+  - id: acceptance_evidence_from_plan_diff
+    type: out-of-band
+    source: "scripts/aid-plan-fsm.sh (grep: 'source: \"plan-diff.json\"')"
+    instruction: skills/pipeline.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: "scripts/tests/bats/test-aid-plan-final-boundary.bats (cases: 'acceptance evidence')"
+    description: "P095 (WAN P101): the plan-level acceptance-evidence.json is built from plan-diff.json results[] — the gate that actually verified the acceptance criteria, per AC, with a verdict and its evidence — instead of aggregating per-EPIC acceptance-evidence.json files nobody writes, which produced `criteria: []` and aggregation aggregated_with_gaps on every plan. verified: every criterion passed. prose_only: plan-diff was skipped because the plan declares no verification_pattern — a pass with a note, since the reviews judge prose criteria. partial: something failed or was skipped beside passing ones — the only blocking case, and it names the criteria. The same _pfsm_plan_has_patterns predicate now governs --stage inputs and --stage gates, which read a skipped plan_diff differently until P095 and put such a plan out of --force's reach."
 
   - id: alloc_skips_taken_ids
     type: fsm-precondition
@@ -850,7 +861,7 @@ enforcements:
     status: active
     verdict: ALIGNED
     test: "scripts/tests/bats/test-review-round.bats (cases: 'stand-in')"
-    description: "P095 (PM instruction 2026-09-19: the stand-in is automatic and reported, never asked): when aid_codex_probe cannot reach a codex (absent, outdated, over its usage limit), `dispatch --provider codex` records {answered: false, reason, fallback: claude} and prints a STAND-IN line instead of leaving the role as provider_absent. `collect` then accepts an answer with provider: claude for that codex role ONLY with that record (otherwise unexpected_provider), and counts a stand-in that was asked for and never dispatched as MISSING, which makes the round invalid — so a second opinion nobody dispatched never closes a round. `close` requires the same start/complete dispatch bracket it requires of any claude reviewer, records provider claude with the checkpoint's stand_in_model and a fallback_reason, and leaves degraded false. `retry` re-probes and rewrites the record instead of dropping it."
+    description: "P095 (PM instruction 2026-09-19: the stand-in is automatic and reported, never asked): when aid_codex_probe cannot reach a codex (absent, outdated, over its usage limit), `dispatch --provider codex` records {answered: false, reason, fallback: claude} and prints a STAND-IN line instead of leaving the role as provider_absent. `collect` then accepts an answer with provider: claude for that codex role ONLY with that record (otherwise unexpected_provider), and counts a stand-in that was asked for and never dispatched as MISSING, which makes the round invalid. Note what this retires in practice: every unreachable-codex case now records a fallback, so the older provider_absent path (round closes degraded, no second opinion) survives only for usage records written before P095, and a new round with no codex is INVALID until the stand-in is dispatched rather than degraded — so a second opinion nobody dispatched never closes a round. `close` requires the same start/complete dispatch bracket it requires of any claude reviewer, records provider claude with the checkpoint's stand_in_model and a fallback_reason, and leaves degraded false. `retry` re-probes and rewrites the record instead of dropping it."
 
   - id: opponent_stand_in
     type: out-of-band
@@ -921,7 +932,7 @@ enforcements:
   - {id: c2_wiring_gate_observe,         type: 11, source: "scripts/aid-fsm.sh:~2250 (cmd_increment_step)", instruction: "defaults/policies/semantic-review.yaml + agents/verifier.md", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E5 wiring-gate observe: unresolved Critical/High in semantic-review-wiring.json → log_event semantic_wiring_would_block + increment continues (blocking deferred to E10 via SEMANTIC_REVIEW_POLICY=blocking)"}
   - {id: c2_dual_emit,                   type: 4,  source: "agents/verifier.md (C2 Dual-Emit Protocol)", instruction: "skills/review-checkpoint-contracts.md (C2 lens catalog)", severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: "epic_review_semantic_final", verdict: ALIGNED, description: "RETIRED by P094 Step 12 (the per-EPIC semantic file is written by the cp3 close; the verifier keeps only the plan-final c2_mode: final producer). Was: E5 dual-emit: .md gate unchanged + semantic-review-{mode}.json additive evidence; c2_mode absent → skip dual-emit entirely"}
   - {id: c2_lens_catalog,                type: 10, source: "skills/review-checkpoint-contracts.md (C2 Semantic Review — Lens Catalog)", instruction: "agents/verifier.md", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "12-lens C2 catalog (FC-09,FC-24..28,FC-30..32,FC-35); no-mega-prompt rule (D2); lens dispatch per profile; C1/structural excluded (D4)"}
-  - {id: c2_acceptance_evidence,         type: 4,  source: "scripts/aid-acceptance-evidence.sh", instruction: "agents/verifier.md (Final Mode Additions §2)", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E5 observe: reconstruct ac_id=sha256[:12]_step_idx, covered from LLM ## AC Coverage block (D3: bash aggregates, LLM determines), emits acceptance-evidence.json"}
+  - {id: c2_acceptance_evidence,         type: 4,  source: "scripts/aid-acceptance-evidence.sh", instruction: "agents/verifier.md (Final Mode Additions §2)", severity: advisory, surface: internal-guard, status: removed_scoped, verdict: unmapped, successor: acceptance_evidence_from_plan_diff, description: "REMOVED P095: the producer had no runtime caller and read verifier-output-step-N.md files P094 removed. The acceptance evidence now comes from the gate that verified the criteria — see acceptance_evidence_from_plan_diff. The source path is kept as the retired row's own name, per this registry's convention."}
   - {id: c2_consumption_proof,           type: 4,  source: "scripts/aid-consumption-proof.sh", instruction: "defaults/schemas/contract-manifest.schema.json (bindings[].status)", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E5 observe: verify bindings[] against evidence_dir (grep+filename pattern); state=verified only when ALL bindings verified; manifest missing → unresolvable+exit 0 (fail-safe)"}
   - {id: c2_completed_lenses_e5,         type: 11, source: "scripts/lib/review-profile-check.sh:~84 (E5 block)", instruction: "defaults/schemas/review-profile.schema.json (completed_lenses)", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E5: completed_lenses read from lenses_run[] union across semantic-review-{mode}.json; E3 backward-compat: no C2 files → COMPLETED_LENSES='' (identical to E3 stub)"}
   - {id: c2_requirement_drift,           type: 4,  source: "agents/verifier.md (Final Mode Additions §1)", instruction: "scripts/tests/fixtures/semantic-review/fc-28-requirement-drift-neg.json", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "E5 observe: requirement-test drift (403→401 without PM approval) → RTD-001 finding severity=critical, fingerprinted; emitted in semantic-review-final.json; does NOT block .md gate verdict in E5 (blocking deferred to E10)"}
@@ -948,14 +959,10 @@ enforcements:
     instruction: "agents/verifier.md (Final Mode Additions §2 AC Coverage)"
     severity: blocking
     surface: internal-guard
-    status: planned
+    status: removed_scoped
     verdict: unmapped
-    deadline: "E10"
-    deferred_until: "E10"
-    promotion_phase: E10
-    deferred_by: "E-054-1_1"
-    deferred_reason: "E5 observe-only; deviation=changed → blocking finding in E10"
-    description: "acceptance-evidence deviation=changed signals requirement drift; blocking deferred to E10"
+    successor: acceptance_evidence_from_plan_diff
+    description: "REMOVED P095: its producer is deleted (see c2_acceptance_evidence) and E10 was cancelled by the PM on 2026-08-29, so the promotion it waited for will not come. Requirement drift is what the plan-diff per-AC verdict and the review lenses report now."
   - id: c2_consumption_unresolvable
     type: 4
     source: "scripts/aid-consumption-proof.sh"

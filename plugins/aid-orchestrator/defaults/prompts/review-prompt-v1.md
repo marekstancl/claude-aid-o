@@ -26,9 +26,9 @@ roles; answer only the questions of your role below.
     `grep`, `rg`, `ls`, `find`, `sed -n`, `git grep`, `wc`, `head`, `tail` or
     `bash <script> --help`, or a reproduction `bash repro/<name>.sh`, or an
     inline `bash -c '<pipeline>'` whose every segment starts with one of
-    `grep rg ls find sed git wc head tail cat cd mkdir mktemp touch printf echo
-    export jq yq test [[ [ for do done if then else fi`, with no redirection to
-    a file, no command substitution, no `source`, no nested `bash`, no `eval`;
+    `grep rg ls git wc head tail cat printf echo jq test [[ [`, with no
+    redirection, no command or process substitution, no newline, no backslash
+    and no in-place flag (anything that can write goes in a repro/ file);
   - `evidence` is {{evidence_forms}}; several are separated by `;`.
   A finding without both is rejected and counts against you.
 - Report only what would lead to DIFFERENT work if fixed. No style remarks, no

@@ -320,7 +320,10 @@ _closed() { [[ -f "$1/measurement.json" ]]; }
 # was asked for, because the probe could not reach a codex.
 _stand_in() { jq -e '.fallback == "claude"' "$1/codex-${2}.usage.json" >/dev/null 2>&1; }
 # _codex_probe — {available, binary, version, reason} from the shared probe.
-_codex_probe() { ( source "${SCRIPT_DIR}/lib/aid-c3-dispatch.sh"; aid_codex_probe ); }
+# The cache belongs to the project under review, never to whatever directory the
+# controller happens to stand in — two projects reviewed from one cwd would
+# otherwise share one answer.
+_codex_probe() { ( AID_PROJECT_ROOT="$ROOT"; export AID_PROJECT_ROOT; source "${SCRIPT_DIR}/lib/aid-c3-dispatch.sh"; aid_codex_probe ); }
 # _stand_in_line <dir> <role> — what the controller must do instead of paying codex.
 _stand_in_line() {
   echo "STAND-IN: codex is unavailable ($3); dispatch ${1}/prompt-${2}.md to a general-purpose agent at model ${RC_STAND_IN_MODEL} (see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."

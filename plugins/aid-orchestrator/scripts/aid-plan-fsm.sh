@@ -6572,7 +6572,17 @@ _pfsm_finalize_review() {
   pd_verdict="$(jq -r '.overall_verdict // ""' "${run_dir_abs}/plan-diff.json" 2>/dev/null || true)"
   [[ "$pd_base" == "$base_commit" && "$pd_head" == "$candidate" ]] \
     || _rassert "plan-diff.json is not bound to ${base_commit}..${candidate}."
-  if [[ "$ac_lens_required_rv" == "true" ]]; then
+  # The SAME predicate --stage gates uses at the plan_diff assertion: a plan
+  # declaring no verification_pattern has nothing machine-checkable, its skip is
+  # the truthful verdict, and the two stages must not read it differently — until
+  # P095 `gates` accepted that file and `inputs` refused it, out of --force's
+  # reach, so such a plan could not be closed at all.
+  local _pf_plan_path=""
+  IFS=$'\t' read -r _pf_plan_path _ < <(_pfsm_plan_file_for_gates "$root" "$troot" "$plan_id" || true)
+  if [[ "$ac_lens_required_rv" == "true" ]] && [[ "$pd_verdict" == "skipped" ]] \
+     && ! _pfsm_plan_has_patterns "$_pf_plan_path"; then
+    echo "NOTE: plan-finalize --stage inputs: plan-diff.json is skipped and the plan declares no verification_pattern — nothing machine-checkable, the skip is accepted, as --stage gates accepts it (prose acceptance criteria are judged by the reviews)." >&2
+  elif [[ "$ac_lens_required_rv" == "true" ]]; then
     [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" ]] \
       || _rassert "an AC lens (ac_to_test_identity/requirement_test_drift) is required by review-profile.json, but plan-diff.json has overall_verdict '${pd_verdict:-<empty>}', expected pass|fail (partial/skipped/unverifiable is not C3 evidence for a required lens)."
   else
@@ -10458,13 +10468,36 @@ _pfsm_finalize_inputs() {
           checks: [], aggregated_from: ($s | length),
           aggregated_absent: ([$s[] | select(.status == "absent")] | length)}')"
     else
-      body="$(jq -nc --argjson s "$sources_json" \
-        '{criteria: [], aggregated_from: ($s | length),
-          aggregated_absent: ([$s[] | select(.status == "absent")] | length)}')"
+      # The acceptance evidence comes from the gate that actually verified the
+      # criteria — aid-plan-diff.sh, per AC, with a verdict and its evidence —
+      # not from per-EPIC acceptance-evidence.json files nobody writes. Until
+      # P095 this aggregated those files and produced `criteria: []` with
+      # verdict aggregated_with_gaps on every plan (WAN P101).
+      body="$(jq -c --argjson s "$sources_json" \
+        '{criteria: [.results[] | {ac: .ac_text, label: .ac_label,
+                                   verdict: (if .verdict == "present" then "pass"
+                                             elif .verdict == "skipped" then "skipped"
+                                             else "fail" end),
+                                   evidence: .evidence}],
+          source: "plan-diff.json",
+          aggregated_from: ($s | length),
+          aggregated_absent: ([$s[] | select(.status == "absent")] | length)}' "$pd")"
     fi
 
     local absent_n; absent_n="$(jq -r '[.[] | select(.status == "absent")] | length' <<< "$sources_json")"
     local verdict="aggregated"; [[ "$absent_n" -gt 0 ]] && verdict="aggregated_with_gaps"
+    if [[ "$agg" == "acceptance-evidence" ]]; then
+      # verified: every criterion passed · prose_only: nothing was machine-
+      # checkable at all · partial: anything failed or was skipped beside
+      # passing ones. Only `partial` blocks at C4, and it names what failed.
+      if [[ "$pd_verdict" == "skipped" ]]; then
+        verdict="prose_only"
+      else
+        verdict="$(jq -r 'if ([.results[].verdict] | length) == 0 then "prose_only"
+                          elif ([.results[] | select(.verdict != "present")] | length) == 0 then "verified"
+                          else "partial" end' "$pd")"
+      fi
+    fi
 
     # The subject hash is the aggregate's identity as a REVIEW SUBJECT: it must
     # be reproducible from what was aggregated, not a random id. It is the

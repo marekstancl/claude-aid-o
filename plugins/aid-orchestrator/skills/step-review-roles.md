@@ -53,12 +53,14 @@ A finding exists only with both:
   `grep`, `rg`, `ls`, `find`, `sed -n`, `git grep`, `wc`, `head`, `tail` or
   `bash <script> --help`; or it is a reproduction, either `bash repro/<name>.sh`
   written under the round's `repro/` directory — the only place a reviewer may
-  write besides the output file — or inline as `bash -c '<pipeline>'` whose every
-  segment starts with one of `grep rg ls find sed git wc head tail cat cd mkdir
-  mktemp touch printf echo export jq yq test [[ [ for do done if then else fi`
-  (`git` only with `grep|log|show|diff|blame|rev-parse|status`), with no
-  redirection to a file, no command substitution, no `source`, no nested `bash`
-  and no `eval`.
+  write besides the output file — or inline as `bash -c '<pipeline>'` whose every segment starts with one of `grep rg ls git
+  wc head tail cat printf echo jq test [[ [` (`git` only with
+  `grep|log|show|diff|blame|rev-parse|status`), with no redirection, no command
+  substitution, no process substitution, no newline, no backslash, no in-place
+  flag, and no verb that has a write mode at all. A verb
+  that can write (`mkdir`, `touch`, `sed -i`, `find -exec`, `yq -i`) and the
+  shell keywords (`if`, `for`, `do`) are refused: a reproduction that needs them
+  is a `repro/<name>.sh` file, which a human can read once before running it.
 - `evidence` — `path:line` or `path:first-last` at the reviewed commit,
   `<sha>:path:line` for a line of a file the diff deleted or moved (the
   pre-image at that commit), or `absent:path` for a file the step should have

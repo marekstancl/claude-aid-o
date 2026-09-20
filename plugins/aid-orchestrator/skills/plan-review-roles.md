@@ -49,12 +49,13 @@ A finding exists only with both:
 - `command` — one read-only command that shows the problem. It must start with
   `grep`, `rg`, `ls`, `find`, `sed -n`, `git grep`, `wc`, `head`, `tail` or
   `bash <script> --help`; or it is a reproduction, either `bash repro/<name>.sh`
-  under the round's `repro/` directory or inline as `bash -c '<pipeline>'` whose
-  every segment starts with one of `grep rg ls find sed git wc head tail cat cd
-  mkdir mktemp touch printf echo export jq yq test [[ [ for do done if then else
-  fi` (`git` only with `grep|log|show|diff|blame|rev-parse|status`), with no
-  redirection to a file, no command substitution, no `source`, no nested `bash`
-  and no `eval`.
+  under the round's `repro/` directory or inline as `bash -c '<pipeline>'` whose every segment starts with one of `grep rg ls git
+  wc head tail cat printf echo jq test [[ [` (`git` only with
+  `grep|log|show|diff|blame|rev-parse|status`), with no redirection, no command
+  substitution, no process substitution, no newline, no backslash, no in-place
+  flag, and no verb that has a write mode at all. A verb
+  that can write and the shell keywords are refused: a reproduction that needs
+  them is a `repro/<name>.sh` file.
 - `evidence` — `path:line` or `path:first-last` inside the repository,
   `absent:path` for a file the plan presumes and the repository lacks, or
   `plan.md:line` for the plan itself; several separated by `;`. Every file used

@@ -71,20 +71,34 @@ bash plugins/aid-orchestrator/scripts/tests/test-step-review-acceptance.sh repla
 
 | Diff | Before (2026-09-19) | After | Why |
 |---|---|---|---|
-| 1 `36f0e429` (alloc glob) | pass — `missing_command` | **fail**, 1 blocker | the inline `mkdir/cd/touch/[[/echo` reproduction is read-only and now accepted |
+| 1 `36f0e429` (alloc glob) | pass — `missing_command` | pass — `command_not_read_only` | its inline reproduction runs `mkdir`, `cd` and `touch`: it WRITES, and after the hardening below no writing verb is on the list (the first draft accepted it, which is what the review caught) |
 | 2 `346a8a36` (set-field) | fail, 1 blocker | **fail**, 1 blocker | unchanged; its citations were always plain `path:line` |
 | 3 `e8814f7f` (pre-push) | pass — `missing_evidence` ×2 | **fail**, 1 blocker | the range `diff.patch:9-14` passes the schema, and the finding stands on its second citation, the pre-image `e8814f7fa701:…/pre-push:58` |
-| 4 `224f60b4` (yq check) | pass — `missing_command` | pass — `command_not_read_only` | its reproduction runs `source aid-fsm.sh`, `git init` and `mktemp` through a command substitution: not read-only, refused by the closed verb list on purpose |
+| 4 `224f60b4` (yq check) | pass — `missing_command` | pass — `command_not_read_only` | its reproduction runs `source aid-fsm.sh` and `git init`: `source` is on no list and `git` is restricted to its reading subcommands, so it is refused on purpose |
 | 5 `22ded9fb` | skip (no round) | skip | the step check gave `skip`; nothing was reviewed |
 
-**Measured: 3 of 4 reviewed diffs now report the defect, against 1 before.**
-The plan predicted `1 pass, 3 fail, 1 skip`; the outcome is `1 pass, 3 fail,
-1 skip` only if diff 4 is counted as the pass, and it is — but for a different
-reason than the plan assumed. The plan expected all four recorded inline
-commands to be accepted; one of them is not a read-only command at all, and
-the closed verb list of the Data Model (no `source`, no command substitution)
-refuses it by design. The reviewer would have to write that reproduction as a
-`repro/<name>.sh` file, which is exactly what the file form is for.
+**Measured: 2 of 4 reviewed diffs now report the defect, against 1 before.**
+The plan predicted `1 pass, 3 fail, 1 skip`; the measured outcome is
+`2 pass, 2 fail, 1 skip`. The plan expected all four recorded inline commands to
+be accepted, and two of them are not read-only commands at all: diff 1 creates
+files in /tmp to show a glob bug, diff 4 sources `aid-fsm.sh` and runs `git
+init`. Both are legitimate reproductions and both belong in a
+`repro/<name>.sh` file, which is exactly what the file form is for. What the
+adjudicator stopped losing is the two findings it rejected on FORM: the line
+range of diff 3 and the pipeline of diff 2.
+
+**The verb list is shorter than the plan's.** An independent review on
+2026-09-20 walked through what the planned list admitted and found it was a
+first-word check over a string the reviewer model writes: `if true; then rm -rf
+x; fi` passed (only `then` was checked), a newline hid a second command from the
+segment splitter entirely, `export PATH=/tmp/evil:$PATH` re-pointed every later
+verb, and `find -exec`, `sed -i` and `yq -i` all write. So `cd mkdir mktemp
+touch export find sed yq` and the shell keywords are not on the list, a newline,
+a backslash, a redirection, a command or process substitution and any in-place
+flag refuse outright, and the recorded diff-1 command (`mkdir -p /tmp/wan-check
+&& cd … && touch …`) would be refused today as well. The table above is the re-measurement after
+the hardening; the first draft scored 3 of 4 by accepting diff 1's writing
+reproduction.
 
 **No fixture was created.** The plan's `fixtures/step-review/fresh-diffs-2026-09-19.json`
 would have to pin pre-image shas that live only on a scratch branch; a fixture

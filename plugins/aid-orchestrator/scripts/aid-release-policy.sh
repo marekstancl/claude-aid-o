@@ -286,6 +286,24 @@ check_required_present() {
         return 0
       fi
     fi
+    # The plan-level acceptance evidence says one of three things (P095):
+    # verified (every criterion passed), prose_only (nothing was machine-
+    # checkable — the reviews judged the criteria, as for every prose AC), or
+    # partial, which blocks and names what did not pass.
+    if [[ "$id" == acceptance_evidence ]]; then
+      local _ae; _ae="$(jq -r '.verdict.aggregation // ""' "$file" 2>/dev/null)"
+      if [[ "$_ae" == "partial" ]]; then
+        local _failed
+        _failed="$(jq -r '[.acceptance_evidence.criteria[]? | select(.verdict != "pass") | (.label // .ac)] | join(", ")' "$file" 2>/dev/null)"
+        add_input "$id" "$(basename "$file")" "blocked" "criteria not met: ${_failed:-unnamed}" "$(_artifact_head_match "$file")" "present_but_failing"
+        add_blocker "$bid" "blocking" "acceptance-evidence.json reports partial — criteria not met: ${_failed:-unnamed}"
+        return 0
+      fi
+      if [[ "$_ae" == "prose_only" ]]; then
+        add_input "$id" "$(basename "$file")" "pass" "no acceptance criterion is machine-checkable (prose_only) — the reviews judged them" "$(_artifact_head_match "$file")" "present_ok"
+        return 0
+      fi
+    fi
     if _content_says_fail "$id" "$file"; then
       # OBSERVE (default) records the truth without blocking: the row carries
       # `fail` and `present_but_failing`, and NO blocker is added, so

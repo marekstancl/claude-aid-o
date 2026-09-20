@@ -122,7 +122,9 @@ _evidence_norm() {
   local item="$1"
   item="${item#"${item%%[![:space:]]*}"}"
   if [[ "$item" =~ ^(.+):([0-9]+)-([0-9]+)$ ]]; then
-    (( BASH_REMATCH[2] <= BASH_REMATCH[3] )) || return 1
+    # 10# or bash aborts the arithmetic on a zero-padded number (`08: value
+    # too great for base`), which drops a valid citation AND prints to stderr.
+    (( 10#${BASH_REMATCH[2]} <= 10#${BASH_REMATCH[3]} )) || return 1
     item="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
   fi
   printf '%s' "$item"
@@ -142,22 +144,41 @@ _evidence_first_ok() {
   return 1
 }
 
-# The verbs an inline reproduction may start a segment with: read-only, and
-# nothing whose purpose is to run something else (no source, no bash, no eval).
-_INLINE_VERBS=" grep rg ls find sed git wc head tail cat cd mkdir mktemp touch printf echo export jq yq test [[ [ for do done if then else fi "
+# The verbs an inline reproduction may start a segment with. Every one of them
+# READS and has no mode that writes: that is the whole criterion, and it is why
+# the list is shorter than the one P095 was planned with. An independent review
+# of 2026-09-20 walked through what the planned list actually admitted and the
+# answer was "anything":
+#   - `mkdir`, `touch`, `mktemp`, `cd` and `export` write, or move the ground a
+#     later verb stands on (`export PATH=/tmp/evil:$PATH` hijacks every verb
+#     after it);
+#   - the shell keywords `if then else fi for do done` open a segment whose
+#     FIRST word is the keyword, so only the keyword was ever checked and
+#     `if true; then rm -rf x; fi` passed;
+#   - `find` has `-exec`/`-delete`, `sed` has `-i` and its `w` command, `yq`
+#     has `-i`. A verb with a write mode needs a flag vocabulary to be safe,
+#     and a flag vocabulary rots.
+# A reviewer who needs any of those writes a `repro/<name>.sh` file, which is
+# what the file form is for: a human can read it once before running it.
+_INLINE_VERBS=" grep rg ls git wc head tail cat printf echo jq test [[ [ "
 
-# _inline_body_ok <body> — every segment of an inline command starts with a
-# read-only verb, nothing redirects to a file, nothing substitutes a command.
+# _inline_body_ok <body> — a bounded read-only pipeline: every segment starts
+# with a verb from the list, nothing redirects, substitutes a command, opens a
+# new line, or edits a file in place.
 _inline_body_ok() {
   local body="$1" i ch inq=0 seg="" s w n=${#1}
   local -a segs=() words=()
-  [[ "$body" != *'$('* && "$body" != *'`'* ]] || return 1
+  # A newline is a command separator the segment splitter below cannot see, a
+  # backslash can quote one, and both forms of process substitution run code.
+  case "$body" in
+    *$'\n'*|*\\*|*'$('*|*'`'*|*'<('*|*'>('*) return 1 ;;
+  esac
   for (( i=0; i<n; i++ )); do
     ch="${body:i:1}"
     if [[ "$ch" == '"' ]]; then inq=$(( ! inq )); seg+="$ch"; continue; fi
     if (( inq )); then seg+="$ch"; continue; fi
     case "$ch" in
-      '>') return 1 ;;
+      '>'|'<') return 1 ;;
       ';'|'|'|'&') segs+=("$seg"); seg="" ;;
       *) seg+="$ch" ;;
     esac
@@ -168,7 +189,11 @@ _inline_body_ok() {
     (( ${#words[@]} > 0 )) || continue
     w="${words[0]}"
     [[ "$_INLINE_VERBS" == *" $w "* ]] || return 1
-    if [[ "$w" == git ]]; then
+    # No in-place flag on any verb, whatever the list says it reads.
+    for w in "${words[@]}"; do
+      case "$w" in -i|-i.*|--in-place|--inplace) return 1 ;; esac
+    done
+    if [[ "${words[0]}" == git ]]; then
       case "${words[1]:-}" in grep|log|show|diff|blame|rev-parse|status) ;; *) return 1 ;; esac
     fi
   done
