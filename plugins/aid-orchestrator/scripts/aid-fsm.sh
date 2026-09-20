@@ -7641,7 +7641,10 @@ EOF
             # non-zero exit is treated as a block reason, never a set -e crash.
             local _c3_verify_bin="${AID_C3_DISPATCH_BIN:-${SCRIPT_DIR}/lib/aid-c3-dispatch.sh}"
             local _c3_verify_out="" _c3_verify_rc=0
-            _c3_verify_out=$(bash "$_c3_verify_bin" verify "$evidence_dir" 2>&1) || _c3_verify_rc=$?
+            # --read-only: this hook asks whether the evidence holds, it does
+            # not repair it. A raw/report mismatch is reported and blocks; the
+            # report is replaced only by a verify run on purpose.
+            _c3_verify_out=$(bash "$_c3_verify_bin" verify --read-only "$evidence_dir" 2>&1) || _c3_verify_rc=$?
             if [[ "$_c3_verify_rc" -ne 0 ]]; then
               c3_dispatch_block_reason="aid-c3-dispatch.sh verify failed (report↔raw faithful-transform binding broken, exit ${_c3_verify_rc}): ${_c3_verify_out}"
             fi

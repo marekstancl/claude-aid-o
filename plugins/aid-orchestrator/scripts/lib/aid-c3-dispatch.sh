@@ -1113,14 +1113,31 @@ _looks_at_capacity() {
 # Two installs coexist on the dev host (/usr/local/bin/codex 0.149.1 shadows
 # /usr/bin/codex 0.154.0) and `command -v` picks the older.
 aid_codex_binary() {
-  local d bin best="" best_v="" v
+  local d bin first="" best="" best_v="" v
+  # An explicit choice beats every rule: a wrapper, a pinned install, or a test
+  # shim that must win whatever version it claims.
+  if [[ -n "${AID_CODEX_BIN:-}" && -x "${AID_CODEX_BIN}" ]]; then
+    v="$("${AID_CODEX_BIN}" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
+    printf '%s\t%s\n' "${AID_CODEX_BIN}" "${v:-unknown}"
+    return 0
+  fi
   IFS=':' read -ra _acb_dirs <<< "$PATH"
   for d in "${_acb_dirs[@]}"; do
     bin="${d:-.}/codex"
     [[ -x "$bin" && ! -d "$bin" ]] || continue
+    if [[ -z "$first" ]]; then
+      first="$bin"
+      v="$("$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
+      # A codex that will not say its version cannot be ranked, and a wrapper or
+      # a test shim put FIRST on PATH is a deliberate choice. PATH order wins
+      # there; the version rule is only for deciding between two real installs.
+      [[ -n "$v" ]] || { printf '%s\t%s\n' "$first" "unknown"; return 0; }
+      best="$bin"; best_v="$v"
+      continue
+    fi
     v="$("$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
     [[ -n "$v" ]] || continue
-    if [[ -z "$best" ]] || [[ "$(printf '%s\n%s\n' "$best_v" "$v" | sort -V | tail -1)" == "$v" && "$best_v" != "$v" ]]; then
+    if [[ "$(printf '%s\n%s\n' "$best_v" "$v" | sort -V | tail -1)" == "$v" && "$best_v" != "$v" ]]; then
       best="$bin"; best_v="$v"
     fi
   done
@@ -2705,6 +2722,49 @@ _vfail() {
   exit 2
 }
 
+# _vmismatch <reason> — the report on disk contradicts the raw response.
+#   Exit 2 like every other NOT-verified condition, but ALSO stop the false
+#   report being what the next reader believes: the release policy reads
+#   audit-report.json, never the raw message (ACTA P024 — three findings, two
+#   HIGH, and the report on disk said none). The rejected report is kept beside
+#   it, and the replacement carries the raw verdict verbatim.
+#   Under --reference / --read-only nothing is written: a read-only caller (the
+#   FSM hook) asks a question, it does not repair the evidence.
+#   Reads $report, $last_msg and $reference from cmd_verify's scope.
+_vmismatch() {
+  local reason="$1" rejected="${report%.json}.rejected.json" tmp
+  if (( reference )); then
+    echo "verify: NOT verified — ${reason} (read-only: audit-report.json left as it is)" >&2
+    exit 2
+  fi
+  # Already rejected once, or already replaced with this same reason: leave both
+  # files exactly as they are, so a second verify changes nothing.
+  if [[ -e "$rejected" ]] \
+     || [[ "$(jq -r '.status // ""' "$report" 2>/dev/null)" == "unverifiable" \
+           && "$(jq -r '.audit_report.unverifiable_reasons[0] // ""' "$report" 2>/dev/null)" == "$reason" ]]; then
+    echo "verify: NOT verified — ${reason} (already recorded; no file touched)" >&2
+    exit 2
+  fi
+  tmp="$(mktemp "${report}.XXXXXX")" || _vfail "${reason} (and no temp file to record it in)"
+  if ! jq -n --arg r "$reason" --slurpfile raw "$last_msg" \
+       '{schema_version: "aid-2.0", artifact_type: "audit_report",
+         status: "unverifiable",
+         audit_report: {review_status: "unverifiable", outcome: "review_unverifiable",
+                        unverifiable_reasons: [$r],
+                        raw: ($raw[0] // null)}}' > "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    jq -n --arg r "$reason" '{schema_version: "aid-2.0", artifact_type: "audit_report",
+       status: "unverifiable",
+       audit_report: {review_status: "unverifiable", outcome: "review_unverifiable",
+                      unverifiable_reasons: [($r + " (raw_unreadable)")], raw: null}}' > "$tmp" \
+      || { rm -f "$tmp"; _vfail "${reason} (and the replacement could not be written)"; }
+  fi
+  mv "$report" "$rejected" || { rm -f "$tmp"; _vfail "${reason} (and the report could not be set aside)"; }
+  mv "$tmp" "$report"      || _vfail "${reason} (and the replacement could not be put in place)"
+  echo "verify: NOT verified — ${reason}; audit-report.json replaced with status: unverifiable carrying the raw verdict, the original is in $(basename "$rejected")" >&2
+  exit 2
+}
+
 # _file_sha_pref <file>  — "sha256:<64hex>" over a file's raw bytes; empty (→ a
 # guaranteed mismatch on any later compare) when the file is missing/unreadable,
 # so a pruned/edited artifact fails a hash check rather than crashing.
@@ -2762,14 +2822,14 @@ cmd_verify() {
   local reference=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --reference) reference=1; shift ;;
+      --reference|--read-only) reference=1; shift ;;
       --)          shift; break ;;
       -*)          _vfail "unknown flag: $1" ;;
       *)           break ;;
     esac
   done
   local evidence_dir="${1:-}"
-  [[ -n "$evidence_dir" ]] || _vfail "usage: verify [--reference] <evidence_dir>"
+  [[ -n "$evidence_dir" ]] || _vfail "usage: verify [--reference|--read-only] <evidence_dir>"
   [[ -d "$evidence_dir" ]] || _vfail "evidence_dir not a directory: $evidence_dir"
 
   local c3_dir="$evidence_dir/c3"
@@ -2893,10 +2953,13 @@ cmd_verify() {
   exp_review_status="$(jq -r '.review_status' <<<"$expected" 2>/dev/null)"
   r_status="$(jq -r '.status' "$report" 2>/dev/null || true)"
   r_review_status="$(jq -r '.audit_report.review_status' "$report" 2>/dev/null || true)"
+  # These two are the only assertions where the REPORT contradicts the RAW
+  # verdict; every other _vfail above is a precondition or a usage failure and
+  # keeps its immediate exit with nothing written.
   [[ "$r_status" == "$exp_status" ]] \
-    || _vfail "audit_report.status != expected-from-raw (report:${r_status} expected:${exp_status})"
+    || _vmismatch "audit_report.status != expected-from-raw (report:${r_status} expected:${exp_status})"
   [[ "$r_review_status" == "$exp_review_status" ]] \
-    || _vfail "audit_report.review_status != expected-from-raw (report:${r_review_status} expected:${exp_review_status})"
+    || _vmismatch "audit_report.review_status != expected-from-raw (report:${r_review_status} expected:${exp_review_status})"
 
   if [[ "$exp_status" == "unverifiable" ]]; then
     local r_outcome exp_reasons r_reasons

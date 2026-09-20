@@ -704,7 +704,7 @@ _imp269_write_receipt() {
   mkdir -p "$TEST_TMPDIR/codex-clean"
   cat > "$TEST_TMPDIR/codex-clean/codex" <<'CODEXEOF'
 #!/usr/bin/env bash
-if [[ "$1" == "--version" ]]; then echo "fake-clean-codex 0.0.0"; exit 0; fi
+if [[ "$1" == "--version" ]]; then echo "fake-clean-codex 99.0.0"; exit 0; fi
 last=""
 while [[ $# -gt 0 ]]; do case "$1" in --output-last-message|-o) last="$2"; shift 2 ;; *) shift ;; esac; done
 report="$(jq -nc --arg h "$FAKE_HEAD" --arg bh "$FAKE_BRIEF_HASH" \
@@ -1023,7 +1023,7 @@ _drive_clean_dispatch() {
   mkdir -p "$TEST_TMPDIR/codex-clean"
   cat > "$TEST_TMPDIR/codex-clean/codex" <<'CODEXEOF'
 #!/usr/bin/env bash
-if [[ "$1" == "--version" ]]; then echo "fake-clean-codex 0.0.0"; exit 0; fi
+if [[ "$1" == "--version" ]]; then echo "fake-clean-codex 99.0.0"; exit 0; fi
 last=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -1504,7 +1504,7 @@ JSON
   mkdir -p "$TEST_TMPDIR/codex-unverifiable-findings"
   cat > "$TEST_TMPDIR/codex-unverifiable-findings/codex" <<'CODEXEOF'
 #!/usr/bin/env bash
-if [[ "$1" == "--version" ]]; then echo "fake-unverifiable-findings-codex 0.0.0"; exit 0; fi
+if [[ "$1" == "--version" ]]; then echo "fake-unverifiable-findings-codex 99.0.0"; exit 0; fi
 last=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -1576,7 +1576,7 @@ CODEXEOF
   mkdir -p "$TEST_TMPDIR/codex-unverifiable-plain"
   cat > "$TEST_TMPDIR/codex-unverifiable-plain/codex" <<'CODEXEOF'
 #!/usr/bin/env bash
-if [[ "$1" == "--version" ]]; then echo "fake-unverifiable-plain-codex 0.0.0"; exit 0; fi
+if [[ "$1" == "--version" ]]; then echo "fake-unverifiable-plain-codex 99.0.0"; exit 0; fi
 last=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -1611,4 +1611,56 @@ CODEXEOF
   run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
   [ "$status" -ne 0 ]
   [[ "$output" == *"blocking_findings != false"* ]]
+}
+
+@test "P095: a report that contradicts the raw verdict is replaced with unverifiable carrying the raw, and the original is kept" {
+  _drive_clean_dispatch
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+  local REP="$TEST_EVIDENCE_DIR/audit-report.json" REJ="$TEST_EVIDENCE_DIR/audit-report.rejected.json"
+  local before; before="$(cat "$REP")"
+
+  jq '.status = "unverifiable"' "$REP" > "$REP.t" && mv "$REP.t" "$REP"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"replaced with status: unverifiable"* ]]
+  [ "$(jq -r '.status' "$REP")" = unverifiable ]
+  [ "$(jq -r '.audit_report.outcome' "$REP")" = review_unverifiable ]
+  [ "$(jq -r '.audit_report.raw.review_status // ""' "$REP")" != "" ]
+  [ -f "$REJ" ]
+  [[ "$(jq -r '.status' "$REJ")" == unverifiable ]]   # the tampered file, set aside verbatim
+
+  # a second verify changes neither file
+  local rep_sha rej_sha
+  rep_sha="$(sha256sum "$REP" | cut -d' ' -f1)"; rej_sha="$(sha256sum "$REJ" | cut -d' ' -f1)"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$REP" | cut -d' ' -f1)" = "$rep_sha" ]
+  [ "$(sha256sum "$REJ" | cut -d' ' -f1)" = "$rej_sha" ]
+}
+
+@test "P095: --read-only reports the same mismatch and writes nothing" {
+  _drive_clean_dispatch
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+  local REP="$TEST_EVIDENCE_DIR/audit-report.json"
+  jq '.audit_report.review_status = "unverifiable"' "$REP" > "$REP.t" && mv "$REP.t" "$REP"
+  local sha; sha="$(sha256sum "$REP" | cut -d' ' -f1)"
+  run bash "$DISPATCH" verify --read-only "$TEST_EVIDENCE_DIR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"read-only"* ]]
+  [ "$(sha256sum "$REP" | cut -d' ' -f1)" = "$sha" ]
+  [ ! -e "$TEST_EVIDENCE_DIR/audit-report.rejected.json" ]
+}
+
+@test "P095: a consistent report is untouched, and a usage failure writes nothing" {
+  _drive_clean_dispatch
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+  local REP="$TEST_EVIDENCE_DIR/audit-report.json" sha
+  sha="$(sha256sum "$REP" | cut -d' ' -f1)"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ "$(sha256sum "$REP" | cut -d' ' -f1)" = "$sha" ]
+  run bash "$DISPATCH" verify --nonsense "$TEST_EVIDENCE_DIR"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$REP" | cut -d' ' -f1)" = "$sha" ]
+  [ ! -e "$TEST_EVIDENCE_DIR/audit-report.rejected.json" ]
 }
