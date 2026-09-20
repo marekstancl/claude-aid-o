@@ -13,13 +13,18 @@
 #   T04  mixed-surfaces: scripts + schemas → high, union of required_lenses
 #   T05  medium-single-surface: commands/*.md → control_instruction (medium)
 #   T06  clean-low: tests/*.sh with assert/PASS/FAIL signals → low
-#   T07  unknown-surface: src/*.py (no match) → unverifiable
+#   T07  unknown-surface: a file no surface names → unverifiable (fail-closed)
 #   T08  unplanned-security-surface: new script not in plan → candidate adds scripts_core
 #   T09  control-instruction-md: commands/*.md NOT docs_trivial
 #   T10  range-undetermined: no --range, no fsm-state.yaml → exit 22
 #   T11  stub-completed: empty required_lenses → review-profile-check exit 0
 #   T12  profile_hash determinism
 #   T13  missing lenses detected: review-profile-check exit 1 with lens names
+#   T15  consumer project: src/auth/login.py → a named surface, not unverifiable
+#   T16  project override adds a surface and raises the level
+#   T17  an override that would lower the level leaves effective at the default's
+#   T18  an unparseable override falls back to the default with a warning
+#   T19  an override naming an undefined risk level is refused (exit 2)
 
 set -uo pipefail
 
@@ -108,6 +113,15 @@ add_and_commit() {
 }
 
 # ---------------------------------------------------------------------------
+# install_override: put a project review-profiles.yaml into a fixture repo
+# Usage: install_override <dir> <file>   (or pipe the YAML: install_override <dir> -)
+# ---------------------------------------------------------------------------
+install_override() {
+  mkdir -p "$1/.aid-o/config/policies"
+  cat "$2" > "$1/.aid-o/config/policies/review-profiles.yaml"
+}
+
+# ---------------------------------------------------------------------------
 # run_profile: invoke aid-review-profile.sh; returns exit code via stdout
 # Stdout from prefilter is suppressed (only exit code is echoed).
 # ---------------------------------------------------------------------------
@@ -190,6 +204,8 @@ assert_field "T01: required_lenses empty (length=0)" "0" "$T01_LENSES"
 # ===========================================================================
 T02_REPO="${SCRATCHPAD}/t02"
 setup_temp_repo "$T02_REPO"
+# Content signals are this repository's own policy, not the shipped default.
+install_override "$T02_REPO" "${PLUGIN_ROOT}/.aid-o/config/policies/review-profiles.yaml"
 add_and_commit "$T02_REPO" "hidden behavior in docs" \
   "docs/api-notes.md" "$(printf 'Notes about the API\ncmd_route handler\ntransition table\n')"
 T02_OUT="${SCRATCHPAD}/t02-profile.json"
@@ -274,12 +290,12 @@ T06_MATCHED=$(jq -r '.review_profile.matched_surfaces | join(",")' "$T06_OUT" 2>
 assert_contains "T06: matched=test_harness" "$T06_MATCHED" "test_harness"
 
 # ===========================================================================
-# T07: unknown-surface — src/*.py (no surface match, no docs_allowlist) → unverifiable
+# T07: unknown-surface — no surface, no docs_allowlist → unverifiable
 # ===========================================================================
 T07_REPO="${SCRATCHPAD}/t07"
 setup_temp_repo "$T07_REPO"
 add_and_commit "$T07_REPO" "unknown production file" \
-  "src/some-production-module.py" "def handle_request(): pass"
+  "assets/model.bin" "opaque"
 T07_OUT="${SCRATCHPAD}/t07-profile.json"
 T07_RC=$(run_profile "$T07_REPO" "/dev/null" "$T07_OUT")
 assert_exit "T07: unknown-surface exit" 0 "$T07_RC"
@@ -446,6 +462,73 @@ assert_contains "T14: candidate has docs_content" "$T14_CAND_S" "docs_content"
 # Union should elevate risk beyond docs_trivial
 if [[ "$T14_RISK" != "docs_trivial" ]]; then _pass "T14: risk elevated by plan-time (=$T14_RISK)"
 else _fail "T14: risk NOT elevated by plan-time surface — union broken"; fi
+
+# ===========================================================================
+# T15-T19: the profile in a consumer project, and the project override
+# ===========================================================================
+profile_field() { jq -r ".review_profile.$2" "$1" 2>/dev/null || echo ""; }
+
+T15_REPO="${SCRATCHPAD}/t15"
+setup_temp_repo "$T15_REPO"
+add_and_commit "$T15_REPO" "login change" "src/auth/login.py" "def login(): pass"
+T15_OUT="${SCRATCHPAD}/t15-profile.json"
+assert_exit "T15: consumer exit" 0 "$(run_profile "$T15_REPO" /dev/null "$T15_OUT")"
+assert_field "T15: risk_profile=high" "high" "$(profile_field "$T15_OUT" risk_profile)"
+assert_contains "T15: auth_security matched" "$(profile_field "$T15_OUT" 'matched_surfaces | join(",")')" "auth_security"
+assert_field "T15: no override recorded" "null" "$(profile_field "$T15_OUT" override_verdict)"
+
+T16_REPO="${SCRATCHPAD}/t16"
+setup_temp_repo "$T16_REPO"
+install_override "$T16_REPO" - <<'EOF'
+surfaces:
+  billing:
+    match: {path_globs: ["src/billing/**"]}
+    risk: high
+    lenses: [negative_case]
+EOF
+add_and_commit "$T16_REPO" "billing change" "src/billing/invoice.py" "def total(): pass"
+T16_OUT="${SCRATCHPAD}/t16-profile.json"
+assert_exit "T16: override exit" 0 "$(run_profile "$T16_REPO" /dev/null "$T16_OUT")"
+assert_field "T16: default_verdict=medium" "medium" "$(profile_field "$T16_OUT" default_verdict)"
+assert_field "T16: effective=high" "high" "$(profile_field "$T16_OUT" effective)"
+assert_contains "T16: billing matched" "$(profile_field "$T16_OUT" 'matched_surfaces | join(",")')" "billing"
+assert_field "T16: both policy files recorded" "2" "$(profile_field "$T16_OUT" 'policy_files | length')"
+
+T17_REPO="${SCRATCHPAD}/t17"
+setup_temp_repo "$T17_REPO"
+install_override "$T17_REPO" - <<'EOF'
+surfaces:
+  auth_security: {risk: low}
+EOF
+add_and_commit "$T17_REPO" "login change" "src/auth/login.py" "def login(): pass"
+T17_OUT="${SCRATCHPAD}/t17-profile.json"
+assert_exit "T17: lowering override exit" 0 "$(run_profile "$T17_REPO" /dev/null "$T17_OUT")"
+assert_field "T17: override_verdict=medium" "medium" "$(profile_field "$T17_OUT" override_verdict)"
+assert_field "T17: effective stays high" "high" "$(profile_field "$T17_OUT" effective)"
+assert_field "T17: risk_profile is the effective one" "high" "$(profile_field "$T17_OUT" risk_profile)"
+
+T18_REPO="${SCRATCHPAD}/t18"
+setup_temp_repo "$T18_REPO"
+install_override "$T18_REPO" - <<<'surfaces: [unclosed'
+add_and_commit "$T18_REPO" "login change" "src/auth/login.py" "def login(): pass"
+T18_OUT="${SCRATCHPAD}/t18-profile.json"
+T18_ERR=$(AID_PLUGIN_PATH="${PLUGIN_ROOT}/plugins/aid-orchestrator" AID_PROJECT_ROOT="$T18_REPO" \
+  bash "$PREFILTER" /dev/null "$SCRATCHPAD" --range HEAD~1..HEAD --out "$T18_OUT" 2>&1 >/dev/null)
+assert_exit "T18: unparseable override exit" 0 "$?"
+assert_contains "T18: warning printed" "$T18_ERR" "using plugin default"
+assert_field "T18: default verdict used" "high" "$(profile_field "$T18_OUT" risk_profile)"
+
+T19_REPO="${SCRATCHPAD}/t19"
+setup_temp_repo "$T19_REPO"
+install_override "$T19_REPO" - <<'EOF'
+surfaces:
+  billing: {match: {path_globs: ["src/billing/**"]}, risk: critical}
+EOF
+add_and_commit "$T19_REPO" "billing change" "src/billing/invoice.py" "def total(): pass"
+T19_ERR=$(AID_PLUGIN_PATH="${PLUGIN_ROOT}/plugins/aid-orchestrator" AID_PROJECT_ROOT="$T19_REPO" \
+  bash "$PREFILTER" /dev/null "$SCRATCHPAD" --range HEAD~1..HEAD --out "${SCRATCHPAD}/t19.json" 2>&1 >/dev/null)
+assert_exit "T19: undefined level refused" 2 "$?"
+assert_contains "T19: valid levels listed" "$T19_ERR" "valid: docs_trivial"
 
 # ===========================================================================
 # Results

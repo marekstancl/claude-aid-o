@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 525          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 527          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -386,6 +386,8 @@ enforcements:
   - {id: reports_scope_allowed,         type: 9,  source: "defaults/templates/epic.md (Allowed files/paths)", instruction: "skills/pipeline.md §7", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: ".aid-o/reports/ default allowed path so committed delivery reports pass scope-check"}
   - {id: delivery_report_template,      type: 10, source: "defaults/templates/delivery-report.md", instruction: "agents/reporter.md", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "fixed 7-section delivery-report template + machine-read frontmatter contract"}
   - {id: ttl_guard_date_override_test_only, type: 4, source: "scripts/aid-registry-ttl-guard.sh (AID_TTL_TODAY)", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, test: "scripts/tests/bats/test-registry-ttl.bats", description: "the guard date override AID_TTL_TODAY is honoured only with AID_TEST_MODE=1; without it the override is ignored with a warning, and a value that is not an ISO date exits 2, so the evidence verifier cannot be handed a past date in production"}
+  - {id: review_profile_override_never_lowers, type: 4, source: "scripts/aid-review-profile.sh (cmd_profile: effective = stricter of default_verdict and override_verdict)", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, test: "scripts/tests/test-review-profile.sh (T16, T17, T19)", description: "a project's .aid-o/config/policies/review-profiles.yaml is merged on top of the plugin default and may add surfaces or raise a level; the effective risk profile is the stricter of the default alone and the merged policy, both recorded in review-profile.json, and an override naming an undefined risk level exits 2 with the valid levels"}
+  - {id: review_role_name_known, type: 4, source: "scripts/aid-review-round.sh (cmd_collect unknown_role; _semantic_final_write lens check)", instruction: "skills/step-review-roles.md", severity: blocking, surface: internal-guard, status: active, verdict: unmapped, test: "scripts/tests/bats/test-review-round.bats (cases: 'an answer naming a role outside the round is invalid with unknown_role', 'cp3 close refuses a semantic file whose lens is not a reviewer of the round')", description: "collect marks an answer whose role is not among the round's reviewers_expected invalid with unknown_role, and close refuses a semantic-review-final.json whose lenses_run or finding lens is outside the round's roles plus the literal step_check, so no artifact carries a lens nobody defined (WAN P101 final-9 carried an invented merge_integrity)"}
 
   # ── E-046-3_3: CP1/behavior_trace enforcement registration ─────────────────
   - id: cp1_critical_path_flow_trace

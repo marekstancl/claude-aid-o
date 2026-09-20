@@ -2,117 +2,145 @@ version: "1.0"
 enforcement: observe
 unknown_surface_profile: unverifiable
 
-# docs_allowlist: narrowed to actual documentation paths only
-# control_instruction surface (commands/skills/agents/templates) is NOT here — different semantics
+# Surfaces describe KINDS of files, never one repository's layout: the same file
+# ships to every project. A project names its own surfaces in
+# .aid-o/config/policies/review-profiles.yaml, which is merged on top of this
+# file; the effective verdict is the stricter of "this file alone" and "this
+# file with the project's", so a project can raise its review and never lower it.
+# A changed file that no matched surface and no docs glob names makes the verdict
+# `unknown_surface_profile`.
 docs_allowlist:
   - "docs/**"
-  - "README.md"
-  - "CHANGELOG.md"
-  - "plugins/aid-orchestrator/README.md"
-  - "plugins/aid-orchestrator/CHANGELOG.md"
+  - "**/*.md"
+  - "LICENSE"
+  # AID's own workspace: plans, tasks, backlog and evidence are documents.
+  # .aid-o/config is not here: it is the `configuration` surface below.
+  - ".aid-o/plans/**"
+  - ".aid-o/tasks/**"
+  - ".aid-o/work/**"
 
 surfaces:
   control_instruction:
     match:
       path_globs:
-        - "plugins/aid-orchestrator/commands/**/*.md"
-        - "plugins/aid-orchestrator/skills/**/*.md"
-        - "plugins/aid-orchestrator/agents/**/*.md"
-        - "plugins/aid-orchestrator/defaults/templates/**/*.md"
-      content_signals: []
+        - "**/commands/**/*.md"
+        - "**/skills/**/*.md"
+        - "**/agents/**/*.md"
+        - "**/templates/**/*.md"
+        - "**/CLAUDE.md"
+        - "**/AGENTS.md"
     risk: medium
-    lenses:
-      - behavior_trace
-      - ac_to_test_identity
-    probes:
-      - "check for behavioral changes in step dispatch instructions"
-      - "verify AC and test-identity alignment"
+    lenses: [behavior_trace, ac_to_test_identity]
 
   scripts_core:
     match:
-      path_globs:
-        - "plugins/aid-orchestrator/scripts/**/*.sh"
-        - "plugins/aid-orchestrator/scripts/lib/**/*.sh"
-      content_signals:
-        - "cmd_"
-        - "transition"
-        - "log_event"
-        - "die "
-        - "exit "
+      path_globs: ["**/*.sh"]
     risk: high
-    lenses:
-      - behavior_trace
-      - negative_case
-      - ac_to_test_identity
-      - security_threat_model
-    probes:
-      - "check FSM state transitions"
-      - "check exit codes and error paths"
-      - "check input validation"
+    lenses: [behavior_trace, negative_case, ac_to_test_identity, security_threat_model]
+
+  source_code:
+    match:
+      path_globs:
+        - "**/*.py"
+        - "**/*.ts"
+        - "**/*.tsx"
+        - "**/*.js"
+        - "**/*.jsx"
+        - "**/*.vue"
+        - "**/*.svelte"
+        - "**/*.go"
+        - "**/*.rs"
+        - "**/*.java"
+        - "**/*.kt"
+        - "**/*.swift"
+        - "**/*.php"
+        - "**/*.rb"
+        - "**/*.cs"
+        - "**/*.c"
+        - "**/*.h"
+        - "**/*.cpp"
+        - "**/*.html"
+        - "**/*.css"
+    risk: medium
+    lenses: [behavior_trace, ac_to_test_identity, negative_case]
+
+  data_migrations:
+    match:
+      path_globs: ["**/migrations/**", "**/*.sql"]
+    risk: high
+    lenses: [behavior_trace, negative_case, field_lineage]
+
+  auth_security:
+    match:
+      path_globs: ["**/auth/**", "**/security/**", "**/*auth*.*"]
+    risk: high
+    lenses: [behavior_trace, negative_case, security_threat_model]
+
+  dependency_manifests:
+    match:
+      path_globs:
+        - "**/package.json"
+        - "**/package-lock.json"
+        - "**/pnpm-lock.yaml"
+        - "**/yarn.lock"
+        - "**/requirements*.txt"
+        - "**/pyproject.toml"
+        - "**/poetry.lock"
+        - "**/go.mod"
+        - "**/go.sum"
+        - "**/Cargo.toml"
+        - "**/Cargo.lock"
+        - "**/Dockerfile*"
+        - "**/docker-compose*.yml"
+    risk: medium
+    lenses: [behavior_trace, security_threat_model]
+
+  configuration:
+    match:
+      path_globs: ["**/*.yaml", "**/*.yml", "**/*.toml", "**/*.json", "**/*.ini", "**/*.env.example"]
+    risk: medium
+    lenses: [behavior_trace, negative_case]
+
+  ci_workflows:
+    match:
+      path_globs: [".github/workflows/**", ".gitlab-ci.yml"]
+    risk: medium
+    lenses: [behavior_trace, negative_case]
 
   test_harness:
     match:
       path_globs:
-        - "plugins/aid-orchestrator/scripts/tests/**/*.sh"
-        - "plugins/aid-orchestrator/scripts/tests/bats/**/*.bats"
-      content_signals:
-        - "assert"
-        - "PASS"
-        - "FAIL"
-        - "Results:"
+        - "**/tests/**"
+        - "**/test/**"
+        - "**/*.bats"
+        - "**/test_*.py"
+        - "**/*_test.*"
+        - "**/*.test.*"
+        - "**/*.spec.*"
     risk: low
-    lenses:
-      - behavior_trace
-      - requirement_test_drift
-    probes:
-      - "verify test covers new behavior"
-      - "check for gap between AC and test assertions"
+    lenses: [behavior_trace, requirement_test_drift]
 
   schemas_and_policies:
     match:
       path_globs:
-        - "plugins/aid-orchestrator/defaults/schemas/**/*.json"
-        - "plugins/aid-orchestrator/defaults/policies/**/*.yaml"
-        - "plugins/aid-orchestrator/defaults/templates/**/*.json"
-      content_signals:
-        - "required"
-        - "enforcement"
-        - "blocking"
-        - "observe"
+        - "**/schemas/**/*.json"
+        - "**/*.schema.json"
+        - "**/policies/**/*.yaml"
+        - "**/templates/**/*.json"
     risk: medium
-    lenses:
-      - behavior_trace
-      - ac_to_test_identity
-      - field_lineage
-    probes:
-      - "check required fields align with producers/consumers"
-      - "verify policy enforcement fields"
+    lenses: [behavior_trace, ac_to_test_identity, field_lineage]
 
   fixtures:
     match:
-      path_globs:
-        - "plugins/aid-orchestrator/scripts/tests/fixtures/**"
-        - "plugins/aid-orchestrator/scripts/tests/e2e/evidence/**"
-      content_signals: []
+      path_globs: ["**/fixtures/**"]
     risk: low
-    lenses:
-      - requirement_test_drift
-    probes:
-      - "verify fixture covers expected scenarios"
+    lenses: [requirement_test_drift]
 
   docs_content:
     match:
-      path_globs:
-        - "docs/**"
-        - "README.md"
-        - "CHANGELOG.md"
-        - "plugins/aid-orchestrator/README.md"
-        - "plugins/aid-orchestrator/CHANGELOG.md"
-      content_signals: []
+      path_globs: ["docs/**", "**/*.md"]
     risk: docs_trivial
     lenses: []
-    probes:
-      - "no behavioral lenses required for pure docs changes"
 
 risk_profiles:
   docs_trivial:

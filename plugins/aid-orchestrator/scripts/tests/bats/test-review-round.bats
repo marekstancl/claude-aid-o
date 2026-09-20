@@ -591,6 +591,27 @@ _close1() {
   run _close1 cp3; [ "$status" -eq 0 ]; [[ "$output" == *"belongs to no plan"* ]]
   [ "$(jq -r '.findings[0].status' "$E/cp3/round-1/merged.json")" = open ]
 }
+@test "collect: an answer naming a role outside the round is invalid with unknown_role" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist '.role = "epic_behaviour"'
+  run _S collect --round 1
+  jq -e '.invalid[] | select(.role == "step_generalist" and (.reason | startswith("unknown_role")))' "$(D 1)/collect.json"
+}
+@test "cp3 close refuses a semantic file whose lens is not a reviewer of the round" {
+  _erepo; _sc cp3 ""
+  local args=(--checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1)
+  "$ROUND_SH" prepare "${args[@]}" >/dev/null
+  local d="$E/cp3/round-1"
+  jq -n '{role: "epic_generalist", checkpoint: "cp3", findings: [{id: "g-1", checkpoint: "cp3", step: 0, severity: "minor",
+      claim: "naming", command: "grep -n x src/new.py", evidence: "src/new.py:1", fix: "rename"}]}' > "$d/reviewer-epic_generalist.json"
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus cp3-epic-generalist --output-file "$d/reviewer-epic_generalist.json" --evidence-dir "$d" >/dev/null
+  "$ROUND_SH" collect "${args[@]}" >/dev/null
+  jq '.findings |= map(.reported_by = ["merge_integrity"])' "$d/merged.json" > "$d/m" && mv "$d/m" "$d/merged.json"
+  run "$ROUND_SH" close "${args[@]}" --tokens epic_generalist=5
+  [ "$status" -ne 0 ]; [[ "$output" == *"merge_integrity"* ]]
+  [ ! -f "$E/semantic-review-final.json" ]
+}
 @test "cp3 close writes <run>/semantic-review-final.json in the protocol shape, valid against its schema, and refuses to close when it cannot" {
   _erepo; _sc cp3 ""
   run _close1 cp3; [ "$status" -eq 0 ]

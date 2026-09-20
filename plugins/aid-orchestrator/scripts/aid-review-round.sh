@@ -431,8 +431,10 @@ cmd_collect() {
     fi
     aid_plan_review_unfence "$answer" "$tmp"
     if err="$(aid_plan_review_answer_error "$tmp" "$CHECKPOINT")"; then
-      if [[ "$(jq -r '.role' "$tmp")" != "$role" ]]; then
-        err="role_mismatch: the file names role $(jq -r '.role' "$tmp")"
+      local named; named="$(jq -r '.role' "$tmp")"
+      if [[ "$named" != "$role" ]]; then
+        _expects "$named" "$dir" && err="role_mismatch: the file names role ${named}" \
+          || err="unknown_role: ${named} is not a reviewer of this round"
       fi
     fi
     if [[ -z "$err" && "${RC_PROVIDER[$i]}" == codex && "$(jq -r '.provider // ""' "$tmp")" == claude ]] \
@@ -525,7 +527,7 @@ _semantic_final_write() {
   for r in "${BASE}"/round-*/merged.json; do [[ -f "$r" ]] && rounds+=("$r"); done
   (( ${#rounds[@]} )) || { echo "close: no merged.json under ${BASE}" >&2; return 1; }
   jq -s --arg base "$base" --arg head "$(_head)" --arg range "$range" --arg v "$verdict" --arg at "$(_now)" \
-        --argjson roles "$(printf '%s\n' "${RC_ROLE[@]}" | jq -R . | jq -s .)" --argjson from "$(printf '%s\n' "${rounds[@]}" | jq -R . | jq -s .)" '
+        --argjson roles "$(_json_strings "${RC_ROLE[@]}")" --argjson from "$(printf '%s\n' "${rounds[@]}" | jq -R . | jq -s .)" '
     def sev: {"blocker": "critical", "major": "medium", "minor": "low"}[.] // "low";
     def st: {"fixed": "resolved", "carried": "deferred"}[.] // "open";
     def file: (split(";")[0] | sub("^[0-9a-f]{7,40}:"; "") | split(":")[0]);
@@ -539,11 +541,15 @@ _semantic_final_write() {
                               status: (.status | st), detail: "\(.claim) (\(.severity), reported \(.status); evidence \(.evidence); fix: \(.fix))"}))}}' \
     "${rounds[@]}" > "$tmp" || { rm -f "$tmp"; return 1; }
   local err
-  err="$(jq -r --slurpfile s "$schema" '
+  # A lens is a reviewer of this round, or step_check for a finding of the
+  # deterministic step check; no artifact carries a name nobody defined.
+  err="$(jq -r --slurpfile s "$schema" --argjson roles "$(_json_strings "${RC_ROLE[@]}" step_check)" '
     ($s[0]) as $sc | ($sc.properties.semantic_review.properties.findings.items) as $fi
     | if .artifact_type != $sc.properties.artifact_type.const then "artifact_type"
       elif (.semantic_review | type) != "object" then "semantic_review"
       elif (.semantic_review.mode | IN($sc.properties.semantic_review.properties.mode.enum[]) | not) then "semantic_review.mode"
+      elif (.semantic_review.lenses_run - $roles | length) > 0 then "lenses_run names \(.semantic_review.lenses_run - $roles | join(", ")), not a reviewer of this round"
+      elif ([.semantic_review.findings[].lens] - $roles | length) > 0 then "finding lens \([.semantic_review.findings[].lens] - $roles | unique | join(", ")) is not a reviewer of this round"
       else (first(.semantic_review.findings[] | . as $x
               | ($fi.required - (keys)) as $missing
               | if ($missing | length) > 0 then "finding \($x.fingerprint): missing \($missing | join(", "))"
