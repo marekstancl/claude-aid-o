@@ -272,7 +272,6 @@ EPICs. The per-EPIC reviews already judged each EPIC alone
 3. Was an EPIC of the plan not reviewed as a whole (`cp3: absent`)? Then read its part of the range as its EPIC reviewer would have.
 4. Does the range remove or weaken an existing behaviour that no criterion of the plan asked to change?
 5. Is a finding the per-EPIC reviews left open still true at the candidate? Report it once, with today's evidence.
-6. Does the range add a guard, a meta-test or a check written against a named incident? Then name what it still lets through: build, in your head, the smallest change that repeats the incident, and see whether the new guard would fail on it (a file pattern it does not scan, a mechanism it does not look at).
 
 ### Stop rule
 

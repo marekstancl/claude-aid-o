@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.101.1] — 2026-09-20
+
+### Changed
+- **Brána porovnání plánu neříká „prošlo", když část kritérií přeskočila** — jakékoli přeskočené kritérium dá `overall_verdict: partial`, kritérium bez řádku výsledku `fail`; dřív stačilo jediné ověřené kritérium a čtyři z devíti nepřečtených vyšly zeleně (nalezeno čtením celku na ACTA a WAN).
+- **Brána, která skončí úspěchem nad ničím, neprojde** — `run_gate` zapíše `fail` s důvodem `vacuous_pass`, když výstup sám říká „0 files checked", „collected 0 items", „no tests ran" nebo prázdný plán TAP; počet nula CHYB zůstává výsledkem.
+- **Nález zahozený jen kvůli formě se jednou vrátí revizorovi** — `collect` takovou odpověď vypíše jako neplatnou s důvodem `form: <id> missing_evidence …` a jde běžnou cestou `retry`; druhá vadná odpověď se přijme a nález se zahodí jako dřív.
+- **Přepínače revizí čte jedna funkce** — `aid_review_switched_off` v `lib/aid-review-config.sh` nahradila tři kopie téže smyčky v řídicím skriptu, rozhodnutí o vydání a načítání konfigurace.
+
 ## [2.101.0] — 2026-09-20
 
 ### ⚠️ Změna chování — přečti před upgradem
