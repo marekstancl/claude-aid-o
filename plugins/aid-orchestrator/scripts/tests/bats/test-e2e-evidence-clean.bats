@@ -2,11 +2,9 @@
 # aid-tier: t2
 # P065 Step 13 (E-065-4_7) — Evidence sanitization backstop.
 #
-# Committed e2e evidence (the P065 Step 1 codex-stream-sample/ grounding
-# sample, and the Step 13 c3-dogfood-fixture/ + c3-dogfood-live-attestation.md
-# dogfood proof) is produced by scripts that sanitize before writing
-# (discover-codex-stream.sh's sanitize()/_verify_no_leaks, c3-dogfood.sh's
-# _sanitize_file()/_verify_no_leaks_dir()). This suite is the BACKSTOP, not the
+# Committed e2e evidence (the codex-stream-sample/ grounding sample) is produced
+# by a script that sanitizes before writing (discover-codex-stream.sh's
+# sanitize()/_verify_no_leaks). This suite is the BACKSTOP, not the
 # only line of defense: it independently greps every committed evidence dir for
 # leak signatures and fails the build if any is found, so a future manual edit
 # or a harness regression cannot silently reintroduce a leak.
@@ -64,92 +62,4 @@ _grep_leak_signatures() {
   run _grep_leak_signatures "$E2E_EVIDENCE_DIR/codex-stream-sample"
   [ "$status" -ne 0 ]
   [ -z "$output" ]
-}
-
-@test "e2e evidence: c3-dogfood-live-attestation.md exists and is committed" {
-  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-live-attestation.md" ]
-}
-
-@test "e2e evidence: c3-dogfood-live-attestation.md contains no leak signatures" {
-  run _grep_leak_signatures "$E2E_EVIDENCE_DIR/c3-dogfood-live-attestation.md"
-  [ "$status" -ne 0 ]
-  [ -z "$output" ]
-}
-
-@test "e2e evidence: c3-dogfood-live-attestation.md records the required attestation fields" {
-  grep -qE '^\| codex_version \| `codex-cli' "$E2E_EVIDENCE_DIR/c3-dogfood-live-attestation.md"
-  grep -qE '^\| codex_session_id \(prefix only\) \| `.{8,}\.\.\.`' "$E2E_EVIDENCE_DIR/c3-dogfood-live-attestation.md"
-  grep -qE '^live_verify: passed$' "$E2E_EVIDENCE_DIR/c3-dogfood-live-attestation.md"
-}
-
-@test "e2e evidence: c3-dogfood-fixture/ exists and is committed" {
-  [ -d "$E2E_EVIDENCE_DIR/c3-dogfood-fixture" ]
-  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture/audit-input-manifest.json" ]
-  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture/audit-report.json" ]
-  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture/c3/c3-dispatch.json" ]
-  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture/c3/codex-last-message.json" ]
-  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture/c3/codex-events.jsonl" ]
-}
-
-@test "e2e evidence: c3-dogfood-fixture/ contains no leak signatures" {
-  run _grep_leak_signatures "$E2E_EVIDENCE_DIR/c3-dogfood-fixture"
-  [ "$status" -ne 0 ]
-  [ -z "$output" ]
-}
-
-@test "e2e evidence: c3-dogfood-fixture/ passes aid-c3-dispatch.sh verify --reference" {
-  local dispatch="$REPO_ROOT/plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh"
-  run bash "$dispatch" verify --reference "$E2E_EVIDENCE_DIR/c3-dogfood-fixture"
-  [ "$status" -eq 0 ]
-  [[ "$output" == verified* ]]
-}
-
-# --- IMP-245 follow-up: real-AC dogfood proof (pass + fail, both determinate) ---
-
-@test "e2e evidence: c3-dogfood-fixture-real-ac-pass/ exists, is committed, and is a determinate pass" {
-  [ -d "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass" ]
-  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass/audit-report.json" ]
-  run jq -r '.status' "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass/audit-report.json"
-  [ "$status" -eq 0 ]
-  [ "$output" = "pass" ]
-}
-
-@test "e2e evidence: c3-dogfood-fixture-real-ac-fail/ exists, is committed, and is a determinate fail" {
-  [ -d "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail" ]
-  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail/audit-report.json" ]
-  run jq -r '.status' "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail/audit-report.json"
-  [ "$status" -eq 0 ]
-  [ "$output" = "fail" ]
-  run jq -r '.audit_report.blocking_findings' "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail/audit-report.json"
-  [ "$output" = "true" ]
-}
-
-@test "e2e evidence: c3-dogfood-fixture-real-ac-{pass,fail}/ contain no leak signatures" {
-  run _grep_leak_signatures "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass"
-  [ "$status" -ne 0 ]
-  [ -z "$output" ]
-  run _grep_leak_signatures "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail"
-  [ "$status" -ne 0 ]
-  [ -z "$output" ]
-}
-
-@test "e2e evidence: c3-dogfood-fixture-real-ac-{pass,fail}-live-attestation.md exist and contain no leak signatures" {
-  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass-live-attestation.md" ]
-  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail-live-attestation.md" ]
-  run _grep_leak_signatures "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass-live-attestation.md"
-  [ "$status" -ne 0 ]
-  [ -z "$output" ]
-  run _grep_leak_signatures "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail-live-attestation.md"
-  [ "$status" -ne 0 ]
-  [ -z "$output" ]
-}
-
-@test "e2e evidence: c3-dogfood-fixture-real-ac-{pass,fail}/ both pass aid-c3-dispatch.sh verify --reference" {
-  local dispatch="$REPO_ROOT/plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh"
-  run bash "$dispatch" verify --reference "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass"
-  [ "$status" -eq 0 ]
-  [[ "$output" == verified* ]]
-  run bash "$dispatch" verify --reference "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail"
-  [ "$status" -eq 0 ]
-  [[ "$output" == verified* ]]
 }

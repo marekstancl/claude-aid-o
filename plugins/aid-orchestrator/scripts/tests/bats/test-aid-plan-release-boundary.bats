@@ -6146,8 +6146,7 @@ YAML
   echo "$dir/fsm-state.yaml"
 }
 
-# _rs_install_spies — the spy harness, following
-# scripts/tests/bats/test-aid-c3-dispatch.bats:1059-1068: a temp directory
+# _rs_install_spies — the spy harness: a temp directory
 # prepended to PATH holding executables that append their argv to a log.
 #
 # ONLY SEAMS A `done-advance` CALL CAN GENUINELY REACH ARE INSTALLED, so that a

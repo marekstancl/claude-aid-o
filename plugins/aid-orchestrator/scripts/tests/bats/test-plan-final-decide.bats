@@ -123,7 +123,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ "$(_decision plan_summary.close.attempts)" -eq 1 ]
   local usd; usd="$(jq -s '[.[].reviewers[].usd] | add | . * 10000 | round / 10000' "$(_run_dir)"/cp7/round-*/measurement.json)"
   [ "$(_decision plan_summary.close.usd)" = "$usd" ]
-  grep -q "Uzavření:\*\* 1 pokus" "$(_run_dir)/pm-summary.md"
+  grep -q "Close:\*\* 1 attempt" "$(_run_dir)/pm-summary.md"
   # deciding twice changes nothing
   _stage decide; [ "$status" -eq 0 ]; [[ "$output" == *"already decided"* ]]
 }

@@ -376,22 +376,8 @@ TYPE_PAYLOAD_MAP[delivery_report]="delivery_report"
 TYPE_PAYLOAD_MAP[verification_report]="verification_report"
 TYPE_PAYLOAD_MAP[invalidation_map]="invalidation_map"
 TYPE_PAYLOAD_MAP[waiver]="waiver"
-# P065 E-065-7_7 post-merge fix ("control_protocol envelope" finding, 10th
-# DONE-review audit): c3-dispatch.json (aid-c3-dispatch.sh's dispatch-side
-# provenance record) declares schema_version:"aid-2.0" and is therefore
-# swept into aid-evidence-verify.sh's V2_ARTIFACTS scan unconditionally
-# (any JSON file with schema_version=="aid-2.0" and control_protocol!=
-# "legacy" gets fully validated — there is no artifact-type allowlist at
-# that layer). It was missing the FULL envelope (control_protocol,
-# identity, revision, status, verdict — not just control_protocol) AND was
-# never registered here, so every real C3-active EPIC's evidence pack has
-# always failed aid-evidence-verify.sh's verification_report step — never
-# caught because aid-release-policy.sh's verification_report input had
-# itself never actually been run for real against a live C3-bridge EPIC
-# until this was discovered. "dispatch" (not "c3_dispatch") is deliberately
-# reused as the payload key: it is the artifact's existing, already-present
-# distinguishing content (invoked/exit_code/outcome/etc.) — no restructuring
-# of aid-c3-dispatch.sh's established shape was needed to satisfy this.
+# c3_dispatch: retired producer (the C3 audit bridge, removed in 2.101.0); the
+# payload key is "dispatch". Kept so evidence written before it still validates.
 TYPE_PAYLOAD_MAP[c3_dispatch]="dispatch"
 # P064 E-064-1_2 Step 2: plan-boundary-manifest.json (plan/Pxxx as the
 # integration branch for a plan's EPICs) becomes a first-class protocol-v2

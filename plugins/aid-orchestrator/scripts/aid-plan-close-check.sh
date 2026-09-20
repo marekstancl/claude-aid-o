@@ -1,25 +1,17 @@
 #!/usr/bin/env bash
 # aid-plan-close-check.sh — mechanical plan-close self-check.
 #
-# Replaces the repeated manual fixes the PM has done by hand across AID
-# projects (stale/untracked delivery reports, reports claiming a Head that
-# is no longer current, queue.yaml/active.md claiming "waiting for merge"
-# long after the merge happened, fsm-state.yaml showing DONE with pending
-# steps) with ONE invokable script that either passes cleanly, auto-corrects
-# what is safely correctable (--auto-annotate, Check 2 only), or fails loud
-# with a specific reason.
+# One invokable script for what used to be fixed by hand at a plan close:
+# queue.yaml/active.md claiming "waiting for merge" long after the merge,
+# fsm-state.yaml showing DONE with pending steps, an open carried obligation,
+# and (with --plan-branch) the plan-branch close boundary. It passes cleanly
+# or fails loud with a specific reason.
 #
 # Usage:
-#   aid-plan-close-check.sh <plan_id> [--project-root <path>] [--auto-annotate]
+#   aid-plan-close-check.sh <plan_id> [--project-root <path>] [--plan-branch] [--json]
 #
-#   <plan_id>          e.g. P062 (drives .aid-o/reports/<plan_id>-*.md lookup
-#                      and E-<nnn>-* EPIC-id matching, nnn = digits after 'P')
+#   <plan_id>          e.g. P062 (drives E-<nnn>-* EPIC-id matching)
 #   --project-root     project root containing .aid-o/ (default: cwd)
-#   --auto-annotate    Check 2 ONLY: for a stale-but-docs-only report, rewrite
-#                      the frontmatter to add Head_at_generation (old head),
-#                      update Head to current HEAD, and write a Head_note.
-#                      Idempotent — a report whose Head already equals HEAD
-#                      is left untouched on a second run.
 #
 # Exit code: 0 = all checks pass (or are non-blocking), non-zero = at least
 # one blocking failure. Never silent — every check prints PASS/FAIL/INFO.
@@ -41,36 +33,12 @@ source "${SCRIPT_DIR}/lib/aid-roots.sh"
 # shellcheck source=lib/aid-obligations.sh
 source "${SCRIPT_DIR}/lib/aid-obligations.sh"
 
-# ─────────────────────────────────────────────────────────────────────────
-# Check 2 classification regex — anything NOT matching this allow-list is
-# treated as code/test and forces "regeneration required" rather than a
-# docs-only annotation.
-#
-# CRITICAL FIX (repo issue #IMP-*): The allow-list must use anchored,
-# path-segment-aware patterns to avoid false positives where real code files
-# (e.g., src/docs/generator.py, packages/sdk-docs/index.ts) get misclassified
-# as docs-only merely because "docs/" appears as a substring in their path.
-#
-# Patterns (applied via grep -Ev against full relative paths):
-#  - README/CHANGELOG: match as basename only, accounting for extensions
-#    (e.g., README.md, CHANGELOG.txt). Regex: (^|/)README($|\.) for README.
-#  - docs/: match as a path SEGMENT, not a substring. Regex: (^|/)docs/ to
-#    match "docs/" at the path root or after a /, but NOT inside a filename
-#    like packages/sdk-docs/index.ts.
-#  - \.md$: already anchored (suffix match).
-#  - Exact paths for .aid-o/ files (backlog.md, queue.yaml, active.md) to
-#    avoid ambiguity with similarly-named files in other directories.
-# ─────────────────────────────────────────────────────────────────────────
-DOCS_ONLY_ALLOW_RE='(^|/)README($|\.)|\.md$|(^|/)CHANGELOG($|\.)|^\.aid-o/work/backlog\.md$|^\.aid-o/config/queue\.yaml$|^\.aid-o/work/active\.md$|(^|/)docs/'
-
 usage() {
   cat >&2 <<'EOF'
-Usage: aid-plan-close-check.sh <plan_id> [--project-root <path>] [--auto-annotate] [--skip-delivery-report]
+Usage: aid-plan-close-check.sh <plan_id> [--project-root <path>] [--plan-branch] [--json]
 
   <plan_id>              e.g. P062
   --project-root         project root containing .aid-o/ (default: cwd)
-  --auto-annotate        Check 2 only: rewrite a stale-but-docs-only report's
-                         frontmatter (Head_at_generation + Head + Head_note)
   --plan-branch          P068 Step 6: additionally run Check 5, the plan-branch
                          close boundary (EPIC terminality + ancestry, the
                          plan-final evidence bound to candidate_sha, the C4 and
@@ -87,14 +55,6 @@ Usage: aid-plan-close-check.sh <plan_id> [--project-root <path>] [--auto-annotat
                          by the same process still blocks. May be given at
                          most once, and only for this plan's own
                          plan-close.lock — the exclusion cannot be widened.
-  --skip-delivery-report Caller has reporter.enabled:false — a missing
-                         delivery/boundary report is expected and must NOT
-                         fail Check 1. Only the report-existence requirement
-                         is relaxed; Check 1 still validates tracking/
-                         freshness for a report that DOES exist on disk, and
-                         Checks 2-4 (Head freshness, fsm-state DONE-pending,
-                         queue/active revalidation) are UNAFFECTED — this
-                         flag never widens into skipping the whole script.
 EOF
   exit 2
 }
@@ -105,8 +65,6 @@ PLAN_ID=""
 # Outside a git repository the old cwd default is kept — the explicit
 # `git rev-parse` guard below still owns the not-a-repo failure path.
 PROJECT_ROOT="$(aid_state_root 2>/dev/null || pwd)"
-AUTO_ANNOTATE=0
-SKIP_DELIVERY_REPORT=0
 PLAN_BRANCH_MODE=0
 CLOSE_MODE="merge"
 CLOSE_OP_ID=""
@@ -115,12 +73,10 @@ EXCLUDE_LOCKS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-root) [[ $# -ge 2 ]] || usage; PROJECT_ROOT="$2"; shift 2 ;;
-    --auto-annotate) AUTO_ANNOTATE=1; shift ;;
     --plan-branch) PLAN_BRANCH_MODE=1; shift ;;
     --close-mode) [[ $# -ge 2 ]] || usage; CLOSE_MODE="$2"; shift 2 ;;
     --exclude-lock) [[ $# -ge 2 ]] || usage; EXCLUDE_LOCKS+=("$2"); shift 2 ;;
     --close-op-id) [[ $# -ge 2 ]] || usage; CLOSE_OP_ID="$2"; shift 2 ;;
-    --skip-delivery-report) SKIP_DELIVERY_REPORT=1; shift ;;
     --json) JSON_OUT=1; shift ;;
     -h|--help) usage ;;
     -*) echo "Unknown flag: $1" >&2; usage ;;
@@ -177,7 +133,6 @@ PLAN_NUM="${PLAN_ID#P}"
 # These are PROJECT_ROOT-relative by construction: the `cd "$PROJECT_ROOT"`
 # above pins the cwd to the resolved state root (P074 Step 1), so ACTIVE_FILE
 # and friends follow PROJECT_ROOT wherever the script was invoked from.
-REPORTS_DIR=".aid-o/reports"
 QUEUE_FILE=".aid-o/config/queue.yaml"
 ACTIVE_FILE=".aid-o/work/active.md"
 
@@ -194,346 +149,6 @@ JSON_OUT="${JSON_OUT:-0}"
 _pass() { RESULT_LINES+=("PASS  [$1] $2"); }
 _fail() { RESULT_LINES+=("FAIL  [$1] $2"); OVERALL_RC=1; }
 _info() { RESULT_LINES+=("INFO  [$1] $2"); }
-
-# ═══════════════════════════════════════════════════════════════════════
-# Check 1 — official report tracking
-# ═══════════════════════════════════════════════════════════════════════
-
-REPORT_STORAGE_MODE=""     # set here, read by Check 2
-FOUND_REPORTS=()           # report paths that exist on disk, set here, read by Check 2
-
-# _git_file_status <path> — echoes exactly one of:
-#   committed            tracked, in HEAD's tree, no uncommitted changes
-#   untracked             never added to the index ("??" in git status)
-#   staged_uncommitted    in the index but not yet in any commit
-#   modified_uncommitted  in HEAD but has uncommitted changes since
-_git_file_status() {
-  local f="$1"
-  if ! git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
-    echo "untracked"; return 0
-  fi
-  if ! git cat-file -e "HEAD:${f}" 2>/dev/null; then
-    echo "staged_uncommitted"; return 0
-  fi
-  if [[ -n "$(git status --porcelain -- "$f" 2>/dev/null)" ]]; then
-    echo "modified_uncommitted"; return 0
-  fi
-  echo "committed"
-}
-
-check1_report_tracking() {
-  # Per-project runtime detection — reuse `git check-ignore` directly against
-  # a probe path under .aid-o/reports/ (the path need not exist on disk for
-  # check-ignore to evaluate the ignore patterns against it).
-  local probe="${REPORTS_DIR}/__aid_plan_close_probe__"
-  if git check-ignore -q "$probe" 2>/dev/null; then
-    REPORT_STORAGE_MODE="private/gitignored"
-  else
-    REPORT_STORAGE_MODE="committed"
-  fi
-
-  local delivery="${REPORTS_DIR}/${PLAN_ID}-delivery.md"
-  local boundary="${REPORTS_DIR}/${PLAN_ID}-boundary.md"
-  local f
-
-  for f in "$delivery" "$boundary"; do
-    if [[ ! -f "$f" ]]; then
-      if [[ "$f" == "$delivery" ]]; then
-        if [[ "$SKIP_DELIVERY_REPORT" -eq 1 ]]; then
-          _info "check1" "$f does not exist — reporter.enabled:false (--skip-delivery-report), not a blocker"
-        else
-          _fail "check1" "$f does not exist — report never generated (report_storage: ${REPORT_STORAGE_MODE})"
-        fi
-      else
-        _info "check1" "$f not present (boundary report optional) — report_storage: ${REPORT_STORAGE_MODE}"
-      fi
-      continue
-    fi
-
-    FOUND_REPORTS+=("$f")
-
-    if [[ "$REPORT_STORAGE_MODE" == "private/gitignored" ]]; then
-      _pass "check1" "$f present (report_storage: private/gitignored — never a blocker)"
-      continue
-    fi
-
-    local st; st=$(_git_file_status "$f")
-    case "$st" in
-      committed)
-        _pass "check1" "$f present and committed (report_storage: committed)" ;;
-      untracked)
-        _fail "check1" "$f exists on disk but is UNTRACKED (report_storage: committed) — git add + commit before plan-close" ;;
-      staged_uncommitted)
-        _fail "check1" "$f is staged but not part of any commit (report_storage: committed) — commit before plan-close" ;;
-      modified_uncommitted)
-        _fail "check1" "$f has uncommitted changes since its last commit (report_storage: committed) — commit before plan-close" ;;
-    esac
-  done
-}
-
-# ═══════════════════════════════════════════════════════════════════════
-# Check 2 — Head freshness
-# ═══════════════════════════════════════════════════════════════════════
-
-# _extract_frontmatter <file> — print the YAML frontmatter block (the lines
-# strictly between the first and second "---" delimiter lines), excluding
-# the delimiters themselves.
-_extract_frontmatter() {
-  awk 'BEGIN{c=0} /^---[[:space:]]*$/{c++; if (c==2) exit; next} c==1{print}' "$1"
-}
-
-# _yq_frontmatter_field <file> <field> — echoes the field's value from the
-# file's frontmatter (empty string if absent). Handles both plain scalars
-# (Head: abc123) and folded/literal block scalars (Head_note: >-\n  ...).
-# A TOOL FAILURE IS NOT AN ANSWER. Under this script's `set -euo pipefail` a
-# broken frontmatter made `yq` exit non-zero inside a command substitution,
-# which ended the WHOLE check mid-run — so a check that should have FAILED
-# looked to its caller like a check that never objected (ACTA, 2026-09-01).
-# Return 0 with the value, 3 with nothing when the YAML cannot be read; the
-# caller must tell "the field is absent" from "I could not look".
-_yq_frontmatter_field() {
-  local file="$1" field="$2" out rc=0
-  out="$(_extract_frontmatter "$file" 2>/dev/null | yq -r ".${field} // \"\"" - 2>/dev/null)" || rc=$?
-  if [[ "$rc" -ne 0 ]]; then
-    echo "cannot read frontmatter of ${file} (yq exit ${rc}) — this is 'unknown', never 'passed'" >&2
-    return 3
-  fi
-  printf '%s' "$out"
-  return 0
-}
-
-# _auto_annotate_report <file> <old_head> <new_head>
-# Idempotent, frontmatter-only rewrite: sets Head=<new_head>,
-# Head_at_generation=<old_head>, Head_note=<explanation>, leaves the rest of
-# the file (including the markdown body) byte-for-byte untouched. Safe to
-# call twice in a row for the SAME (old_head, new_head) pair — the second
-# call's caller never invokes this because Check 2's Head==current-HEAD
-# branch short-circuits before reaching auto-annotate.
-#
-# SECURITY: All runtime values (note with commit subjects) are passed via
-# environment variables + yq's strenv() to prevent yq expression injection
-# from special characters in free-form text (e.g., commit subjects with
-# quotes, backslashes, or other shell metacharacters).
-_auto_annotate_report() {
-  local file="$1" old_head="$2" new_head="$3"
-  local commit_summary
-  commit_summary=$(git log --format='%h %s' "${old_head}..${new_head}" 2>/dev/null | tac | paste -sd', ' - 2>/dev/null || true)
-  [[ -n "$commit_summary" ]] || commit_summary="(no intermediate commits found)"
-  local now; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  local note="Ran against ${old_head:0:7}; commit(s) landed after (${commit_summary}) \
-— docs/backlog-only, zero code/test delta. Header corrected automatically \
-(aid-plan-close-check.sh --auto-annotate, ${now})."
-
-  local marks m1 m2
-  marks=$(grep -n '^---[[:space:]]*$' "$file" | head -2 | cut -d: -f1)
-  m1=$(echo "$marks" | sed -n 1p)
-  m2=$(echo "$marks" | sed -n 2p)
-  if [[ -z "$m1" || -z "$m2" ]]; then
-    echo "ERROR: $file has no parseable '---' frontmatter block — cannot auto-annotate" >&2
-    return 1
-  fi
-
-  local fm_file; fm_file=$(mktemp)
-  _extract_frontmatter "$file" > "$fm_file"
-
-  # New keys (Head_at_generation, Head_note, _header_corrected_at) are
-  # appended after existing keys by yq — since Head already exists earlier
-  # in the file, this reproduces the exact WAN P062-delivery.md field order
-  # (Head, Head_at_generation, Head_note, ...).
-  # Pass all values via environment variables + strenv() to safely escape
-  # special characters in runtime text (commit subjects, etc.).
-  HEAD_VALUE="$new_head" \
-  HEAD_AT_GENERATION="$old_head" \
-  HEAD_NOTE="$note" \
-  HEADER_CORRECTED_AT="$now" \
-  yq -i '
-    .Head = strenv(HEAD_VALUE) |
-    .Head_at_generation = strenv(HEAD_AT_GENERATION) |
-    .Head_note = strenv(HEAD_NOTE) |
-    ._header_corrected_at = strenv(HEADER_CORRECTED_AT)
-  ' "$fm_file"
-
-  local tmp_out; tmp_out=$(mktemp)
-  {
-    echo "---"
-    cat "$fm_file"
-    echo "---"
-    tail -n "+$((m2 + 1))" "$file"
-  } > "$tmp_out"
-  mv "$tmp_out" "$file"
-  rm -f "$fm_file"
-}
-
-# D4 / IMP-467: is THIS candidate covered by a durable, verified D1 plan-final
-# evidence receipt? Only then does grouped freshness apply — a plan/mode
-# without a receipt (legacy, or plan_branch before D1 ran) keeps today's
-# exact per-report-only-self-exclusion behavior. This is the FULL binding
-# _pfsm_verify_plan_final_receipt (aid-plan-fsm.sh, D1) enforces at
-# merge/close time — the derived ref path, exact receipt schema/keys,
-# review_verdict, and plan_id/candidate_sha/run_id/evidence_ref all bound to
-# the manifest's OWN recorded candidate/run — not a looser freshness-only
-# shortcut that would accept any resolvable single-file ref.
-_check2_receipt_covers_candidate() {
-  [[ "$PLAN_BRANCH_MODE" -eq 1 ]] || return 1
-  local plan_id candidate run_id ref hash receipt tree expected_ref
-  plan_id="$(_pbm '.plan_boundary_manifest.plan_id')"
-  candidate="$(_pbm '.plan_boundary_manifest.candidate_sha')"
-  run_id="$(_pbm '.plan_boundary_manifest.plan_final_run_id')"
-  [[ "$plan_id" =~ ^P[0-9]{3}$ && "$candidate" =~ ^[0-9a-f]{40}$ && -n "$run_id" ]] || return 1
-  # D4 round-2 Codex HIGH: the manifest's OWN plan_id field is content on
-  # disk, not proof of which plan this check is running for — PLAN_ID (the
-  # CLI-selected plan this whole script invocation is scoped to) is the only
-  # trustworthy anchor. Without this, a manifest under plan-state/P467/ that
-  # internally claims plan_id:"P123" would derive expected_ref from "P123",
-  # match a real old P123 receipt, and grant P467's reports grouped
-  # freshness from evidence that was never about P467 at all.
-  [[ "$plan_id" == "$PLAN_ID" ]] || return 1
-  expected_ref="refs/heads/aid-evidence/${plan_id}/${candidate}/${run_id}"
-  ref="$(_pbm '.plan_boundary_manifest.plan_final_evidence_ref')"
-  hash="$(_pbm '.plan_boundary_manifest.plan_final_evidence_receipt_sha256')"
-  [[ -n "$ref" && "$ref" == "$expected_ref" && -n "$hash" ]] || return 1
-  receipt="$(git show "${ref}:receipt.json" 2>/dev/null)" || return 1
-  tree="$(git ls-tree -r --name-only "${ref}" 2>/dev/null || true)"
-  [[ "$tree" == "receipt.json" ]] || return 1
-  [[ "sha256:$(printf '%s\n' "$receipt" | sha256sum | awk '{print $1}')" == "$hash" ]] || return 1
-  # D4 round-2 Codex MEDIUM: reuse D1's OWN full schema/key-set validator
-  # (aid-plan-fsm.sh) instead of a shorter ad-hoc re-check — the ad-hoc
-  # version accepted extra/renamed keys and malformed per-output hash
-  # shapes that D1's own verifier would reject. D4 round-4 Codex MEDIUM:
-  # also reuse _pfsm_receipt_has_exact_review_inventory again — it is now
-  # schema-version-FROZEN (not derived from the live
-  # _pfsm_review_required_outputs), so it no longer risks retroactively
-  # invalidating a receipt sealed by an older plugin version.
-  _pfsm_validate_plan_final_receipt_json "$receipt" || return 1
-  _pfsm_receipt_has_exact_review_inventory "$receipt" || return 1
-  local base target target_head frozen_at
-  base="$(_pbm '.plan_boundary_manifest.plan_base_commit')"
-  target="$(_pbm '.plan_boundary_manifest.target_branch')"
-  target_head="$(_pbm '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')"
-  frozen_at="$(_pbm '.plan_boundary_manifest.candidate_frozen_at')"
-  jq -e --arg p "$plan_id" --arg c "$candidate" --arg r "$run_id" --arg ref "$ref" \
-        --arg b "$base" --arg t "$target" --arg th "$target_head" --arg fa "$frozen_at" '
-    (.plan_id == $p) and (.candidate_sha == $c) and (.run_id == $r) and
-    (.evidence_ref == $ref) and (.plan_base_commit == $b) and
-    (.target_branch == $t) and (.target_head_at_freeze == $th) and
-    (.candidate_frozen_at == $fa)
-  ' <<< "$receipt" >/dev/null 2>&1
-}
-
-check2_head_freshness() {
-  local current_head; current_head=$(git rev-parse HEAD)
-  local _grouped=0
-  _check2_receipt_covers_candidate && _grouped=1
-  # D4: the receipt-bound group's own paths, ALL of them — not just "this
-  # report" — are excluded from every group member's delta. A sibling
-  # report's annotation commit touches ONLY that sibling's path, so once the
-  # group is excluded as a whole, no member ever sees another member's
-  # annotation as drift, and the false "the sibling's commit means I am
-  # stale too" oscillation cannot start.
-  local -a _group_excl=()
-  if [[ "$_grouped" -eq 1 ]]; then
-    local _gf
-    for _gf in "${FOUND_REPORTS[@]}"; do _group_excl+=(":(exclude)${_gf}"); done
-  fi
-  local f
-  for f in "${FOUND_REPORTS[@]}"; do
-    local recorded_head head_note head_at_gen
-    # An unreadable file is reported as a finding, not as silence: the check
-    # continues over the remaining files rather than dying on this one.
-    local _fm_rc=0
-    recorded_head=$(_yq_frontmatter_field "$f" "Head") || _fm_rc=$?
-    if [[ "$_fm_rc" -ne 0 ]]; then
-      _fail "check2" "${f}: frontmatter cannot be read, so its recorded Head cannot be compared — fix the YAML or remove the file"
-      continue
-    fi
-    # These two are OPTIONAL fields, so an absent value is legitimate — but an
-    # unreadable FILE is not, and that case was already caught above by the Head
-    # read. Swallowing an error here therefore cannot hide a broken file; it can
-    # only default an optional annotation, which is the intended behaviour
-    # (Codex asked; recorded rather than left looking inconsistent).
-    head_at_gen=$(_yq_frontmatter_field "$f" "Head_at_generation") || head_at_gen=""
-    head_note=$(_yq_frontmatter_field "$f" "Head_note") || head_note=""
-
-    if [[ -z "$recorded_head" ]]; then
-      _fail "check2" "$f: frontmatter has no Head field — cannot verify freshness"
-      continue
-    fi
-
-    if [[ "$recorded_head" == "$current_head" ]]; then
-      _pass "check2" "$f: Head (${recorded_head:0:7}) matches current HEAD — fresh, no note needed"
-      continue
-    fi
-
-    if ! git cat-file -e "${recorded_head}^{commit}" 2>/dev/null; then
-      _fail "check2" "$f: Head field ($recorded_head) does not resolve to a commit in this repo — regeneration required"
-      continue
-    fi
-
-    # Exclude the report file itself from the delta (legacy: just itself; D4
-    # grouped: the WHOLE receipt-bound report group). A report necessarily
-    # records a head that predates the commit which persists that very
-    # value (a commit cannot embed its own SHA) — so the commit that last
-    # wrote/annotated this report is always "one commit behind" its own
-    # current HEAD by construction. Without this exclusion Check 2 could
-    # never stabilize on PASS for a committed, freshly-annotated report
-    # (confirmed against the live WAN P062-delivery.md shape: its recorded
-    # Head predates its own `_header_corrected_at` commit).
-    local changed
-    if [[ "$_grouped" -eq 1 ]]; then
-      changed=$(git diff --name-only "${recorded_head}..${current_head}" -- . "${_group_excl[@]}" 2>/dev/null || true)
-    else
-      changed=$(git diff --name-only "${recorded_head}..${current_head}" -- . ":(exclude)${f}" 2>/dev/null || true)
-    fi
-    if [[ -z "$changed" ]]; then
-      if [[ "$_grouped" -eq 1 ]]; then
-        _pass "check2" "$f: Head (${recorded_head:0:7}) != current HEAD (${current_head:0:7}) but the only delta is within the receipt-bound report group's own annotation commits — fresh"
-      else
-        _pass "check2" "$f: Head (${recorded_head:0:7}) != current HEAD (${current_head:0:7}) but the only delta is this report's own annotation commit — fresh"
-      fi
-      continue
-    fi
-
-    # Classify changed files to distinguish CODE (requires regeneration) from
-    # DOCS-only (can be annotated). A file is CODE if:
-    #   (a) it has a known code extension (.py, .ts, .sh, etc.) — extension-
-    #       based classification wins over directory-name patterns, so
-    #       src/docs/generator.py is CODE despite the docs/ path segment, or
-    #   (b) it doesn't match any of the docs-only patterns.
-    # Collect all CODE files in a two-stage filter.
-    # Note: .yaml/.yml excluded from code_ext_pattern (too broad, includes
-    # config files like queue.yaml which are docs-only via exact-path match).
-    local non_docs code_ext_pattern
-    code_ext_pattern='\.(sh|py|ts|tsx|js|jsx|go|rs|java|rb|c|cpp|h|hpp|sql|json|xml|toml|gradle|pom|kt|scala|swift|m|mm)$'
-
-    # Stage 1: Extract files with code extensions (always CODE, extension wins).
-    local with_code_ext
-    with_code_ext=$(echo "$changed" | grep -E "$code_ext_pattern" || true)
-
-    # Stage 2: From remaining files (without code extensions), extract those
-    # that DON'T match docs-only patterns (also CODE).
-    local without_code_ext without_docs_match
-    without_code_ext=$(echo "$changed" | grep -Ev "$code_ext_pattern" || true)
-    without_docs_match=$(echo "$without_code_ext" | grep -Ev "$DOCS_ONLY_ALLOW_RE" || true)
-
-    # Union: non_docs = (files with code extension) + (non-extension files not matching docs pattern)
-    non_docs=$(printf "%s\n%s" "$with_code_ext" "$without_docs_match" | grep -v '^$' || true)
-
-    if [[ -n "$non_docs" ]]; then
-      _fail "check2" "$f: functional (code/test) change(s) landed since Head (${recorded_head:0:7}) — regeneration required. Changed: $(echo "$non_docs" | tr '\n' ' ')"
-      continue
-    fi
-
-    # All changed paths are docs/backlog/queue-only.
-    if [[ "$AUTO_ANNOTATE" -eq 1 ]]; then
-      _auto_annotate_report "$f" "$recorded_head" "$current_head"
-      _pass "check2" "$f: docs-only delta since Head (${recorded_head:0:7}) — auto-annotated (Head -> ${current_head:0:7})"
-    elif [[ -n "$head_at_gen" && -n "$head_note" ]]; then
-      _fail "check2" "$f: Head_at_generation/Head_note already present but Head field itself is still stale (${recorded_head:0:7} != ${current_head:0:7}) after a further docs-only delta — needs re-annotation (run with --auto-annotate)"
-    else
-      _fail "check2" "$f: Head (${recorded_head:0:7}) stale but delta since is docs-only — needs Head_at_generation + Head + Head_note annotation (run with --auto-annotate)"
-    fi
-  done
-}
 
 # ═══════════════════════════════════════════════════════════════════════
 # Check 3 — fsm-state.yaml DONE-but-pending guard
@@ -1174,8 +789,6 @@ check5_plan_branch_boundary() {
 # ═══════════════════════════════════════════════════════════════════════
 
 main() {
-  check1_report_tracking
-  check2_head_freshness
   check3_fsm_done_pending
   check4_queue_revalidate
   check6_carried_obligations

@@ -4227,7 +4227,7 @@ _pfsm_fix_class() {
 }
 
 # ---------------------------------------------------------------------------
-# _pfsm_finalize_freeze <root> <plan_id> [frozen_at]  — the `--stage freeze` body.
+# _pfsm_finalize_freeze <root> <plan_id> [frozen_at] [accept_ancillary]  — the `--stage freeze` body.
 # ---------------------------------------------------------------------------
 _pfsm_finalize_freeze() {
   local root="$1" plan_id="$2" frozen_at="${3:-}" accept_ancillary="${4:-0}"
@@ -6405,11 +6405,11 @@ cmd_plan_finalize() {
   # P074 Step 5: the clean-worktree check is KEPT for the non-exempt stages
   # and evaluated via `git -C` against the tree the stage really acts on.
   #
-  # P074 Step 8/10: that tree is the PLAN WORKTREE. Every stage — sync, freeze,
-  # gates, inputs, review, c4, summary, accept-ancillary — re-executes itself
-  # there first (or refuses naming the repair), so the review/c4 "stay on the
-  # candidate" contract binds the plan's own tree and the PM's primary checkout
-  # is free during the review window. `project_root` remains the STATE root.
+  # P074 Step 8/10: that tree is the PLAN WORKTREE. Every stage — freeze, gates,
+  # produce, decide — re-executes itself there first (or refuses naming the
+  # repair), so "stay on the candidate" binds the plan's own tree and the PM's
+  # primary checkout is free during the review window. `project_root` remains
+  # the STATE root.
   # Every refusal below ends with the same `next:` line a refused stage prints.
   _refuse() { _pfsm_refusal_next "$plan_id" "$stage" 1; exit 1; }
   _pfsm_require_plan_worktree "$plan_id" "$project_root" || _refuse
@@ -7280,171 +7280,6 @@ _pfsm_close_marker_path() {
   printf '%s/plan-close-complete' "$(dirname "$(plan_state_path "$1")")"
 }
 
-# ---------------------------------------------------------------------------
-# _pfsm_render_close_projections <root> <plan_id>  — P073 Step 12 (P082)
-#
-# The Reporter used to be told to COMMIT its delivery report and boundary
-# manifest, which was unexecutable three ways over: pipeline.md invalidates the
-# review on any tracked write during it, the ordered path `.aid-o/reports/` is
-# gitignored, and the reporter contract said so itself two paragraphs later.
-# The Reporter now writes run-scoped evidence only, and the CONTROLLER renders
-# the human/CI projections HERE — after merge and close, outside any freeze
-# window, so the projection can never cost a review.
-#
-# NEVER A CLOSE BLOCKER. `delivery-report.json` in the run evidence dir is the
-# authoritative artifact; these are derived files with no history value. A
-# missing JSON, an unparseable one, or an unwritable reports directory each
-# produce a WARNING and close proceeds. (Whether the JSON must EXIST at all is
-# a close-check concern, forceable per Step 8 — not this renderer's.)
-# ---------------------------------------------------------------------------
-_pfsm_render_close_projections() {
-  local root="$1" plan_id="$2"
-  # POST-CLOSE ONLY, verified rather than assumed. The caller reaches here
-  # after the CLOSED transition, but the manifest mirror update just above it
-  # is best-effort — so an unexpected state here means the plan may still be
-  # pre-close with a review open, and writing into .aid-o/reports/ would be
-  # exactly the tracked write this whole step exists to keep out of a freeze
-  # window (adversarial-review finding).
-  # plan_state_get REQUIRES the field name; calling it without one returns 1
-  # and an empty value, which would have made this guard silently inert.
-  local _state; _state="$(plan_state_get "$plan_id" "plan_state" 2>/dev/null || echo "")"
-  if [[ -n "$_state" && "$_state" != "not_found" && "$_state" != "CLOSED" ]]; then
-    echo "WARNING: ${plan_id} is ${_state}, not CLOSED — human projection not rendered (a projection is only ever written after the review boundary has closed)." >&2
-    return 0
-  fi
-  local run_dir_rel src reports_dir
-  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || run_dir_rel=""
-  if [[ -z "$run_dir_rel" || "$run_dir_rel" == "null" ]]; then
-    echo "WARNING: no plan-final run directory recorded for ${plan_id} — human projection not rendered." >&2
-    return 0
-  fi
-  src="${root}/${run_dir_rel}/delivery-report.json"
-  if [[ ! -s "$src" ]]; then
-    echo "WARNING: no verified delivery-report.json in ${run_dir_rel} — human projection not rendered." >&2
-    return 0
-  fi
-  if ! jq -e 'type == "object"' "$src" >/dev/null 2>&1; then
-    echo "WARNING: ${run_dir_rel}/delivery-report.json is not a JSON object — human projection not rendered." >&2
-    return 0
-  fi
-
-  reports_dir="${root}/.aid-o/reports"
-  if ! mkdir -p "$reports_dir" 2>/dev/null; then
-    echo "WARNING: cannot create ${reports_dir} — human projection not rendered; ${run_dir_rel}/delivery-report.json remains authoritative." >&2
-    return 0
-  fi
-
-  # Deterministic transform, so a re-close after a forced close overwrites
-  # idempotently rather than accumulating variants.
-  local delivery="${reports_dir}/${plan_id}-delivery.md"
-  local boundary="${reports_dir}/${plan_id}-boundary.md"
-  local run_id="${run_dir_rel##*/}"
-
-  # EVERY SECTION IS BUILT AND CHECKED BEFORE ANYTHING IS PUBLISHED.
-  # An earlier cut ran the formatting `jq` calls inside the redirection group
-  # with their errors sent to /dev/null, and a trailing printf made the group
-  # succeed — so a report whose `.epics` was, say, a string instead of an array
-  # was published WITHOUT its verdict section, misrepresenting the
-  # authoritative JSON as a complete projection (adversarial-review finding).
-  # A malformed report now yields NO projection and a warning.
-  # AN UNRECOGNISED SHAPE IS NOT AN EMPTY REPORT.
-  # The guard below catches a report whose `.epics` is the wrong TYPE. It does
-  # not catch one whose keys simply live somewhere else — and an older shape
-  # (`delivery_report.delivered`, `.found_and_fixed_beyond_scope`, written up to
-  # 2026-08-24) does exactly that. Every `//` default then fired, and the render
-  # replaced a hundred lines of real delivery notes with twenty-five lines of
-  # "(no summary recorded)" (ACTA P018, 2026-09-01). The data was never gone —
-  # the renderer was reading a schema it did not know and reporting the result
-  # as emptiness.
-  #
-  # So: recognise the shape FIRST. None of the expected keys present means this
-  # file is not what this renderer projects, and the honest outcome is to write
-  # nothing and say which keys were looked for.
-  local _known
-  _known="$(jq -r 'if (has("summary") or has("epics") or has("delivered_paths")) then "yes" else "no" end' "$src" 2>/dev/null)" || _known="unreadable"
-  if [[ "$_known" != "yes" ]]; then
-    echo "WARNING: ${run_dir_rel}/delivery-report.json carries none of the keys this projection reads (summary, epics, delivered_paths) — it is a different or older shape, so NOTHING was rendered and ${delivery} is left as it is. Convert the report, or write the projection by hand; an empty template over real notes is worse than no template." >&2
-    return 0
-  fi
-
-  local sec_summary sec_epics sec_paths
-  if ! sec_summary="$(jq -r '.summary // "(no summary recorded)"' "$src" 2>&1)" \
-     || ! sec_epics="$(jq -r '(.epics // []) | if (type != "array") then error("epics is not an array") elif length == 0 then "(none recorded)" else (.[] | "- \(.epic_id // "?"): \(.verdict // "?")") end' "$src" 2>&1)" \
-     || ! sec_paths="$(jq -r '(.delivered_paths // []) | if (type != "array") then error("delivered_paths is not an array") elif length == 0 then "(none recorded)" else (.[] | "- \(.)") end' "$src" 2>&1)"; then
-    echo "WARNING: ${run_dir_rel}/delivery-report.json does not have the expected shape — human projection not rendered (a partial projection would misrepresent it as complete)." >&2
-    return 0
-  fi
-
-  # EVERY INTERPOLATED SCALAR IS EMITTED AS A jq-QUOTED STRING. A raw value
-  # containing a newline used to inject a second frontmatter key — e.g. a
-  # `head` of "abc\nboundary_complete: false" — so a downstream YAML consumer
-  # read a different document than the one that was rendered
-  # (adversarial-review finding).
-  local y_plan y_src y_head y_cand y_run y_now
-  y_plan="$(jq -rn --arg v "$plan_id" '$v|@json')"
-  y_src="$(jq -rn --arg v "${run_dir_rel}/delivery-report.json" '$v|@json')"
-  y_run="$(jq -rn --arg v "$run_id" '$v|@json')"
-  y_now="$(jq -rn --arg v "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '$v|@json')"
-  # `Head:` IS REQUIRED, in BOTH projections. aid-plan-close-check.sh check2
-  # reads it from the frontmatter of exactly these two paths to verify
-  # freshness, and refuses a report that has none. A first cut emitted it only
-  # when the JSON happened to carry one, and never in the boundary manifest —
-  # so rendering here OVERWROTE reports that had it and broke the very close
-  # this renderer runs inside (regression caught by the plan-final boundary
-  # suite's crash-recovery case, which passes at the pre-P073 baseline).
-  #
-  # Preference order is honest, not convenient: the delivery report's own head
-  # when it records one — that is the head the delivery was VERIFIED at, and if
-  # it is stale check2 correctly says so — otherwise the live HEAD, which is
-  # what a file rendered at this instant genuinely describes.
-  y_head="$(jq -r '(.head // .Head // "") | @json' "$src" 2>/dev/null || echo '""')"
-  if [[ "$y_head" == '""' ]]; then
-    local _live_head; _live_head="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo "")"
-    [[ -n "$_live_head" ]] && y_head="$(jq -rn --arg v "$_live_head" '$v|@json')"
-  fi
-  y_cand="$(jq -r '(.candidate_sha // "") | @json' "$src" 2>/dev/null || echo '""')"
-
-  {
-    printf -- '---\n'
-    printf 'plan_id: %s\n' "$y_plan"
-    printf 'rendered_by: "aid-plan-fsm.sh plan-close"\n'
-    printf 'rendered_at: %s\n' "$y_now"
-    printf 'source: %s\n' "$y_src"
-    printf 'Head: %s\n' "$y_head"
-    printf -- '---\n\n'
-    printf '# Delivery report — %s\n\n' "$plan_id"
-    printf 'This file is a PROJECTION rendered at close from the run-scoped\n'
-    printf 'delivery-report.json, which remains the authoritative artifact. It is\n'
-    printf 'derived: regenerating it is always safe.\n\n'
-    printf '## Summary\n\n%s\n' "$sec_summary"
-    printf '\n## Per-EPIC verdicts\n\n%s\n' "$sec_epics"
-    printf '\n## Delivered paths\n\n%s\n' "$sec_paths"
-  } > "${delivery}.tmp.$$" 2>/dev/null && mv "${delivery}.tmp.$$" "$delivery" 2>/dev/null || {
-    rm -f "${delivery}.tmp.$$" 2>/dev/null || true
-    echo "WARNING: cannot write ${delivery} — projection skipped; the run-scoped JSON remains authoritative." >&2
-    return 0
-  }
-
-  {
-    printf -- '---\n'
-    printf 'plan_id: %s\n' "$y_plan"
-    printf 'generated_at: %s\n' "$y_now"
-    printf 'boundary_complete: true\n'
-    printf 'Head: %s\n' "$y_head"
-    printf 'run_id: %s\n' "$y_run"
-    [[ "$y_cand" != '""' ]] && printf 'candidate_sha: %s\n' "$y_cand"
-    printf 'delivery_report: "%s-delivery.md"\n' "$plan_id"
-    printf -- '---\n'
-  } > "${boundary}.tmp.$$" 2>/dev/null && mv "${boundary}.tmp.$$" "$boundary" 2>/dev/null || {
-    rm -f "${boundary}.tmp.$$" 2>/dev/null || true
-    echo "WARNING: cannot write ${boundary} — projection skipped." >&2
-    return 0
-  }
-
-  echo "plan-close: rendered human projections ${plan_id}-delivery.md and ${plan_id}-boundary.md from ${run_dir_rel}/delivery-report.json" >&2
-  return 0
-}
-
 # _pfsm_lock_held <path> — 0 iff a non-blocking flock acquire FAILS, i.e. the
 # advisory lock is still held by a live open file description. Existence of the
 # sidecar is deliberately NOT the signal (flock releases on descriptor close,
@@ -7505,8 +7340,8 @@ _pfsm_close_lock_contended() {
 #   "a keyword denylist cannot reliably recognize refusal semantics".
 #
 #   It cannot, and it does not have to. An evidence-backed refusal REQUIRES
-#   evidence: a frozen candidate, a recorded final run, an audit or curator
-#   report, a release decision. Where none of those exist there is nothing to
+#   evidence: a frozen candidate, a recorded final run, a closed whole-plan
+#   round, a release decision. Where none of those exist there is nothing to
 #   close around, whatever any message says. Where ANY of them exists, this
 #   close refuses and names it — including the case where that evidence
 #   concluded `fail`, which is exactly the case that must never be closed here.
@@ -7520,10 +7355,11 @@ _pfsm_admin_close_evidence() {
   [[ -n "$d" && "$d" != "null" && "$d" != "not_found" && "$d" != "{}" ]] \
     && found+="  · manifest.plan_final_skeletons is present"$'\n'
   # Any plan-final run directory that holds a verdict-bearing artifact.
-  for f in "${root%/}/.aid-o/work/evidence/${plan_id}"/*/audit-report.json \
-           "${root%/}/.aid-o/work/evidence/${plan_id}"/*/curator-report.json \
+  # (audit-report.json and curator-report.json are what a close before 2.101.0 left.)
+  for f in "${root%/}/.aid-o/work/evidence/${plan_id}"/*/cp7/rounds.json \
            "${root%/}/.aid-o/work/evidence/${plan_id}"/*/release-decision.json \
-           "${root%/}/.aid-o/work/evidence/${plan_id}"/*/delivery-gate.json; do
+           "${root%/}/.aid-o/work/evidence/${plan_id}"/*/audit-report.json \
+           "${root%/}/.aid-o/work/evidence/${plan_id}"/*/curator-report.json; do
     [[ -f "$f" ]] && found+="  · ${f#"${root%/}/"}"$'\n'
   done
   # AND THE STATES THAT ARE BROKEN RATHER THAN ABSENT.
@@ -7627,7 +7463,7 @@ _pfsm_admin_close_blockers() {
 }
 
 cmd_plan_close() {
-  local plan_id="" project_root_opt="" op_id_opt="" skip_delivery_report=0
+  local plan_id="" project_root_opt="" op_id_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-root)
@@ -7636,10 +7472,6 @@ cmd_plan_close() {
       --op-id)
         _pfsm_require_optval "plan-close" "$1" "$#" || exit 2
         op_id_opt="$2"; shift 2 ;;
-      # CP2 M5: forwarded by aid-fsm.sh when execution.yaml sets reporter.enabled:false.
-      # It relaxes the delivery-report EXISTENCE requirement only; every other
-      # check still runs, exactly as the legacy path already treats this toggle.
-      --skip-delivery-report) skip_delivery_report=1; shift ;;
       # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
       # every state-TRANSITION command; what it can BYPASS is bounded by the
       # forceable/hard classification in _pfsm_precondition.
@@ -7701,7 +7533,7 @@ cmd_plan_close() {
   fi
 
   if [[ -z "$plan_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-close <plan_id> [--project-root <path>] [--op-id <id>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -7784,7 +7616,6 @@ cmd_plan_close() {
   local -a _cc_args=("$plan_id" --project-root "$root" --plan-branch
                      --close-mode "$close_mode" --exclude-lock "$close_lock"
                      --close-op-id "$op_id")
-  [[ "$skip_delivery_report" -eq 1 ]] && _cc_args+=(--skip-delivery-report)
   ccout="$(bash "${SCRIPT_DIR}/aid-plan-close-check.sh" "${_cc_args[@]}" 2>&1)" || ccrc=$?
   # P073 Step 8: the close-check is BOOKKEEPING COMPLETENESS — unreachable
   # receipts, missing delivery records. It is the exact check that stranded
@@ -8013,11 +7844,6 @@ cmd_plan_close() {
       exit 1
     fi
     plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "CLOSED"' >/dev/null 2>&1 || true
-
-    # P073 Step 12 (P082): the controller renders the committed/worktree
-    # projections HERE — after merge and close, outside any freeze window, so
-    # a projection can never cost a review. Never a close blocker.
-    _pfsm_render_close_projections "$root" "$plan_id" || true
   fi
 
   local crc=0
@@ -9526,13 +9352,8 @@ _pfsm_finalize_produce() {
   local plan_file="" _in_origin="" _in_troot; _in_troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
   IFS=$'\t' read -r plan_file _in_origin < <(_pfsm_plan_file_for_gates "$root" "$_in_troot" "$plan_id" || true)
   [[ -n "$plan_file" ]] || plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"   # archive/ fallback, as before
-  [[ -n "$plan_file" ]] && _pfsm_say_plan_inputs inputs "$plan_file" "${_in_origin:-state_root}" ""
+  [[ -n "$plan_file" ]] && _pfsm_say_plan_inputs produce "$plan_file" "${_in_origin:-state_root}" ""
 
-  # D3 / IMP-465: generate the three plan-boundary specialist scaffolds
-  # (curator, verifier, reporter) BEFORE any of them are dispatched, so none
-  # of the three has to construct a protocol-v2 envelope from prose. Each
-  # call is a no-op if the file already exists (idempotent across retries,
-  # never overwrites specialist work already in progress).
   # ── 1. review-profile.json, over plan_base_commit..candidate_sha ─────────
   # The range matters: the review stage asserts revision.base_sha equals the
   # plan base, because a profile derived over one EPIC would arm the C3 gate for
@@ -10547,7 +10368,7 @@ Subcommands:
   next-epic <plan_id> [--project-root <path>]
   plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
-  plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]
+  plan-close <plan_id> [--project-root <path>] [--op-id <id>]
   plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>] [--op-id <id>]
   plan-scratch <plan_id> --phase brainstorm|generation [--release] [--project-root <path>]
   inventory [--apply] [--plan <id>] [--project-root <path>]

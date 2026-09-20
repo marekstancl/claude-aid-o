@@ -36,8 +36,8 @@ source "${SCRIPT_DIR}/lib/aid-review-config.sh"
 # path segment, `**/` is any number of directories including none, a trailing
 # `**` is everything beneath.
 path_matches_glob() {
-  local re="$2"
-  re="${re//./\\.}"
+  local re="$2" c
+  for c in '\\' . + '(' ')' '[' ']' '{' '}' '|' '^' '$'; do re="${re//"$c"/\\$c}"; done   # every other character is literal
   re="${re//\*\*\//<dirs>}"; re="${re//\*\*/<any>}"
   re="${re//\*/[^/]*}";       re="${re//\?/[^/]}"
   re="${re//<dirs>/(.*/)?}";   re="${re//<any>/.*}"

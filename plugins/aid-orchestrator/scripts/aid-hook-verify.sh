@@ -50,12 +50,9 @@ PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/aid-session-store.sh
 source "${PLUGIN_ROOT}/scripts/lib/aid-session-store.sh"
 # aid_codex_binary: the highest-version codex on PATH, not the first one — two
-# installs coexist on the dev host and `command -v` picks the older. That
-# library sets PLUGIN_ROOT and SCRIPT_DIR from its OWN location, so this file's
-# values are restored right after.
-# shellcheck source=lib/aid-c3-dispatch.sh
-source "${PLUGIN_ROOT}/scripts/lib/aid-c3-dispatch.sh"
-PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# installs coexist on the dev host and `command -v` picks the older.
+# shellcheck source=lib/aid-codex-transport.sh
+source "${PLUGIN_ROOT}/scripts/lib/aid-codex-transport.sh"
 
 REGISTRY="${AID_HOOK_REGISTRY:-${PLUGIN_ROOT}/defaults/hook-registry.yaml}"
 CANARY_RULE="hook_canary"

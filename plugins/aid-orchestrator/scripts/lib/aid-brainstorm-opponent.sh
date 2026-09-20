@@ -36,7 +36,7 @@
 #     is validated; the correspondence is not.
 #
 # WHAT IS REUSED, AND WHAT IS NOT
-#   The Codex transport is `_run_codex_isolated` from lib/aid-c3-dispatch.sh —
+#   The Codex transport is `_run_codex_isolated` from lib/aid-codex-transport.sh —
 #   the shared, hardened launcher (fresh process, read-only sandbox, the
 #   --output-schema trap already learned). Availability comes from
 #   `aid_codex_probe` in the same file: the binary is chosen by version and the
@@ -57,8 +57,8 @@
 _AID_BRAINSTORM_OPPONENT_SH_LOADED=1
 
 _AID_BO_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=aid-c3-dispatch.sh
-source "${_AID_BO_LIB_DIR}/aid-c3-dispatch.sh"
+# shellcheck source=aid-codex-transport.sh
+source "${_AID_BO_LIB_DIR}/aid-codex-transport.sh"
 # shellcheck source=aid-roots.sh
 source "${_AID_BO_LIB_DIR}/aid-roots.sh"
 
@@ -77,7 +77,7 @@ _AID_BO_MAX_ATTEMPTS=3
 # _aid_bo_prompt <brief_file> — the whole instruction, including the shape the
 # answer must have. The shape is enforced by this file's own validator and not
 # by --output-schema: Codex forwards a schema to strict structured output,
-# which hard-fails on conditional keywords (see lib/aid-c3-dispatch.sh).
+# which hard-fails on conditional keywords (see lib/aid-codex-transport.sh).
 _aid_bo_prompt() {
   cat <<'INSTR'
 You are the OPPONENT in a design conversation. Another model has drafted the
@@ -305,7 +305,7 @@ aid_brainstorm_opponent_run() {
   return 0
 }
 
-# Runnable as well as sourceable — the same guard lib/aid-c3-dispatch.sh uses,
+# Runnable as well as sourceable,
 # so sourcing this file never launches a dispatch.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   aid_brainstorm_opponent_run "$@"

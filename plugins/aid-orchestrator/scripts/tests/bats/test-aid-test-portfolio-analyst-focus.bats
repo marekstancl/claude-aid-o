@@ -68,7 +68,7 @@ teardown() {
 }
 
 @test "frontmatter matches this repo's real agent-card convention (name + model only, no invented fields)" {
-  # Verified against gate-fixer.md/simplifier.md/reporter.md/curator.md — agent
+  # Verified against gate-fixer.md/simplifier.md/auditor.md — agent
   # cards carry only name+model, unlike skills/commands (which DO require
   # description/user_invocable). Agent cards are not a file type
   # aid-lint-skill.sh targets (it only classifies commands/ vs skill-shaped

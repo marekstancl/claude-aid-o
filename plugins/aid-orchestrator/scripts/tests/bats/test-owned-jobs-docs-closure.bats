@@ -215,11 +215,9 @@ $naked"
     commands/aid-status.md
     commands/aid-help.md
     agents/auditor.md
-    agents/curator.md
     agents/gate-fixer.md
     agents/implementer.md
     agents/project-scanner.md
-    agents/reporter.md
     agents/simplifier.md
     agents/test-portfolio-analyst.md
     agents/verifier.md

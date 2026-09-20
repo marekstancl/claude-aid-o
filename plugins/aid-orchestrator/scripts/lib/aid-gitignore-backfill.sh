@@ -23,8 +23,8 @@
 #
 # ── SOURCEABLE-SAFE CONVENTION ───────────────────────────────────────────────
 # NO top-level `set -e`/`set -euo pipefail` (matches
-# aid-gate-runtime-baseline.sh / aid-gate-profile.sh / aid-cache-preflight.sh
-# / aid-review-signals.sh). This file is sourced
+# aid-gate-runtime-baseline.sh / aid-gate-profile.sh / aid-cache-preflight.sh).
+# This file is sourced
 # directly into aid-gate-runtime-baseline.sh's shell, which is itself sourced
 # into aid-run-gates.sh's `set -euo pipefail` shell — an unguarded non-zero
 # return here would abort the caller's gate loop. Every function below

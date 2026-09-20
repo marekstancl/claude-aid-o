@@ -205,7 +205,7 @@ ladder_wired_from_code() {
 @test "case 4: DRIFT — every existing_loops budget matches the live value in its cited file" {
   local json; json="$(policy_json)"
   local n; n="$(jq '.existing_loops | length' "$json")"
-  [ "$n" -ge 5 ]
+  [ "$n" -ge 4 ]
 
   local failures="" checked=0
   while IFS=$'\t' read -r id kind key value file line; do
@@ -250,20 +250,18 @@ ladder_wired_from_code() {
     fi
   done < <(jq -r '.existing_loops[] | [.id, .budget_kind, .budget_key, .budget_value, .budget_file, .budget_line] | @tsv' "$json")
 
-  [ "$checked" -ge 5 ]
+  [ "$checked" -ge 4 ]
   [[ -z "$failures" ]] || { echo "ownership-table drift:$failures"; false; }
 }
 
-@test "case 5: the three budgets the plan names by value are the values found live" {
+@test "case 5: the two budgets the plan names by value are the values found live" {
   # These are read out of the SOURCE files, never out of the policy — the
   # policy's own agreement with them is case 4's job. This case pins the three
-  # numbers the plans state in prose (C3 4, plan review rounds 2, gate fix 3),
+  # numbers the plans state in prose (plan review rounds 2, gate fix 3),
   # so a change to any of them surfaces as a decision rather than as silence.
-  local c3 rounds gatefix
-  c3="$(yq -r '.c3_fix_loop.max_rechecks' "$PLUGIN_ROOT/defaults/policies/c3-audit-policy.yaml")"
+  local rounds gatefix
   rounds="$(yq -r '.review_checkpoints.plan_review.rounds_default' "$PLUGIN_ROOT/defaults/policies/review-checkpoints.yaml")"
   gatefix="$(grep -Eo 'max ([0-9]+) cycles per check' "$PLUGIN_ROOT/skills/pipeline.md" | head -1 | grep -Eo '[0-9]+')"
-  [ "$c3" = "4" ]     || { echo "c3_fix_loop.max_rechecks is now '$c3', plan says 4"; false; }
   [ "$rounds" = "2" ] || { echo "plan_review.rounds_default is now '$rounds', P093 says 2"; false; }
   [ "$gatefix" = "3" ]|| { echo "pipeline.md gate fix loop is now '$gatefix', plan says 3"; false; }
 }

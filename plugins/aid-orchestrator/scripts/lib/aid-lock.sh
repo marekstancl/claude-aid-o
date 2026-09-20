@@ -55,7 +55,7 @@
 #
 # ── SOURCEABLE-SAFE CONVENTION ───────────────────────────────────────────────
 # NO top-level `set -e`/`set -euo pipefail` (matches aid-gate-runtime-baseline.sh,
-# aid-gate-profile.sh, aid-cache-preflight.sh, aid-review-signals.sh) — this file is sourced directly into callers running
+# aid-gate-profile.sh, aid-cache-preflight.sh) — this file is sourced directly into callers running
 # under their OWN `set -euo pipefail`, and an unguarded non-zero return here
 # must not silently abort a caller's larger flow before it gets a chance to
 # check the return code. Every public function returns an explicit code;

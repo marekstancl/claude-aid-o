@@ -320,8 +320,8 @@ build_brief_md() {
           "",
           (($r.plan_summary.close // null) as $c
            | if $c == null then "_Not a plan close._"
-             else "- **Uzavření:** \($c.attempts) pokus(ů), \($c.minutes) min, \($c.usd) USD"
-                  + (if ($c.usd_unknown_roles | length) > 0 then " + neznámá cena u: " + ($c.usd_unknown_roles | join(", ")) else "" end) end),
+             else "- **Close:** \($c.attempts) attempt(s), \($c.minutes) min, \($c.usd) USD"
+                  + (if ($c.usd_unknown_roles | length) > 0 then " + cost unknown for: " + ($c.usd_unknown_roles | join(", ")) else "" end) end),
           "- **Whole-delivery review:** " + ((($r.inputs // []) | map(select(.id == "final_review")) | first | "\(.verdict) — \(.reason)") // "not recorded"),
           "",
           "## At-HEAD verification warnings",

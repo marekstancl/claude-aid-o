@@ -143,7 +143,7 @@ _aid_sr_patch() {
   local f="$1" title="$2" bytes; bytes="$(wc -c < "$f")"
   if (( bytes <= ${AID_REVIEW_INLINE_MAX_BYTES:-150000} )); then
     echo "## ${title} (also on disk: ${f})"
-    echo '```diff'; cat "$f"; echo '```'
+    echo '~~~~~diff'; cat "$f"; echo '~~~~~'   # tildes: a diff of Markdown carries ``` lines of its own
   else
     echo "## ${title}: ${bytes} bytes, too large to inline. READ IT FROM DISK with read-only tools, file by file: ${f}"
     grep '^diff --git' "$f" | sed -E 's|^diff --git a/(.*) b/.*|- \1|'

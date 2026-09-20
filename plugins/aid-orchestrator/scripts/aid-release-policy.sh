@@ -175,7 +175,7 @@ _artifact_head_match() {
 }
 
 
-# _is_canonical_input <id> — membership test for the 12 canonical release-decision input ids
+# _is_canonical_input <id> — membership test for the canonical release-decision input ids
 # (mirrors the blockers.input_id enum in release-decision.schema.json). Used by the waiver→input
 # mapping (contract 6).
 _is_canonical_input() {
@@ -346,13 +346,16 @@ compute_final_review() {
   local cp=cp7 toggle=cp7_plan_final_review
   [[ "$MODE" == "plan" ]] || { cp=cp3; toggle=cp3_integration_review; }
   local index="${EVIDENCE_DIR}/${cp}/rounds.json" artifact="${cp}/rounds.json"
-  local rel=".aid-o/config/policies/review-checkpoints.yaml" policy flag value="" at_base
-  for policy in "${PROJECT_ROOT}/${rel}" "${PLUGIN_ROOT}/defaults/policies/review-checkpoints.yaml"; do
-    [[ -f "$policy" ]] || continue
-    for flag in enabled "$toggle"; do
-      [[ "$(yq -r ".review_checkpoints.${flag}" "$policy" 2>/dev/null)" == false ]] && value=false
+  # The two switches, resolved as fsm_check_review_round resolves them: per
+  # switch, the first file that sets it (project first) decides.
+  local rel=".aid-o/config/policies/review-checkpoints.yaml" policy flag read value="" at_base
+  for flag in enabled "$toggle"; do
+    for policy in "${PROJECT_ROOT}/${rel}" "${PLUGIN_ROOT}/defaults/policies/review-checkpoints.yaml"; do
+      [[ -f "$policy" ]] || continue
+      read="$(yq -r ".review_checkpoints.${flag}" "$policy" 2>/dev/null)"
+      [[ "$read" == true || "$read" == false ]] && break
     done
-    break
+    [[ "$read" == false ]] && { value=false; break; }
   done
   if [[ "$value" == false && "$MODE" == "plan" && -n "${PLAN_BASE_SHA:-}" ]] \
      && at_base="$(git -C "$PROJECT_ROOT" show "${PLAN_BASE_SHA}:${rel}" 2>/dev/null)" \
@@ -1112,8 +1115,7 @@ main() {
   exit 0
 }
 
-# Run the CLI only when EXECUTED, not when sourced (P062 Step 8). Same guard
-# aid-c3-dispatch.sh already uses. Without it, sourcing
+# Run the CLI only when EXECUTED, not when sourced (P062 Step 8). Without it, sourcing
 # this file to reach one pure function ran the whole aggregator and exited,
 # which is why its classification logic had never been unit-tested — only
 # observed through a full evidence pack.

@@ -3,7 +3,7 @@
 # aid-render-prompt.sh — deterministic, JSON-aware prompt-template renderer
 # (P065, E-065-1_7, Step 4)
 #
-# Renders a versioned prompt template (e.g. defaults/prompts/c3-audit-prompt-v1.md)
+# Renders a versioned prompt template (e.g. defaults/prompts/review-prompt-v1.md)
 # into a concrete prompt by substituting `{{variable}}` placeholders with values
 # from a canonical JSON object. The template is a COMMITTED contract; this
 # renderer is the ONLY sanctioned way to fill it, so the Codex prompt is never

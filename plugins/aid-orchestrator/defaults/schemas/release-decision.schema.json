@@ -99,13 +99,12 @@
                   {
                     "enum": [
                       "review_profile",
-                      "delivery_gate",
                       "semantic_review_final",
                       "acceptance_evidence",
                       "gates_report",
                       "plan_review",
                       "verification_report",
-                      "invalidation_map",
+                      "plan_diff",
                       "final_review",
                       "obligations"
                     ]

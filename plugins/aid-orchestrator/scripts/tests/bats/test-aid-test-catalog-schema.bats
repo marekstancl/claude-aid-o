@@ -6,8 +6,7 @@
 # test-catalog, test-audit-state, test-audit-inventory,
 # test-audit-consolidated-findings, test-audit-wave-artifact.
 #
-# JSON-Schema tests use python3 + jsonschema (Draft 2020-12) — the same idiom
-# established in test-aid-c3-dispatch.bats; they skip cleanly when the
+# JSON-Schema tests use python3 + jsonschema (Draft 2020-12); they skip cleanly when the
 # jsonschema package is unavailable rather than false-failing.
 
 load test-helpers.bash

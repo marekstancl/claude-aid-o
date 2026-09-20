@@ -106,11 +106,11 @@ aid_receipt_path()    { echo "$(aid_lifecycle_dir "${2:-.}")/receipts/${1}.yaml"
 #      greps the target branch for a merge naming the EPIC — but the only merge
 #      reaching the target branch is `merge(plan): <plan_id>`, which names no
 #      EPIC id, so it returns empty. `_aid_lc_epic_reviewed_head` and
-#      `_aid_lc_epic_review_status` read a per-EPIC audit-report.json that the
-#      new model no longer produces: in `plan_branch` mode the review genuinely
+#      `_aid_lc_epic_review_status` read a per-EPIC review record that
+#      `plan_branch` mode does not use for the release: there the review genuinely
 #      happens ONCE, for the whole plan. In plan mode the merge SHA is supplied
 #      explicitly by the caller and the reviewed head / review status come from
-#      the PLAN-FINAL run's audit-report.json and curator-report.json.
+#      the plan-final run's whole-plan round (cp7/rounds.json).
 #
 # Everything else — the staged/unstaged collision prechecks, schema + public-safe
 # validation, idempotence, `_aid_lc_can_bind`'s ancestry confirmation — is
@@ -123,7 +123,7 @@ aid_receipt_path()    { echo "$(aid_lifecycle_dir "${2:-.}")/receipts/${1}.yaml"
 
 # aid_lc_plan_mode_begin <merge_sha> <plan_final_run_dir_abs> <parent_commit>
 #   merge_sha   — the published plan merge commit, bound as every EPIC's delivery_sha
-#   run_dir_abs — the plan-final run directory holding audit-report.json + curator-report.json
+#   run_dir_abs — the plan-final run directory holding cp7/rounds.json
 #   parent_commit — the commit the lifecycle commit is built on (the merge commit),
 #                   and the CAS "expected old value" for the target ref update
 aid_lc_plan_mode_begin() {
@@ -944,32 +944,32 @@ aid_lifecycle_ensure_manifest() {
   return 0
 }
 
-# _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the EPIC's
-# audit provenance (gitignored evidence). Empty if no provenance (=> unverifiable).
+# _aid_lc_epic_review_file <epic_id> <root> — the EPIC's review record in its
+# gitignored evidence: the EPIC round index (cp3/rounds.json), else the
+# audit-report.json an EPIC closed before 2.101.0 left behind. Empty if neither.
+_aid_lc_epic_review_file() {
+  { ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp3/rounds.json 2>/dev/null \
+    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null || true; } | head -1
+}
+
+# _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the review
+# record. Empty if there is none (=> unverifiable). Plan mode: the review
+# happened once for the whole plan, so it is the whole-plan round's head.
 _aid_lc_epic_reviewed_head() {
-  local epic_id="$1" root="${2:-.}"
   local rep
-  # Plan mode: there is no per-EPIC audit report to read — the review happened
-  # once for the whole plan. The reviewed head is the plan-final Auditor's.
-  if _aid_lc_plan_mode; then
-    local pa="${_AID_LC_PLAN_RUN_DIR:-}/audit-report.json"
-    [[ -f "$pa" ]] || return 0
-    jq -r '.revision.head_sha // .reviewed_head // ""' "$pa" 2>/dev/null || true
-    return 0
-  fi
-  rep="$(ls "${root}/.aid-o/work/evidence/${epic_id}"/*/audit-report.json 2>/dev/null | head -1 || true)"
-  [[ -z "$rep" ]] && return 0
-  jq -r '.revision.head_sha // .reviewed_head // ""' "$rep" 2>/dev/null || true
+  if _aid_lc_plan_mode; then rep="${_AID_LC_PLAN_RUN_DIR:-}/cp7/rounds.json"
+  else rep="$(_aid_lc_epic_review_file "$1" "${2:-.}")"; fi
+  [[ -f "$rep" ]] || return 0
+  jq -r '.head_sha // .revision.head_sha // .reviewed_head // ""' "$rep" 2>/dev/null || true
 }
 
 # _aid_lc_epic_review_status <epic_id> <root> [plan_id] — classify the EPIC's
-# audit review from its provenance (gitignored evidence). Echoes one of:
-#   accepted     — explicit blocking_findings false/0
-#   rejected     — blocking_findings true or a nonzero count
-#   unverifiable — status:unverifiable OR blocking_findings absent/null (never
-#                  presented as accepted — a merge can be delivered while its
-#                  historical review is unverifiable)
-#   none         — no audit report at all
+# review from its record (gitignored evidence). Echoes one of:
+#   accepted     — round verdict pass/skip/no_change (old report: blocking_findings false/0)
+#   rejected     — round verdict fail (old report: blocking_findings true or nonzero)
+#   unverifiable — anything else (never presented as accepted — a merge can be
+#                  delivered while its historical review is unverifiable)
+#   none         — no review record at all
 # [plan_id], in PLAN MODE only, is the authoritative plan id this call is
 # scoped to (D5 lifecycle-audit HIGH follow-up: it MUST come from the
 # caller's own trusted parameter, never be guessed from a mutable runtime
@@ -980,8 +980,16 @@ _aid_lc_epic_review_status() {
   # Plan mode: the ONE plan-level verdict stands for every EPIC in the plan —
   # see _aid_lc_plan_review_status and the PLAN MODE header.
   if _aid_lc_plan_mode; then _aid_lc_plan_review_status "$root" "$plan_id"; return 0; fi
-  rep="$(ls "${root}/.aid-o/work/evidence/${epic_id}"/*/audit-report.json 2>/dev/null | head -1 || true)"
+  rep="$(_aid_lc_epic_review_file "$epic_id" "$root")"
   [[ -z "$rep" ]] && { echo "none"; return 0; }
+  if [[ "$rep" == */cp3/rounds.json ]]; then
+    case "$(jq -r '.verdict // ""' "$rep" 2>/dev/null)" in
+      pass|skip|no_change) echo "accepted" ;;
+      fail)                echo "rejected" ;;
+      *)                   echo "unverifiable" ;;
+    esac
+    return 0
+  fi
   local st bf
   st="$(jq -r '.status // ""' "$rep" 2>/dev/null || true)"
   bf="$(jq -r '.blocking_findings' "$rep" 2>/dev/null || true)"   # direct read (no `// empty`)
@@ -1219,10 +1227,8 @@ aid_lifecycle_record_delivery() {
 #       reason lives in the runtime plan-state and the operation log.
 #   (b) the delivery bindings — every non-abandoned, non-superseded declared
 #       EPIC bound with delivery_sha = the plan merge commit, and the review
-#       verdict taken from the PLAN-level audit-report.json / curator-report.json
-#       in <run_dir_abs>. In the new model the review genuinely happens once for
-#       the whole plan, so a per-EPIC verdict derived from a per-EPIC audit
-#       report no longer exists to be read.
+#       verdict taken from the whole-plan round in <run_dir_abs>: the review
+#       happens once for the whole plan.
 #
 # ONE commit for both, so the closure denominator and the deliveries can never
 # disagree. It does NOT write the receipt: that is Step 6's (`plan-close`), so a

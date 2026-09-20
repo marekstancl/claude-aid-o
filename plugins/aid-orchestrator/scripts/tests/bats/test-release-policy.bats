@@ -1,7 +1,6 @@
 #!/usr/bin/env bats
 # aid-tier: t2
 # test-release-policy.bats — aid-release-policy.sh (C4 release aggregator, E-059-2_2 Step 4)
-# plus the B1 shared-lib (lib/aid-review-signals.sh) cross-check against the FSM.
 #
 # The HEALTHY (release_ready:true) fixture does a REAL git init + commit and aligns HEAD
 # with each artifact's revision.head_sha (via .aid-o/ being gitignored, so evidence never
@@ -401,22 +400,6 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
   # subject_hash is derived from the payload only → stable across runs.
   [ "$(jq -r '.subject.subject_hash' "$EVID/rd1.json")" == "$(jq -r '.subject.subject_hash' "$EVID/rd2.json")" ]
 }
-
-# ─── B1: shared lib sourceable + FSM cross-check ─────────────────────────────
-
-@test "B1: lib/aid-review-signals.sh sources standalone and both functions are callable" {
-  source "$SCRIPTS/lib/aid-review-signals.sh"
-  [ "$(type -t _aid_read_toggle)" == "function" ]
-  [ "$(type -t _aid_validate_test_evidence)" == "function" ]
-  # toggle: enabled default (missing file) and disabled path
-  run _aid_read_toggle "$TEST_TMPDIR/does-not-exist.yaml" reporter
-  [ "$status" -eq 0 ]
-  printf 'reporter:\n  enabled: false\n' > "$TEST_TMPDIR/exec.yaml"
-  run _aid_read_toggle "$TEST_TMPDIR/exec.yaml" reporter
-  [ "$status" -eq 1 ]
-}
-
-# ─── fixture hygiene ─────────────────────────────────────────────────────────
 
 @test "every release-policy fixture file is git-tracked (no .aid-o/ gitignore trap)" {
   local f untracked=0
