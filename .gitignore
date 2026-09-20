@@ -110,8 +110,8 @@ CLAUDE.MD
 # Committed minimal conformance fixture (E-047-4_7 REOPEN): a hand-authored,
 # SANITIZED .aid-o tree for the blocking conformance test. Re-include past the
 # **/.aid-o/ ignore rule above.
-!packages/aid-server/tests/fixtures/mini/**/.aid-o
-!packages/aid-server/tests/fixtures/mini/**/.aid-o/**
+!cockpit/packages/aid-server/tests/fixtures/mini/**/.aid-o
+!cockpit/packages/aid-server/tests/fixtures/mini/**/.aid-o/**
 # Delivery-gate test fixtures: committed .aid-o trees for dg07/dg12 bash tests.
 !plugins/aid-orchestrator/scripts/tests/fixtures/delivery/**/.aid-o
 !plugins/aid-orchestrator/scripts/tests/fixtures/delivery/**/.aid-o/**

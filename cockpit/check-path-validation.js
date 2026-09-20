@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
-const routesDir = path.join(__dirname, '../packages/aid-server/src/routes');
+const routesDir = path.join(__dirname, 'packages/aid-server/src/routes');
 const files = fs.readdirSync(routesDir).filter(f => f.endsWith('.ts'));
 let exitCode = 0;
 for (const file of files) {

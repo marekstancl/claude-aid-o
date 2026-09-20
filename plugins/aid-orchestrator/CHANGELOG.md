@@ -5,6 +5,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- **Kokpit má vlastní složku** — celý node workspace (`packages/`, `package.json` + lock, `tsconfig`, `vitest`, `Dockerfile`, `docker-compose.yml`) se přestěhoval z kořene do `cockpit/`; CI joby a kalibrační skript ukazují na novou cestu, jméno compose projektu je připnuté, takže běžící kontejner zůstává tentýž.
+
 ### Fixed
 - **Odkazy na standardy psaní ukazují na existující soubory** — `skill-writing.md` a `command-writing.md` citovaly audit z června 2026 na cestě `docs/plans/AID-audit-2026-06/`, která od přesunu do `docs/plans/archive/` neexistovala; opraveno na skutečné umístění.
 

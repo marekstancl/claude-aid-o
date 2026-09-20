@@ -127,7 +127,14 @@ every change after that. Both live in `.aid-o/config/`:
 - **v2.101.0** — konec plánu má čtyři kroky a jedno kolo tří revizorů nad celým dodáním; oprava platí znovu jen to, čeho se dotkla; reportér, kurátor, smlouva auditora pro konec plánu, CP4, CP5 a brána dodávky C1 jsou pryč
 - **v2.100.0** — když Codex chybí, odpoví Claude se stejným zadáním; rozhodčí bere rozsah řádků i inline reprodukci; doklad o akceptačních kritériích z brány, která je ověřila
 
-See [CHANGELOG.md](CHANGELOG.md) for full history.
+See [CHANGELOG.md](CHANGELOG.md) for 2.90.0 and later, [CHANGELOG-archive.md](CHANGELOG-archive.md) for everything before.
+
+## Repository layout
+
+- `plugins/aid-orchestrator/` — the plugin (what `/plugin install` ships)
+- `cockpit/` — AID Cockpit, a web UI over `.aid-o/` workspaces (own npm workspace, Dockerfile and compose; not part of the plugin)
+- `docs/` — contributor-facing notes (`extending-aid.md`, design principles) and the plan records of this repository's own AID runs
+- `bin/` — maintainer tools (plugin-issue collection)
 
 ## Requirements
 

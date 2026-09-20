@@ -9,6 +9,11 @@
 # API:  http://localhost:3911/api/projects
 # WS:   ws://localhost:3911/ws
 
+# Project name pinned: the file used to live in the repo root, where Compose
+# derived "aid-orchestrator" from the directory. Keeping it lets the running
+# container be managed from here without a second, colliding project.
+name: aid-orchestrator
+
 services:
   aid-server:
     build:

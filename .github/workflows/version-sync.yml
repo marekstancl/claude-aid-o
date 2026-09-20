@@ -9,13 +9,13 @@ jobs:
       - uses: actions/checkout@v5
       - name: All version locations must match
         run: |
-          VERSION=$(jq -r .version package.json)
+          VERSION=$(jq -r .version cockpit/package.json)
           echo "Expected version: $VERSION"
           check_version() { local file=$1 pattern=$2
             actual=$(grep -oP "$pattern" "$file" | head -1)
             [ "$actual" = "$VERSION" ] || (echo "MISMATCH in $file: $actual != $VERSION" && exit 1)
           }
-          check_version "packages/aid-gui/package.json" '(?<="version": ")[^"]+'
-          check_version "packages/aid-server/package.json" '(?<="version": ")[^"]+'
+          check_version "cockpit/packages/aid-gui/package.json" '(?<="version": ")[^"]+'
+          check_version "cockpit/packages/aid-server/package.json" '(?<="version": ")[^"]+'
           # Plugin has independent versioning (managed via CLAUDE.md Version File Registry)
           # check_version "plugins/aid-orchestrator/.claude-plugin/plugin.json" '(?<="version": ")[^"]+'
