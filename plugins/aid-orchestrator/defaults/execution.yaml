@@ -61,6 +61,14 @@
 # that executed nothing. Adopt tiers with `aid-test-tier-assign.sh` (assign
 # from measured cost), stamp them, and keep them honest with
 # `aid-test-tier-lint.sh` — only then point a gate at `--tier`.
+#
+# `inputs:` (optional, any gate) — the paths a gate's result depends on, as glob
+# pathspecs; a leading `!` excludes. At plan close a gate that passed in the
+# previous attempt is copied forward instead of executed when nothing under its
+# inputs changed between the two candidates and its definition is the same. A
+# gate without `inputs:` depends on the whole tree, so it is copied only when
+# the tree did not change at all. Declare inputs only when they are true: a
+# test gate that lists `["**", "!docs/**"]` says docs cannot break its tests.
 gates:
   tests_pass:
     description: "Merge-path tests pass — the T0 and T1 tiers, not the whole portfolio"

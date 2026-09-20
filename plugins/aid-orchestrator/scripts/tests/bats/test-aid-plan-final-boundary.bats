@@ -1491,6 +1491,67 @@ EOF
 
 # ─── the candidate binding: the stage refuses a head that is not the
 #     frozen candidate, and refuses to run at all before the freeze ─────────
+# ─── Gate reuse across attempts ─────────────────────────────────────────────
+# _reuse_project — a passed first attempt whose gates count their executions and
+# declare inputs: bats_fsm reads everything but docs/, docs_updated reads docs/.
+_reuse_project() {
+  _seed_gates_project
+  _write_exec_yaml
+  local y="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  yq -i '.gates.bats_fsm.command = "echo x >> .aid-o/work/ran_bats_fsm" | .gates.bats_fsm.inputs = ["**", "!docs/**"]
+       | .gates.docs_updated.command = "echo x >> .aid-o/work/ran_docs_updated" | .gates.docs_updated.inputs = ["docs/**"]' "$y"
+  RECEIPT_ARGS=(--substitute-receipt "bats_all=$(_write_receipt bats_all)")
+  _gates "${RECEIPT_ARGS[@]}"; [ "$status" -eq 0 ]
+}
+# _second_attempt <file> <text> — a fix on the plan branch, a new freeze, the gates again
+_second_attempt() {
+  mkdir -p "$TEST_PROJECT_ROOT/$(dirname "$1")"
+  _commit_on "plan/${PLAN_ID}" "$1" "$2"
+  _finalize "$PLAN_ID" freeze                       # notices the moved head and invalidates the old candidate
+  _finalize "$PLAN_ID" sync; _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -eq 0 ]
+  RECEIPT_ARGS=(--substitute-receipt "bats_all=$(_write_receipt bats_all)")
+  _gates "${RECEIPT_ARGS[@]}"
+}
+_ran() { wc -l < "$TEST_PROJECT_ROOT/.aid-o/work/ran_$1" | tr -d ' '; }
+
+@test "reuse: after a docs-only fix the second attempt copies the gate whose inputs exclude docs and re-runs the docs gate" {
+  _reuse_project
+  _second_attempt docs/notes.md "a docs fix"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_ran bats_fsm)" -eq 1 ]; [ "$(_ran docs_updated)" -eq 2 ]
+  [ "$(jq -r '.gates.bats_fsm.reused_from' "$(_report)")" = "R-${PLAN_ID}-final-1" ]
+  [ "$(jq -r '.gates.docs_updated.reused_from // "executed"' "$(_report)")" = executed ]
+  [ "$(jq -r '.revision.head_sha' "$(_report)")" = "$(_manifest_field "$PLAN_ID" candidate_sha)" ]
+  [ "$(jq -r '.gates.bats_fsm.result' "$(_report)")" = pass ]
+  # every copied row names a run directory that exists
+  local from; for from in $(jq -r '.gates[] | .reused_from // empty' "$(_report)" | sort -u); do [ -d "$(dirname "$(_run_dir)")/$from" ]; done
+  grep -q '"event":"gate_reused"' "$(_run_dir)/timeline.jsonl"
+}
+
+@test "reuse: a gate without declared inputs is copied only when the tree did not change; a code fix re-runs it" {
+  _reuse_project
+  _second_attempt src-fix.txt "a code fix"; [ "$status" -eq 0 ]
+  [ "$(_ran bats_fsm)" -eq 2 ]                                   # its inputs changed
+  [ "$(jq -r '.gates.shell_pipeline_smoke.reused_from // "executed"' "$(_report)")" = executed ]   # no inputs = the whole tree
+  [ "$(jq -r '.gates.docs_updated.reused_from' "$(_report)")" = "R-${PLAN_ID}-final-1" ]
+}
+
+@test "reuse: a row that did not pass, or whose gate definition changed, is executed again" {
+  _reuse_project
+  yq -i '.gates.bats_fsm.timeout_seconds = 31' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  _second_attempt docs/notes.md "a docs fix"; [ "$status" -eq 0 ]
+  [ "$(_ran bats_fsm)" -eq 2 ]
+  [ "$(jq -r '.gates.bats_all.reused_from // "never"' "$(_report)")" = never ]   # quarantined: never pass, never copied
+}
+
+@test "reuse: a previous attempt whose report is gone, or is not the runner's, reuses nothing" {
+  _reuse_project
+  local first; first="$(_run_dir)"
+  jq '._generated_by = "someone-else"' "$first/gates_report.json" > "$first/g" && mv "$first/g" "$first/gates_report.json"
+  _second_attempt docs/notes.md "a docs fix"; [ "$status" -eq 0 ]
+  [ "$(_ran bats_fsm)" -eq 2 ]
+  [ "$(jq '[.gates[] | select(.reused_from != null)] | length' "$(_report)")" -eq 0 ]
+}
+
 @test "AC2: --stage gates refuses when the plan branch has moved off the frozen candidate" {
   _seed_gates_project
   _write_exec_yaml

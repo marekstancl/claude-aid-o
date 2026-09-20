@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # aid-review-config.sh — the one reader of a review_checkpoints.<block>
-# reviewer block: plan_review (CP1), step_review (CP2, CP6), epic_review (CP3).
+# reviewer block: plan_review (CP1), step_review (CP2, CP6), epic_review (CP3),
+# final_review (CP7).
 #
 # Precedence: the project's .aid-o/config/policies/review-checkpoints.yaml when
 # it carries the block, otherwise the plugin default. The roles a block may
@@ -32,7 +33,7 @@
 #
 # The toggle key of each block: plan_review → cp1_plan_review,
 # step_review → cp2_step_review (cp6_fast_mode_review when RC_CHECKPOINT=cp6),
-# epic_review → cp3_integration_review.
+# epic_review → cp3_integration_review, final_review → cp7_plan_final_review.
 #
 # One reader for every checkpoint (P094 Step 4); registry row
 # review_config_valid; tested by scripts/tests/bats/test-review-config.bats.
@@ -62,6 +63,7 @@ _aid_rc_toggle_key() {
     plan_review) echo cp1_plan_review ;;
     step_review) [[ "${RC_CHECKPOINT:-}" == cp6 ]] && echo cp6_fast_mode_review || echo cp2_step_review ;;
     epic_review) echo cp3_integration_review ;;
+    final_review) echo cp7_plan_final_review ;;
     *) echo "" ;;
   esac
 }

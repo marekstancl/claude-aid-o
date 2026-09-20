@@ -3,12 +3,13 @@
 # aid-step-check.sh — everything about a change that needs no model, before a
 # reviewer sees it (P094 Step 3).
 #
-#   aid-step-check.sh --checkpoint cp2|cp3|cp6 --evidence-dir <run dir>
+#   aid-step-check.sh --checkpoint cp2|cp3|cp6|cp7 --evidence-dir <run dir>
 #                     [--step N] [--state-file <fsm-state.yaml>] [--plan-json <plan.json>]
-#                     [--worktree] [--dod-file <path>] [--project-root <dir>]
+#                     [--worktree] [--dod-file <path>] [--base <sha>] [--project-root <dir>]
 #
-# Computes, for the diff of one step (cp2), one EPIC (cp3) or the working tree
-# (cp6): the range and where it came from; every changed file classified
+# Computes, for the diff of one step (cp2), one EPIC (cp3), the working tree
+# (cp6) or a whole plan (cp7, --base <plan_base_commit>..HEAD, no declared
+# scope, never skipped): the range and where it came from; every changed file classified
 # against the step's declared scope (outputs, allowed_paths, forbidden_paths);
 # the security patterns of defaults/pre-filter-rules.yaml matched in added
 # lines; added and changed test files with their tier tag; size; the handler
@@ -26,11 +27,11 @@
 # index that already records a closed round: a re-run can never turn a
 # recorded `fail` into a skip.
 #
-# <cp dir> is <run dir>/cp2/step-<N>, <run dir>/cp3 or <run dir>/cp6.
+# <cp dir> is <run dir>/cp2/step-<N>, <run dir>/cp3, <run dir>/cp6 or <run dir>/cp7.
 #
 # Exit: 0 written; 1 refused (named); 2 tooling (jq/yq/git/rules missing);
 #       22 range_undetermined (cp2 without a step_commit or base_commit,
-#       cp3 without a base_commit).
+#       cp3 without a base_commit, cp7 without --base).
 #
 # Successor of the retired pre-filter classify (P060 range rule kept; the
 # verifier-output seed is gone) and of the trivial-skip rule of
@@ -49,9 +50,9 @@ source "$SCRIPT_DIR/lib/aid-ancillary.sh"
 source "$SCRIPT_DIR/lib/aid-test-tier.sh"
 
 die() { echo "step-check: $*" >&2; exit "${2:-1}"; }
-usage() { sed -n '5,9p' "${BASH_SOURCE[0]}" | sed 's/^# *//'; }
+usage() { sed -n '5,10p' "${BASH_SOURCE[0]}" | sed 's/^# *//'; }
 
-CHECKPOINT="" EVID="" STEP="" STATE="" PLAN_JSON="" WORKTREE=0 DOD_FILE="" ROOT=""
+CHECKPOINT="" EVID="" STEP="" STATE="" PLAN_JSON="" WORKTREE=0 DOD_FILE="" ROOT="" BASE_SHA=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --checkpoint) CHECKPOINT="$2"; shift 2 ;;
@@ -61,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --plan-json) PLAN_JSON="$2"; shift 2 ;;
     --worktree) WORKTREE=1; shift ;;
     --dod-file) DOD_FILE="$2"; shift 2 ;;
+    --base) BASE_SHA="$2"; shift 2 ;;
     --project-root) ROOT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option $1 (see --help)" 2 ;;
@@ -68,7 +70,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 for t in jq yq git sha256sum; do command -v "$t" >/dev/null 2>&1 || die "$t not installed" 2; done
-[[ "$CHECKPOINT" =~ ^cp[236]$ ]] || die "--checkpoint must be cp2, cp3 or cp6" 2
+[[ "$CHECKPOINT" =~ ^cp[2367]$ ]] || die "--checkpoint must be cp2, cp3, cp6 or cp7" 2
 [[ -n "$EVID" ]] || die "--evidence-dir is required" 2
 [[ -f "$RULES_FILE" ]] || die "rules file not found: $RULES_FILE" 2
 ROOT="${ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || true)}"
@@ -80,6 +82,7 @@ case "$CHECKPOINT" in
   cp2) [[ "$STEP" =~ ^[0-9]+$ ]] || die "--step N is required for cp2" 2; CPDIR="$EVID/cp2/step-$STEP" ;;
   cp3) CPDIR="$EVID/cp3" ;;
   cp6) CPDIR="$EVID/cp6"; WORKTREE=1 ;;
+  cp7) CPDIR="$EVID/cp7" ;;
 esac
 [[ -z "$DOD_FILE" || -f "$DOD_FILE" ]] || die "--dod-file not found: $DOD_FILE"
 
@@ -90,6 +93,8 @@ HEAD_SHA="$(git_ rev-parse HEAD)"
 range_base="" range_source=""
 if (( WORKTREE )); then
   range_source=worktree
+elif [[ "$CHECKPOINT" == cp7 ]]; then
+  [[ -n "$BASE_SHA" ]] && { range_base="$BASE_SHA"; range_source=plan_base_commit; }
 elif [[ "$CHECKPOINT" == cp2 ]]; then
   # P060 rule: the step boundary, never HEAD~1. The last step_commit event of
   # the previous step, else the run's base_commit, else refuse.
@@ -107,7 +112,7 @@ else
 fi
 if [[ -z "$range_source" ]]; then
   log_event "$TIMELINE" "step_check_range_undetermined" checkpoint="$CHECKPOINT" step="${STEP:-null}" head_sha="$HEAD_SHA"
-  echo "range_undetermined: $CHECKPOINT${STEP:+ step $STEP} has no step_commit event in timeline.jsonl and no base_commit in $(basename "$STATE"); the FSM emits step_commit at every increment-step and base_commit at init. Never hand-write step-check.json." >&2
+  echo "range_undetermined: $CHECKPOINT${STEP:+ step $STEP} has no step_commit event in timeline.jsonl and no base_commit in $(basename "$STATE"); the FSM emits step_commit at every increment-step and base_commit at init; cp7 takes --base <plan_base_commit>. Never hand-write step-check.json." >&2
   exit 22
 fi
 if (( WORKTREE )); then
@@ -139,7 +144,7 @@ _globs_of() {
   done
 }
 SCOPE_GLOBS=() FORBIDDEN_GLOBS=() SCOPE_DECLARED=1
-if [[ "$CHECKPOINT" == cp6 ]]; then
+if [[ "$CHECKPOINT" == cp6 || "$CHECKPOINT" == cp7 ]]; then
   SCOPE_DECLARED=0
 else
   [[ -f "$PLAN_JSON" ]] || die "plan.json not found: $PLAN_JSON"
@@ -211,7 +216,7 @@ elif [[ "$STREAMLINED" == true ]]; then verdict=skip; reason="streamlined"
 elif (( ${#forbidden[@]} > 0 )); then verdict=review; reason="forbidden path touched: ${forbidden[*]}"
 elif (( ${#matched_rules[@]} > 0 )); then verdict="review+security"; reason="security pattern: ${matched_rules[*]}"
 elif (( ${#outside[@]} > 0 )); then verdict=review; reason="files outside the step's scope: ${outside[*]}"
-elif (( ${#FILES[@]} <= MAX_FILES && LINES <= MAX_LINES )); then verdict=skip; reason="${#FILES[@]} file(s), $LINES line(s), inside scope, no pattern matched"
+elif [[ "$CHECKPOINT" != cp7 ]] && (( ${#FILES[@]} <= MAX_FILES && LINES <= MAX_LINES )); then verdict=skip; reason="${#FILES[@]} file(s), $LINES line(s), inside scope, no pattern matched"
 else verdict=review; reason="${#FILES[@]} file(s), $LINES line(s)"
 fi
 

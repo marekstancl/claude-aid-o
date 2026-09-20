@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
 # aid-review-round.sh — one review round at a time, for every checkpoint:
-# the plan review (CP1), the step review (CP2), the EPIC review (CP3) and the
-# fast-mode review (CP6). P094 Step 6; the CP1-only round script is gone.
+# the plan review (CP1), the step review (CP2), the EPIC review (CP3), the
+# fast-mode review (CP6) and the whole-plan review at plan close (CP7).
 #
 # Which review a call is about is the first option group:
 #   --plan <file>                                       CP1: evidence/<plan_id>/cp1/
 #   --checkpoint cp2 --evidence-dir <run dir> --step N  evidence/<run>/cp2/step-N/
 #   --checkpoint cp3 --evidence-dir <run dir>           evidence/<run>/cp3/
 #   --checkpoint cp6 --evidence-dir <do dir>            evidence/do/<id>/cp6/
+#   --checkpoint cp7 --evidence-dir <final run dir>     evidence/<plan>/<R-…-final-N>/cp7/
 #
 #   prepare … --round K [--only <role>] [--manual] [--stub]
 #       build the packet and one prompt per expected reviewer
@@ -25,7 +26,7 @@
 #   fix-check | finalize | dispute                       CP1 only (see below)
 #
 # Every subcommand loads and validates the checkpoint's reviewer block first
-# (review_checkpoints.plan_review / step_review / epic_review). A step round
+# (review_checkpoints.plan_review / step_review / epic_review / final_review). A step round
 # is prepared only from a step-check.json computed at HEAD, and closed only at
 # the same HEAD, with a recorded dispatch bracket for every claude reviewer
 # (unless the round was prepared --stub, which the FSM refuses to advance on).
@@ -108,7 +109,7 @@ if [[ -n "$PLAN" ]]; then
   NS=plan_review; BLOCK=plan_review; ROLES_SKILL="${AID_PLUGIN_PATH}/skills/plan-review-roles.md"
 elif [[ -n "$CHECKPOINT" ]]; then
   MODE=step
-  [[ "$CHECKPOINT" =~ ^cp[236]$ ]] || _die "--checkpoint must be cp2, cp3 or cp6" 2
+  [[ "$CHECKPOINT" =~ ^cp[2367]$ ]] || _die "--checkpoint must be cp2, cp3, cp6 or cp7" 2
   [[ -n "$EVID" && -d "$EVID" ]] || _die "--evidence-dir <dir> required and must exist" 2
   EVID="$(realpath "$EVID")"
   [[ -n "$ROOT" ]] || ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || _die "not inside a git repository; pass --project-root" 2
@@ -117,11 +118,12 @@ elif [[ -n "$CHECKPOINT" ]]; then
     cp2) [[ "$STEP" =~ ^[0-9]+$ ]] || _die "--step N required for cp2" 2; BASE="${EVID}/cp2/step-${STEP}"; NS=step_review; BLOCK=step_review ;;
     cp3) BASE="${EVID}/cp3"; NS=epic_review; BLOCK=epic_review ;;
     cp6) BASE="${EVID}/cp6"; NS=do_review; BLOCK=step_review; export RC_CHECKPOINT=cp6 ;;
+    cp7) BASE="${EVID}/cp7"; NS=final_review; BLOCK=final_review ;;
   esac
   ROLES_SKILL="${AID_PLUGIN_PATH}/skills/step-review-roles.md"
   STEPCHECK="${BASE}/step-check.json"
 else
-  _die "give --plan <file> (CP1) or --checkpoint cp2|cp3|cp6 --evidence-dir <dir> [--step N]" 2
+  _die "give --plan <file> (CP1) or --checkpoint cp2|cp3|cp6|cp7 --evidence-dir <dir> [--step N]" 2
 fi
 
 aid_review_config_load "$ROOT" "$BLOCK" "$ROLES_SKILL" || exit 2
@@ -282,7 +284,11 @@ cmd_prepare() {
     for role in "${roles[@]}"; do aid_plan_review_prompt_render "$role" "$ROUND" "$dir" || exit 1; done
   else
     local prevdir=""; (( ROUND >= 2 )) && prevdir="$(_round_dir $((ROUND - 1)))"
-    aid_step_review_packet_build "$ROOT" "$CHECKPOINT" "$dir" "$STEPCHECK" "${EVID}/plan.json" "${STEP:-}" "$prevdir" || exit 1
+    if [[ "$CHECKPOINT" == cp7 ]]; then
+      aid_final_review_packet_build "$ROOT" "$dir" "$STEPCHECK" "$EVID" "$prevdir" || exit 1
+    else
+      aid_step_review_packet_build "$ROOT" "$CHECKPOINT" "$dir" "$STEPCHECK" "${EVID}/plan.json" "${STEP:-}" "$prevdir" || exit 1
+    fi
     sha="$(_head)"
     mapfile -t roles < <(_expected_roles "$ROUND" | grep -v '^$')
     local min="${#roles[@]}"   # a step round needs every expected role (a codex role may be provider_absent)
@@ -505,11 +511,11 @@ _dispatch_recorded() {
   jq -c --arg f "$focus" --arg r "$2" 'select(.event == "verifier_dispatch_complete" and .focus == $f and ((.output_file // "") | test("reviewer-" + $r + "\\.(json|missing)$")))' "$tl" 2>/dev/null | grep -q .
 }
 
-# ── the CP3 semantic file ──────────────────────────────────────────────────────
+# ── the semantic file of a whole-EPIC (cp3) or whole-plan (cp7) round ─────────
 # _semantic_final_write <verdict> — <run>/semantic-review-final.json, the
-# EPIC-scoped artifact three plan-final consumers keep reading where it always
-# was (aid-fsm.sh routed-findings reconciliation, aid-release-policy.sh input
-# row, aid-plan-fsm.sh plan-finalize): the union of every cp3 round's
+# artifact the boundary consumers keep reading where it always was (aid-fsm.sh
+# routed-findings reconciliation, aid-release-policy.sh input row,
+# aid-plan-fsm.sh plan-finalize): the union of every round's
 # merged.json by fingerprint (the later round's status wins), mapped to the
 # protocol shape and checked against defaults/schemas/semantic-review.schema.json
 # before it is moved into place. lib/aid-finding-merge.sh merges artifacts of
@@ -517,22 +523,22 @@ _dispatch_recorded() {
 # says so in merge_meta.merged_from.
 #   severity  blocker → critical, major → medium, minor → low
 #   status    fixed → resolved, carried → deferred, everything else → open
-#   base_sha  the EPIC's base_commit (fsm-state.yaml), range from step-check.json
+#   base_sha and range come from step-check.json (the EPIC's base_commit at cp3,
+#   the plan's base commit at cp7), so the file names what the reviewers saw
 _semantic_final_write() {
   local verdict="$1" out="${EVID}/semantic-review-final.json" tmp base range schema="${AID_PLUGIN_PATH}/defaults/schemas/semantic-review.schema.json"
-  base="$(yq -r '.base_commit // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"
-  range="$(jq -r '.range // ""' "$STEPCHECK")"
+  range="$(jq -r '.range // ""' "$STEPCHECK")"; base="${range%%..*}"
   tmp="${out}.tmp"
   local rounds=() r
   for r in "${BASE}"/round-*/merged.json; do [[ -f "$r" ]] && rounds+=("$r"); done
   (( ${#rounds[@]} )) || { echo "close: no merged.json under ${BASE}" >&2; return 1; }
-  jq -s --arg base "$base" --arg head "$(_head)" --arg range "$range" --arg v "$verdict" --arg at "$(_now)" \
+  jq -s --arg base "$base" --arg head "$(_head)" --arg range "$range" --arg v "$verdict" --arg at "$(_now)" --arg cp "$CHECKPOINT" \
         --argjson roles "$(_json_strings "${RC_ROLE[@]}")" --argjson from "$(printf '%s\n' "${rounds[@]}" | jq -R . | jq -s .)" '
     def sev: {"blocker": "critical", "major": "medium", "minor": "low"}[.] // "low";
     def st: {"fixed": "resolved", "carried": "deferred"}[.] // "open";
     def file: (split(";")[0] | sub("^[0-9a-f]{7,40}:"; "") | split(":")[0]);
     (sort_by(.round) | map(.findings[]) | group_by(.fingerprint) | map(last)) as $f
-    | {artifact_type: "semantic_review", generated_at: $at, generated_by: "aid-review-round.sh close cp3",
+    | {artifact_type: "semantic_review", generated_at: $at, generated_by: "aid-review-round.sh close \($cp)",
        revision: {base_sha: $base, head_sha: $head},
        semantic_review: {mode: "final", range: $range, verdict: $v, lenses_run: $roles,
          merge_meta: {merged_from: $from, conflicts: []},
@@ -667,8 +673,8 @@ cmd_close() {
     aid_step_review_route_open "$ROOT" "$EVID" "$CHECKPOINT" "$STEP" "$dir" "$(( ROUND >= last_allowed ? 1 : 0 ))" \
       || _die "routing the open findings failed; close can be run again"
     jq --arg at "$(_now)" '. + {routed_at: $at}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
-    if [[ "$CHECKPOINT" == cp3 ]]; then
-      _semantic_final_write "$verdict" || _die "the cp3 round cannot close: ${EVID}/semantic-review-final.json was not written; close can be run again"
+    if [[ "$CHECKPOINT" == cp3 || "$CHECKPOINT" == cp7 ]]; then
+      _semantic_final_write "$verdict" || _die "the ${CHECKPOINT} round cannot close: ${EVID}/semantic-review-final.json was not written; close can be run again"
     fi
   fi
 

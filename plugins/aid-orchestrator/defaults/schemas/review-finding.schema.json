@@ -30,12 +30,12 @@
     }
   ],
   "$defs": {
-    "checkpoint": { "enum": ["cp1", "cp2", "cp3", "cp6"] },
+    "checkpoint": { "enum": ["cp1", "cp2", "cp3", "cp6", "cp7"] },
     "roles_cp1": {
       "enum": ["generalist_a", "generalist_b", "behaviour_edges", "feasibility_deps", "reuse", "enforcement_tests"]
     },
     "roles_step": {
-      "enum": ["step_generalist", "step_security", "epic_generalist", "epic_behaviour", "epic_security"]
+      "enum": ["step_generalist", "step_security", "epic_generalist", "epic_behaviour", "epic_security", "final_criteria", "final_claims", "final_generalist"]
     },
     "finding": {
       "type": "object",

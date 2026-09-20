@@ -4802,6 +4802,49 @@ _pfsm_say_plan_inputs() {
   echo "plan-finalize --stage ${stage}: plan = ${plan_path} (${what})${cfg}" >&2
 }
 
+# _pfsm_gate_definition_sha <execution_yaml> <gate> — what "the same gate" means
+# across attempts: the digest of its whole definition (command, inputs, limits).
+_pfsm_gate_definition_sha() {
+  GATE="$2" yq -o=json -I=0 '.gates[strenv(GATE)]' "$1" 2>/dev/null | sha256sum | cut -d' ' -f1
+}
+
+# _pfsm_gate_reuse_rows <troot> <run_dir> <execution_yaml> <candidate> <gate>...
+#   Prints {from, candidate, rows: {<gate>: <row>}}: the rows of the PREVIOUS
+#   plan-final attempt that may be copied forward instead of executed. A row is
+#   reusable when it passed there, its gate is defined exactly as it was, and
+#   nothing the gate declares as `inputs:` (glob pathspecs; a leading `!`
+#   excludes; none declared = the whole tree) differs between that attempt's
+#   candidate and this one. Anything unreadable means "reuse nothing".
+_pfsm_gate_reuse_rows() {
+  local troot="$1" run_dir="$2" yaml="$3" candidate="$4"; shift 4
+  local none='{"from": null, "candidate": null, "rows": {}}'
+  [[ "$(basename "$run_dir")" =~ ^(.*-final-)([0-9]+)$ ]] || { echo "$none"; return 0; }
+  # The newest earlier attempt that got as far as a gate report.
+  local prev_id="" prev_report="" n
+  for (( n = BASH_REMATCH[2] - 1; n >= 1; n-- )); do
+    prev_id="${BASH_REMATCH[1]}${n}"; prev_report="$(dirname "$run_dir")/${prev_id}/gates_report.json"
+    [[ -f "$prev_report" ]] && break
+  done
+  local prev_candidate
+  prev_candidate="$(jq -r 'select((._generated_by // "") | startswith("aid-run-gates.sh@")) | .revision.head_sha // empty' "$prev_report" 2>/dev/null)" || prev_candidate=""
+  git -C "$troot" cat-file -e "${prev_candidate:-none}^{commit}" 2>/dev/null || { echo "$none"; return 0; }
+
+  local gate spec rows='{}' row
+  local -a pathspec
+  for gate in "$@"; do
+    row="$(jq -c --arg g "$gate" --arg d "$(_pfsm_gate_definition_sha "$yaml" "$gate")" \
+             '.gates[$g] | select(.result == "pass" and .definition_sha256 == $d)' "$prev_report" 2>/dev/null)"
+    [[ -n "$row" ]] || continue
+    pathspec=()
+    while IFS= read -r spec; do
+      [[ "$spec" == '!'* ]] && pathspec+=(":(glob,exclude)${spec#!}") || pathspec+=(":(glob)${spec}")
+    done < <(GATE="$gate" yq -r '.gates[strenv(GATE)].inputs // [] | .[]' "$yaml" 2>/dev/null)
+    git -C "$troot" diff --quiet "$prev_candidate" "$candidate" -- "${pathspec[@]}" 2>/dev/null || continue
+    rows="$(jq -c --arg g "$gate" --argjson r "$row" '.[$g] = $r' <<<"$rows")"
+  done
+  jq -nc --arg from "$prev_id" --arg c "$prev_candidate" --argjson rows "$rows" '{from: $from, candidate: $c, rows: $rows}'
+}
+
 # _pfsm_finalize_gates_body — everything that runs WITH the candidate checked
 # out. Split out so the HEAD restore above happens on every exit path.
 _pfsm_finalize_gates_body() {
@@ -4896,26 +4939,65 @@ _pfsm_finalize_gates_body() {
   # ── Resume: the report is already written, only the transition is missing ─
   # Re-read the existing report and complete the transition; NEVER re-run the
   # gates (that would be the second broad run this stage exists to forbid).
-  local ran_now=0
+  local ran_now=0 expected_runs
   if [[ -f "$report_file" ]]; then
     echo "gates_report.json already exists for ${run_id} — re-reading it and completing only the transition; gates were NOT re-run." >&2
   else
-    ran_now=1
-    local grc=0
-    ( cd "$troot" && "${SCRIPT_DIR}/aid-run-gates.sh" run-all "$execution_yaml" \
-        "$plan_id" "$run_id" "$timeline_file" \
-        --report-file "$report_file" \
-        --profile "$effective_profile" \
-        --base-commit "$base_commit" \
-        --plan-path "$plan_path" ) >/dev/null || grc=$?
-    if [[ ! -f "$report_file" ]]; then
-      echo "PRECONDITION FAIL: the plan-final gate run produced no report at ${run_dir_rel}/gates_report.json (runner rc=${grc}) — the plan stays in PLAN_GATES." >&2
-      return 1
+    # ── Reuse across attempts: a gate that passed in the previous attempt and
+    #    whose declared inputs did not change since is copied, not executed.
+    #    The runner is not told about reuse; it gets a copy of the config whose
+    #    profile lists only the gates that still have to run.
+    local effective_include reuse run_yaml="$execution_yaml"
+    effective_include="$(_pfsm_profile_include "$execution_yaml" "$effective_profile")"
+    # shellcheck disable=SC2086  # gate ids, one per word
+    reuse="$(_pfsm_gate_reuse_rows "$troot" "$run_dir_abs" "$execution_yaml" "$candidate" $effective_include)"
+    local -a to_run=()
+    while IFS= read -r g; do
+      [[ -n "$g" ]] && ! jq -e --arg g "$g" '.rows | has($g)' <<<"$reuse" >/dev/null && to_run+=("$g")
+    done <<< "$effective_include"
+
+    if (( ${#to_run[@]} > 0 )); then
+      ran_now=1
+      if [[ "$(jq '.rows | length' <<<"$reuse")" -gt 0 ]]; then
+        run_yaml="${run_dir_abs}/execution.reuse.yaml"
+        PROFILE="$effective_profile" INCLUDE="$(printf '%s\n' "${to_run[@]}" | jq -R . | jq -sc .)" \
+          yq '.gate_profiles[strenv(PROFILE)].include = (strenv(INCLUDE) | from_json)' "$execution_yaml" > "$run_yaml" || {
+            echo "PRECONDITION FAIL: could not write ${run_yaml}." >&2; return 1; }
+      fi
+      local grc=0
+      ( cd "$troot" && "${SCRIPT_DIR}/aid-run-gates.sh" run-all "$run_yaml" \
+          "$plan_id" "$run_id" "$timeline_file" \
+          --report-file "$report_file" \
+          --profile "$effective_profile" \
+          --base-commit "$base_commit" \
+          --plan-path "$plan_path" ) >/dev/null || grc=$?
+      if [[ ! -f "$report_file" ]]; then
+        echo "PRECONDITION FAIL: the plan-final gate run produced no report at ${run_dir_rel}/gates_report.json (runner rc=${grc}) — the plan stays in PLAN_GATES." >&2
+        return 1
+      fi
+      if [[ "$grc" -ne 0 ]]; then
+        echo "GATES FAILED: the plan-final gate run for ${plan_id} did not pass (runner rc=${grc}); see ${run_dir_rel}/gates_report.json. The plan stays in PLAN_GATES — a failing candidate is shown to the PM, never silently retried." >&2
+        return 1
+      fi
+    else
+      # Nothing to execute: this attempt's report is the previous one, re-bound.
+      jq --arg h "$candidate" '.revision.head_sha = $h' "$(dirname "$run_dir_abs")/$(jq -r .from <<<"$reuse")/gates_report.json" > "$report_file" || return 1
     fi
-    if [[ "$grc" -ne 0 ]]; then
-      echo "GATES FAILED: the plan-final gate run for ${plan_id} did not pass (runner rc=${grc}); see ${run_dir_rel}/gates_report.json. The plan stays in PLAN_GATES — a failing candidate is shown to the PM, never silently retried." >&2
-      return 1
-    fi
+    # Every row says which definition it ran under (what the next attempt
+    # compares), and a copied row says where it came from.
+    local defs='{}'
+    while IFS= read -r g; do
+      [[ -n "$g" ]] && defs="$(jq -c --arg g "$g" --arg d "$(_pfsm_gate_definition_sha "$execution_yaml" "$g")" '.[$g] = $d' <<<"$defs")"
+    done <<< "$effective_include"
+    jq --argjson reuse "$reuse" --argjson defs "$defs" '
+        reduce ($reuse.rows | to_entries[]) as $r (.;
+          .gates[$r.key] = ($r.value + {reused_from: ($r.value.reused_from // $reuse.from), reused_candidate: ($r.value.reused_candidate // $reuse.candidate)})
+          | .excluded_gates = ((.excluded_gates // []) - [$r.key]))
+        | .gates |= with_entries(if $defs[.key] then .value.definition_sha256 = $defs[.key] else . end)' \
+      "$report_file" > "${report_file}.tmp" && mv "${report_file}.tmp" "$report_file" || { rm -f "${report_file}.tmp"; return 1; }
+    while IFS= read -r g; do
+      log_event "$timeline_file" gate_reused gate="$g" reused_from="$(jq -r .from <<<"$reuse")" 2>/dev/null || true
+    done < <(jq -r '.rows | keys[]' <<<"$reuse")
   fi
 
   # ── quarantine_substitutes[]: the ONLY accepted evidence for a quarantined
@@ -5077,8 +5159,10 @@ _pfsm_finalize_gates_body() {
     local starts
     starts="$(grep -c '"event":"gate_runner_start"' "$timeline_file" 2>/dev/null || true)"
     [[ -z "$starts" ]] && starts=0
-    if [[ "$starts" -ne 1 ]]; then
-      _gassert "timeline has ${starts} gate_runner_start events for ${run_id}, expected exactly 1 (no second broad run under a 'full' label)."
+    # A report made only of copied rows ran nothing; any other ran exactly once.
+    expected_runs="$(jq 'if any(.gates[]; .reused_from == null and .result != "profile_excluded") then 1 else 0 end' "$report_file")"
+    if [[ "$starts" -ne "$expected_runs" ]]; then
+      _gassert "timeline has ${starts} gate_runner_start events for ${run_id}, expected exactly ${expected_runs} (no second broad run under a 'full' label)."
     fi
   elif [[ "$ran_now" -eq 1 ]]; then
     _gassert "no timeline at ${run_dir_rel}/timeline.jsonl — the single-run assertion cannot be made."

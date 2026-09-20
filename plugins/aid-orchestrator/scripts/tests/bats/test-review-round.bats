@@ -684,3 +684,100 @@ _close1() {
   run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' && fsm_check_review_round '$E' cp2 0"
   [ "$status" -eq 0 ]
 }
+
+# ── cp7: one round over the whole plan, no plan.json anywhere ─────────────────
+# _frepo — a repository with a plan range (base..HEAD), a plan-final run
+# directory holding what `produce` writes, and final_review on claude roles only.
+_frepo() {
+  R="$ROOT/frepo"; E="$R/.aid-o/work/evidence/P901/R-P901-final-1"; mkdir -p "$R/src" "$R/.aid-o/plans" "$E" "$R/.aid-o/config/policies"
+  git -C "$ROOT" init -q "$R" >/dev/null; git -C "$R" config user.email t@t; git -C "$R" config user.name t
+  echo '.aid-o/' > "$R/.gitignore"; echo base > "$R/src/app.py"; git -C "$R" add -A; git -C "$R" commit -qm base
+  FBASE="$(git -C "$R" rev-parse HEAD)"
+  seq 1 60 >> "$R/src/app.py"; echo "- **New thing** — the app now imports new" > "$R/CHANGELOG.md"; git -C "$R" add -A; git -C "$R" commit -qm "feat: the plan's work"
+  printf -- '---\nid: P901\ntype: feature\n---\n# Plan\n\n### Step 1: first\n\n**Acceptance Criteria:**\n- [ ] the app imports new\n\n**Effort:** S\n\n## Success Criteria\n\n- it works end to end\n' > "$R/.aid-o/plans/P901-x.md"
+  echo '{"gates": {"tests_pass": {"gate": "tests_pass", "result": "pass"}}, "overall_status": "pass"}' > "$E/gates_report.json"
+  echo '{"criteria": []}' > "$E/plan-diff.json"; : > "$E/timeline.jsonl"
+  yq '.review_checkpoints.final_review.reviewers |= map(.provider = "claude" | .model = "sonnet")' \
+     "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
+}
+_fsc() { bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint cp7 --base "$FBASE" --evidence-dir "$E" --project-root "$R" >/dev/null; }
+_F() { "$ROUND_SH" "$1" --checkpoint cp7 --evidence-dir "$E" --project-root "$R" "${@:2}"; }
+FD() { printf '%s/cp7/round-%s' "$E" "$1"; }
+# _fanswer <round> <role> [jq filter] — a cp7 answer with no findings, bracketed like a dispatched agent
+_fanswer() {
+  local d; d="$(FD "$1")"
+  jq -n --arg r "$2" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "fixture"}' | jq "${3:-.}" > "$d/reviewer-$2.json"
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "cp7-${2//_/-}" --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "cp7-${2//_/-}" --output-file "$d/reviewer-$2.json" --evidence-dir "$d" >/dev/null
+}
+_BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims an import the app never makes", command: "grep -n import src/app.py", evidence: "src/app.py:1", fix: "import new"}] | del(.no_findings_reason)'
+
+@test "cp7: produce's inputs hold the plan's criteria and the EPIC findings; prepare prints three prompts with cp7 foci" {
+  _frepo; _fsc
+  grep -q "the app imports new" "$E/cp7/criteria.md"; grep -q "it works end to end" "$E/cp7/criteria.md"
+  [ "$(jq -c .epics "$E/cp7/epic-findings.json")" = "[]" ]
+  [ ! -e "$E/plan.json" ]
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"focus cp7-final-criteria"* && "$output" == *"focus cp7-final-claims"* && "$output" == *"focus cp7-final-generalist"* ]]
+  grep -q "CHANGELOG" "$(FD 1)/packet/claims.patch"
+  grep -q "every EPIC together" "$(FD 1)/prompt-final_claims.md"
+}
+
+@test "cp7: a closed round writes rounds.json and a schema-shaped semantic file over base..candidate, lenses = the round's roles" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  local r; for r in final_criteria final_claims final_generalist; do _fanswer 1 "$r"; done
+  _F collect --round 1 >/dev/null
+  run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .verdict "$E/cp7/rounds.json")" = pass ]
+  [ "$(jq -r .head_sha "$E/cp7/rounds.json")" = "$(git -C "$R" rev-parse HEAD)" ]
+  local f="$E/semantic-review-final.json"
+  [ "$(jq -r .semantic_review.range "$f")" = "${FBASE}..$(git -C "$R" rev-parse HEAD)" ]
+  [ "$(jq -r .revision.base_sha "$f")" = "$FBASE" ]
+  [ "$(jq -c '.semantic_review.lenses_run | sort' "$f")" = '["final_claims","final_criteria","final_generalist"]' ]
+  [ "$(jq -r .generated_by "$f")" = "aid-review-round.sh close cp7" ]
+  run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' && fsm_check_review_round '$E' cp7"
+  [ "$status" -eq 0 ]
+}
+
+@test "cp7: the FSM check names the next command when no round exists" {
+  _frepo
+  run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' && fsm_check_review_round '$E' cp7"
+  [ "$status" -eq 1 ]; [[ "$output" == *"--checkpoint cp7"* ]]
+}
+
+@test "cp7: prepare refuses when HEAD moved past the commit the check was computed at, and without produce's files" {
+  _frepo; _fsc
+  echo more >> "$R/src/app.py"; git -C "$R" commit -qam "later work"
+  run _F prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"stale"* ]]
+  _fsc; rm "$E/cp7/criteria.md"
+  run _F prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"--stage produce"* ]]
+}
+
+@test "cp7: close refuses a reviewer file nobody dispatched" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_claims
+  jq -n '{role: "final_generalist", checkpoint: "cp7", findings: [], no_findings_reason: "hand-written"}' > "$(FD 1)/reviewer-final_generalist.json"
+  _F collect --round 1 >/dev/null
+  run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5
+  [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]
+}
+
+@test "cp7: an open blocker fails the round and stays open; the confirmation round carries it and the fix diff, and asks only its reporter" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist; _fanswer 1 final_claims "$_BLOCKER"
+  _F collect --round 1 >/dev/null
+  run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5; [ "$status" -eq 0 ]
+  [ "$(jq -r .verdict "$E/cp7/rounds.json")" = fail ]
+  [ "$(jq -r '.findings[0].status' "$(FD 1)/merged.json")" = open ]
+  run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' && fsm_check_review_round '$E' cp7"; [ "$status" -eq 1 ]
+  sed -i '1i import new' "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"; _fsc
+  run _F prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -c .reviewers_expected "$(FD 2)/round.json")" = '["final_claims"]' ]
+  [ -s "$(FD 2)/packet/fix.patch" ]; [ "$(jq '.findings | length' "$(FD 2)/packet/open-findings.json")" -eq 1 ]
+}
+
+@test "cp7: a finding of a final role validates against the finding schema's checkpoint and role lists" {
+  jq -e '."$defs".checkpoint.enum | index("cp7")' "$AID_PLUGIN_PATH/defaults/schemas/review-finding.schema.json"
+  jq -e '."$defs".roles_step.enum | (index("final_criteria") and index("final_claims") and index("final_generalist"))' "$AID_PLUGIN_PATH/defaults/schemas/review-finding.schema.json"
+}

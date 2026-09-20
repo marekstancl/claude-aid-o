@@ -12,6 +12,8 @@ review_checkpoints:
   cp4_curator_validation: true     # curator proposal validation (verifier:code-review)
   cp5_critical_gate: true          # auditor critical findings block DONE
   cp6_fast_mode_review: true       # post-/aid-do review (verifier:code-review)
+  cp7_plan_final_review: true      # the whole plan read once before the merge decision (final_review below);
+                                   # switched off, plan-finalize --stage decide blocks until the PM waives it
   simplifier_pass: true            # plan-boundary Simplifier proposal pass (gate-fixer applies S/M)
   delivery_report: true            # plan-boundary Reporter delivery report generation
 
@@ -60,6 +62,16 @@ review_checkpoints:
       - {role: epic_generalist, provider: claude, model: sonnet}
       - {role: epic_behaviour,  provider: claude, model: sonnet}
       - {role: epic_security,   provider: codex,  model: gpt-5.6-terra}
+  # Whole-plan review (CP7): one round over plan_base_commit..candidate before
+  # plan-finalize --stage decide, plus a confirmation round after a fix.
+  final_review:
+    rounds_default: 2
+    banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
+    stand_in_model: sonnet
+    reviewers:
+      - {role: final_criteria,   provider: claude, model: opus}
+      - {role: final_claims,     provider: claude, model: sonnet}
+      - {role: final_generalist, provider: codex,  model: gpt-5.6-terra}
 
   # The fix loop, the trivial-skip thresholds and the pre-filter left with
   # P094: a step is skipped by aid-step-check.sh (size, scope, no pattern), the

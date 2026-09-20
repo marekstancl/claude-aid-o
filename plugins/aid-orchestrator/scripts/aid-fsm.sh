@@ -1226,8 +1226,9 @@ fsm_count_recent_fails_epic() {
 }
 
 # fsm_check_review_round <evidence_dir> <checkpoint> [<step>] [--freshness [<tree_root>]]
-#   P094 Step 8: the one precondition of the step review (cp2) and the EPIC
-#   review (cp3). Reads <cp dir>/rounds.json written by aid-step-check.sh (a
+#   The one precondition of the step review (cp2), the EPIC review (cp3) and
+#   the whole-plan review (cp7, <evidence_dir> = the plan-final run directory,
+#   called by plan-finalize --stage decide). Reads <cp dir>/rounds.json written by aid-step-check.sh (a
 #   skip or no_change verdict) or by aid-review-round.sh close (pass or fail):
 #     skip       passes only with a step_check timeline event whose head_sha and
 #                sha256 match the step check, computed at HEAD (skip_unbound,
@@ -1240,8 +1241,9 @@ fsm_count_recent_fails_epic() {
 #                fixture or evidence churn with a CP3-Freshness-Exception trailer
 #                on every commit past the reviewed head (P060 Step 4, kept)
 #     fail       blocks naming the index
-#   cp3 additionally requires <evidence_dir>/semantic-review-final.json when a
-#   round ran (the routed-findings reconciliation reads it).
+#   cp3 and cp7 additionally require <evidence_dir>/semantic-review-final.json
+#   when a round ran (the routed-findings reconciliation and the release
+#   decision read it).
 #   A disabled checkpoint (review_checkpoints.enabled or its own toggle false)
 #   passes with a review_checkpoint_disabled audit line.
 #   Registry: fsm_review_round_required, fsm_review_round_head_bound,
@@ -1259,6 +1261,7 @@ fsm_check_review_round() {
   case "$cp" in
     cp2) cpdir="${evidence_dir}/cp2/step-${step}"; toggle=cp2_step_review ;;
     cp3) cpdir="${evidence_dir}/cp3"; toggle=cp3_integration_review ;;
+    cp7) cpdir="${evidence_dir}/cp7"; toggle=cp7_plan_final_review ;;
     *) echo "PRECONDITION FAIL: fsm_check_review_round: unknown checkpoint ${cp}" >&2; return 1 ;;
   esac
   index="${cpdir}/rounds.json"
@@ -1289,6 +1292,7 @@ fsm_check_review_round() {
   done
 
   local how_to="run: bash \$AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint ${cp}${step:+ --step $step} --evidence-dir ${evidence_dir}; then, for a review verdict, aid-review-round.sh prepare/collect/close (commands/aid-run.md \"Step review (CP2) and EPIC review (CP3)\")"
+  [[ "$cp" == cp7 ]] && how_to="run: plan-finalize --stage produce, then bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare|collect|close --checkpoint cp7 --evidence-dir ${evidence_dir} --round 1"
   if [[ ! -f "$index" ]]; then
     _PRECONDITION_FAIL_REASON="review_round_missing"
     echo "PRECONDITION FAIL: no review round index for ${cp}${step:+ step $step} (${index} missing). ${how_to}" >&2
@@ -1356,9 +1360,9 @@ fsm_check_review_round() {
     return 1
   fi
   local reviewed_head; reviewed_head="$(jq -r '.head_sha // ""' "${dir}/round.json")"
-  if [[ "$cp" == cp3 && ! -f "${evidence_dir}/semantic-review-final.json" ]]; then
+  if [[ "$cp" != cp2 && ! -f "${evidence_dir}/semantic-review-final.json" ]]; then
     _PRECONDITION_FAIL_REASON="semantic_review_missing"
-    echo "PRECONDITION FAIL: the cp3 round closed but ${evidence_dir}/semantic-review-final.json is missing (the cp3 close writes it for the routed-findings reconciliation); run aid-review-round.sh close again." >&2
+    echo "PRECONDITION FAIL: the ${cp} round closed but ${evidence_dir}/semantic-review-final.json is missing (the ${cp} close writes it); run aid-review-round.sh close again." >&2
     return 1
   fi
   [[ "$reviewed_head" == "$current_head" ]] && return 0

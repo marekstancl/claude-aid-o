@@ -1,6 +1,6 @@
 ---
 name: step-review-roles
-description: Reviewer contract for the step review (CP2), the EPIC review (CP3) and the fast-mode review (CP6) — the packet, the five reviewer roles with their questions and stop rules, the evidence rule and the output file shape
+description: Reviewer contract for the step review (CP2), the EPIC review (CP3), the fast-mode review (CP6) and the whole-plan review at plan close (CP7) — the packet, the eight reviewer roles with their questions and stop rules, the evidence rule and the output file shape
 user_invocable: false
 required_roles: none
 ---
@@ -12,7 +12,9 @@ required_roles: none
 The step review (CP2) puts one step's diff in front of one or two reviewers
 before the step is closed; the EPIC review (CP3) puts the whole EPIC diff in
 front of two or three before the EPIC goes to its gates; the fast-mode review
-(CP6) reviews a `/aid-do` working tree the same way, advisory. Every reviewer
+(CP6) reviews a `/aid-do` working tree the same way, advisory; the whole-plan
+review (CP7) reads the range of a finished plan, every EPIC together, once
+before the decision to merge. Every reviewer
 of a round gets the same packet and the same rules; only the role section
 differs. This file is the source of the role sections: the round engine cuts
 one `## Role:` section out of it per reviewer and renders it into
@@ -40,6 +42,12 @@ after the `--- PACKET ---` marker:
 | `files.json` | `plan.json` (`outputs`, `allowed_paths`, `forbidden_paths`) | what the step was allowed to touch |
 | `diff.patch` | `git diff <range>` from `step-check.json` | the change under review |
 | `open-findings.json`, `fix.patch` | the previous round (confirmation rounds only) | what was still open, and what the fix changed |
+
+At CP7 `dod.md` is the plan's acceptance and success criteria, `files.json`
+declares no scope, and the packet adds `plan-diff.json` (which executed test
+proves which criterion), `gates_report.json` (the gates at the candidate),
+`epic-findings.json` (what each EPIC's CP3 round left open, so it is not
+judged twice) and `claims.patch` (the CHANGELOG, README and docs hunks).
 
 Reviewers may read the repository at the reviewed commit with read-only tools
 beyond the packet; the findings worth paying for usually lie in callers and
@@ -211,6 +219,62 @@ between steps.
 
 A blocker is an exploitable path across the EPIC: unvalidated input reaching a
 sink, a missing authorization check, or a secret in the tree.
+
+## Role: final_criteria
+
+The finished plan against what it promised. You hold the plan's acceptance and
+success criteria (`dod.md`) and the record of what was executed
+(`plan-diff.json`, `gates_report.json`), and you check each promise against a
+proof that ran.
+
+### Questions
+
+1. For every acceptance criterion of the plan: which executed test or gate row proves it? Name the test by `path:line` and its result in `plan-diff.json`.
+2. Is any criterion recorded as verified while its test was skipped, not selected, or does not assert what the criterion says?
+3. Is any criterion proven only by a manual step, a live system or a later deployment that the range does not contain?
+4. Does a success criterion of the plan as a whole have no proof at all in the range?
+
+### Stop rule
+
+A blocker is an acceptance criterion with no executed proof at the candidate.
+A criterion whose proof is weaker than its wording is a major.
+
+## Role: final_claims
+
+What the delivery says about itself against what the code does. You hold
+`claims.patch` (CHANGELOG, README and docs hunks of the range) and the code at
+the candidate.
+
+### Questions
+
+1. For every behavioural claim in the CHANGELOG, README and docs hunks: does the code at the candidate do it? Cite the line that does, or the absence.
+2. Does a binding instruction for whoever deploys or operates this (an order of steps, a migration, a flag that must be set) live only outside the delivered files: in a backlog, a plan, a chat?
+3. Does the diff contradict the plan's declared type (a docs-only or refactor plan that changes behaviour, a plan that says "no API change" and changes one)?
+4. Does a user-facing change of the range have no CHANGELOG line at all?
+
+### Stop rule
+
+A blocker is a false claim: the delivery says the system does something it
+does not do, or a binding instruction exists only outside what is delivered.
+
+## Role: final_generalist
+
+The whole range as a colleague from another provider reads it, across the
+EPICs. The per-EPIC reviews already judged each EPIC alone
+(`epic-findings.json`); you look for what none of them could see.
+
+### Questions
+
+1. Does a change of one EPIC break a caller, a consumer or a test that another EPIC of the same plan touched or relied on?
+2. Is anything half-done across the EPICs: a function one EPIC adds and no EPIC calls, a flag one EPIC reads and none sets?
+3. Was an EPIC of the plan not reviewed as a whole (`cp3: absent`)? Then read its part of the range as its EPIC reviewer would have.
+4. Does the range remove or weaken an existing behaviour that no criterion of the plan asked to change?
+5. Is a finding the per-EPIC reviews left open still true at the candidate? Report it once, with today's evidence.
+
+### Stop rule
+
+A blocker is a break that exists only when the EPICs are read together: a
+broken consumer, an unwired half, or a behaviour lost that nobody asked to lose.
 
 ## Anti-patterns
 
