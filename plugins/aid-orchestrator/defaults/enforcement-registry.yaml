@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 524          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 525          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -378,13 +378,14 @@ enforcements:
   # These rows carry deadline fields so aid-registry-ttl-guard.sh can enforce
   # promotion accountability. Deferral example:
   #   deferred_until: 2026-09-30, deferred_by: marek, deferred_reason: Q3 roadmap
-  - {id: delivery_report_present,       type: 4,  source: "scripts/aid-fsm.sh (fsm_eval_delivery_report_present)", instruction: "skills/pipeline.md §7 / commands/aid-run.md", severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2026-09-30", description: "plan-boundary structural presence: .aid-o/reports/{plan}-delivery.md exists"}
-  - {id: delivery_report_test_evidence, type: 4,  source: "scripts/aid-fsm.sh (_test_evidence on-disk check)", instruction: "agents/reporter.md", severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2026-09-30", description: "delivery report _test_evidence[] references >=1 artifact under evidence dir"}
-  - {id: simplifier_pass,               type: 9,  source: "defaults/policies/review-checkpoints.yaml", instruction: "skills/pipeline.md §7 step 5", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", description: "plan-boundary Simplifier proposal pass toggle; gate-fixer applies S/M, defers L"}
-  - {id: delivery_report,               type: 9,  source: "defaults/policies/review-checkpoints.yaml", instruction: "skills/pipeline.md §7 step 6", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", description: "plan-boundary Reporter delivery-report generation toggle"}
-  - {id: reporter_focus_allowlist,      type: 4,  source: "scripts/aid-emit-dispatch.sh:80", instruction: "skills/pipeline.md §4", severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2026-09-30", description: "--focus allowlist accepts reporter|simplifier (subagent-mode dispatch ledger)"}
-  - {id: reports_scope_allowed,         type: 9,  source: "defaults/templates/epic.md (Allowed files/paths)", instruction: "skills/pipeline.md §7", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", description: ".aid-o/reports/ default allowed path so committed delivery reports pass scope-check"}
-  - {id: delivery_report_template,      type: 10, source: "defaults/templates/delivery-report.md", instruction: "agents/reporter.md", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", description: "fixed 7-section delivery-report template + machine-read frontmatter contract"}
+  - {id: delivery_report_present,       type: 4,  source: "scripts/aid-fsm.sh (fsm_eval_delivery_report_present)", instruction: "skills/pipeline.md §7 / commands/aid-run.md", severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "plan-boundary structural presence: .aid-o/reports/{plan}-delivery.md exists"}
+  - {id: delivery_report_test_evidence, type: 4,  source: "scripts/aid-fsm.sh (_test_evidence on-disk check)", instruction: "agents/reporter.md", severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "delivery report _test_evidence[] references >=1 artifact under evidence dir"}
+  - {id: simplifier_pass,               type: 9,  source: "defaults/policies/review-checkpoints.yaml", instruction: "skills/pipeline.md §7 step 5", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "plan-boundary Simplifier proposal pass toggle; gate-fixer applies S/M, defers L"}
+  - {id: delivery_report,               type: 9,  source: "defaults/policies/review-checkpoints.yaml", instruction: "skills/pipeline.md §7 step 6", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "plan-boundary Reporter delivery-report generation toggle"}
+  - {id: reporter_focus_allowlist,      type: 4,  source: "scripts/aid-emit-dispatch.sh:80", instruction: "skills/pipeline.md §4", severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "--focus allowlist accepts reporter|simplifier (subagent-mode dispatch ledger)"}
+  - {id: reports_scope_allowed,         type: 9,  source: "defaults/templates/epic.md (Allowed files/paths)", instruction: "skills/pipeline.md §7", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: ".aid-o/reports/ default allowed path so committed delivery reports pass scope-check"}
+  - {id: delivery_report_template,      type: 10, source: "defaults/templates/delivery-report.md", instruction: "agents/reporter.md", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "fixed 7-section delivery-report template + machine-read frontmatter contract"}
+  - {id: ttl_guard_date_override_test_only, type: 4, source: "scripts/aid-registry-ttl-guard.sh (AID_TTL_TODAY)", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, test: "scripts/tests/bats/test-registry-ttl.bats", description: "the guard date override AID_TTL_TODAY is honoured only with AID_TEST_MODE=1; without it the override is ignored with a warning, and a value that is not an ISO date exits 2, so the evidence verifier cannot be handed a past date in production"}
 
   # ── E-046-3_3: CP1/behavior_trace enforcement registration ─────────────────
   - id: cp1_critical_path_flow_trace
@@ -1468,6 +1469,9 @@ enforcements:
     status: planned
     verdict: unmapped
     deadline: "2026-09-30"
+    deferred_until: "2026-12-31"
+    deferred_by: "PM 2026-09-20"
+    deferred_reason: "owned by the P068 line; re-dated so the TTL guard does not break plan-final in consumer projects; out of P096 scope"
     description: "TRANSITION half — BUILT AND TESTED, NOT YET WIRED. queue_set_status validates against the seven-value enum (exit 2, nothing written, for anything else — including the read-only legacy `queued`/`completed`), refuses to leave a terminal status, and rejects a `reason` outside its charset allowlist; queue_claim_next performs read-and-claim inside ONE hold of <queue>.lock so two concurrent callers cannot both win an entry, and records a durable blocked reason or reports rc 3. As of this row's creation these three functions have ZERO production callers outside the library, its own CLI and the bats suite — every non-`queued` status in the live queue still got there by hand, which is the very failure this is meant to abolish. Recorded `planned` rather than `active` so the registry does not overclaim: promotion to active requires aid-plan-fsm.sh's epic-start / epic-merge-to-plan / plan-merge-to-main to drive them (E-064-2_2 Step 4, else P068). Deadline aligned with the rest of the plan-boundary cohort."
     test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
 
@@ -1571,6 +1575,9 @@ enforcements:
     status: planned
     verdict: unmapped
     deadline: "2026-09-30"
+    deferred_until: "2026-12-31"
+    deferred_by: "PM 2026-09-20"
+    deferred_reason: "owned by the P068 line; re-dated so the TTL guard does not break plan-final in consumer projects; out of P096 scope"
     description: "RECORD half, WRITER-ONLY until P068 (IMP-274 registry-honesty pass; was overclaimed as active — a writer with no reader is a detector without enforcement, AID-v3-principles.md §1). cmd_epic_complete records a plan-declared gate (plan.json.gates[]) that the active EPIC-boundary profile excludes into the manifest as plan_final_required_gates (plan-wide union, monotonic, plus per-EPIC), fail-loud, never silently dropped. The record does NOT gate anything today: the GATES:DONE plan_gate_profile_excluded precondition blocks UNCONDITIONALLY on an excluded plan-required gate (it is not conditional on this record — earlier description mis-stated that), and the only intended READER of the record is P068's plan-final stage, which does not exist yet. Also records the targeted selector's exit-3 unknown-production-path signal by raising the recorded floor to at least full. Promotion to active requires the P068 plan-final consumer; deadline aligned with the plan-boundary cohort."
     test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
 

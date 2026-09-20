@@ -17,7 +17,7 @@
 #   0   All planned rows are either not-yet-past-deadline or have a valid
 #       future deferred_until date.
 #   1   One or more planned rows are stale (past deadline, no valid deferral).
-#   2   Registry not found or not readable.
+#   2   Registry not found or not readable, or a malformed AID_TTL_TODAY.
 #
 # Schema fields checked (per EPIC E-046-1_3 Step 5):
 #   deadline       ISO 8601 date (YYYY-MM-DD); optional per row; if present and
@@ -29,11 +29,26 @@
 #
 # Rows with status: active or status: dead are NEVER checked (only status: planned).
 # Rows with no deadline field are skipped (guard is opt-in per row).
+#
+# Environment:
+#   AID_TTL_TODAY  ISO date used instead of the system date. Honoured only
+#                  together with AID_TEST_MODE=1, so a production run of the
+#                  evidence verifier cannot be handed a past date.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TODAY=$(date -u +%Y-%m-%d)
+if [[ -n "${AID_TTL_TODAY:-}" ]]; then
+  if [[ "${AID_TEST_MODE:-}" != "1" ]]; then
+    echo "WARNING: AID_TTL_TODAY ignored (honoured only with AID_TEST_MODE=1); using $TODAY" >&2
+  elif [[ ! "$AID_TTL_TODAY" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "ERROR: AID_TTL_TODAY must be an ISO date (YYYY-MM-DD), got: $AID_TTL_TODAY" >&2
+    exit 2
+  else
+    TODAY="$AID_TTL_TODAY"
+  fi
+fi
 
 # ── Registry discovery ────────────────────────────────────────────────────────
 

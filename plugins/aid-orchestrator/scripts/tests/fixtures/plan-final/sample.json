@@ -1,0 +1,118 @@
+{
+  "recorded": "2026-09-20",
+  "note": "Six high findings of the plan-final auditor whose reviewed commits still resolve, plus two medium findings standing in for the two high findings of WAN P078 (final-6, final-7), whose candidate commits are gone from the repository.",
+  "entries": [
+    {
+      "id": "S1",
+      "project": "wan",
+      "plan": "P082",
+      "run": "R-P082-final-2",
+      "base_sha": "38dd3a85033dfbd8355f5a59b3b2fa25b3ec13ff",
+      "candidate_sha": "142f3c4f4ddd50a779e132678ce8661f5420df6c",
+      "finding": {
+        "severity": "high",
+        "claim": "Plan P082 is explicitly scoped as docs-only ('Žádná změna byznys logiky, API nebo DB — čistě obsah help stránek + registrace routes/config', per .aid-o/plans/P082-napoveda-remediace-a-pwa.md §Out of scope). The candidate diff nonetheless bundles a repo-wide CI change: .github/workflows/ci.yml's pytest step is commented out entirely ('ci: temporarily disable pytest step until test suite is fast (PM decision)', commits 5185a3e5 and 9516c548, both timestamped 18:07:58, i.e. AFTER CP3 code-review and CP3 security review both ran at 17:50-17:52 against head f1a2f83c). Neither CP3 review, nor the gates run (revision.head_sha=5185a3e5 in gates_report.json, itself already post-CI-disable but pre-quarantine-commit), ever evaluated this change specifically as a CI-safety-net regression. It also directly contradicts a same-day backlog.md entry (line ~1867) recording the CI pytest job as freshly working and green ('ruff + 2435 unit testů (~74s) + version-sync guard, oba joby zelené') — that state was reversed by the disabling commits a few hours later on the same branch, with no corresponding backlog/lessons-learned entry explaining the reversal.",
+        "evidence": ".github/workflows/ci.yml"
+      },
+      "source": "audit-report.json"
+    },
+    {
+      "id": "S2",
+      "project": "wan",
+      "plan": "P101",
+      "run": "R-P101-final-2",
+      "base_sha": "0e9012c173ddd09903762f2d4ef97f56d8c130f6",
+      "candidate_sha": "f4b3e5397a16014e62395f558299bc0d2239f585",
+      "finding": {
+        "severity": "high",
+        "claim": "P101 (3 EPICy, HEAD f4b3e539) nesahá na CHANGELOG.md vůbec (git diff base..head -- CHANGELOG.md je prázdný), přestože obsahuje uživatelsky viditelné změny chování (Krok 5: soupis dokladů u nečitelného dokladu neposílá fotit znovu; Krok 6: hromadné opakování zvedá i dávky padlé na server/timeout). Verze v pyproject.toml (0.28.4) je navíc UŽ VYDANÁ — existuje tag v0.28.4 a HEAD je jeho potomek (git describe: v0.28.4-33-gf4b3e539) — takže podle vlastního pravidla projektu (CLAUDE.md: neprázdný výstup git tag -l = vydáno a neměnné, zakládá se nová sekce nad ní) mělo P101 zvednout verzi a založit novou sekci, ne mlčet. docs_updated gate v obou EPIC bězích (E-101-1_3, E-101-3_3) hlásí PASS/OK — 'CHANGELOG.md OK — verze 0.28.4, 7 bodů pro uživatele' — ale scripts/check_changelog.sh ověřuje jen, že AKTUÁLNÍ verze z pyproject.toml má neprázdný záznam (ten záznam je starý, z PŘED P101, o e-mailovém příjmu a WANIS frontě) a že neexistují 2+ nevydané verze; nikde neověřuje, že (a) změny TOHOTO běhu jsou zdokumentované, nebo (b) že cílová verze ještě není tagovaná. Formálně zelená brána, fakticky beze změny changelogu pro reálné uživatelské chování.",
+        "evidence": "CHANGELOG.md"
+      },
+      "source": "audit-report.json"
+    },
+    {
+      "id": "S3",
+      "project": "wan",
+      "plan": "P101",
+      "run": "R-P101-final-4",
+      "base_sha": "0e9012c173ddd09903762f2d4ef97f56d8c130f6",
+      "candidate_sha": "f06c2f0d76896e66f6cc934a7b7b512acfe561be",
+      "finding": {
+        "severity": "high",
+        "claim": "CHANGELOG 0.29.0 sekce Pro uzivatele tvrdi 'Rozpoznavani dokladu uhne na zalozni model rychleji' - ale toto chovani dnes nenastane pro zadneho realneho uzivatele. Overeno primo: (1) docs/wan/ocr-flow.md rika doslova 'dnes v produkci zadna zaloha nenastupuje' - produkcni primary je Sonnet (wan-classifier/wan-extractor-best), tyto aliasy nemaji v litellm_config.yaml zaznam ve fallbacks, tedy zadna zaloha se nekona bez ohledu na num_retries:0 u cheap aliasu; (2) na eco-dev, kde by cheap tier mohl byt aktivni, kontejner svc-litellm bezi od 31.8. se starym configem bez num_retries:0 i bez reasoning_effort (IMP-633, nezavisle overeno: docker exec svc-litellm cat config.yaml postrada oboji, zatimco soubor na hostu oboji ma). Zaznam tedy popisuje funkci, ktera neni zapnuta nikde, kde by ji uzivatel mohl zazit.",
+        "evidence": "CHANGELOG.md#0.29.0"
+      },
+      "source": "audit-report.json"
+    },
+    {
+      "id": "S4",
+      "project": "wan",
+      "plan": "P101",
+      "run": "R-P101-final-4",
+      "base_sha": "0e9012c173ddd09903762f2d4ef97f56d8c130f6",
+      "candidate_sha": "f06c2f0d76896e66f6cc934a7b7b512acfe561be",
+      "finding": {
+        "severity": "high",
+        "claim": "Zavazne poradi nasazeni ktere IMP-633 sam predepisuje ('Do te doby NENASAZOVAT wan-api bez _REASONING_EFFORT_OVERRIDE') zije VYHRADNE v backlog.md. Tento kandidat uz appku o override ochudil (AC4 prochazi, _REASONING_EFFORT_OVERRIDE ma nula vyskytu v wan/) - tedy presne ten stav, pred kterym IMP-633 varuje, jakmile nekdo tento kod nasadi na host, kde brana jeste nema num_retries/reasoning_effort. Ani CHANGELOG.md 0.29.0, ani pyproject.toml, ani docs/wan/deployment.md runbook (ktery WAN CLAUDE.md oznacuje za jediny zavazny postup pred kazdym nasazenim) na IMP-633 neodkazuji - overeno grepem, nula vyskytu. Kdo runbook prectne cely (jak CLAUDE.md prikazuje) ale nezna backlog nazpamet, poradi nemusi zachytit.",
+        "evidence": ".aid-o/work/backlog.md#IMP-633"
+      },
+      "source": "audit-report.json"
+    },
+    {
+      "id": "S5",
+      "project": "acta",
+      "plan": "P024",
+      "run": "R-P024-final-3",
+      "base_sha": "4c75019bca6b4520d4ef5d00fddbda920241dd95",
+      "candidate_sha": "f3b33251a00c37981f9ab4fa1fb485aa412e0e9d",
+      "finding": {
+        "severity": "high",
+        "claim": "AC1 (coverage after two nightly windows), AC2 (live VIES freshness) and AC3 (ARES population activation, >90% threshold) are recorded UNVERIFIED in the committed live-verification protocol; AC3's >90% condition is explicitly not met. These are plan success criteria — no merge-ready PASS can be derived for them from the evidence on disk.",
+        "evidence": "docs/plans/evidence/2026-08-31-P024-registry-e2e.md"
+      },
+      "source": "audit-report.json"
+    },
+    {
+      "id": "S6",
+      "project": "acta",
+      "plan": "P024",
+      "run": "R-P024-final-3",
+      "base_sha": "4c75019bca6b4520d4ef5d00fddbda920241dd95",
+      "candidate_sha": "f3b33251a00c37981f9ab4fa1fb485aa412e0e9d",
+      "finding": {
+        "severity": "high",
+        "claim": "AC8 requires a committed documentation change and successful validation in the separate docs repository. The sealed plan-diff artifact marked AC8 skipped, and the sealed gates_report recorded docs_updated as skip (exit code 2); no allow-listed, digest-bound evidence verified that criterion at C3 dispatch time.",
+        "evidence": "AC8 / docs repo evidence"
+      },
+      "source": "audit-report.json"
+    },
+    {
+      "id": "S7",
+      "project": "wan",
+      "plan": "P082",
+      "run": "R-P082-final-2",
+      "base_sha": "38dd3a85033dfbd8355f5a59b3b2fa25b3ec13ff",
+      "candidate_sha": "142f3c4f4ddd50a779e132678ce8661f5420df6c",
+      "finding": {
+        "severity": "medium",
+        "claim": "Re-deriving the diff scope (check-table step 1) shows every review/gate artifact in the evidence directory was executed against a commit older than candidate_sha: CP3 code-review and CP3 security review both record Reviewed-Head=f1a2f83c; gates_report.json records revision.head_sha=5185a3e5. candidate_sha (142f3c4f) is 3 commits ahead of the gates run and 4 ahead of CP3 (the two CI-disable commits, the epic merge/audit-log commit, the main-sync merge, and the final quarantine commit to execution.yaml). Diffing 5185a3e5..142f3c4f confirms the only content that changed after the gates run was .aid-o/config/execution.yaml (gate quarantine block), .aid-o/config/queue.yaml, .aid-o/work/active-run-pointer.json and .aid-o/work/audit-log.jsonl — i.e. no further UI/help-page code changed after gating, which limits the practical impact, but the formal claim that 'gates (release profil) prošly' for the candidate under review is not literally true of 142f3c4f — it is true of 5185a3e5 plus an unreviewed 4-commit tail.",
+        "evidence": ".aid-o/work/evidence/E-082-1_1/R-E082-1/gates/gates_report.json"
+      },
+      "source": "audit-report.json"
+    },
+    {
+      "id": "S8",
+      "project": "wan",
+      "plan": "P101",
+      "run": "R-P101-final-4",
+      "base_sha": "0e9012c173ddd09903762f2d4ef97f56d8c130f6",
+      "candidate_sha": "f06c2f0d76896e66f6cc934a7b7b512acfe561be",
+      "finding": {
+        "severity": "medium",
+        "claim": "Novy meta-hlidac je skutecna obrana (nezavisle overeno: chyta vsechny tri dnesni volajici moduly test_partial_retry.py/test_admin_reocr_failed.py/test_reocr_reason_sets_agree.py-vyjimka, ma kanarka test_test_hlida_neco_skutecneho proti tiche ztrate predmetu), ale ma dve mezery: (1) kriterium 'mocky discard_file_documents+run_session_pipeline' NEBRANI trvalemu zapisu do sdilene DB mimo transakcni bublinu - presne ta konstrukce, ktera incident 2.9. zpusobila (tri testy v repu bezi mimo SAVEPOINT bublinu, viz CLAUDE.md); modul napsany takhle by testem prosel a incident zopakoval, protoze test bublinu vubec nezkouma; (2) sken je omezeny na tests/**/test_*.py (regex v _moduly_volajici_sweep), volani presunute do conftest.py nebo tests/helpers/*.py je neviditelne.",
+        "evidence": "tests/meta/test_reocr_sweep_isolation.py"
+      },
+      "source": "audit-report.json"
+    }
+  ]
+}

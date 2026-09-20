@@ -1,0 +1,183 @@
+{
+  "command": "plan-final-measure.sh --projects-root /opt/eco/projects --as-of 2026-09-20",
+  "as_of": "2026-09-20",
+  "projects": {
+    "acta": {
+      "plans": 6,
+      "runs": 25,
+      "attempts_per_plan": [
+        1,
+        3,
+        4,
+        5,
+        5,
+        6
+      ],
+      "minutes_per_attempt": {
+        "median": 22.6,
+        "p90": 92.6
+      },
+      "first_to_last_hours_median": 2.2,
+      "release_ready": {
+        "false": 6
+      },
+      "blockers": {
+        "plan_review": 1,
+        "verification_report": 6
+      },
+      "delivery_gate_enforcement": {
+        "observe": 13
+      },
+      "acceptance_evidence": {
+        "runs": 13,
+        "empty": 13
+      },
+      "audit": {
+        "runs": 13,
+        "zero_findings": 10,
+        "severities": {
+          "high": 2,
+          "info": 2,
+          "low": 5,
+          "medium": 1
+        }
+      },
+      "risk_profile": {
+        "unverifiable": 15
+      }
+    },
+    "agents": {
+      "plans": 1,
+      "runs": 5,
+      "attempts_per_plan": [
+        5
+      ],
+      "minutes_per_attempt": {
+        "median": 3.7,
+        "p90": 5.2
+      },
+      "first_to_last_hours_median": 13.5,
+      "release_ready": {},
+      "blockers": {},
+      "delivery_gate_enforcement": {},
+      "acceptance_evidence": {
+        "runs": 0,
+        "empty": 0
+      },
+      "audit": {
+        "runs": 0,
+        "zero_findings": 0,
+        "severities": {}
+      },
+      "risk_profile": {
+        "unverifiable": 1
+      }
+    },
+    "aid-orchestrator": {
+      "plans": 1,
+      "runs": 2,
+      "attempts_per_plan": [
+        2
+      ],
+      "minutes_per_attempt": {
+        "median": 2.9,
+        "p90": null
+      },
+      "first_to_last_hours_median": 2.9,
+      "release_ready": {},
+      "blockers": {},
+      "delivery_gate_enforcement": {
+        "observe": 1
+      },
+      "acceptance_evidence": {
+        "runs": 1,
+        "empty": 1
+      },
+      "audit": {
+        "runs": 0,
+        "zero_findings": 0,
+        "severities": {}
+      },
+      "risk_profile": {
+        "unverifiable": 1
+      }
+    },
+    "wan": {
+      "plans": 9,
+      "runs": 50,
+      "attempts_per_plan": [
+        1,
+        3,
+        3,
+        4,
+        5,
+        6,
+        7,
+        10,
+        11
+      ],
+      "minutes_per_attempt": {
+        "median": 10.7,
+        "p90": 43.6
+      },
+      "first_to_last_hours_median": 2.3,
+      "release_ready": {
+        "false": 8
+      },
+      "blockers": {
+        "plan_diff": 1,
+        "plan_review": 1,
+        "verification_report": 8
+      },
+      "delivery_gate_enforcement": {
+        "observe": 24
+      },
+      "acceptance_evidence": {
+        "runs": 24,
+        "empty": 23
+      },
+      "audit": {
+        "runs": 17,
+        "zero_findings": 3,
+        "severities": {
+          "high": 6,
+          "info": 13,
+          "low": 6,
+          "medium": 9
+        }
+      },
+      "risk_profile": {
+        "unverifiable": 25
+      }
+    }
+  },
+  "area_lines": {
+    "scripts/aid-plan-fsm.sh": 11552,
+    "scripts/aid-release-policy.sh": 1384,
+    "scripts/aid-evidence-verify.sh": 1092,
+    "scripts/aid-plan-close-check.sh": 1215,
+    "scripts/aid-delivery-gate.sh": 940,
+    "scripts/aid-pm-brief.sh": 486,
+    "scripts/lib/aid-c3-dispatch.sh": 3222,
+    "scripts/lib/delivery-checks/dg01-dependency-consistency.sh": 161,
+    "scripts/lib/delivery-checks/dg02-build.sh": 66,
+    "scripts/lib/delivery-checks/dg03-typecheck.sh": 59,
+    "scripts/lib/delivery-checks/dg04-test.sh": 132,
+    "scripts/lib/delivery-checks/dg05-consumer-compile.sh": 94,
+    "scripts/lib/delivery-checks/dg06-removed-dep.sh": 182,
+    "scripts/lib/delivery-checks/dg07-state-consistency.sh": 161,
+    "scripts/lib/delivery-checks/dg08-runtime-env.sh": 180,
+    "scripts/lib/delivery-checks/dg09-static-coverage.sh": 107,
+    "scripts/lib/delivery-checks/dg10-startup-smoke.sh": 120,
+    "scripts/lib/delivery-checks/dg11-build-config.sh": 216,
+    "scripts/lib/delivery-checks/dg12-authority.sh": 165,
+    "scripts/lib/delivery-checks/dg15-route-resolve.sh": 273,
+    "scripts/lib/delivery-checks/dg17-independent-oracle-nodrop.sh": 172,
+    "scripts/lib/delivery-checks/dg18-acceptance-struct.sh": 103,
+    "agents/reporter.md": 208,
+    "agents/simplifier.md": 150,
+    "agents/curator.md": 364,
+    "agents/auditor.md": 1315
+  },
+  "area_lines_total": 24119
+}
