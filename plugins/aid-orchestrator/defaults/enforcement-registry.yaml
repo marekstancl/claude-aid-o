@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 518          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 522          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -785,6 +785,50 @@ enforcements:
     verdict: ALIGNED
     test: "scripts/tests/bats/test-review-adjudicate.bats (case: 'command: an inline read-only reproduction is accepted, one that writes or runs another file is not')"
     description: "P095: a reviewer may carry the reproduction inline as `bash -c '<pipeline>'` instead of a file under repro/, because Sonnet wrote the inline form in three of four P094 acceptance rounds with the file rule in its prompt. The body is bounded: every segment (split on ;, |, && and ||) must start with one of grep rg ls find sed git wc head tail cat cd mkdir mktemp touch printf echo export jq yq test [[ [ for do done if then else fi, `git` only with grep|log|show|diff|blame|rev-parse|status; a redirection to a file, a command substitution, `source`, a nested `bash` and `eval` refuse. A refused body is rejected with the reason command_not_read_only, distinct from missing_command."
+
+  - id: alloc_skips_taken_ids
+    type: fsm-precondition
+    source: "scripts/aid-fsm.sh (grep: 'skipped .* id(s) a file')"
+    instruction: skills/pipeline.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: "scripts/tests/bats/test-alloc-lock.bats (cases: 'an id a plan file already carries is skipped', 'two files carrying the same taken id')"
+    description: "P095 (WAN, 2026-09-19: P106 was allocated twice): `alloc plan-id`/`alloc epic-id` walks the counter past every id a file in .aid-o/plans or .aid-o/tasks already carries, and says on stderr how many it skipped. The lock, the atomic rewrite and the comment-preserving sed are unchanged; only the number handed out moves."
+
+  - id: set_field_traced
+    type: fsm-precondition
+    source: "scripts/aid-fsm.sh (grep: 'field_set')"
+    instruction: commands/aid-run.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: "scripts/tests/bats/test-aid-fsm.bats (cases: 'set-field: a transition precondition needs a reason', 'set-field: a precondition field on a state file with no timeline')"
+    description: "P095: every `set-field` appends a field_set line (field, old, new, reason) to the run's timeline, and the four fields that ARE transition preconditions — total_steps, current_step, plan_json_hash, base_commit — additionally require --reason of at least 20 characters and a resolvable timeline. A state file naming no epic_id/run_id is refused for those four rather than moved silently: a reason nothing records is not a record. Before this, a precondition could be moved with no trace at all, so an audit could not tell a repair from a bypass."
+
+  - id: auto_mode_state_written
+    type: fsm-precondition
+    source: "scripts/aid-fsm.sh (grep: 'cmd_auto_mode')"
+    instruction: skills/pipeline.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: "scripts/tests/bats/test-permissions.bats (cases: 'a state file written by auto-mode set auto', 'a PM stop wins over an exported AID_AUTO_MODE=1', 'mode: manual in the state file wins')"
+    description: "P095 (ACTA P024): .aid-o/work/auto-mode-state.yaml has been named by skills/pipeline.md, /aid-run --auto and /aid-stop since v2.x and no script ever wrote it, so every later decision point of an AUTO run read 'manual'. `aid-fsm.sh auto-mode set auto|manual --by <who> [--reason]` is the ONE writer (/aid-stop writes manual through it, keeping the stopped_at/stopped_by/stop_reason fields it used to write by hand) and aid_autonomous_mode in lib/aid-permissions.sh stays the ONE reader. Precedence: mode: manual in the file beats an exported AID_AUTO_MODE=1 (a PM stop wins over the controller it stops), then AID_AUTO_MODE=1, then mode: auto, then permissions.yaml."
+
+  - id: review_round_needs_yq
+    type: fsm-precondition
+    source: "scripts/aid-fsm.sh (grep: 'yq_missing')"
+    instruction: skills/pipeline.md
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: "scripts/tests/bats/test-review-round-fsm.bats (case: 'without yq the precondition fails loudly')"
+    description: "P095 (IMP-610): fsm_check_review_round read both review-checkpoint switches through yq without checking that yq exists. Without it every read returned empty, neither switch was ever seen as false, and the round rule was enforced from a file nobody read. The check now returns 1 with PRECONDITION FAIL: yq is not installed, reason yq_missing, and it sits OUTSIDE any command substitution — inside one the return would only end the subshell."
 
   - id: evidence_verify_state_root
     type: out-of-band

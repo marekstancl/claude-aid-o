@@ -124,3 +124,23 @@ EOF2
   _check cp3 "" --freshness "$TEST_PROJECT_ROOT"; [ "$status" -eq 0 ]
   jq -se 'any(.[]; .event == "cp3_freshness_would_block")' "$E/timeline.jsonl" >/dev/null
 }
+@test "without yq the precondition fails loudly instead of enforcing from an unread file" {
+  aid_fixture_seed_step_review "$E" cp2 0 pass
+  # a PATH that is the real one minus yq — naming a few directories by hand
+  # rots, and the function reaches for a dozen tools besides yq
+  local nobin="$BATS_TEST_TMPDIR/nobin" d f; mkdir -p "$nobin"
+  local IFS=:
+  for d in $PATH; do
+    [[ -d "$d" ]] || continue
+    for f in "$d"/*; do
+      [[ -x "$f" && ! -d "$f" ]] || continue
+      [[ "${f##*/}" == yq ]] && continue
+      [[ -e "${nobin}/${f##*/}" ]] || ln -s "$f" "${nobin}/${f##*/}"
+    done
+  done
+  unset IFS
+  PATH="$nobin" _check cp2 0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"yq is not installed"* ]]
+  [[ "$output" == *"FAIL:yq_missing"* ]]
+}

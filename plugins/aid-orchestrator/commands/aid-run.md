@@ -62,6 +62,18 @@ Escalation rules for `--auto`:
 - Gate retries → auto-retry up to configured max (default: 2)
 - Version bump on intermediate phase → auto-defer (bump only on final phase)
 
+**The first action of `--auto`, before anything else:**
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" auto-mode set auto --by "aid-run --auto"
+```
+
+It writes `.aid-o/work/auto-mode-state.yaml`, which every later decision point
+reads through `aid_autonomous_mode`. Until P095 no script wrote that file, so a
+run that announced itself as AUTO was read back as manual at every checkpoint.
+If the command fails, stop: a run that cannot record its own mode is not an
+AUTO run.
+
 Requires `autonomous_mode: true` in `.aid-o/config/permissions.yaml`.
 If not set, `--auto` prints a warning and falls back to manual mode.
 
@@ -182,7 +194,7 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 4. **PRE-FLIGHT is mandatory:** `READY→EXECUTE` requires `plan.json` to exist in run dir
 5. **Gates are mandatory:** `GATES→DONE` requires `gates_report.json` with `overall: pass`
 6. **Steps must complete:** `EXECUTE→GATES` requires `current_step >= total_steps`
-7. **Do NOT edit fsm-state.yaml directly** — all mutations go through `aid-fsm.sh` commands (`transition`, `increment-step`, `set-field`)
+7. **Do NOT edit fsm-state.yaml directly** — all mutations go through `aid-fsm.sh` commands (`transition`, `increment-step`, `set-field`). Every `set-field` leaves a `field_set` line in the run's `timeline.jsonl`, and the four fields that are transition preconditions (`total_steps`, `current_step`, `plan_json_hash`, `base_commit`) need `--reason "<20+ chars>"` and a resolvable timeline, or the command refuses
 8. **`--force` is PM-only** — never use without explicit PM instruction; logged to audit trail
 9. **Multi-layer defense** — `aid-release.sh` and git pre-commit hook independently verify `done_phase` before allowing release/commit on FSM branches
 10. **Step verification evidence** — `increment-step` REFUSES to advance without `step-{N}-verify.md` containing `## Result: PASS` in evidence dir

@@ -22,7 +22,7 @@
 #
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 #
-# **Last Updated:** 2026-08-27
+# **Last Updated:** 2026-09-20
 # =============================================================================
 [[ -n "${_AID_PERMISSIONS_SH_LOADED:-}" ]] && return 0
 _AID_PERMISSIONS_SH_LOADED=1
@@ -31,8 +31,24 @@ _AID_PERMISSIONS_SH_LOADED=1
 #
 # One `yq` invocation, not two: the type and the value come back together, so
 # the reader costs one process rather than the two every hand-rolled copy spent.
+# Precedence, highest first (P095):
+#   1. auto-mode-state.yaml says manual — a PM stop always wins, including over
+#      a controller that already exported AID_AUTO_MODE=1;
+#   2. AID_AUTO_MODE=1 — this controller announced itself;
+#   3. auto-mode-state.yaml says auto — a run that announced itself earlier;
+#   4. permissions.yaml, as before.
+# The file is a persisted INPUT of this one reader, never a second reader.
 aid_autonomous_mode() {
-  local perm="${1%/}/.aid-o/config/permissions.yaml"
+  local root="${1%/}"
+  local perm="${root}/.aid-o/config/permissions.yaml"
+  local state="${root}/.aid-o/work/auto-mode-state.yaml"
+  local smode=""
+  if [[ -f "$state" ]]; then
+    smode="$(sed -nE 's/^mode:[[:space:]]*"?([a-z]+)"?[[:space:]]*$/\1/p' "$state" | head -1)"
+  fi
+  [[ "$smode" == manual ]] && { echo manual; return 0; }
+  [[ "${AID_AUTO_MODE:-}" == "1" ]] && { echo auto; return 0; }
+  [[ "$smode" == auto ]] && { echo auto; return 0; }
   [[ -f "$perm" ]] || { echo manual; return 0; }
   command -v yq >/dev/null 2>&1 || { echo manual; return 0; }
   local pair

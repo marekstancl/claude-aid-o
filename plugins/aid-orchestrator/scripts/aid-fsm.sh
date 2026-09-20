@@ -1263,6 +1263,16 @@ fsm_check_review_round() {
   esac
   index="${cpdir}/rounds.json"
 
+  # Without yq every `yq -r` below returns empty, so neither switch is ever
+  # seen as false and the round rule is enforced from a value nobody read.
+  # The check is OUTSIDE a command substitution on purpose: inside one, the
+  # return would only end the subshell.
+  if ! command -v yq >/dev/null 2>&1; then
+    _PRECONDITION_FAIL_REASON="yq_missing"
+    echo "PRECONDITION FAIL: yq is not installed, so the review-checkpoint switches cannot be read — install yq or the round rule is enforced from an unread file" >&2
+    return 1
+  fi
+
   # The two switches, read where the PM sets them (project file first).
   local flag file value
   for flag in enabled "$toggle"; do
@@ -5977,8 +5987,63 @@ cmd_get_field() {
   grep "^${field}:" "$state_file" | awk '{print $2}' | tr -d '"'
 }
 
+# cmd_auto_mode set auto|manual --by <who> [--reason <text>] | get
+#   The documentation, /aid-run --auto and /aid-stop have all named
+#   .aid-o/work/auto-mode-state.yaml since v2.x, and no script has ever written
+#   it, so every later decision point read "manual" (ACTA P024). This is the
+#   writer. The reader stays the one it always was, aid_autonomous_mode in
+#   lib/aid-permissions.sh.
+cmd_auto_mode() {
+  local sub="${1:-}"; shift || true
+  local root by="" reason="" mode=""
+  root="$(aid_state_root 2>/dev/null)" || root="$PWD"
+  local file="${root}/.aid-o/work/auto-mode-state.yaml"
+  case "$sub" in
+    get)
+      [[ -f "$file" ]] || { echo manual; return 0; }
+      local m; m="$(yaml_field "$file" mode)"
+      [[ "$m" == auto ]] && echo auto || echo manual
+      return 0
+      ;;
+    set) mode="${1:-}"; shift || true ;;
+    *) echo "ERROR: auto-mode: usage: auto-mode set auto|manual --by <who> [--reason <text>] | auto-mode get" >&2; exit 2 ;;
+  esac
+  case "$mode" in auto|manual) ;; *) echo "ERROR: auto-mode set: mode must be auto or manual (got '${mode}')" >&2; exit 2 ;; esac
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --by) by="${2:-}"; shift 2 ;;
+      --reason) reason="${2:-}"; shift 2 ;;
+      *) echo "ERROR: auto-mode set: unknown option $1" >&2; exit 2 ;;
+    esac
+  done
+  [[ -n "$by" ]] || { echo "ERROR: auto-mode set: --by <who> is required" >&2; exit 2 ;}
+  mkdir -p "$(dirname "$file")" 2>/dev/null || { echo "ERROR: auto-mode set: cannot create $(dirname "$file")" >&2; exit 1; }
+  {
+    printf 'mode: %s\n' "$mode"
+    printf 'set_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'set_by: "%s"\n' "$by"
+    if [[ "$mode" == manual ]]; then
+      # The three fields /aid-stop wrote by hand, kept so an old reader of this
+      # file still finds what it looked for.
+      printf 'stopped_at: "%s"\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf 'stopped_by: "%s"\n' "$by"
+      printf 'stop_reason: "%s"\n' "${reason:-unspecified}"
+    fi
+    [[ -n "$reason" ]] && printf 'reason: "%s"\n' "$reason"
+    : # the conditional above must not decide the group's exit status
+  } > "${file}.tmp" && mv "${file}.tmp" "$file" || { echo "ERROR: auto-mode set: cannot write ${file}" >&2; exit 1; }
+  echo "auto-mode: ${mode} (${file})"
+}
+
 cmd_set_field() {
-  local field="$1" value="$2" state_file="$3"
+  local field="$1" value="$2" state_file="$3"; shift 3
+  local reason=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reason) reason="${2:-}"; shift 2 ;;
+      *) echo "ERROR: set-field: unknown option $1" >&2; exit 2 ;;
+    esac
+  done
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
 
   # Reserved fields — managed by dedicated commands only
@@ -5986,6 +6051,26 @@ cmd_set_field() {
     state) echo "ERROR: 'state' is reserved — use 'transition' command" >&2; exit 1 ;;
     done_phase) echo "ERROR: 'done_phase' is reserved — use 'done-advance' command" >&2; exit 1 ;;
   esac
+
+  # Four fields are transition PRECONDITIONS: moving one moves what the FSM
+  # will allow next, and until P095 it moved with no timeline line and no
+  # stated reason, so an audit could not tell a repair from a bypass.
+  local timeline=""
+  case "$field" in
+    total_steps|current_step|plan_json_hash|base_commit)
+      if (( ${#reason} < 20 )); then
+        echo "ERROR: set-field ${field} moves a transition precondition — pass --reason \"<at least 20 characters>\" saying why" >&2
+        exit 1
+      fi
+      timeline=$(derive_timeline "$state_file") || true
+      if [[ -z "$timeline" ]]; then
+        echo "ERROR: set-field ${field}: ${state_file} names no epic_id/run_id, so the change could not be recorded anywhere — a reason with no record is refused" >&2
+        exit 1
+      fi
+      ;;
+    *) timeline=$(derive_timeline "$state_file") || true ;;
+  esac
+  local old; old="$(yaml_field "$state_file" "$field")"
 
   # Use awk (not sed s///) for the replace: a value containing "/" (e.g. a
   # path — plan_path is the common case) breaks a sed substitution
@@ -6007,6 +6092,8 @@ cmd_set_field() {
   else
     echo "${field}: ${value}" >> "$state_file"
   fi
+  [[ -n "$timeline" ]] && log_event "$timeline" "field_set" field="$field" old="$old" new="$value" reason="$reason"
+  return 0
 }
 
 # ─── Per-step hash snapshot (init writes, amend-scope/rebase-plan update) ──
@@ -8907,6 +8994,23 @@ epic: 0
   fi
   local next=$((current + 1))
 
+  # A counter can lag behind the files: a plan written by hand carries a number
+  # the counter never saw, and the allocator would hand it out a second time
+  # (WAN got P106 twice, 2026-09-19). The number is free; skipping is not.
+  local _skipped=0 _dir _glob
+  case "$kind" in
+    plan-id) _dir="${root}/.aid-o/plans"; _glob='P%03d-*.md' ;;
+    epic-id) _dir="${root}/.aid-o/tasks"; _glob='E-%03d*.md' ;;
+    *)    _dir="" ;;
+  esac
+  if [[ -n "$_dir" ]]; then
+    # shellcheck disable=SC2059 — _glob is a fixed format string, not input
+    while compgen -G "${_dir}/$(printf "$_glob" "$next")" > /dev/null 2>&1; do
+      next=$((next + 1)); _skipped=$((_skipped + 1))
+    done
+    (( _skipped > 0 )) && echo "NOTE: alloc ${kind}: skipped ${_skipped} id(s) a file in ${_dir} already carries" >&2
+  fi
+
   # Atomic write preserving every comment byte: sed rewrites ONLY the digits
   # on the matching line into a temp copy in the SAME directory, then mv
   # replaces the file in one rename.
@@ -8950,6 +9054,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     get-field)         shift; cmd_get_field "$@" ;;
     step-evidence-dir) shift; cmd_step_evidence_dir "$@" ;;
     set-field)         shift; cmd_set_field "$@" ;;
+    auto-mode)         shift; cmd_auto_mode "$@" ;;
     amend-scope)       shift; cmd_amend_scope "$@" ;;
     rebase-plan)       shift; cmd_rebase_plan "$@" ;;
     done-advance)               shift; cmd_done_advance "$@" ;;

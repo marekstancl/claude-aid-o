@@ -245,3 +245,23 @@ _norm_counter() {
   [[ "$output" == *"alloc plan-id"* ]]
   [[ "$output" == *"alloc epic-id"* ]]
 }
+
+@test "an id a plan file already carries is skipped, with a NOTE saying how many" {
+  _mk_repo "$TEST_TMPDIR/repo"
+  mkdir -p "$TEST_TMPDIR/repo/.aid-o/plans"; : > "$TEST_TMPDIR/repo/.aid-o/plans/P075-written-by-hand.md"
+  run bash -c "cd '$TEST_TMPDIR/repo' && '$FSM' alloc plan-id" 3>&-
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *P076* ]]
+  [[ "$output" == *"skipped 1 id"* ]]
+  grep -q '^plan: 76' "$TEST_TMPDIR/repo/.aid-o/config/counter.yaml"
+}
+
+@test "two files carrying the same taken id are one skip, not two" {
+  _mk_repo "$TEST_TMPDIR/repo"
+  mkdir -p "$TEST_TMPDIR/repo/.aid-o/plans"; : > "$TEST_TMPDIR/repo/.aid-o/plans/P075-a.md"
+  mkdir -p "$TEST_TMPDIR/repo/.aid-o/plans"; : > "$TEST_TMPDIR/repo/.aid-o/plans/P075-b.md"
+  run bash -c "cd '$TEST_TMPDIR/repo' && '$FSM' alloc plan-id" 3>&-
+  [ "$status" -eq 0 ]
+  [[ "$output" == *P076* ]]
+  [ "$(grep -c 'skipped' <<< "$output")" -eq 1 ]
+}
