@@ -38,9 +38,9 @@
 
 _generated_by: aid-orchestrator:verifier@{dispatch_label}
 <!-- ABSOLUTELY REQUIRED — FSM precondition fails (fsm_check_verifier_output
-     line ~146) if no line starts with `_generated_by:`. The pre-filter writes
-     a placeholder `aid-pre-filter.sh@v<X.Y.Z>`; the verifier MUST overwrite
-     it to prove a verifier subagent actually ran (anti-fabrication).
+     line ~146) if no line starts with `_generated_by:`. Nothing writes a
+     placeholder any more (the pre-filter is gone since P094); the verifier
+     writes this line itself to prove a verifier subagent actually ran.
 
      dispatch_label convention (DIFFERS PER VARIANT — empirical from real
      evidence files in .aid-o/work/evidence/E-035-2_2/):
@@ -84,10 +84,6 @@ reason: {free-text justification — REQUIRED ONLY for classification=SKIP}
 
      Example for SKIP: `reason: diff under trivial_threshold (2 files, 8 lines)`
      For RUN / FAIL / FULL_REVIEW this field is optional; omit it entirely. -->
-
-matched_rules: ["{rule_id_1}", "{rule_id_2}"]
-<!-- Optional. The rule ids of defaults/pre-filter-rules.yaml the reviewed diff
-     matched, when known. Not FSM-checked. -->
 
 # Additive Fields (v2.35+) — present only when applicable
 <!-- ADDITIVE ONLY: these fields extend (never replace) the above top-level fields.

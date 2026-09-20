@@ -6178,7 +6178,7 @@ cmd_rebase_plan() {
   else jq -n --argjson e "$entry" '[$e]' > "$tmp"; fi
   mv "$tmp" "$rec" || die "rebase-plan: could not write ${rec}; nothing was changed"
   _step_hashes_write "$evidence_dir" "$current_hash" || die "rebase-plan: record written but the per-step snapshot could not be updated — re-run the same command"
-  cmd_set_field plan_json_hash "$current_hash" "$state_file"
+  cmd_set_field plan_json_hash "$current_hash" "$state_file" --reason "rebase-plan: ${reason}"
   log_event "${evidence_dir}/timeline.jsonl" "plan_rebased" step="$cs" from_hash="$stored_hash" to_hash="$current_hash" changed_future_steps="$(jq -r 'join(",")' <<<"$fut_json")" reason="$reason"
   local _rb_epic _rb_run; _rb_epic=$(yaml_field "$state_file" epic_id); _rb_run=$(yaml_field "$state_file" run_id)
   fsm_emit_audit_log "plan_rebased" --epic-id "${_rb_epic:-unknown}" --run-id "${_rb_run:-unknown}" --evidence-dir "$evidence_dir" --step "$cs" --from-hash "$stored_hash" --to-hash "$current_hash" --reason "$reason" 2>/dev/null || true
@@ -6309,7 +6309,7 @@ cmd_amend_scope() {
   mv "$tmp_amend" "$amend" || { rm -f "$tmp_amend" "$tmp_plan"; die "amend-scope: could not write ${amend}; nothing was changed"; }
   mv "$tmp_plan" "$plan" || { rm -f "$tmp_plan"; die "amend-scope: amendment recorded but ${plan} could not be rewritten — re-run the same command"; }
   local new_hash; new_hash=$(sha256sum "$plan" | awk '{print $1}')
-  cmd_set_field plan_json_hash "$new_hash" "$state_file"
+  cmd_set_field plan_json_hash "$new_hash" "$state_file" --reason "amend-scope: ${reason}"
   # The per-step snapshot follows: the widened step is now "the step as
   # dispatched" for a later rebase-plan. (The IMP-263 binding of an already
   # written step-verify file no longer matches — the step is re-verified, as

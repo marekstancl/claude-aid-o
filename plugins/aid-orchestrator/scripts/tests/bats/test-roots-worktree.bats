@@ -62,6 +62,14 @@ _mk_primary() {
   # at the project's state root. Empty `gates:` is a valid outcome; the fixture
   # only has to exist and parse.
   printf 'gates: {}\n' > "$d/.aid-o/config/execution.yaml"
+  # This suite is about WHICH .aid-o a command writes into, not about the plan
+  # review. P093 made the CP1 gate a generation precondition, which refused the
+  # chain here for a reason the suite does not assert on; switching the
+  # checkpoint off in the fixture says so instead of seeding a review round that
+  # would have to be maintained for no assertion.
+  mkdir -p "$d/.aid-o/config/policies"
+  printf 'review_checkpoints:\n  cp1_plan_review: false\n' \
+    > "$d/.aid-o/config/policies/review-checkpoints.yaml"
   printf '.aid-o/\n' > "$d/.gitignore"
   printf 'seed\n' > "$d/README.md"
   (
@@ -281,6 +289,12 @@ _plant_tripwire() {
   local primary
   primary="$(_phys "$TEST_TMPDIR/primary")"
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$primary/.aid-o/plans/P099-multi.md"
+  # P089 made a rendered PM page a generation precondition. Rendered here with
+  # the real renderer, through the exact command the refusal prints.
+  mkdir -p "$primary/.aid-o/work/evidence/P099"
+  ( cd "$primary" && source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh" \
+    && aid_plan_summary_render "$primary/.aid-o/plans/P099-multi.md" \
+         "$primary/.aid-o/work/evidence/P099/plan-summary-artifact.html" ) >/dev/null 2>&1
 
   run bash -c "cd '$TEST_TMPDIR/wt' && bash '$PIPELINE' --plan '$primary/.aid-o/plans/P099-multi.md' --queue-mode chain" 3>&-
   [ "$status" -eq 0 ]
@@ -599,8 +613,27 @@ EOF
   sed -i 's/^state: DONE/state: EXECUTE/' "$ev/fsm-state.yaml"
   # Step-verify evidence lives ONLY in the primary workspace: the ledger row
   # below can be written at all only if increment-step READ it from there.
-  printf 'idempotency_token: TOK-906-0\nstep_id: S0\nplan_step_hash: h0\nreviewed_commit: c0\n' \
-    > "$ev/step-0-verify.md"
+  # The five sections the step-verify precondition requires: this suite asserts
+  # WHERE the ledger, waiver and audit entry land, so the verify file has to be
+  # complete enough to get past the precondition that reads it.
+  cat > "$ev/step-0-verify.md" <<'VERIFY'
+idempotency_token: TOK-906-0
+step_id: S0
+plan_step_hash: h0
+reviewed_commit: c0
+
+## Result: PASS
+
+- [x] the step's only acceptance criterion
+
+Commit: 0123456abcdef
+
+## Memory Used
+N/A — fixture
+
+## Memory Written
+N/A — fixture
+VERIFY
 
   run bash -c "cd '$TEST_TMPDIR/wt' && '$FSM' increment-step '$ev/fsm-state.yaml' \
     --force --reason 'worktree root-migration regression test for the forced step advance'" 3>&-

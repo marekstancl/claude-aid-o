@@ -2211,9 +2211,18 @@ EOS
   [ "$(jq -r '.[0].reason' "$td/steps/step_1_backend/scope-amendment.json")" = "AC3 demands a test the plan forgot" ]
   grep -q '"event":"scope_amended"' "$td/timeline.jsonl"
   grep -qx 'tests/test_a.py' "$(dirname "$td")/allowed_paths.txt"   # the scope_check gate's file kept in step
-  # not in EXECUTE → refused
+  # In GATES the scope may still be widened, but never silently: the gate rows
+  # judged against the old scope are retired (or their absence is said out
+  # loud), because they were judged against a scope that no longer exists.
+  # This assertion used to expect a refusal ("not EXECUTE"); the refusal moved
+  # to rebase-plan, and the test kept asserting it long after amend-scope
+  # stopped saying it.
   sed -i 's/^state: EXECUTE/state: GATES/' "$td/fsm-state.yaml"
-  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add x.py --reason "trying to widen after the work is done"
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add x.py --reason "widening after the gates have run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gates must still be re-run"* || "$output" == *"Re-run the gates"* ]]
+  # rebase-plan is the one that still refuses outside EXECUTE
+  run bash "$FSM" rebase-plan "$td/fsm-state.yaml" --reason "a rebase at a boundary is the refused one"
   [ "$status" -ne 0 ]; [[ "$output" == *"not EXECUTE"* ]]
 }
 

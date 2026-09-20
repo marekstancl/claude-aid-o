@@ -656,8 +656,13 @@ run_verification_input() {
   # passes nothing and keeps the HEAD default it always had.
   local _candidate=()
   [[ -n "${CANDIDATE_SHA:-}" ]] && _candidate=(--candidate "$CANDIDATE_SHA")
+  # --tree: WHICH working tree the decision is about. Without it the verifier
+  # judges the tree containing the CURRENT DIRECTORY, so a policy run from
+  # anywhere else reported that project's uncommitted work as this one's dirt
+  # (the healthy-fixture case of test-release-policy.bats has been red for
+  # exactly this reason).
   AID_PROJECT_ROOT="$PROJECT_ROOT" bash "$EVIDENCE_VERIFY" "$_verify_subject" "$RUN_ID" \
-    --out "$vr_tmp" --at-head "${_candidate[@]}" >/dev/null 2>&1 || vr_exit=$?
+    --out "$vr_tmp" --at-head --tree "$PROJECT_ROOT" "${_candidate[@]}" >/dev/null 2>&1 || vr_exit=$?
 
   case "$vr_exit" in
     2|10|20)

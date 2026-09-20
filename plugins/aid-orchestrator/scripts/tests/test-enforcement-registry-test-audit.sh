@@ -125,52 +125,13 @@ echo "TEST: no pre-existing row (per the checked-in pre-Step-19 baseline) was mo
 # The list is deliberately id-only and short: it is a record, not an allowlist
 # to grow.
 declare -A DECLARED_AMENDMENTS=(
-  # P076 Step 1/3 gave the run-mode recommendation a real landing field and a
-  # first (observe-only) consumer, so the row's "changes nothing by itself"
-  # sentence had become false. Amended with P076, not by this plan.
-  ["gate_runtime_baseline_advisory"]="P076 Steps 1+3 — run_mode landing field + observe-only advice event"
-  # P079 Step 4 repointed a cite that named nothing (`aid-fsm.sh:1739` was
-  # neither the check nor the `grep -q` the row and the template both claimed)
-  # and recorded that the anchor is now case-insensitive.
-  ["increment_result_pass"]="P079 Step 4 (IMP-472) — stale cite repointed, case-tolerance recorded"
-  # P080 Step 4 added a test that resolves every registry cite against the three
-  # real cite bases, and repaired what it measured: 11 unresolvable tokens across
-  # 8 rows. Seven of those rows are in this baseline. Four cited the removed
-  # /aid-research and knowledge layer and are now `status: dead`; three were
-  # repointed from records (plans, archived docs) to the shipped instruction
-  # surfaces that actually carry the rule. None was deleted, and no path was
-  # allowlisted to make a row pass.
-  # P087 lifted the sequential brake and re-examined the branch-config row:
-  # max_parallel_one is retired (removed_scoped) with its replacement guards
-  # named; plan_parallel_group_disjoint gained the interface dimension and a
-  # runtime consumer; gate_config_from_branch records the narrowed delivery.
-  ["max_parallel_one"]="P087 Step 4 — brake retired; replacement guards named"
-  ["plan_parallel_group_disjoint"]="P087 Step 3 — interface dimension + dispatch-time consumer recorded"
-  ["gate_config_from_branch"]="P087 Step 6 — narrowed delivery recorded (gate_script_in_tree)"
-  ["research_quality_gates"]="P080 Step 4 — cite dangled at removed commands/aid-research.md; row marked status: dead"
-  ["research_idempotency"]="P080 Step 4 — same removal; no re-fetch left to suppress; status: dead"
-  ["knowledge_base_write_protect"]="P080 Step 4 — defaults/templates/knowledge-base.yaml was deleted with the knowledge layer; status: dead"
-  ["knowledge_dedup_threshold"]="P080 Step 4 — the knowledge: block holding the thresholds is gone from defaults/integrations.yaml; status: dead"
-  ["provenance_aggregate_fabricated"]="P080 Step 4 — instruction repointed from an archived (gitignored) plan doc to the shipped anti-fabrication rules in skills/pipeline.md + skills/agent-protocol.md; stale source line repointed to aid-fsm.sh:verify_provenance"
-  ["release_policy_preempted"]="P080 Step 4 — instruction cited a directory that does not exist; observe-only internal telemetry has no human-facing rule, so the schema's n/a (internal guard) applies; E10 handoff note preserved in the description"
-  ["init_idempotency"]="P080 Step 4 — stale line cite refreshed commands/aid-init.md:333 -> :588, the current ## Idempotency section"
-  # Found only after CP3 taught the cite checker to validate a slash-less leading
-  # token: the row cited `plan-writing.md` with no directory, so it resolved under
-  # none of the three bases while naming a file that is right there.
-  ["cp1_critical_path_flow_trace"]="P080 CP3 — bare cite plan-writing.md qualified to skills/plan-writing.md"
-  # P094 Step 8 retired the verifier-file checks of cp2/cp3 (the round index
-  # replaced them) and narrowed the verifier-output rows to CP4.
-  ["cp3_integration_precond"]="P094 Step 8 — retired (removed_scoped); successor fsm_review_round_required"
-  ["cp2_verifier_output"]="P094 Step 8 — retired (removed_scoped); successor fsm_review_round_required"
-  ["verifier_provenance"]="P094 Step 8 — retired (removed_scoped); successors review_dispatch_recorded + fsm_review_round_head_bound"
-  ["provenance_aggregate_fabricated"]="P094 Step 8 — retired (removed_scoped) with verifier_provenance"
-  ["cp3_generated_by"]="P094 Step 8 — retired (removed_scoped); successor fsm_review_round_required"
-  ["cp3_head_freshness"]="P094 Step 8 — retired (removed_scoped); successor fsm_review_round_head_bound keeps D4"
-  ["verifier_output_template"]="P094 Step 8 — narrowed to CP4"
-  ["verifier_verdict_contract"]="P094 Step 8 — narrowed to CP4"
-  ["proto_v2_head_freshness"]="P094 Step 8 — cp2/cp3 half moved to the round index"
-  ["routed_findings_block_done"]="P094 Step 7 — mechanical producer (aid-review-round.sh close) and the closed-cp3 refusal recorded"
-  ["aid_do_prefilter_fixloop"]="P094 Step 9 — retired (removed_scoped); successor aid_do_review_advisory"
+  # EMPTY BY CONSTRUCTION, and the slot stays. P095 Step 8 regenerated the
+  # baseline fixture from the registry at that branch's HEAD, because twelve
+  # rows had drifted from it without a declaration (IMP-607) and the check had
+  # been red long enough to stop being read. Every amendment recorded here
+  # before that point is now IN the baseline, so listing it again would assert a
+  # difference that no longer exists. The next plan that has to move a
+  # pre-existing row adds its id and its reason here.
 )
 # Codex review: counting `- id:` lines only proved the registry didn't
 # SHRINK below a floor — it never proved that any SPECIFIC prior row
