@@ -55,3 +55,41 @@ the citation, not on its truth.
 - Fix the top-level `local` in the adjudicator.
 - Re-run these five diffs (the scratch branch stays) after the fix: expected
   1 pass, 3 fail, 1 skip.
+
+## The replay after P095 Step 1 (2026-09-20)
+
+The recorded answers, unchanged, re-adjudicated by the branch
+`feat/p095-review-cleanup`. No model was called; only the adjudicator differs.
+The command (the project root is the scratch checkout, because the pre-image
+shas the reviewers cited live on `scratch/p094-fresh-diffs`, not on `main`):
+
+```
+bash plugins/aid-orchestrator/scripts/tests/test-step-review-acceptance.sh replay-do \
+  --evidence /opt/eco/projects/aid-orchestrator/.aid-o/work/evidence \
+  --project-root /opt/eco/projects/aid-orchestrator/.aid-worktrees/fresh-diffs
+```
+
+| Diff | Before (2026-09-19) | After | Why |
+|---|---|---|---|
+| 1 `36f0e429` (alloc glob) | pass — `missing_command` | **fail**, 1 blocker | the inline `mkdir/cd/touch/[[/echo` reproduction is read-only and now accepted |
+| 2 `346a8a36` (set-field) | fail, 1 blocker | **fail**, 1 blocker | unchanged; its citations were always plain `path:line` |
+| 3 `e8814f7f` (pre-push) | pass — `missing_evidence` ×2 | **fail**, 1 blocker | the range `diff.patch:9-14` passes the schema, and the finding stands on its second citation, the pre-image `e8814f7fa701:…/pre-push:58` |
+| 4 `224f60b4` (yq check) | pass — `missing_command` | pass — `command_not_read_only` | its reproduction runs `source aid-fsm.sh`, `git init` and `mktemp` through a command substitution: not read-only, refused by the closed verb list on purpose |
+| 5 `22ded9fb` | skip (no round) | skip | the step check gave `skip`; nothing was reviewed |
+
+**Measured: 3 of 4 reviewed diffs now report the defect, against 1 before.**
+The plan predicted `1 pass, 3 fail, 1 skip`; the outcome is `1 pass, 3 fail,
+1 skip` only if diff 4 is counted as the pass, and it is — but for a different
+reason than the plan assumed. The plan expected all four recorded inline
+commands to be accepted; one of them is not a read-only command at all, and
+the closed verb list of the Data Model (no `source`, no command substitution)
+refuses it by design. The reviewer would have to write that reproduction as a
+`repro/<name>.sh` file, which is exactly what the file form is for.
+
+**No fixture was created.** The plan's `fixtures/step-review/fresh-diffs-2026-09-19.json`
+would have to pin pre-image shas that live only on a scratch branch; a fixture
+that rots the day the branch is pruned is worse than no fixture. `replay-do` is
+a measurement command, run by hand against an evidence tree, and the durable
+regression coverage lives in the three new cases of
+`scripts/tests/bats/test-review-adjudicate.bats` (Step 1), which build their
+own repository.

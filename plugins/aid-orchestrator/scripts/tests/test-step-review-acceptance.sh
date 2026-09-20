@@ -18,6 +18,11 @@
 #            [--tokens ID=total ...]               subagent token totals from the Agent tool result ("unknown" allowed)
 #                                                  (new mode: ID:ROLE=total, one per dispatched role)
 #   stub     --mode M --model NAME [--only ID]     replay fixtures/step-review/answers/ with the guard
+#   replay-do  --evidence DIR --project-root DIR    re-adjudicate the recorded cp6 rounds under
+#                                                   DIR/do/*/cp6/round-1 with THIS tree's adjudicator
+#                                                   and print one line per round. A measurement, not
+#                                                   an assertion: the citations resolve only against
+#                                                   the checkout the round was reviewed in.
 #
 # The stub guard: `stub` prepends a directory whose `claude` and `codex` exit 99
 # to PATH and exports AID_REVIEW_DISPATCH_STUB=1; any exit 99 fails the suite.
@@ -183,6 +188,29 @@ cmd_cleanup() {
   return 0
 }
 
+# replay-do --evidence DIR --project-root DIR — what the recorded answers yield
+# through this tree's adjudicator. No model is called and no recorded file is
+# written: each round is copied to a temporary directory first.
+cmd_replay_do() {
+  local ev="$1" root="$2" tmp d id sc
+  [[ -d "$ev" ]] || die "replay-do: no evidence directory $ev"
+  tmp="$(mktemp -d)"
+  for d in "$ev"/do/*/cp6; do
+    [[ -d "$d/round-1" ]] || continue
+    id="$(basename "$(dirname "$d")")"
+    cp -r "$d/round-1" "$tmp/$id"
+    rm -f "$tmp/$id"/merged.json "$tmp/$id"/rejected.json "$tmp/$id"/yield.json
+    sc=(); [[ -f "$d/step-check.json" ]] && sc=(--step-check "$d/step-check.json")
+    "$PLUGIN_DIR/scripts/aid-review-adjudicate.sh" "$tmp/$id" --project-root "$root" \
+      --namespace do_review "${sc[@]}" >/dev/null 2>&1 || true
+    printf '%s\t%s\t%s\t%s\n' "$id" \
+      "$([[ "$(jq '.blockers_open // 0' "$tmp/$id/merged.json" 2>/dev/null || echo 0)" -gt 0 ]] && echo fail || echo pass)" \
+      "$(jq '.findings | length' "$tmp/$id/merged.json" 2>/dev/null || echo 0)" \
+      "$(jq -c '[.[] | .reason]' "$tmp/$id/rejected.json" 2>/dev/null || echo '[]')"
+  done
+  rm -rf "$tmp"
+}
+
 cmd_stub() {
   local mode="$1" model="$2" only="${3:-}"
   local guard; guard="$(mktemp -d)"
@@ -218,9 +246,10 @@ cmd_stub() {
 
 main() {
   local sub="${1:-}"; shift || true
-  local mode="" out="" model="" only=""; local -a tokens=()
+  local mode="" out="" model="" only="" evidence="" root=""; local -a tokens=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --evidence) evidence="$2"; shift 2 ;; --project-root) root="$2"; shift 2 ;;
       --mode) mode="$2"; shift 2 ;; --out) out="$2"; shift 2 ;; --model) model="$2"; MODEL="$2"; shift 2 ;;
       --only) only="$2"; shift 2 ;; --tokens) shift; while [[ $# -gt 0 && "$1" != --* ]]; do tokens+=("$1"); shift; done ;;
       *) die "unknown option $1" ;;
@@ -232,7 +261,8 @@ main() {
     collect) [[ -n "$mode" && -n "$out" && -n "$model" ]] || die "collect needs --mode, --out, --model"; cmd_collect "$mode" "$out" "$model" "${tokens[@]}" ;;
     stub)    [[ -n "$mode" && -n "$model" ]] || die "stub needs --mode and --model"; cmd_stub "$mode" "$model" "$only" ;;
     cleanup) [[ -n "$out" ]] || die "cleanup needs --out"; cmd_cleanup "$out" ;;
-    *) die "usage: $0 prepare|collect|stub ..." ;;
+    replay-do) [[ -n "$evidence" && -n "$root" ]] || die "replay-do needs --evidence and --project-root"; cmd_replay_do "$evidence" "$root" ;;
+    *) die "usage: $0 prepare|collect|stub|replay-do ..." ;;
   esac
 }
 main "$@"
