@@ -11,6 +11,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Nález zahozený jen kvůli formě se jednou vrátí revizorovi** — `collect` takovou odpověď vypíše jako neplatnou s důvodem `form: <id> missing_evidence …` a jde běžnou cestou `retry`; druhá vadná odpověď se přijme a nález se zahodí jako dřív.
 - **Přepínače revizí čte jedna funkce** — `aid_review_switched_off` v `lib/aid-review-config.sh` nahradila tři kopie téže smyčky v řídicím skriptu, rozhodnutí o vydání a načítání konfigurace.
 
+### Removed
+- **Přepínač `head_match_policy`** — nečetl ho žádný kód; vstup pořízený na jiném commitu (výsledky bran, kontrola plánu) rozhodnutí o vydání blokuje bezpodmínečně už dnes a řádek registru `c4_head_match_policy` to teď říká jako `active`.
+
 ## [2.101.0] — 2026-09-20
 
 ### ⚠️ Změna chování — přečti před upgradem

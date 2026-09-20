@@ -1070,7 +1070,7 @@ enforcements:
   # Eight OBS-ledger-backed fixes shipped in P060 EPIC 1+2. Rows 1,2,6,7 are hard
   # structural/blocking (active). Rows 3,4,5 are observe-gated mechanisms that are
   # active but downgrade to telemetry under their *_POLICY seam. Row 8
-  # (c4_head_match_policy) is planned/observe until E10 promotion. Per the DG-07
+  # (c4_head_match_policy) is active and unconditional. Per the DG-07
   # convention above these rows carry NO verdict field.
   - id: gates_count_integrity
     type: 4
@@ -1135,16 +1135,14 @@ enforcements:
     description: "at EPIC start (queue pickup) each depends_on dependency is re-checked via git merge-base --is-ancestor; a queue that cannot be parsed (queue_parse_failed) or an unresolved dependency (queue_dep_unresolved) fails loud, otherwise the revalidation result is advisory telemetry; closes OBS-20260709-06"
   - id: c4_head_match_policy
     type: 9
-    source: "scripts/aid-release-policy.sh (grep: 'head_match')"
+    source: "scripts/aid-release-policy.sh (grep: 'stale (head_match=false)')"
     instruction: n/a
     severity: blocking
     surface: "C4-release-decision"
-    enforcement: observe
-    status: planned
-    deadline: "2026-12-31"
-    promotion_phase: E10
-    deferred_until: "2026-12-31"
-    description: "the release decision makes head_match consequential: an out-of-pack required input with head_match==false is classified blocking (release_ready=false) once head_match_policy is promoted from observe; until then it stays observe and the input row carries the verdict without gating"
+    status: active
+    description: "A required input produced at another commit cannot look usable: gates_report.json whose recorded head_sha is not the judged head, and a plan-review authority whose target_head is not in its ancestry, each become a `blocked` inputs[] row plus a blocker, so release_ready is false; in-pack artifacts are covered by aid-evidence-verify.sh --at-head, whose failure blocks the same way. An input that carries no head at all is `unknown`: never counted as at-head, surfaced in the PM brief, never blocking. Unconditional — the former head_match_policy key had no reader and is gone (PM decision 2026-09-20)."
+    recovery: "Re-run the stage that produces the stale input at the judged head (gates, or the plan review), then the decision."
+    test: "scripts/tests/bats/test-release-policy.bats (cases: 'F4(a)', 'F4(f)', 'F4(g)', 'F4(h)')"
   - id: profile_selection
     type: 4
     source: "scripts/aid-run-gates.sh (grep: 'Gate profile resolution')"

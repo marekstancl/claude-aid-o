@@ -26,7 +26,6 @@ policies:
     enforcement: observe
   defaults/policies/release-decision-policy.yaml:
     enforcement: observe
-    head_match_policy: observe
 
 # Registry rows the plan-boundary work is required to have added, each with the
 # verdict it was added with. A row that vanishes, or whose verdict is quietly
