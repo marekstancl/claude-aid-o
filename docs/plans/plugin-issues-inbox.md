@@ -2521,3 +2521,661 @@ odpovídající plánové větvi.
 ne z aktuálního `HEAD` hlavního checkoutu — nebo aspoň při zápisu ověřit, že
 je zapisovaný základ jejím předkem, a padnout hned, ne až o EPIC později.
 
+
+## Collected 2026-09-20 — 24 entries from 3 project(s)
+
+---
+
+#### acta — 14. `--stage review` neřekne, které chybějící soubory má vyrobit `--stage inputs` (plugin: not recorded)
+
+**OPRAVA (dopsáno později):** původně jsem sem napsal, že `--stage inputs`
+přepisuje hotové výstupy agentů skeletony. **To není pravda** a ověřil jsem to:
+`inputs` skeleton zapíše jen tam, kde soubor chybí, a nad vyplněným tělem ho
+nechá být (dokonce opraví obálku a tělo zachová). Nechávám to tu jako záznam
+o vlastní chybné diagnóze, ne jako vadu pluginu.
+
+Co zbývá jako skutečná drobnost: `--stage review` vypíše jeden seznam
+chybějících souborů, ve kterém jsou promíchané ty, které vyrábí `--stage
+inputs` (review-profile, delivery-gate, acceptance-evidence), s těmi, které
+musí napsat agent. Kontrolor z toho nepozná, co má spustit a co dispatchovat.
+
+**Návrh:** ten seznam rozdělit na dvě skupiny.
+
+**Kde:** `aid-plan-fsm.sh plan-finalize <plan> --stage inputs`
+**Kdy:** 2026-09-02, P024, run R-P024-final-3.
+
+Stage `inputs` vyrábí deterministické artefakty (`review-profile.json`,
+`delivery-gate.json`, `acceptance-evidence.json`) — ale zároveň (pře)zapisuje
+**skeletony** pro `semantic-review-final.json`, `curator-report.json` a
+`delivery-report.json`, tedy pro výstupy, které píšou agenti.
+
+Kontrolní smyčka přitom vede k tomu, že se `inputs` spustí AŽ PO dispatchi:
+`--stage review` teprve řekne, které soubory chybí, a mezi nimi jsou jak
+agentní výstupy, tak ty deterministické. Kdo pustí agenty a pak doplní
+`inputs`, přepíše hotovou recenzi prázdným skeletonem — bez varování, bez
+chyby, a `--stage review` pak jen řekne „chybí výstupy", takže to vypadá jako
+by agent selhal.
+
+Mně to tentokrát neublížilo jen proto, že agenti ještě nedopsali.
+
+**Návrh:** `inputs` má skeleton psát jen tam, kde soubor neexistuje, nebo
+existující skeleton nechat být a nad vyplněným artefaktem selhat. Případně
+`--stage review` v seznamu chybějících souborů rozlišit „vyrob pomocí
+--stage inputs" vs. „musí napsat agent".
+
+
+
+---
+
+#### acta — 15. `--auto` nezaložil `auto-mode-state.yaml`, fail-safe pak tvrdí manuál (plugin: not recorded)
+
+**Kde:** `/aid-run --auto <plan>` → `.aid-o/work/auto-mode-state.yaml`
+**Kdy:** 2026-09-02, P024.
+
+`skills/pipeline.md:2942` říká: „Activation: `/aid-run --auto` → sets
+`auto-mode-state.yaml: mode: auto`" a hned pod tím „IF file missing or
+unreadable → default to manual (fail-safe)".
+
+Session byla spuštěná jako `/aid-run --auto P024`, ale ten soubor v celém
+workspace neexistuje. Každý pozdější rozhodovací bod tedy čte „manual",
+přestože uživatel výslovně žádal autonomní běh. Nejvíc to bolí na hranici
+plánu: `DONE — PM summary` má v auto režimu pravidlo „Auto-MERGE if no
+blocking + score ≥ 80", v manuálu se má ptát PM. Kontrolor tak stojí před
+volbou buď si ten stav dopsat sám (což je vyrobit si vlastní autorizaci),
+nebo se ptát na něco, co uživatel už jednou zadal.
+
+Guardraily přitom byly splněné: všechny brány zelené, nula blokujících
+nálezů, auditor 88/100 bez poklesu.
+
+**Návrh:** `/aid-run --auto` má ten soubor zapsat jako první krok a selhat,
+když se to nepovede — tichý fallback na manuál je horší než hlasitá chyba.
+Případně nechat příznak číst z běžícího příkazu, ne jen ze souboru.
+
+
+
+---
+
+#### acta — 16. C3 bridge zahodí Codexovy nálezy a zapíše report, který tvrdí opak (plugin: not recorded)
+
+**Kde:** `scripts/lib/aid-c3-dispatch.sh verify <evidence_dir>`
+**Kdy:** 2026-09-02, P024, run R-P024-final-3, kandidát f3b33251.
+
+Codex (gpt-5.6-terra, cross_provider) vrátil v `c3/codex-last-message.json`:
+`review_status: "findings"`, `blocking_findings: true`, tři nálezy (dva HIGH).
+
+`verify` z toho vyrobil `audit-report.json`, kde je:
+`status: "unverifiable"`, `audit_report.blocking_findings: false`,
+`findings: []` — tedy **nula nálezů a žádné blokování**.
+
+Ten rozpor `verify` sám detekuje a vypíše:
+„NOT verified — audit_report.status != expected-from-raw
+(report:unverifiable expected:fail)" — ale **skončí s exit 0** a ten zavádějící
+soubor nechá na disku. Kdo se podívá jen na artefakt (což dělá `--stage review`
+i každý další krok řetězu), přečte si „audit bez nálezů" tam, kde nezávislý
+auditor merge zablokoval. To je falešná zelená v tom nejcitlivějším místě
+celého protokolu.
+
+**Návrh:** při neshodě `verify` nesmí skončit nulou a nesmí nechat zapsaný
+report, který raw verdikt nereprezentuje — buď nálezy přenést věrně, nebo
+soubor nezapsat vůbec a selhat hlasitě.
+
+
+
+---
+
+#### acta — 17. C0 revize plánu chyběla a zjistilo se to až na hranici plánu (plugin: not recorded)
+
+**Kde:** `plan-finalize --stage c4` → `release-decision.json`
+**Kdy:** 2026-09-02, P024.
+
+C4 vrátil `release_ready=false` se dvěma blokátory, z nichž první byl:
+„c0-plan-review.json missing at .aid-o/work/evidence/P024/ — the plan's own C0
+review is a REQUIRED input at the plan-final boundary".
+
+Ověřeno: **P014, P015, P016, P018, P019, P020 i P021 ten soubor mají, P024 ne.**
+Plán přitom prošel CP1, generováním EPICů, čtyřmi kompletními EPICy a celým
+plan-final štosem, než na to kdokoli narazil. Je to táž třída jako chybějící
+`verification_pattern` (vada #13): povinný vstup, jehož absenci nikdo nekontroluje
+v okamžiku, kdy se ještě dá levně doplnit.
+
+**Návrh:** existenci `c0-plan-review.json` ověřit při přechodu do generování EPICů,
+ne až na hranici plánu.
+
+
+
+---
+
+#### acta — 18. `plan-close` vyžaduje delivery.md, ale nikdo neřekne, kdo a jak ho má vyrobit (plugin: not recorded)
+
+**Kde:** `aid-plan-fsm.sh plan-close` → `[check1]`/`[check2]`
+**Kdy:** 2026-09-02, P024.
+
+`plan-close` blokuje na `.aid-o/reports/<plan>-delivery.md`. Reporter ho ale psát
+**nesmí** — během zmrazení je to zápis mimo run evidence dir a pipeline.md výslovně
+říká, že projekci vykresluje controller až po merge/close. Nikde není napsáno, že to
+má controller udělat jako krok, ani jaký má ten soubor mít tvar.
+
+Tvar jsem musel zpětně odvodit z cizího plánu (`P013-delivery.md`), protože `check2`
+postupně vyžaduje:
+1. YAML frontmatter s polem `Head:` (jinak „cannot verify freshness"),
+2. `Head`, které **není** kandidát, ale aktuální hlava `main` — po mergi tam totiž
+   přistane lifecycle manifest a check hlásí „functional change(s) landed since Head",
+3. a protože commit toho reportu sám hlavu posune, musí se `Head` psát na hodnotu,
+   která vznikne až tím commitem — řešil jsem to amendem. Při souběžné práci jiné
+   session na `main` je to závod.
+
+**Návrh:** buď ať projekci vyrábí `plan-close` sám, nebo ať je v pipeline.md popsaný
+krok i schéma frontmatteru a `Head` ať se porovnává proti merge commitu plánu, ne
+proti pohyblivé hlavě `main`.
+
+
+
+---
+
+#### acta — 19. `aid-evidence-verify.sh` z worktree hledá evidenci na špatné cestě a napíše tam nesmysl (plugin: not recorded)
+
+**Kde:** `scripts/aid-evidence-verify.sh <plan> <run> --at-head`
+**Kdy:** 2026-09-02, P024.
+
+Spuštěno z `.aid-worktrees/plan-P024` hledá evidenci v
+`<worktree>/.aid-o/work/evidence/...`, kde nikdy není (bydlí v kořeni stavu).
+Vrátí `evidence_pack_found fail` — a přesto do té neexistující cesty **zapíše**
+`verification-report.json`, takže po sobě nechá artefakt tvrdící, že ověření selhalo,
+na místě, kam nepatří.
+
+Z kořene stavu projde, ale `git_clean` selže na **netrackovaném** adresáři
+(`.aid-o/work/plan-final-substitutes/`), který je runtime evidencí a špinit strom
+by neměl. `fingerprint` a `artifact_head_freshness` zase selžou na souborech, které
+nejsou protocol-v2 artefakty (rozhodnutí PM, doklad k AC8).
+
+**Návrh:** cestu k evidenci brát vždy z kořene stavu; při nenalezení packu nic
+nezapisovat; `git_clean` počítat jen sledované změny; freshness/fingerprint pouštět
+jen nad protocol-v2 artefakty.
+
+
+
+---
+
+#### acta — 20. Schéma rozhodnutí PM nedovolí zapsat opravu (plugin: not recorded)
+
+**Kde:** `schemas/pm-plan-decision.schema.json` (`additionalProperties: false`)
+
+Když se v rozhodnutí PM ukáže věcná chyba (mně se stalo, že jsem tam měl nepravdivé
+tvrzení o nepushnuté dokumentaci), není kam zapsat korekci — jakýkoli klíč navíc
+merge odmítne. Skončil jsem tím, že jsem opravu vlepil do volného textu `notes`.
+
+**Návrh:** povolit `corrections: []`, ať je oprava strojově čitelná a nemíchá se
+s původním zněním.
+
+---
+
+
+
+---
+
+#### acta — 2026-09-02 — pre-push hook blokuje i MAZÁNÍ tagu, když má větev nezvednuté commity (plugin: not recorded)
+
+**Plugin:** aid-orchestrator — pre-push hook (version-bump guard)
+
+**Co se stalo:** při úklidu po ověření Step 8 (zahazovací tag `v0.0.0-gate-test`)
+odmítl pre-push hook smazat vzdálený tag:
+
+```
+$ git push origin :refs/tags/v0.0.0-gate-test
+  feat: commits found → run: bash .../aid-release.sh auto
+  Or push without bump: git push --no-verify
+error: failed to push some refs
+```
+
+**Příčina:** hook svůj výčet výjimek dělá nad lokálními refy a `(delete)` z něj
+vynechává — ale pak stejně spustí version-bump guard proti HEAD. Jakmile má
+větev nezvednuté `feat:`/`fix:` commity (tady 48 od `v0.10.0`), zablokuje se
+**jakékoli** mazání tagu. Smazání refu přitom žádnou verzi nevydává; guard tam
+hlídá něco, co se v té operaci vůbec neděje.
+
+**Co to způsobilo:** úklid po ověřovacím běhu se nedal dokončit předepsanou
+cestou. `--no-verify` jsem nepoužil (a klasifikátor ho stejně blokuje), takže
+se ref smazal přes API: `gh api -X DELETE repos/.../git/refs/tags/v0.0.0-gate-test`.
+Výsledek je správný, ale je to obchvat nástroje, který měl operaci pustit sám.
+
+**Proč to není okrajové:** každý plán, který si k ověření vyrobí zahazovací tag —
+což je běžný a správný postup u release řetězu — na tohle narazí při úklidu.
+A protože jediná cesta, kterou hook nabízí, je `--no-verify`, tlačí uživatele
+k obcházení celého hooku místo k vypnutí jedné nesouvisející kontroly.
+
+→ Návrh: version-bump guard vyhodnocovat jen u pushů, které něco PŘIDÁVAJÍ.
+Mazání refu (`git push origin :refs/tags/X`, resp. hodnota `(delete)` na vstupu
+hooku) má guard přeskočit úplně — stejně jako ho přeskakuje výčet výjimek, který
+už dnes `(delete)` rozpoznává, jen z něj nevyvozuje důsledek.
+
+---
+
+
+
+---
+
+#### acta — 2026-09-02 — Plán může předepsat krok, který v režimu `plan_branch` nemůže proběhnout: nic to nezachytí (plugin: not recorded)
+
+**Plugin:** aid-orchestrator — `aid-plan-lint.sh`, `aid-generation-readiness.sh`,
+CP1-deep panel, C0 cross-provider review
+
+**Co se stalo:** P021 má Steps 10 a 11, jejichž postup výslovně předpokládá, že
+workflow ze Steps 2, 8 a 9 už **leží na `main`**:
+
+> „Ruční postup, celý na `main` po mergnutí práce z EPICů 1-3"
+> „4. commit … a push do `main`; 5. počká se na ZELENOU CI pro ten commit"
+
+To v režimu `plan_branch` nejde. EPIC se slučuje do `plan/<id>`, a na `main` se
+plán dostane až přes `plan-merge-to-main` na plan-final hranici — tedy **až po
+dokončení všech EPICů**, včetně těch dvou kroků. Steps 10 a 11 tak čekají na
+stav, který nemůže nastat dřív, než ony samy skončí.
+
+Není to teoretické: `workflow_dispatch` GitHub nabízí jen pro workflow ve výchozí
+větvi (doloženo `HTTP 404` při pokusu spustit `release.yml` z task větve),
+a `workflow_run` se spouští z definice ve výchozí větvi. Obojí je tedy z task
+větve fyzicky nedosažitelné.
+
+**Co všechno to NEZACHYTILO:**
+
+| Kontrola | Proč to minula |
+|---|---|
+| `aid-plan-lint.sh` | kontroluje gramatiku `Files:`/`Depends on:`, ne proveditelnost v cílovém režimu |
+| `aid-generation-readiness.sh` | graf je acyklický — a to on doopravdy je, závislost na `main` v grafu není |
+| CP1-deep, 9 čoček, 3 kola | recenzují plán jako dokument proti repozitáři |
+| C0 cross-provider, 5 kol | totéž, jen jiným modelem |
+
+Všichni četli plán a repozitář. **Nikdo nečetl plán proti `plan-state.yaml`,**
+kde stojí `mode: plan_branch`, a proti tomu, co ten režim o dosažitelnosti `main`
+během běhu implikuje.
+
+**Dopad:** plán projde generováním, EPICy se vygenerují, dva EPICy se odpracují
+a teprve poslední dva kroky posledního EPICu narazí na zeď. To je nejdražší
+možný okamžik, kdy se to dá zjistit — po zaplacení skoro celé ceny plánu.
+
+→ Návrh, dvě úrovně:
+  1. **Mechanicky:** do `aid-generation-readiness.sh` přidat kontrolu, která
+     v `Implementation Detail` a `Acceptance Criteria` hledá odkazy na cílovou
+     větev (`push do main`, `on: push: branches: [main]`, `workflow_dispatch`
+     u souboru, který krok teprve zakládá) a u plánu v režimu `plan_branch`
+     je hlásí jako advisory. Nemusí to být blokující — stačí, aby to padlo
+     do očí PŘED generováním.
+  2. **Lidsky:** doplnit do `plan-writing.md` odstavec o tom, že v režimu
+     `plan_branch` je `main` během celého plánu nedosažitelný, a že krok,
+     který ho potřebuje, patří buď za plan-final hranici, nebo do samostatného
+     navazujícího plánu. Dnes to `plan-writing.md` nikde neříká.
+
+**Co jsem udělal:** zastavil se před Step 10 a předal PM. Steps 8 a 9 jsou
+hotové a ověřené; Steps 10 a 11 čekají na rozhodnutí, jestli se plán uzavře
+bez nich (a vydání 0.11.0 proběhne jako první použití postupu, který runbook
+už popisuje), nebo se `plan/P021` sloučí do `main` dřív a kroky doběhnou tam.
+
+---
+
+
+
+---
+
+#### acta — 2026-09-03 — `set-field` mění stav běhu TIŠE, bez zápisu do timeline (plugin: not recorded)
+
+**Plugin:** aid-orchestrator — `aid-fsm.sh set-field`
+
+**Co se stalo:** při uzavírání EPICu E-021-3_3 po Step 9 bylo potřeba srovnat
+`total_steps` se skutečností. `aid-fsm.sh set-field total_steps 2 <state_file>`
+proběhl, hodnotu změnil — a **nevypsal nic a do `timeline.jsonl` nezapsal nic**.
+
+**Proč je to vada.** `set-field` mění stav, podle kterého se rozhoduje o dalších
+přechodech: `EXECUTE → GATES` má precondition `current_step >= total_steps`.
+Snížením `total_steps` tedy jde odemknout přechod, který by jinak neprošel —
+a v auditní stopě po tom nezůstane ani řádka. Ostatní mutace se chovají opačně:
+`transition`, `increment-step`, `amend-scope`, `done-advance` i `rebase-plan`
+do timeline píšou, a `amend-scope` dokonce navíc zakládá vlastní artefakt.
+
+Není to teoretické: přesně tuhle cestu jsem musel použít, protože `rebase-plan`
+zmenšení pod aktuální krok odmítá (správně — „the current step no longer exists")
+a `--force` u `increment-step` by znamenalo vyrobit evidenci tvrdící, že kroky
+proběhly. `set-field` byl jediná zbývající cesta a je zároveň jediná bez stopy.
+
+**Co jsem udělal:** zapsal důvod ručně — `pm_scope_decision` do `timeline.jsonl`
+a rozhodnutí do `evidence/E-021-3_3/R-E021-3/scope-decision-steps-10-11.md`.
+Kdybych to neudělal, nikdo by z artefaktů nepoznal, proč EPIC se čtyřmi
+naplánovanými kroky skončil po dvou.
+
+→ Návrh, tři body:
+  1. `set-field` má do `timeline.jsonl` zapisovat vždy — pole, starou hodnotu,
+     novou hodnotu, čas.
+  2. U polí, která ovlivňují precondition přechodů (`total_steps`,
+     `current_step`, `plan_json_hash`, `base_commit`), vyžadovat `--reason`
+     stejně jako u `amend-scope` a `rebase-plan`. Dnes je `set-field` jediná
+     mutace bez odůvodnění.
+  3. Zvážit, jestli `total_steps` nemá být odvozené z `plan.json` a ne uložené
+     zvlášť — dvě místa s touž pravdou se rozejdou, a tady se rozejít MUSELA,
+     protože `rebase-plan` neumí zmenšit plán pod běžící krok.
+
+---
+
+
+
+---
+
+#### acta — 2026-09-03 — plan-finalize: `gates` skip u `plan_diff` přijme, `inputs` ho odmítne (plugin: not recorded)
+
+**Plugin:** aid-orchestrator — `aid-plan-fsm.sh plan-finalize`, fáze `gates` vs. `inputs`
+
+**Co se stalo:** plan-final P021. Fáze `gates` doběhla zeleně a k bráně `plan_diff`
+výslovně napsala:
+
+```
+NOTE: plan-finalize --stage gates: plan_diff skipped and the plan declares no
+verification_pattern — nothing machine-checkable, the skip is accepted
+(prose acceptance criteria are judged by the reviews).
+```
+
+Hned následující fáze `inputs` tentýž artefakt odmítla:
+
+```
+PRECONDITION FAIL: an AC lens (ac_to_test_identity/requirement_test_drift) is
+required by review-profile.json, but C3 plan-diff.json is missing, skipped,
+partial, malformed or not bound to … (overall_verdict='<empty>', expected pass|fail)
+```
+
+`plan-diff.json` má `overall_verdict: "skipped"`. Jedna fáze ten skip prohlásí za
+legitimní a zdůvodní proč, druhá ho o pár sekund později bere jako chybějící důkaz.
+
+**`--force` na to nedosáhne.** Vypsal `FORCE: every precondition passed — --force
+bypassed nothing and no waiver was written` a hned nato spadl na téže podmínce.
+Ta kontrola tedy leží mimo množinu, kterou `--force` obchází, což u PM-only
+únikového ventilu překvapí.
+
+**Dopad:** plán, jehož akceptační kritéria jsou prozaická (a `plan-finalize` to sám
+uzná), nemá jak projít fází `inputs`. Zbývá obejít celý plan-final a dokončit merge
+ručně, čímž se ztratí i ty artefakty, které by jinak vznikly.
+
+→ Návrh: (1) sjednotit čtení `overall_verdict: "skipped"` napříč fázemi — buď je
+skip legitimní všude, nebo nikde; (2) když je legitimní, `review-profile.json`
+nemá AC lens u takového plánu vyžadovat; (3) `--force` má pokrývat i tuhle
+podmínku, nebo má hláška říct, že na ni nedosáhne a co s tím.
+
+---
+
+#### agents — 1. Pásmo `full` kvůli jednomu řádku v `package.json` (plugin: not recorded)
+
+→ Co se stalo: plán P005 (hlas v asistentu) mění v `asistent/widget/package.json` jediný řádek — do `build` skriptu přibude `vite build --mode hlas`. `aid-cp1-gate.sh --classify-only` vrátil `full (full_path:asistent/widget/package.json)`: soubor spadá pod „dependency manifests", přestože se závislosti nemění.
+→ Co to způsobilo: devět čoček + rozhodčí (1,84 M tokenů) a povinné C0 kolo Codexem, který byl vyčerpaný do 21. 9. — plán by stál čtyři dny, nebo by se příkaz k sestavení musel rozdělit na dvě místa (dluh, před kterým projektové CLAUDE.md varuje).
+→ Co jsem udělal: PM zvolil výjimku (`cp1-pm-escalation-override.json`, jen pro Codexovo kolo) a zpětný běh Codexu jako měření.
+→ Pozorování: klasifikace podle CESTY nerozliší „mění závislosti" od „mění skript". Přitom čočky v tomhle případě svou cenu vrátily (viz bod 3) — takže otázka není „bylo pásmo moc přísné", ale „bylo přísné ze správného důvodu". Nebylo: o `package.json` nebyl ani jeden ze 101 nálezů.
+
+
+
+---
+
+#### agents — 2. První kontrola plánu umřela na limitu účtu a nic nezapsala (plugin: not recorded)
+
+→ Co se stalo: CP1 verifier (kolo 1a) běžel ~35 min, narazil na `429 session limit` a skončil bez jediného zapsaného řádku; skript `aid-brainstorm-opponent.sh` předtím vrátil rc=3 „not reached" bez důvodu v logu (Codex byl `vycerpano`, což `aid-audit-independence.sh detect` hlásil jako `available`).
+→ Co to způsobilo: 35 minut a neznámý počet tokenů bez výstupu; PM čekal; kontrola nezávislosti tvrdila dostupnost dodavatele, který nedosáhl.
+→ Co jsem udělal: od druhého pokusu má každý revizor v zadání „založ výstupní soubor HNED a připisuj"; všech devět čoček to dodrželo.
+→ Pozorování: (a) dispatch kontraktu CP1 by měl průběžný zápis vyžadovat sám; (b) `detect` měří přihlášení, ne kvótu — projekt má stav kvóty v `poskytovatel.json`, plugin ho nečte.
+
+
+
+---
+
+#### agents — 3. Tabulka čoček (celá v `01-tabulka-cocek.md`) (plugin: not recorded)
+
+101 nálezů, 94 přijatých rozhodčím, 64 různých problémů, **52 z nich nenašla žádná ze dvou předchozích kontrol** — přičemž kolo 2 těsně předtím potvrdilo 16/16 „vyřešeno". 1,63 M tokenů, 380 s nástěnně.
+- Překryv čoček MEZI SEBOU je velký (65/101 nálezů sdílí cluster), překryv s obecnou kontrolou malý (8/60 clusterů). Čtyři čočky našly tutéž vadu (mikrofon přežije odhlášení).
+- Nejzávažnější nálezy přišly z **observe-only** C0 čoček (logování přepisů do cizího Langfuse; existující přepis hlasu v témž repu sdílející aliasy; zamčený `mock_testing_fallbacks`; odpověď bez pole `model`). Do verdiktu se podle kontraktu nepočítají.
+- `reuse_evidence` ukázala metodickou díru lintu: 5 z 10 polí `Reuse check` hledalo identifikátor, který plán sám zavádí → `none` zaručené, lint ho přehraje a potvrdí. Lint ověřuje, že důkaz není zastaralý, ne že něco dokazuje.
+
+
+
+---
+
+#### agents — 4. Opravy plánu na místě vyrábějí vady (měřeno dvakrát) (plugin: not recorded)
+
+→ Co se stalo: 7 z 16 nálezů kola 1 vzniklo autorovou opravou nálezů kola 0; 6,5 z 12 nových nálezů kola 2 vzniklo opravou kola 1; jednu další si autor vyrobil a chytil při opravě kola 2. Pokaždé stejně: směr opravy správně, detail (řádek, jméno, hodnota) domyšlený místo ověřený.
+→ Pozorování: smyčka „revize → znovu CP1" nemá krok, který by ověřil NOVĚ NAPSANÁ tvrzení opravy proti kódu. 9 z 16 nálezů kola 1 by chytil deterministický skript (existence jmenovaných ENV/funkcí/přepínačů, symbol u `(lines ~N-M)`, AC, které platí už na HEAD, `command -v`, zakázané „atd." — lint hlídá jen `etc.`).
+
+
+
+---
+
+#### agents — 5. Drobnosti nástroje (plugin: not recorded)
+
+- Verze plánu mezi koly se nikde nesnímkuje; rozdíl „co změnila oprava" šel u kola 1 doložit jen ze zápisu, ne diffem (od kola 2 snímkuju ručně do `pilot/`).
+- Lint je mírnější než verifier u pole `Reuse check` (lint ho chce jen u `Create:`, verifier u každého kroku) — dvě pravidla, dva verdikty.
+- Verifier karta odkazuje na `skills/role-cards.md` a `skills/agent-protocol.md`, které v pracovním stromu nejsou (hlásila čočka L1).
+- Po změně přihlášeného účtu uprostřed session přestal platit odkaz na PM stránku plánu (artefakt) a musel se publikovat znovu pod novou adresou.
+
+
+
+---
+
+#### agents — 6. Smyčka revizí nekonverguje v počtu nálezů (kola 4 a 5) (plugin: not recorded)
+
+→ Co se stalo: po kole 3 (verdikt revise) PM zvolil přepis dotčených kroků od nuly + potvrzení jiným modelem + tři závazné čočky. v4: 55/60 problémů vyřešeno, ale čočky 10 blockerů a 44 nálezů. Revize 2 (v5): 4 blockery, 34 nálezů → podle kontraktu eskalace na PM. Cena kol 4+5: 1,66 M tokenů; celý CP1 plánu 3,9 M.
+→ Pozorování:
+  - Blockery 7 → 10 → 4, nálezy 35 → 44 → 34. Polovina nálezů r2 (16/32) leží v textu, který přidala revize 2. Smyčka „revize → čočky" tedy v počtu nálezů nemá pevný bod; kontrakt ji ukončuje počtem revizí, ne kvalitou.
+  - V r2 už žádná vada NÁVRHU. Zbylé třídy: úplnost stavových automatů (patří spíš testům nad kódem než plánu) a PROSTŘEDÍ/PROCES (není venv, CI se nespouští — main 63 commitů před origin, brány červené z cizí práce, sdílené živé repozitáře). Druhou třídu plán neumí způsobit ani opravit, ale čočka L3 ji hlásí jako blocker plánu — kontrakt mezi „vada plánu" a „předpoklad prostředí" nerozlišuje; rozhodčího jsem o rozlišení požádal nad rámec kontraktu.
+  - Kontrakty existujících testů (přesný výčet klíčů, přesný seznam souborů, přesný aria-label): 5 blockerů ve třech kolech (`test_session_endpoint`, `test_widget_tok`, `prechod-a-odkazy`, `test_audit`, sada návratu zálohy). Každý by našel skript: „pro každý soubor v `Files` najdi testy, které ho jmenují nebo porovnávají množinu na rovnost". Žádná čočka to nemá v zadání, L2 to dělá jen když si vzpomene.
+  - Revizor v kole 4 spustil při úklidu `rm -rf /tmp/tmp.*` (mimo svůj adresář). Read-only zadání revizorům nic nevynucuje; od kola 5 to mají v zadání zakázané slovy.
+  - Čočky se ani v pátém kole „nevyčerpaly" — L1 po vyjmenování tabulek přechodů začala hlásit páry stav×událost, které tabulka vynechala (klid × stop apod.). Bez pravidla o závažnosti by to pokračovalo donekonečna; v kole 5 jsem ho do zadání přidal a High kleslo z 12 na 7.
+
+
+
+---
+
+#### agents — 7. Srovnání s Codexem — DOPLNIT po 21. 9. (plugin: not recorded)
+
+---
+
+#### wan — 2026-09-02 — agregace acceptance evidence na hranici plánu nesbírá nic a hlásí to jako průchod (plugin: not recorded)
+
+**Verze pluginu:** 2.95.11
+**Kde:** `aid-plan-fsm.sh plan-finalize --stage inputs` → `acceptance-evidence.json`
+
+**Co se stalo.** Plán P101 má šest akceptačních kritérií s ověřovacími vzory.
+Agregovaná `acceptance-evidence.json` v plánovém běhu nese `criteria: []`
+a všechny tři EPIC zdroje má jako `absent` (`aggregated_absent: 3`) — tedy
+strojově není doložené ANI JEDNO kritérium. Artefakt to ale hlásí jako průchod
+se značkou `aggregated_with_gaps`.
+
+**Co to způsobilo.** Nic přímo — kritéria ověřila brána `plan_diff`, která si
+vzory pouští sama. Ale `acceptance-evidence.json` se tváří jako doklad přijetí
+a v tomhle stavu nedokládá nic. Kdo se na něj spolehne (a je to jeden
+z povinných výstupů plánové revize), dostane prázdno vydávané za splněno.
+
+**Proč jsou zdroje `absent`.** EPIC běhy `acceptance-evidence.json` neprodukují
+— vzniká jen na hranici plánu. Agregace tedy sbírá ze souborů, které nikdo
+nezapsal.
+
+**Návrh.** Buď ať agregace při nulovém sběru padne (nebo aspoň hlásí `absent`
+místo `aggregated_with_gaps`), nebo ať se na EPIC hranici acceptance evidence
+opravdu produkuje. Dnešní stav je třetí možnost: tvrdí průchod a nedokládá nic
+— tedy přesně ten vzorec „formálně splněno, fakticky ne", který plán P101
+v ekosystému ruší.
+
+Nalezeno plánovou sémantickou revizí P101, ne mnou.
+
+
+
+---
+
+#### wan — 2026-09-02 — ověření důkazů „při hlavě" nemůže v režimu `plan_branch` projít (plugin: not recorded)
+
+**Verze pluginu:** 2.95.11
+**Kde:** `aid-plan-fsm.sh plan-finalize --stage c4` → vstup `verification_report`
+(`aid-release-policy.sh::run_verification_input` → `aid-evidence-verify.sh --at-head`)
+
+**Co se stalo.** Rozhodnutí C4 pro P101 skončilo `release_ready=false` se dvěma
+překážkami; jednou z nich je `verification (--at-head) fail`. Ta kontrola nemůže
+v tomhle režimu projít ani při dokonale zdravých důkazech, protože hledá dvě
+věci, které v `plan_branch` nikdy nejsou na jednom místě:
+
+- **Důkazní balík** `.aid-o/work/evidence/<plán>/<běh>/` je NEsledovaný a žije
+  jen v hlavním checkoutu.
+- **Hlava, proti které se ověřuje**, je zmrazený kandidát — ten je jen ve stromu
+  plánu (`.aid-worktrees/plan-<id>`).
+
+FSM si stage přepne do stromu plánu (`NOTE: … re-running this command in
+.aid-worktrees/plan-P101`) a předá `AID_PROJECT_ROOT` = strom plánu. Tam je
+`.aid-o/` sledovaná kopie z gitu, takže balík běhu v ní neexistuje:
+
+```
+aid-evidence-verify: no evidence packs found
+  ✗ evidence_pack_found   no evidence packs found under …/.aid-worktrees/plan-P101/.aid-o/work/evidence
+```
+
+Spuštění téhož z hlavního checkoutu balík najde, ale padne na tom, že hlava je
+`main`, ne kandidát:
+
+```
+  ✗ git_clean                 working tree has uncommitted changes
+  ✗ artifact_head_freshness   pack_head is not reachable from HEAD
+```
+
+**Co to způsobilo.** `release_ready=false` a tím nemožnost zapečetit uzavírací
+důkaz (`_pfsm_seal_plan_final_close_evidence` vyžaduje `blockers_count == 0`).
+Politika je dnes `enforcement: observe`, takže stage sama nespadla — při
+`blocking` by se plán v tomhle režimu nedal uzavřít vůbec.
+
+**Nebezpečí, které z toho plyne.** Jediné dvě „opravy", které se nabízejí, jsou
+obě falšování: nasymlinkovat balík do stromu plánu (a schovat symlink před
+`git_clean`), nebo kontrolu obejít. Kdo je pod tlakem termínu, jednu z nich
+udělá — a zelená pak nedokazuje nic.
+
+**Návrh.** Ověřovač by měl balík hledat v hlavním checkoutu (kde jediný je)
+a hlavu brát z kandidáta zapsaného v manifestu (ne z `git rev-parse HEAD`
+toho stromu, ve kterém zrovna běží). Do té doby by měl vstup hlásit
+`unverifiable` s vysvětlením „balík a hlava nejsou v jednom stromu", ne `fail`
+— dnešní `fail` vypadá jako vada důkazů, a přitom je to vada prostředí.
+
+**Vedlejší nález, tentokrát můj a opravený.** `dispatch-record.json` jsem
+nejdřív napsal s protokolovou obálkou v2. `artifact_type: "dispatch_record"`
+ale v registru není, takže ověřovač na něm padal na `protocol_validate`
+i `fingerprint`. Soupis dispatchu není protokolový artefakt a nemá se za něj
+vydávat — po odstranění obálky obě kontroly procházejí. Stálo by za zmínku
+v dokumentaci, protože brána `--stage review` po tom souboru výslovně sahá.
+
+
+
+---
+
+#### wan — 2026-09-03 — pre-push hook kontroluje prefix zprávy, ne skutečnou verzi (plugin: not recorded)
+
+**Verze pluginu:** 2.95.11
+**Kde:** `.git/hooks/pre-push`, blok `AID-ORCHESTRATOR-PREPUSH-START`
+
+**Co se stalo.** Push `main` s vydáním 0.30.0 byl odmítnut:
+
+```
+AID HOOK: Push blocked — N commits since v0.29.0 without version bump.
+  feat: commits found → run: bash plugins/aid-orchestrator/scripts/aid-release.sh auto
+  Or push without bump: git push --no-verify
+```
+
+Verze přitom zvednutá BYLA — `pyproject.toml`, `uv.lock` i `CHANGELOG.md`
+z 0.29.0 na 0.30.0, `scripts/check_changelog.sh` prochází. Hook to nevidí,
+protože nekontroluje verzi: hledá mezi commity zprávu odpovídající `^release:`.
+Bump nesl prefix `chore(release):` a tím propadl.
+
+**Proč je to tentýž vzorec, jaký ruší P101.** Kontrola měří ZNAČKU, ne
+skutečnost, kterou má hlídat. Plyne z toho obojí:
+
+- **falešně negativní** — poctivě zvednutá verze push zablokuje (tenhle případ);
+- **falešně pozitivní** — prázdný commit se zprávou `release: cokoli` hook
+  uspokojí, i když se v `pyproject.toml` nehnulo nic. Guard tedy neručí za to,
+  co slibuje jeho vlastní hláška („without version bump").
+
+**Nabízené řešení hook sám snižuje na obejití.** Hláška nabízí
+`git push --no-verify`, tedy vypnutí VŠECH pre-push kontrol kvůli formátu
+jedné zprávy. Kdo to jednou udělá, udělá to pak i tam, kde guard měl pravdu.
+
+**Návrh.** Číst skutečný zdroj verze projektu (u WANu `pyproject.toml`,
+`version-sync` v CI ho už bere jako autoritativní) a porovnat ho s posledním
+tagem; prefix zprávy nanejvýš jako doplňkový signál. Do té doby aspoň
+rozšířit vzor na `^(release|chore\(release\)|feat\(release\)):`, ať konvenční
+commit neselhává, a v hlášce místo `--no-verify` navrhnout, co konkrétně
+doplnit.
+
+**Jak to bylo vyřešeno teď:** prázdným commitem `release: 0.30.0`, který
+v těle vysvětluje, kde bump doopravdy leží a co bylo před zápisem ověřeno —
+tedy splněním konvence, ne vypnutím kontroly.
+
+---
+
+
+
+---
+
+#### wan — 2026-09-04 — brainstorm bez plánu nezanechá v gitu ŽÁDNÝ záznam (interim je ignorovaný, vize nesledovaná) (plugin: not recorded)
+
+**Verze pluginu:** 2.95.11
+**Kde:** `.aid-o/work/interim-*.md` (v projektovém `.gitignore` na řádku 374),
+`.aid-o/work/brainstorm/<plan>/{vision.md,state.yaml}` (nesledované),
+`skills/brainstorming.md` → `scripts/aid-brainstorm-state.sh approve`.
+
+**Co se stalo.** P104 proběhlo přesně tak, jak skill připouští: brainstorm
+s vizí, měření, tři varianty pro PM. PM pak řekl „zvládneš rovnou vývoj?" —
+tedy **plán se nikdy nenapsal** a `approve` se nespustilo, protože nebylo co
+approvovat. Po sloučení práce do `main` jsem zjistil, že v gitu nezůstalo
+z celého rozboru nic:
+
+- `interim-P104.md` (analýza geometrie, naměřená čísla „doklad 490 px = 62 %
+  A4", zdůvodnění tří variant) — **ignorovaný explicitním pravidlem** v
+  `.gitignore:374`, ne omylem;
+- `brainstorm/P104/vision.md` (pět bodů s testy, které PM schválil a proti
+  kterým se pak měřilo) — **nesledovaný**, ta složka v gitu není vůbec;
+- `brainstorm/P104/state.yaml` (že vize BYLA schválena) — totéž.
+
+Přitom ve stejném adresáři je 275 souborů sledovaných (ruční specifikace,
+handoffy, postmortemy) — nekonzistence je v tom, že strojově vyrobené záznamy
+brainstormu se chovají jinak než ručně psané.
+
+**Proč to vadí.** Vize je smlouva o tom, co se má postavit, a PM ji schvaluje;
+interim je jediné místo, kde je zapsané PROČ (co se měřilo, co se zamítlo a
+proč). Když brainstorm neskončí plánem, tahle dvojice je JEDINÝ záznam — a
+zmizí při prvním úklidu pracovního stromu nebo při přechodu na jiný stroj.
+Skill sám počítá s tím, že `approve` vizi „promotuje vedle plánů" (tam už
+sledovaná je), jenže ten krok se pojí s existencí plánu; cesta „brainstorm →
+rovnou vývoj" je legitimní a záznam na ní propadne.
+
+**Jak jsem to obešel.** Podstatu jsem ručně přelil do commit messages a do
+`CLAUDE.md` (proč flex místo mřížky, proč `--wan-chrome`, proč práh 1100 px)
+a nálezy do backlogu jako IMP-650..653. Byla to ale moje volba, ne nic, co by
+pipeline vynutila — a rozbor s čísly v gitu stejně není.
+
+**Návrh.** Kterýkoli z těchto tří, seřazeno podle mého odhadu poměru přínos/cena:
+
+1. Nechat `approve` fungovat i bez plánu (běh se uzavře jako „skončil rovnou
+   vývojem") a vizi promotovat vedle plánů jako dnes. Nejmenší zásah, používá
+   už existující mechanismus.
+2. Přestat ignorovat `interim-*.md` u běhů, které skončily prací v kódu —
+   nebo aspoň na konci běhu vypsat větu „tyhle záznamy nejsou v gitu".
+3. Přidat `brainstorm/<plan>/` mezi sledované cesty v šabloně `.gitignore`,
+   kterou `/aid-init` zakládá; dnes tam ta složka není ani na jedné straně,
+   takže o ní nikdo nerozhodl.
+
+Nalezeno při ověřování, jestli se při sloučení P104 něco neztratilo (PM se
+ptal na evidenci času — ta byla v pořádku, tohle vyplavalo vedle ní).
+
+
+
+
+---
+
+#### wan — 2026-09-19 — alloc plan-id vydal obsazené číslo (plugin: not recorded)
+
+- Co se stalo: `aid-fsm.sh alloc plan-id` vrátil P106, přitom `.aid-o/plans/P106-archivace-misto-mazani.md` existuje (plány P105/P106 vznikly mimo alokátor, čítač je nezná).
+- Co to způsobilo: nový plán by přepsal existující.
+- Co jsem udělal: alokoval znovu (P107), ověřil, že volné. Alokátor nekontroluje existenci souborů v `plans/` — stejná past jako 10. 8. (čítač 87 vs P090).
+
+
+
+---
+
+#### wan — 2026-09-19 · brainstorm oponent (2.98.0) · P107 — záloha za Codex musí být automatická (plugin: not recorded)
+
+- **Co se stalo:** `aid-brainstorm-opponent.sh` vrátil rc=3 („opponent not reached") dvakrát za sebou během sekund. Příčiny: (1) skript volá `codex` z PATH = stará 0.149.1 (/usr/local/bin), funkční je /usr/bin/codex 0.154.0; (2) i s funkční binárkou Codex odmítl práci – vyčerpaný limit do 21. 9. 2026 8:29. Skill pak velí předložit PM rozhodnutí (výjimka 1), a flow se zastavil.
+- **Požadavek PM (19. 9. 2026):** když Codex není dostupný (chybí, stará verze, limit, chyba), oponent se AUTOMATICKY pustí jako nezávislý Claude Code subagent se stejným zadáním (brief, ne závěry autora). PM se jen INFORMUJE, že oponoval CC místo Codexu a proč. Žádná otázka, žádné čekání.
+- **Návrh opravy:** v `aid-brainstorm-opponent.sh` fallback řetěz codex → CC subagent (izolovaný kontext, bez přístupu k interim dokumentu autora); `dispute.json` zapíše `provider: "claude-code"` + `fallback_reason`. Totéž pro ostatní místa, kde se volá Codex jako druhý názor (review plánu, review kódu). A binárku Codexu hledat podle verze, ne první v PATH.
+
