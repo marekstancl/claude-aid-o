@@ -3,6 +3,50 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.100.0] — 2026-09-20
+
+### ⚠️ Změna chování — přečti před upgradem
+
+**Když Codex není k dispozici, odpoví místo něj Claude — automaticky a bez
+otázky na PM.** Dostupnost se zjišťuje sondou (`aid_codex_probe`): binárku
+vybírá podle verze, ne podle pořadí v PATH (na dev hostu starší instalace
+stínila novější), a krátkým `codex exec` pozná i vyčerpaný limit účtu —
+nainstalovaný Codex, který odmítá odpovídat, je přesně ten případ, který se
+opravdu děje. Role, kterou žádný Codex nezvládne, dostane do záznamu
+`fallback: claude` a controller dispatchne stejný prompt Claude agentovi.
+**Kolo, jehož zástup nikdo nedispatchoval, je od této verze neplatné** (dřív
+se uzavřelo jako „degraded" a druhý názor prostě chyběl): roli uvidíte jako
+`missing`, dokud zástup neproběhne. Model zástupu je `stand_in_model`
+v `review-checkpoints.yaml` (výchozí `opus` pro plán, `sonnet` pro krok
+a EPIC). Oponent brainstormingu končí kódem 4 s pokynem `STAND-IN:` místo
+monologu; jeho odpověď se vrací přes `--answer <soubor>`.
+
+**`set-field` na čtyři pole, která jsou podmínkou přechodu** (`total_steps`,
+`current_step`, `plan_json_hash`, `base_commit`) **vyžaduje `--reason`** delší
+než dvacet znaků a rozlišitelnou časovou osu, jinak odmítne. Každé `set-field`
+navíc zapíše řádek `field_set` (pole, stará hodnota, nová, důvod).
+
+### Added
+- **Zástup za Codex** — `aid_codex_probe` a `aid_codex_binary` v `lib/aid-c3-dispatch.sh` rozhodují dostupnost jednou pro všechny čtyři volající; `AID_CODEX_BIN` pinuje binárku, když je pravidlo podle verze špatná odpověď.
+- **`aid-fsm.sh auto-mode set|get`** — zapisovatel `.aid-o/work/auto-mode-state.yaml`, který dokumentace, `/aid-run --auto` i `/aid-stop` jmenovaly rok, aniž by ho kdokoli psal; `aid_autonomous_mode` zůstává jediným čtenářem a bere `mode: manual` nad exportovaným `AID_AUTO_MODE=1` — zastavení od PM vyhrává nad během, který zastavuje.
+- **`--candidate <sha>` v `aid-evidence-verify.sh`** — commit, který se soudí, když hlava pracovního stromu je jinde (hranice plánu posílá zmrazeného kandidáta).
+- **`replay-do` v `test-step-review-acceptance.sh`** — měřicí režim, který přehraje zaznamenaná kola revizorů přes adjudikátor aktuálního stromu.
+
+### Changed
+- **Rozhodčí revize bere, co revizor opravdu píše** — citace smí být rozsah `soubor:první-poslední` (otisk se váže na první řádek) a reprodukce smí být inline `bash -c '<roura>'`. Tělo je ohraničené: každý segment začíná čtecím slovesem, žádné sloveso se zápisovým režimem v seznamu není, a nový řádek, zpětné lomítko, přesměrování, substituce příkazu nebo procesu a jakýkoli `-i` přepínač odmítají. Nezávislá revize ukázala, že první návrh seznamu byl dekorace — patnáct konkrétních úniků je teď testem.
+- **Doklad o akceptačních kritériích vzniká z brány, která je ověřila** — `acceptance-evidence.json` na úrovni plánu se staví z `plan-diff.json` `results[]` s verdiktem `verified`, `partial` nebo `prose_only`; blokuje jen `partial`, a jmenuje kritéria. `--stage inputs` čte přeskočený `plan_diff` stejně jako `--stage gates`.
+- **`aid-evidence-verify.sh` hledá balík ve stavovém kořeni** — z plánovacího worktree, který vlastní `.aid-o/` nemá, už nehlásí „no evidence packs found"; `git_clean` počítá jen sledované soubory, protože runtime zapisuje nesledované adresáře do stromu, ve kterém běží.
+- **`alloc plan-id` / `alloc epic-id` přeskočí číslo, které už soubor nese** — WAN dostal P106 dvakrát; číslo je zadarmo, kolize ne.
+
+### Fixed
+- **Zpráva C3, která si odporovala se surovým verdiktem Codexu, zůstávala na disku** — release brána čte soubor, ne surovou odpověď (ACTA: tři nálezy, dva vysoké, zpráva tvrdila nula). Neshoda teď zprávu odloží jako `audit-report.rejected.json` a nahradí ji `status: unverifiable` se surovým verdiktem; pod `--read-only`, který posílá FSM hook, se nepíše nic.
+- **`aid-release-policy.sh` neříkal verifikátoru, který strom má soudit** — soudil adresář volajícího, takže cizí rozdělaná práce padala na účet tohoto běhu.
+- **`fsm_check_review_round` bez `yq`** — přepínače se četly jako prázdné a pravidlo kola se vynucovalo ze souboru, který nikdo nepřečetl; teď hlasité `PRECONDITION FAIL`.
+- **Zastaralé fixtury a základna registru** — základna regenerována (dvanáct řádků se posunulo bez deklarace), čtyři fixtury z doby před P093/P094 zelené, šablona CP4 už nepopisuje odstraněný pre-filter.
+
+### Removed
+- **`scripts/aid-acceptance-evidence.sh`** — neměl živého volajícího a četl `verifier-output-step-N.md`, které od P094 nikdo nepíše; jeho dva registrové řádky jsou retired s nástupcem a odstavec „AC↔Evidence" zmizel z `agents/verifier.md`.
+
 ## [2.99.0] — 2026-09-19
 
 ### ⚠️ Změna chování — přečti před upgradem
