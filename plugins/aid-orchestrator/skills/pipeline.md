@@ -1455,7 +1455,7 @@ failed** card replaces it when the review ends in a blocker the PM must resolve)
    aid_plan_close_render "$evidence_dir/pm-decision-brief.json" \
                          "$evidence_dir/release-decision.json" "$plan_id" "$evidence_dir"
    ```
-   Publish the body with the Artifact tool, then present the chat card verbatim. The renderer
+   Publish the artifact body via the Artifact tool, then present the chat card verbatim. The renderer
    reads ONLY those two files and fails CLOSED (exit 1, no page) when the brief lacks a required
    field or the decision carries no `plan_summary`. If the brief is absent, report the Blocked
    card "plan-close brief missing — run aid-pm-brief.sh"; never improvise a summary from
