@@ -131,3 +131,28 @@ v projektech HOTOVO/ZAMÍTNUTO s verzí.
 - součet času revizí ve `/aid-status` (po prvním ostrém EPICu),
 - naměřená blended sazba Sonnetu do `prices.yaml`,
 - Codex jako `epic_security` naostro (limit vyprší 21. 9. 2026 8:29).
+
+## 6. Co z tohohle záznamu P095 opravdu udělalo (2026-09-20, vydáno 2.100.0)
+
+Kroky 1-10 hotové, mergnuto jako `9373c324`, tag `v2.100.0`, merge cesta
+zelená (T0 970/970, T1 811/811), testbed 30/30 proti nainstalovanému pluginu.
+
+**Z §4 vyřízeno:** acta 14, 15, 16, 19 a oba body z 2026-09-03 (set-field,
+gates/inputs) — HOTOVO; acta 17 a 20 ZAMÍTNUTO jako překonané; acta 2026-09-02
+pre-push HOTOVO už v 2.93.0. wan: agregace acceptance evidence, ověření „při
+hlavě", alloc obsazeného čísla a záloha za Codex — všechno HOTOVO. agents 1, 3,
+6, 7 ZAMÍTNUTO jako překonané, 2a/4/5 ponechány jako poučení. Anotace jsou
+v souborech projektů, každá s verzí.
+
+**Z §5 zbývá:** součet času revizí ve `/aid-status` (čeká na první ostrý EPIC)
+a Codex jako `epic_security` naostro (limit vypršel 21. 9. 2026 8:29, po tom
+datu je to jeden běh). Naměřená sazba Sonnetu se NEZMĚŘILA a nezmění se, dokud
+plán poběží mimo AID: P095 se na pokyn PM stavělo ručně, takže nevzniklo ani
+jedno cp2 kolo — důvod je zapsaný přímo v `prices.yaml`.
+
+**Nové, co tahle práce našla a co §4 nemělo:** dvě skutečné chyby za
+zestárlými testy (`aid-release-policy.sh` neposílal verifikátoru `--tree`;
+`amend-scope` v GATES už neodmítá) a čtyři nové backlogové řádky —
+IMP-615 (25 případů `test-c3-audit` červených už na main), IMP-616 (stažený,
+byl to omyl v mé vlastní diagnóze), IMP-617 (merge cesta 32 min proti stropu
+10 min). IMP-607, 608, 610, 611, 612 a 613 jsou uzavřené.
