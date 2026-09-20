@@ -311,7 +311,7 @@ AID Control System v2 introduces a shared protocol v2 envelope that all control 
 ### Schema files
 - `defaults/schemas/aid-protocol-v2.schema.json` — canonical envelope schema (JSON Schema draft 2020-12); every field annotated `$comment: enforced` or `$comment: reference`
 - `defaults/schemas/README.md` — enforced-vs-reference table with `aid-protocol-validate.sh`'s exact enforcement scope
-- 13 type-specific schemas: `plan-graph.schema.json`, `contract-manifest.schema.json`, `review-profile.schema.json`, `delivery-gate.schema.json` (retired producer), `ui-fidelity.schema.json`, `semantic-review.schema.json`, `acceptance-evidence.schema.json`, `audit-report.schema.json`, `audit-input-manifest.schema.json`, `release-decision.schema.json`, `pm-decision-brief.schema.json`, `curator.schema.json`, `delivery-report.schema.json`
+- 7 type-specific schemas: `plan-graph.schema.json`, `contract-manifest.schema.json`, `review-profile.schema.json`, `ui-fidelity.schema.json`, `semantic-review.schema.json`, `acceptance-evidence.schema.json`, `release-decision.schema.json`, `pm-decision-brief.schema.json`. The artifact types of retired producers (`audit_report`, `audit_input_manifest`, `curator`, `delivery_report`, `delivery_gate`, `c3_dispatch`) stay in the validator so older evidence still validates; their schema files are gone.
 - `defaults/schemas/run-control-protocol.schema.json` — per-run protocol lock (E2+ wiring)
 
 ### Validator: `aid-protocol-validate.sh`

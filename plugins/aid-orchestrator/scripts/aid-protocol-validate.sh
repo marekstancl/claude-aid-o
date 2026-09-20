@@ -401,7 +401,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 14: C3 audit_report required subfields (D7 — provider/model/process_id must be
 # echoed from audit_trigger, never self-introspected; input_manifest_hash is the
-# provenance binding). defaults/schemas/audit-report.schema.json declares these 4
+# provenance binding). The (retired) audit-report schema declared these 4
 # fields `required` on the .audit_report payload, but Step 12 above only checks that
 # the payload KEY is present — it never descends into the payload, so a report missing
 # these fields previously passed this validator with exit 0 despite the schema's own
@@ -554,7 +554,7 @@ fi
 #   - audit_report (C3): fingerprint_audit_report() over occurrence_id/severity/
 #     area/finding/recommendation — C3 findings are LLM-derived adversarial
 #     discoveries with no check_id/target_path/finding_class (those fields
-#     aren't in audit-report.schema.json). See aid-finding-fingerprint.sh for
+#     aren't in the retired audit-report schema). See aid-finding-fingerprint.sh for
 #     why the universal 5-field formula below doesn't apply to this type.
 #   - everything else: the universal fingerprint() formula
 #     (project_id/artifact_type/check_id/target_path/finding_class), unchanged.

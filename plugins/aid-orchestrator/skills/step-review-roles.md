@@ -27,8 +27,7 @@ Invoke when changing what a step or EPIC reviewer is asked, how a finding must
 look, or which roles exist. The controller does not read this file during a
 round — it follows the "Step review (CP2) and EPIC review (CP3)" section of
 `commands/aid-run.md` — and the reviewers get their role section inside the
-rendered prompt. Do NOT invoke for the plan review (`skills/plan-review-roles.md`)
-or for CP4 (`agents/verifier.md`).
+rendered prompt. Do NOT invoke for the plan review (`skills/plan-review-roles.md`).
 
 ## The Packet
 

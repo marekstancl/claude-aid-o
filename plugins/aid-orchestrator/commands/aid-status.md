@@ -1242,7 +1242,7 @@ Run /aid-run {id} to start execution.
 - If `$ARGUMENTS` is empty → show overview (default)
 
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-20
 
 ## Plan mode
 

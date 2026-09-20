@@ -6090,29 +6090,6 @@ _pfsm_seal_plan_final_close_evidence() {
   printf '%s|%s|%s' "$ref" "$commit" "$expected_hash"
 }
 
-# _pfsm_verify_plan_final_close_receipt <root> <plan_id> <candidate> <run_id>
-# Echoes the validated receipt JSON on stdout; PRECONDITION FAIL + return 1 on
-# anything ambiguous, forged, partial, stale or mismatched.
-_pfsm_verify_plan_final_close_receipt() {
-  local root="$1" plan_id="$2" candidate="$3" run_id="$4"
-  local ref want_hash got_hash receipt expected_ref
-  ref="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_close_evidence_ref')" || ref=""
-  want_hash="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_close_evidence_receipt_sha256')" || want_hash=""
-  [[ -n "$ref" && "$ref" != "null" && -n "$want_hash" && "$want_hash" != "null" ]] || { echo "PRECONDITION FAIL: ${plan_id} has no durable plan-final CLOSE evidence receipt." >&2; return 1; }
-  expected_ref="$(_pfsm_plan_final_close_evidence_ref "$plan_id" "$candidate" "$run_id")" || { echo "PRECONDITION FAIL: invalid plan/candidate/run binding for durable close evidence." >&2; return 1; }
-  [[ "$ref" == "$expected_ref" ]] || { echo "PRECONDITION FAIL: durable close evidence ref is not the uniquely derived plan/candidate/run ref." >&2; return 1; }
-  receipt="$(git -C "$root" show "${ref}:receipt.json" 2>/dev/null)" || { echo "PRECONDITION FAIL: durable plan-final close evidence ref ${ref} is missing or unreadable." >&2; return 1; }
-  local tree_paths
-  tree_paths="$(git -C "$root" ls-tree -r --name-only "$ref" 2>/dev/null || true)"
-  [[ "$tree_paths" == "receipt.json" ]] || { echo "PRECONDITION FAIL: durable plan-final close evidence ref ${ref} contains files other than receipt.json." >&2; return 1; }
-  got_hash="sha256:$(printf '%s\n' "$receipt" | sha256sum | awk '{print $1}')"
-  [[ "$got_hash" == "$want_hash" ]] || { echo "PRECONDITION FAIL: durable plan-final close evidence receipt hash mismatch for ${plan_id}." >&2; return 1; }
-  _pfsm_validate_plan_final_close_receipt_json "$receipt" || { echo "PRECONDITION FAIL: durable plan-final close evidence receipt is not public-safe or has an invalid shape." >&2; return 1; }
-  jq -e --arg p "$plan_id" --arg c "$candidate" --arg r "$run_id" '.plan_id == $p and .candidate_sha == $c and .run_id == $r' <<< "$receipt" >/dev/null \
-    || { echo "PRECONDITION FAIL: durable plan-final close evidence receipt does not bind this plan/candidate/run." >&2; return 1; }
-  printf '%s' "$receipt"
-}
-
 
 
 

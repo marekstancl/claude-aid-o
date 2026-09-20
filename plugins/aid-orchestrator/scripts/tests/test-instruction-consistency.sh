@@ -281,7 +281,8 @@ for pat in 'verifier-output-step-' 'aid-prefilter.sh classify' 'verifier-output-
   fi
 done
 
-SECTION_LINES=$(awk '/^## Step review \(CP2\) and EPIC review \(CP3\)$/{on=1; next} on && /^### State: READY$/{exit} on' "$PLUGIN_DIR/commands/aid-run.md" | wc -l)
+# the section ends at the next `## ` heading (since P095 that is the stand-in section, not READY)
+SECTION_LINES=$(awk '/^## Step review \(CP2\) and EPIC review \(CP3\)$/{on=1; next} on && /^## /{exit} on' "$PLUGIN_DIR/commands/aid-run.md" | wc -l)
 if [[ "$SECTION_LINES" -gt 0 && "$SECTION_LINES" -le 150 ]]; then
   pass "aid-run.md review section is ${SECTION_LINES} lines (≤ 150, adapter included)"
 else
@@ -408,6 +409,18 @@ else
   PASS=$((PASS + 1)); echo "  ✓ an archived record carrying the old sentence is left alone"
 fi
 rm -f "$ARCHIVE_FIXTURE"
+
+echo ""
+echo "TEST: no instruction names a mechanism P096 retired, or a former plan-finalize stage"
+# Precise names, not the bare words: "the reporters of a finding" is plain English.
+RETIRED_RE='agents/(reporter|curator)\.md|curator-report|-delivery\.md|delivery-report|aid-c3-dispatch|c3-audit-policy|aid-delivery-gate|\bCP4\b|\bCP5\b|cp4_curator|--stage (sync|inputs|review|c4|summary|accept-ancillary)\b|--focus (reporter|simplifier)'
+RETIRED_HITS="$(grep -rnE "$RETIRED_RE" "$PLUGIN_DIR/commands" "$PLUGIN_DIR/skills" "$PLUGIN_DIR/agents" \
+                  "$PLUGIN_DIR/scripts/lib/aid-review-adapter-claude.md" 2>/dev/null || true)"
+if [[ -z "$RETIRED_HITS" ]]; then
+  PASS=$((PASS + 1)); echo "  ✓ commands, skills and agents name no retired mechanism (the successor table is reference/review-successors.md)"
+else
+  FAIL=$((FAIL + 1)); echo "  ✗ retired names still instructed:"; printf '%s\n' "$RETIRED_HITS" | cut -c1-160 | sed 's/^/      /'
+fi
 
 echo ""
 echo "=================================="

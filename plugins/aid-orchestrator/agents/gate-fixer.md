@@ -193,4 +193,4 @@ The `gate` field names the failing gate:
 
 ---
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-20
