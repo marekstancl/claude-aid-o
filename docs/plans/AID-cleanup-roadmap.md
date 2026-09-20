@@ -67,3 +67,14 @@ Návrh **C1 — standard veřejného repa AID** (napsat do Docusauru jako `/aid/
 Práce: standard půl dne, úklid repa podle něj jeden až dva dny (přesun GUI balíčku
 zvlášť). Riziko: odkazy z Docusauru a z pluginu na přesunuté soubory — hlídá
 `test-enforcement-registry-cites.sh` a odkazová kontrola help indexu.
+
+## D. Náměty PM na později (zapsáno 20. 9. 2026 večer)
+
+| # | Co | Poznámka |
+|---|---|---|
+| D1 | **Kompletní přestavba a promyšlení Brainu** (vulcan-memory / Qdrant jako paměť ekosystému) | co se ukládá, kdo čte, jak se to udržuje čerstvé; základ pro D2 |
+| D2 | **Sebezlepšování AID** – učení se z dřívějších chyb jako aktivní složka AID | Brain (D1) jako zdroj: nálezy revizí, incidenty z plánů, IMP backlog → AID je při plánování a revizi sám používá, ne jen archivuje |
+| D3 | **Paralelismus** – znovu, s novým návrhem | P077/P078 linka zrušena (2026-08-09); vracet se jen s plánem, který znovu spočítá, co to stojí (viz paměť: nenavrhovat oživení bez nového zadání PM) |
+
+Rozhodnutí PM 20. 9. 2026 večer k úklidu: kokpit zůstává v repu pod `cockpit/` (1A);
+Telegram = údržba mapy + vyřazení `svc-mcp-tg-bot` jako samostatný krok mimo AID repo (2A).

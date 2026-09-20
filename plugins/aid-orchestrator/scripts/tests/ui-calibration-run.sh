@@ -17,9 +17,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURE_BASE="$SCRIPT_DIR/fixtures/ui-fidelity"
 COMPARE_MJS="$(realpath "$SCRIPT_DIR/../../lib/ui-fidelity/ui-compare.mjs")"
 SCREENG_CAPTURE_MJS="$(realpath "$SCRIPT_DIR/../../lib/ui-fidelity/screeng-capture.mjs")"
-AID_GUI_DIR="$(realpath "$SCRIPT_DIR/../../../../packages/aid-gui")"
+AID_GUI_DIR="$(realpath "$SCRIPT_DIR/../../../../cockpit/packages/aid-gui")"
 # Workspace root for hoisted node_modules (npm workspaces)
-AID_WORKSPACE_ROOT="$(realpath "$SCRIPT_DIR/../../../../")"
+AID_WORKSPACE_ROOT="$(realpath "$SCRIPT_DIR/../../../../cockpit")"
 AID_GUI_PORT=3911
 VITE_PID=""
 VITE_STARTED_BY_SCRIPT=false
@@ -106,7 +106,7 @@ start_vite_server() {
   fi
 
   if [[ ! -d "$AID_GUI_DIR" ]]; then
-    echo "ERROR: packages/aid-gui not found at $AID_GUI_DIR" >&2
+    echo "ERROR: cockpit/packages/aid-gui not found at $AID_GUI_DIR" >&2
     echo "D-desktop/D-mobile cases require aid-gui to be present." >&2
     exit 1
   fi

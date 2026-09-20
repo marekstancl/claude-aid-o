@@ -7,7 +7,7 @@
 # parser never has to deal with nested-quote fragments.
 #
 # Reads all 8 canonical version-file locations from the project root's own
-# CLAUDE.md "Version File Registry" table, asserts they all agree on ONE
+# CONTRIBUTING.md "Version File Registry" table, asserts they all agree on ONE
 # version number, asserts that version differs from the pre-EPIC baseline,
 # and asserts both CHANGELOG.md files actually mention it (a real entry, not
 # just a bump with no changelog trace).
@@ -25,7 +25,7 @@
 #                        <new_version>" and "both CHANGELOGs mention it"
 #                        checks run (no baseline-divergence check).
 #
-# The 8 canonical locations (root CLAUDE.md "Version File Registry"):
+# The 8 canonical locations (root CONTRIBUTING.md "Version File Registry"):
 #   1. CHANGELOG.md                                          -> `## [X.Y.Z]` header
 #   2. plugins/aid-orchestrator/CHANGELOG.md                  -> `## [X.Y.Z]` header
 #   3. .claude-plugin/marketplace.json                        -> .metadata.version

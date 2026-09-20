@@ -31,12 +31,19 @@ versioning:
     - .aid-o
     - .claude
     - CHANGELOG.md
+    - CHANGELOG-archive.md
     - README.md
+    - CONTRIBUTING.md
     - CLAUDE.md
     - plugins/aid-orchestrator/CHANGELOG.md
+    - plugins/aid-orchestrator/CHANGELOG-archive.md
     - plugins/aid-orchestrator/README.md
   app_paths:
     - plugins
+    - cockpit
+    # The cockpit's Dockerfile lives in cockpit/ and its COPY sources are
+    # relative to that context; the drift gate matches them literally, so the
+    # context-relative names stay listed next to the repo-relative `cockpit`.
     - packages
     - package.json
     - package-lock.json*
