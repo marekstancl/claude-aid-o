@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 517          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 518          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -785,6 +785,17 @@ enforcements:
     verdict: ALIGNED
     test: "scripts/tests/bats/test-review-adjudicate.bats (case: 'command: an inline read-only reproduction is accepted, one that writes or runs another file is not')"
     description: "P095: a reviewer may carry the reproduction inline as `bash -c '<pipeline>'` instead of a file under repro/, because Sonnet wrote the inline form in three of four P094 acceptance rounds with the file rule in its prompt. The body is bounded: every segment (split on ;, |, && and ||) must start with one of grep rg ls find sed git wc head tail cat cd mkdir mktemp touch printf echo export jq yq test [[ [ for do done if then else fi, `git` only with grep|log|show|diff|blame|rev-parse|status; a redirection to a file, a command substitution, `source`, a nested `bash` and `eval` refuse. A refused body is rejected with the reason command_not_read_only, distinct from missing_command."
+
+  - id: evidence_verify_state_root
+    type: out-of-band
+    source: "scripts/aid-evidence-verify.sh (grep: 'aid_state_root')"
+    instruction: scripts/aid-evidence-verify.sh
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    test: "scripts/tests/bats/test-evidence-verify-tree.bats (cases: 'the pack is found from a worktree', '--candidate is what freshness is measured against')"
+    description: "P095 (WAN P101, ACTA P024): the evidence pack is resolved from aid_state_root, never from AID_PROJECT_ROOT or the current directory, because a plan worktree has no .aid-o/ of its own and every --at-head run from one reported 'no evidence packs found'. The commit under judgement is `--candidate <sha>` when a caller names one (the plan boundary passes the frozen candidate; EPIC mode keeps the HEAD default), and git_clean counts tracked changes only — the runtime writes untracked directories into the tree it runs in, so an untracked-sensitive check could never pass under plan_branch."
 
   - id: codex_stand_in_recorded
     type: out-of-band

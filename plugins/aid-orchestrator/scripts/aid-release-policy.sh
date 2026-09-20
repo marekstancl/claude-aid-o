@@ -633,8 +633,13 @@ run_verification_input() {
   # and be recorded as `unverifiable`, i.e. a blocker, rather than skipped).
   local _verify_subject="$EPIC_ID"
   [[ "${MODE:-epic}" == "plan" ]] && _verify_subject="$PLAN_ID"
+  # At the plan boundary the tree the verifier runs in holds `main`, while the
+  # commit under judgement is the frozen candidate on the plan branch. EPIC mode
+  # passes nothing and keeps the HEAD default it always had.
+  local _candidate=()
+  [[ -n "${CANDIDATE_SHA:-}" ]] && _candidate=(--candidate "$CANDIDATE_SHA")
   AID_PROJECT_ROOT="$PROJECT_ROOT" bash "$EVIDENCE_VERIFY" "$_verify_subject" "$RUN_ID" \
-    --out "$vr_tmp" --at-head >/dev/null 2>&1 || vr_exit=$?
+    --out "$vr_tmp" --at-head "${_candidate[@]}" >/dev/null 2>&1 || vr_exit=$?
 
   case "$vr_exit" in
     2|10|20)
