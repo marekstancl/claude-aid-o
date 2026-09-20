@@ -507,6 +507,18 @@ cmd_collect() {
        && ! _stand_in "$dir" "$role"; then
       err="unexpected_provider: ${role} is a codex role and no stand-in was recorded in codex-${role}.usage.json"
     fi
+    # A finding whose command or evidence breaks the form would be dropped by the
+    # adjudicator, true or not. Once per role it goes back to its reviewer instead
+    # (the `retry` path, with the reason quoted); a second malformed answer is
+    # accepted and that finding is dropped as before.
+    if [[ -z "$err" && ! -e "${dir}/reviewer-${role}.form-asked" ]]; then
+      local form
+      form="$(jq -r --slurpfile s "$AID_PR_SCHEMA" "$(aid_plan_review_proof_jq) [.findings[] | . as \$f | proof_error as \$e | \"\(\$f.id) \(\$e)\"] | join(\", \")" "$tmp" 2>/dev/null)"
+      if [[ -n "$form" ]]; then
+        : > "${dir}/reviewer-${role}.form-asked"
+        err="form: ${form} — \`command\` is ONE read-only command, \`evidence\` is citations only (path:line; path:first-last), what the line shows goes in \`claim\`; asked once"
+      fi
+    fi
     if [[ -n "$err" ]]; then
       echo "$err" > "${dir}/reviewer-${role}.invalid.txt"
       invalid+=("$(jq -nc --arg r "$role" --arg why "$err" '{role: $r, reason: $why}')")

@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 538          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 540          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -3792,3 +3792,27 @@ enforcements:
     description: "P096 Step 12 — every Codex call of AID (review rounds, the brainstorm opponent, the recovery adjudicator) goes through one function: a fresh process with --sandbox read-only, rooted in the project, stdin closed, no --output-schema, the CLI's exit code returned. Sourcing the file sets no shell option and no variable of the caller."
     recovery: "n/a — a property of the transport, not a refusal."
     test: "scripts/tests/bats/test-codex-transport.bats"
+
+  - id: gate_vacuous_pass_refused
+    type: 1
+    source: "scripts/aid-run-gates.sh:run_gate (grep: 'vacuous_pass')"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "A gate whose command exits 0 while its own output says it looked at nothing (0 files checked, collected 0 items, no tests ran, an empty TAP plan) is recorded as fail with reason vacuous_pass. The signature list is closed and literal: a count of zero errors is a result, a count of zero files is an absence. The one idea kept from the retired C1 delivery gate (DG-09)."
+    recovery: "Fix the gate's command or path so it reaches the files it is meant to check; the row's output shows what the tool printed."
+    test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'vacuous pass')"
+
+  - id: review_form_reask_once
+    type: 1
+    source: "scripts/aid-review-round.sh:cmd_collect (grep: 'form-asked')"
+    instruction: "scripts/lib/aid-review-adapter-claude.md (grep: 'form:')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "An answer carrying a finding whose command or evidence breaks the form is listed by collect as invalid, once per role and round, with the reason naming the finding (form: <id> missing_evidence …), so it goes back to its reviewer through the existing retry path instead of being dropped silently by the adjudicator. A second malformed answer is accepted and that finding is dropped as before. Found by the P096 acceptance run, where a true blocker was dropped for a bracketed note after a citation."
+    recovery: "aid-review-round.sh retry --role <role>, re-dispatch the same prompt with the reason quoted, collect again."
+    test: "scripts/tests/bats/test-review-round.bats (grep: 'breaks the form')"

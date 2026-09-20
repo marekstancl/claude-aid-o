@@ -362,6 +362,21 @@ _bracket() {
   echo tiny >> "$R/src/app.py"; git -C "$R" commit -qam tiny; _sc
   run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"verdict is skip"* ]]
 }
+@test "step: an answer whose finding breaks the form goes back to its reviewer once; the second time the finding is dropped as before" {
+  _repo; printf 'def f():\n    return 1\n' >> "$R/src/app.py"; git -C "$R" commit -qam more; _sc
+  _S prepare --round 1 >/dev/null
+  local note='.findings[0].evidence = "src/app.py:1 (the line that matters)"'
+  _sanswer 1 step_generalist "$note"
+  run _S collect --round 1
+  [[ "$(jq -r '.invalid[0].reason' "$(D 1)/collect.json")" == "form: "*"missing_evidence"*"asked once" ]]
+  [ -e "$(D 1)/reviewer-step_generalist.form-asked" ]
+  _S retry --round 1 --role step_generalist >/dev/null
+  _sanswer 1 step_generalist "$note"                       # the same malformed answer again
+  run _S collect --round 1; [ "$status" -eq 0 ]
+  [ "$(jq -r '.valid | index("step_generalist") != null' "$(D 1)/collect.json")" = true ]
+  [ "$(jq -r '.[0].reason' "$(D 1)/rejected.json")" = missing_evidence ]
+}
+
 @test "step: collect needs every expected role; close is bound to HEAD, to a token value and to a dispatch bracket; verdict fail with an open major" {
   _repo; printf 'import subprocess\nsubprocess.run(x, shell=True)\n' >> "$R/src/app.py"; git -C "$R" commit -qam sec; _sc
   _S prepare --round 1 >/dev/null

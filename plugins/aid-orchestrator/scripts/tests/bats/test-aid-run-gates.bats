@@ -1745,3 +1745,12 @@ YAML
   run jq -re '.gates.echo_plugin_path.output' "$report"
   [ "$output" == "unknown_placeholder" ]
 }
+
+@test "a gate that exits 0 over nothing is a vacuous pass, refused; a count of zero ERRORS is a result" {
+  _g() { bash -c "source '$AID_PLUGIN_PATH/scripts/aid-run-gates.sh' >/dev/null 2>&1; set +e; run_gate g \"echo '$1'\" 5"; }
+  [ "$(_g 'Success: no issues found in 0 source files' | jq -r '.result + ":" + .reason')" = "fail:vacuous_pass" ]
+  [ "$(_g 'collected 0 items' | jq -r .result)" = "fail" ]
+  [ "$(_g '1..0' | jq -r .result)" = "fail" ]
+  [ "$(_g '0 errors, 12 files checked' | jq -r '.result + ":" + (.reason // "")')" = "pass:" ]
+  [ "$(_g '20 files checked, 0 files skipped' | jq -r .result)" = "pass" ]
+}

@@ -69,6 +69,7 @@ PROTOCOL_VALIDATE="${SCRIPT_DIR}/aid-protocol-validate.sh"
 source "${SCRIPT_DIR}/lib/aid-obligations.sh"
 # shellcheck source=lib/aid-review-summary.sh
 source "${SCRIPT_DIR}/lib/aid-review-summary.sh"
+source "${SCRIPT_DIR}/lib/aid-review-config.sh"    # aid_review_switched_off
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-permissions.sh"   # the ONE autonomous_mode reader
 
@@ -346,17 +347,8 @@ compute_final_review() {
   local cp=cp7 toggle=cp7_plan_final_review
   [[ "$MODE" == "plan" ]] || { cp=cp3; toggle=cp3_integration_review; }
   local index="${EVIDENCE_DIR}/${cp}/rounds.json" artifact="${cp}/rounds.json"
-  # The two switches, resolved as fsm_check_review_round resolves them: per
-  # switch, the first file that sets it (project first) decides.
-  local rel=".aid-o/config/policies/review-checkpoints.yaml" policy flag read value="" at_base
-  for flag in enabled "$toggle"; do
-    for policy in "${PROJECT_ROOT}/${rel}" "${PLUGIN_ROOT}/defaults/policies/review-checkpoints.yaml"; do
-      [[ -f "$policy" ]] || continue
-      read="$(yq -r ".review_checkpoints.${flag}" "$policy" 2>/dev/null)"
-      [[ "$read" == true || "$read" == false ]] && break
-    done
-    [[ "$read" == false ]] && { value=false; break; }
-  done
+  local rel=".aid-o/config/policies/review-checkpoints.yaml" policy="" value="" at_base
+  policy="$(aid_review_switched_off "$PROJECT_ROOT" "$toggle")" && { value=false; policy="${policy#*$'\t'}"; }
   if [[ "$value" == false && "$MODE" == "plan" && -n "${PLAN_BASE_SHA:-}" ]] \
      && at_base="$(git -C "$PROJECT_ROOT" show "${PLAN_BASE_SHA}:${rel}" 2>/dev/null)" \
      && [[ "$(yq -r ".review_checkpoints.enabled != false and .review_checkpoints.${toggle} != false" <<< "$at_base" 2>/dev/null)" == true ]]; then

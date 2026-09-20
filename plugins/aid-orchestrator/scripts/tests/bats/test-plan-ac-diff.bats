@@ -62,6 +62,27 @@ EOF
   [ "$absent" -eq 0 ]
 }
 
+@test "one criterion checked, one prose criterion skipped → partial, never pass (ACTA P024)" {
+  echo "test content" > "${TMPDIR_TEST}/foo.ts"
+  cat > "${PLANS_DIR}/P-TEST.md" <<'EOF'
+## Acceptance Criteria
+
+- [ ] AC1: foo file exists
+  ```yaml
+  verification_pattern:
+    type: must_contain
+    file: "foo.ts"
+    regex: "test content"
+  ```
+- [ ] AC2: coverage holds after two nightly windows (measured on live data)
+EOF
+  run bash "$AID_DIFF_SCRIPT" --plan "${PLANS_DIR}/P-TEST.md" --evidence-dir "$EVIDENCE_DIR" --base-commit "$BASE_COMMIT"
+  [ "$status" -eq 0 ]                                  # nothing absent: the gate does not fail
+  [ "$(jq -r '.overall_verdict' "$EVIDENCE_DIR/plan-diff.json")" = "partial" ]
+  [ "$(jq -r '.summary.skipped_count' "$EVIDENCE_DIR/plan-diff.json")" = "1" ]
+  [ "$(jq -r '.ac_count' "$EVIDENCE_DIR/plan-diff.json")" = "$(jq -r '.results | length' "$EVIDENCE_DIR/plan-diff.json")" ]
+}
+
 @test "one AC absent: must_not_exist file actually exists → exit 1 + verdict fail" {
   mkdir -p "${TMPDIR_TEST}/ui/src/lib"
   echo "stale" > "${TMPDIR_TEST}/ui/src/lib/unifyExtractedSources.ts"

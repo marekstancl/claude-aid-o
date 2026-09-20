@@ -332,9 +332,18 @@ else
   results_json=$(printf '%s\n' "${ac_result_lines[@]}" | jq -sc '.')
 fi
 
+# `pass` means EVERY criterion was checked and found. A skipped criterion (prose,
+# or a pattern that produced no result) makes the run `partial`, however many
+# others passed: ACTA P024 read `pass` with 4 of 9 criteria never looked at. A
+# criterion with no result row at all is a broken run, never a pass.
 overall="pass"
+[[ "$skipped_count" -gt 0 ]] && overall="partial"
+missing_rows=$(( ac_count - ${#ac_result_lines[@]} ))
+if (( missing_rows > 0 )); then
+  echo "ERROR: aid-plan-diff: ${missing_rows} of ${ac_count} acceptance criteria produced no result row" >&2
+  absent_count=$(( absent_count + missing_rows ))
+fi
 [[ "$absent_count" -gt 0 ]] && overall="fail"
-[[ "$overall" == "pass" && "$skipped_count" -gt 0 && "$present_count" -eq 0 ]] && overall="partial"
 
 jq -n \
   --arg gb "aid-plan-diff.sh@${PLUGIN_VERSION}" \

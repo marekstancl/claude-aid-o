@@ -52,6 +52,7 @@ if [[ ! -f "${SCRIPT_DIR}/lib/aid-resume-artifact.sh" ]]; then
 fi
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-resume-artifact.sh"
+source "${SCRIPT_DIR}/lib/aid-review-config.sh"   # aid_review_switched_off
 PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # Controller plugin-cache staleness guard (P060 Step 5) — defines
@@ -1278,19 +1279,11 @@ fsm_check_review_round() {
   fi
 
   # The two switches, read where the PM sets them (project file first).
-  local flag file value
-  for flag in enabled "$toggle"; do
-    value=""
-    for file in "${AID_PROJECT_ROOT:-$tree_root}/.aid-o/config/policies/review-checkpoints.yaml" "${SCRIPT_DIR}/../defaults/policies/review-checkpoints.yaml"; do
-      [[ -f "$file" ]] || continue
-      value="$(yq -r ".review_checkpoints.${flag}" "$file" 2>/dev/null)"
-      [[ "$value" == true || "$value" == false ]] && break
-    done
-    if [[ "$value" == false ]]; then
-      fsm_emit_audit_log "review_checkpoint_disabled" --evidence-dir "$evidence_dir" --reason "${flag}: false" 2>/dev/null || true
-      return 0
-    fi
-  done
+  local off
+  if off="$(aid_review_switched_off "${AID_PROJECT_ROOT:-$tree_root}" "$toggle")"; then
+    fsm_emit_audit_log "review_checkpoint_disabled" --evidence-dir "$evidence_dir" --reason "${off%%$'\t'*}: false" 2>/dev/null || true
+    return 0
+  fi
 
   local how_to="run: bash \$AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint ${cp}${step:+ --step $step} --evidence-dir ${evidence_dir}; then, for a review verdict, aid-review-round.sh prepare/collect/close (commands/aid-run.md \"Step review (CP2) and EPIC review (CP3)\")"
   [[ "$cp" == cp7 ]] && how_to="run: plan-finalize --stage produce, then bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare|collect|close --checkpoint cp7 --evidence-dir ${evidence_dir} --round 1"
