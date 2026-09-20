@@ -235,8 +235,11 @@ aid_brainstorm_opponent_run() {
 
   # No codex is not a monologue any more: a claude agent answers the same brief.
   # The PM is told which provider answered and why, and is never asked to choose.
-  local probe _bo_root; _bo_root="$(aid_state_root 2>/dev/null)" || _bo_root="$PWD"
-  probe="$(AID_PROJECT_ROOT="$_bo_root" aid_codex_probe)"
+  # One resolution for both the probe's cache and the sandbox the dispatch runs
+  # in: they are the same project, and a second `aid_state_root` call a few
+  # lines down was the same answer with different stderr handling.
+  local root; root="$(aid_state_root 2>/dev/null)" || root="$PWD"
+  local probe; probe="$(AID_PROJECT_ROOT="$root" aid_codex_probe)"
   if [[ "$(jq -r '.available' <<< "$probe")" != true ]]; then
     local why; why="$(jq -r '.reason' <<< "$probe")"
     _aid_bo_prompt "$brief" > "${out_dir}/opponent-prompt.txt" \
@@ -256,7 +259,6 @@ aid_brainstorm_opponent_run() {
     return 4
   fi
 
-  local root; root="$(aid_state_root)" || root="$PWD"
   local tmp; tmp="$(mktemp -d)" || { echo "opponent: no temp dir" >&2; return 1; }
   _aid_bo_prompt "$brief" > "${tmp}/prompt.txt"
 

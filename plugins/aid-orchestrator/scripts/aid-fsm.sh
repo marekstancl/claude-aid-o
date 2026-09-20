@@ -6058,20 +6058,18 @@ cmd_set_field() {
   # Four fields are transition PRECONDITIONS: moving one moves what the FSM
   # will allow next, and until P095 it moved with no timeline line and no
   # stated reason, so an audit could not tell a repair from a bypass.
-  local timeline=""
+  local timeline; timeline=$(derive_timeline "$state_file") || true
   case "$field" in
     total_steps|current_step|plan_json_hash|base_commit)
       if (( ${#reason} < 20 )); then
         echo "ERROR: set-field ${field} moves a transition precondition — pass --reason \"<at least 20 characters>\" saying why" >&2
         exit 1
       fi
-      timeline=$(derive_timeline "$state_file") || true
       if [[ -z "$timeline" ]]; then
         echo "ERROR: set-field ${field}: ${state_file} names no epic_id/run_id, so the change could not be recorded anywhere — a reason with no record is refused" >&2
         exit 1
       fi
       ;;
-    *) timeline=$(derive_timeline "$state_file") || true ;;
   esac
   local old; old="$(yaml_field "$state_file" "$field")"
 

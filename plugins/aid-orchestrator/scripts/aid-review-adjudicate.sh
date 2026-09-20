@@ -211,8 +211,9 @@ _command_ok() {
     return 0
   fi
   if [[ "$cmd" == "bash -c "* ]]; then
-    [[ "$cmd" =~ ^bash\ -c\ \'([^\']*)\'[[:space:]]*$ ]] && _inline_body_ok "${BASH_REMATCH[1]}" \
-      || { printf command_not_read_only; return 1; }
+    if ! [[ "$cmd" =~ ^bash\ -c\ \'([^\']*)\'[[:space:]]*$ ]] || ! _inline_body_ok "${BASH_REMATCH[1]}"; then
+      printf command_not_read_only; return 1
+    fi
   fi
   return 0
 }

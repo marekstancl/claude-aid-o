@@ -1114,6 +1114,9 @@ _looks_at_capacity() {
 # /usr/bin/codex 0.154.0) and `command -v` picks the older.
 aid_codex_binary() {
   local d bin first="" best="" best_v="" v
+  # local: this file is SOURCED, and an array left behind in the caller's shell
+  # is the kind of thing that only breaks two functions later.
+  local -a _acb_dirs=()
   # An explicit choice beats every rule: a wrapper, a pinned install, or a test
   # shim that must win whatever version it claims.
   if [[ -n "${AID_CODEX_BIN:-}" && -x "${AID_CODEX_BIN}" ]]; then
