@@ -28,6 +28,10 @@ TTL_GUARD="${SCRIPT_DIR}/aid-registry-ttl-guard.sh"
 # AID_PROJECT_ROOT to itself, where the evidence pack has never been.
 # shellcheck source=lib/aid-roots.sh
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
+# shellcheck source=lib/aid-ancillary.sh
+source "${SCRIPT_DIR}/lib/aid-ancillary.sh"
+# shellcheck source=lib/aid-plan-manifest.sh
+source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"
 
 # ---------------------------------------------------------------------------
 # Check result variables (populated by run_* functions)
@@ -214,28 +218,55 @@ resolve_root() {
 # Check 1: git_clean
 # ---------------------------------------------------------------------------
 run_git_clean_check() {
-  local git_output
+  local git_output state_root
   # Tracked files only. The runtime writes untracked directories into the tree
   # it runs in (.aid-o/work, .aid-worktrees), and a check that calls those dirt
   # can never pass under plan_branch. The invariant C4 needs is "nothing the
   # candidate would carry differs", which is exactly the tracked set.
-  git_output=$(git -C "$TREE" status --porcelain --untracked-files=no 2>&1)
-  local exit_code=$?
-
-  if [[ $exit_code -ne 0 ]]; then
+  if ! git_output=$(git -C "$TREE" status --porcelain --untracked-files=no 2>&1); then
     CHECK_git_clean_STATUS="unverifiable"
     CHECK_git_clean_DETAIL="git status failed in ${TREE} (not a git repo or git unavailable)"
     CHECK_git_clean_EVIDENCE="$git_output"
     return
   fi
 
-  if [[ -z "$git_output" ]]; then
+  # One definition of "clean" for the whole boundary: what the plan-final policy
+  # calls ancillary (AID's own bookkeeping, e.g. the id counter) is not dirt.
+  # The policy comes from the state root, the tree judged is $TREE.
+  state_root="$(aid_state_root 2>/dev/null)" || state_root="$ROOT"
+  local load_err
+  if ! load_err="$(aid_ancillary_load "$state_root" 2>&1)"; then
+    CHECK_git_clean_STATUS="fail"
+    CHECK_git_clean_DETAIL="the project's plan-final policy is refused"
+    CHECK_git_clean_EVIDENCE="$load_err"
+    return
+  fi
+  local dirty filtered="" line protected_json="[]"
+  dirty="$(aid_ancillary_filter_porcelain --mode policy --project-root "$state_root" <<<"$git_output")"
+  # Protected wins: a delivery path of the plan is dirt whatever glob matched it.
+  if [[ "$EPIC_ID" =~ ^P[0-9]+$ ]]; then
+    protected_json="$(plan_manifest_get "$EPIC_ID" '.plan_boundary_manifest.protected_paths' 2>/dev/null)" || protected_json="[]"
+  fi
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    grep -qxF -- "$line" <<<"$dirty" && continue
+    if aid_ancillary_path_protected "${line:3}" "$protected_json"; then
+      dirty+="${dirty:+$'\n'}${line}"
+    else
+      filtered+="${filtered:+, }${line:3}"
+    fi
+  done <<<"$git_output"
+
+  local policy_note="policy ${_AID_ANCILLARY_POLICY_FILE:-<legacy fallback>}"
+  [[ "$_AID_ANCILLARY_POLICY_FILE" == "${state_root}/.aid-o/"* ]] && policy_note+=" (project override)"
+  if [[ -z "$dirty" ]]; then
     CHECK_git_clean_STATUS="pass"
-    CHECK_git_clean_DETAIL="working tree ${TREE} is clean (tree from ${TREE_SOURCE})"
+    CHECK_git_clean_DETAIL="working tree ${TREE} is clean (tree from ${TREE_SOURCE}; ${policy_note})"
+    CHECK_git_clean_EVIDENCE="${filtered:+ancillary, not counted: ${filtered}}"
   else
     CHECK_git_clean_STATUS="fail"
-    CHECK_git_clean_DETAIL="working tree ${TREE} has uncommitted changes (tree from ${TREE_SOURCE})"
-    CHECK_git_clean_EVIDENCE="$git_output"
+    CHECK_git_clean_DETAIL="working tree ${TREE} has uncommitted changes (tree from ${TREE_SOURCE}; ${policy_note})"
+    CHECK_git_clean_EVIDENCE="${dirty}${filtered:+$'\n'ancillary, not counted: ${filtered}}"
   fi
 }
 

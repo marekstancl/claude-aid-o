@@ -48,6 +48,9 @@ plan_final:
     # project removes them here, because losing the queue.yaml exception alone
     # would deadlock routine operation.
     - ".aid-o/config/queue.yaml"
+    # AID rewrites the id counter on every plan, EPIC and run allocation, so a
+    # tracked counter.yaml is dirty in any tree AID has worked in.
+    - ".aid-o/config/counter.yaml"
     - ".aid-o/work/audit-log.jsonl"
     - ".aid-o/metrics/gate-runtime-baselines.yaml"
     - ".aid-o/metrics/gate-runtime-baselines.yaml.lock"

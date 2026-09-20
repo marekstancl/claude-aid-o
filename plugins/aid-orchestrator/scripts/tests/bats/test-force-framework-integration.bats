@@ -253,11 +253,11 @@ _head() { ( cd "$ROOT" && git rev-parse HEAD ); }
   # And the classifier must see three DISTINCT entries, not one glued token.
   local prot
   prot="$(jq -c '[.steps[]?.allowed_paths[]?]' "$ROOT/$ev/plan.json")"
-  run _p "_pfsm_path_is_protected 'docs/release-notes.md' '$prot'"
+  run _p "aid_ancillary_path_protected 'docs/release-notes.md' '$prot'"
   [ "$status" -eq 0 ]
-  run _p "_pfsm_path_is_protected 'src/app.sh' '$prot'"
+  run _p "aid_ancillary_path_protected 'src/app.sh' '$prot'"
   [ "$status" -eq 0 ]
-  run _p "_pfsm_path_is_protected 'src/app.shdocs/release-notes.md' '$prot'"
+  run _p "aid_ancillary_path_protected 'src/app.shdocs/release-notes.md' '$prot'"
   [ "$status" -ne 0 ]
 }
 

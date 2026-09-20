@@ -102,3 +102,52 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 1 ]
   [ -z "$(find "$CLEAN" "$TMP" -name verification-report.json -newer "$marker" 2>/dev/null)" ]
 }
+
+# ── ancillary-filtered cleanliness (one definition of "clean" for the boundary) ──
+
+# _track_counter <repo> — a tracked, then modified, .aid-o/config/counter.yaml
+_track_counter() {
+  mkdir -p "$1/.aid-o/config"; printf 'plan: 1\n' > "$1/.aid-o/config/counter.yaml"
+  git -C "$1" add -f .aid-o/config/counter.yaml; git -C "$1" commit -q -m counter
+  printf 'plan: 2\n' > "$1/.aid-o/config/counter.yaml"
+}
+# _git_clean <repo> <field> — run the verifier on <repo> with a pack, print one field of the git_clean check
+_git_clean() {
+  _pack "$1" P902 run-1 "$(git -C "$1" rev-parse HEAD)"
+  env AID_PROJECT_ROOT="$1" bash "$TOOL" P902 run-1 --tree "$1" --out "$TMP/clean.json" >/dev/null 2>&1 || true
+  jq -r --arg f "$2" '.. | objects | select(.id? == "git_clean") | .[$f]' "$TMP/clean.json"
+}
+
+@test "a modified counter.yaml and an untracked runtime directory are not dirt, in the verifier and in the plan FSM's strict list" {
+  _track_counter "$CLEAN"; mkdir -p "$CLEAN/.aid-o/work/run"; : > "$CLEAN/.aid-o/work/run/x.json"
+  [ "$(_git_clean "$CLEAN" status)" = pass ]
+  [[ "$(_git_clean "$CLEAN" evidence)" == *"counter.yaml"* ]]      # the report says what it did not count
+  # the list behind _pfsm_check_clean_worktree and the drift detector's fallback
+  run bash -c "source '$PLUGIN_ROOT/scripts/lib/aid-ancillary.sh'; git -C '$CLEAN' status --porcelain --untracked-files=no | aid_ancillary_filter_porcelain --mode legacy5"
+  [ "$status" -eq 0 ]; [ -z "$output" ]
+}
+
+@test "a modified tracked source file still fails beside an ancillary one" {
+  _track_counter "$DIRTY"
+  [ "$(_git_clean "$DIRTY" status)" = fail ]
+  [[ "$(_git_clean "$DIRTY" evidence)" == *"tracked.txt"* ]]
+}
+
+@test "a project policy that lists a delivery path as ancillary is refused naming the entry" {
+  mkdir -p "$DIRTY/.aid-o/config/policies"
+  printf 'plan_final:\n  ancillary_paths:\n    - ".aid-o/work/**"\n    - "tracked.txt"\n' > "$DIRTY/.aid-o/config/policies/plan-final-policy.yaml"
+  [ "$(_git_clean "$DIRTY" status)" = fail ]
+  [[ "$(_git_clean "$DIRTY" detail)" == *"policy is refused"* ]]
+  [[ "$(_git_clean "$DIRTY" evidence)" == *"'tracked.txt'"* ]]
+}
+
+@test "a protected path of the plan is dirt even when an ancillary glob matches it" {
+  mkdir -p "$CLEAN/.aid-o/work/plan-state/P902" "$CLEAN/.aid-o/work/notes"
+  printf 'v1\n' > "$CLEAN/.aid-o/work/notes/handover.md"
+  git -C "$CLEAN" add -f .aid-o/work/notes/handover.md; git -C "$CLEAN" commit -q -m notes
+  printf 'v2\n' > "$CLEAN/.aid-o/work/notes/handover.md"
+  [ "$(_git_clean "$CLEAN" status)" = pass ]                        # ancillary while nothing protects it
+  jq -n '{plan_boundary_manifest: {protected_paths: [".aid-o/work/notes/handover.md"]}}' \
+    > "$CLEAN/.aid-o/work/plan-state/P902/plan-boundary-manifest.json"
+  [ "$(_git_clean "$CLEAN" status)" = fail ]
+}

@@ -193,6 +193,20 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
   [ "$(_rd '.release_decision.pm_brief_status')" == "pending" ]
 }
 
+@test "healthy fixture with AID's own tracked counter.yaml modified → verification_report pass, no blocker" {
+  unset AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB
+  _build_healthy
+  # A project that tracks its counter: AID rewrote it during the run. amend keeps HEAD_SHA's artifacts honest.
+  echo "plan: 1" > "$CFG/counter.yaml"; git -C "$PROJ" add -f .aid-o/config/counter.yaml
+  git -C "$PROJ" commit -q --amend --no-edit; HEAD_SHA="$(git -C "$PROJ" rev-parse HEAD)"
+  local f; for f in "$EVID"/review-profile.json "$EVID"/delivery-gate.json "$EVID"/semantic-review-final.json "$EVID"/acceptance-evidence.json; do _rewrite_head "$f" "$HEAD_SHA"; done
+  jq --arg h "$HEAD_SHA" '.target_head = $h' "$AUTH" > "$AUTH.t" && mv "$AUTH.t" "$AUTH"
+  echo "plan: 2" > "$CFG/counter.yaml"
+  _run_agg
+  [ "$(_input_verdict verification_report)" == "pass" ]
+  ! _has_blocker verification_report
+}
+
 @test "healthy output validates against the Step-3 release_decision schema (exit 0)" {
   _build_healthy
   _run_agg

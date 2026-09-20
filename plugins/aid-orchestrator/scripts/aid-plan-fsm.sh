@@ -5453,7 +5453,7 @@ _pfsm_equivalence_classify() {
 
   while IFS= read -r -d '' path; do
     [[ -n "$path" ]] || continue
-    if _pfsm_path_is_protected "$path" "$prot_json"; then
+    if aid_ancillary_path_protected "$path" "$prot_json"; then
       printf 'PROTECTED  %s\n' "$path"
     elif aid_ancillary_match "$path" "$root"; then
       printf 'ancillary  %s\n' "$path"
@@ -5463,21 +5463,6 @@ _pfsm_equivalence_classify() {
   done < "$raw_f"
   rm -f "$raw_f"
   return 0
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_path_is_protected <path> <protected_json>
-#   Uses the SAME matcher as the ancillary classifier so protected-set matching
-#   and scope checking can never diverge on the same entry, with the
-#   permissive directory-prefix semantics the pre-commit hook uses.
-# ---------------------------------------------------------------------------
-_pfsm_path_is_protected() {
-  local path="$1" prot_json="$2" entry
-  while IFS= read -r entry; do
-    [[ -n "$entry" ]] || continue
-    _aid_ancillary_glob_match "$path" "$entry" && return 0
-  done < <(jq -r '.[]? // empty' <<<"$prot_json" 2>/dev/null)
-  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -5586,7 +5571,7 @@ plan_final_review_equivalent() {
     [[ -n "$entry" ]] || continue
     xy="${entry:0:2}"
     wpath="${entry:3}"
-    if _pfsm_path_is_protected "$wpath" "$prot_json"; then
+    if aid_ancillary_path_protected "$wpath" "$prot_json"; then
       dirty+="  PROTECTED  ${xy} ${wpath}"$'\n'
     elif ! aid_ancillary_match "$wpath" "$root"; then
       dirty+="  DELIVERY   ${xy} ${wpath}"$'\n'
@@ -5595,7 +5580,7 @@ plan_final_review_equivalent() {
       local orig=""
       IFS= read -r -d '' orig || true
       if [[ -n "$orig" ]]; then
-        if _pfsm_path_is_protected "$orig" "$prot_json"; then
+        if aid_ancillary_path_protected "$orig" "$prot_json"; then
           dirty+="  PROTECTED  ${xy} ${orig} (renamed from)"$'\n'
         elif ! aid_ancillary_match "$orig" "$root"; then
           dirty+="  DELIVERY   ${xy} ${orig} (renamed from)"$'\n'
@@ -5901,7 +5886,7 @@ _pfsm_review_candidate_drift() {
       [[ -n "$entry" ]] || continue
       xy="${entry:0:2}"
       wpath="${entry:3}"
-      if _pfsm_path_is_protected "$wpath" "$prot_json"; then
+      if aid_ancillary_path_protected "$wpath" "$prot_json"; then
         dirty+="PROTECTED ${xy} ${wpath}"$'\n'
       elif ! aid_ancillary_match "$wpath" "$root"; then
         dirty+="${xy} ${wpath}"$'\n'
@@ -5915,7 +5900,7 @@ _pfsm_review_candidate_drift() {
         orig=""
         IFS= read -r -d '' orig || true
         if [[ -n "$orig" ]]; then
-          if _pfsm_path_is_protected "$orig" "$prot_json"; then
+          if aid_ancillary_path_protected "$orig" "$prot_json"; then
             dirty+="PROTECTED ${xy} ${orig}"$'\n'
           elif ! aid_ancillary_match "$orig" "$root"; then
             dirty+="${xy} ${orig}"$'\n'

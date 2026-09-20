@@ -26,11 +26,13 @@
 [[ -n "${_AID_ANCILLARY_LOADED:-}" ]] && return 0
 _AID_ANCILLARY_LOADED=1
 
-# The five legacy runtime paths, in the order the original regexes had them.
-# `legacy5` is aid-plan-fsm.sh's and aid-release.sh's set; `legacy4` is
-# aid-fsm.sh's, which predates the `plan-state/` entry.
+# The legacy runtime paths, in the order the original regexes had them.
+# `legacy5` is aid-plan-fsm.sh's and aid-release.sh's set (the original five
+# plus counter.yaml, which AID itself rewrites on every id allocation);
+# `legacy4` is aid-fsm.sh's, which predates the `plan-state/` entry.
 _AID_ANCILLARY_LEGACY5=(
   ".aid-o/config/queue.yaml"
+  ".aid-o/config/counter.yaml"
   ".aid-o/work/audit-log.jsonl"
   ".aid-o/metrics/gate-runtime-baselines.yaml"
   ".aid-o/metrics/gate-runtime-baselines.yaml.lock"
@@ -53,7 +55,8 @@ _AID_ANCILLARY_POLICY_FILE=""
 # aid_ancillary_load <project_root>
 #   Reads the project policy at .aid-o/config/policies/plan-final-policy.yaml
 #   when present, else the shipped default. Caches per root so porcelain
-#   filtering stays one pass. Fails closed to the five legacy paths.
+#   filtering stays one pass. Fails closed to the legacy paths; returns 2 (after
+#   the same fallback) when a project policy tries to widen the set.
 # ---------------------------------------------------------------------------
 aid_ancillary_load() {
   local root="${1:-.}"
@@ -77,9 +80,17 @@ aid_ancillary_load() {
     return 0
   fi
 
-  local line
+  # A project policy may drop entries or name more of AID's own workspace; it
+  # may not declare its delivery paths ancillary.
+  local line shipped_list=""
+  [[ "$file" == "$project" && -r "$shipped" ]] && shipped_list="$(yq -r '.plan_final.ancillary_paths[]?' "$shipped" 2>/dev/null)"
   while IFS= read -r line; do
     [[ -n "$line" && "$line" != "null" ]] || continue
+    if [[ "$file" == "$project" && "$line" != .aid-o/* ]] && ! grep -qxF -- "$line" <<<"$shipped_list"; then
+      _aid_ancillary_fallback "${project} lists '${line}' under plan_final.ancillary_paths; a project may only name paths under .aid-o/ or entries of the shipped default, delivery paths are never ancillary"
+      _AID_ANCILLARY_LOADED_ROOT="$root"
+      return 2
+    fi
     _AID_ANCILLARY_PATTERNS+=("$line")
   done < <(yq -r '.plan_final.ancillary_paths[]?' "$file" 2>/dev/null)
 
@@ -93,7 +104,7 @@ aid_ancillary_load() {
 _aid_ancillary_fallback() {
   _AID_ANCILLARY_PATTERNS=("${_AID_ANCILLARY_LEGACY5[@]}")
   if [[ "$_AID_ANCILLARY_WARNED" -eq 0 ]]; then
-    echo "WARNING: ${1} — falling back to the five legacy runtime paths. The ancillary filter is never widened on a read error." >&2
+    echo "WARNING: ${1} — falling back to the legacy runtime paths. The ancillary filter is never widened on a read error." >&2
     _AID_ANCILLARY_WARNED=1
   fi
 }
@@ -156,6 +167,21 @@ aid_ancillary_match() {
   for p in "${_AID_ANCILLARY_PATTERNS[@]}"; do
     _aid_ancillary_glob_match "$path" "$p" && return 0
   done
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# aid_ancillary_path_protected <path> <protected_json>
+#   0 when <path> is named by the JSON array of protected entries (a plan's
+#   delivery paths). Same matcher as the ancillary globs, so the two sets can
+#   never disagree about one entry; protected always wins over ancillary.
+# ---------------------------------------------------------------------------
+aid_ancillary_path_protected() {
+  local path="$1" prot_json="$2" entry
+  while IFS= read -r entry; do
+    [[ -n "$entry" ]] || continue
+    _aid_ancillary_glob_match "$path" "$entry" && return 0
+  done < <(jq -r '.[]? // empty' <<<"$prot_json" 2>/dev/null)
   return 1
 }
 
