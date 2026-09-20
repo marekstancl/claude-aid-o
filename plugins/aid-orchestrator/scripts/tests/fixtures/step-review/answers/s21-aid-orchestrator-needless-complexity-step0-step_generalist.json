@@ -7,10 +7,10 @@
       "checkpoint": "cp2",
       "step": 0,
       "severity": "major",
-      "claim": "question 7: _strip_dir re-implements basename character by character and _name_of is a wrapper with one use; the step needs one line",
-      "command": "grep -n \"_strip_dir\\|_name_of\" plugins/aid-orchestrator/scripts/lib/aid-report-names.sh",
+      "claim": "_strip_dir hand-rolls a character-by-character loop to strip the directory component instead of using the shell's own basename mechanism (basename or ${path##*/}), for no behaviour the standard form lacks.",
+      "command": "sed -n '6,14p' plugins/aid-orchestrator/scripts/lib/aid-report-names.sh",
       "evidence": "plugins/aid-orchestrator/scripts/lib/aid-report-names.sh:6-14",
-      "fix": "delete _strip_dir and _name_of; aid_report_names is `local f; for f in \"$@\"; do basename -- \"$f\"; done`"
+      "fix": "Replace _strip_dir/_name_of (9 lines) with a single expansion, e.g. printf '%s\\n' \"${f##*/}\" inside aid_report_names, or call basename; delete the two helper functions."
     }
   ]
 }

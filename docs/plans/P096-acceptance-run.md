@@ -71,3 +71,42 @@ otevřené jako položka backlogu.
 Zahození nálezu jen kvůli formě je na konci plánu drahé (blokující věc zmizí
 s poznámkou „1 zamítnutý"). Jednorázové vrácení revizorovi k přepsání je změna
 všech úrovní revizí, mimo tento plán - položka backlogu.
+
+## Ukázka zbytečné složitosti (ostré čtení, strop 1 USD)
+Revizor kroku (Sonnet, 70 tis. tokenů, 33 s) nastraženou věc našel: ruční smyčka
+po znacích místo `basename`. Nahlásil ji jako závažnou podle otázky 7 a jinak
+nic. Jeho skutečná odpověď nahradila ve fixtuře ručně psanou.
+
+## Testbed (proti tomuto pracovnímu stromu)
+`bin/verify.sh --plugin <strom>`: 37 prošlo, 0 selhalo. Nově sedm kontrol
+uzavření plánu: zdravý plán projde; odmítá se otevřený blokující nález, červená
+brána, nevypořádaný závazek, **odpověď revizora bez záznamu o spuštění, ručně
+přepsané rozhodnutí a kandidát posunutý po revizi** (tři podvrhy z plánu).
+Testbed pouští případy z `test-plan-final-decide.bats` nainstalovaného pluginu,
+vlastní kopii fixtur nemá.
+
+## Přehrání času (deset zaznamenaných běhů)
+**Není to přehrání od začátku do konce**, a říkám to předem: brány WAN a ACTA
+(pytest, databáze) se v odloženém klonu pustit nedají. Čas nového pokusu je
+proto složený ze tří změřených částí: skutečná doba bran z daného běhu + režie
+nových kroků bez modelů (68 s, třikrát měřeno, včetně stavby fixtury) +
+nejpomalejší revizor kola z dnešního ostrého čtení (role běží souběžně).
+
+| Běh | Brány | Starý pokus celkem | Nový pokus (složeno) |
+|---|---|---|---|
+| WAN P101 pokusy 7-11 | 3,6-3,9 min | 6,3 / 12,7 / 17,4 / 22,4 / 43,5 min | 8,5-8,8 min |
+| ACTA P024 pokusy 1-3 | 4,6-4,9 min | 8,7 / 28,2 / 57,1 min | 7,9-8,2 min |
+| ACTA P021 pokus 1 | 4,6 min | 96,5 min | 7,9 min |
+| ACTA P020 pokus 5 | 17,5 min | 36,4 min | 20,8 min |
+
+Medián nového pokusu: **WAN 8,7 min proti 10,7, ACTA 8,2 min proti 22,6.**
+Kritérium (pod základem u obou projektů) splněno, u WAN těsně. Hlavní úspora
+není v minutách na pokus, ale v počtu pokusů: oprava dokumentace už neplatí
+brány ani dvě ze tří rolí znovu. To se ukáže až na živých plánech
+(`P096-live-follow-up.md`).
+
+## Cena a doporučení
+Zhruba 10 USD na šest nálezů potvrzených revizorem, tedy kolem 1,7 USD za nález.
+**Doporučení: pokračovat částí 2 (mazání).** Pravidlo splněno 7 z 8, nové čtení
+navíc našlo věci, které auditor neviděl, a obě slabiny (S8, zahazování na formu)
+jsou zapsané jako backlog, ne zametené.

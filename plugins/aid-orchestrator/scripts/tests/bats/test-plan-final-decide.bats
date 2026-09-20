@@ -249,6 +249,36 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ ! -e "$(_run_dir)/release-decision.json" ]
 }
 
+@test "forgery: a reviewer file with no dispatch bracket closes no round" {
+  _project
+  _stage freeze; _stage gates; _stage produce; [ "$status" -eq 0 ]
+  local args=(--checkpoint cp7 --evidence-dir "$(_run_dir)" --project-root "$R" --round 1) d role
+  "$ROUND" prepare "${args[@]}" >/dev/null; d="$(_run_dir)/cp7/round-1"
+  for role in $(jq -r '.reviewers_expected[]' "$d/round.json"); do
+    jq -n --arg r "$role" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "forged"}' > "$d/reviewer-$role.json"
+  done
+  "$ROUND" collect "${args[@]}" >/dev/null
+  run "$ROUND" close "${args[@]}" --tokens final_criteria=1 final_claims=1 final_generalist=1
+  [ "$status" -ne 0 ]; [[ "$output" == *dispatch* ]]
+  _stage decide; [ "$status" -eq 1 ]                          # no closed round, nothing decided
+}
+
+@test "forgery: a decision rewritten by hand does not merge" {
+  _project
+  _close_up_to_decide; _stage decide; [ "$status" -eq 0 ]
+  local dec; dec="$(_run_dir)/release-decision.json"
+  jq '.release_decision.blockers = []' "$dec" > "$dec.t" && mv "$dec.t" "$dec"
+  run bash "$FSM" plan-merge-to-main "$PLAN_ID" --decision "$dec" --project-root "$R"
+  [ "$status" -ne 0 ]; [[ "$output" == *release-decision.json* ]]
+}
+
+@test "forgery: a candidate moved after the review is not decided" {
+  _project
+  _close_up_to_decide
+  echo 'print("moved")' > "$R/app.py"; git -C "$R" commit -qam "a change after the review"
+  _stage decide; [ "$status" -eq 6 ]; [[ "$output" == *"--stage freeze"* ]]
+}
+
 # ── the former stage names ───────────────────────────────────────────────────
 @test "sync, inputs, review, c4, summary and accept-ancillary exit 2 naming what replaced them" {
   _project
