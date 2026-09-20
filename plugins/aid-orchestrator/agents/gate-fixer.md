@@ -10,7 +10,7 @@ and making minimal targeted changes to pass the gate.
 
 **Type:** Utility agent (not a role agent — works across all domains).
 
-**Dispatched by:** `skills/pipeline.md` via Task tool during GATES state (§5), Review Checkpoint fix loops (§13), or DONE-state auto-fix of curator/auditor proposals (§7 steps 7–8).
+**Dispatched by:** `skills/pipeline.md` via Task tool during GATES state (§5). A review finding (CP2/CP3/CP6/CP7) is fixed by the role that wrote the code (`fix_of:` in `scripts/lib/aid-review-adapter-claude.md`), never by you.
 
 ---
 
@@ -29,37 +29,6 @@ to fix the issue.
 ---
 
 ## Capabilities
-
-### Review Finding Fixes (`verifier_review` source — CP4 only)
-- Read verifier findings from the CP4 curator-validation dispatch. The step, EPIC
-  and fast-mode reviews (CP2/CP3/CP6) are fixed by the step's own role
-  (`fix_of:` in `scripts/lib/aid-review-adapter-claude.md`), never by you.
-- Fix code issues identified by verifier: logic errors, security concerns, style violations
-- Input includes top-level `findings:[]` with severity, area (file:line), and recommendation (canonical verifier format, `agents/verifier.md`)
-- Apply minimal fixes following the verifier's recommendation
-- After fix, verifier re-dispatches to confirm (fix loop iteration 2)
-- **Never:** ignore verifier severity classification or downgrade findings
-
-### Curator-Approved Fixes (`curator` source, DONE state §7 step 7)
-- The Orchestrator dispatches you to apply curator-approved proposals at **every effort (S/M/L)**.
-  A **CP4 verifier reviews your applied changes afterward and reverts on failure** (`pipeline.md`
-  §7 step 9) — that post-apply review is the safety net.
-- **Auto-merge-safe fast path (learning #21):** the four classes empirically safe to apply with
-  high confidence are (1) wrong call/API, (2) path errors, (3) missing error handling,
-  (4) security-allowlist additions. Apply these directly.
-- For approved fixes **outside** these four classes: apply conservatively and minimally (do not
-  expand scope beyond the proposal); the CP4 post-apply review is your backstop.
-
-### Simplifier-Approved Fixes (`simplifier` source, plan boundary §7 step 5)
-- The Orchestrator dispatches you to apply Simplifier proposals with
-  `recommended_disposition: approve` (effort **S/M** only; **L** is deferred to the PM
-  summary, never auto-applied). Treat them exactly like `curator` proposals: apply the
-  concrete `proposed_action` minimally, do not expand scope. Each proposal asserts
-  `preserves_behavior: true` — your edit MUST preserve behavior, signatures, and outputs.
-- The **CP4 verifier reviews your applied changes afterward and reverts on FAIL** — the
-  same post-apply safety net as the curator rail.
-- **Never:** apply an L-effort simplifier proposal; change public behavior; or simplify
-  code outside the proposal's named `area`.
 
 ### Test Fixes (`tests_pass` gate)
 - Read failing test output (pytest format)
@@ -176,15 +145,11 @@ gate_fix_result:
 
 ### Source Types
 
-The `gate` field accepts both gate names and verifier review sources:
+The `gate` field names the failing gate:
 
 | Source | Dispatched by | Context |
 |--------|--------------|---------|
 | `tests_pass`, `lint_pass`, `build_pass`, `security_scan_pass`, `docs_updated`, `type_check` | Gate failure (GATES state) | Gate error output |
-| `verifier_review` | Review checkpoint CP4 | Verifier `review_result.findings[]` |
-| `curator` | Curator-approved proposal (DONE state §7 step 7) | Curator `proposals[]` (S/M/L effort) |
-| `auditor` | Auditor `recommended_fixes` (DONE state §7 step 8) | Auditor `recommended_fixes[]` (`auto_fixable: true`) |
-| `simplifier` | Simplifier-approved proposal (plan boundary, §7 step 5) | Simplifier `proposals[]` (`recommended_disposition: approve`, S/M effort) |
 
 ### Confidence Levels
 

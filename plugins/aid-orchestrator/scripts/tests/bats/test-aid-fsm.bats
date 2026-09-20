@@ -4,8 +4,7 @@
 # + EXECUTE→GATES gates_report._generated_by precondition (Step 3) +
 # grandfather behavior. P033 Step 9 adds CP2 verifier-output preconditions +
 # force_override --reason enforcement. 14 assertions total.
-# E-046-1_3 Step 6 adds: cross-plan E-→P gate (Step 1), _generated_at CP2/CP4
-# enforcement (Step 2), CP5 blocking_findings four-case matrix (Step 3).
+# E-046-1_3 Step 6 adds: cross-plan E-→P gate (Step 1).
 
 load test-helpers.bash
 
@@ -28,31 +27,7 @@ setup() {
 
 teardown() {
   unset GIT_DIR
-  unset C3_AUDIT_POLICY
   teardown_test_evidence_dir
-}
-
-# _pin_c3_blocking
-#   E-059-1_2 Step 1: the C3 independent-audit hook is enforcement-gated —
-#   c3-audit-policy.yaml ships `enforcement: observe` (staged wake), so by
-#   default the hook emits c3_gate_would_block telemetry and lets the transition
-#   through. Tests that assert the hook BLOCKS pin enforcement to `blocking` via
-#   the C3_AUDIT_POLICY seam (mirrors DELIVERY_GATE_POLICY). The per-profile
-#   c3_required risk-gate still reads the installed default policy.
-_pin_c3_blocking() {
-  local policy_file="$TEST_TMPDIR/c3-audit-policy-blocking.yaml"
-  cat > "$policy_file" <<'YAML'
-version: 1
-enforcement: blocking
-risk_profiles:
-  high:
-    c3_required: true
-    required_independence_level: cross_model
-  unverifiable:
-    c3_required: true
-    required_independence_level: cross_provider
-YAML
-  export C3_AUDIT_POLICY="$policy_file"
 }
 
 # ─── Step 2: PRE-FLIGHT branch enforcement (6 assertions) ────────────────
@@ -625,179 +600,6 @@ _p040_seed_increment_preconditions() {
   grep -q 'fsm_orphan_dispatch_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
 }
 
-# ─── P040 Step 3: CP4 curator-validation enforcement (5 assertions) ──────────
-
-# Helper: invoke fsm_check_cp4_curator_validation by sourcing aid-fsm.sh in a
-# subshell with epic_id/run_id/project_root in scope (needed by
-# fsm_emit_audit_log). Echoes exit code via `run`. Args: <evidence_dir> <project_root>.
-_run_cp4_check() {
-  local ev_dir="$1" proj_root="$2"
-  run bash -c '
-    set -euo pipefail
-    source "'"$FSM"'"
-    epic_id=E-test run_id=R-test project_root="'"$proj_root"'"
-    fsm_check_cp4_curator_validation "'"$ev_dir"'" "'"$proj_root"'"
-  '
-}
-
-# Helper: seed an fsm-state.yaml with a given base_commit under the evidence dir.
-_cp4_seed_state() {
-  local base="$1"
-  cat > "$TEST_EVIDENCE_DIR/fsm-state.yaml" <<EOF
-epic_id: E-test
-run_id: R-test
-state: DONE
-base_commit: $base
-EOF
-}
-
-@test "CP4: no curator-report → skip silently (no audit entry)" {
-  # No curator-report.md present → function returns 0 without touching audit log.
-  _cp4_seed_state "HEAD"
-  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
-  [ ! -f "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl" ] || \
-    ! grep -q 'cp4_' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-
-@test "CP4: curator + production touch + missing CP4 file → block + audit" {
-  local base; base=$(git rev-parse HEAD)
-  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
-  # Commit a production-path file so base_commit..HEAD touches production.
-  mkdir -p plugins/aid-orchestrator/skills
-  echo "pipeline change" > plugins/aid-orchestrator/skills/pipeline.md
-  git add plugins/aid-orchestrator/skills/pipeline.md
-  git commit -q -m "prod change"
-  _cp4_seed_state "$base"
-
-  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"CP4 (curator-validation) review missing"* ]]
-  grep -q 'cp4_missing_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-  grep -q '"base"' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-  grep -q 'pipeline.md' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-
-@test "CP4: curator + docs-only range → skip + non-blocking telemetry" {
-  local base; base=$(git rev-parse HEAD)
-  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
-  # Only docs / CHANGELOG touched in range → no production match.
-  mkdir -p docs
-  echo "doc change" > docs/notes.md
-  echo "changelog" > CHANGELOG.md
-  git add docs/notes.md CHANGELOG.md
-  git commit -q -m "docs only"
-  _cp4_seed_state "$base"
-
-  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 0 ]
-  grep -q 'cp4_skip_no_prod_match' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-
-@test "CP4: NR 10 §3B range-scan — production touch at HEAD~1, docs-only at HEAD → block" {
-  local base; base=$(git rev-parse HEAD)
-  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
-  # HEAD~1: production file (aid-fsm.sh under scripts/).
-  mkdir -p plugins/aid-orchestrator/scripts
-  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git commit -q -m "prod change at HEAD~1"
-  # HEAD: docs-only commit (would pass a last-commit-only check).
-  mkdir -p docs
-  echo "changelog" > docs/CHANGELOG.md
-  git add docs/CHANGELOG.md
-  git commit -q -m "docs only at HEAD"
-  _cp4_seed_state "$base"
-
-  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"CP4 (curator-validation) review missing"* ]]
-  # Range scan caught the HEAD~1 production file despite docs-only last commit.
-  grep -q 'aid-fsm.sh' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-  grep -q 'cp4_missing_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-
-@test "CP4: consumer layout (cp4_production_paths=apps/|services/|packages/) → block on apps/ touch" {
-  local base; base=$(git rev-parse HEAD)
-  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
-  # Consumer-style execution.yaml overriding the production glob.
-  mkdir -p .aid-o/config
-  printf 'cp4_production_paths: "apps/|services/|packages/"\n' > .aid-o/config/execution.yaml
-  mkdir -p apps
-  echo "consumer prod" > apps/foo.ts
-  git add apps/foo.ts
-  git commit -q -m "consumer prod change"
-  _cp4_seed_state "$base"
-
-  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"CP4 (curator-validation) review missing"* ]]
-  grep -q 'apps/foo.ts' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-
-@test "CP4: malformed glob ERE (curator + prod touch + bad glob) → fail-closed with audit" {
-  local base; base=$(git rev-parse HEAD)
-  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
-  # Malformed ERE glob: unmatched paren
-  mkdir -p .aid-o/config
-  printf 'cp4_production_paths: "plugins/|scripts/(foo"\n' > .aid-o/config/execution.yaml
-  # Commit a production-path file so the range would match if the glob were valid
-  mkdir -p plugins/aid-orchestrator/skills
-  echo "prod change" > plugins/aid-orchestrator/skills/pipeline.md
-  git add plugins/aid-orchestrator/skills/pipeline.md
-  git commit -q -m "prod change"
-  _cp4_seed_state "$base"
-
-  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"cp4_production_paths is not a valid ERE"* ]]
-  [[ "$output" == *"Glob: plugins/|scripts/(foo"* ]]
-  grep -q 'cp4_glob_invalid' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-  grep -q 'cp4_production_paths_invalid_ere' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-
-@test "CP4: malformed glob ERE + streamlined mode (advisory) → streamlined skip happens first" {
-  local base; base=$(git rev-parse HEAD)
-  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
-  # Malformed ERE glob: unmatched paren
-  mkdir -p .aid-o/config
-  printf 'cp4_production_paths: "plugins/|scripts/(bad"\n' > .aid-o/config/execution.yaml
-  # Commit a production-path file
-  mkdir -p plugins/aid-orchestrator/skills
-  echo "prod change" > plugins/aid-orchestrator/skills/pipeline.md
-  git add plugins/aid-orchestrator/skills/pipeline.md
-  git commit -q -m "prod change"
-  # Streamlined mode: CP4 is advisory, should skip before glob check
-  _streamlined_seed_state "true" "$base"
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-
-  run bash -c '
-    set -euo pipefail
-    source "'"$FSM"'"
-    epic_id=E-test run_id=R-test project_root="'"$TEST_PROJECT_ROOT"'"
-    fsm_check_cp4_curator_validation "'"$TEST_EVIDENCE_DIR"'" "'"$TEST_PROJECT_ROOT"'" "'"$state_file"'"
-  '
-  [ "$status" -eq 0 ]
-  grep -q 'cp4_skipped_streamlined_advisory' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-
-@test "CP4 composer: apps/ monorepo layout → cp4_production_paths = apps/|services/|packages/|src/" {
-  # Exercises resolve_cp4_production_paths via compose_execution_yaml.
-  local composer="$AID_PLUGIN_PATH/scripts/lib/aid-init-execution-yaml.sh"
-  local proj="$TEST_TMPDIR/consumer"
-  mkdir -p "$proj/apps" "$proj/src"
-  local out="$proj/.aid-o/config/execution.yaml"
-  run bash -c '
-    set -euo pipefail
-    export AID_PLUGIN_PATH="'"$AID_PLUGIN_PATH"'"
-    source "'"$composer"'"
-    compose_execution_yaml "'"$proj"'" "'"$out"'" typescript
-  '
-  [ "$status" -eq 0 ]
-  grep -q 'cp4_production_paths: "apps/|services/|packages/|src/"' "$out"
-}
-
 @test "aid-run-gates.sh: env-var bypass allows EXECUTE state when AID_GATES_TRIGGERED_BY_FSM=1" {
   seed_test_state_files "EXECUTE" "1" "1"
   local exec_yaml; exec_yaml="$TEST_EVIDENCE_DIR/execution.yaml"
@@ -894,7 +696,7 @@ EOF
   local cj="$TEST_EVIDENCE_DIR/compliance.json"
   [ -f "$cj" ]
   [ "$(jq -r '.coverage_mode' "$cj")" = "streamlined" ]
-  jq -e '.skipped_dimensions == ["verifier_outputs.cp2_rounds","verifier_outputs.cp4_curator_validation"]' "$cj"
+  jq -e '.skipped_dimensions == ["verifier_outputs.cp2_rounds"]' "$cj"
 }
 
 @test "streamlined: abandoned fires on <3 timeline events (NR 12 anchor)" {
@@ -951,31 +753,6 @@ EOF
   # No integration-review-fail audit recorded.
   [ ! -f "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl" ] || \
     ! grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-
-@test "streamlined: CP4 mode-aware skip → advisory audit, no missing_cp4 fail" {
-  local base; base=$(git rev-parse HEAD)
-  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
-  # Commit a production-path file so base..HEAD touches plugins/.
-  mkdir -p plugins/aid-orchestrator/skills
-  echo "pipeline change" > plugins/aid-orchestrator/skills/pipeline.md
-  git add plugins/aid-orchestrator/skills/pipeline.md
-  git commit -q -m "prod change"
-  _streamlined_seed_state true "$base"
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  # Integration-review evidence present (CP4 advisory short-circuit runs first anyway).
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
-  echo '{}'   > "$TEST_EVIDENCE_DIR/gates_report.json"
-
-  run bash -c '
-    set -euo pipefail
-    source "'"$FSM"'"
-    epic_id=E-test run_id=R-test project_root="'"$TEST_PROJECT_ROOT"'"
-    fsm_check_cp4_curator_validation "'"$TEST_EVIDENCE_DIR"'" "'"$TEST_PROJECT_ROOT"'" "'"$state_file"'"
-  '
-  [ "$status" -eq 0 ]
-  grep -q 'cp4_skipped_streamlined_advisory' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-  ! grep -q 'cp4_missing_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
 }
 
 # ─── P040 Component E: steps[] array absorption + read_steps_array ────────
@@ -1212,41 +989,6 @@ PLAN
 # ─── E-046-1_3 Step 2: _generated_at required in CP2 verifier output ─────────
 # Regression for the missing check: empty/absent _generated_at was accepted before.
 
-@test "CP4: curator-validation file present but missing _generated_at → hard fail (content-validation)" {
-  local base; base=$(git rev-parse HEAD)
-  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
-  # Commit a production-path file
-  mkdir -p plugins/aid-orchestrator/skills
-  echo "change" > plugins/aid-orchestrator/skills/pipeline.md
-  git add plugins/aid-orchestrator/skills/pipeline.md
-  git commit -q -m "prod change"
-  _cp4_seed_state "$base"
-  # CP4 file present but missing _generated_at (would have passed before Step 2)
-  printf '_generated_by: aid-orchestrator:verifier@CP4-curator-epic1\nclassification: FULL_REVIEW\nverdict: pass\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-cp4-curator-validation.md"
-
-  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"invalid"* ]]
-}
-
-@test "CP4: curator-validation file with empty _generated_by → hard fail (content-validation)" {
-  local base; base=$(git rev-parse HEAD)
-  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
-  mkdir -p plugins/aid-orchestrator/skills
-  echo "change" > plugins/aid-orchestrator/skills/pipeline.md
-  git add plugins/aid-orchestrator/skills/pipeline.md
-  git commit -q -m "prod change"
-  _cp4_seed_state "$base"
-  # _generated_by present but empty value
-  printf '_generated_by: \n_generated_at: 2026-06-18T10:00:00Z\nclassification: FULL_REVIEW\nverdict: pass\n' \
-    > "$TEST_EVIDENCE_DIR/verifier-output-cp4-curator-validation.md"
-
-  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"invalid"* ]]
-}
-
 # ─── E-046-1_3 post-audit: yaml_field quote normalization + verdict whitelist ─
 # Regression for auditor finding: _generated_by: "" passed as non-empty (quoted
 # empty is non-empty string before quote-stripping fix), and verdict: banana
@@ -1266,64 +1008,6 @@ PLAN
 
   run "$FSM" increment-step "$state_file"
   [ "$status" -eq 0 ]
-}
-
-# ─── E-046-1_3 post-audit: blocking_findings fail-closed on non-false values ──
-# Auditor finding: only exact "true" was blocked; "maybe", "\"true\"", comments
-# all passed silently as clean. Fix: accept ONLY scalar "false", block everything else.
-
-# Helper: seed minimal DONE/review state for done-advance tests that need
-# curator-report + audit-report to vary per test.
-_seed_done_review_state() {
-  local state_file="$1"
-  # P094: done-advance re-checks the cp3 round against HEAD; the cases below
-  # move HEAD (an empty amend) after seeding, so the checkpoint is switched
-  # off here — an audited pass — and the C3 hook stays the variable under test.
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
-  printf 'review_checkpoints:\n  cp3_integration_review: false\n' > "$TEST_PROJECT_ROOT/.aid-o/config/policies/review-checkpoints.yaml"
-  cat > "$state_file" <<YAML
-epic_id: E-test
-run_id: R-test
-branch: task/E-test/main
-state: DONE
-done_phase: review
-created_at: 2026-06-18T00:00:00Z
-total_steps: 1
-current_step: 1
-pm_decision: merge
-YAML
-  mkdir -p "$TEST_EVIDENCE_DIR/gates"
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/tasks" "$TEST_PROJECT_ROOT/.aid-o/work" \
-           "$TEST_PROJECT_ROOT/.aid-o/config"
-  touch "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-  printf '{"overall":"pass","_generated_by":"aid-run-gates.sh@test","_generated_at":"2026-06-18T00:00:00Z","_command_log":[]}\n' \
-    > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
-  cat > "$TEST_PROJECT_ROOT/.aid-o/config/plugin.yaml" <<YAML
-plugin_path: "$AID_PLUGIN_PATH"
-dispatch_mode: subagent
-YAML
-}
-
-@test "CP5: blocking_findings: maybe → fail-closed (non-false treated as blocking)" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  _seed_done_review_state "$state_file"
-  printf 'blocking_findings: maybe\n' > "$TEST_EVIDENCE_DIR/audit-report.md"
-  echo "curator report" > "$TEST_EVIDENCE_DIR/curator-report.md"
-
-  run "$FSM" done-advance review release "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"blocking_findings"* ]]
-}
-
-@test "CP5: blocking_findings: \"true\" (quoted) → fail-closed after yaml_field unquoting" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  _seed_done_review_state "$state_file"
-  printf 'blocking_findings: "true"\n' > "$TEST_EVIDENCE_DIR/audit-report.md"
-  echo "curator report" > "$TEST_EVIDENCE_DIR/curator-report.md"
-
-  run "$FSM" done-advance review release "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"blocking_findings"* ]]
 }
 
 # ─── E5 C2 Semantic Wiring-Gate (observe mode) ───────────────────────────────
@@ -1370,217 +1054,6 @@ WIRING
   # Timeline must contain semantic_wiring_would_block event
   assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "semantic_wiring_would_block"
 }
-
-# ─── E-057-1_2 Finding 3: C3 risk-profile-resolution hook regression suite ───
-# Tests for done-advance review→release C3 precondition gate. Three scenarios:
-# 1. risk_profile=high + AID_PLUGIN_PATH set + blocking audit → hook fires, blocks
-# 2. risk_profile=high + policy missing high key + blocking audit → hook fires, blocks (Finding 1 fix: yq has() catches absence)
-# 3. risk_profile=medium (non-C3) + no audit-report → hook no-op, passes (true-negative control)
-
-@test "E-057-1_2 C3 hook: risk_profile=high + blocking audit-report → precondition fails" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  _seed_done_review_state "$state_file"
-  _pin_c3_blocking   # E-059-1_2: hook is observe-by-default; pin blocking to assert the block
-
-  # Create review-profile.json with high-risk profile
-  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
-{
-  "review_profile": {
-    "risk_profile": "high"
-  }
-}
-JSON
-
-  # Create audit-report.json with blocking finding (matches c3_hook_fired=true condition)
-  cat > "$TEST_EVIDENCE_DIR/audit-report.json" <<'JSON'
-{
-  "audit_report": {
-    "blocking_findings": true,
-    "input_manifest_hash": "sha256:abc123"
-  },
-  "status": "pass",
-  "revision": {
-    "head_sha": "deadbeef"
-  }
-}
-JSON
-
-  # Set AID_PLUGIN_PATH so the hook can locate c3-audit-policy.yaml
-  export AID_PLUGIN_PATH
-
-  # Mock current HEAD to match the audit's head_sha (otherwise stale-check fails first)
-  GIT_AUTHOR_DATE='2026-06-18 00:00:00' git commit --allow-empty --amend -m "test" >/dev/null 2>&1 || true
-
-  run "$FSM" done-advance review release "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"C3 independent audit block"* ]]
-  [[ "$output" == *"blocking_findings == true"* ]]
-}
-
-@test "E-057-1_2 C3 hook: has() presence-check prevents false-pass on absent profile key" {
-  # Finding 1 fix: yq has() confirms both .risk_profiles[profile] AND .c3_required exist
-  # before treating policy read as succeeded. If either is absent, fail-closed (hook fires).
-  # This test verifies the has() logic via direct yq call (unit-level verification).
-  local test_policy_good="$TEST_EVIDENCE_DIR/policy-good.yaml"
-  local test_policy_missing_high="$TEST_EVIDENCE_DIR/policy-no-high.yaml"
-
-  # Policy file WITH "high" key (normal case)
-  cat > "$test_policy_good" <<'YAML'
-version: 1
-risk_profiles:
-  high:
-    c3_required: true
-    required_independence_level: cross_model
-  medium:
-    c3_required: false
-YAML
-
-  # Policy file WITHOUT "high" key (corruption scenario)
-  cat > "$test_policy_missing_high" <<'YAML'
-version: 1
-risk_profiles:
-  medium:
-    c3_required: false
-YAML
-
-  # Verify: has() works on good policy
-  local has_high_good
-  has_high_good=$(yq -r '(.risk_profiles | has("high")) and (.risk_profiles["high"] | has("c3_required"))' "$test_policy_good" 2>/dev/null)
-  [ "$has_high_good" == "true" ]
-
-  # Verify: has() returns false on corrupted policy (key absent)
-  local has_high_bad
-  has_high_bad=$(yq -r '(.risk_profiles | has("high")) and (.risk_profiles["high"] | has("c3_required"))' "$test_policy_missing_high" 2>/dev/null)
-  [ "$has_high_bad" == "false" ]
-
-  rm -f "$test_policy_good" "$test_policy_missing_high"
-}
-
-@test "E-057-1_2 C3 hook: risk_profile=medium (non-C3) + no audit-report → hook no-op, precondition passes" {
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  _seed_done_review_state "$state_file"
-
-  # Create review-profile.json with medium profile (NOT a C3-required profile)
-  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
-{
-  "review_profile": {
-    "risk_profile": "medium"
-  }
-}
-JSON
-
-  # Do NOT create audit-report.json (medium profile doesn't require C3 audit)
-  # This tests that the hook is a no-op for non-C3 profiles
-
-  # Create a legacy audit-report.md (empty blocking_findings) to fall through to legacy path
-  printf 'blocking_findings: false\n' > "$TEST_EVIDENCE_DIR/audit-report.md"
-  echo "curator report" > "$TEST_EVIDENCE_DIR/curator-report.md"
-
-  export AID_PLUGIN_PATH
-  run "$FSM" done-advance review release "$state_file"
-  [ "$status" -eq 0 ]
-  # Should NOT see C3 block reason in output
-  [[ "$output" != *"C3 independent audit block"* ]]
-}
-
-@test "E-057-1_2 C3 hook: malformed policy YAML fails closed (no script crash) instead of bypassing" {
-  # CP4 round 2 regression: bare `var=$(yq ...)` under set -e aborted the WHOLE script
-  # when c3-audit-policy.yaml was unparseable, skipping the structured PRECONDITION FAIL
-  # message and the ERROR summary entirely (though the script's own nonzero exit still
-  # prevented the transition from completing — not a bypass, but an unhandled crash
-  # instead of a clean, audited fail-closed message). This test locks the fix: a
-  # malformed policy file for a high-risk profile must still emit the C3 block message.
-  # E-059-1_2: the malformed policy exercises the RISK-GATE (fail-closed → hook fires);
-  # the enforcement toggle is pinned blocking via C3_AUDIT_POLICY so the block asserts.
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  _seed_done_review_state "$state_file"
-  _pin_c3_blocking
-
-  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
-{
-  "review_profile": {
-    "risk_profile": "high"
-  }
-}
-JSON
-
-  cat > "$TEST_EVIDENCE_DIR/audit-report.json" <<'JSON'
-{
-  "audit_report": {
-    "blocking_findings": true,
-    "input_manifest_hash": "sha256:abc123"
-  },
-  "status": "pass",
-  "revision": {
-    "head_sha": "deadbeef"
-  }
-}
-JSON
-
-  GIT_AUTHOR_DATE='2026-06-18 00:00:00' git commit --allow-empty --amend -m "test" >/dev/null 2>&1 || true
-
-  # Point AID_PLUGIN_PATH at a fake plugin root whose c3-audit-policy.yaml is syntactically
-  # broken (missing colon after the risk-profile key) — yq must fail to parse it, and the
-  # done-advance call must NOT crash the whole script as a result.
-  local fake_plugin_root="$TEST_EVIDENCE_DIR/fake-plugin-root"
-  mkdir -p "$fake_plugin_root/defaults/policies"
-  printf 'risk_profiles:\n  high\n    c3_required: true\n' > "$fake_plugin_root/defaults/policies/c3-audit-policy.yaml"
-
-  AID_PLUGIN_PATH="$fake_plugin_root"
-  export AID_PLUGIN_PATH
-  run "$FSM" done-advance review release "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"C3 independent audit block"* ]]
-  [[ "$output" == *"blocking_findings == true"* ]]
-  [[ "$output" == *"precondition(s) failed"* ]]
-}
-
-@test "E-057-1_2 C3 hook: non-object .audit_report in valid JSON fails closed (no script crash)" {
-  # CP4 round 3 finding: audit-report.json can be well-formed JSON at the top level while
-  # .audit_report itself is a scalar/string instead of an object — jq errors trying to index
-  # into it (.audit_report.blocking_findings), which under set -e aborted the whole script
-  # before any of the 4 field-extraction jq calls' fail-closed logic could run. This test
-  # locks the guard added to all 4 reads (c3_blocking/c3_status/c3_manifest_hash/c3_head_sha).
-  # E-059-1_2: pin enforcement blocking so the fail-closed reason actually blocks.
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  _seed_done_review_state "$state_file"
-  _pin_c3_blocking
-
-  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
-{
-  "review_profile": {
-    "risk_profile": "high"
-  }
-}
-JSON
-
-  # .audit_report is a STRING, not an object — jq's `.audit_report.blocking_findings`
-  # errors ("Cannot index string with string") when read directly.
-  cat > "$TEST_EVIDENCE_DIR/audit-report.json" <<'JSON'
-{
-  "audit_report": "oops-not-an-object",
-  "status": "pass",
-  "revision": {
-    "head_sha": "deadbeef"
-  }
-}
-JSON
-
-  GIT_AUTHOR_DATE='2026-06-18 00:00:00' git commit --allow-empty --amend -m "test" >/dev/null 2>&1 || true
-
-  export AID_PLUGIN_PATH
-  run "$FSM" done-advance review release "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"C3 independent audit block"* ]]
-  [[ "$output" == *"precondition(s) failed"* ]]
-}
-
-# ─── OBS-20260708-04: increment-step syncs steps[] array (4 assertions) ──────
-# fsm_init's header comment declares steps[] "single source of truth", but
-# cmd_increment_step historically only ever bumped the current_step scalar —
-# steps[] entries stayed status: pending forever, even on fully DONE runs
-# (VULCAN B-142 ×2, AID's own E-059-2_2 self-dogfood run; live-repro anchor:
-# E-061-2_6/R-E061-2/fsm-state.yaml, both steps pending post-merge).
 
 # Helper: fsm-state.yaml with an explicit steps[] array (P040 Component E
 # shape) sized so steps[3] exists — current_step: 3, total_steps: 4. steps[0-2]
@@ -2305,100 +1778,17 @@ _edit_step() { jq --argjson i "$1" --arg v "$2" '.steps[$i].objective = $v' "$TE
   [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "0" ]
 }
 
-@test "v2.95.8 (acta #32): a verifier output written to the checkout root is named in the diagnostic and still refused" {
-  local td="$TEST_EVIDENCE_DIR"
-  printf '_generated_by: x\n_generated_at: y\nclassification: FULL_REVIEW\nverdict: pass\n' > "$TEST_PROJECT_ROOT/verifier-output-cp3-security.md"
-  run bash -c "cd '$TEST_PROJECT_ROOT' && source '$FSM' 2>/dev/null; fsm_check_verifier_output '$td/verifier-output-cp3-security.md'"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"file missing"* && "$output" == *"exists at ${TEST_PROJECT_ROOT}/verifier-output-cp3-security.md"* ]]
-}
-
-
-# ─── CP4 behaviour-trace gate of fsm_check_verifier_output (moved from
-# test-behavior-trace.bats by P094 Step 14; the function is CP4-only now) ────
-_write_base_verifier() {
-  local file="$1"
-  cat > "$file" <<EOF
-_generated_by: aid-orchestrator:verifier@test-fixture
-_generated_at: 2026-06-19T00:00:00Z
-classification: RUN
-verdict: pass
-EOF
-}
 # ─── Test 1: behavior_trace_count=0 FAILS ────────────────────────────────
-
-@test "behavior_trace: count=0 with required=true fails (exit code 1)" {
-  local vo="$TEST_TMPDIR/verifier-output.md"
-  _write_base_verifier "$vo"
-  cat >> "$vo" <<EOF
-behavior_trace_required: true
-behavior_trace_count: 0
-EOF
-  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
-  [ "$status" -eq 1 ]
-}
 
 # ─── Test 2: behavior_trace_count=3 PASSES ───────────────────────────────
 
-@test "behavior_trace: count=3 with required=true passes (exit code 0)" {
-  local vo="$TEST_TMPDIR/verifier-output.md"
-  _write_base_verifier "$vo"
-  cat >> "$vo" <<EOF
-behavior_trace_required: true
-behavior_trace_count: 3
-EOF
-  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
-  [ "$status" -eq 0 ]
-}
-
 # ─── Test 3: behavior_trace_required=false PASSES regardless of count ────
-
-@test "behavior_trace: required=false, count=0 passes (gate skipped)" {
-  local vo="$TEST_TMPDIR/verifier-output.md"
-  _write_base_verifier "$vo"
-  cat >> "$vo" <<EOF
-behavior_trace_required: false
-behavior_trace_count: 0
-EOF
-  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
-  [ "$status" -eq 0 ]
-}
 
 # ─── Test 4: no behavior_trace_required field PASSES (default is no enforcement)
 
-@test "behavior_trace: field absent in file passes (opt-in gate, no field = skip)" {
-  local vo="$TEST_TMPDIR/verifier-output.md"
-  _write_base_verifier "$vo"
-  # No behavior_trace_required line at all.
-  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
-  [ "$status" -eq 0 ]
-}
-
 # ─── Test 5: missing behavior_trace_count when required FAILS ─────────────
 
-@test "behavior_trace: required=true but count field absent fails (exit code 1)" {
-  local vo="$TEST_TMPDIR/verifier-output.md"
-  _write_base_verifier "$vo"
-  cat >> "$vo" <<EOF
-behavior_trace_required: true
-EOF
-  # behavior_trace_count is intentionally omitted — yaml_field returns empty.
-  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
-  [ "$status" -eq 1 ]
-}
-
 # ─── Test 6: behavior_trace_count=1 with required=true PASSES (boundary) ──
-
-@test "behavior_trace: count=1 with required=true passes (boundary value)" {
-  local vo="$TEST_TMPDIR/verifier-output.md"
-  _write_base_verifier "$vo"
-  cat >> "$vo" <<EOF
-behavior_trace_required: true
-behavior_trace_count: 1
-EOF
-  run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
-  [ "$status" -eq 0 ]
-}
 
 @test "set-field: a transition precondition needs a reason and leaves a field_set line; an ordinary field needs none" {
   local td="$TEST_EVIDENCE_DIR" sf

@@ -20,7 +20,7 @@ Read in combination with `skills/agent-protocol.md` for input/output format.
 
 **Model is sourced here.** Each step role declares a `**Model:**` field — this is the single
 source of truth for the dispatch model tier (an optional `step.model` in `plan.json` overrides it
-for one step; controller agents auditor/curator/gate-fixer/verifier carry model in their own
+for one step; controller agents auditor/gate-fixer/verifier carry model in their own
 agent-file frontmatter). See `pipeline.md` §4.
 
 **Max Parallel note.** `**Max Parallel:**` documents the *intended* concurrency ceiling per role.

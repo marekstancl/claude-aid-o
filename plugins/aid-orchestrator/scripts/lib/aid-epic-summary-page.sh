@@ -4,13 +4,11 @@
 # (P089 Step 4)
 #
 #   aid_epic_summary_page_path   <root> <epic_id>
-#   aid_epic_summary_page_render <run_evidence_dir> <out_path> [backlog_file]
+#   aid_epic_summary_page_render <run_evidence_dir> <out_path>
 #
 # WHY THIS EXISTS
-#   Both the PM and the plan arrived at the same missing artifact independently.
-#   The Curator files backlog items while reviewing a finished EPIC, and today
-#   the PM learns of them only by noticing that `backlog.md` grew. This page is
-#   the one place that also says WHY each of them exists.
+#   The PM learns from one page what a finished EPIC delivered and what its
+#   review left open.
 #
 #   It renders when the phase is genuinely OVER — after the review, not after
 #   the last step (PM, 2026-08-25: "až ve chvíli, kdy je to opravdu hotové").
@@ -24,9 +22,9 @@
 #   agent. This writes a page for a person, and both keep their own job.
 #
 # THE DATA CONTRACT, because the Step 6 obligation depends on it
-#   inputs     `audit-report.{json,md,yaml}` and `curator-report.{json,md}` from
-#              the RUN's evidence dir. Either missing → the page is still
-#              rendered and NAMES the missing one. It never implies the review
+#   inputs     the EPIC review round (`cp3/rounds.json` and the last round's
+#              `merged.json`) from the RUN's evidence dir. Missing → the page is
+#              still rendered and NAMES it. It never implies the review
 #              was complete when it was not.
 #   output     <root>/.aid-o/work/evidence/<plan_id>/<epic_id>/epic-summary-artifact.html
 #              — the same convention as plan-summary-artifact.html, so
@@ -37,7 +35,7 @@
 #
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 #
-# **Last Updated:** 2026-08-26
+# **Last Updated:** 2026-09-20
 # =============================================================================
 [[ -n "${_AID_ESP_SH_LOADED:-}" ]] && return 0
 _AID_ESP_SH_LOADED=1
@@ -77,26 +75,11 @@ _esp_duration() {
   printf '%s h %s min' "$(( s / 3600 ))" "$(( (s % 3600) / 60 ))"
 }
 
-# _esp_backlog_reason <backlog_file> <imp_id>
-#   The proposal's own headline from the backlog table, which is where the
-#   Curator wrote WHY it filed the item. Nothing (exit 1) when it is not there.
-_esp_backlog_reason() {
-  local file="${1-}" id="${2-}" row title
-  [[ -n "$file" && -f "$file" && -n "$id" ]] || return 1
-  row="$(grep -m1 -F "| ${id} |" "$file" 2>/dev/null)" || return 1
-  [[ -n "$row" ]] || return 1
-  # Column 4 is the suggestion; its leading **bold** run is the headline.
-  title="$(sed -n 's/.*\*\*\(.\{1,\}\)\*\*.*/\1/p' <<<"$row")"
-  [[ -n "$title" ]] || title="$(awk -F'|' '{print $5}' <<<"$row" | sed 's/^ *//; s/ *$//')"
-  [[ -n "$title" ]] || return 1
-  printf '%s' "$title"
-}
-
-# aid_epic_summary_page_render <run_evidence_dir> <out_path> [backlog_file]
+# aid_epic_summary_page_render <run_evidence_dir> <out_path>
 aid_epic_summary_page_render() {
-  local ev="${1-}" out="${2-}" backlog="${3-}"
+  local ev="${1-}" out="${2-}"
   if [[ -z "$ev" || -z "$out" ]]; then
-    echo "aid_epic_summary_page_render: usage: aid_epic_summary_page_render <run_evidence_dir> <out_path> [backlog_file]" >&2
+    echo "aid_epic_summary_page_render: usage: aid_epic_summary_page_render <run_evidence_dir> <out_path>" >&2
     return 1
   fi
   local state="${ev}/fsm-state.yaml"
@@ -115,7 +98,7 @@ aid_epic_summary_page_render() {
 
   # ── WHAT THE EPIC ACTUALLY PRODUCED ───────────────────────────────────────
   # The page exists so the PM learns what came out of the EPIC. Until 2026-08-28
-  # this renderer never asked: it read the audit and curator reports, and when
+  # this renderer never asked: it read the review reports, and when
   # they were absent it said so and stopped — three near-identical pages for WAN
   # P099, none of which named a single thing the work produced.
   #
@@ -155,60 +138,24 @@ aid_epic_summary_page_render() {
     [[ "${#delivered[@]}" -gt 0 ]] && break
   done
 
-  # ── the review's two inputs; a missing one is NAMED, never implied away ────
-  local -a missing=() findings=() backlog_items=()
-  local audit_json="${ev}/audit-report.json" audit_md=""
-  local f; for f in "${ev}/audit-report.md" "${ev}/audit-report.yaml"; do
-    [[ -f "$f" ]] && { audit_md="$f"; break; }
-  done
-
-  local n_blocking=0 n_findings=0
-  if [[ -f "$audit_json" ]] && command -v jq >/dev/null 2>&1 \
-     && jq -e '.' "$audit_json" >/dev/null 2>&1; then
-    n_findings="$(aid_artifact_number "$(jq -r '[(.audit_report.findings // .findings // [])[]] | length' "$audit_json" 2>/dev/null)")"
-    n_blocking="$(aid_artifact_number "$(jq -r '[(.audit_report.findings // .findings // [])[] | select(.severity == "critical" or .severity == "high")] | length' "$audit_json" 2>/dev/null)")"
-    if (( n_findings > 0 )); then
-      findings+=("Audit: ${n_findings} nálezů, z toho ${n_blocking} blokujících")
-    else
-      findings+=("Audit doběhl a nenašel nic")
+  # ── the review's record; a missing one is NAMED, never implied away ───────
+  # The EPIC round index (cp3/rounds.json) carries the verdict; what it left
+  # open is in the last round's merged.json.
+  local -a missing=() findings=()
+  local n_blocking=0 n_open=0 rounds="${ev}/cp3/rounds.json" last_round
+  last_round="$(ls -d "${ev}"/cp3/round-* 2>/dev/null | sort -V | tail -1)"
+  if [[ -f "$rounds" ]] && jq -e '.verdict' "$rounds" >/dev/null 2>&1; then
+    if [[ -f "${last_round}/merged.json" ]]; then
+      n_open="$(aid_artifact_number "$(jq -r '[.findings[] | select(.status == "open" or .status == "disputed")] | length' "${last_round}/merged.json" 2>/dev/null)")"
+      n_blocking="$(aid_artifact_number "$(jq -r '[.findings[] | select((.status == "open" or .status == "disputed") and .severity == "blocker")] | length' "${last_round}/merged.json" 2>/dev/null)")"
     fi
-  elif [[ -n "$audit_md" ]]; then
-    # The .md/.yaml form of the report carries ONE machine-readable line, the
-    # `blocking_findings:` flag the FSM already reads. Its ABSENCE is a third
-    # state and must not be rounded down to "clean": a report whose verdict
-    # cannot be read is a review this page cannot vouch for.
-    if grep -qiE '^blocking_findings:[[:space:]]*true' "$audit_md"; then
-      n_blocking=1
-      findings+=("Audit hlásí blokující nálezy — v ${epic_id} je co opravit před mergem")
-    elif grep -qiE '^blocking_findings:[[:space:]]*false' "$audit_md"; then
-      findings+=("Audit doběhl a blokující nálezy nehlásí")
-    else
-      missing+=("čitelný verdikt auditu (report je tu, ale nenese řádek blocking_findings:)")
-    fi
+    case "$(jq -r '.verdict' "$rounds")" in
+      pass|skip|no_change) findings+=("Revize EPICu prošla$( (( n_open > 0 )) && printf ', otevřených nálezů zůstává %s' "$n_open")") ;;
+      *)                   findings+=("Revize EPICu neprošla: otevřených nálezů ${n_open}, z toho ${n_blocking} blokujících"); (( n_blocking > 0 )) || n_blocking=1 ;;
+    esac
   else
-    missing+=("report auditu")
+    missing+=("záznam revize EPICu (cp3/rounds.json)")
   fi
-
-  local curator_json="${ev}/curator-report.json" curator_md="${ev}/curator-report.md"
-  local -a imp_ids=()
-  if [[ -f "$curator_json" ]] && command -v jq >/dev/null 2>&1 \
-     && jq -e '.' "$curator_json" >/dev/null 2>&1; then
-    mapfile -t imp_ids < <(jq -r '[(.curator.proposals // [])[] | .id // empty] | .[]' "$curator_json" 2>/dev/null)
-  elif [[ -f "$curator_md" ]]; then
-    mapfile -t imp_ids < <(grep -oE 'IMP-[0-9]+' "$curator_md" 2>/dev/null | sort -u)
-  else
-    missing+=("report kurátora")
-  fi
-
-  local id reason
-  for id in "${imp_ids[@]+"${imp_ids[@]}"}"; do
-    [[ -n "$id" ]] || continue
-    if reason="$(_esp_backlog_reason "$backlog" "$id")"; then
-      backlog_items+=("${id} — ${reason}")
-    else
-      backlog_items+=("${id} — důvod vzniku není v backlogu dohledatelný")
-    fi
-  done
 
   # ── the verdict, DERIVED ───────────────────────────────────────────────────
   local verdict verdict_state
@@ -216,8 +163,8 @@ aid_epic_summary_page_render() {
     verdict="Revize neúplná"; verdict_state="warn"
   elif (( n_blocking > 0 )); then
     verdict="Blokující nálezy"; verdict_state="critical"
-  elif (( ${#backlog_items[@]} > 0 )); then
-    verdict="Hotovo, s otevřenými návrhy"; verdict_state="warn"
+  elif (( n_open > 0 )); then
+    verdict="Hotovo, s otevřenými nálezy"; verdict_state="warn"
   else
     verdict="Hotovo, bez nálezů"; verdict_state="ok"
   fi
@@ -230,7 +177,6 @@ aid_epic_summary_page_render() {
   done
   items+=("${findings[@]+"${findings[@]}"}")
   (( gate_retries > 1 )) && items+=("Brány musely běžet ${gate_retries}× — něco se opravovalo za pochodu")
-  items+=("${backlog_items[@]+"${backlog_items[@]}"}")
 
   local items_json next_json
   items_json="$(printf '%s\n' "${items[@]+"${items[@]}"}" | jq -R . | jq -sc 'map(select(. != ""))')"
@@ -239,7 +185,7 @@ aid_epic_summary_page_render() {
   local ask=""
   local -a next_steps=()
   if (( ${#missing[@]} > 0 )); then
-    next_steps+=("Doplnit chybějící report a revizi dokončit")
+    next_steps+=("Revizi EPICu dokončit")
     next_steps+=("Nebo mergnout s vědomím, že revize je neúplná")
     ask="Rozhodni: dokončit revizi, nebo mergnout bez ní. Doporučuju dokončit — merge bez revize je jediná věc, kterou už zpětně nedoženeš. Dokud nerozhodneš, EPIC leží hotový a nemergnutý."
   elif (( n_blocking > 0 )); then
@@ -257,9 +203,9 @@ aid_epic_summary_page_render() {
   if (( ${#missing[@]} > 0 )); then
     core="Revize ale neproběhla celá — chybí $(printf '%s' "${missing[0]}"). Co je níž, platí jen pro tu část, která proběhla."
   elif (( n_blocking > 0 )); then
-    core="Audit našel $(_aid_artifact_czech "$n_blocking" "blokující nález" "blokující nálezy" "blokujících nálezů"); kurátor založil $(_aid_artifact_czech "${#backlog_items[@]}" "položku" "položky" "položek") do backlogu."
+    core="Revize EPICu nechala otevřené $(_aid_artifact_czech "$n_blocking" "blokující nález" "blokující nálezy" "blokujících nálezů")."
   else
-    core="Revize proběhla celá, blokující nález žádný; kurátor založil $(_aid_artifact_czech "${#backlog_items[@]}" "položku" "položky" "položek") do backlogu."
+    core="Revize EPICu proběhla celá, blokující nález žádný."
   fi
 
   # The profile requires `deliverables`; shape it the way the plan page does —

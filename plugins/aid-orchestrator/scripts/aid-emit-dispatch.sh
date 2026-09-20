@@ -27,7 +27,7 @@ EOF
 }
 
 # The one focus allowlist (the start check and its error text read this).
-AID_DISPATCH_FOCUS_RE='^(cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp3-[a-z][a-z0-9-]*|cp4(-[a-z][a-z0-9-]*)?|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|reporter|simplifier)$'
+AID_DISPATCH_FOCUS_RE='^(cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp3-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*)$'
 
 # Focus default duration table (resolved when --expected-duration-max not given).
 default_duration_for_focus() {
@@ -36,7 +36,6 @@ default_duration_for_focus() {
     cp1*)  echo 1200 ;;
     cp2-*) echo 600 ;;
     cp3-*) echo 900 ;;
-    cp4-*) echo 600 ;;
     cp6-*) echo 600 ;;
     cp7-*) echo 1200 ;;
     *)     echo 600 ;;
@@ -84,7 +83,7 @@ cmd_start() {
   # Allowlist (one variable, used by the check and the error text): cp1-<role>,
   # cp2-step-N-<role> (P094: the role suffix is mandatory, the bare cp2-step-N
   # form is refused so the ledger never mixes two shapes), cp3-<role>,
-  # cp4[-curator-validation], cp6-<role>, cp7-<role>, reporter, simplifier.
+  # cp6-<role>, cp7-<role>.
   if [[ ! "$focus" =~ $AID_DISPATCH_FOCUS_RE ]]; then
     echo "ERROR: --focus does not match allowed pattern ${AID_DISPATCH_FOCUS_RE} (got: $focus)" >&2
     exit 1

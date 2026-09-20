@@ -7224,8 +7224,8 @@ cmd_plan_merge_to_main() {
 # P068 E-068-1_2 Step 6 — `plan-close`, the mechanical close transaction.
 #
 # WHY THIS EXISTS: two plan-state systems have coexisted and neither read the
-# other — the legacy `ca-review-complete` marker plus the gitignored
-# `.aid-o/reports/*` (aid-fsm.sh's own `cmd_plan_close`), and the git-tracked
+# other — the legacy `ca-review-complete` marker (aid-fsm.sh's own
+# `cmd_plan_close`), and the git-tracked
 # `.aid-lifecycle/manifests|receipts` layer. A plan could therefore be
 # "closed" in one world while the other had no durable proof of anything. This
 # command is the ONE place they are reconciled, and it is a real gate: it can

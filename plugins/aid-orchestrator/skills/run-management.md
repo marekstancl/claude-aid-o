@@ -166,8 +166,8 @@ Loop:
 
 1. [ ] Write `fsm-state.yaml`: `state: DONE`
 2. [ ] Append to `timeline.jsonl`: `{"eventType": "fsm_transition", "state": "DONE"}`
-3. [ ] Run Curator agent (post-gate hook)
-4. [ ] Write lessons to `.aid-o/work/backlog.md`
+3. [ ] EPIC review round (CP3) closed
+4. [ ] Deferred findings recorded (`aid_obligation_add`, or a backlog row)
 5. [ ] Archive task file to `.aid-o/tasks/archive/`
 6. [ ] `active.md` refreshes automatically at the done-advance boundary — do not hand-edit it
 
@@ -292,12 +292,11 @@ For `.aid-o/` workspace layout, see `commands/aid-init.md`.
 
 ---
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-09-20
 
 ## Plan-boundary note
 
-Under `plan_branch` the Auditor, Curator, Simplifier and Reporter are
-**plan-final** roles: dispatched once per plan, at the boundary, against the
-frozen candidate. CP2 and CP3 remain per EPIC. Under
-`legacy_epic_release_mode` the previous per-EPIC cadence is unchanged. Mode is
-read from the plan's committed lifecycle manifest, never inferred.
+Under `plan_branch` the whole delivery is read once per plan, by the whole-plan
+round (CP7) against the frozen candidate (`commands/aid-run.md`, "Closing a plan
+(plan-final)"). CP2 and CP3 remain per EPIC in both modes. Mode is read from the
+plan's committed lifecycle manifest, never inferred.

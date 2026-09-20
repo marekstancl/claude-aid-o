@@ -2300,13 +2300,13 @@ write_compliance_json() {
   fi
 
   # P040 Component D: emit coverage_mode + skipped_dimensions so the aggregator
-  # can distinguish streamlined runs (which legitimately skip per-step CP2 and
-  # CP4 curator validation) from full runs that are missing that evidence.
+  # can distinguish streamlined runs (which legitimately skip per-step CP2)
+  # from full runs that are missing that evidence.
   local streamlined mode_value skipped_dims
   streamlined=$(yq -r '.streamlined_mode // false' "$state_file" 2>/dev/null || echo "false")
   if [[ "$streamlined" == "true" ]]; then
     mode_value="streamlined"
-    skipped_dims='["verifier_outputs.cp2_rounds","verifier_outputs.cp4_curator_validation"]'
+    skipped_dims='["verifier_outputs.cp2_rounds"]'
   else
     mode_value="full"
     skipped_dims='[]'
@@ -6575,7 +6575,6 @@ EOF
       local _esp_out
       if _esp_out="$(aid_epic_summary_page_path "$project_root" "$epic_id")"; then
         aid_epic_summary_page_render "$evidence_dir" "$_esp_out" \
-          "${project_root%/}/.aid-o/work/backlog.md" \
           || log_warn "epic-summary-artifact.html render failed (non-fatal)"
       else
         log_warn "epic-summary-artifact.html: cannot resolve the page path for ${epic_id} (non-fatal)"

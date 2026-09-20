@@ -165,16 +165,16 @@ VALID_ARTIFACT_TYPES=(
   semantic_review
   acceptance_evidence
   consumption_proof
-  audit_report
-  audit_input_manifest
+  audit_report         # retired producer (2.101.0); kept so older evidence still validates
+  audit_input_manifest # retired producer (2.101.0); kept so older evidence still validates
   release_decision
   pm_decision_brief
-  curator
-  delivery_report
+  curator              # retired producer (2.101.0); kept so older evidence still validates
+  delivery_report      # retired producer (2.101.0); kept so older evidence still validates
   verification_report
   invalidation_map
   waiver
-  c3_dispatch
+  c3_dispatch          # retired producer (2.101.0); kept so older evidence still validates
   plan_boundary_manifest
 )
 

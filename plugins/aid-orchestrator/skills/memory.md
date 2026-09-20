@@ -32,7 +32,7 @@ To get recent events:
 
 ## Backlog
 Read: `.aid-o/work/backlog.md`
-Written by: Curator agent (post-gate). DO NOT write directly.
+Written by: the controller, one `IMP-{NNN}` row per deferred item.
 Format: sections for Bugs / Features / Refactoring / Performance, each with
   IMP-{NNN} entries (status: pending|implementing|implemented|deferred).
 
@@ -73,4 +73,4 @@ If `integrations.yaml → memory.cross_project.enabled: true`:
 - NEVER delete entries from backlog.md
 - Qdrant is optional — all workflows work without it
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-09-20

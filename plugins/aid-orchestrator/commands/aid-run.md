@@ -629,9 +629,8 @@ deterministic redactor the artifact body uses. No path from gate output to the P
 
 ### State: DONE
 
-DONE uses two mechanically enforced sub-phases: `review` → `release`.
-**C+A model:** Dispatch per EPIC (background OK), validate per Plan (hard stop). See `pipeline.md §7`.
-Sub-phase transitions are managed by `done-advance` (not `transition`).
+DONE uses two mechanically enforced sub-phases: `review` → `release`, managed by `done-advance`
+(not `transition`). Detail: `pipeline.md §7`.
 
 **Sub-phase: `review`** (auto-set on GATES→DONE)
 
@@ -639,77 +638,52 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 2. Archive run file → `runs/archive/`
 3. `work/active.md` refreshes automatically at the done-advance boundary (generated index of active streams — never hand-edit it; detail lives in `work/plan-state/`)
 4. Generate `final_report.md`
-5. **Parallel dispatch:** Curator + Auditor agents (two Agent calls in single message)
-6. Wait for both to complete → evidence saved to `evidence/{epic_id}/{run_id}/`
-7. **Curator auto-fix** — gate-fixer applies approved proposals at every effort (S/M/L); only an
-   explicit always-defer rule (architecture, standards-L) defers
-8. **Auditor auto-fix** — gate-fixer applies S/M/L `recommended_fixes` (where `auto_fixable: true`)
-9. **CP4** — verifier (`code-review`) reviews the APPLIED curator/auditor changes (runs AFTER the
-   apply, so it actually reviews them)
-   - If FAIL → revert those changes, log reversion
-   - Skip if `review_checkpoints.cp4_curator_validation: false`
-10. **CP5** — check auditor `blocking_findings` flag → flag in PM summary
-11. **PM Summary** (see `pipeline.md` §7 for full template):
+5. Produce `review-profile.json` (`pipeline.md §7`, step 5)
+6. **EPIC review (CP3)** — "Step review (CP2) and EPIC review (CP3)" above. A finding is fixed by
+   the role that wrote the code and confirmed by the next round.
+7. **PM Summary** (see `pipeline.md` §7 for the full template):
     ```
     DONE REVIEW — {epic_id}
     {outcome in one plain sentence: what this EPIC now does for the PM}
     Changed: {1-3 user-relevant effects}
-    Verified: {pass}/{total} gates pass; auditor {overall}/100 (trend: {delta})
+    Verified: {pass}/{total} gates pass; EPIC review {verdict}
              {or the concrete reason something is unverified}
     Next step: {the one recommended option below, with its one-line reason}
 
-    {if blocking_findings:}
-    ⛔ CRITICAL FINDINGS (block merge):
-      1. [{type}] {finding} — effort: {S|M|L}
-      Audit report: .aid-o/work/evidence/{id}/{run}/audit-report.md
-
     Detail — steps {done}/{total} | gates {pass}/{total} | duration {time}
-      Auditor: Code {n} | Security {n} | Docs {n} | Process {n}
-      Curator: {applied} fixes applied (S/M/L), {deferred} deferred (always-defer rules / rejected)
-      Auto-fixes: {count} from auditor recommendations
-      Simplifier: {applied} applied, {deferred} L-effort deferred
-      Delivery report: .aid-o/reports/{plan_id}-delivery.md (outcome: {pass|partial|no-runtime})
-
+      EPIC review: {blockers open} blockers, {majors open} majors — cp3/rounds.json
     Key outputs: {artifact list}
     Evidence: .aid-o/work/evidence/{id}/{run_id}/
 
     Options (`legacy_epic_release_mode`):
       MERGE — release + merge to main + queue pickup
-      FIX   — provide guidance, re-run review cycle
+      FIX   — provide guidance, re-run the review
       ABORT — stop EPIC, no merge
 
     Options (`plan_branch`):
       MERGE — merge this EPIC into the PLAN branch; no release, no tag, no push.
-              The release happens once, later, at the plan-final boundary.
-      FIX   — provide guidance, re-run review cycle
+              The release happens once, later, when the plan is closed.
+      FIX   — provide guidance, re-run the review
       ABORT — stop EPIC, no merge
     ```
     This is the **Finished** card of `skills/communication.md` applied to DONE:
     outcome sentence first, then what changed, what is verified and the one
-    recommended next step; counters, scores, report paths and evidence dirs
-    belong to the `Detail —` line and below it, never above it. If the review
-    ends in a blocker the PM must resolve, render the **Blocked or failed**
-    card instead and keep the same ordering.
-    The summary above is the `legacy_epic_release_mode` shape. In `plan_branch`
-    mode the Auditor/Curator/Simplifier/Reporter lines describe the PLAN-FINAL
-    review, not a per-EPIC one — those roles run once per plan, at the boundary,
-    against the frozen candidate. An EPIC completing in `plan_branch` mode owes
-    its cp3 review round and its own evidence, not a specialist stack.
-12. **PM decides:** MERGE → step 13 | FIX → re-run steps 5-11 | ABORT → ERROR (E8)
-13. **Advance sub-phase:** PM chose MERGE →
+    recommended next step; counters, report paths and evidence dirs belong to
+    the `Detail —` line and below it, never above it. If the review ends in a
+    blocker the PM must resolve, render the **Blocked or failed** card instead
+    and keep the same ordering.
+8. **PM decides:** MERGE → step 9 | FIX → re-run steps 5-7 | ABORT → ERROR (E8)
+9. **Advance sub-phase:** PM chose MERGE →
     ```
     bash {plugin_path}/scripts/aid-fsm.sh set-field pm_decision merge <state_file>
     bash {plugin_path}/scripts/aid-fsm.sh done-advance review release <state_file>
     ```
-    Preconditions enforced in `legacy_epic_release_mode`: `curator-report` exists,
-    `audit-report` exists, `pm_decision=merge`. In `plan_branch` mode the FSM skips the
-    Curator/Auditor/CP4/C3/C4 stack plus the **cp3 head re-check** and the
-    **review-profile presence** check. It does **not** skip CP3 itself — the EPIC
-    review round still runs per EPIC, and under `--streamlined` its closed passing
-    index (`cp3/rounds.json`) remains a hard precondition of `done-advance`.
-    `pm_decision=merge`, the archived-task-file check, the auditor's `blocking_findings`
-    verdict whenever an `audit-report` exists at all, and the other EPIC-local checks
-    (streamlined integration review, abandoned check, tiered compliance) still apply.
+    Enforced in both modes: `pm_decision=merge`, the archived-task-file check, routed
+    findings, the streamlined integration review, the abandoned check and tiered compliance.
+    `legacy_epic_release_mode` adds the **cp3 head re-check** and the release decision; a
+    `plan_branch` EPIC skips those two (its release is decided when the plan is closed), but
+    never CP3 itself — under `--streamlined` its closed passing index (`cp3/rounds.json`)
+    remains a hard precondition of `done-advance`.
 
 **Sub-phase: `release`** (after `done-advance review release`)
 
@@ -849,10 +823,10 @@ and the whole-delivery review the decision reads there is the EPIC's own cp3 rou
 
 ## Important
 
-- **Review Checkpoints** — CP2/CP3 are review rounds (the section above), CP4/CP5 the verifier and auditor at DONE; every checkpoint toggles in `config/policies/review-checkpoints.yaml`
-- **Pre-merge review** — mode-dependent. In `legacy_epic_release_mode` Curator + Auditor run in parallel before the EPIC merge. In `plan_branch` they do not run per EPIC at all: they are plan-final roles, dispatched once per plan against the frozen candidate, and the EPIC owes its cp3 review round instead. PM approves via MERGE/FIX/ABORT in both modes
+- **Review Checkpoints** — CP2/CP3 are review rounds (the section above), CP7 the whole-plan round of "Closing a plan"; every checkpoint toggles in `config/policies/review-checkpoints.yaml`
+- **Pre-merge review** — the EPIC review round (CP3), per EPIC in both modes; a `plan_branch` plan is read once more as a whole when it is closed (CP7). PM approves via MERGE/FIX/ABORT in both modes
 - **Exhausted review round** — a cp2/cp3 round that fails after the last allowed round is a PM decision (fix in a granted round, or accept with the findings routed), not an escalation state
-- **Escalation E8** — PM chose ABORT in DONE summary due to critical auditor findings
+- **Escalation E8** — PM chose ABORT in the DONE summary
 - **6 states only** — READY, EXECUTE, GATES, ESCALATION, DONE, ERROR
 - **DONE sub-phases** — `review → release`, managed by `done-advance` (not `transition`); `set-field` rejects writes to `done_phase`
 - **No v1 states** — no IDLE, PRE_FLIGHT, SCOPE_CHECK, PLAN, CURATOR_RESOLVE, PM_APPROVAL, DEPLOY_CHECK, FINALIZING
@@ -922,16 +896,12 @@ trigger criteria in `/aid-plan`). When `--streamlined` is passed to `init`:
   of accumulated per-step cp2 evidence, the transition refuses to advance unless
   the EPIC review round closed with verdict `pass` (`cp3/rounds.json`) and
   `gates_report.json` exists. Missing either hard-fails with `streamlined_integration_review`.
-- **CP4 validation is advisory** — when the §7 curator/auditor auto-fix touched
-  production code, full mode hard-fails without `verifier-output-cp4-curator-validation.md`;
-  streamlined mode emits a `cp4_skipped_streamlined_advisory` audit event and
-  proceeds.
 - **Abandoned check fires on `< 3` timeline events** — a streamlined run whose
   `timeline.jsonl` has fewer than 3 events (init + transition to EXECUTE + at
   least one step/phase event) is treated as claimed-but-never-executed and
   hard-fails with `streamlined_abandoned` (NR 12 SOUSTO P009 anchor).
 - **`compliance.json` emits `coverage_mode: "streamlined"`** plus
-  `skipped_dimensions: ["verifier_outputs.cp2_rounds", "verifier_outputs.cp4_curator_validation"]`
+  `skipped_dimensions: ["verifier_outputs.cp2_rounds"]`
   so the cross-EPIC aggregator distinguishes a legitimate streamlined run from a
   full run that is missing that evidence. Full mode emits
   `coverage_mode: "full"` and an empty `skipped_dimensions` array.
