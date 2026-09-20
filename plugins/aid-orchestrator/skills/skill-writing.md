@@ -380,7 +380,7 @@ per enforcement type is:
 | 14 | Test-regression-gate | the `test-*.sh` itself |
 | 15 | Stack-gate-binding | `defaults/execution-stacks/<lang>.yaml` |
 
-Source: `docs/plans/AID-audit-2026-06/03-governance-recommendation.md §Component 2`.
+Source: `docs/plans/archive/AID-audit-2026-06/03-governance-recommendation.md §Component 2`.
 
 **Lifecycle rule (for new enforcements):** Every new enforcement mechanism MUST,
 in the same change that introduces it:
@@ -500,7 +500,7 @@ will reach for `--force` because no path forward is documented.
 
 - `docs/plans/AID-v3-principles.md` — Principle #1 (Detector without Enforcement);
   candidate Principle #5 (Enforcement without Instruction)
-- `docs/plans/AID-audit-2026-06/03-governance-recommendation.md` — type→instruction
+- `docs/plans/archive/AID-audit-2026-06/03-governance-recommendation.md` — type→instruction
   convention table (Component 2) and enforcement-registry.yaml schema
 - `plugins/aid-orchestrator/skills/pipeline.md` — canonical home for type-1/3/4
   enforcements; observed length ceiling reference (~1207 lines)

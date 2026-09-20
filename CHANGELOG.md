@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+- **Odkazy na standardy psaní ukazují na existující soubory** — `skill-writing.md` a `command-writing.md` citovaly audit z června 2026 na cestě `docs/plans/AID-audit-2026-06/`, která od přesunu do `docs/plans/archive/` neexistovala; opraveno na skutečné umístění.
+
+### Removed
+- **Zbytky v kořeni veřejného repa** — dva obrázky produktizace (1 MB) bez jediného čtenáře a `audit-watchdog.sh` (pojistka pro `/aid-audit-tests`, který se od 5. 8. 2026 nespouští) jsou smazané; záznamy vlastních běhů (`.aid-o/work/evidence/`, 174 souborů, a pět `interim-*.md`) už nejsou v gitu — repo tím začalo dodržovat pravidlo, které `/aid-init` dává každému projektu (běhové artefakty se neverzují); na disku zůstávají.
+
 ## [2.101.1] — 2026-09-20
 
 ### Changed

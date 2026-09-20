@@ -192,7 +192,7 @@ When modifying plugin files (`plugins/aid-orchestrator/`), always update:
    when you bring one up to standard, remove it from the GRANDFATHERED list in that test.
 5. **Register + document every enforcement** — any new detection capability (FSM precondition,
    structural check, gate, severity-routed compliance key, dispatch guard, policy toggle) MUST
-   be recorded in the enforcement registry (`docs/plans/AID-audit-2026-06/enforcement-registry.yaml`)
+   be recorded in the enforcement registry (`plugins/aid-orchestrator/defaults/enforcement-registry.yaml`)
    with its `type`/`source`/`instruction`/`severity`/`surface`, and its enforcement mechanism named
    at design time per [`docs/plans/AID-v3-principles.md`](docs/plans/AID-v3-principles.md) §1
    (*Detector without Enforcement is Decoration*). New contributor-facing reference: `docs/extending-aid.md`.

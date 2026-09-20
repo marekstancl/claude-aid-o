@@ -6,7 +6,7 @@ user_invocable: false
 
 # Command Writing — Authoring and Maintaining AID Commands
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-09-20
 
 How to create and maintain slash-command files (`commands/*.md`) for the AID
 orchestrator plugin. Companion to `skill-writing.md` (skills) — commands are a
@@ -217,13 +217,13 @@ doesn't exist; `Option 6a` doesn't exist; `state.yaml` is the legacy name.
 
 ## Reference Files
 
-- `docs/plans/AID-audit-2026-06/skill-writing-PROVISIONAL.md` — sibling standard (skills)
-- `docs/plans/AID-audit-2026-06/09-command-audit.md` — the audit that motivated this standard (cross-command patterns)
-- `docs/plans/AID-audit-2026-06/03-governance-recommendation.md` — enforcement registry + type→home convention
+- `docs/plans/archive/AID-audit-2026-06/skill-writing-PROVISIONAL.md` — sibling standard (skills)
+- `docs/plans/archive/AID-audit-2026-06/09-command-audit.md` — the audit that motivated this standard (cross-command patterns)
+- `docs/plans/archive/AID-audit-2026-06/03-governance-recommendation.md` — enforcement registry + type→home convention
 - `plugins/aid-orchestrator/scripts/aid-fsm.sh` — canonical state-file (`fsm-state.yaml`), transitions, preconditions
 - `plugins/aid-orchestrator/scripts/aid-emit-dispatch.sh` — the required dispatch wrapper
 - `plugins/aid-orchestrator/CLAUDE.md §On Plugin Changes` — footer + CHANGELOG conventions
 
 ---
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-09-20
