@@ -1753,4 +1753,6 @@ YAML
   [ "$(_g '1..0' | jq -r .result)" = "fail" ]
   [ "$(_g '0 errors, 12 files checked' | jq -r '.result + ":" + (.reason // "")')" = "pass:" ]
   [ "$(_g '20 files checked, 0 files skipped' | jq -r .result)" = "pass" ]
+  # a fan-out gate: one empty sub-run among real ones is not vacuous
+  [ "$(_g 'no tests ran in a; 300 passed in b' | jq -r .result)" = "pass" ]
 }

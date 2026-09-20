@@ -246,9 +246,11 @@ run_gate() {
   [[ $exit_code -ne 0 ]] && result="fail"
   # A gate that exits 0 while its own output says it looked at nothing did not
   # pass, it did not run. The list is closed and literal on purpose: "0 errors"
-  # is a result, "0 files checked" is an absence.
+  # is a result, "0 files checked" is an absence. A fan-out gate with one empty
+  # sub-run among real ones is not vacuous: any positive count clears it.
   if [[ "$result" == pass ]] && grep -qiE \
-       '(^|[^0-9])0 (source )?files (checked|processed|linted|scanned)|(checked|found|in) 0 (source )?files|collected 0 items|no tests (ran|found)|ran 0 tests|^1\.\.0$' <<<"$output"; then
+       '(^|[^0-9])0 (source )?files (checked|processed|linted|scanned)|(checked|found|in) 0 (source )?files|collected 0 items|no tests (ran|found)|ran 0 tests|^1\.\.0( |$)|\[no test files\]' <<<"$output" \
+     && ! grep -qiE '(^|[^0-9])[1-9][0-9]* (source )?(files?|tests?|items?|passed)|^ok( |$)' <<<"$output"; then
     result="fail"; reason="vacuous_pass"
   fi
 

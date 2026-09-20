@@ -83,6 +83,31 @@ EOF
   [ "$(jq -r '.ac_count' "$EVIDENCE_DIR/plan-diff.json")" = "$(jq -r '.results | length' "$EVIDENCE_DIR/plan-diff.json")" ]
 }
 
+@test "a criterion command that reads stdin does not eat the criteria after it" {
+  cat > "${PLANS_DIR}/P-TEST.md" <<'EOF'
+## Acceptance Criteria
+
+- [ ] AC1: a command that reads stdin
+  ```yaml
+  verification_pattern:
+    type: cmd
+    cmd: "cat >/dev/null"
+    expected_exit: 0
+  ```
+- [ ] AC2: the seed file is there
+  ```yaml
+  verification_pattern:
+    type: must_contain
+    file: "seed.txt"
+    regex: "x"
+  ```
+EOF
+  run bash "$AID_DIFF_SCRIPT" --plan "${PLANS_DIR}/P-TEST.md" --evidence-dir "$EVIDENCE_DIR" --base-commit "$BASE_COMMIT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.results | length' "$EVIDENCE_DIR/plan-diff.json")" = "2" ]
+  [ "$(jq -r '.overall_verdict' "$EVIDENCE_DIR/plan-diff.json")" = "pass" ]
+}
+
 @test "one AC absent: must_not_exist file actually exists → exit 1 + verdict fail" {
   mkdir -p "${TMPDIR_TEST}/ui/src/lib"
   echo "stale" > "${TMPDIR_TEST}/ui/src/lib/unifyExtractedSources.ts"

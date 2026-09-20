@@ -546,6 +546,10 @@ cmd_collect() {
   elif [[ "$generalist_expected" == true && "$generalist_present" == false ]]; then
     status=invalid; reason="no generalist answered"
   fi
+  # A form re-ask is owed whatever the count says: a round that stayed valid
+  # without the role would adjudicate without its whole answer.
+  local reask; reask="$(printf '%s\n' "${invalid[@]}" | jq -rs '[.[] | select(.reason | startswith("form:")) | .role] | join(", ")')"
+  [[ "$status" == valid && -n "$reask" ]] && { status=invalid; reason="form re-ask owed: ${reask}"; }
 
   jq -n --argjson valid "$(_json_strings "${valid[@]}")" \
         --argjson invalid "$(printf '%s\n' "${invalid[@]}" | jq -s '.')" \

@@ -362,6 +362,18 @@ _bracket() {
   echo tiny >> "$R/src/app.py"; git -C "$R" commit -qam tiny; _sc
   run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"verdict is skip"* ]]
 }
+@test "plan: five well-formed answers do not close a round while the sixth is owed a form re-ask" {
+  "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
+  _answer_all; _answer reuse '.findings[0].evidence = "scripts/a.sh:2 (the second line)"'
+  run "$ROUND_SH" collect "$PLAN" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"form re-ask owed: reuse"* ]]
+  [ ! -e "$CP1/round-1/merged.json" ]                       # nothing was adjudicated without the role
+  "$ROUND_SH" retry "$PLAN" --round 1 --role reuse >/dev/null
+  _answer reuse
+  run "$ROUND_SH" collect "$PLAN" --round 1; [ "$status" -eq 0 ]
+  [ "$(jq '.valid | length' "$CP1/round-1/collect.json")" -eq 6 ]
+}
+
 @test "step: an answer whose finding breaks the form goes back to its reviewer once; the second time the finding is dropped as before" {
   _repo; printf 'def f():\n    return 1\n' >> "$R/src/app.py"; git -C "$R" commit -qam more; _sc
   _S prepare --round 1 >/dev/null

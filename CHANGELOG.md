@@ -6,10 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [2.101.1] — 2026-09-20
 
 ### Changed
-- **Brána porovnání plánu neříká „prošlo", když část kritérií přeskočila** — jakékoli přeskočené kritérium dá `overall_verdict: partial`, kritérium bez řádku výsledku `fail`; dřív stačilo jediné ověřené kritérium a čtyři z devíti nepřečtených vyšly zeleně (nalezeno čtením celku na ACTA a WAN).
-- **Brána, která skončí úspěchem nad ničím, neprojde** — `run_gate` zapíše `fail` s důvodem `vacuous_pass`, když výstup sám říká „0 files checked", „collected 0 items", „no tests ran" nebo prázdný plán TAP; počet nula CHYB zůstává výsledkem.
-- **Nález zahozený jen kvůli formě se jednou vrátí revizorovi** — `collect` takovou odpověď vypíše jako neplatnou s důvodem `form: <id> missing_evidence …` a jde běžnou cestou `retry`; druhá vadná odpověď se přijme a nález se zahodí jako dřív.
-- **Přepínače revizí čte jedna funkce** — `aid_review_switched_off` v `lib/aid-review-config.sh` nahradila tři kopie téže smyčky v řídicím skriptu, rozhodnutí o vydání a načítání konfigurace.
+- **Záznam porovnání plánu netvrdí „prošlo", když část kritérií přeskočil** — jakékoli přeskočené kritérium dá `overall_verdict: partial` (nic to neodmítá, jen záznam přestal lhát a revizor kritérií to vidí), kritérium bez řádku výsledku `fail`; příkaz kritéria má zavřený vstup, takže už nesní kritéria za sebou; dřív stačilo jediné ověřené kritérium a čtyři z devíti nepřečtených vyšly zeleně (nalezeno čtením celku na ACTA a WAN).
+- **Brána, která skončí úspěchem nad ničím, neprojde** — `run_gate` zapíše `fail` s důvodem `vacuous_pass`, když výstup sám říká „0 files checked", „collected 0 items", „no tests ran" prázdný plán TAP nebo „[no test files]"; počet nula CHYB zůstává výsledkem a jakýkoli kladný počet ve výstupu podezření ruší.
+- **Nález zahozený jen kvůli formě se jednou vrátí revizorovi** — `collect` takovou odpověď vypíše jako neplatnou s důvodem `form: <id> missing_evidence …` a jde běžnou cestou `retry`; kolo se bez té role neuzavře, ani když splní minimum odpovědí; druhá vadná odpověď se přijme a nález se zahodí jako dřív.
+- **Přepínače revizí čte jedna funkce** — `aid_review_switched_off` v `lib/aid-review-config.sh` nahradila tři kopie téže smyčky v řídicím skriptu, rozhodnutí o vydání a načítání konfigurace; výchozí soubor se všude bere z `AID_PLUGIN_PATH`, když je nastavená.
 
 ### Removed
 - **Přepínač `head_match_policy`** — nečetl ho žádný kód; vstup pořízený na jiném commitu (výsledky bran, kontrola plánu) rozhodnutí o vydání blokuje bezpodmínečně už dnes a řádek registru `c4_head_match_policy` to teď říká jako `active`.
