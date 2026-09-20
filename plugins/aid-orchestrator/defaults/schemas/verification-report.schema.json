@@ -54,8 +54,7 @@
                   "artifact_head_freshness",
                   "protocol_validate",
                   "fingerprint",
-                  "ttl_registry",
-                  "observe_blocking_interpretation"
+                  "ttl_registry"
                 ]
               },
               "status": {

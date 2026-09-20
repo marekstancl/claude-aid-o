@@ -16,7 +16,6 @@
 | protocol_validate | {status} | {detail} |
 | fingerprint | {status} | {detail} |
 | ttl_registry | {status} | {detail} |
-| observe_blocking_interpretation | {status} | {detail} |
 
 ## Result
 

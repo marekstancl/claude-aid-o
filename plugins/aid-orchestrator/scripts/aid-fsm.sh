@@ -54,9 +54,6 @@ fi
 source "${SCRIPT_DIR}/lib/aid-resume-artifact.sh"
 PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
-# Shared plan-boundary review signals — _aid_read_toggle + _aid_validate_test_evidence
-# (B1: one substrate for the FSM compliance checks AND the C4 release aggregator).
-source "${SCRIPT_DIR}/lib/aid-review-signals.sh"
 # Controller plugin-cache staleness guard (P060 Step 5) — defines
 # run_cache_preflight. Sourced AFTER aid-stage-log.sh so log_event already
 # exists (the lib's re-source guard then skips, preserving aid-fsm.sh's die()).
@@ -1225,9 +1222,13 @@ fsm_count_recent_fails_epic() {
   fsm_count_fails_matching '.reason==$r' --arg r "$1"
 }
 
-# fsm_check_review_round <evidence_dir> <checkpoint> [<step>] [--freshness [<tree_root>]]
-#   P094 Step 8: the one precondition of the step review (cp2) and the EPIC
-#   review (cp3). Reads <cp dir>/rounds.json written by aid-step-check.sh (a
+# fsm_check_review_round <evidence_dir> <checkpoint> [<step>] [--freshness [<tree_root>]] [--head <sha>]
+#   --head: the commit the round must have read, when it is not the tree's HEAD
+#   (plan close: the frozen candidate, while the tree may stand on an accepted
+#   ancillary-only move past it).
+#   The one precondition of the step review (cp2), the EPIC review (cp3) and
+#   the whole-plan review (cp7, <evidence_dir> = the plan-final run directory,
+#   called by plan-finalize --stage decide). Reads <cp dir>/rounds.json written by aid-step-check.sh (a
 #   skip or no_change verdict) or by aid-review-round.sh close (pass or fail):
 #     skip       passes only with a step_check timeline event whose head_sha and
 #                sha256 match the step check, computed at HEAD (skip_unbound,
@@ -1240,18 +1241,20 @@ fsm_count_recent_fails_epic() {
 #                fixture or evidence churn with a CP3-Freshness-Exception trailer
 #                on every commit past the reviewed head (P060 Step 4, kept)
 #     fail       blocks naming the index
-#   cp3 additionally requires <evidence_dir>/semantic-review-final.json when a
-#   round ran (the routed-findings reconciliation reads it).
+#   cp3 and cp7 additionally require <evidence_dir>/semantic-review-final.json
+#   when a round ran (the routed-findings reconciliation and the release
+#   decision read it).
 #   A disabled checkpoint (review_checkpoints.enabled or its own toggle false)
 #   passes with a review_checkpoint_disabled audit line.
 #   Registry: fsm_review_round_required, fsm_review_round_head_bound,
 #   fsm_review_round_skip_bound. Tested by test-review-round-fsm.bats.
 fsm_check_review_round() {
-  local evidence_dir="$1" cp="$2" step="${3:-}" freshness=0 tree_root="$PWD"
+  local evidence_dir="$1" cp="$2" step="${3:-}" freshness=0 tree_root="$PWD" expected_head=""
   shift 3 2>/dev/null || shift $#
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --freshness) freshness=1; [[ -n "${2:-}" && "${2:-}" != --* ]] && { tree_root="$2"; shift; }; shift ;;
+      --head) expected_head="${2:-}"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -1259,6 +1262,7 @@ fsm_check_review_round() {
   case "$cp" in
     cp2) cpdir="${evidence_dir}/cp2/step-${step}"; toggle=cp2_step_review ;;
     cp3) cpdir="${evidence_dir}/cp3"; toggle=cp3_integration_review ;;
+    cp7) cpdir="${evidence_dir}/cp7"; toggle=cp7_plan_final_review ;;
     *) echo "PRECONDITION FAIL: fsm_check_review_round: unknown checkpoint ${cp}" >&2; return 1 ;;
   esac
   index="${cpdir}/rounds.json"
@@ -1289,6 +1293,7 @@ fsm_check_review_round() {
   done
 
   local how_to="run: bash \$AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint ${cp}${step:+ --step $step} --evidence-dir ${evidence_dir}; then, for a review verdict, aid-review-round.sh prepare/collect/close (commands/aid-run.md \"Step review (CP2) and EPIC review (CP3)\")"
+  [[ "$cp" == cp7 ]] && how_to="run: plan-finalize --stage produce, then bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare|collect|close --checkpoint cp7 --evidence-dir ${evidence_dir} --round 1"
   if [[ ! -f "$index" ]]; then
     _PRECONDITION_FAIL_REASON="review_round_missing"
     echo "PRECONDITION FAIL: no review round index for ${cp}${step:+ step $step} (${index} missing). ${how_to}" >&2
@@ -1297,7 +1302,8 @@ fsm_check_review_round() {
   local verdict head_sha
   verdict="$(jq -r '.verdict // ""' "$index" 2>/dev/null)" || { echo "PRECONDITION FAIL: ${index} does not parse" >&2; return 1; }
   head_sha="$(jq -r '.head_sha // ""' "$index" 2>/dev/null)"
-  local current_head; current_head="$(git -C "$tree_root" rev-parse HEAD 2>/dev/null || echo "")"
+  local current_head="$expected_head"
+  [[ -n "$current_head" ]] || current_head="$(git -C "$tree_root" rev-parse HEAD 2>/dev/null || echo "")"
 
   case "$verdict" in
     skip|no_change)
@@ -1356,9 +1362,9 @@ fsm_check_review_round() {
     return 1
   fi
   local reviewed_head; reviewed_head="$(jq -r '.head_sha // ""' "${dir}/round.json")"
-  if [[ "$cp" == cp3 && ! -f "${evidence_dir}/semantic-review-final.json" ]]; then
+  if [[ "$cp" != cp2 && ! -f "${evidence_dir}/semantic-review-final.json" ]]; then
     _PRECONDITION_FAIL_REASON="semantic_review_missing"
-    echo "PRECONDITION FAIL: the cp3 round closed but ${evidence_dir}/semantic-review-final.json is missing (the cp3 close writes it for the routed-findings reconciliation); run aid-review-round.sh close again." >&2
+    echo "PRECONDITION FAIL: the ${cp} round closed but ${evidence_dir}/semantic-review-final.json is missing (the ${cp} close writes it); run aid-review-round.sh close again." >&2
     return 1
   fi
   [[ "$reviewed_head" == "$current_head" ]] && return 0
@@ -1412,82 +1418,6 @@ fsm_check_review_round() {
   local files_csv=""
   (( ${#changed_files[@]} )) && { files_csv=$(printf '%s,' "${changed_files[@]}"); files_csv="${files_csv%,}"; }
   [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_exception" reviewed_head="$reviewed_head" head="$current_head" changed_file_count="${#changed_files[@]}" changed_files="$files_csv"
-  return 0
-}
-
-# Validate a verifier-output-cp4-curator-validation.md file (its only caller since P094 is CP4 in fsm_check_orphan_dispatches; cp2/cp3 are fsm_check_review_round).
-# Returns 0 (pass) if file exists + has non-empty _generated_by + _generated_at
-# + valid classification. For RUN/FAIL/FULL_REVIEW also requires non-empty
-# verdict != "pending" (verifier ran). Aligned with agents/verifier.md CP4
-# output contract.
-# Structural gate (v2.35+): behavior_trace_count > 0 when behavior_trace_required: true.
-# Gate is opt-in (only fires when behavior_trace_required is explicitly "true").
-# CP6 is advisory and never reaches this check via the FSM flow.
-fsm_check_verifier_output() {
-  local file=$1
-  # Each refusal names its reason on stderr (verifier_output_invalid: …), so a
-  # caller's "missing or invalid" is never the whole story (agents #3: three
-  # verifier rounds were re-run for a missing `classification:` line).
-  if [[ ! -f "$file" ]]; then
-    echo "verifier_output_invalid: ${file}: file missing" >&2
-    # Diagnostic only, never accepted: a verifier given a bare file name
-    # writes it where it stands (acta #32) — say so, so the review is moved,
-    # not re-run.
-    local _stray="${PWD}/$(basename "$file")"
-    [[ -f "$_stray" && "$_stray" != "$file" ]] \
-      && echo "verifier_output_invalid: a file with that name exists at ${_stray} — it was written outside the evidence dir; move it to ${file} (the validator never reads it from there)" >&2
-    return 1
-  fi
-  grep -q '^_generated_by:' "$file" || { echo "verifier_output_invalid: ${file}: no _generated_by: line" >&2; return 1; }
-  grep -q '^_generated_at:' "$file" || { echo "verifier_output_invalid: ${file}: no _generated_at: line" >&2; return 1; }
-  grep -q '^classification:' "$file" || { echo "verifier_output_invalid: ${file}: no classification: line (CP3 verifiers write classification: FULL_REVIEW themselves)" >&2; return 1; }
-
-  local generated_by generated_at classification
-  generated_by=$(yaml_field "$file" _generated_by)
-  [[ -z "$generated_by" ]] && { echo "verifier_output_invalid: ${file}: _generated_by is empty" >&2; return 1; }
-  generated_at=$(yaml_field "$file" _generated_at)
-  [[ -z "$generated_at" ]] && { echo "verifier_output_invalid: ${file}: _generated_at is empty" >&2; return 1; }
-
-  # P079 Step 4 (IMP-472): these two fields are the only ones a HUMAN-facing
-  # agent writes by hand, and they carry OPPOSITE casing conventions —
-  # classification uppercase, verdict lowercase — so a verifier that followed
-  # the template's `## Result: PASS` into the verdict field had its whole
-  # review rejected for the casing. Equivalent forms are normalized; genuinely
-  # unknown values (`banana`, `PASSED`) still fail loudly. Only the extracted
-  # TOKEN is lowercased — the evidence file's bytes are never touched.
-  classification=$(yaml_field "$file" classification)
-  case "${classification,,}" in
-    skip)
-      grep -q '^reason:' "$file" || return 1
-      ;;
-    run|fail|full_review)
-      grep -q '^verdict:' "$file" || { echo "verifier_output_invalid: ${file}: no verdict: line" >&2; return 1; }
-      local verdict
-      verdict=$(yaml_field "$file" verdict)
-      case "${verdict,,}" in
-        pass|fail) ;;          # only valid completed verdicts
-        pending)   echo "verifier_output_invalid: ${file}: verdict is still 'pending' — the verifier was not dispatched, or did not write its verdict" >&2; return 1 ;;
-        *)         echo "verifier_output_invalid: ${file}: verdict '${verdict}' is not pass|fail" >&2; return 1 ;;
-      esac
-      ;;
-    *)
-      echo "verifier_output_invalid: ${file}: classification '${classification}' is not SKIP|RUN|FAIL|FULL_REVIEW" >&2; return 1
-      ;;
-  esac
-
-  # Structural gate: behavior_trace_count > 0 when required for high-risk diffs (v2.35+).
-  # Only fires when verifier output explicitly sets behavior_trace_required: true.
-  local behavior_trace_required
-  behavior_trace_required=$(yaml_field "$file" behavior_trace_required)
-  if [[ "$behavior_trace_required" == "true" ]]; then
-    local behavior_trace_count
-    behavior_trace_count=$(yaml_field "$file" behavior_trace_count)
-    # Fail if count is missing, empty, zero, negative, or non-numeric
-    if [[ -z "$behavior_trace_count" || ! "$behavior_trace_count" =~ ^[1-9][0-9]*$ ]]; then
-      return 1
-    fi
-  fi
-
   return 0
 }
 
@@ -1710,142 +1640,6 @@ fsm_check_orphan_dispatches() {
   die "missing_dispatch_complete: $(echo "$orphan_focuses" | head -3 | tr '\n' ' ')"
 }
 
-# fsm_check_cp4_curator_validation — Component C of P040 (Dispatch Lifecycle
-# Enforcement Bundle). Requires verifier-output-cp4-curator-validation.md when
-# curator-report.md exists AND any commit in base_commit..HEAD range touches
-# production code paths.
-#
-# Empirical anchor: NR 10 §3B + NR 12 (curator changes production code without
-# CP4 review). Enforcement principle: AID-v3-principles.md §1.
-fsm_check_cp4_curator_validation() {
-  local evidence_dir="$1"
-  local project_root="$2"
-  local state_file="${3:-}"
-  # P074 Step 1: this helper is MIXED — it reads project STATE
-  # (.aid-o/config/execution.yaml, below) and it runs TREE git commands whose
-  # `HEAD` is branch-specific. Since done-advance's project_root is now the
-  # PRIMARY state root, the tree the run's commits actually live on is passed
-  # separately. Optional and defaulting to project_root, so every existing
-  # caller (and every fixture that passes a repo path as project_root while
-  # standing somewhere else) keeps its exact previous behaviour.
-  local tree_root="${4:-$project_root}"
-  local curator_report="${evidence_dir}/curator-report.md"
-
-  # No curator commit = no CP4 needed; skip silently.
-  [[ ! -f "$curator_report" ]] && return 0
-
-  # P040 Component D coordination: streamlined mode treats CP4 as advisory.
-  local streamlined
-  streamlined=$(yq -r '.streamlined_mode // false' "$state_file" 2>/dev/null || echo "false")
-  if [[ "$streamlined" == "true" ]]; then
-    fsm_emit_audit_log "cp4_skipped_streamlined_advisory" \
-      --evidence-dir "$evidence_dir" --reason "streamlined_mode CP4 advisory per spec"
-    return 0
-  fi
-
-  # Resolve base_commit from the FSM state file — scan the FULL EPIC range, not
-  # just HEAD. The state file is written as fsm-state.yaml in production but some
-  # callers/fixtures name it state.yaml; accept either (P040 Step 3 reconciliation).
-  local fsm_state_file="${evidence_dir}/fsm-state.yaml"
-  [[ ! -f "$fsm_state_file" && -f "${evidence_dir}/state.yaml" ]] && fsm_state_file="${evidence_dir}/state.yaml"
-  local base_commit
-  base_commit=$(yq -r '.base_commit' "$fsm_state_file" 2>/dev/null)
-  [[ -z "$base_commit" || "$base_commit" == "null" ]] && return 0  # fsm-state unreadable; conservative skip
-
-  # Resolve production-code glob (configurable per project; /aid-init auto-detects)
-  local prod_paths
-  prod_paths=$(yq -r '.cp4_production_paths // "plugins/|scripts/|src/|lib/|api/"' \
-                "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null \
-                || echo "plugins/|scripts/|src/|lib/|api/")
-  [[ -z "$prod_paths" || "$prod_paths" == "null" ]] && prod_paths="plugins/|scripts/|src/|lib/|api/"
-
-  # LOW-1: validate the prod_paths ERE before relying on a no-match result.
-  # grep returns 0=match, 1=no-match, >=2=error (e.g. bad ERE). The old pipeline
-  # swallowed ALL non-zero exits via `|| true`, so a malformed cp4_production_paths
-  # regex looked identical to "no production files touched" → CP4 silently disabled.
-  # FAIL CLOSED on malformed ERE: cannot prove production was NOT touched, so CP4
-  # is required. Capture grep's raw exit code directly (not via `! ...`, which
-  # would rewrite $? to 0/1).
-  local grep_probe_rc=0
-  printf '' | grep -E "^(${prod_paths})" >/dev/null 2>&1 || grep_probe_rc=$?
-  if [[ "$grep_probe_rc" -ge 2 ]]; then
-    fsm_emit_audit_log "cp4_glob_invalid" \
-      --evidence-dir "$evidence_dir" \
-      --glob "$prod_paths" \
-      --reason "cp4_production_paths_invalid_ere"
-    echo "ERROR: cp4_production_paths is not a valid ERE — cannot evaluate CP4 (production-touch detection)." >&2
-    echo "  Glob: ${prod_paths}" >&2
-    echo "  Fix the glob in .aid-o/config/execution.yaml, OR override (audited):" >&2
-    echo "    aid-fsm.sh done-advance review release <state_file> --force \\" >&2
-    echo "        --reason '<≥20 chars why skipping CP4 is acceptable>' \\" >&2
-    echo "        --blocked-checks 'cp4_curator_validation'" >&2
-    die "cp4_glob_invalid"
-  fi
-
-  # Telemetry: log which glob and range were evaluated (cp4_glob_evaluated — previously
-  # documented in agent-protocol.md:278 but never emitted; wired in E-046-1_3 Step 4).
-  fsm_emit_audit_log "cp4_glob_evaluated" \
-    --base "$base_commit" \
-    --evidence-dir "$evidence_dir" \
-    --glob "$prod_paths"
-
-  # Did ANY commit in base_commit..HEAD touch production paths?
-  # `|| true` guards against set -euo pipefail aborting when grep finds no match
-  # (exit 1) — the no-touch case is the legitimate skip path, not an error.
-  local touched_prod
-  touched_prod=$(git -C "$tree_root" diff --name-only "${base_commit}..HEAD" 2>/dev/null \
-                   | grep -E "^(${prod_paths})" | head -1 || true)
-
-  if [[ -z "$touched_prod" ]]; then
-    # No production touch in EPIC range — emit non-blocking telemetry.
-    fsm_emit_audit_log "cp4_skip_no_prod_match" \
-      --base "$base_commit" \
-      --evidence-dir "$evidence_dir" \
-      --glob "$prod_paths"
-    return 0
-  fi
-
-  # Check for CP4 review file and validate its content via the shared verifier validator.
-  local cp4_file="${evidence_dir}/verifier-output-cp4-curator-validation.md"
-  if [[ -f "$cp4_file" ]]; then
-    fsm_check_verifier_output "$cp4_file" || {
-      echo "ERROR: verifier-output-cp4-curator-validation.md is present but invalid." >&2
-      echo "  Missing or empty: _generated_by, _generated_at, or classification." >&2
-      echo "  Re-dispatch CP4 verifier and overwrite the file with a valid output." >&2
-      die "cp4_invalid_content"
-    }
-    return 0
-  fi
-
-  # Hard fail with structured error
-  echo "ERROR: CP4 (curator-validation) review missing — cannot advance to release." >&2
-  echo "  EPIC range examined: ${base_commit}..HEAD" >&2
-  echo "  Production-code paths touched: $touched_prod (plus possibly others; first match shown)" >&2
-  echo "  Required file: $cp4_file" >&2
-  echo "" >&2
-  echo "Fix: dispatch curator-validation verifier and write its output to:" >&2
-  echo "  $cp4_file" >&2
-  echo "" >&2
-  echo "OR (PM-authorized override, audited):" >&2
-  echo "  aid-fsm.sh done-advance review release <state_file> --force \\" >&2
-  echo "      --reason '<≥20 chars why this skip is acceptable>' \\" >&2
-  echo "      --blocked-checks 'cp4_curator_validation'" >&2
-
-  fsm_emit_audit_log "cp4_missing_fail" \
-    --base "$base_commit" \
-    --touched-prod "$touched_prod" \
-    --evidence-dir "$evidence_dir"
-
-  # E-059-2_2 Step 5: this die() preempts the C4 dual-run slot in cmd_done_advance
-  # (caller `return 1` unreachable — helper dies internally). Observe telemetry
-  # (sampling-bias fix) before the hard-exit; no gate behavior change. tree_root
-  # is param $4 of this function (defaulting to project_root, param $2).
-  log_event "${evidence_dir}/timeline.jsonl" "release_policy_preempted" \
-    gate="cp4_curator" \
-    head_sha="$(git -C "$tree_root" rev-parse HEAD 2>/dev/null || echo unknown)"
-  die "missing_cp4_curator_validation"
-}
-
 # fsm_check_streamlined_integration_review — Component D of P040. When
 # streamlined_mode is true, refuse done-advance review→release unless all three
 # integration-review evidence files exist. Closes the documented contract into
@@ -1895,12 +1689,6 @@ fsm_check_streamlined_integration_review() {
     echo "      --blocked-checks 'streamlined_integration_review'" >&2
     fsm_emit_audit_log "streamlined_integration_review_fail" \
       --evidence-dir "$evidence_dir" --missing "${joined}"
-    # E-059-2_2 Step 5: this die() preempts the C4 dual-run slot in cmd_done_advance
-    # (the caller's `return 1` is unreachable — this helper dies internally). Observe
-    # telemetry (sampling-bias fix) before the hard-exit; no gate behavior change.
-    log_event "${evidence_dir}/timeline.jsonl" "release_policy_preempted" \
-      gate="streamlined_integration" \
-      head_sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     die "streamlined_integration_review"
   fi
   log_event "${evidence_dir}/timeline.jsonl" "streamlined_integration_review_gates_source" \
@@ -1935,12 +1723,6 @@ fsm_check_streamlined_abandoned() {
     echo "      --blocked-checks 'streamlined_abandoned'" >&2
     fsm_emit_audit_log "streamlined_abandoned_fail" \
       --evidence-dir "$evidence_dir" --event-count "$event_count"
-    # E-059-2_2 Step 5: this die() preempts the C4 dual-run slot in cmd_done_advance
-    # (caller `return 1` unreachable — helper dies internally). Observe telemetry
-    # (sampling-bias fix) before the hard-exit; no gate behavior change.
-    log_event "${evidence_dir}/timeline.jsonl" "release_policy_preempted" \
-      gate="streamlined_abandoned" \
-      head_sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     die "streamlined_abandoned"
   fi
   return 0
@@ -2274,85 +2056,6 @@ try_telegram_alert() {
 # the per-EPIC compliance.json + emits the `compliance_written` timeline event.
 
 
-# ─── P045: delivery_report_present (plan-boundary structural presence check) ──
-# Echoes a JSON literal — null | true | false — for the delivery report at the
-# plan boundary. Surfaced ONLY through the existing _blocking_count severity gate
-# in cmd_done_advance review→release (advisory by default; no die(), no new gate).
-#   null  — plan boundary NOT reached for this EPIC (no ca-review-complete marker),
-#           or yq unavailable (conservative not-applicable; never a failure).
-#   true  — at boundary AND .aid-o/reports/{plan_id}-delivery.md exists AND its
-#           _test_evidence[] references >=1 file present on disk under evidence_dir.
-#   false — at boundary AND report missing, OR no _test_evidence references a file
-#           that exists on disk (advisory failure; release still proceeds).
-# plan_id is derived from epic_id (E-045-1_1 -> P045). The report is one plan-level
-# fact, so every EPIC of the plan resolves it identically once the marker exists.
-fsm_eval_delivery_report_present() {
-  local epic_id="$1" evidence_dir="$2" project_root="$3"
-
-  # Plan-boundary signal: ca-review-complete marker in this EPIC's evidence dir.
-  # Before the boundary the check is not applicable → null (cannot false-fail a
-  # non-final EPIC).
-  [[ -f "${evidence_dir}/ca-review-complete" ]] || { echo null; return 0; }
-
-  # Frontmatter inspection needs yq; conservative null if absent.
-  command -v yq >/dev/null 2>&1 || { echo null; return 0; }
-
-  # Derive plan_id from epic_id (E-045-1_1 -> P045).
-  local plan_num plan_id
-  plan_num=""
-  [[ "$epic_id" =~ ^E-([0-9]+) ]] && plan_num="${BASH_REMATCH[1]}"
-  [[ -z "$plan_num" ]] && { echo null; return 0; }
-  plan_id="P${plan_num}"
-
-  local report="${project_root}/.aid-o/reports/${plan_id}-delivery.md"
-  [[ -f "$report" ]] || { echo false; return 0; }
-
-  # _test_evidence[] validation lives in the shared lib (B1) so this FSM check and
-  # the C4 release aggregator read one substrate. Echoes true|false; the yq guard
-  # inside is defensive (this function already returned null above when yq is
-  # missing, so the external behavior here is byte-identical to the prior inline
-  # block: report present + >=1 in-tree _test_evidence path on disk → true, else false).
-  _aid_validate_test_evidence "$report" "$evidence_dir"
-}
-
-# ─── Helper: read toggle status from execution.yaml ──────────────────────────
-# _aid_read_toggle is now provided by lib/aid-review-signals.sh (sourced at the
-# top of this file) — one substrate shared with the C4 release aggregator (B1).
-# Callers here (fsm_eval_simplifier_present, cmd_plan_close) are unchanged.
-
-# ─── E-046-2_3 Step 4: simplifier_report_present (plan-boundary measurement) ──
-# null  — plan boundary not reached (no ca-review-complete marker), OR
-#         simplifier.enabled:false in execution.yaml (N/A; no report expected).
-# true  — at boundary AND simplifier-report.md present in evidence_dir.
-# false — at boundary AND simplifier-report.md missing (advisory; never blocks).
-# MEASUREMENT ONLY — enforcement in a future step.
-fsm_eval_simplifier_present() {
-  local epic_id="$1" evidence_dir="$2" project_root="$3"
-
-  # Plan-boundary signal: ca-review-complete marker in this EPIC's evidence dir.
-  [[ -f "${evidence_dir}/ca-review-complete" ]] || { echo null; return 0; }
-
-  # Respect simplifier.enabled:false toggle in execution.yaml — N/A when disabled.
-  # P083 Step 6: ONLY rc=1 (explicit enabled:false) is disabled. rc=2
-  # (unreadable/malformed) falls through and is treated as enabled — fail
-  # closed: the measurement still runs rather than reporting N/A on a config
-  # this function could not evaluate. _aid_read_toggle's own stderr line
-  # names the file and section.
-  local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
-  local toggle_rc=0
-  _aid_read_toggle "$exec_yaml" "simplifier" || toggle_rc=$?
-  if (( toggle_rc == 1 )); then
-    echo null
-    return 0
-  fi
-
-  if [[ -f "${evidence_dir}/simplifier-report.md" ]]; then
-    echo true
-  else
-    echo false
-  fi
-}
-
 evaluate_compliance_checks() {
   local epic_id=$1 state_file=$2 evidence_dir=$3 project_root=$4
 
@@ -2448,14 +2151,6 @@ evaluate_compliance_checks() {
     plan_ac_match=null  # plan-diff.json missing — backward compat, treated as skip
   fi
 
-  # P045: delivery_report_present — plan-boundary structural presence (null/true/false).
-  local delivery_report_present
-  delivery_report_present=$(fsm_eval_delivery_report_present "$epic_id" "$evidence_dir" "$project_root")
-
-  # E-046-2_3 Step 4: simplifier_report_present — measurement only (advisory).
-  local simplifier_report_present
-  simplifier_report_present=$(fsm_eval_simplifier_present "$epic_id" "$evidence_dir" "$project_root")
-
   jq -nc \
     --argjson bc          "$branch_correct" \
     --argjson eyp         "$exec_yaml_present" \
@@ -2468,8 +2163,6 @@ evaluate_compliance_checks() {
     --argjson cp3v        "$cp3_v" \
     --argjson cp3_round   "$cp3_round_json" \
     --argjson agg         "$aggregate" \
-    --argjson drp         "$delivery_report_present" \
-    --argjson srp         "$simplifier_report_present" \
     '{
       branch_correct:         $bc,
       execution_yaml_present: $eyp,
@@ -2485,9 +2178,7 @@ evaluate_compliance_checks() {
         cp3_round:                  $cp3_round,
         aggregate:                  $agg
       },
-      dod_present: null,
-      delivery_report_present: $drp,
-      simplifier_report_present: $srp
+      dod_present: null
     }'
 }
 
@@ -2597,13 +2288,13 @@ write_compliance_json() {
   fi
 
   # P040 Component D: emit coverage_mode + skipped_dimensions so the aggregator
-  # can distinguish streamlined runs (which legitimately skip per-step CP2 and
-  # CP4 curator validation) from full runs that are missing that evidence.
+  # can distinguish streamlined runs (which legitimately skip per-step CP2)
+  # from full runs that are missing that evidence.
   local streamlined mode_value skipped_dims
   streamlined=$(yq -r '.streamlined_mode // false' "$state_file" 2>/dev/null || echo "false")
   if [[ "$streamlined" == "true" ]]; then
     mode_value="streamlined"
-    skipped_dims='["verifier_outputs.cp2_rounds","verifier_outputs.cp4_curator_validation"]'
+    skipped_dims='["verifier_outputs.cp2_rounds"]'
   else
     mode_value="full"
     skipped_dims='[]'
@@ -2979,8 +2670,8 @@ EOF
             rm -f "$_gp_paths_file"
           fi
           # risk_base_commit empty (fsm-state unreadable/malformed) → required_profile
-          # stays "" — conservative no-op, same fallback fsm_check_cp4_curator_validation
-          # uses; we cannot prove a floor we cannot compute, never guess or fail loud on it.
+          # stays "" — conservative no-op: we cannot prove a floor we cannot compute,
+          # never guess or fail loud on it.
 
           if [[ -n "$required_profile" ]]; then
             local active_rank required_rank
@@ -3136,126 +2827,6 @@ EOF
 }
 
 # ─── Commands ───────────────────────────────────────────────────────────
-
-# ═══════════════════════════════════════════════════════════════════════════
-# PM ESCALATION OVERRIDE — the producer (P073 Step 10)
-#
-# One artifact schema for BOTH bounded review loops. Housed here as an
-# aid-fsm.sh subcommand rather than a new script: this is the operator's
-# existing entry point, and the override is a lifecycle action, not a review
-# internal.
-#
-#   aid-fsm.sh pm-override grant c3 <plan_id> --reason "<text >=20>"
-#              [--project-root <path>] [--evidence-root <path>]
-#
-# Writes c3-pm-escalation-override.json (`{pm_ref}` shape), claimed atomically
-# and exactly once by the C3 loop. Plan review (CP1) has its own PM record:
-# aid-review-round.sh override.
-#
-# THE ARTIFACT IS NOT WRITTEN BY AGENTS. It is the PM's decision made
-# physical; an agent creating one would be forging the authorisation it is
-# meant to be bounded by.
-# ═══════════════════════════════════════════════════════════════════════════
-cmd_pm_override() {
-  local action="${1:-}"; shift || true
-  case "$action" in
-    grant) : ;;
-    ""|-h|--help)
-      echo "Usage: aid-fsm.sh pm-override grant c3 <plan_id> --reason '<text>' [--project-root <path>] [--evidence-root <path>]" >&2
-      exit 1 ;;
-    *)
-      echo "ERROR: pm-override: unknown action '${action}' (only 'grant' exists)." >&2
-      exit 2 ;;
-  esac
-
-  local target="${1:-}"; shift || true
-  local plan_id="${1:-}"; shift || true
-  # P074 Step 1: the DEFAULT project root is STATE — the grant
-  # artifact must land where its consumer looks, i.e. under the PRIMARY .aid-o, not in whatever tree the PM happened
-  # to stand in. An explicit --project-root still wins verbatim. Legacy "."
-  # kept as the last resort for cwds no root can be derived from.
-  local reason="" project_root="" evidence_root=""
-  project_root="$(aid_state_root 2>/dev/null || printf '%s' ".")"
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --reason)        reason="${2:-}"; shift 2 ;;
-      # An explicit root is canonicalized exactly like AID_PROJECT_ROOT: a flag
-      # pointing into a linked worktree must reach the primary state, never
-      # recreate a worktree-local .aid-o.
-      --project-root)  project_root="$(aid_canonicalize_project_root "${2:-}" 2>/dev/null || printf '%s' "${2:-}")"; shift 2 ;;
-      --evidence-root) evidence_root="${2:-}"; shift 2 ;;
-      --*) echo "ERROR: pm-override grant: unknown flag: $1" >&2; exit 2 ;;
-      *) shift ;;
-    esac
-  done
-
-  case "$target" in
-    c3) : ;;
-    c0) echo "ERROR: pm-override grant: 'c0' is gone with the Codex plan review loop; a PM decision on plan review rounds is recorded with aid-review-round.sh override --plan <plan>." >&2; exit 2 ;;
-    *) echo "ERROR: pm-override grant: target must be 'c3' (got '${target:-<empty>}')." >&2; exit 2 ;;
-  esac
-  [[ "$plan_id" =~ ^P[0-9]{3}$ ]] || {
-    echo "ERROR: pm-override grant: plan_id must match ^P[0-9]{3}\$ (got '${plan_id:-<empty>}')." >&2
-    exit 2
-  }
-  if [[ "${#reason}" -lt 20 ]]; then
-    echo "ERROR: pm-override grant: --reason must be at least 20 characters (got ${#reason})." >&2
-    echo "  The reason IS the authorisation record — a bounded review loop that can be" >&2
-    echo "  reopened without a stated reason is not bounded at all." >&2
-    exit 2
-  fi
-  command -v jq >/dev/null 2>&1 || { echo "ERROR: pm-override grant: jq is required." >&2; exit 2; }
-
-  # Resolve where the consumer will look: the run evidence dir recorded in the
-  # C3 loop state, which the caller supplies with --evidence-root when it is not
-  # the plan evidence root.
-  local dir
-  if [[ -n "$evidence_root" ]]; then
-    dir="$evidence_root"
-  else
-    dir="${project_root}/.aid-o/work/evidence/${plan_id}"
-  fi
-  local out="${dir}/c3-pm-escalation-override.json"
-
-  if [[ ! -d "$dir" ]]; then
-    mkdir -p "$dir" 2>/dev/null || {
-      echo "ERROR: pm-override grant: cannot create the evidence root ${dir}. Pass --evidence-root if the consumer looks elsewhere." >&2
-      exit 1
-    }
-  fi
-  # Never overwrite an unconsumed grant: two grants in flight would let one
-  # PM decision authorise two attempts.
-  if [[ -e "$out" ]]; then
-    echo "ERROR: pm-override grant: an UNCONSUMED override already exists at ${out}. It authorises exactly one further attempt; let it be claimed before granting another." >&2
-    exit 1
-  fi
-
-  local now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  local tmp="${out}.tmp.$$"
-  jq -n --arg ref "$reason" --arg plan "$plan_id" --arg t "$target" --arg now "$now" \
-    --arg op "${USER:-unknown}" \
-    '{schema_version:"aid-2.0", artifact_type:"pm_escalation_override",
-      target:$t, plan_id:$plan, pm_ref:$ref, created_at:$now,
-      origin:"grant", granted_by:$op}' > "$tmp" 2>/dev/null || {
-    rm -f "$tmp" 2>/dev/null || true
-    echo "ERROR: pm-override grant: could not write ${out}." >&2
-    exit 1
-  }
-  # ATOMIC PUBLISH, same shape as the claim primitive. A plain `mv` overwrites
-  # its destination, so two PMs granting concurrently both passed the existence
-  # check above, both wrote, and the later one silently replaced the earlier
-  # artifact while BOTH commands printed "Granted" — one PM decision lost
-  # without a trace (adversarial-review finding). `mv -n` plus the mandatory
-  # tmp-gone post-check makes the loser say so instead. The post-check is not
-  # optional: on the installed coreutils 9.1 a SKIPPED `mv -n` still exits 0.
-  if ! mv -n "$tmp" "$out" 2>/dev/null || [[ -e "$tmp" ]]; then
-    rm -f "$tmp" 2>/dev/null || true
-    echo "ERROR: pm-override grant: an override for ${plan_id} was granted concurrently and is already at ${out} — NOTHING was written by this call. It authorises exactly one further attempt; let it be claimed before granting another." >&2
-    exit 1
-  fi
-  echo "Granted a single-use ${target} escalation override for ${plan_id} at ${out}" >&2
-  echo "$out"
-}
 
 
 # _fsm_resume_artifact_preflight <epic_id> — P076 Step 4.
@@ -3481,8 +3052,7 @@ _resume_other_jobs_live() {
   return 1
 }
 
-# _resume_claim <artifact> — THE single-use claim. Same primitive the shipped
-# pm-override path uses, not a second one: `mv -n` plus a MANDATORY
+# _resume_claim <artifact> — THE single-use claim: `mv -n` plus a MANDATORY
 # source-gone post-check, because on the installed coreutils a SKIPPED `mv -n`
 # still exits 0. Winner: prints the claim path, rc 0. Loser: prints the
 # WINNER's claim file (so the race's losing output names who took it), rc 1.
@@ -5194,41 +4764,6 @@ cmd_advance_to_gates() {
     # check_preconditions re-validates _generated_by, CP3 outputs, grandfather logic.
     # The runner just wrote gates_report.json with _generated_by, so the check passes.
     if cmd_transition EXECUTE GATES "$state_file"; then
-      # D0 gate point — observe-mode delivery gate (E2, E-050).
-      # Runs after last EXECUTE step and successful EXECUTE→GATES transition.
-      # Non-blocking: never fails the transition regardless of exit code or findings.
-      local _d0_script="${SCRIPT_DIR}/aid-delivery-gate.sh"
-      local _d0_policy="${SCRIPT_DIR}/../defaults/policies/delivery-gate.yaml"
-      if [[ -f "$_d0_script" ]]; then
-        local _d0_base_sha _d0_output _d0_exit=0
-        _d0_base_sha=$(yaml_field "$state_file" base_commit)
-        # P074 Step 1 (review round 2): canonicalize before exporting to the
-        # D0 subprocess — a raw worktree path must never be handed down as
-        # AID_PROJECT_ROOT. Legacy expression kept only when nothing resolves.
-        local _d0_project_root
-        _d0_project_root="$(aid_state_root 2>/dev/null || pwd)"
-        # The tree the gate MEASURES is this run's checkout (after the
-        # worktree re-exec above, $PWD); the state root only says where the
-        # evidence and the delivery map live. Before this the gate read HEAD
-        # from the primary checkout and stamped the artifact head_is_current
-        # against a tree the run never touched (agents #8).
-        _d0_output=$(
-          DELIVERY_GATE_POLICY="$_d0_policy" \
-          AID_EVIDENCE_BASE="${_d0_project_root}/.aid-o/work/evidence" \
-          AID_PROJECT_ROOT="$_d0_project_root" \
-          AID_GIT_TREE="$PWD" \
-          timeout 300 bash "$_d0_script" \
-            --epic "$epic_id" --run "$run_id" \
-            --base "${_d0_base_sha:-HEAD~1}" \
-            --phase D0 2>&1
-        ) || _d0_exit=$?
-        [[ -n "$timeline" ]] && log_event "$timeline" "d0_delivery_gate" \
-          exit_code="${_d0_exit}" \
-          observe="true" \
-          epic="${epic_id}" \
-          run="${run_id}"
-      fi
-      # D0 is observe-only — never fail the transition
       echo "advance-to-gates: SUCCESS — gates passed, state=GATES"
       return 0
     else
@@ -6335,59 +5870,9 @@ cmd_amend_scope() {
 # ─── DONE Sub-Phase Advancement ─────────────────────────────────────────
 # Phases within DONE: review → release
 # Preconditions for review → release:
-#   - curator-report exists (curator agent ran)
-#   - audit-report exists (auditor agent ran)
 #   - pm_decision field set to "merge"
 
 VALID_DONE_PHASES="review release"
-
-# ─── C4 dual-run divergence classifier (E-059-2_2 Step 5) ────────────────
-# _c4_divergence_class <match> <c4_ready> <blocker_count> <blocker_ids_newline_sep>
-# Maps a (match, C4 release_ready, C4 blocker-set) tuple onto the TOTAL 7-class
-# divergence taxonomy, evaluated in strict PRECEDENCE ORDER. MECE + fail-closed:
-# it ALWAYS prints exactly one non-empty class (never null/empty), so every
-# release_policy_dual_run event carries a divergence_class. Pure function (no
-# side effects) → unit-testable by sourcing aid-fsm.sh. blocker_ids are the
-# canonical .release_decision.blockers[].input_id literals emitted by
-# aid-release-policy.sh (note: semantic_review_final, not semantic_review).
-_c4_divergence_class() {
-  local match="$1" c4_ready="$2" bcount="$3" blockers="$4"
-  # Sanitize bcount → integer (aggregator always emits a number; guard anyway).
-  [[ "$bcount" =~ ^[0-9]+$ ]] || bcount=0
-
-  # 1. none — C4 and legacy agree. Evaluated FIRST.
-  [[ "$match" == "true" ]] && { printf 'none'; return 0; }
-
-  # 2-5. Sole-blocker classes (exactly one C4 blocker). Pure-bash extraction —
-  # no `grep | head` pipe (avoids the pipefail+SIGPIPE trap under set -euo pipefail;
-  # this function is called from a command substitution inside cmd_done_advance).
-  if [[ "$bcount" == "1" ]]; then
-    local sole="$blockers"
-    sole="${sole//$'\n'/}"   # single id → strip any surrounding newlines
-    sole="${sole// /}"       # and spaces (a canonical input_id has neither)
-    case "$sole" in
-      verification_report) printf 'verification_only';  return 0 ;;
-      reporter)            printf 'reporter_missing';   return 0 ;;
-      simplifier)          printf 'simplifier_missing'; return 0 ;;
-      review_profile|gates_report|plan_review|delivery_gate|semantic_review_final|acceptance_evidence|curator_report|audit_report)
-                           printf 'required_input';     return 0 ;;
-      *)                   printf 'unclassified';       return 0 ;;  # an unknown id
-    esac
-  fi
-
-  # 6. c4_permissive — C4 says ready, legacy blocked, no C4 blocker.
-  if [[ "$bcount" == "0" && "$c4_ready" == "true" ]]; then
-    printf 'c4_permissive'; return 0
-  fi
-
-  # 7. mixed — 2+ C4 blockers of any categories (incl. same category).
-  if [[ "$bcount" -ge 2 ]]; then
-    printf 'mixed'; return 0
-  fi
-
-  # 8. unclassified — FAIL-CLOSED catch-all (e.g. not-ready + empty blockers).
-  printf 'unclassified'; return 0
-}
 
 # ─── Plan-branch release-stack skip list (P064 plan Step 9) ──────────────────
 # THE single source of truth for which review→release stages cmd_done_advance
@@ -6403,24 +5888,15 @@ _c4_divergence_class() {
 # plan_branch mode: the streamlined integration review (which, under
 # `streamlined_mode: true`, still HARD-REQUIRES this EPIC's own CP3 code-review
 # + CP3 security outputs — only the CP3 FRESHNESS RE-CHECK is skipped, never
-# the CP3 pair itself), the abandoned-but-shipped check, the DG-07 delivery
-# gate, the tiered-severity compliance precondition (which is what reads the
+# the CP3 pair itself), the abandoned-but-shipped check, the tiered-severity
+# compliance precondition (which is what reads the
 # run's CP2 verifier outputs), `pm_decision == merge`, the archived-task-file
-# check, and the auditor's `blocking_findings` verdict when an audit-report
-# exists at all (Step 4 CP2 finding 1 — a PM-blessed mid-plan Auditor run must
-# still be able to block). The skip is scoped to the per-EPIC RELEASE stack —
+# check and the routed-findings check. The skip is scoped to the per-EPIC RELEASE stack —
 # the stages that only make sense once, at the plan boundary — not to local
 # verification.
 AID_PLAN_BRANCH_SKIPPED_STAGES=(
-  c3_review_profile_presence
-  cp4_curator_validation
   cp3_freshness_recheck
-  curator_report_presence
-  auditor_report_presence
-  c3_independent_audit
-  curator_content_ref_sequencing
-  c3_dispatch_provenance
-  c4_release_decision_dual_run
+  release_decision
 )
 
 # _fsm_declared_plan_mode <epic_id> — echoes `<mode>\t<plan_id>\t<reason>`.
@@ -6444,7 +5920,7 @@ AID_PLAN_BRANCH_SKIPPED_STAGES=(
 # it is not durable, not auditable, not visible to any other clone, and
 # `cmd_init`'s dirty-tree guard uses `--untracked-files=no`, so nothing else
 # would catch it either — an untracked file must not be able to silence the
-# nine `AID_PLAN_BRANCH_SKIPPED_STAGES`. The committed manifest is what
+# `AID_PLAN_BRANCH_SKIPPED_STAGES`. The committed manifest is what
 # `aid_lifecycle_set_plan_mode` writes (atomically, on target_branch), so the
 # intended workflow already satisfies this.
 #
@@ -6826,50 +6302,6 @@ cmd_done_advance() {
         return 1
       fi
 
-      # E2 DG-07 hook: state-consistency delivery check (observe mode by default)
-      # Reads enforcement from delivery-gate.yaml policy:
-      #   observe  → write delivery_gate_would_block telemetry only (no block)
-      #   blocking → block done-advance if DG-07 fails (E10 promotion path)
-      # Fail-safe: if policy is missing or unreadable, default to observe (never block).
-      local _dg07_enforcement _dg07_policy _dg07_script _dg07_exit _dg07_output
-      local _dg07_timeline="${evidence_dir}/timeline.jsonl"
-      # DELIVERY_GATE_POLICY env var allows test/CI override of the policy path.
-      _dg07_policy="${DELIVERY_GATE_POLICY:-${SCRIPT_DIR}/../defaults/policies/delivery-gate.yaml}"
-      _dg07_enforcement="observe"   # fail-safe default
-      if [[ -f "$_dg07_policy" ]] && command -v yq >/dev/null 2>&1; then
-        local _pol_enforcement
-        _pol_enforcement=$(aid_control_enforcement "$_dg07_policy" "c1_delivery_gate")
-        [[ "$_pol_enforcement" == "blocking" ]] && _dg07_enforcement="blocking"
-      fi
-
-      _dg07_script="${SCRIPT_DIR}/lib/delivery-checks/dg07-state-consistency.sh"
-      if [[ -f "$_dg07_script" ]]; then
-        _dg07_exit=0
-        _dg07_output=$(AID_PROJECT_ROOT="$project_root" \
-                       AID_EPIC_ID="$epic_id" \
-                       AID_RUN_ID="$run_id" \
-                       bash "$_dg07_script" 2>&1) || _dg07_exit=$?
-
-        if [[ "$_dg07_exit" -eq 1 ]]; then
-          # DG-07 detected an inconsistency
-          log_event "$_dg07_timeline" "delivery_gate_would_block" \
-            check="dg07" enforcement="$_dg07_enforcement" output="$_dg07_output"
-
-          if [[ "$_dg07_enforcement" == "blocking" ]]; then
-            echo "ERROR: DG-07 state-consistency check failed (enforcement=blocking):" >&2
-            echo "$_dg07_output" >&2
-            echo "" >&2
-            echo "Run with --force to override (PM-authorized, audited)." >&2
-            log_event "$_dg07_timeline" "fsm_done_advance_fail" check="dg07" reason="state_inconsistency"
-            exit 2
-          else
-            log_warn "DG-07 state-consistency would_block (enforcement=observe, delivery_ready will be false)"
-          fi
-        fi
-        # exit 2 (unverifiable) or 0 (pass): no block, no event
-      fi
-      # End DG-07 E2 hook
-
       # E3 review_profile hook: missing_lenses observe telemetry
       # REVIEW_PROFILE_POLICY env overrides policy path for test/CI.
       # Fail-safe: missing policy → observe (never block).
@@ -6910,65 +6342,6 @@ cmd_done_advance() {
         fi
       fi
       # End E3 review_profile hook
-
-      # ── C3 activation (IMP-177 / E-059-1_2 Step 1): resolve the C3 audit
-      # enforcement mode ONCE, then apply it to BOTH the review-profile presence
-      # check (below) and the C3 independent-audit hook (further down). The
-      # `enforcement:` key (observe|blocking) already lives in c3-audit-policy.yaml
-      # since E8 — this is the first caller that reads it. C3_AUDIT_POLICY env
-      # overrides the policy PATH (test/CI seam, mirrors DELIVERY_GATE_POLICY);
-      # it overrides the enforcement toggle only, not the per-profile c3_required
-      # risk-gate below (which stays anchored to the installed default policy).
-      # Fail-safe: missing policy / missing yq → observe (never block). The C3
-      # gate is staged OBSERVE by default; E10 promotion flips the policy default
-      # to blocking. See AID-v3-principles.md §1.
-      local c3_default_policy="${PLUGIN_ROOT}/defaults/policies/c3-audit-policy.yaml"
-      local c3_enforce_policy="${C3_AUDIT_POLICY:-$c3_default_policy}"
-      local c3_enforcement="observe"
-      local _c3_timeline="${evidence_dir}/timeline.jsonl"
-      if [[ -f "$c3_enforce_policy" ]] && command -v yq >/dev/null 2>&1; then
-        local _pol_c3_enf
-        _pol_c3_enf=$(aid_control_enforcement "$c3_enforce_policy" "c3_audit")
-        [[ "$_pol_c3_enf" == "blocking" ]] && c3_enforcement="blocking"
-      fi
-
-      # ── C3 activation: review-profile.json presence check (producer wiring). ──
-      # P064 plan Step 9 — SKIPPED in plan_branch mode (`c3_review_profile_presence`
-      # in AID_PLAN_BRANCH_SKIPPED_STAGES).
-      #
-      # PRECISION (Step 4 CP2 finding 2): what an intermediate plan-branch EPIC
-      # stops producing is the C3 PRODUCER HOOK's `review-profile.json` (the
-      # aid-review-profile.sh risk profile over the full base_commit..HEAD diff that
-      # feeds the plan-final C3/Curator/Auditor chain) — NOT the CP3 verifier
-      # round. The cp3 review round still runs per EPIC in plan_branch mode, and
-      # under `streamlined_mode: true` fsm_check_streamlined_integration_review
-      # (above the skip guard, retained in both modes) still hard-`die`s without
-      # its closed passing index. Only
-      # this presence check and the CP3 FRESHNESS re-check are skipped, so that
-      # under enforcement=blocking a plan-branch EPIC is not failed for missing
-      # an artifact the mode deliberately stopped producing.
-      if [[ "$_pb_plan_branch" != "true" ]]; then
-      # review-profile.json is produced in the DONE review sub-phase (pipeline.md,
-      # aid-review-profile.sh over the full base_commit..HEAD diff). Its ABSENCE
-      # means the C3 producer wiring did not run for this EPIC. OBSERVE by default:
-      # emit review_profile_would_block telemetry but DO NOT block — grandfather-safe
-      # for in-flight EPICs (e.g. E-046-3_3) that predate the producer wiring.
-      # enforcement=blocking (E10 / C3_AUDIT_POLICY test override) flips this to a
-      # hard precondition failure so the blocking branch stays live, testable code.
-      if [[ ! -f "${evidence_dir}/review-profile.json" ]]; then
-        log_event "$_c3_timeline" "review_profile_would_block" \
-          check="review_profile_presence" enforcement="$c3_enforcement" \
-          reason="review-profile.json absent in evidence dir"
-        if [[ "$c3_enforcement" == "blocking" ]]; then
-          echo "PRECONDITION FAIL: review-profile.json not found in ${evidence_dir}/ — C3 producer hook must run in the DONE review sub-phase (enforcement=blocking)." >&2
-          log_event "$_c3_timeline" "fsm_done_advance_fail" check="review_profile_presence" reason="profile_absent"
-          exit 2
-        else
-          log_warn "review_profile presence would_block (enforcement=observe, non-blocking): review-profile.json absent in ${evidence_dir}"
-        fi
-      fi
-      fi
-      # End C3 activation review-profile presence check (+ plan_branch skip guard)
 
 
       # P038 Step 3: tiered severity blocking precondition.
@@ -7030,11 +6403,6 @@ EOF
           [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_blocked" \
             blocking_count="$_blocking_count" blocked_checks="$_blocking_names"
 
-          # E-059-2_2 Step 5: this hard-exit preempts the C4 dual-run slot below.
-          # Observe telemetry (sampling-bias fix) — no gate behavior change.
-          log_event "$_timeline" "release_policy_preempted" \
-            gate="tiered_compliance" \
-            head_sha="$(git -C "$_tree_root" rev-parse HEAD 2>/dev/null || echo unknown)"
 
           exit 2
         fi
@@ -7045,7 +6413,7 @@ EOF
         fsm_emit_compliance_recovery "$epic_id" "$_timeline" "$project_root" \
           "✅ ${epic_id}: compliance cleared, release unblocked."
       fi
-      # End P038/P042 compliance block. Falls through to existing curator/auditor checks.
+      # End P038/P042 compliance block.
 
       # ── EPIC-LOCAL checks that run in BOTH modes ────────────────────────────
       # Relocated here by P064 plan Step 9 from inside the release stack below
@@ -7088,713 +6456,48 @@ EOF
       # decided about, the second catches the ones nobody did.
       _fsm_routed_findings_check "$epic_id" "$evidence_dir" || errors=$((errors + 1))
 
-      # ── The auditor's `blocking_findings` verdict (EPIC-LOCAL, BOTH modes) ───
-      # HOISTED out of the release stack by the Step 4 CP2 review (finding 1). It
-      # used to sit inside the skip guard while appearing in NEITHER the skipped
-      # list nor the "WHAT IS NOT HERE" list — so a PM-blessed mid-plan Auditor
-      # run (skills/pipeline.md, `mid_plan_specialist_review_exception`) that
-      # reported a critical finding was silently ungated for an intermediate
-      # plan-branch EPIC: it merged into `plan/{plan_id}` with the finding
-      # unaddressed and nothing named the bypass. The verdict is about THIS
-      # EPIC's own diff, not about the plan boundary, so it belongs here with
-      # the other EPIC-local checks and is deliberately NOT in
-      # AID_PLAN_BRANCH_SKIPPED_STAGES.
-      #
-      # NO-OP WHEN NO REPORT EXISTS. An intermediate plan-branch EPIC normally
-      # produces no audit-report at all; absence remains exactly what it was
-      # before the hoist — silence, never a new hard failure. Only the PRESENCE
-      # of audit-report.md/.yaml arms the fail-closed read.
-      #
-      # Blocks on the auditor's CANONICAL top-level `blocking_findings` field
-      # (agents/auditor.md: emitted as the first line of the YAML, E-046-1_3 Step
-      # 3 producer→consumer migration). yaml_field() matches only line-start keys
-      # — indented/nested values and prose body lines are INVISIBLE, preventing
-      # the old grep-ciE false-positive on negations ("No blocking_findings: true
-      # ..."). Fail-closed: report present + field absent → cannot confirm clean
-      # → block.
-      #
-      # C3 SSOT PRECEDENCE (E-057-1_2 Step 4) — PRESERVED, BUT SCOPED. In legacy
-      # mode this .md/.yaml read still defers to the C3 independent-audit hook
-      # further down, which reads `.audit_report.blocking_findings` out of
-      # audit-report.json: ONE source of truth, not two parallel checks. The
-      # deferral is now scoped to the case where that hook CAN actually run.
-      #   * plan_branch mode → the whole C3 chain is skipped, so deferring to it
-      #     would leave the verdict ungated. This read always applies there.
-      #   * legacy mode → defer exactly when the C3 hook's own secondary trigger
-      #     would fire (review-profile.json AND a non-empty `.audit_report`
-      #     object in audit-report.json). A run whose PRIMARY risk-gate fires
-      #     without a readable audit-report.json no longer skips this read: the
-      #     C3 hook has no JSON verdict to substitute, so the .md/.yaml verdict
-      #     is the only one there is (fail-closed direction, deliberate).
-      local audit_file=""
-      [[ -f "${evidence_dir}/audit-report.md" ]] && audit_file="${evidence_dir}/audit-report.md"
-      [[ -f "${evidence_dir}/audit-report.yaml" ]] && audit_file="${evidence_dir}/audit-report.yaml"
-
-      local _bf_json_is_ssot="false"
-      if [[ "$_pb_plan_branch" != "true" \
-            && -f "${evidence_dir}/review-profile.json" \
-            && -f "${evidence_dir}/audit-report.json" ]] && command -v jq >/dev/null 2>&1; then
-        # Same shape probe as the C3 hook's secondary trigger below (a non-empty
-        # `.audit_report` OBJECT is what makes that hook adopt the JSON as SSOT).
-        # Guarded against `set -euo pipefail` abort like every other jq read here.
-        local _bf_shape="" _bf_shape_ec=0
-        _bf_shape=$(jq -r 'if (.audit_report | type) == "object" and (.audit_report | length) > 0 then "true" else "false" end' \
-          "${evidence_dir}/audit-report.json" 2>/dev/null) || _bf_shape_ec=$?
-        [[ $_bf_shape_ec -eq 0 && "$_bf_shape" == "true" ]] && _bf_json_is_ssot="true"
-      fi
-
-      if [[ -n "$audit_file" && "$_bf_json_is_ssot" != "true" ]]; then
-        local blk
-        blk=$(yaml_field "$audit_file" blocking_findings)
-        if [[ -z "$blk" ]]; then
-          echo "PRECONDITION FAIL: audit-report is missing canonical top-level 'blocking_findings' field (fail-closed)." >&2
-          echo "Re-dispatch auditor so it emits 'blocking_findings: false' or 'true' at line start. See: $audit_file" >&2
-          errors=$((errors + 1))
-        elif [[ "$blk" != "false" ]]; then
-          # Fail-closed on any non-false value: true, maybe, "true", comment, garbage.
-          # Only exact scalar 'false' (after quote-stripping by yaml_field) is clean.
-          echo "PRECONDITION FAIL: blocking_findings value '${blk}' is not 'false' — treating as blocking (fail-closed on any non-false value)." >&2
-          echo "Address the finding or correct the field value. See: $audit_file" >&2
-          errors=$((errors + 1))
-        fi
-        # blk == "false" → no blocking findings; passes silently.
-      fi
-
-      # ══ P064 plan Step 9: THE per-EPIC RELEASE STACK ════════════════════════
-      # Everything from here to "End of the plan_branch-skipped release stack"
-      # is the stack an INTERMEDIATE plan-branch EPIC completion must be
-      # structurally incapable of invoking: CP4 curator validation, the CP3
-      # freshness re-check, the Curator/Auditor report requirements, the C3
-      # independent-audit chain, the C3 dispatch-provenance hook and the
-      # EPIC-scoped C4 dual run. Their names are listed, in this order, in
-      # AID_PLAN_BRANCH_SKIPPED_STAGES near the top of cmd_done_advance's
-      # section of this file — that array is the single source of truth the
-      # timeline event and the spy test both read.
-      #
-      # The body below is UNINDENTED on purpose: this guard is a pure skip, and
-      # re-indenting ~625 lines would bury the behavioural change in whitespace
-      # and make every future `git blame` on the release stack point at Step 9.
+      # ══ The per-EPIC release stack ═════════════════════════════════════════
+      # Skipped for an INTERMEDIATE plan-branch EPIC, whose release is decided once,
+      # at the plan's close (plan-finalize). The skipped names are
+      # AID_PLAN_BRANCH_SKIPPED_STAGES, which the timeline event and the spy test read.
       if [[ "$_pb_plan_branch" != "true" ]]; then
 
-      # P040 Component C: CP4 enforcement (must run before existing curator-report check)
-      # MIXED helper: project_root supplies its STATE read (execution.yaml
-      # cp4_production_paths), _tree_root its base_commit..HEAD diff.
-      if ! fsm_check_cp4_curator_validation "$evidence_dir" "$project_root" "$state_file" "$_tree_root"; then
-        return 1  # die() already called inside
-      fi
-
-      # P060 Step 4: CP3 freshness re-check at review→release. The GATES:DONE probe
-      # is the primary gate, but CP4 / review-phase commits can land AFTER DONE and
-      # move HEAD past the reviewed CP3 head — this re-check catches that class.
-      # Grandfather + policy (default BLOCKING, D9) handled inside.
-      # PURE TREE consumer (every use of its third arg is a git probe against
-      # the reviewed HEAD) — it gets the invoking tree, not the state root.
-      if ! fsm_check_review_round "$evidence_dir" cp3 "" --freshness "$_tree_root"; then
-        log_event "${evidence_dir}/timeline.jsonl" "fsm_done_advance_fail" \
-          check="cp3_freshness" reason="${_PRECONDITION_FAIL_REASON:-cp3_stale_review}"
-        return 1
-      fi
-
-      # Curator report must exist
-      if [[ ! -f "${evidence_dir}/curator-report.yaml" && ! -f "${evidence_dir}/curator-report.md" ]]; then
-        echo "PRECONDITION FAIL: Curator report not found in ${evidence_dir}/. Curator agent must run first." >&2
-        errors=$((errors + 1))
-      fi
-
-      # Auditor report must exist
-      if [[ ! -f "${evidence_dir}/audit-report.yaml" && ! -f "${evidence_dir}/audit-report.md" ]]; then
-        echo "PRECONDITION FAIL: Auditor report not found in ${evidence_dir}/. Auditor agent must run first." >&2
-        errors=$((errors + 1))
-      fi
-
-      # Risk-profile resolution (shared by Curator guard and C3 hook).
-      # Must run BEFORE the Curator guard to determine if C3 is required.
-      # Fail-closed risk-profile gate: resolve risk_profile and decide if hook fires.
-      local c3_risk_profile="" c3_hook_fired="false"
-      local review_profile_file="${evidence_dir}/review-profile.json"
-      local c3_report_file="${evidence_dir}/audit-report.json"
-
-      if [[ -f "$review_profile_file" ]]; then
-        if ! command -v jq >/dev/null 2>&1; then
-          # jq missing but file exists → ambiguous, fail-closed: treat as unverifiable
-          c3_risk_profile="unverifiable"
-        else
-          # jq available, try to read. If read succeeds, validate that the resolved
-          # value is one of the known enum values.
-          # CP4 round 3 fix: guard against set -e crash if review-profile.json is valid
-          # JSON but .review_profile is not an object (jq errors on the index attempt).
-          local resolved_profile="" resolved_exit_code=0
-          resolved_profile=$(jq -r '.review_profile.risk_profile // "MISSING"' "$review_profile_file" 2>/dev/null) || resolved_exit_code=$?
-          if [[ $resolved_exit_code -eq 0 && "$resolved_profile" != "MISSING" ]]; then
-            # jq succeeded in reading a non-null value; check if it's valid enum.
-            case "$resolved_profile" in
-              docs_trivial|low|medium|high|unverifiable)
-                c3_risk_profile="$resolved_profile"
-                ;;
-              *)
-                # Invalid enum value (should not happen from a well-formed schema,
-                # but fail-closed: treat as unverifiable).
-                c3_risk_profile="unverifiable"
-                ;;
-            esac
-          else
-            # jq failed, or read null/missing key → ambiguous, fail-closed.
-            c3_risk_profile="unverifiable"
-          fi
-        fi
-      fi
-
-      # Primary trigger: read c3_required from policy file for the resolved risk profile.
-      # Fail-closed: if profile is unverifiable, or if policy read fails/is ambiguous,
-      # treat as requiring C3.
-      if [[ -n "$c3_risk_profile" ]]; then
-        local c3_required_from_policy="" policy_read_succeeded="false"
-        # Per-profile c3_required risk-gate reads the installed default policy
-        # (NOT the C3_AUDIT_POLICY enforcement override) — see c3_default_policy
-        # rationale above. Reuses the single definition for DRY (GEN-007).
-        local policy_file="$c3_default_policy"
-
-        # Only attempt policy read if both file exists AND yq is available.
-        if [[ -f "$policy_file" ]] && command -v yq >/dev/null 2>&1; then
-          # Use has() to distinguish "key absent" from "key present but false".
-          # Both scenarios yield exit 0 and "false" output with the old // false fallback,
-          # making it impossible to distinguish. The fix: check presence first.
-          # CP4 round 2 fix: bare `var=$(cmd)` under `set -e` aborts the WHOLE SCRIPT if
-          # cmd (yq) exits non-zero (e.g. malformed/unparseable policy YAML) — the `|| ...`
-          # guard is mandatory here so a corrupted policy file fails closed with a proper
-          # PRECONDITION FAIL message instead of an unhandled script crash.
-          local has_profile_key="" has_exit_code=0
-          has_profile_key=$(yq -r "(.risk_profiles | has(\"$c3_risk_profile\")) and (.risk_profiles[\"$c3_risk_profile\"] | has(\"c3_required\"))" "$policy_file" 2>/dev/null) || has_exit_code=$?
-          if [[ $has_exit_code -eq 0 && "$has_profile_key" == "true" ]]; then
-            local c3_required_exit_code=0
-            c3_required_from_policy=$(yq -r ".risk_profiles[\"$c3_risk_profile\"].c3_required" "$policy_file" 2>/dev/null) || c3_required_exit_code=$?
-            if [[ $c3_required_exit_code -eq 0 && ("$c3_required_from_policy" == "true" || "$c3_required_from_policy" == "false") ]]; then
-              policy_read_succeeded="true"
-            fi
-          fi
+        # P060 Step 4: CP3 freshness re-check at review→release. The GATES:DONE probe
+        # is the primary gate, but review-phase commits can land AFTER DONE and
+        # move HEAD past the reviewed CP3 head — this re-check catches that class.
+        # Grandfather + policy (default BLOCKING, D9) handled inside.
+        # PURE TREE consumer (every use of its third arg is a git probe against
+        # the reviewed HEAD) — it gets the invoking tree, not the state root.
+        if ! fsm_check_review_round "$evidence_dir" cp3 "" --freshness "$_tree_root"; then
+          log_event "${evidence_dir}/timeline.jsonl" "fsm_done_advance_fail" \
+            check="cp3_freshness" reason="${_PRECONDITION_FAIL_REASON:-cp3_stale_review}"
+          return 1
         fi
 
-        # Fire hook if:
-        #   1. Policy read succeeded AND c3_required is true, OR
-        #   2. Policy read failed or was ambiguous for a high-risk profile (fail-closed: can't confirm false), OR
-        #   3. Profile is unverifiable (fail-closed for ambiguous/unparseable resolution)
-        if [[ "$policy_read_succeeded" == "true" && "$c3_required_from_policy" == "true" ]]; then
-          c3_hook_fired="true"
-        elif [[ "$policy_read_succeeded" != "true" && "$c3_risk_profile" == "high" ]]; then
-          # Policy read failed/ambiguous for high-risk profile → fail-closed
-          c3_hook_fired="true"
-        elif [[ "$c3_risk_profile" == "unverifiable" ]]; then
-          c3_hook_fired="true"
+        # ─── The release decision (aid-release-policy.sh, EPIC scope) ───────────
+        # Observe by default (release-decision-policy.yaml); `blocking` turns a
+        # release_ready=false into a refusal. A crash of the aggregator is logged
+        # and never blocks: no verdict was obtained. --force takes the sibling
+        # branch above and never reaches this.
+        local _rdp_policy _rdp_enforcement="observe" _cvp="observe" _c4_rc=0
+        _rdp_policy="${RELEASE_DECISION_POLICY:-${SCRIPT_DIR}/../defaults/policies/release-decision-policy.yaml}"
+        if [[ -f "$_rdp_policy" ]] && command -v yq >/dev/null 2>&1; then
+          [[ "$(aid_control_enforcement "$_rdp_policy" "c4_release_decision")" == "blocking" ]] && _rdp_enforcement="blocking"
+          [[ "$(aid_control_enforcement "$_rdp_policy" "c4_content_verdict" "content_verdict_policy")" == "blocking" ]] && _cvp="blocking"
         fi
-      fi
-
-      # Secondary independent trigger: if review-profile.json exists (this run went through
-      # C3 pipeline) BUT the primary gate didn't fire, AND audit-report.json exists and has
-      # a valid .audit_report structure, fire the hook. This closes the case where the primary
-      # gate (risk-profile resolution) is somehow fooled but a real C3 report was produced for
-      # this run (e.g., review-profile.json corrupted, all detection mechanisms missed it, but
-      # the C3 stage still ran and produced a report).
-      # NOTE: Must run BEFORE the Curator guard so that c3_hook_fired is fully resolved when
-      # the guard consults it (E-057-2_2 Step 1 defense-in-depth fix).
-      if [[ "$c3_hook_fired" != "true" && -f "$review_profile_file" && -f "$c3_report_file" ]]; then
-        if command -v jq >/dev/null 2>&1; then
-          # CP4 round 3 fix: guard against set -e crash if audit-report.json is valid
-          # JSON but not an object at the top level (jq errors piping into `.audit_report`).
-          local has_audit_report="" has_audit_exit_code=0
-          has_audit_report=$(jq -r 'if (.audit_report | type) == "object" and (.audit_report | length) > 0 then "true" else "false" end' "$c3_report_file" 2>/dev/null) || has_audit_exit_code=$?
-          if [[ $has_audit_exit_code -eq 0 && "$has_audit_report" == "true" ]]; then
-            c3_hook_fired="true"
-            # Secondary trigger fired; set risk_profile for error messages below.
-            # We don't know the original profile, so use "unverifiable" as the reason.
-            c3_risk_profile="unverifiable"
-          fi
-        fi
-      fi
-
-      # E-057-2_2 Step 1: Curator content-ref sequencing guard (risk-gated, JSON).
-      # Curator now dual-emits curator-report.json alongside curator-report.md
-      # (`agents/curator.md`), carrying `.curator.audit_report_ref` = sha256 of the
-      # CONTENT of the audit-report.json it actually consumed — a content hash (not
-      # `head_sha`) proves the Curator genuinely ran AFTER the Auditor and ingested
-      # that exact audit output, not just at the same commit (L1 fix). This check is
-      # ADDITIVE to the .md/.yaml existence checks above (which stay — other code
-      # paths rely on that file-existence contract).
-      #
-      # Risk-gating (mirrors C3 hook pattern at lines ~2725-2799):
-      # - When c3_hook_fired == "true" (high/unverifiable risk profile), curator-report.json
-      #   is REQUIRED: absence of the whole file is a hard block (fail-closed), because on
-      #   a C3-required run, Curator is expected to emit it. This matches agents/curator.md
-      #   C3.5 dual-emit contract.
-      # - When c3_hook_fired == "false" (other profiles or no review-profile.json), the file
-      #   is optional: absence is a silent no-op (pre-C3 Curator runs have no JSON file).
-      #
-      # When curator-report.json DOES exist, fail-closed validation applies to its contents:
-      # missing/unreadable ref, missing audit-report.json, or a hash mismatch all block.
-      # Every jq/sha256sum command substitution is guarded against `set -e` (this script
-      # runs under `set -euo pipefail`), matching the C3 hook pattern.
-      local curator_json="${evidence_dir}/curator-report.json"
-      local audit_json="${evidence_dir}/audit-report.json"
-
-      if [[ -f "$curator_json" ]]; then
-        # File exists: perform content-ref validation (fail-closed on any anomaly).
-        if ! command -v jq >/dev/null 2>&1; then
-          echo "PRECONDITION FAIL: jq is required to verify curator-report.json's audit_report_ref and is not available (fail-closed)." >&2
-          errors=$((errors + 1))
-        elif [[ ! -f "$audit_json" ]]; then
-          echo "PRECONDITION FAIL: curator-report.json exists but audit-report.json not found — cannot verify sequencing ref (fail-closed). See: ${curator_json}" >&2
-          errors=$((errors + 1))
-        else
-          local cref="" cref_ec=0 actual_hash="" actual_hash_ec=0
-          cref=$(jq -r '.curator.audit_report_ref // empty' "$curator_json" 2>/dev/null) || cref_ec=$?
-          [[ $cref_ec -ne 0 ]] && cref=""
-          actual_hash=$(sha256sum "$audit_json" 2>/dev/null | awk '{print $1}') || actual_hash_ec=$?
-          [[ $actual_hash_ec -ne 0 ]] && actual_hash=""
-          local cref_hex="${cref#sha256:}"
-
-          if [[ -z "$cref" ]]; then
-            echo "PRECONDITION FAIL: curator-report.json missing .curator.audit_report_ref (sequencing fail-closed). See: ${curator_json}" >&2
-            errors=$((errors + 1))
-          elif [[ -z "$actual_hash" ]]; then
-            echo "PRECONDITION FAIL: could not compute sha256 of ${audit_json} (sequencing fail-closed)." >&2
-            errors=$((errors + 1))
-          elif [[ "$cref_hex" != "$actual_hash" ]]; then
-            echo "PRECONDITION FAIL: curator-report.json .curator.audit_report_ref (${cref}) does not match sha256 of audit-report.json content (sha256:${actual_hash}) — Curator did not consume the current audit output (sequencing violation)." >&2
-            errors=$((errors + 1))
-          fi
-          # cref_hex == actual_hash → passes silently.
-        fi
-      elif [[ "$c3_hook_fired" == "true" ]]; then
-        # File missing but C3 is required: hard block (fail-closed).
-        echo "PRECONDITION FAIL: curator-report.json not found (risk profile '${c3_risk_profile}' requires C3 audit and dual-emitted curator report)." >&2
-        echo "Curator agent must run after Auditor (C3) and emit both curator-report.md and curator-report.json. See: ${curator_json}" >&2
-        errors=$((errors + 1))
-      fi
-      # If file missing AND c3_hook_fired == "false": silent no-op (pre-C3 run)
-
-      # (P064 plan Step 9 moved the pm_decision and task-file-archived checks OUT
-      # of this block to just ABOVE the plan_branch skip guard — they are
-      # EPIC-local validations, not release-stack stages, and must keep running
-      # in both modes. Search: "EPIC-LOCAL checks that run in BOTH modes".)
-
-      # E-057-1_2 Step 4: C3 independent-audit hook (risk-gated, JSON source of truth).
-      # Reads `.audit_report.blocking_findings` from audit-report.json (protocol-v2
-      # envelope, agents/auditor.md C3 mode, E-057-1_2 Step 2). For any run whose risk
-      # profile requires C3, this REPLACES the legacy yaml_field()-based .md/.yaml
-      # blocking_findings read — ONE source of truth, not two parallel checks
-      # (M2 fix). Risk profile comes from review-profile.json (produced by
-      # aid-review-profile.sh / skills/pipeline.md's C3 producer hook, E-057-1_2 Step
-      # 3); this hook only fires when that profile is "high" or "unverifiable" — the two
-      # (and only two) `c3_required: true` profiles in c3-audit-policy.yaml (D8/D9). Any
-      # other profile (docs_trivial/low/medium), or a run with no review-profile.json at
-      # all (pre-C3 runs never subjected to this pipeline stage), leaves this hook a
-      # no-op — and the legacy blocking_findings check has ALREADY RUN by then. The
-      # P064 Step 9 CP2 review HOISTED it ~250 lines ABOVE this block, out of the
-      # release stack and into the EPIC-local checks that execute in BOTH modes, so it
-      # is no longer "below" as the comments here used to say (search: "The auditor's
-      # `blocking_findings` verdict (EPIC-LOCAL, BOTH modes)").
-      #
-      # Fail-closed (D4): missing/unreadable/unparseable audit-report.json, a missing
-      # `.audit_report.input_manifest_hash` (provenance), a `status` of "unverifiable"
-      # (independence could not be confirmed), or a stale `revision.head_sha` that no
-      # longer matches the run's actual current HEAD (freshness — an audit computed
-      # against a prior commit must not authorize release of the current commit,
-      # mirroring the E2.5 stale-artifact-acceptance lesson) ALL block. No `// false`
-      # jq fallback anywhere below — absence/unreadability is treated as blocking, never
-      # as a silent pass.
-      #
-      # CP2 Fix: Fire hook fail-closed if review-profile.json exists but:
-      #   - jq is unavailable (cannot read it), OR
-      #   - .review_profile.risk_profile is null/missing/invalid enum (not one of
-      #     docs_trivial|low|medium|high|unverifiable from review-profile.schema.json)
-      # Also fire hook (secondary independent trigger) if audit-report.json exists and is
-      # parseable with a valid .audit_report structure (non-null object), regardless of
-      # risk_profile resolution.
-      #
-      # NOTE: c3_risk_profile and c3_hook_fired are now fully initialized and computed,
-      # including secondary trigger at lines ~2711-2735 (shared initialization for Curator
-      # guard + C3 hook). The secondary trigger completes resolution before the Curator guard
-      # runs, ensuring c3_hook_fired reflects BOTH primary and secondary conditions (E-057-2_2
-      # Step 1 defense-in-depth fix).
-      #
-      # P065 Step 16 (E-065-6_7) — CANONICAL-report confirmation, documentation only, NO
-      # functional change here. pipeline.md's C3 fix→reverify loop (bounded at
-      # `c3-audit-policy.yaml` → `c3_fix_loop.max_rechecks`) re-runs build-manifest/dispatch/
-      # verify IN PLACE on every recheck — each iteration overwrites this same
-      # `$evidence_dir/audit-report.json` (and `c3/c3-dispatch.json`) rather than writing a
-      # per-attempt file. That means this hook, reading `$c3_report_file` at the evidence root
-      # exactly as it always has, is ALREADY reading the CANONICAL (last-attempt) report —
-      # whatever the loop's final outcome (clean, or still-blocking at recheck-budget
-      # exhaustion), the content checks below see that final state. Per-attempt evidence
-      # layering (a distinct file per attempt, preserving earlier attempts for audit trail) is
-      # Step 17's job, not this hook's — no change needed here for that. `c3_recheck_count`
-      # (if the run entered the fix loop) is read below, best-effort, purely to enrich the
-      # `c3_gate_would_block` telemetry event below with how many rechecks preceded a block —
-      # it does not participate in any pass/fail decision in this hook.
-
-      if [[ "$c3_hook_fired" == "true" ]]; then
-        local c3_block_reason=""
-
-        if ! command -v jq >/dev/null 2>&1; then
-          c3_block_reason="jq is required to verify audit-report.json and is not available"
-        elif [[ ! -f "$c3_report_file" ]]; then
-          c3_block_reason="audit-report.json not found (risk profile '${c3_risk_profile}' requires a C3 audit)"
-        elif ! jq -e . "$c3_report_file" >/dev/null 2>&1; then
-          c3_block_reason="audit-report.json is not valid/parseable JSON"
-        else
-          # CP4 round 3 fix: guard all 4 jq reads against set -e crash — audit-report.json
-          # passed the `jq -e .` parseability check above, but that only proves the TOP
-          # level is valid JSON, not that `.audit_report`/`.revision` are objects. A report
-          # where e.g. `.audit_report` is a string/array/scalar makes jq error on `.field`
-          # indexing, which would otherwise abort this whole function via set -e instead of
-          # falling through to the fail-closed checks below (which already correctly treat
-          # empty/MISSING values as blocking — the guard only prevents the crash, it does
-          # not change the fail-closed semantics).
-          local c3_blocking="" c3_status="" c3_manifest_hash="" c3_head_sha="" c3_current_head=""
-          local c3_blocking_ec=0 c3_status_ec=0 c3_manifest_hash_ec=0 c3_head_sha_ec=0
-          c3_blocking=$(jq -r 'if (.audit_report.blocking_findings | type) == "boolean" then (.audit_report.blocking_findings | tostring) else "MISSING" end' "$c3_report_file" 2>/dev/null) || c3_blocking_ec=$?
-          [[ $c3_blocking_ec -ne 0 ]] && c3_blocking="MISSING"
-          c3_status=$(jq -r '.status // "MISSING"' "$c3_report_file" 2>/dev/null) || c3_status_ec=$?
-          [[ $c3_status_ec -ne 0 ]] && c3_status="MISSING"
-          c3_manifest_hash=$(jq -r '.audit_report.input_manifest_hash // empty' "$c3_report_file" 2>/dev/null) || c3_manifest_hash_ec=$?
-          [[ $c3_manifest_hash_ec -ne 0 ]] && c3_manifest_hash=""
-          c3_head_sha=$(jq -r '.revision.head_sha // empty' "$c3_report_file" 2>/dev/null) || c3_head_sha_ec=$?
-          [[ $c3_head_sha_ec -ne 0 ]] && c3_head_sha=""
-          c3_current_head=$(git -C "$_tree_root" rev-parse HEAD 2>/dev/null || echo "")
-
-          # P065 Step 15 (E-065-5_7) — ADDITIVE ONLY: detect a degraded_advisory
-          # same-provider Claude fallback report (agents/auditor.md `c3_advisory` mode,
-          # dispatched by pipeline.md when c3-audit-policy.yaml's c3_on_unavailable ==
-          # degraded_advisory). Read alongside the fields above so the elif chain below can
-          # give it a MORE SPECIFIC reason than the generic unverifiable check — it does not
-          # change what blocks, only how precisely the reason is reported.
-          local c3_advisory="" c3_independence_level=""
-          local c3_advisory_ec=0 c3_independence_level_ec=0
-          c3_advisory=$(jq -r 'if (.audit_report.advisory | type) == "boolean" then (.audit_report.advisory | tostring) else "false" end' "$c3_report_file" 2>/dev/null) || c3_advisory_ec=$?
-          [[ $c3_advisory_ec -ne 0 ]] && c3_advisory="false"
-          c3_independence_level=$(jq -r '.audit_report.independence_level // ""' "$c3_report_file" 2>/dev/null) || c3_independence_level_ec=$?
-          [[ $c3_independence_level_ec -ne 0 ]] && c3_independence_level=""
-
-          if [[ "$c3_blocking" != "false" && "$c3_blocking" != "true" ]]; then
-            # Covers missing/null/non-boolean .audit_report.blocking_findings — fail-closed,
-            # deliberately NOT `// false` (that is the exact anti-pattern this hook replaces).
-            c3_block_reason="audit-report.json .audit_report.blocking_findings is missing or not a boolean (fail-closed)"
-          elif [[ "$c3_blocking" == "true" ]]; then
-            c3_block_reason="audit-report.json .audit_report.blocking_findings == true (critical/high finding present)"
-          elif [[ "$c3_advisory" == "true" || "$c3_independence_level" == "context_only" ]]; then
-            # P065 Step 15 — checked BEFORE the generic unverifiable check below on purpose: an
-            # advisory report always ALSO has status: unverifiable (see agents/auditor.md
-            # "C3 Advisory Mode"), so without this branch first it would only ever surface the
-            # generic reason, never this more actionable one. A genuine (non-advisory) c3 report
-            # never sets .advisory:true or independence_level:context_only — c3-audit-policy.yaml
-            # requires cross_model/cross_provider for the two c3_required profiles, so this
-            # branch cannot fire on a real Codex pass/fail/unverifiable result.
-            c3_block_reason="c3_advisory_not_independent: audit-report.json .audit_report.advisory=${c3_advisory} / .audit_report.independence_level=${c3_independence_level:-<empty>} (same-provider Claude fallback review — not an independent cross-provider/cross-model C3 audit)"
-          elif [[ "$c3_status" == "unverifiable" ]]; then
-            c3_block_reason="audit-report.json .status == \"unverifiable\" (required independence level could not be confirmed)"
-          elif [[ -z "$c3_manifest_hash" ]]; then
-            c3_block_reason="audit-report.json missing .audit_report.input_manifest_hash (provenance fail-closed)"
-          elif [[ -z "$c3_head_sha" || -z "$c3_current_head" || "$c3_head_sha" != "$c3_current_head" ]]; then
-            c3_block_reason="audit-report.json .revision.head_sha (${c3_head_sha:-<empty>}) != current HEAD (${c3_current_head:-<empty>}) — stale audit (freshness fail-closed)"
-          fi
-        fi
-
-        if [[ -n "$c3_block_reason" ]]; then
-          # IMP-177 / E-059-1_2 Step 1 C3 activation: gate the block on the
-          # resolved enforcement mode (c3_enforcement, read from c3-audit-policy.yaml
-          # near the top of this branch). Always emit c3_gate_would_block telemetry
-          # so the gate is observable whether or not it blocks; then:
-          #   observe  → telemetry only, transition continues (staged wake, default)
-          #   blocking → today's fail-closed behavior (counts toward errors → exit 1)
-          #
-          # P065 Step 16 — best-effort read of c3_recheck_count from fsm-state.yaml
-          # (set via `aid-fsm.sh set-field c3_recheck_count <n> <state_file>` by
-          # pipeline.md's fix→reverify loop; absent on any run that never entered the
-          # loop, e.g. a clean first audit). Purely additive telemetry enrichment — it
-          # does not affect c3_block_reason or the enforcement decision above/below.
-          local c3_recheck_count
-          c3_recheck_count=$(yaml_field "$state_file" c3_recheck_count)
-          [[ -z "$c3_recheck_count" ]] && c3_recheck_count="0"
-          log_event "$_c3_timeline" "c3_gate_would_block" \
-            check="c3_independent_audit" enforcement="$c3_enforcement" \
-            risk_profile="$c3_risk_profile" reason="$c3_block_reason" \
-            c3_recheck_count="$c3_recheck_count"
-          if [[ "$c3_enforcement" == "blocking" ]]; then
-            echo "PRECONDITION FAIL: C3 independent audit block — ${c3_block_reason}." >&2
-            echo "Risk profile '${c3_risk_profile}' requires a fresh, clean audit-report.json before release. See: ${c3_report_file}" >&2
-            errors=$((errors + 1))
-          else
-            log_warn "C3 independent audit would_block (enforcement=observe, non-blocking): ${c3_block_reason}"
-          fi
-        fi
-      fi
-
-      # ── C3 dispatch-provenance enforcement hook (P065 Step 9 / E-065-3_7) ────
-      # THE enforcement point P065 exists to build: under `enforcement: blocking`
-      # a C3-required run may advance ONLY when c3/c3-dispatch.json proves a REAL,
-      # verified Codex run at HEAD. This block is strictly ADDITIVE to the C3
-      # independent-audit hook above — it does NOT replace or weaken any check
-      # there. That hook validates the report's CONTENT
-      # (blocking_findings/status/manifest/freshness); THIS hook validates the
-      # DISPATCH PROVENANCE (that Codex genuinely ran) and — check #5, the
-      # critical new enforcement — SHELLS OUT to `aid-c3-dispatch.sh verify` so
-      # the full report↔raw faithful-transform binding (raw re-validation +
-      # tuple/fingerprint equality) becomes part of the deterministic
-      # MERGE-BLOCKING gate, not merely prose in pipeline.md. An edited/fabricated
-      # report whose otherwise-intact c3-dispatch.json would pass checks 1–4 now
-      # FAILS at the verify shell-out and can no longer pass this gate.
-      #
-      # Reasons are computed IN ORDER (first failing reason wins):
-      #   1. c3/c3-dispatch.json absent (covers legacy pre-P065 runs — c3/ absent).
-      #   2. dispatch did not genuinely succeed cross_provider (invoked!=true OR
-      #      exit_code!=0 OR outcome!="dispatched" OR events_valid!=true OR empty
-      #      codex_session_id).
-      #   3. audit-report.json .audit_report.process_id != dispatch codex_session_id.
-      #   4. audit-report.json .audit_report.reviewed_head != current HEAD (stale).
-      #   5. `aid-c3-dispatch.sh verify <evidence_dir>` exits non-zero
-      #      (report↔raw faithful-transform binding broken).
-      #
-      # Enforcement-gated exactly like the hook above (c3_enforcement, resolved
-      # from c3-audit-policy.yaml near the top of this branch; C3_AUDIT_POLICY is
-      # the test/CI seam). blocking → errors++ with the first failing reason;
-      # observe → emit c3_dispatch_would_block telemetry only, no errors++.
-      # Fail-closed under blocking: jq missing, or c3/c3-dispatch.json absent, is a
-      # block reason (file existence alone is not proof). Every jq/verify command
-      # substitution is guarded against `set -euo pipefail` abort.
-      if [[ "$c3_hook_fired" == "true" ]]; then
-        local c3_dispatch_block_reason=""
-        local c3_dispatch_json="${evidence_dir}/c3/c3-dispatch.json"
-
-        # P065 E-065-7_7 DONE-review Finding B follow-up (found by CP2 while
-        # verifying the Finding B fix itself): AID_C3_ATTEMPT layering
-        # (Step 17) writes c3-dispatch.json under c3/attempt-NN/c3/, never
-        # mirroring it to this legacy root path — the exact same
-        # evidence_dir/work_evidence_dir confusion Finding B fixed inside
-        # aid-c3-dispatch.sh's own cmd_verify, but this hook reads the file
-        # directly instead of going through cmd_verify for checks 1-4. Check
-        # 5 below already shells out to `verify`, which is attempt-aware
-        # since the Finding B fix and remains the authoritative validator
-        # regardless of this resolution's own correctness — this snippet
-        # only needs to get checks 1-4's PATH right, not re-validate
-        # anything. Mirrors cmd_verify's own Step 0 resolution exactly
-        # (same loop-summary.json current_attempt field, same zero-pad).
-        if [[ -f "${evidence_dir}/c3/loop-summary.json" ]] && command -v jq >/dev/null 2>&1; then
-          local _c3_hook_cur_attempt
-          # Guarded like every other jq substitution in this function (see the
-          # header comment above: "every jq/verify command substitution is
-          # guarded against set -euo pipefail abort") — a malformed/partial
-          # loop-summary.json (e.g. a truncated write) must fall through to
-          # the legacy path below, not crash the whole done-advance call.
-          _c3_hook_cur_attempt=$(jq -r '.current_attempt // empty' "${evidence_dir}/c3/loop-summary.json" 2>/dev/null) \
-            || _c3_hook_cur_attempt=""
-          if [[ "$_c3_hook_cur_attempt" =~ ^[1-9][0-9]*$ ]]; then
-            local _c3_hook_cur_nn
-            _c3_hook_cur_nn=$(printf '%02d' "$_c3_hook_cur_attempt")
-            c3_dispatch_json="${evidence_dir}/c3/attempt-${_c3_hook_cur_nn}/c3/c3-dispatch.json"
-          fi
-        fi
-
-        if ! command -v jq >/dev/null 2>&1; then
-          # jq missing → cannot read provenance → fail-closed.
-          c3_dispatch_block_reason="jq is required to verify c3-dispatch.json provenance and is not available"
-        elif [[ ! -f "$c3_dispatch_json" ]]; then
-          # Check 1: absent provenance (also the legacy pre-P065 run case — c3/ absent).
-          c3_dispatch_block_reason="c3/c3-dispatch.json not found — no proof a real Codex audit was dispatched at HEAD"
-        elif ! jq -e . "$c3_dispatch_json" >/dev/null 2>&1; then
-          c3_dispatch_block_reason="c3/c3-dispatch.json is not valid/parseable JSON"
-        else
-          # Guard all reads against set -e abort (this script runs set -euo pipefail).
-          local _d_invoked _d_exit _d_outcome _d_events _d_session
-          local _di_ec=0 _de_ec=0 _do_ec=0 _dev_ec=0 _ds_ec=0
-          _d_invoked=$(jq -r '.dispatch.invoked | tostring' "$c3_dispatch_json" 2>/dev/null) || _di_ec=$?
-          [[ $_di_ec -ne 0 ]] && _d_invoked="MISSING"
-          _d_exit=$(jq -r '.dispatch.exit_code | tostring' "$c3_dispatch_json" 2>/dev/null) || _de_ec=$?
-          [[ $_de_ec -ne 0 ]] && _d_exit="MISSING"
-          _d_outcome=$(jq -r '.dispatch.outcome // "MISSING"' "$c3_dispatch_json" 2>/dev/null) || _do_ec=$?
-          [[ $_do_ec -ne 0 ]] && _d_outcome="MISSING"
-          _d_events=$(jq -r '.dispatch.events_valid | tostring' "$c3_dispatch_json" 2>/dev/null) || _dev_ec=$?
-          [[ $_dev_ec -ne 0 ]] && _d_events="MISSING"
-          _d_session=$(jq -r '.dispatch.codex_session_id // ""' "$c3_dispatch_json" 2>/dev/null) || _ds_ec=$?
-          [[ $_ds_ec -ne 0 ]] && _d_session=""
-
-          # audit-report.json provenance fields (process_id / reviewed_head).
-          local _r_pid _r_reviewed_head _rp_ec=0 _rrh_ec=0 _c3_dp_head=""
-          _r_pid=$(jq -r '.audit_report.process_id // ""' "$c3_report_file" 2>/dev/null) || _rp_ec=$?
-          [[ $_rp_ec -ne 0 ]] && _r_pid=""
-          _r_reviewed_head=$(jq -r '.audit_report.reviewed_head // ""' "$c3_report_file" 2>/dev/null) || _rrh_ec=$?
-          [[ $_rrh_ec -ne 0 ]] && _r_reviewed_head=""
-          _c3_dp_head=$(git -C "$_tree_root" rev-parse HEAD 2>/dev/null || echo "")
-
-          if [[ "$_d_invoked" != "true" || "$_d_exit" != "0" || "$_d_outcome" != "dispatched" \
-                || "$_d_events" != "true" || -z "$_d_session" || "$_d_session" == "null" ]]; then
-            # Check 2: dispatch did not genuinely succeed (covers rate_limited /
-            # unavailable / timeout outcomes, invoked:false, events_valid:false, ...).
-            c3_dispatch_block_reason="c3-dispatch.json does not prove a successful Codex run (invoked=${_d_invoked}, exit_code=${_d_exit}, outcome=${_d_outcome}, events_valid=${_d_events}, session='${_d_session}')"
-          elif [[ -z "$_r_pid" || "$_r_pid" != "$_d_session" ]]; then
-            # Check 3: report's process_id must bind to the dispatch session.
-            c3_dispatch_block_reason="audit-report.json .audit_report.process_id ('${_r_pid}') != c3-dispatch.json codex_session_id ('${_d_session}')"
-          elif [[ -z "$_r_reviewed_head" || -z "$_c3_dp_head" || "$_r_reviewed_head" != "$_c3_dp_head" ]]; then
-            # Check 4: report must have reviewed the CURRENT HEAD (freshness).
-            c3_dispatch_block_reason="audit-report.json .audit_report.reviewed_head ('${_r_reviewed_head:-<empty>}') != current HEAD ('${_c3_dp_head:-<empty>}') — stale audit"
-          else
-            # Check 5 (THE enforcement fix): shell out to the verify command — the
-            # full report↔raw faithful-transform binding. A fabricated/edited report
-            # whose c3-dispatch.json would pass checks 1–4 FAILS here. Guarded so a
-            # non-zero exit is treated as a block reason, never a set -e crash.
-            local _c3_verify_bin="${AID_C3_DISPATCH_BIN:-${SCRIPT_DIR}/lib/aid-c3-dispatch.sh}"
-            local _c3_verify_out="" _c3_verify_rc=0
-            # --read-only: this hook asks whether the evidence holds, it does
-            # not repair it. A raw/report mismatch is reported and blocks; the
-            # report is replaced only by a verify run on purpose.
-            _c3_verify_out=$(bash "$_c3_verify_bin" verify --read-only "$evidence_dir" 2>&1) || _c3_verify_rc=$?
-            if [[ "$_c3_verify_rc" -ne 0 ]]; then
-              c3_dispatch_block_reason="aid-c3-dispatch.sh verify failed (report↔raw faithful-transform binding broken, exit ${_c3_verify_rc}): ${_c3_verify_out}"
-            fi
-          fi
-        fi
-
-        if [[ -n "$c3_dispatch_block_reason" ]]; then
-          # Always emit c3_dispatch_would_block so the gate is observable in both
-          # modes; then blocking → errors++, observe → telemetry only (matches the
-          # C3 independent-audit hook's would_block convention above).
-          log_event "$_c3_timeline" "c3_dispatch_would_block" \
-            check="c3_dispatch_provenance" enforcement="$c3_enforcement" \
-            risk_profile="$c3_risk_profile" reason="$c3_dispatch_block_reason"
-          if [[ "$c3_enforcement" == "blocking" ]]; then
-            echo "PRECONDITION FAIL: C3 dispatch provenance block — ${c3_dispatch_block_reason}." >&2
-            echo "Risk profile '${c3_risk_profile}' requires a verified Codex dispatch (c3/c3-dispatch.json) proving a real, faithful audit at HEAD. See: ${c3_dispatch_json}" >&2
-            errors=$((errors + 1))
-          else
-            log_warn "C3 dispatch provenance would_block (enforcement=observe, non-blocking): ${c3_dispatch_block_reason}"
-          fi
-        fi
-      fi
-
-      # (Step 4 CP2 finding 1 moved the legacy `blocking_findings` .md/.yaml read
-      # OUT of this block to just ABOVE the plan_branch skip guard, beside the
-      # pm_decision and task-file-archived checks — it is an EPIC-LOCAL verdict
-      # about this EPIC's own diff and must keep blocking in BOTH modes. Its C3
-      # SSOT deferral is preserved there, scoped to the legacy path where the C3
-      # hook above actually runs. Search: "the auditor's `blocking_findings`
-      # verdict (EPIC-LOCAL, BOTH modes)".)
-
-      # ─── C4 release-decision dual-run hook (E-059-2_2 Step 5) ───────────────
-      # Runs the C4 release aggregator (aid-release-policy.sh) HERE — after every
-      # legacy check above, so `errors` is the COMPLETE legacy verdict — and logs
-      # how the aggregator's release_ready compares to it. Observe-only by default
-      # (release-decision-policy.yaml enforcement: observe → transition unaffected).
-      #
-      # HARD GUARANTEE: an aggregator crash MUST NOT abort done-advance. The call
-      # uses the set -euo pipefail-safe `cmd || rc=$?` idiom (same as the aggregator's
-      # own evidence-verify call), so a non-zero exit is caught and only logs
-      # result=crash — the legacy `errors` tally alone then decides the transition.
-      # NOTE: --force takes the sibling branch above (whole gauntlet skipped), so a
-      # forced advance structurally NEVER reaches this hook / emits dual_run.
-      local _c4_timeline="${evidence_dir}/timeline.jsonl"
-      local _c4_head_sha _c4_legacy_errors="$errors" _c4_legacy_ready
-      _c4_head_sha=$(git -C "$_tree_root" rev-parse HEAD 2>/dev/null || echo "unknown")
-      [[ "$_c4_legacy_errors" -eq 0 ]] && _c4_legacy_ready="true" || _c4_legacy_ready="false"
-
-      # Resolve enforcement (fail-safe observe). RELEASE_DECISION_POLICY = test/CI seam.
-      local _rdp_enforcement="observe" _rdp_policy
-      _rdp_policy="${RELEASE_DECISION_POLICY:-${SCRIPT_DIR}/../defaults/policies/release-decision-policy.yaml}"
-      if [[ -f "$_rdp_policy" ]] && command -v yq >/dev/null 2>&1; then
-        local _pol_rdp
-        _pol_rdp=$(aid_control_enforcement "$_rdp_policy" "c4_release_decision")
-        [[ "$_pol_rdp" == "blocking" ]] && _rdp_enforcement="blocking"
-      fi
-
-      # P062 Step 8 — the content-verdict switch, read from the SAME policy file
-      # and passed to the aggregator, which reads no policy of its own. Its own
-      # key, separate from `enforcement` above, so E10's promotion step can flip
-      # the content verdict for an approved control without also flipping the
-      # release_ready dual-run toggle. Fail-safe observe on a missing key,
-      # missing file or missing yq — every "cannot tell" path leaves it OFF.
-      local _cvp="observe"
-      if [[ -f "$_rdp_policy" ]] && command -v yq >/dev/null 2>&1; then
-        local _pol_cvp
-        _pol_cvp=$(aid_control_enforcement "$_rdp_policy" "c4_content_verdict" "content_verdict_policy")
-        [[ "$_pol_cvp" == "blocking" ]] && _cvp="blocking"
-      fi
-
-      # Run the aggregator GUARDED. AID_RELEASE_POLICY_BIN = test seam (default: shipped).
-      local _c4_bin _c4_out _c4_rc=0
-      _c4_bin="${AID_RELEASE_POLICY_BIN:-${SCRIPT_DIR}/aid-release-policy.sh}"
-      _c4_out=$(AID_PROJECT_ROOT="$project_root" CONTENT_VERDICT_POLICY="$_cvp" \
-                bash "$_c4_bin" "$epic_id" "$run_id" 2>&1) || _c4_rc=$?
-
-      if [[ "$_c4_rc" -ne 0 ]]; then
-        # Aggregator crashed → observe only, NEVER block (could not obtain a verdict).
-        log_event "$_c4_timeline" "release_policy_dual_run" \
-          result="crash" match="false" divergence_class="unclassified" \
-          legacy_ready="$_c4_legacy_ready" enforcement="$_rdp_enforcement" \
-          exit_code="$_c4_rc" head_sha="$_c4_head_sha"
-      else
-        local _c4_rd="${evidence_dir}/release-decision.json"
-        local _c4_ready="unknown" _c4_bcount=0 _c4_blocker_ids=""
-        if [[ -f "$_c4_rd" ]] && command -v jq >/dev/null 2>&1; then
-          # Boolean-safe read: `.release_ready // "unknown"` is WRONG here — jq's //
-          # treats a literal `false` as empty, so a false verdict would misread as
-          # "unknown" (breaking match against a legacy false). Map the boolean explicitly.
-          _c4_ready=$(jq -r 'if .release_decision.release_ready == true then "true"
-                             elif .release_decision.release_ready == false then "false"
-                             else "unknown" end' "$_c4_rd" 2>/dev/null || echo "unknown")
-          _c4_bcount=$(jq -r '.release_decision.blockers | length' "$_c4_rd" 2>/dev/null || echo "0")
-          _c4_blocker_ids=$(jq -r '.release_decision.blockers[]?.input_id' "$_c4_rd" 2>/dev/null || echo "")
-        fi
-        local _c4_match="false"
-        [[ "$_c4_ready" == "$_c4_legacy_ready" ]] && _c4_match="true"
-        local _c4_divclass
-        _c4_divclass=$(_c4_divergence_class "$_c4_match" "$_c4_ready" "$_c4_bcount" "$_c4_blocker_ids")
-
-        log_event "$_c4_timeline" "release_policy_dual_run" \
-          result="compared" match="$_c4_match" divergence_class="$_c4_divclass" \
-          legacy_ready="$_c4_legacy_ready" c4_release_ready="$_c4_ready" \
-          legacy_errors="$_c4_legacy_errors" blocker_count="$_c4_bcount" \
-          enforcement="$_rdp_enforcement" head_sha="$_c4_head_sha"
-
-        # E-060-2_2 Step 8 (contract 5): per-input at-HEAD telemetry. The aggregator is a pure,
-        # side-effect-free deterministic producer (no log_event) — the FSM dual-run hook is the
-        # NAMED emitter. After reading release-decision.json, emit one c4_head_match_divergence
-        # per head_match==false input (a stale artifact that must not look usable), and one
-        # c4_head_match_unknown per unknown-basis gating input (uncomputable at-HEAD — surfaced
-        # so it is never a silent true). Best-effort telemetry: never affects the transition.
-        if [[ -f "$_c4_rd" ]] && command -v jq >/dev/null 2>&1; then
-          local _hm_id _hm_val
-          while IFS=$'\t' read -r _hm_id _hm_val; do
-            [[ -z "$_hm_id" ]] && continue
-            if [[ "$_hm_val" == "false" ]]; then
-              log_event "$_c4_timeline" "c4_head_match_divergence" \
-                input_id="$_hm_id" head_match="false" head_sha="$_c4_head_sha" \
-                enforcement="$_rdp_enforcement"
-            else
-              log_event "$_c4_timeline" "c4_head_match_unknown" \
-                input_id="$_hm_id" head_match="unknown" head_sha="$_c4_head_sha" \
-                enforcement="$_rdp_enforcement"
-            fi
-          done < <(jq -r '
-            .release_decision.inputs[]?
-            | select( (.head_match == false)
-                      or (.head_match == "unknown" and .verdict != "advisory" and .verdict != "not_applicable") )
-            | [.id, (if .head_match == false then "false" else "unknown" end)] | @tsv' \
-            "$_c4_rd" 2>/dev/null)
-        fi
-
-        # Divergence → alert (AID_TEST_MODE suppresses the real send inside lib/aid-alert.sh).
-        if [[ "$_c4_match" == "false" ]]; then
-          aid_alert_run warning plan-c4-divergence "$epic_id" \
-            "stará a nová logika vydání se na tomhle EPICu neshodly (třída ${_c4_divclass}) — zatím jen pozorujeme, nic to neblokuje." \
-            "Do konce týdne rozhodni, která z těch dvou má pravdu; jinak se přepnutí odkládá naslepo." \
-            "legacy_ready=${_c4_legacy_ready} c4_ready=${_c4_ready} class=${_c4_divclass}" || true
-        fi
-
-        # Enforcement: observe → transition unaffected; blocking → a C4 false stops it.
+        AID_PROJECT_ROOT="$project_root" CONTENT_VERDICT_POLICY="$_cvp" \
+          bash "${AID_RELEASE_POLICY_BIN:-${SCRIPT_DIR}/aid-release-policy.sh}" "$epic_id" "$run_id" >/dev/null 2>&1 || _c4_rc=$?
+        local _c4_rd="${evidence_dir}/release-decision.json" _c4_ready="unknown"
+        [[ "$_c4_rc" -eq 0 && -f "$_c4_rd" ]] \
+          && _c4_ready=$(jq -r '.release_decision.release_ready | if . == true or . == false then tostring else "unknown" end' "$_c4_rd" 2>/dev/null || echo unknown)
+        log_event "${evidence_dir}/timeline.jsonl" "release_decision" \
+          release_ready="$_c4_ready" exit_code="$_c4_rc" enforcement="$_rdp_enforcement" \
+          head_sha="$(git -C "$_tree_root" rev-parse HEAD 2>/dev/null || echo unknown)"
         if [[ "$_rdp_enforcement" == "blocking" && "$_c4_ready" == "false" ]]; then
-          echo "PRECONDITION FAIL: C4 release aggregator release_ready=false (enforcement=blocking)." >&2
+          echo "PRECONDITION FAIL: the release decision is release_ready=false (enforcement=blocking)." >&2
           echo "See ${_c4_rd} for the blocker list, or override with --force (PM-authorized, audited)." >&2
           errors=$((errors + 1))
         fi
-      fi
-      # ─── End C4 dual-run hook ───────────────────────────────────────────────
 
       fi
       # ══ End of the plan_branch-skipped release stack (P064 plan Step 9) ═════
@@ -7853,7 +6556,6 @@ EOF
       local _esp_out
       if _esp_out="$(aid_epic_summary_page_path "$project_root" "$epic_id")"; then
         aid_epic_summary_page_render "$evidence_dir" "$_esp_out" \
-          "${project_root%/}/.aid-o/work/backlog.md" \
           || log_warn "epic-summary-artifact.html render failed (non-fatal)"
       else
         log_warn "epic-summary-artifact.html: cannot resolve the page path for ${epic_id} (non-fatal)"
@@ -8096,10 +6798,8 @@ cmd_check_promotion_candidates() {
 }
 
 # ─── plan-close ─────────────────────────────────────────────────────────
-# Verify all required CA reports are present, then write ca-review-complete.
-# simplifier-report.md is skipped when simplifier.enabled:false in execution.yaml.
-# delivery-report.md  is skipped when reporter.enabled:false  in execution.yaml.
-# Skips are logged to audit-log.jsonl with rationale.
+# Run the plan-close self-check (and, for a plan_branch plan, the plan-layer
+# close transaction), then write the EPIC's ca-review-complete marker.
 # Usage: aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
 # _fsm_plan_mode_args <plan_id> <root> — the three values `aid_lc_plan_mode_begin`
 # needs, read from the plan's own manifest: merge sha, plan-final run directory
@@ -8215,79 +6915,13 @@ cmd_plan_close() {
   # git-tracked lifecycle manifest on target_branch) — never from the runtime
   # plan-boundary manifest. CP3-F2 made that a structural invariant precisely so
   # two mode sources can never disagree, and plan-close is not an exception.
-  # Read execution.yaml toggles — grep-only, no yq dependency. Read BEFORE the
-  # plan-layer delegation (CP2 M5): the delegated path used to return before
-  # this, so a project with reporter.enabled:false hard-failed the plan layer's
-  # Check 1 ("report never generated") with no reachable remedy.
-  local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
-  local simplifier_enabled=true
-  local reporter_enabled=true
-  # P083 Step 6: only rc=1 (explicit enabled:false) disables — rc=2
-  # (unreadable/malformed) fails CLOSED to enabled=true rather than being
-  # coerced to disabled, so an unreadable config cannot silently waive a
-  # plan-boundary requirement. _aid_read_toggle's own stderr line names the
-  # file and section for the unreadable case.
-  local simplifier_rc=0 reporter_rc=0
-  _aid_read_toggle "$exec_yaml" "simplifier" || simplifier_rc=$?
-  _aid_read_toggle "$exec_yaml" "reporter" || reporter_rc=$?
-  if (( simplifier_rc == 1 )); then simplifier_enabled=false; fi
-  if (( reporter_rc == 1 )); then reporter_enabled=false; fi
-
   local _pb_plan_layer_closed=0
-
   local audit_log="${project_root}/.aid-o/work/audit-log.jsonl"
 
-  local curator_report="${evidence_dir}/curator-report.md"
-  local audit_report="${evidence_dir}/audit-report.md"
-  local simplifier_report="${evidence_dir}/simplifier-report.md"
-  local delivery_report="${project_root}/.aid-o/reports/${plan_id}-delivery.md"
-
-  # Helper: emit standard missing-report error message.
-  local _fail_missing
-  _fail_missing() {
-    echo "PRECONDITION FAIL: required report not found: $1" >&2
-    echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
-    missing=1
-  }
-
-  # Always-required reports (no toggle).
-  local missing=0
-  for required_file in "$curator_report" "$audit_report"; do
-    if [[ ! -f "$required_file" ]]; then
-      _fail_missing "$required_file"
-    fi
-  done
-
-  # simplifier-report: required unless simplifier.enabled:false.
-  if [[ "$simplifier_enabled" == "false" ]]; then
-    log_event "$audit_log" "plan_close_skip" specialist="simplifier" rationale="simplifier.enabled:false in execution.yaml"
-  else
-    if [[ ! -f "$simplifier_report" ]]; then
-      _fail_missing "$simplifier_report"
-    fi
-  fi
-
-  # delivery-report: required unless reporter.enabled:false.
-  if [[ "$reporter_enabled" == "false" ]]; then
-    log_event "$audit_log" "plan_close_skip" specialist="reporter" rationale="reporter.enabled:false in execution.yaml"
-  else
-    if [[ ! -f "$delivery_report" ]]; then
-      _fail_missing "$delivery_report"
-    fi
-  fi
-
-  if [[ "$missing" -ne 0 ]]; then
-    exit 1
-  fi
-
-  # ── The plan-layer close transaction — AFTER the evidence gate above ──────
-  # Ordering is the whole point. The plan-layer close is IRREVERSIBLE: it commits
-  # a lifecycle receipt, writes plan-close-complete and moves the plan to CLOSED.
-  # Running it before the required-report checks meant a plan could be
-  # permanently closed in the books and only then fail on a missing Curator or
-  # Auditor report — the exact split between recorded state and reality that this
-  # whole plan boundary exists to prevent. Nothing durable is written until every
-  # required report for this EPIC is present.
+  # ── The plan-layer close transaction ──────────────────────────────────────
+  # IRREVERSIBLE: it commits a lifecycle receipt, writes plan-close-complete and
+  # moves the plan to CLOSED. Its own check (aid-plan-close-check.sh
+  # --plan-branch) is what refuses a plan that is not ready.
   local _pb_mode_row _pb_mode=""
   _pb_mode_row="$(_fsm_declared_plan_mode "$epic_id" 2>/dev/null || true)"
   _pb_mode="${_pb_mode_row%%$'\t'*}"
@@ -8307,9 +6941,7 @@ cmd_plan_close() {
         _pb_plan_layer_closed=1
         ;;
       PLAN_MERGING|ABORTED|CLOSED)
-        local -a _pb_close_args=("$plan_id" --project-root "$project_root")
-        [[ "$reporter_enabled" == "false" ]] && _pb_close_args+=(--skip-delivery-report)
-        if ! "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-close "${_pb_close_args[@]}"; then
+        if ! "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-close "$plan_id" --project-root "$project_root"; then
           echo "PRECONDITION FAIL: plan-close: the plan-layer close transaction refused ${plan_id} — no EPIC marker was written." >&2
           exit 1
         fi
@@ -8323,27 +6955,11 @@ cmd_plan_close() {
     esac
   fi
 
-  # Mechanical plan-close self-check (aid-plan-close-check.sh) — replaces the
-  # PM's repeated manual audits (stale/untracked reports, DONE-but-pending
-  # fsm-state, stale queue/active.md) with a hard gate here. --auto-annotate
-  # only lets the script's own Check 2 fix the safe docs-only-stale-report
-  # case; it is not a general cleanup pass. A failure here blocks
-  # ca-review-complete exactly like a missing report above.
-  #
-  # The checker ALWAYS runs, even when reporter.enabled:false — skipping it
-  # entirely would also skip Checks 2-4 (Head freshness, fsm-state DONE-
-  # pending, queue/active revalidation), none of which have anything to do
-  # with the delivery report. Only the delivery-report existence requirement
-  # (Check 1) is relaxed via --skip-delivery-report, matching the toggle this
-  # function already honors a few lines up without widening the skip.
-  local -a _plan_close_check_flags=(--auto-annotate)
-  if [[ "$reporter_enabled" == "false" ]]; then
-    _plan_close_check_flags+=(--skip-delivery-report)
-    log_event "$audit_log" "plan_close_skip" specialist="plan-close-check-delivery-report" rationale="reporter.enabled:false in execution.yaml (delivery-report existence only; Checks 2-4 still run)"
-  fi
+  # The mechanical plan-close self-check (DONE-but-pending fsm-state, stale
+  # queue/active.md, carried obligations) is a hard gate here.
   if [[ "$_pb_plan_layer_closed" -eq 1 ]]; then
     log_event "$audit_log" "plan_close_skip" specialist="plan-close-check-rerun" rationale="the plan-layer close transaction already ran aid-plan-close-check.sh --plan-branch, which is a strict superset of this invocation"
-  elif ! "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" --project-root "$project_root" "${_plan_close_check_flags[@]}"; then
+  elif ! "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" --project-root "$project_root"; then
     echo "PRECONDITION FAIL: aid-plan-close-check.sh reported a blocking issue for ${plan_id}" >&2
     echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
     exit 1
@@ -9083,9 +7699,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 [[ -n "$_pr_id" ]] || { echo "Usage: aid-fsm.sh plan-reconcile <plan_id> [--dry-run|--apply] [root]" >&2; exit 1; }
                                 # PLAN MODE HAS TO BE BEGUN, AND NOBODY WAS BEGINNING IT.
                                 # In plan mode the lifecycle reads the reviewed head from
-                                # $_AID_LC_PLAN_RUN_DIR/audit-report.json. This dispatch called
+                                # $_AID_LC_PLAN_RUN_DIR/cp7/rounds.json. This dispatch called
                                 # the reconcile directly and the function does not begin the mode
-                                # itself, so the path resolved to /audit-report.json, the read
+                                # itself, so the path resolved to the filesystem root, the read
                                 # came back empty, and EVERY epic of EVERY plan_branch plan was
                                 # reported "unverifiable — no reviewed-head provenance" while the
                                 # real report sat in the evidence directory. plan-close's check5
@@ -9106,12 +7722,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     plan-record-delivery)       shift
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-record-delivery <epic_id> [root]" >&2; exit 1; }
                                 aid_lifecycle_record_delivery "$1" "${2:-.}" ;;
-    pm-override)                shift; cmd_pm_override "$@" ;;
     plan-state)                 shift
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
                                 aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|resume|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|step-evidence-dir|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|pm-override|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune|active-runs stalled> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|resume|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|step-evidence-dir|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune|active-runs stalled> [args...]" >&2
       exit 1 ;;
   esac
 fi

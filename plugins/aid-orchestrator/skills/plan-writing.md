@@ -6,7 +6,7 @@ user_invocable: false
 
 # Plan Writing — Exhaustive Plan Document Authoring
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-20
 
 **Skill:** plan-writing
 **Dependencies:** brainstorming
@@ -1415,12 +1415,11 @@ obligations (a `Reuse check:` on a delivered step is answered truthfully by
 
 ---
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-20
 
 ## Plan-boundary note
 
-Under `plan_branch` the Auditor, Curator, Simplifier and Reporter are
-**plan-final** roles: dispatched once per plan, at the boundary, against the
-frozen candidate. CP2 and CP3 remain per EPIC. Under
-`legacy_epic_release_mode` the previous per-EPIC cadence is unchanged. Mode is
-read from the plan's committed lifecycle manifest, never inferred.
+Under `plan_branch` the whole delivery is read once per plan, by the whole-plan
+round (CP7) against the frozen candidate (`commands/aid-run.md`, "Closing a plan
+(plan-final)"). CP2 and CP3 remain per EPIC in both modes. Mode is read from the
+plan's committed lifecycle manifest, never inferred.

@@ -25,7 +25,7 @@ fingerprint() {
 #
 # audit_report findings are LLM-derived adversarial-review discoveries, not
 # deterministic check-against-target results — they have no check_id/target_path/
-# finding_class (those fields aren't in audit-report.schema.json and never were;
+# finding_class (those fields were never in the audit-report schema;
 # C3.5's minimal finding shape is fingerprint/occurrence_id/severity/action_owner
 # plus the free-form area/finding/recommendation fields the auditor actually
 # writes). The universal fingerprint() formula above doesn't apply here — using it

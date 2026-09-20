@@ -116,13 +116,11 @@
 # `rerun_targeted` and `collect_and_continue`.
 #
 # ── TRANSPORT ───────────────────────────────────────────────────────────────
-# `_run_codex_isolated` from `aid-c3-dispatch.sh` — the SAME isolated transport
-# the C3 bridge and plan review use, reused by `source`, never
-# reimplemented. That file sets `set -euo pipefail` at top level, which sourcing
-# would otherwise impose on every caller of this lib; the options are saved and
-# restored around the `source` below, so sourcing this file changes no shell
-# option of the caller. The function is written to behave identically whether or
-# not the caller runs under `set -euo pipefail` (both are covered by the suite).
+# `_run_codex_isolated` from `aid-codex-transport.sh` — the SAME isolated transport
+# the review rounds and the brainstorm opponent use, reused by `source`, never
+# reimplemented. It sets no shell option, so sourcing this file changes none of
+# the caller's. The function behaves identically whether or not the caller runs
+# under `set -euo pipefail` (both are covered by the suite).
 #
 # ── AUDIT ───────────────────────────────────────────────────────────────────
 # Every exchange — including the refusals that never dispatch — writes
@@ -181,15 +179,9 @@
 # **Last Updated:** 2026-08-10
 # =============================================================================
 
-# shellcheck source=aid-c3-dispatch.sh
+# shellcheck source=aid-codex-transport.sh
 _AID_RA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Save every shell option, source the transport (which sets -euo pipefail at top
-# level), then restore. `set +o` prints the exact commands that recreate the
-# current option state, so this is a faithful restore in both directions.
-_AID_RA_SAVED_OPTS="$(set +o)"
-source "$_AID_RA_DIR/aid-c3-dispatch.sh"
-eval "$_AID_RA_SAVED_OPTS"
-unset _AID_RA_SAVED_OPTS
+source "$_AID_RA_DIR/aid-codex-transport.sh"
 
 _AID_RA_POLICY_DEFAULT="$_AID_RA_DIR/../../defaults/policies/auto-recovery.yaml"
 _AID_RA_SCHEMA_DEFAULT="$_AID_RA_DIR/../../defaults/schemas/auto-recovery.schema.json"

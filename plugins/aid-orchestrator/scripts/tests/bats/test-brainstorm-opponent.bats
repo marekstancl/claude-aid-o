@@ -6,8 +6,8 @@
 # opponent AID had arrived AFTER the plan was written (the C0 review) — the
 # expensive place to discover a wrong premise.
 #
-# HOW CODEX IS STOOD IN FOR: a `codex` shim on PATH that answers the four
-# availability probes lib/aid-audit-independence.sh really makes, and writes a
+# HOW CODEX IS STOOD IN FOR: a `codex` shim on PATH that answers the
+# availability probe of lib/aid-codex-transport.sh, and writes a
 # last-message file the way the real CLI does. So what is exercised is the
 # parsing and the merge that will meet the real tool — not a mock of AID's own
 # code.
@@ -220,7 +220,7 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   export PATH="$older:$PATH"
   # the ranking itself, not only its consequence: the chooser must name the
   # 9.9.9 shim although the 0.1.0 one comes first on PATH
-  run bash -c "source '$PLUGIN_ROOT/scripts/lib/aid-c3-dispatch.sh'; aid_codex_binary"
+  run bash -c "source '$PLUGIN_ROOT/scripts/lib/aid-codex-transport.sh'; aid_codex_binary"
   [ "$status" -eq 0 ]
   [[ "$output" == *"$BIN/codex"*9.9.9* ]]
   [[ "$output" != *"$older"* ]]

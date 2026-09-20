@@ -42,7 +42,7 @@ _drift() {
     . "$SCRIPT_DIR/lib/aid-plan-state.sh"
     . "$SCRIPT_DIR/lib/aid-plan-manifest.sh"
     . "$SCRIPT_DIR/lib/aid-ancillary.sh"
-    eval "$(sed -n "/^_pfsm_equivalence_classify()/,/^_pfsm_finalize_review()/p" "$SCRIPT_DIR/aid-plan-fsm.sh" \
+    eval "$(sed -n "/^_pfsm_equivalence_classify()/,/^_pfsm_plan_final_evidence_ref()/p" "$SCRIPT_DIR/aid-plan-fsm.sh" \
             | sed "\$d")"
     cd "$2"
     eval "$3"

@@ -3,6 +3,57 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.101.0] — 2026-09-20
+
+### ⚠️ Změna chování — přečti před upgradem
+
+**Konec plánu má čtyři kroky místo šesti a čte ho jedno kolo tří revizorů.**
+`plan-finalize --stage` zná `freeze`, `gates`, `produce` a `decide`; staré názvy
+(`sync`, `inputs`, `review`, `c4`, `summary`, `accept-ancillary`) končí kódem 2
+a jmenují nástupce. **Plán rozpracovaný ve starém uzavírání se zavře znovu od
+`--stage freeze`**; doklad verze 1 se při uzavření odmítne s tímto příkazem.
+Celé dodání čte jednou kolo `cp7` (role kritérií, tvrzení a celku), oprava
+razí další pokus a znovu se platí jen to, čeho se dotkla: brána, jejíž vstupy
+ani definice se nepohnuly, se zkopíruje, role bez nálezu a bez dotčených vstupů
+se přenese. Každé odmítnutí končí řádkem `next:` s dalším příkazem.
+
+**Reportér, kurátor, smlouva auditora pro konec plánu, CP4, CP5, brána dodávky
+C1 a srovnávací běh rozhodnutí jsou pryč.** Nález revize opravuje role, která
+kód psala, a potvrzuje ho další kolo; stránku pro PM počítá `aid-pm-brief.sh`
+a ukazuje pokusy, minuty a cenu uzavření. `plan-close` už nečeká na
+`<plán>-delivery.md`. Klíče `reporter:`, `simplifier:`, `curator_auto_rules:`
+a `cp4_production_paths:` v `execution.yaml` a přepínače `cp4_curator_validation`,
+`cp5_critical_gate`, `simplifier_pass`, `delivery_report` už nic nečte — smějí
+zůstat, jen nic nedělají. Volitelná kontrola CI `plan-boundary-required-check.yml`
+hlídala soubory reportéra; v projektu ji smažte.
+
+### Added
+- **Kolo `cp7` — čtení celého plánu** — tři role (`final_criteria` na Opusu, `final_claims`, `final_generalist` na Codexu se zapsaným zástupem) čtou `plan_base..kandidát` jednou před rozhodnutím; přepínač `cp7_plan_final_review` se čte ze základny plánu, takže ho plán sám nevypne, a vypnuté kolo blokuje, dokud ho PM pro daného kandidáta nevzdá (`decide --waive-final-review --reason`).
+- **Znovupoužití výsledků mezi pokusy** — `freeze` zapíše `fix-class.json` (co se změnilo a které vstupy revizí to zneplatňuje) a `gates` zkopíruje řádky bran s nezměněnými vstupy i definicí s poli `reused_from` a `reused_candidate`.
+- **Záznam zápisů kroků** — `stage-writes.jsonl` drží otisk každého souboru, který krok napsal; vstup rozhodnutí upravený rukou `decide` odmítne jménem.
+- **Profil revize s projektovou vrstvou** — výchozí povrchy plus `.aid-o/config/policies/review-profiles.yaml` projektu; platí přísnější z obou a vzory cest jsou ve stylu gitignore.
+- **Otázka 7 revizorů kroku a žebřík „napiš nejméně kódu, který funguje"** — zbytečná složitost se hledá u každého kroku, ne jednou na konci plánu.
+- **`lib/aid-codex-transport.sh`** — jediná cesta ke Codexu (čtecí sandbox, kořen v projektu, zavřený vstup) pod jménem, které říká, co to je; při načtení nemění volajícímu žádnou volbu ani proměnnou.
+
+### Changed
+- **Rozhodnutí o vydání čte menší uzavřenou sadu** — `gates_report`, `final_review` (u EPICu index `cp3`), `obligations`, profil revize, doklad kritérií, sémantický soubor kola a ověření evidence; v `done-advance` se loguje jako `release_decision` a blokuje jen s `enforcement: blocking`.
+- **Účetní srovnání plánu a stránky o EPICu čtou záznam revizí** — `lib/aid-lifecycle.sh`, `lib/aid-epic-summary-page.sh` a `aid-epic-summary.sh` berou verdikt a otevřené nálezy z `cp7/rounds.json` a `cp3`; zpráva auditora se čte už jen u EPICů uzavřených dřív.
+- **`aid-plan-close-check.sh` hlídá stav, ne zprávy** — zůstaly kontroly rozpracovaného DONE, fronty, závazků a hranice plánové větve.
+- **Zadání revizorů říká, že `evidence` jsou jen odkazy** — poznámka za číslem řádku dřív potichu zahodila i pravdivý blokující nález.
+- **`agents/auditor.md` a `agents/simplifier.md`** — audit zdraví projektu pro `/aid-audit` a agent na vyžádání; `agents/verifier.md` slouží už jen posuzování částí návrhu.
+
+### Fixed
+- **Odmítnutí `plan-finalize` před výběrem kroku nekončilo dalším příkazem** — špinavý strom, odpojená hlava a rozpracovaný merge teď také tisknou `next:`.
+- **Porovnání cest v profilu revize bralo znaky regulárního výrazu doslova špatně** — `+`, závorky a `|` ve vzoru projektu se už nevykládají jako regex.
+- **Blok s diffem v zadání revizora mohl ukončit řádek ze samotného diffu** — plot je z vlnovek.
+- **Dva zastaralé testy a jedna základna** — `test-scoped-preflights` (chyběl `--run-id`), `test-control-boundary` (smazaná politika) a délka oddílu revizí v `test-instruction-consistency` byly červené už dřív.
+
+### Removed
+- **Reportér, kurátor a most auditu ke Codexu** — `agents/reporter.md`, `agents/curator.md`, `lib/aid-c3-dispatch.sh`, `lib/aid-audit-mode.sh`, `lib/aid-audit-independence.sh`, `lib/aid-review-signals.sh`, politika a prompty C3, šablona zprávy o dodání, příkaz `pm-override`, kontrola výstupu ověřovatele a jejich sady; 35 řádků registru je vyřazeno s nástupcem v `reference/review-successors.md`.
+- **Brána dodávky C1** — nespustila jedinou kontrolu ve 101 ze 101 běhů projektů a jinde zdvojovala projektové brány; pravidlo o hodnotách `enforcement` zůstalo jako lint.
+- **Kontroly zpráv při uzavření plánu, jejich kopie v `.aid-o/reports/` a kontrola CI nad nimi** — po reportérovi neměly co hlídat.
+- **Šest schémat vyřazených artefaktů** — nic je nenačítalo; typy ve validátoru zůstávají, aby šla ověřit starší evidence.
+
 ## [2.100.0] — 2026-09-20
 
 ### ⚠️ Změna chování — přečti před upgradem

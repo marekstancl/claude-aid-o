@@ -1,0 +1,54 @@
+{
+  "description": "P096 Step 11: which finding of the whole-plan round (cp7) matched each recorded auditor finding. Judged by the controller on 2026-09-20 from the live answers in answers/. `matched_by` is the fingerprint of the accepted finding in that round; `mechanism` names the deterministic check that makes the finding impossible to reach, where no reviewer is meant to find it.",
+  "rule": "at least 6 of 8 matched",
+  "entries": [
+    {
+      "id": "S1",
+      "matched": true,
+      "matched_by": "sha256:f4d5d15b66fb0cfdcda95f03b273069ed723b8923e36d4704c39b5d9a973dcec",
+      "mechanism": null
+    },
+    {
+      "id": "S2",
+      "matched": true,
+      "matched_by": "sha256:bad8d5745e21a067260658bdd42f86554414fe246af682a424618ece9a5543e3",
+      "mechanism": null
+    },
+    {
+      "id": "S3",
+      "matched": true,
+      "matched_by": "sha256:4206041b3635d2b6cd74ec6d09dc08d8f686ee85d80d2aec0324bd41cf3d01b0",
+      "mechanism": null
+    },
+    {
+      "id": "S4",
+      "matched": true,
+      "matched_by": "sha256:4206041b3635d2b6cd74ec6d09dc08d8f686ee85d80d2aec0324bd41cf3d01b0",
+      "mechanism": null
+    },
+    {
+      "id": "S5",
+      "matched": true,
+      "matched_by": "sha256:525f8067fc75e18c464bcfaa35b9a61b35689bc067b2dea38084774613889d4d",
+      "mechanism": null
+    },
+    {
+      "id": "S6",
+      "matched": true,
+      "matched_by": "sha256:cc93190364b965a999695fdf205cd87597adda74ab4165890a7d818182630b45",
+      "mechanism": null
+    },
+    {
+      "id": "S7",
+      "matched": true,
+      "matched_by": null,
+      "mechanism": "freeze re-runs every gate and review whose inputs moved, so no result of an older commit reaches decide (test-plan-final-decide.bats: 'a code fix re-reads everything')"
+    },
+    {
+      "id": "S8",
+      "matched": false,
+      "matched_by": null,
+      "mechanism": null
+    }
+  ]
+}

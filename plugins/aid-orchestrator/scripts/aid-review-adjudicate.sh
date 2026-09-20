@@ -22,7 +22,7 @@
 #   - the same fingerprint twice from one reviewer     → rejected: duplicate
 # What survives is merged by fingerprint — the five-argument formula of
 # lib/aid-finding-fingerprint.sh: project, namespace, the step (`.step`, or the
-# literal "plan"/"epic"/"do" per namespace), the first evidence with its line,
+# literal "plan"/"epic"/"do" per namespace; final_review uses "plan"), the first evidence with its line,
 # the first eight words of the claim; the next round matches it by the same
 # key without the evidence line. CP1 keeps its `plan_review` namespace and its
 # `.step // "plan"` third argument, so fingerprints recorded before this script
@@ -60,9 +60,9 @@ while [[ $# -gt 0 ]]; do
     *)  DIR="$1"; shift ;;
   esac
 done
-usage() { echo "Usage: aid-review-adjudicate.sh <round_dir> --project-root <dir> --namespace plan_review|step_review|epic_review|do_review [--plan <plan.md>] [--step-check <json>] [--previous <round_dir>]" >&2; exit 2; }
+usage() { echo "Usage: aid-review-adjudicate.sh <round_dir> --project-root <dir> --namespace plan_review|step_review|epic_review|do_review|final_review [--plan <plan.md>] [--step-check <json>] [--previous <round_dir>]" >&2; exit 2; }
 [[ -n "$DIR" && -n "$ROOT" && -n "$NS" ]] || usage
-case "$NS" in plan_review|step_review|epic_review|do_review) ;; *) usage ;; esac
+case "$NS" in plan_review|step_review|epic_review|do_review|final_review) ;; *) usage ;; esac
 [[ -r "${DIR}/round.json" && -r "${DIR}/collect.json" ]] || { echo "adjudicate: cannot read ${DIR}" >&2; exit 1; }
 [[ -z "$PLAN" || -r "$PLAN" ]] || { echo "adjudicate: cannot read ${PLAN}" >&2; exit 1; }
 [[ -z "$STEP_CHECK" || -r "$STEP_CHECK" ]] || { echo "adjudicate: cannot read ${STEP_CHECK}" >&2; exit 1; }
@@ -227,6 +227,7 @@ _third() {
     step_review) jq -r '.step // "step"' <<< "$1" ;;
     epic_review) echo epic ;;
     do_review)   echo do ;;
+    final_review) echo plan ;;
   esac
 }
 

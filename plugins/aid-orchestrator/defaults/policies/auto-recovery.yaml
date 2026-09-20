@@ -242,7 +242,7 @@ stop_classes:
 
   TRANSIENT_INFRA:
     description: >-
-      A cross-provider dispatch (a C3 audit) did not produce a
+      A cross-provider dispatch (a Codex reviewer) did not produce a
       response for an infrastructure reason — provider unavailable, rate
       limited, or the call timed out. Per pipeline.md this is NOT a loop
       iteration and does not consume review budget.
@@ -250,9 +250,9 @@ stop_classes:
     ladder_entry: instruction
     ladder_entry_status: planned
     emitter:
-      - file: plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh
-        anchor: 'rate_limited) uo="rate_limited" ;;'
-        note: "C3 attempt outcome mapping — unavailable / rate_limited / timeout"
+      - file: plugins/aid-orchestrator/scripts/aid-review-round.sh
+        anchor: 'why=rate_limited'
+        note: "a Codex reviewer's dispatch outcome — no_file / rate_limited / timeout"
     allowed_actions: [wait_and_resume, retry_once, resume_missing_lenses]
     budget: {attempts: 3, wall_clock_seconds: 3600}
     terminus: [adjudicate, escalation, pm_force]
@@ -284,9 +284,6 @@ stop_classes:
     ladder_entry: instruction
     ladder_entry_status: planned
     emitter:
-      - file: plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh
-        anchor: budget_exhausted
-        note: "C3 fix loop sets top_outcome=escalated with escalation_reason=budget_exhausted"
       - file: plugins/aid-orchestrator/scripts/aid-review-round.sh
         anchor: "exceeds rounds_default"
         note: "plan review refuses a round beyond rounds_default without the PM's recorded override"
@@ -355,16 +352,6 @@ existing_loops:
     budget_value: 2
     budget_file: plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml
     budget_kind: policy_key
-
-  - id: c3_fix_loop
-    what: "C3 independent audit fix→reverify loop (initial audit + rechecks)"
-    authority: existing
-    governed_by_ladder: false
-    budget_key: "c3_fix_loop.max_rechecks"
-    budget_value: 4
-    budget_file: plugins/aid-orchestrator/defaults/policies/c3-audit-policy.yaml
-    budget_kind: policy_key
-    note: "aid-c3-dispatch.sh reads this key and fails closed to the same 4."
 
   - id: plan_review_rounds
     what: "Plan review (CP1) rounds before EPIC generation"

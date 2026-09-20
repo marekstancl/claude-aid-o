@@ -281,11 +281,39 @@ for pat in 'verifier-output-step-' 'aid-prefilter.sh classify' 'verifier-output-
   fi
 done
 
-SECTION_LINES=$(awk '/^## Step review \(CP2\) and EPIC review \(CP3\)$/{on=1; next} on && /^### State: READY$/{exit} on' "$PLUGIN_DIR/commands/aid-run.md" | wc -l)
+# the section ends at the next `## ` heading (since P095 that is the stand-in section, not READY)
+SECTION_LINES=$(awk '/^## Step review \(CP2\) and EPIC review \(CP3\)$/{on=1; next} on && /^## /{exit} on' "$PLUGIN_DIR/commands/aid-run.md" | wc -l)
 if [[ "$SECTION_LINES" -gt 0 && "$SECTION_LINES" -le 150 ]]; then
   pass "aid-run.md review section is ${SECTION_LINES} lines (≤ 150, adapter included)"
 else
   fail "aid-run.md review section is ${SECTION_LINES} lines (must exist and be ≤ 150)"
+fi
+
+# ─── 11. Clean code at the source (P096) ──────────────────────────────────
+# The role that writes a step is told how to write less, and the step reviewer
+# asks about needless complexity while the diff is small: there is no cleanup
+# pass at the plan boundary to rely on.
+
+echo ""
+echo "=== 11. Clean code at the source (P096) ==="
+
+CARDS="$PLUGIN_DIR/skills/role-cards.md"
+if [[ "$(grep -c '^### Write the least code that works$' "$CARDS")" -eq 1 ]]; then
+  pass "the least-code ladder exists exactly once in role-cards.md"
+else
+  fail "role-cards.md must carry the '### Write the least code that works' ladder exactly once"
+fi
+for role in $(awk '/^## Step Roles/{on=1} /^## Verifier Focus Cards/{on=0} on && /^## Role: /{print $3}' "$CARDS"); do
+  if awk -v h="## Role: ${role}" '$0 == h {on=1; next} on && /^## /{exit} on' "$CARDS" | grep -q 'Write the least code that works'; then
+    pass "step role ${role} references the ladder"
+  else
+    fail "step role ${role} does not reference the least-code ladder"
+  fi
+done
+if awk '/^## Role: step_generalist$/{on=1; next} on && /^## /{exit} on' "$PLUGIN_DIR/skills/step-review-roles.md" | grep -q '^7\. Is anything here more than the step needs'; then
+  pass "step_generalist asks question 7 (needless complexity)"
+else
+  fail "step_generalist in step-review-roles.md lacks question 7 (needless complexity)"
 fi
 
 # ─── Summary ───────────────────────────────────────────────────────────────
@@ -381,6 +409,18 @@ else
   PASS=$((PASS + 1)); echo "  ✓ an archived record carrying the old sentence is left alone"
 fi
 rm -f "$ARCHIVE_FIXTURE"
+
+echo ""
+echo "TEST: no instruction names a mechanism P096 retired, or a former plan-finalize stage"
+# Precise names, not the bare words: "the reporters of a finding" is plain English.
+RETIRED_RE='agents/(reporter|curator)\.md|curator-report|-delivery\.md|delivery-report|aid-c3-dispatch|c3-audit-policy|aid-delivery-gate|\bCP4\b|\bCP5\b|cp4_curator|--stage (sync|inputs|review|c4|summary|accept-ancillary)\b|--focus (reporter|simplifier)'
+RETIRED_HITS="$(grep -rnE "$RETIRED_RE" "$PLUGIN_DIR/commands" "$PLUGIN_DIR/skills" "$PLUGIN_DIR/agents" \
+                  "$PLUGIN_DIR/scripts/lib/aid-review-adapter-claude.md" 2>/dev/null || true)"
+if [[ -z "$RETIRED_HITS" ]]; then
+  PASS=$((PASS + 1)); echo "  ✓ commands, skills and agents name no retired mechanism (the successor table is reference/review-successors.md)"
+else
+  FAIL=$((FAIL + 1)); echo "  ✗ retired names still instructed:"; printf '%s\n' "$RETIRED_HITS" | cut -c1-160 | sed 's/^/      /'
+fi
 
 echo ""
 echo "=================================="

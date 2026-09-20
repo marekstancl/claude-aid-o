@@ -1,0 +1,9 @@
+{"role": "final_generalist", "checkpoint": "cp7",
+ "findings": [{"id": "final_generalist-1", "checkpoint": "cp7",
+               "step": null,
+               "severity": "blocker",
+               "claim": "The range disables the CI pytest step for the whole repo (not just this EPIC's scope), removing an existing test-execution behaviour that no criterion of this docs/PWA-help plan asked to change, so every subsequent EPIC/plan loses backend regression coverage on push/PR silently.",
+               "command": "grep -n \"TEMPORARILY DISABLED\\|Pytest\" .github/workflows/ci.yml",
+               "evidence": ".github/workflows/ci.yml:30-42",
+               "fix": "Revert the CI pytest step removal in this plan's diff (or split it into its own separately-reviewed change with its own DoD criterion and PM sign-off), so P082 (a help-docs + PWA-page remediation plan) does not silently drop repo-wide backend test coverage in CI."}],
+ "no_findings_reason": ""}

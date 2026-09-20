@@ -174,8 +174,8 @@ Do not hand-roll that dispatch. Source `scripts/lib/aid-recovery-adjudicate.sh` 
 `aid_recovery_adjudicate <run_evidence_dir> <stop_class> <facts_file>`. It builds the prompt pack
 (verified facts, current FSM state, the ladder record so far, the class's `allowed_actions` from
 `defaults/policies/auto-recovery.yaml` as an explicit allowlist, and the forbidden
-authority-expanding actions), dispatches through the same isolated Codex transport the C3 bridge
-uses, accepts only a reply naming exactly one action from that allowlist plus a rationale, retries
+authority-expanding actions), dispatches through the same isolated Codex transport the review rounds
+use, accepts only a reply naming exactly one action from that allowlist plus a rationale, retries
 once with the rejection quoted, and records every exchange to `timeline.jsonl`, the ladder record and
 a per-exchange audit artifact. It prints the selected action, or `escalate` — which is not an action
 and must never be executed as one. The full convention, the fail-closed paths and the authority
@@ -403,9 +403,9 @@ reviews (`commands/aid-run.md` "Step review (CP2) and EPIC review (CP3)",
 `commands/aid-do.md`) include this text verbatim. `<round dir>` is the
 directory `prepare` printed, and `prepare` prints each role's `<focus>` next
 to its prompt: `cp1-<role>` for a plan, `cp2-step-<N>-<role>` for a step,
-`cp3-<role>` for an EPIC, `cp6-<role>` in fast mode, the role with `_`
-replaced by `-` (the dispatch wrapper allows no underscore in `--focus` or
-`--agent-id`).
+`cp3-<role>` for an EPIC, `cp6-<role>` in fast mode, `cp7-<role>` at plan
+close, the role with `_` replaced by `-` (the dispatch wrapper allows no
+underscore in `--focus` or `--agent-id`).
 
 For EACH expected role with `provider: claude` in `<round dir>/round.json`,
 one at a time:
@@ -629,9 +629,8 @@ deterministic redactor the artifact body uses. No path from gate output to the P
 
 ### State: DONE
 
-DONE uses two mechanically enforced sub-phases: `review` → `release`.
-**C+A model:** Dispatch per EPIC (background OK), validate per Plan (hard stop). See `pipeline.md §7`.
-Sub-phase transitions are managed by `done-advance` (not `transition`).
+DONE uses two mechanically enforced sub-phases: `review` → `release`, managed by `done-advance`
+(not `transition`). Detail: `pipeline.md §7`.
 
 **Sub-phase: `review`** (auto-set on GATES→DONE)
 
@@ -639,77 +638,52 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 2. Archive run file → `runs/archive/`
 3. `work/active.md` refreshes automatically at the done-advance boundary (generated index of active streams — never hand-edit it; detail lives in `work/plan-state/`)
 4. Generate `final_report.md`
-5. **Parallel dispatch:** Curator + Auditor agents (two Agent calls in single message)
-6. Wait for both to complete → evidence saved to `evidence/{epic_id}/{run_id}/`
-7. **Curator auto-fix** — gate-fixer applies approved proposals at every effort (S/M/L); only an
-   explicit always-defer rule (architecture, standards-L) defers
-8. **Auditor auto-fix** — gate-fixer applies S/M/L `recommended_fixes` (where `auto_fixable: true`)
-9. **CP4** — verifier (`code-review`) reviews the APPLIED curator/auditor changes (runs AFTER the
-   apply, so it actually reviews them)
-   - If FAIL → revert those changes, log reversion
-   - Skip if `review_checkpoints.cp4_curator_validation: false`
-10. **CP5** — check auditor `blocking_findings` flag → flag in PM summary
-11. **PM Summary** (see `pipeline.md` §7 for full template):
+5. Produce `review-profile.json` (`pipeline.md §7`, step 5)
+6. **EPIC review (CP3)** — "Step review (CP2) and EPIC review (CP3)" above. A finding is fixed by
+   the role that wrote the code and confirmed by the next round.
+7. **PM Summary** (see `pipeline.md` §7 for the full template):
     ```
     DONE REVIEW — {epic_id}
     {outcome in one plain sentence: what this EPIC now does for the PM}
     Changed: {1-3 user-relevant effects}
-    Verified: {pass}/{total} gates pass; auditor {overall}/100 (trend: {delta})
+    Verified: {pass}/{total} gates pass; EPIC review {verdict}
              {or the concrete reason something is unverified}
     Next step: {the one recommended option below, with its one-line reason}
 
-    {if blocking_findings:}
-    ⛔ CRITICAL FINDINGS (block merge):
-      1. [{type}] {finding} — effort: {S|M|L}
-      Audit report: .aid-o/work/evidence/{id}/{run}/audit-report.md
-
     Detail — steps {done}/{total} | gates {pass}/{total} | duration {time}
-      Auditor: Code {n} | Security {n} | Docs {n} | Process {n}
-      Curator: {applied} fixes applied (S/M/L), {deferred} deferred (always-defer rules / rejected)
-      Auto-fixes: {count} from auditor recommendations
-      Simplifier: {applied} applied, {deferred} L-effort deferred
-      Delivery report: .aid-o/reports/{plan_id}-delivery.md (outcome: {pass|partial|no-runtime})
-
+      EPIC review: {blockers open} blockers, {majors open} majors — cp3/rounds.json
     Key outputs: {artifact list}
     Evidence: .aid-o/work/evidence/{id}/{run_id}/
 
     Options (`legacy_epic_release_mode`):
       MERGE — release + merge to main + queue pickup
-      FIX   — provide guidance, re-run review cycle
+      FIX   — provide guidance, re-run the review
       ABORT — stop EPIC, no merge
 
     Options (`plan_branch`):
       MERGE — merge this EPIC into the PLAN branch; no release, no tag, no push.
-              The release happens once, later, at the plan-final boundary.
-      FIX   — provide guidance, re-run review cycle
+              The release happens once, later, when the plan is closed.
+      FIX   — provide guidance, re-run the review
       ABORT — stop EPIC, no merge
     ```
     This is the **Finished** card of `skills/communication.md` applied to DONE:
     outcome sentence first, then what changed, what is verified and the one
-    recommended next step; counters, scores, report paths and evidence dirs
-    belong to the `Detail —` line and below it, never above it. If the review
-    ends in a blocker the PM must resolve, render the **Blocked or failed**
-    card instead and keep the same ordering.
-    The summary above is the `legacy_epic_release_mode` shape. In `plan_branch`
-    mode the Auditor/Curator/Simplifier/Reporter lines describe the PLAN-FINAL
-    review, not a per-EPIC one — those roles run once per plan, at the boundary,
-    against the frozen candidate. An EPIC completing in `plan_branch` mode owes
-    its cp3 review round and its own evidence, not a specialist stack.
-12. **PM decides:** MERGE → step 13 | FIX → re-run steps 5-11 | ABORT → ERROR (E8)
-13. **Advance sub-phase:** PM chose MERGE →
+    recommended next step; counters, report paths and evidence dirs belong to
+    the `Detail —` line and below it, never above it. If the review ends in a
+    blocker the PM must resolve, render the **Blocked or failed** card instead
+    and keep the same ordering.
+8. **PM decides:** MERGE → step 9 | FIX → re-run steps 5-7 | ABORT → ERROR (E8)
+9. **Advance sub-phase:** PM chose MERGE →
     ```
     bash {plugin_path}/scripts/aid-fsm.sh set-field pm_decision merge <state_file>
     bash {plugin_path}/scripts/aid-fsm.sh done-advance review release <state_file>
     ```
-    Preconditions enforced in `legacy_epic_release_mode`: `curator-report` exists,
-    `audit-report` exists, `pm_decision=merge`. In `plan_branch` mode the FSM skips the
-    Curator/Auditor/CP4/C3/C4 stack plus the **cp3 head re-check** and the
-    **review-profile presence** check. It does **not** skip CP3 itself — the EPIC
-    review round still runs per EPIC, and under `--streamlined` its closed passing
-    index (`cp3/rounds.json`) remains a hard precondition of `done-advance`.
-    `pm_decision=merge`, the archived-task-file check, the auditor's `blocking_findings`
-    verdict whenever an `audit-report` exists at all, and the other EPIC-local checks
-    (streamlined integration review, abandoned check, DG-07, tiered compliance) still apply.
+    Enforced in both modes: `pm_decision=merge`, the archived-task-file check, routed
+    findings, the streamlined integration review, the abandoned check and tiered compliance.
+    `legacy_epic_release_mode` adds the **cp3 head re-check** and the release decision; a
+    `plan_branch` EPIC skips those two (its release is decided when the plan is closed), but
+    never CP3 itself — under `--streamlined` its closed passing index (`cp3/rounds.json`)
+    remains a hard precondition of `done-advance`.
 
 **Sub-phase: `release`** (after `done-advance review release`)
 
@@ -759,6 +733,79 @@ repair the lifecycle manifest — never fall back to the legacy branch.
 3. Preserve all evidence for debugging
 4. Report to PM with error context
 
+## Closing a plan (plan-final)
+
+When every EPIC of a `plan_branch` plan is `merged_to_plan`, abandoned with a
+reason, or superseded, the plan is closed ONCE, as a whole, in four stages and
+one review round. Every stage is bound to one frozen candidate, records what it
+wrote, and ends its output with `next:` or names what it refuses and what to
+run instead. Follow what the tool prints; this section is the map.
+
+`<fsm>` is `bash "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"`, `<round>` is
+`bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh"`. Stay in the plan's
+worktree (`.aid-worktrees/plan-<id>`) on `plan/<id>` for the whole close.
+
+| # | Command | What it does | It refuses when |
+|---|---------|--------------|-----------------|
+| 0 | `bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" prepare-plan <plan> --bump auto --plan-branch plan/<plan>` | the version commit, BEFORE the freeze, so the candidate already contains the release metadata | the tree is dirty; HEAD is not the plan branch |
+| 1 | `<fsm> plan-finalize <plan> --stage freeze` | merges the target branch into `plan/<plan>`, freezes the candidate, mints `R-<plan>-final-<N>` | an EPIC is not terminal; the merge conflicts (exit 4, state CONFLICT); the tree is dirty |
+| 2 | `<fsm> plan-finalize <plan> --stage gates` | the plan-final gate run; a gate that passed in the previous attempt and whose `inputs:` did not change is copied (`reused_from`), not executed | a gate fails (the report names it); the branch moved off the candidate |
+| 3 | `<fsm> plan-finalize <plan> --stage produce` | review profile, plan-diff, acceptance evidence, and what the round reads (`cp7/`) | gates have not passed; the candidate moved |
+| 4 | `<round> prepare\|collect\|close --checkpoint cp7 --evidence-dir <run dir> --project-root <plan worktree> --round 1` | the whole-plan review: `final_criteria`, `final_claims`, `final_generalist` | `produce` has not run; HEAD is not the candidate; a reviewer file has no dispatch bracket |
+| 5 | `<fsm> plan-finalize <plan> --stage decide` | the one aggregate: `release-decision.json`, the sealed receipt, the PM page with attempts, minutes and USD | the round is not closed; a decision input was edited by hand (named); the candidate moved |
+
+**The round (row 4)** is dispatched exactly as a step or EPIC round: the
+procedure, the prompt files, the dispatch bracket (`aid-emit-dispatch.sh start` …
+`complete`, focus `cp7-<role>`), the Codex role and its stand-in are the ones in
+"Step review (CP2) and EPIC review (CP3)" and "Stand-in for a Codex role" above.
+`prepare` prints one prompt per role it asks; a role it lists as *carried* is not
+dispatched. `produce` prints the exact `prepare` command with the run directory.
+A plan has one round per attempt: a fix moves the candidate, so its confirmation
+is round 1 of the next attempt.
+
+**When something is open.** `close` reports `fail`, or `decide` prints
+`NOT READY` with the blockers:
+
+1. The role that wrote the code fixes it, on the plan branch:
+   ```
+   Agent(subagent_type: "aid-orchestrator:implementer", model: <the model of that role's card in skills/role-cards.md>,
+         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the fingerprints you addressed. Touch nothing a finding does not name.")
+   ```
+   The owning step is the one whose declared files cover the path (`plan.json` of the EPIC whose commit last touched it: `git log -1 -- <path>`).
+2. `--stage freeze` again. It mints the next attempt and writes `fix-class.json`:
+   what the fix touched decides what is read again. A change to CHANGELOG, README
+   or docs re-asks `final_claims`; an edit of the plan's criteria re-asks
+   `final_criteria`; code re-asks everyone; a role whose inputs were not touched
+   and which had no finding is carried. The round's packet shows the re-asked
+   reviewers what stayed open and the fix diff.
+3. `gates` (unchanged gates are copied), `produce`, the round, `decide`.
+
+An ancillary-only move after the freeze (AID's own bookkeeping, e.g. the id
+counter) costs nothing: `freeze` names `--stage freeze --accept-ancillary`, which
+writes the equivalence receipt and keeps the gates, the round and the decision.
+
+**When to go to the PM, and with which card** (`skills/communication.md`). Try the
+fix path once first; escalate when it does not apply or did not help.
+
+| Refusal | Try once | Then show the PM |
+|---------|----------|------------------|
+| a gate is red and the failure is real | the fix path above | **Blocked** card: the gate, what it printed, the smallest fix |
+| a cp7 blocker is still open after a fixed attempt | one more fix when the finding changed; else stop | **Decision** card: FIX (what it costs) / accept with a recorded dispute / ABORT |
+| the project disputes a finding | `<round> dispute` is CP1-only: do not edit the finding | **Decision** card quoting the finding and its evidence |
+| the branch was rewritten (`fix-class.json` reason `rewritten_branch`) | nothing is carried; run the full attempt | none, unless it repeats: then **Blocked** |
+| `verification_report` blocks | read its `git_clean` evidence: commit or discard the named tracked file | **Blocked** card naming the file |
+| `final_review_disabled` | switch `cp7_plan_final_review` back on | **Decision** card; only the PM's words go into `--stage decide --waive-final-review --reason "<words>"`, and the page then says the plan was NOT read as a whole |
+
+**At the end.** `decide` prints `READY` and the plan is `AWAITING_PM`. Render the
+page and the card from the two files it wrote, publish the page with the
+Artifact tool and present the card verbatim (`commands/aid-plan.md`, "Plan-final
+/ close boundary"); state no number yourself. MERGE runs
+`<fsm> plan-merge-to-main <plan> --decision <file>`; FIX is the fix path; ABORT is
+`plan-abort` with the PM's reason.
+
+`legacy_epic_release_mode` has no plan close: each EPIC releases at its own DONE,
+and the whole-delivery review the decision reads there is the EPIC's own cp3 round.
+
 ## Reference Files
 
 - `skills/pipeline.md` — §4 EXECUTE dispatch protocol, §5 GATES protocol
@@ -776,10 +823,10 @@ repair the lifecycle manifest — never fall back to the legacy branch.
 
 ## Important
 
-- **Review Checkpoints** — CP2/CP3 are review rounds (the section above), CP4/CP5 the verifier and auditor at DONE; every checkpoint toggles in `config/policies/review-checkpoints.yaml`
-- **Pre-merge review** — mode-dependent. In `legacy_epic_release_mode` Curator + Auditor run in parallel before the EPIC merge. In `plan_branch` they do not run per EPIC at all: they are plan-final roles, dispatched once per plan against the frozen candidate, and the EPIC owes its cp3 review round instead. PM approves via MERGE/FIX/ABORT in both modes
+- **Review Checkpoints** — CP2/CP3 are review rounds (the section above), CP7 the whole-plan round of "Closing a plan"; every checkpoint toggles in `config/policies/review-checkpoints.yaml`
+- **Pre-merge review** — the EPIC review round (CP3), per EPIC in both modes; a `plan_branch` plan is read once more as a whole when it is closed (CP7). PM approves via MERGE/FIX/ABORT in both modes
 - **Exhausted review round** — a cp2/cp3 round that fails after the last allowed round is a PM decision (fix in a granted round, or accept with the findings routed), not an escalation state
-- **Escalation E8** — PM chose ABORT in DONE summary due to critical auditor findings
+- **Escalation E8** — PM chose ABORT in the DONE summary
 - **6 states only** — READY, EXECUTE, GATES, ESCALATION, DONE, ERROR
 - **DONE sub-phases** — `review → release`, managed by `done-advance` (not `transition`); `set-field` rejects writes to `done_phase`
 - **No v1 states** — no IDLE, PRE_FLIGHT, SCOPE_CHECK, PLAN, CURATOR_RESOLVE, PM_APPROVAL, DEPLOY_CHECK, FINALIZING
@@ -849,16 +896,12 @@ trigger criteria in `/aid-plan`). When `--streamlined` is passed to `init`:
   of accumulated per-step cp2 evidence, the transition refuses to advance unless
   the EPIC review round closed with verdict `pass` (`cp3/rounds.json`) and
   `gates_report.json` exists. Missing either hard-fails with `streamlined_integration_review`.
-- **CP4 validation is advisory** — when the §7 curator/auditor auto-fix touched
-  production code, full mode hard-fails without `verifier-output-cp4-curator-validation.md`;
-  streamlined mode emits a `cp4_skipped_streamlined_advisory` audit event and
-  proceeds.
 - **Abandoned check fires on `< 3` timeline events** — a streamlined run whose
   `timeline.jsonl` has fewer than 3 events (init + transition to EXECUTE + at
   least one step/phase event) is treated as claimed-but-never-executed and
   hard-fails with `streamlined_abandoned` (NR 12 SOUSTO P009 anchor).
 - **`compliance.json` emits `coverage_mode: "streamlined"`** plus
-  `skipped_dimensions: ["verifier_outputs.cp2_rounds", "verifier_outputs.cp4_curator_validation"]`
+  `skipped_dimensions: ["verifier_outputs.cp2_rounds"]`
   so the cross-EPIC aggregator distinguishes a legitimate streamlined run from a
   full run that is missing that evidence. Full mode emits
   `coverage_mode: "full"` and an empty `skipped_dimensions` array.
@@ -868,4 +911,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-20

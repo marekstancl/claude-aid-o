@@ -11,10 +11,6 @@
     "merge_mode": "auto",
     "evidence_verification_status": "pass",
     "evidence_verified_at_head": true,
-    "reporter_status": "missing",
-    "reporter_reason": "reporter produced no summary",
-    "simplifier_status": "ok",
-    "simplifier_reason": "",
     "summary_for_pm": "",
     "delivered_summary_ref": ".aid-o/work/evidence/P080/delivery.md"
   }

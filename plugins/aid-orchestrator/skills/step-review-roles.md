@@ -1,6 +1,6 @@
 ---
 name: step-review-roles
-description: Reviewer contract for the step review (CP2), the EPIC review (CP3) and the fast-mode review (CP6) — the packet, the five reviewer roles with their questions and stop rules, the evidence rule and the output file shape
+description: Reviewer contract for the step review (CP2), the EPIC review (CP3), the fast-mode review (CP6) and the whole-plan review at plan close (CP7) — the packet, the eight reviewer roles with their questions and stop rules, the evidence rule and the output file shape
 user_invocable: false
 required_roles: none
 ---
@@ -12,7 +12,9 @@ required_roles: none
 The step review (CP2) puts one step's diff in front of one or two reviewers
 before the step is closed; the EPIC review (CP3) puts the whole EPIC diff in
 front of two or three before the EPIC goes to its gates; the fast-mode review
-(CP6) reviews a `/aid-do` working tree the same way, advisory. Every reviewer
+(CP6) reviews a `/aid-do` working tree the same way, advisory; the whole-plan
+review (CP7) reads the range of a finished plan, every EPIC together, once
+before the decision to merge. Every reviewer
 of a round gets the same packet and the same rules; only the role section
 differs. This file is the source of the role sections: the round engine cuts
 one `## Role:` section out of it per reviewer and renders it into
@@ -25,8 +27,7 @@ Invoke when changing what a step or EPIC reviewer is asked, how a finding must
 look, or which roles exist. The controller does not read this file during a
 round — it follows the "Step review (CP2) and EPIC review (CP3)" section of
 `commands/aid-run.md` — and the reviewers get their role section inside the
-rendered prompt. Do NOT invoke for the plan review (`skills/plan-review-roles.md`)
-or for CP4 (`agents/verifier.md`).
+rendered prompt. Do NOT invoke for the plan review (`skills/plan-review-roles.md`).
 
 ## The Packet
 
@@ -40,6 +41,12 @@ after the `--- PACKET ---` marker:
 | `files.json` | `plan.json` (`outputs`, `allowed_paths`, `forbidden_paths`) | what the step was allowed to touch |
 | `diff.patch` | `git diff <range>` from `step-check.json` | the change under review |
 | `open-findings.json`, `fix.patch` | the previous round (confirmation rounds only) | what was still open, and what the fix changed |
+
+At CP7 `dod.md` is the plan's acceptance and success criteria, `files.json`
+declares no scope, and the packet adds `plan-diff.json` (which executed test
+proves which criterion), `gates_report.json` (the gates at the candidate),
+`epic-findings.json` (what each EPIC's CP3 round left open, so it is not
+judged twice) and `claims.patch` (the CHANGELOG, README and docs hunks).
 
 Reviewers may read the repository at the reviewed commit with read-only tools
 beyond the packet; the findings worth paying for usually lie in callers and
@@ -65,7 +72,9 @@ A finding exists only with both:
 - `evidence` — `path:line` or `path:first-last` at the reviewed commit,
   `<sha>:path:line` for a line of a file the diff deleted or moved (the
   pre-image at that commit), or `absent:path` for a file the step should have
-  produced and did not; several separated by `;`. A range stands on its first
+  produced and did not; several separated by `;`. Citations only: a word or a
+  bracketed note after a line number makes the field unreadable and the finding
+  is dropped, so what the line shows goes in `claim`. A range stands on its first
   line, which is what the finding is matched by across rounds. Every file used must be cited. The finding stands when at
   least one citation resolves, so cite the exact line: a wrong number wastes
   that citation.
@@ -132,6 +141,7 @@ that the change delivers its acceptance criteria and nothing else, correctly.
 4. Does the change break a caller, a consumer of a file it edits or deletes, or a contract another module relies on?
 5. Is there an error, retry or concurrency path the change opens that ends in a silent wrong result?
 6. Does any name, path, number or claim in the diff (code, comment, doc) disagree with the repository at this commit?
+7. Is anything here more than the step needs: a hand-written replacement of a standard function, an abstraction with one use, a dependency for a few lines, scaffolding for later? Name what to delete or what replaces it. `major` when the diff would be materially shorter, else `minor`; a criterion that asks for the abstraction wins.
 
 ### Stop rule
 
@@ -212,6 +222,62 @@ between steps.
 A blocker is an exploitable path across the EPIC: unvalidated input reaching a
 sink, a missing authorization check, or a secret in the tree.
 
+## Role: final_criteria
+
+The finished plan against what it promised. You hold the plan's acceptance and
+success criteria (`dod.md`) and the record of what was executed
+(`plan-diff.json`, `gates_report.json`), and you check each promise against a
+proof that ran.
+
+### Questions
+
+1. For every acceptance criterion of the plan: which executed test or gate row proves it? Name the test by `path:line` and its result in `plan-diff.json`.
+2. Is any criterion recorded as verified while its test was skipped, not selected, or does not assert what the criterion says?
+3. Is any criterion proven only by a manual step, a live system or a later deployment that the range does not contain?
+4. Does a success criterion of the plan as a whole have no proof at all in the range?
+
+### Stop rule
+
+A blocker is an acceptance criterion with no executed proof at the candidate.
+A criterion whose proof is weaker than its wording is a major.
+
+## Role: final_claims
+
+What the delivery says about itself against what the code does. You hold
+`claims.patch` (CHANGELOG, README and docs hunks of the range) and the code at
+the candidate.
+
+### Questions
+
+1. For every behavioural claim in the CHANGELOG, README and docs hunks: does the code at the candidate do it? Cite the line that does, or the absence.
+2. Does a binding instruction for whoever deploys or operates this (an order of steps, a migration, a flag that must be set) live only outside the delivered files: in a backlog, a plan, a chat?
+3. Does the diff contradict the plan's declared type (a docs-only or refactor plan that changes behaviour, a plan that says "no API change" and changes one)?
+4. Does a user-facing change of the range have no CHANGELOG line at all?
+
+### Stop rule
+
+A blocker is a false claim: the delivery says the system does something it
+does not do, or a binding instruction exists only outside what is delivered.
+
+## Role: final_generalist
+
+The whole range as a colleague from another provider reads it, across the
+EPICs. The per-EPIC reviews already judged each EPIC alone
+(`epic-findings.json`); you look for what none of them could see.
+
+### Questions
+
+1. Does a change of one EPIC break a caller, a consumer or a test that another EPIC of the same plan touched or relied on?
+2. Is anything half-done across the EPICs: a function one EPIC adds and no EPIC calls, a flag one EPIC reads and none sets?
+3. Was an EPIC of the plan not reviewed as a whole (`cp3: absent`)? Then read its part of the range as its EPIC reviewer would have.
+4. Does the range remove or weaken an existing behaviour that no criterion of the plan asked to change?
+5. Is a finding the per-EPIC reviews left open still true at the candidate? Report it once, with today's evidence.
+
+### Stop rule
+
+A blocker is a break that exists only when the EPICs are read together: a
+broken consumer, an unwired half, or a behaviour lost that nobody asked to lose.
+
 ## Anti-patterns
 
 | Wrong | Right |
@@ -220,6 +286,7 @@ sink, a missing authorization check, or a secret in the tree.
 | Repeating what `step-check.json` already reports | trust the script; review what it cannot see |
 | Answering another role's questions | stay in the role; the others cover the rest |
 | `evidence` pointing at a directory, a whole file or a line of the diff | `path:line` or `path:first-last` at the reviewed commit, `<sha>:path:line` for a deleted line, `absent:path` for a missing file |
+| `evidence` with a note after the citation, `a.py:12 (the removed call)` | the citation alone; the note belongs in `claim` |
 | "It is probably covered somewhere" as the answer to the test question | the covering test's file and case, or the finding that the test is missing |
 
 **Last Updated:** 2026-09-20

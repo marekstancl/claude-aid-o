@@ -62,7 +62,7 @@ test_audit_decision_key() {
   printf '%s\n' "$val"
 }
 
-# _tac_have_jsonschema — same idiom as test-aid-c3-dispatch.bats.
+# _tac_have_jsonschema — is a JSON Schema validator importable here.
 _tac_have_jsonschema() {
   command -v python3 >/dev/null 2>&1 && python3 -c 'import jsonschema' >/dev/null 2>&1
 }

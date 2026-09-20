@@ -46,39 +46,25 @@
 # branch, and adding it would multiply the branch-identity paths this file
 # has to reason about for no tested benefit.
 #
-# P068 EPIC E-068-1_2 Step 1 adds the FIRST plan-final subcommand:
-#   aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze>
-#                    [--frozen-at <rfc3339>] [--project-root <path>]
-# P068 Step 2 adds the third stage — the ONE plan-final gate run:
-#   aid-plan-fsm.sh plan-finalize <plan_id> --stage gates
-#                    [--execution-yaml <path>]
+# The end of a plan is one subcommand in four stages, each bound to ONE frozen
+# candidate and each naming the next command in what it prints:
+#   aid-plan-fsm.sh plan-finalize <plan_id> --stage freeze [--accept-ancillary] [--frozen-at <rfc3339>]
+#       merges the target branch into plan/<id>, freezes the candidate and
+#       mints the run directory R-<plan>-final-<N>; after a fix it writes
+#       fix-class.json, which says what the fix invalidated
+#   aid-plan-fsm.sh plan-finalize <plan_id> --stage gates [--execution-yaml <path>]
 #                    [--substitute-receipt <gate_id>=<receipt path>]...
-# — see the section header above `_pfsm_finalize_gates` for the profile
-# selection (release, or its pre-declared release-derived substitute when a
-# gate carries a `quarantine:` block), the post-run assertions, and why
-# `plan_diff` is plan-required with `pass` (never its Fast Mode exit-2 skip).
-# P068 Step 3 adds the fourth stage — the plan-level review boundary:
-#   aid-plan-fsm.sh plan-finalize <plan_id> --stage review
-#                    [--execution-yaml <path>]
-# — see the section header above `_pfsm_finalize_review`. It DISPATCHES NOTHING:
-# it declares the required outputs (`review-requirements.json`), blocks with
-# exit 7 until they exist, refuses a stale/wrong-subject output with exit 1, and
-# invalidates the candidate with exit 6 when a tracked write proves a fix was
-# accepted. On success: PLAN_REVIEW -> AWAITING_PM.
-# P068 Step 4 adds the fifth and sixth stages — the plan-mode C4 decision and
-# the plan-level PM summary:
-#   aid-plan-fsm.sh plan-finalize <plan_id> --stage c4
-#   aid-plan-fsm.sh plan-finalize <plan_id> --stage summary
-# — see the section header above `_pfsm_finalize_c4`. Both run out of
-# AWAITING_PM and make NO state transition: `c4` produces ONE release decision
-# via `aid-release-policy.sh --plan` (the same aggregator, plan resolution) plus
-# dual-run evidence, and `summary` renders the PM plan-final summary via
-# `aid-pm-brief.sh`, keeping reviewed candidate / approved target / final merge
-# SHA / tag status as four distinct fields. The merge and the release/tag stay
-# with Step 5's PM-authorized `plan-merge-to-main`.
-# — see the dedicated section header above cmd_plan_finalize for the order it
-# enforces (sync → version preparation → freeze) and why an invalidation
-# clears the whole candidate binding at once.
+#       the ONE plan-final gate run; a gate that passed in the previous attempt
+#       and whose declared inputs did not change is copied, not executed
+#   aid-plan-fsm.sh plan-finalize <plan_id> --stage produce
+#       the derived inputs of the review and of the decision: review profile,
+#       plan-diff, acceptance evidence, and what the whole-plan round reads (cp7/)
+#   (the round itself is aid-review-round.sh prepare|collect|close --checkpoint cp7)
+#   aid-plan-fsm.sh plan-finalize <plan_id> --stage decide [--waive-final-review --reason "<text>"]
+#       the one aggregate: release-decision.json, the sealed receipt, the PM
+#       page; PLAN_REVIEW -> AWAITING_PM when the answer is yes
+# The former stage names (sync, inputs, review, c4, summary, accept-ancillary)
+# print the command that replaced them and exit 2.
 #
 # `plan-merge-to-main`, `plan-close-check` and `inventory` remain later-step
 # subcommands; this file does not implement them yet. That matters beyond
@@ -317,7 +303,7 @@ _pfsm_check_clean_worktree() {
     # SEPARATE appended clause, never a rewording of the original.
     echo "PRECONDITION FAIL: uncommitted changes present — commit or stash before plan-start/epic-start:" >&2
     printf '%s\n' "$dirty" >&2
-    echo "(tree evaluated: ${root}. Since P074 Step 5 this refusal fires only for commands that mutate this tree — epic-merge-to-plan and plan-finalize --stage sync/freeze/gates/inputs; plan-start and epic-start no longer run it.)" >&2
+    echo "(tree evaluated: ${root}. Since P074 Step 5 this refusal fires only for commands that mutate this tree — epic-merge-to-plan and plan-finalize --stage freeze/gates; plan-start and epic-start no longer run it.)" >&2
     return 1
   fi
   return 0
@@ -3932,25 +3918,21 @@ _pfsm_maybe_continue() {
 }
 
 # =============================================================================
-# ─── P068 Step 1: the plan-final boundary — `plan-finalize` ──────────────────
+# ─── The plan-final boundary — `plan-finalize --stage freeze` ───────────────
 #
-# `plan-finalize` opens the plan-final cycle in a FIXED order that the rest of
-# the boundary depends on:
+# `freeze` opens the plan-final cycle. In one call it
+#     syncs   : every EPIC is terminal → merge target_branch into the plan
+#               branch → PLAN_SYNC
+#     freezes : ONE immutable candidate at the resulting plan head, with its run
+#               directory → PLAN_GATES
 #
-#     --stage sync   : every EPIC is terminal → merge target_branch into the
-#                      plan branch → PLAN_SYNC
-#     (the release script's prepare-plan subcommand runs HERE, still in PLAN_SYNC —
-#      it makes the version commit on the plan branch)
-#     --stage freeze : freeze ONE immutable candidate at the resulting plan
-#                      head, allocate its run directory → PLAN_GATES
+# Version preparation (aid-release.sh prepare-plan) makes its commit on the plan
+# branch BEFORE `freeze` is called, so the frozen candidate already contains the
+# release metadata and nothing has to be committed once the reviews start. When
+# the target branch moved ahead in the same version files, the sync reports
+# CONFLICT and names the resolution; nothing is frozen over a conflict.
 #
-# The order is load-bearing. Version preparation happens BEFORE the freeze so
-# the frozen candidate already contains the release metadata and nothing has
-# to be committed once the reviews start. And because `prepare-plan` runs
-# while the state is still PLAN_SYNC, it never needs a `candidate_sha` that
-# does not yet exist.
-#
-# A MERGE, NOT A REBASE (roadmap resolved decision 4): `--stage sync` uses
+# A MERGE, NOT A REBASE (roadmap resolved decision 4): the sync uses
 # `git merge --no-ff`. A rebase would rewrite the plan branch's commits, so
 # every recorded SHA in the manifest (`plan_base_commit`, every
 # `epic_base_commit`, every `epic_merge_commit`) would name a commit that no
@@ -4057,14 +4039,14 @@ plan_final_invalidate() {
   # IMP-258 (per-write failures must propagate, never `|| true`). Report loudly
   # and name the reconciliation, rather than pretending success.
   if ! _pfsm_plan_state_set "$plan_id" "$target_state"; then
-    echo "PRECONDITION FAIL: the plan-final fields for ${plan_id} were cleared and the manifest moved to ${target_state}, but the plan STATE FILE could not be moved — the two records now disagree. Reconcile with 'aid-plan-fsm.sh plan-state ${plan_id}' before finalizing again; the candidate binding is already gone, so re-run '--stage sync' rather than assuming a candidate exists." >&2
+    echo "PRECONDITION FAIL: the plan-final fields for ${plan_id} were cleared and the manifest moved to ${target_state}, but the plan STATE FILE could not be moved — the two records now disagree. Reconcile with 'aid-plan-fsm.sh plan-state ${plan_id}' before finalizing again; the candidate binding is already gone, so re-run '--stage freeze' rather than assuming a candidate exists." >&2
     return 1
   fi
   return 0
 }
 
 # ---------------------------------------------------------------------------
-# _pfsm_finalize_sync <root> <plan_id>  — the `--stage sync` body.
+# _pfsm_finalize_sync <root> <plan_id>  — the first half of `--stage freeze`.
 # ---------------------------------------------------------------------------
 _pfsm_finalize_sync() {
   local root="$1" plan_id="$2"
@@ -4079,7 +4061,7 @@ _pfsm_finalize_sync() {
   local target_branch=""
   target_branch="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target_branch=""
   if [[ -z "$target_branch" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage sync: no target_branch recorded for ${plan_id} — run plan-start first." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage freeze (sync): no target_branch recorded for ${plan_id} — run plan-start first." >&2
     return 1
   fi
 
@@ -4111,7 +4093,7 @@ _pfsm_finalize_sync() {
   unfinished="$(plan_manifest_get "$plan_id" \
     '[.plan_boundary_manifest.epic_runs[] | select(.status == "pending" or .status == "running" or .status == "blocked") | .epic_id + " (" + .status + ")"] | join(", ")')" || unfinished=""
   if [[ -n "$unfinished" && "$unfinished" != "not_found" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage sync: ${plan_id} still has non-terminal EPICs — ${unfinished}. Every EPIC must be merged_to_plan, abandoned or superseded before the plan branch is synced." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage freeze (sync): ${plan_id} still has non-terminal EPICs — ${unfinished}. Every EPIC must be merged_to_plan, abandoned or superseded before the plan branch is synced." >&2
     return 1
   fi
 
@@ -4122,20 +4104,20 @@ _pfsm_finalize_sync() {
   unreasoned="$(plan_manifest_get "$plan_id" \
     '[.plan_boundary_manifest.epic_runs[] | select((.status == "abandoned" or .status == "superseded") and ((.terminal_reason // "") == "")) | .epic_id + " (" + .status + ")"] | join(", ")')" || unreasoned=""
   if [[ -n "$unreasoned" && "$unreasoned" != "not_found" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage sync: ${plan_id} has terminal EPICs with no recorded reason — ${unreasoned}. Abandonment requires a reason; record it with 'aid-plan-fsm.sh epic-complete ${plan_id} <epic_id> --abandon --reason <text>'." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage freeze (sync): ${plan_id} has terminal EPICs with no recorded reason — ${unreasoned}. Abandonment requires a reason; record it with 'aid-plan-fsm.sh epic-complete ${plan_id} <epic_id> --abandon --reason <text>'." >&2
     return 1
   fi
 
   local plan_head=""
   plan_head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
   if [[ -z "$plan_head" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage sync: ${plan_branch} not found — run plan-start first." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage freeze (sync): ${plan_branch} not found — run plan-start first." >&2
     return 1
   fi
   local target_head=""
   target_head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || target_head=""
   if [[ -z "$target_head" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage sync: target branch ${target_branch} not found." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage freeze (sync): target branch ${target_branch} not found." >&2
     return 1
   fi
 
@@ -4154,7 +4136,7 @@ _pfsm_finalize_sync() {
   # exact commit; `git checkout <sha>` restores a detached HEAD faithfully.
   [[ -n "$orig_branch" ]] || orig_branch="$(git -C "${troot}" rev-parse HEAD 2>/dev/null || echo "")"
   if ! git -C "$troot" checkout -q "$plan_branch" >/dev/null 2>&1; then
-    echo "PRECONDITION FAIL: plan-finalize --stage sync: cannot check out ${plan_branch} (checked out in another worktree?) — nothing merged." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage freeze (sync): cannot check out ${plan_branch} (checked out in another worktree?) — nothing merged." >&2
     return 1
   fi
 
@@ -4205,11 +4187,50 @@ _pfsm_finalize_sync() {
   return 0
 }
 
+# _pfsm_fix_class <root> <plan_id> <previous_candidate> <candidate> <previous_run_dir>
+#   What a fix after a freeze changed, read from the git range alone (the run
+#   directory is not in it). Prints fix-class.json: every changed path with what
+#   it feeds into the whole-plan round — `criteria` (the plan file), `claims`
+#   (CHANGELOG, README, docs, any markdown), `diff` (everything else) — and the
+#   union as invalidated_feeds. An ancillary path feeds nothing. A rewritten
+#   branch (the previous candidate is not an ancestor) or an unreadable range
+#   invalidates everything; ancestry is never softened.
+_pfsm_fix_class() {
+  local root="$1" plan_id="$2" prev="$3" cand="$4" prev_run_dir="$5"
+  local reason="" paths='[]' kind path feed
+  if ! git -C "$root" merge-base --is-ancestor "$prev" "$cand" 2>/dev/null; then
+    reason="rewritten_branch: ${prev} is not an ancestor of ${cand}"
+  else
+    local classified
+    if classified="$(_pfsm_equivalence_classify "$root" "$plan_id" "$prev" "$cand" 2>/dev/null)"; then
+      while read -r kind path; do
+        [[ -n "$path" ]] || continue
+        case "$path" in
+          .aid-o/plans/"${plan_id}"*.md)             feed=criteria ;;
+          *CHANGELOG*|*README*|docs/*|*.md)          feed=claims ;;
+          *)                                         feed=diff ;;
+        esac
+        [[ "$kind" == ancillary ]] && feed=""
+        paths="$(jq -c --arg p "$path" --arg k "${kind,,}" --arg f "$feed" '. + [{path: $p, kind: $k, feeds: (if $f == "" then [] else [$f] end)}]' <<<"$paths")"
+      done <<< "$classified"
+    else
+      reason="unreadable_range: git could not diff ${prev}..${cand}"
+    fi
+  fi
+  jq -n --arg prev "$prev" --arg cand "$cand" --arg dir "$prev_run_dir" --arg why "$reason" --argjson paths "$paths" '
+    ([$paths[].feeds[]] | unique) as $feeds
+    | {previous_candidate: $prev, candidate: $cand, previous_run_dir: $dir, changed_paths: $paths,
+       class: (if $why == "" and ($feeds | length) == 0 then "ancillary" else "delivery" end),
+       docs_only: ($why == "" and ($feeds | length) > 0 and ($feeds | index("diff") | not)),
+       invalidated_feeds: (if $why != "" then ["criteria", "claims", "diff"] else $feeds end),
+       reason: (if $why == "" then null else $why end)}'
+}
+
 # ---------------------------------------------------------------------------
-# _pfsm_finalize_freeze <root> <plan_id> [frozen_at]  — the `--stage freeze` body.
+# _pfsm_finalize_freeze <root> <plan_id> [frozen_at] [accept_ancillary]  — the `--stage freeze` body.
 # ---------------------------------------------------------------------------
 _pfsm_finalize_freeze() {
-  local root="$1" plan_id="$2" frozen_at="${3:-}"
+  local root="$1" plan_id="$2" frozen_at="${3:-}" accept_ancillary="${4:-0}"
   # P074 Step 8/10: the TREE this stage acts on is the plan's execution
   # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
   # moves). Refs/objects are shared between worktrees, so only the
@@ -4233,7 +4254,14 @@ _pfsm_finalize_freeze() {
     return 1
   fi
 
-  local cur_candidate=""
+  # --accept-ancillary freezes nothing: it records that the head moved past the
+  # candidate in ancillary paths only, and refuses everything else by itself.
+  if [[ "$accept_ancillary" == 1 ]]; then
+    _pfsm_finalize_accept_ancillary "$root" "$plan_id"
+    return $?
+  fi
+
+  local cur_candidate="" prev_candidate="" prev_run_dir=""
   cur_candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || cur_candidate=""
 
   # ── A candidate already exists: it is either still exact, or it changed ──
@@ -4242,7 +4270,9 @@ _pfsm_finalize_freeze() {
   # discarded wholesale rather than silently re-pointed at the new head: every
   # plan-final field is cleared together and the plan goes to PLAN_FIX for the
   # fix cycle to re-sync and re-freeze.
-  if [[ -n "$cur_candidate" && "$cur_candidate" != "not_found" ]]; then
+  # A plan in CONFLICT holds a candidate that the sync below clears (resolving
+  # the conflict necessarily moves the plan branch), so it is not judged here.
+  if [[ -n "$cur_candidate" && "$cur_candidate" != "not_found" && "$(plan_state_get "$plan_id" "plan_state" 2>/dev/null)" != "CONFLICT" ]]; then
     if [[ "$cur_candidate" == "$plan_head" ]]; then
       local run_dir=""
       run_dir="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir=""
@@ -4268,21 +4298,37 @@ _pfsm_finalize_freeze() {
     # transition, and re-freezing became impossible with no way forward that did
     # not hand-edit state. A plan whose candidate drifted while it sits in
     # PLAN_SYNC simply stays there — that is already the re-sync state.
+    # The plan branch moved past the frozen candidate: a fix landed. What the
+    # fix touched decides what is kept (see _pfsm_fix_class): an ancillary-only
+    # move keeps everything behind an equivalence receipt; anything else mints a
+    # new attempt here and now, and gates, produce and the round carry forward
+    # what the change cannot have affected.
+    if plan_final_review_equivalent "$root" "$plan_id" >/dev/null 2>&1; then
+      echo "PRECONDITION FAIL: ${plan_branch} moved from the frozen candidate ${cur_candidate} to ${plan_head}, and the difference is ancillary-only — nothing has to be re-run. Accept it with: plan-finalize ${plan_id} --stage freeze --accept-ancillary" >&2
+      return 1
+    fi
+    prev_candidate="$cur_candidate"
+    prev_run_dir="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || prev_run_dir=""
     local _fz_state _fz_target="PLAN_FIX"
     _fz_state="$(plan_state_get "$plan_id" "plan_state" 2>/dev/null || true)"
     [[ "$_fz_state" == "PLAN_SYNC" ]] && _fz_target="PLAN_SYNC"
     local irc=0
     plan_final_invalidate "$plan_id" "candidate_changed_after_freeze" "$_fz_target" || irc=$?
     [[ "$irc" -ne 0 ]] && return "$irc"
-    echo "CANDIDATE INVALIDATED: ${plan_branch} moved from the frozen candidate ${cur_candidate} to ${plan_head} — all plan-final fields cleared and the plan is now ${_fz_target}. Re-run --stage sync then --stage freeze to mint a new candidate; the previous run directory is left byte-identical." >&2
-    return 6
+    echo "plan-finalize --stage freeze: ${plan_branch} moved from the frozen candidate ${cur_candidate} to ${plan_head}; minting a new attempt (the previous run directory is left byte-identical)." >&2
   fi
+
+  # ── Sync: the target branch merged into the plan branch, every time ──────
+  local src=0
+  _pfsm_finalize_sync "$root" "$plan_id" >/dev/null || src=$?
+  [[ "$src" -ne 0 ]] && return "$src"
+  plan_head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
 
   # ── State precondition: freeze only out of PLAN_SYNC ─────────────────────
   local cur_state=""
   cur_state="$(plan_state_get "$plan_id" "plan_state")" || cur_state=""
   if [[ "$cur_state" != "PLAN_SYNC" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage freeze: ${plan_id} is in state '${cur_state:-<none>}' — freeze runs only out of PLAN_SYNC (run '--stage sync' first, then the release script's prepare-plan subcommand)." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage freeze: ${plan_id} is in state '${cur_state:-<none>}' after the sync — freeze mints a candidate only out of PLAN_SYNC." >&2
     return 1
   fi
 
@@ -4296,7 +4342,7 @@ _pfsm_finalize_freeze() {
   # PLAN_SYNC → PLAN_SYNC is a legal self-edge precisely for this loop.
   if ! _pfsm_is_ancestor "$root" "$target_head" "$plan_branch"; then
     _pfsm_plan_state_set "$plan_id" "PLAN_SYNC" || true
-    echo "PRECONDITION FAIL: target_drift_during_freeze — ${target_branch} advanced to ${target_head}, which ${plan_branch} does not contain. Nothing was frozen; the plan stays in PLAN_SYNC. Re-run '--stage sync' to merge the drift in, then freeze." >&2
+    echo "PRECONDITION FAIL: target_drift_during_freeze — ${target_branch} advanced to ${target_head}, which ${plan_branch} does not contain. Nothing was frozen; the plan stays in PLAN_SYNC. Re-run: plan-finalize ${plan_id} --stage freeze" >&2
     return 1
   fi
 
@@ -4498,7 +4544,13 @@ _pfsm_finalize_freeze() {
     echo "PRECONDITION FAIL: the candidate for ${plan_id} was recorded (manifest is at PLAN_GATES with the candidate pair), but the plan STATE FILE could not be moved to PLAN_GATES — the two records now disagree. Re-run '--stage freeze': it reconciles the state file from the recorded candidate. Do not proceed to the gate run until both read PLAN_GATES." >&2
     return 1
   fi
+  if [[ -n "$prev_candidate" ]]; then
+    _pfsm_fix_class "$root" "$plan_id" "$prev_candidate" "$plan_head" "$prev_run_dir" > "${run_dir_abs}/fix-class.json" \
+      && aid_stage_writes_record "$run_dir_abs" freeze fix-class.json
+    echo "plan-finalize --stage freeze: fix class $(jq -r '"\(.class) (re-read: \(.invalidated_feeds | join(", ") | if . == "" then "nothing" else . end))"' "${run_dir_abs}/fix-class.json") — ${run_dir_rel}/fix-class.json" >&2
+  fi
   echo "$plan_head"
+  echo "next: plan-finalize ${plan_id} --stage gates" >&2
   return 0
 }
 
@@ -4711,7 +4763,7 @@ _pfsm_finalize_gates() {
   required_profile="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_required_profile')" || required_profile=""
   for v in candidate base_commit run_id run_dir_rel; do
     if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
-      echo "PRECONDITION FAIL: plan-finalize --stage gates: ${plan_id} has no frozen candidate (${v} is unset) — run '--stage sync' then '--stage freeze' first. The plan-final gates run against ONE immutable candidate, never against a moving branch head." >&2
+      echo "PRECONDITION FAIL: plan-finalize --stage gates: ${plan_id} has no frozen candidate (${v} is unset) — run '--stage freeze' first. The plan-final gates run against ONE immutable candidate, never against a moving branch head." >&2
       return 1
     fi
   done
@@ -4800,6 +4852,49 @@ _pfsm_say_plan_inputs() {
   [[ "$origin" == "state_root" ]] && what="state root (no copy in the candidate worktree)"
   [[ -n "$execution_yaml" ]] && cfg="; execution.yaml = ${execution_yaml} (state root — a plan branch copy of .aid-o/config is NOT read; edit it in the primary checkout)"
   echo "plan-finalize --stage ${stage}: plan = ${plan_path} (${what})${cfg}" >&2
+}
+
+# _pfsm_gate_definition_sha <execution_yaml> <gate> — what "the same gate" means
+# across attempts: the digest of its whole definition (command, inputs, limits).
+_pfsm_gate_definition_sha() {
+  GATE="$2" yq -o=json -I=0 '.gates[strenv(GATE)]' "$1" 2>/dev/null | sha256sum | cut -d' ' -f1
+}
+
+# _pfsm_gate_reuse_rows <troot> <run_dir> <execution_yaml> <candidate> <gate>...
+#   Prints {from, candidate, rows: {<gate>: <row>}}: the rows of the PREVIOUS
+#   plan-final attempt that may be copied forward instead of executed. A row is
+#   reusable when it passed there, its gate is defined exactly as it was, and
+#   nothing the gate declares as `inputs:` (glob pathspecs; a leading `!`
+#   excludes; none declared = the whole tree) differs between that attempt's
+#   candidate and this one. Anything unreadable means "reuse nothing".
+_pfsm_gate_reuse_rows() {
+  local troot="$1" run_dir="$2" yaml="$3" candidate="$4"; shift 4
+  local none='{"from": null, "candidate": null, "rows": {}}'
+  [[ "$(basename "$run_dir")" =~ ^(.*-final-)([0-9]+)$ ]] || { echo "$none"; return 0; }
+  # The newest earlier attempt that got as far as a gate report.
+  local prev_id="" prev_report="" n
+  for (( n = BASH_REMATCH[2] - 1; n >= 1; n-- )); do
+    prev_id="${BASH_REMATCH[1]}${n}"; prev_report="$(dirname "$run_dir")/${prev_id}/gates_report.json"
+    [[ -f "$prev_report" ]] && break
+  done
+  local prev_candidate
+  prev_candidate="$(jq -r 'select((._generated_by // "") | startswith("aid-run-gates.sh@")) | .revision.head_sha // empty' "$prev_report" 2>/dev/null)" || prev_candidate=""
+  git -C "$troot" cat-file -e "${prev_candidate:-none}^{commit}" 2>/dev/null || { echo "$none"; return 0; }
+
+  local gate spec rows='{}' row
+  local -a pathspec
+  for gate in "$@"; do
+    row="$(jq -c --arg g "$gate" --arg d "$(_pfsm_gate_definition_sha "$yaml" "$gate")" \
+             '.gates[$g] | select(.result == "pass" and .definition_sha256 == $d)' "$prev_report" 2>/dev/null)"
+    [[ -n "$row" ]] || continue
+    pathspec=()
+    while IFS= read -r spec; do
+      [[ "$spec" == '!'* ]] && pathspec+=(":(glob,exclude)${spec#!}") || pathspec+=(":(glob)${spec}")
+    done < <(GATE="$gate" yq -r '.gates[strenv(GATE)].inputs // [] | .[]' "$yaml" 2>/dev/null)
+    git -C "$troot" diff --quiet "$prev_candidate" "$candidate" -- "${pathspec[@]}" 2>/dev/null || continue
+    rows="$(jq -c --arg g "$gate" --argjson r "$row" '.[$g] = $r' <<<"$rows")"
+  done
+  jq -nc --arg from "$prev_id" --arg c "$prev_candidate" --argjson rows "$rows" '{from: $from, candidate: $c, rows: $rows}'
 }
 
 # _pfsm_finalize_gates_body — everything that runs WITH the candidate checked
@@ -4896,26 +4991,66 @@ _pfsm_finalize_gates_body() {
   # ── Resume: the report is already written, only the transition is missing ─
   # Re-read the existing report and complete the transition; NEVER re-run the
   # gates (that would be the second broad run this stage exists to forbid).
-  local ran_now=0
+  local ran_now=0 expected_runs
   if [[ -f "$report_file" ]]; then
     echo "gates_report.json already exists for ${run_id} — re-reading it and completing only the transition; gates were NOT re-run." >&2
   else
-    ran_now=1
-    local grc=0
-    ( cd "$troot" && "${SCRIPT_DIR}/aid-run-gates.sh" run-all "$execution_yaml" \
-        "$plan_id" "$run_id" "$timeline_file" \
-        --report-file "$report_file" \
-        --profile "$effective_profile" \
-        --base-commit "$base_commit" \
-        --plan-path "$plan_path" ) >/dev/null || grc=$?
-    if [[ ! -f "$report_file" ]]; then
-      echo "PRECONDITION FAIL: the plan-final gate run produced no report at ${run_dir_rel}/gates_report.json (runner rc=${grc}) — the plan stays in PLAN_GATES." >&2
-      return 1
+    # ── Reuse across attempts: a gate that passed in the previous attempt and
+    #    whose declared inputs did not change since is copied, not executed.
+    #    The runner is not told about reuse; it gets a copy of the config whose
+    #    profile lists only the gates that still have to run.
+    local effective_include reuse run_yaml="$execution_yaml"
+    effective_include="$(_pfsm_profile_include "$execution_yaml" "$effective_profile")"
+    # shellcheck disable=SC2086  # gate ids, one per word
+    reuse="$(_pfsm_gate_reuse_rows "$troot" "$run_dir_abs" "$execution_yaml" "$candidate" $effective_include)"
+    local reuse_from; reuse_from="$(jq -r .from <<<"$reuse")"
+    local -a to_run=()
+    while IFS= read -r g; do
+      [[ -n "$g" ]] && ! jq -e --arg g "$g" '.rows | has($g)' <<<"$reuse" >/dev/null && to_run+=("$g")
+    done <<< "$effective_include"
+
+    if (( ${#to_run[@]} > 0 )); then
+      ran_now=1
+      if [[ "$(jq '.rows | length' <<<"$reuse")" -gt 0 ]]; then
+        run_yaml="${run_dir_abs}/execution.reuse.yaml"
+        PROFILE="$effective_profile" INCLUDE="$(printf '%s\n' "${to_run[@]}" | jq -R . | jq -sc .)" \
+          yq '.gate_profiles[strenv(PROFILE)].include = (strenv(INCLUDE) | from_json)' "$execution_yaml" > "$run_yaml" || {
+            echo "PRECONDITION FAIL: could not write ${run_yaml}." >&2; return 1; }
+      fi
+      local grc=0
+      ( cd "$troot" && "${SCRIPT_DIR}/aid-run-gates.sh" run-all "$run_yaml" \
+          "$plan_id" "$run_id" "$timeline_file" \
+          --report-file "$report_file" \
+          --profile "$effective_profile" \
+          --base-commit "$base_commit" \
+          --plan-path "$plan_path" ) >/dev/null || grc=$?
+      if [[ ! -f "$report_file" ]]; then
+        echo "PRECONDITION FAIL: the plan-final gate run produced no report at ${run_dir_rel}/gates_report.json (runner rc=${grc}) — the plan stays in PLAN_GATES." >&2
+        return 1
+      fi
+      if [[ "$grc" -ne 0 ]]; then
+        echo "GATES FAILED: the plan-final gate run for ${plan_id} did not pass (runner rc=${grc}); see ${run_dir_rel}/gates_report.json. The plan stays in PLAN_GATES — a failing candidate is shown to the PM, never silently retried." >&2
+        return 1
+      fi
+    else
+      # Nothing to execute: this attempt's report is the previous one, re-bound.
+      jq --arg h "$candidate" '.revision.head_sha = $h' "$(dirname "$run_dir_abs")/${reuse_from}/gates_report.json" > "$report_file" || return 1
     fi
-    if [[ "$grc" -ne 0 ]]; then
-      echo "GATES FAILED: the plan-final gate run for ${plan_id} did not pass (runner rc=${grc}); see ${run_dir_rel}/gates_report.json. The plan stays in PLAN_GATES — a failing candidate is shown to the PM, never silently retried." >&2
-      return 1
-    fi
+    # Every row says which definition it ran under (what the next attempt
+    # compares), and a copied row says where it came from.
+    local defs='{}'
+    while IFS= read -r g; do
+      [[ -n "$g" ]] && defs="$(jq -c --arg g "$g" --arg d "$(_pfsm_gate_definition_sha "$execution_yaml" "$g")" '.[$g] = $d' <<<"$defs")"
+    done <<< "$effective_include"
+    jq --argjson reuse "$reuse" --argjson defs "$defs" '
+        reduce ($reuse.rows | to_entries[]) as $r (.;
+          .gates[$r.key] = ($r.value + {reused_from: ($r.value.reused_from // $reuse.from), reused_candidate: ($r.value.reused_candidate // $reuse.candidate)})
+          | .excluded_gates = ((.excluded_gates // []) - [$r.key]))
+        | .gates |= with_entries(if $defs[.key] then .value.definition_sha256 = $defs[.key] else . end)' \
+      "$report_file" > "${report_file}.tmp" && mv "${report_file}.tmp" "$report_file" || { rm -f "${report_file}.tmp"; return 1; }
+    while IFS= read -r g; do
+      log_event "$timeline_file" gate_reused gate="$g" reused_from="${reuse_from}" 2>/dev/null || true
+    done < <(jq -r '.rows | keys[]' <<<"$reuse")
   fi
 
   # ── quarantine_substitutes[]: the ONLY accepted evidence for a quarantined
@@ -5077,8 +5212,10 @@ _pfsm_finalize_gates_body() {
     local starts
     starts="$(grep -c '"event":"gate_runner_start"' "$timeline_file" 2>/dev/null || true)"
     [[ -z "$starts" ]] && starts=0
-    if [[ "$starts" -ne 1 ]]; then
-      _gassert "timeline has ${starts} gate_runner_start events for ${run_id}, expected exactly 1 (no second broad run under a 'full' label)."
+    # A report made only of copied rows ran nothing; any other ran exactly once.
+    expected_runs="$(jq 'if any(.gates[]; .reused_from == null and .result != "profile_excluded") then 1 else 0 end' "$report_file")"
+    if [[ "$starts" -ne "$expected_runs" ]]; then
+      _gassert "timeline has ${starts} gate_runner_start events for ${run_id}, expected exactly ${expected_runs} (no second broad run under a 'full' label)."
     fi
   elif [[ "$ran_now" -eq 1 ]]; then
     _gassert "no timeline at ${run_dir_rel}/timeline.jsonl — the single-run assertion cannot be made."
@@ -5088,6 +5225,9 @@ _pfsm_finalize_gates_body() {
     echo "PRECONDITION FAIL: ${fails} plan-final gate assertion(s) failed for ${plan_id}; the plan stays in PLAN_GATES and no transition was made. Fix the candidate or the evidence and re-run." >&2
     return 1
   fi
+
+  # shellcheck disable=SC2046  # file names without spaces, relative to the run directory
+  aid_stage_writes_record "$run_dir_abs" gates gates_report.json $(cd "$run_dir_abs" && ls gates_rows/* 2>/dev/null)
 
   # ── The transition (a P064-legal edge: PLAN_GATES → PLAN_REVIEW) ─────────
   local op_id crc=0
@@ -5104,264 +5244,24 @@ _pfsm_finalize_gates_body() {
   fi
 
   echo "$candidate"
-  echo "plan-final gates PASSED for ${plan_id} at ${candidate} (profile ${effective_profile}) — ${run_dir_rel}/gates_report.json; ${plan_id} is now PLAN_REVIEW." >&2
+  echo "plan-final gates PASSED for ${plan_id} at ${candidate} (profile ${effective_profile}) — ${run_dir_rel}/gates_report.json; ${plan_id} is now PLAN_REVIEW. next: plan-finalize ${plan_id} --stage produce" >&2
   return 0
 }
 
-# =============================================================================
-# P068 Step 3 — `plan-finalize --stage review`: the plan-level review boundary
-# =============================================================================
-#
-# THE SHELL FSM DOES NOT DISPATCH LLM AGENTS. It declares which outputs must
-# exist, validates them against the frozen candidate, and blocks until they do.
-# That division already exists for C3 (`aid-fsm.sh` validates a dispatch record
-# the controller produced) and is preserved here verbatim. What changes is the
-# SUBJECT: the review range is `plan_base_commit..candidate_sha` — the whole
-# plan — not one EPIC's diff.
-#
-# The stage writes `review-requirements.json` into the plan-final run directory
-# (the machine-readable contract of what the controller must produce), then:
-#
-#   exit 7  `awaiting_review_outputs` — one or more required outputs are ABSENT.
-#           This is NOT an error: it is the state the controller resolves by
-#           dispatching the agents and re-running the stage.
-#   exit 1  a required output is PRESENT but STALE or WRONG-SUBJECT (wrong head,
-#           wrong plan, wrong audit hash, wrong ordering) or fails
-#           `aid-protocol-validate.sh`. Never accepted with a warning — a stale
-#           review is exactly the failure this boundary exists to prevent.
-#   exit 6  the CANDIDATE CHANGED (a tracked write by a utility or a specialist
-#           fix). `plan_final_invalidate` fires, the plan returns to PLAN_FIX,
-#           the gate report and every review output are invalidated with it.
-#   exit 0  every output present, fresh and bound → PLAN_REVIEW -> AWAITING_PM.
-#
-# WHY EVERY OUTPUT LANDS OUTSIDE THE CANDIDATE TREE: the run directory lives
-# under `.aid-o/work/evidence/<plan_id>/` — gitignored runtime area — so a full
-# review pass writes nothing tracked and `candidate_sha` is provably unchanged
-# when it finishes. A specialist that writes a TRACKED file has, by definition,
-# proposed a fix; that is the invalidation path above, not a review result.
-# ---------------------------------------------------------------------------
-
-# The four plan-boundary specialist agents whose dispatch count is asserted.
-_AID_PLAN_FINAL_AGENTS=(auditor curator simplifier reporter)
-
-# The default registry of plan-boundary UTILITIES. Today exactly one: the
-# Scanner memory scan described in skills/pipeline.md ("Plan Boundary: Scanner
-# Memory Scan"). Overridable per project via execution.yaml's
-# `plan_final_utilities:` list, so registering a new utility is a config edit
-# rather than a code edit — but it is never IMPLICIT: an unregistered utility
-# that runs is not counted, and a registered one that does not run blocks.
-_AID_PLAN_FINAL_DEFAULT_UTILITIES=(scanner_memory_scan)
-
-# _pfsm_plan_final_utilities <execution_yaml> — the registered utility ids.
-_pfsm_plan_final_utilities() {
-  local ey="$1" out=""
-  if [[ -f "$ey" ]] && command -v yq >/dev/null 2>&1; then
-    out="$(yq -r '.plan_final_utilities // [] | .[]' "$ey" 2>/dev/null || true)"
-  fi
-  if [[ -n "$out" ]]; then printf '%s\n' "$out"; else printf '%s\n' "${_AID_PLAN_FINAL_DEFAULT_UTILITIES[@]}"; fi
-}
-
-# _pfsm_review_required_outputs — "<filename>|<artifact_type>|<binding>" rows.
-# `-` in the artifact_type column means "not a protocol-v2 JSON artifact", so
-# aid-protocol-validate.sh is not run over it (markdown, and the dispatch
-# record, which is a controller bookkeeping file rather than a review result).
+# _pfsm_review_required_outputs — the inventory of the plan-final receipt
+# (schema_version aid-plan-final-evidence-2), one file per line, relative to
+# the run directory. Every one of them is written by a stage or by the cp7
+# close and hashed into the receipt `decide` seals; the two receipt checks
+# (_pfsm_receipt_has_exact_review_inventory here, aid_lifecycle in
+# lib/aid-lifecycle.sh) and aid-plan-close-check.sh carry the same list.
 _pfsm_review_required_outputs() {
-  cat <<'ROWS'
-semantic-review-final.json|semantic_review|revision.head_sha == candidate_sha and the recorded range covers plan_base_commit..candidate_sha
-audit-report.json|audit_report|audit_report.reviewed_head == candidate_sha and input_manifest_hash present
-curator-report.json|curator|curator.audit_report_ref sha256 matches audit-report.json
-simplifier-report.md|-|a `Head:` provenance line equal to candidate_sha
-delivery-report.json|delivery_report|identity.plan_id set and revision.head_sha == candidate_sha; written LAST (after every other output)
-review-profile.json|review_profile|produced over plan_base_commit..candidate_sha; carries review_profile.required_lenses (arms the C3 gate)
-plan-diff.json|-|C3 plan-AC verdict over plan_base_commit..candidate_sha; hash-bound before review dispatch
-audit-input-manifest.json|-|audit_input_manifest.input_hash matches audit-report.json's input_manifest_hash; its plan-diff.json evidence_hashes[] entry (if any) matches the producer-sealed hash. Not run through generic protocol-v2/plan-identity validation — audit-input-manifest.schema.json's identity block is epic-shaped (project_id/epic_id/run_id, no plan_id) and shared with the per-EPIC C3 path; see IMP-464 D2 follow-up.
-delivery-gate.json|delivery_gate|identity.epic_id == null, identity.plan_id set, sources[] lists every contributing EPIC
-acceptance-evidence.json|acceptance_evidence|identity.epic_id == null, identity.plan_id set, sources[] lists every contributing EPIC
-dispatch-record.json|-|one dispatch per plan-boundary agent and per registered utility, bound to candidate_sha AND this attempt's run_id
-ROWS
+  printf '%s\n' acceptance-evidence.json gates_report.json plan-diff.json review-profile.json \
+    semantic-review-final.json cp7/rounds.json release-decision.json
 }
 
-# ---------------------------------------------------------------------------
-# D3 / IMP-465 — generated protocol-v2 scaffolds for Curator/Verifier/Reporter.
-#
-# WHY: the three plan-boundary specialists (Curator -> curator-report.json,
-# Verifier -> semantic-review-final.json, Reporter -> delivery-report.json)
-# previously had to infer every envelope field (schema_version, identity,
-# subject, revision, provenance...) from prose instructions, causing avoidable
-# first-output schema failures — a defect class, not a specific bug. AID now
-# writes a schema-valid skeleton at the canonical path BEFORE the specialist
-# is dispatched; the specialist edits that SAME file and adds only its own
-# payload key. No new role, no new review round, no new file/path — the
-# skeleton lives exactly where the specialist's real output belongs.
-#
-# _pfsm_plan_final_skeleton_spec <kind> — echoes "<filename>|<artifact_type>|<payload_key>"
-# for kind in curator|verifier|reporter, or returns 1 for an unknown kind.
-# ---------------------------------------------------------------------------
-_pfsm_plan_final_skeleton_spec() {
-  case "$1" in
-    curator)  printf 'curator-report.json|curator|curator' ;;
-    verifier) printf 'semantic-review-final.json|semantic_review|semantic_review' ;;
-    reporter) printf 'delivery-report.json|delivery_report|delivery_report' ;;
-    *) return 1 ;;
-  esac
-}
 
-# _pfsm_generate_plan_final_skeleton <kind> <root> <project_id> <plan_id>
-#                                     <base_commit> <candidate> <run_id>
-#                                     <run_dir_abs>
-# Idempotent: NEVER overwrites an existing file at the canonical path — once
-# the specialist starts filling it (or a prior run already produced one),
-# regenerating would silently discard real work. Only writes when the file is
-# genuinely absent.
-# _pfsm_render_plan_final_skeleton <atype> <pkey> <project_id> <plan_id> <run_id>
-#                                   <candidate> <base_commit> <fname> <out_file>
-# Renders the canonical skeleton document to <out_file>. Pure — never reads
-# the destination path, never touches the manifest. Deterministic except for
-# `created_at` (wall-clock; the destination is always about to be freshly
-# (re)written by the only two callers, so a fresh timestamp is correct, not a
-# staleness risk).
-_pfsm_render_plan_final_skeleton() {
-  local atype="$1" pkey="$2" project_id="$3" plan_id="$4" run_id="$5" candidate="$6" base_commit="$7" fname="$8" out_file="$9"
-  local now subj
-  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  subj="$(printf 'plan-final-skeleton:%s:%s:%s' "$plan_id" "$candidate" "$fname" | sha256sum | cut -d' ' -f1)"
-  jq -n --arg t "$atype" --arg pk "$pkey" --arg pid "$project_id" --arg plan "$plan_id" \
-        --arg run "$run_id" --arg h "$candidate" --arg b "$base_commit" \
-        --arg now "$now" --arg subj "sha256:${subj}" \
-    '{schema_version:"aid-2.0", artifact_type:$t, producer:("aid-orchestrator:" + $t + "@generated"),
-      created_at:$now, control_protocol:"aid-2.0",
-      identity:{project_id:$pid, epic_id:null, plan_id:$plan, run_id:$run},
-      subject:{subject_hash:$subj},
-      revision:{head_sha:$h, base_sha:$b, head_is_current:true, freshness:"current"},
-      status:"pass", verdict:{kind:"none", ready:false},
-      provenance:{dispatch_mode:"subagent", generated_by_tool:"aid-plan-fsm.sh#skeleton"},
-      _locked:{
-        note:("everything outside ." + $pk + " is part of the hashed envelope and must be returned byte-for-byte"),
-        fields:["schema_version","artifact_type","created_at","control_protocol","identity","subject","revision","status","verdict","provenance"],
-        payload_key:$pk}}
-     | .[$pk] = null' > "$out_file" 2>/dev/null
-}
 
-_pfsm_generate_plan_final_skeleton() {
-  local kind="$1" root="$2" project_id="$3" plan_id="$4" base_commit="$5" candidate="$6" run_id="$7" run_dir_abs="$8"
-  local spec fname atype pkey
-  spec="$(_pfsm_plan_final_skeleton_spec "$kind")" || { echo "PRECONDITION FAIL: unknown plan-final skeleton kind '${kind}'." >&2; return 1; }
-  IFS='|' read -r fname atype pkey <<< "$spec"
-  local out="${run_dir_abs}/${fname}"
-  if [[ -f "$out" ]]; then
-    local existing_hash
-    existing_hash="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind}.sha256" 2>/dev/null || true)"
-    if [[ -n "$existing_hash" && "$existing_hash" != "null" && "$existing_hash" != "not_found" ]]; then
-      return 0
-    fi
-    # The file exists but its generation was never recorded — either a
-    # specialist is genuinely filling it (payload no longer null: leave it
-    # alone, not our crash to fix — the missing record then blocks review
-    # with an explicit "run inputs" message, a deliberate, diagnosable dead
-    # end rather than trusting an unverifiable file) or generation crashed
-    # between writing the file and sealing its hash (payload STILL null: we
-    # do NOT trust whatever bytes happen to be on disk — a null payload means
-    # there is nothing of the specialist's to preserve, so we REGENERATE and
-    # OVERWRITE with a freshly rendered, provably-AID-authored skeleton and
-    # seal THAT hash, exactly like a first-time generation).
-    local cur_payload_type
-    cur_payload_type="$(jq -r --arg pk "$pkey" '(.[$pk] | type)' "$out" 2>/dev/null || true)"
-    if [[ "$cur_payload_type" == "null" ]]; then
-      local heal_tmp; heal_tmp="$(mktemp "${TMPDIR:-/tmp}/aid-plan-final-skeleton.XXXXXX")" || return 1
-      _pfsm_render_plan_final_skeleton "$atype" "$pkey" "$project_id" "$plan_id" "$run_id" "$candidate" "$base_commit" "$fname" "$heal_tmp" \
-        || { rm -f "$heal_tmp"; echo "PRECONDITION FAIL: could not re-render the ${kind} skeleton during crash recovery." >&2; return 1; }
-      local heal_hash; heal_hash="sha256:$(jq -S -c '.' "$heal_tmp" | sha256sum | awk '{print $1}')"
-      mv -f "$heal_tmp" "$out" || { rm -f "$heal_tmp"; echo "PRECONDITION FAIL: could not overwrite ${out} during crash recovery." >&2; return 1; }
-      plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind} = {sha256: \"${heal_hash}\", candidate_sha: \"${candidate}\", run_id: \"${run_id}\"}" >/dev/null || {
-        echo "PRECONDITION FAIL: ${out} was re-rendered from a prior interrupted --stage inputs run, but its generation record still could not be sealed." >&2
-        return 1
-      }
-    else
-      echo "WARN: ${out} exists with a non-null .${pkey} payload but no sealed generation record — this is not a crash this producer can safely fix (the payload may be real, in-progress specialist work). '--stage review' will refuse it with 'run plan-finalize --stage inputs' until this is resolved by hand: either restore/complete the specialist's edit over a freshly generated skeleton, or delete ${fname} and re-run '--stage inputs'." >&2
-    fi
-    return 0
-  fi
-  mkdir -p "$run_dir_abs" 2>/dev/null || { echo "PRECONDITION FAIL: cannot create ${run_dir_abs}." >&2; return 1; }
-  local tmp; tmp="$(mktemp "${TMPDIR:-/tmp}/aid-plan-final-skeleton.XXXXXX")" || return 1
-  _pfsm_render_plan_final_skeleton "$atype" "$pkey" "$project_id" "$plan_id" "$run_id" "$candidate" "$base_commit" "$fname" "$tmp" \
-    || { rm -f "$tmp"; echo "PRECONDITION FAIL: could not render the ${kind} skeleton." >&2; return 1; }
-  # IMP-465 (D3) hardening: record a canonical (sorted-key) hash of exactly
-  # what was generated — envelope + null payload — keyed to this candidate
-  # and run. Verification recomputes the SAME canonical form (payload
-  # re-nulled) from whatever the specialist leaves behind and requires an
-  # EXACT match, rather than re-deriving a guessed subset of "immutable"
-  # fields — this is what actually proves generation happened, not merely
-  # that a hand-built file coincidentally matches a few expected values, and
-  # it is invariant to harmless re-serialization (key order/whitespace) so a
-  # normal in-place edit of the payload key never false-positives.
-  local skel_hash; skel_hash="sha256:$(jq -S -c '.' "$tmp" | sha256sum | awk '{print $1}')"
-  mv -f "$tmp" "$out" || { rm -f "$tmp"; echo "PRECONDITION FAIL: could not write ${out}." >&2; return 1; }
-  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind} = {sha256: \"${skel_hash}\", candidate_sha: \"${candidate}\", run_id: \"${run_id}\"}" >/dev/null || {
-    echo "PRECONDITION FAIL: ${out} was written, but its generation record could not be sealed in the manifest — review will refuse until this is resolved (re-run --stage inputs; generation is idempotent)." >&2
-    return 1
-  }
-}
 
-# _pfsm_verify_plan_final_skeleton_envelope <kind> <root> <project_id> <plan_id>
-#                                            <base_commit> <candidate> <run_id>
-#                                            <run_dir_abs>
-# Recomputes the canonical (sorted-key, payload-nulled) hash of the actual
-# file and requires it to equal the hash --stage inputs recorded when it
-# generated the skeleton for THIS exact candidate/run — proof of generation,
-# not a guess from a few field values, and immune to reordering/whitespace
-# from a normal in-place payload edit. No recorded hash (or one bound to a
-# different candidate/run) fails closed with an explicit "run inputs" message
-# rather than silently accepting — or silently rejecting — a legacy/
-# hand-built envelope that happens to resemble one.
-# Echoes nothing on success; a nonzero return means the caller should reject
-# via _rassert with the message on stdout.
-_pfsm_verify_plan_final_skeleton_envelope() {
-  local kind="$1" root="$2" project_id="$3" plan_id="$4" base_commit="$5" candidate="$6" run_id="$7" run_dir_abs="$8"
-  local spec fname atype pkey
-  spec="$(_pfsm_plan_final_skeleton_spec "$kind")" || return 1
-  IFS='|' read -r fname atype pkey <<< "$spec"
-  local f="${run_dir_abs}/${fname}"
-  [[ -f "$f" ]] || { printf '%s is missing.' "$fname"; return 1; }
-  local rec_hash rec_cand rec_run
-  rec_hash="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind}.sha256" 2>/dev/null || true)"
-  rec_cand="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind}.candidate_sha" 2>/dev/null || true)"
-  rec_run="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind}.run_id" 2>/dev/null || true)"
-  if [[ -z "$rec_hash" || "$rec_hash" == "null" || "$rec_hash" == "not_found" ]]; then
-    printf '%s has no recorded skeleton-generation hash for this plan — run "plan-finalize --stage inputs" before dispatching the %s specialist.' "$fname" "$kind"
-    return 1
-  fi
-  if [[ "$rec_cand" != "$candidate" || "$rec_run" != "$run_id" ]]; then
-    printf '%s has a recorded skeleton bound to a different candidate/run (stale) — re-run "plan-finalize --stage inputs" against this frozen candidate.' "$fname"
-    return 1
-  fi
-  local payload_type; payload_type="$(jq -r --arg pk "$pkey" '(.[$pk] | type)' "$f" 2>/dev/null || true)"
-  [[ "$payload_type" == "object" ]] || { printf '%s payload key .%s is not an object (got %s) — never read as a filled specialist output.' "$fname" "$pkey" "${payload_type:-<unreadable>}"; return 1; }
-  local actual_hash; actual_hash="sha256:$(jq -S -c --arg pk "$pkey" '.[$pk] = null' "$f" 2>/dev/null | sha256sum | awk '{print $1}')"
-  [[ "$actual_hash" == "$rec_hash" ]] && return 0
-  # NAME THE FIELDS THAT ACTUALLY DIFFER.
-  # The old message listed identity/revision/schema/producer/provenance — and
-  # NOT `status` or `verdict`, which the hash protects just as much. An agent
-  # that changed those two (on its dispatcher's own wrong instruction) was
-  # refused twice without being able to see why, and only found the cause by
-  # reading the hash computation (ACTA, 2026-08-31). A refusal that will not say
-  # what it objects to makes the reader guess, and the reader guessed wrong.
-  local _skel _diff=""
-  _skel="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.plan_final_skeletons.${kind}.envelope" 2>/dev/null || true)"
-  if [[ -n "$_skel" && "$_skel" != "null" && "$_skel" != "not_found" ]]; then
-    _diff="$(jq -r --argjson skel "$_skel" --arg pk "$pkey" '
-        . as $now
-        | ($skel | keys_unsorted) + ($now | keys_unsorted) | unique
-        | map(select(. != $pk))
-        | map(select(($skel[.] // null) != ($now[.] // null)))
-        | join(", ")' "$f" 2>/dev/null || true)"
-  fi
-  if [[ -n "$_diff" ]]; then
-    printf '%s does not carry the exact envelope AID generated for this plan/candidate/run. These fields differ from the skeleton: %s. Everything outside the payload key .%s is part of the envelope — including status and verdict, which are NOT yours to fill in.' "$fname" "$_diff" "$pkey"
-  else
-    printf '%s does not carry the exact envelope AID generated for this plan/candidate/run. Everything outside the payload key .%s is protected — identity, revision, schema_version/artifact_type/control_protocol, producer, provenance, AND status and verdict. Only .%s may be written.' "$fname" "$pkey" "$pkey"
-  fi
-  return 1
-}
 
 # ---------------------------------------------------------------------------
 # _pfsm_review_candidate_drift <root> <plan_id> <candidate>
@@ -5453,7 +5353,7 @@ _pfsm_equivalence_classify() {
 
   while IFS= read -r -d '' path; do
     [[ -n "$path" ]] || continue
-    if _pfsm_path_is_protected "$path" "$prot_json"; then
+    if aid_ancillary_path_protected "$path" "$prot_json"; then
       printf 'PROTECTED  %s\n' "$path"
     elif aid_ancillary_match "$path" "$root"; then
       printf 'ancillary  %s\n' "$path"
@@ -5463,21 +5363,6 @@ _pfsm_equivalence_classify() {
   done < "$raw_f"
   rm -f "$raw_f"
   return 0
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_path_is_protected <path> <protected_json>
-#   Uses the SAME matcher as the ancillary classifier so protected-set matching
-#   and scope checking can never diverge on the same entry, with the
-#   permissive directory-prefix semantics the pre-commit hook uses.
-# ---------------------------------------------------------------------------
-_pfsm_path_is_protected() {
-  local path="$1" prot_json="$2" entry
-  while IFS= read -r entry; do
-    [[ -n "$entry" ]] || continue
-    _aid_ancillary_glob_match "$path" "$entry" && return 0
-  done < <(jq -r '.[]? // empty' <<<"$prot_json" 2>/dev/null)
-  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -5586,7 +5471,7 @@ plan_final_review_equivalent() {
     [[ -n "$entry" ]] || continue
     xy="${entry:0:2}"
     wpath="${entry:3}"
-    if _pfsm_path_is_protected "$wpath" "$prot_json"; then
+    if aid_ancillary_path_protected "$wpath" "$prot_json"; then
       dirty+="  PROTECTED  ${xy} ${wpath}"$'\n'
     elif ! aid_ancillary_match "$wpath" "$root"; then
       dirty+="  DELIVERY   ${xy} ${wpath}"$'\n'
@@ -5595,7 +5480,7 @@ plan_final_review_equivalent() {
       local orig=""
       IFS= read -r -d '' orig || true
       if [[ -n "$orig" ]]; then
-        if _pfsm_path_is_protected "$orig" "$prot_json"; then
+        if aid_ancillary_path_protected "$orig" "$prot_json"; then
           dirty+="  PROTECTED  ${xy} ${orig} (renamed from)"$'\n'
         elif ! aid_ancillary_match "$orig" "$root"; then
           dirty+="  DELIVERY   ${xy} ${orig} (renamed from)"$'\n'
@@ -5813,7 +5698,7 @@ _pfsm_review_candidate_drift() {
 
   # ── P073 Step 17: the head may also sit at a RECEIPTED accepted head ──────
   # Two positions are legitimate: the candidate itself, and the exact head a
-  # deliberate `--stage accept-ancillary` recorded. Anything else invalidates
+  # deliberate `--stage freeze --accept-ancillary` recorded. Anything else invalidates
   # as before — including one commit PAST the accepted head, because only the
   # head that was actually compared carries a receipt.
   local accepted="" acc_receipt="" acc_sha=""
@@ -5863,7 +5748,7 @@ _pfsm_review_candidate_drift() {
       plan_final_review_equivalent "$root" "$plan_id" >/dev/null 2>&1 || erc=$?
       printf 'plan/%s moved from the frozen candidate %s to %s' "$plan_id" "$candidate" "${plan_head:-<unresolvable>}"
       if [[ "$erc" -eq 0 ]]; then
-        printf ' — the difference is ancillary-only, so this review can be preserved: run plan-finalize %s --stage accept-ancillary' "$plan_id"
+        printf ' — the difference is ancillary-only, so this review can be preserved: run plan-finalize %s --stage freeze --accept-ancillary' "$plan_id"
       fi
       return 1
     fi
@@ -5901,7 +5786,7 @@ _pfsm_review_candidate_drift() {
       [[ -n "$entry" ]] || continue
       xy="${entry:0:2}"
       wpath="${entry:3}"
-      if _pfsm_path_is_protected "$wpath" "$prot_json"; then
+      if aid_ancillary_path_protected "$wpath" "$prot_json"; then
         dirty+="PROTECTED ${xy} ${wpath}"$'\n'
       elif ! aid_ancillary_match "$wpath" "$root"; then
         dirty+="${xy} ${wpath}"$'\n'
@@ -5915,7 +5800,7 @@ _pfsm_review_candidate_drift() {
         orig=""
         IFS= read -r -d '' orig || true
         if [[ -n "$orig" ]]; then
-          if _pfsm_path_is_protected "$orig" "$prot_json"; then
+          if aid_ancillary_path_protected "$orig" "$prot_json"; then
             dirty+="PROTECTED ${xy} ${orig}"$'\n'
           elif ! aid_ancillary_match "$orig" "$root"; then
             dirty+="${xy} ${orig}"$'\n'
@@ -5933,8 +5818,6 @@ _pfsm_review_candidate_drift() {
   return 0
 }
 
-# ---------------------------------------------------------------------------
-# _pfsm_finalize_review <root> <plan_id> <execution_yaml>
 # ---------------------------------------------------------------------------
 # _pfsm_plan_final_evidence_ref <plan_id> <candidate_sha> <run_id>
 #
@@ -5957,7 +5840,7 @@ _pfsm_validate_plan_final_receipt_json() {
   jq -e '
     (type == "object") and
     ((keys | sort) == (["artifact_type","candidate_frozen_at","candidate_sha","evidence_ref","outputs","plan_base_commit","plan_id","review_verdict","run_id","schema_version","target_branch","target_head_at_freeze"] | sort)) and
-    (.schema_version == "aid-plan-final-evidence-1") and
+    (.schema_version == "aid-plan-final-evidence-2") and
     (.artifact_type == "plan_final_evidence_receipt") and
     (.review_verdict == "accepted") and
     (.plan_id | test("^P[0-9]{3}$")) and
@@ -5992,8 +5875,8 @@ _pfsm_receipt_has_exact_review_inventory() {
   local receipt="$1" schema_version expected actual
   schema_version="$(jq -r '.schema_version // ""' <<< "$receipt" 2>/dev/null || true)"
   case "$schema_version" in
-    aid-plan-final-evidence-1)
-      expected='["acceptance-evidence.json","audit-input-manifest.json","audit-report.json","curator-report.json","delivery-gate.json","delivery-report.json","dispatch-record.json","plan-diff.json","review-profile.json","semantic-review-final.json","simplifier-report.md"]'
+    aid-plan-final-evidence-2)
+      expected='["acceptance-evidence.json","cp7/rounds.json","gates_report.json","plan-diff.json","release-decision.json","review-profile.json","semantic-review-final.json"]'
       ;;
     *)
       return 1
@@ -6017,7 +5900,7 @@ _pfsm_seal_plan_final_review() {
   ref="$(_pfsm_plan_final_evidence_ref "$plan_id" "$candidate" "$run_id")" || return 1
   tmp="$(mktemp "${TMPDIR:-/tmp}/aid-plan-final-receipt.XXXXXX")" || return 1
   receipt="$(jq -nc --arg plan "$plan_id" --arg base "$base" --arg candidate "$candidate" --arg target "$target" --arg target_head "$target_head" --arg frozen_at "$frozen_at" --arg run "$run_id" --arg ref "$ref" --argjson outputs "$outputs_json" \
-    '{schema_version:"aid-plan-final-evidence-1",artifact_type:"plan_final_evidence_receipt",review_verdict:"accepted",plan_id:$plan,plan_base_commit:$base,candidate_sha:$candidate,candidate_frozen_at:$frozen_at,target_branch:$target,target_head_at_freeze:$target_head,run_id:$run,evidence_ref:$ref,outputs:$outputs}')" || { rm -f "$tmp"; return 1; }
+    '{schema_version:"aid-plan-final-evidence-2",artifact_type:"plan_final_evidence_receipt",review_verdict:"accepted",plan_id:$plan,plan_base_commit:$base,candidate_sha:$candidate,candidate_frozen_at:$frozen_at,target_branch:$target,target_head_at_freeze:$target_head,run_id:$run,evidence_ref:$ref,outputs:$outputs}')" || { rm -f "$tmp"; return 1; }
   _pfsm_validate_plan_final_receipt_json "$receipt" || { echo "PRECONDITION FAIL: refusing to seal a non-public-safe plan-final receipt." >&2; rm -f "$tmp"; return 1; }
   _pfsm_receipt_has_exact_review_inventory "$receipt" || { echo "PRECONDITION FAIL: refusing to seal an incomplete or expanded plan-final review inventory." >&2; rm -f "$tmp"; return 1; }
   printf '%s\n' "$receipt" > "$tmp" || { rm -f "$tmp"; return 1; }
@@ -6057,7 +5940,7 @@ _pfsm_verify_plan_final_receipt() {
   local ref want_hash got_hash receipt expected_ref
   ref="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_ref')" || ref=""
   want_hash="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_receipt_sha256')" || want_hash=""
-  [[ -n "$ref" && "$ref" != "null" && -n "$want_hash" && "$want_hash" != "null" ]] || { echo "PRECONDITION FAIL: ${plan_id} has no durable plan-final evidence receipt — rerun plan-finalize --stage review; merge/close never trust runtime evidence alone." >&2; return 1; }
+  [[ -n "$ref" && "$ref" != "null" && -n "$want_hash" && "$want_hash" != "null" ]] || { echo "PRECONDITION FAIL: ${plan_id} has no durable plan-final evidence receipt — rerun plan-finalize --stage decide; merge/close never trust runtime evidence alone." >&2; return 1; }
   expected_ref="$(_pfsm_plan_final_evidence_ref "$plan_id" "$candidate" "$run_id")" || { echo "PRECONDITION FAIL: invalid plan/candidate/run binding for durable evidence." >&2; return 1; }
   [[ "$ref" == "$expected_ref" ]] || { echo "PRECONDITION FAIL: durable evidence ref is not the uniquely derived plan/candidate/run ref." >&2; return 1; }
   receipt="$(git -C "$root" show "${ref}:receipt.json" 2>/dev/null)" || { echo "PRECONDITION FAIL: durable plan-final evidence ref ${ref} is missing or unreadable." >&2; return 1; }
@@ -6086,9 +5969,9 @@ _pfsm_verify_plan_final_receipt() {
 # ---------------------------------------------------------------------------
 # IMP-466 item 4 — the CLOSE-time counterpart of the review receipt.
 #
-# The review receipt (above) durably survives runtime loss for --stage review
-# alone. plan-close also attests to the gates report, the plan-mode C4
-# decision (+ its dual-run corroboration) and the PM merge authorization —
+# The review receipt (above) durably survives runtime loss for the decision
+# alone. plan-close also attests to the gates report, the plan-final
+# decision and the PM merge authorization —
 # all of which normally live ONLY under gitignored `.aid-o/work/`. Without a
 # durable projection of THOSE too, a lost runtime after a real merge can never
 # close again without literally re-running gates/C4/PM — which is not a
@@ -6120,7 +6003,7 @@ _pfsm_validate_plan_final_close_receipt_json() {
     (if has("merged_head")
        then (.merged_head | test("^[0-9a-f]{40}$")) and (.review_equivalence == true)
        else true end) and
-    (.schema_version == "aid-plan-final-close-evidence-1") and
+    (.schema_version == "aid-plan-final-close-evidence-1" or .schema_version == "aid-plan-final-close-evidence-2") and
     (.artifact_type == "plan_final_close_evidence_receipt") and
     (.plan_id | test("^P[0-9]{3}$")) and
     (.candidate_sha | test("^[0-9a-f]{40}$")) and
@@ -6131,35 +6014,39 @@ _pfsm_validate_plan_final_close_receipt_json() {
     (.merged_tree | test("^[0-9a-f]{40}$")) and
     (.tag == "none" or (.tag | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) and
     (.gates_verdict == "pass") and
-    (.c4_decision | type == "object" and (.release_ready == true) and (.blockers_count == 0) and (.dual_run_match == true) and ((keys|sort) == (["blockers_count","dual_run_match","release_ready"]|sort))) and
+    # Version 1 was sealed while the decision ran beside a legacy verdict and
+    # carries dual_run_match; version 2 is the decision alone. Both exact.
+    (.schema_version as $v | .c4_decision | type == "object" and (.release_ready == true) and (.blockers_count == 0)
+      and (if $v == "aid-plan-final-close-evidence-1"
+           then (.dual_run_match == true) and ((keys|sort) == ["blockers_count","dual_run_match","release_ready"])
+           else (keys|sort) == ["blockers_count","release_ready"] end)) and
     (.pm_decision | type == "object" and (.decision == "MERGE") and (.sha256 | test("^sha256:[0-9a-f]{64}$")) and ((keys|sort) == (["decision","sha256"]|sort)))
   ' <<< "$json" >/dev/null 2>&1
 }
 
 # _pfsm_seal_plan_final_close_evidence <root> <plan> <candidate> <run> <target>
 #   <target_head_before> <merge_commit> <merged_tree> <tag> <gates_report>
-#   <release_decision.json> <release_decision_dual_run.json> <pm_decision_file>
+#   <release_decision.json> <pm_decision_file> [<merged_head> <review_equivalence>]
 _pfsm_seal_plan_final_close_evidence() {
   local root="$1" plan_id="$2" candidate="$3" run_id="$4" target="$5" target_head_before="$6" merge_commit="$7" merged_tree="$8" tag="$9"
   shift 9
-  local gates_report="$1" c4_decision_file="$2" c4_dual_run_file="$3" pm_decision_file="$4"
+  local gates_report="$1" c4_decision_file="$2" pm_decision_file="$3"
   # P073 Step 18: OPTIONAL, and deliberately so. Omitted (the candidate path)
   # the receipt keeps its pre-P073 bytes exactly, which is what lets the
   # existing merge tests pass unmodified.
-  local merged_head_arg="${5:-}" review_equiv_arg="${6:-}"
+  local merged_head_arg="${4:-}" review_equiv_arg="${5:-}"
   local ref receipt tmp blob tree commit existing existing_receipt expected_hash actual_hash
 
   [[ -s "$gates_report" ]] && jq -e '.overall == "pass"' "$gates_report" >/dev/null 2>&1 || { echo "PRECONDITION FAIL: refusing to seal close evidence — gates_report.json is missing or not overall pass." >&2; return 1; }
-  local c4_release_ready c4_blockers c4_dual_match
+  local c4_release_ready c4_blockers
   c4_release_ready="$(jq -r '.release_decision.release_ready // false' "$c4_decision_file" 2>/dev/null || echo false)"
   c4_blockers="$(jq -r '.release_decision.blockers | length' "$c4_decision_file" 2>/dev/null || echo -1)"
-  c4_dual_match="$(jq -r '.match // false' "$c4_dual_run_file" 2>/dev/null || echo false)"
   # Whole-diff review MEDIUM: "$c4_blockers is a valid number" alone accepted
   # a contradictory release_ready:true WITH a non-empty blockers[] — must be
   # EXACTLY 0, not merely numeric, or a replaced/forged release-decision.json
   # could seal (and later, via recovery, re-authorize) a closure that was
   # never actually unblocked.
-  [[ "$c4_release_ready" == "true" && "$c4_blockers" == "0" && "$c4_dual_match" == "true" ]] || { echo "PRECONDITION FAIL: refusing to seal close evidence — the C4 decision is not an unblocked (zero blockers), matched release_ready=true verdict." >&2; return 1; }
+  [[ "$c4_release_ready" == "true" && "$c4_blockers" == "0" ]] || { echo "PRECONDITION FAIL: refusing to seal close evidence — the decision is not an unblocked (zero blockers) release_ready=true verdict." >&2; return 1; }
   local pm_decision pm_hash
   pm_decision="$(jq -r '.decision // ""' "$pm_decision_file" 2>/dev/null || true)"
   [[ "$pm_decision" == "MERGE" ]] || { echo "PRECONDITION FAIL: refusing to seal close evidence — no MERGE PM decision at ${pm_decision_file}." >&2; return 1; }
@@ -6171,7 +6058,7 @@ _pfsm_seal_plan_final_close_evidence() {
     --arg thb "$target_head_before" --arg mc "$merge_commit" --arg mt "$merged_tree" --arg tag "$tag" \
     --argjson blockers "$c4_blockers" --arg pmh "$pm_hash" \
     --arg mh "$merged_head_arg" --arg req "$review_equiv_arg" \
-    '{schema_version:"aid-plan-final-close-evidence-1",artifact_type:"plan_final_close_evidence_receipt",plan_id:$plan,candidate_sha:$candidate,run_id:$run,target_branch:$target,target_head_before:$thb,merge_commit:$mc,merged_tree:$mt,tag:$tag,gates_verdict:"pass",c4_decision:{release_ready:true,blockers_count:$blockers,dual_run_match:true},pm_decision:{decision:"MERGE",sha256:$pmh}}
+    '{schema_version:"aid-plan-final-close-evidence-2",artifact_type:"plan_final_close_evidence_receipt",plan_id:$plan,candidate_sha:$candidate,run_id:$run,target_branch:$target,target_head_before:$thb,merge_commit:$mc,merged_tree:$mt,tag:$tag,gates_verdict:"pass",c4_decision:{release_ready:true,blockers_count:$blockers},pm_decision:{decision:"MERGE",sha256:$pmh}}
      + (if $req == "true" then {merged_head:$mh, review_equivalence:true} else {} end)')" || { rm -f "$tmp"; return 1; }
   _pfsm_validate_plan_final_close_receipt_json "$receipt" || { echo "PRECONDITION FAIL: refusing to seal a non-public-safe plan-final close receipt." >&2; rm -f "$tmp"; return 1; }
   printf '%s\n' "$receipt" > "$tmp" || { rm -f "$tmp"; return 1; }
@@ -6196,7 +6083,7 @@ _pfsm_seal_plan_final_close_evidence() {
   tree="$(printf '100644 blob %s\treceipt.json\n' "$blob" | git -C "$root" mktree)" || return 1
   commit="$(git -C "$root" commit-tree "$tree" -m "aid: seal plan-final close evidence ${plan_id} ${run_id}")" || return 1
   if ! git -C "$root" update-ref "$ref" "$commit" ''; then
-    _pfsm_seal_plan_final_close_evidence "$root" "$plan_id" "$candidate" "$run_id" "$target" "$target_head_before" "$merge_commit" "$merged_tree" "$tag" "$gates_report" "$c4_decision_file" "$c4_dual_run_file" "$pm_decision_file" "$merged_head_arg" "$review_equiv_arg"
+    _pfsm_seal_plan_final_close_evidence "$root" "$plan_id" "$candidate" "$run_id" "$target" "$target_head_before" "$merge_commit" "$merged_tree" "$tag" "$gates_report" "$c4_decision_file" "$pm_decision_file" "$merged_head_arg" "$review_equiv_arg"
     return $?
   fi
   actual_hash="sha256:$(git -C "$root" show "${ref}:receipt.json" | sha256sum | awk '{print $1}')"
@@ -6204,862 +6091,204 @@ _pfsm_seal_plan_final_close_evidence() {
   printf '%s|%s|%s' "$ref" "$commit" "$expected_hash"
 }
 
-# _pfsm_verify_plan_final_close_receipt <root> <plan_id> <candidate> <run_id>
-# Echoes the validated receipt JSON on stdout; PRECONDITION FAIL + return 1 on
-# anything ambiguous, forged, partial, stale or mismatched.
-_pfsm_verify_plan_final_close_receipt() {
-  local root="$1" plan_id="$2" candidate="$3" run_id="$4"
-  local ref want_hash got_hash receipt expected_ref
-  ref="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_close_evidence_ref')" || ref=""
-  want_hash="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_close_evidence_receipt_sha256')" || want_hash=""
-  [[ -n "$ref" && "$ref" != "null" && -n "$want_hash" && "$want_hash" != "null" ]] || { echo "PRECONDITION FAIL: ${plan_id} has no durable plan-final CLOSE evidence receipt." >&2; return 1; }
-  expected_ref="$(_pfsm_plan_final_close_evidence_ref "$plan_id" "$candidate" "$run_id")" || { echo "PRECONDITION FAIL: invalid plan/candidate/run binding for durable close evidence." >&2; return 1; }
-  [[ "$ref" == "$expected_ref" ]] || { echo "PRECONDITION FAIL: durable close evidence ref is not the uniquely derived plan/candidate/run ref." >&2; return 1; }
-  receipt="$(git -C "$root" show "${ref}:receipt.json" 2>/dev/null)" || { echo "PRECONDITION FAIL: durable plan-final close evidence ref ${ref} is missing or unreadable." >&2; return 1; }
-  local tree_paths
-  tree_paths="$(git -C "$root" ls-tree -r --name-only "$ref" 2>/dev/null || true)"
-  [[ "$tree_paths" == "receipt.json" ]] || { echo "PRECONDITION FAIL: durable plan-final close evidence ref ${ref} contains files other than receipt.json." >&2; return 1; }
-  got_hash="sha256:$(printf '%s\n' "$receipt" | sha256sum | awk '{print $1}')"
-  [[ "$got_hash" == "$want_hash" ]] || { echo "PRECONDITION FAIL: durable plan-final close evidence receipt hash mismatch for ${plan_id}." >&2; return 1; }
-  _pfsm_validate_plan_final_close_receipt_json "$receipt" || { echo "PRECONDITION FAIL: durable plan-final close evidence receipt is not public-safe or has an invalid shape." >&2; return 1; }
-  jq -e --arg p "$plan_id" --arg c "$candidate" --arg r "$run_id" '.plan_id == $p and .candidate_sha == $c and .run_id == $r' <<< "$receipt" >/dev/null \
-    || { echo "PRECONDITION FAIL: durable plan-final close evidence receipt does not bind this plan/candidate/run." >&2; return 1; }
-  printf '%s' "$receipt"
-}
 
-_pfsm_finalize_review() {
-  local root="$1" plan_id="$2" execution_yaml="$3"
-  # P074 Step 8/10: the TREE this stage acts on is the plan's execution
-  # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
-  # moves). Refs/objects are shared between worktrees, so only the
-  # HEAD/index/working-tree legs below change; legacy plans resolve `troot`
-  # back to `$root` and behave byte-identically to pre-P074.
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# plan-finalize --stage decide — the one aggregate at the end of a plan.
+#
+# Reads what the earlier stages and the whole-plan round (cp7) left in the run
+# directory, asks aid-release-policy.sh for the decision, and says yes or no:
+#   yes  the receipt (aid-plan-final-evidence-2) is sealed, the PM page and card
+#        are rendered with the close's attempts, minutes and USD, and the plan
+#        moves PLAN_REVIEW -> AWAITING_PM for the PM's MERGE | FIX | ABORT;
+#   no   the decision and the PM page are written with the blockers named, the
+#        plan stays in PLAN_REVIEW, and the stage exits 1.
+# It refuses (nothing written) when the candidate moved — `--stage freeze`
+# classifies the change — when a decision input was altered after the stage
+# that wrote it, or when the cp7 round is not closed.
+#
+# --waive-final-review --reason "<the PM's words>" records the PM's waiver of a
+# switched-off whole-plan review for THIS candidate: a file in the run
+# directory plus a timeline and an audit-log entry; the release policy accepts
+# the waiver only with both.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_pfsm_finalize_decide() {
+  local root="$1" plan_id="$2" waive="${3:-0}"
   local troot; troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
 
-  command -v jq >/dev/null 2>&1 || {
-    echo "PRECONDITION FAIL: plan-finalize --stage review requires jq — refusing to validate review outputs without the tool that reads them." >&2
-    return 1
-  }
-  command -v sha256sum >/dev/null 2>&1 || {
-    echo "PRECONDITION FAIL: plan-finalize --stage review requires sha256sum — the Curator's audit_report_ref binding cannot be verified without it." >&2
-    return 1
-  }
-
-  local candidate base_commit run_id run_dir_rel target_branch target_head_at_freeze candidate_frozen_at v
-  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
-  base_commit="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_base_commit')" || base_commit=""
-  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
-  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
-  target_branch="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target_branch=""
-  target_head_at_freeze="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')" || target_head_at_freeze=""
-  candidate_frozen_at="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_frozen_at')" || candidate_frozen_at=""
-  for v in candidate base_commit run_id run_dir_rel target_branch target_head_at_freeze candidate_frozen_at; do
-    if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
-      echo "PRECONDITION FAIL: plan-finalize --stage review: ${plan_id} has no frozen candidate (${v} is unset) — the plan-level reviews run against ONE immutable candidate. Run '--stage sync', '--stage freeze' and '--stage gates' first." >&2
-      return 1
-    fi
-  done
-
-  # ── The invalidation trigger, BEFORE anything else ──────────────────────
-  # Any tracked write produced by a utility or by an accepted specialist fix is
-  # a candidate-changing fix: the candidate binding, the gate report and every
-  # review output are invalidated together and the plan returns to PLAN_FIX.
-  # This runs first so a fix accepted between two review passes can never be
-  # papered over by re-validating outputs that describe the OLD candidate.
-  local drift=""
-  if ! drift="$(_pfsm_review_candidate_drift "$root" "$plan_id" "$candidate")"; then
-    local irc=0
-    plan_final_invalidate "$plan_id" "candidate_changed_during_review" "PLAN_FIX" || irc=$?
-    [[ "$irc" -ne 0 ]] && return "$irc"
-    echo "CANDIDATE INVALIDATED: ${drift}. Every plan-final field is cleared, the gate report and all review outputs for ${run_id} are no longer authoritative, and ${plan_id} is now PLAN_FIX. Commit the fix, then re-run '--stage sync', '--stage freeze', '--stage gates' and '--stage review' against the NEW candidate — the previous run directory is left byte-identical." >&2
-    return 6
-  fi
-
-  # ── State precondition, and the idempotent resume ────────────────────────
-  local cur_state=""
-  cur_state="$(plan_state_get "$plan_id" "plan_state")" || cur_state=""
-  if [[ "$cur_state" == "AWAITING_PM" ]]; then
-    echo "already in AWAITING_PM for candidate ${candidate} — the plan-level review boundary is complete; no agent was re-dispatched and no output was re-validated into a second pass." >&2
-    echo "$candidate"
-    return 0
-  fi
-  if [[ "$cur_state" != "PLAN_REVIEW" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage review: ${plan_id} is in state '${cur_state:-<none>}' — the review stage runs only out of PLAN_REVIEW (the gate stage puts it there)." >&2
-    return 1
-  fi
-
-  # ── CP2 F1 (2026-07-25): the worktree must BE the candidate ─────────────
-  # `--stage gates` documents why ("the working tree must BE the candidate while
-  # they run"), checks out plan/<plan_id> and restores HEAD afterwards. This stage
-  # did neither, so in the normal gates -> review flow it ran with HEAD on whatever
-  # branch preceded gates — typically the target branch. Two costs: the
-  # `git status` half of the drift check was baselined against the WRONG tree (a
-  # "fix" rewriting a file to the version already on that branch reads as clean),
-  # and the four specialists were dispatched against a tree that is not the
-  # candidate, so any agent reading the worktree silently reviewed the wrong code.
-  # Refuse rather than silently check out: the controller dispatches BETWEEN the
-  # exit-7 and the validating invocation, so it — not this stage — must place the
-  # worktree on the candidate and keep it there for the whole review boundary.
-  local head_now=""
-  head_now="$(git -C "$troot" rev-parse HEAD 2>/dev/null || echo "")"
-  if [[ "$head_now" != "$candidate" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage review requires ${plan_id}'s PLAN WORKTREE (${troot}) to BE the frozen candidate, but its HEAD is ${head_now:-<unknown>} and the candidate is ${candidate}. The plan-level specialists review THAT tree and the drift check is baselined on it — your primary checkout is not involved and is free to carry unrelated work. Run 'git -C ${troot} checkout plan/${plan_id}' (the candidate is its head) before dispatching the reviewers, and leave that tree alone until '--stage review' returns 0." >&2
-    return 1
-  fi
-
-
-  local run_dir_abs="${root}/${run_dir_rel}"
-  mkdir -p "$run_dir_abs" || {
-    echo "PRECONDITION FAIL: cannot create ${run_dir_rel}." >&2
-    return 1
-  }
-
-  local -a utilities=()
-  local u
-  while IFS= read -r u; do [[ -n "$u" ]] && utilities+=("$u"); done < <(_pfsm_plan_final_utilities "$execution_yaml")
-
-  # ── review-requirements.json: the machine-readable dispatch contract ─────
-  local reqs_json="[]" row fname atype binding
-  while IFS='|' read -r fname atype binding; do
-    [[ -z "$fname" ]] && continue
-    reqs_json="$(jq -c --arg p "${run_dir_rel}/${fname}" --arg t "$atype" --arg b "$binding" \
-      '. + [{path:$p, artifact_type:(if $t == "-" then null else $t end), binding:$b}]' <<< "$reqs_json")"
-  done < <(_pfsm_review_required_outputs)
-  local req_file="${run_dir_abs}/review-requirements.json"
-  jq -n --arg plan "$plan_id" --arg run "$run_id" --arg cand "$candidate" --arg base "$base_commit" \
-        --argjson reqs "$reqs_json" \
-        --argjson agents "$(printf '%s\n' "${_AID_PLAN_FINAL_AGENTS[@]}" | jq -R . | jq -s .)" \
-        --argjson utils "$(printf '%s\n' "${utilities[@]}" | jq -R . | jq -s .)" \
-    '{plan_id:$plan, run_id:$run, candidate_sha:$cand, plan_base_commit:$base,
-      review_range:($base + ".." + $cand),
-      required_outputs:$reqs, required_agent_dispatches:$agents,
-      registered_utilities:$utils}' > "${req_file}.tmp" \
-    && mv "${req_file}.tmp" "$req_file" || {
-      rm -f "${req_file}.tmp"
-      echo "PRECONDITION FAIL: could not write ${run_dir_rel}/review-requirements.json." >&2
-      return 1
-    }
-
-  # ── Presence: exit 7, listing exactly what the controller must dispatch ──
-  # D3 / IMP-465: for the three generated-skeleton outputs, the FILE existing
-  # is not the same as the SPECIALIST having produced anything — --stage
-  # inputs pre-creates them with a null payload precisely so the specialist
-  # edits them in place. Presence here must mean "payload filled", or the
-  # skeleton's mere existence would silently swallow the exit-7 dispatch
-  # signal pipeline.md tells the controller to act on.
-  local -a missing=()
-  while IFS='|' read -r fname atype binding; do
-    [[ -z "$fname" ]] && continue
-    local fpath="${run_dir_abs}/${fname}"
-    if [[ ! -f "$fpath" ]]; then
-      missing+=("$fname"); continue
-    fi
-    local skel_pkey=""
-    case "$fname" in
-      curator-report.json)        skel_pkey="curator" ;;
-      semantic-review-final.json) skel_pkey="semantic_review" ;;
-      delivery-report.json)       skel_pkey="delivery_report" ;;
-    esac
-    if [[ -n "$skel_pkey" ]]; then
-      local skel_ptype; skel_ptype="$(jq -r --arg pk "$skel_pkey" '(.[$pk] | type)' "$fpath" 2>/dev/null || echo "null")"
-      [[ "$skel_ptype" == "object" ]] || missing+=("$fname")
-    fi
-  done < <(_pfsm_review_required_outputs)
-  if (( ${#missing[@]} > 0 )); then
-    echo "awaiting_review_outputs: ${plan_id} is blocked in PLAN_REVIEW until the following plan-final outputs exist in ${run_dir_rel}/ — ${missing[*]}. This is a DISPATCH state, not an error: the FSM does not dispatch agents; the controller does, then re-runs '--stage review'. The full contract (expected path, artifact type, subject binding) is in ${run_dir_rel}/review-requirements.json; the review range is ${base_commit}..${candidate}." >&2
-    return 7
-  fi
-
-  # ── Snapshot every required output BEFORE validating any of them ─────────
-  # Round-3 Codex HIGH: without this, a check could validate version A of a
-  # file and the LATER hash-and-seal loop (near the end of this function)
-  # could hash a since-swapped version B — the durable receipt would then
-  # attest to bytes nothing here ever actually validated. Copying every
-  # required output into a private, never-written-to-again snapshot and
-  # redirecting every subsequent read in this function (validation AND the
-  # final outputs_json hash) at that snapshot closes the window: whatever
-  # gets validated below is byte-identical to whatever gets sealed. The
-  # snapshot directory is removed on every return from this function.
-  local _review_snapshot
-  _review_snapshot="$(mktemp -d "${TMPDIR:-/tmp}/aid-plan-final-review-snapshot.XXXXXX")" || {
-    echo "PRECONDITION FAIL: could not create a private snapshot directory to validate plan-final review outputs atomically." >&2
-    return 1
-  }
-  trap 'rm -rf "$_review_snapshot"' RETURN
-  while IFS='|' read -r fname atype binding; do
-    [[ -z "$fname" ]] && continue
-    cp -p "${run_dir_abs}/${fname}" "${_review_snapshot}/${fname}" 2>/dev/null || {
-      echo "PRECONDITION FAIL: could not snapshot ${run_dir_rel}/${fname} for review validation." >&2
-      return 1
-    }
-  done < <(_pfsm_review_required_outputs)
-  run_dir_abs="$_review_snapshot"
-
-  # ── Protocol validation, then per-output subject binding ────────────────
-  local fails=0
-  _rassert() { echo "PLAN-FINAL REVIEW ASSERTION FAILED: $1" >&2; fails=$((fails+1)); }
-
-  while IFS='|' read -r fname atype binding; do
-    [[ -z "$fname" || "$atype" == "-" ]] && continue
-    local vrc=0 vout=""
-    # CP2 F3 (2026-07-25): aid-protocol-validate.sh returns 0 with `legacy_skipped`
-    # for any artifact declaring control_protocol: "legacy", BEFORE the envelope,
-    # provenance and type-specific checks — including the audit-report independence
-    # check. Accepting that here would let the one artifact whose independence is
-    # the entire point of the audit opt out of proving it. A plan-final review
-    # output must be a real protocol-v2 artifact.
-    local proto
-    proto="$(jq -r '.control_protocol // ""' "${run_dir_abs}/${fname}" 2>/dev/null || echo "")"
-    if [[ "$proto" == "legacy" ]]; then
-      _rassert "${fname} declares control_protocol: \"legacy\", which short-circuits aid-protocol-validate.sh before the envelope, provenance and type-specific checks (for an audit report, before the independence check). A plan-final review output must be a real protocol-v2 artifact."
-      continue
-    fi
-    # CP2 F5: pass the candidate as the current head so the validator's freshness
-    # cross-check (revision.head_is_current / revision.freshness) actually runs
-    # instead of being skipped for an empty CURRENT_HEAD.
-    vout="$(bash "${SCRIPT_DIR}/aid-protocol-validate.sh" "${run_dir_abs}/${fname}" --current-head "$candidate" 2>&1)" || vrc=$?
-    if [[ "$vrc" -ne 0 ]]; then
-      _rassert "${fname} fails aid-protocol-validate.sh (validator exit ${vrc}: ${vout})."
-      continue
-    fi
-    local decl
-    decl="$(jq -r '.artifact_type // ""' "${run_dir_abs}/${fname}")"
-    [[ "$decl" == "$atype" ]] \
-      || _rassert "${fname} declares artifact_type '${decl}', expected '${atype}'."
-  done < <(_pfsm_review_required_outputs)
-
-  # Every JSON review output must be bound to THIS candidate and THIS plan.
-  # An EPIC evidence pack copied into the run directory fails right here:
-  # identity.plan_id is absent (or names another plan) and the head is an EPIC
-  # head, not the candidate.
-  local f
-  for f in semantic-review-final.json audit-report.json curator-report.json \
-           delivery-report.json review-profile.json delivery-gate.json \
-           acceptance-evidence.json; do
-    local h p
-    h="$(jq -r '.revision.head_sha // ""' "${run_dir_abs}/${f}")"
-    [[ "$h" == "$candidate" ]] \
-      || _rassert "${f} records revision.head_sha '${h}', expected the frozen candidate '${candidate}' — a review of any other head is stale evidence."
-    # CP2 F2 (2026-07-25): bind to the ATTEMPT, not only the candidate. Without
-    # this, an invalidation that is REVERTED rather than fixed re-freezes the SAME
-    # commit into a new run directory, and `cp -p` of the previous attempt's
-    # outputs satisfies every other check — heads match, the curator ref is
-    # self-consistent because the audit report was copied alongside it, and cp -p
-    # preserves mtimes so the Reporter-last ordering still holds. The stage would
-    # return 0 having validated a review nobody performed on this attempt.
-    local rid_out
-    rid_out="$(jq -r '.identity.run_id // ""' "${run_dir_abs}/${f}")"
-    [[ "$rid_out" == "$run_id" ]] \
-      || _rassert "${f} records identity.run_id '${rid_out}', expected this attempt's '${run_id}' — an output carried over from a previous plan-final attempt is not a review of THIS attempt, even when the candidate sha happens to match."
-    p="$(jq -r '.identity.plan_id // ""' "${run_dir_abs}/${f}")"
-    [[ "$p" == "$plan_id" ]] \
-      || _rassert "${f} records identity.plan_id '${p}', expected '${plan_id}' — this output does not belong to this plan (an EPIC evidence pack copied in fails here)."
-  done
-
-  # D3 / IMP-465: the three generated-skeleton specialists (Curator, Verifier,
-  # Reporter) must have edited ONLY their payload key — the envelope AID
-  # generated for them (schema_version/artifact_type/control_protocol/
-  # identity/revision) must still be exactly what was sealed at --stage
-  # inputs time, and the payload key must actually be filled (not left as the
-  # generated null placeholder).
-  local _skel_project_id; _skel_project_id="$(basename "$root")"
-  local _skel_kind _skel_err
-  for _skel_kind in curator verifier reporter; do
-    _skel_err="$(_pfsm_verify_plan_final_skeleton_envelope "$_skel_kind" "$root" "$_skel_project_id" \
-      "$plan_id" "$base_commit" "$candidate" "$run_id" "$run_dir_abs")" \
-      || _rassert "$_skel_err"
-  done
-
-  # semantic-review-final.json: the RANGE must cover the whole plan.
-  local sr_base
-  sr_base="$(jq -r '.revision.base_sha // ""' "${run_dir_abs}/semantic-review-final.json")"
-  [[ "$sr_base" == "$base_commit" ]] \
-    || _rassert "semantic-review-final.json records revision.base_sha '${sr_base}', expected plan_base_commit '${base_commit}' — the C2 final review must cover ${base_commit}..${candidate}, so a defect introduced by the FIRST EPIC is still in range after the last one is integrated."
-  local sr_range
-  sr_range="$(jq -r '.semantic_review.range // ""' "${run_dir_abs}/semantic-review-final.json")"
-  if [[ -n "$sr_range" && "$sr_range" != "${base_commit}..${candidate}" ]]; then
-    _rassert "semantic-review-final.json records semantic_review.range '${sr_range}', expected '${base_commit}..${candidate}'."
-  fi
-
-  # audit-report.json: reviewed_head + input_manifest_hash.
-  local a_head a_hash
-  a_head="$(jq -r '.audit_report.reviewed_head // ""' "${run_dir_abs}/audit-report.json")"
-  a_hash="$(jq -r '.audit_report.input_manifest_hash // ""' "${run_dir_abs}/audit-report.json")"
-  [[ "$a_head" == "$candidate" ]] \
-    || _rassert "audit-report.json records audit_report.reviewed_head '${a_head}', expected the frozen candidate '${candidate}'."
-  [[ -n "$a_hash" ]] \
-    || _rassert "audit-report.json has no audit_report.input_manifest_hash — the audit's own input set is unproven."
-  # D2 / IMP-464 round-2 (auditor-flagged gap): audit-report.json's claimed
-  # input_manifest_hash was previously only checked for non-emptiness — any
-  # string satisfied it, so a mismatched or stale manifest could sit behind
-  # a report that CLAIMED a hash without that hash ever being checked
-  # against the real audit-input-manifest.json. It now has to equal that
-  # manifest's OWN .audit_input_manifest.input_hash field exactly — the
-  # provenance chain the manifest's own schema documents (D7).
-  local aim_input_hash
-  aim_input_hash="$(jq -r '.audit_input_manifest.input_hash // ""' "${run_dir_abs}/audit-input-manifest.json" 2>/dev/null || true)"
-  [[ -n "$aim_input_hash" && "$a_hash" == "$aim_input_hash" ]] \
-    || _rassert "audit-report.json's audit_report.input_manifest_hash (${a_hash:-<empty>}) does not equal audit-input-manifest.json's own audit_input_manifest.input_hash (${aim_input_hash:-<empty>}) — the audit report's claimed input set is unproven against the actual manifest."
-
-  # curator-report.json: audit_report_ref must be sha256(audit-report.json).
-  local c_ref c_actual
-  c_ref="$(jq -r '(.curator.audit_report_ref // "") | if type == "object" then (.sha256 // "") else . end' "${run_dir_abs}/curator-report.json")"
-  c_ref="${c_ref#sha256:}"
-  c_actual="$(sha256sum "${run_dir_abs}/audit-report.json" | awk '{print $1}')"
-  [[ "$c_ref" == "$c_actual" ]] \
-    || _rassert "curator-report.json's curator.audit_report_ref (${c_ref:-<absent>}) is not sha256 of the audit report in this run directory (${c_actual}) — the Curator reviewed a DIFFERENT audit report."
-
-  # D5 / IMP-468: a raw Auditor blocker (severity critical|high in
-  # audit-report.json's findings[]) is evidence — a bare
-  # curator.blocking_findings:false NEVER erases it. Every such finding needs
-  # a schema-bound adjudication entry in curator.adjudications[], bound to
-  # THIS exact audit report hash / candidate / run (partial, stale, or
-  # missing adjudication blocks review). Security-tier findings (severity ==
-  # critical) and PM-required findings (action_owner == "pm") can never be
-  # self-cleared via disposition "false_positive" — that always escalates.
-  # Shared with lib/aid-lifecycle.sh's _aid_lc_plan_review_status (D5
-  # follow-up) via lib/aid-adjudication.sh's aid_adjudication_resolve — one
-  # resolver, so the plan-final boundary's verdict and the .aid-lifecycle
-  # classifier's verdict can never silently drift apart.
-  local adjudication_check adj_total adj_valid unadj_count illegal_fp_count unadj_list
-  adjudication_check="$(aid_adjudication_resolve "${run_dir_abs}/audit-report.json" "${run_dir_abs}/curator-report.json" "$candidate" "$run_id")" \
-    || adjudication_check=""
-  if [[ -z "$adjudication_check" ]]; then
-    _rassert "audit-report.json or curator-report.json could not be read to check formal Curator adjudication."
-  else
-    adj_total="$(jq -r '.adj_total' <<<"$adjudication_check")"
-    adj_valid="$(jq -r '.adj_valid' <<<"$adjudication_check")"
-    unadj_count="$(jq -r '.unadj_count' <<<"$adjudication_check")"
-    unadj_list="$(jq -r '.unadj_list | join(", ")' <<<"$adjudication_check")"
-    illegal_fp_count="$(jq -r '.illegal_fp_count' <<<"$adjudication_check")"
-    [[ "$adj_total" == "$adj_valid" ]] \
-      || _rassert "curator-report.json's curator.adjudications[] contains an entry that is malformed or not bound to THIS exact audit report/candidate/run — partial or stale adjudication is refused."
-    [[ "$unadj_count" -eq 0 ]] \
-      || _rassert "audit-report.json has critical|high finding(s) with no matching curator.adjudications[] entry — a raw Auditor blocker is never resolved by a bare curator.blocking_findings:false: ${unadj_list}"
-    [[ "$illegal_fp_count" -eq 0 ]] \
-      || _rassert "curator-report.json disposes a security-tier (severity=critical) or PM-required (action_owner=pm) finding as 'false_positive' — those can never self-clear that way and must be 'requires_pm' or 'confirmed'."
-  fi
-
-  # simplifier-report.md: the `Head:` provenance line.
-  if ! grep -Eq "^[[:space:]]*[*_]{0,2}Head:?[*_]{0,2}[[:space:]]*:?[[:space:]]*${candidate}[[:space:]]*$" \
-        "${run_dir_abs}/simplifier-report.md"; then
-    _rassert "simplifier-report.md has no 'Head: ${candidate}' provenance line — the Simplifier's subject is unproven, so it may have read any tree."
-  fi
-
-  # review-profile.json: the C3 gate arming input.
-  jq -e '(.review_profile.required_lenses | type == "array")' "${run_dir_abs}/review-profile.json" >/dev/null 2>&1 \
-    || _rassert "review-profile.json has no review_profile.required_lenses[] — lib/review-profile-check.sh reports 'unverifiable' on it, so the C3 gate would never be armed for the plan-level C4 run."
-  local rp_base
-  rp_base="$(jq -r '.revision.base_sha // ""' "${run_dir_abs}/review-profile.json")"
-  [[ "$rp_base" == "$base_commit" ]] \
-    || _rassert "review-profile.json records revision.base_sha '${rp_base}', expected plan_base_commit '${base_commit}' — the profile must be derived over the whole plan range."
-
-  # IMP-464 (D2): plan-diff is controller-produced C3 input, not an arbitrary
-  # JSON file that becomes trustworthy merely because its later hash is
-  # sealed. Whether "skipped" is an acceptable verdict here depends on the
-  # SAME required_lenses[] arming check as C3's own build-manifest gate: a
-  # required AC lens's verdict must be pass|fail (aid-plan-diff.sh's actual
-  # overall_verdict vocabulary — pass|fail|partial|skipped; "present"/"absent"
-  # is the per-AC results[] vocabulary, not this field); when no AC lens is
-  # armed, an honest "skipped" is not fabricated evidence, it is the correct
-  # explicit classification, and must not block a legitimate no-AC-lens plan.
-  local ac_lens_required_rv="false"
-  jq -e '.review_profile.required_lenses // [] | any(. == "ac_to_test_identity" or . == "requirement_test_drift")' "${run_dir_abs}/review-profile.json" >/dev/null 2>&1 \
-    && ac_lens_required_rv="true"
-  local pd_base pd_head pd_verdict
-  pd_base="$(jq -r '.base_commit // ""' "${run_dir_abs}/plan-diff.json" 2>/dev/null || true)"
-  pd_head="$(jq -r '.head_commit // ""' "${run_dir_abs}/plan-diff.json" 2>/dev/null || true)"
-  pd_verdict="$(jq -r '.overall_verdict // ""' "${run_dir_abs}/plan-diff.json" 2>/dev/null || true)"
-  [[ "$pd_base" == "$base_commit" && "$pd_head" == "$candidate" ]] \
-    || _rassert "plan-diff.json is not bound to ${base_commit}..${candidate}."
-  # The SAME predicate --stage gates uses at the plan_diff assertion: a plan
-  # declaring no verification_pattern has nothing machine-checkable, its skip is
-  # the truthful verdict, and the two stages must not read it differently — until
-  # P095 `gates` accepted that file and `inputs` refused it, out of --force's
-  # reach, so such a plan could not be closed at all.
-  local _pf_plan_path=""
-  IFS=$'\t' read -r _pf_plan_path _ < <(_pfsm_plan_file_for_gates "$root" "$troot" "$plan_id" || true)
-  if [[ "$ac_lens_required_rv" == "true" ]] && [[ "$pd_verdict" == "skipped" ]] \
-     && ! _pfsm_plan_has_patterns "$_pf_plan_path"; then
-    echo "NOTE: plan-finalize --stage inputs: plan-diff.json is skipped and the plan declares no verification_pattern — nothing machine-checkable, the skip is accepted, as --stage gates accepts it (prose acceptance criteria are judged by the reviews)." >&2
-  elif [[ "$ac_lens_required_rv" == "true" ]]; then
-    [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" ]] \
-      || _rassert "an AC lens (ac_to_test_identity/requirement_test_drift) is required by review-profile.json, but plan-diff.json has overall_verdict '${pd_verdict:-<empty>}', expected pass|fail (partial/skipped/unverifiable is not C3 evidence for a required lens)."
-  else
-    [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" || "$pd_verdict" == "partial" || "$pd_verdict" == "skipped" ]] \
-      || _rassert "plan-diff.json has overall_verdict '${pd_verdict:-<empty>}', expected pass|fail|partial|skipped."
-  fi
-  jq -e '(.results | type == "array") and (.summary | type == "object")' "${run_dir_abs}/plan-diff.json" >/dev/null 2>&1 \
-    || _rassert "plan-diff.json lacks results[] or summary{}; C3 must not read an underspecified AC verdict."
-  local pd_expected pd_actual
-  pd_expected="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_inputs.plan_diff_sha256' 2>/dev/null || true)"
-  pd_actual="sha256:$(sha256sum "${run_dir_abs}/plan-diff.json" | awk '{print $1}')"
-  [[ "$pd_expected" == "$pd_actual" ]] \
-    || _rassert "plan-diff.json differs from the controller-produced pre-dispatch hash; replacement after inputs is refused."
-  # IMP-464 (D2) TOCTOU close: the LIVE file matching the pre-dispatch hash
-  # only proves the file is back to the sealed bytes NOW — not that C3 read
-  # those same bytes when it actually dispatched. audit-input-manifest.json
-  # is now a REQUIRED output (D2 round-2), so this reads the real file
-  # unconditionally; if C3 sealed its own snapshot of plan-diff.json into
-  # its evidence_hashes[], that snapshot must ALSO equal the producer's
-  # hash, or a swap-dispatch-restore around the dispatch call is caught
-  # here. D2 round-3 Codex MEDIUM: whenever plan-diff.json carries a REAL
-  # verdict (pass|fail — pd_verdict "skipped" is the only honest way
-  # to NOT have read it), the evidence_hashes[] entry is now MANDATORY, not
-  # merely checked-if-present — an absent, non-array, or plan-diff.json-less
-  # evidence_hashes[] no longer silently passes as "C3 never read it" when
-  # the producer's own plan-diff.json says otherwise.
-  local c3_manifest="${run_dir_abs}/audit-input-manifest.json"
-  local c3_evidence_hashes_valid c3_pd_hash
-  c3_evidence_hashes_valid="$(jq -e '(.audit_input_manifest.evidence_hashes // []) | type == "array"' "$c3_manifest" >/dev/null 2>&1 && echo true || echo false)"
-  c3_pd_hash="$(jq -r '(.audit_input_manifest.evidence_hashes // [])[]? | select(.path=="plan-diff.json") | .sha256' "$c3_manifest" 2>/dev/null | head -1)"
-  if [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" || "$pd_verdict" == "partial" ]]; then
-    if [[ "$c3_evidence_hashes_valid" != "true" ]]; then
-      _rassert "audit-input-manifest.json's audit_input_manifest.evidence_hashes is missing or not an array, but plan-diff.json has a real overall_verdict '${pd_verdict}' — C3's own record of what it consumed is unproven."
-    elif [[ -z "$c3_pd_hash" ]]; then
-      _rassert "audit-input-manifest.json's evidence_hashes[] has no plan-diff.json entry, but plan-diff.json has a real overall_verdict '${pd_verdict}' — C3 must record what it actually read, not omit it."
-    elif [[ "$c3_pd_hash" != "$pd_expected" ]]; then
-      _rassert "C3's audit-input-manifest.json sealed plan-diff.json at ${c3_pd_hash}, not the producer-sealed ${pd_expected} — C3 may have dispatched over swapped evidence."
-    fi
-  elif [[ -n "$c3_pd_hash" && "$c3_pd_hash" != "$pd_expected" ]]; then
-    _rassert "C3's audit-input-manifest.json sealed plan-diff.json at ${c3_pd_hash}, not the producer-sealed ${pd_expected} — C3 may have dispatched over swapped evidence."
-  fi
-
-  # ── The plan-level aggregates: delivery-gate + acceptance-evidence ──────
-  # `identity.epic_id` MUST be null: these are the PLAN's aggregates, and an
-  # EPIC id here would make them indistinguishable from a per-EPIC artifact
-  # (the delivery-gate schema was widened to string-or-null in this step so
-  # the plan-level shape is schema-valid rather than merely tolerated).
-  local contributing
-  contributing="$(plan_manifest_get "$plan_id" '[.plan_boundary_manifest.epic_runs[] | select(.status == "merged_to_plan") | .epic_id] | sort | join(" ")' 2>/dev/null)" || contributing=""
-  [[ "$contributing" == "not_found" ]] && contributing=""
-  local agg
-  for agg in delivery-gate.json acceptance-evidence.json; do
-    local eid
-    eid="$(jq -r '.identity.epic_id // "null"' "${run_dir_abs}/${agg}")"
-    [[ "$eid" == "null" ]] \
-      || _rassert "${agg} records identity.epic_id '${eid}' — the plan-level aggregate is bound to the PLAN (epic_id null, plan_id set), never to one EPIC."
-    local srcs missing_e=""
-    srcs="$(jq -r '[(.sources // [])[] | if type == "object" then (.epic_id // "") else . end] | sort | join(" ")' "${run_dir_abs}/${agg}")"
-    if [[ -z "$srcs" ]]; then
-      _rassert "${agg} has an empty sources[] — the aggregate must name the EPIC runs it was aggregated from (epic_runs[].evidence_dir)."
-    else
-      local e
-      for e in $contributing; do
-        [[ " ${srcs} " == *" ${e} "* ]] || missing_e="${missing_e:+${missing_e}, }${e}"
-      done
-      [[ -z "$missing_e" ]] \
-        || _rassert "${agg} is missing a per-EPIC contribution for: ${missing_e}. A plan-level aggregate that silently omits an EPIC would report the plan green on partial evidence."
-    fi
-  done
-
-  # ── dispatch-record.json: exactly one dispatch per agent and per utility ─
-  local dr="${run_dir_abs}/dispatch-record.json"
-  jq -e 'type == "object"' "$dr" >/dev/null 2>&1 \
-    || _rassert "dispatch-record.json is not a JSON object."
-  local dr_cand
-  dr_cand="$(jq -r '.candidate_sha // ""' "$dr" 2>/dev/null || echo "")"
-  [[ "$dr_cand" == "$candidate" ]] \
-    || _rassert "dispatch-record.json records candidate_sha '${dr_cand}', expected '${candidate}' — a dispatch record for another candidate proves nothing about THIS attempt."
-  # CP2 F2: the candidate alone does not identify the attempt — a re-freeze of the
-  # same commit gets a NEW run id, and a copied dispatch record would otherwise
-  # still match.
-  local dr_run
-  dr_run="$(jq -r '.run_id // ""' "$dr" 2>/dev/null || echo "")"
-  [[ "$dr_run" == "$run_id" ]] \
-    || _rassert "dispatch-record.json records run_id '${dr_run}', expected this attempt's '${run_id}' — a dispatch record copied from a previous attempt proves nothing about THIS one."
-  local ag n
-  local counts_json="{}" utils_json="[]"
-  for ag in "${_AID_PLAN_FINAL_AGENTS[@]}"; do
-    n="$(jq -r --arg a "$ag" '[(.dispatches // [])[] | select(.agent == $a) | (.count // 1)] | add // 0' "$dr" 2>/dev/null || echo 0)"
-    [[ "$n" =~ ^[0-9]+$ ]] || n=0
-    if [[ "$n" -ne 1 ]]; then
-      _rassert "dispatch-record.json records ${n} dispatch(es) of '${ag}' on this attempt, expected exactly 1 — every plan-boundary specialist runs once against the frozen candidate."
-    fi
-    counts_json="$(jq -c --arg a "$ag" --argjson n "${n:-0}" '. + {($a): $n}' <<< "$counts_json")"
-  done
-  local ut
-  for ut in "${utilities[@]}"; do
-    n="$(jq -r --arg u "$ut" '[(.utilities // [])[] | select(.id == $u) | (.count // 1)] | add // 0' "$dr" 2>/dev/null || echo 0)"
-    [[ "$n" =~ ^[0-9]+$ ]] || n=0
-    if [[ "$n" -ne 1 ]]; then
-      _rassert "dispatch-record.json records ${n} run(s) of the registered plan-boundary utility '${ut}', expected exactly 1 — every registered utility is counted EXPLICITLY, never assumed."
-    fi
-    utils_json="$(jq -c --arg u "$ut" --argjson n "${n:-0}" '. + [{id:$u, count:$n}]' <<< "$utils_json")"
-  done
-
-  # ── The Reporter runs LAST — after the final non-mutating pass ──────────
-  # Its authoritative output is this protocol-v2 JSON; the human
-  # `.aid-o/reports/<plan_id>-delivery.md` is a PROJECTION and is explicitly
-  # not release authority. Ordering is asserted from the on-disk mtimes: a
-  # delivery report older than any other review output describes a state of
-  # the review that no longer holds (e.g. a Simplifier fix accepted after it).
-  local dr_mtime other_mtime
-  dr_mtime="$(stat -c %Y "${run_dir_abs}/delivery-report.json" 2>/dev/null || echo 0)"
-  while IFS='|' read -r fname atype binding; do
-    [[ -z "$fname" || "$fname" == "delivery-report.json" || "$fname" == "dispatch-record.json" ]] && continue
-    other_mtime="$(stat -c %Y "${run_dir_abs}/${fname}" 2>/dev/null || echo 0)"
-    if [[ "$dr_mtime" -lt "$other_mtime" ]]; then
-      _rassert "delivery-report.json is OLDER than ${fname} — the Reporter must be dispatched last, after the final non-mutating pass. Re-dispatch the Reporter against the current outputs."
-    fi
-  done < <(_pfsm_review_required_outputs)
-
-  if [[ "$fails" -gt 0 ]]; then
-    echo "PRECONDITION FAIL: ${fails} plan-final review assertion(s) failed for ${plan_id}; the plan stays in PLAN_REVIEW and no transition was made. A stale, wrong-plan or wrong-candidate output is NEVER accepted with a warning." >&2
-    return 1
-  fi
-
-  # ── The candidate must STILL be intact after all validation ─────────────
-  # Cheap, and it closes the window in which a background specialist commits
-  # while this stage is reading its outputs.
-  if ! drift="$(_pfsm_review_candidate_drift "$root" "$plan_id" "$candidate")"; then
-    local irc2=0
-    plan_final_invalidate "$plan_id" "candidate_changed_during_review" "PLAN_FIX" || irc2=$?
-    [[ "$irc2" -ne 0 ]] && return "$irc2"
-    echo "CANDIDATE INVALIDATED (post-validation): ${drift}. The outputs validated moments ago describe a candidate that no longer exists; ${plan_id} is now PLAN_FIX." >&2
-    return 6
-  fi
-
-  # ── Record the pass, then transition PLAN_REVIEW -> AWAITING_PM ─────────
-  local outputs_json="{}"
-  while IFS='|' read -r fname atype binding; do
-    [[ -z "$fname" ]] && continue
-    outputs_json="$(jq -c --arg f "$fname" \
-      --arg s "sha256:$(sha256sum "${run_dir_abs}/${fname}" | awk '{print $1}')" \
-      '. + {($f): $s}' <<< "$outputs_json")"
-  done < <(_pfsm_review_required_outputs)
-
-  local review_json
-  review_json="$(jq -nc --arg cand "$candidate" --arg base "$base_commit" --arg run "$run_id" \
-    --argjson outputs "$outputs_json" --argjson counts "$counts_json" --argjson utils "$utils_json" \
-    '{candidate_sha:$cand, review_range:($base + ".." + $cand), run_id:$run,
-      outputs:$outputs, dispatch_counts:$counts, utilities_run:$utils}')"
-  local sealed ref receipt_commit receipt_hash
-  sealed="$(_pfsm_seal_plan_final_review "$root" "$plan_id" "$base_commit" "$candidate" "$target_branch" "$target_head_at_freeze" "$candidate_frozen_at" "$run_id" "$outputs_json")" || {
-    echo "PRECONDITION FAIL: every plan-final review output for ${plan_id} validated, but its durable receipt could not be sealed — refusing to transition on runtime-only evidence." >&2
-    return 1
-  }
-  IFS='|' read -r ref receipt_commit receipt_hash <<< "$sealed"
-  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_review = ${review_json} | .plan_boundary_manifest.plan_final_evidence_ref = \"${ref}\" | .plan_boundary_manifest.plan_final_evidence_receipt_sha256 = \"${receipt_hash}\"" >/dev/null || {
-    echo "PRECONDITION FAIL: durable plan-final evidence for ${plan_id} was sealed at ${ref}, but its runtime pointer could not be recorded — refusing to transition; retry is idempotent." >&2
-    return 1
-  }
-
-  local op_id crc=0
-  op_id="$(plan_op_key "plan-finalize-review" "$plan_id" "-" "0" "$plan_id")"
-  plan_op_begin "$plan_id" "$op_id" "plan-finalize-review" "$plan_id" "$candidate" >/dev/null 2>&1 || true
-  if ! _pfsm_plan_state_set "$plan_id" "AWAITING_PM"; then
-    echo "PRECONDITION FAIL: the plan-final review for ${plan_id} passed every assertion and is recorded in the manifest, but the plan STATE FILE could not be moved PLAN_REVIEW -> AWAITING_PM. Re-run '--stage review' — the outputs are durable and it re-validates them without re-dispatching anything." >&2
-    return 1
-  fi
-  plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "AWAITING_PM"' >/dev/null 2>&1 || true
-  plan_op_commit "$plan_id" "$op_id" >/dev/null 2>&1 || crc=$?
-  if [[ "$crc" -ne 0 ]]; then
-    echo "WARN: could not record the plan-finalize-review state_committed op for ${plan_id} (rc=${crc}); the state transition itself landed." >&2
-  fi
-
-  # ── The SPLIT marker (P068 Step 6) ───────────────────────────────────────
-  # `plan-review-complete` says exactly what it means: every plan-final review
-  # is complete and the PM decision is still PENDING. It is deliberately NOT
-  # `plan-close-complete` — that second marker is written only after the PM
-  # decision exists AND the merge (or a recorded abort) has happened AND the
-  # lifecycle receipt is committed, so a closed plan can never be reported
-  # before the release actually occurred.
-  local _pr_marker="${root}/.aid-o/work/plan-state/${plan_id}/plan-review-complete"
-  mkdir -p "$(dirname "$_pr_marker")" 2>/dev/null || true
-  printf 'run_id=%s\ncandidate_sha=%s\nreviews_complete_at=%s\npm_decision=pending\n' \
-    "$run_id" "$candidate" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${_pr_marker}.tmp" 2>/dev/null \
-    && mv -f "${_pr_marker}.tmp" "$_pr_marker" 2>/dev/null || rm -f "${_pr_marker}.tmp" 2>/dev/null
-
-  echo "$candidate"
-  echo "plan-final review PASSED for ${plan_id} at ${candidate} over ${base_commit}..${candidate} — every required output in ${run_dir_rel}/ is present, protocol-valid and bound to the candidate; ${plan_id} is now AWAITING_PM." >&2
-  return 0
-}
-
-# =============================================================================
-# P068 Step 4 — `plan-finalize --stage c4` and `--stage summary`
-# =============================================================================
-#
-# `--stage c4` produces EXACTLY ONE plan-mode release decision, bound to the
-# frozen candidate AND to the approved target head, into the plan-final run
-# directory. It is the plan-level analogue of the FSM's review->release C4 hook
-# for EPICs, and it reuses the SAME aggregator (`aid-release-policy.sh`) in its
-# new `--plan` mode — no second decision engine.
-#
-# `--stage summary` renders the PM plan-final summary from that decision (via
-# `aid-pm-brief.sh`, which reads release-decision.json and nothing else).
-#
-# STATE: both stages run out of AWAITING_PM and make NO state transition.
-# `--stage review` is what moves PLAN_REVIEW -> AWAITING_PM (Step 3), and the
-# plan state table in lib/aid-plan-state.sh has no state between them. Adding
-# one would be a state-machine change, which this step deliberately does not
-# make; instead both stages are idempotent and re-runnable inside AWAITING_PM,
-# and `--stage summary` ASSERTS the plan is in AWAITING_PM rather than moving it
-# there a second time. The PM authorization + merge remain Step 5's job.
-#
-# DUAL RUN: before E10, C4 keeps its configured mode from
-# defaults/policies/release-decision-policy.yaml (`enforcement: observe` today)
-# and emits dual-run evidence exactly as aid-fsm.sh does for EPICs — the
-# comparison is recorded, and only `enforcement: blocking` lets a
-# release_ready=false actually fail the stage.
-# ---------------------------------------------------------------------------
-
-# _pfsm_c4_enforcement — echoes observe|blocking. Fail-safe: anything unreadable
-# degrades to `observe` (never blocks), mirroring the aid-fsm.sh hook.
-_pfsm_c4_enforcement() {
-  local pf="${RELEASE_DECISION_POLICY:-${SCRIPT_DIR}/../defaults/policies/release-decision-policy.yaml}"
-  local v=""
-  if [[ -f "$pf" ]] && command -v yq >/dev/null 2>&1; then
-    v="$(yq -r '.enforcement // "observe"' "$pf" 2>/dev/null || echo observe)"
-  fi
-  case "$v" in blocking) echo blocking ;; *) echo observe ;; esac
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_finalize_c4 <root> <plan_id>
-# ---------------------------------------------------------------------------
-_pfsm_finalize_c4() {
-  local root="$1" plan_id="$2"
-  # P074 Step 8/10: the TREE this stage acts on is the plan's execution
-  # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
-  # moves). Refs/objects are shared between worktrees, so only the
-  # HEAD/index/working-tree legs below change; legacy plans resolve `troot`
-  # back to `$root` and behave byte-identically to pre-P074.
-  local troot; troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
-
-  command -v jq >/dev/null 2>&1 || {
-    echo "PRECONDITION FAIL: plan-finalize --stage c4 requires jq — refusing to produce a release decision without the tool that reads its inputs." >&2
-    return 1
-  }
-
-  local candidate base_commit run_id run_dir_rel target_branch target_head v
+  local candidate base_commit run_id run_dir_rel target_branch target_head frozen_at v
   candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
   base_commit="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_base_commit')" || base_commit=""
   run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
   run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
   target_branch="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target_branch=""
   target_head="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')" || target_head=""
-  for v in candidate base_commit run_id run_dir_rel target_branch target_head; do
+  frozen_at="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_frozen_at')" || frozen_at=""
+  for v in candidate base_commit run_id run_dir_rel target_branch target_head frozen_at; do
     if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
-      echo "PRECONDITION FAIL: plan-finalize --stage c4: ${plan_id} has no frozen candidate (${v} is unset) — the plan-level release decision is bound to ONE immutable candidate and to the target head recorded at its freeze. Run '--stage sync', '--stage freeze', '--stage gates' and '--stage review' first." >&2
+      echo "PRECONDITION FAIL: plan-finalize --stage decide: ${plan_id} has no frozen candidate (${v} is unset). Run: plan-finalize ${plan_id} --stage freeze" >&2
       return 1
     fi
   done
+  local run_dir_abs="${root}/${run_dir_rel}" decision
 
-  # The same invalidation trigger the review stage runs, for the same reason: a
-  # tracked write between the review and the decision means the decision would
-  # describe a candidate that no longer exists.
   local drift=""
   if ! drift="$(_pfsm_review_candidate_drift "$root" "$plan_id" "$candidate")"; then
-    local irc=0
-    plan_final_invalidate "$plan_id" "candidate_changed_during_c4" "PLAN_FIX" || irc=$?
-    [[ "$irc" -ne 0 ]] && return "$irc"
-    echo "CANDIDATE INVALIDATED: ${drift}. No release decision was produced; ${plan_id} is now PLAN_FIX. Re-run the whole plan-final cycle against the NEW candidate." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage decide: ${drift}. Nothing was decided. Run: plan-finalize ${plan_id} --stage freeze — it classifies what changed and keeps every result the change cannot have affected." >&2
     return 6
   fi
 
   local cur_state=""
   cur_state="$(plan_state_get "$plan_id" "plan_state")" || cur_state=""
-  if [[ "$cur_state" != "AWAITING_PM" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage c4: ${plan_id} is in state '${cur_state:-<none>}' — the plan-level C4 decision runs only out of AWAITING_PM (the review stage puts it there)." >&2
+  decision="${run_dir_abs}/release-decision.json"
+  if [[ "$cur_state" == "AWAITING_PM" && -s "$decision" ]]; then
+    echo "already decided for candidate ${candidate}: ${run_dir_rel}/release-decision.json says release_ready=$(jq -r '.release_decision.release_ready' "$decision"); ${plan_id} is AWAITING_PM." >&2
+    echo "$candidate"
+    return 0
+  fi
+  if [[ "$cur_state" != "PLAN_REVIEW" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage decide: ${plan_id} is in state '${cur_state:-<none>}' — the decision runs out of PLAN_REVIEW. Run: plan-finalize ${plan_id} --stage gates" >&2
+    return 1
+  fi
+  # The plan worktree stands on the plan branch head: the candidate, or the head
+  # an ancillary-only move was accepted at (the drift check above proved it).
+  if [[ "$(git -C "$troot" rev-parse HEAD 2>/dev/null)" != "$(git -C "$troot" rev-parse "refs/heads/plan/${plan_id}" 2>/dev/null)" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage decide requires ${plan_id}'s plan worktree (${troot}) to be on plan/${plan_id}. Run: git -C ${troot} checkout plan/${plan_id}" >&2
     return 1
   fi
 
-  # Same worktree rule as `--stage review`: the decision's inputs are read at the
-  # candidate, and aid-evidence-verify.sh --at-head compares against the worktree.
-  local head_now=""
-  head_now="$(git -C "$troot" rev-parse HEAD 2>/dev/null || echo "")"
-  if [[ "$head_now" != "$candidate" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage c4 requires ${plan_id}'s PLAN WORKTREE (${troot}) to BE the frozen candidate, but its HEAD is ${head_now:-<unknown>} and the candidate is ${candidate}. Run 'git -C ${troot} checkout plan/${plan_id}' before the C4 stage; your primary checkout is not involved." >&2
+  if [[ "$waive" == 1 ]]; then
+    local waiver="${run_dir_abs}/final-review-waiver.json" now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [[ -f "${run_dir_abs}/cp7/rounds.json" && "$(jq -r '.verdict // ""' "${run_dir_abs}/cp7/rounds.json")" != waived ]]; then
+      echo "PRECONDITION FAIL: plan-finalize --stage decide --waive-final-review: ${run_dir_rel}/cp7 already holds a round; a waiver is for a whole-plan review that is switched off, never a way around one that ran." >&2
+      return 1
+    fi
+    jq -n --arg plan "$plan_id" --arg run "$run_id" --arg cand "$candidate" --arg why "$_PFSM_FORCE_REASON" \
+          --arg op "${USER:-unknown}" --arg at "$now" \
+      '{artifact_type: "final_review_waiver", plan_id: $plan, run_id: $run, candidate_sha: $cand, reason: $why, operator: $op, created_at: $at}' > "$waiver" || return 1
+    log_event "${run_dir_abs}/timeline.jsonl" final_review_waived plan_id="$plan_id" candidate_sha="$candidate" reason="$_PFSM_FORCE_REASON"
+    bash "${SCRIPT_DIR}/aid-audit-log.sh" append --epic-id "$plan_id" --run-id "$run_id" --event final_review_waived \
+      --candidate-sha "$candidate" --reason "$_PFSM_FORCE_REASON" --operator "${USER:-unknown}" \
+      --output "${root}/.aid-o/work/audit-log.jsonl" || {
+        rm -f "$waiver"
+        echo "PRECONDITION FAIL: the waiver could not be written to the audit log — a waiver nobody can audit is not recorded." >&2
+        return 1; }
+    # The two files a round would have written say, explicitly, that none ran.
+    mkdir -p "${run_dir_abs}/cp7"
+    jq -n --arg h "$candidate" '{verdict: "waived", head_sha: $h, rounds: [], waiver: "final-review-waiver.json"}' > "${run_dir_abs}/cp7/rounds.json"
+    jq -n --arg b "$base_commit" --arg h "$candidate" --arg plan "$plan_id" --arg run "$run_id" --arg project "$(basename "$root")" --arg at "$now" \
+      '{artifact_type: "semantic_review", generated_at: $at, generated_by: "aid-plan-fsm.sh plan-finalize --stage decide --waive-final-review",
+        revision: {base_sha: $b, head_sha: $h}, identity: {project_id: $project, epic_id: null, plan_id: $plan, run_id: $run},
+        semantic_review: {mode: "final", range: ($b + ".." + $h), verdict: "waived", lenses_run: [], findings: []}}' > "${run_dir_abs}/semantic-review-final.json"
+    aid_stage_writes_record "$run_dir_abs" decide cp7/rounds.json semantic-review-final.json
+  fi
+
+  # ── The whole-plan round: closed, or the stage says what to run ──────────
+  local round_msg="" round_rc=0
+  round_msg="$( cd "$troot" && source "${SCRIPT_DIR}/aid-fsm.sh" && AID_PROJECT_ROOT="$root" fsm_check_review_round "$run_dir_abs" cp7 "" --head "$candidate" 2>&1 \
+                || { echo "reason=${_PRECONDITION_FAIL_REASON:-}"; exit 1; } )" || round_rc=1
+  if [[ "$round_rc" -ne 0 && "$round_msg" != *"reason=review_round_failed"* ]]; then
+    echo "${round_msg%reason=*}" >&2
     return 1
   fi
 
-  local run_dir_abs="${root}/${run_dir_rel}"
-  local decision="${run_dir_abs}/release-decision.json"
-  mkdir -p "$run_dir_abs" || { echo "PRECONDITION FAIL: cannot create ${run_dir_rel}." >&2; return 1; }
+  local tampered=""
+  if ! tampered="$(aid_stage_writes_verify "$run_dir_abs")"; then
+    echo "PRECONDITION FAIL: plan-finalize --stage decide: ${run_dir_rel}/${tampered} was changed after the stage that wrote it (its digest is not the one recorded in stage-writes.jsonl). A decision input is never edited by hand; re-run the stage that produces it." >&2
+    return 1
+  fi
 
-  # ── The one plan-mode C4 run ────────────────────────────────────────────
+  # ── The decision ────────────────────────────────────────────────────────
   local arc=0 aout=""
   aout="$(AID_PROJECT_ROOT="$root" bash "${SCRIPT_DIR}/aid-release-policy.sh" \
     --plan "$plan_id" --run-id "$run_id" --evidence-dir "$run_dir_rel" \
     --candidate-sha "$candidate" --target-ref "$target_branch" --target-head-sha "$target_head" \
     --out "$decision" 2>&1)" || arc=$?
-  if [[ "$arc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage c4: the plan-mode release aggregator exited ${arc} for ${plan_id} — no release decision was recorded. Aggregator output: ${aout}" >&2
+  if [[ "$arc" -ne 0 ]] || ! jq -e '.release_decision | type == "object"' "$decision" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-finalize --stage decide: the release aggregate exited ${arc} for ${plan_id} and recorded no decision. Output: ${aout}" >&2
     return 1
   fi
-  if ! jq -e '.release_decision | type == "object"' "$decision" >/dev/null 2>&1; then
-    echo "PRECONDITION FAIL: plan-finalize --stage c4: ${run_dir_rel}/release-decision.json is not a release_decision artifact." >&2
-    return 1
-  fi
-
-  local release_ready blockers_n
+  local release_ready blockers
   release_ready="$(jq -r '.release_decision.release_ready' "$decision")"
-  blockers_n="$(jq -r '.release_decision.blockers | length' "$decision")"
+  blockers="$(jq -r '[.release_decision.blockers[] | "\(.input_id): \(.reason)"] | join("; ")' "$decision")"
 
-  # ── The relocated legacy release checks, run ONCE in this same stage ─────
-  # At the plan boundary the legacy stack is the plan-final gate report plus the
-  # recorded plan-final review — the two things that, before C4 existed, were the
-  # whole basis for "this is releasable". Both are already durable, so this is a
-  # read, not a re-run.
-  local legacy_gates="fail" legacy_review="fail" legacy_verdict="false"
-  local gr="${run_dir_abs}/gates_report.json"
-  if [[ -f "$gr" ]] && jq -e '(.overall // .gates_report.result // .status // "") == "pass"' "$gr" >/dev/null 2>&1; then
-    legacy_gates="pass"
+  # ── The PM page, rendered from files whatever the verdict ───────────────
+  local bout=""
+  if ! bout="$(bash "${SCRIPT_DIR}/aid-pm-brief.sh" "$run_dir_abs" 2>&1)" || [[ ! -s "${run_dir_abs}/pm-summary.md" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage decide: aid-pm-brief.sh did not render ${run_dir_rel}/pm-summary.md. Output: ${bout}" >&2
+    return 1
   fi
-  if [[ "$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_review.run_id')" == "$run_id" ]]; then
-    legacy_review="pass"
-  fi
-  [[ "$legacy_gates" == "pass" && "$legacy_review" == "pass" ]] && legacy_verdict="true"
-
-  local match="false" divergence="none"
-  [[ "$release_ready" == "$legacy_verdict" ]] && match="true"
-  if [[ "$match" != "true" ]]; then
-    if [[ "$release_ready" == "false" ]]; then divergence="c4_stricter"; else divergence="c4_permissive"; fi
-  fi
-
-  local enforcement; enforcement="$(_pfsm_c4_enforcement)"
-  local dual="${run_dir_abs}/release-decision-dual-run.json"
-  jq -n --arg plan "$plan_id" --arg run "$run_id" --arg cand "$candidate" \
-        --arg tref "$target_branch" --arg thead "$target_head" \
-        --arg enf "$enforcement" --arg div "$divergence" \
-        --arg lg "$legacy_gates" --arg lr "$legacy_review" \
-        --argjson rr "$release_ready" --argjson lv "$legacy_verdict" --argjson m "$match" \
-    '{event:"release_policy_dual_run", plan_id:$plan, run_id:$run, candidate_sha:$cand,
-      target_ref:$tref, target_head_sha:$thead, head_sha:$cand,
-      enforcement:$enf, c4_release_ready:$rr,
-      legacy_verdict:$lv, legacy_checks:{gates_report:$lg, plan_final_review:$lr},
-      match:$m, divergence_class:$div}' > "${dual}.tmp" \
-    && mv "${dual}.tmp" "$dual" || {
-      rm -f "${dual}.tmp"
-      echo "PRECONDITION FAIL: plan-finalize --stage c4: could not write ${run_dir_rel}/release-decision-dual-run.json — a C4 run whose dual-run evidence is not durable is not recorded." >&2
-      return 1
-    }
-
-  # P073 Step 17: the PM surface must show when a review survived on
-  # equivalence rather than on an unmoved head. Both fields are ADDITIVE —
-  # existing consumers read by key and ignore them.
-  local c4_accepted=""
-  c4_accepted="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.accepted_head' 2>/dev/null)" || c4_accepted=""
-  [[ "$c4_accepted" == "null" ]] && c4_accepted=""
-
-  local c4_json
-  c4_json="$(jq -nc --arg run "$run_id" --arg cand "$candidate" --arg thead "$target_head" \
-    --arg enf "$enforcement" --argjson rr "$release_ready" --argjson bn "$blockers_n" \
-    --argjson m "$match" --arg div "$divergence" --arg ah "$c4_accepted" \
-    '{run_id:$run, candidate_sha:$cand, target_head_sha:$thead, enforcement:$enf,
-      release_ready:$rr, blockers:$bn, dual_run:{match:$m, divergence_class:$div},
-      accepted_head:(if $ah == "" then null else $ah end),
-      review_equivalence:($ah != "" and $ah != $cand)}')"
-  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_c4 = ${c4_json}" >/dev/null || {
-    echo "PRECONDITION FAIL: the plan-final C4 decision for ${plan_id} was written to ${run_dir_rel}/release-decision.json, but the result could not be recorded in the manifest. Re-run '--stage c4' — the aggregator is deterministic at a fixed candidate." >&2
+  local decision_json
+  decision_json="$(jq -nc --arg run "$run_id" --arg cand "$candidate" --arg thead "$target_head" \
+    --argjson rr "$release_ready" --argjson bn "$(jq '.release_decision.blockers | length' "$decision")" \
+    '{run_id: $run, candidate_sha: $cand, target_head_sha: $thead, enforcement: "blocking", release_ready: $rr, blockers: $bn}')"
+  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_c4 = ${decision_json}
+    | .plan_boundary_manifest.plan_final_summary = {run_id: \"${run_id}\", candidate_sha: \"${candidate}\", pm_summary: \"${run_dir_rel}/pm-summary.md\", pm_decision_brief: \"${run_dir_rel}/pm-decision-brief.json\"}" >/dev/null || {
+    echo "PRECONDITION FAIL: the decision for ${plan_id} is written at ${run_dir_rel}/release-decision.json but could not be recorded in the manifest. Re-run: plan-finalize ${plan_id} --stage decide" >&2
     return 1
   }
 
-  if [[ "$enforcement" == "blocking" && "$release_ready" != "true" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage c4: release_ready=false with ${blockers_n} blocker(s) and release-decision-policy enforcement=blocking. The decision is durable at ${run_dir_rel}/release-decision.json; resolve the blockers listed there." >&2
+  if [[ "$release_ready" != "true" ]]; then
+    echo "NOT READY: ${plan_id} at ${candidate:0:12} — ${blockers}. The decision and the PM page are in ${run_dir_rel}/." >&2
     return 1
   fi
 
+  # ── Yes: seal the receipt, then hand over to the PM ─────────────────────
+  local outputs_json="{}" fname
+  while IFS= read -r fname; do
+    outputs_json="$(jq -c --arg f "$fname" --arg s "sha256:$(sha256sum "${run_dir_abs}/${fname}" | awk '{print $1}')" '. + {($f): $s}' <<< "$outputs_json")"
+  done < <(_pfsm_review_required_outputs)
+  local sealed ref receipt_hash
+  sealed="$(_pfsm_seal_plan_final_review "$root" "$plan_id" "$base_commit" "$candidate" "$target_branch" "$target_head" "$frozen_at" "$run_id" "$outputs_json")" || {
+    echo "PRECONDITION FAIL: the decision for ${plan_id} is yes, but its durable receipt could not be sealed — refusing to hand over on runtime-only evidence. Re-run: plan-finalize ${plan_id} --stage decide" >&2
+    return 1
+  }
+  IFS='|' read -r ref _ receipt_hash <<< "$sealed"
+  local review_json
+  review_json="$(jq -nc --arg cand "$candidate" --arg base "$base_commit" --arg run "$run_id" --argjson outputs "$outputs_json" \
+    '{candidate_sha: $cand, review_range: ($base + ".." + $cand), run_id: $run, outputs: $outputs}')"
+  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_review = ${review_json} | .plan_boundary_manifest.plan_final_evidence_ref = \"${ref}\" | .plan_boundary_manifest.plan_final_evidence_receipt_sha256 = \"${receipt_hash}\"" >/dev/null || {
+    echo "PRECONDITION FAIL: the receipt for ${plan_id} is sealed at ${ref} but its pointer could not be recorded. Re-run: plan-finalize ${plan_id} --stage decide" >&2
+    return 1
+  }
+  if ! _pfsm_plan_state_set "$plan_id" "AWAITING_PM"; then
+    echo "PRECONDITION FAIL: the decision for ${plan_id} is yes and sealed, but the plan state file could not be moved PLAN_REVIEW -> AWAITING_PM. Re-run: plan-finalize ${plan_id} --stage decide" >&2
+    return 1
+  fi
+  plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "AWAITING_PM"' >/dev/null 2>&1 || true
+
   echo "$candidate"
-  echo "plan-final C4 decision recorded for ${plan_id} at ${candidate} (release_ready=${release_ready}, blockers=${blockers_n}, enforcement=${enforcement}, dual_run match=${match}/${divergence}). ${plan_id} stays AWAITING_PM; run '--stage summary' next." >&2
+  echo "READY: ${plan_id} at ${candidate:0:12} — gates green, the whole-plan round closed, obligations settled. PM page: ${run_dir_rel}/pm-summary.md. ${plan_id} is AWAITING_PM: show the PM the MERGE | FIX | ABORT card; MERGE runs plan-merge-to-main." >&2
   return 0
 }
 
-# ---------------------------------------------------------------------------
-# _pfsm_finalize_summary <root> <plan_id>
-# ---------------------------------------------------------------------------
-_pfsm_finalize_summary() {
-  local root="$1" plan_id="$2"
-
-  command -v jq >/dev/null 2>&1 || {
-    echo "PRECONDITION FAIL: plan-finalize --stage summary requires jq." >&2
-    return 1
-  }
-
-  local candidate run_id run_dir_rel v
-  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
-  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
-  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
-  for v in candidate run_id run_dir_rel; do
-    if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
-      echo "PRECONDITION FAIL: plan-finalize --stage summary: ${plan_id} has no frozen candidate (${v} is unset)." >&2
-      return 1
-    fi
-  done
-
-  local cur_state=""
-  cur_state="$(plan_state_get "$plan_id" "plan_state")" || cur_state=""
-  if [[ "$cur_state" != "AWAITING_PM" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage summary: ${plan_id} is in state '${cur_state:-<none>}' — the PM summary is rendered for a plan that is AWAITING_PM (the review stage puts it there, the C4 stage keeps it there)." >&2
-    return 1
-  fi
-
-  local run_dir_abs="${root}/${run_dir_rel}"
-  local decision="${run_dir_abs}/release-decision.json"
-  if [[ ! -s "$decision" ]] || ! jq -e '.release_decision | type == "object"' "$decision" >/dev/null 2>&1; then
-    echo "PRECONDITION FAIL: plan-finalize --stage summary: no plan-mode release decision at ${run_dir_rel}/release-decision.json — run '--stage c4' first. The PM summary REPORTS the decision; it never substitutes for it." >&2
-    return 1
-  fi
-  # A decision produced in EPIC mode (or carried over) cannot be summarised as this
-  # plan's: the plan-level sections are rendered from `release_decision.plan_summary`,
-  # which only plan mode emits, and the identity must name this plan and this attempt.
-  local d_plan d_run d_epic
-  d_plan="$(jq -r '.identity.plan_id // ""' "$decision")"
-  d_run="$(jq -r '.identity.run_id // ""' "$decision")"
-  d_epic="$(jq -r '.identity.epic_id // "null"' "$decision")"
-  if [[ "$d_plan" != "$plan_id" || "$d_run" != "$run_id" || "$d_epic" != "null" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage summary: ${run_dir_rel}/release-decision.json is bound to plan '${d_plan:-<absent>}' / run '${d_run:-<absent>}' / epic '${d_epic}', expected plan '${plan_id}' / run '${run_id}' / epic null. A PM summary must never be able to imply an intermediate EPIC was released." >&2
-    return 1
-  fi
-  if ! jq -e '.release_decision.plan_summary | type == "object"' "$decision" >/dev/null 2>&1; then
-    echo "PRECONDITION FAIL: plan-finalize --stage summary: the decision carries no release_decision.plan_summary — it was not produced in plan mode, so the plan-level sections (EPICs, skips, gates, specialist review, backlog, merge decision) cannot be rendered." >&2
-    return 1
-  fi
-
-  local brc=0 bout=""
-  bout="$(bash "${SCRIPT_DIR}/aid-pm-brief.sh" "$run_dir_abs" 2>&1)" || brc=$?
-  if [[ "$brc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage summary: aid-pm-brief.sh exited ${brc} for ${plan_id} — the PM summary is NOT complete. Output: ${bout}" >&2
-    return 1
-  fi
-  local md="${run_dir_abs}/pm-summary.md"
-  [[ -s "$md" ]] || {
-    echo "PRECONDITION FAIL: plan-finalize --stage summary: ${run_dir_rel}/pm-summary.md was not written." >&2
-    return 1
-  }
-  # The four fields roadmap §8 requires to be DISTINCT and labelled. Asserted here so a
-  # renderer regression cannot silently collapse "reviewed" into "released".
-  local lbl missing_lbl=""
-  for lbl in "Reviewed candidate SHA:" "Approved target SHA:" "Final main merge SHA:" "Release / tag status:"; do
-    grep -Fq "$lbl" "$md" || missing_lbl="${missing_lbl:+${missing_lbl}, }${lbl}"
-  done
-  if [[ -n "$missing_lbl" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage summary: pm-summary.md is missing the required labelled field(s): ${missing_lbl}. The reviewed candidate, the approved target, the final merge SHA and the tag status are four distinct facts and must each be rendered." >&2
-    return 1
-  fi
-
-  local sum_json
-  sum_json="$(jq -nc --arg run "$run_id" --arg cand "$candidate" \
-    --arg md "${run_dir_rel}/pm-summary.md" --arg brief "${run_dir_rel}/pm-decision-brief.json" \
-    '{run_id:$run, candidate_sha:$cand, pm_summary:$md, pm_decision_brief:$brief}')"
-  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_summary = ${sum_json}" >/dev/null || {
-    echo "PRECONDITION FAIL: the PM plan-final summary for ${plan_id} was rendered at ${run_dir_rel}/pm-summary.md but could not be recorded in the manifest. Re-run '--stage summary' — it re-renders from the same durable decision." >&2
-    return 1
-  }
-
-  echo "$candidate"
-  echo "plan-final PM summary rendered for ${plan_id} at ${run_dir_rel}/pm-summary.md (+ pm-decision-brief.json); ${plan_id} is AWAITING_PM — the merge and the release/tag are Step 5's PM-authorized actions, not this stage's." >&2
-  return 0
+# _pfsm_refusal_next <plan_id> <stage> <rc> — the last line of every refusal of
+# a plan-final stage: what to run next, and when the PM is the way out. The
+# message above it says WHAT was refused; this says what to DO, so an agent is
+# never left with a refusal and no move (commands/aid-run.md, "Closing a plan").
+_pfsm_refusal_next() {
+  local plan_id="$1" stage="$2" rc="$3" cmd="plan-finalize ${1} --stage"
+  case "${stage}:${rc}" in
+    *:4)      echo "next: resolve the conflict on plan/${plan_id} (merge the target branch by hand, commit), then: ${cmd} freeze. escalate: a Blocked card when resolving it needs a product decision." >&2 ;;
+    *:6)      echo "next: ${cmd} freeze — it classifies what changed and keeps every result the change cannot have affected." >&2 ;;
+    gates:*)  echo "next: read the gate report named above; the role that wrote the failing code fixes it, then: ${cmd} freeze. escalate: a Blocked card when the failure is not in the delivered code (environment, quarantine receipt)." >&2 ;;
+    decide:*) echo "next: the fix path of commands/aid-run.md \"Closing a plan\", then: ${cmd} freeze. escalate: a Decision card (FIX / ABORT) when a blocker is not a role's to fix." >&2 ;;
+    *)        echo "next: correct what the message above names, then: ${cmd} ${stage}. escalate: a Blocked card when it cannot be corrected from inside the plan." >&2 ;;
+  esac
 }
 
 # =============================================================================
-# cmd_plan_finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>]
+# cmd_plan_finalize <plan_id> --stage <freeze|gates|produce|decide> [--accept-ancillary]
+#                    [--waive-final-review --reason <text>] [--frozen-at <rfc3339>]
 #                    [--execution-yaml <path>] [--substitute-receipt <gate>=<path>]
 #                    [--project-root <path>]
 # =============================================================================
 cmd_plan_finalize() {
-  local plan_id="" stage="" project_root_opt="" frozen_at="" execution_yaml_opt=""
+  local plan_id="" stage="" project_root_opt="" frozen_at="" execution_yaml_opt="" accept_ancillary=0 waive_final_review=0
   local -a substitute_receipts=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -7079,6 +6308,8 @@ cmd_plan_finalize() {
       --frozen-at)
         _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
         frozen_at="$2"; shift 2 ;;
+      --accept-ancillary) accept_ancillary=1; shift ;;
+      --waive-final-review) waive_final_review=1; shift ;;
       # P073 Step 8 — see the note on plan-start's loop.
       --force) _PFSM_FORCE=1; shift ;;
       --force-reason)
@@ -7099,20 +6330,41 @@ cmd_plan_finalize() {
   done
   # P073 Step 8 (review finding): a force reason without --force is an
   # error, never a silently discarded argument.
-  _pfsm_force_arg_check "plan-finalize" || exit 2
+  # --waive-final-review carries its own --reason: the PM's words for the
+  # waiver record, not a force reason.
+  if [[ "$waive_final_review" -eq 1 ]]; then
+    if [[ "$stage" != decide || "${#_PFSM_FORCE_REASON}" -lt 20 ]]; then
+      echo "ERROR: plan-finalize: --waive-final-review belongs to --stage decide and needs --reason \"<the PM's words, at least 20 characters>\"" >&2
+      exit 2
+    fi
+  else
+    _pfsm_force_arg_check "plan-finalize" || exit 2
+  fi
 
   if [[ -z "$plan_id" || -z "$stage" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <freeze|gates|produce|decide> [--accept-ancillary] [--waive-final-review --reason <text>] [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
     echo "ERROR: plan-finalize: plan_id must match ^P[0-9]{3}\$ (got '${plan_id}')" >&2
     exit 2
   fi
+  # A former stage name says what replaced it, so an agent following old text
+  # is told what to run instead of being left with "unknown stage".
+  local replaced=""
   case "$stage" in
-    sync|freeze|gates|inputs|review|c4|summary|accept-ancillary) ;;
-    *) echo "ERROR: plan-finalize: --stage must be 'sync', 'freeze', 'gates', 'inputs', 'review', 'c4' or 'summary' (got '${stage}')" >&2; exit 2 ;;
+    freeze|gates|produce|decide) ;;
+    sync)             replaced="plan-finalize ${plan_id} --stage freeze   (freeze merges the target branch in before it freezes)" ;;
+    accept-ancillary) replaced="plan-finalize ${plan_id} --stage freeze --accept-ancillary" ;;
+    inputs)           replaced="plan-finalize ${plan_id} --stage produce" ;;
+    review)           replaced="bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare|collect|close --checkpoint cp7 --evidence-dir <the plan-final run directory> --round 1   (after: plan-finalize ${plan_id} --stage produce)" ;;
+    c4|summary)       replaced="plan-finalize ${plan_id} --stage decide" ;;
+    *) echo "ERROR: plan-finalize: --stage must be freeze, gates, produce or decide (got '${stage}')" >&2; exit 2 ;;
   esac
+  if [[ -n "$replaced" ]]; then
+    echo "ERROR: plan-finalize: the stage '${stage}' no longer exists. Run: ${replaced}" >&2
+    exit 2
+  fi
   if [[ "$stage" != "gates" && ${#substitute_receipts[@]} -gt 0 ]]; then
     echo "ERROR: plan-finalize: --substitute-receipt is only meaningful for --stage gates." >&2
     exit 2
@@ -7131,79 +6383,47 @@ cmd_plan_finalize() {
   # P074 Step 5: the clean-worktree check is KEPT for the non-exempt stages
   # and evaluated via `git -C` against the tree the stage really acts on.
   #
-  # P074 Step 8/10: that tree is the PLAN WORKTREE. Every stage — sync, freeze,
-  # gates, inputs, review, c4, summary, accept-ancillary — re-executes itself
-  # there first (or refuses naming the repair), so the review/c4 "stay on the
-  # candidate" contract binds the plan's own tree and the PM's primary checkout
-  # is free during the review window. `project_root` remains the STATE root.
-  _pfsm_require_plan_worktree "$plan_id" "$project_root" || exit 1
+  # P074 Step 8/10: that tree is the PLAN WORKTREE. Every stage — freeze, gates,
+  # produce, decide — re-executes itself there first (or refuses naming the
+  # repair), so "stay on the candidate" binds the plan's own tree and the PM's
+  # primary checkout is free during the review window. `project_root` remains
+  # the STATE root.
+  # Every refusal below ends with the same `next:` line a refused stage prints.
+  _refuse() { _pfsm_refusal_next "$plan_id" "$stage" 1; exit 1; }
+  _pfsm_require_plan_worktree "$plan_id" "$project_root" || _refuse
   local tree_root
   tree_root="$(_pfsm_plan_tree_root "$project_root" "$plan_id")"
-  _pfsm_check_detached_head "$tree_root" || exit 1
-  _pfsm_check_no_merge_in_progress "$tree_root" || exit 1
-  # `--stage review` deliberately does NOT take the generic dirty-tree refusal.
-  # For sync/freeze/gates a dirty tree is an operator mistake to be corrected
-  # before anything is frozen. During the review boundary it is a SIGNAL with a
-  # defined meaning: a utility or an accepted specialist fix wrote a tracked
-  # file, i.e. the candidate changed. Exiting 1 here would hide that behind
-  # "commit or stash first"; instead `_pfsm_finalize_review` detects it and
-  # calls `plan_final_invalidate`, so the plan returns to PLAN_FIX and every
-  # review output is invalidated together with the candidate.
-  # `c4` and `summary` join `review` in the dirty-tree exemption for the same reason:
-  # inside the review->decision->summary boundary a tracked write MEANS the candidate
-  # changed, and `_pfsm_finalize_c4` turns that into an invalidation rather than a
-  # "commit or stash first" that would hide it.
-  # P073 Step 16: `accept-ancillary` joins the dirty-tree exemption. A dirty
-  # tree is its INPUT, not a refusal condition — the whole point is to classify
-  # what moved rather than demand it be stashed away first.
-  if [[ "$stage" != "review" && "$stage" != "c4" && "$stage" != "summary" && "$stage" != "accept-ancillary" ]]; then
-    # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
-    # bookkeeping obstacle, not a physical impossibility, so an audited
-    # --force may pass it. The check still prints its own recovery first.
-    _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$tree_root" || exit 1
-    _pfsm_commit_force "plan-finalize" "$plan_id" "$project_root" || exit 1
+  _pfsm_check_detached_head "$tree_root" || _refuse
+  _pfsm_check_no_merge_in_progress "$tree_root" || _refuse
+  # A dirty tree blocks freeze and gates: it is an operator mistake to correct
+  # before anything is frozen or gated. `produce` and `decide` run inside the
+  # review boundary, where a tracked write MEANS the candidate changed: their
+  # drift check names it and points at `--stage freeze`. For
+  # `freeze --accept-ancillary` a moved tree is the input, not a refusal.
+  if [[ "$stage" == gates || ( "$stage" == freeze && "$accept_ancillary" -eq 0 ) ]]; then
+    # Forceable: a dirty tree or an unproven lineage is a bookkeeping obstacle,
+    # not a physical impossibility, so an audited --force may pass it.
+    _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$tree_root" || _refuse
+    _pfsm_commit_force "plan-finalize" "$plan_id" "$project_root" || _refuse
   fi
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
     echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
-    exit 1
+    _refuse
   fi
 
   local rc=0
   case "$stage" in
-    sync)   _pfsm_finalize_sync "$project_root" "$plan_id" || rc=$? ;;
-    freeze) _pfsm_finalize_freeze "$project_root" "$plan_id" "$frozen_at" || rc=$? ;;
+    freeze) _pfsm_finalize_freeze "$project_root" "$plan_id" "$frozen_at" "$accept_ancillary" || rc=$? ;;
     gates)
       local execution_yaml="${execution_yaml_opt:-${project_root}/.aid-o/config/execution.yaml}"
       _pfsm_finalize_gates "$project_root" "$plan_id" "$execution_yaml" \
         "${substitute_receipts[@]+"${substitute_receipts[@]}"}" || rc=$?
       ;;
-    review)
-      local execution_yaml_r="${execution_yaml_opt:-${project_root}/.aid-o/config/execution.yaml}"
-      _pfsm_finalize_review "$project_root" "$plan_id" "$execution_yaml_r" || rc=$?
-      ;;
-    inputs)
-      # The producer for the three C4 inputs. Runs between `gates` and `review`:
-      # the candidate must already be frozen (the profile is derived over the
-      # plan range against it) and the review stage validates what this writes.
-      local _in_cand _in_base _in_run _in_dir
-      _in_cand="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || _in_cand=""
-      _in_base="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_base_commit')" || _in_base=""
-      _in_run="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || _in_run=""
-      _in_dir="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || _in_dir=""
-      for v in _in_cand _in_base _in_run _in_dir; do
-        if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
-          echo "PRECONDITION FAIL: plan-finalize --stage inputs: ${plan_id} has no frozen candidate binding (${v#_in_} is unset) — run '--stage sync' then '--stage freeze' first. The three C4 inputs are derived over the frozen candidate, never over a moving head." >&2
-          rc=1; break
-        fi
-      done
-      [[ "$rc" -eq 0 ]] && { _pfsm_finalize_inputs "$plan_id" "$project_root" \
-        "${project_root}/${_in_dir}" "$_in_cand" "$_in_base" "$_in_run" || rc=$?; }
-      ;;
-    c4)      _pfsm_finalize_c4 "$project_root" "$plan_id" || rc=$? ;;
-    summary) _pfsm_finalize_summary "$project_root" "$plan_id" || rc=$? ;;
-    accept-ancillary) _pfsm_finalize_accept_ancillary "$project_root" "$plan_id" || rc=$? ;;
+    produce) _pfsm_finalize_produce "$project_root" "$plan_id" || rc=$? ;;
+    decide)  _pfsm_finalize_decide "$project_root" "$plan_id" "$waive_final_review" || rc=$? ;;
   esac
+  [[ "$rc" -eq 0 ]] || _pfsm_refusal_next "$plan_id" "$stage" "$rc"
   exit "$rc"
 }
 
@@ -7563,7 +6783,7 @@ cmd_plan_merge_to_main() {
     [[ "$m_rpath" == "null" ]] && m_rpath=""
     [[ "$m_rsha" == "null" ]] && m_rsha=""
     if [[ -z "$m_rpath" || ! -r "${root}/${m_rpath}" ]]; then
-      echo "PRECONDITION FAIL: plan-merge-to-main: accepted_head ${m_accepted} is recorded but its receipt (${m_rpath:-<none>}) is missing — never merge on manifest state alone. Rerun plan-finalize ${plan_id} --stage accept-ancillary. ${target_branch} is unchanged." >&2
+      echo "PRECONDITION FAIL: plan-merge-to-main: accepted_head ${m_accepted} is recorded but its receipt (${m_rpath:-<none>}) is missing — never merge on manifest state alone. Rerun plan-finalize ${plan_id} --stage freeze --accept-ancillary. ${target_branch} is unchanged." >&2
       exit 1
     fi
     local m_now_sha
@@ -7656,7 +6876,7 @@ cmd_plan_merge_to_main() {
     plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_final_merge = {"result":"stale_authorization"}' >/dev/null 2>&1 || true
     local irc=0
     plan_final_invalidate "$plan_id" "stale_authorization" "PLAN_SYNC" || irc=$?
-    echo "STALE AUTHORIZATION: ${target_branch} advanced from the approved ${target_head_frozen} to ${target_head} while the PM was deciding. NOTHING was merged, ${target_branch} is unchanged, the candidate binding is cleared and ${plan_id} is back in PLAN_SYNC. Re-run '--stage sync' onwards and obtain a fresh decision." >&2
+    echo "STALE AUTHORIZATION: ${target_branch} advanced from the approved ${target_head_frozen} to ${target_head} while the PM was deciding. NOTHING was merged, ${target_branch} is unchanged, the candidate binding is cleared and ${plan_id} is back in PLAN_SYNC. Re-run 'plan-finalize --stage freeze' onwards and obtain a fresh decision." >&2
     [[ "$irc" -ne 0 ]] && exit "$irc"
     exit 1
   fi
@@ -7758,7 +6978,7 @@ cmd_plan_merge_to_main() {
     mt_out="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$merged_head" 2>&1)" || mt_rc=$?
     if [[ "$mt_rc" -ne 0 ]]; then
       _pfsm_plan_state_set "$plan_id" "CONFLICT" || true
-      echo "MERGE CONFLICT: ${plan_branch} (${merged_head}) does not merge cleanly into ${target_branch} (${target_head}). NOTHING was merged — ${target_branch} is still at ${target_head} — and ${plan_id} is now CONFLICT. Resolve by re-synchronising the target branch into the plan branch ('plan-finalize --stage sync'), which necessarily produces a NEW plan branch head and therefore INVALIDATES the frozen candidate: there is no path from CONFLICT back to a merge against the old candidate." >&2
+      echo "MERGE CONFLICT: ${plan_branch} (${merged_head}) does not merge cleanly into ${target_branch} (${target_head}). NOTHING was merged — ${target_branch} is still at ${target_head} — and ${plan_id} is now CONFLICT. Resolve by re-synchronising the target branch into the plan branch ('plan-finalize --stage freeze'), which necessarily produces a NEW plan branch head and therefore INVALIDATES the frozen candidate: there is no path from CONFLICT back to a merge against the old candidate." >&2
       printf '%s\n' "$mt_out" >&2
       exit 4
     fi
@@ -7862,8 +7082,7 @@ cmd_plan_merge_to_main() {
   local close_sealed close_ref close_receipt_commit close_receipt_hash
   close_sealed="$(_pfsm_seal_plan_final_close_evidence "$root" "$plan_id" "$candidate" "$run_id" "$target_branch" \
     "$target_head_frozen" "$merge_commit" "$merged_tree" "$tag_status" \
-    "${run_dir_abs}/gates_report.json" "${run_dir_abs}/release-decision.json" \
-    "${run_dir_abs}/release-decision-dual-run.json" "$decision_file" \
+    "${run_dir_abs}/gates_report.json" "${run_dir_abs}/release-decision.json" "$decision_file" \
     "$merged_head" "$review_equivalence")" || {
     echo "WARN: plan-merge-to-main: the merge ${merge_commit} is published, but its durable close-evidence receipt could not be sealed — plan-close will require the runtime evidence directory until this is resolved (re-run plan-merge-to-main; sealing is idempotent)." >&2
     close_sealed=""
@@ -7983,8 +7202,8 @@ cmd_plan_merge_to_main() {
 # P068 E-068-1_2 Step 6 — `plan-close`, the mechanical close transaction.
 #
 # WHY THIS EXISTS: two plan-state systems have coexisted and neither read the
-# other — the legacy `ca-review-complete` marker plus the gitignored
-# `.aid-o/reports/*` (aid-fsm.sh's own `cmd_plan_close`), and the git-tracked
+# other — the legacy `ca-review-complete` marker (aid-fsm.sh's own
+# `cmd_plan_close`), and the git-tracked
 # `.aid-lifecycle/manifests|receipts` layer. A plan could therefore be
 # "closed" in one world while the other had no durable proof of anything. This
 # command is the ONE place they are reconciled, and it is a real gate: it can
@@ -8037,171 +7256,6 @@ _pfsm_close_lock_path() {
 # _pfsm_close_marker_path <plan_id>
 _pfsm_close_marker_path() {
   printf '%s/plan-close-complete' "$(dirname "$(plan_state_path "$1")")"
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_render_close_projections <root> <plan_id>  — P073 Step 12 (P082)
-#
-# The Reporter used to be told to COMMIT its delivery report and boundary
-# manifest, which was unexecutable three ways over: pipeline.md invalidates the
-# review on any tracked write during it, the ordered path `.aid-o/reports/` is
-# gitignored, and the reporter contract said so itself two paragraphs later.
-# The Reporter now writes run-scoped evidence only, and the CONTROLLER renders
-# the human/CI projections HERE — after merge and close, outside any freeze
-# window, so the projection can never cost a review.
-#
-# NEVER A CLOSE BLOCKER. `delivery-report.json` in the run evidence dir is the
-# authoritative artifact; these are derived files with no history value. A
-# missing JSON, an unparseable one, or an unwritable reports directory each
-# produce a WARNING and close proceeds. (Whether the JSON must EXIST at all is
-# a close-check concern, forceable per Step 8 — not this renderer's.)
-# ---------------------------------------------------------------------------
-_pfsm_render_close_projections() {
-  local root="$1" plan_id="$2"
-  # POST-CLOSE ONLY, verified rather than assumed. The caller reaches here
-  # after the CLOSED transition, but the manifest mirror update just above it
-  # is best-effort — so an unexpected state here means the plan may still be
-  # pre-close with a review open, and writing into .aid-o/reports/ would be
-  # exactly the tracked write this whole step exists to keep out of a freeze
-  # window (adversarial-review finding).
-  # plan_state_get REQUIRES the field name; calling it without one returns 1
-  # and an empty value, which would have made this guard silently inert.
-  local _state; _state="$(plan_state_get "$plan_id" "plan_state" 2>/dev/null || echo "")"
-  if [[ -n "$_state" && "$_state" != "not_found" && "$_state" != "CLOSED" ]]; then
-    echo "WARNING: ${plan_id} is ${_state}, not CLOSED — human projection not rendered (a projection is only ever written after the review boundary has closed)." >&2
-    return 0
-  fi
-  local run_dir_rel src reports_dir
-  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir' 2>/dev/null)" || run_dir_rel=""
-  if [[ -z "$run_dir_rel" || "$run_dir_rel" == "null" ]]; then
-    echo "WARNING: no plan-final run directory recorded for ${plan_id} — human projection not rendered." >&2
-    return 0
-  fi
-  src="${root}/${run_dir_rel}/delivery-report.json"
-  if [[ ! -s "$src" ]]; then
-    echo "WARNING: no verified delivery-report.json in ${run_dir_rel} — human projection not rendered." >&2
-    return 0
-  fi
-  if ! jq -e 'type == "object"' "$src" >/dev/null 2>&1; then
-    echo "WARNING: ${run_dir_rel}/delivery-report.json is not a JSON object — human projection not rendered." >&2
-    return 0
-  fi
-
-  reports_dir="${root}/.aid-o/reports"
-  if ! mkdir -p "$reports_dir" 2>/dev/null; then
-    echo "WARNING: cannot create ${reports_dir} — human projection not rendered; ${run_dir_rel}/delivery-report.json remains authoritative." >&2
-    return 0
-  fi
-
-  # Deterministic transform, so a re-close after a forced close overwrites
-  # idempotently rather than accumulating variants.
-  local delivery="${reports_dir}/${plan_id}-delivery.md"
-  local boundary="${reports_dir}/${plan_id}-boundary.md"
-  local run_id="${run_dir_rel##*/}"
-
-  # EVERY SECTION IS BUILT AND CHECKED BEFORE ANYTHING IS PUBLISHED.
-  # An earlier cut ran the formatting `jq` calls inside the redirection group
-  # with their errors sent to /dev/null, and a trailing printf made the group
-  # succeed — so a report whose `.epics` was, say, a string instead of an array
-  # was published WITHOUT its verdict section, misrepresenting the
-  # authoritative JSON as a complete projection (adversarial-review finding).
-  # A malformed report now yields NO projection and a warning.
-  # AN UNRECOGNISED SHAPE IS NOT AN EMPTY REPORT.
-  # The guard below catches a report whose `.epics` is the wrong TYPE. It does
-  # not catch one whose keys simply live somewhere else — and an older shape
-  # (`delivery_report.delivered`, `.found_and_fixed_beyond_scope`, written up to
-  # 2026-08-24) does exactly that. Every `//` default then fired, and the render
-  # replaced a hundred lines of real delivery notes with twenty-five lines of
-  # "(no summary recorded)" (ACTA P018, 2026-09-01). The data was never gone —
-  # the renderer was reading a schema it did not know and reporting the result
-  # as emptiness.
-  #
-  # So: recognise the shape FIRST. None of the expected keys present means this
-  # file is not what this renderer projects, and the honest outcome is to write
-  # nothing and say which keys were looked for.
-  local _known
-  _known="$(jq -r 'if (has("summary") or has("epics") or has("delivered_paths")) then "yes" else "no" end' "$src" 2>/dev/null)" || _known="unreadable"
-  if [[ "$_known" != "yes" ]]; then
-    echo "WARNING: ${run_dir_rel}/delivery-report.json carries none of the keys this projection reads (summary, epics, delivered_paths) — it is a different or older shape, so NOTHING was rendered and ${delivery} is left as it is. Convert the report, or write the projection by hand; an empty template over real notes is worse than no template." >&2
-    return 0
-  fi
-
-  local sec_summary sec_epics sec_paths
-  if ! sec_summary="$(jq -r '.summary // "(no summary recorded)"' "$src" 2>&1)" \
-     || ! sec_epics="$(jq -r '(.epics // []) | if (type != "array") then error("epics is not an array") elif length == 0 then "(none recorded)" else (.[] | "- \(.epic_id // "?"): \(.verdict // "?")") end' "$src" 2>&1)" \
-     || ! sec_paths="$(jq -r '(.delivered_paths // []) | if (type != "array") then error("delivered_paths is not an array") elif length == 0 then "(none recorded)" else (.[] | "- \(.)") end' "$src" 2>&1)"; then
-    echo "WARNING: ${run_dir_rel}/delivery-report.json does not have the expected shape — human projection not rendered (a partial projection would misrepresent it as complete)." >&2
-    return 0
-  fi
-
-  # EVERY INTERPOLATED SCALAR IS EMITTED AS A jq-QUOTED STRING. A raw value
-  # containing a newline used to inject a second frontmatter key — e.g. a
-  # `head` of "abc\nboundary_complete: false" — so a downstream YAML consumer
-  # read a different document than the one that was rendered
-  # (adversarial-review finding).
-  local y_plan y_src y_head y_cand y_run y_now
-  y_plan="$(jq -rn --arg v "$plan_id" '$v|@json')"
-  y_src="$(jq -rn --arg v "${run_dir_rel}/delivery-report.json" '$v|@json')"
-  y_run="$(jq -rn --arg v "$run_id" '$v|@json')"
-  y_now="$(jq -rn --arg v "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '$v|@json')"
-  # `Head:` IS REQUIRED, in BOTH projections. aid-plan-close-check.sh check2
-  # reads it from the frontmatter of exactly these two paths to verify
-  # freshness, and refuses a report that has none. A first cut emitted it only
-  # when the JSON happened to carry one, and never in the boundary manifest —
-  # so rendering here OVERWROTE reports that had it and broke the very close
-  # this renderer runs inside (regression caught by the plan-final boundary
-  # suite's crash-recovery case, which passes at the pre-P073 baseline).
-  #
-  # Preference order is honest, not convenient: the delivery report's own head
-  # when it records one — that is the head the delivery was VERIFIED at, and if
-  # it is stale check2 correctly says so — otherwise the live HEAD, which is
-  # what a file rendered at this instant genuinely describes.
-  y_head="$(jq -r '(.head // .Head // "") | @json' "$src" 2>/dev/null || echo '""')"
-  if [[ "$y_head" == '""' ]]; then
-    local _live_head; _live_head="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo "")"
-    [[ -n "$_live_head" ]] && y_head="$(jq -rn --arg v "$_live_head" '$v|@json')"
-  fi
-  y_cand="$(jq -r '(.candidate_sha // "") | @json' "$src" 2>/dev/null || echo '""')"
-
-  {
-    printf -- '---\n'
-    printf 'plan_id: %s\n' "$y_plan"
-    printf 'rendered_by: "aid-plan-fsm.sh plan-close"\n'
-    printf 'rendered_at: %s\n' "$y_now"
-    printf 'source: %s\n' "$y_src"
-    printf 'Head: %s\n' "$y_head"
-    printf -- '---\n\n'
-    printf '# Delivery report — %s\n\n' "$plan_id"
-    printf 'This file is a PROJECTION rendered at close from the run-scoped\n'
-    printf 'delivery-report.json, which remains the authoritative artifact. It is\n'
-    printf 'derived: regenerating it is always safe.\n\n'
-    printf '## Summary\n\n%s\n' "$sec_summary"
-    printf '\n## Per-EPIC verdicts\n\n%s\n' "$sec_epics"
-    printf '\n## Delivered paths\n\n%s\n' "$sec_paths"
-  } > "${delivery}.tmp.$$" 2>/dev/null && mv "${delivery}.tmp.$$" "$delivery" 2>/dev/null || {
-    rm -f "${delivery}.tmp.$$" 2>/dev/null || true
-    echo "WARNING: cannot write ${delivery} — projection skipped; the run-scoped JSON remains authoritative." >&2
-    return 0
-  }
-
-  {
-    printf -- '---\n'
-    printf 'plan_id: %s\n' "$y_plan"
-    printf 'generated_at: %s\n' "$y_now"
-    printf 'boundary_complete: true\n'
-    printf 'Head: %s\n' "$y_head"
-    printf 'run_id: %s\n' "$y_run"
-    [[ "$y_cand" != '""' ]] && printf 'candidate_sha: %s\n' "$y_cand"
-    printf 'delivery_report: "%s-delivery.md"\n' "$plan_id"
-    printf -- '---\n'
-  } > "${boundary}.tmp.$$" 2>/dev/null && mv "${boundary}.tmp.$$" "$boundary" 2>/dev/null || {
-    rm -f "${boundary}.tmp.$$" 2>/dev/null || true
-    echo "WARNING: cannot write ${boundary} — projection skipped." >&2
-    return 0
-  }
-
-  echo "plan-close: rendered human projections ${plan_id}-delivery.md and ${plan_id}-boundary.md from ${run_dir_rel}/delivery-report.json" >&2
-  return 0
 }
 
 # _pfsm_lock_held <path> — 0 iff a non-blocking flock acquire FAILS, i.e. the
@@ -8264,8 +7318,8 @@ _pfsm_close_lock_contended() {
 #   "a keyword denylist cannot reliably recognize refusal semantics".
 #
 #   It cannot, and it does not have to. An evidence-backed refusal REQUIRES
-#   evidence: a frozen candidate, a recorded final run, an audit or curator
-#   report, a release decision. Where none of those exist there is nothing to
+#   evidence: a frozen candidate, a recorded final run, a closed whole-plan
+#   round, a release decision. Where none of those exist there is nothing to
 #   close around, whatever any message says. Where ANY of them exists, this
 #   close refuses and names it — including the case where that evidence
 #   concluded `fail`, which is exactly the case that must never be closed here.
@@ -8279,10 +7333,11 @@ _pfsm_admin_close_evidence() {
   [[ -n "$d" && "$d" != "null" && "$d" != "not_found" && "$d" != "{}" ]] \
     && found+="  · manifest.plan_final_skeletons is present"$'\n'
   # Any plan-final run directory that holds a verdict-bearing artifact.
-  for f in "${root%/}/.aid-o/work/evidence/${plan_id}"/*/audit-report.json \
-           "${root%/}/.aid-o/work/evidence/${plan_id}"/*/curator-report.json \
+  # (audit-report.json and curator-report.json are what a close before 2.101.0 left.)
+  for f in "${root%/}/.aid-o/work/evidence/${plan_id}"/*/cp7/rounds.json \
            "${root%/}/.aid-o/work/evidence/${plan_id}"/*/release-decision.json \
-           "${root%/}/.aid-o/work/evidence/${plan_id}"/*/delivery-gate.json; do
+           "${root%/}/.aid-o/work/evidence/${plan_id}"/*/audit-report.json \
+           "${root%/}/.aid-o/work/evidence/${plan_id}"/*/curator-report.json; do
     [[ -f "$f" ]] && found+="  · ${f#"${root%/}/"}"$'\n'
   done
   # AND THE STATES THAT ARE BROKEN RATHER THAN ABSENT.
@@ -8386,7 +7441,7 @@ _pfsm_admin_close_blockers() {
 }
 
 cmd_plan_close() {
-  local plan_id="" project_root_opt="" op_id_opt="" skip_delivery_report=0
+  local plan_id="" project_root_opt="" op_id_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-root)
@@ -8395,10 +7450,6 @@ cmd_plan_close() {
       --op-id)
         _pfsm_require_optval "plan-close" "$1" "$#" || exit 2
         op_id_opt="$2"; shift 2 ;;
-      # CP2 M5: forwarded by aid-fsm.sh when execution.yaml sets reporter.enabled:false.
-      # It relaxes the delivery-report EXISTENCE requirement only; every other
-      # check still runs, exactly as the legacy path already treats this toggle.
-      --skip-delivery-report) skip_delivery_report=1; shift ;;
       # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
       # every state-TRANSITION command; what it can BYPASS is bounded by the
       # forceable/hard classification in _pfsm_precondition.
@@ -8460,7 +7511,7 @@ cmd_plan_close() {
   fi
 
   if [[ -z "$plan_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-close <plan_id> [--project-root <path>] [--op-id <id>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -8543,7 +7594,6 @@ cmd_plan_close() {
   local -a _cc_args=("$plan_id" --project-root "$root" --plan-branch
                      --close-mode "$close_mode" --exclude-lock "$close_lock"
                      --close-op-id "$op_id")
-  [[ "$skip_delivery_report" -eq 1 ]] && _cc_args+=(--skip-delivery-report)
   ccout="$(bash "${SCRIPT_DIR}/aid-plan-close-check.sh" "${_cc_args[@]}" 2>&1)" || ccrc=$?
   # P073 Step 8: the close-check is BOOKKEEPING COMPLETENESS — unreachable
   # receipts, missing delivery records. It is the exact check that stranded
@@ -8772,11 +7822,6 @@ cmd_plan_close() {
       exit 1
     fi
     plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "CLOSED"' >/dev/null 2>&1 || true
-
-    # P073 Step 12 (P082): the controller renders the committed/worktree
-    # projections HERE — after merge and close, outside any freeze window, so
-    # a projection can never cost a review. Never a close blocker.
-    _pfsm_render_close_projections "$root" "$plan_id" || true
   fi
 
   local crc=0
@@ -9933,33 +8978,20 @@ _pfsm_recover_plan_final_receipt() {
     ".plan_boundary_manifest.plan_final_evidence_dir=\"${dir}\""
     ".plan_boundary_manifest.plan_final_evidence_ref=${esc_ref}"
     ".plan_boundary_manifest.plan_final_evidence_receipt_sha256=${esc_hash}"
-    ".plan_boundary_manifest.plan_final_review={candidate_sha:${esc_c},run_id:${esc_r},outputs:$(jq -c '.outputs' <<<"$receipt"),dispatch_counts:{},utilities_run:[]}"
+    ".plan_boundary_manifest.plan_final_review={candidate_sha:${esc_c},run_id:${esc_r},outputs:$(jq -c '.outputs' <<<"$receipt")}"
     ".plan_boundary_manifest.plan_state=${esc_state}"
   )
 
-  # The runtime pointer to plan_final_c4 is lost with the manifest, but its
-  # OWN durable evidence (release-decision.json + the dual-run corroboration)
-  # is NOT part of the review receipt and may still be sitting, untouched, in
-  # the run directory (only the manifest/state pointer was lost, not the run
-  # dir itself). Reconstruct it ONLY when both files are present and bound to
-  # this exact plan/candidate/run; otherwise leave it absent — close then
-  # fails closed on a real "no C4 decision" rather than a fabricated one.
-  local c4_rd="${root}/${dir}/release-decision.json" c4_dual="${root}/${dir}/release-decision-dual-run.json"
-  if [[ -s "$c4_rd" && -s "$c4_dual" ]]; then
-    local c4_rd_cand c4_dual_run c4_dual_cand
-    c4_rd_cand="$(jq -r '.release_decision.candidate_sha // ""' "$c4_rd" 2>/dev/null || true)"
-    c4_dual_run="$(jq -r '.run_id // ""' "$c4_dual" 2>/dev/null || true)"
-    c4_dual_cand="$(jq -r '.candidate_sha // ""' "$c4_dual" 2>/dev/null || true)"
-    if [[ "$c4_rd_cand" == "$candidate" && "$c4_dual_run" == "$run_id" && "$c4_dual_cand" == "$candidate" ]]; then
-      local c4_json
-      c4_json="$(jq -nc --slurpfile rd "$c4_rd" --slurpfile dl "$c4_dual" --arg run "$run_id" --arg cand "$candidate" \
-        '{run_id:$run, candidate_sha:$cand, target_head_sha:($dl[0].target_head_sha // ""),
-          enforcement:($dl[0].enforcement // "observe"),
-          release_ready:($rd[0].release_decision.release_ready // false),
-          blockers:($rd[0].release_decision.blockers // [] | length),
-          dual_run:{match:($dl[0].match // false), divergence_class:($dl[0].divergence_class // "unknown")}}')"
-      _rf+=(".plan_boundary_manifest.plan_final_c4=${c4_json}")
-    fi
+  # The runtime pointer to plan_final_c4 is lost with the manifest, but the
+  # decision itself is not part of the review receipt and may still be sitting,
+  # untouched, in the run directory. Reconstruct the pointer ONLY when the file
+  # is bound to this exact candidate; otherwise leave it absent — close then
+  # fails closed on a real "no decision" rather than a fabricated one.
+  local c4_rd="${root}/${dir}/release-decision.json"
+  if [[ -s "$c4_rd" && "$(jq -r '.release_decision.candidate_sha // ""' "$c4_rd" 2>/dev/null)" == "$candidate" ]]; then
+    _rf+=(".plan_boundary_manifest.plan_final_c4=$(jq -c --arg run "$run_id" --arg cand "$candidate" \
+      '{run_id: $run, candidate_sha: $cand, enforcement: "blocking",
+        release_ready: (.release_decision.release_ready // false), blockers: (.release_decision.blockers // [] | length)}' "$c4_rd")")
   fi
   if [[ "$merged" -eq 1 ]]; then
     local esc_mc esc_tag esc_tree
@@ -10255,47 +9287,42 @@ _pfsm_crash_seam() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# plan-finalize --stage inputs — the PRODUCER for the three C4 inputs.
+# plan-finalize --stage produce — the PRODUCER of the decision's derived inputs.
 #
-# Closes `plan_finalize_c4_reader_gap`. Until this existed, the review and c4
-# stages VALIDATED review-profile.json, delivery-gate.json and
-# acceptance-evidence.json while nothing in the plan produced them: a reader
-# with no writer, which meant the plan-final boundary could not complete
-# end-to-end and the gap had to be recorded in the enforcement registry rather
-# than closed.
-#
-# Production is real, not fabrication. The review profile comes from the
-# `aid-review-profile.sh` producer run over the WHOLE plan range.
-# The two aggregates are built from each contributing EPIC's own evidence pack:
-# an EPIC that has an artifact contributes its content hash, and one that does
-# not is recorded as `absent` — visible in the artifact rather than silently
-# dropped, because "no EPIC produced this" is a fact the PM should see, not one
-# the aggregate should hide.
+# Production is derivation, never fabrication:
+#   review-profile.json      aid-review-profile.sh over the WHOLE plan range
+#   plan-diff.json           aid-plan-diff.sh: every machine-checkable criterion
+#   acceptance-evidence.json the criteria as that gate saw them, bound to the
+#                            plan and naming every contributing EPIC
+#   cp7/                     the deterministic check of the range, the plan's
+#                            criteria and what each EPIC's own review left open
+# It runs out of PLAN_REVIEW at the frozen candidate and may be run again; each
+# run records what it wrote (stage-writes.jsonl).
 # ═══════════════════════════════════════════════════════════════════════════
-_pfsm_finalize_inputs() {
-  local plan_id="$1" root="$2" run_dir_abs="$3" candidate="$4" base_commit="$5" run_id="$6"
-
-  mkdir -p "$run_dir_abs" 2>/dev/null || {
-    echo "PRECONDITION FAIL: plan-finalize --stage inputs: cannot create ${run_dir_abs}." >&2; return 1; }
-
-  # CP2 (2026-07-27): this stage OVERWRITES the three artifacts. Once
-  # `--stage review` has recorded their sha256 in the manifest, re-running it
-  # would change files whose hashes are already bound, and plan-close would then
-  # report "a required review output was altered" — a true statement with a
-  # misleading diagnosis, since nobody tampered with anything: a producer was
-  # simply run twice. A producer that can silently invalidate a completed review
-  # is worse than one that refuses, so it refuses.
-  #
-  # The exception is a RE-FROZEN candidate: the recorded review then describes a
-  # candidate that no longer exists and is already void, so producing fresh
-  # inputs for the new one is exactly right.
-  local _rec_cand=""
-  _rec_cand="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_review.candidate_sha')" 2>/dev/null || _rec_cand=""
-  [[ "$_rec_cand" == "null" || "$_rec_cand" == "not_found" ]] && _rec_cand=""
-  if [[ -n "$_rec_cand" && "$_rec_cand" == "$candidate" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage inputs: ${plan_id} already has a RECORDED plan-final review bound to candidate ${candidate:0:8}, whose outputs are hash-bound in the manifest. Re-producing them now would alter files the review already attested to, and close would report them as altered. Nothing was written. If the candidate genuinely changed, re-freeze first — the recorded review is void from that moment and this stage will run." >&2
+_pfsm_finalize_produce() {
+  local root="$1" plan_id="$2" candidate base_commit run_id run_dir_rel v
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
+  base_commit="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_base_commit')" || base_commit=""
+  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
+  for v in candidate base_commit run_id run_dir_rel; do
+    if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
+      echo "PRECONDITION FAIL: plan-finalize --stage produce: ${plan_id} has no frozen candidate (${v} is unset). Run: plan-finalize ${plan_id} --stage freeze" >&2
+      return 1
+    fi
+  done
+  local run_dir_abs="${root}/${run_dir_rel}" drift=""
+  if ! drift="$(_pfsm_review_candidate_drift "$root" "$plan_id" "$candidate")"; then
+    echo "PRECONDITION FAIL: plan-finalize --stage produce: ${drift}. Run: plan-finalize ${plan_id} --stage freeze" >&2
+    return 6
+  fi
+  if [[ "$(plan_state_get "$plan_id" "plan_state")" != "PLAN_REVIEW" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage produce runs out of PLAN_REVIEW (the gates stage puts the plan there). Run: plan-finalize ${plan_id} --stage gates" >&2
     return 1
   fi
+
+  mkdir -p "$run_dir_abs" 2>/dev/null || {
+    echo "PRECONDITION FAIL: plan-finalize --stage produce: cannot create ${run_dir_abs}." >&2; return 1; }
 
   local project_id; project_id="$(basename "$root")"
   # The same plan the gates stage evaluates (candidate copy first): the
@@ -10303,18 +9330,7 @@ _pfsm_finalize_inputs() {
   local plan_file="" _in_origin="" _in_troot; _in_troot="$(_pfsm_plan_tree_root "$root" "$plan_id")"
   IFS=$'\t' read -r plan_file _in_origin < <(_pfsm_plan_file_for_gates "$root" "$_in_troot" "$plan_id" || true)
   [[ -n "$plan_file" ]] || plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"   # archive/ fallback, as before
-  [[ -n "$plan_file" ]] && _pfsm_say_plan_inputs inputs "$plan_file" "${_in_origin:-state_root}" ""
-
-  # D3 / IMP-465: generate the three plan-boundary specialist scaffolds
-  # (curator, verifier, reporter) BEFORE any of them are dispatched, so none
-  # of the three has to construct a protocol-v2 envelope from prose. Each
-  # call is a no-op if the file already exists (idempotent across retries,
-  # never overwrites specialist work already in progress).
-  local _skel_kind
-  for _skel_kind in curator verifier reporter; do
-    _pfsm_generate_plan_final_skeleton "$_skel_kind" "$root" "$project_id" "$plan_id" \
-      "$base_commit" "$candidate" "$run_id" "$run_dir_abs" || return 1
-  done
+  [[ -n "$plan_file" ]] && _pfsm_say_plan_inputs produce "$plan_file" "${_in_origin:-state_root}" ""
 
   # ── 1. review-profile.json, over plan_base_commit..candidate_sha ─────────
   # The range matters: the review stage asserts revision.base_sha equals the
@@ -10330,7 +9346,7 @@ _pfsm_finalize_inputs() {
     rprc=127
   fi
   if [[ "$rprc" -ne 0 || ! -s "$rp" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage inputs: the review profile producer did not emit ${rp} (rc=${rprc}). The C3 gate cannot be armed for the plan-level run without it, and a hand-written profile would be a claim rather than a derivation." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage produce: the review profile producer did not emit ${rp} (rc=${rprc}). The C3 gate cannot be armed for the plan-level run without it, and a hand-written profile would be a claim rather than a derivation." >&2
     return 1
   fi
   # The producer is EPIC-shaped by origin; the plan-level run is bound to the
@@ -10340,40 +9356,11 @@ _pfsm_finalize_inputs() {
      '.identity = ((.identity // {}) + {epic_id: null, plan_id: $p, run_id: $r})
       | .revision = ((.revision // {}) + {base_sha: $b, head_sha: $h})' \
      "$rp" > "$rptmp" 2>/dev/null && mv -f "$rptmp" "$rp" || { rm -f "$rptmp";
-    echo "PRECONDITION FAIL: plan-finalize --stage inputs: could not bind ${rp} to the plan." >&2; return 1; }
-
-  # D2 / IMP-464: C3 must consume a deterministic plan-AC verdict that was
-  # produced before review dispatch and is sealed with the final inventory.
-  # HERE (the producer) always REQUIRES a plan-diff.json file to exist,
-  # whether or not the lens is armed — aid-plan-diff.sh is always invoked and
-  # always writes one on every normal exit (0/1/2), so "the file is genuinely
-  # missing" at this specific call site means the producer itself failed to
-  # run, never a legitimate "not applicable". This is intentionally STRICTER
-  # than C3's own build-manifest gate (aid-c3-dispatch.sh), which is a
-  # general-purpose tool also used for non-plan-final (EPIC-level) audits
-  # where plan-diff.json is never produced at all — there, file absence with
-  # no armed lens is the legitimate "not_required_absent" classification.
-  # Whether an AC lens (ac_to_test_identity / requirement_test_drift) is
-  # ARMED for this run decides what a legitimate plan-diff.json looks like:
-  #   - armed:      overall_verdict MUST be pass|fail (aid-plan-diff.sh exit
-  #                 0/1; mapped below to this manifest's own present|absent
-  #                 plan_diff_verdict vocabulary). A skipped/partial/
-  #                 malformed/missing artifact blocks dispatch — it is not
-  #                 evidence and is never read as a pass.
-  #   - not armed:  overall_verdict "skipped" (aid-plan-diff.sh exit 2, no AC
-  #                 section / fast-mode) is the HONEST, EXPECTED outcome and
-  #                 is recorded explicitly as such — never silently upgraded
-  #                 to "present" and never blocked as if it were missing.
-  # Either way the artifact must exist, be well-formed, and be bound to
-  # base_commit..candidate — a truly missing/malformed/mismatched artifact
-  # blocks regardless of whether the lens is armed.
-  local ac_lens_required="false"
-  jq -e '.review_profile.required_lenses // [] | any(. == "ac_to_test_identity" or . == "requirement_test_drift")' "$rp" >/dev/null 2>&1 \
-    && ac_lens_required="true"
+    echo "PRECONDITION FAIL: plan-finalize --stage produce: could not bind ${rp} to the plan." >&2; return 1; }
 
   local pd="${run_dir_abs}/plan-diff.json" pdrc=0
   if [[ -z "$plan_file" || ! -x "${SCRIPT_DIR}/aid-plan-diff.sh" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage inputs: C3 requires a real plan source and aid-plan-diff.sh; no plan-diff evidence can be fabricated." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage produce: C3 requires a real plan source and aid-plan-diff.sh; no plan-diff evidence can be fabricated." >&2
     return 1
   fi
   bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$plan_file" --evidence-dir "$run_dir_abs" --base-commit "$base_commit" >/dev/null 2>&1 || pdrc=$?
@@ -10382,17 +9369,12 @@ _pfsm_finalize_inputs() {
     pd_verdict="$(jq -r --arg b "$base_commit" --arg h "$candidate" \
       'if (.base_commit == $b and .head_commit == $h) then (.overall_verdict // "") else "" end' "$pd" 2>/dev/null || true)"
   fi
-  if [[ "$ac_lens_required" == "true" ]]; then
-    [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" ]] || {
-      echo "PRECONDITION FAIL: plan-finalize --stage inputs: an AC lens (ac_to_test_identity/requirement_test_drift) is required by review-profile.json, but C3 plan-diff.json is missing, skipped, partial, malformed or not bound to ${base_commit}..${candidate} (overall_verdict='${pd_verdict:-<empty>}', expected pass|fail) — a required lens's absence is never read as a pass." >&2
-      return 1
-    }
-  else
-    [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" || "$pd_verdict" == "partial" || "$pd_verdict" == "skipped" ]] || {
-      echo "PRECONDITION FAIL: plan-finalize --stage inputs: C3 plan-diff.json is missing, malformed or not bound to ${base_commit}..${candidate}." >&2
-      return 1
-    }
-  fi
+  # `skipped` is a truthful verdict for a plan with no machine-checkable
+  # criterion: its prose criteria are judged by the round's final_criteria role.
+  [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" || "$pd_verdict" == "partial" || "$pd_verdict" == "skipped" ]] || {
+    echo "PRECONDITION FAIL: plan-finalize --stage produce: plan-diff.json is missing, malformed or not bound to ${base_commit}..${candidate}." >&2
+    return 1
+  }
   local pd_hash pd_manifest_verdict
   case "$pd_verdict" in
     pass) pd_manifest_verdict="present" ;;
@@ -10400,142 +9382,68 @@ _pfsm_finalize_inputs() {
     *)    pd_manifest_verdict="skipped" ;;  # partial or skipped — schema's plan_diff_verdict enum has no "partial"
   esac
   pd_hash="sha256:$(sha256sum "$pd" | awk '{print $1}')"
-  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_inputs = {plan_diff_sha256: \"${pd_hash}\", candidate_sha: \"${candidate}\", run_id: \"${run_id}\", ac_lens_required: ${ac_lens_required}, plan_diff_verdict: \"${pd_manifest_verdict}\"}" >/dev/null || {
-    echo "PRECONDITION FAIL: plan-finalize --stage inputs: the produced plan-diff hash could not be recorded before review dispatch." >&2
+  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_inputs = {plan_diff_sha256: \"${pd_hash}\", candidate_sha: \"${candidate}\", run_id: \"${run_id}\", plan_diff_verdict: \"${pd_manifest_verdict}\"}" >/dev/null || {
+    echo "PRECONDITION FAIL: plan-finalize --stage produce: the produced plan-diff hash could not be recorded before review dispatch." >&2
     return 1
   }
 
-  # ── 2 + 3. the two aggregates, built from the contributing EPICs ─────────
   local contributing
   contributing="$(plan_manifest_get "$plan_id" '[.plan_boundary_manifest.epic_runs[] | select(.status == "merged_to_plan") | .epic_id] | sort | join(" ")' 2>/dev/null)" || contributing=""
   [[ "$contributing" == "not_found" || "$contributing" == "null" ]] && contributing=""
   if [[ -z "$contributing" ]]; then
-    echo "PRECONDITION FAIL: plan-finalize --stage inputs: ${plan_id} records no EPIC in status merged_to_plan, so there is nothing to aggregate. An aggregate over zero sources would assert a delivery nobody made." >&2
+    echo "PRECONDITION FAIL: plan-finalize --stage produce: ${plan_id} records no EPIC in status merged_to_plan, so there is nothing to aggregate. An aggregate over zero sources would assert a delivery nobody made." >&2
     return 1
   fi
 
-  local agg base_name key
-  for agg in delivery-gate acceptance-evidence; do
-    case "$agg" in
-      delivery-gate)      key="delivery_gate" ;;
-      acceptance-evidence) key="acceptance_evidence" ;;
-    esac
-    local sources_json="[]" e edir efile ehash estatus
-    for e in $contributing; do
-      edir="$(plan_manifest_get "$plan_id" "[.plan_boundary_manifest.epic_runs[] | select(.epic_id == \"${e}\") | .evidence_dir][0] // \"\"" 2>/dev/null)" || edir=""
-      [[ "$edir" == "not_found" || "$edir" == "null" ]] && edir=""
-      efile=""; ehash=""; estatus="absent"
-      if [[ -n "$edir" && -s "${root}/${edir}/${agg}.json" ]]; then
-        efile="${edir}/${agg}.json"
-        ehash="sha256:$(sha256sum "${root}/${efile}" | awk '{print $1}')"
-        estatus="aggregated"
-      fi
-      sources_json="$(jq -c --arg e "$e" --arg d "${edir}" --arg f "$efile" \
-        --arg h "$ehash" --arg st "$estatus" \
-        '. + [{epic_id: $e, evidence_dir: $d, artifact: $f, sha256: $h, status: $st}]' \
-        <<< "$sources_json")"
-    done
-
-    local body
-    if [[ "$agg" == "delivery-gate" ]]; then
-      # DOGFOOD FINDING (P075, 2026-07-27): the aggregate must carry the
-      # enforcement interpretation. `aid-evidence-verify.sh --at-head` fails
-      # `observe_blocking_interpretation` when `delivery_gate.summary.enforcement`
-      # is absent, and that failure blocks C4 — so a delivery gate that does not
-      # say HOW it is enforced is not a usable input, however complete it looks.
-      # The value is read from the policy in force rather than hardcoded: writing
-      # "observe" into an artifact while the project enforces "blocking" would be
-      # the aggregate lying about its own weight.
-      local _dg_enf=""
-      local _dg_pol="${SCRIPT_DIR}/../defaults/policies/delivery-gate.yaml"
-      [[ -f "${root}/.aid-o/config/policies/delivery-gate.yaml" ]] \
-        && _dg_pol="${root}/.aid-o/config/policies/delivery-gate.yaml"
-      [[ -f "$_dg_pol" ]] && _dg_enf="$(yq -r '.enforcement // ""' "$_dg_pol" 2>/dev/null || true)"
-      case "$_dg_enf" in
-        observe|dual_run|blocking) ;;
-        *) _dg_enf="observe" ;;   # the conservative reading when the policy is silent
-      esac
-      # Under `observe` the gate must also record what it WOULD have blocked —
-      # that is the entire content of an observing gate, and the evidence
-      # verifier requires the boolean. The honest derivation for an aggregate:
-      # it would block when it cannot show every contributing EPIC's gate,
-      # because "I have no evidence for this EPIC" is not the same as "this EPIC
-      # passed". Under `blocking` the same condition is what actually blocks.
-      body="$(jq -nc --argjson s "$sources_json" --arg enf "$_dg_enf" \
-        '{phase: "plan-final", profile: "plan_aggregate",
-          summary: {enforcement: $enf,
-                    would_block: ([$s[] | select(.status == "absent")] | length > 0)},
-          checks: [], aggregated_from: ($s | length),
-          aggregated_absent: ([$s[] | select(.status == "absent")] | length)}')"
-    else
-      # The acceptance evidence comes from the gate that actually verified the
-      # criteria — aid-plan-diff.sh, per AC, with a verdict and its evidence —
-      # not from per-EPIC acceptance-evidence.json files nobody writes. Until
-      # P095 this aggregated those files and produced `criteria: []` with
-      # verdict aggregated_with_gaps on every plan (WAN P101).
-      body="$(jq -c --argjson s "$sources_json" \
-        '{criteria: [.results[] | {ac: .ac_text, label: .ac_label,
-                                   verdict: (if .verdict == "present" then "pass"
-                                             elif .verdict == "skipped" then "skipped"
-                                             else "fail" end),
-                                   evidence: .evidence}],
-          source: "plan-diff.json",
-          aggregated_from: ($s | length),
-          aggregated_absent: ([$s[] | select(.status == "absent")] | length)}' "$pd")"
-    fi
-
-    local absent_n; absent_n="$(jq -r '[.[] | select(.status == "absent")] | length' <<< "$sources_json")"
-    local verdict="aggregated"; [[ "$absent_n" -gt 0 ]] && verdict="aggregated_with_gaps"
-    if [[ "$agg" == "acceptance-evidence" ]]; then
-      # verified: every criterion passed · prose_only: nothing was machine-
-      # checkable at all · partial: anything failed or was skipped beside
-      # passing ones. Only `partial` blocks at C4, and it names what failed.
-      if [[ "$pd_verdict" == "skipped" ]]; then
-        verdict="prose_only"
-      else
-        verdict="$(jq -r 'if ([.results[].verdict] | length) == 0 then "prose_only"
-                          elif ([.results[] | select(.verdict != "present")] | length) == 0 then "verified"
-                          else "partial" end' "$pd")"
-      fi
-    fi
-
-    # The subject hash is the aggregate's identity as a REVIEW SUBJECT: it must
-    # be reproducible from what was aggregated, not a random id. It is the
-    # sha256 of the plan id, the candidate and the ordered source list, so two
-    # runs over the same inputs produce the same hash and a changed source set
-    # produces a different one. `aid-protocol-validate.sh` requires the
-    # `sha256:<64 hex>` shape (exit 7) and rejects anything else.
-    local subject_hash
-    subject_hash="sha256:$(printf '%s\n%s\n%s' "$plan_id" "$candidate" \
-      "$(jq -S -c '[.[] | {epic_id, sha256, status}]' <<< "$sources_json")" \
-      | sha256sum | awk '{print $1}')"
-    # verdict.kind is a closed enum (none|delivery_ready|release_ready). The
-    # aggregate does not decide readiness — C4 does — so it is `none`, with the
-    # aggregation outcome carried in a sibling field rather than smuggled into
-    # the enum.
-    jq -n --arg pid "$project_id" --arg p "$plan_id" --arg r "$run_id" \
-          --arg h "$candidate" --arg b "$base_commit" --arg at "$agg" \
-          --arg k "$key" --argjson body "$body" --argjson s "$sources_json" \
-          --arg v "$verdict" --arg sh "$subject_hash" \
-      '{schema_version: "aid-2.0", artifact_type: ($at | gsub("-"; "_")),
-        producer: "aid-plan-fsm.sh@plan-finalize-inputs",
-        created_at: (now | todate | sub("\\.[0-9]+Z$"; "Z")),
-        control_protocol: "aid-2.0",
-        identity: {project_id: $pid, epic_id: null, plan_id: $p, run_id: $r},
-        subject: {plan_id: $p, candidate_sha: $h, subject_hash: $sh},
-        revision: {base_sha: $b, head_sha: $h,
-                   head_is_current: true, freshness: "current"},
-        status: "pass", verdict: {kind: "none", aggregation: $v},
-        provenance: {dispatch_mode: "deterministic",
-                     generated_by_tool: "aid-plan-fsm.sh",
-                     aggregated_at_boundary: "plan-final"},
-        sources: $s}
-       | .[$k] = $body' > "${run_dir_abs}/${agg}.json" || {
-      echo "PRECONDITION FAIL: plan-finalize --stage inputs: could not write ${agg}.json." >&2
+  # ── acceptance-evidence.json: the plan's criteria as the gate that verified
+  #    them saw them (aid-plan-diff.sh, per criterion, with its evidence), bound
+  #    to the plan and naming every contributing EPIC. ───────────────────────
+  #    verified: every criterion passed · prose_only: nothing was machine-
+  #    checkable · partial: anything failed or was skipped beside passing ones.
+  #    Only `partial` blocks the decision, and it names what failed.
+  local sources_json verdict subject_hash
+  sources_json="$(plan_manifest_get "$plan_id" '[.plan_boundary_manifest.epic_runs[] | select(.status == "merged_to_plan") | {epic_id, evidence_dir}] | sort_by(.epic_id)')" || sources_json="[]"
+  if [[ "$pd_verdict" == "skipped" ]]; then
+    verdict="prose_only"
+  else
+    verdict="$(jq -r 'if ([.results[].verdict] | length) == 0 then "prose_only"
+                      elif ([.results[] | select(.verdict != "present")] | length) == 0 then "verified"
+                      else "partial" end' "$pd")"
+  fi
+  # The subject hash is reproducible from what was aggregated (plan, candidate,
+  # sources), in the `sha256:<64 hex>` shape aid-protocol-validate.sh requires.
+  subject_hash="sha256:$(printf '%s\n%s\n%s' "$plan_id" "$candidate" "$(jq -S -c . <<< "$sources_json")" | sha256sum | awk '{print $1}')"
+  jq --arg pid "$project_id" --arg p "$plan_id" --arg r "$run_id" --arg h "$candidate" --arg b "$base_commit" \
+     --argjson s "$sources_json" --arg v "$verdict" --arg sh "$subject_hash" \
+    '{schema_version: "aid-2.0", artifact_type: "acceptance_evidence",
+      producer: "aid-plan-fsm.sh@plan-finalize-produce",
+      created_at: (now | todate | sub("\\.[0-9]+Z$"; "Z")),
+      control_protocol: "aid-2.0",
+      identity: {project_id: $pid, epic_id: null, plan_id: $p, run_id: $r},
+      subject: {plan_id: $p, candidate_sha: $h, subject_hash: $sh},
+      revision: {base_sha: $b, head_sha: $h, head_is_current: true, freshness: "current"},
+      status: "pass", verdict: {kind: "none", aggregation: $v},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-plan-fsm.sh", aggregated_at_boundary: "plan-final"},
+      sources: $s,
+      acceptance_evidence: {source: "plan-diff.json",
+        criteria: [.results[] | {ac: .ac_text, label: .ac_label, evidence: .evidence,
+                                 verdict: (if .verdict == "present" then "pass" elif .verdict == "skipped" then "skipped" else "fail" end)}]}}' \
+    "$pd" > "${run_dir_abs}/acceptance-evidence.json" || {
+      echo "PRECONDITION FAIL: plan-finalize --stage produce: could not write acceptance-evidence.json." >&2
       return 1; }
-  done
 
-  echo "INPUTS PRODUCED: ${plan_id} — review-profile.json over ${base_commit:0:8}..${candidate:0:8}, and the plan-level delivery-gate.json + acceptance-evidence.json aggregated from: ${contributing}. Written to ${run_dir_abs}." >&2
+  # ── What the whole-plan round (cp7) reads: the deterministic check of the
+  #    range, the plan's criteria and what each EPIC's own review left open ───
+  bash "${SCRIPT_DIR}/aid-step-check.sh" --checkpoint cp7 --base "$base_commit" \
+    --evidence-dir "$run_dir_abs" --project-root "$_in_troot" >/dev/null || {
+      echo "PRECONDITION FAIL: plan-finalize --stage produce: the deterministic check of ${base_commit:0:8}..${candidate:0:8} did not run (aid-step-check.sh --checkpoint cp7)." >&2
+      return 1; }
+  ( source "${SCRIPT_DIR}/lib/aid-step-review-packet.sh" && aid_final_review_inputs_build "$root" "$run_dir_abs" "$plan_file" "$plan_id" ) || return 1
+  aid_stage_writes_record "$run_dir_abs" produce review-profile.json plan-diff.json acceptance-evidence.json \
+    cp7/step-check.json cp7/criteria.md cp7/epic-findings.json
+
+  echo "PRODUCED: ${plan_id} — review profile, plan-diff, acceptance evidence and the whole-plan round's inputs over ${base_commit:0:8}..${candidate:0:8} in ${run_dir_rel}/." >&2
+  echo "next: bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare --checkpoint cp7 --evidence-dir ${run_dir_abs} --project-root ${_in_troot} --round 1 — dispatch the prompts it prints, then collect and close (commands/aid-plan.md, \"Plan close\"); then: plan-finalize ${plan_id} --stage decide" >&2
   return 0
 }
 
@@ -11437,7 +10345,7 @@ Subcommands:
   next-epic <plan_id> [--project-root <path>]
   plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
-  plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]
+  plan-close <plan_id> [--project-root <path>] [--op-id <id>]
   plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>] [--op-id <id>]
   plan-scratch <plan_id> --phase brainstorm|generation [--release] [--project-root <path>]
   inventory [--apply] [--plan <id>] [--project-root <path>]

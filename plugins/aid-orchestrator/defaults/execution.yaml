@@ -61,6 +61,14 @@
 # that executed nothing. Adopt tiers with `aid-test-tier-assign.sh` (assign
 # from measured cost), stamp them, and keep them honest with
 # `aid-test-tier-lint.sh` — only then point a gate at `--tier`.
+#
+# `inputs:` (optional, any gate) — the paths a gate's result depends on, as glob
+# pathspecs; a leading `!` excludes. At plan close a gate that passed in the
+# previous attempt is copied forward instead of executed when nothing under its
+# inputs changed between the two candidates and its definition is the same. A
+# gate without `inputs:` depends on the whole tree, so it is copied only when
+# the tree did not change at all. Declare inputs only when they are true: a
+# test gate that lists `["**", "!docs/**"]` says docs cannot break its tests.
 gates:
   tests_pass:
     description: "Merge-path tests pass — the T0 and T1 tiers, not the whole portfolio"
@@ -356,7 +364,7 @@ acceptable_debt:
   - "missing edge case tests (core path tested)"
   - "placeholder error messages (replaced before release)"
 
-# Review-quality guidance honored by curator/auditor. Enforcement routing (AID-052, 2026-06-03):
+# Review-quality guidance honored by the reviewers. Enforcement routing (AID-052, 2026-06-03):
 #   HARD-GATED by the step check (defaults/pre-filter-rules.yaml, via aid-step-check.sh):
 #     hardcoded credentials → hardcoded_secret_pattern; disabled security checks →
 #     disabled_security_check; skipped tests → skipped_test; console.log/debugger → debug_leftover
@@ -373,39 +381,3 @@ not_acceptable:
   - "changes to forbidden paths"              # gated: scope-check.sh (allowed_paths) + verifier (forbidden_paths)
   - "console.log / print() in production code" # console.log gated (debug_leftover); print() advisory
   - "empty catch blocks"                      # advisory
-
-# ─── Curator Auto-Resolution ────────────────────────────────────────────
-curator_auto_rules:
-  always_approve:
-    - { type: dx }
-    - { type: security, priority: high }
-    - { area: "docs/*" }
-    - { source_type: standards, effort: S }
-  always_defer:
-    - { type: architecture }
-    - { source_type: standards, effort: L }
-  default_action: approve
-  learning:
-    enabled: true
-    similarity_threshold: 0.80
-    min_decisions: 3
-
-# ─── CP4 Curator-Validation Enforcement (P040 Component C) ───────────────────
-# P040 Component C: production-code path glob for CP4 enforcement trigger.
-# Format: pipe-separated regex alternation; matched as left-anchored prefix
-# against `git diff --name-only` output.
-cp4_production_paths: "plugins/|scripts/|src/|lib/|api/"
-
-# ─── Plan-Boundary Specialists (P045) ─────────────────────────────────────
-simplifier:
-  # Default-on. To disable, set enabled: false + add PM rationale comment explaining why.
-  enabled: true
-  model: opus
-  defer_effort: [L]
-
-reporter:
-  # Default-on. To disable, set enabled: false + add PM rationale comment explaining why.
-  enabled: true
-  model: sonnet
-  report_dir: ".aid-o/reports"
-  dispatch_mode_override: null

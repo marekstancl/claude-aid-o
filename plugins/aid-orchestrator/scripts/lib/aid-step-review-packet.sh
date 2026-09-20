@@ -8,6 +8,18 @@
 #   Writes <round_dir>/packet/{diff.patch, dod.md, files.json, step-check.json,
 #   manifest.json} and, for a confirmation round, open-findings.json and
 #   fix.patch (the diff from the previous round's head to HEAD).
+# aid_final_review_inputs_build <state_root> <run_dir> <plan_file> <plan_id>
+#   What a whole-plan round (cp7) reads besides the diff, written once per
+#   attempt by plan-finalize --stage produce into <run_dir>/cp7/: criteria.md
+#   (the plan's acceptance and success criteria) and epic-findings.json (what
+#   every contributing EPIC's cp3 round left open, carried or routed; an EPIC
+#   with no cp3 evidence is listed as `cp3: absent`).
+# aid_final_review_packet_build <root> <round_dir> <step_check> <run_dir> [<prev_round_dir>]
+#   The cp7 packet: diff.patch, claims.patch (CHANGELOG, README and docs hunks),
+#   dod.md (criteria.md), epic-findings.json, plan-diff.json, gates_report.json,
+#   files.json, step-check.json, manifest.json. No plan.json is needed. A range
+#   of more than 400 files also gets one diff-<EPIC>.patch per contributing
+#   EPIC, named in the prompt; nothing is truncated.
 # aid_step_review_prompt_render <role> <round> <round_dir> <checkpoint> <step>
 #   Renders defaults/prompts/review-prompt-v1.md for one role of
 #   skills/step-review-roles.md through aid-render-prompt.sh, then appends the
@@ -22,7 +34,7 @@
 _AID_SR_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 AID_SR_TEMPLATE="${_AID_SR_PLUGIN}/defaults/prompts/review-prompt-v1.md"
 AID_SR_ROLES_SKILL="${_AID_SR_PLUGIN}/skills/step-review-roles.md"
-AID_SR_EVIDENCE_FORMS='`path:line` or `path:first-last` at the reviewed commit, `<sha>:path:line` for a line of a file the diff deleted or moved (the pre-image at that commit), or `absent:path` for a file the step should have produced and did not; one citation that resolves is enough, but cite the exact line (a wrong number wastes the citation)'
+AID_SR_EVIDENCE_FORMS='`path:line` or `path:first-last` at the reviewed commit, `<sha>:path:line` for a line of a file the diff deleted or moved (the pre-image at that commit), or `absent:path` for a file the step should have produced and did not; one citation that resolves is enough, but cite the exact line (a wrong number wastes the citation); citations only, separated by `;` — a word or a bracketed note after a line number drops the finding, so say what the line shows in `claim`'
 
 aid_step_review_packet_build() {
   local root="$1" cp="$2" dir="$3/packet" sc="$4" plan_json="$5" step="${6:-}" prev="${7:-}"
@@ -50,13 +62,69 @@ aid_step_review_packet_build() {
       jq '{outputs: [.steps[].outputs[]?], allowed_paths: [.steps[].allowed_paths[]?], forbidden_paths: [.steps[].forbidden_paths[]?], scope_declared: true}' "$plan_json" > "$dir/files.json"
     fi
   fi
+  _aid_sr_packet_finish "$root" "$dir" "$prev"
+}
+
+# _aid_sr_packet_finish <root> <packet_dir> <prev_round_dir> — what every packet
+# ends with: the confirmation round's open findings and fix diff, then the manifest.
+_aid_sr_packet_finish() {
+  local root="$1" dir="$2" prev="${3:-}" f
   if [[ -n "$prev" && -f "$prev/merged.json" ]]; then
     jq '{findings: [.findings[] | select((.status | IN("open", "disputed", "routed", "carried")) and (.severity == "blocker" or .severity == "major"))]}' "$prev/merged.json" > "$dir/open-findings.json"
     git -C "$root" diff "$(jq -r .head_sha "$prev/round.json")..HEAD" > "$dir/fix.patch" || return 1
   fi
   (cd "$dir" && for f in *; do
      jq -n --arg f "$f" --arg s "$(sha256sum "$f" | cut -d' ' -f1)" '{file: $f, sha256: $s}'
-   done) | jq -s --arg h "$(jq -r .head_sha "$sc")" '{head_sha: $h, files: .}' > "$dir/manifest.json"
+   done) | jq -s --arg h "$(jq -r .head_sha "$dir/step-check.json")" '{head_sha: $h, files: .}' > "$dir/manifest.json"
+}
+
+aid_final_review_inputs_build() {
+  local state_root="$1" out="$2/cp7" plan_file="$3" plan_id="$4" epic_dir run
+  [[ -f "$plan_file" ]] || { echo "produce: plan file not found: ${plan_file}" >&2; return 1; }
+  mkdir -p "$out" || return 1
+  # Every "**Acceptance Criteria:**" block under its step heading, and the
+  # plan-level "## Success Criteria" section.
+  awk '
+    /^### / { step = $0 }
+    /^## /  { in_success = ($0 ~ /^## Success Criteria/); in_ac = 0; if (in_success) print "\n" $0; next }
+    /^\*\*Acceptance Criteria:\*\*/ { in_ac = 1; print "\n" step; next }
+    in_ac && /^\*\*/ { in_ac = 0 }
+    in_ac || in_success { print }
+  ' "$plan_file" > "$out/criteria.md"
+  [[ -s "$out/criteria.md" ]] || { echo "produce: ${plan_file} has no acceptance or success criteria" >&2; return 1; }
+  for epic_dir in "${state_root}/.aid-o/work/evidence/E-${plan_id#P}-"*; do
+    [[ -d "$epic_dir" ]] || continue
+    run="$(ls -dt "$epic_dir"/*/cp3 2>/dev/null | head -n1)"
+    if [[ -z "$run" ]]; then
+      jq -nc --arg e "$(basename "$epic_dir")" '{epic: $e, cp3: "absent", findings: []}'
+    else
+      jq -c --arg e "$(basename "$epic_dir")" -s '{epic: $e, cp3: "reviewed",
+        findings: (sort_by(.round) | map(.findings[]) | group_by(.fingerprint) | map(last)
+                   | map(select(.status | IN("open", "disputed", "carried", "routed")) | {severity, status, claim, evidence, fix}))}' "$run"/round-*/merged.json
+    fi
+  done | jq -s '{epics: .}' > "$out/epic-findings.json"
+}
+
+aid_final_review_packet_build() {
+  local root="$1" dir="$2/packet" sc="$3" run="$4" prev="${5:-}" f range
+  [[ -f "$sc" ]] || { echo "prepare: no step check at ${sc}" >&2; return 1; }
+  for f in gates_report.json plan-diff.json cp7/criteria.md cp7/epic-findings.json; do
+    [[ -f "${run}/${f}" ]] || { echo "prepare: ${run}/${f} is missing; run plan-finalize --stage produce first" >&2; return 1; }
+  done
+  mkdir -p "$dir" || return 1
+  cp "$sc" "$dir/step-check.json" && cp "${run}/gates_report.json" "${run}/plan-diff.json" "${run}/cp7/epic-findings.json" "$dir/" \
+    && cp "${run}/cp7/criteria.md" "$dir/dod.md" || return 1
+  echo '{"outputs": [], "allowed_paths": [], "forbidden_paths": [], "scope_declared": false}' > "$dir/files.json"
+  range="$(jq -r .range "$sc")"
+  git -C "$root" diff "$range" > "$dir/diff.patch" || return 1
+  git -C "$root" diff "$range" -- '*CHANGELOG*' '*README*' 'docs/**' '*.md' > "$dir/claims.patch" || return 1
+  if (( $(jq '.size.files' "$sc") > 400 )); then
+    local epic
+    while IFS= read -r epic; do
+      git -C "$root" log --format=%H --grep="$epic" "$range" | while IFS= read -r f; do git -C "$root" show "$f"; done > "$dir/diff-${epic}.patch"
+    done < <(jq -r '.epics[].epic' "$dir/epic-findings.json")
+  fi
+  _aid_sr_packet_finish "$root" "$dir" "$prev"
 }
 
 # aid_step_review_role_section <role> — the role's section of the roles skill.
@@ -66,6 +134,20 @@ aid_step_review_role_section() {
     on && /^## / { exit }
     on { print }
   ' "$AID_SR_ROLES_SKILL"
+}
+
+# _aid_sr_patch <file> <title> — a patch inline when one prompt can carry it,
+# else its file list and where to read it: a whole-plan or whole-EPIC range can
+# be a megabyte (ACTA P024: 1.1 MB), and a prompt that large is never read.
+_aid_sr_patch() {
+  local f="$1" title="$2" bytes; bytes="$(wc -c < "$f")"
+  if (( bytes <= ${AID_REVIEW_INLINE_MAX_BYTES:-150000} )); then
+    echo "## ${title} (also on disk: ${f})"
+    echo '~~~~~diff'; cat "$f"; echo '~~~~~'   # tildes: a diff of Markdown carries ``` lines of its own
+  else
+    echo "## ${title}: ${bytes} bytes, too large to inline. READ IT FROM DISK with read-only tools, file by file: ${f}"
+    grep '^diff --git' "$f" | sed -E 's|^diff --git a/(.*) b/.*|- \1|'
+  fi
 }
 
 aid_step_review_prompt_render() {
@@ -78,6 +160,7 @@ aid_step_review_prompt_render() {
     cp2) what="the diff of one implementation step (step ${step}) against its acceptance criteria" ;;
     cp3) what="the diff of one whole EPIC against its acceptance criteria" ;;
     cp6) what="a working-tree change made in fast mode against its task" ;;
+    cp7) what="the diff of one whole plan, every EPIC together, against the plan's acceptance criteria" ;;
   esac
   (( round >= 2 )) && note="This is a confirmation round: the packet below carries the findings still open and the author's fix."
   jq -n --arg s "$section" --arg cp "$cp" --arg r "$round" --arg o "${dir}/reviewer-${role}.json" \
@@ -102,8 +185,7 @@ aid_step_review_prompt_render() {
       echo "### Findings still open"
       jq -r '.findings[] | "- [\(.severity)] \(.claim) (evidence: \(.evidence); fix asked: \(.fix))"' "${dir}/packet/open-findings.json"
       echo
-      echo "### What the author changed (fix.patch)"
-      echo '```diff'; cat "${dir}/packet/fix.patch"; echo '```'
+      _aid_sr_patch "${dir}/packet/fix.patch" "What the author changed (fix.patch)" | sed 's/^## /### /'
       echo
     fi
     echo "## Deterministic step check (already reported, do not repeat)"
@@ -112,11 +194,27 @@ aid_step_review_prompt_render() {
     echo "## Definition of Done"
     cat "${dir}/packet/dod.md"
     echo
+    if [[ "$cp" == cp7 ]]; then
+      echo "## What the per-EPIC reviews already judged (do not repeat; read ACROSS the EPICs)"
+      jq -r '.epics[] | if .cp3 == "absent" then "- \(.epic): NOT reviewed as a whole (closed before the EPIC review existed)"
+                        else "- \(.epic): \(.findings | length) finding(s) left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join(""))) end' "${dir}/packet/epic-findings.json"
+      echo
+      echo "## Gates at the candidate (gates_report.json on disk: ${dir}/packet/gates_report.json)"
+      jq -r '.gates | to_entries[] | "- \(.key): \(.value.result)" + (if .value.reused_from then " (reused from \(.value.reused_from))" else "" end)' "${dir}/packet/gates_report.json"
+      echo
+      echo "## Executed tests per criterion: ${dir}/packet/plan-diff.json"
+      echo
+      _aid_sr_patch "${dir}/packet/claims.patch" "claims.patch (CHANGELOG, README and docs hunks of the range)"
+      echo
+      local part
+      for part in "${dir}"/packet/diff-*.patch; do
+        [[ -f "$part" ]] && echo "The range is large; one part per EPIC is on disk: ${part}"
+      done
+    fi
     echo "## Declared scope (files.json)"
     jq -r '"outputs:\n" + ((.outputs // []) | map("- " + .) | join("\n")) + "\nallowed_paths: " + ((.allowed_paths // []) | join(", ")) + "\nforbidden_paths: " + ((.forbidden_paths // []) | join(", "))' "${dir}/packet/files.json"
     echo
-    echo "## diff.patch (also on disk: ${dir}/packet/diff.patch)"
-    echo '```diff'; cat "${dir}/packet/diff.patch"; echo '```'
+    _aid_sr_patch "${dir}/packet/diff.patch" "diff.patch"
   } >> "$out"
 }
 
@@ -154,6 +252,8 @@ _aid_sr_later_step_covers() {
 #          done-advance then blocks until the PM resolves or backlogs it
 #     cp6, or an EPIC of no plan                   → nothing to write to: the
 #          findings stay `open` in merged.json and the close says so
+#     cp7                                          → the findings stay `open`;
+#          the plan-final decision reads merged.json and blocks on them
 #   Before the last round the next round confirms; nothing is written.
 #   A journal write failure returns 1 BEFORE merged.json is touched, so close
 #   fails without closed_at and can be run again.
@@ -183,6 +283,10 @@ aid_step_review_route_open() {
   open="$(jq -c '[.findings[] | select((.status == "open" or .status == "disputed") and (.severity == "blocker" or .severity == "major"))]' "${dir}/merged.json")"
   [[ "$(jq 'length' <<< "$open")" -gt 0 ]] || return 0
   (( last )) || return 0
+  if [[ "$cp" == cp7 ]]; then
+    echo "close: $(jq 'length' <<< "$open") finding(s) stay open in ${dir}/merged.json; plan-finalize --stage decide blocks on them until a fix is confirmed" >&2
+    return 0
+  fi
   if [[ "$cp" == cp6 || -z "$plan_id" ]]; then
     echo "close: $(jq 'length' <<< "$open") finding(s) stay open in ${dir}/merged.json ($([[ "$cp" == cp6 ]] && echo "fast mode has no plan journal" || echo "${epic} belongs to no plan")); the PM decides on them" >&2
     return 0

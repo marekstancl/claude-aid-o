@@ -20,7 +20,7 @@ Read in combination with `skills/agent-protocol.md` for input/output format.
 
 **Model is sourced here.** Each step role declares a `**Model:**` field — this is the single
 source of truth for the dispatch model tier (an optional `step.model` in `plan.json` overrides it
-for one step; controller agents auditor/curator/gate-fixer/verifier carry model in their own
+for one step; controller agents auditor/gate-fixer/verifier carry model in their own
 agent-file frontmatter). See `pipeline.md` §4.
 
 **Max Parallel note.** `**Max Parallel:**` documents the *intended* concurrency ceiling per role.
@@ -45,6 +45,29 @@ See also: [VULCAN specialty overlays](#vulcan-specialty-overlays) at the end of 
 
 ## Step Roles
 
+### Write the least code that works
+
+Every step role works down this ladder before it writes anything, and stops at
+the first rung that solves the step:
+
+1. **Does it need to exist?** A step is done by its acceptance criteria, not by
+   the amount of code. What no criterion asks for is not written.
+2. **Is it already in this codebase?** Search before you write, and say where
+   you looked (`grep`, the neighbouring module, `scripts/lib/`). Reuse or extend
+   what is there; a second copy of an existing helper is a defect.
+3. **Does the standard library or the platform already do it?** A built-in beats
+   a hand-written loop (`basename`, `sort -u`, `jq`, the language's own parser).
+4. **An installed dependency before a new one.** A new dependency needs a
+   criterion that cannot be met without it.
+5. **The shortest diff that is correct.** Delete before you add. No abstraction
+   with one use, no option nobody sets, no scaffolding "for later".
+6. **A deliberate shortcut says so.** A comment names the ceiling (what it does
+   not handle) so the reviewer sees a choice, not an oversight.
+
+The step reviewer asks about exactly this (`skills/step-review-roles.md`,
+`step_generalist` question 7), while the diff is small. The plan boundary has no
+cleanup pass to rely on.
+
 ---
 
 ## Role: architect
@@ -59,6 +82,7 @@ See also: [VULCAN specialty overlays](#vulcan-specialty-overlays) at the end of 
 - Cross-cutting concern identification (auth, tenant isolation, audit)
 
 **Constraints:**
+- MUST work down the ladder in "Write the least code that works" (above) before adding anything
 - NEVER write implementation code — contracts and docs only
 - NEVER modify existing contracts without a migration plan
 - MUST document why the chosen approach beats alternatives
@@ -87,6 +111,7 @@ See also: [VULCAN specialty overlays](#vulcan-specialty-overlays) at the end of 
 - Domain event-to-state-transition mapping
 
 **Constraints:**
+- MUST work down the ladder in "Write the least code that works" (above) before adding anything
 - NEVER implement API endpoints, queries, or infrastructure code
 - MUST keep domain logic pure (no framework dependencies in domain layer)
 - MUST define what happens on invalid state transitions
@@ -113,6 +138,7 @@ See also: [VULCAN specialty overlays](#vulcan-specialty-overlays) at the end of 
 - DB migrations for schema changes
 
 **Constraints:**
+- MUST work down the ladder in "Write the least code that works" (above) before adding anything
 - MUST follow API contract defined by architect step — never change it
 - NEVER write frontend code
 - MUST include error handling for all external calls
@@ -142,6 +168,7 @@ See also: [VULCAN specialty overlays](#vulcan-specialty-overlays) at the end of 
 - `ui_change_contract` delta reading (existing_ui steps) — defines exactly what to change
 
 **Constraints:**
+- MUST work down the ladder in "Write the least code that works" (above) before adding anything
 - NEVER modify API contracts or backend code
 - NEVER use `any` type — define TypeScript interfaces for all data shapes
 - MUST use existing component library and patterns (no new design systems)
@@ -178,6 +205,7 @@ criteria. I test what the code DOES, not what it was supposed to do.
 - Test-quality diagnosis (mock-vs-real, behavior-vs-AC — see Constraints)
 
 **Constraints:**
+- MUST work down the ladder in "Write the least code that works" (above) before adding anything
 - NEVER modify production code — only test files, fixtures, and harness
 - MUST give every EPIC acceptance criterion at least one test scenario
 - **Behavior over literal-AC:** confirm the BEHAVIOR an AC describes is actually exercised
@@ -240,6 +268,7 @@ the implementation actually functions across every layer it touches.
 - Fix loop: diagnose failed check → fix code → rerun ONLY failed checks → repeat
 
 **Constraints:**
+- MUST work down the ladder in "Write the least code that works" (above) before adding anything
 - **DoD-driven:** every check must trace to a Definition-of-Done / acceptance-criterion item.
   A green run that didn't exercise a DoD item is NOT acceptance.
 - **NEVER mock** — all checks run against real infrastructure.
@@ -287,6 +316,7 @@ the implementation actually functions across every layer it touches.
 - Tenant isolation verification (when EPIC.constraints.isolation is set)
 
 **Constraints:**
+- MUST work down the ladder in "Write the least code that works" (above) before adding anything
 - NEVER implement features — analysis and patching only
 - MUST escalate CRITICAL findings immediately (set result: escalate)
 - MUST document all findings even if patched
@@ -312,6 +342,7 @@ the implementation actually functions across every layer it touches.
 - Trace context propagation across service boundaries
 
 **Constraints:**
+- MUST work down the ladder in "Write the least code that works" (above) before adding anything
 - NEVER include sensitive data in traces or logs (PII, secrets, passwords)
 - MUST verify parent-child span relationships are correct
 - MUST follow existing OTel config (not introduce new exporters without Architect approval)
@@ -336,6 +367,7 @@ the implementation actually functions across every layer it touches.
 - README updates for new modules or changed configuration
 
 **Constraints:**
+- MUST work down the ladder in "Write the least code that works" (above) before adding anything
 - NEVER modify production code
 - MUST be in the same commit as the code change (docs lag = gate failure)
 - MUST reflect what the code actually does — not what was planned
@@ -360,6 +392,7 @@ the implementation actually functions across every layer it touches.
 - Release validation (build passes, version consistent across files)
 
 **Constraints:**
+- MUST work down the ladder in "Write the least code that works" (above) before adding anything
 - NEVER bump version without confirming it's the last EPIC in the release series
 - MUST follow semver — breaking change = major bump
 - Intermediate EPIC → defer version bump (orchestrator will confirm)
@@ -589,19 +622,13 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 ---
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-09-20
 **Replaces:** All 11 files formerly in `plugins/aid-orchestrator/defaults/playbooks/`
 
 ## Plan-boundary note
 
-Under `plan_branch` the Auditor, Curator, Simplifier and Reporter are
-**plan-final** roles: dispatched once per plan, at the boundary, against the
-frozen candidate. CP2 and CP3 remain per EPIC. Under
-`legacy_epic_release_mode` the previous per-EPIC cadence is unchanged. Mode is
-read from the plan's committed lifecycle manifest, never inferred.
-
-**Write boundary — see `skills/pipeline.md`, "THE PLAN-FINAL BOUNDARY RULE".**
-Plan-final specialists write run-scoped evidence only and commit nothing; the
-controller renders committed projections at `plan-close`. The rule is stated
-in exactly one place on purpose: the P082 contradiction survived precisely
-because a second copy of it, in `agents/reporter.md`, said the opposite.
+Under `plan_branch` a plan is read as a whole once, at its close, by the
+whole-plan review round (CP7, `skills/step-review-roles.md`); CP2 and CP3 remain
+per EPIC. What stays open after that round is fixed by the role that wrote the
+code, then confirmed. Mode is read from the plan's committed lifecycle manifest,
+never inferred.

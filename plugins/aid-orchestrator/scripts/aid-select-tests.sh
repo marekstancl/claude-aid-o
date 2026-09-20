@@ -248,9 +248,6 @@ map_path_to_tests() {
     "${PLUGIN_PREFIX}/defaults/schemas/"*)
       printf 'bash\t%s/scripts/tests/test-protocol-validate.sh\n' "$PLUGIN_PREFIX"
       ;;
-    "${PLUGIN_PREFIX}/defaults/policies/delivery-gate.yaml")
-      printf 'bash\t%s/scripts/tests/test-delivery-gate.sh\n' "$PLUGIN_PREFIX"
-      ;;
     "${PLUGIN_PREFIX}/lib/ui-fidelity/"*)
       # Both suites reference lib/ui-fidelity/ directly (the only two in the
       # repo that do — verified by grep at authoring time) and exercise the
@@ -508,8 +505,8 @@ if [[ -n "$EMIT_UNITS_FILE" ]]; then
       if [[ "$runner" == "bash" ]]; then
         # Codex review: as of this writing, P066's catalog inventory has NO
         # shell-suite ("sh:") adapter at all — every Initial-mapping entry
-        # that maps to a .sh harness (aid-plan-diff.sh, schemas/**,
-        # delivery-gate.yaml, the ui-fidelity/** pair) will ALWAYS miss here
+        # that maps to a .sh harness (aid-plan-diff.sh, schemas/**, the
+        # ui-fidelity/** pair) will ALWAYS miss here
         # today. This is a real, known, ecosystem-level gap (a P066 adapter
         # concern, out of this step's own scope) — never silently ignored,
         # but named explicitly so it reads as "the adapter doesn't exist

@@ -8,11 +8,10 @@
 #   pm-decision-brief.json  — protocol-v2 `pm_decision_brief` artifact that ECHOES the decision's
 #                             release_ready + blockers + waivers_applied + the D11 state fields
 #                             (merge_mode, evidence_verification_status, evidence_verified_at_head,
-#                             reporter_status/reason, simplifier_status/reason, summary_for_pm,
-#                             delivered_summary_ref). Validates against pm-decision-brief.schema.json
+#                             summary_for_pm, delivered_summary_ref). Validates against pm-decision-brief.schema.json
 #                             via aid-protocol-validate.sh (exit 0) for a complete decision.
 #   pm-summary.md           — human template rendered from the same fields. Mechanical honesty:
-#                             it legibly shows evidence/Reporter/Simplifier/waiver status even in an
+#                             it legibly shows evidence, waiver and whole-delivery review status even in an
 #                             auto-merge run, so an auto-merge is never silent.
 #
 # CYCLE-BREAK (D6/D9): the brief's PAYLOAD is derived deterministically from release-decision.json and
@@ -68,11 +67,11 @@
 set -uo pipefail
 
 # ---------------------------------------------------------------------------
-# The 12 fields the brief ECHOES from release_decision (single source of truth,
+# The 8 fields the brief ECHOES from release_decision (single source of truth,
 # shared by the payload builder + both echo-consistency checks so they never drift).
 # communication_status + human_summary_path are brief-specific, NOT echoes.
 # ---------------------------------------------------------------------------
-ECHO_FIELDS_JSON='["release_ready","blockers","waivers_applied","merge_mode","evidence_verification_status","evidence_verified_at_head","reporter_status","reporter_reason","simplifier_status","simplifier_reason","summary_for_pm","delivered_summary_ref"]'
+ECHO_FIELDS_JSON='["release_ready","blockers","waivers_applied","merge_mode","evidence_verification_status","evidence_verified_at_head","summary_for_pm","delivered_summary_ref"]'
 
 usage() {
   echo "Usage: aid-pm-brief.sh <evidence_dir> [--out-dir <path>] [--validate]" >&2
@@ -96,8 +95,7 @@ decision_complete() {
     | if ($r | type) != "object" then "no"
       elif ($r.release_ready | type) != "boolean" then "no"
       elif (["blockers","waivers_applied","merge_mode","evidence_verification_status",
-             "evidence_verified_at_head","reporter_status","reporter_reason",
-             "simplifier_status","simplifier_reason","summary_for_pm","delivered_summary_ref"]
+             "evidence_verified_at_head","summary_for_pm","delivered_summary_ref"]
             | all(. as $k | ($r | has($k)))) then "yes"
       else "no" end
   ' "$decision" 2>/dev/null)" || res="no"
@@ -124,10 +122,6 @@ build_brief_payload() {
         merge_mode: ($r.merge_mode // "blocked"),
         evidence_verification_status: ($r.evidence_verification_status // "unverifiable"),
         evidence_verified_at_head: ($r.evidence_verified_at_head // false),
-        reporter_status: ($r.reporter_status // "missing"),
-        reporter_reason: ($r.reporter_reason // "release-decision.json missing or malformed — reporter status unavailable"),
-        simplifier_status: ($r.simplifier_status // "missing"),
-        simplifier_reason: ($r.simplifier_reason // "release-decision.json missing or malformed — simplifier status unavailable"),
         summary_for_pm: ($r.summary_for_pm // "PM brief incomplete: release-decision.json missing or malformed in evidence dir."),
         delivered_summary_ref: ($r.delivered_summary_ref // null)
       }'
@@ -290,13 +284,11 @@ build_brief_md() {
                       + ($qs | map(((.gate_id // .) | tostring)) | join(", ")) ]
                end)
           + [ "",
-              "## Specialist review summary",
+              "## Whole-plan review record",
               "" ]
           + (( $ps.specialist_review ) as $sv
              | if $sv == null then [ "_No plan-final review recorded in the manifest._" ]
-               else [ "- **Review range:** " + orn($sv.review_range),
-                      "- **Dispatches:** " + (($sv.dispatch_counts // {}) | to_entries | map(.key + "=" + (.value | tostring)) | join(", ")),
-                      "- **Utilities run:** " + (( $sv.utilities_run // [] ) | map(((.id // .) | tostring) + "=" + ((.count // 1) | tostring)) | join(", ")) ]
+               else [ "- **Review range:** " + orn($sv.review_range) ]
                end)
           + [ "",
               "## Remaining backlog",
@@ -322,10 +314,13 @@ build_brief_md() {
         else [] end)
       + [
           "",
-          "## Review signals",
+          "## Closing the plan",
           "",
-          "- **Reporter:** " + (($r.reporter_status // "unknown") | tostring) + " — " + (($r.reporter_reason // "") | tostring),
-          "- **Simplifier:** " + (($r.simplifier_status // "unknown") | tostring) + " — " + (($r.simplifier_reason // "") | tostring),
+          (($r.plan_summary.close // null) as $c
+           | if $c == null then "_Not a plan close._"
+             else "- **Close:** \($c.attempts) attempt(s), \($c.minutes) min, \($c.usd) USD"
+                  + (if ($c.usd_unknown_roles | length) > 0 then " + cost unknown for: " + ($c.usd_unknown_roles | join(", ")) else "" end) end),
+          "- **Whole-delivery review:** " + ((($r.inputs // []) | map(select(.id == "final_review")) | first | "\(.verdict) — \(.reason)") // "not recorded"),
           "",
           "## At-HEAD verification warnings",
           ""

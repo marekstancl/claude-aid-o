@@ -120,10 +120,10 @@ _evidence() {
   [[ "$output" == *"audit-report.json"* ]]
 }
 
-@test "evidence: a curator report, a release decision or a delivery gate each refuse" {
+@test "evidence: a closed whole-plan round, a release decision or an older curator report each refuse" {
   local root="$BATS_TEST_TMPDIR/each" f
-  for f in curator-report.json release-decision.json delivery-gate.json; do
-    rm -rf "$root"; mkdir -p "$root/.aid-o/work/evidence/P019/R-1"
+  for f in cp7/rounds.json release-decision.json curator-report.json; do
+    rm -rf "$root"; mkdir -p "$root/.aid-o/work/evidence/P019/R-1/cp7"
     printf '{}' > "$root/.aid-o/work/evidence/P019/R-1/$f"
     MANIFEST_STUB="" run _evidence "$root" P019
     [ -n "$output" ]

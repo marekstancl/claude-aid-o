@@ -157,3 +157,15 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   run _load_step
   [ "$status" -eq 1 ]; [[ "$output" == *"banned_models"* ]]
 }
+
+# ── final_review (CP7) ────────────────────────────────────────────────────────
+@test "final_review: the default loads with three roles; its toggle switches it off; a banned model is refused" {
+  aid_review_config_load "$ROOT" final_review "$STEP_SKILL" && aid_review_config_validate
+  [ "${RC_ROLE[*]}" = "final_criteria final_claims final_generalist" ]
+  [ "$RC_ENABLED" = 1 ] && [ "$RC_STAND_IN_MODEL" = sonnet ]
+  yq '.review_checkpoints.cp7_plan_final_review = false' "$DEFAULT" > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
+  aid_review_config_load "$ROOT" final_review "$STEP_SKILL"; [ "$RC_ENABLED" = 0 ]
+  yq '.review_checkpoints.final_review.reviewers[0].model = "haiku"' "$DEFAULT" > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
+  aid_review_config_load "$ROOT" final_review "$STEP_SKILL"
+  run aid_review_config_validate; [ "$status" -eq 1 ]; [[ "$output" == *"haiku"* ]]
+}

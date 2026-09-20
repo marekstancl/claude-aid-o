@@ -49,10 +49,6 @@
     "pm_brief_status": "pending",
     "evidence_verified_at_head": true,
     "evidence_verification_status": "pass",
-    "reporter_status": "not_applicable",
-    "reporter_reason": "not_plan_boundary",
-    "simplifier_status": "not_applicable",
-    "simplifier_reason": "not_plan_boundary",
     "delivered_summary_ref": ".aid-o/work/evidence/E-061-1_6/R-E061-1/final_report.md",
     "summary_for_pm": "release_ready=false; evidence=pass; reporter=not_applicable; simplifier=not_applicable; waivers=0; blockers=3; merge_mode=blocked"
   }

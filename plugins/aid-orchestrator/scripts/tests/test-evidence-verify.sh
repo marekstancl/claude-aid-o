@@ -59,7 +59,7 @@ setup_git_repo() {
   git -C "$dir" add .gitignore README.md
   git -C "$dir" commit -q -m "init"
   if [[ "$with_dirty" == "true" ]]; then
-    echo "dirty" > "$dir/dirty.txt"  # untracked file -> dirty
+    echo "dirty" >> "$dir/README.md"  # a modified TRACKED file: untracked files are not dirt
   fi
   git -C "$dir" rev-parse HEAD
 }
@@ -108,7 +108,7 @@ run_verifier() {
   local exit_code=0
   AID_PROJECT_ROOT="$repo_dir" \
     bash "$VERIFIER" "E-test" "$fixture_name" \
-    --out "$out_file" "${extra_args[@]}" 2>/dev/null || exit_code=$?
+    --out "$out_file" --tree "$repo_dir" "${extra_args[@]}" 2>/dev/null || exit_code=$?
 
   LAST_VR_FILE="$out_file"
   LAST_VR_EXIT="$exit_code"
@@ -130,7 +130,6 @@ test_clean_pack() {
   assert_check_status "T01/artifact_head_freshness"         "$LAST_VR_FILE" "artifact_head_freshness"         "pass"
   assert_check_status "T01/protocol_validate"               "$LAST_VR_FILE" "protocol_validate"               "pass"
   assert_check_status "T01/fingerprint"                     "$LAST_VR_FILE" "fingerprint"                     "pass"
-  assert_check_status "T01/observe_blocking_interpretation" "$LAST_VR_FILE" "observe_blocking_interpretation" "pass"
   assert_json_field   "T01/verified"                        "$LAST_VR_FILE" ".verification_report.summary.verified" "true"
 }
 
@@ -297,28 +296,13 @@ test_ttl_violation() {
   local out_file="$SCRATCHPAD/vr-ttl.json"
   local exit_code=0
   AID_PROJECT_ROOT="$repo" AID_REGISTRY_PATH="$registry" \
-    bash "$VERIFIER" "E-test" "ttl-violation" \
+    bash "$VERIFIER" "E-test" "ttl-violation" --tree "$repo" \
     --out "$out_file" 2>/dev/null || exit_code=$?
   LAST_VR_FILE="$out_file"
   LAST_VR_EXIT="$exit_code"
 
   assert_check_status "T10/ttl_registry" "$LAST_VR_FILE" "ttl_registry" "fail"
   assert_json_field   "T10/verified"     "$LAST_VR_FILE" ".verification_report.summary.verified" "false"
-}
-
-# ---------------------------------------------------------------------------
-# T11: enforcement-absent — observe_blocking_interpretation FAIL
-# ---------------------------------------------------------------------------
-test_enforcement_absent() {
-  local repo="$SCRATCHPAD/repo-absent"
-  local pack_head
-  pack_head=$(setup_git_repo "$repo")
-  setup_evidence_pack "$repo" "enforcement-absent" "$pack_head"
-
-  run_verifier "$repo" "enforcement-absent"
-
-  assert_check_status "T11/observe_blocking_interpretation" "$LAST_VR_FILE" "observe_blocking_interpretation" "fail"
-  assert_json_field   "T11/verified"                        "$LAST_VR_FILE" ".verification_report.summary.verified" "false"
 }
 
 # ---------------------------------------------------------------------------
@@ -333,7 +317,7 @@ test_idempotency() {
   # First run
   local out1="$SCRATCHPAD/vr-idem-1.json"
   local exit1=0
-  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "clean-pack" --out "$out1" 2>/dev/null || exit1=$?
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" --tree "$repo" "E-test" "clean-pack" --out "$out1" 2>/dev/null || exit1=$?
   if [[ "$exit1" -ne 0 ]]; then
     _fail "T12/first-run (expected exit 0, got $exit1)"
     return
@@ -343,7 +327,7 @@ test_idempotency() {
   # Second run — must also pass (idempotent)
   local out2="$SCRATCHPAD/vr-idem-2.json"
   local exit2=0
-  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "clean-pack" --out "$out2" 2>/dev/null || exit2=$?
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" --tree "$repo" "E-test" "clean-pack" --out "$out2" 2>/dev/null || exit2=$?
   if [[ "$exit2" -eq 0 ]]; then
     _pass "T12/second-run (idempotent)"
   else
@@ -380,13 +364,13 @@ test_at_head_strict() {
   # Without --at-head: ancestor -> pass
   local out_nstrict="$SCRATCHPAD/vr-athead-normal.json"
   local exit_nstrict=0
-  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "clean-pack" --out "$out_nstrict" 2>/dev/null || exit_nstrict=$?
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" --tree "$repo" "E-test" "clean-pack" --out "$out_nstrict" 2>/dev/null || exit_nstrict=$?
   assert_check_status "T12a/no-flag-freshness" "$out_nstrict" "artifact_head_freshness" "pass"
 
   # With --at-head: pack_head != HEAD -> fail
   local out_strict="$SCRATCHPAD/vr-athead-strict.json"
   local exit_strict=0
-  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "clean-pack" --at-head --out "$out_strict" 2>/dev/null || exit_strict=$?
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" --tree "$repo" "E-test" "clean-pack" --at-head --out "$out_strict" 2>/dev/null || exit_strict=$?
   assert_check_status "T12a/at-head-freshness" "$out_strict" "artifact_head_freshness" "fail"
   if [[ "$exit_strict" -eq 1 ]]; then
     _pass "T12a/at-head-exit-1"
@@ -413,7 +397,7 @@ test_auto_detect() {
   # Run without positional args — auto-detect
   local out="$SCRATCHPAD/vr-autodetect.json"
   local exit_code=0
-  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" --out "$out" 2>/dev/null || exit_code=$?
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" --tree "$repo" --out "$out" 2>/dev/null || exit_code=$?
 
   # Should discover E-autodetect/autorun
   if [[ -f "$out" ]]; then
@@ -436,7 +420,7 @@ test_validator_missing_runtime() {
   local out="$SCRATCHPAD/vr-valm.json"
   local exit_code=0
   AID_PROJECT_ROOT="$repo" AID_VALIDATOR_PATH="/nonexistent/aid-protocol-validate.sh" \
-    bash "$VERIFIER" "E-test" "clean-pack" --out "$out" 2>/dev/null || exit_code=$?
+    bash "$VERIFIER" "E-test" "clean-pack" --tree "$repo" --out "$out" 2>/dev/null || exit_code=$?
 
   assert_check_status "T12c/protocol_validate" "$out" "protocol_validate" "unverifiable"
   assert_json_field "T12c/verified" "$out" ".verification_report.summary.verified" "false"
@@ -460,7 +444,7 @@ test_self_validate() {
     local pack_head
     pack_head=$(setup_git_repo "$repo")
     setup_evidence_pack "$repo" "clean-pack" "$pack_head"
-    AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "clean-pack" --out "$vr_file" 2>/dev/null || true
+    AID_PROJECT_ROOT="$repo" bash "$VERIFIER" --tree "$repo" "E-test" "clean-pack" --out "$vr_file" 2>/dev/null || true
   fi
 
   if [[ ! -f "$vr_file" ]]; then
@@ -494,7 +478,7 @@ test_self_validate_with_findings() {
 
   local out="$SCRATCHPAD/vr-findings.json"
   local exit_code=0
-  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "dirty-pack-t13b" --out "$out" 2>/dev/null || exit_code=$?
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" --tree "$repo" "E-test" "dirty-pack-t13b" --out "$out" 2>/dev/null || exit_code=$?
 
   if [[ "$exit_code" -ne 1 ]]; then
     _fail "T13b/exit-1 (expected exit 1, got $exit_code)"
@@ -566,7 +550,7 @@ test_waiver_mixed() {
   # an ancestor, not equal — must still verify overall.
   local out="$SCRATCHPAD/vr-waiver-mixed.json"
   local exit_code=0
-  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "waiver-mixed" --at-head --out "$out" 2>/dev/null || exit_code=$?
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" --tree "$repo" "E-test" "waiver-mixed" --at-head --out "$out" 2>/dev/null || exit_code=$?
 
   assert_check_status "T15/artifact_head_freshness" "$out" "artifact_head_freshness" "pass"
   assert_check_status "T15/protocol_validate"       "$out" "protocol_validate"       "pass"
@@ -599,7 +583,7 @@ test_waiver_forged_ancestor() {
     "$FIXTURES_DIR/waiver-mixed/waiver-historical.json" > "$ev_dir/waiver-historical.json"
 
   local out="$SCRATCHPAD/vr-waiver-forged.json"
-  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "waiver-forged" --out "$out" 2>/dev/null || true
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" --tree "$repo" "E-test" "waiver-forged" --out "$out" 2>/dev/null || true
 
   assert_check_status "T16/artifact_head_freshness" "$out" "artifact_head_freshness" "fail"
   assert_json_field    "T16/verified"               "$out" ".verification_report.summary.verified" "false"
@@ -642,7 +626,6 @@ main() {
   test_mixed_legacy
   test_nondeterministic_fingerprint
   test_ttl_violation
-  test_enforcement_absent
   test_idempotency
   test_at_head_strict
   test_auto_detect

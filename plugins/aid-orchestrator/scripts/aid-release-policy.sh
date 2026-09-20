@@ -23,14 +23,14 @@
 #   * the comparison head — the FROZEN CANDIDATE, not the worktree HEAD
 #   * plan_review         — resolved from PLAN_ID directly, NOT through the epic_input.md
 #                           plan_ref hop, which has no meaning without an EPIC input
-#   * reporter/simplifier — MANDATORY at this boundary. The EPIC-mode `ca-review-complete`
-#                           marker does not exist by construction here, so the EPIC branch
-#                           would return a non-blocking `not_applicable` — exactly inverting
-#                           their purpose. In plan mode the run directory's own
-#                           delivery-report.json / simplifier-report.md ARE the boundary
-#                           condition; missing or stale is a blocker, never a skip.
+#   * final_review        — the whole-plan round (cp7) of the run directory: closed, passed
+#                           and at the candidate. Switched off, it blocks
+#                           (final_review_disabled) unless the PM waived it for this
+#                           candidate; a switch flipped inside the plan's own range is
+#                           ignored. EPIC mode reads the EPIC's own cp3 round instead.
+#   * obligations         — an open release_blocker of the plan blocks.
 #   * epic roll-up        — every EPIC merged into the plan must be named in the
-#                           plan-level delivery-gate/acceptance-evidence sources[] and
+#                           plan-level acceptance-evidence sources[] and
 #                           have its evidence directory on disk; otherwise a blocker
 #                           `epic_rollup:<epic_id>` NAMING that EPIC.
 #
@@ -46,12 +46,10 @@
 # and identity.epic_id == null, or it is `blocked` with a blocker.
 #
 # Data Model (REQUIRED / PROFILE-GATED / ADVISORY / CONDITIONAL / OPTIONAL):
-#   REQUIRED (missing → blocked): review-profile, delivery-gate, semantic-review-final,
+#   REQUIRED (missing → blocked): review-profile, semantic-review-final,
 #     acceptance-evidence, gates_report (root, fallback gates/), plan-review (plan_ref hop),
 #     verification-report (aid-evidence-verify.sh --at-head; fail OR unverifiable both block).
-#   PROFILE-GATED (required only when the C3 audit gate is active): curator-report, audit-report.
-#   CONDITIONAL (marker→toggle→file): reporter (.aid-o/reports/<Pnum>-delivery.md, reporter.enabled),
-#     simplifier (<evidence_dir>/simplifier-report.md, simplifier.enabled).
+#     final_review (cp7/rounds.json; cp3/rounds.json in EPIC mode), obligations (plan mode).
 #   OPTIONAL: waiver-*.json → waivers_applied[] (Waived != pass).
 #
 # Exit codes:
@@ -67,14 +65,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 EVIDENCE_VERIFY="${SCRIPT_DIR}/aid-evidence-verify.sh"
 PROTOCOL_VALIDATE="${SCRIPT_DIR}/aid-protocol-validate.sh"
-C3_POLICY_FILE="${PLUGIN_ROOT}/defaults/policies/c3-audit-policy.yaml"
-
-# Shared review-signal substrate (B1) — _aid_read_toggle + _aid_validate_test_evidence.
-# The SAME functions fsm_eval_delivery_report_present / fsm_eval_simplifier_present read,
-# so the aggregator and the FSM compliance checks never diverge on the reporter/simplifier
-# substrate.
-# shellcheck source=lib/aid-review-signals.sh
-source "${SCRIPT_DIR}/lib/aid-review-signals.sh"
+# shellcheck source=lib/aid-obligations.sh
+source "${SCRIPT_DIR}/lib/aid-obligations.sh"
+# shellcheck source=lib/aid-review-summary.sh
+source "${SCRIPT_DIR}/lib/aid-review-summary.sh"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-permissions.sh"   # the ONE autonomous_mode reader
 
@@ -85,14 +79,6 @@ INPUTS_JSON="[]"
 BLOCKERS_JSON="[]"
 WAIVERS_JSON="[]"
 WAIVER_FINDINGS_JSON="[]"   # E-060-2_2 Step 8 — per-waiver disposition (applied | orphan_waiver)
-
-# Reporter / Simplifier CONDITIONAL results (set by compute_reporter/compute_simplifier)
-REPORTER_STATUS="not_applicable"
-REPORTER_REASON="not_plan_boundary"
-REPORTER_ARTIFACT=".aid-o/reports/delivery.md"
-SIMPLIFIER_STATUS="not_applicable"
-SIMPLIFIER_REASON="not_plan_boundary"
-SIMPLIFIER_ARTIFACT="simplifier-report.md"
 
 # ---------------------------------------------------------------------------
 # Small deterministic helpers
@@ -188,33 +174,14 @@ _artifact_head_match() {
   [[ "$hs" == "${CURRENT_HEAD}" ]] && echo true || echo false
 }
 
-# _markdown_head_match <file> — at-HEAD basis for our OWN markdown producers (reporter delivery
-# report, simplifier-report.md), which have NO JSON `revision` block. E-060-2_2 Step 8 contract 3:
-# mtime is NEVER a basis; the binding is the producer provenance line `Head: <sha>`. sha matches
-# CURRENT_HEAD (full or as a prefix) → true; present-but-differs → false; NO provenance line → the
-# declared string "unknown" (git-log binding is impossible — .aid-o/reports/ is gitignored).
-_markdown_head_match() {
-  local f="$1" sha=""
-  [[ -f "$f" ]] || { echo '"unknown"'; return 0; }
-  sha="$(grep -iE '^[[:space:]]*Head:[[:space:]]*[0-9a-fA-F]{7,40}([[:space:]]|$)' "$f" 2>/dev/null \
-        | head -1 | sed -E 's/^[[:space:]]*[Hh][Ee][Aa][Dd]:[[:space:]]*//; s/[[:space:]].*$//')" || sha=""
-  [[ -z "$sha" ]] && { echo '"unknown"'; return 0; }
-  [[ -z "${CURRENT_HEAD:-}" ]] && { echo '"unknown"'; return 0; }
-  # Accept an abbreviated sha (>=7) that is a prefix of the full CURRENT_HEAD, or an exact match.
-  if [[ "$CURRENT_HEAD" == "$sha" || ( "${#sha}" -ge 7 && "$CURRENT_HEAD" == "$sha"* ) ]]; then
-    echo true
-  else
-    echo false
-  fi
-}
 
-# _is_canonical_input <id> — membership test for the 12 canonical release-decision input ids
+# _is_canonical_input <id> — membership test for the canonical release-decision input ids
 # (mirrors the blockers.input_id enum in release-decision.schema.json). Used by the waiver→input
 # mapping (contract 6).
 _is_canonical_input() {
   case "$1" in
-    review_profile|delivery_gate|semantic_review_final|acceptance_evidence|gates_report|\
-curator_report|plan_review|verification_report|audit_report|reporter|simplifier)
+    review_profile|semantic_review_final|acceptance_evidence|gates_report|\
+plan_review|verification_report|final_review|obligations)
       return 0 ;;
     *) return 1 ;;
   esac
@@ -263,13 +230,10 @@ _plan_identity_reason() {
 _content_says_fail() {
   local id="$1" f="$2"
   case "$id" in
-    audit_report)
-      [[ "$(jq -r '.blocking_findings // false' "$f" 2>/dev/null)" == "true" ]] && return 0
-      [[ "$(jq -r '.status // ""' "$f" 2>/dev/null)" == "fail" ]] && return 0 ;;
     gates_report)
       local ov; ov="$(jq -r '.overall // ""' "$f" 2>/dev/null)"
       [[ -n "$ov" && "$ov" != "pass" ]] && return 0 ;;
-    semantic_review_final|delivery_gate|curator_report)
+    semantic_review_final)
       [[ "$(jq -r '.status // ""' "$f" 2>/dev/null)" == "fail" ]] && return 0 ;;
   esac
   return 1
@@ -353,82 +317,7 @@ _extract_plan_ref() {
   echo "$raw"
 }
 
-# _c3_gate_active — returns 0 (C3 audit gate active) or 1 (inactive).
-# Mirrors fsm_eval / done-advance c3_hook_fired (aid-fsm.sh ~2725-2824): fail-closed to
-# ACTIVE for an unverifiable/high profile, and the secondary audit-report.json trigger.
-_c3_gate_active() {
-  local evidence_dir="$1"
-  local review_profile_file="${evidence_dir}/review-profile.json"
-  local audit_report_file="${evidence_dir}/audit-report.json"
 
-  # No review-profile.json → this run never entered the C3 pipeline → inactive.
-  [[ -f "$review_profile_file" ]] || return 1
-
-  # Resolve risk profile (fail-closed to "unverifiable" on any ambiguity).
-  local risk_profile=""
-  if ! command -v jq >/dev/null 2>&1; then
-    risk_profile="unverifiable"
-  else
-    local resolved="" rc=0
-    resolved="$(jq -r '.review_profile.risk_profile // "MISSING"' "$review_profile_file" 2>/dev/null)" || rc=$?
-    if [[ $rc -eq 0 && "$resolved" != "MISSING" ]]; then
-      case "$resolved" in
-        docs_trivial|low|medium|high|unverifiable) risk_profile="$resolved" ;;
-        *) risk_profile="unverifiable" ;;
-      esac
-    else
-      risk_profile="unverifiable"
-    fi
-  fi
-
-  # Primary trigger: policy c3_required for the resolved profile.
-  local policy_read_succeeded="false" c3_required_from_policy=""
-  if [[ -f "$C3_POLICY_FILE" ]] && command -v yq >/dev/null 2>&1; then
-    local has_key="" hrc=0
-    has_key="$(yq -r "(.risk_profiles | has(\"$risk_profile\")) and (.risk_profiles[\"$risk_profile\"] | has(\"c3_required\"))" "$C3_POLICY_FILE" 2>/dev/null)" || hrc=$?
-    if [[ $hrc -eq 0 && "$has_key" == "true" ]]; then
-      local crc=0
-      c3_required_from_policy="$(yq -r ".risk_profiles[\"$risk_profile\"].c3_required" "$C3_POLICY_FILE" 2>/dev/null)" || crc=$?
-      if [[ $crc -eq 0 && ("$c3_required_from_policy" == "true" || "$c3_required_from_policy" == "false") ]]; then
-        policy_read_succeeded="true"
-      fi
-    fi
-  fi
-
-  if [[ "$policy_read_succeeded" == "true" && "$c3_required_from_policy" == "true" ]]; then
-    return 0
-  elif [[ "$policy_read_succeeded" != "true" && "$risk_profile" == "high" ]]; then
-    return 0   # fail-closed: cannot confirm c3_required=false for a high profile
-  elif [[ "$risk_profile" == "unverifiable" ]]; then
-    return 0   # fail-closed
-  fi
-
-  # Secondary trigger: a real audit-report.json for this run fires the hook even if the
-  # primary gate did not (mirrors the FSM defense-in-depth trigger).
-  if [[ -f "$audit_report_file" ]] && command -v jq >/dev/null 2>&1; then
-    local has_audit="" arc=0
-    has_audit="$(jq -r 'if (.audit_report | type) == "object" and (.audit_report | length) > 0 then "true" else "false" end' "$audit_report_file" 2>/dev/null)" || arc=$?
-    if [[ $arc -eq 0 && "$has_audit" == "true" ]]; then
-      return 0
-    fi
-  fi
-
-  return 1
-}
-
-# process_profile_gated <id> <file> — curator-report / audit-report rows.
-# C3 active + missing → blocked (+ blocker); C3 inactive + missing → advisory (no block).
-process_profile_gated() {
-  local id="$1" file="$2"
-  if _is_json "$file"; then
-    add_input "$id" "$(basename "$file")" "pass" "present" "$(_artifact_head_match "$file")"
-  elif [[ "$C3_ACTIVE" == "true" ]]; then
-    add_input "$id" "$(basename "$file")" "blocked" "required when C3 audit gate active; missing" false "missing"
-    add_blocker "$id" "blocking" "$(basename "$file") required (C3 audit gate active) but missing"
-  else
-    add_input "$id" "$(basename "$file")" "advisory" "not required (C3 audit gate inactive); absent" true
-  fi
-}
 
 # _read_autonomous_mode — echoes auto|manual for this script's PROJECT_ROOT.
 #
@@ -439,161 +328,91 @@ process_profile_gated() {
 # vocabulary.
 _read_autonomous_mode() { aid_autonomous_mode "$PROJECT_ROOT"; }
 
-# _status_to_verdict / _status_headmatch — map a reporter/simplifier 5-enum status onto the
-# inputs[] verdict enum + head_match field.
-_status_to_verdict() {
-  case "$1" in
-    pass) echo pass ;;
-    fail) echo fail ;;
-    missing) echo blocked ;;
-    disabled|not_applicable) echo advisory ;;
-    # P083 Step 6: an unreadable/malformed toggle is a refusal, not an
-    # advisory annotation — it must verdict the same as "fail", or the
-    # status distinction this step added would be visible but toothless.
-    toggle_unreadable) echo fail ;;
-    *) echo advisory ;;
+
+
+
+# ---------------------------------------------------------------------------
+# compute_final_review — the independent reading of the whole delivery.
+# Plan mode: the cp7 round of the run directory. EPIC mode (legacy release
+# mode): the EPIC's own cp3 round, which already reads base_commit..HEAD.
+#   pass     the index says pass (or no_change/skip from the step check) at HEAD
+#   blocked  no closed round, a failed round (the open blockers are named), a
+#            round of another head, or the review switched off without the PM's
+#            waiver for this candidate (final_review_disabled)
+# The switch is believed only as it stood at the plan's base commit when the
+# policy file is tracked: a plan cannot switch off its own review.
+# ---------------------------------------------------------------------------
+compute_final_review() {
+  local cp=cp7 toggle=cp7_plan_final_review
+  [[ "$MODE" == "plan" ]] || { cp=cp3; toggle=cp3_integration_review; }
+  local index="${EVIDENCE_DIR}/${cp}/rounds.json" artifact="${cp}/rounds.json"
+  # The two switches, resolved as fsm_check_review_round resolves them: per
+  # switch, the first file that sets it (project first) decides.
+  local rel=".aid-o/config/policies/review-checkpoints.yaml" policy flag read value="" at_base
+  for flag in enabled "$toggle"; do
+    for policy in "${PROJECT_ROOT}/${rel}" "${PLUGIN_ROOT}/defaults/policies/review-checkpoints.yaml"; do
+      [[ -f "$policy" ]] || continue
+      read="$(yq -r ".review_checkpoints.${flag}" "$policy" 2>/dev/null)"
+      [[ "$read" == true || "$read" == false ]] && break
+    done
+    [[ "$read" == false ]] && { value=false; break; }
+  done
+  if [[ "$value" == false && "$MODE" == "plan" && -n "${PLAN_BASE_SHA:-}" ]] \
+     && at_base="$(git -C "$PROJECT_ROOT" show "${PLAN_BASE_SHA}:${rel}" 2>/dev/null)" \
+     && [[ "$(yq -r ".review_checkpoints.enabled != false and .review_checkpoints.${toggle} != false" <<< "$at_base" 2>/dev/null)" == true ]]; then
+    value=""   # switched off inside the plan's own range: ignored
+  fi
+
+  if [[ "$value" == false ]]; then
+    local waiver="${EVIDENCE_DIR}/final-review-waiver.json"
+    if [[ "$MODE" != "plan" ]]; then
+      add_input final_review "$artifact" "advisory" "the EPIC review (${toggle}) is switched off in ${policy#"${PROJECT_ROOT}/"}" true
+    elif [[ "$(jq -r '.candidate_sha // ""' "$waiver" 2>/dev/null)" == "$CANDIDATE_SHA" ]] \
+         && jq -es --arg p "$PLAN_ID" --arg c "$CANDIDATE_SHA" 'any(.[]; .event == "final_review_waived" and .epic_id == $p and .candidate_sha == $c)' \
+              "${PROJECT_ROOT}/.aid-o/work/audit-log.jsonl" >/dev/null 2>&1; then
+      add_input final_review "final-review-waiver.json" "advisory" "NOT READ AS A WHOLE: the whole-plan review is switched off and the PM waived it for this candidate: $(jq -r .reason "$waiver")" true
+    else
+      add_input final_review "$artifact" "blocked" "final_review_disabled: the whole-plan review is switched off and no PM waiver bound to this candidate is recorded in the audit log" false
+      add_blocker final_review "blocking" "final_review_disabled: the plan was not read as a whole. Switch ${toggle} back on, or the PM waives it: plan-finalize ${PLAN_ID} --stage decide --waive-final-review --reason \"<the PM's words>\""
+    fi
+    return 0
+  fi
+
+  local verdict head last
+  verdict="$(jq -r '.verdict // ""' "$index" 2>/dev/null)"; head="$(jq -r '.head_sha // ""' "$index" 2>/dev/null)"
+  case "$verdict" in
+    pass|skip|no_change)
+      if [[ "$head" == "$CURRENT_HEAD" ]]; then
+        add_input final_review "$artifact" "pass" "the ${cp} round closed with verdict ${verdict} at ${head:0:12}" true
+      else
+        add_input final_review "$artifact" "blocked" "the ${cp} round read ${head:0:12}, not ${CURRENT_HEAD:0:12}" false
+        add_blocker final_review "blocking" "the ${cp} round is stale: it read ${head:0:12}, the decision is about ${CURRENT_HEAD:0:12}"
+      fi ;;
+    fail)
+      last="$(jq -r '[.rounds[].round] | max' "$index")"
+      local open; open="$(jq -r '[.findings[] | select((.status | IN("open", "disputed", "routed", "carried")) and (.severity == "blocker" or .severity == "major")) | "[\(.severity)] \(.claim) (\(.evidence))"] | join("; ")' "${EVIDENCE_DIR}/${cp}/round-${last}/merged.json" 2>/dev/null)"
+      add_input final_review "$artifact" "blocked" "the ${cp} round closed with verdict fail" false
+      add_blocker final_review "blocking" "the whole-delivery review left open: ${open:-see ${artifact}}" ;;
+    *)
+      add_input final_review "$artifact" "blocked" "no closed ${cp} round" false "missing"
+      add_blocker final_review "blocking" "no closed ${cp} round in ${EVIDENCE_DIR#"${PROJECT_ROOT}/"}; run aid-review-round.sh prepare|collect|close --checkpoint ${cp}" ;;
   esac
 }
-_status_headmatch() {
-  case "$1" in pass|disabled|not_applicable) echo true ;; *) echo false ;; esac
-}
 
-# compute_reporter — CONDITIONAL: marker → toggle(reporter.enabled) → file → _test_evidence.
-# Reporter delivery-report plan_id is P<num> derived from epic_id (byte-identical to
-# fsm_eval_delivery_report_present), so the shared-lib substrate cross-checks 1:1.
-compute_reporter() {
-  # ── PLAN mode: the plan-final run IS the boundary ────────────────────────
-  # There is no `ca-review-complete` marker at the plan boundary (it is an EPIC
-  # done-advance marker), and EPIC_ID is empty so the `^E-([0-9]+)` plan-number
-  # derivation below has nothing to match. Falling through would return a
-  # NON-BLOCKING `not_applicable / not_plan_boundary` at the ONE boundary where the
-  # Reporter is mandatory. The authoritative artifact here is the run-scoped
-  # protocol-v2 delivery-report.json — never the committed Markdown projection.
-  if [[ "${MODE:-epic}" == "plan" ]]; then
-    local preport="${EVIDENCE_DIR}/delivery-report.json"
-    REPORTER_ARTIFACT="delivery-report.json"
-    if [[ ! -f "$preport" ]]; then
-      REPORTER_STATUS="missing"
-      REPORTER_REASON="delivery-report.json missing in the plan-final run directory (${RUN_ID}) — the Reporter is MANDATORY at the plan boundary"
-      return 0
-    fi
-    if ! _is_json "$preport"; then
-      REPORTER_STATUS="fail"
-      REPORTER_REASON="delivery-report.json present but empty or unparseable"
-      return 0
-    fi
-    local pir; pir="$(_plan_identity_reason "$preport")"
-    if [[ -n "$pir" ]]; then
-      REPORTER_STATUS="fail"
-      REPORTER_REASON="delivery-report.json is not bound to this plan-final attempt: ${pir}"
-      return 0
-    fi
-    local phead; phead="$(jq -r '.revision.head_sha // ""' "$preport" 2>/dev/null || echo "")"
-    if [[ "$phead" != "$CANDIDATE_SHA" ]]; then
-      REPORTER_STATUS="fail"
-      REPORTER_REASON="delivery-report.json records revision.head_sha '${phead:-<absent>}', expected the frozen candidate '${CANDIDATE_SHA}' — a delivery report for another head is stale"
-      return 0
-    fi
-    REPORTER_STATUS="pass"
-    REPORTER_REASON="run-scoped delivery-report.json present, protocol-shaped, bound to plan ${PLAN_ID}, attempt ${RUN_ID} and the frozen candidate"
-    return 0
-  fi
-
-  local marker="${EVIDENCE_DIR}/ca-review-complete"
-  local exec_yaml="${PROJECT_ROOT}/.aid-o/config/execution.yaml"
-  local plan_num="" report_plan_id=""
-  [[ "$EPIC_ID" =~ ^E-([0-9]+) ]] && plan_num="${BASH_REMATCH[1]}"
-  if [[ -z "$plan_num" ]]; then
-    REPORTER_STATUS="not_applicable"
-    REPORTER_REASON="not_plan_boundary (epic_id carries no plan number)"
-    REPORTER_ARTIFACT=".aid-o/reports/delivery.md"
-    return 0
-  fi
-  report_plan_id="P${plan_num}"
-  REPORTER_ARTIFACT=".aid-o/reports/${report_plan_id}-delivery.md"
-  local report="${PROJECT_ROOT}/.aid-o/reports/${report_plan_id}-delivery.md"
-
-  if [[ ! -f "$marker" ]]; then
-    REPORTER_STATUS="not_applicable"; REPORTER_REASON="not_plan_boundary"; return 0
-  fi
-  # P083 Step 6: rc=1 (explicit enabled:false) disables; rc=2 (unreadable/
-  # malformed) is its own named status — never coerced into "disabled".
-  local _toggle_rc=0
-  _aid_read_toggle "$exec_yaml" "reporter" || _toggle_rc=$?
-  if [[ "$_toggle_rc" -eq 1 ]]; then
-    REPORTER_STATUS="disabled"; REPORTER_REASON="reporter.enabled:false in execution.yaml"; return 0
-  fi
-  if [[ "$_toggle_rc" -eq 2 ]]; then
-    REPORTER_STATUS="toggle_unreadable"; REPORTER_REASON="could not read the 'reporter' toggle in ${exec_yaml} — not the same as enabled or disabled"; return 0
-  fi
-  if [[ ! -f "$report" ]]; then
-    REPORTER_STATUS="missing"; REPORTER_REASON="delivery report missing at ${REPORTER_ARTIFACT}"; return 0
-  fi
-  local valid
-  valid="$(_aid_validate_test_evidence "$report" "$EVIDENCE_DIR")"
-  if [[ "$valid" == "true" ]]; then
-    REPORTER_STATUS="pass"; REPORTER_REASON="delivery report present with >=1 in-tree _test_evidence path on disk"
+# compute_obligations — plan mode: an open release_blocker of the plan blocks
+# (lib/aid-obligations.sh; an unreadable journal blocks too, never reads as empty).
+compute_obligations() {
+  [[ "$MODE" == "plan" ]] || return 0
+  local open rc=0
+  open="$(AID_PLAN_STATE_PROJECT_ROOT="$PROJECT_ROOT" aid_obligation_open "$PLAN_ID" release_blocker 2>&1)" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    add_input obligations "obligations.jsonl" "blocked" "the obligations journal cannot be read" false "invalid"
+    add_blocker obligations "blocking" "the obligations journal of ${PLAN_ID} cannot be read: ${open}"
+  elif [[ -n "$open" ]]; then
+    add_input obligations "obligations.jsonl" "blocked" "$(wc -l <<< "$open" | tr -d ' ') open release blocker(s)" false "present_but_failing"
+    add_blocker obligations "blocking" "open release blocker: $(head -n1 <<< "$open" | cut -f3); settle it with aid-obligations (resolve, or register a backlog IMP)"
   else
-    REPORTER_STATUS="fail"; REPORTER_REASON="delivery report _test_evidence references no in-tree file on disk"
-  fi
-}
-
-# compute_simplifier — CONDITIONAL: marker → toggle(simplifier.enabled) → file existence.
-# simplifier-report.md has no _test_evidence frontmatter (agents/simplifier.md), so the
-# content gate is file existence + non-empty — the existence substrate matches
-# fsm_eval_simplifier_present; an empty file is a content 'fail'.
-compute_simplifier() {
-  # ── PLAN mode: mandatory, same reasoning as compute_reporter ─────────────
-  # The `Head:` provenance line is the Simplifier's only subject binding (its report
-  # has no JSON envelope), so at the plan boundary it must name the frozen candidate.
-  if [[ "${MODE:-epic}" == "plan" ]]; then
-    local preport="${EVIDENCE_DIR}/simplifier-report.md"
-    SIMPLIFIER_ARTIFACT="simplifier-report.md"
-    if [[ ! -f "$preport" ]]; then
-      SIMPLIFIER_STATUS="missing"
-      SIMPLIFIER_REASON="simplifier-report.md missing in the plan-final run directory (${RUN_ID}) — the Simplifier is MANDATORY at the plan boundary"
-      return 0
-    fi
-    if [[ ! -s "$preport" ]]; then
-      SIMPLIFIER_STATUS="fail"
-      SIMPLIFIER_REASON="simplifier-report.md present but empty"
-      return 0
-    fi
-    if [[ "$(_markdown_head_match "$preport")" != "true" ]]; then
-      SIMPLIFIER_STATUS="fail"
-      SIMPLIFIER_REASON="simplifier-report.md has no 'Head: ${CANDIDATE_SHA}' provenance line — the Simplifier's subject is unproven, so it may have read any tree"
-      return 0
-    fi
-    SIMPLIFIER_STATUS="pass"
-    SIMPLIFIER_REASON="simplifier-report.md present, non-empty and carrying a Head: provenance line equal to the frozen candidate"
-    return 0
-  fi
-
-  local marker="${EVIDENCE_DIR}/ca-review-complete"
-  local exec_yaml="${PROJECT_ROOT}/.aid-o/config/execution.yaml"
-  local report="${EVIDENCE_DIR}/simplifier-report.md"
-  SIMPLIFIER_ARTIFACT="simplifier-report.md"
-
-  if [[ ! -f "$marker" ]]; then
-    SIMPLIFIER_STATUS="not_applicable"; SIMPLIFIER_REASON="not_plan_boundary"; return 0
-  fi
-  # P083 Step 6: rc=1 (explicit enabled:false) disables; rc=2 (unreadable/
-  # malformed) is its own named status — never coerced into "disabled".
-  local _toggle_rc=0
-  _aid_read_toggle "$exec_yaml" "simplifier" || _toggle_rc=$?
-  if [[ "$_toggle_rc" -eq 1 ]]; then
-    SIMPLIFIER_STATUS="disabled"; SIMPLIFIER_REASON="simplifier.enabled:false in execution.yaml"; return 0
-  fi
-  if [[ "$_toggle_rc" -eq 2 ]]; then
-    SIMPLIFIER_STATUS="toggle_unreadable"; SIMPLIFIER_REASON="could not read the 'simplifier' toggle in ${exec_yaml} — not the same as enabled or disabled"; return 0
-  fi
-  if [[ ! -f "$report" ]]; then
-    SIMPLIFIER_STATUS="missing"; SIMPLIFIER_REASON="simplifier-report.md missing in evidence dir"; return 0
-  fi
-  if [[ -s "$report" ]]; then
-    SIMPLIFIER_STATUS="pass"; SIMPLIFIER_REASON="simplifier-report.md present and non-empty"
-  else
-    SIMPLIFIER_STATUS="fail"; SIMPLIFIER_REASON="simplifier-report.md present but empty"
+    add_input obligations "obligations.jsonl" "pass" "no open release blocker" true
   fi
 }
 
@@ -830,21 +649,18 @@ main() {
 
   # --- REQUIRED presence rows ---
   check_required_present review_profile        review_profile        "${EVIDENCE_DIR}/review-profile.json"
-  check_required_present delivery_gate         delivery_gate         "${EVIDENCE_DIR}/delivery-gate.json"
-  check_required_present semantic_review_final semantic_review_final "${EVIDENCE_DIR}/semantic-review-final.json"
+  # The semantic file is the whole-plan round's own output: with no round at all,
+  # its absence is the final_review blocker below, not a second one beside it.
+  [[ "$MODE" == "plan" && ! -e "${EVIDENCE_DIR}/cp7/rounds.json" ]] \
+    || check_required_present semantic_review_final semantic_review_final "${EVIDENCE_DIR}/semantic-review-final.json"
   check_required_present acceptance_evidence   acceptance_evidence   "${EVIDENCE_DIR}/acceptance-evidence.json"
 
-  # IMP-464 (D2): C3 consumes the plan AC command/verdict evidence explicitly.
-  # It is not interchangeable with a green gate aggregate: a missing or
-  # malformed per-criterion record is blocking in plan mode. Whether an
-  # honest "skipped" verdict is acceptable depends on whether an AC lens
-  # (ac_to_test_identity / requirement_test_drift) is ARMED by this run's
-  # review-profile.json required_lenses[] — required_present above already
-  # guarantees review-profile.json exists in plan mode.
+  # The plan's machine-checkable criteria (plan-diff.json) are read explicitly:
+  # they are not interchangeable with a green gate aggregate, so a missing or
+  # malformed record blocks in plan mode. A plan with no machine-checkable
+  # criterion is truthfully `skipped`; its prose criteria are judged by the
+  # whole-plan round's final_criteria role.
   if [[ "$MODE" == "plan" ]]; then
-    local ac_lens_required_rp="false"
-    jq -e '.review_profile.required_lenses // [] | any(. == "ac_to_test_identity" or . == "requirement_test_drift")' \
-      "${EVIDENCE_DIR}/review-profile.json" >/dev/null 2>&1 && ac_lens_required_rp="true"
     local pd="${EVIDENCE_DIR}/plan-diff.json" pd_base="" pd_head="" pd_verdict=""
     if [[ ! -s "$pd" ]] || ! _is_json "$pd"; then
       add_input plan_diff "plan-diff.json" "blocked" "plan-diff.json missing or invalid" false
@@ -854,19 +670,9 @@ main() {
       pd_head="$(jq -r '.head_commit // ""' "$pd" 2>/dev/null || true)"
       pd_verdict="$(jq -r '.overall_verdict // ""' "$pd" 2>/dev/null || true)"
       # aid-plan-diff.sh's OVERALL vocabulary is pass/fail/partial/skipped
-      # (present/absent are its PER-AC verdicts, one level down). This check
-      # originally required present/absent here — a vocabulary that the
-      # producer never emits at this level — so every real plan-diff, verdict
-      # "pass" included, was blocked as unbound. Caught by AC4 of the boundary
-      # suite once CI's red streak was finally read.
+      # (present/absent are its PER-AC verdicts, one level down).
       local pd_verdict_ok=0
-      if [[ "$ac_lens_required_rp" == "true" ]]; then
-        # an armed AC lens demands a REAL evaluation: pass or fail,
-        # never a skipped/partial non-answer
-        [[ "$pd_verdict" == "pass" || "$pd_verdict" == "fail" ]] && pd_verdict_ok=1
-      else
-        case "$pd_verdict" in pass|fail|partial|skipped) pd_verdict_ok=1 ;; esac
-      fi
+      case "$pd_verdict" in pass|fail|partial|skipped) pd_verdict_ok=1 ;; esac
       if [[ "$pd_base" != "$PLAN_BASE_SHA" || "$pd_head" != "$CANDIDATE_SHA" ]] \
          || [[ "$pd_verdict_ok" -ne 1 ]] \
          || ! jq -e '(.results | type == "array") and (.summary | type == "object")' "$pd" >/dev/null 2>&1; then
@@ -884,7 +690,7 @@ main() {
           skipped|partial) pd_row_verdict="not_required_skipped" ;;
           fail)            pd_row_verdict="blocked" ;;
         esac
-        add_input plan_diff "plan-diff.json" "$pd_row_verdict" "bound plan AC verdict=${pd_verdict} (ac_lens_required=${ac_lens_required_rp})" true
+        add_input plan_diff "plan-diff.json" "$pd_row_verdict" "bound plan AC verdict=${pd_verdict}" true
         case "$pd_verdict" in
           pass|skipped|partial) : ;;
           *) add_blocker plan_diff "blocking" "plan-diff reports absent acceptance criteria" ;;
@@ -966,79 +772,22 @@ main() {
     add_blocker verification_report "blocking" "verification (--at-head) ${VERIFICATION_VERDICT}: ${VERIFICATION_REASON}"
   fi
 
-  # --- profile-gated curator-report + audit-report (same C3 gate for both) ---
-  C3_ACTIVE=false
-  _c3_gate_active "$EVIDENCE_DIR" && C3_ACTIVE=true
-  process_profile_gated curator_report "${EVIDENCE_DIR}/curator-report.json"
-  process_profile_gated audit_report   "${EVIDENCE_DIR}/audit-report.json"
-
-  # --- Reporter / Simplifier CONDITIONAL ---
-  compute_reporter
-  compute_simplifier
-
-  # head_match for our own markdown producers (contract 3): when the CONDITIONAL status is `pass`
-  # the report is present+valid, so its at-HEAD basis is the `Head: <sha>` provenance line
-  # (mtime NEVER). No provenance → "unknown" (never blocks). For non-pass statuses the status
-  # itself drives the row/blocker, so keep the mechanical status→head_match mapping.
-  local reporter_hm simplifier_hm reporter_verdict simplifier_verdict
-  local reporter_reason_final="$REPORTER_REASON" simplifier_reason_final="$SIMPLIFIER_REASON"
-  reporter_verdict="$(_status_to_verdict "$REPORTER_STATUS")"
-  simplifier_verdict="$(_status_to_verdict "$SIMPLIFIER_STATUS")"
-  if [[ "$REPORTER_STATUS" == "pass" && "$MODE" == "plan" ]]; then
-    # Plan mode's Reporter artifact is the run-scoped protocol-v2 JSON, so its at-HEAD
-    # basis is the JSON revision stamp, not a Markdown provenance line.
-    reporter_hm="$(_artifact_head_match "${EVIDENCE_DIR}/delivery-report.json")"
-  elif [[ "$REPORTER_STATUS" == "pass" ]]; then
-    reporter_hm="$(_markdown_head_match "${PROJECT_ROOT}/${REPORTER_ARTIFACT}")"
-  else
-    reporter_hm="$(_status_headmatch "$REPORTER_STATUS")"
-  fi
-  if [[ "$SIMPLIFIER_STATUS" == "pass" ]]; then
-    simplifier_hm="$(_markdown_head_match "${EVIDENCE_DIR}/simplifier-report.md")"
-  else
-    simplifier_hm="$(_status_headmatch "$SIMPLIFIER_STATUS")"
-  fi
-
-  # NET-NEW stale blocking (contract 1): a report that is present+valid (status pass) but provably
-  # stale (provenance Head != HEAD → head_match false) must NOT look usable. "unknown" never blocks.
-  if [[ "$REPORTER_STATUS" == "pass" && "$reporter_hm" == "false" ]]; then
-    reporter_verdict="blocked"
-    reporter_reason_final="${REPORTER_REASON}; but STALE: delivery-report provenance Head != HEAD (out-of-pack; not covered by --at-head verification)"
-  fi
-  if [[ "$SIMPLIFIER_STATUS" == "pass" && "$simplifier_hm" == "false" ]]; then
-    simplifier_verdict="blocked"
-    simplifier_reason_final="${SIMPLIFIER_REASON}; but STALE: simplifier-report.md provenance Head != HEAD (out-of-pack; not covered by --at-head verification)"
-  fi
-
-  add_input reporter    "$REPORTER_ARTIFACT"    "$reporter_verdict"    "$reporter_reason_final"    "$reporter_hm"
-  add_input simplifier  "$SIMPLIFIER_ARTIFACT"  "$simplifier_verdict"  "$simplifier_reason_final"  "$simplifier_hm"
-  # P083 Step 6: toggle_unreadable blocks the same as missing|fail — an
-  # unreadable/malformed toggle must never let release_ready stay true.
-  case "$REPORTER_STATUS" in
-    missing|fail|toggle_unreadable) add_blocker reporter "blocking" "reporter ${REPORTER_STATUS}: ${REPORTER_REASON}" ;;
-    pass) [[ "$reporter_hm" == "false" ]] && add_blocker reporter "blocking" "reporter delivery report stale (head_match=false): provenance Head != HEAD" ;;
-  esac
-  case "$SIMPLIFIER_STATUS" in
-    missing|fail|toggle_unreadable) add_blocker simplifier "blocking" "simplifier ${SIMPLIFIER_STATUS}: ${SIMPLIFIER_REASON}" ;;
-    pass) [[ "$simplifier_hm" == "false" ]] && add_blocker simplifier "blocking" "simplifier-report.md stale (head_match=false): provenance Head != HEAD" ;;
-  esac
+  # --- the independent reading of the whole delivery, and what the plan still owes ---
+  compute_final_review
+  compute_obligations
 
   # --- PLAN mode: the per-EPIC roll-up (one input row + blocker PER EPIC) --------
-  # The plan-level delivery-gate.json / acceptance-evidence.json are AGGREGATES; a
-  # plan-level green built on a silently-omitted EPIC is exactly the failure this
-  # boundary exists to prevent. So every EPIC merged into the plan must (a) still have
-  # its per-EPIC evidence directory on disk and (b) be NAMED in both aggregates'
-  # sources[]. A missing contribution is a blocker whose input_id NAMES that EPIC
+  # The plan-level acceptance-evidence.json is an AGGREGATE; a plan-level green
+  # built on a silently-omitted EPIC is exactly the failure this boundary exists to
+  # prevent. So every EPIC merged into the plan must (a) still have its per-EPIC
+  # evidence directory on disk and (b) be NAMED in the aggregate's sources[]. A missing contribution is a blocker whose input_id NAMES that EPIC
   # (`epic_rollup:<epic_id>`), never a generic aggregate failure.
   PLAN_EPICS_JSON="[]"
   if [[ "$MODE" == "plan" ]]; then
     local manifest_p="${PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
     PLAN_EPICS_JSON="$(jq -c '[.plan_boundary_manifest.epic_runs[]? | {epic_id, run_id, status, evidence_dir, terminal_reason: (.terminal_reason // null)}]' "$manifest_p" 2>/dev/null)" || PLAN_EPICS_JSON="[]"
     [[ -z "$PLAN_EPICS_JSON" ]] && PLAN_EPICS_JSON="[]"
-    local dg_srcs="" ae_srcs=""
-    if _is_json "${EVIDENCE_DIR}/delivery-gate.json"; then
-      dg_srcs="$(jq -r '[(.sources // [])[] | if type == "object" then (.epic_id // "") else . end] | join(" ")' "${EVIDENCE_DIR}/delivery-gate.json" 2>/dev/null || echo "")"
-    fi
+    local ae_srcs=""
     if _is_json "${EVIDENCE_DIR}/acceptance-evidence.json"; then
       ae_srcs="$(jq -r '[(.sources // [])[] | if type == "object" then (.epic_id // "") else . end] | join(" ")' "${EVIDENCE_DIR}/acceptance-evidence.json" 2>/dev/null || echo "")"
     fi
@@ -1047,13 +796,12 @@ main() {
       [[ -z "$_eid" ]] && continue
       _reasons=""
       [[ -d "${PROJECT_ROOT}/${_edir}" ]] || _reasons="${_reasons}per-EPIC evidence directory ${_edir} is absent; "
-      [[ " ${dg_srcs} " == *" ${_eid} "* ]] || _reasons="${_reasons}not named in the plan-level delivery-gate.json sources[]; "
       [[ " ${ae_srcs} " == *" ${_eid} "* ]] || _reasons="${_reasons}not named in the plan-level acceptance-evidence.json sources[]; "
       if [[ -n "$_reasons" ]]; then
         add_input "epic_rollup:${_eid}" "${_edir}" "blocked" "roll-up contribution missing for ${_eid}: ${_reasons%; }" false
         add_blocker "epic_rollup:${_eid}" "blocking" "the plan-level roll-up is missing ${_eid}'s contribution: ${_reasons%; }"
       else
-        add_input "epic_rollup:${_eid}" "${_edir}" "pass" "contribution present on disk and named in both plan-level aggregates" true
+        add_input "epic_rollup:${_eid}" "${_edir}" "pass" "contribution present on disk and named in the plan-level acceptance evidence" true
       fi
     done < <(jq -r '.[] | select(.status == "merged_to_plan") | [.epic_id, .evidence_dir] | @tsv' <<<"$PLAN_EPICS_JSON" 2>/dev/null)
 
@@ -1203,7 +951,7 @@ main() {
 
   # --- summary_for_pm (mechanical template — no LLM) ---
   local summary_for_pm
-  summary_for_pm="release_ready=${release_ready}; evidence=${VERIFICATION_VERDICT}; reporter=${REPORTER_STATUS}; simplifier=${SIMPLIFIER_STATUS}; waivers=${waiver_count}; blockers=${blocker_count}; merge_mode=${merge_mode}"
+  summary_for_pm="release_ready=${release_ready}; evidence=${VERIFICATION_VERDICT}; waivers=${waiver_count}; blockers=${blocker_count}; merge_mode=${merge_mode}"
   if [[ "$MODE" == "plan" ]]; then
     summary_for_pm="plan=${PLAN_ID}; run=${RUN_ID}; reviewed_candidate=${CANDIDATE_SHA}; target=${TARGET_REF}@${TARGET_HEAD_SHA}; ${summary_for_pm}"
   fi
@@ -1231,7 +979,7 @@ main() {
       --arg plan "$PLAN_ID" --arg run "$RUN_ID" \
       --arg cand "$CANDIDATE_SHA" --arg tref "$TARGET_REF" --arg thead "$TARGET_HEAD_SHA" \
       --arg gres "$gates_result" --arg gpath "${gates_report_path#"${PROJECT_ROOT}/"}" \
-      --argjson epics "$PLAN_EPICS_JSON" '
+      --argjson epics "$PLAN_EPICS_JSON" --argjson close "$(aid_plan_close_cost "$(dirname "$EVIDENCE_DIR")" "$PLAN_ID")" '
       ($m[0].plan_boundary_manifest // {}) as $b
       | {
           plan_id: $plan,
@@ -1247,9 +995,9 @@ main() {
           plan_final_gates: {report: $gpath, result: $gres,
                              quarantine_substitutes: ($b.quarantine_substitutes // [])},
           specialist_review: ($b.plan_final_review // null),
-          remaining_backlog: ($b.plan_final_backlog // [])
+          remaining_backlog: ($b.plan_final_backlog // []),
+          close: $close
         }')" || plan_summary_json="null"
-    [[ -z "$plan_summary_json" ]] && plan_summary_json="null"
   fi
 
   # --- envelope-derived fields ---
@@ -1280,10 +1028,6 @@ main() {
     --arg pm_brief_status "pending" \
     --argjson evidence_verified_at_head "$evidence_verified_at_head" \
     --arg evidence_verification_status "$VERIFICATION_VERDICT" \
-    --arg reporter_status "$REPORTER_STATUS" \
-    --arg reporter_reason "$REPORTER_REASON" \
-    --arg simplifier_status "$SIMPLIFIER_STATUS" \
-    --arg simplifier_reason "$SIMPLIFIER_REASON" \
     --argjson delivered_summary_ref "$delivered_summary_ref_json" \
     --arg summary_for_pm "$summary_for_pm" \
     --argjson plan_summary "$plan_summary_json" \
@@ -1300,10 +1044,6 @@ main() {
       pm_brief_status: $pm_brief_status,
       evidence_verified_at_head: $evidence_verified_at_head,
       evidence_verification_status: $evidence_verification_status,
-      reporter_status: $reporter_status,
-      reporter_reason: $reporter_reason,
-      simplifier_status: $simplifier_status,
-      simplifier_reason: $simplifier_reason,
       delivered_summary_ref: $delivered_summary_ref,
       summary_for_pm: $summary_for_pm
     }
@@ -1374,8 +1114,7 @@ main() {
   exit 0
 }
 
-# Run the CLI only when EXECUTED, not when sourced (P062 Step 8). Same guard
-# aid-c3-dispatch.sh already uses. Without it, sourcing
+# Run the CLI only when EXECUTED, not when sourced (P062 Step 8). Without it, sourcing
 # this file to reach one pure function ran the whole aggregator and exited,
 # which is why its classification logic had never been unit-tested — only
 # observed through a full evidence pack.

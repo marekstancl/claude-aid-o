@@ -6146,8 +6146,7 @@ YAML
   echo "$dir/fsm-state.yaml"
 }
 
-# _rs_install_spies — the spy harness, following
-# scripts/tests/bats/test-aid-c3-dispatch.bats:1059-1068: a temp directory
+# _rs_install_spies — the spy harness: a temp directory
 # prepended to PATH holding executables that append their argv to a log.
 #
 # ONLY SEAMS A `done-advance` CALL CAN GENUINELY REACH ARE INSTALLED, so that a
@@ -7223,7 +7222,6 @@ YAML
 # harness — which is the "justified PCRE dependency" the backlog entry allows,
 # tracked to shrink, never to grow:
 #   aid-release.sh                              3  (CHANGELOG/pyproject version extraction)
-#   lib/delivery-checks/dg08-runtime-env.sh     1  (advisory engines probe, || true)
 #   tests/test-instruction-consistency.sh       2  (dev harness, GNU host only)
 #   aid-fsm.sh                                  1  (:1411 step_n counter — pre-existing,
 #                                                   named as known in E-064-2_2 CP2)
@@ -7247,7 +7245,6 @@ _imp274_scan() {
 
   declare -A allow=(
     ["aid-release.sh"]=3
-    ["lib/delivery-checks/dg08-runtime-env.sh"]=1
     ["tests/test-instruction-consistency.sh"]=2
     ["aid-fsm.sh"]=1
   )

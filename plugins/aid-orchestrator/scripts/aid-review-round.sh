@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
 # aid-review-round.sh — one review round at a time, for every checkpoint:
-# the plan review (CP1), the step review (CP2), the EPIC review (CP3) and the
-# fast-mode review (CP6). P094 Step 6; the CP1-only round script is gone.
+# the plan review (CP1), the step review (CP2), the EPIC review (CP3), the
+# fast-mode review (CP6) and the whole-plan review at plan close (CP7).
 #
 # Which review a call is about is the first option group:
 #   --plan <file>                                       CP1: evidence/<plan_id>/cp1/
 #   --checkpoint cp2 --evidence-dir <run dir> --step N  evidence/<run>/cp2/step-N/
 #   --checkpoint cp3 --evidence-dir <run dir>           evidence/<run>/cp3/
 #   --checkpoint cp6 --evidence-dir <do dir>            evidence/do/<id>/cp6/
+#   --checkpoint cp7 --evidence-dir <final run dir>     evidence/<plan>/<R-…-final-N>/cp7/
 #
 #   prepare … --round K [--only <role>] [--manual] [--stub]
 #       build the packet and one prompt per expected reviewer
@@ -25,7 +26,7 @@
 #   fix-check | finalize | dispute                       CP1 only (see below)
 #
 # Every subcommand loads and validates the checkpoint's reviewer block first
-# (review_checkpoints.plan_review / step_review / epic_review). A step round
+# (review_checkpoints.plan_review / step_review / epic_review / final_review). A step round
 # is prepared only from a step-check.json computed at HEAD, and closed only at
 # the same HEAD, with a recorded dispatch bracket for every claude reviewer
 # (unless the round was prepared --stub, which the FSM refuses to advance on).
@@ -108,7 +109,7 @@ if [[ -n "$PLAN" ]]; then
   NS=plan_review; BLOCK=plan_review; ROLES_SKILL="${AID_PLUGIN_PATH}/skills/plan-review-roles.md"
 elif [[ -n "$CHECKPOINT" ]]; then
   MODE=step
-  [[ "$CHECKPOINT" =~ ^cp[236]$ ]] || _die "--checkpoint must be cp2, cp3 or cp6" 2
+  [[ "$CHECKPOINT" =~ ^cp[2367]$ ]] || _die "--checkpoint must be cp2, cp3, cp6 or cp7" 2
   [[ -n "$EVID" && -d "$EVID" ]] || _die "--evidence-dir <dir> required and must exist" 2
   EVID="$(realpath "$EVID")"
   [[ -n "$ROOT" ]] || ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || _die "not inside a git repository; pass --project-root" 2
@@ -117,11 +118,12 @@ elif [[ -n "$CHECKPOINT" ]]; then
     cp2) [[ "$STEP" =~ ^[0-9]+$ ]] || _die "--step N required for cp2" 2; BASE="${EVID}/cp2/step-${STEP}"; NS=step_review; BLOCK=step_review ;;
     cp3) BASE="${EVID}/cp3"; NS=epic_review; BLOCK=epic_review ;;
     cp6) BASE="${EVID}/cp6"; NS=do_review; BLOCK=step_review; export RC_CHECKPOINT=cp6 ;;
+    cp7) BASE="${EVID}/cp7"; NS=final_review; BLOCK=final_review ;;
   esac
   ROLES_SKILL="${AID_PLUGIN_PATH}/skills/step-review-roles.md"
   STEPCHECK="${BASE}/step-check.json"
 else
-  _die "give --plan <file> (CP1) or --checkpoint cp2|cp3|cp6 --evidence-dir <dir> [--step N]" 2
+  _die "give --plan <file> (CP1) or --checkpoint cp2|cp3|cp6|cp7 --evidence-dir <dir> [--step N]" 2
 fi
 
 aid_review_config_load "$ROOT" "$BLOCK" "$ROLES_SKILL" || exit 2
@@ -218,6 +220,54 @@ _index_add() {
   fi
 }
 
+# _carried_roles <round_dir> <role>... — cp7, first round of an attempt that
+# follows a fix (<run>/fix-class.json): a role is carried, not asked again, when
+# nothing it reads was touched by the fix (criteria, claims, diff) AND it had
+# nothing to report in the previous attempt. Its answer is copied into this
+# round; prints {role: source path}. A role that reported anything is asked
+# again, because its evidence was checked against another commit.
+# _prev_attempt_rounds — the cp7 rounds of the previous attempt (a sibling run
+# directory), newest first; nothing when this is the first attempt.
+_prev_attempt_rounds() {
+  local fc="${EVID}/fix-class.json"
+  [[ -f "$fc" ]] || return 0
+  ls -d "$(dirname "$EVID")/$(basename "$(jq -r '.previous_run_dir // "none"' "$fc")")"/cp7/round-* 2>/dev/null | sort -t- -k2 -n -r
+}
+_carried_roles() {
+  local dir="$1" fc="${EVID}/fix-class.json" role feeds src out='{}'; shift
+  [[ -f "$fc" ]] || { echo '{}'; return 0; }
+  for role in "$@"; do
+    case "$role" in
+      final_criteria)   feeds='["criteria","diff"]' ;;
+      final_claims)     feeds='["claims","diff"]' ;;
+      *)                feeds='["diff"]' ;;
+    esac
+    jq -e --argjson f "$feeds" '(.invalidated_feeds - $f) == .invalidated_feeds' "$fc" >/dev/null || continue
+    src="$(for d in $(_prev_attempt_rounds); do
+             [[ -f "$d/measurement.json" ]] && jq -e --arg r "$role" '.valid | index($r)' "$d/collect.json" >/dev/null 2>&1 \
+               && { echo "$d/reviewer-${role}.json"; break; }
+           done)"
+    [[ -n "$src" ]] && jq -e '(.findings | length) == 0' "$src" >/dev/null 2>&1 || continue
+    cp "$src" "${dir}/reviewer-${role}.json" || continue
+    [[ -f "${src%/*}/codex-${role}.usage.json" ]] && cp "${src%/*}/codex-${role}.usage.json" "$dir/"
+    out="$(jq -c --arg r "$role" --arg s "$src" '.[$r] = $s' <<< "$out")"
+  done
+  echo "$out"
+}
+# _previous_attempt_round — cp7 after a fix: the last closed round of the previous
+# attempt, when it left a blocker or major open. A fix always moves the candidate,
+# so the confirmation happens in the NEXT attempt's first round: its packet shows
+# the reviewers what stayed open and what the fix changed.
+_previous_attempt_round() {
+  local d
+  for d in $(_prev_attempt_rounds); do
+    [[ -f "$d/measurement.json" ]] || continue
+    jq -e '[.findings[] | select((.status | IN("open", "disputed")) and (.severity == "blocker" or .severity == "major"))] | length > 0' "$d/merged.json" >/dev/null 2>&1 && echo "$d"
+    return 0
+  done
+}
+_is_carried() { jq -e --arg r "$2" '(.carried_from // {}) | has($r)' "$1/round.json" >/dev/null 2>&1; }
+
 cmd_prepare() {
   _need_round
   # The PM's switch (review_checkpoints.enabled / the checkpoint's own key) is
@@ -244,6 +294,9 @@ cmd_prepare() {
     dir="$(_round_dir "$ROUND")"
     # A packet without a round record is a prepare that died; it is rebuilt.
     [[ -f "${dir}/round.json" ]] && _die "round ${ROUND} already prepared; a retry goes through 'retry', a fresh round through the next number"
+    if [[ "$CHECKPOINT" == cp7 ]] && (( ROUND >= 2 )); then
+      _die "a whole-plan round is bound to one candidate, and a fix moves it: commit the fix, run plan-finalize --stage freeze, and prepare round 1 of the new attempt (its packet carries what stayed open and the fix)"
+    fi
     if (( ROUND > RC_ROUNDS_DEFAULT )); then
       local allowed; allowed="$(_override_rounds)"
       [[ -n "$allowed" && "$allowed" -ge "$ROUND" ]] \
@@ -282,20 +335,30 @@ cmd_prepare() {
     for role in "${roles[@]}"; do aid_plan_review_prompt_render "$role" "$ROUND" "$dir" || exit 1; done
   else
     local prevdir=""; (( ROUND >= 2 )) && prevdir="$(_round_dir $((ROUND - 1)))"
-    aid_step_review_packet_build "$ROOT" "$CHECKPOINT" "$dir" "$STEPCHECK" "${EVID}/plan.json" "${STEP:-}" "$prevdir" || exit 1
+    [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 ]] && prevdir="$(_previous_attempt_round)"
+    if [[ "$CHECKPOINT" == cp7 ]]; then
+      aid_final_review_packet_build "$ROOT" "$dir" "$STEPCHECK" "$EVID" "$prevdir" || exit 1
+    else
+      aid_step_review_packet_build "$ROOT" "$CHECKPOINT" "$dir" "$STEPCHECK" "${EVID}/plan.json" "${STEP:-}" "$prevdir" || exit 1
+    fi
     sha="$(_head)"
     mapfile -t roles < <(_expected_roles "$ROUND" | grep -v '^$')
     local min="${#roles[@]}"   # a step round needs every expected role (a codex role may be provider_absent)
+    local carried='{}'
+    [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 ]] && carried="$(_carried_roles "$dir" "${roles[@]}")"
     jq -n --arg cp "$CHECKPOINT" --argjson step "${STEP:-null}" --argjson round "$ROUND" --arg h "$sha" \
       --arg scs "$(jq -r .sha256 "$STEPCHECK")" --argjson min "$min" --arg at "$(_now)" \
       --argjson degraded "$([[ "$RC_DEGRADED" == 1 ]] && echo true || echo false)" \
       --argjson stub "$([[ "$STUB" == 1 ]] && echo true || echo false)" \
-      --arg conf "$([[ -n "$prevdir" ]] && echo "round-$((ROUND - 1))" || echo "")" \
+      --arg conf "$([[ -z "$prevdir" ]] || { (( ROUND >= 2 )) && echo "round-$((ROUND - 1))" || echo "$prevdir"; })" --argjson carried "$carried" \
       '{checkpoint: $cp, step: $step, round: $round, head_sha: $h, step_check_sha256: $scs,
         reviewers_expected: $ARGS.positional, min_answers_effective: $min, degraded: $degraded, stub: $stub,
-        confirmation_of: (if $conf == "" then null else $conf end), started_at: $at}' \
+        confirmation_of: (if $conf == "" then null else $conf end), started_at: $at}
+       + (if ($carried | length) > 0 then {carried_from: $carried} else {} end)' \
       --args "${roles[@]}" > "${dir}/round.json"
-    for role in "${roles[@]}"; do aid_step_review_prompt_render "$role" "$ROUND" "$dir" "$CHECKPOINT" "${STEP:-}" || exit 1; done
+    for role in "${roles[@]}"; do
+      _is_carried "$dir" "$role" || aid_step_review_prompt_render "$role" "$ROUND" "$dir" "$CHECKPOINT" "${STEP:-}" || exit 1
+    done
   fi
 
   trap - EXIT
@@ -304,7 +367,10 @@ cmd_prepare() {
     _log review_round_start checkpoint="$CHECKPOINT" step="${STEP:-null}" round="$ROUND" reviewers="${#roles[@]}"
   fi
   echo "prepared round ${ROUND}: ${#roles[@]} reviewers → ${dir}"
-  for role in "${roles[@]}"; do echo "  ${dir}/prompt-${role}.md  (focus $(_focus "$role"))"; done
+  for role in "${roles[@]}"; do
+    if _is_carried "$dir" "$role"; then echo "  ${role}: carried from the previous attempt (the fix touched nothing it reads, and it had no finding)"
+    else echo "  ${dir}/prompt-${role}.md  (focus $(_focus "$role"))"; fi
+  done
 }
 
 _existing_round() {
@@ -323,7 +389,7 @@ _stand_in() { jq -e '.fallback == "claude"' "$1/codex-${2}.usage.json" >/dev/nul
 # The cache belongs to the project under review, never to whatever directory the
 # controller happens to stand in — two projects reviewed from one cwd would
 # otherwise share one answer.
-_codex_probe() { ( AID_PROJECT_ROOT="$ROOT"; export AID_PROJECT_ROOT; source "${SCRIPT_DIR}/lib/aid-c3-dispatch.sh"; aid_codex_probe ); }
+_codex_probe() { ( AID_PROJECT_ROOT="$ROOT"; export AID_PROJECT_ROOT; source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"; aid_codex_probe ); }
 # _stand_in_line <dir> <role> <why> — what the controller must do instead of paying codex.
 _stand_in_line() {
   echo "STAND-IN: codex is unavailable ($3); dispatch ${1}/prompt-${2}.md to a general-purpose agent at model ${RC_STAND_IN_MODEL} (see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
@@ -350,8 +416,8 @@ cmd_dispatch() {
   fi
   local events="${dir}/codex-${ROLE}.events.jsonl" last="${dir}/codex-${ROLE}.last.txt" rc=0
   # In a subshell: the launcher's library sets its own shell options on load.
-  ( # shellcheck source=lib/aid-c3-dispatch.sh
-    source "${SCRIPT_DIR}/lib/aid-c3-dispatch.sh"
+  ( # shellcheck source=lib/aid-codex-transport.sh
+    source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"
     CODEX_MODEL="${RC_MODEL[$i]}"
     _run_codex_isolated "$ROOT" "${dir}/prompt-${ROLE}.md" "$events" "${dir}/codex-${ROLE}.stderr.txt" "$last"
   ) || rc=$?
@@ -431,8 +497,10 @@ cmd_collect() {
     fi
     aid_plan_review_unfence "$answer" "$tmp"
     if err="$(aid_plan_review_answer_error "$tmp" "$CHECKPOINT")"; then
-      if [[ "$(jq -r '.role' "$tmp")" != "$role" ]]; then
-        err="role_mismatch: the file names role $(jq -r '.role' "$tmp")"
+      local named; named="$(jq -r '.role' "$tmp")"
+      if [[ "$named" != "$role" ]]; then
+        _expects "$named" "$dir" && err="role_mismatch: the file names role ${named}" \
+          || err="unknown_role: ${named} is not a reviewer of this round"
       fi
     fi
     if [[ -z "$err" && "${RC_PROVIDER[$i]}" == codex && "$(jq -r '.provider // ""' "$tmp")" == claude ]] \
@@ -503,11 +571,11 @@ _dispatch_recorded() {
   jq -c --arg f "$focus" --arg r "$2" 'select(.event == "verifier_dispatch_complete" and .focus == $f and ((.output_file // "") | test("reviewer-" + $r + "\\.(json|missing)$")))' "$tl" 2>/dev/null | grep -q .
 }
 
-# ── the CP3 semantic file ──────────────────────────────────────────────────────
+# ── the semantic file of a whole-EPIC (cp3) or whole-plan (cp7) round ─────────
 # _semantic_final_write <verdict> — <run>/semantic-review-final.json, the
-# EPIC-scoped artifact three plan-final consumers keep reading where it always
-# was (aid-fsm.sh routed-findings reconciliation, aid-release-policy.sh input
-# row, aid-plan-fsm.sh plan-finalize): the union of every cp3 round's
+# artifact the boundary consumers keep reading where it always was (aid-fsm.sh
+# routed-findings reconciliation, aid-release-policy.sh input row,
+# aid-plan-fsm.sh plan-finalize): the union of every round's
 # merged.json by fingerprint (the later round's status wins), mapped to the
 # protocol shape and checked against defaults/schemas/semantic-review.schema.json
 # before it is moved into place. lib/aid-finding-merge.sh merges artifacts of
@@ -515,35 +583,42 @@ _dispatch_recorded() {
 # says so in merge_meta.merged_from.
 #   severity  blocker → critical, major → medium, minor → low
 #   status    fixed → resolved, carried → deferred, everything else → open
-#   base_sha  the EPIC's base_commit (fsm-state.yaml), range from step-check.json
+#   base_sha and range come from step-check.json (the EPIC's base_commit at cp3,
+#   the plan's base commit at cp7), so the file names what the reviewers saw
 _semantic_final_write() {
   local verdict="$1" out="${EVID}/semantic-review-final.json" tmp base range schema="${AID_PLUGIN_PATH}/defaults/schemas/semantic-review.schema.json"
-  base="$(yq -r '.base_commit // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"
-  range="$(jq -r '.range // ""' "$STEPCHECK")"
+  range="$(jq -r '.range // ""' "$STEPCHECK")"; base="${range%%..*}"
   tmp="${out}.tmp"
   local rounds=() r
   for r in "${BASE}"/round-*/merged.json; do [[ -f "$r" ]] && rounds+=("$r"); done
   (( ${#rounds[@]} )) || { echo "close: no merged.json under ${BASE}" >&2; return 1; }
-  jq -s --arg base "$base" --arg head "$(_head)" --arg range "$range" --arg v "$verdict" --arg at "$(_now)" \
-        --argjson roles "$(printf '%s\n' "${RC_ROLE[@]}" | jq -R . | jq -s .)" --argjson from "$(printf '%s\n' "${rounds[@]}" | jq -R . | jq -s .)" '
+  jq -s --arg base "$base" --arg head "$(_head)" --arg range "$range" --arg v "$verdict" --arg at "$(_now)" --arg cp "$CHECKPOINT" \
+        --arg project "$(basename "$ROOT")" --arg plan "$(basename "$(dirname "$EVID")")" --arg run "$(basename "$EVID")" \
+        --argjson roles "$(_json_strings "${RC_ROLE[@]}")" --argjson from "$(printf '%s\n' "${rounds[@]}" | jq -R . | jq -s .)" '
     def sev: {"blocker": "critical", "major": "medium", "minor": "low"}[.] // "low";
     def st: {"fixed": "resolved", "carried": "deferred"}[.] // "open";
     def file: (split(";")[0] | sub("^[0-9a-f]{7,40}:"; "") | split(":")[0]);
     (sort_by(.round) | map(.findings[]) | group_by(.fingerprint) | map(last)) as $f
-    | {artifact_type: "semantic_review", generated_at: $at, generated_by: "aid-review-round.sh close cp3",
-       revision: {base_sha: $base, head_sha: $head},
-       semantic_review: {mode: "final", range: $range, verdict: $v, lenses_run: $roles,
+    | {artifact_type: "semantic_review", generated_at: $at, generated_by: "aid-review-round.sh close \($cp)",
+       revision: {base_sha: $base, head_sha: $head}}
+      # a whole-plan file is bound to its plan and attempt (the run directory is <plan>/<run>)
+      + (if $cp == "cp7" then {identity: {project_id: $project, epic_id: null, plan_id: $plan, run_id: $run}} else {} end)
+      + {semantic_review: {mode: "final", range: $range, verdict: $v, lenses_run: $roles,
          merge_meta: {merged_from: $from, conflicts: []},
          findings: ($f | map({fingerprint, severity: (.severity | sev), lens: (.reported_by[0] // "step_check"),
                               check_id: (.fingerprint[7:23]), target_path: (.evidence | file), finding_class: (.reported_by[0] // "step_check"),
                               status: (.status | st), detail: "\(.claim) (\(.severity), reported \(.status); evidence \(.evidence); fix: \(.fix))"}))}}' \
     "${rounds[@]}" > "$tmp" || { rm -f "$tmp"; return 1; }
   local err
-  err="$(jq -r --slurpfile s "$schema" '
+  # A lens is a reviewer of this round, or step_check for a finding of the
+  # deterministic step check; no artifact carries a name nobody defined.
+  err="$(jq -r --slurpfile s "$schema" --argjson roles "$(_json_strings "${RC_ROLE[@]}" step_check)" '
     ($s[0]) as $sc | ($sc.properties.semantic_review.properties.findings.items) as $fi
     | if .artifact_type != $sc.properties.artifact_type.const then "artifact_type"
       elif (.semantic_review | type) != "object" then "semantic_review"
       elif (.semantic_review.mode | IN($sc.properties.semantic_review.properties.mode.enum[]) | not) then "semantic_review.mode"
+      elif (.semantic_review.lenses_run - $roles | length) > 0 then "lenses_run names \(.semantic_review.lenses_run - $roles | join(", ")), not a reviewer of this round"
+      elif ([.semantic_review.findings[].lens] - $roles | length) > 0 then "finding lens \([.semantic_review.findings[].lens] - $roles | unique | join(", ")) is not a reviewer of this round"
       else (first(.semantic_review.findings[] | . as $x
               | ($fi.required - (keys)) as $missing
               | if ($missing | length) > 0 then "finding \($x.fingerprint): missing \($missing | join(", "))"
@@ -556,6 +631,14 @@ _semantic_final_write() {
     echo "close: semantic-review-final.json does not satisfy ${schema}: ${err}" >&2; rm -f "$tmp"; return 1
   fi
   mv "$tmp" "$out"
+}
+
+# _record_final_writes — a cp7 close is a stage of the plan close: what it wrote
+# is recorded for the decision's integrity check (lib/aid-stage-log.sh).
+_record_final_writes() {
+  [[ "$CHECKPOINT" == cp7 ]] || return 0
+  # shellcheck disable=SC2046  # file names without spaces, relative to the run directory
+  aid_stage_writes_record "$EVID" cp7-close $(aid_stage_writes_inputs "$EVID" | grep -E '^(cp7/|semantic-review-final\.json$)')
 }
 
 cmd_close() {
@@ -578,6 +661,7 @@ cmd_close() {
         && mv "${measurement}.tmp" "$measurement" && added=1
     done
     (( added )) || _die "round ${ROUND} already closed"
+    _record_final_writes
     echo "round ${ROUND}: measurement updated"; return 0
   fi
 
@@ -593,6 +677,7 @@ cmd_close() {
         # A stand-in is dispatched by the controller like any claude reviewer,
         # so it owes the same bracket: a stand-in nobody dispatched never closes.
         [[ "${RC_PROVIDER[$i]}" == claude ]] || _stand_in "$dir" "$role" || continue
+        _is_carried "$dir" "$role" && continue
         _dispatch_recorded "$dir" "$role" || _die "no_dispatch_record: no start/complete bracket with focus $(_focus "$role") naming reviewer-${role}.json in ${dir}/timeline.jsonl; a reviewer file nobody dispatched does not close a round"
       done
     fi
@@ -606,7 +691,9 @@ cmd_close() {
     # actually answered, at the checkpoint's stand-in model.
     if [[ "$prov" == codex ]] && _stand_in "$dir" "$role"; then prov=claude; model="$RC_STAND_IN_MODEL"; fi
     status="$(jq -r --arg r "$role" 'if (.valid | index($r)) then "answered" elif (.missing | index($r)) then "missing" elif ((.provider_absent // []) | index($r)) then "provider_absent" else "invalid" end' "${dir}/collect.json")"
-    if [[ "$prov" == codex ]]; then
+    if _is_carried "$dir" "$role"; then
+      entry="$(jq -c --arg r "$role" '{tokens: 0, carried_from: .carried_from[$r]}' "${dir}/round.json")"
+    elif [[ "$prov" == codex ]]; then
       usage="${dir}/codex-${role}.usage.json"
       if [[ -f "$usage" ]]; then
         entry="$(jq -c '{tokens: (if (.tokens_in | type) == "number" and (.tokens_out | type) == "number" then .tokens_in + .tokens_out else "unknown" end)}
@@ -626,7 +713,9 @@ cmd_close() {
     # USD from the tracked price table (Step 11): codex reports input, cached
     # input and output apart; a claude figure is one total, priced at the blend.
     local usd
-    if [[ "$prov" == codex ]]; then
+    if _is_carried "$dir" "$role"; then
+      usd=0
+    elif [[ "$prov" == codex ]]; then
       usd="$(aid_review_usd "$model" "$(jq -r '.tokens_in // "unknown"' <<< "$entry")" "$(jq -r '.tokens_out // "unknown"' <<< "$entry")" "$(jq -r '.cache_read // 0' <<< "$entry")" 0)"
     else
       usd="$(aid_review_usd_blended "$model" "$(jq -r '.tokens' <<< "$entry")")"
@@ -661,8 +750,8 @@ cmd_close() {
     aid_step_review_route_open "$ROOT" "$EVID" "$CHECKPOINT" "$STEP" "$dir" "$(( ROUND >= last_allowed ? 1 : 0 ))" \
       || _die "routing the open findings failed; close can be run again"
     jq --arg at "$(_now)" '. + {routed_at: $at}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
-    if [[ "$CHECKPOINT" == cp3 ]]; then
-      _semantic_final_write "$verdict" || _die "the cp3 round cannot close: ${EVID}/semantic-review-final.json was not written; close can be run again"
+    if [[ "$CHECKPOINT" == cp3 || "$CHECKPOINT" == cp7 ]]; then
+      _semantic_final_write "$verdict" || _die "the ${CHECKPOINT} round cannot close: ${EVID}/semantic-review-final.json was not written; close can be run again"
     fi
   fi
 
@@ -679,6 +768,7 @@ cmd_close() {
        | (if $dc == "stubbed" then .dispatch_check = "stubbed" else . end)' "$index" > "${index}.tmp" && mv "${index}.tmp" "$index"
     jq --arg at "$(_now)" --arg v "$verdict" '. + {closed_at: $at, verdict: $v}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
   fi
+  _record_final_writes
   _log review_round_close checkpoint="$CHECKPOINT" step="${STEP:-null}" round="$ROUND" verdict="$verdict" \
     status="$(jq -r .status "${dir}/collect.json")" blockers_open="$(jq -r '.blockers_open // 0' "${dir}/merged.json" 2>/dev/null || echo 0)"
   echo "round ${ROUND} closed (${verdict}): $(jq -r '[.reviewers | to_entries[] | "\(.key)=\(.value.tokens)"] | join(" ")' "$measurement")$([[ "$stub" == true ]] && echo '  [stub: no dispatch check; the FSM refuses this round]')"

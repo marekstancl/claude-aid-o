@@ -166,7 +166,7 @@ EOF
 
   run _anc 'aid_ancillary_load "."; printf "%s\n" "${_AID_ANCILLARY_PATTERNS[@]}"'
   [ "$status" -eq 0 ]
-  [[ "$output" == *"falling back to the five legacy runtime paths"* ]]
+  [[ "$output" == *"falling back to the legacy runtime paths"* ]]
   [[ "$output" == *"never widened on a read error"* ]]
   # Exactly the five, and NOT the wider globs.
   [[ "$output" == *".aid-o/work/plan-state/**"* ]]

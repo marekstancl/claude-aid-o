@@ -17,11 +17,9 @@ artifact_type: control_boundary_baseline
 captured_at_version: "2.62.1"
 
 # path -> key -> expected value
+# (c3-audit-policy.yaml and delivery-gate.yaml left with their mechanisms in
+# 2.101.0: a removed control cannot be raised quietly.)
 policies:
-  defaults/policies/c3-audit-policy.yaml:
-    enforcement: observe
-  defaults/policies/delivery-gate.yaml:
-    enforcement: observe
   defaults/policies/review-profiles.yaml:
     enforcement: observe
   defaults/policies/semantic-review.yaml:

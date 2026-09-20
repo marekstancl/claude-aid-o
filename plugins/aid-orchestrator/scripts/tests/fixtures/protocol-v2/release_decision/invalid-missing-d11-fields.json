@@ -23,10 +23,6 @@
     "pm_brief_required": false,
     "pm_brief_status": "generated",
     "evidence_verified_at_head": true,
-    "evidence_verification_status": "pass",
-    "reporter_reason": "delivery report generated and verified at head",
-    "simplifier_status": "not_applicable",
-    "simplifier_reason": "no simplification pass configured for this run",
     "delivered_summary_ref": "evidence/E-059-2/delivery-report.json",
     "summary_for_pm": "All gates green; release is ready to merge automatically."
   }

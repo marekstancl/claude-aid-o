@@ -6,7 +6,7 @@ decoration?"* It distils the binding conventions from
 [`docs/plans/AID-v3-principles.md`](plans/AID-v3-principles.md) §1 and the P041
 governance recommendation
 ([`docs/plans/AID-audit-2026-06/03-governance-recommendation.md`](plans/AID-audit-2026-06/03-governance-recommendation.md)),
-and uses **P045 (Simplifier + Reporter)** as the end-to-end worked example.
+and ends with the areas added since, one section per plan.
 
 The two binding rules behind everything below:
 
@@ -251,8 +251,8 @@ override-by-default. Two repo examples:
 - The **cross-plan init guard** (~aid-fsm.sh:1479–1501): `cmd_init` refuses to
   start a new plan when the previous plan has an `audit-report.md` but no
   `ca-review-complete` marker — `exit 1` with a remediation message.
-- `fsm_check_cp4_curator_validation` (aid-fsm.sh:283) — requires the CP4 curator
-  validation output when a curator commit touched production code; fails closed.
+- `fsm_check_review_round` — `increment-step` and `done-advance` refuse without a closed,
+  passing review round at HEAD; fails closed.
 
 **When to choose which.** Use the severity-layer when the signal is new and you
 want it advisory-then-promotable (the responsible default under §1's
@@ -261,12 +261,9 @@ positives and trains reflexive `--force`). Use a hard-die only when an immediate
 stop is correct regardless of empirical track record (an integrity invariant, a
 structural impossibility).
 
-**Plan-boundary vs per-EPIC placement.** A plan-level check must attach to the
-`ca-review-complete` marker (the plan boundary), **not** to a per-EPIC
-`done-advance`. `fsm_eval_delivery_report_present` returns `null` (not
-applicable) until `ca-review-complete` exists in the EPIC's evidence dir —
-that's what stops a plan-final check from false-blocking every non-final EPIC of
-the plan.
+**Plan-boundary vs per-EPIC placement.** A plan-level check belongs to a `plan-finalize`
+stage, **not** to a per-EPIC `done-advance` — an intermediate EPIC of a `plan_branch` plan
+skips the release stack, so a check placed there never runs for the plan.
 
 ---
 
@@ -283,47 +280,13 @@ This matters for anti-fabrication. In `agent_tool` mode the CC Agent tool writes
 `subagent` mode. So in the default mode the anti-fabrication floor is:
 
 - **structural-presence** checks (the output file actually exists),
-- an **independent Auditor** pass, and
+- the **review rounds**, whose answers are bound to a dispatch bracket, and
 - **honest agent instructions** in `pipeline.md` (MUST-dispatch /
   MUST-NOT-self-review).
 
 Hard, non-fabricatable provenance enforcement (the interval-bracket against a
 real dispatch timeline) requires **opt-in `subagent` mode**. Don't design a new
 check assuming the timeline is there by default — it isn't.
-
----
-
-## Worked example: P045 Simplifier + Reporter
-
-P045 added two plan-boundary agents end-to-end. Each artifact maps to its type
-and canonical home:
-
-- **Agent contracts (type 13).** `agents/simplifier.md` (propose-only; never
-  edits code) and `agents/reporter.md` (tests the delivery, writes the report).
-- **Template (type 10).** `defaults/templates/delivery-report.md` — the shape of
-  `.aid-o/reports/{plan_id}-delivery.md`, including the `_test_evidence[]`
-  frontmatter the structural check reads.
-- **Orchestration (types 1/3).** `skills/pipeline.md` §4 (dispatch-wrapper:
-  wrap reporter/simplifier dispatch by mode, emit `aid-emit-dispatch.sh`
-  start/complete with `--focus reporter|simplifier`) and §7 DONE (the
-  plan-boundary sequence: Simplifier after C+A fixes, Reporter last after CP4).
-- **Structural check (type 4).** `fsm_eval_delivery_report_present` feeds the
-  **severity layer** as `delivery_report_present` — advisory by default, surfaced
-  only at `review→release`, `null` until the plan boundary.
-- **Policy (type 9).** `check-severity.yaml` (the check's severity registry),
-  `defaults/policies/review-checkpoints.yaml` (`simplifier_pass` /
-  `delivery_report` toggles) and `execution.yaml`.
-- **Dispatch guard.** `aid-emit-dispatch.sh` enforces a focus allowlist so
-  `reporter` / `simplifier` are recognized dispatch foci.
-- **Registry.** Entries for the new check and agents in
-  `plugins/aid-orchestrator/defaults/enforcement-registry.yaml`.
-
-**agent_tool caveat.** Because the default dispatch mode is `agent_tool`, the
-Reporter's delivery report is held honest by structural presence + the
-independent Auditor + the §7 dispatch instructions — not by timeline provenance.
-The `delivery_report_present` check verifies the report exists and references a
-real on-disk artifact; it does not (and cannot, in `agent_tool` mode) prove the
-Reporter was independently dispatched. That hard guarantee needs `subagent` mode.
 
 ---
 
@@ -339,22 +302,6 @@ When adding a new detection capability, register it in `defaults/enforcement-reg
 See also **Plan review (CP1)** in this file for how a plan is reviewed before
 generation.
 
-### Plan Boundary Enforcement
-
-- **plan-close gate**: `aid-fsm.sh:cmd_plan_close()` — enforces all 4 required reports (curator-report, audit-report, simplifier-report, delivery-report) before `ca-review-complete` marker. Bypass: toggle-skip pattern with PM rationale.
-- **CI floor**: `defaults/ci/plan-boundary-required-check.yml` — GitHub Actions check for committed boundary manifests in `.aid-o/reports/`. Requires `!.aid-o/reports/` in `.gitignore` (see `commands/aid-init.md`).
-
-### CP5 Contract
-
-- **blocking_findings check**: `aid-fsm.sh:cmd_done_advance()` — reads `blocking_findings` field from `audit-report.md` as a structured top-level field (not prose). `blocking_findings: true` blocks the MERGE option in the PM summary.
-- **Contract location**: `skills/review-checkpoint-contracts.md` §CP5 Contract (see CP4 Contract for the adjudicator flow).
-
-### behavior_trace Enforcement
-
-- **High-risk patterns**: 8 categories in `skills/review-checkpoint-contracts.md` (auth, routes, validation, migrations, fsm, security sinks, payment, dep manifests).
-- **Structural gate**: `aid-fsm.sh:fsm_check_verifier_output()` — fires when `behavior_trace_required: true` explicitly set in verifier output. Returns non-zero if `behavior_trace_count == 0`.
-- **Per-checkpoint diff scope**: `aid-prefilter.sh --checkpoint <cp2|cp3|cp4|cp6>` — CP2=step diff, CP3=base_commit..HEAD, CP4=applied C+A diff.
-
 ---
 
 ## AID Control System v2 Protocol (enforced vs reference)
@@ -364,7 +311,7 @@ AID Control System v2 introduces a shared protocol v2 envelope that all control 
 ### Schema files
 - `defaults/schemas/aid-protocol-v2.schema.json` — canonical envelope schema (JSON Schema draft 2020-12); every field annotated `$comment: enforced` or `$comment: reference`
 - `defaults/schemas/README.md` — enforced-vs-reference table with `aid-protocol-validate.sh`'s exact enforcement scope
-- 13 type-specific schemas: `plan-graph.schema.json`, `contract-manifest.schema.json`, `review-profile.schema.json`, `delivery-gate.schema.json`, `ui-fidelity.schema.json`, `semantic-review.schema.json`, `acceptance-evidence.schema.json`, `audit-report.schema.json`, `audit-input-manifest.schema.json`, `release-decision.schema.json`, `pm-decision-brief.schema.json`, `curator.schema.json`, `delivery-report.schema.json`
+- 7 type-specific schemas: `plan-graph.schema.json`, `contract-manifest.schema.json`, `review-profile.schema.json`, `ui-fidelity.schema.json`, `semantic-review.schema.json`, `acceptance-evidence.schema.json`, `release-decision.schema.json`, `pm-decision-brief.schema.json`. The artifact types of retired producers (`audit_report`, `audit_input_manifest`, `curator`, `delivery_report`, `delivery_gate`, `c3_dispatch`) stay in the validator so older evidence still validates; their schema files are gone.
 - `defaults/schemas/run-control-protocol.schema.json` — per-run protocol lock (E2+ wiring)
 
 ### Validator: `aid-protocol-validate.sh`
@@ -404,72 +351,6 @@ Legacy artifacts (`control_protocol: "legacy"`) → exit 0 with `legacy_skipped`
 
 ---
 
-## C1 Delivery Engine (E2)
-
-The C1 Delivery Engine (`aid-delivery-gate.sh`) is a deterministic (no-LLM) gate
-that runs after every EXECUTE phase in observe mode. It produces a protocol-v2
-`delivery-gate.json` artifact.
-
-### Profiles
-
-The engine auto-detects the project profile from `defaults/policies/delivery-gate.yaml`:
-
-| Profile | Detected by |
-|---------|-------------|
-| `plugin-bash` | `.claude-plugin/plugin.json` present |
-| `npm-workspaces` | `package.json` with `"workspaces"` |
-| `npm-workspaces+plugin-bash` | Both above (union) |
-| `unverifiable` | Neither detected |
-
-The profile determines which check commands to run for each DG check (DG-01..12).
-
-### Checks (DG-01..12)
-
-| ID | Name | Applicability |
-|----|------|---------------|
-| DG-01 | dependency-consistency | lockfile present |
-| DG-02 | build | build command declared |
-| DG-03 | typecheck | `.ts` files present |
-| DG-04 | test | always |
-| DG-05 | consumer-compile | public exports changed |
-| DG-06 | removed-dep | deps removed from manifest |
-| DG-07 | state-consistency | always |
-| DG-08 | runtime-env | `.nvmrc` or `engines` present |
-| DG-09 | static-coverage | typecheck/lint command declared |
-| DG-10 | startup-smoke | built entry point present |
-| DG-11 | build-config | bundler config present |
-| DG-12 | authority | authority policy files present |
-
-### Observe -> Blocking Promotion
-
-E2 is **observe mode only**. The engine writes telemetry but never blocks FSM transitions.
-
-To promote to blocking (E10):
-1. Set `enforcement: blocking` in `defaults/policies/delivery-gate.yaml`
-2. All DG checks must have green baselines on your codebase first
-3. Update enforcement-registry entries from `status: planned` to `status: active`
-
-### Reading delivery-gate.json
-
-```json
-{
-  "delivery_gate": {
-    "delivery_ready": false,
-    "profile": "npm-workspaces+plugin-bash",
-    "phase": "D0",
-    "checks": [
-      { "id": "dg01", "name": "dependency-consistency", "status": "skip",
-        "skip_reason": "legacy_no_child_rows", "output_preview": "" }
-    ],
-    "summary": { "total": 12, "pass": 0, "fail": 0, "skip": 11, "unverifiable": 1, "would_block": false }
-  }
-}
-```
-
-Full artifact is a protocol-v2 envelope validated by `aid-protocol-validate.sh`.
-
----
-
 ## Evidence Pack Verifier (E2.5)
 
 `aid-evidence-verify.sh` is a standalone deterministic CLI that verifies an evidence pack for a completed run. It does not modify FSM state — it is a PM/CI tool for post-DONE validation.
@@ -502,16 +383,6 @@ Exit codes: 0 = pack verified, non-zero = one or more required checks failed.
 | `protocol_validate` | Any artifact fails `aid-protocol-validate.sh` |
 | `fingerprint` | Any artifact has nondeterministic finding fingerprint |
 | `ttl_registry` | Registry has planned row past deadline without deferral |
-| `observe_blocking_interpretation` | `delivery-gate.json` missing `enforcement` key, or value not in {observe, dual_run, blocking} |
-
-### Observe-vs-blocking rule
-
-The `observe_blocking_interpretation` check fires only when `delivery-gate.json` is in the evidence pack. If absent → `skip` (not a failure). The check validates that:
-- `delivery_gate.summary.enforcement` is present and not null
-- Its value is in `{observe, dual_run, blocking}`
-- If `enforcement: observe` → `would_block` is a bool (present and not null)
-
-This catches the real E2 finding: `delivery-gate.json` has `summary.would_block: true` but `enforcement` key is **absent** — the verifier reports `observe_blocking_interpretation: fail`.
 
 ### Output
 
@@ -764,300 +635,38 @@ SEMANTIC_REVIEW_POLICY=blocking bash scripts/aid-fsm.sh increment-step ...
 
 ---
 
-## Delivery Map Configuration (E6)
+## Closing a plan (P096)
 
-The `delivery-map.yaml` file (`.aid-o/config/delivery-map.yaml`) configures opt-in C1 probes for DG-15, DG-17, and DG-18. Without this file, all three probes are skipped (not-applicable).
+A `plan_branch` plan is closed by `aid-plan-fsm.sh plan-finalize` in four stages — `freeze`,
+`gates`, `produce`, `decide` — with the whole-plan review round (`cp7`, three roles, run by
+`aid-review-round.sh`) between `produce` and `decide`. The controller instruction is one
+section, `commands/aid-run.md` "Closing a plan (plan-final)"; nothing else restates it.
 
-### Schema
+What a contributor has to respect:
 
-```yaml
-# .aid-o/config/delivery-map.yaml
-meta:
-  status: active        # draft | active | deprecated
-  confidence: high      # low | medium | high
-  stack: react-router+express
-
-routes:
-  framework: react-router   # react-router | express
-  route_files: ["src/routes/**/*.tsx"]
-  link_globs: ["src/**/*.tsx"]
-
-oracle_baselines:
-  events_log:
-    analytics_output_file: "data/events.json"
-    expected_cardinality: 100
-    cardinality_method: jq_length  # jq_length | grep_count
-```
-
-### DG-15 — Route Resolve (literal links only)
-Checks that `<Link to="...">` paths resolve to declared routes. Scope: **literal strings only** — dynamic links (computed values, template literals) are not checked and no false-negative is claimed.
-
-Dynamic links (`to={variable}`, `to={computedPath}`, template literals) are **out of scope** — the probe cannot see them and makes no false-negative claim for those patterns.
-
-### DG-17 — Independent Oracle No-Drop
-Checks that analytics output files meet declared minimum cardinality. Requires `analytics_output_file` and `expected_cardinality` per baseline. Without a file → config_missing (not a fake pass).
-
-### DG-18 — Acceptance Provenance
-Reads FSM step-*-verify.md evidence, surfaces acceptance history into delivery-gate.json. Never emits a fail — skip is handled by the dispatcher.
-
-### What E6 Does NOT Deliver
-- DG-13 (reachability analysis) — requires AST tooling
-- DG-14 (wire shape) — requires AST tooling
-- DG-16 (fallback invocation) — requires call-graph analysis
-- Living-contract enforcement (map_drift, C0 preflight, delivery_areas) — separate schema/setup phase
-- Automatic delivery-map generation (`aid-init` proposal)
+- **One attempt, one candidate.** A fix moves the candidate, so it mints the next attempt.
+  `freeze` classifies what changed (`fix-class.json`) and keeps every result the change cannot
+  have affected: a gate row whose input paths and definition did not move is copied with
+  `reused_from`, a reviewer role whose feeds did not move and who had no finding is carried.
+- **The decision reads a closed inventory.** `aid-release-policy.sh` decides from
+  `gates_report`, `final_review` (the closed `cp7/rounds.json` at the candidate), `obligations`,
+  the review profile, the acceptance evidence and the semantic file the round writes. Every file
+  a stage writes is recorded in `stage-writes.jsonl`; a decision input edited by hand is refused
+  by name.
+- **Every refusal names the next command** (`_pfsm_refusal_next`), and says when the PM is the
+  way out.
+- **Removed, with successors on record** (`reference/review-successors.md`): the reporter, the
+  curator, the auditor's plan-final (C3) contract and its Codex bridge, the simplifier as a
+  required step, CP4, CP5, the C1 delivery gate and the dual run. The Codex transport they
+  shared is `scripts/lib/aid-codex-transport.sh`.
 
 ---
 
-## C3 Independent Audit (E8)
+## The release decision (`aid-release-policy.sh`)
 
-C3 is a **risk-gated, distrust-based** independent audit stage, delivered across two EPICs
-of plan P057: `E-057-1_2` (auditor conversion, FSM hook, policy) and `E-057-2_2` (Curator
-sequencing, invalidation-map observe, red-green tests, this release). It sits between DONE-gate
-completion and merge, and — unlike the legacy A-J health audit it grew out of — is designed to
-be **wrong on purpose in test fixtures** and prove the pipeline actually catches that.
-
-### Protocol-v2 Artifacts
-
-`audit-report.json` and `audit-input-manifest.json` (`defaults/schemas/audit-report.schema.json`,
-`defaults/schemas/audit-input-manifest.schema.json`) follow the same protocol-v2 envelope
-convention as every other C-stage artifact: a **type-named top-level key**
-(`.audit_report`, matching `.semantic_review.findings` / `.ui_fidelity.result`), with
-**findings at the envelope top level** (`scripts/aid-protocol-validate.sh`,
-`defaults/schemas/aid-protocol-v2.schema.json`) rather than nested under the type key. Every
-audit-report.json carries:
-- `.audit_report.blocking_findings` (boolean) — the single source of truth `aid-fsm.sh`
-  reads for release blocking (no legacy `.md`/`.yaml` `yaml_field()` parsing for C3 runs).
-- `.audit_report.provider` / `.model` / `.process_id` — echoed verbatim from the
-  Orchestrator's `audit_trigger` at dispatch time, never self-reported by the auditor agent
-  (D7 — self-introspection ban; see `agents/auditor.md`).
-- `.audit_report.input_manifest_hash` — provenance linkage to the input manifest the audit
-  actually ran against.
-
-### `agents/auditor.md` Dual-Mode
-
-The auditor is now **one agent, two protocols**, selected by `audit_trigger.mode` in the
-Orchestrator's dispatch input — never self-detected:
-- **`mode: "c3"`** — the risk-gated, distrust-based Independent Audit described here. PASS is
-  never the default; the auditor must actively fail to find a blocking issue.
-- **`mode: "legacy_health"`** — the original trust-based A–J project-health audit, kept as a
-  compat section for callers that still want a general health score. `audit_trigger.mode`
-  absent from the dispatch input is a dispatch error, not a silent fallback to legacy.
-
-### Independence Detection — `aid-audit-independence.sh`
-
-`scripts/lib/aid-audit-independence.sh detect --required <level>` reports whether the
-**required** independence level for the current run's risk profile is actually achievable —
-never "what's the best available", matching D8's fail-closed intent. Three levels:
-`context_only` (always available, no external dependency), `cross_model` (requires
-`AID_AUDIT_ALT_MODEL` env var to differ from the auditor's own configured model),
-`cross_provider` (requires Codex binary in PATH + `codex exec --help` sanity + confirmed
-`codex login status` + `--json`/`--output-schema` flags present). This script is
-**detection-only** — it never invokes `codex exec` with a real prompt and never dispatches a
-real audit; unconfirmable or missing signals degrade to `unverifiable`, never to a silent pass.
-
-### `c3-audit-policy.yaml` — Risk Profile → Required Independence
-
-`defaults/policies/c3-audit-policy.yaml` is the authoritative source of
-`required_independence_level` per risk profile (D8). Only two profiles carry `c3_required: true`
-today: `high` (requires `cross_model`) and `unverifiable` (requires `cross_provider` — a
-profile that, by construction, itself will likely report `status: unverifiable` and block,
-rather than silently skip the audit). `docs_trivial`/`low`/`medium` are not C3-required.
-
-### FSM Done-Advance C3 Hook (`aid-fsm.sh`)
-
-`cmd_done_advance()` carries a C3 hook (anchored by the search text `C3 independent-audit hook`,
-not a line number — it drifted across fix rounds within the same EPIC) that fires only when the
-run's risk profile (from `review-profile.json`) is `high` or `unverifiable` — the two
-`c3_required: true` profiles. When it fires, it fail-closed blocks release on any of:
-- `.audit_report.blocking_findings == true` (critical/high finding),
-- `.status == "unverifiable"` (required independence level could not be confirmed),
-- missing/unparseable `audit-report.json`,
-- missing `.audit_report.input_manifest_hash` (provenance — presence/format check only, see
-  "What E8 Does NOT Deliver" below),
-- a stale `.revision.head_sha` that no longer matches the run's current HEAD.
-
-No `// false` jq fallback anywhere in this hook — absence or unreadability is always treated as
-blocking, never as a silent pass. Runs with no `review-profile.json` at all (pre-C3 runs) leave
-the hook a no-op and fall through unchanged to the legacy check.
-
-### Curator Runs Serially After C3 (E-057-2_2 Step 1)
-
-`skills/pipeline.md` now dispatches **Auditor (C3), then Curator — serial, not parallel** (state
-table, DONE checklist, and both narrative sequencing notes were updated; see `agents/curator.md`
-"Dispatched by... AFTER the Auditor (C3) completes — serial, not parallel"). The Curator reads
-`audit-report.json` as a **required** input and dual-emits both the existing
-`curator-report.md` (unchanged FSM plan-close/CP4 `.md` checks) and a new `curator-report.json`
-carrying `proposal_status: PROPOSALS_READY|NO_PROPOSALS|INPUT_INCOMPLETE` plus
-`.curator.audit_report_ref` — the sha256 of the actual bytes of the `audit-report.json` the
-Curator consumed. `aid-fsm.sh`'s content-ref sequencing guard validates the integrity chain:
-when `curator-report.json` exists, recomputes `sha256sum` of the current `audit-report.json`
-and compares it against `.curator.audit_report_ref`; a mismatch or missing field blocks
-(fail-closed). When the risk profile requires C3 (high/unverifiable), absence of the entire
-`curator-report.json` file also blocks — because Curator is required to dual-emit it.
-When risk profile does not require C3 (other profiles), absence is a silent no-op (pre-C3
-Curator runs have no JSON file). This proves genuine consumption-order (the Curator actually
-read the current audit output), not merely "same HEAD commit" — a same-HEAD check alone
-cannot distinguish a Curator that ran before C3 from one that ran after. **`recommended_disposition` (the
-approve/reject/defer merge-influence contract consumed by `gate-fixer.md`, `simplifier.md`, and
-`pipeline.md`) is completely untouched** — E8 only changes sequencing and vocabulary, never
-merge-authority.
-
-### `invalidation-map.json` — Observe-Only (E-057-2_2 Step 2)
-
-`scripts/lib/aid-invalidation-map.sh` is a new, standalone producer (schema:
-`defaults/schemas/invalidation-map.schema.json`) that, given an applied fix's changed paths,
-derives:
-- `affected_c1_checks[]` — a **deterministic subset**: it reads `changed_paths_match` globs
-  directly from `delivery-gate.yaml` via `yq` and re-implements the same glob-matching approach
-  (rather than calling `aid-delivery-gate.sh`'s private `_check_applicable`, which is not
-  designed for reuse — an explicit correction made during E8).
-- `affected_c2_modes[]` — **conservative, not precise**: any changed path touching a C2-relevant
-  surface marks ALL four canonical C2 modes (local/wiring/behavior/final) as affected. There is
-  no path→mode substrate today, so this script is honest about the imprecision instead of
-  pretending derivation it can't deliver.
-
-It emits `invalidation-map.json` plus a timeline `log_event` (`invalidation_map_produced`) and is
-registered in the enforcement registry as `invalidation_map_observe` (advisory, `status: active`,
-same shape as the existing `c2_wiring_gate_observe` pattern). Critically, it **never** invokes
-`aid-delivery-gate.sh` or the semantic-review engine itself — `require_rerun` is a flag/request
-for a human or a future automation to act on, not a trigger. This is proven behaviorally in
-`scripts/tests/bats/test-invalidation-map.bats`.
-
-### What E8 Does NOT Deliver
-
-E8 is deliberately **C3 audit core**, not a full external-audit-and-auto-rerun system. See
-[`docs/plans/2026-06-29-BACKLOG.md` § "E8 Deferred"](plans/2026-06-29-BACKLOG.md) for the authoritative list; the
-items that most affect how you should read the guarantees above:
-
-- **No real `codex exec` dispatch** — `aid-audit-independence.sh` only *detects* whether
-  `cross_provider` independence is achievable (binary present, `--help` sane, login confirmed,
-  required flags exposed). The actual subprocess dispatch, output-schema parsing, and merge into
-  `audit-report.json` is net-new infra, deferred. A `cross_provider`-required run today stays
-  "detected → unverifiable until dispatch is wired", never a false pass.
-- **No automatic invalidation-triggered re-run** — `invalidation-map.json` is observe-only.
-  `require_rerun` is recorded, never acted on; a new FSM/pipeline re-run primitive is a
-  separate, deferred piece of work.
-- **No precise C2-mode affectedness derivation** — C2 modes are triggered by plan-graph assembly
-  position, not file path; E8 marks affectedness conservatively (see above) rather than
-  pretending a path-based derivation that doesn't exist.
-- **C4 consumption of release decisions — deferred to E9.** Nothing in E8 wires
-  `audit-report.json` / `curator-report.json` / `invalidation-map.json` into an actual
-  release-policy decision; that is C4/E9 territory.
-- **Merge-authority is completely untouched, deferred to E9.** The Curator's
-  `recommended_disposition` auto-approve/reject/defer logic — the actual merge-influence
-  contract — is not modified by E8 in any way; only sequencing (Curator after C3) and vocabulary
-  (`proposal_status`) changed.
-- **No cryptographic hash-equality binding, in either of the two places E8 introduces a
-  "prove real consumption via hash" mechanism.** Both `.audit_report.input_manifest_hash` (the
-  C3 audit report's own provenance hash, E-057-1_2) and `.curator.audit_report_ref` (this
-  EPIC's Curator content-ref sequencing guard) are **presence/format checks**, not a
-  cryptographic chain of custody — self-disclosed as deferred (Curator finding IMP-176,
-  `E-057-1_2` final report). They prove "a hash of the right shape is present and, for the
-  Curator case, matches the current file's sha256" — not a signed or otherwise
-  tamper-evident provenance chain.
-- **Large legacy A-J project-health audit cleanup** — the converted auditor keeps A-J as a
-  legacy-compat section (`agents/auditor.md` "Legacy Compat: A–J Health Audit"); splitting it
-  into a standalone project-health tool is deferred.
-- **Codex auth detection mechanism is a best-effort probe, not a researched standard** — no
-  `codex login-status` convention existed in-repo before E8; the current check treats anything
-  other than a clear "Logged in" signal as unconfirmed (fail-closed), and the concrete auth
-  probe itself is flagged TBD for follow-up research.
-
----
-
-## C3 Cross-Provider Dispatch Bridge (P065)
-
-P065 resolves the single largest deferral of the E8 C3 core (see "What E8 Does
-NOT Deliver" → *No real `codex exec` dispatch*). Where E8 only **detected**
-whether `cross_provider` independence was achievable, P065 ships the real
-subprocess dispatch, the trust boundary that turns an untrusted external
-response into an `audit-report.json`, and the FSM verification that binds that
-report back to the raw Codex output at HEAD. The audit is now performed by an
-actual second vendor (Codex), not an in-process Claude `Agent()` call.
-
-### `aid-c3-dispatch.sh` — three subcommands
-
-`scripts/lib/aid-c3-dispatch.sh` is the bridge. It has three deterministic
-subcommands, each a distinct stage of the dispatch lifecycle:
-
-- **`build-manifest`** — assembles the hash-manifested Codex brief (the audit
-  input): the changed-file set, the run's risk profile, and the versioned prompt
-  rendered against the run's facts. The manifest is content-hashed so the audit
-  can later be proven to have run against exactly these inputs.
-- **`dispatch`** — invokes the real Codex CLI as a fresh subprocess. It is
-  **always probed as `cross_provider`** (a different vendor than the auditor's
-  own model) and is **non-sticky** — each run re-probes availability rather than
-  trusting a cached "codex is here" flag. The untrusted response crosses the
-  trust boundary through `_validate_response` (schema + shape, hardened against a
-  multi-document-JSON bypass), `_normalize`, and `_write_report` /
-  `_write_unverifiable`.
-- **`verify [--reference]`** — the provenance + faithful-transform check: it
-  re-binds the written `audit-report.json` to the raw Codex output it was
-  transformed from, and confirms the report describes HEAD. This is the exit-0
-  signal the FSM gate consumes.
-
-### The two contracts
-
-The bridge sits between two schemas:
-
-- **Input manifest** — the `build-manifest` output; the hash-manifested brief the
-  Codex process reads.
-- **Codex response** (`defaults/schemas/c3-codex-response.schema.json`) — the
-  shape the external process must return. A response that fails this schema is
-  routed to `_write_unverifiable`, never coerced into a pass.
-
-The versioned prompt template (`c3-audit-prompt-v1.md`) is rendered by the
-deterministic `aid-render-prompt.sh`, so the same run facts always produce the
-same brief — the prompt is data with a version, not an ad-hoc string.
-
-### Normalization and raw-binding (faithful-transform proof)
-
-The external response is **untrusted input**. `_normalize` maps it into the
-protocol-v2 `audit-report.json` envelope; the report retains a binding back to
-the raw Codex output so `verify` can prove the report is a **faithful transform**
-of what Codex actually returned — not a fabricated or drifted summary. The
-faithful-transform binding plus the provenance chain (input-manifest hash →
-dispatch → report → HEAD) is what makes the C3 report trustworthy without
-trusting the auditor to self-report.
-
-### Independence via provider, not sandbox
-
-Codex reads the repository **read-only** — independence does **not** come from a
-filesystem jail. It comes from being a **different vendor running in a fresh
-process**: a distinct model family, distinct training, distinct execution
-context. A read-only repo view is sufficient because the guarantee being sought
-is *independent judgment*, not *containment*. Do not design the bridge assuming a
-sandbox boundary; the boundary is the vendor split.
-
-### `c3_on_unavailable` — degradation policy
-
-`c3-audit-policy.yaml`'s `c3_executor` block is executor-first with a
-`cross_provider` probe and `c3_on_unavailable: unverifiable`. When Codex is not
-available, the run degrades to `unverifiable` (which the C3-required profiles
-treat as blocking — fail-closed, never a silent pass). The alternative
-`degraded_advisory` disposition — where an unavailable executor downgrades to a
-non-blocking advisory instead of blocking — ships in a **later phase of this same
-plan**, not here.
-
-### Observe → blocking staging
-
-The FSM `done-advance` C3 hook shells out to `scripts/lib/aid-c3-dispatch.sh verify`, making
-the full report↔raw faithful-transform binding a **real, deterministic,
-merge-blocking capability** — code, not prose. The shipped default enforcement
-stays **`observe`**; the real blocking activation is decided at a later milestone
-(**E10**), after calibration, consistent with every other C-stage gate's
-observe→blocking promotion pattern. Registered as `c3_cross_provider_dispatch`
-(`type: 1`, `surface: internal-guard`) in `defaults/enforcement-registry.yaml`.
-
----
-
-## C4 Release Policy (E9)
-
-C4 is the release-decision aggregator: the single deterministic place that decides whether an
-EPIC's evidence pack is releasable. It is pure bash/jq — **no LLM** — so its verdict is
-reproducible and auditable, and it is the first control layer to actually consume the C1/C2/C3
-artifacts into a release decision (E8 explicitly deferred that consumption to here).
+The release-decision aggregator is the single deterministic place that decides whether an
+EPIC's — or, at a plan's close, a plan's — evidence pack is releasable. It is pure bash/jq —
+**no LLM** — so its verdict is reproducible and auditable.
 
 ### Producer: `aid-release-policy.sh`
 
@@ -1069,10 +678,7 @@ against `defaults/schemas/` via `aid-protocol-validate.sh`). It aggregates a fix
 
 | Class | Inputs | Effect when absent/failing |
 |-------|--------|----------------------------|
-| **REQUIRED** | `review_profile`, `delivery_gate`, `semantic_review_final`, `acceptance_evidence`, `gates_report`, `plan_review`, `verification_report` | `blocked` verdict + a `blocking` blocker → `release_ready=false` |
-| **PROFILE-GATED** | `audit_report`, `curator_report` | required only when the C3 risk gate is active for the run's `review-profile.json`; otherwise `advisory` |
-| **ADVISORY** | `invalidation_map` | never blocks (records `require_rerun` as a request, not an enforcement) |
-| **CONDITIONAL** | `reporter`, `simplifier` | see the D11 CONDITIONAL model below |
+| **REQUIRED** | `review_profile`, `semantic_review_final`, `acceptance_evidence`, `gates_report`, `plan_review`, `verification_report`, `final_review` (the closed `cp7/rounds.json` of a plan, the `cp3` index of an EPIC), `obligations` | `blocked` verdict + a `blocking` blocker → `release_ready: false` |
 | **OPTIONAL** | `waiver-*.json` | surfaced in `waivers_applied[]`; **waived ≠ pass** |
 
 `release_ready` is `true` **iff** `blockers` is empty **and** `evidence_verified_at_head` is
@@ -1092,25 +698,13 @@ content — **content-verdict blocking is deferred to E10**. Fail-closed rules t
   genuine tool error (missing harness, exit 2/10/20, unparseable report) degrades to
   `unverifiable`.
 
-### Dual-run consumer: the `done-advance` hook
+### Consumer: the `done-advance` hook
 
-The FSM `done-advance review → release` transition runs C4 in an **observe** dual-run hook
-alongside the legacy release checks and emits a `release_policy_dual_run` timeline event
-comparing the two verdicts. The event carries `head_sha`, `match`, `legacy_ready`, and a
-never-empty `divergence_class` from a total 8-value taxonomy: `none`, `verification_only`,
-`reporter_missing`, `simplifier_missing`, `required_input`, `c4_permissive`, `mixed`,
-`unclassified` (the fail-closed floor — the classifier never returns empty/null, even on
-aggregator crash).
-
-The hook is **observe-only by default** (divergence never blocks the transition). Setting
-`RELEASE_DECISION_POLICY` to a policy file with `enforcement: blocking` flips it to a live
-blocking branch. A broken aggregator emits `result: crash` + `divergence_class: unclassified`
-and done-advance **still passes** (`set -e` safe). When a hard-exit legacy gate (tiered
-compliance, streamlined-integration, cp4-curator) preempts the C4 slot, a
-`release_policy_preempted` event records which gate fired instead. These two observe events plus
-the force→waiver writer are registered in
-[`enforcement-registry.yaml`](../plugins/aid-orchestrator/defaults/enforcement-registry.yaml)
-as `release_policy_dual_run` / `release_policy_preempted` / `force_writes_waiver`.
+In `legacy_epic_release_mode` the FSM `done-advance review → release` transition runs the
+aggregator and logs a `release_decision` timeline event (`release_ready`, `exit_code`,
+`enforcement`, `head_sha`). **Observe by default**; a `RELEASE_DECISION_POLICY` file with
+`enforcement: blocking` turns `release_ready: false` into a refusal. A crashed aggregator is
+logged and never blocks. For a `plan_branch` plan the decision is `plan-finalize --stage decide`.
 
 ### PM handoff: `aid-pm-brief.sh`
 
@@ -1118,13 +712,13 @@ as `release_policy_dual_run` / `release_policy_preempted` / `force_writes_waiver
 projection of `release-decision.json` into the PM machine handoff — it reads **exactly one**
 evidence file (the decision) and no siblings (cycle-break). It emits `pm-decision-brief.json`
 (protocol-v2 `pm_decision_brief`) + a human `pm-summary.md`, then does one idempotent patch-back
-of `pm_brief_status` into the decision. The human summary shows evidence / Reporter / Simplifier
-/ waiver status **in full even for an auto-merge run**, so an auto-merge is never silent — but
+of `pm_brief_status` into the decision. The human summary shows evidence / review / waiver
+status **in full even for an auto-merge run**, so an auto-merge is never silent — but
 see the honest phasing limitation below.
 
 ### D11 — release-decision state model
 
-D11 is the set of state fields the C4 decision carries so the PM handoff is legible without
+D11 is the set of state fields the decision carries so the PM handoff is legible without
 re-deriving anything. All live under `release_decision` and are echoed 1:1 into
 `pm-decision-brief.json`:
 
@@ -1134,30 +728,9 @@ re-deriving anything. All live under `release_decision` and are echoed 1:1 into
 | `pm_brief_status` | `pending` → `generated` \| `failed` \| `incomplete` | brief lifecycle (see phasing) |
 | `evidence_verified_at_head` | boolean | did `aid-evidence-verify.sh --at-head` pass at current HEAD |
 | `evidence_verification_status` | `pass` \| `fail` \| `unverifiable` | fail (mismatch/dirty) vs unverifiable (tool error) — distinct |
-| `reporter_status` / `simplifier_status` | `pass` \| `fail` \| `missing` \| `disabled` \| `not_applicable` | CONDITIONAL 5-enum |
 | `merge_mode` | `auto` \| `manual` \| `blocked` | informative routing, NOT an enforcement gate |
 | `delivered_summary_ref` | path \| `null` | already-resolved pointer, echoed not re-opened |
 | `summary_for_pm` | string | mechanical one-line template, no LLM |
-
-**Reporter / Simplifier CONDITIONAL model.** Reporter and Simplifier are **plan-boundary** roles.
-Their C4 status is decided over the SAME underlying signals the FSM's
-`fsm_eval_delivery_report_present` / `fsm_eval_simplifier_present` compliance evaluators use (the
-`ca-review-complete` marker, the `execution.yaml` enable toggle via
-`scripts/lib/aid-review-signals.sh`, and — for Reporter — the delivery report's
-`_test_evidence[]` on disk):
-
-1. **Off the plan boundary** (no `ca-review-complete` marker) → `not_applicable`
-   (`reason: not_plan_boundary`). Does NOT affect `release_ready` — the per-EPIC case.
-2. **On the boundary but disabled** (`reporter.enabled:false` / `simplifier.enabled:false`) →
-   `disabled`. Does NOT affect `release_ready`.
-3. **On the boundary, enabled, artifact absent** → `missing` → a `blocking` blocker →
-   `release_ready=false`.
-4. **On the boundary, enabled, artifact present + valid** → `pass`.
-
-The 5-enum maps onto `inputs[]` via `_status_to_verdict` (`missing→blocked`,
-`disabled`/`not_applicable→advisory`), mirroring how the existing compliance-gate evaluators
-collapse `disabled`/`not_applicable` into the same non-blocking result — C4 adds the richer
-5-enum on top without changing that regression surface.
 
 **Auto-merge-brief phasing — the honest L1-F2 limitation.** `pm_brief_status` is **always
 `pending`** at C4-write time — even for a `release_ready:true` / `merge_mode:auto` decision. The
@@ -1179,21 +752,17 @@ Per Principle #1 (a detector is not enforcement), E9 core delivers the C4 **mech
   a merge that lacks a PM brief. "Auto-merge never silent" is an E9 *pipeline convention*, not a
   structural guarantee. Enforcement (a `--validate`-gated MERGE that fails closed when
   `pm_brief_status != generated`) is deferred to **E10**.
-- **Dual-run defaults to observe, not blocking.** The `release_policy_dual_run` hook records
-  divergence; it does not enforce C4 until a project opts in via
-  `RELEASE_DECISION_POLICY: enforcement: blocking`. C4 becoming the sole release authority is E10.
-- **PROFILE-GATED inputs depend on live review-profile production.** The C3 risk gate that makes
-  `audit_report` / `curator_report` REQUIRED only fires when `review-profile.json` is present
-  (**IMP-177**, now resolved-by-P059 for the C3-activation half; end-to-end metric verification
-  is E10).
+- **The per-EPIC decision defaults to observe, not blocking.** `done-advance` logs it; it does
+  not enforce it until a project opts in via `RELEASE_DECISION_POLICY: enforcement: blocking`.
+  At a plan's close (`--stage decide`) the decision is always enforced.
 - **Evidence-freshness binding is presence/format, not cryptographic** — `head_sha` /
   `input_manifest_hash` are checked for presence and staleness, not recomputed-and-compared for
   hash equality (**IMP-176**, E10 territory).
-- **IMP-179 (subagent protocol-cache staleness) is unresolved** — Curator/Auditor subagent
-  system prompts resolve from the installed plugin cache, not the live repo, so an `agents/*.md`
-  change made inside an EPIC is not picked up by that same EPIC's own DONE-phase review dispatch
-  (evidenced 3×). Paste the changed protocol verbatim into the dispatch prompt until a
-  dispatch-time freshness-hash check lands.
+- **IMP-179 (subagent protocol-cache staleness) is unresolved** — an `aid-orchestrator:*`
+  subagent's system prompt resolves from the installed plugin cache, not the live repo, so an
+  `agents/*.md` change made inside an EPIC is not picked up by that same EPIC's own dispatches.
+  Paste the changed protocol verbatim into the dispatch prompt until a dispatch-time
+  freshness-hash check lands.
 - **IMP-191 (finding-fingerprint collision) is deliberately deferred from P059** —
   `fingerprint_audit_report()` in `scripts/lib/aid-finding-fingerprint.sh` joins its 7 fields
   with a raw `0x1F` byte and is not injective; it is a determinism/tamper-evidence check (no
@@ -1461,7 +1030,7 @@ default but also an invisible dead end for the PM.
 
 ### Single-use PM-override artifacts
 
-A PM override (the C3 grant, the EPIC supersede record) is a file the producer
+A PM override (the EPIC supersede record, the resume artifact) is a file the producer
 writes and exactly one consumer claims. The claim is:
 
 ```bash
@@ -1875,7 +1444,7 @@ Three consumers sit on it. `lib/aid-recovery-ladder.sh` loads it
 (`aid_recovery_policy_load`), records every attempt in
 `<evidence>/recovery-ladder.jsonl` and returns PERMISSION — it never performs an
 action. `lib/aid-recovery-adjudicate.sh` takes the exhausted case to the isolated Codex
-transport (`_run_codex_isolated`, shared with the C3 dispatch bridge) with a
+transport (`_run_codex_isolated`, shared with the review rounds) with a
 fact pack, and returns exactly one allowlisted action or the literal `escalate`. And the terminus stamps `auto_controller:
 blocked_for_pm` on the run, which `/aid-status` renders.
 

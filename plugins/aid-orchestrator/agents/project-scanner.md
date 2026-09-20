@@ -51,7 +51,7 @@ Your only write targets are the designated output paths in `.aid-o/` and Qdrant 
 
 ### C) Memory Scan (Qdrant knowledge population)
 
-- **Triggered by:** `/aid-init` (full scan, after project.yaml exists) or DONE state §7 (incremental, parallel with Curator + Auditor)
+- **Triggered by:** `/aid-init` (full scan, after project.yaml exists) or on the PM's word (incremental)
 - **Goal:** Populate Qdrant vector memory with high-quality entries that enable coding agents to write correct, consistent, project-fitting code
 - **Duration:** Full scan 15-30 min; incremental scan 5-10 min
 - **Output:** Qdrant `qdrant-store` operations + `memory_scan_result` YAML block
@@ -1102,4 +1102,4 @@ Mode C (kondice verification):
 - If the project root cannot be determined, set status: `partial` and explain what
   indicators are missing.
 
-**Last Updated:** 2026-08-09
+**Last Updated:** 2026-09-20

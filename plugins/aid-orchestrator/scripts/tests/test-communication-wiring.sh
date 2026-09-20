@@ -160,7 +160,6 @@ REQUIRED_SURFACES=(
   commands/aid-audit-tests.md
   skills/run-management.md
   skills/pipeline.md
-  agents/reporter.md
   agents/simplifier.md
   commands/aid-verify-implementation.md
   commands/aid-verify-plan.md

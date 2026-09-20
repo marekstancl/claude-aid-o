@@ -30,8 +30,8 @@
         },
         "lenses_run": {
           "type": "array",
-          "items": { "type": "string" },
-          "$comment": "lens identifiers that were applied in this review run"
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "$comment": "reviewer roles applied in this run; membership in the round's reviewers is enforced by aid-review-round.sh close"
         },
         "findings": {
           "type": "array",
@@ -50,7 +50,8 @@
               },
               "lens": {
                 "type": "string",
-                "$comment": "which lens produced this finding"
+                "pattern": "^[a-z][a-z0-9_]*$",
+                "$comment": "the reviewer role that produced this finding, or step_check; membership is enforced by aid-review-round.sh close"
               },
               "check_id": {
                 "type": "string",

@@ -1,0 +1,9 @@
+{"role": "final_claims", "checkpoint": "cp7",
+ "findings": [{"id": "final_claims-1", "checkpoint": "cp7",
+               "step": 7,
+               "severity": "blocker",
+               "claim": "CHANGELOG 0.29.0 states as an accomplished fact that reasoning_effort moved from the app's _REASONING_EFFORT_OVERRIDE to the gateway alias and that model swaps are now config-only, and that num_retries: 0 is set for the cheap aliases — but the delivered code already deletes the app-side override (litellm_client.py) while the paired gateway config change is, per IMP-633, NOT deployed on eco-dev (GET /model/info and md5sum both confirm the running config lacks it). The binding deploy-order instruction that prevents this from silently billing full reasoning effort ('do not deploy wan-api without _REASONING_EFFORT_OVERRIDE until the gateway is redeployed') exists only in backlog.md, not in any delivered file, gate, or migration step.",
+               "command": "grep -n 'config-only' CHANGELOG.md",
+               "evidence": "CHANGELOG.md:82; wan/integrations/litellm_client.py:72; .aid-o/work/backlog.md:4214; .aid-o/work/backlog.md:4242",
+               "fix": "Either gate the removal of _REASONING_EFFORT_OVERRIDE on the gateway config actually being deployed (verified in an automated check, not prose), or revert the CHANGELOG claim to state the migration is only code-ready and not yet in effect, and encode the required deploy order as an executable precondition rather than a backlog paragraph."}],
+ "no_findings_reason": ""}

@@ -6,7 +6,7 @@ user_invocable: false
 
 # Skill Writing — Authoring and Maintaining AID Skills
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-09-20
 
 How to create and maintain skill files for the AID orchestrator plugin.
 This file is self-applicable: it obeys every rule it prescribes.
@@ -397,8 +397,8 @@ enforcement.
 
 ## Reflection Propagation
 
-When a reflection session (`NR N` in `AID-v3-agents-outputs.md`) or a Curator
-report produces a learning that belongs in a skill, the learning MUST be
+When a reflection session (`NR N` in `AID-v3-agents-outputs.md`) or a review
+finding produces a learning that belongs in a skill, the learning MUST be
 propagated using the type→canonical-home convention above.
 
 **Protocol:**
@@ -513,4 +513,4 @@ will reach for `--force` because no path forward is documented.
 
 ---
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-09-20

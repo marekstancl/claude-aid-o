@@ -197,7 +197,7 @@ _receipts() { find "$ROOT/.aid-o" -name 'review-equivalence-receipt*.json' 2>/de
 
 # ─── acceptance ───────────────────────────────────────────────────────────
 
-_accept() { ( cd "$ROOT" && bash "$PFSM" plan-finalize "$PLAN" --stage accept-ancillary --project-root "$ROOT" ); }
+_accept() { ( cd "$ROOT" && bash "$PFSM" plan-finalize "$PLAN" --stage freeze --accept-ancillary --project-root "$ROOT" ); }
 
 @test "P073 Step 16: acceptance writes ONE receipt and records accepted_head" {
   _seed
@@ -325,7 +325,7 @@ _accept() { ( cd "$ROOT" && bash "$PFSM" plan-finalize "$PLAN" --stage accept-an
   [ "$status" -eq 0 ]
 }
 
-@test "P073 Step 16: the stage is dispatchable and documented in the usage" {
+@test "P073 Step 16: the acceptance is a flag of freeze, documented in the usage" {
   run grep -c 'accept-ancillary' "$PFSM"
   [ "$output" -ge 3 ]
   run bash -c "cd '$ROOT' && bash '$PFSM' plan-finalize $PLAN --stage bogus 2>&1 | head -2"

@@ -9,7 +9,7 @@ user_invocable: false
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
 Additive to the canonical verifier output format (`agents/verifier.md`).
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-20
 
 ## False-Green Guardrails
 
@@ -41,7 +41,7 @@ never re-derives them.
 
 `step-check.json.range` (and `range_source`) is the diff a round reviews:
 `<previous step commit>..HEAD` for cp2, `base_commit..HEAD` for cp3, the
-working tree for cp6; CP4 reviews the applied curator/auditor diff.
+working tree for cp6, `plan_base_commit..candidate_sha` for cp7.
 
 ## Structural Gate: behaviour trace
 
@@ -93,22 +93,6 @@ step check reports a handler pattern. The controller's procedure, command by
 command, is the "Step review (CP2) and EPIC review (CP3)" section of
 `commands/aid-run.md`; the round evidence is described there and in
 `skills/step-review-roles.md`.
-
-## CP4 Contract
-
-Focus: `code-review` (applied C+A changes)
-Scope: C+A applied diff (or full EPIC range if scope unclear)
-Required fields: all standard verifier fields + `checkpoint: cp4`, `classification: FULL_REVIEW`
-High-risk gate: if C+A applied changes touch high-risk patterns, trace required
-
-## CP5 Contract
-
-Focus: `blocking_findings` check (DONE sub-phase `review`)
-Scope: reads structured `blocking_findings:` field from `audit-report.md` (top-level, not prose)
-Enforcement: `aid-fsm.sh:cmd_done_advance()` — `blocking_findings: true` blocks the MERGE option in the PM summary
-Required fields in audit-report: `blocking_findings: true|false` at line-start (not inside a heading or prose)
-High-risk gate: NOT a diff gate — evaluates the audit report output, not the code diff
-Note: CP5 is not a verifier dispatch. It is a structured field check inside `done-advance`.
 
 ## CP1 Contract — Plan Review
 
@@ -164,7 +148,7 @@ These lenses are SEMANTIC (C2). Shape/wire/structural checks are C1 (E6) — NOT
 | `ui_lifecycle` | UI lifecycle | behavior | FC-30 | Modal/component close/reopen retains or correctly resets state |
 | `frontend_user_outcome` | Frontend user outcome | behavior | FC-35 | Looks correct over real data, not mocked; user-visible outcomes verified |
 
-**C1/structural checks excluded (D4):** Delivery gate presence, producer-consumer file contracts, build config resolution, route registration, import resolution — these belong to C1/E6, not C2.
+**Structural checks excluded (D4):** producer-consumer file contracts, build config resolution, route registration, import resolution — these belong to the project's own gates, not to a lens.
 
 ### Lens Output per Finding
 
@@ -182,8 +166,7 @@ detail: "<human-readable explanation>"
 
 ## Plan-boundary note
 
-Under `plan_branch` the Auditor, Curator, Simplifier and Reporter are
-**plan-final** roles: dispatched once per plan, at the boundary, against the
-frozen candidate. CP2 and CP3 remain per EPIC. Under
-`legacy_epic_release_mode` the previous per-EPIC cadence is unchanged. Mode is
-read from the plan's committed lifecycle manifest, never inferred.
+Under `plan_branch` the whole delivery is read once per plan, by the whole-plan
+round (CP7) against the frozen candidate (`commands/aid-run.md`, "Closing a plan
+(plan-final)"). CP2 and CP3 remain per EPIC in both modes. Mode is read from the
+plan's committed lifecycle manifest, never inferred.

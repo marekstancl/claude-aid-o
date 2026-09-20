@@ -1,0 +1,17 @@
+{"role": "final_claims", "checkpoint": "cp7",
+ "findings": [
+   {"id": "final_claims-1", "checkpoint": "cp7",
+    "step": 8,
+    "severity": "blocker",
+    "claim": "The order-of-deploy instruction that prevents a silent billing/quality regression (do not deploy wan-api's removed _REASONING_EFFORT_OVERRIDE until the shared gateway container is reconciled with reasoning_effort in litellm_config.yaml) is written only in a work-tracking file (backlog.md), not in any delivered runbook or docs shipped with the range.",
+    "command": "grep -n \"NENASAZOVAT\" .aid-o/work/backlog.md",
+    "evidence": ".aid-o/work/backlog.md:4242; wan/integrations/litellm_client.py:72",
+    "fix": "Move the deploy-order warning (reconcile svc-litellm container before removing app-side override) into a delivered operational doc for this range (e.g. a note in the code comment's referenced runbook, or a docs hunk in this repo), not only into backlog.md which is not consulted at deploy time."},
+   {"id": "final_claims-2", "checkpoint": "cp7",
+    "step": null,
+    "severity": "major",
+    "claim": "The range makes at least one user-facing behavioural change (a new degraded-result UI string keyed off last_error_kind, added in DokladySoupis.tsx) with no corresponding CHANGELOG.md line anywhere in the diff.",
+    "command": "bash -c 'git diff 0e9012c173ddd09903762f2d4ef97f56d8c130f6..f4b3e5397a16014e62395f558299bc0d2239f585 --stat -- CHANGELOG.md'",
+    "evidence": "absent:CHANGELOG.md; ui/src/components/scan/DokladySoupis.tsx:101",
+    "fix": "Add a CHANGELOG.md entry describing the new degraded-result text and last_error_kind surfacing, per this repo's own CHANGELOG format standard."}
+ ]}

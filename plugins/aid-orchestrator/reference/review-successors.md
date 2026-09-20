@@ -58,3 +58,65 @@ an active id or that literal.
 | `review-profile.json` producer (the retired pre-filter's `profile` subcommand) | `scripts/aid-review-profile.sh` (split out in Step 14; same output) |
 | `c2_acceptance_evidence` | `acceptance_evidence_from_plan_diff` |
 | `c2_acceptance_deviation` | `acceptance_evidence_from_plan_diff` |
+
+# Plan-final mechanisms: today → successor (P096)
+
+One row per registry id retired by the plan-final rebuild. A successor is an
+ACTIVE registry id, or `none (…)` naming the recorded decision.
+
+## Registry ids retired by P096
+
+| Removed or retired id | Successor | Note |
+|-----------------------|-----------|------|
+| `DG-01-dependency-consistency` | `gates_overall_pass` | the project's own blocking gates (docs/plans/P096-delivery-gate-triage.md) |
+| `DG-02-build` | `gates_overall_pass` | the project's `build` gate |
+| `DG-03-typecheck` | `gates_overall_pass` | the project's `type_check` gate |
+| `DG-04-test` | `gates_overall_pass` | the required `tests_pass` gate, which ran the same command |
+| `DG-05-consumer-compile` | `gates_overall_pass` | the project's build gate |
+| `DG-06-removed-dep` | `gates_overall_pass` | project gates, and the cp3 and cp7 diff reviews |
+| `DG-07-fsm-hook` | `execute_gates_all_steps` | step completeness already blocks upstream |
+| `DG-07-state-consistency` | `execute_gates_all_steps` | same; open dispatches and compliance are FSM preconditions of their own |
+| `DG-08-runtime-env` | `gates_overall_pass` | npm-specific; a project that needs it declares a gate |
+| `DG-09-static-coverage` | `gates_overall_pass` | the idea ("0 files checked is not a pass") is backlog IMP-618 |
+| `DG-10-startup-smoke` | `gates_overall_pass` | a project gate |
+| `DG-11-build-config` | `gates_overall_pass` | a project gate |
+| `DG-12-authority` | `policy_enforcement_values_lint` | the two rules kept as a merge-path lint |
+| `DG-15-route-resolve` | `gates_overall_pass` | needed a delivery map no project had |
+| `DG-17-independent-oracle-nodrop` | `gates_overall_pass` | needed oracle baselines no project had |
+| `DG-18-acceptance-struct` | `final_review_round_required` | provenance only; the `final_criteria` role ties criteria to executed tests |
+| `ev-observe-blocking-interpretation` | none (P096 Step 8 triage) | read only the removed gate's output |
+| `plan_final_specialist_review` | `final_review_round_required` | the whole-plan round reads what the four specialists read |
+| `epic_specialist_review_exception` | `fsm_review_round_required` | no specialist is left to dispatch mid-plan; the EPIC owes its cp3 round |
+| `done_advance_blocking_findings` | `fsm_review_round_required` | the EPIC round verdict replaced the auditor flag (CP5) |
+| `c3_blocking_high_or_critical` | `final_review_round_required` | an open blocker of the whole-plan round blocks the decision |
+| `c3_independence_unverifiable` | `codex_stand_in_recorded` | the second provider is the generalist role; a stand-in is recorded, never silent |
+| `c3_provenance_required` | `final_review_head_bound` | the round is bound to the candidate and to a dispatch bracket |
+| `c3_verify_mismatch_unverifiable` | `final_review_head_bound` | no transformed report exists any more; answers are read as written |
+| `c3_cross_provider_dispatch` | `final_review_round_required` | the Codex transport now serves the review rounds |
+| `c3_ac_source_binding` | `final_review_round_required` | the final_criteria role reads the plan criteria from the frozen plan file |
+| `c3_gate_enforcement_toggle` | `final_review_round_required` | the round is required unless the PM waives it for the candidate |
+| `review_profile_presence` | `release_decision_input_row_shape` | review-profile is a required input of the decision |
+| `curator_content_ref_guard` | none (P096: a finding is fixed by the role that wrote the code; no proposals exist) | the curator and its sequencing are gone |
+| `curator_auto_rules` | none (P096: a finding is fixed by the role that wrote the code; no proposals exist) | the auto-resolution rules had no other reader |
+| `cp4_curator_validation` | `fsm_review_round_required` | no self-applied fix remains; a fix is confirmed by the next round |
+| `cp4_glob_invalid` | `fsm_review_round_required` | same |
+| `cp4_production_paths_ere` | `fsm_review_round_required` | same; the config key is gone |
+| `streamlined_cp4_advisory` | `fsm_review_round_required` | same |
+| `cp4_paths_layout_aware` | `fsm_review_round_required` | same; /aid-init no longer derives the glob |
+| `cp4_glob_evaluated` | `fsm_review_round_required` | same |
+| `cp4_template_stale_name` | `fsm_review_round_required` | same |
+| `cp4_full_range_scan` | `fsm_review_round_required` | same |
+| `verifier_output_template` | `fsm_review_round_required` | CP4 was its last user; round answers follow review-finding.schema.json |
+| `verifier_verdict_contract` | `fsm_review_round_required` | same |
+| `behavior_trace_high_risk_gate` | `review_adjudicator_trace` | the trace rule lives in the adjudicator of the rounds |
+| `delivery_report_present` | none (P096: the PM page is computed from the release decision) | reporter removed |
+| `delivery_report_test_evidence` | none (P096: the PM page is computed from the release decision) | reporter removed |
+| `delivery_report` | none (P096: the PM page is computed from the release decision) | toggle removed with the reporter |
+| `delivery_report_template` | none (P096: the PM page is computed from the release decision) | template removed with the reporter |
+| `reporter_focus_allowlist` | none (P096: the PM page is computed from the release decision) | the two foci left the dispatch allowlist |
+| `reports_scope_allowed` | none (P096: the PM page is computed from the release decision) | nothing writes .aid-o/reports any more |
+| `simplifier_pass` | `step_review_needless_complexity` | question 7 of the step reviewers, asked on every step |
+| `release_policy_dual_run` | none (P096: the legacy verdict it compared against is gone) | the decision is logged as release_decision |
+| `release_policy_preempted` | none (P096: it corrected the dual run for sampling bias) | telemetry removed |
+| `pm_override_single_use_claim` | none (P096: the C3 loop it overrode is gone) | plan review keeps its own override record |
+| `review_signal_toggle_fail_closed` | none (P096: the reporter and simplifier toggles are gone) | library removed |

@@ -51,22 +51,6 @@
           "type": "boolean",
           "$comment": "D11 echo"
         },
-        "reporter_status": {
-          "enum": ["pass", "fail", "missing", "not_applicable", "disabled"],
-          "$comment": "D11 echo"
-        },
-        "reporter_reason": {
-          "type": "string",
-          "$comment": "D11 echo"
-        },
-        "simplifier_status": {
-          "enum": ["pass", "fail", "missing", "not_applicable", "disabled"],
-          "$comment": "D11 echo"
-        },
-        "simplifier_reason": {
-          "type": "string",
-          "$comment": "D11 echo"
-        },
         "summary_for_pm": {
           "type": "string",
           "$comment": "D11 echo"
@@ -85,10 +69,6 @@
         "merge_mode",
         "evidence_verification_status",
         "evidence_verified_at_head",
-        "reporter_status",
-        "reporter_reason",
-        "simplifier_status",
-        "simplifier_reason",
         "summary_for_pm",
         "delivered_summary_ref"
       ]

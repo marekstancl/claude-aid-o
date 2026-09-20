@@ -99,7 +99,7 @@ _seed_lifecycle() {
   run _pf plan-start "$PLAN_ID" --mode legacy_epic_release_mode
   [ "$status" -eq 0 ]
   _dirty
-  run _pf epic-start "$PLAN_ID" E-900-1_1
+  run _pf epic-start "$PLAN_ID" E-900-1_1 --run-id R-E900-1
   [ "$status" -eq 0 ]
   [[ "$output" != *"uncommitted changes present"* ]]
   # The task branch was created as a ref — no checkout happened, HEAD stayed
@@ -271,68 +271,11 @@ _add_epic() {
     > "$ROOT/$ev/plan.json"
 }
 
-# _seed_plan_final_evidence — the plan-final review + C4 records the merge
-# reads, written as REAL files with their REAL sha256 recorded, exactly as
-# `--stage review` does (verbatim from test-aid-plan-final-boundary.bats).
-_seed_plan_final_evidence() {
-  local dir; dir="$(_run_dir)"
-  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
-  local run_id; run_id="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
-  local base; base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
-  local thead; thead="$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)"
-  mkdir -p "$dir"
-
-  jq -n '{overall:"pass", gates:[]}' > "${dir}/gates_report.json"
-
-  local f outputs='{}'
-  for f in semantic-review-final.json audit-report.json audit-input-manifest.json curator-report.json \
-           simplifier-report.md delivery-report.json review-profile.json \
-           plan-diff.json delivery-gate.json acceptance-evidence.json dispatch-record.json; do
-    if [[ ! -f "${dir}/${f}" ]]; then
-      if [[ "$f" == *.md ]]; then
-        printf 'Head: %s\n' "$cand" > "${dir}/${f}"
-      elif [[ "$f" == "plan-diff.json" ]]; then
-        jq -n --arg b "$base" --arg h "$cand" \
-          '{base_commit:$b, head_commit:$h, overall_verdict:"pass", results:[], summary:{present_count:0,absent_count:0}}' > "${dir}/${f}"
-      else
-        jq -n --arg h "$cand" '{schema_version:"aid-2.0", revision:{head_sha:$h}}' > "${dir}/${f}"
-      fi
-    fi
-    outputs="$(jq -c --arg k "$f" --arg v "sha256:$(sha256sum "${dir}/${f}" | awk '{print $1}')" \
-      '. + {($k): $v}' <<<"$outputs")"
-  done
-
-  plan_manifest_update "$PLAN_ID" \
-    ".plan_boundary_manifest.plan_final_inputs = {plan_diff_sha256: \"sha256:$(sha256sum "${dir}/plan-diff.json" | awk '{print $1}')\", candidate_sha: \"${cand}\", run_id: \"${run_id}\", ac_lens_required: false, plan_diff_verdict: \"present\"}" >/dev/null
-
-  plan_manifest_update "$PLAN_ID" \
-    ".plan_boundary_manifest.plan_final_review = $(jq -nc --arg c "$cand" --arg b "$base" \
-      --arg r "$run_id" --argjson o "$outputs" \
-      '{candidate_sha:$c, review_range:($b + ".." + $c), run_id:$r, outputs:$o,
-        dispatch_counts:{}, utilities_run:[]}')" >/dev/null
-
-  local sealed ref receipt_commit receipt_hash
-  local target_head
-  target_head="$(git -C "$ROOT" rev-parse main)"
-  local frozen_at
-  frozen_at="$(_manifest_field "$PLAN_ID" candidate_frozen_at)"
-  sealed="$(bash -c 'source "$1"; _pfsm_seal_plan_final_review "$2" "$3" "$4" "$5" main "$6" "$7" "$8" "$9"' \
-    _ "$PLAN_FSM_CLI" "$ROOT" "$PLAN_ID" "$base" "$cand" "$target_head" "$frozen_at" "$run_id" "$outputs")"
-  IFS='|' read -r ref receipt_commit receipt_hash <<< "$sealed"
-  [[ -n "$ref" && -n "$receipt_hash" ]] || return 1
-  plan_manifest_update "$PLAN_ID" \
-    ".plan_boundary_manifest.plan_final_evidence_ref = \"${ref}\" | .plan_boundary_manifest.plan_final_evidence_receipt_sha256 = \"${receipt_hash}\"" >/dev/null
-
-  jq -n --arg c "$cand" '{schema_version:"aid-2.0", artifact_type:"release_decision",
-    release_decision:{release_ready:true, blockers:[], candidate_sha:$c}}' \
-    > "${dir}/release-decision.json"
-  jq -n --arg p "$PLAN_ID" --arg r "$run_id" --arg c "$cand" --arg t "$thead" \
-    '{event:"release_policy_dual_run", plan_id:$p, run_id:$r, candidate_sha:$c,
-      target_head:$t}' > "${dir}/release-policy-dual-run.json"
-}
+# _seed_plan_final_evidence — a decided plan, as the merge reads it.
+_seed_plan_final_evidence() { aid_fixture_seed_plan_decided "$ROOT" "$PLAN_ID"; }
 
 # _seed_merge_project — a plan at AWAITING_PM at a frozen candidate, reached
-# through the REAL sync + freeze stages plus the real transition table.
+# through the REAL freeze stage plus the real transition table.
 _seed_merge_project() {
   _bootstrap
   _commit_on "plan/${PLAN_ID}" epic-work.txt "feat: the EPIC's work"
@@ -340,8 +283,6 @@ _seed_merge_project() {
   local mc; mc="$(git -C "$ROOT" rev-parse "plan/$PLAN_ID")"
   plan_manifest_set_epic_status "$PLAN_ID" "E-900-1_1" "merged_to_plan" "$mc"
 
-  _finalize "$PLAN_ID" sync
-  [ "$status" -eq 0 ]
   _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
   plan_state_transition "$PLAN_ID" "PLAN_GATES" "PLAN_REVIEW" >/dev/null

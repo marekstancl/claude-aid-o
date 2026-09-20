@@ -169,9 +169,9 @@ tests. This mirrors the project rule: *adversarially verify before claiming done
   pending-dispatches ledger. The `aid-emit-dispatch.sh` wrapper therefore does
   not apply: outside an FSM run there is no orphan-dispatch reconciliation to
   feed.
-- **Complements `agents/verifier.md`** — that agent runs the in-pipeline review
-  checkpoints (CP2–CP5) and the GATES DONE checks during `/aid-run`.
+- **Complements the review rounds** — the step, EPIC and whole-plan reviewers
+  (CP2, CP3, CP7) read the work during `/aid-run`.
   `/aid-verify-implementation` is the manual DONE gut-check the PM fires by hand
   on work that already claims to be complete.
 
-**Last Updated:** 2026-08-12
+**Last Updated:** 2026-09-20

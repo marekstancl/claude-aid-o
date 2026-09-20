@@ -512,9 +512,9 @@ reviews (`commands/aid-run.md` "Step review (CP2) and EPIC review (CP3)",
 `commands/aid-do.md`) include this text verbatim. `<round dir>` is the
 directory `prepare` printed, and `prepare` prints each role's `<focus>` next
 to its prompt: `cp1-<role>` for a plan, `cp2-step-<N>-<role>` for a step,
-`cp3-<role>` for an EPIC, `cp6-<role>` in fast mode, the role with `_`
-replaced by `-` (the dispatch wrapper allows no underscore in `--focus` or
-`--agent-id`).
+`cp3-<role>` for an EPIC, `cp6-<role>` in fast mode, `cp7-<role>` at plan
+close, the role with `_` replaced by `-` (the dispatch wrapper allows no
+underscore in `--focus` or `--agent-id`).
 
 For EACH expected role with `provider: claude` in `<round dir>/round.json`,
 one at a time:
@@ -695,11 +695,15 @@ reads.
 criteria is judged on what it edited), else from the state root; `execution.yaml` and the
 evidence are **always the state root's** — a plan branch's copy of `.aid-o/config` is never
 read, edit it in the primary checkout. `--stage gates` prints both paths before it runs
-anything; `--stage inputs` prints the plan it used (it reads no gate config).
+anything; `--stage produce` prints the plan it used (it reads no gate config).
+
+The stages, the whole-plan review round, the fix path and the escalation table
+are in ONE place: `commands/aid-run.md`, "Closing a plan (plan-final)". This
+section is only about what the PM sees at the end.
 
 Under `plan_branch`, the plan-final boundary is the PM's decision moment — so it
-gets a card and a one-screen page, not a file listing. After `aid-pm-brief.sh`
-has produced the handoff pair, render both from it:
+gets a card and a one-screen page, not a file listing. `plan-finalize --stage
+decide` has produced the handoff pair; render both from it:
 
 ```bash
 source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-close-summary.sh"
@@ -780,7 +784,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-20
 
 ## Plan mode
 

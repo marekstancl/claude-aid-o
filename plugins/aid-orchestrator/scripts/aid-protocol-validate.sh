@@ -160,21 +160,21 @@ VALID_ARTIFACT_TYPES=(
   plan_graph
   contract_manifest
   review_profile
-  delivery_gate
+  delivery_gate        # retired producer (the C1 delivery gate, removed in 2.101.0); kept so evidence written before it still validates
   ui_fidelity
   semantic_review
   acceptance_evidence
   consumption_proof
-  audit_report
-  audit_input_manifest
+  audit_report         # retired producer (2.101.0); kept so older evidence still validates
+  audit_input_manifest # retired producer (2.101.0); kept so older evidence still validates
   release_decision
   pm_decision_brief
-  curator
-  delivery_report
+  curator              # retired producer (2.101.0); kept so older evidence still validates
+  delivery_report      # retired producer (2.101.0); kept so older evidence still validates
   verification_report
   invalidation_map
   waiver
-  c3_dispatch
+  c3_dispatch          # retired producer (2.101.0); kept so older evidence still validates
   plan_boundary_manifest
 )
 
@@ -376,22 +376,8 @@ TYPE_PAYLOAD_MAP[delivery_report]="delivery_report"
 TYPE_PAYLOAD_MAP[verification_report]="verification_report"
 TYPE_PAYLOAD_MAP[invalidation_map]="invalidation_map"
 TYPE_PAYLOAD_MAP[waiver]="waiver"
-# P065 E-065-7_7 post-merge fix ("control_protocol envelope" finding, 10th
-# DONE-review audit): c3-dispatch.json (aid-c3-dispatch.sh's dispatch-side
-# provenance record) declares schema_version:"aid-2.0" and is therefore
-# swept into aid-evidence-verify.sh's V2_ARTIFACTS scan unconditionally
-# (any JSON file with schema_version=="aid-2.0" and control_protocol!=
-# "legacy" gets fully validated — there is no artifact-type allowlist at
-# that layer). It was missing the FULL envelope (control_protocol,
-# identity, revision, status, verdict — not just control_protocol) AND was
-# never registered here, so every real C3-active EPIC's evidence pack has
-# always failed aid-evidence-verify.sh's verification_report step — never
-# caught because aid-release-policy.sh's verification_report input had
-# itself never actually been run for real against a live C3-bridge EPIC
-# until this was discovered. "dispatch" (not "c3_dispatch") is deliberately
-# reused as the payload key: it is the artifact's existing, already-present
-# distinguishing content (invoked/exit_code/outcome/etc.) — no restructuring
-# of aid-c3-dispatch.sh's established shape was needed to satisfy this.
+# c3_dispatch: retired producer (the C3 audit bridge, removed in 2.101.0); the
+# payload key is "dispatch". Kept so evidence written before it still validates.
 TYPE_PAYLOAD_MAP[c3_dispatch]="dispatch"
 # P064 E-064-1_2 Step 2: plan-boundary-manifest.json (plan/Pxxx as the
 # integration branch for a plan's EPICs) becomes a first-class protocol-v2
@@ -415,7 +401,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 14: C3 audit_report required subfields (D7 — provider/model/process_id must be
 # echoed from audit_trigger, never self-introspected; input_manifest_hash is the
-# provenance binding). defaults/schemas/audit-report.schema.json declares these 4
+# provenance binding). The (retired) audit-report schema declared these 4
 # fields `required` on the .audit_report payload, but Step 12 above only checks that
 # the payload KEY is present — it never descends into the payload, so a report missing
 # these fields previously passed this validator with exit 0 despite the schema's own
@@ -482,17 +468,16 @@ fi
 
 # ---------------------------------------------------------------------------
 # Step 16: release_decision D11 explicit state fields (E-059-2). release-decision.json
-# must carry all 11 D11 fields with valid enums/types so the FSM merge gate and the PM
+# must carry all 7 D11 fields with valid enums/types so the FSM merge gate and the PM
 # brief never infer state. dual_run is OPTIONAL (FSM-patched in a later step) and is
 # NOT checked here. Runs after Step 15 so a missing release_ready reports as exit 15.
 # Only applies to artifact_type == release_decision.
 # ---------------------------------------------------------------------------
 if [[ "$artifact_type" == "release_decision" ]]; then
-  # 16a — presence of all 11 D11 fields (delivered_summary_ref is required-but-nullable,
+  # 16a — presence of all 7 D11 fields (delivered_summary_ref is required-but-nullable,
   # so presence is a has() check; its value may legitimately be null).
   for d11_field in merge_mode pm_brief_required pm_brief_status evidence_verified_at_head \
-                   evidence_verification_status reporter_status reporter_reason \
-                   simplifier_status simplifier_reason delivered_summary_ref summary_for_pm; do
+                   evidence_verification_status delivered_summary_ref summary_for_pm; do
     d11_present=$(jq -r --arg f "$d11_field" 'if (.release_decision | has($f)) then "yes" else "no" end' "$ARTIFACT_FILE")
     if [[ "$d11_present" != "yes" ]]; then
       echo "missing_d11_field:${d11_field}" >&2
@@ -510,15 +495,6 @@ if [[ "$artifact_type" == "release_decision" ]]; then
   d11_evs=$(jq -r '.release_decision.evidence_verification_status // ""' "$ARTIFACT_FILE")
   case "$d11_evs" in pass|fail|unverifiable) ;; *) echo "bad_d11_enum:evidence_verification_status" >&2; exit 16 ;; esac
 
-  # 16c — enum validation (reporter/simplifier share one enum)
-  for d11_status_field in reporter_status simplifier_status; do
-    d11_status_val=$(jq -r --arg f "$d11_status_field" '.release_decision[$f] // ""' "$ARTIFACT_FILE")
-    case "$d11_status_val" in
-      pass|fail|missing|not_applicable|disabled) ;;
-      *) echo "bad_d11_enum:${d11_status_field}" >&2; exit 16 ;;
-    esac
-  done
-
   # 16d — boolean type validation
   for d11_bool_field in pm_brief_required evidence_verified_at_head; do
     d11_bool_type=$(jq -r --arg f "$d11_bool_field" '.release_decision[$f] | type' "$ARTIFACT_FILE")
@@ -529,7 +505,7 @@ if [[ "$artifact_type" == "release_decision" ]]; then
   done
 
   # 16e — non-empty string validation
-  for d11_str_field in reporter_reason simplifier_reason summary_for_pm; do
+  for d11_str_field in summary_for_pm; do
     d11_str_ok=$(jq -r --arg f "$d11_str_field" 'if (.release_decision[$f] | type) == "string" and (.release_decision[$f] | length) > 0 then "yes" else "no" end' "$ARTIFACT_FILE")
     if [[ "$d11_str_ok" != "yes" ]]; then
       echo "bad_d11_type:${d11_str_field}" >&2
@@ -578,7 +554,7 @@ fi
 #   - audit_report (C3): fingerprint_audit_report() over occurrence_id/severity/
 #     area/finding/recommendation — C3 findings are LLM-derived adversarial
 #     discoveries with no check_id/target_path/finding_class (those fields
-#     aren't in audit-report.schema.json). See aid-finding-fingerprint.sh for
+#     aren't in the retired audit-report schema). See aid-finding-fingerprint.sh for
 #     why the universal 5-field formula below doesn't apply to this type.
 #   - everything else: the universal fingerprint() formula
 #     (project_id/artifact_type/check_id/target_path/finding_class), unchanged.

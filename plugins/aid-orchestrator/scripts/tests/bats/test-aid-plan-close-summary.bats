@@ -52,10 +52,6 @@ _brief() {
       merge_mode: $mode,
       evidence_verification_status: "pass",
       evidence_verified_at_head: true,
-      reporter_status: "ok",
-      reporter_reason: "",
-      simplifier_status: "ok",
-      simplifier_reason: "",
       summary_for_pm: "release_ready=true; evidence=pass; blockers=0",
       delivered_summary_ref: ".aid-o/work/evidence/P080/delivery.md"
     }
@@ -85,8 +81,9 @@ _decision() {
         ],
         plan_final_gates: {report: ".aid-o/work/evidence/P080/gates-report.json", result: "pass",
                            quarantine_substitutes: []},
-        specialist_review: {status: "clean"},
-        remaining_backlog: ["IMP-999"]
+        specialist_review: {review_range: "1111111..2222222"},
+        remaining_backlog: ["IMP-999"],
+        close: {attempts: 1, minutes: 9, usd: 1.25, usd_unknown_roles: []}
       }
     }
   }' > "$DECISION"
@@ -94,7 +91,7 @@ _decision() {
 
 _blockers_two() {
   jq -n '[{input_id: "review_profile", severity: "high", reason: "profil neodpovídá HEAD"},
-          {input_id: "delivery_report", severity: "high", reason: "chybí delivery report"}]'
+          {input_id: "final_review", severity: "high", reason: "otevřený blokující nález"}]'
 }
 
 # ─── fixture class 1: not release-ready → Decision-required card ────────────
@@ -313,7 +310,7 @@ _blockers_two() {
 
 @test "the two legitimately-null fields stay legitimate — nothing merged, no review" {
   # final_merge_sha: null means "not merged yet" and specialist_review: null
-  # means "did not run". Tightening the value check must not turn either of
+  # means "no review record in the manifest". Tightening the value check must not turn either of
   # those real states into a refusal.
   _brief true manual '[]'
   _decision null not_tagged
@@ -324,7 +321,7 @@ _blockers_two() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Potřebuji tvoje rozhodnutí"* ]]
   [ -s "$OUT_DIR/plan-close-artifact.html" ]
-  grep -qF 'Specialistická revize: neproběhl' "$OUT_DIR/plan-close-artifact.html"
+  grep -qF 'Čtení celku: nezaznamenáno' "$OUT_DIR/plan-close-artifact.html"   # no final_review input in the decision
 }
 
 @test "a plan_summary whose epics is not an array fails closed rather than counting zero" {

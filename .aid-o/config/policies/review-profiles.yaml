@@ -1,0 +1,46 @@
+# This repository's own review surfaces, merged on top of the plugin default
+# (plugins/aid-orchestrator/defaults/policies/review-profiles.yaml). The default
+# describes kinds of files; what is specific to AID's own code lives here.
+# Committed with `git add -f` (.aid-o/config is ignored) so CI reads it too.
+surfaces:
+  aid_state_machines:
+    match:
+      path_globs:
+        - "plugins/aid-orchestrator/scripts/aid-fsm.sh"
+        - "plugins/aid-orchestrator/scripts/aid-plan-fsm.sh"
+        - "plugins/aid-orchestrator/scripts/lib/aid-lifecycle.sh"
+    risk: high
+    lenses: [behavior_trace, negative_case, ac_to_test_identity, security_threat_model]
+
+  aid_gate_runner:
+    match:
+      path_globs:
+        - "plugins/aid-orchestrator/scripts/aid-run-gates.sh"
+        - "plugins/aid-orchestrator/scripts/aid-select-tests.sh"
+        - "plugins/aid-orchestrator/scripts/lib/aid-gate-profile.sh"
+    risk: high
+    lenses: [behavior_trace, negative_case]
+
+  aid_generation_chain:
+    match:
+      path_globs:
+        - "plugins/aid-orchestrator/scripts/aid-plan-to-epic.sh"
+        - "plugins/aid-orchestrator/scripts/aid-epic-to-json.sh"
+        - "plugins/aid-orchestrator/scripts/aid-json-to-run.sh"
+    risk: high
+    lenses: [behavior_trace, field_lineage]
+
+  aid_release_boundary:
+    match:
+      path_globs:
+        - "plugins/aid-orchestrator/scripts/aid-release-policy.sh"
+        - "plugins/aid-orchestrator/scripts/aid-evidence-verify.sh"
+        - "plugins/aid-orchestrator/scripts/aid-plan-close-check.sh"
+        - "plugins/aid-orchestrator/scripts/aid-release.sh"
+    risk: high
+    lenses: [behavior_trace, negative_case, security_threat_model]
+
+  # A docs-only diff that still carries controller vocabulary is not trivial.
+  scripts_core:
+    match:
+      content_signals: ["cmd_", "transition", "log_event"]

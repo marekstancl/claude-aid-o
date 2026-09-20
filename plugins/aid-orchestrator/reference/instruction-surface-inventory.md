@@ -58,10 +58,8 @@ that is absent from a clean checkout.
 
 | Surface | Disposition | Note |
 |---------|-------------|------|
-| `agents/auditor.md` | `update` | Dispatch is plan-final, once per plan. |
-| `agents/curator.md` | `update` | Dispatch is plan-final, once per plan. |
-| `agents/simplifier.md` | `update` | Plan-final boundary confirmed. |
-| `agents/reporter.md` | `update` | Plan-final boundary and the protocol-v2 delivery artifact. |
+| `agents/auditor.md` | `update` | The project-health audit of `/aid-audit`; no plan-final contract (P096). |
+| `agents/simplifier.md` | `update` | An agent the PM may invoke after a plan; no required report (P096). |
 | `agents/verifier.md` | `update` | P094: CP2/CP3/CP6 are reviewer rounds, not verifier dispatches; the card keeps CP4, `section-review`, `cross-section-review` and the plan-final `c2_mode: final` producer. |
 | `agents/implementer.md` | `verified` | Implements a step; no release cadence. |
 | `agents/gate-fixer.md` | `verified` | Fixes gate failures; no release cadence. P094: `model: sonnet`; `verifier_review` is CP4 only; the invalidation-map note is gone. |

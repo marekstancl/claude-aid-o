@@ -178,3 +178,44 @@ EOF
   actual=$(yq '.enforcements | length' "$SHIPPED_REGISTRY")
   [ "$declared" -eq "$actual" ]
 }
+
+# ── Date override and the 2026-09-30 cohort ──────────────────────────────────
+
+@test "TTL guard: the shipped registry is clean the day after the 2026-09-30 cohort deadline" {
+  AID_TTL_TODAY=2026-10-01 run bash "$TTL_GUARD" "$SHIPPED_REGISTRY"
+  [ "$status" -eq 0 ]
+}
+
+@test "TTL guard: a deferral is a date, not an exemption" {
+  cat > "$REGISTRY" <<'EOF2'
+version: 1
+enforcements:
+  - {id: cohort_row, type: 4, source: "scripts/aid-fsm.sh:1", instruction: n/a, severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2026-09-30", deferred_until: "2026-10-31", deferred_by: "P096", deferred_reason: "P096 removes this mechanism", description: "fixture copy of a deferred row"}
+EOF2
+  AID_TTL_TODAY=2026-10-01 run bash "$TTL_GUARD" "$REGISTRY"
+  [ "$status" -eq 0 ]
+  AID_TTL_TODAY=2026-11-01 run bash "$TTL_GUARD" "$REGISTRY"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"id=cohort_row"* ]]
+  sed -i 's/deferred_until: "2026-10-31", //' "$REGISTRY"
+  AID_TTL_TODAY=2026-10-01 run bash "$TTL_GUARD" "$REGISTRY"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"id=cohort_row"* ]]
+}
+
+@test "TTL guard: a malformed AID_TTL_TODAY is refused" {
+  AID_TTL_TODAY=tomorrow run bash "$TTL_GUARD" "$SHIPPED_REGISTRY"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"ISO date"* ]]
+}
+
+@test "TTL guard: AID_TTL_TODAY without AID_TEST_MODE=1 is ignored with a warning" {
+  cat > "$REGISTRY" <<'EOF2'
+version: 1
+enforcements:
+  - {id: future_row, type: 4, source: "scripts/aid-fsm.sh:1", instruction: n/a, severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2099-01-01", description: "stale only under the override"}
+EOF2
+  AID_TEST_MODE=0 AID_TTL_TODAY=2099-06-01 run bash "$TTL_GUARD" "$REGISTRY"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"AID_TTL_TODAY ignored"* ]]
+}

@@ -407,6 +407,28 @@ else
   pass_msg "status: dead rows are exempt from path validation"
 fi
 
+# ── the enforcement-values lint (registry row policy_enforcement_values_lint) ──
+# The two rules of the retired DG-12 authority check, over what the plugin ships:
+# an `enforcement:` value is observe or blocking, and nothing is `blocking` while
+# still `planned`.
+_enforcement_violations() {   # <enum: policy|registry> <yaml file>…  → "<file>: <what>" lines
+  local kind="$1" f; shift
+  for f in "$@"; do
+    yq -r '.. | select(type == "!!map" and has("enforcement")) | [.enforcement, (.status // "")] | @tsv' "$f" 2>/dev/null \
+      | awk -F'\t' -v f="$f" -v kind="$kind" '
+          $0 == "" { next }
+          kind == "policy" && $1 != "observe" && $1 != "blocking" { print f ": enforcement value \"" $1 "\"" }
+          $1 == "blocking" && $2 == "planned"                     { print f ": enforcement: blocking with status: planned" }'
+  done
+}
+echo "TEST: every shipped enforcement value is observe or blocking, and none is blocking while planned"
+# The enum binds the policies; in the registry `enforcement` also describes a row in words.
+violations="$(_enforcement_violations policy "$PLUGIN_DIR"/defaults/policies/*.yaml; _enforcement_violations registry "$REGISTRY")"
+[[ -z "$violations" ]] && pass_msg "shipped policies and the registry are clean" || fail_msg "$violations"
+printf 'a: {enforcement: blocking, status: planned}\nb: {enforcement: sometimes}\n' > "${fixture_dir}/policy.yaml"
+[[ "$(_enforcement_violations policy "${fixture_dir}/policy.yaml" | wc -l)" -eq 2 ]] \
+  && pass_msg "the lint fires on both rules" || fail_msg "the lint did not flag a blocking+planned map and an out-of-enum value"
+
 echo "----------------------------------------------------------------------"
 total=$((pass + fail))
 echo "Results: ${pass}/${total} passed, ${fail} failed"

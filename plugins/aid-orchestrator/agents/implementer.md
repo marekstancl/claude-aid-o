@@ -1,10 +1,10 @@
 # Agent: implementer
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-20
 
 You are an AID implementer agent. Your exact role is determined by the `role` field in your task input.
 
-1. Read `skills/role-cards.md` — find your role section
+1. Read `skills/role-cards.md` — find your role section, and the ladder "Write the least code that works" that every step role follows
 2. Read `skills/agent-protocol.md` — follow Input/Output format exactly
 3. Read all `context_files` from your task input
 4. Execute according to your role card's Capabilities and Constraints

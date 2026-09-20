@@ -26,8 +26,6 @@ _AID_LIFECYCLE_SH_LOADED=1
 
 # Resolve the plugin's defaults dir (for orchestration.yaml) relative to this lib.
 _AID_LC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=/dev/null
-source "${_AID_LC_LIB_DIR}/aid-adjudication.sh"
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 aid_lifecycle_dir()   { echo "${1:-.}/.aid-lifecycle"; }
@@ -108,11 +106,11 @@ aid_receipt_path()    { echo "$(aid_lifecycle_dir "${2:-.}")/receipts/${1}.yaml"
 #      greps the target branch for a merge naming the EPIC — but the only merge
 #      reaching the target branch is `merge(plan): <plan_id>`, which names no
 #      EPIC id, so it returns empty. `_aid_lc_epic_reviewed_head` and
-#      `_aid_lc_epic_review_status` read a per-EPIC audit-report.json that the
-#      new model no longer produces: in `plan_branch` mode the review genuinely
+#      `_aid_lc_epic_review_status` read a per-EPIC review record that
+#      `plan_branch` mode does not use for the release: there the review genuinely
 #      happens ONCE, for the whole plan. In plan mode the merge SHA is supplied
 #      explicitly by the caller and the reviewed head / review status come from
-#      the PLAN-FINAL run's audit-report.json and curator-report.json.
+#      the plan-final run's whole-plan round (cp7/rounds.json).
 #
 # Everything else — the staged/unstaged collision prechecks, schema + public-safe
 # validation, idempotence, `_aid_lc_can_bind`'s ancestry confirmation — is
@@ -125,7 +123,7 @@ aid_receipt_path()    { echo "$(aid_lifecycle_dir "${2:-.}")/receipts/${1}.yaml"
 
 # aid_lc_plan_mode_begin <merge_sha> <plan_final_run_dir_abs> <parent_commit>
 #   merge_sha   — the published plan merge commit, bound as every EPIC's delivery_sha
-#   run_dir_abs — the plan-final run directory holding audit-report.json + curator-report.json
+#   run_dir_abs — the plan-final run directory holding cp7/rounds.json
 #   parent_commit — the commit the lifecycle commit is built on (the merge commit),
 #                   and the CAS "expected old value" for the target ref update
 aid_lc_plan_mode_begin() {
@@ -140,15 +138,14 @@ aid_lc_plan_mode_end() {
 }
 _aid_lc_plan_mode() { [[ "${_AID_LC_PLAN_MODE:-0}" == "1" ]]; }
 
-# _aid_lc_plan_final_trusted_candidate <root> <plan_id> — echoes "<candidate_sha> <run_id>"
-# from the DURABLE, git-tracked D1 plan-final evidence receipt (never from a
-# gitignored, freely-editable runtime file), or returns 1 if none/ambiguous.
-# D5 lifecycle-audit HIGH follow-up: this is the anchor that makes
-# _aid_lc_plan_review_status's adjudication bypass safe against a forged
-# audit-report.json + curator-report.json pair that is only INTERNALLY
-# self-consistent (matching each other) but does not describe the actual
-# frozen candidate/run — the receipt requires rewriting immutable git
-# history to forge, unlike editing two JSON files in .aid-o/work/.
+# _aid_lc_plan_final_trusted_candidate <root> <plan_id> — echoes
+# "<candidate_sha> <run_id> <sha256 of cp7/rounds.json>" from the DURABLE,
+# git-tracked plan-final evidence receipt (never from a gitignored,
+# freely-editable runtime file), or returns 1 if none/ambiguous.
+# This is the anchor that makes _aid_lc_plan_review_status safe against an
+# edited round index: the receipt carries the index's digest, and forging the
+# receipt requires rewriting immutable git history, unlike editing a JSON file
+# in .aid-o/work/.
 # Mirrors aid-plan-fsm.sh's _pfsm_recover_plan_final_receipt discovery/dedup
 # logic (kept independent, not shared, to avoid aid-lifecycle.sh depending
 # on the top-level aid-plan-fsm.sh script).
@@ -175,7 +172,7 @@ _aid_lc_plan_final_trusted_candidate() {
     jq -e '
       (type == "object") and
       ((keys | sort) == (["artifact_type","candidate_frozen_at","candidate_sha","evidence_ref","outputs","plan_base_commit","plan_id","review_verdict","run_id","schema_version","target_branch","target_head_at_freeze"] | sort)) and
-      (.schema_version == "aid-plan-final-evidence-1") and
+      (.schema_version == "aid-plan-final-evidence-2") and
       (.artifact_type == "plan_final_evidence_receipt") and
       (.review_verdict == "accepted") and
       (.plan_id | test("^P[0-9]{3}$")) and
@@ -195,10 +192,10 @@ _aid_lc_plan_final_trusted_candidate() {
     # shape check above but must still be refused, exactly as
     # _pfsm_verify_plan_final_receipt/_pfsm_recover_plan_final_receipt/
     # close-check's D4 fix all require. Literal list frozen for schema
-    # version "aid-plan-final-evidence-1" (see aid-plan-fsm.sh's
+    # version "aid-plan-final-evidence-2" (see aid-plan-fsm.sh's
     # _pfsm_receipt_has_exact_review_inventory — kept in sync deliberately).
     jq -e '
-      (.outputs | keys | sort) == (["acceptance-evidence.json","audit-input-manifest.json","audit-report.json","curator-report.json","delivery-gate.json","delivery-report.json","dispatch-record.json","plan-diff.json","review-profile.json","semantic-review-final.json","simplifier-report.md"] | sort)
+      (.outputs | keys | sort) == (["acceptance-evidence.json","cp7/rounds.json","gates_report.json","plan-diff.json","release-decision.json","review-profile.json","semantic-review-final.json"] | sort)
     ' <<< "$receipt" >/dev/null 2>&1 || continue
     [[ "$(jq -r '.plan_id' <<< "$receipt")" == "$plan_id" ]] || continue
     local cand run expected
@@ -217,7 +214,7 @@ _aid_lc_plan_final_trusted_candidate() {
     fi
     seen["$suffix"]="$obj"
     found=$((found + 1))
-    result="${cand} ${run}"
+    result="${cand} ${run} $(jq -r '.outputs["cp7/rounds.json"]' <<< "$receipt")"
   done < <(git -C "$root" for-each-ref --format='%(refname)' \
     "refs/heads/aid-evidence/${plan_id}/" "refs/remotes/*/aid-evidence/${plan_id}/**" 2>/dev/null)
   [[ "$found" -eq 1 ]] || return 1
@@ -225,90 +222,34 @@ _aid_lc_plan_final_trusted_candidate() {
 }
 
 # _aid_lc_plan_review_status <root> [plan_id] — the ONE plan-level verdict,
-# read from the plan-final run's audit-report.json + curator-report.json.
+# read from the whole-plan round of the plan-final run (<run>/cp7/rounds.json).
 # Same vocabulary and the same fail-closed bias as the per-EPIC classifier it
 # stands in for: `unverifiable` whenever the evidence does not positively say
-# "no blockers", never a default to `accepted`. <root> is REQUIRED for the
-# adjudication bypass below (it anchors candidate/run to the durable
-# receipt); omitting it does not break normal classification, it just
-# disables that bypass. [plan_id] — D5 lifecycle-audit round-2 HIGH: MUST be
-# the caller's own authoritative plan id (threaded from
-# aid_lifecycle_bind_delivery's/aid_lifecycle_plan_reconcile's own trusted
-# `plan_id` parameter, all the way from aid-plan-fsm.sh's CLI-level plan
-# argument) — NEVER guessed from the mutable, gitignored
-# plan_final_evidence_dir path this function's run directory ultimately
-# derives from. A path-derived guess is exactly what let an attacker who
-# controls that mutable field redirect the trusted-receipt lookup at an
-# unrelated plan's (possibly also-legitimate) receipt. Omitting plan_id
-# disables the adjudication bypass entirely (falls through to "rejected"),
-# it is never silently guessed.
+# so, never a default to `accepted`.
+#   none          no round index in the run directory
+#   unverifiable  no sealed receipt for <plan_id>, or the index is not the one
+#                 the receipt sealed (digest), or it names another candidate
+#   accepted      verdict pass, or skip/no_change (nothing to read), or waived
+#                 (the PM's recorded waiver; the receipt seals that too)
+#   rejected      verdict fail
+# [plan_id] MUST be the caller's own authoritative plan id, never guessed from
+# the mutable run directory path; without it the receipt cannot be found and
+# the answer is `unverifiable`.
 _aid_lc_plan_review_status() {
   local root="${1:-.}" plan_id="${2:-}"
-  local dir="${_AID_LC_PLAN_RUN_DIR:-}"
-  [[ -n "$dir" ]] || { echo "none"; return 0; }
-  local audit="${dir}/audit-report.json" curator="${dir}/curator-report.json"
-  [[ -f "$audit" ]] || { echo "none"; return 0; }
-  local st bf
-  st="$(jq -r '.status // ""' "$audit" 2>/dev/null || true)"
-  # `//` is NOT usable here: jq treats `false` as falsy, so `.blocking_findings //
-  # .audit_report.blocking_findings` would fall through on the very value that
-  # means "accepted". Read the two shapes explicitly instead.
-  bf="$(jq -r 'if has("blocking_findings") then .blocking_findings
-               elif (.audit_report? | type) == "object" and (.audit_report | has("blocking_findings")) then .audit_report.blocking_findings
-               else null end' "$audit" 2>/dev/null || true)"
-  if [[ "$st" == "unverifiable" ]]; then echo "unverifiable"; return 0; fi
-  if [[ "$bf" == "true" || ( "$bf" =~ ^[0-9]+$ && "$bf" != "0" ) ]]; then
-    # D5 / IMP-468 follow-up (auditor-flagged gap): a raw Auditor
-    # blocking_findings:true is not automatically "rejected" anymore — the
-    # plan-final review boundary (aid-plan-fsm.sh's own, stricter D5 gate)
-    # may have already accepted a formal, exactly-bound Curator adjudication
-    # for every critical|high finding. Without this check, a plan that
-    # legitimately passed that gate could never reach "accepted" here,
-    # permanently misclassified in the git-tracked .aid-lifecycle layer
-    # regardless of how the plan-final boundary itself judged it. Only a
-    # FULLY resolved set (every blocking finding validly adjudicated, no
-    # malformed/stale entries, no illegal false_positive) bypasses this —
-    # anything less falls through to "rejected", same as before.
-    #
-    # D5 lifecycle-audit HIGH: candidate_sha/run_id are NOT read from
-    # audit-report.json's own envelope — that file (and curator-report.json)
-    # are gitignored, mutable, and being classified BY this same function;
-    # an attacker who can replace both together, internally consistently,
-    # could otherwise redefine their own trust anchor. They are read from
-    # the DURABLE, git-tracked plan-final evidence receipt instead
-    # (_aid_lc_plan_final_trusted_candidate), and audit-report.json's own
-    # envelope is then required to AGREE with that trusted anchor — a
-    # mismatch (or no discoverable/unambiguous receipt at all) refuses the
-    # bypass instead of trusting the file being classified to name its own
-    # candidate.
-    local trusted=""
-    if [[ -n "$plan_id" ]]; then
-      trusted="$(_aid_lc_plan_final_trusted_candidate "$root" "$plan_id" 2>/dev/null || true)"
-    fi
-    local adj_candidate="" adj_run=""
-    if [[ -n "$trusted" ]]; then
-      read -r adj_candidate adj_run <<< "$trusted"
-    fi
-    local env_candidate env_run
-    env_candidate="$(jq -r '.revision.head_sha // ""' "$audit" 2>/dev/null || true)"
-    env_run="$(jq -r '.identity.run_id // ""' "$audit" 2>/dev/null || true)"
-    if [[ -n "$adj_candidate" && -n "$adj_run" && "$env_candidate" == "$adj_candidate" && "$env_run" == "$adj_run" && -f "$curator" ]] \
-       && aid_adjudication_fully_resolved "$audit" "$curator" "$adj_candidate" "$adj_run"; then
-      : # every raw blocker is formally, validly adjudicated against the durably-anchored candidate/run — do not reject on the raw flag alone
-    else
-      echo "rejected"; return 0
-    fi
+  local index="${_AID_LC_PLAN_RUN_DIR:-}/cp7/rounds.json"
+  [[ -n "${_AID_LC_PLAN_RUN_DIR:-}" && -f "$index" ]] || { echo "none"; return 0; }
+  local candidate run sealed
+  read -r candidate run sealed <<< "$(_aid_lc_plan_final_trusted_candidate "$root" "$plan_id" 2>/dev/null || true)"
+  if [[ -z "$sealed" || "$sealed" != "sha256:$(sha256sum "$index" | cut -d' ' -f1)" \
+        || "$(jq -r '.head_sha // ""' "$index" 2>/dev/null)" != "$candidate" ]]; then
+    echo "unverifiable"; return 0
   fi
-  if [[ "$bf" != "false" && "$bf" != "0" && "$bf" != "true" && ! ( "$bf" =~ ^[0-9]+$ ) ]]; then echo "unverifiable"; return 0; fi
-  # The Curator's verdict is part of the plan-level review, so a Curator that
-  # reports blockers rejects the plan just as the Auditor does.
-  if [[ -f "$curator" ]]; then
-    local cbf; cbf="$(jq -r 'if has("blocking_findings") then .blocking_findings
-                             elif (.curator? | type) == "object" and (.curator | has("blocking_findings")) then .curator.blocking_findings
-                             else false end' "$curator" 2>/dev/null || true)"
-    if [[ "$cbf" == "true" || ( "$cbf" =~ ^[0-9]+$ && "$cbf" != "0" ) ]]; then echo "rejected"; return 0; fi
-  fi
-  echo "accepted"
+  case "$(jq -r '.verdict // ""' "$index" 2>/dev/null)" in
+    pass|skip|no_change|waived) echo "accepted" ;;
+    fail)                       echo "rejected" ;;
+    *)                          echo "unverifiable" ;;
+  esac
 }
 
 _aid_lc_require_target_branch() {
@@ -1003,32 +944,33 @@ aid_lifecycle_ensure_manifest() {
   return 0
 }
 
-# _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the EPIC's
-# audit provenance (gitignored evidence). Empty if no provenance (=> unverifiable).
+# _aid_lc_epic_review_file <epic_id> <root> — the EPIC's review record in its
+# gitignored evidence: the EPIC round index (cp3/rounds.json), else the
+# audit-report.json an EPIC closed before 2.101.0 left behind. Empty if neither.
+_aid_lc_epic_review_file() {
+  { ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp3/rounds.json 2>/dev/null \
+    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null || true; } | sort -V | tail -1   # the latest run
+}
+
+# _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the review
+# record. Empty if there is none (=> unverifiable). Plan mode: the review
+# happened once for the whole plan, so it is the whole-plan round's head.
 _aid_lc_epic_reviewed_head() {
-  local epic_id="$1" root="${2:-.}"
   local rep
-  # Plan mode: there is no per-EPIC audit report to read — the review happened
-  # once for the whole plan. The reviewed head is the plan-final Auditor's.
-  if _aid_lc_plan_mode; then
-    local pa="${_AID_LC_PLAN_RUN_DIR:-}/audit-report.json"
-    [[ -f "$pa" ]] || return 0
-    jq -r '.revision.head_sha // .reviewed_head // ""' "$pa" 2>/dev/null || true
-    return 0
-  fi
-  rep="$(ls "${root}/.aid-o/work/evidence/${epic_id}"/*/audit-report.json 2>/dev/null | head -1 || true)"
-  [[ -z "$rep" ]] && return 0
-  jq -r '.revision.head_sha // .reviewed_head // ""' "$rep" 2>/dev/null || true
+  if _aid_lc_plan_mode; then rep="${_AID_LC_PLAN_RUN_DIR:-}/cp7/rounds.json"
+  else rep="$(_aid_lc_epic_review_file "$1" "${2:-.}")"; fi
+  [[ -f "$rep" ]] || return 0
+  # the LAST round's head: a fix between rounds moves it past the index's own
+  jq -r '.rounds[-1].head_sha // .head_sha // .revision.head_sha // .reviewed_head // ""' "$rep" 2>/dev/null || true
 }
 
 # _aid_lc_epic_review_status <epic_id> <root> [plan_id] — classify the EPIC's
-# audit review from its provenance (gitignored evidence). Echoes one of:
-#   accepted     — explicit blocking_findings false/0
-#   rejected     — blocking_findings true or a nonzero count
-#   unverifiable — status:unverifiable OR blocking_findings absent/null (never
-#                  presented as accepted — a merge can be delivered while its
-#                  historical review is unverifiable)
-#   none         — no audit report at all
+# review from its record (gitignored evidence). Echoes one of:
+#   accepted     — round verdict pass/skip/no_change (old report: blocking_findings false/0)
+#   rejected     — round verdict fail (old report: blocking_findings true or nonzero)
+#   unverifiable — anything else (never presented as accepted — a merge can be
+#                  delivered while its historical review is unverifiable)
+#   none         — no review record at all
 # [plan_id], in PLAN MODE only, is the authoritative plan id this call is
 # scoped to (D5 lifecycle-audit HIGH follow-up: it MUST come from the
 # caller's own trusted parameter, never be guessed from a mutable runtime
@@ -1039,8 +981,16 @@ _aid_lc_epic_review_status() {
   # Plan mode: the ONE plan-level verdict stands for every EPIC in the plan —
   # see _aid_lc_plan_review_status and the PLAN MODE header.
   if _aid_lc_plan_mode; then _aid_lc_plan_review_status "$root" "$plan_id"; return 0; fi
-  rep="$(ls "${root}/.aid-o/work/evidence/${epic_id}"/*/audit-report.json 2>/dev/null | head -1 || true)"
+  rep="$(_aid_lc_epic_review_file "$epic_id" "$root")"
   [[ -z "$rep" ]] && { echo "none"; return 0; }
+  if [[ "$rep" == */cp3/rounds.json ]]; then
+    case "$(jq -r '.verdict // ""' "$rep" 2>/dev/null)" in
+      pass|skip|no_change) echo "accepted" ;;
+      fail)                echo "rejected" ;;
+      *)                   echo "unverifiable" ;;
+    esac
+    return 0
+  fi
   local st bf
   st="$(jq -r '.status // ""' "$rep" 2>/dev/null || true)"
   bf="$(jq -r '.blocking_findings' "$rep" 2>/dev/null || true)"   # direct read (no `// empty`)
@@ -1278,10 +1228,8 @@ aid_lifecycle_record_delivery() {
 #       reason lives in the runtime plan-state and the operation log.
 #   (b) the delivery bindings — every non-abandoned, non-superseded declared
 #       EPIC bound with delivery_sha = the plan merge commit, and the review
-#       verdict taken from the PLAN-level audit-report.json / curator-report.json
-#       in <run_dir_abs>. In the new model the review genuinely happens once for
-#       the whole plan, so a per-EPIC verdict derived from a per-EPIC audit
-#       report no longer exists to be read.
+#       verdict taken from the whole-plan round in <run_dir_abs>: the review
+#       happens once for the whole plan.
 #
 # ONE commit for both, so the closure denominator and the deliveries can never
 # disagree. It does NOT write the receipt: that is Step 6's (`plan-close`), so a

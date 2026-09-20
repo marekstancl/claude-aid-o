@@ -7,7 +7,7 @@
 # round without the file and passes a skipped one with an audit line) and the
 # release policy's required-input row (aid-release-policy.sh). Cross-component
 # by design (round engine → FSM, round engine → release policy), so t2 whatever
-# it costs. The plan-finalize --stage inputs case (review-profile.json after
+# it costs. The plan-finalize --stage produce case (review-profile.json after
 # P094 Step 14) is added by that step.
 # Origin: P094 Step 7.
 
@@ -78,9 +78,9 @@ _reconcile() { run bash -c "cd '$ROOT' && source '$FSM' && _fsm_routed_findings_
 @test "the release policy reads the written file as a present required input, not a blocker" {
   run _cp3_round "src/app.py:3"; [ "$status" -eq 0 ]
   local f
-  for f in review-profile.json delivery-gate.json acceptance-evidence.json gates_report.json epic_input.md; do cp "$FIX/pack/$f" "$EV/$f"; done
+  for f in review-profile.json acceptance-evidence.json gates_report.json epic_input.md; do cp "$FIX/pack/$f" "$EV/$f"; done
   local head; head="$(git -C "$ROOT" rev-parse HEAD)"
-  for f in review-profile.json delivery-gate.json acceptance-evidence.json; do
+  for f in review-profile.json acceptance-evidence.json; do
     jq --arg h "$head" '.revision.head_sha = $h' "$EV/$f" > "$EV/$f.tmp" && mv "$EV/$f.tmp" "$EV/$f"
   done
   mkdir -p "$ROOT/.aid-o/work/evidence/P059-release-policy/generation"

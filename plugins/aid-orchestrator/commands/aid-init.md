@@ -99,7 +99,6 @@ project may legitimately carry its own hook logic outside the markers.
 | File | Written when |
 |------|--------------|
 | `.aid-o/config/integrations.yaml` | the Qdrant memory integration is detected as available — `/aid-init` writes only `memory.enabled: true` at creation |
-| `.github/workflows/plan-boundary-required-check.yml` | the PM answers Y to the optional plan-boundary CI prompt |
 
 ### Where `.aid-o/` is created
 
@@ -147,21 +146,6 @@ the worktree directory shows up as untracked. Re-running `/aid-init` also refres
 git hooks, which matters here: hooks installed before P074 cannot resolve `.aid-o` from
 inside a linked worktree, so `plan-start` prints a warning that commits made from the
 plan worktree are unguarded until the hooks are re-installed.
-
-**Note:** If the project's root `.gitignore` contains a `.aid-o/` blanket exclusion,
-replace it with the following four lines so that boundary manifests and delivery reports
-can be committed (git cannot un-ignore content inside an ignored directory — the glob
-form is required):
-
-```gitignore
-# Replace: .aid-o/
-.aid-o/*
-!.aid-o/reports/
-!.aid-o/reports/**
-```
-
-The `.aid-o/` form (directory ignore) silently blocks all negation that follows;
-`.aid-o/*` (glob ignore) allows `!.aid-o/reports/` to work correctly.
 
 **Rules:**
 - Per-line backfill (idempotent): for each line in `defaults/.gitignore`, append it
@@ -523,7 +507,7 @@ hand-written progress notes.
 ```markdown
 # AID Backlog
 
-_Source: user | agent | curator | audit_
+_Source: user | agent | review | audit_
 
 ## Bugs
 | ID | Priority | Source | Summary |
@@ -683,8 +667,8 @@ matches by branch, and enforces that staged files stay within the state-appropri
 
 - **EXECUTE** → the current step's `allowed_paths` (from `plan.json`) ∪ the run's evidence dir.
 - **GATES** → the union of ALL steps' `allowed_paths` ∪ evidence dir (gate-fix reaches wider).
-- **DONE/review** → union of ALL steps' `allowed_paths` ∪ evidence dir (documented Curator/Auditor
-  auto-fix commits legitimately touch step files).
+- **DONE/review** → union of ALL steps' `allowed_paths` ∪ evidence dir (the fix of an
+  EPIC review finding legitimately touches step files).
 - **DONE/release** → a version whitelist derived at runtime from `project.yaml` `versioning`
   (`source` + `files[].path`) ∪ both CHANGELOGs ∪ evidence dir.
 
@@ -794,34 +778,6 @@ Config defaults installation:
 ```
 
 **What the config does:** Read by `/aid-audit-tests` (`lib/aid-test-audit-config.sh`'s `load_test_audit_config`) for its budget/agent-concurrency/allowed-runner defaults. The distributed template's values are byte-identical to the loader's own hardcoded defaults, so a project's `/aid-audit-tests` behavior is unchanged whether or not `/aid-init` has run since this plan shipped.
-
-### Optional: Plan Boundary CI Check
-
-- **Plan boundary CI check** (optional): Copy `defaults/ci/plan-boundary-required-check.yml` to `.github/workflows/` to enforce the boundary manifest check on PRs. Run `/aid-audit` to verify installation status.
-
-Ask the PM whether to install it:
-
-```
-Plan boundary CI check
-====================================
-Installs .github/workflows/plan-boundary-required-check.yml
-This check verifies committed boundary manifests in .aid-o/reports/ on every PR/merge.
-Required by branch protection to enforce the plan boundary on squash + web merges.
-
-Install now? (Y/N)
-```
-
-- Default: skip (do not install) if PM does not respond
-- If PM says Y: copy `{plugin_path}/defaults/ci/plan-boundary-required-check.yml` to `.github/workflows/plan-boundary-required-check.yml`
-- If `.github/workflows/` does not exist, create it first
-- If the file already exists: **skip** (do not overwrite — PM may have customised it)
-
-```
-CI check installation:
-  [INSTALLED] .github/workflows/plan-boundary-required-check.yml — plan boundary CI check (new)
-  [EXISTS]    .github/workflows/plan-boundary-required-check.yml — keeping existing
-  [SKIPPED]   User declined CI check installation
-```
 
 ## Lazy-Created (NOT at init time)
 
@@ -972,4 +928,4 @@ creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.
 
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-20

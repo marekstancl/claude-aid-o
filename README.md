@@ -53,7 +53,7 @@ Or go fully autonomous:
 
 **Fast Mode (`/aid-do`)** — For tasks under 2 hours. < 2 min overhead. Creates a quick log (Q-NNN.md), skips the full EPIC pipeline.
 
-**7 controller agents** — Implementer, Verifier, Gate-fixer, Curator, Auditor, Project-scanner, Run-validator — dispatched automatically based on your plan's dependency graph.
+**7 agents** — Implementer, Verifier, Gate-fixer, Auditor, Simplifier, Project-scanner, Test-portfolio-analyst. The Implementer is dispatched per step from your plan's dependency graph; every delivery is read by reviewer rounds (step, EPIC, whole plan).
 
 **Quality gates with auto-fix** — Tests, lint, build, security scan run via `aid-run-gates.sh`. Gate failures trigger the gate-fixer agent (up to 3 attempts) before escalating to you.
 
@@ -103,7 +103,7 @@ Or go fully autonomous:
              DONE      ESCALATION → gate-fixer (auto) or PM (manual)
                │              │
                ▼              └──► retry → GATES
-          curator + archive
+        EPIC review + archive
 ```
 
 **Manual mode** — PM approves at READY and reviews at ESCALATION.
@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.100.0** (current) — když Codex chybí, odpoví Claude se stejným zadáním; rozhodčí bere rozsah řádků i inline reprodukci; doklad o akceptačních kritériích z brány, která je ověřila
+- **v2.101.0** (current) — konec plánu má čtyři kroky a jedno kolo tří revizorů nad celým dodáním; oprava platí znovu jen to, čeho se dotkla; reportér, kurátor, smlouva auditora pro konec plánu, CP4, CP5 a brána dodávky C1 jsou pryč
+- **v2.100.0** — když Codex chybí, odpoví Claude se stejným zadáním; rozhodčí bere rozsah řádků i inline reprodukci; doklad o akceptačních kritériích z brány, která je ověřila
 - **v2.99.0** — kontrola kroku, EPICu a fast mode na jednom motoru kol; pre-filter, soubory verifikátora a invalidační mapa odstraněny
-- **v2.98.0** — kontrola plánu šesti revizory ve dvou kolech, jedna cesta bez pásem; starý řetězec C0 a ledger odstraněny
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
@@ -145,8 +145,8 @@ A plan declares its release model in its committed lifecycle manifest
 
 Under **`plan_branch`** an EPIC merges into the plan branch and releases nothing.
 The plan releases once, at the plan-final boundary: one gate profile run against
-a frozen candidate, one specialist review (Auditor, Curator, Simplifier,
-Reporter), one PM authorization bound to that candidate, one compare-and-swap
+a frozen candidate, one review of the whole delivery by three reviewer roles,
+one PM authorization bound to that candidate, one compare-and-swap
 merge to the target branch, at most one tag, and a committed lifecycle receipt
 without which the plan cannot be declared closed.
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # aid-review-config.sh — the one reader of a review_checkpoints.<block>
-# reviewer block: plan_review (CP1), step_review (CP2, CP6), epic_review (CP3).
+# reviewer block: plan_review (CP1), step_review (CP2, CP6), epic_review (CP3),
+# final_review (CP7).
 #
 # Precedence: the project's .aid-o/config/policies/review-checkpoints.yaml when
 # it carries the block, otherwise the plugin default. The roles a block may
@@ -32,7 +33,7 @@
 #
 # The toggle key of each block: plan_review → cp1_plan_review,
 # step_review → cp2_step_review (cp6_fast_mode_review when RC_CHECKPOINT=cp6),
-# epic_review → cp3_integration_review.
+# epic_review → cp3_integration_review, final_review → cp7_plan_final_review.
 #
 # One reader for every checkpoint (P094 Step 4); registry row
 # review_config_valid; tested by scripts/tests/bats/test-review-config.bats.
@@ -41,11 +42,28 @@ _AID_RC_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." &
 _AID_RC_KNOWN_KEYS="rounds_default min_answers docs_type_reviewers banned_models reviewers skip_threshold stand_in_model"
 _AID_RC_LEGACY_KEYS="ceremony_bands cp1_codex_review fix_loop skip_trivial trivial_threshold pre_filter"
 
+# aid_policy_file <project_root> <basename> [<yq probe>] [<warning label>]
+#   Prints the policy file to read: the project's .aid-o/config/policies/<basename>
+#   when it exists and the probe (a yq path that must resolve) succeeds, else the
+#   plugin default, with "<label>: using plugin default" on stderr when a project
+#   file was passed over.
+aid_policy_file() {
+  local project="${1}/.aid-o/config/policies/${2}" probe="${3:-.}" label="${4:-$2}"
+  if [[ -f "$project" ]]; then
+    if yq -e "$probe" "$project" >/dev/null 2>&1; then
+      echo "$project"; return 0
+    fi
+    echo "${label}: using plugin default" >&2
+  fi
+  echo "${_AID_RC_PLUGIN}/defaults/policies/${2}"
+}
+
 _aid_rc_toggle_key() {
   case "$1" in
     plan_review) echo cp1_plan_review ;;
     step_review) [[ "${RC_CHECKPOINT:-}" == cp6 ]] && echo cp6_fast_mode_review || echo cp2_step_review ;;
     epic_review) echo cp3_integration_review ;;
+    final_review) echo cp7_plan_final_review ;;
     *) echo "" ;;
   esac
 }
@@ -60,14 +78,7 @@ aid_review_config_load() {
 
   local default="${_AID_RC_PLUGIN}/defaults/policies/review-checkpoints.yaml"
   local project="${root}/.aid-o/config/policies/review-checkpoints.yaml"
-  RC_CONFIG_FILE="$default"
-  if [[ -f "$project" ]]; then
-    if yq -e ".review_checkpoints.${block}" "$project" >/dev/null 2>&1; then
-      RC_CONFIG_FILE="$project"
-    else
-      echo "${block} config: using plugin default" >&2
-    fi
-  fi
+  RC_CONFIG_FILE="$(aid_policy_file "$root" review-checkpoints.yaml ".review_checkpoints.${block}" "${block} config")"
 
   local err
   if ! err="$(yq -e ".review_checkpoints.${block}" "$RC_CONFIG_FILE" 2>&1 >/dev/null)"; then
