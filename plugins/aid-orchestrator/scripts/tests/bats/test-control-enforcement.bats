@@ -37,9 +37,14 @@ teardown() { teardown_test_evidence_dir; }
   [ "$output" = "observe" ]
 }
 
-@test "all six readers in the shipped code go through the shared resolver" {
+@test "every reader in the shipped code goes through the shared resolver" {
+  # The assertion is the INVARIANT, not a headcount of files: aid-fsm.sh is the
+  # only caller left (aid-auto-pipeline.sh stopped reading the policy when CP1
+  # became the generation gate, and this case kept naming it long afterwards),
+  # and nothing anywhere reads a control's enforcement without the resolver.
   n="$(grep -c 'aid_control_enforcement' "$AID_PLUGIN_PATH/scripts/aid-fsm.sh")"
   [ "$n" -ge 6 ]
-  run grep -q 'aid_control_enforcement' "$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh"
-  [ "$status" -eq 0 ]
+  # no shipped script parses `.controls.*.enforcement` on its own
+  run grep -rln --include='*.sh' "controls\..*\.enforcement" "$AID_PLUGIN_PATH/scripts"
+  [ "$output" = "" ] || [ "$output" = "$AID_PLUGIN_PATH/scripts/lib/aid-control-enforcement.sh" ]
 }

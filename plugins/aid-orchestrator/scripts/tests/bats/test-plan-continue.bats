@@ -64,7 +64,9 @@ _light_unmerged() {
 # including) the merge: epic-start, a commit on its task branch, epic-complete.
 _real_epic() {
   local epic_id="$1"
-  run bash "$PLAN_FSM" epic-start P090 "$epic_id" --project-root "$ROOT"
+  # --run-id is mandatory since epic-start stopped inventing one (an invented id
+  # splits the evidence from the manifest); this fixture predates that rule.
+  run bash "$PLAN_FSM" epic-start P090 "$epic_id" --run-id "R-${epic_id}-plan" --project-root "$ROOT"
   [ "$status" -eq 0 ]
   git -C "$ROOT" checkout -q "task/${epic_id}/main"
   echo "work" > "$ROOT/work-${epic_id}.txt"
@@ -92,6 +94,13 @@ _two_epic_queue() {
   [ "$status" -eq 0 ]
   _two_epic_queue
   _real_epic E-090-1_2
+  # In production the generation chain (aid-json-to-run.sh) has already created
+  # the next EPIC's run before the queue claims it; epic-start finds it on disk
+  # and no longer invents one. The fixture never created it, so the
+  # continuation's epic-start failed here for a reason production does not have.
+  mkdir -p "$ROOT/.aid-o/work/evidence/E-090-2_2/R-E-090-2_2-plan"
+  printf 'epic_id: E-090-2_2\nstate: READY\n' \
+    > "$ROOT/.aid-o/work/evidence/E-090-2_2/R-E-090-2_2-plan/fsm-state.yaml"
 
   run bash "$PLAN_FSM" epic-merge-to-plan P090 E-090-1_2 --project-root "$ROOT"
   [ "$status" -eq 0 ]
