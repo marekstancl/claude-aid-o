@@ -1444,7 +1444,7 @@ Three consumers sit on it. `lib/aid-recovery-ladder.sh` loads it
 (`aid_recovery_policy_load`), records every attempt in
 `<evidence>/recovery-ladder.jsonl` and returns PERMISSION — it never performs an
 action. `lib/aid-recovery-adjudicate.sh` takes the exhausted case to the isolated Codex
-transport (`_run_codex_isolated`, shared with the C3 dispatch bridge) with a
+transport (`_run_codex_isolated`, shared with the review rounds) with a
 fact pack, and returns exactly one allowlisted action or the literal `escalate`. And the terminus stamps `auto_controller:
 blocked_for_pm` on the run, which `/aid-status` renders.
 

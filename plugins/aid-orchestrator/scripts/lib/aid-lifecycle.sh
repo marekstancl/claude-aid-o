@@ -949,7 +949,7 @@ aid_lifecycle_ensure_manifest() {
 # audit-report.json an EPIC closed before 2.101.0 left behind. Empty if neither.
 _aid_lc_epic_review_file() {
   { ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp3/rounds.json 2>/dev/null \
-    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null || true; } | head -1
+    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null || true; } | sort -V | tail -1   # the latest run
 }
 
 # _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the review
@@ -960,7 +960,8 @@ _aid_lc_epic_reviewed_head() {
   if _aid_lc_plan_mode; then rep="${_AID_LC_PLAN_RUN_DIR:-}/cp7/rounds.json"
   else rep="$(_aid_lc_epic_review_file "$1" "${2:-.}")"; fi
   [[ -f "$rep" ]] || return 0
-  jq -r '.head_sha // .revision.head_sha // .reviewed_head // ""' "$rep" 2>/dev/null || true
+  # the LAST round's head: a fix between rounds moves it past the index's own
+  jq -r '.rounds[-1].head_sha // .head_sha // .revision.head_sha // .reviewed_head // ""' "$rep" 2>/dev/null || true
 }
 
 # _aid_lc_epic_review_status <epic_id> <root> [plan_id] — classify the EPIC's

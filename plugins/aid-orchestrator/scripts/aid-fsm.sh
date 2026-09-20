@@ -5891,9 +5891,7 @@ VALID_DONE_PHASES="review release"
 # the CP3 pair itself), the abandoned-but-shipped check, the tiered-severity
 # compliance precondition (which is what reads the
 # run's CP2 verifier outputs), `pm_decision == merge`, the archived-task-file
-# check, and the auditor's `blocking_findings` verdict when an audit-report
-# exists at all (Step 4 CP2 finding 1 — a PM-blessed mid-plan Auditor run must
-# still be able to block). The skip is scoped to the per-EPIC RELEASE stack —
+# check and the routed-findings check. The skip is scoped to the per-EPIC RELEASE stack —
 # the stages that only make sense once, at the plan boundary — not to local
 # verification.
 AID_PLAN_BRANCH_SKIPPED_STAGES=(
@@ -6415,7 +6413,7 @@ EOF
         fsm_emit_compliance_recovery "$epic_id" "$_timeline" "$project_root" \
           "✅ ${epic_id}: compliance cleared, release unblocked."
       fi
-      # End P038/P042 compliance block. Falls through to existing curator/auditor checks.
+      # End P038/P042 compliance block.
 
       # ── EPIC-LOCAL checks that run in BOTH modes ────────────────────────────
       # Relocated here by P064 plan Step 9 from inside the release stack below
@@ -6465,7 +6463,7 @@ EOF
       if [[ "$_pb_plan_branch" != "true" ]]; then
 
         # P060 Step 4: CP3 freshness re-check at review→release. The GATES:DONE probe
-        # is the primary gate, but CP4 / review-phase commits can land AFTER DONE and
+        # is the primary gate, but review-phase commits can land AFTER DONE and
         # move HEAD past the reviewed CP3 head — this re-check catches that class.
         # Grandfather + policy (default BLOCKING, D9) handled inside.
         # PURE TREE consumer (every use of its third arg is a git probe against
@@ -7701,9 +7699,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 [[ -n "$_pr_id" ]] || { echo "Usage: aid-fsm.sh plan-reconcile <plan_id> [--dry-run|--apply] [root]" >&2; exit 1; }
                                 # PLAN MODE HAS TO BE BEGUN, AND NOBODY WAS BEGINNING IT.
                                 # In plan mode the lifecycle reads the reviewed head from
-                                # $_AID_LC_PLAN_RUN_DIR/audit-report.json. This dispatch called
+                                # $_AID_LC_PLAN_RUN_DIR/cp7/rounds.json. This dispatch called
                                 # the reconcile directly and the function does not begin the mode
-                                # itself, so the path resolved to /audit-report.json, the read
+                                # itself, so the path resolved to the filesystem root, the read
                                 # came back empty, and EVERY epic of EVERY plan_branch plan was
                                 # reported "unverifiable — no reviewed-head provenance" while the
                                 # real report sat in the evidence directory. plan-close's check5

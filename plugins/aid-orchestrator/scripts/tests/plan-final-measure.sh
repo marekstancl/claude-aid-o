@@ -69,9 +69,8 @@ rows="$(
 area_lines="$(
   cd "$PLUGIN_DIR"
   wc -l scripts/aid-plan-fsm.sh scripts/aid-release-policy.sh scripts/aid-evidence-verify.sh \
-        scripts/aid-plan-close-check.sh scripts/aid-delivery-gate.sh scripts/aid-pm-brief.sh \
-        scripts/lib/aid-c3-dispatch.sh scripts/lib/delivery-checks/*.sh \
-        agents/reporter.md agents/simplifier.md agents/curator.md agents/auditor.md 2>/dev/null |
+        scripts/aid-plan-close-check.sh scripts/aid-pm-brief.sh scripts/lib/aid-codex-transport.sh \
+        agents/simplifier.md agents/auditor.md 2>/dev/null |
     awk '$2 != "total" {printf "%s\t%s\n", $2, $1}' | jq -Rn '[inputs | split("\t") | {(.[0]): (.[1] | tonumber)}] | add // {}'
 )"
 

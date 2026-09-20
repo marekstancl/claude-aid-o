@@ -172,10 +172,11 @@ emit_deferred() {
 
   local found_any=false
 
-  # What the EPIC review left open (the last round's merged.json).
+  # What the EPIC review left unresolved (the last round's merged.json; the same
+  # four statuses the round's own verdict counts).
   local last_round open
   last_round="$(ls -d "${evidence_dir}"/cp3/round-* 2>/dev/null | sort -V | tail -1)"
-  open="$(jq -r '.findings[] | select(.status == "open" or .status == "disputed") | "\(.severity): \(.claim)"' \
+  open="$(jq -r '.findings[] | select(.status | IN("open", "disputed", "routed", "carried")) | "\(.severity): \(.claim)"' \
     "${last_round}/merged.json" 2>/dev/null | head -5 || true)"
   if [[ -n "$open" ]]; then
     printf 'Z revize EPICu — otevřené nálezy:\n'

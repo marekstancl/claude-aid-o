@@ -1230,7 +1230,7 @@ In FIRST AID mode, add option D: "Continue manual".
 | E5 | Agent: {name}, Step: {N}, Expected: `evidence/.../output.md`, Got: nothing |
 | E6 | Parallel group: wave {N}, Conflicting files: {list}, Branches: {list} |
 | E7 | (retired with P094: an exhausted review round is a PM card, not an escalation state) |
-| E8 | Critical findings: {list from audit report}, Report: `.aid-o/work/evidence/{id}/{run}/audit-report.md` |
+| E8 | Open findings: {list from the EPIC review}, Round: `.aid-o/work/evidence/{id}/{run}/cp3/rounds.json` |
 
 **PM response execution:**
 - **A (Fix):** Record decision: `aid-fsm.sh set-field escalation_decision fix <state_file>` → then `aid-fsm.sh transition ESCALATION EXECUTE|GATES <state_file>`

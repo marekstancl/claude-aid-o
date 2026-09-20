@@ -148,7 +148,7 @@ These lenses are SEMANTIC (C2). Shape/wire/structural checks are C1 (E6) — NOT
 | `ui_lifecycle` | UI lifecycle | behavior | FC-30 | Modal/component close/reopen retains or correctly resets state |
 | `frontend_user_outcome` | Frontend user outcome | behavior | FC-35 | Looks correct over real data, not mocked; user-visible outcomes verified |
 
-**C1/structural checks excluded (D4):** Delivery gate presence, producer-consumer file contracts, build config resolution, route registration, import resolution — these belong to C1/E6, not C2.
+**Structural checks excluded (D4):** producer-consumer file contracts, build config resolution, route registration, import resolution — these belong to the project's own gates, not to a lens.
 
 ### Lens Output per Finding
 

@@ -522,7 +522,6 @@ EOF
   jq -e --arg w "$wvbase" '.release_decision.waivers_applied | index($w)' "$OUT" >/dev/null
 }
 
-# ─── release_policy_preempted (hard-exits that never reach the C4 slot) ────────
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # E-059-2_2 Step 7 — Doc-1 §13.2 D11 negative fixtures (rows 18-27).

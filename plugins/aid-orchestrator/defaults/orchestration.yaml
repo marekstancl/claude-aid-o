@@ -12,7 +12,7 @@ language:
 
 # ─── Models ──────────────────────────────────────────────────────────────
 # Model tier per role is defined in skills/role-cards.md (single source of truth) —
-# step roles carry a `**Model:**` field; controller agents (auditor/curator/gate-fixer/
+# step roles carry a `**Model:**` field; controller agents (auditor/gate-fixer/
 # verifier) carry model in their own agent-file frontmatter. An optional `step.model`
 # in plan.json overrides the card for that one step. See pipeline.md §4 for dispatch.
 

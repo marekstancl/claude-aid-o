@@ -174,8 +174,8 @@ Do not hand-roll that dispatch. Source `scripts/lib/aid-recovery-adjudicate.sh` 
 `aid_recovery_adjudicate <run_evidence_dir> <stop_class> <facts_file>`. It builds the prompt pack
 (verified facts, current FSM state, the ladder record so far, the class's `allowed_actions` from
 `defaults/policies/auto-recovery.yaml` as an explicit allowlist, and the forbidden
-authority-expanding actions), dispatches through the same isolated Codex transport the C3 bridge
-uses, accepts only a reply naming exactly one action from that allowlist plus a rationale, retries
+authority-expanding actions), dispatches through the same isolated Codex transport the review rounds
+use, accepts only a reply naming exactly one action from that allowlist plus a rationale, retries
 once with the rejection quoted, and records every exchange to `timeline.jsonl`, the ladder record and
 a per-exchange audit artifact. It prints the selected action, or `escalate` — which is not an action
 and must never be executed as one. The full convention, the fail-closed paths and the authority

@@ -1033,7 +1033,7 @@ enforcements:
     promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "RETIRED by P094 Step 12 (the invalidation map is removed entirely, PM 7A; nothing emits gate_fixer_fix_applied since the gate-fixer left cp2/cp3). Was: done-advance review→release: compares gate_fixer_fix_applied event count to invalidation_map_produced event count; when applied > produced, emit invalidation_map_expected_missing (observe by default; INVALIDATION_MAP_ENFORCEMENT=blocking seam makes it exit 2); detects when a fix was applied but its post-fix invalidation-map hook did not run (pipeline.md Invalidation-Map Post-Fix Hook); fail-closed: no timeline or no applied events ⇒ no-op"
-    test: "scripts/tests/bats/test-c3-activation.bats"
+    test: "removed with the mechanism (P096 Step 12)"
 
   # ── E-059-2_2: C4 release-decision dual-run — observe mode, blocking promotion E10 ──
   # UMBRELLA NOTE: the divergence_class taxonomy (none / verification_only /
@@ -1537,7 +1537,7 @@ enforcements:
     surface: llm-facing
     status: active
     verdict: ALIGNED
-    description: "done-advance review->release resolves the owning plan's DECLARED lifecycle mode (plan_mode_single_authority); in plan_branch it runs only the EPIC-local validations (streamlined integration review, abandoned check, DG-07 delivery gate, tiered compliance, pm_decision, archived-task-file, and the hoisted legacy blocking_findings verdict) and structurally skips every stage in the single SSOT array AID_PLAN_BRANCH_SKIPPED_STAGES (c3 review-profile presence, CP4 curator validation, CP3 freshness recheck, curator/auditor report presence, c3 independent audit, curator content-ref sequencing, c3 dispatch provenance, c4 release-decision dual-run), emitting done_advance_plan_branch_mode listing them from that same array (a real JSON array even without jq). The three hoisted EPIC-local checks remain enforced in BOTH modes so a PM-blessed mid-plan Auditor's blocking finding still blocks. Legacy mode is unchanged."
+    description: "done-advance review->release resolves the owning plan's DECLARED lifecycle mode (plan_mode_single_authority); in plan_branch it runs only the EPIC-local validations (streamlined integration review, abandoned check, tiered compliance, pm_decision, archived-task-file, routed findings) and structurally skips every stage in the single SSOT array AID_PLAN_BRANCH_SKIPPED_STAGES (cp3_freshness_recheck, release_decision), emitting done_advance_plan_branch_mode listing them from that same array (a real JSON array even without jq). Legacy mode runs both."
     test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
 
   - id: plan_mode_unresolved_block

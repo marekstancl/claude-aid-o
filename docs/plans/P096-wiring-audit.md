@@ -60,4 +60,24 @@ IMP-618 až IMP-623 v `.aid-o/work/backlog.md`.
 
 ## Nezávislé čtení
 
-_Doplní se po doběhnutí nezávislého ověření._
+Codex byl 20. 9. přes limit účtu, četl proto nezávislý Claude (Opus), jen přes git na
+commitu `41777a30`, bez znalosti tohoto auditu kromě jeho textu a se zadáním „zkus ho rozbít".
+
+**Verdikt: nic blokujícího; zadrátování drží.** Žádný živý volající smazaných věcí ve
+`scripts/`, `commands/`, `skills/`, `agents/`, `defaults/`, hookách ani workflow; každý nový
+soubor má volajícího; `set -e` v novém bloku rozhodnutí o vydání je bezpečné (ověřeno pokusem);
+`plan-close` a zkrácená kontrola uzavření nemají nenastavenou proměnnou ani kontrolu, která by
+potichu přestala běžet; přenos ke Codexu sedí se všemi čtyřmi volajícími.
+
+Co našel a co se s tím stalo (vše opraveno před mergem):
+
+| Váha | Nález | Oprava |
+|---|---|---|
+| větší | aktivní řádek registru `plan_branch_release_skip` popisoval osm přeskakovaných kroků, které už nejsou | popis přepsán na dva skutečné |
+| větší | komentář nad seznamem přeskakovaných kroků v `aid-fsm.sh` sliboval kontrolu verdiktu auditora, která zmizela; tři další zastaralé komentáře | opraveny |
+| drobné, ale věcné | hlava revize se četla z prvního kola, takže oprava mezi koly mohla projít kontrolou původu s hlavou, kterou nikdo naposledy nečetl; a bral se abecedně první běh místo posledního | čte se hlava posledního kola posledního běhu |
+| drobné, ale věcné | shrnutí a stránka o EPICu počítaly jen stavy `open` a `disputed`, kolo samo počítá i `routed` a `carried` | stejné čtyři stavy |
+| drobné | pět nepravdivých vět v dokumentaci (most C3, zpráva auditora u eskalace E8, brána dodávky v kontraktech, kurátor v `orchestration.yaml`) | opraveny |
+| drobné | osiřelý nadpis v sadě, mrtvý řádek v ručním seznamu výjimek, měřicí skript počítal smazané soubory, řádek registru citoval smazaný test | opraveny |
+| drobné | katalog testů projektu jmenoval 20 jednotek, jejichž soubory neexistují (část už před P096) | odstraněny |
+| návrh | `aid_codex_binary` (35 řádků na výběr nejvyšší verze) by šel napsat kratší | neměněno: kód z P095 přesunutý beze změny, mimo rozsah |
