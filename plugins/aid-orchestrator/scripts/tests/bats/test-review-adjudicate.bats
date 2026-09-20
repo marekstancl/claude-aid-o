@@ -250,10 +250,13 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   _finding "$R1" reuse '.id = "reuse-2" | .claim = "claim two of its own" | .command = "bash -c '"'"'git log --oneline | head -3'"'"'"'
   _finding "$R1" reuse '.id = "reuse-3" | .claim = "claim three of its own" | .command = "bash -c '"'"'cat scripts/a.sh; ls scripts'"'"'"'
   _finding "$R1" reuse '.id = "reuse-4" | .claim = "claim four of its own" | .command = "bash -c '"'"'jq -n 1 | wc -c'"'"'"'
+  # an ordinary case-insensitive grep: rejected by the first hardening, which
+  # vetoed -i on every word although no allowed verb has an in-place mode
+  _finding "$R1" reuse '.id = "reuse-5" | .claim = "claim five of its own" | .command = "bash -c '"'"'grep -i TWO scripts/a.sh'"'"'"'
   run ADJ "$R1" --project-root "$ROOT"
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq 'length' "$R1/rejected.json")" -eq 0 ]
-  [ "$(jq '.findings | length' "$R1/merged.json")" -eq 4 ]
+  [ "$(jq '.findings | length' "$R1/merged.json")" -eq 5 ]
 }
 
 @test "command: every way out of the inline allowlist an independent review found is refused" {

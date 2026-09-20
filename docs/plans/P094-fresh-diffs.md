@@ -83,9 +83,11 @@ The plan predicted `1 pass, 3 fail, 1 skip`; the measured outcome is
 be accepted, and two of them are not read-only commands at all: diff 1 creates
 files in /tmp to show a glob bug, diff 4 sources `aid-fsm.sh` and runs `git
 init`. Both are legitimate reproductions and both belong in a
-`repro/<name>.sh` file, which is exactly what the file form is for. What the
-adjudicator stopped losing is the two findings it rejected on FORM: the line
-range of diff 3 and the pipeline of diff 2.
+`repro/<name>.sh` file, which is exactly what the file form is for. What the adjudicator stopped losing is ONE
+finding, diff 3's, rejected on the FORM of its citation (a line range). Diff 2
+was never lost — its citations were plain `path:line` all along — and diffs 1
+and 4 are still rejected, now for what their reproductions DO rather than for
+the form they are written in.
 
 **The verb list is shorter than the plan's.** An independent review on
 2026-09-20 walked through what the planned list admitted and found it was a

@@ -24,7 +24,8 @@ monologu; jeho odpověď se vrací přes `--answer <soubor>`.
 **`set-field` na čtyři pole, která jsou podmínkou přechodu** (`total_steps`,
 `current_step`, `plan_json_hash`, `base_commit`) **vyžaduje `--reason`** delší
 než dvacet znaků a rozlišitelnou časovou osu, jinak odmítne. Každé `set-field`
-navíc zapíše řádek `field_set` (pole, stará hodnota, nová, důvod).
+navíc zapíše řádek `field_set` (pole, stará hodnota, nová, důvod) všude,
+kde se dá odvodit časová osa běhu.
 
 ### Added
 - **Zástup za Codex** — `aid_codex_probe` a `aid_codex_binary` v `lib/aid-c3-dispatch.sh` rozhodují dostupnost jednou pro všechny čtyři volající; `AID_CODEX_BIN` pinuje binárku, když je pravidlo podle verze špatná odpověď.

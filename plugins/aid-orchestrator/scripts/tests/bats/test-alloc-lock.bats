@@ -265,3 +265,13 @@ _norm_counter() {
   [[ "$output" == *P076* ]]
   [ "$(grep -c 'skipped' <<< "$output")" -eq 1 ]
 }
+
+@test "an id carried only by an ARCHIVED plan is taken too" {
+  _mk_repo "$TEST_TMPDIR/repo"
+  mkdir -p "$TEST_TMPDIR/repo/.aid-o/plans/archive"
+  : > "$TEST_TMPDIR/repo/.aid-o/plans/archive/P075-finished-and-filed.md"
+  run bash -c "cd '$TEST_TMPDIR/repo' && '$FSM' alloc plan-id" 3>&-
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *P076* ]]
+  [[ "$output" == *"archive/"* ]]
+}

@@ -53,8 +53,9 @@ A finding exists only with both:
   wc head tail cat printf echo jq test [[ [` (`git` only with
   `grep|log|show|diff|blame|rev-parse|status`), with no redirection, no command
   substitution, no process substitution, no newline, no backslash, no in-place
-  flag, and no verb that has a write mode at all. A verb
-  that can write and the shell keywords are refused: a reproduction that needs
+  flag, and no verb that has a write mode at all. The list is closed: a verb that is not on it
+  is refused whatever it does, which is how `mkdir`, `sed`, `find`, `yq` and
+  the words `if`, `for` and `do` are kept out. A reproduction that needs any of
   them is a `repro/<name>.sh` file.
 - `evidence` — `path:line` or `path:first-last` inside the repository,
   `absent:path` for a file the plan presumes and the repository lacks, or

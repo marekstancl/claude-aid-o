@@ -189,11 +189,11 @@ _inline_body_ok() {
     (( ${#words[@]} > 0 )) || continue
     w="${words[0]}"
     [[ "$_INLINE_VERBS" == *" $w "* ]] || return 1
-    # No in-place flag on any verb, whatever the list says it reads.
-    for w in "${words[@]}"; do
-      case "$w" in -i|-i.*|--in-place|--inplace) return 1 ;; esac
-    done
-    if [[ "${words[0]}" == git ]]; then
+    # No in-place flag veto here on purpose: not one verb on the list HAS an
+    # in-place mode, and a veto over every word rejected `grep -i`, the most
+    # ordinary case-insensitive search there is — throwing a real finding away
+    # on form, which is the failure P095 exists to end.
+    if [[ "$w" == git ]]; then
       case "${words[1]:-}" in grep|log|show|diff|blame|rev-parse|status) ;; *) return 1 ;; esac
     fi
   done

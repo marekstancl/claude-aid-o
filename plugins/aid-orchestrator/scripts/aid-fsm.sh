@@ -6000,9 +6000,12 @@ cmd_auto_mode() {
   local file="${root}/.aid-o/work/auto-mode-state.yaml"
   case "$sub" in
     get)
-      [[ -f "$file" ]] || { echo manual; return 0; }
-      local m; m="$(yaml_field "$file" mode)"
-      [[ "$m" == auto ]] && echo auto || echo manual
+      # Delegates to the ONE reader rather than reading the file itself: a
+      # second reader that ignores AID_AUTO_MODE and permissions.yaml would
+      # print `manual` in exactly the case the FSM acts on as `auto`.
+      # shellcheck source=lib/aid-permissions.sh
+      source "${SCRIPT_DIR}/lib/aid-permissions.sh"
+      aid_autonomous_mode "$root"
       return 0
       ;;
     set) mode="${1:-}"; shift || true ;;
@@ -9000,18 +9003,25 @@ epic: 0
   # A counter can lag behind the files: a plan written by hand carries a number
   # the counter never saw, and the allocator would hand it out a second time
   # (WAN got P106 twice, 2026-09-19). The number is free; skipping is not.
-  local _skipped=0 _dir _glob
+  # archive/ counts: a completed plan moves there, and an id it still carries is
+  # just as taken as one in the live directory — without this the WAN collision
+  # (P106 twice) simply waits for the colliding plan to be archived.
+  local _skipped=0 _glob; local -a _dirs=()
   case "$kind" in
-    plan-id) _dir="${root}/.aid-o/plans"; _glob='P%03d-*.md' ;;
-    epic-id) _dir="${root}/.aid-o/tasks"; _glob='E-%03d*.md' ;;
-    *)    _dir="" ;;
+    plan-id) _dirs=("${root}/.aid-o/plans" "${root}/.aid-o/plans/archive"); _glob='P%03d-*.md' ;;
+    epic-id) _dirs=("${root}/.aid-o/tasks" "${root}/.aid-o/tasks/archive"); _glob='E-%03d*.md' ;;
   esac
-  if [[ -n "$_dir" ]]; then
-    # shellcheck disable=SC2059 — _glob is a fixed format string, not input
-    while compgen -G "${_dir}/$(printf "$_glob" "$next")" > /dev/null 2>&1; do
-      next=$((next + 1)); _skipped=$((_skipped + 1))
+  if (( ${#_dirs[@]} )); then
+    local _d _taken=1
+    while (( _taken )); do
+      _taken=0
+      for _d in "${_dirs[@]}"; do
+        # shellcheck disable=SC2059 — _glob is a fixed format string, not input
+        compgen -G "${_d}/$(printf "$_glob" "$next")" > /dev/null 2>&1 && { _taken=1; break; }
+      done
+      (( _taken )) && { next=$((next + 1)); _skipped=$((_skipped + 1)); }
     done
-    (( _skipped > 0 )) && echo "NOTE: alloc ${kind}: skipped ${_skipped} id(s) a file in ${_dir} already carries" >&2
+    (( _skipped > 0 )) && echo "NOTE: alloc ${kind}: skipped ${_skipped} id(s) a file in ${_dirs[0]} or its archive/ already carries" >&2
   fi
 
   # Atomic write preserving every comment byte: sed rewrites ONLY the digits

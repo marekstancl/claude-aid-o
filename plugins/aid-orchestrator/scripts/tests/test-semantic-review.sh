@@ -159,10 +159,6 @@ echo "T10: protocol-validate --current-head on generated artifacts"
 T10_DIR=$(mktemp -d)
 T10_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 mkdir -p "$T10_DIR/ev"
-cat > "$T10_DIR/plan.json" <<'J'
-{"steps":[{"id":"step-1","title":"SHA test","acceptance_criteria":["SHA must be full 40 chars"]}]}
-J
-# Create step-1 verifier output
 # consumption-proof
 cat > "$T10_DIR/manifest.json" <<'J'
 {"bindings":[{"id":"SHA-BIND","contract_ref":"x.json","status":"pending"}]}
