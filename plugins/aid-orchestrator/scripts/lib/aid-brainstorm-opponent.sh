@@ -21,12 +21,12 @@
 #   - Two models agreeing on something WRONG is not caught here. Nothing in
 #     this file looks for that; it is a known boundary of the design, not a
 #     defect in it.
-#   - An opponent that cannot be reached does not become agreement, and since
-#     P088 it does not silently become a monologue either: the caller PRESENTS
-#     it to the PM as a decision (skills/brainstorming.md) while `ask_pm` is
-#     true. Three attempts per run, checked BEFORE the attempt — without a cap,
-#     a provider having a bad afternoon turns into a loop of interruptions,
-#     which is worse than the monologue it was trying to avoid.
+#   - An opponent that cannot be reached does not become agreement. Since P095
+#     it does not become a monologue or a question either: when NO codex can be
+#     reached (absent, outdated, over its usage limit), a claude agent answers
+#     the same brief and the record says which provider answered and why (exit
+#     4 and `--answer`). The three-attempt cap and the `ask_pm` decision remain
+#     for the narrower case a codex answered the probe and then said nothing.
 #   - An answer that is not in the required shape is treated as UNREACHED, for
 #     the same reason: prose that could not be parsed is not consent.
 #   - "They agreed" is the OPPONENT'S OWN CLAIM about the brief, not a
@@ -39,7 +39,9 @@
 #   The Codex transport is `_run_codex_isolated` from lib/aid-c3-dispatch.sh —
 #   the shared, hardened launcher (fresh process, read-only sandbox, the
 #   --output-schema trap already learned). Availability comes from
-#   lib/aid-audit-independence.sh. What is NOT reused is C0's dispatch state
+#   `aid_codex_probe` in the same file: the binary is chosen by version and the
+#   usage limit is probed, because neither `command -v` nor a --version check
+#   can see a codex that is installed and refusing to answer. What is NOT reused is C0's dispatch state
 #   machine: attempts, ledgers and override artifacts belong to a gate that
 #   blocks a release, and a brainstorm is not that.
 #
@@ -49,7 +51,7 @@
 #
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 #
-# **Last Updated:** 2026-08-24
+# **Last Updated:** 2026-09-20
 # =============================================================================
 [[ -n "${_AID_BRAINSTORM_OPPONENT_SH_LOADED:-}" ]] && return 0
 _AID_BRAINSTORM_OPPONENT_SH_LOADED=1
@@ -139,22 +141,74 @@ _aid_bo_write_unreached() {
   }
 }
 
+# _aid_bo_monologue <attempt> <what> — the one line the run prints when a codex
+# that WAS reachable gave nothing back. The third failure is the last: from then
+# on the run says so instead of asking the PM again.
+_aid_bo_monologue() {
+  if (( $1 >= _AID_BO_MAX_ATTEMPTS )); then
+    echo "opponent not reached ${_AID_BO_MAX_ATTEMPTS}+ times — no longer asking; this brainstorm continues as a recorded monologue: $2" >&2
+  else
+    echo "opponent not reached — this brainstorm is a monologue and the artifact says so: $2" >&2
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # aid_brainstorm_opponent_run <plan_id> <brief_file> <out_dir>
 #
 #   0  the opponent answered — read <out_dir>/dispute.json for what it said
 #   1  the vision gate refused, or the arguments are unusable
-#   3  the opponent was not reached; the run continues as a monologue and the
-#      artifact records that it did
+#   3  the opponent was not reached although a codex answered the probe; the
+#      run continues as a monologue and the artifact records that it did
+#   4  no codex could be reached at all: the STAND-IN line names the prompt the
+#      controller must give a claude agent, whose answer comes back through
+#      `--answer <file>`. The PM is told, never asked (PM instruction 2026-09-19).
+#
+#   aid_brainstorm_opponent_run <plan_id> <brief> <out_dir> [--answer <file>]
 # ---------------------------------------------------------------------------
 aid_brainstorm_opponent_run() {
   local plan_id="${1:?opponent: plan id required}"
   local brief="${2:?opponent: brief file required}"
   local out_dir="${3:?opponent: output directory required}"
+  shift 3 || true
+  local stand_in_answer=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --answer) stand_in_answer="${2:?opponent: --answer needs a file}"; shift 2 ;;
+      *) echo "opponent: unknown option $1" >&2; return 1 ;;
+    esac
+  done
 
   [[ -r "$brief" ]] || { echo "opponent: cannot read the brief ${brief}" >&2; return 1; }
   mkdir -p "$out_dir" || { echo "opponent: cannot create ${out_dir}" >&2; return 1; }
   local dispute="${out_dir}/dispute.json"
+  local standin="${out_dir}/stand-in.json"
+
+  # The stand-in's answer comes back here. It is the same brief and the same
+  # shape; only the provider differs, and the record says so.
+  if [[ -n "$stand_in_answer" ]]; then
+    [[ -r "$standin" ]] || { echo "opponent: --answer without a stand-in asked for (no ${standin})" >&2; return 1; }
+    local why; why="$(jq -r '.reason // "unknown"' "$standin")"
+    sed -e 's/^```json$//' -e 's/^```$//' "$stand_in_answer" > "${out_dir}/.stand-in-answer.json"
+    if ! _aid_bo_valid "${out_dir}/.stand-in-answer.json"; then
+      rm -f "${out_dir}/.stand-in-answer.json"
+      _aid_bo_write_unreached "$dispute" "$plan_id" "stand_in_invalid: the stand-in answered outside the required shape" \
+        "$(( $(_aid_bo_attempts "$dispute") + 1 ))" || return 1
+      echo "opponent: the stand-in answered outside the required shape — dispatch it once more with --answer" >&2
+      return 1
+    fi
+    jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg p "$plan_id" \
+       --arg m "$(jq -r '.model // "unknown"' "$standin")" --arg why "$why" --argjson cap "$_AID_BO_MAX_TO_PM" \
+       '{opponent: "answered", plan_id: $p, model: $m, provider: "claude", fallback_reason: $why, created_at: $at,
+         agree: (.agree // []), disagree: (.disagree // []), missing: (.missing // []),
+         to_pm: ((.disagree // [])[:$cap]),
+         held_back: (((.disagree // []) | length) - $cap | if . < 0 then 0 else . end)}' \
+       "${out_dir}/.stand-in-answer.json" > "$dispute" || {
+      rm -f "${out_dir}/.stand-in-answer.json"
+      echo "opponent: the stand-in answer could not be written to ${dispute}" >&2; return 1; }
+    rm -f "${out_dir}/.stand-in-answer.json"
+    echo "opponent answered by a claude stand-in (codex ${why}): $(jq -r '.agree | length' "$dispute") agreed, $(jq -r '.disagree | length' "$dispute") disputed" >&2
+    return 0
+  fi
 
   # The vision gate is the reason Step 7 is a transition and not a sentence:
   # the opponent is dispatched by code, so code can refuse to dispatch it.
@@ -179,19 +233,32 @@ aid_brainstorm_opponent_run() {
     return 3
   fi
 
-  local avail rc=0
-  avail="$(bash "${_AID_BO_LIB_DIR}/aid-audit-independence.sh" detect --required cross_provider 2>&1)" || rc=$?
-  if [[ "$rc" -ne 0 ]]; then
-    _aid_bo_write_unreached "$dispute" "$plan_id" "$avail" "$attempt" || return 1
-    if (( attempt >= _AID_BO_MAX_ATTEMPTS )); then
-      echo "opponent not reached ${_AID_BO_MAX_ATTEMPTS}+ times — no longer asking; this brainstorm continues as a recorded monologue: ${avail}" >&2
-      return 3
-    fi
-    echo "opponent not reached — this brainstorm is a monologue and the artifact says so: ${avail}" >&2
-    return 3
+  # No codex is not a monologue any more: a claude agent answers the same brief.
+  # The PM is told which provider answered and why, and is never asked to choose.
+  # One resolution for both the probe's cache and the sandbox the dispatch runs
+  # in: they are the same project, and a second `aid_state_root` call a few
+  # lines down was the same answer with different stderr handling.
+  local root; root="$(aid_state_root 2>/dev/null)" || root="$PWD"
+  local probe; probe="$(AID_PROJECT_ROOT="$root" aid_codex_probe)"
+  if [[ "$(jq -r '.available' <<< "$probe")" != true ]]; then
+    local why; why="$(jq -r '.reason' <<< "$probe")"
+    _aid_bo_prompt "$brief" > "${out_dir}/opponent-prompt.txt" \
+      || { echo "opponent: cannot write ${out_dir}/opponent-prompt.txt" >&2; return 1; }
+    jq -n --arg r "$why" --arg m "${AID_BO_STAND_IN_MODEL:-opus}" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{stand_in: "claude", reason: $r, model: $m, asked_at: $at}' > "$standin" \
+      || { echo "opponent: cannot write ${standin}" >&2; return 1; }
+    # An asked-for stand-in that nobody dispatched must not look like a
+    # brainstorm where the opponent never ran. `stand_in_pending` is neither
+    # `answered` nor `unreached`, so aid-brainstorm-state.sh refuses to close on
+    # it — the record says "asked, not yet answered", which is the truth.
+    jq -n --arg p "$plan_id" --arg r "$why" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{opponent: "stand_in_pending", plan_id: $p, reason: ("no codex reachable (" + $r + "); a claude stand-in was asked for and has not answered yet"),
+        created_at: $at, provider: "claude", agree: [], disagree: [], missing: []}' > "$dispute" \
+      || { echo "opponent: cannot write ${dispute}" >&2; return 1; }
+    echo "STAND-IN: codex is unavailable (${why}); dispatch ${out_dir}/opponent-prompt.txt to a general-purpose agent (model ${AID_BO_STAND_IN_MODEL:-opus}) and pass its answer back with --answer <file>" >&2
+    return 4
   fi
 
-  local root; root="$(aid_state_root)" || root="$PWD"
   local tmp; tmp="$(mktemp -d)" || { echo "opponent: no temp dir" >&2; return 1; }
   _aid_bo_prompt "$brief" > "${tmp}/prompt.txt"
 
@@ -202,7 +269,7 @@ aid_brainstorm_opponent_run() {
   if [[ "$drc" -ne 0 || ! -s "${tmp}/answer.txt" ]]; then
     _aid_bo_write_unreached "$dispute" "$plan_id" "the opponent did not answer (exit ${drc})" "$attempt" || { rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"
-    echo "opponent not reached (exit ${drc}) — continuing as a monologue" >&2
+    _aid_bo_monologue "$attempt" "the opponent did not answer (exit ${drc})"
     return 3
   fi
 
@@ -211,7 +278,7 @@ aid_brainstorm_opponent_run() {
   if ! _aid_bo_valid "${tmp}/answer.json"; then
     _aid_bo_write_unreached "$dispute" "$plan_id" "the opponent answered outside the required shape — an answer that cannot be read is not agreement" "$attempt" || { rm -rf "$tmp"; return 1; }
     rm -rf "$tmp"
-    echo "opponent answered outside the required shape — treated as not reached" >&2
+    _aid_bo_monologue "$attempt" "the opponent answered outside the required shape"
     return 3
   fi
 

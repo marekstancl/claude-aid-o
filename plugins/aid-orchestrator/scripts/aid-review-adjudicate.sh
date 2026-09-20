@@ -116,25 +116,104 @@ _evidence_item_ok() {
   (( line <= $(awk 'END { print NR }' "$abs") )) || return 1
 }
 
-# _evidence_first_ok <evidence> — prints the first citation that resolves; a
-# finding stands on ONE resolving citation (P094 acceptance run: three real
-# defects were lost to one wrong line number among several right ones). Exit 1
-# when none resolves.
+# _evidence_norm <item> — trims and collapses a range citation `path:N-M` to the
+# line it is anchored on, `path:N`; exit 1 on a reversed range.
+_evidence_norm() {
+  local item="$1"
+  item="${item#"${item%%[![:space:]]*}"}"
+  if [[ "$item" =~ ^(.+):([0-9]+)-([0-9]+)$ ]]; then
+    # 10# or bash aborts the arithmetic on a zero-padded number (`08: value
+    # too great for base`), which drops a valid citation AND prints to stderr.
+    (( 10#${BASH_REMATCH[2]} <= 10#${BASH_REMATCH[3]} )) || return 1
+    item="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
+  fi
+  printf '%s' "$item"
+}
+
+# _evidence_first_ok <evidence> — prints the first citation that resolves, in its
+# normalised `path:N` form; a finding stands on ONE resolving citation (P094
+# acceptance run: three real defects were lost to one wrong line number among
+# several right ones). Exit 1 when none resolves.
 _evidence_first_ok() {
-  local item
+  local item norm
   IFS=';' read -ra items <<< "$1"
   for item in "${items[@]}"; do
-    _evidence_item_ok "$item" && { printf '%s' "${item#"${item%%[![:space:]]*}"}"; return 0; }
+    norm="$(_evidence_norm "$item")" || continue
+    _evidence_item_ok "$norm" && { printf '%s' "$norm"; return 0; }
   done
   return 1
 }
 
-# _command_ok <command> — a `bash repro/<x>.sh` must exist under the round's repro/.
+# The verbs an inline reproduction may start a segment with. Every one of them
+# READS and has no mode that writes: that is the whole criterion, and it is why
+# the list is shorter than the one P095 was planned with. An independent review
+# of 2026-09-20 walked through what the planned list actually admitted and the
+# answer was "anything":
+#   - `mkdir`, `touch`, `mktemp`, `cd` and `export` write, or move the ground a
+#     later verb stands on (`export PATH=/tmp/evil:$PATH` hijacks every verb
+#     after it);
+#   - the shell keywords `if then else fi for do done` open a segment whose
+#     FIRST word is the keyword, so only the keyword was ever checked and
+#     `if true; then rm -rf x; fi` passed;
+#   - `find` has `-exec`/`-delete`, `sed` has `-i` and its `w` command, `yq`
+#     has `-i`. A verb with a write mode needs a flag vocabulary to be safe,
+#     and a flag vocabulary rots.
+# A reviewer who needs any of those writes a `repro/<name>.sh` file, which is
+# what the file form is for: a human can read it once before running it.
+_INLINE_VERBS=" grep rg ls git wc head tail cat printf echo jq test [[ [ "
+
+# _inline_body_ok <body> — a bounded read-only pipeline: every segment starts
+# with a verb from the list, nothing redirects, substitutes a command, opens a
+# new line, or edits a file in place.
+_inline_body_ok() {
+  local body="$1" i ch inq=0 seg="" s w n=${#1}
+  local -a segs=() words=()
+  # A newline is a command separator the segment splitter below cannot see, a
+  # backslash can quote one, and both forms of process substitution run code.
+  case "$body" in
+    *$'\n'*|*\\*|*'$('*|*'`'*|*'<('*|*'>('*) return 1 ;;
+  esac
+  for (( i=0; i<n; i++ )); do
+    ch="${body:i:1}"
+    if [[ "$ch" == '"' ]]; then inq=$(( ! inq )); seg+="$ch"; continue; fi
+    if (( inq )); then seg+="$ch"; continue; fi
+    case "$ch" in
+      '>'|'<') return 1 ;;
+      ';'|'|'|'&') segs+=("$seg"); seg="" ;;
+      *) seg+="$ch" ;;
+    esac
+  done
+  segs+=("$seg")
+  for s in "${segs[@]}"; do
+    read -ra words <<< "$s"
+    (( ${#words[@]} > 0 )) || continue
+    w="${words[0]}"
+    [[ "$_INLINE_VERBS" == *" $w "* ]] || return 1
+    # No in-place flag veto here on purpose: not one verb on the list HAS an
+    # in-place mode, and a veto over every word rejected `grep -i`, the most
+    # ordinary case-insensitive search there is — throwing a real finding away
+    # on form, which is the failure P095 exists to end.
+    if [[ "$w" == git ]]; then
+      case "${words[1]:-}" in grep|log|show|diff|blame|rev-parse|status) ;; *) return 1 ;; esac
+    fi
+  done
+  return 0
+}
+
+# _command_ok <command> — prints the rejection reason and returns 1 when the
+# command is not a usable proof: a `bash repro/<x>.sh` whose file is not under
+# the round's repro/, or an inline `bash -c '<body>'` that is not read-only.
 _command_ok() {
   local cmd="$1" script
   if [[ "$cmd" =~ ^bash\ (repro/[a-z0-9_-]+\.sh)( |$) ]]; then
     script="${BASH_REMATCH[1]}"
-    [[ -f "${DIR}/${script}" ]] || return 1
+    [[ -f "${DIR}/${script}" ]] || { printf missing_command; return 1; }
+    return 0
+  fi
+  if [[ "$cmd" == "bash -c "* ]]; then
+    if ! [[ "$cmd" =~ ^bash\ -c\ \'([^\']*)\'[[:space:]]*$ ]] || ! _inline_body_ok "${BASH_REMATCH[1]}"; then
+      printf command_not_read_only; return 1
+    fi
   fi
   return 0
 }
@@ -152,20 +231,21 @@ _third() {
 }
 
 project_id="$(basename "$ROOT")"
-mapfile -t VALID < <(jq -r '.valid[]' "${DIR}/collect.json")
-for role in "${VALID[@]}"; do
+
+# _adjudicate_role <role> — every finding of one reviewer's answer is accepted
+# with its fingerprint or rejected with a reason.
+_adjudicate_role() {
+  local role="$1" answer f id reason first step key fp match
+  local -A seen=()
   answer="${DIR}/reviewer-${role}.json"
   [[ -r "$answer" ]] || _fail "cannot read ${answer}"
-  declare -A seen=()
   while IFS= read -r f; do
     jq -c --arg r "$role" '{role: $r, id}' <<< "$f" >> "${WORK}/originated.jsonl"
     id="$(jq -r '.id' <<< "$f")"
     reason="$(jq -r --slurpfile s "$AID_PR_SCHEMA" "$(aid_plan_review_proof_jq) proof_error // \"\"" <<< "$f")" \
       || _fail "cannot read a finding of ${answer}"
-    if [[ -z "$reason" ]] && ! _command_ok "$(jq -r '.command' <<< "$f")"; then
-      reason=missing_command
-    fi
-    local first=""
+    [[ -n "$reason" ]] || reason="$(_command_ok "$(jq -r '.command' <<< "$f")" || true)"
+    first=""
     if [[ -z "$reason" ]] && ! first="$(_evidence_first_ok "$(jq -r '.evidence' <<< "$f")")"; then
       reason=evidence_not_found
     fi
@@ -191,7 +271,11 @@ for role in "${VALID[@]}"; do
     [[ -n "$reason" ]] && jq -nc --arg r "$role" --arg id "$id" --arg why "$reason" \
       '{role: $r, id: $id, reason: $why}' >> "${WORK}/rejected.jsonl"
   done < <(jq -c '.findings[]' "$answer")
-  unset seen
+}
+
+mapfile -t VALID < <(jq -r '.valid[]' "${DIR}/collect.json")
+for role in "${VALID[@]}"; do
+  _adjudicate_role "$role"
 done
 
 # The step check's own findings: the script is the command.

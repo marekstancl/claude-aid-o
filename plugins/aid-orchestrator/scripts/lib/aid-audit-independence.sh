@@ -55,6 +55,13 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Sourced FIRST and its own SCRIPT_DIR/PLUGIN_ROOT overwritten afterwards: that
+# library sets both unconditionally from its own BASH_SOURCE, so sourcing it
+# after the assignment would silently repoint this file at the installed plugin
+# even when AID_PLUGIN_PATH names another tree.
+# shellcheck source=aid-c3-dispatch.sh
+source "${SCRIPT_DIR}/aid-c3-dispatch.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
 VERBOSE=false
@@ -128,8 +135,9 @@ _detect_cross_provider() {
   local check1=false check2=false check3=false check4=false
   local help_output="" login_output="" login_exit=0
 
-  # Check 1: binary present in PATH
-  if command -v codex &>/dev/null; then
+  # Check 1: binary present in PATH — chosen by version, because two installs
+  # coexist on the dev host and `command -v` picks the older one.
+  if aid_codex_binary &>/dev/null; then
     check1=true
   fi
   _trace "cross_provider check 1/4 (command -v codex): $([[ "$check1" == "true" ]] && echo PASS || echo FAIL)"

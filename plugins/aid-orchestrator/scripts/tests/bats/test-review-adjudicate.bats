@@ -232,3 +232,76 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   [ "$(jq -c '[.[] | .reason]' "$R1/rejected.json")" = '["evidence_not_found"]' ]
   [ "$(jq -r '.findings[0].evidence' "$R1/merged.json")" = "absent:scripts/never-written.sh" ]
 }
+@test "evidence: a range resolves on its first line and anchors the fingerprint; a range past the end or reversed does not" {
+  _finding "$R1" reuse '.evidence = "scripts/a.sh:2-3"'
+  _finding "$R1" reuse '.id = "reuse-2" | .evidence = "scripts/a.sh:9-12" | .claim = "second claim nothing like the first"'
+  _finding "$R1" reuse '.id = "reuse-3" | .evidence = "scripts/a.sh:14-9" | .claim = "third claim nothing like the others"'
+  run ADJ "$R1" --project-root "$ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -c '[.[] | .reason]' "$R1/rejected.json")" = '["evidence_not_found","evidence_not_found"]' ]
+  # the range anchors on line 2, so the same claim cited as scripts/a.sh:2 has the same fingerprint
+  _round "$R2" 2 reuse
+  _finding "$R2" reuse '.evidence = "scripts/a.sh:2"'
+  ADJ "$R2" --project-root "$ROOT" >/dev/null
+  [ "$(jq -r '.findings[0].fingerprint' "$R1/merged.json")" = "$(jq -r '.findings[0].fingerprint' "$R2/merged.json")" ]
+}
+@test "command: an inline read-only reproduction is accepted, anything that can write or run is not" {
+  _finding "$R1" reuse '.command = "bash -c '"'"'grep -n two scripts/a.sh | wc -l'"'"'"'
+  _finding "$R1" reuse '.id = "reuse-2" | .claim = "claim two of its own" | .command = "bash -c '"'"'git log --oneline | head -3'"'"'"'
+  _finding "$R1" reuse '.id = "reuse-3" | .claim = "claim three of its own" | .command = "bash -c '"'"'cat scripts/a.sh; ls scripts'"'"'"'
+  _finding "$R1" reuse '.id = "reuse-4" | .claim = "claim four of its own" | .command = "bash -c '"'"'jq -n 1 | wc -c'"'"'"'
+  # an ordinary case-insensitive grep: rejected by the first hardening, which
+  # vetoed -i on every word although no allowed verb has an in-place mode
+  _finding "$R1" reuse '.id = "reuse-5" | .claim = "claim five of its own" | .command = "bash -c '"'"'grep -i TWO scripts/a.sh'"'"'"'
+  run ADJ "$R1" --project-root "$ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq 'length' "$R1/rejected.json")" -eq 0 ]
+  [ "$(jq '.findings | length' "$R1/merged.json")" -eq 5 ]
+}
+
+@test "command: every way out of the inline allowlist an independent review found is refused" {
+  # Each of these was ACCEPTED by the first draft of the allowlist (review of
+  # 2026-09-20): a first-word check over a string the reviewer model writes.
+  local n=0 body f="$R1/reviewer-reuse.json"
+  for body in \
+    'rm -rf scripts' \
+    'echo 1 > f' \
+    'source scripts/a.sh; echo hi' \
+    'bash scripts/a.sh' \
+    'cat <(rm -rf /tmp/pwn)' \
+    'find . -name x -exec rm -rf {} +' \
+    'sed -i s/a/b/ scripts/a.sh' \
+    'if true; then rm -rf /tmp/pwn; fi' \
+    'for f in *; do rm -rf $f; done' \
+    'export PATH=/tmp/evil:$PATH; grep x scripts/a.sh' \
+    'mkdir -p /tmp/pwn' \
+    'touch /tmp/pwn' \
+    'yq -i .a=1 f.yaml' \
+    'git push origin main' \
+    'grep x scripts/a.sh
+rm -rf /tmp/pwn'
+  do
+    n=$(( n + 1 ))
+    jq --arg id "reuse-$n" --arg c "claim number $n of its very own here" \
+       --arg cmd "bash -c '$body'" \
+       '.findings += [{id: $id, step: 1, severity: "blocker", claim: $c, command: $cmd,
+                       evidence: "scripts/a.sh:2", fix: "f"}]' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  done
+  run ADJ "$R1" --project-root "$ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq '.findings | length' "$R1/merged.json")" -eq 0 ]
+  [ "$(jq 'length' "$R1/rejected.json")" -eq "$n" ]
+  [ "$(jq -c '[.[] | .reason] | unique' "$R1/rejected.json")" = '["command_not_read_only"]' ]
+}
+
+@test "adjudicate: a collected round is judged with nothing on stderr" {
+  _finding "$R1" reuse '.'
+  ADJ "$R1" --project-root "$ROOT" >/dev/null 2>"$ROOT/err.txt"
+  [ ! -s "$ROOT/err.txt" ]
+}
+@test "evidence: a zero-padded range resolves instead of aborting the arithmetic" {
+  _finding "$R1" reuse '.evidence = "scripts/a.sh:01-03"'
+  ADJ "$R1" --project-root "$ROOT" >/dev/null 2>"$ROOT/err2.txt"
+  [ ! -s "$ROOT/err2.txt" ]
+  [ "$(jq '.findings | length' "$R1/merged.json")" -eq 1 ]
+}

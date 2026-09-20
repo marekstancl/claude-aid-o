@@ -56,3 +56,5 @@ an active id or that literal.
 | routing of open findings (`aid_finding_route`, instruction) | `review_open_findings_routed` (mechanical, in `close`) |
 | carried obligations (`aid_obligation_add`, instruction) | `review_open_findings_routed` (a cp2 finding a later step covers) |
 | `review-profile.json` producer (the retired pre-filter's `profile` subcommand) | `scripts/aid-review-profile.sh` (split out in Step 14; same output) |
+| `c2_acceptance_evidence` | `acceptance_evidence_from_plan_diff` |
+| `c2_acceptance_deviation` | `acceptance_evidence_from_plan_diff` |

@@ -6263,3 +6263,89 @@ _FORCE_REASON="the PM accepts an incomplete close to unstrand this plan"
   run git -C "$TEST_PROJECT_ROOT" log --oneline --all
   [[ "$output" != *"a mutation the next restore must erase"* ]]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P095 Step 6 — the acceptance evidence comes from the gate that verified it
+#
+# Until P095 the plan-level acceptance-evidence.json was aggregated from
+# per-EPIC acceptance-evidence.json files nobody writes, so every plan got
+# `criteria: []` and `aggregated_with_gaps` (WAN P101). It is now derived from
+# plan-diff.json, the producer that actually evaluates each acceptance
+# criterion.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _plan_with_acs <yaml-body> — give the fixture plan pattern acceptance criteria.
+# NOT committed: a commit would move HEAD past the frozen candidate and
+# plan-diff would bind to a range the manifest does not name. The stage reads
+# the plan from the state root, so an untracked file is what it reads.
+_plan_with_acs() {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-acs.md" <<EOF
+# ${PLAN_ID}
+
+## Acceptance Criteria
+
+$1
+EOF
+}
+
+@test "P095: a plan with no verification_pattern yields prose_only, and --stage inputs accepts it" {
+  _seed_merge_project_pre_review
+  _inputs
+  echo "$output"; [ "$status" -eq 0 ]
+  local ae; ae="$(_run_dir)/acceptance-evidence.json"
+  [ "$(jq -r '.verdict.aggregation' "$ae")" = prose_only ]
+  [ "$(jq -r '.acceptance_evidence.source' "$ae")" = "plan-diff.json" ]
+  # and it is still the PLAN's artifact, with the contributing EPICs recorded
+  [ "$(jq -r '.identity.epic_id' "$ae")" = null ]
+  [ "$(jq -r '.sources | length' "$ae")" -ge 1 ]
+}
+
+@test "P095: every criterion passing yields verified, with one entry per criterion" {
+  _seed_merge_project_pre_review
+  _plan_with_acs '- [ ] AC1: the work file exists
+  ```yaml
+  verification_pattern:
+    type: must_contain
+    file: "epic-work.txt"
+    regex: "the EPIC"
+  ```
+- [ ] AC2: nothing named bar was added
+  ```yaml
+  verification_pattern:
+    type: must_not_exist
+    file: "bar.ts"
+  ```'
+  _inputs
+  echo "$output"; [ "$status" -eq 0 ]
+  local ae; ae="$(_run_dir)/acceptance-evidence.json"
+  [ "$(jq -r '.verdict.aggregation' "$ae")" = verified ]
+  [ "$(jq -r '.acceptance_evidence.criteria | length' "$ae")" -eq 2 ]
+  [ "$(jq -r '[.acceptance_evidence.criteria[] | select(.verdict == "pass")] | length' "$ae")" -eq 2 ]
+  [ "$(jq -r '.acceptance_evidence.criteria[0].evidence' "$ae")" != "" ]
+}
+
+@test "P095: a criterion that fails yields partial and names it" {
+  _seed_merge_project_pre_review
+  _plan_with_acs '- [ ] AC1: the work file exists
+  ```yaml
+  verification_pattern:
+    type: must_contain
+    file: "epic-work.txt"
+    regex: "the EPIC"
+  ```
+- [ ] AC2: a file nobody wrote contains a promise
+  ```yaml
+  verification_pattern:
+    type: must_contain
+    file: "never-written.txt"
+    regex: "promised"
+  ```'
+  _inputs
+  echo "$output"; [ "$status" -eq 0 ]
+  local ae; ae="$(_run_dir)/acceptance-evidence.json"
+  [ "$(jq -r '.verdict.aggregation' "$ae")" = partial ]
+  [ "$(jq -r '.acceptance_evidence.criteria | length' "$ae")" -eq 2 ]
+  [ "$(jq -r '[.acceptance_evidence.criteria[] | select(.verdict == "fail")] | length' "$ae")" -eq 1 ]
+  [[ "$(jq -r '[.acceptance_evidence.criteria[] | select(.verdict == "fail") | .ac] | join(",")' "$ae")" == *"promise"* ]]
+}

@@ -286,6 +286,24 @@ check_required_present() {
         return 0
       fi
     fi
+    # The plan-level acceptance evidence says one of three things (P095):
+    # verified (every criterion passed), prose_only (nothing was machine-
+    # checkable — the reviews judged the criteria, as for every prose AC), or
+    # partial, which blocks and names what did not pass.
+    if [[ "$id" == acceptance_evidence ]]; then
+      local _ae; _ae="$(jq -r '.verdict.aggregation // ""' "$file" 2>/dev/null)"
+      if [[ "$_ae" == "partial" ]]; then
+        local _failed
+        _failed="$(jq -r '[.acceptance_evidence.criteria[]? | select(.verdict != "pass") | (.label // .ac)] | join(", ")' "$file" 2>/dev/null)"
+        add_input "$id" "$(basename "$file")" "blocked" "criteria not met: ${_failed:-unnamed}" "$(_artifact_head_match "$file")" "present_but_failing"
+        add_blocker "$bid" "blocking" "acceptance-evidence.json reports partial — criteria not met: ${_failed:-unnamed}"
+        return 0
+      fi
+      if [[ "$_ae" == "prose_only" ]]; then
+        add_input "$id" "$(basename "$file")" "pass" "no acceptance criterion is machine-checkable (prose_only) — the reviews judged them" "$(_artifact_head_match "$file")" "present_ok"
+        return 0
+      fi
+    fi
     if _content_says_fail "$id" "$file"; then
       # OBSERVE (default) records the truth without blocking: the row carries
       # `fail` and `present_but_failing`, and NO blocker is added, so
@@ -633,8 +651,18 @@ run_verification_input() {
   # and be recorded as `unverifiable`, i.e. a blocker, rather than skipped).
   local _verify_subject="$EPIC_ID"
   [[ "${MODE:-epic}" == "plan" ]] && _verify_subject="$PLAN_ID"
+  # At the plan boundary the tree the verifier runs in holds `main`, while the
+  # commit under judgement is the frozen candidate on the plan branch. EPIC mode
+  # passes nothing and keeps the HEAD default it always had.
+  local _candidate=()
+  [[ -n "${CANDIDATE_SHA:-}" ]] && _candidate=(--candidate "$CANDIDATE_SHA")
+  # --tree: WHICH working tree the decision is about. Without it the verifier
+  # judges the tree containing the CURRENT DIRECTORY, so a policy run from
+  # anywhere else reported that project's uncommitted work as this one's dirt
+  # (the healthy-fixture case of test-release-policy.bats has been red for
+  # exactly this reason).
   AID_PROJECT_ROOT="$PROJECT_ROOT" bash "$EVIDENCE_VERIFY" "$_verify_subject" "$RUN_ID" \
-    --out "$vr_tmp" --at-head >/dev/null 2>&1 || vr_exit=$?
+    --out "$vr_tmp" --at-head --tree "$PROJECT_ROOT" "${_candidate[@]}" >/dev/null 2>&1 || vr_exit=$?
 
   case "$vr_exit" in
     2|10|20)

@@ -2211,9 +2211,18 @@ EOS
   [ "$(jq -r '.[0].reason' "$td/steps/step_1_backend/scope-amendment.json")" = "AC3 demands a test the plan forgot" ]
   grep -q '"event":"scope_amended"' "$td/timeline.jsonl"
   grep -qx 'tests/test_a.py' "$(dirname "$td")/allowed_paths.txt"   # the scope_check gate's file kept in step
-  # not in EXECUTE → refused
+  # In GATES the scope may still be widened, but never silently: the gate rows
+  # judged against the old scope are retired (or their absence is said out
+  # loud), because they were judged against a scope that no longer exists.
+  # This assertion used to expect a refusal ("not EXECUTE"); the refusal moved
+  # to rebase-plan, and the test kept asserting it long after amend-scope
+  # stopped saying it.
   sed -i 's/^state: EXECUTE/state: GATES/' "$td/fsm-state.yaml"
-  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add x.py --reason "trying to widen after the work is done"
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add x.py --reason "widening after the gates have run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gates must still be re-run"* || "$output" == *"Re-run the gates"* ]]
+  # rebase-plan is the one that still refuses outside EXECUTE
+  run bash "$FSM" rebase-plan "$td/fsm-state.yaml" --reason "a rebase at a boundary is the refused one"
   [ "$status" -ne 0 ]; [[ "$output" == *"not EXECUTE"* ]]
 }
 
@@ -2301,8 +2310,8 @@ _edit_step() { jq --argjson i "$1" --arg v "$2" '.steps[$i].objective = $v' "$TE
   # current_step is 3 (0-based) → index 3 is the step in flight; index 4 is a FUTURE step
   jq '.steps += [{"id":"s4","allowed_paths":["d.py"]},{"id":"s5","allowed_paths":["e.py"]}]' "$TEST_EVIDENCE_DIR/plan.json" > "$TEST_EVIDENCE_DIR/p.tmp" && mv "$TEST_EVIDENCE_DIR/p.tmp" "$TEST_EVIDENCE_DIR/plan.json"
   ( source "$FSM" 2>/dev/null || true; _step_hashes_write "$TEST_EVIDENCE_DIR" "$(sha256sum "$TEST_EVIDENCE_DIR/plan.json" | awk '{print $1}')" )
-  "$FSM" set-field plan_json_hash "$(sha256sum "$TEST_EVIDENCE_DIR/plan.json" | awk '{print $1}')" "$state_file"
-  "$FSM" set-field total_steps 5 "$state_file"
+  "$FSM" set-field plan_json_hash "$(sha256sum "$TEST_EVIDENCE_DIR/plan.json" | awk '{print $1}')" "$state_file" --reason "fixture setup: stamp the hash of the plan this case writes"
+  "$FSM" set-field total_steps 5 "$state_file" --reason "fixture setup: the plan this case writes has five steps"
   : > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
   # the PM regenerates the FUTURE step (index 4)
   jq '.steps[4].objective = "regenerated"' "$TEST_EVIDENCE_DIR/plan.json" > "$TEST_EVIDENCE_DIR/p.tmp" && mv "$TEST_EVIDENCE_DIR/p.tmp" "$TEST_EVIDENCE_DIR/plan.json"
@@ -2331,7 +2340,7 @@ _edit_step() { jq --argjson i "$1" --arg v "$2" '.steps[$i].objective = $v' "$TE
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _imp263_seed_step0 "$state_file" TOK-0                      # a valid, bound step-0 verification
   # the plan.json hash stamp + snapshot, as init would leave them
-  "$FSM" set-field plan_json_hash "$(sha256sum "$TEST_EVIDENCE_DIR/plan.json" | awk '{print $1}')" "$state_file"
+  "$FSM" set-field plan_json_hash "$(sha256sum "$TEST_EVIDENCE_DIR/plan.json" | awk '{print $1}')" "$state_file" --reason "fixture setup: stamp the hash of the plan this case writes"
   ( source "$FSM" 2>/dev/null || true; _step_hashes_write "$TEST_EVIDENCE_DIR" "$(sha256sum "$TEST_EVIDENCE_DIR/plan.json" | awk '{print $1}')" )
   run "$FSM" amend-scope "$state_file" --add src/extra.py --reason "PM approved one more file for step 0"
   [ "$status" -eq 0 ]
@@ -2434,4 +2443,42 @@ behavior_trace_count: 1
 EOF
   run bash -c "source '$FSM' 2>/dev/null; fsm_check_verifier_output '$vo'"
   [ "$status" -eq 0 ]
+}
+
+@test "set-field: a transition precondition needs a reason and leaves a field_set line; an ordinary field needs none" {
+  local td="$TEST_EVIDENCE_DIR" sf
+  sf="$td/fsm-state.yaml"
+  cat > "$sf" <<EOS
+epic_id: E-test
+run_id: R-test
+state: EXECUTE
+current_step: 0
+total_steps: 4
+EOS
+  local tl="$td/timeline.jsonl"; : > "$tl"
+  local before; before="$(cat "$sf")"
+  run bash "$FSM" set-field total_steps 2 "$sf"
+  [ "$status" -eq 1 ]; [[ "$output" == *"--reason"* ]]
+  [ "$(cat "$sf")" = "$before" ]
+
+  run bash "$FSM" set-field total_steps 2 "$sf" --reason "the plan lost two steps in review"
+  echo "$output"; [ "$status" -eq 0 ]
+  grep -q '^total_steps: 2' "$sf"
+  [ "$(jq -r 'select(.event == "field_set") | "\(.field) \(.old) \(.new)"' "$tl" | tail -1)" = "total_steps 4 2" ]
+
+  # an ordinary field needs no reason and is still traced
+  run bash "$FSM" set-field pm_decision merge "$sf"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'select(.event == "field_set") | .field' "$tl" | tail -1)" = pm_decision ]
+}
+
+@test "set-field: a precondition field on a state file with no timeline is refused, reason or not" {
+  local sf="$TEST_EVIDENCE_DIR/orphan-state.yaml"
+  printf 'state: EXECUTE
+current_step: 0
+total_steps: 4
+' > "$sf"
+  run bash "$FSM" set-field total_steps 2 "$sf" --reason "a reason with nowhere to be recorded"
+  [ "$status" -eq 1 ]; [[ "$output" == *"names no epic_id/run_id"* ]]
+  grep -q '^total_steps: 4' "$sf"
 }

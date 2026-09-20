@@ -170,7 +170,10 @@ _plan() {
   # Same untagged-by-band situation, but classified `light`: no risk: high, and
   # only ordinary source code declared.
   { printf -- '---\nid: P902\ntype: regular\nrisk: low\nlifecycle_strict: true\n---\n'
-    printf '# Plan: P902\n\n## Testing Strategy\n\nnone\n\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly.\n\n**Files:**\n- Modify: `scripts/tests/x.bats` — edit\n'
+    # The mandatory step fields and the '## Standards' section are what the
+    # STRICT lint has required since it tightened; this case is about the BAND,
+    # so the fixture carries them instead of failing for an unrelated reason.
+    printf '# Plan: P902\n\n## Standards\n\n| Standard | Why it binds | Deviation |\n|---|---|---|\n| `/ecosystem/specs/test-standard` | the step edits a test suite | none |\n\n## Testing Strategy\n\nnone\n\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly.\n\n**Files:**\n- Modify: `scripts/tests/x.bats` — edit\n\n**Architecture Context:** the suite keeps its one subject.\n\n**Error Handling:** a failing case fails the suite.\n\n**Edge Cases:**\n- none beyond the case itself\n'
   } > "$PLAN"
   run "$LINT" "$PLAN"
   [ "$status" -eq 0 ]

@@ -2659,15 +2659,17 @@ If task complexity grows (3+ files, multi-step) → suggest `/aid-plan --epic` i
 
 ## §9 Autonomous Mode (FIRST AID)
 
-**Activation:** `/aid-run --auto` → sets `auto-mode-state.yaml: mode: auto`
+**Activation:** `/aid-run --auto` runs `aid-fsm.sh auto-mode set auto --by "aid-run --auto"`
+as its first action.
 
 **State file:** `.aid-o/work/auto-mode-state.yaml`
+**One writer:** `aid-fsm.sh auto-mode set` (`/aid-stop` writes `manual` through it too).
+**One reader:** `aid_autonomous_mode` in `scripts/lib/aid-permissions.sh`.
 
-**LLM reads mode** at every decision point:
-```
-mode = read auto-mode-state.yaml → mode field
-IF file missing or unreadable → default to "manual" (fail-safe)
-```
+**Every decision point reads the mode through that one reader**, which takes
+`mode: manual` in the state file above an exported `AID_AUTO_MODE=1` (a PM stop
+wins), then `AID_AUTO_MODE=1`, then `mode: auto`, then `permissions.yaml`.
+A missing or unreadable file defaults to `manual` (fail-safe).
 
 **Auto-mode overrides:**
 

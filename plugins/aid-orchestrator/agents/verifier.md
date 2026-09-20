@@ -197,29 +197,7 @@ Fingerprint: `fingerprint <project_id> semantic_review RTD-001 <target_path> dri
 **Observe semantics:** finding is emitted in semantic-review-final.json; does NOT block
 CP3 verdict (the `.md` gate verdict remains based on code review, not this finding).
 
-### 2. AC↔Evidence LLM Matching
-
-After standard code review, perform semantic coverage assessment:
-
-For each acceptance criterion in the EPIC plan:
-1. Read the AC text
-2. Assess: does the diff contain evidence that this criterion is satisfied?
-3. Output coverage signal in the `.md` file under `## AC Coverage`:
-```
-## AC Coverage
-ac_coverage:
-  - ac_id: "<sha256[:12]>_00"
-    ac_text: "<original AC text, truncated to 80 chars>"
-    covered: true|false
-    evidence: "<brief: what in the diff satisfies this AC>"
-    deviation: none|missing|changed
-```
-This section was meant for `aid-acceptance-evidence.sh reconstruct` (acceptance-evidence.json); that script has no live caller and reads per-step files that no longer exist — IMP-612 decides its producer.
-
-**Note:** Coverage is a SEMANTIC judgment (LLM). `aid-acceptance-evidence.sh` only
-aggregates — it does not re-evaluate coverage (D3).
-
-### 3. C1 Evidence Ancestor-Aware Ref
+### 2. C1 Evidence Ancestor-Aware Ref
 
 When referencing C1 evidence (structural check outputs), check freshness using:
 ```

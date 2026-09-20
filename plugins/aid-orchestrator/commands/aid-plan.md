@@ -224,9 +224,16 @@ for the result.
 rc=0
 bash {plugin_path}/scripts/lib/aid-brainstorm-opponent.sh \
   P{NNN} <brief.md> .aid-o/work/brainstorm/P{NNN} || rc=$?
-# rc=0 answered · rc=3 not reached → PRESENT IT AS A DECISION (exception 1),
-# capped at three attempts per run · rc=1 the vision gate refused, or nothing
-# could be recorded — stop and fix that.
+# rc=0 answered · rc=1 the vision gate refused, or nothing could be recorded —
+# stop and fix that · rc=3 a codex answered the probe and then said nothing →
+# PRESENT IT AS A DECISION (exception 1), capped at three attempts per run ·
+# rc=4 NO codex could be reached: the STAND-IN line names a prompt file.
+# Dispatch it to a general-purpose agent at the model the line names, write the
+# agent's JSON answer to a file, and hand it back:
+#   bash {plugin_path}/scripts/lib/aid-brainstorm-opponent.sh \
+#     P{NNN} <brief.md> .aid-o/work/brainstorm/P{NNN} --answer <answer.json>
+# This is NOT a decision for the PM: the stand-in is dispatched, and the result
+# card says which provider answered and why (PM instruction 2026-09-19).
 ```
 
 The opponent gets **the brief**, not your conclusions: handing it your positions
@@ -546,6 +553,19 @@ one at a time:
    nobody dispatched does not close a round. Only a round prepared with
    `--stub` by the acceptance suite skips that check, and the FSM refuses to
    advance on such a round.
+
+## Stand-in for a Codex role
+
+When `dispatch --provider codex` prints a line starting `STAND-IN:`, no codex
+could be reached (absent, outdated, or over its usage limit) and the round
+records `fallback: "claude"` for that role. Dispatch it exactly as above — the
+same prompt file, the same start/complete bracket — at the model the STAND-IN
+line names (`stand_in_model` of the checkpoint's block), and tell the reviewer
+to write `"provider": "claude"` in its answer. `collect` accepts a claude answer
+for a codex role ONLY with that record, and counts a stand-in nobody dispatched
+as missing, which makes the round invalid. Pass its token figure to `close` like
+any claude role. The PM card names the stand-in and the reason in one line; the
+PM is told, not asked.
 
 After ALL reviewers of the round (claude and codex) have been dispatched, run
 `collect`. Only when `collect` exits 0, run `close` once with a token value for

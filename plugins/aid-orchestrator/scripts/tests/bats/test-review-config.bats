@@ -144,3 +144,16 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   run aid_review_config_load "$ROOT" step_review "$ROOT/nope.md"
   [ "$status" -eq 1 ]; [[ "$output" == *"roles skill not found"* ]]
 }
+@test "stand_in_model: read into RC_STAND_IN_MODEL, defaulted per checkpoint, refused when banned" {
+  aid_review_config_load "$ROOT" step_review "$STEP_SKILL" 2>/dev/null
+  [ "$RC_STAND_IN_MODEL" = sonnet ]
+  aid_review_config_load "$ROOT" plan_review "$PLAN_SKILL" 2>/dev/null
+  [ "$RC_STAND_IN_MODEL" = opus ]
+  _project '.review_checkpoints.step_review.stand_in_model = "opus"'
+  run aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
+  [ "$status" -eq 0 ]; [[ "$output" != *"unknown key"* ]]
+  aid_review_config_load "$ROOT" step_review "$STEP_SKILL" 2>/dev/null; [ "$RC_STAND_IN_MODEL" = opus ]
+  _project '.review_checkpoints.step_review.stand_in_model = "haiku"'
+  run _load_step
+  [ "$status" -eq 1 ]; [[ "$output" == *"banned_models"* ]]
+}

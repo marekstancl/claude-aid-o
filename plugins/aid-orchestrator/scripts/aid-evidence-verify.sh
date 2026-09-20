@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # aid-evidence-verify.sh — AID evidence pack verifier (Step 2: core checks)
 #
-# Usage: aid-evidence-verify.sh [<epic_id> <run_id>] [--out <path>] [--at-head] [--tree <path>]
+# Usage: aid-evidence-verify.sh [<epic_id> <run_id>] [--out <path>] [--at-head] [--tree <path>] [--candidate <sha>]
 #
 # Verifies git cleanliness, locates the canonical evidence pack, and validates
 # every protocol-v2 artifact for freshness, protocol conformance, and fingerprint.
@@ -24,6 +24,10 @@ VALIDATOR="${AID_VALIDATOR_PATH:-${SCRIPT_DIR}/aid-protocol-validate.sh}"
 # AID_VALIDATOR_PATH tests the check step; self-validation verifies our own artifact integrity.
 SELF_VALIDATOR="${SCRIPT_DIR}/aid-protocol-validate.sh"
 TTL_GUARD="${SCRIPT_DIR}/aid-registry-ttl-guard.sh"
+# aid_state_root: the ONE checkout .aid-o/ lives in. A plan worktree sets
+# AID_PROJECT_ROOT to itself, where the evidence pack has never been.
+# shellcheck source=lib/aid-roots.sh
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
 
 # ---------------------------------------------------------------------------
 # Check result variables (populated by run_* functions)
@@ -64,6 +68,10 @@ CURRENT_HEAD=""
 
 VALIDATOR_MISSING=false
 AT_HEAD_MODE=false
+# The commit being judged. Empty means "HEAD of --tree", which is what every
+# caller before P095 meant; a plan-final run passes the candidate explicitly,
+# because the pack lives in the primary checkout and the candidate does not.
+CANDIDATE_SHA=""
 OUT_PATH=""
 
 # Internal: v2 artifact list (populated by run_pack_discovery)
@@ -115,6 +123,11 @@ parse_args() {
         OUT_PATH="$2"
         shift 2
         ;;
+      --candidate)
+        CANDIDATE_SHA="$2"
+        shift 2
+        continue
+        ;;
       --at-head)
         AT_HEAD_MODE=true
         shift
@@ -127,7 +140,7 @@ parse_args() {
         ;;
       -*)
         echo "aid-evidence-verify: unknown option: $1" >&2
-        echo "Usage: aid-evidence-verify.sh [<epic_id> <run_id>] [--out <path>] [--at-head] [--tree <path>]" >&2
+        echo "Usage: aid-evidence-verify.sh [<epic_id> <run_id>] [--out <path>] [--at-head] [--tree <path>] [--candidate <sha>]" >&2
         exit 2
         ;;
       *)
@@ -202,7 +215,11 @@ resolve_root() {
 # ---------------------------------------------------------------------------
 run_git_clean_check() {
   local git_output
-  git_output=$(git -C "$TREE" status --porcelain 2>&1)
+  # Tracked files only. The runtime writes untracked directories into the tree
+  # it runs in (.aid-o/work, .aid-worktrees), and a check that calls those dirt
+  # can never pass under plan_branch. The invariant C4 needs is "nothing the
+  # candidate would carry differs", which is exactly the tracked set.
+  git_output=$(git -C "$TREE" status --porcelain --untracked-files=no 2>&1)
   local exit_code=$?
 
   if [[ $exit_code -ne 0 ]]; then
@@ -226,7 +243,11 @@ run_git_clean_check() {
 # Check 2: evidence_pack_found + v2 artifact enumeration
 # ---------------------------------------------------------------------------
 run_pack_discovery() {
-  local evidence_base="$ROOT/.aid-o/work/evidence"
+  # The pack lives in the STATE root, never in the calling tree: a plan worktree
+  # has no .aid-o/ of its own (WAN P101, ACTA P024 — every --at-head run from a
+  # plan worktree looked for the pack under that tree and reported none).
+  local evidence_base
+  evidence_base="$(aid_state_root 2>/dev/null)/.aid-o/work/evidence" || evidence_base="$ROOT/.aid-o/work/evidence"
 
   if [[ -n "$EPIC_ID" && -n "$RUN_ID" ]]; then
     # Explicit epic/run provided
@@ -338,10 +359,10 @@ run_freshness_check() {
     return
   fi
 
-  # Resolve current HEAD
-  CURRENT_HEAD=$(git -C "$TREE" rev-parse HEAD 2>/dev/null) || {
+  # The commit being judged: the candidate when one was named, else HEAD.
+  CURRENT_HEAD=$(git -C "$TREE" rev-parse "${CANDIDATE_SHA:-HEAD}^{commit}" 2>/dev/null) || {
     CHECK_artifact_head_freshness_STATUS="unverifiable"
-    CHECK_artifact_head_freshness_DETAIL="git rev-parse HEAD failed"
+    CHECK_artifact_head_freshness_DETAIL="$([[ -n "$CANDIDATE_SHA" ]] && echo "candidate ${CANDIDATE_SHA} is not reachable from ${TREE}" || echo "git rev-parse HEAD failed")"
     return
   }
 
@@ -391,7 +412,7 @@ run_freshness_check() {
       CHECK_artifact_head_freshness_EVIDENCE="reason: waiver_head_not_a_commit, artifact: $(basename "$artifact"), head_sha: $w_head"
       return
     fi
-    if ! git -C "$TREE" merge-base --is-ancestor "$w_head" HEAD 2>/dev/null; then
+    if ! git -C "$TREE" merge-base --is-ancestor "$w_head" "$CURRENT_HEAD" 2>/dev/null; then
       CHECK_artifact_head_freshness_STATUS="fail"
       CHECK_artifact_head_freshness_DETAIL="waiver's recorded head_sha is not an ancestor of current HEAD"
       CHECK_artifact_head_freshness_EVIDENCE="reason: waiver_head_not_ancestor, artifact: $(basename "$artifact"), head_sha: $w_head, current_head: $CURRENT_HEAD"
@@ -452,7 +473,7 @@ run_freshness_check() {
     return
   fi
 
-  if ! git -C "$TREE" merge-base --is-ancestor "$PACK_HEAD" HEAD 2>/dev/null; then
+  if ! git -C "$TREE" merge-base --is-ancestor "$PACK_HEAD" "$CURRENT_HEAD" 2>/dev/null; then
     CHECK_artifact_head_freshness_STATUS="fail"
     CHECK_artifact_head_freshness_DETAIL="pack_head is not reachable from HEAD"
     CHECK_artifact_head_freshness_EVIDENCE="reason: divergent_stale, pack_head: $PACK_HEAD, current_head: $CURRENT_HEAD"

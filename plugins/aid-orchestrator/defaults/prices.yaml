@@ -28,7 +28,7 @@ models:
     cache_read: 0.20
     cache_write: 2.50
     blended: 6.56
-    blended_basis: "estimated: the opus blend scaled by the input-price ratio 2/5; replace with a measured figure after the P094 acceptance run"
+    blended_basis: "estimated: the opus blend scaled by the input-price ratio 2/5. P095 was to replace this with a measured figure from its own cp2 rounds; it was built OUTSIDE the AID pipeline on the PM's instruction (2026-09-20), so ZERO rounds were priced and the estimate stands. The next plan run through /aid-run with sonnet step reviewers is what measures it — three rounds with a known token count are enough."
     source: "https://platform.claude.com/docs/en/about-claude/pricing"
     as_of: "2026-09-19"
   gpt-5.6-terra:

@@ -145,6 +145,10 @@ _answer_all() { local r; for r in generalist_a generalist_b behaviour_edges feas
   mkdir -p "$ROOT/bin"
   cat > "$ROOT/bin/codex" <<'STUB'
 #!/usr/bin/env bash
+# --version and the probe's one-token prompt: what aid_codex_probe asks before
+# a real dispatch is paid for.
+[[ "$1" == --version ]] && { echo "codex-cli 9.9.9"; exit 0; }
+[[ "${*: -1}" == ok ]] && exit 0
 out=""; while [[ $# -gt 0 ]]; do [[ "$1" == --output-last-message ]] && out="$2"; shift; done
 printf '```json\n{"role":"generalist_b","findings":[],"no_findings_reason":"nothing found"}\n```\n' > "$out"
 echo '{"type":"thread.started"}'
@@ -157,6 +161,17 @@ STUB
   [ "$(jq .tokens_in "$CP1/round-1/codex-generalist_b.usage.json")" -eq 1200 ]
   PATH="$ROOT/bin:$PATH" run "$ROUND_SH" dispatch "$PLAN" --round 1 --provider codex --role generalist_b
   [ "$status" -eq 1 ]; [[ "$output" == *"never paid twice"* ]]
+}
+@test "dispatch: with no codex reachable, the CP1 role generalist_b is stood in for by claude" {
+  "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
+  jq -n '{available: false, binary: "", version: "", reason: "codex_absent", probed_at: "2026-09-20T00:00:00Z"}' > "$ROOT/probe.json"
+  AID_CODEX_PROBE_STUB="$ROOT/probe.json" run "$ROUND_SH" dispatch "$PLAN" --round 1 --provider codex --role generalist_b
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"STAND-IN"* ]]; [[ "$output" == *opus* ]]
+  [ "$(jq -r '.fallback' "$CP1/round-1/codex-generalist_b.usage.json")" = claude ]
+  _answer_all; _answer generalist_b '.provider = "claude"'
+  run "$ROUND_SH" collect "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  jq -e '.valid | index("generalist_b")' "$CP1/round-1/collect.json"
 }
 @test "dispatch: a claude role is refused naming the controller instruction" {
   "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
@@ -407,18 +422,68 @@ _bracket() {
   [ "$(jq -r .dispatch_check "$(D 1)/measurement.json")" = stubbed ]
   [ "$(jq -r .dispatch_check "$E/cp2/step-0/rounds.json")" = stubbed ]
 }
-@test "step: a codex role whose launcher is absent counts as provider_absent and the round closes degraded" {
-  _repo; _sc
+# _codex_role — a cp2 config of one claude generalist and one codex security role
+_codex_role() {
   mkdir -p "$R/.aid-o/config/policies"
-  yq '.review_checkpoints.step_review.reviewers += [{"role":"step_security","provider":"codex","model":"gpt-5"}] | .review_checkpoints.step_review.reviewers |= unique_by(.role)' \
-     "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  cp "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" "$R/.aid-o/config/policies/review-checkpoints.yaml"
   yq -i '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"},{"role":"step_security","provider":"codex","model":"gpt-5"}]' "$R/.aid-o/config/policies/review-checkpoints.yaml"
+}
+# _probe <available> [reason] — the canned probe result the dispatch reads
+_probe() {
+  jq -n --argjson a "$1" --arg r "${2:-none}" \
+    '{available: $a, binary: "/usr/bin/codex", version: "9.9.9", reason: $r, probed_at: "2026-09-20T00:00:00Z"}' > "$ROOT/probe.json"
+  export AID_CODEX_PROBE_STUB="$ROOT/probe.json"
+}
+
+@test "step: a codex role no codex can answer is stood in for by claude, and the round closes undegraded" {
+  _repo; _sc; _codex_role
   _S prepare --round 1 >/dev/null
   [ "$(jq '.reviewers_expected | length' "$(D 1)/round.json")" -eq 2 ]
-  mkdir -p "$ROOT/bin"; printf '#!/usr/bin/env bash\necho "ERROR: You have hit your usage limit" >&2\nexit 1\n' > "$ROOT/bin/codex"; chmod +x "$ROOT/bin/codex"
-  PATH="$ROOT/bin:$PATH" run "$ROUND_SH" dispatch --checkpoint cp2 --evidence-dir "$E" --step 0 --project-root "$R" --round 1 --provider codex --role step_security
-  [ "$status" -eq 1 ]; [[ "$output" == *rate_limited* ]]
-  [ "$(jq -r .reason "$(D 1)/codex-step_security.usage.json")" = rate_limited ]
+  _probe false rate_limited
+  run "$ROUND_SH" dispatch --checkpoint cp2 --evidence-dir "$E" --step 0 --project-root "$R" --round 1 --provider codex --role step_security
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"STAND-IN"* ]]; [[ "$output" == *sonnet* ]]
+  [ "$(jq -r '.fallback' "$(D 1)/codex-step_security.usage.json")" = claude ]
+
+  # a stand-in that was asked for and never dispatched does not close the round
+  _sanswer 1 step_generalist
+  run _S collect --round 1; [ "$status" -eq 1 ]
+  [ "$(jq -c .missing "$(D 1)/collect.json")" = '["step_security"]' ]
+
+  _sanswer 1 step_security '.provider = "claude"'
+  _S collect --round 1 >/dev/null
+  [ "$(jq -c .valid "$(D 1)/collect.json")" = '["step_generalist","step_security"]' ]
+  _bracket 1 step_generalist; _bracket 1 step_security
+  run _S close --round 1 --tokens step_generalist=3 step_security=7; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .degraded "$(D 1)/measurement.json")" = false ]
+  [ "$(jq -r '.reviewers.step_security | "\(.provider) \(.model) \(.tokens) \(.fallback_reason)"' "$(D 1)/measurement.json")" = "claude sonnet 7 rate_limited" ]
+}
+
+@test "step: a claude answer for a codex role without a stand-in record is unexpected_provider" {
+  _repo; _sc; _codex_role
+  _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _sanswer 1 step_security '.provider = "claude"'
+  run _S collect --round 1; [ "$status" -eq 1 ]
+  [[ "$(jq -r '.invalid[0].reason' "$(D 1)/collect.json")" == unexpected_provider* ]]
+}
+
+@test "step: retry on a stood-in role keeps the record so the retried answer is not a stranger" {
+  _repo; _sc; _codex_role
+  _S prepare --round 1 >/dev/null
+  _probe false codex_absent
+  "$ROUND_SH" dispatch --checkpoint cp2 --evidence-dir "$E" --step 0 --project-root "$R" --round 1 --provider codex --role step_security >/dev/null
+  _sanswer 1 step_generalist; _sanswer 1 step_security '.provider = "claude" | .findings[0].severity = "critical"'
+  _S collect --round 1 || true
+  run _S retry --round 1 --role step_security
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"STAND-IN"* ]]
+  [ "$(jq -r '.fallback' "$(D 1)/codex-step_security.usage.json")" = claude ]
+  [ ! -f "$(D 1)/reviewer-step_security.json" ]
+}
+
+@test "step: a legacy record with no stand-in still counts as provider_absent and closes degraded" {
+  _repo; _sc; _codex_role
+  _S prepare --round 1 >/dev/null
+  # the shape dispatch wrote before P095: no fallback key
+  jq -n '{answered: false, reason: "rate_limited"}' > "$(D 1)/codex-step_security.usage.json"
   _sanswer 1 step_generalist; _S collect --round 1 >/dev/null
   [ "$(jq -c .provider_absent "$(D 1)/collect.json")" = '["step_security"]' ]
   _bracket 1 step_generalist

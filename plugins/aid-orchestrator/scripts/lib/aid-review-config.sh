@@ -38,7 +38,7 @@
 # review_config_valid; tested by scripts/tests/bats/test-review-config.bats.
 
 _AID_RC_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-_AID_RC_KNOWN_KEYS="rounds_default min_answers docs_type_reviewers banned_models reviewers skip_threshold"
+_AID_RC_KNOWN_KEYS="rounds_default min_answers docs_type_reviewers banned_models reviewers skip_threshold stand_in_model"
 _AID_RC_LEGACY_KEYS="ceremony_bands cp1_codex_review fix_loop skip_trivial trivial_threshold pre_filter"
 
 _aid_rc_toggle_key() {
@@ -100,6 +100,9 @@ aid_review_config_load() {
     RC_ROLE+=("$role"); RC_PROVIDER+=("$provider"); RC_MODEL+=("$model"); RC_WHEN+=("$when")
     [[ -z "$when" ]] && unconditional=$((unconditional + 1))
   done < <(yq -r "${b}.reviewers // [] | .[] | [.role, .provider, .model, (.when // \"\")] | @tsv" "$RC_CONFIG_FILE")
+  # The model a Claude stand-in runs at when a codex role cannot be reached.
+  RC_STAND_IN_MODEL="$(yq -r "${b}.stand_in_model // \"\"" "$RC_CONFIG_FILE")"
+  [[ -n "$RC_STAND_IN_MODEL" ]] || RC_STAND_IN_MODEL="$([[ "$block" == plan_review ]] && echo opus || echo sonnet)"
   RC_MIN_ANSWERS="$(yq -r "${b}.min_answers // \"\"" "$RC_CONFIG_FILE")"
   [[ -n "$RC_MIN_ANSWERS" ]] || RC_MIN_ANSWERS="$unconditional"
 
@@ -169,6 +172,8 @@ aid_review_config_validate() {
       *) _aid_rc_fail "role ${role}: when must be review+security (got '${RC_WHEN[$i]}')"; return 1 ;;
     esac
   done
+  [[ " $RC_BANNED_MODELS " == *" $RC_STAND_IN_MODEL "* ]] \
+    && { _aid_rc_fail "stand_in_model ${RC_STAND_IN_MODEL} is in banned_models"; return 1; }
   (( unconditional > 0 )) || { _aid_rc_fail "no unconditional role (every reviewer carries a when)"; return 1; }
   if [[ "$required" == all ]]; then
     for role in $expected; do

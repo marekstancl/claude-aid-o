@@ -55,3 +55,57 @@ the citation, not on its truth.
 - Fix the top-level `local` in the adjudicator.
 - Re-run these five diffs (the scratch branch stays) after the fix: expected
   1 pass, 3 fail, 1 skip.
+
+## The replay after P095 Step 1 (2026-09-20)
+
+The recorded answers, unchanged, re-adjudicated by the branch
+`feat/p095-review-cleanup`. No model was called; only the adjudicator differs.
+The command (the project root is the scratch checkout, because the pre-image
+shas the reviewers cited live on `scratch/p094-fresh-diffs`, not on `main`):
+
+```
+bash plugins/aid-orchestrator/scripts/tests/test-step-review-acceptance.sh replay-do \
+  --evidence /opt/eco/projects/aid-orchestrator/.aid-o/work/evidence \
+  --project-root /opt/eco/projects/aid-orchestrator/.aid-worktrees/fresh-diffs
+```
+
+| Diff | Before (2026-09-19) | After | Why |
+|---|---|---|---|
+| 1 `36f0e429` (alloc glob) | pass — `missing_command` | pass — `command_not_read_only` | its inline reproduction runs `mkdir`, `cd` and `touch`: it WRITES, and after the hardening below no writing verb is on the list (the first draft accepted it, which is what the review caught) |
+| 2 `346a8a36` (set-field) | fail, 1 blocker | **fail**, 1 blocker | unchanged; its citations were always plain `path:line` |
+| 3 `e8814f7f` (pre-push) | pass — `missing_evidence` ×2 | **fail**, 1 blocker | the range `diff.patch:9-14` passes the schema, and the finding stands on its second citation, the pre-image `e8814f7fa701:…/pre-push:58` |
+| 4 `224f60b4` (yq check) | pass — `missing_command` | pass — `command_not_read_only` | its reproduction runs `source aid-fsm.sh` and `git init`: `source` is on no list and `git` is restricted to its reading subcommands, so it is refused on purpose |
+| 5 `22ded9fb` | skip (no round) | skip | the step check gave `skip`; nothing was reviewed |
+
+**Measured: 2 of 4 reviewed diffs now report the defect, against 1 before.**
+The plan predicted `1 pass, 3 fail, 1 skip`; the measured outcome is
+`2 pass, 2 fail, 1 skip`. The plan expected all four recorded inline commands to
+be accepted, and two of them are not read-only commands at all: diff 1 creates
+files in /tmp to show a glob bug, diff 4 sources `aid-fsm.sh` and runs `git
+init`. Both are legitimate reproductions and both belong in a
+`repro/<name>.sh` file, which is exactly what the file form is for. What the adjudicator stopped losing is ONE
+finding, diff 3's, rejected on the FORM of its citation (a line range). Diff 2
+was never lost — its citations were plain `path:line` all along — and diffs 1
+and 4 are still rejected, now for what their reproductions DO rather than for
+the form they are written in.
+
+**The verb list is shorter than the plan's.** An independent review on
+2026-09-20 walked through what the planned list admitted and found it was a
+first-word check over a string the reviewer model writes: `if true; then rm -rf
+x; fi` passed (only `then` was checked), a newline hid a second command from the
+segment splitter entirely, `export PATH=/tmp/evil:$PATH` re-pointed every later
+verb, and `find -exec`, `sed -i` and `yq -i` all write. So `cd mkdir mktemp
+touch export find sed yq` and the shell keywords are not on the list, a newline,
+a backslash, a redirection, a command or process substitution and any in-place
+flag refuse outright, and the recorded diff-1 command (`mkdir -p /tmp/wan-check
+&& cd … && touch …`) would be refused today as well. The table above is the re-measurement after
+the hardening; the first draft scored 3 of 4 by accepting diff 1's writing
+reproduction.
+
+**No fixture was created.** The plan's `fixtures/step-review/fresh-diffs-2026-09-19.json`
+would have to pin pre-image shas that live only on a scratch branch; a fixture
+that rots the day the branch is pruned is worse than no fixture. `replay-do` is
+a measurement command, run by hand against an evidence tree, and the durable
+regression coverage lives in the three new cases of
+`scripts/tests/bats/test-review-adjudicate.bats` (Step 1), which build their
+own repository.

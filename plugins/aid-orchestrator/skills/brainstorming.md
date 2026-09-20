@@ -182,10 +182,12 @@ Write the draft positions to a brief (one line per position), then:
 rc=0
 bash "$AID_PLUGIN_PATH/scripts/lib/aid-brainstorm-opponent.sh" \
   P{NNN} <brief.md> .aid-o/work/brainstorm/P{NNN} || rc=$?
-# rc=0 answered · rc=3 not reached, CARRY ON · rc=1 the vision gate refused, or
-# nothing could be recorded — stop and fix that. Absorb rc=3 explicitly: under
-# `set -e` an unavailable opponent would otherwise end the run it is meant to
-# let continue.
+# rc=0 answered · rc=3 a codex answered the probe and then said nothing, CARRY
+# ON · rc=4 no codex at all → dispatch the STAND-IN prompt the line names to a
+# general-purpose agent and hand its answer back with --answer <file> · rc=1 the
+# vision gate refused, or nothing could be recorded — stop and fix that. Absorb
+# rc=3 and rc=4 explicitly: under `set -e` an unavailable opponent would
+# otherwise end the run it is meant to let continue.
 ```
 
 **Read the result the way it is meant:**
@@ -195,6 +197,7 @@ bash "$AID_PLUGIN_PATH/scripts/lib/aid-brainstorm-opponent.sh" \
 | `agree` entries | Record them and move on. Do **not** ask the PM to confirm something both models already hold. |
 | `disagree` entries | **Filtered by MUST 15, not forwarded wholesale.** A disagreement that IS one of the five kinds goes to the PM as part of the batch, with both positions and what it costs to get wrong (at most five; the rest stay in `dispute.json` and the summary says how many). A disagreement that is NOT — a method, a shape, an implementation choice — the models settle between themselves, and the artifact records the choice AND the loser's objection. Forwarding every disagreement was the old interrogation with a new name: two models can disagree about anything, and "the opponent disagreed" is not by itself a reason to spend the PM's attention. |
 | `missing` entries | Gaps neither position covered. Fold them into the questions. |
+| `provider: "claude"` with a `fallback_reason` | A stand-in answered the same brief because no codex could be reached. Read it exactly as an opponent's answer, and say in one line which provider answered and why. Never ask the PM whether to use a stand-in. |
 | `opponent: unreached` | Read `ask_pm`. While it is `true`, present it to the PM as a decision — carry on as a monologue, try again, or stop. Once it is `false` (three attempts spent), say in one line that the design is a monologue and why, and carry on. **Never** present it as agreement: an opponent that did not answer has not agreed. |
 
 The gate refuses to dispatch on a vision the PM has not approved, so the vision

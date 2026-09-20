@@ -64,8 +64,12 @@ fake_codex() {
   cat > "$BIN/codex" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
+  --version) echo "codex-cli 9.9.9"; exit 0 ;;
   login) echo "Logged in as test"; exit 0 ;;
   exec)
+    # aid_codex_probe sends a one-token prompt: a reachable codex answers it
+    # whatever the dispatch itself is rigged to do.
+    [[ "${*: -1}" == ok ]] && exit 0
     if [[ "$*" == *"--help"* ]]; then
       echo "Usage: codex exec [--json] [--output-schema <file>] [--output-last-message <file>]"
       exit 0
@@ -151,14 +155,78 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   [[ "$output" == *"2 beyond the 5"* ]]
 }
 
-@test "AC26: an opponent that cannot be reached is recorded as such, never as agreement" {
+@test "AC26: no codex at all is stood in for by a claude agent, never turned into agreement" {
   approve_vision
   path_without_codex
   run_opponent
-  [ "$status" -eq 3 ]
-  [ "$(jq -r '.opponent' "$TMP/out/dispute.json")" = "unreached" ]
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"STAND-IN"* ]]
+  [[ "$output" == *"codex_absent"* ]]
+  [ -s "$TMP/out/opponent-prompt.txt" ]
+  [ "$(jq -r '.stand_in' "$TMP/out/stand-in.json")" = "claude" ]
+  # the attempt IS recorded, and in a shape that cannot close the brainstorm
+  [ "$(jq -r '.opponent' "$TMP/out/dispute.json")" = "stand_in_pending" ]
   [ "$(jq -r '.agree | length' "$TMP/out/dispute.json")" = "0" ]
-  [[ "$output" == *"monologue"* ]]
+}
+
+@test "a stand-in that was asked for and never answered does not close the brainstorm" {
+  approve_vision
+  path_without_codex
+  run_opponent; [ "$status" -eq 4 ]
+  # approve is where the opponent's record is required, and it reads the run's
+  # own state directory; a pending stand-in is neither answered nor unreached,
+  # so it refuses and says how to finish it
+  local sdir="$ROOT/.aid-o/work/brainstorm/P900"
+  [ -d "$sdir" ]
+  cp "$TMP/out/dispute.json" "$sdir/dispute.json"
+  printf '<html></html>' > "$sdir/brainstorm-summary-artifact.html"
+  run bash "$BS" approve P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"--answer"* ]]
+}
+
+@test "the stand-in's answer is recorded as a claude answer with the reason codex was not used" {
+  approve_vision
+  path_without_codex
+  run_opponent
+  [ "$status" -eq 4 ]
+  printf '%s' '{"agree":[{"point":"x","why":"y"}],"disagree":[],"missing":[]}' > "$TMP/stand-in-answer.json"
+  run bash "$OPP" P900 "$BRIEF" "$TMP/out" --answer "$TMP/stand-in-answer.json"
+  [ "$status" -eq 0 ]
+  local d="$TMP/out/dispute.json"
+  [ "$(jq -r .opponent "$d")" = "answered" ]
+  [ "$(jq -r .provider "$d")" = "claude" ]
+  [ "$(jq -r .fallback_reason "$d")" = "codex_absent" ]
+  [ "$(jq -r '.agree | length' "$d")" = "1" ]
+}
+
+@test "a stand-in answer outside the required shape is not consent either" {
+  approve_vision
+  path_without_codex
+  run_opponent
+  printf '%s' 'I agree with all of it.' > "$TMP/stand-in-answer.json"
+  run bash "$OPP" P900 "$BRIEF" "$TMP/out" --answer "$TMP/stand-in-answer.json"
+  [ "$status" -eq 1 ]
+  [ "$(jq -r .opponent "$TMP/out/dispute.json")" = "unreached" ]
+  [[ "$(jq -r .reason "$TMP/out/dispute.json")" == *"stand_in_invalid"* ]]
+}
+
+@test "the codex binary is chosen by version, not by which one PATH finds first" {
+  approve_vision
+  fake_codex '{"agree":[],"disagree":[],"missing":[]}'
+  local older="$TMP/older"; mkdir -p "$older"
+  printf '#!/usr/bin/env bash\ncase "$1" in --version) echo "codex-cli 0.1.0"; exit 0;; esac\nexit 9\n' > "$older/codex"
+  chmod +x "$older/codex"
+  export PATH="$older:$PATH"
+  # the ranking itself, not only its consequence: the chooser must name the
+  # 9.9.9 shim although the 0.1.0 one comes first on PATH
+  run bash -c "source '$PLUGIN_ROOT/scripts/lib/aid-c3-dispatch.sh'; aid_codex_binary"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$BIN/codex"*9.9.9* ]]
+  [[ "$output" != *"$older"* ]]
+  # and the consequence: the older shim exits 9 on everything but --version
+  run_opponent
+  [ "$status" -eq 0 ]
 }
 
 @test "AC26: an answer outside the required shape is treated as not reached, not as consent" {
@@ -196,22 +264,22 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   [ "$(jq -r '.opponent' "$TMP/out/dispute.json")" = "unreached" ]
 }
 
-@test "a dispute artifact that cannot be written is a failure, not a recorded monologue" {
+@test "a record that cannot be written is a failure, not a recorded monologue" {
   # "The artifact says so" has to be a fact about a file. A run that could not
   # write its record must not report one.
   approve_vision
-  path_without_codex
+  fake_codex '{"agree":[],"disagree":[],"missing":[]}'
   chmod 500 "$TMP/out"
-  run_opponent
+  FAKE_CODEX_EXIT=7 run_opponent
   chmod 700 "$TMP/out"
   [ "$status" -eq 1 ]
   [[ "$output" == *"no record of what happened"* ]]
 }
 
-@test "AC8/AC9: an unreachable opponent is recorded with its attempt count, for the PM to decide on" {
+@test "AC8/AC9: a codex that answered the probe and then said nothing is recorded with its attempt count" {
   approve_vision
-  path_without_codex
-  run_opponent
+  fake_codex '{"agree":[],"disagree":[],"missing":[]}'
+  FAKE_CODEX_EXIT=7 run_opponent
   [ "$status" -eq 3 ]
   local d="$TMP/out/dispute.json"
   [ "$(jq -r .opponent "$d")" = "unreached" ]
@@ -219,7 +287,7 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   [ "$(jq -r .ask_pm "$d")" = "true" ]
   # Bound to THIS run, so a record from another one cannot close it.
   [ "$(jq -r .plan_id "$d")" = "P900" ]
-  [[ "$(jq -r .reason "$d")" == *"codex"* ]]
+  [[ "$(jq -r .reason "$d")" == *"did not answer"* ]]
 }
 
 @test "after three unreachable attempts it stops asking and says so" {
@@ -227,7 +295,8 @@ run_opponent() { run bash "$OPP" P900 "$BRIEF" "$TMP/out"; }
   # interruptions — worse than the monologue it was avoiding. Codex returned
   # 529 three times in a row on the day this was written.
   approve_vision
-  path_without_codex
+  fake_codex '{"agree":[],"disagree":[],"missing":[]}'
+  export FAKE_CODEX_EXIT=7
   run_opponent; [ "$status" -eq 3 ]
   [ "$(jq -r .ask_pm "$TMP/out/dispute.json")" = "true" ]
   run_opponent; [ "$status" -eq 3 ]

@@ -7,7 +7,7 @@ required_roles: none
 
 # Step Review Roles
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-20
 
 The step review (CP2) puts one step's diff in front of one or two reviewers
 before the step is closed; the EPIC review (CP3) puts the whole EPIC diff in
@@ -51,13 +51,22 @@ A finding exists only with both:
 
 - `command` — one read-only command that shows the problem. It must start with
   `grep`, `rg`, `ls`, `find`, `sed -n`, `git grep`, `wc`, `head`, `tail` or
-  `bash <script> --help`; or it is a reproduction `bash repro/<name>.sh` that
-  the reviewer wrote under the round's `repro/` directory, the only place a
-  reviewer may write besides the output file.
-- `evidence` — `path:line` at the reviewed commit, `<sha>:path:line` for a
-  line of a file the diff deleted or moved (the pre-image at that commit), or
-  `absent:path` for a file the step should have produced and did not; several
-  separated by `;`. Every file used must be cited. The finding stands when at
+  `bash <script> --help`; or it is a reproduction, either `bash repro/<name>.sh`
+  written under the round's `repro/` directory — the only place a reviewer may
+  write besides the output file — or inline as `bash -c '<pipeline>'` whose every segment starts with one of `grep rg ls git
+  wc head tail cat printf echo jq test [[ [` (`git` only with
+  `grep|log|show|diff|blame|rev-parse|status`), with no redirection, no command
+  substitution, no process substitution, no newline, no backslash, no in-place
+  flag, and no verb that has a write mode at all. The list is closed: a verb that is not on it
+  is refused whatever it does, which is how `mkdir`, `touch`, `sed`, `find`,
+  `yq` and the words `if`, `for` and `do` are kept out. A reproduction that
+  needs any of them is a `repro/<name>.sh` file, which a human can read once
+  before running it.
+- `evidence` — `path:line` or `path:first-last` at the reviewed commit,
+  `<sha>:path:line` for a line of a file the diff deleted or moved (the
+  pre-image at that commit), or `absent:path` for a file the step should have
+  produced and did not; several separated by `;`. A range stands on its first
+  line, which is what the finding is matched by across rounds. Every file used must be cited. The finding stands when at
   least one citation resolves, so cite the exact line: a wrong number wastes
   that citation.
 
@@ -210,7 +219,7 @@ sink, a missing authorization check, or a secret in the tree.
 | A finding that says "might be a problem" with no command | the command that shows it, or no finding |
 | Repeating what `step-check.json` already reports | trust the script; review what it cannot see |
 | Answering another role's questions | stay in the role; the others cover the rest |
-| `evidence` pointing at a directory, a whole file or a line of the diff | `path:line` at the reviewed commit, `<sha>:path:line` for a deleted line, `absent:path` for a missing file |
+| `evidence` pointing at a directory, a whole file or a line of the diff | `path:line` or `path:first-last` at the reviewed commit, `<sha>:path:line` for a deleted line, `absent:path` for a missing file |
 | "It is probably covered somewhere" as the answer to the test question | the covering test's file and case, or the finding that the test is missing |
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-20

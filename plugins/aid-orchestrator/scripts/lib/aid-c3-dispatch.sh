@@ -1109,12 +1109,98 @@ _looks_at_capacity() {
 #   — the conditional rules are load-bearing for bridge validation.
 #
 #   Returns the codex/timeout exit code (124 = timed out).
+# aid_codex_binary — the highest-version `codex` on $PATH, not the first one.
+# Two installs coexist on the dev host (/usr/local/bin/codex 0.149.1 shadows
+# /usr/bin/codex 0.154.0) and `command -v` picks the older.
+aid_codex_binary() {
+  local d bin first="" best="" best_v="" v
+  # local: this file is SOURCED, and an array left behind in the caller's shell
+  # is the kind of thing that only breaks two functions later.
+  local -a _acb_dirs=()
+  # An explicit choice beats every rule: a wrapper, a pinned install, or a test
+  # shim that must win whatever version it claims.
+  if [[ -n "${AID_CODEX_BIN:-}" && -x "${AID_CODEX_BIN}" ]]; then
+    v="$("${AID_CODEX_BIN}" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
+    printf '%s\t%s\n' "${AID_CODEX_BIN}" "${v:-unknown}"
+    return 0
+  fi
+  IFS=':' read -ra _acb_dirs <<< "$PATH"
+  for d in "${_acb_dirs[@]}"; do
+    bin="${d:-.}/codex"
+    [[ -x "$bin" && ! -d "$bin" ]] || continue
+    if [[ -z "$first" ]]; then
+      first="$bin"
+      v="$("$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
+      # A codex that will not say its version cannot be ranked, and a wrapper or
+      # a test shim put FIRST on PATH is a deliberate choice. PATH order wins
+      # there; the version rule is only for deciding between two real installs.
+      [[ -n "$v" ]] || { printf '%s\t%s\n' "$first" "unknown"; return 0; }
+      best="$bin"; best_v="$v"
+      continue
+    fi
+    v="$("$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
+    [[ -n "$v" ]] || continue
+    if [[ "$(printf '%s\n%s\n' "$best_v" "$v" | sort -V | tail -1)" == "$v" && "$best_v" != "$v" ]]; then
+      best="$bin"; best_v="$v"
+    fi
+  done
+  [[ -n "$best" ]] || return 1
+  printf '%s\t%s\n' "$best" "$best_v"
+}
+
+# aid_codex_probe [out.json] — can a codex answer right now? Prints
+# {available, binary, version, reason, probed_at} and writes it to out.json when
+# one is named. `reason` is none|codex_absent|rate_limited|timeout|error.
+# A `codex exec` of a one-token prompt is the only way to see the usage limit,
+# so the answer is cached for ten minutes under <root>/.aid-o/work/codex-probe.json.
+# AID_CODEX_PROBE_STUB=<file> replaces the whole probe with that file's content
+# (tests only; never a production path).
+aid_codex_probe() {
+  local out="${1:-}" root cache age now bin ver rc=0 reason=none avail=true tmp result
+  if [[ -n "${AID_CODEX_PROBE_STUB:-}" && -r "${AID_CODEX_PROBE_STUB}" ]]; then
+    result="$(cat "$AID_CODEX_PROBE_STUB")"
+    [[ -n "$out" ]] && printf '%s\n' "$result" > "$out"
+    printf '%s\n' "$result"; return 0
+  fi
+  root="${AID_PROJECT_ROOT:-$PWD}"; cache="${root}/.aid-o/work/codex-probe.json"
+  now="$(date -u +%s)"
+  if [[ -r "$cache" ]]; then
+    age=$(( now - $(date -u -r "$cache" +%s 2>/dev/null || echo 0) ))
+    if (( age >= 0 && age < 600 )) && jq -e . "$cache" >/dev/null 2>&1; then
+      result="$(cat "$cache")"
+      [[ -n "$out" ]] && printf '%s\n' "$result" > "$out"
+      printf '%s\n' "$result"; return 0
+    fi
+  fi
+  if ! IFS=$'\t' read -r bin ver < <(aid_codex_binary); then
+    avail=false; reason=codex_absent; bin=""; ver=""
+  else
+    tmp="$(mktemp)" || { avail=false; reason=error; }
+    if [[ "$avail" == true ]]; then
+      timeout 30 "$bin" exec --sandbox read-only -m "${CODEX_MODEL:-gpt-5.6-terra}" ok </dev/null >"$tmp" 2>&1 || rc=$?
+      if (( rc == 124 )); then avail=false; reason=timeout
+      elif (( rc != 0 )); then
+        avail=false
+        grep -qiE 'usage limit|rate.?limit|429' "$tmp" && reason=rate_limited || reason=error
+      fi
+      rm -f "$tmp"
+    fi
+  fi
+  result="$(jq -nc --argjson a "$avail" --arg b "$bin" --arg v "$ver" --arg r "$reason" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{available: $a, binary: $b, version: $v, reason: $r, probed_at: $at}')"
+  mkdir -p "${root}/.aid-o/work" 2>/dev/null && printf '%s\n' "$result" > "$cache" 2>/dev/null || true
+  [[ -n "$out" ]] && printf '%s\n' "$result" > "$out"
+  printf '%s\n' "$result"
+}
+
 _run_codex_isolated() {
   local project_root="$1" prompt_file="$2" events_out="$3" stderr_out="$4" last_out="$5"
-  local prompt rc=0
+  local prompt rc=0 bin
   prompt="$(cat "$prompt_file")"
+  IFS=$'\t' read -r bin _ < <(aid_codex_binary) || bin=codex
   timeout "${AID_C3_TIMEOUT_SECONDS:-${AID_CODEX_ISOLATED_TIMEOUT_SECONDS:-900}}" \
-    codex exec --json \
+    "$bin" exec --json \
       --cd "$project_root" \
       --sandbox read-only \
       -m "$CODEX_MODEL" \
@@ -2425,7 +2511,8 @@ cmd_dispatch() {
 
   # --- Step 5: codex_version (best effort; slug is NOT in the stream) ---------
   local codex_version
-  codex_version="$(codex --version 2>/dev/null || echo "")"
+  # The version of the binary that will RUN, not of whichever codex is first.
+  codex_version="$(aid_codex_binary 2>/dev/null | cut -f2)"
 
   # IMP-464 (D2) TOCTOU close: build-manifest sealed evidence_hashes[] at
   # build-manifest time, potentially long before this exact moment. Codex is
@@ -2638,6 +2725,49 @@ _vfail() {
   exit 2
 }
 
+# _vmismatch <reason> — the report on disk contradicts the raw response.
+#   Exit 2 like every other NOT-verified condition, but ALSO stop the false
+#   report being what the next reader believes: the release policy reads
+#   audit-report.json, never the raw message (ACTA P024 — three findings, two
+#   HIGH, and the report on disk said none). The rejected report is kept beside
+#   it, and the replacement carries the raw verdict verbatim.
+#   Under --reference / --read-only nothing is written: a read-only caller (the
+#   FSM hook) asks a question, it does not repair the evidence.
+#   Reads $report, $last_msg and $reference from cmd_verify's scope.
+_vmismatch() {
+  local reason="$1" rejected="${report%.json}.rejected.json" tmp
+  if (( reference )); then
+    echo "verify: NOT verified — ${reason} (read-only: audit-report.json left as it is)" >&2
+    exit 2
+  fi
+  # Already rejected once, or already replaced with this same reason: leave both
+  # files exactly as they are, so a second verify changes nothing.
+  if [[ -e "$rejected" ]] \
+     || [[ "$(jq -r '.status // ""' "$report" 2>/dev/null)" == "unverifiable" \
+           && "$(jq -r '.audit_report.unverifiable_reasons[0] // ""' "$report" 2>/dev/null)" == "$reason" ]]; then
+    echo "verify: NOT verified — ${reason} (already recorded; no file touched)" >&2
+    exit 2
+  fi
+  tmp="$(mktemp "${report}.XXXXXX")" || _vfail "${reason} (and no temp file to record it in)"
+  if ! jq -n --arg r "$reason" --slurpfile raw "$last_msg" \
+       '{schema_version: "aid-2.0", artifact_type: "audit_report",
+         status: "unverifiable",
+         audit_report: {review_status: "unverifiable", outcome: "review_unverifiable",
+                        unverifiable_reasons: [$r],
+                        raw: ($raw[0] // null)}}' > "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    jq -n --arg r "$reason" '{schema_version: "aid-2.0", artifact_type: "audit_report",
+       status: "unverifiable",
+       audit_report: {review_status: "unverifiable", outcome: "review_unverifiable",
+                      unverifiable_reasons: [($r + " (raw_unreadable)")], raw: null}}' > "$tmp" \
+      || { rm -f "$tmp"; _vfail "${reason} (and the replacement could not be written)"; }
+  fi
+  mv "$report" "$rejected" || { rm -f "$tmp"; _vfail "${reason} (and the report could not be set aside)"; }
+  mv "$tmp" "$report"      || _vfail "${reason} (and the replacement could not be put in place)"
+  echo "verify: NOT verified — ${reason}; audit-report.json replaced with status: unverifiable carrying the raw verdict, the original is in $(basename "$rejected")" >&2
+  exit 2
+}
+
 # _file_sha_pref <file>  — "sha256:<64hex>" over a file's raw bytes; empty (→ a
 # guaranteed mismatch on any later compare) when the file is missing/unreadable,
 # so a pruned/edited artifact fails a hash check rather than crashing.
@@ -2695,14 +2825,14 @@ cmd_verify() {
   local reference=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --reference) reference=1; shift ;;
+      --reference|--read-only) reference=1; shift ;;
       --)          shift; break ;;
       -*)          _vfail "unknown flag: $1" ;;
       *)           break ;;
     esac
   done
   local evidence_dir="${1:-}"
-  [[ -n "$evidence_dir" ]] || _vfail "usage: verify [--reference] <evidence_dir>"
+  [[ -n "$evidence_dir" ]] || _vfail "usage: verify [--reference|--read-only] <evidence_dir>"
   [[ -d "$evidence_dir" ]] || _vfail "evidence_dir not a directory: $evidence_dir"
 
   local c3_dir="$evidence_dir/c3"
@@ -2826,10 +2956,13 @@ cmd_verify() {
   exp_review_status="$(jq -r '.review_status' <<<"$expected" 2>/dev/null)"
   r_status="$(jq -r '.status' "$report" 2>/dev/null || true)"
   r_review_status="$(jq -r '.audit_report.review_status' "$report" 2>/dev/null || true)"
+  # These two are the only assertions where the REPORT contradicts the RAW
+  # verdict; every other _vfail above is a precondition or a usage failure and
+  # keeps its immediate exit with nothing written.
   [[ "$r_status" == "$exp_status" ]] \
-    || _vfail "audit_report.status != expected-from-raw (report:${r_status} expected:${exp_status})"
+    || _vmismatch "audit_report.status != expected-from-raw (report:${r_status} expected:${exp_status})"
   [[ "$r_review_status" == "$exp_review_status" ]] \
-    || _vfail "audit_report.review_status != expected-from-raw (report:${r_review_status} expected:${exp_review_status})"
+    || _vmismatch "audit_report.review_status != expected-from-raw (report:${r_review_status} expected:${exp_review_status})"
 
   if [[ "$exp_status" == "unverifiable" ]]; then
     local r_outcome exp_reasons r_reasons

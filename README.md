@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.99.0** (current) — kontrola kroku, EPICu a fast mode na jednom motoru kol; pre-filter, soubory verifikátora a invalidační mapa odstraněny
+- **v2.100.0** (current) — když Codex chybí, odpoví Claude se stejným zadáním; rozhodčí bere rozsah řádků i inline reprodukci; doklad o akceptačních kritériích z brány, která je ověřila
+- **v2.99.0** — kontrola kroku, EPICu a fast mode na jednom motoru kol; pre-filter, soubory verifikátora a invalidační mapa odstraněny
 - **v2.98.0** — kontrola plánu šesti revizory ve dvou kolech, jedna cesta bez pásem; starý řetězec C0 a ledger odstraněny
-- **v2.97.0** — deterministická kontrola plánu (`aid-plan-check.sh`) před generováním
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

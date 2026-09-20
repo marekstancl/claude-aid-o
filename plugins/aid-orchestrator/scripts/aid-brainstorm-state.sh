@@ -314,6 +314,10 @@ cmd_approve() {
   case "$opp" in
     answered|unreached) ;;
     *)
+      if [[ "$opp" == "stand_in_pending" ]]; then
+        echo "REFUSED: ${dispute} records a claude stand-in that was asked for and never answered. Dispatch the prompt in $(dirname "$dispute")/opponent-prompt.txt to a general-purpose agent and pass its answer back with aid-brainstorm-opponent.sh ... --answer <file>." >&2
+        return 1
+      fi
       echo "REFUSED: ${dispute} is unreadable or carries opponent='${opp:-<none>}' — a damaged record is not a record. Expected 'answered' or 'unreached'." >&2
       return 1 ;;
   esac

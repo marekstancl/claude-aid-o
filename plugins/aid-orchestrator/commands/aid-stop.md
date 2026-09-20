@@ -73,13 +73,14 @@ Execute these steps in order. Each step is independent — if one fails, log the
 **This write halts the Controller — auto-pickup is gated on `mode == auto`, so flipping to
 `mode: manual` stops it from dispatching the next agent.**
 
-1. Write `.aid-o/work/auto-mode-state.yaml`:
-   ```yaml
-   mode: manual
-   stopped_at: "{now ISO 8601}"
-   stopped_by: "pm"
-   stop_reason: "/aid-stop command"
+1. Write the state file through the FSM, never by hand:
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" auto-mode set manual --by pm --reason "/aid-stop command"
    ```
+   It writes `mode`, `set_at`, `set_by` and the three `stopped_*` fields this
+   command used to write itself, into `.aid-o/work/auto-mode-state.yaml`.
+   A `mode: manual` there beats an exported `AID_AUTO_MODE=1`: a PM stop wins
+   over a controller that already announced itself.
 2. If write fails:
    - Log ERROR: "Failed to update auto-mode-state.yaml: {error}"
    - Continue (do NOT abort).
