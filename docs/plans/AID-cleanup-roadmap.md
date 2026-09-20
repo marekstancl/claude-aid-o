@@ -1,5 +1,9 @@
 # Co dál s čištěním pluginu — kandidáti po P096
 
+**Rozhodnutí PM 20. 9. 2026:** pořadí je **C1 jen úklid** (bez psaní standardu do
+Docusauru) → **A2 smazat audit testů** → **A1 přestavba bran**. Ostatní body tu
+zůstávají, aby bylo kam se vrátit.
+
 Založeno 20. 9. 2026 po vydání 2.101.1. Řada P093 → P094 → P095 → P096 přestavěla
 kontrolu plánu, kroku, EPICu, fast mode a konec plánu na jeden motor revizních kol
 a smazala, co nahradila. Tady je, co v témže duchu zbývá, a co je jiného druhu.
