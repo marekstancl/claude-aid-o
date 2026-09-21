@@ -379,3 +379,132 @@ FIXTURE
   run yq '.gate_profiles.custom.include | join(",")' .aid-o/config/execution.yaml
   [ "$output" == "ts_test" ]
 }
+
+# ─── P097 Step 3: the configuration upgrade (`upgrade` main of the library) ──
+
+_p097_fixture_project() {  # <name> → project root with a copy of the fixture
+  local root="$TEST_TMPDIR/$1"
+  mkdir -p "$root/.aid-o/config"
+  cp "$AID_PLUGIN_PATH/scripts/tests/fixtures/gates/projects/$1.yaml" "$root/.aid-o/config/execution.yaml"
+  echo "$root"
+}
+
+@test "P097 Step 3: upgrade on the ACTA fixture — exit 3 with the diff, then 0 with the printed hash; 11 required_when lines gone, default_profile added" {
+  root="$(_p097_fixture_project acta)"
+  cfg="$root/.aid-o/config/execution.yaml"
+  # The plan counts 11 `required_when` lines: 10 keys and one mention inside
+  # a comment (`# ... required_when: always ...`). The keys go; the comment stays.
+  [ "$(grep -c 'required_when' "$cfg")" -eq 11 ]
+  [ "$(grep -c '^ *required_when:' "$cfg")" -eq 10 ]
+  before="$(sha256sum "$cfg")"
+
+  run bash "$HELPER" upgrade "$root"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"--- current"* ]]
+  [[ "$output" == *"-    required_when: \"*.py exists\""* ]]
+  [[ "$output" == *"+default_profile: standard"* ]]
+  [[ "$output" == *"+    when_paths:"* ]]
+  [[ "$output" == *"diff_hash: sha256:"* ]]
+  # Nothing written by the preview.
+  [ "$(sha256sum "$cfg")" == "$before" ]
+
+  hash="$(printf '%s\n' "$output" | sed -n 's/^diff_hash: //p')"
+  run bash "$HELPER" upgrade "$root" --confirm-upgrade "$hash"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"upgraded ${cfg} (${hash})"* ]]
+
+  [ "$(grep -c '^ *required_when:' "$cfg")" -eq 0 ]
+  [ "$(grep -c 'required_when' "$cfg")" -eq 1 ]
+  run yq '.default_profile' "$cfg"
+  [ "$output" == "standard" ]
+  run yq '.gate_profile_defaults' "$cfg"
+  [ "$output" == "null" ]
+  run yq '.gate_profiles | has("quick")' "$cfg"
+  [ "$output" == "false" ]
+  run yq '.gate_profiles.full.when_paths | length' "$cfg"
+  [ "$output" -eq 14 ]
+  # Never touched: every command and every non-empty include[] survive verbatim.
+  run yq '.gates.py_test.command' "$cfg"
+  [ "$output" == "bash backend/scripts/run_py_test_gate.sh" ]
+  run yq '.gate_profiles.release.include | length' "$cfg"
+  [ "$output" -eq 11 ]
+}
+
+@test "P097 Step 3: a stale --confirm-upgrade hash refuses (exit 2), writes nothing and re-prints the current diff" {
+  root="$(_p097_fixture_project acta)"
+  cfg="$root/.aid-o/config/execution.yaml"
+  before="$(sha256sum "$cfg")"
+
+  run bash "$HELPER" upgrade "$root" --confirm-upgrade sha256:0000000000000000000000000000000000000000000000000000000000000000
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"does not match the current diff"* ]]
+  [[ "$output" == *"--- current"* ]]
+  [[ "$output" == *"diff_hash: sha256:"* ]]
+  [ "$(sha256sum "$cfg")" == "$before" ]
+}
+
+@test "P097 Step 3: a clean file reports nothing to upgrade and exits 0" {
+  root="$(_p097_fixture_project krok)"   # krok never had a dead key nor a profile table
+  before="$(sha256sum "$root/.aid-o/config/execution.yaml")"
+  run bash "$HELPER" upgrade "$root"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "nothing to upgrade: "* ]]
+  [ "$(sha256sum "$root/.aid-o/config/execution.yaml")" == "$before" ]
+
+  # And an upgraded file is clean on the second run.
+  root="$(_p097_fixture_project vulcan)"
+  run bash "$HELPER" upgrade "$root"
+  [ "$status" -eq 3 ]
+  hash="$(printf '%s\n' "$output" | sed -n 's/^diff_hash: //p')"
+  run bash "$HELPER" upgrade "$root" --confirm-upgrade "$hash"
+  [ "$status" -eq 0 ]
+  run bash "$HELPER" upgrade "$root"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "nothing to upgrade: "* ]]
+}
+
+@test "P097 Step 3: gate_profiles without a profile named standard — exit 2 naming the declared profiles; --default-profile <declared> proceeds; an undeclared name is refused" {
+  root="$(_p097_fixture_project agents)"
+  cfg="$root/.aid-o/config/execution.yaml"
+  before="$(sha256sum "$cfg")"
+
+  run bash "$HELPER" upgrade "$root"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"no profile named 'standard'"* ]]
+  [[ "$output" == *"declared: targeted full release"* ]]
+  [[ "$output" == *"--default-profile <name>"* ]]
+  [ "$(sha256sum "$cfg")" == "$before" ]
+
+  run bash "$HELPER" upgrade "$root" --default-profile nope
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"no profile named 'nope'"* ]]
+
+  run bash "$HELPER" upgrade "$root" --default-profile full
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"+default_profile: full"* ]]
+  hash="$(printf '%s\n' "$output" | sed -n 's/^diff_hash: //p')"
+  run bash "$HELPER" upgrade "$root" --confirm-upgrade "$hash" --default-profile full
+  [ "$status" -eq 0 ]
+  run yq '.default_profile' "$cfg"
+  [ "$output" == "full" ]
+  # notifications.telegram keeps only its one read key, at the indent aid-fsm.sh greps.
+  run yq '.notifications.telegram | keys | join(",")' "$cfg"
+  [ "$output" == "alert_on_compliance_recovery" ]
+  grep -q '^    alert_on_compliance_recovery: true' "$cfg"
+}
+
+@test "P097 Step 3: an unparseable execution.yaml exits 2 with the parser error and nothing written" {
+  mkdir -p "$TEST_TMPDIR/broken/.aid-o/config"
+  cfg="$TEST_TMPDIR/broken/.aid-o/config/execution.yaml"
+  printf 'gates:\n  a:\n    command: "unterminated\n  b: [\n' > "$cfg"
+  before="$(sha256sum "$cfg")"
+  run bash "$HELPER" upgrade "$TEST_TMPDIR/broken"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"does not parse"* ]]
+  [ "$(sha256sum "$cfg")" == "$before" ]
+
+  run bash "$HELPER" upgrade "$TEST_TMPDIR/does-not-exist"
+  [ "$status" -eq 2 ]
+  run bash "$HELPER"
+  [ "$status" -eq 2 ]
+}

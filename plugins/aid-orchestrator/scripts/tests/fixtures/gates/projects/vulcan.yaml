@@ -1,0 +1,56 @@
+# AID gate definitions — P56 EPIC 2/2 (MVP 0.4 Telegram Session Manager + Scheduled Tasks, Phase 2)
+# Kod se meni v /opt/eco/services/agent-runtime/ (agent-runner) + Docusaurus docs.
+# Gates: py_compile (3 souboru) -> tests-smoke.sh (agent-loop regrese) -> tests-gateway-smoke.sh
+# (T1-T20 kumulativne, T19 uz obsazen z Phase 1 gate-fixer, viz step 5/plan-step-11 dispatch) ->
+# deploy.sh (scp -> py_compile -> smoke -> restart gateway + scheduler timer install) ->
+# docusaurus_build (Node 22 kontejner eco-docs, beh primo na eco-dev, ne host Node 18).
+
+version: "1.0"
+generated_by: "controller (P56 E-56-2_2 Phase 2)"
+
+gates:
+  py_compile_gateway:
+    command: "cd /opt/eco/services/agent-runtime && python3 -m py_compile telegram-gateway.py"
+    required: true
+    timeout_seconds: 30
+  py_compile_agent_loop:
+    command: "cd /opt/eco/services/agent-runtime && python3 -m py_compile agent-loop.py"
+    required: true
+    timeout_seconds: 30
+  py_compile_scheduler:
+    command: "cd /opt/eco/services/agent-runtime && python3 -m py_compile agent-scheduler.py"
+    required: true
+    timeout_seconds: 30
+  agent_loop_smoke:
+    # tests-smoke.sh (na rozdil od tests-gateway-smoke.sh) hardcoduje zapisy do
+    # /opt/eco/agent-work/{verification,tmp} - ACL vlastni agent-runner, lokalni
+    # marekstancl tam nema prava. SSH na agent-runner, ne lokalni beh.
+    # -n je POVINNE: gate runner iteruje gates pres `while read <<< heredoc`;
+    # ssh bez -n zdedi smycky stdin a sezere zbytek gate_names, cimz tise
+    # zastavi zbyvajici gates (zjisteno prvnim skutecnym behem gates v tomto EPICu).
+    command: "ssh -n agent-runner@10.20.20.22 'cd /opt/eco/services/agent-runtime && bash tests-smoke.sh'"
+    required: true
+    timeout_seconds: 90
+  gateway_smoke:
+    command: "cd /opt/eco/services/agent-runtime && bash tests-gateway-smoke.sh"
+    required: true
+    timeout_seconds: 90
+  deploy_check:
+    # </dev/null je POVINNE: deploy.sh dela nekolik `ssh "$HOST" "..."` volani BEZ
+    # -n uvnitr sebe - kdyz bezi jako gate (viz agent_loop_smoke komentar vyse pro
+    # mechanismus), tyhle vnorene ssh prikazy sezerou stdin gate-runner smycky a
+    # docusaurus_build (dalsi gate v poradi) se tise nikdy nespusti.
+    command: "cd /opt/eco/services/agent-runtime && bash deploy.sh </dev/null && echo 'deploy-ok'"
+    required: true
+    timeout_seconds: 120
+  docusaurus_build:
+    command: "docker exec eco-docs npm run build"
+    required: true
+    timeout_seconds: 180
+
+notifications:
+  telegram:
+    enabled: false
+    chat_id: null
+    alert_on_repeated_precondition_fail: true
+    alert_threshold: 3

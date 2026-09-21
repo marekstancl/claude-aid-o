@@ -1,0 +1,239 @@
+# ACTA gate commands — run via Docker (eco-dev: tools not installed on host)
+# python:3.12-slim and node:20-alpine images are pre-cached on eco-dev
+#
+# POZN. (E-009 HIGH-1 fix): pipe `... | tr` uvnitř kontejnerového `sh -c` jinak
+# polkne exit code (vrací tr=0), takže selhání testu/lintu by se reportovalo jako
+# "pass" (false-green). `set -o pipefail` uvnitř sh -c zajistí, že exit code je
+# z padajícího článku pipeline, ne z tr. aid-run-gates.sh to opravit nemůže —
+# pipe je uvnitř kontejneru, ne na vnější bash úrovni.
+# py_type_check BYL advisory (`; exit 0`) a přesně to se vymstilo: nezávislý
+# audit C3 v P018 našel v reportu, který hlásil `pass`, 14 mypy chyb — z toho
+# 6 nových od EPICu, který branou právě prošel. Zelená brána přestala znamenat
+# „otypováno" (týž vzorec jako B-046 u DB testů).
+# Od P018 je brána OSTRÁ: `backend/scripts/run_py_type_check_gate.sh`, základ
+# je nula (osm starých chyb opraveno), takže jakákoli chyba = červená. Skript
+# navíc hlídá, jestli mypy vůbec doběhl — prázdný výstup NENÍ průchod.
+# Schváleno PM 2026-08-23.
+#
+# POZN. (P014 L3-BLOCK-1 fix): py_test instaluje i `xmlschema` — XSD testy
+# (test_convert_schema.py, test_isdoc_schema.py) mají `pytest.importorskip`,
+# takže bez xmlschema se tiše skipovaly a XSD validace byla false-green
+# (P013 gate report: 795 teček vs "804 passed" — chybějících ~9 = přesně tyto
+# skipnuté moduly).
+
+gates:
+  # --- Python ---
+  py_test:
+    # Repo-local runner (B-046). Zvedne VLASTNÍ dočasnou postgres:17-alpine,
+    # předá testům explicitní DATABASE_URL a zapne ACTA_REQUIRE_TEST_DATABASE=1,
+    # takže nedostupná databáze je FAIL, ne SKIP.
+    #
+    # Dřív gate běžel v čistém kontejneru bez DATABASE_URL a DB testy se tiše
+    # přeskočily — a zrovna ty dokazují identitu a partial unique indexy,
+    # migrační cyklus, idempotenci upsertu, zotavení savepointu a ošetření
+    # kolize identit. Gate byl přesto zelený, takže „zelené gates“ pro cokoli
+    # nad PostgreSQL neznamenalo „otestováno“. Dva audity po sobě to vedly
+    # jako P0.
+    #
+    # Detaily (izolace, unikátní jména pro souběžné běhy, úklid přes trap)
+    # jsou ve skriptu — execution.yaml má gate volat, ne ho definovat.
+    command: "bash backend/scripts/run_py_test_gate.sh"
+    required_when: "*.py exists"
+    # Delší než ostatní gaty: start databáze + instalace závislostí + suite.
+    timeout_seconds: 900
+    required: true
+  py_lint:
+    command: "docker run --rm -e NO_COLOR=1 -v $(pwd)/backend:/app -w /app python:3.12-slim sh -c 'set -o pipefail; pip install --quiet ruff >/dev/null 2>&1; ruff check . --output-format=concise --no-cache 2>&1 | LC_ALL=C tr -dc \"[:print:]\\n\"'"
+    required_when: "*.py exists"
+    timeout_seconds: 120
+    required: true
+  py_type_check:
+    command: "bash backend/scripts/run_py_type_check_gate.sh"
+    required_when: "*.py exists"
+    # Stahuje image a instaluje mypy jako předtím, jen navíc ověřuje, že doběhl.
+    timeout_seconds: 300
+    required: true
+  # --- TypeScript ---
+  ts_test:
+    # Od P015 post-audit frontend test suite MÁ (vitest, `npm test`), takže gate
+    # reálně běží. Graceful skip (exit 2) zůstává jako pojistka, kdyby skript
+    # zmizel — ne falešný fail ani falešně zelený test.
+    #
+    # POZN. k filtru výstupu: alpine má busybox `tr`, který `[:print:]` neumí
+    # a výstup rozkouše na nečitelné zbytky (gate procházel, ale z logu nešlo
+    # poznat, kolik testů proběhlo). Proto se u node gates escape sekvence
+    # strippují sedem, ne trem.
+    command: "docker run --rm -e CI=true -v $(pwd)/frontend:/app -w /app node:20-alpine sh -c 'npm install --silent >/dev/null 2>&1; npm run 2>&1 | grep -qE \"^  test$\" || { echo \"ts_test: no test script configured — skip (frontend nema test suite)\"; exit 2; }; set -o pipefail; npm test 2>&1 | sed -e \"s/\\x1b\\[[0-9;]*[a-zA-Z]//g\"'"
+    pass_criteria: "graceful skip (exit 2) when no frontend test suite is configured"
+    required_when: "*.ts OR *.tsx exists"
+    timeout_seconds: 180
+    required: true
+  ts_lint:
+    command: "docker run --rm -e NO_COLOR=1 -v $(pwd)/frontend:/app -w /app node:20-alpine sh -c 'set -o pipefail; npm install --silent >/dev/null 2>&1; npm run lint 2>&1 | sed -e \"s/\\x1b\\[[0-9;]*[a-zA-Z]//g\"'"
+    required_when: "*.ts OR *.tsx exists"
+    timeout_seconds: 120
+    required: true
+  ts_type_check:
+    command: "docker run --rm -e NO_COLOR=1 -v $(pwd)/frontend:/app -w /app node:20-alpine sh -c 'set -o pipefail; npm install --silent >/dev/null 2>&1; npm run typecheck 2>&1 | sed -e \"s/\\x1b\\[[0-9;]*[a-zA-Z]//g\"'"
+    required_when: "tsconfig.json exists"
+    timeout_seconds: 120
+    required: true
+  # --- DoD ---
+  # docs_updated je manuální Definition-of-Done položka (aktualizace dokumentace),
+  # kterou nelze spolehlivě CI-automatizovat. Plugin ji injektuje do plan.json.gates
+  # každého EPICu; když NENÍ definována zde, reconciliace ji hlásí jako
+  # undefined_gate → fail (a to vynutí overall=fail). Definujeme ji tedy jako
+  # explicitní advisory SKIP (exit 2 + pass_criteria "exit 2"): není to falešný
+  # fail (undefined_gate) ani falešně zelený gate — je to poctivě zaznamenaný
+  # "manuálně ověřováno v review, ne CI-enforced". Kontrola dokumentace probíhá
+  # v DONE review (curator/auditor), ne strojově zde.
+  plan_diff:
+    # Brána plánu, ne EPICu: ověřuje, že akceptační kritéria z plánu jsou
+    # v kódu materiálně splněná. Plan-final běh ji VYŽADUJE a nemá pro ni
+    # náhradní cestu — bez ní se finalizace zastaví hláškou
+    # „plan_diff result is '<absent>'".
+    #
+    # Obě cesty jsou ABSOLUTNÍ, a to schválně:
+    #  - plugin NENÍ součástí tohohle repozitáře (kanonická definice
+    #    v defaults/ předpokládá monorepo s pluginem uvnitř),
+    #  - evidence žije jen v HLAVNÍM checkoutu (`.aid-o/work/` je gitignored),
+    #    kdežto brány běží ve worktree plánu. Relativní cesta by tam
+    #    neexistovala a brána by spadla na „Evidence dir not found".
+    #
+    # `pass_criteria` přijímá i exit 2 — to je zdokumentovaný graceful skip
+    # pro plán bez akceptačních kritérií. Pro plan-final běh se ale
+    # `--plan-path` a `--base-commit` předávají výslovně, takže se na skip
+    # nespadne a brána skutečně vyhodnocuje.
+    description: "Akceptační kritéria plánu jsou v kódu splněná"
+    required: true
+    type: deterministic
+    command: "bash ${AID_PLUGIN_PATH:-/home/marekstancl/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator}/scripts/aid-plan-diff.sh --plan {plan_path} --evidence-dir ${AID_PROJECT_ROOT:-/opt/eco/projects/acta}/.aid-o/work/evidence/{epic_id}/{run_id} --base-commit {base_commit}"
+    # 900 s, ne 180. Brána pouští ověřovací příkaz ke KAŽDÉMU akceptačnímu
+    # kritériu plánu; u P016 je jich 11 a většina spouští část testové sady,
+    # takže celý běh trvá ~318 s. Na 180 s spadl na timeout (exit 124) —
+    # tedy vypadal jako nesplněná kritéria, ačkoli všech 11 bylo `present`.
+    # Falešně červená brána je horší než pomalá.
+    timeout_seconds: 900
+    pass_criteria: "exit 0 (vše přítomno) nebo exit 2 (plán bez AC — graceful skip)"
+    max_retries: 0
+
+  # 2026-08-31 (P020 plan-final review): ts_e2e/ts_e2e_pwa přesunuty AŽ SEM,
+  # ZA plan_diff. Gate runner běží brány v pořadí definice v tomto souboru,
+  # ne v pořadí `include:` u profilu — a e2e skripty (viz jejich komentáře
+  # níže) přepínají sdílený acta-api dev kontejner na GHCR/prod build jako
+  # vedlejší efekt (`depends_on: acta-api` v jejich compose overlay). Když
+  # plan_diff běžel PO e2e, viděl acta-api bez lokálně sestavené migrace a
+  # AC13 (`alembic heads`) padalo — ne kvůli chybě v kódu, ale kvůli tomuhle
+  # pořadí. Ověřeno opakovaně: ruční spuštění stejného `aid-plan-diff.sh`
+  # příkazu MINUTY po e2e vždy prošlo 14/14.
+  ts_e2e:
+    quarantine:
+      enabled: true
+      # Rozhodnutí PM 2026-09-02 při plan-final P024. Obě e2e brány podle
+      # vlastních komentářů níž PŘESTAVUJÍ sdílený dev stack na eco-dev
+      # (acta-api, acta-worker, acta-ui) a nechají ho tak. To je zásah do
+      # prostředí, které používá i někdo jiný, a plan-final P024 se mu vyhýbá
+      # ze stejného důvodu, z jakého se u kroku 14 nepouštělo celé noční okno.
+      #
+      # NENÍ to trvalé vypnutí: karanténa je deklarovaná výjimka, kterou
+      # `plan-finalize --stage gates` vidí a zapíše do evidence, takže z ní
+      # nemůže vzniknout tichá zelená. Až bude na e2e vhodná chvíle (vyhrazený
+      # stack nebo domluvené okno), `enabled` se vrátí na false.
+      reason: "prestavuje sdileny dev stack na eco-dev; PM 2026-09-02 (plan-final P024)"
+    # Release brána: celá Playwright sada proti stacku POSTAVENÉMU Z TÉTO
+    # pracovní kopie (acta-api + acta-worker + acta-ui), ne proti tomu, co na
+    # hostu zrovna běží. Bez toho by zelené e2e mohlo pocházet z cizího kódu.
+    #
+    # Je JEN v profilu `release` (plan-final), ne ve `full` (per-EPIC): skript
+    # nahrazuje sdílený dev stack na eco-dev a nechává ho tam, takže se nesmí
+    # pouštět na každém EPICu.
+    command: "bash deploy/e2e-release.sh"
+    pass_criteria: "exit 0; chromium + tablet + tablet-landscape + mobile against the stack built from this worktree"
+    required_when: "frontend/e2e exists"
+    timeout_seconds: 1800
+    max_retries: 0
+    required: true
+  ts_e2e_pwa:
+    quarantine:
+      enabled: true
+      # Rozhodnutí PM 2026-09-02 při plan-final P024. Obě e2e brány podle
+      # vlastních komentářů níž PŘESTAVUJÍ sdílený dev stack na eco-dev
+      # (acta-api, acta-worker, acta-ui) a nechají ho tak. To je zásah do
+      # prostředí, které používá i někdo jiný, a plan-final P024 se mu vyhýbá
+      # ze stejného důvodu, z jakého se u kroku 14 nepouštělo celé noční okno.
+      #
+      # NENÍ to trvalé vypnutí: karanténa je deklarovaná výjimka, kterou
+      # `plan-finalize --stage gates` vidí a zapíše do evidence, takže z ní
+      # nemůže vzniknout tichá zelená. Až bude na e2e vhodná chvíle (vyhrazený
+      # stack nebo domluvené okno), `enabled` se vrátí na false.
+      reason: "prestavuje sdileny dev stack na eco-dev; PM 2026-09-02 (plan-final P024)"
+    # PWA app shell proti PRODUKČNÍMU buildu za nginxem. Musí být zvlášť:
+    # `npm run e2e` projekt `pwa` vynechává (viz frontend/package.json), takže
+    # release brána ho nepokrývá. Nezávislý audit P019 na to upozornil — do té
+    # doby neexistoval vázaný důkaz, že se appka dá nainstalovat.
+    #
+    # Jako u ts_e2e jen v profilu `release`: skript přepíná sdílený dev stack.
+    command: "bash deploy/e2e-pwa.sh"
+    pass_criteria: "exit 0; manifest, service worker a cache hlavičky proti produkčnímu buildu"
+    required_when: "frontend/e2e exists"
+    timeout_seconds: 900
+    max_retries: 0
+    required: true
+  # P016: české názvy daňových kategorií existují dvakrát — v backendu kvůli
+  # exportu, ve frontendu kvůli UI. Pytest je porovnat NEMŮŽE: py_test pouští
+  # backend v kontejneru, kam se frontend nemountuje, takže takový test se vždy
+  # přeskočí (ověřeno). Běží proto tady, na hostu, kde jsou vidět oba soubory.
+  # Bez třetích stran, bez venv, bez DB — `ast` nad Pythonem, regex nad TS.
+  vat_labels_sync:
+    description: "Číselník názvů kategorií se nerozešel mezi exportem a UI"
+    command: "python3 scripts/check_vat_labels_sync.py"
+    pass_criteria: "exit 0 — obě strany mají stejné názvy pro stejné kategorie"
+    required_when: "always"
+    timeout_seconds: 30
+    max_retries: 0
+    required: true
+  docs_updated:
+    command: "sh -c 'echo \"docs_updated: manualni DoD kontrola v review (neni CI-automatizovano) — skip\"; exit 2'"
+    pass_criteria: "advisory manual DoD item — graceful skip (exit 2), not CI-enforced"
+    required_when: "always"
+    timeout_seconds: 30
+
+notifications:
+  telegram:
+    enabled: false
+
+# ── Gate profiles (doplněno /aid-init, plugin 2.87.0) ────────────────────────
+# POZOR: generátor pluginu detekuje jen `typescript` (pyproject.toml je
+# v backend/, ne v kořeni), takže jeho navržený blok by z bran vynechal celý
+# backend. Názvy níže proto odpovídají SKUTEČNÝM branám v `gates:` výše.
+#
+# targeted = rychlé kontroly na každý krok (lint + typy, bez kontejnerů s DB)
+# full     = vše, na konci EPICu; py_test si zvedá vlastní PostgreSQL (B-046)
+gate_profile_defaults:
+  step: targeted
+  epic: full
+
+gate_profiles:
+  quick:
+    include: []
+  targeted:
+    include: [py_lint, py_type_check, ts_lint, ts_type_check]
+  standard:
+    # docs_updated je tu proto, ze plugin ji vklada do plan.json.gates KAZDEHO
+    # EPICu (required_when: always). Kdyz ji profil nezahrne, GATES->DONE odmitne
+    # prechod s duvodem plan_gate_profile_excluded — plan branu vyzaduje, profil
+    # ji vylucuje. Sama brana je advisory graceful skip (exit 2), takze ji
+    # zahrnout nic nestoji a odstrani to zaruceny zasek kazdeho behu, ktery
+    # FSM auto-resolvne na 'standard'. Zjisteno na E-021-1_3 (2026-09-02).
+    include: [py_lint, py_type_check, ts_lint, ts_type_check, ts_test, docs_updated]
+  full:
+    include: [py_test, py_lint, py_type_check, ts_test, ts_lint, ts_type_check, vat_labels_sync, docs_updated]
+  release:
+    include: [py_test, py_lint, py_type_check, ts_test, ts_lint, ts_type_check, vat_labels_sync, docs_updated, plan_diff, ts_e2e, ts_e2e_pwa]
+  # Náhradní profil pro plan-final, když je některá brána v karanténě.
+  # `plan-finalize --stage gates` ho použije MÍSTO `release` a kontroluje
+  # ROVNOST MNOŽIN proti `release` mínus karanténované brány — takže se jím
+  # nedá tiše vypustit brána, která v karanténě není. Musí být deklarovaný
+  # předem, improvizace za běhu je odmítnuta.
+  release_quarantine:
+    include: [py_test, py_lint, py_type_check, ts_test, ts_lint, ts_type_check, vat_labels_sync, docs_updated, plan_diff]

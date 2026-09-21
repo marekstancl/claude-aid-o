@@ -41,6 +41,16 @@
 #       this is what makes the upgrade byte-preserving by construction rather
 #       than by a promise about a round-trip YAML rewrite.
 #
+#   execution_yaml_default_when_paths
+#       P097 Step 3: the glob list a `full` profile's `when_paths` gets — the
+#       one copy of the classifier's high-risk patterns (see the function).
+#
+#   execution_yaml_upgrade <path> [--confirm-upgrade <hash>] [--default-profile <name>]
+#       P097 Step 3: the hash-confirmed upgrade that removes the dead keys
+#       and adds `default_profile` + `when_paths`. Also the in-library main:
+#       `bash …/lib/aid-init-execution-yaml.sh upgrade <project root|file> …`
+#       (exit 0 nothing to do or applied, 3 diff printed, 2 bad input).
+#
 #   render_targeted_tests_gate_block
 #       Renders the `targeted_tests:` gate entry (2-space indented, meant to
 #       be embedded inside an existing `gates:` mapping). P069 Step 12
@@ -426,6 +436,266 @@ EOF
   }
 }
 
+# ─── P097 Step 3: the configuration upgrade ─────────────────────────────────
+#
+# execution_yaml_default_when_paths
+#   Echo the glob patterns (one per line) a `full` profile's `when_paths`
+#   gets when the upgrade adds it. THE one copy of the classifier's high-risk
+#   list: each `case` arm of gate_profile_is_high_risk_path in
+#   lib/aid-gate-profile.sh appears here verbatim, so a path the old
+#   classifier calls high-risk matches one of these through
+#   _aid_ancillary_glob_match (a bash `case` glob, the same engine) and a path
+#   it does not, matches none. Read by this upgrade and by the composer; the
+#   resolver reads `when_paths` from the file and never needs this list.
+execution_yaml_default_when_paths() {
+  cat <<'EOF'
+aid-fsm.sh
+*/aid-fsm.sh
+aid-run-gates.sh
+*/aid-run-gates.sh
+aid-release-policy.sh
+*/aid-release-policy.sh
+aid-evidence-verify.sh
+*/aid-evidence-verify.sh
+defaults/schemas/*
+*/defaults/schemas/*
+defaults/policies/*
+*/defaults/policies/*
+agents/*.md
+*/agents/*.md
+EOF
+}
+
+# Dead keys: written by earlier composers, read by nothing since 2.102.0.
+# The same name is dead at the top level and inside a gate row.
+_EYU_DEAD_KEY_RE='^(required_when|needs_services|services|gate_profile_defaults|baseline|baseline_[a-z0-9_]+|runtime_baseline|quarantine)$'
+# Gate-row keys the composer writes (defaults/execution-stacks/*.yaml); any
+# other surviving key is project-added and gets a printed note, never a removal.
+_EYU_ROW_KEY_RE='^(command|required|timeout_seconds|description|pass_criteria|type|max_retries)$'
+
+# _eyu_locate <file> <key path a.b.c>
+#   Print "<key line> <block end line>" for the FIRST occurrence of a block
+#   mapping key reached by the dotted path, or nothing. A key's block ends at
+#   the last following non-blank line indented deeper than the key (comments
+#   included); a blank line ends it. Line-based on purpose: a yq rewrite
+#   reflows comments and quoting in every project file (measured: 2-252 noise
+#   lines per file), and the diff must show nothing but the upgrade.
+#   ponytail: block-style mappings with plain keys only — flow mappings
+#   (`{a: 1}`) and quoted keys are not found; every project file uses neither.
+_eyu_locate() {
+  awk -v want="$2" '
+    function indent(s,  m) { match(s, /^ */); return RLENGTH }
+    BEGIN { n = split(want, seg, "."); depth = 1; need = 0; found = 0 }
+    {
+      if (found) {
+        if ($0 ~ /^[ \t]*$/) { exit }
+        if (indent($0) > kind) { last = NR; next }
+        exit
+      }
+      if ($0 ~ /^[ \t]*$/ || $0 ~ /^[ \t]*#/) next
+      ind = indent($0)
+      if (depth > 1 && ind <= pind) exit
+      if (depth > 1 && need < 0) need = ind
+      if (ind == need && $0 ~ ("^ *" seg[depth] ":")) {
+        if (depth == n) { found = 1; start = NR; kind = ind; last = NR; next }
+        pind = ind; need = -1; depth++
+      }
+    }
+    END { if (found) print start, last }
+  ' "$1"
+}
+
+# execution_yaml_upgrade <path> [--confirm-upgrade <hash>] [--default-profile <name>]
+#   Print the diff that removes the dead keys, drops an empty `quick`, adds
+#   `default_profile` (when gate_profiles exists) and `when_paths` on `full`;
+#   write it only when <hash> matches the printed one. Exit 0 nothing to do or
+#   applied, 3 diff printed and not applied, 2 bad input or a choice the
+#   operator must make (no profile named standard, a stale hash, a file that
+#   does not parse). Never touches gates.<id>.command or a non-empty include[].
+execution_yaml_upgrade() {
+  local file="${1:-}"; shift || true
+  local confirm="" default_profile=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --confirm-upgrade) [[ $# -ge 2 ]] || { echo "[ERROR] --confirm-upgrade requires a value" >&2; return 2; }; confirm="$2"; shift 2 ;;
+      --default-profile) [[ $# -ge 2 ]] || { echo "[ERROR] --default-profile requires a value" >&2; return 2; }; default_profile="$2"; shift 2 ;;
+      *) echo "[ERROR] unknown option '$1'" >&2; return 2 ;;
+    esac
+  done
+  [[ -f "$file" ]] || { echo "[ERROR] no execution.yaml at '${file}'" >&2; return 2; }
+  command -v yq >/dev/null 2>&1 || { echo "[ERROR] yq not found" >&2; return 2; }
+  local parse_err
+  if ! parse_err="$(yq '.' "$file" 2>&1 >/dev/null)"; then
+    echo "[ERROR] ${file} does not parse: ${parse_err}" >&2
+    return 2
+  fi
+  if (( $(grep -c '^gates:' "$file" || true) > 1 )); then
+    echo "[ERROR] ${file} has more than one top-level 'gates:' line — resolve the duplicate by hand first" >&2
+    return 2
+  fi
+
+  local -a del_from=() del_to=() ins_after=() ins_text=() notes=()
+  local loc key id path
+  _eyu_del() {  # <key path> → queue its block for removal, if present
+    loc="$(_eyu_locate "$file" "$1")"
+    [[ -n "$loc" ]] || return 1
+    del_from+=("${loc% *}"); del_to+=("${loc#* }")
+    notes+=("- removed ${1}")
+  }
+
+  # Top-level dead keys, then the same names inside every gate row.
+  while IFS= read -r key; do
+    [[ "$key" =~ $_EYU_DEAD_KEY_RE ]] && { _eyu_del "$key" || true; }
+  done < <(yq 'keys | .[]' "$file")
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    while IFS= read -r key; do
+      if [[ "$key" =~ $_EYU_DEAD_KEY_RE ]]; then
+        _eyu_del "gates.${id}.${key}" || true
+      elif [[ ! "$key" =~ $_EYU_ROW_KEY_RE ]]; then
+        notes+=("- note: gates.${id}.${key} is not a key the composer writes; left in place")
+      fi
+    done < <(g="$id" yq '.gates[strenv(g)] | select(type == "!!map") | keys | .[]' "$file")
+  done < <(yq '.gates | select(type == "!!map") | keys | .[]' "$file")
+
+  # An empty quick profile.
+  if [[ "$(yq '.gate_profiles | has("quick")' "$file")" == "true" \
+     && "$(yq '.gate_profiles.quick.include // [] | length' "$file")" == "0" ]]; then
+    _eyu_del "gate_profiles.quick" || true
+  fi
+
+  # notifications.telegram: every key but the one that is read.
+  local -a tg_keys=() tg_dead=()
+  mapfile -t tg_keys < <(yq '.notifications.telegram | select(type == "!!map") | keys | .[]' "$file")
+  for key in "${tg_keys[@]}"; do
+    [[ "$key" == "alert_on_compliance_recovery" ]] || tg_dead+=("$key")
+  done
+  if (( ${#tg_dead[@]} > 0 )); then
+    if (( ${#tg_dead[@]} == ${#tg_keys[@]} )); then
+      # Nothing would remain under telegram: drop the empty parents too.
+      if [[ "$(yq '.notifications | keys | length' "$file")" == "1" ]]; then
+        _eyu_del "notifications" || true
+      else
+        _eyu_del "notifications.telegram" || true
+      fi
+    else
+      for key in "${tg_dead[@]}"; do _eyu_del "notifications.telegram.${key}" || true; done
+    fi
+  fi
+
+  # default_profile and when_paths — only when a profile table exists.
+  local -a profiles=()
+  if [[ "$(yq '.gate_profiles | type' "$file")" == "!!map" ]]; then
+    mapfile -t profiles < <(yq '.gate_profiles | keys | .[]' "$file")
+    if [[ "$(yq 'has("default_profile")' "$file")" == "false" ]]; then
+      local name="${default_profile:-standard}"
+      if [[ ! " ${profiles[*]} " == *" ${name} "* ]]; then
+        echo "[ERROR] ${file}: no profile named '${name}' to be default_profile; declared: ${profiles[*]}. Choose one and re-run with --default-profile <name>" >&2
+        return 2
+      fi
+      loc="$(_eyu_locate "$file" "gate_profiles")"
+      ins_after+=("$(( ${loc% *} - 1 ))"); ins_text+=("default_profile: ${name}")
+      notes+=("- added default_profile: ${name}")
+    fi
+    if [[ " ${profiles[*]} " == *" full "* ]]; then
+      if [[ "$(yq '.gate_profiles.full | has("when_paths")' "$file")" == "false" ]]; then
+        loc="$(_eyu_locate "$file" "gate_profiles.full")"
+        local pad text
+        pad="$(sed -n "${loc% *}p" "$file" | sed -E 's/^( *).*/\1/')  "
+        text="${pad}when_paths:"
+        while IFS= read -r path; do text+=$'\n'"${pad}  - \"${path}\""; done < <(execution_yaml_default_when_paths)
+        ins_after+=("${loc#* }"); ins_text+=("$text")
+        notes+=("- added when_paths on gate_profiles.full (the classifier's high-risk list)")
+      fi
+    else
+      notes+=("- note: no profile named full — no when_paths added; no profile is auto-selected until one declares when_paths")
+    fi
+    # Informational: declared order is the rank, narrowest first.
+    local prev=-1 n order_ok=1
+    for name in "${profiles[@]}"; do
+      n="$(p="$name" yq '.gate_profiles[strenv(p)].include // [] | length' "$file")"
+      (( n < prev )) && order_ok=0
+      prev=$n
+    done
+    (( order_ok )) || notes+=("- note: gate_profiles are not declared narrowest-first (${profiles[*]}); the declared order is the rank — reorder by hand if that is not intended")
+  fi
+
+  if (( ${#del_from[@]} == 0 && ${#ins_after[@]} == 0 )); then
+    echo "nothing to upgrade: ${file}"
+    return 0
+  fi
+
+  # Apply: one awk pass over the original lines.
+  local spec="" i tmp
+  for i in "${!del_from[@]}"; do spec+="D ${del_from[$i]} ${del_to[$i]}"$'\n'; done
+  for i in "${!ins_after[@]}"; do spec+="I ${ins_after[$i]} ${ins_text[$i]//$'\n'/$'\x01'}"$'\n'; done
+  tmp="$(mktemp)"
+  awk -v spec="$spec" '
+    BEGIN {
+      m = split(spec, rows, "\n")
+      for (r = 1; r <= m; r++) {
+        if (rows[r] == "") continue
+        kind = substr(rows[r], 1, 1); rest = substr(rows[r], 3)
+        if (kind == "D") { split(rest, ab, " "); for (l = ab[1]; l <= ab[2]; l++) del[l] = 1 }
+        else {
+          sp = index(rest, " "); at = substr(rest, 1, sp - 1); t = substr(rest, sp + 1); gsub(/\001/, "\n", t)
+          if (at in ins) ins[at] = ins[at] "\n" t; else ins[at] = t
+        }
+      }
+      if (0 in ins) print ins[0]
+    }
+    { if (!(NR in del)) print; if (NR in ins) print ins[NR] }
+  ' "$file" > "$tmp"
+
+  if ! parse_err="$(yq '.' "$tmp" 2>&1 >/dev/null)"; then
+    echo "[ERROR] the upgraded file would not parse (${parse_err}); nothing written — report this with the file" >&2
+    rm -f "$tmp"; return 2
+  fi
+  local hash
+  hash="sha256:$(cat <(sha256sum "$file" | cut -d' ' -f1) "$tmp" | sha256sum | cut -d' ' -f1)"
+
+  if [[ -n "$confirm" && "$confirm" == "$hash" ]]; then
+    cat "$tmp" > "$file"; rm -f "$tmp"
+    echo "upgraded ${file} (${hash})"
+    return 0
+  fi
+  local rc=3
+  if [[ -n "$confirm" ]]; then
+    echo "[ERROR] --confirm-upgrade hash does not match the current diff (stale or wrong); nothing written. Current diff:" >&2
+    rc=2
+  fi
+  echo "Proposed upgrade of ${file}:"
+  diff -u --label current --label proposed "$file" "$tmp" || true
+  rm -f "$tmp"
+  echo ""
+  printf '%s\n' "${notes[@]}"
+  echo ""
+  echo "diff_hash: ${hash}"
+  echo "To apply exactly this diff, re-run with: --confirm-upgrade ${hash}"
+  return $rc
+}
+
 export -f detect_stacks compose_execution_yaml \
   stack_gate_names render_gate_profiles_block execution_yaml_has_gate_profiles \
-  append_gate_profiles_block render_targeted_tests_gate_block
+  append_gate_profiles_block render_targeted_tests_gate_block \
+  execution_yaml_default_when_paths execution_yaml_upgrade _eyu_locate
+
+# In-library main: `bash …/lib/aid-init-execution-yaml.sh upgrade <project root|file>
+# [--confirm-upgrade <hash>] [--default-profile <name>]` — the command every
+# refusal names, so a human can run it without a source step.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  case "${1:-}" in
+    upgrade)
+      shift
+      target="${1:-}"; shift || true
+      [[ -n "$target" ]] || { echo "usage: $0 upgrade <project root|execution.yaml> [--confirm-upgrade <hash>] [--default-profile <name>]" >&2; exit 2; }
+      [[ -f "$target" ]] || target="${target}/.aid-o/config/execution.yaml"
+      execution_yaml_upgrade "$target" "$@"
+      exit $?
+      ;;
+    *)
+      echo "usage: $0 upgrade <project root|execution.yaml> [--confirm-upgrade <hash>] [--default-profile <name>]" >&2
+      exit 2
+      ;;
+  esac
+fi
