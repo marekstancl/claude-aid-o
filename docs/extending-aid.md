@@ -892,108 +892,18 @@ EPIC — if you are budgeting dispatches, budget them per plan.
 
 ---
 
-## Test-portfolio decision quality (P072)
+## Test-portfolio decision quality (P072) — removed 2026-09-21
 
-Fifteen enforcements were added by P072; five of them guarded the parallelism
-machinery and were retired with it in P078 (`status: removed_scoped` in the
-registry, with the removal recorded rather than the row deleted). This section
-is a contributor's index to the ten that remain.
-
-### The decision artifact
-
-A `full` audit produces `decision.json` (`aid-test-audit-decision-v1`) beside
-its findings. It carries `audit_status`, one terminal disposition per run unit,
-the portfolio arithmetic, the proposed actions with their impact, and what
-remains unresolved.
-
-Two properties make it worth having, and both are enforced rather than
-conventional:
-
-- **`audit_status: incomplete` blocks the handoff.** `--write-plan` and the
-  same-conversation continuation both refuse. Building a remediation plan on
-  the part an audit skipped makes the skipped units read as
-  examined-and-healthy.
-- **`impact.kind` cannot overstate.** `measured` needs two comparable runs;
-  `estimated` needs its assumptions stated; `unknown` may carry a `before_ms`
-  but must then qualify it, because a bare number on an unfinished run reads as
-  a measured total.
-
-### The ten live enforcements (five retired in P078)
-
-| Row | What it stops |
-|---|---|
-| `test_audit_incomplete_blocks_write_plan` | A remediation plan built on an audit that did not finish deciding |
-| `test_audit_disposition_reconciliation` | A partial shard result rendering as a verdict on the whole portfolio |
-| `test_audit_coverage_reduction_requires_falsification` | Deleting a test on `unproved` — which is not an argument for deletion |
-| `test_audit_clone_config_precondition` | Auditing a config-less clone, which silently drops every declared-command gate |
-| `test_audit_aggregate_unparsed_fails` | An unparseable suite result counting as zero tests and passing |
-| `test_audit_inventory_arithmetic_guard` | A run unit vanishing between adapters |
-| `test_audit_profile_ingestion_fail_closed` | A corrupt profile receipt becoming an empty action list that reads as "nothing needed doing" |
-| `test_audit_profile_selection_owed` | A slow suite the audit selected for diagnosis, and nobody diagnosed |
-| `test_audit_profile_supervised_execution` | A deadline kill filed as an operator cancel — both arrive as exit 143 |
-| `test_execution_no_double_dispatch` | A run unit executed twice in one gate run |
-
-Retired in P078 with the parallelism machinery they guarded:
-`test_audit_resource_map_shared_evidence`, `test_audit_pilot_evidence_bound`,
-`test_catalog_parallel_provenance_binding`, `test_lane_single_parallel_authority`,
-`test_audit_lane_membership_exact`. Their rows survive as `removed_scoped`
-records — the registry keeps the history rather than pretending the guards
-never existed.
-
-Each row records its **recovery behaviour**: what an operator actually does
-when it fires. A blocking enforcement with no stated recovery is a wall, and
-the registry test refuses a row that omits it.
-
-### The execution ledger, and the emission path that is easy to forget
-
-`test_execution_no_double_dispatch` is worth reading about before you touch the
-gate runner. The ledger records one entry per run unit ACTUALLY DISPATCHED,
-from two emission points (P078 deleted the other two — the bats lane and the
-scheduler — with the parallelism machinery):
-
-1. `run-all-tests.sh` — one per suite
-2. `aid-run-gates.sh` — for any gate whose command invokes a runner **directly**
-
-The second is the one that matters and the one easiest to leave out. This
-repository HAD a gate that ran `test-aid-fsm.bats` on its own while the
-aggregate ran it too, with the `full` and `release` profiles including both, so
-that file executed twice on every full run. With only the fan-out point
-instrumented, the ledger would have recorded one entry for it and reported zero
-duplicates — certifying as clean the exact defect it was built to detect. It
-found it instead, and `bats_fsm` is now absent from those two profiles; the red
-proof lives in a fixture so fixing the waste did not blind the check.
-
-There is deliberately **no membership exemption**. Exempting "the pool gate
-contains this unit" was implemented, and it silenced that same defect. Each
-dispatch point appends once per execution it actually performs, so two entries
-under two gate ids are two executions; `--contains` is recorded for a reader
-but suppresses nothing.
-
-**Everything inside an accounted run is fail-closed.** A failed open, a failed
-append, a ledger path that names a file that is not there, a close that cannot
-be evaluated — each fails the gate run, because a ledger with a gap reports zero
-duplicates exactly like a clean one. There is no `|| true` on any emission
-path, and there used to be. The ONE permitted no-op is a dispatch point with no
-ledger path at all: a developer running a suite by hand has no run to account
-for. "The path was set but the file is missing" is NOT that case, and was once
-treated as though it were.
-
-What DOES excuse a repeat is a declaration made when it happens.
-`--execution-kind normal|retry|escalation` marks a single append;
-`AID_EXECUTION_KIND` marks a whole subprocess, which is how the targeted-tests
-escalation — which re-invokes the gate runner with the parent's ledger
-inherited — avoids being recorded as an accident. Declared repeats appear in the summary as
-`deliberate_repeats`: never failing, never invisible, because a rerun somebody
-asked for still costs the wall clock twice. The default is `normal`, so silence
-is not a declaration and a forgotten mark stays a defect.
-
-### Adding to this area
-
-The command file (`commands/aid-audit-tests.md`) is the operator contract and
-is NOT on the lint gate's grandfathered list — keep it clean rather than adding
-it. The agent card is verified by the golden-prompt test instead, because
-linting it would demand frontmatter fields that are meaningless for a
-dispatched agent.
+The test-portfolio audit (`/aid-audit-tests`, its five prompts, seven schemas,
+`lib/aid-test-audit-*`, the `test-portfolio-analyst` agent, `config/test-audit.yaml`)
+was removed after its one real run (2026-08-05) produced no proposal the PM
+accepted and the parallelism it was built to decide about was itself removed
+(P078). What stays, because the merge path reads it: the test catalog
+(`aid-test-inventory.sh` → `aid-test-catalog-approve.sh` → `.aid-o/config/test-catalog.yaml`),
+the tier tags and their tools (`aid-test-tier-assign.sh`, `aid-test-tier-lint.sh`,
+`lib/aid-test-durations.sh`) and the selection layer (`aid-select-tests.sh`,
+adapters, execution units). Registry rows of the removed enforcements carry
+`status: removed_scoped` with this note as their `replacement_guard`.
 
 ## The force framework, PM overrides, and review equivalence (P073)
 

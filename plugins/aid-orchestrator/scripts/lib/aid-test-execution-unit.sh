@@ -65,8 +65,8 @@ execution_unit_run() {
       # NUL-delimited decode (Codex review: a line-based `jq -r` + `mapfile
       # -t` silently splits any argv element containing an embedded
       # newline, which the schema permits, into two arguments — matching
-      # the same NUL-safe idiom already used by
-      # aid-test-audit-measure.sh:48).
+      # the same NUL-safe idiom the test audit's measurer used before it was
+      # removed on 2026-09-21).
       mapfile -d '' -t argv < <(jq -j '.command.argv[] | . + "\u0000"' <<<"$unit_json")
       [[ ${#argv[@]} -gt 0 ]] || { echo "execution_unit_run: command.argv must be non-empty" >&2; return 1; }
       bash "$_AID_JOB_SH" run --jobs-dir "$jobs_dir" --id "$job_id" \
@@ -122,8 +122,8 @@ execution_unit_cancel() {
 #
 #   duration_ms is quantized to whole seconds (Codex review): aid-job.sh's
 #   own result record has only integer-epoch started_epoch/ended_epoch —
-#   the same second-granularity limitation aid-test-audit-measure.sh:32
-#   already documents for its own duration_ms. This wrapper never touches
+#   the same second-granularity limitation the test audit's measurer
+#   documented for its own duration_ms. This wrapper never touches
 #   aid-job.sh, so it cannot add sub-second precision that isn't recorded.
 #   ended_epoch is ALSO absent on some valid terminal records — the
 #   pre-exec-handshake cancelled result (_wrap_write_cancelled_result,

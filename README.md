@@ -74,7 +74,6 @@ Or go fully autonomous:
 | `/aid-verify-plan` | Independent adversarial review of a plan before it goes to execution |
 | `/aid-verify-implementation` | Independent adversarial DONE review of an implementation before it is trusted as complete |
 | `/aid-audit` | Project health audit — code, docs, tests, dependencies |
-| `/aid-audit-tests` | Test portfolio audit — inventory, safe measurement, and a plain-language recommendation |
 | `/visual-companion` | Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision |
 | `/aid-stop` | Emergency stop — save progress, restore permissions |
 | `/aid-help [topic]` | Progressive help — Level 0 cheat sheet → Level 3 architecture deep-dive |

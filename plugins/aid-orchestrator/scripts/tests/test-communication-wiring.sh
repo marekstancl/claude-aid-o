@@ -17,14 +17,12 @@
 #      literal, defined in communication.md and pasted unchanged at each site —
 #      a loose grep would pass on a paraphrase, which is exactly how two
 #      differently-worded clauses ship and neither is enforced.
-#      The sites are FIVE, and `skills/pipeline.md` appears twice on purpose: it
+#      The sites are FOUR, and `skills/pipeline.md` appears twice on purpose: it
 #      carries two distinct renderer invocations (gates phase and plan boundary)
 #      and each is asserted separately, anchored on its own renderer name —
 #      listing the file once would let the gates path pass on the plan path's
-#      clause. `commands/aid-audit-tests.md` is the fifth: it is a `renderer:`
-#      final turn in defaults/help-index.yaml and carries the canonical clause,
-#      and while it was off this list the clause could be deleted there without
-#      failing anything.
+#      clause. (A fifth, `commands/aid-audit-tests.md`, left with the
+#      test-portfolio audit on 2026-09-21.)
 #   3. SUPERSEDED FRAGMENTS. The shapes the contract replaces are gone: the
 #      metrics-first DONE-review header in aid-run.md, the hardcoded Czech
 #      language mandate in the two verify commands, and any second definition
@@ -157,7 +155,6 @@ REQUIRED_SURFACES=(
   commands/aid-run.md
   commands/aid-do.md
   commands/aid-plan.md
-  commands/aid-audit-tests.md
   skills/run-management.md
   skills/pipeline.md
   agents/simplifier.md
@@ -185,7 +182,6 @@ RENDERER_SITES=(
   'skills/pipeline.md|aid-gate-outcome-summary.sh|gates phase'
   'commands/aid-plan.md|aid-plan-close-summary.sh|plan-close boundary'
   'skills/pipeline.md|aid-plan-close-summary.sh|plan-boundary section'
-  'commands/aid-audit-tests.md|aid-test-audit-chat-summary.sh|test-audit final turn'
 )
 for site in "${RENDERER_SITES[@]}"; do
   IFS='|' read -r rel anchor label <<<"$site"

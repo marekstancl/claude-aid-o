@@ -87,23 +87,6 @@ PATH_add "$AID_PLUGIN_PATH/scripts"
 - `CHANGELOG.md` — version history
 - `scripts/README.md` — bash script documentation
 
-## Test portfolio audit (`/aid-audit-tests`)
-
-Inventories a project's tests, optionally measures a bounded subset, and ends
-with a plain-language summary that answers **what to do** before it shows any
-evidence: what to do now, what to fix or remove, test time now and after, and
-what is not proved yet.
-
-**It recommends; it does not act.** The audit never edits a test and never
-changes `execution.yaml`. What a `full` run produces is a decision artifact
-whose actions are proposals — acting on one is a separate, explicit step you
-take.
-
-One property is worth knowing before you run it: an audit that did not finish
-deciding says so (`audit_status: incomplete`) and **refuses** to hand over a
-remediation plan. A plan built on the part it skipped would make those units
-read as examined-and-healthy.
-
 ## Test execution is sequential by design
 
 Tests run one at a time. The P069 test scheduler, its staged rollout

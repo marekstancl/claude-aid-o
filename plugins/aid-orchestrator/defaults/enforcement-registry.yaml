@@ -1580,10 +1580,12 @@ enforcements:
     instruction: "commands/aid-audit-tests.md (STATIC MODE NEVER EXECUTES TESTS)"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "2026-09-21 — the test-portfolio audit (/aid-audit-tests, P072) was deleted outright: its one real run (2026-08-05) produced no proposal the PM accepted, and the parallelism it was built to decide about was removed by P078. Cited files are gone; docs/extending-aid.md §P072 records what stays (catalog, tiers, selection)."
+    replacement_guard: "none needed — the guarded command no longer exists; the test catalog and tier tools it fed keep their own rows"
     verdict: ALIGNED
     description: "static mode allows ONLY a narrow, hand-picked set of argv-type discovery commands (grep, cat, jq, a checked git diff subcommand) — sed and find are explicitly excluded (both have argument-reachable arbitrary-code-execution escapes: GNU sed -e '1e whoami', find -exec) and shell-type commands are rejected outright in static mode, closing a compound-command-chaining hole. measure/full modes only allow an exact, type-aware match against a real execution.yaml gate command or an entry in the approved (never proposed) test-catalog.yaml — never free-form LLM output. aid-test-audit-measure.sh calls aid_test_audit_check_allowed before every aid-job.sh dispatch and aborts the whole run on a refusal, never skipping just that one command."
-    test: "scripts/tests/bats/test-aid-test-audit-command-allowlist.bats"
+    test: "removed with the audit (2026-09-21) — the named suites were deleted"
 
   - id: test_audit_catalog_approval_boundary
     type: 9
@@ -1591,10 +1593,12 @@ enforcements:
     instruction: "commands/aid-audit-tests.md (grep: 'Closing the loop: OFFER the approval')"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "2026-09-21 — the test-portfolio audit (/aid-audit-tests, P072) was deleted outright: its one real run (2026-08-05) produced no proposal the PM accepted, and the parallelism it was built to decide about was removed by P078. Cited files are gone; docs/extending-aid.md §P072 records what stays (catalog, tiers, selection)."
+    replacement_guard: "none needed — the guarded command no longer exists; the test catalog and tier tools it fed keep their own rows"
     verdict: ALIGNED
     description: "A discovered command in the gitignored, evidence-only test-catalog.proposed.yaml is never eligible for execution — the command-allowlist's measure/full-mode check reads only the tracked, force-added .aid-o/config/test-catalog.yaml, and the ONLY script that ever writes that path is aid-test-catalog-approve.sh, an explicit, PM-invoked action. Enforced by file-location separation (proposed vs approved are different files, only one of which the allowlist consults), not a soft flag any caller could bypass. Approving the catalog file as a whole never approves source_pattern_mappings[] — that requires the separate, mandatory aid-test-catalog-confirm-mapping.sh gate with a matching reviewed_diff_hash. (P080 Step 4: REPOINTED — the instruction cited plans/P066-test-portfolio-audit-capability.md, which lives at .aid-o/plans/archive/ — force-added, so it IS tracked; tracking is not the reason. A plan is a record of a decision, not a shipped instruction surface; the rule a user actually reads is the approval section of commands/aid-audit-tests.md, which is where the cite now points.)"
-    test: "scripts/tests/bats/test-aid-test-audit-command-allowlist.bats"
+    test: "removed with the audit (2026-09-21) — the named suites were deleted"
 
   - id: test_audit_never_auto_invoked
     type: 9
@@ -1602,10 +1606,12 @@ enforcements:
     instruction: "commands/aid-audit-tests.md (grep: 'Chat handoff (natural-language continuation)') — the same-conversation convention, never a global interceptor"
     severity: blocking
     surface: llm-facing
-    status: active
+    status: removed_scoped
+    removal: "2026-09-21 — the test-portfolio audit (/aid-audit-tests, P072) was deleted outright: its one real run (2026-08-05) produced no proposal the PM accepted, and the parallelism it was built to decide about was removed by P078. Cited files are gone; docs/extending-aid.md §P072 records what stays (catalog, tiers, selection)."
+    replacement_guard: "none needed — the guarded command no longer exists; the test catalog and tier tools it fed keep their own rows"
     verdict: ALIGNED
     description: "/aid-audit-tests runs only when a user (or the controller, on an explicit user request) types the command — it is never dispatched after an EPIC, a plan, or a release, and carries no FSM/gate/CI wiring of any kind. The same-conversation NL-continuation convention (a reply like 'pokračuj' after the audit's own final turn) is scoped to that ONE audit's durable record and never fires from outside an active /aid-audit-tests conversation; it enforces nothing at any FSM/gate/release boundary. (P080 Step 4: REPOINTED — the instruction cited plans/P066-test-portfolio-audit-capability.md Constraint 10, which lives at .aid-o/plans/archive/ — force-added and therefore tracked, so the repoint is about ROLE (a plan is a record, not a shipped instruction surface), not about tracking. The shipped, tracked statement of the same constraint is the command file's own chat-handoff section, so the cite now names that.)"
-    test: "grep guard, Step 24 Part A (this command file never appears in any dispatch/FSM/gate wiring path)"
+    test: "removed with the audit (2026-09-21) — the named suites were deleted"
 
   - id: scheduler_unknown_parallelism_sequential
     type: 1
@@ -1650,11 +1656,13 @@ enforcements:
     instruction: "commands/aid-audit-tests.md step 6"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "2026-09-21 — the test-portfolio audit (/aid-audit-tests, P072) was deleted outright: its one real run (2026-08-05) produced no proposal the PM accepted, and the parallelism it was built to decide about was removed by P078. Cited files are gone; docs/extending-aid.md §P072 records what stays (catalog, tiers, selection)."
+    replacement_guard: "none needed — the guarded command no longer exists; the test catalog and tier tools it fed keep their own rows"
     verdict: ALIGNED
     description: "P072 Step 13 — every profiling receipt an audit ingests must validate against aid-test-profile-v1 (defaults/schemas/test-profile.schema.json), carry THIS audit's audit_id, and hash-match the evidence log sitting beside it. Any violation halts finalization before consolidated-findings.json or decision.json exists. The version this replaced ended the ingestion pipeline with `|| echo '[]'`, so an unparseable, foreign or tampered receipt became an empty action list — which renders identically to 'nothing needed doing'. Silence that reads as a clean bill of health is the failure mode this row exists to close."
     recovery: "The halt names the offending receipt and why (unparseable, foreign audit id, or a log that no longer hashes to what the receipt recorded). Re-run the profile for that unit, or remove the stale receipt from the profiles directory."
-    test: "scripts/tests/bats/test-aid-test-audit-reconciliation.bats (STEP 13 FAIL-CLOSED cases); scripts/tests/bats/test-aid-audit-tests-finalize-production.bats (PRODUCTION profile cases)"
+    test: "removed with the audit (2026-09-21) — the named suites were deleted"
 
   - id: test_audit_profile_selection_owed
     type: 1
@@ -1662,11 +1670,13 @@ enforcements:
     instruction: "commands/aid-audit-tests.md step 5"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "2026-09-21 — the test-portfolio audit (/aid-audit-tests, P072) was deleted outright: its one real run (2026-08-05) produced no proposal the PM accepted, and the parallelism it was built to decide about was removed by P078. Cited files are gone; docs/extending-aid.md §P072 records what stays (catalog, tiers, selection)."
+    replacement_guard: "none needed — the guarded command no longer exists; the test catalog and tier tools it fed keep their own rows"
     verdict: ALIGNED
     description: "P072 Step 13 — the selector deterministically names which measured run units owe a cost profile (decision.profile_trigger_ms, capped by decision.profile_max_units), and the consolidator REFUSES to finalize a full audit in which a selected unit has no receipt. Without the refusal the selector would be a detector with no enforcement: it would name three slow suites, nobody would profile them, and the audit would finalize looking exactly as complete as one that had. Units over the trigger but past the cap are emitted as `measure` actions carrying their measured cost, so a bounded budget produces a reported gap rather than a silent one."
     recovery: "The halt names the selected units with no receipt. Profile them (aid-test-audit-profile.sh), or lower decision.profile_max_units so they are recorded as deferred instead of selected."
-    test: "scripts/tests/bats/test-aid-test-audit-profile-select.bats; scripts/tests/bats/test-aid-test-audit-reconciliation.bats (STEP 13 SELECTION cases)"
+    test: "removed with the audit (2026-09-21) — the named suites were deleted"
 
   - id: test_audit_profile_supervised_execution
     type: 1
@@ -1674,11 +1684,13 @@ enforcements:
     instruction: "commands/aid-audit-tests.md step 5b"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "2026-09-21 — the test-portfolio audit (/aid-audit-tests, P072) was deleted outright: its one real run (2026-08-05) produced no proposal the PM accepted, and the parallelism it was built to decide about was removed by P078. Cited files are gone; docs/extending-aid.md §P072 records what stays (catalog, tiers, selection)."
+    replacement_guard: "none needed — the guarded command no longer exists; the test catalog and tier tools it fed keep their own rows"
     verdict: ALIGNED
     description: "P072 Step 13 — the profiler runs its measured command through aid-job.sh, never a bare `timeout`, so a diagnostic run obeys the same contract as every other long-running command here: process-group ownership, a durable terminal receipt, an explicit `lost` state, and operator cancel. Outcome is classified from the job STATE, never the exit code: a deadline kill and an operator's `kill` both arrive as SIGTERM/143, so reading the code would file every timeout as 'someone stopped it'. The allowlist approves the EXACT executed argv; `--timing` is permitted only as a checked one-token diff over an otherwise approved command, and approval comes from the approved catalog rather than from whichever catalog the command was derived from."
     recovery: "The receipt states the job state. `deadline` means raise --budget-minutes; `cancelled` means re-run without interrupting; `lost` means the supervisor died — check the jobs directory named in the receipt."
-    test: "scripts/tests/bats/test-aid-test-audit-profile.bats"
+    test: "removed with the audit (2026-09-21) — the named suites were deleted"
 
   - id: test_audit_resource_map_shared_evidence
     type: 1
@@ -1756,11 +1768,13 @@ enforcements:
     instruction: "commands/aid-audit-tests.md — `audit_status`, and what an `incomplete` audit refuses"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "2026-09-21 — the test-portfolio audit (/aid-audit-tests, P072) was deleted outright: its one real run (2026-08-05) produced no proposal the PM accepted, and the parallelism it was built to decide about was removed by P078. Cited files are gone; docs/extending-aid.md §P072 records what stays (catalog, tiers, selection)."
+    replacement_guard: "none needed — the guarded command no longer exists; the test catalog and tier tools it fed keep their own rows"
     verdict: ALIGNED
     description: "P072 Step 3 — an audit whose decision artifact says `incomplete` cannot hand anyone a remediation plan. The bridge returns ready:false with reason `audit_incomplete`, blocking BOTH `--write-plan` and the same-conversation continuation. Building a plan on the part an audit skipped is worse than building none: the skipped units read as examined-and-healthy."
     recovery: "The chat summary's first section names the smallest bounded next action (a pilot membership, or the highest-priority `measure`). Do that, re-run the audit, then hand off."
-    test: "scripts/tests/test-integration-audit-report-shapes.sh (incomplete shape); scripts/tests/bats/test-aid-test-audit-write-plan-bridge.bats"
+    test: "removed with the audit (2026-09-21) — the named suites were deleted"
 
   - id: test_audit_disposition_reconciliation
     type: 1
@@ -1768,11 +1782,13 @@ enforcements:
     instruction: "commands/aid-audit-tests.md — `audit_status` table"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "2026-09-21 — the test-portfolio audit (/aid-audit-tests, P072) was deleted outright: its one real run (2026-08-05) produced no proposal the PM accepted, and the parallelism it was built to decide about was removed by P078. Cited files are gone; docs/extending-aid.md §P072 records what stays (catalog, tiers, selection)."
+    replacement_guard: "none needed — the guarded command no longer exists; the test catalog and tier tools it fed keep their own rows"
     verdict: ALIGNED
     description: "P072 Step 4 — every unit a shard was assigned must come back with exactly one terminal disposition. The consolidator reconciles inventory count, assigned count and disposition count three ways; a mismatch or a duplicate makes the audit `incomplete` rather than letting a partial result render as a verdict on the whole portfolio."
     recovery: "Re-dispatch the shard whose units are named in `portfolio_coverage.missing_run_unit_ids`, or reduce the shard so its budget covers what it was given."
-    test: "scripts/tests/bats/test-aid-test-audit-reconciliation.bats"
+    test: "removed with the audit (2026-09-21) — the named suites were deleted"
 
   - id: test_audit_coverage_reduction_requires_falsification
     type: 1
@@ -1780,11 +1796,13 @@ enforcements:
     instruction: "agents/test-portfolio-analyst.md — terminal dispositions"
     severity: blocking
     surface: llm-facing
-    status: active
+    status: removed_scoped
+    removal: "2026-09-21 — the test-portfolio audit (/aid-audit-tests, P072) was deleted outright: its one real run (2026-08-05) produced no proposal the PM accepted, and the parallelism it was built to decide about was removed by P078. Cited files are gone; docs/extending-aid.md §P072 records what stays (catalog, tiers, selection)."
+    replacement_guard: "none needed — the guarded command no longer exists; the test catalog and tier tools it fed keep their own rows"
     verdict: ALIGNED
     description: "P072 Step 5 — a proposal that REDUCES coverage must name which retained test still catches the defect, with a real falsification method (mutation, revert or input_probe) and a citable evidence ref. `unproved` is not an argument for deletion, and the schema refuses the artifact rather than trusting a reviewer to notice."
     recovery: "Run the falsification probe named in the disposition and record its evidence, or downgrade the proposal to `keep`."
-    test: "scripts/tests/bats/test-aid-test-audit-reconciliation.bats; scripts/tests/test-integration-audit-report-shapes.sh"
+    test: "removed with the audit (2026-09-21) — the named suites were deleted"
 
   - id: test_audit_clone_config_precondition
     type: 1
@@ -1792,11 +1810,13 @@ enforcements:
     instruction: "commands/aid-audit-tests.md — Disposable-clone precondition"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "2026-09-21 — the test-portfolio audit (/aid-audit-tests, P072) was deleted outright: its one real run (2026-08-05) produced no proposal the PM accepted, and the parallelism it was built to decide about was removed by P078. Cited files are gone; docs/extending-aid.md §P072 records what stays (catalog, tiers, selection)."
+    replacement_guard: "none needed — the guarded command no longer exists; the test catalog and tier tools it fed keep their own rows"
     verdict: ALIGNED
     description: "P072 Step 8 — `.aid-o/` is gitignored, so a disposable clone carries no config unless someone copied it, and auditing such a clone silently drops every declared-command gate: the report comes out confidently smaller than the project with nothing to show anything is missing. The parser refuses before the scan, and distinguishes 'cannot read' from 'not there' because those need different fixes."
     recovery: "Copy the live checkout's `.aid-o/config/` into the clone (the refusal prints the exact `cp -r`), or pass `--allow-missing-config` to audit a genuinely un-initialized project, which downgrades the refusal to a warning naming what will be absent."
-    test: "scripts/tests/bats/test-aid-audit-tests-cli.bats"
+    test: "removed with the audit (2026-09-21) — the named suites were deleted"
 
   - id: test_audit_aggregate_unparsed_fails
     type: 1

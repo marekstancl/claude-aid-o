@@ -59,7 +59,6 @@ when a condition holds).
     execution.yaml        # gate definitions, composed eagerly from detected stacks
     plugin.yaml           # resolved plugin_path + discovered_at + dispatch_mode
     check-severity.yaml   # compliance-check severity registry (copied from defaults)
-    test-audit.yaml       # test portfolio audit config (copied from defaults)
     counter.yaml          # sequential id counters, seeded at 0
   work/
     active.md             # GENERATED stream index (never hand-written)
@@ -72,7 +71,7 @@ when a condition holds).
   work/evidence/          # empty directory (for run evidence)
 ```
 
-**Total: 10 files under `.aid-o/` + 4 empty directories = 14 items.** This is the only count
+**Total: 9 files under `.aid-o/` + 4 empty directories = 13 items.** (Ten until 2026-09-21, when `config/test-audit.yaml` left with the test-portfolio audit.) This is the only count
 statement in this document; every other place that describes the fresh-init product refers back
 to it rather than restating a number.
 
@@ -82,7 +81,7 @@ document's own rules rather than convenience:
 - **`.gitignore`** is a consumer-repo file that AID backfills per line — the identical category
   as the git hooks below, which this document already excludes. Counting one and excluding the
   other would be the same inconsistency this section exists to remove.
-- **`config/` and `work/` are not empty** — they hold the ten files. The four genuinely empty
+- **`config/` and `work/` are not empty** — they hold the nine files. The four genuinely empty
   directories are `plans/`, `tasks/`, `work/quick/` and `work/evidence/`. An earlier draft of
   this line said "5 empty directories" while listing `config/` among them, which was false on
   its face.
@@ -762,22 +761,6 @@ Config defaults installation:
 ```
 
 **What the registry does:** Maps each compliance check to either `severity: blocking` (cmd_done_advance refuses to advance review→release without `--force`) or `severity: advisory` (logged in `compliance.json failures[]` but does not block). See `skills/pipeline.md` §7 and `docs/plans/AID-v3-principles.md` §1 for the tiered-severity rationale.
-
-### test-audit.yaml — test portfolio audit config
-
-1. **Source template:** `{plugin_path}/defaults/config/test-audit.yaml`
-2. **Target:** `.aid-o/config/test-audit.yaml`
-3. **Logic:**
-   - If target does NOT exist → copy template
-   - If target exists → **skip** (do not overwrite; PM may have customized `budget_minutes_default`, `max_read_only_audit_agents`, or `allowed_runners`)
-
-```
-Config defaults installation:
-  [INSTALLED] .aid-o/config/test-audit.yaml — test portfolio audit config (new)
-  [EXISTS]    .aid-o/config/test-audit.yaml — keeping existing (PM customizations preserved)
-```
-
-**What the config does:** Read by `/aid-audit-tests` (`lib/aid-test-audit-config.sh`'s `load_test_audit_config`) for its budget/agent-concurrency/allowed-runner defaults. The distributed template's values are byte-identical to the loader's own hardcoded defaults, so a project's `/aid-audit-tests` behavior is unchanged whether or not `/aid-init` has run since this plan shipped.
 
 ## Lazy-Created (NOT at init time)
 

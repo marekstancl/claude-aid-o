@@ -128,8 +128,6 @@
 #                asserts aid-run.md wires it with the publish clause.
 #   /aid-plan    commands/aid-plan.md sources aid-plan-close-summary.sh at the
 #                plan-final / close boundary — the last turn of a plan stream.
-#   /aid-audit-tests  commands/aid-audit-tests.md finalizes through
-#                lib/aid-test-audit-chat-summary.sh (via scripts/aid-audit-tests-finalize.sh).
 #   /aid-do, /aid-verify-implementation  their own files name the Finished card.
 #   /aid-verify-plan, /visual-companion  end on a PM choice (relay the verdict for
 #                a go/no-go; per-question visual decision) → decision-required.
@@ -185,7 +183,6 @@ surfaces:
                "creates:.aid-o/config/execution.yaml",
                "creates:.aid-o/config/plugin.yaml",
                "creates:.aid-o/config/check-severity.yaml",
-               "creates:.aid-o/config/test-audit.yaml",
                "creates-if:.aid-o/config/integrations.yaml",
                "mutates:.aid-o/config/execution.yaml"],
       final_turn: "renderer:scripts/aid-config-summary.sh" }
@@ -213,11 +210,6 @@ surfaces:
       purpose: "Independent adversarial DONE review of an implementation before it is trusted as complete",
       topic: plan-lifecycle, audience: power, disposition: current,
       writes: [], final_turn: "card:finished" }
-
-  - { command: /aid-audit-tests, file: plugins/aid-orchestrator/commands/aid-audit-tests.md,
-      purpose: "Test portfolio audit — inventory, safe measurement, and a plain-language recommendation",
-      topic: tests, audience: power, disposition: current,
-      writes: [], final_turn: "renderer:scripts/lib/aid-test-audit-chat-summary.sh" }
 
   - { command: /visual-companion, file: plugins/aid-orchestrator/skills/visual-companion/SKILL.md,
       purpose: "Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision",

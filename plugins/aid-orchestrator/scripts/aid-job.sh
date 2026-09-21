@@ -250,10 +250,10 @@ cmd_run() {
   #     a sleeping process still holds the write end.
   # The second one was MEASURED on this branch: a bats suite ran every case and
   # then sat for fifteen minutes with no children, because six `sleep 3600`
-  # processes held fd 3. Fixed here rather than in one caller, because five
+  # processes held fd 3. Fixed here rather than in one caller, because three
   # scripts already call `run` (aid-run-gates.sh, lib/aid-service.sh,
-  # lib/aid-test-execution-unit.sh, lib/aid-test-audit-measure.sh,
-  # aid-test-audit-profile.sh) and each of them has the same hazard the day it
+  # lib/aid-test-execution-unit.sh; two audit callers left on 2026-09-21)
+  # and each of them has the same hazard the day it
   # holds a lock or is read through a pipe.
   #
   # The loop is Linux-only, which this supervisor already is (it reads /proc for

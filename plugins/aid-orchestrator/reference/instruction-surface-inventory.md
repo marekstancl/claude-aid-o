@@ -31,7 +31,6 @@ that is absent from a clean checkout.
 | `commands/aid-verify-plan.md` | `verified` | CP1 is a plan-level review already; no per-EPIC release instruction. |
 | `commands/aid-verify-implementation.md` | `verified` | Reviews an implementation, not a release cadence. |
 | `commands/aid-audit.md` | `verified` | Health audit; no lifecycle instruction. |
-| `commands/aid-audit-tests.md` | `verified` | Test portfolio audit; no lifecycle/release-cadence instruction. |
 | `commands/aid-help.md` | `verified` | Routes to other surfaces; carries no lifecycle instruction of its own. |
 | `commands/aid-setup.md` | `verified` | Configuration; no release cadence. |
 | `commands/aid-stop.md` | `verified` | Emergency stop; no release cadence. |
@@ -64,7 +63,6 @@ that is absent from a clean checkout.
 | `agents/implementer.md` | `verified` | Implements a step; no release cadence. |
 | `agents/gate-fixer.md` | `verified` | Fixes gate failures; no release cadence. P094: `model: sonnet`; `verifier_review` is CP4 only; the invalidation-map note is gone. |
 | `agents/project-scanner.md` | `verified` | Scans a project; no lifecycle instruction. |
-| `agents/test-portfolio-analyst.md` | `verified` | Analyzes test-portfolio wave shards; no lifecycle/release-cadence instruction. |
 
 ## Not instruction surfaces
 

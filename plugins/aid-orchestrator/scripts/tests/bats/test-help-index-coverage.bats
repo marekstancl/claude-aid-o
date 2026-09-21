@@ -79,8 +79,8 @@ setup() {
 index_rows()      { printf '%s\n' "$INDEX_TSV"; }
 enumerated_rows() { printf '%s\n' "$ENUM_TSV"; }
 
-# A slash command as a WHOLE WORD. `/aid-audit` must not be matched inside
-# `/aid-audit-tests`: AID command names are prefixes of one another, so a plain
+# A slash command as a WHOLE WORD. `/aid-audit` must not be matched inside a
+# longer name (`/aid-audit-tests` existed until 2026-09-21): command names are prefixes of one another, so a plain
 # substring test would report the shorter command as routed by a section that only
 # ever names the longer one. The trailing guard is "not followed by a word char or a
 # hyphen"; the leading guard is "not preceded by a word char or a hyphen", which keeps
@@ -259,7 +259,7 @@ router_topics() {
 
     body="$(section_body_unfenced "$topic")"
     # Word-boundary match, NOT a substring: `/aid-audit` must not be satisfied by a
-    # section that only ever names `/aid-audit-tests`. Every AID command is a prefix
+    # section that only ever names a longer command. Every AID command is a prefix
     # of some other command or could become one, so a substring match would silently
     # declare the shorter one routed — in the exact assertion this suite exists for.
     if ! grep -qE -- "$(command_word_re "$command")" <<<"$body"; then
