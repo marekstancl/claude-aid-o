@@ -53,7 +53,7 @@ Or go fully autonomous:
 
 **Fast Mode (`/aid-do`)** — For tasks under 2 hours. < 2 min overhead. Creates a quick log (Q-NNN.md), skips the full EPIC pipeline.
 
-**7 agents** — Implementer, Verifier, Gate-fixer, Auditor, Simplifier, Project-scanner, Test-portfolio-analyst. The Implementer is dispatched per step from your plan's dependency graph; every delivery is read by reviewer rounds (step, EPIC, whole plan).
+**6 agents** — Implementer, Verifier, Gate-fixer, Auditor, Simplifier, Project-scanner. The Implementer is dispatched per step from your plan's dependency graph; every delivery is read by reviewer rounds (step, EPIC, whole plan).
 
 **Quality gates with auto-fix** — Tests, lint, build, security scan run via `aid-run-gates.sh`. Gate failures trigger the gate-fixer agent (up to 3 attempts) before escalating to you.
 
