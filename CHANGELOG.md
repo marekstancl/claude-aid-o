@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.102.0] — 2026-09-21
+
+### Removed
+- **Audit testového portfolia (`/aid-audit-tests`, P072) je pryč** — příkaz, agent `test-portfolio-analyst`, pět promptů, sedm schémat, konfigurace `config/test-audit.yaml`, osm skriptů, osm knihoven a 24 sad testů (55 souborů, ≈15 700 řádků); jediný ostrý běh 5. 8. 2026 nedal návrh, který by PM přijal, a paralelismus, o kterém měl rozhodovat, odstranil P078. Zůstává, co čte merge cesta: katalog testů (`aid-test-inventory.sh` → `aid-test-catalog-approve.sh`), patra a jejich nástroje, výběr testů. Deset řádků registru je `removed_scoped`; `/aid-init` zakládá devět souborů místo deseti; `/aid-help tests` popisuje patra místo auditu.
+
 ## [2.101.3] — 2026-09-21
 
 ### Removed

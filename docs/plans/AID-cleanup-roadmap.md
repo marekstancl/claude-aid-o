@@ -1,7 +1,8 @@
 # Co dál s čištěním pluginu — kandidáti po P096
 
 **Rozhodnutí PM 20. 9. 2026:** pořadí je **C1 jen úklid** (bez psaní standardu do
-Docusauru) → **A2 smazat audit testů** → **A1 přestavba bran**. Ostatní body tu
+Docusauru) → **A2 smazat audit testů** → **A1 přestavba bran**.
+**Stav 21. 9. 2026:** C1 hotovo (v2.101.2), Telegram 2A hotovo (v2.101.3), A2 hotovo (v2.102.0). Další: A1. Ostatní body tu
 zůstávají, aby bylo kam se vrátit.
 
 Založeno 20. 9. 2026 po vydání 2.101.1. Řada P093 → P094 → P095 → P096 přestavěla

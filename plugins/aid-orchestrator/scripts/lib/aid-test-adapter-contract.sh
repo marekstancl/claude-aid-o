@@ -37,7 +37,8 @@ adapter_supports_filter() {
 
 # adapter_validate_audit_id <audit_id> — the ONE canonical, fail-closed
 # audit_id format shared by every script that builds a filesystem path from
-# it (aid-test-audit-state.sh, aid-test-audit-dispatch.sh, ...). Only
+# it (today aid-test-inventory.sh; the audit scripts that shared it left on
+# 2026-09-21). Only
 # `[A-Za-z0-9_-]`, non-empty — this already excludes `/`, `..`, and
 # whitespace, so a validated audit_id can never escape
 # `.aid-o/work/test-audits/<audit_id>/` via path traversal. PM-confirmed
@@ -244,7 +245,7 @@ adapter_shebang_runner() {
 #   python3+jsonschema is unavailable — matching aid-plan-fsm.sh's own
 #   established precedent (aid_lifecycle_schema_validate: "validator
 #   unavailable ... refusing to act on an unvalidated artifact") and this
-#   plan's own aid-test-audit-config.sh fix. A caller with a real, present
+#   plan's own config-loader fix. A caller with a real, present
 #   document is trusting this check to actually gate downstream behavior —
 #   treating "can't check" as "assume valid" would defeat that trust.
 adapter_validate_schema() {

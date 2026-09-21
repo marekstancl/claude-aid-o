@@ -35,7 +35,7 @@ _field() { yq -r ".enforcements[] | select(.id == \"$1\") | .$2 // \"\"" "$REG";
 }
 
 @test "AC16: every one of them carries every mandatory field, non-empty" {
-  # The same field set `scripts/tests/test-enforcement-registry-test-audit.sh`
+  # The same field set `the P072 registry suite (deleted with the audit on 2026-09-21)`
   # requires — asserted here per row, because that script asks about the file as
   # a whole and would not tell you WHICH row lost a field.
   #

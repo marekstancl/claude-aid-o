@@ -105,7 +105,6 @@ _fail() { echo "FAIL: $1"; FAIL=$((FAIL + 1)); }
 # ---------------------------------------------------------------------------
 for f in "$EXEC_YAML_LIB" "$GITIGNORE_LIB" "$INIT_DOC" \
          "$DEFAULTS_DIR/.gitignore" "$DEFAULTS_DIR/check-severity.yaml" \
-         "$DEFAULTS_DIR/config/test-audit.yaml" \
          "$DEFAULTS_DIR/hooks/pre-commit" "$DEFAULTS_DIR/hooks/pre-push"; do
   if [[ ! -f "$f" ]]; then
     echo "ERROR: required file not found: $f" >&2
@@ -155,13 +154,12 @@ MANIFEST_FILES=(
   ".aid-o/config/execution.yaml"
   ".aid-o/config/plugin.yaml"
   ".aid-o/config/check-severity.yaml"
-  ".aid-o/config/test-audit.yaml"
   # v2.89.2: a fresh workspace could not allocate its first plan id, because
   # /aid-init never created this file and the allocator refuses without it —
   # pointing the PM back at the command that had just run. The file joined the
-  # command's product then (ten files, fourteen items) and this manifest was not
-  # updated, so aid-init.md said ten and this test asserted nine. The document
-  # is the one that is right.
+  # command's product then and this manifest was not updated, so aid-init.md
+  # said ten and this test asserted nine. The document is the one that is
+  # right. (2026-09-21: test-audit.yaml left with the audit; nine again.)
   ".aid-o/config/counter.yaml"
   ".aid-o/work/active.md"
   ".aid-o/work/backlog.md"
@@ -264,7 +262,6 @@ replay_init() {
     # 2. Config defaults — copied only when absent.
     mkdir -p "$root/.aid-o/config" "$root/.aid-o/work"
     [[ -f ".aid-o/config/check-severity.yaml" ]] || cp "$DEFAULTS_DIR/check-severity.yaml" ".aid-o/config/check-severity.yaml"
-    [[ -f ".aid-o/config/test-audit.yaml" ]]    || cp "$DEFAULTS_DIR/config/test-audit.yaml" ".aid-o/config/test-audit.yaml"
 
     # 3. Prose-authored templates — PLACEHOLDER content (see header: content is
     #    explicitly not covered; presence and never-overwrite are).

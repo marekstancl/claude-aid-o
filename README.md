@@ -53,7 +53,7 @@ Or go fully autonomous:
 
 **Fast Mode (`/aid-do`)** — For tasks under 2 hours. < 2 min overhead. Creates a quick log (Q-NNN.md), skips the full EPIC pipeline.
 
-**7 agents** — Implementer, Verifier, Gate-fixer, Auditor, Simplifier, Project-scanner, Test-portfolio-analyst. The Implementer is dispatched per step from your plan's dependency graph; every delivery is read by reviewer rounds (step, EPIC, whole plan).
+**6 agents** — Implementer, Verifier, Gate-fixer, Auditor, Simplifier, Project-scanner. The Implementer is dispatched per step from your plan's dependency graph; every delivery is read by reviewer rounds (step, EPIC, whole plan).
 
 **Quality gates with auto-fix** — Tests, lint, build, security scan run via `aid-run-gates.sh`. Gate failures trigger the gate-fixer agent (up to 3 attempts) before escalating to you.
 
@@ -74,7 +74,6 @@ Or go fully autonomous:
 | `/aid-verify-plan` | Independent adversarial review of a plan before it goes to execution |
 | `/aid-verify-implementation` | Independent adversarial DONE review of an implementation before it is trusted as complete |
 | `/aid-audit` | Project health audit — code, docs, tests, dependencies |
-| `/aid-audit-tests` | Test portfolio audit — inventory, safe measurement, and a plain-language recommendation |
 | `/visual-companion` | Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision |
 | `/aid-stop` | Emergency stop — save progress, restore permissions |
 | `/aid-help [topic]` | Progressive help — Level 0 cheat sheet → Level 3 architecture deep-dive |
@@ -123,9 +122,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.101.3** (current) — Telegram bot `svc-mcp-tg-bot` vyřazen z pluginu; blok `notifications.telegram` má jen klíč, který se čte
+- **v2.102.0** (current) — audit testového portfolia (`/aid-audit-tests`) smazán; zůstává katalog, patra a výběr testů
+- **v2.101.3** — Telegram bot `svc-mcp-tg-bot` vyřazen z pluginu; blok `notifications.telegram` má jen klíč, který se čte
 - **v2.101.2** — veřejné repo uklizené: kořen nese jen plugin (kokpit pod `cockpit/`), běhové záznamy a soukromý kontext mimo git, pravidla pro přispěvatele v `CONTRIBUTING.md`, CHANGELOG rozdělen na živý a archiv
-- **v2.101.1** — přeskočené kritérium už nedá zelený verdikt porovnání plánu; brána nad ničím neprojde; formálně vadný nález se jednou vrátí revizorovi
 
 See [CHANGELOG.md](CHANGELOG.md) for 2.90.0 and later, [CHANGELOG-archive.md](CHANGELOG-archive.md) for 0.1.0 – 2.89.3.
 

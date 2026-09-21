@@ -892,57 +892,36 @@ EPIC — if you are budgeting dispatches, budget them per plan.
 
 ---
 
-## Test-portfolio decision quality (P072)
+## Test-portfolio decision quality (P072) — removed 2026-09-21
 
-Fifteen enforcements were added by P072; five of them guarded the parallelism
-machinery and were retired with it in P078 (`status: removed_scoped` in the
-registry, with the removal recorded rather than the row deleted). This section
-is a contributor's index to the ten that remain.
+The test-portfolio audit (`/aid-audit-tests`, its five prompts, seven schemas (six `test-audit-*` plus `test-profile`),
+`lib/aid-test-audit-*`, the `test-portfolio-analyst` agent, `config/test-audit.yaml`)
+was removed after its one real run (2026-08-05) produced no proposal the PM
+accepted and the parallelism it was built to decide about was itself removed
+(P078). What stays, because the merge path reads it: the test catalog
+(`aid-test-inventory.sh` → `aid-test-catalog-approve.sh` → `.aid-o/config/test-catalog.yaml`),
+the tier tags and their tools (`aid-test-tier-assign.sh`, `aid-test-tier-lint.sh`,
+`lib/aid-test-durations.sh`) and the selection layer (`aid-select-tests.sh`,
+adapters, execution units). Registry rows of the removed enforcements carry
+`status: removed_scoped` with this note as their `replacement_guard`.
 
-### The decision artifact
+### The test catalog, and who refreshes it now
 
-A `full` audit produces `decision.json` (`aid-test-audit-decision-v1`) beside
-its findings. It carries `audit_status`, one terminal disposition per run unit,
-the portfolio arithmetic, the proposed actions with their impact, and what
-remains unresolved.
+The catalog (`.aid-o/config/test-catalog.yaml`, schema
+`defaults/schemas/test-catalog.schema.json`) is what `aid-select-tests.sh` reads
+for approved mappings. It used to be refreshed by step 2 of `/aid-audit-tests`;
+with the audit gone nothing on the merge path produces it, so it is refreshed by
+hand when suites move or are added:
 
-Two properties make it worth having, and both are enforced rather than
-conventional:
+```bash
+bash scripts/aid-test-inventory.sh --project-root . --audit-id catalog-$(date +%Y%m%d) --output-dir .aid-o/work/test-audits/catalog-$(date +%Y%m%d)
+bash scripts/aid-test-catalog-approve.sh --proposed .aid-o/work/test-audits/catalog-<date>/test-catalog.proposed.yaml --project-root .
+```
 
-- **`audit_status: incomplete` blocks the handoff.** `--write-plan` and the
-  same-conversation continuation both refuse. Building a remediation plan on
-  the part an audit skipped makes the skipped units read as
-  examined-and-healthy.
-- **`impact.kind` cannot overstate.** `measured` needs two comparable runs;
-  `estimated` needs its assumptions stated; `unknown` may carry a `before_ms`
-  but must then qualify it, because a bare number on an unfinished run reads as
-  a measured total.
-
-### The ten live enforcements (five retired in P078)
-
-| Row | What it stops |
-|---|---|
-| `test_audit_incomplete_blocks_write_plan` | A remediation plan built on an audit that did not finish deciding |
-| `test_audit_disposition_reconciliation` | A partial shard result rendering as a verdict on the whole portfolio |
-| `test_audit_coverage_reduction_requires_falsification` | Deleting a test on `unproved` — which is not an argument for deletion |
-| `test_audit_clone_config_precondition` | Auditing a config-less clone, which silently drops every declared-command gate |
-| `test_audit_aggregate_unparsed_fails` | An unparseable suite result counting as zero tests and passing |
-| `test_audit_inventory_arithmetic_guard` | A run unit vanishing between adapters |
-| `test_audit_profile_ingestion_fail_closed` | A corrupt profile receipt becoming an empty action list that reads as "nothing needed doing" |
-| `test_audit_profile_selection_owed` | A slow suite the audit selected for diagnosis, and nobody diagnosed |
-| `test_audit_profile_supervised_execution` | A deadline kill filed as an operator cancel — both arrive as exit 143 |
-| `test_execution_no_double_dispatch` | A run unit executed twice in one gate run |
-
-Retired in P078 with the parallelism machinery they guarded:
-`test_audit_resource_map_shared_evidence`, `test_audit_pilot_evidence_bound`,
-`test_catalog_parallel_provenance_binding`, `test_lane_single_parallel_authority`,
-`test_audit_lane_membership_exact`. Their rows survive as `removed_scoped`
-records — the registry keeps the history rather than pretending the guards
-never existed.
-
-Each row records its **recovery behaviour**: what an operator actually does
-when it fires. A blocking enforcement with no stated recovery is a wall, and
-the registry test refuses a row that omits it.
+The `--audit-id` name and the `.aid-o/work/test-audits/<id>/` output directory
+are the inventory's own vocabulary and survived the audit; renaming them is a
+separate, cosmetic change. `aid-test-catalog-confirm-mapping.sh` has no runtime
+caller since 2026-09-21 (it was only ever named by the deleted command).
 
 ### The execution ledger, and the emission path that is easy to forget
 
@@ -1720,7 +1699,6 @@ Each row's carve-out is cited by file and section name, not line number:
 | `config/execution.yaml` | `/aid-init` composes; PM hand-edits | `commands/aid-init.md` → "execution.yaml Generation" + "Existing Project — `gate_profiles` Upgrade" | `test-init-idempotency.sh` |
 | `config/plugin.yaml` | **two writers** — `/aid-init` and `/aid-run` PRE-FLIGHT (path self-repair); nobody but fresh init or a human writes `dispatch_mode` | `commands/aid-init.md` → "Ownership — `plugin.yaml` has a SECOND writer" | — |
 | `config/check-severity.yaml` | **two writers** — `/aid-init` creates once, `aid-fsm.sh promote-check` mutates; `/aid-setup` does not touch it | `commands/aid-init.md` → "check-severity.yaml — severity registry" | — |
-| `config/test-audit.yaml` | `/aid-init` copies once; PM customizes | `commands/aid-init.md` → "test-audit.yaml — test portfolio audit config" | — |
 | `config/integrations.yaml` (conditional) | `/aid-setup` (module `integrations`); init writes exactly one key at creation | `commands/aid-init.md` → "Ownership — `integrations.yaml`" | — |
 | `work/active.md`, `work/backlog.md`, `work/timeline.jsonl` | `/aid-init` creates; the pipeline appends | `commands/aid-init.md` → "active.md template" / "backlog.md template" | — |
 | `.gitignore` (not counted) | AID backfills per line | `commands/aid-init.md` → ".gitignore (copied from defaults/.gitignore)" | `test-init-idempotency.sh` |

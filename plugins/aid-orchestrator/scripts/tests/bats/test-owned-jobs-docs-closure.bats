@@ -222,7 +222,6 @@ $naked"
     agents/implementer.md
     agents/project-scanner.md
     agents/simplifier.md
-    agents/test-portfolio-analyst.md
     agents/verifier.md
   )
   for rel in "${touched[@]}"; do

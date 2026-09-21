@@ -100,7 +100,7 @@ Project profile: .aid-o/config/project.yaml → stack, test/lint/build commands
 Permissions: .aid-o/config/permissions.yaml → autonomous_mode: true for /aid-run --auto
 
 Health: /aid-audit       → project health score (0-100) with recommendations
-Tests:  /aid-audit-tests → test portfolio inventory + recommendation
+Tests:  /aid-help tests  → test tiers, what runs on the merge path
 ```
 
 ## Level 3: Power User (custom gates or autonomous mode)
@@ -126,7 +126,7 @@ Ask for any of these with `/aid-help <topic>`:
 /aid-help plan-lifecycle  → plan branches, release model, verification commands
 /aid-help status          → /aid-status deep dive (overview, EPIC detail, queue)
 /aid-help gates           → gate types, execution.yaml configuration, retry logic
-/aid-help tests           → /aid-audit-tests, test tiers, what runs on the merge path
+/aid-help tests           → test tiers, what runs on the merge path, the nightly
 /aid-help audit           → /aid-audit project health audit (categories A–J)
 /aid-help recovery        → /aid-stop, resume, escalation, PM overrides
 /aid-help auto            → autonomous mode, background gates, resuming a dead run
@@ -329,28 +329,27 @@ All retries exhausted → ESCALATION.
 
 ### Topic: tests
 
-`/aid-audit-tests` inventories the test portfolio, optionally measures a bounded
-subset of it, and ends with a plain-language recommendation. It never edits,
-deletes or quarantines a test, and it never runs itself — you have to ask.
+Every suite carries one tier tag in its header (`# aid-tier: t0|t1|t2`).
 This is about **tests**; for the project's overall health score see
-`/aid-help audit`, which covers the differently-named `/aid-audit`.
+`/aid-help audit`, which covers `/aid-audit`.
 
 ```
-/aid-audit-tests                  bare invocation ASKS which mode + budget
-  --mode static                   discovery only, executes nothing (minutes)
-  --mode measure                  measures runtimes (tens of minutes)
-  --mode full                     the complete audit (hours)
-
 Tiers: t0 = the pulse, t1 = what blocks a merge, t2 = nightly.
-The merge path runs t0 + t1; the full portfolio runs nightly.
+The merge path runs t0 + t1; the full portfolio runs nightly and its
+result shows as one line in /aid-status.
+aid-test-tier-assign.sh   proposes tiers from measured durations
+aid-test-tier-lint.sh     every suite has exactly one tag, no plan numbers in names
 ```
+
+The test-portfolio audit (`/aid-audit-tests`, P072) was removed on 2026-09-21:
+its one real run (2026-08-05) produced no decision the PM accepted.
 
 ### Topic: audit
 
 `/aid-audit` scores the whole project's health from 0 to 100 across categories
 A–J — code, security, docs, process, tokens, frontend, database, instruction
-quality, standards and memory — and returns recommendations. It is **not** the
-test-portfolio audit: for tests, `/aid-help tests` covers `/aid-audit-tests`.
+quality, standards and memory — and returns recommendations. For tests, see
+`/aid-help tests`.
 
 ```
 /aid-audit        project health score (0-100) + prioritized recommendations
@@ -452,7 +451,7 @@ idempotent: run it again after every plugin update. Run it before `/aid-setup`.
 /aid-init         create or upgrade .aid-o/ (plans, tasks, config, work)
 
 Creates: config/project.yaml, config/permissions.yaml, config/execution.yaml,
-         config/plugin.yaml, config/check-severity.yaml, config/test-audit.yaml
+         config/plugin.yaml, config/check-severity.yaml
          and, only when Qdrant memory is detected, config/integrations.yaml
 Upgrade: offers the gate_profiles block if execution.yaml predates it —
          declining keeps the project on legacy_epic_release_mode, one
@@ -597,4 +596,4 @@ Adding a rule is a row plus a handler — never an edit to `aid-hook.sh`. See
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-21

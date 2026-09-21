@@ -8,7 +8,7 @@
 #   BODY on disk and nothing more; it never publishes. Publication through the
 #   Artifact tool is a live, session-level act owned by the controller
 #   instruction, and NOTHING in this suite claims to cover it — the same
-#   boundary aid-test-audit-chat-summary.sh draws for its own renderer.
+#   boundary the test audit's renderer drew before it was removed (2026-09-21).
 
 load test-helpers.bash
 

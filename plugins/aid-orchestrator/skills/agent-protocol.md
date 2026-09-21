@@ -315,7 +315,7 @@ path whenever they redirect.
 ## Controller boundary (non-negotiable)
 
 This contract binds **every** dispatched agent — implementer, verifier, gate-fixer, auditor,
-simplifier, project-scanner, test-portfolio-analyst. It is stated here once and
+simplifier, project-scanner. It is stated here once and
 nowhere else; each agent card points at this section instead of restating it, so there is exactly
 one text to read and exactly one text to change.
 
@@ -378,7 +378,7 @@ about that path is available to a dispatched agent.
 
 ---
 
-**Last Updated:** 2026-09-20
+**Last Updated:** 2026-09-21
 
 ## Agent handoff contract at the plan boundary
 

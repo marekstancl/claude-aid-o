@@ -17,8 +17,8 @@
 #   It does not publish. It does not read run state. It is a pure function of
 #   its two JSON inputs plus the template — testable with fixtures, reusable by
 #   every renderer built on top of it. Publication (the Artifact tool) belongs
-#   to the controller instruction, mirroring aid-test-audit-chat-summary.sh's
-#   Artifact-first banner precedent.
+#   to the controller instruction (the Artifact-first banner precedent came
+#   from the test audit's renderer, removed 2026-09-21).
 #
 #   The output is a BODY: no <!doctype>, no <html>/<head>/<body> tag. The
 #   Artifact tool supplies the skeleton and a CSP blocks every external asset,

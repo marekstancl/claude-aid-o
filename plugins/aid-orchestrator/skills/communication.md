@@ -6,7 +6,7 @@ user_invocable: false
 
 # Communication — Decision Cards and Output Products
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-09-21
 
 Every message AID leaves the PM with at a boundary is one of four small cards:
 outcome first, plain language, one recommended action. This file defines those
@@ -92,8 +92,8 @@ specialization owned by `commands/aid-run.md`.
   carries `final_turn` (`renderer:<script>`, `card:<type>`, `internal`).
 - **Publish before present** — a renderer emits the chat card on stdout and an
   artifact body file; every wiring site carries the clause below VERBATIM, one
-  literal, and joins the five sites `scripts/tests/test-communication-wiring.sh`
-  indexes BY NAME (`/aid-audit-tests` included) in the change that wires it —
+  literal, and joins the sites `scripts/tests/test-communication-wiring.sh`
+  indexes BY NAME in the change that wires it —
   off that list it is unchecked. Publication is the controller's act.
 
 ```text
@@ -111,8 +111,6 @@ Publish the artifact body via the Artifact tool, then present the chat card verb
 5. **MUST NOT** state a completion, pass or published page the canonical
    controller verdict does not carry.
 6. **MUST** carry the publish clause verbatim at every renderer wiring site.
-   `/aid-audit-tests` takes card vocabulary from here; its own renderer mandate
-   stays authoritative for what that command emits.
 
 ## Completeness Gate
 
@@ -126,4 +124,4 @@ Publish the artifact body via the Artifact tool, then present the chat card verb
 - `scripts/lib/aid-artifact-render.sh` — artifact body skeleton.
 - `scripts/tests/test-communication-wiring.sh` — wiring guard for this file.
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-09-21
