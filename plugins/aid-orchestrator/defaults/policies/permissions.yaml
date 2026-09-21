@@ -10,7 +10,8 @@
 # 2026-05-31 — NR 11 audit: synced with running MCP setup (eco-prod/eco-dev).
 # Removed stale: qdrant-*, shared-docker, shared-telegram, shared-postgres,
 # shared-minio, shared-playwright.
-# Added: eco-admin, svc-mcp-tg-bot, vulcan-memory, plugin_*.
+# Added: eco-admin, vulcan-memory, plugin_*. (svc-mcp-tg-bot retired 2026-09-21:
+# alerts go through the shared send_alert(), no MCP tool is needed.)
 
 active_preset: "autonomous"  # autonomous | custom
 
@@ -106,10 +107,6 @@ presets:
       # Add to .claude/settings.local.json explicitly when a project needs browser automation.
       # ── Sequential Thinking ──
       - "mcp__shared-sequential-thinking__sequentialthinking"
-      # ── Telegram alerts (P032 v2.16.0 — replaces legacy shared-telegram MCP) ──
-      # svc-mcp-tg-bot exposes a single AID-internal alert tool;
-      # general-purpose Telegram interaction is no longer in scope for AID dispatch.
-      - "mcp__svc-mcp-tg-bot__send_message"
     claude_code_deny:
       - "Bash(rm -rf:*)"
       - "Bash(git push --force:*)"

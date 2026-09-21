@@ -216,7 +216,7 @@ The composer writes a single `gates:` mapping with one section per detected stac
 
 If no stacks are detected, the file is still written with an empty `gates:` mapping and a `# No stacks detected — add gate definitions manually.` comment. PM can hand-author gate sections without re-running `/aid-init`.
 
-A `notifications.telegram` block is appended (`enabled: false` by default) to wire P032 repeated-precondition-fail alerts once `svc-mcp-tg-bot` is deployed.
+A `notifications.telegram` block is appended with its one read key, `alert_on_compliance_recovery` (default `true`); alerts themselves go through the ecosystem's shared `send_alert()` via `lib/aid-alert.sh`, so there is nothing to enable.
 
 ### Existing Project — gate_profiles Upgrade
 
@@ -928,4 +928,4 @@ creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.
 
 
-**Last Updated:** 2026-09-20
+**Last Updated:** 2026-09-21

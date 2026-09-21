@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-- **Plugin:** 2.101.2
+- **Plugin:** 2.101.3
 - **License:** AGPL-3.0-only
 - **Requires:** Claude Code with plugin support
 
@@ -22,11 +22,10 @@ Optional (development):
 | `bats` ≥ 1.5 | Unit test suite under `scripts/tests/bats/` | `apt install bats` / `brew install bats-core` |
 | `direnv` | Worktree `.envrc` auto-load | `apt install direnv` / `brew install direnv` |
 
-Optional (Telegram alerts via `svc-mcp-tg-bot`):
+Optional (Telegram alerts):
 
 | Tool | Required for | Install |
 |------|--------------|---------|
-| `docker` + `docker compose` | `svc-mcp-tg-bot` deployment | per Docker docs |
 | `curl` | Telegram alerts, through the ecosystem's shared `send_alert()` (see [Alerty z AID](https://docs.aidlab.dev/aid/alerty)) | OS default |
 
 Pre-flight verification: `bash $AID_PLUGIN_PATH/scripts/aid-check-deps.sh`

@@ -123,9 +123,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.101.2** (current) — veřejné repo uklizené: kořen nese jen plugin (kokpit pod `cockpit/`), běhové záznamy a soukromý kontext mimo git, pravidla pro přispěvatele v `CONTRIBUTING.md`, CHANGELOG rozdělen na živý a archiv
+- **v2.101.3** (current) — Telegram bot `svc-mcp-tg-bot` vyřazen z pluginu; blok `notifications.telegram` má jen klíč, který se čte
+- **v2.101.2** — veřejné repo uklizené: kořen nese jen plugin (kokpit pod `cockpit/`), běhové záznamy a soukromý kontext mimo git, pravidla pro přispěvatele v `CONTRIBUTING.md`, CHANGELOG rozdělen na živý a archiv
 - **v2.101.1** — přeskočené kritérium už nedá zelený verdikt porovnání plánu; brána nad ničím neprojde; formálně vadný nález se jednou vrátí revizorovi
-- **v2.101.0** — konec plánu má čtyři kroky a jedno kolo tří revizorů nad celým dodáním; oprava platí znovu jen to, čeho se dotkla; reportér, kurátor, smlouva auditora pro konec plánu, CP4, CP5 a brána dodávky C1 jsou pryč
 
 See [CHANGELOG.md](CHANGELOG.md) for 2.90.0 and later, [CHANGELOG-archive.md](CHANGELOG-archive.md) for 0.1.0 – 2.89.3.
 

@@ -1106,8 +1106,7 @@ For post-deploy EPICs (`fsm-state.yaml.created_at >= AID_DEPLOY_DATE`):
 - Hand-written reports are rejected with copy-paste remediation in stderr.
 - Repeated-fail detection: ≥ 3 same-reason fails on the same EPIC trigger
   `fsm_precondition_repeated_fail` event + a best-effort alert through
-  `lib/aid-alert.sh` (`aid_alert_run`, scope `aid-beh`, state `BĚŽÍCÍ PLÁN`)
-  (HTTP POST to `localhost:8817/send_message`).
+  `lib/aid-alert.sh` (`aid_alert_run`, scope `aid-beh`, state `BĚŽÍCÍ PLÁN`).
 
 For pre-deploy grandfathered EPICs (`created_at < AID_DEPLOY_DATE`): precondition
 skipped (legacy compat — preserves resumability of the 203 pre-Session-A EPIC dirs).
@@ -2047,7 +2046,7 @@ Two rules, both learned the expensive way:
 
 ---
 
-**Last Updated:** 2026-09-20
+**Last Updated:** 2026-09-21
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
