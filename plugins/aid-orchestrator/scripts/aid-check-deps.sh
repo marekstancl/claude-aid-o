@@ -69,8 +69,7 @@ check_optional bats   "apt install bats / brew install bats-core" "bats unit sui
 check_optional direnv "apt install direnv / brew install direnv"  "worktree .envrc auto-load"
 
 echo
-echo "Optional (Telegram alerts via svc-mcp-tg-bot):"
-check_optional docker "https://docs.docker.com/engine/install/" "container deployment"
+echo "Optional (Telegram alerts):"
 check_optional curl   "apt install curl / brew install curl"     "Telegram alerts via the shared send_alert()"
 
 echo

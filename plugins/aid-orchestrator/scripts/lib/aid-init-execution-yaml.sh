@@ -415,11 +415,9 @@ EOF
     cat <<'EOF'
 notifications:
   telegram:
-    enabled: false               # default off; set true after svc-mcp-tg-bot deployed
-    chat_id: null                # null → use TELEGRAM_ALERT_DEFAULT_CHAT_ID from server env
-    alert_on_repeated_precondition_fail: true
+    # Alerts go through the ecosystem's shared send_alert() (lib/aid-alert.sh);
+    # there is no bot to enable and no chat to pick. The one key read here:
     alert_on_compliance_recovery: true  # P042: emit ✅ recovery alert when a previously-blocked EPIC clears
-    alert_threshold: 3
 EOF
 
   } > "${output_file}" || {

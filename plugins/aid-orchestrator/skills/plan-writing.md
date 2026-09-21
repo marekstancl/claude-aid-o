@@ -6,7 +6,7 @@ user_invocable: false
 
 # Plan Writing — Exhaustive Plan Document Authoring
 
-**Last Updated:** 2026-09-20
+**Last Updated:** 2026-09-21
 
 **Skill:** plan-writing
 **Dependencies:** brainstorming
@@ -856,7 +856,7 @@ CODEBASE GROUNDING (added v2.17.0 — addresses CP1 systematic blind spot
         • Ports (e.g., 8818, 8817)
             → cross-check with running infra (`docker ps`) and existing 88XX
               catalog; flag conflicts BEFORE plan write, not at deploy.
-        • Service / container names (e.g., svc-mcp-tg-bot, infra-postgres)
+        • Service / container names (e.g., svc-litellm, infra-postgres)
             → docker ps; flag if name collides with running service.
         • External commands (e.g., yq, bats, direnv, docker)
             → command -v; mark as required dependency (Constraints) if not
@@ -945,7 +945,7 @@ STEP OUTPUTS CONCRETENESS (added v2.18.0 — addresses verifier deprivation qual
         • **
       ACCEPT:
         • src/lib/aid-init-execution-yaml.sh
-        • services/mcp-tg-bot/server.py
+        • scripts/lib/aid-alert.sh
       EXCEPTION: integration test plans where coverage is genuinely directory-
       wide may use suffix patterns (e.g., tests/unit/*.bats) BUT must include
       explicit `step.expected_count` field stating the expected file count.
@@ -1415,7 +1415,7 @@ obligations (a `Reuse check:` on a delivered step is answered truthfully by
 
 ---
 
-**Last Updated:** 2026-09-20
+**Last Updated:** 2026-09-21
 
 ## Plan-boundary note
 
