@@ -19,15 +19,25 @@
 #     execution.yaml.gate_profiles.<name>.include[] (a whitelist of gate
 #     keys). Gates defined under execution.yaml.gates but NOT in the active
 #     profile's include[] are NOT run — they get an explicit
-#     `profile_excluded` result row instead of being silently omitted, and
-#     never affect `overall` (same treatment as a skipped required:false
-#     gate). Omitting --profile preserves today's behavior exactly: all
-#     defined gates run, even if gate_profiles exists in execution.yaml.
+#     `status: skip, reason: not_in_profile` row instead of being silently
+#     omitted, and never affect `overall` (same treatment as a skipped
+#     required:false gate). Omitting --profile preserves today's behavior
+#     exactly: all defined gates run, even if gate_profiles exists.
 #   • Unknown --profile name, or a profile include[] entry that isn't a key
 #     under execution.yaml.gates, is fail-loud (exit != 0) BEFORE any gate
 #     runs.
 #   • gates_report.json gains: profile, profile_source, profile_reason,
-#     excluded_gates[] (additive; null/[] when --profile isn't passed).
+#     excluded_gates[] (additive; null/[] when --profile isn't passed). The
+#     list stays one release for readers; the rows are the contract.
+#
+# P097 Step 2 — every row is a version-2 gate row (lib/aid-gate-row.sh,
+#   defaults/schemas/gate-row.schema.json): `row_version: 2`, `status`
+#   pass|fail|skip, a `reason` from the closed vocabulary, `duration_ms`,
+#   `started_at`/`completed_at`, `evidence`, `required`, `waived`,
+#   `reused_from`, and `result` as the derived version-1 compatibility field.
+#   The rows are stamped in ONE place (`_gate_row_finalize`) on their way into
+#   the report and the checkpoint file, and a row whose reason is outside the
+#   vocabulary fails the run naming the gate.
 #
 # P032 Step 3 changes vs pre-Session-A:
 #   • execution.yaml parsing switched from awk regex to yq (mikefarah variant)
@@ -228,8 +238,9 @@ run_gate() {
   local timeout_s="${3:-60}"
   local log_file="${4:-/dev/null}"
 
-  local start_ms
+  local start_ms started_at
   start_ms=$(date +%s%3N)
+  started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   local output exit_code=0
   # </dev/null: a stdin-consuming gate (ssh, cat, …) must NOT inherit the
@@ -238,8 +249,9 @@ run_gate() {
   # overall still reports pass (OBS-20260708-07).
   output=$(LC_ALL=C timeout "$timeout_s" bash -c "$command" </dev/null 2>&1) || exit_code=$?
 
-  local end_ms
+  local end_ms completed_at
   end_ms=$(date +%s%3N)
+  completed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   local duration_ms=$(( end_ms - start_ms ))
 
   local result="pass" reason=""
@@ -262,7 +274,11 @@ run_gate() {
   output_truncated="${output_truncated//$'\n'/\\n}"
   output_truncated="${output_truncated//$'\t'/\\t}"
 
-  local json="{\"gate\":\"${gate_name}\",\"result\":\"${result}\"${reason:+,\"reason\":\"${reason}\"},\"exit_code\":${exit_code},\"duration_ms\":${duration_ms},\"output\":\"${output_truncated}\"}"
+  # The version-2 row (P097 Step 2): status/reason/waived derived here by the
+  # one mapping every row goes through; `result` rides along as the derived
+  # compatibility field.
+  local json
+  json="$(gate_row_normalize "{\"gate\":\"${gate_name}\",\"result\":\"${result}\"${reason:+,\"reason\":\"${reason}\"},\"exit_code\":${exit_code},\"duration_ms\":${duration_ms},\"started_at\":\"${started_at}\",\"completed_at\":\"${completed_at}\",\"output\":\"${output_truncated}\"}")"
   echo "$json"
 
   # Log to file if provided
@@ -927,7 +943,20 @@ _bg_fail_row() {
         --arg jid "$job_id" \
     '{gate:$g, result:"fail", exit_code:1, duration_ms:0, output:$o,
       reason:$r, job_id:(if $jid == "" then null else $jid end),
-      job_state:"none"}'
+      job_state:"none"}' | gate_row_normalize
+}
+
+# _gate_row_finalize <gate_name> <row_json>
+#   Every row on its way into the report or a checkpoint file passes here:
+#   version-2 shape (gate_row_normalize) and a reason inside the closed
+#   vocabulary (gate_row_check). Prints the row; exit 1 (naming the gate) when
+#   the runner produced a row outside its own contract — that is the defect,
+#   not something to write down and carry on from.
+_gate_row_finalize() {
+  local gate_name="$1" row
+  row="$(gate_row_normalize "$2")" || return 1
+  gate_row_check "$gate_name" "$row" || return 1
+  printf '%s' "$row"
 }
 
 # ─── P076 Step 4 — the eager continuation pointer ───────────────────────────
@@ -1825,6 +1854,12 @@ run_all_gates() {
   # same rule the execution ledger follows).
   local _jobs_dir="" _rows_dir=""
   if [[ -d "$_evidence_dir" ]]; then
+    # The report, the rows and the logs all live here: a directory that cannot
+    # be written refuses the run BEFORE any gate, so no partial row exists.
+    if [[ ! -w "$_evidence_dir" ]]; then
+      echo "ERROR: aid-run-gates.sh: evidence directory '${_evidence_dir}' is not writable — refusing to run gates whose rows could not be recorded" >&2
+      return 2
+    fi
     _jobs_dir="${_evidence_dir}/jobs"
     _rows_dir="${_evidence_dir}/gates_rows"
   fi
@@ -2039,15 +2074,15 @@ run_all_gates() {
     # A gate defined in execution.yaml but not listed in the active
     # profile's include[] is never run — but it must never be silently
     # dropped either (same defined==processed contract as the no_command
-    # skip row above): emit an explicit profile_excluded row, count it
+    # skip row above): emit an explicit `skip / not_in_profile` row, count it
     # toward `processed`, and record it in excluded_gates. A required:true
     # gate excluded this way does NOT fail the run — same treatment as a
     # skipped required:false gate below.
     if [[ -n "$profile" ]] && ! jq -e --arg g "$gate_name" 'any(.[]; . == $g)' <<< "$include_gates_json" >/dev/null 2>&1; then
-      log_event "$timeline_file" "gate_complete" gate="$gate_name" result="profile_excluded" reason="profile_excluded" profile="$profile"
+      log_event "$timeline_file" "gate_complete" gate="$gate_name" result="skip" reason="not_in_profile" profile="$profile"
       $first || gates_json+=","
       first=false
-      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"profile_excluded\",\"reason\":\"profile_excluded\",\"exit_code\":0,\"duration_ms\":0,\"output\":\"\",\"attempts\":0,$(_req_fields "$gate_name")}"
+      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"skip\",\"reason\":\"not_in_profile\",\"exit_code\":null,\"duration_ms\":0,\"output\":\"\",\"attempts\":0,$(_req_fields "$gate_name")}"
       processed=$((processed+1))
       excluded_gates+=("$gate_name")
       continue
@@ -2133,7 +2168,7 @@ run_all_gates() {
       overall="fail"
       $first || gates_json+=","
       first=false
-      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"unknown_placeholder\",\"attempts\":0,$(_req_fields "$gate_name")}"
+      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"reason\":\"unknown_placeholder\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"unknown_placeholder\",\"attempts\":0,$(_req_fields "$gate_name")}"
       processed=$((processed+1))
       continue
     fi
@@ -2144,13 +2179,15 @@ run_all_gates() {
     if [[ -n "$_missing_scripts" ]]; then
       local _ms_list="${_missing_scripts//$'\n'/ }"
       echo "ERROR: aid-run-gates.sh: gate '${gate_name}' names ${_ms_list}— not in the tree ${_plugin_project_root}. The branch under test must carry every script its gates name; there is no fallback to the primary checkout." >&2
+      # The timeline keeps the event's original reason name (test-gate-config-
+      # branch.bats greps it); the ROW carries the vocabulary name.
       log_event "$timeline_file" "gate_complete" gate="$gate_name" result="fail" reason="gate_script_missing_in_tree" scripts="$_ms_list"
       $first || gates_json+=","
       first=false
       gates_json+="\"${gate_name}\":$(jq -nc --arg g "$gate_name" --arg s "$_ms_list" --arg t "$_plugin_project_root" \
         --argjson rq "$([[ "${_AID_REQ_RESOLVED[$gate_name]:-false}" == "true" ]] && echo true || echo false)" \
         --arg rs "${_AID_REQ_SOURCE[$gate_name]:-legacy_default}" \
-        '{gate:$g, result:"fail", reason:"gate_script_missing_in_tree", exit_code:1, duration_ms:0,
+        '{gate:$g, result:"fail", reason:"missing_script", exit_code:1, duration_ms:0,
           output:("gate script(s) not in the tree " + $t + ": " + $s), attempts:0,
           required:$rq, required_source:$rs}')"
       processed=$((processed+1))
@@ -2214,7 +2251,7 @@ run_all_gates() {
         gate_result=$(run_gate "$gate_name" "$resolved_cmd" "$timeout_s" /dev/null) || gate_exit=$?
       fi
       local r
-      r=$(echo "$gate_result" | jq -r '.result')
+      r=$(echo "$gate_result" | jq -r '.status')
       # Phase 2 (P037) — exit code 2 is a graceful skip when gate's pass_criteria
       # mentions "exit 2" (legacy plan / no AC blocks / Fast Mode).
       # Evidence truthfulness fix: result="skip" (not "pass") so gates_report.json
@@ -2223,7 +2260,7 @@ run_all_gates() {
       local gate_ec
       gate_ec=$(echo "$gate_result" | jq -r '.exit_code')
       if [[ "$r" != "pass" && "$gate_ec" == "2" && "$pass_criteria" == *"exit 2"* ]]; then
-        gate_result=$(echo "$gate_result" | jq '.result = "skip"')
+        gate_result=$(echo "$gate_result" | jq '.status = "skip" | .result = "skip" | .reason = "exit_2"')
         r="skip"
       fi
 
@@ -2260,10 +2297,9 @@ run_all_gates() {
       # fresh attempt under the new, longer timeout (AC6 fixture b).
       if [[ "$(gate_baseline_policy_check "$gate_name" "$timeout_s")" == "block" ]]; then
         gate_baseline_mark_policy_block "$gate_name" "increase_timeout_or_background" || true
-        # result stays the UNCHANGED literal "fail" (never a new value) —
-        # reason/recommendation are purely additive fields describing WHY no
-        # further attempt was made.
-        gate_result=$(echo "$gate_result" | jq '.result = "fail" | .reason = "timeout_policy_block" | .recommendation = "increase_timeout_or_background"')
+        # status stays the UNCHANGED literal "fail" (never a new value) —
+        # reason/recommendation describe WHY no further attempt was made.
+        gate_result=$(echo "$gate_result" | jq '.status = "fail" | .result = "fail" | .reason = "timeout_policy_block" | .recommendation = "increase_timeout_or_background"')
         # P076 Step 13 — GATE_TIMEOUT, mechanical ladder entry. AFTER the row is
         # final, so the recorded stop is the verdict that was actually reached;
         # `gate_result` is never touched from here, and `break` still happens.
@@ -2275,20 +2311,23 @@ run_all_gates() {
       [[ $attempt -le $max_retries ]] && echo "Gate ${gate_name} failed (attempt ${attempt}/${max_retries}), retrying..." >&2
     done
 
+    # `final_result` is the row's status, or "waived" once a waiver applied:
+    # the one word the timeline event and the overall verdict below key on.
     local final_result
-    final_result=$(echo "$gate_result" | jq -r '.result')
+    final_result=$(echo "$gate_result" | jq -r '.status')
 
     # ─── Gate-scoped PM waiver (IMP-270) ───────────────────────────────────
-    # A failed gate becomes `waived` (NEVER `pass`) iff a gate-scoped waiver
-    # exists for it AND aid-gate-waiver.sh check returns `valid` for the exact
-    # (project, epic, run, HEAD, gate, command fingerprint) tuple. A waiver
-    # file alone changes nothing — the check must pass. On valid: consume the
-    # single-use waiver, stamp result=waived + waiver_ref, and record the gate
-    # in waived_gates[]. overall then treats it like a pass (the required-fail
-    # branch below is skipped because final_result is no longer "fail"), but
-    # the top-level waived_gates[] array keeps it visible in PM/release
-    # evidence. A waiver present but failing check for ANY reason leaves the
-    # result "fail" and records waiver_rejected:<verdict> on the row.
+    # A failed gate becomes `waived: true` (its status stays `fail`, NEVER
+    # `pass`) iff a gate-scoped waiver exists for it AND aid-gate-waiver.sh
+    # check returns `valid` for the exact (project, epic, run, HEAD, gate,
+    # command fingerprint) tuple. A waiver file alone changes nothing — the
+    # check must pass. On valid: consume the single-use waiver, stamp
+    # waived=true (+ the derived result "waived") + waiver_ref, and record the
+    # gate in waived_gates[]. overall then treats it like a pass (the
+    # required-fail branch below is skipped because final_result is no longer
+    # "fail"), but the top-level waived_gates[] array keeps it visible in
+    # PM/release evidence. A waiver present but failing check for ANY reason
+    # leaves the row `fail` and records waiver_rejected:<verdict> on it.
     if [[ "$final_result" == "fail" ]]; then
       local _wv_file="${_evidence_dir}/waivers/gate-waiver-${gate_name}.json"
       if [[ -f "$_wv_file" ]]; then
@@ -2313,7 +2352,7 @@ run_all_gates() {
           else
             gate_result=$(echo "$gate_result" | jq \
               --arg ref "waivers/gate-waiver-${gate_name}.json" \
-              '.result = "waived" | .waiver_ref = $ref')
+              '.waived = true | .result = "waived" | .waiver_ref = $ref')
             final_result="waived"
             waived_gates+=("$gate_name")
           fi
@@ -2391,6 +2430,12 @@ run_all_gates() {
       --argjson req "$([[ "${required:-false}" == "true" ]] && echo true || echo false)" \
       --arg reqsrc "${required_source:-legacy_default}" \
       ". + {\"attempts\":${attempt}, \"required\": \$req, \"required_source\": \$reqsrc, \"runtime_baseline\": \$rb}")
+    # The checkpoint file is a row too, so the contract is applied BEFORE it
+    # is written; a row outside the vocabulary ends the run here, by name.
+    merged_row="$(_gate_row_finalize "$gate_name" "$merged_row")" || {
+      _svc_release_run "$_evidence_dir" "$execution_yaml"
+      return 1
+    }
     gates_json+="\"${gate_name}\":${merged_row}"
     processed=$((processed+1))
 
@@ -2503,7 +2548,7 @@ run_all_gates() {
         processed=$((processed+1))
         log_event "$timeline_file" "gate_row_restored" gate="$_rg" source="$_rf" \
           head="$_rec_head"
-        if [[ "$(jq -r '.result // ""' <<<"$_rrow")" == "fail" ]] \
+        if [[ "$(gate_row_normalize "$_rrow" | jq -r 'select(.waived | not) | .status')" == "fail" ]] \
            && [[ "$_required_rg" == "true" ]]; then
           overall="fail"
         fi
@@ -2602,6 +2647,23 @@ run_all_gates() {
 
   gates_json+="}"
 
+  # ─── every row is a version-2 row, checked against the vocabulary ────────
+  # The branches above that never run a command (not_in_profile, no_command,
+  # service_unhealthy, unknown_placeholder, missing_script, gate_row_stale,
+  # undefined_gate) and the restored checkpoint rows are stamped here, in one
+  # pass, so no emission site can leave a version-1 row behind. `_integrity`
+  # and `_execution_ledger` are run-level records, not rows, and are skipped.
+  gates_json="$(jq -c "${AID_GATE_ROW_JQ} gate_rows_normalize" <<<"$gates_json")" || {
+    echo "ERROR: aid-run-gates.sh: the gate rows could not be normalized to the version-2 contract" >&2
+    _svc_release_run "$_evidence_dir" "$execution_yaml"
+    return 1
+  }
+  local _chk_gate _chk_row
+  while IFS=$'\t' read -r _chk_gate _chk_row; do
+    [[ -n "$_chk_gate" ]] || continue
+    gate_row_check "$_chk_gate" "$_chk_row" || { _svc_release_run "$_evidence_dir" "$execution_yaml"; return 1; }
+  done < <(jq -r 'to_entries[] | select((.key|startswith("_")|not) and (.value|type) == "object") | "\(.key)\t\(.value|tojson)"' <<<"$gates_json")
+
   # ─── the verdict is DERIVED from the rows, once, here ──────────────────
   # `overall` is set in seven places above, each inside its own branch, and a
   # path that reaches none of them used to leave the run reported as `pass`
@@ -2610,12 +2672,12 @@ run_all_gates() {
   # the authority. A row that FAILED and is REQUIRED makes the run fail, and
   # nothing downstream has to agree for that to hold.
   #
-  # `waived` is deliberately not a failure here — a waiver is a recorded PM
-  # decision, and the surrounding code already surfaces it as risk acceptance
-  # rather than as a pass.
+  # A waived row (`waived: true`) is deliberately not a failure here — a waiver
+  # is a recorded PM decision, and the surrounding code already surfaces it as
+  # risk acceptance rather than as a pass.
   local _derived_fail
   _derived_fail="$(jq -r '[to_entries[]
-      | select((.value.result? // "") == "fail")
+      | select((.value.status? // "") == "fail" and (.value.waived? // false) == false)
       | select((.value.required? // false) == true)] | length' <<<"$gates_json" 2>/dev/null)" || _derived_fail=""
   if [[ "$_derived_fail" =~ ^[0-9]+$ ]] && (( _derived_fail > 0 )) && [[ "$overall" != "fail" ]]; then
     log_event "$timeline_file" "gate_overall_corrected" was="$overall" required_failures="$_derived_fail"

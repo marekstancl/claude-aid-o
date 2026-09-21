@@ -522,10 +522,10 @@ YAML
   # own sleep+timeout) plus this same per-gate overhead, i.e. comfortably
   # over this threshold either way.
   [ "$elapsed" -lt 5 ]
-  run jq -re '.gates.shell_pipeline_smoke.result' "$REPORT"
-  [ "$output" == "profile_excluded" ]
+  run jq -re '.gates.shell_pipeline_smoke.status' "$REPORT"
+  [ "$output" == "skip" ]
   run jq -re '.gates.shell_pipeline_smoke.reason' "$REPORT"
-  [ "$output" == "profile_excluded" ]
+  [ "$output" == "not_in_profile" ]
   run jq -e '.excluded_gates == ["shell_pipeline_smoke"]' "$REPORT"
   [ "$status" -eq 0 ]
   run jq -re '.profile' "$REPORT"
@@ -579,8 +579,8 @@ gate_profiles:
 YAML
   run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile targeted
   [ "$status" -eq 0 ]
-  run jq -re '.gates.beta.result' "$REPORT"
-  [ "$output" == "profile_excluded" ]
+  run jq -re '.gates.beta.status + "/" + .gates.beta.reason' "$REPORT"
+  [ "$output" == "skip/not_in_profile" ]
   run jq -e '.excluded_gates == ["beta"]' "$REPORT"
   [ "$status" -eq 0 ]
   run jq -re '.overall' "$REPORT"
@@ -1315,7 +1315,7 @@ YAML
   run jq -re '.gates.flaky_gate.result' "$REPORT"
   [ "$output" == "fail" ]
   # No policy-block fields — this is an ordinary exhausted-retries timeout fail.
-  run jq -e '.gates.flaky_gate | has("reason") | not' "$REPORT"
+  run jq -e '.gates.flaky_gate.reason | startswith("exit_")' "$REPORT"   # P097: a reason is always present; the policy block would say timeout_policy_block
   [ "$status" -eq 0 ]
   run jq -e '.gates.flaky_gate | has("recommendation") | not' "$REPORT"
   [ "$status" -eq 0 ]
@@ -1347,7 +1347,7 @@ YAML
   [ "$output" == "pass" ]
   run jq -re '.gates.flaky_gate.attempts' "$REPORT"
   [ "$output" == "1" ]
-  run jq -e '.gates.flaky_gate | has("reason") | not' "$REPORT"
+  run jq -e '.gates.flaky_gate.reason | startswith("exit_")' "$REPORT"   # P097: a reason is always present; the policy block would say timeout_policy_block
   [ "$status" -eq 0 ]
   run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
   [ "$output" == "none" ]
@@ -1406,7 +1406,7 @@ YAML
   [ "$output" == "true" ]
   run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
   [ "$output" == "none" ]
-  run jq -e '.gates.flaky_gate | has("reason") | not' "$REPORT"
+  run jq -e '.gates.flaky_gate.reason | startswith("exit_")' "$REPORT"   # P097: a reason is always present; the policy block would say timeout_policy_block
   [ "$status" -eq 0 ]
 
   # other_gate's own unrelated failure is still correctly reported — never
@@ -1748,11 +1748,166 @@ YAML
 
 @test "a gate that exits 0 over nothing is a vacuous pass, refused; a count of zero ERRORS is a result" {
   _g() { bash -c "source '$AID_PLUGIN_PATH/scripts/aid-run-gates.sh' >/dev/null 2>&1; set +e; run_gate g \"echo '$1'\" 5"; }
-  [ "$(_g 'Success: no issues found in 0 source files' | jq -r '.result + ":" + .reason')" = "fail:vacuous_pass" ]
-  [ "$(_g 'collected 0 items' | jq -r .result)" = "fail" ]
-  [ "$(_g '1..0' | jq -r .result)" = "fail" ]
-  [ "$(_g '0 errors, 12 files checked' | jq -r '.result + ":" + (.reason // "")')" = "pass:" ]
-  [ "$(_g '20 files checked, 0 files skipped' | jq -r .result)" = "pass" ]
+  [ "$(_g 'Success: no issues found in 0 source files' | jq -r '.status + ":" + .reason')" = "fail:vacuous_pass" ]
+  [ "$(_g 'collected 0 items' | jq -r .status)" = "fail" ]
+  [ "$(_g '1..0' | jq -r .status)" = "fail" ]
+  [ "$(_g '0 errors, 12 files checked' | jq -r '.status + ":" + .reason')" = "pass:exit_0" ]
+  [ "$(_g '20 files checked, 0 files skipped' | jq -r .status)" = "pass" ]
   # a fan-out gate: one empty sub-run among real ones is not vacuous
-  [ "$(_g 'no tests ran in a; 300 passed in b' | jq -r .result)" = "pass" ]
+  [ "$(_g 'no tests ran in a; 300 passed in b' | jq -r .status)" = "pass" ]
+}
+
+# ─── P097 Step 2 — the gate row as ONE contract (version 2) ─────────────────
+# defaults/schemas/gate-row.schema.json is the shape; lib/aid-gate-row.sh's
+# gate_row_normalize is the only reader; the runner refuses a reason outside
+# the closed vocabulary.
+
+_schema() { printf '%s' "$AID_PLUGIN_PATH/defaults/schemas/gate-row.schema.json"; }
+
+# The waiver and the row checkpoint both bind to HEAD, so these cases need a repo.
+_git_init_project() {
+  git init -q -b main "$TEST_PROJECT"
+  git -C "$TEST_PROJECT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+}
+
+# _validate_rows <report> — every gate row (not the `_`-prefixed run-level
+# records) validates against the schema; prints the offending key otherwise.
+_validate_rows() {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-test-adapter-contract.sh"
+  local key row
+  while IFS=$'\t' read -r key row; do
+    adapter_validate_schema "$(_schema)" "$row" || { echo "row '$key' does not validate: $row"; return 1; }
+  done < <(jq -r '.gates | to_entries[] | select(.key|startswith("_")|not) | "\(.key)\t\(.value|tojson)"' "$1")
+}
+
+@test "P097 rows: a run writes version-2 rows for pass, fail, vacuous, exit-2 skip, missing script, not-in-profile and waived — every one validates against gate-row.schema.json" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  beta:
+    command: "exit 3"
+    required: false
+  vac:
+    command: "echo 'collected 0 items'"
+    required: false
+  skipper:
+    command: "exit 2"
+    required: false
+    pass_criteria: "exit 2 means skip"
+  ghost:
+    command: "bash scripts/no-such-gate-script.sh"
+    required: false
+  waived_one:
+    command: "exit 5"
+    required: true
+  outside:
+    command: "exit 0"
+    required: false
+gate_profiles:
+  p:
+    include: [alpha, beta, vac, skipper, ghost, waived_one]
+YAML
+  _git_init_project
+  local ev="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-1"
+  "$AID_PLUGIN_PATH/scripts/aid-gate-waiver.sh" issue waived_one --evidence-dir "$ev" \
+    --execution-yaml "$EXEC_YAML" --epic E-X --run R-1 \
+    --reason "P097 Step 2 fixture: a waived required failure" >/dev/null
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile p
+  [ "$status" -eq 0 ]
+  run jq -r '[.gates | to_entries[] | select(.key|startswith("_")|not) | "\(.key)=\(.value.status)/\(.value.reason)/\(.value.waived)"] | join(" ")' "$REPORT"
+  [ "$output" == "alpha=pass/exit_0/false beta=fail/exit_3/false vac=fail/vacuous_pass/false skipper=skip/exit_2/false ghost=fail/missing_script/false waived_one=fail/exit_5/true outside=skip/not_in_profile/false" ]
+  run jq -e '[.gates | to_entries[] | select(.key|startswith("_")|not) | .value.row_version] | all(. == 2)' "$REPORT"
+  [ "$status" -eq 0 ]
+  # the derived compatibility field, one release
+  run jq -r '.gates.waived_one.result + " " + .gates.outside.result + " " + .gates.alpha.result' "$REPORT"
+  [ "$output" == "waived skip pass" ]
+  run jq -r '.overall' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -e '.waived_gates == ["waived_one"] and .excluded_gates == ["outside"]' "$REPORT"
+  [ "$status" -eq 0 ]
+  # stamps and evidence on a foreground row
+  run jq -e '.gates.alpha | (.started_at|type) == "string" and (.completed_at|type) == "string" and .evidence == null and (.duration_ms|type) == "number"' "$REPORT"
+  [ "$status" -eq 0 ]
+  run _validate_rows "$REPORT"
+  [ "$status" -eq 0 ]
+  # the checkpoint file is a row too
+  run jq -e '.row_version == 2 and .status == "pass" and .reason == "exit_0"' "$ev/gates_rows/alpha.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "P097 rows: a background job that timed out and one that vanished write job_timeout / job_lost rows with the job's stdout as evidence" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-gate-row.sh"
+  local jobs="$TEST_TMPDIR/jobs"; mkdir -p "$jobs/g-attempt-1" "$jobs/g-attempt-2"
+  printf 'partial output\n' > "$jobs/g-attempt-1/stdout.log"
+  jq -nc '{state:"timed_out", exit_code:143, started_at:"2026-09-21T10:00:00Z", ended_at:"2026-09-21T10:00:07Z"}' > "$jobs/g-attempt-1/result.json"
+  run gate_row_from_job g "$jobs/g-attempt-1" g-attempt-1
+  [ "$status" -eq 1 ]
+  run jq -r '"\(.row_version) \(.status) \(.reason) \(.exit_code) \(.job_exit_code) \(.duration_ms) \(.evidence) \(.started_at) \(.result)"' <<<"$output"
+  [ "$output" == "2 fail job_timeout 124 143 7000 jobs/g-attempt-1/stdout.log 2026-09-21T10:00:00Z fail" ]
+  run gate_row_from_job g "$jobs/g-attempt-2" g-attempt-2 lost
+  [ "$status" -eq 1 ]
+  run jq -r '"\(.row_version) \(.status) \(.reason) \(.evidence)"' <<<"$output"
+  [ "$output" == "2 fail job_lost null" ]
+}
+
+@test "P097 rows: gate_row_normalize maps every version-1 result of the Data Model table, skips the _execution_ledger key, and passes a version-2 row through untouched" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-gate-row.sh"
+  _n() { gate_row_normalize "$1" | jq -r '"\(.status)/\(.reason)/\(.waived)/\(.result)"'; }
+  [ "$(_n '{"result":"pass","exit_code":0}')" == "pass/exit_0/false/pass" ]
+  [ "$(_n '{"result":"fail","exit_code":3}')" == "fail/exit_3/false/fail" ]
+  [ "$(_n '{"result":"fail","reason":"timeout_policy_block","exit_code":124}')" == "fail/timeout_policy_block/false/fail" ]
+  [ "$(_n '{"result":"fail","reason":"gate_script_missing_in_tree","exit_code":1}')" == "fail/missing_script/false/fail" ]
+  [ "$(_n '{"result":"skip","exit_code":2}')" == "skip/legacy_row/false/skip" ]
+  [ "$(_n '{"result":"skip","reason":"no_command"}')" == "skip/no_command/false/skip" ]
+  [ "$(_n '{"result":"profile_excluded","reason":"profile_excluded"}')" == "skip/not_in_profile/false/skip" ]
+  [ "$(_n '{"result":"waived","exit_code":1,"waiver_ref":"w"}')" == "fail/exit_1/true/waived" ]
+  [ "$(_n '{"result":"job_timeout"}')" == "fail/job_timeout/false/fail" ]
+  [ "$(_n '{"result":"job_lost"}')" == "fail/job_lost/false/fail" ]
+  [ "$(_n '{"result":"job_cancelled"}')" == "fail/job_cancelled/false/fail" ]
+  # a real row with neither status nor result: the legacy mapping
+  [ "$(_n '{"gate":"x","exit_code":0}')" == "skip/legacy_row/false/skip" ]
+  # a version-2 row is not re-mapped
+  [ "$(_n '{"row_version":2,"status":"fail","reason":"exit_9","waived":true,"result":"waived"}')" == "fail/exit_9/true/waived" ]
+  # every version-1 result value the 30-day sample carries (Step 1 fixture)
+  local v
+  for v in $(jq -r '[.sample[].rows | to_entries[] | select(.key|startswith("_")|not) | .value] | unique | .[]' "$AID_PLUGIN_PATH/scripts/tests/fixtures/gates/gates-sample.json"); do
+    run gate_row_normalize "{\"result\":\"$v\"}"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"row_version":2'* ]]
+  done
+  # the ledger key inside .gates is a run-level record, never a row
+  run jq -c "${AID_GATE_ROW_JQ} .gates | gate_rows_normalize" <<<'{"gates":{"a":{"result":"pass"},"_execution_ledger":{"path":"p","duplicates":[],"dispatched":3}}}'
+  [ "$output" == '{"a":{"result":"pass","status":"pass","reason":"exit_0","waived":false,"row_version":2,"exit_code":null,"duration_ms":0,"started_at":null,"completed_at":null,"evidence":null,"required":false,"reused_from":null},"_execution_ledger":{"path":"p","duplicates":[],"dispatched":3}}' ]
+}
+
+@test "P097 rows: a reason outside the closed vocabulary is refused by name, and a run that produces one exits 1 naming the gate" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-gate-row.sh"
+  local row; row="$(gate_row_normalize '{"result":"fail","reason":"invented","exit_code":1}')"
+  run gate_row_check alpha "$row"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate 'alpha'"* && "$output" == *"invented"* && "$output" == *"closed vocabulary"* ]]
+  # the same check through the runner: a checkpointed row restored with an
+  # invented reason (the restore path re-emits the row verbatim) ends the run
+  # naming the gate. The row must carry this run's own binding, so it is
+  # produced by a first run and then edited.
+  _git_init_project
+  local ev="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-1"
+  "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
+  [ -f "$ev/gates_rows/beta.json" ]
+  jq -c '.reason = "invented"' "$ev/gates_rows/beta.json" > "$ev/gates_rows/beta.json.tmp" && mv "$ev/gates_rows/beta.json.tmp" "$ev/gates_rows/beta.json"
+  AID_TEST_DROP_GATE_RESTORE=beta run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate 'beta'"* && "$output" == *"invented"* ]]
+}
+
+@test "P097 rows: no script reads a gate row's result directly — every reader goes through gate_row_normalize (grep guard)" {
+  run grep -rn '\.gates\[[^]]*\]\.result\|\.gates\[\]\.result\|\.value\.result\|gates_rows/[^ ]*\.json[^|]*\.result' \
+    "$AID_PLUGIN_PATH/scripts" --exclude-dir=tests --exclude=aid-gate-row.sh
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  # the report-level alias of `overall` is not a row and stays
+  grep -q '\.gates_report\.result' "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh"
+  grep -q '\.gates_report\.result' "$AID_PLUGIN_PATH/scripts/aid-plan-close-check.sh"
 }

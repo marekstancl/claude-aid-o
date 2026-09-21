@@ -32,6 +32,8 @@
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 
 _AID_SR_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# shellcheck source=aid-gate-row.sh
+[[ -n "${AID_GATE_ROW_JQ:-}" ]] || source "${_AID_SR_PLUGIN}/scripts/lib/aid-gate-row.sh"   # P097 Step 2 — gate rows read through gate_row_normalize
 AID_SR_TEMPLATE="${_AID_SR_PLUGIN}/defaults/prompts/review-prompt-v1.md"
 AID_SR_ROLES_SKILL="${_AID_SR_PLUGIN}/skills/step-review-roles.md"
 AID_SR_EVIDENCE_FORMS='`path:line` or `path:first-last` at the reviewed commit, `<sha>:path:line` for a line of a file the diff deleted or moved (the pre-image at that commit), or `absent:path` for a file the step should have produced and did not; one citation that resolves is enough, but cite the exact line (a wrong number wastes the citation); citations only, separated by `;` — a word or a bracketed note after a line number drops the finding, so say what the line shows in `claim`'
@@ -200,7 +202,9 @@ aid_step_review_prompt_render() {
                         else "- \(.epic): \(.findings | length) finding(s) left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join(""))) end' "${dir}/packet/epic-findings.json"
       echo
       echo "## Gates at the candidate (gates_report.json on disk: ${dir}/packet/gates_report.json)"
-      jq -r '.gates | to_entries[] | "- \(.key): \(.value.result)" + (if .value.reused_from then " (reused from \(.value.reused_from))" else "" end)' "${dir}/packet/gates_report.json"
+      jq -r "${AID_GATE_ROW_JQ}"'.gates | gate_rows_normalize | to_entries[] | select((.key|startswith("_")|not) and (.value|type) == "object")
+             | "- \(.key): \(.value.status) (\(.value.reason))" + (if .value.waived then " waived" else "" end)
+               + (if .value.reused_from then " (reused from \(.value.reused_from))" else "" end)' "${dir}/packet/gates_report.json"
       echo
       echo "## Executed tests per criterion: ${dir}/packet/plan-diff.json"
       echo

@@ -64,6 +64,9 @@ source "${SCRIPT_DIR}/lib/aid-cache-preflight.sh"
 # cmd_advance_to_gates (auto-resolve, this EPIC's Step 2 / "Step 8") and the
 # GATES:DONE risk-upgrade precondition below (D4 enforcement, not advisory).
 source "${SCRIPT_DIR}/lib/aid-gate-profile.sh"
+# P097 Step 2 — the ONE gate-row reader (gate_row_normalize); no reader here
+# inspects a row's `result`.
+source "${SCRIPT_DIR}/lib/aid-gate-row.sh"
 # P062 Step 11 — ONE per-control enforcement resolver for all five readers
 # below. Five private copies is how two of them end up disagreeing in the
 # blocking direction (the P084 incident).
@@ -2512,7 +2515,7 @@ EOF
         # (plan-gate floor, risk profile, cp3 freshness) stays fully enforced.
         local waived_rows report_head
         report_head=$(jq -r '.revision.head_sha // empty' "$report" 2>/dev/null)
-        waived_rows=$(jq -r '(.gates // {}) | to_entries[] | select(.value.result == "waived") | .key' "$report" 2>/dev/null)
+        waived_rows=$(jq -r "${AID_GATE_ROW_JQ}"'(.gates // {}) | gate_rows_normalize | to_entries[] | select((.value|type) == "object" and .value.status == "fail" and .value.waived == true) | .key' "$report" 2>/dev/null)
         if [[ -n "$waived_rows" ]]; then
           # IMP-270 (PM review 2026-07-24): a waived row is re-validated against
           # the report's OWN revision.head_sha. If that is absent or not a 40-hex
@@ -3659,7 +3662,7 @@ cmd_resume() {
 
   local rowfile=""
   if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head" "$execution_yaml" "$repo" "$tree")"; then
-    local rres; rres="$(jq -r '.result // "?"' "$rowfile" 2>/dev/null || echo '?')"
+    local rres; rres="$(jq -r "${AID_GATE_ROW_JQ}"'gate_row_normalize | "\(.status)/\(.reason)"' "$rowfile" 2>/dev/null || echo '?')"
     _resume_release_pointer "$epic_id"
     _resume_say "$epic_id" "found" "job '${job_id}' for gate '${gate}' is ${state} (collected, current at ${head:0:12})"
     _resume_say "$epic_id" "recorded" "gate row '${gate}' = ${rres} at ${rowfile} (checkpoint only — the next run-all assembles the report); pointer claimed as ${claimed}"
@@ -4771,7 +4774,7 @@ cmd_advance_to_gates() {
     [[ -n "$timeline" ]] && log_event "$timeline" "fsm_advance_to_gates_fail" \
       reason="gates_runner_exit_${rc}" runner_exit="$rc"
     local _failed_gates=""
-    [[ -f "$report_file" ]] && _failed_gates="$(jq -r '[.gates // {} | to_entries[] | select(.value.result == "fail") | .key] | join(", ")' "$report_file" 2>/dev/null || true)"
+    [[ -f "$report_file" ]] && _failed_gates="$(jq -r "${AID_GATE_ROW_JQ}"'[.gates // {} | gate_rows_normalize | to_entries[] | select((.value|type) == "object" and .value.status == "fail" and .value.waived != true) | .key] | join(", ")' "$report_file" 2>/dev/null || true)"
     echo "advance-to-gates: FAIL — gates runner exit=$rc${_failed_gates:+; failed: ${_failed_gates}}; state unchanged (EXECUTE). Report: ${report_file}" >&2
     return "$rc"
   fi

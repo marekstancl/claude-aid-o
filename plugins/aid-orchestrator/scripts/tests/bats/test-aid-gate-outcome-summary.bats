@@ -263,6 +263,37 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo</span>' "$(BODY)"
 }
 
+# P097 Step 2: the same report written as version-2 rows (status/reason/waived,
+# no `result` at all) renders the same lines — the summary reads every row
+# through gate_row_normalize and its text did not change.
+@test "version-2 rows (status/reason/waived) render exactly the version-1 lines: mimo profil, přeskočena, prominuta, selhala" {
+  _row2() {  # <gate> <status> <reason> <waived> <exit>
+    jq -nc --arg g "$1" --arg st "$2" --arg r "$3" --argjson w "$4" --argjson e "$5" \
+      '{row_version:2, gate:$g, status:$st, reason:$r, waived:$w, exit_code:$e, duration_ms:10,
+        started_at:"2026-09-21T10:00:00Z", completed_at:"2026-09-21T10:00:01Z", evidence:null,
+        required:false, reused_from:null, output:"", attempts:1}'
+  }
+  local gates
+  gates="$(jq -nc --argjson a "$(_row2 tests pass exit_0 false 0)" \
+    --argjson b "$(_row2 lint skip exit_2 false 2)" \
+    --argjson c "$(_row2 build skip not_in_profile false null)" \
+    --argjson d "$(_row2 e2e fail exit_1 true 1)" \
+    --argjson e "$(_row2 types fail exit_4 false 4)" \
+    --argjson f "$(_row2 smoke fail missing_script false 1)" \
+    '{tests:$a, lint:$b, build:$c, e2e:$d, types:$e, smoke:$f, _execution_ledger:{path:"p", duplicates:[], dispatched:1}}')"
+  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+  grep -qF 'brána lint neběžela: přeskočena' "$(BODY)"
+  grep -qF 'brána build neběžela: mimo profil' "$(BODY)"
+  grep -qF 'brána smoke neběžela: skript brány ve stromu nebyl' "$(BODY)"
+  grep -qF 'brána e2e: prominuta' "$(BODY)"
+  grep -qF 'brána types: selhala (exit 4), důvod neznámý' "$(BODY)"
+  # the list is capped at five and passes come last, so the pass shows as a count
+  grep -qF '<span class="k">Ověřeno</span><span class="v">1 brána</span>' "$(BODY)"
+  grep -qF '<span class="k">Neběželo</span><span class="v">3</span>' "$(BODY)"
+}
+
 @test "a FAILING non-required gate with overall pass still selects the Finished card" {
   local gates
   gates="$(jq -nc --argjson a "$(_row tests pass 0 1000 1)" --argjson b "$(_row docs_updated fail 1 500 1)" \

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator/schemas/gate-row.schema.json",
+  "title": "Gate row, version 2",
+  "description": "WHY THIS FILE EXISTS: one row of gates_report.json.gates.<id> (and gates_rows/<id>.json) as written by aid-run-gates.sh since P097 Step 2. The row is the contract with every reader; scripts/lib/aid-gate-row.sh (gate_row_normalize) maps a version-1 row onto this shape and reads the closed reason vocabulary from `properties.reason.pattern` here. `result` is the version-1 compatibility field, derived from status/waived, kept for one release.",
+  "type": "object",
+  "required": ["row_version", "status", "reason", "exit_code", "duration_ms", "started_at", "completed_at", "evidence", "required", "waived", "reused_from", "result"],
+  "properties": {
+    "row_version": { "const": 2 },
+    "status": { "enum": ["pass", "fail", "skip"] },
+    "reason": {
+      "type": "string",
+      "description": "Closed vocabulary. exit_<n>: the command's exit code (exit_0 with status pass; a status skip with exit_2 is the pass_criteria 'exit 2' convention). job_timeout/job_lost/job_cancelled: the background job's terminal state. not_in_profile, missing_script, vacuous_pass, reused_from, legacy_row: plan P097 Data Model. The remaining names are the runner's pre-existing did-not-run reasons (aid-run-gates.sh), kept under their existing names because the summary and eight suites already render and assert them.",
+      "pattern": "^(exit_[0-9]+|job_timeout|job_lost|job_cancelled|not_in_profile|missing_script|vacuous_pass|reused_from|legacy_row|no_command|service_unhealthy|unknown_placeholder|timeout_policy_block|gate_row_stale|undefined_gate|no_jobs_dir|job_supervisor_unavailable|job_fingerprint_failed|resume_artifact_write_failed|job_start_failed|job_result_not_current)$"
+    },
+    "exit_code": { "type": ["integer", "null"] },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "started_at": { "type": ["string", "null"] },
+    "completed_at": { "type": ["string", "null"] },
+    "evidence": { "type": ["string", "null"], "description": "Log path relative to the run's evidence directory (a background job's stdout.log); null when the gate ran in the foreground, whose output is on the row itself." },
+    "required": { "type": "boolean" },
+    "waived": { "type": "boolean", "description": "A PM waiver on a fail row. Never a reason and never a status." },
+    "reused_from": { "type": ["string", "null"] },
+    "result": { "enum": ["pass", "fail", "skip", "waived"] }
+  }
+}

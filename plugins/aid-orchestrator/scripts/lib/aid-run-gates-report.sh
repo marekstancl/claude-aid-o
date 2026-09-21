@@ -27,8 +27,15 @@
 #
 # Emits the merged report JSON to stdout.
 #
+# P097 Step 2: both passes' rows go through the one row contract
+# (lib/aid-gate-row.sh, gate_rows_normalize) so the merged report never carries
+# a version-1 row whichever runner produced either pass.
+#
 # NO top-level `set -e`/`set -euo pipefail` — sourced under the caller's own
 # strict shell (same idiom as aid-test-adapter-bats.sh).
+
+# shellcheck source=aid-gate-row.sh
+[[ -n "${AID_GATE_ROW_JQ:-}" ]] || source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/aid-gate-row.sh"
 
 merge_escalation_report() {
   local targeted_report_json="$1" full_report_json="$2" reason="$3"
@@ -36,5 +43,7 @@ merge_escalation_report() {
     --argjson full "$full_report_json" \
     --argjson targeted "$targeted_report_json" \
     --arg reason "$reason" \
-    '$full + {escalation: {triggered_by: "targeted_tests", reason: $reason, targeted_run: $targeted}}'
+    "${AID_GATE_ROW_JQ}"'
+    def rows: if (.gates|type) == "object" then .gates |= gate_rows_normalize else . end;
+    ($full | rows) + {escalation: {triggered_by: "targeted_tests", reason: $reason, targeted_run: ($targeted | rows)}}'
 }

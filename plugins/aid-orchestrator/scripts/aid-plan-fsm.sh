@@ -158,6 +158,8 @@ source "${SCRIPT_DIR}/lib/aid-plan-state.sh"      # also sources lib/aid-lock.sh
 source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"   # also sources lib/aid-lock.sh + lib/aid-gate-profile.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-gate-row.sh"     # P097 Step 2 — the ONE gate-row reader (gate_row_normalize)
 source "${SCRIPT_DIR}/lib/aid-plugin-issues.sh"   # the project's record of AID's own defects
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
@@ -4885,7 +4887,7 @@ _pfsm_gate_reuse_rows() {
   local -a pathspec
   for gate in "$@"; do
     row="$(jq -c --arg g "$gate" --arg d "$(_pfsm_gate_definition_sha "$yaml" "$gate")" \
-             '.gates[$g] | select(.result == "pass" and .definition_sha256 == $d)' "$prev_report" 2>/dev/null)"
+             "${AID_GATE_ROW_JQ}"'.gates[$g] | select(type == "object") | gate_row_normalize | select(.status == "pass" and .definition_sha256 == $d)' "$prev_report" 2>/dev/null)"
     [[ -n "$row" ]] || continue
     pathspec=()
     while IFS= read -r spec; do
@@ -5044,7 +5046,7 @@ _pfsm_finalize_gates_body() {
     done <<< "$effective_include"
     jq --argjson reuse "$reuse" --argjson defs "$defs" '
         reduce ($reuse.rows | to_entries[]) as $r (.;
-          .gates[$r.key] = ($r.value + {reused_from: ($r.value.reused_from // $reuse.from), reused_candidate: ($r.value.reused_candidate // $reuse.candidate)})
+          .gates[$r.key] = ($r.value + {reused_from: ($r.value.reused_from // $reuse.from), reused_candidate: ($r.value.reused_candidate // $reuse.candidate), reason: "reused_from"})
           | .excluded_gates = ((.excluded_gates // []) - [$r.key]))
         | .gates |= with_entries(if $defs[.key] then .value.definition_sha256 = $defs[.key] else . end)' \
       "$report_file" > "${report_file}.tmp" && mv "${report_file}.tmp" "$report_file" || { rm -f "${report_file}.tmp"; return 1; }
@@ -5156,8 +5158,8 @@ _pfsm_finalize_gates_body() {
     [[ -z "$inc" ]] && continue
     if _pfsm_in_list "$inc" "$quarantined"; then continue; fi
     local res
-    res="$(jq -r --arg g "$inc" '.gates[$g].result // "<absent>"' "$report_file")"
-    if [[ "$res" == "<absent>" || "$res" == "profile_excluded" ]]; then
+    res="$(jq -r --arg g "$inc" "${AID_GATE_ROW_JQ}"'.gates[$g] | if type != "object" then "<absent>" else (gate_row_normalize | if .reason == "not_in_profile" then "not_in_profile" else .status end) end' "$report_file")"
+    if [[ "$res" == "<absent>" || "$res" == "not_in_profile" ]]; then
       _gassert "release gate '${inc}' has result '${res}' — a non-quarantined gate of the resolved profile must appear with a real result (notably shell_pipeline_smoke, which the EPIC-scoped bats_all_quarantine profile omits)."
     elif [[ "$res" == "skip" ]] && _pfsm_in_list "$inc" "$plan_required"; then
       if [[ "$inc" == "plan_diff" ]] && ! _pfsm_plan_has_patterns "$plan_path"; then
@@ -5173,7 +5175,7 @@ _pfsm_finalize_gates_body() {
   # skip is the truthful verdict ("nothing machine-checkable here") and the
   # acceptance criteria were judged by the reviews, as for every prose AC.
   local pd
-  pd="$(jq -r '.gates.plan_diff.result // "<absent>"' "$report_file")"
+  pd="$(jq -r "${AID_GATE_ROW_JQ}"'.gates.plan_diff | if type != "object" then "<absent>" else (gate_row_normalize | .status) end' "$report_file")"
   if [[ "$pd" == "skip" ]] && ! _pfsm_plan_has_patterns "$plan_path"; then
     echo "NOTE: plan-finalize --stage gates: plan_diff skipped and the plan declares no verification_pattern — nothing machine-checkable, the skip is accepted (prose acceptance criteria are judged by the reviews)." >&2
   else
@@ -5185,10 +5187,10 @@ _pfsm_finalize_gates_body() {
   local qg2
   for qg2 in ${quarantined_in_profile[@]+"${quarantined_in_profile[@]}"}; do
     local qres
-    qres="$(jq -r --arg g "$qg2" '.gates[$g].result // "profile_excluded"' "$report_file")"
+    qres="$(jq -r --arg g "$qg2" "${AID_GATE_ROW_JQ}"'.gates[$g] | if type != "object" then "not_in_profile" else (gate_row_normalize | if .reason == "not_in_profile" then "not_in_profile" else .status end) end' "$report_file")"
     case "$qres" in
       pass) _gassert "quarantined gate '${qg2}' is reported 'pass' — a quarantined gate is never green." ;;
-      waived|profile_excluded|unverifiable|fail) ;;
+      not_in_profile|fail) ;;
       *) _gassert "quarantined gate '${qg2}' has unexpected result '${qres}'." ;;
     esac
     jq -e --arg g "$qg2" --arg h "$candidate" --arg b "$base_commit" '
@@ -5213,7 +5215,7 @@ _pfsm_finalize_gates_body() {
     starts="$(grep -c '"event":"gate_runner_start"' "$timeline_file" 2>/dev/null || true)"
     [[ -z "$starts" ]] && starts=0
     # A report made only of copied rows ran nothing; any other ran exactly once.
-    expected_runs="$(jq 'if any(.gates[]; .reused_from == null and .result != "profile_excluded") then 1 else 0 end' "$report_file")"
+    expected_runs="$(jq "${AID_GATE_ROW_JQ}"'if any(.gates | gate_rows_normalize | to_entries[] | select((.key|startswith("_")|not) and (.value|type) == "object") | .value; .reused_from == null and .reason != "not_in_profile") then 1 else 0 end' "$report_file")"
     if [[ "$starts" -ne "$expected_runs" ]]; then
       _gassert "timeline has ${starts} gate_runner_start events for ${run_id}, expected exactly ${expected_runs} (no second broad run under a 'full' label)."
     fi

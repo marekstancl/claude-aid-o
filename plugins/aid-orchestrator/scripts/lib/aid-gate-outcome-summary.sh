@@ -41,13 +41,13 @@
 #   `escalation` key — a superset, accepted here and surfaced in the core list.
 #
 # THE CARD FOLLOWS `.overall`, NEVER A PER-GATE VERDICT
-#   Gate rows carry {gate, result, reason, exit_code, duration_ms, output,
-#   attempts} and NO `required` key: required-ness lives in execution.yaml and
-#   survives only in the envelope's `.overall`, which the runner already
-#   computes (a failing non-required gate leaves overall=pass at :2001/:2259, a
-#   waived required failure is treated as a pass at :2145, and skip /
-#   profile_excluded never affect it). Deriving the card from individual rows
-#   would tell the PM a run is blocked while the FSM advances.
+#   Gate rows are read through the version-2 contract (lib/aid-gate-row.sh,
+#   P097 Step 2): {status, reason, waived, exit_code, duration_ms, attempts,
+#   required, ...}. The card still follows the envelope's `.overall`, which the
+#   runner computes (a failing non-required gate leaves overall=pass, a waived
+#   required failure is treated as a pass, and skip / not_in_profile never
+#   affect it). Deriving the card from individual rows would tell the PM a run
+#   is blocked while the FSM advances.
 #
 # FOUR CLOSED CATEGORIES, AND THE PAGE COUNTS IN THEM (P089 Step 3)
 #   ověřeno · selhalo · neběželo · prominuto. The headline is HOW MANY FAILED,
@@ -64,11 +64,11 @@
 #   times; it now lives only in the provenance footer.
 #
 # WAIVED IS NOT PASSED (D3)
-#   `waived` is a first-class row result. The REPORT is the primary waiver
-#   source: the runner rewrites a waived row to result:"waived" with a
-#   `waiver_ref` (:2174-2176) and surfaces top-level `waived_gates[]`
-#   (:1692-1694, :2512-2537) precisely so nothing downstream reconstructs
-#   waivers from receipts. A waiver renders as PM risk acceptance, carrying the
+#   A waiver is the boolean `waived: true` on a `fail` row (the version-1
+#   `result: "waived"` maps to exactly that). The REPORT is the primary waiver
+#   source: the runner stamps the row with `waived` and a `waiver_ref` and
+#   surfaces top-level `waived_gates[]` precisely so nothing downstream
+#   reconstructs waivers from receipts. A waiver renders as PM risk acceptance, carrying the
 #   literal `waived`; the string "passed" is never emitted by this file at all.
 #   A waiver present but REJECTED leaves the row `fail` with
 #   `waiver_rejected:<verdict>` — that renders in the failed section with its
@@ -86,6 +86,8 @@
 _AID_GOS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-artifact-render.sh
 source "${_AID_GOS_LIB_DIR}/aid-artifact-render.sh"
+# shellcheck source=aid-gate-row.sh
+source "${_AID_GOS_LIB_DIR}/aid-gate-row.sh"   # P097 Step 2 — the ONE row reader (gate_row_normalize)
 
 _AID_GOS_ARTIFACT_BASENAME="gate-outcome-artifact.html"
 
@@ -94,10 +96,10 @@ _AID_GOS_FORCE_CMD="aid-fsm.sh transition GATES DONE <state_file> --force --reas
 _AID_GOS_ADVANCE_CMD="aid-fsm.sh transition GATES DONE <state_file>"
 
 # "DID NOT RUN" IS A MAPPING, NOT A GUESS (P089 Step 3)
-#   The runner has no separate result for "the harness stopped this gate before
+#   The runner has no separate status for "the harness stopped this gate before
 #   it could prove anything": such a row is a plain `fail` whose `reason` says
-#   what happened (aid-run-gates.sh:2040, :2071, :2391, and _bg_fail_row at
-#   :908). Counting those among the failures tells the PM the code broke when
+#   what happened (aid-run-gates.sh, the branches before dispatch and
+#   _bg_fail_row). Counting those among the failures tells the PM the code broke when
 #   the code was never run; counting an unexplained failure among them would
 #   hide a real one. So the list is CLOSED and explicit, every entry is a reason
 #   whose own row text says the gate did not run in this invocation, and the
@@ -116,7 +118,7 @@ _AID_GOS_ADVANCE_CMD="aid-fsm.sh transition GATES DONE <state_file>"
 #   bash there is, so the readable form loses to the one that runs.
 _AID_GOS_NOT_RUN_REASONS=(
   'service_unhealthy|služba, kterou brána potřebuje, neběžela'
-  'gate_script_missing_in_tree|skript brány ve stromu nebyl'
+  'missing_script|skript brány ve stromu nebyl'
   'gate_row_stale|záznam brány patřil jiné revizi, v tomhle běhu neběžela'
   'job_lost|běh brány na pozadí se ztratil, žádný záznam o dokončení'
 )
@@ -240,8 +242,11 @@ aid_gate_outcome_render() {
   # ── counts, all COMPUTED from the report's .gates OBJECT (a map, not rows) ──
   # The conversion's STATUS is read. An unchecked jq here is how a malformed
   # report reached the card as empty counters instead of as a refusal.
+  # Every row is read through the version-2 contract (P097 Step 2): a
+  # version-1 row from older evidence is mapped, a version-2 row passes
+  # through, and nothing below looks at `result` again.
   local rows
-  if ! rows="$(jq -c '[ .gates | to_entries[] | (.value + {gate: (.value.gate // .key)}) ]' <<<"$report" 2>/dev/null)" \
+  if ! rows="$(jq -c "${AID_GATE_ROW_JQ}"'[ .gates | to_entries[] | select((.key|startswith("_")|not) and (.value|type) == "object") | (.value + {gate: (.value.gate // .key)}) | gate_row_normalize ]' <<<"$report" 2>/dev/null)" \
      || [[ -z "$rows" ]] \
      || [[ "$(jq -r 'if type == "array" then "ok" else "no" end' <<<"$rows" 2>/dev/null)" != "ok" ]]; then
     echo "aid_gate_outcome_render: gates report at ${report_path} could not be converted into gate rows — refusing to render a card from an unknown gate set" >&2
@@ -269,7 +274,7 @@ aid_gate_outcome_render() {
   # the page counted it as a failure AND as a waiver, over one gate.
   local waived_json
   waived_json="$(jq -c --argjson rows "$rows" '
-    (((.waived_gates // []) + [$rows[] | select(.result == "waived") | .gate]) | unique) as $w
+    (((.waived_gates // []) + [$rows[] | select(.status == "fail" and .waived) | .gate]) | unique) as $w
     | [ $rows[] | select(has("waiver_rejected")) | .gate ] as $rejected
     | [ $w[] | select(. as $g | $rejected | index($g) | not) ]' <<<"$report")"
   n_waived="$(jq -r 'length' <<<"$waived_json")"
@@ -338,7 +343,8 @@ aid_gate_outcome_render() {
         n_failed=$(( n_failed + 1 ))
         if [[ -n "$rejected" ]]; then
           it_failed+=("brána ${gate}: selhala (exit ${code}), výjimka zamítnuta — ${rejected}")
-        elif [[ -z "$reason" ]]; then
+        elif [[ -z "$reason" || "$reason" == exit_* ]]; then
+          # `exit_<n>` says nothing the exit code beside it does not.
           it_failed+=("brána ${gate}: selhala (exit ${code}), důvod neznámý")
         else
           it_failed+=("brána ${gate}: selhala (exit ${code}), důvod: ${reason}")
@@ -349,7 +355,7 @@ aid_gate_outcome_render() {
         ;;
       skip)
         it_not_run+=("brána ${gate} neběžela: přeskočena"); n_not_run=$(( n_not_run + 1 )) ;;
-      profile_excluded)
+      not_in_profile)
         it_not_run+=("brána ${gate} neběžela: mimo profil"); n_not_run=$(( n_not_run + 1 )) ;;
       pass)
         n_pass=$(( n_pass + 1 ))
@@ -374,7 +380,7 @@ aid_gate_outcome_render() {
       (($rep._command_log // []) | map(select(.name != null)) | map({(.name|tostring): .command}) | add // {}) as $cmds
       | .[]
       | [ ((.gate // "?")|clean),
-          ((.result // "?")|clean),
+          ((if .status == "fail" and .waived then "waived" elif .reason == "not_in_profile" then "not_in_profile" else .status end)|clean),
           ((.exit_code // 0)|tostring|clean),
           ((.attempts // 0)|tostring|clean),
           (.reason|clean),
@@ -391,7 +397,7 @@ aid_gate_outcome_render() {
     [[ -n "$w" ]] || continue
     it_waived+=("brána ${w}: prominuta — PM převzal riziko$(_aid_gos_waiver_detail "$waiver_dir" "$w")")
   done < <(jq -r --argjson rows "$rows" \
-    '([$rows[] | select(.result == "waived") | .gate]) as $have | .[] | select(. as $g | $have | index($g) | not)' \
+    '([$rows[] | select(.status == "fail" and .waived) | .gate]) as $have | .[] | select(. as $g | $have | index($g) | not)' \
     <<<"$waived_json")
 
   local -a core_items=()
