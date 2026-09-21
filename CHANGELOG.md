@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [2.101.3] — 2026-09-21
 
 ### Removed
 - **Telegram bot `svc-mcp-tg-bot` a vše, co na něj ukazovalo** — zdroj služby (`services/mcp-tg-bot/`) je z repa pryč; služba přijala za 30 dní dvě zprávy (podle `docker logs` z 21. 9. před smazáním) a AID posílá od 26. 8. přes sdílenou `send_alert()` (`lib/aid-alert.sh`). Blok `notifications.telegram`, který `/aid-init` zapisuje, má už jen jediný klíč, který někdo čte (`alert_on_compliance_recovery`); `enabled`, `chat_id`, `alert_threshold` a `alert_on_repeated_precondition_fail` neměly čtenáře. Z výchozích oprávnění zmizel nástroj `mcp__svc-mcp-tg-bot__send_message`, z kontroly závislostí a README docker jako „nasazení bota".
