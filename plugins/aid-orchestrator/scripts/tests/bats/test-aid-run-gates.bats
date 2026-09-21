@@ -1866,8 +1866,27 @@ YAML
   [ "$(_n '{"result":"job_timeout"}')" == "fail/job_timeout/false/fail" ]
   [ "$(_n '{"result":"job_lost"}')" == "fail/job_lost/false/fail" ]
   [ "$(_n '{"result":"job_cancelled"}')" == "fail/job_cancelled/false/fail" ]
-  # a real row with neither status nor result: the legacy mapping
-  [ "$(_n '{"gate":"x","exit_code":0}')" == "skip/legacy_row/false/skip" ]
+  # ── the acceptance criterion, by value, on SYNTHETIC rows (the 30-day
+  # sample fixture holds no status-less and no waived rows, so the fixture
+  # loop below cannot prove these three claims — review round 1 blocker) ──
+  # (a) a row with neither `status` nor `result` → skip / legacy_row, the
+  #     other fields kept and the version-2 fields filled in
+  run gate_row_normalize '{"gate":"x","exit_code":0,"duration_ms":5,"output":"o","attempts":1}'
+  [ "$status" -eq 0 ]
+  [ "$output" == '{"gate":"x","exit_code":0,"duration_ms":5,"output":"o","attempts":1,"status":"skip","reason":"legacy_row","waived":false,"row_version":2,"started_at":null,"completed_at":null,"evidence":null,"required":false,"reused_from":null,"result":"skip"}' ]
+  [ "$(_n '{}')" == "skip/legacy_row/false/skip" ]
+  # (b) `result: waived` with an exit code → fail / exit_<n> + waived: true
+  [ "$(_n '{"result":"waived","exit_code":7}')" == "fail/exit_7/true/waived" ]
+  [ "$(gate_row_normalize '{"result":"waived","exit_code":7}' | jq -c '{status,reason,waived}')" == '{"status":"fail","reason":"exit_7","waived":true}' ]
+  # (c) `result: profile_excluded` → skip / not_in_profile, with or without
+  #     the version-1 reason beside it
+  [ "$(_n '{"result":"profile_excluded"}')" == "skip/not_in_profile/false/skip" ]
+  [ "$(_n '{"result":"profile_excluded","reason":"profile_excluded","exit_code":0}')" == "skip/not_in_profile/false/skip" ]
+  # (d) each job_* result → fail / job_*
+  local j
+  for j in job_timeout job_lost job_cancelled; do
+    [ "$(_n "{\"result\":\"$j\",\"exit_code\":124}")" == "fail/$j/false/fail" ]
+  done
   # a version-2 row is not re-mapped
   [ "$(_n '{"row_version":2,"status":"fail","reason":"exit_9","waived":true,"result":"waived"}')" == "fail/exit_9/true/waived" ]
   # every version-1 result value the 30-day sample carries (Step 1 fixture)
