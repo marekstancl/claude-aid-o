@@ -160,15 +160,68 @@ Stated so its absence is not read as a pass:
 
 ## Verdict
 
-<!-- filled by the controller from the independent reader (Codex, or the Claude
-     stand-in). The reader re-runs the three greps above, reads the diff, and
-     answers:
-       - does every new function have a caller?
-       - does any removed layer still have a reader?
-       - does any comment name a file that does not exist?
-       - is anything in EPIC 2's removal list still in use?
-     Then, on its own line and nothing else:
+**Reader:** Codex (`codex exec --sandbox read-only`), three readings on
+2026-09-22 at HEAD 9825352f, d7653b8e and 95a39065. The first two returned
+`fail`; each finding was answered by a fix or by a correction of the question,
+and the third reading is reproduced below. The controller did not grade itself:
+the verdict line is the reader's.
 
-verdict: pass | fail
+**Reading 1 (HEAD 9825352f) — fail.** (a) All added functions have callers.
+(b) The baseline file was still listed as an ancillary exception in
+`lib/aid-ancillary.sh` and `defaults/policies/plan-final-policy.yaml` with
+nothing saying it is legacy-only. (c) No broken comment citation. (d) The reader
+counted EPIC 2's removal list as a blocker because the files still exist — a
+misreading of the question, since Step 9 deletes them and has not run.
+→ Fixed (b) in `d7653b8e`: both entries now say in a comment that nothing has
+written the file since Step 5 and the exception exists only so a tree upgraded
+from an older AID does not read as dirty. Question 4 was restated.
 
-     A `fail` blocks EPIC 2. -->
+**Reading 2 (HEAD d7653b8e) — fail.** (b) accepted as resolved. (d) accepted:
+no runtime call site, only test readers, listed as Step 9 notes. New blocker in
+(c): two comments naming files that do not exist —
+`defaults/enforcement-registry.yaml:4` (a gitignored seed of the June 2026
+audit) and `scripts/tests/fixtures/gates/projects/wan.yaml:114`.
+→ The registry header was rewritten (`95a39065`). The WAN file is a verbatim
+copy of another repository's `execution.yaml`, kept byte-identical on purpose so
+the upgrade and replay fixtures are real samples; its comments cite paths inside
+that repository. `scripts/tests/fixtures/**` was therefore excluded from
+question 3 as foreign data.
+
+**Reading 3 (HEAD 95a39065), verbatim:**
+
+> 1. Yes. At current HEAD `95a3906536fbdd8a06ca08de9963371919f4e45f`, I
+>    extracted added shell definitions with `git diff -U0 5701bafa~1..HEAD` and
+>    counted non-comment occurrences using `git grep -w`. All 20 added functions
+>    have callers: counts range from 2 (`validate_all_timeouts`,
+>    `_gate_row_finalize`, `gate_profile_floor_verdict`) to 20
+>    (`gate_row_normalize`). The nested `_eyu_del` has six calls in addition to
+>    its definition.
+> 2. No removed layer retains an active reader. The grep found only refusals,
+>    upgrade logic, detectors/tests, and historical records. The remaining
+>    baseline entries in `aid-ancillary.sh`, `plan-final-policy.yaml` and
+>    `aid-fsm.sh` are justified legacy-upgrade exceptions: their comments state
+>    that nothing writes the files after Step 5 and that the exact old paths are
+>    ignored only so upgraded trees are not falsely dirty. The entry itself need
+>    not leave with the runtime layer.
+> 3. No. I enumerated path-like citations in comments of every touched file,
+>    excluding all `scripts/tests/fixtures/**` as instructed, and resolved the
+>    concrete repository paths against HEAD. No comment names a missing file.
+>    The corrected enforcement-registry header is clean.
+> 4. No unnoticed runtime reader exists. `git grep` for all five Step 9 paths
+>    and for actual `source`/function calls returned no non-test runtime call
+>    site. Step 9 should nevertheless update the readily discoverable test
+>    readers: `test-init-gate-profiles.bats` sources `aid-gate-profile.sh`, and
+>    `test-recovery-ladder.bats` sources and calls `aid-service.sh`. It should
+>    also retire the `SERVICE_UNHEALTHY` emitter entries in
+>    `defaults/policies/auto-recovery.yaml` and clean meta-test references such
+>    as `test-run-all-tier-filter.bats`, `test-run-all-timing.bats` and
+>    `gates-measure.sh`. These are visible test/config references, not hidden
+>    breakage.
+
+**Step 9 inherits from this audit** (nothing here blocks EPIC 2): the two test
+sources above, the `SERVICE_UNHEALTHY` class and its emitter anchors in
+`defaults/policies/auto-recovery.yaml`, the meta-test and `gates-measure.sh`
+references to the deleted suites, and the `MIRRORED BY:` comment in
+`lib/aid-env-name-denylist.sh` naming `defaults/schemas/service-declaration.schema.json`.
+
+verdict: pass
