@@ -278,3 +278,31 @@ EOF
   gate_profile_is_high_risk_path "scripts/aid-run-gates.sh"
   ! gate_profile_is_high_risk_path "backend/app/main.py"
 }
+
+@test "P097 Step 6: a gate whose only claim was required_when keeps the OLD runner's meaning — required" {
+  # Since 2.96.0 (lib/aid-gate-applicability.sh, deleted in Step 6) a gate
+  # whose `required_when` held was REQUIRED (`required_source: required_when`);
+  # an advisory gate expressed that with its exit 2, not with the key. So the
+  # upgrade writes `required: true` where a lone `required_when` stood — ACTA's
+  # docs_updated (`required_when: always`, exit 2 graceful skip) included —
+  # and a gate that already says `required:` is left alone.
+  source "$HELPER"
+  local cfg="$TEST_TMPDIR/e.yaml"
+  cat > "$cfg" <<'YAML'
+gates:
+  docs_updated:
+    command: "sh -c 'exit 2'"
+    required_when: "always"
+  py_test:
+    command: "pytest"
+    required_when: "*.py exists"
+    required: false
+YAML
+  local out hash
+  out="$(execution_yaml_upgrade "$cfg")" || [ $? -eq 3 ]
+  hash="$(printf '%s\n' "$out" | sed -n 's/^diff_hash: //p')"
+  execution_yaml_upgrade "$cfg" --confirm-upgrade "$hash"
+  [ "$(yq '.gates.docs_updated.required' "$cfg")" = "true" ]
+  [ "$(yq '.gates.py_test.required' "$cfg")" = "false" ]
+  [ "$(yq '[.. | select(tag == "!!map") | keys[] | select(. == "required_when")] | length' "$cfg")" -eq 0 ]
+}
