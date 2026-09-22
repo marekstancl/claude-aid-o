@@ -30,6 +30,11 @@ _AID_ANCILLARY_LOADED=1
 # `legacy5` is aid-plan-fsm.sh's and aid-release.sh's set (the original five
 # plus counter.yaml, which AID itself rewrites on every id allocation);
 # `legacy4` is aid-fsm.sh's, which predates the `plan-state/` entry.
+# `.aid-o/metrics/gate-runtime-baselines.yaml` below is LEGACY-ONLY since P097
+# Step 5: nothing writes it any more (the baseline only proposes a number, it
+# never runs and never stores). The exception stays because a consumer upgraded
+# from an older AID still has the file on disk, and a tree that carries it must
+# not be called dirty. Drop it once no consumer has one.
 _AID_ANCILLARY_LEGACY5=(
   ".aid-o/config/queue.yaml"
   ".aid-o/config/counter.yaml"
