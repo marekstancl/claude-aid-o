@@ -271,7 +271,8 @@ the implementation actually functions across every layer it touches.
   - "Compiles" ≠ "looks right": compare the rendered page against the mockup/plan screenshot and
     put the comparison in step-verify
   - Wait for real data/state, not arbitrary sleeps (flake = false confidence). For infrastructure
-    readiness the named alternative is a service's `probe_cmd`, not a sleep.
+    readiness the gate's own `command:` waits — it starts what it needs and polls it until ready,
+    because the runner declares and manages nothing itself (P097 Step 6).
   - Tie each assertion to a specific DoD item; navigation-only checks are not acceptance
   - Cover negative/error paths and at least desktop (1280×720) + mobile (375×667) viewports
 - Fix loop: max 3 repair cycles per failed check, then ESCALATION
