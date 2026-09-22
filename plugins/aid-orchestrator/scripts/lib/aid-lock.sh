@@ -5,7 +5,7 @@
 #
 # WHY THIS EXISTS: three call sites already hand-roll the exact same
 # sidecar-flock idiom — `scripts/aid-emit-dispatch.sh:130-140` (twice) and
-# `scripts/lib/aid-gate-runtime-baseline.sh:129-131` (twice) — each opening a
+# the since-retired gate runtime baseline writer (twice) — each opening a
 # `<data_file>.lock` sidecar via `exec {fd}>lockfile` and calling
 # `flock -x -w <n> <fd>` inside a subshell scoped to that one critical
 # section. This file generalizes that idiom into two functions so the next
@@ -54,8 +54,8 @@
 # releasing the first one (each acquire call overwrites the global).
 #
 # ── SOURCEABLE-SAFE CONVENTION ───────────────────────────────────────────────
-# NO top-level `set -e`/`set -euo pipefail` (matches aid-gate-runtime-baseline.sh,
-# aid-gate-profile.sh, aid-cache-preflight.sh) — this file is sourced directly into callers running
+# NO top-level `set -e`/`set -euo pipefail` (matches aid-gate-profile.sh,
+# aid-cache-preflight.sh) — this file is sourced directly into callers running
 # under their OWN `set -euo pipefail`, and an unguarded non-zero return here
 # must not silently abort a caller's larger flow before it gets a chance to
 # check the return code. Every public function returns an explicit code;
@@ -215,7 +215,7 @@ aid_lock_release() {
 
 # ===========================================================================
 # Standalone CLI — debugging / bats convenience only (mirrors the idiom in
-# aid-gate-runtime-baseline.sh). The real, intended usage is sourcing this
+# aid-gate-profile.sh). The real, intended usage is sourcing this
 # file (see header). `acquire` runs in a single throwaway subprocess so it
 # cannot demonstrate the "hold across multiple statements" lifetime model —
 # it exists so a test can assert acquire/timeout behavior from a subprocess.

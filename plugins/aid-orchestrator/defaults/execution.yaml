@@ -10,7 +10,11 @@
 #   description      — human-readable purpose of the gate
 #   required         — true blocks GATES→DONE on failure; false is advisory
 #   command          — the shell command the gate runs
-#   timeout_seconds  — wall-clock budget for the command (default 60)
+#   timeout_seconds  — the gate's deadline, the only one it has (default 60).
+#                      Derivation rule: 2 × p95 of the last 20 runs, rounded
+#                      up to 30 s, 60–3 600 s; `aid-gate-runtime-report.sh`
+#                      (`gate_baseline_propose`) prints that number from the
+#                      recorded gates_rows history and never writes it here.
 #   max_retries      — retry attempts after a failure (default from policy)
 #   pass_criteria    — human-readable success definition
 #   when             — human-readable applicability condition

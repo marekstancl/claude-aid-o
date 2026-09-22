@@ -12,8 +12,6 @@
 _BATS_ADAPTER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-test-adapter-contract.sh
 source "${_BATS_ADAPTER_LIB_DIR}/aid-test-adapter-contract.sh"
-# shellcheck source=aid-gate-runtime-baseline.sh
-source "${_BATS_ADAPTER_LIB_DIR}/aid-gate-runtime-baseline.sh"
 
 # bats_adapter_discover <project_root> [search_subdir]
 #   Emits a JSON array of run_units[] entries to stdout, one per discovered

@@ -2681,48 +2681,6 @@ EOF
       }
       ;;
 
-    GATES:EXECUTE)
-      # P063 Step 3: repeated-timeout policy block precondition. A gate that
-      # aid-run-gates.sh's retry loop marked retryable:false (via
-      # gate_baseline_mark_policy_block, after 3+ consecutive timeouts each
-      # recorded at >= the currently-configured timeout_seconds — see
-      # gate_baseline_policy_check in aid-gate-runtime-baseline.sh) has
-      # nothing for gate-fixer to act on: the gate never got a chance to run
-      # to completion, so re-entering EXECUTE to "fix" it is pointless.
-      # Refuse the transition so the orchestrator routes to GATES:ESCALATION
-      # instead (AID-v3-principles.md §1 — a gates_report.json field nobody
-      # reads before retrying anyway is decoration, not enforcement).
-      local gates_report="${evidence_dir}/gates/gates_report.json"
-      if [[ -f "$gates_report" ]] && command -v jq &>/dev/null; then
-        local blocked_gate
-        blocked_gate=$(jq -r '(.gates // {}) | to_entries[] | select(.value.runtime_baseline.retryable == false) | .key' "$gates_report" 2>/dev/null | head -1)
-        if [[ -n "$blocked_gate" ]]; then
-          local blocked_action
-          blocked_action=$(jq -r --arg g "$blocked_gate" '.gates[$g].runtime_baseline.operator_action // "unknown"' "$gates_report" 2>/dev/null)
-          _PRECONDITION_FAIL_REASON="timeout_policy_block"
-          cat <<EOF >&2
-PRECONDITION FAIL: gate '${blocked_gate}' is retryable:false (timeout_policy_block) — refusing GATES→EXECUTE.
-
-Reason: gate '${blocked_gate}' has already timed out repeatedly at the currently
-        configured timeout_seconds (see gates_report.json.gates.${blocked_gate}.runtime_baseline)
-        — gate-fixer has nothing to act on since the gate never runs to
-        completion. Recommended operator action: ${blocked_action}.
-
-Fix: address the blocking gate directly (${blocked_action}: e.g. raise
-     execution.yaml.gates.${blocked_gate}.timeout_seconds, or switch it to a
-     background run mode), re-run gates, then retry — OR route this run to
-     GATES:ESCALATION instead of retrying EXECUTE:
-       aid-fsm.sh transition GATES ESCALATION ${state_file}
-
-OR (PM-authorized override, audited):
-  aid-fsm.sh transition GATES EXECUTE ${state_file} --force --reason \\
-      '<≥20 chars why re-entering EXECUTE for this gate is acceptable>'
-EOF
-          return 1
-        fi
-      fi
-      ;;
-
     # Failure/retry paths — always allowed
     EXECUTE:ESCALATION|GATES:ESCALATION) : ;;
 
@@ -2993,17 +2951,6 @@ _resume_release_pointer() {
   return 0
 }
 
-# ── P076 Step 6 / carried review obligation (AC4): the baseline sample a
-# resumed row records must JOIN the gate's existing series, not reset it ────
-# The baseline entry's identity is sha256("<gate>:<command_template>"), and the
-# in-line runner passes the TEMPLATE (`.gates.<gate>.command`, `{token}`s and
-# all) as that argument plus the RESOLVED string as the second one. A resume
-# that passed the resolved command as BOTH would fingerprint differently for
-# every token-bearing gate — the normal case here — wiping `recent_samples`,
-# stamping `series_reset_at`, and rewriting `command_template` to the resolved
-# string so the next ordinary `run-all` reset it right back. These three
-# helpers recover the same two arguments the in-line path uses.
-
 # _resume_execution_yaml <safe_next_action> — the execution.yaml the dead run
 # was using, taken from the artifact's own fully resolved instruction
 # (`... aid-run-gates.sh run-all <execution_yaml> <epic> <run> ...`). Empty
@@ -3021,41 +2968,11 @@ _resume_execution_yaml() {
   return 0
 }
 
-# _resume_command_template <gate> <execution_yaml> <resolved_cmd> — the
-# TEMPLATE, in descending order of authority: the gate's configured command
-# (so a genuinely EDITED command still resets the series, exactly as an
-# ordinary run would), then the template already on record for this gate (so a
-# resume with no reachable config still joins the recorded series), and only
-# then the resolved string (no history exists, so nothing can be reset).
-_resume_command_template() {
-  local gate="$1" ey="${2:-}" resolved="${3:-}" tmpl=""
-  if [[ -n "$ey" ]] && command -v yq >/dev/null 2>&1; then
-    tmpl="$(yq -r ".gates.\"${gate}\".command // \"\"" "$ey" 2>/dev/null || echo "")"
-    [[ "$tmpl" == "null" ]] && tmpl=""
-  fi
-  if [[ -z "$tmpl" ]] && declare -F _gbr_get_entry_json >/dev/null 2>&1; then
-    tmpl="$(_gbr_get_entry_json "$gate" 2>/dev/null | jq -r '.command_template // ""' 2>/dev/null || echo "")"
-    [[ "$tmpl" == "null" ]] && tmpl=""
-  fi
-  [[ -n "$tmpl" ]] || tmpl="$resolved"
-  printf '%s' "$tmpl"
-}
-
-# _resume_concurrency_context <gate> <repo> — the SAME derivation the in-line
-# runner performs. P078 removed the scheduler, so every gate — targeted_tests
-# included — executes sequentially and the baseline series is single-valued.
-# Kept as a function (rather than inlining the literal) because the resume path
-# and the in-line runner must never drift on this value, and a named seam is
-# where a future change would land.
-_resume_concurrency_context() {
-  printf 'sequential'
-}
-
-# _resume_write_row <evidence_dir> <gate> <job_dir> <job_id> <state> <attempts> <head> [execution_yaml] [repo] [tree]
+# _resume_write_row <evidence_dir> <gate> <job_dir> <job_id> <state> <attempts> <head> [tree]
 #   The ONLY thing resume writes into the run's evidence: Step 2's durable
 #   incremental row checkpoint. Byte-shaped exactly like the in-line path's —
-#   the same `gate_row_from_job` mapping, the same `. + {attempts, runtime_
-#   baseline}` merge, the same `_checkpoint {head, tree, key, written_at}`
+#   the same `gate_row_from_job` mapping, the same `. + {attempts}` merge,
+#   the same `_checkpoint {head, tree, key, written_at}`
 #   envelope from the same shared helper, the same atomic tmp+mv. It has to be:
 #   the restore pass refuses a row with no envelope
 #   (`row_not_bound_to_a_revision`) or an unverifiable key
@@ -3064,8 +2981,7 @@ _resume_concurrency_context() {
 #   Echoes the row file path. rc 1 if nothing could be written.
 _resume_write_row() {
   local evidence_dir="$1" gate="$2" job_dir="$3" job_id="$4" state="$5" \
-        attempts="$6" head="$7" execution_yaml="${8:-}" repo="${9:-}" \
-        tree="${10:-}"
+        attempts="$6" head="$7" tree="${8:-}"
   # The gate name becomes a filename — never let it become a path.
   case "$gate" in */*|*..*|"") return 1 ;; esac
 
@@ -3073,31 +2989,8 @@ _resume_write_row() {
   row="$(gate_row_from_job "$gate" "$job_dir" "$job_id" "$state")" || true
   [[ -n "$row" ]] || return 1
 
-  # The baseline sample the dead in-line runner never got to record. Same
-  # library, same call, same ARGUMENTS and the same ordering (update, then
-  # report) — so the runtime_baseline this row carries is the one the in-line
-  # path would have carried, and the sample lands in the gate's EXISTING
-  # series instead of resetting it. The resolved command comes from the JOB
-  # RECORD's argv, never re-derived; the template and the concurrency context
-  # are recovered exactly as documented above.
-  local rcmd exit_code dur_ms timeout_s tmpl ctx
-  rcmd="$(jq -r '.command[2] // ""' "$job_dir/job.json" 2>/dev/null || echo "")"
-  exit_code="$(jq -r '.exit_code' <<<"$row" 2>/dev/null || echo 1)"
-  dur_ms="$(jq -r '.duration_ms' <<<"$row" 2>/dev/null || echo 0)"
-  timeout_s="$(jq -r '.deadline_sec // 0' "$job_dir/job.json" 2>/dev/null || echo 0)"
-  if [[ -n "$rcmd" ]] && declare -F gate_baseline_update >/dev/null 2>&1; then
-    tmpl="$(_resume_command_template "$gate" "$execution_yaml" "$rcmd")"
-    ctx="$(_resume_concurrency_context "$gate" "$repo")"
-    gate_baseline_update "$gate" "$tmpl" "$rcmd" "$exit_code" "$dur_ms" "$timeout_s" "$ctx" || true
-  fi
-  local rb='null'
-  if declare -F gate_baseline_report_json >/dev/null 2>&1; then
-    rb="$(gate_baseline_report_json "$gate" 2>/dev/null)"
-    [[ -z "$rb" ]] && rb='null'
-  fi
-
   local merged
-  merged="$(jq --argjson rb "$rb" ". + {\"attempts\":${attempts}, \"runtime_baseline\": \$rb}" <<<"$row")" || return 1
+  merged="$(jq ". + {\"attempts\":${attempts}}" <<<"$row")" || return 1
 
   local rows_dir="${evidence_dir}/gates_rows"
   mkdir -p "$rows_dir" 2>/dev/null || return 1
@@ -3499,13 +3392,11 @@ cmd_resume() {
     return 0
   fi
 
-  # Load the shared mapping + baseline libraries lazily: they are needed only
-  # on this one path, and a resume must not change what every other aid-fsm.sh
-  # command loads.
+  # Load the shared mapping library lazily: it is needed only on this one
+  # path, and a resume must not change what every other aid-fsm.sh command
+  # loads.
   # shellcheck disable=SC1091
   [[ -f "${SCRIPT_DIR}/lib/aid-gate-row.sh" ]] && source "${SCRIPT_DIR}/lib/aid-gate-row.sh"
-  # shellcheck disable=SC1091
-  [[ -f "${SCRIPT_DIR}/lib/aid-gate-runtime-baseline.sh" ]] && source "${SCRIPT_DIR}/lib/aid-gate-runtime-baseline.sh"
   if ! declare -F gate_row_from_job >/dev/null 2>&1; then
     _resume_release_pointer "$epic_id"
     _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but the shared job-result mapping (lib/aid-gate-row.sh) is unavailable"
@@ -3513,14 +3404,6 @@ cmd_resume() {
     _resume_next_line "$epic_id" "rerun the gates: " "$next_action"
     return 0
   fi
-  # The baseline library's data file, resolved through the state root so a
-  # resume from the plan worktree writes the same file the in-line runner did.
-  if [[ -z "${AID_GATE_BASELINE_FILE:-}" ]]; then
-    local _st_root; _st_root="$(aid_state_root 2>/dev/null)" || _st_root="$PWD"
-    export AID_GATE_BASELINE_FILE="${_st_root}/.aid-o/metrics/gate-runtime-baselines.yaml"
-    mkdir -p "$(dirname "$AID_GATE_BASELINE_FILE")" 2>/dev/null || true
-  fi
-
   local attempts=1
   [[ "$job_id" =~ -attempt-([0-9]+)$ ]] && attempts="${BASH_REMATCH[1]}"
   # HEAD *and* tree, through the SHARED derivation the in-line checkpoint writer
@@ -3537,7 +3420,7 @@ cmd_resume() {
   head="${_rev%% *}"; tree="${_rev##* }"
 
   # The gate's own configuration, as named by the artifact's resolved
-  # instruction — the template argument the baseline sample needs (AC4).
+  # instruction — the service sweep below reads its declarations.
   local execution_yaml; execution_yaml="$(_resume_execution_yaml "$next_action")"
 
   # ─── the service safety net, on THIS path only (P076 Step 10) ────────────
@@ -3571,7 +3454,7 @@ cmd_resume() {
   _fsm_service_sweep "$evidence_dir" "$execution_yaml" "resume"
 
   local rowfile=""
-  if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head" "$execution_yaml" "$repo" "$tree")"; then
+  if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head" "$tree")"; then
     local rres; rres="$(jq -r "${AID_GATE_ROW_JQ}"'gate_row_normalize | "\(.status)/\(.reason)"' "$rowfile" 2>/dev/null || echo '?')"
     _resume_release_pointer "$epic_id"
     _resume_say "$epic_id" "found" "job '${job_id}' for gate '${gate}' is ${state} (collected, current at ${head:0:12})"
@@ -4154,14 +4037,10 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # same change on the very next invocation.
   #
   # .aid-o/metrics/gate-runtime-baselines.yaml (+ its .lock sidecar) get the
-  # same treatment (P063 Step 2): the gitignore/.git-info-exclude backfill
-  # (aid-run-gates.sh's aid_gate_baseline_ensure_gitignored) is the PRIMARY
-  # defense against these files ever showing up as tracked, but this guard is
-  # defense-in-depth, independent of whether that bootstrap succeeded in a
-  # given clone — a project where either file is unusually git-tracked must
-  # still not have its own runtime metrics writes block `init`. Same
-  # single-file, non-glob scoping as the two entries above (never a
-  # directory-wide glob).
+  # same treatment: nothing writes them since P097 Step 5, but a project that
+  # still carries them tracked from before must not have that leftover block
+  # `init`. Same single-file, non-glob scoping as the two entries above (never
+  # a directory-wide glob).
   # P074 Step 1: the dirty guard is a TREE check — it must evaluate the tree
   # the command runs in (aid_invoke_root), which inside a linked worktree is
   # the worktree itself, never the primary checkout.

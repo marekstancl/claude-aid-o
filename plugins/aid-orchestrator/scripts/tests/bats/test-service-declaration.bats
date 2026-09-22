@@ -529,8 +529,9 @@ YAML
         if (.value | type) == "object" then
           .value |= (
               (if has("duration_ms") then .duration_ms = 0 else . end)
-            | (if (.runtime_baseline | type) == "object"
-               then .runtime_baseline.p95_ms = 0 else . end)
+            # P097 Step 2 rows stamp their own start/end (row_version 2).
+            | (if has("started_at") then .started_at = "NORMALIZED" else . end)
+            | (if has("completed_at") then .completed_at = "NORMALIZED" else . end)
           )
         else . end)
     | ._command_log |= map(.duration_ms = 0)

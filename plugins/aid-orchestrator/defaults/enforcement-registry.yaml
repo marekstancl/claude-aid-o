@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 540          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 541          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -1242,22 +1242,37 @@ enforcements:
     test: "scripts/tests/bats/test-plan-close.bats (grep: 'aid-plan-close-check.sh')"
   - id: gate_timeout_policy_block
     type: 1
-    source: "scripts/aid-fsm.sh (grep: 'timeout_policy_block' inside check_preconditions GATES:EXECUTE)"
-    instruction: "scripts/lib/aid-gate-runtime-baseline.sh (grep: 'gate_baseline_policy_check|gate_baseline_mark_policy_block') producer"
+    source: "removed (scripts/aid-fsm.sh check_preconditions GATES:EXECUTE)"
+    instruction: "removed (the baseline library's policy check and block marker)"
     severity: blocking
     surface: "GATES:EXECUTE precondition"
-    status: active
-    description: "P063 Step 3: closes the gap between aid-run-gates.sh's retry loop detecting a repeated-timeout streak (Step 1's gate_baseline_policy_check — block iff the last 3 recorded samples for a gate are ALL censored/timeout AND each sample's OWN recorded timeout_seconds >= the currently-configured value) and that verdict actually changing orchestrator behavior. When the retry loop hits 'block' it calls gate_baseline_mark_policy_block (sets gates_report.json.gates.<gate>.runtime_baseline.retryable:false + operator_action + policy_result:timeout_policy_block) and stops retrying instead of consuming another attempt (result stays the unchanged literal 'fail'; reason:timeout_policy_block + recommendation:increase_timeout_or_background are additive). Without THIS precondition that verdict was only a report field nobody reads before the orchestrator naturally re-enters GATES:EXECUTE for the gate-fixer retry cycle (AID-v3-principles.md §1 — Detector without Enforcement is Decoration, the P026/WAN anchor). check_preconditions now reads gates_report.json at GATES:EXECUTE and refuses the transition (naming the specific blocking gate + its operator_action) whenever ANY gate has runtime_baseline.retryable==false — required-ness is irrelevant (gate-fixer has nothing to act on either way). A gate whose CURRENT attempt just passed is never affected (gate_baseline_update never re-arms retryable:true itself; only a fresh mark_policy_block or gate_baseline's own reset-on-fingerprint-change path clears it). Same override convention as every sibling precondition: --force --reason '<>=20 chars>', audited via fsm_force_override/waiver."
-    test: "scripts/tests/bats/test-aid-fsm.bats (grep: 'AC11'), scripts/tests/bats/test-aid-run-gates.bats (grep: 'AC6|AC10')"
+    status: removed_scoped
+    removal: "P097 Step 5 (2026-09-22) — the runtime baseline was removed: a gate's deadline is `timeout_seconds` from configuration and nothing else, so the same configuration gives the same deadline on every host. Measurement: the P097 Step 1 baseline (scripts/tests/fixtures/gates/gates-baseline.json) — policy_result was `none` on all 474 rows that carried a baseline (acta 349, wan 97, agents 24, aid-orchestrator 4), and run_mode_recommended reached `background` on 3 of them (acta) without any configuration changing; the baseline steered nothing. History now only proposes a number (gate_baseline_propose) that a person writes into the file."
+    replacement_guard: "gate_timeout_fixed"
+    description: "RETIRED by P097 Step 5: a timed-out gate is a `job_timeout` row and the recovery ladder retries gate failures; no cross-run streak is kept. Was: P063 Step 3: closes the gap between aid-run-gates.sh's retry loop detecting a repeated-timeout streak (Step 1's gate_baseline_policy_check — block iff the last 3 recorded samples for a gate are ALL censored/timeout AND each sample's OWN recorded timeout_seconds >= the currently-configured value) and that verdict actually changing orchestrator behavior. When the retry loop hits 'block' it calls gate_baseline_mark_policy_block (sets gates_report.json.gates.<gate>.runtime_baseline.retryable:false + operator_action + policy_result:timeout_policy_block) and stops retrying instead of consuming another attempt (result stays the unchanged literal 'fail'; reason:timeout_policy_block + recommendation:increase_timeout_or_background are additive). Without THIS precondition that verdict was only a report field nobody reads before the orchestrator naturally re-enters GATES:EXECUTE for the gate-fixer retry cycle (AID-v3-principles.md §1 — Detector without Enforcement is Decoration, the P026/WAN anchor). check_preconditions now reads gates_report.json at GATES:EXECUTE and refuses the transition (naming the specific blocking gate + its operator_action) whenever ANY gate has runtime_baseline.retryable==false — required-ness is irrelevant (gate-fixer has nothing to act on either way). A gate whose CURRENT attempt just passed is never affected (gate_baseline_update never re-arms retryable:true itself; only a fresh mark_policy_block or gate_baseline's own reset-on-fingerprint-change path clears it). Same override convention as every sibling precondition: --force --reason '<>=20 chars>', audited via fsm_force_override/waiver."
+    test: "removed with the mechanism (P097 Step 5)"
   - id: gate_runtime_baseline_advisory
     type: 11
-    source: "scripts/aid-gate-runtime-report.sh"
-    instruction: "scripts/lib/aid-gate-runtime-baseline.sh (grep: 'gate_baseline_show|gate_baseline_report_json') producer"
+    source: "removed (scripts/aid-gate-runtime-report.sh now prints proposed vs configured only)"
+    instruction: "removed (the baseline library's show and report-json producers)"
     severity: advisory
-    status: active
+    status: removed_scoped
+    removal: "P097 Step 5 (2026-09-22) — the runtime baseline was removed: a gate's deadline is `timeout_seconds` from configuration and nothing else, so the same configuration gives the same deadline on every host. Measurement: the P097 Step 1 baseline (scripts/tests/fixtures/gates/gates-baseline.json) — policy_result was `none` on all 474 rows that carried a baseline (acta 349, wan 97, agents 24, aid-orchestrator 4), and run_mode_recommended reached `background` on 3 of them (acta) without any configuration changing; the baseline steered nothing. History now only proposes a number (gate_baseline_propose) that a person writes into the file."
+    replacement_guard: "gate_timeout_fixed"
     surface: llm-facing
-    description: "P063 Step 4: `aid-gate-runtime-report.sh [--project-root <path>] [gate_name]` is a thin, standalone CLI presentation layer over Step 1's library — it sources aid-gate-runtime-baseline.sh directly and calls gate_baseline_show/gate_baseline_report_json rather than re-deriving any percentile/formatting logic. Given a gate_name it prints that gate's p95/timeout/run-mode summary plus a one-line data-sufficiency note (derived only from report_json's own data_sufficient/non_censored_samples_count fields, never from censored/timeout samples); given none, it lists every gate with at least one recorded sample. This is a DISTINCT, non-blocking row from gate_timeout_policy_block above (Step 3) — it is advisory-only, never an FSM precondition, and never changes orchestrator behavior by itself. P076 Step 1 gave the run-mode half of that recommendation a real landing field: `run_mode: foreground|background` is now an optional per-gate key in execution.yaml (default foreground, documented in defaults/execution.yaml, read by aid-run-gates.sh), so the advice names an edit that actually exists instead of a hypothetical one. P076 Step 3 added the recommendation's first behavioural consumer, itself deliberately observe-only: when the baseline recommends background for a gate that declares no run_mode, aid-run-gates.sh emits ONE `gate_run_mode_advice` timeline event per gate per run carrying the exact one-line edit — it surfaces the recommendation, it never applies it. Flipping a gate remains a human/controller edit to execution.yaml (timeout_seconds and run_mode alike); nothing in this row auto-changes a project's configuration."
-    test: "scripts/tests/bats/test-aid-gate-runtime-report.bats"
+    description: "RETIRED by P097 Step 5: the report prints the proposed `timeout_seconds` next to the configured one and never advises a run mode. Was: P063 Step 4: `aid-gate-runtime-report.sh [--project-root <path>] [gate_name]` is a thin, standalone CLI presentation layer over Step 1's library — it sources aid-gate-runtime-baseline.sh directly and calls gate_baseline_show/gate_baseline_report_json rather than re-deriving any percentile/formatting logic. Given a gate_name it prints that gate's p95/timeout/run-mode summary plus a one-line data-sufficiency note (derived only from report_json's own data_sufficient/non_censored_samples_count fields, never from censored/timeout samples); given none, it lists every gate with at least one recorded sample. This is a DISTINCT, non-blocking row from gate_timeout_policy_block above (Step 3) — it is advisory-only, never an FSM precondition, and never changes orchestrator behavior by itself. P076 Step 1 gave the run-mode half of that recommendation a real landing field: `run_mode: foreground|background` is now an optional per-gate key in execution.yaml (default foreground, documented in defaults/execution.yaml, read by aid-run-gates.sh), so the advice names an edit that actually exists instead of a hypothetical one. P076 Step 3 added the recommendation's first behavioural consumer, itself deliberately observe-only: when the baseline recommends background for a gate that declares no run_mode, aid-run-gates.sh emits ONE `gate_run_mode_advice` timeline event per gate per run carrying the exact one-line edit — it surfaces the recommendation, it never applies it. Flipping a gate remains a human/controller edit to execution.yaml (timeout_seconds and run_mode alike); nothing in this row auto-changes a project's configuration."
+    test: "removed with the mechanism (P097 Step 5); the report's own suite is scripts/tests/bats/test-aid-gate-runtime-report.bats"
+  - id: gate_timeout_fixed
+    type: 4
+    source: "scripts/aid-run-gates.sh (grep: 'validate_all_timeouts'; run_gate's `timeout` and run_background_gate's --deadline both take the configured value)"
+    instruction: "defaults/execution.yaml (comment on timeout_seconds); docs/extending-aid.md (grep: 'Fixed timeouts')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P097 Step 5: a gate's deadline is `timeout_seconds` from configuration and nothing else — absent → 60, non-integer or ≤ 0 → exit 2 naming the gate before any gate runs. No live baseline steers the run: nothing reads a history file during a gate run, a gate past its deadline is a `status: fail, reason: job_timeout` row with no surviving child, and `aid-gate-runtime-baseline.sh propose` only prints what the written rule (2 × p95 of the last 20 rows, job_timeout rows excluded, rounded up to 30 s, 60–3 600 s) gives from the recorded gates_rows."
+    test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'P097 Step 5'), scripts/tests/bats/test-aid-gate-runtime-baseline.bats"
 
   # ── IMP-232 v2.58.1: plan-level closure wired into the runtime lifecycle ────
   # v2.58.0 shipped the closure library/CLI as DETECTORS with no runtime call
@@ -3156,16 +3171,18 @@ enforcements:
 
   - id: gate_baseline_sequential_only
     type: 4
-    source: "scripts/lib/aid-gate-runtime-baseline.sh (gate_baseline_update)"
+    source: "removed (the baseline library's writer)"
     instruction: "n/a"
     severity: advisory
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "P097 Step 5 (2026-09-22) — the runtime baseline was removed: a gate's deadline is `timeout_seconds` from configuration and nothing else, so the same configuration gives the same deadline on every host. Measurement: the P097 Step 1 baseline (scripts/tests/fixtures/gates/gates-baseline.json) — policy_result was `none` on all 474 rows that carried a baseline (acta 349, wan 97, agents 24, aid-orchestrator 4), and run_mode_recommended reached `background` on 3 of them (acta) without any configuration changing; the baseline steered nothing. History now only proposes a number (gate_baseline_propose) that a person writes into the file."
+    replacement_guard: "none needed — the writer and its concurrency_context argument are gone"
     verdict: ALIGNED
     tier: t1
-    description: "P083 Step 8 — a pure deletion, not a new capability. P078 removed the parallel-gate scheduler; both producers (aid-run-gates.sh, aid-fsm.sh) have hardcoded concurrency_context='sequential' ever since, the receipt schema is `enum: [\"sequential\"]`, and the live baseline's non-sequential sibling maps (`recent_samples_by_context`/`percentiles_by_context`) were uniformly empty or absent across every entry — there was nothing left to migrate. The acceptor now refuses any other value by name instead of silently falling through a dead branch, so a resurrection attempt (a stale caller, a copy-pasted example) fails loudly rather than writing into fields nothing reads."
+    description: "RETIRED by P097 Step 5 with the writer it guarded. Was: P083 Step 8 — a pure deletion, not a new capability. P078 removed the parallel-gate scheduler; both producers (aid-run-gates.sh, aid-fsm.sh) have hardcoded concurrency_context='sequential' ever since, the receipt schema is `enum: [\"sequential\"]`, and the live baseline's non-sequential sibling maps (`recent_samples_by_context`/`percentiles_by_context`) were uniformly empty or absent across every entry — there was nothing left to migrate. The acceptor now refuses any other value by name instead of silently falling through a dead branch, so a resurrection attempt (a stale caller, a copy-pasted example) fails loudly rather than writing into fields nothing reads."
     recovery: "The refusal names the rejected value and the gate. Callers must pass 'sequential' or omit the argument (its default)."
-    test: "scripts/tests/bats/test-gate-baseline-sequential-only.bats"
+    test: "removed with the mechanism (P097 Step 5)"
 
   - id: plan_reuse_evidence
     type: 4

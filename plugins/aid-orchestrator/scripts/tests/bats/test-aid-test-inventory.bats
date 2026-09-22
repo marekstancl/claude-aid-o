@@ -317,7 +317,6 @@ _inv_out() {
   # A symlink under a different name would be two sh: ids for one real file if
   # the adapter followed it; the guard exists so that class fails loudly.
   run bash -c '
-    source "$1/scripts/lib/aid-gate-runtime-baseline.sh" 2>/dev/null || true
     source "$1/scripts/lib/aid-test-adapter-contract.sh"
     units="[{\"run_unit_id\":\"sh:a\",\"runner\":\"sh\",\"source_paths\":[\"tests/x.sh\"]},
             {\"run_unit_id\":\"sh:b\",\"runner\":\"sh\",\"source_paths\":[\"tests/x.sh\"]}]"

@@ -87,7 +87,7 @@ PLUGIN_PREFIX="plugins/aid-orchestrator"
 # execution, without depending on the caller's CWD.
 #
 # AID_SELECT_TESTS_PLUGIN_ROOT is a test-only isolation seam (same convention
-# as AID_GATE_BASELINE_FILE / AID_CHANGED_PATHS elsewhere in this plugin): it
+# as AID_CHANGED_PATHS elsewhere in this plugin): it
 # lets a bats fixture point test EXECUTION at fast stub files under a mktemp
 # root, while the CLASSIFICATION logic (map_path_to_tests below) still maps
 # real production paths to their real repo-relative test-file locations —

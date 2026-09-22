@@ -178,9 +178,9 @@ stop_classes:
 
   GATE_TIMEOUT:
     description: >-
-      A gate did not finish inside its configured budget — either its job blew
-      past its deadline plus grace and the runner cancelled it, or the
-      repeated-timeout policy blocked a further attempt.
+      A background gate's job blew past its deadline plus grace and the runner
+      cancelled it. (A gate the supervisor or `timeout` stopped at its deadline
+      is an ordinary `job_timeout` failure row, retried like any other.)
     detector: mechanical
     ladder_entry: mechanical
     ladder_entry_status: live
@@ -195,9 +195,6 @@ stop_classes:
       - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
         anchor: "_gate_ladder_emit GATE_TIMEOUT gate_job_deadline_exceeded"
         note: "background gate blew its deadline + grace; runner cancels and reads the terminal record"
-      - file: plugins/aid-orchestrator/scripts/aid-run-gates.sh
-        anchor: "_gate_ladder_emit GATE_TIMEOUT timeout_policy_block"
-        note: "three censored samples at or above the current timeout — no further attempt is spent"
     allowed_actions: [rerun_targeted, collect_and_continue]
     budget: {attempts: 1, wall_clock_seconds: 900}
     terminus: [adjudicate, escalation, pm_force]

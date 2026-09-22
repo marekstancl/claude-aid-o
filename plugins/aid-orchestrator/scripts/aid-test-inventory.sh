@@ -11,7 +11,7 @@
 #
 # Both emitted artifacts are schema-validated (test-audit-inventory.schema.json
 # / test-catalog.schema.json) BEFORE publish, and published atomically
-# (tmp-file-then-mv, same discipline as aid-gate-runtime-baseline.sh) — a
+# (tmp-file-then-mv, same discipline as aid-emit-dispatch.sh) — a
 # crash/kill mid-write, or a document that fails its own schema, must never
 # leave a partial or invalid artifact at the real path (PM feedback, E1
 # re-review).
@@ -377,7 +377,7 @@ if ! adapter_validate_schema "$CATALOG_SCHEMA" "$catalog_json"; then
 fi
 
 # ─── Atomic publish: tmp-file-then-mv for BOTH artifacts, same discipline as
-# aid-gate-runtime-baseline.sh — a crash/kill between the tmp write and the
+# aid-emit-dispatch.sh — a crash/kill between the tmp write and the
 # mv leaves the real files exactly as they were (never a torn/partial write).
 inventory_tmp="${output_dir%/}/inventory.json.tmp.$$"
 catalog_tmp="${output_dir%/}/test-catalog.proposed.yaml.tmp.$$"

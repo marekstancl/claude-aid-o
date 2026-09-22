@@ -90,8 +90,9 @@ done
 if (( line_count )); then
   cd "$PLUGIN_DIR"
   # scripts/gates/* and the profile libraries (old classifier until Step 9, new
-  # resolver) join the named files by glob, so the list survives the removal.
-  wc -l "${AREA_FILES[@]}" scripts/lib/aid-gate-profile*.sh scripts/gates/* 2>/dev/null |
+  # resolver) join the named files by glob, so the list survives the removal;
+  # a named file a later step deleted counts 0 (wc's rc is not the measurement).
+  { wc -l "${AREA_FILES[@]}" scripts/lib/aid-gate-profile*.sh scripts/gates/* 2>/dev/null || true; } |
     awk '$2 != "total" {printf "%s\t%s\n", $2, $1}' |
     jq -Rn --arg commit "$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
       '{command: "gates-measure.sh --line-count", commit: $commit,

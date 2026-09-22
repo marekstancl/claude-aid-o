@@ -1079,19 +1079,6 @@ check a plan-required gate could disappear from a run that still reports `overal
 2. `aid-fsm.sh transition GATES EXECUTE <state_file>` (re-enters EXECUTE for fix)
 3. After fix: `aid-fsm.sh transition EXECUTE GATES <state_file>`
 
-**Repeated-timeout policy block (P063 Step 3):** step 2 above (`aid-fsm.sh transition GATES
-EXECUTE`) can now be refused. If `aid-run-gates.sh`'s retry loop already saw the gate time out
-3+ times in a row, each at a timeout at least as large as the currently-configured
-`timeout_seconds` (`gate_baseline_policy_check`, P063 Step 1), it stops retrying instead of
-burning another attempt and marks the gate `retryable:false` with an `operator_action`
-(`gate_baseline_mark_policy_block`). A policy-blocked gate has nothing for gate-fixer to act
-on — the gate never ran to completion, so there is no failure output to fix, only a timeout
-setting to change. Re-entering EXECUTE for it is pointless, so the `GATES→EXECUTE` FSM
-precondition now refuses that specific transition (naming the blocking gate and its
-`operator_action`) and the orchestrator should route straight to `GATES:ESCALATION` instead —
-see "On gate failure (max_attempts exhausted)" below. `--force --reason '<≥20 chars>'` remains
-the escape hatch, same as every sibling precondition.
-
 **On gate failure (max_attempts exhausted):**
 `aid-fsm.sh transition GATES ESCALATION <state_file>`
 

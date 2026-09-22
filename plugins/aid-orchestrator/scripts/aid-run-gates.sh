@@ -71,10 +71,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
-# shellcheck source=lib/aid-gate-runtime-baseline.sh
-source "${SCRIPT_DIR}/lib/aid-gate-runtime-baseline.sh"
-# shellcheck source=lib/aid-gitignore-backfill.sh
-source "${SCRIPT_DIR}/lib/aid-gitignore-backfill.sh"
 # shellcheck source=lib/aid-run-gates-report.sh
 source "${SCRIPT_DIR}/lib/aid-run-gates-report.sh"
 # shellcheck source=lib/aid-gate-row.sh
@@ -157,51 +153,6 @@ _gate_ladder_emit() {
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.16.0}"
 
-# ─── Gate runtime baseline gitignore bootstrap (P063 Step 2) ────────────────
-# Lazy, idempotent, LOCAL-ONLY: if `.aid-o/metrics/` (the gate runtime
-# baseline library's data directory — owned by aid-gate-runtime-baseline.sh,
-# Step 1) is not ALREADY excluded from git in this clone — whether via a
-# brand-new project's shipped/tracked `.gitignore` or a previous run of this
-# very function — add it (and its `.lock` glob) to `.git/info/exclude`
-# (never the tracked `.gitignore`). Uses the exact same
-# `git check-ignore -q <probe>` technique aid-plan-close-check.sh's Check 1
-# uses for its own per-project gitignored-vs-committed detection.
-#
-# Lives HERE (not inside aid-gate-runtime-baseline.sh) because this plugin's
-# own P063 EPIC plan.json scopes that library file to Step 1 only — Step 2
-# integrates it without modifying it, calling only its already-published
-# gate_baseline_update/gate_baseline_report_json/gate_baseline_show functions.
-#
-# Deliberately a no-op whenever AID_GATE_BASELINE_FILE is set — that env var
-# is aid-gate-runtime-baseline.sh's own documented test-isolation seam (its
-# bats suite points it at an isolated tmp file "without requiring a git
-# checkout"); if a caller has opted into that isolation, this bootstrap must
-# never write into the REAL clone's `.git/info/exclude` as a side effect.
-# Also a no-op when git is unavailable or CWD isn't inside a git working
-# tree — fails open, matching every public function in the two libraries
-# this depends on.
-aid_gate_baseline_ensure_gitignored() {
-  [[ -n "${AID_GATE_BASELINE_FILE:-}" ]] && return 0
-  command -v git >/dev/null 2>&1 || return 0
-  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
-
-  # Already excluded (tracked .gitignore OR a prior .git/info/exclude
-  # backfill) — nothing to do.
-  git check-ignore -q ".aid-o/metrics/__aid_gate_baseline_probe__" 2>/dev/null && return 0
-
-  # P079 Step 2: from a LINKED worktree `.git` is a file, not a directory, so
-  # the literal `.git/info/exclude` path named nothing writable. The common dir
-  # is the one every worktree of this clone shares — the exclude lands once
-  # there and applies to all of them, which is what "LOCAL-ONLY to this clone"
-  # meant all along.
-  local _common_dir
-  _common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
-  [[ -n "$_common_dir" ]] || return 0
-  gitignore_exclude_append "${_common_dir}/info/exclude" ".aid-o/metrics/"
-  gitignore_exclude_append "${_common_dir}/info/exclude" ".aid-o/metrics/*.lock"
-  return 0
-}
-
 # Phase 2 (P037) — resolve {token} placeholders in gate commands via bash parameter expansion.
 # Recognized tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}, {plugin_path}, {evidence_dir}.
 # Unknown {<token>} → fail-loud exit 1 (silent pass-through is a debug trap).
@@ -257,6 +208,10 @@ run_gate() {
 
   local result="pass" reason=""
   [[ $exit_code -ne 0 ]] && result="fail"
+  # `timeout(1)` exits 124 when the deadline passed: the row says so by name
+  # (the closed vocabulary's `job_timeout`, the same reason a background gate's
+  # supervisor reports), never as a bare `exit_124` a reader has to decode.
+  [[ $exit_code -eq 124 ]] && reason="job_timeout"
   # A gate that exits 0 while its own output says it looked at nothing did not
   # pass, it did not run. The list is closed and literal on purpose: "0 errors"
   # is a result, "0 files checked" is an absence. A fan-out gate with one empty
@@ -355,19 +310,6 @@ resolve_run_mode() {
   yq ".gates.\"${gate}\".run_mode // \"foreground\"" "$file"
 }
 
-# _run_mode_declared <execution_yaml> <gate_name>
-#   True iff the gate DECLARES a run_mode key at all. Not a second run_mode
-#   reader — it resolves no value and applies no default; resolve_run_mode above
-#   stays the only place that turns config into a mode. It exists because
-#   resolve_run_mode deliberately collapses "absent" and "explicit foreground"
-#   into the same answer, and the P076 Step 3 advice must stay silent for BOTH
-#   explicit values: a PM who already wrote `run_mode: foreground` has made the
-#   decision this advice exists to prompt.
-_run_mode_declared() {
-  local file="$1" gate="$2"
-  [[ "$(yq ".gates.\"${gate}\" | has(\"run_mode\")" "$file" 2>/dev/null)" == "true" ]]
-}
-
 # validate_all_run_modes <execution_yaml>
 #   Fail-loud sweep over EVERY defined gate, run BEFORE any gate command is
 #   spawned — exactly like the gate-profile validation above it. A typo
@@ -386,6 +328,23 @@ validate_all_run_modes() {
         return 1
         ;;
     esac
+  done < <(yq '.gates | keys | .[]' "$file")
+  return 0
+}
+
+# validate_all_timeouts <execution_yaml>
+#   `timeout_seconds` is the gate's deadline and nothing else (P097 Step 5):
+#   absent → the template default 60; anything but a positive integer is a
+#   configuration refusal that names the gate, before any gate runs.
+validate_all_timeouts() {
+  local file="$1" gate t
+  while IFS= read -r gate; do
+    [[ -z "$gate" ]] && continue
+    t="$(GATE="$gate" yq '.gates[strenv(GATE)].timeout_seconds // 60' "$file")"
+    if [[ ! "$t" =~ ^[0-9]+$ ]] || (( t <= 0 )); then
+      echo "ERROR: aid-run-gates.sh: gate '${gate}' has invalid timeout_seconds: '${t}' (a positive integer number of seconds; omit the key for the default 60)" >&2
+      return 2
+    fi
   done < <(yq '.gates | keys | .[]' "$file")
   return 0
 }
@@ -915,25 +874,6 @@ _svc_release_run() {
   return 0
 }
 
-# _gate_expect_p95_seconds <gate_name>
-#   The gate's runtime-baseline p95 in SECONDS for aid-job.sh's --expect-p95,
-#   but only once the baseline holds >= 3 non-censored samples (the same
-#   "enough data to quote" threshold gate_baseline_recommend_timeout uses).
-#   Echoes nothing for a young gate, so the flag is simply omitted and the job
-#   record legitimately lacks the field.
-_gate_expect_p95_seconds() {
-  local gate_name="$1" bj p95 nc
-  bj="$(gate_baseline_report_json "$gate_name" 2>/dev/null || true)"
-  [[ -z "$bj" || "$bj" == "null" ]] && return 0
-  p95="$(jq -r '.p95_ms // "null"' <<<"$bj" 2>/dev/null || echo null)"
-  nc="$(jq -r '.non_censored_samples_count // 0' <<<"$bj" 2>/dev/null || echo 0)"
-  [[ "$p95" =~ ^[0-9]+$ ]] || return 0
-  [[ "$nc" =~ ^[0-9]+$ ]] || return 0
-  if (( nc < 3 )); then return 0; fi
-  printf '%s' "$(( (p95 + 999) / 1000 ))"
-  return 0
-}
-
 # _bg_fail_row <gate_name> <reason> <message> [job_id]
 #   The gate row for a background gate that never got a supervised job at all.
 #   Deliberately a plain `fail` in the existing vocabulary — the reason field
@@ -1232,9 +1172,6 @@ run_background_gate() {
   else
     local -a run_args=(run --jobs-dir "$jobs_dir" --id "$job_id"
                        --label "$gate_name" --deadline "$timeout_s")
-    local p95_sec
-    p95_sec="$(_gate_expect_p95_seconds "$gate_name")"
-    [[ -n "$p95_sec" ]] && run_args+=(--expect-p95 "$p95_sec")
     run_args+=(-- "${job_argv[@]}")
 
     local start_err start_rc=0
@@ -1631,6 +1568,7 @@ run_all_gates() {
   # spawned — a typo on the third gate must not be discovered after the first
   # two have already run.
   validate_all_run_modes "$execution_yaml" || exit 1
+  validate_all_timeouts "$execution_yaml" || exit 2
 
   # ─── services validation (P076 Step 8) ─────────────────────────────────
   # Same entry point, same spirit: the OPTIONAL `services:` block is checked
@@ -1639,11 +1577,6 @@ run_all_gates() {
   # the middle of a gate. An absent block is a no-op — nothing changes for a
   # project that declares no services.
   _validate_services_config "$execution_yaml" || exit 1
-
-  # One-time-per-clone lazy bootstrap (P063 Step 2) — see
-  # aid_gate_baseline_ensure_gitignored above. Called once per run (not per
-  # gate/attempt): idempotent, and there's nothing gate-specific about it.
-  aid_gate_baseline_ensure_gitignored
 
   # ─── Gate profile validation (P097 Step 4) ───────────────────────────
   # The caller names the profile; nothing here chooses one. A name that is
@@ -1816,20 +1749,6 @@ run_all_gates() {
   # the current HEAD+command. Surfaces top-level as waived_gates[] so nothing
   # downstream can miss that a required gate was accepted without passing.
   declare -a waived_gates=()
-  # Gates whose runtime baseline (P063 Step 2) already has enough data
-  # (non_censored_samples_count >= 5) to be worth a human-readable summary
-  # line after the run — populated inline at merge time below (reusing the
-  # runtime_baseline_json already fetched there) so the post-loop summary
-  # never re-queries gates that were profile_excluded/skipped/never run this
-  # round, and never re-fetches the same gate's baseline twice.
-  declare -a baseline_summary_gates=()
-  # P076 Step 3 — gates whose own telemetry recommends `background` while their
-  # config declares no run_mode at all. Appended EXACTLY ONCE per gate, at the
-  # single post-retry merge point below (never per attempt), from the
-  # runtime_baseline JSON already fetched there — no second baseline pass.
-  # Emitted after the run as one named timeline event per gate, observe-only:
-  # flipping a gate stays a one-line human edit (P069 observe-then-promote).
-  declare -a run_mode_advice_gates=()
 
   # P069 Step 14 — targeted_tests escalation (exit 3 unknown_production /
   # exit 11 mapping_gap). Set inline when that gate's FINAL result settles
@@ -2190,11 +2109,6 @@ run_all_gates() {
 
     log_event "$timeline_file" "gate_start" gate="$gate_name" epic_id="$epic_id"
 
-    # Gates run sequentially by design — the P069 scheduler dispatch path
-    # was removed in P078 (PM decision 2026-08-09). The baseline still
-    # records the concurrency context; it is always "sequential" now.
-    local gate_concurrency_context="sequential"
-
     # The dispatch points tag their entries with the gate they are running
     # under, which only this loop knows.
     export AID_CURRENT_GATE_ID="$gate_name"
@@ -2257,52 +2171,15 @@ run_all_gates() {
         r="skip"
       fi
 
-      # ─── Gate runtime baseline sample (P063 Step 2) ────────────────────
-      # One sample per ATTEMPT (not per gate) — a retried gate's earlier
-      # failed/timed-out attempts are real duration data too. Deliberately
-      # excludes "skip" (both the no_command-less path above, which never
-      # reaches here, and this exit-2/pass_criteria convention above): a
-      # skip never really executed the gate's intended work, so it is not a
-      # meaningful timing sample. Never allowed to fail the run — a metrics
-      # write is never load-bearing for gate pass/fail.
-      if [[ "$r" != "skip" ]]; then
-        local baseline_exit_code baseline_duration_ms
-        baseline_exit_code=$(echo "$gate_result" | jq -r '.exit_code')
-        baseline_duration_ms=$(echo "$gate_result" | jq -r '.duration_ms')
-        gate_baseline_update "$gate_name" "$cmd" "$resolved_cmd" \
-          "$baseline_exit_code" "$baseline_duration_ms" "$timeout_s" "$gate_concurrency_context" || true
-      fi
-
       [[ "$r" == "pass" || "$r" == "skip" ]] && break
-
-      # ─── Repeated-timeout policy block (P063 Step 3) ───────────────────
-      # Reached ONLY when the current attempt already failed/timed out (the
-      # pass/skip break above already returned for a passing attempt — a
-      # gate whose CURRENT attempt just passed NEVER reaches this check,
-      # which is what makes AC10 hold) AND the loop is about to decide
-      # whether to consume another attempt. `timeout_s` is the gate's
-      # currently-configured timeout, read once before this loop began.
-      # gate_baseline_policy_check compares the last 3 recorded samples
-      # (already including the one gate_baseline_update just wrote above for
-      # THIS attempt) — "block" iff all 3 are censored (timeout) AND each
-      # sample's OWN recorded timeout_seconds >= the current config, so a
-      # timeout streak recorded under a since-raised timeout never blocks a
-      # fresh attempt under the new, longer timeout (AC6 fixture b).
-      if [[ "$(gate_baseline_policy_check "$gate_name" "$timeout_s")" == "block" ]]; then
-        gate_baseline_mark_policy_block "$gate_name" "increase_timeout_or_background" || true
-        # status stays the UNCHANGED literal "fail" (never a new value) —
-        # reason/recommendation describe WHY no further attempt was made.
-        gate_result=$(echo "$gate_result" | jq '.status = "fail" | .result = "fail" | .reason = "timeout_policy_block" | .recommendation = "increase_timeout_or_background"')
-        # P076 Step 13 — GATE_TIMEOUT, mechanical ladder entry. AFTER the row is
-        # final, so the recorded stop is the verdict that was actually reached;
-        # `gate_result` is never touched from here, and `break` still happens.
-        _gate_ladder_emit GATE_TIMEOUT timeout_policy_block \
-          "gate ${gate_name}: three censored samples at or above the configured ${timeout_s}s timeout — no further attempt is spent"
-        break
-      fi
 
       [[ $attempt -le $max_retries ]] && echo "Gate ${gate_name} failed (attempt ${attempt}/${max_retries}), retrying..." >&2
     done
+    # A gate that spent every attempt leaves the loop by its condition, one
+    # past the last attempt made; `attempts` on the row counts attempts, not
+    # loop exits. (P097 Step 5: the policy block's early `break` used to hide
+    # this for timeouts.)
+    (( attempt > max_retries + 1 )) && attempt=$(( max_retries + 1 ))
 
     # `final_result` is the row's status, or "waived" once a waiver applied:
     # the one word the timeline event and the overall verdict below key on.
@@ -2384,30 +2261,7 @@ run_all_gates() {
       fi
     fi
 
-    # Add to gates JSON aggregate. `runtime_baseline` (P063 Step 2) is purely
-    # additive — gate_baseline_report_json always returns a valid JSON object
-    # (a zeroed/null-filled one when there's no entry yet or yq/jq is
-    # missing), never a bare `null`, so this merge never removes/renames any
-    # existing key.
-    local runtime_baseline_json runtime_baseline_nc
-    runtime_baseline_json=$(gate_baseline_report_json "$gate_name" 2>/dev/null)
-    [[ -z "$runtime_baseline_json" ]] && runtime_baseline_json='null'
-    runtime_baseline_nc=$(jq -r '.non_censored_samples_count // 0' <<<"$runtime_baseline_json" 2>/dev/null)
-    [[ "$runtime_baseline_nc" =~ ^[0-9]+$ ]] && (( runtime_baseline_nc >= 5 )) && baseline_summary_gates+=("$gate_name")
-
-    # ─── P076 Step 3 — run_mode advice collection (observe-only) ───────────
-    # Same already-fetched runtime_baseline_json, no extra read. The
-    # recommendation itself carries the library's rules (>= 5 non-censored
-    # samples AND p95 > 10 min → "background"; anything else → null or
-    # "foreground"), so nothing is re-derived here. An unreadable/absent
-    # baseline yields null → no advice, no failure (fail-open telemetry).
-    local _advice_rec _advice_p95
-    _advice_rec=$(jq -r '.run_mode_recommended // "null"' <<<"$runtime_baseline_json" 2>/dev/null || echo null)
-    if [[ "$_advice_rec" == "background" ]] && ! _run_mode_declared "$execution_yaml" "$gate_name"; then
-      _advice_p95=$(jq -r '.p95_ms // "null"' <<<"$runtime_baseline_json" 2>/dev/null || echo null)
-      [[ "$_advice_p95" =~ ^[0-9]+$ ]] || _advice_p95="null"
-      run_mode_advice_gates+=("${gate_name}|${_advice_p95}")
-    fi
+    # Add to gates JSON aggregate.
     $first || gates_json+=","
     first=false
     local merged_row
@@ -2419,10 +2273,10 @@ run_all_gates() {
     # `legacy_default`. Without it, a run that stopped blocking because a
     # required_when stopped matching looks identical to one that was never
     # required, and adoption of this change could not be audited.
-    merged_row=$(echo "$gate_result" | jq --argjson rb "$runtime_baseline_json" \
+    merged_row=$(echo "$gate_result" | jq \
       --argjson req "$([[ "${required:-false}" == "true" ]] && echo true || echo false)" \
       --arg reqsrc "${required_source:-legacy_default}" \
-      ". + {\"attempts\":${attempt}, \"required\": \$req, \"required_source\": \$reqsrc, \"runtime_baseline\": \$rb}")
+      ". + {\"attempts\":${attempt}, \"required\": \$req, \"required_source\": \$reqsrc}")
     # The checkpoint file is a row too, so the contract is applied BEFORE it
     # is written; a row outside the vocabulary ends the run here, by name.
     merged_row="$(_gate_row_finalize "$gate_name" "$merged_row")" || {
@@ -2887,51 +2741,6 @@ run_all_gates() {
   local total_duration=$((SECONDS - run_start))
   log_event "$timeline_file" "gate_runner_complete" \
     report_path="$report_path" overall="$overall" duration_sec="$total_duration"
-
-  # ─── Gate runtime baseline summary (P063 Step 2) ───────────────────────
-  # Human-readable, one line per gate whose baseline has "enough data to
-  # trust" (non_censored_samples_count >= 5 — matches
-  # gate_baseline_recommend_run_mode's own threshold). `baseline_summary_gates`
-  # was populated inline at merge time above (reusing the runtime_baseline
-  # JSON already fetched there for THIS run's gates only — never a second
-  # full re-scan of every defined gate, which would re-pay yq/jq subprocess
-  # cost for profile_excluded/skipped/never-run gates for no benefit).
-  # Printed to stderr only — stdout carries exactly the final JSON `report`
-  # line consumed by callers/tests (`run-all ... | jq`).
-  if (( ${#baseline_summary_gates[@]} > 0 )); then
-    local baseline_summary_gate
-    for baseline_summary_gate in "${baseline_summary_gates[@]}"; do
-      gate_baseline_show "$baseline_summary_gate" >&2
-    done
-  fi
-
-  # ─── run_mode advice (P076 Step 3) ─────────────────────────────────────
-  # The first behavioural consumer of gate_baseline_recommend_run_mode, and
-  # deliberately the mildest one: a named timeline event carrying the exact
-  # one-line edit, once per gate per run. It changes NOTHING about how any gate
-  # ran — the run is already over at this point, the report is written, and the
-  # decision to flip stays a human one. The edit string is built from the gate
-  # name alone, so it is copy-pasteable in any consumer project.
-  if (( ${#run_mode_advice_gates[@]} > 0 )); then
-    local _advice_entry _advice_gate_name _advice_gate_p95
-    for _advice_entry in "${run_mode_advice_gates[@]}"; do
-      _advice_gate_name="${_advice_entry%|*}"
-      _advice_gate_p95="${_advice_entry##*|}"
-      # Once per gate per RUN, not per invocation: a targeted pass that
-      # escalates re-enters this script as a subprocess writing to the SAME
-      # run timeline, and a gate present in both passes must still be advised
-      # exactly once. Cheap because the advice list is normally empty.
-      if [[ -f "$timeline_file" ]] && jq -se --exit-status --arg g "$_advice_gate_name" \
-           'any(.[]; .event == "gate_run_mode_advice" and .gate == $g)' \
-           "$timeline_file" >/dev/null 2>&1; then
-        continue
-      fi
-      log_event "$timeline_file" "gate_run_mode_advice" \
-        gate="$_advice_gate_name" \
-        p95_ms="$_advice_gate_p95" \
-        edit="set gates.${_advice_gate_name}.run_mode: background in .aid-o/config/execution.yaml"
-    done
-  fi
 
   [[ "$overall" == "pass" ]] && return 0 || return 1
 }

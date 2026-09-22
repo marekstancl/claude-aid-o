@@ -11,9 +11,11 @@
 #   2  the budget-th + 1 attempt refuses with `budget_exhausted` + adjudicate
 #   3  an action the class does not allow is refused BY NAME
 #   4  the wall clock refuses even with attempts remaining
-#   5  THE EMITTER, A/B: a timeout fixture writes a GATE_TIMEOUT ladder entry
-#      while the gate verdict stays byte-identical to the same fixture run by
-#      the same runner with the ladder lib ABSENT
+#   5  A/B: a timeout fixture's gate verdict stays byte-identical to the same
+#      fixture run by the same runner with the ladder lib ABSENT (P097 Step 5:
+#      a gate stopped at its deadline is a plain job_timeout row and writes no
+#      ladder entry; GATE_TIMEOUT's one live emitter is the past-grace cancel
+#      of a job its supervisor failed to stop, which no fixture can force)
 #   6  escalate lands `blocked_for_pm` on the map, and leaving ESCALATION still
 #      requires `escalation_decision` (regression)
 #   7  the reader honours `revoked_unrecorded` — the Step-12 carried obligation
@@ -131,9 +133,8 @@ normalize_report() {
           .value |= (
               (if has("duration_ms") then .duration_ms = 0 else . end)
             | (if has("output") then .output = "NORMALIZED" else . end)
-            | (if (.runtime_baseline | type) == "object"
-               then .runtime_baseline.p95_ms = 0 | .runtime_baseline.mean_ms = 0
-               else . end)
+            | (if has("started_at") then .started_at = "NORMALIZED" else . end)
+            | (if has("completed_at") then .completed_at = "NORMALIZED" else . end)
           )
         else . end)
     | (if has("_command_log") then ._command_log |= map(.duration_ms = 0) else . end)
@@ -259,7 +260,7 @@ normalize_report() {
   [ "$output" = "proceed 1" ]
 }
 
-@test "case 5: A/B — the GATE_TIMEOUT emitter records, and the gate verdict is byte-identical without it" {
+@test "case 5: A/B — a timeout fixture's gate verdict is byte-identical with and without the ladder lib" {
   # THE INVARIANCE PROOF. Not "the row still looks right" — the SAME runner is
   # run twice over the SAME fixture, once with lib/aid-recovery-ladder.sh
   # present and once with it absent from an otherwise identical copy of the
@@ -292,13 +293,9 @@ YAML
   ladder_report="$a/$EVID_REL/gates/gates_report.json"
   [ -f "$ladder_report" ] || { cat "$WORK/a.err"; false; }
 
-  # the ladder entry really was written, by the emitter this case is about
-  local arec="$a/$EVID_REL/recovery-ladder.jsonl"
-  [ -f "$arec" ] || { echo "no ladder record"; ls -la "$a/$EVID_REL"; false; }
-  run jq -r -s '[.[] | select(.class=="GATE_TIMEOUT" and .emitter=="timeout_policy_block")] | length' "$arec"
-  [ "$output" -ge 1 ] || { cat "$arec"; false; }
-  run jq -r -s '.[0] | [.event, .class, .outcome] | join("|")' "$arec"
-  [ "$output" = "recovery_stop|GATE_TIMEOUT|detected" ]
+  # P097 Step 5: a deadline stop is an ordinary job_timeout row — no ladder
+  # entry is written for it, with the lib present or absent.
+  [ ! -f "$a/$EVID_REL/recovery-ladder.jsonl" ]
 
   # ── B: the same runner from a plugin copy with the ladder lib REMOVED ─────
   local plug="$WORK/plugin-noladder"
@@ -327,9 +324,8 @@ YAML
 
   # and, said explicitly, the verdict this fixture exists to protect
   run jq -r '[.gates.slow.result, (.gates.slow.exit_code|tostring), .gates.slow.reason,
-              (.gates.slow.runtime_baseline.samples_count|tostring),
-              (.gates.slow.runtime_baseline.non_censored_samples_count|tostring)] | join("|")' "$ladder_report"
-  [ "$output" = "fail|124|timeout_policy_block|3|0" ] || { echo "$output"; false; }
+              (.gates.slow.attempts|tostring)] | join("|")' "$ladder_report"
+  [ "$output" = "fail|124|job_timeout|3" ] || { echo "$output"; false; }
 }
 
 @test "case 6: escalate lands blocked_for_pm, and leaving ESCALATION still needs the decision field" {

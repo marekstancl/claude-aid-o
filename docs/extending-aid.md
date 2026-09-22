@@ -1261,17 +1261,32 @@ building one needs a registered collector first, and the runner is written to
 refuse an unknown mode rather than to document the requirement.
 
 **Background it when losing the session would cost more than the gate.** The
-mechanical signal is already collected for you: when a gate's runtime baseline
-recommends `background` and the gate declares no `run_mode`, the runner emits a
-`gate_run_mode_advice` timeline event carrying the measured p95 and the exact
-one-line edit. That event is deliberately observe-only — it never flips
-anything: it writes no gate row, changes no gate verdict and no exit code, and
-an unreadable baseline yields no advice and no failure
-(`test-run-mode-advice.bats`, four cases over the real gate runner). The flip is
-a PM's one-line decision, and in this repository only `bats_all` and
+flip is a PM's one-line decision, and in this repository only `bats_all` and
 `bats_boundary` have earned it. The shipped `/aid-init` template documents the
 key and declares it nowhere, so a consumer project's gates keep the foreground
 path, which is byte-for-byte the code AID always ran.
+
+**Fixed timeouts (P097 Step 5).** A gate's deadline is `timeout_seconds` and
+nothing else: absent, the template default of 60 s; not a positive integer,
+`run-all` exits 2 naming the gate before any gate runs. The same configuration
+and the same code give the same deadline on every host — no history file
+steers a run (the P063 runtime baseline, its repeated-timeout block and its
+run-mode advice were removed; the measurement that justified it is the
+`gate_timeout_fixed` registry row). A gate past its deadline is a
+`status: fail, reason: job_timeout` row with no surviving child, whether
+`timeout(1)` or the job supervisor stopped it. History informs the number in
+the file: the written rule is 2 × p95 of the last 20 measured `duration_ms`
+(`job_timeout` rows excluded), rounded up to 30 s, 60–3 600 s, and the
+maintainer tool prints it next to what is configured —
+
+```bash
+plugins/aid-orchestrator/scripts/aid-gate-runtime-report.sh [--project-root <path>] [gate]
+# bats_all proposed_timeout_seconds=2280 (p95 1140000 ms over the last 20 measured durations, 1 job_timeout rows excluded) configured_timeout_seconds=3600
+```
+
+(`scripts/lib/aid-gate-runtime-baseline.sh propose <evidence root> <gate>`
+underneath; fewer than five measured durations prints `insufficient_history`).
+It never writes: a person edits `timeout_seconds`.
 
 **Re-attach, precisely.** The job id is deterministic —
 `<gate>-attempt-<N>` — so a rerun looks in exactly the directory this attempt
