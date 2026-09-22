@@ -12,18 +12,19 @@
 # value happens to be.
 #
 # The check exists at TWO altitudes on purpose:
-#   * DECLARATION time — `_svc_denied_port_env` in aid-run-gates.sh, so a bad
-#     declaration is refused in the same sweep as every other shape rule;
-#   * EXPORT time — `_aid_svc_export_port` in lib/aid-service.sh, the one place
+#   * DECLARATION time — was `_svc_denied_port_env` in aid-run-gates.sh; that
+#     validator left with the service lifecycle (P097 Step 6);
+#   * EXPORT time — `_aid_svc_export_port` in the service library, the one place
 #     that actually performs the export, so a caller that skipped validation
-#     still cannot get the name past the export.
+#     still cannot get the name past the export (leaves in P097 Step 9).
 # Two altitudes, but ONE list — a second enumeration is a list that drifts, and
 # it did: the export-time copy was missing the interpreter-hook and git families
 # for one commit and advertised protection it did not provide.
 #
 # MIRRORED BY: defaults/schemas/service-declaration.schema.json
 # (`$defs.service.properties.port_env.allOf`) — keep the entries and their order
-# identical. `test-service-declaration.bats` fails if the three drift apart.
+# identical (the suite that pinned the three together left with the service
+# declaration validator in P097 Step 6; the schema follows in Step 9).
 #
 # MATCHING is EXACT and CASE-SENSITIVE for the enumerated names, and
 # case-sensitive PREFIX for the open-ended families (`LD_`, `DYLD_`,

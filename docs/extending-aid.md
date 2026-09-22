@@ -1341,78 +1341,28 @@ diverged once, fail-open).
 
 ### Declaring services
 
-Infrastructure a gate needs is declared in `execution.yaml` next to the gates,
-and the runner owns its lifecycle:
+**Removed (P097 Step 6).** The service lifecycle of P076 — the `services:`
+block, per-gate `needs_services`, the per-run port registry, the ownership
+claim, the entry sweep and the FSM's `_fsm_service_sweep` — is gone, and
+nothing replaces it: the sweep only ever signalled service jobs, and the
+resume path always left a live background gate alone, so gates keep their one
+process owner (`aid-job.sh`, the owned-job contract above) and there is
+nothing left to sweep. The measurement behind the decision is the P097 Step 1
+baseline: no consumer project declared a service. What the mechanism was, and
+the rules it enforced, are history in `CHANGELOG-archive.md` (the P076 entry).
+A `services.json` left under a run's evidence by a pre-2.103 run is reported
+once by `aid-fsm.sh resume`/`done-advance` and otherwise ignored.
 
-```yaml
-services:
-  postgres:
-    start_cmd: "docker compose up postgres"     # MUST stay in the foreground
-    probe_cmd: "pg_isready -h 127.0.0.1 -p \"$PGPORT_E2E\""
-    stop_cmd: "docker compose stop postgres"
-    startup_deadline_seconds: 60                # health-probe budget
-    max_lifetime_seconds: 3600                  # the job's whole-process deadline
-    restart_authorized: false                   # repairs are opt-in authority
-    port_env: PGPORT_E2E                        # per-run allocated port
-
-gates:
-  e2e:
-    command: "npm run test:e2e"
-    needs_services: [postgres]
-```
-
-Four rules a contributor has to respect:
-
-1. **`start_cmd` must remain the foreground process of its job.** The service
-   job IS the ownership record — `lib/aid-service.sh` contains no `setsid`, no
-   pgid arithmetic and no direct `kill`; its entire process surface is four
-   `aid-job.sh` invocations. A trailing `&`, `nohup`, `disown` or `setsid` is
-   refused by a lint at declaration time, and a command that daemonizes
-   internally is caught at runtime (a terminal job whose probe still answers is
-   refused by name) — the honest limit being that after that refusal the orphan
-   really does survive, because there is nothing left to signal.
-2. **Readiness is `probe_cmd`, never a sleep.** The probe is polled to healthy
-   or to `startup_deadline_seconds`, bounded by `timeout(1)` so a blocking probe
-   cannot outlive the declared budget. The e2e role card names `probe_cmd` as
-   the alternative to an arbitrary sleep; manual `docker` is a fallback that
-   must be declared in the report.
-3. **Ports come from the registry, not from the config.** With `port_env` set,
-   the runner allocates a per-run port by BIND probe (a connect scan cannot
-   prove bindability, which is why `python3` is a named dependency with a named
-   refusal), exports it into every command for that service, and records it in
-   `<evidence>/services.json` — written *before* the spawn, so no started job is
-   ever unrecorded. Omitting `port_env` is the honestly-named escape hatch for a
-   service on a fixed external port. `port_env` names are checked against one
-   shared denylist (`lib/aid-env-name-denylist.sh`) — `PATH`, `BASH_ENV`, the
-   `LD_`/`DYLD_`/`BASH_FUNC_`/`AID_` families and friends — because a project's
-   own config must not be able to aim it at the loader or the runner's state.
-4. **Acquire once, release once, and never inside a gate.** Services come up
-   after the declaration validator and before the gate loop, and go down after
-   the report is written; `needs_services` is a *check* at gate start
-   (unhealthy → that gate fails fast with `service_unhealthy`, the rest still
-   run), never a repair. A nested runner invocation — the targeted-tests
-   escalation re-enters the same script — runs with
-   `AID_SERVICE_LIFECYCLE_OWNED=1` and neither sweeps, acquires nor releases.
-   That rule exists because the parallel-teardown race is real: two gates
-   sharing a service, one tearing it down under the other.
-
-**Crash recovery is the NEXT run's entry sweep**, because a SIGKILLed runner
-reaches no cleanup hook. The sweep runs before the acquire, and it is
-authenticated: an ownership claim (pid, `/proc` start time, boot id, host) is
-written before the acquire and dropped after teardown, every "cannot tell"
-answers *alive*, and a second runner meeting a live claim REFUSES rather than
-skipping the sweep and inheriting the services. A job under `service-jobs/` that
-neither this run's spawn ledger nor its registry vouches for is REPORTED with the
-exact cancel command, never signalled.
-
-**Teardown reconciles commands against the declaration.** The registry records
-`stop_cmd` and `probe_cmd` so a teardown still works after the config moved, but
-whenever a declaration can be read it WINS, and a recorded entry naming a
-service the config does not declare is refused rather than executed. Read
-`aid_service_down_all`'s header before you call it: **its rc 2 has several
-distinct causes** — a live foreign owner, a missing `jq`, a missing `yq`, an
-unreadable declaration — and it prints its own named line for each. A caller
-must relay that line, not assert a cause of its own.
+**Removed keys are refused, never ignored (P097 Step 6).** `run-all` stops
+with exit 2 before any gate runs when `execution.yaml` still carries
+`services:` or `gate_profile_defaults` at the top level, or `required_when` or
+`needs_services` on a gate — naming every key found, the gate it sits on, and
+the upgrade that removes it
+(`bash $AID_PLUGIN_PATH/scripts/lib/aid-init-execution-yaml.sh upgrade <project root>`).
+The key is the signal, not its content: `services: {}` is refused like a
+populated block. An ignored key is how `required_when` sat unread in every
+generated project for four months; `required:` alone now decides whether a
+gate blocks. The registry row is `execution_yaml_dead_keys_refused`.
 
 ### The recovery policy, and how a consumer changes it
 
@@ -1422,11 +1372,12 @@ stop classes (`GATE_TIMEOUT`, `SERVICE_UNHEALTHY`, `JOB_LOST`,
 `TRANSIENT_INFRA`, `DISPATCH_ORPHANED`, `REVIEW_EXHAUSTED`, `UNCLASSIFIED`),
 each carrying:
 
-- `allowed_actions` — drawn from a CLOSED vocabulary of six reversible actions
-  (`wait_and_resume`, `retry_once`, `restart_service_once`, `rerun_targeted`,
-  `resume_missing_lenses`, `collect_and_continue`). None of them weakens, waives
-  or bypasses a gate. An action name outside the six is a schema error at load,
-  never a silent no-op.
+- `allowed_actions` — drawn from a CLOSED vocabulary of five reversible actions
+  (`wait_and_resume`, `retry_once`, `rerun_targeted`, `resume_missing_lenses`,
+  `collect_and_continue`; `restart_service_once` left with the service
+  lifecycle in P097 Step 6). None of them weakens, waives or bypasses a gate.
+  An action name outside the five is a schema error at load, never a silent
+  no-op.
 - `budget: {attempts, wall_clock_seconds}` — spent per run per class.
 - `emitter` — the real `file:line` that classifies this stop, grepped against
   the source by a test that turns red when the anchor moves.

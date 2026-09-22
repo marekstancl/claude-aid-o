@@ -555,6 +555,18 @@ execution_yaml_upgrade() {
     while IFS= read -r key; do
       if [[ "$key" =~ $_EYU_DEAD_KEY_RE ]]; then
         _eyu_del "gates.${id}.${key}" || true
+        # `required_when: "<glob> exists"` was the gate's only "required" claim
+        # in every generated project (every expression is static stack
+        # detection, true for the project it was written for): dropping it
+        # alone leaves a gate `required: false` and a profile with no required
+        # gate, which the resolver refuses. Found by P097 Step 6.
+        if [[ "$key" == required_when ]] \
+           && [[ "$(g="$id" yq '.gates[strenv(g)] | has("required")' "$file")" == "false" ]]; then
+          local rw_pad
+          rw_pad="$(sed -n "${loc% *}p" "$file" | sed -E 's/^( *).*/\1/')"
+          ins_after+=("${loc#* }"); ins_text+=("${rw_pad}required: true")
+          notes+=("- gates.${id}: required_when replaced by required: true")
+        fi
       elif [[ ! "$key" =~ $_EYU_ROW_KEY_RE ]]; then
         notes+=("- note: gates.${id}.${key} is not a key the composer writes; left in place")
       fi

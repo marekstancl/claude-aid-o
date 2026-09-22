@@ -250,11 +250,10 @@ cmd_run() {
   #     a sleeping process still holds the write end.
   # The second one was MEASURED on this branch: a bats suite ran every case and
   # then sat for fifteen minutes with no children, because six `sleep 3600`
-  # processes held fd 3. Fixed here rather than in one caller, because three
-  # scripts already call `run` (aid-run-gates.sh, lib/aid-service.sh,
-  # lib/aid-test-execution-unit.sh; two audit callers left on 2026-09-21)
-  # and each of them has the same hazard the day it
-  # holds a lock or is read through a pipe.
+  # processes held fd 3. Fixed here rather than in one caller, because several
+  # scripts call `run` (aid-run-gates.sh, lib/aid-test-execution-unit.sh, and
+  # the service library until it leaves in P097 Step 9) and each of them has
+  # the same hazard the day it holds a lock or is read through a pipe.
   #
   # The loop is Linux-only, which this supervisor already is (it reads /proc for
   # PID-reuse safety). The `$(...)` listing the descriptors opens one of its own
@@ -613,10 +612,9 @@ cmd_cancel() {
     # self-consistency, and an attacker who copies a victim's real pid and pgid
     # out of /proc satisfies it exactly. Nothing readable from this directory can
     # distinguish those two cases, so the defence cannot live here. It lives in
-    # the CALLER: `cancel` is aimed at a specific --id, and the only untargeted
-    # caller in this repo (aid-service's orphan sweep) now signals a job only
-    # when this run's own spawn ledger or registry vouches for it, and reports
-    # rather than signals anything else. See `_aid_svc_vouched_set`.
+    # the CALLER: `cancel` is aimed at a specific --id, and there is no
+    # untargeted caller left in this repo (the service orphan sweep, the one
+    # there was, went with the service lifecycle in P097 Step 6).
     _live_pgid=""
     # `|| true` INSIDE the substitution: on a later iteration the pid may already
     # be dead (the signal took effect), so `ps` fails; without this the pipefail

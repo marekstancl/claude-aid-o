@@ -1315,6 +1315,64 @@ YAML
   done
 }
 
+# ─── P097 Step 6: removed keys are refused with the upgrade command, never ignored ──
+
+@test "P097 Step 6: required_when, needs_services, services: and gate_profile_defaults -> exit 2 naming key, gate and the upgrade command, before any gate runs" {
+  local label yaml
+  for label in required_when needs_services services services_empty gate_profile_defaults; do
+    case "$label" in
+      required_when)        yaml=$'gates:\n  broken:\n    command: "echo ran > ran"\n    required_when: always' ;;
+      needs_services)       yaml=$'gates:\n  broken:\n    command: "echo ran > ran"\n    needs_services: [api]' ;;
+      services)             yaml=$'services:\n  api:\n    start_cmd: "sleep 1"\n    probe_cmd: "true"\n    startup_deadline_seconds: 5\ngates:\n  alpha:\n    command: "echo ran > ran"\n    required: true' ;;
+      services_empty)       yaml=$'services: {}\ngates:\n  alpha:\n    command: "echo ran > ran"\n    required: true' ;;
+      gate_profile_defaults) yaml=$'gate_profile_defaults:\n  step: fast\ngates:\n  alpha:\n    command: "echo ran > ran"\n    required: true' ;;
+    esac
+    printf '%s\n' "$yaml" > "$EXEC_YAML"
+    rm -f "$TEST_PROJECT/ran" "$REPORT"
+    run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+    [ "$status" -eq 2 ] || { echo "$label: rc=$status $output"; false; }
+    [[ "$output" == *"carries configuration this runner no longer reads"* ]] || { echo "$label: $output"; false; }
+    case "$label" in
+      required_when|needs_services) [[ "$output" == *"${label} (gate broken)"* ]] || { echo "$label: $output"; false; } ;;
+      services_empty)               [[ "$output" == *"services (top level)"* ]] || { echo "$label: $output"; false; } ;;
+      *)                            [[ "$output" == *"${label} (top level)"* ]] || { echo "$label: $output"; false; } ;;
+    esac
+    [[ "$output" == *"aid-init-execution-yaml.sh upgrade <project root>"* ]] || { echo "$label: $output"; false; }
+    [ ! -f "$TEST_PROJECT/ran" ]
+    [ ! -f "$REPORT" ]
+  done
+}
+
+@test "P097 Step 6: required is explicit true|false or absent (legacy_default); a quoted value is refused" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 1"
+    required: true
+  beta:
+    command: "exit 1"
+  gamma:
+    command: "exit 0"
+    required: false
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$status" -ne 0 ]
+  [ "$(jq -r '[.gates.alpha, .gates.beta, .gates.gamma] | map("\(.required)/\(.required_source)") | join(" ")' "$REPORT")" = "true/explicit false/legacy_default false/explicit" ]
+  [ "$(jq -r '.overall' "$REPORT")" = "fail" ]
+
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "echo ran > ran"
+    required: "true"
+YAML
+  rm -f "$REPORT"
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate 'alpha': required must be an unquoted true or false"* ]]
+  [ ! -f "$TEST_PROJECT/ran" ]
+}
+
 # ─── P061 EPIC 3 Step 10 — targeted_tests gate wiring (execution.yaml) ───────
 # Verifies the targeted_tests gate registered in the real
 # .aid-o/config/execution.yaml is (a) findable/runnable by aid-run-gates.sh at

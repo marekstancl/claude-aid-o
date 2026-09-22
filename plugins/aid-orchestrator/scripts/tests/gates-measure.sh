@@ -47,21 +47,16 @@ AREA_FILES=(
   scripts/lib/aid-gate-row.sh
   scripts/lib/aid-run-gates-report.sh
   scripts/lib/aid-gate-outcome-summary.sh
-  scripts/lib/aid-gate-applicability.sh
   scripts/lib/aid-gate-runtime-baseline.sh
-  scripts/lib/aid-service.sh
   scripts/lib/aid-test-adapter-contract.sh
   scripts/lib/aid-lock.sh
   scripts/lib/aid-env-name-denylist.sh
   scripts/lib/aid-plan-manifest.sh
   scripts/lib/aid-init-execution-yaml.sh
-  scripts/tests/bats/test-gate-required-when.bats
   scripts/tests/bats/test-aid-gate-runtime-baseline.bats
   scripts/tests/bats/test-gate-baseline-sequential-only.bats
   scripts/tests/bats/test-aid-gate-runtime-report.bats
   scripts/tests/bats/test-aid-service.bats
-  scripts/tests/bats/test-service-lifecycle.bats
-  scripts/tests/bats/test-service-declaration.bats
   scripts/tests/bats/test-owned-jobs-integration.bats
   scripts/tests/bats/test-owned-jobs-review-regressions.bats
   scripts/tests/bats/test-owned-jobs-docs-closure.bats
@@ -89,10 +84,12 @@ done
 
 if (( line_count )); then
   cd "$PLUGIN_DIR"
-  # scripts/gates/* and the profile libraries (old classifier until Step 9, new
-  # resolver) join the named files by glob, so the list survives the removal;
-  # a named file a later step deleted counts 0 (wc's rc is not the measurement).
-  { wc -l "${AREA_FILES[@]}" scripts/lib/aid-gate-profile*.sh scripts/gates/* 2>/dev/null || true; } |
+  # scripts/gates/*, the profile libraries (old classifier until Step 9, new
+  # resolver) and the service library (until Step 9) join the named files by
+  # glob, so the list survives the removal; a file a later step deleted counts
+  # 0 (wc's rc is not the measurement). The applicability library and the three
+  # service/required_when suites Step 6 deleted are no longer named: 0 lines.
+  { wc -l "${AREA_FILES[@]}" scripts/lib/aid-gate-profile*.sh scripts/lib/aid-service*.sh scripts/gates/* 2>/dev/null || true; } |
     awk '$2 != "total" {printf "%s\t%s\n", $2, $1}' |
     jq -Rn --arg commit "$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
       '{command: "gates-measure.sh --line-count", commit: $commit,

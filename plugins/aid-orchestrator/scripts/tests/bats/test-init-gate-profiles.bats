@@ -202,6 +202,7 @@ EOF
   # include[], comment-free value and custom key survives.
   local strip_dead='del(.gate_profile_defaults, .baseline, .runtime_baseline, .needs_services, .services)
     | del(.gate_profiles.quick | select(. != null and (.include // [] | length == 0)))
+    | (.gates // {})[] |= with(select(has("required_when") and (has("required") | not)); .required = true)
     | (.gates // {})[] |= del(.required_when, .needs_services, .services, .quarantine, .baseline, .runtime_baseline)
     | del(.notifications.telegram.enabled, .notifications.telegram.chat_id, .notifications.telegram.alert_threshold, .notifications.telegram.alert_on_repeated_precondition_fail)
     | del(.notifications.telegram | select(length == 0))
@@ -219,19 +220,24 @@ EOF
     fi
     [ "$rc" -eq 3 ]
     # Every added line is default_profile or the when_paths block, nothing else.
-    run bash -c "printf '%s\n' \"\$1\" | grep -E '^\+[^+]' | grep -vE '^\+(default_profile: |    when_paths:|      - \")'" _ "$out"
+    run bash -c "printf '%s\n' \"\$1\" | grep -E '^\+[^+]' | grep -vE '^\+(default_profile: |    when_paths:|      - \"|    required: true$)'" _ "$out"
     [ "$status" -eq 1 ]
     [ -z "$output" ]
     hash="$(printf '%s\n' "$out" | sed -n 's/^diff_hash: //p')"
     execution_yaml_upgrade "$cfg" --confirm-upgrade "$hash" "${default_arg[@]}"
     yq '.' "$cfg" >/dev/null
-    [ "$(yq -o=json "$strip_dead" "$fixtures/$name.yaml")" == "$(yq -o=json "$strip_added" "$cfg")" ]
+    # `jq -S`: the replacement `required: true` sits where required_when was,
+    # so key ORDER inside a gate may differ; values and keys may not.
+    [ "$(yq -o=json "$strip_dead" "$fixtures/$name.yaml" | jq -S .)" == "$(yq -o=json "$strip_added" "$cfg" | jq -S .)" ]
     # Nothing dead survives.
     [ "$(yq '[.. | select(tag == "!!map") | keys[] | select(test("^(required_when|needs_services|services|gate_profile_defaults|baseline.*|runtime_baseline|quarantine|enabled|chat_id|alert_threshold|alert_on_repeated_precondition_fail)$"))] | length' "$cfg")" -eq 0 ]
     if [[ "$(yq '.gate_profiles | type' "$cfg")" == "!!map" ]]; then
       [ "$(yq '.default_profile' "$cfg")" != "null" ]
       [[ "$(yq '.gate_profiles | has("full")' "$cfg")" == "false" ]] || [ "$(yq '.gate_profiles.full.when_paths | length' "$cfg")" -eq 14 ]
     fi
+    # P097 Step 6: a gate whose only "required" claim was required_when keeps
+    # being required (sousto: 3 such gates, ACTA: 1), never silently optional.
+    [ "$(yq '[.gates[] | select(has("required") | not)] | length' "$cfg")" -eq 0 ] || [[ "$name" != sousto-na-miru && "$name" != acta ]]
   done
 }
 

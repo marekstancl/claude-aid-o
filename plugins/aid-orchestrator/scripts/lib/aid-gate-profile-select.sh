@@ -9,9 +9,7 @@
 #   gate_profile_exists <yaml> <name>         exit 0 iff declared
 #   gate_profile_index <yaml> <name>          0-based declaration index; exit 1 unknown
 #   gate_profile_has_required_gate <yaml> <name>  exit 0 iff include[] names a gate that is
-#       `required: true`, or carries `required_when` with no explicit `required` (the
-#       composer's stack fragments write only required_when; lib/aid-gate-applicability.sh
-#       decides at run time whether it applies)
+#       `required: true` (the only requiredness there is since P097 Step 6)
 #   gate_profile_wider <yaml> <a> <b>         the higher-indexed of two (an undeclared name loses)
 #   gate_profile_for_paths <yaml> <paths file>  the LAST declared profile whose when_paths
 #       matches any changed path, else default_profile; prints nothing when the file
@@ -56,7 +54,7 @@ gate_profile_index() {
 
 gate_profile_has_required_gate() {
   local j; j="$(_gps_json "$1")" || return $?
-  jq -e --arg p "${2:-}" '. as $j | .gate_profiles[$p].include // [] | any(.[]; . as $g | $j.gates[$g] as $r | ($r.required == true) or ($r.required == null and $r.required_when != null))' <<<"$j" >/dev/null
+  jq -e --arg p "${2:-}" '. as $j | .gate_profiles[$p].include // [] | any(.[]; . as $g | $j.gates[$g].required == true)' <<<"$j" >/dev/null
 }
 
 gate_profile_wider() {

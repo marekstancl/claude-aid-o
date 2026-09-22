@@ -140,11 +140,14 @@ _upgraded_fixture() {  # <project> — the Step 3 upgrade applied to the fixture
   [ "$status" -eq 2 ]; [[ "$output" == *"targeted"* ]]
 }
 
-@test "a gate carrying only required_when (the composer's shape) counts as required" {
-  yq -i '.gates.unit = {"command": "true", "required_when": "*.ts exists"}' "$YAML"
+@test "only required: true counts as required (required_when is dead since P097 Step 6; the composer writes required: true)" {
+  yq -i '.gates.unit = {"command": "true", "required": true}' "$YAML"
   run bash "$SEL" has-required-gate "$YAML" standard
   [ "$status" -eq 0 ]
-  yq -i '.gates.unit.required = false' "$YAML"
+  yq -i '.gates.unit = {"command": "true", "required_when": "*.ts exists"}' "$YAML"
+  run bash "$SEL" has-required-gate "$YAML" standard
+  [ "$status" -ne 0 ]
+  yq -i '.gates.unit = {"command": "true", "required": false}' "$YAML"
   run bash "$SEL" has-required-gate "$YAML" standard
   [ "$status" -ne 0 ]
 }

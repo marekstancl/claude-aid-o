@@ -26,8 +26,9 @@
 #  10  two concurrent attempts of a 1-attempt class spend it ONCE (the TOCTOU
 #      the single critical section closes)
 #  11  fail-closed: an unreadable policy adjudicates, it never permits a retry
-#  12  the ladder cannot smuggle restart authority — it executes nothing, and
-#      aid-service still gates its one restart on the declaration
+#  12  the ladder executes nothing, and the removed `restart_service_once`
+#      (P097 Step 6) is refused as an action outside the closed set — a
+#      pre-2.103 record naming it escalates, it never restarts anything
 #
 # Nothing here stubs the ladder. Cases 5 and 8 drive the REAL aid-run-gates.sh
 # and the REAL aid-service.sh over real fixtures.
@@ -203,14 +204,14 @@ normalize_report() {
 }
 
 @test "case 3: an action the class does not allow is refused, and the refusal names it" {
-  # `restart_service_once` is a real vocabulary action — but not one GATE_TIMEOUT
+  # `wait_and_resume` is a real vocabulary action — but not one GATE_TIMEOUT
   # is allowed to take. Membership of the vocabulary is not membership of the
   # class's allowlist.
-  run ladder aid_ladder_attempt "$EVID" GATE_TIMEOUT restart_service_once
+  run ladder aid_ladder_attempt "$EVID" GATE_TIMEOUT wait_and_resume
   [ "$status" -eq 4 ] || { echo "$output"; false; }
   [ "$output" = "adjudicate refused_action_not_allowed" ]
   run jq -r '.detail' "$REC"
-  [ "$output" = "action 'restart_service_once' is not in allowed_actions for class GATE_TIMEOUT" ]
+  [ "$output" = "action 'wait_and_resume' is not in allowed_actions for class GATE_TIMEOUT" ]
 
   # An action outside the vocabulary entirely is refused the same way, and no
   # attempt was spent by either refusal.
@@ -462,7 +463,7 @@ YAML
 }
 
 @test "case 9: the closed sets are lib == policy == schema, and the loader is where the contract says" {
-  # The lib compiles the six action names and the seven class names as literals
+  # The lib compiles the five action names and the seven class names as literals
   # on purpose (the policy is the thing being bounded). That only stays safe
   # while the three agree, so the agreement is pinned rather than assumed.
   local lib_actions policy_actions schema_actions
@@ -571,23 +572,23 @@ YAML
   [ "${lines[-1]}" = "adjudicate refused_unreadable_record" ]
 }
 
-@test "case 12: the ladder cannot smuggle restart authority" {
-  # The ladder GRANTS `restart_service_once` for SERVICE_UNHEALTHY...
+@test "case 12: the ladder executes nothing, and the removed restart action is refused" {
+  # `restart_service_once` left the vocabulary with the service lifecycle
+  # (P097 Step 6). A record or a caller from before 2.103 that still names it
+  # is an action outside the closed set: refused and routed to adjudication,
+  # with no attempt spent — the same path as any unknown action.
   run ladder aid_ladder_attempt "$EVID" SERVICE_UNHEALTHY restart_service_once
-  [ "$status" -eq 0 ]
-  [ "$output" = "proceed 1" ]
+  [ "$status" -eq 4 ] || { echo "$output"; false; }
+  [ "$output" = "adjudicate refused_action_not_allowed" ]
+  run jq -r -s '[.[] | select(.outcome=="started")] | length' "$REC"
+  [ "$output" = "0" ]
+  run bash -c 'source "$LIB"; _aid_ladder_action_constants'
+  [[ "$output" != *restart_service_once* ]] || { echo "$output"; false; }
 
-  # ...and executes nothing. There is no process control in this file at all:
-  # no supervisor invocation, no signal, no session/process-group arithmetic.
+  # And there is no process control in this file at all: no supervisor
+  # invocation, no signal, no session/process-group arithmetic.
   run grep -nE '\b(setsid|kill|pkill|nohup|disown)\b|aid-job\.sh|start_cmd|aid_service_up' "$LIB"
   [ "$status" -ne 0 ] || { echo "$output"; false; }
-
-  # So the only code that can restart a service is aid-service's own path, and
-  # that path still spends its ONE restart only when the DECLARATION authorises
-  # it and only once — which is what makes the grant above unable to exceed it.
-  run grep -cE '^[[:space:]]*if \[\[ "\$restart_auth" == "true" \]\] && \(\( restart_used == 0 \)\); then$' \
-    "$PLUGIN_ROOT/scripts/lib/aid-service.sh"
-  [ "$output" = "1" ] || { echo "the one-restart gate in aid-service.sh has moved or changed"; false; }
 }
 
 @test "case 13: the terminus the ladder READS cannot be reordered behind a broken validator" {
