@@ -306,3 +306,38 @@ YAML
   [ "$(yq '.gates.py_test.required' "$cfg")" = "false" ]
   [ "$(yq '[.. | select(tag == "!!map") | keys[] | select(. == "required_when")] | length' "$cfg")" -eq 0 ]
 }
+
+@test "P097 CP3: the confirmed upgrade replaces the file by rename, leaving no partial write and no stray sibling" {
+  source "$HELPER"
+  local cfg="$TEST_TMPDIR/atomic.yaml"
+  cat > "$cfg" <<'YAML'
+gates:
+  g:
+    command: "true"
+    required_when: "always"
+YAML
+  chmod 640 "$cfg"
+  local out hash
+  out="$(execution_yaml_upgrade "$cfg")" || [ $? -eq 3 ]
+  hash="$(printf '%s\n' "$out" | sed -n 's/^diff_hash: //p')"
+  execution_yaml_upgrade "$cfg" --confirm-upgrade "$hash"
+  # the file parses, kept its mode, and nothing was left beside it
+  yq '.' "$cfg" >/dev/null
+  [ "$(stat -c '%a' "$cfg")" = "640" ]
+  [ "$(find "$TEST_TMPDIR" -name 'atomic.yaml.aid-upgrade.*' | wc -l)" -eq 0 ]
+  # an unwritable directory refuses without touching the original
+  local dir="$TEST_TMPDIR/ro"; mkdir -p "$dir"; cp "$cfg" "$dir/e.yaml"
+  cat >> "$dir/e.yaml" <<'YAML'
+  h:
+    command: "true"
+    required_when: "always"
+YAML
+  out="$(execution_yaml_upgrade "$dir/e.yaml")" || [ $? -eq 3 ]
+  hash="$(printf '%s\n' "$out" | sed -n 's/^diff_hash: //p')"
+  local before; before="$(sha256sum "$dir/e.yaml" | cut -d' ' -f1)"
+  chmod 500 "$dir"
+  run execution_yaml_upgrade "$dir/e.yaml" --confirm-upgrade "$hash"
+  chmod 700 "$dir"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$dir/e.yaml" | cut -d' ' -f1)" = "$before" ]
+}

@@ -670,7 +670,15 @@ execution_yaml_upgrade() {
   hash="sha256:$(cat <(sha256sum "$file" | cut -d' ' -f1) "$tmp" | sha256sum | cut -d' ' -f1)"
 
   if [[ -n "$confirm" && "$confirm" == "$hash" ]]; then
-    cat "$tmp" > "$file"; rm -f "$tmp"
+    # Atomic rename, never `cat > $file`: a killed process must not leave a
+    # project's execution.yaml half-written, and a rename is the only write the
+    # readers can see either side of. The temp file is a sibling so the rename
+    # stays on one filesystem; permissions are carried over from the original.
+    local swap="${file}.aid-upgrade.$$"
+    cat "$tmp" > "$swap" || { rm -f "$tmp" "$swap"; echo "[ERROR] could not stage the upgraded ${file}; nothing written" >&2; return 2; }
+    chmod --reference="$file" "$swap" 2>/dev/null || true
+    mv -f "$swap" "$file" || { rm -f "$tmp" "$swap"; echo "[ERROR] could not replace ${file}; nothing written" >&2; return 2; }
+    rm -f "$tmp"
     echo "upgraded ${file} (${hash})"
     return 0
   fi
