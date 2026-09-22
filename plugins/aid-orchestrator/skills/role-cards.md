@@ -245,25 +245,13 @@ the implementation actually functions across every layer it touches.
   - **Database:** rows created/modified, relationships, field values, migrations applied
   - **API:** endpoint responses, status codes, payload structure, auth flow
   - **Playwright UI:** page renders, interactions work, data displays correctly
-- Infrastructure startup — **declare it, never improvise it.** Long-lived infrastructure a run
-  needs (database, dev server, queue) belongs in the `services:` block of
-  `.aid-o/config/execution.yaml`, and the gate that needs it names it in that gate's
-  `needs_services: [...]`. The run then acquires every declared service ONCE before its first gate
-  and releases it ONCE after the report — you neither start nor stop it, and a gate whose service
-  is not healthy fails fast by name instead of failing later about something else.
-  - `probe_cmd` is the alternative the no-arbitrary-sleeps rule always implied and never named:
-    readiness is a command that exits 0 when the service is genuinely serving (`pg_isready`, a
-    `curl` on the health endpoint), polled by the runner until `startup_deadline_seconds` runs
-    out. A `sleep 10` before a check is a guess; `probe_cmd` is an answer. It must RETURN — each
-    invocation is bounded by what remains of `startup_deadline_seconds`, and `stop_cmd` by
-    `AID_SERVICE_STOP_TIMEOUT_SEC` (30 s), so a probe that blocks is killed and counted as
-    not-ready rather than holding the deadline open.
-  - `port_env` gives the service a per-run port instead of a fixed one, so two runs on the same
-    machine cannot collide.
-  - **Fallback, only when nothing is declared:** run the infrastructure by hand (docker compose up,
-    migrations, seed data, healthcheck) — and say so in the E2E report, because a hand-started
-    service is not owned by the run and will not be cleaned up by it. Prefer adding the
-    declaration to repeating the manual steps.
+- Infrastructure startup — **the gate command owns it.** Long-lived infrastructure a run needs
+  (database, dev server, queue) is started, probed and stopped by the gate's own `command:` in
+  `.aid-o/config/execution.yaml` (a wrapper script that brings it up, waits on a real readiness
+  check such as `pg_isready` or a `curl` on the health endpoint — never a `sleep` — runs the
+  suite, and tears down on exit). Since P097 Step 6 the runner declares and manages no service
+  itself. Infrastructure started by hand is not owned by the run and is not cleaned up by it;
+  say so in the E2E report, and prefer moving the steps into the gate command.
 - Stateful test flows (Test 1 creates data → Test 3 verifies it)
 - Fix loop: diagnose failed check → fix code → rerun ONLY failed checks → repeat
 
@@ -622,7 +610,7 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 ---
 
-**Last Updated:** 2026-09-20
+**Last Updated:** 2026-09-22
 **Replaces:** All 11 files formerly in `plugins/aid-orchestrator/defaults/playbooks/`
 
 ## Plan-boundary note

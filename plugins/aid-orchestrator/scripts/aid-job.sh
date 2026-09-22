@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aid-job.sh — Controller-owned background job supervisor (IMP-262)
+# aid-job.sh — the one process owner for long-running work.
 #
-# A small, standalone helper that gives a long-running command a DURABLE
-# IDENTITY and a TERMINAL RESULT that a resumed AUTO controller can collect
-# without relying on `tail -f`, an agent notification, or the original shell
-# staying alive.
+# WHY THIS FILE EXISTS: a command that outlives the session that started it
+# needs an owner that is not that session. This supervisor gives such a
+# command a DURABLE IDENTITY (its own session and process group, a job record
+# bound to the start HEAD and tree) and a TERMINAL RESULT (an atomically
+# written result record) that a resumed controller can collect without a
+# `tail -f`, an agent notification, or the original shell staying alive. It is
+# the ONE process owner in the plugin: the gate runner runs every `run_mode:
+# background` gate through it, the plan continuation spawns the next EPIC's
+# run through it, and the test execution unit runs suites through it. Since
+# the service lifecycle left (P097 Step 6) nothing else starts a job, so a
+# resumed controller has one place to ask what is still alive.
 #
 # Subcommands:
 #   run       Start a command in its own session/process-group; write a durable

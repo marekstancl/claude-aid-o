@@ -423,6 +423,30 @@ else
 fi
 
 echo ""
+echo "TEST: the gate instruction uses the row vocabulary the runner emits (P097 Step 7)"
+# The version-1 words the runner no longer writes: a row is `status: skip,
+# reason: not_in_profile`, the report's `profile_source` is caller|none, and
+# `profile_reason` does not exist. An instruction still teaching the old words
+# sends the controller looking for fields no report carries. The hygiene sweep
+# (test-gates-hygiene.sh, t0) covers the removed LAYERS; this covers the
+# renamed ROW words, on the two files the controller reads for gates.
+# Word-bounded: `plan_gate_profile_excluded` is a live GATES:DONE reason.
+OLD_ROW_RE='\bprofile_excluded\b|"cli_flag"|\bprofile_reason\b'
+OLD_ROW_HITS="$(grep -nE "$OLD_ROW_RE" "$PLUGIN_DIR/skills/pipeline.md" "$PLUGIN_DIR/commands/aid-run.md" 2>/dev/null || true)"
+if [[ -z "$OLD_ROW_HITS" ]]; then
+  PASS=$((PASS + 1)); echo "  ✓ pipeline.md and aid-run.md name no version-1 profile vocabulary"
+else
+  FAIL=$((FAIL + 1)); echo "  ✗ version-1 profile vocabulary still instructed:"; printf '%s\n' "$OLD_ROW_HITS" | cut -c1-160 | sed 's/^/      /'
+fi
+# The §5 section the controller reads is ONE section, and short enough to be read.
+GATES_LINES="$(awk '/^## §5 Gates$/ { on = 1; next } on && /^## / { exit } on { n++ } END { print n + 0 }' "$PLUGIN_DIR/skills/pipeline.md")"
+if (( GATES_LINES > 0 && GATES_LINES <= 120 )); then
+  PASS=$((PASS + 1)); echo "  ✓ pipeline.md '## §5 Gates' is one section of ${GATES_LINES} lines (max 120)"
+else
+  FAIL=$((FAIL + 1)); echo "  ✗ pipeline.md '## §5 Gates' is ${GATES_LINES} lines (expected 1..120)"
+fi
+
+echo ""
 echo "=================================="
 echo "Instruction Consistency: $PASS passed, $FAIL failed, $WARN warnings"
 # P072 Step 9 — canonical line for the aggregate collector.

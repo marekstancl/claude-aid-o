@@ -2783,7 +2783,7 @@ enforcements:
   - id: advance_to_gates_worktree_redirect
     type: 1
     source: "scripts/aid-fsm.sh:cmd_advance_to_gates (search: 'P079 Step 1 (IMP-475)') calling _fsm_require_plan_worktree"
-    instruction: "skills/pipeline.md (§5 GATES State)"
+    instruction: "skills/pipeline.md (§5 Gates)"
     severity: blocking
     surface: internal-guard
     status: active

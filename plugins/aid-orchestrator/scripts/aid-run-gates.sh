@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
-# aid-run-gates.sh — Deterministic gate runner with provenance fields (P032 Step 3).
+# aid-run-gates.sh — the gate runner.
+#
+# WHY THIS FILE EXISTS: it is the one program that turns the gate table in
+# execution.yaml into a gates_report.json. It reads each gate's `command`,
+# `required`, `timeout_seconds`, `max_retries` and `run_mode`, runs the
+# command (inline, or as an aid-job.sh job for `run_mode: background`), and
+# writes one version-2 row per defined gate (lib/aid-gate-row.sh) plus the
+# `overall` verdict, which fails only on a failed `required: true` gate that no
+# PM waiver covers. It chooses nothing: the caller names the profile
+# (--profile, resolved by lib/aid-gate-profile-select.sh), the file names the
+# deadline, and a configuration key the runner no longer reads
+# (`_refuse_dead_keys` below) stops the run with exit 2 and the upgrade
+# command instead of being ignored. The FSM's
+# GATES:DONE precondition trusts a report only when this file wrote it
+# (`_generated_by`).
 #
 # Usage:
 #   aid-run-gates.sh run-gate <gate_name> <command> <timeout_s> <log_file>
@@ -121,9 +135,9 @@ _gates_evidence_dir() {
 
 # ─── Recovery-ladder emitters (P076 Step 13) ────────────────────────────────
 # The ladder RECORDS and ROUTES; it never replaces a verdict. Every call below
-# is additive: the gate's fail, its 124 streak accounting, the repeated-timeout
-# policy block and the job_lost row all behave exactly as they did before, and
-# a ladder that cannot be loaded or cannot be written changes nothing at all.
+# is additive: the gate's `job_timeout` or `job_lost` row is written exactly as
+# it would be without the ladder, and a ladder that cannot be loaded or cannot
+# be written changes nothing at all.
 #
 # Sourced LAZILY and BEST-EFFORT (the opposite discipline from
 # aid-resume-artifact.sh above, on purpose): those definitions are load-bearing

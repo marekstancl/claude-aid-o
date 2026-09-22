@@ -245,18 +245,22 @@ carve-out exists to distinguish itself from.
   ```
 - `--state-file` ensures gates only run when FSM is in GATES state
 - `--report-file` persists `gates_report.json` (required by `GATES→DONE` precondition)
-- **`--profile <name>` (P061 E1, optional)** — restricts this run to the gate keys listed in
-  `execution.yaml.gate_profiles.<name>.include[]`. Gates NOT in that list get an explicit
-  `profile_excluded` result row (never silently dropped, never fails `overall`). Omitting
-  `--profile` runs every defined gate exactly as before. Unknown profile name, or an
-  `include[]` entry that isn't a key under `execution.yaml.gates`, fails loud (exit 1) before
-  any gate runs. Today `--profile` is a purely explicit, manual flag — nothing in `/aid-run`
-  selects it automatically yet (that's a later P061 EPIC). See `pipeline.md §5` for full detail.
-- **Plan-gate floor at `GATES→DONE`** — if `plan.json.gates[]` names a gate, that gate must
-  not appear in `gates_report.json.excluded_gates[]`; `aid-fsm.sh` refuses the transition
-  (reason `plan_gate_profile_excluded`) otherwise. A malformed `plan.json` also blocks the
-  transition (reason `plan_json_malformed`) rather than being treated as no requirements.
-  Override via `--force --reason '<≥20 chars>'` like any other `GATES→DONE` precondition.
+- **`--profile <name>` (optional)** — `execution.yaml.gate_profiles` is an ordered list of
+  named `include[]` sets, narrowest first; the runner runs exactly the named profile's
+  `include[]` and gives every other gate a `status: skip, reason: not_in_profile` row (never
+  silently dropped, never fails `overall`). Omitting `--profile` runs every defined gate. The
+  runner never chooses: the CALLER names the profile, and the report records it (`profile`,
+  `profile_source: caller|none`, `profile_table`). `aid-fsm.sh advance-to-gates` is that caller —
+  it resolves the last declared profile whose `when_paths` matches the run's `base_commit..HEAD`
+  diff, else `default_profile`, and passes the name. An unknown name, or a profile whose
+  `include[]` names no `required: true` gate, is refused with exit 2 before any gate runs,
+  naming the declared table and the upgrade command. See `pipeline.md §5`.
+- **Two floors at `GATES→DONE`** — a gate named in `plan.json.gates[]` must not appear in
+  `excluded_gates[]` (reason `plan_gate_profile_excluded`; a malformed `plan.json` is
+  `plan_json_malformed`), and the recorded profile must be no narrower than the resolver's
+  answer for the same diff on the same table (reasons `risk_profile_unresolvable`,
+  `profile_table_changed`, `risk_profile_below_required`). Override via `--force --reason
+  '<≥20 chars>'` like any other `GATES→DONE` precondition.
 
 ## PRE-FLIGHT (before FSM starts)
 
@@ -563,13 +567,9 @@ the same section, `--checkpoint cp3`.
 
 **Actions:**
 1. Read gate definitions from `config/execution.yaml`
-2. Run each gate command (per `scripts/aid-run-gates.sh`):
-   - `test_cmd` from `config/project.yaml`
-   - `lint_cmd` from `config/project.yaml`
-   - `build_cmd` from `config/project.yaml`
-   - Custom gates from `execution.yaml`
-   - If `--profile <name>` was passed, only gates in that profile's `include[]` run — the rest
-     get a `profile_excluded` row (see "Gate execution" above, `pipeline.md §5`)
+2. Run each gate command (per `scripts/aid-run-gates.sh`): every gate under
+   `execution.yaml.gates` — or, with `--profile <name>`, only that profile's `include[]`; the
+   rest get a `not_in_profile` skip row (see "Gate execution" above, `pipeline.md §5`)
 3. Generate `gates_report.json`
 4. Log results to `timeline.jsonl`
 
@@ -913,4 +913,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-09-20
+**Last Updated:** 2026-09-22

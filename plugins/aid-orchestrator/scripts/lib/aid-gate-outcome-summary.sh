@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
-# aid-gate-outcome-summary.sh — P080 Step 11.
+# aid-gate-outcome-summary.sh — the gate-boundary message.
 #
-# The gate-run boundary message, rendered DETERMINISTICALLY from the canonical
-# gates report. One entry point:
+# WHY THIS FILE EXISTS: when the gate runner returns, the PM gets one card and
+# (only when the run blocks) one page, and neither is written by a model. This
+# file renders both DETERMINISTICALLY from gates_report.json: every number is
+# computed from the report it was handed, the verdict follows the envelope's
+# `.overall` and never a per-gate row, a waived gate renders as PM risk
+# acceptance and never as a pass, and no raw gate output reaches a human
+# surface without the redactor. The controller sources it at the gates phase
+# (commands/aid-run.md, skills/pipeline.md) and presents the card verbatim.
+#
+# One entry point:
 #
 #   aid_gate_outcome_render <gates_report_json> <run_dir> [waiver_dir]
 #
@@ -13,8 +21,10 @@
 #   waiver_dir         OPTIONAL receipts dir. It ENRICHES waiver detail only.
 #                      Its absence can never hide a waiver.
 #
-#   Writes  <run_dir>/gate-outcome-artifact.html   (an artifact BODY)
-#   Prints  the chat card on stdout, last line `Artifact: <path>`
+#   Writes  <run_dir>/gate-outcome-artifact.html   (an artifact BODY) — only
+#           when the run BLOCKS; a passing run leaves no page
+#   Prints  the chat card on stdout, last line `Artifact: <path>` when a page
+#           was written
 #
 # WHAT THIS IS NOT
 #   It does not publish. Publication through the Artifact tool is the
@@ -27,8 +37,8 @@
 #   waiver is never rendered as a passing gate.
 #
 # REPORT PATH IS NOT A CONSTANT
-#   `aid-run-gates.sh` takes an arbitrary `--report-file` (:1629 only DEFAULTS
-#   to the nested layout), and the repo carries both a nested and a flat
+#   `aid-run-gates.sh` takes an arbitrary `--report-file` (the runner only
+#   DEFAULTS to the nested layout), and the repo carries both a nested and a flat
 #   layout. Resolution stops at the first hit, in this order:
 #     1. the exact path passed in as $1
 #     2. <run_dir>/gates/gates_report.json      (nested)

@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aid-gate-row.sh — job result → gate row mapping (P076 Step 2).
+# aid-gate-row.sh — the gate row, one contract.
 #
-# ONE definition, two callers: the background poll loop in aid-run-gates.sh
-# (this step) and the resume-time report patching (Step 5). Both need to turn
-# an aid-job.sh terminal result into a row that is INDISTINGUISHABLE in shape
-# from a row `run_gate` would have produced, so every existing downstream
-# consumer (retry loop, waiver check, runtime-baseline sample, command_log,
-# report assembly) needs zero changes to accept it.
+# WHY THIS FILE EXISTS: a gate row (`gates_report.json.gates.<id>`,
+# `gates_rows/<id>.json`) is one shape — `row_version: 2`, `status`
+# pass|fail|skip, a `reason` from the closed vocabulary in
+# defaults/schemas/gate-row.schema.json, `waived`, `exit_code`, `duration_ms`,
+# `evidence`, `required`, `reused_from` — and this file is its only home. It
+# holds the two things every reader and writer shares: `gate_row_normalize`
+# (bash, and the jq def of the same name in $AID_GATE_ROW_JQ), which turns a
+# version-1 row into a version-2 row so no reader inspects `result` itself,
+# and `gate_row_check`, which the runner applies to every row it writes. It
+# also carries the one mapping from an aid-job.sh terminal result to a row,
+# used by the runner's background poll loop and by the resume path, so a
+# background row is indistinguishable in shape from a foreground one.
 #
-# The three non-obvious mappings, and why:
+# The three non-obvious mappings in the job-result path, and why:
 #
 #   duration_ms — an aid-job result record carries NO duration field. It is
 #     composed here from the job's own started_at/ended_at stamps. Second
@@ -17,24 +23,15 @@
 #     0 rather than a fabricated number.
 #
 #   exit_code 124 on timeout — the supervisor kills a deadline-exceeded command
-#     with TERM then KILL, so the RAW exit code is 143/137. Every existing
-#     timeout consumer in this repository keys on 124 (the `timeout(1)`
-#     convention): the runtime baseline marks a sample censored iff exit_code
-#     is 124, and the repeated-timeout policy block counts those censored
-#     samples. A row carrying 143 would therefore silently stop counting toward
-#     a timeout streak. So a `timed_out` job SYNTHESIZES 124 in `exit_code` and
-#     preserves the real one in `job_exit_code`.
+#     with TERM then KILL, so the RAW exit code is 143/137. The runner's
+#     foreground path uses `timeout(1)`, whose deadline exit is 124, and the
+#     row's reason for either is `job_timeout`. So a `timed_out` job
+#     SYNTHESIZES 124 in `exit_code` and preserves the real one in
+#     `job_exit_code`, and the two paths produce the same row.
 #
 #   job_id / job_state — the durable binding from a gate row back to the job
 #     directory that produced it. Present on background rows only; a foreground
 #     row never gains a field.
-#
-# P097 Step 2 — the row is ONE contract (version 2), and this file is its only
-# home. Every reader goes through `gate_row_normalize` (bash) or the jq def of
-# the same name in $AID_GATE_ROW_JQ; nothing else inspects a row's `result`.
-# The shape and the closed reason vocabulary are in
-# defaults/schemas/gate-row.schema.json; the runner checks every row it writes
-# against that vocabulary (`gate_row_check`).
 #
 # Sourceable only — this file defines functions and runs nothing.
 # =============================================================================
