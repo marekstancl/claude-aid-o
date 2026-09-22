@@ -47,7 +47,6 @@ AREA_FILES=(
   scripts/lib/aid-gate-row.sh
   scripts/lib/aid-run-gates-report.sh
   scripts/lib/aid-gate-outcome-summary.sh
-  scripts/lib/aid-gate-profile.sh
   scripts/lib/aid-gate-applicability.sh
   scripts/lib/aid-gate-runtime-baseline.sh
   scripts/lib/aid-service.sh
@@ -90,8 +89,9 @@ done
 
 if (( line_count )); then
   cd "$PLUGIN_DIR"
-  # scripts/gates/* joins the named files: the plan counts the runner's gate scripts too.
-  wc -l "${AREA_FILES[@]}" scripts/gates/* 2>/dev/null |
+  # scripts/gates/* and the profile libraries (old classifier until Step 9, new
+  # resolver) join the named files by glob, so the list survives the removal.
+  wc -l "${AREA_FILES[@]}" scripts/lib/aid-gate-profile*.sh scripts/gates/* 2>/dev/null |
     awk '$2 != "total" {printf "%s\t%s\n", $2, $1}' |
     jq -Rn --arg commit "$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
       '{command: "gates-measure.sh --line-count", commit: $commit,
