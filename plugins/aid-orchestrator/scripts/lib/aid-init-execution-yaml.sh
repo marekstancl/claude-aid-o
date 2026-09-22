@@ -672,9 +672,13 @@ execution_yaml_upgrade() {
   if [[ -n "$confirm" && "$confirm" == "$hash" ]]; then
     # Atomic rename, never `cat > $file`: a killed process must not leave a
     # project's execution.yaml half-written, and a rename is the only write the
-    # readers can see either side of. The temp file is a sibling so the rename
-    # stays on one filesystem; permissions are carried over from the original.
-    local swap="${file}.aid-upgrade.$$"
+    # readers can see either side of. The staging file is a SIBLING so the
+    # rename stays on one filesystem, and `mktemp` names it, never the PID: a
+    # predictable sibling can be pre-planted as a symlink by anyone who can
+    # write into the config directory, and the operator's confirmed write would
+    # then land wherever that link points (CP3 security review).
+    local swap
+    swap="$(mktemp "$(dirname "$file")/.aid-upgrade.XXXXXXXX")" || { rm -f "$tmp"; echo "[ERROR] could not stage the upgraded ${file}; nothing written" >&2; return 2; }
     cat "$tmp" > "$swap" || { rm -f "$tmp" "$swap"; echo "[ERROR] could not stage the upgraded ${file}; nothing written" >&2; return 2; }
     chmod --reference="$file" "$swap" 2>/dev/null || true
     mv -f "$swap" "$file" || { rm -f "$tmp" "$swap"; echo "[ERROR] could not replace ${file}; nothing written" >&2; return 2; }

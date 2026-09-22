@@ -324,7 +324,21 @@ YAML
   # the file parses, kept its mode, and nothing was left beside it
   yq '.' "$cfg" >/dev/null
   [ "$(stat -c '%a' "$cfg")" = "640" ]
-  [ "$(find "$TEST_TMPDIR" -name 'atomic.yaml.aid-upgrade.*' | wc -l)" -eq 0 ]
+  [ "$(find "$TEST_TMPDIR" -name '.aid-upgrade.*' | wc -l)" -eq 0 ]
+  # the staging name is unpredictable: a pre-planted sibling cannot catch the
+  # write, because mktemp picks the name (CP3 security review).
+  ln -s "$TEST_TMPDIR/victim" "$TEST_TMPDIR/atomic.yaml.aid-upgrade.$$"
+  printf 'untouched\n' > "$TEST_TMPDIR/victim"
+  cat > "$cfg" <<'YAML'
+gates:
+  g:
+    command: "true"
+    required_when: "always"
+YAML
+  out="$(execution_yaml_upgrade "$cfg")" || [ $? -eq 3 ]
+  hash="$(printf '%s\n' "$out" | sed -n 's/^diff_hash: //p')"
+  execution_yaml_upgrade "$cfg" --confirm-upgrade "$hash"
+  [ "$(cat "$TEST_TMPDIR/victim")" = "untouched" ]
   # an unwritable directory refuses without touching the original
   local dir="$TEST_TMPDIR/ro"; mkdir -p "$dir"; cp "$cfg" "$dir/e.yaml"
   cat >> "$dir/e.yaml" <<'YAML'
