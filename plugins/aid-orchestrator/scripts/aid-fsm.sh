@@ -59,11 +59,11 @@ source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # run_cache_preflight. Sourced AFTER aid-stage-log.sh so log_event already
 # exists (the lib's re-source guard then skips, preserving aid-fsm.sh's die()).
 source "${SCRIPT_DIR}/lib/aid-cache-preflight.sh"
-# Shared gate-profile risk-classification resolver (P061 E2 Step 1) — defines
-# gate_profile_resolve / gate_profile_rank / gate_profile_max. Used by both
-# cmd_advance_to_gates (auto-resolve, this EPIC's Step 2 / "Step 8") and the
-# GATES:DONE risk-upgrade precondition below (D4 enforcement, not advisory).
-source "${SCRIPT_DIR}/lib/aid-gate-profile.sh"
+# P097 Step 4 — the one gate-profile resolver over the project's own table
+# (gate_profile_for_paths / gate_profile_floor_verdict). Used by both
+# cmd_advance_to_gates (picks the profile a run executes) and the GATES:DONE
+# floor precondition below (refuses a narrower or missing profile).
+source "${SCRIPT_DIR}/lib/aid-gate-profile-select.sh"
 # P097 Step 2 — the ONE gate-row reader (gate_row_normalize); no reader here
 # inspects a row's `result`.
 source "${SCRIPT_DIR}/lib/aid-gate-row.sh"
@@ -189,49 +189,21 @@ _fsm_epic_plan_nnn() {
   return 0
 }
 
-# ─── Gate-profile boundary selector (P064 plan Step 8) ──────────────────────
-# _fsm_gate_profile_boundary <epic_id> — echoes the `boundary` positional to
-# hand gate_profile_resolve for THIS EPIC: "epic" when the EPIC belongs to a
-# plan whose DECLARED release model is `plan_branch`, "" (legacy, byte-identical
-# to pre-Step-8 behaviour) otherwise. Always exits 0 — this is a routing
-# decision, never an enforcement point.
-#
-# WHY MODE-GATED. boundary=epic caps the resolved profile at `standard`,
-# which is only safe because a plan_branch plan has a plan-final run that
-# still executes the accumulated floor (recorded by `aid-plan-fsm.sh
-# epic-complete`, consumed by the plan-final stage). A legacy
-# `legacy_epic_release_mode` plan has no such second run: capping there would
-# silently drop `bats_all` and suppress the done_phase=release escalation
-# with nothing downstream to make up for it — a coverage regression, not a
-# split. Every "cannot tell" path therefore returns "" (no cap, more gates),
-# the conservative direction — the opposite of cmd_init's lineage check,
-# which fails CLOSED because there "cannot tell" would skip a security proof.
+# ─── Gate-profile boundary label (P064 plan Step 8, reduced by P097 Step 4) ─
+# _fsm_gate_profile_boundary <epic_id> — "epic" when the EPIC belongs to a
+# plan whose DECLARED release model is `plan_branch`, "" (legacy) otherwise.
+# Always exits 0. Since P097 Step 4 the label is RECORDED on the timeline and
+# in the floor's refusal text only: the profile itself comes from the
+# project's own gate_profiles table (lib/aid-gate-profile-select.sh), and the
+# cap-at-standard this label used to switch on no longer exists.
 #
 # ── ONE AUTHORITY (CP3 integration review finding 2, adjudicated action A3) ──
 # This function computes NOTHING of its own: it asks `_fsm_declared_plan_mode`
-# (below, the release-routing resolver) and maps its verdict. It USED to read
-# the gitignored RUNTIME manifest `plan-boundary-manifest.json` while
-# `_fsm_declared_plan_mode` read the git-tracked DECLARATION
-# `.aid-lifecycle/manifests/<plan_id>.yaml` — two sources that go stale
-# independently and could therefore disagree while BOTH returned a confident,
-# non-error answer:
-#   * runtime=plan_branch + declaration absent -> gates capped at `standard`
-#     while the LEGACY release stack merged the EPIC into the target branch and
-#     ran the bump/tag/push. A high-risk EPIC shipped with reduced verification,
-#     and the accumulated floor was discarded (only `epic-complete` writes one,
-#     and the legacy path never reaches it).
-#   * an UNTRACKED declaration saying plan_branch confidently silenced all nine
-#     AID_PLAN_BRANCH_SKIPPED_STAGES with nothing committed anywhere.
-# The runtime manifest is no longer a mode input anywhere in this file. The two
-# helpers still REACT differently to "cannot tell" — here "" (no cap => MORE
-# gates), there a hard block — but that is a difference in CONSEQUENCE, chosen
-# per call site, never a difference in the verdict.
-#
-# BOTH gate_profile_resolve call sites in this file MUST route through this
-# one helper: advance-to-gates picks the profile a run executes and the
-# GATES:DONE precondition recomputes the requirement it is measured against.
-# If they disagreed, an EPIC that correctly ran the capped `standard` would
-# be compared against an uncapped `full` and could never reach DONE.
+# (below, the release-routing resolver) and maps its verdict. The gitignored
+# RUNTIME manifest `plan-boundary-manifest.json` is not a mode input anywhere
+# in this file — two sources that go stale independently could disagree while
+# both returned a confident answer. Both gate-profile call sites (advance-to-
+# gates and the GATES:DONE floor) route through this one helper.
 _fsm_gate_profile_boundary() {
   local epic_id="${1:-}" _gb_mode="" _gb_plan="" _gb_reason=""
   # `|| true`: the read itself is never allowed to abort a routing decision.
@@ -2016,8 +1988,7 @@ fsm_emit_compliance_recovery() {
   local recovery_checks
   recovery_checks=$(fsm_check_compliance_recovery "$timeline" 2>/dev/null) || return 0
   local recovery_gate
-  recovery_gate=$(grep -E '^    alert_on_compliance_recovery:' "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null \
-    | awk '{print $2}' | tr -d '"'"'"' ') || recovery_gate=""
+  recovery_gate=$(yq -r '.notifications.telegram.alert_on_compliance_recovery // ""' "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null) || recovery_gate=""
   recovery_gate="${recovery_gate:-true}"
   [[ "$recovery_gate" == "false" ]] || \
     aid_alert_run info plan-compliance-recovered "$epic_id" \
@@ -2627,122 +2598,61 @@ EOF
           fi
         fi
 
-        # P061 E2 Step 2 ("Step 8"): risk-upgrade FSM enforcement (D4). ───────
-        # plan_gate_floor (above) guards "did the plan's own required gates
-        # survive the active profile". THIS check guards a different gap: the
-        # active profile ITSELF (gates_report.json.profile, whatever --profile
-        # aid-run-gates.sh was actually invoked with for this run) must be no
-        # weaker than the RISK-REQUIRED profile the shared resolver (Step 1,
-        # aid-gate-profile.sh) computes from this run's actual base_commit..HEAD
-        # diff. Recomputed HERE (not trusted from advance-to-gates' earlier
-        # auto-resolve) because the gates could have been (re-)run manually
-        # with a different/weaker --profile after auto-resolve last ran —
-        # trusting the resolver's own SUGGESTION at run-time would make this a
-        # detector, not enforcement (AID-v3-principles.md §1). A missing
-        # `profile` field means no --profile was ever passed for this run
-        # (legacy execution.yaml without gate_profiles, or a project that
-        # hasn't opted in) — D9: behaves exactly like today, no-op (every
-        # defined gate already ran, nothing weaker to catch).
-        #
-        # P064 plan Step 8: the recompute is BOUNDARY-AWARE. It passes the
-        # same boundary advance-to-gates used (via the single
-        # _fsm_gate_profile_boundary helper), so an EPIC that correctly ran
-        # the capped EPIC-boundary profile is compared against the
-        # EPIC-boundary requirement — not against the unbounded plan-final
-        # floor, which would hard-fail every high-risk EPIC at GATES:DONE.
-        # The plan-final floor is recorded into the plan-boundary manifest by
-        # `aid-plan-fsm.sh epic-complete`, not enforced at this transition.
-        local active_profile
-        active_profile=$(jq -r '.profile // empty' "$report" 2>/dev/null)
-        if [[ -n "$active_profile" ]]; then
-          local risk_base_commit required_profile="" _gp_boundary=""
-          risk_base_commit=$(yaml_field "$state_file" base_commit)
-          _gp_boundary="$(_fsm_gate_profile_boundary "$(yaml_field "$state_file" epic_id)")"
-          if [[ -n "$risk_base_commit" ]]; then
-            local _gp_paths_file
-            _gp_paths_file=$(mktemp -t aid-gate-profile-risk.XXXXXX)
-            git -C "$PWD" diff --name-only "${risk_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
-            required_profile=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json" "$_gp_boundary")
-            rm -f "$_gp_paths_file"
+        # P097 Step 4: the gate-profile floor. ─────────────────────────────
+        # The profile the run RECORDED (gates_report.json.profile, whatever
+        # --profile the runner was actually invoked with) must be no narrower
+        # than the one the resolver picks for this run's base_commit..HEAD diff
+        # on the project's own table. Recomputed here, not trusted from
+        # advance-to-gates, because the gates may have been re-run by hand with
+        # a narrower --profile. A report without a profile is refused whenever
+        # the file declares gate_profiles; without a table it passes only when
+        # every declared gate has a row. A table that changed between the run
+        # and now refuses with profile_table_changed instead of comparing
+        # indexes across two orders. All of that is one library verdict.
+        local _gp_yaml _gp_required="" _gp_base_commit _gp_verdict _gp_rc=0
+        _gp_yaml="$(aid_state_path ".aid-o/config/execution.yaml" 2>/dev/null || printf '%s' "$PWD/.aid-o/config/execution.yaml")"
+        _gp_base_commit=$(yaml_field "$state_file" base_commit)
+        if [[ -n "$_gp_base_commit" && -f "$_gp_yaml" ]]; then
+          local _gp_paths_file _gp_err
+          _gp_paths_file=$(mktemp -t aid-gate-profile-risk.XXXXXX)
+          git -C "$PWD" diff --name-only "${_gp_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
+          _gp_required=$(gate_profile_for_paths "$_gp_yaml" "$_gp_paths_file" 2>"${_gp_paths_file}.err") || _gp_rc=$?
+          _gp_err="$(cat "${_gp_paths_file}.err" 2>/dev/null)"
+          rm -f "$_gp_paths_file" "${_gp_paths_file}.err"
+          if (( _gp_rc != 0 )); then
+            _PRECONDITION_FAIL_REASON="risk_profile_unresolvable"
+            echo "PRECONDITION FAIL: risk_profile_unresolvable — the project's gate_profiles table cannot resolve a profile for this diff: ${_gp_err}" >&2
+            return 1
           fi
-          # risk_base_commit empty (fsm-state unreadable/malformed) → required_profile
-          # stays "" — conservative no-op: we cannot prove a floor we cannot compute,
-          # never guess or fail loud on it.
+        fi
+        # base_commit empty (fsm-state unreadable) → no required profile: the
+        # verdict still checks the recorded profile and the table. The
+        # boundary is logged for the record only: P064's cap is gone, the
+        # table's own when_paths decide.
+        if ! _gp_verdict="$(gate_profile_floor_verdict "$_gp_yaml" "$report" "$_gp_required")"; then
+          _PRECONDITION_FAIL_REASON="${_gp_verdict%%:*}"
+          local _gp_boundary_note _gp_fix_name
+          _gp_boundary_note="$(_fsm_gate_profile_boundary "$(yaml_field "$state_file" epic_id)")"
+          _gp_fix_name="${_gp_required:-<the resolver answer>}"
+          cat <<EOF >&2
+PRECONDITION FAIL: ${_gp_verdict} (diff ${_gp_base_commit:-unknown}..HEAD, boundary ${_gp_boundary_note:-legacy}).
 
-          if [[ -n "$required_profile" ]]; then
-            local active_rank required_rank
-            if active_rank=$(gate_profile_rank "$active_profile" 2>/dev/null) \
-               && required_rank=$(gate_profile_rank "$required_profile" 2>/dev/null); then
-              if (( active_rank < required_rank )); then
-                _PRECONDITION_FAIL_REASON="risk_profile_below_required"
-                cat <<EOF >&2
-PRECONDITION FAIL: risk_profile_below_required — active gate profile '${active_profile}' (rank ${active_rank}) is weaker than the risk-required profile '${required_profile}' (rank ${required_rank}) for this EPIC's actual diff (${risk_base_commit}..HEAD).
+Reason: the only way to narrow gate coverage is a profile name the project
+        declared in execution.yaml.gate_profiles, chosen by that file's own
+        when_paths / default_profile rule, and the GATES:DONE floor refuses a
+        report that names none, names one narrower than the resolver's answer,
+        or was produced against a table that has since changed.
 
-Reason: D4 (P061) — a high-risk changed path (e.g. aid-fsm.sh, aid-run-gates.sh,
-        aid-release-policy.sh, aid-evidence-verify.sh, defaults/schemas/*,
-        defaults/policies/*, agents/*.md) upgrades the REQUIRED gate profile
-        for this run. This precondition VERIFIES and ENFORCES that floor at
-        GATES:DONE — it does not just recommend it (a detector without
-        enforcement is decoration, AID-v3-principles.md §1).
-
-Fix: re-run gates so the recorded profile is >= '${required_profile}':
+Fix: re-run the gates so the recorded profile is >= '${_gp_fix_name}':
        bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh advance-to-gates ${state_file}
-     (auto-resolves the risk-required profile for you), or explicitly:
-       bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all ... --profile ${required_profile}
+     (resolves the profile for you), or explicitly:
+       bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all ... --profile ${_gp_fix_name}
 
 OR (PM-authorized override, audited):
   aid-fsm.sh transition GATES DONE ${state_file} --force --reason \\
       '<≥20 chars why completing under a weaker profile is acceptable>'
 EOF
-                return 1
-              fi
-            else
-              # Active profile name isn't one of the 5 known ranks (a custom
-              # project-defined gate_profiles key) — cannot compare, cannot
-              # enforce. For high-risk diffs, this is a blocking failure
-              # (fail-closed: we cannot verify the active profile is sufficient).
-              # For low-risk diffs, non-blocking telemetry only.
-              local req_rank
-              if req_rank=$(gate_profile_rank "$required_profile" 2>/dev/null); then
-                if (( req_rank > 0 )); then
-                  # Required profile is above 'quick' (high-risk) — must fail
-                  # because we cannot verify an unrecognized active profile meets it.
-                  _PRECONDITION_FAIL_REASON="risk_profile_unresolvable"
-                  cat <<EOF >&2
-PRECONDITION FAIL: risk_profile_unresolvable — the recorded active gate profile '${active_profile}' is not recognized (not in the canonical profile ranks: quick/targeted/standard/full/release). The risk-required profile for this EPIC's diff is '${required_profile}' (rank ${req_rank}), which is above 'quick' — we cannot verify that an unrecognized profile name meets this requirement.
-
-Reason: D4 (P061) — a high-risk changed path upgrades the REQUIRED gate profile
-        for this run. This precondition VERIFIES and ENFORCES that floor at
-        GATES:DONE — it does not just recommend it (a detector without
-        enforcement is decoration, AID-v3-principles.md §1).
-
-Fix: Either extend your execution.yaml.gate_profiles to define '${active_profile}' with a documented rank, or re-run gates with a recognized profile name:
-       bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all ... --profile ${required_profile}
-
-OR (PM-authorized override, audited):
-  aid-fsm.sh transition GATES DONE ${state_file} --force --reason \\
-      '<≥20 chars why using an unrecognized profile is acceptable>'
-EOF
-                  return 1
-                else
-                  # Required profile is 'quick' — low-risk, unrecognized active
-                  # profile is acceptable. Non-blocking telemetry only.
-                  fsm_emit_audit_log "risk_profile_rank_unresolvable" \
-                    --evidence-dir "$evidence_dir" \
-                    --active-profile "$active_profile" \
-                    --required-profile "$required_profile"
-                fi
-              else
-                # required_profile rank lookup itself failed — should not happen
-                # (we computed required_profile ourselves from the resolver), but
-                # fall back to non-blocking telemetry as a safety measure.
-                fsm_emit_audit_log "risk_profile_rank_unresolvable" \
-                  --evidence-dir "$evidence_dir" \
-                  --active-profile "$active_profile" \
-                  --required-profile "$required_profile"
-              fi
-            fi
-          fi
+          return 1
         fi
       else
         # Fail loud, never silent-pass: without jq we cannot verify overall==pass,
@@ -4682,54 +4592,41 @@ cmd_advance_to_gates() {
       epic_id="$epic_id" run_id="$run_id" reason="plan_json_absent"
   fi
 
-  # ─── P061 E2 Step 2 ("Step 8"): gate-profile auto-resolve ─────────────────
-  # DESIGN DECISION: advance-to-gates ALWAYS resolves a profile — either the
-  # caller's explicit --profile (wins outright, no resolver call at all) or,
-  # when none was given, the Step 1 shared resolver (aid-gate-profile.sh's
-  # gate_profile_resolve) run against THIS run's base_commit..HEAD diff. The
-  # resolved name is only actually passed to aid-run-gates.sh as --profile
-  # when it is a key under execution.yaml.gate_profiles — this is the D9
-  # legacy-preservation guard: a project that has never defined gate_profiles
-  # (the overwhelming majority today, INCLUDING this plugin's own
-  # execution.yaml at the time of writing) must keep running every defined
-  # gate exactly as before. Without this guard, auto-resolve would hand
-  # aid-run-gates.sh a --profile name with no matching gate_profiles key,
-  # which is a hard, fail-loud error there (P061 E1 Step 2) — i.e. it would
-  # BREAK every project that hasn't opted in, including the very EPIC that
-  # produced this code. An explicit caller --profile is passed through
-  # unconditionally instead: the caller asked for it by name, so an unknown
-  # key is the caller's own mistake and should fail loud (same as calling
-  # aid-run-gates.sh directly with a bad --profile).
+  # ─── P097 Step 4: gate-profile selection ─────────────────────────────────
+  # An explicit caller --profile wins outright (an unknown name is the
+  # caller's own mistake and fails loud in the runner). Otherwise the
+  # resolver picks the profile for THIS run's base_commit..HEAD diff from the
+  # project's own table: the last declared profile whose when_paths matches,
+  # else default_profile. A project without gate_profiles gets no --profile
+  # (every gate runs, profile_source none); a table without a usable
+  # default_profile, or an answer with no required gate, stops here naming
+  # the upgrade command. The GATES:DONE floor recomputes the same answer.
   local profile_arg=()
   if [[ -n "$explicit_profile" ]]; then
     profile_arg=(--profile "$explicit_profile")
     [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
       profile="$explicit_profile" source="explicit_caller"
   else
-    # P064 plan Step 8: resolve at the EPIC BOUNDARY (mode-gated — see
-    # _fsm_gate_profile_boundary). In plan_branch mode this caps the run at
-    # `standard`, so no EPIC starts a broad suite on its own; the accumulated
-    # plan-final floor is recorded separately by `aid-plan-fsm.sh
-    # epic-complete`. The GATES:DONE risk precondition recomputes through the
-    # SAME helper, so the two can never disagree.
-    local _gp_base_commit _gp_paths_file _gp_resolved _gp_defined _gp_boundary
+    local _gp_base_commit _gp_paths_file _gp_resolved _gp_boundary _gp_rc=0
     _gp_base_commit=$(yaml_field "$state_file" base_commit)
     _gp_boundary="$(_fsm_gate_profile_boundary "$epic_id")"
     _gp_paths_file=$(mktemp -t aid-gate-profile-paths.XXXXXX)
     if [[ -n "$_gp_base_commit" ]]; then
       git -C "$PWD" diff --name-only "${_gp_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
     fi
-    _gp_resolved=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json" "$_gp_boundary")
+    _gp_resolved=$(gate_profile_for_paths "$execution_yaml" "$_gp_paths_file") || _gp_rc=$?
     rm -f "$_gp_paths_file"
-
-    _gp_defined=$(PROFILE="$_gp_resolved" yq '.gate_profiles[strenv(PROFILE)]' "$execution_yaml" 2>/dev/null || echo "")
-    if [[ -n "$_gp_defined" && "$_gp_defined" != "null" ]]; then
-      profile_arg=(--profile "$_gp_resolved" --profile-reason "FSM auto-resolved profile ${_gp_resolved}")
+    if (( _gp_rc != 0 )); then
+      echo "ERROR: advance-to-gates: ${execution_yaml} declares gate_profiles but no profile can be resolved (see above)." >&2
+      exit 2
+    fi
+    if [[ -n "$_gp_resolved" ]]; then
+      profile_arg=(--profile "$_gp_resolved")
       [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
         profile="$_gp_resolved" source="auto_resolved" boundary="${_gp_boundary:-legacy}"
     else
       [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_auto_resolve_skipped" \
-        resolved="$_gp_resolved" reason="not_defined_in_gate_profiles" boundary="${_gp_boundary:-legacy}"
+        reason="no_gate_profiles" boundary="${_gp_boundary:-legacy}"
     fi
   fi
 

@@ -14,21 +14,20 @@
 #     `--plan null`, takes its Fast Mode exit-2 skip, and the one release gate
 #     run for a whole plan reports success while verifying nothing.
 #
-# P061 E1 Step 2 changes:
-#   • --profile <name> selects a named subset of gates to run, from
-#     execution.yaml.gate_profiles.<name>.include[] (a whitelist of gate
-#     keys). Gates defined under execution.yaml.gates but NOT in the active
-#     profile's include[] are NOT run — they get an explicit
-#     `status: skip, reason: not_in_profile` row instead of being silently
-#     omitted, and never affect `overall` (same treatment as a skipped
-#     required:false gate). Omitting --profile preserves today's behavior
-#     exactly: all defined gates run, even if gate_profiles exists.
-#   • Unknown --profile name, or a profile include[] entry that isn't a key
-#     under execution.yaml.gates, is fail-loud (exit != 0) BEFORE any gate
-#     runs.
-#   • gates_report.json gains: profile, profile_source, profile_reason,
-#     excluded_gates[] (additive; null/[] when --profile isn't passed). The
-#     list stays one release for readers; the rows are the contract.
+# Profiles (P061 E1 Step 2, reshaped by P097 Step 4):
+#   • --profile <name> runs exactly execution.yaml.gate_profiles.<name>.include[]
+#     and nothing else decides. Gates outside the profile get an explicit
+#     `status: skip, reason: not_in_profile` row and never affect `overall`.
+#     Omitting --profile runs every defined gate.
+#   • The name is validated through lib/aid-gate-profile-select.sh BEFORE any
+#     gate runs: an unknown name, or a profile whose include[] names no
+#     `required: true` gate (a run that can only skip is not a run), exits 2
+#     naming the declared profiles and the upgrade command. An include[] entry
+#     that is not a key under gates, or names a gate without a command, exits 1.
+#   • gates_report.json records `profile` (null without --profile),
+#     `profile_source: caller|none`, `profile_table` (the declared names in
+#     order — the GATES:DONE floor compares indexes within THIS list) and
+#     `excluded_gates[]`.
 #
 # P097 Step 2 — every row is a version-2 gate row (lib/aid-gate-row.sh,
 #   defaults/schemas/gate-row.schema.json): `row_version: 2`, `status`
@@ -95,6 +94,8 @@ fi
 source "${SCRIPT_DIR}/lib/aid-resume-artifact.sh"
 # shellcheck source=lib/aid-roots.sh
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
+# P097 Step 4 — the one profile resolver (names, ranks, refusals).
+source "${SCRIPT_DIR}/lib/aid-gate-profile-select.sh"
 
 # ─── State paths vs the tree under test (P079 Step 2, IMP-479) ──────────────
 # Two different roots meet in this file and used to be the same one by
@@ -1588,7 +1589,7 @@ run_all_gates() {
 
   # Parse optional flags: --state-file, --report-file, --plan-json, --profile,
   # --base-commit, --plan-path
-  local state_file="" report_file="" plan_json="" profile="" profile_reason_opt=""
+  local state_file="" report_file="" plan_json="" profile=""
   # P068 Step 2 — explicit substitution inputs. ADDITIVE and OPTIONAL: when
   # absent, both fall back to --state-file exactly as before, so every existing
   # EPIC-scoped caller is byte-for-byte unaffected. They exist because a
@@ -1604,7 +1605,6 @@ run_all_gates() {
       --report-file) report_file="$2"; shift 2 ;;
       --plan-json) plan_json="$2"; shift 2 ;;
       --profile) profile="$2"; shift 2 ;;
-      --profile-reason) profile_reason_opt="$2"; shift 2 ;;
       --base-commit) base_commit_opt="$2"; base_commit_opt_set=1; shift 2 ;;
       --plan-path) plan_path_opt="$2"; plan_path_opt_set=1; shift 2 ;;
       *) shift ;;
@@ -1645,30 +1645,20 @@ run_all_gates() {
   # gate/attempt): idempotent, and there's nothing gate-specific about it.
   aid_gate_baseline_ensure_gitignored
 
-  # ─── Gate profile resolution (P061 E1 Step 2) ──────────────────────────
-  # A profile is a named include[] whitelist of gate keys under
-  # execution.yaml.gate_profiles. --profile <name> activates exactly one
-  # profile for THIS run (auto-selection by risk/phase is a later EPIC —
-  # for this step profile_source is always "cli_flag"). Omitting --profile
-  # leaves `profile`/`include_gates_json` empty and every check below is
-  # skipped, so legacy execution.yaml files (with or without a
-  # `gate_profiles` block) behave EXACTLY as before — this is the
-  # backward-compatibility contract.
-  #
-  # All three fail-loud cases are validated upfront, before any gate runs:
-  #   1. --profile <name> where <name> is not a key under gate_profiles.
-  #   2. A profile's include[] lists a gate not defined under .gates.
-  #   3. A profile's include[] lists a gate defined with no `command`.
-  local profile_source="null" profile_reason="null"
+  # ─── Gate profile validation (P097 Step 4) ───────────────────────────
+  # The caller names the profile; nothing here chooses one. A name that is
+  # not declared, or a profile that could only skip, is refused with exit 2
+  # before any gate runs. include[] entries are then checked against gates:
+  # (an undefined gate or a gate without a command is exit 1, as before).
+  local profile_source="none"
   local include_gates_json="[]"
+  local profile_table_json
+  profile_table_json="$(gate_profile_table "$execution_yaml" | jq -R . | jq -sc .)"
   if [[ -n "$profile" ]]; then
-    local profile_def
-    profile_def=$(PROFILE="$profile" yq '.gate_profiles[strenv(PROFILE)]' "$execution_yaml")
-    if [[ -z "$profile_def" || "$profile_def" == "null" ]]; then
-      echo "ERROR: aid-run-gates.sh: unknown gate profile '${profile}' — no such key under gate_profiles in ${execution_yaml}" >&2
-      exit 1
+    if ! gate_profile_exists "$execution_yaml" "$profile"; then
+      echo "ERROR: aid-run-gates.sh: unknown gate profile '${profile}' — declared profiles in ${execution_yaml}: ${profile_table_json}; $(gate_profile_upgrade_hint)" >&2
+      exit 2
     fi
-
     include_gates_json=$(PROFILE="$profile" yq -o=json '.gate_profiles[strenv(PROFILE)].include // []' "$execution_yaml" | tr -d '\n ')
     local profile_defined_keys_json
     profile_defined_keys_json=$(yq -o=json '.gates | keys' "$execution_yaml" | tr -d '\n ')
@@ -1690,14 +1680,17 @@ run_all_gates() {
         exit 1
       fi
     done < <(jq -r '.[]' <<< "$include_gates_json")
-
-    # The FSM passes the profile it resolved with its reason; a bare --profile
-    # from a human is what "explicit --profile flag" was ever meant to say.
-    if [[ -n "${profile_reason_opt:-}" ]]; then
-      profile_source="fsm_resolved"; profile_reason="$profile_reason_opt"
-    else
-      profile_source="cli_flag"; profile_reason="explicit --profile flag"
+    # After the per-gate checks, so a command-less gate is still named as
+    # such: a profile whose include[] carries no required gate is refused —
+    # a run that can only skip is not a run. The one exception is the
+    # plan-final reuse copy (aid-plan-fsm.sh sets AID_GATES_REUSE_OF to the
+    # attempt the required rows were copied from): there the required gates
+    # already passed and the narrowed include[] is what is left to execute.
+    if [[ -z "${AID_GATES_REUSE_OF:-}" ]] && ! gate_profile_has_required_gate "$execution_yaml" "$profile"; then
+      echo "ERROR: aid-run-gates.sh: gate profile '${profile}' includes no required gate (include: $(PROFILE="$profile" yq -o=json -I=0 '.gate_profiles[strenv(PROFILE)].include // []' "$execution_yaml")) — a run that can only skip is not a run; declared profiles: ${profile_table_json}; $(gate_profile_upgrade_hint)" >&2
+      exit 2
     fi
+    profile_source="caller"
   fi
 
   # FSM state check: refuse to run if state is not GATES, UNLESS caller is
@@ -2756,16 +2749,13 @@ run_all_gates() {
     revision_json='{"head_sha":null}'
   fi
 
-  # ─── gate profile fields (P061 E1 Step 2) ──────────────────────────────
-  # profile/profile_source/profile_reason stay JSON null when --profile
-  # wasn't passed (legacy-compat: field present, value absent-equivalent).
-  # excluded_gates is always an array, empty when no gate was excluded.
-  local profile_val_json="null" profile_source_val_json="null" profile_reason_val_json="null"
-  if [[ -n "$profile" ]]; then
-    profile_val_json=$(jq -nc --arg v "$profile" '$v')
-    profile_source_val_json=$(jq -nc --arg v "$profile_source" '$v')
-    profile_reason_val_json=$(jq -nc --arg v "$profile_reason" '$v')
-  fi
+  # ─── gate profile fields (P097 Step 4) ─────────────────────────────────
+  # `profile` is null without --profile; `profile_source` is caller|none;
+  # `profile_table` is the declared order the floor compares indexes in
+  # ([] when the file declares no gate_profiles). excluded_gates is always
+  # an array, empty when no gate was excluded.
+  local profile_val_json="null"
+  [[ -n "$profile" ]] && profile_val_json=$(jq -nc --arg v "$profile" '$v')
   local excluded_gates_json
   if (( ${#excluded_gates[@]} == 0 )); then
     excluded_gates_json="[]"
@@ -2794,11 +2784,11 @@ run_all_gates() {
               --argjson pgr "$plan_gates_reconciled" \
               --argjson rev "$revision_json" \
               --argjson prof "$profile_val_json" \
-              --argjson profsrc "$profile_source_val_json" \
-              --argjson profreason "$profile_reason_val_json" \
+              --arg profsrc "$profile_source" \
+              --argjson proftable "$profile_table_json" \
               --argjson excl "$excluded_gates_json" \
               --argjson waived "$waived_gates_json" \
-              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev, profile: $prof, profile_source: $profsrc, profile_reason: $profreason, excluded_gates: $excl, waived_gates: $waived}' \
+              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev, profile: $prof, profile_source: $profsrc, profile_table: $proftable, excluded_gates: $excl, waived_gates: $waived}' \
               <<< "$report")
 
   # ─── P069 Step 14 — targeted_tests escalation: full-profile substitute ──

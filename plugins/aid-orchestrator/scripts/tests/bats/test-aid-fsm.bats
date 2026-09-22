@@ -1827,3 +1827,54 @@ total_steps: 4
   [ "$status" -eq 1 ]; [[ "$output" == *"names no epic_id/run_id"* ]]
   grep -q '^total_steps: 4' "$sf"
 }
+
+# ─── P097 Step 4: the GATES:DONE gate-profile floor, end to end (t2) ────────
+# The merge-path proof of the same rule is in test-aid-gate-profile-select.bats
+# (t0, the library verdict) and test-aid-run-gates.bats (t1); this is the
+# FSM's own end-to-end case: a report that names no profile while the
+# project's execution.yaml declares gate_profiles is refused with
+# risk_profile_unresolvable, and the same run recorded under the resolved
+# profile proceeds.
+@test "P097 Step 4: GATES:DONE refuses a gates_report.json with no profile (risk_profile_unresolvable) and accepts the same run recorded under the resolved profile" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local RUN_GATES="$AID_PLUGIN_PATH/scripts/aid-run-gates.sh"
+  local base; base=$(git rev-parse HEAD)
+  echo "ordinary" > ordinary.txt; git add ordinary.txt; git commit -q -m "ordinary change"
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  always_pass:
+    command: "true"
+    required: true
+default_profile: standard
+gate_profiles:
+  standard:
+    include: [always_pass]
+  full:
+    include: [always_pass]
+    when_paths: ["*/aid-fsm.sh"]
+YAML
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$status" -eq 0 ]
+  run jq -r '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "null" ]
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"risk_profile_unresolvable"* ]]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+
+  # The same run, recorded under the resolved profile, passes the floor.
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile standard
+  [ "$status" -eq 0 ]
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
+}

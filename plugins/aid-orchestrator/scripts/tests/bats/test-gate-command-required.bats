@@ -54,7 +54,7 @@ YAML
 gates:
   plan_diff:
     command: "exit 0"
-    required: false
+    required: true   # P097 Step 4: a profile must name at least one required gate
   docs_updated:
     required: false
 

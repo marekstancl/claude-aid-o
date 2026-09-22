@@ -17,12 +17,13 @@
 #   compose_execution_yaml <project_root> <output_file> [stack ...]
 #       Render execution.yaml at <output_file> from per-stack template
 #       fragments under defaults/execution-stacks/<stack>.yaml. Also emits a
-#       generic `gate_profile_defaults`/`gate_profiles` block (P061 E1 Step 5)
+#       generic `default_profile`/`gate_profiles` block (P061 E1 Step 5,
+#       list model since P097 Step 4)
 #       derived ONLY from gate names each stack fragment actually defines —
 #       never references self-host names like bats_fsm/bats_all (D3 isolation).
 #
 #   render_gate_profiles_block [stack ...]
-#       P061 E1 Step 6: echo JUST the `gate_profile_defaults`/`gate_profiles`
+#       P061 E1 Step 6: echo JUST the `default_profile`/`gate_profiles`
 #       YAML block (or its "no stacks detected" comment fallback) for the
 #       given stacks — the same derivation compose_execution_yaml uses
 #       internally, factored out so the existing-project upgrade path (below)
@@ -155,7 +156,7 @@ stack_gate_names() {
 #   P061 E1 Step 6: standalone version of the gate_profiles derivation that
 #   used to live inline in compose_execution_yaml (P061 E1 Step 5). Echoes
 #   either the "no stacks detected" comment line, or the full
-#   `gate_profile_defaults:` + `gate_profiles:` YAML block, to stdout.
+#   `default_profile:` + `gate_profiles:` YAML block, to stdout.
 #   compose_execution_yaml (fresh-init) and append_gate_profiles_block callers
 #   (existing-project upgrade) both call this — one derivation, no drift.
 render_gate_profiles_block() {
@@ -265,31 +266,36 @@ render_gate_profiles_block() {
     targeted_gate_names+=("targeted_tests")
   fi
 
-  # P083 Step 7: the full canonical ladder (quick < targeted < standard <
-  # full < release, per gate_profile_rank), composed from the SAME two
-  # derivations above — targeted and full are unchanged. `quick` is
-  # deliberately empty (the fastest possible check: nothing beyond whatever
-  # the caller runs unconditionally); `standard` and `release` reuse `full`'s
-  # set rather than inventing a third gate-selection heuristic this stack
-  # data cannot ground — "release includes what exists", not a fixed
-  # membership distinct from `full`.
-  local targeted_csv full_csv
+  # P097 Step 4: the profiles are an ORDERED list, narrowest first — the
+  # declaration index is the rank (lib/aid-gate-profile-select.sh). No
+  # `quick` (an empty include[] is a run that can only skip, which the
+  # resolver refuses) and no `gate_profile_defaults` (dead since 2.102.0).
+  # `default_profile: standard` is what an EPIC run gets when no when_paths
+  # matches; `full` carries the when_paths (execution_yaml_default_when_paths,
+  # the one copy of the high-risk list); `release` is the plan-final
+  # boundary's explicit name and is never auto-selected, so it has none.
+  # `standard`, `full` and `release` reuse the same set rather than inventing
+  # a gate-selection heuristic this stack data cannot ground.
+  local targeted_csv full_csv when_paths_yaml=""
   targeted_csv="$(IFS=', '; echo "${targeted_gate_names[*]}")"
   full_csv="$(IFS=', '; echo "${full_gate_names[*]}")"
+  local wp
+  while IFS= read -r wp; do when_paths_yaml+="      - \"${wp}\""$'\n'; done < <(execution_yaml_default_when_paths)
   cat <<EOF
-gate_profile_defaults:
-  step: targeted
-  epic: full
+# Profiles are an ordered list, narrowest first: the declaration index is the
+# rank the GATES:DONE floor compares. A run gets the LAST profile whose
+# when_paths matches a changed path, else default_profile.
+default_profile: standard
 
 gate_profiles:
-  quick:
-    include: []
   targeted:
     include: [${targeted_csv}]
   standard:
     include: [${full_csv}]
   full:
     include: [${full_csv}]
+    when_paths:
+${when_paths_yaml%$'\n'}
   release:
     include: [${full_csv}]
 EOF
@@ -378,9 +384,6 @@ compose_execution_yaml() {
 # Detected stacks: ${stacks_label}
 # Review and customize commands; remove sections for stacks you don't use.
 
-version: "1.0"
-generated_by: "aid-init v2.16.0"
-
 gates:
 EOF
 
@@ -441,8 +444,8 @@ EOF
 # execution_yaml_default_when_paths
 #   Echo the glob patterns (one per line) a `full` profile's `when_paths`
 #   gets when the upgrade adds it. THE one copy of the classifier's high-risk
-#   list: each `case` arm of gate_profile_is_high_risk_path in
-#   lib/aid-gate-profile.sh appears here verbatim, so a path the old
+#   list: each `case` arm of the old classifier's gate_profile_is_high_risk_path
+#   (the pre-P097 profile library, deleted by Step 9) appears here verbatim, so a path the old
 #   classifier calls high-risk matches one of these through
 #   _aid_ancillary_glob_match (a bash `case` glob, the same engine) and a path
 #   it does not, matches none. Read by this upgrade and by the composer; the

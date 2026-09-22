@@ -155,7 +155,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-plan-state.sh"      # also sources lib/aid-lock.sh
 # shellcheck disable=SC1091
-source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"   # also sources lib/aid-lock.sh + lib/aid-gate-profile.sh
+source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"   # also sources lib/aid-lock.sh + lib/aid-gate-profile-select.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
 # shellcheck disable=SC1091
@@ -3135,63 +3135,32 @@ cmd_epic_complete() {
     profile="$(jq -r '.profile // empty' "$gates_report" 2>/dev/null)" || profile=""
   fi
 
-  # ═══ Plan-final floor (P064 plan Step 8) ═════════════════════════════════
-  # The EPIC boundary deliberately runs a CAPPED profile (lib/aid-gate-profile.sh,
-  # boundary=epic), so `gates_report.json.profile` is NOT the risk this EPIC
-  # carries — it is only the cheapest run that satisfied the EPIC boundary.
-  # The risk itself is recomputed here from the EPIC's real diff and recorded
-  # as the plan-final floor, which P068's plan-final stage consumes. The
-  # resolver returns that floor out-of-band; `--floor-file` is the channel
-  # that survives being read from a subshell.
-  #
-  # ── THE EPIC'S OWN fsm-state IS DELIBERATELY NOT PASSED ──────────────────
-  # (CP3 integration review finding 3.) `gate_profile_resolve` reads exactly
-  # one field out of an fsm-state file: `done_phase`. `done_phase == release`
-  # escalates the UNBOUNDED view — and the unbounded view IS the accumulated
-  # floor. But `epic-complete` runs AFTER `done-advance review release`, so
-  # this EPIC's state file ALWAYS says `done_phase: release` by the time we get
-  # here. Passing it would have recorded the floor `release` for every EPIC
-  # whatever its diff: a docs-only EPIC would pin the whole plan at the release
-  # suite, `epic_final_profile_floor` would carry no information at all, and
-  # the `targeted_tests` exit-3 escalation below could never raise anything
-  # because the floor was already at the ceiling by construction.
-  #
-  # An EPIC's `done_phase: release` describes THAT EPIC's own FSM tail — its
-  # release sub-phase — not the PLAN's final release boundary. Nothing is lost
-  # by not inheriting it: the plan-final boundary re-adds the release
-  # escalation UNCONDITIONALLY (`boundary=plan_final` -> max(accumulated_floor,
-  # release), lib/aid-gate-profile.sh), so the plan-final run still executes
-  # the release suite. What is recorded here is then exactly what it claims to
-  # be: the risk of THIS EPIC's own epic_base_commit..task_branch diff.
-  #
-  # WHY AN EMPTY fsm-state POSITIONAL rather than a new flag or a different
-  # boundary name: "" is already the library's documented "no release-phase
-  # signal to inherit" input (its no-fsm-state guard is an explicit, tested
-  # fallback), it needs no change to a resolver shared with aid-fsm.sh's two
-  # call sites, and it keeps ONE way to express the release escalation instead
-  # of a second, boundary-specific one that would have to be kept in sync.
+  # ═══ Plan-final floor (P064 plan Step 8, P097 Step 4) ═══════════════════
+  # The floor this EPIC contributes to the plan-final run is the WIDEST of:
+  # the profile the project's own table resolves for this EPIC's real
+  # epic_base_commit..task_branch diff (gate_profile_for_paths: the last
+  # declared profile whose when_paths matches, else default_profile), the
+  # profile the run actually executed, and `full` when the targeted selector
+  # could not prove which tests cover the change (exit 3). "Wider" is the
+  # declaration index in that table (gate_profile_wider); a name the table
+  # does not declare cannot raise anything and is reported instead.
+  local _ec_exec_yaml="${project_root}/.aid-o/config/execution.yaml"
   local final_floor=""
   local _ec_base _ec_task_branch
   _ec_base="$(jq -r '.epic_base_commit // empty' <<<"$entry_json" 2>/dev/null)" || _ec_base=""
   _ec_task_branch="$(jq -r '.task_branch // empty' <<<"$entry_json" 2>/dev/null)" || _ec_task_branch=""
-  if [[ -n "$_ec_base" && -n "$_ec_task_branch" ]] \
+  if [[ -f "$_ec_exec_yaml" && -n "$_ec_base" && -n "$_ec_task_branch" ]] \
      && git -C "$project_root" rev-parse --verify --quiet "$_ec_task_branch" >/dev/null 2>&1; then
-    local _ec_paths _ec_floor_file _ec_rc=0
+    local _ec_paths _ec_rc=0
     _ec_paths="$(mktemp -t aid-epic-complete-paths.XXXXXX)"
-    _ec_floor_file="$(mktemp -t aid-epic-complete-floor.XXXXXX)"
     git -C "$project_root" diff --name-only "${_ec_base}..${_ec_task_branch}" \
       > "$_ec_paths" 2>/dev/null || true
-    gate_profile_resolve "$_ec_paths" "" \
-      "${project_root}/${evidence_dir}/review-profile.json" epic \
-      --floor-file "$_ec_floor_file" >/dev/null 2>/dev/null || _ec_rc=$?
-    if [[ "$_ec_rc" -eq 0 ]]; then
-      final_floor="$(head -n1 "$_ec_floor_file" 2>/dev/null)" || final_floor=""
-    else
-      # A usage error from the resolver is a bug in THIS call, never the
-      # operator's problem — but it must not silently mean "no floor".
-      echo "WARN: epic-complete: could not resolve the plan-final floor for ${epic_id} (rc=${_ec_rc}) — falling back to the run's recorded profile." >&2
+    final_floor="$(gate_profile_for_paths "$_ec_exec_yaml" "$_ec_paths")" || _ec_rc=$?
+    rm -f "$_ec_paths"
+    if [[ "$_ec_rc" -ne 0 ]]; then
+      echo "PRECONDITION FAIL: epic-complete: ${_ec_exec_yaml} declares gate_profiles but cannot resolve a profile for ${epic_id}'s diff (see above)." >&2
+      exit 1
     fi
-    rm -f "$_ec_paths" "$_ec_floor_file"
   fi
 
   # An unknown production path (aid-select-tests.sh exit 3, surfaced as the
@@ -3204,31 +3173,32 @@ cmd_epic_complete() {
     _ec_sel_exit="$(jq -r '.gates.targeted_tests.exit_code // empty' "$gates_report" 2>/dev/null)" || _ec_sel_exit=""
     if [[ "$_ec_sel_exit" == "3" ]]; then
       unknown_production_path=true
-      final_floor="$(gate_profile_max "${final_floor:-quick}" full 2>/dev/null)" || final_floor="full"
+      final_floor="$(gate_profile_wider "$_ec_exec_yaml" "$final_floor" full 2>/dev/null)" || final_floor="${final_floor:-full}"
     fi
   fi
 
-  # The run's own profile is a lower bound too (it really executed) — but only
-  # when it is one of the five canonical names. A project-defined custom
-  # profile is legitimate (aid-fsm.sh's own risk_profile_unresolvable branch
-  # treats it as unrankable, not illegal), so it is reported and skipped
+  # The run's own profile is a lower bound too (it really executed) — when the
+  # table declares it. A name it does not declare is reported and skipped
   # rather than failing an otherwise complete EPIC.
   if [[ -n "$profile" ]]; then
-    if gate_profile_rank "$profile" >/dev/null 2>&1; then
-      final_floor="$(gate_profile_max "${final_floor:-quick}" "$profile" 2>/dev/null)" || final_floor="$profile"
+    if gate_profile_exists "$_ec_exec_yaml" "$profile" 2>/dev/null; then
+      final_floor="$(gate_profile_wider "$_ec_exec_yaml" "$final_floor" "$profile" 2>/dev/null)" || final_floor="$profile"
     else
-      echo "NOTE: epic-complete: gates_report.json for ${epic_id} names a non-canonical gate profile '${profile}' (epic_completion_profile_unranked) — it cannot raise the plan-final floor; the floor comes from the resolver instead." >&2
+      echo "NOTE: epic-complete: gates_report.json for ${epic_id} names a gate profile '${profile}' that ${_ec_exec_yaml} does not declare (epic_completion_profile_unranked) — it cannot raise the plan-final floor." >&2
     fi
   fi
+  # A floor the table does not declare (no gate_profiles at all) is not raised.
+  if [[ -n "$final_floor" ]] && ! gate_profile_exists "$_ec_exec_yaml" "$final_floor" 2>/dev/null; then
+    echo "NOTE: epic-complete: plan-final floor '${final_floor}' is not declared in ${_ec_exec_yaml}; nothing raised." >&2
+    final_floor=""
+  fi
 
-  # gate_profiles absent from execution.yaml: the floor is still recorded (it
-  # is a property of the DIFF, not of the config), only profile SELECTION is
-  # unavailable — the documented legacy behaviour for a project that has not
-  # upgraded its execution.yaml yet.
-  local _ec_exec_yaml="${project_root}/.aid-o/config/execution.yaml"
+  # gate_profiles absent from execution.yaml: there is no table to rank in,
+  # so no floor is raised — the documented behaviour for a project that has
+  # not upgraded its execution.yaml yet (its plan-final run executes every gate).
   if [[ ! -f "$_ec_exec_yaml" ]] \
      || ! yq -e '.gate_profiles' "$_ec_exec_yaml" >/dev/null 2>&1; then
-    echo "NOTE: epic-complete: gate_profiles_absent — no gate_profiles block in ${_ec_exec_yaml}; recording the plan-final floor '${final_floor:-<none>}' without profile selection." >&2
+    echo "NOTE: epic-complete: gate_profiles_absent — no gate_profiles block in ${_ec_exec_yaml}; no plan-final floor to raise (every gate runs at plan-final)." >&2
   fi
 
   # A gate the PLAN declared mandatory that the active profile excluded must
@@ -4913,14 +4883,14 @@ _pfsm_finalize_gates_body() {
   shift 8
   local -a subs=("$@")
 
-  # ── Profile resolution: max(plan_final_required_profile, release) ────────
-  # gate_profile_max comes from lib/aid-gate-profile.sh (P064 Step 8); this
-  # stage CONSUMES the table, it does not define one.
+  # ── Profile resolution: the wider of (plan_final_required_profile, release)
+  # by declaration index in the project's own table (gate_profile_wider,
+  # lib/aid-gate-profile-select.sh, P097 Step 4). `release` is the plan-final
+  # boundary's explicit name — never auto-selected, always at least this. A
+  # recorded floor the table does not declare cannot widen it (an undeclared
+  # name loses); `release` itself undeclared is the empty-include refusal below.
   local resolved=""
-  resolved="$(gate_profile_max "$required_profile" release)" || {
-    echo "PRECONDITION FAIL: plan-finalize --stage gates: cannot resolve the plan-final profile from '${required_profile}'." >&2
-    return 1
-  }
+  resolved="$(gate_profile_wider "$execution_yaml" "$required_profile" release 2>/dev/null)" || resolved="release"
 
   local release_include quarantined
   release_include="$(_pfsm_profile_include "$execution_yaml" "$resolved")"
@@ -5020,7 +4990,11 @@ _pfsm_finalize_gates_body() {
             echo "PRECONDITION FAIL: could not write ${run_yaml}." >&2; return 1; }
       fi
       local grc=0
-      ( cd "$troot" && "${SCRIPT_DIR}/aid-run-gates.sh" run-all "$run_yaml" \
+      # AID_GATES_REUSE_OF: the runner skips its "profile has no required
+      # gate" refusal for a reuse copy whose required rows were copied above.
+      local -a reuse_env=()
+      [[ "$run_yaml" != "$execution_yaml" ]] && reuse_env=("AID_GATES_REUSE_OF=${reuse_from}")
+      ( cd "$troot" && env "${reuse_env[@]}" "${SCRIPT_DIR}/aid-run-gates.sh" run-all "$run_yaml" \
           "$plan_id" "$run_id" "$timeline_file" \
           --report-file "$report_file" \
           --profile "$effective_profile" \

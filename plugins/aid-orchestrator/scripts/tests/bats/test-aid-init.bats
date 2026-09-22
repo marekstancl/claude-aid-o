@@ -94,12 +94,20 @@ teardown() {
   mkdir -p .aid-o/config
   compose_execution_yaml "$PWD" .aid-o/config/execution.yaml "${stacks[@]}"
 
-  # gate_profile_defaults + gate_profiles block present, structurally correct
-  # (same key names aid-run-gates.sh --profile / aid-fsm.sh plan-gate floor expect).
-  run yq '.gate_profile_defaults.step' .aid-o/config/execution.yaml
-  [ "$output" == "targeted" ]
-  run yq '.gate_profile_defaults.epic' .aid-o/config/execution.yaml
-  [ "$output" == "full" ]
+  # P097 Step 4: default_profile + gate_profiles block present as an ordered
+  # list (no gate_profile_defaults, no quick, when_paths on full only).
+  run yq '.gate_profile_defaults' .aid-o/config/execution.yaml
+  [ "$output" == "null" ]
+  run yq '.gate_profiles.quick' .aid-o/config/execution.yaml
+  [ "$output" == "null" ]
+  run yq -r '.default_profile' .aid-o/config/execution.yaml
+  [ "$output" == "standard" ]
+  run yq -r '.gate_profiles | keys | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "targeted,standard,full,release" ]
+  run yq -r '[.gate_profiles[] | has("when_paths")] | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "false,false,true,false" ]
+  run yq -r '.gate_profiles.full.when_paths | join(",")' .aid-o/config/execution.yaml
+  [[ "$output" == *"*/aid-fsm.sh"* ]]
 
   # Profiles reference ONLY gate names the TypeScript stack fragment itself
   # defines (ts_test/ts_lint/ts_type_check) — never self-host bats_* names —
@@ -110,10 +118,7 @@ teardown() {
   run yq '.gate_profiles.full.include | join(",")' .aid-o/config/execution.yaml
   [ "$output" == "ts_test,ts_lint,ts_type_check" ]
 
-  # P083 Step 7: the full canonical ladder — quick < targeted < standard <
-  # full < release. quick is empty; standard and release reuse full's set.
-  run yq '.gate_profiles.quick.include | length' .aid-o/config/execution.yaml
-  [ "$output" == "0" ]
+  # standard and release reuse full's set.
   run yq '.gate_profiles.standard.include | join(",")' .aid-o/config/execution.yaml
   [ "$output" == "ts_test,ts_lint,ts_type_check" ]
   run yq '.gate_profiles.release.include | join(",")' .aid-o/config/execution.yaml
@@ -220,8 +225,8 @@ FIXTURE
   # consumer" fix. (Contrast with the fresh-init test above, which composes
   # into a file with no pre-existing `gates:` and gets the UNFILTERED
   # stack-derived set, including targeted_tests and ts_type_check.)
-  run yq '.gate_profile_defaults.step' .aid-o/config/execution.yaml
-  [ "$output" == "targeted" ]
+  run yq -r '.default_profile' .aid-o/config/execution.yaml
+  [ "$output" == "standard" ]
   run yq '.gate_profiles.targeted.include | join(",")' .aid-o/config/execution.yaml
   [ "$output" == "ts_test" ]
   run yq '.gate_profiles.full.include | join(",")' .aid-o/config/execution.yaml
@@ -230,8 +235,8 @@ FIXTURE
   [ "$output" == "ts_test,ts_lint" ]
   run yq '.gate_profiles.release.include | join(",")' .aid-o/config/execution.yaml
   [ "$output" == "ts_test,ts_lint" ]
-  run yq '.gate_profiles.quick.include | length' .aid-o/config/execution.yaml
-  [ "$output" == "0" ]
+  run yq '.gate_profiles.quick' .aid-o/config/execution.yaml
+  [ "$output" == "null" ]
   # No profile names ts_type_check or targeted_tests — neither is in this
   # fixture's gates: mapping.
   refute_grep -qE "ts_type_check|targeted_tests" .aid-o/config/execution.yaml

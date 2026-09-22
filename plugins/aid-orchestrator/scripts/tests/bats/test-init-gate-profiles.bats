@@ -22,7 +22,7 @@ teardown() {
   [[ -n "${TEST_TMPDIR:-}" && -d "$TEST_TMPDIR" ]] && rm -rf "$TEST_TMPDIR"
 }
 
-@test "a stack-detected workspace yields all five profiles, each naming only defined gates, release non-empty" {
+@test "a stack-detected workspace yields the four list profiles narrowest first, each naming only defined gates, release non-empty" {
   touch package.json
   source "$HELPER"
   mapfile -t stacks < <(detect_stacks "$PWD")
@@ -31,10 +31,16 @@ teardown() {
   mkdir -p .aid-o/config
   compose_execution_yaml "$PWD" .aid-o/config/execution.yaml "${stacks[@]}"
 
-  for profile in quick targeted standard full release; do
-    run yq -e ".gate_profiles.${profile}" .aid-o/config/execution.yaml
-    [ "$status" -eq 0 ]
-  done
+  # P097 Step 4: ordered list, no quick, no gate_profile_defaults,
+  # default_profile standard, when_paths on full only.
+  run yq -r '.gate_profiles | keys | join(",")' .aid-o/config/execution.yaml
+  [ "$output" = "targeted,standard,full,release" ]
+  run yq -r '.default_profile' .aid-o/config/execution.yaml
+  [ "$output" = "standard" ]
+  run yq '.gate_profile_defaults' .aid-o/config/execution.yaml
+  [ "$output" = "null" ]
+  run yq -r '[.gate_profiles[] | has("when_paths")] | join(",")' .aid-o/config/execution.yaml
+  [ "$output" = "false,false,true,false" ]
 
   run yq '.gate_profiles.release.include | length' .aid-o/config/execution.yaml
   [ "$output" -gt 0 ]

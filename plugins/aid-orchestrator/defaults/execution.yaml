@@ -381,3 +381,31 @@ not_acceptable:
   - "changes to forbidden paths"              # gated: scope-check.sh (allowed_paths) + verifier (forbidden_paths)
   - "console.log / print() in production code" # console.log gated (debug_leftover); print() advisory
   - "empty catch blocks"                      # advisory
+
+# ─── Gate profiles (P097 Step 4) ─────────────────────────────────────────
+# `/aid-init` (fresh or upgrade) appends a `default_profile:` + `gate_profiles:`
+# block here, composed from the gates above. Profiles are an ORDERED LIST,
+# declared narrowest first: the declaration index IS the rank — there is no
+# other ordering anywhere. `aid-run-gates.sh --profile <name>` runs exactly
+# that profile's `include[]`; an unknown name, or a profile whose include[]
+# names no required gate, is refused before any gate runs.
+#
+# Selection (`lib/aid-gate-profile-select.sh`): an EPIC run gets the LAST
+# declared profile whose `when_paths:` matches any changed path, else
+# `default_profile:`. A profile without `when_paths:` is never auto-selected;
+# `release` is the plan-final boundary's explicit name. The GATES:DONE floor
+# refuses a report that names no profile, one narrower (lower index) than the
+# resolver's answer, or one recorded against a table that has since changed
+# (`profile_table_changed`).
+#
+#   default_profile: standard
+#   gate_profiles:
+#     targeted:
+#       include: [tests_pass]
+#     standard:
+#       include: [tests_pass, security_scan_pass, docs_updated]
+#     full:
+#       include: [tests_pass, security_scan_pass, docs_updated]
+#       when_paths: ["*/aid-fsm.sh", "defaults/schemas/*"]
+#     release:
+#       include: [tests_pass, security_scan_pass, docs_updated]

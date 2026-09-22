@@ -66,7 +66,7 @@ setup() {
   # shellcheck disable=SC1090
   source "$PLAN_STATE_LIB"      # also sources $LOCK_LIB (see its own header)
   # shellcheck disable=SC1090
-  source "$PLAN_MANIFEST_LIB"   # also sources $LOCK_LIB + aid-gate-profile.sh
+  source "$PLAN_MANIFEST_LIB"   # also sources $LOCK_LIB + aid-gate-profile-select.sh
   # shellcheck disable=SC1090
   source "$LIFECYCLE_LIB"
 }
@@ -1400,10 +1400,50 @@ _seed_manifest_from_fixture() {
 }
 
 # ─── raise_final_profile ─────────────────────────────────────────────────
+# P097 Step 4: the rank is the declaration index in the project's own
+# gate_profiles table, read from $(aid_state_root)/.aid-o/config/execution.yaml
+# (here: AID_PLAN_MANIFEST_PROJECT_ROOT = TEST_PROJECT_ROOT). The function
+# keeps its <plan_id> <profile> signature.
+_write_profile_table() {  # [names...] in declared order (default: the four)
+  local -a names=("$@"); (( ${#names[@]} )) || names=(targeted standard full release)
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  { printf 'gates:\n  g:\n    command: "true"\n    required: true\ndefault_profile: %s\ngate_profiles:\n' "${names[0]}"
+    local n; for n in "${names[@]}"; do printf '  %s:\n    include: [g]\n' "$n"; done
+  } > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+}
+
+@test "P097 Step 4: plan_manifest_raise_final_profile reads the table from the state root's execution.yaml — a name it does not declare is refused, the first raise records profile_table" {
+  _init_manifest "P900"
+  _write_profile_table
+  run plan_manifest_raise_final_profile "P900" "nightly"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not declared"* ]]
+  run plan_manifest_raise_final_profile "P900" "full"
+  [ "$status" -eq 0 ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.profile_table | join(",")'
+  [ "$output" = "targeted,standard,full,release" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "full" ]
+}
+
+@test "P097 Step 4: a raise whose file order differs from the manifest's recorded profile_table refuses with profile_table_changed and writes nothing" {
+  _init_manifest "P900"
+  _write_profile_table
+  plan_manifest_raise_final_profile "P900" "standard"
+  _write_profile_table standard targeted full release
+  run plan_manifest_raise_final_profile "P900" "release"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"profile_table_changed"* ]]
+  run plan_manifest_get P900 '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "standard" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.profile_table | join(",")'
+  [ "$output" = "targeted,standard,full,release" ]
+}
 
 # ─── AC2: raising to a LOWER profile than current is a documented no-op ────
 @test "AC2: plan_manifest_raise_final_profile to a LOWER profile than current is a no-op, current value unchanged" {
   _init_manifest "P900"
+  _write_profile_table
   plan_manifest_update P900 '.plan_boundary_manifest.plan_final_required_profile = "standard"'
 
   run plan_manifest_raise_final_profile "P900" "targeted"
@@ -1415,6 +1455,7 @@ _seed_manifest_from_fixture() {
 
 @test "plan_manifest_raise_final_profile: raising to a HIGHER profile actually raises it" {
   _init_manifest "P900"
+  _write_profile_table
   plan_manifest_update P900 '.plan_boundary_manifest.plan_final_required_profile = "standard"'
 
   run plan_manifest_raise_final_profile "P900" "full"
@@ -1426,6 +1467,7 @@ _seed_manifest_from_fixture() {
 
 @test "plan_manifest_raise_final_profile: never decreases across two sequential calls (up then down)" {
   _init_manifest "P900"
+  _write_profile_table
   plan_manifest_update P900 '.plan_boundary_manifest.plan_final_required_profile = "standard"'
 
   plan_manifest_raise_final_profile "P900" "full"
@@ -1462,6 +1504,7 @@ _seed_manifest_from_fixture() {
   # resetting the field to "standard" before each, and requires every single
   # one to land on "release" — a real regression must fail at least one.
   _init_manifest "P900"
+  _write_profile_table
   local trial
   for trial in 1 2 3 4 5; do
     plan_manifest_update P900 '.plan_boundary_manifest.plan_final_required_profile = "standard"'
@@ -5602,12 +5645,12 @@ YAML
 # ─── Boundary-split gate profiles + self-host activation
 #     (P064 EPIC E-064-2_2 Step 3 = plan Step 8) ─────────────────────────────
 # =============================================================================
-# The risk resolver (lib/aid-gate-profile.sh) now answers TWO questions from
-# one call: "what should THIS EPIC's own gate run be" (stdout, capped at
-# `standard` when the caller passes boundary=epic) and "what must the
-# plan-final run be at minimum" (the accumulated floor, out-of-band via
-# AID_GATE_PROFILE_FLOOR / --floor-file). `epic-complete` records the second
-# into the plan-boundary manifest; P068's plan-final stage consumes it.
+# P097 Step 4 replaced the two-question resolver with the project's own
+# ordered gate_profiles table (lib/aid-gate-profile-select.sh): the EPIC's run
+# profile is the widest declared profile whose when_paths matches, else
+# default_profile; `epic-complete` records the wider of that and the run's
+# profile into the plan-boundary manifest; the plan-final stage runs at least
+# `release`.
 #
 # TRACEABILITY — `ACn:` numbers this step's own AC list (plan Step 8):
 #   AC1  high-risk EPIC records plan_final_required_profile >= full while its
@@ -5670,126 +5713,21 @@ _pfsm_write_plan_json() {
   jq -nc --argjson g "$gates" '{gates: $g}' > "$dir/plan.json"
 }
 
-# ─── lib/aid-gate-profile.sh — the boundary split ──────────────────────────
+# ─── lib/aid-gate-profile-select.sh — the table resolver (P097 Step 4) ─────
+# The boundary split (cap at standard, out-of-band floor) is gone: an EPIC's
+# run profile is the last declared profile whose when_paths matches, else
+# default_profile, and the plan-final run is always at least `release`
+# (gate_profile_wider by declaration index). The library's own suite is
+# test-aid-gate-profile-select.bats; this is the sourced-through-manifest check.
 
-@test "AC1: gate_profile_resolve boundary=epic caps a high-risk diff at standard while the accumulated floor stays full" {
+@test "P097 Step 4: gate_profile_for_paths and gate_profile_wider are callable through the sourced manifest library" {
+  _write_profile_table
+  yq -i '.gate_profiles.full.when_paths = ["*/aid-fsm.sh"]' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
   local paths; paths="$(_gp_paths_file "plugins/aid-orchestrator/scripts/aid-fsm.sh")"
-
-  # Sourced caller (no command substitution) so AID_GATE_PROFILE_FLOOR is
-  # observable — that is the documented out-of-band channel.
-  AID_GATE_PROFILE_FLOOR=""
-  gate_profile_resolve "$paths" "" "" epic > "$TEST_TMPDIR/resolved.txt"
-  [ "$(cat "$TEST_TMPDIR/resolved.txt")" = "standard" ]
-  [ "$AID_GATE_PROFILE_FLOOR" = "full" ]
-
-  # stdout is still EXACTLY one line — both production callers use it as a
-  # single gate_profiles key.
-  [ "$(wc -l < "$TEST_TMPDIR/resolved.txt")" -eq 1 ]
-}
-
-@test "AC1: --floor-file writes the accumulated floor for a non-sourcing caller" {
-  local paths; paths="$(_gp_paths_file "plugins/aid-orchestrator/scripts/aid-fsm.sh")"
-  local floor_file="$TEST_TMPDIR/floor.txt"
-
-  run bash "$AID_PLUGIN_PATH/scripts/lib/aid-gate-profile.sh" resolve \
-    "$paths" "" "" epic --floor-file "$floor_file"
-  [ "$status" -eq 0 ]
-  [ "$output" = "standard" ]
-  [ "$(cat "$floor_file")" = "full" ]
-}
-
-# WHAT THIS PINS, AND WHAT IT DOES NOT (CP3 integration review finding 3).
-# This is a LIBRARY-level statement: "given an fsm-state whose done_phase is
-# `release`, boundary=epic suppresses the escalation in the printed profile and
-# keeps it in the floor". It is NOT a statement about what `epic-complete`
-# records — that command deliberately passes NO fsm-state (aid-plan-fsm.sh,
-# "THE EPIC'S OWN fsm-state IS DELIBERATELY NOT PASSED"), because an EPIC's own
-# `done_phase: release` is its FSM tail, not the plan's final boundary. The
-# acceptance-level tests below therefore expect a RISK-derived floor, and the
-# contract test "CP3-F3 (contract)" holds the two levels together.
-@test "Edge Case: boundary=epic suppresses the release escalation for the run profile while the floor still records release" {
-  local paths; paths="$(_gp_paths_file "docs/x.md")"
-  local state="$TEST_TMPDIR/fsm-state.yaml"
-  printf 'epic_id: E-064-1_1\ndone_phase: release\n' > "$state"
-
-  AID_GATE_PROFILE_FLOOR=""
-  gate_profile_resolve "$paths" "$state" "" epic > "$TEST_TMPDIR/resolved.txt"
-  [ "$(cat "$TEST_TMPDIR/resolved.txt")" = "quick" ]
-  [ "$AID_GATE_PROFILE_FLOOR" = "release" ]
-
-  # plan_final asks for the escalated run itself.
-  AID_GATE_PROFILE_FLOOR=""
-  gate_profile_resolve "$paths" "$state" "" plan_final > "$TEST_TMPDIR/resolved2.txt"
-  [ "$(cat "$TEST_TMPDIR/resolved2.txt")" = "release" ]
-  [ "$AID_GATE_PROFILE_FLOOR" = "release" ]
-}
-
-@test "Regression: a three-argument gate_profile_resolve call keeps today's unbounded behaviour byte-identical" {
-  local paths; paths="$(_gp_paths_file "plugins/aid-orchestrator/scripts/aid-fsm.sh")"
-  local state="$TEST_TMPDIR/fsm-state.yaml"
-  printf 'epic_id: E-064-1_1\ndone_phase: release\n' > "$state"
-
-  # No boundary → no cap, no suppression: high-risk stays `full`, a release
-  # done_phase still escalates to `release`.
-  run gate_profile_resolve "$paths"
-  [ "$status" -eq 0 ]
+  run gate_profile_for_paths "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" "$paths"
   [ "$output" = "full" ]
-
-  run gate_profile_resolve "$paths" "$state"
-  [ "$status" -eq 0 ]
+  run gate_profile_wider "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" standard release
   [ "$output" = "release" ]
-
-  # Docs-only, no boundary → quick, exactly as before.
-  local docs; docs="$(_gp_paths_file "docs/a.md" "README.md")"
-  run gate_profile_resolve "$docs"
-  [ "$status" -eq 0 ]
-  [ "$output" = "quick" ]
-}
-
-@test "Edge Case: AID_GATE_PROFILE_OVERRIDE downward from full without the force variables is refused at the epic boundary" {
-  local paths; paths="$(_gp_paths_file "plugins/aid-orchestrator/scripts/aid-fsm.sh")"
-
-  AID_GATE_PROFILE_OVERRIDE=quick run gate_profile_resolve "$paths" "" "" epic
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"rejected"* ]]
-  [[ "$output" == *"standard"* ]]
-
-  # The waiver is honoured — and the cap still applies on top of it, so the
-  # EPIC boundary can never be talked into a broad suite either way.
-  AID_GATE_PROFILE_OVERRIDE=quick AID_GATE_PROFILE_FORCE=1 \
-    AID_GATE_PROFILE_FORCE_REASON="documented waiver for this one run, PM approved" \
-    run gate_profile_resolve "$paths" "" "" epic
-  [ "$status" -eq 0 ]
-  [ "$output" = "quick" ]
-
-  # A downward override never lowers the plan-final floor.
-  AID_GATE_PROFILE_FLOOR=""
-  AID_GATE_PROFILE_OVERRIDE=quick AID_GATE_PROFILE_FORCE=1 \
-    AID_GATE_PROFILE_FORCE_REASON="documented waiver for this one run, PM approved" \
-    gate_profile_resolve "$paths" "" "" epic --floor-file "$TEST_TMPDIR/floor.txt" >/dev/null
-  [ "$(cat "$TEST_TMPDIR/floor.txt")" = "full" ]
-}
-
-@test "Error Handling: gate_profile_resolve exits 2 on an unknown boundary and on --floor-file without a boundary" {
-  local paths; paths="$(_gp_paths_file "docs/a.md")"
-
-  run gate_profile_resolve "$paths" "" "" plan-final
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"boundary"* ]]
-
-  run gate_profile_resolve "$paths" "" "" epic extra
-  [ "$status" -eq 2 ]
-
-  run gate_profile_resolve "$paths" --floor-file "$TEST_TMPDIR/floor.txt"
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"--floor-file"* ]]
-  [ ! -f "$TEST_TMPDIR/floor.txt" ]
-
-  run gate_profile_resolve "$paths" "" "" epic --floor-file
-  [ "$status" -eq 2 ]
-
-  run gate_profile_resolve "$paths" "" "" epic --nope
-  [ "$status" -eq 2 ]
 }
 
 # ─── .aid-o/config/execution.yaml — the activated profile table ────────────
@@ -5809,46 +5747,22 @@ _pfsm_write_plan_json() {
   local cfg; cfg="$(_selfhost_execution_yaml)"
   [[ -f "$cfg" ]] || skip "self-host .aid-o/config/execution.yaml absent (gitignored workspace)"
   local p
-  for p in quick targeted standard full release; do
-    run _gp_yq_jq "$cfg" "(.gate_profiles.${p}.include | length) > 0"
+  for p in $(yq -r '.gate_profiles | keys | .[]' "$cfg"); do
+    run _gp_yq_jq "$cfg" "(.gate_profiles[\"${p}\"].include | length) > 0"
     [ "$status" -eq 0 ]
-    run _gp_yq_jq "$cfg" "([.gate_profiles.${p}.include[]] - [.gates | keys[]] | length) == 0"
+    run _gp_yq_jq "$cfg" "([.gate_profiles[\"${p}\"].include[]] - [.gates | keys[]] | length) == 0"
     [ "$status" -eq 0 ]
   done
 }
 
-@test "AC2: no profile the epic boundary can resolve to includes bats_all — a broad suite needs a recorded PM exception" {
-  # The cap really is `standard`, even for the worst possible classification
-  # (high-risk paths AND a release done_phase) — config-independent, so this
-  # half runs everywhere.
-  local paths; paths="$(_gp_paths_file "plugins/aid-orchestrator/scripts/aid-fsm.sh" "plugins/aid-orchestrator/defaults/policies/x.yaml")"
-  local state="$TEST_TMPDIR/fsm-state.yaml"
-  printf 'done_phase: release\n' > "$state"
-  run gate_profile_resolve "$paths" "$state" "" epic
-  [ "$output" = "standard" ]
-
-  # …and none of the three profiles boundary=epic can return runs the broad
-  # suite (quick is classify_paths' floor, standard is the cap).
+@test "AC2: no auto-resolvable profile in the self-host table includes bats_all — a broad suite needs a recorded PM exception" {
   local cfg; cfg="$(_selfhost_execution_yaml)"
   [[ -f "$cfg" ]] || skip "self-host .aid-o/config/execution.yaml absent (gitignored workspace)"
   local p
-  for p in quick targeted standard; do
-    run _gp_yq_jq "$cfg" "([.gate_profiles.${p}.include[]] | index(\"bats_all\")) == null"
+  for p in $(yq -r '[(.gate_profiles | to_entries[] | select(.value.when_paths != null) | .key), (.default_profile | select(. != null))] | unique | .[]' "$cfg"); do
+    run _gp_yq_jq "$cfg" "([.gate_profiles[\"${p}\"].include[]] | index(\"bats_all\")) == null"
     [ "$status" -eq 0 ]
   done
-}
-
-@test "AC7: a docs-only diff resolves to quick at the epic boundary and quick's include[] excludes the broad suite" {
-  local docs; docs="$(_gp_paths_file "docs/a.md" "CHANGELOG.md")"
-  AID_GATE_PROFILE_FLOOR=""
-  gate_profile_resolve "$docs" "" "" epic > "$TEST_TMPDIR/resolved.txt"
-  [ "$(cat "$TEST_TMPDIR/resolved.txt")" = "quick" ]
-  [ "$AID_GATE_PROFILE_FLOOR" = "quick" ]
-
-  local cfg; cfg="$(_selfhost_execution_yaml)"
-  [[ -f "$cfg" ]] || skip "self-host .aid-o/config/execution.yaml absent (gitignored workspace)"
-  run _gp_yq_jq "$cfg" '(.gate_profiles.quick.include | length) > 0'
-  [ "$status" -eq 0 ]
 }
 
 # ─── aid-plan-fsm.sh epic-complete — recording the floor ───────────────────
@@ -5934,20 +5848,6 @@ _pfsm_write_plan_json() {
   # `release` — which is exactly what inheriting done_phase used to do.
   run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
   [ "$output" = "standard" ]
-}
-
-@test "CP3-F3 (contract): epic-complete passes NO fsm-state to gate_profile_resolve" {
-  # The structural half of the same claim, so the two test LEVELS cannot drift
-  # apart again: the library keeps escalating on a `release` done_phase (see
-  # "Edge Case: boundary=epic suppresses the release escalation…"), and this
-  # pins that epic-complete never hands it one.
-  local call
-  call="$(grep -n -A 2 'gate_profile_resolve "\$_ec_paths"' "$PLAN_FSM_CLI")"
-  [ -n "$call" ]
-  [[ "$call" == *'gate_profile_resolve "$_ec_paths" ""'* ]]
-  [[ "$call" != *'gate_profile_resolve "$_ec_paths" "$state_file"'* ]]
-  # …and the reason is written down next to it, not only here.
-  grep -q 'DELIBERATELY NOT PASSED' "$PLAN_FSM_CLI"
 }
 
 @test "Edge Case: a plan-declared gate the active profile excluded is recorded as a mandatory plan-final gate, never silently dropped" {

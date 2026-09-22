@@ -8,6 +8,10 @@
 # so every run the FSM auto-resolved to `standard` passed its gates and was
 # then refused at the transition — after the whole gate run was paid for.
 # (ACTA, 2026-09-02.)
+#
+# P097 Step 4: the auto-resolvable set is read from the project's own table —
+# every declared profile with `when_paths`, plus `default_profile`. No name is
+# hard-coded; `release` (no when_paths) is never consulted.
 
 load test-helpers.bash
 
@@ -42,15 +46,16 @@ _generate() {
 gates:
   docs_updated:
     command: "true"
+default_profile: standard
 gate_profiles:
-  quick:
-    include: [docs_updated]
   targeted:
     include: [docs_updated]
+    when_paths: ["src/*"]
   standard:
     include: []
   full:
     include: [docs_updated]
+    when_paths: ["*/aid-fsm.sh"]
 YAML
   _generate
   [ "$status" -ne 0 ]
@@ -58,16 +63,34 @@ YAML
   [[ "$output" == *"standard"* ]]
 }
 
+@test "generation refuses when a when_paths profile (not the default) excludes it" {
+  cat > "$EXEC" <<'YAML'
+gates:
+  docs_updated:
+    command: "true"
+default_profile: standard
+gate_profiles:
+  standard:
+    include: [docs_updated]
+  full:
+    include: []
+    when_paths: ["*/aid-fsm.sh"]
+YAML
+  _generate
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"[full]"* ]]
+}
+
 @test "generation proceeds when every auto-resolvable profile includes it" {
   cat > "$EXEC" <<'YAML'
 gates:
   docs_updated:
     command: "true"
+default_profile: standard
 gate_profiles:
-  quick:
-    include: [docs_updated]
   targeted:
     include: [docs_updated]
+    when_paths: ["src/*"]
   standard:
     include: [docs_updated]
 YAML
@@ -75,35 +98,17 @@ YAML
   [ "$status" -eq 0 ]
 }
 
-@test "a canonical profile the config does not define is not required to list it" {
-  # The FSM runs every gate when the resolved profile is absent, so an
-  # undefined profile excludes nothing and must not be treated as a refusal.
+@test "a profile with no when_paths that is not the default is not consulted — nothing can resolve to it" {
   cat > "$EXEC" <<'YAML'
 gates:
   docs_updated:
     command: "true"
+default_profile: standard
 gate_profiles:
-  standard:
-    include: [docs_updated]
-YAML
-  _generate
-  [ "$status" -eq 0 ]
-}
-
-@test "full and release are not consulted — an EPIC boundary cannot resolve to them" {
-  cat > "$EXEC" <<'YAML'
-gates:
-  docs_updated:
-    command: "true"
-gate_profiles:
-  quick:
-    include: [docs_updated]
   targeted:
-    include: [docs_updated]
-  standard:
-    include: [docs_updated]
-  full:
     include: []
+  standard:
+    include: [docs_updated]
   release:
     include: []
 YAML
@@ -118,7 +123,7 @@ YAML
 }
 
 @test "a project that declares no DoD gate is unaffected" {
-  printf 'gates: {}\ngate_profiles:\n  standard:\n    include: []\n' > "$EXEC"
+  printf 'gates: {}\ndefault_profile: standard\ngate_profiles:\n  standard:\n    include: []\n' > "$EXEC"
   _generate
   [ "$status" -eq 0 ]
 }
