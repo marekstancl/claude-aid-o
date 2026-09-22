@@ -1,8 +1,8 @@
 # =============================================================================
 # AID Orchestrator — Enforcement Registry (DISTRIBUTED / git-tracked)
 # =============================================================================
-# Promoted from docs/plans/AID-audit-2026-06/enforcement-registry.yaml
-# (seed artifact, gitignored) by EPIC E-046-1_3 Step 5.
+# Promoted by EPIC E-046-1_3 Step 5 from a seed artifact of the June 2026 audit
+# that was never tracked and no longer exists on disk; this file is the record.
 #
 # This is the canonical list of every enforcement mechanism shipped with the
 # plugin distribution. The seed file in docs/plans/ is now a mirror/archive.
