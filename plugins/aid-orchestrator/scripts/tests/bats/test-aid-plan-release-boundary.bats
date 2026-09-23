@@ -5661,7 +5661,7 @@ YAML
 #   AC5  `release`'s include list is a superset of `full`'s
 #   AC6  a high-risk EPIC that ran `standard` still reaches DONE
 #   AC7  a docs-only EPIC resolves to `quick`, which exists as a gate_profiles key
-#   AC8  test-aid-fsm.bats / test-aid-gate-profile.bats stay green (run, not asserted here)
+#   AC8  test-aid-fsm.bats stays green (run, not asserted here)
 
 # _gp_paths_file <path> [path ...] — a changed-paths file for the resolver.
 _gp_paths_file() {

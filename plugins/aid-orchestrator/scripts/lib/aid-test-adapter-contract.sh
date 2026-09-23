@@ -4,7 +4,7 @@
 # Shared interface every test-portfolio adapter (Bats, package-script,
 # declared-command — Steps 2-3) implements against. Sourced, never executed
 # directly. NO top-level `set -e`/`set -euo pipefail` (matches the
-# aid-gate-profile.sh convention): callers source this under their OWN
+# aid-cache-preflight.sh convention): callers source this under their OWN
 # `set -euo pipefail` shell, and an unguarded non-zero
 # return here must never kill the caller's shell.
 #

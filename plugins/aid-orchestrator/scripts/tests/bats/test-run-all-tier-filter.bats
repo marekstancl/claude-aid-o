@@ -113,10 +113,10 @@ _suite() {
   # Was "delegation still wins over tier". Delegation was removed 2026-08-14:
   # the tier tag is the only authority, so a t2 suite is an ordinary INLINE line
   # carrying its tier — selected out of the merge path by --tier, not by a map.
-  _suite bats/test-aid-service.bats t2
+  _suite bats/test-slow-t2.bats t2
   run bash "$RUNNER" --list 3>&-
   [ "$status" -eq 0 ]
   [[ "$output" == *"INLINE: test-cheap.bats [t0]"* ]]
-  [[ "$output" == *"INLINE: test-aid-service.bats [t2]"* ]]
-  [ "$(grep -c 'test-aid-service.bats' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"INLINE: test-slow-t2.bats [t2]"* ]]
+  [ "$(grep -c 'test-slow-t2.bats' <<<"$output")" -eq 1 ]
 }

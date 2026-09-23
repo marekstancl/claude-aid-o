@@ -641,6 +641,25 @@ cmd_cancel() {
     jq -r '.state' "$job_dir/result.json"; exit 0
   fi
 
+  # TERM did not end it within the window. A group that is STILL alive is not
+  # "cancelled": writing that result would free the job id while the old
+  # command keeps running against the same tree, and a superseding re-run
+  # (aid-run-gates.sh) would then run two copies at once (P097 CP3 security).
+  # Escalate to KILL, and refuse to claim a terminal state if even that fails.
+  # The group is judged by its MEMBERS, not by the recorded leader: when the
+  # wrapper died first (crash, OOM, KILL) its children are still in the group
+  # and nothing above signalled them. A process-group id cannot be handed to a
+  # new group while any member of the old one lives, so members found here are
+  # the job's own.
+  if [[ "$pgid" =~ ^[1-9][0-9]*$ && "$pgid" -gt 1 ]] && pgrep -g "$pgid" >/dev/null 2>&1; then
+    kill -KILL -"$pgid" 2>/dev/null || true
+    for i in $(seq 1 20); do pgrep -g "$pgid" >/dev/null 2>&1 || break; sleep 0.1; done
+    if pgrep -g "$pgid" >/dev/null 2>&1; then
+      echo "ERROR: aid-job.sh: job ${job_id}: process group ${pgid} survived TERM and KILL; not recording it as cancelled" >&2
+      exit 1
+    fi
+  fi
+
   # Fallback: wrapper already gone without a record (e.g. crash) — write a
   # terminal cancellation result ourselves so the job never dangles.
   local now_iso; now_iso="$(_iso_now)"

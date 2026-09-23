@@ -13,7 +13,8 @@
 #
 # ── WHAT THIS FILE IS ───────────────────────────────────────────────────────
 # `defaults/policies/auto-recovery.yaml` shipped in Step 11 as a policy with no
-# runtime: it declared seven stop classes, five reversible actions, a per-class
+# runtime: it declared seven stop classes (six since P097 retired
+# SERVICE_UNHEALTHY with the service lifecycle), five reversible actions, a per-class
 # budget and a terminus, and NOTHING read it. This file is the loader and the
 # record writer that policy named in its own `loader_contract` — which is why
 # the path and the function name `aid_recovery_policy_load` are not free
@@ -24,7 +25,7 @@
 #
 # ── WHAT IT DOES NOT DO — three boundaries, all load-bearing ────────────────
 #  1. IT NEVER REPLACES A VERDICT. The gate runner's fail + streak + policy
-#     block, aid-service's restart exhaustion, the FSM's orphan-dispatch die:
+#     block, the FSM's orphan-dispatch die:
 #     all keep their exact prior behaviour. The ladder RECORDS that the stop
 #     happened and ROUTES what the AUTO loop does next. Every emitter call site
 #     is `>/dev/null 2>&1 || true` and writes nothing to its caller's stdout,
@@ -32,9 +33,9 @@
 #  2. IT NEVER EXECUTES AN ACTION. `aid_ladder_attempt` returns permission; the
 #     CALLER performs the action and reports back through `aid_ladder_outcome`.
 #     Nothing in this file starts, restarts, signals or supervises a process.
-#     The former `restart_service_once` action left the vocabulary with the
-#     service lifecycle (P097 Step 6): a pre-2.103 record that still names it
-#     is an action outside the closed set — refused, never executed.
+#     The former service-restart action left the vocabulary with the service
+#     lifecycle (P097 Step 6): a pre-2.103 record that still names it is an
+#     action outside the closed set — refused, never executed.
 #  3. IT NEVER GOVERNS THE EXISTING LOOPS. The gate fix loop, CP2/CP3, the C3
 #     fix loop, the CP1 ledger and per-gate `max_retries` keep their own budgets
 #     in their own files (the policy's `existing_loops` table declares them).
@@ -148,7 +149,6 @@ _aid_ladder_action_constants() {
 _aid_ladder_class_constants() {
   printf '%s\n' \
     GATE_TIMEOUT \
-    SERVICE_UNHEALTHY \
     JOB_LOST \
     TRANSIENT_INFRA \
     DISPATCH_ORPHANED \
@@ -198,7 +198,7 @@ _aid_ladder_policy_usable() {
   declared="$(yq -r '.stop_classes // {} | keys | .[]' "$policy" 2>/dev/null | LC_ALL=C sort | tr '\n' ',')"
   expected="$(_aid_ladder_class_constants | LC_ALL=C sort | tr '\n' ',')"
   [[ "$declared" == "$expected" ]] || {
-    printf 'policy stop_classes is not the closed set of seven this ladder enforces\n'; return 0; }
+    printf 'policy stop_classes is not the closed set of six this ladder enforces\n'; return 0; }
 
   while IFS= read -r a; do
     [[ -n "$a" ]] || continue

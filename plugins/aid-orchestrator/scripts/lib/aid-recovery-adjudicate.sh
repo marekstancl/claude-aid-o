@@ -200,7 +200,6 @@ _AID_RA_SCHEMA_CHECK="unavailable"
 _aid_ra_class_constants() {
   printf '%s\n' \
     GATE_TIMEOUT \
-    SERVICE_UNHEALTHY \
     JOB_LOST \
     TRANSIENT_INFRA \
     DISPATCH_ORPHANED \
@@ -300,7 +299,7 @@ _aid_ra_policy_error() {
     declared_c="$(yq -r '.stop_classes // {} | keys | .[]' "$policy" 2>/dev/null | LC_ALL=C sort | tr '\n' ',')" || declared_c=""
     expected_c="$(_aid_ra_class_constants | LC_ALL=C sort | tr '\n' ',')"
     if [[ "$declared_c" != "$expected_c" ]]; then
-      reason="policy stop_classes is not the closed set of seven this adjudicator enforces"; break
+      reason="policy stop_classes is not the closed set of six this adjudicator enforces"; break
     fi
     #      The terminus read is type-aware and COUNTED: `join` on a non-array is
     #      a yq ERROR, not an empty result, so the earlier form emitted no lines

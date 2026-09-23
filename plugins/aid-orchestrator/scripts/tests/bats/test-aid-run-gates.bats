@@ -1822,3 +1822,38 @@ YAML
   grep -q '\.gates_report\.result' "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh"
   grep -q '\.gates_report\.result' "$AID_PLUGIN_PATH/scripts/aid-plan-close-check.sh"
 }
+
+@test "P097 Step 9: a raised timeout_seconds is not answered with the recorded job_timeout — the rerun executes the command" {
+  # Before the fix the re-attach compared only the command fingerprint and the
+  # start HEAD, so a job that timed out under 1 s was collected again after the
+  # timeout was raised, and the gate stayed job_timeout.
+  git -C "$TEST_PROJECT" init -q
+  git -C "$TEST_PROJECT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+  export AID_GATE_POLL_INTERVAL_SEC=1 AID_GATE_HEARTBEAT_SEC=1
+  local counter="$TEST_TMPDIR/ran"
+  _yaml() {
+    cat > "$EXEC_YAML" <<YAML
+gates:
+  slow:
+    command: "sleep 2 && echo ran >> ${counter}"
+    required: true
+    timeout_seconds: $1
+    max_retries: 0
+    run_mode: background
+YAML
+  }
+  _yaml 1
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  run jq -r '.gates.slow.reason' "$REPORT"
+  [ "$output" = "job_timeout" ] || { cat "$REPORT"; false; }
+  [ ! -f "$counter" ]
+
+  _yaml 10
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  run jq -r '"\(.gates.slow.status) \(.gates.slow.reason)"' "$REPORT"
+  [ "$output" = "pass exit_0" ] || { cat "$REPORT"; false; }
+  [ "$(cat "$counter")" = "ran" ]
+  run jq -r -s '[.[] | select(.event == "gate_job_superseded" and .reason == "deadline_changed")] | length' "$TIMELINE"
+  [ "$output" = "1" ]
+}

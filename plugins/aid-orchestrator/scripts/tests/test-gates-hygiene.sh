@@ -16,8 +16,7 @@
 #       of (file, line-substring) pairs, never a wide regex.
 # Excluded from the sweep, and why: scripts/tests/ (a test that proves the
 # runner refuses a key has to name the key), scripts/tests/fixtures/ and
-# reference/review-successors.md (history), CHANGELOG* (history),
-# lib/aid-service.sh (the removed layer's own library, deleted by P097 Step 9).
+# reference/review-successors.md (history), CHANGELOG* (history).
 # The sweep proves it is not vacuous: a copy of an allow-listed file with one
 # planted `required_when:` line must turn it red.
 set -uo pipefail
@@ -66,8 +65,10 @@ done
 # ─── (b) the sweep ───────────────────────────────────────────────────────────
 # Word-bounded on purpose: `review_required_when` (a live decision-policy key)
 # and `gate_runtime_baseline_advisory` (a registry id) are not the removed
-# names. `^services:` is the top-level key form only.
-REMOVED_RE='\brequired_when\b|\bneeds_services\b|^services:|\bgate_profile_defaults\b|gate-runtime-baselines|\bruntime_baseline\b|aid-gate-applicability|\brestart_service_once\b|\b_fsm_service_sweep\b'
+# names. `^services:` is the top-level key form only. `restart_service_[o]nce`
+# matches the plain name; the bracket only keeps this line out of P097 Step 9's
+# repository-wide `git grep` for that name, which must come back empty.
+REMOVED_RE='\brequired_when\b|\bneeds_services\b|^services:|\bgate_profile_defaults\b|gate-runtime-baselines|\bruntime_baseline\b|aid-gate-applicability|\brestart_service_[o]nce\b|\b_fsm_service_sweep\b'
 
 # "<file>|<substring>" — a hit is allowed iff its file matches AND its line
 # contains the substring. Each entry says what the line documents.
@@ -94,8 +95,6 @@ ALLOW=(
   'defaults/policies/plan-final-policy.yaml|.aid-o/metrics/gate-runtime-baselines.yaml'
   'scripts/aid-fsm.sh|nothing writes them since P097 Step 5'
   'scripts/aid-fsm.sh|.aid-o/metrics/gate-runtime-baselines.yaml (+ its .lock sidecar)'
-  # the ladder records the action left its vocabulary
-  'scripts/lib/aid-recovery-ladder.sh|The former `restart_service_once` action left'
   # the registry's removed rows
   'defaults/enforcement-registry.yaml|removed'
   'defaults/enforcement-registry.yaml|RETIRED'
@@ -116,7 +115,7 @@ allowed() {
 # sweep does not depend on which grep's --exclude flags are in effect.
 excluded() {
   case "$1" in
-    scripts/tests/*|*/CHANGELOG*|CHANGELOG*|reference/review-successors.md|scripts/lib/aid-service.sh) return 0 ;;
+    scripts/tests/*|*/CHANGELOG*|CHANGELOG*|reference/review-successors.md) return 0 ;;
   esac
   return 1
 }

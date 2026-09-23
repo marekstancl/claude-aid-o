@@ -559,7 +559,8 @@ _resume_jobs_still_live() {
 #     • a job dir for THIS attempt exists, same fingerprint, same start HEAD
 #         – still live      → re-attach and poll
 #         – already terminal → `collect` idempotently; the suite NEVER re-runs
-#     • a job dir exists but the fingerprint or the start HEAD moved
+#     • a job dir exists but the fingerprint, the start HEAD or the recorded
+#       deadline (job.json deadline_sec vs timeout_seconds) moved
 #                           → cancel it, ARCHIVE the dir to `.superseded-<epoch>`
 #                             (aid-job.sh run refuses an existing dir, so the
 #                             deterministic id has to be freed), start fresh
@@ -618,6 +619,12 @@ run_background_gate() {
     cur_head="$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo "")"
     if [[ "$rec_fp" != "$fp" ]]; then
       drift_reason="command_fingerprint_mismatch"
+    elif [[ "$(jq -r '.deadline_sec // ""' "$job_dir/job.json" 2>/dev/null)" != "$timeout_s" ]]; then
+      # The job ran under another timeout_seconds. Re-collecting it would hand
+      # back the old deadline's verdict (typically job_timeout) after the
+      # operator raised the timeout to fix exactly that — so it is superseded
+      # and the gate runs under the configured deadline, live or terminal.
+      drift_reason="deadline_changed"
     elif _job_head_drifted "$rec_head" "$cur_head"; then
       # Same command, but HEAD moved since the job started. Re-attaching would
       # answer a question about a revision nobody is asking about any more.
@@ -631,7 +638,7 @@ run_background_gate() {
       drift_reason="result_tree_moved"
     fi
     if [[ -n "$drift_reason" ]]; then
-      local sup_ts sup_dir sup_log
+      local sup_ts sup_dir sup_log cancel_rc=0
       sup_ts="$(date -u +%s)"
       sup_dir="${job_dir}.superseded-${sup_ts}"
       sup_log="${jobs_dir}/${job_id}.superseded-${sup_ts}.log"
@@ -642,10 +649,19 @@ run_background_gate() {
         echo "  recorded start_head:  ${rec_head}"
         echo "  current HEAD:         ${cur_head}"
         echo "-- cancel --"
-        bash "$job_sh" cancel --jobs-dir "$jobs_dir" --id "$job_id" 2>&1 || true
-        echo "-- archive to ${sup_dir} --"
-        mv "$job_dir" "$sup_dir" 2>&1 || true
+        bash "$job_sh" cancel --jobs-dir "$jobs_dir" --id "$job_id" 2>&1 || cancel_rc=$?
+        echo "cancel exit: ${cancel_rc}"
       } >"$sup_log" 2>&1 || true
+      # A cancel that could not end the old process group (it survived TERM and
+      # KILL, aid-job.sh exits non-zero) leaves the old command running against
+      # this tree. Archiving the job and starting a fresh one under the same id
+      # would run two copies at once — the gate fails here instead (P097 CP3).
+      if (( cancel_rc != 0 )); then
+        echo "ERROR: aid-run-gates.sh: gate '${gate_name}' — the superseded job '${job_id}' could not be stopped (see ${sup_log}); refusing to start a second copy" >&2
+        _bg_fail_row "$gate_name" "job_lost" "superseded job ${job_id} could not be stopped; see ${sup_log}" "$job_id"
+        return 1
+      fi
+      mv "$job_dir" "$sup_dir" >>"$sup_log" 2>&1 || true
       log_event "$timeline_file" "gate_job_superseded" gate="$gate_name" \
         job_id="$job_id" reason="$drift_reason" archived_to="$sup_dir" log="$sup_log"
       # If the archive did not happen the id is still occupied; `run` below

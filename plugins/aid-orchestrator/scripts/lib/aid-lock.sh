@@ -54,7 +54,7 @@
 # releasing the first one (each acquire call overwrites the global).
 #
 # ── SOURCEABLE-SAFE CONVENTION ───────────────────────────────────────────────
-# NO top-level `set -e`/`set -euo pipefail` (matches aid-gate-profile.sh,
+# NO top-level `set -e`/`set -euo pipefail` (matches
 # aid-cache-preflight.sh) — this file is sourced directly into callers running
 # under their OWN `set -euo pipefail`, and an unguarded non-zero return here
 # must not silently abort a caller's larger flow before it gets a chance to
@@ -215,7 +215,7 @@ aid_lock_release() {
 
 # ===========================================================================
 # Standalone CLI — debugging / bats convenience only (mirrors the idiom in
-# aid-gate-profile.sh). The real, intended usage is sourcing this
+# aid-cache-preflight.sh). The real, intended usage is sourcing this
 # file (see header). `acquire` runs in a single throwaway subprocess so it
 # cannot demonstrate the "hold across multiple statements" lifetime model —
 # it exists so a test can assert acquire/timeout behavior from a subprocess.

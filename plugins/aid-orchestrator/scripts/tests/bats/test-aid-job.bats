@@ -327,3 +327,24 @@ _imp262_started_job() {   # <job_dir> <sentinel_path>
   jq -e '(.command_fingerprint | test("^[0-9a-f]{64}$")) and (.command | type == "array")' "$JOBS/$id/job.json"
   jq -e '.command_fingerprint | test("^[0-9a-f]{64}$")' "$JOBS/$id/result.json"
 }
+
+# -- P097 CP3: after cancel no member of the group survives, even one ignoring TERM with its
+#    leader already dead. Regression guard only: the wrapper cleaned its group in every
+#    variant built here, so this case passes with or without the escalation it guards. --
+@test "cancel kills an orphaned group whose leader is already dead, never records it cancelled while alive" {
+  local marker="7.${RANDOM}${RANDOM}"
+  run bash "$SCRIPT" run --jobs-dir "$JOBS" --id orphaned --repo "$REPO" -- \
+    bash -c "trap '' TERM; sleep ${marker}"
+  [ "$status" -eq 0 ]
+  local i pid
+  for i in $(seq 1 30); do pgrep -f "sleep ${marker}" >/dev/null && break; sleep 0.1; done
+  pgrep -f "sleep ${marker}" >/dev/null
+  for i in $(seq 1 30); do pid="$(jq -r '.pid // empty' "$JOBS/orphaned/job.json")"; [[ -n "$pid" ]] && break; sleep 0.1; done
+  kill -KILL "$pid"                      # the wrapper dies without writing a result
+  sleep 0.3
+  pgrep -f "sleep ${marker}" >/dev/null  # its child is still running, orphaned in the group
+  run bash "$SCRIPT" cancel --jobs-dir "$JOBS" --id orphaned
+  [ "$status" -eq 0 ]
+  run pgrep -f "sleep ${marker}"
+  [ "$status" -ne 0 ]
+}

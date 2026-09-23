@@ -12,9 +12,10 @@
 #   Step 13 of this EPIC landed the runtime this file used to only promise:
 #   `scripts/lib/aid-recovery-ladder.sh` loads this policy
 #   (`aid_recovery_policy_load`) and writes the per-run ladder record
-#   `<run evidence>/recovery-ladder.jsonl`. Three classes now enter that record
-#   from CODE — GATE_TIMEOUT and JOB_LOST from aid-run-gates.sh, SERVICE_UNHEALTHY
-#   from aid-service.sh — and say so with `ladder_entry_status: live`.
+#   `<run evidence>/recovery-ladder.jsonl`. Two classes now enter that record
+#   from CODE — GATE_TIMEOUT and JOB_LOST, from aid-run-gates.sh and aid-job.sh —
+#   and say so with `ladder_entry_status: live`. (A third, SERVICE_UNHEALTHY,
+#   left with the service lifecycle in P097.)
 #
 #   The other four are still `planned`, and that is the honest word for them:
 #   their ladder entry is written by a CONTROLLER following the AUTO-loop
@@ -110,7 +111,7 @@ ladder_runtime:
   reason: >-
     scripts/lib/aid-recovery-ladder.sh reads this file (aid_recovery_policy_load)
     and writes <run evidence>/recovery-ladder.jsonl. Budget refusals route to
-    adjudication and then to the FSM ESCALATION state; the three mechanical
+    adjudication and then to the FSM ESCALATION state; the two mechanical
     classes below have real ladder writes at their emitter sites.
   loader_lands_in: "P076 EPIC 2, Step 13 — scripts/lib/aid-recovery-ladder.sh (landed)"
   ladder_record_writer_lands_in: "P076 EPIC 2, Step 13 — aid_recovery_ladder_append in the same file (landed)"
@@ -193,25 +194,6 @@ stop_classes:
         note: "background gate blew its deadline + grace; runner cancels and reads the terminal record"
     allowed_actions: [rerun_targeted, collect_and_continue]
     budget: {attempts: 1, wall_clock_seconds: 900}
-    terminus: [adjudicate, escalation, pm_force]
-
-  SERVICE_UNHEALTHY:
-    description: >-
-      A declared service never reached healthy, or fell out of healthy, and
-      aid-service has spent everything its declaration authorised (the one port
-      reallocation and, where declared, the one authorised restart).
-    detector: mechanical
-    ladder_entry: mechanical
-    ladder_entry_status: live
-    emitter:
-      - file: plugins/aid-orchestrator/scripts/lib/aid-service.sh
-        anchor: "its job was cancelled and stop_cmd run"
-        note: "terminal per-service verdict after the retry budget is spent; registry state is timed_out|lost|unhealthy"
-      - file: plugins/aid-orchestrator/scripts/lib/aid-service.sh
-        anchor: "still unhealthy after the one authorized restart"
-        note: "the restart-exhaustion failure_reason specifically"
-    allowed_actions: [wait_and_resume]
-    budget: {attempts: 1, wall_clock_seconds: 300}
     terminus: [adjudicate, escalation, pm_force]
 
   JOB_LOST:

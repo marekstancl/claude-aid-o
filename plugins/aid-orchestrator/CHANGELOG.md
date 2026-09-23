@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.103.0] — 2026-09-23
+
+### Changed
+- **Gate row je jedna smlouva (verze 2)** — `status`/`reason` z uzavřeného slovníku (`exit_0`, `exit_<n>`, `job_timeout`, `job_lost`, `job_cancelled`, `not_in_profile`, `missing_script`, `vacuous_pass`, `reused_from`, `legacy_row`) nahrazují starý `result`; `required`/`required_source` je na každém řádku. `result` zůstává jedno vydání jako kompatibilní pole (odvozené).
+- **Profily jsou seřazené seznamy** — `gate_profiles` s `default_profile` a `when_paths` na `full`, řešené na jednom místě (`lib/aid-gate-profile-select.sh`); vyhrává poslední (nejširší) profil, jehož `when_paths` sedí na změněnou cestu.
+- **Timeouty jsou pevné** — `timeout_seconds` se už neřídí živým baseline; `aid-gate-runtime-baseline.sh propose` jen navrhuje číslo z historie, nikdy nezapisuje.
+- **Upgrade konfigurace** — `aid-init-execution-yaml.sh upgrade` (hash-confirmed, atomický rename) převede starý `required_when` na `required: true`; zvednutí timeoutu gate znovu spustí, ne že znovu vyzvedne starou úlohu.
+
+### Removed
+- **`services:` a servisní vrstva, `required_when` a jeho knihovna, klasifikátor rizika `lib/aid-gate-profile.sh`, baseline-řízené timeouty, třída zotavení `SERVICE_UNHEALTHY` a `restart_service_once`** — nahrazeny výše. Runner nově ODMÍTÁ `required_when`, `needs_services`, `services:` a `gate_profile_defaults` (exit 2) s příkazem na upgrade (`bash $AID_PLUGIN_PATH/scripts/lib/aid-init-execution-yaml.sh upgrade <project root>`).
+
+**Poznámka pro projekty:** spustit upgrade jednou na projekt (náhled, pak `--confirm-upgrade <hash>`), jinak další běh brány starou konfiguraci odmítne. Replay ukázal, že reálné vydání ACTA (P019) bylo dřív uzavřeno jako zelené s padajícím e2e gate, protože "required" žilo jen v `required_when` — u toho projektu teď taková brána selže tam, kde dřív tiše procházela.
+
 ## [2.102.0] — 2026-09-21
 
 ### Removed

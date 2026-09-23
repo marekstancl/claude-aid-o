@@ -133,12 +133,11 @@
       }
     },
     "stop_classes": {
-      "description": "The seven classes. UNCLASSIFIED is required because it is the default routing for anything unnamed — a policy without it could leave a stop with no route at all.",
+      "description": "The six classes. UNCLASSIFIED is required because it is the default routing for anything unnamed — a policy without it could leave a stop with no route at all.",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "GATE_TIMEOUT",
-        "SERVICE_UNHEALTHY",
         "JOB_LOST",
         "TRANSIENT_INFRA",
         "DISPATCH_ORPHANED",
@@ -147,7 +146,6 @@
       ],
       "properties": {
         "GATE_TIMEOUT": { "$ref": "#/$defs/emitting_class" },
-        "SERVICE_UNHEALTHY": { "$ref": "#/$defs/emitting_class" },
         "JOB_LOST": { "$ref": "#/$defs/emitting_class" },
         "TRANSIENT_INFRA": { "$ref": "#/$defs/emitting_class" },
         "DISPATCH_ORPHANED": { "$ref": "#/$defs/emitting_class" },

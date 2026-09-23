@@ -122,9 +122,9 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.102.0** (current) — audit testového portfolia (`/aid-audit-tests`) smazán; zůstává katalog, patra a výběr testů
+- **v2.103.0** (current) — gate row je jedna smlouva (verze 2, uzavřený slovník důvodů); profily jsou seřazené seznamy s jedním resolverem; timeouty pevné, baseline jen navrhuje; `services:` a `required_when` odstraněny, runner je odmítá s příkazem na upgrade
+- **v2.102.0** — audit testového portfolia (`/aid-audit-tests`) smazán; zůstává katalog, patra a výběr testů
 - **v2.101.3** — Telegram bot `svc-mcp-tg-bot` vyřazen z pluginu; blok `notifications.telegram` má jen klíč, který se čte
-- **v2.101.2** — veřejné repo uklizené: kořen nese jen plugin (kokpit pod `cockpit/`), běhové záznamy a soukromý kontext mimo git, pravidla pro přispěvatele v `CONTRIBUTING.md`, CHANGELOG rozdělen na živý a archiv
 
 See [CHANGELOG.md](CHANGELOG.md) for 2.90.0 and later, [CHANGELOG-archive.md](CHANGELOG-archive.md) for 0.1.0 – 2.89.3.
 
