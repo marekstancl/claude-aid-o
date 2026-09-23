@@ -3639,7 +3639,7 @@ enforcements:
 
   - id: parallel_dispatch_wave_check
     type: 9
-    source: "scripts/lib/aid-parallel-dispatch.sh (aid_parallel_decide, aid_parallel_step_worktree, aid_parallel_step_reset, aid_parallel_merge) + scripts/aid-plan-parallel-check.sh (--group) + the project's .aid-o/config/orchestration.yaml, else defaults/orchestration.yaml (dispatch.max_parallel, dispatch.strategy, dispatch.worktree_base; lib/aid-roots.sh aid_orchestration_value, P099)"
+    source: "scripts/lib/aid-parallel-dispatch.sh (aid_parallel_decide, aid_parallel_step_worktree, aid_parallel_step_reset, aid_parallel_merge) + scripts/aid-plan-parallel-check.sh (--group) + defaults/orchestration.yaml, overridden per key by the project's orchestration.yaml (dispatch.max_parallel, dispatch.strategy, dispatch.worktree_base; scripts/lib/aid-roots.sh aid_orchestration_value, P099)"
     instruction: "skills/pipeline.md (§4 Parallel groups, §10)"
     severity: blocking
     surface: llm-facing
