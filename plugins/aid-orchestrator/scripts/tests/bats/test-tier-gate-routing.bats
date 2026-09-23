@@ -172,3 +172,9 @@ _include_or_die() {
       || fail "nightly-tests.yml claims ci.yml runs T0+T1, but ci.yml has no tier filter"
   fi
 }
+
+@test "P097 Step 4: release and release_quarantine are only ever named explicitly — no when_paths on either" {
+  _need_project_config
+  run yq -r '[.gate_profiles.release, .gate_profiles.release_quarantine] | map(has("when_paths")) | join(",")' "$EXEC_YAML"
+  [ "$output" = "false,false" ]
+}

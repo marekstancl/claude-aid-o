@@ -250,39 +250,21 @@ $naked"
 ${stale}"
 }
 
-@test "10: the CHANGELOG and extending-aid.md agree on what the run-mode advice is PROVEN to do" {
-  # THE REGRESSION THIS CLOSES: the commit that retracted "the gate report is
-  # byte-identical with and without it" from the CHANGELOG — on the stated
-  # grounds that the A/B comparison was run during implementation but never
-  # shipped as a test — left the identical claim standing in the contributor
-  # doc. Two closure surfaces then disagreed about what is proven, and the doc
-  # was the stronger, unprovable one. A retraction is only a retraction when
-  # every copy goes.
-  local claim='it writes no gate row, changes no gate verdict and no exit code'
-  grep -qF -- "$claim" "$ARCHIVE_CL" \
-    || _fail "the CHANGELOG no longer states what the four shipped cases prove about gate_run_mode_advice ('$claim')"
-  grep -qF -- "$claim" "$EXTENDING" \
-    || _fail "docs/extending-aid.md does not state the CHANGELOG's proven wording for gate_run_mode_advice ('$claim') — the two closure surfaces disagree about what is proven"
-
-  # The retracted claim may not survive in EITHER file, in any phrasing that
-  # asserts report identity.
+@test "10: the run-mode advice is gone from the contributor doc, and its removal is recorded where the advice was" {
+  # The advice (P076 Step 3) and the runtime baseline it read were removed by
+  # P097 Step 5. The CHANGELOG archive keeps the history as written; the
+  # contributor doc, which describes what the code DOES, may no longer describe
+  # the event or cite the deleted suite, and must say what replaced it.
   local f offender
-  for f in "$ROOT_CL" "$PLUGIN_CL" "$ARCHIVE_CL" "$EXTENDING"; do
-    offender="$(grep -niE 'byte-identical (with and without|report)|report is byte-identical' "$f" || true)"
-    [ -z "$offender" ] || _fail "'$f' still asserts the gate report is byte-identical with and without the advice event — that claim was retracted because no shipped test proves it:
+  for f in "$EXTENDING"; do
+    offender="$(grep -nE 'gate_run_mode_advice|test-run-mode-advice\.bats' "$f" || true)"
+    [ -z "$offender" ] || _fail "'$f' still describes the removed run-mode advice (P097 Step 5):
 $offender"
   done
-
-  # The test file the wording now cites must exist and really carry those cases,
-  # so the weaker claim is anchored rather than merely weaker.
+  grep -qF -- "Fixed timeouts (P097 Step 5)" "$EXTENDING" \
+    || _fail "docs/extending-aid.md does not carry the 'Fixed timeouts (P097 Step 5)' paragraph that replaced the advice"
   local advice="$REPO_ROOT/plugins/aid-orchestrator/scripts/tests/bats/test-run-mode-advice.bats"
-  [ -f "$advice" ] || _fail "both surfaces cite test-run-mode-advice.bats, which does not exist"
-  # `|| true`: `grep -c` prints `0` and EXITS 1 on no match, so under `set -e`
-  # a file with no @test at all aborted this case before its own message could
-  # print — the one outcome the assertion exists to report.
-  local cases; cases="$(grep -c '^@test' "$advice" || true)"
-  [ "$cases" -ge 4 ] \
-    || _fail "both surfaces say 'four cases over the real gate runner'; test-run-mode-advice.bats defines ${cases}"
+  [ ! -f "$advice" ] || _fail "test-run-mode-advice.bats still exists although the mechanism it proved is removed"
 }
 
 @test "9: EVERY surface describing blocked_for_pm names a writer that really writes it" {

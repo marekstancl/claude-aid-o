@@ -142,8 +142,8 @@ detection and the PM confirmation are defined in `skills/setup/project-scan.md`.
 
 **Not here: `gate_profiles` upgrade for an existing `execution.yaml`.** `(4) Project Scan` /
 `scan` re-detects `test_cmd`/`lint_cmd`/`build_cmd` in `project.yaml` — it does not touch
-`config/execution.yaml`. The non-destructive, PM-confirmed `gate_profile_defaults`/`gate_profiles`
-upgrade for a project's existing `execution.yaml` (P061 D9) is owned entirely by `/aid-init`
+`config/execution.yaml`. The PM-confirmed `default_profile`/`gate_profiles`
+upgrade for a project's existing `execution.yaml` (P097 Step 3) is owned entirely by `/aid-init`
 (see `commands/aid-init.md` → "Existing Project — gate_profiles Upgrade"), since `/aid-init` is
 already the sole writer of that file's initial content — keeping both the create and the upgrade
 path in one command avoids two commands independently deciding what belongs in `gates:`.
@@ -156,4 +156,4 @@ path in one command avoids two commands independently deciding what belongs in `
 - **Modular** — each module is independent, load only what's needed
 
 
-**Last Updated:** 2026-08-22
+**Last Updated:** 2026-09-22

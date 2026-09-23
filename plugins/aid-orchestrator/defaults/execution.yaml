@@ -10,24 +10,15 @@
 #   description      — human-readable purpose of the gate
 #   required         — true blocks GATES→DONE on failure; false is advisory
 #   command          — the shell command the gate runs
-#   timeout_seconds  — wall-clock budget for the command (default 60)
+#   timeout_seconds  — the gate's deadline, the only one it has (default 60).
+#                      Derivation rule: 2 × p95 of the last 20 runs, rounded
+#                      up to 30 s, 60–3 600 s; `aid-gate-runtime-report.sh`
+#                      (`gate_baseline_propose`) prints that number from the
+#                      recorded gates_rows history and never writes it here.
 #   max_retries      — retry attempts after a failure (default from policy)
 #   pass_criteria    — human-readable success definition
 #   when             — human-readable applicability condition
 #   run_mode         — foreground | background (default: foreground)
-#   needs_services   — list of declared service names this gate requires healthy
-#
-# needs_services: [name, ...]
-#   The services (declared in the `services:` block below) that must be HEALTHY
-#   before this gate is allowed to run. Every name is checked against the
-#   declarations at run-all entry — a name no service declares is a hard error
-#   that names the gate, never a silent wait on nothing.
-#   At gate start the runner asks the service registry (and the declared probe)
-#   whether each named service is healthy; if one is not, THIS gate fails fast
-#   with reason `service_unhealthy` and the other gates still run. It is a check,
-#   never a repair: services are acquired ONCE for the whole run before the first
-#   gate and released ONCE after the report is written, so no gate ever starts or
-#   stops one. A gate that omits the key is unaffected in every way.
 #
 # run_mode: foreground|background
 #   foreground (default, and the behaviour of every gate that omits the key)
@@ -198,81 +189,6 @@ gates:
 #     max_retries: 2
 #     language: python
 
-# ─── Services (optional — commentary only, nothing active) ───────────────
-#
-# A `services:` map declares the long-lived processes a run may need standing
-# up before its gates can mean anything — a database, a dev server, a queue.
-# It exists because AID starts no service anywhere on its own authority: until
-# a project writes this block, "infrastructure startup" is prose in a role card
-# with no mechanism behind it, and an agent left to improvise reaches for the
-# one thing it must not use (a blind `sleep`) because nothing else is offered.
-#
-# THE BLOCK IS OPTIONAL AND THIS TEMPLATE DECLARES NO SERVICES. A project with
-# no `services:` key behaves exactly as it always has — same gates, same report,
-# byte for byte. Nothing auto-starts for a consumer project; a PM opts in by
-# uncommenting and editing `.aid-o/config/execution.yaml`. This repository, for
-# instance, declares nothing: its tests need no running infrastructure.
-#
-# Shape authority: defaults/schemas/service-declaration.schema.json.
-# Runtime enforcement: `_validate_services_config` in aid-run-gates.sh, which
-# mirrors the schema and runs at run-all entry, BEFORE any service or gate
-# action, naming the offending service and field on violation.
-#
-# Per-service keys:
-#   start_cmd                 (required) the command that starts the service.
-#                             It MUST remain the FOREGROUND process of its job
-#                             — no `&`, no `nohup`, no self-daemonising fork.
-#                             The supervisor owns the process group; a command
-#                             that backgrounds itself returns a pid owning
-#                             nothing and the run can no longer stop what it
-#                             started.
-#   probe_cmd                 (required) health probe; exit 0 = healthy. It is
-#                             polled, so keep it cheap and side-effect free.
-#   startup_deadline_seconds  (required) the HEALTH-PROBE budget only: absent →
-#                             starting must reach healthy within this many
-#                             seconds. It is NOT the process lifetime.
-#   max_lifetime_seconds      (default 86400) the aid-job whole-process
-#                             deadline — a run-lifetime ceiling kept
-#                             deliberately SEPARATE from the startup budget, so
-#                             one number never has to mean both "how long may it
-#                             take to come up" and "how long may it live".
-#   stop_cmd                  (optional) graceful shutdown. Absent → teardown
-#                             relies on job cancel alone (process-group kill),
-#                             which is fine for a process with no external state
-#                             to flush.
-#   log_hint                  (optional) where this service's own logs land —
-#                             for the human diagnosing a failed startup.
-#   restart_authorized        (default false) may an automated run restart it
-#                             after it dies? Repairs are opt-in authority.
-#   port_env                  (optional) the env var carrying the per-run
-#                             allocated port. Its absence is the shared-resource
-#                             escape hatch, honestly named: a service on a fixed
-#                             external port (an existing shared database)
-#                             declares no port_env and allocation is skipped for
-#                             it. Two services may never name the same port_env
-#                             — one env var, one owner; the runner refuses.
-#
-# Worked example (a project whose e2e gate needs its own Postgres):
-#
-# services:
-#   postgres:
-#     start_cmd: "docker compose up postgres"
-#     probe_cmd: "pg_isready -h 127.0.0.1 -p \"$PGPORT_E2E\""
-#     stop_cmd: "docker compose stop postgres"
-#     startup_deadline_seconds: 60
-#     max_lifetime_seconds: 3600
-#     log_hint: "docker compose logs postgres"
-#     restart_authorized: false
-#     port_env: PGPORT_E2E
-#
-# ... and the gate that needs it says so by name (see `needs_services` in the
-# per-gate key list at the top of this file):
-#
-# gates:
-#   e2e:
-#     command: "npm run test:e2e"
-#     needs_services: [postgres]
-
 # ─── Retry & Escalation ─────────────────────────────────────────────────
 # Retry is PER-GATE only: each gate's own `max_retries` (see gate definitions above)
 # is the single retry knob, read by aid-run-gates.sh. There is no project-wide retry
@@ -381,3 +297,31 @@ not_acceptable:
   - "changes to forbidden paths"              # gated: scope-check.sh (allowed_paths) + verifier (forbidden_paths)
   - "console.log / print() in production code" # console.log gated (debug_leftover); print() advisory
   - "empty catch blocks"                      # advisory
+
+# ─── Gate profiles (P097 Step 4) ─────────────────────────────────────────
+# `/aid-init` (fresh or upgrade) appends a `default_profile:` + `gate_profiles:`
+# block here, composed from the gates above. Profiles are an ORDERED LIST,
+# declared narrowest first: the declaration index IS the rank — there is no
+# other ordering anywhere. `aid-run-gates.sh --profile <name>` runs exactly
+# that profile's `include[]`; an unknown name, or a profile whose include[]
+# names no required gate, is refused before any gate runs.
+#
+# Selection (`lib/aid-gate-profile-select.sh`): an EPIC run gets the LAST
+# declared profile whose `when_paths:` matches any changed path, else
+# `default_profile:`. A profile without `when_paths:` is never auto-selected;
+# `release` is the plan-final boundary's explicit name. The GATES:DONE floor
+# refuses a report that names no profile, one narrower (lower index) than the
+# resolver's answer, or one recorded against a table that has since changed
+# (`profile_table_changed`).
+#
+#   default_profile: standard
+#   gate_profiles:
+#     targeted:
+#       include: [tests_pass]
+#     standard:
+#       include: [tests_pass, security_scan_pass, docs_updated]
+#     full:
+#       include: [tests_pass, security_scan_pass, docs_updated]
+#       when_paths: ["*/aid-fsm.sh", "defaults/schemas/*"]
+#     release:
+#       include: [tests_pass, security_scan_pass, docs_updated]

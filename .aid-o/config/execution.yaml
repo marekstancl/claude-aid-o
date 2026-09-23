@@ -514,6 +514,7 @@ gate_profiles:
       - bats_fsm
       - plan_diff
       - docs_updated
+      - check_release_paths
   p064-closure:
     reason: >-
       P064 E-064-1_2 closure run (PM disposition 2026-07-22). Re-seals gate

@@ -1417,21 +1417,20 @@ else
   # an explicit `--profile <name>` can still exclude the gate, and only the FSM
   # sees that. This is the earlier, cheaper half of the same guarantee.
   #
-  # The set asked about is the resolver's, not the file's: `aid-gate-profile.sh`
-  # owns the canonical names and caps auto-resolution at `standard` on an EPIC
-  # boundary, so those three are the ones a run can land on without anybody
-  # choosing. A canonical profile the config does not define is skipped — the
-  # FSM runs every gate when the resolved profile is absent, so its exclusion
-  # list is empty by definition.
+  # The set asked about is what the resolver can land on without anybody
+  # choosing (P097 Step 4, lib/aid-gate-profile-select.sh): every declared
+  # profile with `when_paths`, plus `default_profile`. The check reads the
+  # project's own table — no hard-coded names. A file without gate_profiles
+  # runs every gate, so its exclusion list is empty by definition.
   _dod_gate_name="${dod_gates#- }"
   _dod_bad=""
   if [[ "$(yq -r '.gate_profiles != null' "$_exec_yaml" 2>/dev/null)" == "true" ]]; then
-    for _prof in quick targeted standard; do
-      [[ "$(yq -r ".gate_profiles.\"${_prof}\" != null" "$_exec_yaml" 2>/dev/null)" == "true" ]] || continue
-      if [[ "$(yq -r "[.gate_profiles.\"${_prof}\".include[]? | select(. == \"${_dod_gate_name}\")] | length" "$_exec_yaml" 2>/dev/null)" == "0" ]]; then
+    while IFS= read -r _prof; do
+      [[ -n "$_prof" ]] || continue
+      if [[ "$(P="$_prof" G="$_dod_gate_name" yq -r '[.gate_profiles[strenv(P)].include[]? | select(. == strenv(G))] | length' "$_exec_yaml" 2>/dev/null)" == "0" ]]; then
         _dod_bad="${_dod_bad:+${_dod_bad}, }${_prof}"
       fi
-    done
+    done < <(yq -r '[(.gate_profiles | to_entries[] | select(.value.when_paths != null) | .key), (.default_profile | select(. != null))] | unique | .[]' "$_exec_yaml" 2>/dev/null)
   fi
   if [[ -n "$_dod_bad" ]]; then
     error_exit "DoD gate '${_dod_gate_name}' is defined in ${_exec_yaml} under gates: and would be written into this EPIC's plan.json, but the auto-resolvable profile(s) [${_dod_bad}] do not include it. Every run the FSM resolves to one of those would pass its gates and then be refused at GATES -> DONE (plan_gate_profile_excluded). Fix one of the two: add '${_dod_gate_name}' to those profiles' include[] in gate_profiles, or remove it from gates:." 1

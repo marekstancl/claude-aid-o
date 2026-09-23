@@ -15,8 +15,6 @@
 _PKGSCRIPT_ADAPTER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-test-adapter-contract.sh
 source "${_PKGSCRIPT_ADAPTER_LIB_DIR}/aid-test-adapter-contract.sh"
-# shellcheck source=aid-gate-runtime-baseline.sh
-source "${_PKGSCRIPT_ADAPTER_LIB_DIR}/aid-gate-runtime-baseline.sh"
 
 _PKGSCRIPT_RUNNER_KEYWORDS='vitest|jest|playwright[[:space:]]+test|pytest|go[[:space:]]+test'
 

@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
-# aid-run-gates.sh — Deterministic gate runner with provenance fields (P032 Step 3).
+# aid-run-gates.sh — the gate runner.
+#
+# WHY THIS FILE EXISTS: it is the one program that turns the gate table in
+# execution.yaml into a gates_report.json. It reads each gate's `command`,
+# `required`, `timeout_seconds`, `max_retries` and `run_mode`, runs the
+# command (inline, or as an aid-job.sh job for `run_mode: background`), and
+# writes one version-2 row per defined gate (lib/aid-gate-row.sh) plus the
+# `overall` verdict, which fails only on a failed `required: true` gate that no
+# PM waiver covers. It chooses nothing: the caller names the profile
+# (--profile, resolved by lib/aid-gate-profile-select.sh), the file names the
+# deadline, and a configuration key the runner no longer reads
+# (`_refuse_dead_keys` below) stops the run with exit 2 and the upgrade
+# command instead of being ignored. The FSM's
+# GATES:DONE precondition trusts a report only when this file wrote it
+# (`_generated_by`).
 #
 # Usage:
 #   aid-run-gates.sh run-gate <gate_name> <command> <timeout_s> <log_file>
@@ -14,20 +28,29 @@
 #     `--plan null`, takes its Fast Mode exit-2 skip, and the one release gate
 #     run for a whole plan reports success while verifying nothing.
 #
-# P061 E1 Step 2 changes:
-#   • --profile <name> selects a named subset of gates to run, from
-#     execution.yaml.gate_profiles.<name>.include[] (a whitelist of gate
-#     keys). Gates defined under execution.yaml.gates but NOT in the active
-#     profile's include[] are NOT run — they get an explicit
-#     `profile_excluded` result row instead of being silently omitted, and
-#     never affect `overall` (same treatment as a skipped required:false
-#     gate). Omitting --profile preserves today's behavior exactly: all
-#     defined gates run, even if gate_profiles exists in execution.yaml.
-#   • Unknown --profile name, or a profile include[] entry that isn't a key
-#     under execution.yaml.gates, is fail-loud (exit != 0) BEFORE any gate
-#     runs.
-#   • gates_report.json gains: profile, profile_source, profile_reason,
-#     excluded_gates[] (additive; null/[] when --profile isn't passed).
+# Profiles (P061 E1 Step 2, reshaped by P097 Step 4):
+#   • --profile <name> runs exactly execution.yaml.gate_profiles.<name>.include[]
+#     and nothing else decides. Gates outside the profile get an explicit
+#     `status: skip, reason: not_in_profile` row and never affect `overall`.
+#     Omitting --profile runs every defined gate.
+#   • The name is validated through lib/aid-gate-profile-select.sh BEFORE any
+#     gate runs: an unknown name, or a profile whose include[] names no
+#     `required: true` gate (a run that can only skip is not a run), exits 2
+#     naming the declared profiles and the upgrade command. An include[] entry
+#     that is not a key under gates, or names a gate without a command, exits 1.
+#   • gates_report.json records `profile` (null without --profile),
+#     `profile_source: caller|none`, `profile_table` (the declared names in
+#     order — the GATES:DONE floor compares indexes within THIS list) and
+#     `excluded_gates[]`.
+#
+# P097 Step 2 — every row is a version-2 gate row (lib/aid-gate-row.sh,
+#   defaults/schemas/gate-row.schema.json): `row_version: 2`, `status`
+#   pass|fail|skip, a `reason` from the closed vocabulary, `duration_ms`,
+#   `started_at`/`completed_at`, `evidence`, `required`, `waived`,
+#   `reused_from`, and `result` as the derived version-1 compatibility field.
+#   The rows are stamped in ONE place (`_gate_row_finalize`) on their way into
+#   the report and the checkpoint file, and a row whose reason is outside the
+#   vocabulary fails the run naming the gate.
 #
 # P032 Step 3 changes vs pre-Session-A:
 #   • execution.yaml parsing switched from awk regex to yq (mikefarah variant)
@@ -62,16 +85,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
-# shellcheck source=lib/aid-gate-runtime-baseline.sh
-source "${SCRIPT_DIR}/lib/aid-gate-runtime-baseline.sh"
-# shellcheck source=lib/aid-gitignore-backfill.sh
-source "${SCRIPT_DIR}/lib/aid-gitignore-backfill.sh"
 # shellcheck source=lib/aid-run-gates-report.sh
 source "${SCRIPT_DIR}/lib/aid-run-gates-report.sh"
 # shellcheck source=lib/aid-gate-row.sh
 source "${SCRIPT_DIR}/lib/aid-gate-row.sh"
-# shellcheck source=lib/aid-gate-applicability.sh
-source "${SCRIPT_DIR}/lib/aid-gate-applicability.sh"
 # shellcheck source=lib/aid-resume-artifact.sh
 # THE shared continuation vocabulary (artifact basename, revision pair,
 # pending-pointer resolution, gate-row binding key). Sourced fail-CLOSED: this
@@ -85,6 +102,8 @@ fi
 source "${SCRIPT_DIR}/lib/aid-resume-artifact.sh"
 # shellcheck source=lib/aid-roots.sh
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
+# P097 Step 4 — the one profile resolver (names, ranks, refusals).
+source "${SCRIPT_DIR}/lib/aid-gate-profile-select.sh"
 
 # ─── State paths vs the tree under test (P079 Step 2, IMP-479) ──────────────
 # Two different roots meet in this file and used to be the same one by
@@ -116,9 +135,9 @@ _gates_evidence_dir() {
 
 # ─── Recovery-ladder emitters (P076 Step 13) ────────────────────────────────
 # The ladder RECORDS and ROUTES; it never replaces a verdict. Every call below
-# is additive: the gate's fail, its 124 streak accounting, the repeated-timeout
-# policy block and the job_lost row all behave exactly as they did before, and
-# a ladder that cannot be loaded or cannot be written changes nothing at all.
+# is additive: the gate's `job_timeout` or `job_lost` row is written exactly as
+# it would be without the ladder, and a ladder that cannot be loaded or cannot
+# be written changes nothing at all.
 #
 # Sourced LAZILY and BEST-EFFORT (the opposite discipline from
 # aid-resume-artifact.sh above, on purpose): those definitions are load-bearing
@@ -145,51 +164,6 @@ _gate_ladder_emit() {
 }
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.16.0}"
-
-# ─── Gate runtime baseline gitignore bootstrap (P063 Step 2) ────────────────
-# Lazy, idempotent, LOCAL-ONLY: if `.aid-o/metrics/` (the gate runtime
-# baseline library's data directory — owned by aid-gate-runtime-baseline.sh,
-# Step 1) is not ALREADY excluded from git in this clone — whether via a
-# brand-new project's shipped/tracked `.gitignore` or a previous run of this
-# very function — add it (and its `.lock` glob) to `.git/info/exclude`
-# (never the tracked `.gitignore`). Uses the exact same
-# `git check-ignore -q <probe>` technique aid-plan-close-check.sh's Check 1
-# uses for its own per-project gitignored-vs-committed detection.
-#
-# Lives HERE (not inside aid-gate-runtime-baseline.sh) because this plugin's
-# own P063 EPIC plan.json scopes that library file to Step 1 only — Step 2
-# integrates it without modifying it, calling only its already-published
-# gate_baseline_update/gate_baseline_report_json/gate_baseline_show functions.
-#
-# Deliberately a no-op whenever AID_GATE_BASELINE_FILE is set — that env var
-# is aid-gate-runtime-baseline.sh's own documented test-isolation seam (its
-# bats suite points it at an isolated tmp file "without requiring a git
-# checkout"); if a caller has opted into that isolation, this bootstrap must
-# never write into the REAL clone's `.git/info/exclude` as a side effect.
-# Also a no-op when git is unavailable or CWD isn't inside a git working
-# tree — fails open, matching every public function in the two libraries
-# this depends on.
-aid_gate_baseline_ensure_gitignored() {
-  [[ -n "${AID_GATE_BASELINE_FILE:-}" ]] && return 0
-  command -v git >/dev/null 2>&1 || return 0
-  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
-
-  # Already excluded (tracked .gitignore OR a prior .git/info/exclude
-  # backfill) — nothing to do.
-  git check-ignore -q ".aid-o/metrics/__aid_gate_baseline_probe__" 2>/dev/null && return 0
-
-  # P079 Step 2: from a LINKED worktree `.git` is a file, not a directory, so
-  # the literal `.git/info/exclude` path named nothing writable. The common dir
-  # is the one every worktree of this clone shares — the exclude lands once
-  # there and applies to all of them, which is what "LOCAL-ONLY to this clone"
-  # meant all along.
-  local _common_dir
-  _common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
-  [[ -n "$_common_dir" ]] || return 0
-  gitignore_exclude_append "${_common_dir}/info/exclude" ".aid-o/metrics/"
-  gitignore_exclude_append "${_common_dir}/info/exclude" ".aid-o/metrics/*.lock"
-  return 0
-}
 
 # Phase 2 (P037) — resolve {token} placeholders in gate commands via bash parameter expansion.
 # Recognized tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}, {plugin_path}, {evidence_dir}.
@@ -228,8 +202,9 @@ run_gate() {
   local timeout_s="${3:-60}"
   local log_file="${4:-/dev/null}"
 
-  local start_ms
+  local start_ms started_at
   start_ms=$(date +%s%3N)
+  started_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
   local output exit_code=0
   # </dev/null: a stdin-consuming gate (ssh, cat, …) must NOT inherit the
@@ -238,12 +213,17 @@ run_gate() {
   # overall still reports pass (OBS-20260708-07).
   output=$(LC_ALL=C timeout "$timeout_s" bash -c "$command" </dev/null 2>&1) || exit_code=$?
 
-  local end_ms
+  local end_ms completed_at
   end_ms=$(date +%s%3N)
+  completed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   local duration_ms=$(( end_ms - start_ms ))
 
   local result="pass" reason=""
   [[ $exit_code -ne 0 ]] && result="fail"
+  # `timeout(1)` exits 124 when the deadline passed: the row says so by name
+  # (the closed vocabulary's `job_timeout`, the same reason a background gate's
+  # supervisor reports), never as a bare `exit_124` a reader has to decode.
+  [[ $exit_code -eq 124 ]] && reason="job_timeout"
   # A gate that exits 0 while its own output says it looked at nothing did not
   # pass, it did not run. The list is closed and literal on purpose: "0 errors"
   # is a result, "0 files checked" is an absence. A fan-out gate with one empty
@@ -262,7 +242,11 @@ run_gate() {
   output_truncated="${output_truncated//$'\n'/\\n}"
   output_truncated="${output_truncated//$'\t'/\\t}"
 
-  local json="{\"gate\":\"${gate_name}\",\"result\":\"${result}\"${reason:+,\"reason\":\"${reason}\"},\"exit_code\":${exit_code},\"duration_ms\":${duration_ms},\"output\":\"${output_truncated}\"}"
+  # The version-2 row (P097 Step 2): status/reason/waived derived here by the
+  # one mapping every row goes through; `result` rides along as the derived
+  # compatibility field.
+  local json
+  json="$(gate_row_normalize "{\"gate\":\"${gate_name}\",\"result\":\"${result}\"${reason:+,\"reason\":\"${reason}\"},\"exit_code\":${exit_code},\"duration_ms\":${duration_ms},\"started_at\":\"${started_at}\",\"completed_at\":\"${completed_at}\",\"output\":\"${output_truncated}\"}")"
   echo "$json"
 
   # Log to file if provided
@@ -338,19 +322,6 @@ resolve_run_mode() {
   yq ".gates.\"${gate}\".run_mode // \"foreground\"" "$file"
 }
 
-# _run_mode_declared <execution_yaml> <gate_name>
-#   True iff the gate DECLARES a run_mode key at all. Not a second run_mode
-#   reader — it resolves no value and applies no default; resolve_run_mode above
-#   stays the only place that turns config into a mode. It exists because
-#   resolve_run_mode deliberately collapses "absent" and "explicit foreground"
-#   into the same answer, and the P076 Step 3 advice must stay silent for BOTH
-#   explicit values: a PM who already wrote `run_mode: foreground` has made the
-#   decision this advice exists to prompt.
-_run_mode_declared() {
-  local file="$1" gate="$2"
-  [[ "$(yq ".gates.\"${gate}\" | has(\"run_mode\")" "$file" 2>/dev/null)" == "true" ]]
-}
-
 # validate_all_run_modes <execution_yaml>
 #   Fail-loud sweep over EVERY defined gate, run BEFORE any gate command is
 #   spawned — exactly like the gate-profile validation above it. A typo
@@ -373,548 +344,45 @@ validate_all_run_modes() {
   return 0
 }
 
-# ═══════════════════════════════════════════════════════════════════════════
-# P076 Step 8 — service declarations.
-#
-# execution.yaml may carry an OPTIONAL `services:` map: the per-project
-# declaration of long-lived processes a run needs standing up before its gates
-# mean anything. It lives here, and not in some new file, because execution.yaml
-# is already the per-project gate/runtime contract every project owns.
-#
-# Two authorities, deliberately, and they must agree:
-#   • defaults/schemas/service-declaration.schema.json — the documentation and
-#     test authority for the shape.
-#   • _validate_services_config below — the RUNTIME enforcement, mirroring every
-#     constraint in that schema plus the one JSON Schema cannot express across
-#     sibling properties (duplicate port_env).
-# scripts/tests/bats/test-service-declaration.bats drives BOTH from one shared
-# case table, so the two cannot drift apart silently.
-#
-# Nothing in this step starts, stops or supervises a service. This is validation
-# only: shape refused early, loudly, by service and field.
-# ═══════════════════════════════════════════════════════════════════════════
-
-# _svc_err <service> <message>
-#   Every service violation names the service; the message names the field.
-_svc_err() {
-  echo "ERROR: aid-run-gates.sh: services: service '${1}': ${2}" >&2
-}
-
-# _svc_denied_port_env <name>
-#   True when <name> is a variable the runner's own children depend on.
-#
-#   port_env names the variable carrying the per-run allocated port, and that
-#   variable is exported into the environment of every service and gate command.
-#   So the name is not merely cosmetic: `port_env: PATH` would set PATH to a port
-#   number for the whole run and no command would resolve a binary again;
-#   `BASH_ENV`, `LD_PRELOAD` or `NODE_OPTIONS` would point a code-loading hook at
-#   one. This is refused at declaration time, in the same sweep as every other
-#   shape rule, rather than at export time — the exporting step should inherit a
-#   name it can already trust.
-#
-#   Matching is EXACT and CASE-SENSITIVE for the enumerated names, and
-#   case-sensitive PREFIX for the open-ended families (LD_, DYLD_, BASH_FUNC_,
-#   AID_). Case-sensitive because environment variables are: `Path` is not `PATH`
-#   and nothing on the system honours it, so refusing the case variant would be a
-#   false refusal that buys no safety. Prefix only where the family is genuinely
-#   open-ended and libc/shell-version dependent (LD_PRELOAD, LD_AUDIT,
-#   LD_LIBRARY_PATH, …), so an enumeration would silently go stale.
-#
-#   THE LIST ITSELF LIVES IN lib/aid-env-name-denylist.sh, because there are two
-#   consumers — this declaration-time check and the export-time guard in
-#   lib/aid-service.sh — and a second enumeration is a list that drifts. It did:
-#   the export-time copy was missing the interpreter-hook and git families while
-#   advertising that it covered them.
-#
-#   MIRRORED BY: defaults/schemas/service-declaration.schema.json
-#   (port_env.allOf) — keep the two lists in the same order.
-_svc_denied_port_env() {
-  if ! declare -F aid_env_name_denied >/dev/null 2>&1; then
-    # shellcheck source=lib/aid-env-name-denylist.sh
-    source "${SCRIPT_DIR}/lib/aid-env-name-denylist.sh" 2>/dev/null || true
-  fi
-  if ! declare -F aid_env_name_denied >/dev/null 2>&1; then
-    # FAIL CLOSED, and say why: with no denylist available every name is denied,
-    # which refuses a legitimate declaration rather than admitting a hostile one.
-    echo "ERROR: aid-run-gates.sh: the shared env-name denylist (${SCRIPT_DIR}/lib/aid-env-name-denylist.sh) could not be loaded — refusing every port_env name rather than exporting one unchecked" >&2
-    return 0
-  fi
-  aid_env_name_denied "$1"
-}
-
-# _svc_backgrounding_form <start_cmd>
-#   Echoes the backgrounding form found in a start_cmd, or nothing.
-#
-#   start_cmd MUST remain the foreground process of its job: the supervisor owns
-#   the process group, and a command that backgrounds itself hands back a pid
-#   owning nothing — the one violation that produces an UNSTOPPABLE orphan.
-#
-#   HONEST LIMIT: this is a SYNTACTIC lint, not a proof. It catches the obvious
-#   forms — a trailing `&` (a trailing `&&` is not one, that is a shell syntax
-#   error to be reported by the shell), and `nohup`, `disown` or `setsid` used as
-#   a command word. It CANNOT see a command that daemonises inside itself (a
-#   wrapper script that forks and exits, a `docker run -d` behind an npm script).
-#   That case is deliberately not chased here: it is caught at runtime instead, by
-#   the rule that a TERMINAL job whose probe still reports healthy is exactly the
-#   daemonised-start_cmd violation. A clean result here means "no obvious
-#   backgrounding syntax", never "proven foreground".
-#
-#   MIRRORED BY: defaults/schemas/service-declaration.schema.json
-#   (start_cmd.allOf).
-_svc_backgrounding_form() {
-  local cmd="$1" trimmed
-  # Regexes held in variables: an unquoted ERE containing ';', '|' and '(' is
-  # fragile inline, and BASH_REMATCH still works through a variable.
-  local re_amp='(^|[^&])&$'
-  local re_word='(^|[[:space:];&|(])(nohup|disown|setsid)[[:space:]]'
-  trimmed="${cmd%"${cmd##*[![:space:]]}"}"
-  if [[ "$trimmed" =~ $re_amp ]]; then
-    echo "a trailing '&'"
-    return 0
-  fi
-  if [[ "$cmd" =~ $re_word ]]; then
-    echo "'${BASH_REMATCH[2]}'"
-    return 0
-  fi
-  return 1
-}
-
-# _validate_needs_services <execution_yaml> <declared_names_newline_separated>
-#   A gate may declare `needs_services: [names]` — the services that must be
-#   HEALTHY before that gate is allowed to run. The list is validated against the
-#   DECLARED service names here, at the same config check as everything else,
-#   because the failure it prevents is silent: a gate naming a service that no
-#   longer exists (renamed, removed, typo'd) would otherwise either wait on
-#   nothing or fail at gate time with a diagnosis about readiness when the truth
-#   is a stale config line.
-#
-#   Runs even when there is NO `services:` block at all — that is precisely the
-#   case where every name is unknown, and it is the loudest one worth catching.
-#
-#   rc 0 nothing to complain about · rc 1 a refused declaration (named).
-_validate_needs_services() {
-  local file="$1" declared="$2"
-  local gate n tag
-  [[ "$(yq 'has("gates")' "$file" 2>/dev/null || echo false)" == "true" ]] || return 0
-
-  # ONE yq call for the whole check in the overwhelmingly common case: the gates
-  # that carry the key at all. A project using none pays a single query.
-  local carriers
-  # `select(.value | has(...))` and NOT `select(.value | type == "!!map" and
-  # has(...))`: the second form's operator precedence makes yq evaluate the
-  # `and` as the right-hand side of the `==`, so it selects NOTHING and the whole
-  # check silently passes — which is exactly how this was first written, and the
-  # unknown name reached the gate loop instead of the config check. `has` on a
-  # non-map gate value is simply false, so the type test bought nothing anyway.
-  carriers="$(yq '.gates | to_entries[] | select(.value | has("needs_services")) | .key' "$file" 2>/dev/null || true)"
-  [[ -n "$carriers" ]] || return 0
-
+# validate_all_timeouts <execution_yaml>
+#   `timeout_seconds` is the gate's deadline and nothing else (P097 Step 5):
+#   absent → the template default 60; anything but a positive integer is a
+#   configuration refusal that names the gate, before any gate runs.
+validate_all_timeouts() {
+  local file="$1" gate t
   while IFS= read -r gate; do
     [[ -z "$gate" ]] && continue
-    tag="$(GATE="$gate" yq '.gates[strenv(GATE)].needs_services | tag' "$file" 2>/dev/null || echo '!!null')"
-    if [[ "$tag" != '!!seq' ]]; then
-      echo "ERROR: aid-run-gates.sh: gate '${gate}': 'needs_services' must be a list of declared service names (found ${tag#\!\!})" >&2
-      return 1
+    t="$(GATE="$gate" yq '.gates[strenv(GATE)].timeout_seconds // 60' "$file")"
+    if [[ ! "$t" =~ ^[0-9]+$ ]] || (( t <= 0 )); then
+      echo "ERROR: aid-run-gates.sh: gate '${gate}' has invalid timeout_seconds: '${t}' (a positive integer number of seconds; omit the key for the default 60)" >&2
+      return 2
     fi
-    while IFS= read -r n; do
-      [[ -z "$n" ]] && continue
-      if ! grep -qxF "$n" <<<"$declared"; then
-        echo "ERROR: aid-run-gates.sh: gate '${gate}': 'needs_services' names '${n}', which is not a declared service. Declared services: ${declared//$'\n'/, }" >&2
-        echo "  A gate cannot wait on a service this project does not declare — add it under 'services:' in ${file}, or drop the name." >&2
-        return 1
-      fi
-    done < <(GATE="$gate" yq '.gates[strenv(GATE)].needs_services | .[]' "$file" 2>/dev/null)
-  done <<< "$carriers"
-  return 0
-}
-
-# _validate_services_config <execution_yaml>
-#   Fail-loud sweep over every declared service, run at run_all entry BEFORE any
-#   service or gate action. Also validates every gate's optional `needs_services`
-#   list against the names this same sweep just accepted (see
-#   _validate_needs_services) — the two belong to one config check, because a
-#   reference is only checkable next to the thing it references.
-#
-#   Exit contract — three outcomes, not two:
-#     0  nothing to complain about. Either there is no `services:` block (or an
-#        empty one), in which case the function touches nothing and this is the
-#        byte-identical path every pre-P076 project stays on; or every declared
-#        service was inspected and is well-formed.
-#     1  a declaration was inspected and REFUSED — the message names the service
-#        and the field.
-#     2  the config could NOT be inspected (file missing, yq missing, yq could
-#        not parse the file). This is the fail-CLOSED outcome and it is
-#        deliberately not 0: "I could not look" must never read as "it is fine".
-#        run_all cannot reach it today — it guards with `[[ -f ]]` and
-#        require_yq_mikefarah before calling — but the function is a
-#        general-purpose primitive now, and a future second caller without those
-#        guards must inherit a refusal, not a silent skip.
-#   Every non-zero outcome is a refusal for callers that use `|| exit 1`.
-_validate_services_config() {
-  local file="$1"
-  local svc key tag val
-  local -a env_names=() env_owners=()
-
-  # ── fail-closed preflight: distinguish "nothing to validate" from "could not
-  # look at it". Both used to return 0; only the first one still does.
-  if [[ ! -f "$file" ]]; then
-    echo "ERROR: aid-run-gates.sh: services: cannot validate '${file}': file not found (refusing rather than assuming there are no services)" >&2
-    return 2
-  fi
-  if ! command -v yq >/dev/null 2>&1; then
-    echo "ERROR: aid-run-gates.sh: services: cannot validate '${file}': yq is not available (refusing rather than assuming there are no services)" >&2
-    return 2
-  fi
-
-  local has_services
-  if ! has_services="$(yq 'has("services")' "$file" 2>&1)"; then
-    echo "ERROR: aid-run-gates.sh: services: cannot parse '${file}': ${has_services}" >&2
-    return 2
-  fi
-  # No services block: there is nothing to validate about services, but a gate
-  # naming one is still a config error — and the most obvious one there is.
-  [[ "$has_services" == "true" ]] || { _validate_needs_services "$file" ""; return $?; }
-
-  local root_tag
-  if ! root_tag="$(yq '.services | tag' "$file" 2>&1)"; then
-    echo "ERROR: aid-run-gates.sh: services: cannot read the services block of '${file}': ${root_tag}" >&2
-    return 2
-  fi
-  case "$root_tag" in
-    '!!null') _validate_needs_services "$file" ""; return $? ;;   # `services:` with no entries is the same as absent
-    '!!map') ;;
-    *)
-      echo "ERROR: aid-run-gates.sh: services: must be a map of service name -> declaration (found ${root_tag#\!\!})" >&2
-      return 1
-      ;;
-  esac
-
-  # The sweep below reads service names line by line, so a name containing a
-  # NEWLINE would arrive as two names and be blamed on the wrong field ("api":
-  # declaration must be a map, found null). Catch it here, where the diagnosis is
-  # still true: if the key list produces more lines than there are keys, some name
-  # contains a newline. Fail-closed either way — this only replaces a misleading
-  # refusal with an accurate one.
-  local declared_keys key_lines
-  declared_keys="$(yq '.services | keys | length' "$file")"
-  key_lines="$(yq '.services | keys | .[]' "$file" | wc -l)"
-  if [[ "$key_lines" != "$declared_keys" ]]; then
-    echo "ERROR: aid-run-gates.sh: services: a service name contains a newline (${declared_keys} name(s) declared, ${key_lines} line(s) of text) — service names must match ^[a-z0-9][a-z0-9_-]*\$" >&2
-    return 1
-  fi
-
-  # Every name this sweep ACCEPTS, for the needs_services cross-check below. It
-  # is built from the accepted names rather than from a second yq read, so a gate
-  # can never reference a service the sweep refused.
-  local accepted_names=""
-
-  while IFS= read -r svc; do
-    [[ -z "$svc" ]] && continue
-
-    # Service name: it becomes part of log lines, job directory names and error
-    # messages, so it stays filesystem- and shell-safe.
-    if [[ ! "$svc" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
-      _svc_err "$svc" "invalid service name (allowed: lowercase letters, digits, '_' and '-', starting with a letter or digit)"
-      return 1
-    fi
-
-    tag="$(SVC="$svc" yq '.services[strenv(SVC)] | tag' "$file" 2>/dev/null || echo '!!null')"
-    if [[ "$tag" != '!!map' ]]; then
-      _svc_err "$svc" "declaration must be a map of fields (found ${tag#\!\!})"
-      return 1
-    fi
-
-    # additionalProperties: false — an unknown key is a typo, and a typo that is
-    # silently ignored is a contract the project believes it declared.
-    while IFS= read -r key; do
-      [[ -z "$key" ]] && continue
-      case "$key" in
-        start_cmd|probe_cmd|stop_cmd|startup_deadline_seconds|max_lifetime_seconds|log_hint|restart_authorized|port_env) ;;
-        *)
-          _svc_err "$svc" "unknown field '${key}' (accepted: start_cmd, probe_cmd, stop_cmd, startup_deadline_seconds, max_lifetime_seconds, log_hint, restart_authorized, port_env)"
-          return 1
-          ;;
-      esac
-    done < <(SVC="$svc" yq '.services[strenv(SVC)] | keys | .[]' "$file")
-
-    # Required fields.
-    for key in start_cmd probe_cmd startup_deadline_seconds; do
-      if [[ "$(SVC="$svc" K="$key" yq '.services[strenv(SVC)] | has(strenv(K))' "$file")" != "true" ]]; then
-        _svc_err "$svc" "missing required field '${key}'"
-        return 1
-      fi
-    done
-
-    # Non-empty strings.
-    for key in start_cmd probe_cmd stop_cmd log_hint; do
-      [[ "$(SVC="$svc" K="$key" yq '.services[strenv(SVC)] | has(strenv(K))' "$file")" == "true" ]] || continue
-      tag="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)] | tag' "$file")"
-      val="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)]' "$file")"
-      if [[ "$tag" != '!!str' || -z "$val" ]]; then
-        _svc_err "$svc" "field '${key}' must be a non-empty string"
-        return 1
-      fi
-    done
-
-    # start_cmd stays in the FOREGROUND of its job. Syntactic lint only — see
-    # _svc_backgrounding_form for exactly what it does and does not catch.
-    local bgform
-    if bgform="$(_svc_backgrounding_form "$(SVC="$svc" yq '.services[strenv(SVC)].start_cmd' "$file")")"; then
-      _svc_err "$svc" "field 'start_cmd' must stay in the FOREGROUND of its job, but it contains ${bgform}: the supervisor owns the process group, and a command that backgrounds itself returns a pid owning nothing, so the run can no longer stop what it started. (This check is syntactic: it catches a trailing '&', 'nohup', 'disown' and 'setsid'; it cannot catch a command that daemonises internally, which is caught at runtime instead — a TERMINAL job whose probe still reports healthy.)"
-      return 1
-    fi
-
-    # Positive integers.
-    for key in startup_deadline_seconds max_lifetime_seconds; do
-      [[ "$(SVC="$svc" K="$key" yq '.services[strenv(SVC)] | has(strenv(K))' "$file")" == "true" ]] || continue
-      tag="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)] | tag' "$file")"
-      val="$(SVC="$svc" K="$key" yq '.services[strenv(SVC)][strenv(K)]' "$file")"
-      if [[ "$tag" != '!!int' || ! "$val" =~ ^[0-9]+$ || "$val" -lt 1 ]]; then
-        _svc_err "$svc" "field '${key}' must be an integer >= 1"
-        return 1
-      fi
-    done
-
-    # Booleans. Absent restart_authorized defaults to false — repairs are opt-in
-    # authority, so the default is the one that grants nothing.
-    if [[ "$(SVC="$svc" yq '.services[strenv(SVC)] | has("restart_authorized")' "$file")" == "true" ]]; then
-      tag="$(SVC="$svc" yq '.services[strenv(SVC)].restart_authorized | tag' "$file")"
-      if [[ "$tag" != '!!bool' ]]; then
-        _svc_err "$svc" "field 'restart_authorized' must be true or false"
-        return 1
-      fi
-    fi
-
-    # port_env: optional (a service on a fixed external port declares none and
-    # allocation is skipped for it), but when present it must be a legal env var
-    # name AND unowned by any other service.
-    if [[ "$(SVC="$svc" yq '.services[strenv(SVC)] | has("port_env")' "$file")" == "true" ]]; then
-      tag="$(SVC="$svc" yq '.services[strenv(SVC)].port_env | tag' "$file")"
-      val="$(SVC="$svc" yq '.services[strenv(SVC)].port_env' "$file")"
-      if [[ "$tag" != '!!str' || ! "$val" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-        _svc_err "$svc" "field 'port_env' must be a valid environment variable name (^[A-Za-z_][A-Za-z0-9_]*\$)"
-        return 1
-      fi
-      if _svc_denied_port_env "$val"; then
-        _svc_err "$svc" "field 'port_env' must not name the reserved variable '${val}': it is exported into every service and gate command, and that variable controls how commands are found, parsed or loaded (or is AID's own runtime state) — setting it to a port number would break or hijack the whole run. Pick a service-specific name such as '$(printf '%s' "${svc^^}" | tr -c 'A-Z0-9_' '_')_PORT'."
-        return 1
-      fi
-      local i
-      for i in "${!env_names[@]}"; do
-        if [[ "${env_names[$i]}" == "$val" ]]; then
-          _svc_err "$svc" "field 'port_env' duplicates '${val}', already declared by service '${env_owners[$i]}' — one env var, one owner"
-          return 1
-        fi
-      done
-      env_names+=("$val")
-      env_owners+=("$svc")
-    fi
-    accepted_names+="${svc}"$'\n'
-  done < <(yq '.services | keys | .[]' "$file")
-
-  _validate_needs_services "$file" "${accepted_names%$'\n'}" || return 1
-
+  done < <(yq '.gates | keys | .[]' "$file")
   return 0
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# P076 Step 10 — the service LIFECYCLE, wired into a real run.
+# P097 Step 6 — keys the runner no longer reads are REFUSED, never ignored.
 #
-# Step 8 gave the declaration a validator; Step 9 gave it a library. This is the
-# step that makes either reachable, and its whole shape is one rule:
-#
-#   ACQUIRE ONCE before the gate loop, RELEASE ONCE after the report is written.
-#
-# Never per gate. Two gates sharing a service must not let the first one tear it
-# down under the second (the Codex round's parallel-teardown finding), and a
-# service is declared for the RUN, not for a gate — so a service no gate names is
-# still brought up and taken down with the run.
-#
-# There is no completion hook anywhere in this file that a SIGKILLed runner can
-# reach, so the crash safety net is not a hook: a RERUN sweeps at ENTRY, before it
-# acquires, and `resume`/`done-advance` sweep for a run that is being wrapped up
-# without a rerun. All of them call `aid_service_down_all` — ONE teardown
-# definition, four callers.
-#
-# A project that declares no services makes ZERO of these calls: every one of
-# them is behind `_svc_declared_count > 0`, and the library is not even sourced.
+# `required_when`, `needs_services`, `services:` and `gate_profile_defaults`
+# left this runner with the service lifecycle and the applicability library.
+# A key that is merely ignored is how `required_when` rotted unread for four
+# months, so an execution.yaml that still carries one stops the run before any
+# gate starts and names the upgrade that removes it (Step 3). The KEY is the
+# signal, not its content: `services: {}` is refused like a populated block.
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Set to 1 once this invocation has acquired services, so the release is exactly
-# once and a release without an acquire is a no-op.
-_SVC_ACQUIRED=0
-
-# _svc_declared_count <execution_yaml> — how many services the config declares.
-# ONE yq call; 0 for a config with no block, an empty block, or an unreadable
-# file (the shape is refused upstream by _validate_services_config, which runs
-# first — this function only decides whether the lifecycle applies at all).
-_svc_declared_count() {
-  local n
-  n="$(yq '.services // {} | length' "$1" 2>/dev/null || echo 0)"
-  [[ "$n" =~ ^[0-9]+$ ]] || n=0
-  printf '%s' "$n"
-}
-
-# _svc_lib_load — source lib/aid-service.sh, fail CLOSED.
-#   Called only when services are declared. A missing library with declared
-#   services is not a run that can proceed: the gates would run against
-#   infrastructure nobody started and report on it as if they had.
-_svc_lib_load() {
-  declare -F aid_service_up_all >/dev/null 2>&1 && return 0
-  if [[ ! -f "${SCRIPT_DIR}/lib/aid-service.sh" ]]; then
-    echo "ERROR: aid-run-gates.sh: services are declared but ${SCRIPT_DIR}/lib/aid-service.sh is missing — refusing to run gates against infrastructure nothing brought up" >&2
-    return 1
-  fi
-  # shellcheck source=lib/aid-service.sh
-  source "${SCRIPT_DIR}/lib/aid-service.sh" || return 1
-  declare -F aid_service_up_all >/dev/null 2>&1
-}
-
-# _svc_stale_state_present <evidence_dir>
-#   True when THIS run's evidence already holds service state that is not
-#   accounted for as stopped — a registry entry in any non-stopped state, or a
-#   job directory under the supervisor's layout. That is the signature of a run
-#   that died before its release, and it is the only thing the entry sweep needs
-#   to decide on: `aid_service_down_all` does the actual reasoning.
-_svc_stale_state_present() {
-  local ev="$1" reg="$1/services.json" jr="$1/service-jobs"
-  if [[ -f "$reg" ]] \
-     && jq -e '[.services[]? | select(.state != "stopped")] | length > 0' "$reg" >/dev/null 2>&1; then
-    return 0
-  fi
-  # if/fi rather than an `&&` chain: this file runs under `set -e`, and a
-  # trailing false `&&` list as a statement is the shape that exits a script.
-  if [[ -d "$jr" ]]; then
-    if compgen -G "${jr}/*/*/job.json" >/dev/null 2>&1; then return 0; fi
-  fi
-  return 1
-}
-
-# ─── WHO OWNS THIS RUN'S SERVICES (P076 Step 10 fix) ────────────────────────
-# `_svc_stale_state_present` answers "is there service state that is not
-# stopped". That is NOT the question the entry sweep needs, and the difference
-# is destructive: a run that is HEALTHY and mid-gates looks exactly like a run
-# that died with its services up. Asking only the first question means a second
-# `run-all` entering the same evidence directory tears a LIVE run's database
-# down under its running gates.
-#
-# So the acquire path proves the previous owner is GONE before it touches
-# anything, and it proves it about a process rather than about a state string.
-# The claim record is written BEFORE the acquire, so any service state that
-# exists was preceded by a live claim — there is no window in which state exists
-# and no owner is recorded.
-#
-# THE CLAIM IS NOT DEFINED HERE ANY MORE, and that is the CP3 BLOCKING fix. It
-# used to be, and the consequence was that only this file could read it: the
-# FSM's `_fsm_service_sweep` — the teardown on `resume` and `done-advance` —
-# never consulted it, so a `resume` against a run whose background gate had
-# finished while its FOREGROUND gate was still running swept that live run's
-# services away and reported two passing gates as `service_unhealthy`. The
-# definitions now live in `lib/aid-service.sh`, beside `aid_service_down_all`,
-# which refuses while a live owner holds the claim — so every teardown path in
-# the system reads ONE authority. These four wrappers keep this file's local
-# vocabulary and add only the `_SVC_OWNER_CLAIMED` bookkeeping, which is this
-# invocation's own business.
-#
-# WHAT IS NOT HERE, deliberately: no `flock` held across the run. I measured the
-# reason rather than assuming it — a descriptor opened with `exec {fd}>>lock` is
-# NOT close-on-exec in bash 5.2, so a run-scoped lock is inherited by every
-# service `aid-job.sh` detaches, and the lock then outlives the runner for the
-# whole lifetime of the service (verified: parent locks, spawns a setsid'd
-# child, closes its own fd — the lock is still held). That converts a crash into
-# a permanently unrunnable project, which is worse than what it prevents. The
-# claim-before-acquire ordering gives the same mutual exclusion for the case
-# that matters without putting a descriptor into a detached process.
-#
-# THE ONE CASE THAT DOES NOT FAIL CLOSED, named: service state with NO claim
-# record. It is swept, as before. Every acquire in this file writes a claim
-# first, so an unclaimed registry is either from a build older than this change
-# or hand-written — never a live run of this code. Refusing there would make the
-# crash recovery unreachable for exactly the runs it exists for.
-_SVC_OWNER_CLAIMED=0
-_svc_owner_file()     { aid_service_owner_file "$1"; }
-_svc_owner_live()     { aid_service_owner_live "$1"; }
-_svc_owner_describe() { aid_service_owner_describe "$1"; }
-
-_svc_owner_claim() {
-  aid_service_owner_claim "$1" "${2:-}" || return 1
-  _SVC_OWNER_CLAIMED=1
-  return 0
-}
-
-_svc_owner_clear() {
-  (( _SVC_OWNER_CLAIMED == 1 )) || return 0
-  _SVC_OWNER_CLAIMED=0
-  aid_service_owner_clear "$1"
-  return 0
-}
-
-# _svc_manual_commands <evidence_dir> <execution_yaml>
-#   The commands a human would run to finish a teardown this run could not. Read
-#   from the registry, which is the only record of what was allocated — printed
-#   verbatim so the line can be pasted rather than reconstructed.
-_svc_manual_commands() {
-  local ev="$1" reg="$1/services.json"
-  [[ -f "$reg" ]] || return 0
-  jq -r --arg job "${SCRIPT_DIR}/aid-job.sh" '
-    .services // {} | to_entries[] | select(.value.state != "stopped") |
-    "  service " + .key + ":"
-    + (if (.value.stop_cmd // "") != "" then "\n    " + .value.stop_cmd else "" end)
-    + (if (.value.job_id // "") != "" then
-         "\n    bash " + $job + " cancel --jobs-dir " + (.value.jobs_dir // "?") + " --id " + .value.job_id
-       else "" end)
-  ' "$reg" 2>/dev/null || true
-}
-
-# _svc_release_run <evidence_dir> <execution_yaml>
-#   THE release. Idempotent, called exactly once per invocation that acquired,
-#   and NEVER able to un-write evidence: it runs after the report is written, and
-#   a failure is a warning naming the manual commands — not a failed run.
-_svc_release_run() {
-  local ev="$1" yaml="$2"
-  (( _SVC_ACQUIRED == 1 )) || return 0
-  _SVC_ACQUIRED=0
-  local _down_rc=0
-  aid_service_down_all "$ev" "$yaml" || _down_rc=$?
-  if (( _down_rc == 2 )); then
-    # rc 2 is a REFUSAL, and it has several causes: a live foreign owner (which
-    # should indeed be impossible while releasing our own claim), but also jq
-    # missing so the claim cannot be read, or yq missing / the declaration
-    # unreadable so a recorded stop_cmd would run unreconciled. The library
-    # prints its named line immediately above, and its header tells callers not
-    # to assume a cause — so this message reports the outcome and defers.
-    echo "WARN: aid-run-gates.sh: the service teardown REFUSED for the reason named in the line above (a live owner's claim, or a dependency/declaration it could not read). The claim record under '${ev}' has NOT been cleared and no service was stopped. If that line names a live foreign owner, that should be impossible while releasing our own claim — investigate before rerunning:" >&2
-    _svc_manual_commands "$ev" "$yaml" >&2
-    return 0
-  fi
-  if (( _down_rc != 0 )); then
-    echo "WARN: aid-run-gates.sh: service teardown did not fully succeed — at least one declared service still answers its probe. The gate report is already written and is NOT affected. Finish the teardown by hand:" >&2
-    _svc_manual_commands "$ev" "$yaml" >&2
-  fi
-  # The claim covered the services this invocation owned; they are down, so it
-  # is dropped LAST — a claim removed before the teardown would let a runner
-  # entering in that window sweep a service that is still being stopped.
-  _svc_owner_clear "$ev"
-  return 0
-}
-
-# _gate_expect_p95_seconds <gate_name>
-#   The gate's runtime-baseline p95 in SECONDS for aid-job.sh's --expect-p95,
-#   but only once the baseline holds >= 3 non-censored samples (the same
-#   "enough data to quote" threshold gate_baseline_recommend_timeout uses).
-#   Echoes nothing for a young gate, so the flag is simply omitted and the job
-#   record legitimately lacks the field.
-_gate_expect_p95_seconds() {
-  local gate_name="$1" bj p95 nc
-  bj="$(gate_baseline_report_json "$gate_name" 2>/dev/null || true)"
-  [[ -z "$bj" || "$bj" == "null" ]] && return 0
-  p95="$(jq -r '.p95_ms // "null"' <<<"$bj" 2>/dev/null || echo null)"
-  nc="$(jq -r '.non_censored_samples_count // 0' <<<"$bj" 2>/dev/null || echo 0)"
-  [[ "$p95" =~ ^[0-9]+$ ]] || return 0
-  [[ "$nc" =~ ^[0-9]+$ ]] || return 0
-  if (( nc < 3 )); then return 0; fi
-  printf '%s' "$(( (p95 + 999) / 1000 ))"
-  return 0
+# _refuse_dead_keys <execution_yaml> — exit 2 with key, gate and the upgrade
+# command on stderr when a removed key is present; silent otherwise.
+_refuse_dead_keys() {
+  local file="$1" found
+  found="$(yq -o=json '.' "$file" 2>/dev/null | jq -r '. as $r
+    | (["services","gate_profile_defaults"][] | select(. as $k | $r | has($k)) | . + " (top level)"),
+      ($r.gates // {} | to_entries[] | .key as $g | .value | select(type == "object") | keys[]
+        | select(. == "required_when" or . == "needs_services") | . + " (gate " + $g + ")")' 2>/dev/null)" || found=""
+  [[ -n "$found" ]] || return 0
+  echo "ERROR: aid-run-gates.sh: ${file} carries configuration this runner no longer reads: ${found//$'\n'/; }. Refusing to run any gate on a key nothing enforces — $(gate_profile_upgrade_hint)" >&2
+  exit 2
 }
 
 # _bg_fail_row <gate_name> <reason> <message> [job_id]
@@ -927,7 +395,20 @@ _bg_fail_row() {
         --arg jid "$job_id" \
     '{gate:$g, result:"fail", exit_code:1, duration_ms:0, output:$o,
       reason:$r, job_id:(if $jid == "" then null else $jid end),
-      job_state:"none"}'
+      job_state:"none"}' | gate_row_normalize
+}
+
+# _gate_row_finalize <gate_name> <row_json>
+#   Every row on its way into the report or a checkpoint file passes here:
+#   version-2 shape (gate_row_normalize) and a reason inside the closed
+#   vocabulary (gate_row_check). Prints the row; exit 1 (naming the gate) when
+#   the runner produced a row outside its own contract — that is the defect,
+#   not something to write down and carry on from.
+_gate_row_finalize() {
+  local gate_name="$1" row
+  row="$(gate_row_normalize "$2")" || return 1
+  gate_row_check "$gate_name" "$row" || return 1
+  printf '%s' "$row"
 }
 
 # ─── P076 Step 4 — the eager continuation pointer ───────────────────────────
@@ -1202,9 +683,6 @@ run_background_gate() {
   else
     local -a run_args=(run --jobs-dir "$jobs_dir" --id "$job_id"
                        --label "$gate_name" --deadline "$timeout_s")
-    local p95_sec
-    p95_sec="$(_gate_expect_p95_seconds "$gate_name")"
-    [[ -n "$p95_sec" ]] && run_args+=(--expect-p95 "$p95_sec")
     run_args+=(-- "${job_argv[@]}")
 
     local start_err start_rc=0
@@ -1541,7 +1019,7 @@ run_all_gates() {
 
   # THE run's evidence directory, resolved ONCE (P079 Step 2). Every state
   # artifact below — timeline, default report path, execution ledger, waivers,
-  # job records, row checkpoints, the service registry — hangs off this one
+  # job records, row checkpoints — hangs off this one
   # value, and the recovery ladder reads it by name from this scope.
   local _evidence_dir; _evidence_dir="$(_gates_evidence_dir "$epic_id" "$run_id")"
 
@@ -1559,7 +1037,7 @@ run_all_gates() {
 
   # Parse optional flags: --state-file, --report-file, --plan-json, --profile,
   # --base-commit, --plan-path
-  local state_file="" report_file="" plan_json="" profile="" profile_reason_opt=""
+  local state_file="" report_file="" plan_json="" profile=""
   # P068 Step 2 — explicit substitution inputs. ADDITIVE and OPTIONAL: when
   # absent, both fall back to --state-file exactly as before, so every existing
   # EPIC-scoped caller is byte-for-byte unaffected. They exist because a
@@ -1575,7 +1053,6 @@ run_all_gates() {
       --report-file) report_file="$2"; shift 2 ;;
       --plan-json) plan_json="$2"; shift 2 ;;
       --profile) profile="$2"; shift 2 ;;
-      --profile-reason) profile_reason_opt="$2"; shift 2 ;;
       --base-commit) base_commit_opt="$2"; base_commit_opt_set=1; shift 2 ;;
       --plan-path) plan_path_opt="$2"; plan_path_opt_set=1; shift 2 ;;
       *) shift ;;
@@ -1602,44 +1079,28 @@ run_all_gates() {
   # spawned — a typo on the third gate must not be discovered after the first
   # two have already run.
   validate_all_run_modes "$execution_yaml" || exit 1
+  validate_all_timeouts "$execution_yaml" || exit 2
 
-  # ─── services validation (P076 Step 8) ─────────────────────────────────
-  # Same entry point, same spirit: the OPTIONAL `services:` block is checked
-  # here, before any service or gate action, so a malformed declaration is
-  # refused by service and field instead of surfacing as a mystery failure in
-  # the middle of a gate. An absent block is a no-op — nothing changes for a
-  # project that declares no services.
-  _validate_services_config "$execution_yaml" || exit 1
+  # ─── removed keys (P097 Step 6) ────────────────────────────────────────
+  # Same entry point: a `services:` block, `gate_profile_defaults`, or a gate
+  # with `required_when`/`needs_services` is refused with the upgrade command
+  # before any gate runs. Ignoring the key is what let it rot unread.
+  _refuse_dead_keys "$execution_yaml"
 
-  # One-time-per-clone lazy bootstrap (P063 Step 2) — see
-  # aid_gate_baseline_ensure_gitignored above. Called once per run (not per
-  # gate/attempt): idempotent, and there's nothing gate-specific about it.
-  aid_gate_baseline_ensure_gitignored
-
-  # ─── Gate profile resolution (P061 E1 Step 2) ──────────────────────────
-  # A profile is a named include[] whitelist of gate keys under
-  # execution.yaml.gate_profiles. --profile <name> activates exactly one
-  # profile for THIS run (auto-selection by risk/phase is a later EPIC —
-  # for this step profile_source is always "cli_flag"). Omitting --profile
-  # leaves `profile`/`include_gates_json` empty and every check below is
-  # skipped, so legacy execution.yaml files (with or without a
-  # `gate_profiles` block) behave EXACTLY as before — this is the
-  # backward-compatibility contract.
-  #
-  # All three fail-loud cases are validated upfront, before any gate runs:
-  #   1. --profile <name> where <name> is not a key under gate_profiles.
-  #   2. A profile's include[] lists a gate not defined under .gates.
-  #   3. A profile's include[] lists a gate defined with no `command`.
-  local profile_source="null" profile_reason="null"
+  # ─── Gate profile validation (P097 Step 4) ───────────────────────────
+  # The caller names the profile; nothing here chooses one. A name that is
+  # not declared, or a profile that could only skip, is refused with exit 2
+  # before any gate runs. include[] entries are then checked against gates:
+  # (an undefined gate or a gate without a command is exit 1, as before).
+  local profile_source="none"
   local include_gates_json="[]"
+  local profile_table_json
+  profile_table_json="$(gate_profile_table "$execution_yaml" | jq -R . | jq -sc .)"
   if [[ -n "$profile" ]]; then
-    local profile_def
-    profile_def=$(PROFILE="$profile" yq '.gate_profiles[strenv(PROFILE)]' "$execution_yaml")
-    if [[ -z "$profile_def" || "$profile_def" == "null" ]]; then
-      echo "ERROR: aid-run-gates.sh: unknown gate profile '${profile}' — no such key under gate_profiles in ${execution_yaml}" >&2
-      exit 1
+    if ! gate_profile_exists "$execution_yaml" "$profile"; then
+      echo "ERROR: aid-run-gates.sh: unknown gate profile '${profile}' — declared profiles in ${execution_yaml}: ${profile_table_json}; $(gate_profile_upgrade_hint)" >&2
+      exit 2
     fi
-
     include_gates_json=$(PROFILE="$profile" yq -o=json '.gate_profiles[strenv(PROFILE)].include // []' "$execution_yaml" | tr -d '\n ')
     local profile_defined_keys_json
     profile_defined_keys_json=$(yq -o=json '.gates | keys' "$execution_yaml" | tr -d '\n ')
@@ -1661,14 +1122,17 @@ run_all_gates() {
         exit 1
       fi
     done < <(jq -r '.[]' <<< "$include_gates_json")
-
-    # The FSM passes the profile it resolved with its reason; a bare --profile
-    # from a human is what "explicit --profile flag" was ever meant to say.
-    if [[ -n "${profile_reason_opt:-}" ]]; then
-      profile_source="fsm_resolved"; profile_reason="$profile_reason_opt"
-    else
-      profile_source="cli_flag"; profile_reason="explicit --profile flag"
+    # After the per-gate checks, so a command-less gate is still named as
+    # such: a profile whose include[] carries no required gate is refused —
+    # a run that can only skip is not a run. The one exception is the
+    # plan-final reuse copy (aid-plan-fsm.sh sets AID_GATES_REUSE_OF to the
+    # attempt the required rows were copied from): there the required gates
+    # already passed and the narrowed include[] is what is left to execute.
+    if [[ -z "${AID_GATES_REUSE_OF:-}" ]] && ! gate_profile_has_required_gate "$execution_yaml" "$profile"; then
+      echo "ERROR: aid-run-gates.sh: gate profile '${profile}' includes no required gate (include: $(PROFILE="$profile" yq -o=json -I=0 '.gate_profiles[strenv(PROFILE)].include // []' "$execution_yaml")) — a run that can only skip is not a run; declared profiles: ${profile_table_json}; $(gate_profile_upgrade_hint)" >&2
+      exit 2
     fi
+    profile_source="caller"
   fi
 
   # FSM state check: refuse to run if state is not GATES, UNLESS caller is
@@ -1733,42 +1197,26 @@ run_all_gates() {
   gate_count=$(yq '.gates | length' "$execution_yaml")
   gate_names_json=$(yq -o=json '.gates | keys' "$execution_yaml" | tr -d '\n ')
 
-  # ─── required_when validation, BEFORE anything runs ────────────────
-  # Every gate's requirement is resolved up front, for two reasons. A gate the
-  # active profile excludes never reaches the per-gate read, so a malformed
-  # expression there would go unnoticed until the day that profile is used.
-  # And a bad expression late in the file would otherwise let the gates before
-  # it run — including their side effects — before the run refuses.
-  #
-  # The applicability root is `$PWD` — the SAME directory `run_gate`'s
-  # `bash -c` executes in. An earlier version used the git top-level, which is
-  # only equal to it when the runner is invoked from the root: from
-  # `repo/subdir` applicability would have been judged against the whole
-  # repository while every gate command saw one directory. A gate could then be
-  # required on the strength of files its own command cannot reach. Whatever
-  # the commands can see is what decides whether they were applicable.
-  local _rw_root="$PWD"
-  local _rw_gate _rw_ans _rw_rc
+  # ─── `required` resolved up front, for every gate ───────────────────
+  # Explicit `required: true|false` (an unquoted boolean) or absent → false
+  # with source `legacy_default`. Resolved before the loop so a malformed
+  # value late in the file refuses the run before an earlier gate has run and
+  # left its side effects. (`required_when` no longer exists — P097 Step 6;
+  # `_refuse_dead_keys` above already stopped a file that still carries it.)
+  local _rw_gate _rw_tag
   declare -A _AID_REQ_RESOLVED=() _AID_REQ_SOURCE=()
-  # Taken HERE, explicitly, once per run — not left to the library's
-  # root-keyed cache. Two run_all_gates calls in one shell at the same cwd
-  # would otherwise share the first run's snapshot, so the "one snapshot per
-  # run" contract would hold only for the first of them.
-  aid_gate_snapshot_candidates "$_rw_root"
   while IFS= read -r _rw_gate; do
     [[ -n "$_rw_gate" ]] || continue
-    # Called directly, NOT through $(...): the reason for a refusal lives in
-    # _AID_GA_ERROR, and a command substitution's subshell takes it with it.
-    _rw_rc=0
-    aid_gate_required "$execution_yaml" "$_rw_gate" "$_rw_root" >/dev/null || _rw_rc=$?
-    _rw_ans="${_AID_GA_REQUIRED}"$'\t'"${_AID_GA_SOURCE}"
-    if [[ "$_rw_rc" -ne 0 ]]; then
-      echo "ERROR: ${_AID_GA_ERROR:-gate '${_rw_gate}': unreadable requirement}" >&2
-      echo "ERROR: accepted forms are 'required: true|false', or 'required_when: always' / 'required_when: \"<glob> exists\"' (clauses joined by the literal ' OR '). Refusing to run any gate on a requirement this runner cannot read — guessing it is what left failing gates green." >&2
-      return 1
-    fi
-    _AID_REQ_RESOLVED["$_rw_gate"]="${_rw_ans%%$'\t'*}"
-    _AID_REQ_SOURCE["$_rw_gate"]="${_rw_ans##*$'\t'}"
+    _rw_tag="$(GATE="$_rw_gate" yq -r '.gates[strenv(GATE)].required | tag' "$execution_yaml" 2>/dev/null || echo '!!null')"
+    case "$_rw_tag" in
+      '!!null') _AID_REQ_RESOLVED["$_rw_gate"]=false; _AID_REQ_SOURCE["$_rw_gate"]=legacy_default ;;
+      '!!bool')
+        _AID_REQ_RESOLVED["$_rw_gate"]="$(GATE="$_rw_gate" yq -r '.gates[strenv(GATE)].required' "$execution_yaml")"
+        _AID_REQ_SOURCE["$_rw_gate"]=explicit ;;
+      *)
+        echo "ERROR: aid-run-gates.sh: gate '${_rw_gate}': required must be an unquoted true or false (found ${_rw_tag#\!\!}). Refusing to run any gate on a requirement this runner cannot read — guessing it is what left failing gates green." >&2
+        return 1 ;;
+    esac
   done < <(yq '.gates | keys | .[]' "$execution_yaml")
   log_event "$timeline_file" "gate_runner_start" \
     report_path="$report_path" gate_count="$gate_count" \
@@ -1794,20 +1242,6 @@ run_all_gates() {
   # the current HEAD+command. Surfaces top-level as waived_gates[] so nothing
   # downstream can miss that a required gate was accepted without passing.
   declare -a waived_gates=()
-  # Gates whose runtime baseline (P063 Step 2) already has enough data
-  # (non_censored_samples_count >= 5) to be worth a human-readable summary
-  # line after the run — populated inline at merge time below (reusing the
-  # runtime_baseline_json already fetched there) so the post-loop summary
-  # never re-queries gates that were profile_excluded/skipped/never run this
-  # round, and never re-fetches the same gate's baseline twice.
-  declare -a baseline_summary_gates=()
-  # P076 Step 3 — gates whose own telemetry recommends `background` while their
-  # config declares no run_mode at all. Appended EXACTLY ONCE per gate, at the
-  # single post-retry merge point below (never per attempt), from the
-  # runtime_baseline JSON already fetched there — no second baseline pass.
-  # Emitted after the run as one named timeline event per gate, observe-only:
-  # flipping a gate stays a one-line human edit (P069 observe-then-promote).
-  declare -a run_mode_advice_gates=()
 
   # P069 Step 14 — targeted_tests escalation (exit 3 unknown_production /
   # exit 11 mapping_gap). Set inline when that gate's FINAL result settles
@@ -1825,6 +1259,12 @@ run_all_gates() {
   # same rule the execution ledger follows).
   local _jobs_dir="" _rows_dir=""
   if [[ -d "$_evidence_dir" ]]; then
+    # The report, the rows and the logs all live here: a directory that cannot
+    # be written refuses the run BEFORE any gate, so no partial row exists.
+    if [[ ! -w "$_evidence_dir" ]]; then
+      echo "ERROR: aid-run-gates.sh: evidence directory '${_evidence_dir}' is not writable — refusing to run gates whose rows could not be recorded" >&2
+      return 2
+    fi
     _jobs_dir="${_evidence_dir}/jobs"
     _rows_dir="${_evidence_dir}/gates_rows"
   fi
@@ -1902,94 +1342,6 @@ run_all_gates() {
     fi
   fi
 
-  # ─── Services: entry sweep, then ACQUIRE ONCE (P076 Step 10) ─────────────
-  # HERE, and not earlier or later, for four reasons that each pin one edge:
-  #   • after `_validate_services_config`, so a malformed declaration is refused
-  #     before anything is started;
-  #   • after `_evidence_dir` is resolved, because the service registry lives in
-  #     the run's evidence and nothing here invents an evidence directory;
-  #   • after the ledger is opened, so a run that cannot be accounted refuses
-  #     before it starts a process;
-  #   • BEFORE the gate loop, so a service failure fails the whole run before a
-  #     single gate has run and reported on infrastructure that never came up.
-  #
-  # The sweep runs before the acquire because a SIGKILLed runner reaches no
-  # completion hook, ever: the next `run-all` IS the crash recovery. It tears
-  # down whatever the dead run left non-stopped (registry entries plus, inside
-  # `aid_service_down_all`, any live job the registry does not name), and the
-  # idempotent `up_all` then starts cleanly instead of beside an orphan.
-  #
-  # ONE OWNER PER RUN, and it is enforced two different ways for two different
-  # kinds of second runner — say which is which, because a single sentence here
-  # previously implied a guarantee only one half of it delivered:
-  #   • the KNOWN re-entry. The targeted_tests escalation re-enters this script
-  #     as a subprocess against the SAME epic/run — and therefore the same
-  #     registry — while this invocation's services are up. It is handed
-  #     AID_SERVICE_LIFECYCLE_OWNED=1, which makes it a CONSUMER: it still reads
-  #     the registry for its own `needs_services` checks, and it neither sweeps,
-  #     acquires nor releases. An environment variable is enough here and only
-  #     here, because we are the parent that sets it.
-  #   • ANY OTHER second runner — a rerun launched while the first is still mid
-  #     gates, from a script, a second session, or a scheduler. Nothing tells us
-  #     about that one, so we ask the operating system: the claim record left by
-  #     the current owner is checked against a LIVE PROCESS, and a second runner
-  #     REFUSES rather than sweeping a running run's services out from under it.
-  #     Refusing is the fail-closed direction: a run that will not start is an
-  #     error message, a database torn down mid-gates is a corrupted verdict.
-  local _svc_count=0 _svc_manage=1
-  _svc_count="$(_svc_declared_count "$execution_yaml")"
-  [[ "${AID_SERVICE_LIFECYCLE_OWNED:-}" == "1" ]] && _svc_manage=0
-  if (( _svc_count > 0 )); then
-    _svc_lib_load || exit 1
-  fi
-  # A run that declares services and does not manage them is a legitimate but
-  # UNUSUAL shape: every gate that does not name `needs_services` runs against
-  # infrastructure nobody started, and passes. Recorded, so that run's evidence
-  # cannot be mistaken for a run that had its services (finding 3).
-  if (( _svc_count > 0 && _svc_manage == 0 )); then
-    log_event "$timeline_file" "services_lifecycle_delegated" \
-      declared="$_svc_count" reason="AID_SERVICE_LIFECYCLE_OWNED"
-  fi
-  if (( _svc_count > 0 && _svc_manage == 1 )); then
-    if [[ -z "$_evidence_dir" || ! -d "$_evidence_dir" ]]; then
-      echo "ERROR: aid-run-gates.sh: ${_svc_count} service(s) declared in ${execution_yaml} but there is no evidence directory at '${_evidence_dir}' to hold the service registry — refusing to start a service this run could not record, and therefore could not stop" >&2
-      exit 1
-    fi
-    # BEFORE the sweep, because the sweep is the destructive step.
-    if _svc_owner_live "$_evidence_dir"; then
-      log_event "$timeline_file" "service_owner_conflict" evidence_dir="$_evidence_dir"
-      echo "ERROR: aid-run-gates.sh: another gate runner is still managing the services recorded under '${_evidence_dir}' ($(_svc_owner_describe "$_evidence_dir")) — refusing to run. Two runners sharing one run's service registry cannot both own it: this one would sweep the live run's services out from under its gates. Wait for that run, or stop it; if it is gone and this message persists, its claim record is ${_evidence_dir}/services.owner.json." >&2
-      exit 1
-    fi
-    if _svc_stale_state_present "$_evidence_dir"; then
-      echo "aid-run-gates.sh: this run's evidence still holds service state from an earlier, unfinished invocation — sweeping it before acquiring (a killed runner reaches no cleanup hook; this rerun is the cleanup)" >&2
-      log_event "$timeline_file" "service_stale_sweep" evidence_dir="$_evidence_dir"
-      aid_service_down_all "$_evidence_dir" "$execution_yaml" || true
-    fi
-    # The claim goes down BEFORE anything is started, so there is no window in
-    # which this run owns a service that no record names as ours. A claim we
-    # cannot write is a claim the next runner cannot check, so it fails the run
-    # rather than starting services nobody can prove ownership of.
-    if ! _svc_owner_claim "$_evidence_dir" "$run_id"; then
-      echo "ERROR: aid-run-gates.sh: could not record the service ownership claim at '$(_svc_owner_file "$_evidence_dir")' — refusing to start services whose owner a second runner could not check (it would read the absence as 'nobody owns these' and sweep them)" >&2
-      exit 1
-    fi
-    log_event "$timeline_file" "services_acquire_start" declared="$_svc_count"
-    local _svc_up_rc=0
-    aid_service_up_all "$_evidence_dir" "$execution_yaml" || _svc_up_rc=$?
-    if (( _svc_up_rc != 0 )); then
-      # Whatever DID come up is recorded and therefore stoppable — release it
-      # through the one teardown definition before failing.
-      _SVC_ACQUIRED=1
-      log_event "$timeline_file" "services_acquire_fail" declared="$_svc_count" exit_code="$_svc_up_rc"
-      _svc_release_run "$_evidence_dir" "$execution_yaml"
-      echo "ERROR: aid-run-gates.sh: the declared services for this run did not come up (aid_service_up_all exit ${_svc_up_rc}) — refusing to run any gate against infrastructure that is not there. The named service failure is above." >&2
-      exit 1
-    fi
-    _SVC_ACQUIRED=1
-    log_event "$timeline_file" "services_acquired" declared="$_svc_count"
-  fi
-
   # Iterate gate names via yq (mikefarah)
   local gate_names
   gate_names=$(yq '.gates | keys | .[]' "$execution_yaml")
@@ -2039,15 +1391,15 @@ run_all_gates() {
     # A gate defined in execution.yaml but not listed in the active
     # profile's include[] is never run — but it must never be silently
     # dropped either (same defined==processed contract as the no_command
-    # skip row above): emit an explicit profile_excluded row, count it
+    # skip row above): emit an explicit `skip / not_in_profile` row, count it
     # toward `processed`, and record it in excluded_gates. A required:true
     # gate excluded this way does NOT fail the run — same treatment as a
     # skipped required:false gate below.
     if [[ -n "$profile" ]] && ! jq -e --arg g "$gate_name" 'any(.[]; . == $g)' <<< "$include_gates_json" >/dev/null 2>&1; then
-      log_event "$timeline_file" "gate_complete" gate="$gate_name" result="profile_excluded" reason="profile_excluded" profile="$profile"
+      log_event "$timeline_file" "gate_complete" gate="$gate_name" result="skip" reason="not_in_profile" profile="$profile"
       $first || gates_json+=","
       first=false
-      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"profile_excluded\",\"reason\":\"profile_excluded\",\"exit_code\":0,\"duration_ms\":0,\"output\":\"\",\"attempts\":0,$(_req_fields "$gate_name")}"
+      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"skip\",\"reason\":\"not_in_profile\",\"exit_code\":null,\"duration_ms\":0,\"output\":\"\",\"attempts\":0,$(_req_fields "$gate_name")}"
       processed=$((processed+1))
       excluded_gates+=("$gate_name")
       continue
@@ -2055,11 +1407,8 @@ run_all_gates() {
 
     local cmd required max_retries timeout_s pass_criteria run_mode
     cmd=$(yq ".gates.\"${gate_name}\".command" "$execution_yaml")
-    # Resolved up front (see the validation block above): explicit `required:`
-    # wins; otherwise `required_when` decides; otherwise the pre-2026-09
-    # default of false. Reading `.required // false` here was the whole defect:
-    # `required_when` is what the shipped templates and every generated project
-    # actually carried, and it was never read at all.
+    # Resolved up front (see the block above): explicit `required:` or the
+    # pre-2026-09 default of false.
     required="${_AID_REQ_RESOLVED[$gate_name]:-false}"
     local required_source="${_AID_REQ_SOURCE[$gate_name]:-legacy_default}"
     max_retries=$(yq ".gates.\"${gate_name}\".max_retries // 1" "$execution_yaml")
@@ -2082,49 +1431,6 @@ run_all_gates() {
       continue
     fi
 
-    # ─── needs_services fail-fast (P076 Step 10) ──────────────────────────
-    # A gate that declares `needs_services` runs ONLY when every named service is
-    # healthy right now. The check is here — before placeholder resolution, before
-    # the ledger append, before any dispatch — so a gate whose dependency is down
-    # fails FAST and by name instead of failing slowly, in its own words, about
-    # something else. The names were validated against the declarations at config
-    # check, so anything unhealthy here is a runtime fact, never a typo.
-    #
-    # This is a READ of the registry plus one probe per service: cheap enough to
-    # sit on the `background` path too, where it happens at gate start, before the
-    # job is spawned. And it never touches the service — checking is not managing;
-    # the run acquired once and will release once.
-    #
-    # Other gates are completely unaffected: one unhealthy dependency fails ONE
-    # gate, and the loop continues.
-    if (( _svc_count > 0 )); then
-      local _needs_json _need _unhealthy=""
-      _needs_json="$(GATE="$gate_name" yq -o=json '.gates[strenv(GATE)].needs_services // []' "$execution_yaml" 2>/dev/null | tr -d '\n ' || echo '[]')"
-      if [[ -n "$_needs_json" && "$_needs_json" != "[]" && "$_needs_json" != "null" ]]; then
-        while IFS= read -r _need; do
-          [[ -z "$_need" ]] && continue
-          if ! aid_service_status "$_need" "$_evidence_dir" "$execution_yaml" >/dev/null 2>&1; then
-            _unhealthy+="${_unhealthy:+, }${_need}"
-          fi
-        done < <(jq -r '.[]' <<<"$_needs_json" 2>/dev/null || true)
-      fi
-      if [[ -n "$_unhealthy" ]]; then
-        echo "ERROR: aid-run-gates.sh: gate '${gate_name}' needs service(s) that are not healthy: ${_unhealthy} — failing this gate fast rather than running it against infrastructure that is not there" >&2
-        log_event "$timeline_file" "gate_complete" gate="$gate_name" result="fail" reason="service_unhealthy" services="$_unhealthy"
-        $first || gates_json+=","
-        first=false
-        gates_json+="\"${gate_name}\":$(jq -nc --arg g "$gate_name" --arg s "$_unhealthy" \
-          --argjson rq "$([[ "${_AID_REQ_RESOLVED[$gate_name]:-false}" == "true" ]] && echo true || echo false)" \
-          --arg rs "${_AID_REQ_SOURCE[$gate_name]:-legacy_default}" \
-          '{gate:$g, result:"fail", reason:"service_unhealthy", exit_code:1, duration_ms:0,
-            output:("required service(s) not healthy: " + $s), attempts:0, unhealthy_services:($s | split(", ")),
-            required:$rq, required_source:$rs}')"
-        processed=$((processed+1))
-        if [[ "${required:-false}" == "true" ]]; then overall="fail"; fi
-        continue
-      fi
-    fi
-
     # Phase 2 (P037) — resolve {token} placeholders before bash -c execution.
     # Unknown tokens fail-loud — mark gate as fail and continue to next gate.
     local resolved_cmd
@@ -2133,7 +1439,7 @@ run_all_gates() {
       overall="fail"
       $first || gates_json+=","
       first=false
-      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"unknown_placeholder\",\"attempts\":0,$(_req_fields "$gate_name")}"
+      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"reason\":\"unknown_placeholder\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"unknown_placeholder\",\"attempts\":0,$(_req_fields "$gate_name")}"
       processed=$((processed+1))
       continue
     fi
@@ -2144,13 +1450,15 @@ run_all_gates() {
     if [[ -n "$_missing_scripts" ]]; then
       local _ms_list="${_missing_scripts//$'\n'/ }"
       echo "ERROR: aid-run-gates.sh: gate '${gate_name}' names ${_ms_list}— not in the tree ${_plugin_project_root}. The branch under test must carry every script its gates name; there is no fallback to the primary checkout." >&2
+      # The timeline keeps the event's original reason name (test-gate-config-
+      # branch.bats greps it); the ROW carries the vocabulary name.
       log_event "$timeline_file" "gate_complete" gate="$gate_name" result="fail" reason="gate_script_missing_in_tree" scripts="$_ms_list"
       $first || gates_json+=","
       first=false
       gates_json+="\"${gate_name}\":$(jq -nc --arg g "$gate_name" --arg s "$_ms_list" --arg t "$_plugin_project_root" \
         --argjson rq "$([[ "${_AID_REQ_RESOLVED[$gate_name]:-false}" == "true" ]] && echo true || echo false)" \
         --arg rs "${_AID_REQ_SOURCE[$gate_name]:-legacy_default}" \
-        '{gate:$g, result:"fail", reason:"gate_script_missing_in_tree", exit_code:1, duration_ms:0,
+        '{gate:$g, result:"fail", reason:"missing_script", exit_code:1, duration_ms:0,
           output:("gate script(s) not in the tree " + $t + ": " + $s), attempts:0,
           required:$rq, required_source:$rs}')"
       processed=$((processed+1))
@@ -2159,11 +1467,6 @@ run_all_gates() {
     fi
 
     log_event "$timeline_file" "gate_start" gate="$gate_name" epic_id="$epic_id"
-
-    # Gates run sequentially by design — the P069 scheduler dispatch path
-    # was removed in P078 (PM decision 2026-08-09). The baseline still
-    # records the concurrency context; it is always "sequential" now.
-    local gate_concurrency_context="sequential"
 
     # The dispatch points tag their entries with the gate they are running
     # under, which only this loop knows.
@@ -2188,8 +1491,6 @@ run_all_gates() {
              --fingerprint "$(printf '%s' "$resolved_cmd" | sha256sum | cut -c1-16)" \
              --dispatch-point gate_runner_direct >/dev/null 2>&1; then
           echo "ERROR: aid-run-gates.sh: execution-ledger append failed for gate '$gate_name' — refusing to continue with incomplete accounting" >&2
-          # An abandoned run must not abandon its services. Same one teardown.
-          _svc_release_run "$_evidence_dir" "$execution_yaml"
           return 3
         fi
       done < <(_gate_bats_units "$resolved_cmd")
@@ -2214,7 +1515,7 @@ run_all_gates() {
         gate_result=$(run_gate "$gate_name" "$resolved_cmd" "$timeout_s" /dev/null) || gate_exit=$?
       fi
       local r
-      r=$(echo "$gate_result" | jq -r '.result')
+      r=$(echo "$gate_result" | jq -r '.status')
       # Phase 2 (P037) — exit code 2 is a graceful skip when gate's pass_criteria
       # mentions "exit 2" (legacy plan / no AC blocks / Fast Mode).
       # Evidence truthfulness fix: result="skip" (not "pass") so gates_report.json
@@ -2223,72 +1524,37 @@ run_all_gates() {
       local gate_ec
       gate_ec=$(echo "$gate_result" | jq -r '.exit_code')
       if [[ "$r" != "pass" && "$gate_ec" == "2" && "$pass_criteria" == *"exit 2"* ]]; then
-        gate_result=$(echo "$gate_result" | jq '.result = "skip"')
+        gate_result=$(echo "$gate_result" | jq '.status = "skip" | .result = "skip" | .reason = "exit_2"')
         r="skip"
-      fi
-
-      # ─── Gate runtime baseline sample (P063 Step 2) ────────────────────
-      # One sample per ATTEMPT (not per gate) — a retried gate's earlier
-      # failed/timed-out attempts are real duration data too. Deliberately
-      # excludes "skip" (both the no_command-less path above, which never
-      # reaches here, and this exit-2/pass_criteria convention above): a
-      # skip never really executed the gate's intended work, so it is not a
-      # meaningful timing sample. Never allowed to fail the run — a metrics
-      # write is never load-bearing for gate pass/fail.
-      if [[ "$r" != "skip" ]]; then
-        local baseline_exit_code baseline_duration_ms
-        baseline_exit_code=$(echo "$gate_result" | jq -r '.exit_code')
-        baseline_duration_ms=$(echo "$gate_result" | jq -r '.duration_ms')
-        gate_baseline_update "$gate_name" "$cmd" "$resolved_cmd" \
-          "$baseline_exit_code" "$baseline_duration_ms" "$timeout_s" "$gate_concurrency_context" || true
       fi
 
       [[ "$r" == "pass" || "$r" == "skip" ]] && break
 
-      # ─── Repeated-timeout policy block (P063 Step 3) ───────────────────
-      # Reached ONLY when the current attempt already failed/timed out (the
-      # pass/skip break above already returned for a passing attempt — a
-      # gate whose CURRENT attempt just passed NEVER reaches this check,
-      # which is what makes AC10 hold) AND the loop is about to decide
-      # whether to consume another attempt. `timeout_s` is the gate's
-      # currently-configured timeout, read once before this loop began.
-      # gate_baseline_policy_check compares the last 3 recorded samples
-      # (already including the one gate_baseline_update just wrote above for
-      # THIS attempt) — "block" iff all 3 are censored (timeout) AND each
-      # sample's OWN recorded timeout_seconds >= the current config, so a
-      # timeout streak recorded under a since-raised timeout never blocks a
-      # fresh attempt under the new, longer timeout (AC6 fixture b).
-      if [[ "$(gate_baseline_policy_check "$gate_name" "$timeout_s")" == "block" ]]; then
-        gate_baseline_mark_policy_block "$gate_name" "increase_timeout_or_background" || true
-        # result stays the UNCHANGED literal "fail" (never a new value) —
-        # reason/recommendation are purely additive fields describing WHY no
-        # further attempt was made.
-        gate_result=$(echo "$gate_result" | jq '.result = "fail" | .reason = "timeout_policy_block" | .recommendation = "increase_timeout_or_background"')
-        # P076 Step 13 — GATE_TIMEOUT, mechanical ladder entry. AFTER the row is
-        # final, so the recorded stop is the verdict that was actually reached;
-        # `gate_result` is never touched from here, and `break` still happens.
-        _gate_ladder_emit GATE_TIMEOUT timeout_policy_block \
-          "gate ${gate_name}: three censored samples at or above the configured ${timeout_s}s timeout — no further attempt is spent"
-        break
-      fi
-
       [[ $attempt -le $max_retries ]] && echo "Gate ${gate_name} failed (attempt ${attempt}/${max_retries}), retrying..." >&2
     done
+    # A gate that spent every attempt leaves the loop by its condition, one
+    # past the last attempt made; `attempts` on the row counts attempts, not
+    # loop exits. (P097 Step 5: the policy block's early `break` used to hide
+    # this for timeouts.)
+    (( attempt > max_retries + 1 )) && attempt=$(( max_retries + 1 ))
 
+    # `final_result` is the row's status, or "waived" once a waiver applied:
+    # the one word the timeline event and the overall verdict below key on.
     local final_result
-    final_result=$(echo "$gate_result" | jq -r '.result')
+    final_result=$(echo "$gate_result" | jq -r '.status')
 
     # ─── Gate-scoped PM waiver (IMP-270) ───────────────────────────────────
-    # A failed gate becomes `waived` (NEVER `pass`) iff a gate-scoped waiver
-    # exists for it AND aid-gate-waiver.sh check returns `valid` for the exact
-    # (project, epic, run, HEAD, gate, command fingerprint) tuple. A waiver
-    # file alone changes nothing — the check must pass. On valid: consume the
-    # single-use waiver, stamp result=waived + waiver_ref, and record the gate
-    # in waived_gates[]. overall then treats it like a pass (the required-fail
-    # branch below is skipped because final_result is no longer "fail"), but
-    # the top-level waived_gates[] array keeps it visible in PM/release
-    # evidence. A waiver present but failing check for ANY reason leaves the
-    # result "fail" and records waiver_rejected:<verdict> on the row.
+    # A failed gate becomes `waived: true` (its status stays `fail`, NEVER
+    # `pass`) iff a gate-scoped waiver exists for it AND aid-gate-waiver.sh
+    # check returns `valid` for the exact (project, epic, run, HEAD, gate,
+    # command fingerprint) tuple. A waiver file alone changes nothing — the
+    # check must pass. On valid: consume the single-use waiver, stamp
+    # waived=true (+ the derived result "waived") + waiver_ref, and record the
+    # gate in waived_gates[]. overall then treats it like a pass (the
+    # required-fail branch below is skipped because final_result is no longer
+    # "fail"), but the top-level waived_gates[] array keeps it visible in
+    # PM/release evidence. A waiver present but failing check for ANY reason
+    # leaves the row `fail` and records waiver_rejected:<verdict> on it.
     if [[ "$final_result" == "fail" ]]; then
       local _wv_file="${_evidence_dir}/waivers/gate-waiver-${gate_name}.json"
       if [[ -f "$_wv_file" ]]; then
@@ -2313,7 +1579,7 @@ run_all_gates() {
           else
             gate_result=$(echo "$gate_result" | jq \
               --arg ref "waivers/gate-waiver-${gate_name}.json" \
-              '.result = "waived" | .waiver_ref = $ref')
+              '.waived = true | .result = "waived" | .waiver_ref = $ref')
             final_result="waived"
             waived_gates+=("$gate_name")
           fi
@@ -2352,30 +1618,7 @@ run_all_gates() {
       fi
     fi
 
-    # Add to gates JSON aggregate. `runtime_baseline` (P063 Step 2) is purely
-    # additive — gate_baseline_report_json always returns a valid JSON object
-    # (a zeroed/null-filled one when there's no entry yet or yq/jq is
-    # missing), never a bare `null`, so this merge never removes/renames any
-    # existing key.
-    local runtime_baseline_json runtime_baseline_nc
-    runtime_baseline_json=$(gate_baseline_report_json "$gate_name" 2>/dev/null)
-    [[ -z "$runtime_baseline_json" ]] && runtime_baseline_json='null'
-    runtime_baseline_nc=$(jq -r '.non_censored_samples_count // 0' <<<"$runtime_baseline_json" 2>/dev/null)
-    [[ "$runtime_baseline_nc" =~ ^[0-9]+$ ]] && (( runtime_baseline_nc >= 5 )) && baseline_summary_gates+=("$gate_name")
-
-    # ─── P076 Step 3 — run_mode advice collection (observe-only) ───────────
-    # Same already-fetched runtime_baseline_json, no extra read. The
-    # recommendation itself carries the library's rules (>= 5 non-censored
-    # samples AND p95 > 10 min → "background"; anything else → null or
-    # "foreground"), so nothing is re-derived here. An unreadable/absent
-    # baseline yields null → no advice, no failure (fail-open telemetry).
-    local _advice_rec _advice_p95
-    _advice_rec=$(jq -r '.run_mode_recommended // "null"' <<<"$runtime_baseline_json" 2>/dev/null || echo null)
-    if [[ "$_advice_rec" == "background" ]] && ! _run_mode_declared "$execution_yaml" "$gate_name"; then
-      _advice_p95=$(jq -r '.p95_ms // "null"' <<<"$runtime_baseline_json" 2>/dev/null || echo null)
-      [[ "$_advice_p95" =~ ^[0-9]+$ ]] || _advice_p95="null"
-      run_mode_advice_gates+=("${gate_name}|${_advice_p95}")
-    fi
+    # Add to gates JSON aggregate.
     $first || gates_json+=","
     first=false
     local merged_row
@@ -2383,14 +1626,14 @@ run_all_gates() {
     # run passed or failed, and the end-of-run verdict has nothing to re-derive
     # from — which is how "overall: pass" survived a failed required gate.
     # `required_source` rides along so a reader can tell WHY a gate was (or
-    # was not) required — `explicit`, `required_when`, `not_applicable` or
-    # `legacy_default`. Without it, a run that stopped blocking because a
-    # required_when stopped matching looks identical to one that was never
-    # required, and adoption of this change could not be audited.
-    merged_row=$(echo "$gate_result" | jq --argjson rb "$runtime_baseline_json" \
+    # was not) required — `explicit` or `legacy_default`.
+    merged_row=$(echo "$gate_result" | jq \
       --argjson req "$([[ "${required:-false}" == "true" ]] && echo true || echo false)" \
       --arg reqsrc "${required_source:-legacy_default}" \
-      ". + {\"attempts\":${attempt}, \"required\": \$req, \"required_source\": \$reqsrc, \"runtime_baseline\": \$rb}")
+      ". + {\"attempts\":${attempt}, \"required\": \$req, \"required_source\": \$reqsrc}")
+    # The checkpoint file is a row too, so the contract is applied BEFORE it
+    # is written; a row outside the vocabulary ends the run here, by name.
+    merged_row="$(_gate_row_finalize "$gate_name" "$merged_row")" || return 1
     gates_json+="\"${gate_name}\":${merged_row}"
     processed=$((processed+1))
 
@@ -2503,7 +1746,7 @@ run_all_gates() {
         processed=$((processed+1))
         log_event "$timeline_file" "gate_row_restored" gate="$_rg" source="$_rf" \
           head="$_rec_head"
-        if [[ "$(jq -r '.result // ""' <<<"$_rrow")" == "fail" ]] \
+        if [[ "$(gate_row_normalize "$_rrow" | jq -r 'select(.waived | not) | .status')" == "fail" ]] \
            && [[ "$_required_rg" == "true" ]]; then
           overall="fail"
         fi
@@ -2529,9 +1772,6 @@ run_all_gates() {
     if [[ "$_ledger_rc" -ne 0 && "$_ledger_rc" -ne 7 ]]; then
       echo "ERROR: aid-run-gates.sh: the execution ledger could not be closed or evaluated (exit ${_ledger_rc}): ${_ledger_out}" >&2
       unset AID_EXECUTION_LEDGER
-      # Same rule as the append path: no return from this function leaves a
-      # service this invocation acquired still running.
-      _svc_release_run "$_evidence_dir" "$execution_yaml"
       return 3
     fi
     if [[ "$_ledger_rc" -eq 7 ]]; then
@@ -2602,6 +1842,22 @@ run_all_gates() {
 
   gates_json+="}"
 
+  # ─── every row is a version-2 row, checked against the vocabulary ────────
+  # The branches above that never run a command (not_in_profile, no_command,
+  # service_unhealthy, unknown_placeholder, missing_script, gate_row_stale,
+  # undefined_gate) and the restored checkpoint rows are stamped here, in one
+  # pass, so no emission site can leave a version-1 row behind. `_integrity`
+  # and `_execution_ledger` are run-level records, not rows, and are skipped.
+  gates_json="$(jq -c "${AID_GATE_ROW_JQ} gate_rows_normalize" <<<"$gates_json")" || {
+    echo "ERROR: aid-run-gates.sh: the gate rows could not be normalized to the version-2 contract" >&2
+    return 1
+  }
+  local _chk_gate _chk_row
+  while IFS=$'\t' read -r _chk_gate _chk_row; do
+    [[ -n "$_chk_gate" ]] || continue
+    gate_row_check "$_chk_gate" "$_chk_row" || return 1
+  done < <(jq -r 'to_entries[] | select((.key|startswith("_")|not) and (.value|type) == "object") | "\(.key)\t\(.value|tojson)"' <<<"$gates_json")
+
   # ─── the verdict is DERIVED from the rows, once, here ──────────────────
   # `overall` is set in seven places above, each inside its own branch, and a
   # path that reaches none of them used to leave the run reported as `pass`
@@ -2610,12 +1866,12 @@ run_all_gates() {
   # the authority. A row that FAILED and is REQUIRED makes the run fail, and
   # nothing downstream has to agree for that to hold.
   #
-  # `waived` is deliberately not a failure here — a waiver is a recorded PM
-  # decision, and the surrounding code already surfaces it as risk acceptance
-  # rather than as a pass.
+  # A waived row (`waived: true`) is deliberately not a failure here — a waiver
+  # is a recorded PM decision, and the surrounding code already surfaces it as
+  # risk acceptance rather than as a pass.
   local _derived_fail
   _derived_fail="$(jq -r '[to_entries[]
-      | select((.value.result? // "") == "fail")
+      | select((.value.status? // "") == "fail" and (.value.waived? // false) == false)
       | select((.value.required? // false) == true)] | length' <<<"$gates_json" 2>/dev/null)" || _derived_fail=""
   if [[ "$_derived_fail" =~ ^[0-9]+$ ]] && (( _derived_fail > 0 )) && [[ "$overall" != "fail" ]]; then
     log_event "$timeline_file" "gate_overall_corrected" was="$overall" required_failures="$_derived_fail"
@@ -2694,16 +1950,13 @@ run_all_gates() {
     revision_json='{"head_sha":null}'
   fi
 
-  # ─── gate profile fields (P061 E1 Step 2) ──────────────────────────────
-  # profile/profile_source/profile_reason stay JSON null when --profile
-  # wasn't passed (legacy-compat: field present, value absent-equivalent).
-  # excluded_gates is always an array, empty when no gate was excluded.
-  local profile_val_json="null" profile_source_val_json="null" profile_reason_val_json="null"
-  if [[ -n "$profile" ]]; then
-    profile_val_json=$(jq -nc --arg v "$profile" '$v')
-    profile_source_val_json=$(jq -nc --arg v "$profile_source" '$v')
-    profile_reason_val_json=$(jq -nc --arg v "$profile_reason" '$v')
-  fi
+  # ─── gate profile fields (P097 Step 4) ─────────────────────────────────
+  # `profile` is null without --profile; `profile_source` is caller|none;
+  # `profile_table` is the declared order the floor compares indexes in
+  # ([] when the file declares no gate_profiles). excluded_gates is always
+  # an array, empty when no gate was excluded.
+  local profile_val_json="null"
+  [[ -n "$profile" ]] && profile_val_json=$(jq -nc --arg v "$profile" '$v')
   local excluded_gates_json
   if (( ${#excluded_gates[@]} == 0 )); then
     excluded_gates_json="[]"
@@ -2732,11 +1985,11 @@ run_all_gates() {
               --argjson pgr "$plan_gates_reconciled" \
               --argjson rev "$revision_json" \
               --argjson prof "$profile_val_json" \
-              --argjson profsrc "$profile_source_val_json" \
-              --argjson profreason "$profile_reason_val_json" \
+              --arg profsrc "$profile_source" \
+              --argjson proftable "$profile_table_json" \
               --argjson excl "$excluded_gates_json" \
               --argjson waived "$waived_gates_json" \
-              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev, profile: $prof, profile_source: $profsrc, profile_reason: $profreason, excluded_gates: $excl, waived_gates: $waived}' \
+              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev, profile: $prof, profile_source: $profsrc, profile_table: $proftable, excluded_gates: $excl, waived_gates: $waived}' \
               <<< "$report")
 
   # ─── P069 Step 14 — targeted_tests escalation: full-profile substitute ──
@@ -2783,11 +2036,7 @@ run_all_gates() {
     # the parent's AID_EXECUTION_LEDGER, so without this marker the escalation
     # re-running the same units under the full profile would be recorded as an
     # accidental double execution and fail a run that behaved correctly.
-    # The escalation is a CONSUMER of this run's services, never their owner —
-    # see the acquire block. Without this it would sweep the services THIS
-    # invocation is still holding, which is the parallel-teardown race in its
-    # most literal form: one runner tearing a service down under another.
-    AID_EXECUTION_KIND=escalation AID_SERVICE_LIFECYCLE_OWNED=1 \
+    AID_EXECUTION_KIND=escalation \
       bash "${BASH_SOURCE[0]}" "${escalation_args[@]}" >/dev/null 2>&1 || true
     if [[ -f "$full_escalation_report_path" ]]; then
       local full_report_json; full_report_json="$(cat "$full_escalation_report_path")"
@@ -2818,16 +2067,6 @@ run_all_gates() {
     echo "$report" > "${report_file}.tmp" && mv "${report_file}.tmp" "$report_file"
   fi
 
-  # ─── Services: RELEASE ONCE (P076 Step 10) ───────────────────────────────
-  # AFTER the report is written and echoed, on both the pass and the fail path,
-  # and exactly once for the whole run. Cleanup never un-writes evidence: if the
-  # teardown does not fully succeed the run still reports what the gates found,
-  # and the failure is a warning naming the manual commands.
-  if (( _SVC_ACQUIRED == 1 )); then
-    _svc_release_run "$_evidence_dir" "$execution_yaml"
-    log_event "$timeline_file" "services_released" declared="$_svc_count"
-  fi
-
   # Existing per-run completion event (kept for backward compat)
   log_event "$timeline_file" "gates_complete" overall="$overall" epic_id="$epic_id"
 
@@ -2835,51 +2074,6 @@ run_all_gates() {
   local total_duration=$((SECONDS - run_start))
   log_event "$timeline_file" "gate_runner_complete" \
     report_path="$report_path" overall="$overall" duration_sec="$total_duration"
-
-  # ─── Gate runtime baseline summary (P063 Step 2) ───────────────────────
-  # Human-readable, one line per gate whose baseline has "enough data to
-  # trust" (non_censored_samples_count >= 5 — matches
-  # gate_baseline_recommend_run_mode's own threshold). `baseline_summary_gates`
-  # was populated inline at merge time above (reusing the runtime_baseline
-  # JSON already fetched there for THIS run's gates only — never a second
-  # full re-scan of every defined gate, which would re-pay yq/jq subprocess
-  # cost for profile_excluded/skipped/never-run gates for no benefit).
-  # Printed to stderr only — stdout carries exactly the final JSON `report`
-  # line consumed by callers/tests (`run-all ... | jq`).
-  if (( ${#baseline_summary_gates[@]} > 0 )); then
-    local baseline_summary_gate
-    for baseline_summary_gate in "${baseline_summary_gates[@]}"; do
-      gate_baseline_show "$baseline_summary_gate" >&2
-    done
-  fi
-
-  # ─── run_mode advice (P076 Step 3) ─────────────────────────────────────
-  # The first behavioural consumer of gate_baseline_recommend_run_mode, and
-  # deliberately the mildest one: a named timeline event carrying the exact
-  # one-line edit, once per gate per run. It changes NOTHING about how any gate
-  # ran — the run is already over at this point, the report is written, and the
-  # decision to flip stays a human one. The edit string is built from the gate
-  # name alone, so it is copy-pasteable in any consumer project.
-  if (( ${#run_mode_advice_gates[@]} > 0 )); then
-    local _advice_entry _advice_gate_name _advice_gate_p95
-    for _advice_entry in "${run_mode_advice_gates[@]}"; do
-      _advice_gate_name="${_advice_entry%|*}"
-      _advice_gate_p95="${_advice_entry##*|}"
-      # Once per gate per RUN, not per invocation: a targeted pass that
-      # escalates re-enters this script as a subprocess writing to the SAME
-      # run timeline, and a gate present in both passes must still be advised
-      # exactly once. Cheap because the advice list is normally empty.
-      if [[ -f "$timeline_file" ]] && jq -se --exit-status --arg g "$_advice_gate_name" \
-           'any(.[]; .event == "gate_run_mode_advice" and .gate == $g)' \
-           "$timeline_file" >/dev/null 2>&1; then
-        continue
-      fi
-      log_event "$timeline_file" "gate_run_mode_advice" \
-        gate="$_advice_gate_name" \
-        p95_ms="$_advice_gate_p95" \
-        edit="set gates.${_advice_gate_name}.run_mode: background in .aid-o/config/execution.yaml"
-    done
-  fi
 
   [[ "$overall" == "pass" ]] && return 0 || return 1
 }

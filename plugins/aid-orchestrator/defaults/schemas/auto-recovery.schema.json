@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aid-orchestrator/schemas/auto-recovery-v1",
   "title": "aid-auto-recovery-policy/1",
-  "description": "The shape of the AUTO-mode recovery policy — defaults/policies/auto-recovery.yaml, and any project override of it at .aid-o/config/policies/auto-recovery.yaml. It is the single machine-readable authority for how an AUTO run classifies a stop and what reversible actions it may take before a person is involved. Two properties are load-bearing and are expressed here rather than left to prose: (1) `allowed_actions` is enum-constrained to the six defined action names, so an unknown action is a schema ERROR refused at load and never a silent no-op; (2) every stop class must carry both honesty axes — `detector` (does code detect this today?) and `ladder_entry` (who writes the ladder record?) — plus `ladder_entry_status`, which states whether that writer exists yet. A class may not be declared without an emitter unless it is UNCLASSIFIED, which by construction has none. The companion enforcement is scripts/tests/bats/test-auto-recovery-policy.bats, which validates the shipped policy against this schema, greps every named emitter to a real code site, and re-reads every `existing_loops` budget from the file it cites.",
+  "description": "The shape of the AUTO-mode recovery policy — defaults/policies/auto-recovery.yaml, and any project override of it at .aid-o/config/policies/auto-recovery.yaml. It is the single machine-readable authority for how an AUTO run classifies a stop and what reversible actions it may take before a person is involved. Two properties are load-bearing and are expressed here rather than left to prose: (1) `allowed_actions` is enum-constrained to the five defined action names, so an unknown action is a schema ERROR refused at load and never a silent no-op; (2) every stop class must carry both honesty axes — `detector` (does code detect this today?) and `ladder_entry` (who writes the ladder record?) — plus `ladder_entry_status`, which states whether that writer exists yet. A class may not be declared without an emitter unless it is UNCLASSIFIED, which by construction has none. The companion enforcement is scripts/tests/bats/test-auto-recovery-policy.bats, which validates the shipped policy against this schema, greps every named emitter to a real code site, and re-reads every `existing_loops` budget from the file it cites.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -114,13 +114,12 @@
       }
     },
     "action_vocabulary": {
-      "description": "The CLOSED set of reversible actions, each with the sentence that says what it does. Exactly the six names — no more, no fewer — because `allowed_actions` is enum-constrained to them and a vocabulary entry with no enum slot would be unreachable.",
+      "description": "The CLOSED set of reversible actions, each with the sentence that says what it does. Exactly the five names — no more, no fewer — because `allowed_actions` is enum-constrained to them and a vocabulary entry with no enum slot would be unreachable.",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "wait_and_resume",
         "retry_once",
-        "restart_service_once",
         "rerun_targeted",
         "resume_missing_lenses",
         "collect_and_continue"
@@ -128,7 +127,6 @@
       "properties": {
         "wait_and_resume": { "type": "string", "minLength": 1 },
         "retry_once": { "type": "string", "minLength": 1 },
-        "restart_service_once": { "type": "string", "minLength": 1 },
         "rerun_targeted": { "type": "string", "minLength": 1 },
         "resume_missing_lenses": { "type": "string", "minLength": 1 },
         "collect_and_continue": { "type": "string", "minLength": 1 }
@@ -278,14 +276,13 @@
       }
     },
     "allowed_actions": {
-      "description": "Reversible actions this class may take before adjudication. ENUM-CONSTRAINED to the six names in `action_vocabulary`: anything else is a schema error refused at load, never a silent no-op. An empty array is legal and means 'no recovery — adjudicate immediately'.",
+      "description": "Reversible actions this class may take before adjudication. ENUM-CONSTRAINED to the five names in `action_vocabulary`: anything else is a schema error refused at load, never a silent no-op. An empty array is legal and means 'no recovery — adjudicate immediately'.",
       "type": "array",
       "uniqueItems": true,
       "items": {
         "enum": [
           "wait_and_resume",
           "retry_once",
-          "restart_service_once",
           "rerun_targeted",
           "resume_missing_lenses",
           "collect_and_continue"

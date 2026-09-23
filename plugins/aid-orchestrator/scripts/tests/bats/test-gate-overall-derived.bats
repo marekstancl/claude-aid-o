@@ -13,11 +13,13 @@ setup() {
   RUNNER="$PLUGIN_ROOT/scripts/aid-run-gates.sh"
 }
 
-@test "the derivation block exists and keys on result=fail AND required=true" {
+@test "the derivation block exists and keys on status=fail, not waived, AND required=true (P097 Step 2: the version-2 row)" {
   local block
   block="$(sed -n '/the verdict is DERIVED from the rows/,/local completed_at/p' "$RUNNER")"
   [ -n "$block" ]
-  [[ "$block" == *'.value.result? // "") == "fail"'* ]]
+  [[ "$block" == *'.value.status? // "") == "fail"'* ]]
+  [[ "$block" == *'.value.waived? // false) == false'* ]]
+  [[ "$block" != *'.value.result'* ]]
   [[ "$block" == *'.value.required? // false) == true'* ]]
   [[ "$block" == *'overall="fail"'* ]]
 }

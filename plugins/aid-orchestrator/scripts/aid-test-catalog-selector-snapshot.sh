@@ -14,7 +14,7 @@
 #   2. Surface every production-surface path the Initial mapping does NOT
 #      cover as a recommendation:fix finding (category: selector-gap) — this
 #      is how the known 5-path gap (aid-plan-fsm.sh, lib/aid-queue-write.sh,
-#      lib/aid-gate-profile.sh, aid-queue-add.sh,
+#      the gate-profile library, aid-queue-add.sh,
 #      defaults/enforcement-registry.yaml) is sourced from the real
 #      function, not a hand-written comment.
 #

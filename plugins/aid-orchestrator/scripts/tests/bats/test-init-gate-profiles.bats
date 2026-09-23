@@ -22,7 +22,7 @@ teardown() {
   [[ -n "${TEST_TMPDIR:-}" && -d "$TEST_TMPDIR" ]] && rm -rf "$TEST_TMPDIR"
 }
 
-@test "a stack-detected workspace yields all five profiles, each naming only defined gates, release non-empty" {
+@test "a stack-detected workspace yields the four list profiles narrowest first, each naming only defined gates, release non-empty" {
   touch package.json
   source "$HELPER"
   mapfile -t stacks < <(detect_stacks "$PWD")
@@ -31,10 +31,16 @@ teardown() {
   mkdir -p .aid-o/config
   compose_execution_yaml "$PWD" .aid-o/config/execution.yaml "${stacks[@]}"
 
-  for profile in quick targeted standard full release; do
-    run yq -e ".gate_profiles.${profile}" .aid-o/config/execution.yaml
-    [ "$status" -eq 0 ]
-  done
+  # P097 Step 4: ordered list, no quick, no gate_profile_defaults,
+  # default_profile standard, when_paths on full only.
+  run yq -r '.gate_profiles | keys | join(",")' .aid-o/config/execution.yaml
+  [ "$output" = "targeted,standard,full,release" ]
+  run yq -r '.default_profile' .aid-o/config/execution.yaml
+  [ "$output" = "standard" ]
+  run yq '.gate_profile_defaults' .aid-o/config/execution.yaml
+  [ "$output" = "null" ]
+  run yq -r '[.gate_profiles[] | has("when_paths")] | join(",")' .aid-o/config/execution.yaml
+  [ "$output" = "false,false,true,false" ]
 
   run yq '.gate_profiles.release.include | length' .aid-o/config/execution.yaml
   [ "$output" -gt 0 ]
@@ -184,4 +190,168 @@ EOF
   # The unrelated CWD config is untouched.
   run yq '.gates.totally_unrelated_gate.command' "$TEST_TMPDIR/cwd-with-unrelated-config/.aid-o/config/execution.yaml"
   [ "$output" == "echo hi" ]
+}
+
+# ─── P097 Step 3: the upgrade over the eight project fixtures ────────────────
+
+@test "P097 Step 3: on every project fixture the upgrade changes nothing but the named removals and the two additions, and the result parses" {
+  source "$HELPER"
+  local fixtures="$AID_PLUGIN_PATH/scripts/tests/fixtures/gates/projects"
+  # The semantic view of "only the named keys": the original minus the dead
+  # keys must equal the upgraded file minus the two additions — every command,
+  # include[], comment-free value and custom key survives.
+  local strip_dead='del(.gate_profile_defaults, .baseline, .runtime_baseline, .needs_services, .services)
+    | del(.gate_profiles.quick | select(. != null and (.include // [] | length == 0)))
+    | (.gates // {})[] |= with(select(has("required_when") and (has("required") | not)); .required = true)
+    | (.gates // {})[] |= del(.required_when, .needs_services, .services, .quarantine, .baseline, .runtime_baseline)
+    | del(.notifications.telegram.enabled, .notifications.telegram.chat_id, .notifications.telegram.alert_threshold, .notifications.telegram.alert_on_repeated_precondition_fail)
+    | del(.notifications.telegram | select(length == 0))
+    | del(.notifications | select(length == 0))'
+  local strip_added='del(.default_profile, .gate_profiles.full.when_paths)'
+  local name cfg out hash default_arg
+  for name in acta agents aid-orchestrator aid-testbed krok sousto-na-miru vulcan wan; do
+    cfg="$TEST_TMPDIR/$name.yaml"
+    cp "$fixtures/$name.yaml" "$cfg"
+    default_arg=()
+    [[ "$name" == "agents" ]] && default_arg=(--default-profile full)   # declares no `standard`
+    rc=0; out="$(execution_yaml_upgrade "$cfg" "${default_arg[@]}")" || rc=$?
+    if [[ "$name" == "krok" ]]; then   # never had a dead key nor a profile table
+      [ "$rc" -eq 0 ]; [[ "$out" == nothing\ to\ upgrade* ]]; continue
+    fi
+    [ "$rc" -eq 3 ]
+    # Every added line is default_profile or the when_paths block, nothing else.
+    run bash -c "printf '%s\n' \"\$1\" | grep -E '^\+[^+]' | grep -vE '^\+(default_profile: |    when_paths:|      - \"|    required: true$)'" _ "$out"
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    hash="$(printf '%s\n' "$out" | sed -n 's/^diff_hash: //p')"
+    execution_yaml_upgrade "$cfg" --confirm-upgrade "$hash" "${default_arg[@]}"
+    yq '.' "$cfg" >/dev/null
+    # `jq -S`: the replacement `required: true` sits where required_when was,
+    # so key ORDER inside a gate may differ; values and keys may not.
+    [ "$(yq -o=json "$strip_dead" "$fixtures/$name.yaml" | jq -S .)" == "$(yq -o=json "$strip_added" "$cfg" | jq -S .)" ]
+    # Nothing dead survives.
+    [ "$(yq '[.. | select(tag == "!!map") | keys[] | select(test("^(required_when|needs_services|services|gate_profile_defaults|baseline.*|runtime_baseline|quarantine|enabled|chat_id|alert_threshold|alert_on_repeated_precondition_fail)$"))] | length' "$cfg")" -eq 0 ]
+    if [[ "$(yq '.gate_profiles | type' "$cfg")" == "!!map" ]]; then
+      [ "$(yq '.default_profile' "$cfg")" != "null" ]
+      [[ "$(yq '.gate_profiles | has("full")' "$cfg")" == "false" ]] || [ "$(yq '.gate_profiles.full.when_paths | length' "$cfg")" -eq 14 ]
+    fi
+    # P097 Step 6: a gate whose only "required" claim was required_when keeps
+    # being required (sousto: 3 such gates, ACTA: 1), never silently optional.
+    [ "$(yq '[.gates[] | select(has("required") | not)] | length' "$cfg")" -eq 0 ] || [[ "$name" != sousto-na-miru && "$name" != acta ]]
+  done
+}
+
+@test "P097 Step 3: the upgraded when_paths agree with the old classifier's gate_profile_is_high_risk_path on ten changed-path sets" {
+  source "$HELPER"
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-ancillary.sh"
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-gate-profile.sh"
+  cfg="$TEST_TMPDIR/acta.yaml"
+  cp "$AID_PLUGIN_PATH/scripts/tests/fixtures/gates/projects/acta.yaml" "$cfg"
+  hash="$(execution_yaml_upgrade "$cfg" | sed -n 's/^diff_hash: //p')"
+  execution_yaml_upgrade "$cfg" --confirm-upgrade "$hash"
+  mapfile -t globs < <(yq '.gate_profiles.full.when_paths[]' "$cfg")
+  [ "${#globs[@]}" -eq 14 ]
+
+  # Ten sets, one path per line; a set is high-risk iff one of its paths is.
+  local -a sets=(
+    "plugins/aid-orchestrator/scripts/aid-fsm.sh"
+    "docs/plans/P097.md README.md"
+    "scripts/aid-run-gates.sh scripts/lib/aid-gate-row.sh"
+    "plugins/aid-orchestrator/defaults/schemas/plan.schema.json"
+    "plugins/aid-orchestrator/defaults/policies/review-profiles.yaml"
+    "plugins/aid-orchestrator/agents/implementer.md CHANGELOG.md"
+    "scripts/lib/aid-fsm-helpers.sh scripts/tests/bats/test-aid-fsm.bats"
+    "aid-release-policy.sh"
+    "backend/app/main.py frontend/src/App.tsx"
+    "aid-evidence-verify.sh defaults/schemas/x.json docs/agents/readme.md"
+  )
+  local set path old new g
+  for set in "${sets[@]}"; do
+    for path in $set; do
+      old=0; gate_profile_is_high_risk_path "$path" && old=1
+      new=0
+      for g in "${globs[@]}"; do _aid_ancillary_glob_match "$path" "$g" && { new=1; break; }; done
+      [ "$old" -eq "$new" ] || { echo "disagree on $path: classifier=$old when_paths=$new" >&2; return 1; }
+    done
+  done
+  # Both sides of the split are exercised: high-risk and not.
+  gate_profile_is_high_risk_path "scripts/aid-run-gates.sh"
+  ! gate_profile_is_high_risk_path "backend/app/main.py"
+}
+
+@test "P097 Step 6: a gate whose only claim was required_when keeps the OLD runner's meaning — required" {
+  # Since 2.96.0 (lib/aid-gate-applicability.sh, deleted in Step 6) a gate
+  # whose `required_when` held was REQUIRED (`required_source: required_when`);
+  # an advisory gate expressed that with its exit 2, not with the key. So the
+  # upgrade writes `required: true` where a lone `required_when` stood — ACTA's
+  # docs_updated (`required_when: always`, exit 2 graceful skip) included —
+  # and a gate that already says `required:` is left alone.
+  source "$HELPER"
+  local cfg="$TEST_TMPDIR/e.yaml"
+  cat > "$cfg" <<'YAML'
+gates:
+  docs_updated:
+    command: "sh -c 'exit 2'"
+    required_when: "always"
+  py_test:
+    command: "pytest"
+    required_when: "*.py exists"
+    required: false
+YAML
+  local out hash
+  out="$(execution_yaml_upgrade "$cfg")" || [ $? -eq 3 ]
+  hash="$(printf '%s\n' "$out" | sed -n 's/^diff_hash: //p')"
+  execution_yaml_upgrade "$cfg" --confirm-upgrade "$hash"
+  [ "$(yq '.gates.docs_updated.required' "$cfg")" = "true" ]
+  [ "$(yq '.gates.py_test.required' "$cfg")" = "false" ]
+  [ "$(yq '[.. | select(tag == "!!map") | keys[] | select(. == "required_when")] | length' "$cfg")" -eq 0 ]
+}
+
+@test "P097 CP3: the confirmed upgrade replaces the file by rename, leaving no partial write and no stray sibling" {
+  source "$HELPER"
+  local cfg="$TEST_TMPDIR/atomic.yaml"
+  cat > "$cfg" <<'YAML'
+gates:
+  g:
+    command: "true"
+    required_when: "always"
+YAML
+  chmod 640 "$cfg"
+  local out hash
+  out="$(execution_yaml_upgrade "$cfg")" || [ $? -eq 3 ]
+  hash="$(printf '%s\n' "$out" | sed -n 's/^diff_hash: //p')"
+  execution_yaml_upgrade "$cfg" --confirm-upgrade "$hash"
+  # the file parses, kept its mode, and nothing was left beside it
+  yq '.' "$cfg" >/dev/null
+  [ "$(stat -c '%a' "$cfg")" = "640" ]
+  [ "$(find "$TEST_TMPDIR" -name '.aid-upgrade.*' | wc -l)" -eq 0 ]
+  # the staging name is unpredictable: a pre-planted sibling cannot catch the
+  # write, because mktemp picks the name (CP3 security review).
+  ln -s "$TEST_TMPDIR/victim" "$TEST_TMPDIR/atomic.yaml.aid-upgrade.$$"
+  printf 'untouched\n' > "$TEST_TMPDIR/victim"
+  cat > "$cfg" <<'YAML'
+gates:
+  g:
+    command: "true"
+    required_when: "always"
+YAML
+  out="$(execution_yaml_upgrade "$cfg")" || [ $? -eq 3 ]
+  hash="$(printf '%s\n' "$out" | sed -n 's/^diff_hash: //p')"
+  execution_yaml_upgrade "$cfg" --confirm-upgrade "$hash"
+  [ "$(cat "$TEST_TMPDIR/victim")" = "untouched" ]
+  # an unwritable directory refuses without touching the original
+  local dir="$TEST_TMPDIR/ro"; mkdir -p "$dir"; cp "$cfg" "$dir/e.yaml"
+  cat >> "$dir/e.yaml" <<'YAML'
+  h:
+    command: "true"
+    required_when: "always"
+YAML
+  out="$(execution_yaml_upgrade "$dir/e.yaml")" || [ $? -eq 3 ]
+  hash="$(printf '%s\n' "$out" | sed -n 's/^diff_hash: //p')"
+  local before; before="$(sha256sum "$dir/e.yaml" | cut -d' ' -f1)"
+  chmod 500 "$dir"
+  run execution_yaml_upgrade "$dir/e.yaml" --confirm-upgrade "$hash"
+  chmod 700 "$dir"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$dir/e.yaml" | cut -d' ' -f1)" = "$before" ]
 }

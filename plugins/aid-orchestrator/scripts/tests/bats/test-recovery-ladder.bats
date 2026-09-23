@@ -11,9 +11,11 @@
 #   2  the budget-th + 1 attempt refuses with `budget_exhausted` + adjudicate
 #   3  an action the class does not allow is refused BY NAME
 #   4  the wall clock refuses even with attempts remaining
-#   5  THE EMITTER, A/B: a timeout fixture writes a GATE_TIMEOUT ladder entry
-#      while the gate verdict stays byte-identical to the same fixture run by
-#      the same runner with the ladder lib ABSENT
+#   5  A/B: a timeout fixture's gate verdict stays byte-identical to the same
+#      fixture run by the same runner with the ladder lib ABSENT (P097 Step 5:
+#      a gate stopped at its deadline is a plain job_timeout row and writes no
+#      ladder entry; GATE_TIMEOUT's one live emitter is the past-grace cancel
+#      of a job its supervisor failed to stop, which no fixture can force)
 #   6  escalate lands `blocked_for_pm` on the map, and leaving ESCALATION still
 #      requires `escalation_decision` (regression)
 #   7  the reader honours `revoked_unrecorded` — the Step-12 carried obligation
@@ -24,8 +26,9 @@
 #  10  two concurrent attempts of a 1-attempt class spend it ONCE (the TOCTOU
 #      the single critical section closes)
 #  11  fail-closed: an unreadable policy adjudicates, it never permits a retry
-#  12  the ladder cannot smuggle restart authority — it executes nothing, and
-#      aid-service still gates its one restart on the declaration
+#  12  the ladder executes nothing, and the removed `restart_service_once`
+#      (P097 Step 6) is refused as an action outside the closed set — a
+#      pre-2.103 record naming it escalates, it never restarts anything
 #
 # Nothing here stubs the ladder. Cases 5 and 8 drive the REAL aid-run-gates.sh
 # and the REAL aid-service.sh over real fixtures.
@@ -131,9 +134,8 @@ normalize_report() {
           .value |= (
               (if has("duration_ms") then .duration_ms = 0 else . end)
             | (if has("output") then .output = "NORMALIZED" else . end)
-            | (if (.runtime_baseline | type) == "object"
-               then .runtime_baseline.p95_ms = 0 | .runtime_baseline.mean_ms = 0
-               else . end)
+            | (if has("started_at") then .started_at = "NORMALIZED" else . end)
+            | (if has("completed_at") then .completed_at = "NORMALIZED" else . end)
           )
         else . end)
     | (if has("_command_log") then ._command_log |= map(.duration_ms = 0) else . end)
@@ -202,14 +204,14 @@ normalize_report() {
 }
 
 @test "case 3: an action the class does not allow is refused, and the refusal names it" {
-  # `restart_service_once` is a real vocabulary action — but not one GATE_TIMEOUT
+  # `wait_and_resume` is a real vocabulary action — but not one GATE_TIMEOUT
   # is allowed to take. Membership of the vocabulary is not membership of the
   # class's allowlist.
-  run ladder aid_ladder_attempt "$EVID" GATE_TIMEOUT restart_service_once
+  run ladder aid_ladder_attempt "$EVID" GATE_TIMEOUT wait_and_resume
   [ "$status" -eq 4 ] || { echo "$output"; false; }
   [ "$output" = "adjudicate refused_action_not_allowed" ]
   run jq -r '.detail' "$REC"
-  [ "$output" = "action 'restart_service_once' is not in allowed_actions for class GATE_TIMEOUT" ]
+  [ "$output" = "action 'wait_and_resume' is not in allowed_actions for class GATE_TIMEOUT" ]
 
   # An action outside the vocabulary entirely is refused the same way, and no
   # attempt was spent by either refusal.
@@ -259,7 +261,7 @@ normalize_report() {
   [ "$output" = "proceed 1" ]
 }
 
-@test "case 5: A/B — the GATE_TIMEOUT emitter records, and the gate verdict is byte-identical without it" {
+@test "case 5: A/B — a timeout fixture's gate verdict is byte-identical with and without the ladder lib" {
   # THE INVARIANCE PROOF. Not "the row still looks right" — the SAME runner is
   # run twice over the SAME fixture, once with lib/aid-recovery-ladder.sh
   # present and once with it absent from an otherwise identical copy of the
@@ -292,13 +294,9 @@ YAML
   ladder_report="$a/$EVID_REL/gates/gates_report.json"
   [ -f "$ladder_report" ] || { cat "$WORK/a.err"; false; }
 
-  # the ladder entry really was written, by the emitter this case is about
-  local arec="$a/$EVID_REL/recovery-ladder.jsonl"
-  [ -f "$arec" ] || { echo "no ladder record"; ls -la "$a/$EVID_REL"; false; }
-  run jq -r -s '[.[] | select(.class=="GATE_TIMEOUT" and .emitter=="timeout_policy_block")] | length' "$arec"
-  [ "$output" -ge 1 ] || { cat "$arec"; false; }
-  run jq -r -s '.[0] | [.event, .class, .outcome] | join("|")' "$arec"
-  [ "$output" = "recovery_stop|GATE_TIMEOUT|detected" ]
+  # P097 Step 5: a deadline stop is an ordinary job_timeout row — no ladder
+  # entry is written for it, with the lib present or absent.
+  [ ! -f "$a/$EVID_REL/recovery-ladder.jsonl" ]
 
   # ── B: the same runner from a plugin copy with the ladder lib REMOVED ─────
   local plug="$WORK/plugin-noladder"
@@ -327,9 +325,8 @@ YAML
 
   # and, said explicitly, the verdict this fixture exists to protect
   run jq -r '[.gates.slow.result, (.gates.slow.exit_code|tostring), .gates.slow.reason,
-              (.gates.slow.runtime_baseline.samples_count|tostring),
-              (.gates.slow.runtime_baseline.non_censored_samples_count|tostring)] | join("|")' "$ladder_report"
-  [ "$output" = "fail|124|timeout_policy_block|3|0" ] || { echo "$output"; false; }
+              (.gates.slow.attempts|tostring)] | join("|")' "$ladder_report"
+  [ "$output" = "fail|124|job_timeout|3" ] || { echo "$output"; false; }
 }
 
 @test "case 6: escalate lands blocked_for_pm, and leaving ESCALATION still needs the decision field" {
@@ -466,7 +463,7 @@ YAML
 }
 
 @test "case 9: the closed sets are lib == policy == schema, and the loader is where the contract says" {
-  # The lib compiles the six action names and the seven class names as literals
+  # The lib compiles the five action names and the seven class names as literals
   # on purpose (the policy is the thing being bounded). That only stays safe
   # while the three agree, so the agreement is pinned rather than assumed.
   local lib_actions policy_actions schema_actions
@@ -575,23 +572,23 @@ YAML
   [ "${lines[-1]}" = "adjudicate refused_unreadable_record" ]
 }
 
-@test "case 12: the ladder cannot smuggle restart authority" {
-  # The ladder GRANTS `restart_service_once` for SERVICE_UNHEALTHY...
+@test "case 12: the ladder executes nothing, and the removed restart action is refused" {
+  # `restart_service_once` left the vocabulary with the service lifecycle
+  # (P097 Step 6). A record or a caller from before 2.103 that still names it
+  # is an action outside the closed set: refused and routed to adjudication,
+  # with no attempt spent — the same path as any unknown action.
   run ladder aid_ladder_attempt "$EVID" SERVICE_UNHEALTHY restart_service_once
-  [ "$status" -eq 0 ]
-  [ "$output" = "proceed 1" ]
+  [ "$status" -eq 4 ] || { echo "$output"; false; }
+  [ "$output" = "adjudicate refused_action_not_allowed" ]
+  run jq -r -s '[.[] | select(.outcome=="started")] | length' "$REC"
+  [ "$output" = "0" ]
+  run bash -c 'source "$LIB"; _aid_ladder_action_constants'
+  [[ "$output" != *restart_service_once* ]] || { echo "$output"; false; }
 
-  # ...and executes nothing. There is no process control in this file at all:
-  # no supervisor invocation, no signal, no session/process-group arithmetic.
+  # And there is no process control in this file at all: no supervisor
+  # invocation, no signal, no session/process-group arithmetic.
   run grep -nE '\b(setsid|kill|pkill|nohup|disown)\b|aid-job\.sh|start_cmd|aid_service_up' "$LIB"
   [ "$status" -ne 0 ] || { echo "$output"; false; }
-
-  # So the only code that can restart a service is aid-service's own path, and
-  # that path still spends its ONE restart only when the DECLARATION authorises
-  # it and only once — which is what makes the grant above unable to exceed it.
-  run grep -cE '^[[:space:]]*if \[\[ "\$restart_auth" == "true" \]\] && \(\( restart_used == 0 \)\); then$' \
-    "$PLUGIN_ROOT/scripts/lib/aid-service.sh"
-  [ "$output" = "1" ] || { echo "the one-restart gate in aid-service.sh has moved or changed"; false; }
 }
 
 @test "case 13: the terminus the ladder READS cannot be reordered behind a broken validator" {

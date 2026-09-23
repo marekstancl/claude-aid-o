@@ -8,12 +8,10 @@ setup() {
   RUN_GATES="$REPO_ROOT/plugins/aid-orchestrator/scripts/aid-run-gates.sh"
   FIXTURES="$REPO_ROOT/plugins/aid-orchestrator/scripts/tests/fixtures"
   TIMELINE="$TEST_DIR/timeline.jsonl"
-  # Run from the throwaway TEST_DIR so aid-run-gates.sh's cwd-relative
-  # .aid-o/metrics/gate-runtime-baselines.yaml is written (and torn down) in
-  # isolation. Without this, baselines accumulated in the shared tests/ cwd
-  # across runs, and a polluted baseline made `run-all` return non-zero
-  # (flaky suite red, unrelated to any gate logic). All RUN_GATES/FIXTURES/
-  # TIMELINE paths above are absolute, so the cd is safe.
+  # Run from the throwaway TEST_DIR so anything aid-run-gates.sh writes
+  # cwd-relative lands (and is torn down) in isolation, never in the shared
+  # tests/ cwd. All RUN_GATES/FIXTURES/TIMELINE paths above are absolute, so
+  # the cd is safe.
   cd "$TEST_DIR"
 }
 

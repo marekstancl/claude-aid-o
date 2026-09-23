@@ -292,23 +292,8 @@ try:
 except Exception: pass
 stale = [x for x in fresh if stale_cut and x["last_change"] < stale_cut]
 
-# ── 7. gate stability from runtime baselines ───────────────────────────────
-gate_stability = []
-try:
-    import yaml as _y2
-    bl = _y2.safe_load(open(f"{ROOT}/.aid-o/metrics/gate-runtime-baselines.yaml")) or {}
-    for g, v in (bl.get("gates") or bl or {}).items():
-        if not isinstance(v, dict): continue
-        samples = v.get("recent_samples") or []
-        if not samples: continue
-        ok = sum(1 for x in samples if x.get("exit_code") == 0)
-        gate_stability.append({"gate": g, "samples": len(samples),
-                               "pass_rate": round(ok/len(samples), 2),
-                               "censored": sum(1 for x in samples if x.get("censored"))})
-except Exception:
-    pass
 
-# ── 8. case counts — how many TESTS, not just suites ──────────────────────
+# ── 7. case counts — how many TESTS, not just suites ──────────────────────
 # The owner's first question was "kolik testů máme" and every answer so far
 # counted SUITES. Cases are countable mechanically for bats; where they are
 # not countable (a gate wrapping an opaque command), the report says
@@ -334,7 +319,7 @@ for f in all_tests:
     case_counts.append({"file": rel(f), "runner": runner, "cases": n})
 case_counts.sort(key=lambda x: -x["cases"])
 
-# ── 9. naming conventions ─────────────────────────────────────────────────
+# ── 8. naming conventions ─────────────────────────────────────────────────
 # "aktuálně totál bordel bez konvence" — measurable: what prefixes dominate,
 # and which files follow no recognisable pattern. The proposal writes itself:
 # the dominant pattern IS the convention candidate, outliers are the renames.
@@ -572,7 +557,6 @@ doc = {
         "unreferenced_tests": unreferenced,
         "untested_surfaces": untested[:50],
         "test_freshness": {"stale_180d": len(stale), "files": stale[:20]},
-        "gate_stability": gate_stability,
         "case_counts": {"total_countable": total_cases,
                         "files_counted": len(case_counts),
                         "by_runner": cases_by_runner,
@@ -595,7 +579,6 @@ doc = {
         "unreferenced": len(unreferenced),
         "untested_surfaces": len(untested),
         "stale_tests_180d": len(stale),
-        "gates_with_history": len(gate_stability),
         "total_cases_countable": total_cases,
         "naming_outliers": len(outliers),
         "fabricated_measured": len(fabricated),

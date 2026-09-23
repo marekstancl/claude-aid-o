@@ -179,7 +179,7 @@
 #
 # ── SOURCEABLE-SAFE CONVENTION ───────────────────────────────────────────────
 # NO top-level `set -e`/`set -euo pipefail` — matches aid-plan-state.sh /
-# aid-lock.sh / aid-gate-profile.sh. Every public function returns an
+# aid-lock.sh / aid-gate-profile-select.sh. Every public function returns an
 # explicit code.
 #
 # ── USAGE ────────────────────────────────────────────────────────────────────
@@ -223,7 +223,7 @@ _AID_PLAN_MANIFEST_LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${_AID_PLAN_MANIFEST_LIBDIR}/aid-lock.sh"
 # shellcheck disable=SC1091
-source "${_AID_PLAN_MANIFEST_LIBDIR}/aid-gate-profile.sh"
+source "${_AID_PLAN_MANIFEST_LIBDIR}/aid-gate-profile-select.sh"   # P097 Step 4 — the one profile resolver
 # shellcheck disable=SC1091
 source "${_AID_PLAN_MANIFEST_LIBDIR}/aid-roots.sh"   # P074 Step 1 — state-root resolution
 
@@ -1249,59 +1249,58 @@ plan_manifest_set_epic_status() {
 # ===========================================================================
 # plan_manifest_raise_final_profile <plan_id> <profile>
 #
-# Raises `plan_final_required_profile` to max(current, profile) — the profile
-# can only move UP the rank table (quick=0 < targeted=1 < standard=2 <
-# full=3 < release=4). A lower-or-equal-ranked `profile` is a documented
-# NO-OP (no write) — never an error.
+# Raises `plan_final_required_profile` to the WIDER of (current, profile) by
+# declaration index in the project's own gate_profiles table (P097 Step 4:
+# the table is the rank; narrowest first). A narrower-or-equal `profile` is
+# a documented NO-OP (no write) — never an error.
 #
-# The rank comparison happens INSIDE the jq filter passed to
-# _plan_manifest_atomic_mutate, i.e. under the lock, against the file's LIVE
-# value at write time — not via a lock-free bash-side pre-computation. This
-# is required for correctness: two concurrent callers racing to raise the
-# profile to different targets must never let the lower one clobber the
-# higher one once it lands (see the "Regression: concurrent
-# raise_final_profile calls never downgrade" bats test). Every call
-# therefore takes the lock, including a call whose outcome turns out to be a
-# no-op — the no-op is decided under the lock, not before it.
+# The table comes from `<state root>/.aid-o/config/execution.yaml` — the
+# same root `_plan_manifest_project_root` resolves for the manifest itself,
+# so the signature stays <plan_id> <profile>. It is rendered into an index
+# table and passed INTO the jq filter, so the comparison happens under the
+# lock against the file's LIVE value at write time (two concurrent raises
+# can never let the narrower one clobber the wider — see the "concurrent
+# raise_final_profile calls never downgrade" bats test). The first raise
+# records the table as `profile_table`; a later raise whose file order
+# differs from the recorded one REFUSES with `profile_table_changed` (a
+# reordered table is not comparable to the recorded rank).
 #
-# Returns: 0 success or no-op, 1 bad profile name / not_found / corrupt
-# propagated from the read, 2 missing jq, 3 lock timeout, 5 corrupt /
-# validator missing.
+# Returns: 0 success or no-op, 1 profile not declared / not_found /
+# profile_table_changed / corrupt propagated from the read, 2 missing jq,
+# 3 lock timeout, 5 corrupt / validator missing.
 # ===========================================================================
 plan_manifest_raise_final_profile() {
   local plan_id="$1" profile="$2"
 
   _plan_manifest_require_jq || return 2
   _pm_validate_plan_id_charset "$plan_id" || return 1
-  if ! gate_profile_rank "$profile" >/dev/null 2>&1; then
-    _pm_warn "plan_manifest_raise_final_profile: unknown profile '${profile:-<empty>}'"
+  local _root _yaml table_json
+  _root="$(_plan_manifest_project_root)" || return 2
+  _yaml="${_root}/.aid-o/config/execution.yaml"
+  if ! gate_profile_index "$_yaml" "$profile" >/dev/null 2>&1; then
+    _pm_warn "plan_manifest_raise_final_profile: profile '${profile:-<empty>}' is not declared in ${_yaml} (declared: $(gate_profile_table "$_yaml" 2>/dev/null | tr '\n' ' '))"
     return 1
   fi
+  table_json="$(gate_profile_table "$_yaml" | jq -R . | jq -sc .)"
 
-  # CRITICAL FIX for race condition: The profile comparison and max-computation
-  # must happen INSIDE the jq filter (which runs under the lock, after re-reading
-  # the file) — NOT in bash BEFORE taking the lock. This prevents a downgrade
-  # when two concurrent callers race (B writes "release", then A writes "full",
-  # downgrading the value from "release" to "full").
-  #
-  # The jq filter below inlines the profile rank table and does the comparison
-  # against the file's LIVE value at write time, under the lock. The filter is
-  # idempotent: if the target profile is already at or below the current rank,
-  # the filter leaves the file unchanged (via the `else .` branch).
-  #
-  # Profile rank table (matching aid-gate-profile.sh): quick=0 < targeted=1
-  # < standard=2 < full=3 < release=4.
+  # The index table is bound as $table; the comparison and the recorded-table
+  # check both run inside the filter, under the lock, against the live file.
   local filter='
-    {quick:0,targeted:1,standard:2,full:3,release:4} as $ranks |
-    ((.plan_boundary_manifest.plan_final_required_profile as $current | $ranks[$current]) // 0) as $current_rank |
-    ($ranks[$profile] // 0) as $new_rank |
-    if $new_rank > $current_rank
+    (.plan_boundary_manifest.profile_table // null) as $recorded |
+    if ($recorded != null and $recorded != $table)
+    then error("profile_table_changed: manifest recorded \($recorded | tojson), execution.yaml now declares \($table | tojson)")
+    else . end |
+    ($table | index($profile)) as $new_idx |
+    .plan_boundary_manifest.plan_final_required_profile as $current |
+    ($table | index($current) // -1) as $current_idx |
+    .plan_boundary_manifest.profile_table = $table |
+    if $new_idx > $current_idx
     then .plan_boundary_manifest.plan_final_required_profile = $profile
     else .
     end
   '
 
-  _plan_manifest_atomic_mutate "$plan_id" "$filter" --arg profile "$profile"
+  _plan_manifest_atomic_mutate "$plan_id" "$filter" --arg profile "$profile" --argjson table "$table_json"
 }
 
 # ===========================================================================

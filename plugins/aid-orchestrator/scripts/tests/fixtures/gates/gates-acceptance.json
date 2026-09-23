@@ -1,0 +1,516 @@
+{
+  "replayed": 61,
+  "equal": 61,
+  "raw_equal": 18,
+  "differences": [
+    {
+      "run_id": "R-E016-4",
+      "gate": "vat_labels_sync",
+      "old": "absent",
+      "new": "pass",
+      "class": "config_drift",
+      "explanation": "the upgraded configuration defines a gate the recorded run did not have"
+    },
+    {
+      "run_id": "R-E019-3",
+      "gate": "ts_e2e",
+      "old": "absent",
+      "new": "skip",
+      "class": "config_drift",
+      "explanation": "the upgraded configuration defines a gate the recorded run did not have"
+    },
+    {
+      "run_id": "R-E020-1",
+      "gate": "vat_labels_sync",
+      "old": "fail",
+      "new": "absent",
+      "class": "config_drift",
+      "explanation": "the recorded run had a gate the configuration at this sha no longer defines"
+    },
+    {
+      "run_id": "R-P016-final-1",
+      "gate": "vat_labels_sync",
+      "old": "absent",
+      "new": "pass",
+      "class": "config_drift",
+      "explanation": "the upgraded configuration defines a gate the recorded run did not have"
+    },
+    {
+      "run_id": "R-P016-final-2",
+      "gate": "vat_labels_sync",
+      "old": "absent",
+      "new": "pass",
+      "class": "config_drift",
+      "explanation": "the upgraded configuration defines a gate the recorded run did not have"
+    },
+    {
+      "run_id": "R-P016-final-3",
+      "gate": "vat_labels_sync",
+      "old": "absent",
+      "new": "pass",
+      "class": "config_drift",
+      "explanation": "the upgraded configuration defines a gate the recorded run did not have"
+    },
+    {
+      "run_id": "R-P016-final-4",
+      "gate": "vat_labels_sync",
+      "old": "absent",
+      "new": "pass",
+      "class": "config_drift",
+      "explanation": "the upgraded configuration defines a gate the recorded run did not have"
+    },
+    {
+      "run_id": "R-P018-final-3",
+      "gate": "plan_diff",
+      "old": "pass",
+      "new": "absent",
+      "class": "config_drift",
+      "explanation": "the recorded run had a gate the configuration at this sha no longer defines"
+    },
+    {
+      "run_id": "R-P018-final-4",
+      "gate": "plan_diff",
+      "old": "pass",
+      "new": "absent",
+      "class": "config_drift",
+      "explanation": "the recorded run had a gate the configuration at this sha no longer defines"
+    },
+    {
+      "run_id": "R-P018-final-5",
+      "gate": "plan_diff",
+      "old": "pass",
+      "new": "absent",
+      "class": "config_drift",
+      "explanation": "the recorded run had a gate the configuration at this sha no longer defines"
+    },
+    {
+      "run_id": "R-P019-final-1",
+      "gate": "ts_e2e",
+      "old": "absent",
+      "new": "pass",
+      "class": "config_drift",
+      "explanation": "the upgraded configuration defines a gate the recorded run did not have"
+    },
+    {
+      "run_id": "R-P019-final-2",
+      "gate": "ts_e2e",
+      "old": "absent",
+      "new": "pass",
+      "class": "config_drift",
+      "explanation": "the upgraded configuration defines a gate the recorded run did not have"
+    },
+    {
+      "run_id": "R-P019-final-3",
+      "gate": "ts_e2e",
+      "old": "absent",
+      "new": "pass",
+      "class": "config_drift",
+      "explanation": "the upgraded configuration defines a gate the recorded run did not have"
+    },
+    {
+      "run_id": "R-P019-final-5",
+      "gate": "(overall)",
+      "old": "pass",
+      "new": "fail",
+      "class": "overall",
+      "explanation": "the recorded run was a FALSE GREEN and the new runner is right: ts_e2e exited 130 (interrupted) and the run still reported pass, because the runner of 2026-08 (aid-run-gates.sh@v2.16.0) recorded no 'required' on any row and ACTA declared the gate only through required_when: 'frontend/e2e exists' — a static claim nothing enforced. Step 3's upgrade turns that dead key into required: true, so the same inputs now give overall=fail. This is the change P097 exists to make, observed on a real run.",
+      "explained": true
+    },
+    {
+      "run_id": "R-E016-3",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E016-4",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E018-1",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E018-2",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E019-1",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E019-2",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E019-3",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E020-1",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E020-2",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E020-3",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E021-1",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E021-2",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E021-3",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E024-1",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E024-2",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E024-3",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E024-4",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P016-final-1",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P016-final-1",
+      "gate": "plan_diff",
+      "old": "exit_124",
+      "new": "job_timeout",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P016-final-2",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P016-final-2",
+      "gate": "plan_diff",
+      "old": "exit_124",
+      "new": "job_timeout",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P016-final-3",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P016-final-4",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P018-final-1",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P018-final-2",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P018-final-3",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P018-final-4",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P018-final-5",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P018-final-6",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P019-final-1",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P019-final-2",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P019-final-3",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P019-final-4",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P019-final-5",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P020-final-1",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P020-final-2",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P020-final-3",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P020-final-4",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P020-final-5",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P021-final-1",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P021-final-1",
+      "gate": "plan_diff",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P024-final-1",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P024-final-1",
+      "gate": "plan_diff",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P024-final-2",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P024-final-3",
+      "gate": "docs_updated",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-E101-3",
+      "gate": "plan_diff",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    },
+    {
+      "run_id": "R-P099-final-1",
+      "gate": "plan_diff",
+      "old": "legacy_row",
+      "new": "exit_2",
+      "class": "reason",
+      "explanation": "same status, different reason"
+    }
+  ],
+  "by_class": {
+    "config_drift": 13,
+    "overall": 1,
+    "reason": 47
+  },
+  "verdict_differences_explained": [
+    {
+      "run_id": "R-P019-final-5",
+      "gate": "(overall)",
+      "old": "pass",
+      "new": "fail",
+      "class": "overall",
+      "explanation": "the recorded run was a FALSE GREEN and the new runner is right: ts_e2e exited 130 (interrupted) and the run still reported pass, because the runner of 2026-08 (aid-run-gates.sh@v2.16.0) recorded no 'required' on any row and ACTA declared the gate only through required_when: 'frontend/e2e exists' — a static claim nothing enforced. Step 3's upgrade turns that dead key into required: true, so the same inputs now give overall=fail. This is the change P097 exists to make, observed on a real run.",
+      "explained": true
+    }
+  ],
+  "pm_acceptance": "owed — every entry of verdict_differences_explained must be accepted in writing by the PM before P097 Step 9 (docs/plans/P097-acceptance-run.md)",
+  "sample": "gates-sample.json",
+  "generated_by": "scripts/tests/test-gates-replay.sh",
+  "generated_at": "2026-09-22T15:35:36Z"
+}

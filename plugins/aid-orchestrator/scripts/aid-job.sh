@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aid-job.sh — Controller-owned background job supervisor (IMP-262)
+# aid-job.sh — the one process owner for long-running work.
 #
-# A small, standalone helper that gives a long-running command a DURABLE
-# IDENTITY and a TERMINAL RESULT that a resumed AUTO controller can collect
-# without relying on `tail -f`, an agent notification, or the original shell
-# staying alive.
+# WHY THIS FILE EXISTS: a command that outlives the session that started it
+# needs an owner that is not that session. This supervisor gives such a
+# command a DURABLE IDENTITY (its own session and process group, a job record
+# bound to the start HEAD and tree) and a TERMINAL RESULT (an atomically
+# written result record) that a resumed controller can collect without a
+# `tail -f`, an agent notification, or the original shell staying alive. It is
+# the ONE process owner in the plugin: the gate runner runs every `run_mode:
+# background` gate through it, the plan continuation spawns the next EPIC's
+# run through it, and the test execution unit runs suites through it. Since
+# the service lifecycle left (P097 Step 6) nothing else starts a job, so a
+# resumed controller has one place to ask what is still alive.
 #
 # Subcommands:
 #   run       Start a command in its own session/process-group; write a durable
@@ -250,11 +257,10 @@ cmd_run() {
   #     a sleeping process still holds the write end.
   # The second one was MEASURED on this branch: a bats suite ran every case and
   # then sat for fifteen minutes with no children, because six `sleep 3600`
-  # processes held fd 3. Fixed here rather than in one caller, because three
-  # scripts already call `run` (aid-run-gates.sh, lib/aid-service.sh,
-  # lib/aid-test-execution-unit.sh; two audit callers left on 2026-09-21)
-  # and each of them has the same hazard the day it
-  # holds a lock or is read through a pipe.
+  # processes held fd 3. Fixed here rather than in one caller, because several
+  # scripts call `run` (aid-run-gates.sh, lib/aid-test-execution-unit.sh, and
+  # the service library until it leaves in P097 Step 9) and each of them has
+  # the same hazard the day it holds a lock or is read through a pipe.
   #
   # The loop is Linux-only, which this supervisor already is (it reads /proc for
   # PID-reuse safety). The `$(...)` listing the descriptors opens one of its own
@@ -613,10 +619,9 @@ cmd_cancel() {
     # self-consistency, and an attacker who copies a victim's real pid and pgid
     # out of /proc satisfies it exactly. Nothing readable from this directory can
     # distinguish those two cases, so the defence cannot live here. It lives in
-    # the CALLER: `cancel` is aimed at a specific --id, and the only untargeted
-    # caller in this repo (aid-service's orphan sweep) now signals a job only
-    # when this run's own spawn ledger or registry vouches for it, and reports
-    # rather than signals anything else. See `_aid_svc_vouched_set`.
+    # the CALLER: `cancel` is aimed at a specific --id, and there is no
+    # untargeted caller left in this repo (the service orphan sweep, the one
+    # there was, went with the service lifecycle in P097 Step 6).
     _live_pgid=""
     # `|| true` INSIDE the substitution: on a later iteration the pid may already
     # be dead (the signal took effect), so `ps` fails; without this the pipefail

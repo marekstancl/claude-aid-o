@@ -306,26 +306,39 @@ guess to be re-derived by hand.
 
 ### Topic: gates
 
-Gates are the quality checks between `GATES` and `DONE`. They come from
-`config/project.yaml` and `config/execution.yaml`, and `/aid-run` runs them.
+Gates are the quality checks between `GATES` and `DONE`. They are the table
+under `gates:` in `config/execution.yaml` (written by `/aid-init`), and
+`/aid-run` runs them through `scripts/aid-run-gates.sh`.
 
 ```
 Quality Gates
 ====================================
-Default gates (from config/project.yaml):
-  test_cmd   → run tests
-  lint_cmd   → run linter
-  build_cmd  → run build
+config/execution.yaml:
+  gates:
+    security_scan:
+      command: "npm audit --audit-level=high"
+      required: true          # true blocks GATES → DONE; false is advisory
+      timeout_seconds: 180    # the deadline, the only one (default 60)
+      max_retries: 2          # retries inside one run (default 1)
+      run_mode: background    # optional: survives a dead session (aid-job.sh)
 
-Custom gates (config/execution.yaml):
-  - name: security_scan
-    command: "npm audit --audit-level=high"
-    required: true
-    max_retries: 2
+  default_profile: standard   # profiles: ordered lists, narrowest first
+  gate_profiles:
+    targeted: {include: [tests_pass]}
+    standard: {include: [tests_pass, security_scan]}
+    full:     {include: [tests_pass, security_scan], when_paths: ["*/aid-fsm.sh"]}
 
-Gate retry: up to 2 attempts with gate-fixer agent between retries.
-All retries exhausted → ESCALATION.
+Which profile runs: the last declared one whose when_paths matches a changed
+path, else default_profile. A profile with no required gate is refused.
+Each gate's row: status pass|fail|skip + reason (exit_<n>, job_timeout, ...).
+Retries exhausted on a required gate → gate-fixer, then ESCALATION.
+Choosing timeout_seconds: aid-gate-runtime-report.sh prints 2 × p95 of the
+last 20 runs next to the configured value; it never writes.
 ```
+
+A key the runner no longer reads stops the run before any gate starts and
+names the fix: `aid-init-execution-yaml.sh upgrade <project root>` (see
+`/aid-help init`).
 
 ### Topic: tests
 
@@ -596,4 +609,4 @@ Adding a rule is a row plus a handler — never an edit to `aid-hook.sh`. See
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-09-21
+**Last Updated:** 2026-09-22

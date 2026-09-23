@@ -1,0 +1,154 @@
+# Execution config — gates run in docker (frontend+backend) for dev-host consistency; required:true.
+task_id: P012
+run_id: run-p012-001
+mode: auto
+plan_file: .aid-o/plans/P012-process-editor-deep.md
+steps:
+- id: 1
+  title: DocumentTab component with AI format / raw text toggle
+  phase: 1
+  deps: []
+  effort: M
+- id: 2
+  title: Integrate DocumentTab into ProcessEditView
+  phase: 1
+  deps:
+  - 1
+  effort: S
+- id: 3
+  title: Extend StepData interface and store with new fields
+  phase: 2
+  deps: []
+  effort: M
+- id: 4
+  title: Build StepCardFactory and TaskStepCard
+  phase: 2
+  deps:
+  - 3
+  effort: M
+- id: 5
+  title: Build DecisionStepCard, WaitStepCard, SubprocessStepCard
+  phase: 2
+  deps:
+  - 3
+  - 4
+  effort: L
+- id: 6
+  title: Rewrite ProcessEditForm to use StepCardFactory
+  phase: 2
+  deps:
+  - 3
+  - 4
+  - 5
+  effort: L
+- id: 7
+  title: raci_data JSONB column + step-level RACI API
+  phase: 3
+  deps: []
+  effort: M
+- id: 8
+  title: Step-level RACITab component
+  phase: 3
+  deps:
+  - 3
+  - 7
+  effort: L
+- id: 9
+  title: ProcessResource model, migration, CRUD API
+  phase: 4
+  deps: []
+  effort: M
+- id: 10
+  title: ResourcesTab frontend component
+  phase: 4
+  deps:
+  - 4
+  - 9
+  effort: M
+- id: 11
+  title: Rewrite useAIReview with 60s interval + blocking
+  phase: 5
+  deps:
+  - 7
+  - 8
+  effort: M
+- id: 12
+  title: Chat persistence — load on mount, save every message
+  phase: 5
+  deps: []
+  effort: M
+- id: 13
+  title: Extend AI agent context with full process state
+  phase: 5
+  deps:
+  - 7
+  - 8
+  - 9
+  - 12
+  effort: M
+- id: 14
+  title: 3-state save feedback indicator
+  phase: 6
+  deps: []
+  effort: S
+- id: 15
+  title: Version badge with auto-increment
+  phase: 6
+  deps:
+  - 7
+  effort: S
+- id: 16
+  title: Responsive sidebar collapse + UI consistency
+  phase: 6
+  deps:
+  - 1
+  - 4
+  - 8
+  - 10
+  effort: M
+parallel_groups:
+- - 1
+  - 3
+  - 7
+  - 9
+  - 12
+  - 14
+- - 2
+  - 4
+  - 8
+  - 10
+  - 15
+- - 5
+  - 11
+- - 6
+  - 13
+- - 16
+gates:
+  typecheck-frontend:
+    command: docker run --rm -v /opt/eco/projects/krok/frontend:/app -w /app krok-frontend:latest
+      sh -c 'npx tsc --noEmit'
+    max_retries: 2
+    timeout_seconds: 300
+    required: true
+  build-frontend:
+    command: docker run --rm -v /opt/eco/projects/krok/frontend:/app -w /app krok-frontend:latest
+      sh -c 'rm -rf dist && npm run build'
+    max_retries: 1
+    timeout_seconds: 300
+    required: true
+  lint-backend:
+    command: docker run --rm -v /opt/eco/projects/krok/backend:/app -w /app krok-backend:latest
+      sh -c 'pip install -q ruff 2>/dev/null && ruff check .'
+    max_retries: 1
+    timeout_seconds: 300
+    required: true
+  test-backend:
+    command: docker run --rm --network host -v /opt/eco/projects/krok/backend:/app
+      -v /opt/eco/projects/krok/frontend:/frontend
+      -w /app krok-backend:latest sh -c 'pip install -q pytest pytest-asyncio 2>/dev/null
+      && pytest tests/ -q --deselect tests/test_api_departments.py::test_delete_department
+      --deselect tests/test_auth.py::test_api_key_set_rejects_missing_header --deselect
+      tests/test_auth.py::test_api_key_set_accepts_correct_header'
+    max_retries: 1
+    timeout_seconds: 600
+    required: true

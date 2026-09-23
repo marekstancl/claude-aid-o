@@ -13,7 +13,7 @@
 #
 # ── WHAT THIS FILE IS ───────────────────────────────────────────────────────
 # `defaults/policies/auto-recovery.yaml` shipped in Step 11 as a policy with no
-# runtime: it declared seven stop classes, six reversible actions, a per-class
+# runtime: it declared seven stop classes, five reversible actions, a per-class
 # budget and a terminus, and NOTHING read it. This file is the loader and the
 # record writer that policy named in its own `loader_contract` — which is why
 # the path and the function name `aid_recovery_policy_load` are not free
@@ -31,14 +31,10 @@
 #     because several of those callers' stdout IS a gate row.
 #  2. IT NEVER EXECUTES AN ACTION. `aid_ladder_attempt` returns permission; the
 #     CALLER performs the action and reports back through `aid_ladder_outcome`.
-#     In particular `restart_service_once` is not a free action: nothing in this
-#     file starts, restarts, signals or supervises a process, so the only code
-#     that can restart a service is still aid-service.sh's own restart path,
-#     which spends the ONE restart only when the declaration says
-#     `restart_authorized: true` and only once per service
-#     (`[[ "$restart_auth" == "true" ]] && (( restart_used == 0 ))`). A ladder
-#     action therefore cannot smuggle authority the declaration withheld — not
-#     because it promises not to, but because it has no mechanism to.
+#     Nothing in this file starts, restarts, signals or supervises a process.
+#     The former `restart_service_once` action left the vocabulary with the
+#     service lifecycle (P097 Step 6): a pre-2.103 record that still names it
+#     is an action outside the closed set — refused, never executed.
 #  3. IT NEVER GOVERNS THE EXISTING LOOPS. The gate fix loop, CP2/CP3, the C3
 #     fix loop, the CP1 ledger and per-gate `max_retries` keep their own budgets
 #     in their own files (the policy's `existing_loops` table declares them).
@@ -137,14 +133,13 @@ _aid_ladder_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # ── THE TWO CLOSED SETS ─────────────────────────────────────────────────────
 # Literals, deliberately NOT read from the policy: the policy is the thing being
-# bounded. Same discipline as lib/aid-recovery-adjudicate.sh's six action
+# bounded. Same discipline as lib/aid-recovery-adjudicate.sh's five action
 # constants, and `test-recovery-ladder.bats` pins lib == policy == schema so
 # drift is loud rather than silent.
 _aid_ladder_action_constants() {
   printf '%s\n' \
     wait_and_resume \
     retry_once \
-    restart_service_once \
     rerun_targeted \
     resume_missing_lenses \
     collect_and_continue
@@ -198,7 +193,7 @@ _aid_ladder_policy_usable() {
   declared="$(yq -r '.action_vocabulary // {} | keys | .[]' "$policy" 2>/dev/null | LC_ALL=C sort | tr '\n' ',')"
   expected="$(_aid_ladder_action_constants | LC_ALL=C sort | tr '\n' ',')"
   [[ "$declared" == "$expected" ]] || {
-    printf 'policy action_vocabulary is not the closed set of six this ladder enforces\n'; return 0; }
+    printf 'policy action_vocabulary is not the closed set of five this ladder enforces\n'; return 0; }
 
   declared="$(yq -r '.stop_classes // {} | keys | .[]' "$policy" 2>/dev/null | LC_ALL=C sort | tr '\n' ',')"
   expected="$(_aid_ladder_class_constants | LC_ALL=C sort | tr '\n' ',')"

@@ -54,7 +54,7 @@ YAML
 gates:
   plan_diff:
     command: "exit 0"
-    required: false
+    required: true   # P097 Step 4: a profile must name at least one required gate
   docs_updated:
     required: false
 
@@ -64,12 +64,12 @@ gate_profiles:
 YAML
   run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile standard
   [ "$status" -eq 0 ]
-  run jq -re '.gates.plan_diff.result' "$REPORT"
+  run jq -re '.gates.plan_diff.status' "$REPORT"
   [ "$output" == "pass" ]
   # docs_updated is excluded from the active profile, so it never reaches
-  # the command check at all — profile_excluded, not a refusal.
-  run jq -re '.gates.docs_updated.result' "$REPORT"
-  [ "$output" == "profile_excluded" ]
+  # the command check at all — skip / not_in_profile, not a refusal.
+  run jq -re '.gates.docs_updated.status + "/" + .gates.docs_updated.reason' "$REPORT"
+  [ "$output" == "skip/not_in_profile" ]
 }
 
 @test "a command-less gate with no --profile at all is unchanged (legacy skip/no_command)" {
@@ -83,10 +83,8 @@ gates:
 YAML
   run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
   [ "$status" -eq 0 ]
-  run jq -re '.gates.plan_diff.result' "$REPORT"
-  [ "$output" == "skip" ]
-  run jq -re '.gates.plan_diff.reason' "$REPORT"
-  [ "$output" == "no_command" ]
+  run jq -re '.gates.plan_diff.status + "/" + .gates.plan_diff.reason' "$REPORT"
+  [ "$output" == "skip/no_command" ]
 }
 
 @test "the shipped defaults name no command-less gate in any profile (forward guard)" {
