@@ -114,25 +114,13 @@ _hook_audit() {
 # between harnesses stops being covered within the window rather than never.
 # The residual gap is recorded in defaults/hook-registry.yaml; closing it needs
 # a harness marker in the event payload that neither tool sends today.
-_AID_HOOK_TRUST_TTL_DAYS_DEFAULT=7
-
 _hook_trust_ok() {
   local file="${AID_HOOK_TRUST_FILE:-}"
   if [[ -z "$file" ]]; then
     local dir; dir="$(aid_session_store_dir hooks)" || return 1
     file="${dir}/trust.json"
   fi
-  [[ -f "$file" ]] || return 1
-  [[ "$(jq -r '.verified // false' "$file" 2>/dev/null)" == "true" ]] || return 1
-
-  local ttl checked_at w now
-  ttl="$(yq -r ".trust_ttl_days // ${_AID_HOOK_TRUST_TTL_DAYS_DEFAULT}" "$REGISTRY" 2>/dev/null)"
-  [[ "$ttl" =~ ^[0-9]+$ ]] || ttl="$_AID_HOOK_TRUST_TTL_DAYS_DEFAULT"
-  checked_at="$(jq -r '.checked_at // ""' "$file" 2>/dev/null)"
-  [[ -n "$checked_at" ]] || return 1
-  w="$(date -u -d "$checked_at" +%s 2>/dev/null)" || return 1
-  now="$(date -u +%s)"
-  (( now - w <= ttl * 86400 ))
+  aid_hook_trust_in_force "$file" "$REGISTRY"
 }
 
 # --------------------------------------------------------------------------
@@ -370,7 +358,9 @@ dispatch() {
     # that can stop work has to say so in the registry where it can be read.
     no_block="$active"
     [[ "$when_active" == "true" ]] && no_block=0
-    local may_block=0
+    # may_block: an explicit refusal stops the turn. fail_blocks: the rule's own
+    # timeout or error does too — never for a row that bounds its own loop.
+    local may_block=0 fail_blocks=0
     if [[ "$failure" == "closed" && "$no_block" -eq 0 ]]; then
       if (( trust_ok )); then
         may_block=1
@@ -379,6 +369,7 @@ dispatch() {
       fi
     fi
 
+    (( may_block )) && [[ "$when_active" != "true" ]] && fail_blocks=1
     local tmpd="" out_f="" err_f="" out="" reason="" rc=0
     tmpd="$(mktemp -d)" || { _hook_audit "$event" "$id" error "no temp dir for the rule run"; continue; }
     out_f="${tmpd}/out"; err_f="${tmpd}/err"
@@ -418,13 +409,13 @@ dispatch() {
         ;;
       124)
         _hook_audit "$event" "$id" timeout "exceeded ${timeout_s}s"
-        if (( may_block )) && [[ "$when_active" != "true" ]]; then
+        if (( fail_blocks )); then
           denied=1; denials+="rule ${id} exceeded its ${timeout_s}s budget and is fail-closed"$'\n'
         fi
         ;;
       *)
         _hook_audit "$event" "$id" error "$reason"
-        if (( may_block )) && [[ "$when_active" != "true" ]]; then
+        if (( fail_blocks )); then
           denied=1; denials+="rule ${id} failed (${reason}) and is fail-closed"$'\n'
         fi
         ;;

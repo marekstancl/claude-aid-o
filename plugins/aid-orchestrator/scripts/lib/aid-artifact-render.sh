@@ -251,7 +251,7 @@ _aid_artifact_list() {
     item="$(_aid_artifact_cap_sentences "$item")"
     item="$(_aid_artifact_clip "$item" "$_AID_ARTIFACT_CAP_SENTENCE")"
     shown+="<li>$(_aid_artifact_escape "$item")</li>"
-  done < <(jq -j --argjson cap "$cap" '.[:$cap][] | (if type == "object" then (.name // .label // (.|tostring)) else tostring end) + "\u0000"' <<<"$arr")
+  done < <(jq -j --argjson cap "$cap" '.[:$cap][] | (if type == "object" then (.name // .label // (.|tostring)) else tostring end | gsub("\u0000"; "")) + "\u0000"' <<<"$arr")
   local out="<${tag}${cls}>${shown}</${tag}>"
   if (( total > cap )); then
     out+="<p class=\"more\">$(_aid_artifact_escape "$(_aid_artifact_overflow "$(( total - cap ))")")</p>"
@@ -461,7 +461,7 @@ aid_artifact_render() {
   local st_result st_duration st_scope st_unresolved
   IFS=$'\x1f' read -r st_result st_duration st_scope st_unresolved < <(jq -r \
     '[.tiles.result.state, .tiles.duration.state, .tiles.scope.state, .tiles.unresolved.state]
-     | map(. // "" | tostring | gsub("\u001f"; " ")) | join("\u001f")' <<<"$facts_raw")
+     | map(. // "" | tostring | gsub("[\n\u001f]"; " ")) | join("\u001f")' <<<"$facts_raw")
 
   facts_raw="$(jq \
     --arg rc "$(_aid_artifact_tile_class "$st_result")" \
@@ -555,7 +555,7 @@ aid_artifact_render() {
   # NAMED as text rather than silently linking off-origin.
   local detail_label detail_href html_detail="" have_detail=0
   { IFS= read -r -d '' detail_label; IFS= read -r -d '' detail_href; } < <(jq -j \
-    '((.detail.label // .detail.name), .detail.href) | (. // "" | tostring) + "\u0000"' <<<"$facts_raw")
+    '((.detail.label // .detail.name), .detail.href) | (. // "" | tostring | gsub("\u0000"; "")) + "\u0000"' <<<"$facts_raw")
   if [[ -n "$detail_label" ]]; then
     have_detail=1
     detail_label="$(_aid_artifact_clip "$detail_label" "$_AID_ARTIFACT_CAP_SENTENCE")"
@@ -579,7 +579,7 @@ aid_artifact_render() {
   # ── prose blocks: sentence cap, then block cap, then escape ───────────────
   local p_summary p_core p_ask
   { IFS= read -r -d '' p_summary; IFS= read -r -d '' p_core; IFS= read -r -d '' p_ask; } < <(jq -j \
-    '(.summary, .core, .ask) | (. // "" | tostring) + "\u0000"' <<<"$prose_raw")
+    '(.summary, .core, .ask) | (. // "" | tostring | gsub("\u0000"; "")) + "\u0000"' <<<"$prose_raw")
 
   local summary_missing=0
   if [[ -z "${p_summary// /}" ]]; then p_summary="$_AID_ARTIFACT_PROSE_MISSING"; summary_missing=1; fi
@@ -632,7 +632,7 @@ aid_artifact_render() {
       factv["${fkeys[$fi]}"]="$value"; fi=$((fi + 1))
     done < <(jq -j '. as $f | $ARGS.positional[]
       | (reduce split(".")[] as $p ($f; if type == "object" then .[$p] else null end))
-      | (if . == null or . == "" then "—" else tostring end) + "\u0000"' --args "${fkeys[@]}" <<<"$facts_raw" 2>/dev/null)
+      | (if . == null or . == "" then "—" else tostring | gsub("\u0000"; "") end) + "\u0000"' --args "${fkeys[@]}" <<<"$facts_raw" 2>/dev/null)
   fi
 
   local out="" rest="$tpl" match kind key value

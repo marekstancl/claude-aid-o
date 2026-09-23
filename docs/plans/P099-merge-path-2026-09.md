@@ -18,7 +18,7 @@ Skutečné ověření udělá první noční běh po sloučení (`/aid-status` �
 
 | sada | před | po | co |
 |---|---|---|---|
-| vykreslení stránek (renderer) | 4,0 s / stránka | 2,3 s | ~15 volání `jq` místo ~79, výstup bajt po bajtu stejný |
+| vykreslení stránek (renderer) | 4,0 s / stránka | 2,3 s | ~15 volání `jq` místo ~79; výstup stejný na všech fixtures i zlatých souborech — jediný rozdíl: nový řádek uvnitř pole kroku se vykreslí jako mezera (v HTML totéž) |
 | test-aid-artifact-render | 105 s | 79 s | rychlejší renderer |
 | test-aid-plan-summary (t0) | 76 s | 54 s | rychlejší renderer (+1 případ) |
 | test-artifact-profiles (t0) | 36 s | 15 s | renderer; 4 případy stránky bran pryč |
