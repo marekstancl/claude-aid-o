@@ -245,12 +245,13 @@ _aid_artifact_list() {
   [[ "$total" =~ ^[0-9]+$ ]] || total=0
   (( total > 0 )) || { printf ''; return 0; }
   if [[ "$ordered" == "1" ]]; then tag="ol"; cls=" class=\"steps\""; fi
-  for (( i = 0; i < total && i < cap; i++ )); do
-    item="$(jq -r --argjson i "$i" '.[$i] | if type == "object" then (.name // .label // (.|tostring)) else tostring end' <<<"$arr")"
+  # One jq for every shown item; items are NUL-separated so a newline inside
+  # an item stays inside it.
+  while IFS= read -r -d '' item; do
     item="$(_aid_artifact_cap_sentences "$item")"
     item="$(_aid_artifact_clip "$item" "$_AID_ARTIFACT_CAP_SENTENCE")"
     shown+="<li>$(_aid_artifact_escape "$item")</li>"
-  done
+  done < <(jq -j --argjson cap "$cap" '.[:$cap][] | (if type == "object" then (.name // .label // (.|tostring)) else tostring end) + "\u0000"' <<<"$arr")
   local out="<${tag}${cls}>${shown}</${tag}>"
   if (( total > cap )); then
     out+="<p class=\"more\">$(_aid_artifact_escape "$(_aid_artifact_overflow "$(( total - cap ))")")</p>"
@@ -349,18 +350,14 @@ _aid_artifact_apply_profile() {
     return 1
   fi
 
-  local path missing="" present
-  while IFS= read -r path; do
-    [[ -n "$path" ]] || continue
-    present="$(jq -r --arg p "$path" '
-      (reduce ($p | split(".")[]) as $k (.; if type == "object" then .[$k] else null end))
-      | if . == null then "no"
-        elif type == "array" then (if length > 0 then "yes" else "no" end)
-        elif type == "object" then (if length > 0 then "yes" else "no" end)
-        elif (tostring | gsub("^\\s+|\\s+$"; "")) == "" then "no"
-        else "yes" end' <<<"$_ap_facts")"
-    [[ "$present" == "yes" ]] || missing+="${missing:+, }${path}"
-  done < <(jq -r --arg t "$atype" '.profiles[$t].required[]? ' <<<"$profiles")
+  # Every required path in ONE jq: the ones that are absent or empty, in order.
+  local missing
+  missing="$(jq -r --argjson req "$(jq -c --arg t "$atype" '.profiles[$t].required // []' <<<"$profiles")" '
+    . as $f | [$req[] | select(
+      (reduce split(".")[] as $k ($f; if type == "object" then .[$k] else null end))
+      | if . == null then true
+        elif type == "array" or type == "object" then length == 0
+        else (tostring | gsub("^\\s+|\\s+$"; "")) == "" end)] | join(", ")' <<<"$_ap_facts")"
 
   if [[ -n "$missing" ]]; then
     echo "aid_artifact_render: artifact_type '${atype}' requires: ${missing}" >&2
@@ -462,10 +459,9 @@ aid_artifact_render() {
 
   # ── computed facts: tile classes and the redaction count ──────────────────
   local st_result st_duration st_scope st_unresolved
-  st_result="$(jq -r '.tiles.result.state // "" | tostring' <<<"$facts_raw")"
-  st_duration="$(jq -r '.tiles.duration.state // "" | tostring' <<<"$facts_raw")"
-  st_scope="$(jq -r '.tiles.scope.state // "" | tostring' <<<"$facts_raw")"
-  st_unresolved="$(jq -r '.tiles.unresolved.state // "" | tostring' <<<"$facts_raw")"
+  IFS=$'\x1f' read -r st_result st_duration st_scope st_unresolved < <(jq -r \
+    '[.tiles.result.state, .tiles.duration.state, .tiles.scope.state, .tiles.unresolved.state]
+     | map(. // "" | tostring | gsub("\u001f"; " ")) | join("\u001f")' <<<"$facts_raw")
 
   facts_raw="$(jq \
     --arg rc "$(_aid_artifact_tile_class "$st_result")" \
@@ -513,42 +509,44 @@ aid_artifact_render() {
     *)         _deliv_heading="Co plán dodá" ;;
   esac
 
-  local html_deliv="" have_deliv=0 _d_epic _d_rows _d_i _d_j _d_n _d_t _d_a _d_d
+  local html_deliv="" have_deliv=0 _d_n _d_t _d_a _d_d
   if [[ "$(jq -r 'has("deliverables") and (.deliverables | type == "array") and (.deliverables | length > 0)' <<<"$facts_raw")" == "true" ]]; then
     have_deliv=1
     html_deliv=""
-    for _d_i in $(jq -r 'keys_unsorted[]' <<<"$(jq -c '.deliverables' <<<"$facts_raw")"); do
-      _d_epic="$(jq -r --argjson i "$_d_i" '.deliverables[$i].epic // ""' <<<"$facts_raw")"
-      html_deliv+="<h3 class=\"deliv-epic\">$(_aid_artifact_escape "$(_aid_artifact_clip "$_d_epic" "$_AID_ARTIFACT_CAP_SENTENCE")")</h3><ul class=\"deliv\">"
-      _d_rows="$(jq -r --argjson i "$_d_i" '.deliverables[$i].steps | length' <<<"$facts_raw")"
-      for (( _d_j = 0; _d_j < _d_rows; _d_j++ )); do
-        _d_n="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].n // ""' <<<"$facts_raw")"
-        _d_t="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].text // ""' <<<"$facts_raw")"
-        _d_a="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].acs // "0"' <<<"$facts_raw")"
-        _d_d="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].detail // ""' <<<"$facts_raw")"
-        # A PLAN page numbers steps because the reader is following a sequence
-        # not yet run. A FINISHED page lists what came out, where "Krok 3" is
-        # noise — the delivered thing is the subject, not its position.
-        if [[ -n "$_d_n" && "$_deliv_heading" == "Co plán dodá" ]]; then
-          html_deliv+="<li><b>Krok $(_aid_artifact_escape "$_d_n"):</b> $(_aid_artifact_escape "$(_aid_artifact_clip "$_d_t" "$_AID_ARTIFACT_CAP_SENTENCE")")"
-        else
-          html_deliv+="<li>$(_aid_artifact_escape "$(_aid_artifact_clip "$_d_t" "$_AID_ARTIFACT_CAP_SENTENCE")")"
-        fi
-        # Czech declension, because "3 kritérií" is what a machine writes and a
-        # reader notices: 1 kritérium, 2-4 kritéria, 5+ kritérií.
-        if [[ -n "$_d_a" && "$_d_a" != "0" ]]; then
-          local _d_w="kritérií"
-          [[ "$_d_a" == "1" ]] && _d_w="kritérium"
-          [[ "$_d_a" =~ ^[234]$ ]] && _d_w="kritéria"
-          html_deliv+=" <span class=\"acs\">· $(_aid_artifact_escape "$_d_a") ${_d_w}</span>"
-        fi
-        # The step's Objective, whole, under its title (never clipped: it is the
-        # one sentence that says what the step delivers).
-        [[ -n "$_d_d" ]] && html_deliv+="<br>$(_aid_artifact_escape "$_d_d")"
-        html_deliv+="</li>"
-      done
-      html_deliv+="</ul>"
-    done
+    # One jq for every group and row: a group header row is "G<US>epic", a step
+    # row "S<US>n<US>text<US>acs<US>detail"; values are made single-line and
+    # free of the separator, the same shape every other field reaches here in.
+    local _kind _d_open=0
+    while IFS=$'\x1f' read -r _kind _d_n _d_t _d_a _d_d; do
+      if [[ "$_kind" == G ]]; then
+        (( _d_open )) && html_deliv+="</ul>"
+        html_deliv+="<h3 class=\"deliv-epic\">$(_aid_artifact_escape "$(_aid_artifact_clip "$_d_n" "$_AID_ARTIFACT_CAP_SENTENCE")")</h3><ul class=\"deliv\">"
+        _d_open=1; continue
+      fi
+      # A PLAN page numbers steps because the reader is following a sequence
+      # not yet run. A FINISHED page lists what came out, where "Krok 3" is
+      # noise — the delivered thing is the subject, not its position.
+      if [[ -n "$_d_n" && "$_deliv_heading" == "Co plán dodá" ]]; then
+        html_deliv+="<li><b>Krok $(_aid_artifact_escape "$_d_n"):</b> $(_aid_artifact_escape "$(_aid_artifact_clip "$_d_t" "$_AID_ARTIFACT_CAP_SENTENCE")")"
+      else
+        html_deliv+="<li>$(_aid_artifact_escape "$(_aid_artifact_clip "$_d_t" "$_AID_ARTIFACT_CAP_SENTENCE")")"
+      fi
+      # Czech declension, because "3 kritérií" is what a machine writes and a
+      # reader notices: 1 kritérium, 2-4 kritéria, 5+ kritérií.
+      if [[ -n "$_d_a" && "$_d_a" != "0" ]]; then
+        local _d_w="kritérií"
+        [[ "$_d_a" == "1" ]] && _d_w="kritérium"
+        [[ "$_d_a" =~ ^[234]$ ]] && _d_w="kritéria"
+        html_deliv+=" <span class=\"acs\">· $(_aid_artifact_escape "$_d_a") ${_d_w}</span>"
+      fi
+      # The step's Objective, whole, under its title (never clipped: it is the
+      # one sentence that says what the step delivers).
+      [[ -n "$_d_d" ]] && html_deliv+="<br>$(_aid_artifact_escape "$_d_d")"
+      html_deliv+="</li>"
+    done < <(jq -r 'def one: . // "" | tostring | gsub("[\n\u001f]"; " ");
+      .deliverables[] | (["G", (.epic | one)] | join("\u001f")),
+        (.steps[]? | ["S", (.n | one), (.text | one), (.acs // "0" | one), (.detail | one)] | join("\u001f"))' <<<"$facts_raw")
+    (( _d_open )) && html_deliv+="</ul>"
   fi
 
   # Block 7 — EXPLICIT input only. No detail label, no block. An href is
@@ -556,8 +554,8 @@ aid_artifact_render() {
   # forbids an external target, so an absolute one degrades to the target
   # NAMED as text rather than silently linking off-origin.
   local detail_label detail_href html_detail="" have_detail=0
-  detail_label="$(jq -r '.detail.label // .detail.name // "" | tostring' <<<"$facts_raw")"
-  detail_href="$(jq -r '.detail.href // "" | tostring' <<<"$facts_raw")"
+  { IFS= read -r -d '' detail_label; IFS= read -r -d '' detail_href; } < <(jq -j \
+    '((.detail.label // .detail.name), .detail.href) | (. // "" | tostring) + "\u0000"' <<<"$facts_raw")
   if [[ -n "$detail_label" ]]; then
     have_detail=1
     detail_label="$(_aid_artifact_clip "$detail_label" "$_AID_ARTIFACT_CAP_SENTENCE")"
@@ -580,9 +578,8 @@ aid_artifact_render() {
 
   # ── prose blocks: sentence cap, then block cap, then escape ───────────────
   local p_summary p_core p_ask
-  p_summary="$(jq -r '.summary // "" | tostring' <<<"$prose_raw")"
-  p_core="$(jq -r '.core // "" | tostring' <<<"$prose_raw")"
-  p_ask="$(jq -r '.ask // "" | tostring' <<<"$prose_raw")"
+  { IFS= read -r -d '' p_summary; IFS= read -r -d '' p_core; IFS= read -r -d '' p_ask; } < <(jq -j \
+    '(.summary, .core, .ask) | (. // "" | tostring) + "\u0000"' <<<"$prose_raw")
 
   local summary_missing=0
   if [[ -z "${p_summary// /}" ]]; then p_summary="$_AID_ARTIFACT_PROSE_MISSING"; summary_missing=1; fi
@@ -624,6 +621,20 @@ aid_artifact_render() {
   _aid_artifact_region tpl deliverables  "$have_deliv"
   _aid_artifact_region tpl detail        "$have_detail"
 
+  # Every {{fact:*}} value in ONE jq (a jq per placeholder was most of a
+  # page's render time), NUL-separated in the order of the keys.
+  local -A factv=()
+  local -a fkeys=()
+  mapfile -t fkeys < <(grep -oE '\{\{fact:[A-Za-z0-9_.]+\}\}' <<<"$tpl" | sed 's/^{{fact://; s/}}$//' | sort -u)
+  if (( ${#fkeys[@]} )); then
+    local fi=0
+    while IFS= read -r -d '' value; do
+      factv["${fkeys[$fi]}"]="$value"; fi=$((fi + 1))
+    done < <(jq -j '. as $f | $ARGS.positional[]
+      | (reduce split(".")[] as $p ($f; if type == "object" then .[$p] else null end))
+      | (if . == null or . == "" then "—" else tostring end) + "\u0000"' --args "${fkeys[@]}" <<<"$facts_raw" 2>/dev/null)
+  fi
+
   local out="" rest="$tpl" match kind key value
   while [[ "$rest" =~ \{\{(fact|prose|html):([A-Za-z0-9_.]+)\}\} ]]; do
     match="${BASH_REMATCH[0]}"
@@ -633,10 +644,7 @@ aid_artifact_render() {
     rest="${rest#*"$match"}"
     case "$kind" in
       fact)
-        value="$(jq -r --arg k "$key" '
-          reduce ($k | split(".")[]) as $p (.; if type == "object" then .[$p] else null end)
-          | if . == null or . == "" then "—" else tostring end' <<<"$facts_raw" 2>/dev/null)"
-        [[ -n "$value" ]] || value="$_AID_ARTIFACT_ABSENT"
+        value="${factv[$key]:-$_AID_ARTIFACT_ABSENT}"
         value="$(_aid_artifact_escape "$value")"
         ;;
       prose)

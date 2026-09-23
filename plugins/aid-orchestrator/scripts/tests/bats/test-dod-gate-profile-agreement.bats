@@ -1,5 +1,8 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
+#
+# T1 BY MEASUREMENT (P099): 82 s over 6 cases (nightly journal, 2026-09-23) —
+# every case runs the real generator; T0 is under 2 s per case.
 #
 # The DoD gate is chosen from execution.yaml's `gates:` map and written into
 # plan.json; the GATES -> DONE precondition then judges the run against the

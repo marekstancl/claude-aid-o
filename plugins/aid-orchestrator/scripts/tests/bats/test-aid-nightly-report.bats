@@ -1,5 +1,9 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+#
+# T2 SINCE P099 (docs/plans/P099-merge-path-2026-09.md): the reporter runs only
+# in the nightly CI job, so its suite runs there too — a broken reporter shows
+# the next morning in /aid-status (NOT RUN / unreadable), not on a merge.
 #
 # MEASURED 61 s over 12 cases = 5 s per case (nightly journal, 2026-08-15); T0
 # is under 2 s per case. Each case drives the real reporter over a real runner
