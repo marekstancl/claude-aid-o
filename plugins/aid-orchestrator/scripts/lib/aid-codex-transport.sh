@@ -100,27 +100,29 @@ aid_codex_probe() {
 #   One fresh, read-only codex process; its --json stream, stderr and last
 #   message land in the three output files. Independence is provider + fresh
 #   process + `--sandbox read-only`, not a filesystem jail. Reads $CODEX_MODEL
-#   and a timeout (AID_CODEX_ISOLATED_TIMEOUT_SECONDS; AID_C3_TIMEOUT_SECONDS is
-#   the older name and still wins when set). Returns the codex/timeout exit
-#   code (124 = timed out).
+#   and $CODEX_EFFORT (default medium) and a timeout
+#   (AID_CODEX_ISOLATED_TIMEOUT_SECONDS; AID_C3_TIMEOUT_SECONDS is the older name
+#   and still wins when set). Returns the codex/timeout exit code (124 = timed out).
+#
+#   The prompt goes on stdin (`-`), never as an argument: a 189 kB CP1 prompt
+#   failed with "Argument list too long" (exit 126) on 2026-09-21.
 #
 #   `--output-schema` is deliberately NOT passed: Codex forwards it to strict
 #   structured output, which answers HTTP 400 to any `if`/`then`/`allOf`. The
 #   trusted check of an answer is the caller's own validator, never the backend.
 _run_codex_isolated() {
   local project_root="$1" prompt_file="$2" events_out="$3" stderr_out="$4" last_out="$5"
-  local prompt rc=0 bin
-  prompt="$(cat "$prompt_file")"
+  local rc=0 bin
+  [[ -r "$prompt_file" ]] || { echo "aid-codex-transport: cannot read prompt $prompt_file" >&2; return 2; }
   IFS=$'\t' read -r bin _ < <(aid_codex_binary) || bin=codex
   timeout "${AID_C3_TIMEOUT_SECONDS:-${AID_CODEX_ISOLATED_TIMEOUT_SECONDS:-900}}" \
     "$bin" exec --json \
       --cd "$project_root" \
       --sandbox read-only \
       -m "$CODEX_MODEL" \
-      -c model_reasoning_effort=high \
+      -c model_reasoning_effort="${CODEX_EFFORT:-medium}" \
       --output-last-message "$last_out" \
-      "$prompt" \
-      < /dev/null > "$events_out" 2> "$stderr_out" || rc=$?
+      - < "$prompt_file" > "$events_out" 2> "$stderr_out" || rc=$?
   return "$rc"
 }
 

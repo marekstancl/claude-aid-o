@@ -377,8 +377,8 @@ audit line).
    step, `--checkpoint cp3 --evidence-dir <run dir>` for an EPIC.
 3. Dispatch every reviewer, then `collect` and `close`, exactly as the
    controller instruction quoted below says (codex roles: `aid-review-round.sh
-   dispatch <review> --round K --provider codex --role <role>`; an absent codex
-   is `provider_absent` and the round closes degraded, never faked).
+   dispatch <review> --round K --provider codex --role <role>`; a codex
+   that gives no answer is replaced by the stand-in the quoted text describes).
 4. `close` prints the verdict. `pass` → `increment-step` / `transition`.
    `fail` with a round left (`rounds_default`, 2) → the step's own role fixes
    (the `fix_of:` dispatch in the instruction below), a new step check, then
@@ -452,15 +452,15 @@ one at a time:
 ## Stand-in for a Codex role
 
 When `dispatch --provider codex` prints a line starting `STAND-IN:`, no codex
-could be reached (absent, outdated, or over its usage limit) and the round
-records `fallback: "claude"` for that role. Dispatch it exactly as above — the
-same prompt file, the same start/complete bracket — at the model the STAND-IN
-line names (`stand_in_model` of the checkpoint's block), and tell the reviewer
-to write `"provider": "claude"` in its answer. `collect` accepts a claude answer
-for a codex role ONLY with that record, and counts a stand-in nobody dispatched
-as missing, which makes the round invalid. Pass its token figure to `close` like
-any claude role. The PM card names the stand-in and the reason in one line; the
-PM is told, not asked.
+answer came (absent, outdated, over its usage limit, or a run that left no
+answer) and the round records `fallback: "claude"` for that role. Dispatch it
+exactly as above — the same prompt file, the same start/complete bracket — at
+the model the STAND-IN line names (`stand_in_model` of the checkpoint's
+block), and tell the reviewer to write `"provider": "claude"` in its answer.
+`collect` accepts a claude answer for a codex role ONLY with that record, and
+counts a stand-in nobody dispatched as missing, which makes the round invalid.
+Pass its token figure to `close` like any claude role. The PM card names the
+stand-in and the reason in one line; the PM is told, not asked.
 
 After ALL reviewers of the round (claude and codex) have been dispatched, run
 `collect`. Only when `collect` exits 0, run `close` once with a token value for

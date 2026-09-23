@@ -51,7 +51,9 @@ roles; answer only the questions of your role below.
 ## Output
 
 Write ONE file to `{{output_path}}` containing exactly one JSON object and
-nothing else:
+nothing else. If you cannot write files (a read-only sandbox), print that one
+object as your final message instead, with nothing after it; AID writes the
+file from that message.
 
 {"role": "<your role id>", "checkpoint": "{{checkpoint}}",
  "findings": [{"id": "<role>-1", "checkpoint": "{{checkpoint}}",

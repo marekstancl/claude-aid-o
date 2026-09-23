@@ -173,6 +173,16 @@ STUB
   echo "$output"; [ "$status" -eq 0 ]
   jq -e '.valid | index("generalist_b")' "$CP1/round-1/collect.json"
 }
+@test "dispatch: a codex run that leaves no answer is stood in for, and codex is not dispatched twice" {
+  "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
+  _probe true
+  mkdir -p "$ROOT/bin"; printf '#!/usr/bin/env bash\nexit 0\n' > "$ROOT/bin/codex"; chmod +x "$ROOT/bin/codex"
+  PATH="$ROOT/bin:$PATH" run "$ROUND_SH" dispatch "$PLAN" --round 1 --provider codex --role generalist_b
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"STAND-IN"*"(no_file)"* ]]
+  [ "$(jq -r '"\(.fallback) \(.reason)"' "$CP1/round-1/codex-generalist_b.usage.json")" = "claude no_file" ]
+  PATH="$ROOT/bin:$PATH" run "$ROUND_SH" dispatch "$PLAN" --round 1 --provider codex --role generalist_b
+  [ "$status" -eq 1 ]; [[ "$output" == *"only through retry"* ]]
+}
 @test "dispatch: a claude role is refused naming the controller instruction" {
   "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
   run "$ROUND_SH" dispatch "$PLAN" --round 1 --provider codex --role reuse

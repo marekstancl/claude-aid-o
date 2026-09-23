@@ -392,7 +392,7 @@ _stand_in() { jq -e '.fallback == "claude"' "$1/codex-${2}.usage.json" >/dev/nul
 _codex_probe() { ( AID_PROJECT_ROOT="$ROOT"; export AID_PROJECT_ROOT; source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"; aid_codex_probe ); }
 # _stand_in_line <dir> <role> <why> — what the controller must do instead of paying codex.
 _stand_in_line() {
-  echo "STAND-IN: codex is unavailable ($3); dispatch ${1}/prompt-${2}.md to a general-purpose agent at model ${RC_STAND_IN_MODEL} (see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
+  echo "STAND-IN: no codex answer ($3); dispatch ${1}/prompt-${2}.md to a general-purpose agent at model ${RC_STAND_IN_MODEL} (see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
 }
 
 cmd_dispatch() {
@@ -405,6 +405,7 @@ cmd_dispatch() {
     || _die "role ${ROLE} is dispatched by the controller (see scripts/lib/aid-review-adapter-claude.md)"
   local answer="${dir}/reviewer-${ROLE}.json" usage="${dir}/codex-${ROLE}.usage.json"
   [[ -e "$answer" ]] && _die "${answer} already exists; a reviewer is never paid twice (use retry after collect lists it as invalid)"
+  _stand_in "$dir" "$ROLE" && _die "a stand-in was already ordered for ${ROLE}; codex is asked again only through retry"
 
   local probe why
   probe="$(_codex_probe)"
@@ -431,17 +432,12 @@ cmd_dispatch() {
     echo "dispatched ${ROLE} (codex ${RC_MODEL[$i]}): answer in ${answer}"
   else
     rm -f "$answer"
-    local why=no_file; (( rc == 124 )) && why=timeout
+    local why=no_file; (( rc != 0 )) && why="exit_${rc}"; (( rc == 124 )) && why=timeout
     grep -qiE 'usage limit|rate.?limit|429' "${dir}/codex-${ROLE}.stderr.txt" 2>/dev/null && why=rate_limited
-    # A codex that answered the probe and then hit its limit mid-run falls back
-    # like an absent one; a codex that simply wrote nothing is a failure.
-    if [[ "$why" == rate_limited || "$why" == timeout ]]; then
-      jq -n --arg why "$why" '{answered: false, reason: $why, fallback: "claude"}' > "$usage"
-      _stand_in_line "$dir" "$ROLE" "$why"
-      return 0
-    fi
-    jq -n --arg why "$why" '{answered: false, reason: $why}' > "$usage"
-    _die "codex returned no answer for ${ROLE} (exit ${rc}); recorded as ${why}, see ${dir}/codex-${ROLE}.stderr.txt"
+    # Any run that leaves no answer falls back to the stand-in: a transport
+    # failure never costs the round its second opinion.
+    jq -n --arg why "$why" '{answered: false, reason: $why, fallback: "claude"}' > "$usage"
+    _stand_in_line "$dir" "$ROLE" "$why"
   fi
 }
 
