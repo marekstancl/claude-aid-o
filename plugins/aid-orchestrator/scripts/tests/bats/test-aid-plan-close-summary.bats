@@ -460,3 +460,46 @@ _blockers_two() {
   grep -qF 'Nic — ozvu se, až bude hotovo' "$body"
   refute_grep -qF '<h2>Jak pokračovat</h2>' "$body"
 }
+
+# --- P099 Step 7: where the plan's time went --------------------------------
+
+@test "the delivered page shows where the time went, or says it was not measured" {
+  _brief true auto '[]'
+  _decision '"3333333333333333333333333333333333333333"' v2.84.0
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 0 ]
+  grep -qF 'Kam šel čas: neměřeno' "$OUT_DIR/plan-close-artifact.html"
+  jq '.release_decision.plan_summary.time = {work_min: 300, review_min: 60, gates_min: 25, waiting_pm_min: 90, outage_min: null}' \
+    "$DECISION" > "$DECISION.x" && mv "$DECISION.x" "$DECISION"
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 0 ]
+  grep -qF 'Kam šel čas: práce 300 min, revize 60 min, brány 25 min, čekání na tebe 90 min, výpadky neměřeno' "$OUT_DIR/plan-close-artifact.html"
+}
+
+@test "aid_plan_close_time: five numbers from review rounds, gate runs, EXECUTE spans and the hook audit" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-review-summary.sh"
+  local r="$BATS_TEST_TMPDIR/p" ev run
+  ev="$r/.aid-o/work/evidence/P900"; run="$r/.aid-o/work/evidence/E-900-1_1/R-1"
+  mkdir -p "$ev/cp1/round-1" "$ev/R-P900-final-1/cp7/round-1" "$run/cp2/step-0/round-1"
+  printf '{"started_at":"2026-09-01T10:00:00Z","finished_at":"2026-09-01T10:30:00Z"}' > "$ev/cp1/round-1/measurement.json"
+  printf '{"started_at":"2026-09-01T12:30:00Z","finished_at":"2026-09-01T12:40:00Z"}' > "$run/cp2/step-0/round-1/measurement.json"
+  printf '{"started_at":"2026-09-01T20:00:00Z","finished_at":"2026-09-01T20:20:00Z"}' > "$ev/R-P900-final-1/cp7/round-1/measurement.json"
+  printf '%s\n' '{"ts":"2026-09-01T11:00:00Z","event":"fsm_transition","from":"READY","to":"EXECUTE"}' \
+    '{"ts":"2026-09-01T13:00:00Z","event":"gate_runner_start"}' '{"ts":"2026-09-01T13:15:00Z","event":"gate_runner_complete"}' \
+    '{"ts":"2026-09-01T17:00:00Z","event":"fsm_transition","from":"EXECUTE","to":"GATES"}' > "$run/timeline.jsonl"
+  # S1 hands over at 14:00, the PM answers at 15:00; S1 is refused at 15:30 and
+  # its next event comes at 16:10 (a 40-minute outage). S9 names another plan.
+  printf '%s\n' \
+    '{"ts":"2026-09-01T14:00:00Z","event":"Stop","session_id":"S1","rule":"queue_continuation_notice","outcome":"skip","reason":"outcome=handed_over plan=P900: card"}' \
+    '{"ts":"2026-09-01T15:00:00Z","event":"UserPromptSubmit","session_id":"S1","rule":"pm_reply_marker","outcome":"skip","reason":"pm reply"}' \
+    '{"ts":"2026-09-01T15:30:00Z","event":"Stop","session_id":"S1","rule":"queue_continuation_notice","outcome":"deny","reason":"outcome=refused plan=P900: x"}' \
+    '{"ts":"2026-09-01T16:10:00Z","event":"PreToolUse","session_id":"S1","rule":"turn_write_scope","outcome":"skip","reason":"x"}' \
+    '{"ts":"2026-09-01T14:00:00Z","event":"Stop","session_id":"S9","rule":"queue_continuation_notice","outcome":"skip","reason":"outcome=handed_over plan=P901: card"}' \
+    > "$BATS_TEST_TMPDIR/audit.jsonl"
+  AID_HOOK_AUDIT="$BATS_TEST_TMPDIR/audit.jsonl" run aid_plan_close_time "$r" P900 .aid-o/work/evidence/E-900-1_1/R-1
+  [ "$status" -eq 0 ]
+  # EXECUTE 11:00-17:00 = 360; minus review 10, gates 15, waiting 60, outage 40 = 235
+  [ "$(jq -c . <<< "$output")" = '{"work_min":235,"review_min":60,"gates_min":15,"waiting_pm_min":60,"outage_min":40}' ]
+  AID_HOOK_AUDIT="$BATS_TEST_TMPDIR/none.jsonl" run aid_plan_close_time "$r" P900
+  [ "$(jq -c '[.waiting_pm_min, .outage_min, .work_min]' <<< "$output")" = '[null,null,null]' ]
+}

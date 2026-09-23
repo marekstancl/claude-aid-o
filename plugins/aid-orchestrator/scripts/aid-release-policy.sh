@@ -971,7 +971,8 @@ main() {
       --arg plan "$PLAN_ID" --arg run "$RUN_ID" \
       --arg cand "$CANDIDATE_SHA" --arg tref "$TARGET_REF" --arg thead "$TARGET_HEAD_SHA" \
       --arg gres "$gates_result" --arg gpath "${gates_report_path#"${PROJECT_ROOT}/"}" \
-      --argjson epics "$PLAN_EPICS_JSON" --argjson close "$(aid_plan_close_cost "$(dirname "$EVIDENCE_DIR")" "$PLAN_ID")" '
+      --argjson epics "$PLAN_EPICS_JSON" --argjson close "$(aid_plan_close_cost "$(dirname "$EVIDENCE_DIR")" "$PLAN_ID")" \
+      --argjson time "$(aid_plan_close_time "$PROJECT_ROOT" "$PLAN_ID" $(jq -r '.[].evidence_dir // empty' <<< "$PLAN_EPICS_JSON"))" '
       ($m[0].plan_boundary_manifest // {}) as $b
       | {
           plan_id: $plan,
@@ -988,7 +989,8 @@ main() {
                              quarantine_substitutes: ($b.quarantine_substitutes // [])},
           specialist_review: ($b.plan_final_review // null),
           remaining_backlog: ($b.plan_final_backlog // []),
-          close: $close
+          close: $close,
+          time: $time
         }')" || plan_summary_json="null"
   fi
 

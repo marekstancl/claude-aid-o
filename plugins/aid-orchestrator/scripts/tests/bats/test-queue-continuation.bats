@@ -500,9 +500,15 @@ _sent() { grep -c "${1:-agent-waiting}" "$TMP/sent" 2>/dev/null || echo 0; }
   mkdir -p "$TMP/store/hooks"
   printf '{"verified":true,"tool":"bats","version":"fixture","checked_at":"%s"}' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$TMP/store/hooks/trust.json"
+  local before; before="$(find "$ROOT/.aid-o" -type f -exec sha256sum {} + | sort)"
   run bash "$HOOK" Stop <<< "$(_stop S1 "x" true)"
-  [ "$status" -eq 2 ]; [[ "$output" == *"continue the /aid-run --auto procedure"* || "$output" == *"Continue the /aid-run --auto procedure"* ]]
+  [ "$status" -eq 2 ]; [[ "$output" == *"Continue the /aid-run --auto procedure"* ]]
   grep -q '"rule":"queue_continuation_notice","outcome":"deny","reason":"outcome=refused plan=P090' "$AID_HOOK_AUDIT"
+  # The PM's prompt is audited too, and neither event writes into the tree.
+  run bash "$HOOK" UserPromptSubmit <<< "$(jq -n --arg c "$ROOT" '{session_id:"S1",cwd:$c,prompt:"ok"}')"
+  [ "$status" -eq 0 ]
+  grep -q '"event":"UserPromptSubmit","session_id":"S1".*"rule":"pm_reply_marker"' "$AID_HOOK_AUDIT"
+  [ "$(find "$ROOT/.aid-o" -type f -exec sha256sum {} + | sort)" = "$before" ]
   # A rule that overruns never blocks: the registry's clock is set below the
   # rule's own work by a slow stand-in for the jobs query.
   local reg="$TMP/reg.yaml"

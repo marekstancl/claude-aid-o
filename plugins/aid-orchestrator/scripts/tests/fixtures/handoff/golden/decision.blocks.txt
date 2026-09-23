@@ -10,4 +10,6 @@
 <h2>Čeho se to týká</h2>
 <section class="block ask">
 <h2>Co se čeká ode mě</h2>
+<section class="block">
+<h2>Co plán dodal</h2>
 <footer>
