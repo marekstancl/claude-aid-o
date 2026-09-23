@@ -40,3 +40,10 @@ teardown() { [[ -n "${T:-}" ]] && find "$T" -delete; }
   run bash -c "before=\$(set +o); source '$LIB'; [[ \"\$before\" == \"\$(set +o)\" && -z \"\${SCRIPT_DIR:-}\" && -z \"\${PLUGIN_ROOT:-}\" ]]"
   [ "$status" -eq 0 ]
 }
+
+@test "the probe asks the configured model, and a cached answer about another model is probed again" {
+  run bash -c "cd '$T/project'; source '$LIB'; CODEX_MODEL=model-a aid_codex_probe >/dev/null; CODEX_MODEL=model-a aid_codex_probe >/dev/null; grep -qx model-a '$SPY_ARGS' && rm '$SPY_ARGS'
+               CODEX_MODEL=model-a aid_codex_probe >/dev/null; [[ ! -e '$SPY_ARGS' ]]
+               CODEX_MODEL=model-b aid_codex_probe | jq -e '.model == \"model-b\"' >/dev/null && grep -qx model-b '$SPY_ARGS'"
+  [ "$status" -eq 0 ]
+}

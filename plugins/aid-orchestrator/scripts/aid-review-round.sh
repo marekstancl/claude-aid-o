@@ -385,11 +385,12 @@ _closed() { [[ -f "$1/measurement.json" ]]; }
 # _stand_in <round_dir> <role> — the codex role's record says a claude stand-in
 # was asked for, because the probe could not reach a codex.
 _stand_in() { jq -e '.fallback == "claude"' "$1/codex-${2}.usage.json" >/dev/null 2>&1; }
-# _codex_probe — {available, binary, version, reason} from the shared probe.
+# _codex_probe <model> — {available, binary, version, reason} from the shared
+# probe, asked of the model the role will run on.
 # The cache belongs to the project under review, never to whatever directory the
 # controller happens to stand in — two projects reviewed from one cwd would
 # otherwise share one answer.
-_codex_probe() { ( AID_PROJECT_ROOT="$ROOT"; export AID_PROJECT_ROOT; source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"; aid_codex_probe ); }
+_codex_probe() { ( AID_PROJECT_ROOT="$ROOT" CODEX_MODEL="$1"; export AID_PROJECT_ROOT CODEX_MODEL; source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"; aid_codex_probe ); }
 # _agent_type <role> — the subagent a claude reviewer (or a codex role's
 # stand-in) is dispatched as: the role's effort, low → reviewer-light.
 _agent_type() {
@@ -418,8 +419,9 @@ cmd_dispatch() {
   [[ -e "$answer" ]] && _die "${answer} already exists; a reviewer is never paid twice (use retry after collect lists it as invalid)"
   _stand_in "$dir" "$ROLE" && _die "a stand-in was already ordered for ${ROLE}; codex is asked again only through retry"
 
+  [[ -r "${dir}/prompt-${ROLE}.md" ]] || _die "cannot read ${dir}/prompt-${ROLE}.md; prepare the round again" 2
   local probe why
-  probe="$(_codex_probe)"
+  probe="$(_codex_probe "${RC_MODEL[$i]}")"
   if [[ "$(jq -r '.available' <<< "$probe")" != true ]]; then
     why="$(jq -r '.reason' <<< "$probe")"
     jq -n --arg r "$why" '{answered: false, reason: $r, fallback: "claude"}' > "$usage"
@@ -465,7 +467,7 @@ cmd_retry() {
     # The stand-in record is the role's provenance, not a spent answer: it is
     # re-probed and rewritten, never dropped, or the retried answer would look
     # like a claude file nobody asked for (unexpected_provider).
-    local probe why; probe="$(_codex_probe)"; why="$(jq -r '.reason' <<< "$probe")"
+    local probe why; probe="$(_codex_probe "${RC_MODEL[$(aid_review_role_index "$ROLE")]}")"; why="$(jq -r '.reason' <<< "$probe")"
     if [[ "$(jq -r '.available' <<< "$probe")" == true ]]; then
       rm -f "${dir}/codex-${ROLE}".*
       echo "retry ${ROLE}: codex answers again; dispatch ${dir}/prompt-${ROLE}.md, then collect"

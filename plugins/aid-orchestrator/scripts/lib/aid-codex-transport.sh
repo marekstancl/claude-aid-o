@@ -50,11 +50,12 @@ aid_codex_binary() {
   printf '%s\t%s\n' "$best" "$best_v"
 }
 
-# aid_codex_probe [out.json] — can a codex answer right now? Prints
-# {available, binary, version, reason, probed_at} and writes it to out.json when
-# one is named. `reason` is none|codex_absent|rate_limited|timeout|error.
+# aid_codex_probe [out.json] — can a codex answer right now, on $CODEX_MODEL?
+# Prints {available, binary, version, model, reason, probed_at} and writes it
+# to out.json when one is named. `reason` is none|codex_absent|rate_limited|timeout|error.
 # A `codex exec` of a one-token prompt is the only way to see the usage limit,
-# so the answer is cached for ten minutes under <root>/.aid-o/work/codex-probe.json.
+# so the answer is cached for ten minutes under <root>/.aid-o/work/codex-probe.json,
+# per model: a cached answer about another model is probed again.
 # AID_CODEX_PROBE_STUB=<file> replaces the whole probe with that file's content
 # (tests only; never a production path).
 aid_codex_probe() {
@@ -68,7 +69,7 @@ aid_codex_probe() {
   now="$(date -u +%s)"
   if [[ -r "$cache" ]]; then
     age=$(( now - $(date -u -r "$cache" +%s 2>/dev/null || echo 0) ))
-    if (( age >= 0 && age < 600 )) && jq -e . "$cache" >/dev/null 2>&1; then
+    if (( age >= 0 && age < 600 )) && jq -e --arg m "$CODEX_MODEL" '.model == $m' "$cache" >/dev/null 2>&1; then
       result="$(cat "$cache")"
       [[ -n "$out" ]] && printf '%s\n' "$result" > "$out"
       printf '%s\n' "$result"; return 0
@@ -79,7 +80,7 @@ aid_codex_probe() {
   else
     tmp="$(mktemp)" || { avail=false; reason=error; }
     if [[ "$avail" == true ]]; then
-      timeout 30 "$bin" exec --sandbox read-only -m "${CODEX_MODEL:-gpt-5.6-terra}" ok </dev/null >"$tmp" 2>&1 || rc=$?
+      timeout 30 "$bin" exec --sandbox read-only -m "$CODEX_MODEL" ok </dev/null >"$tmp" 2>&1 || rc=$?
       if (( rc == 124 )); then avail=false; reason=timeout
       elif (( rc != 0 )); then
         avail=false
@@ -89,8 +90,8 @@ aid_codex_probe() {
     fi
   fi
   result="$(jq -nc --argjson a "$avail" --arg b "$bin" --arg v "$ver" --arg r "$reason" \
-    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{available: $a, binary: $b, version: $v, reason: $r, probed_at: $at}')"
+    --arg m "$CODEX_MODEL" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{available: $a, binary: $b, version: $v, model: $m, reason: $r, probed_at: $at}')"
   mkdir -p "${root}/.aid-o/work" 2>/dev/null && printf '%s\n' "$result" > "$cache" 2>/dev/null || true
   [[ -n "$out" ]] && printf '%s\n' "$result" > "$out"
   printf '%s\n' "$result"

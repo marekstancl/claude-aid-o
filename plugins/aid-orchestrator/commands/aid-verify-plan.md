@@ -34,11 +34,11 @@ review that counts before EPIC generation.
    bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" prepare --plan <plan> --round 1 --only <role> --manual
    ```
 
-2. Dispatch that reviewer in a fresh context; its model is the role's `model`
-   in `review_checkpoints.plan_review`, and it reads its prompt file itself:
+2. Dispatch that reviewer in a fresh context as the agent and at the model
+   `prepare` printed next to its prompt; it reads its prompt file itself:
 
    ```
-   Agent(subagent_type: "general-purpose", model: <the role's model>,
+   Agent(subagent_type: <the agent prepare printed>, model: <the model printed there>,
          prompt: "Your complete instructions are in <manual dir>/prompt-<role>.md. Read that whole file first and follow it exactly.")
    ```
 
