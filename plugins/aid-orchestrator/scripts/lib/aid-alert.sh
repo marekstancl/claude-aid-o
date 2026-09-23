@@ -34,7 +34,6 @@ _AID_ALERT_SH_LOADED=1
 source "$(dirname "${BASH_SOURCE[0]}")/aid-session-store.sh"
 
 _AID_ALERT_PRODUCTION_LIB="/opt/eco/services/scripts/lib/telegram-notify.sh"
-AID_ALERT_TELEGRAM_LIB="${AID_TELEGRAM_LIB:-$_AID_ALERT_PRODUCTION_LIB}"
 
 # _aid_alert_workspace — the main checkout of the repository this AID runs over:
 # the same answer from the checkout and from any of its plan worktrees.
@@ -60,15 +59,16 @@ _aid_alert_project() {
 # Returns the truth about delivery: 0 delivered, 1 not delivered, 2 suppressed.
 _aid_alert_send() {
   local severity="$1" scope="$2" id="$3" what="$4" action="$5" state="$6" source="$7"
+  local lib="${AID_TELEGRAM_LIB:-$_AID_ALERT_PRODUCTION_LIB}"
 
   # Test mode refuses the production library, not a stub: a fixture that
   # forgot to stub cannot reach the real channel.
-  if [[ "${AID_TEST_MODE:-0}" == "1" && "$AID_ALERT_TELEGRAM_LIB" == "$_AID_ALERT_PRODUCTION_LIB" ]]; then
+  if [[ "${AID_TEST_MODE:-0}" == "1" && "$lib" == "$_AID_ALERT_PRODUCTION_LIB" ]]; then
     return 2
   fi
 
-  if [[ ! -f "$AID_ALERT_TELEGRAM_LIB" ]]; then
-    echo "aid-alert: no shared telegram library at ${AID_ALERT_TELEGRAM_LIB} — alert '${id}' not delivered (non-fatal)" >&2
+  if [[ ! -f "$lib" ]]; then
+    echo "aid-alert: no shared telegram library at ${lib} — alert '${id}' not delivered (non-fatal)" >&2
     return 1
   fi
 
@@ -76,15 +76,15 @@ _aid_alert_send() {
   # options, none of which may leak into the caller.
   (
     # shellcheck source=/dev/null
-    source "$AID_ALERT_TELEGRAM_LIB" 2>/dev/null || exit 3
+    source "$lib" 2>/dev/null || exit 3
     declare -F send_alert >/dev/null 2>&1 || exit 4
     send_alert "$severity" "$scope" "$id" "$what" "$action" "" "" "$state" "$source"
   )
   local rc=$?
   case "$rc" in
     0) return 0 ;;
-    3) echo "aid-alert: could not source ${AID_ALERT_TELEGRAM_LIB} — alert '${id}' not delivered (non-fatal)" >&2; return 1 ;;
-    4) echo "aid-alert: ${AID_ALERT_TELEGRAM_LIB} defines no send_alert() — alert '${id}' not delivered (non-fatal). The standard's shared sender is what carries the mandatory fields." >&2; return 1 ;;
+    3) echo "aid-alert: could not source ${lib} — alert '${id}' not delivered (non-fatal)" >&2; return 1 ;;
+    4) echo "aid-alert: ${lib} defines no send_alert() — alert '${id}' not delivered (non-fatal). The standard's shared sender is what carries the mandatory fields." >&2; return 1 ;;
     *) echo "aid-alert: delivery of '${id}' failed (rc=${rc}, non-fatal); the run is unaffected" >&2; return 1 ;;
   esac
 }
@@ -98,19 +98,24 @@ _aid_alert_record() {
 }
 
 # _aid_alert_once <plan_id> <kind> <severity> <id> <state> <what> <action>
-#   Sends unless the plan's <kind> record is open, and opens it on delivery. A
-#   failed send leaves the record closed (the next stop tries again) and one
-#   line in failures.jsonl; an unwritable store still sends.
+#   Sends unless the plan's <kind> record exists. The record is CLAIMED before
+#   the send (created with noclobber, so of two sessions ending turns at once
+#   only one sends) and released again when the send fails, with one line in
+#   failures.jsonl — the next stop tries again. A store that cannot be written
+#   (or a record nobody could clear again) still sends, without de-duplication.
 _aid_alert_once() {
   local plan="$1" kind="$2" severity="$3" id="$4" state="$5" what="$6" action="$7" record project rc=0
-  record="$(_aid_alert_record "$plan" "$kind")" || {
-    echo "aid-alert: the alert store is unavailable — '${id}' is sent without de-duplication" >&2; record=""; }
-  [[ -n "$record" && -e "$record" ]] && return 0
+  record="$(_aid_alert_record "$plan" "$kind")" || record=""
+  if [[ -n "$record" && -w "$(dirname "$record")" ]]; then
+    ( set -C; : > "$record" ) 2>/dev/null || return 0
+  else
+    echo "aid-alert: the alert store is not writable — '${id}' is sent without de-duplication" >&2
+    record=""
+  fi
   project="$(_aid_alert_project)"
   _aid_alert_send "$severity" "${project}-aid" "$id" "$what" "$action" "$state" "AID · ${project}" || rc=$?
-  if (( rc == 0 )); then
-    [[ -n "$record" ]] && date -u +%Y-%m-%dT%H:%M:%SZ > "$record" 2>/dev/null
-  elif [[ -n "$record" ]]; then
+  if (( rc != 0 )) && [[ -n "$record" ]]; then
+    rm -f "$record"
     jq -nc --arg p "$plan" --arg id "$id" --argjson rc "$rc" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       '{at: $at, plan: $p, id: $id, rc: $rc}' >> "$(dirname "$record")/failures.jsonl" 2>/dev/null
   fi

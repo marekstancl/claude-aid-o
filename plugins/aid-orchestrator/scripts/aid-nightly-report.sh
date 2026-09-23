@@ -307,3 +307,14 @@ write_artifact() {
 write_artifact || { echo "aid-nightly-report: could not write '$ARTIFACT'" >&2; exit 2; }
 
 echo "aid-nightly-report: $ARTIFACT ($(jq 'length' <<<"$failed_json") failed, $(jq 'length' <<<"$flaky_json") flaky)"
+
+# ─── Once a month, what could go ─────────────────────────────────────────────
+# Attached to the report: the reaper's list is a proposal a PM reads beside the
+# night's result. It proposes only — nothing here deletes anything. ONE caller:
+# the nightly workflow briefly had a step of its own gated on the same date, so
+# on the 1st the reaper ran twice and wrote its artifact twice.
+if [[ "$(date -u +%d)" == "01" ]]; then
+  echo ""
+  bash "$SCRIPT_DIR/aid-test-reaper.sh" --dir "$NIGHTLY_DIR" --tests-dir "$TESTS_DIR" || true
+fi
+exit 0

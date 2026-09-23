@@ -98,3 +98,14 @@ _sent() { grep -c '^id=' "$SENT" 2>/dev/null || echo 0; }
   run grep -rnE 'aid_alert_(run|nightly)|try_telegram_alert|send_alert ' "$scripts" --include=*.sh
   [ -z "$(echo "$output" | grep -v '/tests/\|lib/aid-alert.sh')" ]
 }
+
+@test "two sessions ending turns at the same moment send one message; an unwritable store still sends" {
+  printf 'send_alert() { sleep 1; echo "id=$3" >> "$SENT"; }\n' > "$TEST_TMPDIR/slow.sh"
+  export AID_TELEGRAM_LIB="$TEST_TMPDIR/slow.sh"
+  bash -c 'source "$LIB"; aid_alert_waiting P900 a b' & bash -c 'source "$LIB"; aid_alert_waiting P900 a b' & wait
+  [ "$(_sent)" -eq 1 ]
+  mkdir -p "$AID_SESSION_STORE/alerts"; chmod -w "$AID_SESSION_STORE/alerts"
+  run bash -c 'source "$LIB"; aid_alert_waiting P901 a b'
+  chmod +w "$AID_SESSION_STORE/alerts"
+  [[ "$output" == *"without de-duplication"* ]]; [ "$(_sent)" -eq 2 ]
+}

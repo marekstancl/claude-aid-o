@@ -161,14 +161,13 @@ The block that lists what was produced carries a heading that follows the
 | `artifact_type` | heading |
 |---|---|
 | `plan` | Co plán dodá |
-| `epic_done` | Co EPIC dodal |
 | `plan_done` | Co plán dodal |
 
 The template holds `{{prose:deliverables_heading}}`; `lib/aid-artifact-render.sh`
 resolves it from the type before substitution. A producer supplies nothing for
 it — it is derived, never passed — and a template that hard-codes one of the
-three strings would print a plan's promise over a finished EPIC's result
+strings would print a plan's promise over a finished plan's result
 (the state before 2026-08-28).
 
-`deliverables` itself is required by the `plan`, `epic_done` and `plan_done`
+`deliverables` itself is required by the `plan` and `plan_done`
 profiles: a finished page that cannot say what it produced does not render.
