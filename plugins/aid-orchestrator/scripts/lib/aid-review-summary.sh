@@ -183,7 +183,8 @@ aid_plan_close_cost() {
 #   nobody could measure is null ("neměřeno" on the page), never 0.
 #     review   every review round's own start..end (measurement.json): CP1,
 #              the EPICs' CP2/CP3, the plan-final CP7
-#     gates    gate_runner_start..gate_runner_complete in the EPIC timelines
+#     gates    gate_runner_start..gate_runner_complete in the EPIC and plan-final
+#              timelines
 #     waiting  from a Stop the continuation rule let end with a card or a spent
 #              budget to the PM's next prompt in that session (hook audit)
 #     outage   a gap over 20 minutes after a Stop the rule refused (or let wait)
@@ -199,6 +200,7 @@ aid_plan_close_time() {
   mapfile -t m < <(ls "$ev"/cp1/round-*/measurement.json "$ev"/R-"${plan}"-final-*/cp7/round-*/measurement.json 2>/dev/null
                    for d; do find "${root}/${d}" -path '*/cp[23]/*' -name measurement.json 2>/dev/null; done)
   for d; do [[ -f "${root}/${d}/timeline.jsonl" ]] && tl+=("${root}/${d}/timeline.jsonl"); done
+  for d in "$ev"/R-"${plan}"-final-*/timeline.jsonl; do [[ -f "$d" ]] && tl+=("$d"); done
   audit="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}"
   local -a pat=()
   if [[ -r "$audit" ]]; then

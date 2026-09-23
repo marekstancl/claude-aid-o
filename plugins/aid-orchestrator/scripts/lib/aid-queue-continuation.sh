@@ -227,14 +227,16 @@ _aid_qc_counter() {
   printf '%s/%s_%s\n' "$dir" "$(_aid_alert_workspace | sha256sum | cut -c1-16)" "$1"
 }
 
-# _aid_qc_jobs_busy <root> — true when a background job AID owns (a gate run
-# under evidence/<epic>/<run>/jobs) is still live.
+# _aid_qc_jobs_busy <root> <plan_id> — true when a background job AID owns for
+# THIS plan (a gate run under evidence/E-<nnn>-*/<run>/jobs or the plan-final
+# run's jobs) is still live. Another plan's job never excuses this plan's stop.
 _aid_qc_jobs_busy() {
-  local d
+  local d n="${2#P}"
   while IFS= read -r d; do
     bash "${_AID_QC_LIB_DIR}/../aid-job.sh" watchdog --jobs-dir "$d" 2>/dev/null \
       | jq -e '.state == "busy"' >/dev/null 2>&1 && return 0
-  done < <(find "$1/.aid-o/work/evidence" -mindepth 3 -maxdepth 3 -type d -name jobs 2>/dev/null)
+  done < <(find "$1/.aid-o/work/evidence" -mindepth 3 -maxdepth 3 -type d -name jobs \
+             \( -path "*/E-${n}-*/*" -o -path "*/${2}/*" \) 2>/dev/null)
   return 1
 }
 
@@ -263,11 +265,14 @@ aid_hook_rule_queue_continuation_stop() {
     plan="$(basename "$(dirname "$sf")")"; break
   done
   [[ -n "$plan" ]] || { echo "outcome=not_auto: this session drives no open autonomous plan" >&2; return 3; }
+  yq -e '.plan_id' "$root/.aid-o/work/plan-state/${plan}/plan-state.yaml" >/dev/null 2>&1 \
+    || { echo "outcome=not_auto plan=${plan}: plan-state.yaml does not parse — the rule does not refuse without knowing" >&2; return 3; }
 
   [[ -n "$transcript" && -r "$transcript" ]] \
     || { echo "outcome=not_auto plan=${plan}: no readable transcript — the rule does not refuse without knowing" >&2; return 3; }
   local last tmp
-  last="$(_aid_hrt_last_message "$transcript")"
+  last="$(_aid_hrt_last_message "$transcript")" \
+    || { echo "outcome=not_auto plan=${plan}: the transcript does not parse — the rule does not refuse without knowing" >&2; return 3; }
   tmp="$(mktemp)" || { echo "outcome=not_auto plan=${plan}: no temp file" >&2; return 3; }
   printf '%s\n' "$last" > "$tmp"
   if _aid_hrt_hands_over "$tmp"; then
@@ -277,7 +282,7 @@ aid_hook_rule_queue_continuation_stop() {
     return 3
   fi
   rm -f "$tmp"
-  if [[ "$(printf '%s' "$last" | grep -v '^[[:space:]]*$' | tail -1)" == AID-WAIT:* ]] && _aid_qc_jobs_busy "$root"; then
+  if [[ "$(printf '%s' "$last" | grep -v '^[[:space:]]*$' | tail -1)" == AID-WAIT:* ]] && _aid_qc_jobs_busy "$root" "$plan"; then
     echo "outcome=wait plan=${plan}: a declared wait on a live background job" >&2
     return 3
   fi

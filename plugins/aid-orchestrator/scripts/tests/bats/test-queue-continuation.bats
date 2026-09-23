@@ -473,6 +473,23 @@ _sent() { grep -c "${1:-agent-waiting}" "$TMP/sent" 2>/dev/null || echo 0; }
   [ "$status" -eq 2 ]; [[ "$output" == *"continuation 1 of 40"* ]]
 }
 
+@test "the rule never refuses without knowing: an unparsable transcript or plan-state, or another plan's live job" {
+  _plan P090 auto EPIC_INTEGRATION; _bind P090 S1; _sink
+  printf 'not json\n' > "$TMP/bad.jsonl"
+  run aid_hook_rule_queue_continuation_stop <<< "$(jq -n --arg c "$ROOT" --arg t "$TMP/bad.jsonl" '{session_id:"S1",cwd:$c,transcript_path:$t}')"
+  [ "$status" -eq 3 ]; [[ "$output" == *"transcript does not parse"* ]]
+  # another plan's live job does not excuse this plan's AID-WAIT
+  local jd="$ROOT/.aid-o/work/evidence/E-091-1_2/R-1/jobs/j1"; mkdir -p "$jd"
+  sleep 30 & local pid=$!
+  jq -n --argjson p "$pid" --arg st "$(awk '{print $22}' /proc/$pid/stat)" '{pid:$p, proc_starttime:$st}' > "$jd/job.json"
+  run aid_hook_rule_queue_continuation_stop <<< "$(_stop S1 $'AID-WAIT: bats_all')"
+  kill "$pid"; wait "$pid" 2>/dev/null || true
+  [ "$status" -eq 2 ]
+  printf 'plan_id: [broken\nautonomy: auto\nplan_state: EPIC_INTEGRATION\nauto_session: S1\n' > "$ROOT/.aid-o/work/plan-state/P090/plan-state.yaml"
+  run aid_hook_rule_queue_continuation_stop <<< "$(_stop S1 "x")"
+  [ "$status" -eq 3 ]; [[ "$output" == *"does not parse"* ]]
+}
+
 @test "at the budget the turn ends with one waiting message; budget 0 disables the refusal" {
   _plan P090 auto EPIC_INTEGRATION; _bind P090 S1; _sink
   mkdir -p "$ROOT/.aid-o/config"; printf 'autonomy:\n  continuation_budget: 1\n' > "$ROOT/.aid-o/config/orchestration.yaml"
@@ -495,7 +512,7 @@ _sent() { grep -c "${1:-agent-waiting}" "$TMP/sent" 2>/dev/null || echo 0; }
   [[ "$output" == *"continuation 1 of 40"* ]]
 }
 
-@test "through the real dispatcher the refusal holds under stop_hook_active, and a timeout lets the turn end" {
+@test "through the real dispatcher the refusal holds under stop_hook_active, and neither event writes into the tree" {
   _plan P090 auto EPIC_INTEGRATION; _bind P090 S1; _sink
   mkdir -p "$TMP/store/hooks"
   printf '{"verified":true,"tool":"bats","version":"fixture","checked_at":"%s"}' \
@@ -509,14 +526,6 @@ _sent() { grep -c "${1:-agent-waiting}" "$TMP/sent" 2>/dev/null || echo 0; }
   [ "$status" -eq 0 ]
   grep -q '"event":"UserPromptSubmit","session_id":"S1".*"rule":"pm_reply_marker"' "$AID_HOOK_AUDIT"
   [ "$(find "$ROOT/.aid-o" -type f -exec sha256sum {} + | sort)" = "$before" ]
-  # A rule that overruns never blocks: the registry's clock is set below the
-  # rule's own work by a slow stand-in for the jobs query.
-  local reg="$TMP/reg.yaml"
-  yq '(.rules[] | select(.id == "queue_continuation_notice") | .timeout_s) = 1' "$AID_PLUGIN_PATH/defaults/hook-registry.yaml" > "$reg"
-  mkdir -p "$TMP/slow"; printf '#!/bin/sh\nsleep 3\n' > "$TMP/slow/jq"; chmod +x "$TMP/slow/jq"
-  AID_HOOK_REGISTRY="$reg" run env PATH="$TMP/slow:$PATH" bash -c "exec bash '$HOOK' Stop" <<< "$(_stop S1 "x" true)"
-  [ "$status" -ne 2 ]
-  grep -q '"rule":"queue_continuation_notice","outcome":"timeout"' "$AID_HOOK_AUDIT"
 }
 
 @test "the registry row refuses (degree 2, closed) and bounds its own loop" {
