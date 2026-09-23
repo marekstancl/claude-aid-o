@@ -18,8 +18,9 @@
 #   read from the project file first, then the default), RC_ROUNDS_DEFAULT,
 #   RC_MIN_ANSWERS (the block's min_answers when it declares one, else the
 #   number of unconditional roles), RC_BANNED_MODELS (space-separated), arrays
-#   RC_ROLE[], RC_PROVIDER[], RC_MODEL[], RC_WHEN[] (same index = same reviewer;
-#   RC_WHEN is "" or the step-check verdict that enables the role),
+#   RC_ROLE[], RC_PROVIDER[], RC_MODEL[], RC_EFFORT[], RC_WHEN[] (same index =
+#   same reviewer; RC_EFFORT is low|medium|high, medium when unset; RC_WHEN is ""
+#   or the step-check verdict that enables the role),
 #   RC_DEGRADED, RC_EXTRA_DOCS_TYPE_REVIEWERS (space-separated),
 #   RC_EXTRA_SKIP_THRESHOLD_FILES, RC_EXTRA_SKIP_THRESHOLD_LINES.
 #   Returns 2 without yq, 1 on unreadable YAML, a missing block or a missing
@@ -122,16 +123,15 @@ aid_review_config_load() {
   RC_EXTRA_DOCS_TYPE_REVIEWERS="$(yq -r "${b}.docs_type_reviewers // [] | .[]" "$RC_CONFIG_FILE" | tr '\n' ' ')"
   RC_EXTRA_SKIP_THRESHOLD_FILES="$(yq -r "${b}.skip_threshold.max_files // \"\"" "$RC_CONFIG_FILE")"
   RC_EXTRA_SKIP_THRESHOLD_LINES="$(yq -r "${b}.skip_threshold.max_lines // \"\"" "$RC_CONFIG_FILE")"
-  RC_ROLE=(); RC_PROVIDER=(); RC_MODEL=(); RC_WHEN=()
-  local role provider model when unconditional=0
-  while IFS=$'\t' read -r role provider model when; do
+  RC_ROLE=(); RC_PROVIDER=(); RC_MODEL=(); RC_EFFORT=(); RC_WHEN=()
+  local role provider model effort when unconditional=0
+  while IFS=$'\t' read -r role provider model effort when; do
     [[ -n "$role" ]] || continue
-    RC_ROLE+=("$role"); RC_PROVIDER+=("$provider"); RC_MODEL+=("$model"); RC_WHEN+=("$when")
+    RC_ROLE+=("$role"); RC_PROVIDER+=("$provider"); RC_MODEL+=("$model"); RC_EFFORT+=("$effort"); RC_WHEN+=("$when")
     [[ -z "$when" ]] && unconditional=$((unconditional + 1))
-  done < <(yq -r "${b}.reviewers // [] | .[] | [.role, .provider, .model, (.when // \"\")] | @tsv" "$RC_CONFIG_FILE")
-  # The model a Claude stand-in runs at when a codex role cannot be reached.
-  RC_STAND_IN_MODEL="$(yq -r "${b}.stand_in_model // \"\"" "$RC_CONFIG_FILE")"
-  [[ -n "$RC_STAND_IN_MODEL" ]] || RC_STAND_IN_MODEL="$([[ "$block" == plan_review ]] && echo opus || echo sonnet)"
+  done < <(yq -r "${b}.reviewers // [] | .[] | [.role, .provider, .model, (.effort // \"medium\"), (.when // \"\")] | @tsv" "$RC_CONFIG_FILE")
+  # The model a Claude stand-in runs at when a codex role gives no answer.
+  RC_STAND_IN_MODEL="$(yq -r "${b}.stand_in_model // \"opus\"" "$RC_CONFIG_FILE")"
   RC_MIN_ANSWERS="$(yq -r "${b}.min_answers // \"\"" "$RC_CONFIG_FILE")"
   [[ -n "$RC_MIN_ANSWERS" ]] || RC_MIN_ANSWERS="$unconditional"
 
@@ -185,6 +185,10 @@ aid_review_config_validate() {
     [[ -n "${RC_MODEL[$i]}" ]] || { _aid_rc_fail "role ${role}: model is empty"; return 1; }
     [[ " $RC_BANNED_MODELS " == *" ${RC_MODEL[$i]} "* ]] \
       && { _aid_rc_fail "role ${role}: model ${RC_MODEL[$i]} is in banned_models"; return 1; }
+    case "${RC_EFFORT[$i]}" in
+      low|medium|high) ;;
+      *) _aid_rc_fail "role ${role}: effort must be low, medium or high (got '${RC_EFFORT[$i]}')"; return 1 ;;
+    esac
     case "${RC_WHEN[$i]}" in
       "") unconditional=$((unconditional + 1)) ;;
       review+security) ;;

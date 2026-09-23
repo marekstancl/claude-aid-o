@@ -57,7 +57,8 @@ memory_context:         # injected by controller from Qdrant
 ```
 
 **Reading order before starting:**
-1. `skills/role-cards.md` — find your role section (Identity, Capabilities, Constraints)
+1. Your role card (Identity, Capabilities, Constraints) — pasted in your task prompt after the
+   Dispatch Contract
 2. `skills/agent-protocol.md` (this file) — input/output rules
 3. All `context_files` listed in your task input
 4. Previous step outputs from `evidence/.../steps/` (if `context_scope` != `none`)
@@ -378,7 +379,7 @@ about that path is available to a dispatched agent.
 
 ---
 
-**Last Updated:** 2026-09-21
+**Last Updated:** 2026-09-23
 
 ## Agent handoff contract at the plan boundary
 

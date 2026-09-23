@@ -557,7 +557,7 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
 
 1. Read current step: `aid-fsm.sh get-field current_step <state_file>`
 2. Load step definition from `plan.json` → `steps[current_step]` (`step_id` = its `id`)
-3. Load role card from `skills/role-cards.md` for the step's `role`
+3. Read the step role's `**Model:**` and `**Effort:**` in `skills/role-cards.md`
 4. Build the step's **dispatch contract** (P087) and its evidence directory:
    ```bash
    step_dir="$(bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-evidence-dir "$state_file" "$N")"
@@ -570,10 +570,12 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
    (item 10 below), not something the agent is trusted to remember.
 5. Assemble dispatch prompt (see Context Assembly below); when a contract exists, paste
    `aid_dispatch_contract_prompt "$step_dir/contract.json"` verbatim after the task block —
-   it tells the agent the version it must quote back and the `aid-return` block it owes.
-6. Dispatch via Agent tool. The model tier comes from the step role's `**Model:**`
-   field in `skills/role-cards.md` (single source of truth); an optional `step.model`
-   in `plan.json` overrides it for that one step (default: `opus` if neither is set)
+   it tells the agent the version it must quote back and the `aid-return` block it owes,
+   and carries the step role's card and the shared "Write the least code that works" rule
+   (content, never a path).
+6. Dispatch via Agent tool: subagent type `aid-orchestrator:implementer-light` when the card
+   says `**Effort:** low`, else `aid-orchestrator:implementer`; model the card's `**Model:**`
+   (an optional `step.model` in `plan.json` overrides it for that one step)
 7. Save output to `$step_dir/output.md` (`evidence/{epic_id}/{run_id}/steps/{step_id}/`).
    **The controller writes this file, from the agent's final message, and nobody else.** Do
    not ask the agent to write its own `output.md`: the `aid-return` block sits in the
@@ -1684,7 +1686,7 @@ Designed for quick tasks that don't warrant a full EPIC.
 
 **LLM behavior:**
 1. Log task to `.aid-o/logs/aid-do-log.jsonl` (action: `aid_do_start`)
-2. Dispatch single agent (default: sonnet) with task description
+2. Dispatch single agent (`aid-orchestrator:implementer`, model opus) with task description
 3. Verify output (same as §4)
 4. **Review Checkpoint CP6:** Pre-filter (§13) runs first on `git diff`.
    If pre-filter clean + trivial → skip. If pre-filter finds pattern → immediate FAIL.
@@ -1930,7 +1932,7 @@ Two rules, both learned the expensive way:
 
 ---
 
-**Last Updated:** 2026-09-22
+**Last Updated:** 2026-09-23
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

@@ -100,7 +100,8 @@ aid_codex_probe() {
 #   One fresh, read-only codex process; its --json stream, stderr and last
 #   message land in the three output files. Independence is provider + fresh
 #   process + `--sandbox read-only`, not a filesystem jail. Reads $CODEX_MODEL
-#   and $CODEX_EFFORT (default medium) and a timeout
+#   and $CODEX_EFFORT (default high, as measured in
+#   docs/plans/P099-codex-model-check.md) and a timeout
 #   (AID_CODEX_ISOLATED_TIMEOUT_SECONDS; AID_C3_TIMEOUT_SECONDS is the older name
 #   and still wins when set). Returns the codex/timeout exit code (124 = timed out).
 #
@@ -120,7 +121,7 @@ _run_codex_isolated() {
       --cd "$project_root" \
       --sandbox read-only \
       -m "$CODEX_MODEL" \
-      -c model_reasoning_effort="${CODEX_EFFORT:-medium}" \
+      -c model_reasoning_effort="${CODEX_EFFORT:-high}" \
       --output-last-message "$last_out" \
       - < "$prompt_file" > "$events_out" 2> "$stderr_out" || rc=$?
   return "$rc"

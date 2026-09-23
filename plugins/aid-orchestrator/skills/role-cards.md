@@ -18,10 +18,11 @@ Two card sets for AID agents:
 
 Read in combination with `skills/agent-protocol.md` for input/output format.
 
-**Model is sourced here.** Each step role declares a `**Model:**` field — this is the single
-source of truth for the dispatch model tier (an optional `step.model` in `plan.json` overrides it
-for one step; controller agents auditor/gate-fixer/verifier carry model in their own
-agent-file frontmatter). See `pipeline.md` §4.
+**Model and effort are sourced here.** Each step role declares `**Model:**` and `**Effort:**` —
+the single source of truth for the dispatch (an optional `step.model` in `plan.json` overrides the
+model for one step). `Effort: low` dispatches `aid-orchestrator:implementer-light`, anything else
+`aid-orchestrator:implementer`; controller agents auditor/gate-fixer/verifier carry model and effort
+in their own agent-file frontmatter. See `pipeline.md` §4.
 
 **Max Parallel note.** `**Max Parallel:**` documents the *intended* concurrency ceiling per role.
 The global ceiling is `orchestration.yaml → dispatch.max_parallel` (3 by default since P087; 1 is
@@ -30,14 +31,10 @@ the brake), and a wave runs concurrently only when `aid_parallel_decide` says so
 nothing computes it; the global ceiling is the one the decision returns.
 
 What the cap governs, precisely: **how many worker agents one controller session dispatches at a
-time**. P074 does not change it — that plan isolates trees, not dispatch.
-P074 gives each plan its own git worktree and its own state files; that isolates the plans' TREES
-and bookkeeping, which is not the same thing as authorizing concurrent agent dispatch.
-
-So, plainly: **two plan streams may be worked at the same time**, each from its own plan worktree
-via its own `/aid-run` invocation (isolation = separate worktrees + per-plan `plan-state` + the
-`active-runs.json` map). Within any one of those streams, dispatch remains strictly sequential —
-one worker at a time — exactly as before.
+time**. A wave runs concurrently up to `dispatch.max_parallel`; steps outside a wave run one at a
+time. Separately, two plan streams may be worked at the same time, each from its own plan worktree
+via its own `/aid-run` invocation (separate worktrees + per-plan `plan-state` + the
+`active-runs.json` map).
 
 See also: [VULCAN specialty overlays](#vulcan-specialty-overlays) at the end of this file.
 
@@ -95,6 +92,7 @@ cleanup pass to rely on.
 - Check: missing ADR for significant decisions, backwards-incompatible contract changes
 
 **Model:** opus
+**Effort:** medium
 **Max Parallel:** 1 (single source of truth for contracts)
 
 ---
@@ -121,7 +119,8 @@ cleanup pass to rely on.
 - Look for: business logic leaking into API layer, missing invariant enforcement
 - Check: state machine completeness (are all edge transitions handled?)
 
-**Model:** sonnet
+**Model:** opus
+**Effort:** low
 **Max Parallel:** 1 (domain model must be consistent)
 
 ---
@@ -150,6 +149,7 @@ cleanup pass to rely on.
 - Check: logging completeness, missing input validation at API boundaries
 
 **Model:** opus
+**Effort:** medium
 **Max Parallel:** 2 (different service layers / modules)
 
 ---
@@ -188,6 +188,7 @@ cleanup pass to rely on.
 - Check: bundle size (large imports), unnecessary re-renders, missing lazy loading
 
 **Model:** opus
+**Effort:** medium
 **Max Parallel:** 2 (different pages / feature areas)
 
 ---
@@ -227,7 +228,8 @@ criteria. I test what the code DOES, not what it was supposed to do.
 - Look for: tests asserting on mocks instead of real behavior, flaky time/order dependence
 - Check: ACs with no corresponding test, happy-path-only suites (no error/edge coverage)
 
-**Model:** sonnet
+**Model:** opus
+**Effort:** low
 **Max Parallel:** 2 (different test suites / modules)
 
 ---
@@ -289,6 +291,7 @@ the implementation actually functions across every layer it touches.
 - Check: layers skipped without justification, no negative-path coverage
 
 **Model:** opus
+**Effort:** medium
 **Max Parallel:** 1 (owns shared infrastructure during the run)
 
 ---
@@ -315,7 +318,8 @@ the implementation actually functions across every layer it touches.
 - Look for: OWASP Top 10 patterns, missing rate limiting, weak CORS config
 - Check: dependency CVEs, missing security headers, sensitive data in error responses
 
-**Model:** sonnet
+**Model:** opus
+**Effort:** low
 **Max Parallel:** 1 (sequential security review)
 
 ---
@@ -340,7 +344,8 @@ the implementation actually functions across every layer it touches.
 - Look for: spans missing on new service calls, log statements without structured fields
 - Check: missing correlation IDs across service boundaries
 
-**Model:** sonnet
+**Model:** opus
+**Effort:** low
 **Max Parallel:** 2 (different services)
 
 ---
@@ -365,7 +370,8 @@ the implementation actually functions across every layer it touches.
 - Look for: undocumented endpoints, outdated parameter descriptions
 - Check: code examples that no longer compile or match current API
 
-**Model:** sonnet
+**Model:** opus
+**Effort:** low
 **Max Parallel:** 2 (different doc sections)
 
 ---
@@ -390,7 +396,8 @@ the implementation actually functions across every layer it touches.
 - Look for: version mismatches between package.json / pyproject.toml / VERSION file
 - Check: CHANGELOG missing entries for merged PRs
 
-**Model:** sonnet (or bash — `aid-release.sh` handles automated bumps)
+**Model:** opus
+**Effort:** low (or bash — `aid-release.sh` handles automated bumps)
 **Max Parallel:** 1 (only one release step per run)
 
 ---
@@ -398,7 +405,7 @@ the implementation actually functions across every layer it touches.
 ## Verifier Focus Cards
 
 Focus cards are read-only verification lenses. They never write implementation code. The set here
-MUST match the focus list in `agents/verifier.md`. All focus types run on **sonnet**.
+MUST match the focus list in `agents/verifier.md`. All focus types run on **opus**, effort low.
 
 ---
 
@@ -420,7 +427,8 @@ MUST match the focus list in `agents/verifier.md`. All focus types run on **sonn
   the acceptance criterion describes — flag cases where an AC is "met" by name/string only, and
   report drift between the AC wording and the implementation.
 
-**Model:** sonnet
+**Model:** opus
+**Effort:** low
 
 ---
 
@@ -438,7 +446,8 @@ MUST match the focus list in `agents/verifier.md`. All focus types run on **sonn
 - CHANGELOG entry present for user-visible changes
 - No placeholder text or TODO markers in published docs
 
-**Model:** sonnet
+**Model:** opus
+**Effort:** low
 
 ---
 
@@ -460,7 +469,8 @@ obvious test-only issues.
   diagnostics: a test must exercise real behavior, not assert on a stale mock, and not pass on
   name-match alone.
 
-**Model:** sonnet
+**Model:** opus
+**Effort:** low
 
 ---
 
@@ -479,7 +489,8 @@ obvious test-only issues.
 - Missing input validation at API boundaries
 - Tenant data isolation (if applicable)
 
-**Model:** sonnet
+**Model:** opus
+**Effort:** low
 
 ---
 
@@ -515,7 +526,8 @@ the worst failure mode.
 **Do NOT:** rewrite the section, write plan files, review other sections, or soften a finding to be
 agreeable.
 
-**Model:** sonnet
+**Model:** opus
+**Effort:** low
 
 ---
 
@@ -546,7 +558,8 @@ claim, `area: "{file}:{line}"`; for a consistency claim, the two section names t
 labels — reuse the `review_result` enum (verdict `PASS|FAIL|PASS_WITH_NOTES`; severity
 `critical|high|medium|low`).
 
-**Model:** sonnet
+**Model:** opus
+**Effort:** low
 
 ---
 
@@ -573,7 +586,8 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 **Improvement Hints:** Chybějící type hints na StateGraph, tools not bound, checkpointer not persisting state.
 
-**Model:** inherits the base step role's tier (opus for implementation-heavy LangGraph work)
+**Model:** opus
+**Effort:** inherits the base step role's
 
 ---
 
@@ -590,7 +604,8 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 **Improvement Hints:** Event loop not running, missing `await`, resource leak (unclosed client/connection).
 
-**Model:** inherits the base step role's tier
+**Model:** opus
+**Effort:** inherits the base step role's
 
 ---
 
@@ -607,11 +622,12 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 **Improvement Hints:** Missing schema prefix, hardcoded schema name, cross-tenant leak, no `tenant_id` in WHERE clause.
 
-**Model:** inherits the base step role's tier
+**Model:** opus
+**Effort:** inherits the base step role's
 
 ---
 
-**Last Updated:** 2026-09-22
+**Last Updated:** 2026-09-23
 **Replaces:** All 11 files formerly in `plugins/aid-orchestrator/defaults/playbooks/`
 
 ## Plan-boundary note

@@ -19,8 +19,10 @@ review_checkpoints:
   # other than claude/codex and a model listed in banned_models. A project
   # override is .aid-o/config/policies/review-checkpoints.yaml with its own
   # plan_review block. Claude models are the Agent tool's model names; the
-  # codex model is passed to `codex exec -m`. When both generalists use the
-  # same model the round is recorded as degraded.
+  # codex model is passed to `codex exec -m`. `effort` (low|medium|high,
+  # default medium) is a claude role's agent type (low: reviewer-light) and a
+  # codex role's reasoning effort. When both generalists use the same model
+  # the round is recorded as degraded.
   plan_review:
     rounds_default: 2            # a third round, or only one, needs the PM's recorded override
     min_answers: 4               # a round with fewer valid answers is invalid
@@ -29,7 +31,7 @@ review_checkpoints:
     stand_in_model: opus       # a codex role unreachable: a claude agent answers the same brief
     reviewers:
       - {role: generalist_a,      provider: claude, model: opus}
-      - {role: generalist_b,      provider: codex,  model: gpt-5.6-terra}
+      - {role: generalist_b,      provider: codex,  model: gpt-5.6-terra, effort: high}
       - {role: behaviour_edges,   provider: claude, model: opus}
       - {role: feasibility_deps,  provider: claude, model: opus}
       - {role: reuse,             provider: claude, model: opus}
@@ -40,35 +42,34 @@ review_checkpoints:
   # (P094). `when: review+security` marks a role that runs only when
   # aid-step-check.sh reports a security pattern. skip_threshold is what the
   # step check calls small: a diff at or under both limits, inside the step's
-  # scope, with no pattern matched, is `skip` and needs no reviewer. The models
-  # are placeholders until P094 Step 13 chooses them from a measurement.
+  # scope, with no pattern matched, is `skip` and needs no reviewer.
   step_review:
     rounds_default: 2
     skip_threshold: {max_files: 1, max_lines: 50}
     banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
-    stand_in_model: sonnet     # a codex role unreachable: a claude agent answers the same brief
+    stand_in_model: opus       # a codex role unreachable: a claude agent answers the same brief
     reviewers:
-      - {role: step_generalist, provider: claude, model: sonnet}
-      - {role: step_security,   provider: claude, model: sonnet, when: review+security}
+      - {role: step_generalist, provider: claude, model: opus, effort: low}
+      - {role: step_security,   provider: claude, model: opus, effort: low, when: review+security}
   epic_review:
     rounds_default: 2
     banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
-    stand_in_model: sonnet     # a codex role unreachable: a claude agent answers the same brief
+    stand_in_model: opus       # a codex role unreachable: a claude agent answers the same brief
     reviewers:
-      - {role: epic_generalist, provider: claude, model: sonnet}
-      - {role: epic_behaviour,  provider: claude, model: sonnet}
-      - {role: epic_security,   provider: codex,  model: gpt-5.6-terra}
+      - {role: epic_generalist, provider: claude, model: opus, effort: low}
+      - {role: epic_behaviour,  provider: claude, model: opus, effort: low}
+      - {role: epic_security,   provider: codex,  model: gpt-5.6-terra, effort: high}
   # Whole-plan review (CP7): one round over plan_base_commit..candidate before
   # plan-finalize --stage decide. A fix moves the candidate, so its confirmation
   # is round 1 of the next attempt (carrying what stayed open and the fix diff).
   final_review:
     rounds_default: 1
     banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
-    stand_in_model: sonnet
+    stand_in_model: opus
     reviewers:
       - {role: final_criteria,   provider: claude, model: opus}
-      - {role: final_claims,     provider: claude, model: sonnet}
-      - {role: final_generalist, provider: codex,  model: gpt-5.6-terra}
+      - {role: final_claims,     provider: claude, model: opus, effort: low}
+      - {role: final_generalist, provider: codex,  model: gpt-5.6-terra, effort: high}
 
   # The fix loop, the trivial-skip thresholds and the pre-filter left with
   # P094: a step is skipped by aid-step-check.sh (size, scope, no pattern), the

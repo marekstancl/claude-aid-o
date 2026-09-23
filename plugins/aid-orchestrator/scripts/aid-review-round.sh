@@ -369,7 +369,7 @@ cmd_prepare() {
   echo "prepared round ${ROUND}: ${#roles[@]} reviewers → ${dir}"
   for role in "${roles[@]}"; do
     if _is_carried "$dir" "$role"; then echo "  ${role}: carried from the previous attempt (the fix touched nothing it reads, and it had no finding)"
-    else echo "  ${dir}/prompt-${role}.md  (focus $(_focus "$role"))"; fi
+    else echo "  ${dir}/prompt-${role}.md  (focus $(_focus "$role")$(_agent_note "$role"))"; fi
   done
 }
 
@@ -390,9 +390,20 @@ _stand_in() { jq -e '.fallback == "claude"' "$1/codex-${2}.usage.json" >/dev/nul
 # controller happens to stand in — two projects reviewed from one cwd would
 # otherwise share one answer.
 _codex_probe() { ( AID_PROJECT_ROOT="$ROOT"; export AID_PROJECT_ROOT; source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"; aid_codex_probe ); }
+# _agent_type <role> — the subagent a claude reviewer (or a codex role's
+# stand-in) is dispatched as: the role's effort, low → reviewer-light.
+_agent_type() {
+  local i; i="$(aid_review_role_index "$1")"
+  [[ "${RC_EFFORT[$i]}" == low ]] && echo aid-orchestrator:reviewer-light || echo general-purpose
+}
+# _agent_note <role> — what prepare prints next to a claude role's prompt.
+_agent_note() {
+  local i; i="$(aid_review_role_index "$1")"
+  if [[ "${RC_PROVIDER[$i]}" == claude ]]; then echo ", agent $(_agent_type "$1") at model ${RC_MODEL[$i]}"; fi
+}
 # _stand_in_line <dir> <role> <why> — what the controller must do instead of paying codex.
 _stand_in_line() {
-  echo "STAND-IN: no codex answer ($3); dispatch ${1}/prompt-${2}.md to a general-purpose agent at model ${RC_STAND_IN_MODEL} (see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
+  echo "STAND-IN: no codex answer ($3); dispatch ${1}/prompt-${2}.md to a $(_agent_type "$2") agent at model ${RC_STAND_IN_MODEL} (see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
 }
 
 cmd_dispatch() {
@@ -419,7 +430,7 @@ cmd_dispatch() {
   # In a subshell: the launcher's library sets its own shell options on load.
   ( # shellcheck source=lib/aid-codex-transport.sh
     source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"
-    CODEX_MODEL="${RC_MODEL[$i]}"
+    CODEX_MODEL="${RC_MODEL[$i]}" CODEX_EFFORT="${RC_EFFORT[$i]}"
     _run_codex_isolated "$ROOT" "${dir}/prompt-${ROLE}.md" "$events" "${dir}/codex-${ROLE}.stderr.txt" "$last"
   ) || rc=$?
 
