@@ -414,7 +414,7 @@ plugin_issues_line() {
 # stopped running is the failure mode a "green" memory hides. No artifact at
 # all renders NOTHING: a project without a nightly is not in a red state.
 nightly_line() {
-  local _dir _latest _date _today _age _failed _streak _quar _colour
+  local _dir _latest _date _today _age _failed _streak _quar _budget
   _dir="${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}"
   _latest="$_dir/latest.json"
   [ -f "$_latest" ] || return 0
@@ -429,6 +429,10 @@ nightly_line() {
   _streak="$(jq -r '[.failed[]?.streak] | max // 0' "$_latest" 2>/dev/null)"; : "${_streak:=0}"
   _quar="$(jq -r '.quarantined | length' "$_latest" 2>/dev/null)"; : "${_quar:=0}"
   [ "$_quar" -gt 0 ] 2>/dev/null && _quar=" — ${_quar} quarantined" || _quar=""
+  # The merge-path budget verdict, seen where a red night is seen (the nightly
+  # no longer sends Telegram since P099).
+  _budget="$(jq -r '.merge_path_budget // empty | select(.merge_path_over)
+    | " — merge path \(.merge_path_seconds) s over budget \(.merge_path_budget_s) s"' "$_latest" 2>/dev/null)"
 
   _today="$(date -u +%s)"
   _age=$(( ( _today - $(date -u -d "$_date" +%s 2>/dev/null || echo "$_today") ) / 86400 ))
@@ -438,21 +442,23 @@ nightly_line() {
   fi
 
   if [ "$_failed" -gt 0 ]; then
-    printf 'Nightly: RED (%s) — %s suite(s) failing, worst streak %s%s — %s\n\n' \
-      "$_date" "$_failed" "$_streak" "$_quar" "$_dir/$_date.json"
+    printf 'Nightly: RED (%s) — %s suite(s) failing, worst streak %s%s%s — %s\n\n' \
+      "$_date" "$_failed" "$_streak" "$_quar" "$_budget" "$_dir/$_date.json"
   else
-    printf 'Nightly: green (%s)%s\n\n' "$_date" "$_quar"
+    printf 'Nightly: green (%s)%s%s\n\n' "$_date" "$_quar" "$_budget"
   fi
 }
 ```
 
 The line appears in four shapes and no others — a green night with its date, a
 red one with the failing count and the worst streak, a nightly that stopped
-running, and an artifact this cannot read:
+running, and an artifact this cannot read; a merge path over its budget is
+appended to the first two:
 
 ```
 Nightly: green (2026-08-10)
 Nightly: green (2026-08-10) — 2 quarantined
+Nightly: green (2026-08-10) — merge path 1450 s over budget 600 s
 Nightly: RED (2026-08-10) — 3 suite(s) failing, worst streak 4 — /opt/eco/data/aid-nightly/aid-orchestrator/2026-08-10.json
 Nightly: NOT RUN since 2026-08-04 (6 days) — /opt/eco/data/aid-nightly/aid-orchestrator/latest.json
 ```

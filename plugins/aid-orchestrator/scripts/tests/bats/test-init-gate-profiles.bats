@@ -204,8 +204,7 @@ EOF
     | del(.gate_profiles.quick | select(. != null and (.include // [] | length == 0)))
     | (.gates // {})[] |= with(select(has("required_when") and (has("required") | not)); .required = true)
     | (.gates // {})[] |= del(.required_when, .needs_services, .services, .quarantine, .baseline, .runtime_baseline)
-    | del(.notifications.telegram.enabled, .notifications.telegram.chat_id, .notifications.telegram.alert_threshold, .notifications.telegram.alert_on_repeated_precondition_fail)
-    | del(.notifications.telegram | select(length == 0))
+    | del(.notifications.telegram)
     | del(.notifications | select(length == 0))'
   local strip_added='del(.default_profile, .gate_profiles.full.when_paths)'
   local name cfg out hash default_arg

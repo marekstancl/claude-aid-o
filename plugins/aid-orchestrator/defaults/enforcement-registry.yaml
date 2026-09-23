@@ -2952,14 +2952,14 @@ enforcements:
 
   - id: alert_contract
     type: 6
-    source: "scripts/lib/aid-alert.sh (aid_alert_run / aid_alert_nightly -> the ecosystem's shared send_alert)"
+    source: "scripts/lib/aid-alert.sh (aid_alert_waiting / aid_alert_delivered -> the ecosystem's shared send_alert)"
     instruction: "skills/pipeline.md"
     severity: blocking
     surface: internal-guard
     status: active
     verdict: ALIGNED
     enforcement_mechanism: merge_path_test
-    description: "2026-08-26 — the binding rule is the ecosystem standard at /ecosystem/operations/alerting-and-automation; the in-repo instruction surface is skills/pipeline.md, because a cite has to resolve to a file this repository ships. AID had two senders and neither obeyed the ecosystem alert standard: the nightly reporter called the legacy send_telegram_alert() with free text, and aid-fsm.sh POSTed straight to the MCP bot on localhost:8817, a second transport as well as a second format. Neither carried severity, host, scope, ID, Co or Akce, so a reader could not tell an alert about a RUNNING PLAN from one about last night's TESTS — the defect the standard says belongs to the alert, not the reader. One sender now: lib/aid-alert.sh composes nothing itself and delegates to the shared send_alert(), spending the standard's free `state` field on that very question (BĚŽÍCÍ PLÁN / NOČNÍ TESTY) with scopes aid-beh and aid-testy. The project rules are enforced by test: every Akce carries a DEADLINE, the two nightly states are separate IDs at separate severities (a completed red night vs a run cut short, where nothing was measured), delivery status is REPORTED rather than swallowed (the first cut always returned 0, which would have recorded an undelivered alert as sent and never retried it), the sender runs in a SUBSHELL so a configurable library cannot change the FSM's shell mid-transition, and test mode refuses the PRODUCTION library so no fixture can reach the real channel."
+    description: "P099 Step 3 (PM, 2026-09-23): AID sends exactly two messages through the ecosystem standard's shared send_alert() (/ecosystem/operations/alerting-and-automation §2): agent-waiting when an agent stops and needs the PM (one per stop across sessions, re-armed by the PM's next prompt) and plan-delivered at a merge close (once per plan, forced closes say so). The FSM and the nightly send nothing; their events stay in the timeline and the nightly artifact. The in-repo instruction surface is skills/pipeline.md."
     recovery: "Each failure names the missing field or the offending call site; the catalog of every message AID can send is /aid/alerty."
     test: "scripts/tests/bats/test-aid-alert.bats"
 

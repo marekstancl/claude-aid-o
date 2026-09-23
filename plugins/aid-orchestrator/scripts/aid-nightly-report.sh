@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
 # aid-nightly-report.sh — turn a nightly portfolio run into a durable result
-# and, on red, one message (P081 Step 7).
-#
-# A FILE FIRST, A MESSAGE SECOND. The artifact is written before anything is
-# sent, so a lost, muted or misconfigured Telegram channel never means a lost
-# result. The standard demands the second surface for exactly that reason, and
-# `/aid-status` reads this same file.
+# (P081 Step 7). The result is a file that `/aid-status` reads; since P099 the
+# nightly sends no Telegram message — the PM gets one only when an agent waits
+# for them and when a plan is delivered.
 #
 # WHERE THE ARTIFACT LIVES, AND WHY NOT `.aid-o/`: the CI job runs in the
 # self-hosted runner's own `_work` checkout, so `aid_state_root()` there
@@ -30,14 +27,11 @@
 # the retry ⇒ recorded `flaky` and quarantined (see aid-test-quarantine.sh),
 # not counted as a failure. Fail again ⇒ a real failure.
 #
-# RED IS REPORTED ONCE, THEN COUNTED. A failure already in last night's
-# artifact increments a streak instead of sending another message; the message
-# goes out when something is NEW, or when a quarantine entry has aged past its
-# deadline with no owner. A green night sends nothing at all.
+# A failure already in last night's artifact increments its streak.
 #
 # Usage:
 #   aid-nightly-report.sh --runner-log <file> [--exit-code N] [--log-url URL]
-#                         [--tests-dir DIR] [--dir DIR] [--no-notify]
+#                         [--tests-dir DIR] [--dir DIR]
 #
 # Exit codes: 0 = the artifact was written (whatever the night's colour),
 #             2 = usage / the artifact could not be written.
@@ -53,13 +47,11 @@ source "$SCRIPT_DIR/lib/aid-test-tier.sh"
 source "$SCRIPT_DIR/lib/aid-test-durations.sh"
 
 QUARANTINE_SH="$SCRIPT_DIR/aid-test-quarantine.sh"
-ESCALATE_DAYS="${AID_QUARANTINE_ESCALATE_DAYS:-14}"
-TELEGRAM_LIB="${AID_TELEGRAM_LIB:-/opt/eco/services/scripts/lib/telegram-notify.sh}"
 
 # The retry re-invokes the RUNNER (see the retry block below). Overridable so
 # a fixture can supply a stub — the seam exists for tests, not for production.
 RUNNER="${AID_NIGHTLY_RUNNER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tests/run-all-tests.sh}"
-RUNNER_LOG=""; EXIT_CODE=0; LOG_URL=""; TESTS_DIR=""; NOTIFY=1
+RUNNER_LOG=""; EXIT_CODE=0; LOG_URL=""; TESTS_DIR=""
 # Merge-path tier budgets, in seconds, from the ecosystem test standard.
 # Measured, never summed: a tier's budget is verified by a REAL RUN, because
 # the runner's ~2 s per-suite overhead makes a sum of suite times a lie.
@@ -83,7 +75,6 @@ while [[ $# -gt 0 ]]; do
                  TESTS_DIR="$2"; shift 2 ;;
     --dir) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --dir needs a value" >&2; exit 2; }
            NIGHTLY_DIR="$2"; shift 2 ;;
-    --no-notify)  NOTIFY=0; shift ;;
     --help|-h)
       sed -n '/^# Usage:/,/^# Exit codes:/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -194,11 +185,10 @@ for name in ${reported_failures[@]+"${reported_failures[@]}"}; do
   fi
   if [[ "$retry_ok" -eq 1 ]]; then
     flaky+=("$name")
-    # A quarantine that was not written is a suite that will never age and
-    # never escalate — the artifact would show it flaky tonight and forget it
-    # tomorrow. Say so rather than swallowing the write.
+    # A quarantine that was not written is a suite that will never age — the
+    # artifact would show it flaky tonight and forget it tomorrow. Say so rather than swallowing the write.
     if ! bash "$QUARANTINE_SH" add "$name" "" >/dev/null 2>&1; then
-      echo "aid-nightly-report: '$name' is flaky but could NOT be quarantined — it will not age or escalate until this is fixed" >&2
+      echo "aid-nightly-report: '$name' is flaky but could NOT be quarantined — it will not age until this is fixed" >&2
       quarantine_write_failed=true
     fi
   else
@@ -238,37 +228,6 @@ while IFS=$'\t' read -r _ d; do
   duration_ms=$(( duration_ms + d ))
 done < <(aid_durations_by_suite "$TESTS_DIR")
 
-# An ownerless overdue entry escalates the night it crosses the deadline and
-# then once a week — not every single night. A daily repeat of the same
-# sentence is how a channel gets muted, which costs the streak counting its
-# whole point.
-# Selected ONCE. Counting the set with one filter and printing it with a second
-# copy of the same filter is how a message stops matching the count that decided
-# to send it.
-escalating_json="$(jq -c --argjson limit "$ESCALATE_DAYS" \
-  '[.[] | select(.owner == "" and .age_days >= $limit
-                 and ((.age_days - $limit) % 7 == 0))]' <<<"$quarantined_json")"
-escalating="$(jq 'length' <<<"$escalating_json")"
-new_failures="$(jq '[.[] | select(.known | not)] | length' <<<"$failed_json")"
-
-# A message that was never delivered leaves the failure "known" but UNREPORTED.
-# Without this, a red night that coincided with a broken Telegram token stays
-# silent forever afterwards, because every later night sees a known failure.
-prev_undelivered=false
-if [[ -f "$LATEST" ]] \
-   && [[ "$(jq -r '.notified' "$LATEST" 2>/dev/null)" == "false" ]] \
-   && [[ "$(jq -r '.failed | length' "$LATEST" 2>/dev/null)" != "0" ]]; then
-  prev_undelivered=true
-fi
-
-# Was LAST night already incomplete? A run that is cut short two nights running
-# is one situation, not two messages — but the FIRST night it happens must
-# speak, even when the failing suites are all already known. Without this the
-# dedup could swallow the transition from "red" to "we know nothing", which is
-# a change of severity, not a repeat.
-prev_censored=false
-[[ -f "$LATEST" ]] && [[ "$(jq -r '.censored' "$LATEST" 2>/dev/null)" == "true" ]] && prev_censored=true
-
 # ─── Co přibylo do merge cesty ──────────────────────────────────────────────
 # Spoustecem NENI cas, ale ZMENA SLOZENI. Merge cesta vyrostla z 13 na 18 minut
 # za tri dny tim, ze pribylo 18 sad — kazda spravne oznacena, zadna nezpomalila.
@@ -278,11 +237,9 @@ prev_censored=false
 # Zamerne tu NENI: kalibrace sumu, prahy v procentech, klouzave mediany, drift.
 # PM to odmitl a ma pravdu — kazdodenni hlaseni casu je spam, ktery se ztlumi.
 #
-# Pravidlo: kdyz se slozeni NEZMENILO, o casech se MLCI. Kdyz neco pribylo,
-# rekne se co a co to udelalo s rozpoctem. To je jednou za cas, ne kazdou noc.
+# Artefakt nese, co do merge cesty pribylo a co ubylo; /aid-status to cte.
 INVENTORY="${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}/merge-path-inventory.txt"
 inventory_json='null'
-_added_note=""
 if [[ -n "${MERGE_PATH_SUITES:-}" ]]; then
   _new_inv="$(printf '%s\n' $MERGE_PATH_SUITES | sort -u)"
   if [[ -f "$INVENTORY" ]]; then
@@ -298,9 +255,6 @@ if [[ -n "${MERGE_PATH_SUITES:-}" ]]; then
       '{added:$added, removed:$removed,
         added_suites:($added_list|split("\n")|map(select(length>0))),
         removed_suites:($removed_list|split("\n")|map(select(length>0)))}')"
-  if [[ "$_na" -gt 0 || "$_ng" -gt 0 ]]; then
-    _added_note="merge cesta: +${_na} / -${_ng} sad"
-  fi
   printf '%s\n' "$_new_inv" > "$INVENTORY" 2>/dev/null || true
 fi
 
@@ -315,7 +269,6 @@ fi
 # and a gate that stops work over it gets routed around (the lesson the
 # quarantined advisory gate already taught this project).
 budget_json='null'
-_over_budget=""
 if [[ "$T0_SECONDS" =~ ^[0-9]+$ || "$T1_SECONDS" =~ ^[0-9]+$ ]]; then
   _t0="${T0_SECONDS:-null}"; [[ "$_t0" =~ ^[0-9]+$ ]] || _t0=null
   _t1="${T1_SECONDS:-null}"; [[ "$_t1" =~ ^[0-9]+$ ]] || _t1=null
@@ -326,23 +279,19 @@ if [[ "$T0_SECONDS" =~ ^[0-9]+$ || "$T1_SECONDS" =~ ^[0-9]+$ ]]; then
       merge_path_seconds:(($t0//0)+($t1//0)),
       merge_path_budget_s:$t1b,
       merge_path_over:((($t0//0)+($t1//0)) > $t1b)}')"
-  [[ "$_t0" != null && "$_t0" -gt "$T0_BUDGET_S" ]] && \
-    _over_budget="${_over_budget}T0 ${_t0}s (rozpočet ${T0_BUDGET_S}s); "
-  [[ "$_t1" != null && "$_t1" -gt "$T1_BUDGET_S" ]] && \
-    _over_budget="${_over_budget}T1 ${_t1}s (rozpočet ${T1_BUDGET_S}s); "
 else
   # Not measured is NOT within budget. Say so, the way the runner watchdog does.
   echo "aid-nightly-report: tier durations were not supplied — the merge-path budget check DID NOT RUN (this is not a pass)." >&2
 fi
 
-# ─── The artifact, written BEFORE anything is sent ──────────────────────────
+# ─── The artifact ───────────────────────────────────────────────────────────
 write_artifact() {
   jq -n --arg date "$TODAY" --argjson suites_run "$suites_run" \
         --argjson passed "$suites_passed" --argjson failed "$failed_json" \
         --argjson flaky "$flaky_json" --argjson quarantined "$quarantined_json" \
         --argjson duration_ms "$duration_ms" --arg log_url "$LOG_URL" \
         --argjson exit_code "$EXIT_CODE" --argjson censored "$censored" \
-        --argjson notified "$1" --argjson quarantine_unreadable "$quarantine_unreadable" \
+        --argjson quarantine_unreadable "$quarantine_unreadable" \
         --argjson quarantine_write_failed "$quarantine_write_failed" \
         --argjson merge_path_budget "$budget_json" \
         --argjson merge_path_inventory "$inventory_json" \
@@ -352,89 +301,9 @@ write_artifact() {
       flaky:$flaky, quarantined:$quarantined, duration_ms:$duration_ms,
       exit_code:$exit_code, censored:$censored, log_url:$log_url,
       quarantine_unreadable:$quarantine_unreadable,
-      quarantine_write_failed:$quarantine_write_failed,
-      notified:$notified}' > "$ARTIFACT" || return 1
+      quarantine_write_failed:$quarantine_write_failed}' > "$ARTIFACT" || return 1
   cp "$ARTIFACT" "$LATEST" || return 1
 }
-write_artifact false || { echo "aid-nightly-report: could not write '$ARTIFACT'" >&2; exit 2; }
+write_artifact || { echo "aid-nightly-report: could not write '$ARTIFACT'" >&2; exit 2; }
 
-# ─── One message, only when there is something new to say ───────────────────
-notified=false
-# An over-budget merge path is a reason to speak, alongside a new failure: it
-# is the signal that was missing while the path grew from 13 to 18 minutes
-# unnoticed. It is deduplicated with everything else — the same fingerprint
-# rules — so a budget that stays over does not become nightly noise.
-if [[ "$NOTIFY" -eq 1 ]] \
-   && { [[ "$new_failures" -gt 0 ]] || [[ "$escalating" -gt 0 ]] \
-        || [[ -n "$_added_note" ]] || [[ "$prev_undelivered" == "true" ]] \
-        || [[ "$censored" == "true" && "$prev_censored" != "true" ]]; }; then
-  msg="$(printf 'AID nightly %s: %s failed, %s flaky, %s quarantined\n' \
-    "$TODAY" "$(jq 'length' <<<"$failed_json")" "$(jq 'length' <<<"$flaky_json")" \
-    "$(jq 'length' <<<"$quarantined_json")")"
-  msg+="$(jq -r '.[] | "  - \(.suite)\(if .streak > 1 then " — \(.streak). night in a row" else "" end)"' <<<"$failed_json")"
-  if [[ "$escalating" -gt 0 ]]; then
-    msg+=$'\n'"$(jq -r '.[] | "  ! quarantined \(.age_days)d with no owner: \(.suite)"' \
-      <<<"$escalating_json")"
-  fi
-  [[ "$quarantine_unreadable" == "true" ]] && msg+=$'\n'"  ! the quarantine record is unreadable"
-  if [[ -n "$_added_note" ]]; then
-    msg+=$'\n'"  ! ${_added_note}"
-    [[ -n "$_over_budget" ]] && msg+=$'\n'"    a je pres rozpocet: ${_over_budget%; }"
-    _al="$(jq -r '.added_suites[]?' <<<"$inventory_json" 2>/dev/null | head -5)"
-    [[ -n "$_al" ]] && msg+=$'\n'"$(printf '    + %s\n' $_al)"
-  fi
-  [[ -n "$LOG_URL" ]] && msg+=$'\n'"$LOG_URL"
-
-  # TWO STATES, NEVER ONE (ecosystem alert standard, project rule 2). "The
-  # result is bad" and "nothing was measured" read the same in a free-text
-  # message and are not the same thing at all: the first means the portfolio ran
-  # and we know something unpleasant, the second means it was CUT SHORT and the
-  # numbers below are a fragment. That is exactly what happened on 2026-08-15,
-  # when the job hit GitHub's 6-hour ceiling mid-run and this reporter announced
-  # "17 failed" as if it were a result.
-  #
-  # `censored` is the runner's own end marker missing with suite output present.
-  # It raises the severity AND changes the ID, so the two cases are separable in
-  # the catalog, in a search, and in the reader's head.
-  local_id="nightly-red"; local_sev="warning"
-  local_what="$(jq 'length' <<<"$failed_json") sad spadlo v nočním portfoliu."
-  local_action="Do zítřejšího poledne přiděl každé spadlé sadě vlastníka, nebo rozhodni, že počká — pád T2 je úkol do druhého pracovního dne."
-  if [[ "$censored" == "true" ]]; then
-    local_id="nightly-neuplny"
-    local_sev="critical"
-    local_what="Noční běh se NEDOKONČIL — čísla níž jsou útržek, ne výsledek. O sadách, ke kterým nedošel, nevíme nic."
-    local_action="Do zítřejšího poledne zjisti, proč se běh usekl (strop úlohy, timeout, zrušení). Dokud to neplatí, neber zelenou ani červenou jako platnou."
-  fi
-
-  if [[ -f "$TELEGRAM_LIB" ]]; then
-    # shellcheck source=/dev/null
-    source "$SCRIPT_DIR/lib/aid-alert.sh"
-    if aid_alert_nightly "$local_sev" "$local_id" "$local_what" "$local_action" \
-         "$msg" "${LOG_URL:-}"; then
-      notified=true
-    else
-      # rc 2 is "credentials not configured" — a silent skip by contract. The
-      # miss is recorded in the artifact rather than swallowed.
-      echo "aid-nightly-report: the alert was not delivered; the result is still in $ARTIFACT" >&2
-    fi
-  else
-    echo "aid-nightly-report: no Telegram helper at '$TELEGRAM_LIB' — the result is still in $ARTIFACT" >&2
-  fi
-  write_artifact "$notified" || exit 2
-fi
-
-echo "aid-nightly-report: $ARTIFACT ($(jq 'length' <<<"$failed_json") failed, $(jq 'length' <<<"$flaky_json") flaky, notified=$notified)"
-
-# ─── Once a month, what could go ─────────────────────────────────────────────
-# Attached to the report rather than mailed separately: the reaper's list is a
-# proposal a PM reads beside the night's result, and a separate channel is a
-# channel that gets muted. It proposes only — nothing here deletes anything.
-# ONE caller. The nightly workflow briefly had a step of its own gated on the
-# same date, so on the 1st the reaper ran twice and wrote its artifact twice.
-# The list belongs here, beside the night's result — a proposal in a separate
-# channel is a channel that gets muted.
-if [[ "$(date -u +%d)" == "01" ]]; then
-  echo ""
-  bash "$SCRIPT_DIR/aid-test-reaper.sh" --dir "$NIGHTLY_DIR" --tests-dir "$TESTS_DIR" || true
-fi
-exit 0
+echo "aid-nightly-report: $ARTIFACT ($(jq 'length' <<<"$failed_json") failed, $(jq 'length' <<<"$flaky_json") flaky)"

@@ -215,7 +215,7 @@ The composer writes a single `gates:` mapping with one section per detected stac
 
 If no stacks are detected, the file is still written with an empty `gates:` mapping and a `# No stacks detected — add gate definitions manually.` comment. PM can hand-author gate sections without re-running `/aid-init`.
 
-A `notifications.telegram` block is appended with its one read key, `alert_on_compliance_recovery` (default `true`); alerts themselves go through the ecosystem's shared `send_alert()` via `lib/aid-alert.sh`, so there is nothing to enable.
+No `notifications` block is written: AID's two messages (the agent waits, the plan is delivered) go through the ecosystem's shared `send_alert()` via `lib/aid-alert.sh` and have no switch.
 
 ### Existing Project — gate_profiles Upgrade
 
@@ -227,8 +227,8 @@ after the PM has seen exactly what changes:
 
 **1. The dead-key upgrade (P097 Step 3).** Earlier composers wrote keys nothing reads any more:
 `required_when`, `needs_services`, `services`, `gate_profile_defaults`, `baseline*`,
-`runtime_baseline`, `quarantine`, an empty `quick` profile, and every `notifications.telegram.*`
-key except `alert_on_compliance_recovery`. The library's `upgrade` removes them, adds
+`runtime_baseline`, `quarantine`, an empty `quick` profile, and the whole `notifications.telegram`
+block. The library's `upgrade` removes them, adds
 `default_profile: standard` when a profile table exists, and adds `when_paths` to the profile named
 `full` (the classifier's high-risk pattern list, so every run that resolved `full` before resolves
 `full` after). It never touches `gates.<id>.command` or a non-empty `include[]`; a key it does not

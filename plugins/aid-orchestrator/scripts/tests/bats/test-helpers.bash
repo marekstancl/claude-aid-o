@@ -11,7 +11,7 @@
 setup_test_evidence_dir() {
   local epic_id="${1:-E-test}"
   local run_id="${2:-R-test}"
-  # Test-mode guard — suppresses real-world side effects (e.g. try_telegram_alert)
+  # Test-mode guard — suppresses real-world side effects (e.g. a Telegram alert)
   # for any aid-fsm.sh code path invoked during this fixture.
   export AID_TEST_MODE=1
   TEST_TMPDIR=$(mktemp -d)

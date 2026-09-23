@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # aid-tier: t2
 # test-tiered-severity.bats — P038 Phase 2 tiered severity + merge blocking smoke test.
-# Extended by P042: compliance recovery alert (fixtures 7a-7c).
+# Extended by P042: compliance recovery marker (fixtures 7a-7f).
 #
 # Validates the AID-v3-principles.md §1 enforcement chain:
 #   Step 1 (--blocked-checks audit-log array) →
@@ -26,9 +26,6 @@ load test-helpers.bash
 
 setup() {
   export TZ=UTC
-  # Suppress try_telegram_alert during fixture runs (P038 cmd_done_advance
-  # precondition fires alert on blocking compliance failures; without this
-  # guard each fixture would send a real Telegram message).
   export AID_TEST_MODE=1
   TMPDIR_TEST="$(mktemp -d)"
   PROJECT_ROOT="$TMPDIR_TEST"
@@ -262,11 +259,10 @@ EOF
   echo "$output" | grep -E 'memory_substantive +5 +0 +0\.00 +yes'
 }
 
-# ─── Recovery alert fixtures (P042) ─────────────────────────────────────────
+# ─── Recovery fixtures (P042) ───────────────────────────────────────────────
 # These fixtures reuse the fixture-2 clean-done-advance harness (no blocking
-# failures). The observable signal is the
-# fsm_done_advance_recovered event in timeline.jsonl — NOT the Telegram alert
-# text (AID_TEST_MODE=1 suppresses try_telegram_alert unconditionally).
+# failures). The observable signal is the fsm_done_advance_recovered event in
+# timeline.jsonl.
 
 # Shared helper: the setup already carries everything a clean done-advance
 # needs; kept as the named seam the recovery fixtures call. Caller must
@@ -344,7 +340,7 @@ _setup_clean_done_advance() { :; }
 # ─── Fixture 7e ─────────────────────────────────────────────────────────────
 # force-path recovery (P044): a pending fsm_done_advance_blocked cleared via
 # --force override must ALSO write the fsm_done_advance_recovered event —
-# pairing every 🛑 blocked alert with a ✅ resolution regardless of which path
+# pairing every blocked event with its resolution regardless of which path
 # cleared the block (clean re-run vs PM force-override).
 @test "fixture 7e: recovery: force override after block writes exactly one recovered event" {
   # Seed a prior blocking event (simulates a previous blocked done-advance).
@@ -387,34 +383,3 @@ _setup_clean_done_advance() { :; }
     "${EVIDENCE_DIR}/timeline.jsonl")
   [ "$recovered_count" -eq 0 ]
 }
-
-# ─── Fixture 7d ─────────────────────────────────────────────────────────────
-# gate-disabled: alert_on_compliance_recovery=false in execution.yaml → alert
-# suppressed, but the fsm_done_advance_recovered event is still written (log_event
-# is unconditional; only try_telegram_alert is gated).
-@test "fixture 7d: recovery: gate disabled suppresses alert but still writes recovered event" {
-  # Seed a prior blocking event.
-  printf '{"ts":"2026-05-13T10:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"gates_generated_by"}\n' \
-    >> "${EVIDENCE_DIR}/timeline.jsonl"
-
-  # Disable the alert gate in execution.yaml (4-space indent, under notifications.telegram).
-  cat >> "${CONFIG_DIR}/execution.yaml" <<EOF
-notifications:
-  telegram:
-    enabled: false
-    alert_on_compliance_recovery: false
-EOF
-
-  _setup_clean_done_advance
-
-  cd "$PROJECT_ROOT"
-  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
-  [ "$status" -eq 0 ]
-
-  # The recovered event MUST still be written (dedup marker is unconditional).
-  local recovered_count
-  recovered_count=$(jq -s '[.[] | select(.event=="fsm_done_advance_recovered")] | length' \
-    "${EVIDENCE_DIR}/timeline.jsonl")
-  [ "$recovered_count" -eq 1 ]
-}
-

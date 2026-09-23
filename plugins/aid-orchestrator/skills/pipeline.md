@@ -1038,8 +1038,8 @@ exit 3/11 forced a second `--profile full` pass (`lib/aid-run-gates-report.sh`).
 
 Every GATES→DONE refusal is overridable by `aid-fsm.sh transition GATES DONE <state_file> --force
 --reason '<≥20 chars — PM-authorized reason>'`, logged as `fsm_force_override` (§1). Repeated
-same-reason precondition fails (≥ 3) emit `fsm_precondition_repeated_fail` and a best-effort
-alert through `lib/aid-alert.sh`. Pre-deploy EPICs (`created_at < AID_DEPLOY_DATE`) skip the
+same-reason precondition fails (≥ 3) emit `fsm_precondition_repeated_fail` in the timeline.
+Pre-deploy EPICs (`created_at < AID_DEPLOY_DATE`) skip the
 `_generated_by` check (§2 grandfather).
 
 **Gate-boundary message (deterministic).** When the runner returns — DONE branch and failing
@@ -1184,8 +1184,8 @@ Detail in [Telemetry Reference](#telemetry-reference) below.
 - **Tiered Severity** — `done-advance review release` refuses on `severity: blocking` failures;
   soft-fail if `yq` is missing. Override via `--force --reason`. Registry:
   `.aid-o/config/check-severity.yaml`.
-- **Compliance Recovery Alert** (P042) — Telegram on block and on recovery. Config gate:
-  `notifications.telegram.alert_on_compliance_recovery` (default `true`).
+- **Compliance Recovery** (P042) — timeline events on block and on recovery; no Telegram
+  (P099: AID messages the PM only when an agent waits and when a plan is delivered).
 
 ### The PM force backdoor (P073)
 
@@ -1650,27 +1650,18 @@ Reference: `docs/plans/AID-v3-principles.md §1 — Detector without Enforcement
 is Decoration`. P038 (v2.21.0) is the first concrete application of this
 principle in AID.
 
-#### Compliance Recovery Alert (P042, v2.29.0+)
+#### Compliance Recovery (P042, v2.29.0+)
 
-Companion to the blocking flow above — the PM gets a signal in both directions:
+Companion to the blocking flow above, recorded in the timeline only (no Telegram
+since P099):
 
 1. **Block:** when `done-advance review→release` refuses transition on blocking
-   failures, the FSM sends a `🛑 <epic>: N blocking compliance failure(s) —
-   release blocked` Telegram alert and writes a `fsm_done_advance_blocked`
-   timeline event (with the `blocked_checks` list).
+   failures, the FSM writes a `fsm_done_advance_blocked` timeline event (with the
+   `blocked_checks` list).
 2. **Recovery:** on the next successful `done-advance review→release` (zero
    blocking failures), if the last `fsm_done_advance_blocked` event has no later
-   `fsm_done_advance_recovered` event, the FSM sends `✅ <epic>: compliance
-   cleared, release unblocked. Checks: <list>` and writes a
-   `fsm_done_advance_recovered` timeline event.
-
-The recovered event doubles as a **dedup marker** — exactly one recovery alert
-per block episode; subsequent clean runs stay silent until a new block occurs.
-
-**Config gate:** `notifications.telegram.alert_on_compliance_recovery` in
-`.aid-o/config/execution.yaml` (default `true`). Setting `false` suppresses the
-Telegram message only — the `fsm_done_advance_recovered` timeline event is
-always written (observable test signal, fixture 7d).
+   `fsm_done_advance_recovered` event, the FSM writes a `fsm_done_advance_recovered`
+   timeline event — one per block episode.
 
 **Soft-fail:** missing timeline.jsonl or `jq` → recovery detection silently
 skips (telemetry over correctness, same posture as compliance.json writes).

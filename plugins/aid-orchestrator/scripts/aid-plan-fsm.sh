@@ -7823,6 +7823,12 @@ cmd_plan_close() {
 
   echo "$marker"
   if [[ "$close_mode" == "merge" ]]; then
+    # The PM's second message (P099 Step 3). A send that fails never changes
+    # the close: the close is durable above.
+    local forced=""
+    [[ "$_PFSM_FORCE" -eq 1 || "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 ]] && forced=forced
+    ( cd "$root" && source "${SCRIPT_DIR}/lib/aid-alert.sh" \
+        && aid_alert_delivered "$plan_id" "${root}/${run_dir_rel:-.aid-o/work/evidence/${plan_id}}" "$forced" ) || true
     if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 ]]; then
       # The word "closed" is never used bare for this either. An administrative
       # close is terminal and legitimate — and it is not the same fact as a plan
