@@ -48,7 +48,15 @@ gates:
     # (gate:shell_pipeline_smoke below, .github/workflows/nightly-tests.yml).
     command: "bash -c 'plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 && plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1'"
     required: true
-    timeout_seconds: 900   # the standard's own budgets — T0 ≤ 2 min, T1 ≤ 10 min
+    # MEASURED 2026-09-22 on this host, whole portfolio green: T0 753 s
+    # (75 suites, 978 tests), T1 1895 s (39 suites, 644 tests), total 2648 s.
+    # The standard's budgets (T0 ≤ 2 min, T1 ≤ 10 min) are what the tiers ought
+    # to cost, not what they cost here, and 900 s cut this gate at 15 min with
+    # `job_timeout` on 2026-09-22 (P097 CP3 run). The P097 rule is 2 × p95
+    # rounded up to 30 s, so: 5310 s. Set 5400. Note for whoever tunes this:
+    # `gate_baseline_propose` clamps its suggestion at 3600 s and therefore
+    # cannot propose the number this very repository needs (IMP, P097 Step 9).
+    timeout_seconds: 5400
                            # — plus headroom. aid-test-tier-assign.sh ENFORCES
                            # those budgets by demoting the most expensive member
                            # while a tier overflows, so this cap is bounded by
@@ -333,12 +341,6 @@ gates:
       if [[ $api_changed -gt 0 && $doc_changed -eq 0 ]]; then
         echo "WARN: API files changed ($api_changed) but no docs updated"; exit 1
       fi
-notifications:
-  telegram:
-    enabled: false
-    chat_id: null
-    alert_on_repeated_precondition_fail: true
-    alert_threshold: 3
 # ─── Which profile runs when (2026-08-11) ────────────────────────────────────
 # Until today this key was absent, which means NO profile was passed and every
 # gate ran on every phase — including `bats_all`, i.e. the whole T0+T1 merge
@@ -357,10 +359,8 @@ notifications:
 #
 # A step gets `targeted`: CP2 review covers the step's own diff, and a step is
 # not a merge into anything.
-gate_profile_defaults:
-  step: targeted
-  epic: standard
 
+default_profile: standard
 gate_profiles:
   # ─── P064 plan Step 8 — the five canonical risk profiles ────────────────
   # These are the names the old profile classifier (deleted in P097)'s resolver can return
@@ -464,6 +464,21 @@ gate_profiles:
       - plan_diff
       - docs_updated
       - check_release_paths
+    when_paths:
+      - "aid-fsm.sh"
+      - "*/aid-fsm.sh"
+      - "aid-run-gates.sh"
+      - "*/aid-run-gates.sh"
+      - "aid-release-policy.sh"
+      - "*/aid-release-policy.sh"
+      - "aid-evidence-verify.sh"
+      - "*/aid-evidence-verify.sh"
+      - "defaults/schemas/*"
+      - "*/defaults/schemas/*"
+      - "defaults/policies/*"
+      - "*/defaults/policies/*"
+      - "agents/*.md"
+      - "*/agents/*.md"
   release:
     include:
       - tier_lint
@@ -514,7 +529,6 @@ gate_profiles:
       - bats_fsm
       - plan_diff
       - docs_updated
-      - check_release_paths
   p064-closure:
     reason: >-
       P064 E-064-1_2 closure run (PM disposition 2026-07-22). Re-seals gate
