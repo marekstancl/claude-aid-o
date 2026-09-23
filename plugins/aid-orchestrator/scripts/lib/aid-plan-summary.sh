@@ -132,7 +132,7 @@ _aps_count_risks() {
 # Same pipefail care as above: a plan with no **AID Role:** line is renderable,
 # and `grep .` finding nothing must not become the caller's exit status.
 _aps_roles() {
-  sed -n 's/^\*\*AID Role:\*\*[[:space:]]*\([a-z-]*\).*/\1/p' "$1" 2>/dev/null \
+  sed -n 's/^\*\*AID Role:\*\*[[:space:]]*\([a-z0-9-]*\).*/\1/p' "$1" 2>/dev/null \
     | { grep . || true; } | sort -u | paste -sd, - | sed 's/,/, /g'
 }
 
@@ -191,19 +191,17 @@ aid_plan_summary_renderable() {
 # step." The page before this carried a fact list and a truncated paragraph of
 # the plan's Context; nothing on it said what the plan would actually do.
 #
-# The line per step is its **Objective**, verbatim-ish. That is not a paraphrase
-# of intent: `skills/plan-writing.md:282` defines the field as "What this step
-# produces or changes — one sentence", so it is the deliverable, written by the
-# author, in the author's words. A cross-provider review read it as mere intent;
-# the contract says otherwise, and the alternative — deriving a deliverable from
-# the Files list — would put paths on a page whose whole point is plain language.
+# The line per step is its `### Step N:` title, and its **Objective** follows
+# whole as a second line (P099: a clipped Objective as the only line hid the
+# step's name). Both are the author's words; deriving a deliverable from the
+# Files list would put paths on a page whose whole point is plain language.
 #
 # Every step is listed. NO cap and no "and N more": a 10-step plan whose tail is
 # collapsed hides exactly the part the PM opened the page to judge. The count of
 # acceptance criteria rides along on each line, because "what it delivers" and
 # "how I will know it is done" are one question asked twice.
 _aps_deliverables() {
-  local plan="${1-}" line epic_title="" out="[]" n obj acs
+  local plan="${1-}" line epic_title="" out="[]" n title obj acs
   [[ -f "$plan" ]] || { printf '[]'; return 0; }
   # One pass: EPIC markers open a group, step headers add a row to it.
   local cur_epic=""
@@ -220,26 +218,28 @@ _aps_deliverables() {
       [[ -n "$epic_title" ]] && cur_epic="$cur_epic — $epic_title"
       out="$(jq -c --arg e "$cur_epic" '. + [{epic: $e, steps: []}]' <<<"$out")"
     elif [[ "$line" =~ ^###[[:space:]]+Step[[:space:]]+([0-9]+):[[:space:]]*(.*)$ ]]; then
-      n="${BASH_REMATCH[1]}"
+      n="${BASH_REMATCH[1]}"; title="${BASH_REMATCH[2]}"
       obj="$(_aps_step_objective "$plan" "$n")"
       acs="$(_aps_step_acs "$plan" "$n")"
-      [[ -n "$obj" ]] || obj="${BASH_REMATCH[2]}"
+      [[ -n "$title" ]] || title="Krok ${n}"
       # A plan with no EPIC markers still lists its steps: open an implicit group.
       if [[ "$out" == "[]" ]]; then
         out="$(jq -c '. + [{epic: "Kroky", steps: []}]' <<<"$out")"
       fi
-      out="$(jq -c --arg n "$n" --arg o "$obj" --arg a "$acs" \
-        '(.[-1].steps) += [{n: $n, text: $o, acs: $a}]' <<<"$out")"
+      out="$(jq -c --arg n "$n" --arg t "$title" --arg o "$obj" --arg a "$acs" \
+        '(.[-1].steps) += [{n: $n, text: $t, detail: $o, acs: $a}]' <<<"$out")"
     fi
   done < "$plan"
   printf '%s' "$out"
 }
 
 # _aps_step_objective <plan> <n> — the Objective line of step <n>, unmarked.
+# A step ends at the next `### ` or `## ` heading: a plan-level section after
+# the last step (Testing Strategy, Acceptance Criteria) is not the step's.
 _aps_step_objective() {
   awk -v want="$2" '
     $0 ~ "^### Step " want ":" { inside = 1; next }
-    inside && /^### Step /     { exit }
+    inside && /^###? /         { exit }
     inside && /^\*\*Objective:\*\*/ {
       sub(/^\*\*Objective:\*\*[[:space:]]*/, ""); print; exit
     }
@@ -250,7 +250,7 @@ _aps_step_objective() {
 _aps_step_acs() {
   awk -v want="$2" '
     $0 ~ "^### Step " want ":" { inside = 1; next }
-    inside && /^### Step /     { exit }
+    inside && /^###? /         { exit }
     inside && /^- \[ \] /     { c++ }
     END { print c + 0 }
   ' "$1" 2>/dev/null

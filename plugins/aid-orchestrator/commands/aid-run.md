@@ -582,15 +582,13 @@ returns — at the GATES→DONE boundary and equally on the failing branch — d
 summary of your own. Source `scripts/lib/aid-gate-outcome-summary.sh` and run:
 
 ```bash
-aid_gate_outcome_render "<the --report-file path you passed the runner>" "<evidence_dir>" "<evidence_dir>/waivers"
+aid_gate_outcome_render "<the --report-file path you passed the runner>" "<evidence_dir>"
 ```
 
 Pass the runner's own `--report-file` path explicitly — it is the preferred wiring; the
 renderer only falls back to `<evidence_dir>/gates/gates_report.json` and then the flat
-`<evidence_dir>/gates_report.json`. It writes `<evidence_dir>/gate-outcome-artifact.html` and
-prints the card (Finished, or Blocked when `overall: fail`) with a final `Artifact: <path>` line.
-
-Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+`<evidence_dir>/gates_report.json`. It prints the card (Finished, or Blocked when
+`overall: fail`); present it verbatim. A gate run owes the PM no page.
 
 Card shapes, the ordering rule and the language rule are defined once in `skills/communication.md`
 — do not restate or re-word them here.

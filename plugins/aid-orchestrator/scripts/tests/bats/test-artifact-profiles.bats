@@ -3,10 +3,9 @@
 # test-artifact-profiles.bats — a page must carry what its TYPE owes
 # (P089 Step 2).
 #
-# The four things a machine can decide, and nothing beyond them: a required
-# field is absent; the type is not one of the five; the result sentence
-# disagrees with the counts it was derived from; a link block carries a file
-# path. Whether the page is any GOOD is a reader's judgement and no test here
+# The things a machine can decide, and nothing beyond them: a required field
+# is absent; the type is not one of the three; a link block carries a file
+# path; block 6 contradicts the next steps. Whether the page is any GOOD is a reader's judgement and no test here
 # claims otherwise.
 
 load test-helpers.bash
@@ -46,23 +45,6 @@ _plan_facts() {
   }'
 }
 
-# A complete `gates` page: the four counts, and NO result tile — the renderer
-# composes that one.
-_gates_facts() {
-  local passed="${1:-6}" failed="${2:-0}" not_run="${3:-3}" waived="${4:-0}"
-  jq -n --arg p "$passed" --arg f "$failed" --arg n "$not_run" --arg w "$waived" '{
-    artifact_type: "gates",
-    eyebrow: "Brány", title: "Běh bran", when: "26. 8. 2026",
-    outcome: {
-      passed_count: ($p|tonumber), failed_count: ($f|tonumber),
-      not_run_count: ($n|tonumber), waived_count: ($w|tonumber)
-    },
-    tiles: {duration: {value: "3 min"}},
-    items: ["scope-check ověřil rozsah commitu"],
-    footer: "Vyrobil test."
-  }'
-}
-
 _prose() {
   jq -n '{summary: "Shrnutí.", core: "Jádro.", ask: "Přečti plán."}'
 }
@@ -93,7 +75,7 @@ _prose() {
 
 # ─── the type itself ────────────────────────────────────────────────────────
 
-@test "profile: an unknown artifact_type is an error and names the five" {
+@test "profile: an unknown artifact_type is an error and names the three" {
   local facts; facts="$(_plan_facts | jq '.artifact_type = "incident"')"
   run aid_artifact_render outcome "$facts" "$(_prose)" "$OUT"
   [ "$status" -eq 1 ]
@@ -110,48 +92,6 @@ _prose() {
 }
 
 # ─── the result sentence is DERIVED, so it cannot disagree ──────────────────
-
-@test "profile: zero failures never produce the language of failure" {
-  run aid_artifact_render outcome "$(_gates_facts 6 0 3 0)" "$(_prose)" "$OUT"
-  [ "$status" -eq 0 ]
-  grep -q "Nic neselhalo" "$OUT"
-  grep -q "state-ok" "$OUT"
-  # The rejected headline: "6 of 9 passed" while nothing failed.
-  ! grep -q "6/9" "$OUT"
-  grep -q "Neběželo" "$OUT"
-}
-
-@test "profile: failures are counted, declined and marked critical" {
-  run aid_artifact_render outcome "$(_gates_facts 6 2 1 0)" "$(_prose)" "$OUT"
-  [ "$status" -eq 0 ]
-  grep -q "2 brány selhaly" "$OUT"
-  grep -q "state-critical" "$OUT"
-}
-
-@test "profile: a caller's own result tile is dropped, not trusted" {
-  local facts; facts="$(_gates_facts 6 0 3 0 | jq '.tiles.result = {value: "6/9 prošlo", state: "ok"}')"
-  run aid_artifact_render outcome "$facts" "$(_prose)" "$OUT"
-  [ "$status" -eq 0 ]
-  ! grep -q "6/9 prošlo" "$OUT"
-  grep -q "Nic neselhalo" "$OUT"
-}
-
-@test "profile: a waiver is named on the result tile and never counted as a pass" {
-  run aid_artifact_render outcome "$(_gates_facts 6 0 0 1)" "$(_prose)" "$OUT"
-  [ "$status" -eq 0 ]
-  grep -q "1 prominuta" "$OUT"
-  grep -q "state-warn" "$OUT"
-  grep -q "6 bran" "$OUT"
-}
-
-@test "profile: a type that derives from state and carries no counts is refused" {
-  local facts; facts="$(_gates_facts | jq 'del(.outcome.waived_count)')"
-  run aid_artifact_render outcome "$facts" "$(_prose)" "$OUT"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"outcome.waived_count"* ]]
-}
-
-# ─── blocks 5 and 7 name things ─────────────────────────────────────────────
 
 @test "profile: a file path in block 5 is refused" {
   local facts; facts="$(_plan_facts | jq '.links = ["plugins/aid-orchestrator/scripts/lib/aid-artifact-render.sh"]')"
@@ -207,8 +147,8 @@ _prose() {
     callers+=("$f")
   done < <(grep -rl 'aid_artifact_render ' "$lib" --include='*.sh')
 
-  # Five today: plan, gates, plan close, brainstorming, finished EPIC.
-  [ "${#callers[@]}" -eq 5 ]
+  # Three since P099: plan, plan close, brainstorming.
+  [ "${#callers[@]}" -eq 3 ]
   for f in "${callers[@]}"; do
     grep -q 'artifact_type' "$f" || {
       echo "no artifact_type in $(basename "$f") — it is still on the transitional typeless path" >&2

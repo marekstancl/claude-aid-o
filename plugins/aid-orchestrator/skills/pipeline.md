@@ -1047,14 +1047,12 @@ branch alike, manual and auto mode — do not summarise. Source
 `scripts/lib/aid-gate-outcome-summary.sh` and run:
 
 ```bash
-aid_gate_outcome_render "<the --report-file path passed above>" "<evidence_dir>" "<evidence_dir>/waivers"
+aid_gate_outcome_render "<the --report-file path passed above>" "<evidence_dir>"
 ```
 
-It computes every number from the report, follows `.overall` and never a per-gate row, renders a
-waiver as PM risk acceptance, and writes `<evidence_dir>/gate-outcome-artifact.html` only when the
-run BLOCKS (a passing run leaves no page; the `Artifact:` line is then absent).
-Publish the artifact body via the Artifact tool, then present the chat card verbatim.
-Card shapes and the language rule are in `skills/communication.md`. If the renderer exits
+It computes every number from the report, follows `.overall` and never a per-gate row, and counts
+a waiver as PM risk acceptance. Present the card it prints verbatim; a gate run owes the PM no
+page (the PM reads two per plan: the written plan and the delivered one). Card shapes and the language rule are in `skills/communication.md`. If the renderer exits
 non-zero, say so and present a Blocked card built only from bounded facts, routing raw-derived
 text through `aid_gate_outcome_redact` first.
 
@@ -1176,10 +1174,6 @@ Detail in [Telemetry Reference](#telemetry-reference) below.
 
 - **Epic Summary** — after `done-advance review→release`, `evidence/<epic>/<run>/epic-summary.md`
   with the delivery summary, warnings and PM trust level. Best-effort; never blocks release.
-- **EPIC page for the PM** (P089) — on the same edge `done-advance` renders
-  `evidence/<plan_id>/<epic_id>/epic-summary-artifact.html`. The Stop rule
-  `milestone_artifact_rendered` refuses a turn that finished an EPIC without one. **Publish it
-  with the Artifact tool** and hand the PM the link; the renderer writes a body and never publishes.
 - **Compliance Telemetry** — `compliance.json`; `overall: pass` if all checks ∈ {true, null}.
 - **Tiered Severity** — `done-advance review release` refuses on `severity: blocking` failures;
   soft-fail if `yq` is missing. Override via `--force --reason`. Registry:

@@ -1,39 +1,26 @@
 #!/usr/bin/env bats
 # aid-tier: t1
-# test-aid-gate-outcome-summary.bats — fixtures for the gate/waiver outcome
-# renderer (P080 Step 11).
+# test-aid-gate-outcome-summary.bats — the gate-boundary card (P080 Step 11;
+# card only since P099 Step 4: a gate run owes the PM no page).
 #
-# TESTABILITY BOUNDARY, STATED EXPLICITLY
-#   aid_gate_outcome_render writes an artifact BODY and prints a chat card.
-#   It never publishes. Publication through the Artifact tool is the
-#   controller's live, session-level act, wired in commands/aid-run.md and
-#   skills/pipeline.md — nothing in this suite covers or claims it.
-#
-# THE RULE THIS SUITE EXISTS FOR
-#   A waiver is PM risk acceptance, never a pass. The waiver's own rendered
-#   result item carries `waived` and carries NO pass label — Czech forms
-#   included, because these surfaces are Czech and `passed` alone was a guard
-#   against a word the renderer would never have written anyway.
+# THE RULES THIS SUITE EXISTS FOR
+#   The card follows `.overall`, never a per-gate row. A waiver is PM risk
+#   acceptance, never a pass — Czech forms included. A report nobody can vouch
+#   for is refused, never rendered as an empty pass. Nothing from the report
+#   reaches the card without the redactor.
 #
 # NEGATIVE ASSERTIONS USE refute_grep, NOT `! grep`
 #   `! grep -q …` cannot fail a bats case: bash exempts a `!`-inverted command
-#   from `set -e` and bats' ERR trap inherits the exemption. Every `! grep`
-#   line in this file was inert. See refute_grep in test-helpers.bash.
+#   from `set -e` and bats' ERR trap inherits the exemption.
 
 load test-helpers.bash
 
 setup() {
-
-  # Since 2026-08-28 a PASSING gate run leaves no page (PM: a page is owed only
-  # when something is asked of him). These cases assert the page's CONTENT, so
-  # they opt back into always-render; the cases that assert the new behaviour
-  # set it themselves.
-  export AID_ARTIFACT_ALWAYS=1
   setup_test_evidence_dir
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
   RUN_DIR="$TEST_TMPDIR/run"
-  mkdir -p "$RUN_DIR/gates" "$RUN_DIR/waivers"
+  mkdir -p "$RUN_DIR/gates"
   export RUN_DIR
   # shellcheck disable=SC1090
   source "$AID_PLUGIN_PATH/scripts/lib/aid-gate-outcome-summary.sh"
@@ -68,69 +55,22 @@ _all_pass_report() {
 
 _write() { printf '%s\n' "$1" > "$2"; }
 
-# _pos <file> <needle> — byte offset of the first occurrence, the same
-# order-assert technique test-aid-artifact-render.bats uses for the 7 blocks.
-_pos() { grep -abo -F -e "$2" "$1" | head -1 | cut -d: -f1; }
+# _counts — the Finished card's count line.
+_counts() { grep -F 'Ověřeno:' <<<"$output"; }
 
-# _assert_block_order <body> — the ecosystem block order, structurally.
-#
-# BLOCK 5 IS NOT ASSERTED, AND THAT IS THE POINT (P089 Step 3). The standard
-# renders "Čeho se to týká" only when related links exist, and this page has
-# none any more: its only link was the report path, which the standard forbids
-# in blocks 5 and 7 and which the provenance footer already names. A helper
-# that demanded block 5 would demand the defect back.
-_assert_block_order() {
-  local f="$1" p1 p2 p3 p4 p6 p7
-  p1="$(_pos "$f" '<header class="masthead">')"
-  p2="$(_pos "$f" '<section class="tiles">')"
-  p3="$(_pos "$f" '<h2>Shrnutí</h2>')"
-  p4="$(_pos "$f" '<h2>Jádro</h2>')"
-  p6="$(_pos "$f" '<h2>Co se čeká ode mě</h2>')"
-  p7="$(_pos "$f" 'class="golink')"
-  for v in "$p1" "$p2" "$p3" "$p4" "$p6" "$p7"; do [ -n "$v" ]; done
-  [ "$p1" -lt "$p2" ]; [ "$p2" -lt "$p3" ]; [ "$p3" -lt "$p4" ]
-  [ "$p4" -lt "$p6" ]; [ "$p6" -lt "$p7" ]
-  refute_grep -qF '<h2>Čeho se to týká</h2>' "$f"
-}
+# ─── the two cards ──────────────────────────────────────────────────────────
 
-BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
-
-# ─── fixture class 1: all pass ──────────────────────────────────────────────
-
-@test "an all-pass report renders the Finished card and computed tile counts" {
+@test "an all-pass report renders the Finished card with computed counts and no page" {
   _write "$(_all_pass_report)" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-
   [[ "$output" == Hotovo:* ]]
   [[ "$output" == *"nic neselhalo"* ]]
-  [[ "$output" == *"Ověřeno: 2 z 2 bran"* ]]
-  [[ "$output" != *Zastaveno:* ]]
-  [[ "${output##*$'\n'}" == "Artifact: $(BODY)" ]]
-
-  # Tiles are DERIVED: 120000 ms of gate time is 2 min, not a claim; and the
-  # headline is HOW MANY FAILED, never a ratio of passes.
-  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo</span>' "$(BODY)"
-  grep -qF '<span class="k">Trvalo</span><span class="v">2 min 0 s</span>' "$(BODY)"
-  grep -qF '<span class="k">Ověřeno</span><span class="v">2 brány</span>' "$(BODY)"
-  grep -qF '<span class="k">Neběželo</span><span class="v">0</span>' "$(BODY)"
-  refute_grep -qF '2/2 prošlo' "$(BODY)"
-
-  # The core names WHICH gates ran and what each of them verified.
-  grep -qF 'brána tests: prošla — ověřila: bats scripts/tests' "$(BODY)"
-
-  # Nothing is expected, so no command stands beside block 6.
-  grep -qF 'Nic — ozvu se, až bude hotovo' "$(BODY)"
-  refute_grep -qF '<h2>Jak pokračovat</h2>' "$(BODY)"
+  # 120000 ms of gate time is 2 min — derived, not claimed.
+  [[ "$(_counts)" == "Ověřeno: 2 z 2 bran za 2 min 0 s (selhalo 0, neběželo 0, prominuto 0)." ]]
+  [[ "$output" != *Zastaveno:* && "$output" != *"Artifact:"* ]]
+  [ -z "$(find "$RUN_DIR" -name '*.html')" ]
 }
-
-@test "the rendered artifact carries its blocks in the standard's order, and no link block" {
-  _write "$(_all_pass_report)" "$RUN_DIR/gates/gates_report.json"
-  aid_gate_outcome_render "" "$RUN_DIR"
-  _assert_block_order "$(BODY)"
-}
-
-# ─── fixture class 2: a failed required gate ────────────────────────────────
 
 @test "a failed required gate renders the Blocked card naming the gate and the smallest recovery action" {
   local gates
@@ -139,22 +79,19 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-
   [[ "$output" == Zastaveno:* ]]
   [[ "$output" == *"brána tests selhala (exit 1)"* ]]
+  [[ "$output" == *"ověřeno 1 z 2 bran"* ]]
   # The recovery line is the gate's OWN command from _command_log — never an
   # invented remediation, because no gate definition carries one.
   [[ "$output" == *"Doporučené řešení: zopakuj bránu příkazem \`bats scripts/tests\`"* ]]
   [[ "$output" == *"aid-fsm.sh transition GATES DONE <state_file> --force --reason"* ]]
-
-  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
-  grep -qF '<span class="k">Ověřeno</span><span class="v">1 brána</span>' "$(BODY)"
-  grep -qF '<span class="k">Neběželo</span><span class="v">0</span>' "$(BODY)"
+  [ -z "$(find "$RUN_DIR" -name '*.html')" ]
 }
 
-# ─── fixture class 3: waived — the D3 rule ──────────────────────────────────
+# ─── waived — the D3 rule ───────────────────────────────────────────────────
 
-@test "a waived gate renders as PM risk acceptance, never as a pass" {
+@test "a waived gate is counted as PM risk acceptance, never as a pass" {
   local gates extra
   gates="$(jq -nc --argjson a "$(_row tests waived 1 5000 3)" --argjson b "$(_row lint pass 0 1000 1)" \
     '{tests:($a + {waiver_ref:"waivers/gate-waiver-tests.json"}), lint:$b}')"
@@ -162,86 +99,46 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   _write "$(_report pass "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-
-  grep -qF 'brána tests: prominuta — PM převzal riziko' "$(BODY)"
-  [[ "$output" == *"prominutá"* ]]
-
-  # "NEVER AS A PASS" IS A CLAIM ABOUT LABELS, NOT ABOUT ONE ENGLISH WORD.
-  # This used to forbid only the literal `passed`, on surfaces that are written
-  # in Czech throughout — a row labelled `prošla` would have satisfied it while
-  # saying exactly the thing the case is named for. The negative is now scoped
-  # to the waived gate's own result item (the page is one long line, so the
-  # unit is the <li>, and a document-wide grep would collide with the entirely
-  # legitimate count tiles) and covers the Czech forms.
-  local waived_li
-  waived_li="$(grep -oE '<li>[^<]*</li>' "$(BODY)" | grep -F 'prominuta')"
-  [[ "$waived_li" == *"tests"* ]]
-  refute_grep -qiE 'passed|prošl[aoyi]|prošel|úspěch|success' <<<"$waived_li"
+  [[ "$(_counts)" == "Ověřeno: 1 z 2 bran"*"prominuto 1)." ]]
+  local waived_line
+  waived_line="$(grep -F 'prominut' <<<"$output" | grep -v '^Ověřeno:')"
+  [ -n "$waived_line" ]
+  refute_grep -qiE 'passed|prošl[aoyi]|prošel|úspěch|success' <<<"$waived_line"
   # `OK` is matched case-SENSITIVELY and as a whole word: folded to lowercase
   # it hits inside ordinary Czech words such as "krok".
-  refute_grep -qE '\b(OK|PASS|PASSED)\b|✅' <<<"$waived_li"
-
-  local waived_card
-  waived_card="$(grep -F 'prominut' <<<"$output")"
-  [ -n "$waived_card" ]
-  refute_grep -qiE 'passed|prošl[aoyi]|prošel|úspěch|success' <<<"$waived_card"
-  refute_grep -qE '\b(OK|PASS|PASSED)\b|✅' <<<"$waived_card"
-
-  # A waiver has its OWN count and is never folded into the passes: one gate
-  # passed, one was waived, and the result tile names the waiver.
-  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo, 1 prominuta</span>' "$(BODY)"
-  grep -qF '<span class="k">Ověřeno</span><span class="v">1 brána</span>' "$(BODY)"
-  grep -qF 'prominuto 1' "$(BODY)"
+  refute_grep -qE '\b(OK|PASS|PASSED)\b|✅' <<<"$waived_line"
 }
 
-@test "the report alone carries the waiver — no waiver directory is passed at all" {
-  local gates extra
-  gates="$(jq -nc --argjson a "$(_row tests waived 1 5000 3)" '{tests:$a}')"
-  extra='{"waived_gates":["tests"]}'
-  _write "$(_report pass "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
-  rm -rf "$RUN_DIR/waivers"
-
-  run aid_gate_outcome_render "" "$RUN_DIR"
-  [ "$status" -eq 0 ]
-  grep -qF 'brána tests: prominuta — PM převzal riziko' "$(BODY)"
-  refute_grep -qF 'passed' "$(BODY)"
-}
-
-@test "a waiver named only by waived_gates[] still renders — a missing row never hides it" {
+@test "a waiver named only by waived_gates[] still counts — a missing row never hides it" {
   local gates extra
   gates="$(jq -nc --argjson a "$(_row lint pass 0 1000 1)" '{lint:$a}')"
   extra='{"waived_gates":["docs_updated"]}'
   _write "$(_report pass "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-  grep -qF 'brána docs_updated: prominuta — PM převzal riziko' "$(BODY)"
+  [[ "$(_counts)" == *"prominuto 1)." ]]
 }
 
-@test "the waiver receipt enriches the line but is never the source of the waiver" {
+@test "a fail row that waived_gates names is a waiver, not also a failure (Codex, P089)" {
   local gates extra
-  gates="$(jq -nc --argjson a "$(_row tests waived 1 5000 1)" '{tests:$a}')"
-  extra='{"waived_gates":["tests"]}'
+  gates="$(jq -nc --argjson a "$(_row lint fail 1 500 1)" --argjson b "$(_row tests pass 0 1000 1)" \
+    '{lint:$a, tests:$b}')"
+  extra='{"waived_gates":["lint"]}'
   _write "$(_report pass "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
-  jq -nc '{gate_id:"tests", authorized_by:"PM", reason:"flaky suite, fixed in the next EPIC", expires_at:null, consumed:{at:null, by_run:null}}' \
-    > "$RUN_DIR/waivers/gate-waiver-tests.json"
-
-  run aid_gate_outcome_render "" "$RUN_DIR" "$RUN_DIR/waivers"
-  [ "$status" -eq 0 ]
-  grep -qF 'flaky suite, fixed in the next EPIC' "$(BODY)"
-  grep -qF 'prominuta — PM převzal riziko' "$(BODY)"
-}
-
-@test "a rejected waiver renders in the failed section with its verdict word, never as waived-ok" {
-  local gates
-  gates="$(jq -nc --argjson a "$(_row tests fail 1 5000 1)" \
-    '{tests:($a + {waiver_rejected:"expired"})}')"
-  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
+  [[ "$(_counts)" == *"(selhalo 0, neběželo 0, prominuto 1)." ]]
+}
 
-  grep -qF 'brána tests: selhala (exit 1), výjimka zamítnuta — expired' "$(BODY)"
-  [[ "$output" == Zastaveno:* ]]
-  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
+@test "a REJECTED waiver stays a failure even when waived_gates names the gate" {
+  local gates extra
+  gates="$(jq -nc --argjson a "$(_row lint fail 1 500 1)" \
+    '{lint:($a + {waiver_rejected:"expired"})}')"
+  extra='{"waived_gates":["lint"]}'
+  _write "$(_report fail "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "Zastaveno: brána lint selhala (exit 1)."* ]]
 }
 
 # ─── card selection follows .overall, never a per-row verdict ───────────────
@@ -255,18 +152,13 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   _write "$(_report pass "$gates")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-
   [[ "$output" == Hotovo:* ]]
-  grep -qF 'brána lint neběžela: přeskočena' "$(BODY)"
-  grep -qF 'brána build neběžela: mimo profil' "$(BODY)"
-  grep -qF '<span class="k">Neběželo</span><span class="v">2</span>' "$(BODY)"
-  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo</span>' "$(BODY)"
+  [[ "$(_counts)" == *"(selhalo 0, neběželo 2, prominuto 0)." ]]
 }
 
-# P097 Step 2: the same report written as version-2 rows (status/reason/waived,
-# no `result` at all) renders the same lines — the summary reads every row
-# through gate_row_normalize and its text did not change.
-@test "version-2 rows (status/reason/waived) render exactly the version-1 lines: mimo profil, přeskočena, prominuta, selhala" {
+# P097 Step 2: version-2 rows (status/reason/waived, no `result`) classify the
+# same way — the renderer reads every row through gate_row_normalize.
+@test "version-2 rows (status/reason/waived) classify exactly like version-1 rows" {
   _row2() {  # <gate> <status> <reason> <waived> <exit>
     jq -nc --arg g "$1" --arg st "$2" --arg r "$3" --argjson w "$4" --argjson e "$5" \
       '{row_version:2, gate:$g, status:$st, reason:$r, waived:$w, exit_code:$e, duration_ms:10,
@@ -281,17 +173,10 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
     --argjson e "$(_row2 types fail exit_4 false 4)" \
     --argjson f "$(_row2 smoke fail missing_script false 1)" \
     '{tests:$a, lint:$b, build:$c, e2e:$d, types:$e, smoke:$f, _execution_ledger:{path:"p", duplicates:[], dispatched:1}}')"
-  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
+  _write "$(_report pass "$gates")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-  grep -qF 'brána lint neběžela: přeskočena' "$(BODY)"
-  grep -qF 'brána build neběžela: mimo profil' "$(BODY)"
-  grep -qF 'brána smoke neběžela: skript brány ve stromu nebyl' "$(BODY)"
-  grep -qF 'brána e2e: prominuta' "$(BODY)"
-  grep -qF 'brána types: selhala (exit 4), důvod neznámý' "$(BODY)"
-  # the list is capped at five and passes come last, so the pass shows as a count
-  grep -qF '<span class="k">Ověřeno</span><span class="v">1 brána</span>' "$(BODY)"
-  grep -qF '<span class="k">Neběželo</span><span class="v">3</span>' "$(BODY)"
+  [[ "$(_counts)" == "Ověřeno: 1 z 6 bran"*"(selhalo 1, neběželo 3, prominuto 1)." ]]
 }
 
 @test "a FAILING non-required gate with overall pass still selects the Finished card" {
@@ -301,58 +186,29 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   _write "$(_report pass "$gates")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-
-  # The card follows .overall. Reading the row instead would tell the PM the
-  # run is blocked while the FSM advances.
-  [[ "$output" == Hotovo:* ]]
+  # Reading the row instead would tell the PM the run is blocked while the FSM advances.
+  [[ "$output" == "Hotovo: brány doběhly, 1 z nich selhalo (žádná z nich povinná)."* ]]
   [[ "$output" != *Zastaveno:* ]]
-  grep -qF 'brána docs_updated: selhala (exit 1)' "$(BODY)"
 }
 
-@test "a retried gate surfaces its attempts in the core list, not in the tiles" {
-  local gates
-  gates="$(jq -nc --argjson a "$(_row tests pass 0 1000 3)" '{tests:$a}')"
-  _write "$(_report pass "$gates")" "$RUN_DIR/gates/gates_report.json"
-  aid_gate_outcome_render "" "$RUN_DIR"
-
-  grep -qF 'brána tests: prošla až na 3. pokus' "$(BODY)"
-  grep -qF '<span class="k">Neběželo</span><span class="v">0</span>' "$(BODY)"
-}
-
-# ─── edge: an empty profile ─────────────────────────────────────────────────
-
-@test "a report with zero gates renders the Finished card, scope 0 and the explicit note" {
+@test "a report with zero gates renders the Finished card with scope 0" {
   _write "$(_report pass '{}')" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-
   [[ "$output" == Hotovo:* ]]
   [[ "$output" == *"Ověřeno: 0 z 0 bran"* ]]
-  grep -qF '<span class="k">Ověřeno</span><span class="v">0 bran</span>' "$(BODY)"
-  grep -qF 'profil nespustil žádnou bránu, takže se nic neověřilo' "$(BODY)"
-  _assert_block_order "$(BODY)"
 }
 
 # ─── all three report locations, plus the escalation shape ──────────────────
 
-@test "an explicit report path wins, and the provenance footer names it" {
+@test "an explicit report path wins over the nested decoy" {
   local other="$TEST_TMPDIR/somewhere-else.json"
   _write "$(_all_pass_report)" "$other"
   _write "$(_report fail "$(jq -nc --argjson a "$(_row tests fail 1 10 1)" '{tests:$a}')")" \
     "$RUN_DIR/gates/gates_report.json"
-
   run aid_gate_outcome_render "$other" "$RUN_DIR"
   [ "$status" -eq 0 ]
-  # The explicit path was rendered, not the nested decoy.
   [[ "$output" == Hotovo:* ]]
-  grep -qF "Zdroj: $other." "$(BODY)"
-}
-
-@test "the nested layout resolves when no explicit path is given" {
-  _write "$(_all_pass_report)" "$RUN_DIR/gates/gates_report.json"
-  run aid_gate_outcome_render "" "$RUN_DIR"
-  [ "$status" -eq 0 ]
-  grep -qF "Zdroj: $RUN_DIR/gates/gates_report.json." "$(BODY)"
 }
 
 @test "the flat layout resolves when the nested one does not exist" {
@@ -360,10 +216,10 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   _write "$(_all_pass_report)" "$RUN_DIR/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-  grep -qF "Zdroj: $RUN_DIR/gates_report.json." "$(BODY)"
+  [[ "$output" == Hotovo:* ]]
 }
 
-@test "the escalation-shaped variant renders and names the escalation" {
+@test "the escalation-shaped variant renders" {
   local base merged
   base="$(_all_pass_report)"
   # Exactly lib/aid-run-gates-report.sh's merge: the full pass verbatim plus a
@@ -371,20 +227,17 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   merged="$(jq -nc --argjson full "$base" --argjson targeted "$base" \
     '$full + {escalation:{triggered_by:"targeted_tests", reason:"exit_code 11: mapping_gap", targeted_run:$targeted}}')"
   _write "$merged" "$RUN_DIR/gates/gates_report.json"
-
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-  grep -qF 'eskalace targeted → full: exit_code 11: mapping_gap' "$(BODY)"
-  grep -qF "Zdroj: $RUN_DIR/gates/gates_report.json." "$(BODY)"
+  [[ "$(_counts)" == "Ověřeno: 2 z 2 bran"* ]]
 }
 
 # ─── error handling ─────────────────────────────────────────────────────────
 
-@test "a missing report exits 1 with a one-line error and writes no artifact" {
+@test "a missing report exits 1 with a one-line error" {
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"no gates report found"* ]]
-  [ ! -f "$(BODY)" ]
 }
 
 @test "an invalid report exits 1 rather than rendering wrong numbers" {
@@ -395,31 +248,20 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
 }
 
 @test "a report carrying no .gates data fails closed, not as an empty profile" {
-  # `.gates` defaulted to `{}` made "no gate data in this file" read exactly
-  # like the legitimate empty profile above — a confident "0 z 0 prošlo" over a
-  # report nobody could vouch for. The two are different facts.
   _write '{"overall":"pass","epic_id":"E1"}' "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"carries no .gates object"* ]]
-  [[ "$output" != *"0 z 0 prošlo"* ]]
-  [ ! -f "$(BODY)" ]
+  [[ "$output" != *"0 z 0"* ]]
 }
 
 @test "a gate map whose VALUE is not an object fails closed, not into blank counters" {
-  # The outer-type check let this through: `.gates` IS an object. The row
-  # conversion then died on it ("Cannot index string with string") and its
-  # status was never read, so every counter came out empty and the card printed
-  # `Hotovo: brány doběhly,  z  prošlo.` with exit 0 — a pass claimed over a
-  # gate set nobody could enumerate.
   _write '{"overall":"pass","epic_id":"E1","gates":{"tests":"pass"}}' \
     "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"non-object gate entries (tests)"* ]]
   [[ "$output" != *"Hotovo:"* ]]
-  [[ "$output" != *" z  prošlo"* ]]
-  [ ! -f "$(BODY)" ]
 }
 
 @test "one malformed entry among good ones is refused by name, never silently dropped" {
@@ -429,18 +271,10 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"non-object gate entries (lint)"* ]]
-  # Never "1 z 1 prošlo" — dropping the row it cannot read would have counted a
-  # one-gate pass over a two-gate report.
-  [[ "$output" != *"prošlo"* ]]
-  [ ! -f "$(BODY)" ]
+  [[ "$output" != *"Ověřeno"* ]]
 }
 
 @test "a report with no .overall fails closed — a missing verdict is not a pass" {
-  # The card follows `.overall` and nothing else, so its ABSENCE decided the
-  # message: `.overall // "unknown"` is not "fail", so blocked stayed 0 and a
-  # report of two failing gates printed `Hotovo: brány doběhly`. The runner
-  # writes exactly "pass" or "fail" (aid-run-gates.sh:2454, and :2613 for the
-  # merged escalation shape); anything else is a report nobody can vouch for.
   local gates
   gates="$(jq -nc --argjson a "$(_row tests fail 1 1000 1)" --argjson b "$(_row lint fail 1 500 1)" \
     '{tests:$a, lint:$b}')"
@@ -450,7 +284,6 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"no usable .overall verdict"* ]]
   [[ "$output" != *"Hotovo:"* ]]
-  [ ! -f "$(BODY)" ]
 }
 
 @test "an unrecognised .overall value fails closed rather than defaulting to not-blocked" {
@@ -459,9 +292,9 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"no usable .overall verdict"* ]]
-  [[ "$output" != *"Hotovo:"* ]]
-  [ ! -f "$(BODY)" ]
 }
+
+# ─── redaction ──────────────────────────────────────────────────────────────
 
 @test "a secret smuggled into .overall is redacted in the refusal it causes" {
   _write "$(jq -c '.overall = "ghp_0123456789abcdefghij"' <<<"$(_all_pass_report)")" \
@@ -471,8 +304,6 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   refute_grep 'ghp_0123456789abcdefghij' <<<"$output"
 }
 
-# ─── the fallback path's redactor is callable, and it redacts ───────────────
-
 @test "aid_gate_outcome_redact is the callable entry point the fallback card must use" {
   run aid_gate_outcome_redact 'gate output: token=ghp_0123456789abcdefghij failed'
   [ "$status" -eq 0 ]
@@ -480,36 +311,26 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   [[ "$output" == *"<redacted:"* ]]
 }
 
-@test "a secret in the failing gate's exit_code is redacted in the CHAT CARD" {
-  # exit_code is a passthrough of a report field, not a number this file
-  # computed, so it is input like any other. The card redacted the gate name and
-  # the reproduction command beside it and printed this one verbatim.
+@test "a secret in the failing gate's exit_code or name is redacted in the card" {
   local gates
   gates="$(jq -nc '{tests: {gate:"tests", result:"fail", reason:"",
                             exit_code:"ghp_ABCDEFGHIJKLMNOPQRSTUV",
                             duration_ms:5000, output:"", attempts:1}}')"
   _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
-
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
   [[ "$output" == Zastaveno:* ]]
   [[ "$output" != *"ghp_ABCDEFGHIJKLMNOPQRSTUV"* ]]
   [[ "$output" == *"<redacted:github_token>"* ]]
-}
-
-@test "a secret reaching the renderer through a gate name is redacted and counted" {
-  local gates
   gates="$(jq -nc --argjson a "$(_row "leak-ghp_0123456789abcdefghij" fail 1 10 1)" '{leaky:$a}')"
   _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
-  aid_gate_outcome_render "" "$RUN_DIR"
-
-  refute_grep -qF 'ghp_0123456789abcdefghij' "$(BODY)"
-  grep -qE 'Redigováno tajemství: [1-9]' "$(BODY)"
+  run aid_gate_outcome_render "" "$RUN_DIR"
+  refute_grep -qF 'ghp_0123456789abcdefghij' <<<"$output"
 }
 
 # ─── "did not run" versus "failed" is a mapping, not a guess (P089 Step 3) ──
 
-@test "a fail row whose reason means the harness stopped it counts as not-run, and the page names the reason" {
+@test "a fail row whose reason means the harness stopped it counts as not-run" {
   local gates
   gates="$(jq -nc --argjson a "$(_row tests pass 0 1000 1)" \
     --argjson b "$(_row build fail 1 0 0 service_unhealthy)" \
@@ -517,31 +338,16 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   _write "$(_report pass "$gates")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-
-  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo</span>' "$(BODY)"
-  grep -qF '<span class="k">Neběželo</span><span class="v">1</span>' "$(BODY)"
-  grep -qF 'brána build neběžela: služba, kterou brána potřebuje, neběžela' "$(BODY)"
-  refute_grep -qF 'brána build: selhala' "$(BODY)"
+  [[ "$(_counts)" == *"(selhalo 0, neběželo 1, prominuto 0)." ]]
 }
 
 @test "a fail row with an unknown reason counts as a failure, conservatively" {
   local gates
-  gates="$(jq -nc --argjson a "$(_row tests fail 1 1000 1 disk_full)" '{tests:$a}')"
-  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
+  gates="$(jq -nc --argjson a "$(_row tests fail 1 1000 1 disk_full)" --argjson b "$(_row lint pass 0 10 1)" '{tests:$a, lint:$b}')"
+  _write "$(_report pass "$gates")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-
-  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
-  grep -qF 'brána tests: selhala (exit 1), důvod: disk_full' "$(BODY)"
-}
-
-@test "a fail row with no reason at all says the reason is unknown" {
-  local gates
-  gates="$(jq -nc --argjson a "$(_row tests fail 1 1000 1)" '{tests:$a}')"
-  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
-  run aid_gate_outcome_render "" "$RUN_DIR"
-  [ "$status" -eq 0 ]
-  grep -qF 'brána tests: selhala (exit 1), důvod neznámý' "$(BODY)"
+  [[ "$(_counts)" == *"(selhalo 1, neběželo 0, prominuto 0)." ]]
 }
 
 @test "a run blocked by nothing but infrastructure says so instead of reading green" {
@@ -550,51 +356,8 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-
-  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo, běh přesto zastaven</span>' "$(BODY)"
-  grep -q 'state-critical' "$(BODY)"
   [[ "$output" == *"neselhala žádná brána, ale 1 jich neproběhlo"* ]]
 }
-
-# ─── blocks 5 and 7 name things ─────────────────────────────────────────────
-
-@test "the report path is in the provenance footer and nowhere else on the page" {
-  _write "$(_all_pass_report)" "$RUN_DIR/gates/gates_report.json"
-  aid_gate_outcome_render "" "$RUN_DIR"
-
-  grep -qF "Zdroj: $RUN_DIR/gates/gates_report.json." "$(BODY)"
-  grep -qF '<div class="golink golink-flat">Technický detail běhu bran</div>' "$(BODY)"
-  # Once — in the footer. It used to be on this page three times.
-  [ "$(grep -oF "$RUN_DIR/gates/gates_report.json" "$(BODY)" | wc -l)" -eq 1 ]
-}
-
-@test "a fail row that waived_gates names is a waiver, not also a failure (Codex, P089)" {
-  local gates extra
-  gates="$(jq -nc --argjson a "$(_row lint fail 1 500 1)" --argjson b "$(_row tests pass 0 1000 1)" \
-    '{lint:$a, tests:$b}')"
-  extra='{"waived_gates":["lint"]}'
-  _write "$(_report pass "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
-  run aid_gate_outcome_render "" "$RUN_DIR"
-  [ "$status" -eq 0 ]
-
-  grep -qF '<span class="k">Výsledek</span><span class="v">Nic neselhalo, 1 prominuta</span>' "$(BODY)"
-  grep -qF 'brána lint: prominuta — PM převzal riziko' "$(BODY)"
-  refute_grep -qF 'brána lint: selhala' "$(BODY)"
-}
-
-@test "a REJECTED waiver stays a failure even when waived_gates names the gate" {
-  local gates extra
-  gates="$(jq -nc --argjson a "$(_row lint fail 1 500 1)" \
-    '{lint:($a + {waiver_rejected:"expired"})}')"
-  extra='{"waived_gates":["lint"]}'
-  _write "$(_report fail "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
-  run aid_gate_outcome_render "" "$RUN_DIR"
-  [ "$status" -eq 0 ]
-
-  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
-  grep -qF 'brána lint: selhala (exit 1), výjimka zamítnuta — expired' "$(BODY)"
-}
-
 
 # ── the classification stream cannot be silenced or forged (Codex, P089) ──
 
@@ -605,43 +368,15 @@ BODY() { printf '%s' "$RUN_DIR/gate-outcome-artifact.html"; }
   _write "$(_report pass "$gates" "$extra")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-  # One gate passed, and the page says so — the jq that feeds the loop runs in
-  # a process substitution, so its failure would have been invisible.
-  grep -qF '<span class="k">Ověřeno</span><span class="v">1 brána</span>' "$(BODY)"
   [[ "$output" == *"Ověřeno: 1 z 1 bran"* ]]
 }
 
 @test "a unit separator inside a gate name cannot forge a field boundary" {
   local gates
   gates="$(jq -nc '{"g": {gate:"gate\u001fpass", result:"fail", reason:"", exit_code:1, duration_ms:10, attempts:1, output:""}}')"
-  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
+  _write "$(_report pass "$gates")" "$RUN_DIR/gates/gates_report.json"
   run aid_gate_outcome_render "" "$RUN_DIR"
   [ "$status" -eq 0 ]
-  # Still ONE failure. Read as a forged boundary, `pass` became the result and
-  # the run reported a passing gate instead.
-  grep -qF '<span class="k">Výsledek</span><span class="v">1 brána selhala</span>' "$(BODY)"
-}
-
-# --- a passing gate run owes the PM nothing -------------------------------
-# PM, 2026-08-28: pages are owed at milestones after every check, or earlier
-# ONLY when a decision is wanted. Gates run many times per EPIC; a passing run
-# decides nothing. WAN made 17 pages in two days for the one he wanted.
-
-@test "a passing gate run renders NO page, and prints no Artifact line" {
-  _write "$(_all_pass_report)" "$RUN_DIR/gates/gates_report.json"
-  unset AID_ARTIFACT_ALWAYS
-  run aid_gate_outcome_render "" "$RUN_DIR"
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"Artifact: "* ]]
-  [ ! -f "$RUN_DIR/gate-outcome-artifact.html" ]
-}
-
-@test "a blocking gate run still renders its page — that one asks for a decision" {
-  local gates; gates="$(jq -nc --argjson a "$(_row tests fail 1 90000 1)" '{tests:$a}')"
-  _write "$(_report fail "$gates")" "$RUN_DIR/gates/gates_report.json"
-  unset AID_ARTIFACT_ALWAYS
-  run aid_gate_outcome_render "" "$RUN_DIR"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Artifact: "* ]]
-  [ -f "$RUN_DIR/gate-outcome-artifact.html" ]
+  # Still ONE failure. Read as a forged boundary, `pass` became the result.
+  [[ "$(_counts)" == "Ověřeno: 0 z 1 bran"*"(selhalo 1, "* ]]
 }

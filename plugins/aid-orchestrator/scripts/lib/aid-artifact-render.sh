@@ -88,9 +88,8 @@ aid_artifact_number() {
 #   Every input this library renders — facts_json, prose_json, and any command
 #   output embedded in them — is scanned before a byte is written.
 #
-#   Matches are REDACTED (<redacted:NAME>), not failed on: failing closed at
-#   the gate-outcome boundary would suppress precisely the message telling the
-#   PM a run broke. But the redaction is COUNTED and the count is rendered in
+#   Matches are REDACTED (<redacted:NAME>), not failed on: failing closed
+#   would suppress precisely the page telling the PM something broke. But the redaction is COUNTED and the count is rendered in
 #   the provenance footer, so a redaction can never be silent.
 #
 #   Shipped detectors (name → what it catches):
@@ -108,11 +107,9 @@ aid_artifact_number() {
 #   Escaping is applied AFTER redaction, never instead of it.
 #
 # PROFILES — what a page of THIS TYPE owes (P089 Step 2)
-#   `facts.artifact_type` names one of the five types in
-#   defaults/artifact-profiles.yaml, and the profile decides three things:
-#   which fields the page must carry, whether its result tile is COMPOSED from
-#   `facts.outcome` counts rather than written by the caller, and the
-#   between-field contradictions that make a page refuse to render (a block 6
+#   `facts.artifact_type` names one of the three types in
+#   defaults/artifact-profiles.yaml, and the profile decides two things: which
+#   fields the page must carry, and the between-field contradictions that make a page refuse to render (a block 6
 #   that asks for nothing beside a list of next steps; a link that carries a
 #   file path or repeats the detail target).
 #
@@ -291,7 +288,7 @@ _aid_artifact_region() {
 
 # ── PROFILES: what a page of THIS TYPE owes (P089 Step 2) ──────────────────
 #
-# `facts.artifact_type` names one of the five types in
+# `facts.artifact_type` names one of the three types in
 # defaults/artifact-profiles.yaml. Given one, this library refuses to render a
 # page that does not carry what its type owes — a page can no longer satisfy
 # the seven-block skeleton and still be worthless.
@@ -338,86 +335,8 @@ _aid_artifact_looks_like_path() {
   return 1
 }
 
-# _aid_artifact_czech <n> <form-1> <form-2-4> <form-5+> — "1 brána", "3 brány",
-# "7 bran". A machine writes "3 brán" and a reader notices.
-_aid_artifact_czech() {
-  local n="$1"
-  case "$n" in
-    1) printf '%s %s' "$n" "$2" ;;
-    2|3|4) printf '%s %s' "$n" "$3" ;;
-    *) printf '%s %s' "$n" "$4" ;;
-  esac
-}
-
-# _aid_artifact_outcome_tiles <facts_var_name>
-#   Composes the result, scope and unresolved tiles FROM THE COUNTS and drops
-#   whatever the caller put there. This is the whole point: a page cannot say
-#   "6/9 passed" while nothing failed, because no caller writes that sentence
-#   any more — the renderer derives it from `facts.outcome`.
-_aid_artifact_outcome_tiles() {
-  local -n _ot_facts="$1"
-  local passed failed not_run waived missing=""
-  local k
-  for k in passed_count failed_count not_run_count waived_count; do
-    if [[ "$(jq -r --arg k "$k" 'has("outcome") and (.outcome | has($k))' <<<"$_ot_facts")" != "true" ]]; then
-      missing+="${missing:+, }outcome.${k}"
-    fi
-  done
-  if [[ -n "$missing" ]]; then
-    echo "aid_artifact_render: this type derives its result from state and is missing: ${missing}" >&2
-    return 1
-  fi
-  passed="$(aid_artifact_number "$(jq -r '.outcome.passed_count' <<<"$_ot_facts")")"
-  failed="$(aid_artifact_number "$(jq -r '.outcome.failed_count' <<<"$_ot_facts")")"
-  not_run="$(aid_artifact_number "$(jq -r '.outcome.not_run_count' <<<"$_ot_facts")")"
-  waived="$(aid_artifact_number "$(jq -r '.outcome.waived_count' <<<"$_ot_facts")")"
-
-  # `outcome.blocked` is OPTIONAL and exists for one honest case: a run whose
-  # only failures were infrastructure — so nothing the code owns failed, and the
-  # verdict is still fail. Without it the tile would read "nothing failed" in
-  # green above a page telling the PM the run is stopped.
-  local blocked
-  blocked="$(aid_artifact_number "$(jq -r 'if (.outcome.blocked // false) then 1 else 0 end' <<<"$_ot_facts")")"
-
-  local result_value result_state
-  if (( failed > 0 )); then
-    result_value="$(_aid_artifact_czech "$failed" "brána selhala" "brány selhaly" "bran selhalo")"
-    result_state="critical"
-  elif (( blocked == 1 )); then
-    result_value="Nic neselhalo, běh přesto zastaven"
-    result_state="critical"
-  else
-    result_value="Nic neselhalo"
-    result_state="ok"
-    (( passed == 0 )) && result_state="warn"
-  fi
-  # A waiver is accepted risk, never a pass — so it is named on the result tile
-  # rather than folded into the passed count.
-  if (( waived > 0 )); then
-    result_value+=", $(_aid_artifact_czech "$waived" "prominuta" "prominuty" "prominuto")"
-    [[ "$result_state" == "ok" ]] && result_state="warn"
-  fi
-
-  local scope_value unresolved_state="ok"
-  scope_value="$(_aid_artifact_czech "$passed" "brána" "brány" "bran")"
-  (( not_run > 0 )) && unresolved_state="warn"
-
-  _ot_facts="$(jq \
-    --arg rv "$result_value" --arg rs "$result_state" \
-    --arg sv "$scope_value" \
-    --arg uv "$not_run" --arg us "$unresolved_state" \
-    '.tiles.result     = {label: "Výsledek", value: $rv, state: $rs}
-     | .tiles.scope      = {label: "Ověřeno",  value: $sv, state: "ok"}
-     | .tiles.unresolved = {label: "Neběželo", value: $uv, state: $us}' <<<"$_ot_facts")" || {
-    echo "aid_artifact_render: failed to compose the outcome tiles" >&2
-    return 1
-  }
-  return 0
-}
-
 # _aid_artifact_apply_profile <facts_var_name> <artifact_type>
-#   Everything a profile decides: required fields, state-derived tiles, and the
-#   two contradictions a machine can see (a page that asks for nothing while
+#   Everything a profile decides: required fields, and the two contradictions a machine can see (a page that asks for nothing while
 #   listing next steps; a link that carries a path or duplicates the detail).
 _aid_artifact_apply_profile() {
   local -n _ap_facts="$1"
@@ -428,10 +347,6 @@ _aid_artifact_apply_profile() {
     known="$(jq -r '.profiles | keys_unsorted | join(", ")' <<<"$profiles")"
     echo "aid_artifact_render: unknown artifact_type '${atype}' (known: ${known})" >&2
     return 1
-  fi
-
-  if [[ "$(jq -r --arg t "$atype" '.profiles[$t].outcome_from_state // false' <<<"$profiles")" == "true" ]]; then
-    _aid_artifact_outcome_tiles _ap_facts || return 1
   fi
 
   local path missing="" present
@@ -591,16 +506,14 @@ aid_artifact_render() {
   # long is shortened — never dropped, and never silently: the clip is the same
   # one every other block on this page uses.
   # The heading names what the reader is looking at, so it follows the TYPE:
-  # a plan page promises, a finished EPIC or plan reports. One literal heading
-  # for both read as a plan's promise printed over an EPIC's result.
+  # a plan page promises, a closed plan reports.
   local _deliv_heading
   case "$(jq -r '.artifact_type // ""' <<<"$facts_raw")" in
-    epic_done) _deliv_heading="Co EPIC dodal" ;;
     plan_done) _deliv_heading="Co plán dodal" ;;
     *)         _deliv_heading="Co plán dodá" ;;
   esac
 
-  local html_deliv="" have_deliv=0 _d_epic _d_rows _d_i _d_j _d_n _d_t _d_a
+  local html_deliv="" have_deliv=0 _d_epic _d_rows _d_i _d_j _d_n _d_t _d_a _d_d
   if [[ "$(jq -r 'has("deliverables") and (.deliverables | type == "array") and (.deliverables | length > 0)' <<<"$facts_raw")" == "true" ]]; then
     have_deliv=1
     html_deliv=""
@@ -612,6 +525,7 @@ aid_artifact_render() {
         _d_n="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].n // ""' <<<"$facts_raw")"
         _d_t="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].text // ""' <<<"$facts_raw")"
         _d_a="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].acs // "0"' <<<"$facts_raw")"
+        _d_d="$(jq -r --argjson i "$_d_i" --argjson j "$_d_j" '.deliverables[$i].steps[$j].detail // ""' <<<"$facts_raw")"
         # A PLAN page numbers steps because the reader is following a sequence
         # not yet run. A FINISHED page lists what came out, where "Krok 3" is
         # noise — the delivered thing is the subject, not its position.
@@ -628,6 +542,9 @@ aid_artifact_render() {
           [[ "$_d_a" =~ ^[234]$ ]] && _d_w="kritéria"
           html_deliv+=" <span class=\"acs\">· $(_aid_artifact_escape "$_d_a") ${_d_w}</span>"
         fi
+        # The step's Objective, whole, under its title (never clipped: it is the
+        # one sentence that says what the step delivers).
+        [[ -n "$_d_d" ]] && html_deliv+="<br>$(_aid_artifact_escape "$_d_d")"
         html_deliv+="</li>"
       done
       html_deliv+="</ul>"
