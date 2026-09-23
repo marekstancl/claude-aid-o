@@ -208,7 +208,7 @@ either is ignored while the conventional evidence path is probed instead:
    again here). A file with any other name is not the continuation artifact.
 2. **Containment.** It resolves (`realpath -m`) INSIDE this run's own evidence
    directory, `.aid-o/work/evidence/<epic_id>/<run_id>` — the same rule
-   `lib/aid-service.sh:_aid_svc_safe_jobs_dir` applies to a registry-recorded
+   the former service library (removed in P097) applied to a registry-recorded
    `jobs_dir`. Shape alone was not containment: a correctly-named regular file
    anywhere the process could `stat` it — another run's leftovers, `/tmp`,
    outside the repository entirely — was accepted as proof, and this row then
@@ -216,7 +216,7 @@ either is ignored while the conventional evidence path is probed instead:
    pasteable command.
 
    **And the root that containment is measured against is not the map's to
-   choose.** `_aid_svc_safe_jobs_dir` is handed its evidence directory by its
+   choose.** That rule was handed its evidence directory by its
    CALLER — exactly one of the two sides is untrusted, which is the whole
    reason the comparison means anything. A first attempt here assembled the
    root from `<epic_id>/<run_id>` read out of the very entry supplying the
@@ -245,8 +245,8 @@ either is ignored while the conventional evidence path is probed instead:
    unreadable basename does. It is never replaced by the un-normalized string: a
    plain prefix comparison of raw strings reproduces the escape this check
    exists to close, because the kernel resolves `..` in a path the comparison
-   accepted whole. This is the refusal `_aid_svc_safe_jobs_dir` also makes when
-   its own canonicalization comes back empty.
+   accepted whole. The service library's rule made the same refusal when
+   its own canonicalization came back empty.
 
 A regular file sitting at an arbitrary recorded path is not evidence that a
 controller left a continuation behind, and this row must never assert a state it
@@ -693,8 +693,8 @@ controller_facts() {
   # against a root the same input had chosen. A valid epic id with
   # `run_id: ../../../../../OUT2` — or a map key spelled the same way — walked
   # the root out to the planted file and the escape reopened one field over.
-  # `lib/aid-service.sh:_aid_svc_safe_jobs_dir`, the rule this borrows, takes
-  # its evidence dir as a CALLER-supplied argument: exactly one side is
+  # The service library's jobs-dir rule (removed in P097), which this borrows,
+  # took its evidence dir as a CALLER-supplied argument: exactly one side is
   # untrusted, and that asymmetry is what makes the comparison mean anything.
   #
   # AND IT FAILS CLOSED WHEN IT CANNOT CANONICALIZE. `-m` is a GNU coreutils
@@ -707,8 +707,8 @@ controller_facts() {
   # PASSED, and `[ -f ]` then succeeded because the KERNEL resolves `..` even
   # though the comparison did not. Every canonicalization below therefore yields
   # the empty string on failure and an empty result is REFUSED, never used:
-  # `lib/aid-service.sh:_aid_svc_safe_jobs_dir` does the same (`rp` is required
-  # non-empty before the recorded value is honoured), and refusing to claim
+  # the service library's jobs-dir rule did the same (`rp` was required
+  # non-empty before the recorded value was honoured), and refusing to claim
   # containment you cannot compute is the only honest answer. The consequence is
   # stated rather than hidden: on a host whose `realpath` lacks `-m`, fact 1 is
   # never established and every row degrades to its recorded controller value —
@@ -771,7 +771,7 @@ controller_facts() {
         # location — another run's evidence, /tmp, outside the repository — be
         # accepted as proof that this run's controller left a continuation
         # behind, and its recorded action was then printed as a pasteable
-        # command. Same rule as lib/aid-service.sh:_aid_svc_safe_jobs_dir,
+        # command. Same rule as the former service library's jobs-dir check,
         # INCLUDING its refusal: a canonicalization that did not happen is not a
         # containment result, so an empty `_rp` skips the candidate instead of
         # falling back to the un-normalized string (see the base above for what

@@ -3,9 +3,9 @@
 #
 # Shared interface every test-portfolio adapter (Bats, package-script,
 # declared-command — Steps 2-3) implements against. Sourced, never executed
-# directly. NO top-level `set -e`/`set -euo pipefail` (matches
-# aid-gate-runtime-baseline.sh/aid-gate-profile.sh convention): callers source
-# this under their OWN `set -euo pipefail` shell, and an unguarded non-zero
+# directly. NO top-level `set -e`/`set -euo pipefail` (matches the
+# aid-cache-preflight.sh convention): callers source this under their OWN
+# `set -euo pipefail` shell, and an unguarded non-zero
 # return here must never kill the caller's shell.
 #
 # Every function here is a pure helper: no network, no test execution, no
@@ -141,7 +141,10 @@ adapter_check_run_unit_id_collisions() {
 }
 
 # adapter_command_fingerprint <run_unit_id> <canonical_command_json>
-#   Echoes gate_baseline_fingerprint(run_unit_id, canonical_command_json).
+#   Echoes "sha256:<first 12 hex chars>" of
+#   sha256sum("<run_unit_id>:<canonical_command_json>") — the hashing scheme
+#   the retired gate runtime baseline used (P097 Step 5 moved it here; the
+#   stored fingerprints keep their values).
 #   PM feedback (E1 re-review, performance): this used to re-canonicalize
 #   (`jq -cS`) on every call — a full extra jq subprocess spawn per
 #   run_unit, which dominates wall-clock time in this environment (jq's own
@@ -151,11 +154,16 @@ adapter_check_run_unit_id_collisions() {
 #   object with `jq -ncS` from the start (see aid-test-adapter-bats.sh),
 #   so the value stored IS the canonical form, never re-derived. Never
 #   argv-joined-with-spaces, which cannot distinguish ["a","b c"] from
-#   ["a b","c"]. Reuses the real, existing gate_baseline_fingerprint function
-#   (lib/aid-gate-runtime-baseline.sh:251) — no reimplemented hashing scheme.
+#   ["a b","c"].
 adapter_command_fingerprint() {
-  local run_unit_id="$1" canonical_command_json="$2"
-  gate_baseline_fingerprint "$run_unit_id" "$canonical_command_json"
+  local run_unit_id="$1" canonical_command_json="$2" h
+  command -v sha256sum >/dev/null 2>&1 || {
+    echo "WARN: aid-test-adapter-contract.sh: sha256sum not found — cannot compute fingerprint" >&2
+    return 1
+  }
+  h=$(printf '%s' "${run_unit_id}:${canonical_command_json}" | sha256sum 2>/dev/null | cut -c1-12)
+  [[ -n "$h" ]] || { echo "WARN: aid-test-adapter-contract.sh: fingerprint computation failed for '${run_unit_id}'" >&2; return 1; }
+  echo "sha256:${h}"
 }
 
 # ─── Linear (NDJSON-buffered) array accumulation ────────────────────────────

@@ -279,9 +279,9 @@ ladder_wired_from_code() {
   [[ -z "$bad" ]] || { echo "classes with a non-standard terminus: $bad"; false; }
 }
 
-@test "case 7: allowed actions and the vocabulary are the same closed set of six" {
+@test "case 7: allowed actions and the vocabulary are the same closed set of five" {
   local json; json="$(policy_json)"
-  [ "$(jq '.action_vocabulary | length' "$json")" -eq 6 ]
+  [ "$(jq '.action_vocabulary | length' "$json")" -eq 5 ]
   # every used action is defined
   local undefined
   undefined="$(jq -r '[.stop_classes[].allowed_actions[]] - (.action_vocabulary | keys) | .[]' "$json")"

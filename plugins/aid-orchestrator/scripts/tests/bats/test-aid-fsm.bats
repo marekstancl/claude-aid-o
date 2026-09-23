@@ -358,104 +358,20 @@ PLAN
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
 }
 
-# ─── P063 Step 3 (AC11): GATES:EXECUTE repeated-timeout policy block ────────
-# Real 3-consecutive-timeout policy block via the actual aid-run-gates.sh
-# code path (not hand-written JSON): seed 3 prior timeout samples in the
-# gate-runtime-baseline file, then run one more attempt that also times out
-# under the same currently-configured timeout, exactly like
-# test-aid-run-gates.bats' AC6a fixture — this produces a REAL
-# gates_report.json with runtime_baseline.retryable:false.
+# ─── P097 Step 5: no repeated-timeout policy block ──────────────────────────
+# A timed-out gate is a `job_timeout` row like any other failure: GATES→EXECUTE
+# proceeds without --force so the ladder can retry it. (The P063 block that
+# refused the transition after three cross-run timeouts read a baseline file;
+# nothing reads one any more.)
 
-@test "AC11: GATES:EXECUTE refused when a gate is retryable:false (real timeout_policy_block); GATES:ESCALATION and --force still work" {
-  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-
+@test "P097 Step 5: GATES:EXECUTE proceeds after a job_timeout row, no --force needed" {
   local exec_yaml="$TEST_TMPDIR/exec.yaml"
   cat > "$exec_yaml" <<'YAML'
 gates:
   flaky_gate:
-    command: "sleep 2"
+    command: "sleep 5"
     required: true
     timeout_seconds: 1
-    max_retries: 2
-YAML
-  mkdir -p "$TEST_EVIDENCE_DIR/gates"
-  RUN_GATES="$AID_PLUGIN_PATH/scripts/aid-run-gates.sh"
-  "$RUN_GATES" run-all "$exec_yaml" E-test R-test \
-    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" >/dev/null 2>&1 || true
-
-  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
-  [ "$output" == "false" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.operator_action' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
-  [ "$output" == "increase_timeout_or_background" ]
-
-  # Fixture A: GATES:EXECUTE is REFUSED, message names gate + operator_action.
-  local state_a="$TEST_TMPDIR/state-a.yaml"
-  write_post_deploy_state_yaml "$state_a"
-  sed -i 's/^state: .*/state: GATES/' "$state_a"
-  run "$FSM" transition GATES EXECUTE "$state_a"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"flaky_gate"* ]]
-  [[ "$output" == *"increase_timeout_or_background"* ]]
-  [ "$(grep '^state:' "$state_a" | awk '{print $2}')" = "GATES" ]
-
-  # Fixture B: GATES:ESCALATION for the SAME evidence dir still succeeds
-  # normally — this precondition only ever guards GATES:EXECUTE.
-  local state_b="$TEST_TMPDIR/state-b.yaml"
-  write_post_deploy_state_yaml "$state_b"
-  sed -i 's/^state: .*/state: GATES/' "$state_b"
-  run "$FSM" transition GATES ESCALATION "$state_b"
-  [ "$status" -eq 0 ]
-  [ "$(grep '^state:' "$state_b" | awk '{print $2}')" = "ESCALATION" ]
-
-  # Fixture C: --force --reason overrides the refusal, same as every sibling
-  # precondition.
-  local state_c="$TEST_TMPDIR/state-c.yaml"
-  write_post_deploy_state_yaml "$state_c"
-  sed -i 's/^state: .*/state: GATES/' "$state_c"
-  run "$FSM" transition GATES EXECUTE "$state_c" --force --reason "PM-authorized override — manually verified flaky_gate timeout is safe to retry"
-  [ "$status" -eq 0 ]
-  [ "$(grep '^state:' "$state_c" | awk '{print $2}')" = "EXECUTE" ]
-}
-
-# ─── E-063-1_1 REOPEN (PM finding, HIGH) ────────────────────────────────────
-# AC11 above proves the block CORRECTLY refuses GATES:EXECUTE while it is
-# still active. This test proves the other half the PM's manual review found
-# missing: once that SAME gate later recovers, the block must be gone — and
-# a DIFFERENT gate's own real, current failure must still be visible and
-# actionable via a normal GATES:EXECUTE retry, never masked by the first
-# gate's already-resolved history. Under the pre-fix code this transition
-# was refused forever (flaky_gate's retryable:false never cleared), even
-# though the actual remaining problem — other_gate — has nothing to do with
-# the old timeout streak and gate-fixer could otherwise address it directly.
-@test "E-063-1_1 reopen: GATES:EXECUTE proceeds once a previously-blocked gate recovers, even while a DIFFERENT gate currently fails" {
-  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" mark-policy-block flaky_gate "increase_timeout_or_background"
-
-  # Confirm the block is REAL (established via mark-policy-block, not just
-  # raw seeded samples) before proceeding.
-  run bash "$LIB" report-json flaky_gate
-  [ "$(echo "$output" | jq -r '.retryable')" == "false" ]
-
-  # A LATER gates run: flaky_gate now passes; other_gate fails for a reason
-  # completely unrelated to flaky_gate's old timeout streak.
-  local exec_yaml="$TEST_TMPDIR/exec-reopen.yaml"
-  cat > "$exec_yaml" <<'YAML'
-gates:
-  flaky_gate:
-    command: "exit 0"
-    required: true
-    timeout_seconds: 5
-    max_retries: 0
-  other_gate:
-    command: "exit 1"
-    required: true
-    timeout_seconds: 5
     max_retries: 0
 YAML
   mkdir -p "$TEST_EVIDENCE_DIR/gates"
@@ -463,15 +379,12 @@ YAML
   "$RUN_GATES" run-all "$exec_yaml" E-test R-test \
     --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" >/dev/null 2>&1 || true
 
-  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
-  [ "$output" == "true" ]
-  run jq -re '.gates.other_gate.result' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
-  [ "$output" == "fail" ]
+  run jq -r '[.gates.flaky_gate.status, .gates.flaky_gate.reason] | join("/")' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "fail/job_timeout" ]
+  run jq -e '.gates.flaky_gate | has("runtime_baseline") | not' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$status" -eq 0 ]
 
-  # The actual proof: GATES:EXECUTE must proceed WITHOUT --force. gate-fixer
-  # needs to retry EXECUTE to address other_gate's real, current failure —
-  # flaky_gate's already-resolved history must not stand in the way.
-  local state="$TEST_TMPDIR/state-reopen.yaml"
+  local state="$TEST_TMPDIR/state.yaml"
   write_post_deploy_state_yaml "$state"
   sed -i 's/^state: .*/state: GATES/' "$state"
   run "$FSM" transition GATES EXECUTE "$state"
@@ -1826,4 +1739,55 @@ total_steps: 4
   run bash "$FSM" set-field total_steps 2 "$sf" --reason "a reason with nowhere to be recorded"
   [ "$status" -eq 1 ]; [[ "$output" == *"names no epic_id/run_id"* ]]
   grep -q '^total_steps: 4' "$sf"
+}
+
+# ─── P097 Step 4: the GATES:DONE gate-profile floor, end to end (t2) ────────
+# The merge-path proof of the same rule is in test-aid-gate-profile-select.bats
+# (t0, the library verdict) and test-aid-run-gates.bats (t1); this is the
+# FSM's own end-to-end case: a report that names no profile while the
+# project's execution.yaml declares gate_profiles is refused with
+# risk_profile_unresolvable, and the same run recorded under the resolved
+# profile proceeds.
+@test "P097 Step 4: GATES:DONE refuses a gates_report.json with no profile (risk_profile_unresolvable) and accepts the same run recorded under the resolved profile" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local RUN_GATES="$AID_PLUGIN_PATH/scripts/aid-run-gates.sh"
+  local base; base=$(git rev-parse HEAD)
+  echo "ordinary" > ordinary.txt; git add ordinary.txt; git commit -q -m "ordinary change"
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  always_pass:
+    command: "true"
+    required: true
+default_profile: standard
+gate_profiles:
+  standard:
+    include: [always_pass]
+  full:
+    include: [always_pass]
+    when_paths: ["*/aid-fsm.sh"]
+YAML
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$status" -eq 0 ]
+  run jq -r '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "null" ]
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"risk_profile_unresolvable"* ]]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+
+  # The same run, recorded under the resolved profile, passes the floor.
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile standard
+  [ "$status" -eq 0 ]
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
 }

@@ -1,0 +1,1686 @@
+{
+  "command": "gates-measure.sh --projects-root /opt/eco/projects --since 30 --as-of 2026-09-21",
+  "as_of": "2026-09-21",
+  "since_days": 30,
+  "window": {
+    "from": "2026-08-22T23:59:59Z",
+    "to": "2026-09-21T23:59:59Z",
+    "by": "file mtime"
+  },
+  "projects": {
+    "acta": {
+      "reports": 43,
+      "runs": 41,
+      "other_names": 0,
+      "unreadable": [],
+      "empty_reports": [],
+      "rows": {
+        "total": 438,
+        "by_status": {
+          "fail": 8,
+          "legacy_row": 41,
+          "pass": 299,
+          "profile_excluded": 47,
+          "skip": 43
+        },
+        "by_reason": {
+          "gate_script_missing_in_tree": 1,
+          "profile_excluded": 47
+        },
+        "legacy_row_keys": {
+          "dispatched,duplicates,path": 41
+        }
+      },
+      "profiles": [
+        {
+          "profile": "full",
+          "profile_source": "cli_flag",
+          "runs": 17
+        },
+        {
+          "profile": "release",
+          "profile_source": "cli_flag",
+          "runs": 20
+        },
+        {
+          "profile": "release_quarantine",
+          "profile_source": "cli_flag",
+          "runs": 4
+        }
+      ],
+      "overall": {
+        "fail": 4,
+        "pass": 37
+      },
+      "timeouts_hit": 0,
+      "runtime_baseline": {
+        "rows_with_baseline": 349,
+        "policy_result": {
+          "none": 349
+        },
+        "timeout_recommended_present": 268,
+        "run_mode_recommended": {
+          "background": 3,
+          "foreground": 225
+        }
+      },
+      "config": {
+        "execution_yaml": true,
+        "gates": 11,
+        "gate_profiles": [
+          "full",
+          "quick",
+          "release",
+          "release_quarantine",
+          "standard",
+          "targeted"
+        ],
+        "required_when": [
+          "*.py exists",
+          "*.py exists",
+          "*.py exists",
+          "*.ts OR *.tsx exists",
+          "*.ts OR *.tsx exists",
+          "tsconfig.json exists",
+          "frontend/e2e exists",
+          "frontend/e2e exists",
+          "always",
+          "always"
+        ],
+        "services": 0,
+        "baseline_mentions_in_execution_yaml": 0,
+        "runtime_baseline_file_gates": [
+          "py_test",
+          "py_lint",
+          "py_type_check",
+          "ts_test",
+          "ts_lint",
+          "ts_type_check"
+        ]
+      },
+      "sample_excluded": 0
+    },
+    "agents": {
+      "reports": 5,
+      "runs": 5,
+      "other_names": 0,
+      "unreadable": [],
+      "empty_reports": [],
+      "rows": {
+        "total": 33,
+        "by_status": {
+          "fail": 1,
+          "legacy_row": 5,
+          "pass": 22,
+          "profile_excluded": 4,
+          "skip": 1
+        },
+        "by_reason": {
+          "profile_excluded": 4
+        },
+        "legacy_row_keys": {
+          "dispatched,duplicates,path": 5
+        }
+      },
+      "profiles": [
+        {
+          "profile": "full",
+          "profile_source": "cli_flag",
+          "runs": 1
+        },
+        {
+          "profile": "none",
+          "profile_source": "none",
+          "runs": 2
+        },
+        {
+          "profile": "release",
+          "profile_source": "cli_flag",
+          "runs": 2
+        }
+      ],
+      "overall": {
+        "fail": 1,
+        "pass": 4
+      },
+      "timeouts_hit": 0,
+      "runtime_baseline": {
+        "rows_with_baseline": 24,
+        "policy_result": {
+          "none": 24
+        },
+        "timeout_recommended_present": 22,
+        "run_mode_recommended": {
+          "foreground": 8
+        }
+      },
+      "config": {
+        "execution_yaml": true,
+        "gates": 6,
+        "gate_profiles": [
+          "full",
+          "release",
+          "targeted"
+        ],
+        "required_when": [],
+        "services": 0,
+        "baseline_mentions_in_execution_yaml": 0,
+        "runtime_baseline_file_gates": []
+      },
+      "sample_excluded": 0
+    },
+    "aid-orchestrator": {
+      "reports": 2,
+      "runs": 2,
+      "other_names": 0,
+      "unreadable": [],
+      "empty_reports": [],
+      "rows": {
+        "total": 16,
+        "by_status": {
+          "pass": 4,
+          "profile_excluded": 12
+        },
+        "by_reason": {
+          "profile_excluded": 12
+        },
+        "legacy_row_keys": {}
+      },
+      "profiles": [
+        {
+          "profile": "quick",
+          "profile_source": "cli_flag",
+          "runs": 2
+        }
+      ],
+      "overall": {
+        "pass": 2
+      },
+      "timeouts_hit": 0,
+      "runtime_baseline": {
+        "rows_with_baseline": 4,
+        "policy_result": {
+          "none": 4
+        },
+        "timeout_recommended_present": 4,
+        "run_mode_recommended": {
+          "foreground": 4
+        }
+      },
+      "config": {
+        "execution_yaml": true,
+        "gates": 12,
+        "gate_profiles": [
+          "bats_all_quarantine",
+          "full",
+          "p064-closure",
+          "quick",
+          "release",
+          "release_quarantine",
+          "standard",
+          "targeted"
+        ],
+        "required_when": [],
+        "services": 0,
+        "baseline_mentions_in_execution_yaml": 7,
+        "runtime_baseline_file_gates": [
+          "plan_diff",
+          "docs_updated",
+          "bats_fsm",
+          "bats_all",
+          "tests_pass",
+          "lint_pass",
+          "required_gate",
+          "optional_gate",
+          "shell_pipeline_smoke",
+          "ui_calibration_result",
+          "ui_calibration_signoff",
+          "targeted_tests",
+          "bats_boundary",
+          "g"
+        ]
+      },
+      "sample_excluded": 0
+    },
+    "aid-testbed": {
+      "reports": 0,
+      "runs": 0,
+      "other_names": 0,
+      "unreadable": [],
+      "empty_reports": [],
+      "rows": {
+        "total": 0,
+        "by_status": {},
+        "by_reason": {},
+        "legacy_row_keys": {}
+      },
+      "profiles": [],
+      "overall": {},
+      "timeouts_hit": 0,
+      "runtime_baseline": {
+        "rows_with_baseline": 0,
+        "policy_result": {},
+        "timeout_recommended_present": 0,
+        "run_mode_recommended": {}
+      },
+      "config": {
+        "execution_yaml": true,
+        "gates": 1,
+        "gate_profiles": [],
+        "required_when": [],
+        "services": 0,
+        "baseline_mentions_in_execution_yaml": 0,
+        "runtime_baseline_file_gates": []
+      },
+      "sample_excluded": 0
+    },
+    "krok": {
+      "reports": 0,
+      "runs": 0,
+      "other_names": 0,
+      "unreadable": [],
+      "empty_reports": [],
+      "rows": {
+        "total": 0,
+        "by_status": {},
+        "by_reason": {},
+        "legacy_row_keys": {}
+      },
+      "profiles": [],
+      "overall": {},
+      "timeouts_hit": 0,
+      "runtime_baseline": {
+        "rows_with_baseline": 0,
+        "policy_result": {},
+        "timeout_recommended_present": 0,
+        "run_mode_recommended": {}
+      },
+      "config": {
+        "execution_yaml": true,
+        "gates": 4,
+        "gate_profiles": [],
+        "required_when": [],
+        "services": 0,
+        "baseline_mentions_in_execution_yaml": 0,
+        "runtime_baseline_file_gates": []
+      },
+      "sample_excluded": 0
+    },
+    "sousto-na-miru": {
+      "reports": 0,
+      "runs": 0,
+      "other_names": 0,
+      "unreadable": [],
+      "empty_reports": [],
+      "rows": {
+        "total": 0,
+        "by_status": {},
+        "by_reason": {},
+        "legacy_row_keys": {}
+      },
+      "profiles": [],
+      "overall": {},
+      "timeouts_hit": 0,
+      "runtime_baseline": {
+        "rows_with_baseline": 0,
+        "policy_result": {},
+        "timeout_recommended_present": 0,
+        "run_mode_recommended": {}
+      },
+      "config": {
+        "execution_yaml": true,
+        "gates": 3,
+        "gate_profiles": [],
+        "required_when": [
+          "*.ts OR *.tsx exists",
+          "*.ts OR *.tsx exists",
+          "tsconfig.json exists"
+        ],
+        "services": 0,
+        "baseline_mentions_in_execution_yaml": 0,
+        "runtime_baseline_file_gates": []
+      },
+      "sample_excluded": 0
+    },
+    "vulcan": {
+      "reports": 0,
+      "runs": 0,
+      "other_names": 0,
+      "unreadable": [],
+      "empty_reports": [],
+      "rows": {
+        "total": 0,
+        "by_status": {},
+        "by_reason": {},
+        "legacy_row_keys": {}
+      },
+      "profiles": [],
+      "overall": {},
+      "timeouts_hit": 0,
+      "runtime_baseline": {
+        "rows_with_baseline": 0,
+        "policy_result": {},
+        "timeout_recommended_present": 0,
+        "run_mode_recommended": {}
+      },
+      "config": {
+        "execution_yaml": true,
+        "gates": 7,
+        "gate_profiles": [],
+        "required_when": [],
+        "services": 0,
+        "baseline_mentions_in_execution_yaml": 0,
+        "runtime_baseline_file_gates": []
+      },
+      "sample_excluded": 0
+    },
+    "wan": {
+      "reports": 20,
+      "runs": 20,
+      "other_names": 1,
+      "unreadable": [],
+      "empty_reports": [],
+      "rows": {
+        "total": 160,
+        "by_status": {
+          "fail": 3,
+          "legacy_row": 20,
+          "pass": 92,
+          "profile_excluded": 43,
+          "skip": 2
+        },
+        "by_reason": {
+          "profile_excluded": 43
+        },
+        "legacy_row_keys": {
+          "dispatched,duplicates,path": 20
+        }
+      },
+      "profiles": [
+        {
+          "profile": "none",
+          "profile_source": "none",
+          "runs": 1
+        },
+        {
+          "profile": "release",
+          "profile_source": "cli_flag",
+          "runs": 14
+        },
+        {
+          "profile": "standard",
+          "profile_source": "cli_flag",
+          "runs": 3
+        },
+        {
+          "profile": "standard",
+          "profile_source": "fsm_resolved",
+          "runs": 2
+        }
+      ],
+      "overall": {
+        "fail": 2,
+        "pass": 18
+      },
+      "timeouts_hit": 0,
+      "runtime_baseline": {
+        "rows_with_baseline": 97,
+        "policy_result": {
+          "none": 97
+        },
+        "timeout_recommended_present": 82,
+        "run_mode_recommended": {
+          "foreground": 65
+        }
+      },
+      "config": {
+        "execution_yaml": true,
+        "gates": 7,
+        "gate_profiles": [
+          "release",
+          "standard"
+        ],
+        "required_when": [],
+        "services": 0,
+        "baseline_mentions_in_execution_yaml": 3,
+        "runtime_baseline_file_gates": [
+          "unit_tests",
+          "moved_integration_tests",
+          "counts_invariant_tests",
+          "ruff_lint",
+          "docs_updated",
+          "frontend_tests",
+          "p070_tests",
+          "gate_registry",
+          "p077_confirmations",
+          "plan_diff",
+          "p079_moved_integration_tests",
+          "p079_production_overview"
+        ]
+      },
+      "sample_excluded": 0
+    }
+  },
+  "totals": {
+    "runs": 68,
+    "rows": 647,
+    "by_status": {
+      "fail": 12,
+      "legacy_row": 66,
+      "pass": 417,
+      "profile_excluded": 106,
+      "skip": 46
+    },
+    "unreadable": 0
+  },
+  "sample": [
+    {
+      "project": "acta",
+      "run_id": "R-E016-3",
+      "report_path": "acta/.aid-o/work/evidence/E-016-3_4/R-E016-3/gates/gates_report.json",
+      "sha": "800866385ca56cf32ecfd28764727dcf5ed1513b",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "plan_diff": "profile_excluded",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E016-4",
+      "report_path": "acta/.aid-o/work/evidence/E-016-4_4/R-E016-4/gates/gates_report.json",
+      "sha": "97e673be5051791842b279c053688776f205258d",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "plan_diff": "profile_excluded",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E018-1",
+      "report_path": "acta/.aid-o/work/evidence/E-018-1_2/R-E018-1/gates/gates_report.json",
+      "sha": "42b74a91ea1250a17f397003882e6cfcf5435076",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E018-2",
+      "report_path": "acta/.aid-o/work/evidence/E-018-2_2/R-E018-2/gates/gates_report.json",
+      "sha": "43d6e8fd17d29f51ac80a6162117696475895c93",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E019-1",
+      "report_path": "acta/.aid-o/work/evidence/E-019-1_3/R-E019-1/gates/gates_report.json",
+      "sha": "aeade1353493115dfde0423e14d7d0e49fdc81e4",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "profile_excluded",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E019-2",
+      "report_path": "acta/.aid-o/work/evidence/E-019-2_3/R-E019-2/gates/gates_report.json",
+      "sha": "7fbdd738552c7b790f09967a84f7f5f83b6b1a45",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "profile_excluded",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E019-3",
+      "report_path": "acta/.aid-o/work/evidence/E-019-3_3/R-E019-3/gates/gates_report.json",
+      "sha": "9e1086af17a44c1c2883ce8bb8e3565a27bf32d1",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "profile_excluded",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E020-1",
+      "report_path": "acta/.aid-o/work/evidence/E-020-1_3/R-E020-1/gates/gates_report.json",
+      "sha": "03561c8c4964cce6ef63d78a0daf45b7001bfb44",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "plan_diff": "profile_excluded",
+        "vat_labels_sync": "fail",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E020-2",
+      "report_path": "acta/.aid-o/work/evidence/E-020-2_3/R-E020-2/gates/gates_report.json",
+      "sha": "2db33cf17bdb1b737d492b7854e6844011253e30",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "plan_diff": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E020-3",
+      "report_path": "acta/.aid-o/work/evidence/E-020-3_3/R-E020-3/gates/gates_report.json",
+      "sha": "9805242ffae6c2f43317cbdfe7d81bb136f09317",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "plan_diff": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E021-1",
+      "report_path": "acta/.aid-o/work/evidence/E-021-1_3/R-E021-1/gates/gates_report.json",
+      "sha": "4dd31eb1535c266974c6a41be2d116dd611b593e",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "profile_excluded",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E021-2",
+      "report_path": "acta/.aid-o/work/evidence/E-021-2_3/R-E021-2/gates/gates_report.json",
+      "sha": "97e243c0d6fd792f0766e333ad052767f3939f70",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "profile_excluded",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E021-3",
+      "report_path": "acta/.aid-o/work/evidence/E-021-3_3/R-E021-3/gates/gates_report.json",
+      "sha": "f59d3dda06db7a3b457de298a4a4b3c764e43b3f",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "profile_excluded",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E024-1",
+      "report_path": "acta/.aid-o/work/evidence/E-024-1_4/R-E024-1/gates/gates_report.json",
+      "sha": "76e2c69707b35777d0ca1c7406779eac039f7d12",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "profile_excluded",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E024-2",
+      "report_path": "acta/.aid-o/work/evidence/E-024-2_4/R-E024-2/gates/gates_report.json",
+      "sha": "0faef417a7890b4c63369362a27f3832c84bbf4b",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "profile_excluded",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E024-3",
+      "report_path": "acta/.aid-o/work/evidence/E-024-3_4/R-E024-3/gates/gates_report.json",
+      "sha": "7e64727df7b7e149a48472f14bfab5b1075e34a5",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "profile_excluded",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-E024-4",
+      "report_path": "acta/.aid-o/work/evidence/E-024-4_4/R-E024-4/gates/gates_report.json",
+      "sha": "3d8d28ddc613e9da57198e9244188812cb8fc8d2",
+      "sha_source": "report.revision.head_sha",
+      "profile": "full",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "profile_excluded",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P016-final-1",
+      "report_path": "acta/.aid-o/work/evidence/P016/R-P016-final-1/gates_report.json",
+      "sha": "827ae4a2dbc7fe08926cd9ace1a26531c0bf1ba0",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "fail",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "fail",
+        "ts_e2e_pwa": "pass",
+        "plan_diff": "fail",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P016-final-2",
+      "report_path": "acta/.aid-o/work/evidence/P016/R-P016-final-2/gates_report.json",
+      "sha": "a21799fd35dd9fb9ebd8c8eaa03dbd89f441351d",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "fail",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "fail",
+        "ts_e2e_pwa": "pass",
+        "plan_diff": "fail",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P016-final-3",
+      "report_path": "acta/.aid-o/work/evidence/P016/R-P016-final-3/gates_report.json",
+      "sha": "7344961f1b0ec8f9ac3fc208c20dcbcc3605a708",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "pass",
+        "ts_e2e_pwa": "pass",
+        "plan_diff": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P016-final-4",
+      "report_path": "acta/.aid-o/work/evidence/P016/R-P016-final-4/gates_report.json",
+      "sha": "9fab03936c30a6b130eb28f5689a645c9bca6e3f",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "pass",
+        "ts_e2e_pwa": "pass",
+        "plan_diff": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P018-final-1",
+      "report_path": "acta/.aid-o/work/evidence/P018/R-P018-final-1/gates_report.json",
+      "sha": "c0bb5b162b492d217e6d8baadc38252ec5fdd541",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P018-final-2",
+      "report_path": "acta/.aid-o/work/evidence/P018/R-P018-final-2/gates_report.json",
+      "sha": "c0bb5b162b492d217e6d8baadc38252ec5fdd541",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P018-final-3",
+      "report_path": "acta/.aid-o/work/evidence/P018/R-P018-final-3/gates_report.json",
+      "sha": "c0bb5b162b492d217e6d8baadc38252ec5fdd541",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P018-final-4",
+      "report_path": "acta/.aid-o/work/evidence/P018/R-P018-final-4/gates_report.json",
+      "sha": "40ca1c760d467aaded98e9ed7f6f68cef08683d4",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P018-final-5",
+      "report_path": "acta/.aid-o/work/evidence/P018/R-P018-final-5/gates_report.json",
+      "sha": "404c29d8a1e4d1cdafc16500a3387f9bb64f9edc",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P018-final-6",
+      "report_path": "acta/.aid-o/work/evidence/P018/R-P018-final-6/gates_report.json",
+      "sha": "5476af5b007300a2d84589c119e030f098885b57",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P019-final-1",
+      "report_path": "acta/.aid-o/work/evidence/P019/R-P019-final-1/gates_report.json",
+      "sha": "ac5b8c4f5000fd9bea36cd4ff89904c0149dea10",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P019-final-2",
+      "report_path": "acta/.aid-o/work/evidence/P019/R-P019-final-2/gates_report.json",
+      "sha": "43f5ee14390e973f59b84e7080ef85556e2a97a8",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P019-final-3",
+      "report_path": "acta/.aid-o/work/evidence/P019/R-P019-final-3/gates_report.json",
+      "sha": "c3dbdcdbaba9da37e1043284c862948136bb2084",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P019-final-4",
+      "report_path": "acta/.aid-o/work/evidence/P019/R-P019-final-4/gates_report.json",
+      "sha": "530b1f19070da65a55b4a5b8a6215e919ef08bac",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "pass",
+        "ts_e2e_pwa": "pass",
+        "plan_diff": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P019-final-5",
+      "report_path": "acta/.aid-o/work/evidence/P019/post-merge-review/gates_report.json",
+      "sha": "52098c0b6ea5193ff0153f7251b9bdd3232dda7c",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "fail",
+        "ts_e2e_pwa": "pass",
+        "plan_diff": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P020-final-1",
+      "report_path": "acta/.aid-o/work/evidence/P020/R-P020-final-1/gates_report.json",
+      "sha": "63239134c279a1e14d02a70705adac8e74560eee",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "fail",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "pass",
+        "ts_e2e_pwa": "pass",
+        "plan_diff": "fail",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P020-final-2",
+      "report_path": "acta/.aid-o/work/evidence/P020/R-P020-final-2/gates_report.json",
+      "sha": "1a116a5941f9da76d4a7d035eac37e5d1dd35f18",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "pass",
+        "ts_e2e_pwa": "pass",
+        "plan_diff": "pass",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P020-final-3",
+      "report_path": "acta/.aid-o/work/evidence/P020/R-P020-final-3/gates_report.json",
+      "sha": "02b36efc11f66a1ad54f016d4ce5ac8fa605abc3",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "fail",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "ts_e2e": "pass",
+        "ts_e2e_pwa": "pass",
+        "plan_diff": "fail",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P020-final-4",
+      "report_path": "acta/.aid-o/work/evidence/P020/R-P020-final-4/gates_report.json",
+      "sha": "c8b5c9338b07457dc883ae6f10b376eb14cd17ab",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "pass",
+        "ts_e2e": "pass",
+        "ts_e2e_pwa": "pass",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P020-final-5",
+      "report_path": "acta/.aid-o/work/evidence/P020/R-P020-final-5/gates_report.json",
+      "sha": "4d46c25446f70b29a49ed6d0572002ebe1267bef",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "pass",
+        "ts_e2e": "pass",
+        "ts_e2e_pwa": "pass",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P021-final-1",
+      "report_path": "acta/.aid-o/work/evidence/P021/R-P021-final-1/gates_report.json",
+      "sha": "61424c35f12626e143c95c8beaffd43248812f9d",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release_quarantine",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "skip",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P024-final-1",
+      "report_path": "acta/.aid-o/work/evidence/P024/R-P024-final-1/gates_report.json",
+      "sha": "a7dacee2cb6d070f8583927273d0b99895908f02",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release_quarantine",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "skip",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P024-final-2",
+      "report_path": "acta/.aid-o/work/evidence/P024/R-P024-final-2/gates_report.json",
+      "sha": "c10bad8371dcab2e915e548c8f88de5d36c64617",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release_quarantine",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "pass",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "acta",
+      "run_id": "R-P024-final-3",
+      "report_path": "acta/.aid-o/work/evidence/P024/R-P024-final-3/gates_report.json",
+      "sha": "f3b33251a00c37981f9ab4fa1fb485aa412e0e9d",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release_quarantine",
+      "overall": "pass",
+      "rows": {
+        "py_test": "pass",
+        "py_lint": "pass",
+        "py_type_check": "pass",
+        "ts_test": "pass",
+        "ts_lint": "pass",
+        "ts_type_check": "pass",
+        "plan_diff": "pass",
+        "ts_e2e": "profile_excluded",
+        "ts_e2e_pwa": "profile_excluded",
+        "vat_labels_sync": "pass",
+        "docs_updated": "skip"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-E099-1",
+      "report_path": "wan/.aid-o/work/evidence/E-099-1_3/R-E099-1/gates/gates_report.json",
+      "sha": "803bd6ff13f1bf08f1fd184a79600c914b8b7767",
+      "sha_source": "report.revision.head_sha",
+      "profile": "standard",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "profile_excluded",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-E099-2",
+      "report_path": "wan/.aid-o/work/evidence/E-099-2_3/R-E099-2/gates/gates_report.json",
+      "sha": "30784ab9fd7d1dad83b9483a942499ae3bb00424",
+      "sha_source": "report.revision.head_sha",
+      "profile": "standard",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "profile_excluded",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-E099-3",
+      "report_path": "wan/.aid-o/work/evidence/E-099-3_3/R-E099-3/gates/gates_report.json",
+      "sha": "70993351583dcc49f98e6fdb5b94215ea9bd566b",
+      "sha_source": "report.revision.head_sha",
+      "profile": "standard",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "profile_excluded",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-E101-1",
+      "report_path": "wan/.aid-o/work/evidence/E-101-1_3/R-E101-1/gates/gates_report.json",
+      "sha": "5025c8bcc8d5cd03aba09cd4c775382eb1245aa3",
+      "sha_source": "report.revision.head_sha",
+      "profile": "standard",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "profile_excluded",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-E101-2",
+      "report_path": "wan/.aid-o/work/evidence/E-101-2_3/R-E101-2/gates/gates_report.json",
+      "sha": "2cb0106620be43d86ec849d0c9bb8ff779d6019c",
+      "sha_source": "report.revision.head_sha",
+      "profile": "standard",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "profile_excluded",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-E101-3",
+      "report_path": "wan/.aid-o/work/evidence/E-101-3_3/R-E101-3/gates/gates_report.json",
+      "sha": "6bc2e7fdf4330d6ab654d6bdbe6c97dcab4ebeef",
+      "sha_source": "report.revision.head_sha",
+      "profile": null,
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "skip",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "fail",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "pass"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P099-final-1",
+      "report_path": "wan/.aid-o/work/evidence/P099/R-P099-final-1/gates_report.json",
+      "sha": "8d55d868eb1f8499d340302d48ad8a19877fbeb8",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "skip",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P099-final-2",
+      "report_path": "wan/.aid-o/work/evidence/P099/R-P099-final-2/gates_report.json",
+      "sha": "9a4cfcf061e5c82457ef3751169f8478c9a3e6da",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P099-final-3",
+      "report_path": "wan/.aid-o/work/evidence/P099/R-P099-final-3/gates_report.json",
+      "sha": "6b7c7e667ded74ed6f05364908b3e1a6bc4e3246",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P101-final-1",
+      "report_path": "wan/.aid-o/work/evidence/P101/R-P101-final-1/gates_report.json",
+      "sha": "d459db9ab376abc40761280644b3c73280894713",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "fail",
+      "rows": {
+        "plan_diff": "fail",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P101-final-10",
+      "report_path": "wan/.aid-o/work/evidence/P101/R-P101-final-10/gates_report.json",
+      "sha": "d7ba030a08fbf7c8a5cc71b1a203468f1a569a02",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P101-final-11",
+      "report_path": "wan/.aid-o/work/evidence/P101/R-P101-final-11/gates_report.json",
+      "sha": "304c82d4753cf47a2975d283b2f9233627794600",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P101-final-2",
+      "report_path": "wan/.aid-o/work/evidence/P101/R-P101-final-2/gates_report.json",
+      "sha": "f4b3e5397a16014e62395f558299bc0d2239f585",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P101-final-3",
+      "report_path": "wan/.aid-o/work/evidence/P101/R-P101-final-3/gates_report.json",
+      "sha": "99d5ccb84ff89b20d822349c6d7129ec9450773f",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "fail",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "fail",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P101-final-4",
+      "report_path": "wan/.aid-o/work/evidence/P101/R-P101-final-4/gates_report.json",
+      "sha": "f06c2f0d76896e66f6cc934a7b7b512acfe561be",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P101-final-5",
+      "report_path": "wan/.aid-o/work/evidence/P101/R-P101-final-5/gates_report.json",
+      "sha": "a9a685d45f19944a943a648faac235657c8a5968",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P101-final-6",
+      "report_path": "wan/.aid-o/work/evidence/P101/R-P101-final-6/gates_report.json",
+      "sha": "34d46252e4fc72114694e22167d94e9d10a40f11",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P101-final-7",
+      "report_path": "wan/.aid-o/work/evidence/P101/R-P101-final-7/gates_report.json",
+      "sha": "2d6b428d0afc9ae53050d2b773582ff5e966bbec",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P101-final-8",
+      "report_path": "wan/.aid-o/work/evidence/P101/R-P101-final-8/gates_report.json",
+      "sha": "765b62b9c24af661ff72d1488c7274c98484f209",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    },
+    {
+      "project": "wan",
+      "run_id": "R-P101-final-9",
+      "report_path": "wan/.aid-o/work/evidence/P101/R-P101-final-9/gates_report.json",
+      "sha": "928a111a940dc47398605a407d1dedf23cdde95c",
+      "sha_source": "report.revision.head_sha",
+      "profile": "release",
+      "overall": "pass",
+      "rows": {
+        "plan_diff": "pass",
+        "tests_merge_path": "pass",
+        "tests_full_portfolio": "profile_excluded",
+        "lint_python": "pass",
+        "docs_updated": "pass",
+        "tests_frontend": "pass",
+        "tests_session_intake": "profile_excluded"
+      }
+    }
+  ]
+}

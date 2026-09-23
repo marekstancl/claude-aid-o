@@ -12,8 +12,8 @@
 #   2. A SIGKILLed runner leaves the job alive; the rerun RE-ATTACHES (one job
 #      dir, gate_job_reattached logged) and completes the report WITHOUT
 #      re-executing the suite.
-#   3. A background timeout maps to the existing fail + streak accounting
-#      (synthesized 124 → censored samples → timeout_policy_block).
+#   3. A background timeout maps to the existing fail row
+#      (synthesized 124 → reason job_timeout; P097 Step 5: no streak block).
 #   4. Child processes of a timed-out background gate are dead (group kill).
 #   5. Command drift supersedes the stale job dir instead of re-attaching it.
 #   6. GOLDEN: a foreground-only execution.yaml produces a gates_report
@@ -168,7 +168,7 @@ YAML
 #   completed_at / _generated_at    — wall-clock stamps
 #   revision.head_sha               — the fixture repo's fresh commit sha
 #   gates[].duration_ms             — measured wall clock
-#   gates[].runtime_baseline.p95_ms — derived from that same wall clock
+#   gates[].started_at / completed_at — wall-clock stamps (P097 row v2)
 #   _command_log[].duration_ms      — measured wall clock
 # Everything else — results, exit codes, outputs, attempts, ordering, the whole
 # schema — is compared.
@@ -189,8 +189,9 @@ golden_normalize() {
         if (.value | type) == "object" then
           .value |= (
               (if has("duration_ms") then .duration_ms = 0 else . end)
-            | (if (.runtime_baseline | type) == "object"
-               then .runtime_baseline.p95_ms = 0 else . end)
+            # P097 Step 2 rows stamp their own start/end (row_version 2).
+            | (if has("started_at") then .started_at = "NORMALIZED" else . end)
+            | (if has("completed_at") then .completed_at = "NORMALIZED" else . end)
           )
         else . end)
     | ._command_log |= map(.duration_ms = 0)
@@ -324,7 +325,7 @@ YAML
   [ "$output" = "pass" ]
 }
 
-@test "case 3: a background timeout maps to fail + the existing 124 streak accounting" {
+@test "case 3: a background timeout maps to fail + job_timeout with the synthesized 124" {
   init_project
   cat > "$PROJ/exec.yaml" <<'YAML'
 gates:
@@ -351,19 +352,14 @@ YAML
   [ "$output" != "124" ]
   [ "$output" != "null" ]
 
-  # (b) Streak accounting is unchanged: 124 → censored samples → after three
-  #     censored attempts the repeated-timeout policy block fires, exactly as
-  #     it does for a foreground gate.
-  run jq -r '.gates.slow.runtime_baseline.last_attempt_result' "$REPORT"
-  [ "$output" = "timeout" ]
-  run jq -r '.gates.slow.runtime_baseline.samples_count' "$REPORT"
-  [ "$output" -eq 3 ]
-  run jq -r '.gates.slow.runtime_baseline.non_censored_samples_count' "$REPORT"
-  [ "$output" -eq 0 ]
+  # (b) P097 Step 5: no cross-run streak is kept — the row says job_timeout
+  #     by name, every attempt was spent, and no baseline rides on it.
   run jq -r '.gates.slow.reason' "$REPORT"
-  [ "$output" = "timeout_policy_block" ]
-  run jq -r '.gates.slow.recommendation' "$REPORT"
-  [ "$output" = "increase_timeout_or_background" ]
+  [ "$output" = "job_timeout" ]
+  run jq -r '.gates.slow.attempts' "$REPORT"
+  [ "$output" -eq 3 ]
+  run jq -e '.gates.slow | has("runtime_baseline") | not' "$REPORT"
+  [ "$status" -eq 0 ]
 
   # (c) Each retry got its OWN deterministic job id — a failed terminal job is
   #     never re-attached as the next attempt's result.

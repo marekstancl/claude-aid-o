@@ -1230,13 +1230,14 @@ design time — a detector without enforcement is decoration.
 
 ## Owned waits: background gates, declared services, bounded recovery (P076)
 
-Before P076, every long operation in AUTO mode was a wait nobody owned. A
-thirty-minute suite ran inline, so a killed session took it with it; the
-infrastructure a test needed was started by hand and slept on; and a controller
-that died left a run indistinguishable from one making progress. P076 gives each
-of those an owner. Three contracts came out of it, and anything you add that
-runs long, needs infrastructure, or retries after a failure has to respect the
-matching one.
+Before P076, every long operation in AUTO mode was a wait nobody owned: a
+thirty-minute suite ran inline, so a killed session took it with it, and a
+controller that died left a run indistinguishable from one making progress.
+What remains of P076 after P097 is two contracts — the owned job
+(`aid-job.sh`, the one process owner) and the bounded recovery ladder. The
+third, declared services, was removed; its heading below records that so the
+contributor sections stay findable. Anything you add that runs long or
+retries after a failure has to respect the matching contract.
 
 ### The owned-job contract
 
@@ -1261,17 +1262,14 @@ building one needs a registered collector first, and the runner is written to
 refuse an unknown mode rather than to document the requirement.
 
 **Background it when losing the session would cost more than the gate.** The
-mechanical signal is already collected for you: when a gate's runtime baseline
-recommends `background` and the gate declares no `run_mode`, the runner emits a
-`gate_run_mode_advice` timeline event carrying the measured p95 and the exact
-one-line edit. That event is deliberately observe-only — it never flips
-anything: it writes no gate row, changes no gate verdict and no exit code, and
-an unreadable baseline yields no advice and no failure
-(`test-run-mode-advice.bats`, four cases over the real gate runner). The flip is
-a PM's one-line decision, and in this repository only `bats_all` and
+flip is a PM's one-line decision, and in this repository only `bats_all` and
 `bats_boundary` have earned it. The shipped `/aid-init` template documents the
 key and declares it nowhere, so a consumer project's gates keep the foreground
 path, which is byte-for-byte the code AID always ran.
+
+**Fixed timeouts (P097 Step 5).** A gate's deadline is `timeout_seconds` and
+nothing else; the rule, the tool that proposes a value and the row it produces
+on expiry are in "Gates (P097)" below.
 
 **Re-attach, precisely.** The job id is deterministic —
 `<gate>-attempt-<N>` — so a rerun looks in exactly the directory this attempt
@@ -1326,92 +1324,43 @@ diverged once, fail-open).
 
 ### Declaring services
 
-Infrastructure a gate needs is declared in `execution.yaml` next to the gates,
-and the runner owns its lifecycle:
+**Removed (P097 Step 6).** The service lifecycle of P076 — the `services:`
+block, per-gate `needs_services`, the per-run port registry, the ownership
+claim, the entry sweep and the FSM's `_fsm_service_sweep` — is gone, and
+nothing replaces it: the sweep only ever signalled service jobs, and the
+resume path always left a live background gate alone, so gates keep their one
+process owner (`aid-job.sh`, the owned-job contract above) and there is
+nothing left to sweep. The measurement behind the decision is the P097 Step 1
+baseline: no consumer project declared a service. What the mechanism was, and
+the rules it enforced, are history in `CHANGELOG-archive.md` (the P076 entry).
+A `services.json` left under a run's evidence by a pre-2.103 run is reported
+once by `aid-fsm.sh resume`/`done-advance` and otherwise ignored.
 
-```yaml
-services:
-  postgres:
-    start_cmd: "docker compose up postgres"     # MUST stay in the foreground
-    probe_cmd: "pg_isready -h 127.0.0.1 -p \"$PGPORT_E2E\""
-    stop_cmd: "docker compose stop postgres"
-    startup_deadline_seconds: 60                # health-probe budget
-    max_lifetime_seconds: 3600                  # the job's whole-process deadline
-    restart_authorized: false                   # repairs are opt-in authority
-    port_env: PGPORT_E2E                        # per-run allocated port
-
-gates:
-  e2e:
-    command: "npm run test:e2e"
-    needs_services: [postgres]
-```
-
-Four rules a contributor has to respect:
-
-1. **`start_cmd` must remain the foreground process of its job.** The service
-   job IS the ownership record — `lib/aid-service.sh` contains no `setsid`, no
-   pgid arithmetic and no direct `kill`; its entire process surface is four
-   `aid-job.sh` invocations. A trailing `&`, `nohup`, `disown` or `setsid` is
-   refused by a lint at declaration time, and a command that daemonizes
-   internally is caught at runtime (a terminal job whose probe still answers is
-   refused by name) — the honest limit being that after that refusal the orphan
-   really does survive, because there is nothing left to signal.
-2. **Readiness is `probe_cmd`, never a sleep.** The probe is polled to healthy
-   or to `startup_deadline_seconds`, bounded by `timeout(1)` so a blocking probe
-   cannot outlive the declared budget. The e2e role card names `probe_cmd` as
-   the alternative to an arbitrary sleep; manual `docker` is a fallback that
-   must be declared in the report.
-3. **Ports come from the registry, not from the config.** With `port_env` set,
-   the runner allocates a per-run port by BIND probe (a connect scan cannot
-   prove bindability, which is why `python3` is a named dependency with a named
-   refusal), exports it into every command for that service, and records it in
-   `<evidence>/services.json` — written *before* the spawn, so no started job is
-   ever unrecorded. Omitting `port_env` is the honestly-named escape hatch for a
-   service on a fixed external port. `port_env` names are checked against one
-   shared denylist (`lib/aid-env-name-denylist.sh`) — `PATH`, `BASH_ENV`, the
-   `LD_`/`DYLD_`/`BASH_FUNC_`/`AID_` families and friends — because a project's
-   own config must not be able to aim it at the loader or the runner's state.
-4. **Acquire once, release once, and never inside a gate.** Services come up
-   after the declaration validator and before the gate loop, and go down after
-   the report is written; `needs_services` is a *check* at gate start
-   (unhealthy → that gate fails fast with `service_unhealthy`, the rest still
-   run), never a repair. A nested runner invocation — the targeted-tests
-   escalation re-enters the same script — runs with
-   `AID_SERVICE_LIFECYCLE_OWNED=1` and neither sweeps, acquires nor releases.
-   That rule exists because the parallel-teardown race is real: two gates
-   sharing a service, one tearing it down under the other.
-
-**Crash recovery is the NEXT run's entry sweep**, because a SIGKILLed runner
-reaches no cleanup hook. The sweep runs before the acquire, and it is
-authenticated: an ownership claim (pid, `/proc` start time, boot id, host) is
-written before the acquire and dropped after teardown, every "cannot tell"
-answers *alive*, and a second runner meeting a live claim REFUSES rather than
-skipping the sweep and inheriting the services. A job under `service-jobs/` that
-neither this run's spawn ledger nor its registry vouches for is REPORTED with the
-exact cancel command, never signalled.
-
-**Teardown reconciles commands against the declaration.** The registry records
-`stop_cmd` and `probe_cmd` so a teardown still works after the config moved, but
-whenever a declaration can be read it WINS, and a recorded entry naming a
-service the config does not declare is refused rather than executed. Read
-`aid_service_down_all`'s header before you call it: **its rc 2 has several
-distinct causes** — a live foreign owner, a missing `jq`, a missing `yq`, an
-unreadable declaration — and it prints its own named line for each. A caller
-must relay that line, not assert a cause of its own.
+**Removed keys are refused, never ignored (P097 Step 6).** `run-all` stops
+with exit 2 before any gate runs when `execution.yaml` still carries
+`services:` or `gate_profile_defaults` at the top level, or `required_when` or
+`needs_services` on a gate — naming every key found, the gate it sits on, and
+the upgrade that removes it
+(`bash $AID_PLUGIN_PATH/scripts/lib/aid-init-execution-yaml.sh upgrade <project root>`).
+The key is the signal, not its content: `services: {}` is refused like a
+populated block. An ignored key is how `required_when` sat unread in every
+generated project for four months; `required:` alone now decides whether a
+gate blocks. The registry row is `execution_yaml_dead_keys_refused`.
 
 ### The recovery policy, and how a consumer changes it
 
 `defaults/policies/auto-recovery.yaml` is the one machine-readable answer to
-"what may an autonomous run do about a stop, and how often". It defines seven
-stop classes (`GATE_TIMEOUT`, `SERVICE_UNHEALTHY`, `JOB_LOST`,
-`TRANSIENT_INFRA`, `DISPATCH_ORPHANED`, `REVIEW_EXHAUSTED`, `UNCLASSIFIED`),
-each carrying:
+"what may an autonomous run do about a stop, and how often". It defines six
+stop classes (`GATE_TIMEOUT`, `JOB_LOST`, `TRANSIENT_INFRA`,
+`DISPATCH_ORPHANED`, `REVIEW_EXHAUSTED`, `UNCLASSIFIED`; `SERVICE_UNHEALTHY`
+left with the service lifecycle in P097), each carrying:
 
-- `allowed_actions` — drawn from a CLOSED vocabulary of six reversible actions
-  (`wait_and_resume`, `retry_once`, `restart_service_once`, `rerun_targeted`,
-  `resume_missing_lenses`, `collect_and_continue`). None of them weakens, waives
-  or bypasses a gate. An action name outside the six is a schema error at load,
-  never a silent no-op.
+- `allowed_actions` — drawn from a CLOSED vocabulary of five reversible actions
+  (`wait_and_resume`, `retry_once`, `rerun_targeted`, `resume_missing_lenses`,
+  `collect_and_continue`; the service-restart action left with the service
+  lifecycle in P097 Step 6). None of them weakens, waives or bypasses a gate.
+  An action name outside the five is a schema error at load, never a silent
+  no-op.
 - `budget: {attempts, wall_clock_seconds}` — spent per run per class.
 - `emitter` — the real `file:line` that classifies this stop, grepped against
   the source by a test that turns red when the anchor moves.
@@ -1467,12 +1416,10 @@ changing the ladder's numbers will not move them.
 ### Adding to this area
 
 Anything that runs long enough to outlive a session becomes an `aid-job.sh` job,
-not a detached process. Anything a gate depends on gets DECLARED, so the runner
-can probe it instead of a human sleeping on it. Anything that retries goes
-through the ladder's budget rather than counting for itself. And any state a
-dying controller would have to write about itself is DERIVED by its readers
-instead — the epitaph rule: the one party that cannot write is the one the flag
-would be about.
+not a detached process. Anything that retries goes through the ladder's budget
+rather than counting for itself. And any state a dying controller would have to
+write about itself is DERIVED by its readers instead — the epitaph rule: the one
+party that cannot write is the one the flag would be about.
 
 ## The aftermath layer (P079)
 
@@ -2389,3 +2336,101 @@ at the proof has established nothing about this plan and says so instead — and
 released only by a human's
 `aid-plan-continue.sh --reclaim <epic_id>`, which no automation calls. Taking a
 live run's entry out from under it is worse than waiting.
+
+## Gates (P097)
+
+A gate is one entry under `execution.yaml.gates.<id>` — `command`, `required`,
+`timeout_seconds`, `max_retries`, `run_mode` — and `scripts/aid-run-gates.sh` is
+the one program that reads it. The controller's instruction is one section,
+`skills/pipeline.md` §5; this section is what a contributor has to keep true
+when touching the runner, the resolver, or a reader of the report.
+
+### The row contract
+
+Every row the runner writes (`gates_report.json.gates.<id>`, and the per-gate
+checkpoint `gates_rows/<id>.json`) is version 2: `row_version: 2`, `status`
+pass|fail|skip, `reason` from the closed vocabulary in
+`defaults/schemas/gate-row.schema.json`, `exit_code`, `duration_ms`,
+`started_at`, `completed_at`, `evidence`, `required`, `waived`, `reused_from`,
+and `result` kept for one release as the derived version-1 field. A waiver is
+`waived: true` on a `fail` row, never a reason and never a pass. `overall` is
+`fail` iff a `required: true` gate failed without a valid waiver.
+
+`scripts/lib/aid-gate-row.sh` is the only home of the shape: `gate_row_normalize`
+(bash, and the jq def of the same name in `$AID_GATE_ROW_JQ`) turns a version-1
+row into a version-2 row, and `gate_row_check` refuses a reason outside the
+vocabulary. A reader that needs a row's verdict prepends `$AID_GATE_ROW_JQ` to
+its jq filter and reads `status`/`reason`/`waived`; nothing inspects `result`.
+A new reason is added to the schema's pattern and to the summary's rendering
+(`lib/aid-gate-outcome-summary.sh`) in the same commit, or `gate_row_check` fails
+the run naming the gate. Registry row: `gate_row_contract_v2`.
+
+### The resolver
+
+`gate_profiles` is an ordered table, declared narrowest first; the declaration
+index is the rank and there is no other ordering anywhere.
+`scripts/lib/aid-gate-profile-select.sh` is the one resolver — `gate_profile_table`,
+`gate_profile_index`, `gate_profile_has_required_gate`, `gate_profile_for_paths`
+(the LAST declared profile whose `when_paths` matches any changed path, else
+`default_profile`; a profile without `when_paths` is never auto-selected),
+`gate_profile_floor_verdict` — and every caller (the runner's `--profile`
+validation, `aid-fsm.sh advance-to-gates`, the GATES:DONE floor, the plan-final
+stage) asks it instead of keeping a table of its own. The runner chooses
+nothing: the caller passes the name, the report records `profile`,
+`profile_source: caller|none` and `profile_table`, and the floor compares
+indexes within THAT recorded list; a table that changed between the run and
+the precondition refuses with `profile_table_changed` rather than comparing
+across two orders. A profile whose `include[]` names no `required: true` gate
+is refused at resolve and at `--profile` (exit 2) — a run that can only skip
+is not a run. Registry rows: `gate_profile_from_caller` (the caller passes the
+name, the floor checks it) and `gate_profile_unknown_refused` (the exit 2).
+
+### The timeout rule
+
+`timeout_seconds` is the deadline and nothing else: absent, 60 s; not a
+positive integer, `run-all` exits 2 naming the gate before any gate runs. The
+same configuration and the same code give the same deadline on every host — no
+history file steers a run. A gate past its deadline is a `status: fail,
+reason: job_timeout` row with no surviving child, whether `timeout(1)` or the
+job supervisor stopped it, and the recovery ladder records it as
+`GATE_TIMEOUT`. A background gate's job records the deadline it ran under
+(`deadline_sec` in `job.json`); a rerun re-attaches to that job only while
+it still equals `timeout_seconds`, so raising the timeout after a
+`job_timeout` runs the gate again instead of collecting the old verdict.
+Registry row: `gate_timeout_fixed`.
+
+History informs the number in the file. The written rule (the template comment
+on `timeout_seconds` in `defaults/execution.yaml`): 2 × p95 of the last 20
+measured `duration_ms` of that gate, `job_timeout` rows excluded, rounded up to
+a multiple of 30 s, minimum 60 s, maximum 3 600 s. `propose` prints it and
+never writes — a person edits `timeout_seconds`:
+
+```bash
+plugins/aid-orchestrator/scripts/aid-gate-runtime-report.sh [--project-root <path>] [gate]
+# bats_all proposed_timeout_seconds=2280 (p95 1140000 ms over the last 20 measured durations, 1 job_timeout rows excluded) configured_timeout_seconds=3600
+bash plugins/aid-orchestrator/scripts/lib/aid-gate-runtime-baseline.sh propose <evidence root> <gate>
+# fewer than five measured durations → insufficient_history
+```
+
+### The reader test
+
+`scripts/tests/test-execution-yaml-readers.sh` (t0) composes `execution.yaml`
+for every shipped stack and demands, for each key the composer writes, a reader
+expression somewhere under `scripts/` outside tests, templates and the writer
+library. A key the composer writes and nothing reads turns it red — that is how
+eight keys that sat unread for months are kept from coming back. A key the
+runner deliberately no longer reads is REFUSED, not ignored: `run-all` stops
+with exit 2 before any gate runs and names the key, the gate and the upgrade
+(`bash $AID_PLUGIN_PATH/scripts/lib/aid-init-execution-yaml.sh upgrade <project root>`).
+Adding a key therefore means adding its reader in the same commit; removing
+one means adding it to the upgrade's dead-key list and to the runner's refusal.
+Registry rows: `execution_yaml_keys_have_readers` (the reader test) and
+`execution_yaml_dead_keys_refused` (the refusal).
+
+### Hygiene
+
+`scripts/tests/test-gates-hygiene.sh` (t0) keeps this area readable: each gate
+file opens with a `WHY THIS FILE EXISTS` paragraph, and no live instruction or
+script under the plugin names a removed layer outside the lines that document
+its refusal or its upgrade (an explicit allow-list in the suite, not a wide
+regex).

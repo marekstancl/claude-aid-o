@@ -52,6 +52,8 @@ plan_final:
     # tracked counter.yaml is dirty in any tree AID has worked in.
     - ".aid-o/config/counter.yaml"
     - ".aid-o/work/audit-log.jsonl"
+    # Legacy-only since P097 Step 5: nothing writes these any more, but a tree
+    # upgraded from an older AID still carries them and must not read as dirty.
     - ".aid-o/metrics/gate-runtime-baselines.yaml"
     - ".aid-o/metrics/gate-runtime-baselines.yaml.lock"
     - ".aid-o/work/plan-state/**"

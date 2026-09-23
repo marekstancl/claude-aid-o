@@ -1,0 +1,538 @@
+version: '1.0'
+generated_by: manual override for E-035-1_2 (P035 Phase 1)
+gates:
+  bats_fsm:
+    command: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm.bats
+    required: true
+    timeout_seconds: 300
+    max_retries: 1
+  bats_all:
+    # QUARANTINE LIFTED (P071 E-071-1_1 Step 3, 2026-08-02): the 2026-07-23
+    # quarantine (below, kept for history) blocked the monolithic aggregate
+    # after two overlapping E-064-2_2 runs shared the live repository and
+    # cost 50-95 minutes of untrustworthy evidence. P071 replaced the blanket
+    # `bats plugins/aid-orchestrator/scripts/tests/bats/` invocation with a
+    # partitioned run (everything except the 2 known-slow boundary files
+    # below). P078 removed the parallel lane wrapper that once performed that
+    # partition; the partition stays, now as the plain globbed-and-filtered
+    # bats invocation in `command:` above.
+    #
+    # CP2 fix (2026-08-02): this gate ONLY runs the pool phase now, split out
+    # from the 2 boundary files (see gate:bats_boundary below) — an earlier
+    # version ran both phases under ONE required:true gate with
+    # timeout_seconds:1800, but test-aid-plan-final-boundary.bats alone is
+    # known (this session's diagnostic work) to potentially exceed 3600s+
+    # without completing, which would have made this required gate fail from
+    # a plain timeout kill on essentially every real invocation, until Step 4
+    # fixes that file's speed — a real regression vs. the quarantine stub it
+    # replaced. Splitting keeps this gate real, required, and fast; the 2
+    # slow boundary files get their own separate, non-required gate instead.
+    #
+    # Original 2026-07-23 quarantine record (history only, no longer active):
+    #   authorized_by: "PM 2026-07-23"
+    #   tracked_by: "P066"
+    #   original_command: "bats plugins/aid-orchestrator/scripts/tests/bats/"
+    # P078 (2026-08-10): parallelism removed — plain sequential bats over the
+    # suite directory, still excluding the 2 slow boundary files (they keep
+    # their own gate:bats_boundary below; the exclusion predates parallelism
+    # and survives it — it is about budget isolation, not pooling).
+    #
+    # P081 Step 6 (2026-08-10): THIS GATE IS NOW T0+T1, NOT THE PORTFOLIO.
+    # The old command was a glob with a hand-maintained negative filter naming
+    # the two boundary suites. Tier filtering plus the delegation map express
+    # the same partition declaratively, so the filter is REMOVED rather than
+    # translated — and the partition is now derived from measured cost instead
+    # of from whichever files somebody remembered to exclude. The gate keeps
+    # its NAME so every profile, registry row and historical baseline that
+    # references it stays valid. What used to run here now runs nightly
+    # (gate:shell_pipeline_smoke below, .github/workflows/nightly-tests.yml).
+    command: "bash -c 'plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 && plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1'"
+    required: true
+    timeout_seconds: 900   # the standard's own budgets — T0 ≤ 2 min, T1 ≤ 10 min
+                           # — plus headroom. aid-test-tier-assign.sh ENFORCES
+                           # those budgets by demoting the most expensive member
+                           # while a tier overflows, so this cap is bounded by
+                           # construction rather than by hope. The previous
+                           # 2400s stood over an UNBACKED 1556s estimate for a
+                           # whole-portfolio run this gate no longer performs.
+    # P076 Step 1 (2026-08-09): supervised background job via aid-job.sh.
+    # Rationale, stated honestly. An earlier version of this comment called
+    # the 1556s figure above "measured, not guessed". It is not: the repo's
+    # own test audit TAUD-20260806-0440 (content-scan.json ->
+    # checks.fabricated_measured) records gate:bats_all as
+    # {claimed_ms: 1556000, actual_ms: null, "claimed measured, no
+    # measurement exists"}. Treat 1556s as an UNBACKED ESTIMATE inherited
+    # from the timeout_seconds note above — one alleged uncapped run, never a
+    # p95, with no completed-run record behind it.
+    # What IS on record is enough on its own: since the P071 quarantine lift
+    # this gate has never completed under a 600s cap (censored samples only),
+    # so its true cost is unknown and known to be large. A gate of unknown,
+    # large cost is exactly the one an interrupted session must not have to
+    # restart from zero.
+    # Backgrounded, the job is owned by its process group and its result is
+    # bound to the start HEAD/tree, so a rerun after a crash re-attaches to
+    # the still-live job instead of paying the 26 minutes twice. Failure
+    # semantics, required-ness, timeout and retry budget are unchanged.
+    run_mode: background
+    max_retries: 0
+  bats_boundary:
+    # P071 E-071-1_1 Step 3 CP2 fix (2026-08-02): the 2 bats files excluded
+    # from gate:bats_all's run (test-aid-plan-final-boundary.bats,
+    # test-aid-plan-release-boundary.bats) — both create a real git repo per
+    # test and run sequentially, never pooled. required:false + a generous
+    # timeout because test-aid-plan-final-boundary.bats's own root-cause fix
+    # is explicitly P071 Step 4's job, not this gate's; until that lands this
+    # gate is advisory (informational signal only, never blocks GATES→DONE).
+    # Re-evaluate required:true once Step 4 brings this file's cost down to
+    # something a real timeout budget can bound.
+    # P078 (2026-08-10): plain sequential bats, same 2 files the lane
+    # wrapper used to resolve before P078 deleted it.
+    #
+    # P081 Step 6 (2026-08-10): OFF THE MERGE PATH. Both suites are T2 by any
+    # measurement — each builds a real git repository per test — and a gate
+    # with a two-hour ceiling in front of every merge is precisely what this
+    # plan exists to remove. The gate definition stays (its two suites still
+    # run, in the nightly's T2 selection); it is simply no longer in any
+    # merge-path profile.
+    command: "bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
+    required: false
+    timeout_seconds: 7200
+    # P076 Step 1 (2026-08-09): supervised background job via aid-job.sh.
+    # This is the longest gate in the repository — the 2 sequential boundary
+    # files each build a real git repo per test, and
+    # test-aid-plan-final-boundary.bats alone has been observed running past
+    # 3600s without completing, which is why the cap is 7200s. A gate with a
+    # two-hour ceiling is precisely the one an interrupted auto-mode run must
+    # not have to restart: backgrounded, the job survives the interruption
+    # and the next run re-attaches by command fingerprint. required:false
+    # (advisory) is untouched — backgrounding an advisory gate is legal and
+    # changes none of its failure semantics.
+    run_mode: background
+    max_retries: 0
+  shell_pipeline_smoke:
+    description: >-
+      Despite the name, this is NOT a fast/partial smoke check — it runs the
+      FULL aggregate test suite via run-all-tests.sh (timeout_seconds 7200).
+      It OVERLAPS gate:bats_all rather than containing it: this gate adds 47
+      standalone test-*.sh shell suites bats_all never touches, while bats_all
+      covers the bats aggregate this gate partly delegates to CI jobs.
+      Neither set contains the other, so neither gate substitutes for the
+      other. (P078: the isolation-experiment suite both once referenced was
+      deleted with the parallelism machinery.) Its cost under the CURRENT cap is unmeasured:
+      gate-runtime-baselines.yaml records 5 non-censored runs (p50 1393316 ms,
+      p90/p95/max 1869545 ms), the newest dated 2026-07-15, and every one of
+      the 8 samples since is exit 124, censored at the then-1900s cap. bats_all
+      has never completed at all (percentiles null), so the two gates have no
+      comparable current measurement.
+    # Kept the historical key name rather than renaming it (P071 E-071-1_1
+    # Step 2, 2026-08-02) — release_quarantine's own reason text (see below)
+    # quotes `shell_pipeline_smoke` verbatim, p064-closure's reason text
+    # quotes it too, and grep across .aid-o/work/ turns up dozens of evidence
+    # plan.json / interim-doc references to this exact string. A rename would
+    # require rewriting all of those consistently with no reliable way to
+    # confirm every reference was caught, for a gate that has no other active
+    # collision. The name's "smoke" implication is corrected via description
+    # above instead.
+    # P081 Step 6 (2026-08-10): THIS IS THE NIGHTLY'S COMMAND NOW, and it is in
+    # NO merge-path profile. The tier work did not make this run cheaper — it
+    # moved it to where its cost is free.
+    #
+    # NO `--tier` HERE, deliberately. An earlier cut ran `--tier t2` — the
+    # portfolio minus what the merge path already covered — which sounds
+    # efficient and quietly breaks two of this plan's own claims: the full
+    # portfolio would never run green in one place, and `--timing` would only
+    # ever refresh T2 durations, so a T0 suite that grew into T1 territory
+    # could never be caught by the lint that compares a tag against its newest
+    # measurement. Re-running 12 minutes of T0+T1 at 02:40 costs nothing.
+    # No --tier: an untiered run IS the whole portfolio. (It used to also pass
+    # `--include-delegated`; delegation was removed 2026-08-14.) The nightly is
+    # the one run that owes every
+    # suite a measurement.
+    # .github/workflows/nightly-tests.yml runs the same selection, and
+    # test-tier-gate-routing.bats asserts the two do not drift apart.
+    command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --timing
+    required: false
+    # 1900s -> 7200s (2026-08-04). A real audit cut this gate off at 2001s with
+    # 73 of 151 suites done, so it had NEVER completed inside its cap — and a
+    # gate that always stops a third of the way through verifies nothing while
+    # still costing half an hour. It hid a genuine failing case for two commits,
+    # exactly as bats_all's own 600s cap did.
+    #
+    # 7200 is a CEILING chosen to let the gate finish and finally produce a real
+    # number, NOT a prediction of how long it takes. No run under the CURRENT cap
+    # has completed: the 5 non-censored samples in
+    # .aid-o/metrics/gate-runtime-baselines.yaml (p50 1393316 ms, p90/p95/max
+    # 1869545 ms) all date from 2026-07-12 to 2026-07-15 and were taken at the
+    # then-1900s cap, and
+    # every sample since is exit 124. 2001s/73-suites is a lower bound, and
+    # scaling it to 151 would be the arithmetic this plan forbids. Note the
+    # baseline machinery already derives timeout_recommended_seconds: 2805 and
+    # run_mode_recommended: background for this gate from those stale samples —
+    # 7200 is ~2.6x that, deliberately, because it is a ceiling and not an
+    # estimate. Once one run completes under this cap, set both from the
+    # measurement.
+    #
+    # For scale (P076 Step 7, 2026-08-09): an earlier version of this line said
+    # "bats_all measures 1602s". No completed run backs that number. The
+    # runtime baseline .aid-o/metrics/gate-runtime-baselines.yaml records
+    # gate:bats_all as samples_count 2 / non_censored_samples_count 0, both
+    # exit 124 at the 600s cap, with p50/p90/p95/max all null — bats_all has
+    # never completed a measured run at all. The figure is not unique to this
+    # file: .aid-o/work/evidence/P073/cp1-deep/cp1-lens-L3-enforcement.md:12
+    # cites "a 1556-1602s measurement" — but that line sources itself to
+    # `.aid-o/config/execution.yaml:36`, i.e. it is review prose quoting this
+    # config, not an independent measurement record. 1602s and the 1556s
+    # figure above are both unbacked estimates (cf. test audit
+    # TAUD-20260806-0440, checks.fabricated_measured).
+    #
+    # The comparison the line was reaching for survives without a number, but
+    # it rests on OVERLAP, not containment: each of the two gates runs work the
+    # other never touches, so neither set contains the other and neither gate
+    # is redundant or a substitute for the other.
+    #   - This gate runs 47 standalone `test-*.sh` shell suites
+    #     (plugins/aid-orchestrator/scripts/tests/test-*.sh, none excluded by
+    #     the discovery loop). gate:bats_all invokes bats files only and runs
+    #     none of them.
+    #   - gate:bats_all globs the bats tree and skips only the 2 boundary
+    #     files, so it runs every other bats suite inline; this gate skips
+    #     whatever DELEGATED_SUITES (run-all-tests.sh) hands to a dedicated
+    #     CI job.
+    #   - The 2 boundary files (test-aid-plan-final-boundary.bats,
+    #     test-aid-plan-release-boundary.bats) are skipped by BOTH gates;
+    #     gate:bats_boundary is what runs them.
+    # P079 obligation 1 resolution (2026-08-10): cap from the honest measurement
+    # on 102a5f3 — 12200 s (3 h 23 min) full portfolio, RC=1 with all failures in
+    # the cancelled test-audit line; delegation since REMOVED the three heaviest
+    # suites, so 12200 s is a conservative upper bound. max(12200*1.5, +60) =
+    # 18300 s. No routine re-measurement — re-derive only when the portfolio
+    # grows materially (PM decision 2026-08-10).
+    timeout_seconds: 18300
+    run_mode: background
+    max_retries: 0
+  # P081 whole-diff review follow-up (2026-08-11): the tier lint was registered
+  # `severity: blocking` and invoked by NOTHING — check 1 (every suite declares
+  # a tier) survived only because run-all-tests.sh re-implements it, and checks
+  # 2 (no plan number in a filename) and 3 (a tier no cheaper than its newest
+  # measurement) had no enforcement path at all. Cheap, seconds, no processes.
+  # Check 3 is machine-local until the durations journal has a CI transport;
+  # it reports UNVERIFIED rather than failing, which is stated in the script.
+  # Named per the very rules it enforces (test-standard "Jména bran" 6-10):
+  # kind first, no tool, no outcome word. Existing gates are grandfathered in
+  # scripts/tests/gate-name-allowlist.txt and reported as advisory; a NEW or
+  # renamed gate must lint clean, which is what makes this a control and not a
+  # comment (AID-v3 principle #1).
+  # Vráceno na required: true 2026-08-11, jakmile P080 mergnul main a skript
+  # na jeho větvi existuje (ověřeno spuštěním z jeho worktree: PASS).
+  # Historie, ať se to nezopakuje: konfigurace se čte z HLAVNÍHO checkoutu
+  # (`aid_state_root` → git common dir), ale příkaz běží ve větvi plánu, takže
+  # brána přidaná do main okamžitě platí i pro větve, kde její skript ještě
+  # není. Zaevidováno jako IMP-497 — přidávat bránu za běhu cizího plánu je
+  # do té doby destruktivní.
+  lint_gate_names:
+    command: "bash plugins/aid-orchestrator/scripts/aid-gate-name-lint.sh --config .aid-o/config/execution.yaml"
+    required: true
+    timeout_seconds: 60
+    max_retries: 0
+
+  tier_lint:
+    command: "bash plugins/aid-orchestrator/scripts/aid-test-tier-lint.sh"
+    required: true
+    timeout_seconds: 120
+    max_retries: 0
+
+  check_release_paths:
+    note: 'P089 Step 10, wired by PM decision 2026-08-26. required=false is
+      DELIBERATE and standing. The gate compares two claims about what reaches
+      a user — versioning.release_exempt_paths / app_paths in project.yaml, and
+      the COPY/ADD sources of the Dockerfile — and this repository ships TWO
+      products down two channels: the image carries packages/ (the cockpit app)
+      while the plugin travels through the git marketplace and never enters the
+      image at all. A disagreement here is a question about that split, not a
+      defect the running EPIC introduced, so it is reported and does not block.
+      It also matches LITERALLY: a glob in the Dockerfile (COPY package*.json)
+      needs the same glob in app_paths, which is why that entry carries one.'
+    command: "bash plugins/aid-orchestrator/scripts/gates/release-paths-drift.sh"
+    required: false
+    timeout_seconds: 60
+    max_retries: 0
+
+  plan_diff:
+    note: 'P083 Step 5 (2026-08-13): required=false is a DELIBERATE, standing
+      choice, not a historical exemption — the "P038+" note above named a
+      false history (git log -S over 16 tracked commits since 2026-08-04
+      shows the command was never present at all; this is a first-time
+      addition). The gate evaluates the WHOLE source plan''s criteria on
+      every EPIC-level run, and this repository''s own in-flight plans do
+      not have every suite built by the time an EPIC gate runs — required:true
+      here would make a plan unable to finish itself. required:true belongs
+      at plan-final, where every suite exists.'
+    description: Plan AC blocks materially satisfied in codebase HEAD
+    required: false
+    command: "plugins/aid-orchestrator/scripts/aid-plan-diff.sh --plan {plan_path} --evidence-dir .aid-o/work/evidence/{epic_id}/{run_id} --base-commit {base_commit}"
+    # timeout_seconds attribution (P071 E-071-1_1 Step 1, 2026-08-02): the
+    # p064-closure profile's "34 min of wall clock" note (below) describes
+    # plan_diff and shell_pipeline_smoke TOGETHER (both excluded from that
+    # profile as a pair) and does not break out a per-gate duration.
+    # .aid-o/config/execution.yaml is git-ignored (**/.aid-o/ in .gitignore),
+    # so there is no commit history to trace which gate contributed how much
+    # of the 34 min — the attribution to plan_diff alone could not be
+    # confirmed or ruled out. Falling back to this gate's own historical
+    # baseline instead: gate-runtime-baselines.yaml -> gates.plan_diff has 8
+    # non-censored samples (the other 6 recorded samples are
+    # censored:true/exit_code 124 at the old 120s cap and are excluded per
+    # that file's own convention), avg ~15.6s, max ~68.5s. 300s (~4.4x the
+    # observed non-censored max) gives headroom without reintroducing an
+    # unbounded/guessed value.
+    timeout_seconds: 300
+    pass_criteria: exit 0 (all present) or exit 2 (legacy plan / Fast Mode graceful
+      skip)
+    max_retries: 0
+  ui_calibration_result:
+    description: "Calibration evidence verified: 5 cases pass/fail, all artifacts present on disk, D-desktop/D-mobile prove real ScreenG capture"
+    note: "required=false for post-E7-CAL EPICs: one-time verification done in E-056-2_3; gate is advisory for subsequent runs"
+    required: false
+    type: deterministic
+    command: "bash plugins/aid-orchestrator/scripts/tests/ui-calibration-verify.sh .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json .aid-o/work/evidence/{epic_id}/{run_id}"
+    timeout_seconds: 30
+    pass_criteria: "exit code 0 (all verification checks pass)"
+    max_retries: 0
+  ui_calibration_signoff:
+    description: "PM has manually signed off on E7-CAL calibration results after reviewing 5-case evidence pack"
+    note: "required=false for post-E7-CAL EPICs: signoff was completed in E-056-2_3; advisory for subsequent runs"
+    required: false
+    type: deterministic
+    command: "jq -e '.calibration.pm_signoff.confirmed_by | length > 0' .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json"
+    timeout_seconds: 10
+    pass_criteria: "exit code 0 (confirmed_by is non-empty string)"
+    max_retries: 0
+  targeted_tests:
+    note: 'P061 EPIC 3 Step 10 — defined but NOT activated in any self-host
+      gate_profiles.*.include[] yet (EPIC 4, D1/D3, wires the self-host
+      activation); registered here so aid-run-gates.sh can resolve and run it
+      on demand ahead of that activation.'
+    description: Targeted test selector — maps git-diff changed paths to their
+      mapped test(s) via the Initial mapping and runs them for real; an
+      unknown production path is a deliberate fail, never a silent skip
+      (D-selector-1).
+    required: false
+    type: deterministic
+    command: plugins/aid-orchestrator/scripts/aid-select-tests.sh --base {base_commit}
+    timeout_seconds: 600
+    pass_criteria: exit 0 (selected tests passed, or nothing selected e.g.
+      docs-only change); exit 1 = a selected test failed; exit 3 = unverifiable
+      unknown production path (D-selector-1) — both 1 and 3 surface as gate
+      result "fail" (any non-zero exit)
+    max_retries: 0
+  docs_updated:
+    description: "Documentation updated for changed APIs/models"
+    required: false
+    type: deterministic
+    command: |
+      api_changed=$(git diff --name-only {base_commit}..HEAD | grep -cE 'routes/|api/|endpoints/|models/|schemas/|openapi/' || true)
+      doc_changed=$(git diff --name-only {base_commit}..HEAD | grep -cE 'README|docs/|CHANGELOG|\.md$' || true)
+      if [[ $api_changed -gt 0 && $doc_changed -eq 0 ]]; then
+        echo "WARN: API files changed ($api_changed) but no docs updated"; exit 1
+      fi
+notifications:
+  telegram:
+    enabled: false
+    chat_id: null
+    alert_on_repeated_precondition_fail: true
+    alert_threshold: 3
+# ─── Which profile runs when (2026-08-11) ────────────────────────────────────
+# Until today this key was absent, which means NO profile was passed and every
+# gate ran on every phase — including `bats_all`, i.e. the whole T0+T1 merge
+# path (13 min) at the end of every single EPIC.
+#
+# That was left over from before the tier pilot: when the merge path took
+# 6 h 49 m nobody would have run it per EPIC, so the question never came up;
+# after it dropped to 13 min the profiles were never revisited. The PM caught
+# it by asking why an agent was "running everything" on an eight-file change.
+#
+# The tier standard's own logic settles it: the merge path is a MERGE event.
+# An EPIC merges into the plan branch, so it gets `standard` — targeted tests
+# for what actually changed, plus the FSM suite and the plan-criteria check.
+# The full T0+T1 sweep belongs to plan-final, which `plan_final_profile_floor:
+# release` already enforces, and `release` includes `bats_all`.
+#
+# A step gets `targeted`: CP2 review covers the step's own diff, and a step is
+# not a merge into anything.
+gate_profile_defaults:
+  step: targeted
+  epic: standard
+
+gate_profiles:
+  # ─── P064 plan Step 8 — the five canonical risk profiles ────────────────
+  # These are the names lib/aid-gate-profile.sh's resolver can return
+  # (quick < targeted < standard < full < release). Until this block existed,
+  # every auto-resolve took aid-fsm.sh's `gate_profile_auto_resolve_skipped`
+  # branch and `targeted_tests` was defined but never activated anywhere.
+  #
+  # `docs_updated` is in EVERY include[] on purpose. plan.json.gates[] is a
+  # per-EPIC hard floor enforced at GATES:DONE (`plan_gate_profile_excluded`,
+  # aid-fsm.sh), and this repository's own EPICs routinely declare
+  # `docs_updated` there — a profile that excluded it would refuse the very
+  # EPIC that selected it. The gate costs two `git diff --name-only` calls,
+  # so carrying it in the cheapest profile is still cheaper than one skipped
+  # doc review. `release` therefore stays a strict superset of `full`.
+  #
+  # `bats_all` appears only in `full` and `release`: the EPIC boundary can
+  # never resolve above `standard` in plan_branch mode, so the broad suite is
+  # a plan-final (or PM-exception) act, not a per-EPIC one.
+  #
+  # `targeted_tests` runs in `targeted` and `standard` but DELIBERATELY NOT in
+  # `full`/`release`, so the include lists are not a monotonic chain. This is
+  # the one documented exception, raised as CP2 security finding 1 on
+  # E-064-2_2 Step 3 and adjudicated here rather than silently.
+  #
+  # The concern is real in form: the rank order quick < targeted < standard <
+  # full < release is consumed as a SAFETY order by aid-fsm.sh's
+  # `risk_profile_below_required`, which asserts a higher rank verifies at
+  # least as much. The exception is nonetheless correct, because
+  # `targeted_tests` is a SELECTOR, not a test suite:
+  #
+  #   * Coverage is not lost. `aid-select-tests.sh` maps changed paths to a
+  #     SUBSET of the suites `bats_all` runs unconditionally at `full`, so at
+  #     `full` the selector can only ever pick tests that already ran.
+  #   * The one non-redundant signal is exit 3 (unknown production path,
+  #     D-selector-1). Its sole wired effect is to raise the plan-final floor
+  #     to at least `full` (aid-plan-fsm.sh, epic-complete). At an active
+  #     `full` the floor is already there, so the signal has nothing left to
+  #     do — it can only restate a conclusion already reached.
+  #   * Including it anyway would plant a permanent `fail` row in every `full`
+  #     run of this repository: the Initial mapping currently covers none of
+  #     `scripts/aid-plan-fsm.sh`, `scripts/lib/aid-queue-write.sh`,
+  #     `scripts/lib/aid-gate-profile.sh`, `scripts/aid-queue-add.sh` or
+  #     `defaults/enforcement-registry.yaml`, so exit 3 is guaranteed. A red
+  #     row that carries no information the run does not already have is
+  #     noise, and noise is what makes real red rows get ignored.
+  #
+  # The genuine fix is to extend the Initial mapping in
+  # scripts/aid-select-tests.sh so those five paths resolve to suites. That
+  # file is outside every step's allowed paths in this EPIC and is filed as a
+  # carried finding instead. When it lands, revisit this exception: with the
+  # mapping complete, exit 3 becomes rare and putting `targeted_tests` in
+  # every profile costs nothing.
+  quick:
+    include:
+      - tier_lint
+      - lint_gate_names
+      - bats_fsm
+      - docs_updated
+  targeted:
+    include:
+      - tier_lint
+      - lint_gate_names
+      - targeted_tests
+      - bats_fsm
+      - docs_updated
+  standard:
+    include:
+      - tier_lint
+      - lint_gate_names
+      - targeted_tests
+      - bats_fsm
+      - plan_diff
+      - docs_updated
+  # bats_fsm is BACK in full and release (P081 whole-diff review, 2026-08-11).
+  # It was removed because `bats_all` ran test-aid-fsm.bats in its pool, so
+  # including both dispatched the same run unit twice — true until this branch.
+  # test-aid-fsm.bats is `# aid-tier: t2` and `bats_all` now resolves to the
+  # T0+T1 selection, so it no longer dispatches that suite at all: leaving
+  # bats_fsm out left the two heaviest profiles — including the one plan-final
+  # runs — with NO FSM coverage. There is no double dispatch to avoid any more.
+  # `release_quarantine` gains it for the same reason and to keep the
+  # set-equality assertion (release MINUS the quarantined gate) satisfied.
+  # P081 Step 6 (2026-08-10) — THE MERGE PATH IS T0 + T1.
+  # `bats_all` now resolves to the tier-filtered runner, and the two gates that
+  # carried the rest of the portfolio left these profiles entirely:
+  #   - shell_pipeline_smoke (the whole portfolio, 3 h 23 min measured) is the
+  #     nightly's command;
+  #   - bats_boundary (two suites, 7200 s ceiling) is T2 and rides the nightly
+  #     with everything else.
+  # Neither gate was deleted, and neither stops running: they run at 02:40 UTC
+  # instead of in front of a merge.
+  # `check_release_paths` is in the two HEAVY profiles only. It asks what
+  # reaches a user, which is a plan-final question — on a per-step run it would
+  # re-answer it unchanged every time and add nothing but a line.
+  full:
+    include:
+      - tier_lint
+      - lint_gate_names
+      - bats_all
+      - bats_fsm
+      - plan_diff
+      - docs_updated
+      - check_release_paths
+  release:
+    include:
+      - tier_lint
+      - lint_gate_names
+      - bats_all
+      - bats_fsm
+      - plan_diff
+      - docs_updated
+      - check_release_paths
+  bats_all_quarantine:
+    reason: >-
+      Temporary PM-authorized AID self-host profile while P066 audits and
+      repairs the monolithic bats portfolio. It never runs bats_all and is
+      never equivalent to full/release. Use only after affected suites have
+      separate terminal evidence, then cross GATES:DONE with an explicit
+      audited --force reason naming bats_all_quarantine.
+    include:
+      - tier_lint
+      - lint_gate_names
+      - bats_fsm
+      - plan_diff
+      - docs_updated
+  release_quarantine:
+    reason: >-
+      P068 Step 2 — THE plan-final substitute for `release` while a release
+      gate carries a declared `quarantine:` block (at v2.62.1 that was
+      `bats_all`, PM 2026-07-23, tracked by P066; no gate carries an active
+      block today). It is `release` MINUS the quarantined gate and NOTHING
+      else, and `aid-plan-fsm.sh plan-finalize --stage gates` asserts exactly
+      that SET EQUALITY before it will run.
+      P081 Step 6 (2026-08-10) — re-pointed with `release`, and the latent
+      inconsistency it had carried is closed at the same time. `release` is now
+      {bats_all, plan_diff, docs_updated}, so this profile is {plan_diff,
+      docs_updated}: `bats_all` is the ONLY test gate `release` has left, which
+      means a quarantined `bats_all` leaves this substitute with no test gate
+      by construction. That is not an oversight to paper over with `bats_fsm`
+      — but that reasoning was written against a `bats_all` that still ran
+      test-aid-fsm.bats. It does not: that suite is t2 and `bats_all` is the
+      T0+T1 selection. So (2026-08-11) `release` gains `bats_fsm` and this
+      profile gains it too, which both restores FSM coverage and keeps the
+      set equality exact — this profile is still `release` MINUS `bats_all`. The compensation is the one this profile already
+      names: the quarantined gate is never green, it is reported
+      profile_excluded/waived, and it must carry its own marked
+      targeted-substitute receipt in the report's `quarantine_substitutes[]`.
+    include:
+      - tier_lint
+      - lint_gate_names
+      - bats_fsm
+      - plan_diff
+      - docs_updated
+  p064-closure:
+    reason: >-
+      P064 E-064-1_2 closure run (PM disposition 2026-07-22). Re-seals gate
+      evidence at the post-fix HEAD to clear C3 attempt-03 finding
+      c3-E-064-1_2-0 (stale gates_report head_sha). Includes both required
+      gates (bats_fsm, bats_all) plus the plan-required docs_updated and the
+      advisory targeted_tests selector. Excludes shell_pipeline_smoke and
+      plan_diff (both exit 124 timeout_policy_block, required=false, 34 min
+      of wall clock with no verdict — P071 E-071-1_1 Step 1 attribution note:
+      this 34 min figure is the COMBINED duration of both gates running in
+      that closure attempt; it was not possible to split it per-gate because
+      .aid-o/ is git-ignored and no commit history exists to trace it further,
+      so plan_diff.timeout_seconds above was set from that gate's own
+      historical baseline instead, not from this incident) and
+      ui_calibration_result / ui_calibration_signoff (UI gates; this EPIC
+      touches only bash scripts, schemas and docs — no UI surface exists to
+      calibrate).
+    include:
+      - bats_fsm
+      - bats_all
+      - targeted_tests
+      - docs_updated

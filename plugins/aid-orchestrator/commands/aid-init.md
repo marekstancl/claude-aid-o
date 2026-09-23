@@ -220,88 +220,81 @@ A `notifications.telegram` block is appended with its one read key, `alert_on_co
 ### Existing Project — gate_profiles Upgrade
 
 Non-destructive, PM-confirmed (decision D9). `.aid-o/config/execution.yaml` is **project
-configuration**, not global magic re-applied on every plugin update (D9). A project that already has its own `execution.yaml` — possibly hand-edited by
-its PM (this repo's own `.aid-o/config/execution.yaml` is exactly this case:
-`generated_by: manual override for E-035-1_2`) — MUST NEVER have that file silently rewritten by a
-later `/aid-init` re-run, even to add a feature as small as the `gate_profile_defaults`/
-`gate_profiles` block from the "execution.yaml Generation" section above (new projects only get that
-block via the idempotent fresh-write path — see previous section — because there is no existing file
-to protect yet).
+configuration**, not global magic re-applied on every plugin update (D9). A project that already has
+its own `execution.yaml` — possibly hand-edited by its PM — MUST NEVER have that file silently
+rewritten by a later `/aid-init` re-run. Two upgrades exist for an existing file, and both write only
+after the PM has seen exactly what changes:
 
-When `.aid-o/config/execution.yaml` already exists, `/aid-init` runs this check on **every**
-re-run (not just the first time a PM upgrades) — a PM who declines once is free to accept later, and
-a PM who never wants it is never nagged into an unwanted write:
+**1. The dead-key upgrade (P097 Step 3).** Earlier composers wrote keys nothing reads any more:
+`required_when`, `needs_services`, `services`, `gate_profile_defaults`, `baseline*`,
+`runtime_baseline`, `quarantine`, an empty `quick` profile, and every `notifications.telegram.*`
+key except `alert_on_compliance_recovery`. The library's `upgrade` removes them, adds
+`default_profile: standard` when a profile table exists, and adds `when_paths` to the profile named
+`full` (the classifier's high-risk pattern list, so every run that resolved `full` before resolves
+`full` after). It never touches `gates.<id>.command` or a non-empty `include[]`; a key it does not
+know is left in place with a printed note. `/aid-init` runs it on **every** re-run when the file
+exists:
+
+```bash
+# Pseudocode
+upgrade="$AID_PLUGIN_PATH/scripts/lib/aid-init-execution-yaml.sh"
+if [[ -f .aid-o/config/execution.yaml ]]; then
+  bash "$upgrade" upgrade "$PWD"; rc=$?
+  case $rc in
+    0) log_info "[EXISTS] execution.yaml — nothing to upgrade" ;;
+    3) # the diff and its hash were printed — show them to the PM verbatim, then:
+       #   apply:   bash "$upgrade" upgrade "$PWD" --confirm-upgrade sha256:<hash from the output>
+       #   decline: nothing is written; /aid-init re-offers next time
+       ;;
+    2) # a choice the operator must make (no profile named standard → --default-profile <name>),
+       # or a file that does not parse — the message names the fix; nothing is written
+       ;;
+  esac
+fi
+```
+
+**Report shown to PM** (exit 3): the unified diff the command printed, its `diff_hash:` line, and
+the one-line notes under it (what was removed, what was added, a custom key left in place, a profile
+table not declared narrowest-first). Then the question: apply this exact diff? The PM answers by
+choosing; on yes, `/aid-init` re-runs the same command with `--confirm-upgrade <hash>`. The hash is
+bound to the file's current bytes and to the proposed result, so an edit between preview and confirm
+makes the hash stale: the command refuses (exit 2), writes nothing, and prints the current diff again.
+
+**2. The missing-table upgrade (P061 E1 Step 6).** A file with neither `gate_profile_defaults` nor
+`gate_profiles` is offered a `gate_profiles` block appended at the end of the file:
 
 ```bash
 # Pseudocode
 source "$AID_PLUGIN_PATH/scripts/lib/aid-init-execution-yaml.sh"
-if [[ -f .aid-o/config/execution.yaml ]]; then
-  if execution_yaml_has_gate_profiles .aid-o/config/execution.yaml; then
-    log_info "[EXISTS] gate_profiles — already present, nothing to upgrade"
-  else
-    mapfile -t stacks < <(detect_stacks "$PWD")
-    proposed_block="$(render_gate_profiles_block "${stacks[@]}")"
-    # ... present proposed_block to PM (see report format below), read Y/N ...
-    if [[ "$pm_confirmed" == "Y" ]]; then
-      append_gate_profiles_block .aid-o/config/execution.yaml "$proposed_block"
-      log_info "[UPGRADED] gate_profiles block added to .aid-o/config/execution.yaml"
-    else
-      log_info "[SKIPPED] gate_profiles upgrade declined — run /aid-init again anytime to re-offer"
-    fi
-  fi
+if [[ -f .aid-o/config/execution.yaml ]] && ! execution_yaml_has_gate_profiles .aid-o/config/execution.yaml; then
+  mapfile -t stacks < <(detect_stacks "$PWD")
+  proposed_block="$(render_gate_profiles_block "${stacks[@]}")"
+  # ... present proposed_block to PM, read Y/N ...
+  [[ "$pm_confirmed" == "Y" ]] && append_gate_profiles_block .aid-o/config/execution.yaml "$proposed_block"
 fi
 ```
 
-**Report shown to PM** (only when the file exists and is missing the block):
+**Rules (both upgrades):**
+- Default on no response: **N** — never silently write. There is no safe default *value* to guess for
+  a hand-maintained file.
+- The dead-key upgrade edits lines, never reserializes: a `yq` round-trip reflows comments and quoting
+  in every real project file, so the write is a line-exact removal and insertion whose only
+  differences are the ones in the printed diff. The missing-table upgrade appends and never reads
+  what is already there. Either way, every existing `gates:` `command:` value stays byte-identical.
+- If a `gate_profiles` table exists but declares no profile named `standard`, the dead-key upgrade
+  does not guess a default: it exits 2 naming the declared profiles and asks for
+  `--default-profile <name>`.
+- The missing-table block uses the **same derivation** the fresh-init composer uses
+  (`detect_stacks` + each stack fragment's own gate names, `defaults/execution-stacks/<stack>.yaml`).
 
-```
-gate_profiles upgrade available
-====================================
-.aid-o/config/execution.yaml exists but has no gate_profile_defaults/gate_profiles block.
-Detected stack(s): {stacks}
-
-Proposed block to ADD (nothing else in the file changes):
-
-gate_profile_defaults:
-  step: targeted
-  epic: full
-
-gate_profiles:
-  targeted:
-    include: [{targeted gate names}]
-  full:
-    include: [{full gate names}]
-
-This is an ADDITIVE change only — every existing `gates:` entry (including hand-edited `command:`
-values) and every other key in the file is left byte-identical. Add this block now? (Y/N)
-```
-
-**Rules:**
-- Default on no response: **N** — never silently write. Matches the Standards Selection /
-  Dispatch Mode Selection precedent elsewhere in this command of defaulting to the non-destructive
-  choice when the PM does not answer, except here "non-destructive" means "write nothing" rather
-  than "pick option A", because there is no safe default *value* to guess for a hand-maintained file.
-- If BOTH `gate_profile_defaults` and `gate_profiles` top-level keys are already present →
-  no-op. Nothing to upgrade, no report shown.
-- On confirm: the write is **additive-only** — append the two new top-level keys after the end of
-  the existing file content. The existing `gates:` mapping (and every other existing top-level key)
-  is never reparsed, reordered, reindented, or reserialized. This is deliberate: a full YAML
-  parse-and-rewrite round-trip risks reformatting a PM's hand-edited `command:` values (quoting
-  style, line wrapping) even when their *value* is preserved — append-only avoids touching those
-  bytes at all.
-- The proposed block uses the **same derivation** the fresh-init composer uses
-  (`detect_stacks` + each stack fragment's own gate names, `defaults/execution-stacks/<stack>.yaml`)
-  so an existing project and a brand-new project with the same detected stack(s) get an identical
-  `gate_profiles` shape — no separate/drifting logic path for the upgrade case.
-
-**Implementation:** `execution_yaml_has_gate_profiles`, `render_gate_profiles_block`, and
-`append_gate_profiles_block` live in `scripts/lib/aid-init-execution-yaml.sh` (P061 E1 Step 6).
-`render_gate_profiles_block` factors the block-rendering logic `compose_execution_yaml` uses
-(originally added inline in P061 E1 Step 5) out into a standalone function so both the fresh-init
-path and this upgrade path call the identical code — no drift between what a new project and an
-upgraded existing project get for the same detected stack(s). Bats coverage:
-`scripts/tests/bats/test-aid-init.bats` (byte-identical hand-edited-command preservation on
-confirm, no-write on decline, no-op when already present, refusal on a missing file).
+**Implementation:** `execution_yaml_upgrade`, `execution_yaml_default_when_paths`,
+`execution_yaml_has_gate_profiles`, `render_gate_profiles_block` and `append_gate_profiles_block`
+live in `scripts/lib/aid-init-execution-yaml.sh`; `bash …/lib/aid-init-execution-yaml.sh upgrade`
+is the same library run as a command. Bats coverage: `scripts/tests/bats/test-aid-init.bats`
+(exit codes 3 → 0 with the hash, stale hash, nothing to upgrade, no `standard`, unparseable file;
+plus the P061 append cases) and `scripts/tests/bats/test-init-gate-profiles.bats` (the upgrade over
+the eight project fixtures under `scripts/tests/fixtures/gates/projects/` changes nothing but the
+named keys; the added `when_paths` agree with the old classifier on ten changed-path sets).
 
 ### Standards Selection
 
@@ -788,11 +781,11 @@ Safe to run multiple times:
   `work/active.md.pre-index`.
 - **New v2 dirs** → created if missing
 - **Re-detection** → re-scans stack, shows proposed changes, asks PM before overwriting
-- **Existing `execution.yaml` gate_profiles upgrade (P061 D9)** → the one narrow exception to
-  "not overwritten": if the file exists but lacks the `gate_profile_defaults`/`gate_profiles`
-  block, `/aid-init` offers to *append* (never rewrite) it after explicit PM confirmation — see
-  "Existing Project — gate_profiles Upgrade" above. Every existing byte, including hand-edited
-  `command:` values, is preserved untouched.
+- **Existing `execution.yaml` upgrades (P061 D9, P097)** → the one narrow exception to
+  "not overwritten": `/aid-init` offers the hash-confirmed dead-key upgrade, and — when the file
+  lacks a `gate_profiles` table — the appended block, each only after the PM has seen the exact
+  diff — see "Existing Project — gate_profiles Upgrade" above. Every hand-edited `command:` value
+  is preserved untouched.
 
 **Mechanical anchor:** `scripts/tests/test-init-idempotency.sh` pins the *scripted substrate* of
 this contract — the base manifest above, a byte-identical re-run, the never-overwritten existing

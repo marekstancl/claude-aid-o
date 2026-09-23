@@ -513,27 +513,20 @@ YAML
   [ "$status" -eq 0 ]
   # Must finish well under shell_pipeline_smoke's 5s timeout — proves it was
   # never dispatched to run_gate at all (not just that its row got discarded).
-  # Threshold widened 3->5s (P063 Step 2): every included gate now also pays
-  # a per-attempt gate_baseline_update write + a gate_baseline_report_json
-  # read (yq/jq subprocess overhead, ~0.3-0.7s/gate on this fixture's 2
-  # included gates) — a real, expected fixed cost of this EPIC, not a
-  # regression this test is meant to catch. The distinguishing signal stays
-  # intact: if shell_pipeline_smoke actually ran, elapsed would be >=5s (its
-  # own sleep+timeout) plus this same per-gate overhead, i.e. comfortably
-  # over this threshold either way.
   [ "$elapsed" -lt 5 ]
-  run jq -re '.gates.shell_pipeline_smoke.result' "$REPORT"
-  [ "$output" == "profile_excluded" ]
+  run jq -re '.gates.shell_pipeline_smoke.status' "$REPORT"
+  [ "$output" == "skip" ]
   run jq -re '.gates.shell_pipeline_smoke.reason' "$REPORT"
-  [ "$output" == "profile_excluded" ]
+  [ "$output" == "not_in_profile" ]
   run jq -e '.excluded_gates == ["shell_pipeline_smoke"]' "$REPORT"
   [ "$status" -eq 0 ]
   run jq -re '.profile' "$REPORT"
   [ "$output" == "standard" ]
   run jq -re '.profile_source' "$REPORT"
-  [ "$output" == "cli_flag" ]
-  run jq -re '.profile_reason' "$REPORT"
-  [ -n "$output" ]
+  [ "$output" == "caller" ]
+  # P097 Step 4: the declared order travels with the report.
+  run jq -ce '.profile_table' "$REPORT"
+  [ "$output" == '["standard"]' ]
   # Included gates still ran and passed
   run jq -re '.gates.plan_diff.result' "$REPORT"
   [ "$output" == "pass" ]
@@ -579,8 +572,8 @@ gate_profiles:
 YAML
   run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile targeted
   [ "$status" -eq 0 ]
-  run jq -re '.gates.beta.result' "$REPORT"
-  [ "$output" == "profile_excluded" ]
+  run jq -re '.gates.beta.status + "/" + .gates.beta.reason' "$REPORT"
+  [ "$output" == "skip/not_in_profile" ]
   run jq -e '.excluded_gates == ["beta"]' "$REPORT"
   [ "$status" -eq 0 ]
   run jq -re '.overall' "$REPORT"
@@ -590,9 +583,39 @@ YAML
 @test "run-all profile d: unknown --profile name fails loud before running any gate" {
   # setup()'s EXEC_YAML (alpha/beta) has no gate_profiles block at all.
   run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile does-not-exist
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 2 ]
   [[ "$output" == *"unknown gate profile"* ]]
+  [[ "$output" == *"declared profiles"* ]]
   # Report must not have been written — validation happens before any gate runs
+  [ ! -f "$REPORT" ]
+}
+
+@test "run-all profile d2 (P097 Step 4): a declared profile with an empty include[] or only optional gates exits 2, runs nothing, names the declared profiles" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  beta:
+    command: "exit 0"
+    required: false
+default_profile: standard
+gate_profiles:
+  quick:
+    include: []
+  optional_only:
+    include: [beta]
+  standard:
+    include: [alpha]
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile quick
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"no required gate"* ]]
+  [[ "$output" == *'["quick","optional_only","standard"]'* ]]
+  [ ! -f "$REPORT" ]
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile optional_only
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"beta"* ]]
   [ ! -f "$REPORT" ]
 }
 
@@ -847,128 +870,114 @@ YAML
   [ "$output" == "pass" ]
   run jq -e '.excluded_gates == []' "$REPORT"
   [ "$status" -eq 0 ]
-  run jq -re '.profile' "$REPORT"
+  run jq -r '.profile' "$REPORT"
   [ "$output" == "null" ]
   run jq -re '.profile_source' "$REPORT"
-  [ "$output" == "null" ]
-  run jq -re '.profile_reason' "$REPORT"
-  [ "$output" == "null" ]
+  [ "$output" == "none" ]
+  run jq -ce '.profile_table' "$REPORT"
+  [ "$output" == '["standard"]' ]
 }
 
-# ─── P061 E2 Step 2 ("Step 8") — FSM risk-upgrade enforcement (D4) ───────────
-# The active gate profile ACTUALLY recorded on gates_report.json.profile must
-# be >= the risk-required profile computed by the Step 1 shared resolver
-# (aid-gate-profile.sh's gate_profile_resolve) against this run's actual
-# base_commit..HEAD diff — the GATES:DONE precondition VERIFIES and ENFORCES
-# this floor (D4), it does not just let the resolver's own earlier suggestion
-# go unchecked (AID-v3-principles.md §1: detector without enforcement is
-# decoration).
+# ─── P097 Step 4 — the GATES:DONE gate-profile floor ─────────────────────────
+# The profile ACTUALLY recorded on gates_report.json.profile must be no
+# narrower (by declaration index in the project's own gate_profiles table)
+# than the one lib/aid-gate-profile-select.sh resolves for this run's
+# base_commit..HEAD diff: the last declared profile whose when_paths matches,
+# else default_profile. The precondition VERIFIES and ENFORCES that floor; a
+# report that names no profile while the table exists is refused too.
 
-@test "GATES:DONE risk-upgrade (CHECKPOINT 2): diff touches aid-fsm.sh -> resolver requires 'full'; active profile 'quick' -> precondition FAILS with risk_profile_below_required" {
-  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
-  setup_test_evidence_dir E-X R-1
-  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
-  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+# _seed_high_risk_diff — commit a change to aid-fsm.sh; echoes the base sha.
+_seed_high_risk_diff() {
   local base; base=$(git rev-parse HEAD)
-
-  # Simulate this EPIC's own diff touching aid-fsm.sh (high-risk path per
-  # aid-gate-profile.sh's classification rules) between base_commit and HEAD.
   mkdir -p plugins/aid-orchestrator/scripts
   echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
   git add plugins/aid-orchestrator/scripts/aid-fsm.sh
   git commit -q -m "touch aid-fsm.sh"
+  echo "$base"
+}
+
+_write_table_yaml() {  # <file> — standard (default) < full (when_paths on aid-fsm.sh)
+  cat > "$1" <<'YAML'
+gates:
+  always_pass:
+    command: "true"
+    required: true
+  extra:
+    command: "true"
+    required: true
+default_profile: standard
+gate_profiles:
+  standard:
+    include: [always_pass]
+  full:
+    include: [always_pass, extra]
+    when_paths: ["*/aid-fsm.sh"]
+YAML
+}
+
+@test "GATES:DONE floor: diff touches aid-fsm.sh -> resolver requires 'full'; a manual re-run recorded 'standard' -> precondition FAILS with risk_profile_below_required" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  local base; base="$(_seed_high_risk_diff)"
 
   seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
   echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
 
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
-  cat > "$exec_yaml" <<'YAML'
-gates:
-  always_pass:
-    command: "true"
-    required: true
-gate_profiles:
-  quick:
-    include: []
-  full:
-    include: [always_pass]
-YAML
+  _write_table_yaml "$exec_yaml"
 
-  # Active profile recorded is 'quick' — too weak for a high-risk diff.
   run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
-    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile quick
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile standard
   [ "$status" -eq 0 ]
   run jq -re '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
-  [ "$output" == "quick" ]
+  [ "$output" == "standard" ]
   run jq -re '.overall' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$output" == "pass" ]
 
-  # GATES→DONE must refuse — the risk-required profile for this diff is 'full'.
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass   # P094: GATES→DONE reads the cp3 round at HEAD
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -ne 0 ]
   [[ "$output" == *"risk_profile_below_required"* ]]
-  [[ "$output" == *"'quick'"* ]]
+  [[ "$output" == *"'standard'"* ]]
   [[ "$output" == *"'full'"* ]]
-  # State never advanced past GATES
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
-  # Reason surfaced on the timeline via cmd_transition's generic precondition logger
   run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
   [ "$output" == "risk_profile_below_required" ]
 }
 
-@test "GATES:DONE risk-upgrade: diff touches aid-fsm.sh -> active profile 'full' (== required) -> transition proceeds normally" {
+@test "GATES:DONE floor: diff touches aid-fsm.sh -> recorded 'full' (== required) -> transition proceeds normally" {
   [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
   setup_test_evidence_dir E-X R-1
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
-  local base; base=$(git rev-parse HEAD)
-
-  mkdir -p plugins/aid-orchestrator/scripts
-  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git commit -q -m "touch aid-fsm.sh"
+  local base; base="$(_seed_high_risk_diff)"
 
   seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
   echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
 
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
-  cat > "$exec_yaml" <<'YAML'
-gates:
-  always_pass:
-    command: "true"
-    required: true
-gate_profiles:
-  full:
-    include: [always_pass]
-YAML
+  _write_table_yaml "$exec_yaml"
 
   run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
     --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile full
   [ "$status" -eq 0 ]
 
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass   # P094: GATES→DONE reads the cp3 round at HEAD
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -eq 0 ]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
 }
 
-@test "GATES:DONE risk-upgrade: no --profile used (legacy, D9) -> profile field absent -> no-op even for a high-risk diff" {
+@test "GATES:DONE floor: no gate_profiles in execution.yaml -> no --profile, every gate has a row -> transition proceeds (profile_source none)" {
   [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
   setup_test_evidence_dir E-X R-1
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
-  local base; base=$(git rev-parse HEAD)
-
-  # High-risk diff (aid-fsm.sh touched) but the run never used --profile at all
-  # (execution.yaml has no gate_profiles block) — D9: behaves exactly like
-  # today, every defined gate already ran, nothing weaker to enforce against.
-  mkdir -p plugins/aid-orchestrator/scripts
-  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git commit -q -m "touch aid-fsm.sh"
+  local base; base="$(_seed_high_risk_diff)"
 
   seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
   echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
@@ -980,63 +989,69 @@ YAML
   run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
     --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$status" -eq 0 ]
-  run jq -re '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  run jq -r '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$output" == "null" ]
+  run jq -r '.profile_source' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "none" ]
 
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass   # P094: GATES→DONE reads the cp3 round at HEAD
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -eq 0 ]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
 }
 
-@test "advance-to-gates auto-resolve (FSM e2e): diff touches aid-fsm.sh + gate_profiles.full defined -> runner invoked with --profile full automatically (no explicit --profile from caller)" {
+@test "advance-to-gates (FSM e2e): diff touches aid-fsm.sh + full declares when_paths -> runner invoked with --profile full automatically; profile_table recorded" {
   [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
   setup_test_evidence_dir E-X R-1
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
-  local base; base=$(git rev-parse HEAD)
-
-  mkdir -p plugins/aid-orchestrator/scripts
-  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git commit -q -m "touch aid-fsm.sh"
+  local base; base="$(_seed_high_risk_diff)"
 
   seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
   echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
 
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
-  cat > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" <<'YAML'
-gates:
-  always_pass:
-    command: "true"
-    required: true
-gate_profiles:
-  full:
-    include: [always_pass]
-YAML
+  _write_table_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -eq 0 ]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
   run jq -re '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$output" == "full" ]
+  run jq -ce '.profile_table' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == '["standard","full"]' ]
   assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "gate_profile_selected"
 }
 
-@test "advance-to-gates auto-resolve (legacy regression, D9): diff touches aid-fsm.sh but gate_profiles is NOT defined -> --profile never passed, all gates run unchanged" {
+@test "advance-to-gates (FSM e2e): ordinary diff -> default_profile standard is passed" {
   [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
   setup_test_evidence_dir E-X R-1
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
   local base; base=$(git rev-parse HEAD)
+  echo "ordinary" > ordinary.txt; git add ordinary.txt; git commit -q -m "ordinary change"
 
-  # Same high-risk diff as above, but this project's execution.yaml has never
-  # opted into gate_profiles at all — the overwhelming majority case today.
-  mkdir -p plugins/aid-orchestrator/scripts
-  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git commit -q -m "touch aid-fsm.sh"
+  seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  _write_table_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  run jq -re '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "standard" ]
+  run jq -re '.gates.extra.reason' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "not_in_profile" ]
+}
+
+@test "advance-to-gates (legacy regression): gate_profiles NOT defined -> --profile never passed, all gates run unchanged" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  local base; base="$(_seed_high_risk_diff)"
 
   seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
   echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
@@ -1048,68 +1063,86 @@ YAML
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -eq 0 ]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
-  run jq -re '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  run jq -r '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$output" == "null" ]
   assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "gate_profile_auto_resolve_skipped"
 }
 
-@test "GATES:DONE risk-upgrade regression: unrecognized/custom profile name 'ci-fast' on high-risk diff (aid-fsm.sh) -> precondition FAILS with risk_profile_unresolvable" {
-  # E-061-2_6 Step 2 fix: when an active profile name is not in the canonical 5
-  # (quick/targeted/standard/full/release) and the required profile is high-risk
-  # (> quick), the precondition must FAIL, not silently pass.
+@test "advance-to-gates: gate_profiles without default_profile -> exit 2 naming the upgrade command, no gate runs" {
   [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
   setup_test_evidence_dir E-X R-1
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
-  local base; base=$(git rev-parse HEAD)
+  local base; base="$(_seed_high_risk_diff)"
+  seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  _write_table_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  yq -i 'del(.default_profile)' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
-  # Simulate high-risk diff touching aid-fsm.sh
-  mkdir -p plugins/aid-orchestrator/scripts
-  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
-  git commit -q -m "touch aid-fsm.sh"
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"aid-init-execution-yaml.sh upgrade"* ]]
+  [ ! -f "$TEST_EVIDENCE_DIR/gates/gates_report.json" ]
+}
+
+@test "GATES:DONE floor: a report with NO profile while gate_profiles is declared -> precondition FAILS with risk_profile_unresolvable" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  local base; base="$(_seed_high_risk_diff)"
 
   seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
   echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
 
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
-  cat > "$exec_yaml" <<'YAML'
-gates:
-  always_pass:
-    command: "true"
-    required: true
-gate_profiles:
-  ci-fast:
-    include: []
-  full:
-    include: [always_pass]
-YAML
+  _write_table_yaml "$exec_yaml"
 
-  # Active profile is the custom 'ci-fast' (not in canonical 5 ranks)
-  # which excludes all gates, so overall=pass even though nothing ran.
+  # A manual run-all without --profile: every gate ran, but the report names
+  # no profile — the case that passed silently before P097 Step 4.
   run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
-    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile ci-fast
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$status" -eq 0 ]
-  run jq -re '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
-  [ "$output" == "ci-fast" ]
+  run jq -r '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "null" ]
   run jq -re '.overall' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$output" == "pass" ]
 
-  # GATES→DONE must FAIL — the required profile for this diff is 'full' (high-risk),
-  # but the active profile 'ci-fast' is unrecognized (not in the rank table), so we
-  # cannot verify it meets the requirement. This must be fail-closed, not silent pass.
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass   # P094: GATES→DONE reads the cp3 round at HEAD
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -ne 0 ]
   [[ "$output" == *"risk_profile_unresolvable"* ]]
-  [[ "$output" == *"ci-fast"* ]]
-  [[ "$output" == *"full"* ]]
-  # State never advanced past GATES
+  [[ "$output" == *"names no profile"* ]]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
-  # Reason surfaced on the timeline via cmd_transition's generic precondition logger
   run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
   [ "$output" == "risk_profile_unresolvable" ]
+}
+
+@test "GATES:DONE floor: the table was reordered after the run -> precondition FAILS with profile_table_changed" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  local base; base="$(_seed_high_risk_diff)"
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  _write_table_yaml "$exec_yaml"
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile full
+  [ "$status" -eq 0 ]
+  # Reorder: full first, standard second.
+  yq -i '.gate_profiles = {"full": .gate_profiles.full, "standard": .gate_profiles.standard}' "$exec_yaml"
+  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"profile_table_changed"* ]]
+  run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  [ "$output" == "profile_table_changed" ]
 }
 
 # ─── P061 E-061-2_6: Regression test for yq expression injection (security fix) ──
@@ -1167,18 +1200,7 @@ YAML
   [[ "$output" == *"unknown gate profile"* ]]
 }
 
-# ─── P063 Step 2 (AC8): gates_report.json additive-only fields ─────────────
-# gate_baseline_update (per-attempt) + the runtime_baseline merge into each
-# gate's aggregate row must be PURELY ADDITIVE: every key present in a
-# PRE-P063-style report (the shape shipped through P061 EPIC 1/6, the last
-# version before this EPIC) stays present, unchanged in kind, in a POST-P063
-# report from the same gate run.
-#
-# TODO(Step 3): AC8's other half — "a policy-blocked required:true gate
-# produces overall==fail" — depends on Step 3's repeated-timeout FSM
-# precondition / policy-block mechanism, which does not exist yet as of this
-# step. That half is intentionally NOT tested here; add it once Step 3 lands
-# gate_baseline_mark_policy_block's wiring into a real fail-the-run path.
+# ─── Report shape: every long-standing key survives (was P063 AC8) ─────────
 @test "AC8: gates_report.json gains only additive fields — every pre-P063 top-level and per-gate key survives unchanged" {
   "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
   [ -f "$REPORT" ]
@@ -1193,7 +1215,7 @@ YAML
     | (["epic_id","run_id","overall","completed_at","gates","_generated_by",
       "_generated_at","_command_log","covered_paths","changed_paths_covered",
       "relevance","plan_gates_reconciled","revision","profile",
-      "profile_source","profile_reason","excluded_gates"]) as $pre
+      "profile_source","profile_table","excluded_gates"]) as $pre
     | all($pre[]; . as $k | $obj | has($k))
   ' "$REPORT"
   [ "$status" -eq 0 ]
@@ -1214,271 +1236,141 @@ YAML
   run jq -e '.gates.alpha.result == "pass" and (.gates.alpha.exit_code|type) == "number" and (.gates.alpha.duration_ms|type) == "number" and (.gates.alpha.attempts|type) == "number"' "$REPORT"
   [ "$status" -eq 0 ]
 
-  # The new ADDITIVE field: runtime_baseline, a well-formed object carrying
-  # gate_baseline_report_json's documented keys — additive alongside, never
-  # replacing, any pre-existing key above.
-  run jq -e '.gates.alpha | has("runtime_baseline") and (.runtime_baseline | type) == "object"' "$REPORT"
-  [ "$status" -eq 0 ]
-  run jq -e '
-    .gates.alpha.runtime_baseline as $rb
-    | (["samples_count","non_censored_samples_count","p95_ms",
-        "timeout_recommended_seconds","run_mode_recommended","data_sufficient",
-        "last_attempt_result","policy_result","retryable","operator_action"]) as $pre
-    | all($pre[]; . as $k | $rb | has($k))
-  ' "$REPORT"
-  [ "$status" -eq 0 ]
-
-  # And it reflects a REAL sample from this very run (not a stub/empty
-  # placeholder) — proves the per-attempt gate_baseline_update wiring
-  # actually fired, not just that the merge key exists.
-  run jq -e '.gates.alpha.runtime_baseline.samples_count >= 1 and .gates.alpha.runtime_baseline.last_attempt_result == "pass"' "$REPORT"
+  # P097 Step 5: no runtime baseline rides on a row any more.
+  run jq -e '.gates.alpha | has("runtime_baseline") | not' "$REPORT"
   [ "$status" -eq 0 ]
 }
 
-# ─── P063 Step 3: repeated-timeout policy block (AC6, AC10) ────────────────
-# LIB seeds the baseline file directly (CLI dispatch mode) so a 3-consecutive-
-# timeout streak can be assembled WITHOUT actually running 3 real gate
-# attempts — matches how the streak really accumulates in production (across
-# separate runs). command_template passed to `LIB update` must be byte-
-# identical to the gate's `command:` in execution.yaml, otherwise the
-# fingerprint differs and gate_baseline_update starts a fresh series instead
-# of extending the seeded one.
+# ─── P097 Step 5: fixed timeouts — the deadline is timeout_seconds, nothing else ──
 
-@test "AC6a: 3 consecutive timeouts at the SAME timeout_seconds as current config -> blocks instead of a further attempt" {
-  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-
-  cat > "$EXEC_YAML" <<'YAML'
+@test "P097 Step 5 (AC2): a foreground gate past timeout_seconds: 2 is a job_timeout row in under 4 s with no surviving child" {
+  # The sleep's own argument is the marker: "5.<random digits>" seconds is a
+  # valid interval and unique enough for pgrep -f to find this process by it.
+  local marker="5.${RANDOM}${RANDOM}${RANDOM}"
+  cat > "$EXEC_YAML" <<YAML
 gates:
-  flaky_gate:
-    command: "sleep 2"
-    required: true
-    timeout_seconds: 1
-    max_retries: 2
-YAML
-  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
-  [ -f "$REPORT" ]
-
-  # Blocked on the FIRST attempt of this run (no retry consumed) — proves the
-  # loop stopped instead of burning attempt 2/3.
-  run jq -re '.gates.flaky_gate.attempts' "$REPORT"
-  [ "$output" == "1" ]
-  run jq -re '.gates.flaky_gate.result' "$REPORT"
-  [ "$output" == "fail" ]
-  run jq -re '.gates.flaky_gate.reason' "$REPORT"
-  [ "$output" == "timeout_policy_block" ]
-  run jq -re '.gates.flaky_gate.recommendation' "$REPORT"
-  [ "$output" == "increase_timeout_or_background" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$REPORT"
-  [ "$output" == "false" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
-  [ "$output" == "timeout_policy_block" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.operator_action' "$REPORT"
-  [ "$output" == "increase_timeout_or_background" ]
-  # required:true gate that fails still flips overall (pre-existing semantics,
-  # unbroken by this new code path).
-  run jq -re '.overall' "$REPORT"
-  [ "$output" == "fail" ]
-}
-
-@test "AC6b: 3 consecutive timeouts recorded at a LOWER timeout_seconds than the current (raised) config -> does NOT block; real attempts continue under the new timeout" {
-  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
-  bash "$LIB" update flaky_gate "sleep 3" "sleep 3" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 3" "sleep 3" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 3" "sleep 3" 124 1000 1
-
-  # Current config RAISES timeout_seconds to 2 (was 1 for the seeded samples).
-  # The gate command still times out at 2s (sleep 3s > 2s) — this is a REAL
-  # attempt, not an auto-pass, so the block-check's own timeout comparison
-  # (not just "did it pass") is what must produce "no-block" here.
-  cat > "$EXEC_YAML" <<'YAML'
-gates:
-  flaky_gate:
-    command: "sleep 3"
+  slow:
+    command: "sleep ${marker}"
     required: true
     timeout_seconds: 2
-    max_retries: 1
-YAML
-  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
-  [ -f "$REPORT" ]
-
-  # NOT blocked: the run exhausted its retries normally (max_retries:1 -> 2
-  # real executions) instead of being short-circuited after 1. `attempts`
-  # reports the loop counter's POST-loop value (a pre-existing, off-by-one
-  # bash `for` artifact unrelated to this step: it overshoots by 1 past the
-  # last real execution whenever the loop exhausts without `break`) — 3 here
-  # confirms both real attempts ran to exhaustion, not that a 3rd fired.
-  run jq -re '.gates.flaky_gate.attempts' "$REPORT"
-  [ "$output" == "3" ]
-  run jq -re '.gates.flaky_gate.result' "$REPORT"
-  [ "$output" == "fail" ]
-  # No policy-block fields — this is an ordinary exhausted-retries timeout fail.
-  run jq -e '.gates.flaky_gate | has("reason") | not' "$REPORT"
-  [ "$status" -eq 0 ]
-  run jq -e '.gates.flaky_gate | has("recommendation") | not' "$REPORT"
-  [ "$status" -eq 0 ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$REPORT"
-  [ "$output" == "true" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
-  [ "$output" == "none" ]
-}
-
-@test "AC10: a gate whose CURRENT attempt just passed is never blocked by an unrelated historical timeout streak" {
-  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
-  bash "$LIB" update flaky_gate "exit 0" "exit 0" 124 1000 60
-  bash "$LIB" update flaky_gate "exit 0" "exit 0" 124 1000 60
-  bash "$LIB" update flaky_gate "exit 0" "exit 0" 124 1000 60
-
-  cat > "$EXEC_YAML" <<'YAML'
-gates:
-  flaky_gate:
-    command: "exit 0"
-    required: true
-    timeout_seconds: 60
-    max_retries: 2
-YAML
-  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
-  [ "$status" -eq 0 ]
-  [ -f "$REPORT" ]
-
-  run jq -re '.gates.flaky_gate.result' "$REPORT"
-  [ "$output" == "pass" ]
-  run jq -re '.gates.flaky_gate.attempts' "$REPORT"
-  [ "$output" == "1" ]
-  run jq -e '.gates.flaky_gate | has("reason") | not' "$REPORT"
-  [ "$status" -eq 0 ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
-  [ "$output" == "none" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$REPORT"
-  [ "$output" == "true" ]
-  run jq -re '.overall' "$REPORT"
-  [ "$output" == "pass" ]
-}
-
-# ─── E-063-1_1 REOPEN (PM finding, HIGH) — real policy block must clear ─────
-# AC10 above seeds raw samples via `LIB update` but never calls
-# `LIB mark-policy-block`, so it never actually exercised the bug: a gate
-# whose policy_result/retryable were genuinely flipped to an active block
-# (via gate_baseline_mark_policy_block, the real code path aid-run-gates.sh
-# Step 3 uses) NEVER cleared again, even once the gate itself recovered.
-# These 3 tests establish a REAL block first, then prove it clears exactly
-# where the PM's remediation instruction requires: a later passing attempt
-# (while a DIFFERENT gate's own unrelated failure stays correctly reported,
-# unaffected), a command_template edit, and a raised timeout_seconds.
-
-@test "E-063-1_1 reopen: a gate previously policy-blocked then later PASSING clears retryable, while a DIFFERENT currently-failing gate is unaffected" {
-  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" mark-policy-block flaky_gate "increase_timeout_or_background"
-
-  # Confirm the block is REAL before proceeding (not just a raw sample seed).
-  run bash "$LIB" report-json flaky_gate
-  [ "$(echo "$output" | jq -r '.retryable')" == "false" ]
-  [ "$(echo "$output" | jq -r '.policy_result')" == "timeout_policy_block" ]
-
-  # A LATER gates run: flaky_gate now passes quickly; a DIFFERENT gate,
-  # other_gate, fails for a completely unrelated reason. Under the pre-fix
-  # code, flaky_gate's stale retryable:false would still be carried forward
-  # here even though this run's own attempt for it just passed.
-  cat > "$EXEC_YAML" <<'YAML'
-gates:
-  flaky_gate:
-    command: "exit 0"
-    required: true
-    timeout_seconds: 5
     max_retries: 0
-  other_gate:
+YAML
+  local start_ms end_ms
+  start_ms=$(date +%s%3N)
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  end_ms=$(date +%s%3N)
+  [ "$status" -ne 0 ]
+  # The whole run (about 1.8 s of runner overhead around the gate) ends before
+  # the 5 s sleep could have: the deadline cut it, nothing waited it out.
+  [ $((end_ms - start_ms)) -lt 5000 ]
+  run jq -r '[.gates.slow.status, .gates.slow.reason, (.gates.slow.exit_code|tostring)] | join("|")' "$REPORT"
+  [ "$output" = "fail|job_timeout|124" ]
+  # The gate itself: job_timeout in under 4 s.
+  run jq -e '.gates.slow.duration_ms < 4000' "$REPORT"
+  [ "$status" -eq 0 ]
+  run jq -r '.overall' "$REPORT"
+  [ "$output" = "fail" ]
+  # pgrep guard: the sleep the gate forked is gone with the gate. The guard is
+  # not vacuous: the same pattern finds a live sleep started the same way.
+  run pgrep -f "sleep ${marker}"
+  [ "$status" -ne 0 ]
+  sleep "${marker}" &
+  local probe=$!
+  run pgrep -f "sleep ${marker}"
+  [ "$status" -eq 0 ]
+  kill "$probe" 2>/dev/null; wait "$probe" 2>/dev/null || true
+}
+
+@test "P097 Step 5: timeout_seconds absent -> the template default 60 (a 1 s gate passes under it)" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  quick:
+    command: "sleep 1"
+    required: true
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$status" -eq 0 ]
+  run jq -r '.gates.quick.reason' "$REPORT"
+  [ "$output" = "exit_0" ]
+}
+
+@test "P097 Step 5: non-integer or <= 0 timeout_seconds -> exit 2 naming the gate, before any gate runs" {
+  local t
+  for t in "abc" "0" "-5" "1.5"; do
+    cat > "$EXEC_YAML" <<YAML
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  broken:
+    command: "echo ran > '$TEST_TMPDIR/ran-$t'"
+    required: true
+    timeout_seconds: $t
+YAML
+    run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"gate 'broken' has invalid timeout_seconds: '$t'"* ]]
+    [ ! -f "$TEST_TMPDIR/ran-$t" ]
+    [ ! -f "$REPORT" ]
+  done
+}
+
+# ─── P097 Step 6: removed keys are refused with the upgrade command, never ignored ──
+
+@test "P097 Step 6: required_when, needs_services, services: and gate_profile_defaults -> exit 2 naming key, gate and the upgrade command, before any gate runs" {
+  local label yaml
+  for label in required_when needs_services services services_empty gate_profile_defaults; do
+    case "$label" in
+      required_when)        yaml=$'gates:\n  broken:\n    command: "echo ran > ran"\n    required_when: always' ;;
+      needs_services)       yaml=$'gates:\n  broken:\n    command: "echo ran > ran"\n    needs_services: [api]' ;;
+      services)             yaml=$'services:\n  api:\n    start_cmd: "sleep 1"\n    probe_cmd: "true"\n    startup_deadline_seconds: 5\ngates:\n  alpha:\n    command: "echo ran > ran"\n    required: true' ;;
+      services_empty)       yaml=$'services: {}\ngates:\n  alpha:\n    command: "echo ran > ran"\n    required: true' ;;
+      gate_profile_defaults) yaml=$'gate_profile_defaults:\n  step: fast\ngates:\n  alpha:\n    command: "echo ran > ran"\n    required: true' ;;
+    esac
+    printf '%s\n' "$yaml" > "$EXEC_YAML"
+    rm -f "$TEST_PROJECT/ran" "$REPORT"
+    run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+    [ "$status" -eq 2 ] || { echo "$label: rc=$status $output"; false; }
+    [[ "$output" == *"carries configuration this runner no longer reads"* ]] || { echo "$label: $output"; false; }
+    case "$label" in
+      required_when|needs_services) [[ "$output" == *"${label} (gate broken)"* ]] || { echo "$label: $output"; false; } ;;
+      services_empty)               [[ "$output" == *"services (top level)"* ]] || { echo "$label: $output"; false; } ;;
+      *)                            [[ "$output" == *"${label} (top level)"* ]] || { echo "$label: $output"; false; } ;;
+    esac
+    [[ "$output" == *"aid-init-execution-yaml.sh upgrade <project root>"* ]] || { echo "$label: $output"; false; }
+    [ ! -f "$TEST_PROJECT/ran" ]
+    [ ! -f "$REPORT" ]
+  done
+}
+
+@test "P097 Step 6: required is explicit true|false or absent (legacy_default); a quoted value is refused" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
     command: "exit 1"
     required: true
-    timeout_seconds: 5
-    max_retries: 0
+  beta:
+    command: "exit 1"
+  gamma:
+    command: "exit 0"
+    required: false
 YAML
   run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
-  [ -f "$REPORT" ]
+  [ "$status" -ne 0 ]
+  [ "$(jq -r '[.gates.alpha, .gates.beta, .gates.gamma] | map("\(.required)/\(.required_source)") | join(" ")' "$REPORT")" = "true/explicit false/legacy_default false/explicit" ]
+  [ "$(jq -r '.overall' "$REPORT")" = "fail" ]
 
-  run jq -re '.gates.flaky_gate.result' "$REPORT"
-  [ "$output" == "pass" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$REPORT"
-  [ "$output" == "true" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
-  [ "$output" == "none" ]
-  run jq -e '.gates.flaky_gate | has("reason") | not' "$REPORT"
-  [ "$status" -eq 0 ]
-
-  # other_gate's own unrelated failure is still correctly reported — never
-  # masked, suppressed, or itself turned into a policy block by flaky_gate's
-  # unrelated history.
-  run jq -re '.gates.other_gate.result' "$REPORT"
-  [ "$output" == "fail" ]
-  run jq -re '.gates.other_gate.runtime_baseline.policy_result' "$REPORT"
-  [ "$output" == "none" ]
-  run jq -re '.overall' "$REPORT"
-  [ "$output" == "fail" ]  # other_gate's real, unrelated failure still flips overall
-}
-
-@test "E-063-1_1 reopen: command_template edit on a previously policy-blocked gate clears the block" {
-  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" mark-policy-block flaky_gate "increase_timeout_or_background"
-
-  run bash "$LIB" report-json flaky_gate
-  [ "$(echo "$output" | jq -r '.retryable')" == "false" ]
-
-  # SAME gate name, EDITED command (fingerprint reset).
   cat > "$EXEC_YAML" <<'YAML'
 gates:
-  flaky_gate:
-    command: "exit 0 # edited"
-    required: true
-    timeout_seconds: 5
-    max_retries: 0
+  alpha:
+    command: "echo ran > ran"
+    required: "true"
 YAML
+  rm -f "$REPORT"
   run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
-  [ -f "$REPORT" ]
-
-  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$REPORT"
-  [ "$output" == "true" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
-  [ "$output" == "none" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.samples_count' "$REPORT"
-  [ "$output" == "1" ]  # series really reset, not blended with the old block's samples
-}
-
-@test "E-063-1_1 reopen: raising timeout_seconds on a previously policy-blocked gate clears the block" {
-  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
-  bash "$LIB" mark-policy-block flaky_gate "increase_timeout_or_background"
-
-  run bash "$LIB" report-json flaky_gate
-  [ "$(echo "$output" | jq -r '.retryable')" == "false" ]
-
-  # SAME command_template (no fingerprint reset) — timeout_seconds RAISED so
-  # the gate now genuinely finishes inside the new timeout.
-  cat > "$EXEC_YAML" <<'YAML'
-gates:
-  flaky_gate:
-    command: "sleep 2"
-    required: true
-    timeout_seconds: 5
-    max_retries: 0
-YAML
-  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
-  [ -f "$REPORT" ]
-
-  run jq -re '.gates.flaky_gate.result' "$REPORT"
-  [ "$output" == "pass" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$REPORT"
-  [ "$output" == "true" ]
-  run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
-  [ "$output" == "none" ]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate 'alpha': required must be an unquoted true or false"* ]]
+  [ ! -f "$TEST_PROJECT/ran" ]
 }
 
 # ─── P061 EPIC 3 Step 10 — targeted_tests gate wiring (execution.yaml) ───────
@@ -1748,11 +1640,220 @@ YAML
 
 @test "a gate that exits 0 over nothing is a vacuous pass, refused; a count of zero ERRORS is a result" {
   _g() { bash -c "source '$AID_PLUGIN_PATH/scripts/aid-run-gates.sh' >/dev/null 2>&1; set +e; run_gate g \"echo '$1'\" 5"; }
-  [ "$(_g 'Success: no issues found in 0 source files' | jq -r '.result + ":" + .reason')" = "fail:vacuous_pass" ]
-  [ "$(_g 'collected 0 items' | jq -r .result)" = "fail" ]
-  [ "$(_g '1..0' | jq -r .result)" = "fail" ]
-  [ "$(_g '0 errors, 12 files checked' | jq -r '.result + ":" + (.reason // "")')" = "pass:" ]
-  [ "$(_g '20 files checked, 0 files skipped' | jq -r .result)" = "pass" ]
+  [ "$(_g 'Success: no issues found in 0 source files' | jq -r '.status + ":" + .reason')" = "fail:vacuous_pass" ]
+  [ "$(_g 'collected 0 items' | jq -r .status)" = "fail" ]
+  [ "$(_g '1..0' | jq -r .status)" = "fail" ]
+  [ "$(_g '0 errors, 12 files checked' | jq -r '.status + ":" + .reason')" = "pass:exit_0" ]
+  [ "$(_g '20 files checked, 0 files skipped' | jq -r .status)" = "pass" ]
   # a fan-out gate: one empty sub-run among real ones is not vacuous
-  [ "$(_g 'no tests ran in a; 300 passed in b' | jq -r .result)" = "pass" ]
+  [ "$(_g 'no tests ran in a; 300 passed in b' | jq -r .status)" = "pass" ]
+}
+
+# ─── P097 Step 2 — the gate row as ONE contract (version 2) ─────────────────
+# defaults/schemas/gate-row.schema.json is the shape; lib/aid-gate-row.sh's
+# gate_row_normalize is the only reader; the runner refuses a reason outside
+# the closed vocabulary.
+
+_schema() { printf '%s' "$AID_PLUGIN_PATH/defaults/schemas/gate-row.schema.json"; }
+
+# The waiver and the row checkpoint both bind to HEAD, so these cases need a repo.
+_git_init_project() {
+  git init -q -b main "$TEST_PROJECT"
+  git -C "$TEST_PROJECT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+}
+
+# _validate_rows <report> — every gate row (not the `_`-prefixed run-level
+# records) validates against the schema; prints the offending key otherwise.
+_validate_rows() {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-test-adapter-contract.sh"
+  local key row
+  while IFS=$'\t' read -r key row; do
+    adapter_validate_schema "$(_schema)" "$row" || { echo "row '$key' does not validate: $row"; return 1; }
+  done < <(jq -r '.gates | to_entries[] | select(.key|startswith("_")|not) | "\(.key)\t\(.value|tojson)"' "$1")
+}
+
+@test "P097 rows: a run writes version-2 rows for pass, fail, vacuous, exit-2 skip, missing script, not-in-profile and waived — every one validates against gate-row.schema.json" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  beta:
+    command: "exit 3"
+    required: false
+  vac:
+    command: "echo 'collected 0 items'"
+    required: false
+  skipper:
+    command: "exit 2"
+    required: false
+    pass_criteria: "exit 2 means skip"
+  ghost:
+    command: "bash scripts/no-such-gate-script.sh"
+    required: false
+  waived_one:
+    command: "exit 5"
+    required: true
+  outside:
+    command: "exit 0"
+    required: false
+gate_profiles:
+  p:
+    include: [alpha, beta, vac, skipper, ghost, waived_one]
+YAML
+  _git_init_project
+  local ev="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-1"
+  "$AID_PLUGIN_PATH/scripts/aid-gate-waiver.sh" issue waived_one --evidence-dir "$ev" \
+    --execution-yaml "$EXEC_YAML" --epic E-X --run R-1 \
+    --reason "P097 Step 2 fixture: a waived required failure" >/dev/null
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile p
+  [ "$status" -eq 0 ]
+  run jq -r '[.gates | to_entries[] | select(.key|startswith("_")|not) | "\(.key)=\(.value.status)/\(.value.reason)/\(.value.waived)"] | join(" ")' "$REPORT"
+  [ "$output" == "alpha=pass/exit_0/false beta=fail/exit_3/false vac=fail/vacuous_pass/false skipper=skip/exit_2/false ghost=fail/missing_script/false waived_one=fail/exit_5/true outside=skip/not_in_profile/false" ]
+  run jq -e '[.gates | to_entries[] | select(.key|startswith("_")|not) | .value.row_version] | all(. == 2)' "$REPORT"
+  [ "$status" -eq 0 ]
+  # the derived compatibility field, one release
+  run jq -r '.gates.waived_one.result + " " + .gates.outside.result + " " + .gates.alpha.result' "$REPORT"
+  [ "$output" == "waived skip pass" ]
+  run jq -r '.overall' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -e '.waived_gates == ["waived_one"] and .excluded_gates == ["outside"]' "$REPORT"
+  [ "$status" -eq 0 ]
+  # stamps and evidence on a foreground row
+  run jq -e '.gates.alpha | (.started_at|type) == "string" and (.completed_at|type) == "string" and .evidence == null and (.duration_ms|type) == "number"' "$REPORT"
+  [ "$status" -eq 0 ]
+  run _validate_rows "$REPORT"
+  [ "$status" -eq 0 ]
+  # the checkpoint file is a row too
+  run jq -e '.row_version == 2 and .status == "pass" and .reason == "exit_0"' "$ev/gates_rows/alpha.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "P097 rows: a background job that timed out and one that vanished write job_timeout / job_lost rows with the job's stdout as evidence" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-gate-row.sh"
+  local jobs="$TEST_TMPDIR/jobs"; mkdir -p "$jobs/g-attempt-1" "$jobs/g-attempt-2"
+  printf 'partial output\n' > "$jobs/g-attempt-1/stdout.log"
+  jq -nc '{state:"timed_out", exit_code:143, started_at:"2026-09-21T10:00:00Z", ended_at:"2026-09-21T10:00:07Z"}' > "$jobs/g-attempt-1/result.json"
+  run gate_row_from_job g "$jobs/g-attempt-1" g-attempt-1
+  [ "$status" -eq 1 ]
+  run jq -r '"\(.row_version) \(.status) \(.reason) \(.exit_code) \(.job_exit_code) \(.duration_ms) \(.evidence) \(.started_at) \(.result)"' <<<"$output"
+  [ "$output" == "2 fail job_timeout 124 143 7000 jobs/g-attempt-1/stdout.log 2026-09-21T10:00:00Z fail" ]
+  run gate_row_from_job g "$jobs/g-attempt-2" g-attempt-2 lost
+  [ "$status" -eq 1 ]
+  run jq -r '"\(.row_version) \(.status) \(.reason) \(.evidence)"' <<<"$output"
+  [ "$output" == "2 fail job_lost null" ]
+}
+
+@test "P097 rows: gate_row_normalize maps every version-1 result of the Data Model table, skips the _execution_ledger key, and passes a version-2 row through untouched" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-gate-row.sh"
+  _n() { gate_row_normalize "$1" | jq -r '"\(.status)/\(.reason)/\(.waived)/\(.result)"'; }
+  [ "$(_n '{"result":"pass","exit_code":0}')" == "pass/exit_0/false/pass" ]
+  [ "$(_n '{"result":"fail","exit_code":3}')" == "fail/exit_3/false/fail" ]
+  [ "$(_n '{"result":"fail","reason":"timeout_policy_block","exit_code":124}')" == "fail/timeout_policy_block/false/fail" ]
+  [ "$(_n '{"result":"fail","reason":"gate_script_missing_in_tree","exit_code":1}')" == "fail/missing_script/false/fail" ]
+  [ "$(_n '{"result":"skip","exit_code":2}')" == "skip/legacy_row/false/skip" ]
+  [ "$(_n '{"result":"skip","reason":"no_command"}')" == "skip/no_command/false/skip" ]
+  [ "$(_n '{"result":"profile_excluded","reason":"profile_excluded"}')" == "skip/not_in_profile/false/skip" ]
+  [ "$(_n '{"result":"waived","exit_code":1,"waiver_ref":"w"}')" == "fail/exit_1/true/waived" ]
+  [ "$(_n '{"result":"job_timeout"}')" == "fail/job_timeout/false/fail" ]
+  [ "$(_n '{"result":"job_lost"}')" == "fail/job_lost/false/fail" ]
+  [ "$(_n '{"result":"job_cancelled"}')" == "fail/job_cancelled/false/fail" ]
+  # ── the acceptance criterion, by value, on SYNTHETIC rows (the 30-day
+  # sample fixture holds no status-less and no waived rows, so the fixture
+  # loop below cannot prove these three claims — review round 1 blocker) ──
+  # (a) a row with neither `status` nor `result` → skip / legacy_row, the
+  #     other fields kept and the version-2 fields filled in
+  run gate_row_normalize '{"gate":"x","exit_code":0,"duration_ms":5,"output":"o","attempts":1}'
+  [ "$status" -eq 0 ]
+  [ "$output" == '{"gate":"x","exit_code":0,"duration_ms":5,"output":"o","attempts":1,"status":"skip","reason":"legacy_row","waived":false,"row_version":2,"started_at":null,"completed_at":null,"evidence":null,"required":false,"reused_from":null,"result":"skip"}' ]
+  [ "$(_n '{}')" == "skip/legacy_row/false/skip" ]
+  # (b) `result: waived` with an exit code → fail / exit_<n> + waived: true
+  [ "$(_n '{"result":"waived","exit_code":7}')" == "fail/exit_7/true/waived" ]
+  [ "$(gate_row_normalize '{"result":"waived","exit_code":7}' | jq -c '{status,reason,waived}')" == '{"status":"fail","reason":"exit_7","waived":true}' ]
+  # (c) `result: profile_excluded` → skip / not_in_profile, with or without
+  #     the version-1 reason beside it
+  [ "$(_n '{"result":"profile_excluded"}')" == "skip/not_in_profile/false/skip" ]
+  [ "$(_n '{"result":"profile_excluded","reason":"profile_excluded","exit_code":0}')" == "skip/not_in_profile/false/skip" ]
+  # (d) each job_* result → fail / job_*
+  local j
+  for j in job_timeout job_lost job_cancelled; do
+    [ "$(_n "{\"result\":\"$j\",\"exit_code\":124}")" == "fail/$j/false/fail" ]
+  done
+  # a version-2 row is not re-mapped
+  [ "$(_n '{"row_version":2,"status":"fail","reason":"exit_9","waived":true,"result":"waived"}')" == "fail/exit_9/true/waived" ]
+  # every version-1 result value the 30-day sample carries (Step 1 fixture)
+  local v
+  for v in $(jq -r '[.sample[].rows | to_entries[] | select(.key|startswith("_")|not) | .value] | unique | .[]' "$AID_PLUGIN_PATH/scripts/tests/fixtures/gates/gates-sample.json"); do
+    run gate_row_normalize "{\"result\":\"$v\"}"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"row_version":2'* ]]
+  done
+  # the ledger key inside .gates is a run-level record, never a row
+  run jq -c "${AID_GATE_ROW_JQ} .gates | gate_rows_normalize" <<<'{"gates":{"a":{"result":"pass"},"_execution_ledger":{"path":"p","duplicates":[],"dispatched":3}}}'
+  [ "$output" == '{"a":{"result":"pass","status":"pass","reason":"exit_0","waived":false,"row_version":2,"exit_code":null,"duration_ms":0,"started_at":null,"completed_at":null,"evidence":null,"required":false,"reused_from":null},"_execution_ledger":{"path":"p","duplicates":[],"dispatched":3}}' ]
+}
+
+@test "P097 rows: a reason outside the closed vocabulary is refused by name, and a run that produces one exits 1 naming the gate" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-gate-row.sh"
+  local row; row="$(gate_row_normalize '{"result":"fail","reason":"invented","exit_code":1}')"
+  run gate_row_check alpha "$row"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate 'alpha'"* && "$output" == *"invented"* && "$output" == *"closed vocabulary"* ]]
+  # the same check through the runner: a checkpointed row restored with an
+  # invented reason (the restore path re-emits the row verbatim) ends the run
+  # naming the gate. The row must carry this run's own binding, so it is
+  # produced by a first run and then edited.
+  _git_init_project
+  local ev="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-1"
+  "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
+  [ -f "$ev/gates_rows/beta.json" ]
+  jq -c '.reason = "invented"' "$ev/gates_rows/beta.json" > "$ev/gates_rows/beta.json.tmp" && mv "$ev/gates_rows/beta.json.tmp" "$ev/gates_rows/beta.json"
+  AID_TEST_DROP_GATE_RESTORE=beta run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate 'beta'"* && "$output" == *"invented"* ]]
+}
+
+@test "P097 rows: no script reads a gate row's result directly — every reader goes through gate_row_normalize (grep guard)" {
+  run grep -rn '\.gates\[[^]]*\]\.result\|\.gates\[\]\.result\|\.value\.result\|gates_rows/[^ ]*\.json[^|]*\.result' \
+    "$AID_PLUGIN_PATH/scripts" --exclude-dir=tests --exclude=aid-gate-row.sh
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  # the report-level alias of `overall` is not a row and stays
+  grep -q '\.gates_report\.result' "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh"
+  grep -q '\.gates_report\.result' "$AID_PLUGIN_PATH/scripts/aid-plan-close-check.sh"
+}
+
+@test "P097 Step 9: a raised timeout_seconds is not answered with the recorded job_timeout — the rerun executes the command" {
+  # Before the fix the re-attach compared only the command fingerprint and the
+  # start HEAD, so a job that timed out under 1 s was collected again after the
+  # timeout was raised, and the gate stayed job_timeout.
+  git -C "$TEST_PROJECT" init -q
+  git -C "$TEST_PROJECT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+  export AID_GATE_POLL_INTERVAL_SEC=1 AID_GATE_HEARTBEAT_SEC=1
+  local counter="$TEST_TMPDIR/ran"
+  _yaml() {
+    cat > "$EXEC_YAML" <<YAML
+gates:
+  slow:
+    command: "sleep 2 && echo ran >> ${counter}"
+    required: true
+    timeout_seconds: $1
+    max_retries: 0
+    run_mode: background
+YAML
+  }
+  _yaml 1
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  run jq -r '.gates.slow.reason' "$REPORT"
+  [ "$output" = "job_timeout" ] || { cat "$REPORT"; false; }
+  [ ! -f "$counter" ]
+
+  _yaml 10
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  run jq -r '"\(.gates.slow.status) \(.gates.slow.reason)"' "$REPORT"
+  [ "$output" = "pass exit_0" ] || { cat "$REPORT"; false; }
+  [ "$(cat "$counter")" = "ran" ]
+  run jq -r -s '[.[] | select(.event == "gate_job_superseded" and .reason == "deadline_changed")] | length' "$TIMELINE"
+  [ "$output" = "1" ]
 }

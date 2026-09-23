@@ -59,11 +59,14 @@ source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # run_cache_preflight. Sourced AFTER aid-stage-log.sh so log_event already
 # exists (the lib's re-source guard then skips, preserving aid-fsm.sh's die()).
 source "${SCRIPT_DIR}/lib/aid-cache-preflight.sh"
-# Shared gate-profile risk-classification resolver (P061 E2 Step 1) — defines
-# gate_profile_resolve / gate_profile_rank / gate_profile_max. Used by both
-# cmd_advance_to_gates (auto-resolve, this EPIC's Step 2 / "Step 8") and the
-# GATES:DONE risk-upgrade precondition below (D4 enforcement, not advisory).
-source "${SCRIPT_DIR}/lib/aid-gate-profile.sh"
+# P097 Step 4 — the one gate-profile resolver over the project's own table
+# (gate_profile_for_paths / gate_profile_floor_verdict). Used by both
+# cmd_advance_to_gates (picks the profile a run executes) and the GATES:DONE
+# floor precondition below (refuses a narrower or missing profile).
+source "${SCRIPT_DIR}/lib/aid-gate-profile-select.sh"
+# P097 Step 2 — the ONE gate-row reader (gate_row_normalize); no reader here
+# inspects a row's `result`.
+source "${SCRIPT_DIR}/lib/aid-gate-row.sh"
 # P062 Step 11 — ONE per-control enforcement resolver for all five readers
 # below. Five private copies is how two of them end up disagreeing in the
 # blocking direction (the P084 incident).
@@ -186,49 +189,21 @@ _fsm_epic_plan_nnn() {
   return 0
 }
 
-# ─── Gate-profile boundary selector (P064 plan Step 8) ──────────────────────
-# _fsm_gate_profile_boundary <epic_id> — echoes the `boundary` positional to
-# hand gate_profile_resolve for THIS EPIC: "epic" when the EPIC belongs to a
-# plan whose DECLARED release model is `plan_branch`, "" (legacy, byte-identical
-# to pre-Step-8 behaviour) otherwise. Always exits 0 — this is a routing
-# decision, never an enforcement point.
-#
-# WHY MODE-GATED. boundary=epic caps the resolved profile at `standard`,
-# which is only safe because a plan_branch plan has a plan-final run that
-# still executes the accumulated floor (recorded by `aid-plan-fsm.sh
-# epic-complete`, consumed by the plan-final stage). A legacy
-# `legacy_epic_release_mode` plan has no such second run: capping there would
-# silently drop `bats_all` and suppress the done_phase=release escalation
-# with nothing downstream to make up for it — a coverage regression, not a
-# split. Every "cannot tell" path therefore returns "" (no cap, more gates),
-# the conservative direction — the opposite of cmd_init's lineage check,
-# which fails CLOSED because there "cannot tell" would skip a security proof.
+# ─── Gate-profile boundary label (P064 plan Step 8, reduced by P097 Step 4) ─
+# _fsm_gate_profile_boundary <epic_id> — "epic" when the EPIC belongs to a
+# plan whose DECLARED release model is `plan_branch`, "" (legacy) otherwise.
+# Always exits 0. Since P097 Step 4 the label is RECORDED on the timeline and
+# in the floor's refusal text only: the profile itself comes from the
+# project's own gate_profiles table (lib/aid-gate-profile-select.sh), and the
+# cap-at-standard this label used to switch on no longer exists.
 #
 # ── ONE AUTHORITY (CP3 integration review finding 2, adjudicated action A3) ──
 # This function computes NOTHING of its own: it asks `_fsm_declared_plan_mode`
-# (below, the release-routing resolver) and maps its verdict. It USED to read
-# the gitignored RUNTIME manifest `plan-boundary-manifest.json` while
-# `_fsm_declared_plan_mode` read the git-tracked DECLARATION
-# `.aid-lifecycle/manifests/<plan_id>.yaml` — two sources that go stale
-# independently and could therefore disagree while BOTH returned a confident,
-# non-error answer:
-#   * runtime=plan_branch + declaration absent -> gates capped at `standard`
-#     while the LEGACY release stack merged the EPIC into the target branch and
-#     ran the bump/tag/push. A high-risk EPIC shipped with reduced verification,
-#     and the accumulated floor was discarded (only `epic-complete` writes one,
-#     and the legacy path never reaches it).
-#   * an UNTRACKED declaration saying plan_branch confidently silenced all nine
-#     AID_PLAN_BRANCH_SKIPPED_STAGES with nothing committed anywhere.
-# The runtime manifest is no longer a mode input anywhere in this file. The two
-# helpers still REACT differently to "cannot tell" — here "" (no cap => MORE
-# gates), there a hard block — but that is a difference in CONSEQUENCE, chosen
-# per call site, never a difference in the verdict.
-#
-# BOTH gate_profile_resolve call sites in this file MUST route through this
-# one helper: advance-to-gates picks the profile a run executes and the
-# GATES:DONE precondition recomputes the requirement it is measured against.
-# If they disagreed, an EPIC that correctly ran the capped `standard` would
-# be compared against an uncapped `full` and could never reach DONE.
+# (below, the release-routing resolver) and maps its verdict. The gitignored
+# RUNTIME manifest `plan-boundary-manifest.json` is not a mode input anywhere
+# in this file — two sources that go stale independently could disagree while
+# both returned a confident answer. Both gate-profile call sites (advance-to-
+# gates and the GATES:DONE floor) route through this one helper.
 _fsm_gate_profile_boundary() {
   local epic_id="${1:-}" _gb_mode="" _gb_plan="" _gb_reason=""
   # `|| true`: the read itself is never allowed to abort a routing decision.
@@ -2013,8 +1988,7 @@ fsm_emit_compliance_recovery() {
   local recovery_checks
   recovery_checks=$(fsm_check_compliance_recovery "$timeline" 2>/dev/null) || return 0
   local recovery_gate
-  recovery_gate=$(grep -E '^    alert_on_compliance_recovery:' "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null \
-    | awk '{print $2}' | tr -d '"'"'"' ') || recovery_gate=""
+  recovery_gate=$(yq -r '.notifications.telegram.alert_on_compliance_recovery // ""' "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null) || recovery_gate=""
   recovery_gate="${recovery_gate:-true}"
   [[ "$recovery_gate" == "false" ]] || \
     aid_alert_run info plan-compliance-recovered "$epic_id" \
@@ -2512,7 +2486,7 @@ EOF
         # (plan-gate floor, risk profile, cp3 freshness) stays fully enforced.
         local waived_rows report_head
         report_head=$(jq -r '.revision.head_sha // empty' "$report" 2>/dev/null)
-        waived_rows=$(jq -r '(.gates // {}) | to_entries[] | select(.value.result == "waived") | .key' "$report" 2>/dev/null)
+        waived_rows=$(jq -r "${AID_GATE_ROW_JQ}"'(.gates // {}) | gate_rows_normalize | to_entries[] | select((.value|type) == "object" and .value.status == "fail" and .value.waived == true) | .key' "$report" 2>/dev/null)
         if [[ -n "$waived_rows" ]]; then
           # IMP-270 (PM review 2026-07-24): a waived row is re-validated against
           # the report's OWN revision.head_sha. If that is absent or not a 40-hex
@@ -2624,122 +2598,61 @@ EOF
           fi
         fi
 
-        # P061 E2 Step 2 ("Step 8"): risk-upgrade FSM enforcement (D4). ───────
-        # plan_gate_floor (above) guards "did the plan's own required gates
-        # survive the active profile". THIS check guards a different gap: the
-        # active profile ITSELF (gates_report.json.profile, whatever --profile
-        # aid-run-gates.sh was actually invoked with for this run) must be no
-        # weaker than the RISK-REQUIRED profile the shared resolver (Step 1,
-        # aid-gate-profile.sh) computes from this run's actual base_commit..HEAD
-        # diff. Recomputed HERE (not trusted from advance-to-gates' earlier
-        # auto-resolve) because the gates could have been (re-)run manually
-        # with a different/weaker --profile after auto-resolve last ran —
-        # trusting the resolver's own SUGGESTION at run-time would make this a
-        # detector, not enforcement (AID-v3-principles.md §1). A missing
-        # `profile` field means no --profile was ever passed for this run
-        # (legacy execution.yaml without gate_profiles, or a project that
-        # hasn't opted in) — D9: behaves exactly like today, no-op (every
-        # defined gate already ran, nothing weaker to catch).
-        #
-        # P064 plan Step 8: the recompute is BOUNDARY-AWARE. It passes the
-        # same boundary advance-to-gates used (via the single
-        # _fsm_gate_profile_boundary helper), so an EPIC that correctly ran
-        # the capped EPIC-boundary profile is compared against the
-        # EPIC-boundary requirement — not against the unbounded plan-final
-        # floor, which would hard-fail every high-risk EPIC at GATES:DONE.
-        # The plan-final floor is recorded into the plan-boundary manifest by
-        # `aid-plan-fsm.sh epic-complete`, not enforced at this transition.
-        local active_profile
-        active_profile=$(jq -r '.profile // empty' "$report" 2>/dev/null)
-        if [[ -n "$active_profile" ]]; then
-          local risk_base_commit required_profile="" _gp_boundary=""
-          risk_base_commit=$(yaml_field "$state_file" base_commit)
-          _gp_boundary="$(_fsm_gate_profile_boundary "$(yaml_field "$state_file" epic_id)")"
-          if [[ -n "$risk_base_commit" ]]; then
-            local _gp_paths_file
-            _gp_paths_file=$(mktemp -t aid-gate-profile-risk.XXXXXX)
-            git -C "$PWD" diff --name-only "${risk_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
-            required_profile=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json" "$_gp_boundary")
-            rm -f "$_gp_paths_file"
+        # P097 Step 4: the gate-profile floor. ─────────────────────────────
+        # The profile the run RECORDED (gates_report.json.profile, whatever
+        # --profile the runner was actually invoked with) must be no narrower
+        # than the one the resolver picks for this run's base_commit..HEAD diff
+        # on the project's own table. Recomputed here, not trusted from
+        # advance-to-gates, because the gates may have been re-run by hand with
+        # a narrower --profile. A report without a profile is refused whenever
+        # the file declares gate_profiles; without a table it passes only when
+        # every declared gate has a row. A table that changed between the run
+        # and now refuses with profile_table_changed instead of comparing
+        # indexes across two orders. All of that is one library verdict.
+        local _gp_yaml _gp_required="" _gp_base_commit _gp_verdict _gp_rc=0
+        _gp_yaml="$(aid_state_path ".aid-o/config/execution.yaml" 2>/dev/null || printf '%s' "$PWD/.aid-o/config/execution.yaml")"
+        _gp_base_commit=$(yaml_field "$state_file" base_commit)
+        if [[ -n "$_gp_base_commit" && -f "$_gp_yaml" ]]; then
+          local _gp_paths_file _gp_err
+          _gp_paths_file=$(mktemp -t aid-gate-profile-risk.XXXXXX)
+          git -C "$PWD" diff --name-only "${_gp_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
+          _gp_required=$(gate_profile_for_paths "$_gp_yaml" "$_gp_paths_file" 2>"${_gp_paths_file}.err") || _gp_rc=$?
+          _gp_err="$(cat "${_gp_paths_file}.err" 2>/dev/null)"
+          rm -f "$_gp_paths_file" "${_gp_paths_file}.err"
+          if (( _gp_rc != 0 )); then
+            _PRECONDITION_FAIL_REASON="risk_profile_unresolvable"
+            echo "PRECONDITION FAIL: risk_profile_unresolvable — the project's gate_profiles table cannot resolve a profile for this diff: ${_gp_err}" >&2
+            return 1
           fi
-          # risk_base_commit empty (fsm-state unreadable/malformed) → required_profile
-          # stays "" — conservative no-op: we cannot prove a floor we cannot compute,
-          # never guess or fail loud on it.
+        fi
+        # base_commit empty (fsm-state unreadable) → no required profile: the
+        # verdict still checks the recorded profile and the table. The
+        # boundary is logged for the record only: P064's cap is gone, the
+        # table's own when_paths decide.
+        if ! _gp_verdict="$(gate_profile_floor_verdict "$_gp_yaml" "$report" "$_gp_required")"; then
+          _PRECONDITION_FAIL_REASON="${_gp_verdict%%:*}"
+          local _gp_boundary_note _gp_fix_name
+          _gp_boundary_note="$(_fsm_gate_profile_boundary "$(yaml_field "$state_file" epic_id)")"
+          _gp_fix_name="${_gp_required:-<the resolver answer>}"
+          cat <<EOF >&2
+PRECONDITION FAIL: ${_gp_verdict} (diff ${_gp_base_commit:-unknown}..HEAD, boundary ${_gp_boundary_note:-legacy}).
 
-          if [[ -n "$required_profile" ]]; then
-            local active_rank required_rank
-            if active_rank=$(gate_profile_rank "$active_profile" 2>/dev/null) \
-               && required_rank=$(gate_profile_rank "$required_profile" 2>/dev/null); then
-              if (( active_rank < required_rank )); then
-                _PRECONDITION_FAIL_REASON="risk_profile_below_required"
-                cat <<EOF >&2
-PRECONDITION FAIL: risk_profile_below_required — active gate profile '${active_profile}' (rank ${active_rank}) is weaker than the risk-required profile '${required_profile}' (rank ${required_rank}) for this EPIC's actual diff (${risk_base_commit}..HEAD).
+Reason: the only way to narrow gate coverage is a profile name the project
+        declared in execution.yaml.gate_profiles, chosen by that file's own
+        when_paths / default_profile rule, and the GATES:DONE floor refuses a
+        report that names none, names one narrower than the resolver's answer,
+        or was produced against a table that has since changed.
 
-Reason: D4 (P061) — a high-risk changed path (e.g. aid-fsm.sh, aid-run-gates.sh,
-        aid-release-policy.sh, aid-evidence-verify.sh, defaults/schemas/*,
-        defaults/policies/*, agents/*.md) upgrades the REQUIRED gate profile
-        for this run. This precondition VERIFIES and ENFORCES that floor at
-        GATES:DONE — it does not just recommend it (a detector without
-        enforcement is decoration, AID-v3-principles.md §1).
-
-Fix: re-run gates so the recorded profile is >= '${required_profile}':
+Fix: re-run the gates so the recorded profile is >= '${_gp_fix_name}':
        bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh advance-to-gates ${state_file}
-     (auto-resolves the risk-required profile for you), or explicitly:
-       bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all ... --profile ${required_profile}
+     (resolves the profile for you), or explicitly:
+       bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all ... --profile ${_gp_fix_name}
 
 OR (PM-authorized override, audited):
   aid-fsm.sh transition GATES DONE ${state_file} --force --reason \\
       '<≥20 chars why completing under a weaker profile is acceptable>'
 EOF
-                return 1
-              fi
-            else
-              # Active profile name isn't one of the 5 known ranks (a custom
-              # project-defined gate_profiles key) — cannot compare, cannot
-              # enforce. For high-risk diffs, this is a blocking failure
-              # (fail-closed: we cannot verify the active profile is sufficient).
-              # For low-risk diffs, non-blocking telemetry only.
-              local req_rank
-              if req_rank=$(gate_profile_rank "$required_profile" 2>/dev/null); then
-                if (( req_rank > 0 )); then
-                  # Required profile is above 'quick' (high-risk) — must fail
-                  # because we cannot verify an unrecognized active profile meets it.
-                  _PRECONDITION_FAIL_REASON="risk_profile_unresolvable"
-                  cat <<EOF >&2
-PRECONDITION FAIL: risk_profile_unresolvable — the recorded active gate profile '${active_profile}' is not recognized (not in the canonical profile ranks: quick/targeted/standard/full/release). The risk-required profile for this EPIC's diff is '${required_profile}' (rank ${req_rank}), which is above 'quick' — we cannot verify that an unrecognized profile name meets this requirement.
-
-Reason: D4 (P061) — a high-risk changed path upgrades the REQUIRED gate profile
-        for this run. This precondition VERIFIES and ENFORCES that floor at
-        GATES:DONE — it does not just recommend it (a detector without
-        enforcement is decoration, AID-v3-principles.md §1).
-
-Fix: Either extend your execution.yaml.gate_profiles to define '${active_profile}' with a documented rank, or re-run gates with a recognized profile name:
-       bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all ... --profile ${required_profile}
-
-OR (PM-authorized override, audited):
-  aid-fsm.sh transition GATES DONE ${state_file} --force --reason \\
-      '<≥20 chars why using an unrecognized profile is acceptable>'
-EOF
-                  return 1
-                else
-                  # Required profile is 'quick' — low-risk, unrecognized active
-                  # profile is acceptable. Non-blocking telemetry only.
-                  fsm_emit_audit_log "risk_profile_rank_unresolvable" \
-                    --evidence-dir "$evidence_dir" \
-                    --active-profile "$active_profile" \
-                    --required-profile "$required_profile"
-                fi
-              else
-                # required_profile rank lookup itself failed — should not happen
-                # (we computed required_profile ourselves from the resolver), but
-                # fall back to non-blocking telemetry as a safety measure.
-                fsm_emit_audit_log "risk_profile_rank_unresolvable" \
-                  --evidence-dir "$evidence_dir" \
-                  --active-profile "$active_profile" \
-                  --required-profile "$required_profile"
-              fi
-            fi
-          fi
+          return 1
         fi
       else
         # Fail loud, never silent-pass: without jq we cannot verify overall==pass,
@@ -2766,48 +2679,6 @@ EOF
         echo "PRECONDITION FAIL: escalation_decision not set in fsm-state.yaml. PM must decide first." >&2
         return 1
       }
-      ;;
-
-    GATES:EXECUTE)
-      # P063 Step 3: repeated-timeout policy block precondition. A gate that
-      # aid-run-gates.sh's retry loop marked retryable:false (via
-      # gate_baseline_mark_policy_block, after 3+ consecutive timeouts each
-      # recorded at >= the currently-configured timeout_seconds — see
-      # gate_baseline_policy_check in aid-gate-runtime-baseline.sh) has
-      # nothing for gate-fixer to act on: the gate never got a chance to run
-      # to completion, so re-entering EXECUTE to "fix" it is pointless.
-      # Refuse the transition so the orchestrator routes to GATES:ESCALATION
-      # instead (AID-v3-principles.md §1 — a gates_report.json field nobody
-      # reads before retrying anyway is decoration, not enforcement).
-      local gates_report="${evidence_dir}/gates/gates_report.json"
-      if [[ -f "$gates_report" ]] && command -v jq &>/dev/null; then
-        local blocked_gate
-        blocked_gate=$(jq -r '(.gates // {}) | to_entries[] | select(.value.runtime_baseline.retryable == false) | .key' "$gates_report" 2>/dev/null | head -1)
-        if [[ -n "$blocked_gate" ]]; then
-          local blocked_action
-          blocked_action=$(jq -r --arg g "$blocked_gate" '.gates[$g].runtime_baseline.operator_action // "unknown"' "$gates_report" 2>/dev/null)
-          _PRECONDITION_FAIL_REASON="timeout_policy_block"
-          cat <<EOF >&2
-PRECONDITION FAIL: gate '${blocked_gate}' is retryable:false (timeout_policy_block) — refusing GATES→EXECUTE.
-
-Reason: gate '${blocked_gate}' has already timed out repeatedly at the currently
-        configured timeout_seconds (see gates_report.json.gates.${blocked_gate}.runtime_baseline)
-        — gate-fixer has nothing to act on since the gate never runs to
-        completion. Recommended operator action: ${blocked_action}.
-
-Fix: address the blocking gate directly (${blocked_action}: e.g. raise
-     execution.yaml.gates.${blocked_gate}.timeout_seconds, or switch it to a
-     background run mode), re-run gates, then retry — OR route this run to
-     GATES:ESCALATION instead of retrying EXECUTE:
-       aid-fsm.sh transition GATES ESCALATION ${state_file}
-
-OR (PM-authorized override, audited):
-  aid-fsm.sh transition GATES EXECUTE ${state_file} --force --reason \\
-      '<≥20 chars why re-entering EXECUTE for this gate is acceptable>'
-EOF
-          return 1
-        fi
-      fi
       ;;
 
     # Failure/retry paths — always allowed
@@ -3080,69 +2951,11 @@ _resume_release_pointer() {
   return 0
 }
 
-# ── P076 Step 6 / carried review obligation (AC4): the baseline sample a
-# resumed row records must JOIN the gate's existing series, not reset it ────
-# The baseline entry's identity is sha256("<gate>:<command_template>"), and the
-# in-line runner passes the TEMPLATE (`.gates.<gate>.command`, `{token}`s and
-# all) as that argument plus the RESOLVED string as the second one. A resume
-# that passed the resolved command as BOTH would fingerprint differently for
-# every token-bearing gate — the normal case here — wiping `recent_samples`,
-# stamping `series_reset_at`, and rewriting `command_template` to the resolved
-# string so the next ordinary `run-all` reset it right back. These three
-# helpers recover the same two arguments the in-line path uses.
-
-# _resume_execution_yaml <safe_next_action> — the execution.yaml the dead run
-# was using, taken from the artifact's own fully resolved instruction
-# (`... aid-run-gates.sh run-all <execution_yaml> <epic> <run> ...`). Empty
-# unless the extracted token is a readable file — a guess is worse than none.
-_resume_execution_yaml() {
-  local s="${1:-}" tok=""
-  [[ -n "$s" ]] || return 0
-  # shellcheck disable=SC2086
-  set -- $s
-  while [[ $# -gt 0 ]]; do
-    if [[ "$1" == "run-all" ]]; then tok="${2:-}"; break; fi
-    shift
-  done
-  [[ -n "$tok" && -f "$tok" ]] && printf '%s' "$tok"
-  return 0
-}
-
-# _resume_command_template <gate> <execution_yaml> <resolved_cmd> — the
-# TEMPLATE, in descending order of authority: the gate's configured command
-# (so a genuinely EDITED command still resets the series, exactly as an
-# ordinary run would), then the template already on record for this gate (so a
-# resume with no reachable config still joins the recorded series), and only
-# then the resolved string (no history exists, so nothing can be reset).
-_resume_command_template() {
-  local gate="$1" ey="${2:-}" resolved="${3:-}" tmpl=""
-  if [[ -n "$ey" ]] && command -v yq >/dev/null 2>&1; then
-    tmpl="$(yq -r ".gates.\"${gate}\".command // \"\"" "$ey" 2>/dev/null || echo "")"
-    [[ "$tmpl" == "null" ]] && tmpl=""
-  fi
-  if [[ -z "$tmpl" ]] && declare -F _gbr_get_entry_json >/dev/null 2>&1; then
-    tmpl="$(_gbr_get_entry_json "$gate" 2>/dev/null | jq -r '.command_template // ""' 2>/dev/null || echo "")"
-    [[ "$tmpl" == "null" ]] && tmpl=""
-  fi
-  [[ -n "$tmpl" ]] || tmpl="$resolved"
-  printf '%s' "$tmpl"
-}
-
-# _resume_concurrency_context <gate> <repo> — the SAME derivation the in-line
-# runner performs. P078 removed the scheduler, so every gate — targeted_tests
-# included — executes sequentially and the baseline series is single-valued.
-# Kept as a function (rather than inlining the literal) because the resume path
-# and the in-line runner must never drift on this value, and a named seam is
-# where a future change would land.
-_resume_concurrency_context() {
-  printf 'sequential'
-}
-
-# _resume_write_row <evidence_dir> <gate> <job_dir> <job_id> <state> <attempts> <head> [execution_yaml] [repo] [tree]
+# _resume_write_row <evidence_dir> <gate> <job_dir> <job_id> <state> <attempts> <head> [tree]
 #   The ONLY thing resume writes into the run's evidence: Step 2's durable
 #   incremental row checkpoint. Byte-shaped exactly like the in-line path's —
-#   the same `gate_row_from_job` mapping, the same `. + {attempts, runtime_
-#   baseline}` merge, the same `_checkpoint {head, tree, key, written_at}`
+#   the same `gate_row_from_job` mapping, the same `. + {attempts}` merge,
+#   the same `_checkpoint {head, tree, key, written_at}`
 #   envelope from the same shared helper, the same atomic tmp+mv. It has to be:
 #   the restore pass refuses a row with no envelope
 #   (`row_not_bound_to_a_revision`) or an unverifiable key
@@ -3151,8 +2964,7 @@ _resume_concurrency_context() {
 #   Echoes the row file path. rc 1 if nothing could be written.
 _resume_write_row() {
   local evidence_dir="$1" gate="$2" job_dir="$3" job_id="$4" state="$5" \
-        attempts="$6" head="$7" execution_yaml="${8:-}" repo="${9:-}" \
-        tree="${10:-}"
+        attempts="$6" head="$7" tree="${8:-}"
   # The gate name becomes a filename — never let it become a path.
   case "$gate" in */*|*..*|"") return 1 ;; esac
 
@@ -3160,31 +2972,8 @@ _resume_write_row() {
   row="$(gate_row_from_job "$gate" "$job_dir" "$job_id" "$state")" || true
   [[ -n "$row" ]] || return 1
 
-  # The baseline sample the dead in-line runner never got to record. Same
-  # library, same call, same ARGUMENTS and the same ordering (update, then
-  # report) — so the runtime_baseline this row carries is the one the in-line
-  # path would have carried, and the sample lands in the gate's EXISTING
-  # series instead of resetting it. The resolved command comes from the JOB
-  # RECORD's argv, never re-derived; the template and the concurrency context
-  # are recovered exactly as documented above.
-  local rcmd exit_code dur_ms timeout_s tmpl ctx
-  rcmd="$(jq -r '.command[2] // ""' "$job_dir/job.json" 2>/dev/null || echo "")"
-  exit_code="$(jq -r '.exit_code' <<<"$row" 2>/dev/null || echo 1)"
-  dur_ms="$(jq -r '.duration_ms' <<<"$row" 2>/dev/null || echo 0)"
-  timeout_s="$(jq -r '.deadline_sec // 0' "$job_dir/job.json" 2>/dev/null || echo 0)"
-  if [[ -n "$rcmd" ]] && declare -F gate_baseline_update >/dev/null 2>&1; then
-    tmpl="$(_resume_command_template "$gate" "$execution_yaml" "$rcmd")"
-    ctx="$(_resume_concurrency_context "$gate" "$repo")"
-    gate_baseline_update "$gate" "$tmpl" "$rcmd" "$exit_code" "$dur_ms" "$timeout_s" "$ctx" || true
-  fi
-  local rb='null'
-  if declare -F gate_baseline_report_json >/dev/null 2>&1; then
-    rb="$(gate_baseline_report_json "$gate" 2>/dev/null)"
-    [[ -z "$rb" ]] && rb='null'
-  fi
-
   local merged
-  merged="$(jq --argjson rb "$rb" ". + {\"attempts\":${attempts}, \"runtime_baseline\": \$rb}" <<<"$row")" || return 1
+  merged="$(jq ". + {\"attempts\":${attempts}}" <<<"$row")" || return 1
 
   local rows_dir="${evidence_dir}/gates_rows"
   mkdir -p "$rows_dir" 2>/dev/null || return 1
@@ -3264,96 +3053,16 @@ _resume_no_artifact_report() {
   return 0
 }
 
-# ─── The service safety net (P076 Step 10) ──────────────────────────────────
-# _fsm_service_sweep <evidence_dir> [<execution_yaml>] [<caller>]
-#
-# ONE teardown definition in this system — `aid_service_down_all` — and this is
-# the FSM's single call site for it, shared by both callers here: `resume` on its
-# terminal-collect path and `done-advance` at the release edge. Neither
-# re-implements teardown; both hand it a run's evidence directory and let the
-# library reason about registry entries and unregistered jobs.
-#
-# It is a NET, not a mechanism. The mechanism is `run-all`, which acquires once
-# and releases once; this exists for the run that is being wrapped up without a
-# rerun ever happening — a dead run collected by `resume`, or a run that reached
-# release with services still recorded.
-#
-# Four properties make it safe to call from the FSM:
-#   • it does NOTHING unless this run's evidence actually holds service state, so
-#     every project that declares no services is untouched (and no library is
-#     even sourced);
-#   • it is never called from a path where a supervised job of the run is still
-#     live — that is the caller's guarantee, and for `resume` it is the whole
-#     read-only-vs-claim split;
-#   • THE RUNNER'S OWN LIVENESS is checked, and this is the CP3 BLOCKING fix.
-#     The bullet above was the whole guarantee, and it is only half of one:
-#     `_resume_other_jobs_live` sees SUPERVISED JOBS, and a live IN-LINE runner
-#     is invisible to the supervisor by construction (its own comment said so).
-#     A run with one finished background gate and one long FOREGROUND gate
-#     therefore looked exactly like a dead run — and that is not an exotic
-#     shape, it is what `watchdog → resume_needed` produces after 300 s of no
-#     progress, on the ordinary AUTO path, in a repository whose gates routinely
-#     exceed 300 s. The sweep took the database out from under the running gate
-#     and two gates that would have passed were reported `service_unhealthy`: a
-#     fabricated verdict.
-#     The evidence that closes it is the ownership claim this same EPIC built,
-#     and it is NOT re-implemented here. `aid_service_down_all` consults it and
-#     REFUSES (rc 2) while a different, provably-live process holds it, so
-#     `resume`, `done-advance` and `run-all`'s entry sweep all inherit one
-#     answer from one authority. All this function adds is saying out loud which
-#     refusal happened;
-#   • it never fails its caller. A teardown that could not finish — or that was
-#     refused — is a warning next to a transition or a collection that already
-#     happened.
-#
-# EVERY caller passes its execution.yaml, and that is a SECURITY property rather
-# than a nicety: without a declaration to reconcile against, `aid_service_down_all`
-# falls back to the `stop_cmd` RECORDED IN THE REGISTRY and runs it through
-# `bash -c`. The registry lives in the run's evidence directory, which an
-# implementer or a gate-fixer subagent can write — so a sweep with no declaration
-# is a path from "can write a file under .aid-o/work/evidence/" to "executes a
-# command inside the FSM". With the yaml present the library refuses the recorded
-# string outright. An empty second argument is therefore a BUG, not a shorthand:
-# it makes the library fall back to $AID_SERVICE_CONFIG, a path relative to
-# whatever cwd the FSM happens to run in.
-_fsm_service_sweep() {
-  local ev="${1:-}" yaml="${2:-}" caller="${3:-fsm}"
-  [[ -n "$ev" && -d "$ev" ]] || return 0
-  # Nothing was ever brought up here → nothing to sweep, nothing to load.
-  [[ -f "${ev}/services.json" || -d "${ev}/service-jobs" ]] || return 0
-  if ! declare -F aid_service_down_all >/dev/null 2>&1; then
-    if [[ ! -f "${SCRIPT_DIR}/lib/aid-service.sh" ]]; then
-      echo "WARN: aid-fsm.sh ${caller}: ${ev} holds service state but lib/aid-service.sh is unavailable — sweep skipped; stop the services by hand (see ${ev}/services.json)" >&2
-      return 0
-    fi
-    # shellcheck disable=SC1091
-    source "${SCRIPT_DIR}/lib/aid-service.sh" || {
-      echo "WARN: aid-fsm.sh ${caller}: lib/aid-service.sh could not be loaded — service sweep skipped" >&2
-      return 0
-    }
-  fi
-  # ALWAYS quoted, never `${yaml:+"$yaml"}`: that expansion word-splits a path
-  # containing a space, so `.../my run/.aid-o/config/execution.yaml` reached the
-  # library as `.../my` — a path that does not exist, which is exactly the
-  # no-declaration fallback above. An empty "$yaml" is already the library's
-  # documented "use the default" signal, so the conditional bought nothing.
-  local rc=0
-  aid_service_down_all "$ev" "$yaml" || rc=$?
-  if (( rc == 2 )); then
-    # The one authority refused. rc 2 has SEVERAL causes — a live owner's claim,
-    # jq missing so the claim cannot be read, yq missing or the declaration
-    # unreadable so a recorded stop_cmd would run unreconciled — and
-    # aid_service_down_all's own header says a caller must not assume which. It
-    # prints its named line immediately above this one, so this message defers
-    # to that line instead of inventing a cause it cannot know. Said plainly,
-    # because "the services are still up" is the CORRECT outcome here and must
-    # not read as a failure of this command.
-    echo "aid-fsm.sh ${caller}: the services recorded under ${ev} were NOT swept — the teardown REFUSED, for the reason named in the line above (a live owner, or a dependency/declaration it could not read). That refusal is deliberate: sweeping on an unverified answer would either report passing gates as failed or run a command the project's config never authorised. This ${caller} changed nothing about the services." >&2
-    return 0
-  fi
-  if (( rc != 0 )); then
-    echo "WARN: aid-fsm.sh ${caller}: at least one service recorded under ${ev} still answers its probe after teardown — see the named line above; this did not affect anything recorded" >&2
-  fi
+# _fsm_pre_2103_services_note <evidence_dir> <caller>
+#   The service lifecycle and its sweep left with P097 Step 6: gates keep their
+#   one owner (aid-job.sh), and the sweep only ever signalled service jobs. A
+#   `services.json` under a run's evidence can therefore only come from a run
+#   older than 2.103. It is reported once, here, and otherwise ignored — nothing
+#   in this file reads it, and nothing will stop what it recorded.
+_fsm_pre_2103_services_note() {
+  local ev="${1:-}" caller="${2:-fsm}"
+  [[ -n "$ev" && -f "${ev}/services.json" ]] || return 0
+  echo "aid-fsm.sh ${caller}: ${ev}/services.json is a service registry from a pre-2.103 run; the service lifecycle is gone (P097) and this file is ignored — stop anything it names by hand" >&2
   return 0
 }
 
@@ -3558,10 +3267,7 @@ cmd_resume() {
   # final report — only the `gates_rows/<gate>.json` checkpoint the next
   # `run-all` assembles. A live IN-LINE runner is invisible to the SUPERVISOR,
   # so no guarantee is claimed here about the checkpoint such a runner may also
-  # be writing. It is NOT invisible to the service ownership claim, and that
-  # difference is load-bearing a few lines below: the service sweep leaves a
-  # live runner's services standing. A checkpoint written twice is recoverable;
-  # a database removed from under a running gate is a fabricated verdict.
+  # be writing. A checkpoint written twice is recoverable.
   local claimed
   if ! claimed="$(_resume_claim "$art")"; then
     _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but the continuation artifact was already claimed — the winner's claim file is ${claimed}"
@@ -3586,13 +3292,11 @@ cmd_resume() {
     return 0
   fi
 
-  # Load the shared mapping + baseline libraries lazily: they are needed only
-  # on this one path, and a resume must not change what every other aid-fsm.sh
-  # command loads.
+  # Load the shared mapping library lazily: it is needed only on this one
+  # path, and a resume must not change what every other aid-fsm.sh command
+  # loads.
   # shellcheck disable=SC1091
   [[ -f "${SCRIPT_DIR}/lib/aid-gate-row.sh" ]] && source "${SCRIPT_DIR}/lib/aid-gate-row.sh"
-  # shellcheck disable=SC1091
-  [[ -f "${SCRIPT_DIR}/lib/aid-gate-runtime-baseline.sh" ]] && source "${SCRIPT_DIR}/lib/aid-gate-runtime-baseline.sh"
   if ! declare -F gate_row_from_job >/dev/null 2>&1; then
     _resume_release_pointer "$epic_id"
     _resume_say "$epic_id" "found" "job '${job_id}' is ${state}, but the shared job-result mapping (lib/aid-gate-row.sh) is unavailable"
@@ -3600,14 +3304,6 @@ cmd_resume() {
     _resume_next_line "$epic_id" "rerun the gates: " "$next_action"
     return 0
   fi
-  # The baseline library's data file, resolved through the state root so a
-  # resume from the plan worktree writes the same file the in-line runner did.
-  if [[ -z "${AID_GATE_BASELINE_FILE:-}" ]]; then
-    local _st_root; _st_root="$(aid_state_root 2>/dev/null)" || _st_root="$PWD"
-    export AID_GATE_BASELINE_FILE="${_st_root}/.aid-o/metrics/gate-runtime-baselines.yaml"
-    mkdir -p "$(dirname "$AID_GATE_BASELINE_FILE")" 2>/dev/null || true
-  fi
-
   local attempts=1
   [[ "$job_id" =~ -attempt-([0-9]+)$ ]] && attempts="${BASH_REMATCH[1]}"
   # HEAD *and* tree, through the SHARED derivation the in-line checkpoint writer
@@ -3623,43 +3319,11 @@ cmd_resume() {
   _rev="$(aid_gate_row_revision "${repo:-}")"
   head="${_rev%% *}"; tree="${_rev##* }"
 
-  # The gate's own configuration, as named by the artifact's resolved
-  # instruction — the template argument the baseline sample needs (AC4).
-  local execution_yaml; execution_yaml="$(_resume_execution_yaml "$next_action")"
-
-  # ─── the service safety net, on THIS path only (P076 Step 10) ────────────
-  # The claim is taken and the job is dead: this run is being wrapped up, and a
-  # run that is being wrapped up owns no services any more. Everything above this
-  # line — the `running` branch, the `started` branch, and the live-sibling
-  # refusal — returned WITHOUT touching services, deliberately and as a hard
-  # rule: a background gate that is still running may depend on a declared
-  # service, and sweeping it there would kill the very dependency the surviving
-  # job needs in order to finish. A status look never claims, and it never stops
-  # a service either.
-  #
-  # AND the run's OWN liveness, which the live-sibling refusal above cannot see:
-  # a job being dead does not make the RUNNER dead. `aid_service_down_all`
-  # refuses while the ownership claim names a live process, so a resume against
-  # a run whose background gate finished while its foreground gate is still
-  # going now leaves that gate's dependency alone and says so. The check is not
-  # here — it is in the one teardown definition, so this call site cannot drift
-  # away from the one `done-advance` and `run-all` use.
-  #
-  # THE HONEST BOUND on the two branches that also sit below the live-sibling
-  # refusal and still do NOT sweep — `missing|unknown` and `lost`. The plan says
-  # the sweep runs on the terminal-collect path ONLY, and that is what this code
-  # does. But do not read their leak as "until done-advance": a run whose job is
-  # LOST or whose records are MISSING typically never reaches done-advance at
-  # all, and if it is never rerun there is no `run-all` entry sweep either. So a
-  # service left by such a run leaks until somebody reruns the gates or stops it
-  # by hand — INDEFINITELY, not "until the next boundary". Both branches tell the
-  # operator to rerun the gate, and that rerun is the sweep. Widening this is a
-  # PM decision about the plan's letter, not something to infer from here.
-  _fsm_service_sweep "$evidence_dir" "$execution_yaml" "resume"
+  _fsm_pre_2103_services_note "$evidence_dir" "resume"
 
   local rowfile=""
-  if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head" "$execution_yaml" "$repo" "$tree")"; then
-    local rres; rres="$(jq -r '.result // "?"' "$rowfile" 2>/dev/null || echo '?')"
+  if rowfile="$(_resume_write_row "$evidence_dir" "$gate" "$job_dir" "$job_id" "$state" "$attempts" "$head" "$tree")"; then
+    local rres; rres="$(jq -r "${AID_GATE_ROW_JQ}"'gate_row_normalize | "\(.status)/\(.reason)"' "$rowfile" 2>/dev/null || echo '?')"
     _resume_release_pointer "$epic_id"
     _resume_say "$epic_id" "found" "job '${job_id}' for gate '${gate}' is ${state} (collected, current at ${head:0:12})"
     _resume_say "$epic_id" "recorded" "gate row '${gate}' = ${rres} at ${rowfile} (checkpoint only — the next run-all assembles the report); pointer claimed as ${claimed}"
@@ -4241,14 +3905,10 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # same change on the very next invocation.
   #
   # .aid-o/metrics/gate-runtime-baselines.yaml (+ its .lock sidecar) get the
-  # same treatment (P063 Step 2): the gitignore/.git-info-exclude backfill
-  # (aid-run-gates.sh's aid_gate_baseline_ensure_gitignored) is the PRIMARY
-  # defense against these files ever showing up as tracked, but this guard is
-  # defense-in-depth, independent of whether that bootstrap succeeded in a
-  # given clone — a project where either file is unusually git-tracked must
-  # still not have its own runtime metrics writes block `init`. Same
-  # single-file, non-glob scoping as the two entries above (never a
-  # directory-wide glob).
+  # same treatment: nothing writes them since P097 Step 5, but a project that
+  # still carries them tracked from before must not have that leftover block
+  # `init`. Same single-file, non-glob scoping as the two entries above (never
+  # a directory-wide glob).
   # P074 Step 1: the dirty guard is a TREE check — it must evaluate the tree
   # the command runs in (aid_invoke_root), which inside a linked worktree is
   # the worktree itself, never the primary checkout.
@@ -4679,54 +4339,41 @@ cmd_advance_to_gates() {
       epic_id="$epic_id" run_id="$run_id" reason="plan_json_absent"
   fi
 
-  # ─── P061 E2 Step 2 ("Step 8"): gate-profile auto-resolve ─────────────────
-  # DESIGN DECISION: advance-to-gates ALWAYS resolves a profile — either the
-  # caller's explicit --profile (wins outright, no resolver call at all) or,
-  # when none was given, the Step 1 shared resolver (aid-gate-profile.sh's
-  # gate_profile_resolve) run against THIS run's base_commit..HEAD diff. The
-  # resolved name is only actually passed to aid-run-gates.sh as --profile
-  # when it is a key under execution.yaml.gate_profiles — this is the D9
-  # legacy-preservation guard: a project that has never defined gate_profiles
-  # (the overwhelming majority today, INCLUDING this plugin's own
-  # execution.yaml at the time of writing) must keep running every defined
-  # gate exactly as before. Without this guard, auto-resolve would hand
-  # aid-run-gates.sh a --profile name with no matching gate_profiles key,
-  # which is a hard, fail-loud error there (P061 E1 Step 2) — i.e. it would
-  # BREAK every project that hasn't opted in, including the very EPIC that
-  # produced this code. An explicit caller --profile is passed through
-  # unconditionally instead: the caller asked for it by name, so an unknown
-  # key is the caller's own mistake and should fail loud (same as calling
-  # aid-run-gates.sh directly with a bad --profile).
+  # ─── P097 Step 4: gate-profile selection ─────────────────────────────────
+  # An explicit caller --profile wins outright (an unknown name is the
+  # caller's own mistake and fails loud in the runner). Otherwise the
+  # resolver picks the profile for THIS run's base_commit..HEAD diff from the
+  # project's own table: the last declared profile whose when_paths matches,
+  # else default_profile. A project without gate_profiles gets no --profile
+  # (every gate runs, profile_source none); a table without a usable
+  # default_profile, or an answer with no required gate, stops here naming
+  # the upgrade command. The GATES:DONE floor recomputes the same answer.
   local profile_arg=()
   if [[ -n "$explicit_profile" ]]; then
     profile_arg=(--profile "$explicit_profile")
     [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
       profile="$explicit_profile" source="explicit_caller"
   else
-    # P064 plan Step 8: resolve at the EPIC BOUNDARY (mode-gated — see
-    # _fsm_gate_profile_boundary). In plan_branch mode this caps the run at
-    # `standard`, so no EPIC starts a broad suite on its own; the accumulated
-    # plan-final floor is recorded separately by `aid-plan-fsm.sh
-    # epic-complete`. The GATES:DONE risk precondition recomputes through the
-    # SAME helper, so the two can never disagree.
-    local _gp_base_commit _gp_paths_file _gp_resolved _gp_defined _gp_boundary
+    local _gp_base_commit _gp_paths_file _gp_resolved _gp_boundary _gp_rc=0
     _gp_base_commit=$(yaml_field "$state_file" base_commit)
     _gp_boundary="$(_fsm_gate_profile_boundary "$epic_id")"
     _gp_paths_file=$(mktemp -t aid-gate-profile-paths.XXXXXX)
     if [[ -n "$_gp_base_commit" ]]; then
       git -C "$PWD" diff --name-only "${_gp_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
     fi
-    _gp_resolved=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json" "$_gp_boundary")
+    _gp_resolved=$(gate_profile_for_paths "$execution_yaml" "$_gp_paths_file") || _gp_rc=$?
     rm -f "$_gp_paths_file"
-
-    _gp_defined=$(PROFILE="$_gp_resolved" yq '.gate_profiles[strenv(PROFILE)]' "$execution_yaml" 2>/dev/null || echo "")
-    if [[ -n "$_gp_defined" && "$_gp_defined" != "null" ]]; then
-      profile_arg=(--profile "$_gp_resolved" --profile-reason "FSM auto-resolved profile ${_gp_resolved}")
+    if (( _gp_rc != 0 )); then
+      echo "ERROR: advance-to-gates: ${execution_yaml} declares gate_profiles but no profile can be resolved (see above)." >&2
+      exit 2
+    fi
+    if [[ -n "$_gp_resolved" ]]; then
+      profile_arg=(--profile "$_gp_resolved")
       [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
         profile="$_gp_resolved" source="auto_resolved" boundary="${_gp_boundary:-legacy}"
     else
       [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_auto_resolve_skipped" \
-        resolved="$_gp_resolved" reason="not_defined_in_gate_profiles" boundary="${_gp_boundary:-legacy}"
+        reason="no_gate_profiles" boundary="${_gp_boundary:-legacy}"
     fi
   fi
 
@@ -4771,7 +4418,7 @@ cmd_advance_to_gates() {
     [[ -n "$timeline" ]] && log_event "$timeline" "fsm_advance_to_gates_fail" \
       reason="gates_runner_exit_${rc}" runner_exit="$rc"
     local _failed_gates=""
-    [[ -f "$report_file" ]] && _failed_gates="$(jq -r '[.gates // {} | to_entries[] | select(.value.result == "fail") | .key] | join(", ")' "$report_file" 2>/dev/null || true)"
+    [[ -f "$report_file" ]] && _failed_gates="$(jq -r "${AID_GATE_ROW_JQ}"'[.gates // {} | gate_rows_normalize | to_entries[] | select((.value|type) == "object" and .value.status == "fail" and .value.waived != true) | .key] | join(", ")' "$report_file" 2>/dev/null || true)"
     echo "advance-to-gates: FAIL — gates runner exit=$rc${_failed_gates:+; failed: ${_failed_gates}}; state unchanged (EXECUTE). Report: ${report_file}" >&2
     return "$rc"
   fi
@@ -6561,30 +6208,7 @@ EOF
       log_warn "lib/aid-epic-summary-page.sh did not load — the EPIC's PM page was NOT rendered (non-fatal here; the milestone_artifact_rendered rule will refuse the next turn)"
     fi
 
-    # ─── LAST-RESORT service sweep (P076 Step 10) ────────────────────────
-    # The run is complete. If its evidence still records a service that was never
-    # released — a runner killed after its last gate, a teardown that could not
-    # finish — this is the final moment anything in the pipeline looks at that
-    # run at all. Same one teardown definition, and the same P074 teardown
-    # philosophy the rest of this edge follows: a terminal operation SWEEPS, it
-    # never blocks. A sweep that cannot finish warns; the transition has already
-    # happened and is not undone by it.
-    #
-    # This is NOT the crash path. A runner SIGKILLed mid-gates never reaches
-    # release at all — that run is recovered by the next `run-all`'s entry sweep,
-    # or by `resume`.
-    #
-    # The execution.yaml is passed for the reason named on `_fsm_service_sweep`:
-    # it is the declaration the library reconciles the registry's recorded
-    # `stop_cmd` against, and without it the registry — a file in the run's own
-    # evidence directory — chooses what this edge executes. Resolved through
-    # `aid_state_path` (the same resolver used for `evidence_dir` two lines up),
-    # so it is correct from inside a linked worktree too, where the cwd-relative
-    # default would silently miss.
-    local _svc_execution_yaml
-    _svc_execution_yaml="$(aid_state_path ".aid-o/config/execution.yaml" 2>/dev/null \
-      || printf '%s' "${project_root%/}/.aid-o/config/execution.yaml")"
-    _fsm_service_sweep "$evidence_dir" "$_svc_execution_yaml" "done-advance"
+    _fsm_pre_2103_services_note "$evidence_dir" "done-advance"
   fi
 
   # Audit trail

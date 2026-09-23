@@ -6,29 +6,33 @@
 # CHAIN: that the pieces built across three EPICs hold together end to end,
 # under a real SIGKILL, with real processes, on a real repository.
 #
-#   PHASE 1  KILL IT      — run-all brings a declared service up and hands a
-#                           background gate to the supervisor; the controller is
-#                           SIGKILLed mid-poll. The supervised job survives, the
-#                           continuation artifact is on disk and schema-valid,
-#                           and `/aid-status`'s RENDER RECIPES derive
-#                           `awaiting_host_resume` from those two facts —
+#   PHASE 1  KILL IT      — run-all hands a background gate to the supervisor;
+#                           the controller is SIGKILLed mid-poll. The supervised
+#                           job survives, the continuation artifact is on disk
+#                           and schema-valid, and `/aid-status`'s RENDER RECIPES
+#                           derive `awaiting_host_resume` from those two facts —
 #                           nothing stored it, and the writer refuses to.
 #   PHASE 2  RESUME IT    — `aid-fsm.sh resume` (driven from inside a linked
 #                           worktree, the edge case the plan names) claims the
 #                           artifact EXACTLY ONCE, collects the finished job and
-#                           checkpoints the row. The rerun assembles that row,
-#                           runs the remaining gate, and takes the service down.
-#                           NO RE-EXECUTION is proved by a side-effect counter —
-#                           the gate command appends one line per execution and
-#                           the file has exactly one line at the end.
-#   PHASE 3  EXHAUST IT   — a forced GATE_TIMEOUT drives the ladder to budget
+#                           checkpoints the row. The rerun assembles that row
+#                           and runs the remaining gate. NO RE-EXECUTION is
+#                           proved by a side-effect counter — the gate command
+#                           appends one line per execution and the file has
+#                           exactly one line at the end.
+#   PHASE 3  EXHAUST IT   — a GATE_TIMEOUT stop drives the ladder to budget
 #                           exhaustion; a STUBBED adjudication returns
 #                           `escalate`; the terminus lands `blocked_for_pm` on
 #                           the map, and leaving ESCALATION still requires the
 #                           decision field.
-#   PHASE 4  GOLDEN       — the same runner over a foreground-only config with
-#                           no services is byte-identical, after normalizing the
-#                           volatile fields, to the COMMITTED pre-P076 reference.
+#   PHASE 4  GOLDEN       — the same runner over a foreground-only config is
+#                           byte-identical, after normalizing the volatile
+#                           fields, to the COMMITTED pre-P076 reference.
+#
+# THE SERVICE HALF IS GONE (P097 Step 6). Phases 1-2 used to bring a declared
+# service up beside the background gate and prove it died with its run; the
+# runner now REFUSES a `services:` block, so those phases drive the owned-job
+# chain alone. The suite stays because eight registry rows cite it.
 #   REGISTRY              — every mechanism this plan shipped has a row in
 #                           defaults/enforcement-registry.yaml (grep-asserted).
 #                           UN-SKIPPABLE: it is pure grep and `yq` over a file in
@@ -48,9 +52,8 @@
 # the adjudication lib, exactly as test-recovery-adjudicate.bats does.
 #
 # FIXTURE CONSTRUCTION reuses the idioms of the suites it integrates
-# (test-gate-background, test-resume-command, test-service-lifecycle,
-# test-recovery-ladder): a real git repo, a python3 listener, a connect-only
-# probe, per-test argv TOKENs so every orphan sweep is a real `ps` sweep.
+# (test-gate-background, test-resume-command, test-recovery-ladder): a real git
+# repo, per-test argv TOKENs so every orphan sweep is a real `ps` sweep.
 #
 # EVERY assertion names its phase and the artifact under test (`_fail`), because
 # a red line in an integration suite is worthless if it does not say which link
@@ -92,7 +95,7 @@ setup() {
   command -v jq >/dev/null 2>&1 \
     || { echo "FATAL: jq is not available — it is a hard dependency of the shipped gate runner, not an environment quirk; a skip here would report this plan's acceptance instrument as green while checking nothing" >&2; return 1; }
   command -v yq >/dev/null 2>&1 \
-    || { echo "FATAL: yq is not available — the service declarations and the status render both read it; see the note on jq above" >&2; return 1; }
+    || { echo "FATAL: yq is not available — the runner and the status render both read it; see the note on jq above" >&2; return 1; }
 
   WORK="$(mktemp -d)"; export WORK
   PROJ="$WORK/project"; export PROJ
@@ -114,7 +117,6 @@ setup() {
   TIMELINE="$ABS_EVID/timeline.jsonl"; export TIMELINE
   JOBS="$ABS_EVID/jobs"; export JOBS
   ROWS="$ABS_EVID/gates_rows"; export ROWS
-  REG="$ABS_EVID/services.json"; export REG
   MAP="$PROJ/.aid-o/work/active-runs.json"; export MAP
   # THE side-effect counter: one line per EXECUTION of the background gate's
   # command. Duration proves nothing (a fast machine and a replayed result look
@@ -134,8 +136,8 @@ setup() {
 # These five are genuine environment facilities rather than AID dependencies:
 # `setsid` is how a supervised job outlives its caller, `/proc` is how this
 # suite identifies a runner by its CWD rather than by a pattern match, `python3`
-# is how the services half allocates a real port by BIND probe, and `flock` and
-# `timeout(1)` bound the ladder's critical section and every probe. A machine
+# is what the slow gate fixture sleeps in, and `flock` and `timeout(1)` bound
+# the ladder's critical section and the gate deadline. A machine
 # without them cannot run the crash-survival phases at all — but it can still
 # run the registry assertion, which is pure grep and `yq` over a YAML file in
 # this repository and needs no process facility whatsoever. Keeping these skips
@@ -143,9 +145,9 @@ setup() {
 _require_process_facilities() {
   command -v flock   >/dev/null 2>&1 || skip "flock is not available"
   command -v setsid  >/dev/null 2>&1 || skip "setsid is not available — a supervised job cannot be detached into its own session, so the crash-survival phases cannot be run"
-  command -v python3 >/dev/null 2>&1 || skip "python3 is not available (a declared dependency of the services feature)"
+  command -v python3 >/dev/null 2>&1 || skip "python3 is not available (the slow gate fixture runs in it)"
   command -v timeout >/dev/null 2>&1 || skip "timeout(1) is not available"
-  [ -d /proc ] || skip "/proc is not available — this suite identifies runners and services by real process facts, never by a pattern match"
+  [ -d /proc ] || skip "/proc is not available — this suite identifies runners by real process facts, never by a pattern match"
 }
 
 # teardown — nothing this suite starts may outlive it, and everything is killed
@@ -154,8 +156,8 @@ _require_process_facilities() {
 # /proc/<pid>/cwd, from the token) and signalled individually.
 teardown() {
   local d pgid p
-  # 1. the supervisor's own process groups — gate jobs and service jobs alike
-  for d in "$JOBS"/*/ "$ABS_EVID"/service-jobs/*/*/ "$WORK"/*/.aid-o/work/evidence/*/*/jobs/*/; do
+  # 1. the supervisor's own process groups
+  for d in "$JOBS"/*/ "$WORK"/*/.aid-o/work/evidence/*/*/jobs/*/; do
     [[ -f "${d}job.json" ]] || continue
     pgid="$(jq -r '.pgid // empty' "${d}job.json" 2>/dev/null || true)"
     [[ "$pgid" =~ ^[1-9][0-9]*$ ]] && kill -KILL -"$pgid" 2>/dev/null || true
@@ -186,33 +188,6 @@ _fail() {
 
 # ── fixtures ────────────────────────────────────────────────────────────────
 _write_fixtures() {
-  # THE service: an ordinary server bind, listening forever. $1 port $2 token.
-  cat > "$FIX/listen.sh" <<'EOS'
-#!/usr/bin/env bash
-set -euo pipefail
-exec python3 -c 'import socket,sys
-s = socket.socket()
-s.bind(("127.0.0.1", int(sys.argv[1])))
-s.listen(8)
-while True:
-    c, _ = s.accept(); c.close()' "$1" "$2"
-EOS
-
-  # THE probe: connect-only — it asks "is somebody serving", never "may I bind".
-  cat > "$FIX/probe.sh" <<'EOS'
-#!/usr/bin/env bash
-set -euo pipefail
-exec python3 -c 'import socket,sys
-socket.create_connection(("127.0.0.1", int(sys.argv[1])), 1.0).close()' "$1"
-EOS
-
-  # stop_cmd: one line per teardown, so "released" is a count, not a belief.
-  cat > "$FIX/stop.sh" <<'EOS'
-#!/usr/bin/env bash
-set -uo pipefail
-printf '%s\n' "${SVC_PORT:-ENV_WAS_EMPTY}" >> "$1"
-EOS
-
   # THE background gate: a controlled sleep-loop, deterministic by construction
   # so a fast CI cannot make it finish before the SIGKILL lands. It appends ONE
   # line to the execution counter before it starts sleeping.
@@ -226,18 +201,6 @@ end = time.time() + float(sys.argv[1])
 while time.time() < end:
     time.sleep(0.1)
 print("bg-done")' "$2" "$3"
-EOS
-
-  # A gate that PROVES it saw the service: it reads the per-run port out of the
-  # run registry (the only place it is published) and connects.
-  #   $1 marker  $2 registry  $3 service name
-  cat > "$FIX/gate-touch.sh" <<'EOS'
-#!/usr/bin/env bash
-set -euo pipefail
-port="$(jq -r --arg n "$3" '.services[$n].port' "$2")"
-python3 -c 'import socket,sys
-socket.create_connection(("127.0.0.1", int(sys.argv[1])), 2.0).close()' "$port"
-printf '%s\n' "$port" >> "$1"
 EOS
 
   chmod +x "$FIX"/*.sh
@@ -272,19 +235,11 @@ _seed_map() {
     > "$ABS_EVID/fsm-state.yaml"
 }
 
-# THE execution.yaml phases 1 and 2 share: one declared service, one background
-# gate (SIGKILLed mid-poll), one foreground gate that needs the service and has
-# not run yet when the controller dies.
+# THE execution.yaml phases 1 and 2 share: one background gate (SIGKILLed
+# mid-poll) and one foreground gate that has not run yet when the controller
+# dies. The foreground gate leaves a marker, so "it ran on the rerun" is a file.
 _write_exec_yaml() {
   cat > "$PROJ/exec.yaml" <<YAML
-services:
-  api:
-    start_cmd: bash "$FIX/listen.sh" "\$SVC_PORT" $TOKEN
-    probe_cmd: bash "$FIX/probe.sh" "\$SVC_PORT"
-    stop_cmd: bash "$FIX/stop.sh" "$WORK/stop.log"
-    startup_deadline_seconds: 25
-    max_lifetime_seconds: 300
-    port_env: SVC_PORT
 gates:
   slow_bg:
     command: bash "$FIX/slow-gate.sh" "$MARKER" 12 $TOKEN
@@ -292,10 +247,9 @@ gates:
     timeout_seconds: 180
     run_mode: background
   after_fg:
-    command: bash "$FIX/gate-touch.sh" "$WORK/after.marker" "$EVID/services.json" api
+    command: printf 'ran\n' >> "$WORK/after.marker"
     required: true
     timeout_seconds: 30
-    needs_services: [api]
 YAML
 }
 
@@ -358,10 +312,8 @@ _wait_for() { # <seconds> <shell-condition>
   return 1
 }
 
-_reg_field() { jq -r "${1}" "$REG" 2>/dev/null || true; }
-
 # THE orphan sweep — a real `ps` over the whole process table for this test's
-# service/gate token.
+# gate token.
 _assert_no_orphans() { # _assert_no_orphans <phase>
   local found
   found="$(ps -eo pid,ppid,args 2>/dev/null | grep -F "$TOKEN" | grep -v grep || true)"
@@ -371,11 +323,6 @@ _assert_no_orphans() { # _assert_no_orphans <phase>
     return 1
   fi
   return 0
-}
-
-_probe_port() {
-  python3 -c 'import socket,sys
-socket.create_connection(("127.0.0.1", int(sys.argv[1])), 1.0).close()' "$1" 2>/dev/null
 }
 
 claim_files() { ls -1 "$ARTIFACT".claimed-* 2>/dev/null || true; }
@@ -452,10 +399,10 @@ YAML
 #   completed_at / _generated_at    — wall-clock stamps
 #   revision.head_sha               — the fixture repo's fresh commit sha
 #   gates[].duration_ms             — measured wall clock
-#   gates[].runtime_baseline.p95_ms — derived from that same wall clock
+#   gates[].started_at/completed_at — version-2 rows stamp their own (P097 Step 2)
 #   _command_log[].duration_ms      — measured wall clock
 # Everything else — results, exit codes, outputs, attempts, ordering, the whole
-# schema — is compared.
+# schema — is compared. Kept identical to test-gate-background.bats's copy.
 golden_normalize() {
   jq -S '
       .completed_at = "NORMALIZED"
@@ -465,8 +412,8 @@ golden_normalize() {
         if (.value | type) == "object" then
           .value |= (
               (if has("duration_ms") then .duration_ms = 0 else . end)
-            | (if (.runtime_baseline | type) == "object"
-               then .runtime_baseline.p95_ms = 0 else . end)
+            | (if has("started_at") then .started_at = "NORMALIZED" else . end)
+            | (if has("completed_at") then .completed_at = "NORMALIZED" else . end)
           )
         else . end)
     | ._command_log |= map(.duration_ms = 0)
@@ -491,17 +438,6 @@ golden_normalize() {
     || _fail 1 "$JOBS/slow_bg-attempt-1/job.json" "the supervisor never recorded a pid for the background gate"
   _wait_for 60 '[[ "$(jq -r ".job_id // \"\"" "$ARTIFACT" 2>/dev/null || true)" == "slow_bg-attempt-1" ]]' \
     || _fail 1 "$ARTIFACT" "the continuation pointer was not written EAGERLY, before the job was handed off"
-
-  # The service is up and answering on the port this run allocated: a declared
-  # service LIVES with its run.
-  [ -f "$REG" ] || _fail 1 "$REG" "no service registry was written for a run that declares a service"
-  [ "$(_reg_field '.services.api.state')" = "healthy" ] \
-    || _fail 1 "$REG" "the declared service is not healthy while its run is in flight"
-  local port; port="$(_reg_field '.services.api.port')"
-  [[ "$port" =~ ^[1-9][0-9]*$ ]] \
-    || _fail 1 "$REG" "no per-run port was recorded for the declared service"
-  _probe_port "$port" \
-    || _fail 1 "$REG" "the recorded per-run port answers nothing — the service is not actually serving"
 
   # THE CRASH: SIGKILL, no trap, no cleanup, every process that IS the runner.
   kill_runner
@@ -617,7 +553,7 @@ golden_normalize() {
   [ "$(wc -l < "$MARKER")" -eq 1 ] \
     || _fail 2 "$MARKER" "resume RE-RAN the background gate: $(wc -l < "$MARKER") executions, expected 1"
 
-  # ── the rerun: the remaining gate runs, the run completes, services go down ─
+  # ── the rerun: the remaining gate runs, the run completes ─────────────────
   run run_gates_fg
   echo "stderr: $(cat "$WORK/fg.err")"
   [ "$status" -eq 0 ] \
@@ -641,30 +577,21 @@ golden_normalize() {
   [ "$(wc -l < "$MARKER")" -eq 1 ] \
     || _fail 2 "$MARKER" "the background gate was re-executed by the rerun: $(wc -l < "$MARKER") executions, expected 1"
 
-  # The remaining gate genuinely reached the service on a per-run port.
+  # The remaining gate genuinely ran on the rerun, and exactly once.
   [ -f "$WORK/after.marker" ] \
-    || _fail 2 "$WORK/after.marker" "the dependent gate never connected to the declared service"
-  [[ "$(cat "$WORK/after.marker")" =~ ^[1-9][0-9]*$ ]] \
-    || _fail 2 "$WORK/after.marker" "the dependent gate did not record the per-run port it connected to"
+    || _fail 2 "$WORK/after.marker" "the foreground gate that had not run when the controller died never ran"
+  [ "$(wc -l < "$WORK/after.marker")" -eq 1 ] \
+    || _fail 2 "$WORK/after.marker" "the foreground gate ran $(wc -l < "$WORK/after.marker") times; expected 1"
 
-  # ── the service DIES with its run, leaving no orphan ──────────────────────
-  [ "$(_reg_field '.services.api.state')" = "stopped" ] \
-    || _fail 2 "$REG" "the registry's terminal state for the declared service is not 'stopped' after the run finished"
-  [ -f "$WORK/stop.log" ] \
-    || _fail 2 "$WORK/stop.log" "the declared stop_cmd never ran"
-  ! _probe_port "$(cat "$WORK/after.marker")" \
-    || _fail 2 "the process table" "the service is still answering its port after the run released it"
+  # ── nothing of this run outlives it ───────────────────────────────────────
   _assert_no_orphans 2
-  run grep -c '"event":"services_released"' "$TIMELINE"
-  [ "$status" -eq 0 ] \
-    || _fail 2 "$TIMELINE" "the release edge is not on the record"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PHASE 3 — a real timeout, a real budget, a stubbed adjudication, a PM stop.
 # ═══════════════════════════════════════════════════════════════════════════
 
-@test "phase 3: a forced GATE_TIMEOUT exhausts the ladder budget, the stubbed adjudication escalates, and the run is blocked for a person" {
+@test "phase 3: a GATE_TIMEOUT stop exhausts the ladder budget, the stubbed adjudication escalates, and the run is blocked for a person" {
   _require_process_facilities
   local P3EPIC="E-076-8_8"
   local P3EVID_REL=".aid-o/work/evidence/${P3EPIC}/R-1"
@@ -679,35 +606,14 @@ golden_normalize() {
   git -C "$P3PROJ" add README.md .gitignore
   git -C "$P3PROJ" commit -qm "phase 3 fixture base"
 
-  # THE FORCED TIMEOUT: a background gate whose command cannot finish inside its
-  # declared deadline. Deterministic by construction — the deadline is 2 s and
-  # the command sleeps 60.
-  cat > "$P3PROJ/exec.yaml" <<'YAML'
-gates:
-  slow:
-    command: "sleep 60"
-    required: false
-    timeout_seconds: 2
-    max_retries: 2
-    run_mode: background
-YAML
-
-  ( cd "$P3PROJ" && AID_GATE_BASELINE_FILE="$WORK/baseline-p3.yaml" \
-      "$RUN_GATES" run-all exec.yaml "$P3EPIC" R-1 \
-      --report-file "$P3EVID_REL/gates/gates_report.json" \
-      >"$WORK/p3.out" 2>"$WORK/p3.err" )
-
+  # No runner drive here any more: the `timeout_policy_block` emitter this
+  # phase used to force left with the runtime baseline (P097 Step 5), and a
+  # gate stopped at its deadline is a plain `job_timeout` row that writes no
+  # ladder entry (test-recovery-ladder.bats case 5 pins that). GATE_TIMEOUT's
+  # one live emitter is the past-grace cancel of a job its supervisor failed to
+  # stop, which no fixture can force — so the ladder is entered directly, from
+  # the budget on, exactly as the ladder suite's own cases do.
   local REC="$P3EVID/recovery-ladder.jsonl"
-
-  # (3a) the REAL runner classified the stop and wrote the mechanical entry
-  [ -f "$REC" ] \
-    || _fail 3 "$REC" "a gate that timed out wrote no ladder entry — the emitter did not fire: $(cat "$WORK/p3.err")"
-  run jq -r -s '[.[] | select(.class=="GATE_TIMEOUT" and .emitter=="timeout_policy_block")] | length' "$REC"
-  [ "$output" -ge 1 ] \
-    || _fail 3 "$REC" "no GATE_TIMEOUT stop was recorded by the timeout_policy_block emitter: $(cat "$REC")"
-  run jq -r -s '.[0] | [.event, .class, .outcome] | join("|")' "$REC"
-  [ "$output" = "recovery_stop|GATE_TIMEOUT|detected" ] \
-    || _fail 3 "$REC" "the emitted stop line is not the pinned shape: $output"
 
   # (3b) THE BUDGET. GATE_TIMEOUT ships attempts: 1 — the first is granted, the
   #      second is refused IN THE SAME SECOND, so the wall clock is not what
@@ -808,10 +714,10 @@ SH
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PHASE 4 — the invariance proof: everything above changed nothing for a
-# project that declares no services and runs every gate in the foreground.
+# project that runs every gate in the foreground.
 # ═══════════════════════════════════════════════════════════════════════════
 
-@test "phase 4: GOLDEN — a foreground-only config with no services is byte-identical to the committed pre-P076 reference" {
+@test "phase 4: GOLDEN — a foreground-only config is byte-identical to the committed pre-P076 reference" {
   _require_process_facilities
   [ -f "$GOLDEN" ] \
     || _fail 4 "$GOLDEN" "the committed pre-P076 reference is missing — phase 4 has nothing to compare against and must never regenerate it"
@@ -835,11 +741,6 @@ SH
     || _fail 4 "$GOLDEN" "the report drifted from the committed pre-P076 reference:
 $output"
 
-  # And no service state was created for a project that declares none.
-  [ ! -e "$GPROJ/.aid-o/work/evidence/E-P076/R-1/services.json" ] \
-    || _fail 4 "services.json" "a project that declares no services got a service registry"
-  [ ! -e "$GPROJ/.aid-o/work/evidence/E-P076/R-1/service-jobs" ] \
-    || _fail 4 "service-jobs/" "a project that declares no services got a service jobs root"
   [ ! -e "$GPROJ/.aid-o/work/evidence/E-P076/R-1/auto_resume_required.json" ] \
     || _fail 4 "auto_resume_required.json" "a run with no background gate wrote a continuation pointer"
 }
@@ -967,6 +868,12 @@ $ins"
   #      distinctive key. A token is only worth asserting if deleting the
   #      mechanism's description would delete the token — that is the bar every
   #      entry below is chosen against, and the third column records it.
+  #
+  # THE FIVE SERVICE ROWS ARE NOT IN THIS TABLE ANY MORE (P097 Step 6): they are
+  # `removed_scoped`, their `instruction:` says "removed (...)" and points at the
+  # archive CHANGELOG for the history, and the mechanism they described no
+  # longer has a document to anchor to. The id loop above still proves the rows
+  # exist, and the `removal:` field is what says why.
   local triple rid tfile want cited
   for triple in \
     "gate_run_mode_contract|docs/extending-aid.md|### The owned-job contract" \
@@ -974,11 +881,6 @@ $ins"
     "resume_single_use_claim|commands/aid-run.md|exactly once" \
     "active_run_stall_derivation|commands/aid-status.md|recipe: stalled-runs" \
     "instruction_closure_structural_check|skills/agent-protocol.md|Controller boundary" \
-    "service_declaration_schema|defaults/execution.yaml|service-declaration.schema.json" \
-    "gate_needs_services_fail_fast|defaults/execution.yaml|needs_services" \
-    "service_registry_eager_write|defaults/execution.yaml|no self-daemonising fork" \
-    "service_lifecycle_acquire_release|skills/role-cards.md|declare it, never improvise it" \
-    "service_teardown_declaration_preflight|docs/extending-aid.md|Teardown reconciles commands against the declaration" \
     "auto_recovery_policy_contract|commands/aid-run.md|auto-recovery.yaml" \
     "recovery_adjudication_allowlist|defaults/policies/auto-recovery.yaml|allowed_actions" \
     "recovery_ladder_budget_refusal|defaults/policies/auto-recovery.yaml|wall_clock_seconds" \

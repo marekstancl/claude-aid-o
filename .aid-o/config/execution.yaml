@@ -363,7 +363,7 @@ gate_profile_defaults:
 
 gate_profiles:
   # ─── P064 plan Step 8 — the five canonical risk profiles ────────────────
-  # These are the names lib/aid-gate-profile.sh's resolver can return
+  # These are the names the old profile classifier (deleted in P097)'s resolver can return
   # (quick < targeted < standard < full < release). Until this block existed,
   # every auto-resolve took aid-fsm.sh's `gate_profile_auto_resolve_skipped`
   # branch and `targeted_tests` was defined but never activated anywhere.
@@ -402,7 +402,7 @@ gate_profiles:
   #   * Including it anyway would plant a permanent `fail` row in every `full`
   #     run of this repository: the Initial mapping currently covers none of
   #     `scripts/aid-plan-fsm.sh`, `scripts/lib/aid-queue-write.sh`,
-  #     `scripts/lib/aid-gate-profile.sh`, `scripts/aid-queue-add.sh` or
+  #     `scripts/the old profile classifier (deleted in P097)`, `scripts/aid-queue-add.sh` or
   #     `defaults/enforcement-registry.yaml`, so exit 3 is guaranteed. A red
   #     row that carries no information the run does not already have is
   #     noise, and noise is what makes real red rows get ignored.
@@ -514,6 +514,7 @@ gate_profiles:
       - bats_fsm
       - plan_diff
       - docs_updated
+      - check_release_paths
   p064-closure:
     reason: >-
       P064 E-064-1_2 closure run (PM disposition 2026-07-22). Re-seals gate

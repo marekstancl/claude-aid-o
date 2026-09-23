@@ -1,40 +1,33 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aid-gitignore-backfill.sh — generic gitignore-style line helper (P063 EPIC
-# "Gate Runtime Baselines", Step 2/4).
+# aid-gitignore-backfill.sh — generic gitignore-style line helper.
 #
-# WHY: aid-run-gates.sh must never let `.aid-o/metrics/` dirty an
-# already-initialized existing project's git tree. Brand-new projects get
-# `.aid-o/metrics/` for free via the shipped `defaults/.gitignore` (copied by
-# /aid-init into the project's tracked `.gitignore`). Already-initialized
-# projects need a LOCAL-ONLY, lazy, automatic backfill into
-# `.git/info/exclude` (per-clone, never committed, needs no manual re-init)
-# — see `aid-gate-runtime-baseline.sh`'s `gate_baseline_ensure_gitignored`,
-# the sole production caller of the functions in this file.
+# WHY THIS FILE EXISTS: /aid-init backfills a consumer project's tracked
+# `.gitignore` per line (commands/aid-init.md, "Base manifest") — append an
+# entry only when its exact line is absent, never reorder or rewrite what a
+# person wrote. That logic lives here once; the command sources this file
+# inline. No script sources it at run time (P097 Step 5 removed the gate
+# runner's one-time `.git/info/exclude` bootstrap along with the runtime
+# baseline it existed for).
 #
 # ── GENERIC OVER WHICH FILE ──────────────────────────────────────────────────
-# This file has NO knowledge of `.aid-o/metrics/` or `.git/info/exclude`
-# specifically — it operates on any "one gitignore-pattern-per-line" file at
-# an arbitrary path. The runtime caller targets `.git/info/exclude`; this
-# file's own bats suite (test-aid-gitignore-backfill.bats) exercises the
-# exact same two functions against a plain `.gitignore`-style fixture too —
-# there is exactly one place this append-only-at-EOF, never-reorder logic
-# lives, not two copies that could drift.
+# This file has NO knowledge of any particular entry or target — it operates
+# on any "one gitignore-pattern-per-line" file at an arbitrary path. Its bats
+# suite (test-aid-gitignore-backfill.bats) exercises the same two functions
+# against a plain `.gitignore`-style fixture and a `.git/info/exclude`-style
+# one — there is exactly one place this append-only-at-EOF, never-reorder
+# logic lives, not two copies that could drift.
 #
 # ── SOURCEABLE-SAFE CONVENTION ───────────────────────────────────────────────
 # NO top-level `set -e`/`set -euo pipefail` (matches
-# aid-gate-runtime-baseline.sh / aid-gate-profile.sh / aid-cache-preflight.sh).
-# This file is sourced
-# directly into aid-gate-runtime-baseline.sh's shell, which is itself sourced
-# into aid-run-gates.sh's `set -euo pipefail` shell — an unguarded non-zero
-# return here would abort the caller's gate loop. Every function below
-# returns 0 even when the underlying mkdir/append fails (fail open, warn to
-# stderr) — a metrics-bootstrap side effect must never block a real gate run.
+# aid-cache-preflight.sh): a caller may source this under its own strict
+# shell. Every function below returns 0 even when the underlying mkdir/append
+# fails (fail open, warn to stderr).
 #
 # ── USAGE ─────────────────────────────────────────────────────────────────
 #   source .../lib/aid-gitignore-backfill.sh
-#   gitignore_exclude_has_entry ".git/info/exclude" ".aid-o/metrics/"
-#   gitignore_exclude_append   ".git/info/exclude" ".aid-o/metrics/"
+#   gitignore_exclude_has_entry ".gitignore" ".aid-o/work/"
+#   gitignore_exclude_append   ".gitignore" ".aid-o/work/"
 # =============================================================================
 
 # gitignore_exclude_has_entry <path> <entry>

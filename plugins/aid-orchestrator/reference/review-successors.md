@@ -120,3 +120,32 @@ ACTIVE registry id, or `none (…)` naming the recorded decision.
 | `release_policy_preempted` | none (P096: it corrected the dual run for sampling bias) | telemetry removed |
 | `pm_override_single_use_claim` | none (P096: the C3 loop it overrode is gone) | plan review keeps its own override record |
 | `review_signal_toggle_fail_closed` | none (P096: the reporter and simplifier toggles are gone) | library removed |
+
+# Gate-layer mechanisms: today → successor (P097)
+
+One row per registry id retired by the gate rebuild (Steps 5, 6 and 9). A
+successor is an ACTIVE registry id, or `none (…)` naming the recorded decision.
+
+## Registry ids retired by P097
+
+| Removed or retired id | Successor | Note |
+|-----------------------|-----------|------|
+| `gate_required_when` | `execution_yaml_dead_keys_refused` | P097 Step 6: `required:` alone decides; a file still carrying `required_when` is refused with the upgrade command |
+| `gate_needs_services_fail_fast` | `execution_yaml_dead_keys_refused` | P097 Step 6: the service lifecycle is gone; a gate carrying `needs_services` is refused |
+| `gate_timeout_policy_block` | `gate_timeout_fixed` | P097 Step 5: the deadline is `timeout_seconds` and nothing else; no cross-run streak |
+| `gate_runtime_baseline_advisory` | `gate_timeout_fixed` | P097 Step 5: the report proposes a number, never a run mode |
+| `gate_baseline_sequential_only` | `gate_timeout_fixed` | P097 Step 5: no live baseline is written during a run, so nothing to serialize |
+| `service_declaration_schema` | `execution_yaml_dead_keys_refused` | P097 Step 6: a `services:` key, empty or not, is refused with the upgrade command |
+| `service_lifecycle_acquire_release` | none (P097 Step 6: the sweep only ever signalled service jobs; gates keep their one owner, aid-job.sh) | nothing replaces the sweep |
+| `service_registry_eager_write` | none (P097 Step 6: no service is started by a run; the library left in Step 9) | unreachable from the runner |
+| `service_teardown_declaration_preflight` | none (P097 Step 6: no service is stopped by a run; the library left in Step 9) | unreachable from the runner |
+| `risk_upgrade` | `gate_profile_from_caller` | P097 Step 4 replaced the fixed five-name rank with the project's ordered table; Step 9 removed the old library |
+| `gate_profile_epic_boundary_cap` | `gate_profile_from_caller` | P097 Step 4: an EPIC runs what its table resolves; the plan-final floor stays `release`, no cap between them |
+
+## Gate-layer mechanisms without a registry row of their own (P097)
+
+| Today (before P097) | Successor |
+|---------------------|-----------|
+| the service library (`services:` lifecycle, per-run port registry, env-name denylist) | none (P097 Step 6 made it unreachable, Step 9 deleted it; no consumer declared a service) |
+| the old risk-classification library (fixed five-name rank, hard-coded high-risk paths, `boundary=epic` cap) | `scripts/lib/aid-gate-profile-select.sh` (`gate_profile_from_caller`) |
+| recovery stop class `SERVICE_UNHEALTHY` and its service-restart action | none (P097 Step 9: its only emitter was the service library; the policy has six classes) |

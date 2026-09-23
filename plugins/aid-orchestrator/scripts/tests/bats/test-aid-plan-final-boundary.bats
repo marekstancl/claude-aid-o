@@ -1403,9 +1403,10 @@ EOF
   run jq -r '.gates.bats_fsm.result' "$(_report)"
   [ "$output" = "pass" ]
 
-  # Now the one thing under test: a REQUIRED gate carrying result "skip".
+  # Now the one thing under test: a REQUIRED gate carrying status "skip"
+  # (P097 Step 2: the version-2 row; `result` is only the derived field).
   local tmp; tmp="$(mktemp)"
-  jq '.gates.bats_fsm.result = "skip" | .gates.bats_fsm.reason = "no_command"' "$(_report)" > "$tmp"
+  jq '.gates.bats_fsm.status = "skip" | .gates.bats_fsm.result = "skip" | .gates.bats_fsm.reason = "no_command"' "$(_report)" > "$tmp"
   mv "$tmp" "$(_report)"
 
   # Re-enter the stage against that report. PLAN_REVIEW -> PLAN_GATES is not a

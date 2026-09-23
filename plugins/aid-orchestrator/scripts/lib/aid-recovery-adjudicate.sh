@@ -29,10 +29,10 @@
 # caller, the policy file or the reply. It is three nested facts about the code:
 #
 #   INVARIANT 1 (the closed set). Every element of the allowlist this function
-#     builds is compared, with `==`, against `_aid_ra_action_constants` — six
+#     builds is compared, with `==`, against `_aid_ra_action_constants` — five
 #     names written as literals in THIS file. Anything else is dropped. The set
 #     of strings this function can print is therefore a subset of
-#     {those six} ∪ {"escalate"}, whatever the policy says, whatever the class
+#     {those five} ∪ {"escalate"}, whatever the policy says, whatever the class
 #     is called and whatever the adjudicator replies. `action_vocabulary` in the
 #     policy is not the authority for that set; it is checked AGAINST it
 #     (`_aid_ra_policy_error`), and a drift test pins lib = policy = schema.
@@ -66,7 +66,7 @@
 # ── FAIL-CLOSED PATHS (every one of these ends at `escalate`) ───────────────
 #   • missing / unreadable run evidence dir, or a non-appendable timeline
 #   • an unreadable, unparseable or schema-invalid policy, a policy whose
-#     `action_vocabulary` is not the six this code knows, or a class declaring
+#     `action_vocabulary` is not the five this code knows, or a class declaring
 #     an action outside it (`loader_contract.unknown_action`: "a schema error,
 #     refused at load") → refused BEFORE any dispatch
 #   • a stop class not declared by the policy (including any attempt at query
@@ -192,7 +192,7 @@ _AID_RA_FSM_DEFAULT="$_AID_RA_DIR/../aid-fsm.sh"
 _AID_RA_SCHEMA_CHECK="unavailable"
 
 # ── THE CLOSED SET ──────────────────────────────────────────────────────────
-# INVARIANT 1 lives here. These six literals are the only action names this
+# INVARIANT 1 lives here. These five literals are the only action names this
 # adjudicator can ever print. They are deliberately NOT read from the policy:
 # the policy is the thing being bounded. `test-recovery-adjudicate.bats` case 22
 # pins them equal to the policy's `action_vocabulary` keys and to the schema's
@@ -200,7 +200,6 @@ _AID_RA_SCHEMA_CHECK="unavailable"
 _aid_ra_class_constants() {
   printf '%s\n' \
     GATE_TIMEOUT \
-    SERVICE_UNHEALTHY \
     JOB_LOST \
     TRANSIENT_INFRA \
     DISPATCH_ORPHANED \
@@ -212,7 +211,6 @@ _aid_ra_action_constants() {
   printf '%s\n' \
     wait_and_resume \
     retry_once \
-    restart_service_once \
     rerun_targeted \
     resume_missing_lenses \
     collect_and_continue
@@ -271,7 +269,7 @@ _aid_ra_policy_error() {
       reason="recovery policy is not parseable YAML: $policy"; break
     fi
 
-    # (a) the vocabulary must be EXACTLY the six names this code knows. A policy
+    # (a) the vocabulary must be EXACTLY the five names this code knows. A policy
     #     that invents a seventh is not a policy this adjudicator can bound.
     local declared expected
     declared="$(yq -r '.action_vocabulary // {} | keys | .[]' "$policy" 2>/dev/null | LC_ALL=C sort | tr '\n' ',')" || declared=""
@@ -301,7 +299,7 @@ _aid_ra_policy_error() {
     declared_c="$(yq -r '.stop_classes // {} | keys | .[]' "$policy" 2>/dev/null | LC_ALL=C sort | tr '\n' ',')" || declared_c=""
     expected_c="$(_aid_ra_class_constants | LC_ALL=C sort | tr '\n' ',')"
     if [[ "$declared_c" != "$expected_c" ]]; then
-      reason="policy stop_classes is not the closed set of seven this adjudicator enforces"; break
+      reason="policy stop_classes is not the closed set of six this adjudicator enforces"; break
     fi
     #      The terminus read is type-aware and COUNTED: `join` on a non-array is
     #      a yq ERROR, not an empty result, so the earlier form emitted no lines

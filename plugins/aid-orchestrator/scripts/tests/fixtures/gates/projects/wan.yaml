@@ -1,0 +1,173 @@
+# AID gate definitions — used by aid-run-gates.sh
+#
+# Each gate runs a shell command; pass = exit 0, fail = non-zero.
+# `required: true` gates contribute to overall pass/fail.
+# Gate timeout is 60 s by default (per aid-run-gates.sh).
+#
+# ── Brány pouští ADRESÁŘE, ne jmenné seznamy (P092) ───────────────────────
+# Do 2026-08-12 vyjmenovávala brána nad integračními testy 74 souborů ručně.
+# Projekt se ten seznam zapomněl aktualizovat třikrát (IMP-181/190/211) a audit
+# 2026-08-11 našel 156 souborů (1 401 případů), které nespouštěl nikdo. Brány
+# proto pouštějí celé adresáře a vyřazení se deklaruje v
+# `.aid-o/config/test-quarantine.yaml` — s vlastníkem a lhůtou, ne mlčky.
+# Hlídá to `tests/meta/` (brána `tests_meta`).
+#
+# Každá brána nad testy volá `scripts/pytest.sh`. Ten je jediné místo, které
+# vkládá karanténu, takže cesta kolem něj by byla cesta, jak ji obejít.
+#
+# Tím zanikly čtyři mechanismy, které tuhle díru jen obcházely: marker
+# `gate_required` + `scripts/gate_registry_check.sh` + brána `gate_registry`
+# (hlídaly, že se PŘIHLÁŠENÝ soubor dostal do seznamu — soubor, který se
+# nepřihlásil, neviděly, a přesně těch bylo 156), a brány
+# `counts_invariant_tests`, `p077_confirmations`, `p079_production_overview`,
+# které byly jmenné podmnožiny té velké.
+
+# ── Gate profily (P061) ────────────────────────────────────────────────────
+# Profil = whitelist bran pro JEDEN běh (`aid-run-gates.sh --profile <jméno>`).
+# Brána mimo profil dostane řádek `profile_excluded` — nikdy se nezahodí tiše.
+gate_profiles:
+  # Projektový default. Jméno musí zůstat `standard` — aid-fsm.sh's GATES:DONE
+  # risk-profile check (D4/P061) zná jen pět kanonických jmen
+  # (quick/targeted/standard/full/release) a projektové jméno padá na
+  # `risk_profile_unresolvable`.
+  standard:
+    include:
+      - tests_merge_path
+      - lint_python
+      - tests_frontend
+      - docs_updated
+
+  # Nejpřísnější úroveň — uzavření plánu (`plan-finalize --stage gates`).
+  # Proti `standard` navíc `plan_diff` a `tests_full_portfolio`.
+  release:
+    include:
+      - plan_diff
+      - tests_merge_path
+      - lint_python
+      - tests_frontend
+      # POZOR, `tests_full_portfolio` sem NEPATŘÍ: nese značku `nightly: true`,
+      # tedy „běží v noci, ne na cestě k merge". P094 ho sem zkusil přidat
+      # (uzávěr plánu je jediné místo, kde by se celé portfolio hodilo) a běh
+      # skončil signálem 137 — 28 minut testů se do brány nevejde. Celé
+      # portfolio dokazuje noční běh, ne uzávěr.
+      # P094: chybělo, přestože komentář nad profilem říká „proti standard
+      # navíc JEN plan_diff" — release má být nadmnožina standardu. Bez toho
+      # plan-finalize --stage gates padal na vlastní kontrole („excluded_gates
+      # obsahuje docs_updated, který je required:true").
+      - docs_updated
+      # POZOR, `tests_session_intake` sem NEPATŘÍ, přestože je taky
+      # `required: true`: má deklarovanou karanténu, a bránu s karanténou
+      # smí profil obsahovat jen tehdy, když existuje předem deklarovaný
+      # náhradní profil `release_quarantine`. Vyloučení je u ní legitimní.
+
+gates:
+  # Ověřuje, že AC bloky plánu jsou materiálně splněné v HEAD. Plán-final stage
+  # ji vyžaduje bez ohledu na profil (`result` musí být `pass`, ne jen
+  # `profile_excluded`), proto je i v `release.include[]` výš.
+  # POZOR na jméno: `plan_diff` je KANONICKÝ identifikátor, na který se ptá
+  # `aid-plan-fsm.sh` při uzávěru plánu (`jq '.gates.plan_diff.result'`).
+  # Do P094 se tahle brána jmenovala `check_plan_diff` a plánový uzávěr proto
+  # hlásil „plan_diff result is '<absent>'" — brána běžela, ale nikdo ji
+  # nenašel. Přejmenovat ji zpátky znamená rozbít uzavření každého plánu.
+  plan_diff:
+    description: "Plan AC blocks materially satisfied in codebase HEAD"
+    required: true
+    type: deterministic
+    # Cesta k evidenci se odvozuje ze SPOLEČNÉHO git adresáře, ne z pracovního.
+    # Brány běží s cwd v pracovní kopii plánu (.aid-worktrees/plan-P…), kde ale
+    # `.aid-o` je obyčejný adresář z větve — evidence žije v hlavním checkoutu.
+    # Relativní `.aid-o/…` proto při uzavírání plánu ukazovalo do prázdna a brána
+    # padala na „Evidence dir not found" (28. 8. 2026, P099).
+    command: >-
+      AID_PLAN_DIFF_AC_TIMEOUT=300 {plugin_path}/scripts/aid-plan-diff.sh
+      --plan {plan_path}
+      --evidence-dir "$(dirname "$(git rev-parse --git-common-dir)")/.aid-o/work/evidence/{epic_id}/{run_id}"
+      --base-commit {base_commit}
+    timeout_seconds: 300
+    pass_criteria: "exit 0 (all present) or exit 2 (legacy plan / Fast Mode graceful skip)"
+    max_retries: 0
+
+  # T0 + T1 — všechno, co nepotřebuje databázi ani úložiště. Tohle je cesta
+  # k merge; jméno říká rozsah, protože rozsah je tu to podstatné (pravidlo 10).
+  tests_merge_path:
+    command: "WAN_TEST_BLOCK_SOCKETS=1 scripts/pytest.sh tests/meta/ tests/unit/ -q < /dev/null"
+    required: true
+    max_retries: 0
+    timeout_seconds: 300
+
+  # T2 — celý integrační i e2e adresář. NENÍ v žádném profilu: standard říká
+  # „noční cron, nikdy na cestě k merge". Volá ji `scripts/nightly_tests.sh`
+  # jménem. Do 2026-08-13 běžela na cestě k merge a stála 27,5 min; bylo to
+  # vědomé a přechodné, dokud se nevědělo, co je rozbité (P092 Kroky 1-4).
+  tests_full_portfolio:
+    # Značka pro `tests/meta/test_gate_coverage.py`: brána mimo profil normálně
+    # znamená „neběží" (tak zmizelo z dosahu 24 souborů). Tahle běží — jen
+    # v noci, ne na cestě k merge.
+    nightly: true
+    command: "scripts/pytest.sh tests/ -q --durations=25 < /dev/null"
+    # `required` čte JEN kontrola uzávěru plánu; noční běh pouští celý strom
+    # napřímo (`scripts/nightly_tests.sh` řádek 283), ne přes runner bran.
+    # `required: true` tady tedy nikoho nenutilo nic spustit — jen bránilo
+    # uzavřít plán, protože profil `release` tuhle bránu vyloučit MUSÍ
+    # (28 minut, historicky signál 137) a kontrola uzávěru značku `nightly`
+    # neumí. Že se v noci opravdu pouští, hlídá `tests/meta/test_gate_coverage.py`
+    # přes `nightly: true` proti `docs/testing/nightly-cron.md` — ne přes tohle pole.
+    # Viz .aid-o/work/aid-plugin-issues.md bod 14.
+    required: false
+    max_retries: 0
+    timeout_seconds: 3600
+
+  lint_python:
+    # `run --rm --no-deps`, ne `exec`: `exec` lintuje obsah DLOUHOBĚŽÍCÍHO
+    # kontejneru, kam si kdokoli může něco odložit. 2026-08-11 byla tahle brána
+    # červená kvůli `check_active.py`, který v repozitáři vůbec není — leží
+    # od 10. 8. uvnitř kontejneru po cizím ladění. CI pouští týž lint v čerstvém
+    # kontejneru a prochází. Tohle je ten příkaz z CI, doslova (P092 Krok 7).
+    command: "docker compose run --rm --no-deps wan-api ruff check . < /dev/null"
+    required: true
+    max_retries: 0
+    timeout_seconds: 120
+
+  # Dokumentační kontrakt (P096; zavírá projektovou vadu z 16. 8. 2026, kdy
+  # plan.json každého EPICu deklaroval `docs_updated`, ale žádná definice
+  # neexistovala a brána padala jako undefined_gate u všech běhů).
+  # „Dokumentace aktuální" v tomhle projektu znamená: CHANGELOG.md je
+  # konzistentní s verzí (týž parser, jakým appka čte „Co je nového" —
+  # scripts/check_changelog.sh; hlídá chybějící/prázdný záznam nevydané
+  # verze i dvě a víc nevydaných verzí najednou).
+  docs_updated:
+    command: "bash scripts/check_changelog.sh < /dev/null"
+    required: true
+    max_retries: 0
+    timeout_seconds: 60
+
+  # IMP-170: baseline-relativní (viz scripts/frontend_gate.sh) — padá jen na
+  # regresi nad rámec už evidovaného dluhu IMP-138 (10 selhání / 5 souborů),
+  # ne na tom dluhu samotném. Konstantu baseline utahovat, jak IMP-138 ubývá.
+  tests_frontend:
+    # `covers` je nutné, protože příkaz žádné cesty nejmenuje — vitest si je
+    # bere z `ui/vitest.config.ts`. Bez téhle deklarace by kontrola pokrytí
+    # považovala všech 182 vitest sad za neběžící na cestě k merge.
+    covers: ["ui/src/"]
+    command: "scripts/frontend_gate.sh < /dev/null"
+    required: true
+    max_retries: 0
+    timeout_seconds: 240
+
+  # Testy z plánu P070 vybrané markerem. Proti `tests_integration` přidává dvě
+  # věci, které adresářový běh nemá: NULOVOU TOLERANCI (žádná baseline) a
+  # PENĚŽNÍ POJISTKU (otrávený WAN_LITELLM_API_KEY + vyloučení placených
+  # markerů) — viz scripts/session_intake_gate.sh. `pytest -m session_intake` samotné se nesmí
+  # použít nikdy: `-m` PŘEPÍŠE `addopts`, a tahle past už stála 11,26 USD.
+  tests_session_intake:
+    command: "scripts/session_intake_gate.sh < /dev/null"
+    required: true
+    max_retries: 0
+    timeout_seconds: 600
+    # `test_defer_coverage.py::test_reocr_failed_skips_deferred_session` visí
+    # INTERMITENTNĚ (ověřeno trojmo 2026-07-29 vč. plného revertu diffu;
+    # 2026-08-08 týž běh prošel čistě, 402/402 za 348 s). Root cause neznámá.
+    # Tentýž soubor je vyřazený i z `tests_integration` — záznam s vlastníkem
+    # a lhůtou je v `.aid-o/config/test-quarantine.yaml`.
+    quarantine:
+      enabled: true

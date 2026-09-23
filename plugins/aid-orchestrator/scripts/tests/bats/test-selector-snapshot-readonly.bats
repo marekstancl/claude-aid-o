@@ -33,7 +33,7 @@ setup() {
 
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/aid-plan-fsm.sh"* ]]
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/lib/aid-queue-write.sh"* ]]
-  [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/lib/aid-gate-profile.sh"* ]]
+  [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/lib/aid-gate-profile-select.sh"* ]]
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/aid-queue-add.sh"* ]]
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/defaults/enforcement-registry.yaml"* ]]
 

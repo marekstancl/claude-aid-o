@@ -15,8 +15,6 @@ setup() {
   setup_test_evidence_dir
   PLUGIN_DIR="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   # shellcheck disable=SC1090
-  source "$PLUGIN_DIR/scripts/lib/aid-gate-runtime-baseline.sh" 2>/dev/null || true
-  # shellcheck disable=SC1090
   source "$PLUGIN_DIR/scripts/lib/aid-test-adapter-contract.sh"
   # shellcheck disable=SC1090
   source "$PLUGIN_DIR/scripts/lib/aid-test-adapter-shell-suite.sh"

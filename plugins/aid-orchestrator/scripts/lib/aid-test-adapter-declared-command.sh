@@ -12,8 +12,6 @@
 _DECLCMD_ADAPTER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-test-adapter-contract.sh
 source "${_DECLCMD_ADAPTER_LIB_DIR}/aid-test-adapter-contract.sh"
-# shellcheck source=aid-gate-runtime-baseline.sh
-source "${_DECLCMD_ADAPTER_LIB_DIR}/aid-gate-runtime-baseline.sh"
 
 # declared_command_adapter_discover <execution_yaml_path> [existing_run_units_json] [project_root]
 #   Emits a JSON array of run_units[] entries, one per gate in
