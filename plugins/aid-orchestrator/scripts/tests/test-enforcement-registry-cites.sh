@@ -4,7 +4,8 @@
 #
 # Registry hygiene: every `source:` / `instruction:` cite in
 # defaults/enforcement-registry.yaml must name a file (or directory) that
-# actually exists, and every row id must be unique.
+# actually exists, every suite path a row's `test:` names must exist (P097
+# Step 9), and every row id must be unique.
 #
 # Why this exists: a registry row is the plugin's promise that a detector has a
 # real enforcing surface. A cite that points at a file which was deleted,
@@ -406,6 +407,46 @@ if grep -q '^CITE|control_dead|' <<<"$control"; then
 else
   pass_msg "status: dead rows are exempt from path validation"
 fi
+
+# ─── 6. Every suite a row's `test:` names exists ────────────────────────────
+# P097 Step 9. A row whose `test:` points at a deleted suite still LOOKS
+# tested — two rows cited test-anti-fabrication.bats for three months after
+# P094 deleted it. Same exemption as the cites: `dead` / `removed_scoped` rows
+# name the suite that left with their mechanism. A path token is anything
+# ending in .bats/.sh/.py with a `/` in it; annotations after it (`:186`,
+# `(grep: '...')`, `, second/suite.bats`) are split off by the pattern.
+_test_field_violations() {   # <registry> <plugin_dir> <repo_dir> → "TEST|<id>|<path>" lines
+  local registry="$1" plugin_dir="$2" repo_dir="$3" id val p
+  yq -o=json '.' "$registry" \
+    | jq -r '.enforcements[] | select((.status // "") | test("^(dead|removed_scoped)$") | not)
+             | [(.id // "<no-id>"), (.test // "" | tostring)] | join("\u001f")' \
+    | while IFS=$'\x1f' read -r id val; do
+        while IFS= read -r p; do
+          [[ -n "$p" ]] || continue
+          _cite_resolves "$p" "$plugin_dir" "$repo_dir" || printf 'TEST|%s|%s\n' "$id" "$p"
+        done < <(grep -oE '[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+\.(bats|sh|py)' <<<"$val" || true)
+      done
+}
+echo "TEST: every suite a live row's test: field names exists"
+tviol="$(_test_field_violations "$REGISTRY" "$PLUGIN_DIR" "$REPO_DIR")"
+n_tests="$(yq '[.enforcements[] | select(.test != null)] | length' "$REGISTRY")"
+if [[ -z "$tviol" ]]; then
+  pass_msg "no live row names a missing suite (${n_tests} rows carry test:)"
+else
+  sed 's/^/  /' <<<"$tviol"
+  fail_msg "$(grep -c . <<<"$tviol") test: path(s) name a suite that does not exist"
+fi
+echo "TEST: the test: check FIRES on a row naming a deleted suite"
+cat > "${fixture_dir}/tests.yaml" <<'FIXTURE'
+enforcements:
+  - {id: t_good, status: active, test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'P097 rows'), scripts/tests/test-review-successors.sh"}
+  - {id: t_bad, status: active, test: "scripts/tests/test-control-boundary.sh, scripts/tests/bats/test-aid-service.bats:29"}
+  - {id: t_retired, status: removed_scoped, test: "scripts/tests/bats/test-aid-service.bats"}
+FIXTURE
+tctl="$(_test_field_violations "${fixture_dir}/tests.yaml" "$PLUGIN_DIR" "$REPO_DIR")"
+[[ "$tctl" == "TEST|t_bad|scripts/tests/bats/test-aid-service.bats" ]] \
+  && pass_msg "only the deleted suite of the active row is flagged" \
+  || fail_msg "expected exactly 'TEST|t_bad|scripts/tests/bats/test-aid-service.bats', got: ${tctl:-<nothing>}"
 
 # ── the enforcement-values lint (registry row policy_enforcement_values_lint) ──
 # The two rules of the retired DG-12 authority check, over what the plugin ships:

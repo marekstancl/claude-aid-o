@@ -19,19 +19,19 @@
 #   6  escalate lands `blocked_for_pm` on the map, and leaving ESCALATION still
 #      requires `escalation_decision` (regression)
 #   7  the reader honours `revoked_unrecorded` — the Step-12 carried obligation
-#   8  the other two mechanical emitters (JOB_LOST, SERVICE_UNHEALTHY) really
-#      write, from real code paths
+#   8  the other mechanical emitter (JOB_LOST) really writes, from a real code
+#      path (SERVICE_UNHEALTHY left with the service lifecycle, P097)
 #   9  the closed sets are lib == policy == schema, and the loader's NAME and
 #      PATH are the ones loader_contract declares
 #  10  two concurrent attempts of a 1-attempt class spend it ONCE (the TOCTOU
 #      the single critical section closes)
 #  11  fail-closed: an unreadable policy adjudicates, it never permits a retry
-#  12  the ladder executes nothing, and the removed `restart_service_once`
-#      (P097 Step 6) is refused as an action outside the closed set — a
-#      pre-2.103 record naming it escalates, it never restarts anything
+#  12  the ladder executes nothing: no process control in the library, and an
+#      action outside the closed set (as the removed service restart now is)
+#      is refused with no attempt spent
 #
 # Nothing here stubs the ladder. Cases 5 and 8 drive the REAL aid-run-gates.sh
-# and the REAL aid-service.sh over real fixtures.
+# over real fixtures.
 
 setup() {
   export TZ=UTC
@@ -398,7 +398,7 @@ YAML
   [ -z "$output" ]
 }
 
-@test "case 8: the other two mechanical emitters write from real code paths" {
+@test "case 8: the other mechanical emitter (JOB_LOST) writes from a real code path" {
   # ── JOB_LOST: a supervised gate job whose process group is SIGKILLed leaves
   #    no terminal record, so the runner maps it to the `job_lost` row — and
   #    that mapping is where the ladder entry is written.
@@ -437,33 +437,10 @@ YAML
   run jq -r -s '[.[] | select(.class=="JOB_LOST" and .emitter=="gate_job_lost")] | length' \
     "$j/$EVID_REL/recovery-ladder.jsonl"
   [ "$output" = "1" ] || { cat "$j/$EVID_REL/recovery-ladder.jsonl"; false; }
-
-  # ── SERVICE_UNHEALTHY: a declared service whose probe never passes exhausts
-  #    what its declaration authorised. The registry verdict and rc are the
-  #    same; the ladder entry is additive.
-  local s="$WORK/s"
-  mkdir -p "$s/$EVID_REL"
-  cat > "$s/exec.yaml" <<'YAML'
-services:
-  api:
-    start_cmd: "sleep 30"
-    probe_cmd: "false"
-    startup_deadline_seconds: 2
-YAML
-  run bash -c 'set -euo pipefail
-    cd "'"$s"'"
-    source "$PLUGIN_ROOT/scripts/lib/aid-service.sh"
-    aid_service_up_all "'"$s/$EVID_REL"'" "'"$s"'/exec.yaml"'
-  [ "$status" -eq 1 ] || { echo "$output"; false; }
-  run jq -r '.services.api.state // .api.state // empty' "$s/$EVID_REL/services.json"
-  [ -n "$output" ] || { cat "$s/$EVID_REL/services.json"; false; }
-  run jq -r -s '[.[] | select(.class=="SERVICE_UNHEALTHY" and .emitter=="service_restart_exhausted")] | length' \
-    "$s/$EVID_REL/recovery-ladder.jsonl"
-  [ "$output" = "1" ] || { cat "$s/$EVID_REL/recovery-ladder.jsonl" 2>/dev/null || echo "(no record)"; false; }
 }
 
 @test "case 9: the closed sets are lib == policy == schema, and the loader is where the contract says" {
-  # The lib compiles the five action names and the seven class names as literals
+  # The lib compiles the five action names and the six class names as literals
   # on purpose (the policy is the thing being bounded). That only stays safe
   # while the three agree, so the agreement is pinned rather than assumed.
   local lib_actions policy_actions schema_actions
@@ -572,22 +549,19 @@ YAML
   [ "${lines[-1]}" = "adjudicate refused_unreadable_record" ]
 }
 
-@test "case 12: the ladder executes nothing, and the removed restart action is refused" {
-  # `restart_service_once` left the vocabulary with the service lifecycle
-  # (P097 Step 6). A record or a caller from before 2.103 that still names it
-  # is an action outside the closed set: refused and routed to adjudication,
-  # with no attempt spent — the same path as any unknown action.
-  run ladder aid_ladder_attempt "$EVID" SERVICE_UNHEALTHY restart_service_once
+@test "case 12: the ladder executes nothing, and an action outside the closed set is refused" {
+  # The service-restart action left the vocabulary with the service lifecycle
+  # (P097 Step 6); a record or caller that still names it is an action outside
+  # the closed set, which is this path: refused, adjudicated, no attempt spent.
+  run ladder aid_ladder_attempt "$EVID" GATE_TIMEOUT restart_a_service
   [ "$status" -eq 4 ] || { echo "$output"; false; }
   [ "$output" = "adjudicate refused_action_not_allowed" ]
   run jq -r -s '[.[] | select(.outcome=="started")] | length' "$REC"
   [ "$output" = "0" ]
-  run bash -c 'source "$LIB"; _aid_ladder_action_constants'
-  [[ "$output" != *restart_service_once* ]] || { echo "$output"; false; }
 
   # And there is no process control in this file at all: no supervisor
   # invocation, no signal, no session/process-group arithmetic.
-  run grep -nE '\b(setsid|kill|pkill|nohup|disown)\b|aid-job\.sh|start_cmd|aid_service_up' "$LIB"
+  run grep -nE '\b(setsid|kill|pkill|nohup|disown)\b|aid-job\.sh|start_cmd' "$LIB"
   [ "$status" -ne 0 ] || { echo "$output"; false; }
 }
 
@@ -648,7 +622,7 @@ YAML
   [[ "$output" == *"terminus other than adjudicate>escalation>pm_force"* ]] || { echo "$output"; false; }
   run bash -c 'set -euo pipefail; source "$LIB"; AID_RECOVERY_POLICY="'"$p2"'" aid_recovery_policy_load'
   [ "$status" -eq 3 ]
-  [[ "$output" == *"closed set of seven"* ]] || { echo "$output"; false; }
+  [[ "$output" == *"closed set of six"* ]] || { echo "$output"; false; }
 
   # (d) THE SAME TRAP ONE TYPE LEVEL DOWN. `join` on a NON-array is a yq error,
   #     not an empty result: with stderr suppressed the check emitted no lines

@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 542          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 546          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -126,7 +126,7 @@ enforcements:
   - {id: ready_execute_planjson,       type: 1, source: "scripts/aid-fsm.sh:1059", instruction: "skills/pipeline.md:53", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "READY→EXECUTE: plan.json exists + total_steps>=1"}
   - {id: increment_steps_remain,       type: 1, source: "scripts/aid-fsm.sh:1074", instruction: "skills/pipeline.md:54", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "increment: more steps must remain"}
   - {id: execute_gates_all_steps,      type: 1, source: "scripts/aid-fsm.sh:1085", instruction: "skills/pipeline.md:54", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "EXECUTE→GATES: all steps complete"}
-  - {id: gates_generated_by,           type: 1, source: "scripts/aid-fsm.sh:1102", instruction: "skills/pipeline.md:544", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "EXECUTE→GATES: gates_report.json must carry _generated_by", test: "scripts/tests/bats/test-anti-fabrication.bats"}
+  - {id: gates_generated_by,           type: 1, source: "scripts/aid-fsm.sh:1102", instruction: "skills/pipeline.md:544", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "EXECUTE→GATES: gates_report.json must carry _generated_by", test: "scripts/tests/bats/test-aid-fsm.bats (grep: 'missing _generated_by')"}
   - {id: gates_overall_pass,           type: 1, source: "scripts/aid-fsm.sh:1173", instruction: "skills/pipeline.md:55", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "GATES→DONE: gates_report overall==pass"}
   - {id: cp3_integration_precond,      type: 1, source: "scripts/aid-fsm.sh:1137", instruction: "skills/pipeline.md:495", severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: "fsm_review_round_required + fsm_review_round_head_bound + fsm_review_round_skip_bound", verdict: ALIGNED, description: "RETIRED by P094 Step 8 (EXECUTE→GATES now needs cp3/rounds.json with a closed passing round, fsm_check_review_round). CP3 verifier-output presence + _generated_by before EXECUTE→GATES"}
   - {id: force_reason_min20,           type: 1, source: "scripts/aid-fsm.sh:440",  instruction: "skills/pipeline.md:66",  severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "--force requires --reason >=20 chars"}
@@ -220,7 +220,7 @@ enforcements:
   - {id: promote_yq_injection,         type: 4, source: "scripts/aid-fsm.sh:2173", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, description: "promote-check --reason yq-injection escaping (P038 CRIT-1)"}
   - {id: promote_registry_guards,      type: 4, source: "scripts/aid-fsm.sh:2161", instruction: n/a, severity: blocking, surface: internal-guard, status: active, verdict: unmapped, description: "promote-check severity.yaml/yq missing + write-failure guards"}
   - {id: read_steps_array_precedence,  type: 4, source: "scripts/aid-fsm.sh", instruction: n/a, severity: advisory, surface: internal-guard, status: active, verdict: unmapped, description: "fsm-state.yaml steps[] precedence over legacy state.yaml", test: "scripts/tests/bats/test-aid-fsm.bats:747"}
-  - {id: stage_log_unknown_fn,         type: 4, source: "scripts/lib/aid-stage-log.sh:78", instruction: n/a, severity: advisory, surface: internal-guard, status: active, verdict: unmapped, description: "stage-log CLI unknown function → non-zero exit", test: "scripts/tests/bats/test-anti-fabrication.bats:186"}
+  - {id: stage_log_unknown_fn,         type: 4, source: "scripts/lib/aid-stage-log.sh:78", instruction: n/a, severity: advisory, surface: internal-guard, status: active, verdict: unmapped, description: "stage-log CLI unknown function → non-zero exit — untested since P094 removed the suite that covered it"}
   - {id: run_id_alloc_no_rollback,     type: 4, source: "skills/run-management.md:62", instruction: "skills/run-management.md:62", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "ID allocation increments counter immediately, never rolls back"}
   - {id: run_file_location_invariant,  type: 4, source: "skills/run-management.md:42", instruction: "skills/run-management.md:42", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "never save run files into .aid-o/ root; never mix locations"}
   - {id: memory_write_protection,      type: 4, source: "skills/memory.md:64", instruction: "skills/memory.md:64", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "never write project.yaml (read-only); never delete backlog entries"}
@@ -1214,12 +1214,14 @@ enforcements:
     test: "scripts/tests/bats/test-control-enforcement.bats"
   - id: risk_upgrade
     type: 1
-    source: "scripts/aid-fsm.sh (grep: 'risk_profile_below_required|risk_profile_unresolvable')"
-    instruction: "scripts/lib/aid-gate-profile.sh (grep: 'gate_profile_resolve') producer"
+    source: "removed (the fixed five-name rank floor in scripts/aid-fsm.sh; the floor is now gate_profile_floor_verdict)"
+    instruction: "removed (the old risk-classification library left in P097 Step 9)"
     severity: blocking
     surface: "GATES:DONE precondition"
-    status: active
-    description: "P061 E2 Step 2 (\"Step 8\"): D4 — a high-risk changed path (aid-fsm.sh, aid-run-gates.sh, aid-release-policy.sh, aid-evidence-verify.sh, defaults/schemas/*, defaults/policies/*, agents/*.md) upgrades the REQUIRED gate profile for this EPIC's diff, and the GATES:DONE precondition VERIFIES AND ENFORCES that floor, not just recommends it (AID-v3-principles.md §1 — Detector without Enforcement is Decoration, the P026/WAN anchor). check_preconditions recomputes the risk-required profile at transition time (via the Step 1 shared resolver, gate_profile_resolve, against this run's actual base_commit..HEAD diff) — it does NOT trust advance-to-gates' earlier auto-resolve suggestion, because gates could have been re-run manually with a weaker --profile afterward. Two blocking outcomes: (1) Compares ranks via gate_profile_rank; active < required refuses the transition with reason risk_profile_below_required (e.g. active='quick' < required='full'). (2) If active profile name is unrecognized (not in the canonical 5: quick/targeted/standard/full/release) and required is high-risk (> quick), refuses the transition with reason risk_profile_unresolvable — fail-closed, because we cannot verify the active profile meets the requirement (E-061-2_6 Step 2 fix). A missing gates_report.json.profile field (no --profile ever used — legacy execution.yaml without gate_profiles, D9) is a no-op, matching pre-P061 behavior exactly. advance-to-gates itself auto-resolves and passes --profile <resolved> to aid-run-gates.sh, but ONLY when the resolved name is an actual key under execution.yaml.gate_profiles (same D9 legacy guard) — an explicit --profile from advance-to-gates' own caller always wins over auto-resolve. --force + reason>=20 chars remains the only override, same as sibling GATES:DONE checks"
+    status: removed_scoped
+    removal: "P097 Step 4 (2026-09-22) replaced the fixed five-name rank and its hard-coded high-risk path list with the project's own ordered gate_profiles table; P097 Step 9 deleted the old library and flipped this row. Measurement: the P097 Step 4 resolver replay over 23 ACTA and WAN EPIC runs (docs/plans/P097-acceptance-run.md, section 4) — the path-derived answer agreed with the old classifier on every run; the one input dropped by design is review-profile.json's `unverifiable` → full floor (2 ACTA runs)."
+    replacement_guard: "gate_profile_from_caller"
+    description: "RETIRED by P097 (Step 4 replaced it, Step 9 removed the library): the GATES:DONE floor compares declaration indexes within the report's recorded profile_table (gate_profile_from_caller). Was: P061 E2 Step 2 (\"Step 8\"): D4 — a high-risk changed path (aid-fsm.sh, aid-run-gates.sh, aid-release-policy.sh, aid-evidence-verify.sh, defaults/schemas/*, defaults/policies/*, agents/*.md) upgrades the REQUIRED gate profile for this EPIC's diff, and the GATES:DONE precondition VERIFIES AND ENFORCES that floor, not just recommends it (AID-v3-principles.md §1 — Detector without Enforcement is Decoration, the P026/WAN anchor). check_preconditions recomputes the risk-required profile at transition time (via the Step 1 shared resolver, gate_profile_resolve, against this run's actual base_commit..HEAD diff) — it does NOT trust advance-to-gates' earlier auto-resolve suggestion, because gates could have been re-run manually with a weaker --profile afterward. Two blocking outcomes: (1) Compares ranks via gate_profile_rank; active < required refuses the transition with reason risk_profile_below_required (e.g. active='quick' < required='full'). (2) If active profile name is unrecognized (not in the canonical 5: quick/targeted/standard/full/release) and required is high-risk (> quick), refuses the transition with reason risk_profile_unresolvable — fail-closed, because we cannot verify the active profile meets the requirement (E-061-2_6 Step 2 fix). A missing gates_report.json.profile field (no --profile ever used — legacy execution.yaml without gate_profiles, D9) is a no-op, matching pre-P061 behavior exactly. advance-to-gates itself auto-resolves and passes --profile <resolved> to aid-run-gates.sh, but ONLY when the resolved name is an actual key under execution.yaml.gate_profiles (same D9 legacy guard) — an explicit --profile from advance-to-gates' own caller always wins over auto-resolve. --force + reason>=20 chars remains the only override, same as sibling GATES:DONE checks"
     test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'CHECKPOINT 2|unrecognized.*profile')"
   - id: gate_scoped_waiver
     type: 1
@@ -1284,6 +1286,50 @@ enforcements:
     tier: t1
     description: "P097 Step 6: an execution.yaml that still carries `services:` or `gate_profile_defaults` (top level), or `required_when`/`needs_services` on a gate, stops `run-all` with exit 2 before any gate runs; the refusal names every key found, the gate it sits on, and the upgrade command (`aid-init-execution-yaml.sh upgrade <project root>`, Step 3) that removes it. The key is the signal, not its content — `services: {}` is refused like a populated block — because an ignored key is how `required_when` sat unread for four months."
     test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'P097 Step 6')"
+  - id: gate_row_contract_v2
+    type: 4
+    source: "scripts/lib/aid-gate-row.sh (gate_row_normalize, gate_row_check) + scripts/aid-run-gates.sh (grep: '_gate_row_finalize')"
+    instruction: "docs/extending-aid.md (grep: '### The row contract'); defaults/schemas/gate-row.schema.json"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P097 Step 2: every gate row the runner writes is version 2 — status pass|fail|skip, a reason from the closed vocabulary (exit_0, exit_<n>, job_timeout, job_lost, job_cancelled, not_in_profile, missing_script, vacuous_pass, reused_from, legacy_row), waived as a boolean on a fail row, never a reason. `_gate_row_finalize` runs `gate_row_check` on each row on its way into the report, so a reason outside the vocabulary exits 1 naming the gate; readers go through `gate_row_normalize`, which maps version-1 rows and a row with no result (legacy_row)."
+    test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'P097 rows')"
+  - id: gate_profile_unknown_refused
+    type: 1
+    source: "scripts/aid-run-gates.sh (grep: 'unknown gate profile'; and gate_profile_has_required_gate on the named profile)"
+    instruction: "docs/extending-aid.md (grep: 'a run that can only skip')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P097 Step 4: `run-all --profile <name>` exits 2 before any gate runs when the name is not declared under gate_profiles (the message lists the declared profiles and the upgrade command), and when the profile's include[] names no `required: true` gate — a run that can only skip is not a run."
+    test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'run-all profile d')"
+  - id: gate_profile_from_caller
+    type: 11
+    source: "scripts/aid-fsm.sh (grep: 'gate_profile_floor_verdict'; advance-to-gates passes gate_profile_for_paths' answer as --profile) + scripts/lib/aid-gate-profile-select.sh"
+    instruction: "docs/extending-aid.md (grep: '### The resolver')"
+    severity: blocking
+    surface: "GATES:DONE precondition"
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P097 Step 4: the runner chooses no profile. The FSM resolves it from the project's ordered gate_profiles table for the run's base_commit..HEAD diff and passes the name; the report records `profile`, `profile_source: caller|none` and `profile_table`. The GATES:DONE floor refuses a report without a profile when the file declares gate_profiles (risk_profile_unresolvable), a profile whose index in the recorded table is narrower than the resolver's answer (risk_profile_below_required), and a table that changed since the run (profile_table_changed). --force + reason >= 20 chars stays the only override."
+    test: "scripts/tests/bats/test-aid-gate-profile-select.bats, scripts/tests/bats/test-aid-fsm.bats (grep: 'P097 Step 4')"
+  - id: execution_yaml_keys_have_readers
+    type: 3
+    source: "scripts/tests/test-execution-yaml-readers.sh"
+    instruction: "docs/extending-aid.md (grep: '### The reader test')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    description: "P097 Step 4: every key the execution.yaml composer writes, for every shipped stack, has a reader expression under scripts/ outside tests, templates and the writer library; a key written and never read turns the t0 suite red. Proves a reader exists, not that the value changes a decision (the suite's header states that limit)."
+    test: "scripts/tests/test-execution-yaml-readers.sh"
 
   # ── IMP-232 v2.58.1: plan-level closure wired into the runtime lifecycle ────
   # v2.58.0 shipped the closure library/CLI as DETECTORS with no runtime call
@@ -1528,13 +1574,15 @@ enforcements:
   # ── P064 E-064-2_2 Step 3 (plan Step 8): boundary-split gate profiles ───────
   - id: gate_profile_epic_boundary_cap
     type: 1
-    source: "scripts/lib/aid-gate-profile.sh (gate_profile_resolve, boundary=epic)"
+    source: "removed (the boundary=epic cap of the old risk-classification library, which left in P097 Step 9)"
     instruction: n/a
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    removal: "P097 Step 4 (2026-09-22) — an EPIC runs the profile the project's own table resolves for its diff and the plan-final floor stays `release`, so no cap sits between them; `_fsm_gate_profile_boundary` now only labels the record. Step 9 deleted the library and flipped this row. Measurement: the P097 Step 4 resolver replay (docs/plans/P097-acceptance-run.md, section 4) — `release` carries no when_paths, so neither resolver returned it for any of the 23 EPIC runs."
+    replacement_guard: "gate_profile_from_caller"
     verdict: ALIGNED
-    description: "In plan_branch mode both aid-fsm.sh call sites route gate_profile_resolve through _fsm_gate_profile_boundary, which returns boundary=epic; that caps the resolved profile at standard and suppresses the done_phase=release escalation, so an EPIC boundary never starts bats_all. The unbounded result is preserved out-of-band as AID_GATE_PROFILE_FLOOR / --floor-file and recorded by epic-complete as plan_final_required_profile; the cap is applied AFTER the AID_GATE_PROFILE_OVERRIDE layer while the waiver gate still keys off the true (uncapped) risk tier, and the risk_profile_below_required recompute passes the same boundary so a correctly-capped standard run is not measured against an uncapped full. Mode-gated on the committed declared lifecycle manifest only (see plan_mode_single_authority); every 'cannot tell' path degrades toward MORE gates."
+    description: "RETIRED by P097 (Step 4 removed the cap, Step 9 the library). Was: In plan_branch mode both aid-fsm.sh call sites route gate_profile_resolve through _fsm_gate_profile_boundary, which returns boundary=epic; that caps the resolved profile at standard and suppresses the done_phase=release escalation, so an EPIC boundary never starts bats_all. The unbounded result is preserved out-of-band as AID_GATE_PROFILE_FLOOR / --floor-file and recorded by epic-complete as plan_final_required_profile; the cap is applied AFTER the AID_GATE_PROFILE_OVERRIDE layer while the waiver gate still keys off the true (uncapped) risk tier, and the risk_profile_below_required recompute passes the same boundary so a correctly-capped standard run is not measured against an uncapped full. Mode-gated on the committed declared lifecycle manifest only (see plan_mode_single_authority); every 'cannot tell' path degrades toward MORE gates."
     test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
 
   - id: plan_final_required_gates_record
@@ -2688,16 +2736,16 @@ enforcements:
   - id: service_registry_eager_write
     type: 4
     status: removed_scoped
-    removal: "P097 Step 6 (2026-09-22) — unreachable: the runner refuses a `services:` key and loads no service library, so nothing in a run reaches this code; the library (scripts/lib/aid-service.sh) and its suite (scripts/tests/bats/test-aid-service.bats) leave in P097 Step 9. Measurement: the P097 Step 1 baseline (scripts/tests/fixtures/gates/gates-baseline.json) — no consumer declared a service."
+    removal: "P097 Step 6 (2026-09-22) — unreachable: the runner refuses a `services:` key and loads no service library, so nothing in a run reaches this code; the service library and its suite left in P097 Step 9. Measurement: the P097 Step 1 baseline (scripts/tests/fixtures/gates/gates-baseline.json) — no consumer declared a service."
     replacement_guard: "execution_yaml_dead_keys_refused"
-    source: "scripts/lib/aid-service.sh:_aid_svc_up_one (eager phase 1: the registry entry and the spawn-ledger entry are both written BEFORE the supervised spawn; eager phase 2: the real job id immediately after it, with a compensating cancel when that write fails; healthy only after the probe passes; `start_cmd` runs as a FOREGROUND aid-job.sh job with `--deadline <max_lifetime_seconds>`) + the `daemonized_start_cmd` refusal"
+    source: "removed (the service library's up path, deleted in P097 Step 9 — eager phase 1: the registry entry and the spawn-ledger entry are both written BEFORE the supervised spawn; eager phase 2: the real job id immediately after it, with a compensating cancel when that write fails; healthy only after the probe passes; `start_cmd` runs as a FOREGROUND aid-job.sh job with `--deadline <max_lifetime_seconds>`) + the `daemonized_start_cmd` refusal"
     instruction: "removed (the `services:` block left defaults/execution.yaml; history in CHANGELOG-archive.md, the P076 entry)"
     severity: blocking
     surface: llm-facing
     verdict: ALIGNED
     description: "RETIRED by P097 Step 6 (code leaves in Step 9). Was P076 Step 9 — the registry entry is written EAGERLY, before the process exists, so a SIGKILL in any window leaves a record every teardown path can see rather than an untracked process. `start_cmd` must be a FOREGROUND command: it is supervised by aid-job.sh (the one process owner) and deadlined by `max_lifetime_seconds`, so a command that daemonises internally and returns is refused by name instead of being reported healthy — the supervisor cannot own a process it never had. The startup loop is bounded by `startup_deadline_seconds` through `timeout(1)`, which is refused up front when absent because without it the deadline is not enforceable. The deadline CANCELS: expiry kills the job's whole process group and runs the declared stop_cmd, leaving no orphan."
     recovery: "The daemonize refusal names the service and says what it observed; a deadline expiry is recorded in the registry with its failure_reason."
-    test: "scripts/tests/bats/test-aid-service.bats"
+    test: "removed with the mechanism (P097 Step 9)"
 
   - id: service_lifecycle_acquire_release
     type: 4
@@ -2716,16 +2764,16 @@ enforcements:
   - id: service_teardown_declaration_preflight
     type: 4
     status: removed_scoped
-    removal: "P097 Step 6 (2026-09-22) — unreachable: the runner refuses a `services:` key and loads no service library, so nothing in a run reaches this code; the library (scripts/lib/aid-service.sh) and its suite (scripts/tests/bats/test-aid-service.bats) leave in P097 Step 9. Measurement: the P097 Step 1 baseline (scripts/tests/fixtures/gates/gates-baseline.json) — no consumer declared a service."
+    removal: "P097 Step 6 (2026-09-22) — unreachable: the runner refuses a `services:` key and loads no service library, so nothing in a run reaches this code; the service library and its suite left in P097 Step 9. Measurement: the P097 Step 1 baseline (scripts/tests/fixtures/gates/gates-baseline.json) — no consumer declared a service."
     replacement_guard: "execution_yaml_dead_keys_refused"
-    source: "scripts/lib/aid-service.sh:aid_service_down_all (the declaration preflight: rc 2 when yq is unavailable OR the execution.yaml is missing/unreadable, scoped to a run that has a registry)"
+    source: "removed (the service library's down path, deleted in P097 Step 9 — the declaration preflight: rc 2 when yq is unavailable OR the execution.yaml is missing/unreadable, scoped to a run that has a registry)"
     instruction: "removed (docs/extending-aid.md, ### Declaring services, now carries the removal note; history in CHANGELOG-archive.md, the P076 entry)"
     severity: blocking
     surface: internal-guard
     verdict: ALIGNED
     description: "RETIRED by P097 Step 6 (code leaves in Step 9). Was P076 Step 9 + Step 16 — `_aid_svc_declares` is what stands between the run's registry and execution: when it can answer, the DECLARED stop_cmd runs (and a service the config does not name is refused outright); when it cannot, every service falls onto the UNRECONCILED branch and the registry's RECORDED stop_cmd runs — a string from a file inside the subagent-writable evidence directory, i.e. a path from 'can write under .aid-o/work/evidence/' to 'executes a command'. It has exactly TWO ways to be unable to answer and they are the same door: no yq, or no readable execution.yaml. Step 9 closed the first. The CP3 security review of EPIC 2 found the second still open — with yq present and execution.yaml simply absent the recorded command executed — and Step 16 closed it symmetrically: rc 2, nothing cancelled, nothing stopped, no state written. Scoped to a run that actually has a registry, because with no registry there is no recorded command to run and the orphan sweep cancels by job id, which the evidence directory does not choose."
     recovery: "The refusal names the unreadable declarations path and says recorded jobs can still be cancelled by hand with aid-job.sh."
-    test: "scripts/tests/bats/test-aid-service.bats (cases 29 and 31)"
+    test: "removed with the mechanism (P097 Step 9)"
 
   - id: auto_recovery_policy_contract
     type: 9

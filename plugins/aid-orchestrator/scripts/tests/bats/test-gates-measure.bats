@@ -98,5 +98,5 @@ run_measure() { run "$MEASURE" --projects-root "$ROOT" --since 30 --as-of "$1"; 
   run "$MEASURE" --line-count
   [ "$status" -eq 0 ]
   [ "$(jq '.files["scripts/aid-run-gates.sh"] > 1000' <<<"$output")" = true ]
-  [ "$(jq '.files["scripts/lib/aid-service.sh"] > 0' <<<"$output")" = true ]
+  [ "$(jq '.files["scripts/lib/aid-gate-profile-select.sh"] > 0' <<<"$output")" = true ]
 }

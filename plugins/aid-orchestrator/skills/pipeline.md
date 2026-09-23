@@ -184,9 +184,9 @@ prints one allowlisted action or the literal `escalate`, and records every excha
 
 **AUTO-loop ladder checklist.** `defaults/policies/auto-recovery.yaml` is the one authority for what
 an AUTO run may do about a stop before a person is involved; `scripts/lib/aid-recovery-ladder.sh`
-loads it and writes the per-run record `<run evidence>/recovery-ladder.jsonl`. Three classes enter
+loads it and writes the per-run record `<run evidence>/recovery-ladder.jsonl`. Two classes enter
 that record from CODE and need nothing from the controller — **GATE_TIMEOUT** and **JOB_LOST** from
-the gate runner, **SERVICE_UNHEALTHY** from aid-service's restart-exhaustion path. The other four are
+the gate runner. The other four are
 the controller's own responsibility, and this is the checklist for them:
 
 | Class | When the AUTO loop routes it | Route |

@@ -657,7 +657,7 @@ JSON
   # the SHAPE it is willing to treat as evidence (the basename must be the
   # shared AID_RESUME_ARTIFACT_BASENAME, read from lib/aid-resume-artifact.sh)
   # and the LOCATION (it must resolve inside `.aid-o/work/evidence/<epic>/<run>`,
-  # the same rule lib/aid-service.sh:_aid_svc_safe_jobs_dir applies to a
+  # the same rule the former service library (removed in P097) applied to a
   # registry-recorded jobs_dir).
   #
   # THE SECOND HALF IS THE CP3 SECURITY FINDING, DEMONSTRATED: shape alone was
@@ -751,8 +751,8 @@ $output" >&2; false; }
   # NOWHERE on the write path, and the map key carries no charset constraint
   # either (`cmd_init` upserts whatever it is handed).
   #
-  # `lib/aid-service.sh:_aid_svc_safe_jobs_dir` — the rule this surface borrows —
-  # takes its evidence directory as a CALLER-supplied argument. Exactly ONE of
+  # The service library's jobs-dir rule — the one this surface borrows —
+  # took its evidence directory as a CALLER-supplied argument. Exactly ONE of
   # the two sides is untrusted, and that asymmetry is the whole reason the
   # comparison means anything. This case pins that asymmetry here: the base is
   # `<state_root>/.aid-o/work/evidence` and the two recorded components are

@@ -242,9 +242,11 @@ EOF
 }
 
 @test "P097 Step 3: the upgraded when_paths agree with the old classifier's gate_profile_is_high_risk_path on ten changed-path sets" {
+  # The old classifier library left in P097 Step 9. Its answers for these
+  # seventeen paths were recorded from it at 864cd029 (1 = high-risk) and are
+  # pinned here, so the upgraded when_paths are still held to what it said.
   source "$HELPER"
   source "$AID_PLUGIN_PATH/scripts/lib/aid-ancillary.sh"
-  source "$AID_PLUGIN_PATH/scripts/lib/aid-gate-profile.sh"
   cfg="$TEST_TMPDIR/acta.yaml"
   cp "$AID_PLUGIN_PATH/scripts/tests/fixtures/gates/projects/acta.yaml" "$cfg"
   hash="$(execution_yaml_upgrade "$cfg" | sed -n 's/^diff_hash: //p')"
@@ -252,35 +254,29 @@ EOF
   mapfile -t globs < <(yq '.gate_profiles.full.when_paths[]' "$cfg")
   [ "${#globs[@]}" -eq 14 ]
 
-  # Ten sets, one path per line; a set is high-risk iff one of its paths is.
-  local -a sets=(
-    "plugins/aid-orchestrator/scripts/aid-fsm.sh"
-    "docs/plans/P097.md README.md"
-    "scripts/aid-run-gates.sh scripts/lib/aid-gate-row.sh"
-    "plugins/aid-orchestrator/defaults/schemas/plan.schema.json"
-    "plugins/aid-orchestrator/defaults/policies/review-profiles.yaml"
-    "plugins/aid-orchestrator/agents/implementer.md CHANGELOG.md"
-    "scripts/lib/aid-fsm-helpers.sh scripts/tests/bats/test-aid-fsm.bats"
-    "aid-release-policy.sh"
-    "backend/app/main.py frontend/src/App.tsx"
-    "aid-evidence-verify.sh defaults/schemas/x.json docs/agents/readme.md"
+  local -a recorded=(
+    "1 plugins/aid-orchestrator/scripts/aid-fsm.sh"
+    "0 docs/plans/P097.md" "0 README.md"
+    "1 scripts/aid-run-gates.sh" "0 scripts/lib/aid-gate-row.sh"
+    "1 plugins/aid-orchestrator/defaults/schemas/plan.schema.json"
+    "1 plugins/aid-orchestrator/defaults/policies/review-profiles.yaml"
+    "1 plugins/aid-orchestrator/agents/implementer.md" "0 CHANGELOG.md"
+    "0 scripts/lib/aid-fsm-helpers.sh" "0 scripts/tests/bats/test-aid-fsm.bats"
+    "1 aid-release-policy.sh"
+    "0 backend/app/main.py" "0 frontend/src/App.tsx"
+    "1 aid-evidence-verify.sh" "1 defaults/schemas/x.json" "1 docs/agents/readme.md"
   )
-  local set path old new g
-  for set in "${sets[@]}"; do
-    for path in $set; do
-      old=0; gate_profile_is_high_risk_path "$path" && old=1
-      new=0
-      for g in "${globs[@]}"; do _aid_ancillary_glob_match "$path" "$g" && { new=1; break; }; done
-      [ "$old" -eq "$new" ] || { echo "disagree on $path: classifier=$old when_paths=$new" >&2; return 1; }
-    done
+  local entry old path new g
+  for entry in "${recorded[@]}"; do
+    old="${entry%% *}"; path="${entry#* }"
+    new=0
+    for g in "${globs[@]}"; do _aid_ancillary_glob_match "$path" "$g" && { new=1; break; }; done
+    [ "$old" -eq "$new" ] || { echo "disagree on $path: classifier=$old when_paths=$new" >&2; return 1; }
   done
-  # Both sides of the split are exercised: high-risk and not.
-  gate_profile_is_high_risk_path "scripts/aid-run-gates.sh"
-  ! gate_profile_is_high_risk_path "backend/app/main.py"
 }
 
 @test "P097 Step 6: a gate whose only claim was required_when keeps the OLD runner's meaning — required" {
-  # Since 2.96.0 (lib/aid-gate-applicability.sh, deleted in Step 6) a gate
+  # Since 2.96.0 (the applicability layer, removed in Step 6) a gate
   # whose `required_when` held was REQUIRED (`required_source: required_when`);
   # an advisory gate expressed that with its exit 2, not with the key. So the
   # upgrade writes `required: true` where a lone `required_when` stood — ACTA's

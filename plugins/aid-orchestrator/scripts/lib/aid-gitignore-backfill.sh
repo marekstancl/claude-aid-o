@@ -19,7 +19,7 @@
 # logic lives, not two copies that could drift.
 #
 # ── SOURCEABLE-SAFE CONVENTION ───────────────────────────────────────────────
-# NO top-level `set -e`/`set -euo pipefail` (matches aid-gate-profile.sh /
+# NO top-level `set -e`/`set -euo pipefail` (matches
 # aid-cache-preflight.sh): a caller may source this under its own strict
 # shell. Every function below returns 0 even when the underlying mkdir/append
 # fails (fail open, warn to stderr).

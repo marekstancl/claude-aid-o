@@ -559,7 +559,8 @@ _resume_jobs_still_live() {
 #     • a job dir for THIS attempt exists, same fingerprint, same start HEAD
 #         – still live      → re-attach and poll
 #         – already terminal → `collect` idempotently; the suite NEVER re-runs
-#     • a job dir exists but the fingerprint or the start HEAD moved
+#     • a job dir exists but the fingerprint, the start HEAD or the recorded
+#       deadline (job.json deadline_sec vs timeout_seconds) moved
 #                           → cancel it, ARCHIVE the dir to `.superseded-<epoch>`
 #                             (aid-job.sh run refuses an existing dir, so the
 #                             deterministic id has to be freed), start fresh
@@ -618,6 +619,12 @@ run_background_gate() {
     cur_head="$(git -C "$repo" rev-parse HEAD 2>/dev/null || echo "")"
     if [[ "$rec_fp" != "$fp" ]]; then
       drift_reason="command_fingerprint_mismatch"
+    elif [[ "$(jq -r '.deadline_sec // ""' "$job_dir/job.json" 2>/dev/null)" != "$timeout_s" ]]; then
+      # The job ran under another timeout_seconds. Re-collecting it would hand
+      # back the old deadline's verdict (typically job_timeout) after the
+      # operator raised the timeout to fix exactly that — so it is superseded
+      # and the gate runs under the configured deadline, live or terminal.
+      drift_reason="deadline_changed"
     elif _job_head_drifted "$rec_head" "$cur_head"; then
       # Same command, but HEAD moved since the job started. Re-attaching would
       # answer a question about a revision nobody is asking about any more.

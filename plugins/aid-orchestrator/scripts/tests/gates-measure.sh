@@ -50,13 +50,10 @@ AREA_FILES=(
   scripts/lib/aid-gate-runtime-baseline.sh
   scripts/lib/aid-test-adapter-contract.sh
   scripts/lib/aid-lock.sh
-  scripts/lib/aid-env-name-denylist.sh
   scripts/lib/aid-plan-manifest.sh
   scripts/lib/aid-init-execution-yaml.sh
   scripts/tests/bats/test-aid-gate-runtime-baseline.bats
-  scripts/tests/bats/test-gate-baseline-sequential-only.bats
   scripts/tests/bats/test-aid-gate-runtime-report.bats
-  scripts/tests/bats/test-aid-service.bats
   scripts/tests/bats/test-owned-jobs-integration.bats
   scripts/tests/bats/test-owned-jobs-review-regressions.bats
   scripts/tests/bats/test-owned-jobs-docs-closure.bats
@@ -84,12 +81,10 @@ done
 
 if (( line_count )); then
   cd "$PLUGIN_DIR"
-  # scripts/gates/*, the profile libraries (old classifier until Step 9, new
-  # resolver) and the service library (until Step 9) join the named files by
-  # glob, so the list survives the removal; a file a later step deleted counts
-  # 0 (wc's rc is not the measurement). The applicability library and the three
-  # service/required_when suites Step 6 deleted are no longer named: 0 lines.
-  { wc -l "${AREA_FILES[@]}" scripts/lib/aid-gate-profile*.sh scripts/lib/aid-service*.sh scripts/gates/* 2>/dev/null || true; } |
+  # scripts/gates/* and the profile resolver join the named files by glob; a
+  # file a later step deleted counts 0 (wc's rc is not the measurement). The
+  # libraries and suites Steps 5, 6 and 9 deleted are no longer named: 0 lines.
+  { wc -l "${AREA_FILES[@]}" scripts/lib/aid-gate-profile*.sh scripts/gates/* 2>/dev/null || true; } |
     awk '$2 != "total" {printf "%s\t%s\n", $2, $1}' |
     jq -Rn --arg commit "$(git rev-parse HEAD 2>/dev/null || echo unknown)" \
       '{command: "gates-measure.sh --line-count", commit: $commit,

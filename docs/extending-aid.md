@@ -1350,14 +1350,14 @@ gate blocks. The registry row is `execution_yaml_dead_keys_refused`.
 ### The recovery policy, and how a consumer changes it
 
 `defaults/policies/auto-recovery.yaml` is the one machine-readable answer to
-"what may an autonomous run do about a stop, and how often". It defines seven
-stop classes (`GATE_TIMEOUT`, `SERVICE_UNHEALTHY`, `JOB_LOST`,
-`TRANSIENT_INFRA`, `DISPATCH_ORPHANED`, `REVIEW_EXHAUSTED`, `UNCLASSIFIED`),
-each carrying:
+"what may an autonomous run do about a stop, and how often". It defines six
+stop classes (`GATE_TIMEOUT`, `JOB_LOST`, `TRANSIENT_INFRA`,
+`DISPATCH_ORPHANED`, `REVIEW_EXHAUSTED`, `UNCLASSIFIED`; `SERVICE_UNHEALTHY`
+left with the service lifecycle in P097), each carrying:
 
 - `allowed_actions` — drawn from a CLOSED vocabulary of five reversible actions
   (`wait_and_resume`, `retry_once`, `rerun_targeted`, `resume_missing_lenses`,
-  `collect_and_continue`; `restart_service_once` left with the service
+  `collect_and_continue`; the service-restart action left with the service
   lifecycle in P097 Step 6). None of them weakens, waives or bypasses a gate.
   An action name outside the five is a schema error at load, never a silent
   no-op.
@@ -2363,7 +2363,7 @@ vocabulary. A reader that needs a row's verdict prepends `$AID_GATE_ROW_JQ` to
 its jq filter and reads `status`/`reason`/`waived`; nothing inspects `result`.
 A new reason is added to the schema's pattern and to the summary's rendering
 (`lib/aid-gate-outcome-summary.sh`) in the same commit, or `gate_row_check` fails
-the run naming the gate.
+the run naming the gate. Registry row: `gate_row_contract_v2`.
 
 ### The resolver
 
@@ -2382,7 +2382,8 @@ indexes within THAT recorded list; a table that changed between the run and
 the precondition refuses with `profile_table_changed` rather than comparing
 across two orders. A profile whose `include[]` names no `required: true` gate
 is refused at resolve and at `--profile` (exit 2) — a run that can only skip
-is not a run.
+is not a run. Registry rows: `gate_profile_from_caller` (the caller passes the
+name, the floor checks it) and `gate_profile_unknown_refused` (the exit 2).
 
 ### The timeout rule
 
@@ -2392,7 +2393,11 @@ same configuration and the same code give the same deadline on every host — no
 history file steers a run. A gate past its deadline is a `status: fail,
 reason: job_timeout` row with no surviving child, whether `timeout(1)` or the
 job supervisor stopped it, and the recovery ladder records it as
-`GATE_TIMEOUT`. Registry row: `gate_timeout_fixed`.
+`GATE_TIMEOUT`. A background gate's job records the deadline it ran under
+(`deadline_sec` in `job.json`); a rerun re-attaches to that job only while
+it still equals `timeout_seconds`, so raising the timeout after a
+`job_timeout` runs the gate again instead of collecting the old verdict.
+Registry row: `gate_timeout_fixed`.
 
 History informs the number in the file. The written rule (the template comment
 on `timeout_seconds` in `defaults/execution.yaml`): 2 × p95 of the last 20
@@ -2419,7 +2424,8 @@ with exit 2 before any gate runs and names the key, the gate and the upgrade
 (`bash $AID_PLUGIN_PATH/scripts/lib/aid-init-execution-yaml.sh upgrade <project root>`).
 Adding a key therefore means adding its reader in the same commit; removing
 one means adding it to the upgrade's dead-key list and to the runner's refusal.
-Registry row: `execution_yaml_dead_keys_refused`.
+Registry rows: `execution_yaml_keys_have_readers` (the reader test) and
+`execution_yaml_dead_keys_refused` (the refusal).
 
 ### Hygiene
 

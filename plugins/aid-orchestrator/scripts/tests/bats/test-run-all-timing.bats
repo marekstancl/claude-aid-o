@@ -113,12 +113,12 @@ _rec() { jq -c --arg s "$1" 'select(.suite == $s)' "$JOURNAL"; }
   # is now the whole portfolio, so the suite that used to need the flag is
   # measured without it — and the flag itself must still be ACCEPTED, because a
   # caller this repo cannot see would otherwise exit 2 on an unknown option.
-  _mk_bats "$TESTS/bats/test-aid-service.bats"
+  _mk_bats "$TESTS/bats/test-slow-t2.bats"
   run bash "$RUNNER" --timing 3>&-
   [ "$status" -eq 0 ]
-  [ -n "$(_rec test-aid-service.bats)" ]
+  [ -n "$(_rec test-slow-t2.bats)" ]
 
   run bash "$RUNNER" --timing --include-delegated 3>&-
   [ "$status" -eq 0 ]
-  [ -n "$(_rec test-aid-service.bats)" ]
+  [ -n "$(_rec test-slow-t2.bats)" ]
 }
