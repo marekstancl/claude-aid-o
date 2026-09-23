@@ -16,9 +16,10 @@ setup() {
   TEST_DIR="$(mktemp -d)"
   aid_test_mk_repo "$TEST_DIR/repo"
   cd "$TEST_DIR/repo"
-  printf 'dispatch:\n  strategy: worktrees\n  max_parallel: 3\n' > orch.yaml
-  printf 'dispatch:\n  max_parallel: 1\n' > brake.yaml
+  mkdir -p .aid-o/config
 }
+# _cfg <yaml> — the project's orchestration.yaml
+_cfg() { printf '%b' "$1" > .aid-o/config/orchestration.yaml; }
 teardown() { cd /; rm -rf "$TEST_DIR"; }
 
 # _plan <spec>...  spec = "<group>|<path>"  — a light plan with one bullet per step
@@ -34,36 +35,48 @@ _plan() {
 
 @test "dispatch: AC10 — a disjoint wave is dispatched concurrently" {
   _plan 'wave-1|src/a.ts' 'wave-1|src/b.ts'
-  run aid_parallel_decide plan.md orch.yaml wave-1 2 .
+  run aid_parallel_decide plan.md . wave-1 2 .
   [ "$status" -eq 0 ]
   [ "$output" = "concurrent slots=3" ]
 }
 
 @test "dispatch: only the wave being dispatched is judged — a collision elsewhere does not serialise it" {
   _plan 'wave-1|src/a.ts' 'wave-1|src/b.ts' 'wave-2|src/c.ts' 'wave-2|src/c.ts'
-  run aid_parallel_decide plan.md orch.yaml wave-1 2 .
+  run aid_parallel_decide plan.md . wave-1 2 .
   [ "$output" = "concurrent slots=3" ]
-  run aid_parallel_decide plan.md orch.yaml wave-2 2 .
+  run aid_parallel_decide plan.md . wave-2 2 .
   [[ "$output" == "serial: wave wave-2 has a collision"* ]]
 }
 
 @test "dispatch: a wave name the plan does not declare is never concurrent" {
   _plan 'wave-1|src/a.ts' 'wave-1|src/b.ts'
-  run aid_parallel_decide plan.md orch.yaml wave-typo 2 .
+  run aid_parallel_decide plan.md . wave-typo 2 .
   [ "$status" -eq 0 ]
   [[ "$output" == "serial: the wave check could not run"* ]]
 }
 
+@test "dispatch: without a project orchestration.yaml the plugin default cap applies; a file without a dispatch block too" {
+  _plan 'wave-1|src/a.ts' 'wave-1|src/b.ts'
+  run aid_parallel_decide plan.md . wave-1 2 .
+  [ "$output" = "concurrent slots=3" ]
+  _cfg 'autonomy:\n  continuation_budget: 5\n'
+  run aid_parallel_decide plan.md . wave-1 2 .
+  [ "$output" = "concurrent slots=3" ]
+  _cfg 'dispatch: [unclosed\n'
+  run aid_parallel_decide plan.md . wave-1 2 .
+  [[ "$output" == "serial: "*"unreadable"* ]]
+}
+
 @test "dispatch: a strategy other than worktrees is serial, whatever max_parallel says" {
   _plan 'wave-1|src/a.ts' 'wave-1|src/b.ts'
-  printf 'dispatch:\n  strategy: sequential\n  max_parallel: 3\n' > seq.yaml
-  run aid_parallel_decide plan.md seq.yaml wave-1 2 .
+  _cfg 'dispatch:\n  strategy: sequential\n  max_parallel: 3\n'
+  run aid_parallel_decide plan.md . wave-1 2 .
   [ "$output" = "serial: dispatch.strategy is sequential — only worktrees isolate a step" ]
 }
 
 @test "dispatch: AC8 — a colliding wave is degraded to serial with the reason, never refused" {
   _plan 'wave-1|src/a.ts' 'wave-1|src/a.ts'
-  run aid_parallel_decide plan.md orch.yaml wave-1 2 .
+  run aid_parallel_decide plan.md . wave-1 2 .
   [ "$status" -eq 0 ]
   [[ "$output" == serial:* ]]
   [[ "$output" == *"not disjoint"* ]]
@@ -71,11 +84,13 @@ _plan() {
 
 @test "dispatch: the brake, a wave of one, and an unrunnable check all mean serial, each with its own reason" {
   _plan 'wave-1|src/a.ts' 'wave-1|src/b.ts'
-  run aid_parallel_decide plan.md brake.yaml wave-1 2 .
+  _cfg 'dispatch:\n  max_parallel: 1\n'
+  run aid_parallel_decide plan.md . wave-1 2 .
   [ "$output" = "serial: dispatch.max_parallel is 1" ]
-  run aid_parallel_decide plan.md orch.yaml wave-1 1 .
+  rm .aid-o/config/orchestration.yaml
+  run aid_parallel_decide plan.md . wave-1 1 .
   [[ "$output" == "serial: a wave of 1 step(s)"* ]]
-  run aid_parallel_decide missing.md orch.yaml wave-1 2 .
+  run aid_parallel_decide missing.md . wave-1 2 .
   [ "$status" -eq 0 ]
   [[ "$output" == "serial: the wave check could not run"* ]]
 }

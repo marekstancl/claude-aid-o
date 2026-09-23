@@ -425,7 +425,7 @@ tree_snapshot() {
   [ "$status" -eq 0 ]
   local labels
   labels="$(printf '%s\n' "$output" | sed 's/:.*//' | tr '\n' '|')"
-  [[ "$labels" == "state root|workspace|plan mode default|gate profiles|permissions|dispatch mode|plan manifests|plugin version|" ]]
+  [[ "$labels" == "state root|workspace|plan mode default|gate profiles|permissions|dispatch mode|parallel cap|plan manifests|plugin version|" ]]
 }
 
 # ─── invocation topology ─────────────────────────────────────────────────
@@ -544,4 +544,13 @@ tree_snapshot() {
   # Trailing shell punctuation (`)`, `;`, quotes) is not part of the target.
   run bash -c "grep -oE '[0-9]?>[^ ]*' '$code' | grep -vE '^[0-9]?>(/dev/null|&1|&2)[);\"'\\''|]*\$' || true"
   [ -z "$output" ]
+}
+
+@test "P099: the parallel cap in force is named with its source — project file, else plugin default" {
+  cd "$TEST_PROJECT_ROOT"
+  run "$SCRIPT"
+  [[ "$output" == *"parallel cap: 3 (source: plugin default orchestration.yaml)"* ]]
+  mkdir -p .aid-o/config; printf 'dispatch:\n  max_parallel: 1\n' > .aid-o/config/orchestration.yaml
+  run "$SCRIPT"
+  [[ "$output" == *"parallel cap: 1 (source: .aid-o/config/orchestration.yaml)"* ]]
 }

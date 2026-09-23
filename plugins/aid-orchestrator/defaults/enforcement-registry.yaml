@@ -3295,7 +3295,7 @@ enforcements:
     tier: t0
     description: "P085 Step 7 — each step declares a **Parallel group** (a wave name, or `---` for a step that runs alone), and two steps in the SAME wave must not name the same file. `Parallel Group` has existed in the EPIC table since P039 and aid-epic-to-json.sh writes it into plan.json, but nothing ever produced a value and nothing ever checked one; this is the producer's other half. Required in `full` and `medium`, where concurrency is declared deliberately; in `light` an absent field defaults to `---`. Two severities, the same two-stage model the Files grammar has: advisory while writing (--advisory), blocking inside aid-generation-readiness.sh, which is the last point before the plan becomes EPICs."
     limits: "The check VERIFIES a schedule and does not produce one — the plan computes its waves by hand. Since P087 Step 3 it judges two dimensions: shared files AND shared declared interfaces (`**Shared interfaces:**`, optional, absent = none). What it cannot see is a shared EFFECT nobody declared: disjoint files and disjoint declared interfaces do not guarantee disjoint impact, and such a collision can merge cleanly — nothing in this row or in parallel_dispatch_wave_check detects it; CP3 and the gates are where it surfaces."
-    runtime_check: "Post-generation: the disjointness is a property of the SOURCE plan, and the generated plan.json inherits the groups verbatim (aid-epic-to-json.sh). Development runtime (P087 Step 4): the dispatcher IS the runtime consumer — aid_parallel_decide runs this check with --group over the plan as it is at dispatch time, and a wave that fails it runs in sequence with the reason recorded (row parallel_dispatch_wave_check)."
+    runtime_check: "Post-generation: the disjointness is a property of the SOURCE plan, and the generated plan.json inherits the groups verbatim (aid-plan-to-epic.sh writes the step's group into the EPIC table since P099 — before that every row carried `---` and no wave ever ran concurrently; aid-epic-to-json.sh builds parallel_groups from it). Development runtime (P087 Step 4): the dispatcher IS the runtime consumer — aid_parallel_decide runs this check with --group over the plan as it is at dispatch time, and a wave that fails it runs in sequence with the reason recorded (row parallel_dispatch_wave_check)."
     recovery: "The finding names both steps and every shared path. Move one step to another wave, or mark it `---`."
     test: "scripts/tests/bats/test-plan-parallel-check.bats"
 
@@ -3639,7 +3639,7 @@ enforcements:
 
   - id: parallel_dispatch_wave_check
     type: 9
-    source: "scripts/lib/aid-parallel-dispatch.sh (aid_parallel_decide, aid_parallel_step_worktree, aid_parallel_step_reset, aid_parallel_merge) + scripts/aid-plan-parallel-check.sh (--group) + defaults/orchestration.yaml (dispatch.max_parallel, dispatch.strategy, dispatch.worktree_base)"
+    source: "scripts/lib/aid-parallel-dispatch.sh (aid_parallel_decide, aid_parallel_step_worktree, aid_parallel_step_reset, aid_parallel_merge) + scripts/aid-plan-parallel-check.sh (--group) + the project's .aid-o/config/orchestration.yaml, else defaults/orchestration.yaml (dispatch.max_parallel, dispatch.strategy, dispatch.worktree_base; lib/aid-roots.sh aid_orchestration_value, P099)"
     instruction: "skills/pipeline.md (§4 Parallel groups, §10)"
     severity: blocking
     surface: llm-facing

@@ -38,6 +38,7 @@ Parse `$ARGUMENTS`:
 | `integrations` | Read `skills/setup/integrations.md`, execute |
 | `claude-md` | Read `skills/setup/claude-md.md`, execute |
 | `scan` | Read `skills/setup/project-scan.md`, execute |
+| `parallel` | The step cap — see "Parallel steps" below |
 | `all` | Execute sequentially: scan → permissions → integrations → claude-md |
 
 Every module **mutates files created by `/aid-init`**; `/aid-setup` never creates the workspace and
@@ -84,11 +85,25 @@ AID Setup — Project Configuration
   (2) Integrations    — enable MCP servers ({enabled_count} enabled)
   (3) CLAUDE.md       — generate project context file ({exists|missing})
   (4) Project Scan    — re-detect tech stack + docs/help surfaces
+  (5) Parallel steps  — how many steps of one wave run at once (current: {parallel cap})
   (A) All             — run everything (recommended for first setup)
   (0) Exit
 
 Select:
 ```
+
+## Parallel steps
+
+`{parallel cap}` is the `parallel cap` line of the configuration summary above. Ask the PM for
+a number — 1 runs every step alone, 3 is the default `/aid-init` writes — and write it to the
+project file the dispatcher reads first:
+
+```bash
+yq -i '.dispatch.max_parallel = <n>' .aid-o/config/orchestration.yaml
+```
+
+A wave still runs one step at a time when its steps share a file or an interface
+(`skills/pipeline.md` §4 "Parallel groups"); the cap only bounds a wave that is safe.
 
 ## Module Execution
 
@@ -132,6 +147,7 @@ it on disk. `CLAUDE.md` is never created by `/aid-init` at all.
 | `.aid-o/config/project.yaml` | `/aid-init` (auto-detection) | `/aid-setup scan` | one delegated writer: `agents/project-scanner.md` (Quick Scan Mode A, triggered by this module; Deep Analysis Mode B, Orchestrator-triggered post-milestone, extends the same auto-detected sections). Merge rule from `skills/setup/project-scan.md` governs: auto-detected sections are replaced, PM-added custom fields are never overwritten. `skills/memory.md`'s "NEVER write to project.yaml" binds memory agents, not the scanner. |
 | `.aid-o/config/integrations.yaml` | `/aid-init`, CONDITIONALLY (only when Qdrant memory is detected, and then only `memory.enabled: true`) | `/aid-setup integrations` | every enable/disable after creation |
 | `CLAUDE.md` | not created by `/aid-init` | `/aid-setup claude-md` | sole AID writer; never overwrites PM-authored content |
+| `.aid-o/config/orchestration.yaml` | `/aid-init` (`dispatch.max_parallel: 3`) | `/aid-setup parallel` | project overrides of the plugin's `defaults/orchestration.yaml`; a key the project does not set falls back to the plugin default |
 
 **Also here: `versioning.release_exempt_paths` / `versioning.app_paths` (P089).**
 `scan` is where an ALREADY-INITIALISED project gets the two lists the release

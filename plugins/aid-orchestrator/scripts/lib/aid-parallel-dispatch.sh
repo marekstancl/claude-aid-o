@@ -3,7 +3,7 @@
 # lib/aid-parallel-dispatch.sh — whether a wave runs at once, and how its
 # work comes back together (P087 Step 4)
 #
-#   aid_parallel_decide        <plan.md> <orchestration.yaml> <wave_name> <wave_size> [tree_root]
+#   aid_parallel_decide        <plan.md> <state_root> <wave_name> <wave_size> [tree_root]
 #   aid_parallel_step_worktree <tree_root> <step_id> <base_ref> [worktree_base]
 #   aid_parallel_step_reset    <tree_root> <step_id> <base_ref> [worktree_base]
 #   aid_parallel_merge         <tree_root> <step_branch> [worktree_base]
@@ -43,6 +43,8 @@
 _AID_PARALLEL_DISPATCH_SH_LOADED=1
 
 _AID_PD_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=aid-roots.sh
+source "${_AID_PD_LIB_DIR}/aid-roots.sh"
 
 # Where a step's worktree lives: `<worktree_base>/step-<step_id>`, the base
 # from `dispatch.worktree_base` (default `.aid-worktrees`, the one path the
@@ -53,16 +55,20 @@ _aid_pd_step_worktree_path() { printf '%s/%s/step-%s' "$1" "${3:-$_AID_PD_DEFAUL
 _aid_pd_step_branch()        { printf 'step/%s' "$1"; }
 
 # ---------------------------------------------------------------------------
-# aid_parallel_decide <plan.md> <orchestration.yaml> <wave_name> <wave_size> [tree_root]
+# aid_parallel_decide <plan.md> <state_root> <wave_name> <wave_size> [tree_root]
 #   stdout: `concurrent slots=<max_parallel>` | `serial: <reason>`
 #   exit 0 always (2 = usage)
+#
+#   The cap and the strategy come from the project's orchestration.yaml, or
+#   from the plugin default when the project does not set them (P099 Step 6:
+#   no project had the file, so the dispatcher had never read a cap at all).
 #
 #   `slots` is the ceiling on agents in flight: a wave larger than it is still
 #   concurrent, in batches of that many — the controller dispatches the next
 #   step of the wave as a slot frees.
 # ---------------------------------------------------------------------------
 aid_parallel_decide() {
-  local plan="${1:?decide: plan file required}" cfg="${2:?decide: orchestration.yaml required}" wave="${3:?decide: wave name required}" size="${4:?decide: wave size required}" root="${5:-.}"
+  local plan="${1:?decide: plan file required}" sroot="${2:?decide: state root required}" wave="${3:?decide: wave name required}" size="${4:?decide: wave size required}" root="${5:-.}"
   [[ "$size" =~ ^[0-9]+$ ]] || { echo "decide: wave size must be a number, got '${size}'" >&2; return 2; }
 
   if (( size < 2 )); then
@@ -70,14 +76,16 @@ aid_parallel_decide() {
     return 0
   fi
 
-  if ! command -v yq >/dev/null 2>&1 || [[ ! -r "$cfg" ]]; then
-    echo "serial: ${cfg} is unreadable or yq is missing — the brake setting cannot be read, so it is treated as on"
+  local max strategy
+  if ! command -v yq >/dev/null 2>&1 \
+     || ! max="$(aid_orchestration_value "$sroot" .dispatch.max_parallel)" \
+     || ! strategy="$(aid_orchestration_value "$sroot" .dispatch.strategy)"; then
+    echo "serial: ${sroot}/.aid-o/config/orchestration.yaml is unreadable or yq is missing — the brake setting cannot be read, so it is treated as on"
     return 0
   fi
-  local max strategy
-  max="$(yq -r '.dispatch.max_parallel // 1' "$cfg" 2>/dev/null)"
+  max="${max%%$'\t'*}"; strategy="${strategy%%$'\t'*}"
   [[ "$max" =~ ^[0-9]+$ ]] || max=1
-  strategy="$(yq -r '.dispatch.strategy // "worktrees"' "$cfg" 2>/dev/null)"
+  strategy="${strategy:-worktrees}"
   if [[ "$strategy" != "worktrees" ]]; then
     echo "serial: dispatch.strategy is ${strategy} — only worktrees isolate a step"
     return 0

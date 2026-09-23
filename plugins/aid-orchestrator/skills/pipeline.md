@@ -923,14 +923,14 @@ never assumed from the plan:
 ```bash
 source "$AID_PLUGIN_PATH/scripts/lib/aid-parallel-dispatch.sh"
 plan_path="$(bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" get-field plan_path "$state_file")"   # plan.md, recorded by init ("null" in Fast Mode → serial)
-orchestration_yaml="$(aid_state_path .aid-o/config/orchestration.yaml)"                     # state root, never the worktree
+state_root="$(aid_state_root)"                                                                # never the worktree
 tree_root="$(git rev-parse --show-toplevel)"                                                 # the tree the run executes in
-worktree_base="$(yq -r '.dispatch.worktree_base // ".aid-worktrees"' "$orchestration_yaml")"
+worktree_base="$(aid_orchestration_value "$state_root" .dispatch.worktree_base | cut -f1)"   # project file, else plugin default
 # the wave: the current step's group in plan.json → parallel_groups[] (each entry lists the step ids of one wave)
 wave_steps="$(jq -c --arg id "$step_id" '.parallel_groups[] | select(index($id))' "$evidence_dir/plan.json")"
 wave_name="$(jq -r --arg id "$step_id" '.steps[] | select(.id == $id) | .parallel_group // "---"' "$evidence_dir/plan.json")"
 wave_size="$(jq -r 'length' <<< "${wave_steps:-[]}")"
-decision="$(aid_parallel_decide "$plan_path" "$orchestration_yaml" "$wave_name" "$wave_size" "$tree_root")"
+decision="$(aid_parallel_decide "$plan_path" "$state_root" "$wave_name" "$wave_size" "$tree_root")"
 # concurrent slots=<max_parallel> | serial: <reason>   — exit 0 either way; log the line to timeline.jsonl
 ```
 

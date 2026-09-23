@@ -859,6 +859,11 @@ _p081_tiers_adopted() {
   [[ "$_P081_TIERS_ADOPTED" == "yes" ]]
 }
 
+# The plan's step sections, read once: the Parallel Group column comes from the
+# same field reader aid-plan-parallel-check.sh validates with (P099 Step 6), so
+# generation writes exactly the wave readiness accepted.
+plan_step_bounds="$(_aid_plan_step_bounds "$plan")"
+
 for sn in "${phase_steps[@]}"; do
   step_counter=$(( step_counter + 1 ))
   step_content="$(extract_step_content "$sn")"
@@ -1243,7 +1248,14 @@ ${_dropped_bullets}Every top-level Files bullet must read \`- <Create|Modify|Tes
     [[ -z "$depends_on_str" ]] && depends_on_str="---"
   fi
 
-  steps_table_rows="${steps_table_rows}| ${step_counter} | ${role} | ${safe_objective} | ${depends_on_str} | --- |"$'\n'
+  parallel_group="---" _pg_s="" _pg_e=""
+  read -r _pg_s _pg_e _ < <(awk -F'\t' -v n="$sn" '$3 ~ "^### Step " n ":" { print; exit }' <<< "$plan_step_bounds") || true
+  if [[ -n "$_pg_s" ]]; then
+    parallel_group="$(_aid_plan_step_field "$plan" "$_pg_s" "$_pg_e" "Parallel group")" || parallel_group="---"
+    parallel_group="${parallel_group%%[[:space:]]*}"
+  fi
+
+  steps_table_rows="${steps_table_rows}| ${step_counter} | ${role} | ${safe_objective} | ${depends_on_str} | ${parallel_group} |"$'\n'
 done
 
 # ---------------------------------------------------------------------------
