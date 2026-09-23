@@ -448,6 +448,26 @@ tctl="$(_test_field_violations "${fixture_dir}/tests.yaml" "$PLUGIN_DIR" "$REPO_
   && pass_msg "only the deleted suite of the active row is flagged" \
   || fail_msg "expected exactly 'TEST|t_bad|scripts/tests/bats/test-aid-service.bats', got: ${tctl:-<nothing>}"
 
+# ─── 7. Every retired row names what replaced it ────────────────────────────
+# P097 Step 9 review. `removed_scoped` means "the mechanism left and something
+# else now guards the same thing" — a retired row with no replacement_guard
+# says a guard disappeared and nothing took its place. Two P095 rows carried
+# only the older `successor:` key and nothing noticed.
+echo "TEST: every removed_scoped row names its replacement_guard"
+_retired_without_guard() { yq -o=json '.' "$1" | jq -r '.enforcements[] | select(.status == "removed_scoped" and ((.replacement_guard // "") == "")) | .id'; }
+rviol="$(_retired_without_guard "$REGISTRY")"
+[[ -z "$rviol" ]] && pass_msg "every removed_scoped row names a replacement_guard" \
+  || fail_msg "removed_scoped without replacement_guard: $(tr '\n' ' ' <<<"$rviol")"
+cat > "${fixture_dir}/retired.yaml" <<'FIXTURE'
+enforcements:
+  - {id: r_good, status: removed_scoped, replacement_guard: something_else}
+  - {id: r_bad, status: removed_scoped, successor: something_else}
+  - {id: r_live, status: active}
+FIXTURE
+[[ "$(_retired_without_guard "${fixture_dir}/retired.yaml")" == "r_bad" ]] \
+  && pass_msg "the check fires on a retired row with only successor:" \
+  || fail_msg "negative control did not flag exactly r_bad"
+
 # ── the enforcement-values lint (registry row policy_enforcement_values_lint) ──
 # The two rules of the retired DG-12 authority check, over what the plugin ships:
 # an `enforcement:` value is observe or blocking, and nothing is `blocking` while
