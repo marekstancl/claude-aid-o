@@ -238,16 +238,15 @@ agent (the mechanism is measured, that delivery is not).
 Každý projekt, který AID používá, má soubor `.aid-o/work/aid-plugin-issues.md`
 (vzniká sám při `plan-start` a každém `init`; pravidla kdy a jak psát má v
 hlavičce). Píší do něj agenti i controller, když se špatně chová **AID sám** –
-ne projekt. Sem se to stahuje a tady se rozhoduje.
+ne projekt. Soubor projektu je jediný záznam: rozhodnutí se píše do něj.
 
-**Sběr:** `bash bin/aid-plugin-issues-collect.sh [--dry-run]`
-- projde `/opt/eco/projects/*/.aid-o/work/aid-plugin-issues.md`,
-- nepřevzaté body slepí do `docs/plans/plugin-issues-inbox.md` (gitignorováno –
-  commitovat `git add -f`),
-- v projektu je označí `> **PŘEVZATO <datum> (aid-orchestrator)**`; nic nemaže.
-Pouští se ručně, když je čas rozhodovat (`--dry-run` jen ukáže, co přibylo).
+**Přehled:** `bash bin/aid-plugin-issues-collect.sh` projde
+`/opt/eco/projects/*/.aid-o/work/aid-plugin-issues.md` a vypíše body bez
+rozhodnutí (HOTOVO / ZAMÍTNUTO / ČÁSTEČNĚ / UŽ ŘEŠENO) s číslem řádku. Nic
+nezapisuje a nic nekopíruje; bod označený jen `PŘEVZATO` (starý sběr) je
+pořád otevřený. Poslední roztřídění: `docs/plans/plugin-issues-triage-2026-09-23.md`.
 
-**Postup po sběru:**
+**Postup:**
 1. Každý bod ověřit v kódu a nechat nezávisle posoudit Codexem
    (reálná chyba / dokumentace / design / už opraveno).
 2. Předložit PM lidsky: co se děje, možnosti, doporučení, proč – PM rozhodne.

@@ -31,8 +31,8 @@ anything already in the project backlog. Those go where they always went.
 The plugin version is what makes an entry readable a month later ("was this
 already fixed?"); read it with
 `jq -r .version "$AID_PLUGIN_PATH/.claude-plugin/plugin.json"` — the Stop-hook
-reminder prints it too. Facts, not proposals — the fix is decided on the owner's side. The owner marks
-each entry `> **PŘEVZATO <date>**` when collected and later `HOTOVO vX.Y.Z` or
-`ZAMÍTNUTO`; entries are never deleted, this file is the project's own record.
+reminder prints it too. Facts, not proposals — the fix is decided on the owner's side. The owner
+writes the decision under the entry (`HOTOVO vX.Y.Z`, `ZAMÍTNUTO`, `ČÁSTEČNĚ`, `UŽ ŘEŠENO`);
+entries are never deleted, this file is the project's own record.
 
 <!-- entries below, newest last -->

@@ -30,6 +30,7 @@ presets:
       - "TodoWrite"
       - "WebSearch"
       - "WebFetch"
+      - "Artifact"   # a page is private until shared; publishing never waits on a prompt (P099)
       - "Bash(*)"
       # ── Qdrant Brain (legacy memory MCP — kept for back-compat with skills/memory-mcp.md) ──
       - "mcp__qdrant-brain__qdrant-find"
