@@ -2,9 +2,10 @@
 
 <!-- created by aid-orchestrator v{{PLUGIN_VERSION}} on {{CREATED_DATE}} -->
 
-One file per project, for every plan it runs. Read by the plugin owner
-(`aid-orchestrator`), who collects these files across projects and decides
-there — nothing else reads this file, nothing is enforced by it.
+One file per project, for every plan it runs, and the one record of what it
+reports: the plugin owner (`aid-orchestrator`) lists the open entries across
+projects and writes each decision under its entry here. Nothing else reads this
+file, nothing is enforced by it.
 
 ## When to write here (and when not)
 

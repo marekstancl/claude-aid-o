@@ -208,8 +208,8 @@ up), and the plugin version on the `Plugin:` line (the file header says where to
 read it; the Stop-hook reminder prints it) — a month later that line is what says
 whether the defect was already fixed. Every `--force` and every `amend-scope` you needed because AID was wrong is
 an entry. A plugin defect found by an external reviewer (Codex) is written by the
-controller — Codex runs read-only. The plugin owner collects these files across
-projects; nothing else reads them, so a missed entry costs nothing and a
+controller — Codex runs read-only. The plugin owner reads these files across
+projects and writes each decision under its entry; nothing else reads them, so a missed entry costs nothing and a
 fabricated one costs trust. A Stop-hook line may remind you when AID refused or
 was bypassed in this session and the file did not change — it is a reminder,
 not a demand: a project defect needs no entry.
