@@ -7889,7 +7889,7 @@ cmd_worktrees() {
 }
 
 cmd_plan_state() {
-  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt="" supersede_epic="" recreate_wt=0 set_autonomy=""
+  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt="" supersede_epic="" recreate_wt=0 set_autonomy="" bind_session="" bind_given=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --repair) repair=1; shift ;;
@@ -7906,6 +7906,9 @@ cmd_plan_state() {
       # project setting on every merge (printing a line each time). This stamps
       # it once, so the plan says what it is.
       --set-autonomy) set_autonomy="${2:-}"; shift 2 ;;
+      # P099 Step 5: `/aid-run --auto` names the session that drives the plan;
+      # the Stop hook keeps only that session working.
+      --bind-session) bind_session="${2:-}"; bind_given=1; shift 2 ;;
       --supersede-epic) supersede_epic="${2:-}"; shift 2 ;;
       --attest-source-ref) attest_ref="${2:-}"; shift 2 ;;
       --reason) attest_reason="${2:-}"; shift 2 ;;
@@ -7918,7 +7921,7 @@ cmd_plan_state() {
     esac
   done
   if [[ -z "$plan_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-state <plan_id> [--repair] [--set-autonomy auto|manual] [--recreate-worktree --reason <text>] [--supersede-epic <epic_id> --reason <text>] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-state <plan_id> [--repair] [--set-autonomy auto|manual] [--bind-session <session_id>] [--recreate-worktree --reason <text>] [--supersede-epic <epic_id> --reason <text>] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -7930,6 +7933,18 @@ cmd_plan_state() {
   project_root="$(_pfsm_resolve_project_root "$project_root_opt")"
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
+
+  if (( bind_given )); then
+    [[ -n "$bind_session" ]] || { echo "ERROR: plan-state: --bind-session needs the session id — run it from the session itself: --bind-session \"\$CLAUDE_CODE_SESSION_ID\"" >&2; exit 2; }
+    local brc=0
+    plan_state_set_autonomy "$plan_id" auto "$bind_session" >/dev/null || brc=$?
+    if [[ "$brc" -eq 0 ]]; then
+      echo "plan-state: ${plan_id} autonomy=auto, driven by session ${bind_session}" >&2
+    else
+      echo "ERROR: plan-state: could not bind ${plan_id} to the session (rc=${brc})" >&2
+    fi
+    exit "$brc"
+  fi
 
   if [[ -n "$set_autonomy" ]]; then
     case "$set_autonomy" in

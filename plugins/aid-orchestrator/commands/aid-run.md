@@ -74,6 +74,29 @@ run that announced itself as AUTO was read back as manual at every checkpoint.
 If the command fails, stop: a run that cannot record its own mode is not an
 AUTO run.
 
+**Then bind this session to the plan and make sure the hook layer is in force**
+(P099: the Stop hook keeps only the bound session working, and its refusals
+count only while a canary verdict is fresh):
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh" plan-state <plan_id> --bind-session "$CLAUDE_CODE_SESSION_ID"
+bash "$AID_PLUGIN_PATH/scripts/aid-hook-verify.sh" --status >/dev/null 2>&1 \
+  || bash "$AID_PLUGIN_PATH/scripts/aid-hook-verify.sh" --canary
+```
+
+A canary that fails leaves the layer degraded; say so in one line and go on.
+After `/clear` or in a new session, `/aid-run --auto` binds again.
+
+**What ends an AUTO turn, and nothing else does.** The Stop hook refuses a turn
+of the bound session that ends with work left, up to
+`autonomy.continuation_budget` times (`orchestration.yaml`, 40) until the PM
+answers. A turn may end with:
+- a Decision card or a Blocked card (`skills/communication.md`) — the PM gets one
+  "agent is waiting" message; the PM's "zastav se" is answered with a Blocked card;
+- a last line `AID-WAIT: <what>` while a background gate job AID owns is live
+  (`aid-job.sh`); the harness brings you back when it finishes;
+- the budget spent, or an account limit — the PM gets the same one message.
+
 Requires `autonomous_mode: true` in `.aid-o/config/permissions.yaml`.
 If not set, `--auto` prints a warning and falls back to manual mode.
 

@@ -266,11 +266,18 @@ cmd_status() {
     echo "Run: aid-hook-verify.sh --canary" >&2
     return 1
   fi
+  # In force = verified AND younger than trust_ttl_days — the same test the
+  # dispatcher applies (aid-hook.sh _hook_trust_ok), so `/aid-run` can renew an
+  # expired verdict on the answer of this command alone.
+  local ttl in_force=1
+  ttl="$(yq -r '.trust_ttl_days // 7' "$REGISTRY" 2>/dev/null)"; [[ "$ttl" =~ ^[0-9]+$ ]] || ttl=7
+  jq -e --argjson d "$ttl" '.verified == true and ((now - (.checked_at | fromdateiso8601)) <= $d * 86400)' "$file" >/dev/null 2>&1 || in_force=0
   if [[ "${1:-}" == "--json" ]]; then
-    cat "$file"; [[ "$(jq -r '.verified' "$file")" == "true" ]]; return $?
+    cat "$file"; (( in_force )); return $?
   fi
+  (( in_force )) || echo "NOT IN FORCE — no verified verdict younger than ${ttl} days; fail-closed rules run as fail-open. Run: aid-hook-verify.sh --canary" >&2
   jq -r '"tool:      \(.tool) \(.version)\nverdict:   \(if .verified then "VERIFIED" else "NOT VERIFIED" end) (\(.state))\ndetail:    \(.detail)\nchecked:   \(.checked_at)\nmeasured:  \(if .unmeasured_version then "this version is NOT the one the ecosystem sheet was measured on (\(.measured_version)) — the run modes and events beyond the one observed here are unverified for it" else "matches the measured ecosystem sheet" end)"' "$file"
-  [[ "$(jq -r '.verified' "$file")" == "true" ]]
+  (( in_force ))
 }
 
 cmd_seed_trust() {

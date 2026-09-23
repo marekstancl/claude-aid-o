@@ -323,7 +323,7 @@ enforcements:
   - {id: audit_log_append,             type: 11, source: "scripts/aid-audit-log.sh:26", instruction: "skills/agent-protocol.md:253", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "atomic append; failure non-fatal (never aborts FSM)"}
   - {id: fsm_emit_audit_log,           type: 11, source: "scripts/aid-fsm.sh:349",  instruction: "skills/agent-protocol.md:253", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "emits cp4/streamlined fail events on precondition failure"}
   - {id: stage_log_invalid_json,       type: 11, source: "scripts/lib/aid-stage-log.sh:49", instruction: n/a, severity: advisory, surface: internal-guard, status: active, verdict: GAP, description: "invalid JSON → log_error event, never blocks"}
-  - {id: repeated_fail_alert,          type: 11, source: "scripts/aid-fsm.sh:107",  instruction: "skills/pipeline.md:450", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "repeated precondition fail → event + Telegram alert"}
+  - {id: repeated_fail_alert,          type: 11, source: "scripts/aid-fsm.sh:107",  instruction: "skills/pipeline.md:450", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "repeated precondition fail → timeline event (no Telegram since P099)"}
   - {id: timeline_window_seconds,      type: 11, source: "defaults/orchestration.yaml:33", instruction: "skills/agent-protocol.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "verifier _generated_by must match dispatch event within +/-60s"}
   - {id: plan_json_hash_tamper,        type: 11, source: "scripts/aid-fsm.sh:cmd_increment_step (plan.json hash mismatch check)", instruction: "skills/pipeline.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "mid-EPIC plan.json sha256 mismatch → die (anti scope-creep). v2.95.5: the sanctioned widening is `aid-fsm.sh amend-scope`, which re-stamps the hash — see scope_amendment; v2.95.7: the sanctioned acceptance of a REGENERATED plan is `aid-fsm.sh rebase-plan` — see plan_rebase"}
   - {id: scope_amendment,              type: 11, source: "scripts/aid-fsm.sh:cmd_amend_scope + lib/aid-dispatch-contract.sh (scope-amendment.json union)", instruction: "skills/agent-protocol.md §Scope Enforcement + commands/aid-run.md rule 16b + skills/pipeline.md §Scope amendment", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "v2.95.5 (ACTA #17): the ONE sanctioned way to widen a step mid-EXECUTE. Moves the three scope readers together — plan.json (commit hook), plan_json_hash (tamper check), steps/<id>/scope-amendment.json (contract validator AND the write-hook notice union it via aid_dispatch_contract_allowed, the contract packet stays as dispatched) — with a ≥20-char reason in the timeline and audit log. Refuses outside EXECUTE, past the last step, absolute or .. paths; never removes a path, never touches another step. Before it, the hook demanded a plan.json edit that the hash check then punished."}
@@ -3022,7 +3022,7 @@ enforcements:
     status: active
     verdict: ALIGNED
     description: "P081 Step 9 — once the merge path is T0+T1, the targeted selector is most of what stands between a change and a merge, and a selector nobody can audit is worse than none because it looks like coverage. `mapped_but_thin` is the class that matters: for a path the mapping DOES claim, the selector exits 0 and its exit-3/exit-11 escalation is structurally unreachable, so a thin mapping fails silently and confidently. The two escalating exits COUNT AS SELECTION — a merge that hit them ran a fuller profile — because manufacturing gaps from a safety net produces a report nobody believes."
-    recovery: "Gaps are reported in <nightly dir>/<date>-selector-gaps.json and named in the nightly's Telegram line; the check never fails the job."
+    recovery: "Gaps are reported in <nightly dir>/<date>-selector-gaps.json; the check never fails the job."
     test: "scripts/tests/bats/test-selector-honesty-check.bats"
 
   - id: help_index_coverage
@@ -3389,7 +3389,7 @@ enforcements:
     tier: t1
     enforcement_degree: 1
     not_guaranteed: "That a harness calls it at all. That is what the canary (hook_canary_verdict) answers, and until it does, no fail-closed rule in this registry is in force."
-    description: "P086 Step 1 — the single entry point every AID harness hook goes through. A rule is a row in defaults/hook-registry.yaml: an event, an owner, a degree and a failure mode. Only `failure: closed` may stop a turn; a `failure: open` row that exits 2 is a misdeclaration, recorded and ignored. Per-rule clocks are capped to what is left of the whole-dispatch budget, an unreadable registry runs NO rule (never all of them), and the three escape hatches (AID_HOOKS_OFF, AID_HOOKS_OFF_RULES, disabled: true) are all audited."
+    description: "P086 Step 1 — the single entry point every AID harness hook goes through. A rule is a row in defaults/hook-registry.yaml: an event, an owner, a degree and a failure mode. Only `failure: closed` may stop a turn; a `failure: open` row that exits 2 is a misdeclaration, recorded and ignored. Per-rule clocks are capped to what is left of the whole-dispatch budget, an unreadable registry runs NO rule (never all of them), and the three escape hatches (AID_HOOKS_OFF, AID_HOOKS_OFF_RULES, disabled: true) are all audited. A row may declare `blocks_when_active: true` (P099): it may refuse a turn the harness is already continuing, and its own timeout or error never blocks — only an explicit refusal does."
     recovery: "AID_HOOKS_OFF_RULES=<id> switches one rule off; AID_HOOKS_OFF=1 is the emergency brake. Both are written to the audit trail in the session store with their reason."
     test: "scripts/tests/bats/test-aid-hook-dispatch.bats"
 
@@ -3405,7 +3405,7 @@ enforcements:
     enforcement_degree: 1
     not_guaranteed: "That the tool and version the verdict names are still the ones running. The dispatcher cannot tell WHICH harness is calling it — neither Claude Code 2.1.226 nor Codex 0.146.0 puts a harness marker in the event payload — so the binding is a freshness window (trust_ttl_days), not an identity check. Inside that window, a tool upgrade is covered by a measurement that no longer applies."
     description: "P086 Step 2 — the only thing in AID allowed to say hooks run here. It runs a real short session and requires AID's own canary rule to have left a SUCCESSFUL record: the dispatcher audits a crashed rule too, so counting audit lines would let a broken layer certify itself. Codex trust states `untrusted` AND `modified` are both refused (checking only the first lets an edited hook through) and the bypass flag is never used. The verdict is mechanical: without it every fail-closed rule degrades to fail-open and the degradation is audited."
-    recovery: "aid-hook-verify.sh --status says what is recorded and why; --canary re-measures; --seed-trust approves Codex hooks idempotently."
+    recovery: "aid-hook-verify.sh --status says what is recorded and why, and exits 1 when no verified verdict is younger than trust_ttl_days; `/aid-run --auto` then renews it with --canary (P099 Step 5), still only by a real session; --seed-trust approves Codex hooks idempotently."
     test: "scripts/tests/bats/test-aid-hook-verify.bats"
 
   - id: decision_card_complete
@@ -3873,16 +3873,16 @@ enforcements:
   - id: queue_continuation_notice
     type: 12
     source: "scripts/lib/aid-queue-continuation.sh"
-    instruction: "defaults/hook-registry.yaml (queue_continuation_notice, queue_continuation_resume)"
-    severity: advisory
+    instruction: "defaults/hook-registry.yaml (queue_continuation_notice, queue_continuation_resume, pm_reply_marker) + commands/aid-run.md (--auto binds the session)"
+    severity: blocking
     surface: llm-facing
     status: active
     verdict: ALIGNED
     tier: t0
-    enforcement_degree: 3
-    not_guaranteed: "THAT IT HOLDS A TURN — it cannot, and the reason is structural rather than a matter of configuration. `aid-hook.sh:315-319` sets `no_block=1` as soon as the harness reports `stop_hook_active: true`, which it does on every Stop after the first hook-driven continuation: a rule may still SPEAK, but no refusal from it may stop the turn again. A barrier built here would therefore hold exactly once and then go quiet, which is worse than no barrier, because everyone would believe it was one. Its row is `failure: open` and its degree is 3 for that reason. It also guarantees nothing when hooks are switched off (AID_HOOKS_OFF, AID_HOOKS_OFF_RULES, `disabled: true`), when the plan has no `autonomy: auto` (every pre-P090 plan), or when the queue cannot be read — there it says NOTHING about that plan and records why on stderr, because a reminder built on 'I do not know' is noise that teaches a reader to skim past the ones that mean something."
-    description: "P090 Step 5 — the net under the mechanism. On `Stop` it names every autonomous plan that still has work; on `SessionStart` it reads back the continuation guidance an interrupted run left, which after a dead controller is the only reader that guidance has. It asks through `peek`, never `claim`: a reminder that consumed the queue would create the very orphan it exists to warn about."
-    recovery: "The notice names the plan, what the queue has next, and what the last continuation left in flight. `aid-plan-continue.sh <plan_id> <finished EPIC>` picks it up."
+    enforcement_degree: 2
+    not_guaranteed: "That the agent does useful work after a refusal — it is sent back with the next action, and the budget (autonomy.continuation_budget, 40 per plan until the PM answers) bounds a loop that keeps failing the same way. Nothing holds a session that is not the plan's `auto_session`, a turn that ends on an account limit (no Stop event arrives), or a layer without a fresh canary verdict (the row is `failure: closed`, so it degrades to open and says so in the audit). A turn that hands over with a card, or ends `AID-WAIT:` while an AID background job is live, is let go by design."
+    description: "P090 Step 5, a refusal since P099 Step 5 — the agent ended its turn in the middle of an autonomous run about ten times in P097. On `Stop` of the session bound to an autonomous plan, a turn with work left is refused with the next action; the row declares `blocks_when_active`, so the refusal holds under stop_hook_active and the rule counts instead. A card or the spent budget ends the run with one `agent-waiting` message; the PM's prompt (`pm_reply_marker`) resets the count and re-arms the message. On `SessionStart` it reads back the continuation guidance an interrupted run left. It asks through `peek`, never `claim`."
+    recovery: "The refusal names the plan, its state and the ways a turn may end. AID_HOOKS_OFF_RULES=queue_continuation_notice switches it off without a release."
     test: "scripts/tests/bats/test-queue-continuation.bats"
 
   - id: codex_transport_read_only

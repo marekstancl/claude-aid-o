@@ -1,37 +1,31 @@
 #!/usr/bin/env bash
 # =============================================================================
-# lib/aid-queue-continuation.sh — the reminder that a plan is not finished
-# (P090 Step 5)
+# lib/aid-queue-continuation.sh — an autonomous plan keeps going until it
+# needs the PM (P090 Step 5; the Stop rule became a bounded refusal in P099)
 #
 #   aid_queue_continuation_scan <state_root>       one line per autonomous plan
 #   aid_hook_rule_queue_continuation_stop          (Stop-event handler)
 #   aid_hook_rule_queue_continuation_start         (SessionStart-event handler)
+#   aid_hook_rule_pm_reply_marker                  (UserPromptSubmit handler)
 #
-# DEGREE 3 ON PURPOSE, AND THIS IS THE WHOLE POINT OF THE FILE.
-# `aid-hook.sh:315-319` sets `no_block=1` the moment the harness reports
-# `stop_hook_active: true`: the rule still RUNS and still SPEAKS, but no
-# refusal from it may stop the turn. A barrier built here would therefore hold
-# exactly once and go quiet the second time — which is worse than not being a
-# barrier at all, because everyone would believe it was one. So this rule never
-# refuses anything. The real continuation is `aid-plan-continue.sh` (Step 3);
-# actually running the next EPIC is Step 6. This is the net underneath: it says
-# out loud what was left half-done.
+# THE STOP RULE REFUSES, WITH A BUDGET. The agent ended its turn in the middle
+# of an autonomous run about ten times in P097 and waited for "pokračuj". When
+# the session that drives an autonomous plan (`auto_session` in its plan-state,
+# bound by `/aid-run --auto`) ends a turn with no hand-over card and no
+# declared background wait, the rule refuses the stop and names the next
+# action. Its registry row says `blocks_when_active: true`, so the refusal
+# holds under `stop_hook_active` too — which is why the rule counts: after
+# `autonomy.continuation_budget` refusals it lets the turn end and sends the
+# PM one "agent is waiting" message. The PM's next prompt resets the count
+# (`aid_hook_rule_pm_reply_marker`). Every other session is never refused.
 #
-# IT ASKS, IT NEVER TAKES. Every read goes through `queue_peek_next`, never
+# IT ASKS, IT NEVER TAKES. Queue reads go through `queue_peek_next`, never
 # `claim-next`: a reminder that consumed the queue would leave an EPIC marked
-# `running` with nothing running — the exact failure P090 exists to remove.
+# `running` with nothing running.
 #
 # WHERE "IS THIS PLAN AUTONOMOUS" COMES FROM. The plan-level `autonomy` field in
-# `.aid-o/work/plan-state/<plan_id>/plan-state.yaml`, written by `plan-start`,
-# read from the FILE and never from the environment. The obvious alternative —
-# `auto_controller` on the run record — cannot serve: a run removes its own
-# entry on the `done-advance review→release` edge (aid-fsm.sh:286), so by the
-# time a turn ends there may be nothing left to read. Absence reads as manual,
-# so a pre-P090 plan is silent rather than noisy.
-#
-# TWO AUTONOMOUS PLANS ARE BOTH NAMED. It costs nothing — the rule blocks
-# nothing — and staying quiet about one of them would be the only way to be
-# actively wrong.
+# `.aid-o/work/plan-state/<plan_id>/plan-state.yaml`, read from the FILE and
+# never from the environment. Absence reads as manual.
 #
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 #
@@ -44,7 +38,8 @@ _AID_QC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-roots.sh
 source "${_AID_QC_LIB_DIR}/aid-roots.sh"
 
-# _aid_qc_state <state_root> <plan_id> — `<autonomy>\t<plan_state>` in ONE pass.
+# _aid_qc_state <state_root> <plan_id> — `<autonomy>\037<plan_state>\037<auto_session>`
+# in ONE pass.
 #
 # Read with awk rather than by sourcing the plan-state library: this runs inside
 # a hook, where the whole dispatch budget is fifteen seconds shared by every
@@ -57,11 +52,12 @@ _aid_qc_state() {
   # US (0x1f), never a tab: a tab is IFS *whitespace*, so a plan with no
   # `autonomy` line would collapse into one field and read its plan_state as
   # its autonomy. `lib/aid-worktree-registry.sh` carries the same note.
-  [[ -f "$sf" ]] || { printf '\x1f'; return 0; }
+  [[ -f "$sf" ]] || { printf '\x1f\x1f'; return 0; }
   awk '
-    /^autonomy:/    && a == "" { a = $2; gsub(/^"|"$/, "", a) }
-    /^plan_state:/  && s == "" { s = $2; gsub(/^"|"$/, "", s) }
-    END { printf "%s\037%s\n", a, s }' "$sf" 2>/dev/null
+    /^autonomy:/     && a == "" { a = $2; gsub(/^"|"$/, "", a) }
+    /^plan_state:/   && s == "" { s = $2; gsub(/^"|"$/, "", s) }
+    /^auto_session:/ && x == "" { x = $2; gsub(/^"|"$/, "", x) }
+    END { printf "%s\037%s\037%s\n", a, s, x }' "$sf" 2>/dev/null
 }
 
 # Plans that owe nothing: a closed or abandoned plan has no next EPIC by
@@ -93,7 +89,7 @@ aid_queue_continuation_scan() {
   for sf in "$root"/.aid-o/work/plan-state/*/plan-state.yaml; do
     [[ -f "$sf" ]] || continue
     plan_id="$(basename "$(dirname "$sf")")"
-    IFS=$'\x1f' read -r autonomy state <<< "$(_aid_qc_state "$root" "$plan_id")"
+    IFS=$'\x1f' read -r autonomy state _ <<< "$(_aid_qc_state "$root" "$plan_id")"
     [[ "$autonomy" == "auto" ]] || continue
     [[ " $_AID_QC_TERMINAL " == *" ${state} "* ]] && continue
 
@@ -146,14 +142,17 @@ aid_queue_continuation_scan() {
   return 0
 }
 
-# _aid_qc_root <event json> — the state root, or nothing (and a reason on
-
 # The once-per-session memory lives in the session store, shared with the
 # milestone rule rather than copied — two copies of "say it once" drift.
 # shellcheck source=aid-session-store.sh
-source "${BASH_SOURCE[0]%/*}/aid-session-store.sh" 2>/dev/null || true
+source "${_AID_QC_LIB_DIR}/aid-session-store.sh"
+# shellcheck source=aid-alert.sh
+source "${_AID_QC_LIB_DIR}/aid-alert.sh"
+# shellcheck source=aid-hook-rules-turn.sh
+source "${_AID_QC_LIB_DIR}/aid-hook-rules-turn.sh"
 
-# stderr). Shared by both handlers.
+# _aid_qc_root <event json> — the state root, or nothing (and a reason on
+# stderr). Shared by the handlers.
 _aid_qc_root() {
   local cwd
   cwd="$(jq -r '.cwd // ""' <<<"$1" 2>/dev/null)"
@@ -161,8 +160,8 @@ _aid_qc_root() {
   (cd "$cwd" && aid_state_root 2>/dev/null) || { echo "cwd is not inside an AID workspace" >&2; return 3; }
 }
 
-# _aid_qc_line <plan> <state> <result> <next> [queue_count] — one sentence,
-# for either event. An empty queue_count means "not determined".
+# _aid_qc_line <plan> <state> <result> <next> [queue_count] — one sentence.
+# An empty queue_count means "not determined".
 _aid_qc_line() {
   local plan="$1" state="$2" result="$3" next="$4" qcount="${5:-}" tail=""
   [[ -n "$next" ]] && tail=" The last continuation left ${next} in flight."
@@ -182,94 +181,32 @@ _aid_qc_line() {
 }
 
 # ---------------------------------------------------------------------------
-# _aid_qc_emit <heading> [footer] — the body both handlers share.
+# aid_hook_rule_queue_continuation_start — SessionStart handler, and the event
+# that actually rescues a lost chain: when a controller dies, the
+# `epic-merge-to-plan` that would have continued the plan never happens again,
+# so the guidance it wrote would be read by nobody. This is who reads it.
 #
-# TWO HANDLERS AND ONE BODY, deliberately. The registry keys `handler` per
-# `event`, and one handler branching on the event name would hide from a reader
-# of `hook-registry.yaml` that these are two rules with two failure modes — the
-# house pattern is exactly this pair shape (`continuity_capture` /
-# `continuity_restore`). What the two must NOT have is two copies of the loop:
-# that is how they start behaving differently while two tests each assert one of
-# them.
-#
-# Returns 0 with something to say, 3 with nothing. Never 2 — this rule has no
-# refusal to make, and its registry rows say `failure: open` so that a reader
-# finds that out where it is recorded rather than by reading this file.
-_aid_qc_emit() {
-  local heading="$1" footer="${2:-}"
+# SAID ONCE PER WORKSPACE, PER PLAN, PER STATE. Five terminals open on one
+# project announced the same open plan five times (PM, "hlásí to pořád v jiných
+# oknech"); the memory is therefore keyed on the WORKSPACE, canonicalised so a
+# symlinked spelling of the same checkout does not get its own memory, and it
+# speaks again the moment the plan's state moves. An unusable root falls back
+# to the session key, which merely repeats — the noisy failure, never the
+# silent one. Returns 0 with something to say, 3 with nothing; never refuses.
+# ---------------------------------------------------------------------------
+aid_hook_rule_queue_continuation_start() {
   local input; input="$(cat)"
   local root; root="$(_aid_qc_root "$input")" || return 3
-
-  # SAY IT ONCE PER SESSION, PER PLAN, PER STATE. This rule reads every
-  # plan-state record in the workspace, so in a project with four open plans it
-  # named all four at EVERY turn — including plans the session was not working
-  # on. Measured 2026-08-30 in a consumer project: the reminder repeated for a
-  # dozen turns and the agent answered "čekám na tebe" to each one, which is
-  # what a rule that repeats teaches. The key carries the plan AND its state, so
-  # a plan that MOVES is named again — that is news; standing still is not.
-  # `//` in jq falls back on null and false, NOT on an empty string, so an
-  # event carrying `"transcript_path": ""` never reached session_id and every
-  # such session shared one memory (Codex, 2026-08-30). Pick the first field
-  # that is actually non-empty.
-  # The session KEY and the TRANSCRIPT are two different things: a session_id
-  # that happens to name a readable file must never be read as a transcript
-  # (Codex, 2026-08-30). The key identifies, the transcript is evidence.
-  local _qc_transcript
-  _qc_transcript="$(printf '%s' "$input" | jq -r '.transcript_path? // "" | if type == "string" then . else "" end' 2>/dev/null)"
-  local _qc_skey
-  _qc_skey="$(printf '%s' "$input" | jq -r '[.transcript_path?, .session_id?] | map(select(type == "string" and . != "")) | first // ""' 2>/dev/null)"
-  local _qc_once_ok=1
-  command -v aid_session_once >/dev/null 2>&1 || _qc_once_ok=0
-
-  # WHOSE "once" IS IT. Stop already speaks only about plans this session has
-  # been in, so a per-session marker is right there. SessionStart speaks about
-  # the whole workspace, and a per-session marker made it repeat in EVERY new
-  # window: five terminals open on one project meant the same open plan
-  # announced five times, which was the PM's complaint ("hlásí to pořád
-  # v jiných oknech"). At SessionStart the memory is therefore keyed on the
-  # WORKSPACE — the first window to open says it, the rest stay quiet — and it
-  # speaks again the moment the plan's state actually moves, because the state
-  # is part of the remembered item.
-  #
-  # NOT a per-day repeat. An earlier version added the date to the item so a
-  # dormant plan would be re-announced daily; that is a retention policy
-  # smuggled in as a key trick, and it nags about plans nobody is touching
-  # while growing the marker file by a line a day (Codex, 2026-09-03). The
-  # window that is genuinely working on the plan still hears about it at every
-  # Stop, so nothing is forgotten by staying quiet here.
-  #
-  # THE KEY MUST BE A REAL WORKSPACE, or not be shared at all.
-  # `workspace:${root}` is non-empty even when root is empty, which would hash
-  # every workspace on the machine onto ONE marker file — the cross-workspace
-  # silencing aid_session_once explicitly warns about, arrived at from the
-  # other direction. An unusable root therefore leaves the per-session key in
-  # place, which merely repeats: the failure this code may have is the noisy
-  # one, never the silent one. The path is canonicalised first so a symlinked
-  # spelling of the same checkout does not get its own memory.
-  if [[ "${_qc_scope:-stop}" == "all" ]]; then
-    local _qc_ws=""
-    if [[ -n "$root" && -d "$root" ]]; then
-      _qc_ws="$(cd -- "$root" 2>/dev/null && pwd -P)" || _qc_ws=""
-    fi
-    [[ -n "$_qc_ws" ]] && _qc_skey="workspace:${_qc_ws}"
-  fi
-
-  local _qc_mine="" _qc_filter=0
-  if [[ "${_qc_scope:-stop}" == "stop" && -n "$_qc_transcript" && -r "$_qc_transcript" ]]; then
-    _qc_mine=" $(grep -oE '\bP[0-9]{3}\b' "$_qc_transcript" 2>/dev/null | sort -u | tr '\n' ' ')"
-    [[ -n "${_qc_mine// /}" ]] && _qc_filter=1
-  fi
+  local skey ws=""
+  skey="$(printf '%s' "$input" | jq -r '[.transcript_path?, .session_id?] | map(select(type == "string" and . != "")) | first // ""' 2>/dev/null)"
+  ws="$(cd -- "$root" 2>/dev/null && pwd -P)" || ws=""
+  [[ -n "$ws" ]] && skey="workspace:${ws}"
 
   local plan state result next qcount n=0
   while IFS=$'\037' read -r plan state result next qcount; do
     [[ -n "$plan" ]] || continue
-    if (( _qc_filter )) && [[ "$_qc_mine" != *" $plan "* ]]; then
-      continue
-    fi
-    if (( _qc_once_ok )) && ! aid_session_once "queue-continuation" "$_qc_skey" "${plan}:${state}:${result}"; then
-      continue
-    fi
-    (( n == 0 )) && echo "$heading"
+    aid_session_once "queue-continuation" "$skey" "${plan}:${state}:${result}" || continue
+    (( n == 0 )) && echo "AID — an autonomous plan from an earlier session is still open (nothing was changed):"
     n=$((n+1))
     _aid_qc_line "$plan" "$state" "$result" "$next" "$qcount"
   done < <(aid_queue_continuation_scan "$root")
@@ -278,26 +215,111 @@ _aid_qc_emit() {
     echo "no open autonomous plan in this workspace" >&2
     return 3
   fi
-  [[ -n "$footer" ]] && echo "$footer"
+  echo "  Continue it with /aid-run --auto (it binds this session to the plan)."
   echo "${n} open autonomous plan(s) named" >&2
   return 0
 }
 
-# aid_hook_rule_queue_continuation_stop — Stop handler. Names every autonomous
-# plan that still has work when a turn ends.
-aid_hook_rule_queue_continuation_stop() {
-  _aid_qc_emit "AID — this turn is ending with an autonomous plan still open (nothing was changed, and this cannot stop a turn):"
+# _aid_qc_counter <plan_id> — the continuation counter file of this workspace's
+# plan, in the session store (never in the tree).
+_aid_qc_counter() {
+  local dir; dir="$(aid_session_store_dir continuation)" || return 1
+  printf '%s/%s_%s\n' "$dir" "$(_aid_alert_workspace | sha256sum | cut -c1-16)" "$1"
 }
 
-# aid_hook_rule_queue_continuation_start — SessionStart handler, and the event
-# that actually rescues a lost chain: when a controller dies, the
-# `epic-merge-to-plan` that would have continued the plan never happens again,
-# so the guidance Step 4 wrote would be read by nobody. This is who reads it.
-aid_hook_rule_queue_continuation_start() {
-  # `all`: the start of a session is exactly where the whole workspace is worth
-  # hearing about — including a plan this session has not been in yet.
-  local _qc_scope=all
-  _aid_qc_emit \
-    "AID — an autonomous plan from an earlier session is still open (nothing was changed):" \
-    "  Continue it with: aid-plan-continue.sh <plan_id> <the EPIC that finished>"
+# _aid_qc_jobs_busy <root> — true when a background job AID owns (a gate run
+# under evidence/<epic>/<run>/jobs) is still live.
+_aid_qc_jobs_busy() {
+  local d
+  while IFS= read -r d; do
+    bash "${_AID_QC_LIB_DIR}/../aid-job.sh" watchdog --jobs-dir "$d" 2>/dev/null \
+      | jq -e '.state == "busy"' >/dev/null 2>&1 && return 0
+  done < <(find "$1/.aid-o/work/evidence" -mindepth 3 -maxdepth 3 -type d -name jobs 2>/dev/null)
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# aid_hook_rule_queue_continuation_stop — Stop handler.
+#   2 refuse the stop (work is left and budget remains)
+#   3 let the turn end: not this session's plan, a hand-over card, a declared
+#     wait on a live background job, the budget spent, or the rule could not
+#     read what it needs (it never refuses without knowing)
+# The reason line starts `outcome=<refused|handed_over|wait|budget_spent|
+# not_auto> plan=<id>`, which the dispatcher writes into the audit line.
+# ---------------------------------------------------------------------------
+aid_hook_rule_queue_continuation_stop() {
+  local input; input="$(cat)"
+  local root; root="$(_aid_qc_root "$input")" || return 3
+  cd "$root" || return 3
+  local sid transcript
+  IFS=$'\x1f' read -r sid transcript < <(jq -r '[.session_id // "", .transcript_path // ""] | join("\u001f")' <<< "$input" 2>/dev/null)
+  [[ -n "$sid" ]] || { echo "outcome=not_auto: the event carries no session_id" >&2; return 3; }
+
+  local sf plan="" state autonomy bound
+  for sf in "$root"/.aid-o/work/plan-state/*/plan-state.yaml; do
+    [[ -f "$sf" ]] || continue
+    IFS=$'\x1f' read -r autonomy state bound <<< "$(_aid_qc_state "$root" "$(basename "$(dirname "$sf")")")"
+    [[ "$autonomy" == auto && "$bound" == "$sid" && " $_AID_QC_TERMINAL " != *" ${state} "* ]] || continue
+    plan="$(basename "$(dirname "$sf")")"; break
+  done
+  [[ -n "$plan" ]] || { echo "outcome=not_auto: this session drives no open autonomous plan" >&2; return 3; }
+
+  [[ -n "$transcript" && -r "$transcript" ]] \
+    || { echo "outcome=not_auto plan=${plan}: no readable transcript — the rule does not refuse without knowing" >&2; return 3; }
+  local last tmp
+  last="$(_aid_hrt_last_message "$transcript")"
+  tmp="$(mktemp)" || { echo "outcome=not_auto plan=${plan}: no temp file" >&2; return 3; }
+  printf '%s\n' "$last" > "$tmp"
+  if _aid_hrt_hands_over "$tmp"; then
+    rm -f "$tmp"
+    aid_alert_waiting "$plan" "předal ti rozhodnutí nebo blokaci" "odpověz v session" || true
+    echo "outcome=handed_over plan=${plan}: the turn ends with a card" >&2
+    return 3
+  fi
+  rm -f "$tmp"
+  if [[ "$(printf '%s' "$last" | grep -v '^[[:space:]]*$' | tail -1)" == AID-WAIT:* ]] && _aid_qc_jobs_busy "$root"; then
+    echo "outcome=wait plan=${plan}: a declared wait on a live background job" >&2
+    return 3
+  fi
+
+  local budget counter n=0
+  budget="$(aid_orchestration_value "$root" .autonomy.continuation_budget | cut -f1)" || budget=""
+  [[ "$budget" =~ ^[0-9]+$ ]] || budget=0
+  counter="$(_aid_qc_counter "$plan")" || { echo "outcome=not_auto plan=${plan}: the session store is unwritable" >&2; return 3; }
+  [[ -r "$counter" ]] && n="$(cat "$counter" 2>/dev/null)"
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  if (( n >= budget )); then
+    aid_alert_waiting "$plan" "vyčerpal ${budget} pokračování bez tvé odpovědi" "zkontroluj session a odpověz" || true
+    echo "outcome=budget_spent plan=${plan}: ${n} of ${budget} continuations used" >&2
+    return 3
+  fi
+  printf '%s\n' "$((n + 1))" > "$counter" || { echo "outcome=not_auto plan=${plan}: the counter cannot be written" >&2; return 3; }
+  echo "outcome=refused plan=${plan}: AID — ${plan} runs autonomously (${state}) and this turn ended with work left (continuation $((n + 1)) of ${budget}). Continue the /aid-run --auto procedure from this state. To hand over, end with a Decision or Blocked card; to wait on a background gate job, end with a line \`AID-WAIT: <what>\`." >&2
+  return 2
+}
+
+# ---------------------------------------------------------------------------
+# aid_hook_rule_pm_reply_marker — UserPromptSubmit handler. The PM answered:
+# every plan this session drives gets its continuation budget back and its
+# waiting message re-armed. The dispatcher's audit line of this event is what
+# marks the PM's reply in time. Returns 3 (nothing to inject).
+# ---------------------------------------------------------------------------
+aid_hook_rule_pm_reply_marker() {
+  local input; input="$(cat)"
+  local root; root="$(_aid_qc_root "$input")" || return 3
+  cd "$root" || return 3
+  local sid sf plan autonomy state bound n=0
+  sid="$(jq -r '.session_id // ""' <<< "$input" 2>/dev/null)"
+  [[ -n "$sid" ]] || { echo "no session_id in the event" >&2; return 3; }
+  for sf in "$root"/.aid-o/work/plan-state/*/plan-state.yaml; do
+    [[ -f "$sf" ]] || continue
+    plan="$(basename "$(dirname "$sf")")"
+    IFS=$'\x1f' read -r autonomy state bound <<< "$(_aid_qc_state "$root" "$plan")"
+    [[ "$bound" == "$sid" ]] || continue
+    rm -f "$(_aid_qc_counter "$plan")"
+    aid_alert_waiting_clear "$plan"
+    n=$((n + 1))
+  done
+  echo "pm reply: ${n} plan(s) re-armed" >&2
+  return 3
 }

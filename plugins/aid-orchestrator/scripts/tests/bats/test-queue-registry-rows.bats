@@ -60,8 +60,8 @@ _field() { yq -r ".enforcements[] | select(.id == \"$1\") | .$2 // \"\"" "$REG";
   [ "$(_field queue_peek_readonly enforcement_degree)" = "1" ]
   [ "$(_field plan_continue_loop enforcement_degree)" = "1" ]
   [ "$(_field plan_continue_spawn enforcement_degree)" = "1" ]
-  # The reminder is the odd one, and that is the whole point of listing four.
-  [ "$(_field queue_continuation_notice enforcement_degree)" = "3" ]
+  # The Stop rule refuses since P099 — code checks the turn and says no.
+  [ "$(_field queue_continuation_notice enforcement_degree)" = "2" ]
 }
 
 @test "AC16: each row's not_guaranteed is a real sentence, not a placeholder" {
@@ -84,12 +84,13 @@ _field() { yq -r ".enforcements[] | select(.id == \"$1\") | .$2 // \"\"" "$REG";
   [[ "$n" == *"PER PLAN"* ]]
 }
 
-@test "AC17: the reminder's row says it does not hold a turn, and names why" {
+@test "P099: the continuation row says what bounds the refusal and whom it never holds" {
   local n; n="$(_field queue_continuation_notice not_guaranteed)"
-  [[ "$n" == *"stop_hook_active"* ]]
-  [[ "$n" == *"HOLDS A TURN"* ]]
-  # …and its severity matches that: a rule that cannot refuse is not blocking.
-  [ "$(_field queue_continuation_notice severity)" = "advisory" ]
+  [[ "$n" == *"budget"* ]]
+  [[ "$n" == *"auto_session"* ]]
+  [[ "$(_field queue_continuation_notice description)" == *"blocks_when_active"* ]]
+  # …and its severity matches that: a rule that refuses is blocking.
+  [ "$(_field queue_continuation_notice severity)" = "blocking" ]
 }
 
 @test "AC16: every row's named test file exists" {

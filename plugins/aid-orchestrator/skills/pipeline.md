@@ -1719,6 +1719,14 @@ A missing or unreadable file defaults to `manual` (fail-safe).
 `escalation.max_per_session` (default 3). On breach → E12 (PM must review). The trigger table above
 is the authoritative source — the YAML config files do not duplicate it.
 
+**The bound session keeps going (P099).** `/aid-run --auto` records the session in the plan's
+state (`plan-state <id> --bind-session`), and the Stop rule `queue_continuation_notice`
+(`scripts/lib/aid-queue-continuation.sh`) refuses a turn of that session that ends with work left,
+up to `orchestration.yaml → autonomy.continuation_budget` refusals; the PM's next prompt resets the
+count. A Decision or Blocked card, a last line `AID-WAIT: <what>` while an AID background job is
+live, or the spent budget lets the turn end; the card and the budget send the PM one "agent is
+waiting" message (`aid_alert_waiting`). No other session is ever refused.
+
 **Stop:** `/aid-stop` → `mode: manual`, finish current step, pause.
 
 ---

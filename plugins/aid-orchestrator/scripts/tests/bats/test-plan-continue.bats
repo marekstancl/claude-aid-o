@@ -358,3 +358,12 @@ YAML
   _continue P090
   [ "$status" -eq 2 ]
 }
+
+@test "P099: plan-state --bind-session makes the plan autonomous and names the session that drives it" {
+  p090_plan_state "$ROOT" P090 manual EPIC_INTEGRATION
+  run bash "$PLAN_FSM" plan-state P090 --bind-session "" --project-root "$ROOT"
+  [ "$status" -eq 2 ]; [[ "$output" == *"CLAUDE_CODE_SESSION_ID"* ]]
+  run bash "$PLAN_FSM" plan-state P090 --bind-session sess-42 --project-root "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.autonomy + " " + .auto_session' "$ROOT/.aid-o/work/plan-state/P090/plan-state.yaml")" = "auto sess-42" ]
+}

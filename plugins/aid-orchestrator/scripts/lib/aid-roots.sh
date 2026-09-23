@@ -225,3 +225,20 @@ _aid_plan_id_of() {
   [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
   printf '%s' "$id"
 }
+
+# aid_orchestration_value <root> <yq path> — one setting of orchestration.yaml
+# as "<value>\t<source>": the project's .aid-o/config/orchestration.yaml when it
+# sets the key, else the plugin default (`plugin default`). A project file that
+# exists but cannot be read prints nothing and returns 1, so a caller never
+# mistakes a broken file for the default. Needs yq.
+aid_orchestration_value() {
+  local project="${1%/}/.aid-o/config/orchestration.yaml" v
+  local plugin_default
+  plugin_default="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../defaults" && pwd)/orchestration.yaml"
+  if [[ -f "$project" ]]; then
+    v="$(yq -r "${2} // \"\"" "$project" 2>/dev/null)" || return 1
+    [[ -n "$v" ]] && { printf '%s\tproject\n' "$v"; return 0; }
+  fi
+  v="$(yq -r "${2} // \"\"" "$plugin_default" 2>/dev/null)" || return 1
+  printf '%s\tplugin default\n' "$v"
+}

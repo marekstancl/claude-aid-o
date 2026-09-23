@@ -249,6 +249,17 @@ EOF
   [[ "$output" == *"never run here"* ]]
 }
 
+@test "--status is in force only while the verified verdict is younger than trust_ttl_days" {
+  jq -n --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{verified:true, tool:"claude-code", version:"x", state:"verified", detail:"d", checked_at:$at, measured_version:"x", unmeasured_version:false}' > "$TRUST"
+  run bash "$VERIFY" --status
+  [ "$status" -eq 0 ]
+  jq '.checked_at = "2026-01-01T00:00:00Z"' "$TRUST" > "$TRUST.x" && mv "$TRUST.x" "$TRUST"
+  run bash "$VERIFY" --status
+  [ "$status" -eq 1 ]; [[ "$output" == *"NOT IN FORCE"* ]]
+  run bash "$VERIFY" --status --json
+  [ "$status" -eq 1 ]
+}
+
 @test "the dispatcher acts on the verdict: a negative one degrades fail-closed rules" {
   # The binding is the whole point of Step 2 — this asserts the wiring, not
   # the wording.
@@ -276,4 +287,12 @@ YAML
   run bash -c "printf '{\"session_id\":\"s\"}' | AID_HOOK_REGISTRY='$TMP/registry.yaml' AID_HOOK_AUDIT='$TMP/a.jsonl' bash '$PLUGIN_ROOT/scripts/aid-hook.sh' Stop"
   [ "$status" -eq 0 ]
   grep -q '"outcome":"degraded"' "$TMP/a.jsonl"
+}
+
+@test "every event a registry rule names is declared in hooks/hooks.json — else the rule never runs" {
+  local e missing=""
+  for e in $(yq -r '.rules[].event' "$PLUGIN_ROOT/defaults/hook-registry.yaml" | sort -u); do
+    jq -e --arg e "$e" '.hooks | has($e)' "$PLUGIN_ROOT/hooks/hooks.json" >/dev/null || missing+=" $e"
+  done
+  [ -z "$missing" ] || { echo "not declared:$missing"; false; }
 }
