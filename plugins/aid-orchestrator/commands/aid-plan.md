@@ -174,8 +174,15 @@ Register the run and its scope — this also creates the brainstorm's own workin
 copy and prints it as `workdir:`:
 
 ```bash
-bash {plugin_path}/scripts/aid-brainstorm-state.sh init P{NNN} --scope roadmap|multi_plan|user_visible|single_plan
+bash {plugin_path}/scripts/aid-brainstorm-state.sh init P{NNN} --scope roadmap|multi_plan|user_visible|single_plan \
+  [--topic-kind ui|other [--reason "<why this is not a screen>"]]
 ```
+
+A `user_visible` run passes `--topic-kind`: `ui` when the topic is UI-visual (the
+visual companion is auto-loaded), `other` otherwise, with a reason the design page
+shows the PM. The design gate refuses a `user_visible` run without a kind, and a
+`ui` run without a `proposal.json` basis built from the application
+(`aid_ui_proposal_build`, `skills/visual-companion/SKILL.md`).
 
 `user_visible` is anything that changes behaviour a user meets — a flag, an
 output format, a message. `single_plan` is only for work nobody outside the code

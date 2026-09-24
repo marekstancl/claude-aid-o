@@ -5,6 +5,7 @@
 #
 #   aid-brainstorm-state.sh init <plan_id>
 #         --scope roadmap|multi_plan|user_visible|single_plan [--topic <text>]
+#         [--topic-kind ui|other [--reason <text>]]
 #   aid-brainstorm-state.sh vision-propose <plan_id> --file <vision.md>
 #   aid-brainstorm-state.sh vision-approve <plan_id>
 #   aid-brainstorm-state.sh vision-reject  <plan_id> --reason <text>
@@ -113,12 +114,14 @@ validate_vision() {
 }
 
 cmd_init() {
-  local plan_id="${1:?}" scope="" topic="" want_worktree=1
+  local plan_id="${1:?}" scope="" topic="" want_worktree=1 kind="" kind_reason=""
   shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --scope) scope="${2:-}"; shift 2 ;;
       --topic) topic="${2:-}"; shift 2 ;;
+      --topic-kind) kind="${2:-}"; shift 2 ;;
+      --reason) kind_reason="${2:-}"; shift 2 ;;
       --no-worktree) want_worktree=0; shift ;;
       *) echo "ERROR: init: unknown flag '$1'" >&2; return 2 ;;
     esac
@@ -126,6 +129,15 @@ cmd_init() {
   case "$scope" in
     roadmap|multi_plan|user_visible|single_plan) ;;
     *) echo "ERROR: --scope must be roadmap, multi_plan, user_visible or single_plan (got '${scope}')" >&2; return 2 ;;
+  esac
+  # Whether a user-visible topic is a screen is the controller's judgement
+  # (P100 Step 8); `other` there is recorded with its reason, which the design
+  # page shows the PM.
+  case "$kind" in
+    ""|ui) ;;
+    other) [[ "$scope" != user_visible || ${#kind_reason} -ge 20 ]] \
+             || { echo "ERROR: --topic-kind other on a user_visible run needs --reason of at least 20 characters: why this is not a screen" >&2; return 2; } ;;
+    *) echo "ERROR: --topic-kind must be ui or other (got '${kind}')" >&2; return 2 ;;
   esac
 
   local dir; dir="$(state_dir "$plan_id")" || return 1
@@ -145,6 +157,8 @@ vision_state: "none"
 vision_file: ""
 run_state: "open"
 skip_reason: "${skip}"
+topic_kind: "${kind}"
+topic_kind_reason: "${kind_reason//\"/}"
 created_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 updated_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 Y
@@ -243,6 +257,27 @@ cmd_gate() {
     *) echo "ERROR: --phase must be design, opponent or summary (got '${phase}')" >&2; return 2 ;;
   esac
   local sf; sf="$(require_state "$plan_id")" || return 1
+
+  # The visual companion's door (P100 Step 8): a user-visible run says whether
+  # it is a screen, and a screen is designed from a proposal basis built from
+  # the application (lib/aid-ui-proposal.sh), never drawn from nothing.
+  if [[ "$phase" == design && "$(get "$sf" scope)" == user_visible ]]; then
+    local kind; kind="$(get "$sf" topic_kind)"
+    if [[ -z "$kind" ]]; then
+      echo "REFUSED: ${plan_id} is user_visible and records no topic kind — start it with: aid-brainstorm-state.sh init ${plan_id} --scope user_visible --topic-kind ui|other [--reason <why not a screen>]" >&2
+      return 1
+    fi
+    if [[ "$kind" == ui ]]; then
+      # Before the design the proposal's BASIS must exist (the viewports and
+      # the screen or design system it is drawn from); its renderings are the
+      # design's output, which aid_ui_proposal_check judges afterwards.
+      local prop; prop="$(state_dir "$plan_id")/proposal.json"
+      if ! jq -e '(.basis | IN("live-screen", "design-system")) and (.viewports | length > 0)' "$prop" >/dev/null 2>&1; then
+        echo "REFUSED: ${plan_id} is a UI topic and has no proposal basis built from the application — build it: aid_ui_proposal_build <project root> $(state_dir "$plan_id") (lib/aid-ui-proposal.sh, skills/visual-companion/SKILL.md)" >&2
+        return 1
+      fi
+    fi
+  fi
 
   local required state; required="$(get "$sf" vision_required)"; state="$(get "$sf" vision_state)"
   if [[ "$required" != "true" ]]; then
@@ -364,7 +399,7 @@ main() {
       cat >&2 <<'EOF'
 Usage: aid-brainstorm-state.sh <command> <plan_id> [flags]
 
-  init <plan_id> --scope roadmap|multi_plan|single_plan [--topic <text>]
+  init <plan_id> --scope roadmap|multi_plan|user_visible|single_plan [--topic <text>] [--topic-kind ui|other [--reason <text>]]
   vision-propose <plan_id> --file <vision.md>
   vision-approve <plan_id>
   vision-reject <plan_id> --reason <text>
