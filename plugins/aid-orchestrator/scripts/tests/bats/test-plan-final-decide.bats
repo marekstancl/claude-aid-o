@@ -302,3 +302,42 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   _stage freeze;  [ "$status" -ne 0 ]; [[ "${lines[-1]}" == next:* ]]
 }
 
+
+# _epic_gate_report <head> — the EPIC run's own gate report: both gates passed at <head>.
+_epic_gate_report() {
+  local ev="$R/.aid-o/work/evidence/E-900-1_1/R-E-900-1_1-1" y="$R/.aid-o/config/execution.yaml" g rows='{}'
+  mkdir -p "$ev/gates"
+  for g in tests_pass epic_bound; do
+    rows="$(jq -c --arg g "$g" --arg d "$(GATE="$g" yq -o=json -I=0 '.gates[strenv(GATE)]' "$y" | sha256sum | cut -d' ' -f1)" \
+      '.[$g] = {gate: $g, result: "pass", status: "pass", reason: "exit_0", row_version: 2, required: false, required_source: "explicit", definition_sha256: $d}' <<<"$rows")"
+  done
+  jq -n --arg h "$1" --argjson rows "$rows" '{_generated_by: "aid-run-gates.sh@test", _generated_at: "2026-09-24T10:00:00Z", overall: "pass", revision: {head_sha: $h}, gates: $rows}' > "$ev/gates/gates_report.json"
+}
+_with_epic_bound_gate() {
+  yq -i '.gates.epic_bound = {"command": "git diff --quiet {base_commit} HEAD -- nothing", "required": false, "timeout_seconds": 30, "max_retries": 0} | .gate_profiles.release.include += ["epic_bound"]' "$R/.aid-o/config/execution.yaml"
+  git -C "$R" commit -qam "config: a gate bound to the EPIC's base"
+}
+
+@test "P100: plan-final reuses a plain gate from the EPIC run on the same tree and runs a {base_commit} gate; another tree reuses nothing" {
+  _project; _with_epic_bound_gate
+  _epic_gate_report "$(git -C "$R" rev-parse HEAD)"
+  _stage freeze; [ "$status" -eq 0 ]
+  _stage gates; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.gates.tests_pass.reused_from' "$(_run_dir)/gates_report.json")" = "E-900-1_1/R-E-900-1_1-1" ]
+  [ "$(jq -r '.gates.epic_bound.reused_from // "ran"' "$(_run_dir)/gates_report.json")" = ran ]
+}
+
+@test "P100: an EPIC gate report on a different tree is never reused" {
+  _project; _with_epic_bound_gate
+  _epic_gate_report "$(git -C "$R" rev-parse HEAD~1)"
+  _stage freeze; [ "$status" -eq 0 ]
+  _stage gates; [ "$status" -eq 0 ]
+  [ "$(jq -r '[.gates[] | .reused_from // empty] | length' "$(_run_dir)/gates_report.json")" -eq 0 ]
+}
+
+@test "P100: a runner that died before its report does not block the next gates run (WAN #16: one orphaned start)" {
+  _project
+  _stage freeze; [ "$status" -eq 0 ]
+  printf '{"ts":"2026-09-24T10:00:00Z","event":"gate_runner_start"}\n' >> "$(_run_dir)/timeline.jsonl"
+  _stage gates; echo "$output"; [ "$status" -eq 0 ]
+}

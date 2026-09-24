@@ -4795,22 +4795,41 @@ _pfsm_gate_definition_sha() {
 }
 
 # _pfsm_gate_reuse_rows <troot> <run_dir> <execution_yaml> <candidate> <gate>...
-#   Prints {from, candidate, rows: {<gate>: <row>}}: the rows of the PREVIOUS
-#   plan-final attempt that may be copied forward instead of executed. A row is
-#   reusable when it passed there, its gate is defined exactly as it was, and
-#   nothing the gate declares as `inputs:` (glob pathspecs; a leading `!`
-#   excludes; none declared = the whole tree) differs between that attempt's
-#   candidate and this one. Anything unreadable means "reuse nothing".
+#   Prints {from, report, candidate, rows: {<gate>: <row>}}: the rows that may be
+#   copied forward instead of executed — from the PREVIOUS plan-final attempt,
+#   or, when there is none, from the plan's newest EPIC run whose head has the
+#   candidate's tree (a merge commit changes the sha, not the tree: P100 Step 6).
+#   A row is reusable when it passed there, its gate is defined exactly as it
+#   was, and nothing the gate declares as `inputs:` (glob pathspecs; a leading
+#   `!` excludes; none declared = the whole tree) differs between that run's
+#   candidate and this one. From an EPIC run, a gate whose command carries a
+#   per-run token of the runner (`{base_commit}`, `{epic_id}` … — any `{…}` but
+#   `{plugin_path}`) answered a question about that EPIC and always runs again.
+#   Anything unreadable means "reuse nothing".
 _pfsm_gate_reuse_rows() {
   local troot="$1" run_dir="$2" yaml="$3" candidate="$4"; shift 4
-  local none='{"from": null, "candidate": null, "rows": {}}'
+  local none='{"from": null, "report": null, "candidate": null, "rows": {}}'
   [[ "$(basename "$run_dir")" =~ ^(.*-final-)([0-9]+)$ ]] || { echo "$none"; return 0; }
   # The newest earlier attempt that got as far as a gate report.
-  local prev_id="" prev_report="" n
+  local prev_id="" prev_report="" n from_epic=0
   for (( n = BASH_REMATCH[2] - 1; n >= 1; n-- )); do
     prev_id="${BASH_REMATCH[1]}${n}"; prev_report="$(dirname "$run_dir")/${prev_id}/gates_report.json"
     [[ -f "$prev_report" ]] && break
   done
+  if [[ ! -f "$prev_report" ]]; then
+    local tree r at best_at="" plan_dir; plan_dir="$(dirname "$run_dir")"
+    tree="$(git -C "$troot" rev-parse "${candidate}^{tree}" 2>/dev/null)" || { echo "$none"; return 0; }
+    prev_report=""
+    for r in "$(dirname "$plan_dir")/E-$(basename "$plan_dir" | tr -d P)-"*/*/gates/gates_report.json; do
+      [[ -f "$r" ]] || continue
+      [[ "$(git -C "$troot" rev-parse "$(jq -r '.revision.head_sha // "none"' "$r" 2>/dev/null)^{tree}" 2>/dev/null)" == "$tree" ]] || continue
+      at="$(jq -r '._generated_at // ""' "$r" 2>/dev/null)"
+      [[ -z "$prev_report" || "$at" > "$best_at" ]] && { prev_report="$r"; best_at="$at"; }
+    done
+    [[ -n "$prev_report" ]] || { echo "$none"; return 0; }
+    prev_id="$(basename "$(dirname "$(dirname "$(dirname "$prev_report")")")")/$(basename "$(dirname "$(dirname "$prev_report")")")"
+    from_epic=1
+  fi
   local prev_candidate
   prev_candidate="$(jq -r 'select((._generated_by // "") | startswith("aid-run-gates.sh@")) | .revision.head_sha // empty' "$prev_report" 2>/dev/null)" || prev_candidate=""
   git -C "$troot" cat-file -e "${prev_candidate:-none}^{commit}" 2>/dev/null || { echo "$none"; return 0; }
@@ -4821,6 +4840,10 @@ _pfsm_gate_reuse_rows() {
     row="$(jq -c --arg g "$gate" --arg d "$(_pfsm_gate_definition_sha "$yaml" "$gate")" \
              "${AID_GATE_ROW_JQ}"'.gates[$g] | select(type == "object") | gate_row_normalize | select(.status == "pass" and .definition_sha256 == $d)' "$prev_report" 2>/dev/null)"
     [[ -n "$row" ]] || continue
+    if (( from_epic )) && GATE="$gate" yq -r '.gates[strenv(GATE)].command // ""' "$yaml" 2>/dev/null \
+         | sed 's/{plugin_path}//g' | grep -q '{[a-z_]*}'; then
+      continue
+    fi
     pathspec=()
     while IFS= read -r spec; do
       [[ "$spec" == '!'* ]] && pathspec+=(":(glob,exclude)${spec#!}") || pathspec+=(":(glob)${spec}")
@@ -4828,7 +4851,7 @@ _pfsm_gate_reuse_rows() {
     git -C "$troot" diff --quiet "$prev_candidate" "$candidate" -- "${pathspec[@]}" 2>/dev/null || continue
     rows="$(jq -c --arg g "$gate" --argjson r "$row" '.[$g] = $r' <<<"$rows")"
   done
-  jq -nc --arg from "$prev_id" --arg c "$prev_candidate" --argjson rows "$rows" '{from: $from, candidate: $c, rows: $rows}'
+  jq -nc --arg from "$prev_id" --arg rep "$prev_report" --arg c "$prev_candidate" --argjson rows "$rows" '{from: $from, report: $rep, candidate: $c, rows: $rows}'
 }
 
 # _pfsm_finalize_gates_body — everything that runs WITH the candidate checked
@@ -4971,8 +4994,11 @@ _pfsm_finalize_gates_body() {
         return 1
       fi
     else
-      # Nothing to execute: this attempt's report is the previous one, re-bound.
-      jq --arg h "$candidate" '.revision.head_sha = $h' "$(dirname "$run_dir_abs")/${reuse_from}/gates_report.json" > "$report_file" || return 1
+      # Nothing to execute: this attempt's report is the reused one, re-bound to
+      # this candidate and this profile (an EPIC run's report ran its own).
+      jq --arg h "$candidate" --arg p "$effective_profile" --argjson inc "$(printf '%s\n' $effective_include | jq -R . | jq -sc .)" \
+        '.revision.head_sha = $h | .profile = $p | .gates |= with_entries(select(.key as $k | $inc | index($k)))' \
+        "$(jq -r .report <<<"$reuse")" > "$report_file" || return 1
     fi
     # Every row says which definition it ran under (what the next attempt
     # compares), and a copied row says where it came from.
@@ -5142,18 +5168,20 @@ _pfsm_finalize_gates_body() {
       || _gassert "quarantined gate '${qg2}' has no valid quarantine_substitutes[] entry bound to the candidate (${candidate}) and base (${base_commit})."
   done
 
-  # Exactly ONE gate_runner_start for this plan-final run — the structural
+  # Exactly ONE completed gate run for this plan-final run — the structural
   # no-duplicate-broad-run proof. `release` is a superset of `full`, so one
   # invocation covers everything and a second would mean a `full` run smuggled
-  # in under another label.
+  # in under another label. Completed, not started: a runner that died before
+  # writing its report is re-run, and its orphaned start made the assertion
+  # refuse the plan for good (WAN #16).
   if [[ -f "$timeline_file" ]]; then
     local starts
-    starts="$(grep -c '"event":"gate_runner_start"' "$timeline_file" 2>/dev/null || true)"
+    starts="$(grep -c '"event":"gate_runner_complete"' "$timeline_file" 2>/dev/null || true)"
     [[ -z "$starts" ]] && starts=0
     # A report made only of copied rows ran nothing; any other ran exactly once.
     expected_runs="$(jq "${AID_GATE_ROW_JQ}"'if any(.gates | gate_rows_normalize | to_entries[] | select((.key|startswith("_")|not) and (.value|type) == "object") | .value; .reused_from == null and .reason != "not_in_profile") then 1 else 0 end' "$report_file")"
     if [[ "$starts" -ne "$expected_runs" ]]; then
-      _gassert "timeline has ${starts} gate_runner_start events for ${run_id}, expected exactly ${expected_runs} (no second broad run under a 'full' label)."
+      _gassert "timeline has ${starts} completed gate runs (gate_runner_complete) for ${run_id}, expected exactly ${expected_runs} (no second broad run under a 'full' label)."
     fi
   elif [[ "$ran_now" -eq 1 ]]; then
     _gassert "no timeline at ${run_dir_rel}/timeline.jsonl — the single-run assertion cannot be made."

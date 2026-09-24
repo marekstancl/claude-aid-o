@@ -172,6 +172,18 @@ deklarovat smazaný soubor. **Práce:** ~1 den.
 **Co uděláme:** jeden průchod testem na fixture plánu. Co spadne, opravíme. Co
 projde, zavřeme. **Práce:** ~0,5 dne + opravy podle nálezů.
 
+### K6/K8 — přezkoušení pěti starších hlášení na 2.105 (P100 krok 6, 24. 9. 2026)
+
+| Hlášení | Jak ověřeno | Výsledek | Akce |
+|---|---|---|---|
+| acta 31. 8. „`plan-reconcile` u plánu na větvi vždy unverifiable" | kód: dispatch `plan-reconcile` v `aid-fsm.sh` zahajuje režim plánu z manifestu (`_fsm_plan_mode_args`), jinak odmítne jménem | opraveno ve 2.96.0 | zavřeno |
+| acta 1. 9. „kontrola uzávěru tiše umře na starém reportu" | kód: `aid-plan-close-check.sh` čte manifest přes `_pbm`, který pod `set -e` nikdy neskončí | opraveno (P096) | zavřeno |
+| acta 1. 9. „`plan-close` přepsal ruční report prázdnou šablonou" | kód: `cmd_plan_close` už žádný report nepíše; stránku dodaného plánu skládá `plan-finalize` z evidence | zaniklo s P096 | zavřeno |
+| wan #16 „dvojí běh bran → dva `gate_runner_start`, kontrola odmítne" | test `test-plan-final-decide.bats` (osiřelý start po spadlém běhu) | **platilo**: běh, který spadl před reportem, zablokoval plán navždy | opraveno v P100: počítají se dokončené běhy (`gate_runner_complete`) |
+| acta 31. 8. „výsledek brány se přehrál i po opravě (bez otisku stromu)" | kód: `aid-run-gates.sh` ruší přehrání výsledku úlohy, jejíž strom se posunul (`result_tree_moved`); popředí se nepřehrává, běží pokaždé | opraveno (P087/P097) | zavřeno |
+
+Znovupoužití brány při konci plánu: z posledního běhu EPICu na stejném stromu, brány s tokenem běhu (`{base_commit}` …) běží vždy znovu (P100 krok 6).
+
 ### K9. Zaniklo s přestavbami — zavřít bez práce
 
 Komponenty, na které hlášení míří, už neexistují (ověřeno: soubor/funkce není).
