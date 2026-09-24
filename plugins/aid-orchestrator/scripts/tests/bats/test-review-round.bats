@@ -731,10 +731,13 @@ _close1() {
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$E/cp3/round-1" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus cp3-epic-generalist --output-file "$E/cp3/round-1/reviewer-epic_generalist.json" --evidence-dir "$E/cp3/round-1" >/dev/null
   "$ROUND_SH" collect --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 >/dev/null
-  mv "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json" "$ROOT/schema.bak"
-  jq '.properties.semantic_review.properties.mode.enum = ["local"]' "$ROOT/schema.bak" > "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json"
-  run "$ROUND_SH" close --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 --tokens epic_generalist=1
-  mv "$ROOT/schema.bak" "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json"
+  # the broken schema lives in a copy of the plugin: an interrupted run must
+  # never leave the real one broken (it did once)
+  local plug="$ROOT/plugin-copy"; mkdir -p "$plug"
+  cp -r "$AID_PLUGIN_PATH"/{scripts,defaults,skills,.claude-plugin} "$plug"/
+  jq '.properties.semantic_review.properties.mode.enum = ["local"]' "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json" \
+    > "$plug/defaults/schemas/semantic-review.schema.json"
+  AID_PLUGIN_PATH="$plug" run "$plug/scripts/aid-review-round.sh" close --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 --tokens epic_generalist=1
   [ "$status" -eq 1 ]; [[ "$output" == *"semantic_review.mode"* ]]
   [ ! -f "$f" ]; [ "$(jq -r '.closed_at // "none"' "$E/cp3/round-1/round.json")" = none ]
 }
