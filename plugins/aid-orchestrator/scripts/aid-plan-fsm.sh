@@ -6590,6 +6590,63 @@ _pfsm_terminal_rescope() {
 }
 
 # ---------------------------------------------------------------------------
+# cmd_plan_record_decision <plan_id> MERGE|FIX|ABORT --by <who> [--reason <text>]
+#                          [--project-root <path>]
+# Writes the PM's answer as the pm_plan_decision plan-merge-to-main reads, bound
+# to the frozen candidate the manifest records, into the attempt's evidence
+# (<plan_final_evidence_dir>/pm-plan-decision.json), and prints its path.
+# Nothing else wrote one: the close card pointed at release-decision.json, which
+# the merge's schema refuses, and the controller built the file by hand.
+# ---------------------------------------------------------------------------
+cmd_plan_record_decision() {
+  local plan_id="${1:-}" decision="${2:-}" by="" reason="" project_root_opt=""
+  shift 2 2>/dev/null || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --by)           by="${2:-}"; shift 2 ;;
+      --reason)       reason="${2:-}"; shift 2 ;;
+      --project-root) project_root_opt="${2:-}"; shift 2 ;;
+      *) echo "ERROR: plan-record-decision: unknown argument '$1'" >&2; exit 2 ;;
+    esac
+  done
+  if ! _pfsm_validate_plan_id "$plan_id" || [[ ! "$decision" =~ ^(MERGE|FIX|ABORT)$ || -z "$by" ]]; then
+    echo "Usage: aid-plan-fsm.sh plan-record-decision <plan_id> MERGE|FIX|ABORT --by <who> [--reason <text>] [--project-root <path>]" >&2
+    exit 2
+  fi
+  local root; root="$(_pfsm_resolve_project_root "$project_root_opt")"
+  export AID_PLAN_STATE_PROJECT_ROOT="$root" AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
+  [[ -f "$(plan_manifest_path "$plan_id")" ]] \
+    || { echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2; exit 1; }
+  local target_branch candidate target_head run_id run_dir_rel v
+  target_branch="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target_branch=""
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
+  target_head="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')" || target_head=""
+  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
+  for v in target_branch candidate target_head run_id run_dir_rel; do
+    if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
+      echo "PRECONDITION FAIL: plan-record-decision: ${plan_id} has no frozen candidate (${v} is unset) — there is nothing to decide on yet. Run the plan-final stages first." >&2
+      exit 1
+    fi
+  done
+  local out="${root}/${run_dir_rel}/pm-plan-decision.json" now
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -n --arg p "$plan_id" --arg r "$run_id" --arg d "$decision" --arg c "$candidate" --arg tb "$target_branch" \
+        --arg th "$target_head" --arg at "$now" --arg by "$by" --arg why "$reason" \
+    '{schema_version: "aid-pm-plan-decision-1.0", artifact_type: "pm_plan_decision",
+      producer: "aid-plan-fsm.sh plan-record-decision", created_at: $at,
+      plan_id: $p, plan_final_run_id: $r, decision: $d, candidate_sha: $c,
+      target_branch: $tb, target_head_sha: $th, decided_at: $at, decided_by: $by}
+     + (if $why != "" then {reason: $why} else {} end)' > "${out}.tmp" \
+    || { rm -f "${out}.tmp"; echo "ERROR: plan-record-decision: cannot write ${out}" >&2; exit 1; }
+  local vout vrc=0
+  vout="$(_pfsm_validate_json_schema "${out}.tmp" "pm-plan-decision.schema.json" 2>&1)" || vrc=$?
+  if (( vrc )); then rm -f "${out}.tmp"; echo "ERROR: plan-record-decision: the decision does not satisfy its schema: ${vout}" >&2; exit 1; fi
+  mv -f "${out}.tmp" "$out"
+  printf '%s\n' "$out"
+}
+
+# ---------------------------------------------------------------------------
 # cmd_plan_merge_to_main <plan_id> --decision <path> [--project-root <path>]
 #                        [--op-id <id>] [--push]
 # ---------------------------------------------------------------------------
@@ -7098,6 +7155,8 @@ cmd_plan_merge_to_main() {
   # authorization part of the evidence the close attests to, so removing it
   # blocks close (AC7) instead of silently degrading to "the merge record
   # implies someone must have approved it".
+  # (plan-record-decision already wrote it there: then there is nothing to copy)
+  [[ "$decision_file" -ef "${root}/${run_dir_rel}/pm-plan-decision.json" ]] || \
   cp -f -- "$decision_file" "${run_dir_rel:+${root}/${run_dir_rel}}/pm-plan-decision.json" 2>/dev/null || \
     echo "WARN: plan-merge-to-main: could not copy the PM decision into ${run_dir_rel}/ — plan-close will refuse until it is present." >&2
 
@@ -10420,6 +10479,7 @@ Subcommands:
   epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--continue|--no-continue] [--project-root <path>] [--op-id <id>]
   next-epic <plan_id> [--project-root <path>]
   plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
+  plan-record-decision <plan_id> MERGE|FIX|ABORT --by <who> [--reason <text>] [--project-root <path>]
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
   plan-close <plan_id> [--project-root <path>] [--op-id <id>]
   plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>] [--op-id <id>]
@@ -10494,6 +10554,7 @@ main() {
     epic-merge-to-plan) cmd_epic_merge_to_plan "$@" ;;
     next-epic) cmd_next_epic "$@" ;;
     plan-finalize) cmd_plan_finalize "$@" ;;
+    plan-record-decision) cmd_plan_record_decision "$@" ;;
     plan-merge-to-main) cmd_plan_merge_to_main "$@" ;;
     plan-close) cmd_plan_close "$@" ;;
     plan-rollback) cmd_plan_rollback "$@" ;;

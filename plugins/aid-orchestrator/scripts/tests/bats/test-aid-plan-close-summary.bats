@@ -124,7 +124,7 @@ _blockers_two() {
   # Byte-compare, not "at least one command": A is the no-action option (there
   # is no defer command at this HEAD), B and C are the two real invocations.
   [[ "$output" == *"Doporučení: A — nedělat nic — plán zůstává otevřený, žádný příkaz se nespouští."* ]]
-  [[ "$output" == *"Alternativy: B — mergnout plán do main i tak, na vlastní riziko — \`aid-plan-fsm.sh plan-merge-to-main P080 --decision ${DECISION}\`; C — uzavřít plán bez merge — \`aid-plan-fsm.sh plan-close P080\`"* ]]
+  [[ "$output" == *"Alternativy: B — mergnout plán do main i tak, na vlastní riziko — \`aid-plan-fsm.sh plan-record-decision P080 MERGE --by pm && aid-plan-fsm.sh plan-merge-to-main P080 --decision $(dirname "$DECISION")/pm-plan-decision.json\`; C — uzavřít plán bez merge — \`aid-plan-fsm.sh plan-close P080\`"* ]]
 }
 
 @test "release-ready but manual merge_mode still asks, and recommends the merge command" {
@@ -134,7 +134,7 @@ _blockers_two() {
   run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Potřebuji tvoje rozhodnutí:"* ]]
-  [[ "$output" == *"Doporučení: A — mergnout plán do main — \`aid-plan-fsm.sh plan-merge-to-main P080 --decision ${DECISION}\`"* ]]
+  [[ "$output" == *"Doporučení: A — mergnout plán do main — \`aid-plan-fsm.sh plan-record-decision P080 MERGE --by pm && aid-plan-fsm.sh plan-merge-to-main P080 --decision $(dirname "$DECISION")/pm-plan-decision.json\`"* ]]
   # Zero blockers still renders the Riziko line — the field is required.
   [[ "$output" == *"Riziko / co není ověřeno: Žádná materiální nejistota"* ]]
 }

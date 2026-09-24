@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 558          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 560          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -3663,7 +3663,7 @@ enforcements:
     tier: t0
     enforcement_degree: 2
     not_guaranteed: "Only while the canary has verified this installation (fail-closed rows degrade to open without it) and never on a turn already continued by a hook (stop_hook_active). Only steps THIS session dispatched (contract newer than the transcript's first timestamp). A hand-over is recognised by the Decision and Blocked card labels; a turn that ends on prose in no card shape while a step is open is refused, which is the intent, but a turn that FAKES a Blocked card passes — the label is a shape, not a truth. Stop does not exist in Codex review modes and never arrives from a killed session; the FSM precondition (dispatch_contract_return) is the later catch."
-    description: "P087 Step 5 — a turn may not end while a step this session dispatched under a contract has not been advanced. The refusal names the step and the transition to make (validate the return, commit, step-verify, increment-step) or the two explicit hand-overs (a Decision card, a Blocked card). P100: a step is this session's when its transcript holds the contract's \"Dispatch Contract (version <v>)\" header (a time window blamed one session for another's step)."
+    description: "P087 Step 5 — a turn may not end while a step this session dispatched under a contract has not been advanced. The refusal names the step and the transition to make (validate the return, commit, step-verify, increment-step) or the two explicit hand-overs (a Decision card, a Blocked card). P100: a step is this session's when its transcript holds the contract's \"Dispatch Contract (version <v>)\" header (a time window blamed one session for another's step). 2.107.0: the ecosystem's decision block (/opt/eco/CLAUDE.md: a numbered Rozhodnutí/Nález, two or more options, Doporučuju) hands over like a Decision card."
     recovery: "Finish the step or hand over with a card; AID_HOOKS_OFF_RULES=turn_step_open is the audited escape."
     test: "scripts/tests/bats/test-hook-rules-turn.bats"
 
@@ -4065,3 +4065,28 @@ enforcements:
     description: "2.106.0: without --project-root, the cp2/cp3 step check and review round diff the worktree the run's recorded branch is checked out in, not the tree they are run from (P101: a check from the primary judged the primary's HEAD and recorded no change); the review config is read from the state root. A branch that exists but is checked out nowhere is refused; none recorded, detached or deleted keeps the cwd. increment-step re-executes in the plan worktree like transition."
     recovery: "check the run's branch out, or pass --project-root <tree>"
     test: "scripts/tests/bats/test-step-check.bats (grep: 'run from the primary')"
+
+  - id: prepare_plan_auto_untyped
+    type: 4
+    source: "scripts/aid-release.sh (grep: 'cannot read this plan')"
+    instruction: "skills/plan-writing.md (grep: 'The release under')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2.107.0: prepare-plan --bump auto refuses when commits since the last tag carry no conventional type (a plan's step commits) and none says feat or fix, and asks for --bump minor|patch; before, it read such a plan as 'no bump' (P101, a new command). chore/docs-only ranges still resolve to none."
+    recovery: "aid-release.sh prepare-plan <plan> --bump minor|patch --plan-branch <branch>"
+    test: "scripts/tests/bats/test-aid-plan-final-boundary.bats (grep: 'refuses a plan whose commits carry no type')"
+
+  - id: plan_record_decision
+    type: 4
+    source: "scripts/aid-plan-fsm.sh (grep: 'cmd_plan_record_decision()')"
+    instruction: "commands/aid-run.md (grep: 'plan-record-decision <plan> MERGE')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2.107.0: the PM's MERGE/FIX/ABORT is written by plan-record-decision as the schema-valid pm_plan_decision bound to the frozen candidate (candidate, attempt, target head at freeze) into the attempt's directory; the close card and plan-continue name it before plan-merge-to-main, which refuses anything else (the card used to name release-decision.json, which the merge's schema refuses)."
+    recovery: "aid-plan-fsm.sh plan-record-decision <plan> MERGE --by pm"
+    test: "scripts/tests/bats/test-aid-plan-final-boundary.bats (grep: 'plan-record-decision writes the MERGE')"
+

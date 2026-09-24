@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Spor o nález kroku i EPICu jde k PM** — `aid-review-round.sh dispute` funguje i na CP2/CP3; nález ve sporu blokuje dál a uvolní ho jen `--pm accepted` s kartou Rozhodnutí, která nález cituje, a s odpovědí PM zapsanou v auditu hooků po té kartě.
 - **Administrativní uzavření plánu odkudkoli** — `plan-close --administrative --reason` uzavře plán sloučený mimo `plan-finalize` z libovolného otevřeného stavu (P097 stál v `PLAN_GATES`); dosud neprošlo ani vlastní kontrolou argumentů, takže nikdy nefungovalo.
 - **Kontrola plánu pozná řádky EPIC, které start plánu odmítne** — `aid-plan-lint.sh` čte řádky `**EPIC N: …**` stejným parserem, jakým start plánu zapisuje manifest (plán bez nich, `**EPIC 1**` bez dvojtečky, číslování mimo 1..K); dřív plán prošel revizí i generováním a spadl až při startu s holým „rc=2", teď start i řekne proč. Návod k psaní plánu (`skills/plan-writing.md` §Phase Markers) už netvrdí, že jednofázový plán řádek nepotřebuje; parser přeskakuje ukázky v bloku kódu jako generátor.
+- **Rozhodnutí PM ke sloučení zapíše příkaz** — `aid-plan-fsm.sh plan-record-decision <plan> MERGE|FIX|ABORT --by pm` uloží rozhodnutí ve tvaru, který sloučení přijme, do adresáře pokusu; karta uzávěrky ho uvádí před `plan-merge-to-main`. Dřív karta radila soubor, který sloučení odmítlo, a rozhodnutí se skládalo ručně podle schématu.
 - **Kontrola kroku přes další repozitáře** — krok, který mění soubory v jiném deklarovaném repozitáři, vrací jejich rozsah (`repo_commits`) a kontrola kroku ho reviduje; repozitář bez vráceného rozsahu je nález, ne přeskočení.
 
 ### Changed
@@ -33,6 +34,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **`AID-WAIT:` platí i pro agenta na pozadí** — autonomní běh smí skončit tah, dokud agent nebo příkaz spuštěný na pozadí neohlásil konec.
 
 ### Fixed
+- **Upgrade `/aid-init` nezúží bránu EPICu** — starý `gate_profile_defaults.epic` (např. `full`) se přenese do `default_profile`; dřív se z něj stal `standard` a brána EPICu v agents prošla bez testů projektu (ACTA by na to narazila při dalším upgradu).
+- **Po uzavření plánu zůstane index hlavní kopie čistý** — potvrzenka, která už leží na disku, se převezme; dřív se ukazovala jako smazaná a zároveň nová a další commit v main by ji tiše smazal.
+- **Commit kroku nevynechá soubor potichu** — soubor, který projekt ignoruje (`docs/`), se commitne; soubor z jiného repozitáře se jmenuje s pokynem k `repo_commits`.
+- **Nález přesunutý do backlogu už neblokuje EPIC** — platí poslední trasa nebo uzavření nálezu.
+- **Konec plánu řekne, na které kontrole spadl** (např. `git_clean: …`); zámky v `.aid-o/config/*.lock` nejsou nepořádek ve stromu.
+- **`prepare-plan --bump auto` se u plánu zeptá** místo tichého „žádné vydání": commity kroků nemají typ, ze kterého by šlo číslo odvodit. Návod k plánu: poslední krok píše obsah vydání, ne čísla verzí.
+- **Brány spuštěné bez `--profile` to řeknou** a jmenují tabulku profilů (P101 tak běžel přes 20 min všechno); `aid-run.md` uvádí jako kanonickou cestu `advance-to-gates`.
+- **Háček konce tahu přijme kartu podle `/opt/eco/CLAUDE.md`** (Rozhodnutí N, možnosti A/B, Doporučuju), ne jen kartu AIDu; falešné „mimo rozsah" u nové složky ve worktree zmizelo.
+- **Drobnosti:** řádek zástupu za Codex uvádí focus; vzor `plan_diff` nerozlišuje velikost písmen; `run-all-tests.sh --only` bere název i bez přípony; test revizního kola kazí jen kopii schématu, nikdy strom pluginu.
 - **Pre-push pozná `chore(release):`** — v projektu bez nastaveného verzování uzavře rozsah i commit ve tvaru conventional commits; `fix(release):` zůstává oprava.
 - **Časy z auditu už neujíždějí o hodinu** — `jq` starší než 1.7 čte čas se `Z` v místním pásmu; výpočet času plánu (čekání na PM do „teď") a počet odmítnutí pro připomínku hlášení pro AID ho teď počítají v UTC, jako to FSM dělá od P037.
 

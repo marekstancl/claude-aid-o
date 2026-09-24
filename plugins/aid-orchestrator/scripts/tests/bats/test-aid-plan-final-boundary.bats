@@ -1920,6 +1920,21 @@ _merge() {
   [ "$output" = "PLAN_MERGING" ]
 }
 
+@test "plan-record-decision writes the MERGE the merge accepts, into the attempt's directory, and the merge takes it from there" {
+  _seed_merge_project
+  run bash "$PLAN_FSM_CLI" plan-record-decision "$PLAN_ID" MERGE --by pm --reason "PM: merge it" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  local d="${output##*$'\n'}"
+  [ -s "$d" ]; [[ "$d" == */pm-plan-decision.json ]]
+  [ "$(jq -r '.decision + " " + .decided_by + " " + .candidate_sha' "$d")" = "MERGE pm $(_plan_sha)" ]
+  _merge "$d"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" != *"could not copy the PM decision"* ]]
+  # no frozen candidate, no decision
+  run bash "$PLAN_FSM_CLI" plan-record-decision P999 MERGE --by pm --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+}
+
 @test "AC5: the lifecycle commit lands on main by plumbing — every non-abandoned EPIC is bound to the plan merge commit" {
   _seed_merge_project
   _merge

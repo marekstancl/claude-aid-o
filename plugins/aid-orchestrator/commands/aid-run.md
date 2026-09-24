@@ -845,7 +845,9 @@ fix path once first; escalate when it does not apply or did not help.
 page and the card from the two files it wrote, publish the page with the
 Artifact tool and present the card verbatim (`commands/aid-plan.md`, "Plan-final
 / close boundary"); state no number yourself. MERGE runs
-`<fsm> plan-merge-to-main <plan> --decision <file>`; FIX is the fix path; ABORT is
+`<fsm> plan-record-decision <plan> MERGE --by pm` (it writes the decision into the
+attempt's directory and prints the path), then
+`<fsm> plan-merge-to-main <plan> --decision <that path>`; FIX is the fix path; ABORT is
 `plan-abort` with the PM's reason.
 
 **The close cleans up.** `plan-close` removes the plan's own worktree, the step
