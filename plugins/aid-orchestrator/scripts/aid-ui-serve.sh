@@ -3,7 +3,11 @@
 # aid-ui-serve.sh — make Impeccable's decision page and the /aid-ui brand page
 # reachable from the PM's laptop over the VPN.
 #
-#   forward <local-port>   socat AID_UI_HOST:AID_UI_FORWARD_PORT -> 127.0.0.1:<local-port>
+#   forward <local-port>   HTTP reverse proxy (python3 stdlib, $PROXY_PY below)
+#                          AID_UI_HOST:AID_UI_FORWARD_PORT -> 127.0.0.1:<local-port>.
+#                          Impeccable answers 403 unless Host, Origin and Referer
+#                          say 127.0.0.1:<local-port>, so the proxy rewrites them;
+#                          the response streams back chunk by chunk (long-poll/SSE).
 #                          only when every process listening on <local-port> is
 #                          Impeccable: its command line contains `impeccable`
 #                          (hard-coded, no override). Guards against exposing an
@@ -41,6 +45,55 @@ BRAND_PORT="${AID_UI_BRAND_PORT:-3916}"
 PROJECT="${AID_UI_PROJECT:-$PWD}"
 JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
 DEADLINE=28800   # 8 h, integer seconds as `aid-job.sh run --deadline` requires
+
+# argv: <bind host> <bind port> <upstream port>. HTTP/1.0 to the browser: the
+# connection close ends each response, so nothing is buffered or re-framed.
+# ponytail: no WebSocket upgrade and no chunked request bodies (browsers send
+# Content-Length); add them if Impeccable's page ever needs them.
+PROXY_PY="$(cat <<'PY'
+import http.client, re, sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+host, port, up = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+LOCAL = "127.0.0.1:%d" % up
+SKIP = {"host", "origin", "referer", "connection", "keep-alive", "proxy-connection",
+        "te", "trailer", "transfer-encoding", "upgrade"}
+
+class Proxy(BaseHTTPRequestHandler):
+    def proxy(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(n) if n else None
+        hdrs = {k: v for k, v in self.headers.items() if k.lower() not in SKIP}
+        hdrs["Host"] = LOCAL
+        for k in ("Origin", "Referer"):
+            if self.headers.get(k):
+                hdrs[k] = re.sub(r"^[a-z]+://[^/]*", "http://" + LOCAL, self.headers[k])
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", up)
+            conn.request(self.command, self.path, body, hdrs)
+            r = conn.getresponse()
+        except OSError as e:
+            self.send_error(502, "upstream 127.0.0.1:%d: %s" % (up, e))
+            return
+        self.send_response_only(r.status, r.reason)
+        for k, v in r.getheaders():
+            if k.lower() not in SKIP:
+                self.send_header(k, v)
+        self.send_header("Connection", "close")
+        self.end_headers()
+        try:
+            while chunk := r.read1(65536):
+                self.wfile.write(chunk)
+                self.wfile.flush()
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+for m in ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"):
+    setattr(Proxy, "do_" + m, Proxy.proxy)
+ThreadingHTTPServer((host, port), Proxy).serve_forever()
+PY
+)"
 
 usage() { echo "usage: aid-ui-serve.sh forward <local-port> | brand <dir> | stop <forward|brand>" >&2; exit 2; }
 die() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 1; }
@@ -87,6 +140,9 @@ start() {   # start <role> <cmd...>
   die "$role server did not start on $HOST:$port: $(tail -n 5 "$JOBS/$id/stdout.log" 2>/dev/null)"
 }
 
+# Internal: the forward job's command. aid-job.sh records argv one line per
+# element, so the multi-line proxy source cannot be an argument of the job itself.
+[[ "${1:-}" == __proxy ]] && { shift; exec python3 -c "$PROXY_PY" "$@"; }
 [[ $# -eq 2 ]] || usage
 case "$1" in
   forward)
@@ -98,7 +154,7 @@ case "$1" in
       [[ "$cmdline" == *impeccable* ]] \
         || refuse "port $2 is not Impeccable's page (pid $p, $(cat "/proc/$p/comm" 2>/dev/null || echo '?')); refusing to expose it"
     done
-    start forward socat "TCP-LISTEN:$FWD_PORT,bind=$HOST,reuseaddr,fork" "TCP:127.0.0.1:$2"
+    start forward bash "${JOB_SH%/*}/aid-ui-serve.sh" __proxy "$HOST" "$FWD_PORT" "$2"
     ;;
   brand)
     dir="$(realpath -e "$2" 2>/dev/null || true)"

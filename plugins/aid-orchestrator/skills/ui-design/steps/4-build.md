@@ -29,9 +29,15 @@ přebírá postavený vzhled.
    `aid-ui-state.sh roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>`.
 6. Ukázky: `lib/ui-fidelity/ui-capture.mjs` pro každý viewport z
    `aid_ui_proposal_viewports <project>` (`scripts/lib/aid-ui-proposal.sh`),
-   obrázky do `docs/brand/assets/`.
-7. `aid-ui-state.sh chapter <project> <id> navrh` pro `barvy`, `typografie`, `ukazky`.
-8. Přestavba po dřívějším schválení:
+   `--output-dir <project>/.aid-ui/capture/<viewport>/` (mimo git, neservíruje se).
+   Do `docs/brand/assets/` zkopíruj jen PNG snímky, `baseline-computed.json` tam nepatří.
+7. Napiš těla kapitol v `docs/brand/index.html` (`<div class="body">` sekcí
+   `barvy`, `typografie`, `ukazky`):
+   - `barvy`: vzorník `.swatch` pro každou `--color-*` z `tokens.css`, u každé jméno a hodnota,
+   - `typografie`: ukázka textu pro každou roli písma (display, body) jejím písmem, velikostí a váhou,
+   - `ukazky`: oba snímky z `assets/` jako `<img>` s popiskem viewportu.
+8. Teprve pak `aid-ui-state.sh chapter <project> <id> navrh` pro `barvy`, `typografie`, `ukazky`.
+9. Přestavba po dřívějším schválení:
    `aid-ui-state.sh reset-approvals <project> barvy typografie komponenty ukazky`.
 
 ## Co PM rozhoduje
@@ -40,8 +46,8 @@ Nic, kromě otázek Impeccable (MUST 1).
 
 ## Zápis
 
-Kód projektu (Impeccable), `DESIGN.md`, `docs/brand/{tokens.css,roles.css,assets/}`,
-kapitoly `barvy`, `typografie`, `ukazky`.
+Kód projektu (Impeccable), `DESIGN.md`, `docs/brand/{tokens.css,roles.css,assets/*.png}`,
+`.aid-ui/capture/`, těla a stav kapitol `barvy`, `typografie`, `ukazky`.
 
 ## Když krok selže
 

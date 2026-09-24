@@ -38,5 +38,8 @@ section { padding: 2rem 0; border-top: 1px solid var(--brand-ink, #1a1a1a); }
 @media print {
   nav { display: none; }
   section { break-before: page; border-top: 0; }
+  /* two full-page screenshots plus the chapter heading fit one A4 page (120mm did not) */
+  img { max-height: 100mm; width: auto; max-width: 100%; }
+  img, figure { break-inside: avoid; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
