@@ -1134,7 +1134,65 @@ _increment_fail() {
   local timeline
   timeline=$(derive_timeline "$state_file") || true
   [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="$reason"
+  _fsm_refusal_next "$reason" || true
   exit 1
+}
+
+# _fsm_cmd <word>... — one command line, each word shell-quoted only when it
+# needs to be (_resume_render_command), so the line can be pasted as printed.
+_fsm_cmd() {
+  local w out=()
+  for w in "$@"; do out+=("$(_resume_render_command "$w" || true)"); done
+  printf '%s' "${out[*]}"
+}
+
+# _fsm_refusal_next <reason> — the last two lines of a refusal agents met
+# (tests/fixtures/refusals/measured-2026-09.tsv): the one command that
+# continues and the row of skills/pipeline.md §"When AID refuses" that says
+# more. Reads $state_file, $evidence_dir, $step, $cp, $last from caller scope
+# (file convention). Returns 1, printing nothing, for a reason without a row.
+_fsm_refusal_next() {
+  local reason="$1" next fsm="${SCRIPT_DIR}/aid-fsm.sh" rr="${SCRIPT_DIR}/aid-review-round.sh"
+  local vf="${evidence_dir:-<evidence dir>}/step-${step:-N}-verify.md" sf="${state_file:-<state file>}"
+  local -a where=(--checkpoint "${cp:-cp2}")
+  [[ -n "${step:-}" && "${cp:-cp2}" == cp2 ]] && where+=(--step "$step")
+  where+=(--evidence-dir "${evidence_dir:-<evidence dir>}")
+  case "$reason" in
+    review_round_missing)
+      if [[ "${cp:-}" == cp7 ]]; then
+        next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-finalize "$(basename "$(dirname "$evidence_dir")")" --stage produce)"
+      else
+        next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}")"
+      fi ;;
+    round_not_closed)
+      next="$(_fsm_cmd bash "$rr" close "${where[@]}" --round "${last:-1}") --tokens <role>=<n|unknown> …" ;;
+    review_round_failed)
+      next="the step's role fixes the open findings and commits, then: $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))")" ;;
+    review_round_stale|cp3_stale_review)
+      next="$(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))") — a confirmation round over the commits since round ${last:-?}" ;;
+    no_change_without_outputs)
+      next="commit the step's work, then: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}")" ;;
+    steps_incomplete)
+      next="finish the next step (commands/aid-run.md step loop), then: $(_fsm_cmd bash "$fsm" increment-step "$sf")" ;;
+    gates_no_generated_by|plan_gate_profile_excluded)
+      next="$(_fsm_cmd bash "$fsm" advance-to-gates "$sf")" ;;
+    gates_runner_exit_*)
+      next="the role that wrote the failing code fixes the gates named above, then: $(_fsm_cmd bash "$fsm" advance-to-gates "$sf")" ;;
+    contract_return_rejected)
+      next="re-dispatch the step with its packet $(_fsm_cmd "${_c_dir:-<step dir>}/contract.json") and record the new return, then: $(_fsm_cmd bash "$fsm" increment-step "$sf")" ;;
+    plan_manifest_missing|plan_branch_mismatch)
+      next="start the EPIC through its plan (task branch and manifest entry), then init again: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" epic-start "${_pb_plan_id:-<plan>}" "${epic_id:-<epic>}" --run-id "${run_id:-<run>}")" ;;
+    contract_return_missing|contract_return_not_done)
+      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent or hand over with a Blocked card), then: $(_fsm_cmd bash "$fsm" increment-step "$sf")" ;;
+    missing_step_verify|verify_no_ac_checklist|verify_no_memory_used|verify_no_memory_written|step_verify_not_pass|verify_no_commit_ref)
+      next="write $(_fsm_cmd "$vf") (pipeline.md §Output verification), then: $(_fsm_cmd bash "$fsm" increment-step "$sf")" ;;
+    binding_wrong_commit|binding_plan_step_hash_mismatch|incomplete_step_binding)
+      next="rewrite the binding of $(_fsm_cmd "$vf") after the step commit (reviewed_commit = HEAD, plan_step_hash from the live plan.json — pipeline.md §Output verification), then: $(_fsm_cmd bash "$fsm" increment-step "$sf")" ;;
+    missing_lenses|done_advance_preconditions)
+      next="correct what the lines above name, then run the same done-advance again: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-<from>}" "${to_phase:-<to>}" "$sf")" ;;
+    *) return 1 ;;
+  esac
+  printf 'next: %s\n(pipeline.md §When AID refuses: %s)\n' "$next" "$reason" >&2
 }
 
 # ─── P032 Step 3: Grandfather + Repeated-Fail Helpers ────────────────────
@@ -1259,11 +1317,13 @@ fsm_check_review_round() {
   [[ "$cp" == cp7 ]] && how_to="run: plan-finalize --stage produce, then bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare|collect|close --checkpoint cp7 --evidence-dir ${evidence_dir} --round 1"
   if [[ ! -f "$index" ]]; then
     _PRECONDITION_FAIL_REASON="review_round_missing"
-    echo "PRECONDITION FAIL: no review round index for ${cp}${step:+ step $step} (${index} missing). ${how_to}" >&2
+    echo "PRECONDITION FAIL: no review round index for ${cp}${step:+ step $step} (${index} missing)." >&2
+    _fsm_refusal_next review_round_missing
     return 1
   fi
-  local verdict head_sha
+  local verdict head_sha last
   verdict="$(jq -r '.verdict // ""' "$index" 2>/dev/null)" || { echo "PRECONDITION FAIL: ${index} does not parse" >&2; return 1; }
+  last="$(jq -r '[.rounds[]?.round] | max // empty' "$index")"
   head_sha="$(jq -r '.head_sha // ""' "$index" 2>/dev/null)"
   local current_head="$expected_head"
   [[ -n "$current_head" ]] || current_head="$(git -C "$tree_root" rev-parse HEAD 2>/dev/null || echo "")"
@@ -1294,7 +1354,8 @@ fsm_check_review_round() {
         done <<< "$outs"
         if (( n_out == 0 )) || [[ -n "$missing_out" ]]; then
           _PRECONDITION_FAIL_REASON="no_change_without_outputs"
-          echo "PRECONDITION FAIL: step ${step} committed nothing and $([[ $n_out -eq 0 ]] && echo "declares no outputs" || echo "its declared output ${missing_out} does not exist") (no_change_without_outputs): an empty step is not a reviewed step. Commit the step's work, or record a PM waiver with --force --reason." >&2
+          echo "PRECONDITION FAIL: step ${step} committed nothing and $([[ $n_out -eq 0 ]] && echo "declares no outputs" || echo "its declared output ${missing_out} does not exist") (no_change_without_outputs): an empty step is not a reviewed step." >&2
+          _fsm_refusal_next no_change_without_outputs
           return 1
         fi
       fi
@@ -1302,21 +1363,22 @@ fsm_check_review_round() {
     pass) ;;
     fail)
       _PRECONDITION_FAIL_REASON="review_round_failed"
-      echo "PRECONDITION FAIL: the last ${cp}${step:+ step $step} review round closed with verdict fail (${index}). Fix the open findings (the step's role, then a confirmation round), or the PM records aid-review-round.sh override." >&2
+      echo "PRECONDITION FAIL: the last ${cp}${step:+ step $step} review round closed with verdict fail (${index})." >&2
+      _fsm_refusal_next review_round_failed
       return 1 ;;
     *)
       _PRECONDITION_FAIL_REASON="review_round_missing"
-      echo "PRECONDITION FAIL: ${index} carries no verdict (a round was prepared but never closed). ${how_to}" >&2
+      echo "PRECONDITION FAIL: ${index} carries no verdict (round ${last:-?} was prepared but never closed)." >&2
+      _fsm_refusal_next round_not_closed
       return 1 ;;
   esac
 
   # pass: the last round must be closed, unstubbed, at HEAD (or D4-fresh).
-  local last dir
-  last="$(jq -r '[.rounds[]?.round] | max // empty' "$index")"
-  dir="${cpdir}/round-${last}"
+  local dir="${cpdir}/round-${last}"
   if [[ -z "$last" || ! -f "${dir}/measurement.json" || "$(jq -r '.closed_at // ""' "${dir}/round.json" 2>/dev/null)" == "" ]]; then
     _PRECONDITION_FAIL_REASON="round_not_closed"
-    echo "PRECONDITION FAIL: ${index} says pass but round ${last:-?} is not closed (no measurement.json or closed_at): round not closed. ${how_to}" >&2
+    echo "PRECONDITION FAIL: ${index} says pass but round ${last:-?} is not closed (no measurement.json or closed_at): round not closed." >&2
+    _fsm_refusal_next round_not_closed
     return 1
   fi
   if [[ "$(jq -r '.dispatch_check // ""' "$index")" == stubbed || "$(jq -r '.dispatch_check // ""' "${dir}/measurement.json")" == stubbed ]]; then
@@ -1333,7 +1395,8 @@ fsm_check_review_round() {
   [[ "$reviewed_head" == "$current_head" ]] && return 0
   if (( ! freshness )); then
     _PRECONDITION_FAIL_REASON="review_round_stale"
-    echo "PRECONDITION FAIL: ${cp}${step:+ step $step} round ${last} reviewed ${reviewed_head:0:12}, HEAD is ${current_head:0:12} (review_round_stale): the reviewers did not see the current tree. ${how_to}" >&2
+    echo "PRECONDITION FAIL: ${cp}${step:+ step $step} round ${last} reviewed ${reviewed_head:0:12}, HEAD is ${current_head:0:12} (review_round_stale): the reviewers did not see the current tree." >&2
+    _fsm_refusal_next review_round_stale
     return 1
   fi
 
@@ -1341,7 +1404,7 @@ fsm_check_review_round() {
   local policy="${CP3_FRESHNESS_POLICY:-blocking}"
   _fresh_fail() {
     [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_would_block" reason="$1" enforcement="$policy"
-    if [[ "$policy" == "blocking" ]]; then _PRECONDITION_FAIL_REASON="cp3_stale_review"; printf '%s\n' "${@:2}" >&2; return 1; fi
+    if [[ "$policy" == "blocking" ]]; then _PRECONDITION_FAIL_REASON="cp3_stale_review"; printf '%s\n' "${@:2}" >&2; _fsm_refusal_next cp3_stale_review; return 1; fi
     return 0
   }
   if ! git -C "$tree_root" rev-parse --verify "${reviewed_head}^{commit}" >/dev/null 2>&1 \
@@ -2326,6 +2389,7 @@ check_preconditions() {
       [[ "$current" -ge "$total" ]] || {
         _PRECONDITION_FAIL_REASON="steps_incomplete"
         echo "PRECONDITION FAIL: current_step=${current} < total_steps=${total}$(_fsm_human_step "$current" "$total"). Not all steps completed." >&2
+        _fsm_refusal_next steps_incomplete
         return 1
       }
 
@@ -2368,6 +2432,7 @@ Manual two-step alternative (debugging / crash recovery):
     --plan-json \$AID_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/${run_id}/plan.json
   bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh transition EXECUTE GATES ${state_file}
 EOF
+          _fsm_refusal_next gates_no_generated_by
           return 1
         fi
 
@@ -2554,6 +2619,7 @@ OR (PM-authorized override, audited):
   aid-fsm.sh transition GATES DONE ${state_file} --force --reason \\
       '<≥20 chars why excluding a plan-required gate is acceptable>'
 EOF
+            _fsm_refusal_next plan_gate_profile_excluded
             return 1
           fi
         fi
@@ -3572,7 +3638,7 @@ cmd_init() {
         else
           echo "PRECONDITION FAIL: plan-branch lineage check failed for ${epic_id} (plan ${_pb_plan_id}, reason: ${_pb_reason})." >&2
           echo "${_pb_detail}" >&2
-          echo "Override (audited): aid-fsm.sh init ${epic_id} ... --force --reason '<why this override is safe>'" >&2
+          _fsm_refusal_next "$_pb_reason" || echo "An override is the PM's decision (a Decision card), never an agent's (pipeline.md §When AID refuses)." >&2
           log_event "$_pb_timeline" "fsm_init_blocked" reason="$_pb_reason" epic_id="$epic_id" plan_id="$_pb_plan_id"
           exit 1
         fi
@@ -4380,6 +4446,7 @@ cmd_advance_to_gates() {
     local _failed_gates=""
     [[ -f "$report_file" ]] && _failed_gates="$(jq -r "${AID_GATE_ROW_JQ}"'[.gates // {} | gate_rows_normalize | to_entries[] | select((.value|type) == "object" and .value.status == "fail" and .value.waived != true) | .key] | join(", ")' "$report_file" 2>/dev/null || true)"
     echo "advance-to-gates: FAIL — gates runner exit=$rc${_failed_gates:+; failed: ${_failed_gates}}; state unchanged (EXECUTE). Report: ${report_file}" >&2
+    _fsm_refusal_next "gates_runner_exit_${rc}"
     return "$rc"
   fi
 }
@@ -4635,6 +4702,7 @@ cmd_increment_step() {
     done
     printf '%s\n' "PRECONDITION FAIL: step verification is incomplete (${#_vf_reasons[@]} problem(s)) — File: ${verify_file}" >&2
     printf '  - %s\n' "${_vf_lines[@]}" >&2
+    _fsm_refusal_next "${_vf_reasons[0]}"
     exit 1
   fi
 
@@ -4684,8 +4752,7 @@ cmd_increment_step() {
         _c_report="$(aid_dispatch_contract_validate "${_c_dir}/contract.json" "${_c_dir}/return.json" "$_c_tree" 2>/dev/null)" \
           || _increment_fail contract_return_rejected \
             "PRECONDITION FAIL: step ${step}'s return is not accepted against its contract." \
-            "$(jq -r '.reasons | join("; ")' <<< "$_c_report" 2>/dev/null)" \
-            "Re-dispatch the step with the current packet; never advance on a rejected return."
+            "$(jq -r '.reasons | join("; ")' <<< "$_c_report" 2>/dev/null)"
         # An ACCEPTED return is a well-formed one; ADVANCING needs a finished one:
         # status done and no gate the agent itself reported as failed.
         jq -e '.step_status == "done" and all(.gates[]?; .result != "fail")' "${_c_dir}/return.json" >/dev/null 2>&1 \
@@ -5921,6 +5988,7 @@ cmd_done_advance() {
             echo "ERROR: review profile missing lenses (enforcement=blocking):" >&2
             echo "$_rp_output" >&2
             log_event "$_rp_timeline" "fsm_done_advance_fail" check="review_profile" reason="missing_lenses"
+            _fsm_refusal_next missing_lenses
             exit 2
           else
             log_warn "review_profile missing_lenses (enforcement=observe, non-blocking): $_rp_output"
@@ -6092,8 +6160,9 @@ EOF
       if [[ $errors -gt 0 ]]; then
         local timeline
         timeline=$(derive_timeline "$state_file") || true
-        [[ -n "$timeline" ]] && log_event "$timeline" "fsm_done_advance_fail" from_phase="$from_phase" to_phase="$to_phase" errors="$errors"
+        [[ -n "$timeline" ]] && log_event "$timeline" "fsm_done_advance_fail" from_phase="$from_phase" to_phase="$to_phase" errors="$errors" reason="done_advance_preconditions"
         echo "ERROR: ${errors} precondition(s) failed for done-advance $from_phase → $to_phase." >&2
+        _fsm_refusal_next done_advance_preconditions
         exit 1
       fi
     fi

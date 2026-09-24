@@ -386,8 +386,8 @@ Pick it back up:
   /aid-run --resume             continue from fsm-state.yaml
   /aid-status <epic-id>         where it actually stopped, and why
 
-When a precondition blocks you and you are sure:
-  --force --reason '<at least 20 characters>'
+When a precondition blocks you:
+  follow its `next:` line — skills/pipeline.md §"When AID refuses" has a row per reason
 ```
 
 `--force` is a PM decision, never an agent's: it is logged to the audit trail, it
@@ -612,4 +612,4 @@ Adding a rule is a row plus a handler — never an edit to `aid-hook.sh`. See
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-09-22
+**Last Updated:** 2026-09-24

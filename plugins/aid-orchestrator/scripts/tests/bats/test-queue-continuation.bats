@@ -473,6 +473,20 @@ _sent() { grep -c "${1:-agent-waiting}" "$TMP/sent" 2>/dev/null || echo 0; }
   [ "$status" -eq 2 ]; [[ "$output" == *"continuation 1 of 40"* ]]
 }
 
+@test "AID-WAIT ends the turn while a background agent it launched has not reported, and not after" {
+  _plan P090 auto EPIC_INTEGRATION; _bind P090 S1; _sink
+  local t="$TMP/bg.jsonl"
+  jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_A",name:"Agent",input:{run_in_background:true}}]}}' > "$t"
+  jq -nc '{type:"assistant",message:{content:[{type:"text",text:"AID-WAIT: CP2 reviewer"}]}}' >> "$t"
+  local ev; ev="$(jq -n --arg c "$ROOT" --arg t "$t" '{session_id:"S1",cwd:$c,transcript_path:$t}')"
+  run aid_hook_rule_queue_continuation_stop <<< "$ev"
+  [ "$status" -eq 3 ]; [[ "$output" == *"outcome=wait"* ]]
+  jq -nc '{type:"user",message:{content:"<task-notification>\n<task-id>a1</task-id>\n<tool-use-id>toolu_A</tool-use-id>\n<status>completed</status>\n</task-notification>"}}' >> "$t"
+  jq -nc '{type:"assistant",message:{content:[{type:"text",text:"AID-WAIT: CP2 reviewer"}]}}' >> "$t"
+  run aid_hook_rule_queue_continuation_stop <<< "$ev"
+  [ "$status" -eq 2 ]; [[ "$output" == *"outcome=refused"* ]]
+}
+
 @test "the rule never refuses without knowing: an unparsable transcript or plan-state, or another plan's live job" {
   _plan P090 auto EPIC_INTEGRATION; _bind P090 S1; _sink
   printf 'not json\n' > "$TMP/bad.jsonl"

@@ -231,6 +231,26 @@ VERIFY
   [[ "$output" =~ "aid-step-check.sh --checkpoint cp2 --step 3" ]]
 }
 
+@test "steps_incomplete and contract_return_rejected name a next command that exists in the plugin" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  sed -i 's/^current_step: 3/current_step: 1/' "$state_file"
+  run "$FSM" transition EXECUTE GATES "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"next: finish the next step"*"then: bash $FSM increment-step $state_file"* ]]
+  [[ "$output" == *"(pipeline.md §When AID refuses: steps_incomplete)"* ]]
+
+  write_post_deploy_state_yaml "$state_file"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  jq -n '{steps: [{id:"s0"},{id:"s1"},{id:"s2"},{id:"s3",role:"backend"}]}' > "$TEST_EVIDENCE_DIR/plan.json"
+  mkdir -p "$TEST_EVIDENCE_DIR/steps/s3"
+  echo '{}' > "$TEST_EVIDENCE_DIR/steps/s3/contract.json"; echo '{}' > "$TEST_EVIDENCE_DIR/steps/s3/return.json"
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not accepted against its contract"* ]]
+  [[ "$output" == *"next: re-dispatch the step with its packet "*"/steps/s3/contract.json"*"then: bash $FSM increment-step"* ]]
+}
+
 @test "increment-step: cp2 round closed with verdict fail → hard fail; a bound skip → accept" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"  # current_step: 3

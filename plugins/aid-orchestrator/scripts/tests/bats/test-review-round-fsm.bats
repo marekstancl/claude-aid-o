@@ -76,6 +76,25 @@ _check() {
   echo prod >> src/app.py; git commit -qam "prod" -m "CP3-Freshness-Exception: no"
   _check cp3 "" --freshness "$TEST_PROJECT_ROOT"; [ "$status" -eq 1 ]
 }
+@test "review_round_stale names the confirmation round as next, and its row" {
+  aid_fixture_seed_step_review "$E" cp2 0 pass
+  echo b >> src/app.py; git commit -qam fix
+  _check cp2 0; [ "$status" -eq 1 ]
+  [[ "$output" == *"next: bash $AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare --checkpoint cp2 --step 0 --evidence-dir $E --round 2"* ]]
+  [[ "$output" == *"(pipeline.md §When AID refuses: review_round_stale)"* ]]
+}
+@test "drift: every measured reason in aid-fsm.sh has a next: line and a row in pipeline.md" {
+  local tsv="$AID_PLUGIN_PATH/scripts/tests/fixtures/refusals/measured-2026-09.tsv"
+  local table="$AID_PLUGIN_PATH/skills/pipeline.md" arms r missing=""
+  arms="$(sed -n '/^_fsm_refusal_next()/,/^}/p' "$FSM")"
+  while IFS=$'\t' read -r _ _ r; do
+    r="${r%%_[0-9]*}"   # gates_runner_exit_1 → its row gates_runner_exit_<n>
+    grep -q "\`${r}" "$table" || missing+=" row:$r"
+    grep -q "$r" "$FSM" || continue
+    [[ "$arms" == *"$r"* ]] || missing+=" next:$r"
+  done < <(grep -v '^#' "$tsv")
+  [[ -z "$missing" ]] || { echo "missing:$missing"; false; }
+}
 @test "cp3 without the semantic file blocks; a missing index names the step check command" {
   aid_fixture_seed_step_review "$E" cp3 "" pass
   rm "$E/semantic-review-final.json"
