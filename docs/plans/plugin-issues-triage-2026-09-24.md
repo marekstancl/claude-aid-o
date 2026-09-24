@@ -68,3 +68,43 @@ Navíc: `test-gates-hygiene.sh` byl červený od P099 (soubor ztratil štítek �
 Revize plánu: dvě otázky navíc pro `feasibility_deps` (A); runner vypíše spadlé
 případy (A, bod 11 výše); pomalé sady a tiše zahozený řádek brány: nic; stará
 verze Codex CLI: odinstalovat. Záznam v `P100-live-follow-up.md`.
+
+## Druhá dávka 24. 9. večer (P101 + agents P008) — PM varianta A, vše opraveno
+
+Nezávislý Claude ověřil 30 položek v kódu: 13 už opravených, 17 platných. Opraveno 13 bodů (N1–N11, N13, N14):
+- N1: upgrade `/aid-init` přenese starou `gate_profile_defaults.epic` do `default_profile`.
+- N2: `aid-plan-fsm.sh plan-record-decision` zapíše rozhodnutí PM, které sloučení přijme.
+- N3: index hlavní kopie po uzavření plánu.
+- N4: brány bez `--profile` to řeknou.
+- N5: poslední trasa nálezu platí.
+- N6: commit kroku vezme ignorovaný soubor, ne stav AIDu, a jmenuje soubor z jiného repozitáře.
+- N7: `decide` jmenuje spadlou kontrolu; zámky jsou pomocné soubory.
+- N8: `--bump auto` se u plánu zeptá.
+- N9: háček konce tahu přijme kartu ekosystému.
+- N10: nová složka ve worktree.
+- N11, N13, N14: drobnosti.
+
+N12 (dvojí `test-aid-fsm`) se udělal až po sloučení P101, v konfiguraci tohoto repozitáře.
+Nedělat: A21 (carry v CP7 je záměr), Impeccable/Playwright (prostředí).
+Do backlogu: pevné počty testů v kritériích, delší paměť pro limit Codexu.
+
+## Třetí dávka 24. 9. v noci (doplněk P101) — PM varianta A, vše opraveno
+
+Hlavní příčinu „decide nikdy READY" odstranil už P100 (podklad z worktree plánu). Poslední kus opravuje M1.
+- M1: čistota stromu na konci plánu i posouzení změny kandidáta se dívá na worktree plánu, ne na hlavní kopii.
+- M2: rozhodnutí o znovupoužití bran; spadlá brána jmenuje příkaz k zopakování.
+- M3: `aid-fsm.sh alloc imp-id`.
+- M4: `\bxit\(`.
+- M5: pořadí vydání v CONTRIBUTING.
+- M6: `done-advance` archivuje soubor EPICu sám.
+- M7: bez varování review_profile.
+- M8: rada bez `rm`.
+- M9: B3.
+- M10: zápis hlášení jedním blokem.
+
+Nedělat: „otrávený" pokus (opraveno v P100) a `--force` na sloučení (záměr).
+Do backlogu:
+- `produce` spouští sady T2, které jmenují kritéria;
+- lidská věta pro PM, když Codex nahradil Claude;
+- release-policy v režimu EPIC soudí hlavní kopii (jen pozoruje);
+- mrtvý pokyn v `skills/pipeline.md` (review-profile per EPIC).
