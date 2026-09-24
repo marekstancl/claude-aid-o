@@ -84,6 +84,9 @@ Planning:
 Before you trust either end:
   /aid-verify-plan             → one plan reviewer, by hand (not a review round)
   /aid-verify-implementation   → adversarial review of a claimed-done result
+
+Design:
+  /aid-ui                  → UI from product type to an approved brand page
 ```
 
 ## Level 2: Configuration (5+ tasks completed)
@@ -125,6 +128,7 @@ Ask for any of these with `/aid-help <topic>`:
 /aid-help generation      → PRE-FLIGHT: plan → EPIC → plan.json as one transaction
 /aid-help plan            → /aid-plan deep dive (brainstorm, write, epic modes)
 /aid-help plan-lifecycle  → plan branches, release model, verification commands
+/aid-help ui              → /aid-ui: UI from product type to an approved brand page
 /aid-help status          → /aid-status deep dive (overview, EPIC detail, queue)
 /aid-help gates           → gate types, execution.yaml configuration, retry logic
 /aid-help tests           → test tiers, what runs on the merge path, the nightly
@@ -287,6 +291,13 @@ If a plan's worktree is missing or broken:
   (repairs the DIRECTORY only; if the plan/<id> branch itself is gone,
    first: git branch plan/<id> <sha from git reflog>, then the line above)
 ```
+
+### Topic: ui
+
+`/aid-ui` vede PM od typu produktu přes vzory až k postavenému a ověřenému vzhledu.
+Směr vybírá PM na stránce Impeccable; bez jeho zaznamenané odpovědi se kroky 4-6
+nespustí (skript `aid-ui-state.sh` je odmítne). Postup nese skill `/ui-design`,
+který načítá `/aid-ui` a sám se nevolá.
 
 ### Topic: status
 

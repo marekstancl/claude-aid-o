@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.106.0] — 2026-09-24
+## [2.107.0] — 2026-09-24
 
 ### Added
 - **Tabulka „When AID refuses"** — `skills/pipeline.md` má řádek pro každý důvod odmítnutí, na který agenti za poslední měsíc narazili (`tests/fixtures/refusals/measured-2026-09.tsv`): co znamená, zda je chybná práce nebo se posunul stav, příkaz, který pokračuje, a zda jde o rozhodnutí PM; nahrazuje starou „force_override Usage Policy" a test hlídá, aby tabulka a kód neodjely.
@@ -53,6 +53,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Časy z auditu už neujíždějí o hodinu** — `jq` starší než 1.7 čte čas se `Z` v místním pásmu; výpočet času plánu (čekání na PM do „teď") a počet odmítnutí pro připomínku hlášení pro AID ho teď počítají v UTC, jako to FSM dělá od P037.
 
 **Poznámka pro projekty:** commit hook se aktualizuje dalším `/aid-init`. `scripts/` pluginu má 175 104 řádků (před plánem 173 883): +1 221, z toho +635 v testech a +586 v pravidlech výše; žádná nová sada testů.
+
+## [2.106.0] — 2026-09-24
+
+### Added
+- **`/aid-ui` - návrh vzhledu mimo AID pipeline** - provede typem produktu, najde šest referencí z galerií, směr vzhledu vybírá PM přes Impeccable (nikdy bez něj), pak designový standard, stavba, ověření a brandová stránka v `docs/brand/`.
+- **`aid-ui-state.sh`** - jediný zapisovatel stavu brandové stránky a brána směru: kroky 4-6 odmítnou běžet bez zaznamenané odpovědi PM ze stránky Impeccable.
+- **`aid-ui-serve.sh`** - stránka rozhodnutí i brandová stránka jsou dostupné přes VPN; stránka rozhodnutí přes proxy, která přepisuje Host/Origin, protože Impeccable přijímá jen 127.0.0.1.
+- **`aid-ui-design-to-css.sh`** - převede tokeny z `DESIGN.md` (barvy, písmo, zaoblení, mezery) na CSS proměnné brandové stránky.
+- **Řádek `aid_ui_direction_needs_pm` v registru vynucení** - pravidlo „směr jen s PM" je hlídané kódem, ne jen textem.
 
 ## [2.105.2] — 2026-09-24
 
