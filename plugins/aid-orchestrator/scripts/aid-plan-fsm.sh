@@ -5054,6 +5054,20 @@ _pfsm_finalize_gates_body() {
       fi
       if [[ "$grc" -ne 0 ]]; then
         echo "GATES FAILED: the plan-final gate run for ${plan_id} did not pass (runner rc=${grc}); see ${run_dir_rel}/gates_report.json. The plan stays in PLAN_GATES — a failing candidate is shown to the PM, never silently retried." >&2
+        # What failed and how to reproduce it alone (the stage itself re-runs
+        # only whole: fix, freeze again, --stage gates). For a test runner the
+        # failed suites come from its log, as the nightly report reads them.
+        local fg fev fcmd fs
+        while IFS=$'\t' read -r fg fev; do
+          [[ -n "$fg" ]] || continue
+          fcmd="$(GATE="$fg" yq '.gates[strenv(GATE)].command // ""' "$execution_yaml" 2>/dev/null)"
+          echo "  failed: ${fg} — reproduce: (cd ${troot} && ${fcmd})" >&2
+          [[ -n "$fev" && -f "${run_dir_abs}/${fev}" ]] || continue
+          while IFS= read -r fs; do
+            [[ -n "$fs" ]] && echo "    suite: ${fs} — reproduce: (cd ${troot} && bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --only ${fs})" >&2
+          done < <(sed -nE '/^[[:space:]]*Failed suites:/,/^$/ s/^[[:space:]]+- (.+)$/\1/p' "${run_dir_abs}/${fev}")
+        done < <(jq -r '.gates | to_entries[] | select((.value.result // .value.status) == "fail")
+                   | "\(.key)\t\(.value.evidence // "")"' "$report_file" 2>/dev/null)
         return 1
       fi
     else

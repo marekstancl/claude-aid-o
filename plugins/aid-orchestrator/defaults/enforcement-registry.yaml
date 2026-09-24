@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 560          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 562          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4089,3 +4089,28 @@ enforcements:
     description: "2.107.0: the PM's MERGE/FIX/ABORT is written by plan-record-decision as the schema-valid pm_plan_decision bound to the frozen candidate (candidate, attempt, target head at freeze) into the attempt's directory; the close card and plan-continue name it before plan-merge-to-main, which refuses anything else (the card used to name release-decision.json, which the merge's schema refuses)."
     recovery: "aid-plan-fsm.sh plan-record-decision <plan> MERGE --by pm"
     test: "scripts/tests/bats/test-aid-plan-final-boundary.bats (grep: 'plan-record-decision writes the MERGE')"
+
+  - id: alloc_imp_id
+    type: 4
+    source: "scripts/aid-fsm.sh (grep: 'imp-id)  key=\"imp\"')"
+    instruction: "skills/memory.md (grep: 'alloc imp-id')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2.107.0: backlog numbers (IMP-NNN) come from aid-fsm.sh alloc imp-id under the counter.yaml lock, after the highest IMP the backlog already names (a counter without an imp: line starts there); two sessions picking numbers by hand collided three times in September 2026. plan-check B6 no longer checks IMP ids and matches whole ids only."
+    recovery: "bash scripts/aid-fsm.sh alloc imp-id"
+    test: "scripts/tests/bats/test-alloc-lock.bats (grep: 'alloc imp-id')"
+
+  - id: plan_final_clean_tree
+    type: 4
+    source: "scripts/aid-release-policy.sh (grep: 'TREE_ROOT=')"
+    instruction: "commands/aid-run.md (grep: 'verification_report')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2.107.0: the plan-final clean-tree check (evidence verifier git_clean, via --tree) and the review equivalence judge the plan's recorded worktree, not the primary checkout another window may be working in; decide stopped at NOT READY for P097, P099 and P101 for this class of reason."
+    recovery: "n/a — commit or discard edits in the plan's worktree"
+    test: "scripts/tests/bats/test-plan-final-decide.bats (grep: 'judges the plan')"
+

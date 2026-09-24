@@ -156,6 +156,8 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   touch "$R/break-the-gate"; git -C "$R" add -A; git -C "$R" commit -qm "break"
   _stage freeze; [ "$status" -eq 0 ]
   _stage gates; [ "$status" -eq 1 ]; [[ "$output" == *"GATES FAILED"* ]]
+  # it names the failed gate and the command that reproduces it
+  [[ "$output" == *"failed: tests_pass — reproduce: "*"test ! -f break-the-gate"* ]]
   _stage decide; [ "$status" -eq 1 ]; [[ "$output" == *"--stage gates"* ]]
   [ ! -e "$(_run_dir)/release-decision.json" ]
 }

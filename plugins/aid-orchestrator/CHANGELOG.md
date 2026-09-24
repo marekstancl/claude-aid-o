@@ -34,6 +34,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **`AID-WAIT:` platí i pro agenta na pozadí** — autonomní běh smí skončit tah, dokud agent nebo příkaz spuštěný na pozadí neohlásil konec.
 
 ### Fixed
+- **Konec plánu kontroluje čistotu stromu plánu, ne hlavní kopie** — rozdělaná práce jiného okna v hlavní kopii už nezablokuje verdikt READY (poslední kus důvodu, proč P097, P099 a P101 končily ručně); totéž platí pro posouzení, zda se kandidát od revize změnil.
+- **Čísla IMP přiděluje AID** — `aid-fsm.sh alloc imp-id` se zámkem, za nejvyšším číslem, které backlog už uvádí (ručně vybraná čísla se ve dvou oknech srazila třikrát); kontrola plánu B6 u citovaného IMP už nevaruje.
+- **Spadlá brána na konci plánu jmenuje, co spadlo, a jak to zopakovat samostatně** (u testů i konkrétní sady).
+- **`done-advance` přesune soubor EPICu do archivu sám**, až když ostatní podmínky projdou; zmizelo varování „review_profile unverifiable" u každého EPICu a rada smazat report bran, který neexistuje.
+- **Bezpečnostní vzor `skipped_test` už nechytá `sys.exit(`**, kontrola plánu B3 nehlásí mazání souboru, který plán sám zakládá.
+- **CONTRIBUTING: pořadí vydání, které pre-push pustí** (lokální značka → push main → ověření nainstalovaného pluginu → push značky → GitHub release s poznámkami z CHANGELOGu); hlášení pro AID se zapisují jedním blokem.
 - **Upgrade `/aid-init` nezúží bránu EPICu** — starý `gate_profile_defaults.epic` (např. `full`) se přenese do `default_profile`; dřív se z něj stal `standard` a brána EPICu v agents prošla bez testů projektu (ACTA by na to narazila při dalším upgradu).
 - **Po uzavření plánu zůstane index hlavní kopie čistý** — potvrzenka, která už leží na disku, se převezme; dřív se ukazovala jako smazaná a zároveň nová a další commit v main by ji tiše smazal.
 - **Commit kroku nevynechá soubor potichu** — soubor, který projekt ignoruje (`docs/`), se commitne; soubor z jiného repozitáře se jmenuje s pokynem k `repo_commits`.
