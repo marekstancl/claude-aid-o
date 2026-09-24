@@ -280,17 +280,12 @@ _gen_plan_recorded_mode() {
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"
 # shellcheck source=lib/aid-queue-write.sh
-source "${SCRIPT_DIR}/lib/aid-queue-write.sh"   # _queue_dep_state, queue_get_field
+source "${SCRIPT_DIR}/lib/aid-queue-write.sh"   # queue_entry_delivered
 
-# _gen_phase_delivered <epic_id> — true when an earlier generation's queue entry
-# for this EPIC names a merge_target and git ancestry proves the merge (P100
-# Step 5). A legacy entry (status only) is never proof: the queue says of itself
-# that an entry is not evidence. A delivered phase is not generated again, not
-# re-queued and not bound to the current plan bytes — its work is already in git.
-_gen_phase_delivered() {
-  [[ -n "$(queue_get_field "$1" merge_target "$queue_yaml" 2>/dev/null)" ]] || return 1
-  [[ "$(_queue_dep_state "$1" "$queue_yaml" "$_aid_pipeline_state_root")" == merged ]]
-}
+# _gen_phase_delivered <epic_id> — an earlier generation delivered this EPIC
+# (queue_entry_delivered): it is not generated again, not re-queued and not
+# bound to the current plan bytes — its work is already in git (P100 Step 5).
+_gen_phase_delivered() { queue_entry_delivered "$1" "$queue_yaml" "$_aid_pipeline_state_root"; }
 
 _gen_sha256_file() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
 # Canonical-JSON self-hash. A PLAIN STATED CONVENTION (no in-tree precedent

@@ -114,6 +114,17 @@ validate_vision() {
   ' "$file"
 }
 
+# _check_topic_kind <kind> <scope> <reason> — ui or other; other on a
+# user_visible run carries a reason of 20+ characters (why it is not a screen).
+_check_topic_kind() {
+  case "$1" in
+    ui) ;;
+    other) [[ "$2" != user_visible || ${#3} -ge 20 ]] \
+             || { echo "ERROR: topic kind other on a user_visible run needs --reason of at least 20 characters: why this is not a screen" >&2; return 1; } ;;
+    *) echo "ERROR: topic kind must be ui or other (got '$1')" >&2; return 1 ;;
+  esac
+}
+
 cmd_init() {
   local plan_id="${1:?}" scope="" topic="" want_worktree=1 kind="" kind_reason=""
   shift
@@ -134,12 +145,7 @@ cmd_init() {
   # Whether a user-visible topic is a screen is the controller's judgement
   # (P100 Step 8); `other` there is recorded with its reason, which the design
   # page shows the PM.
-  case "$kind" in
-    ""|ui) ;;
-    other) [[ "$scope" != user_visible || ${#kind_reason} -ge 20 ]] \
-             || { echo "ERROR: --topic-kind other on a user_visible run needs --reason of at least 20 characters: why this is not a screen" >&2; return 2; } ;;
-    *) echo "ERROR: --topic-kind must be ui or other (got '${kind}')" >&2; return 2 ;;
-  esac
+  [[ -z "$kind" ]] || _check_topic_kind "$kind" "$scope" "$kind_reason" || return 2
 
   local dir; dir="$(state_dir "$plan_id")" || return 1
   mkdir -p "$dir" || { echo "ERROR: cannot create $dir" >&2; return 1; }
@@ -194,12 +200,7 @@ cmd_topic_kind() {
   local plan_id="${1:?}" kind="${2:-}" reason=""; shift 2 || true
   [[ "${1:-}" == --reason ]] && reason="${2:-}"
   local sf; sf="$(require_state "$plan_id")" || return 1
-  case "$kind" in
-    ui) ;;
-    other) [[ "$(get "$sf" scope)" != user_visible || ${#reason} -ge 20 ]] \
-             || { echo "ERROR: topic-kind other on a user_visible run needs --reason of at least 20 characters: why this is not a screen" >&2; return 2; } ;;
-    *) echo "ERROR: topic-kind must be ui or other (got '${kind}')" >&2; return 2 ;;
-  esac
+  _check_topic_kind "$kind" "$(get "$sf" scope)" "$reason" || return 2
   set_field "$sf" topic_kind "$kind" && set_field "$sf" topic_kind_reason "${reason//\"/}" || return 1
   echo "${plan_id}: topic kind ${kind}${reason:+ — ${reason}}"
 }

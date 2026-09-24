@@ -196,6 +196,14 @@ aid_plan_close_cost() {
 #   rotated generations (.2, .1); when the plan began before the oldest line of
 #   a full rotation, waiting and outage are null ("not measured"), never
 #   understated.
+# aid_hook_audit_files — the hook audit and its rotated generations (aid-hook.sh
+# rotates at 20 MB into .1 and .2), oldest first, the ones that exist.
+aid_hook_audit_files() {
+  local a="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}" g
+  for g in "${a}.2" "${a}.1" "$a"; do [[ -r "$g" ]] && printf '%s\n' "$g"; done
+  return 0
+}
+
 aid_plan_close_time() {
   local root="$1" plan="$2"; shift 2
   local ev="${root}/.aid-o/work/evidence/${plan}" d audit sids
@@ -206,7 +214,7 @@ aid_plan_close_time() {
   for d in "$ev"/R-"${plan}"-final-*/timeline.jsonl; do [[ -f "$d" ]] && tl+=("$d"); done
   audit="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}"
   local -a pat=() gens=()
-  for d in "${audit}.2" "${audit}.1" "$audit"; do [[ -r "$d" ]] && gens+=("$d"); done
+  mapfile -t gens < <(aid_hook_audit_files)
   local audit_from=""
   if (( ${#gens[@]} )); then
     # Only a full rotation can have dropped lines: then the oldest kept line

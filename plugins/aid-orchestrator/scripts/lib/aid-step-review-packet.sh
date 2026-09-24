@@ -36,6 +36,10 @@ _AID_SR_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." &
 [[ -n "${AID_GATE_ROW_JQ:-}" ]] || source "${_AID_SR_PLUGIN}/scripts/lib/aid-gate-row.sh"   # P097 Step 2 — gate rows read through gate_row_normalize
 AID_SR_TEMPLATE="${_AID_SR_PLUGIN}/defaults/prompts/review-prompt-v1.md"
 AID_SR_ROLES_SKILL="${_AID_SR_PLUGIN}/skills/step-review-roles.md"
+# The findings a step round still holds open: its verdict, the confirmation
+# round's packet and the roles it asks read this (a form_invalid finding is open
+# until answered, like a disputed one).
+AID_SR_OPEN_JQ='(.status | IN("open", "disputed", "routed", "carried", "form_invalid")) and (.severity == "blocker" or .severity == "major")'
 AID_SR_EVIDENCE_FORMS='`path:line` or `path:first-last` at the reviewed commit, `<sha>:path:line` for a line of a file the diff deleted or moved (the pre-image at that commit), or `absent:path` for a file the step should have produced and did not; one citation that resolves is enough, but cite the exact line (a wrong number wastes the citation); citations only, separated by `;` — a word or a bracketed note after a line number drops the finding, so say what the line shows in `claim`'
 
 aid_step_review_packet_build() {
@@ -72,7 +76,7 @@ aid_step_review_packet_build() {
 _aid_sr_packet_finish() {
   local root="$1" dir="$2" prev="${3:-}" f
   if [[ -n "$prev" && -f "$prev/merged.json" ]]; then
-    jq '{findings: [.findings[] | select((.status | IN("open", "disputed", "routed", "carried", "form_invalid")) and (.severity == "blocker" or .severity == "major"))]}' "$prev/merged.json" > "$dir/open-findings.json"
+    jq "{findings: [.findings[] | select(${AID_SR_OPEN_JQ})]}" "$prev/merged.json" > "$dir/open-findings.json"
     git -C "$root" diff "$(jq -r .head_sha "$prev/round.json")..HEAD" > "$dir/fix.patch" || return 1
   fi
   (cd "$dir" && for f in *; do

@@ -245,11 +245,11 @@ _aid_qc_jobs_busy() {
 # yet: the harness answers each with a <task-notification> naming the call's
 # <tool-use-id> (IMP-647).
 _aid_qc_bg_pending() {
-  local id
-  while IFS= read -r id; do
-    grep -qF "<tool-use-id>${id}</tool-use-id>" "$1" || return 0
-  done < <(jq -r 'select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and .input.run_in_background? == true) | .id' "$1" 2>/dev/null)
-  return 1
+  # Two passes over the transcript whatever its length: the ids launched in the
+  # background, minus the ids a notification answered.
+  [[ -n "$(comm -23 \
+    <(jq -r 'select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and .input.run_in_background? == true) | .id' "$1" 2>/dev/null | sort -u) \
+    <(grep -o '<tool-use-id>[^<]*' "$1" | cut -d'>' -f2 | sort -u))" ]]
 }
 
 # ---------------------------------------------------------------------------

@@ -436,7 +436,13 @@ _aid_test_bullet_tier_finding() {
     [[ -e "${root}/${p}" ]] || new=true
   done <<< "$paths"
   [[ "$suite" == true ]] || return 0
-  grep -rlq --include='test-*.bats' --include='test-*.sh' "$AID_TEST_TIER_TAG_RE" "$root" 2>/dev/null || return 0
+  # Whether <root> has adopted tiers is asked once per root per process.
+  declare -gA _AID_TIERS_ADOPTED
+  if [[ -z "${_AID_TIERS_ADOPTED[$root]:-}" ]]; then
+    _AID_TIERS_ADOPTED[$root]=no
+    grep -rlq --include='test-*.bats' --include='test-*.sh' "$AID_TEST_TIER_TAG_RE" "$root" 2>/dev/null && _AID_TIERS_ADOPTED[$root]=yes
+  fi
+  [[ "${_AID_TIERS_ADOPTED[$root]}" == yes ]] || return 0
   decl="$(_aid_files_bullet_tier "$bullet")" || rc=$?
   if (( rc == 2 )); then
     echo "Test bullet declares tier '${decl}', which is not one of t0/t1/t2"; return 1

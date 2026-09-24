@@ -15,7 +15,7 @@ source "${SCRIPT_DIR}/lib/common.sh"
 source "${SCRIPT_DIR}/lib/aid-plan-graph.sh"
 source "${SCRIPT_DIR}/lib/aid-source-plan-graph.sh"
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
-source "${SCRIPT_DIR}/lib/aid-queue-write.sh"   # _queue_dep_state — a delivered phase is re-proven here
+source "${SCRIPT_DIR}/lib/aid-queue-write.sh"   # queue_entry_delivered — a delivered phase is re-proven here
 check_prerequisites
 
 usage() {
@@ -69,8 +69,8 @@ for phase in $(seq 1 "$total"); do
   # A delivered phase (P100 Step 5) has no output to verify or bind to these
   # plan bytes; the manifest's word is not proof, so git is asked again here.
   if jq -e '.status == "delivered"' <<< "$entry" >/dev/null; then
-    _dq="$(aid_state_path .aid-o/config/queue.yaml)"; _de="$(jq -r '.epic_id' <<< "$entry")"
-    [[ -n "$(queue_get_field "$_de" merge_target "$_dq" 2>/dev/null)" && "$(_queue_dep_state "$_de" "$_dq" "$(aid_state_root)")" == merged ]] \
+    _de="$(jq -r '.epic_id' <<< "$entry")"
+    queue_entry_delivered "$_de" "$(aid_state_path .aid-o/config/queue.yaml)" "$(aid_state_root)" \
       || { echo "ERROR: phase $phase is marked delivered but git does not prove ${_de} merged" >&2; exit 1; }
     continue
   fi

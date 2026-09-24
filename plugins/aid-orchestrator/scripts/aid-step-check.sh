@@ -48,6 +48,8 @@ source "$SCRIPT_DIR/lib/aid-stage-log.sh"
 source "$SCRIPT_DIR/lib/aid-ancillary.sh"
 # shellcheck source=lib/aid-test-tier.sh
 source "$SCRIPT_DIR/lib/aid-test-tier.sh"
+# shellcheck source=lib/aid-dispatch-contract.sh
+source "$SCRIPT_DIR/lib/aid-dispatch-contract.sh"   # aid_dispatch_repo_range_ok
 
 die() { echo "step-check: $*" >&2; exit "${2:-1}"; }
 usage() { sed -n '5,10p' "${BASH_SOURCE[0]}" | sed 's/^# *//'; }
@@ -135,17 +137,14 @@ fi
 OTHER_MISSING=()
 if [[ "$CHECKPOINT" == cp2 && -f "$PLAN_JSON" ]]; then
   ret="$EVID/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON")/return.json"
-  declare -A seen_repo=()
+  declare -A seen_repo=(); root_phys="$(cd "$ROOT" && pwd -P)"
   while IFS= read -r ap; do
     d="$ap"; while [[ ! -d "$d" && "$d" != / ]]; do d="$(dirname "$d")"; done
     repo="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" || continue
-    [[ "$repo" != "$(cd "$ROOT" && pwd -P)" && -z "${seen_repo[$repo]:-}" ]] || continue
+    [[ "$repo" != "$root_phys" && -z "${seen_repo[$repo]:-}" ]] || continue
     seen_repo[$repo]=1
     r="$(jq -r --arg r "$repo" 'first(.repo_commits[]? | select(.repo == $r) | .range) // ""' "$ret" 2>/dev/null || true)"
-    if [[ "$r" != *..* ]] || ! git -C "$repo" rev-parse -q --verify "${r%%..*}^{commit}" >/dev/null \
-       || ! git -C "$repo" rev-parse -q --verify "${r##*..}^{commit}" >/dev/null; then
-      OTHER_MISSING+=("$repo"); continue
-    fi
+    aid_dispatch_repo_range_ok "$repo" "$r" || { OTHER_MISSING+=("$repo"); continue; }
     while IFS= read -r f; do [[ -n "$f" ]] && FILES+=("${repo}/${f}"); done < <(git -C "$repo" diff --name-only "$r")
     DIFF+=$'\n'"$(git -C "$repo" diff "$r")"
     NUMSTAT+=$'\n'"$(git -C "$repo" diff --numstat "$r")"
@@ -240,14 +239,12 @@ elif [[ "$STREAMLINED" == true ]]; then verdict=skip; reason="streamlined"
 elif (( ${#forbidden[@]} > 0 )); then verdict=review; reason="forbidden path touched: ${forbidden[*]}"
 elif (( ${#matched_rules[@]} > 0 )); then verdict="review+security"; reason="security pattern: ${matched_rules[*]}"
 elif (( ${#outside[@]} > 0 )); then verdict=review; reason="files outside the step's scope: ${outside[*]}"
+elif [[ -f "$CPDIR/rounds.json" ]] && jq -e '(.rounds // []) | length > 0' "$CPDIR/rounds.json" >/dev/null 2>&1; then
+  # A step that moved after a closed round is not skipped: the delta round of
+  # aid-review-round.sh confirms it (P100 Step 2).
+  verdict=review; reason="the step moved after a closed round; a delta round confirms it"
 elif [[ "$CHECKPOINT" != cp7 ]] && (( ${#FILES[@]} <= MAX_FILES && LINES <= MAX_LINES )); then verdict=skip; reason="${#FILES[@]} file(s), $LINES line(s), inside scope, no pattern matched"
 else verdict=review; reason="${#FILES[@]} file(s), $LINES line(s)"
-fi
-
-# A step that moved after a closed round is not skipped: the delta round of
-# aid-review-round.sh confirms it (P100 Step 2), so the check says review.
-if [[ "$verdict" == skip && -f "$CPDIR/rounds.json" ]] && jq -e '(.rounds // []) | length > 0' "$CPDIR/rounds.json" >/dev/null 2>&1; then
-  verdict=review; reason="the step moved after a closed round; a delta round confirms it (was: ${reason})"
 fi
 
 # ── 6. write, bind, index ───────────────────────────────────────────────────

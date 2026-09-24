@@ -1130,12 +1130,16 @@ _fsm_refusal_next() {
   local -a where=(--checkpoint "${cp:-cp2}")
   [[ -n "${step:-}" && "${cp:-cp2}" == cp2 ]] && where+=(--step "$step")
   where+=(--evidence-dir "${evidence_dir:-<evidence dir>}")
+  local inc adv chk nextround
+  inc="$(_fsm_cmd bash "$fsm" increment-step "$sf")"; adv="$(_fsm_cmd bash "$fsm" advance-to-gates "$sf")"
+  chk="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}")"
+  nextround="$chk && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))")"
   case "$reason" in
     review_round_missing)
       if [[ "${cp:-}" == cp7 ]]; then
         next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-finalize "$(basename "$(dirname "$evidence_dir")")" --stage produce) && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round 1)"
       else
-        next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}")"
+        next="$chk"
       fi ;;
     round_not_closed)
       # A round is closed after its answers are collected: collect first when it was not.
@@ -1146,29 +1150,29 @@ _fsm_refusal_next() {
         next="dispatch the round's reviewers (commands/aid-run.md CP2/CP3), then: $(_fsm_cmd bash "$rr" collect "${where[@]}" --round "${last:-1}")"
       fi ;;
     review_round_failed)
-      next="the step's role fixes the open findings and commits, then: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}") && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))")" ;;
+      next="the step's role fixes the open findings and commits, then: $nextround" ;;
     review_round_stale|cp3_stale_review)
-      next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}") && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))")" ;;
+      next="$nextround" ;;
     no_change_without_outputs)
-      next="commit the step's work, then: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}")" ;;
+      next="commit the step's work, then: $chk" ;;
     steps_incomplete)
-      next="finish the next step (commands/aid-run.md step loop), then: $(_fsm_cmd bash "$fsm" increment-step "$sf")" ;;
+      next="finish the next step (commands/aid-run.md step loop), then: $inc" ;;
     gates_no_generated_by)
-      next="$(_fsm_cmd bash "$fsm" advance-to-gates "$sf")" ;;
+      next="$adv" ;;
     plan_gate_profile_excluded)
-      next="widen the profile's include[] in execution.yaml gate_profiles (accepting the gap is a PM Decision card), then: $(_fsm_cmd bash "$fsm" advance-to-gates "$sf")" ;;
+      next="widen the profile's include[] in execution.yaml gate_profiles (accepting the gap is a PM Decision card), then: $adv" ;;
     gates_runner_exit_*)
-      next="the role that wrote the failing code fixes the gates named above, then: $(_fsm_cmd bash "$fsm" advance-to-gates "$sf")" ;;
+      next="the role that wrote the failing code fixes the gates named above, then: $adv" ;;
     contract_return_rejected)
-      next="re-dispatch the step with its packet $(_fsm_cmd "${_c_dir:-<step dir>}/contract.json") and record the new return, then: $(_fsm_cmd bash "$fsm" increment-step "$sf")" ;;
+      next="re-dispatch the step with its packet $(_fsm_cmd "${_c_dir:-<step dir>}/contract.json") and record the new return, then: $inc" ;;
     plan_manifest_missing|plan_branch_mismatch)
       next="start the EPIC through its plan (task branch and manifest entry), then init again: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" epic-start "${_pb_plan_id:-<plan>}" "${epic_id:-<epic>}" --run-id "${run_id:-<run>}")" ;;
     contract_return_missing|contract_return_not_done)
-      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent or hand over with a Blocked card), then: $(_fsm_cmd bash "$fsm" increment-step "$sf")" ;;
+      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent or hand over with a Blocked card), then: $inc" ;;
     missing_step_verify|verify_no_ac_checklist|verify_no_memory_used|verify_no_memory_written|step_verify_not_pass|verify_no_commit_ref)
-      next="write $(_fsm_cmd "$vf") (pipeline.md §Output verification), then: $(_fsm_cmd bash "$fsm" increment-step "$sf")" ;;
+      next="write $(_fsm_cmd "$vf") (pipeline.md §Output verification), then: $inc" ;;
     binding_wrong_commit|binding_plan_step_hash_mismatch|incomplete_step_binding)
-      next="rewrite the binding of $(_fsm_cmd "$vf") after the step commit (reviewed_commit = HEAD, plan_step_hash from the live plan.json — pipeline.md §Output verification), then: $(_fsm_cmd bash "$fsm" increment-step "$sf")" ;;
+      next="rewrite the binding of $(_fsm_cmd "$vf") after the step commit (reviewed_commit = HEAD, plan_step_hash from the live plan.json — pipeline.md §Output verification), then: $inc" ;;
     missing_lenses|done_advance_preconditions)
       next="correct what the lines above name, then run the same done-advance again: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-<from>}" "${to_phase:-<to>}" "$sf")" ;;
     *) return 1 ;;

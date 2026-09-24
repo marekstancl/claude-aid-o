@@ -258,14 +258,16 @@ _adjudicate_role() {
        && jq -e '(.severity == "blocker" or .severity == "major") and ((.behaviour_trace // []) | length == 0)' <<< "$f" >/dev/null; then
       reason=trace_missing
     fi
+    # The fingerprint anchors on the first citation that RESOLVES, not the first
+    # written; a finding kept only on form anchors on the first one written.
+    [[ -n "$first" ]] || first="$(jq -r '((.evidence | strings) // "") | split(";")[0] | gsub("^\\s+|\\s+$"; "")' <<< "$f")"
+    step="$(_third "$f")"
+    key="$(_claim_key "$(jq -r '.claim // ""' <<< "$f")")"
+    fp="$(fingerprint "$project_id" "$NS" "$step" "$first" "$key")"
+    # The next round is matched without the line: a fix that shifts lines must
+    # not turn an unresolved finding into a new one.
+    match="$(fingerprint "$project_id" "$NS" "$step" "${first%:*}" "$key")"
     if [[ -z "$reason" ]]; then
-      step="$(_third "$f")"
-      # the fingerprint anchors on the first citation that RESOLVES, not the first written
-      key="$(_claim_key "$(jq -r '.claim' <<< "$f")")"
-      fp="$(fingerprint "$project_id" "$NS" "$step" "$first" "$key")"
-      # The next round is matched without the line: a fix that shifts lines must
-      # not turn an unresolved finding into a new one.
-      match="$(fingerprint "$project_id" "$NS" "$step" "${first%:*}" "$key")"
       if [[ -n "${seen[$fp]:-}" ]]; then
         reason=duplicate
       else
@@ -276,10 +278,7 @@ _adjudicate_role() {
     if [[ -n "$reason" ]]; then
       jq -nc --arg r "$role" --arg id "$id" --arg why "$reason" '{role: $r, id: $id, reason: $why}' >> "${WORK}/rejected.jsonl"
       if [[ "$reason" != duplicate ]]; then
-        step="$(_third "$f")"; first="$(jq -r '((.evidence | strings) // "") | split(";")[0] | gsub("^\\s+|\\s+$"; "")' <<< "$f")"
-        key="$(_claim_key "$(jq -r '.claim // ""' <<< "$f")")"
-        jq -c --arg r "$role" --arg why "$reason" --arg fp "$(fingerprint "$project_id" "$NS" "$step" "$first" "$key")" \
-          --arg m "$(fingerprint "$project_id" "$NS" "$step" "${first%:*}" "$key")" \
+        jq -c --arg r "$role" --arg why "$reason" --arg fp "$fp" --arg m "$match" \
           '. + {role: $r, fingerprint: $fp, match: $m, form_invalid: $why}' <<< "$f" >> "${WORK}/accepted.jsonl"
       fi
     fi

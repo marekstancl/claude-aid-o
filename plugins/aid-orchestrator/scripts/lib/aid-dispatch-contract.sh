@@ -211,6 +211,13 @@ aid_dispatch_contract_extract() {
     || { echo "contract: the ${_AID_DCT_RETURN_FENCE} block in ${out} is not one JSON object" >&2; return 1; }
 }
 
+# aid_dispatch_repo_range_ok <repo> <base>..<head> — both ends are commits in
+# <repo>. The return validator and the step check ask the same question.
+aid_dispatch_repo_range_ok() {
+  [[ "$2" == *..* ]] && git -C "$1" rev-parse -q --verify "${2%%..*}^{commit}" >/dev/null 2>&1 \
+    && git -C "$1" rev-parse -q --verify "${2##*..}^{commit}" >/dev/null 2>&1
+}
+
 # _aid_dc_path_allowed <path> <allowed-json> <own_evidence_suffix> — bash glob
 # match, the same way scripts/gates/scope-check.sh decides. A step's own
 # evidence directory is always allowed: that is where its output is meant to go.
@@ -303,13 +310,15 @@ aid_dispatch_contract_validate() {
   # (deleted_files) of an expected artifact inside the allowed paths is the
   # step folding a file away, not a missing one (P100 Step 4); a deletion is a
   # change like any other, so it counts as declared and is scope-checked below.
-  local expected declared deleted a
+  local expected declared deleted a allowed evidence
   expected="$(jq -r '.expected_artifacts[]? // empty' "$c")"
   deleted="$(jq -r '.deleted_files[]? // empty' "$r")"
-  declared="$(jq -r '.changed_files[]?, .deleted_files[]? // empty' "$r")"
+  declared="$(jq -r '.changed_files[]? // empty' "$r")"$'\n'"$deleted"
+  allowed="$(aid_dispatch_contract_allowed "$c")"
+  evidence="steps/$(jq -r '.step_id // ""' "$c")"
   while IFS= read -r a; do
     [[ -n "$a" ]] || continue
-    grep -qxF -- "$a" <<< "$deleted" && _aid_dc_path_allowed "$a" "$(aid_dispatch_contract_allowed "$c")" "steps/$(jq -r '.step_id // ""' "$c")" && continue
+    [[ $'\n'"$deleted"$'\n' == *$'\n'"$a"$'\n'* ]] && _aid_dc_path_allowed "$a" "$allowed" "$evidence" && continue
     # An ABSOLUTE expected artifact is checked where it actually is, not glued
     # behind the tree root. A step whose output lives in another repository
     # (a plan may declare one deliberately) otherwise produced
@@ -324,13 +333,11 @@ aid_dispatch_contract_validate() {
 
   # Commits the step made in another repository (repo_commits, read by the step
   # check) must exist there: a range that does not resolve is refused, named.
-  local rc_repo rc_range sha
+  local rc_repo rc_range
   while IFS=$'\t' read -r rc_repo rc_range; do
     [[ -n "$rc_repo" ]] || continue
-    for sha in "${rc_range%%..*}" "${rc_range##*..}"; do
-      [[ "$rc_range" == *..* ]] && git -C "$rc_repo" rev-parse -q --verify "${sha}^{commit}" >/dev/null 2>&1 \
-        || { _add reasons "repo_commits names ${rc_range} in ${rc_repo}, and ${sha:-it} is not a commit there"; break; }
-    done
+    aid_dispatch_repo_range_ok "$rc_repo" "$rc_range" \
+      || _add reasons "repo_commits names ${rc_range} in ${rc_repo}, and it is not a <base>..<head> of commits there"
   done < <(jq -r '.repo_commits[]? | [(.repo // ""), (.range // "")] | @tsv' "$r" 2>/dev/null)
 
   # The disk's own list of changes, when there is a git tree to ask. A file
@@ -359,9 +366,7 @@ aid_dispatch_contract_validate() {
 
   # Scope, over the declared list AND the disk's: every file outside the
   # allowed paths is named.
-  local allowed evidence f
-  allowed="$(aid_dispatch_contract_allowed "$c")"
-  evidence="steps/$(jq -r '.step_id // ""' "$c")"
+  local f
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
     if [[ "$f" == *"/steps/step_"* ]] && ! _aid_dc_path_allowed "$f" '[]' "$evidence"; then
@@ -407,7 +412,7 @@ aid_dispatch_contract_commit() {
   # (<evidence>/<epic>/<run>/steps/<step>/contract.json); a contract kept
   # elsewhere can only be held to some task branch.
   local branch sid epic want; branch="$(git -C "$root" branch --show-current 2>/dev/null)"; sid="$(jq -r '.step_id // ""' "$c")"
-  epic="$(basename "$(dirname "$(dirname "$(dirname "$(dirname "$(realpath "$c")")")")")")"
+  epic="$(realpath "$c")"; epic="${epic%/*/steps/*}"; epic="${epic##*/}"
   want='task/*/main'; [[ "$epic" == E-* ]] && want="task/${epic}/main"
   # shellcheck disable=SC2053  # $want is a pattern only when the EPIC is unknown
   if [[ "$branch" != $want && "$branch" != "step/${sid}" ]]; then

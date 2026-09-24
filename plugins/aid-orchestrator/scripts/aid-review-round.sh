@@ -165,11 +165,9 @@ _focus() {
 # _is_generalist <role> — the role whose answer a round cannot do without.
 _is_generalist() { [[ "$1" == generalist_* || "$1" == *_generalist ]]; }
 
-# The findings a step round's verdict counts as open: a finding kept only on
-# form (form_invalid) is open until it is answered, like a disputed one.
-_OPEN_JQ='(.status | IN("open", "disputed", "routed", "carried", "form_invalid")) and (.severity == "blocker" or .severity == "major")'
-# _round_verdict <merged.json> — pass without an open blocker or major, fail otherwise.
-_round_verdict() { jq -r "if [.findings[] | select(${_OPEN_JQ})] | length == 0 then \"pass\" else \"fail\" end" "$1"; }
+# _round_verdict <merged.json> — pass without an open blocker or major
+# (AID_SR_OPEN_JQ, lib/aid-step-review-packet.sh), fail otherwise.
+_round_verdict() { jq -r "if [.findings[] | select(${AID_SR_OPEN_JQ})] | length == 0 then \"pass\" else \"fail\" end" "$1"; }
 
 # _override_rounds — the PM's recorded round count, or nothing.
 _override_rounds() { [[ -f "${BASE}/override.json" ]] && jq -r '.rounds // empty' "${BASE}/override.json" 2>/dev/null; }
@@ -205,7 +203,7 @@ _expected_roles() {
       # (routed and carried findings are still open to the reviewer: a PM
       # override after the last round asks about them again)
       # A delta round after a passed round has nothing open: every role is asked.
-      narrow="$(jq -r "[.findings[] | select(${_OPEN_JQ}) | .reported_by[]] | unique | .[]" "$prev")"
+      narrow="$(jq -r "[.findings[] | select(${AID_SR_OPEN_JQ}) | .reported_by[]] | unique | .[]" "$prev")"
       [[ -z "$narrow" ]] || roles="$(for r in $roles; do grep -qxF "$r" <<<"$narrow" && echo "$r"; done)"
     fi
   fi
@@ -885,8 +883,7 @@ cmd_finalize() {
 # card was written. An audit
 # trail, not a proof: a controller that forges the audit file is not stopped.
 _pm_replied_after() {
-  local audit="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}" g
-  local -a gens=(); for g in "$audit" "${audit}.1" "${audit}.2"; do [[ -r "$g" ]] && gens+=("$g"); done
+  local -a gens=(); mapfile -t gens < <(aid_hook_audit_files)
   (( ${#gens[@]} )) || return 1
   # ISO-8601 UTC strings sort as time; jq's fromdateiso8601 is off by the DST hour.
   # The rotated generations count too (aid-hook.sh rotates at 20 MB).

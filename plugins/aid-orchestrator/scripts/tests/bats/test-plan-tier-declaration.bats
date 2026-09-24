@@ -68,10 +68,10 @@ _generate() {
     --counter-yaml "$ROOT/epic-counter.yaml" 3>&-
 }
 
-@test "1: a NEW suite with no tier stops generation, naming the step" {
+@test "1: a NEW suite with no tier stops generation, naming the line" {
   _generate "$(_plan 'Test: `scripts/tests/bats/test-brand-new.bats` — what it proves')"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"step 1"* ]]
+  [[ "$output" == *"plan.md:17: ERROR"* ]]   # the lint inside generation names the line (P100: one rule, author and generator)
   [[ "$output" == *"declare its tier"* ]]
   [[ "$output" == *"test-brand-new.bats"* ]]
 }

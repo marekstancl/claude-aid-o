@@ -207,7 +207,7 @@ _return() {
   [ "$status" -eq 0 ]
   _return "{repo_commits: [{repo: \"$TEST_DIR/other\", range: \"$a..0123456789abcdef\"}]}"
   run aid_dispatch_contract_validate contract.json .aid-o/return.json .
-  [ "$status" -eq 1 ]; [[ "$output" == *"0123456789abcdef is not a commit there"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"$a..0123456789abcdef in $TEST_DIR/other, and it is not"* ]]
 }
 
 @test "contract: with an evidence root the packet carries the step's absolute evidence directory" {

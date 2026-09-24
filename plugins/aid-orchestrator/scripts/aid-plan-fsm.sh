@@ -167,6 +167,8 @@ source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancilla
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"   # P090 Step 2 — the ONE plan-timeline writer
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-permissions.sh" # P090 — the ONE autonomous_mode reader
+# shellcheck source=lib/aid-generation-ids.sh
+source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"   # aid_gen_plan_num — a plan id to its EPIC ids
 # P074 Step 6 — the SAME shared post-boundary helper aid-fsm.sh uses
 # (aid_active_boundary_sync): a direct `aid-plan-fsm.sh plan-close` /
 # `plan-rollback` (invocable without the aid-fsm.sh wrapper) performs
@@ -1669,7 +1671,7 @@ _pfsm_plan_start_compensate() {
 _pfsm_cleanup_leftovers() {
   local root="$1" plan_id="$2" ref="$3" out="$4" wt="" br line name steps
   local -a removed=() kept=()
-  steps=" $(cat "${root}/.aid-o/work/evidence/E-${plan_id#P}-"*/*/plan.json 2>/dev/null | jq -r '.steps[]?.id // empty' 2>/dev/null | sort -u | tr '\n' ' ') "
+  steps=" $(cat "${root}/.aid-o/work/evidence/E-$(aid_gen_plan_num "$plan_id")-"*/*/plan.json 2>/dev/null | jq -r '.steps[]?.id // empty' 2>/dev/null | sort -u | tr '\n' ' ') "
   while IFS= read -r line; do
     case "$line" in
       "worktree "*) wt="${line#worktree }"; br="" ;;
@@ -4875,14 +4877,14 @@ _pfsm_gate_reuse_rows() {
     local tree r at best_at="" plan_dir; plan_dir="$(dirname "$run_dir")"
     tree="$(git -C "$troot" rev-parse "${candidate}^{tree}" 2>/dev/null)" || { echo "$none"; return 0; }
     prev_report=""
-    for r in "$(dirname "$plan_dir")/E-$(basename "$plan_dir" | tr -d P)-"*/*/gates/gates_report.json; do
+    for r in "$(dirname "$plan_dir")/E-$(aid_gen_plan_num "$(basename "$plan_dir")")-"*/*/gates/gates_report.json; do
       [[ -f "$r" ]] || continue
       [[ "$(git -C "$troot" rev-parse "$(jq -r '.revision.head_sha // "none"' "$r" 2>/dev/null)^{tree}" 2>/dev/null)" == "$tree" ]] || continue
       at="$(jq -r '._generated_at // ""' "$r" 2>/dev/null)"
       [[ -z "$prev_report" || "$at" > "$best_at" ]] && { prev_report="$r"; best_at="$at"; }
     done
     [[ -n "$prev_report" ]] || { echo "$none"; return 0; }
-    prev_id="$(basename "$(dirname "$(dirname "$(dirname "$prev_report")")")")/$(basename "$(dirname "$(dirname "$prev_report")")")"
+    prev_id="${prev_report%/gates/gates_report.json}"; prev_id="$(basename "$(dirname "$prev_id")")/${prev_id##*/}"
     from_epic=1
   fi
   local prev_candidate
