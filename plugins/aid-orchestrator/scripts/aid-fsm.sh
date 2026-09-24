@@ -5459,9 +5459,10 @@ cmd_amend_scope() {
   for p in "${add[@]}"; do
     [[ -n "$p" && "$p" != *".."* ]] || die "amend-scope: '${p}' must be a path without .."
     if [[ "$p" == /* ]]; then
-      local d ok=0
+      local d ok=0 rp; rp="$(realpath -m -- "$p")"
       while IFS= read -r d; do
-        [[ -n "$d" && ( "$p" == "$d" || "$p" == "${d%/}/"* ) ]] && { ok=1; break; }
+        [[ -n "$d" ]] || continue; d="$(realpath -m -- "$d")"
+        [[ "$rp" == "$d" || "$rp" == "${d%/}/"* ]] && { ok=1; break; }
       done <<< "$declared_abs"
       (( ok )) || die "amend-scope: '${p}' is outside the tree and no step of the plan declares it — add it to the step's Files in the plan (a PM decision), then regenerate"
     fi

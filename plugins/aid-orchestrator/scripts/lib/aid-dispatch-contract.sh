@@ -322,6 +322,17 @@ aid_dispatch_contract_validate() {
   done <<< "$expected"
   [[ "$missing" != "[]" ]] && _add reasons "expected artifacts are missing on disk: $(jq -r 'join(", ")' <<< "$missing")"
 
+  # Commits the step made in another repository (repo_commits, read by the step
+  # check) must exist there: a range that does not resolve is refused, named.
+  local rc_repo rc_range sha
+  while IFS=$'\t' read -r rc_repo rc_range; do
+    [[ -n "$rc_repo" ]] || continue
+    for sha in "${rc_range%%..*}" "${rc_range##*..}"; do
+      [[ "$rc_range" == *..* ]] && git -C "$rc_repo" rev-parse -q --verify "${sha}^{commit}" >/dev/null 2>&1 \
+        || { _add reasons "repo_commits names ${rc_range} in ${rc_repo}, and ${sha:-it} is not a commit there"; break; }
+    done
+  done < <(jq -r '.repo_commits[]? | [(.repo // ""), (.range // "")] | @tsv' "$r" 2>/dev/null)
+
   # The disk's own list of changes, when there is a git tree to ask. A file
   # changed but not declared is refused: the declaration is what the commit
   # stages, so an omission would leave an edit behind unstaged and unseen.
@@ -392,8 +403,14 @@ aid_dispatch_contract_commit() {
   # A step commit lands on the run's task branch, or on its own step/<id> branch
   # in a wave — never on plan/*, main or a detached HEAD (ACTA 31. 8.: a step
   # commit landed on plan/P020).
-  local branch sid; branch="$(git -C "$root" branch --show-current 2>/dev/null)"; sid="$(jq -r '.step_id // ""' "$c")"
-  if [[ "$branch" != task/*/main && "$branch" != "step/${sid}" ]]; then
+  # The run's EPIC is the evidence directory the contract sits in
+  # (<evidence>/<epic>/<run>/steps/<step>/contract.json); a contract kept
+  # elsewhere can only be held to some task branch.
+  local branch sid epic want; branch="$(git -C "$root" branch --show-current 2>/dev/null)"; sid="$(jq -r '.step_id // ""' "$c")"
+  epic="$(basename "$(dirname "$(dirname "$(dirname "$(dirname "$(realpath "$c")")")")")")"
+  want='task/*/main'; [[ "$epic" == E-* ]] && want="task/${epic}/main"
+  # shellcheck disable=SC2053  # $want is a pattern only when the EPIC is unknown
+  if [[ "$branch" != $want && "$branch" != "step/${sid}" ]]; then
     echo "contract: ${root} is on '${branch:-detached HEAD}', not the run's task branch — nothing is committed; switch back: git -C ${root} checkout task/<epic>/main" >&2
     return 1
   fi

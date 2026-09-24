@@ -133,7 +133,7 @@ fi
 # step: the step's return names its commits there (repo_commits), and a
 # declared repository the return names no commits in is reported, never skipped.
 OTHER_MISSING=()
-if [[ "$CHECKPOINT" == cp2 ]] && (( ! WORKTREE )) && [[ -f "$PLAN_JSON" ]]; then
+if [[ "$CHECKPOINT" == cp2 && -f "$PLAN_JSON" ]]; then
   ret="$EVID/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON")/return.json"
   declare -A seen_repo=()
   while IFS= read -r ap; do

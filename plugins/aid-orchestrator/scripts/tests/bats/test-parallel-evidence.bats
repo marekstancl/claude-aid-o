@@ -74,6 +74,13 @@ _agent() {
   [ -z "$(git status --porcelain --untracked-files=no)" ]
 }
 
+@test "evidence: a step commit on another EPIC's task branch is refused" {
+  git checkout -q -b task/E-other/main
+  d0="$(_agent 0 a.txt)"
+  run aid_dispatch_contract_commit . "$d0/contract.json" "$d0/return.json" "step 1: a"
+  [ "$status" -eq 1 ]; [[ "$output" == *"not the run's task branch"*"task/<epic>/main"* ]]
+}
+
 @test "evidence: a step that changed nothing makes no commit, and says so" {
   : > a.txt; git add a.txt; git commit -q -m "a.txt already there"   # the promised artifact exists
   d0="$(bash "$FSM" step-evidence-dir "$STATE" 0)"

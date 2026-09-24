@@ -199,6 +199,17 @@ _return() {
   [ "$status" -eq 1 ]; [[ "$output" == *"outside the allowed paths: other/gone.txt"* ]]
 }
 
+@test "contract: a repo_commits range that does not resolve in its repository is refused, naming it" {
+  git init -q "$TEST_DIR/other"; git -C "$TEST_DIR/other" -c user.email=t@t -c user.name=t commit -q --allow-empty -m a
+  local a; a="$(git -C "$TEST_DIR/other" rev-parse HEAD)"
+  _return "{repo_commits: [{repo: \"$TEST_DIR/other\", range: \"$a..$a\"}]}"
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json .
+  [ "$status" -eq 0 ]
+  _return "{repo_commits: [{repo: \"$TEST_DIR/other\", range: \"$a..0123456789abcdef\"}]}"
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json .
+  [ "$status" -eq 1 ]; [[ "$output" == *"0123456789abcdef is not a commit there"* ]]
+}
+
 @test "contract: with an evidence root the packet carries the step's absolute evidence directory" {
   aid_dispatch_contract_build plan.json 0 c-abs.json "$TEST_DIR/.aid-o/work/evidence/E/R"
   [ "$(jq -r .evidence_dir c-abs.json)" = "$TEST_DIR/.aid-o/work/evidence/E/R/steps/step_1_backend" ]
