@@ -88,7 +88,7 @@ _answer() {
 }
 # _round [claims filter] — the whole-plan round: every role that was not carried answers
 _round() {
-  local args=(--checkpoint cp7 --evidence-dir "$(_run_dir)" --project-root "$R" --round "${N:-1}") role tokens=()
+  local args=(--checkpoint cp7 --evidence-dir "$(_run_dir)" --project-root "${PLAN_TREE:-$R}" --round "${N:-1}") role tokens=()
   "$ROUND" prepare "${args[@]}" >/dev/null || return 1
   for role in $(jq -r '.reviewers_expected - ((.carried_from // {}) | keys) | .[]' "$(_run_dir)/cp7/round-${N:-1}/round.json"); do
     if [[ "$role" == final_claims ]]; then _answer "$role" "${1:-.}"; else _answer "$role"; fi
@@ -126,6 +126,19 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   grep -q "Close:\*\* 1 attempt" "$(_run_dir)/pm-summary.md"
   # deciding twice changes nothing
   _stage decide; [ "$status" -eq 0 ]; [[ "$output" == *"already decided"* ]]
+}
+
+@test "the clean-tree check judges the plan's worktree: another window's edit in the primary does not block decide" {
+  unset AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB
+  _project
+  git -C "$R" checkout -q main
+  git -C "$R" worktree add -q "$R/.aid-worktrees/plan-${PLAN_ID}" "plan/${PLAN_ID}"
+  plan_state_set_worktree_path "$PLAN_ID" "$R/.aid-worktrees/plan-${PLAN_ID}"
+  PLAN_TREE="$R/.aid-worktrees/plan-${PLAN_ID}"   # the round reads the tree the plan lives in
+  echo "another window's edit" >> "$R/.aid-o/plans/${PLAN_ID}-x.md"   # tracked, not ancillary
+  _close_up_to_decide
+  _stage decide; echo "$output"
+  [[ ",$(_blockers)," != *",verification_report,"* ]]
 }
 
 @test "open blocker: refused naming the finding; the plan stays in PLAN_REVIEW with the page rendered" {

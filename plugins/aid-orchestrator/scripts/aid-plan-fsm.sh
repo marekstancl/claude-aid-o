@@ -5485,7 +5485,8 @@ plan_final_review_equivalent() {
     echo "equivalence unavailable: cannot create a temporary file to read the worktree status" >&2
     return 2
   }
-  git -C "$root" status --porcelain -z --untracked-files=no > "$status_f" 2>/dev/null || src=$?
+  # the plan's own tree: the state root is the primary, where other work may sit
+  git -C "$(_pfsm_plan_tree_root "$root" "$plan_id")" status --porcelain -z --untracked-files=no > "$status_f" 2>/dev/null || src=$?
   if [[ "$src" -ne 0 ]]; then
     rm -f "$status_f"
     echo "equivalence unavailable: git status failed (exit ${src}) — an unreadable worktree is never treated as clean" >&2
@@ -6236,7 +6237,7 @@ _pfsm_finalize_decide() {
   aout="$(AID_PROJECT_ROOT="$root" bash "${SCRIPT_DIR}/aid-release-policy.sh" \
     --plan "$plan_id" --run-id "$run_id" --evidence-dir "$run_dir_rel" \
     --candidate-sha "$candidate" --target-ref "$target_branch" --target-head-sha "$target_head" \
-    --out "$decision" 2>&1)" || arc=$?
+    --tree "$troot" --out "$decision" 2>&1)" || arc=$?
   if [[ "$arc" -ne 0 ]] || ! jq -e '.release_decision | type == "object"' "$decision" >/dev/null 2>&1; then
     echo "PRECONDITION FAIL: plan-finalize --stage decide: the release aggregate exited ${arc} for ${plan_id} and recorded no decision. Output: ${aout}" >&2
     return 1

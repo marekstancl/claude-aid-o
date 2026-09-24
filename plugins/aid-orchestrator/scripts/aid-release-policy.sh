@@ -473,7 +473,7 @@ run_verification_input() {
   # (the healthy-fixture case of test-release-policy.bats has been red for
   # exactly this reason).
   AID_PROJECT_ROOT="$PROJECT_ROOT" bash "$EVIDENCE_VERIFY" "$_verify_subject" "$RUN_ID" \
-    --out "$vr_tmp" --at-head --tree "$PROJECT_ROOT" "${_candidate[@]}" >/dev/null 2>&1 || vr_exit=$?
+    --out "$vr_tmp" --at-head --tree "$TREE_ROOT" "${_candidate[@]}" >/dev/null 2>&1 || vr_exit=$?
 
   case "$vr_exit" in
     2|10|20)
@@ -511,15 +511,18 @@ run_verification_input() {
 # ---------------------------------------------------------------------------
 _usage_both() {
   echo "Usage (EPIC mode): aid-release-policy.sh <epic_id> <run_id> [--out <path>]" >&2
-  echo "Usage (PLAN mode): aid-release-policy.sh --plan <plan_id> --run-id <run_id> --evidence-dir <path> --candidate-sha <sha> --target-ref <ref> --target-head-sha <sha> [--out <path>]" >&2
+  echo "Usage (PLAN mode): aid-release-policy.sh --plan <plan_id> --run-id <run_id> --evidence-dir <path> --candidate-sha <sha> --target-ref <ref> --target-head-sha <sha> [--tree <plan worktree>] [--out <path>]" >&2
 }
 
 main() {
   # --- Arg parsing (no eval) ---
   local out_path="" _positional=()
-  local plan_opt="" run_id_opt="" evidence_dir_opt="" candidate_opt="" target_ref_opt="" target_head_opt=""
+  local plan_opt="" run_id_opt="" evidence_dir_opt="" candidate_opt="" target_ref_opt="" target_head_opt="" tree_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --tree)
+        [[ $# -lt 2 ]] && { echo "aid-release-policy: --tree requires a path" >&2; _usage_both; exit 2; }
+        tree_opt="$2"; shift 2 ;;
       --out)
         [[ $# -lt 2 ]] && { echo "aid-release-policy: --out requires a path" >&2; exit 2; }
         out_path="$2"; shift 2 ;;
@@ -561,6 +564,9 @@ main() {
   else
     PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || PROJECT_ROOT="."
   fi
+  # The tree whose cleanliness the verifier judges: the plan's worktree when the
+  # caller names it (the state root is the primary, where other work may sit).
+  TREE_ROOT="${tree_opt:-$PROJECT_ROOT}"
 
   if [[ "$MODE" == "plan" ]]; then
     if [[ "${#_positional[@]}" -ne 0 ]]; then
