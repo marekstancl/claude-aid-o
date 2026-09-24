@@ -70,6 +70,7 @@ Plan and EPIC IDs are allocated ONLY through the locked allocator subcommand:
 ```bash
 new_plan_id=$(bash {plugin_path}/scripts/aid-fsm.sh alloc plan-id)   # prints e.g. P075
 new_epic_id=$(bash {plugin_path}/scripts/aid-fsm.sh alloc epic-id)   # prints e.g. E-001
+new_imp_id=$(bash {plugin_path}/scripts/aid-fsm.sh alloc imp-id)     # prints e.g. IMP-664 (a backlog row)
 ```
 
 The allocator takes `counter.yaml.lock` (sidecar flock, 5s timeout, fail closed),

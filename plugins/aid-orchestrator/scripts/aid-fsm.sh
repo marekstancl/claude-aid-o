@@ -7161,8 +7161,9 @@ cmd_alloc() {
   case "$kind" in
     plan-id) key="plan"; prefix="P" ;;
     epic-id) key="epic"; prefix="E-" ;;
+    imp-id)  key="imp";  prefix="IMP-" ;;   # a backlog item (.aid-o/work/backlog.md)
     *)
-      echo "Usage: aid-fsm.sh alloc plan-id | alloc epic-id" >&2
+      echo "Usage: aid-fsm.sh alloc plan-id | alloc epic-id | alloc imp-id" >&2
       exit 1 ;;
   esac
 
@@ -7200,6 +7201,7 @@ cmd_alloc() {
 # allocator, which changes the number and never the note.
 plan: 0
 epic: 0
+imp: 0
 ' > "$counter" || {
       echo "ERROR: alloc ${kind}: could not create ${counter}" >&2
       exit 1
@@ -7218,6 +7220,11 @@ epic: 0
 
   local line current
   line="$(grep -m1 -E "^${key}:" "$counter" || true)"
+  if [[ -z "$line" && "$kind" == imp-id ]]; then
+    # Counters written before 2.107.0 have no imp: line; the backlog scan below
+    # is what keeps the first number clear of the ones already handed out.
+    printf 'imp: 0\n' >> "$counter"; line="imp: 0"
+  fi
   if [[ -z "$line" ]]; then
     aid_lock_release "$fd"
     echo "ERROR: alloc ${kind}: no '${key}:' line in ${counter} — run /aid-init first" >&2
@@ -7256,6 +7263,18 @@ epic: 0
       (( _taken )) && { next=$((next + 1)); _skipped=$((_skipped + 1)); }
     done
     (( _skipped > 0 )) && echo "NOTE: alloc ${kind}: skipped ${_skipped} id(s) a file in ${_dirs[0]} or its archive/ already carries" >&2
+  fi
+  if [[ "$kind" == imp-id ]]; then
+    # IMP numbers live in the backlog's text, not in file names: never hand out
+    # one at or below the highest the backlog already names (hand-picked
+    # numbers collided three times in September 2026).
+    local _hi
+    _hi="$(grep -rhoE 'IMP-[0-9]+' "${root}/.aid-o/work/backlog.md" "${root}/.aid-o/work/backlog" 2>/dev/null \
+           | sed 's/IMP-//; s/^0*//' | sort -n | tail -1 || true)"   # no backlog/ dir is not an error
+    if [[ -n "$_hi" ]] && (( _hi >= next )); then
+      echo "NOTE: alloc imp-id: the backlog already names IMP-${_hi}; continuing after it" >&2
+      next=$((_hi + 1))
+    fi
   fi
 
   # Atomic write preserving every comment byte: sed rewrites ONLY the digits

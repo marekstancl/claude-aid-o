@@ -113,6 +113,13 @@ _plan() { # <file> <strict|legacy> [dep2] [files1...]
   _plan p.md strict '- Depends on: Step 1' '- Modify: `src/a.py` — edit, and remove `src/ghost.py`'
   run "$CHECK" p.md; [[ "$output" == *"WARN  B3"*"src/ghost.py"* ]]
 }
+@test "plan-check B6: a T id a recent commit claims warns; a cited IMP id (AID allocates those) does not" {
+  _plan p.md strict; printf '\nThis closes T-5 and IMP-5.\n' >> p.md
+  git -C "$ROOT" commit -q --allow-empty -m "backlog: T-5 and IMP-5 added"
+  run "$CHECK" p.md
+  [[ "$output" == *"WARN  B6"*"T-5 already appears"* ]]
+  [[ "$output" != *"IMP-5 already appears"* ]]
+}
 @test "plan-check B4: a Resources entry claimed as existing but absent blocks; one marked new does not" {
   _plan p.md strict; sed -i 's/`existing_helper` (`src\/a.py:1`)/`existing_helper` (`src\/a.py:1`); `phantom_helper` (`src\/a.py:9`)/' p.md
   run "$CHECK" p.md; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B4"*phantom_helper* ]]; [[ "$output" != *NEW_FLAG* ]]

@@ -264,7 +264,9 @@ pořád otevřený. Poslední roztřídění: `docs/plans/plugin-issues-triage-2
    tvar sběrač pozná. Bod, který má počkat, zůstává bez značky (je otevřený).
    Soubor projektu je jeho záznam, nikdy se nemaže.
 5. Designové body, které PM schválil odložit, dostanou řádek `IMP-NNN`
-   v `.aid-o/work/backlog.md` s odkazem na projekt a číslo bodu.
+   v `.aid-o/work/backlog.md` s odkazem na projekt a číslo bodu. Číslo dá
+   `bash plugins/aid-orchestrator/scripts/aid-fsm.sh alloc imp-id` (se zámkem;
+   ručně vybraná čísla se ve dvou oknech srazila).
 
 ## Conventions
 

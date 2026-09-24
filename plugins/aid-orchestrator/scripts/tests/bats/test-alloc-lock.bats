@@ -85,6 +85,18 @@ _norm_counter() {
   grep -q '^epic: 1' "$TEST_TMPDIR/repo/.aid-o/config/counter.yaml"
 }
 
+@test "alloc imp-id: a counter without an imp: line starts after the highest IMP the backlog names, then counts on" {
+  _mk_repo "$TEST_TMPDIR/repo"
+  mkdir -p "$TEST_TMPDIR/repo/.aid-o/work"
+  printf '| IMP-651 | x |\n| IMP-663 | y |\n' > "$TEST_TMPDIR/repo/.aid-o/work/backlog.md"
+  ! grep -q '^imp:' "$TEST_TMPDIR/repo/.aid-o/config/counter.yaml"
+  run bash -c "cd '$TEST_TMPDIR/repo' && '$FSM' alloc imp-id 2>/dev/null" 3>&-
+  [ "$status" -eq 0 ]; [ "$output" = "IMP-664" ]
+  grep -q '^imp: 664' "$TEST_TMPDIR/repo/.aid-o/config/counter.yaml"
+  run bash -c "cd '$TEST_TMPDIR/repo' && '$FSM' alloc imp-id 2>/dev/null" 3>&-
+  [ "$output" = "IMP-665" ]
+}
+
 @test "20 PARALLEL alloc plan-id invocations yield 20 distinct sequential IDs (no duplicates, no gaps)" {
   _mk_repo "$TEST_TMPDIR/repo"
   cd "$TEST_TMPDIR/repo"
