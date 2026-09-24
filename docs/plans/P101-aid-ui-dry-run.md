@@ -82,4 +82,4 @@ Adresář `/opt/eco/projects/aid-orchestrator/.aid-o/work/evidence/E-101-2_2/R-E
 - `brand.pdf` (14 stran, první běh), `brand-fixed.pdf` (10 stran, po opravě)
 - `f1-question.png`, `f1-after-click.png` - stránka směru přes VPN adresu a po kliku
 
-Oprava: necommitnutý diff ve worktree `plan-P101` (`aid-ui-serve.sh`, `aid-ui-state.sh`, `SKILL.md`, `base.css`, `steps/2-references.md`, `3-direction.md`, `4-build.md` + bats testy).
+Oprava: commity `9d46d3a7..1c5b24d9` na větvi `task/E-101-2_2/main` (`aid-ui-serve.sh`, `aid-ui-state.sh`, `SKILL.md`, `base.css`, `steps/2-references.md`, `3-direction.md`, `4-build.md` + bats testy).
