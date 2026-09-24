@@ -29,6 +29,18 @@ Oprava: 📝 text / drobnost (do 15 min), 🔧 malá změna kódu (do hodiny), �
 | 14 | Pre-push nepozná `chore(release):` | WAN | 📝 | u projektů bez `versioning` přijmout `*(release):` (`defaults/hooks/pre-push:314`) |
 | 22 | Staré pracovní kopie v agents | úklid | 📝 | smazat `brainstorm-P002`, `brainstorm-P004`, `plan-P003` (čisté, v main); `plan-P008` nechat |
 
+### Stav 24. 9. večer: všech 11 bodů + 2A opraveno (commit 43fe23fc), NEVYDÁNO
+
+Zadání ke každému bodu ověřil proti kódu nezávislý Claude; jeho úpravy jsou v kódu:
+- 17: i `increment-step` se přesměruje do worktree plánu, jinak by se zacyklil na `step_check_stale`. Nastavení revize se čte z hlavní kopie. Větev, která už neexistuje, zůstane u cwd.
+- 1: opraven i návod `skills/plan-writing.md`, který tvrdil, že jednofázový plán řádek EPIC nepotřebuje. Parser přeskakuje bloky kódu.
+- 10: „accepted" znamená, že PM nález zamítl → výpis říká „dismissed by the PM (dispute accepted)". Nález se nepočítá do výtěžku revizora.
+- 14: jen `chore(release):`. `fix(release):` zůstává oprava.
+- 12: přidán i `test-evidence-verify.sh`.
+- 5: počet se bere z `fallback_reason` v measurement.json.
+
+Navíc: `test-gates-hygiene.sh` byl červený od P099 (soubor ztratil štítek „WHY THIS FILE EXISTS"), štítek je vrácen.
+
 ## Do backlogu (střední přínos, jednorázová hlášení)
 
 | # | IMP | Co |
