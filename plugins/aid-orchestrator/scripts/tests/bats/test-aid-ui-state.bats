@@ -91,6 +91,27 @@ await() { run "$SCRIPT" await-direction "$PROJ" --imp "$IMP" --key k1 --page-url
   [[ "$output" == *"http://10.20.20.22:3915/?r=2"* && "$output" == *k2* ]]
 }
 
+@test "recorded direction plus a new round answered reroll: require-direction and step 4 refuse" {
+  STUB_OUT='ANSWER: {"optionId":"a"}'
+  await
+  rm -f "$BATS_TEST_TMPDIR/calls"
+  STUB_OUT='ANSWER: {"optionId":"reroll","steer":""}'
+  await
+  [ "$status" -eq 3 ]
+  [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
+  run "$SCRIPT" require-direction "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"http://10.20.20.22:3915/"* ]]
+  run "$SCRIPT" step "$PROJ" 4
+  [ "$status" -eq 1 ]
+  STUB_OUT='ANSWER: {"optionId":"b"}'
+  await
+  [ "$status" -eq 0 ]
+  [ "$(jq .direction_pending "$STATE")" = null ]
+  run "$SCRIPT" require-direction "$PROJ"
+  [ "$status" -eq 0 ]
+}
+
 @test "no verb records a direction from a caller-supplied file" {
   echo '{"optionId":"a"}' > "$BATS_TEST_TMPDIR/fake.json"
   run "$SCRIPT" set "$PROJ" direction '{"option_id":"a"}'

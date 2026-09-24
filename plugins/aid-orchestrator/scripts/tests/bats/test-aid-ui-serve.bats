@@ -8,9 +8,12 @@ setup() {
   SERVE="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/aid-ui-serve.sh"
   export AID_UI_HOST=127.0.0.1 AID_UI_FORWARD_PORT=39915 AID_UI_BRAND_PORT=39916
   export AID_UI_JOBS_DIR="$BATS_TEST_TMPDIR/jobs" AID_UI_PROJECT="$BATS_TEST_TMPDIR"
+  export AID_UI_FORWARD_PROC=http.server   # the test's stand-in for Impeccable
   FOREIGN_PIDS=()
-  mkdir -p "$BATS_TEST_TMPDIR/brand" "$BATS_TEST_TMPDIR/page"
+  mkdir -p "$BATS_TEST_TMPDIR/brand" "$BATS_TEST_TMPDIR/brand2" "$BATS_TEST_TMPDIR/page"
   echo brand-ok > "$BATS_TEST_TMPDIR/brand/index.html"
+  echo brand2-ok > "$BATS_TEST_TMPDIR/brand2/index.html"
+  echo '{}' | tee "$BATS_TEST_TMPDIR/brand/state.json" > "$BATS_TEST_TMPDIR/brand2/state.json"
   echo page-ok > "$BATS_TEST_TMPDIR/page/index.html"
 }
 
@@ -96,6 +99,30 @@ get() { curl -sf --max-time 3 "http://127.0.0.1:$1/"; }
   [ "$status" -eq 0 ]
   kill -0 "${FOREIGN_PIDS[0]}"
   [ "$(get 39916)" = page-ok ]
+}
+
+@test "forward to a port that is not Impeccable: exit 2, nothing exposed" {
+  foreign_server 39917 "$BATS_TEST_TMPDIR/page"
+  AID_UI_FORWARD_PROC=impeccable run "$SERVE" forward 39917
+  [ "$status" -eq 2 ]
+  [[ "$output" == ERROR:*39917* ]]
+  run get 39915; [ "$status" -ne 0 ]
+  run "$SERVE" forward 39918
+  [ "$status" -eq 2 ]
+}
+
+@test "brand of a directory that is not a brand page: exit 2, nothing served" {
+  run "$SERVE" brand "$BATS_TEST_TMPDIR/page"
+  [ "$status" -eq 2 ]
+  [[ "$output" == ERROR:* ]]
+  run get 39916; [ "$status" -ne 0 ]
+}
+
+@test "brand of another directory while one is served: restarts on the new one" {
+  "$SERVE" brand "$BATS_TEST_TMPDIR/brand"
+  run "$SERVE" brand "$BATS_TEST_TMPDIR/brand2"
+  [ "$status" -eq 0 ]
+  [ "$(get 39916)" = brand2-ok ]
 }
 
 @test "stop without a role exits 2" {

@@ -9,7 +9,7 @@
 #   spacing.<n>           -> --space-<n>
 # Everything else (components, unknown keys) is ignored.
 #
-# Exit: 0 written; 1 no/invalid frontmatter or no tokens (<out.css> untouched); 2 usage.
+# Exit: 0 written; 1 no/invalid frontmatter, no tokens or an unsafe token (<out.css> untouched); 2 usage.
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
@@ -29,15 +29,19 @@ fm=$(awk 'NR==1 { if ($0 != "---") exit 3; next } $0 == "---" { closed=1; exit }
 json=$(printf '%s\n' "$fm" | yq -o=json '.' 2>/dev/null) || fail "invalid YAML frontmatter"
 
 css=$(printf '%s\n' "$json" | jq -r '
-  def group($g; $p): (.[$g] // {}) | to_entries[] | "  --\($p)-\(.key): \(.value);";
-  group("colors"; "color"),
-  ((.typography // {}) | to_entries[] | .key as $role | .value | to_entries[]
-    | select(.key | IN("fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing"))
-    | "  --font-\($role)-\(.key | sub("^font"; "") | gsub("(?<c>[A-Z])"; "-\(.c)") | ltrimstr("-") | ascii_downcase): \(.value);"),
-  group("rounded"; "radius"),
-  group("spacing"; "space")
+  def group($g; $p): (.[$g] // {}) | to_entries[] | {n: "\($p)-\(.key)", v: "\(.value)"};
+  [ group("colors"; "color"),
+    ((.typography // {}) | to_entries[] | .key as $role | .value | to_entries[]
+      | select(.key | IN("fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing"))
+      | {n: "font-\($role)-\(.key | sub("^font"; "") | gsub("(?<c>[A-Z])"; "-\(.c)") | ltrimstr("-") | ascii_downcase)", v: "\(.value)"}),
+    group("rounded"; "radius"),
+    group("spacing"; "space") ] as $t
+  # A name or value that could break out of its declaration (CSS injection) refuses the whole file.
+  | ([$t[] | select((.n | test("^[A-Za-z0-9_-]+$") | not) or (.v | test("[;{}<]|@import|url\\("; "i")))] | .[0]) as $bad
+  | if $bad then "BAD\t--\($bad.n)" else ($t[] | "  --\(.n): \(.v);") end
 ' 2>/dev/null) || fail "token groups are not key/value maps"
 
+[[ "$css" != BAD$'\t'* ]] || fail "unsafe token ${css#BAD$'\t'} (name must be [A-Za-z0-9_-], value must not contain ; { } < @import url()"
 [ -n "$css" ] || fail "no tokens (colors, typography, rounded, spacing)"
 
 tmp=$(mktemp "$out.XXXXXX") || fail "cannot write next to $out"

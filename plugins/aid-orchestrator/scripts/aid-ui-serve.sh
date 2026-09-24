@@ -4,8 +4,16 @@
 # reachable from the PM's laptop over the VPN.
 #
 #   forward <local-port>   socat AID_UI_HOST:AID_UI_FORWARD_PORT -> 127.0.0.1:<local-port>
+#                          only when the process listening on <local-port> is
+#                          Impeccable (its command line contains
+#                          $AID_UI_FORWARD_PROC, default `impeccable`; tests point
+#                          it at their stand-in). Guards against exposing an
+#                          unrelated local service on the VPN; ceiling: any
+#                          process whose command line contains that word passes.
 #   brand <dir>            python3 -m http.server on AID_UI_HOST:AID_UI_BRAND_PORT
-#                          (idempotent: alive and answering -> print URL, exit 0)
+#                          only for a brand page dir (has state.json and index.html);
+#                          idempotent: our job alive, answering and serving the
+#                          same (realpath) dir -> print URL, exit 0; else restart.
 #   stop <forward|brand>   cancel that role's job; no job of ours -> exit 0
 #
 # Both servers run as `aid-job.sh` jobs (the plugin's one process owner), so a
@@ -18,7 +26,7 @@
 # <project>/.aid-ui/jobs.
 # Env: AID_UI_HOST (10.20.20.22), AID_UI_FORWARD_PORT (3915), AID_UI_BRAND_PORT (3916).
 # Output: URL: <url> and JOB: <id>.
-# Exit: 0 ok, 1 port in use / start failure, 2 usage.
+# Exit: 0 ok, 1 port in use / start failure, 2 usage or refused target.
 # =============================================================================
 set -euo pipefail
 
@@ -26,12 +34,14 @@ JOB_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/aid-job.sh"
 HOST="${AID_UI_HOST:-10.20.20.22}"
 FWD_PORT="${AID_UI_FORWARD_PORT:-3915}"
 BRAND_PORT="${AID_UI_BRAND_PORT:-3916}"
+FWD_PROC="${AID_UI_FORWARD_PROC:-impeccable}"
 PROJECT="${AID_UI_PROJECT:-$PWD}"
 JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
 DEADLINE=28800   # 8 h, integer seconds as `aid-job.sh run --deadline` requires
 
 usage() { echo "usage: aid-ui-serve.sh forward <local-port> | brand <dir> | stop <forward|brand>" >&2; exit 2; }
 die() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 1; }
+refuse() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 2; }
 
 port_of() { [[ "$1" == forward ]] && echo "$FWD_PORT" || echo "$BRAND_PORT"; }
 job_id() { echo "aid-ui-$1-$(port_of "$1")"; }
@@ -78,15 +88,23 @@ start() {   # start <role> <cmd...>
 case "$1" in
   forward)
     [[ "$2" =~ ^[0-9]+$ ]] || usage
+    pids="$(ss -ltnpH "sport = :$2" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u || true)"
+    [[ -n "$pids" ]] || refuse "nothing of ours listens on 127.0.0.1:$2; forward only exposes Impeccable's page"
+    for p in $pids; do
+      cmdline="$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null || true)"
+      [[ "$cmdline" == *"$FWD_PROC"* ]] || refuse "port $2 is not Impeccable's page (pid $p: $cmdline); refusing to expose it"
+    done
     start forward socat "TCP-LISTEN:$FWD_PORT,bind=$HOST,reuseaddr,fork" "TCP:127.0.0.1:$2"
     ;;
   brand)
-    [[ -d "$2" ]] || usage
+    [[ -f "$2/state.json" && -f "$2/index.html" ]] \
+      || refuse "$2 is not a brand page (needs state.json and index.html); refusing to serve it"
+    dir="$(realpath "$2")"
     id="$(job_id brand)"
-    if alive "$id" && listening "$BRAND_PORT"; then
+    if alive "$id" && listening "$BRAND_PORT" && [[ "$(jq -r '.command[-1]' "$JOBS/$id/job.json")" == "$dir" ]]; then
       echo "URL: http://$HOST:$BRAND_PORT/"; echo "JOB: $id"; exit 0
     fi
-    start brand python3 -m http.server "$BRAND_PORT" --bind "$HOST" --directory "$(cd "$2" && pwd)"
+    start brand python3 -m http.server "$BRAND_PORT" --bind "$HOST" --directory "$dir"
     ;;
   stop)
     [[ "$2" == forward || "$2" == brand ]] || usage

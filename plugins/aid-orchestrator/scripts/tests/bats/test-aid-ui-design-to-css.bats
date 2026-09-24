@@ -47,3 +47,18 @@ setup() {
   run "$SCRIPT"
   [ "$status" -eq 2 ]
 }
+
+@test "unsafe token name or value: exit 1 naming it, tokens.css untouched" {
+  printf ':root {\n  --color-old: #000;\n}\n' > "$OUT"
+  cp "$OUT" "$BATS_TEST_TMPDIR/before.css"
+  printf -- '---\ncolors:\n  ok: "#fff"\n  evil: "red; } body { background: url(http://x/y)"\n---\n' > "$BATS_TEST_TMPDIR/v.md"
+  run "$SCRIPT" "$BATS_TEST_TMPDIR/v.md" "$OUT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--color-evil"* ]]
+  cmp "$OUT" "$BATS_TEST_TMPDIR/before.css"
+  printf -- '---\ncolors:\n  "a:b{": "#fff"\nspacing:\n  s: "@IMPORT x"\n---\n' > "$BATS_TEST_TMPDIR/n.md"
+  run "$SCRIPT" "$BATS_TEST_TMPDIR/n.md" "$OUT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--color-a:b{"* ]]
+  cmp "$OUT" "$BATS_TEST_TMPDIR/before.css"
+}

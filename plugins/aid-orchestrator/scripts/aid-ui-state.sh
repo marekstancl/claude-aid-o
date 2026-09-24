@@ -4,10 +4,13 @@
 #
 #   init <project>
 #   await-direction <project> --imp <impeccable CLI> --key <key> --page-url <url>
-#       runs `<imp> serve-question --wait --key <key>` itself (repeats on exit 3).
-#       ANSWER {optionId != reroll} -> .aid-ui/direction-answer.json + direction
-#       recorded; ANSWER reroll -> exit 3; page closed (exit 4) -> direction_pending
-#       + exit 1; anything unparseable -> exit 1, nothing recorded.
+#       records direction_pending (key + page url) first, so steps 4-6 refuse while
+#       the round is open, then runs `<imp> serve-question --wait --key <key>`
+#       itself (repeats on exit 3). ANSWER {optionId != reroll} -> .aid-ui/
+#       direction-answer.json + direction recorded + direction_pending cleared;
+#       ANSWER reroll -> exit 3; page closed (exit 4) -> exit 1; anything
+#       unparseable -> exit 1, no direction recorded. All but a valid answer
+#       leave direction_pending set.
 #       There is deliberately no verb that records a direction from a file the
 #       caller supplies: the answer only ever comes from Impeccable's stdout.
 #   pending-direction <project> --key <key> --page-url <url>
@@ -99,12 +102,12 @@ case "$VERB" in
     need_state
     IMP="$(opt imp "$@")"; KEY="$(opt key "$@")"; URL="$(opt page-url "$@")"
     [[ -n "$IMP" && -n "$KEY" && -n "$URL" ]] || usage "await-direction needs --imp --key --page-url"
+    jq_write --arg k "$KEY" --arg u "$URL" '.direction_pending = {key: $k, page_url: $u}'
     while :; do
       rc=0; out="$(IMPECCABLE_QUESTION_FORCE=1 "$IMP" serve-question --wait --key "$KEY")" || rc=$?
       [[ "$rc" -eq 3 ]] || break
     done
     if [[ "$rc" -eq 4 ]]; then
-      jq_write --arg k "$KEY" --arg u "$URL" '.direction_pending = {key: $k, page_url: $u}'
       die "the page closed without the PM's answer; the round stays open: URL $URL key $KEY"
     fi
     [[ "$rc" -eq 0 ]] || die "serve-question --wait exited $rc; nothing recorded: $out"
