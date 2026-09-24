@@ -12,6 +12,10 @@
 # Exit codes: 0=all suites passed, 1=one or more suites failed
 # =============================================================================
 set -uo pipefail
+# plan-finalize exports these for its own scripts; inherited here, they point every
+# suite's state writes at the REAL project (test-aid-obligations wrote P900 journals
+# into it and then failed on the accumulated lines — P097, P101).
+unset AID_PLAN_STATE_PROJECT_ROOT AID_PLAN_MANIFEST_PROJECT_ROOT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

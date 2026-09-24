@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.85.1
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.106.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -72,6 +72,7 @@ Or go fully autonomous:
 | `/aid-init` | Create or upgrade the `.aid-o/` workspace — base manifest, stack auto-detection, idempotent |
 | `/aid-setup [module]` | Configure what init created — permissions, integrations, CLAUDE.md, stack re-scan |
 | `/aid-verify-plan` | Independent adversarial review of a plan before it goes to execution |
+| `/aid-ui` | Guided UI design outside the AID pipeline: references, visual direction chosen by the PM, design standard, build, verification, brand page |
 | `/aid-verify-implementation` | Independent adversarial DONE review of an implementation before it is trusted as complete |
 | `/aid-audit` | Project health audit — code, docs, tests, dependencies |
 | `/visual-companion` | Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision |
@@ -122,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.105.2** (current) — noční běh celý zelený
+- **v2.106.0** (current) — nový příkaz `/aid-ui` pro návrh vzhledu s PM
+- **v2.105.2** — noční běh celý zelený
 - **v2.105.1** — noční běh zase zelený a jmenuje padající sady
 - **v2.105.0** — merge cesta zpět v normě: kontrola pater hlídá součet, jádro merge cesty, patra podle nočních měření
 - **v2.104.1** — Codex na gpt-6-sol medium; stránka plánu až po revizích

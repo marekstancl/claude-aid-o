@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 546          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 547          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -3921,3 +3921,19 @@ enforcements:
     description: "An answer carrying a finding whose command or evidence breaks the form is listed by collect as invalid, once per role and round, with the reason naming the finding (form: <id> missing_evidence …), so it goes back to its reviewer through the existing retry path instead of being dropped silently by the adjudicator. The round is invalid while that re-ask is owed, even when the remaining answers meet min_answers, so it is never adjudicated without the role. A second malformed answer is accepted and that finding is dropped as before. Found by the P096 acceptance run, where a true blocker was dropped for a bracketed note after a citation."
     recovery: "aid-review-round.sh retry --role <role>, re-dispatch the same prompt with the reason quoted, collect again."
     test: "scripts/tests/bats/test-review-round.bats (grep: 'breaks the form')"
+
+  - id: aid_ui_direction_needs_pm
+    type: 12
+    source: "scripts/aid-ui-state.sh"
+    instruction: "skills/ui-design/SKILL.md (MUST Rules 1-3)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That a session calls the script at all instead of editing state.json by hand. The answer is taken by the script from Impeccable's page server, not from a file the agent writes, but its origin is not proven beyond that."
+    description: "P101 Step 6 — /aid-ui never runs a step after the direction choice without the PM. aid-ui-state.sh refuses steps 4-6 while no PM answer is recorded, and the rule text in the skill says the same."
+    recovery: "The refusal names the missing answer. Let the PM choose on Impeccable's page, then run the step again."
+    test_covers: "the refusal of steps 4-6 without a recorded answer (test-aid-ui-state.bats) and the rule text (test-aid-ui-skill-rules.bats)."
+    test: "scripts/tests/bats/test-aid-ui-state.bats"
