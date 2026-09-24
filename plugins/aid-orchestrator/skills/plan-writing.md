@@ -1007,6 +1007,10 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
            → Invalid type (typo like "cmnd" or unsupported "must_match") →
              REVISE_REQUIRED — list invalid AC labels + valid types
 
+      20b2. A `must_contain` regex is matched ignoring letter case, and is written
+           in the language of the file it checks (a record for the PM is Czech:
+           "Scénář B", not "Scenario B").
+
       20c. Every pattern arguments are self-contained — no placeholder brackets.
            → REJECT regex matches: `<[a-z_]+>` in cmd/file/regex/expected_exit fields
                 (e.g., `cmd: "test <path>"` is REJECT; `cmd: "test ./tests/"` is ACCEPT)
@@ -1411,3 +1415,11 @@ Under `plan_branch` the whole delivery is read once per plan, by the whole-plan
 round (CP7) against the frozen candidate (`commands/aid-run.md`, "Closing a plan
 (plan-final)"). CP2 and CP3 remain per EPIC in both modes. Mode is read from the
 plan's committed lifecycle manifest, never inferred.
+
+**The release under `plan_branch`.** The last step writes the release content
+(the CHANGELOG entry, README lines), never the version numbers: `aid-release.sh
+prepare-plan` sets those at the end of the plan, reading the current version
+from the files, so a step that already bumped them is bumped twice. Name the
+bump there (`--bump minor` for a new command or behaviour, `patch` for fixes);
+`--bump auto` cannot read a plan's own step commits and asks.
+

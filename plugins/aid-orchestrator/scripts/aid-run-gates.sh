@@ -1149,6 +1149,10 @@ run_all_gates() {
       exit 2
     fi
     profile_source="caller"
+  elif [[ "$profile_table_json" != "[]" ]]; then
+    # Not a refusal (debugging and crash recovery run everything on purpose),
+    # but never silent: P101 ran every gate for 20+ min this way.
+    echo "NOTE: no --profile: running all $(yq '.gates | length' "$execution_yaml") gates; the declared profiles are ${profile_table_json} — aid-fsm.sh advance-to-gates picks one for the run's diff" >&2
   fi
 
   # FSM state check: refuse to run if state is not GATES, UNLESS caller is

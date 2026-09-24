@@ -862,6 +862,8 @@ gate_profiles:
 YAML
   run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
   [ "$status" -eq 0 ]
+  # ... and says so, naming the table (P101 ran every gate 20+ min unnoticed)
+  [[ "$output" == *'NOTE: no --profile: running all 2 gates; the declared profiles are ["standard"]'* ]]
   # beta is NOT in 'standard's include[], but --profile was never passed —
   # both gates run exactly as they would with no gate_profiles block at all.
   run jq -re '.gates.alpha.result' "$REPORT"

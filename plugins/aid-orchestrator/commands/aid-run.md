@@ -261,10 +261,13 @@ the command, or asserts a gate result nobody collected is not this carve-out —
 carve-out exists to distinguish itself from.
 
 ### Gate execution:
-- Use `--state-file` and `--report-file` flags with `aid-run-gates.sh`:
+- The canonical call is `bash {plugin_path}/scripts/aid-fsm.sh advance-to-gates <state_file>`:
+  it resolves the gate profile for the run's diff and runs the gates (skills/pipeline.md §5).
+- Calling the runner directly is for debugging and crash recovery, and then names the profile
+  (without `--profile` it runs every gate and says so):
   ```
   bash {plugin_path}/scripts/aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> <timeline_file> \
-    --state-file <state_file> --report-file <evidence_dir>/gates/gates_report.json
+    --state-file <state_file> --report-file <evidence_dir>/gates/gates_report.json --profile <name>
   ```
 - `--state-file` ensures gates only run when FSM is in GATES state
 - `--report-file` persists `gates_report.json` (required by `GATES→DONE` precondition)
@@ -788,7 +791,7 @@ worktree (`.aid-worktrees/plan-<id>`) on `plan/<id>` for the whole close.
 
 | # | Command | What it does | It refuses when |
 |---|---------|--------------|-----------------|
-| 0 | `bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" prepare-plan <plan> --bump auto --plan-branch plan/<plan>` | the version commit, BEFORE the freeze, so the candidate already contains the release metadata | the tree is dirty; HEAD is not the plan branch |
+| 0 | `bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" prepare-plan <plan> --bump minor\|patch --plan-branch plan/<plan>` (`auto` asks when the plan's commits carry no type) | the version commit, BEFORE the freeze, so the candidate already contains the release metadata | the tree is dirty; HEAD is not the plan branch |
 | 1 | `<fsm> plan-finalize <plan> --stage freeze` | merges the target branch into `plan/<plan>`, freezes the candidate, mints `R-<plan>-final-<N>` | an EPIC is not terminal; the merge conflicts (exit 4, state CONFLICT); the tree is dirty |
 | 2 | `<fsm> plan-finalize <plan> --stage gates` | the plan-final gate run; a gate that passed in the previous attempt and whose `inputs:` did not change is copied (`reused_from`), not executed | a gate fails (the report names it); the branch moved off the candidate |
 | 3 | `<fsm> plan-finalize <plan> --stage produce` | review profile, plan-diff, acceptance evidence, and what the round reads (`cp7/`) | gates have not passed; the candidate moved |

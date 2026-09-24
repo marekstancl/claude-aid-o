@@ -894,6 +894,23 @@ _prepare() {
 }
 
 # ─── Edge case: the bump resolves to "no bump" ────────────────────────────
+@test "prepare-plan with --bump auto refuses a plan whose commits carry no type (step commits), naming the explicit bump" {
+  _bootstrap
+  _seed_version_project
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/$PLAN_ID"
+  git -C "$TEST_PROJECT_ROOT" tag -a "v1.2.3" -m "Release v1.2.3"
+  printf 'x\n' > "$TEST_PROJECT_ROOT/cmd.txt"
+  git -C "$TEST_PROJECT_ROOT" add cmd.txt
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "step 1: the new command"
+  local head_before; head_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE_CLI" prepare-plan "$PLAN_ID" --bump auto \
+    --plan-branch "plan/$PLAN_ID" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"carry no conventional type"* && "$output" == *"next: "*"--bump minor|patch"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)" = "$head_before" ]
+}
+
 @test "prepare-plan with --bump auto and only chore/docs commits makes NO commit and exits 0" {
   _bootstrap
   _seed_version_project
@@ -2137,7 +2154,7 @@ _merge() {
   [ "$(jq -r '.version' "$rec")" = "1.3.0" ]
 
   # A chore-only follow-up resolves to no bump and records the literal `none`.
-  git -C "$TEST_PROJECT_ROOT" tag -a "v1.3.0" -m "released" >/dev/null 2>&1
+  git -C "$TEST_PROJECT_ROOT" tag -a "v1.3.0" -m "released" "plan/${PLAN_ID}" >/dev/null 2>&1   # the released commit
   _commit_on "plan/${PLAN_ID}" chore.txt "chore: tidy"
   _prepare "$PLAN_ID" --bump auto
   [ "$status" -eq 0 ]
