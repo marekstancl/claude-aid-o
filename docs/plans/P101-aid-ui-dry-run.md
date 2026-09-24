@@ -4,7 +4,7 @@ Jednou větou: skill `/aid-ui` prošel na fiktivním klientovi (Kavárna Lípa)
 všemi třemi scénáři A, B a C; A až po opravě tisku PDF, pět nálezů
 z prvního běhu je opraveno a živě ověřeno, čtyři meze zůstávají zapsané.
 
-Summary (EN, for the plan AC check): Scenario A: pass (after the PDF print fix), Scenario B: pass, Scenario C: pass.
+Summary (EN, for the plan AC check): Scenario A: pass with a known limit (lead direction follows the picks, catalogue challengers do not), Scenario B: pass, Scenario C: pass; steps 5-6: pass.
 
 Zapsáno 2026-09-24. Testovaný kód: worktree `.aid-worktrees/plan-P101`,
 větev `task/E-101-2_2/main`. Všechny volby PM udělal tester za fiktivního
@@ -22,7 +22,7 @@ Dva běhy:
 |---|---|
 | Co běželo | krok 0 (inventura, stav, brand stránka na :3916), krok 1 (shrnutí `PRODUCT.md`), krok 2 (galerie, 12 kandidátů, rubrika vyřadila 6, obrazovka šesti karet), krok 3 (brief, Impeccable new-work, kolo směru), krok 4 (web, `DESIGN.md`, `tokens.css`, `roles.css`, ukázky, PDF) |
 | Co bylo vidět | brand stránka se po kroku 4 změnila z neutrální (bílá, systémové písmo, prázdné Barvy/Typografie/Ukázky) na zelenou se zlatými odkazy a vyplněnými kapitolami; `tokens.css` 4× `--color-`, `roles.css` 1× `--brand-bg`; `state.json.step` = 5 |
-| Výsledek | **PASS**. První PDF **FAIL** (14 stran, Ukázky přetekly na strany 9-13); po opravě tiskového CSS nový render **PASS** (10 stran = titul + 9 kapitol, jedna kapitola na stranu) |
+| Výsledek | **PASS s mezí**: přidělený (vedoucí) směr drží volby klienta, šest challengerů z katalogu, které rozdal Impeccable, je nedrží (`concept-seed` nemá vstup pro připnutý brief), viz Známé meze. První PDF **FAIL** (14 stran, Ukázky přetekly na strany 9-13); po opravě tiskového CSS nový render **PASS** (10 stran = titul + 9 kapitol, jedna kapitola na stranu) |
 | Čas | kroky 0-3 cca 14 min, krok 4 + PDF + F1 4 min 42 s |
 | Rozhodnutí PM | 4 v krocích 0-3 (typ produktu, potvrzení shrnutí, 2 vzory, směr); krok 4 žádné |
 | Blokované galerie | žádná (nikde 403/429/captcha); godly.website přesměruje na recent.design a hledání ignoruje, saasframe jen SaaS |
@@ -55,6 +55,21 @@ Dva běhy:
 | Mobbin bez účtu | netýká se |
 | Detektor | na vlastním webu 2 kola: kontrast zlata 4.0:1 opraven na 4.54:1, zbyl jen `cream-palette` (záměr kontraktu) |
 
+## Běh 3 - kroky 5 a 6
+
+| | |
+|---|---|
+| Co běželo | `/aid-ui` bez argumentu → směrování ze `state.json.step` = 5, načten jen `steps/5-standard.md`; krok 5 (standard), pak krok 6 (ověření) |
+| Krok 5 | **PASS**: vytvořen `docs/design/design-standard.md`, vyplněny kapitoly `komponenty` a `platformy`, `tokens.css` přegenerován (beze změny); `roles` znovu spuštěn z mapy ve `state.json` exit 0; negativní zkouška (přejmenovaný token) exit 1 s hláškou o chybějícím tokenu `lipa-green` |
+| Krok 6 | **PASS**: důkaz závěrečné revize (`.impeccable/review/*.png`) je; kontrola před nasazením našla dva nálezy - dotykové cíle na mobilu 20-27 px < 44 px, focus obrys na papíře 1,85:1 < 3:1 - tester je za fiktivního klienta převzal jako známý dluh; osm kapitol `schvaleno --by PM`, logo `ceka` (brand balíček neexistuje); konečný `state.json.step` = 6 |
+| PDF | `brand-final.pdf`, 11 stran |
+| Čas | krok 5 19:58:14-20:00:33 (cca 2,5 min), krok 6 20:00:33-20:02 (cca 1,5 min + PDF) |
+| Rozhodnutí PM | krok 5: 1 (merge v dokumentu Impeccable); krok 6: 1 (převzetí) |
+
+## Kontrola verzí
+
+`verify-version-files.sh 2.106.0 --baseline 2.105.2` → `OVERALL: PASS — all 8 canonical version-file locations agree on 2.106.0`. Spustil controller na kandidátovi plánu `2a02d5d5` dne 2026-09-24. Verze 2.105.0 z plánu už je vydaná na main; větev plánu vydává 2.106.0 přes prepare-plan.
+
 ## Nalezeno a opraveno
 
 - F1: stránka Impeccable přes VPN adresu vracela 403 (socat nepřepsal Host/Origin) - forward je teď reverzní proxy ve stdlib Pythonu, která přepisuje Host/Origin/Referer; běh 2: `http://10.20.20.22:3915/` 200, klik zaznamenán, `--wait` vypsal `ANSWER`.
@@ -75,6 +90,20 @@ Dva běhy:
 - Hraniční případ plánu „Impeccable rozdává směry, které ignorují volby PM: zapsat jako selhání připnutého zadání z kroku 5, nepřijmout": **ČÁSTEČNĚ**. Přidělený (vedoucí) směr volby drží, protože ho krmí připnutý brief; všech 6 challengerů z katalogu je ignoruje (dva dokonce z režimu Operate při `--mode persuade`). Zapsáno jako selhání připnutého zadání, ne přijato.
 - `concept-seed` nemá vstup pro připnutý brief, takže volby PM se do losování challengerů dostat nemohou.
 
+Chyby textu skillu z běhu 3 (neopraveno, v backlogu jako IMP-653 pro pilot Needless / P102):
+1. `steps/5-standard.md:215` „Co PM rozhoduje: Nic", ale Impeccable `document` (ř. 200) se při existujícím DESIGN.md ptá refresh/overwrite/merge a na North Star.
+2. `steps/5-standard.md:203-204` chce živá tlačítka a pole se stavy, prezentační web žádná nemá; neříká, zda vymyslet vzor, nebo psát „nemá".
+3. Krok 5 bod 4 a krok 6 bod 4 neříkají, jak se píše tělo kapitoly do `docs/brand/index.html` (`chapter` mění jen stav).
+4. `steps/5-standard.md:206` relativní cesty u `aid-ui-design-to-css.sh`, neříká, že se spouští z kořene projektu.
+5. `steps/5-standard.md:211` bod 7 je v běžném toku no-op a neříká, které kapitoly myslí.
+6. `SKILL.md:108-109` „Po úspěchu `step <n+1>`" po kroku 6 dává `step 7` → exit 2; chybí konec toku.
+7. `steps/6-verify.md:250-251` nejasné, zda změna DESIGN.md/design.json v kroku 5 zneplatní revizní PNG.
+8. `steps/6-verify.md:257` a `:276` si odporují; chybí cesta „převzít se známým dluhem".
+9. `steps/6-verify.md:253-255` bez výjimky pro statickou stránku; grep barev neodhalí web s vlastními názvy tokenů mimo `tokens.css`.
+10. `steps/6-verify.md:258` neříká, zda kapitola `schvaleni` schvaluje sebe a co s `logo` ve stavu `ceka`.
+11. `SKILL.md:90-94` Playwright MCP selhal, skill neříká cestu k záložnímu Node Playwrightu.
+12. `aid-ui-serve.sh brand` servíruje celé `docs/brand/` včetně interního `state.json`.
+
 ## Důkazy
 
 Adresář `/opt/eco/projects/aid-orchestrator/.aid-o/work/evidence/E-101-2_2/R-E101-2/steps/step_1_qa/`:
@@ -82,6 +111,8 @@ Adresář `/opt/eco/projects/aid-orchestrator/.aid-o/work/evidence/E-101-2_2/R-E
 - `part2-notes.md` - scénář C, krok 4, PDF, živá kontrola F1
 - `brand-before.png`, `brand-after.png` - brand stránka před a po kroku 4
 - `brand.pdf` (14 stran, první běh), `brand-fixed.pdf` (10 stran, po opravě)
+- `part3-notes.md` - běh 3, kroky 5 a 6
+- `brand-final.pdf` (11 stran, po kroku 6)
 - `f1-question.png`, `f1-after-click.png` - stránka směru přes VPN adresu a po kliku
 
 Oprava: commity `9d46d3a7..1c5b24d9` na větvi `task/E-101-2_2/main` (`aid-ui-serve.sh`, `aid-ui-state.sh`, `SKILL.md`, `base.css`, `steps/2-references.md`, `3-direction.md`, `4-build.md` + bats testy).
