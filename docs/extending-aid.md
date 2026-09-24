@@ -2037,7 +2037,8 @@ could satisfy every structural rule and still be worthless (it announced "6 of
 9 passed" over a run where **nothing** failed and three gates had simply not
 run).
 
-`facts.artifact_type` now names one of five types, and
+`facts.artifact_type` names one of three types (the gate and EPIC pages left
+with P099: the PM reads two pages per plan), and
 `defaults/artifact-profiles.yaml` says what each owes. **Adding a type is a
 section in that file**, never a branch in the renderer.
 
@@ -2045,22 +2046,13 @@ section in that file**, never a branch in the renderer.
 |---|---|
 | `brainstorming` | `lib/aid-brainstorm-summary.sh` |
 | `plan` | `lib/aid-plan-summary.sh` |
-| `gates` | `lib/aid-gate-outcome-summary.sh` |
-| `epic_done` | `lib/aid-epic-summary-page.sh` |
 | `plan_done` | `lib/aid-plan-close-summary.sh` |
 
-Three things the profile decides:
+Two things the profile decides:
 
 1. **Required fields.** A page missing one of its type's fields does not
    render, and the refusal names the type and the field.
-2. **State-derived wording.** A type marked `outcome_from_state` hands the
-   renderer four counts (`passed` / `failed` / `not_run` / `waived`, plus an
-   optional `blocked`) and the renderer COMPOSES the result, verified and
-   did-not-run tiles from them, dropping whatever the caller wrote there.
-   This is the important half: "zero failures" beside a sentence about failure
-   is now impossible to write, rather than something a vocabulary check would
-   have to catch — and no vocabulary check is ever complete.
-3. **Between-field contradictions.** Block 6 may not say "nothing is expected"
+2. **Between-field contradictions.** Block 6 may not say "nothing is expected"
    beside a list of next steps; a link may not be nameless, may not repeat the
    detail target, and **may not be a file path** in blocks 5 or 7.
 
@@ -2076,12 +2068,9 @@ branch, and `test-artifact-profiles.bats` asserts that over the whole caller
 set rather than per caller.
 
 **A milestone owes a page.** `lib/aid-artifact-obligation.sh` refuses to close
-a turn that finished one of three milestones without rendering its page: a
-written plan, an EPIC whose review ended, a closed plan. **A step owes nothing,
-and a failed step owes nothing either.** The EPIC page is produced by
-`cmd_done_advance` on the review→release edge — named, not instructed, because
-a rule that demands a page nobody produces is exactly the kind of rule this
-plan exists to stop writing.
+a turn that finished one of two milestones without rendering its page: a
+written plan and a closed plan. **An EPIC, a step and a failed step owe
+nothing** (P099); a gate run reports with its chat card only.
 
 ### Whether a range of work requires a release
 
@@ -2289,18 +2278,19 @@ two. And a job record that cannot be READ counts as live, for the same reason.
 `autonomy.max_spawned_epics` is **per plan**, not per workspace. Two plans with
 spawning on do not add up. That is a choice; the enforcement registry records it.
 
-### Layer 4 — the reminder (`lib/aid-queue-continuation.sh`)
+### Layer 4 — keep going, bounded (`lib/aid-queue-continuation.sh`)
 
-Two hook rows, both degree 3, both `failure: open`. On `Stop` it names every
-autonomous plan that still has work; on `SessionStart` it reads back the
-continuation guidance an interrupted run left — after a dead controller, the
-only reader that guidance has.
-
-**It is degree 3 because it cannot be anything else.** `aid-hook.sh:315-319`
-sets `no_block=1` the moment the harness reports `stop_hook_active: true`: a
-Stop rule may still speak, but no refusal from it may stop the turn again. A
-barrier built here would hold exactly once and then go quiet — worse than no
-barrier, because everyone would believe it was one.
+On `SessionStart` it reads back the continuation guidance an interrupted run
+left — after a dead controller, the only reader that guidance has (degree 3,
+`failure: open`). On `Stop` (since P099: degree 2, `failure: closed`,
+`blocks_when_active: true`) it refuses the stop of the session bound to an
+autonomous plan (`auto_session`, set by `/aid-run --auto`) while work is left,
+up to `autonomy.continuation_budget` refusals; a Decision or Blocked card, an
+`AID-WAIT:` on a live AID job, or the spent budget lets the turn end, the card
+and the budget with one "agent is waiting" message. `blocks_when_active` is what
+lets the refusal hold under `stop_hook_active`; the count is what keeps it from
+looping, and the rule's own timeout or error never blocks. The PM's next prompt
+(`UserPromptSubmit`, rule `pm_reply_marker`) resets the count.
 
 It asks through `peek`, never `claim`. A reminder that consumed the queue would
 create the very orphan it exists to warn about.

@@ -61,7 +61,7 @@ that is absent from a clean checkout.
 | `agents/simplifier.md` | `update` | An agent the PM may invoke after a plan; no required report (P096). |
 | `agents/verifier.md` | `update` | P094: CP2/CP3/CP6 are reviewer rounds, not verifier dispatches; the card keeps CP4, `section-review`, `cross-section-review` and the plan-final `c2_mode: final` producer. |
 | `agents/implementer.md` | `verified` | Implements a step; no release cadence. |
-| `agents/gate-fixer.md` | `verified` | Fixes gate failures; no release cadence. P094: `model: sonnet`; `verifier_review` is CP4 only; the invalidation-map note is gone. |
+| `agents/gate-fixer.md` | `verified` | Fixes gate failures; no release cadence. P094/P099: `model: opus`, `effort: low`; `verifier_review` is CP4 only; the invalidation-map note is gone. |
 | `agents/project-scanner.md` | `verified` | Scans a project; no lifecycle instruction. |
 
 ## Not instruction surfaces
