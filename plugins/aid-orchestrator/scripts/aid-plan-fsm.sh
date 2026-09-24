@@ -1658,6 +1658,54 @@ _pfsm_plan_start_compensate() {
 # on a lock timeout the closure still completes and the worktree is left in
 # place with a named recovery. See the lock block below.
 # ---------------------------------------------------------------------------
+# _pfsm_cleanup_leftovers <root> <plan_id> <merge_ref> <out.json> — what a plan
+# leaves behind besides its own tree (P100 Step 9, IMP-650): the step trees and
+# step/* branches of its waves that <merge_ref> contains, and its brainstorm- and
+# generation- scratch trees. A tree with uncommitted work, a branch the merge
+# does not contain and a tree outside .aid-worktrees/ are kept and named; a
+# removal git refuses is kept with the command that removes it. Writes <out.json>
+# {removed, kept} and never fails the close.
+_pfsm_cleanup_leftovers() {
+  local root="$1" plan_id="$2" ref="$3" out="$4" wt="" br line name
+  local -a removed=() kept=()
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) wt="${line#worktree }"; br="" ;;
+      "branch "*)   br="${line#branch refs/heads/}" ;;
+      "")
+        [[ -n "$wt" && "$wt" != "$root" ]] || { wt=""; continue; }
+        name="$(basename "$wt")"
+        if [[ "$wt" != "$root/.aid-worktrees/"* ]]; then
+          kept+=("${wt}	not AID's (outside .aid-worktrees/)")
+        elif [[ ( "$br" == step/* && -n "$(git -C "$root" rev-parse -q --verify "$ref" 2>/dev/null)" ) ]] \
+             && git -C "$root" merge-base --is-ancestor "$br" "$ref" 2>/dev/null \
+             || [[ "$name" == "brainstorm-${plan_id}" || "$name" == "generation-${plan_id}" ]]; then
+          if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then
+            kept+=("${wt}	uncommitted work")
+          elif git -C "$root" worktree remove "$wt" >/dev/null 2>&1; then
+            removed+=("$wt")
+          else
+            kept+=("${wt}	git refused: git worktree remove ${wt}")
+          fi
+        fi
+        wt="" ;;
+    esac
+  done < <(git -C "$root" worktree list --porcelain 2>/dev/null; echo)
+  while IFS= read -r br; do
+    [[ -n "$br" ]] || continue
+    if git -C "$root" merge-base --is-ancestor "$br" "$ref" 2>/dev/null && git -C "$root" branch -D "$br" >/dev/null 2>&1; then
+      removed+=("$br")
+    fi
+  done < <(git -C "$root" for-each-ref --format='%(refname:short)' 'refs/heads/step/*')
+  mkdir -p "$(dirname "$out")" 2>/dev/null
+  jq -n --argjson r "$(printf '%s\n' "${removed[@]}" | jq -R 'select(length > 0)' | jq -sc .)" \
+        --argjson k "$(printf '%s\n' "${kept[@]}" | jq -R 'select(length > 0) | split("\t") | {path: .[0], why: .[1]}' | jq -sc .)" \
+        '{removed: $r, kept: $k}' > "$out" 2>/dev/null || true
+  echo "plan-close cleanup: removed ${#removed[@]}, kept ${#kept[@]} (${out})" >&2
+  local k; for k in "${kept[@]}"; do echo "  kept: ${k/	/ — }" >&2; done
+  return 0
+}
+
 _pfsm_teardown_plan_worktree() {
   local root="$1" plan_id="$2"
   local canonical; canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
@@ -7457,8 +7505,10 @@ cmd_plan_close() {
     esac
   done
   # P073 Step 8 (review finding): a force reason without --force is an
-  # error, never a silently discarded argument.
-  _pfsm_force_arg_check "plan-close" || exit 2
+  # error, never a silently discarded argument — except that --administrative
+  # takes the same --reason as its own record, checked right below (it was
+  # refused here, so no administrative close ever got past its arguments).
+  [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 ]] || _pfsm_force_arg_check "plan-close" || exit 2
 
   # An administrative close is a PM decision on the record, so it needs a reason
   # like every other audited bypass here, and it is deliberately NOT combinable
@@ -7525,8 +7575,14 @@ cmd_plan_close() {
       fi
       close_mode="merge" ;;
     *)
-      echo "PRECONDITION FAIL: plan-close: ${plan_id} is in state '${cur_state:-<none>}' — close runs out of PLAN_MERGING (after the merge) or ABORTED (a recorded abort). No marker was written." >&2
-      exit 1
+      # An administrative close takes a plan from wherever it stopped (P097
+      # stood in PLAN_GATES, merged by hand); a normal close does not.
+      if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 && -n "$cur_state" && "$cur_state" != ROLLED_BACK ]]; then
+        close_mode="merge"
+      else
+        echo "PRECONDITION FAIL: plan-close: ${plan_id} is in state '${cur_state:-<none>}' — close runs out of PLAN_MERGING (after the merge) or ABORTED (a recorded abort); a plan merged outside plan-finalize is closed with --administrative --reason. No marker was written." >&2
+        exit 1
+      fi
       ;;
   esac
 
@@ -7535,7 +7591,8 @@ cmd_plan_close() {
   candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
   run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
   run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
-  if [[ "$close_mode" == "merge" ]]; then
+  # An administrative close has, by definition, no plan-final receipt to verify.
+  if [[ "$close_mode" == "merge" && "${_PFSM_ADMIN_CLOSE:-0}" -ne 1 ]]; then
     _pfsm_verify_plan_final_receipt "$root" "$plan_id" "$candidate" "$run_id" || exit 1
   fi
 
@@ -7592,6 +7649,15 @@ cmd_plan_close() {
     local _adm_bad
     _adm_bad="$(_pfsm_admin_close_evidence "$root" "$plan_id")"
 
+    # A plan whose branch is already inside the target was merged by hand: its
+    # plan-final evidence is partial, listed, and no reason to refuse.
+    local _adm_pb; _adm_pb="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_branch' 2>/dev/null)" || _adm_pb=""
+    [[ -n "$_adm_pb" && "$_adm_pb" != null && "$_adm_pb" != not_found ]] || _adm_pb="plan/${plan_id}"
+    if [[ -n "$_adm_bad" ]] && git -C "$root" merge-base --is-ancestor "$_adm_pb" "${target_branch:-main}" 2>/dev/null; then
+      echo "ADMINISTRATIVE CLOSE: ${_adm_pb} is already merged into ${target_branch:-main}; its plan-final evidence is partial and recorded as such:" >&2
+      printf '%s' "$_adm_bad" >&2
+      _adm_bad=""; _PFSM_ADMIN_MERGED_REF="$_adm_pb"
+    fi
     if [[ -n "$_adm_bad" ]]; then
       _pfsm_close_release
       echo "PRECONDITION FAIL: plan-close --administrative refused for ${plan_id}. This flag closes a plan that never produced plan-final evidence; this one HAS some, and a close here could be closing around what it concluded:" >&2
@@ -7781,7 +7847,11 @@ cmd_plan_close() {
   fi
   mv -f "${marker}.tmp" "$marker"
 
-  if [[ "$close_mode" == "merge" ]]; then
+  if [[ "$close_mode" == "merge" && "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 && "$cur_state" != CLOSED ]]; then
+    plan_state_transition "$plan_id" "$cur_state" CLOSED --administrative >/dev/null \
+      || { _pfsm_close_release; echo "PRECONDITION FAIL: plan-close --administrative: ${plan_id} could not be moved from ${cur_state} to CLOSED." >&2; exit 1; }
+    plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "CLOSED"' >/dev/null 2>&1 || true
+  elif [[ "$close_mode" == "merge" ]]; then
     if ! _pfsm_plan_state_set "$plan_id" "CLOSED"; then
       _pfsm_close_release
       echo "PRECONDITION FAIL: plan-close: the receipt is committed and ${marker} is written, but ${plan_id} could not be moved to CLOSED. Reconcile with 'aid-plan-fsm.sh plan-state ${plan_id}'." >&2
@@ -7801,6 +7871,9 @@ cmd_plan_close() {
   # warning naming the manual cleanup (see _pfsm_teardown_plan_worktree), which
   # is why this runs after the close is durable rather than as part of it.
   _pfsm_teardown_plan_worktree "$root" "$plan_id"
+  [[ "$close_mode" == merge ]] && _pfsm_cleanup_leftovers "$root" "$plan_id" \
+    "${merge_commit:-${_PFSM_ADMIN_MERGED_REF:-${target_branch:-main}}}" \
+    "${root}/${run_dir_rel:-.aid-o/work/evidence/${plan_id}}/cleanup.json"
 
   # P074 Step 6: the PLAN-layer close is WRITER 3's other entry point — the
   # SAME shared boundary helper aid-fsm.sh calls, so a direct plan-close

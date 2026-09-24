@@ -822,7 +822,7 @@ plan_state_set_autonomy() {
 # 3 lock timeout, 5 corrupt state file.
 # ===========================================================================
 plan_state_transition() {
-  local plan_id="$1" from="$2" to="$3"
+  local plan_id="$1" from="$2" to="$3" admin="${4:-}"
 
   _plan_state_require_deps || return 2
   _validate_plan_id "$plan_id" || return 1
@@ -832,6 +832,11 @@ plan_state_transition() {
   fi
 
   local pair="${from}:${to}" found=1 t
+  # An administrative close (plan-close --administrative, closure_kind
+  # administrative) reaches CLOSED from any open state: the plan was merged
+  # outside plan-finalize and stopped wherever it stood (P100 Step 9).
+  [[ "$admin" == --administrative && "$to" == CLOSED ]] \
+    && case "$from" in CLOSED|ABORTED|ROLLED_BACK) ;; *) found=0 ;; esac
   for t in "${_AID_PLAN_TRANSITIONS[@]}"; do
     if [[ "$t" == "$pair" ]]; then
       found=0

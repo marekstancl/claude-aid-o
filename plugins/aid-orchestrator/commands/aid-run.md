@@ -845,6 +845,15 @@ Artifact tool and present the card verbatim (`commands/aid-plan.md`, "Plan-final
 `<fsm> plan-merge-to-main <plan> --decision <file>`; FIX is the fix path; ABORT is
 `plan-abort` with the PM's reason.
 
+**The close cleans up.** `plan-close` removes the plan's own worktree, the step
+trees and `step/*` branches its merge contains, and its `brainstorm-`/`generation-`
+scratch trees; a tree with uncommitted work, a branch the merge does not contain
+and a tree outside `.aid-worktrees/` are kept and named, and `cleanup.json` in the
+plan-final evidence lists both. A plan built or merged outside `plan-finalize`
+(it stopped in `PLAN_GATES`, say) is closed from where it stands with
+`<fsm> plan-close <plan> --administrative --reason "<the PM's words>"`; the close
+is recorded as administrative, never as an ordinary one.
+
 `legacy_epic_release_mode` has no plan close: each EPIC releases at its own DONE,
 and the whole-delivery review the decision reads there is the EPIC's own cp3 round.
 

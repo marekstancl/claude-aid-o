@@ -96,6 +96,11 @@ _hook_audit() {
     local dir; dir="$(aid_session_store_dir hooks)" || return 0
     file="${dir}/audit.jsonl"
   fi
+  # Rotate at 20 MB, keeping two generations (.1, .2): the file grew to 27 MB
+  # unrotated (IMP-646). aid_plan_close_time reads all three.
+  if [[ "$(stat -c %s "$file" 2>/dev/null || echo 0)" -gt "${AID_HOOK_AUDIT_MAX_BYTES:-20971520}" ]]; then
+    mv -f "${file}.1" "${file}.2" 2>/dev/null; mv -f "$file" "${file}.1" 2>/dev/null
+  fi
   printf '{"ts":"%s","event":"%s","session_id":"%s","context":"%s","rule":"%s","outcome":"%s","reason":"%s"}\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(_hook_esc "$event")" \
     "$(_hook_esc "${HOOK_SESSION_ID:-}")" "${HOOK_CONTEXT:-unknown}/${HOOK_CONTEXT_SOURCE:-unknown}" \
