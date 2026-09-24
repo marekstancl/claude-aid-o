@@ -224,6 +224,9 @@ _gates_plan() {
   echo wip > "$R/.aid-worktrees/generation-P900/wip.txt"
   git -C "$R" worktree add -q -b step/s9 "$R/.aid-worktrees/step-s9" main
   git -C "$R/.aid-worktrees/step-s9" commit -q --allow-empty -m "an abandoned retry"
+  git -C "$R" branch step/other main          # another plan's wave, just started
+  mkdir -p "$R/.aid-o/work/evidence/E-900-1_1/R-1"
+  echo '{"steps":[{"id":"s1"},{"id":"s9"}]}' > "$R/.aid-o/work/evidence/E-900-1_1/R-1/plan.json"
 }
 
 @test "P100: --administrative closes a hand-merged plan from PLAN_GATES, cleans what it contains, keeps and names the rest; a normal close is refused there" {
@@ -235,7 +238,8 @@ _gates_plan() {
   [ "$(yq -r .plan_state "$R/.aid-o/work/plan-state/P900/plan-state.yaml")" = CLOSED ]
   [ -z "$(git -C "$R" branch --list 'step/s1')" ]
   [ ! -d "$R/.aid-worktrees/step-s1" ] && [ ! -d "$R/.aid-worktrees/brainstorm-P900" ]
-  [ -n "$(git -C "$R" branch --list 'step/s9')" ]
+  [ -n "$(git -C "$R" branch --list 'step/s9')" ] && [ -n "$(git -C "$R" branch --list 'step/other')" ]
+  jq -e '[.kept[].path] | index("step/s9") != null' "$R/.aid-o/work/evidence/P900/cleanup.json"
   jq -e '(.removed | length) >= 3' "$R/.aid-o/work/evidence/P900/cleanup.json"
   jq -e '.kept[] | select(.path | endswith("generation-P900")) | .why == "uncommitted work"' "$R/.aid-o/work/evidence/P900/cleanup.json"
   [[ "$output" == *"kept: $R/.aid-worktrees/generation-P900 — uncommitted work"* ]]

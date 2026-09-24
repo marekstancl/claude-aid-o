@@ -1660,14 +1660,16 @@ _pfsm_plan_start_compensate() {
 # ---------------------------------------------------------------------------
 # _pfsm_cleanup_leftovers <root> <plan_id> <merge_ref> <out.json> — what a plan
 # leaves behind besides its own tree (P100 Step 9, IMP-650): the step trees and
-# step/* branches of its waves that <merge_ref> contains, and its brainstorm- and
-# generation- scratch trees. A tree with uncommitted work, a branch the merge
-# does not contain and a tree outside .aid-worktrees/ are kept and named; a
-# removal git refuses is kept with the command that removes it. Writes <out.json>
-# {removed, kept} and never fails the close.
+# step/<id> branches of its own steps (the ids in its EPICs' plan.json) that
+# <merge_ref> contains, and its brainstorm- and generation- scratch trees. A tree
+# with uncommitted work, a step branch of the plan the merge does not contain
+# and a tree outside .aid-worktrees/ are kept and named; a removal git refuses is
+# kept with the command that removes it. Writes <out.json> {removed, kept} and
+# never fails the close.
 _pfsm_cleanup_leftovers() {
-  local root="$1" plan_id="$2" ref="$3" out="$4" wt="" br line name
+  local root="$1" plan_id="$2" ref="$3" out="$4" wt="" br line name steps
   local -a removed=() kept=()
+  steps=" $(cat "${root}/.aid-o/work/evidence/E-${plan_id#P}-"*/*/plan.json 2>/dev/null | jq -r '.steps[]?.id // empty' 2>/dev/null | sort -u | tr '\n' ' ') "
   while IFS= read -r line; do
     case "$line" in
       "worktree "*) wt="${line#worktree }"; br="" ;;
@@ -1677,8 +1679,9 @@ _pfsm_cleanup_leftovers() {
         name="$(basename "$wt")"
         if [[ "$wt" != "$root/.aid-worktrees/"* ]]; then
           kept+=("${wt}	not AID's (outside .aid-worktrees/)")
-        elif [[ ( "$br" == step/* && -n "$(git -C "$root" rev-parse -q --verify "$ref" 2>/dev/null)" ) ]] \
-             && git -C "$root" merge-base --is-ancestor "$br" "$ref" 2>/dev/null \
+        elif [[ "$br" == step/* && "$steps" == *" ${br#step/} "* ]] && ! git -C "$root" merge-base --is-ancestor "$br" "$ref" 2>/dev/null; then
+          kept+=("${wt}	${br} is not merged into ${ref}")
+        elif [[ "$br" == step/* && "$steps" == *" ${br#step/} "* ]] \
              || [[ "$name" == "brainstorm-${plan_id}" || "$name" == "generation-${plan_id}" ]]; then
           if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then
             kept+=("${wt}	uncommitted work")
@@ -1692,8 +1695,10 @@ _pfsm_cleanup_leftovers() {
     esac
   done < <(git -C "$root" worktree list --porcelain 2>/dev/null; echo)
   while IFS= read -r br; do
-    [[ -n "$br" ]] || continue
-    if git -C "$root" merge-base --is-ancestor "$br" "$ref" 2>/dev/null && git -C "$root" branch -D "$br" >/dev/null 2>&1; then
+    [[ -n "$br" && "$steps" == *" ${br#step/} "* ]] || continue
+    if ! git -C "$root" merge-base --is-ancestor "$br" "$ref" 2>/dev/null; then
+      kept+=("${br}	not merged into ${ref}")
+    elif git -C "$root" branch -D "$br" >/dev/null 2>&1; then
       removed+=("$br")
     fi
   done < <(git -C "$root" for-each-ref --format='%(refname:short)' 'refs/heads/step/*')
@@ -4889,7 +4894,7 @@ _pfsm_gate_reuse_rows() {
              "${AID_GATE_ROW_JQ}"'.gates[$g] | select(type == "object") | gate_row_normalize | select(.status == "pass" and .definition_sha256 == $d)' "$prev_report" 2>/dev/null)"
     [[ -n "$row" ]] || continue
     if (( from_epic )) && GATE="$gate" yq -r '.gates[strenv(GATE)].command // ""' "$yaml" 2>/dev/null \
-         | sed 's/{plugin_path}//g' | grep -q '{[a-z_]*}'; then
+         | sed 's/{plugin_path}//g' | grep -q '{[^}]*}'; then
       continue
     fi
     pathspec=()
