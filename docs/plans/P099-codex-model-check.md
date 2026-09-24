@@ -53,3 +53,8 @@ strom `9de9b9c3`:
 
 Ani jedna varianta `gpt-6-sol` nesplnila pravidlo kroku 2 (najít blokery terry). Jeden
 balík je malý vzorek.
+
+**Rozhodnutí PM (24. 9. 2026): `gpt-6-sol`, effort `medium`** (`review-checkpoints.yaml`,
+výchozí `CODEX_MODEL`/`CODEX_EFFORT` v `lib/aid-codex-transport.sh`), s porovnáním na živých
+revizích: na prvních pěti kolech s Codexem se stejný uložený prompt (`round-N/prompt-<role>.md`)
+pustí ještě jednou na `gpt-5.6-terra` high a nálezy obou se porovnají (IMP-648).

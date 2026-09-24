@@ -3,6 +3,12 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.104.1] — 2026-09-24
+
+### Changed
+- **Codex revizor na `gpt-6-sol`, effort `medium`** (rozhodnutí PM) — `gpt-6-sol` jde od Codex CLI 0.156 i přes ChatGPT účet; AID si bere nejnovější instalaci Codexu sám. Na jednom balíku našel 1 ze 4 blokerů `gpt-5.6-terra` high, proto se na prvních pěti živých kolech porovná s terrou na stejném promptu (`docs/plans/P099-codex-model-check.md`). Cena `gpt-6-sol` je v `prices.yaml`.
+- **Stránka plánu přijde až po revizích** — `/aid-plan` ji vykreslí a zveřejní, až plán projde branou kontroly plánu (`aid-cp1-gate.sh`), ne hned po napsání; PM čte plán jednou, kompletní. Hlídač stránek (`milestone_artifact_rendered`) stránku do té doby nechce.
+
 ## [2.104.0] — 2026-09-24
 
 ### Changed

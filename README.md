@@ -122,7 +122,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.104.0** (current) — hladký běh: Codex odpovídá (prompt na stdin, zástupce při jakékoli chybějící odpovědi); Opus všude s effortem podle role; Telegram jen „agent čeká" a „plán dodán"; dvě stránky pro PM; autonomní běh se sám nezastaví (ohraničené odmítnutí konce tahu); souběžné vlny opravdu běží; čas plánu na stránce dodávky
+- **v2.104.1** (current) — Codex na gpt-6-sol medium; stránka plánu až po revizích
+- **v2.104.0** — hladký běh: Codex odpovídá (prompt na stdin, zástupce při jakékoli chybějící odpovědi); Opus všude s effortem podle role; Telegram jen „agent čeká" a „plán dodán"; dvě stránky pro PM; autonomní běh se sám nezastaví (ohraničené odmítnutí konce tahu); souběžné vlny opravdu běží; čas plánu na stránce dodávky
 - **v2.103.0** — gate row je jedna smlouva (verze 2, uzavřený slovník důvodů); profily jsou seřazené seznamy s jedním resolverem; timeouty pevné, baseline jen navrhuje; `services:` a `required_when` odstraněny, runner je odmítá s příkazem na upgrade
 - **v2.102.0** — audit testového portfolia (`/aid-audit-tests`) smazán; zůstává katalog, patra a výběr testů
 - **v2.101.3** — Telegram bot `svc-mcp-tg-bot` vyřazen z pluginu; blok `notifications.telegram` má jen klíč, který se čte

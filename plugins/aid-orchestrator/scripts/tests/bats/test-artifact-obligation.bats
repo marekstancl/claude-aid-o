@@ -4,7 +4,7 @@
 # (P086 Step 4; P089 Step 6; since P099 Step 4 two: the written plan and the
 # delivered plan — an EPIC owes nothing).
 #
-# THE GROUNDED FAILURE MODE: `commands/aid-plan.md` step 8p has asked sessions
+# THE GROUNDED FAILURE MODE: `commands/aid-plan.md` (then step 8p) asked sessions
 # to render the page since P084 and said in its own text that nothing fails if
 # they skip it. The enforcement registry carried `plan_artifact_rendered` as
 # `planned` for exactly that reason. What is proved here is the mechanism that
@@ -36,6 +36,11 @@ setup() {
   # A plan that OWES a page is one that can have one: since the rule asks the
   # renderer, a plan the renderer refuses owes nothing (see the case below).
   printf -- '---\nid: P900\ntype: plan\n---\n\n# Plan: fixture\n\n## Goal\n\nThe fixture has a goal, so it can be rendered.\n' > "$PLAN"
+  # The page is owed once the plan review gate passes; with the review
+  # switched off the gate passes at once, so every case below starts from a
+  # plan that owes its page (the gate itself is aid-cp1-gate.sh's own suite).
+  mkdir -p "$ROOT/.aid-o/config/policies"
+  printf 'review_checkpoints:\n  cp1_plan_review: false\n' > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
   # The milestone-2 and -3 cases call the checks directly; the Stop-rule cases
   # source the library in their own subshell, deliberately (see run_rule).
   # shellcheck disable=SC1090
@@ -63,6 +68,13 @@ render_page() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"PM page was not rendered"* ]]
   [[ "$output" == *"aid_plan_summary_render"* ]]
+}
+
+@test "a plan that has not passed its plan review owes no page yet" {
+  rm "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
+  run aid_artifact_obligation_check "$PLAN"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"has not passed its plan review"* ]]
 }
 
 @test "a page older than its plan is a finding, not a quiet pass" {
@@ -315,6 +327,8 @@ _close_page() {
     touch -d "2026-08-28 12:00" "$ws/.aid-o/plans/$id-x.md"
   done
   ( cd "$ws" && git init -q . )
+  mkdir -p "$ws/.aid-o/config/policies"
+  cp "$ROOT/.aid-o/config/policies/review-checkpoints.yaml" "$ws/.aid-o/config/policies/"
 
   run_rule "{\"cwd\":\"$ws\",\"transcript_path\":\"$ws/transcript.jsonl\"}"
   [[ "$output" == *"P091"* ]]
