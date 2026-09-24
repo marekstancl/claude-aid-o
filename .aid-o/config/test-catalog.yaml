@@ -10397,21 +10397,9 @@ source_pattern_mappings:
     status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/enforcement-registry.yaml
-    target_run_unit_ids:
-      - bats:plugins/aid-orchestrator/scripts/tests/bats/test-committed-source
-      - bats:plugins/aid-orchestrator/scripts/tests/bats/test-force-framework-integration
-      - bats:plugins/aid-orchestrator/scripts/tests/bats/test-gate-command-required
-      - bats:plugins/aid-orchestrator/scripts/tests/bats/test-owned-jobs-integration
-      - bats:plugins/aid-orchestrator/scripts/tests/bats/test-queue-registry-rows
-      - bats:plugins/aid-orchestrator/scripts/tests/bats/test-registry-ttl
-      - bats:plugins/aid-orchestrator/scripts/tests/bats/test-supersede-recovery
-      - sh:plugins/aid-orchestrator/scripts/tests/test-control-boundary
-      - sh:plugins/aid-orchestrator/scripts/tests/test-enforcement-registry-cites
-      - sh:plugins/aid-orchestrator/scripts/tests/test-evidence-verify
-      - sh:plugins/aid-orchestrator/scripts/tests/test-gates-hygiene
-      - sh:plugins/aid-orchestrator/scripts/tests/test-review-successors
-    classification: production
-    precedence: 4
+    target_run_unit_ids: []
+    classification: unknown_production
+    precedence: 1000
     status: proposed
   - match_type: exact
     path_pattern: plugins/aid-orchestrator/defaults/execution-stacks/bash.yaml
