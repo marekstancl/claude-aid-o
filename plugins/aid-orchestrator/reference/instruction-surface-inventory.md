@@ -34,6 +34,7 @@ that is absent from a clean checkout.
 | `commands/aid-help.md` | `verified` | Routes to other surfaces; carries no lifecycle instruction of its own. |
 | `commands/aid-setup.md` | `verified` | Configuration; no release cadence. |
 | `commands/aid-stop.md` | `verified` | Emergency stop; no release cadence. |
+| `commands/aid-ui.md` | `no-scope` | P101. Runs outside the FSM (no AID run, no release); routes to `skills/ui-design/SKILL.md`. |
 
 ## Skills
 
@@ -52,6 +53,7 @@ that is absent from a clean checkout.
 | `skills/memory.md`, `skills/memory-mcp.md` | `verified` | Memory protocol; no lifecycle instruction. |
 | `skills/skill-writing.md`, `skills/command-writing.md` | `verified` | Authoring standards; no lifecycle instruction. |
 | `skills/communication.md` | `verified` | P080. Card shapes and the publish-before-present clause; says nothing about release cadence, so neither mode changes what it instructs. |
+| `skills/ui-design/SKILL.md` | `no-scope` | P101. `/aid-ui` design steps outside the FSM; its step files under `skills/ui-design/steps/` carry no lifecycle instruction either. |
 
 ## Agents
 
