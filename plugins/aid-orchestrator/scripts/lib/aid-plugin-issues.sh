@@ -80,10 +80,11 @@ _aid_pi_signals() {
   local q_timeline='select((.event // "") | (test("^fsm_.*(fail|blocked)$") or . == "plan_readiness_blocked"))
       | ((.ts // "1970-01-01T00:00:00Z") | (try fromdateiso8601 catch 0)) | select(. >= $s) | 1'
   if [[ -f "$audit" ]]; then
-    n=$(( n + $(jq -r --argjson s "$since" "$q_audit" "$audit" 2>/dev/null | wc -l) ))
+    # TZ=UTC: jq<1.7 fromdateiso8601 honours the local zone even on a Z suffix (P037).
+    n=$(( n + $(TZ=UTC jq -r --argjson s "$since" "$q_audit" "$audit" 2>/dev/null | wc -l) ))
   fi
   while IFS= read -r f; do
-    n=$(( n + $(jq -r --argjson s "$since" "$q_timeline" "$f" 2>/dev/null | wc -l) ))
+    n=$(( n + $(TZ=UTC jq -r --argjson s "$since" "$q_timeline" "$f" 2>/dev/null | wc -l) ))
   done < <(find "${root}/.aid-o/work/evidence" -mindepth 3 -maxdepth 3 -name timeline.jsonl 2>/dev/null)
   echo "$n"
 }

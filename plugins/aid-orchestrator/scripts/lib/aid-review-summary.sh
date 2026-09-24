@@ -223,7 +223,9 @@ aid_plan_close_time() {
     sids="$(cat "${gens[@]}" | grep -F '"rule":"queue_continuation_notice"' | grep -F "plan=${plan}" | jq -r '.session_id' 2>/dev/null | sort -u)"
     for d in $sids; do pat+=(-e "\"session_id\":\"${d}\""); done
   fi
-  jq -n --arg plan "$plan" --argjson now "$(date -u +%s)" \
+  # TZ=UTC: jq<1.7 fromdateiso8601 honours the local zone even on a Z suffix (P037);
+  # the intervals are compared with $now, a real epoch.
+  TZ=UTC jq -n --arg plan "$plan" --argjson now "$(date -u +%s)" \
         --slurpfile m <(cat /dev/null "${m[@]}") \
         --slurpfile t <(for d in "${tl[@]}"; do jq -c --arg f "$d" '. + {_f: $f}' "$d" 2>/dev/null; done) \
         --slurpfile a <( (( ${#pat[@]} )) && cat "${gens[@]}" | grep -F "${pat[@]}") --arg audit_from "$audit_from" '
