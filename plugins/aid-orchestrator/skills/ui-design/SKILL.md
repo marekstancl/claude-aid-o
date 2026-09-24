@@ -42,8 +42,13 @@ Do NOT invoke for:
    IMP="$(jq -r '.plugins["impeccable@impeccable"][0].installPath' ~/.claude/plugins/installed_plugins.json)/skills/impeccable/scripts/impeccable"
    ```
    Chybí (`null`, soubor neexistuje) → stop, řekni PM: `/plugin install impeccable@impeccable`.
-3. Playwright MCP (`mcp__plugin_playwright_playwright__browser_navigate` v nástrojích).
-   Chybí → stop, řekni PM: `/plugin install playwright@claude-plugins-official`.
+3. Prohlížeč - skutečné volání, ne jen existence nástroje:
+   `mcp__plugin_playwright_playwright__browser_navigate` na `about:blank`.
+   Selže (nástroj chybí, prohlížeč nejde spustit) → zkus Node Playwright
+   (`node -e "require.resolve('playwright')"` nebo `@playwright/test`, z pluginu či projektu,
+   a `npx playwright --version`) a řekni PM, že snímky půjdou přes Node Playwright.
+   Nejde ani jedno → stop, řekni PM: `/plugin install playwright@claude-plugins-official`
+   a `npx playwright install chromium`.
 4. Ekosystémové standardy čti živě z `/opt/eco/docs/docs/ecosystem/…`
    (`specs/design-system-standard.md`: checklist, platformy, „Kontrola před nasazením"). Chybí-li některý, jmenuj ho
    PM a poznamenej to v kapitole, které se týká.
@@ -58,8 +63,11 @@ Do NOT invoke for:
 - Načti jen `steps/<n>-*.md` a proveď ho. Po úspěchu
   `aid-ui-state.sh step <project> <n+1>`.
 - Selže skript: ukaž PM jeho řádek `ERROR:`, krok neposouvej.
-- Otevřené kolo (`require-direction` vypíše URL a klíč): znovu otevři TO kolo
-  (`aid-ui-serve.sh forward`, `await-direction` se stejným klíčem), nezakládej nové.
+- Otevřené kolo (`require-direction` vypíše URL a klíč): znovu otevři TO kolo,
+  nezakládej nové. `aid-ui-serve.sh forward <p>` (když neběží), dej PM URL
+  a klíč a ukonči tah. Na další zprávu PM („vybráno" nebo cokoli)
+  `await-direction` se stejným klíčem - převezme odpověď. Hned po znovuotevření
+  ho nevolej: po zavření stránky vrací hned „stránka zavřena".
 
 Skripty (`$AID_PLUGIN_PATH/scripts/`): `aid-ui-state.sh` (jediný zapisovatel
 `state.json`), `aid-ui-serve.sh`, `aid-ui-design-to-css.sh`.

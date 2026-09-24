@@ -84,6 +84,7 @@ PATH_add "$AID_PLUGIN_PATH/scripts"
 ## Documentation
 
 - `/aid-help` — progressive help (Level 0-3)
+- `/aid-ui` — guided UI design outside the AID pipeline (visual direction always chosen by the PM)
 - `CHANGELOG.md` — version history
 - `scripts/README.md` — bash script documentation
 

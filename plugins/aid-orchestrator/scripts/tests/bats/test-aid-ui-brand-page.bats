@@ -31,6 +31,8 @@ setup() {
   ! grep -vE '^var\(--brand-[a-z-]+, [^)]+\)$' <<<"$output" || false
   grep -q '@media print' "$PAGE/base.css"
   grep -q 'break-before: page' "$PAGE/base.css"
+  # print block caps image height so a full-page screenshot fits one A4 page
+  sed -n '/@media print/,/^}/p' "$PAGE/base.css" | grep -qE 'img \{[^}]*max-height: 100mm'
 }
 
 @test "shipped tokens.css and roles.css define no custom property" {

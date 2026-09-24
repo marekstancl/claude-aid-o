@@ -6,7 +6,7 @@
 #   await-direction <project> --imp <impeccable CLI> --key <key> --page-url <url>
 #       records direction_pending (key + page url) first, so steps 4-6 refuse while
 #       the round is open, then runs `<imp> serve-question --wait --key <key>`
-#       itself (repeats on exit 3). ANSWER {optionId != reroll} -> .aid-ui/
+#       itself from <project> (repeats on exit 3). ANSWER {optionId != reroll} -> .aid-ui/
 #       direction-answer.json + direction recorded + direction_pending cleared;
 #       ANSWER reroll -> exit 3; page closed (exit 4) -> exit 1; anything
 #       unparseable -> exit 1, no direction recorded. All but a valid answer
@@ -102,9 +102,11 @@ case "$VERB" in
     need_state
     IMP="$(opt imp "$@")"; KEY="$(opt key "$@")"; URL="$(opt page-url "$@")"
     [[ -n "$IMP" && -n "$KEY" && -n "$URL" ]] || usage "await-direction needs --imp --key --page-url"
+    [[ "$IMP" == */* ]] && IMP="$(realpath -m "$IMP")"   # a relative CLI path survives the cd below
     jq_write --arg k "$KEY" --arg u "$URL" '.direction_pending = {key: $k, page_url: $u}'
     while :; do
-      rc=0; out="$(IMPECCABLE_QUESTION_FORCE=1 "$IMP" serve-question --wait --key "$KEY")" || rc=$?
+      # Impeccable finds .impeccable/questions/<key> in its cwd: run it from the project.
+      rc=0; out="$(cd "$PROJECT" && IMPECCABLE_QUESTION_FORCE=1 "$IMP" serve-question --wait --key "$KEY")" || rc=$?
       [[ "$rc" -eq 3 ]] || break
     done
     if [[ "$rc" -eq 4 ]]; then
@@ -174,8 +176,9 @@ case "$VERB" in
       echo "/* Written by aid-ui-state.sh roles; do not edit. */"
       echo ":root {"
       for k in bg ink accent; do echo "  --brand-$k: var(--color-${R[$k]});"; done
+      # family is required above; the rest only when tokens.css defines it (base.css has fallbacks)
       for k in display body; do for f in family size weight line-height letter-spacing; do
-        echo "  --brand-$k-$f: var(--font-${R[$k]}-$f);"; done; done
+        if grep -q -- "--font-${R[$k]}-$f:" "$tokens"; then echo "  --brand-$k-$f: var(--font-${R[$k]}-$f);"; fi; done; done
       echo "}"
     } > "$tmp"
     jq_write --arg bg "${R[bg]}" --arg ink "${R[ink]}" --arg ac "${R[accent]}" --arg d "${R[display]}" --arg b "${R[body]}" \

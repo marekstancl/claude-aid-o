@@ -32,6 +32,9 @@ V neinteraktivním běhu se krok nespouští (MUST 3).
 5. Šest karet (4 blízko záměru, 2 odvážnější mimo obor, u každé jedna věta, co
    převzít) ve visual-companion (`skills/visual-companion/SKILL.md`):
    `start-server.sh --project-dir <project> --host 0.0.0.0 --url-host 10.20.20.22`.
+   Karty jako výběr více možností: `<div class="cards" data-multiselect>`, každá
+   karta `data-choice="<n>" onclick="toggleSelect(this)"`. Bez `data-multiselect`
+   stránka zvýrazní jen poslední klik.
 6. Kliky PM jsou návrh: vyjmenuj vybrané karty v chatu, PM je potvrdí.
 7. U potvrzených: `browser_evaluate` s `getComputedStyle` na
    `body, h1, h2, p, a, button` (písma, škála, barvy, zaoblení, mezery, pohyb)

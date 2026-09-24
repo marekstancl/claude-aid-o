@@ -66,6 +66,20 @@ await() { run "$SCRIPT" await-direction "$PROJ" --imp "$IMP" --key k1 --page-url
   [ "$(jq .direction "$STATE")" = null ]
 }
 
+@test "await-direction run from another directory: Impeccable is asked from the project" {
+  # Impeccable reads .impeccable/questions/<key> from its cwd; elsewhere it says the server is gone (exit 2).
+  cat > "$IMP" <<'EOF'
+#!/usr/bin/env bash
+[[ "$PWD" == "$STUB_PROJ" ]] || { echo "question server is gone"; exit 2; }
+echo 'ANSWER: {"optionId":"a","steer":""}'
+EOF
+  export STUB_PROJ="$PROJ"
+  cd "$BATS_TEST_TMPDIR"
+  await
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .direction.option_id "$STATE")" = a ]
+}
+
 @test "unparseable output: exit 1, nothing recorded" {
   STUB_OUT='BUILD PATH FLIPPED'
   await
@@ -141,6 +155,17 @@ await() { run "$SCRIPT" await-direction "$PROJ" --imp "$IMP" --key k1 --page-url
   run "$SCRIPT" roles "$PROJ" bg=paper,ink=ghost,accent=print,display=display,body=display
   [ "$status" -eq 1 ]
   [[ "$output" == *ghost* ]]
+}
+
+@test "roles aliases only the font suffixes tokens.css defines" {
+  "$BATS_TEST_DIRNAME/../../aid-ui-design-to-css.sh" "$BATS_TEST_DIRNAME/../fixtures/aid-ui/DESIGN.md" "$PROJ/docs/brand/tokens.css"
+  printf ':root {\n  --font-text-family: Inter, sans-serif;\n  --font-text-size: 1rem;\n}\n' >> "$PROJ/docs/brand/tokens.css"
+  run "$SCRIPT" roles "$PROJ" bg=paper,ink=print,accent=print,display=display,body=text
+  [ "$status" -eq 0 ]
+  grep -qF -- '--brand-body-family: var(--font-text-family);' "$PROJ/docs/brand/roles.css"
+  grep -qF -- '--brand-body-size: var(--font-text-size);' "$PROJ/docs/brand/roles.css"
+  ! grep -q -- '--brand-body-letter-spacing' "$PROJ/docs/brand/roles.css" || false
+  grep -qF -- '--brand-display-letter-spacing: var(--font-display-letter-spacing);' "$PROJ/docs/brand/roles.css"
 }
 
 @test "chapter writes state.json and index.html together" {

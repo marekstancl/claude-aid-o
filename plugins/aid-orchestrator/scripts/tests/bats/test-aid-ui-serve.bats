@@ -49,6 +49,63 @@ get() { curl -sf --max-time 3 "http://127.0.0.1:$1/"; }
   [ "$(get 39915)" = page-ok ]
 }
 
+# Stand-in for Impeccable's own host check: 403 unless Host is 127.0.0.1:<port>
+# and Origin, when sent, is http://127.0.0.1:<port>; else echoes method and body.
+# Every request it sees is appended to $BATS_TEST_TMPDIR/upstream.log.
+strict_upstream() {   # <port>
+  bash -c 'exec -a impeccable-stub python3 -c "$1" "$2" "$3"' _ '
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+local = "127.0.0.1:" + sys.argv[1]
+class H(BaseHTTPRequestHandler):
+    def reply(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        open(sys.argv[2], "a").write(self.command + " " + self.path + "\n")
+        ok = self.headers["Host"] == local and self.headers.get("Origin", "http://" + local) == "http://" + local
+        out = (self.command.encode() + b":" + body) if ok else b"forbidden"
+        self.send_response(200 if ok else 403)
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+    do_GET = do_POST = reply
+HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+' "$1" "$BATS_TEST_TMPDIR/upstream.log" >/dev/null 2>&1 3>&- &
+  FOREIGN_PIDS+=("$!")
+  local i; for i in $(seq 1 50); do
+    [[ -n "$(ss -ltnH "sport = :$1")" ]] && return 0; sleep 0.1
+  done
+  return 1
+}
+
+# The browser on the VPN sends Host/Origin/Referer = the forward's own address
+# (here 127.0.0.1:39915, AID_UI_HOST:AID_UI_FORWARD_PORT); upstream is :39917.
+@test "forward rewrites Host and Origin so a host-checking page answers through the VPN port" {
+  strict_upstream 39917
+  run curl -s --max-time 3 -H 'Host: 127.0.0.1:39915' "http://127.0.0.1:39917/"
+  [ "$output" = forbidden ]   # the stand-in really refuses a foreign Host
+  run "$SERVE" forward 39917
+  [ "$status" -eq 0 ]
+  [ "$(curl -sf --max-time 3 http://127.0.0.1:39915/q?x=1)" = "GET:" ]
+  [ "$(curl -sf --max-time 3 -H 'Origin: http://127.0.0.1:39915' -H 'Referer: http://127.0.0.1:39915/' \
+        -d 'pick=b' http://127.0.0.1:39915/answer)" = "POST:pick=b" ]
+}
+
+@test "forward refuses a foreign Origin, Referer or Host with 403 and upstream never sees it" {
+  strict_upstream 39917
+  "$SERVE" forward 39917
+  run curl -s -o /dev/null -w '%{http_code}' --max-time 3 -H 'Origin: http://evil.example' \
+    -d 'pick=b' http://127.0.0.1:39915/evil-origin
+  [ "$output" = 403 ]
+  run curl -s -o /dev/null -w '%{http_code}' --max-time 3 -H 'Referer: http://127.0.0.1:39915.evil.example/' \
+    -d 'pick=b' http://127.0.0.1:39915/evil-referer
+  [ "$output" = 403 ]
+  run curl -s -o /dev/null -w '%{http_code}' --max-time 3 -H 'Host: evil.example' http://127.0.0.1:39915/evil-host
+  [ "$output" = 403 ]
+  [ "$(curl -sf --max-time 3 http://127.0.0.1:39915/ok)" = "GET:" ]   # same proxy still serves
+  ! grep -q evil "$BATS_TEST_TMPDIR/upstream.log"
+  grep -q 'GET /ok' "$BATS_TEST_TMPDIR/upstream.log"
+}
+
 @test "brand serves a directory" {
   run "$SERVE" brand "$BRAND"
   [ "$status" -eq 0 ]
