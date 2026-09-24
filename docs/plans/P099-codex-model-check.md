@@ -38,3 +38,18 @@ a tokeny má do 1,5× terry. Tokeny splnil (1,17×), blokery ne (3 ze 4).
 výchozí `CODEX_MODEL` v `lib/aid-codex-transport.sh`), tedy přesně to, co bylo
 změřeno. Srovnání zopakovat, až účet pustí řadu `gpt-6` nebo až `gpt-5.6`
 přestane být k dispozici.
+
+## Přeměření 24. 9. 2026 (Codex CLI 0.156.1, `gpt-6-sol` dostupný)
+
+Starší Codex (0.149.1 v `/usr/local/bin`) `gpt-6-sol` odmítal; nový (0.156.1 v `/usr/bin`)
+ho pouští. AID bere nejnovější instalaci sám (`aid_codex_binary`). Stejný balík, stejný
+strom `9de9b9c3`:
+
+| | terra high | gpt-6-sol medium | gpt-6-sol high |
+|---|---|---|---|
+| blokery terry nalezené | 4/4 | 1/4 (alert) | 2/4 (alert, stránka EPICu) |
+| tokeny vstup / výstup | 872 k / 6,4 k | 554 k / 3,6 k | 865 k / 5,7 k |
+| čas | ~2,5 min | 81 s | 134 s |
+
+Ani jedna varianta `gpt-6-sol` nesplnila pravidlo kroku 2 (najít blokery terry). Jeden
+balík je malý vzorek.
