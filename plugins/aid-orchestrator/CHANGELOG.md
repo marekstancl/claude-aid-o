@@ -3,6 +3,30 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.106.0] — 2026-09-24
+
+### Added
+- **Tabulka „When AID refuses"** — `skills/pipeline.md` má řádek pro každý důvod odmítnutí, na který agenti za poslední měsíc narazili (`tests/fixtures/refusals/measured-2026-09.tsv`): co znamená, zda je chybná práce nebo se posunul stav, příkaz, který pokračuje, a zda jde o rozhodnutí PM; nahrazuje starou „force_override Usage Policy" a test hlídá, aby tabulka a kód neodjely.
+- **Spor o nález kroku i EPICu jde k PM** — `aid-review-round.sh dispute` funguje i na CP2/CP3; nález ve sporu blokuje dál a uvolní ho jen `--pm accepted` s kartou Rozhodnutí, která nález cituje, a s odpovědí PM zapsanou v auditu hooků po té kartě.
+- **Administrativní uzavření plánu odkudkoli** — `plan-close --administrative --reason` uzavře plán sloučený mimo `plan-finalize` z libovolného otevřeného stavu (P097 stál v `PLAN_GATES`); dosud neprošlo ani vlastní kontrolou argumentů, takže nikdy nefungovalo.
+- **Kontrola kroku přes další repozitáře** — krok, který mění soubory v jiném deklarovaném repozitáři, vrací jejich rozsah (`repo_commits`) a kontrola kroku ho reviduje; repozitář bez vráceného rozsahu je nález, ne přeskočení.
+
+### Changed
+- **Každé odmítnutí, na které agenti narazili, končí řádkem `next:`** — příkaz se skutečnými cestami běhu, který pokračuje, a odkaz na řádek tabulky; `--force` jmenují jen řádky, kde jde o rozhodnutí PM.
+- **Revizní kolo není slepá ulička** — krok, který se posune po prošlém kole, potvrdí delta kolo nad novými commity (nepočítá se do `rounds_default`, nechce override); kontrola kroku po uzavřeném kole už nevrátí „skip", který by nešel zapsat.
+- **Nález vadný jen formou se neztratí** — rozhodčí ho nechá v seznamu jako `form_invalid` a verdikt kroku ho počítá jako otevřený.
+- **Autor plánu pouští kontrolu, kterou pouští generování** — `/aid-plan` volá `aid-generation-readiness.sh`, která proběhne celá a vypíše všechny nálezy najednou; pravidlo patra nové sady je jedna funkce (`lib/aid-scoping.sh`), kterou volá lint i generátor.
+- **Obnovení napůl dodaného plánu negeneruje dodané EPICy** — fáze, jejíž sloučení git prokáže, se zapíše jako `delivered` a znovu se negeneruje ani nezařazuje; prázdná generační transakce se po opravě plánu sama odloží se třemi auditními záznamy.
+- **Rozsah pokrývá, co kroky legitimně dělají** — backlog a hlášení pro AID jdou commitnout vždy; `amend-scope` funguje i po posledním kroku a pro absolutní cesty, které plán deklaruje; návrat kroku umí deklarovat smazaný soubor.
+- **Kandidát plánu se posuzuje tam, kde žije** — jeden resolver zaznamenaného worktree (`aid_plan_recorded_worktree`) místo tří kopií; čerstvost rozhodnutí v briefu PM, adresář evidence v `aid-plan-diff.sh` a `plan_path` ve stavu běhu vycházejí z něj, commit kroku jde jen na větev jeho EPICu a agent kroku větve nepřepíná.
+- **Konec plánu převezme brány z běhu EPICu na stejném stromu** — brána s tokenem běhu (`{base_commit}` …) běží vždy znovu; běh bran, který spadl před reportem, už plán nezablokuje navždy.
+- **Vizuální společník má dveře** — brainstorming s tématem pro uživatele říká, zda jde o obrazovku, a obrazovka se navrhuje z podkladu postaveného z aplikace; výjimka PM se zapíše i s důvodem, který stránka ukáže.
+- **Uzavření plánu uklidí** — stromy a větve kroků, které sloučení obsahuje, a pracovní stromy brainstormingu a generování; co zůstalo, je jmenované v `cleanup.json`. Audit hooků se rotuje po 20 MB a časy plánu se přes rotaci čtou celé, nebo „neměřeno".
+- **Konec tahu blokuje jen krok, který session sama spustila** — pravidlo `turn_step_open` pozná krok session podle hlavičky `Dispatch Contract (version …)` v jejím přepisu, ne podle času; dvě souběžné session v jednom projektu (tady P100 a P101) už jedna druhé konec tahu neodmítají.
+- **`AID-WAIT:` platí i pro agenta na pozadí** — autonomní běh smí skončit tah, dokud agent nebo příkaz spuštěný na pozadí neohlásil konec.
+
+**Poznámka pro projekty:** commit hook se aktualizuje dalším `/aid-init`. `scripts/` pluginu má 174 905 řádků (před plánem 173 883): +1 022, z toho +536 v testech a +486 v pravidlech výše; žádná nová sada testů.
+
 ## [2.105.2] — 2026-09-24
 
 ### Fixed

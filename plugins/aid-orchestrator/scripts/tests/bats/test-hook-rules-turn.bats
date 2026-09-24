@@ -4,7 +4,7 @@
 # write outside the step's paths is named before it lands (P087 Step 5).
 #
 # Fixtures only: a state root with one run in EXECUTE, a contract for its
-# current step, a transcript with a first timestamp. The handlers are called
+# current step, a transcript in which this session dispatched it. The handlers are called
 # directly and through the real dispatcher (so the registry rows are proved
 # to name them). Nothing here proves a harness calls the hook — the canary
 # does that.
@@ -22,9 +22,9 @@ setup() {
   printf 'epic_id: E-1\nrun_id: R-1\nstate: EXECUTE\ncurrent_step: 0\ntotal_steps: 1\n' > "$EV/fsm-state.yaml"
   printf '{"steps":[{"id":"step_1_backend","role":"backend","objective":"x","outputs":[],"allowed_paths":["src/","docs/readme.md"]}],"dependencies":[]}' > "$EV/plan.json"
   printf '{"version":"abc","step_id":"step_1_backend","allowed_paths":["src/","docs/readme.md"],"evidence_dir":"%s/steps/step_1_backend"}' "$EV" > "$EV/steps/step_1_backend/contract.json"
-  # a transcript whose session started an hour ago — the contract is newer
+  # a transcript in which this session dispatched the step (its contract header)
   TRANSCRIPT="$TMP/transcript.jsonl"
-  printf '{"type":"user","timestamp":"%s","message":{"content":"go"}}\n' "$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)" > "$TRANSCRIPT"
+  jq -nc '{type:"assistant",message:{content:[{type:"tool_use",name:"Agent",input:{prompt:"## Dispatch Contract (version abc)\n..."}}]}}' > "$TRANSCRIPT"
   export AID_HOOK_AUDIT="$TMP/audit.jsonl" AID_SESSION_STORE="$TMP/store"
 }
 teardown() { rm -rf "$TMP"; }
@@ -64,10 +64,13 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
   [ "$status" -eq 3 ]
 }
 
-@test "turn: another session's open step is not this turn's — the window is the transcript's start" {
-  touch -d '-2 hours' "$EV/steps/step_1_backend/contract.json"
+@test "turn: another session's open step is not this turn's — only a transcript that dispatched it holds the turn" {
+  # the other session's step, written after this session started: reading its
+  # contract (its version) is not dispatching it
+  jq -nc '{type:"user",message:{content:[{type:"tool_result",content:"{\"version\":\"abc\",\"step_id\":\"step_1_backend\"}"}]}}' > "$TRANSCRIPT"
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"no step of this session is open"* ]]
 }
 
 @test "turn: AC15 — an unreadable state does not block: no transcript, no workspace, or a malformed state file" {
@@ -120,10 +123,13 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
   [[ "$output" == *"step_1_backend: src/"* && "$output" == *"step_2_frontend: web/"* ]]
   run aid_turn_open_steps "$ROOT"
   [ "${#lines[@]}" -eq 2 ]
+  # with the transcript only the step this session dispatched (abc) is open
+  run aid_turn_open_steps "$ROOT" "$TRANSCRIPT"
+  [ "${#lines[@]}" -eq 1 ]; [[ "${lines[0]}" == *step_1_backend* ]]
 }
 
-@test "turn: with a transcript, the write rule also ignores another session's older step" {
-  touch -d '-2 hours' "$EV/steps/step_1_backend/contract.json"
+@test "turn: with a transcript, the write rule also ignores another session's step" {
+  : > "$TRANSCRIPT"
   run aid_hook_rule_turn_write_scope <<< "$(_write_event "$ROOT/lib/other.sh" | jq --arg t "$TRANSCRIPT" '.transcript_path = $t')"
   [ "$status" -eq 3 ]
 }

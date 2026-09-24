@@ -768,8 +768,9 @@ After agent completes:
 - Forbidden paths modified? → Re-dispatch once with warning; 2nd violation → ESCALATION
 - Credit exhaustion detected? → Pause to `state: paused`, notify PM
 
-**The turn may not end here.** While a contracted step is open — a `contract.json` written
-this session and `current_step` not advanced past it — the `Stop` hook rule `turn_step_open`
+**The turn may not end here.** While a contracted step is open — a step this session dispatched
+(its transcript holds the packet's `Dispatch Contract (version …)` header, so paste the
+block verbatim) and `current_step` not advanced past it — the `Stop` hook rule `turn_step_open`
 (`defaults/hook-registry.yaml`, fail-closed once the canary has verified the installation)
 refuses to close the turn and names the transition: validate the return, commit, write the
 verify file, `increment-step` — or hand over explicitly with a Decision card or a Blocked card

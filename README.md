@@ -122,7 +122,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.105.2** (current) — noční běh celý zelený
+- **v2.106.0** (current) — mantinely místo slepých uliček: každé odmítnutí jmenuje příkaz, který pokračuje; revizní kola bez slepých uliček a spor k PM; autor plánu pouští kontrolu generování; rozsah, kandidát a uzavření plánu pokrývají, co kroky legitimně dělají
+- **v2.105.2** — noční běh celý zelený
 - **v2.105.1** — noční běh zase zelený a jmenuje padající sady
 - **v2.105.0** — merge cesta zpět v normě: kontrola pater hlídá součet, jádro merge cesty, patra podle nočních měření
 - **v2.104.1** — Codex na gpt-6-sol medium; stránka plánu až po revizích

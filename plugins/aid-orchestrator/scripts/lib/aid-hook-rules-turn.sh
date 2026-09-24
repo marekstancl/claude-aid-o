@@ -3,7 +3,7 @@
 # lib/aid-hook-rules-turn.sh — two rules about the course of a turn
 # (P087 Step 5)
 #
-#   aid_turn_open_steps <state_root> [since_epoch]  (shared probe, read-only)
+#   aid_turn_open_steps <state_root> [transcript]   (shared probe, read-only)
 #   aid_hook_rule_turn_step_open                     (Stop-event handler)
 #   aid_hook_rule_turn_write_scope                   (PreToolUse-event handler)
 #
@@ -17,9 +17,14 @@
 #   message is a Decision card or a Blocked card (the labels in
 #   defaults/decision-card-labels.yaml) — or the run is no longer in EXECUTE.
 #
-#   Only THIS session's steps count. The probe takes the session's start (the
-#   transcript's first timestamp) and looks at contracts written after it;
-#   another session's half-done run is not this turn's to finish.
+#   Only THIS session's steps count: a step is the session's when its
+#   transcript holds "Dispatch Contract (version <v>)" of the step's contract —
+#   the header the controller pasted into the dispatch. Merely reading the
+#   contract never matches; another session's half-done run, even one started
+#   later in the same workspace, is not this turn's to finish (P100: a time
+#   window blamed one session for another's step). A new transcript (/clear,
+#   a new window) no longer holds the header, so its steps stop blocking — as
+#   the time window did.
 #
 # RULE 2 — A WRITE OUTSIDE THE STEP'S PATHS IS NAMED (PreToolUse, any, degree 3)
 #   The contract carries the allowed paths, so the moment a Write/Edit names
@@ -48,22 +53,23 @@ source "${_AID_HRT_LIB_DIR}/aid-decision-card.sh"
 source "${_AID_HRT_LIB_DIR}/aid-dispatch-contract.sh"
 
 # ---------------------------------------------------------------------------
-# aid_turn_open_steps <state_root> [since_epoch]
+# aid_turn_open_steps <state_root> [transcript]
 #   Prints ONE tab-separated line per open step, current step first:
 #     <epic_id> <run_id> <step_index> <step_id> <contract_path>
-#   and returns 0; returns 1 when no step is open. With <since_epoch>, a
-#   contract older than that instant is not this session's and is skipped.
+#   and returns 0; returns 1 when no step is open. With <transcript>, only the
+#   steps that session dispatched (its dispatch header, see RULE 1); the
+#   transcript is searched once, however many steps are open.
 #
 #   A step is open when it has a contract and the run has not advanced past
 #   it (index >= current_step). In a concurrent wave that is SEVERAL steps at
 #   once, which is why this prints all of them — a rule that only knew the
 #   current index would judge every other agent of the wave by the wrong
 #   packet. "Active" is read from the runs' own state files, not from a
-#   registry; a stale run is filtered by the session window, not bookkeeping.
+#   registry; another session's run is filtered by the transcript, not bookkeeping.
 # ---------------------------------------------------------------------------
 aid_turn_open_steps() {
-  local root="${1:?open-steps: state root required}" since="${2:-0}"
-  local sf state epic run cur n i plan sid contract mtime found=0
+  local root="${1:?open-steps: state root required}" transcript="${2:-}"
+  local sf state epic run cur n i plan sid contract lines=""
   while IFS= read -r sf; do
     [[ -n "$sf" ]] || continue
     # The four fields of the run in one pass over its state file; each is the
@@ -86,22 +92,18 @@ aid_turn_open_steps() {
       [[ -n "$sid" ]] || continue
       contract="$(dirname "$sf")/steps/${sid}/contract.json"
       [[ -f "$contract" ]] || continue
-      mtime="$(stat -c %Y "$contract" 2>/dev/null || echo 0)"
-      (( mtime >= since )) || continue
-      printf '%s\t%s\t%s\t%s\t%s\n' "$epic" "$run" "$i" "$sid" "$contract"
-      found=1
+      lines+="$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$epic" "$run" "$i" "$sid" "$contract" \
+        "Dispatch Contract (version $(jq -r '.version // ""' "$contract" 2>/dev/null))")"$'\n'
     done
   done < <(find "${root}/.aid-o/work/evidence" -mindepth 3 -maxdepth 3 -name fsm-state.yaml 2>/dev/null | sort)
-  (( found ))
-}
-
-# _aid_hrt_session_start <transcript> — the session's first timestamp as an
-# epoch, or 0 when the transcript does not say.
-_aid_hrt_session_start() {
-  local ts
-  ts="$(head -c 65536 "$1" 2>/dev/null | jq -r 'select(.timestamp != null) | .timestamp' 2>/dev/null | head -1)"
-  [[ -n "$ts" ]] || { echo 0; return 0; }
-  date -u -d "$ts" +%s 2>/dev/null || echo 0
+  [[ -n "$lines" ]] || return 1
+  if [[ -n "$transcript" ]]; then
+    local said
+    said="$(grep -oF -f <(cut -f6 <<< "$lines" | grep -v '(version )$') "$transcript" 2>/dev/null | sort -u)"
+    lines="$(awk -F'\t' 'NR == FNR { s[$0] = 1; next } $6 in s' <(printf '%s\n' "$said") - <<< "$lines")"
+  fi
+  [[ -n "${lines//$'\n'/}" ]] || return 1
+  cut -f1-5 <<< "$lines" | grep -v '^$'
 }
 
 # _aid_hrt_last_message <transcript> — the text of the turn's last assistant
@@ -139,11 +141,10 @@ aid_hook_rule_turn_step_open() {
   local root
   root="$(cd "$cwd" && aid_state_root 2>/dev/null)" || { echo "cwd is not inside an AID workspace" >&2; return 3; }
   [[ -n "$transcript" && -r "$transcript" ]] \
-    || { echo "no readable transcript — the session window is unknown, so no step can be attributed to this turn" >&2; return 3; }
-  local since; since="$(_aid_hrt_session_start "$transcript")"
+    || { echo "no readable transcript — no step can be attributed to this turn" >&2; return 3; }
 
   local line
-  line="$(aid_turn_open_steps "$root" "$since" | head -1)"
+  line="$(aid_turn_open_steps "$root" "$transcript" | head -1)"
   [[ -n "$line" ]] || { echo "no step of this session is open" >&2; return 0; }
   local epic run idx sid
   IFS=$'\t' read -r epic run idx sid _ <<< "$line"
@@ -194,16 +195,15 @@ aid_hook_rule_turn_write_scope() {
   local root
   root="$(cd "$cwd" && aid_state_root 2>/dev/null)" || { echo "cwd is not inside an AID workspace" >&2; return 3; }
 
-  # The same session window as the Stop rule, when the payload names a
+  # The same attribution as the Stop rule, when the payload names a readable
   # transcript; without one, any open step's contract is the best available
   # answer and the notice says which step it is.
-  local since=0
-  [[ -n "$transcript" && -r "$transcript" ]] && since="$(_aid_hrt_session_start "$transcript")"
+  [[ -r "$transcript" ]] || transcript=""
   # The hook cannot tell WHICH agent of a wave is writing, so a path inside
   # ANY open step's paths is inside scope; the notice lists every open step
   # with its paths, and the return validation of the right step settles it.
   local lines
-  lines="$(aid_turn_open_steps "$root" "$since")" || { echo "no step is open — nothing declares paths" >&2; return 3; }
+  lines="$(aid_turn_open_steps "$root" "$transcript")" || { echo "no step is open — nothing declares paths" >&2; return 3; }
   local rel sid contract allowed summary=""
   rel="$(_aid_hrt_relative "$path" "$cwd")"
   while IFS=$'\t' read -r _ _ _ sid contract; do

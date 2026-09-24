@@ -3663,7 +3663,7 @@ enforcements:
     tier: t0
     enforcement_degree: 2
     not_guaranteed: "Only while the canary has verified this installation (fail-closed rows degrade to open without it) and never on a turn already continued by a hook (stop_hook_active). Only steps THIS session dispatched (contract newer than the transcript's first timestamp). A hand-over is recognised by the Decision and Blocked card labels; a turn that ends on prose in no card shape while a step is open is refused, which is the intent, but a turn that FAKES a Blocked card passes — the label is a shape, not a truth. Stop does not exist in Codex review modes and never arrives from a killed session; the FSM precondition (dispatch_contract_return) is the later catch."
-    description: "P087 Step 5 — a turn may not end while a step this session dispatched under a contract has not been advanced. The refusal names the step and the transition to make (validate the return, commit, step-verify, increment-step) or the two explicit hand-overs (a Decision card, a Blocked card)."
+    description: "P087 Step 5 — a turn may not end while a step this session dispatched under a contract has not been advanced. The refusal names the step and the transition to make (validate the return, commit, step-verify, increment-step) or the two explicit hand-overs (a Decision card, a Blocked card). P100: a step is this session's when its transcript holds the contract's \"Dispatch Contract (version <v>)\" header (a time window blamed one session for another's step)."
     recovery: "Finish the step or hand over with a card; AID_HOOKS_OFF_RULES=turn_step_open is the audited escape."
     test: "scripts/tests/bats/test-hook-rules-turn.bats"
 
