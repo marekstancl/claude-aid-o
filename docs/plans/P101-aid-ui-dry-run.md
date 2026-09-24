@@ -90,7 +90,7 @@ Dva běhy:
 - Hraniční případ plánu „Impeccable rozdává směry, které ignorují volby PM: zapsat jako selhání připnutého zadání z kroku 5, nepřijmout": **ČÁSTEČNĚ**. Přidělený (vedoucí) směr volby drží, protože ho krmí připnutý brief; všech 6 challengerů z katalogu je ignoruje (dva dokonce z režimu Operate při `--mode persuade`). Zapsáno jako selhání připnutého zadání, ne přijato.
 - `concept-seed` nemá vstup pro připnutý brief, takže volby PM se do losování challengerů dostat nemohou.
 
-Chyby textu skillu z běhu 3 (neopraveno, v backlogu jako IMP-660 pro pilot Needless / P102):
+Chyby textu skillu z běhu 3 (neopraveno, v backlogu jako IMP-663 pro pilot Needless / P102):
 1. `steps/5-standard.md:215` „Co PM rozhoduje: Nic", ale Impeccable `document` (ř. 200) se při existujícím DESIGN.md ptá refresh/overwrite/merge a na North Star.
 2. `steps/5-standard.md:203-204` chce živá tlačítka a pole se stavy, prezentační web žádná nemá; neříká, zda vymyslet vzor, nebo psát „nemá".
 3. Krok 5 bod 4 a krok 6 bod 4 neříkají, jak se píše tělo kapitoly do `docs/brand/index.html` (`chapter` mění jen stav).
