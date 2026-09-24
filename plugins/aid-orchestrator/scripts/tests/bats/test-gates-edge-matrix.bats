@@ -3,7 +3,7 @@
 # =============================================================================
 # test-gates-edge-matrix.bats — the edges the recorded runs never reached.
 #
-# WHY THIS FILE EXISTS: test-gates-replay.sh (t2) proves the rebuilt runner
+# WHY THIS FILE EXISTS: acceptance-gates-replay.sh (t2) proves the rebuilt runner
 # gives the recorded verdict on runs that really happened. Every one of those
 # runs is a HAPPY path by construction — a project only keeps a gates report
 # when the gates ran. The edges P097 actually changed (an unknown profile, a

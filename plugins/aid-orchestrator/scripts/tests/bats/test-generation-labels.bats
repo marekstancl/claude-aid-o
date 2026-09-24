@@ -242,11 +242,11 @@ _printed_force_command() {
   # Without --force…
   _run_pipeline "$TEST_TMPDIR/p" "$plan"
   [ "$RC" -ne 0 ]
-  [[ "$(_first_line)" == "aid_cp1_blocked: the CP1 gate exited 3 (I/O error)"* ]]
+  [[ "$(_first_line)" == "aid_cp1_blocked: the CP1 gate exited 3 (hard condition)"* ]]
   # …and WITH it, identically.
   _run_pipeline "$TEST_TMPDIR/p" "$plan" --force --reason "$REASON"
   [ "$RC" -ne 0 ]
-  [[ "$(_first_line)" == "aid_cp1_blocked: the CP1 gate exited 3 (I/O error)"* ]]
+  [[ "$(_first_line)" == "aid_cp1_blocked: the CP1 gate exited 3 (hard condition)"* ]]
   grep -qF -- '--force DOES NOT APPLY to this condition class' "$ERRFILE"
   [ ! -f "$(_auth "$TEST_TMPDIR/p")" ]
 }

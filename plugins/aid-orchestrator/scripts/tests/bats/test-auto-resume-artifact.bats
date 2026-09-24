@@ -379,7 +379,7 @@ YAML
   [ "$output" = "0" ]
 }
 
-@test "case 6: an unwritable evidence dir refuses the gate BEFORE spawning the job" {
+@test "case 6: an unwritable evidence dir refuses the run BEFORE spawning any job" {
   init_project
   _seed_map manual
   cat > "$PROJ/exec.yaml" <<'YAML'
@@ -402,15 +402,11 @@ YAML
   run run_gates
   chmod u+w "$PROJ/$EVID"
 
+  # Since P097 the runner refuses the whole run up front: a gate whose row
+  # could not be recorded is never run, so nothing is spawned either.
   [ "$status" -ne 0 ]
-  run jq -r '.gates.bg.result' "$REPORT"
-  [ "$output" = "fail" ]
-  run jq -r '.gates.bg.reason' "$REPORT"
-  [ "$output" = "resume_artifact_write_failed" ]
-  # NOTHING was spawned: no job dir, and no stray sleep.
+  grep -q "is not writable — refusing to run gates whose rows could not be recorded" "$WORK/stderr.txt"
   [ ! -d "$JOBS/bg-attempt-1" ]
-  run grep -c "refusing to spawn a background job nothing can resume" "$WORK/stderr.txt"
-  [ "$output" -ge 1 ]
 }
 
 @test "case 7: init REFUSES while the referenced job is live and names resume" {

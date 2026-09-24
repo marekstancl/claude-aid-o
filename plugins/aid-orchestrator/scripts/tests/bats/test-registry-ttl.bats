@@ -151,25 +151,15 @@ EOF
   [[ "$output" == "c3_cross_provider_dispatch" ]]
 }
 
-@test "shipped registry: c3_cross_provider_dispatch has all required keys" {
-  for key in id type source description instruction severity surface status verdict test; do
-    run yq -e ".enforcements[] | select(.id == \"c3_cross_provider_dispatch\") | has(\"$key\")" "$SHIPPED_REGISTRY"
-    [ "$status" -eq 0 ]
-    [[ "$output" == "true" ]]
-  done
-}
-
-@test "shipped registry: c3_cross_provider_dispatch key values are the expected shape" {
-  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .type' "$SHIPPED_REGISTRY"
-  [ "$status" -eq 0 ]; [[ "$output" == "1" ]]
-  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .severity' "$SHIPPED_REGISTRY"
-  [ "$status" -eq 0 ]; [[ "$output" == "blocking" ]]
-  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .surface' "$SHIPPED_REGISTRY"
-  [ "$status" -eq 0 ]; [[ "$output" == "internal-guard" ]]
+@test "shipped registry: c3_cross_provider_dispatch is retired with its replacement named, not silently dropped" {
+  # P096 Step 12 retired the C3 dispatch: the Codex transport serves the
+  # review rounds, and the final review round is the guard that replaced it.
   run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .status' "$SHIPPED_REGISTRY"
+  [ "$status" -eq 0 ]; [[ "$output" == "removed_scoped" ]]
+  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .replacement_guard' "$SHIPPED_REGISTRY"
+  [ "$status" -eq 0 ]
+  run yq -e ".enforcements[] | select(.id == \"$output\") | .status" "$SHIPPED_REGISTRY"
   [ "$status" -eq 0 ]; [[ "$output" == "active" ]]
-  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .verdict' "$SHIPPED_REGISTRY"
-  [ "$status" -eq 0 ]; [[ "$output" == "ALIGNED" ]]
 }
 
 @test "shipped registry: totals.enforcements matches the actual row count" {

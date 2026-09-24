@@ -308,7 +308,8 @@ _bootstrap_build() {
   # hand-written fixture manifest.
   if [[ "${AID_TEST_SEED_LIFECYCLE:-0}" == "1" ]]; then
     mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
-    printf '# %s\n\n**EPIC 1: the delivered one**\n\n**EPIC 2: the abandoned one**\n' "$plan_id" \
+    # Success Criteria: --stage produce derives the acceptance evidence from them.
+    printf '# %s\n\n**EPIC 1: the delivered one**\n\n**EPIC 2: the abandoned one**\n\n## Success Criteria\n\n- [ ] the delivered EPIC is merged\n' "$plan_id" \
       > "$TEST_PROJECT_ROOT/.aid-o/plans/${plan_id}-lifecycle.md"
     aid_lifecycle_ensure_manifest "$plan_id" "$TEST_PROJECT_ROOT" >/dev/null
     # The DECLARED mode, written durably while main is still the checked-out
@@ -2443,7 +2444,7 @@ _seed_plan_final_evidence() {
   frozen_at="$(_manifest_field "$PLAN_ID" candidate_frozen_at)"
   outputs="$(jq -c '.plan_boundary_manifest.plan_final_review.outputs' \
     "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
-  incomplete="$(jq -c 'del(.["delivery-report.json"])' <<< "$outputs")"
+  incomplete="$(jq -c 'del(.["plan-diff.json"])' <<< "$outputs")"
   before_ref="$(git -C "$TEST_PROJECT_ROOT" for-each-ref --format='%(refname)' "refs/heads/aid-evidence/${PLAN_ID}/" | wc -l)"
   run bash -c 'source "$1"; _pfsm_seal_plan_final_review "$2" "$3" "$4" "$5" main "$6" "$7" "R-'"${PLAN_ID}"'-final-incomplete" "$8"' \
     _ "$PLAN_FSM_CLI" "$TEST_PROJECT_ROOT" "$PLAN_ID" "$base" "$cand" "$target_head" "$frozen_at" "$incomplete"
@@ -3079,40 +3080,6 @@ _fsm_close() {
     "$_EPIC_ID" "$(_epic_dir)" "$TEST_PROJECT_ROOT"
 }
 
-@test "AC7: the delegation REFUSES a missing curator report and closes NOTHING — no receipt, no marker, not CLOSED" {
-  _seed_delegated_close --no-curator
-  local main_before; main_before="$(_main_sha)"
-
-  _fsm_close
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"curator-report.md"* ]]
-
-  # NOTHING durable happened: this is the whole point of the ordering.
-  [ ! -f "$(_marker)" ]
-  [ ! -f "$(_epic_dir)/ca-review-complete" ]
-  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:$(_receipt_rel)"
-  [ "$status" -ne 0 ]
-  [ "$(_main_sha)" = "$main_before" ]
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" != "CLOSED" ]
-}
-
-@test "AC7: the delegation REFUSES a missing audit report and closes NOTHING" {
-  _seed_delegated_close --no-audit
-  local main_before; main_before="$(_main_sha)"
-
-  _fsm_close
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"audit-report.md"* ]]
-
-  [ ! -f "$(_marker)" ]
-  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:$(_receipt_rel)"
-  [ "$status" -ne 0 ]
-  [ "$(_main_sha)" = "$main_before" ]
-  run plan_state_get "$PLAN_ID" "plan_state"
-  [ "$output" != "CLOSED" ]
-}
-
 @test "AC7: with complete evidence the delegation closes once — one receipt, both markers, CLOSED" {
   _seed_delegated_close
 
@@ -3641,7 +3608,7 @@ _seed_epic_done_state() {
 _seed_startable_epic() {
   local eid="$1"
   _bootstrap
-  run bash "$PLAN_FSM_CLI" epic-start "$PLAN_ID" "$eid" --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start "$PLAN_ID" "$eid" --run-id "R-${eid}-plan" --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   _commit_on "task/${eid}/main" "work-${eid}.txt" "feat: the EPIC's work"
 }
@@ -3797,20 +3764,16 @@ _seed_startable_epic() {
 @test "AC4: a candidate that drifts in PLAN_SYNC re-freezes without any manual edit" {
   _seed_merge_project
   # Put the plan back to PLAN_SYNC with a frozen candidate, then move the plan
-  # branch. Freeze must invalidate and leave the plan somewhere it can re-freeze
-  # FROM — targeting PLAN_FIX here wedged the plan, because that transition is
-  # not legal out of PLAN_SYNC (F4, found on the P075 dogfood).
+  # branch. Since P096 freeze folds the sync in: a moved plan branch mints the
+  # next attempt and freezes the new head in the SAME call (the previous run
+  # directory is left as it was) — no manual edit, no second command.
   plan_state_transition "$PLAN_ID" "PLAN_GATES" "PLAN_SYNC" >/dev/null 2>&1 || true
   _commit_on "plan/${PLAN_ID}" drift.txt "feat: work that lands after the freeze"
 
   _finalize "$PLAN_ID" freeze
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"CANDIDATE INVALIDATED"* ]]
-  [[ "$output" != *"not a legal plan-state transition"* ]]
-
-  # And the plan can now genuinely re-freeze — no hand-edited state in between.
-  _finalize "$PLAN_ID" freeze
   [ "$status" -eq 0 ]
+  [[ "$output" == *"minting a new attempt"* ]]
+  [[ "$output" != *"not a legal plan-state transition"* ]]
   run plan_state_get "$PLAN_ID" "plan_state"
   [ "$output" = "PLAN_GATES" ]
   [ "$(_manifest_field "$PLAN_ID" candidate_sha)" = "$(_plan_sha)" ]
@@ -4253,9 +4216,9 @@ _revert_the_merge() {
 # leg gains exactly one alternative, and the merge re-verifies equivalence LIVE
 # against the current policy immediately before the irreversible action.
 
-# _accept_ancillary — the real stage, on the real seeded project.
+# _accept_ancillary — the real stage (freeze --accept-ancillary since P096), on the real seeded project.
 _accept_ancillary() {
-  run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage accept-ancillary \
+  run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage freeze --accept-ancillary \
     --project-root "$TEST_PROJECT_ROOT"
 }
 

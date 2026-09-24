@@ -30,7 +30,15 @@ setup() {
   # skips precondition fixtures; it requires a 20+ char audit reason.
   FORCE_REASON="integration test: position FSM lifecycle past precondition layer"
   fsm_tr() { "$FSM" transition "$1" "$2" "$STATE_FILE" --force --reason "$FORCE_REASON" 2>/dev/null; }
-  fsm_inc() { "$FSM" increment-step "$STATE_FILE" --force --reason "$FORCE_REASON" 2>/dev/null; }
+  # --force never waives the step's verification file, so the helper writes one.
+  fsm_inc() {
+    local e r n d
+    e="$(sed -n 's/^epic_id: *//p' "$STATE_FILE")"; r="$(sed -n 's/^run_id: *//p' "$STATE_FILE")"
+    n="$(sed -n 's/^current_step: *//p' "$STATE_FILE")"; d=".aid-o/work/evidence/$e/$r"
+    mkdir -p "$d"
+    printf '# Step %s Verification\n\n## Result: PASS\n\n- [x] criterion met\n\nCommit: abc1234\n\n## Memory Used\nN/A\n\n## Memory Written\nN/A\n' "$n" > "$d/step-$n-verify.md"
+    "$FSM" increment-step "$STATE_FILE" --force --reason "$FORCE_REASON" 2>/dev/null
+  }
 }
 
 teardown() { rm -rf "$TEST_DIR"; }

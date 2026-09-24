@@ -7,6 +7,8 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FSM="${SCRIPT_DIR}/../aid-fsm.sh"
+# shellcheck source=bats/test-helpers.bash
+source "${SCRIPT_DIR}/bats/test-helpers.bash"
 PASS=0; FAIL=0
 
 _pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
@@ -24,6 +26,8 @@ setup_run() {
   local label="$1"
   local dir="$TMPDIR_ROOT/$label"
   mkdir -p "$dir/.aid-o/work/evidence/E-TEST-E7B/R-TEST-E7B/steps/step_1_frontend/ui"
+  git -C "$dir" init -q && git -C "$dir" -c user.email=t@t -c user.name=t commit -q --allow-empty -m seed
+  local head; head="$(git -C "$dir" rev-parse HEAD)"
 
   # fsm-state.yaml
   cat > "$dir/.aid-o/work/evidence/E-TEST-E7B/R-TEST-E7B/fsm-state.yaml" << FSMEOF
@@ -92,7 +96,7 @@ PEOF
   cat > "$dir/.aid-o/work/evidence/E-TEST-E7B/R-TEST-E7B/step-0-verify.md" << VEOF
 # Step 0 Verify
 
-**EPIC:** E-TEST-E7B | **Run:** R-TEST-E7B | **Commit:** abc1234abc
+**EPIC:** E-TEST-E7B | **Run:** R-TEST-E7B | **Commit:** ${head}
 
 ## AC Checklist
 
@@ -108,19 +112,14 @@ N/A
 step_index: 0
 step_id: step_1_frontend
 plan_step_hash: ${plan_step_hash}
-reviewed_commit: abc1234abc
+reviewed_commit: ${head}
 idempotency_token: TOK-${label}
 
 ## Result: PASS
 VEOF
 
-  # verifier-output-step-0.md (SKIP classification to bypass CP2 check)
-  cat > "$dir/.aid-o/work/evidence/E-TEST-E7B/R-TEST-E7B/verifier-output-step-0.md" << VOUT
-_generated_by: test-harness
-_generated_at: 2026-06-30T00:00:00Z
-classification: SKIP
-reason: test harness
-VOUT
+  # A closed passing CP2 round for step 0 (P094 replaced the verifier-output SKIP).
+  aid_fixture_seed_step_review "$dir/.aid-o/work/evidence/E-TEST-E7B/R-TEST-E7B" cp2 0 pass "$head"
 
   echo "$dir"
 }

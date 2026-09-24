@@ -395,7 +395,9 @@ plugin_issues_line() {
   [ -f "$_f" ] || return 0
   _n="$(grep -cE '^#{2,3} [0-9]+\. ' "$_f" 2>/dev/null || echo 0)"
   _d="$(date -u -r "$_f" +%Y-%m-%d 2>/dev/null || echo '?')"
-  printf 'AID plugin issues: %s entries (last change %s) — %s\n\n' "$_n" "$_d" "$_f"
+  # Shown relative to the project, whatever the cwd (a plan worktree resolves
+  # the state root to an absolute path, the primary checkout to a relative one).
+  printf 'AID plugin issues: %s entries (last change %s) — .aid-o/work/aid-plugin-issues.md\n\n' "$_n" "$_d"
 }
 
 # recipe: nightly-line — defines nightly_line(): the last nightly portfolio

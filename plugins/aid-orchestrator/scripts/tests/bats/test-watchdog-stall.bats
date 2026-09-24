@@ -20,10 +20,9 @@
 #      way that surface's own suite does it — render `STALLED?` plus the resume
 #      command for a stalled entry that has a continuation artifact, and render
 #      the untouched row for a live one
-#   4. REGRESSION: terminal-prune behaviour is byte-identical to the code at
-#      f007069 (the step's start point), map bytes and messages alike
-#   5. AC4 — a resumed baseline sample JOINS the gate's existing series for a
-#      token-bearing command instead of resetting it
+#   4. prune removes terminal and state-less entries and leaves a stalled one
+#      alone (the byte-for-byte comparison with f007069 went when that commit's
+#      libraries did; the gate baseline series of old case 5 went with P097)
 #   6. AC6 — a MULTI-LINE next action is printed quoted and flagged
 #
 # FD-3 / process hygiene: cases that start the real gate runner reap it in
@@ -42,7 +41,6 @@ setup() {
   PROJ="$WORK/project"; export PROJ
   mkdir -p "$PROJ"
 
-  export AID_GATE_BASELINE_FILE="$WORK/baseline.yaml"
   export AID_GATE_POLL_INTERVAL_SEC=1
   export AID_GATE_HEARTBEAT_SEC=1
   export AID_RESUME_POLL_SEC=0
@@ -259,7 +257,7 @@ $expr" 3>&-
   [[ "$output" != *"STALLED?"* ]]
 }
 
-@test "case 4: REGRESSION — terminal-prune behaviour is byte-identical to f007069" {
+@test "case 4: prune removes terminal and state-less entries and leaves a stalled one alone" {
   init_project
   # An entry per prune criterion: terminal live state, gone state file, and a
   # healthy one that must survive — plus a STALLED one, which prune must go on
@@ -271,24 +269,7 @@ $expr" 3>&-
   _map_entry "E-076-2_2" R-2 EXECUTE "$(_iso_ago 10)"
   _map_entry "E-076-3_3" R-3 EXECUTE "$(_iso_ago 10)"   # state file never created
   _map_entry "E-076-4_4" R-4 EXECUTE "$(_iso_ago 7200)" # stalled, and healthy to prune
-  cp "$MAP" "$WORK/map-seed.json"
-
-  # The step's start point, run from a directory where its own lib/ resolves.
-  mkdir -p "$WORK/old/scripts"
-  git -C "$REPO_ROOT" show f007069:plugins/aid-orchestrator/scripts/aid-fsm.sh > "$WORK/old/scripts/aid-fsm.sh"
-  ln -s "$PLUGIN_ROOT/scripts/lib" "$WORK/old/scripts/lib"
-
-  run bash -c "cd '$PROJ' && bash '$WORK/old/scripts/aid-fsm.sh' active-runs prune 2>&1"
-  local old_rc="$status" old_out="$output"
-  cp "$MAP" "$WORK/map-old.json"
-
-  cp "$WORK/map-seed.json" "$MAP"
   run bash -c "cd '$PROJ' && bash '$FSM' active-runs prune 2>&1"
-  echo "OLD($old_rc): $old_out"
-  echo "NEW($status): $output"
-  [ "$status" -eq "$old_rc" ]
-  [ "$output" = "$old_out" ]
-  run diff -u "$WORK/map-old.json" "$MAP"
   [ "$status" -eq 0 ]
 
   # …and what prune actually did is still the documented behaviour
@@ -296,84 +277,6 @@ $expr" 3>&-
   [ "$(jq 'has("E-076-3_3")' "$MAP")" = "false" ]
   [ "$(jq 'has("E-076-2_2")' "$MAP")" = "true" ]
   [ "$(jq 'has("E-076-4_4")' "$MAP")" = "true" ]   # stalled ≠ prunable
-}
-
-@test "case 5: AC4 — a resumed baseline sample JOINS the gate's series for a token-bearing command" {
-  init_project
-  jq -n --arg e "$EPIC" \
-    '{($e): {state_file: (".aid-o/work/evidence/" + $e + "/R-1/fsm-state.yaml"),
-      run_id: "R-1", state: "GATES", branch: ("task/" + $e + "/main"),
-      plan_id: "P076", governs_main: false, updated_at: "2026-01-01T00:00:00Z",
-      auto_controller: "active", resume_artifact: null}}' > "$MAP"
-
-  # A command carrying a {token} — the NORMAL case in this repository, and the
-  # only case in which the fingerprint can diverge at all.
-  cat > "$PROJ/exec.yaml" <<'YAML'
-gates:
-  bg:
-    command: "echo {epic_id}"
-    required: true
-    timeout_seconds: 60
-    run_mode: foreground
-YAML
-  # A PRE-POPULATED baseline: the series a resumed sample must join.
-  ( cd "$PROJ" && "$RUN_GATES" run-all exec.yaml "$EPIC" R-1 \
-      --report-file "$EVID/gates/gates_report.json" >"$WORK/fg.out" 2>"$WORK/fg.err" )
-  local fp0 tmpl0 n0
-  fp0="$(yq -r '.gates.bg.command_fingerprint' "$AID_GATE_BASELINE_FILE")"
-  tmpl0="$(yq -r '.gates.bg.command_template' "$AID_GATE_BASELINE_FILE")"
-  n0="$(yq -r '.gates.bg.recent_samples | length' "$AID_GATE_BASELINE_FILE")"
-  local reset0; reset0="$(yq -r '.gates.bg.series_reset_at' "$AID_GATE_BASELINE_FILE")"
-  echo "seed: fp=$fp0 tmpl=$tmpl0 n=$n0 reset=$reset0"
-  [ "$tmpl0" = "echo {epic_id}" ]
-  [ "$n0" -ge 1 ]
-
-  # Now the resume path: same gate, run in the BACKGROUND, controller killed.
-  sed -i 's/run_mode: foreground/run_mode: background/' "$PROJ/exec.yaml"
-  ( cd "$PROJ" && "$RUN_GATES" run-all exec.yaml "$EPIC" R-1 \
-      --report-file "$EVID/gates/gates_report.json" ) >"$WORK/bg.out" 2>"$WORK/bg.err" &
-  BG_RUNNER_PID=$!
-  local i
-  for i in $(seq 1 200); do
-    [[ -f "$JOBS/bg-attempt-1/job.json" ]] && jq -e '.pid != null' "$JOBS/bg-attempt-1/job.json" >/dev/null 2>&1 && break
-    sleep 0.1
-  done
-  for i in $(seq 1 200); do
-    [[ "$(jq -r '.job_id // ""' "$ARTIFACT" 2>/dev/null || true)" == "bg-attempt-1" ]] && break
-    sleep 0.1
-  done
-  local p
-  for p in $(pgrep -f "aid-run-gates.sh run-all" 2>/dev/null || true); do
-    [[ "$(readlink -f "/proc/$p/cwd" 2>/dev/null || true)" == "$(readlink -f "$PROJ")" ]] && kill -KILL "$p" 2>/dev/null || true
-  done
-  kill -KILL "$BG_RUNNER_PID" 2>/dev/null || true
-  wait "$BG_RUNNER_PID" 2>/dev/null || true
-  BG_RUNNER_PID=""
-  for i in $(seq 1 400); do [[ -f "$JOBS/bg-attempt-1/result.json" ]] && break; sleep 0.1; done
-
-  run bash -c "cd '$PROJ' && bash '$FSM' resume '$EPIC'"
-  echo "$output"
-  [ "$status" -eq 0 ]
-  [ -f "$ROWS/bg.json" ]
-
-  local fp1 tmpl1 n1 reset1
-  fp1="$(yq -r '.gates.bg.command_fingerprint' "$AID_GATE_BASELINE_FILE")"
-  tmpl1="$(yq -r '.gates.bg.command_template' "$AID_GATE_BASELINE_FILE")"
-  n1="$(yq -r '.gates.bg.recent_samples | length' "$AID_GATE_BASELINE_FILE")"
-  reset1="$(yq -r '.gates.bg.series_reset_at' "$AID_GATE_BASELINE_FILE")"
-  echo "after resume: fp=$fp1 tmpl=$tmpl1 n=$n1 reset=$reset1"
-
-  # THE BUG THIS CASE EXISTS FOR: resume used to pass the RESOLVED command as
-  # the template, so the fingerprint diverged, the series was wiped and
-  # `series_reset_at` stamped, and command_template was rewritten to the
-  # resolved string (which the next ordinary run-all would reset right back).
-  [ "$fp1" = "$fp0" ]
-  [ "$tmpl1" = "echo {epic_id}" ]
-  # genesis stamps series_reset_at once; a JOINING sample must not RE-stamp it
-  [ "$reset1" = "$reset0" ]
-  [ "$n1" -gt "$n0" ]
-  # the resolved string is recorded where it belongs, not as the template
-  [ "$(yq -r '.gates.bg.last_resolved_command' "$AID_GATE_BASELINE_FILE")" = "echo ${EPIC}" ]
 }
 
 @test "case 6: AC6 — a MULTI-LINE next action is printed quoted and flagged, never echoed verbatim" {

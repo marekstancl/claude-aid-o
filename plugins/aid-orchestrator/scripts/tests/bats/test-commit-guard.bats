@@ -387,6 +387,9 @@ _farm_excluding() {
   # A commit that lands OUTSIDE step0's scope (src/a.txt), pushed past the hook.
   _stage src/rogue.txt
   git commit -q --no-verify -m "rogue out-of-scope commit"
+  # --force never waives the step's verification file (aid-fsm.sh).
+  printf '# Step 0 Verification\n\n## Result: PASS\n\n- [x] acceptance criterion met\n\nCommit: %s\n\n## Memory Used\nN/A\n\n## Memory Written\nN/A\n' \
+    "$(git rev-parse --short HEAD)" > "$TEST_EVIDENCE_DIR/step-0-verify.md"
 
   run bash "$FSM" increment-step "$sf" --force \
     --reason "companion out-of-scope --no-verify commit detection test exercise" \

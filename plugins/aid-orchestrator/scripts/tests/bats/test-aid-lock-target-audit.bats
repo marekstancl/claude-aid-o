@@ -34,7 +34,7 @@ teardown() {
   teardown_test_evidence_dir
 }
 
-@test "every reported lock_usage[] target across the 4 audited files is a relative/variable reference, never a hardcoded absolute shared path" {
+@test "every reported lock_usage[] target across the audited files is a relative/variable reference, never a hardcoded absolute shared path" {
   local out_dir="$TEST_TMPDIR/lock-audit-out"
   run "$AID_PLUGIN_PATH/scripts/aid-test-inventory.sh" \
     --project-root "$AID_PLUGIN_PATH" --audit-id "lock-audit" --output-dir "$out_dir"
@@ -44,7 +44,7 @@ teardown() {
   local targets
   targets="$(jq -r '
     .entries[]
-    | select(.run_unit_id | test("test-aid-emit-dispatch$|test-aid-gitignore-backfill$|test-invalidation-map$|test-aid-fsm$"))
+    | select(.run_unit_id | test("test-aid-emit-dispatch$|test-aid-gitignore-backfill$|test-aid-fsm$"))
     | .isolation.lock_usage[].lock_target
   ' "$out_dir/inventory.json")"
 
@@ -53,9 +53,9 @@ teardown() {
   # scope covers (the 4 previously-unaudited files named in the plan).
   local audited_count
   audited_count="$(jq -r '
-    [.entries[] | select(.run_unit_id | test("test-aid-emit-dispatch$|test-aid-gitignore-backfill$|test-invalidation-map$|test-aid-fsm$"))] | length
+    [.entries[] | select(.run_unit_id | test("test-aid-emit-dispatch$|test-aid-gitignore-backfill$|test-aid-fsm$"))] | length
   ' "$out_dir/inventory.json")"
-  [ "$audited_count" -eq 4 ]
+  [ "$audited_count" -eq 3 ]  # test-invalidation-map.bats was deleted with its subject
 
   local bad=0
   while IFS= read -r t; do

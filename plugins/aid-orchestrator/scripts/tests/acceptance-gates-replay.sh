@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# aid-tier: t2
+# Not a suite: a one-off acceptance MEASUREMENT (its name keeps it out of
+# run-all-tests.sh, which runs every test-*.sh). Run it by hand.
 # =============================================================================
-# test-gates-replay.sh — do the rebuilt gates give the recorded verdicts?
+# acceptance-gates-replay.sh — do the rebuilt gates give the recorded verdicts?
 #
 # WHY THIS FILE EXISTS: P097 rewrote the gate row (Step 2), the profile table
 # (Step 4), the timeouts (Step 5) and removed three key families (Step 6). Every
@@ -50,7 +51,7 @@
 #                 separately so the record can state it instead of hiding it.
 #
 # RUN IT (t2 — by hand before P097 Step 9, nightly after; NOT on the merge path):
-#   AID_PLUGIN_PATH=<plugin dir> bash scripts/tests/test-gates-replay.sh
+#   AID_PLUGIN_PATH=<plugin dir> bash scripts/tests/acceptance-gates-replay.sh
 #   flags: --sample <file>  --out <file>  --limit <n>  --keep
 #   Exit: 0 every run equal after explanation, 1 otherwise, 2 bad input.
 # =============================================================================
@@ -317,7 +318,7 @@ jq -n \
       verdict_differences_explained: ([$D[] | select(.explained == true)]),
       pm_acceptance: "owed — every entry of verdict_differences_explained must be accepted in writing by the PM before P097 Step 9 (docs/plans/P097-acceptance-run.md)",
       sample: $sample,
-      generated_by: "scripts/tests/test-gates-replay.sh",
+      generated_by: "scripts/tests/acceptance-gates-replay.sh",
       generated_at: $generated_at }' >"$OUT"
 
 echo ""
