@@ -4,6 +4,8 @@ gates:
   bats_fsm:
     command: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-fsm.bats
     required: true
+    # same inputs as bats_all (see there)
+    inputs: ["**", "!docs/**", "!cockpit/**", "!README.md", "!CHANGELOG.md", "!CHANGELOG-archive.md", "!CONTRIBUTING.md", "!.aid-o/plans/**", "!plugins/aid-orchestrator/CHANGELOG*.md"]
     timeout_seconds: 300
     max_retries: 1
   bats_all:
@@ -48,6 +50,12 @@ gates:
     # (gate:shell_pipeline_smoke below, .github/workflows/nightly-tests.yml).
     command: "bash -c 'plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t0 && plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --tier t1'"
     required: true
+    # A docs-only fix does not re-run the tests at plan-final (P101: 5 attempts,
+    # ~1.5 h): nothing t0/t1 reads these paths — true while their readers
+    # (test-backlog-verdicts, test-queue-registry-rows, verify-version-files …)
+    # stay t2. Promote one of them and this list lies. Never on
+    # shell_pipeline_smoke (the whole portfolio).
+    inputs: ["**", "!docs/**", "!cockpit/**", "!README.md", "!CHANGELOG.md", "!CHANGELOG-archive.md", "!CONTRIBUTING.md", "!.aid-o/plans/**", "!plugins/aid-orchestrator/CHANGELOG*.md"]
     # MEASURED 2026-09-22 on this host, whole portfolio green: T0 753 s
     # (75 suites, 978 tests), T1 1895 s (39 suites, 644 tests), total 2648 s.
     # The standard's budgets (T0 ≤ 2 min, T1 ≤ 10 min) are what the tiers ought
@@ -438,15 +446,12 @@ gate_profiles:
       - bats_fsm
       - plan_diff
       - docs_updated
-  # bats_fsm is BACK in full and release (P081 whole-diff review, 2026-08-11).
-  # It was removed because `bats_all` ran test-aid-fsm.bats in its pool, so
-  # including both dispatched the same run unit twice — true until this branch.
-  # test-aid-fsm.bats is `# aid-tier: t2` and `bats_all` now resolves to the
-  # T0+T1 selection, so it no longer dispatches that suite at all: leaving
-  # bats_fsm out left the two heaviest profiles — including the one plan-final
-  # runs — with NO FSM coverage. There is no double dispatch to avoid any more.
-  # `release_quarantine` gains it for the same reason and to keep the
-  # set-equality assertion (release MINUS the quarantined gate) satisfied.
+  # bats_fsm is OUT of full, release, release_quarantine and p064-closure again
+  # (2.107.0): test-aid-fsm.bats is `# aid-tier: t1` now, so `bats_all` (the
+  # T0+T1 selection) already runs it and bats_fsm dispatched it a second time
+  # on every plan close (P101 ledger: "ran under bats_all AND bats_fsm").
+  # It stays in quick, targeted, standard and bats_all_quarantine, which have
+  # no bats_all. If the suite ever leaves t0/t1, put bats_fsm back here.
   # P081 Step 6 (2026-08-10) — THE MERGE PATH IS T0 + T1.
   # `bats_all` now resolves to the tier-filtered runner, and the two gates that
   # carried the rest of the portfolio left these profiles entirely:
@@ -464,7 +469,6 @@ gate_profiles:
       - tier_lint
       - lint_gate_names
       - bats_all
-      - bats_fsm
       - plan_diff
       - docs_updated
       - check_release_paths
@@ -488,7 +492,6 @@ gate_profiles:
       - tier_lint
       - lint_gate_names
       - bats_all
-      - bats_fsm
       - plan_diff
       - docs_updated
       - check_release_paths
@@ -521,16 +524,17 @@ gate_profiles:
       by construction. That is not an oversight to paper over with `bats_fsm`
       — but that reasoning was written against a `bats_all` that still ran
       test-aid-fsm.bats. It does not: that suite is t2 and `bats_all` is the
-      T0+T1 selection. So (2026-08-11) `release` gains `bats_fsm` and this
-      profile gains it too, which both restores FSM coverage and keeps the
-      set equality exact — this profile is still `release` MINUS `bats_all`. The compensation is the one this profile already
+      T0+T1 selection. (2026-08-11) `release` gained `bats_fsm` and so did this
+      profile; since 2.107.0 test-aid-fsm.bats is t1 and `bats_all` covers it,
+      so both dropped it again — while `bats_all` is quarantined this profile
+      therefore has no FSM coverage, and the set equality stays exact
+      (`release` MINUS `bats_all`). The compensation is the one this profile already
       names: the quarantined gate is never green, it is reported
       profile_excluded/waived, and it must carry its own marked
       targeted-substitute receipt in the report's `quarantine_substitutes[]`.
     include:
       - tier_lint
       - lint_gate_names
-      - bats_fsm
       - plan_diff
       - docs_updated
       - check_release_paths
@@ -538,8 +542,8 @@ gate_profiles:
     reason: >-
       P064 E-064-1_2 closure run (PM disposition 2026-07-22). Re-seals gate
       evidence at the post-fix HEAD to clear C3 attempt-03 finding
-      c3-E-064-1_2-0 (stale gates_report head_sha). Includes both required
-      gates (bats_fsm, bats_all) plus the plan-required docs_updated and the
+      c3-E-064-1_2-0 (stale gates_report head_sha). Includes the required
+      bats_all (which covers test-aid-fsm.bats since 2.107.0) plus the plan-required docs_updated and the
       advisory targeted_tests selector. Excludes shell_pipeline_smoke and
       plan_diff (both exit 124 timeout_policy_block, required=false, 34 min
       of wall clock with no verdict — P071 E-071-1_1 Step 1 attribution note:
@@ -552,7 +556,6 @@ gate_profiles:
       touches only bash scripts, schemas and docs — no UI surface exists to
       calibrate).
     include:
-      - bats_fsm
       - bats_all
       - targeted_tests
       - docs_updated

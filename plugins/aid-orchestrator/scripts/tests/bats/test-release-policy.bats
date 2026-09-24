@@ -244,6 +244,8 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
   [ "$(_rd '.release_decision.release_ready')" == "false" ]
   _has_blocker verification_report
   [ "$(_rd '.release_decision.evidence_verification_status')" == "fail" ]
+  # the refusal names the check that failed, not just "one or more"
+  [[ "$(jq -r '.release_decision.blockers[]? | tostring' "$OUT")" == *"git_clean"* ]]
 }
 
 # ─── REGRESSION: empty/whitespace-only REQUIRED inputs (fail-closed, jq 1.6 edge case) ─

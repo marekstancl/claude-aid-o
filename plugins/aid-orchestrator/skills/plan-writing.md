@@ -6,7 +6,7 @@ user_invocable: false
 
 # Plan Writing — Exhaustive Plan Document Authoring
 
-**Last Updated:** 2026-09-21
+**Last Updated:** 2026-09-24
 
 **Skill:** plan-writing
 **Dependencies:** brainstorming
@@ -187,7 +187,7 @@ When brainstorming produces a multi-phase MVP plan (detected by: 4+ weeks effort
 
 ## Phase Markers
 
-When a plan spans multiple EPICs (phases), each phase must be delimited by a phase marker so the pipeline scripts can slice steps correctly. The marker format is:
+Each phase (EPIC) of a plan is delimited by a phase marker so the pipeline scripts can slice steps correctly. The marker format is:
 
 ```
 **EPIC N: Steps M-P — Title**
@@ -199,7 +199,7 @@ Where:
 - `P` is the last step number in this phase
 - `Title` is a short human-readable label (optional but recommended)
 
-**Extended form (with step range — preferred for multi-phase plans):**
+**Example:**
 
 ```markdown
 **EPIC 1: Steps 1-4 — Foundation**
@@ -215,27 +215,15 @@ Where:
 ...
 ```
 
-**Short form (without step range — for sequential simple plans):**
+**Backlog phase** (declared, not required for closing the plan): `**EPIC N / Backlog: Title**`.
 
-```markdown
-**EPIC 1**
-
-### Step 1: ...
-### Step 2: ...
-
-**EPIC 2**
-
-### Step 3: ...
-```
-
-When the short form is used, the script assigns steps to phases by document order: every `### Step N:` header encountered after a `**EPIC N**` marker belongs to that phase, until the next marker.
+Every plan carries these lines, a single-phase plan too (`**EPIC 1: Steps 1-N — Title**`): plan-start writes the plan's lifecycle manifest from them (`lib/aid-lifecycle.sh` `aid_lifecycle_parse_legacy_epics`) and refuses a plan without them, or with an EPIC line in any other form (`**EPIC 1**` without a colon included). `aid-plan-lint.sh` reports it before review.
 
 **Rules:**
 
 | Scenario | Rule |
 |----------|------|
-| Multi-phase plan (total phases > 1) | MUST include phase markers |
-| Single-phase plan (total phases = 1) | Phase markers are NOT required — all steps belong to the single phase automatically |
+| Any plan | MUST include a phase marker per phase, numbered 1..K in order — a single-phase plan has one |
 | Marker placement | Place each marker on its own line, immediately before the first step of that phase |
 | Step numbering | Step numbers in the marker range MUST match actual `### Step N:` headers; ranges with gaps are invalid |
 
@@ -697,8 +685,8 @@ Every step MUST have ALL of these fields populated:
 | **Implementation Detail** | At least 1 paragraph with concrete logic OR 1 code snippet |
 | **Error Handling** | At least 1 failure mode with recovery strategy |
 | **Edge Cases** | At least 2 edge cases (3+ for M/L effort steps) |
-| **Dependencies** | Explicit dependency statement (or "No dependencies — can start independently") |
-| **Acceptance Criteria** | At least 2 testable criteria per step (3+ for M/L effort) |
+| **Dependencies** | `- Depends on: Step N[, Step M]`, or `- Depends on: none` for a step that can start independently (any other wording is refused at generation) |
+| **Acceptance Criteria** | At least 2 testable criteria per step (3+ for M/L effort), each a `- [ ]` bullet — a numbered list counts as zero |
 | **Effort** | S, M, or L |
 | **AID Role** | Exactly one role from the AID role set |
 
@@ -1018,6 +1006,10 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
            → Valid types: "cmd" | "must_not_exist" | "must_contain"
            → Invalid type (typo like "cmnd" or unsupported "must_match") →
              REVISE_REQUIRED — list invalid AC labels + valid types
+
+      20b2. A `must_contain` regex is matched ignoring letter case, and is written
+           in the language of the file it checks (a record for the PM is Czech:
+           "Scénář B", not "Scenario B").
 
       20c. Every pattern arguments are self-contained — no placeholder brackets.
            → REJECT regex matches: `<[a-z_]+>` in cmd/file/regex/expected_exit fields
@@ -1415,7 +1407,7 @@ obligations (a `Reuse check:` on a delivered step is answered truthfully by
 
 ---
 
-**Last Updated:** 2026-09-21
+**Last Updated:** 2026-09-24
 
 ## Plan-boundary note
 
@@ -1423,3 +1415,10 @@ Under `plan_branch` the whole delivery is read once per plan, by the whole-plan
 round (CP7) against the frozen candidate (`commands/aid-run.md`, "Closing a plan
 (plan-final)"). CP2 and CP3 remain per EPIC in both modes. Mode is read from the
 plan's committed lifecycle manifest, never inferred.
+
+**The release under `plan_branch`.** The last step writes the release content
+(the CHANGELOG entry, README lines), never the version numbers: `aid-release.sh
+prepare-plan` sets those at the end of the plan, reading the current version
+from the files, so a step that already bumped them is bumped twice. Name the
+bump there (`--bump minor` for a new command or behaviour, `patch` for fixes);
+`--bump auto` cannot read a plan's own step commits and asks.

@@ -115,12 +115,42 @@ _done_advance() {
   [[ "$output" != *"$FP_A"* ]]
 }
 
+@test "done-advance archives the EPIC task file itself, and only when it advances" {
+  _seed_done_review
+  echo task > "$ROOT/.aid-o/tasks/${EPIC}-thing.md"
+  _lib "aid_finding_route P900 '$FP_A' cp3-code-review step:2 '$EPIC' 2"
+  run _done_advance
+  [ "$status" -ne 0 ]
+  [ -f "$ROOT/.aid-o/tasks/${EPIC}-thing.md" ]            # a refused advance leaves it where it is
+  [[ "$output" != *"not archived"* ]]                      # and it is no refusal of its own
+  _lib "aid_finding_resolve P900 '$FP_A' 'fixed in step 2'"
+  (cd "$ROOT" && aid_fixture_seed_step_review "$EV" cp3 "" pass)
+  run _done_advance
+  echo "$output"; [ "$status" -eq 0 ]
+  [ -f "$ROOT/.aid-o/tasks/archive/${EPIC}-thing.md" ]; [ ! -f "$ROOT/.aid-o/tasks/${EPIC}-thing.md" ]
+  grep -q '"event":"task_file_archived"' "$EV/timeline.jsonl"
+  # review-profile.json is plan-final's, not the EPIC's: no warning here
+  [[ "$output" != *"review_profile unverifiable"* ]]
+}
+
 @test "P079 Step 7: a backlog route is a decision, not an open item — it never blocks" {
   _seed_done_review
   _lib "aid_finding_route P900 '$FP_A' cp3-security backlog:IMP-500 '$EPIC' 2"
 
   run _done_advance
   [[ "$output" != *"$FP_A"* ]]
+}
+
+@test "the latest route or resolve of a fingerprint is its state: epic then backlog does not block, resolve then re-route does" {
+  _lib "aid_finding_route P900 '$FP_A' cp3-code-review step:2 '$EPIC' 2"
+  _lib "aid_finding_route P900 '$FP_A' cp3-code-review backlog:IMP-652 '$EPIC' 2"
+  run _lib "aid_finding_open_for_epic P900 '$EPIC'"
+  [ "$status" -eq 0 ]; [[ "$output" != *"$FP_A"* ]]
+  _lib "aid_finding_route P900 '$FP_B' cp3-code-review step:2 '$EPIC' 2"
+  _lib "aid_finding_resolve P900 '$FP_B' 'fixed in step 2'"
+  _lib "aid_finding_route P900 '$FP_B' cp3-code-review step:3 '$EPIC' 3"
+  run _lib "aid_finding_open_for_epic P900 '$EPIC'"
+  [[ "$output" == *"$FP_B"*"step:3"* ]]
 }
 
 @test "P079 Step 7: a finding routed to a DIFFERENT epic blocks that one, not this one" {

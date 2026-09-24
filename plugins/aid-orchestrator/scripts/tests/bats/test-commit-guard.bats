@@ -192,6 +192,19 @@ _farm_excluding() {
   [ "$status" -eq 0 ]
 }
 
+@test "d2: in GATES a commit touching only the backlog passes, and the hook's always-allowed list equals the FSM's" {
+  git checkout -q -b task/E-test/main
+  _write_plan
+  _write_state GATES task/E-test/main "" 2
+  _stage docs/plans/BACKLOG.md "- IMP-1 a finding"
+  run bash "$HOOK"
+  [ "$status" -eq 0 ]
+  local hook_list fsm_list
+  hook_list="$(grep '^_AID_ALWAYS_ALLOWED=' "$HOOK" | cut -d= -f2-)"
+  fsm_list="$(grep '^_FSM_ALWAYS_ALLOWED=' "$FSM" | cut -d= -f2-)"
+  [ -n "$hook_list" ] && [ "$hook_list" = "$fsm_list" ]
+}
+
 # ─── (e) DONE/release: version whitelist ─────────────────────────────────────
 @test "e: DONE/release passes version files + both CHANGELOGs" {
   git checkout -q -b task/E-test/main

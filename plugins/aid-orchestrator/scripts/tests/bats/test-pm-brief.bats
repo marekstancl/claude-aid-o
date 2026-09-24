@@ -315,3 +315,23 @@ _d() { jq -r "$1" "$DEC"; }
   [ "$(jq -r '.revision.freshness' "$GDIR/ev/pm-decision-brief.json")" == "stale" ]
   [ "$(jq -r '.revision.head_sha' "$GDIR/ev/pm-decision-brief.json")" == "abc123def456" ]
 }
+
+@test "P100: a plan-final decision is judged at the plan's worktree HEAD, not the primary checkout's; unreadable state is stale" {
+  local G="$TEST_TMPDIR/proj" ev
+  mkdir -p "$G"; git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
+  git -C "$G" commit -q --allow-empty -m base
+  git -C "$G" worktree add -q -b plan/P900 "$G/.aid-worktrees/plan-P900"
+  git -C "$G/.aid-worktrees/plan-P900" commit -q --allow-empty -m candidate
+  local cand; cand="$(git -C "$G/.aid-worktrees/plan-P900" rev-parse HEAD)"
+  mkdir -p "$G/.aid-o/work/plan-state/P900"
+  printf 'plan_id: P900\nplan_state: PLAN_GATES\nworktree_path: .aid-worktrees/plan-P900\n' > "$G/.aid-o/work/plan-state/P900/plan-state.yaml"
+  ev="$G/.aid-o/work/evidence/P900/R-P900-final-1"; mkdir -p "$ev"
+  jq --arg h "$cand" '.release_decision.pm_brief_status="pending" | .revision.head_sha=$h' "$FIXTURE" > "$ev/release-decision.json"
+  run env AID_PLUGIN_PATH="$AID_PLUGIN_PATH" bash "$BRIEF" "$ev"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.revision.freshness' "$ev/pm-decision-brief.json")" == "current" ]
+  printf 'this is: [not valid\n' > "$G/.aid-o/work/plan-state/P900/plan-state.yaml"
+  run env AID_PLUGIN_PATH="$AID_PLUGIN_PATH" bash "$BRIEF" "$ev"
+  [[ "$output" == *"unreadable"* ]]
+  [ "$(jq -r '.revision.freshness' "$ev/pm-decision-brief.json")" == "stale" ]
+}

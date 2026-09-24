@@ -135,6 +135,8 @@ EOF
   [ "$output" = "YES" ]
   run _anc 'aid_ancillary_match ".aid-o/work/plan-state/P900/plan-state.yaml" && echo YES || echo NO'
   [ "$output" = "YES" ]
+  run _anc 'aid_ancillary_match ".aid-o/config/queue.yaml.lock" && echo YES || echo NO'
+  [ "$output" = "YES" ]
   run _anc 'aid_ancillary_match ".aid-o/work/anything/at/all.txt" && echo YES || echo NO'
   [ "$output" = "YES" ]
 }

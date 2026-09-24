@@ -212,19 +212,22 @@ _upgraded_fixture() {  # <project> — the Step 3 upgrade applied to the fixture
 # project checkouts) contain no path matching the classifier's high-risk list;
 # the old resolver's timeline event for each of them says `standard`
 # (ACTA's recorded `full` came from an explicit caller flag, profile_source
-# cli_flag). The replay is therefore: an ordinary path set → standard, and a
-# set containing a high-risk path → full (ACTA) / standard (WAN, no `full`
-# profile), and `release` is never returned.
-@test "replay: upgraded ACTA fixture — standard for the sample runs' shape, full on a high-risk path, never release" {
+# cli_flag). Since 2.107.0 the upgrade carries ACTA's own old
+# `gate_profile_defaults.epic: full` into default_profile (its `standard` has
+# no py_test, so the old answer ran no backend tests): an ordinary path set →
+# full for ACTA, standard for WAN (no `full` profile), a high-risk path → full
+# (ACTA), and `release` is never returned.
+@test "replay: upgraded ACTA fixture — full by the project's own EPIC default and on a high-risk path, never release" {
   local f; f="$(_upgraded_fixture acta)"
   run bash "$SEL" table "$f"
   [ "$output" = $'targeted\nstandard\nfull\nrelease\nrelease_quarantine' ]
+  [ "$(yq '.default_profile' "$f")" = full ]
   run bash "$SEL" for-paths "$f" "$(_paths backend/app/models.py frontend/src/App.tsx docs/x.md)"
-  [ "$status" -eq 0 ]; [ "$output" = "standard" ]
+  [ "$status" -eq 0 ]; [ "$output" = "full" ]
   run bash "$SEL" for-paths "$f" "$(_paths backend/app/models.py .aid-o/config/policies/x.yaml plugins/aid-orchestrator/agents/implementer.md)"
   [ "$status" -eq 0 ]; [ "$output" = "full" ]
   run bash "$SEL" for-paths "$f" "$(_paths .aid-o/plans/P099-x.md CHANGELOG.md)"
-  [ "$output" = "standard" ]
+  [ "$output" = "full" ]
   # release and release_quarantine carry no when_paths
   [ "$(yq '.gate_profiles.release | has("when_paths")' "$f")" = false ]
   [ "$(yq '.gate_profiles.release_quarantine | has("when_paths")' "$f")" = false ]

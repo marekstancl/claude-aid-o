@@ -48,6 +48,10 @@ source "$SCRIPT_DIR/lib/aid-stage-log.sh"
 source "$SCRIPT_DIR/lib/aid-ancillary.sh"
 # shellcheck source=lib/aid-test-tier.sh
 source "$SCRIPT_DIR/lib/aid-test-tier.sh"
+# shellcheck source=lib/aid-dispatch-contract.sh
+source "$SCRIPT_DIR/lib/aid-dispatch-contract.sh"   # aid_dispatch_repo_range_ok
+# shellcheck source=lib/aid-roots.sh
+source "$SCRIPT_DIR/lib/aid-roots.sh"               # aid_run_checkout_root, aid_state_root
 
 die() { echo "step-check: $*" >&2; exit "${2:-1}"; }
 usage() { sed -n '5,10p' "${BASH_SOURCE[0]}" | sed 's/^# *//'; }
@@ -73,9 +77,16 @@ for t in jq yq git sha256sum; do command -v "$t" >/dev/null 2>&1 || die "$t not 
 [[ "$CHECKPOINT" =~ ^cp[2367]$ ]] || die "--checkpoint must be cp2, cp3, cp6 or cp7" 2
 [[ -n "$EVID" ]] || die "--evidence-dir is required" 2
 [[ -f "$RULES_FILE" ]] || die "rules file not found: $RULES_FILE" 2
-ROOT="${ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || true)}"
-[[ -n "$ROOT" && -d "$ROOT/.git" || -f "$ROOT/.git" ]] || die "not inside a git repository (or --project-root is not one)" 2
 STATE="${STATE:-$EVID/fsm-state.yaml}"
+if [[ -z "$ROOT" ]]; then
+  ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  # A step or EPIC is diffed in the tree its run's branch is checked out in,
+  # wherever the check is run from.
+  if [[ -n "$ROOT" && "$CHECKPOINT" =~ ^cp[23]$ ]]; then ROOT="$(aid_run_checkout_root "$STATE" "$ROOT")" || exit 2; fi
+fi
+[[ -n "$ROOT" && -d "$ROOT/.git" || -f "$ROOT/.git" ]] || die "not inside a git repository (or --project-root is not one)" 2
+# the review config belongs to the state root (a linked worktree has none, or a stale copy)
+CFG_ROOT="$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")"
 PLAN_JSON="${PLAN_JSON:-$EVID/plan.json}"
 TIMELINE="$EVID/timeline.jsonl"
 case "$CHECKPOINT" in
@@ -127,6 +138,26 @@ else
   mapfile -t FILES < <(git_ diff --name-only "$RANGE")
   DIFF="$(git_ diff "$RANGE")"
   NUMSTAT="$(git_ diff --numstat "$RANGE")"
+fi
+# ── 1b. the other repositories the step declares (P100 Step 4) ──────────────
+# An absolute allowed path inside another git repository is reviewed with the
+# step: the step's return names its commits there (repo_commits), and a
+# declared repository the return names no commits in is reported, never skipped.
+OTHER_MISSING=()
+if [[ "$CHECKPOINT" == cp2 && -f "$PLAN_JSON" ]]; then
+  ret="$EVID/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON")/return.json"
+  declare -A seen_repo=(); root_phys="$(cd "$ROOT" && pwd -P)"
+  while IFS= read -r ap; do
+    d="$ap"; while [[ ! -d "$d" && "$d" != / ]]; do d="$(dirname "$d")"; done
+    repo="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" || continue
+    [[ "$repo" != "$root_phys" && -z "${seen_repo[$repo]:-}" ]] || continue
+    seen_repo[$repo]=1
+    r="$(jq -r --arg r "$repo" 'first(.repo_commits[]? | select(.repo == $r) | .range) // ""' "$ret" 2>/dev/null || true)"
+    aid_dispatch_repo_range_ok "$repo" "$r" || { OTHER_MISSING+=("$repo"); continue; }
+    while IFS= read -r f; do [[ -n "$f" ]] && FILES+=("${repo}/${f}"); done < <(git -C "$repo" diff --name-only "$r")
+    DIFF+=$'\n'"$(git -C "$repo" diff "$r")"
+    NUMSTAT+=$'\n'"$(git -C "$repo" diff --numstat "$r")"
+  done < <(jq -r --argjson s "$STEP" '.steps[$s].allowed_paths[]? | select(startswith("/"))' "$PLAN_JSON")
 fi
 LINES="$(awk '{a+=$1+$2} END{print a+0}' <<<"$NUMSTAT")"
 
@@ -199,7 +230,7 @@ done <<<"$NUMSTAT"
 # ── 5. verdict ──────────────────────────────────────────────────────────────
 _cfg() {  # <yq path> <default>: the project's review-checkpoints.yaml first, then the plugin default
   local v="" f
-  for f in "$ROOT/.aid-o/config/policies/review-checkpoints.yaml" "$PLUGIN_DIR/defaults/policies/review-checkpoints.yaml"; do
+  for f in "$CFG_ROOT/.aid-o/config/policies/review-checkpoints.yaml" "$PLUGIN_DIR/defaults/policies/review-checkpoints.yaml"; do
     [[ -f "$f" ]] || continue
     v="$(yq -r "$1 // \"\"" "$f" 2>/dev/null || true)"; [[ -n "$v" && "$v" != null ]] && break; v=""
   done
@@ -211,11 +242,16 @@ STREAMLINED=false
 [[ -f "$STATE" ]] && STREAMLINED="$(yq -r '.streamlined_mode // false' "$STATE" 2>/dev/null || echo false)"
 
 verdict="" reason=""
-if (( ${#FILES[@]} == 0 )); then verdict=no_change; reason="the range $RANGE has no changes"
+if (( ${#OTHER_MISSING[@]} > 0 )); then verdict=review; reason="declared repository with no commits named in the step's return (repo_commits): ${OTHER_MISSING[*]}"
+elif (( ${#FILES[@]} == 0 )); then verdict=no_change; reason="the range $RANGE has no changes"
 elif [[ "$STREAMLINED" == true ]]; then verdict=skip; reason="streamlined"
 elif (( ${#forbidden[@]} > 0 )); then verdict=review; reason="forbidden path touched: ${forbidden[*]}"
 elif (( ${#matched_rules[@]} > 0 )); then verdict="review+security"; reason="security pattern: ${matched_rules[*]}"
 elif (( ${#outside[@]} > 0 )); then verdict=review; reason="files outside the step's scope: ${outside[*]}"
+elif [[ -f "$CPDIR/rounds.json" ]] && jq -e '(.rounds // []) | length > 0' "$CPDIR/rounds.json" >/dev/null 2>&1; then
+  # A step that moved after a closed round is not skipped: the delta round of
+  # aid-review-round.sh confirms it (P100 Step 2).
+  verdict=review; reason="the step moved after a closed round; a delta round confirms it"
 elif [[ "$CHECKPOINT" != cp7 ]] && (( ${#FILES[@]} <= MAX_FILES && LINES <= MAX_LINES )); then verdict=skip; reason="${#FILES[@]} file(s), $LINES line(s), inside scope, no pattern matched"
 else verdict=review; reason="${#FILES[@]} file(s), $LINES line(s)"
 fi

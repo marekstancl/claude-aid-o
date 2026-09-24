@@ -57,6 +57,10 @@ plan_final:
     - ".aid-o/metrics/gate-runtime-baselines.yaml"
     - ".aid-o/metrics/gate-runtime-baselines.yaml.lock"
     - ".aid-o/work/plan-state/**"
+    # The lock files next to queue.yaml and counter.yaml carry a PID and change
+    # on every AID run; a project that tracks .aid-o/config sees them dirty.
+    # (Also in scripts/lib/aid-ancillary.sh _AID_ANCILLARY_LEGACY5.)
+    - ".aid-o/config/*.lock"
 
     # ── the broader runtime areas ───────────────────────────────────────────
     # Everything under these is orchestration bookkeeping, not delivery. The

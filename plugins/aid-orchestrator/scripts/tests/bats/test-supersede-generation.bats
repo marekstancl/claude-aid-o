@@ -22,7 +22,7 @@
 # FD-3 HYGIENE: every pipeline invocation runs with `3>&-`; no `run` is handed
 # a path that might not exist.
 # After any edit, verify the result count:
-#   bats --tap test-supersede-generation.bats | grep -cE '^(ok|not ok)'   # == 13
+#   bats --tap test-supersede-generation.bats | grep -cE '^(ok|not ok)'   # == 14
 
 load test-helpers.bash
 load generation-fixture.bash
@@ -152,6 +152,28 @@ _incomplete() {
   [ "$(jq -r '.plan_sha256' "$TX")" = "$(sha256sum "$PLAN" | awk '{print $1}')" ]
   # The archived pair is still on disk, untouched.
   [ -n "$(ls "$GEN"/transaction.json.superseded-* 2>/dev/null)" ]
+}
+
+@test "a transaction that generated nothing supersedes itself after a plan fix, with the three records; a partial one still refuses" {
+  run bash -c "cd '$PROJ' && AID_TEST_CP1_FAIL=1 bash '$PIPELINE' --plan '$PLAN' --queue-mode chain" 3>&-
+  [ "$status" -ne 0 ]
+  [ -f "$TX" ]
+  printf '\nThe plan fix after the refusal.\n' >> "$PLAN"
+  aid_fixture_seed_plan "$PROJ" "$PLAN" P099-multi.md >/dev/null
+  run bash -c "cd '$PROJ' && bash '$PIPELINE' --plan '$PLAN' --queue-mode chain" 3>&-
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"generated no phase and the plan identity changed"* ]]
+  local ta; ta="$(ls "$GEN"/transaction.json.superseded-* | head -1)"
+  [ -n "$ta" ]
+  ls "$GEN"/generation-superseded-"${ta##*.superseded-}".json >/dev/null
+  jq -e 'select(.event == "generation_superseded")' "$GEN/timeline.jsonl" >/dev/null
+  # the fresh transaction generated everything; a partial one is never archived by itself
+  rm -f "$GEN/receipt.json"
+  printf '\nA second edit.\n' >> "$PLAN"
+  aid_fixture_seed_plan "$PROJ" "$PLAN" P099-multi.md >/dev/null
+  run bash -c "cd '$PROJ' && bash '$PIPELINE' --plan '$PLAN' --queue-mode chain" 3>&-
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"supersede-generation --plan"* ]]
 }
 
 # ─── the refusals ────────────────────────────────────────────────────────

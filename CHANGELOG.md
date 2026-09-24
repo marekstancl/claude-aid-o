@@ -3,6 +3,57 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.107.0] — 2026-09-24
+
+### Added
+- **Tabulka „When AID refuses"** — `skills/pipeline.md` má řádek pro každý důvod odmítnutí, na který agenti za poslední měsíc narazili (`tests/fixtures/refusals/measured-2026-09.tsv`): co znamená, zda je chybná práce nebo se posunul stav, příkaz, který pokračuje, a zda jde o rozhodnutí PM; nahrazuje starou „force_override Usage Policy" a test hlídá, aby tabulka a kód neodjely.
+- **Spor o nález kroku i EPICu jde k PM** — `aid-review-round.sh dispute` funguje i na CP2/CP3; nález ve sporu blokuje dál a uvolní ho jen `--pm accepted` s kartou Rozhodnutí, která nález cituje, a s odpovědí PM zapsanou v auditu hooků po té kartě.
+- **Administrativní uzavření plánu odkudkoli** — `plan-close --administrative --reason` uzavře plán sloučený mimo `plan-finalize` z libovolného otevřeného stavu (P097 stál v `PLAN_GATES`); dosud neprošlo ani vlastní kontrolou argumentů, takže nikdy nefungovalo.
+- **Kontrola plánu pozná řádky EPIC, které start plánu odmítne** — `aid-plan-lint.sh` čte řádky `**EPIC N: …**` stejným parserem, jakým start plánu zapisuje manifest (plán bez nich, `**EPIC 1**` bez dvojtečky, číslování mimo 1..K); dřív plán prošel revizí i generováním a spadl až při startu s holým „rc=2", teď start i řekne proč. Návod k psaní plánu (`skills/plan-writing.md` §Phase Markers) už netvrdí, že jednofázový plán řádek nepotřebuje; parser přeskakuje ukázky v bloku kódu jako generátor.
+- **Rozhodnutí PM ke sloučení zapíše příkaz** — `aid-plan-fsm.sh plan-record-decision <plan> MERGE|FIX|ABORT --by pm` uloží rozhodnutí ve tvaru, který sloučení přijme, do adresáře pokusu; karta uzávěrky ho uvádí před `plan-merge-to-main`. Dřív karta radila soubor, který sloučení odmítlo, a rozhodnutí se skládalo ručně podle schématu.
+- **Kontrola kroku přes další repozitáře** — krok, který mění soubory v jiném deklarovaném repozitáři, vrací jejich rozsah (`repo_commits`) a kontrola kroku ho reviduje; repozitář bez vráceného rozsahu je nález, ne přeskočení.
+
+### Changed
+- **Každé odmítnutí, na které agenti narazili, končí řádkem `next:`** — příkaz se skutečnými cestami běhu, který pokračuje, a odkaz na řádek tabulky; `--force` jmenují jen řádky, kde jde o rozhodnutí PM.
+- **Revizní kolo není slepá ulička** — krok, který se posune po prošlém kole, potvrdí delta kolo nad novými commity (nepočítá se do `rounds_default`, nechce override); kontrola kroku po uzavřeném kole už nevrátí „skip", který by nešel zapsat.
+- **Nález vadný jen formou se neztratí** — rozhodčí ho nechá v seznamu jako `form_invalid` a verdikt kroku ho počítá jako otevřený.
+- **Autor plánu pouští kontrolu, kterou pouští generování** — `/aid-plan` volá `aid-generation-readiness.sh`, která proběhne celá a vypíše všechny nálezy najednou; pravidlo patra nové sady je jedna funkce (`lib/aid-scoping.sh`), kterou volá lint i generátor.
+- **Obnovení napůl dodaného plánu negeneruje dodané EPICy** — fáze, jejíž sloučení git prokáže, se zapíše jako `delivered` a znovu se negeneruje ani nezařazuje; prázdná generační transakce se po opravě plánu sama odloží se třemi auditními záznamy.
+- **Rozsah pokrývá, co kroky legitimně dělají** — backlog a hlášení pro AID jdou commitnout vždy; `amend-scope` funguje i po posledním kroku a pro absolutní cesty, které plán deklaruje; návrat kroku umí deklarovat smazaný soubor.
+- **Kandidát plánu se posuzuje tam, kde žije** — jeden resolver zaznamenaného worktree (`aid_plan_recorded_worktree`) místo tří kopií; čerstvost rozhodnutí v briefu PM, adresář evidence v `aid-plan-diff.sh` a `plan_path` ve stavu běhu vycházejí z něj, commit kroku jde jen na větev jeho EPICu a agent kroku větve nepřepíná.
+- **Konec plánu převezme brány z běhu EPICu na stejném stromu** — brána s tokenem běhu (`{base_commit}` …) běží vždy znovu; běh bran, který spadl před reportem, už plán nezablokuje navždy.
+- **Vizuální společník má dveře** — brainstorming s tématem pro uživatele říká, zda jde o obrazovku, a obrazovka se navrhuje z podkladu postaveného z aplikace; výjimka PM se zapíše i s důvodem, který stránka ukáže.
+- **Uzavření plánu uklidí** — stromy a větve kroků, které sloučení obsahuje, a pracovní stromy brainstormingu a generování; co zůstalo, je jmenované v `cleanup.json`. Audit hooků se rotuje po 20 MB a časy plánu se přes rotaci čtou celé, nebo „neměřeno".
+- **Konec tahu blokuje jen krok, který session sama spustila** — pravidlo `turn_step_open` pozná krok session podle hlavičky `Dispatch Contract (version …)` v jejím přepisu, ne podle času; dvě souběžné session v jednom projektu (tady P100 a P101) už jedna druhé konec tahu neodmítají.
+- **Kontrola kroku hodnotí strom, ve kterém běh je** — `aid-step-check.sh` a `aid-review-round.sh` (cp2/cp3) bez `--project-root` diffují worktree, kde je vyzvednutá větev běhu, ne kopii, ze které je kontroler spustil (P101: kontrola z hlavní kopie zapsala „beze změn" a krok prošel bez revize); nastavení revize čtou z hlavní kopie a `increment-step` se přesměruje do worktree plánu jako ostatní přechody.
+- **Revize plánu se ptá na pořadí za běhu a na převzaté předpoklady** — role `feasibility_deps` má dvě otázky navíc: kdy za běhu vzniká soubor, který krok čte, a zda je předpoklad převzatý z hlášení nebo backlogu ověřený příkazem v dnešním kódu.
+- **Výpisy revize říkají, co se stalo** — kolo kontroly plánu hlásí „valid; open blockers: N" místo „pass"; řádek souhrnu hned za počtem kol uvede „codex→claude N×", když za Codex odpovídal Claude; revizor vidí číslo kroku z plánu (index v závorce); nález, který PM zamítl (`--pm accepted`), je ve výpisu i v `semantic-review-final.json` „dismissed by the PM", ne „fixed", a nepočítá se revizorovi jako opravený.
+- **Revizor už nedostává falešné „zápis mimo rozsah"** — odpověď zapsaná do adresáře revizního kola (`evidence/…/cp2|cp3|cp6|cp7/…`) není zápis kroku.
+- **Změna registru vynucení vybere 12 sad, ne celou sadu testů** — `aid-select-tests.sh` mapuje `defaults/enforcement-registry.yaml` na sady, které ho čtou.
+- **Runner řekne, které testy spadly** — u červené sady vypíše každé `not ok` s pěti řádky pod ním (jinak konec výstupu), i bez `--verbose`.
+- **`AID-WAIT:` platí i pro agenta na pozadí** — autonomní běh smí skončit tah, dokud agent nebo příkaz spuštěný na pozadí neohlásil konec.
+
+### Fixed
+- **Konec plánu kontroluje čistotu stromu plánu, ne hlavní kopie** — rozdělaná práce jiného okna v hlavní kopii už nezablokuje verdikt READY (poslední kus důvodu, proč P097, P099 a P101 končily ručně); totéž platí pro posouzení, zda se kandidát od revize změnil.
+- **Čísla IMP přiděluje AID** — `aid-fsm.sh alloc imp-id` se zámkem, za nejvyšším číslem, které backlog už uvádí (ručně vybraná čísla se ve dvou oknech srazila třikrát); kontrola plánu B6 u citovaného IMP už nevaruje.
+- **Spadlá brána na konci plánu jmenuje, co spadlo, a jak to zopakovat samostatně** (u testů i konkrétní sady).
+- **`done-advance` přesune soubor EPICu do archivu sám**, až když ostatní podmínky projdou; zmizelo varování „review_profile unverifiable" u každého EPICu a rada smazat report bran, který neexistuje.
+- **Bezpečnostní vzor `skipped_test` už nechytá `sys.exit(`**, kontrola plánu B3 nehlásí mazání souboru, který plán sám zakládá.
+- **CONTRIBUTING: pořadí vydání, které pre-push pustí** (lokální značka → push main → ověření nainstalovaného pluginu → push značky → GitHub release s poznámkami z CHANGELOGu); hlášení pro AID se zapisují jedním blokem.
+- **Upgrade `/aid-init` nezúží bránu EPICu** — starý `gate_profile_defaults.epic` (např. `full`) se přenese do `default_profile`; dřív se z něj stal `standard` a brána EPICu v agents prošla bez testů projektu (ACTA by na to narazila při dalším upgradu).
+- **Po uzavření plánu zůstane index hlavní kopie čistý** — potvrzenka, která už leží na disku, se převezme; dřív se ukazovala jako smazaná a zároveň nová a další commit v main by ji tiše smazal.
+- **Commit kroku nevynechá soubor potichu** — soubor, který projekt ignoruje (`docs/`), se commitne; soubor z jiného repozitáře se jmenuje s pokynem k `repo_commits`.
+- **Nález přesunutý do backlogu už neblokuje EPIC** — platí poslední trasa nebo uzavření nálezu.
+- **Konec plánu řekne, na které kontrole spadl** (např. `git_clean: …`); zámky v `.aid-o/config/*.lock` nejsou nepořádek ve stromu.
+- **`prepare-plan --bump auto` se u plánu zeptá** místo tichého „žádné vydání": commity kroků nemají typ, ze kterého by šlo číslo odvodit. Návod k plánu: poslední krok píše obsah vydání, ne čísla verzí.
+- **Brány spuštěné bez `--profile` to řeknou** a jmenují tabulku profilů (P101 tak běžel přes 20 min všechno); `aid-run.md` uvádí jako kanonickou cestu `advance-to-gates`.
+- **Háček konce tahu přijme kartu podle `/opt/eco/CLAUDE.md`** (Rozhodnutí N, možnosti A/B, Doporučuju), ne jen kartu AIDu; falešné „mimo rozsah" u nové složky ve worktree zmizelo.
+- **Drobnosti:** řádek zástupu za Codex uvádí focus; vzor `plan_diff` nerozlišuje velikost písmen; `run-all-tests.sh --only` bere název i bez přípony; test revizního kola kazí jen kopii schématu, nikdy strom pluginu.
+- **Pre-push pozná `chore(release):`** — v projektu bez nastaveného verzování uzavře rozsah i commit ve tvaru conventional commits; `fix(release):` zůstává oprava.
+- **Časy z auditu už neujíždějí o hodinu** — `jq` starší než 1.7 čte čas se `Z` v místním pásmu; výpočet času plánu (čekání na PM do „teď") a počet odmítnutí pro připomínku hlášení pro AID ho teď počítají v UTC, jako to FSM dělá od P037.
+
+**Poznámka pro projekty:** commit hook se aktualizuje dalším `/aid-init`. `scripts/` pluginu má 176 581 řádků (před P100, tedy ve 2.106.0: 174 931): +1 650, z toho +873 v testech a +777 v pravidlech výše; žádná nová sada testů.
+
 ## [2.106.0] — 2026-09-24
 
 ### Added

@@ -89,6 +89,18 @@ _hook_esc() {
   printf '%s' "$s"
 }
 
+# _hook_audit_rotate — once per dispatch: rotate the audit at 20 MB, keeping two
+# generations (.1, .2); it grew to 27 MB unrotated (IMP-646). aid_hook_audit_files
+# (lib/aid-review-summary.sh) reads all three.
+_hook_audit_rotate() {
+  local file="${AID_HOOK_AUDIT:-}"
+  [[ -n "$file" ]] || { file="$(aid_session_store_dir hooks)/audit.jsonl" || return 0; }
+  if [[ "$(stat -c %s "$file" 2>/dev/null || echo 0)" -gt "${AID_HOOK_AUDIT_MAX_BYTES:-20971520}" ]]; then
+    mv -f "${file}.1" "${file}.2" 2>/dev/null; mv -f "$file" "${file}.1" 2>/dev/null
+  fi
+  return 0
+}
+
 _hook_audit() {
   local event="$1" rule="$2" outcome="$3" reason="${4-}"
   local file="${AID_HOOK_AUDIT:-}"
@@ -253,6 +265,7 @@ run_rule() {
 # --------------------------------------------------------------------------
 dispatch() {
   local event="$1" input="" ; input="$(cat)"
+  _hook_audit_rotate
 
   # THE CHEAP REFUSALS COME FIRST. A dispatch that cannot run a rule — hooks
   # switched off, a missing dependency, an unreadable registry, an event nobody

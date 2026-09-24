@@ -33,8 +33,6 @@ source "${SCRIPT_DIR}/lib/common.sh"
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 # shellcheck source=lib/aid-ac-extract.sh
 source "${SCRIPT_DIR}/lib/aid-ac-extract.sh"   # aid_ac_extract_criteria
-# shellcheck source=lib/aid-test-tier.sh
-source "${SCRIPT_DIR}/lib/aid-test-tier.sh"   # AID_TEST_TIER_TAG_RE
 source "${SCRIPT_DIR}/lib/aid-roots.sh"        # aid_state_root — the SAME root the runner reads
 check_prerequisites
 
@@ -842,23 +840,6 @@ all_step_scoping_meta=""
 # "-->" when parsing block values — this exact token is the parse contract.
 AID_ARROW_SENTINEL='@@AID_ARROW@@'
 
-# P081 Step 10 — has THIS project adopted tiers? The same rule the runner
-# uses, for the same reason: a project that has never tagged a suite must
-# generate exactly as it does today, so taking a plugin upgrade never
-# invalidates a plan that was correct when it was written. Answered once per
-# generation, from the tree being generated, not from the installed plugin.
-_p081_tiers_adopted() {
-  if [[ -z "${_P081_TIERS_ADOPTED:-}" ]]; then
-    if grep -rlq --include='test-*.bats' --include='test-*.sh' \
-         "$AID_TEST_TIER_TAG_RE" . 2>/dev/null; then
-      _P081_TIERS_ADOPTED=yes
-    else
-      _P081_TIERS_ADOPTED=no
-    fi
-  fi
-  [[ "$_P081_TIERS_ADOPTED" == "yes" ]]
-}
-
 # The plan's step sections, read once: the Parallel Group column comes from the
 # same field reader aid-plan-parallel-check.sh validates with (P099 Step 6), so
 # generation writes exactly the wave readiness accepted.
@@ -1021,48 +1002,9 @@ for sn in "${phase_steps[@]}"; do
     if ! _split_paths="$(_aid_split_path_entry "${BASH_REMATCH[2]}")"; then
       error_exit "Invalid Files entry in step ${sn}: ${_raw_file}. Canonical multi-path form: \`a\` + \`b\` — description." 1
     fi
-    # P081 Step 10 — the budget on the way IN. A `Test:` bullet naming a suite
-    # that does not exist yet is a NEW suite, and a new suite with no declared
-    # tier is how a portfolio grows untiered. Only new ones need the
-    # declaration: a bullet pointing at an existing file inherits that file's
-    # tag, which aid-test-tier-lint.sh already guards, so adding a case to an
-    # existing suite — the common and encouraged move — stays free.
-    if [[ "$_raw_file" == Test:* ]] && _p081_tiers_adopted; then
-      # WHICH PATHS ARE SUITES comes first, and the tier is only judged for a
-      # bullet that names one. Judging the declaration first refused a
-      # fixture-only bullet that happened to carry a tier-shaped parenthetical
-      # — a rule firing on something it explicitly exempts.
-      #
-      # The pattern is anchored on `tests/`, not on `*/tests/`: a root-relative
-      # `tests/test-new.sh` is the ordinary shape in a consumer project, and
-      # `*/tests/` requires a directory component before it, so the refusal
-      # would never have fired there at all.
-      _names_new_suite=false
-      _names_suite=false
-      while IFS= read -r _tpath; do
-        [[ -n "$_tpath" ]] || continue
-        case "$_tpath" in
-          tests/test-*.sh|*/tests/test-*.sh|tests/bats/test-*.bats|*/tests/bats/test-*.bats) ;;
-          *) continue ;;
-        esac
-        _names_suite=true
-        [[ -e "$_tpath" ]] || _names_new_suite=true
-      done <<< "$_split_paths"
-
-      if [[ "$_names_suite" == "true" ]]; then
-        # `x="$(f)"` under `set -e` EXITS when f returns non-zero, and "no tier
-        # declared" is exactly a non-zero return — so the rc is captured on the
-        # `||` side or this refusal would kill generation silently instead of
-        # reporting anything.
-        _tier_rc=0
-        _declared_tier="$(_aid_files_bullet_tier "$_raw_file")" || _tier_rc=$?
-        if [[ "$_tier_rc" -eq 2 ]]; then
-          _dropped_bullets+="  step ${sn}: Test bullet declares tier '${_declared_tier}', which is not one of t0/t1/t2: \"${_raw_file}\""$'\n'
-        elif [[ "$_tier_rc" -ne 0 && "$_names_new_suite" == "true" ]]; then
-          _dropped_bullets+="  step ${sn}: Test bullet names a NEW suite with no tier: \"${_raw_file}\" — add (tier: t0|t1|t2)"$'\n'
-        fi
-      fi
-    fi
+    # The tier of a new suite (lib/aid-scoping.sh, the rule the plan lint reports).
+    _tier_finding="$(_aid_test_bullet_tier_finding "$_raw_file" .)" \
+      || _dropped_bullets+="  step ${sn}: ${_tier_finding}: \"${_raw_file}\""$'\n'
     while IFS= read -r _path; do
       [[ -n "$_path" ]] && step_files+="${_path}"$'\n'
     done <<< "$_split_paths"

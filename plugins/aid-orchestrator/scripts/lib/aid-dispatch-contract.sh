@@ -135,6 +135,8 @@ aid_dispatch_contract_build() {
   jq --arg v "$version" '. + {version: $v,
       return_shape: {contract_version: "<the version above, quoted back>",
                      changed_files: ["<every file you changed, repo-relative>"],
+                     deleted_files: ["<a file you deleted that the step may fold away; omit when none>"],
+                     repo_commits: [{repo: "<absolute path of another repository the step declares>", range: "<base>..<head> of your commits there"}],
                      gates: [{name: "<gate>", result: "pass|fail|skipped"}],
                      step_status: "done|blocked"}}' <<< "$body_json" > "$out" \
     || { echo "contract: could not write ${out}" >&2; return 1; }
@@ -207,6 +209,13 @@ aid_dispatch_contract_extract() {
   [[ -n "$block" ]] || { echo "contract: ${out} carries no \`${_AID_DCT_RETURN_FENCE}\` block" >&2; return 1; }
   jq -c 'if type == "object" then . else error("not an object") end' <<< "$block" 2>/dev/null \
     || { echo "contract: the ${_AID_DCT_RETURN_FENCE} block in ${out} is not one JSON object" >&2; return 1; }
+}
+
+# aid_dispatch_repo_range_ok <repo> <base>..<head> — both ends are commits in
+# <repo>. The return validator and the step check ask the same question.
+aid_dispatch_repo_range_ok() {
+  [[ "$2" == *..* ]] && git -C "$1" rev-parse -q --verify "${2%%..*}^{commit}" >/dev/null 2>&1 \
+    && git -C "$1" rev-parse -q --verify "${2##*..}^{commit}" >/dev/null 2>&1
 }
 
 # _aid_dc_path_allowed <path> <allowed-json> <own_evidence_suffix> — bash glob
@@ -297,12 +306,19 @@ aid_dispatch_contract_validate() {
     || _add reasons "the return's gates are not a list of {name, result: pass|fail|skipped}"
   jq -e '.step_status | IN("done","blocked")' "$r" >/dev/null 2>&1 || _add reasons "the return's step_status is not done|blocked"
 
-  # Artifacts: on the disk, not in the declaration.
-  local expected declared a
+  # Artifacts: on the disk, not in the declaration. A declared deletion
+  # (deleted_files) of an expected artifact inside the allowed paths is the
+  # step folding a file away, not a missing one (P100 Step 4); a deletion is a
+  # change like any other, so it counts as declared and is scope-checked below.
+  local expected declared deleted a allowed evidence
   expected="$(jq -r '.expected_artifacts[]? // empty' "$c")"
-  declared="$(jq -r '.changed_files[]? // empty' "$r")"
+  deleted="$(jq -r '.deleted_files[]? // empty' "$r")"
+  declared="$(jq -r '.changed_files[]? // empty' "$r")"$'\n'"$deleted"
+  allowed="$(aid_dispatch_contract_allowed "$c")"
+  evidence="steps/$(jq -r '.step_id // ""' "$c")"
   while IFS= read -r a; do
     [[ -n "$a" ]] || continue
+    [[ $'\n'"$deleted"$'\n' == *$'\n'"$a"$'\n'* ]] && _aid_dc_path_allowed "$a" "$allowed" "$evidence" && continue
     # An ABSOLUTE expected artifact is checked where it actually is, not glued
     # behind the tree root. A step whose output lives in another repository
     # (a plan may declare one deliberately) otherwise produced
@@ -314,6 +330,15 @@ aid_dispatch_contract_validate() {
     [[ -e "$_a_path" ]] || _add missing "$a"
   done <<< "$expected"
   [[ "$missing" != "[]" ]] && _add reasons "expected artifacts are missing on disk: $(jq -r 'join(", ")' <<< "$missing")"
+
+  # Commits the step made in another repository (repo_commits, read by the step
+  # check) must exist there: a range that does not resolve is refused, named.
+  local rc_repo rc_range
+  while IFS=$'\t' read -r rc_repo rc_range; do
+    [[ -n "$rc_repo" ]] || continue
+    aid_dispatch_repo_range_ok "$rc_repo" "$rc_range" \
+      || _add reasons "repo_commits names ${rc_range} in ${rc_repo}, and it is not a <base>..<head> of commits there"
+  done < <(jq -r '.repo_commits[]? | [(.repo // ""), (.range // "")] | @tsv' "$r" 2>/dev/null)
 
   # The disk's own list of changes, when there is a git tree to ask. A file
   # changed but not declared is refused: the declaration is what the commit
@@ -341,9 +366,7 @@ aid_dispatch_contract_validate() {
 
   # Scope, over the declared list AND the disk's: every file outside the
   # allowed paths is named.
-  local allowed evidence f
-  allowed="$(aid_dispatch_contract_allowed "$c")"
-  evidence="steps/$(jq -r '.step_id // ""' "$c")"
+  local f
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
     if [[ "$f" == *"/steps/step_"* ]] && ! _aid_dc_path_allowed "$f" '[]' "$evidence"; then
@@ -368,7 +391,8 @@ aid_dispatch_contract_validate() {
 
 # ---------------------------------------------------------------------------
 # aid_dispatch_contract_commit <tree_root> <contract.json> <return.json> <message>
-#   The controller's per-step commit: VALIDATES the return against the
+#   The controller's per-step commit, on the run's task branch (or the step's
+#   own step/<id> branch in a wave): VALIDATES the return against the
 #   contract first (a rejected return is not committed — exit 1 with the
 #   report), then stages ONLY the files the return names, commits them in
 #   <tree_root> and prints the commit SHA. An agent that changed nothing
@@ -381,24 +405,51 @@ aid_dispatch_contract_validate() {
 # ---------------------------------------------------------------------------
 aid_dispatch_contract_commit() {
   local root="${1:?contract: tree root required}" c="${2:?contract: contract file required}" r="${3:?contract: return file required}" msg="${4:?contract: commit message required}"
+  # A step commit lands on the run's task branch, or on its own step/<id> branch
+  # in a wave — never on plan/*, main or a detached HEAD (ACTA 31. 8.: a step
+  # commit landed on plan/P020).
+  # The run's EPIC is the evidence directory the contract sits in
+  # (<evidence>/<epic>/<run>/steps/<step>/contract.json); a contract kept
+  # elsewhere can only be held to some task branch.
+  local branch sid epic want; branch="$(git -C "$root" branch --show-current 2>/dev/null)"; sid="$(jq -r '.step_id // ""' "$c")"
+  epic="$(realpath "$c")"; epic="${epic%/*/steps/*}"; epic="${epic##*/}"
+  want='task/*/main'; [[ "$epic" == E-* ]] && want="task/${epic}/main"
+  # shellcheck disable=SC2053  # $want is a pattern only when the EPIC is unknown
+  if [[ "$branch" != $want && "$branch" != "step/${sid}" ]]; then
+    echo "contract: ${root} is on '${branch:-detached HEAD}', not the run's task branch — nothing is committed; switch back: git -C ${root} checkout task/<epic>/main" >&2
+    return 1
+  fi
   local report
   if ! report="$(aid_dispatch_contract_validate "$c" "$r" "$root")"; then
     echo "contract: the return is not accepted, nothing is committed — $(jq -r '.reasons | join("; ")' <<< "$report" 2>/dev/null)" >&2
     return 1
   fi
-  local -a files=()
+  local -a files=() forced=()
   local f
   # Present on disk, or tracked and deleted — a declared deletion is a
-  # change like any other and is staged as one.
+  # change like any other and is staged as one. An accepted absolute path is
+  # another repository's (validation holds this tree's to relative paths): it
+  # is named, never dropped silently.
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
-    if [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then files+=("$f"); fi
-  done < <(jq -r '.changed_files[]? // empty' "$r")
-  if [[ "${#files[@]}" -eq 0 ]]; then
+    if [[ "$f" == /* ]]; then
+      echo "contract: not committed here: ${f} (another repository — commit it there and name it in the return's repo_commits)" >&2
+      continue
+    fi
+    [[ "$f" == .aid-o/* ]] && continue   # AID's own state is never the step's delivery
+    if [[ -f "${root}/${f}" ]]; then forced+=("$f")
+    elif [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then files+=("$f"); fi
+  done < <(jq -r '.changed_files[]?, .deleted_files[]? // empty' "$r")
+  if [[ "$(( ${#files[@]} + ${#forced[@]} ))" -eq 0 ]]; then
     echo "nothing to commit"
     return 0
   fi
-  git -C "$root" add -A -- "${files[@]}" 2>/dev/null || { echo "contract: git add refused in ${root}" >&2; return 1; }
+  # -f only for a declared regular file: one the project gitignores (docs/ in
+  # AID itself) is still the step's delivery. A directory is added without it,
+  # so its ignored contents (build output, .env) never ride along.
+  { [[ "${#forced[@]}" -eq 0 ]] || git -C "$root" add -f -- "${forced[@]}"; } 2>/dev/null \
+    && { [[ "${#files[@]}" -eq 0 ]] || git -C "$root" add -A -- "${files[@]}"; } 2>/dev/null \
+    || { echo "contract: git add refused in ${root}" >&2; return 1; }
   if git -C "$root" diff --cached --quiet; then
     echo "nothing to commit"
     return 0

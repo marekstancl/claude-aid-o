@@ -174,8 +174,15 @@ Register the run and its scope — this also creates the brainstorm's own workin
 copy and prints it as `workdir:`:
 
 ```bash
-bash {plugin_path}/scripts/aid-brainstorm-state.sh init P{NNN} --scope roadmap|multi_plan|user_visible|single_plan
+bash {plugin_path}/scripts/aid-brainstorm-state.sh init P{NNN} --scope roadmap|multi_plan|user_visible|single_plan \
+  [--topic-kind ui|other [--reason "<why this is not a screen>"]]
 ```
+
+A `user_visible` run passes `--topic-kind`: `ui` when the topic is UI-visual (the
+visual companion is auto-loaded), `other` otherwise, with a reason the design page
+shows the PM. The design gate refuses a `user_visible` run without a kind, and a
+`ui` run without a `proposal.json` basis built from the application
+(`aid_ui_proposal_build`, `skills/visual-companion/SKILL.md`).
 
 `user_visible` is anything that changes behaviour a user meets — a flag, an
 output format, a message. `single_plan` is only for work nobody outside the code
@@ -274,41 +281,32 @@ Delegate to `skills/plan-writing.md` (Mode A — Post-Brainstorming).
 Pass all approved sections. Plan written to `.aid-o/plans/P{NNN}-{topic}.md`.
 Output: `=== Step 8/9: Document ===`
 
-**Files-shape lint (automatic — run BEFORE CP1, immediately after the plan is
-written).** This is early feedback, not the enforcement of record: the hard
-gate is the deterministic pre-flight inside `aid-plan-to-epic.sh` (which CANNOT
-be skipped). Run:
+**The generation check (automatic — run BEFORE CP1, immediately after the plan
+is written).** The author runs the same check generation runs, so a plan that
+passes here is not refused there:
 
 ```bash
-bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" ".aid-o/plans/P{NNN}-{topic}.md"
+bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total <EPIC count>
 ```
 
-If it exits non-zero (ERROR-tier, or STRICT-tier on a `lifecycle_strict` plan),
-fix the exact Files entries it names — per the grammar in `skills/plan-writing.md`
-— and re-run until it passes, BEFORE proceeding to CP1. Do not hand a plan with
-blocking Files-shape violations to CP1 or to EPIC generation. The plan review
-(Step 9) hands the reviewers the plan check's warnings; it does not replace
-either check.
+It runs every part and prints every finding before one verdict: the Files-shape
+lint (`aid-plan-lint.sh`, the tier of a new suite included), the deterministic
+plan check (`aid-plan-check.sh`, report in `.aid-o/work/evidence/P{NNN}/plan-check.json`),
+the waves (`aid-plan-parallel-check.sh`) and the dependency graph. A `FAIL`
+line points to its row in `skills/pipeline.md` §"When AID refuses". Fix what it
+names — per the grammar in `skills/plan-writing.md` — and re-run until it
+passes, BEFORE CP1. The plan review (Step 9) hands the reviewers the plan
+check's warnings; it does not replace the check.
 
-**Deterministic plan check (automatic — the same moment, the same rule).** The
-lint is one part of it. Run:
-
-```bash
-bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" ".aid-o/plans/P{NNN}-{topic}.md" \
-  --json ".aid-o/work/evidence/P{NNN}/plan-check.json"
-```
-
-It decides everything about the plan that needs no model — the graph of
+The plan check decides everything about the plan that needs no model — the graph of
 `Dependencies:`, step counts, forbidden phrases, paths and symbols against the
 repository, `Resources Verification` claims, criteria already true on HEAD —
 and hands the reviewers its warnings and the list of identifiers the repository
 does not know. It never executes a \`cmd:\` criterion unless you pass
 \`--run-cmds\` after reading every one of them: a plan is model-written text. `BLOCK` lines must be repaired before CP1; a `lifecycle_strict`
 plan is blocked by every one of them, a legacy plan only by what would break
-generation. The check is what `aid-generation-readiness.sh` runs, so a plan
-that skips it here is refused there. After EVERY revision of the plan, run it
-again with the snapshot of the plan as it was and the steps the revision was
-allowed to touch:
+generation. After EVERY revision of the plan, run the plan check again with the
+snapshot of the plan as it was and the steps the revision was allowed to touch:
 
 ```bash
 bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "<plan>" --snapshot "<plan-before-revision>" --fixes "3,7"
@@ -344,12 +342,9 @@ Write an exhaustive implementation plan from specification or topic.
 6. **Plan assembly** — write section by section per `skills/plan-writing.md` template
 7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (28 checks: 16 original + #17 + 17a-e + #18 + #19 + 20a-c + #21; eight are band-scoped — see `skills/plan-writing.md`)
 8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
-8a. **Files-shape lint (automatic, before CP1)** — run
-    `bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" ".aid-o/plans/P{NNN}-{topic}.md"`.
-    On a non-zero exit, fix the exact Files entries it names (per the grammar in
-    `skills/plan-writing.md`) and re-run until it passes, BEFORE CP1. Early
-    feedback only — the hard gate is the deterministic pre-flight in
-    `aid-plan-to-epic.sh`, which cannot be skipped.
+8a. **The generation check (automatic, before CP1)** — run
+    `bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total <EPIC count>`,
+    as in Step 8 above: every finding at once; fix and re-run until it passes, BEFORE CP1.
 9. **Plan review (CP1)** — run "Plan review (CP1)" below, from item 1.
 
 Output: plan path, step count, quality gate results, plan review verdict.
@@ -446,7 +441,7 @@ command accountable, so an unrecordable archive is not performed.
 
 ## Plan review (CP1)
 
-Both modes end here, once `aid-plan-check.sh` passes on the written plan. Six
+Both modes end here, once `aid-generation-readiness.sh` passes on the written plan. Six
 reviewer roles (`skills/plan-review-roles.md`) answer the same packet in at most
 two rounds by default; `aid-review-round.sh` runs the rounds and
 `aid-cp1-gate.sh` refuses EPIC generation until the evidence is complete. Every
@@ -459,11 +454,11 @@ skipped. The gate then passes with a notice.
 `<plan>` is the plan path, `<plan_id>` its frontmatter id, and `R` stands for
 `"$AID_PLUGIN_PATH/scripts/aid-review-round.sh"`.
 
-1. The deterministic check passes and its report matches the plan (a revision
-   makes it stale; rerun it after every edit):
+1. The generation check passes and its plan-check report matches the plan (a
+   revision makes it stale; rerun it after every edit):
 
    ```bash
-   bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" <plan> --json .aid-o/work/evidence/<plan_id>/plan-check.json
+   bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" <plan> --total <EPIC count>
    ```
 
 2. Prepare round 1. It prints the round directory and one prompt per reviewer:
@@ -788,7 +783,7 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-09-23
+**Last Updated:** 2026-09-24
 
 ## Plan mode
 

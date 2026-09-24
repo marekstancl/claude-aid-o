@@ -149,6 +149,10 @@ forces a full rewrite. Read first, draw second.
      are what the mockup must reproduce 1:1 (same px/rem) — never eyeballed sizes.
    - List anything PM wants to add that **isn't in the data shape today** —
      this needs backend decision before drawing
+   - **The application's shared UI components** (buttons, tables, cards, form
+     fields, layout shells) — the proposal is built from them; a new component
+     needs a stated reason. `aid_ui_proposal_build` (lib/aid-ui-proposal.sh) writes
+     the proposal the design gate asks for.
 4. Get PM confirmation that the inventory matches their mental model
 5. **MANDATORY — show current state first:** Before drawing any proposed changes,
    render the component/page **as it currently looks** (from the real code/data shapes
@@ -163,9 +167,10 @@ forces a full rewrite. Read first, draw second.
    the delta. Always: current look + changes applied within it.
 6. Only THEN start companion mockups with the above baseline included
 
-**If PM declines** (e.g. "kresli, je to jen brainstorm"): proceed with
-mockups but explicitly state that data shapes are placeholders and mockups
-won't survive contact with the real component.
+**The one exception** is the PM saying they do not want the real application
+used: record it on the run with `aid-brainstorm-state.sh topic-kind <plan> other
+--reason "<the PM's words>"` (the design page shows it) and say that every data
+shape in the mockups is a placeholder.
 
 ## When to Use (within `/aid-plan brainstorm`)
 
@@ -444,4 +449,4 @@ Visual Companion output integrates with the P027 Visual Assets Pipeline as the 4
 - Frame template (CSS reference): `{plugin_path}/lib/brainstorm-server/frame-template.html`
 - Helper script (client-side): `{plugin_path}/lib/brainstorm-server/helper.js`
 
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-09-24

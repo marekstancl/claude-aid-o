@@ -836,7 +836,8 @@ main() {
         _pc_say "The plan is exhausted, but this script does not close plans. Closing is a"
         _pc_say "decision, and in this repository it is three commands:"
         _pc_say "  aid-plan-fsm.sh plan-finalize ${plan_id} --stage <sync|freeze|gates|inputs|review|c4|summary>"
-        _pc_say "  aid-plan-fsm.sh plan-merge-to-main ${plan_id} --decision <path>"
+        _pc_say "  aid-plan-fsm.sh plan-record-decision ${plan_id} MERGE --by pm   (prints the decision's path)"
+        _pc_say "  aid-plan-fsm.sh plan-merge-to-main ${plan_id} --decision <that path>"
         _pc_say "  aid-plan-fsm.sh plan-close ${plan_id}"
       else
         _pc_say "ask:     ${peeked}"

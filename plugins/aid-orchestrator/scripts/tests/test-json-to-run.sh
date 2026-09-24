@@ -446,6 +446,27 @@ else
   fail "strict plan blocks init without receipt" "exit=$actual_exit; stderr=$(head -1 "$strict_err")"
 fi
 
+# ===========================================================================
+# TEST 14: plan_path is the plan in the state root, not the generation scratch
+# tree source_plan names (P100 Step 7).
+# ===========================================================================
+run_test "plan_path recorded from the state root, not the scratch generation tree"
+mkdir -p "$TMPDIR_ROOT/scratch/.aid-o/plans" "$WORK_REPO/.aid-o/plans"
+printf '%s\n' '---' 'id: P778' '---' '# A plan' > "$TMPDIR_ROOT/scratch/.aid-o/plans/P778-x.md"
+cp "$TMPDIR_ROOT/scratch/.aid-o/plans/P778-x.md" "$WORK_REPO/.aid-o/plans/P778-x.md"
+jq --arg source "$TMPDIR_ROOT/scratch/.aid-o/plans/P778-x.md" '.source_plan = $source' "$PLAN_JSON" > "$TMPDIR_ROOT/scratch.json"
+out_dir="$(make_output_dir "t14")"
+actual_exit=0
+"$SCRIPT_UNDER_TEST" --plan-json "$TMPDIR_ROOT/scratch.json" --run-template "$RUN_TEMPLATE" --epic "$EPIC_FILE" --output-dir "$out_dir" --run-id "R-SCRATCH" \
+  >/dev/null 2>&1 || actual_exit=$?
+git checkout -q main 2>/dev/null || true
+recorded="$(grep '^plan_path:' "$WORK_REPO/.aid-o/work/evidence/E-TEST-001-1_1/R-SCRATCH/fsm-state.yaml" 2>/dev/null | sed 's/^plan_path: *//; s/"//g')"
+if [[ "$actual_exit" -eq 0 && "$recorded" == "$WORK_REPO/.aid-o/plans/P778-x.md" ]]; then
+  pass "plan_path points into the state root"
+else
+  fail "plan_path points into the state root" "exit=$actual_exit recorded='$recorded'"
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

@@ -283,3 +283,13 @@ row two Stop any rule_context)"
   [[ "$output" != *"OK-INJECTED"* ]]
   grep -q 'no owner' "$AUDIT"
 }
+
+@test "an audit file over the limit rotates on the next event, keeping two generations" {
+  write_registry "$(row ok UserPromptSubmit test rule_ok)"
+  printf 'old-2\n' > "$AUDIT.1"; head -c 200 /dev/zero | tr '\0' x > "$AUDIT"
+  AID_HOOK_AUDIT_MAX_BYTES=100 run_hook UserPromptSubmit
+  [ "$status" -eq 0 ]
+  [ "$(cat "$AUDIT.2")" = old-2 ]
+  [ "$(head -c 3 "$AUDIT.1")" = xxx ]
+  [ "$(wc -l < "$AUDIT")" -ge 1 ] && grep -q '"event":"UserPromptSubmit"' "$AUDIT"
+}

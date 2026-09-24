@@ -152,7 +152,9 @@ aid_finding_recorded() {
 # steps): <fingerprint>\t<source_checkpoint>\t<target>.
 #
 # A `backlog:` or `resolved:` route is a decision, not an open item — it never
-# blocks. A route to a DIFFERENT epic blocks that one, not this one.
+# blocks. A route to a DIFFERENT epic blocks that one, not this one. The LAST
+# route or resolve of a fingerprint is its state: a later backlog route lifts an
+# earlier epic one, and a re-route after a resolve opens it again.
 #
 # Exit 2 when the journal exists but cannot be parsed: "unreadable" and
 # "nothing open" must never look alike.
@@ -166,13 +168,12 @@ aid_finding_open_for_epic() {
     return 2
   fi
   jq -rs --arg epic "$epic_id" '
-    ( [ .[] | select(.op == "resolve") | .fingerprint ] | map({(.): true}) | add // {} ) as $done
+    [ .[] | select(.op == "route" or .op == "resolve") ]
+    | group_by(.fingerprint) | map(last)          # group_by is stable: last = latest line
     | [ .[]
         | select(.op == "route")
         | select( ((.target | startswith("step:")) and (.epic_id == $epic))
-                  or (.target == "epic:" + $epic) )
-        | select($done[.fingerprint] | not) ]
-    | unique_by(.fingerprint + .source_checkpoint)
+                  or (.target == "epic:" + $epic) ) ]
     | .[]
     | "\(.fingerprint)\t\(.source_checkpoint)\t\(.target)"
   ' "$file"

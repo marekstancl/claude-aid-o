@@ -172,11 +172,15 @@ role checks every interface the plan relies on.
 4. Does a step consume an output, field or artifact that no earlier step produces?
 5. Does any step depend on a tool, key or behaviour that another step removes earlier or creates later?
 6. Does the plan use a library or external API method, parameter or response shape that the version in use does not have?
+7. For every file or artifact a step reads at run time, which phase or command of the running pipeline writes it, and does that happen before the step runs?
+8. Is every premise the plan takes over from a report, a backlog item or an earlier plan checked by a command against today's code, and does the plan name that command?
 
 ### Stop rule
 
 A blocker is a reused interface that does not exist as assumed, a consumer that
-reads before its producer exists, or an unlisted caller of a deleted file.
+reads before its producer exists (at run time too: a file read before the
+phase that writes it), an unlisted caller of a deleted file, or a premise taken
+over from a report that today's code contradicts.
 
 ## Role: reuse
 

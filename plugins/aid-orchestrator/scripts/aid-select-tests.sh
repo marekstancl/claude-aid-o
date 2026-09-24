@@ -245,6 +245,18 @@ map_path_to_tests() {
     "${PLUGIN_PREFIX}/scripts/aid-evidence-verify.sh")
       printf 'bash\t%s/scripts/tests/test-evidence-verify.sh\n' "$PLUGIN_PREFIX"
       ;;
+    "${PLUGIN_PREFIX}/defaults/enforcement-registry.yaml")
+      # Every suite that reads the shipped registry (grep at authoring time;
+      # test-evidence-verify through aid-registry-ttl-guard.sh).
+      local s
+      for s in committed-source force-framework-integration gate-command-required owned-jobs-integration \
+               queue-registry-rows registry-ttl supersede-recovery; do
+        printf 'bats\t%s/scripts/tests/bats/test-%s.bats\n' "$PLUGIN_PREFIX" "$s"
+      done
+      for s in control-boundary enforcement-registry-cites evidence-verify gates-hygiene review-successors; do
+        printf 'bash\t%s/scripts/tests/test-%s.sh\n' "$PLUGIN_PREFIX" "$s"
+      done
+      ;;
     "${PLUGIN_PREFIX}/defaults/schemas/"*)
       printf 'bash\t%s/scripts/tests/test-protocol-validate.sh\n' "$PLUGIN_PREFIX"
       ;;

@@ -182,6 +182,19 @@ PLANMD
   fi
 }
 
+# P100 Step 7: a relative --evidence-dir given inside a plan worktree names the
+# state root's evidence dir (.aid-o lives only in the primary checkout).
+P=$TMPDIR_ROOT/proj
+git init -q -b main "$P" && git -C "$P" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+git -C "$P" worktree add -q -b plan/P900 "$P/.aid-worktrees/plan-P900" 2>/dev/null
+mkdir -p "$P/.aid-o/work/evidence/P900/R-1"
+( cd "$P/.aid-worktrees/plan-P900" && bash "$PLAN_DIFF" --plan "$FIXTURE_PLAN" --evidence-dir .aid-o/work/evidence/P900/R-1 >/dev/null 2>&1 )
+if [[ -f "$P/.aid-o/work/evidence/P900/R-1/plan-diff.json" ]]; then
+  _pass "relative evidence dir from a plan worktree resolves to the state root"
+else
+  _fail "relative evidence dir from a plan worktree did not resolve to the state root"
+fi
+
 echo ""
 echo "=========================================="
 TOTAL=$(( PASS + FAIL ))

@@ -176,7 +176,7 @@ emit_deferred() {
   # four statuses the round's own verdict counts).
   local last_round open
   last_round="$(ls -d "${evidence_dir}"/cp3/round-* 2>/dev/null | sort -V | tail -1)"
-  open="$(jq -r '.findings[] | select(.status | IN("open", "disputed", "routed", "carried")) | "\(.severity): \(.claim)"' \
+  open="$(jq -r '.findings[] | select(.status | IN("open", "disputed", "routed", "carried", "form_invalid")) | "\(.severity): \(.claim)"' \
     "${last_round}/merged.json" 2>/dev/null | head -5 || true)"
   if [[ -n "$open" ]]; then
     printf 'Z revize EPICu — otevřené nálezy:\n'

@@ -25,6 +25,7 @@ setup() {
 JSON
   printf 'epic_id: E-par\nrun_id: R-par\nstate: EXECUTE\ncurrent_step: 0\ntotal_steps: 2\n' > "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   STATE="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  git checkout -q -b task/E-par/main   # a step commit lands on the run's task branch
 }
 teardown() { teardown_test_evidence_dir; }
 
@@ -71,6 +72,13 @@ _agent() {
   [ "$(git show --name-only --format= "$sha0")" = "a.txt" ]
   [ "$(git show --name-only --format= "$sha1")" = "b.txt" ]
   [ -z "$(git status --porcelain --untracked-files=no)" ]
+}
+
+@test "evidence: a step commit on another EPIC's task branch is refused" {
+  git checkout -q -b task/E-other/main
+  d0="$(_agent 0 a.txt)"
+  run aid_dispatch_contract_commit . "$d0/contract.json" "$d0/return.json" "step 1: a"
+  [ "$status" -eq 1 ]; [[ "$output" == *"not the run's task branch"*"task/<epic>/main"* ]]
 }
 
 @test "evidence: a step that changed nothing makes no commit, and says so" {

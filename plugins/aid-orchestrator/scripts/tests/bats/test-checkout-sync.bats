@@ -29,6 +29,15 @@ teardown() { rm -rf "$T"; }
   [[ -z "$(git status --porcelain)" ]]                  # index matches too
 }
 
+@test "a committed file already on disk untracked and identical (the close's receipt) is taken in, the index ends clean" {
+  echo new > b.txt                                      # written before the plumbing commit
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"brought forward"* ]]
+  [[ "$(cat a.txt)" == "two" ]]
+  [[ -z "$(git status --porcelain)" ]]
+}
+
 @test "an overlapping local edit is not overwritten — a loud warning names the command instead" {
   echo mine > a.txt
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"

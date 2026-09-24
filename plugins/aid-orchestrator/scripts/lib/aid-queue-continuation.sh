@@ -240,11 +240,23 @@ _aid_qc_jobs_busy() {
   return 1
 }
 
+# _aid_qc_bg_pending <transcript> — true when a tool call of this session that
+# ran with run_in_background (an Agent or a Bash) has no completion notification
+# yet: the harness answers each with a <task-notification> naming the call's
+# <tool-use-id> (IMP-647).
+_aid_qc_bg_pending() {
+  # Two passes over the transcript whatever its length: the ids launched in the
+  # background, minus the ids a notification answered.
+  [[ -n "$(comm -23 \
+    <(jq -r 'select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and .input.run_in_background? == true) | .id' "$1" 2>/dev/null | sort -u) \
+    <(grep -o '<tool-use-id>[^<]*' "$1" | cut -d'>' -f2 | sort -u))" ]]
+}
+
 # ---------------------------------------------------------------------------
 # aid_hook_rule_queue_continuation_stop — Stop handler.
 #   2 refuse the stop (work is left and budget remains)
 #   3 let the turn end: not this session's plan, a hand-over card, a declared
-#     wait on a live background job, the budget spent, or the rule could not
+#     wait on a live AID job or a background call still unreported, the budget spent, or the rule could not
 #     read what it needs (it never refuses without knowing)
 # The reason line starts `outcome=<refused|handed_over|wait|budget_spent|
 # not_auto> plan=<id>`, which the dispatcher writes into the audit line.
@@ -282,8 +294,9 @@ aid_hook_rule_queue_continuation_stop() {
     return 3
   fi
   rm -f "$tmp"
-  if [[ "$(printf '%s' "$last" | grep -v '^[[:space:]]*$' | tail -1)" == AID-WAIT:* ]] && _aid_qc_jobs_busy "$root" "$plan"; then
-    echo "outcome=wait plan=${plan}: a declared wait on a live background job" >&2
+  if [[ "$(printf '%s' "$last" | grep -v '^[[:space:]]*$' | tail -1)" == AID-WAIT:* ]] \
+     && { _aid_qc_jobs_busy "$root" "$plan" || _aid_qc_bg_pending "$transcript"; }; then
+    echo "outcome=wait plan=${plan}: a declared wait on a live background job or agent" >&2
     return 3
   fi
 
@@ -299,7 +312,7 @@ aid_hook_rule_queue_continuation_stop() {
     return 3
   fi
   printf '%s\n' "$((n + 1))" > "$counter" || { echo "outcome=not_auto plan=${plan}: the counter cannot be written" >&2; return 3; }
-  echo "outcome=refused plan=${plan}: AID — ${plan} runs autonomously (${state}) and this turn ended with work left (continuation $((n + 1)) of ${budget}). Continue the /aid-run --auto procedure from this state. To hand over, end with a Decision or Blocked card; to wait on a background gate job, end with a line \`AID-WAIT: <what>\`." >&2
+  echo "outcome=refused plan=${plan}: AID — ${plan} runs autonomously (${state}) and this turn ended with work left (continuation $((n + 1)) of ${budget}). Continue the /aid-run --auto procedure from this state. To hand over, end with a Decision or Blocked card; to wait on a background gate job or agent, end with a line \`AID-WAIT: <what>\`." >&2
   return 2
 }
 

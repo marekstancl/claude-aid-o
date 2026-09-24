@@ -382,7 +382,7 @@ compute_final_review() {
       fi ;;
     fail)
       last="$(jq -r '[.rounds[].round] | max' "$index")"
-      local open; open="$(jq -r '[.findings[] | select((.status | IN("open", "disputed", "routed", "carried")) and (.severity == "blocker" or .severity == "major")) | "[\(.severity)] \(.claim) (\(.evidence))"] | join("; ")' "${EVIDENCE_DIR}/${cp}/round-${last}/merged.json" 2>/dev/null)"
+      local open; open="$(jq -r '[.findings[] | select((.status | IN("open", "disputed", "routed", "carried", "form_invalid")) and (.severity == "blocker" or .severity == "major")) | "[\(.severity)] \(.claim) (\(.evidence))"] | join("; ")' "${EVIDENCE_DIR}/${cp}/round-${last}/merged.json" 2>/dev/null)"
       add_input final_review "$artifact" "blocked" "the ${cp} round closed with verdict fail" false
       add_blocker final_review "blocking" "the whole-delivery review left open: ${open:-see ${artifact}}" ;;
     *)
@@ -452,7 +452,7 @@ run_verification_input() {
 
   [[ -f "$EVIDENCE_VERIFY" ]] || return 0
 
-  local vr_tmp="" vr_exit=0 worst=""
+  local vr_tmp="" vr_exit=0 worst="" failed=""
   vr_tmp="$(mktemp "${TMPDIR:-/tmp}/aid-relpol-vr-XXXXXX.json" 2>/dev/null)" || vr_tmp=""
   [[ -z "$vr_tmp" ]] && { VERIFICATION_REASON="verifier_tool_error mktemp_failed"; return 0; }
 
@@ -473,7 +473,7 @@ run_verification_input() {
   # (the healthy-fixture case of test-release-policy.bats has been red for
   # exactly this reason).
   AID_PROJECT_ROOT="$PROJECT_ROOT" bash "$EVIDENCE_VERIFY" "$_verify_subject" "$RUN_ID" \
-    --out "$vr_tmp" --at-head --tree "$PROJECT_ROOT" "${_candidate[@]}" >/dev/null 2>&1 || vr_exit=$?
+    --out "$vr_tmp" --at-head --tree "$TREE_ROOT" "${_candidate[@]}" >/dev/null 2>&1 || vr_exit=$?
 
   case "$vr_exit" in
     2|10|20)
@@ -487,9 +487,12 @@ run_verification_input() {
           | if ($s | any(. == "fail")) then "fail"
             elif ($s | any(. == "unverifiable")) then "unverifiable"
             else "pass" end' "$vr_tmp" 2>/dev/null)" || worst=""
+        # which checks, so a refusal names what to fix (the report is a temp file)
+        failed="$(jq -r --arg w "$worst" '[.verification_report.checks[]? | select(.status == $w)
+          | "\(.id): \(.detail // "" | tostring | gsub("\n"; " ") | .[0:200])"] | join("; ")' "$vr_tmp" 2>/dev/null)" || failed=""
         case "$worst" in
-          fail)         VERIFICATION_VERDICT="fail";         VERIFICATION_REASON="one or more evidence checks failed at HEAD" ;;
-          unverifiable) VERIFICATION_VERDICT="unverifiable"; VERIFICATION_REASON="one or more evidence checks unverifiable" ;;
+          fail)         VERIFICATION_VERDICT="fail";         VERIFICATION_REASON="evidence checks failed at HEAD: ${failed:-unnamed}" ;;
+          unverifiable) VERIFICATION_VERDICT="unverifiable"; VERIFICATION_REASON="evidence checks unverifiable: ${failed:-unnamed}" ;;
           pass)         VERIFICATION_VERDICT="pass";         VERIFICATION_REASON="all evidence checks passed at HEAD" ;;
           *)            VERIFICATION_VERDICT="unverifiable"; VERIFICATION_REASON="verifier_tool_error unparseable_report" ;;
         esac
@@ -508,15 +511,18 @@ run_verification_input() {
 # ---------------------------------------------------------------------------
 _usage_both() {
   echo "Usage (EPIC mode): aid-release-policy.sh <epic_id> <run_id> [--out <path>]" >&2
-  echo "Usage (PLAN mode): aid-release-policy.sh --plan <plan_id> --run-id <run_id> --evidence-dir <path> --candidate-sha <sha> --target-ref <ref> --target-head-sha <sha> [--out <path>]" >&2
+  echo "Usage (PLAN mode): aid-release-policy.sh --plan <plan_id> --run-id <run_id> --evidence-dir <path> --candidate-sha <sha> --target-ref <ref> --target-head-sha <sha> [--tree <plan worktree>] [--out <path>]" >&2
 }
 
 main() {
   # --- Arg parsing (no eval) ---
   local out_path="" _positional=()
-  local plan_opt="" run_id_opt="" evidence_dir_opt="" candidate_opt="" target_ref_opt="" target_head_opt=""
+  local plan_opt="" run_id_opt="" evidence_dir_opt="" candidate_opt="" target_ref_opt="" target_head_opt="" tree_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --tree)
+        [[ $# -lt 2 ]] && { echo "aid-release-policy: --tree requires a path" >&2; _usage_both; exit 2; }
+        tree_opt="$2"; shift 2 ;;
       --out)
         [[ $# -lt 2 ]] && { echo "aid-release-policy: --out requires a path" >&2; exit 2; }
         out_path="$2"; shift 2 ;;
@@ -558,6 +564,9 @@ main() {
   else
     PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || PROJECT_ROOT="."
   fi
+  # The tree whose cleanliness the verifier judges: the plan's worktree when the
+  # caller names it (the state root is the primary, where other work may sit).
+  TREE_ROOT="${tree_opt:-$PROJECT_ROOT}"
 
   if [[ "$MODE" == "plan" ]]; then
     if [[ "${#_positional[@]}" -ne 0 ]]; then

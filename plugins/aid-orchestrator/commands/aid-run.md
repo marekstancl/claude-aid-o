@@ -261,10 +261,13 @@ the command, or asserts a gate result nobody collected is not this carve-out —
 carve-out exists to distinguish itself from.
 
 ### Gate execution:
-- Use `--state-file` and `--report-file` flags with `aid-run-gates.sh`:
+- The canonical call is `bash {plugin_path}/scripts/aid-fsm.sh advance-to-gates <state_file>`:
+  it resolves the gate profile for the run's diff and runs the gates (skills/pipeline.md §5).
+- Calling the runner directly is for debugging and crash recovery, and then names the profile
+  (without `--profile` it runs every gate and says so):
   ```
   bash {plugin_path}/scripts/aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> <timeline_file> \
-    --state-file <state_file> --report-file <evidence_dir>/gates/gates_report.json
+    --state-file <state_file> --report-file <evidence_dir>/gates/gates_report.json --profile <name>
   ```
 - `--state-file` ensures gates only run when FSM is in GATES state
 - `--report-file` persists `gates_report.json` (required by `GATES→DONE` precondition)
@@ -407,6 +410,12 @@ audit line).
    (the `fix_of:` dispatch in the instruction below), a new step check, then
    `prepare --round 2`: the confirmation round asks only the reporters of what
    stayed open. `fail` after the last round → the PM card.
+   A step that moves after a `pass` (a later commit on the same step) is
+   confirmed the same way — a new step check, then `prepare --round <n+1>`: a
+   delta round over the commits since, asking every role, which the round
+   budget does not count and which needs no override.
+   A finding the adjudicator could not accept on form (`form_invalid` in
+   `merged.json`) is open like any other: fix it, or dispute it.
 5. The PM card after an exhausted round is the **Decision required** card of
    `skills/communication.md` (built with `scripts/lib/aid-decision-card.sh`):
    what stayed open (from `merged.json`, blockers first), and the options —
@@ -419,6 +428,14 @@ audit line).
    ```
    The override records the PM's words, the head sha and the time; it never
    changes a verdict.
+6. A finding the step's role believes wrong (the plan's criterion is wrong,
+   the claim is false) is disputed, never edited: `dispute <review> --round K
+   --fingerprint <fp> --reason "<why>"` marks it `disputed` and it keeps
+   blocking. Only the PM clears it: render a **Decision** card that quotes the
+   finding's fingerprint, wait for the answer, then
+   `dispute … --pm accepted --finding-card <card file> --reason "<the PM's words>"`
+   — refused without a PM prompt in the hook audit after the card. The round's
+   verdict is recomputed; `--pm rejected` leaves it open.
 
 <!-- adapter:begin -->
 # Claude reviewers of a review round — controller instruction
@@ -774,7 +791,7 @@ worktree (`.aid-worktrees/plan-<id>`) on `plan/<id>` for the whole close.
 
 | # | Command | What it does | It refuses when |
 |---|---------|--------------|-----------------|
-| 0 | `bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" prepare-plan <plan> --bump auto --plan-branch plan/<plan>` | the version commit, BEFORE the freeze, so the candidate already contains the release metadata | the tree is dirty; HEAD is not the plan branch |
+| 0 | `bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" prepare-plan <plan> --bump minor\|patch --plan-branch plan/<plan>` (`auto` asks when the plan's commits carry no type) | the version commit, BEFORE the freeze, so the candidate already contains the release metadata | the tree is dirty; HEAD is not the plan branch |
 | 1 | `<fsm> plan-finalize <plan> --stage freeze` | merges the target branch into `plan/<plan>`, freezes the candidate, mints `R-<plan>-final-<N>` | an EPIC is not terminal; the merge conflicts (exit 4, state CONFLICT); the tree is dirty |
 | 2 | `<fsm> plan-finalize <plan> --stage gates` | the plan-final gate run; a gate that passed in the previous attempt and whose `inputs:` did not change is copied (`reused_from`), not executed | a gate fails (the report names it); the branch moved off the candidate |
 | 3 | `<fsm> plan-finalize <plan> --stage produce` | review profile, plan-diff, acceptance evidence, and what the round reads (`cp7/`) | gates have not passed; the candidate moved |
@@ -819,7 +836,7 @@ fix path once first; escalate when it does not apply or did not help.
 |---------|----------|------------------|
 | a gate is red and the failure is real | the fix path above | **Blocked** card: the gate, what it printed, the smallest fix |
 | a cp7 blocker is still open after a fixed attempt | one more fix when the finding changed; else stop | **Decision** card: FIX (what it costs) / accept with a recorded dispute / ABORT |
-| the project disputes a finding | `<round> dispute` is CP1-only: do not edit the finding | **Decision** card quoting the finding and its evidence |
+| the project disputes a finding | `<round> dispute` (CP1, CP2, CP3): do not edit the finding | **Decision** card quoting the finding and its evidence |
 | the branch was rewritten (`fix-class.json` reason `rewritten_branch`) | nothing is carried; run the full attempt | none, unless it repeats: then **Blocked** |
 | `verification_report` blocks | read its `git_clean` evidence: commit or discard the named tracked file | **Blocked** card naming the file |
 | `final_review_disabled` | switch `cp7_plan_final_review` back on | **Decision** card; only the PM's words go into `--stage decide --waive-final-review --reason "<words>"`, and the page then says the plan was NOT read as a whole |
@@ -828,8 +845,19 @@ fix path once first; escalate when it does not apply or did not help.
 page and the card from the two files it wrote, publish the page with the
 Artifact tool and present the card verbatim (`commands/aid-plan.md`, "Plan-final
 / close boundary"); state no number yourself. MERGE runs
-`<fsm> plan-merge-to-main <plan> --decision <file>`; FIX is the fix path; ABORT is
+`<fsm> plan-record-decision <plan> MERGE --by pm` (it writes the decision into the
+attempt's directory and prints the path), then
+`<fsm> plan-merge-to-main <plan> --decision <that path>`; FIX is the fix path; ABORT is
 `plan-abort` with the PM's reason.
+
+**The close cleans up.** `plan-close` removes the plan's own worktree, the step
+trees and `step/*` branches its merge contains, and its `brainstorm-`/`generation-`
+scratch trees; a tree with uncommitted work, a branch the merge does not contain
+and a tree outside `.aid-worktrees/` are kept and named, and `cleanup.json` in the
+plan-final evidence lists both. A plan built or merged outside `plan-finalize`
+(it stopped in `PLAN_GATES`, say) is closed from where it stands with
+`<fsm> plan-close <plan> --administrative --reason "<the PM's words>"`; the close
+is recorded as administrative, never as an ordinary one.
 
 `legacy_epic_release_mode` has no plan close: each EPIC releases at its own DONE,
 and the whole-delivery review the decision reads there is the EPIC's own cp3 round.
@@ -939,4 +967,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-09-23
+**Last Updated:** 2026-09-24

@@ -200,3 +200,47 @@ _delivered() {
   # the abort branch sends nothing: the block sits inside `close_mode == merge`
   [ "$(sed -n '/if \[\[ "\$close_mode" == "merge" \]\]; then/,/The PM.s second message/p' "$FSM" | tail -3 | grep -c 'second message')" -eq 1 ]
 }
+
+# --- P100 Step 9: a plan merged by hand, stopped in PLAN_GATES ---------------
+# _gates_plan <root> — P900 on plan_branch, moved to PLAN_GATES, its branch merged
+# into main by hand; a wave's step tree and branch, and a brainstorm scratch tree.
+_gates_plan() {
+  local R="$1"
+  git -C "$R" init -q -b main; git -C "$R" config user.email t@t; git -C "$R" config user.name t
+  printf '.aid-o/work/\n.aid-worktrees/\n' > "$R/.gitignore"; git -C "$R" add -A; git -C "$R" commit -qm base
+  local base; base="$(git -C "$R" rev-parse HEAD)"
+  git -C "$R" branch plan/P900
+  ( cd "$R" && export AID_PLAN_STATE_PROJECT_ROOT="$R" AID_PLAN_MANIFEST_PROJECT_ROOT="$R"
+    source "$PLUGIN_ROOT/scripts/lib/aid-plan-state.sh"; source "$PLUGIN_ROOT/scripts/lib/aid-plan-manifest.sh"
+    plan_state_init P900 plan_branch plan/P900 main >/dev/null
+    for s in EPIC_INTEGRATION PLAN_SYNC PLAN_GATES; do plan_state_transition P900 "$(plan_state_get P900 plan_state)" "$s" >/dev/null; done
+    plan_manifest_init P900 plan/P900 main "$base" "$base" plan_branch >/dev/null )
+  git -C "$R" worktree add -q -b step/s1 "$R/.aid-worktrees/step-s1" plan/P900
+  git -C "$R/.aid-worktrees/step-s1" commit -q --allow-empty -m "step 1"
+  git -C "$R" checkout -q plan/P900; git -C "$R" merge -q --no-edit step/s1; git -C "$R" checkout -q main
+  git -C "$R" merge -q --no-edit plan/P900
+  git -C "$R" worktree add -q --detach "$R/.aid-worktrees/brainstorm-P900" main
+  git -C "$R" worktree add -q --detach "$R/.aid-worktrees/generation-P900" main
+  echo wip > "$R/.aid-worktrees/generation-P900/wip.txt"
+  git -C "$R" worktree add -q -b step/s9 "$R/.aid-worktrees/step-s9" main
+  git -C "$R/.aid-worktrees/step-s9" commit -q --allow-empty -m "an abandoned retry"
+  git -C "$R" branch step/other main          # another plan's wave, just started
+  mkdir -p "$R/.aid-o/work/evidence/E-900-1_1/R-1"
+  echo '{"steps":[{"id":"s1"},{"id":"s9"}]}' > "$R/.aid-o/work/evidence/E-900-1_1/R-1/plan.json"
+}
+
+@test "P100: --administrative closes a hand-merged plan from PLAN_GATES, cleans what it contains, keeps and names the rest; a normal close is refused there" {
+  local R="$BATS_TEST_TMPDIR/p"; mkdir -p "$R"; _gates_plan "$R"
+  run bash -c "cd '$R' && AID_TEST_MODE=1 bash '$FSM' plan-close P900 --project-root '$R'"
+  [ "$status" -ne 0 ]; [[ "$output" == *"--administrative"* ]]
+  run bash -c "cd '$R' && AID_TEST_MODE=1 bash '$FSM' plan-close P900 --project-root '$R' --administrative --reason 'P900 was merged by hand outside plan-finalize'"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(yq -r .plan_state "$R/.aid-o/work/plan-state/P900/plan-state.yaml")" = CLOSED ]
+  [ -z "$(git -C "$R" branch --list 'step/s1')" ]
+  [ ! -d "$R/.aid-worktrees/step-s1" ] && [ ! -d "$R/.aid-worktrees/brainstorm-P900" ]
+  [ -n "$(git -C "$R" branch --list 'step/s9')" ] && [ -n "$(git -C "$R" branch --list 'step/other')" ]
+  jq -e '[.kept[].path] | index("step/s9") != null' "$R/.aid-o/work/evidence/P900/cleanup.json"
+  jq -e '(.removed | length) >= 3' "$R/.aid-o/work/evidence/P900/cleanup.json"
+  jq -e '.kept[] | select(.path | endswith("generation-P900")) | .why == "uncommitted work"' "$R/.aid-o/work/evidence/P900/cleanup.json"
+  [[ "$output" == *"kept: $R/.aid-worktrees/generation-P900 — uncommitted work"* ]]
+}

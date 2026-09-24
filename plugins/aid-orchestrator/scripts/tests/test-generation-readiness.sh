@@ -56,5 +56,34 @@ else
   bad "explicit + Files paths both survive EPIC generation" "one path was lost"
 fi
 
+# The shapes three plans passed the author's old check with and were refused at
+# generation (P100 Step 3): readiness reports every finding in one run.
+# ACTA P024 — prose "No dependencies", numbered criteria, a strict plan.
+sed -e 's/^status: draft$/status: draft\nlifecycle_strict: true/' \
+    -e 's/^\*\*Dependencies:\*\*$/**Dependencies:** No dependencies — can start independently./' \
+    -e '/^- Depends on: Step 1 (architect contracts)$/d' \
+    -e 's/^- \[ \] All domain invariants enforced$/1. All domain invariants enforced/' "$F" > "$tmp/p024.md"
+out="$(bash "$READY" "$tmp/p024.md" --total 3 2>&1)" && bad "P024 shape" "accepted" || {
+  n="$(grep -c '^READINESS: FAIL' <<< "$out")"
+  if [[ "$n" -ge 2 ]] && grep -q "dependency_grammar" <<< "$out" && grep -q "STRICT" <<< "$out"; then
+    ok "P024 shape: the lint and the dependency findings in one run"
+  else bad "P024 shape" "expected several FAIL lines, got: $(grep READINESS <<< "$out")"; fi
+}
+# WAN P101 — no EPIC markers: every unassigned step is named at once.
+sed '/^\*\*EPIC [0-9]/d' "$F" > "$tmp/p101.md"
+out="$(bash "$READY" "$tmp/p101.md" --total 3 2>&1)" && bad "P101 shape" "accepted" || {
+  [[ "$(grep -c 'is not assigned to an EPIC marker' <<< "$out")" -eq 6 ]] \
+    && ok "P101 shape: all six unassigned steps in one run" || bad "P101 shape" "not every step named"
+}
+# This repository's P097 — a new suite without a tier, in a tiered workspace,
+# plus a wave collision: both reported, the tier rule even for a legacy plan.
+ws="$tmp/ws"; mkdir -p "$ws/.aid-o/plans" "$ws/tests/bats"
+printf '#!/usr/bin/env bats\n# aid-tier: t0\n' > "$ws/tests/bats/test-existing.bats"
+sed -e 's|^- Create: `src/domain/rules.py`$|- Test: `tests/bats/test-brand-new.bats` — the rules|' "$F" > "$ws/.aid-o/plans/p097.md"
+out="$(bash "$READY" "$ws/.aid-o/plans/p097.md" --total 3 2>&1)" && bad "P097 shape" "accepted" || {
+  grep -q "ERROR a Test bullet naming a NEW suite must declare its tier" <<< "$out" \
+    && ok "P097 shape: the tier of a new suite is an author-time error" || bad "P097 shape" "$(grep -i tier <<< "$out")"
+}
+
 echo "Results: $pass passed, $fail failed"
 (( fail == 0 ))

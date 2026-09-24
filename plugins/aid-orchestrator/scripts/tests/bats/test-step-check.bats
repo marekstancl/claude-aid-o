@@ -6,7 +6,8 @@
 # empty range is no_change; a forbidden path or a file outside scope is never
 # a skip; a security pattern is review+security; handlers, test tiers,
 # streamlined runs, cp3 and cp6 ranges; the step_check event binds the file;
-# a recorded closed round is never overwritten by a re-run.
+# a recorded closed round is never overwritten by a re-run; a second declared
+# repository is reviewed from the step's return.
 # Origin: P094 Step 3 (step review rebuild).
 
 setup() {
@@ -91,6 +92,14 @@ _json() { jq -r "$1" "$E/$2/step-check.json"; }
   [ "$(_json '.security.matched_rules[0]' cp2/step-0)" = subprocess_shell_true ]
   [ "$(_json '.security.lines|length' cp2/step-0)" -ge 1 ]
 }
+@test "a sys.exit( line is not a skipped test; an xit( line is" {
+  printf 'import sys\nsys.exit(1)\n' >> "$R/src/app.py"; _commit s0 >/dev/null
+  run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 0 ]; [[ "$output" != *"+security"* ]]
+  printf "xit('pending', () => {})\n" >> "$R/src/app.py"; _commit s0b >/dev/null
+  rm -rf "$E/cp2"; run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 0 ]; [ "$(_json '.security.matched_rules[0]' cp2/step-0)" = skipped_test ]
+}
 @test "an upper-case secret assignment with spaces matches the secret rule (rules use \\s and are matched case-insensitively, testbed 2026-09-19)" {
   printf 'AWS_SECRET_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLEKEY0123456789"\n' >> "$R/src/app.py"; _commit s0 >/dev/null
   run _run --checkpoint cp2 --step 0
@@ -148,13 +157,51 @@ _json() { jq -r "$1" "$E/$2/step-check.json"; }
   [ "$(_json '.files.scope_declared' cp6)" = false ]
   [[ "$(_json .dod cp6)" == "Task: do the thing"* ]]
 }
-@test "a re-run over a directory holding a closed failing round is refused and the index is unchanged" {
+@test "a re-run over a directory holding a closed failing round never replaces it: a small diff is review, not a skip, and the index is unchanged" {
   echo "one" >> "$R/src/app.py"; _commit s0 >/dev/null
   mkdir -p "$E/cp2/step-0/round-1"
   jq -n '{verdict: "fail", head_sha: "x", rounds: [{round: 1, verdict: "fail"}]}' > "$E/cp2/step-0/rounds.json"
   run _run --checkpoint cp2 --step 0
-  [ "$status" -eq 1 ]; [[ "$output" == *"already records a closed round"* ]]
+  [ "$status" -eq 0 ]; [ "$(_json .verdict cp2/step-0)" = review ]
   [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = fail ]
+}
+@test "a change only in a second declared repository is reviewed from the return's repo_commits; without them the repository is reported" {
+  local O="$T/docs-repo"; mkdir -p "$O/guide"; git -C "$O" init -q -b main
+  git -C "$O" config user.email t@t; git -C "$O" config user.name t
+  echo a > "$O/guide/page.md"; git -C "$O" add -A; git -C "$O" commit -qm base; local ob; ob="$(git -C "$O" rev-parse HEAD)"
+  echo b >> "$O/guide/page.md"; git -C "$O" commit -qam step; local oh; oh="$(git -C "$O" rev-parse HEAD)"
+  jq --arg o "$O/guide" '.steps[2].allowed_paths = [$o]' "$E/plan.json" > "$E/p" && mv "$E/p" "$E/plan.json"
+  run _run --checkpoint cp2 --step 2
+  [ "$status" -eq 0 ]; [ "$(_json .verdict cp2/step-2)" = review ]
+  [[ "$(_json .reason cp2/step-2)" == *"$O"* ]]
+  mkdir -p "$E/steps/s2"; jq -n --arg r "$O" --arg g "${ob}..${oh}" '{repo_commits: [{repo: $r, range: $g}]}' > "$E/steps/s2/return.json"
+  rm -rf "$E/cp2/step-2"
+  run _run --checkpoint cp2 --step 2
+  [ "$status" -eq 0 ]
+  [ "$(_json '.files.in_scope[0]' cp2/step-2)" = "$O/guide/page.md" ]
+}
+@test "a step that moves after a closed round is review, never skip" {
+  echo "s0" >> "$R/src/app.py"; _commit s0 >/dev/null
+  mkdir -p "$E/cp2/step-0"; jq -n '{verdict: "pass", head_sha: "x", rounds: [{round: 1, verdict: "pass"}]}' > "$E/cp2/step-0/rounds.json"
+  run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 0 ]; [ "$(_json .verdict cp2/step-0)" = review ]
+  [[ "$(_json .reason cp2/step-0)" == *"delta round"* ]]
+}
+@test "run from the primary, the step is diffed in the worktree the run's branch is checked out in; a branch checked out nowhere is refused" {
+  git -C "$R" worktree add -q -b task/E/main "$T/wt" main
+  printf 'branch: task/E/main\n' >> "$E/fsm-state.yaml"
+  echo "s0" >> "$T/wt/src/app.py"; git -C "$T/wt" commit -qam s0
+  run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 0 ]
+  [ "$(_json .range cp2/step-0)" = "${BASE}..$(git -C "$T/wt" rev-parse HEAD)" ]
+  # the branch exists but no tree has it: its commits are in no tree to diff
+  git -C "$R" worktree remove --force "$T/wt"; rm -rf "$E/cp2"
+  run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 2 ]; [[ "$output" == *"task/E/main"*"checked out in no worktree"* ]]
+  # a merged and deleted branch falls back to the tree the check runs in
+  git -C "$R" branch -D task/E/main >/dev/null
+  run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 0 ]
 }
 @test "usage: a missing plan.json for cp2, an unreadable rules file and a bad checkpoint are refused with their code" {
   rm "$E/plan.json"; echo x >> "$R/src/app.py"; _commit s0 >/dev/null

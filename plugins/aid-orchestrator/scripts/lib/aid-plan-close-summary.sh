@@ -341,7 +341,10 @@ aid_plan_close_render() {
   fi
 
   # ── the derived option set ────────────────────────────────────────────────
-  local cmd_merge="aid-plan-fsm.sh plan-merge-to-main ${plan_id} --decision ${decision_path}"
+  # The PM's MERGE is recorded first (plan-record-decision writes the schema-
+  # valid pm_plan_decision into this attempt's directory); release-decision.json
+  # is the policy's verdict, not an authorization, and the merge refuses it.
+  local cmd_merge="aid-plan-fsm.sh plan-record-decision ${plan_id} MERGE --by pm (po tvé odpovědi), pak aid-plan-fsm.sh plan-merge-to-main ${plan_id} --decision $(dirname "$decision_path")/pm-plan-decision.json"
   local cmd_close="aid-plan-fsm.sh plan-close ${plan_id}"
   local cmd_rollback=""
   [[ -n "$merge_sha" ]] && cmd_rollback="aid-plan-fsm.sh plan-rollback ${plan_id} --revert-commit ${merge_sha} --reason \"<důvod vrácení>\""

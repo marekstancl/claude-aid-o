@@ -894,6 +894,23 @@ _prepare() {
 }
 
 # ─── Edge case: the bump resolves to "no bump" ────────────────────────────
+@test "prepare-plan with --bump auto refuses a plan whose commits carry no type (step commits), naming the explicit bump" {
+  _bootstrap
+  _seed_version_project
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/$PLAN_ID"
+  git -C "$TEST_PROJECT_ROOT" tag -a "v1.2.3" -m "Release v1.2.3"
+  printf 'x\n' > "$TEST_PROJECT_ROOT/cmd.txt"
+  git -C "$TEST_PROJECT_ROOT" add cmd.txt
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "step 1: the new command"
+  local head_before; head_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE_CLI" prepare-plan "$PLAN_ID" --bump auto \
+    --plan-branch "plan/$PLAN_ID" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"carry no conventional type"* && "$output" == *"next: "*"--bump minor|patch"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)" = "$head_before" ]
+}
+
 @test "prepare-plan with --bump auto and only chore/docs commits makes NO commit and exits 0" {
   _bootstrap
   _seed_version_project
@@ -1903,6 +1920,21 @@ _merge() {
   [ "$output" = "PLAN_MERGING" ]
 }
 
+@test "plan-record-decision writes the MERGE the merge accepts, into the attempt's directory, and the merge takes it from there" {
+  _seed_merge_project
+  run bash "$PLAN_FSM_CLI" plan-record-decision "$PLAN_ID" MERGE --by pm --reason "PM: merge it" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  local d="${output##*$'\n'}"
+  [ -s "$d" ]; [[ "$d" == */pm-plan-decision.json ]]
+  [ "$(jq -r '.decision + " " + .decided_by + " " + .candidate_sha' "$d")" = "MERGE pm $(_plan_sha)" ]
+  _merge "$d"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" != *"could not copy the PM decision"* ]]
+  # no frozen candidate, no decision
+  run bash "$PLAN_FSM_CLI" plan-record-decision P999 MERGE --by pm --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+}
+
 @test "AC5: the lifecycle commit lands on main by plumbing — every non-abandoned EPIC is bound to the plan merge commit" {
   _seed_merge_project
   _merge
@@ -2137,7 +2169,7 @@ _merge() {
   [ "$(jq -r '.version' "$rec")" = "1.3.0" ]
 
   # A chore-only follow-up resolves to no bump and records the literal `none`.
-  git -C "$TEST_PROJECT_ROOT" tag -a "v1.3.0" -m "released" >/dev/null 2>&1
+  git -C "$TEST_PROJECT_ROOT" tag -a "v1.3.0" -m "released" "plan/${PLAN_ID}" >/dev/null 2>&1   # the released commit
   _commit_on "plan/${PLAN_ID}" chore.txt "chore: tidy"
   _prepare "$PLAN_ID" --bump auto
   [ "$status" -eq 0 ]

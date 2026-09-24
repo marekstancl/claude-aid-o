@@ -395,7 +395,8 @@ if (( HAS_REPO )); then
   done <<< "$VP_BLOCKS"
   while IFS=$'\t' read -r ln p; do
     [[ -n "${p:-}" ]] || continue
-    _exists "$p" || _warn "B3" "$PLAN:$ln" "the plan says to delete \`${p}\`, which does not exist"
+    # a path the plan itself founds (a Files bullet), or names by its tail, is known
+    _known_path "$p" || _warn "B3" "$PLAN:$ln" "the plan says to delete \`${p}\`, which does not exist"
   done < <(printf '%s\n' "$BLANKED" | grep -niE '(smazat|smaže|odstranit|delete|remove) +`' | while IFS=: read -r ln rest; do
              while IFS= read -r p; do [[ -n "$p" ]] && printf '%s\t%s\n' "$ln" "$p"; done < <(_aid_backtick_paths "$rest"); done)
 
@@ -454,10 +455,12 @@ if (( HAS_REPO )); then
     UNKNOWN_IDS="$(comm -23 <(printf '%s\n' "$UNKNOWN_IDS") <(printf '%s\n' "$found"))"
   fi
 
-  # B6 — backlog ids claimed by a commit in the last 24 h.
+  # B6 — backlog ids claimed by a commit in the last 24 h. Not IMP: AID hands
+  # those out (`aid-fsm.sh alloc imp-id`), and a plan citing one is not
+  # allocating it. The id is matched whole (T-66 ≠ T-660, XT-5 ≠ T-5).
   if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
-    for id in $(printf '%s\n' "$BLANKED" | grep -oE '\b(T|IMP|B)-[0-9]+\b' | sort -u); do
-      sha="$(git -C "$ROOT" log --since='24 hours ago' --all --grep="$id" --format=%h 2>/dev/null | head -1)"
+    for id in $(printf '%s\n' "$BLANKED" | grep -oE '\b(T|B)-[0-9]+\b' | sort -u); do
+      sha="$(git -C "$ROOT" log --since='24 hours ago' --all -E --grep="(^|[^A-Za-z0-9-])${id}([^0-9]|\$)" --format=%h 2>/dev/null | head -1)"
       [[ -n "$sha" ]] && _warn "B6" "$PLAN" "${id} already appears in commit ${sha} (last 24 h) — allocated twice?"
     done
   fi

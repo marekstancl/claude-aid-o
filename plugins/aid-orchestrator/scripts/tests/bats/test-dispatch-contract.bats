@@ -152,7 +152,7 @@ _return() {
 @test "contract: the commit refuses a return it would not accept" {
   git init -q -b main . 2>/dev/null || git init -q .
   git config user.email t@t; git config user.name T
-  git add -A; git commit -q -m seed
+  git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
   printf 'x\n' > src/thing.sh
   _return '{contract_version: "stale0000000"}'
   run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
@@ -161,16 +161,78 @@ _return() {
   [ "$(git rev-list --count HEAD)" -eq 1 ]
 }
 
+@test "contract: the commit is refused on a branch that is not the run's task branch or the step's own" {
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  git add -A; git commit -q -m seed; git checkout -q -b plan/P020
+  printf 'x\n' > src/thing.sh
+  _return '{}'
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
+  [ "$status" -eq 1 ]; [[ "$output" == *"git -C $TEST_DIR checkout task/<epic>/main"* ]]
+  git checkout -q -b step/step_1_backend
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
+  [ "$status" -eq 0 ]
+}
+
 @test "contract: a declared deletion is committed, not reported as nothing to commit" {
   git init -q -b main . 2>/dev/null || git init -q .
   git config user.email t@t; git config user.name T
-  git add -A; git commit -q -m seed
+  git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
   rm README.md
   _return '{changed_files: ["README.md"]}'
   run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1: drop readme"
   [ "$status" -eq 0 ]
   [ "$output" != "nothing to commit" ]
   [ "$(git show --name-only --format= HEAD)" = "README.md" ]
+}
+
+@test "contract: a declared file the project gitignores is committed; another repository's file is named, not dropped" {
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  echo "tests/" > .gitignore
+  git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
+  echo x > src/thing.sh; echo y > tests/test-thing.bats
+  local ev=".aid-o/work/evidence/E-1/R-1/steps/step_1_backend/notes.md"
+  mkdir -p "${ev%/*}"; echo e > "$ev"
+  _return "{changed_files: [\"src/thing.sh\", \"tests/test-thing.bats\", \"$ev\"]}"
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
+  echo "$output"; [ "$status" -eq 0 ]
+  # the ignored delivery is committed; AID's own state never is
+  [ "$(git show --name-only --format= HEAD | sort | tr '\n' ' ')" = "src/thing.sh tests/test-thing.bats " ]
+  # a step allowed to write into another repository: the file is named
+  local other="$BATS_TEST_TMPDIR/other"; mkdir -p "$other"; echo z > "$other/doc.md"
+  jq --arg p "$other/doc.md" '.steps[0].allowed_paths += [$p] | .steps[0].outputs += ["Modify: `" + $p + "` — doc"]' plan.json > .aid-o/p2.json
+  aid_dispatch_contract_build .aid-o/p2.json 0 .aid-o/c2.json
+  VERSION="$(jq -r .version .aid-o/c2.json)"
+  echo xx >> src/thing.sh
+  _return "{changed_files: [\"src/thing.sh\", \"$other/doc.md\"]}"
+  run aid_dispatch_contract_commit "$TEST_DIR" .aid-o/c2.json .aid-o/return.json "step 1b"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"not committed here: $other/doc.md"* ]]
+}
+
+@test "contract: a declared deletion of a promised artifact in scope is accepted; undeclared or out of scope is refused" {
+  rm tests/test-thing.bats
+  _return '{changed_files: ["src/thing.sh"], deleted_files: ["tests/test-thing.bats"]}'
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json .
+  [ "$status" -eq 0 ]
+  _return '{changed_files: ["src/thing.sh"]}'
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json .
+  [ "$status" -eq 1 ]; [[ "$output" == *"tests/test-thing.bats"* ]]
+  _return '{changed_files: ["src/thing.sh"], deleted_files: ["tests/test-thing.bats", "other/gone.txt"]}'
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json .
+  [ "$status" -eq 1 ]; [[ "$output" == *"outside the allowed paths: other/gone.txt"* ]]
+}
+
+@test "contract: a repo_commits range that does not resolve in its repository is refused, naming it" {
+  git init -q "$TEST_DIR/other"; git -C "$TEST_DIR/other" -c user.email=t@t -c user.name=t commit -q --allow-empty -m a
+  local a; a="$(git -C "$TEST_DIR/other" rev-parse HEAD)"
+  _return "{repo_commits: [{repo: \"$TEST_DIR/other\", range: \"$a..$a\"}]}"
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json .
+  [ "$status" -eq 0 ]
+  _return "{repo_commits: [{repo: \"$TEST_DIR/other\", range: \"$a..0123456789abcdef\"}]}"
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json .
+  [ "$status" -eq 1 ]; [[ "$output" == *"$a..0123456789abcdef in $TEST_DIR/other, and it is not"* ]]
 }
 
 @test "contract: with an evidence root the packet carries the step's absolute evidence directory" {

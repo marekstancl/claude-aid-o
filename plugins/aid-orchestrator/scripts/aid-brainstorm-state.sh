@@ -5,6 +5,8 @@
 #
 #   aid-brainstorm-state.sh init <plan_id>
 #         --scope roadmap|multi_plan|user_visible|single_plan [--topic <text>]
+#         [--topic-kind ui|other [--reason <text>]]
+#   aid-brainstorm-state.sh topic-kind <plan_id> ui|other [--reason <text>]
 #   aid-brainstorm-state.sh vision-propose <plan_id> --file <vision.md>
 #   aid-brainstorm-state.sh vision-approve <plan_id>
 #   aid-brainstorm-state.sh vision-reject  <plan_id> --reason <text>
@@ -112,13 +114,26 @@ validate_vision() {
   ' "$file"
 }
 
+# _check_topic_kind <kind> <scope> <reason> — ui or other; other on a
+# user_visible run carries a reason of 20+ characters (why it is not a screen).
+_check_topic_kind() {
+  case "$1" in
+    ui) ;;
+    other) [[ "$2" != user_visible || ${#3} -ge 20 ]] \
+             || { echo "ERROR: topic kind other on a user_visible run needs --reason of at least 20 characters: why this is not a screen" >&2; return 1; } ;;
+    *) echo "ERROR: topic kind must be ui or other (got '$1')" >&2; return 1 ;;
+  esac
+}
+
 cmd_init() {
-  local plan_id="${1:?}" scope="" topic="" want_worktree=1
+  local plan_id="${1:?}" scope="" topic="" want_worktree=1 kind="" kind_reason=""
   shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --scope) scope="${2:-}"; shift 2 ;;
       --topic) topic="${2:-}"; shift 2 ;;
+      --topic-kind) kind="${2:-}"; shift 2 ;;
+      --reason) kind_reason="${2:-}"; shift 2 ;;
       --no-worktree) want_worktree=0; shift ;;
       *) echo "ERROR: init: unknown flag '$1'" >&2; return 2 ;;
     esac
@@ -127,6 +142,10 @@ cmd_init() {
     roadmap|multi_plan|user_visible|single_plan) ;;
     *) echo "ERROR: --scope must be roadmap, multi_plan, user_visible or single_plan (got '${scope}')" >&2; return 2 ;;
   esac
+  # Whether a user-visible topic is a screen is the controller's judgement
+  # (P100 Step 8); `other` there is recorded with its reason, which the design
+  # page shows the PM.
+  [[ -z "$kind" ]] || _check_topic_kind "$kind" "$scope" "$kind_reason" || return 2
 
   local dir; dir="$(state_dir "$plan_id")" || return 1
   mkdir -p "$dir" || { echo "ERROR: cannot create $dir" >&2; return 1; }
@@ -145,6 +164,8 @@ vision_state: "none"
 vision_file: ""
 run_state: "open"
 skip_reason: "${skip}"
+topic_kind: "${kind}"
+topic_kind_reason: "${kind_reason//\"/}"
 created_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 updated_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 Y
@@ -170,6 +191,18 @@ Y
     echo "Brainstorming run ${plan_id} (${scope}) — no vision step: ${skip}"
   fi
   echo "workdir: ${workdir}"
+}
+
+# topic-kind <plan_id> ui|other [--reason <text>] — (re)classify a started run:
+# the PM declining the real application for a UI topic is recorded here, on the
+# run, with the reason (P100 Step 8).
+cmd_topic_kind() {
+  local plan_id="${1:?}" kind="${2:-}" reason=""; shift 2 || true
+  [[ "${1:-}" == --reason ]] && reason="${2:-}"
+  local sf; sf="$(require_state "$plan_id")" || return 1
+  _check_topic_kind "$kind" "$(get "$sf" scope)" "$reason" || return 2
+  set_field "$sf" topic_kind "$kind" && set_field "$sf" topic_kind_reason "${reason//\"/}" || return 1
+  echo "${plan_id}: topic kind ${kind}${reason:+ — ${reason}}"
 }
 
 cmd_vision_propose() {
@@ -243,6 +276,28 @@ cmd_gate() {
     *) echo "ERROR: --phase must be design, opponent or summary (got '${phase}')" >&2; return 2 ;;
   esac
   local sf; sf="$(require_state "$plan_id")" || return 1
+
+  # The visual companion's door (P100 Step 8): a user-visible run says whether
+  # it is a screen, and a screen is designed from a proposal basis built from
+  # the application (lib/aid-ui-proposal.sh), never drawn from nothing.
+  if [[ "$phase" == design && "$(get "$sf" scope)" == user_visible ]]; then
+    local kind; kind="$(get "$sf" topic_kind)"
+    if [[ -z "$kind" ]]; then
+      echo "REFUSED: ${plan_id} is user_visible and records no topic kind — start it with: aid-brainstorm-state.sh init ${plan_id} --scope user_visible --topic-kind ui|other [--reason <why not a screen>]" >&2
+      return 1
+    fi
+    if [[ "$kind" == ui ]]; then
+      # Before the design the proposal's BASIS must exist (the viewports and
+      # the screen or design system it is drawn from); its renderings are the
+      # design's output, which aid_ui_proposal_check judges afterwards.
+      local prop; prop="$(state_dir "$plan_id")/proposal.json"
+      if ! jq -e '(.basis | IN("live-screen", "design-system")) and (.viewports | type == "array" and length > 0
+                  and all(.[]; (.name | type == "string") and (.width | type == "number") and (.height | type == "number")))' "$prop" >/dev/null 2>&1; then
+        echo "REFUSED: ${plan_id} is a UI topic and has no proposal basis built from the application — build it: source \$AID_PLUGIN_PATH/scripts/lib/aid-ui-proposal.sh && aid_ui_proposal_build <project root> $(state_dir "$plan_id") (skills/visual-companion/SKILL.md)" >&2
+        return 1
+      fi
+    fi
+  fi
 
   local required state; required="$(get "$sf" vision_required)"; state="$(get "$sf" vision_state)"
   if [[ "$required" != "true" ]]; then
@@ -358,17 +413,19 @@ main() {
     vision-approve)  cmd_vision_approve "$@" ;;
     vision-reject)   cmd_vision_reject "$@" ;;
     gate)            cmd_gate "$@" ;;
+    topic-kind)      cmd_topic_kind "$@" ;;
     approve)         cmd_approve "$@" ;;
     show)            cmd_show "$@" ;;
     *)
       cat >&2 <<'EOF'
 Usage: aid-brainstorm-state.sh <command> <plan_id> [flags]
 
-  init <plan_id> --scope roadmap|multi_plan|single_plan [--topic <text>]
+  init <plan_id> --scope roadmap|multi_plan|user_visible|single_plan [--topic <text>] [--topic-kind ui|other [--reason <text>]]
   vision-propose <plan_id> --file <vision.md>
   vision-approve <plan_id>
   vision-reject <plan_id> --reason <text>
   gate <plan_id> --phase design|opponent|summary
+  topic-kind <plan_id> ui|other [--reason <text>]
   approve <plan_id>
   show <plan_id>
 EOF

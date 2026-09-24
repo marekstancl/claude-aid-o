@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # aid-gate-outcome-summary.sh — the gate-boundary message.
 #
-# When the gate runner returns, the PM gets one chat card, written by no model:
+# WHY THIS FILE EXISTS: when the gate runner returns, the PM gets one chat card, written by no model:
 # this file renders it DETERMINISTICALLY from gates_report.json. Every number is
 # computed from the report, the verdict follows the envelope's `.overall` and
 # never a per-gate row, a waived gate is counted as PM risk acceptance and never

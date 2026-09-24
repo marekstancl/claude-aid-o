@@ -91,6 +91,19 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   _plan pl.md legacy '- Modify: src/nobacktick.ts — no backticks'
   run "$LINT" pl.md; [ "$status" -eq 0 ]
 }
+@test "lint STRICT: an EPIC line plan-start cannot parse ('**EPIC 1**', no colon) blocks strict, warns legacy" {
+  _plan p.md strict '- Create: `src/a.ts` — new'
+  sed -i 's/^\*\*EPIC 1: Steps 1-1\*\*$/**EPIC 1**/' p.md
+  run "$LINT" p.md; [ "$status" -ne 0 ]; [[ "$output" == *"STRICT the EPIC lines do not follow the lifecycle grammar"* ]]
+  _plan p.md legacy '- Create: `src/a.ts` — new'
+  sed -i 's/^\*\*EPIC 1: Steps 1-1\*\*$/**EPIC 1**/' p.md
+  run "$LINT" p.md; [ "$status" -eq 0 ]; [[ "$output" == *"[WARN legacy] the EPIC lines"* ]]
+}
+@test "lint: an EPIC line quoted in a fenced block is an example, not a declaration" {
+  _plan p.md strict '- Create: `src/a.ts` — new'
+  printf '\n```markdown\n**EPIC 1**\n```\n' >> p.md
+  run "$LINT" p.md; [ "$status" -eq 0 ]
+}
 @test "lint ERROR (P079 Step 5, was STRICT): verb+path split across two lines blocks BOTH modes" {
   # Tier raised deliberately. This shape is `- Create:` with an empty body, and
   # since P079 Step 5 generation REFUSES it by name instead of dropping the path

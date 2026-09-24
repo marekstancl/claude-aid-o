@@ -822,7 +822,7 @@ plan_state_set_autonomy() {
 # 3 lock timeout, 5 corrupt state file.
 # ===========================================================================
 plan_state_transition() {
-  local plan_id="$1" from="$2" to="$3"
+  local plan_id="$1" from="$2" to="$3" admin="${4:-}"
 
   _plan_state_require_deps || return 2
   _validate_plan_id "$plan_id" || return 1
@@ -832,6 +832,11 @@ plan_state_transition() {
   fi
 
   local pair="${from}:${to}" found=1 t
+  # An administrative close (plan-close --administrative, closure_kind
+  # administrative) reaches CLOSED from any open state: the plan was merged
+  # outside plan-finalize and stopped wherever it stood (P100 Step 9).
+  [[ "$admin" == --administrative && "$to" == CLOSED ]] \
+    && case "$from" in CLOSED|ABORTED|ROLLED_BACK) ;; *) found=0 ;; esac
   for t in "${_AID_PLAN_TRANSITIONS[@]}"; do
     if [[ "$t" == "$pair" ]]; then
       found=0
@@ -1190,7 +1195,9 @@ plan_op_reconcile() {
 }
 
 # ===========================================================================
-# Standalone CLI — debugging / bats convenience only (see file header).
+# Standalone CLI — debugging and bats, and `recorded-worktree`, which the
+# scripts that do not source this library call (aid-fsm.sh, aid-pm-brief.sh,
+# lib/aid-cache-preflight.sh).
 # ===========================================================================
 _aid_plan_state_usage() {
   cat <<'EOF'
@@ -1200,8 +1207,9 @@ Subcommands:
   state-path <plan_id>
   init <plan_id> <mode> <plan_branch> <target_branch>
   get <plan_id> <field>
+  recorded-worktree <plan_id>
   set-worktree-path <plan_id> <path|"">
-  transition <plan_id> <from> <to>
+  transition <plan_id> <from> <to> [--administrative]
   op-key <command> <plan_id> <stage> <attempt> <subject>
   op-begin <plan_id> <op_id> <command> <subject> <expected_before_sha>
   op-git-applied <plan_id> <op_id> <resulting_sha>
@@ -1211,6 +1219,27 @@ Subcommands:
 EOF
 }
 
+# aid_plan_recorded_worktree <root> <plan_id> — the ABSOLUTE worktree path the
+# plan records: the one answer every script that judges the plan's candidate
+# asks (P100 Step 7; three copies before). A relative record resolves against
+# <root>, which is also the state root it is read from.
+#   0 + a path   the plan records that worktree (whether it still exists is the
+#                caller's question)
+#   0 + nothing  the plan DEFINITIVELY records none (no state file, no field)
+#   2 + nothing  UNKNOWN: the state could not be read (no jq/yq, a corrupt file,
+#                a lock timeout)
+# Unknown is never "none": callers read "none, but a worktree sits at the
+# canonical path" as the plan-start crash window, a claim about a record, and
+# an unreadable record must not be diagnosed as that.
+aid_plan_recorded_worktree() {
+  local root="$1" plan_id="$2" rec="" rc=0
+  rec="$(AID_PLAN_STATE_PROJECT_ROOT="$root" plan_state_get "$plan_id" worktree_path 2>/dev/null)" || rc=$?
+  (( rc == 0 || rc == 1 )) || return 2
+  [[ "$rec" == not_found || "$rec" == null ]] && rec=""
+  [[ -z "$rec" || "$rec" == /* ]] || rec="${root}/${rec}"
+  printf '%s' "$rec"
+}
+
 main() {
   local sub="${1:-}"
   [[ $# -gt 0 ]] && shift
@@ -1218,6 +1247,7 @@ main() {
     state-path)      plan_state_path "$@"; exit $? ;;
     init)             plan_state_init "$@"; exit $? ;;
     get)              plan_state_get "$@"; exit $? ;;
+    recorded-worktree) aid_plan_recorded_worktree "${AID_PLAN_STATE_PROJECT_ROOT:-$(aid_state_root)}" "$@"; exit $? ;;
     set-worktree-path) plan_state_set_worktree_path "$@"; exit $? ;;
     transition)       plan_state_transition "$@"; exit $? ;;
     op-key)           plan_op_key "$@"; exit $? ;;

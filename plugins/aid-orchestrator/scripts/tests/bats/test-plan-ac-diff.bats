@@ -154,6 +154,26 @@ EOF
   [ "$verdict" = "present" ]
 }
 
+@test "must_contain ignores letter case (a record says PASS, the pattern says pass)" {
+  echo "Scenario B: PASS" > "${TMPDIR_TEST}/record.md"
+  cat > "${PLANS_DIR}/P-TEST.md" <<'EOF'
+## Acceptance Criteria
+
+- [ ] AC1: the record says scenario B passed
+  ```yaml
+  verification_pattern:
+    type: must_contain
+    file: "record.md"
+    regex: "scenario b.*pass"
+  ```
+
+## Next Steps
+EOF
+  run "$AID_DIFF_SCRIPT" --plan "${PLANS_DIR}/P-TEST.md" --evidence-dir "$EVIDENCE_DIR" --base-commit "$BASE_COMMIT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.results[0].verdict' "${EVIDENCE_DIR}/plan-diff.json")" = "present" ]
+}
+
 @test "legacy plan: no AC section → exit 2 graceful skip + verdict skipped" {
   cat > "${PLANS_DIR}/P-LEGACY.md" <<'EOF'
 # Plan: Legacy

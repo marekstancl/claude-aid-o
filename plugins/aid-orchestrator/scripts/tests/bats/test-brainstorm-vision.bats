@@ -181,3 +181,37 @@ GOOD_VISION='## Vision
   run bash "$BS" gate P900 --phase whenever
   [ "$status" -eq 2 ]
 }
+
+# ── P100 Step 8: the visual companion's door ─────────────────────────────────
+_approved() {  # _approved <plan> <init args…> — a started run with an approved vision
+  local p="$1"; shift
+  bash "$BS" init "$p" --scope user_visible --no-worktree "$@" >/dev/null
+  bash "$BS" vision-propose "$p" --file "$(vision "$GOOD_VISION")" >/dev/null
+  bash "$BS" vision-approve "$p" >/dev/null
+}
+@test "P100: a user_visible design gate needs a topic kind, and a UI topic a proposal built from the application" {
+  _approved P910
+  run bash "$BS" gate P910 --phase design
+  [ "$status" -eq 1 ]; [[ "$output" == *"--topic-kind ui|other"* ]]
+  _approved P911 --topic-kind ui
+  run bash "$BS" gate P911 --phase design
+  [ "$status" -eq 1 ]; [[ "$output" == *"aid_ui_proposal_build"* ]]
+  ( cd "$ROOT" && source "$PLUGIN_ROOT/scripts/lib/aid-ui-proposal.sh" && aid_ui_proposal_build "$ROOT" "$ROOT/.aid-o/work/brainstorm/P911" >/dev/null )
+  run bash "$BS" gate P911 --phase design
+  echo "$output"; [ "$status" -eq 0 ]
+  _approved P912 --topic-kind other --reason "a CLI flag, nothing is drawn on a screen"
+  run bash "$BS" gate P912 --phase design
+  [ "$status" -eq 0 ]
+  run bash "$BS" init P913 --scope user_visible --no-worktree --topic-kind other
+  [ "$status" -eq 2 ]; [[ "$output" == *"--reason of at least 20 characters"* ]]
+  # a hand-written proposal without real viewports is not a basis
+  _approved P914 --topic-kind ui
+  echo '{"basis":"live-screen","viewports":"x"}' > "$ROOT/.aid-o/work/brainstorm/P914/proposal.json"
+  run bash "$BS" gate P914 --phase design
+  [ "$status" -eq 1 ]
+  # the PM declining the real application is recorded on the running run
+  run bash "$BS" topic-kind P914 other --reason "the PM wants a sketch, not the app"
+  [ "$status" -eq 0 ]
+  run bash "$BS" gate P914 --phase design
+  [ "$status" -eq 0 ]
+}

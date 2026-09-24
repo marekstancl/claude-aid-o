@@ -110,6 +110,10 @@ aid_review_summary() {
   done
   local line="review: ${#rounds[@]} round$( (( ${#rounds[@]} == 1 )) || echo s)"
   if (( ${#files[@]} )); then
+    # A Claude stand-in for a codex role (fallback_reason, written by close)
+    # goes first: the line is cut at 120 characters and it changes what it means.
+    local si; si="$(jq -rs '[.[].reviewers[] | select(.fallback_reason)] | length' "${files[@]}")"
+    (( si )) && line+=", codex→claude ${si}×"
     local tok unk usd usd_unk; read -r tok unk usd usd_unk <<< "$(_aid_rs_sum "${files[@]}")"
     line+=", ${tok} tokens, ${unk} unknown"
     if (( usd_unk == 0 )); then line+=", $(printf '%.4f' "$usd") USD"
@@ -192,7 +196,18 @@ aid_plan_close_cost() {
 #     work     the EPICs' time in EXECUTE minus all of the above
 #   Intervals are merged before summing, so two sessions on one plan count once.
 #   The sessions of the plan are the ones whose continuation lines name it; the
-#   audit is read from the session store (AID_HOOK_AUDIT overrides).
+#   audit is read from the session store (AID_HOOK_AUDIT overrides), with its
+#   rotated generations (.2, .1); when the plan began before the oldest line of
+#   a full rotation, waiting and outage are null ("not measured"), never
+#   understated.
+# aid_hook_audit_files — the hook audit and its rotated generations (aid-hook.sh
+# rotates at 20 MB into .1 and .2), oldest first, the ones that exist.
+aid_hook_audit_files() {
+  local a="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}" g
+  for g in "${a}.2" "${a}.1" "$a"; do [[ -r "$g" ]] && printf '%s\n' "$g"; done
+  return 0
+}
+
 aid_plan_close_time() {
   local root="$1" plan="$2"; shift 2
   local ev="${root}/.aid-o/work/evidence/${plan}" d audit sids
@@ -202,15 +217,22 @@ aid_plan_close_time() {
   for d; do [[ -f "${root}/${d}/timeline.jsonl" ]] && tl+=("${root}/${d}/timeline.jsonl"); done
   for d in "$ev"/R-"${plan}"-final-*/timeline.jsonl; do [[ -f "$d" ]] && tl+=("$d"); done
   audit="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}"
-  local -a pat=()
-  if [[ -r "$audit" ]]; then
-    sids="$(grep -F '"rule":"queue_continuation_notice"' "$audit" | grep -F "plan=${plan}" | jq -r '.session_id' 2>/dev/null | sort -u)"
+  local -a pat=() gens=()
+  mapfile -t gens < <(aid_hook_audit_files)
+  local audit_from=""
+  if (( ${#gens[@]} )); then
+    # Only a full rotation can have dropped lines: then the oldest kept line
+    # is where measuring begins.
+    [[ -r "${audit}.2" ]] && audit_from="$(head -n1 "${audit}.2" | jq -r '.ts // ""' 2>/dev/null)"
+    sids="$(cat "${gens[@]}" | grep -F '"rule":"queue_continuation_notice"' | grep -F "plan=${plan}" | jq -r '.session_id' 2>/dev/null | sort -u)"
     for d in $sids; do pat+=(-e "\"session_id\":\"${d}\""); done
   fi
-  jq -n --arg plan "$plan" --argjson now "$(date -u +%s)" \
+  # TZ=UTC: jq<1.7 fromdateiso8601 honours the local zone even on a Z suffix (P037);
+  # the intervals are compared with $now, a real epoch.
+  TZ=UTC jq -n --arg plan "$plan" --argjson now "$(date -u +%s)" \
         --slurpfile m <(cat /dev/null "${m[@]}") \
         --slurpfile t <(for d in "${tl[@]}"; do jq -c --arg f "$d" '. + {_f: $f}' "$d" 2>/dev/null; done) \
-        --slurpfile a <( (( ${#pat[@]} )) && grep -F "${pat[@]}" "$audit") '
+        --slurpfile a <( (( ${#pat[@]} )) && cat "${gens[@]}" | grep -F "${pat[@]}") --arg audit_from "$audit_from" '
     def ep: fromdateiso8601? // null;
     def merged: sort_by(.[0]) | reduce .[] as $i ([];
       if length > 0 and $i[0] <= .[-1][1] then .[-1][1] = ([.[-1][1], $i[1]] | max) else . + [$i] end);
@@ -221,7 +243,9 @@ aid_plan_close_time() {
     def pairs(s; e): group_by(._f) | map(sort_by(.ts) | reduce .[] as $x ({o: null, r: []};
         if ($x | s) and .o == null then .o = ($x.ts | ep)
         elif ($x | e) and .o != null then .r += [[.o, ($x.ts | ep)]] | .o = null else . end) | .r) | add // [];
-    ([$m[] | [(.started_at | ep), (.finished_at | ep)] | select(.[0] and .[1])]) as $rev
+    ([$t[].ts | strings] | min) as $first
+    | ($audit_from != "" and $first != null and $first < $audit_from) as $unmeasured
+    | ([$m[] | [(.started_at | ep), (.finished_at | ep)] | select(.[0] and .[1])]) as $rev
     | ($t | pairs(.event == "gate_runner_start"; .event == "gate_runner_complete")) as $gat
     | ($t | pairs(.event == "fsm_transition" and .to == "EXECUTE"; .event == "fsm_transition" and .from == "EXECUTE")) as $exe
     | ($a | map(. + {t: (.ts | ep)}) | group_by(.session_id) | map(sort_by(.t))) as $ses
@@ -236,7 +260,7 @@ aid_plan_close_time() {
     | {work_min: (if ($exe | length) == 0 then null else ((($exe | total) - ($exe | merged | inter($busy) | total)) | mins) end),
        review_min: (if ($rev | length) == 0 then null else ($rev | total | mins) end),
        gates_min: (if ($t | length) == 0 then null else ($gat | total | mins) end),
-       waiting_pm_min: (if ($a | length) == 0 then null else ($wait | total | mins) end),
-       outage_min: (if ($a | length) == 0 then null else ($out | total | mins) end)}'
+       waiting_pm_min: (if ($a | length) == 0 or $unmeasured then null else ($wait | total | mins) end),
+       outage_min: (if ($a | length) == 0 or $unmeasured then null else ($out | total | mins) end)}'
 }
 

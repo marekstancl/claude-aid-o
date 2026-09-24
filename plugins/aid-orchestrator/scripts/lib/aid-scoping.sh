@@ -9,10 +9,12 @@
 # with identical logic. Keeping one copy removes the drift hazard the
 # per_step_scoping check's "two independent stages" note warns about.
 #
-# Pure functions (jq + sed only). Idempotent double-source guard.
+# Pure functions (jq + sed only; the tier rule greps the tree). Idempotent double-source guard.
 # =============================================================================
 [[ -n "${_AID_SCOPING_SH_LOADED:-}" ]] && return 0
 _AID_SCOPING_SH_LOADED=1
+# shellcheck source=aid-test-tier.sh
+source "$(dirname "${BASH_SOURCE[0]}")/aid-test-tier.sh"   # AID_TEST_TIER_TAG_RE
 
 # _aid_parse_scoping_line — split a per-step scoping HTML-comment line into its
 # files=[...] and ac=[...] JSON-array substrings (D2).
@@ -405,6 +407,49 @@ _aid_files_bullet_tier() {
     t0|t1|t2) printf '%s' "$decl"; return 0 ;;
     *) printf '%s' "$decl"; return 2 ;;
   esac
+}
+
+# _aid_test_bullet_tier_finding <bullet> <root> — THE rule for a `Test:` bullet's
+# tier (P081 Step 10; one definition since P100 Step 3): generation refuses on
+# it and the plan lint reports it as an ERROR, so a plan the author's check
+# passes is not refused at generation. Prints the finding and returns 1; returns
+# 0, printing nothing, when the bullet is fine or the rule does not apply.
+#
+# Only a NEW suite needs the declaration: a bullet pointing at an existing file
+# inherits that file's tag, which aid-test-tier-lint.sh guards, so adding a case
+# to an existing suite stays free. A project with no `# aid-tier:` tag in
+# <root> has not adopted tiers and is exempt, so a plugin upgrade never
+# invalidates a plan that was correct when it was written. Which paths are
+# suites is judged before the tier: a fixture-only bullet with a tier-shaped
+# parenthetical is not a suite. `tests/` is matched root-relative as well as
+# nested, the ordinary shape in a consumer project.
+_aid_test_bullet_tier_finding() {
+  local bullet="${1#- }" root="${2:-.}" paths p suite=false new=false decl rc=0
+  [[ "$bullet" == Test:* && "$bullet" =~ $_AID_FILES_VERB_RE ]] || return 0
+  paths="$(_aid_split_path_entry "${BASH_REMATCH[2]}" 2>/dev/null)" || return 0
+  while IFS= read -r p; do
+    case "$p" in
+      tests/test-*.sh|*/tests/test-*.sh|tests/bats/test-*.bats|*/tests/bats/test-*.bats) ;;
+      *) continue ;;
+    esac
+    suite=true
+    [[ -e "${root}/${p}" ]] || new=true
+  done <<< "$paths"
+  [[ "$suite" == true ]] || return 0
+  # Whether <root> has adopted tiers is asked once per root per process.
+  declare -gA _AID_TIERS_ADOPTED
+  if [[ -z "${_AID_TIERS_ADOPTED[$root]:-}" ]]; then
+    _AID_TIERS_ADOPTED[$root]=no
+    grep -rlq --include='test-*.bats' --include='test-*.sh' "$AID_TEST_TIER_TAG_RE" "$root" 2>/dev/null && _AID_TIERS_ADOPTED[$root]=yes
+  fi
+  [[ "${_AID_TIERS_ADOPTED[$root]}" == yes ]] || return 0
+  decl="$(_aid_files_bullet_tier "$bullet")" || rc=$?
+  if (( rc == 2 )); then
+    echo "Test bullet declares tier '${decl}', which is not one of t0/t1/t2"; return 1
+  elif (( rc != 0 )) && [[ "$new" == true ]]; then
+    echo "a Test bullet naming a NEW suite must declare its tier — add (tier: t0|t1|t2)"; return 1
+  fi
+  return 0
 }
 
 # _aid_allowed_paths_from_files_json — derive a step's cleaned allowed_paths

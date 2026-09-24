@@ -194,6 +194,16 @@ EOF
 
 # ─── P097 Step 3: the upgrade over the eight project fixtures ────────────────
 
+@test "the upgrade keeps the old EPIC default: gate_profile_defaults.epic: full becomes default_profile: full" {
+  source "$HELPER"
+  cp "$AID_PLUGIN_PATH/scripts/tests/fixtures/gates/projects/agents.yaml" "$TEST_TMPDIR/agents.yaml"
+  [ "$(yq '.gate_profile_defaults.epic' "$TEST_TMPDIR/agents.yaml")" = full ]
+  rc=0; out="$(execution_yaml_upgrade "$TEST_TMPDIR/agents.yaml")" || rc=$?
+  [ "$rc" -eq 3 ]
+  [[ "$out" == *"+default_profile: full"* ]]
+  [[ "$out" == *"carried from gate_profile_defaults.epic"* ]]
+}
+
 @test "P097 Step 3: on every project fixture the upgrade changes nothing but the named removals and the two additions, and the result parses" {
   source "$HELPER"
   local fixtures="$AID_PLUGIN_PATH/scripts/tests/fixtures/gates/projects"

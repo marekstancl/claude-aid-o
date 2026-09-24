@@ -239,42 +239,46 @@ Transitions are **rejected** (exit 1) if evidence of completed work is missing:
 
 All FSM operations are logged to `timeline.jsonl` for audit trail.
 Use `aid-fsm.sh verify-state` before any action to confirm allowed transitions.
-Use `--force` only with explicit PM approval (logged as `fsm_force_override`).
+When a transition is refused, follow its `next:` line (§When AID refuses below).
 DONE sub-phases use `aid-fsm.sh done-advance` (not `transition`).
 
-### force_override Usage Policy
+### When AID refuses
 
-`aid-fsm.sh <command> ... --force` requires `--reason "<text>"` with **minimum 20 characters**.
-Hard fail with copy-paste examples if missing or too short.
+A refusal an agent meets ends with two lines: `next: <command>` — the one
+command that continues, printed with the run's real paths — and
+`(pipeline.md §When AID refuses: <reason>)`, the row below. Follow the `next:`
+line. A row marked **PM** is a decision: render a Decision card
+(`skills/communication.md`) and wait; `--force --reason` is the PM's
+tool, recorded as `fsm_force_override` in the timeline and the audit log, and
+never an agent's way past a refusal. A refusal that stopped valid work (AID
+was wrong) is an entry in `.aid-o/work/aid-plugin-issues.md`.
 
-**When `--force` is mandatory:**
-- Bypassing a FSM precondition when the check has a confirmed false-positive
-- Skipping plan-level DONE gate on `cmd_init` when prior-plan CA review was completed out-of-band
-- Skipping step verification in `cmd_increment_step` when verifier dispatch was unavailable (MCP outage)
+The rows are the reasons agents met from 24. 8. to 23. 9. 2026
+(`scripts/tests/fixtures/refusals/measured-2026-09.tsv`); a reason met later
+gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
+`aid-fsm.sh` has no row here or no `next:` line.
 
-**Examples (accepted by dispatcher):**
-```
-aid-fsm.sh transition EXECUTE GATES $state_file --force --reason \
-  'plan.json bug — step 3 AC has typo blocking gates_no_generated_by check, fix in next EPIC'
-
-aid-fsm.sh transition GATES DONE $state_file --force --reason \
-  'security_scan false positive on test fixture, manually verified safe in commit abc1234'
-
-aid-fsm.sh increment-step $state_file --force --reason \
-  'step verifier dispatch unavailable due to MCP outage, manually reviewed diff in PR #42'
-
-aid-fsm.sh done-advance review release $state_file --force --reason \
-  'EPIC review provider down after three retries, diff reviewed by hand in PR #42'
-```
-
-**Telemetry (automatic, cannot be disabled):**
-- `fsm_force_override` timeline event records `from`, `to`, `reason`, `caller`, `operator` fields
-- Persistent entry to `.aid-o/work/audit-log.jsonl` (cross-EPIC trail, append-only)
-- `compliance.json` captures `force_override_count` (int) + `force_override_reasons` (array) per EPIC
-- Overuse of `--force` is read where it is recorded: the audit log, and the project's
-  `.aid-o/work/aid-plugin-issues.md` (every force needed because AID was wrong is an entry,
-  collected by the owner). The cross-project `aid-compliance-report.sh --reflect` aggregator
-  was removed in v2.95.9 — nothing called it.
+| Reason | What it means | The work or the state? | Next | PM |
+|---|---|---|---|---|
+| `dependency_grammar` | a step's `Depends on:` / `Blocks:` line is not `none` or `Step N[, Step M]` | work | fix the line in the plan, run `aid-generation-readiness.sh <plan>` again | |
+| `parallel_group_collision` | two steps of one wave share a file | work | move one step to another wave (or `---`), run readiness again | |
+| `plan_check` | the plan's structure check failed | work | fix what readiness printed, run readiness again | |
+| `gates_no_generated_by` | `gates_report.json` was not written by the gate runner | state | `aid-fsm.sh advance-to-gates <state>` (runs the gates and moves in one step) | |
+| `gates_runner_exit_<n>` | a required gate failed | work | the role that wrote the failing code fixes it, then `advance-to-gates` | |
+| `plan_gate_profile_excluded` | the plan requires a gate the run's profile left out | state | widen the profile in `execution.yaml`, then `advance-to-gates` | PM, to accept the gap |
+| `steps_incomplete` | not every step advanced | state | finish the next step, `increment-step` | |
+| `missing_step_verify`, `verify_no_ac_checklist`, `verify_no_memory_used`, `verify_no_memory_written`, `step_verify_not_pass`, `verify_no_commit_ref` | `step-N-verify.md` is missing or incomplete | work | write it (§4 Output verification), `increment-step` | |
+| `binding_wrong_commit`, `binding_plan_step_hash_mismatch`, `incomplete_step_binding` | the verify file's binding does not name this step at HEAD | state | rewrite the binding after the step commit (`reviewed_commit` = HEAD, `plan_step_hash` from the live `plan.json`), `increment-step` | |
+| `contract_return_rejected` | the agent's return does not match its contract | work | re-dispatch the step with its packet, record the new return, `increment-step` | |
+| `contract_return_missing`, `contract_return_not_done` | no return recorded, or the agent reported blocked / a failing gate | work | extract the return; a blocked step is resumed or handed over with a Blocked card | PM, when blocked |
+| `review_round_missing` | the step or EPIC has no review round | state | `aid-step-check.sh --checkpoint <cp> …` (it decides skip or review; cp7: `plan-finalize --stage produce`) | |
+| `round_not_closed` | a round was prepared and never closed | state | answers not collected yet: dispatch the reviewers, then `aid-review-round.sh collect … --round <n>`; collected: `close … --round <n>` | |
+| `review_round_failed` | the last round closed with open blockers (a `form_invalid` finding counts) | work | the step's role fixes them and commits, then the step check and `prepare --round <n+1>` | PM, via `dispute` (`commands/aid-run.md` CP2/CP3 item 6) |
+| `review_round_stale`, `cp3_stale_review` | HEAD moved after the round the reviewers saw | state | the step check, then `aid-review-round.sh prepare … --round <n+1>` — a delta round over the commits since; after a passed round it needs no override | |
+| `no_change_without_outputs` | the step committed nothing and declares no output that exists | work | commit the step's work, run the step check again | PM, to waive the step |
+| `plan_manifest_missing`, `plan_branch_mismatch` | the EPIC was not started through its plan | state | `aid-plan-fsm.sh epic-start <plan> <epic> --run-id <run>`, then `init` again | |
+| `missing_lenses`, `done_advance_preconditions` | a done-advance precondition failed (each prints its own line above) | work | correct what the lines name, run the same `done-advance` again | |
+| `missing_verifier_output`, `missing_cp3_code_review` | retired in 2.99.0 (P094): the step and EPIC review rounds replaced the verifier files | — | the `review_round_*` rows | |
 
 ### FSM States
 
@@ -764,8 +768,9 @@ After agent completes:
 - Forbidden paths modified? → Re-dispatch once with warning; 2nd violation → ESCALATION
 - Credit exhaustion detected? → Pause to `state: paused`, notify PM
 
-**The turn may not end here.** While a contracted step is open — a `contract.json` written
-this session and `current_step` not advanced past it — the `Stop` hook rule `turn_step_open`
+**The turn may not end here.** While a contracted step is open — a step this session dispatched
+(its transcript holds the packet's `Dispatch Contract (version …)` header, so paste the
+block verbatim) and `current_step` not advanced past it — the `Stop` hook rule `turn_step_open`
 (`defaults/hook-registry.yaml`, fail-closed once the canary has verified the installation)
 refuses to close the turn and names the transition: validate the return, commit, write the
 verify file, `increment-step` — or hand over explicitly with a Decision card or a Blocked card
@@ -778,6 +783,8 @@ aid_dispatch_contract_commit "$tree_root" "$step_dir/contract.json" "$step_dir/r
   "step {N}: {step title}"     # validates first (a rejected return is not committed), stages only
                                # the return's changed_files; prints the SHA or "nothing to commit"
 ```
+It also stages the return's `deleted_files`, and it commits only on the run's
+`task/<epic>/main` or, in a wave, the step's own `step/<id>` branch.
 The controller is the only committer and it takes returns **one at a time**, in the order
 they arrive — that is the protocol that keeps three agents returning at once from becoming
 one commit. What the FSM guarantees is narrower and mechanical: a contracted step does not
@@ -1925,7 +1932,7 @@ Two rules, both learned the expensive way:
 
 ---
 
-**Last Updated:** 2026-09-23
+**Last Updated:** 2026-09-24
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

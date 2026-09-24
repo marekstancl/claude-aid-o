@@ -397,8 +397,8 @@ Pick it back up:
   /aid-run --resume             continue from fsm-state.yaml
   /aid-status <epic-id>         where it actually stopped, and why
 
-When a precondition blocks you and you are sure:
-  --force --reason '<at least 20 characters>'
+When a precondition blocks you:
+  follow its `next:` line — skills/pipeline.md §"When AID refuses" has a row per reason
 ```
 
 `--force` is a PM decision, never an agent's: it is logged to the audit trail, it

@@ -61,6 +61,13 @@ _suite() {
   [[ "$output" != *"SKIPPED-BY-TIER"* ]]
 }
 
+@test "2b: --only names a suite with or without its extension" {
+  run bash "$RUNNER" --only test-cheap 3>&-
+  [ "$status" -eq 0 ]; [[ "$output" == *"Suite 1/1: test-cheap"* ]]
+  run bash "$RUNNER" --only test-cheap.bats 3>&-
+  [ "$status" -eq 0 ]; [[ "$output" == *"Suite 1/1: test-cheap"* ]]
+}
+
 @test "3: an untagged suite in a tiered tree refuses the run, naming file and lint" {
   _suite bats/test-forgotten.bats
   run bash "$RUNNER" 3>&-

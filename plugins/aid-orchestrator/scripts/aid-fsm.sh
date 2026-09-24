@@ -833,40 +833,12 @@ _fsm_worktree_is_linked() {
   [[ "$gd" == */worktrees/* ]]
 }
 
-# _fsm_plan_worktree_recorded <plan_id> <state_root> — the ABSOLUTE recorded
-# path, or empty (legacy plan / no state file / no plan-state lib).
-#
-# EXIT CODE CARRIES THE DIFFERENCE BETWEEN "no record" AND "cannot read":
-#   0 + a path  -> the plan records that worktree
-#   0 + nothing -> the plan DEFINITIVELY records none (plan_state_get answered:
-#                  rc 0 with an empty/`null` value, or rc 1 `not_found`)
-#   2 + nothing -> the answer is UNKNOWN: plan_state_get could not read at all
-#                  (rc 2 = jq/yq missing, rc 5 = corrupt state file, or any
-#                  other non-0/1 rc such as a lock timeout)
-#
-# The distinction is load-bearing. Callers treat "definitively none" as a
-# legacy plan, and "none BUT a worktree exists at the canonical path" as the
-# plan-start crash window — a hard refusal that asserts a FACT about how the
-# plan was created. Collapsing an unreadable state file into "records none"
-# made that refusal fire on a missing `yq`, telling the operator plan-start had
-# been killed mid-transaction (and pointing at --recreate-worktree) when the
-# real fault was a missing dependency. Never diagnose from an answer you did
-# not get.
+# _fsm_plan_worktree_recorded <plan_id> <state_root> — lib/aid-plan-state.sh
+# aid_plan_recorded_worktree, asked through its CLI (this script does not source
+# the plan-state lib); same output and the same rc 2 for "unknown".
 _fsm_plan_worktree_recorded() {
-  local plan_id="$1" root="$2" rec="" rc=0
-  [[ -f "${SCRIPT_DIR}/lib/aid-plan-state.sh" ]] || { printf ''; return 0; }
-  rec="$(AID_PLAN_STATE_PROJECT_ROOT="$root" \
-    bash "${SCRIPT_DIR}/lib/aid-plan-state.sh" get "$plan_id" worktree_path 2>/dev/null)" || rc=$?
-  # rc 1 with `not_found` on stdout = no state file yet; rc 1 with nothing =
-  # the field is absent. Both are real answers. Anything else is not.
-  if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then
-    printf ''
-    return 2
-  fi
-  [[ "$rec" == "not_found" || "$rec" == "null" ]] && rec=""
-  [[ -z "$rec" ]] && { printf ''; return 0; }
-  [[ "$rec" == /* ]] || rec="${root}/${rec}"
-  printf '%s' "$rec"
+  [[ -f "${SCRIPT_DIR}/lib/aid-plan-state.sh" ]] || return 0
+  AID_PLAN_STATE_PROJECT_ROOT="$2" bash "${SCRIPT_DIR}/lib/aid-plan-state.sh" recorded-worktree "$1"
 }
 
 # _fsm_plan_worktree_canonical_if_live <state_root> <plan_id> — the canonical
@@ -1134,7 +1106,78 @@ _increment_fail() {
   local timeline
   timeline=$(derive_timeline "$state_file") || true
   [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="$reason"
+  _fsm_refusal_next "$reason" || true
   exit 1
+}
+
+# _fsm_cmd <word>... — one command line, each word shell-quoted only when it
+# needs to be (_resume_render_command), so the line can be pasted as printed.
+_fsm_cmd() {
+  local w out=()
+  for w in "$@"; do out+=("$(_resume_render_command "$w" || true)"); done
+  printf '%s' "${out[*]}"
+}
+
+# _fsm_refusal_next <reason> — the last two lines of a refusal agents met
+# (tests/fixtures/refusals/measured-2026-09.tsv): the one command that
+# continues and the row of skills/pipeline.md §"When AID refuses" that says
+# more. Reads from caller scope (file convention) what the reason's command
+# needs: $state_file, $evidence_dir, $step, $cp, $cpdir, $last, $_c_dir,
+# $_pb_plan_id, $epic_id, $run_id, $from_phase, $to_phase. Returns 1, printing nothing, for a reason without a row.
+_fsm_refusal_next() {
+  local reason="$1" next fsm="${SCRIPT_DIR}/aid-fsm.sh" rr="${SCRIPT_DIR}/aid-review-round.sh"
+  local vf="${evidence_dir:-<evidence dir>}/step-${step:-N}-verify.md" sf="${state_file:-<state file>}"
+  local -a where=(--checkpoint "${cp:-cp2}")
+  [[ -n "${step:-}" && "${cp:-cp2}" == cp2 ]] && where+=(--step "$step")
+  where+=(--evidence-dir "${evidence_dir:-<evidence dir>}")
+  local inc adv chk nextround
+  inc="$(_fsm_cmd bash "$fsm" increment-step "$sf")"; adv="$(_fsm_cmd bash "$fsm" advance-to-gates "$sf")"
+  chk="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}")"
+  nextround="$chk && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))")"
+  case "$reason" in
+    review_round_missing)
+      if [[ "${cp:-}" == cp7 ]]; then
+        next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-finalize "$(basename "$(dirname "$evidence_dir")")" --stage produce) && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round 1)"
+      else
+        next="$chk"
+      fi ;;
+    round_not_closed)
+      # A round is closed after its answers are collected: collect first when it was not.
+      local rd="${cpdir:-}/round-${last:-1}"
+      if [[ "$(jq -r '.status // ""' "${rd}/collect.json" 2>/dev/null)" == valid ]]; then
+        next="$(_fsm_cmd bash "$rr" close "${where[@]}" --round "${last:-1}") --tokens <role>=<n|unknown> …"
+      else
+        next="dispatch the round's reviewers (commands/aid-run.md CP2/CP3), then: $(_fsm_cmd bash "$rr" collect "${where[@]}" --round "${last:-1}")"
+      fi ;;
+    review_round_failed)
+      next="the step's role fixes the open findings and commits, then: $nextround" ;;
+    review_round_stale|cp3_stale_review)
+      next="$nextround" ;;
+    no_change_without_outputs)
+      next="commit the step's work, then: $chk" ;;
+    steps_incomplete)
+      next="finish the next step (commands/aid-run.md step loop), then: $inc" ;;
+    gates_no_generated_by)
+      next="$adv" ;;
+    plan_gate_profile_excluded)
+      next="widen the profile's include[] in execution.yaml gate_profiles (accepting the gap is a PM Decision card), then: $adv" ;;
+    gates_runner_exit_*)
+      next="the role that wrote the failing code fixes the gates named above, then: $adv" ;;
+    contract_return_rejected)
+      next="re-dispatch the step with its packet $(_fsm_cmd "${_c_dir:-<step dir>}/contract.json") and record the new return, then: $inc" ;;
+    plan_manifest_missing|plan_branch_mismatch)
+      next="start the EPIC through its plan (task branch and manifest entry), then init again: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" epic-start "${_pb_plan_id:-<plan>}" "${epic_id:-<epic>}" --run-id "${run_id:-<run>}")" ;;
+    contract_return_missing|contract_return_not_done)
+      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent or hand over with a Blocked card), then: $inc" ;;
+    missing_step_verify|verify_no_ac_checklist|verify_no_memory_used|verify_no_memory_written|step_verify_not_pass|verify_no_commit_ref)
+      next="write $(_fsm_cmd "$vf") (pipeline.md §Output verification), then: $inc" ;;
+    binding_wrong_commit|binding_plan_step_hash_mismatch|incomplete_step_binding)
+      next="rewrite the binding of $(_fsm_cmd "$vf") after the step commit (reviewed_commit = HEAD, plan_step_hash from the live plan.json — pipeline.md §Output verification), then: $inc" ;;
+    missing_lenses|done_advance_preconditions)
+      next="correct what the lines above name, then run the same done-advance again: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-<from>}" "${to_phase:-<to>}" "$sf")" ;;
+    *) return 1 ;;
+  esac
+  printf 'next: %s\n(pipeline.md §When AID refuses: %s)\n' "$next" "$reason" >&2
 }
 
 # ─── P032 Step 3: Grandfather + Repeated-Fail Helpers ────────────────────
@@ -1259,11 +1302,13 @@ fsm_check_review_round() {
   [[ "$cp" == cp7 ]] && how_to="run: plan-finalize --stage produce, then bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare|collect|close --checkpoint cp7 --evidence-dir ${evidence_dir} --round 1"
   if [[ ! -f "$index" ]]; then
     _PRECONDITION_FAIL_REASON="review_round_missing"
-    echo "PRECONDITION FAIL: no review round index for ${cp}${step:+ step $step} (${index} missing). ${how_to}" >&2
+    echo "PRECONDITION FAIL: no review round index for ${cp}${step:+ step $step} (${index} missing)." >&2
+    _fsm_refusal_next review_round_missing
     return 1
   fi
-  local verdict head_sha
+  local verdict head_sha last
   verdict="$(jq -r '.verdict // ""' "$index" 2>/dev/null)" || { echo "PRECONDITION FAIL: ${index} does not parse" >&2; return 1; }
+  last="$(jq -r '[.rounds[]?.round] | max // empty' "$index")"
   head_sha="$(jq -r '.head_sha // ""' "$index" 2>/dev/null)"
   local current_head="$expected_head"
   [[ -n "$current_head" ]] || current_head="$(git -C "$tree_root" rev-parse HEAD 2>/dev/null || echo "")"
@@ -1294,7 +1339,8 @@ fsm_check_review_round() {
         done <<< "$outs"
         if (( n_out == 0 )) || [[ -n "$missing_out" ]]; then
           _PRECONDITION_FAIL_REASON="no_change_without_outputs"
-          echo "PRECONDITION FAIL: step ${step} committed nothing and $([[ $n_out -eq 0 ]] && echo "declares no outputs" || echo "its declared output ${missing_out} does not exist") (no_change_without_outputs): an empty step is not a reviewed step. Commit the step's work, or record a PM waiver with --force --reason." >&2
+          echo "PRECONDITION FAIL: step ${step} committed nothing and $([[ $n_out -eq 0 ]] && echo "declares no outputs" || echo "its declared output ${missing_out} does not exist") (no_change_without_outputs): an empty step is not a reviewed step." >&2
+          _fsm_refusal_next no_change_without_outputs
           return 1
         fi
       fi
@@ -1302,21 +1348,22 @@ fsm_check_review_round() {
     pass) ;;
     fail)
       _PRECONDITION_FAIL_REASON="review_round_failed"
-      echo "PRECONDITION FAIL: the last ${cp}${step:+ step $step} review round closed with verdict fail (${index}). Fix the open findings (the step's role, then a confirmation round), or the PM records aid-review-round.sh override." >&2
+      echo "PRECONDITION FAIL: the last ${cp}${step:+ step $step} review round closed with verdict fail (${index})." >&2
+      _fsm_refusal_next review_round_failed
       return 1 ;;
     *)
       _PRECONDITION_FAIL_REASON="review_round_missing"
-      echo "PRECONDITION FAIL: ${index} carries no verdict (a round was prepared but never closed). ${how_to}" >&2
+      echo "PRECONDITION FAIL: ${index} carries no verdict (round ${last:-?} was prepared but never closed)." >&2
+      _fsm_refusal_next round_not_closed
       return 1 ;;
   esac
 
   # pass: the last round must be closed, unstubbed, at HEAD (or D4-fresh).
-  local last dir
-  last="$(jq -r '[.rounds[]?.round] | max // empty' "$index")"
-  dir="${cpdir}/round-${last}"
+  local dir="${cpdir}/round-${last}"
   if [[ -z "$last" || ! -f "${dir}/measurement.json" || "$(jq -r '.closed_at // ""' "${dir}/round.json" 2>/dev/null)" == "" ]]; then
     _PRECONDITION_FAIL_REASON="round_not_closed"
-    echo "PRECONDITION FAIL: ${index} says pass but round ${last:-?} is not closed (no measurement.json or closed_at): round not closed. ${how_to}" >&2
+    echo "PRECONDITION FAIL: ${index} says pass but round ${last:-?} is not closed (no measurement.json or closed_at): round not closed." >&2
+    _fsm_refusal_next round_not_closed
     return 1
   fi
   if [[ "$(jq -r '.dispatch_check // ""' "$index")" == stubbed || "$(jq -r '.dispatch_check // ""' "${dir}/measurement.json")" == stubbed ]]; then
@@ -1333,7 +1380,8 @@ fsm_check_review_round() {
   [[ "$reviewed_head" == "$current_head" ]] && return 0
   if (( ! freshness )); then
     _PRECONDITION_FAIL_REASON="review_round_stale"
-    echo "PRECONDITION FAIL: ${cp}${step:+ step $step} round ${last} reviewed ${reviewed_head:0:12}, HEAD is ${current_head:0:12} (review_round_stale): the reviewers did not see the current tree. ${how_to}" >&2
+    echo "PRECONDITION FAIL: ${cp}${step:+ step $step} round ${last} reviewed ${reviewed_head:0:12}, HEAD is ${current_head:0:12} (review_round_stale): the reviewers did not see the current tree." >&2
+    _fsm_refusal_next review_round_stale
     return 1
   fi
 
@@ -1341,7 +1389,7 @@ fsm_check_review_round() {
   local policy="${CP3_FRESHNESS_POLICY:-blocking}"
   _fresh_fail() {
     [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_would_block" reason="$1" enforcement="$policy"
-    if [[ "$policy" == "blocking" ]]; then _PRECONDITION_FAIL_REASON="cp3_stale_review"; printf '%s\n' "${@:2}" >&2; return 1; fi
+    if [[ "$policy" == "blocking" ]]; then _PRECONDITION_FAIL_REASON="cp3_stale_review"; printf '%s\n' "${@:2}" >&2; _fsm_refusal_next cp3_stale_review; return 1; fi
     return 0
   }
   if ! git -C "$tree_root" rev-parse --verify "${reviewed_head}^{commit}" >/dev/null 2>&1 \
@@ -2326,6 +2374,7 @@ check_preconditions() {
       [[ "$current" -ge "$total" ]] || {
         _PRECONDITION_FAIL_REASON="steps_incomplete"
         echo "PRECONDITION FAIL: current_step=${current} < total_steps=${total}$(_fsm_human_step "$current" "$total"). Not all steps completed." >&2
+        _fsm_refusal_next steps_incomplete
         return 1
       }
 
@@ -2345,6 +2394,10 @@ check_preconditions() {
             log_event "$timeline" "fsm_precondition_repeated_fail" \
               from="$from" to="$to" reason="gates_no_generated_by" attempt_count="$attempt_count"
           fi
+          if [[ ! -f "$gates_report" ]]; then
+            # No report at all: nothing to remove, the gates never ran.
+            echo "PRECONDITION FAIL: no gates report at ${gates_report} — the gates have not run for this run. Run them: bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh advance-to-gates ${state_file}" >&2
+          else
           cat <<EOF >&2
 PRECONDITION FAIL: gates_report.json missing _generated_by field.
 
@@ -2368,6 +2421,8 @@ Manual two-step alternative (debugging / crash recovery):
     --plan-json \$AID_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/${run_id}/plan.json
   bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh transition EXECUTE GATES ${state_file}
 EOF
+          fi
+          _fsm_refusal_next gates_no_generated_by
           return 1
         fi
 
@@ -2554,6 +2609,7 @@ OR (PM-authorized override, audited):
   aid-fsm.sh transition GATES DONE ${state_file} --force --reason \\
       '<≥20 chars why excluding a plan-required gate is acceptable>'
 EOF
+            _fsm_refusal_next plan_gate_profile_excluded
             return 1
           fi
         fi
@@ -3572,7 +3628,7 @@ cmd_init() {
         else
           echo "PRECONDITION FAIL: plan-branch lineage check failed for ${epic_id} (plan ${_pb_plan_id}, reason: ${_pb_reason})." >&2
           echo "${_pb_detail}" >&2
-          echo "Override (audited): aid-fsm.sh init ${epic_id} ... --force --reason '<why this override is safe>'" >&2
+          _fsm_refusal_next "$_pb_reason" || echo "An override is the PM's decision (a Decision card), never an agent's (pipeline.md §When AID refuses)." >&2
           log_event "$_pb_timeline" "fsm_init_blocked" reason="$_pb_reason" epic_id="$epic_id" plan_id="$_pb_plan_id"
           exit 1
         fi
@@ -4380,6 +4436,7 @@ cmd_advance_to_gates() {
     local _failed_gates=""
     [[ -f "$report_file" ]] && _failed_gates="$(jq -r "${AID_GATE_ROW_JQ}"'[.gates // {} | gate_rows_normalize | to_entries[] | select((.value|type) == "object" and .value.status == "fail" and .value.waived != true) | .key] | join(", ")' "$report_file" 2>/dev/null || true)"
     echo "advance-to-gates: FAIL — gates runner exit=$rc${_failed_gates:+; failed: ${_failed_gates}}; state unchanged (EXECUTE). Report: ${report_file}" >&2
+    _fsm_refusal_next "gates_runner_exit_${rc}"
     return "$rc"
   fi
 }
@@ -4506,6 +4563,12 @@ cmd_increment_step() {
   [[ "${2:-}" == "--force" ]] && force="true"
 
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
+  # Same shape as transition: the review-round check compares HEAD with the
+  # step check (which diffs the run's branch, lib/aid-roots.sh
+  # aid_run_checkout_root) and step_commit records HEAD — both in the plan's
+  # tree, not the primary a controller may be standing in. Before anything
+  # writes, so the re-executed process is the only one with side effects.
+  _fsm_require_plan_worktree "$(yaml_field "$state_file" epic_id)"
 
   # P040 Component B: hoist scope vars to function-top so the reconciliation
   # backstop (and audit logging) can run UNCONDITIONALLY, regardless of --force.
@@ -4635,6 +4698,7 @@ cmd_increment_step() {
     done
     printf '%s\n' "PRECONDITION FAIL: step verification is incomplete (${#_vf_reasons[@]} problem(s)) — File: ${verify_file}" >&2
     printf '  - %s\n' "${_vf_lines[@]}" >&2
+    _fsm_refusal_next "${_vf_reasons[0]}"
     exit 1
   fi
 
@@ -4684,8 +4748,7 @@ cmd_increment_step() {
         _c_report="$(aid_dispatch_contract_validate "${_c_dir}/contract.json" "${_c_dir}/return.json" "$_c_tree" 2>/dev/null)" \
           || _increment_fail contract_return_rejected \
             "PRECONDITION FAIL: step ${step}'s return is not accepted against its contract." \
-            "$(jq -r '.reasons | join("; ")' <<< "$_c_report" 2>/dev/null)" \
-            "Re-dispatch the step with the current packet; never advance on a rejected return."
+            "$(jq -r '.reasons | join("; ")' <<< "$_c_report" 2>/dev/null)"
         # An ACCEPTED return is a well-formed one; ADVANCING needs a finished one:
         # status done and no gate the agent itself reported as failed.
         jq -e '.step_status == "done" and all(.gates[]?; .result != "fail")' "${_c_dir}/return.json" >/dev/null 2>&1 \
@@ -5048,7 +5111,7 @@ Fix: revert plan.json to init state; OR, if the PM regenerated the plan on purpo
       _prev_sc=$(yaml_field "$state_file" base_commit)
     fi
     if [[ -n "$_prev_sc" && "$_prev_sc" != "unknown" ]]; then
-      local -a _scope_paths=("$evidence_dir")
+      local -a _scope_paths=("$evidence_dir" "${_FSM_ALWAYS_ALLOWED[@]}")
       local _sp _cf _inscope
       while IFS= read -r _sp; do
         [[ -n "$_sp" ]] && _scope_paths+=("$_sp")
@@ -5313,6 +5376,11 @@ cmd_rebase_plan() {
   echo "rebase-plan: plan.json accepted (step ${cs} and every done step unchanged; future step(s) changed: ${changed_future[*]:-none}) — plan_json_hash re-stamped, recorded in ${rec#${evidence_dir}/} and the timeline. The step in flight keeps its contract and binding."
 }
 
+# Files whose only purpose is to receive findings, in scope in every state (the
+# commit-scope companion below). The pre-commit hook (defaults/hooks/pre-commit,
+# `_AID_ALWAYS_ALLOWED`) holds the same list; test-commit-guard.bats keeps them equal.
+_FSM_ALWAYS_ALLOWED=(".aid-o/work/backlog.md" ".aid-o/work/aid-plugin-issues.md" "docs/plans/BACKLOG.md")
+
 # ─── Scope amendment (PM-approved extra paths, mid-step) ─────────────────
 # Three guards read a step's scope: the pre-commit hook (plan.json, live), the
 # increment-step tamper check (plan.json, by hash stamped at init) and the
@@ -5324,8 +5392,10 @@ cmd_rebase_plan() {
 #   fsm-state  plan_json_hash re-stamped               (tamper check sees it)
 #   steps/<id>/scope-amendment.json                    (validator unions it)
 #   timeline scope_amended + audit-log                 (someone can ask why)
-# It never widens a step that is not the current one, never removes a path,
-# and refuses paths that leave the tree.
+# It never widens a step that is not the current one (after the last step: the
+# last one, whose scope the GATES/DONE union holds), never removes a path, and
+# refuses a path outside the tree unless it is an absolute path some step of
+# this plan already declared (P100 Step 4).
 cmd_amend_scope() {
   local state_file="" reason=""; local -a add=()
   while [[ $# -gt 0 ]]; do
@@ -5397,13 +5467,23 @@ cmd_amend_scope() {
   [[ -f "$plan" ]] || die "amend-scope: ${plan} not found"
   local cs; cs=$(yaml_field "$state_file" current_step); cs="${cs:-0}"
   local total; total=$(jq '.steps | length' "$plan")
-  [[ "$cs" -lt "$total" ]] || die "amend-scope: current_step ${cs} is past the last step (${total}) — nothing to widen"
+  [[ "$total" -gt 0 ]] || die "amend-scope: ${plan} has no steps — nothing to widen"
+  (( cs < total )) || cs=$(( total - 1 ))
   # Files, not subtrees, and never a path the step is forbidden: a widening
   # is a named file with a reason, not "scripts/" with a sentence.
   local p forbidden
   forbidden="$(jq -r --argjson i "$cs" '(.steps[$i].forbidden_paths // [])[]' "$plan" 2>/dev/null || true)"
+  local declared_abs; declared_abs="$(jq -r '.steps[].allowed_paths[]? | select(startswith("/"))' "$plan" 2>/dev/null || true)"
   for p in "${add[@]}"; do
-    [[ -n "$p" && "$p" != /* && "$p" != *".."* ]] || die "amend-scope: '${p}' must be a relative path inside the tree (no leading /, no ..)"
+    [[ -n "$p" && "$p" != *".."* ]] || die "amend-scope: '${p}' must be a path without .."
+    if [[ "$p" == /* ]]; then
+      local d ok=0 rp; rp="$(realpath -m -- "$p")"
+      while IFS= read -r d; do
+        [[ -n "$d" ]] || continue; d="$(realpath -m -- "$d")"
+        [[ "$rp" == "$d" || "$rp" == "${d%/}/"* ]] && { ok=1; break; }
+      done <<< "$declared_abs"
+      (( ok )) || die "amend-scope: '${p}' is outside the tree and no step of the plan declares it — add it to the step's Files in the plan (a PM decision), then regenerate"
+    fi
     [[ "$p" != */ && "$p" != *"*"* && "$p" != *"?"* && ! -d "$p" ]] || die "amend-scope: '${p}' is a directory or a glob — amend names FILES, one --add each"
     local fb
     while IFS= read -r fb; do
@@ -5671,7 +5751,7 @@ _fsm_declared_plan_mode() {
 
 cmd_done_advance() {
   local from_phase="$1" to_phase="$2" state_file="$3"
-  local force="false"
+  local force="false" _archive_task="" _tasks_dir=""
   [[ "${4:-}" == "--force" ]] && force="true"
 
   # P074 Step 8: re-anchor a RELATIVE state file to the state root BEFORE the
@@ -5921,6 +6001,7 @@ cmd_done_advance() {
             echo "ERROR: review profile missing lenses (enforcement=blocking):" >&2
             echo "$_rp_output" >&2
             log_event "$_rp_timeline" "fsm_done_advance_fail" check="review_profile" reason="missing_lenses"
+            _fsm_refusal_next missing_lenses
             exit 2
           else
             log_warn "review_profile missing_lenses (enforcement=observe, non-blocking): $_rp_output"
@@ -5928,7 +6009,7 @@ cmd_done_advance() {
         elif [[ "$_rp_exit" -eq 2 ]]; then
           log_event "$_rp_timeline" "review_profile_missing_lenses" \
             check="review_profile" enforcement="observe" missing_lenses="unverifiable" reason="$_rp_output"
-          log_warn "review_profile unverifiable: $_rp_output"
+          # no warning: review-profile.json is produced at plan-final, never per EPIC
         fi
       fi
       # End E3 review_profile hook
@@ -6021,14 +6102,10 @@ EOF
       # and passed silently, which is the failure direction that matters for a
       # precondition. Same legacy fallback as derive_timeline; aid_state_path
       # keeps the RELATIVE form (and both message strings) intact at root.
-      local task_file _tasks_dir
+      # 2.107.0: no longer a refusal — the file is archived below, once every
+      # other precondition has passed (a failed advance leaves it where it is).
       _tasks_dir="$(aid_state_path ".aid-o/tasks" 2>/dev/null || printf '%s' ".aid-o/tasks")"
-      task_file=$(find "${_tasks_dir}/" -maxdepth 1 -name "${epic_id}*" 2>/dev/null | head -1)
-      if [[ -n "$task_file" ]]; then
-        echo "PRECONDITION FAIL: EPIC task file still in tasks/ (not archived): $(basename "$task_file")" >&2
-        echo "Move to tasks/archive/ before advancing: mv $task_file ${_tasks_dir}/archive/" >&2
-        errors=$((errors + 1))
-      fi
+      _archive_task=$(find "${_tasks_dir}/" -maxdepth 1 \( -name "${epic_id}.md" -o -name "${epic_id}-*.md" \) 2>/dev/null | head -1 || true)
 
       # ── Routed review findings (EPIC-LOCAL, BOTH modes) — P079 Step 7 ───────
       #
@@ -6092,10 +6169,26 @@ EOF
       if [[ $errors -gt 0 ]]; then
         local timeline
         timeline=$(derive_timeline "$state_file") || true
-        [[ -n "$timeline" ]] && log_event "$timeline" "fsm_done_advance_fail" from_phase="$from_phase" to_phase="$to_phase" errors="$errors"
+        [[ -n "$timeline" ]] && log_event "$timeline" "fsm_done_advance_fail" from_phase="$from_phase" to_phase="$to_phase" errors="$errors" reason="done_advance_preconditions"
         echo "ERROR: ${errors} precondition(s) failed for done-advance $from_phase → $to_phase." >&2
+        _fsm_refusal_next done_advance_preconditions
         exit 1
       fi
+    fi
+  fi
+
+  if [[ -n "${_archive_task:-}" ]]; then
+    # a tracked task file moves as a rename, not as a deletion plus a new file
+    local _at_dir; _at_dir="$(dirname "$_archive_task")"
+    mkdir -p "${_tasks_dir}/archive"
+    if { git -C "$_at_dir" ls-files --error-unmatch -- "$(basename "$_archive_task")" >/dev/null 2>&1 \
+           && git -C "$_at_dir" mv -- "$(basename "$_archive_task")" archive/; } \
+       || mv -- "$_archive_task" "${_tasks_dir}/archive/"; then
+      local _at_tl; _at_tl=$(derive_timeline "$state_file") || true
+      [[ -n "$_at_tl" ]] && log_event "$_at_tl" "task_file_archived" file="$(basename "$_archive_task")"
+      echo "archived the EPIC task file: ${_tasks_dir}/archive/$(basename "$_archive_task") (a tracked file is staged as a rename in that checkout)" >&2
+    else
+      echo "WARN: could not archive ${_archive_task} — move it to ${_tasks_dir}/archive/ by hand" >&2
     fi
   fi
 
@@ -7076,8 +7169,9 @@ cmd_alloc() {
   case "$kind" in
     plan-id) key="plan"; prefix="P" ;;
     epic-id) key="epic"; prefix="E-" ;;
+    imp-id)  key="imp";  prefix="IMP-" ;;   # a backlog item (.aid-o/work/backlog.md)
     *)
-      echo "Usage: aid-fsm.sh alloc plan-id | alloc epic-id" >&2
+      echo "Usage: aid-fsm.sh alloc plan-id | alloc epic-id | alloc imp-id" >&2
       exit 1 ;;
   esac
 
@@ -7115,6 +7209,7 @@ cmd_alloc() {
 # allocator, which changes the number and never the note.
 plan: 0
 epic: 0
+imp: 0
 ' > "$counter" || {
       echo "ERROR: alloc ${kind}: could not create ${counter}" >&2
       exit 1
@@ -7133,6 +7228,12 @@ epic: 0
 
   local line current
   line="$(grep -m1 -E "^${key}:" "$counter" || true)"
+  if [[ -z "$line" && "$kind" == imp-id ]]; then
+    # Counters written before 2.107.0 have no imp: line; the backlog scan below
+    # is what keeps the first number clear of the ones already handed out.
+    [[ -z "$(tail -c1 "$counter")" ]] || echo >> "$counter"   # a hand-edited last line without a newline
+    printf 'imp: 0\n' >> "$counter"; line="imp: 0"
+  fi
   if [[ -z "$line" ]]; then
     aid_lock_release "$fd"
     echo "ERROR: alloc ${kind}: no '${key}:' line in ${counter} — run /aid-init first" >&2
@@ -7171,6 +7272,18 @@ epic: 0
       (( _taken )) && { next=$((next + 1)); _skipped=$((_skipped + 1)); }
     done
     (( _skipped > 0 )) && echo "NOTE: alloc ${kind}: skipped ${_skipped} id(s) a file in ${_dirs[0]} or its archive/ already carries" >&2
+  fi
+  if [[ "$kind" == imp-id ]]; then
+    # IMP numbers live in the backlog's text, not in file names: never hand out
+    # one at or below the highest the backlog already names (hand-picked
+    # numbers collided three times in September 2026).
+    local _hi
+    _hi="$(grep -rhoE 'IMP-[0-9]+' "${root}/.aid-o/work/backlog.md" "${root}/.aid-o/work/backlog" 2>/dev/null \
+           | sed 's/IMP-//; s/^0*//' | sort -n | tail -1 || true)"   # no backlog/ dir is not an error
+    if [[ -n "$_hi" ]] && (( _hi >= next )); then
+      echo "NOTE: alloc imp-id: the backlog already names IMP-${_hi}; continuing after it" >&2
+      next=$((_hi + 1))
+    fi
   fi
 
   # Atomic write preserving every comment byte: sed rewrites ONLY the digits

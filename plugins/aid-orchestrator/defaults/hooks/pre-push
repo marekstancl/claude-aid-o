@@ -311,7 +311,7 @@ _aid_prepush_label_fallback() {
   while IFS= read -r _line; do
     _msg="${_line#* }"
     case "$_msg" in
-      release:*) return 0 ;;
+      release:*|"chore(release):"*) return 0 ;;   # chore(release): of conventional commits; fix(release): is still a fix
       feat*|fix*) _has=true ;;
     esac
   done <<EOF

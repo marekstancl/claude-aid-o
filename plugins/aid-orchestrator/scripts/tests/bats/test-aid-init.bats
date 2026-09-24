@@ -407,7 +407,7 @@ _p097_fixture_project() {  # <name> → project root with a copy of the fixture
   [ "$status" -eq 3 ]
   [[ "$output" == *"--- current"* ]]
   [[ "$output" == *"-    required_when: \"*.py exists\""* ]]
-  [[ "$output" == *"+default_profile: standard"* ]]
+  [[ "$output" == *"+default_profile: full"* ]]   # the old gate_profile_defaults.epic, carried
   [[ "$output" == *"+    when_paths:"* ]]
   [[ "$output" == *"diff_hash: sha256:"* ]]
   # Nothing written by the preview.
@@ -421,7 +421,7 @@ _p097_fixture_project() {  # <name> → project root with a copy of the fixture
   [ "$(grep -c '^ *required_when:' "$cfg")" -eq 0 ]
   [ "$(grep -c 'required_when' "$cfg")" -eq 1 ]
   run yq '.default_profile' "$cfg"
-  [ "$output" == "standard" ]
+  [ "$output" == "full" ]   # ACTA's gate_profile_defaults.epic
   run yq '.gate_profile_defaults' "$cfg"
   [ "$output" == "null" ]
   run yq '.gate_profiles | has("quick")' "$cfg"
@@ -471,6 +471,7 @@ _p097_fixture_project() {  # <name> → project root with a copy of the fixture
 @test "P097 Step 3: gate_profiles without a profile named standard — exit 2 naming the declared profiles; --default-profile <declared> proceeds; an undeclared name is refused" {
   root="$(_p097_fixture_project agents)"
   cfg="$root/.aid-o/config/execution.yaml"
+  yq -i 'del(.gate_profile_defaults)' "$cfg"   # no old EPIC default to carry
   before="$(sha256sum "$cfg")"
 
   run bash "$HELPER" upgrade "$root"

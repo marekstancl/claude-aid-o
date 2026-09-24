@@ -173,6 +173,17 @@ if [[ "$BUMP_TYPE" == "auto" ]]; then
     elif $HAS_FIX; then
       BUMP_TYPE="patch"
     else
+      # A plan's own commits ("step 3: …", "merge(epic): …") carry no type, so
+      # "no feat, no fix" says nothing about them: in a plan, ask instead of
+      # guessing "no bump" (P101 was a new command and read as nothing).
+      local _untyped=0
+      [[ -n "${_AID_RELEASE_PLAN_MODE:-}" ]] \
+        && _untyped="$(sed 's/^[^ ]* //' <<< "$COMMITS" | grep -Evc '^(chore|docs|refactor|test|tests|perf|build|ci|style|revert|release)(\([^)]*\))?!?:' || true)"
+      if [[ "${_untyped:-0}" -gt 0 ]]; then
+        echo "PRECONDITION FAIL: --bump auto cannot read this plan: ${_untyped} commit(s) since $LAST_TAG carry no conventional type (a plan's step and merge commits), and none says feat or fix." >&2
+        echo "next: aid-release.sh prepare-plan <plan_id> --bump minor|patch --plan-branch <branch>  (minor for a new command or behaviour, patch for fixes)" >&2
+        exit 1
+      fi
       echo "Only chore/docs/refactor/test commits since $LAST_TAG — no version bump needed." >&2
       if [[ -n "${_RELEASE_NOBUMP_HOOK:-}" ]]; then "$_RELEASE_NOBUMP_HOOK"; fi
       exit 0
@@ -932,7 +943,7 @@ git commit -m "release: v${NEW_VERSION} — ${LAST_FEAT}"
 git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
 
 echo ""
-echo "Released v${NEW_VERSION}. Push with: git push --no-verify && git push --tags"
+echo "Released v${NEW_VERSION} (tagged locally). Push main (git push origin main), verify the installed plugin, then push the tag (git push origin v${NEW_VERSION})."
 }
 
 # =============================================================================
@@ -1123,7 +1134,7 @@ cmd_prepare_plan() {
     _RELEASE_NOBUMP_HOOK=_release_prepare_plan_record_none
   fi
 
-  _release_parse_args_and_resolve_bump "$bump"
+  _AID_RELEASE_PLAN_MODE=1 _release_parse_args_and_resolve_bump "$bump"
   _release_detect_version
 
   if $dry; then

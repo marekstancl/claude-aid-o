@@ -327,6 +327,19 @@ _push() {
   [[ "$output" == *"release_exempt_paths is not set"* ]]
 }
 
+@test "AC21 in the COPY: with no config a chore(release): commit closes the range like release:" {
+  _commit "fix: a real fix" src/app.txt
+  _commit "chore(release): v1.2.0" src/app.txt
+  run _push refs/heads/main "$(git -C "$R" rev-parse HEAD)"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC21 in the COPY: with no config fix(release): is a fix, not a release" {
+  _commit "fix(release): the script" src/app.txt
+  run _push refs/heads/main "$(git -C "$R" rev-parse HEAD)"
+  [ "$status" -eq 1 ]
+}
+
 @test "AC21 in the COPY: with no config a chore-only range still passes, as it did before" {
   _commit "chore: tidy" src/app.txt
   run _push refs/heads/main "$(git -C "$R" rev-parse HEAD)"

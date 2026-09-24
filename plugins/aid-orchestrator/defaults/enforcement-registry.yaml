@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 547          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 563          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -3663,7 +3663,7 @@ enforcements:
     tier: t0
     enforcement_degree: 2
     not_guaranteed: "Only while the canary has verified this installation (fail-closed rows degrade to open without it) and never on a turn already continued by a hook (stop_hook_active). Only steps THIS session dispatched (contract newer than the transcript's first timestamp). A hand-over is recognised by the Decision and Blocked card labels; a turn that ends on prose in no card shape while a step is open is refused, which is the intent, but a turn that FAKES a Blocked card passes — the label is a shape, not a truth. Stop does not exist in Codex review modes and never arrives from a killed session; the FSM precondition (dispatch_contract_return) is the later catch."
-    description: "P087 Step 5 — a turn may not end while a step this session dispatched under a contract has not been advanced. The refusal names the step and the transition to make (validate the return, commit, step-verify, increment-step) or the two explicit hand-overs (a Decision card, a Blocked card)."
+    description: "P087 Step 5 — a turn may not end while a step this session dispatched under a contract has not been advanced. The refusal names the step and the transition to make (validate the return, commit, step-verify, increment-step) or the two explicit hand-overs (a Decision card, a Blocked card). P100: a step is this session's when its transcript holds the contract's \"Dispatch Contract (version <v>)\" header (a time window blamed one session for another's step). 2.107.0: the ecosystem's decision block (/opt/eco/CLAUDE.md: a numbered Rozhodnutí/Nález, two or more options, Doporučuju) hands over like a Decision card."
     recovery: "Finish the step or hand over with a card; AID_HOOKS_OFF_RULES=turn_step_open is the audited escape."
     test: "scripts/tests/bats/test-hook-rules-turn.bats"
 
@@ -3678,7 +3678,7 @@ enforcements:
     tier: t0
     enforcement_degree: 3
     not_guaranteed: "Anything. This is DELIVERY, not a guard, and the plan's re-grounding says why: the catch sees Write/Edit and never a shell redirection (measured by the ecosystem sheet and by P086), so a rule that blocked here would be sold as protection with a hole the size of `bash`. It names the path and the allowed list before the edit lands, as context; what refuses is the contract validation at return time (dispatch_contract_return), which reads the disk."
-    description: "P087 Step 5 — a Write/Edit that lands outside EVERY open step's allowed paths is named before it lands, with the path and each open step's list, as injected context under PreToolUse (owner any, so it reaches a role agent too). In a concurrent wave several steps are open at once and the hook cannot tell which agent is writing, so it judges against the union and the return validation of the right step settles it."
+    description: "P087 Step 5 — a Write/Edit that lands outside EVERY open step's allowed paths is named before it lands, with the path and each open step's list, as injected context under PreToolUse (owner any, so it reaches a role agent too). In a concurrent wave several steps are open at once and the hook cannot tell which agent is writing, so it judges against the union and the return validation of the right step settles it. A write into a review round's own directory (evidence/…/cp2|cp3|cp6|cp7/…) is a reviewer's answer and is not named (2.107.0)."
     recovery: "Nothing to recover; the notice is feedback. The return validation is the enforcement."
     test: "scripts/tests/bats/test-hook-rules-turn.bats"
     not_guaranteed: "that an out-of-scope write is PREVENTED — this rule names it before it lands and does not stop it; a shell redirection is not seen at all. The refusal happens at return time, in the dispatch contract, which compares the declared file list against the disk"
@@ -3867,7 +3867,7 @@ enforcements:
     tier: t0
     test: "scripts/tests/bats/test-plan-close-administrative.bats"
     enforcement_degree: 2
-    description: "PM-requested route (2026-09-02) for closing a plan that never produced an evidence chain — work developed outside AID, or a plugin defect that strands a plan. It writes NO candidate, run id or verdict; it records closure_kind and lists what could not be confirmed. Refused whenever the manifest carries both candidate_sha and plan_final_run_id, so a plan whose evidence exists and says `fail` cannot be closed around; refused together with --force, which means the opposite thing (real data, stuck check); and requires a reason of 20+ characters, recorded verbatim."
+    description: "PM-requested route (2026-09-02) for closing a plan that never produced an evidence chain — work developed outside AID, or a plugin defect that strands a plan. It writes NO candidate, run id or verdict; it records closure_kind and lists what could not be confirmed. Refused whenever the manifest carries both candidate_sha and plan_final_run_id, so a plan whose evidence exists and says `fail` cannot be closed around; refused together with --force, which means the opposite thing (real data, stuck check); and requires a reason of 20+ characters, recorded verbatim. P100 Step 9: it closes from any open state (P097 stood in PLAN_GATES), and a plan whose branch is already inside the target is closed with its plan-final evidence listed as partial; before 2.107.0 no administrative close passed its own argument check (the reason was refused as a force reason without --force)."
     not_guaranteed: "that the plan was delivered, reviewed, or is releasable. It guarantees only that the closure is RECORDED as evidence-free and is never presented as an ordinary close — where an evidence-backed close is required, this one does not satisfy it."
 
   - id: queue_continuation_notice
@@ -3918,9 +3918,201 @@ enforcements:
     surface: internal-guard
     status: active
     verdict: ALIGNED
-    description: "An answer carrying a finding whose command or evidence breaks the form is listed by collect as invalid, once per role and round, with the reason naming the finding (form: <id> missing_evidence …), so it goes back to its reviewer through the existing retry path instead of being dropped silently by the adjudicator. The round is invalid while that re-ask is owed, even when the remaining answers meet min_answers, so it is never adjudicated without the role. A second malformed answer is accepted and that finding is dropped as before. Found by the P096 acceptance run, where a true blocker was dropped for a bracketed note after a citation."
+    description: "An answer carrying a finding whose command or evidence breaks the form is listed by collect as invalid, once per role and round, with the reason naming the finding (form: <id> missing_evidence …), so it goes back to its reviewer through the existing retry path instead of being dropped silently by the adjudicator. The round is invalid while that re-ask is owed, even when the remaining answers meet min_answers, so it is never adjudicated without the role. A second malformed answer is accepted and the finding is kept as form_invalid (row review_finding_form_invalid). Found by the P096 acceptance run, where a true blocker was dropped for a bracketed note after a citation."
     recovery: "aid-review-round.sh retry --role <role>, re-dispatch the same prompt with the reason quoted, collect again."
     test: "scripts/tests/bats/test-review-round.bats (grep: 'breaks the form')"
+
+  - id: review_round_delta
+    type: 1
+    source: "scripts/aid-review-round.sh:cmd_prepare (grep: 'delta round')"
+    instruction: "commands/aid-run.md (grep: 'delta round over the commits')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P100 Step 2: a step or EPIC that moves after a PASSED round is confirmed by a delta round over the commits since, asking every role; it is not counted against rounds_default and needs no override. A failed round beyond the default still needs the PM override, and a round with nothing moved is still refused. The step check turns a would-be skip after a closed round into review, so the delta round can be prepared."
+    recovery: "aid-step-check.sh, then aid-review-round.sh prepare --round <n+1> (the next: line of review_round_stale)."
+    test: "scripts/tests/bats/test-review-round.bats (grep: 'delta round, beyond rounds_default')"
+
+  - id: review_dispute_pm_card
+    type: 1
+    source: "scripts/aid-review-round.sh:cmd_dispute (grep: '_pm_replied_after')"
+    instruction: "commands/aid-run.md (grep: 'is disputed, never edited')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P100 Step 2: at CP2/CP3 a disputed finding keeps blocking; only dispute --pm accepted clears it, and only with --finding-card naming the Decision card that quotes the finding's fingerprint and a pm_reply_marker line (a UserPromptSubmit of any session) in the hook audit after that card. The verdict is recomputed in the round index. This is an audit trail, not a proof: a controller that forges the hook audit file is not stopped."
+    recovery: "Render the Decision card quoting the fingerprint, wait for the PM's answer, then dispute --pm accepted --finding-card <card> --reason '<the PM's words>'."
+    test: "scripts/tests/bats/test-review-round.bats (grep: 'disputed cp2 blocker')"
+
+  - id: review_finding_form_invalid
+    type: 1
+    source: "scripts/aid-review-adjudicate.sh (grep: 'form_invalid')"
+    instruction: "commands/aid-run.md (grep: 'form_invalid')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P100 Step 2: a finding the adjudicator rejects on form (every reason but duplicate) is also kept in merged.json with status form_invalid; a step round's verdict counts a form_invalid blocker or major as open, so a true finding is never lost to its form. The read-only command check itself is unchanged."
+    recovery: "Fix the finding in the step, or dispute it (review_dispute_pm_card)."
+    test: "scripts/tests/bats/test-review-adjudicate.bats (grep: 'escaped quote')"
+
+  - id: amend_scope_declared_absolute
+    type: 1
+    source: "scripts/aid-fsm.sh:cmd_amend_scope (grep: 'no step of the plan declares it')"
+    instruction: "skills/pipeline.md (grep: 'Scope amendment')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P100 Step 4: amend-scope accepts an absolute path only when it lies (by realpath) at or under an absolute path some step of the plan declares; after the last step it widens the last step, so the GATES/DONE union and the commit hook see it."
+    recovery: "Declare the path in the step's Files (a PM decision on the plan), then regenerate."
+    test: "scripts/tests/bats/test-aid-fsm.bats (grep: 'after the last step widens')"
+
+  - id: commit_guard_always_allowed
+    type: 1
+    source: "defaults/hooks/pre-commit (grep: '_AID_ALWAYS_ALLOWED')"
+    instruction: "skills/agent-protocol.md (grep: 'aid-plugin-issues.md')"
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P100 Step 4: the backlog (.aid-o/work/backlog.md, docs/plans/BACKLOG.md) and the plugin-issues file are committable in EXECUTE, GATES and DONE/review; the same list sits in aid-fsm.sh (_FSM_ALWAYS_ALLOWED) for the commit-scope companion, and a test keeps the two equal."
+    recovery: "n/a — a widening, not a refusal."
+    test: "scripts/tests/bats/test-commit-guard.bats (grep: 'only the backlog')"
+
+  - id: dispatch_declared_deletion
+    type: 1
+    source: "scripts/lib/aid-dispatch-contract.sh (grep: 'deleted_files')"
+    instruction: "skills/pipeline.md (grep: 'Per-step commit')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P100 Step 4: a return may declare deleted_files; a declared deletion of an expected artifact inside the allowed paths is not a missing artifact, a deletion outside scope is refused like any out-of-scope change, and the commit stages it. repo_commits ranges must resolve in their repository or the return is refused naming the sha."
+    recovery: "Re-dispatch the step; a deletion outside scope is a scope amendment first."
+    test: "scripts/tests/bats/test-dispatch-contract.bats (grep: 'declared deletion of a promised artifact')"
+
+  - id: dispatch_commit_branch
+    type: 1
+    source: "scripts/lib/aid-dispatch-contract.sh:aid_dispatch_contract_commit (grep: 'not the run')"
+    instruction: "skills/role-cards.md (grep: 'Stay on the branch you were given')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P100 Step 7: the controller's step commit is refused unless the tree is on the run's task/<epic>/main (the EPIC read from the contract's evidence directory) or on the step's own step/<id> branch of a wave; step agents are told never to switch branches in the shared tree."
+    recovery: "git -C <tree> checkout task/<epic>/main, then commit again."
+    test: "scripts/tests/bats/test-parallel-evidence.bats (grep: 'another EPIC')"
+
+  - id: step_check_declared_repositories
+    type: 5
+    source: "scripts/aid-step-check.sh (grep: 'OTHER_MISSING')"
+    instruction: "commands/aid-run.md (Step review (CP2) and EPIC review (CP3))"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P100 Step 4: an absolute allowed path of the step in another git repository is reviewed from the range the step's return names there (repo_commits); a declared repository with no range is a review verdict naming it, never a skip."
+    recovery: "Return repo_commits for the other repository, then run the step check again."
+    test: "scripts/tests/bats/test-step-check.bats (grep: 'second declared repository')"
+
+  - id: brainstorm_design_ui_basis
+    type: 1
+    source: "scripts/aid-brainstorm-state.sh:cmd_gate (grep: 'no proposal basis')"
+    instruction: "skills/visual-companion/SKILL.md (grep: 'shared UI components')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "P100 Step 8: gate --phase design of a user_visible run refuses without a topic kind, and for kind ui without a proposal.json basis (aid_ui_proposal_build: the screen or design system and the viewports); kind other on a user_visible run needs a recorded reason the design page shows. Whether a topic is a screen stays the controller's judgement."
+    recovery: "aid-brainstorm-state.sh init --topic-kind ui|other [--reason]; aid_ui_proposal_build <root> <brainstorm dir>."
+    test: "scripts/tests/bats/test-brainstorm-vision.bats (grep: 'design gate needs a topic kind')"
+
+  - id: generation_delivered_phase
+    type: 4
+    source: "scripts/aid-auto-pipeline.sh (grep: '_gen_phase_delivered')"
+    instruction: "skills/planner.md (grep: 'two-stage')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "P100 Step 5: a phase whose EPIC an earlier generation queued with a merge_target that git ancestry proves merged is recorded delivered and not generated, queued or bound to the plan bytes again; aid-generation-finalize.sh proves it again, and a legacy entry (status only) is never delivered. An incomplete transaction that generated no phase supersedes itself with the three audit records."
+    recovery: "n/a — a delivered phase needs nothing; an unproven one is generated as before."
+    test: "scripts/tests/bats/test-generation-resume.bats (grep: 'half-delivered')"
+
+  - id: plan_lint_epic_grammar
+    type: out-of-band
+    source: "scripts/aid-plan-lint.sh (grep: 'aid-lifecycle.sh\" parse-legacy')"
+    instruction: "skills/plan-writing.md (grep: 'Every plan carries these lines')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "2.107.0: the plan's EPIC lines are read by the same parser plan-start writes the lifecycle manifest with (lib/aid-lifecycle.sh aid_lifecycle_parse_legacy_epics), before review and generation are spent: no EPIC line, or one in neither '**EPIC N: …**' nor '**EPIC N / Backlog: …**' form, or numbering other than 1..K. STRICT tier (blocking for lifecycle_strict, a warning for a legacy plan). plan-start names the reason instead of a bare rc."
+    recovery: "write each phase as '**EPIC N: Steps M-P — Title**' (skills/plan-writing.md §Phase Markers)"
+    test: "scripts/tests/bats/test-plan-lint.bats (grep: 'EPIC line plan-start cannot parse')"
+
+  - id: step_check_run_checkout
+    type: 4
+    source: "scripts/lib/aid-roots.sh (grep: 'aid_run_checkout_root()')"
+    instruction: "commands/aid-run.md (grep: '--checkpoint cp2 --step <N>')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2.107.0: without --project-root, the cp2/cp3 step check and review round diff the worktree the run's recorded branch is checked out in, not the tree they are run from (P101: a check from the primary judged the primary's HEAD and recorded no change); the review config is read from the state root. A branch that exists but is checked out nowhere is refused; none recorded, detached or deleted keeps the cwd. increment-step re-executes in the plan worktree like transition."
+    recovery: "check the run's branch out, or pass --project-root <tree>"
+    test: "scripts/tests/bats/test-step-check.bats (grep: 'run from the primary')"
+
+  - id: prepare_plan_auto_untyped
+    type: 4
+    source: "scripts/aid-release.sh (grep: 'cannot read this plan')"
+    instruction: "skills/plan-writing.md (grep: 'The release under')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2.107.0: prepare-plan --bump auto refuses when commits since the last tag carry no conventional type (a plan's step commits) and none says feat or fix, and asks for --bump minor|patch; before, it read such a plan as 'no bump' (P101, a new command). chore/docs-only ranges still resolve to none."
+    recovery: "aid-release.sh prepare-plan <plan> --bump minor|patch --plan-branch <branch>"
+    test: "scripts/tests/bats/test-aid-plan-final-boundary.bats (grep: 'refuses a plan whose commits carry no type')"
+
+  - id: plan_record_decision
+    type: 4
+    source: "scripts/aid-plan-fsm.sh (grep: 'cmd_plan_record_decision()')"
+    instruction: "commands/aid-run.md (grep: 'plan-record-decision <plan> MERGE')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2.107.0: the PM's MERGE/FIX/ABORT is written by plan-record-decision as the schema-valid pm_plan_decision bound to the frozen candidate (candidate, attempt, target head at freeze) into the attempt's directory; the close card and plan-continue name it before plan-merge-to-main, which refuses anything else (the card used to name release-decision.json, which the merge's schema refuses)."
+    recovery: "aid-plan-fsm.sh plan-record-decision <plan> MERGE --by pm"
+    test: "scripts/tests/bats/test-aid-plan-final-boundary.bats (grep: 'plan-record-decision writes the MERGE')"
+
+  - id: alloc_imp_id
+    type: 4
+    source: "scripts/aid-fsm.sh (grep: 'imp-id)  key=\"imp\"')"
+    instruction: "skills/memory.md (grep: 'alloc imp-id')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2.107.0: backlog numbers (IMP-NNN) come from aid-fsm.sh alloc imp-id under the counter.yaml lock, after the highest IMP the backlog already names (a counter without an imp: line starts there); two sessions picking numbers by hand collided three times in September 2026. plan-check B6 no longer checks IMP ids and matches whole ids only."
+    recovery: "bash scripts/aid-fsm.sh alloc imp-id"
+    test: "scripts/tests/bats/test-alloc-lock.bats (grep: 'alloc imp-id')"
+
+  - id: plan_final_clean_tree
+    type: 4
+    source: "scripts/aid-release-policy.sh (grep: 'TREE_ROOT=')"
+    instruction: "commands/aid-run.md (grep: 'verification_report')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2.107.0: the plan-final clean-tree check (evidence verifier git_clean, via --tree) and the review equivalence judge the plan's recorded worktree, not the primary checkout another window may be working in; decide stopped at NOT READY for P097, P099 and P101 for this class of reason."
+    recovery: "n/a — commit or discard edits in the plan's worktree"
+    test: "scripts/tests/bats/test-plan-final-decide.bats (grep: 'judges the plan')"
 
   - id: aid_ui_direction_needs_pm
     type: 12

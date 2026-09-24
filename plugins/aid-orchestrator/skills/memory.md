@@ -32,7 +32,9 @@ To get recent events:
 
 ## Backlog
 Read: `.aid-o/work/backlog.md`
-Written by: the controller, one `IMP-{NNN}` row per deferred item.
+Written by: the controller, one `IMP-{NNN}` row per deferred item; the number
+comes from `bash {plugin_path}/scripts/aid-fsm.sh alloc imp-id` (locked; two
+sessions picking numbers by hand collided three times).
 Format: sections for Bugs / Features / Refactoring / Performance, each with
   IMP-{NNN} entries (status: pending|implementing|implemented|deferred).
 

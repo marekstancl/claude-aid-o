@@ -167,6 +167,8 @@ source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancilla
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"   # P090 Step 2 — the ONE plan-timeline writer
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-permissions.sh" # P090 — the ONE autonomous_mode reader
+# shellcheck source=lib/aid-generation-ids.sh
+source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"   # aid_gen_plan_num — a plan id to its EPIC ids
 # P074 Step 6 — the SAME shared post-boundary helper aid-fsm.sh uses
 # (aid_active_boundary_sync): a direct `aid-plan-fsm.sh plan-close` /
 # `plan-rollback` (invocable without the aid-fsm.sh wrapper) performs
@@ -1320,49 +1322,11 @@ _pfsm_plan_worktree_lock_path() {
   printf '%s/plan-worktree.lock' "$(dirname "$(plan_state_path "$1")")"
 }
 
-# _pfsm_recorded_worktree <root> <plan_id> — the ABSOLUTE recorded path, or
-# empty when the plan records none (legacy plan, or the crash window between
-# registration and the record). A recorded relative path is resolved against
-# the state root, which is what the schema documents.
-#
-# EXIT CODE CARRIES THE DIFFERENCE BETWEEN "no record" AND "cannot read"
-# (mirrors aid-fsm.sh's _fsm_plan_worktree_recorded — the same defect was
-# fixed there first):
-#   0 + a path  -> the plan records that worktree
-#   0 + nothing -> the plan DEFINITIVELY records none (plan_state_get answered:
-#                  rc 0 with an empty/`null` value, or rc 1 `not_found`)
-#   2 + nothing -> the answer is UNKNOWN: plan_state_get could not read at all
-#                  (rc 2 = jq/yq missing, rc 5 = corrupt state file, or any
-#                  other non-0/1 rc such as a lock timeout)
-#
-# The distinction is load-bearing. `_pfsm_require_plan_worktree` turns
-# "records none BUT a worktree exists at the canonical path" into the
-# plan-start CRASH-WINDOW refusal — a hard claim that plan-start was killed
-# between `git worktree add` and the state write, pointing the operator at
-# `--recreate-worktree`. Collapsing an unreadable state file into "records
-# none" made that refusal fire on a missing `yq`: a false diagnosis of a
-# corrupted transaction when the real fault was a missing dependency. Never
-# diagnose from an answer you did not get.
-_pfsm_recorded_worktree() {
-  local root="$1" plan_id="$2" rec="" rc=0
-  rec="$(plan_state_get "$plan_id" "worktree_path" 2>/dev/null)" || rc=$?
-  # rc 1 with `not_found` on stdout = no state file yet; rc 1 with nothing =
-  # the field is absent. Both are real answers. Anything else is not.
-  if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then
-    printf ''
-    return 2
-  fi
-  [[ "$rec" == "not_found" || "$rec" == "null" ]] && rec=""
-  [[ -z "$rec" ]] && return 0
-  [[ "$rec" == /* ]] || rec="${root}/${rec}"
-  printf '%s' "$rec"
-}
-
 # _pfsm_canonical_worktree_if_live <root> <plan_id> — the canonical
 # `.aid-worktrees/plan-<id>` path when it EXISTS and git knows it as a LINKED
 # worktree, empty otherwise.
 #
-# Used only where the plan-state record is unreadable (rc 2 above). The
+# Used only where the plan-state record is unreadable (aid_plan_recorded_worktree rc 2). The
 # directory name is fixed by Step 7 precisely so it stays derivable without
 # reading state, and git's own registration is the corroboration: a registered
 # linked worktree at the plan's canonical path is physical evidence that this
@@ -1501,7 +1465,7 @@ _pfsm_create_plan_worktree() {
 _pfsm_ensure_plan_worktree() {
   local root="$1" plan_id="$2" plan_branch="$3"
   local canonical; canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
-  local rec; rec="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+  local rec; rec="$(aid_plan_recorded_worktree "$root" "$plan_id")"
 
   if [[ -n "$rec" ]]; then
     git -C "$root" worktree prune >/dev/null 2>&1 || true
@@ -1627,11 +1591,11 @@ _pfsm_plan_start_compensate() {
     fi
   else
     # The state file predates this run: leave it, but never leave OUR pointer.
-    local ptr; ptr="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+    local ptr; ptr="$(aid_plan_recorded_worktree "$root" "$plan_id")"
     if [[ -n "$ptr" ]]; then
       local prc=0
       plan_state_set_worktree_path "$plan_id" "" >/dev/null 2>&1 || prc=$?
-      if [[ "$prc" -ne 0 ]] && [[ -n "$(_pfsm_recorded_worktree "$root" "$plan_id")" ]]; then
+      if [[ "$prc" -ne 0 ]] && [[ -n "$(aid_plan_recorded_worktree "$root" "$plan_id")" ]]; then
         survived+=("the worktree pointer in ${state_path} (rc=${prc}) — clear it once the state directory is writable again")
       else
         undone+=("the worktree pointer in plan-state")
@@ -1696,10 +1660,65 @@ _pfsm_plan_start_compensate() {
 # on a lock timeout the closure still completes and the worktree is left in
 # place with a named recovery. See the lock block below.
 # ---------------------------------------------------------------------------
+# _pfsm_cleanup_leftovers <root> <plan_id> <merge_ref> <out.json> — what a plan
+# leaves behind besides its own tree (P100 Step 9, IMP-650): the step trees and
+# step/<id> branches of its own steps (the ids in its EPICs' plan.json) that
+# <merge_ref> contains, and its brainstorm- and generation- scratch trees. A tree
+# with uncommitted work, a step branch of the plan the merge does not contain
+# and a tree outside .aid-worktrees/ are kept and named; a removal git refuses is
+# kept with the command that removes it. Writes <out.json> {removed, kept} and
+# never fails the close.
+_pfsm_cleanup_leftovers() {
+  local root="$1" plan_id="$2" ref="$3" out="$4" wt="" br line name steps
+  local -a removed=() kept=()
+  steps=" $(cat "${root}/.aid-o/work/evidence/E-$(aid_gen_plan_num "$plan_id")-"*/*/plan.json 2>/dev/null | jq -r '.steps[]?.id // empty' 2>/dev/null | sort -u | tr '\n' ' ') "
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) wt="${line#worktree }"; br="" ;;
+      "branch "*)   br="${line#branch refs/heads/}" ;;
+      "")
+        [[ -n "$wt" && "$wt" != "$root" ]] || { wt=""; continue; }
+        name="$(basename "$wt")"
+        if [[ "$wt" != "$root/.aid-worktrees/"* ]]; then
+          kept+=("${wt}	not AID's (outside .aid-worktrees/)")
+        elif [[ "$br" == step/* && "$steps" == *" ${br#step/} "* ]] && ! git -C "$root" merge-base --is-ancestor "$br" "$ref" 2>/dev/null; then
+          kept+=("${wt}	${br} is not merged into ${ref}")
+        elif [[ "$br" == step/* && "$steps" == *" ${br#step/} "* ]] \
+             || [[ "$name" == "brainstorm-${plan_id}" || "$name" == "generation-${plan_id}" ]]; then
+          if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then
+            kept+=("${wt}	uncommitted work")
+          elif git -C "$root" worktree remove "$wt" >/dev/null 2>&1; then
+            removed+=("$wt")
+          else
+            kept+=("${wt}	git refused: git worktree remove ${wt}")
+          fi
+        fi
+        wt="" ;;
+    esac
+  done < <(git -C "$root" worktree list --porcelain 2>/dev/null; echo)
+  while IFS= read -r br; do
+    [[ -n "$br" && "$steps" == *" ${br#step/} "* ]] || continue
+    if ! git -C "$root" merge-base --is-ancestor "$br" "$ref" 2>/dev/null; then
+      kept+=("${br}	not merged into ${ref}")
+    elif git -C "$root" branch -D "$br" >/dev/null 2>&1; then
+      removed+=("$br")
+    else
+      kept+=("${br}	git refused: git branch -D ${br}")
+    fi
+  done < <(git -C "$root" for-each-ref --format='%(refname:short)' 'refs/heads/step/*')
+  mkdir -p "$(dirname "$out")" 2>/dev/null
+  jq -n --argjson r "$(printf '%s\n' "${removed[@]}" | jq -R 'select(length > 0)' | jq -sc .)" \
+        --argjson k "$(printf '%s\n' "${kept[@]}" | jq -R 'select(length > 0) | split("\t") | {path: .[0], why: .[1]}' | jq -sc .)" \
+        '{removed: $r, kept: $k}' > "$out" 2>/dev/null || true
+  echo "plan-close cleanup: removed ${#removed[@]}, kept ${#kept[@]} (${out})" >&2
+  local k; for k in "${kept[@]}"; do echo "  kept: ${k/	/ — }" >&2; done
+  return 0
+}
+
 _pfsm_teardown_plan_worktree() {
   local root="$1" plan_id="$2"
   local canonical; canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
-  local wt; wt="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+  local wt; wt="$(aid_plan_recorded_worktree "$root" "$plan_id")"
   local had_pointer=0
   [[ -n "$wt" ]] && had_pointer=1
   [[ -n "$wt" ]] || wt="$canonical"
@@ -1841,7 +1860,7 @@ _PFSM_ORIG_ARGS=()
 # ---------------------------------------------------------------------------
 _pfsm_plan_tree_root() {
   local root="$1" plan_id="$2" rec="" rc=0
-  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")" || rc=$?
+  rec="$(aid_plan_recorded_worktree "$root" "$plan_id")" || rc=$?
   # Unreadable record: fall back to the physical evidence, so a live plan
   # worktree is not silently demoted to "run in the state root" just because
   # `yq` is missing or the state file is corrupt.
@@ -2006,7 +2025,7 @@ _pfsm_require_plan_worktree() {
   local plan_id="$1" root="$2"
   local canonical rec here want rc=0
   canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
-  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")" || rc=$?
+  rec="$(aid_plan_recorded_worktree "$root" "$plan_id")" || rc=$?
 
   # UNREADABLE record (missing yq/jq, corrupt state file, lock timeout). The
   # crash-window refusal below must NOT fire here: it asserts that plan-start
@@ -2105,7 +2124,7 @@ _pfsm_require_plan_worktree() {
 _pfsm_refuse_inside_plan_worktree() {
   local plan_id="$1" root="$2" cmd="${3:-this command}"
   local rec here want
-  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+  rec="$(aid_plan_recorded_worktree "$root" "$plan_id")"
   [[ -n "$rec" ]] || rec="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
   here="$(_pfsm_phys "$PWD")"
   want="$(_pfsm_phys "$rec")"
@@ -2416,7 +2435,13 @@ cmd_plan_start() {
   local lc_rc=0
   aid_lifecycle_set_plan_mode "$plan_id" "$mode" "$project_root" || lc_rc=$?
   if [[ "$lc_rc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: aid_lifecycle_set_plan_mode failed for ${plan_id} (rc=${lc_rc}) — op remains at git_applied, retry converges." >&2
+    local lc_why="op remains at git_applied, retry converges"
+    case "$lc_rc" in   # the return codes lib/aid-lifecycle.sh documents
+      2) lc_why="the plan id is not P<number>, or its EPIC lines do not parse: each EPIC is one bold line '**EPIC N: title**' (or '**EPIC N / Backlog: title**'), numbered 1..K (aid-plan-lint.sh names it); fix the plan, then retry" ;;
+      3) lc_why="the plan file is missing, or absent from the target branch" ;;
+      4) lc_why="a local edit to the lifecycle manifest is in the way; commit or discard it, then retry" ;;
+    esac
+    echo "PRECONDITION FAIL: aid_lifecycle_set_plan_mode failed for ${plan_id} (rc=${lc_rc}) — ${lc_why}." >&2
     exit "$lc_rc"
   fi
 
@@ -4833,22 +4858,41 @@ _pfsm_gate_definition_sha() {
 }
 
 # _pfsm_gate_reuse_rows <troot> <run_dir> <execution_yaml> <candidate> <gate>...
-#   Prints {from, candidate, rows: {<gate>: <row>}}: the rows of the PREVIOUS
-#   plan-final attempt that may be copied forward instead of executed. A row is
-#   reusable when it passed there, its gate is defined exactly as it was, and
-#   nothing the gate declares as `inputs:` (glob pathspecs; a leading `!`
-#   excludes; none declared = the whole tree) differs between that attempt's
-#   candidate and this one. Anything unreadable means "reuse nothing".
+#   Prints {from, report, candidate, rows: {<gate>: <row>}}: the rows that may be
+#   copied forward instead of executed — from the PREVIOUS plan-final attempt,
+#   or, when there is none, from the plan's newest EPIC run whose head has the
+#   candidate's tree (a merge commit changes the sha, not the tree: P100 Step 6).
+#   A row is reusable when it passed there, its gate is defined exactly as it
+#   was, and nothing the gate declares as `inputs:` (glob pathspecs; a leading
+#   `!` excludes; none declared = the whole tree) differs between that run's
+#   candidate and this one. From an EPIC run, a gate whose command carries a
+#   per-run token of the runner (`{base_commit}`, `{epic_id}` … — any `{…}` but
+#   `{plugin_path}`) answered a question about that EPIC and always runs again.
+#   Anything unreadable means "reuse nothing".
 _pfsm_gate_reuse_rows() {
   local troot="$1" run_dir="$2" yaml="$3" candidate="$4"; shift 4
-  local none='{"from": null, "candidate": null, "rows": {}}'
+  local none='{"from": null, "report": null, "candidate": null, "rows": {}}'
   [[ "$(basename "$run_dir")" =~ ^(.*-final-)([0-9]+)$ ]] || { echo "$none"; return 0; }
   # The newest earlier attempt that got as far as a gate report.
-  local prev_id="" prev_report="" n
+  local prev_id="" prev_report="" n from_epic=0
   for (( n = BASH_REMATCH[2] - 1; n >= 1; n-- )); do
     prev_id="${BASH_REMATCH[1]}${n}"; prev_report="$(dirname "$run_dir")/${prev_id}/gates_report.json"
     [[ -f "$prev_report" ]] && break
   done
+  if [[ ! -f "$prev_report" ]]; then
+    local tree r at best_at="" plan_dir; plan_dir="$(dirname "$run_dir")"
+    tree="$(git -C "$troot" rev-parse "${candidate}^{tree}" 2>/dev/null)" || { echo "$none"; return 0; }
+    prev_report=""
+    for r in "$(dirname "$plan_dir")/E-$(aid_gen_plan_num "$(basename "$plan_dir")")-"*/*/gates/gates_report.json; do
+      [[ -f "$r" ]] || continue
+      [[ "$(git -C "$troot" rev-parse "$(jq -r '.revision.head_sha // "none"' "$r" 2>/dev/null)^{tree}" 2>/dev/null)" == "$tree" ]] || continue
+      at="$(jq -r '._generated_at // ""' "$r" 2>/dev/null)"
+      [[ -z "$prev_report" || "$at" > "$best_at" ]] && { prev_report="$r"; best_at="$at"; }
+    done
+    [[ -n "$prev_report" ]] || { echo "$none"; return 0; }
+    prev_id="${prev_report%/gates/gates_report.json}"; prev_id="$(basename "$(dirname "$prev_id")")/${prev_id##*/}"
+    from_epic=1
+  fi
   local prev_candidate
   prev_candidate="$(jq -r 'select((._generated_by // "") | startswith("aid-run-gates.sh@")) | .revision.head_sha // empty' "$prev_report" 2>/dev/null)" || prev_candidate=""
   git -C "$troot" cat-file -e "${prev_candidate:-none}^{commit}" 2>/dev/null || { echo "$none"; return 0; }
@@ -4859,6 +4903,10 @@ _pfsm_gate_reuse_rows() {
     row="$(jq -c --arg g "$gate" --arg d "$(_pfsm_gate_definition_sha "$yaml" "$gate")" \
              "${AID_GATE_ROW_JQ}"'.gates[$g] | select(type == "object") | gate_row_normalize | select(.status == "pass" and .definition_sha256 == $d)' "$prev_report" 2>/dev/null)"
     [[ -n "$row" ]] || continue
+    if (( from_epic )) && GATE="$gate" yq -r '.gates[strenv(GATE)].command // ""' "$yaml" 2>/dev/null \
+         | sed 's/{plugin_path}//g' | grep -q '{[^}]*}'; then
+      continue
+    fi
     pathspec=()
     while IFS= read -r spec; do
       [[ "$spec" == '!'* ]] && pathspec+=(":(glob,exclude)${spec#!}") || pathspec+=(":(glob)${spec}")
@@ -4866,7 +4914,7 @@ _pfsm_gate_reuse_rows() {
     git -C "$troot" diff --quiet "$prev_candidate" "$candidate" -- "${pathspec[@]}" 2>/dev/null || continue
     rows="$(jq -c --arg g "$gate" --argjson r "$row" '.[$g] = $r' <<<"$rows")"
   done
-  jq -nc --arg from "$prev_id" --arg c "$prev_candidate" --argjson rows "$rows" '{from: $from, candidate: $c, rows: $rows}'
+  jq -nc --arg from "$prev_id" --arg rep "$prev_report" --arg c "$prev_candidate" --argjson rows "$rows" '{from: $from, report: $rep, candidate: $c, rows: $rows}'
 }
 
 # _pfsm_finalize_gates_body — everything that runs WITH the candidate checked
@@ -5006,11 +5054,30 @@ _pfsm_finalize_gates_body() {
       fi
       if [[ "$grc" -ne 0 ]]; then
         echo "GATES FAILED: the plan-final gate run for ${plan_id} did not pass (runner rc=${grc}); see ${run_dir_rel}/gates_report.json. The plan stays in PLAN_GATES — a failing candidate is shown to the PM, never silently retried." >&2
+        # What failed and how to reproduce it alone (the stage itself re-runs
+        # only whole: fix, freeze again, --stage gates). For a test runner the
+        # failed suites come from its log, as the nightly report reads them.
+        local fg fev fcmd fs
+        while IFS=$'\t' read -r fg fev; do
+          [[ -n "$fg" ]] || continue
+          fcmd="$(GATE="$fg" yq '.gates[strenv(GATE)].command // ""' "$execution_yaml" 2>/dev/null)"
+          echo "  failed: ${fg} — reproduce: (cd ${troot} && ${fcmd})" >&2
+          [[ -n "$fev" && -f "${run_dir_abs}/${fev}" ]] || continue
+          local frunner; frunner="$(grep -oE '[^ "'"'"']*run-all-tests\.sh' <<<"$fcmd" | head -1 || true)"
+          [[ -n "$frunner" ]] || continue
+          while IFS= read -r fs; do
+            [[ -n "$fs" ]] && echo "    suite: ${fs} — reproduce: (cd ${troot} && bash ${frunner} --only ${fs})" >&2
+          done < <(sed -nE '/^[[:space:]]*Failed suites:/,/^$/ s/^[[:space:]]+- (.+)$/\1/p' "${run_dir_abs}/${fev}")
+        done < <(jq -r '.gates | to_entries[] | select((.value.result // .value.status) == "fail")
+                   | "\(.key)\t\(.value.evidence // "")"' "$report_file" 2>/dev/null)
         return 1
       fi
     else
-      # Nothing to execute: this attempt's report is the previous one, re-bound.
-      jq --arg h "$candidate" '.revision.head_sha = $h' "$(dirname "$run_dir_abs")/${reuse_from}/gates_report.json" > "$report_file" || return 1
+      # Nothing to execute: this attempt's report is the reused one, re-bound to
+      # this candidate and this profile (an EPIC run's report ran its own).
+      jq --arg h "$candidate" --arg p "$effective_profile" --argjson inc "$(printf '%s\n' $effective_include | jq -R . | jq -sc .)" \
+        '.revision.head_sha = $h | .profile = $p | .gates |= with_entries(select(.key as $k | $inc | index($k)))' \
+        "$(jq -r .report <<<"$reuse")" > "$report_file" || return 1
     fi
     # Every row says which definition it ran under (what the next attempt
     # compares), and a copied row says where it came from.
@@ -5180,18 +5247,20 @@ _pfsm_finalize_gates_body() {
       || _gassert "quarantined gate '${qg2}' has no valid quarantine_substitutes[] entry bound to the candidate (${candidate}) and base (${base_commit})."
   done
 
-  # Exactly ONE gate_runner_start for this plan-final run — the structural
+  # Exactly ONE completed gate run for this plan-final run — the structural
   # no-duplicate-broad-run proof. `release` is a superset of `full`, so one
   # invocation covers everything and a second would mean a `full` run smuggled
-  # in under another label.
+  # in under another label. Completed, not started: a runner that died before
+  # writing its report is re-run, and its orphaned start made the assertion
+  # refuse the plan for good (WAN #16).
   if [[ -f "$timeline_file" ]]; then
-    local starts
-    starts="$(grep -c '"event":"gate_runner_start"' "$timeline_file" 2>/dev/null || true)"
-    [[ -z "$starts" ]] && starts=0
+    local completes
+    completes="$(grep -c '"event":"gate_runner_complete"' "$timeline_file" 2>/dev/null || true)"
+    [[ -z "$completes" ]] && completes=0
     # A report made only of copied rows ran nothing; any other ran exactly once.
     expected_runs="$(jq "${AID_GATE_ROW_JQ}"'if any(.gates | gate_rows_normalize | to_entries[] | select((.key|startswith("_")|not) and (.value|type) == "object") | .value; .reused_from == null and .reason != "not_in_profile") then 1 else 0 end' "$report_file")"
-    if [[ "$starts" -ne "$expected_runs" ]]; then
-      _gassert "timeline has ${starts} gate_runner_start events for ${run_id}, expected exactly ${expected_runs} (no second broad run under a 'full' label)."
+    if [[ "$completes" -ne "$expected_runs" ]]; then
+      _gassert "timeline has ${completes} completed gate runs (gate_runner_complete) for ${run_id}, expected exactly ${expected_runs} (no second broad run under a 'full' label)."
     fi
   elif [[ "$ran_now" -eq 1 ]]; then
     _gassert "no timeline at ${run_dir_rel}/timeline.jsonl — the single-run assertion cannot be made."
@@ -5432,7 +5501,8 @@ plan_final_review_equivalent() {
     echo "equivalence unavailable: cannot create a temporary file to read the worktree status" >&2
     return 2
   }
-  git -C "$root" status --porcelain -z --untracked-files=no > "$status_f" 2>/dev/null || src=$?
+  # the plan's own tree: the state root is the primary, where other work may sit
+  git -C "$(_pfsm_plan_tree_root "$root" "$plan_id")" status --porcelain -z --untracked-files=no > "$status_f" 2>/dev/null || src=$?
   if [[ "$src" -ne 0 ]]; then
     rm -f "$status_f"
     echo "equivalence unavailable: git status failed (exit ${src}) — an unreadable worktree is never treated as clean" >&2
@@ -6183,7 +6253,7 @@ _pfsm_finalize_decide() {
   aout="$(AID_PROJECT_ROOT="$root" bash "${SCRIPT_DIR}/aid-release-policy.sh" \
     --plan "$plan_id" --run-id "$run_id" --evidence-dir "$run_dir_rel" \
     --candidate-sha "$candidate" --target-ref "$target_branch" --target-head-sha "$target_head" \
-    --out "$decision" 2>&1)" || arc=$?
+    --tree "$troot" --out "$decision" 2>&1)" || arc=$?
   if [[ "$arc" -ne 0 ]] || ! jq -e '.release_decision | type == "object"' "$decision" >/dev/null 2>&1; then
     echo "PRECONDITION FAIL: plan-finalize --stage decide: the release aggregate exited ${arc} for ${plan_id} and recorded no decision. Output: ${aout}" >&2
     return 1
@@ -6534,6 +6604,63 @@ _pfsm_terminal_rescope() {
   plan_manifest_get "$plan_id" \
     '[.plan_boundary_manifest.epic_runs[] | select(.status == "abandoned" or .status == "superseded") | .epic_id + "=" + .status] | join("\n")' \
     2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# cmd_plan_record_decision <plan_id> MERGE|FIX|ABORT --by <who> [--reason <text>]
+#                          [--project-root <path>]
+# Writes the PM's answer as the pm_plan_decision plan-merge-to-main reads, bound
+# to the frozen candidate the manifest records, into the attempt's evidence
+# (<plan_final_evidence_dir>/pm-plan-decision.json), and prints its path.
+# Nothing else wrote one: the close card pointed at release-decision.json, which
+# the merge's schema refuses, and the controller built the file by hand.
+# ---------------------------------------------------------------------------
+cmd_plan_record_decision() {
+  local plan_id="${1:-}" decision="${2:-}" by="" reason="" project_root_opt=""
+  shift 2 2>/dev/null || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --by)           by="${2:-}"; shift 2 ;;
+      --reason)       reason="${2:-}"; shift 2 ;;
+      --project-root) project_root_opt="${2:-}"; shift 2 ;;
+      *) echo "ERROR: plan-record-decision: unknown argument '$1'" >&2; exit 2 ;;
+    esac
+  done
+  if ! _pfsm_validate_plan_id "$plan_id" || [[ ! "$decision" =~ ^(MERGE|FIX|ABORT)$ || -z "$by" ]]; then
+    echo "Usage: aid-plan-fsm.sh plan-record-decision <plan_id> MERGE|FIX|ABORT --by <who> [--reason <text>] [--project-root <path>]" >&2
+    exit 2
+  fi
+  local root; root="$(_pfsm_resolve_project_root "$project_root_opt")"
+  export AID_PLAN_STATE_PROJECT_ROOT="$root" AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
+  [[ -f "$(plan_manifest_path "$plan_id")" ]] \
+    || { echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2; exit 1; }
+  local target_branch candidate target_head run_id run_dir_rel v
+  target_branch="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target_branch=""
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
+  target_head="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')" || target_head=""
+  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
+  for v in target_branch candidate target_head run_id run_dir_rel; do
+    if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
+      echo "PRECONDITION FAIL: plan-record-decision: ${plan_id} has no frozen candidate (${v} is unset) — there is nothing to decide on yet. Run the plan-final stages first." >&2
+      exit 1
+    fi
+  done
+  local out="${root}/${run_dir_rel}/pm-plan-decision.json" now
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -n --arg p "$plan_id" --arg r "$run_id" --arg d "$decision" --arg c "$candidate" --arg tb "$target_branch" \
+        --arg th "$target_head" --arg at "$now" --arg by "$by" --arg why "$reason" \
+    '{schema_version: "aid-pm-plan-decision-1.0", artifact_type: "pm_plan_decision",
+      producer: "aid-plan-fsm.sh plan-record-decision", created_at: $at,
+      plan_id: $p, plan_final_run_id: $r, decision: $d, candidate_sha: $c,
+      target_branch: $tb, target_head_sha: $th, decided_at: $at, decided_by: $by}
+     + (if $why != "" then {reason: $why} else {} end)' > "${out}.tmp" \
+    || { rm -f "${out}.tmp"; echo "ERROR: plan-record-decision: cannot write ${out}" >&2; exit 1; }
+  local vout vrc=0
+  vout="$(_pfsm_validate_json_schema "${out}.tmp" "pm-plan-decision.schema.json" 2>&1)" || vrc=$?
+  if (( vrc )); then rm -f "${out}.tmp"; echo "ERROR: plan-record-decision: the decision does not satisfy its schema: ${vout}" >&2; exit 1; fi
+  mv -f "${out}.tmp" "$out"
+  printf '%s\n' "$out"
 }
 
 # ---------------------------------------------------------------------------
@@ -7045,6 +7172,8 @@ cmd_plan_merge_to_main() {
   # authorization part of the evidence the close attests to, so removing it
   # blocks close (AC7) instead of silently degrading to "the merge record
   # implies someone must have approved it".
+  # (plan-record-decision already wrote it there: then there is nothing to copy)
+  [[ "$decision_file" -ef "${root}/${run_dir_rel}/pm-plan-decision.json" ]] || \
   cp -f -- "$decision_file" "${run_dir_rel:+${root}/${run_dir_rel}}/pm-plan-decision.json" 2>/dev/null || \
     echo "WARN: plan-merge-to-main: could not copy the PM decision into ${run_dir_rel}/ — plan-close will refuse until it is present." >&2
 
@@ -7467,8 +7596,10 @@ cmd_plan_close() {
     esac
   done
   # P073 Step 8 (review finding): a force reason without --force is an
-  # error, never a silently discarded argument.
-  _pfsm_force_arg_check "plan-close" || exit 2
+  # error, never a silently discarded argument — except that --administrative
+  # takes the same --reason as its own record, checked right below (it was
+  # refused here, so no administrative close ever got past its arguments).
+  [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 ]] || _pfsm_force_arg_check "plan-close" || exit 2
 
   # An administrative close is a PM decision on the record, so it needs a reason
   # like every other audited bypass here, and it is deliberately NOT combinable
@@ -7535,8 +7666,14 @@ cmd_plan_close() {
       fi
       close_mode="merge" ;;
     *)
-      echo "PRECONDITION FAIL: plan-close: ${plan_id} is in state '${cur_state:-<none>}' — close runs out of PLAN_MERGING (after the merge) or ABORTED (a recorded abort). No marker was written." >&2
-      exit 1
+      # An administrative close takes a plan from wherever it stopped (P097
+      # stood in PLAN_GATES, merged by hand); a normal close does not.
+      if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 && -n "$cur_state" && "$cur_state" != ROLLED_BACK ]]; then
+        close_mode="merge"
+      else
+        echo "PRECONDITION FAIL: plan-close: ${plan_id} is in state '${cur_state:-<none>}' — close runs out of PLAN_MERGING (after the merge) or ABORTED (a recorded abort); a plan merged outside plan-finalize is closed with --administrative --reason. No marker was written." >&2
+        exit 1
+      fi
       ;;
   esac
 
@@ -7545,7 +7682,9 @@ cmd_plan_close() {
   candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
   run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
   run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
-  if [[ "$close_mode" == "merge" ]]; then
+  [[ "$run_dir_rel" == null || "$run_dir_rel" == not_found ]] && run_dir_rel=""
+  # An administrative close has, by definition, no plan-final receipt to verify.
+  if [[ "$close_mode" == "merge" && "${_PFSM_ADMIN_CLOSE:-0}" -ne 1 ]]; then
     _pfsm_verify_plan_final_receipt "$root" "$plan_id" "$candidate" "$run_id" || exit 1
   fi
 
@@ -7602,6 +7741,15 @@ cmd_plan_close() {
     local _adm_bad
     _adm_bad="$(_pfsm_admin_close_evidence "$root" "$plan_id")"
 
+    # A plan whose branch is already inside the target was merged by hand: its
+    # plan-final evidence is partial, listed, and no reason to refuse.
+    local _adm_pb; _adm_pb="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_branch' 2>/dev/null)" || _adm_pb=""
+    [[ -n "$_adm_pb" && "$_adm_pb" != null && "$_adm_pb" != not_found ]] || _adm_pb="plan/${plan_id}"
+    if [[ -n "$_adm_bad" ]] && git -C "$root" merge-base --is-ancestor "$_adm_pb" "${target_branch:-main}" 2>/dev/null; then
+      echo "ADMINISTRATIVE CLOSE: ${_adm_pb} is already merged into ${target_branch:-main}; its plan-final evidence is partial and recorded as such:" >&2
+      printf '%s' "$_adm_bad" >&2
+      _adm_bad=""; _PFSM_ADMIN_MERGED_REF="$_adm_pb"
+    fi
     if [[ -n "$_adm_bad" ]]; then
       _pfsm_close_release
       echo "PRECONDITION FAIL: plan-close --administrative refused for ${plan_id}. This flag closes a plan that never produced plan-final evidence; this one HAS some, and a close here could be closing around what it concluded:" >&2
@@ -7791,7 +7939,11 @@ cmd_plan_close() {
   fi
   mv -f "${marker}.tmp" "$marker"
 
-  if [[ "$close_mode" == "merge" ]]; then
+  if [[ "$close_mode" == "merge" && "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 && "$cur_state" != CLOSED ]]; then
+    plan_state_transition "$plan_id" "$cur_state" CLOSED --administrative >/dev/null \
+      || { _pfsm_close_release; echo "PRECONDITION FAIL: plan-close --administrative: ${plan_id} could not be moved from ${cur_state} to CLOSED." >&2; exit 1; }
+    plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "CLOSED"' >/dev/null 2>&1 || true
+  elif [[ "$close_mode" == "merge" ]]; then
     if ! _pfsm_plan_state_set "$plan_id" "CLOSED"; then
       _pfsm_close_release
       echo "PRECONDITION FAIL: plan-close: the receipt is committed and ${marker} is written, but ${plan_id} could not be moved to CLOSED. Reconcile with 'aid-plan-fsm.sh plan-state ${plan_id}'." >&2
@@ -7811,6 +7963,9 @@ cmd_plan_close() {
   # warning naming the manual cleanup (see _pfsm_teardown_plan_worktree), which
   # is why this runs after the close is durable rather than as part of it.
   _pfsm_teardown_plan_worktree "$root" "$plan_id"
+  [[ "$close_mode" == merge ]] && _pfsm_cleanup_leftovers "$root" "$plan_id" \
+    "${merge_commit:-${_PFSM_ADMIN_MERGED_REF:-${target_branch:-main}}}" \
+    "${root}/${run_dir_rel:-.aid-o/work/evidence/${plan_id}}/cleanup.json"
 
   # P074 Step 6: the PLAN-layer close is WRITER 3's other entry point — the
   # SAME shared boundary helper aid-fsm.sh calls, so a direct plan-close
@@ -9228,7 +9383,7 @@ _pfsm_plan_state_repair() {
   # repair SAYS SO with the exact command, instead of leaving the operator to
   # discover it from a refusal that describes the wrong cause.
   local _rep_wt="" _rep_rc=0
-  _rep_wt="$(_pfsm_recorded_worktree "$project_root" "$plan_id")" || _rep_rc=$?
+  _rep_wt="$(aid_plan_recorded_worktree "$project_root" "$plan_id")" || _rep_rc=$?
   if [[ "$_rep_rc" -eq 0 && -z "$_rep_wt" ]]; then
     local _rep_canonical; _rep_canonical="$(_pfsm_canonical_worktree_if_live "$project_root" "$plan_id")"
     if [[ -n "$_rep_canonical" ]] && _pfsm_worktree_head_is "$_rep_canonical" "$plan_branch"; then
@@ -10341,6 +10496,7 @@ Subcommands:
   epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--continue|--no-continue] [--project-root <path>] [--op-id <id>]
   next-epic <plan_id> [--project-root <path>]
   plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
+  plan-record-decision <plan_id> MERGE|FIX|ABORT --by <who> [--reason <text>] [--project-root <path>]
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
   plan-close <plan_id> [--project-root <path>] [--op-id <id>]
   plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>] [--op-id <id>]
@@ -10415,6 +10571,7 @@ main() {
     epic-merge-to-plan) cmd_epic_merge_to_plan "$@" ;;
     next-epic) cmd_next_epic "$@" ;;
     plan-finalize) cmd_plan_finalize "$@" ;;
+    plan-record-decision) cmd_plan_record_decision "$@" ;;
     plan-merge-to-main) cmd_plan_merge_to_main "$@" ;;
     plan-close) cmd_plan_close "$@" ;;
     plan-rollback) cmd_plan_rollback "$@" ;;

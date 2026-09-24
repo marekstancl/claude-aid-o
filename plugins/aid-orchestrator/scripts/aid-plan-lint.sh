@@ -173,6 +173,10 @@ _strict_finding() {
   fi
 }
 
+# The project the plan lives in: the Files pass asks it whether a Test bullet
+# names a new suite, and the Reuse-check and documentation passes read it.
+_project_root="$(_aid_plan_project_root "$PLAN")" || _project_root=""
+
 # Every Files bullet, once: the grammar pass below walks it, and so does the
 # per-step Reuse-check pass (P085), which needs to know WHICH step a bullet
 # belongs to. Extracting twice would mean two readers of the same text.
@@ -188,6 +192,11 @@ for _bi in "${!_bullet_lns[@]}"; do
     [[ -n "$prose_path" ]] || continue
     _advisory ":${lineno}" "\`${prose_path}\` is named only in this entry's description, so it will NOT be in the step's allowed_paths — declare it with its own verb bullet if the step edits it: ${bullet}"
   done < <(_prose_paths "$bullet")
+  # An ERROR in both modes: generation refuses it in both.
+  if [[ -n "$_project_root" ]] && ! _tier_msg="$(_aid_test_bullet_tier_finding "$bullet" "$_project_root")"; then
+    errors=$((errors+1))
+    [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: ERROR ${_tier_msg}: ${bullet}" >&2
+  fi
   verdict="$(_aid_classify_files_bullet "$bullet")"
   sev="${verdict%%:*}"; reason="${verdict#*:}"
   [[ "$sev" == "clean" ]] && continue
@@ -281,6 +290,18 @@ _has_testing_strategy() {
   ' "$PLAN"
 }
 
+# plan-start writes the lifecycle manifest from the plan's bold EPIC lines
+# (lib/aid-lifecycle.sh aid_lifecycle_parse_legacy_epics, a stricter grammar
+# than EPIC generation reads) and refuses the plan when they do not parse — so
+# the same parser says it here, before review and generation are spent on it.
+if _lint_plan_id="$(_aid_plan_id_of "$PLAN" 2>/dev/null)" \
+   && ! bash "${SCRIPT_DIR}/aid-lifecycle.sh" parse-legacy "$_lint_plan_id" "$PLAN" >/dev/null 2>&1; then
+  _lint_epic_what="the EPIC lines do not follow the lifecycle grammar"
+  grep -qE '^\*\*EPIC [0-9]+' <(_aid_blank_fenced < "$PLAN") || _lint_epic_what="the plan has no EPIC line (a single-phase plan has one too)"
+  [[ "$_lint_plan_id" =~ ^P[0-9]+$ ]] || _lint_epic_what="the plan id '${_lint_plan_id}' is not P<number>, which the lifecycle manifest needs"
+  _strict_finding "" "${_lint_epic_what} — each EPIC is one bold line '**EPIC N: title**' (or '**EPIC N / Backlog: title**'), numbered 1..K; plan-start refuses the plan otherwise (skills/plan-writing.md §Phase Markers)."
+fi
+
 if ! _has_testing_strategy; then
   _strict_finding "" "no '## Testing Strategy' section with content — say which behaviour this plan verifies, why that one, and where it goes (new suite / case in an existing suite). A Test: bullet per step is NOT required."
 fi
@@ -332,7 +353,6 @@ done < <(_missing_step_fields)
 # claim of `none` over a command that finds something today is a finding. Where
 # the replay's reach ends, and who picks up there, is stated once in
 # skills/review-checkpoint-contracts.md §"Lens: reuse_evidence".
-_project_root="$(_aid_plan_project_root "$PLAN")" || _project_root=""
 
 # Every path this plan declares anywhere, once: the N+1 verdict asks whether a
 # conflicting site already lies inside the plan's reach, and that question is

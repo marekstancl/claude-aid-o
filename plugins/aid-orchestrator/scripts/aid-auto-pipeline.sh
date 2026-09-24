@@ -279,6 +279,14 @@ _gen_plan_recorded_mode() {
 # drift between plugin versions at verify time instead of at queue time.
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"
+# shellcheck source=lib/aid-queue-write.sh
+source "${SCRIPT_DIR}/lib/aid-queue-write.sh"   # queue_entry_delivered
+source "${SCRIPT_DIR}/lib/aid-scoping.sh"       # _aid_blank_fenced
+
+# _gen_phase_delivered <epic_id> — an earlier generation delivered this EPIC
+# (queue_entry_delivered): it is not generated again, not re-queued and not
+# bound to the current plan bytes — its work is already in git (P100 Step 5).
+_gen_phase_delivered() { queue_entry_delivered "$1" "$queue_yaml" "$_aid_pipeline_state_root"; }
 
 _gen_sha256_file() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
 # Canonical-JSON self-hash. A PLAIN STATED CONVENTION (no in-tree precedent
@@ -1013,7 +1021,7 @@ while IFS= read -r line; do
   if [[ "$line" =~ ^\*\*EPIC[[:space:]]+[0-9]+ ]] || [[ "$line" =~ ^\*\*Phase[[:space:]]+[0-9]+ ]]; then
     marker_count=$(( marker_count + 1 ))
   fi
-done < "$plan"
+done < <(_aid_blank_fenced < "$plan")   # a fenced example is no phase, as plan-to-epic and the lifecycle parser read it
 
 # Count step headers — accept multiple formats:
 #   ### Step N: ...       (preferred, level 3)
@@ -1393,6 +1401,7 @@ if [[ -f "$_gen_tx_path" ]]; then
     # and only row carrying that id.
     _gen_stale_entries=""
     for _gp in $(jq -r '.phases[]?.epic_id // empty' "$_gen_tx_path" 2>/dev/null); do
+      _gen_phase_delivered "$_gp" && continue   # delivered: kept, never regenerated
       _gp_status="$(_gen_queue_status "$queue_yaml" "$_gp")"
       [[ -n "$_gp_status" ]] && _gen_stale_entries="${_gen_stale_entries:+${_gen_stale_entries}, }${_gp} (${_gp_status})"
     done
@@ -1409,6 +1418,24 @@ if [[ -f "$_gen_tx_path" ]]; then
       error_exit "cannot archive the COMPLETED generation pair for ${plan_id} to .completed-${_gen_rollover_epoch} siblings — refusing to clobber a completed record." 3
     }
     echo "[INFO] generation_transaction: the previous transaction for ${plan_id} was COMPLETE and the plan identity changed — archived to .completed-${_gen_rollover_epoch} siblings; starting a fresh transaction." >&2
+  elif jq -e '[.phases[]? | .epic_sha256 // ""] | all(. == "")' "$_gen_tx_path" >/dev/null 2>&1; then
+    # AN EMPTY TRANSACTION SUPERSEDES ITSELF. A run that failed before any
+    # phase was generated holds no artifact that could be mixed with the new
+    # derivation; its authority was sealed to the old plan bytes, which is why
+    # the identity no longer matches after a plan fix. It is archived the way
+    # supersede-generation archives (same siblings, same three audit records,
+    # under the lock this run already holds) and generation goes on.
+    _gen_ae="$(date -u +%s)"
+    _gen_ad="$(realpath -m -- "$_gen_dir_path")"
+    { _gen_supersede_audit_preflight "$_gen_ad" \
+        && _gen_archive_pair "$plan_id" "superseded-${_gen_ae}" \
+        && _gen_supersede_audit "$plan_id" "$plan" "automatic: the incomplete transaction generated no phase and the plan identity changed" \
+             "${USER:-unknown}" "$_gen_ae" "$_gen_ad" "${_gen_ad}/transaction.json" "${_gen_ad}/generation-authority.json" \
+             "$_gen_existing_identity" '[]' >/dev/null; } || {
+      _gen_unlock
+      error_exit "the incomplete transaction for ${plan_id} generated nothing, but archiving it automatically failed (see above). Archive it by hand: aid-auto-pipeline.sh supersede-generation --plan '${plan}' --reason \"<at least 20 characters>\"" 3
+    }
+    echo "[INFO] generation_transaction: the previous transaction for ${plan_id} generated no phase and the plan identity changed — archived to .superseded-${_gen_ae} siblings (audited); starting a fresh transaction." >&2
   else
     _gen_unlock
     error_exit "generation transaction identity mismatch for ${plan_id}: the existing INCOMPLETE transaction records identity '${_gen_existing_identity}' (plan_sha256|target_head|phase_derivation_version|total_phases) but this invocation derives '${_gen_identity}'. Artifacts from two derivations are never mixed. Archive the incomplete transaction first: aid-auto-pipeline.sh supersede-generation --plan '${plan}' --reason \"<at least 20 characters>\"" 1
@@ -1693,6 +1720,18 @@ _gen_write_atomic "$_gen_tx_path" "$_gen_tx_bound" || { _gen_unlock; error_exit 
 # concurrently by two same-identity invocations.
 
 for phase in $(seq 1 "$total_phases"); do
+
+  # P100 Step 5 — a phase whose EPIC an earlier generation delivered (proven by
+  # git) is recorded as delivered and skipped: resuming a half-delivered plan
+  # regenerates only what is not in git yet (ACTA #10, #11).
+  _gp_e="$(jq -r --arg p "$phase" '.phases[$p].epic_id // ""' "$_gen_tx_path" 2>/dev/null)"
+  if [[ "$two_stage" == true && -n "$_gp_e" ]] && _gen_phase_delivered "$_gp_e"; then
+    epics_json="$(jq --argjson phase "$phase" --arg e "$_gp_e" --arg qs "$(_gen_queue_status "$queue_yaml" "$_gp_e")" \
+      '. + [{phase:$phase, epic_id:$e, status:"delivered", proven_by:"git", queue_status:$qs, depends_on:[]}]' <<< "$epics_json")"
+    prev_epic_id="$_gp_e"
+    echo "[INFO] Phase ${phase}/${total_phases}: ${_gp_e} is delivered (its merge is in git) — not generated again" >&2
+    continue
+  fi
 
   # -------------------------------------------------------------------------
   # P074 Step 15 — RESUME. A phase whose recorded outputs still exist and
@@ -2037,6 +2076,7 @@ if [[ "$two_stage" == true ]]; then
 
   for phase in $(seq 1 "$total_phases"); do
     _entry="$(jq -c --argjson p "$phase" '.[] | select(.phase == $p)' <<< "$epics_json")"
+    [[ "$(jq -r '.status // ""' <<< "$_entry")" == delivered ]] && continue
     _epic_id="$(jq -r '.epic_id' <<< "$_entry")"
     _epic_path="$(jq -r '.epic_path' <<< "$_entry")"
     _plan_json_path="$(jq -r '.plan_json' <<< "$_entry")"

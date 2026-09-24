@@ -685,6 +685,15 @@ fi
 [[ -z "$fsm_base_commit" ]] && error_exit "aid-json-to-run.sh Step 18: cannot read git HEAD SHA for base_commit" 1
 
 fsm_plan_path="$(jq -r '.source_plan // empty' "$plan_json_path" 2>/dev/null || true)"  # PM fix 2026-07-08: fsm-state must carry plan_path (plan-diff skipped on null = false-green class)
+# What fsm-state records is the plan in the state root: source_plan may name the
+# scratch tree generation ran in, which is released afterwards (P100 Step 7).
+# The receipt below is still checked against the bytes generation read.
+fsm_plan_record="$fsm_plan_path"
+if [[ -n "$fsm_plan_path" && -f "$(aid_state_root)/.aid-o/plans/$(basename "$fsm_plan_path")" ]]; then
+  fsm_plan_record="$(aid_state_root)/.aid-o/plans/$(basename "$fsm_plan_path")"
+elif [[ "$(realpath -m "$fsm_plan_path")" == "$(aid_state_root)/.aid-worktrees/"* ]]; then   # this workspace's scratch trees, not any path that says so
+  error_exit "the plan ${fsm_plan_path} lives only in a scratch tree that is released after generation; put it in $(aid_state_root)/.aid-o/plans/ and run again" 1
+fi
 # Generation integrity boundary: a strict plan (or an explicitly high-risk
 # plan) may not initialise its first EPIC from a partial package. The receipt
 # is produced only after every phase exists, so this check is deliberately here
@@ -824,7 +833,7 @@ elif [[ ! -f "$fsm_state_file" ]]; then
       "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
       "$fsm_branch" "$fsm_base_commit" \
       "$fsm_state_file" \
-      ${fsm_plan_path:+--plan "$fsm_plan_path"} \
+      ${fsm_plan_record:+--plan "$fsm_plan_record"} \
       "${fsm_force_args[@]}" \
       --streamlined || fsm_init_rc=$?
   else
@@ -832,7 +841,7 @@ elif [[ ! -f "$fsm_state_file" ]]; then
       "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
       "$fsm_branch" "$fsm_base_commit" \
       "$fsm_state_file" \
-      ${fsm_plan_path:+--plan "$fsm_plan_path"} \
+      ${fsm_plan_record:+--plan "$fsm_plan_record"} \
       "${fsm_force_args[@]}" || fsm_init_rc=$?
   fi
   # RESTORE THE TREE INIT ACTUALLY USED, not only the caller's.

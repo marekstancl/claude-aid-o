@@ -51,7 +51,7 @@ fail_rules:
     pattern: 'console\.log|debugger|binding\.pry|pdb\.set_trace|import pdb'
   - id: skipped_test
     description: "Test deliberately skipped/disabled (xit/skip markers)"
-    pattern: '\.skip\(|xit\(|xdescribe\(|@pytest\.mark\.skip|@unittest\.skip'
+    pattern: '\.skip\(|\bxit\(|\bxdescribe\(|@pytest\.mark\.skip|@unittest\.skip'   # \b: sys.exit( is not xit(
   - id: disabled_security_check
     description: "Security check disabled inline (nosec / verify=False / TLS verification off)"
     pattern: '# *nosec|verify *= *False|rejectUnauthorized *: *false|InsecureSkipVerify'

@@ -105,6 +105,8 @@ _rec() { jq -c --arg s "$1" 'select(.suite == $s)' "$JOURNAL"; }
   rec="$(_rec test-red.bats)"
   [ -n "$rec" ]
   [ "$(jq -r '.exit_code' <<<"$rec")" -ne 0 ]
+  # the runner names the failed case without --verbose
+  [[ "$output" == *"    not ok 1 fails"* ]]
 }
 
 @test "6: an untiered run measures every suite, and --include-delegated is an accepted no-op" {

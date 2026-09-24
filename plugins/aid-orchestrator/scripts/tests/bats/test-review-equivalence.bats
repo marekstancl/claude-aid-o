@@ -41,6 +41,10 @@ _eq() {
     eval "$(sed -n "/^# ═*$/,/^_pfsm_review_candidate_drift() {/p" "$SCRIPT_DIR/aid-plan-fsm.sh" \
             | sed -n "/^_pfsm_equivalence_classify()/,/^_pfsm_review_candidate_drift() {/p" \
             | sed "\$d")"
+    # the plan-tree resolver the predicate reads status through (and its helpers)
+    for fn in _pfsm_phys _pfsm_worktree_registered _pfsm_worktree_is_linked _pfsm_plan_worktree_path _pfsm_canonical_worktree_if_live _pfsm_plan_tree_root; do
+      eval "$(sed -n "/^${fn}() {/,/^}/p" "$SCRIPT_DIR/aid-plan-fsm.sh")"
+    done
     cd "$2"
     eval "$3"
   ' _ "$AID_PLUGIN_PATH" "$ROOT" "$1"
@@ -140,6 +144,15 @@ _receipts() { find "$ROOT/.aid-o" -name 'review-equivalence-receipt*.json' 2>/de
   run _eq "plan_final_review_equivalent . $PLAN"
   [ "$status" -eq 1 ]
   [[ "$output" == *"uncommitted TRACKED changes"* ]]
+}
+
+@test "tracked dirt in the PRIMARY is not the plan's: with a recorded plan worktree that is clean, the head is equivalent" {
+  _seed
+  ( cd "$ROOT" && git checkout -q main && git worktree add -q "$ROOT/.aid-worktrees/plan-$PLAN" "plan/$PLAN" ) >/dev/null 2>&1
+  _eq "plan_state_init $PLAN plan_branch plan/$PLAN main >/dev/null; plan_state_set_worktree_path $PLAN '$ROOT/.aid-worktrees/plan-$PLAN' >/dev/null"
+  printf 'another window\n' >> "$ROOT/README.md"          # tracked, protected, in the primary only
+  run _eq "plan_final_review_equivalent . $PLAN"
+  echo "$output"; [ "$status" -eq 0 ]
 }
 
 # ─── unavailability (code 2) ──────────────────────────────────────────────

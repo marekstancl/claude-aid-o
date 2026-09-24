@@ -586,14 +586,23 @@ execution_yaml_upgrade() {
   if [[ "$(yq '.gate_profiles | type' "$file")" == "!!map" ]]; then
     mapfile -t profiles < <(yq '.gate_profiles | keys | .[]' "$file")
     if [[ "$(yq 'has("default_profile")' "$file")" == "false" ]]; then
-      local name="${default_profile:-standard}"
+      # The EPIC default the old gate_profile_defaults carried (a dead key the
+      # upgrade removes) is the project's choice: keep it rather than narrow
+      # the EPIC gate to standard (agents 24. 9.: epic: full became standard).
+      local name="${default_profile:-}" carried=""
+      if [[ -z "$name" ]]; then
+        name="$(yq '.gate_profile_defaults.epic // ""' "$file")"
+        if [[ -n "$name" && " ${profiles[*]} " == *" ${name} "* ]]; then carried=" (carried from gate_profile_defaults.epic)"
+        elif [[ -n "$name" ]]; then carried=" (gate_profile_defaults.epic '${name}' is not a declared profile)"; name=standard
+        else name=standard; fi
+      fi
       if [[ ! " ${profiles[*]} " == *" ${name} "* ]]; then
         echo "[ERROR] ${file}: no profile named '${name}' to be default_profile; declared: ${profiles[*]}. Choose one and re-run with --default-profile <name>" >&2
         return 2
       fi
       loc="$(_eyu_locate "$file" "gate_profiles")"
       ins_after+=("$(( ${loc% *} - 1 ))"); ins_text+=("default_profile: ${name}")
-      notes+=("- added default_profile: ${name}")
+      notes+=("- added default_profile: ${name}${carried}")
     fi
     if [[ " ${profiles[*]} " == *" full "* ]]; then
       if [[ "$(yq '.gate_profiles.full | has("when_paths")' "$file")" == "false" ]]; then

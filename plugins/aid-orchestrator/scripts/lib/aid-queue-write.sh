@@ -802,6 +802,14 @@ _queue_merge_target_authorized() {
 #                      and is untrusted input, exactly like a caller argument).
 # Lock-free; git reads only.
 # ---------------------------------------------------------------------------
+# queue_entry_delivered <epic_id> <queue.yaml> <root> — true when the entry
+# names a merge_target and git ancestry proves the merge (P100 Step 5). A
+# legacy entry (status only) is never proof: an entry is not evidence.
+queue_entry_delivered() {
+  [[ -n "$(queue_get_field "$1" merge_target "$2" 2>/dev/null)" ]] || return 1
+  [[ "$(_queue_dep_state "$1" "$2" "$3")" == merged ]]
+}
+
 _queue_dep_state() {
   local dep="$1" file="$2" root="$3"
   local status mt

@@ -165,11 +165,17 @@ with `severity: advisory`, which is what an unrun check is worth.
 2. Copy entry to `plugins/aid-orchestrator/CHANGELOG.md` (must be identical)
 3. Bump version in all 6 remaining files (#3-#8 from registry above)
 4. Update root `README.md` Roadmap section (add new version line, move previous down)
-5. Commit: `release: vX.Y.Z — one-line summary`
-6. Tag: `git tag vX.Y.Z`
-7. GitHub Release: `gh release create vX.Y.Z --title "vX.Y.Z — summary" --notes "{CHANGELOG section for this version}"`
-8. Push: `git push && git push --tags`
-9. **Update plugin in all projects** (see below)
+5. Before any push, run the testbed on the working tree:
+   `/opt/eco/projects/aid-testbed/bin/verify.sh --plugin <repo>/plugins/aid-orchestrator`
+6. Commit: `release: vX.Y.Z — one-line summary`
+7. Tag LOCALLY: `git tag -a vX.Y.Z -m "Release vX.Y.Z"` — the pre-push guard reads the
+   release range from the local tags, so main cannot be pushed without it
+8. Push main only: `git push origin main`
+9. **Update the plugin** (see below) and run the testbed against the INSTALLED plugin
+   (`verify.sh`, no `--plugin`) — the consumer check comes before the release is public
+10. Push the tag: `git push origin vX.Y.Z`
+11. GitHub Release, notes cut from the CHANGELOG:
+    `awk '/^## \[X.Y.Z\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md | gh release create vX.Y.Z --title "vX.Y.Z — summary" --notes-file -`
 
 ### Plugin Update — MANDATORY after every push
 
@@ -258,7 +264,9 @@ pořád otevřený. Poslední roztřídění: `docs/plans/plugin-issues-triage-2
    tvar sběrač pozná. Bod, který má počkat, zůstává bez značky (je otevřený).
    Soubor projektu je jeho záznam, nikdy se nemaže.
 5. Designové body, které PM schválil odložit, dostanou řádek `IMP-NNN`
-   v `.aid-o/work/backlog.md` s odkazem na projekt a číslo bodu.
+   v `.aid-o/work/backlog.md` s odkazem na projekt a číslo bodu. Číslo dá
+   `bash plugins/aid-orchestrator/scripts/aid-fsm.sh alloc imp-id` (se zámkem;
+   ručně vybraná čísla se ve dvou oknech srazila).
 
 ## Conventions
 

@@ -167,6 +167,7 @@ STUB
   jq -n '{available: false, binary: "", version: "", reason: "codex_absent", probed_at: "2026-09-20T00:00:00Z"}' > "$ROOT/probe.json"
   AID_CODEX_PROBE_STUB="$ROOT/probe.json" run "$ROUND_SH" dispatch "$PLAN" --round 1 --provider codex --role generalist_b
   echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"STAND-IN"* ]]; [[ "$output" == *opus* ]]
+  [[ "$output" == *"(focus cp1-generalist-b;"* ]]
   [ "$(jq -r '.fallback' "$CP1/round-1/codex-generalist_b.usage.json")" = claude ]
   _answer_all; _answer generalist_b '.provider = "claude"'
   run "$ROUND_SH" collect "$PLAN" --round 1
@@ -214,6 +215,8 @@ _round1_closed() {
   [ "$status" -eq 1 ]; [[ "$output" == *"no --tokens value for behaviour_edges"* ]]
   run "$ROUND_SH" close "$PLAN" --round 1 --tokens generalist_a=100 behaviour_edges=1 feasibility_deps=1 reuse=1 enforcement_tests=unknown
   echo "$output"; [ "$status" -eq 0 ]
+  # a CP1 round is valid, not "pass": it names what it left open
+  [[ "$output" == *"round 1 closed (valid; open blockers: "* ]]
   [ "$(jq -r '.reviewers.enforcement_tests.tokens' "$CP1/round-1/measurement.json")" = unknown ]
   [ "$(jq -r '.reviewers.generalist_b | "\(.provider) \(.tokens) \(.reason)"' "$CP1/round-1/measurement.json")" = "codex unknown null" ]
   run "$ROUND_SH" close "$PLAN" --round 1 --tokens generalist_a=5
@@ -316,7 +319,7 @@ _repo() {
   git -C "$ROOT" init -q "$R" >/dev/null; git -C "$R" config user.email t@t; git -C "$R" config user.name t
   echo base > "$R/src/app.py"; echo k > "$R/secrets/key.txt"; git -C "$R" add -A; git -C "$R" commit -qm base
   printf 'base_commit: %s\nstreamlined_mode: false\n' "$(git -C "$R" rev-parse HEAD)" > "$E/fsm-state.yaml"
-  jq -n '{steps: [{id: "s0", role: "backend", objective: "add the thing", acceptance_criteria: ["it works"], outputs: ["Modify: `src/app.py` — x", "Create: `src/new.py` — y"], forbidden_paths: ["secrets/**"]}]}' > "$E/plan.json"
+  jq -n '{steps: [{id: "step_1_backend", role: "backend", objective: "add the thing", acceptance_criteria: ["it works"], outputs: ["Modify: `src/app.py` — x", "Create: `src/new.py` — y"], forbidden_paths: ["secrets/**"]}]}' > "$E/plan.json"
   : > "$E/timeline.jsonl"
   seq 1 60 >> "$R/src/app.py"; echo new > "$R/src/new.py"; git -C "$R" add -A; git -C "$R" commit -qm s0
 }
@@ -347,6 +350,8 @@ _bracket() {
   [ "$(jq -r .confirmation_of "$(D 1)/round.json")" = null ]
   [ "$(jq '.files | length' "$(D 1)/packet/manifest.json")" -eq 4 ]
   grep -q '^# cp2 review, round 1$' "$(D 1)/prompt-step_generalist.md"
+  # the reviewer reads the plan's step number, not the 0-based index
+  grep -q '^# Step 1 (index 0): add the thing$' "$(D 1)/packet/dod.md"
   grep -q 'the new file is never\|Definition of Done' "$(D 1)/prompt-step_generalist.md"
   [[ "$output" == *"focus cp2-step-0-step-generalist"* ]]
   jq -e 'select(.event == "review_round_start")' "$E/timeline.jsonl" | grep -q .
@@ -384,7 +389,7 @@ _bracket() {
   [ "$(jq '.valid | length' "$CP1/round-1/collect.json")" -eq 6 ]
 }
 
-@test "step: an answer whose finding breaks the form goes back to its reviewer once; the second time the finding is dropped as before" {
+@test "step: an answer whose finding breaks the form goes back to its reviewer once; the second time the finding is kept as form_invalid and fails the round" {
   _repo; printf 'def f():\n    return 1\n' >> "$R/src/app.py"; git -C "$R" commit -qam more; _sc
   _S prepare --round 1 >/dev/null
   local note='.findings[0].evidence = "src/app.py:1 (the line that matters)"'
@@ -397,6 +402,9 @@ _bracket() {
   run _S collect --round 1; [ "$status" -eq 0 ]
   [ "$(jq -r '.valid | index("step_generalist") != null' "$(D 1)/collect.json")" = true ]
   [ "$(jq -r '.[0].reason' "$(D 1)/rejected.json")" = missing_evidence ]
+  [ "$(jq -r '.findings[0].status' "$(D 1)/merged.json")" = form_invalid ]
+  _bracket 1 step_generalist; _S close --round 1 --tokens step_generalist=1 >/dev/null
+  [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = fail ]
 }
 
 @test "step: collect needs every expected role; close is bound to HEAD, to a token value and to a dispatch bracket; verdict fail with an open major" {
@@ -448,7 +456,37 @@ _bracket() {
   [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = pass ]
   [ "$(jq -r '.findings[0].status' "$(D 1)/merged.json")" = fixed ]
   [ "$(jq -r '.fixer.model' "$(D 2)/measurement.json")" = opus ]
-  run _S prepare --round 3; [ "$status" -eq 1 ]; [[ "$output" == *"override.json"* ]]
+  run _S prepare --round 3; [ "$status" -eq 1 ]; [[ "$output" == *"HEAD has not moved"* ]]
+  # the step moves after a passed round: a delta round, beyond rounds_default, no override
+  echo late >> "$R/src/new.py"; git -C "$R" commit -qam late; _sc
+  run _S prepare --round 3; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -c .reviewers_expected "$(D 3)/round.json")" = '["step_generalist"]' ]
+  grep -q late "$(D 3)/packet/fix.patch"
+}
+@test "step: a disputed cp2 blocker keeps blocking; --pm accepted needs the card quoting it and a PM prompt after the card, then the verdict flips" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist '.findings[0].severity = "blocker"'; _S collect --round 1 >/dev/null; _bracket 1 step_generalist
+  _S close --round 1 --tokens step_generalist=10 >/dev/null
+  local fp card="$ROOT/card.md"; fp="$(jq -r '.findings[0].fingerprint' "$(D 1)/merged.json")"
+  run _S dispute --round 1 --fingerprint "$fp" --reason "the plan criterion itself is wrong here"
+  [ "$status" -eq 0 ]; [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = fail ]
+  export AID_HOOK_AUDIT="$ROOT/audit.jsonl"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  local pm=(dispute --round 1 --fingerprint "$fp" --reason "PM: the criterion is wrong, accepted" --pm accepted)
+  run _S "${pm[@]}"; [ "$status" -eq 1 ]; [[ "$output" == *"--finding-card"* ]]
+  echo "Rozhodnutí 1: kritérium kroku" > "$card"; touch -d '-10 seconds' "$card"
+  run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"does not quote"* ]]
+  echo "nález $fp" >> "$card"; touch -d '-10 seconds' "$card"
+  run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"no PM prompt after"* ]]
+  # a later prompt event of another rule is not the PM's reply marker
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"queue_continuation_notice"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
+  run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
+  run _S "${pm[@]}" --finding-card "$card"; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"dismissed by the PM (dispute accepted)"* ]]
+  [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = pass ]
+  [ "$(jq -r .verdict "$(D 1)/measurement.json")" = pass ]
+  [ "$(jq -r '.findings[0].dispute.pm.card' "$(D 1)/merged.json")" = "$card" ]
 }
 @test "step: a stub round skips the dispatch check and records it; the flag comes from prepare, never from the environment" {
   _repo; _sc; _S prepare --round 1 --stub >/dev/null
@@ -678,6 +716,15 @@ _close1() {
   run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/lib/aid-routed-findings.sh' && aid_finding_open_for_epic P900 E-900-1_2 | wc -l"
   [ "${output##* }" -eq 1 ]
   [ "$(jq -r '.revision.head_sha' "$f")" = "$(git -C "$R" rev-parse HEAD)" ]
+  # a finding the PM dismissed is closed as "fixed", and the file says it was dismissed
+  local fp_med card="$ROOT/card3.md"; fp_med="$(jq -r '.findings[] | select(.severity == "major") | .fingerprint' "$E/cp3/round-2/merged.json")"
+  echo "nález $fp_med" > "$card"; touch -d '-10 seconds' "$card"
+  export AID_HOOK_AUDIT="$ROOT/audit3.jsonl"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  run "$ROUND_SH" dispute --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 2 --fingerprint "$fp_med" \
+    --reason "PM: the contract is met, dismiss it" --pm accepted --finding-card "$card"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$(jq -r '.semantic_review.findings[] | select(.severity == "medium") | .detail' "$f")" == *"dismissed by the PM (dispute accepted)"* ]]
   # a write that cannot satisfy the schema fails close before closed_at
   rm -rf "$E/cp3" "$f"; _sc cp3 ""
   "$ROUND_SH" prepare --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 >/dev/null
@@ -685,27 +732,32 @@ _close1() {
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$E/cp3/round-1" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus cp3-epic-generalist --output-file "$E/cp3/round-1/reviewer-epic_generalist.json" --evidence-dir "$E/cp3/round-1" >/dev/null
   "$ROUND_SH" collect --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 >/dev/null
-  mv "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json" "$ROOT/schema.bak"
-  jq '.properties.semantic_review.properties.mode.enum = ["local"]' "$ROOT/schema.bak" > "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json"
-  run "$ROUND_SH" close --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 --tokens epic_generalist=1
-  mv "$ROOT/schema.bak" "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json"
+  # the broken schema lives in a copy of the plugin: an interrupted run must
+  # never leave the real one broken (it did once)
+  local plug="$ROOT/plugin-copy"; mkdir -p "$plug"
+  cp -r "$AID_PLUGIN_PATH"/{scripts,defaults,skills,.claude-plugin} "$plug"/
+  jq '.properties.semantic_review.properties.mode.enum = ["local"]' "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json" \
+    > "$plug/defaults/schemas/semantic-review.schema.json"
+  AID_PLUGIN_PATH="$plug" run "$plug/scripts/aid-review-round.sh" close --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 --tokens epic_generalist=1
   [ "$status" -eq 1 ]; [[ "$output" == *"semantic_review.mode"* ]]
   [ ! -f "$f" ]; [ "$(jq -r '.closed_at // "none"' "$E/cp3/round-1/round.json")" = none ]
 }
 
 # ── Step 9: fast mode on the same mechanism ──
-@test "cp6: a second prepare of the same fast-mode id is refused, a re-run of the step check over a closed index too, and a switched-off checkpoint prepares nothing (exit 3)" {
+@test "cp6: a second prepare of the same fast-mode id is refused, a re-run of the step check leaves a closed index as it is, and a switched-off checkpoint prepares nothing (exit 3)" {
   _repo; D6="$ROOT/do/20260919T100000Z-abc1234"; mkdir -p "$D6"; : > "$D6/timeline.jsonl"
   seq 1 60 >> "$R/src/app.py"; echo "Task: tidy" > "$D6/task.md"
   (cd "$R" && bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint cp6 --worktree --evidence-dir "$D6" --dod-file "$D6/task.md") >/dev/null
   "$ROUND_SH" prepare --checkpoint cp6 --evidence-dir "$D6" --project-root "$R" --round 1 >/dev/null
   run "$ROUND_SH" prepare --checkpoint cp6 --evidence-dir "$D6" --project-root "$R" --round 1
   [ "$status" -eq 1 ]; [[ "$output" == *"already prepared"* ]]
-  # a closed index is never replaced by a re-run of the step check that would skip
+  # a closed index is never replaced by a re-run of the step check that would skip:
+  # the small change is review (a delta round confirms it, P100) and the index stays
   jq -n '{verdict: "fail", head_sha: "x", rounds: [{round: 1, verdict: "fail"}]}' > "$D6/cp6/rounds.json"
   git -C "$R" checkout -q -- src/app.py; echo tiny >> "$R/src/app.py"
   run bash -c "cd '$R' && bash '$AID_PLUGIN_PATH/scripts/aid-step-check.sh' --checkpoint cp6 --worktree --evidence-dir '$D6' --dod-file '$D6/task.md'"
-  [ "$status" -ne 0 ]; [[ "$output" == *"already records a closed round"* ]]
+  [ "$status" -eq 0 ]; [ "$(jq -r .verdict "$D6/cp6/step-check.json")" = review ]
+  [ "$(jq -r .verdict "$D6/cp6/rounds.json")" = fail ]
   # the PM's switch
   mkdir -p "$R/.aid-o/config/policies"
   printf 'review_checkpoints:\n  cp6_fast_mode_review: false\n' > "$R/.aid-o/config/policies/review-checkpoints.yaml"
