@@ -281,6 +281,7 @@ _gen_plan_recorded_mode() {
 source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"
 # shellcheck source=lib/aid-queue-write.sh
 source "${SCRIPT_DIR}/lib/aid-queue-write.sh"   # queue_entry_delivered
+source "${SCRIPT_DIR}/lib/aid-scoping.sh"       # _aid_blank_fenced
 
 # _gen_phase_delivered <epic_id> — an earlier generation delivered this EPIC
 # (queue_entry_delivered): it is not generated again, not re-queued and not
@@ -1020,7 +1021,7 @@ while IFS= read -r line; do
   if [[ "$line" =~ ^\*\*EPIC[[:space:]]+[0-9]+ ]] || [[ "$line" =~ ^\*\*Phase[[:space:]]+[0-9]+ ]]; then
     marker_count=$(( marker_count + 1 ))
   fi
-done < "$plan"
+done < <(_aid_blank_fenced < "$plan")   # a fenced example is no phase, as plan-to-epic and the lifecycle parser read it
 
 # Count step headers — accept multiple formats:
 #   ### Step N: ...       (preferred, level 3)

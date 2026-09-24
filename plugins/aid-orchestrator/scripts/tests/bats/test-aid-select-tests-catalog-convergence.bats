@@ -11,7 +11,7 @@
 #     silent zero-selection pass
 #   - a changed path matching a docs_non_production-classified row exits 0
 #     with zero tests selected
-#   - the 5 known gaps still exit 3 (unknown_production)
+#   - the 4 known gaps still exit 3 (unknown_production)
 #   - classification is driven ONLY by match_type/path_pattern/
 #     classification — no schema field beyond P066's own shipped definition
 

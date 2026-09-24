@@ -26,7 +26,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Konec tahu blokuje jen krok, který session sama spustila** — pravidlo `turn_step_open` pozná krok session podle hlavičky `Dispatch Contract (version …)` v jejím přepisu, ne podle času; dvě souběžné session v jednom projektu (tady P100 a P101) už jedna druhé konec tahu neodmítají.
 - **Kontrola kroku hodnotí strom, ve kterém běh je** — `aid-step-check.sh` a `aid-review-round.sh` (cp2/cp3) bez `--project-root` diffují worktree, kde je vyzvednutá větev běhu, ne kopii, ze které je kontroler spustil (P101: kontrola z hlavní kopie zapsala „beze změn" a krok prošel bez revize); nastavení revize čtou z hlavní kopie a `increment-step` se přesměruje do worktree plánu jako ostatní přechody.
 - **Revize plánu se ptá na pořadí za běhu a na převzaté předpoklady** — role `feasibility_deps` má dvě otázky navíc: kdy za běhu vzniká soubor, který krok čte, a zda je předpoklad převzatý z hlášení nebo backlogu ověřený příkazem v dnešním kódu.
-- **Výpisy revize říkají, co se stalo** — kolo kontroly plánu hlásí „valid; open blockers: N" místo „pass"; řádek souhrnu začíná „codex→claude N×", když za Codex odpovídal Claude; revizor vidí číslo kroku z plánu (index v závorce); nález, který PM zamítl (`--pm accepted`), je ve výpisu i v `semantic-review-final.json` „dismissed by the PM", ne „fixed", a nepočítá se revizorovi jako opravený.
+- **Výpisy revize říkají, co se stalo** — kolo kontroly plánu hlásí „valid; open blockers: N" místo „pass"; řádek souhrnu hned za počtem kol uvede „codex→claude N×", když za Codex odpovídal Claude; revizor vidí číslo kroku z plánu (index v závorce); nález, který PM zamítl (`--pm accepted`), je ve výpisu i v `semantic-review-final.json` „dismissed by the PM", ne „fixed", a nepočítá se revizorovi jako opravený.
 - **Revizor už nedostává falešné „zápis mimo rozsah"** — odpověď zapsaná do adresáře revizního kola (`evidence/…/cp2|cp3|cp6|cp7/…`) není zápis kroku.
 - **Změna registru vynucení vybere 12 sad, ne celou sadu testů** — `aid-select-tests.sh` mapuje `defaults/enforcement-registry.yaml` na sady, které ho čtou.
 - **Runner řekne, které testy spadly** — u červené sady vypíše každé `not ok` s pěti řádky pod ním (jinak konec výstupu), i bez `--verbose`.
@@ -36,7 +36,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Pre-push pozná `chore(release):`** — v projektu bez nastaveného verzování uzavře rozsah i commit ve tvaru conventional commits; `fix(release):` zůstává oprava.
 - **Časy z auditu už neujíždějí o hodinu** — `jq` starší než 1.7 čte čas se `Z` v místním pásmu; výpočet času plánu (čekání na PM do „teď") a počet odmítnutí pro připomínku hlášení pro AID ho teď počítají v UTC, jako to FSM dělá od P037.
 
-**Poznámka pro projekty:** commit hook se aktualizuje dalším `/aid-init`. `scripts/` pluginu má 174 905 řádků (před plánem 173 883): +1 022, z toho +536 v testech a +486 v pravidlech výše; žádná nová sada testů.
+**Poznámka pro projekty:** commit hook se aktualizuje dalším `/aid-init`. `scripts/` pluginu má 175 103 řádků (před plánem 173 883): +1 220, z toho +634 v testech a +586 v pravidlech výše; žádná nová sada testů.
 
 ## [2.105.2] — 2026-09-24
 

@@ -135,7 +135,7 @@ else
   _die "give --plan <file> (CP1) or --checkpoint cp2|cp3|cp6|cp7 --evidence-dir <dir> [--step N]" 2
 fi
 
-# .aid-o is not checked out into a linked worktree: the config is the primary's
+# the review config belongs to the state root (a linked worktree has none, or a stale copy)
 aid_review_config_load "$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")" "$BLOCK" "$ROLES_SKILL" || exit 2
 aid_review_config_validate || exit 1
 

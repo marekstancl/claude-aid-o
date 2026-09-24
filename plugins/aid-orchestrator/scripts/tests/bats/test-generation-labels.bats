@@ -370,6 +370,7 @@ STUB
   # aid-plan-fsm.sh plan-start, is deliberately non-fatal), so the pre-gate
   # failure exercised here is AID's own transaction-identity abort — which is
   # the point: the note must not fire when AID's checks had not passed yet.
+  # The transaction generated a phase: an empty one supersedes itself (P100).
   gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   local gen="$TEST_TMPDIR/p/.aid-o/work/evidence/P099/generation"
@@ -377,7 +378,7 @@ STUB
   jq -n '{schema:"aid-generation-transaction/v1", plan_id:"P099",
           plan_path:"x", plan_sha256:"deadbeef", target_branch:"main",
           target_head:"deadbeef", mode:"chain", phase_derivation_version:1,
-          total_phases:3, authority_sha256:null, phases:{},
+          total_phases:3, authority_sha256:null, phases:{"1": {epic_sha256: "deadbeef"}},
           created_at:"2026-08-06T00:00:00Z", updated_at:"2026-08-06T00:00:00Z"}' \
     > "$gen/transaction.json"
 

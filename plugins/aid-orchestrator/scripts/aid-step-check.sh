@@ -85,6 +85,8 @@ if [[ -z "$ROOT" ]]; then
   if [[ -n "$ROOT" && "$CHECKPOINT" =~ ^cp[23]$ ]]; then ROOT="$(aid_run_checkout_root "$STATE" "$ROOT")" || exit 2; fi
 fi
 [[ -n "$ROOT" && -d "$ROOT/.git" || -f "$ROOT/.git" ]] || die "not inside a git repository (or --project-root is not one)" 2
+# the review config belongs to the state root (a linked worktree has none, or a stale copy)
+CFG_ROOT="$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")"
 PLAN_JSON="${PLAN_JSON:-$EVID/plan.json}"
 TIMELINE="$EVID/timeline.jsonl"
 case "$CHECKPOINT" in
@@ -228,8 +230,7 @@ done <<<"$NUMSTAT"
 # ── 5. verdict ──────────────────────────────────────────────────────────────
 _cfg() {  # <yq path> <default>: the project's review-checkpoints.yaml first, then the plugin default
   local v="" f
-  # .aid-o is not checked out into a linked worktree: the config is the primary's
-  for f in "$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/.aid-o/config/policies/review-checkpoints.yaml" "$PLUGIN_DIR/defaults/policies/review-checkpoints.yaml"; do
+  for f in "$CFG_ROOT/.aid-o/config/policies/review-checkpoints.yaml" "$PLUGIN_DIR/defaults/policies/review-checkpoints.yaml"; do
     [[ -f "$f" ]] || continue
     v="$(yq -r "$1 // \"\"" "$f" 2>/dev/null || true)"; [[ -n "$v" && "$v" != null ]] && break; v=""
   done

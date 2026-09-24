@@ -297,7 +297,8 @@ _has_testing_strategy() {
 if _lint_plan_id="$(_aid_plan_id_of "$PLAN" 2>/dev/null)" \
    && ! bash "${SCRIPT_DIR}/aid-lifecycle.sh" parse-legacy "$_lint_plan_id" "$PLAN" >/dev/null 2>&1; then
   _lint_epic_what="the EPIC lines do not follow the lifecycle grammar"
-  grep -qE '^\*\*EPIC [0-9]+' "$PLAN" || _lint_epic_what="the plan has no EPIC line (a single-phase plan has one too)"
+  _aid_blank_fenced < "$PLAN" | grep -qE '^\*\*EPIC [0-9]+' || _lint_epic_what="the plan has no EPIC line (a single-phase plan has one too)"
+  [[ "$_lint_plan_id" =~ ^P[0-9]+$ ]] || _lint_epic_what="the plan id '${_lint_plan_id}' is not P<number>, which the lifecycle manifest needs"
   _strict_finding "" "${_lint_epic_what} — each EPIC is one bold line '**EPIC N: title**' (or '**EPIC N / Backlog: title**'), numbered 1..K; plan-start refuses the plan otherwise (skills/plan-writing.md §Phase Markers)."
 fi
 

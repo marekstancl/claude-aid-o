@@ -691,7 +691,7 @@ fsm_plan_path="$(jq -r '.source_plan // empty' "$plan_json_path" 2>/dev/null || 
 fsm_plan_record="$fsm_plan_path"
 if [[ -n "$fsm_plan_path" && -f "$(aid_state_root)/.aid-o/plans/$(basename "$fsm_plan_path")" ]]; then
   fsm_plan_record="$(aid_state_root)/.aid-o/plans/$(basename "$fsm_plan_path")"
-elif [[ "$fsm_plan_path" == */.aid-worktrees/* ]]; then
+elif [[ "$fsm_plan_path" == "$(aid_state_root)/.aid-worktrees/"* || "$fsm_plan_path" == .aid-worktrees/* ]]; then   # this workspace's scratch trees, not any path that says so
   error_exit "the plan ${fsm_plan_path} lives only in a scratch tree that is released after generation; put it in $(aid_state_root)/.aid-o/plans/ and run again" 1
 fi
 # Generation integrity boundary: a strict plan (or an explicitly high-risk

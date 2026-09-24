@@ -61,7 +61,7 @@
 #
 # Pure bash + git. No other dependencies. Safe to source multiple times.
 #
-# **Last Updated:** 2026-08-05
+# **Last Updated:** 2026-09-24
 # =============================================================================
 
 if [[ -n "${_AID_ROOTS_SH_SOURCED:-}" ]]; then

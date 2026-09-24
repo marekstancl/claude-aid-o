@@ -2437,7 +2437,7 @@ cmd_plan_start() {
   if [[ "$lc_rc" -ne 0 ]]; then
     local lc_why="op remains at git_applied, retry converges"
     case "$lc_rc" in   # the return codes lib/aid-lifecycle.sh documents
-      2) lc_why="the plan's EPIC lines do not parse: each EPIC is one bold line '**EPIC N: title**' (or '**EPIC N / Backlog: title**'), numbered 1..K (aid-plan-lint.sh names it); fix the plan, then retry" ;;
+      2) lc_why="the plan id is not P<number>, or its EPIC lines do not parse: each EPIC is one bold line '**EPIC N: title**' (or '**EPIC N / Backlog: title**'), numbered 1..K (aid-plan-lint.sh names it); fix the plan, then retry" ;;
       3) lc_why="the plan file is not found, or not committed on the target branch" ;;
       4) lc_why="a local edit to the lifecycle manifest is in the way; commit or discard it, then retry" ;;
     esac
