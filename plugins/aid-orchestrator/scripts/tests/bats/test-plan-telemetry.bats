@@ -44,6 +44,8 @@ No new verification — this fixture exercises telemetry.
 
 ## Implementation Steps
 
+**EPIC 1: Steps 1-1**
+
 ### Step 1: the step
 
 **Objective:** do it.

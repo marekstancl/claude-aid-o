@@ -589,6 +589,16 @@ _from_no_yq() {
   [[ "$output" == *"executes in its own worktree"* ]]
 }
 
+@test "increment-step invoked FROM THE PRIMARY CHECKOUT redirects into the plan worktree (the step check diffs the run's branch there)" {
+  _mk_project
+  _seed_plan 1
+  local sf=".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"
+  run _from "$ROOT" "$FSM" init "$EPIC_ID" "R-${EPIC_ID}-1" 2 manual main HEAD "$sf"
+  [ "$status" -eq 0 ]
+  run _from "$ROOT" "$FSM" increment-step "$sf"
+  [[ "$output" == *"executes in its own worktree"* ]]
+}
+
 @test "v2.95.8 (agents #8): transition GATES→DONE from the primary checkout also redirects (CP3 freshness reads the worktree's HEAD)" {
   _mk_project
   _seed_plan 1

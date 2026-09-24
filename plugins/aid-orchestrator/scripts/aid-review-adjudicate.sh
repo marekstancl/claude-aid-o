@@ -353,7 +353,7 @@ if [[ -n "$PREV" ]]; then
   if [[ -r "${PREV}/yield.json" ]]; then
     jq --slurpfile m "${PREV}/merged.json" '
       with_entries(.key as $r | .value.fixed =
-        ([$m[0].findings[] | select(.status == "fixed" and (.reported_by | index($r)))] | length))
+        ([$m[0].findings[] | select(.status == "fixed" and .dispute.pm.answer != "accepted" and (.reported_by | index($r)))] | length))
     ' "${PREV}/yield.json" > "$tmp" && mv "$tmp" "${PREV}/yield.json" || _fail "cannot update ${PREV}/yield.json"
   fi
 fi

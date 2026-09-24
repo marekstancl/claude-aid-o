@@ -49,6 +49,10 @@ _measure() {
   _measure "$EV/cp1" 2 '{"reuse": {"tokens": 25, "usd": 0.0004, "answered": true}}'
   [ "$(aid_review_summary "$EV/cp1")" = "review: 2 rounds, 175 tokens, 0 unknown, 0.0028 USD, missing: none, degraded: no" ]
 }
+@test "summary: a claude stand-in for a codex role is named right after the round count" {
+  _measure "$EV/cp1" 1 '{"generalist_b": {"provider": "claude", "fallback_reason": "usage_limit", "tokens": 10, "usd": 0.0002, "answered": true}}'
+  [ "$(aid_review_summary "$EV/cp1")" = "review: 1 round, codex→claude 1×, 10 tokens, 0 unknown, 0.0002 USD, missing: none, degraded: no" ]
+}
 @test "summary: an unknown value is counted, not added; the USD total says + N unknown; a missing role is named; degraded shows" {
   _measure "$EV/cp1" 1 '{"generalist_a": {"tokens": 100, "usd": 0.0016, "answered": true}, "generalist_b": {"tokens": "unknown", "usd": "unknown", "answered": false, "reason": "codex_absent"}}' true
   [ "$(aid_review_summary "$EV/cp1")" = "review: 1 round, 100 tokens, 1 unknown, 0.0016 USD + 1 unknown, missing: generalist_b, degraded: yes" ]

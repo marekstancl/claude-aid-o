@@ -4558,6 +4558,12 @@ cmd_increment_step() {
   [[ "${2:-}" == "--force" ]] && force="true"
 
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
+  # Same shape as transition: the review-round check compares HEAD with the
+  # step check (which diffs the run's branch, lib/aid-roots.sh
+  # aid_run_checkout_root) and step_commit records HEAD — both in the plan's
+  # tree, not the primary a controller may be standing in. Before anything
+  # writes, so the re-executed process is the only one with side effects.
+  _fsm_require_plan_worktree "$(yaml_field "$state_file" epic_id)"
 
   # P040 Component B: hoist scope vars to function-top so the reconciliation
   # backstop (and audit logging) can run UNCONDITIONALLY, regardless of --force.

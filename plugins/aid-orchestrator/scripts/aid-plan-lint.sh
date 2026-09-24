@@ -290,6 +290,17 @@ _has_testing_strategy() {
   ' "$PLAN"
 }
 
+# plan-start writes the lifecycle manifest from the plan's bold EPIC lines
+# (lib/aid-lifecycle.sh aid_lifecycle_parse_legacy_epics, a stricter grammar
+# than EPIC generation reads) and refuses the plan when they do not parse — so
+# the same parser says it here, before review and generation are spent on it.
+if _lint_plan_id="$(_aid_plan_id_of "$PLAN" 2>/dev/null)" \
+   && ! bash "${SCRIPT_DIR}/aid-lifecycle.sh" parse-legacy "$_lint_plan_id" "$PLAN" >/dev/null 2>&1; then
+  _lint_epic_what="the EPIC lines do not follow the lifecycle grammar"
+  grep -qE '^\*\*EPIC [0-9]+' "$PLAN" || _lint_epic_what="the plan has no EPIC line (a single-phase plan has one too)"
+  _strict_finding "" "${_lint_epic_what} — each EPIC is one bold line '**EPIC N: title**' (or '**EPIC N / Backlog: title**'), numbered 1..K; plan-start refuses the plan otherwise (skills/plan-writing.md §Phase Markers)."
+fi
+
 if ! _has_testing_strategy; then
   _strict_finding "" "no '## Testing Strategy' section with content — say which behaviour this plan verifies, why that one, and where it goes (new suite / case in an existing suite). A Test: bullet per step is NOT required."
 fi

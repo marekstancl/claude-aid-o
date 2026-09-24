@@ -56,6 +56,9 @@
 #     primary-checkout invocation, while worktree/subdirectory invocations
 #     get the absolute primary path.
 #
+#   aid_run_checkout_root <state_file> <fallback_root>
+#     The worktree holding the run's recorded branch (see the function).
+#
 # Pure bash + git. No other dependencies. Safe to source multiple times.
 #
 # **Last Updated:** 2026-08-05
@@ -194,6 +197,27 @@ _aid_plan_project_root() {
   done
   return 1
 }
+# aid_run_checkout_root <state_file> <fallback_root> — the tree a run's steps
+# were committed in: the worktree that has the run's `branch:` checked out
+# (the primary counts), so a check run from the primary does not diff the
+# primary's HEAD while the run lives in a linked worktree. No recorded branch,
+# a detached one, or a branch that no longer exists (merged and deleted): the
+# fallback. A branch that exists but is checked out nowhere: rc 1, because
+# its commits are in no tree to diff.
+aid_run_checkout_root() {
+  local state="$1" fallback="$2" branch wt
+  branch="$(awk '/^branch:/ { print $2; exit }' "$state" 2>/dev/null)"
+  if [[ -z "$branch" || "$branch" == HEAD ]]; then printf '%s\n' "$fallback"; return 0; fi
+  wt="$(git -C "$fallback" worktree list --porcelain 2>/dev/null \
+        | awk -v b="branch refs/heads/${branch}" '/^worktree /{ w = substr($0, 10) } $0 == b { print w; exit }')"
+  if [[ -n "$wt" ]]; then printf '%s\n' "$wt"; return 0; fi
+  if git -C "$fallback" show-ref --verify --quiet "refs/heads/${branch}"; then
+    echo "ERROR: the run's branch ${branch} (${state}) is checked out in no worktree — check it out, or pass --project-root (git worktree list)" >&2
+    return 1
+  fi
+  printf '%s\n' "$fallback"
+}
+
 # _aid_fm_get <plan> <key> — one scalar from the plan's YAML frontmatter block
 # (first `---` to its closing `---`), trimmed and unquoted. Nothing when the
 # key, or the block, is absent.

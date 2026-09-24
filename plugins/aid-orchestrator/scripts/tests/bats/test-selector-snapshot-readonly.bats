@@ -24,7 +24,7 @@ setup() {
   [ "$before_hash" = "$after_hash" ]
 }
 
-@test "the 5 known selector gap paths appear as recommendation:fix findings sourced from the real function" {
+@test "the 4 known selector gap paths appear as recommendation:fix findings sourced from the real function" {
   run "$SNAPSHOT_SCRIPT" --project-root "$REPO_ROOT"
   [ "$status" -eq 0 ]
 
@@ -35,7 +35,8 @@ setup() {
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/lib/aid-queue-write.sh"* ]]
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/lib/aid-gate-profile-select.sh"* ]]
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/aid-queue-add.sh"* ]]
-  [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/defaults/enforcement-registry.yaml"* ]]
+  # the registry is mapped since 2.106.0 (the suites that read it)
+  [[ "$gap_ids" != *"selector-gap:plugins/aid-orchestrator/defaults/enforcement-registry.yaml"* ]]
 
   echo "$output" | jq -e '[.findings[] | select(.recommendation != "fix")] | length == 0' >/dev/null
   echo "$output" | jq -e '[.findings[] | select(.category != "selector-gap")] | length == 0' >/dev/null

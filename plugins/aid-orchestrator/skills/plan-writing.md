@@ -187,7 +187,7 @@ When brainstorming produces a multi-phase MVP plan (detected by: 4+ weeks effort
 
 ## Phase Markers
 
-When a plan spans multiple EPICs (phases), each phase must be delimited by a phase marker so the pipeline scripts can slice steps correctly. The marker format is:
+Each phase (EPIC) of a plan is delimited by a phase marker so the pipeline scripts can slice steps correctly. The marker format is:
 
 ```
 **EPIC N: Steps M-P — Title**
@@ -199,7 +199,7 @@ Where:
 - `P` is the last step number in this phase
 - `Title` is a short human-readable label (optional but recommended)
 
-**Extended form (with step range — preferred for multi-phase plans):**
+**Example:**
 
 ```markdown
 **EPIC 1: Steps 1-4 — Foundation**
@@ -215,27 +215,15 @@ Where:
 ...
 ```
 
-**Short form (without step range — for sequential simple plans):**
+**Backlog phase** (declared, not required for closing the plan): `**EPIC N / Backlog: Title**`.
 
-```markdown
-**EPIC 1**
-
-### Step 1: ...
-### Step 2: ...
-
-**EPIC 2**
-
-### Step 3: ...
-```
-
-When the short form is used, the script assigns steps to phases by document order: every `### Step N:` header encountered after a `**EPIC N**` marker belongs to that phase, until the next marker.
+Every plan carries these lines, a single-phase plan too (`**EPIC 1: Steps 1-N — Title**`): plan-start writes the plan's lifecycle manifest from them (`lib/aid-lifecycle.sh` `aid_lifecycle_parse_legacy_epics`) and refuses a plan without them, or with an EPIC line in any other form (`**EPIC 1**` without a colon included). `aid-plan-lint.sh` reports it before review.
 
 **Rules:**
 
 | Scenario | Rule |
 |----------|------|
-| Multi-phase plan (total phases > 1) | MUST include phase markers |
-| Single-phase plan (total phases = 1) | Phase markers are NOT required — all steps belong to the single phase automatically |
+| Any plan | MUST include a phase marker per phase, numbered 1..K in order — a single-phase plan has one |
 | Marker placement | Place each marker on its own line, immediately before the first step of that phase |
 | Step numbering | Step numbers in the marker range MUST match actual `### Step N:` headers; ranges with gaps are invalid |
 

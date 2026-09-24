@@ -214,6 +214,8 @@ _round1_closed() {
   [ "$status" -eq 1 ]; [[ "$output" == *"no --tokens value for behaviour_edges"* ]]
   run "$ROUND_SH" close "$PLAN" --round 1 --tokens generalist_a=100 behaviour_edges=1 feasibility_deps=1 reuse=1 enforcement_tests=unknown
   echo "$output"; [ "$status" -eq 0 ]
+  # a CP1 round is valid, not "pass": it names what it left open
+  [[ "$output" == *"round 1 closed (valid; open blockers: "* ]]
   [ "$(jq -r '.reviewers.enforcement_tests.tokens' "$CP1/round-1/measurement.json")" = unknown ]
   [ "$(jq -r '.reviewers.generalist_b | "\(.provider) \(.tokens) \(.reason)"' "$CP1/round-1/measurement.json")" = "codex unknown null" ]
   run "$ROUND_SH" close "$PLAN" --round 1 --tokens generalist_a=5
@@ -316,7 +318,7 @@ _repo() {
   git -C "$ROOT" init -q "$R" >/dev/null; git -C "$R" config user.email t@t; git -C "$R" config user.name t
   echo base > "$R/src/app.py"; echo k > "$R/secrets/key.txt"; git -C "$R" add -A; git -C "$R" commit -qm base
   printf 'base_commit: %s\nstreamlined_mode: false\n' "$(git -C "$R" rev-parse HEAD)" > "$E/fsm-state.yaml"
-  jq -n '{steps: [{id: "s0", role: "backend", objective: "add the thing", acceptance_criteria: ["it works"], outputs: ["Modify: `src/app.py` — x", "Create: `src/new.py` — y"], forbidden_paths: ["secrets/**"]}]}' > "$E/plan.json"
+  jq -n '{steps: [{id: "step_1_backend", role: "backend", objective: "add the thing", acceptance_criteria: ["it works"], outputs: ["Modify: `src/app.py` — x", "Create: `src/new.py` — y"], forbidden_paths: ["secrets/**"]}]}' > "$E/plan.json"
   : > "$E/timeline.jsonl"
   seq 1 60 >> "$R/src/app.py"; echo new > "$R/src/new.py"; git -C "$R" add -A; git -C "$R" commit -qm s0
 }
@@ -347,6 +349,8 @@ _bracket() {
   [ "$(jq -r .confirmation_of "$(D 1)/round.json")" = null ]
   [ "$(jq '.files | length' "$(D 1)/packet/manifest.json")" -eq 4 ]
   grep -q '^# cp2 review, round 1$' "$(D 1)/prompt-step_generalist.md"
+  # the reviewer reads the plan's step number, not the 0-based index
+  grep -q '^# Step 1 (index 0): add the thing$' "$(D 1)/packet/dod.md"
   grep -q 'the new file is never\|Definition of Done' "$(D 1)/prompt-step_generalist.md"
   [[ "$output" == *"focus cp2-step-0-step-generalist"* ]]
   jq -e 'select(.event == "review_round_start")' "$E/timeline.jsonl" | grep -q .
@@ -478,6 +482,7 @@ _bracket() {
   run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]
   printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
   run _S "${pm[@]}" --finding-card "$card"; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"dismissed by the PM (dispute accepted)"* ]]
   [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = pass ]
   [ "$(jq -r .verdict "$(D 1)/measurement.json")" = pass ]
   [ "$(jq -r '.findings[0].dispute.pm.card' "$(D 1)/merged.json")" = "$card" ]
@@ -710,6 +715,15 @@ _close1() {
   run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/lib/aid-routed-findings.sh' && aid_finding_open_for_epic P900 E-900-1_2 | wc -l"
   [ "${output##* }" -eq 1 ]
   [ "$(jq -r '.revision.head_sha' "$f")" = "$(git -C "$R" rev-parse HEAD)" ]
+  # a finding the PM dismissed is closed as "fixed", and the file says it was dismissed
+  local fp_med card="$ROOT/card3.md"; fp_med="$(jq -r '.findings[] | select(.severity == "major") | .fingerprint' "$E/cp3/round-2/merged.json")"
+  echo "nález $fp_med" > "$card"; touch -d '-10 seconds' "$card"
+  export AID_HOOK_AUDIT="$ROOT/audit3.jsonl"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  run "$ROUND_SH" dispute --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 2 --fingerprint "$fp_med" \
+    --reason "PM: the contract is met, dismiss it" --pm accepted --finding-card "$card"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$(jq -r '.semantic_review.findings[] | select(.severity == "medium") | .detail' "$f")" == *"dismissed by the PM (dispute accepted)"* ]]
   # a write that cannot satisfy the schema fails close before closed_at
   rm -rf "$E/cp3" "$f"; _sc cp3 ""
   "$ROUND_SH" prepare --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 >/dev/null

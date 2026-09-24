@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 556          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 558          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -3678,7 +3678,7 @@ enforcements:
     tier: t0
     enforcement_degree: 3
     not_guaranteed: "Anything. This is DELIVERY, not a guard, and the plan's re-grounding says why: the catch sees Write/Edit and never a shell redirection (measured by the ecosystem sheet and by P086), so a rule that blocked here would be sold as protection with a hole the size of `bash`. It names the path and the allowed list before the edit lands, as context; what refuses is the contract validation at return time (dispatch_contract_return), which reads the disk."
-    description: "P087 Step 5 — a Write/Edit that lands outside EVERY open step's allowed paths is named before it lands, with the path and each open step's list, as injected context under PreToolUse (owner any, so it reaches a role agent too). In a concurrent wave several steps are open at once and the hook cannot tell which agent is writing, so it judges against the union and the return validation of the right step settles it."
+    description: "P087 Step 5 — a Write/Edit that lands outside EVERY open step's allowed paths is named before it lands, with the path and each open step's list, as injected context under PreToolUse (owner any, so it reaches a role agent too). In a concurrent wave several steps are open at once and the hook cannot tell which agent is writing, so it judges against the union and the return validation of the right step settles it. A write into a review round's own directory (evidence/…/cp2|cp3|cp6|cp7/…) is a reviewer's answer and is not named (2.106.0)."
     recovery: "Nothing to recover; the notice is feedback. The return validation is the enforcement."
     test: "scripts/tests/bats/test-hook-rules-turn.bats"
     not_guaranteed: "that an out-of-scope write is PREVENTED — this rule names it before it lands and does not stop it; a shell redirection is not seen at all. The refusal happens at return time, in the dispatch contract, which compares the declared file list against the disk"
@@ -4041,3 +4041,27 @@ enforcements:
     description: "P100 Step 5: a phase whose EPIC an earlier generation queued with a merge_target that git ancestry proves merged is recorded delivered and not generated, queued or bound to the plan bytes again; aid-generation-finalize.sh proves it again, and a legacy entry (status only) is never delivered. An incomplete transaction that generated no phase supersedes itself with the three audit records."
     recovery: "n/a — a delivered phase needs nothing; an unproven one is generated as before."
     test: "scripts/tests/bats/test-generation-resume.bats (grep: 'half-delivered')"
+
+  - id: plan_lint_epic_grammar
+    type: out-of-band
+    source: "scripts/aid-plan-lint.sh (grep: 'aid-lifecycle.sh\" parse-legacy')"
+    instruction: "skills/plan-writing.md (grep: 'Every plan carries these lines')"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "2.106.0: the plan's EPIC lines are read by the same parser plan-start writes the lifecycle manifest with (lib/aid-lifecycle.sh aid_lifecycle_parse_legacy_epics), before review and generation are spent: no EPIC line, or one in neither '**EPIC N: …**' nor '**EPIC N / Backlog: …**' form, or numbering other than 1..K. STRICT tier (blocking for lifecycle_strict, a warning for a legacy plan). plan-start names the reason instead of a bare rc."
+    recovery: "write each phase as '**EPIC N: Steps M-P — Title**' (skills/plan-writing.md §Phase Markers)"
+    test: "scripts/tests/bats/test-plan-lint.bats (grep: 'EPIC line plan-start cannot parse')"
+
+  - id: step_check_run_checkout
+    type: 4
+    source: "scripts/lib/aid-roots.sh (grep: 'aid_run_checkout_root()')"
+    instruction: "commands/aid-run.md (grep: '--checkpoint cp2 --step <N>')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "2.106.0: without --project-root, the cp2/cp3 step check and review round diff the worktree the run's recorded branch is checked out in, not the tree they are run from (P101: a check from the primary judged the primary's HEAD and recorded no change); the review config is read from the state root. A branch that exists but is checked out nowhere is refused; none recorded, detached or deleted keeps the cwd. increment-step re-executes in the plan worktree like transition."
+    recovery: "check the run's branch out, or pass --project-root <tree>"
+    test: "scripts/tests/bats/test-step-check.bats (grep: 'run from the primary')"

@@ -179,6 +179,22 @@ _json() { jq -r "$1" "$E/$2/step-check.json"; }
   [ "$status" -eq 0 ]; [ "$(_json .verdict cp2/step-0)" = review ]
   [[ "$(_json .reason cp2/step-0)" == *"delta round"* ]]
 }
+@test "run from the primary, the step is diffed in the worktree the run's branch is checked out in; a branch checked out nowhere is refused" {
+  git -C "$R" worktree add -q -b task/E/main "$T/wt" main
+  printf 'branch: task/E/main\n' >> "$E/fsm-state.yaml"
+  echo "s0" >> "$T/wt/src/app.py"; git -C "$T/wt" commit -qam s0
+  run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 0 ]
+  [ "$(_json .range cp2/step-0)" = "${BASE}..$(git -C "$T/wt" rev-parse HEAD)" ]
+  # the branch exists but no tree has it: its commits are in no tree to diff
+  git -C "$R" worktree remove --force "$T/wt"; rm -rf "$E/cp2"
+  run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 2 ]; [[ "$output" == *"task/E/main"*"checked out in no worktree"* ]]
+  # a merged and deleted branch falls back to the tree the check runs in
+  git -C "$R" branch -D task/E/main >/dev/null
+  run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 0 ]
+}
 @test "usage: a missing plan.json for cp2, an unreadable rules file and a bad checkpoint are refused with their code" {
   rm "$E/plan.json"; echo x >> "$R/src/app.py"; _commit s0 >/dev/null
   run _run --checkpoint cp2 --step 0; [ "$status" -eq 1 ]; [[ "$output" == *plan.json* ]]

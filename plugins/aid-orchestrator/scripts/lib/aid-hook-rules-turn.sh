@@ -194,6 +194,11 @@ aid_hook_rule_turn_write_scope() {
   [[ -n "$cwd" && -d "$cwd" ]] || { echo "no usable cwd in the event" >&2; return 3; }
   local root
   root="$(cd "$cwd" && aid_state_root 2>/dev/null)" || { echo "cwd is not inside an AID workspace" >&2; return 3; }
+  # A reviewer writes its answer into the review round's own directory while
+  # the step is still open; that is the round's path, not the step's.
+  case "$path" in
+    *.aid-o/work/evidence/*/cp[2367]/*) echo "a review round's own directory" >&2; return 3 ;;
+  esac
 
   # The same attribution as the Stop rule, when the payload names a readable
   # transcript; without one, any open step's contract is the best available

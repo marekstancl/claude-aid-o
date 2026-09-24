@@ -573,6 +573,14 @@ for suite in "${SUITES[@]}"; do
     skip_info=", $suite_skipped skipped"
   fi
   echo "  [$status_icon] $suite_passed/$suite_run passed, $suite_failed failed${skip_info}"
+  # A red suite names what failed even without --verbose (which printed it all
+  # already): each bats `not ok` with the lines under it, else the output's tail.
+  if [[ "$suite_exit" -ne 0 && "$VERBOSE" -eq 0 ]]; then
+    _failed_cases=""
+    [[ "$is_bats" -eq 1 ]] && _failed_cases="$(grep -A5 --no-group-separator '^not ok' <<< "$suite_output")"
+    [[ -n "$_failed_cases" ]] || _failed_cases="$(tail -n 10 <<< "$suite_output")"
+    sed 's/^/    /' <<< "$_failed_cases"
+  fi
   echo ""
 done
 

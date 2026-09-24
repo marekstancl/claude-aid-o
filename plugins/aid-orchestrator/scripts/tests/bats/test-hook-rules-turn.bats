@@ -111,6 +111,11 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
   [ "$status" -eq 0 ]; [ -z "$output" ]
   run aid_hook_rule_turn_write_scope <<< "$(_write_event "$EV/steps/step_1_backend/output.md")"
   [ "$status" -eq 0 ]; [ -z "$output" ]
+  # a reviewer's answer lands in the review round's directory, not the step's paths
+  run aid_hook_rule_turn_write_scope <<< "$(_write_event "$EV/cp2/step-0/round-1/reviewer-step_generalist.json")"
+  [ "$status" -eq 3 ]; [[ "$output" != *"OUTSIDE"* ]]
+  run aid_hook_rule_turn_write_scope <<< "$(_write_event "$ROOT/.aid-o/work/backlog.md")"
+  [[ "$output" == *"OUTSIDE"* ]]
 }
 
 @test "turn: in a concurrent wave every open step's paths count — a second agent's write is judged by ITS packet" {

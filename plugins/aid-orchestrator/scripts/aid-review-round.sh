@@ -117,7 +117,11 @@ elif [[ -n "$CHECKPOINT" ]]; then
   [[ "$CHECKPOINT" =~ ^cp[2367]$ ]] || _die "--checkpoint must be cp2, cp3, cp6 or cp7" 2
   [[ -n "$EVID" && -d "$EVID" ]] || _die "--evidence-dir <dir> required and must exist" 2
   EVID="$(realpath "$EVID")"
-  [[ -n "$ROOT" ]] || ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || _die "not inside a git repository; pass --project-root" 2
+  if [[ -z "$ROOT" ]]; then
+    ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || _die "not inside a git repository; pass --project-root" 2
+    # the tree the run's branch is checked out in, as aid-step-check.sh diffs it
+    if [[ "$CHECKPOINT" =~ ^cp[23]$ ]]; then ROOT="$(aid_run_checkout_root "${EVID}/fsm-state.yaml" "$ROOT")" || exit 2; fi
+  fi
   ROOT="$(realpath "$ROOT")"
   case "$CHECKPOINT" in
     cp2) [[ "$STEP" =~ ^[0-9]+$ ]] || _die "--step N required for cp2" 2; BASE="${EVID}/cp2/step-${STEP}"; NS=step_review; BLOCK=step_review ;;
@@ -131,7 +135,8 @@ else
   _die "give --plan <file> (CP1) or --checkpoint cp2|cp3|cp6|cp7 --evidence-dir <dir> [--step N]" 2
 fi
 
-aid_review_config_load "$ROOT" "$BLOCK" "$ROLES_SKILL" || exit 2
+# .aid-o is not checked out into a linked worktree: the config is the primary's
+aid_review_config_load "$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")" "$BLOCK" "$ROLES_SKILL" || exit 2
 aid_review_config_validate || exit 1
 
 _need_round() { [[ "$ROUND" =~ ^[1-9][0-9]*$ ]] || _die "--round K required" 2; }
@@ -649,7 +654,7 @@ _semantic_final_write() {
          merge_meta: {merged_from: $from, conflicts: []},
          findings: ($f | map({fingerprint, severity: (.severity | sev), lens: (.reported_by[0] // "step_check"),
                               check_id: (.fingerprint[7:23]), target_path: (.evidence | file), finding_class: (.reported_by[0] // "step_check"),
-                              status: (.status | st), detail: "\(.claim) (\(.severity), reported \(.status); evidence \(.evidence); fix: \(.fix))"}))}}' \
+                              status: (.status | st), detail: "\(.claim) (\(.severity), \(if .dispute.pm.answer == "accepted" then "dismissed by the PM (dispute accepted)" else "reported \(.status)" end); evidence \(.evidence); fix: \(.fix))"}))}}' \
     "${rounds[@]}" > "$tmp" || { rm -f "$tmp"; return 1; }
   local err
   # A lens is a reviewer of this round, or step_check for a finding of the
@@ -810,9 +815,13 @@ cmd_close() {
     jq --arg at "$(_now)" --arg v "$verdict" '. + {closed_at: $at, verdict: $v}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
   fi
   _record_final_writes
+  local blockers; blockers="$(jq -r '.blockers_open // 0' "${dir}/merged.json" 2>/dev/null || echo 0)"
   _log review_round_close checkpoint="$CHECKPOINT" step="${STEP:-null}" round="$ROUND" verdict="$verdict" \
-    status="$(jq -r .status "${dir}/collect.json")" blockers_open="$(jq -r '.blockers_open // 0' "${dir}/merged.json" 2>/dev/null || echo 0)"
-  echo "round ${ROUND} closed (${verdict}): $(jq -r '[.reviewers | to_entries[] | "\(.key)=\(.value.tokens)"] | join(" ")' "$measurement")$([[ "$stub" == true ]] && echo '  [stub: no dispatch check; the FSM refuses this round]')"
+    status="$(jq -r .status "${dir}/collect.json")" blockers_open="$blockers"
+  # A CP1 round has no verdict of its own (aid-cp1-gate.sh judges the plan): it
+  # is valid, and what it left open is the number that matters.
+  local outcome="$verdict"; [[ "$MODE" == plan ]] && outcome="valid; open blockers: ${blockers}"
+  echo "round ${ROUND} closed (${outcome}): $(jq -r '[.reviewers | to_entries[] | "\(.key)=\(.value.tokens)"] | join(" ")' "$measurement")$([[ "$stub" == true ]] && echo '  [stub: no dispatch check; the FSM refuses this round]')"
 }
 
 # ── CP1-only subcommands ──────────────────────────────────────────────────────
@@ -932,7 +941,9 @@ cmd_dispute() {
     [[ "$CHECKPOINT" == cp3 ]] && { _semantic_final_write "$v" || _die "${EVID}/semantic-review-final.json was not rewritten; run the dispute again"; }
     _log review_dispute checkpoint="$CHECKPOINT" step="${STEP:-null}" round="$ROUND" fingerprint="$FINGERPRINT" answer="${PM_ANSWER:-disputed}" verdict="$v"
   fi
-  echo "finding ${FINGERPRINT}: $(jq -r --arg f "$FINGERPRINT" '.findings[] | select(.fingerprint == $f) | .status' "${dir}/merged.json")"
+  # status "fixed" closes a finding the PM dismissed too; say which one it is
+  echo "finding ${FINGERPRINT}: $(jq -r --arg f "$FINGERPRINT" '.findings[] | select(.fingerprint == $f)
+    | if .dispute.pm.answer == "accepted" then "dismissed by the PM (dispute accepted)" else .status end' "${dir}/merged.json")"
 }
 
 cmd_override() {

@@ -110,6 +110,10 @@ aid_review_summary() {
   done
   local line="review: ${#rounds[@]} round$( (( ${#rounds[@]} == 1 )) || echo s)"
   if (( ${#files[@]} )); then
+    # A Claude stand-in for a codex role (fallback_reason, written by close)
+    # goes first: the line is cut at 120 characters and it changes what it means.
+    local si; si="$(jq -rs '[.[].reviewers[] | select(.fallback_reason)] | length' "${files[@]}")"
+    (( si )) && line+=", codex→claude ${si}×"
     local tok unk usd usd_unk; read -r tok unk usd usd_unk <<< "$(_aid_rs_sum "${files[@]}")"
     line+=", ${tok} tokens, ${unk} unknown"
     if (( usd_unk == 0 )); then line+=", $(printf '%.4f' "$usd") USD"

@@ -2435,7 +2435,13 @@ cmd_plan_start() {
   local lc_rc=0
   aid_lifecycle_set_plan_mode "$plan_id" "$mode" "$project_root" || lc_rc=$?
   if [[ "$lc_rc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: aid_lifecycle_set_plan_mode failed for ${plan_id} (rc=${lc_rc}) — op remains at git_applied, retry converges." >&2
+    local lc_why="op remains at git_applied, retry converges"
+    case "$lc_rc" in   # the return codes lib/aid-lifecycle.sh documents
+      2) lc_why="the plan's EPIC lines do not parse: each EPIC is one bold line '**EPIC N: title**' (or '**EPIC N / Backlog: title**'), numbered 1..K (aid-plan-lint.sh names it); fix the plan, then retry" ;;
+      3) lc_why="the plan file is not found, or not committed on the target branch" ;;
+      4) lc_why="a local edit to the lifecycle manifest is in the way; commit or discard it, then retry" ;;
+    esac
+    echo "PRECONDITION FAIL: aid_lifecycle_set_plan_mode failed for ${plan_id} (rc=${lc_rc}) — ${lc_why}." >&2
     exit "$lc_rc"
   fi
 

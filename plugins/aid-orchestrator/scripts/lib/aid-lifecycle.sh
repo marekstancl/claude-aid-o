@@ -655,7 +655,7 @@ aid_lifecycle_parse_legacy_epics() {
       continue
     fi
     nums+=("$n"); scopes+=("$scope")
-  done < <(grep -E '^\*\*EPIC [0-9]+' "$plan_file")
+  done < <(awk '/^[[:space:]]*```/ { fenced = !fenced; next } !fenced && /^\*\*EPIC [0-9]+/' "$plan_file")   # a fenced example is not a declaration (as aid-plan-to-epic.sh reads it)
 
   local k="${#nums[@]}"
   [[ "$k" -ge 1 ]] || return 2

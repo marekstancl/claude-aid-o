@@ -36,6 +36,11 @@ _AID_SR_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." &
 [[ -n "${AID_GATE_ROW_JQ:-}" ]] || source "${_AID_SR_PLUGIN}/scripts/lib/aid-gate-row.sh"   # P097 Step 2 — gate rows read through gate_row_normalize
 AID_SR_TEMPLATE="${_AID_SR_PLUGIN}/defaults/prompts/review-prompt-v1.md"
 AID_SR_ROLES_SKILL="${_AID_SR_PLUGIN}/skills/step-review-roles.md"
+# step_name(index) on a plan.json step: the plan's own number from its id
+# (step_3_backend → "Step 3 (index 2)"), the index alone when the id has none —
+# a reviewer reading "Step 2" would look for the plan's step 2.
+_AID_SR_STEP_NAME_JQ='def step_name($i): ([(.id // "") | capture("^step_(?<n>[0-9]+)")] | .[0].n) as $n
+  | if $n then "Step \($n) (index \($i))" else "Step \($i)" end;'
 # The findings a step round still holds open: its verdict, the confirmation
 # round's packet and the roles it asks read this (a form_invalid finding is open
 # until answered, like a disputed one).
@@ -61,10 +66,10 @@ aid_step_review_packet_build() {
   else
     [[ -f "$plan_json" ]] || { echo "prepare: no plan.json at ${plan_json}" >&2; return 1; }
     if [[ "$cp" == cp2 ]]; then
-      jq -r --argjson s "$step" '.steps[$s] | "# Step \($s): \(.objective // "")\n\n## Acceptance criteria\n" + ((.acceptance_criteria // []) | map("- " + .) | join("\n"))' "$plan_json" > "$dir/dod.md"
+      jq -r --argjson s "$step" "${_AID_SR_STEP_NAME_JQ}"' .steps[$s] | "# \(step_name($s)): \(.objective // "")\n\n## Acceptance criteria\n" + ((.acceptance_criteria // []) | map("- " + .) | join("\n"))' "$plan_json" > "$dir/dod.md"
       jq --argjson s "$step" '.steps[$s] | {outputs: (.outputs // []), allowed_paths: (.allowed_paths // []), forbidden_paths: (.forbidden_paths // []), scope_declared: true}' "$plan_json" > "$dir/files.json"
     else
-      jq -r '"# EPIC: \(.epic_id // .id // "")\n\n" + ((.objective // .goal // "") | tostring) + "\n\n" + ([.steps | to_entries[] | "## Step \(.key): \(.value.objective // "")\n" + ((.value.acceptance_criteria // []) | map("- " + .) | join("\n"))] | join("\n\n"))' "$plan_json" > "$dir/dod.md"
+      jq -r "${_AID_SR_STEP_NAME_JQ}"' "# EPIC: \(.epic_id // .id // "")\n\n" + ((.objective // .goal // "") | tostring) + "\n\n" + ([.steps | to_entries[] | "## \(.key as $k | .value | step_name($k)): \(.value.objective // "")\n" + ((.value.acceptance_criteria // []) | map("- " + .) | join("\n"))] | join("\n\n"))' "$plan_json" > "$dir/dod.md"
       jq '{outputs: [.steps[].outputs[]?], allowed_paths: [.steps[].allowed_paths[]?], forbidden_paths: [.steps[].forbidden_paths[]?], scope_declared: true}' "$plan_json" > "$dir/files.json"
     fi
   fi
@@ -284,7 +289,10 @@ aid_step_review_route_open() {
       while IFS= read -r fixed_fp; do
         [[ -n "$fixed_fp" ]] || continue
         jq -e --arg fp "$fixed_fp" -s 'any(.[]; .op == "route" and .fingerprint == $fp) and (any(.[]; .op == "resolve" and .fingerprint == $fp) | not)' "$jf" >/dev/null 2>&1 || continue
-        aid_finding_resolve "$plan_id" "$fixed_fp" "fixed: confirmed by ${cp}${step:+ step $step} $(basename "$dir") at $(git -C "$root" rev-parse --short HEAD)" || return 1
+        local how="fixed: confirmed by"   # a finding the PM dismissed is "fixed" in status only
+        jq -e --arg fp "$fixed_fp" -s 'any(.[].findings[]; .fingerprint == $fp and .dispute.pm.answer == "accepted")' \
+          "${dir%/*}"/round-*/merged.json >/dev/null 2>&1 && how="dismissed by the PM (dispute accepted) in"
+        aid_finding_resolve "$plan_id" "$fixed_fp" "${how} ${cp}${step:+ step $step} $(basename "$dir") at $(git -C "$root" rev-parse --short HEAD)" || return 1
       done < <(jq -r '.findings[] | select(.status == "fixed") | .fingerprint' "${dir%/*}"/round-*/merged.json 2>/dev/null | sort -u)
     fi
   fi

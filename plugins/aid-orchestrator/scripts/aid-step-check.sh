@@ -50,6 +50,8 @@ source "$SCRIPT_DIR/lib/aid-ancillary.sh"
 source "$SCRIPT_DIR/lib/aid-test-tier.sh"
 # shellcheck source=lib/aid-dispatch-contract.sh
 source "$SCRIPT_DIR/lib/aid-dispatch-contract.sh"   # aid_dispatch_repo_range_ok
+# shellcheck source=lib/aid-roots.sh
+source "$SCRIPT_DIR/lib/aid-roots.sh"               # aid_run_checkout_root, aid_state_root
 
 die() { echo "step-check: $*" >&2; exit "${2:-1}"; }
 usage() { sed -n '5,10p' "${BASH_SOURCE[0]}" | sed 's/^# *//'; }
@@ -75,9 +77,14 @@ for t in jq yq git sha256sum; do command -v "$t" >/dev/null 2>&1 || die "$t not 
 [[ "$CHECKPOINT" =~ ^cp[2367]$ ]] || die "--checkpoint must be cp2, cp3, cp6 or cp7" 2
 [[ -n "$EVID" ]] || die "--evidence-dir is required" 2
 [[ -f "$RULES_FILE" ]] || die "rules file not found: $RULES_FILE" 2
-ROOT="${ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || true)}"
-[[ -n "$ROOT" && -d "$ROOT/.git" || -f "$ROOT/.git" ]] || die "not inside a git repository (or --project-root is not one)" 2
 STATE="${STATE:-$EVID/fsm-state.yaml}"
+if [[ -z "$ROOT" ]]; then
+  ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  # A step or EPIC is diffed in the tree its run's branch is checked out in,
+  # wherever the check is run from.
+  if [[ -n "$ROOT" && "$CHECKPOINT" =~ ^cp[23]$ ]]; then ROOT="$(aid_run_checkout_root "$STATE" "$ROOT")" || exit 2; fi
+fi
+[[ -n "$ROOT" && -d "$ROOT/.git" || -f "$ROOT/.git" ]] || die "not inside a git repository (or --project-root is not one)" 2
 PLAN_JSON="${PLAN_JSON:-$EVID/plan.json}"
 TIMELINE="$EVID/timeline.jsonl"
 case "$CHECKPOINT" in
@@ -221,7 +228,8 @@ done <<<"$NUMSTAT"
 # ── 5. verdict ──────────────────────────────────────────────────────────────
 _cfg() {  # <yq path> <default>: the project's review-checkpoints.yaml first, then the plugin default
   local v="" f
-  for f in "$ROOT/.aid-o/config/policies/review-checkpoints.yaml" "$PLUGIN_DIR/defaults/policies/review-checkpoints.yaml"; do
+  # .aid-o is not checked out into a linked worktree: the config is the primary's
+  for f in "$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/.aid-o/config/policies/review-checkpoints.yaml" "$PLUGIN_DIR/defaults/policies/review-checkpoints.yaml"; do
     [[ -f "$f" ]] || continue
     v="$(yq -r "$1 // \"\"" "$f" 2>/dev/null || true)"; [[ -n "$v" && "$v" != null ]] && break; v=""
   done
