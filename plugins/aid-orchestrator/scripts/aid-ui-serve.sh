@@ -6,7 +6,11 @@
 #   forward <local-port>   HTTP reverse proxy (python3 stdlib, $PROXY_PY below)
 #                          AID_UI_HOST:AID_UI_FORWARD_PORT -> 127.0.0.1:<local-port>.
 #                          Impeccable answers 403 unless Host, Origin and Referer
-#                          say 127.0.0.1:<local-port>, so the proxy rewrites them;
+#                          say 127.0.0.1:<local-port>, so the proxy rewrites them,
+#                          but only for requests addressed to the proxy itself:
+#                          Host must be AID_UI_HOST:AID_UI_FORWARD_PORT and Origin/
+#                          Referer, when sent, must name http://<that>; anything
+#                          else gets 403 and never reaches Impeccable (CSRF guard);
 #                          the response streams back chunk by chunk (long-poll/SSE).
 #                          only when every process listening on <local-port> is
 #                          Impeccable: its command line contains `impeccable`
@@ -51,22 +55,32 @@ DEADLINE=28800   # 8 h, integer seconds as `aid-job.sh run --deadline` requires
 # ponytail: no WebSocket upgrade and no chunked request bodies (browsers send
 # Content-Length); add them if Impeccable's page ever needs them.
 PROXY_PY="$(cat <<'PY'
-import http.client, re, sys
+import http.client, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 host, port, up = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 LOCAL = "127.0.0.1:%d" % up
+OWN = "%s:%d" % (host, port)   # the address the PM's browser uses
 SKIP = {"host", "origin", "referer", "connection", "keep-alive", "proxy-connection",
         "te", "trailer", "transfer-encoding", "upgrade"}
 
 class Proxy(BaseHTTPRequestHandler):
+    def ours(self):   # Host is us; Origin/Referer, when sent, name us
+        o, r = self.headers.get("Origin"), self.headers.get("Referer")
+        return (self.headers.get("Host") == OWN
+                and (o is None or o == "http://" + OWN)
+                and (r is None or r == "http://" + OWN or r.startswith("http://" + OWN + "/")))
+
     def proxy(self):
+        if not self.ours():
+            self.send_error(403, "request not addressed to http://" + OWN)
+            return
         n = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(n) if n else None
         hdrs = {k: v for k, v in self.headers.items() if k.lower() not in SKIP}
         hdrs["Host"] = LOCAL
         for k in ("Origin", "Referer"):
             if self.headers.get(k):
-                hdrs[k] = re.sub(r"^[a-z]+://[^/]*", "http://" + LOCAL, self.headers[k])
+                hdrs[k] = "http://" + LOCAL + self.headers[k][len("http://" + OWN):]
         try:
             conn = http.client.HTTPConnection("127.0.0.1", up)
             conn.request(self.command, self.path, body, hdrs)
