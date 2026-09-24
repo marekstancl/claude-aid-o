@@ -2342,6 +2342,16 @@ _close() {
 # (The review and C4 STAGES themselves are Step 2/3/4's own exhaustive
 # coverage above; re-running them here would cost a full release gate profile
 # per test and prove nothing about close.)
+# _seed_closable — a merged plan with its plan-final evidence, ready to close.
+# (Removed by P096 while 58 cases still called it; restored 2026-09-24.)
+_seed_closable() { _snap_fixture "closable${1:+:$1}" _seed_closable_build "$@"; }
+_seed_closable_build() {
+  _seed_merge_project
+  _seed_plan_final_evidence
+  _merge
+  [ "$status" -eq 0 ]
+}
+
 _seed_plan_final_evidence() {
   aid_fixture_seed_plan_decided "$TEST_PROJECT_ROOT" "$PLAN_ID" || return 1
   # The private, gitignored human projection. Its Head is the candidate, which

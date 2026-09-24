@@ -289,7 +289,7 @@ MD
 # suite runs concurrently with.
 _a_epic_midexecution() {
   FIXTURE_STAGE="A:mid-execution"
-  run _from "$ROOT" "$PLAN_FSM" epic-start "$PLAN_A" "$EPIC_A" --project-root "$ROOT"
+  run _from "$ROOT" "$PLAN_FSM" epic-start "$PLAN_A" "$EPIC_A" --run-id R-A --project-root "$ROOT"
   _ok A epic-start "$FIXTURE_STAGE" "epic-start failed: $output" -- [ "$status" -eq 0 ]
 
   run _from "$ROOT" "$FSM" init "$EPIC_A" R-A 2 manual main HEAD "$(_sf_a)"

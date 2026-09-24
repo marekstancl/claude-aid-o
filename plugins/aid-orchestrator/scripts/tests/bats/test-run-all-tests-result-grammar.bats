@@ -280,3 +280,18 @@ SH
   bash "$f" >&- 2>/dev/null || true
   [ ! -d "$marker" ]
 }
+
+@test "BEHAVIOUR: every suite that did not pass is named, even when an unparsed one ends the run" {
+  # The nightly report reads the "Failed suites:" list; an unparsed suite used
+  # to exit before it was written, and 21 red suites showed as one "(runner)".
+  local p="$TEST_TMPDIR/plugin"
+  mkdir -p "$p/scripts/tests"
+  ln -s "$PLUGIN_DIR/scripts/lib" "$p/scripts/lib"
+  cp "$RUNNER" "$p/scripts/tests/run-all-tests.sh"
+  printf '#!/usr/bin/env bash\n# aid-tier: t0\necho "Results: 0/1 passed, 1 failed"\nexit 1\n' > "$p/scripts/tests/test-red.sh"
+  printf '#!/usr/bin/env bash\n# aid-tier: t0\necho "no result line"\nexit 0\n' > "$p/scripts/tests/test-silent.sh"
+  run bash "$p/scripts/tests/run-all-tests.sh"
+  [ "$status" -eq 1 ]
+  names="$(sed -nE '/^[[:space:]]*Failed suites:/,/^$/ s/^[[:space:]]+- (.+)$/\1/p' <<<"$output")"
+  [ "$names" = "$(printf 'test-red\ntest-silent')" ]
+}
