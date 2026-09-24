@@ -452,7 +452,7 @@ run_verification_input() {
 
   [[ -f "$EVIDENCE_VERIFY" ]] || return 0
 
-  local vr_tmp="" vr_exit=0 worst=""
+  local vr_tmp="" vr_exit=0 worst="" failed=""
   vr_tmp="$(mktemp "${TMPDIR:-/tmp}/aid-relpol-vr-XXXXXX.json" 2>/dev/null)" || vr_tmp=""
   [[ -z "$vr_tmp" ]] && { VERIFICATION_REASON="verifier_tool_error mktemp_failed"; return 0; }
 
@@ -487,9 +487,12 @@ run_verification_input() {
           | if ($s | any(. == "fail")) then "fail"
             elif ($s | any(. == "unverifiable")) then "unverifiable"
             else "pass" end' "$vr_tmp" 2>/dev/null)" || worst=""
+        # which checks, so a refusal names what to fix (the report is a temp file)
+        failed="$(jq -r --arg w "$worst" '[.verification_report.checks[]? | select(.status == $w)
+          | "\(.id): \(.detail // "" | tostring | gsub("\n"; " ") | .[0:200])"] | join("; ")' "$vr_tmp" 2>/dev/null)" || failed=""
         case "$worst" in
-          fail)         VERIFICATION_VERDICT="fail";         VERIFICATION_REASON="one or more evidence checks failed at HEAD" ;;
-          unverifiable) VERIFICATION_VERDICT="unverifiable"; VERIFICATION_REASON="one or more evidence checks unverifiable" ;;
+          fail)         VERIFICATION_VERDICT="fail";         VERIFICATION_REASON="evidence checks failed at HEAD: ${failed:-unnamed}" ;;
+          unverifiable) VERIFICATION_VERDICT="unverifiable"; VERIFICATION_REASON="evidence checks unverifiable: ${failed:-unnamed}" ;;
           pass)         VERIFICATION_VERDICT="pass";         VERIFICATION_REASON="all evidence checks passed at HEAD" ;;
           *)            VERIFICATION_VERDICT="unverifiable"; VERIFICATION_REASON="verifier_tool_error unparseable_report" ;;
         esac

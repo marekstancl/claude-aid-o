@@ -115,11 +115,16 @@ _aid_hrt_last_message() {
 }
 
 # _aid_hrt_hands_over <text_file> — does the turn's last message open a
-# Decision card (validated by the card library) or a Blocked card (its label
-# in any configured language)? 0 yes, 1 no.
+# Decision card (validated by the card library), the ecosystem's decision
+# block, or a Blocked card (its label in any configured language)? 0 yes, 1 no.
 _aid_hrt_hands_over() {
   local f="$1"
   aid_decision_card_validate "$f" >/dev/null 2>&1 && return 0
+  # The ecosystem's own decision block (/opt/eco/CLAUDE.md, part 5): a numbered
+  # decision or finding, at least two options and a recommendation.
+  grep -Eq '^[[:space:]*#]*(Rozhodnutí|Nález) [0-9]+:' "$f" 2>/dev/null \
+    && (( $(grep -Ec '^[[:space:]*]*[A-Z]\)' "$f") >= 2 )) \
+    && grep -Eq '^[[:space:]*]*Doporučuju' "$f" && return 0
   local lang label
   while IFS= read -r lang; do
     [[ -n "$lang" ]] || continue
@@ -172,7 +177,9 @@ aid_hook_rule_turn_step_open() {
 _aid_hrt_relative() {
   local path="$1" cwd="$2" top
   [[ "$path" == /* ]] || { printf '%s' "$path"; return 0; }
-  top="$(cd "$(dirname "$path")" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)" \
+  # a new folder does not exist yet: its nearest existing parent names the tree
+  local d; d="$(dirname "$path")"; while [[ ! -d "$d" && "$d" != / ]]; do d="$(dirname "$d")"; done
+  top="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" \
     || top="$(cd "$cwd" && git rev-parse --show-toplevel 2>/dev/null)" || top="$cwd"
   printf '%s' "${path#"${top%/}/"}"
 }

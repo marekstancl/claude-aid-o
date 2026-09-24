@@ -123,6 +123,18 @@ _done_advance() {
   [[ "$output" != *"$FP_A"* ]]
 }
 
+@test "the latest route or resolve of a fingerprint is its state: epic then backlog does not block, resolve then re-route does" {
+  _lib "aid_finding_route P900 '$FP_A' cp3-code-review step:2 '$EPIC' 2"
+  _lib "aid_finding_route P900 '$FP_A' cp3-code-review backlog:IMP-652 '$EPIC' 2"
+  run _lib "aid_finding_open_for_epic P900 '$EPIC'"
+  [ "$status" -eq 0 ]; [[ "$output" != *"$FP_A"* ]]
+  _lib "aid_finding_route P900 '$FP_B' cp3-code-review step:2 '$EPIC' 2"
+  _lib "aid_finding_resolve P900 '$FP_B' 'fixed in step 2'"
+  _lib "aid_finding_route P900 '$FP_B' cp3-code-review step:3 '$EPIC' 3"
+  run _lib "aid_finding_open_for_epic P900 '$EPIC'"
+  [[ "$output" == *"$FP_B"*"step:3"* ]]
+}
+
 @test "P079 Step 7: a finding routed to a DIFFERENT epic blocks that one, not this one" {
   _seed_done_review
   _lib "aid_finding_route P900 '$FP_B' cp3-code-review epic:E-900-2_2 '$EPIC' 2"

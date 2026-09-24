@@ -42,12 +42,14 @@ _AID_ANCILLARY_LEGACY5=(
   ".aid-o/metrics/gate-runtime-baselines.yaml"
   ".aid-o/metrics/gate-runtime-baselines.yaml.lock"
   ".aid-o/work/plan-state/**"
+  ".aid-o/config/*.lock"   # the lock files AID's writers hold (keep in sync with defaults/policies/plan-final-policy.yaml)
 )
 _AID_ANCILLARY_LEGACY4=(
   ".aid-o/config/queue.yaml"
   ".aid-o/work/audit-log.jsonl"
   ".aid-o/metrics/gate-runtime-baselines.yaml"
   ".aid-o/metrics/gate-runtime-baselines.yaml.lock"
+  ".aid-o/config/*.lock"
 )
 
 # Loaded policy globs, and a once-per-process warn latch.

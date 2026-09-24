@@ -246,7 +246,7 @@ run_pattern() {
     must_contain)
       if [[ ! -f "$file" ]]; then
         verdict="absent"; evidence="file not found: $file"
-      elif grep -E -q -- "$regex" "$file" 2>/dev/null; then
+      elif grep -Eiq -- "$regex" "$file" 2>/dev/null; then
         verdict="present"; evidence="regex matched in $file"
       else
         verdict="absent"; evidence="regex not found in $file"

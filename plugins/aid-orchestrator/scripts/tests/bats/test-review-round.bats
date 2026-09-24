@@ -167,6 +167,7 @@ STUB
   jq -n '{available: false, binary: "", version: "", reason: "codex_absent", probed_at: "2026-09-20T00:00:00Z"}' > "$ROOT/probe.json"
   AID_CODEX_PROBE_STUB="$ROOT/probe.json" run "$ROUND_SH" dispatch "$PLAN" --round 1 --provider codex --role generalist_b
   echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"STAND-IN"* ]]; [[ "$output" == *opus* ]]
+  [[ "$output" == *"(focus cp1-generalist-b;"* ]]
   [ "$(jq -r '.fallback' "$CP1/round-1/codex-generalist_b.usage.json")" = claude ]
   _answer_all; _answer generalist_b '.provider = "claude"'
   run "$ROUND_SH" collect "$PLAN" --round 1

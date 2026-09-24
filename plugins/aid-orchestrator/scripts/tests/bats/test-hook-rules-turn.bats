@@ -61,7 +61,14 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
   [[ "$output" == *"hands over explicitly"* ]]
   _say $'I need your decision: which base?\nWhy now: it blocks.\nRecommendation: A — rebase.\nBecause: cheaper.\nAlternatives: B — merge.\nRisk / what is unverified: none.'
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
+  [ "$status" -eq 3 ]  # the ecosystem's decision block (/opt/eco/CLAUDE.md) hands over too
+  _say $'**Rozhodnutí 1: kdo dostane číslo.**\n  A) počkat.\n  B) vydat hned.\nDoporučuju A, protože je to bezpečnější.'
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
   [ "$status" -eq 3 ]
+  # naming a decision without options is not one
+  _say $'Rozhodnutí 1: hotovo, jedu dál.\nDoporučuju nic.'
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
+  [ "$status" -eq 2 ]
 }
 
 @test "turn: another session's open step is not this turn's — only a transcript that dispatched it holds the turn" {
@@ -115,7 +122,10 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
   run aid_hook_rule_turn_write_scope <<< "$(_write_event "$EV/cp2/step-0/round-1/reviewer-step_generalist.json")"
   [ "$status" -eq 3 ]; [[ "$output" != *"OUTSIDE"* ]]
   run aid_hook_rule_turn_write_scope <<< "$(_write_event "$ROOT/.aid-o/work/backlog.md")"
-  [[ "$output" == *"OUTSIDE"* ]]
+  [[ "$output" == *"OUTSIDE"* ]]  # a new folder inside a linked worktree is judged against that tree, not the primary
+  git -C "$ROOT" worktree add -q "$TMP/wt" 2>/dev/null
+  run aid_hook_rule_turn_write_scope <<< "$(_write_event "$TMP/wt/src/newdir/x.sh")"
+  [ "$status" -eq 0 ]; [ -z "$output" ]
 }
 
 @test "turn: in a concurrent wave every open step's paths count — a second agent's write is judged by ITS packet" {

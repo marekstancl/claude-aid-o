@@ -288,7 +288,8 @@ aid_step_review_route_open() {
     if [[ -n "$jf" && -s "$jf" ]]; then
       while IFS= read -r fixed_fp; do
         [[ -n "$fixed_fp" ]] || continue
-        jq -e --arg fp "$fixed_fp" -s 'any(.[]; .op == "route" and .fingerprint == $fp) and (any(.[]; .op == "resolve" and .fingerprint == $fp) | not)' "$jf" >/dev/null 2>&1 || continue
+        # still routed: its latest route/resolve is a route (lib/aid-routed-findings.sh)
+        jq -e --arg fp "$fixed_fp" -s '[.[] | select((.op == "route" or .op == "resolve") and .fingerprint == $fp)] | last | .op == "route"' "$jf" >/dev/null 2>&1 || continue
         local how="fixed: confirmed by"   # a finding the PM dismissed is "fixed" in status only
         jq -e --arg fp "$fixed_fp" -s 'any(.[].findings[]; .fingerprint == $fp and .dispute.pm.answer == "accepted")' \
           "${dir%/*}"/round-*/merged.json >/dev/null 2>&1 && how="dismissed by the PM (dispute accepted) in"

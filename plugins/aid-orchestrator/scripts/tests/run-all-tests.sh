@@ -365,7 +365,8 @@ fi
 if [[ -n "$ONLY" ]]; then
   _o=()
   for suite in ${SUITES[@]+"${SUITES[@]}"}; do
-    [[ "$(basename "$suite")" == "$ONLY" ]] && _o+=("$suite")
+    _b="$(basename "$suite")"
+    [[ "$_b" == "$ONLY" || "${_b%.*}" == "$ONLY" ]] && _o+=("$suite")   # with or without .bats/.sh
   done
   if [[ "${#_o[@]}" -eq 0 ]]; then
     echo "ERROR: --only '$ONLY' matched no discovered suite." >&2

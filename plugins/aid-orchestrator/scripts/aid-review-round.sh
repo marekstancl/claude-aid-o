@@ -426,7 +426,7 @@ _agent_note() {
 }
 # _stand_in_line <dir> <role> <why> — what the controller must do instead of paying codex.
 _stand_in_line() {
-  echo "STAND-IN: no codex answer ($3); dispatch ${1}/prompt-${2}.md to a $(_agent_type "$2") agent at model ${RC_STAND_IN_MODEL} (see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
+  echo "STAND-IN: no codex answer ($3); dispatch ${1}/prompt-${2}.md to a $(_agent_type "$2") agent at model ${RC_STAND_IN_MODEL} (focus $(_focus "$2"); see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
 }
 
 cmd_dispatch() {
