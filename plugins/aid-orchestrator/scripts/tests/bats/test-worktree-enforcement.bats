@@ -528,7 +528,7 @@ _from_no_yq() {
   [ "$(_primary_branch)" = "$before_branch" ]
 }
 
-@test "P074 A1: the unit contract — _pfsm_recorded_worktree returns 2 (unknown), not 0 (records none), when the state cannot be read" {
+@test "P074 A1: the unit contract — aid_plan_recorded_worktree returns 2 (unknown), not 0 (records none), when the state cannot be read" {
   _mk_project
   _seed_plan 1
   # Corrupt the state file: plan_state_get answers rc 5, which is a read
@@ -537,7 +537,7 @@ _from_no_yq() {
   run bash -c "cd '$ROOT'
     export AID_PLAN_STATE_PROJECT_ROOT='$ROOT'
     source '$PLAN_FSM'
-    rc=0; out=\"\$(_pfsm_recorded_worktree '$ROOT' '$PLAN_ID')\" || rc=\$?
+    rc=0; out=\"\$(aid_plan_recorded_worktree '$ROOT' '$PLAN_ID')\" || rc=\$?
     printf 'rc=%s out=[%s]\n' \"\$rc\" \"\$out\"" 3>&-
   [ "$status" -eq 0 ]
   [[ "$output" == *"rc=2"* ]]

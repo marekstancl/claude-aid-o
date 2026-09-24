@@ -1320,49 +1320,11 @@ _pfsm_plan_worktree_lock_path() {
   printf '%s/plan-worktree.lock' "$(dirname "$(plan_state_path "$1")")"
 }
 
-# _pfsm_recorded_worktree <root> <plan_id> — the ABSOLUTE recorded path, or
-# empty when the plan records none (legacy plan, or the crash window between
-# registration and the record). A recorded relative path is resolved against
-# the state root, which is what the schema documents.
-#
-# EXIT CODE CARRIES THE DIFFERENCE BETWEEN "no record" AND "cannot read"
-# (mirrors aid-fsm.sh's _fsm_plan_worktree_recorded — the same defect was
-# fixed there first):
-#   0 + a path  -> the plan records that worktree
-#   0 + nothing -> the plan DEFINITIVELY records none (plan_state_get answered:
-#                  rc 0 with an empty/`null` value, or rc 1 `not_found`)
-#   2 + nothing -> the answer is UNKNOWN: plan_state_get could not read at all
-#                  (rc 2 = jq/yq missing, rc 5 = corrupt state file, or any
-#                  other non-0/1 rc such as a lock timeout)
-#
-# The distinction is load-bearing. `_pfsm_require_plan_worktree` turns
-# "records none BUT a worktree exists at the canonical path" into the
-# plan-start CRASH-WINDOW refusal — a hard claim that plan-start was killed
-# between `git worktree add` and the state write, pointing the operator at
-# `--recreate-worktree`. Collapsing an unreadable state file into "records
-# none" made that refusal fire on a missing `yq`: a false diagnosis of a
-# corrupted transaction when the real fault was a missing dependency. Never
-# diagnose from an answer you did not get.
-_pfsm_recorded_worktree() {
-  local root="$1" plan_id="$2" rec="" rc=0
-  rec="$(plan_state_get "$plan_id" "worktree_path" 2>/dev/null)" || rc=$?
-  # rc 1 with `not_found` on stdout = no state file yet; rc 1 with nothing =
-  # the field is absent. Both are real answers. Anything else is not.
-  if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then
-    printf ''
-    return 2
-  fi
-  [[ "$rec" == "not_found" || "$rec" == "null" ]] && rec=""
-  [[ -z "$rec" ]] && return 0
-  [[ "$rec" == /* ]] || rec="${root}/${rec}"
-  printf '%s' "$rec"
-}
-
 # _pfsm_canonical_worktree_if_live <root> <plan_id> — the canonical
 # `.aid-worktrees/plan-<id>` path when it EXISTS and git knows it as a LINKED
 # worktree, empty otherwise.
 #
-# Used only where the plan-state record is unreadable (rc 2 above). The
+# Used only where the plan-state record is unreadable (aid_plan_recorded_worktree rc 2). The
 # directory name is fixed by Step 7 precisely so it stays derivable without
 # reading state, and git's own registration is the corroboration: a registered
 # linked worktree at the plan's canonical path is physical evidence that this
@@ -1501,7 +1463,7 @@ _pfsm_create_plan_worktree() {
 _pfsm_ensure_plan_worktree() {
   local root="$1" plan_id="$2" plan_branch="$3"
   local canonical; canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
-  local rec; rec="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+  local rec; rec="$(aid_plan_recorded_worktree "$root" "$plan_id")"
 
   if [[ -n "$rec" ]]; then
     git -C "$root" worktree prune >/dev/null 2>&1 || true
@@ -1627,11 +1589,11 @@ _pfsm_plan_start_compensate() {
     fi
   else
     # The state file predates this run: leave it, but never leave OUR pointer.
-    local ptr; ptr="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+    local ptr; ptr="$(aid_plan_recorded_worktree "$root" "$plan_id")"
     if [[ -n "$ptr" ]]; then
       local prc=0
       plan_state_set_worktree_path "$plan_id" "" >/dev/null 2>&1 || prc=$?
-      if [[ "$prc" -ne 0 ]] && [[ -n "$(_pfsm_recorded_worktree "$root" "$plan_id")" ]]; then
+      if [[ "$prc" -ne 0 ]] && [[ -n "$(aid_plan_recorded_worktree "$root" "$plan_id")" ]]; then
         survived+=("the worktree pointer in ${state_path} (rc=${prc}) — clear it once the state directory is writable again")
       else
         undone+=("the worktree pointer in plan-state")
@@ -1699,7 +1661,7 @@ _pfsm_plan_start_compensate() {
 _pfsm_teardown_plan_worktree() {
   local root="$1" plan_id="$2"
   local canonical; canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
-  local wt; wt="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+  local wt; wt="$(aid_plan_recorded_worktree "$root" "$plan_id")"
   local had_pointer=0
   [[ -n "$wt" ]] && had_pointer=1
   [[ -n "$wt" ]] || wt="$canonical"
@@ -1841,7 +1803,7 @@ _PFSM_ORIG_ARGS=()
 # ---------------------------------------------------------------------------
 _pfsm_plan_tree_root() {
   local root="$1" plan_id="$2" rec="" rc=0
-  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")" || rc=$?
+  rec="$(aid_plan_recorded_worktree "$root" "$plan_id")" || rc=$?
   # Unreadable record: fall back to the physical evidence, so a live plan
   # worktree is not silently demoted to "run in the state root" just because
   # `yq` is missing or the state file is corrupt.
@@ -2006,7 +1968,7 @@ _pfsm_require_plan_worktree() {
   local plan_id="$1" root="$2"
   local canonical rec here want rc=0
   canonical="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
-  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")" || rc=$?
+  rec="$(aid_plan_recorded_worktree "$root" "$plan_id")" || rc=$?
 
   # UNREADABLE record (missing yq/jq, corrupt state file, lock timeout). The
   # crash-window refusal below must NOT fire here: it asserts that plan-start
@@ -2105,7 +2067,7 @@ _pfsm_require_plan_worktree() {
 _pfsm_refuse_inside_plan_worktree() {
   local plan_id="$1" root="$2" cmd="${3:-this command}"
   local rec here want
-  rec="$(_pfsm_recorded_worktree "$root" "$plan_id")"
+  rec="$(aid_plan_recorded_worktree "$root" "$plan_id")"
   [[ -n "$rec" ]] || rec="$(_pfsm_plan_worktree_path "$root" "$plan_id")"
   here="$(_pfsm_phys "$PWD")"
   want="$(_pfsm_phys "$rec")"
@@ -9228,7 +9190,7 @@ _pfsm_plan_state_repair() {
   # repair SAYS SO with the exact command, instead of leaving the operator to
   # discover it from a refusal that describes the wrong cause.
   local _rep_wt="" _rep_rc=0
-  _rep_wt="$(_pfsm_recorded_worktree "$project_root" "$plan_id")" || _rep_rc=$?
+  _rep_wt="$(aid_plan_recorded_worktree "$project_root" "$plan_id")" || _rep_rc=$?
   if [[ "$_rep_rc" -eq 0 && -z "$_rep_wt" ]]; then
     local _rep_canonical; _rep_canonical="$(_pfsm_canonical_worktree_if_live "$project_root" "$plan_id")"
     if [[ -n "$_rep_canonical" ]] && _pfsm_worktree_head_is "$_rep_canonical" "$plan_branch"; then

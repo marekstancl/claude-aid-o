@@ -375,7 +375,8 @@ aid_dispatch_contract_validate() {
 
 # ---------------------------------------------------------------------------
 # aid_dispatch_contract_commit <tree_root> <contract.json> <return.json> <message>
-#   The controller's per-step commit: VALIDATES the return against the
+#   The controller's per-step commit, on the run's task branch (or the step's
+#   own step/<id> branch in a wave): VALIDATES the return against the
 #   contract first (a rejected return is not committed — exit 1 with the
 #   report), then stages ONLY the files the return names, commits them in
 #   <tree_root> and prints the commit SHA. An agent that changed nothing
@@ -388,6 +389,14 @@ aid_dispatch_contract_validate() {
 # ---------------------------------------------------------------------------
 aid_dispatch_contract_commit() {
   local root="${1:?contract: tree root required}" c="${2:?contract: contract file required}" r="${3:?contract: return file required}" msg="${4:?contract: commit message required}"
+  # A step commit lands on the run's task branch, or on its own step/<id> branch
+  # in a wave — never on plan/*, main or a detached HEAD (ACTA 31. 8.: a step
+  # commit landed on plan/P020).
+  local branch sid; branch="$(git -C "$root" branch --show-current 2>/dev/null)"; sid="$(jq -r '.step_id // ""' "$c")"
+  if [[ "$branch" != task/*/main && "$branch" != "step/${sid}" ]]; then
+    echo "contract: ${root} is on '${branch:-detached HEAD}', not the run's task branch — nothing is committed; switch back: git -C ${root} checkout task/<epic>/main" >&2
+    return 1
+  fi
   local report
   if ! report="$(aid_dispatch_contract_validate "$c" "$r" "$root")"; then
     echo "contract: the return is not accepted, nothing is committed — $(jq -r '.reasons | join("; ")' <<< "$report" 2>/dev/null)" >&2

@@ -16,7 +16,8 @@
 #
 # CYCLE-BREAK (D6/D9): the brief's PAYLOAD is derived deterministically from release-decision.json and
 # NOTHING else. It reads NO sibling evidence files — not epic-summary.md, not final_report.md, not gates.
-# The SINGLE non-file read is `git rev-parse HEAD` (in the decision's own dir) used ONLY to compute the
+# The SINGLE non-file read is `git rev-parse HEAD` (of the candidate: the plan's recorded worktree for a
+# plan-final decision, else the decision's own dir) used ONLY to compute the
 # envelope's revision freshness at read time (IMP-264, see _compute_revision_freshness) — the brief must
 # not echo the decision's frozen `head_is_current`/`freshness`, which become false claims once a commit
 # lands. This adds no sibling-file read and is deterministic within a fixed git state.
@@ -65,6 +66,9 @@
 # patch the ONE field per the design contract, no more.
 
 set -uo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/aid-roots.sh
+source "${SCRIPT_DIR}/lib/aid-roots.sh"   # aid_state_root — where the plan-state is read
 
 # ---------------------------------------------------------------------------
 # The 8 fields the brief ECHOES from release_decision (single source of truth,
@@ -142,9 +146,25 @@ build_brief_payload() {
 _compute_revision_freshness() {
   local recorded="$1" decision="$2" current=""
   local hexre='^[0-9a-f]{40}$'
-  # HEAD is resolved from the decision file's own directory (the evidence dir lives inside the
-  # project repo), mirroring how fsm_check_cp3_freshness / c3-dispatch resolve "current".
-  current="$(git -C "$(dirname "$decision")" rev-parse HEAD 2>/dev/null || echo "")"
+  # HEAD is the candidate's: for a plan-final decision (evidence/<plan>/<run>/) of a plan that
+  # executes in its own worktree, that worktree's HEAD — the primary checkout the evidence lives
+  # in is on another branch (P100 Step 7). Otherwise the decision file's own directory.
+  local tree plan_id rec rc=0
+  tree="$(dirname "$decision")"
+  plan_id="$(basename "$(dirname "$tree")")"
+  if [[ "$plan_id" =~ ^P[0-9]{3}$ ]]; then
+    rec="$(cd "$tree" && AID_PLAN_STATE_PROJECT_ROOT="$(aid_state_root)" \
+      bash "${SCRIPT_DIR}/lib/aid-plan-state.sh" recorded-worktree "$plan_id" 2>/dev/null)" || rc=$?
+    if (( rc != 0 )); then
+      echo "aid-pm-brief: the plan-state of ${plan_id} is unreadable, so the candidate is unknown — freshness is stale" >&2
+      echo "false stale"; return 0
+    fi
+    if [[ -n "$rec" && -d "$rec" ]]; then tree="$rec"
+    elif [[ -n "$rec" ]]; then
+      echo "aid-pm-brief: ${plan_id}'s recorded worktree ${rec} is gone; judged in the state root — restore it: aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why>\"" >&2
+    fi
+  fi
+  current="$(git -C "$tree" rev-parse HEAD 2>/dev/null || echo "")"
   if [[ "$recorded" =~ $hexre && "$current" =~ $hexre && "$recorded" == "$current" ]]; then
     echo "true current"
   else

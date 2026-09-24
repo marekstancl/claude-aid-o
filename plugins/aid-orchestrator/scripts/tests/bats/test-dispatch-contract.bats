@@ -152,7 +152,7 @@ _return() {
 @test "contract: the commit refuses a return it would not accept" {
   git init -q -b main . 2>/dev/null || git init -q .
   git config user.email t@t; git config user.name T
-  git add -A; git commit -q -m seed
+  git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
   printf 'x\n' > src/thing.sh
   _return '{contract_version: "stale0000000"}'
   run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
@@ -161,10 +161,23 @@ _return() {
   [ "$(git rev-list --count HEAD)" -eq 1 ]
 }
 
+@test "contract: the commit is refused on a branch that is not the run's task branch or the step's own" {
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  git add -A; git commit -q -m seed; git checkout -q -b plan/P020
+  printf 'x\n' > src/thing.sh
+  _return '{}'
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
+  [ "$status" -eq 1 ]; [[ "$output" == *"git -C $TEST_DIR checkout task/<epic>/main"* ]]
+  git checkout -q -b step/step_1_backend
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
+  [ "$status" -eq 0 ]
+}
+
 @test "contract: a declared deletion is committed, not reported as nothing to commit" {
   git init -q -b main . 2>/dev/null || git init -q .
   git config user.email t@t; git config user.name T
-  git add -A; git commit -q -m seed
+  git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
   rm README.md
   _return '{changed_files: ["README.md"]}'
   run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1: drop readme"

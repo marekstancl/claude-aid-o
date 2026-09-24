@@ -1211,6 +1211,27 @@ Subcommands:
 EOF
 }
 
+# aid_plan_recorded_worktree <root> <plan_id> — the ABSOLUTE worktree path the
+# plan records: the one answer every script that judges the plan's candidate
+# asks (P100 Step 7; three copies before). A relative record resolves against
+# <root>, which is also the state root it is read from.
+#   0 + a path   the plan records that worktree (whether it still exists is the
+#                caller's question)
+#   0 + nothing  the plan DEFINITIVELY records none (no state file, no field)
+#   2 + nothing  UNKNOWN: the state could not be read (no jq/yq, a corrupt file,
+#                a lock timeout)
+# Unknown is never "none": callers read "none, but a worktree sits at the
+# canonical path" as the plan-start crash window, a claim about a record, and
+# an unreadable record must not be diagnosed as that.
+aid_plan_recorded_worktree() {
+  local root="$1" plan_id="$2" rec="" rc=0
+  rec="$(AID_PLAN_STATE_PROJECT_ROOT="$root" plan_state_get "$plan_id" worktree_path 2>/dev/null)" || rc=$?
+  (( rc == 0 || rc == 1 )) || return 2
+  [[ "$rec" == not_found || "$rec" == null ]] && rec=""
+  [[ -z "$rec" || "$rec" == /* ]] || rec="${root}/${rec}"
+  printf '%s' "$rec"
+}
+
 main() {
   local sub="${1:-}"
   [[ $# -gt 0 ]] && shift
@@ -1218,6 +1239,7 @@ main() {
     state-path)      plan_state_path "$@"; exit $? ;;
     init)             plan_state_init "$@"; exit $? ;;
     get)              plan_state_get "$@"; exit $? ;;
+    recorded-worktree) aid_plan_recorded_worktree "${AID_PLAN_STATE_PROJECT_ROOT:-$(aid_state_root)}" "$@"; exit $? ;;
     set-worktree-path) plan_state_set_worktree_path "$@"; exit $? ;;
     transition)       plan_state_transition "$@"; exit $? ;;
     op-key)           plan_op_key "$@"; exit $? ;;

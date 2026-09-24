@@ -22,6 +22,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
+# shellcheck source=lib/aid-roots.sh
+source "${SCRIPT_DIR}/lib/aid-roots.sh"   # aid_state_path — a relative evidence dir lives in the state root
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.67.0}"
 
@@ -47,6 +49,10 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown arg: $1"; usage; exit 10 ;;
   esac
 done
+
+# A relative evidence dir (.aid-o/work/evidence/...) names the state root's, also when this
+# runs inside a plan worktree, where .aid-o does not exist (P100 Step 7).
+[[ -n "$EVIDENCE_DIR" && "$EVIDENCE_DIR" != /* ]] && EVIDENCE_DIR="$(aid_state_path "$EVIDENCE_DIR")"
 
 # Fast Mode / manual EPIC handling: empty or literal "null" plan_path → graceful skip
 if [[ -z "$PLAN" || "$PLAN" == "null" ]]; then

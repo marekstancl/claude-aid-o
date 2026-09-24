@@ -251,11 +251,10 @@ _aid_cp_is_plugin_wip() {
     local state_root
     state_root="$(cd "$top" 2>/dev/null && aid_state_root 2>/dev/null)" || return 1
     recorded="$(AID_PLAN_STATE_PROJECT_ROOT="$state_root" \
-      bash "${_AID_CP_LIB_DIR}/aid-plan-state.sh" get "$plan_id" worktree_path 2>/dev/null)" || rc=$?
-    # rc > 1 is an UNREADABLE registry (missing yq, corrupt state, lock
+      bash "${_AID_CP_LIB_DIR}/aid-plan-state.sh" recorded-worktree "$plan_id" 2>/dev/null)" || rc=$?
+    # rc 2 is an UNREADABLE registry (missing yq, corrupt state, lock
     # timeout) — the one case that must never be read as permission.
-    [[ "$rc" -le 1 ]] || return 1
-    [[ "$recorded" == "not_found" || "$recorded" == "null" ]] && recorded=""
+    [[ "$rc" -eq 0 ]] || return 1
   fi
   if [[ -n "$recorded" ]]; then
     # A recorded worktree is authoritative: this must BE it, not merely sit at

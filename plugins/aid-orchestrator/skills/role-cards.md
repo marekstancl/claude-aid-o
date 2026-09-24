@@ -65,6 +65,11 @@ The step reviewer asks about exactly this (`skills/step-review-roles.md`,
 `step_generalist` question 7), while the diff is small. The plan boundary has no
 cleanup pass to rely on.
 
+**Stay on the branch you were given.** Never `checkout`, `switch` or `reset` a
+branch in the tree you work in — it is shared with the controller and, in a
+plan, with the other steps. Read another branch with `git show <branch>:<path>`.
+The controller's step commit refuses any branch but the run's task branch.
+
 ---
 
 ## Role: architect
@@ -627,7 +632,7 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 ---
 
-**Last Updated:** 2026-09-23
+**Last Updated:** 2026-09-24
 **Replaces:** All 11 files formerly in `plugins/aid-orchestrator/defaults/playbooks/`
 
 ## Plan-boundary note

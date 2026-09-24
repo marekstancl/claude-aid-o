@@ -25,6 +25,7 @@ setup() {
 JSON
   printf 'epic_id: E-par\nrun_id: R-par\nstate: EXECUTE\ncurrent_step: 0\ntotal_steps: 2\n' > "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   STATE="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  git checkout -q -b task/E-par/main   # a step commit lands on the run's task branch
 }
 teardown() { teardown_test_evidence_dir; }
 
