@@ -168,9 +168,9 @@ forces a full rewrite. Read first, draw second.
 6. Only THEN start companion mockups with the above baseline included
 
 **The one exception** is the PM saying they do not want the real application
-used: record it with `aid-brainstorm-state.sh init … --topic-kind other --reason
-"<the PM's words>"` (the design page shows it) and say that every data shape in
-the mockups is a placeholder.
+used: record it on the run with `aid-brainstorm-state.sh topic-kind <plan> other
+--reason "<the PM's words>"` (the design page shows it) and say that every data
+shape in the mockups is a placeholder.
 
 ## When to Use (within `/aid-plan brainstorm`)
 

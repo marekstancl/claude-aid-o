@@ -72,8 +72,11 @@ aid_brainstorm_summary_render() {
     return 1
   fi
 
-  local topic scope vision_state vision_file run_state
+  local topic scope vision_state vision_file run_state kind_reason
   topic="$(yq -r '.topic // ""' "$state" 2>/dev/null)"
+  # A user-visible run the controller marked "not a screen" shows why (P100 Step 8).
+  [[ "$(yq -r '.topic_kind // ""' "$state" 2>/dev/null)" == other ]] \
+    && kind_reason="$(yq -r '.topic_kind_reason // ""' "$state" 2>/dev/null)"
   scope="$(yq -r '.scope // ""' "$state" 2>/dev/null)"
   vision_state="$(yq -r '.vision_state // "none"' "$state" 2>/dev/null)"
   vision_file="$(yq -r '.vision_file // ""' "$state" 2>/dev/null)"
@@ -122,11 +125,12 @@ aid_brainstorm_summary_render() {
   # different facts, and a zero row would answer a question nobody asked.
   items_json="$(jq -n \
     --arg vision "$vision_line" --arg opp "$opponent_line" \
-    --arg scope "$scope" --arg disputed "$disputed" --arg held "$held" '[
+    --arg scope "$scope" --arg disputed "$disputed" --arg held "$held" --arg kind "${kind_reason:-}" '[
       $vision,
       $opp,
       "Rozsah: " + $scope
     ]
+    + (if $kind != "" then ["Bez návrhu z aplikace: " + $kind] else [] end)
     + (if ($disputed | tonumber) > 0
        then ["Sporů k rozhodnutí: " + $disputed
              + (if ($held | tonumber) > 0 then " (" + $held + " mimo tuto stránku)" else "" end)]

@@ -258,3 +258,10 @@ opponent_ran() { dispute '{"opponent":"answered","plan_id":"P900","agree":[],"di
   # The path survives where it belongs: the provenance footer, once.
   [ "$(grep -oF "$RUN_DIR" "$OUT" | wc -l)" -eq 1 ]
 }
+
+@test "P100: a user-visible run marked 'not a screen' shows the reason on the page" {
+  bash "$BS" init P900 --scope user_visible --topic "A new CLI flag" --no-worktree --topic-kind other --reason "a CLI flag, nothing is drawn on a screen" >/dev/null
+  run aid_brainstorm_summary_render P900 "$OUT"
+  [ "$status" -eq 0 ]
+  grep -q "Bez návrhu z aplikace: a CLI flag, nothing is drawn on a screen" "$OUT"
+}

@@ -204,4 +204,14 @@ _approved() {  # _approved <plan> <init args…> — a started run with an appro
   [ "$status" -eq 0 ]
   run bash "$BS" init P913 --scope user_visible --no-worktree --topic-kind other
   [ "$status" -eq 2 ]; [[ "$output" == *"--reason of at least 20 characters"* ]]
+  # a hand-written proposal without real viewports is not a basis
+  _approved P914 --topic-kind ui
+  echo '{"basis":"live-screen","viewports":"x"}' > "$ROOT/.aid-o/work/brainstorm/P914/proposal.json"
+  run bash "$BS" gate P914 --phase design
+  [ "$status" -eq 1 ]
+  # the PM declining the real application is recorded on the running run
+  run bash "$BS" topic-kind P914 other --reason "the PM wants a sketch, not the app"
+  [ "$status" -eq 0 ]
+  run bash "$BS" gate P914 --phase design
+  [ "$status" -eq 0 ]
 }

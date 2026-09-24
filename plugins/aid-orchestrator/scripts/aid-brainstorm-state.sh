@@ -6,6 +6,7 @@
 #   aid-brainstorm-state.sh init <plan_id>
 #         --scope roadmap|multi_plan|user_visible|single_plan [--topic <text>]
 #         [--topic-kind ui|other [--reason <text>]]
+#   aid-brainstorm-state.sh topic-kind <plan_id> ui|other [--reason <text>]
 #   aid-brainstorm-state.sh vision-propose <plan_id> --file <vision.md>
 #   aid-brainstorm-state.sh vision-approve <plan_id>
 #   aid-brainstorm-state.sh vision-reject  <plan_id> --reason <text>
@@ -186,6 +187,23 @@ Y
   echo "workdir: ${workdir}"
 }
 
+# topic-kind <plan_id> ui|other [--reason <text>] — (re)classify a started run:
+# the PM declining the real application for a UI topic is recorded here, on the
+# run, with the reason (P100 Step 8).
+cmd_topic_kind() {
+  local plan_id="${1:?}" kind="${2:-}" reason=""; shift 2 || true
+  [[ "${1:-}" == --reason ]] && reason="${2:-}"
+  local sf; sf="$(require_state "$plan_id")" || return 1
+  case "$kind" in
+    ui) ;;
+    other) [[ "$(get "$sf" scope)" != user_visible || ${#reason} -ge 20 ]] \
+             || { echo "ERROR: topic-kind other on a user_visible run needs --reason of at least 20 characters: why this is not a screen" >&2; return 2; } ;;
+    *) echo "ERROR: topic-kind must be ui or other (got '${kind}')" >&2; return 2 ;;
+  esac
+  set_field "$sf" topic_kind "$kind" && set_field "$sf" topic_kind_reason "${reason//\"/}" || return 1
+  echo "${plan_id}: topic kind ${kind}${reason:+ — ${reason}}"
+}
+
 cmd_vision_propose() {
   local plan_id="${1:?}" file=""
   shift
@@ -272,7 +290,8 @@ cmd_gate() {
       # the screen or design system it is drawn from); its renderings are the
       # design's output, which aid_ui_proposal_check judges afterwards.
       local prop; prop="$(state_dir "$plan_id")/proposal.json"
-      if ! jq -e '(.basis | IN("live-screen", "design-system")) and (.viewports | length > 0)' "$prop" >/dev/null 2>&1; then
+      if ! jq -e '(.basis | IN("live-screen", "design-system")) and (.viewports | type == "array" and length > 0
+                  and all(.[]; (.name | type == "string") and (.width | type == "number") and (.height | type == "number")))' "$prop" >/dev/null 2>&1; then
         echo "REFUSED: ${plan_id} is a UI topic and has no proposal basis built from the application — build it: aid_ui_proposal_build <project root> $(state_dir "$plan_id") (lib/aid-ui-proposal.sh, skills/visual-companion/SKILL.md)" >&2
         return 1
       fi
@@ -393,6 +412,7 @@ main() {
     vision-approve)  cmd_vision_approve "$@" ;;
     vision-reject)   cmd_vision_reject "$@" ;;
     gate)            cmd_gate "$@" ;;
+    topic-kind)      cmd_topic_kind "$@" ;;
     approve)         cmd_approve "$@" ;;
     show)            cmd_show "$@" ;;
     *)
@@ -404,6 +424,7 @@ Usage: aid-brainstorm-state.sh <command> <plan_id> [flags]
   vision-approve <plan_id>
   vision-reject <plan_id> --reason <text>
   gate <plan_id> --phase design|opponent|summary
+  topic-kind <plan_id> ui|other [--reason <text>]
   approve <plan_id>
   show <plan_id>
 EOF
