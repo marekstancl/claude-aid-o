@@ -52,7 +52,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Pre-push pozná `chore(release):`** — v projektu bez nastaveného verzování uzavře rozsah i commit ve tvaru conventional commits; `fix(release):` zůstává oprava.
 - **Časy z auditu už neujíždějí o hodinu** — `jq` starší než 1.7 čte čas se `Z` v místním pásmu; výpočet času plánu (čekání na PM do „teď") a počet odmítnutí pro připomínku hlášení pro AID ho teď počítají v UTC, jako to FSM dělá od P037.
 
-**Poznámka pro projekty:** commit hook se aktualizuje dalším `/aid-init`. `scripts/` pluginu má 175 104 řádků (před plánem 173 883): +1 221, z toho +635 v testech a +586 v pravidlech výše; žádná nová sada testů.
+**Poznámka pro projekty:** commit hook se aktualizuje dalším `/aid-init`. `scripts/` pluginu má 176 545 řádků (před P100, tedy ve 2.106.0: 174 931): +1 614, z toho +848 v testech a +766 v pravidlech výše; žádná nová sada testů.
 
 ## [2.106.0] — 2026-09-24
 
