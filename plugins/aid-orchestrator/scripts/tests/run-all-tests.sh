@@ -613,6 +613,17 @@ fi
 echo "  Total:   $TOTAL_TESTS tests across $SUITES_RUN suites"
 echo ""
 
+# Every suite that did not pass, by name, BEFORE any of the exits below — the
+# nightly report reads this list, and an unparsed or truncated suite used to
+# exit first and leave it unwritten, so 21 red suites were reported as one
+# "(runner)" for four nights (2026-09-21..24).
+_not_passed=(${FAILED_SUITE_NAMES[@]+"${FAILED_SUITE_NAMES[@]}"} ${UNPARSED_SUITES[@]+"${UNPARSED_SUITES[@]}"} ${TRUNCATED_SUITES[@]+"${TRUNCATED_SUITES[@]}"})
+if [[ "${#_not_passed[@]}" -gt 0 ]]; then
+  echo "  Failed suites:"
+  printf '    - %s\n' $(printf '%s\n' "${_not_passed[@]}" | sort -u)
+  echo ""
+fi
+
 # Fail the aggregate on an unparsed suite. Enabled only after a full run
 # measured zero of them (P072 Step 9 acceptance): 138 suites, 2564 tests,
 # zero unparsed and zero inconsistent.
@@ -632,11 +643,6 @@ if [[ "${#TRUNCATED_SUITES[@]}" -gt 0 ]]; then
 fi
 
 if [[ "$SUITES_FAILED" -gt 0 ]]; then
-  echo "  Failed suites:"
-  for name in "${FAILED_SUITE_NAMES[@]}"; do
-    echo "    - $name"
-  done
-  echo ""
   echo "RESULT: FAIL"
   echo ""
   exit 1

@@ -275,8 +275,3 @@ _accept() { _drift "_pfsm_finalize_accept_ancillary . $PLAN"; }
   [[ "$output" == *"nothing to accept"* ]]
   [ "$(find "$ROOT/.aid-o" -name 'review-equivalence-receipt*.json' | wc -l | tr -d ' ')" = "0" ]
 }
-
-@test "P073 Step 17 (F3): the C4 flag compares accepted_head against the candidate" {
-  run grep -c 'review_equivalence:($ah != "" and $ah != $cand)' "$PFSM"
-  [ "$output" = "1" ]
-}

@@ -62,6 +62,9 @@ setup() {
   # own convention).
   export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  # The plugin-issues file exists, so its one-time "created" note (stderr)
+  # does not land in the `run` output the cases compare exactly.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work" && : > "$TEST_PROJECT_ROOT/.aid-o/work/aid-plugin-issues.md"
 
   # shellcheck disable=SC1090
   source "$PLAN_STATE_LIB"      # also sources $LOCK_LIB (see its own header)
@@ -1907,7 +1910,7 @@ _pfsm_drop_plan_worktree() {
   _pfsm_bootstrap_plan "P064"
   local plan_head; plan_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
 
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   [ "$output" = "task/E-064-1_1/main" ]
 
@@ -1919,7 +1922,7 @@ _pfsm_drop_plan_worktree() {
   [ "$recorded_base" = "$plan_head" ]
 
   # epic-start is idempotent on immediate re-run too.
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 }
 
@@ -1934,7 +1937,7 @@ _pfsm_drop_plan_worktree() {
   local manifest_before; manifest_before="$(cat "$mp")"
 
   git -C "$TEST_PROJECT_ROOT" branch task/E-064-1_1/main main
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]
 
   local manifest_after; manifest_after="$(cat "$mp")"
@@ -1950,7 +1953,7 @@ _pfsm_drop_plan_worktree() {
   git -C "$TEST_PROJECT_ROOT" commit -qm "advance to the plan base"
 
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   local mp="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json"
@@ -1961,7 +1964,7 @@ _pfsm_drop_plan_worktree() {
   # to that earlier commit, not the one epic-start actually recorded.
   git -C "$TEST_PROJECT_ROOT" branch -f task/E-064-1_1/main "$root_sha"
 
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"lineage broken"* ]]
 
@@ -1971,11 +1974,11 @@ _pfsm_drop_plan_worktree() {
 
 @test "AC4: a task branch belonging to a DIFFERENT plan has no manifest entry in the NAMED plan and is rejected" {
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   _pfsm_bootstrap_plan "P900"
-  run bash "$PLAN_FSM_CLI" epic-start P900 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"cannot prove lineage"* ]]
 }
@@ -1996,7 +1999,7 @@ _pfsm_drop_plan_worktree() {
   [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" ]
 
   git -C "$TEST_PROJECT_ROOT" branch task/E-064-1_1/main "$target_sha"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"no manifest entry"* ]]
 }
@@ -2016,11 +2019,11 @@ _pfsm_drop_plan_worktree() {
 
   # A manually created branch is rejected identically inside the worktree.
   git -C "$wt_dir" branch task/E-064-1_1/main main
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$wt_dir"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$wt_dir"
   [ "$status" -ne 0 ]
 
   # A legitimate epic-start still succeeds from inside the worktree.
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_2 --project-root "$wt_dir"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_2 --run-id R-2 --project-root "$wt_dir"
   [ "$status" -eq 0 ]
   [ "$output" = "task/E-064-1_2/main" ]
 }
@@ -2039,7 +2042,7 @@ _pfsm_drop_plan_worktree() {
   run plan_op_reconcile "P064" "$op_id"
   [ "$output" = "git_applied" ]
 
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   [ "$output" = "task/E-064-1_1/main" ]
 
@@ -2068,7 +2071,7 @@ _pfsm_drop_plan_worktree() {
   git -C "$TEST_PROJECT_ROOT" add "$lm"
   git -C "$TEST_PROJECT_ROOT" commit -qm "declare E-064-1_2"
 
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # Give E-064-1_1's task branch a real commit, then merge it into
@@ -2136,7 +2139,7 @@ _pfsm_drop_plan_worktree() {
 
 @test "AC8: --attest-source-ref promotes ONE unproven entry to proven, records the attestation in the op log, and is the only way to do so" {
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # Manually flip E-064-1_1 to unproven (as --repair would for an
@@ -2168,7 +2171,7 @@ _pfsm_drop_plan_worktree() {
 # ─── IMP-265b: healthy repair is a non-destructive no-op ─────────────────────
 @test "IMP-265b: plan-state --repair on a HEALTHY manifest is a non-destructive no-op — proven + attestation metadata preserved, byte-identical" {
   _pfsm_bootstrap_plan "P900"
-  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # Decorate the healthy proven entry with attestation-style metadata that
@@ -2194,7 +2197,7 @@ _pfsm_drop_plan_worktree() {
 
 @test "IMP-265b: a second plan-state --repair is idempotent — the rebuilt manifest round-trips byte-identical" {
   _pfsm_bootstrap_plan "P900"
-  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # A real merge so the first repair restores a merged_to_plan (unproven) entry.
@@ -2224,7 +2227,7 @@ _pfsm_drop_plan_worktree() {
 # ─── IMP-258: repair propagates per-entry write failures ─────────────────────
 @test "IMP-258: a per-entry write failure during --repair fails the whole repair with a non-zero exit (never success over a partial manifest)" {
   _pfsm_bootstrap_plan "P900"
-  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
@@ -2246,7 +2249,7 @@ _pfsm_drop_plan_worktree() {
 # ─── IMP-267: attestation re-derives ancestry from Git ───────────────────────
 @test "IMP-267: attesting a repaired entry RE-DERIVES epic_base_commit from Git, overwriting a wrong stored value" {
   _pfsm_bootstrap_plan "P900"
-  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   git -C "$TEST_PROJECT_ROOT" checkout -q task/E-900-1_1/main
@@ -2286,7 +2289,7 @@ _pfsm_drop_plan_worktree() {
 
 @test "IMP-267: attestation FAILS CLOSED when the stored ancestry cannot be proven from Git" {
   _pfsm_bootstrap_plan "P900"
-  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # Flip to unproven and plant a bogus (well-formed but non-existent) merge
@@ -2326,7 +2329,7 @@ _pfsm_drop_plan_worktree() {
   _pfsm_bootstrap_plan "P064"
   echo dirty >> "$TEST_PROJECT_ROOT/.gitkeep"
 
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   [[ "$output" != *"uncommitted changes present"* ]]
   local branch_sha
@@ -2546,7 +2549,7 @@ _pfsm_drop_plan_worktree() {
   git -C "$TEST_PROJECT_ROOT" commit -qm "advance to the plan base"
 
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # Force the task branch onto the EARLIER root commit — an ancestor of, but
@@ -2586,7 +2589,7 @@ _pfsm_drop_plan_worktree() {
 
 @test "AC3: deleting the runtime plan-boundary-manifest.json does NOT downgrade to legacy — fails closed with plan_manifest_missing, mode still reads plan_branch from the lifecycle manifest" {
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   rm -f "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json"
@@ -2627,7 +2630,7 @@ _pfsm_drop_plan_worktree() {
   # not the old cmd_init-local `plan_mode_unavailable`. Same fail-closed
   # guarantee, now one authority instead of a second reader.
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # Shadow mktemp with a wrapper that always fails, simulating an
@@ -2668,7 +2671,7 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
 
 @test "IMP-273: yq absent while a plan_branch declaration is committed blocks cmd_init with plan_mode_unresolved (was a silent legacy downgrade)" {
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # A PATH holding every tool cmd_init's preamble needs EXCEPT yq — genuinely
@@ -2786,7 +2789,7 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
 
 @test "AC4: the lineage check fires on a RESUMED run (state file already present), caught before the generic duplicate-init guard" {
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   local args; args="$(build_default_init_args E-064-1_1)"
@@ -2810,7 +2813,7 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
 
 @test "AC4: the lineage check fires inside a linked worktree too (is_worktree() short-circuits PRE-FLIGHT branch enforcement, but not this block)" {
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   run bash "$PLAN_MANIFEST_LIB" set-epic-status P064 E-064-1_1 abandoned
   [ "$status" -eq 0 ]
@@ -2838,7 +2841,7 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
   git -C "$TEST_PROJECT_ROOT" commit -qm "advance to the plan base"
 
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   git -C "$TEST_PROJECT_ROOT" branch -f task/E-064-1_1/main "$root_sha"
 
@@ -2863,7 +2866,7 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
 
 @test "Error Handling: lib/aid-plan-manifest.sh cannot be sourced -> fails CLOSED for a declared plan_branch plan (plan_manifest_unavailable), never a silent legacy fallback" {
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # A copy of aid-fsm.sh + lib/ with aid-plan-manifest.sh removed — proves
@@ -2911,7 +2914,7 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
   # ^E-[0-9]{3}-[0-9]+_[0-9]+$ format check is rejected BEFORE reaching the
   # vulnerable plan_manifest_get call.
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # Test Case 1: epic_id with missing underscore segment (E-064-1 instead of E-064-1_1)
@@ -3085,7 +3088,7 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
   # block reason epic_lineage_unproven until it is explicitly attested.
 
   _pfsm_bootstrap_plan "P064"
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # Prune .aid-o/work to simulate a recovered workspace (evidence lost). The
@@ -3127,7 +3130,7 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
   # being pruned) passes init successfully.
   _pfsm_bootstrap_plan "P064"
 
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # Verify the entry is proven from the start
@@ -3214,7 +3217,7 @@ _f2_assert_init_blocked() {
 
 @test "Security F-2 (Exploit B): a legitimate sibling branch merge is not misattributed to the substring-matching entry, which stays unproven" {
   _pfsm_bootstrap_plan "P900"
-  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # No adversary here: a sibling branch whose name merely has the victim's
@@ -3255,7 +3258,7 @@ _f2_assert_init_blocked() {
 
 @test "Security F-2 (positive control): a fresh epic-start still writes lineage:proven and init still succeeds" {
   _pfsm_bootstrap_plan "P900"
-  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   # Built through the REAL epic-start, never a hand-written fixture — this is
@@ -3280,7 +3283,7 @@ _f2_assert_init_blocked() {
   git -C "$TEST_PROJECT_ROOT" commit -qm "declare E-900-1_2"
 
   # Path 1: a genuine epic-start plus a genuine merge into the plan branch.
-  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   git -C "$TEST_PROJECT_ROOT" checkout -q task/E-900-1_1/main
   echo work > "$TEST_PROJECT_ROOT/epic-1.txt"
@@ -3323,7 +3326,7 @@ _f2_assert_init_blocked() {
 
 @test "Security F-2: an explicit operator attestation is the ONLY way a repaired entry becomes proven, and then init succeeds" {
   _pfsm_bootstrap_plan "P900"
-  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
@@ -3381,7 +3384,7 @@ _f2_assert_init_blocked() {
 #   has no provable lineage and epic-start would (correctly) reject it.
 _pfsm_epic_with_commit() {
   local plan_id="$1" epic_id="$2" file="${3:-work-${2}.txt}" content="${4:-work}"
-  run bash "$PLAN_FSM_CLI" epic-start "$plan_id" "$epic_id" --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start "$plan_id" "$epic_id" --run-id "R-${epic_id}-plan" --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   git -C "$TEST_PROJECT_ROOT" checkout -q "task/${epic_id}/main"
   # `file` may be a nested path (Step 8's risk cases commit
@@ -3773,6 +3776,7 @@ _pfsm_merge_commit_count() {
 
 @test "epic-complete raises the plan-final profile from gates_report.json and marks the entry pending merge" {
   _pfsm_bootstrap_plan "P064"
+  _write_profile_table quick targeted standard full release  # P097: a raise names a declared profile
   _pfsm_epic_with_commit "P064" "E-064-1_1"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "full"
 
@@ -3878,6 +3882,7 @@ _pfsm_merge_commit_count() {
 
 @test "epic-complete --full-tests --reason records the PM exception without lowering the plan-final floor" {
   _pfsm_bootstrap_plan "P064"
+  _write_profile_table quick targeted standard full release  # P097: a raise names a declared profile
   _pfsm_epic_with_commit "P064" "E-064-1_1"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
 
@@ -3990,7 +3995,7 @@ _pfsm_force_unproven() {
   [ "$output" = "null" ]
 
   # epic-start refuses the SAME entry — the two commands now agree.
-  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --run-id R-1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"lineage"* ]]
 }
@@ -5755,20 +5760,19 @@ _pfsm_write_plan_json() {
   done
 }
 
-@test "AC2: no auto-resolvable profile in the self-host table includes bats_all — a broad suite needs a recorded PM exception" {
-  local cfg; cfg="$(_selfhost_execution_yaml)"
-  [[ -f "$cfg" ]] || skip "self-host .aid-o/config/execution.yaml absent (gitignored workspace)"
-  local p
-  for p in $(yq -r '[(.gate_profiles | to_entries[] | select(.value.when_paths != null) | .key), (.default_profile | select(. != null))] | unique | .[]' "$cfg"); do
-    run _gp_yq_jq "$cfg" "([.gate_profiles[\"${p}\"].include[]] | index(\"bats_all\")) == null"
-    [ "$status" -eq 0 ]
-  done
-}
-
 # ─── aid-plan-fsm.sh epic-complete — recording the floor ───────────────────
+
+# _gp_table — the P097 shape of the resolution: the project's own ordered table,
+# with `full` selected by a high-risk path. The floor can only be raised to a
+# profile the project declares.
+_gp_table() {
+  _write_profile_table quick targeted standard full release
+  yq -i '.gate_profiles.full.when_paths = ["*/aid-fsm.sh"]' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+}
 
 @test "AC1: epic-complete records the plan-final floor full for a high-risk EPIC whose own boundary ran standard" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "standard"
 
@@ -5791,6 +5795,7 @@ _pfsm_write_plan_json() {
 
 @test "AC4: an unknown production path (targeted_tests exit 3) raises the plan-final floor to full" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   # A LOW-risk diff — without the exit-3 signal this run's floor would be
   # `standard`, so the raise can only come from the unknown production path.
   _pfsm_epic_with_commit "P064" "E-064-1_1" "src/thing.ts" "code"
@@ -5808,6 +5813,7 @@ _pfsm_write_plan_json() {
 
 @test "Edge Case: a docs-only EPIC in a plan whose floor is already release keeps the floor at release" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "docs/notes.md" "docs"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
   plan_manifest_raise_final_profile "P064" "release"
@@ -5825,6 +5831,7 @@ _pfsm_write_plan_json() {
 #     EPIC's own done_phase ────────────────────────────────────────────────
 @test "CP3-F3: the recorded floor is risk-derived even though the EPIC's own done_phase is release" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "docs/notes.md" "docs"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
 
@@ -5852,6 +5859,7 @@ _pfsm_write_plan_json() {
 
 @test "Edge Case: a plan-declared gate the active profile excluded is recorded as a mandatory plan-final gate, never silently dropped" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "src/thing.ts" "code"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE"
   _pfsm_write_plan_json "E-064-1_1" '["docs_updated","bats_fsm"]'
@@ -5874,6 +5882,7 @@ _pfsm_write_plan_json() {
 
 @test "AC3: epic-complete --full-tests records epic_full_test_exception with reason and requesting boundary and never lowers the floor" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "docs/notes.md" "docs"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
   plan_manifest_raise_final_profile "P064" "release"
@@ -5892,7 +5901,7 @@ _pfsm_write_plan_json() {
   [ "$status" -eq 0 ]
 }
 
-@test "Error Handling: epic-complete with no gate_profiles in execution.yaml still records the floor and reports gate_profiles_absent" {
+@test "Error Handling: epic-complete with no gate_profiles in execution.yaml leaves the floor and reports gate_profiles_absent" {
   _pfsm_bootstrap_plan "P064"
   _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "standard"
@@ -5903,8 +5912,9 @@ _pfsm_write_plan_json() {
   run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"gate_profiles_absent"* ]]
+  # P097: with no table there is no floor to raise — every gate runs at plan-final.
   run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
-  [ "$output" = "full" ]
+  [ "$output" = "standard" ]
 
   # With the block present, no such note.
   printf 'gates:\n  bats_fsm:\n    command: "true"\ngate_profiles:\n  quick:\n    include: [bats_fsm]\n' \
@@ -5935,8 +5945,11 @@ total_steps: 1
 created_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 base_commit: ${base}
 EOF
-  jq -nc --arg p "$profile" \
-    '{overall:"pass", profile:$p, profile_source:"auto_resolved", excluded_gates:[],
+  # profile_table: the declared names the runner recorded (P097); the FSM
+  # refuses a report whose table differs from the file's.
+  local table; table="$(yq -r '.gate_profiles // {} | keys | .[]' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" 2>/dev/null | jq -R . | jq -sc .)"
+  jq -nc --arg p "$profile" --argjson t "${table:-[]}" \
+    '{overall:"pass", profile:$p, profile_source:"auto_resolved", profile_table:$t, excluded_gates:[],
       _generated_by:"aid-run-gates.sh", gates:{}}' > "$dir/gates/gates_report.json"
   echo "$dir/fsm-state.yaml"
 }
@@ -5944,6 +5957,7 @@ EOF
 @test "AC6: a high-risk EPIC that ran standard at its own boundary reaches DONE in plan_branch mode" {
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   _pfsm_bootstrap_plan "P064" plan_branch
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
 
   local base; base="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"
@@ -5960,6 +5974,7 @@ EOF
 @test "AC6: the same high-risk EPIC in a legacy-mode plan still requires full — the epic cap is plan_branch only" {
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   _pfsm_bootstrap_plan "P064" legacy_epic_release_mode
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
 
   local base; base="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"
@@ -5976,6 +5991,7 @@ EOF
 @test "AC6: a plan_branch EPIC that ran BELOW the epic-boundary requirement is still refused" {
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   _pfsm_bootstrap_plan "P064" plan_branch
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
 
   local base; base="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"

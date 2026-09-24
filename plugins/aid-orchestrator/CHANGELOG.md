@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.105.1] — 2026-09-24
+
+### Fixed
+- **Noční přehled jmenuje každou padající sadu** — runner vypíše „Failed suites:" vždy, i když běh ukončí neparsovatelná nebo zkrácená sada; dřív skončil dřív a noční přehled slil 21 padajících sad do jedné položky „(runner)" čtyři noci po sobě.
+- **Noční běh skoro zelený** — z 21 padajících sad jich 20 prochází (zbývá část `test-aid-plan-release-boundary.bats`: testy staré vydávací cesty EPICu, kterou P096/P097 odstranily; roztřídí se v další verzi) po P094–P099: většinou testy, které neznaly nová pravidla (`epic-start` vyžaduje `--run-id`, `increment-step` i s `--force` chce ověření kroku, krok potřebuje uzavřené revizní kolo, runner odmítne neznapisovatelnou evidenci předem), testy smazaných věcí (C4, časové řady bran, `c3_cross_provider_dispatch`, `test-invalidation-map`) a pomocná funkce `_seed_closable`, kterou P096 smazal, zatímco ji 58 případů volalo.
+- **Závěrečná revize plánu čte i sekci `## Acceptance Criteria`** — šablona plánu ji má, výběr kritérií pro cp7 (P096) bral jen kritéria u kroků a `## Success Criteria`, takže plán psaný podle šablony s kritérii jen v této sekci `--stage produce` odmítl („no acceptance or success criteria").
+- **`/aid-status` ukazuje cestu k hlášením pro AID stejně odkudkoli** — z worktree plánu dřív absolutní cestu.
+- **`release_quarantine` = `release` bez `bats_all`** — profil nedostal `check_release_paths`, když ho dostal `release`.
+- **Nové typy agentů z P099 (`implementer-light`, `reviewer-light`) jsou v inventáři instrukčních ploch.**
+
+### Changed
+- **Dvě jednorázová přijetí nejsou sady** — `test-gates-replay.sh` → `acceptance-gates-replay.sh`, `test-step-review-acceptance.sh` → `acceptance-step-review.sh`; runner je nespouští (noc je zabíjela časovým limitem a hlásila jako neparsovatelné).
+
 ## [2.105.0] — 2026-09-24
 
 ### Changed

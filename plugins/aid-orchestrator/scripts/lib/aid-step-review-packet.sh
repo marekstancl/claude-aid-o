@@ -85,10 +85,11 @@ aid_final_review_inputs_build() {
   [[ -f "$plan_file" ]] || { echo "produce: plan file not found: ${plan_file}" >&2; return 1; }
   mkdir -p "$out" || return 1
   # Every "**Acceptance Criteria:**" block under its step heading, and the
-  # plan-level "## Success Criteria" section.
+  # plan-level "## Acceptance Criteria" and "## Success Criteria" sections
+  # (the plan template has both).
   awk '
     /^### / { step = $0 }
-    /^## /  { in_success = ($0 ~ /^## Success Criteria/); in_ac = 0; if (in_success) print "\n" $0; next }
+    /^## /  { in_success = ($0 ~ /^## (Success|Acceptance) Criteria/); in_ac = 0; if (in_success) print "\n" $0; next }
     /^\*\*Acceptance Criteria:\*\*/ { in_ac = 1; print "\n" step; next }
     in_ac && /^\*\*/ { in_ac = 0 }
     in_ac || in_success { print }

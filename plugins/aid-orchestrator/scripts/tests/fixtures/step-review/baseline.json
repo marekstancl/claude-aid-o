@@ -275,7 +275,7 @@
     "usd_per_entry_estimate": 0.365,
     "usd_per_confirmed_finding_estimate": 1.2166666666666666
   },
-  "invocation": "test-step-review-acceptance.sh prepare/collect --mode baseline, one Agent dispatch per entry (subagent_type general-purpose, model claude-sonnet-5), prompt = verbatim verifier header + DoD + step files + diff",
+  "invocation": "acceptance-step-review.sh prepare/collect --mode baseline, one Agent dispatch per entry (subagent_type general-purpose, model claude-sonnet-5), prompt = verbatim verifier header + DoD + step files + diff",
   "run_date": "2026-09-19",
   "ceiling_usd": 15,
   "usd_estimate": {

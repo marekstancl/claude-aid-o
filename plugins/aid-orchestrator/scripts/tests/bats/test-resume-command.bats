@@ -301,7 +301,11 @@ kill_controller_after_spawn() {
 
   # KEY SETS first, including nested: an extra or missing field is a shape
   # difference the normalisation below could otherwise hide.
-  run bash -c "diff <(jq -S 'paths|join(\".\")' '$WORK/row-inline.json') <(jq -S 'paths|join(\".\")' '$WORK/row-resume.json')"
+  # `required`/`required_source` are the one exception: the in-line writer
+  # knows how the gate's `required` was resolved and the resume path does not;
+  # the report assembly stamps both on every restored row anyway
+  # (aid-run-gates.sh, the restore pass), so the report is identical.
+  run bash -c "diff <(jq -S 'del(.required_source)|paths|join(\".\")' '$WORK/row-inline.json') <(jq -S 'del(.required_source)|paths|join(\".\")' '$WORK/row-resume.json')"
   echo "key diff: $output"
   [ "$status" -eq 0 ]
 
@@ -310,7 +314,8 @@ kill_controller_after_spawn() {
   # figures derived from that duration. Everything else — gate, result,
   # exit_code, output, job_id, job_state, attempts, sample counts, the
   # recorded HEAD — must match byte for byte.
-  local norm='.duration_ms = 0
+  local norm='del(.required_source, .required)
+              | .duration_ms = 0 | .started_at = "PINNED" | .completed_at = "PINNED"
               | ._checkpoint.written_at = "PINNED"
               | .runtime_baseline.p95_ms = 0
               | .runtime_baseline.timeout_recommended_seconds = 0'

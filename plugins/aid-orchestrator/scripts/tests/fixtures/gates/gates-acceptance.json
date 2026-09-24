@@ -511,6 +511,6 @@
   ],
   "pm_acceptance": "owed — every entry of verdict_differences_explained must be accepted in writing by the PM before P097 Step 9 (docs/plans/P097-acceptance-run.md)",
   "sample": "gates-sample.json",
-  "generated_by": "scripts/tests/test-gates-replay.sh",
+  "generated_by": "scripts/tests/acceptance-gates-replay.sh",
   "generated_at": "2026-09-22T15:35:36Z"
 }

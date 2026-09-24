@@ -189,16 +189,17 @@ else
   exit 1
 fi
 
-# ─── LAYER 4: EVIDENCE REQUIREMENT in reviewer prompt ─────────────────────
+# ─── LAYER 4: the reviewer's evidence requirement ─────────────────────────
+# Since P093 every plan reviewer is prompted from ONE template; the finding
+# contract (a command and an evidence per finding) lives there, not in
+# commands/aid-plan.md.
 echo "[Layer 4] Reviewer evidence requirement"
-EVIDENCE_HDR=$(grep -c "EVIDENCE REQUIREMENT" "$AID_PLAN_CMD" || true)
-EVIDENCE_FIELDS=$(grep -cE "command_run:|output_excerpt:" "$AID_PLAN_CMD" || true)
-EVIDENCE_HDR=${EVIDENCE_HDR:-0}
-EVIDENCE_FIELDS=${EVIDENCE_FIELDS:-0}
-if (( EVIDENCE_HDR >= 1 && EVIDENCE_FIELDS >= 4 )); then
-  echo "  ✓ Reviewer prompt has EVIDENCE REQUIREMENT (header=$EVIDENCE_HDR, field hits=$EVIDENCE_FIELDS)"
+REVIEW_TEMPLATE="$(dirname "$AID_PLAN_CMD")/../defaults/prompts/review-prompt-v1.md"
+if grep -q 'A finding exists ONLY with a `command` and an `evidence`' "$REVIEW_TEMPLATE" \
+   && grep -q '"command":' "$REVIEW_TEMPLATE" && grep -q '"evidence":' "$REVIEW_TEMPLATE"; then
+  echo "  ✓ Reviewer prompt template requires a command and an evidence per finding"
 else
-  echo "FAIL: reviewer prompt missing evidence spec (header=$EVIDENCE_HDR, field hits=$EVIDENCE_FIELDS)"
+  echo "FAIL: reviewer prompt template ($REVIEW_TEMPLATE) lost the command/evidence requirement"
   exit 1
 fi
 

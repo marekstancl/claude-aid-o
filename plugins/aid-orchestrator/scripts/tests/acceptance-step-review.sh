@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# aid-tier: t2
-# test-step-review-acceptance.sh — replay the recorded step diffs of the sample through a review
+# Not a suite: a one-off acceptance MEASUREMENT (its name keeps it out of
+# run-all-tests.sh, which runs every test-*.sh). Run it by hand.
+# acceptance-step-review.sh — replay the recorded step diffs of the sample through a review
 # flow and record what each review found and cost (P094 Steps 1 and 13).
 #
 # Modes
@@ -37,7 +38,7 @@ PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 FIX="$PLUGIN_DIR/scripts/tests/fixtures/step-review"
 SAMPLE="$FIX/sample.json"
 
-die() { echo "test-step-review-acceptance: $*" >&2; exit 1; }
+die() { echo "acceptance-step-review: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 not installed"; }
 need jq; need git
 

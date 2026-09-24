@@ -122,7 +122,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.105.0** (current) — merge cesta zpět v normě: kontrola pater hlídá součet, jádro merge cesty, patra podle nočních měření
+- **v2.105.1** (current) — noční běh zase zelený a jmenuje padající sady
+- **v2.105.0** — merge cesta zpět v normě: kontrola pater hlídá součet, jádro merge cesty, patra podle nočních měření
 - **v2.104.1** — Codex na gpt-6-sol medium; stránka plánu až po revizích
 - **v2.104.0** — hladký běh: Codex odpovídá (prompt na stdin, zástupce při jakékoli chybějící odpovědi); Opus všude s effortem podle role; Telegram jen „agent čeká" a „plán dodán"; dvě stránky pro PM; autonomní běh se sám nezastaví (ohraničené odmítnutí konce tahu); souběžné vlny opravdu běží; čas plánu na stránce dodávky
 - **v2.103.0** — gate row je jedna smlouva (verze 2, uzavřený slovník důvodů); profily jsou seřazené seznamy s jedním resolverem; timeouty pevné, baseline jen navrhuje; `services:` a `required_when` odstraněny, runner je odmítá s příkazem na upgrade

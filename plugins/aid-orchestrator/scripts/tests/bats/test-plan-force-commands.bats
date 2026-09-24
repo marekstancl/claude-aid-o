@@ -210,14 +210,14 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
 
   # The P074 headline behavior: the removed preflight no longer refuses, and
   # nothing else in epic-start minds the unrelated tracked edit.
-  run _pf epic-start P900 E-900-1_1
+  run _pf epic-start P900 E-900-1_1 --run-id R-1
   [ "$status" -eq 0 ]
   [[ "$output" != *"uncommitted changes present"* ]]
   [ "$(_receipts)" = "0" ]
 
   # With nothing left to bypass, a forced epic-start says so and mints
   # NO receipt — the no-op-flag contract, same as plan-start's.
-  run _pf epic-start P900 E-900-2_1 --force --force-reason "$REASON"
+  run _pf epic-start P900 E-900-2_1 --run-id R-1 --force --force-reason "$REASON"
   [[ "$output" == *"bypassed nothing"* ]]
   [ "$(_receipts)" = "0" ]
 }
