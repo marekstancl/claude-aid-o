@@ -186,6 +186,28 @@ _return() {
   [ "$(git show --name-only --format= HEAD)" = "README.md" ]
 }
 
+@test "contract: a declared file the project gitignores is committed; another repository's file is named, not dropped" {
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  echo "tests/" > .gitignore
+  git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
+  echo x > src/thing.sh; echo y > tests/test-thing.bats
+  _return '{}'
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(git show --name-only --format= HEAD | sort | tr '\n' ' ')" = "src/thing.sh tests/test-thing.bats " ]
+  # a step allowed to write into another repository: the file is named
+  local other="$BATS_TEST_TMPDIR/other"; mkdir -p "$other"; echo z > "$other/doc.md"
+  jq --arg p "$other/doc.md" '.steps[0].allowed_paths += [$p] | .steps[0].outputs += ["Modify: `" + $p + "` — doc"]' plan.json > .aid-o/p2.json
+  aid_dispatch_contract_build .aid-o/p2.json 0 .aid-o/c2.json
+  VERSION="$(jq -r .version .aid-o/c2.json)"
+  echo xx >> src/thing.sh
+  _return "{changed_files: [\"src/thing.sh\", \"$other/doc.md\"]}"
+  run aid_dispatch_contract_commit "$TEST_DIR" .aid-o/c2.json .aid-o/return.json "step 1b"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"not committed here: $other/doc.md"* ]]
+}
+
 @test "contract: a declared deletion of a promised artifact in scope is accepted; undeclared or out of scope is refused" {
   rm tests/test-thing.bats
   _return '{changed_files: ["src/thing.sh"], deleted_files: ["tests/test-thing.bats"]}'

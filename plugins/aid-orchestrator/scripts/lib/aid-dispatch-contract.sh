@@ -427,16 +427,24 @@ aid_dispatch_contract_commit() {
   local -a files=()
   local f
   # Present on disk, or tracked and deleted — a declared deletion is a
-  # change like any other and is staged as one.
+  # change like any other and is staged as one. An accepted absolute path is
+  # another repository's (validation holds this tree's to relative paths): it
+  # is named, never dropped silently.
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
+    if [[ "$f" == /* ]]; then
+      echo "contract: not committed here: ${f} (another repository — commit it there and name it in the return's repo_commits)" >&2
+      continue
+    fi
     if [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then files+=("$f"); fi
   done < <(jq -r '.changed_files[]?, .deleted_files[]? // empty' "$r")
   if [[ "${#files[@]}" -eq 0 ]]; then
     echo "nothing to commit"
     return 0
   fi
-  git -C "$root" add -A -- "${files[@]}" 2>/dev/null || { echo "contract: git add refused in ${root}" >&2; return 1; }
+  # -f: a declared path the project gitignores (docs/ in AID itself) is still
+  # the step's delivery; every path here passed the contract's scope check.
+  git -C "$root" add -A -f -- "${files[@]}" 2>/dev/null || { echo "contract: git add refused in ${root}" >&2; return 1; }
   if git -C "$root" diff --cached --quiet; then
     echo "nothing to commit"
     return 0

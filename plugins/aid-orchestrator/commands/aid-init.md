@@ -230,7 +230,8 @@ after the PM has seen exactly what changes:
 `required_when`, `needs_services`, `services`, `gate_profile_defaults`, `baseline*`,
 `runtime_baseline`, `quarantine`, an empty `quick` profile, and the whole `notifications.telegram`
 block. The library's `upgrade` removes them, adds
-`default_profile: standard` when a profile table exists, and adds `when_paths` to the profile named
+`default_profile` when a profile table exists (the old `gate_profile_defaults.epic` when it names a
+declared profile, else `standard`), and adds `when_paths` to the profile named
 `full` (the classifier's high-risk pattern list, so every run that resolved `full` before resolves
 `full` after). It never touches `gates.<id>.command` or a non-empty `include[]`; a key it does not
 know is left in place with a printed note. `/aid-init` runs it on **every** re-run when the file

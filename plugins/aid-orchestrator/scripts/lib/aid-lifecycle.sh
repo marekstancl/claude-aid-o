@@ -327,7 +327,20 @@ _aid_lc_sync_checkout_of() {
   wt="$(git -C "$root" worktree list --porcelain 2>/dev/null \
         | awk -v b="branch refs/heads/${branch}" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
   [[ -n "$wt" ]] || return 0
-  if git -C "$wt" read-tree -m -u "$old" "$new" 2>/dev/null; then
+  # A file the write committed may already sit in that tree, untracked and
+  # byte-identical (the close writes its receipt there before committing it):
+  # read-tree refuses to overwrite it and the receipt shows as deleted + new.
+  # Staging exactly those files lets a second read go through.
+  local synced=0 p
+  git -C "$wt" read-tree -m -u "$old" "$new" 2>/dev/null && synced=1
+  if (( ! synced )); then
+    while IFS= read -r p; do
+      [[ -f "${wt}/${p}" && "$(git -C "$wt" hash-object -- "$p")" == "$(git -C "$wt" rev-parse -q --verify "${new}:${p}")" ]] \
+        && git -C "$wt" add -f -- "$p" 2>/dev/null
+    done < <(git -C "$wt" diff --name-only "$old" "$new")
+    git -C "$wt" read-tree -m -u "$old" "$new" 2>/dev/null && synced=1
+  fi
+  if (( synced )); then
     echo "NOTE: ${branch} is checked out in ${wt} — its index and tree were brought forward to ${new:0:12}, so the next commit there does not revert this write." >&2
   else
     echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree still show the state BEFORE ${new:0:12} (local changes overlap). A plain 'git commit' there would REVERT this write. Before any commit in ${wt} run: git -C ${wt} reset --merge" >&2
