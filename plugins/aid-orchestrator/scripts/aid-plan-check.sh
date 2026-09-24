@@ -457,10 +457,10 @@ if (( HAS_REPO )); then
 
   # B6 — backlog ids claimed by a commit in the last 24 h. Not IMP: AID hands
   # those out (`aid-fsm.sh alloc imp-id`), and a plan citing one is not
-  # allocating it. The id must end where the number ends (IMP-66 ≠ IMP-660).
+  # allocating it. The id is matched whole (T-66 ≠ T-660, XT-5 ≠ T-5).
   if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
     for id in $(printf '%s\n' "$BLANKED" | grep -oE '\b(T|B)-[0-9]+\b' | sort -u); do
-      sha="$(git -C "$ROOT" log --since='24 hours ago' --all -E --grep="${id}([^0-9]|\$)" --format=%h 2>/dev/null | head -1)"
+      sha="$(git -C "$ROOT" log --since='24 hours ago' --all -E --grep="(^|[^A-Za-z0-9-])${id}([^0-9]|\$)" --format=%h 2>/dev/null | head -1)"
       [[ -n "$sha" ]] && _warn "B6" "$PLAN" "${id} already appears in commit ${sha} (last 24 h) — allocated twice?"
     done
   fi

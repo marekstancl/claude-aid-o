@@ -5063,8 +5063,10 @@ _pfsm_finalize_gates_body() {
           fcmd="$(GATE="$fg" yq '.gates[strenv(GATE)].command // ""' "$execution_yaml" 2>/dev/null)"
           echo "  failed: ${fg} — reproduce: (cd ${troot} && ${fcmd})" >&2
           [[ -n "$fev" && -f "${run_dir_abs}/${fev}" ]] || continue
+          local frunner; frunner="$(grep -oE '[^ "'"'"']*run-all-tests\.sh' <<<"$fcmd" | head -1 || true)"
+          [[ -n "$frunner" ]] || continue
           while IFS= read -r fs; do
-            [[ -n "$fs" ]] && echo "    suite: ${fs} — reproduce: (cd ${troot} && bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --only ${fs})" >&2
+            [[ -n "$fs" ]] && echo "    suite: ${fs} — reproduce: (cd ${troot} && bash ${frunner} --only ${fs})" >&2
           done < <(sed -nE '/^[[:space:]]*Failed suites:/,/^$/ s/^[[:space:]]+- (.+)$/\1/p' "${run_dir_abs}/${fev}")
         done < <(jq -r '.gates | to_entries[] | select((.value.result // .value.status) == "fail")
                    | "\(.key)\t\(.value.evidence // "")"' "$report_file" 2>/dev/null)

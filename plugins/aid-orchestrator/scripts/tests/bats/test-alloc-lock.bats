@@ -97,6 +97,15 @@ _norm_counter() {
   [ "$output" = "IMP-665" ]
 }
 
+@test "alloc imp-id on a hand-edited counter whose last line has no newline keeps both lines intact" {
+  _mk_repo "$TEST_TMPDIR/repo"
+  printf 'plan: 74\nepic: 12' > "$TEST_TMPDIR/repo/.aid-o/config/counter.yaml"
+  run bash -c "cd '$TEST_TMPDIR/repo' && '$FSM' alloc imp-id 2>/dev/null" 3>&-
+  [ "$status" -eq 0 ]; [ "$output" = "IMP-001" ]
+  grep -qx 'epic: 12' "$TEST_TMPDIR/repo/.aid-o/config/counter.yaml"
+  grep -qx 'imp: 1' "$TEST_TMPDIR/repo/.aid-o/config/counter.yaml"
+}
+
 @test "20 PARALLEL alloc plan-id invocations yield 20 distinct sequential IDs (no duplicates, no gaps)" {
   _mk_repo "$TEST_TMPDIR/repo"
   cd "$TEST_TMPDIR/repo"

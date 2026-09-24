@@ -6105,7 +6105,7 @@ EOF
       # 2.107.0: no longer a refusal — the file is archived below, once every
       # other precondition has passed (a failed advance leaves it where it is).
       _tasks_dir="$(aid_state_path ".aid-o/tasks" 2>/dev/null || printf '%s' ".aid-o/tasks")"
-      _archive_task=$(find "${_tasks_dir}/" -maxdepth 1 \( -name "${epic_id}.md" -o -name "${epic_id}-*.md" \) 2>/dev/null | head -1)
+      _archive_task=$(find "${_tasks_dir}/" -maxdepth 1 \( -name "${epic_id}.md" -o -name "${epic_id}-*.md" \) 2>/dev/null | head -1 || true)
 
       # ── Routed review findings (EPIC-LOCAL, BOTH modes) — P079 Step 7 ───────
       #
@@ -6178,10 +6178,18 @@ EOF
   fi
 
   if [[ -n "${_archive_task:-}" ]]; then
-    mkdir -p "${_tasks_dir}/archive" && mv -- "$_archive_task" "${_tasks_dir}/archive/"
-    local _at_tl; _at_tl=$(derive_timeline "$state_file") || true
-    [[ -n "$_at_tl" ]] && log_event "$_at_tl" "task_file_archived" file="$(basename "$_archive_task")"
-    echo "archived the EPIC task file: ${_tasks_dir}/archive/$(basename "$_archive_task")" >&2
+    # a tracked task file moves as a rename, not as a deletion plus a new file
+    local _at_dir; _at_dir="$(dirname "$_archive_task")"
+    mkdir -p "${_tasks_dir}/archive"
+    if { git -C "$_at_dir" ls-files --error-unmatch -- "$(basename "$_archive_task")" >/dev/null 2>&1 \
+           && git -C "$_at_dir" mv -- "$(basename "$_archive_task")" archive/; } \
+       || mv -- "$_archive_task" "${_tasks_dir}/archive/"; then
+      local _at_tl; _at_tl=$(derive_timeline "$state_file") || true
+      [[ -n "$_at_tl" ]] && log_event "$_at_tl" "task_file_archived" file="$(basename "$_archive_task")"
+      echo "archived the EPIC task file: ${_tasks_dir}/archive/$(basename "$_archive_task")" >&2
+    else
+      echo "WARN: could not archive ${_archive_task} — move it to ${_tasks_dir}/archive/ by hand" >&2
+    fi
   fi
 
   # Advance phase
@@ -7223,6 +7231,7 @@ imp: 0
   if [[ -z "$line" && "$kind" == imp-id ]]; then
     # Counters written before 2.107.0 have no imp: line; the backlog scan below
     # is what keeps the first number clear of the ones already handed out.
+    [[ -z "$(tail -c1 "$counter")" ]] || echo >> "$counter"   # a hand-edited last line without a newline
     printf 'imp: 0\n' >> "$counter"; line="imp: 0"
   fi
   if [[ -z "$line" ]]; then
