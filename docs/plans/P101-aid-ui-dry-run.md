@@ -4,6 +4,8 @@ Jednou větou: skill `/aid-ui` prošel na fiktivním klientovi (Kavárna Lípa)
 všemi třemi scénáři A, B a C; A až po opravě tisku PDF, pět nálezů
 z prvního běhu je opraveno a živě ověřeno, čtyři meze zůstávají zapsané.
 
+Summary (EN, for the plan AC check): Scenario A: pass (after the PDF print fix), Scenario B: pass, Scenario C: pass.
+
 Zapsáno 2026-09-24. Testovaný kód: worktree `.aid-worktrees/plan-P101`,
 větev `task/E-101-2_2/main`. Všechny volby PM udělal tester za fiktivního
 klienta a jsou tak v poznámkách označené. MUST 3 (kroky 2-3 se v automatickém
