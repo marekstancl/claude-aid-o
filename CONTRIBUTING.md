@@ -253,8 +253,10 @@ pořád otevřený. Poslední roztřídění: `docs/plans/plugin-issues-triage-2
    Nic nejde do backlogu bez tohoto popisu.
 3. Schválené opravy: návrh → Codex → oprava → Codex → merge cesta (t0+t1) → vydání.
 4. Výsledek dopsat pod bod v souboru projektu:
-   `> **HOTOVO vX.Y.Z (datum):** co se změnilo` / `ZAMÍTNUTO:` proč /
-   `NECHAT, ověřit <kdy>`. Soubor projektu je jeho záznam, nikdy se nemaže.
+   `> **HOTOVO vX.Y.Z (datum):** co se změnilo` / `> **ZAMÍTNUTO:** proč` /
+   `> **ČÁSTEČNĚ …**` / `> **UŽ ŘEŠENO …**` — řádek hned pod nadpisem bodu, jen tenhle
+   tvar sběrač pozná. Bod, který má počkat, zůstává bez značky (je otevřený).
+   Soubor projektu je jeho záznam, nikdy se nemaže.
 5. Designové body, které PM schválil odložit, dostanou řádek `IMP-NNN`
    v `.aid-o/work/backlog.md` s odkazem na projekt a číslo bodu.
 

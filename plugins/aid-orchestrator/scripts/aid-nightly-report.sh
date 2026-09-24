@@ -62,7 +62,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --runner-log) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --runner-log needs a value" >&2; exit 2; }
                   RUNNER_LOG="$2"; shift 2 ;;
-    --merge-path-suites) MERGE_PATH_SUITES="${2:-}"; shift 2 ;;
     --t0-seconds) T0_SECONDS="${2:-}"; shift 2 ;;
     --t1-seconds) T1_SECONDS="${2:-}"; shift 2 ;;
     --exit-code) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --exit-code needs a value" >&2; exit 2; }
@@ -228,36 +227,6 @@ while IFS=$'\t' read -r _ d; do
   duration_ms=$(( duration_ms + d ))
 done < <(aid_durations_by_suite "$TESTS_DIR")
 
-# ─── Co přibylo do merge cesty ──────────────────────────────────────────────
-# Spoustecem NENI cas, ale ZMENA SLOZENI. Merge cesta vyrostla z 13 na 18 minut
-# za tri dny tim, ze pribylo 18 sad — kazda spravne oznacena, zadna nezpomalila.
-# Detektor regresi po sadach by tohle nikdy nechytil (a Codex to potvrdil: navrh
-# neprosel vlastni prejimaci zkouskou).
-#
-# Zamerne tu NENI: kalibrace sumu, prahy v procentech, klouzave mediany, drift.
-# PM to odmitl a ma pravdu — kazdodenni hlaseni casu je spam, ktery se ztlumi.
-#
-# Artefakt nese, co do merge cesty pribylo a co ubylo; /aid-status to cte.
-INVENTORY="${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}/merge-path-inventory.txt"
-inventory_json='null'
-if [[ -n "${MERGE_PATH_SUITES:-}" ]]; then
-  _new_inv="$(printf '%s\n' $MERGE_PATH_SUITES | sort -u)"
-  if [[ -f "$INVENTORY" ]]; then
-    _added="$(comm -13 <(sort -u "$INVENTORY") <(printf '%s\n' "$_new_inv"))"
-    _gone="$(comm -23 <(sort -u "$INVENTORY") <(printf '%s\n' "$_new_inv"))"
-  else
-    _added=""; _gone=""      # prvni noc zaklada inventuru, nehlasi 234 "novych"
-  fi
-  _na=$(printf '%s' "$_added" | grep -c . || true)
-  _ng=$(printf '%s' "$_gone" | grep -c . || true)
-  inventory_json="$(jq -nc --argjson added "$_na" --argjson removed "$_ng" \
-      --arg added_list "$_added" --arg removed_list "$_gone" \
-      '{added:$added, removed:$removed,
-        added_suites:($added_list|split("\n")|map(select(length>0))),
-        removed_suites:($removed_list|split("\n")|map(select(length>0)))}')"
-  printf '%s\n' "$_new_inv" > "$INVENTORY" 2>/dev/null || true
-fi
-
 # ─── Merge-path budgets ─────────────────────────────────────────────────────
 # The gap nobody was watching. Between 2026-08-11 and 08-14 the merge path grew
 # from 42 suites / 13 min to 72 / 18 min, both tiers over budget — every new
@@ -294,10 +263,8 @@ write_artifact() {
         --argjson quarantine_unreadable "$quarantine_unreadable" \
         --argjson quarantine_write_failed "$quarantine_write_failed" \
         --argjson merge_path_budget "$budget_json" \
-        --argjson merge_path_inventory "$inventory_json" \
     '{date:$date, suites_run:$suites_run, passed:$passed, failed:$failed,
       merge_path_budget:$merge_path_budget,
-      merge_path_inventory:$merge_path_inventory,
       flaky:$flaky, quarantined:$quarantined, duration_ms:$duration_ms,
       exit_code:$exit_code, censored:$censored, log_url:$log_url,
       quarantine_unreadable:$quarantine_unreadable,

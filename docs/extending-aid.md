@@ -1739,7 +1739,7 @@ The renderer family is three libraries with one shape:
 | Library | Boundary | Canonical input |
 |---|---|---|
 | `lib/aid-artifact-render.sh` | none — the generic body renderer everything else builds on | `facts_json` + `prose_json` |
-| `lib/aid-gate-outcome-summary.sh` | the gates run | the runner's gates report (`--report-file`, else nested, else flat — first hit wins, and the resolved path goes in the provenance footer) |
+| `lib/aid-gate-outcome-summary.sh` | the gates run | the runner's gates report (`--report-file`, else nested, else flat — first hit wins; a chat card only, no page since P099) |
 | `lib/aid-plan-close-summary.sh` | plan-final / close | the PM brief AND the release decision, both required |
 
 Each is a pure function of its inputs plus the template. Numbers are COUNTED,
@@ -1882,12 +1882,11 @@ so nobody mistakes it for a complete one.
 * retries each failing suite exactly ONCE — passing on the retry makes it
   `flaky`, which is quarantined (`aid-test-quarantine.sh`) rather than counted
   as a failure or waved through as green;
-* sends ONE Telegram message on a NEW failure; a failure already in last
-  night's artifact increments a streak instead of sending again; a green night
-  sends nothing;
-* renders one line in `/aid-status` and at `/aid-plan` orientation — the second
-  surface exists so a muted channel never means a lost result, and a nightly
-  that silently STOPPED running renders as its own finding.
+* sends no message (P099); a failure already in last night's artifact
+  increments a streak;
+* renders one line in `/aid-status` and at `/aid-plan` orientation — red, an
+  over-budget merge path, and a nightly that silently STOPPED running each
+  render as their own finding.
 
 ### The selector's honesty check
 

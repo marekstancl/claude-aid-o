@@ -33,7 +33,8 @@ The plugin version is what makes an entry readable a month later ("was this
 already fixed?"); read it with
 `jq -r .version "$AID_PLUGIN_PATH/.claude-plugin/plugin.json"` — the Stop-hook
 reminder prints it too. Facts, not proposals — the fix is decided on the owner's side. The owner
-writes the decision under the entry (`HOTOVO vX.Y.Z`, `ZAMÍTNUTO`, `ČÁSTEČNĚ`, `UŽ ŘEŠENO`);
+writes the decision as the line right under the entry's heading — `> **HOTOVO vX.Y.Z …**`,
+`> **ZAMÍTNUTO …**`, `> **ČÁSTEČNĚ …**` or `> **UŽ ŘEŠENO …**`;
 entries are never deleted, this file is the project's own record.
 
 <!-- entries below, newest last -->

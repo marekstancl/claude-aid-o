@@ -14,6 +14,7 @@ Configure AID for this project. Modular — run all or pick one module.
 /aid-setup integrations       # enable/disable MCP integrations
 /aid-setup claude-md          # generate/update CLAUDE.md
 /aid-setup scan               # re-detect project stack
+/aid-setup parallel           # step cap (dispatch.max_parallel)
 /aid-setup all                # run all modules sequentially
 ```
 
@@ -147,7 +148,7 @@ it on disk. `CLAUDE.md` is never created by `/aid-init` at all.
 | `.aid-o/config/project.yaml` | `/aid-init` (auto-detection) | `/aid-setup scan` | one delegated writer: `agents/project-scanner.md` (Quick Scan Mode A, triggered by this module; Deep Analysis Mode B, Orchestrator-triggered post-milestone, extends the same auto-detected sections). Merge rule from `skills/setup/project-scan.md` governs: auto-detected sections are replaced, PM-added custom fields are never overwritten. `skills/memory.md`'s "NEVER write to project.yaml" binds memory agents, not the scanner. |
 | `.aid-o/config/integrations.yaml` | `/aid-init`, CONDITIONALLY (only when Qdrant memory is detected, and then only `memory.enabled: true`) | `/aid-setup integrations` | every enable/disable after creation |
 | `CLAUDE.md` | not created by `/aid-init` | `/aid-setup claude-md` | sole AID writer; never overwrites PM-authored content |
-| `.aid-o/config/orchestration.yaml` | `/aid-init` (`dispatch.max_parallel: 3`) | `/aid-setup parallel` | project overrides of the plugin's `defaults/orchestration.yaml`; a key the project does not set falls back to the plugin default |
+| `.aid-o/config/orchestration.yaml` | `/aid-init` (`dispatch.max_parallel: 3`) | `/aid-setup parallel` | project values for `dispatch.max_parallel`, `dispatch.strategy`, `dispatch.worktree_base` and `autonomy.continuation_budget` (read through `aid_orchestration_value`); an unset one falls back to the plugin default. Other keys come from the plugin default only |
 
 **Also here: `versioning.release_exempt_paths` / `versioning.app_paths` (P089).**
 `scan` is where an ALREADY-INITIALISED project gets the two lists the release

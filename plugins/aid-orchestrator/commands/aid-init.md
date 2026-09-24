@@ -60,7 +60,7 @@ when a condition holds).
     plugin.yaml           # resolved plugin_path + discovered_at + dispatch_mode
     check-severity.yaml   # compliance-check severity registry (copied from defaults)
     counter.yaml          # sequential id counters, seeded at 0
-    orchestration.yaml    # project overrides of the plugin default: dispatch.max_parallel: 3
+    orchestration.yaml    # the project's step cap: dispatch.max_parallel: 3 (see /aid-setup parallel)
   work/
     active.md             # GENERATED stream index (never hand-written)
     backlog.md            # improvement backlog (categorized sections)
