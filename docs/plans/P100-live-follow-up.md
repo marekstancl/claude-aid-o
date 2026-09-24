@@ -51,7 +51,8 @@ Selhání (vynucení bez PM nebo ruční úprava stavu) otevírá opravné vydá
 ## Velikost pluginu
 
 `scripts/` pluginu (včetně testů): před plánem (0d4ffc6b) 173 883 řádků, po
-něm 174 905 řádků (+1 022: +536 v testech, +486 v pravidlech). Růst je v testech nových pravidel a v pravidlech
+něm 175 104 řádků (+1 221: +635 v testech, +586 v pravidlech; z toho +199 připadá na
+12 oprav z triáže 24. 9.). Růst je v testech nových pravidel a v pravidlech
 samých (tabulka odmítnutí, spor k PM, delta kolo, úklid při uzavření, převzetí
 bran z EPICu, druh tématu u brainstormingu); nic z toho není nová sada testů.
 
