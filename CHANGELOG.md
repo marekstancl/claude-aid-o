@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.105.2] — 2026-09-24
+
+### Fixed
+- **Noční běh celý zelený** — dodělána poslední sada `test-aid-plan-release-boundary.bats` (74 padajících případů). Testy dostaly to, co od P094/P097 vyžaduje každý přechod EPICu (uzavřené revizní kolo EPICu, `--run-id`, tabulku profilů v projektu, `profile_table` v reportu bran); smazány případy zrušených věcí (zpráva kurátora, `blocking_findings` z audit-reportu, rozdíl starého a plánového režimu v požadovaném profilu, text dvojice ověřovatelů CP3 v návodech).
+
 ## [2.105.1] — 2026-09-24
 
 ### Fixed

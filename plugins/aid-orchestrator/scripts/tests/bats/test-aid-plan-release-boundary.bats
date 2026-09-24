@@ -5917,7 +5917,7 @@ _gp_table() {
   [ "$output" = "standard" ]
 
   # With the block present, no such note.
-  printf 'gates:\n  bats_fsm:\n    command: "true"\ngate_profiles:\n  quick:\n    include: [bats_fsm]\n' \
+  printf 'gates:\n  bats_fsm:\n    command: "true"\n    required: true\ndefault_profile: quick\ngate_profiles:\n  quick:\n    include: [bats_fsm]\n' \
     > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
   _pfsm_epic_with_commit "P064" "E-064-1_2" "src/other.ts" "code"
   _pfsm_write_epic_evidence "E-064-1_2" "DONE" "standard"
@@ -5951,6 +5951,9 @@ EOF
   jq -nc --arg p "$profile" --argjson t "${table:-[]}" \
     '{overall:"pass", profile:$p, profile_source:"auto_resolved", profile_table:$t, excluded_gates:[],
       _generated_by:"aid-run-gates.sh", gates:{}}' > "$dir/gates/gates_report.json"
+  # The closed EPIC review round GATES -> DONE requires (P094), at the root
+  # commit, an ancestor of every tree the transition may evaluate.
+  (cd "$TEST_PROJECT_ROOT" && aid_fixture_seed_step_review "$dir" cp3 "" pass "$(git rev-list --max-parents=0 HEAD | tail -1)") >/dev/null
   echo "$dir/fsm-state.yaml"
 }
 
@@ -5971,27 +5974,12 @@ EOF
   [ "$(grep '^state:' "$state_file" | awk '{print $2}')" = "DONE" ]
 }
 
-@test "AC6: the same high-risk EPIC in a legacy-mode plan still requires full — the epic cap is plan_branch only" {
-  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
-  _pfsm_bootstrap_plan "P064" legacy_epic_release_mode
-  _gp_table
-  _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
-
-  local base; base="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"
-  local state_file; state_file="$(_fsm_seed_gates_run "E-064-1_1" "$base" "standard")"
-  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
-
-  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"risk_profile_below_required"* ]]
-  [[ "$output" == *"'full'"* ]]
-  [ "$(grep '^state:' "$state_file" | awk '{print $2}')" = "GATES" ]
-}
-
 @test "AC6: a plan_branch EPIC that ran BELOW the epic-boundary requirement is still refused" {
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   _pfsm_bootstrap_plan "P064" plan_branch
   _gp_table
+  # The requirement this run falls below: the table's default.
+  yq -i '.default_profile = "standard"' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
   _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
 
   local base; base="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"
@@ -6055,6 +6043,11 @@ YAML
   printf '{"overall":"pass","_generated_by":"aid-run-gates.sh@test","_generated_at":"2026-07-22T00:00:00Z","_command_log":[]}\n' \
     > "$dir/gates/gates_report.json"
   touch "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  # A closed passing EPIC review round (cp3): every done-advance needs one (P094).
+  # Bound to the root commit, an ancestor of every tree the advance may
+  # evaluate; a case that needs the freshness check to see no later commit
+  # re-seeds it at the head it advances from.
+  (cd "$TEST_PROJECT_ROOT" && aid_fixture_seed_step_review "$dir" cp3 "" pass "$(git rev-list --max-parents=0 HEAD | tail -1)")
   cat > "$TEST_PROJECT_ROOT/.aid-o/config/plugin.yaml" <<YAML
 plugin_path: "$AID_PLUGIN_PATH"
 dispatch_mode: subagent
@@ -6234,25 +6227,10 @@ _rs_plan_branch_epic() {
 
 # ─── AC2: the legacy-mode positive inverse ─────────────────────────────────
 
-@test "AC2: the same fixture in legacy_epic_release_mode is REFUSED — the release stack is demonstrably still live" {
-  _rs_plan_branch_epic P064 E-064-1_1 legacy_epic_release_mode
-  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
-  _rs_install_spies
-
-  run bash "$FSM" done-advance review release "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"Curator report not found"* ]]
-  [ "$(_rs_done_phase "$state_file")" = "review" ]
-  # No plan_branch routing event was emitted for a legacy plan.
-  [ -z "$(_rs_event E-064-1_1 done_advance_plan_branch_mode)" ]
-}
-
 @test "AC2: a COMPLETE legacy-mode run reaches release AND fires the C4 aggregator — the expected non-zero invocation" {
   _rs_plan_branch_epic P064 E-064-1_1 legacy_epic_release_mode
   local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
   local dir; dir="$(_rs_run_dir E-064-1_1)"
-  printf 'blocking_findings: false\n' > "$dir/audit-report.md"
-  echo "curator report" > "$dir/curator-report.md"
   _rs_install_spies
 
   run bash "$FSM" done-advance review release "$state_file"
@@ -6261,10 +6239,6 @@ _rs_plan_branch_epic() {
   # The C4 dual-run hook ran: exactly the stage plan_branch mode skips.
   [ "$(wc -l < "$RS_C4_LOG")" -ge 1 ]
   [[ "$(cat "$RS_C4_LOG")" == *"E-064-1_1"* ]]
-  # ...and so did `c3_review_profile_presence`, the first skipped stage: its
-  # would_block telemetry fires here on the SAME fixture whose plan_branch run
-  # (AC1) emits nothing. That contrast is what makes AC1's silence evidence.
-  [ -n "$(_rs_event E-064-1_1 review_profile_would_block)" ]
 }
 
 @test "AC2: the identical EPIC id under plan_branch needs NEITHER report — mode, not evidence, is what differs" {
@@ -6283,6 +6257,7 @@ _rs_plan_branch_epic() {
 @test "AC3: the retained streamlined integration review still blocks a plan_branch EPIC missing its CP3 evidence" {
   _rs_plan_branch_epic P064 E-064-1_1 plan_branch
   local state_file; state_file="$(_rs_seed_done_review E-064-1_1 true)"
+  rm -rf "$(_rs_run_dir E-064-1_1)/cp3"   # the CP3 evidence this case is about
   _rs_install_spies
 
   run bash "$FSM" done-advance review release "$state_file"
@@ -6339,7 +6314,7 @@ YAML
   while read -r stage; do
     [ -n "$stage" ]
   done <<< "$from_source"
-  [ "$(echo "$from_source" | wc -l)" -ge 8 ]
+  [ "$(echo "$from_source" | wc -l)" -ge 2 ]  # cp3_freshness_recheck, release_decision since P096
 }
 
 # ─── Step 4 CP2 finding 1: the auditor verdict is EPIC-LOCAL, not a release
@@ -6353,58 +6328,6 @@ YAML
 # `done_advance_plan_branch_mode` event did not name the bypassed gate, so the
 # bypass left no auditable trace. AC4 structurally cannot catch this — it
 # compares the array against an event built from that same array.
-
-@test "CP2-1: a mid-plan audit-report with blocking_findings: true REFUSES a plan_branch advance" {
-  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
-  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
-  local dir; dir="$(_rs_run_dir E-064-1_1)"
-  # Exactly the verifier's scenario: the PM records the exception, dispatches
-  # the Auditor mid-plan, and the Auditor reports a critical finding. Risk
-  # profile is low/medium (no review-profile.json at all), so the C3 hook would
-  # not have fired even in legacy mode — this .md read is the ONLY gate on the
-  # field, and before the hoist plan_branch mode skipped it.
-  plan_manifest_update P064 '.plan_boundary_manifest.mid_plan_specialist_review_exception = {"epic_id":"E-064-1_1","reason":"PM asked for an early architecture read"}'
-  printf 'blocking_findings: true\n' > "$dir/audit-report.md"
-  _rs_install_spies
-
-  run bash "$FSM" done-advance review release "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"blocking_findings"* ]]
-  [ "$(_rs_done_phase "$state_file")" = "review" ]
-  # The block came from a RETAINED EPIC-local check, not from mode resolution:
-  # the routing event is still emitted and no release-stack seam fired.
-  [ -n "$(_rs_event E-064-1_1 done_advance_plan_branch_mode)" ]
-  [ "$(wc -l < "$RS_C4_LOG")" -eq 0 ]
-  # ...and the check is deliberately NOT claimed as skipped.
-  ! _rs_skipped_stages_from_source | grep -q 'blocking_findings'
-}
-
-@test "CP2-1: the same blocking verdict still REFUSES in legacy_epic_release_mode" {
-  _rs_plan_branch_epic P064 E-064-1_1 legacy_epic_release_mode
-  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
-  local dir; dir="$(_rs_run_dir E-064-1_1)"
-  printf 'blocking_findings: true\n' > "$dir/audit-report.md"
-  echo "curator report" > "$dir/curator-report.md"
-
-  run bash "$FSM" done-advance review release "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"blocking_findings"* ]]
-  [ "$(_rs_done_phase "$state_file")" = "review" ]
-}
-
-@test "CP2-1: a non-false value is fail-closed in plan_branch too (not just literal true)" {
-  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
-  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
-  local dir; dir="$(_rs_run_dir E-064-1_1)"
-  # An audit-report that EXISTS but carries no line-start verdict: the field is
-  # unreadable, so "clean" cannot be confirmed. Fail-closed, same as legacy.
-  printf '# Audit\n\nNo blocking_findings: true were found in this EPIC.\n' > "$dir/audit-report.md"
-
-  run bash "$FSM" done-advance review release "$state_file"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"missing canonical top-level 'blocking_findings' field"* ]]
-  [ "$(_rs_done_phase "$state_file")" = "review" ]
-}
 
 @test "CP2-1: the hoisted check is a NO-OP when no audit-report exists — the normal intermediate EPIC still advances" {
   _rs_plan_branch_epic P064 E-064-1_1 plan_branch
@@ -6513,18 +6436,6 @@ YAML
 
 # ─── Step 4 CP2 findings 2 + 7: the prose must match the FSM ───────────────
 
-@test "CP2-2: the controller instructions do NOT claim the FSM skips CP3 itself" {
-  # `fsm_check_streamlined_integration_review` runs ABOVE the skip guard and
-  # hard-dies when streamlined_mode is true and the two CP3 outputs are absent
-  # (asserted by the AC3 test above). A controller told that "CP3" is skipped
-  # would not dispatch it and would hit an unrecoverable done-advance.
-  ! grep -q 'Curator/Auditor/CP3/CP4/C3/C4 stack' "$AID_PLUGIN_PATH/commands/aid-run.md"
-  grep -q 'CP3 freshness re-check' "$AID_PLUGIN_PATH/commands/aid-run.md"
-  # pipeline.md must say plainly that the CP3 pair is still dispatched per EPIC
-  # and stays mandatory under streamlined_mode.
-  grep -q 'CP3 verifier pair is still dispatched per EPIC' "$AID_PLUGIN_PATH/skills/pipeline.md"
-}
-
 @test "CP2-7: the release sub-phase's auto-merge rule and evidence list are mode-qualified" {
   # The `plan_branch` branch must carry its OWN auto-mode rule, evaluable from
   # artifacts an intermediate EPIC actually has — an auditor score cannot be
@@ -6571,9 +6482,13 @@ YAML
   [ -n "$(_rs_event E-064-1_1 done_advance_plan_branch_mode)" ]
 
   git -C "$TEST_PROJECT_ROOT" checkout -q task/E-077-1_1/main
+  # The legacy plan advances in its own worktree, on plan/P077.
+  (cd "$TEST_PROJECT_ROOT" && aid_fixture_seed_step_review "$(_rs_run_dir E-077-1_1)" cp3 "" pass "$(git rev-parse plan/P077)")
   run bash "$FSM" done-advance review release "$lg_state"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"Curator report not found"* ]]
+  # The legacy plan takes the release stack (the C4 aggregator fires for it,
+  # never for the plan_branch EPIC) and emits no plan_branch routing event.
+  [[ "$(cat "$RS_C4_LOG")" == *"E-077-1_1"* ]]
+  [[ "$(cat "$RS_C4_LOG")" != *"E-064-1_1"* ]]
   [ -z "$(_rs_event E-077-1_1 done_advance_plan_branch_mode)" ]
 }
 
@@ -6600,10 +6515,6 @@ YAML
   run bash -c "jq -r '.plan_boundary_manifest.mid_plan_specialist_review_exception.epic_id' '$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json'"
   [ "$status" -eq 0 ]
   [ "$output" = "E-064-1_1" ]
-}
-
-@test "Edge Case: the mid-plan specialist exception is named in the controller instructions" {
-  grep -q 'mid_plan_specialist_review_exception' "$AID_PLUGIN_PATH/skills/pipeline.md"
 }
 
 # ─── Error Handling: an unresolvable mode BLOCKS, never falls back to legacy ─
@@ -7099,24 +7010,6 @@ YAML
   # (the one remaining mention is the comment that explains why not).
   run bash -c "grep -n 'grep -oP' '$FSM' | grep -v ':[[:space:]]*#' | grep -c '(?<=^E-)' || true"
   [ "$output" = "0" ]
-}
-
-@test "CP3-small: the C3 hook's comments no longer claim the legacy blocking_findings read is 'below'" {
-  # The legacy .md/.yaml read was hoisted ~250 lines ABOVE the C3 hook by the
-  # P064 Step 9 CP2 review; the comments still said "directly below", which
-  # sends a reader (or a future fixer) to the wrong end of the function.
-  local legacy_line c3_line
-  legacy_line="$(grep -n 'blk=\$(yaml_field "\$audit_file" blocking_findings)' "$FSM" | head -1 | cut -d: -f1)"
-  c3_line="$(grep -n 'E-057-1_2 Step 4: C3 independent-audit hook' "$FSM" | head -1 | cut -d: -f1)"
-  [ -n "$legacy_line" ]
-  [ -n "$c3_line" ]
-  # The premise the comments have to describe: legacy read FIRST, C3 hook after.
-  [ "$legacy_line" -lt "$c3_line" ]
-  run bash -c "grep -n 'blocking_findings read directly below' '$FSM' || true"
-  [ -z "$output" ]
-  run bash -c "grep -n 'legacy blocking_findings check below' '$FSM' || true"
-  [ -z "$output" ]
-  grep -q 'HOISTED it ~250 lines ABOVE this block' "$FSM"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
