@@ -280,7 +280,7 @@ gates:
       at plan-final, where every suite exists.'
     description: Plan AC blocks materially satisfied in codebase HEAD
     required: false
-    command: "plugins/aid-orchestrator/scripts/aid-plan-diff.sh --plan {plan_path} --evidence-dir .aid-o/work/evidence/{epic_id}/{run_id} --base-commit {base_commit}"
+    command: "plugins/aid-orchestrator/scripts/aid-plan-diff.sh --plan {plan_path} --evidence-dir {evidence_dir} --base-commit {base_commit}"
     # timeout_seconds attribution (P071 E-071-1_1 Step 1, 2026-08-02): the
     # p064-closure profile's "34 min of wall clock" note (below) describes
     # plan_diff and shell_pipeline_smoke TOGETHER (both excluded from that
