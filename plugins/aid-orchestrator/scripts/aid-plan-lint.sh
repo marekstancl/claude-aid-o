@@ -173,6 +173,10 @@ _strict_finding() {
   fi
 }
 
+# The project the plan lives in: the Files pass asks it whether a Test bullet
+# names a new suite, and the Reuse-check and documentation passes read it.
+_project_root="$(_aid_plan_project_root "$PLAN")" || _project_root=""
+
 # Every Files bullet, once: the grammar pass below walks it, and so does the
 # per-step Reuse-check pass (P085), which needs to know WHICH step a bullet
 # belongs to. Extracting twice would mean two readers of the same text.
@@ -188,6 +192,11 @@ for _bi in "${!_bullet_lns[@]}"; do
     [[ -n "$prose_path" ]] || continue
     _advisory ":${lineno}" "\`${prose_path}\` is named only in this entry's description, so it will NOT be in the step's allowed_paths — declare it with its own verb bullet if the step edits it: ${bullet}"
   done < <(_prose_paths "$bullet")
+  # An ERROR in both modes: generation refuses it in both.
+  if [[ -n "$_project_root" ]] && ! _tier_msg="$(_aid_test_bullet_tier_finding "$bullet" "$_project_root")"; then
+    errors=$((errors+1))
+    [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${lineno}: ERROR ${_tier_msg}: ${bullet}" >&2
+  fi
   verdict="$(_aid_classify_files_bullet "$bullet")"
   sev="${verdict%%:*}"; reason="${verdict#*:}"
   [[ "$sev" == "clean" ]] && continue
@@ -332,7 +341,6 @@ done < <(_missing_step_fields)
 # claim of `none` over a command that finds something today is a finding. Where
 # the replay's reach ends, and who picks up there, is stated once in
 # skills/review-checkpoint-contracts.md §"Lens: reuse_evidence".
-_project_root="$(_aid_plan_project_root "$PLAN")" || _project_root=""
 
 # Every path this plan declares anywhere, once: the N+1 verdict asks whether a
 # conflicting site already lies inside the plan's reach, and that question is

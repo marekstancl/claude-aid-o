@@ -12,7 +12,7 @@
 # these carry no `@test` lines, but the convention is one rule, not two).
 #
 # Result count after any edit:
-#   bats --tap test-plan-tier-declaration.bats | grep -cE '^(ok|not ok)'   # == 6
+#   bats --tap test-plan-tier-declaration.bats | grep -cE '^(ok|not ok)'   # == 13
 
 load test-helpers.bash
 
@@ -72,8 +72,17 @@ _generate() {
   _generate "$(_plan 'Test: `scripts/tests/bats/test-brand-new.bats` — what it proves')"
   [ "$status" -ne 0 ]
   [[ "$output" == *"step 1"* ]]
-  [[ "$output" == *"no tier"* ]]
+  [[ "$output" == *"declare its tier"* ]]
   [[ "$output" == *"test-brand-new.bats"* ]]
+}
+
+@test "1b: the plan lint reports the same rule, so the author meets it before generation" {
+  local plan; plan="$(_plan 'Test: `scripts/tests/bats/test-brand-new.bats` — what it proves')"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" "$plan"
+  [[ "$output" == *"a Test bullet naming a NEW suite must declare its tier"* ]]
+  plan="$(_plan 'Test: `scripts/tests/bats/test-existing.bats` — one more case')"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" "$plan"
+  [[ "$output" != *"declare its tier"* ]]
 }
 
 @test "2: the same bullet with a tier generates" {
@@ -110,7 +119,7 @@ _generate() {
   mkdir -p "$ROOT/tests"
   _generate "$(_plan 'Test: `tests/test-brand-new.sh` — what it proves')"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"no tier"* ]]
+  [[ "$output" == *"declare its tier"* ]]
 }
 
 @test "6: a project that has adopted no tiers generates exactly as before" {

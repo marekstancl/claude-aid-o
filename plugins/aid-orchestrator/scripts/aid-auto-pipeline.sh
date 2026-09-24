@@ -1409,6 +1409,24 @@ if [[ -f "$_gen_tx_path" ]]; then
       error_exit "cannot archive the COMPLETED generation pair for ${plan_id} to .completed-${_gen_rollover_epoch} siblings — refusing to clobber a completed record." 3
     }
     echo "[INFO] generation_transaction: the previous transaction for ${plan_id} was COMPLETE and the plan identity changed — archived to .completed-${_gen_rollover_epoch} siblings; starting a fresh transaction." >&2
+  elif jq -e '[.phases[]? | .epic_sha256 // ""] | all(. == "")' "$_gen_tx_path" >/dev/null 2>&1; then
+    # AN EMPTY TRANSACTION SUPERSEDES ITSELF. A run that failed before any
+    # phase was generated holds no artifact that could be mixed with the new
+    # derivation; its authority was sealed to the old plan bytes, which is why
+    # the identity no longer matches after a plan fix. It is archived the way
+    # supersede-generation archives (same siblings, same three audit records,
+    # under the lock this run already holds) and generation goes on.
+    _gen_ae="$(date -u +%s)"
+    _gen_ad="$(realpath -m -- "$_gen_dir_path")"
+    { _gen_supersede_audit_preflight "$_gen_ad" \
+        && _gen_archive_pair "$plan_id" "superseded-${_gen_ae}" \
+        && _gen_supersede_audit "$plan_id" "$plan" "automatic: the incomplete transaction generated no phase and the plan identity changed" \
+             "${USER:-unknown}" "$_gen_ae" "$_gen_ad" "${_gen_ad}/transaction.json" "${_gen_ad}/generation-authority.json" \
+             "$_gen_existing_identity" '[]' >/dev/null; } || {
+      _gen_unlock
+      error_exit "the incomplete transaction for ${plan_id} generated nothing, but archiving it automatically failed (see above). Archive it by hand: aid-auto-pipeline.sh supersede-generation --plan '${plan}' --reason \"<at least 20 characters>\"" 3
+    }
+    echo "[INFO] generation_transaction: the previous transaction for ${plan_id} generated no phase and the plan identity changed — archived to .superseded-${_gen_ae} siblings (audited); starting a fresh transaction." >&2
   else
     _gen_unlock
     error_exit "generation transaction identity mismatch for ${plan_id}: the existing INCOMPLETE transaction records identity '${_gen_existing_identity}' (plan_sha256|target_head|phase_derivation_version|total_phases) but this invocation derives '${_gen_identity}'. Artifacts from two derivations are never mixed. Archive the incomplete transaction first: aid-auto-pipeline.sh supersede-generation --plan '${plan}' --reason \"<at least 20 characters>\"" 1

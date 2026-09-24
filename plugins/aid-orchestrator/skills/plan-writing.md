@@ -6,7 +6,7 @@ user_invocable: false
 
 # Plan Writing — Exhaustive Plan Document Authoring
 
-**Last Updated:** 2026-09-21
+**Last Updated:** 2026-09-24
 
 **Skill:** plan-writing
 **Dependencies:** brainstorming
@@ -697,8 +697,8 @@ Every step MUST have ALL of these fields populated:
 | **Implementation Detail** | At least 1 paragraph with concrete logic OR 1 code snippet |
 | **Error Handling** | At least 1 failure mode with recovery strategy |
 | **Edge Cases** | At least 2 edge cases (3+ for M/L effort steps) |
-| **Dependencies** | Explicit dependency statement (or "No dependencies — can start independently") |
-| **Acceptance Criteria** | At least 2 testable criteria per step (3+ for M/L effort) |
+| **Dependencies** | `- Depends on: Step N[, Step M]`, or `- Depends on: none` for a step that can start independently (any other wording is refused at generation) |
+| **Acceptance Criteria** | At least 2 testable criteria per step (3+ for M/L effort), each a `- [ ]` bullet — a numbered list counts as zero |
 | **Effort** | S, M, or L |
 | **AID Role** | Exactly one role from the AID role set |
 
@@ -1415,7 +1415,7 @@ obligations (a `Reuse check:` on a delivered step is answered truthfully by
 
 ---
 
-**Last Updated:** 2026-09-21
+**Last Updated:** 2026-09-24
 
 ## Plan-boundary note
 
