@@ -37,11 +37,11 @@ css=$(printf '%s\n' "$json" | jq -r '
     group("rounded"; "radius"),
     group("spacing"; "space") ] as $t
   # A name or value that could break out of its declaration (CSS injection) refuses the whole file.
-  | ([$t[] | select((.n | test("^[A-Za-z0-9_-]+$") | not) or (.v | test("[;{}<]|@import|url\\("; "i")))] | .[0]) as $bad
+  | ([$t[] | select((.n | test("^[A-Za-z0-9_-]+$") | not) or (.v | test("[;{}<\\\\]|@import|url\\(|image-set\\(|image\\(|expression\\("; "i")))] | .[0]) as $bad
   | if $bad then "BAD\t--\($bad.n)" else ($t[] | "  --\(.n): \(.v);") end
 ' 2>/dev/null) || fail "token groups are not key/value maps"
 
-[[ "$css" != BAD$'\t'* ]] || fail "unsafe token ${css#BAD$'\t'} (name must be [A-Za-z0-9_-], value must not contain ; { } < @import url()"
+[[ "$css" != BAD$'\t'* ]] || fail "unsafe token ${css#BAD$'\t'} (name must be [A-Za-z0-9_-], value must not contain ; { } < \\ @import url( image-set( image( expression("
 [ -n "$css" ] || fail "no tokens (colors, typography, rounded, spacing)"
 
 tmp=$(mktemp "$out.XXXXXX") || fail "cannot write next to $out"

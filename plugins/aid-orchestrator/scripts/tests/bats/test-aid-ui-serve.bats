@@ -8,12 +8,12 @@ setup() {
   SERVE="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/aid-ui-serve.sh"
   export AID_UI_HOST=127.0.0.1 AID_UI_FORWARD_PORT=39915 AID_UI_BRAND_PORT=39916
   export AID_UI_JOBS_DIR="$BATS_TEST_TMPDIR/jobs" AID_UI_PROJECT="$BATS_TEST_TMPDIR"
-  export AID_UI_FORWARD_PROC=http.server   # the test's stand-in for Impeccable
   FOREIGN_PIDS=()
-  mkdir -p "$BATS_TEST_TMPDIR/brand" "$BATS_TEST_TMPDIR/brand2" "$BATS_TEST_TMPDIR/page"
-  echo brand-ok > "$BATS_TEST_TMPDIR/brand/index.html"
-  echo brand2-ok > "$BATS_TEST_TMPDIR/brand2/index.html"
-  echo '{}' | tee "$BATS_TEST_TMPDIR/brand/state.json" > "$BATS_TEST_TMPDIR/brand2/state.json"
+  BRAND="$BATS_TEST_TMPDIR/proj/docs/brand" BRAND2="$BATS_TEST_TMPDIR/proj2/docs/brand"
+  mkdir -p "$BRAND" "$BRAND2" "$BATS_TEST_TMPDIR/page"
+  echo brand-ok > "$BRAND/index.html"
+  echo brand2-ok > "$BRAND2/index.html"
+  echo '{}' | tee "$BRAND/state.json" > "$BRAND2/state.json"
   echo page-ok > "$BATS_TEST_TMPDIR/page/index.html"
 }
 
@@ -25,8 +25,11 @@ teardown() {
 }
 
 # A server the test owns (not a job of ours); fd 3 closed so bats is not held.
-foreign_server() {   # <port> <dir>
-  python3 -m http.server "$1" --bind 127.0.0.1 --directory "$2" >/dev/null 2>&1 3>&- &
+# [argv0] renames the process's argv[0]; `impeccable-stub` is the stand-in for
+# Impeccable (its /proc/<pid>/cmdline then starts with impeccable-stub).
+foreign_server() {   # <port> <dir> [argv0]
+  bash -c 'exec -a "$0" python3 -m http.server "$1" --bind 127.0.0.1 --directory "$2"' \
+    "${3:-python3}" "$1" "$2" >/dev/null 2>&1 3>&- &
   FOREIGN_PIDS+=("$!")
   local i; for i in $(seq 1 50); do
     [[ -n "$(ss -ltnH "sport = :$1")" ]] && return 0; sleep 0.1
@@ -37,7 +40,8 @@ foreign_server() {   # <port> <dir>
 get() { curl -sf --max-time 3 "http://127.0.0.1:$1/"; }
 
 @test "forward serves a loopback page through the forward port" {
-  foreign_server 39917 "$BATS_TEST_TMPDIR/page"
+  foreign_server 39917 "$BATS_TEST_TMPDIR/page" impeccable-stub
+  [[ "$(tr '\0' ' ' < "/proc/${FOREIGN_PIDS[0]}/cmdline")" == impeccable-stub\ * ]]
   run "$SERVE" forward 39917
   [ "$status" -eq 0 ]
   [[ "$output" == *"URL: http://127.0.0.1:39915/"* ]]
@@ -46,16 +50,16 @@ get() { curl -sf --max-time 3 "http://127.0.0.1:$1/"; }
 }
 
 @test "brand serves a directory" {
-  run "$SERVE" brand "$BATS_TEST_TMPDIR/brand"
+  run "$SERVE" brand "$BRAND"
   [ "$status" -eq 0 ]
   [[ "$output" == *"URL: http://127.0.0.1:39916/"* ]]
   [ "$(get 39916)" = brand-ok ]
 }
 
 @test "stop forward leaves the brand server answering" {
-  foreign_server 39917 "$BATS_TEST_TMPDIR/page"
+  foreign_server 39917 "$BATS_TEST_TMPDIR/page" impeccable-stub
   "$SERVE" forward 39917
-  "$SERVE" brand "$BATS_TEST_TMPDIR/brand"
+  "$SERVE" brand "$BRAND"
   run "$SERVE" stop forward
   [ "$status" -eq 0 ]
   run get 39915; [ "$status" -ne 0 ]
@@ -63,7 +67,7 @@ get() { curl -sf --max-time 3 "http://127.0.0.1:$1/"; }
 }
 
 @test "forward, stop forward, forward: the fixed job id restarts and serves again" {
-  foreign_server 39917 "$BATS_TEST_TMPDIR/page"
+  foreign_server 39917 "$BATS_TEST_TMPDIR/page" impeccable-stub
   "$SERVE" forward 39917
   "$SERVE" stop forward
   run "$SERVE" forward 39917
@@ -73,20 +77,20 @@ get() { curl -sf --max-time 3 "http://127.0.0.1:$1/"; }
 }
 
 @test "brand twice returns the same URL; brand after stop brand answers again" {
-  run "$SERVE" brand "$BATS_TEST_TMPDIR/brand"
+  run "$SERVE" brand "$BRAND"
   [ "$status" -eq 0 ]; first="$output"
-  run "$SERVE" brand "$BATS_TEST_TMPDIR/brand"
+  run "$SERVE" brand "$BRAND"
   [ "$status" -eq 0 ]
   [ "$output" = "$first" ]
   "$SERVE" stop brand
-  run "$SERVE" brand "$BATS_TEST_TMPDIR/brand"
+  run "$SERVE" brand "$BRAND"
   [ "$status" -eq 0 ]
   [ "$(get 39916)" = brand-ok ]
 }
 
 @test "a port held by a foreign http.server: exit 1 naming the port, foreign alive" {
   foreign_server 39916 "$BATS_TEST_TMPDIR/page"
-  run "$SERVE" brand "$BATS_TEST_TMPDIR/brand"
+  run "$SERVE" brand "$BRAND"
   [ "$status" -eq 1 ]
   [[ "$output" == *"39916"* ]]
   kill -0 "${FOREIGN_PIDS[0]}"
@@ -101,11 +105,13 @@ get() { curl -sf --max-time 3 "http://127.0.0.1:$1/"; }
   [ "$(get 39916)" = page-ok ]
 }
 
-@test "forward to a port that is not Impeccable: exit 2, nothing exposed" {
+@test "forward to a port that is not Impeccable: exit 2, only pid and name, nothing exposed" {
   foreign_server 39917 "$BATS_TEST_TMPDIR/page"
-  AID_UI_FORWARD_PROC=impeccable run "$SERVE" forward 39917
+  AID_UI_FORWARD_PROC=python3 run "$SERVE" forward 39917   # the old override is gone
   [ "$status" -eq 2 ]
   [[ "$output" == ERROR:*39917* ]]
+  [[ "$output" == *"pid ${FOREIGN_PIDS[0]}, python3)"* ]]
+  [[ "$output" != *http.server* && "$output" != *"$BATS_TEST_TMPDIR"* ]]
   run get 39915; [ "$status" -ne 0 ]
   run "$SERVE" forward 39918
   [ "$status" -eq 2 ]
@@ -118,9 +124,20 @@ get() { curl -sf --max-time 3 "http://127.0.0.1:$1/"; }
   run get 39916; [ "$status" -ne 0 ]
 }
 
+@test "brand outside a docs/brand dir, even with state.json and index.html or via a docs/brand symlink: exit 2" {
+  cp -r "$BRAND" "$BATS_TEST_TMPDIR/elsewhere"
+  run "$SERVE" brand "$BATS_TEST_TMPDIR/elsewhere"
+  [ "$status" -eq 2 ]; [[ "$output" == ERROR:* ]]
+  mkdir -p "$BATS_TEST_TMPDIR/proj3/docs"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$BATS_TEST_TMPDIR/proj3/docs/brand"
+  run "$SERVE" brand "$BATS_TEST_TMPDIR/proj3/docs/brand"
+  [ "$status" -eq 2 ]; [[ "$output" == ERROR:* ]]
+  run get 39916; [ "$status" -ne 0 ]
+}
+
 @test "brand of another directory while one is served: restarts on the new one" {
-  "$SERVE" brand "$BATS_TEST_TMPDIR/brand"
-  run "$SERVE" brand "$BATS_TEST_TMPDIR/brand2"
+  "$SERVE" brand "$BRAND"
+  run "$SERVE" brand "$BRAND2"
   [ "$status" -eq 0 ]
   [ "$(get 39916)" = brand2-ok ]
 }

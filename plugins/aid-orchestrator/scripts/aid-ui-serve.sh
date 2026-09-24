@@ -4,14 +4,18 @@
 # reachable from the PM's laptop over the VPN.
 #
 #   forward <local-port>   socat AID_UI_HOST:AID_UI_FORWARD_PORT -> 127.0.0.1:<local-port>
-#                          only when the process listening on <local-port> is
-#                          Impeccable (its command line contains
-#                          $AID_UI_FORWARD_PROC, default `impeccable`; tests point
-#                          it at their stand-in). Guards against exposing an
-#                          unrelated local service on the VPN; ceiling: any
-#                          process whose command line contains that word passes.
+#                          only when every process listening on <local-port> is
+#                          Impeccable: its command line contains `impeccable`
+#                          (hard-coded, no override). Guards against exposing an
+#                          unrelated local service on the VPN. A refusal names
+#                          only the pid and /proc/<pid>/comm, never the cmdline
+#                          (it can carry secrets).
+#                          ponytail: ceiling = a local process started with
+#                          `impeccable` in its argv passes; a real check would ask
+#                          Impeccable's own endpoint who it is.
 #   brand <dir>            python3 -m http.server on AID_UI_HOST:AID_UI_BRAND_PORT
-#                          only for a brand page dir (has state.json and index.html);
+#                          only for a brand page dir: realpath ends in /docs/brand
+#                          and it has state.json and index.html;
 #                          idempotent: our job alive, answering and serving the
 #                          same (realpath) dir -> print URL, exit 0; else restart.
 #   stop <forward|brand>   cancel that role's job; no job of ours -> exit 0
@@ -34,7 +38,6 @@ JOB_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/aid-job.sh"
 HOST="${AID_UI_HOST:-10.20.20.22}"
 FWD_PORT="${AID_UI_FORWARD_PORT:-3915}"
 BRAND_PORT="${AID_UI_BRAND_PORT:-3916}"
-FWD_PROC="${AID_UI_FORWARD_PROC:-impeccable}"
 PROJECT="${AID_UI_PROJECT:-$PWD}"
 JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
 DEADLINE=28800   # 8 h, integer seconds as `aid-job.sh run --deadline` requires
@@ -92,14 +95,15 @@ case "$1" in
     [[ -n "$pids" ]] || refuse "nothing of ours listens on 127.0.0.1:$2; forward only exposes Impeccable's page"
     for p in $pids; do
       cmdline="$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null || true)"
-      [[ "$cmdline" == *"$FWD_PROC"* ]] || refuse "port $2 is not Impeccable's page (pid $p: $cmdline); refusing to expose it"
+      [[ "$cmdline" == *impeccable* ]] \
+        || refuse "port $2 is not Impeccable's page (pid $p, $(cat "/proc/$p/comm" 2>/dev/null || echo '?')); refusing to expose it"
     done
     start forward socat "TCP-LISTEN:$FWD_PORT,bind=$HOST,reuseaddr,fork" "TCP:127.0.0.1:$2"
     ;;
   brand)
-    [[ -f "$2/state.json" && -f "$2/index.html" ]] \
-      || refuse "$2 is not a brand page (needs state.json and index.html); refusing to serve it"
-    dir="$(realpath "$2")"
+    dir="$(realpath -e "$2" 2>/dev/null || true)"
+    [[ "$dir" == */docs/brand && -f "$dir/state.json" && -f "$dir/index.html" ]] \
+      || refuse "$2 is not a brand page (needs <project>/docs/brand with state.json and index.html); refusing to serve it"
     id="$(job_id brand)"
     if alive "$id" && listening "$BRAND_PORT" && [[ "$(jq -r '.command[-1]' "$JOBS/$id/job.json")" == "$dir" ]]; then
       echo "URL: http://$HOST:$BRAND_PORT/"; echo "JOB: $id"; exit 0

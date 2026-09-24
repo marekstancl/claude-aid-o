@@ -62,3 +62,16 @@ setup() {
   [[ "$output" == *"--color-a:b{"* ]]
   cmp "$OUT" "$BATS_TEST_TMPDIR/before.css"
 }
+
+@test "CSS escape or resource function in a value: exit 1 naming the token, tokens.css untouched" {
+  printf ':root {\n  --color-old: #000;\n}\n' > "$OUT"
+  cp "$OUT" "$BATS_TEST_TMPDIR/before.css"
+  local v
+  for v in '\\75 rl(http://x/y)' 'IMAGE-SET("x.png" 1x)' 'Image(x.png)' 'eXpression(alert(1))'; do
+    printf -- '---\ncolors:\n  ok: "#fff"\n  evil: %s\n---\n' "'$v'" > "$BATS_TEST_TMPDIR/e.md"
+    run "$SCRIPT" "$BATS_TEST_TMPDIR/e.md" "$OUT"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"--color-evil"* ]]
+    cmp "$OUT" "$BATS_TEST_TMPDIR/before.css"
+  done
+}
