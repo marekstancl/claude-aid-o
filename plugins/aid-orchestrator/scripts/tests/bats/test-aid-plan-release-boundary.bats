@@ -3776,6 +3776,7 @@ _pfsm_merge_commit_count() {
 
 @test "epic-complete raises the plan-final profile from gates_report.json and marks the entry pending merge" {
   _pfsm_bootstrap_plan "P064"
+  _write_profile_table quick targeted standard full release  # P097: a raise names a declared profile
   _pfsm_epic_with_commit "P064" "E-064-1_1"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "full"
 
@@ -3881,6 +3882,7 @@ _pfsm_merge_commit_count() {
 
 @test "epic-complete --full-tests --reason records the PM exception without lowering the plan-final floor" {
   _pfsm_bootstrap_plan "P064"
+  _write_profile_table quick targeted standard full release  # P097: a raise names a declared profile
   _pfsm_epic_with_commit "P064" "E-064-1_1"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
 
@@ -5758,20 +5760,19 @@ _pfsm_write_plan_json() {
   done
 }
 
-@test "AC2: no auto-resolvable profile in the self-host table includes bats_all — a broad suite needs a recorded PM exception" {
-  local cfg; cfg="$(_selfhost_execution_yaml)"
-  [[ -f "$cfg" ]] || skip "self-host .aid-o/config/execution.yaml absent (gitignored workspace)"
-  local p
-  for p in $(yq -r '[(.gate_profiles | to_entries[] | select(.value.when_paths != null) | .key), (.default_profile | select(. != null))] | unique | .[]' "$cfg"); do
-    run _gp_yq_jq "$cfg" "([.gate_profiles[\"${p}\"].include[]] | index(\"bats_all\")) == null"
-    [ "$status" -eq 0 ]
-  done
-}
-
 # ─── aid-plan-fsm.sh epic-complete — recording the floor ───────────────────
+
+# _gp_table — the P097 shape of the resolution: the project's own ordered table,
+# with `full` selected by a high-risk path. The floor can only be raised to a
+# profile the project declares.
+_gp_table() {
+  _write_profile_table quick targeted standard full release
+  yq -i '.gate_profiles.full.when_paths = ["*/aid-fsm.sh"]' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+}
 
 @test "AC1: epic-complete records the plan-final floor full for a high-risk EPIC whose own boundary ran standard" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "standard"
 
@@ -5794,6 +5795,7 @@ _pfsm_write_plan_json() {
 
 @test "AC4: an unknown production path (targeted_tests exit 3) raises the plan-final floor to full" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   # A LOW-risk diff — without the exit-3 signal this run's floor would be
   # `standard`, so the raise can only come from the unknown production path.
   _pfsm_epic_with_commit "P064" "E-064-1_1" "src/thing.ts" "code"
@@ -5811,6 +5813,7 @@ _pfsm_write_plan_json() {
 
 @test "Edge Case: a docs-only EPIC in a plan whose floor is already release keeps the floor at release" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "docs/notes.md" "docs"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
   plan_manifest_raise_final_profile "P064" "release"
@@ -5828,6 +5831,7 @@ _pfsm_write_plan_json() {
 #     EPIC's own done_phase ────────────────────────────────────────────────
 @test "CP3-F3: the recorded floor is risk-derived even though the EPIC's own done_phase is release" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "docs/notes.md" "docs"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
 
@@ -5855,6 +5859,7 @@ _pfsm_write_plan_json() {
 
 @test "Edge Case: a plan-declared gate the active profile excluded is recorded as a mandatory plan-final gate, never silently dropped" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "src/thing.ts" "code"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE"
   _pfsm_write_plan_json "E-064-1_1" '["docs_updated","bats_fsm"]'
@@ -5877,6 +5882,7 @@ _pfsm_write_plan_json() {
 
 @test "AC3: epic-complete --full-tests records epic_full_test_exception with reason and requesting boundary and never lowers the floor" {
   _pfsm_bootstrap_plan "P064"
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "docs/notes.md" "docs"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
   plan_manifest_raise_final_profile "P064" "release"
@@ -5895,7 +5901,7 @@ _pfsm_write_plan_json() {
   [ "$status" -eq 0 ]
 }
 
-@test "Error Handling: epic-complete with no gate_profiles in execution.yaml still records the floor and reports gate_profiles_absent" {
+@test "Error Handling: epic-complete with no gate_profiles in execution.yaml leaves the floor and reports gate_profiles_absent" {
   _pfsm_bootstrap_plan "P064"
   _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "standard"
@@ -5906,8 +5912,9 @@ _pfsm_write_plan_json() {
   run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"gate_profiles_absent"* ]]
+  # P097: with no table there is no floor to raise — every gate runs at plan-final.
   run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
-  [ "$output" = "full" ]
+  [ "$output" = "standard" ]
 
   # With the block present, no such note.
   printf 'gates:\n  bats_fsm:\n    command: "true"\ngate_profiles:\n  quick:\n    include: [bats_fsm]\n' \
@@ -5938,8 +5945,11 @@ total_steps: 1
 created_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 base_commit: ${base}
 EOF
-  jq -nc --arg p "$profile" \
-    '{overall:"pass", profile:$p, profile_source:"auto_resolved", excluded_gates:[],
+  # profile_table: the declared names the runner recorded (P097); the FSM
+  # refuses a report whose table differs from the file's.
+  local table; table="$(yq -r '.gate_profiles // {} | keys | .[]' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" 2>/dev/null | jq -R . | jq -sc .)"
+  jq -nc --arg p "$profile" --argjson t "${table:-[]}" \
+    '{overall:"pass", profile:$p, profile_source:"auto_resolved", profile_table:$t, excluded_gates:[],
       _generated_by:"aid-run-gates.sh", gates:{}}' > "$dir/gates/gates_report.json"
   echo "$dir/fsm-state.yaml"
 }
@@ -5947,6 +5957,7 @@ EOF
 @test "AC6: a high-risk EPIC that ran standard at its own boundary reaches DONE in plan_branch mode" {
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   _pfsm_bootstrap_plan "P064" plan_branch
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
 
   local base; base="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"
@@ -5963,6 +5974,7 @@ EOF
 @test "AC6: the same high-risk EPIC in a legacy-mode plan still requires full — the epic cap is plan_branch only" {
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   _pfsm_bootstrap_plan "P064" legacy_epic_release_mode
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
 
   local base; base="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"
@@ -5979,6 +5991,7 @@ EOF
 @test "AC6: a plan_branch EPIC that ran BELOW the epic-boundary requirement is still refused" {
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   _pfsm_bootstrap_plan "P064" plan_branch
+  _gp_table
   _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
 
   local base; base="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"
