@@ -1,0 +1,5 @@
+/* Placeholder. `aid-ui-state.sh roles` overwrites this file with the
+   --brand-bg, --brand-ink, --brand-accent, --brand-display-* and
+   --brand-body-* aliases as var() references to the project's own token
+   names in tokens.css. Empty until roles are chosen, so base.css falls
+   back to its neutral values. */
