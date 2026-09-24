@@ -72,7 +72,7 @@ aid_step_review_packet_build() {
 _aid_sr_packet_finish() {
   local root="$1" dir="$2" prev="${3:-}" f
   if [[ -n "$prev" && -f "$prev/merged.json" ]]; then
-    jq '{findings: [.findings[] | select((.status | IN("open", "disputed", "routed", "carried")) and (.severity == "blocker" or .severity == "major"))]}' "$prev/merged.json" > "$dir/open-findings.json"
+    jq '{findings: [.findings[] | select((.status | IN("open", "disputed", "routed", "carried", "form_invalid")) and (.severity == "blocker" or .severity == "major"))]}' "$prev/merged.json" > "$dir/open-findings.json"
     git -C "$root" diff "$(jq -r .head_sha "$prev/round.json")..HEAD" > "$dir/fix.patch" || return 1
   fi
   (cd "$dir" && for f in *; do

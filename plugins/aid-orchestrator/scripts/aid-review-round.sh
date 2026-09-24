@@ -23,7 +23,11 @@
 #       clear one invalid or missing reviewer so it can answer again
 #   override … --rounds 1|2|3 --reason "<the PM's words>"
 #       record the PM's instruction to run one round, or a third
-#   fix-check | finalize | dispute                       CP1 only (see below)
+#   dispute … --round K --fingerprint <fp> --reason "<why>" [--pm accepted|rejected [--finding-card <card>]]
+#       CP1, CP2, CP3: a disputed finding stays blocking; only the PM's answer
+#       clears it, and at CP2/CP3 `--pm accepted` needs the Decision card that
+#       quotes the finding and a PM prompt after it (the hook audit)
+#   fix-check | finalize                                 CP1 only (see below)
 #
 # Every subcommand loads and validates the checkpoint's reviewer block first
 # (review_checkpoints.plan_review / step_review / epic_review / final_review). A step round
@@ -63,7 +67,7 @@ usage() { sed -n '4,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2;
 
 CMD="${1:-}"; [[ -n "$CMD" && "$CMD" != -h && "$CMD" != --help ]] || usage
 shift
-PLAN="" CHECKPOINT="" EVID="" STEP="" ROUND="" ROOT="" ONLY="" MANUAL=0 STUB=0 ROLE="" PROVIDER="" FINGERPRINT="" REASON="" ROUNDS="" PM_ANSWER="" FIXER=""
+PLAN="" CHECKPOINT="" EVID="" STEP="" ROUND="" ROOT="" ONLY="" MANUAL=0 STUB=0 ROLE="" PROVIDER="" FINGERPRINT="" REASON="" ROUNDS="" PM_ANSWER="" FIXER="" CARD=""
 TOKENS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -83,6 +87,7 @@ while [[ $# -gt 0 ]]; do
     --rounds)       ROUNDS="${2:-}"; shift 2 ;;
     --pm)           PM_ANSWER="${2:-}"; shift 2 ;;
     --fixer)        FIXER="${2:-}"; shift 2 ;;
+    --finding-card) CARD="${2:-}"; shift 2 ;;
     --tokens)       shift; while [[ $# -gt 0 && "$1" != --* ]]; do TOKENS+=("$1"); shift; done ;;
     -*) echo "${CMD}: unknown option $1" >&2; exit 2 ;;
     *)  [[ -z "$PLAN" ]] && PLAN="$1"; shift ;;   # a bare path is the plan (CP1 compatibility)
@@ -160,6 +165,12 @@ _focus() {
 # _is_generalist <role> — the role whose answer a round cannot do without.
 _is_generalist() { [[ "$1" == generalist_* || "$1" == *_generalist ]]; }
 
+# The findings a step round's verdict counts as open: a finding kept only on
+# form (form_invalid) is open until it is answered, like a disputed one.
+_OPEN_JQ='(.status | IN("open", "disputed", "routed", "carried", "form_invalid")) and (.severity == "blocker" or .severity == "major")'
+# _round_verdict <merged.json> — pass without an open blocker or major, fail otherwise.
+_round_verdict() { jq -r "if [.findings[] | select(${_OPEN_JQ})] | length == 0 then \"pass\" else \"fail\" end" "$1"; }
+
 # _override_rounds — the PM's recorded round count, or nothing.
 _override_rounds() { [[ -f "${BASE}/override.json" ]] && jq -r '.rounds // empty' "${BASE}/override.json" 2>/dev/null; }
 
@@ -193,9 +204,9 @@ _expected_roles() {
       prev="$(_round_dir $((n - 1)))/merged.json"
       # (routed and carried findings are still open to the reviewer: a PM
       # override after the last round asks about them again)
-      narrow="$(jq -r '[.findings[] | select((.status | IN("open", "disputed", "routed", "carried"))
-                        and (.severity == "blocker" or .severity == "major")) | .reported_by[]] | unique | .[]' "$prev")"
-      roles="$(for r in $roles; do grep -qxF "$r" <<<"$narrow" && echo "$r"; done)"
+      # A delta round after a passed round has nothing open: every role is asked.
+      narrow="$(jq -r "[.findings[] | select(${_OPEN_JQ}) | .reported_by[]] | unique | .[]" "$prev")"
+      [[ -z "$narrow" ]] || roles="$(for r in $roles; do grep -qxF "$r" <<<"$narrow" && echo "$r"; done)"
     fi
   fi
   if [[ -n "$ONLY" ]]; then
@@ -297,21 +308,29 @@ cmd_prepare() {
     if [[ "$CHECKPOINT" == cp7 ]] && (( ROUND >= 2 )); then
       _die "a whole-plan round is bound to one candidate, and a fix moves it: commit the fix, run plan-finalize --stage freeze, and prepare round 1 of the new attempt (its packet carries what stayed open and the fix)"
     fi
-    if (( ROUND > RC_ROUNDS_DEFAULT )); then
+    # A step that moves after a PASSED round gets a delta round over the new
+    # commits: nothing to fix, so it is neither a fix round nor one the round
+    # budget counts — the reviewers only have to see what they have not seen.
+    local prev="" delta=0
+    if (( ROUND >= 2 )); then
+      prev="$(_round_dir $((ROUND - 1)))"
+      if [[ "$MODE" != plan ]]; then
+        [[ -f "${prev}/measurement.json" ]] || _die "round $((ROUND - 1)) is not closed"
+        [[ "$(jq -r .head_sha "${prev}/round.json")" != "$(_head)" ]] \
+          || _die "HEAD has not moved since round $((ROUND - 1)); a confirmation round reviews a fix"
+        [[ "$(jq -r '.verdict // ""' "${prev}/measurement.json")" == pass ]] && delta=1
+      fi
+    fi
+    if (( ROUND > RC_ROUNDS_DEFAULT && ! delta )); then
       local allowed; allowed="$(_override_rounds)"
       [[ -n "$allowed" && "$allowed" -ge "$ROUND" ]] \
         || _die "round ${ROUND} exceeds rounds_default ${RC_ROUNDS_DEFAULT}; it needs the PM's override.json (aid-review-round.sh override)"
     fi
-    if (( ROUND >= 2 )); then
-      local prev; prev="$(_round_dir $((ROUND - 1)))"
+    if (( ROUND >= 2 && ! delta )); then
       if [[ "$MODE" == plan ]]; then
         [[ -f "${prev}/fix-diff.json" ]] || _die "round $((ROUND - 1)) has no fix-diff.json; run fix-check first"
         [[ "$(jq -r '.pass' "${prev}/fix-diff.json")" == true ]] \
           || _die "the fix of round $((ROUND - 1)) did not pass fix-check: $(jq -c '.added_outside_fixes' "${prev}/fix-diff.json")"
-      else
-        [[ -f "${prev}/measurement.json" ]] || _die "round $((ROUND - 1)) is not closed"
-        [[ "$(jq -r .head_sha "${prev}/round.json")" != "$(_head)" ]] \
-          || _die "HEAD has not moved since round $((ROUND - 1)); a confirmation round reviews a fix"
       fi
       [[ "$(jq '[.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major"))] | length' "${prev}/merged.json")" -gt 0 ]] \
         || _die "nothing to confirm: round $((ROUND - 1)) left no open blocker or major finding"
@@ -519,7 +538,7 @@ cmd_collect() {
     # A finding whose command or evidence breaks the form would be dropped by the
     # adjudicator, true or not. Once per role it goes back to its reviewer instead
     # (the `retry` path, with the reason quoted); a second malformed answer is
-    # accepted and that finding is dropped as before.
+    # accepted and the adjudicator keeps that finding as form_invalid, open.
     if [[ -z "$err" && ! -e "${dir}/reviewer-${role}.form-asked" ]]; then
       local form
       form="$(jq -r --slurpfile s "$AID_PR_SCHEMA" "$(aid_plan_review_proof_jq) [.findings[] | . as \$f | proof_error as \$e | \"\(\$f.id) \(\$e)\"] | join(\", \")" "$tmp" 2>/dev/null)"
@@ -767,8 +786,7 @@ cmd_close() {
 
   local verdict=pass
   if [[ "$MODE" == step ]]; then
-    # The verdict: pass without an open blocker or major, fail otherwise.
-    [[ "$(jq '[.findings[] | select((.status | IN("open", "disputed", "routed", "carried")) and (.severity == "blocker" or .severity == "major"))] | length' "${dir}/merged.json")" -eq 0 ]] || verdict=fail
+    verdict="$(_round_verdict "${dir}/merged.json")"
     # What stays open after the LAST allowed round is routed or carried before
     # the round is marked closed, so an interrupted close is run again, not lost.
     local last_allowed; last_allowed="$(_override_rounds)"; [[ -n "$last_allowed" ]] || last_allowed="$RC_ROUNDS_DEFAULT"
@@ -862,8 +880,20 @@ cmd_finalize() {
   echo "finalized after round ${last}: plan snapshot ${dir}/plan-final.md"
 }
 
+# _pm_replied_after <card> — true when the hook audit holds a PM prompt
+# (UserPromptSubmit, any session) later than the card was written. An audit
+# trail, not a proof: a controller that forges the audit file is not stopped.
+_pm_replied_after() {
+  local audit="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}"
+  [[ -r "$audit" ]] || return 1
+  # ISO-8601 UTC strings sort as time; jq's fromdateiso8601 is off by the DST hour.
+  grep -F '"event":"UserPromptSubmit"' "$audit" \
+    | jq -e --arg t "$(date -u -d "@$(stat -c %Y "$1")" +%Y-%m-%dT%H:%M:%SZ)" -s 'any(.[]; .ts > $t)' >/dev/null 2>&1
+}
+
 cmd_dispute() {
-  _plan_only
+  [[ "$MODE" == plan || "$CHECKPOINT" == cp2 || "$CHECKPOINT" == cp3 ]] \
+    || _die "dispute is for the plan (CP1), step (CP2) and EPIC (CP3) reviews" 2
   local dir; dir="$(_existing_round)" || exit 1
   [[ -n "$FINGERPRINT" && ${#REASON} -ge 20 ]] || _die "--fingerprint and a --reason of at least 20 characters required" 2
   [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
@@ -874,17 +904,34 @@ cmd_dispute() {
   done
   jq -e --arg f "$FINGERPRINT" '.findings | map(.fingerprint) | index($f) != null' "${dir}/merged.json" >/dev/null \
     || _die "no finding ${FINGERPRINT} in round ${ROUND}"
+  if [[ "$MODE" == step && "$PM_ANSWER" == accepted ]]; then
+    [[ -f "$CARD" ]] || _die "--pm accepted needs --finding-card <the Decision card the PM answered> (skills/communication.md); render it and wait for the PM"
+    grep -qF "$FINGERPRINT" "$CARD" || _die "the card ${CARD} does not quote finding ${FINGERPRINT}; the PM must have been asked about this finding"
+    _pm_replied_after "$CARD" || _die "no PM prompt after ${CARD} in the hook audit; the PM has not answered the card yet"
+  fi
   local filter
   case "$PM_ANSWER" in
     "")       filter='.status = "disputed" | .dispute = {reason: $why, at: $at}' ;;
-    accepted) filter='.status = "fixed" | .dispute.pm = {answer: "accepted", words: $why, at: $at}' ;;
+    accepted) filter='.status = "fixed" | .dispute.pm = {answer: "accepted", words: $why, at: $at, card: $card}' ;;
     rejected) filter='.status = "open" | .dispute.pm = {answer: "rejected", words: $why, at: $at}' ;;
     *) _die "--pm takes accepted or rejected" 2 ;;
   esac
-  jq --arg f "$FINGERPRINT" --arg why "$REASON" --arg at "$(_now)" "
+  jq --arg f "$FINGERPRINT" --arg why "$REASON" --arg at "$(_now)" --arg card "$CARD" "
     .findings |= map(if .fingerprint == \$f then (${filter}) else . end)
     | .blockers_open = ([.findings[] | select(.severity == \"blocker\" and (.status == \"open\" or .status == \"disputed\"))] | length)
   " "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  # A closed step round carries its verdict in four places; the FSM reads the index.
+  if [[ "$MODE" == step && -f "${dir}/measurement.json" ]]; then
+    local v f index="${BASE}/rounds.json"
+    v="$(_round_verdict "${dir}/merged.json")"
+    for f in "${dir}/measurement.json" "${dir}/round.json"; do
+      jq --arg v "$v" '.verdict = $v' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+    done
+    jq --argjson r "$ROUND" --arg v "$v" '.rounds |= map(if .round == $r then .verdict = $v else . end)
+      | if ([.rounds[].round] | max) == $r then .verdict = $v else . end' "$index" > "${index}.tmp" && mv "${index}.tmp" "$index"
+    [[ "$CHECKPOINT" == cp3 ]] && { _semantic_final_write "$v" || _die "${EVID}/semantic-review-final.json was not rewritten; run the dispute again"; }
+    _log review_dispute checkpoint="$CHECKPOINT" step="${STEP:-null}" round="$ROUND" fingerprint="$FINGERPRINT" answer="${PM_ANSWER:-disputed}" verdict="$v"
+  fi
   echo "finding ${FINGERPRINT}: $(jq -r --arg f "$FINGERPRINT" '.findings[] | select(.fingerprint == $f) | .status' "${dir}/merged.json")"
 }
 

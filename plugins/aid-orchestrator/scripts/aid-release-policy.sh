@@ -382,7 +382,7 @@ compute_final_review() {
       fi ;;
     fail)
       last="$(jq -r '[.rounds[].round] | max' "$index")"
-      local open; open="$(jq -r '[.findings[] | select((.status | IN("open", "disputed", "routed", "carried")) and (.severity == "blocker" or .severity == "major")) | "[\(.severity)] \(.claim) (\(.evidence))"] | join("; ")' "${EVIDENCE_DIR}/${cp}/round-${last}/merged.json" 2>/dev/null)"
+      local open; open="$(jq -r '[.findings[] | select((.status | IN("open", "disputed", "routed", "carried", "form_invalid")) and (.severity == "blocker" or .severity == "major")) | "[\(.severity)] \(.claim) (\(.evidence))"] | join("; ")' "${EVIDENCE_DIR}/${cp}/round-${last}/merged.json" 2>/dev/null)"
       add_input final_review "$artifact" "blocked" "the ${cp} round closed with verdict fail" false
       add_blocker final_review "blocking" "the whole-delivery review left open: ${open:-see ${artifact}}" ;;
     *)

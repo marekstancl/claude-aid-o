@@ -60,7 +60,8 @@ _finding() {
   run ADJ "$R1" --project-root "$ROOT"
   [ "$status" -eq 0 ]
   [ "$(jq -c '[.[] | .reason]' "$R1/rejected.json")" = '["evidence_not_found","missing_command","missing_evidence","evidence_not_found","evidence_not_found","evidence_not_found","duplicate"]' ]
-  [ "$(jq '.findings | length' "$R1/merged.json")" -eq 1 ]
+  # every rejection but the duplicate stays in the list as form_invalid, open
+  [ "$(jq -c '[.findings[] | .status] | group_by(.) | map({(.[0]): length}) | add' "$R1/merged.json")" = '{"form_invalid":6,"open":1}' ]
 }
 @test "adjudicate: yield counts what each role originated and what survived" {
   _finding "$R1" reuse '.'
@@ -142,7 +143,7 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   _finding "$R2" step_generalist '.id = "step_generalist-3" | .evidence = "0123456789ab:scripts/a.sh:1"'
   run "$ADJ_BIN" "$R2" --project-root "$ROOT" --namespace step_review
   [ "$status" -eq 0 ]
-  [ "$(jq '.findings | length' "$R2/merged.json")" -eq 1 ]
+  [ "$(jq '[.findings[] | select(.status == "open")] | length' "$R2/merged.json")" -eq 1 ]
   [ "$(jq -c '[.[] | .reason]' "$R2/rejected.json")" = '["evidence_not_found","evidence_not_found"]' ]
   [ "$(jq -r '.head_sha' "$R2/merged.json")" = "$(git -C "$ROOT" rev-parse HEAD)" ]
 }
@@ -155,7 +156,7 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   run "$ADJ_BIN" "$R2" --project-root "$ROOT" --namespace step_review
   [ "$status" -eq 0 ]
   [ "$(jq -c '[.[] | .reason]' "$R2/rejected.json")" = '["missing_command"]' ]
-  [ "$(jq -r '.findings[0].command' "$R2/merged.json")" = "bash repro/race-1.sh" ]
+  [ "$(jq -r '[.findings[] | select(.status == "open")][0].command' "$R2/merged.json")" = "bash repro/race-1.sh" ]
 }
 @test "cp2: plan.md evidence is evidence_not_found without --plan; trace_missing fires only with a handler pattern, only for a generalist's blocker or major" {
   _git_root >/dev/null
@@ -217,12 +218,12 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   run ADJ "$R1" --project-root "$ROOT"
   [ "$status" -eq 0 ]
   [ "$(jq -c '[.[] | .reason]' "$R1/rejected.json")" = '["evidence_not_found"]' ]
-  [ "$(jq -r '.findings[0].evidence' "$R1/merged.json")" = "scripts/a.sh:999; scripts/a.sh:2" ]
+  [ "$(jq -r '[.findings[] | select(.status == "open")][0].evidence' "$R1/merged.json")" = "scripts/a.sh:999; scripts/a.sh:2" ]
   # the fingerprint anchors on scripts/a.sh:2, so the same claim cited as scripts/a.sh:2 alone merges with it
   _round "$R2" 2 reuse
   _finding "$R2" reuse '.evidence = "scripts/a.sh:2"'
   ADJ "$R2" --project-root "$ROOT" >/dev/null
-  [ "$(jq -r '.findings[0].fingerprint' "$R1/merged.json")" = "$(jq -r '.findings[0].fingerprint' "$R2/merged.json")" ]
+  [ "$(jq -r '[.findings[] | select(.status == "open")][0].fingerprint' "$R1/merged.json")" = "$(jq -r '.findings[0].fingerprint' "$R2/merged.json")" ]
 }
 @test "evidence: absent:path proves a missing file and is refused for a file that exists; git log is a read-only command" {
   _finding "$R1" reuse '.evidence = "absent:scripts/never-written.sh" | .command = "git log --oneline -3 -- scripts/never-written.sh"'
@@ -230,7 +231,7 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   run ADJ "$R1" --project-root "$ROOT"
   [ "$status" -eq 0 ]
   [ "$(jq -c '[.[] | .reason]' "$R1/rejected.json")" = '["evidence_not_found"]' ]
-  [ "$(jq -r '.findings[0].evidence' "$R1/merged.json")" = "absent:scripts/never-written.sh" ]
+  [ "$(jq -r '[.findings[] | select(.status == "open")][0].evidence' "$R1/merged.json")" = "absent:scripts/never-written.sh" ]
 }
 @test "evidence: a range resolves on its first line and anchors the fingerprint; a range past the end or reversed does not" {
   _finding "$R1" reuse '.evidence = "scripts/a.sh:2-3"'
@@ -243,7 +244,7 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   _round "$R2" 2 reuse
   _finding "$R2" reuse '.evidence = "scripts/a.sh:2"'
   ADJ "$R2" --project-root "$ROOT" >/dev/null
-  [ "$(jq -r '.findings[0].fingerprint' "$R1/merged.json")" = "$(jq -r '.findings[0].fingerprint' "$R2/merged.json")" ]
+  [ "$(jq -r '[.findings[] | select(.status == "open")][0].fingerprint' "$R1/merged.json")" = "$(jq -r '.findings[0].fingerprint' "$R2/merged.json")" ]
 }
 @test "command: an inline read-only reproduction is accepted, anything that can write or run is not" {
   _finding "$R1" reuse '.command = "bash -c '"'"'grep -n two scripts/a.sh | wc -l'"'"'"'
@@ -289,11 +290,27 @@ rm -rf /tmp/pwn'
   done
   run ADJ "$R1" --project-root "$ROOT"
   echo "$output"; [ "$status" -eq 0 ]
-  [ "$(jq '.findings | length' "$R1/merged.json")" -eq 0 ]
+  [ "$(jq '[.findings[] | select(.status != "form_invalid")] | length' "$R1/merged.json")" -eq 0 ]
   [ "$(jq 'length' "$R1/rejected.json")" -eq "$n" ]
   [ "$(jq -c '[.[] | .reason] | unique' "$R1/rejected.json")" = '["command_not_read_only"]' ]
 }
 
+@test "form: a bash -c body with an escaped quote is kept as form_invalid and open; a writing body too, never accepted" {
+  _step_round "$R2" 1 step_generalist
+  local f="$R2/reviewer-step_generalist.json" n=0 body
+  for body in "grep -n '\''two'\'' scripts/a.sh" "rm scripts/a.sh" "grep x \"'\"; rm f; '\"\" scripts/a.sh"; do
+    n=$(( n + 1 ))
+    jq --arg id "g-$n" --arg c "claim number $n of its very own here" --arg cmd "bash -c '$body'" \
+       '.findings += [{id: $id, step: 1, severity: "blocker", claim: $c, command: $cmd, evidence: "scripts/a.sh:2", fix: "f"}]' \
+       "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  done
+  run "$ADJ_BIN" "$R2" --project-root "$ROOT" --namespace step_review
+  [ "$status" -eq 0 ]
+  [ "$(jq 'length' "$R2/rejected.json")" -eq 3 ]
+  [ "$(jq -c '[.findings[] | .status] | unique' "$R2/merged.json")" = '["form_invalid"]' ]
+  [ "$(jq '.findings | length' "$R2/merged.json")" -eq 3 ]
+  jq -e 'all(.findings[]; .form_invalid | IN("command_not_read_only", "missing_command"))' "$R2/merged.json"
+}
 @test "adjudicate: a collected round is judged with nothing on stderr" {
   _finding "$R1" reuse '.'
   ADJ "$R1" --project-root "$ROOT" >/dev/null 2>"$ROOT/err.txt"

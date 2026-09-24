@@ -384,7 +384,7 @@ _bracket() {
   [ "$(jq '.valid | length' "$CP1/round-1/collect.json")" -eq 6 ]
 }
 
-@test "step: an answer whose finding breaks the form goes back to its reviewer once; the second time the finding is dropped as before" {
+@test "step: an answer whose finding breaks the form goes back to its reviewer once; the second time the finding is kept as form_invalid and fails the round" {
   _repo; printf 'def f():\n    return 1\n' >> "$R/src/app.py"; git -C "$R" commit -qam more; _sc
   _S prepare --round 1 >/dev/null
   local note='.findings[0].evidence = "src/app.py:1 (the line that matters)"'
@@ -397,6 +397,9 @@ _bracket() {
   run _S collect --round 1; [ "$status" -eq 0 ]
   [ "$(jq -r '.valid | index("step_generalist") != null' "$(D 1)/collect.json")" = true ]
   [ "$(jq -r '.[0].reason' "$(D 1)/rejected.json")" = missing_evidence ]
+  [ "$(jq -r '.findings[0].status' "$(D 1)/merged.json")" = form_invalid ]
+  _bracket 1 step_generalist; _S close --round 1 --tokens step_generalist=1 >/dev/null
+  [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = fail ]
 }
 
 @test "step: collect needs every expected role; close is bound to HEAD, to a token value and to a dispatch bracket; verdict fail with an open major" {
@@ -448,7 +451,33 @@ _bracket() {
   [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = pass ]
   [ "$(jq -r '.findings[0].status' "$(D 1)/merged.json")" = fixed ]
   [ "$(jq -r '.fixer.model' "$(D 2)/measurement.json")" = opus ]
-  run _S prepare --round 3; [ "$status" -eq 1 ]; [[ "$output" == *"override.json"* ]]
+  run _S prepare --round 3; [ "$status" -eq 1 ]; [[ "$output" == *"HEAD has not moved"* ]]
+  # the step moves after a passed round: a delta round, beyond rounds_default, no override
+  echo late >> "$R/src/new.py"; git -C "$R" commit -qam late; _sc
+  run _S prepare --round 3; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -c .reviewers_expected "$(D 3)/round.json")" = '["step_generalist"]' ]
+  grep -q late "$(D 3)/packet/fix.patch"
+}
+@test "step: a disputed cp2 blocker keeps blocking; --pm accepted needs the card quoting it and a PM prompt after the card, then the verdict flips" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist '.findings[0].severity = "blocker"'; _S collect --round 1 >/dev/null; _bracket 1 step_generalist
+  _S close --round 1 --tokens step_generalist=10 >/dev/null
+  local fp card="$ROOT/card.md"; fp="$(jq -r '.findings[0].fingerprint' "$(D 1)/merged.json")"
+  run _S dispute --round 1 --fingerprint "$fp" --reason "the plan criterion itself is wrong here"
+  [ "$status" -eq 0 ]; [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = fail ]
+  export AID_HOOK_AUDIT="$ROOT/audit.jsonl"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  local pm=(dispute --round 1 --fingerprint "$fp" --reason "PM: the criterion is wrong, accepted" --pm accepted)
+  run _S "${pm[@]}"; [ "$status" -eq 1 ]; [[ "$output" == *"--finding-card"* ]]
+  echo "Rozhodnutí 1: kritérium kroku" > "$card"; touch -d '-10 seconds' "$card"
+  run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"does not quote"* ]]
+  echo "nález $fp" >> "$card"; touch -d '-10 seconds' "$card"
+  run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"no PM prompt after"* ]]
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
+  run _S "${pm[@]}" --finding-card "$card"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = pass ]
+  [ "$(jq -r .verdict "$(D 1)/measurement.json")" = pass ]
+  [ "$(jq -r '.findings[0].dispute.pm.card' "$(D 1)/merged.json")" = "$card" ]
 }
 @test "step: a stub round skips the dispatch check and records it; the flag comes from prepare, never from the environment" {
   _repo; _sc; _S prepare --round 1 --stub >/dev/null

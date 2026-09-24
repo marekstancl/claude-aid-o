@@ -20,6 +20,9 @@
 #   - a generalist's blocker or major without a behaviour trace while the step
 #     check reports a handler pattern (--step-check)   → rejected: trace_missing
 #   - the same fingerprint twice from one reviewer     → rejected: duplicate
+# A finding rejected on form (every reason but duplicate) is also kept in the
+# merged list as `form_invalid`: a step round's verdict counts it as open, so
+# a true finding is never lost to its form.
 # What survives is merged by fingerprint — the five-argument formula of
 # lib/aid-finding-fingerprint.sh: project, namespace, the step (`.step`, or the
 # literal "plan"/"epic"/"do" per namespace; final_review uses "plan"), the first evidence with its line,
@@ -269,8 +272,16 @@ _adjudicate_role() {
         jq -c --arg r "$role" --arg fp "$fp" --arg m "$match" '. + {role: $r, fingerprint: $fp, match: $m}' <<< "$f" >> "${WORK}/accepted.jsonl"
       fi
     fi
-    [[ -n "$reason" ]] && jq -nc --arg r "$role" --arg id "$id" --arg why "$reason" \
-      '{role: $r, id: $id, reason: $why}' >> "${WORK}/rejected.jsonl"
+    if [[ -n "$reason" ]]; then
+      jq -nc --arg r "$role" --arg id "$id" --arg why "$reason" '{role: $r, id: $id, reason: $why}' >> "${WORK}/rejected.jsonl"
+      if [[ "$reason" != duplicate ]]; then
+        step="$(_third "$f")"; first="$(jq -r '((.evidence | strings) // "") | split(";")[0] | gsub("^\\s+|\\s+$"; "")' <<< "$f")"
+        key="$(_claim_key "$(jq -r '.claim // ""' <<< "$f")")"
+        jq -c --arg r "$role" --arg why "$reason" --arg fp "$(fingerprint "$project_id" "$NS" "$step" "$first" "$key")" \
+          --arg m "$(fingerprint "$project_id" "$NS" "$step" "${first%:*}" "$key")" \
+          '. + {role: $r, fingerprint: $fp, match: $m, form_invalid: $why}' <<< "$f" >> "${WORK}/accepted.jsonl"
+      fi
+    fi
   done < <(jq -c '.findings[]' "$answer")
 }
 
@@ -298,7 +309,7 @@ prior='{"findings":[]}'; [[ -r "${DIR}/merged.json" ]] && prior="$(cat "${DIR}/m
 jq -s --argjson round "$(jq '.round' "${DIR}/round.json")" --arg ns "$NS" \
       --argjson sha "$(jq '.plan_sha256 // null' "${DIR}/round.json")" \
       --argjson head "$(jq '.head_sha // null' "${DIR}/round.json")" --argjson prior "$prior" '
-  def rank: {"blocker": 3, "major": 2, "minor": 1}[.];
+  def rank: {"blocker": 3, "major": 2, "minor": 1}[.] // 0;
   ($prior.findings | map({(.fingerprint): .}) | add // {}) as $old
   | group_by(.fingerprint)
   | map(sort_by(-(.severity | rank)) as $g
@@ -308,7 +319,8 @@ jq -s --argjson round "$(jq '.round' "${DIR}/round.json")" --arg ns "$NS" \
            severity_reported: (map({(.role): .severity}) | add),
            claim: $top.claim, command: $top.command, evidence: $top.evidence, fix: $top.fix,
            reported_by: (map(.role) | unique), also_reported_by: (map(.role) | unique | length),
-           status: ($was.status // "open")}
+           status: ($was.status // (if all($g[]; .form_invalid) then "form_invalid" else "open" end))}
+        + (if all($g[]; .form_invalid) then {form_invalid: $top.form_invalid} else {} end)
         + (if $top.behaviour_trace then {behaviour_trace: $top.behaviour_trace} else {} end)
         + (if $was.dispute then {dispute: $was.dispute} else {} end))
   | {namespace: $ns, plan_sha256: $sha, head_sha: $head, round: $round, findings: .,
@@ -332,7 +344,7 @@ if [[ -n "$PREV" ]]; then
   jq --slurpfile now "${DIR}/merged.json" --argjson answered "$(jq '.valid' "${DIR}/collect.json")" '
     ($now[0].findings | map(.match)) as $still
     | .findings |= map(
-        if (.status | IN("open", "disputed", "routed", "carried")) and (.severity == "blocker" or .severity == "major")
+        if (.status | IN("open", "disputed", "routed", "carried", "form_invalid")) and (.severity == "blocker" or .severity == "major")
            and ((.match // .fingerprint) | IN($still[]) | not)
            and (.reported_by - $answered | length) == 0
         then .status = "fixed" else . end)

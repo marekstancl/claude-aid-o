@@ -1160,16 +1160,16 @@ _fsm_refusal_next() {
   case "$reason" in
     review_round_missing)
       if [[ "${cp:-}" == cp7 ]]; then
-        next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-finalize "$(basename "$(dirname "$evidence_dir")")" --stage produce)"
+        next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-finalize "$(basename "$(dirname "$evidence_dir")")" --stage produce) && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round 1)"
       else
         next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}")"
       fi ;;
     round_not_closed)
       next="$(_fsm_cmd bash "$rr" close "${where[@]}" --round "${last:-1}") --tokens <role>=<n|unknown> …" ;;
     review_round_failed)
-      next="the step's role fixes the open findings and commits, then: $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))")" ;;
+      next="the step's role fixes the open findings and commits, then: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}") && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))")" ;;
     review_round_stale|cp3_stale_review)
-      next="$(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))") — a confirmation round over the commits since round ${last:-?}" ;;
+      next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}") && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))") — a delta round over the commits since round ${last:-?}" ;;
     no_change_without_outputs)
       next="commit the step's work, then: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}")" ;;
     steps_incomplete)

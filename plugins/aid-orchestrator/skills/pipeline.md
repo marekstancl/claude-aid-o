@@ -273,8 +273,8 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `contract_return_missing`, `contract_return_not_done` | no return recorded, or the agent reported blocked / a failing gate | work | extract the return; a blocked step is resumed or handed over with a Blocked card | PM, when blocked |
 | `review_round_missing` | the step or EPIC has no review round | state | `aid-step-check.sh --checkpoint <cp> …` (it decides skip or review; cp7: `plan-finalize --stage produce`) | |
 | `round_not_closed` | a round was prepared and never closed | state | `aid-review-round.sh close … --round <n>` | |
-| `review_round_failed` | the last round closed with open blockers | work | the step's role fixes them and commits, then `prepare --round <n+1>` | PM, via `dispute` (§13) |
-| `review_round_stale`, `cp3_stale_review` | HEAD moved after the round the reviewers saw | state | `aid-review-round.sh prepare … --round <n+1>` — a confirmation round over the commits since | |
+| `review_round_failed` | the last round closed with open blockers (a `form_invalid` finding counts) | work | the step's role fixes them and commits, then the step check and `prepare --round <n+1>` | PM, via `dispute` (`commands/aid-run.md` CP2/CP3 item 6) |
+| `review_round_stale`, `cp3_stale_review` | HEAD moved after the round the reviewers saw | state | the step check, then `aid-review-round.sh prepare … --round <n+1>` — a delta round over the commits since; after a passed round it needs no override | |
 | `no_change_without_outputs` | the step committed nothing and declares no output that exists | work | commit the step's work, run the step check again | PM, to waive the step |
 | `plan_manifest_missing`, `plan_branch_mismatch` | the EPIC was not started through its plan | state | `aid-plan-fsm.sh epic-start <plan> <epic> --run-id <run>`, then `init` again | |
 | `missing_lenses`, `done_advance_preconditions` | a done-advance precondition failed (each prints its own line above) | work | correct what the lines name, run the same `done-advance` again | |

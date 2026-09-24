@@ -407,6 +407,12 @@ audit line).
    (the `fix_of:` dispatch in the instruction below), a new step check, then
    `prepare --round 2`: the confirmation round asks only the reporters of what
    stayed open. `fail` after the last round → the PM card.
+   A step that moves after a `pass` (a later commit on the same step) is
+   confirmed the same way — a new step check, then `prepare --round <n+1>`: a
+   delta round over the commits since, asking every role, which the round
+   budget does not count and which needs no override.
+   A finding the adjudicator could not accept on form (`form_invalid` in
+   `merged.json`) is open like any other: fix it, or dispute it.
 5. The PM card after an exhausted round is the **Decision required** card of
    `skills/communication.md` (built with `scripts/lib/aid-decision-card.sh`):
    what stayed open (from `merged.json`, blockers first), and the options —
@@ -419,6 +425,14 @@ audit line).
    ```
    The override records the PM's words, the head sha and the time; it never
    changes a verdict.
+6. A finding the step's role believes wrong (the plan's criterion is wrong,
+   the claim is false) is disputed, never edited: `dispute <review> --round K
+   --fingerprint <fp> --reason "<why>"` marks it `disputed` and it keeps
+   blocking. Only the PM clears it: render a **Decision** card that quotes the
+   finding's fingerprint, wait for the answer, then
+   `dispute … --pm accepted --finding-card <card file> --reason "<the PM's words>"`
+   — refused without a PM prompt in the hook audit after the card. The round's
+   verdict is recomputed; `--pm rejected` leaves it open.
 
 <!-- adapter:begin -->
 # Claude reviewers of a review round — controller instruction
@@ -819,7 +833,7 @@ fix path once first; escalate when it does not apply or did not help.
 |---------|----------|------------------|
 | a gate is red and the failure is real | the fix path above | **Blocked** card: the gate, what it printed, the smallest fix |
 | a cp7 blocker is still open after a fixed attempt | one more fix when the finding changed; else stop | **Decision** card: FIX (what it costs) / accept with a recorded dispute / ABORT |
-| the project disputes a finding | `<round> dispute` is CP1-only: do not edit the finding | **Decision** card quoting the finding and its evidence |
+| the project disputes a finding | `<round> dispute` (CP1, CP2, CP3): do not edit the finding | **Decision** card quoting the finding and its evidence |
 | the branch was rewritten (`fix-class.json` reason `rewritten_branch`) | nothing is carried; run the full attempt | none, unless it repeats: then **Blocked** |
 | `verification_report` blocks | read its `git_clean` evidence: commit or discard the named tracked file | **Blocked** card naming the file |
 | `final_review_disabled` | switch `cp7_plan_final_review` back on | **Decision** card; only the PM's words go into `--stage decide --waive-final-review --reason "<words>"`, and the page then says the plan was NOT read as a whole |
@@ -939,4 +953,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-09-23
+**Last Updated:** 2026-09-24

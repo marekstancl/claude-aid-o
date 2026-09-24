@@ -80,7 +80,7 @@ _check() {
   aid_fixture_seed_step_review "$E" cp2 0 pass
   echo b >> src/app.py; git commit -qam fix
   _check cp2 0; [ "$status" -eq 1 ]
-  [[ "$output" == *"next: bash $AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare --checkpoint cp2 --step 0 --evidence-dir $E --round 2"* ]]
+  [[ "$output" == *"next: bash $AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint cp2 --step 0 --evidence-dir $E && bash $AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare --checkpoint cp2 --step 0 --evidence-dir $E --round 2"* ]]
   [[ "$output" == *"(pipeline.md §When AID refuses: review_round_stale)"* ]]
 }
 @test "drift: every measured reason in aid-fsm.sh has a next: line and a row in pipeline.md" {
