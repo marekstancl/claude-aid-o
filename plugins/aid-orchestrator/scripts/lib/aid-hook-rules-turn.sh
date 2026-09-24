@@ -99,7 +99,7 @@ aid_turn_open_steps() {
   [[ -n "$lines" ]] || return 1
   if [[ -n "$transcript" ]]; then
     local said
-    said="$(grep -oF -f <(cut -f6 <<< "$lines" | grep -v '(version )$') "$transcript" 2>/dev/null | sort -u)"
+    said="$(grep -oF -f <(cut -f6 <<< "$lines" | grep -v -e '(version )$' -e '^$') "$transcript" 2>/dev/null | sort -u)"
     lines="$(awk -F'\t' 'NR == FNR { s[$0] = 1; next } $6 in s' <(printf '%s\n' "$said") - <<< "$lines")"
   fi
   [[ -n "${lines//$'\n'/}" ]] || return 1
