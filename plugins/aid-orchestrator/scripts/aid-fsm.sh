@@ -6186,7 +6186,7 @@ EOF
        || mv -- "$_archive_task" "${_tasks_dir}/archive/"; then
       local _at_tl; _at_tl=$(derive_timeline "$state_file") || true
       [[ -n "$_at_tl" ]] && log_event "$_at_tl" "task_file_archived" file="$(basename "$_archive_task")"
-      echo "archived the EPIC task file: ${_tasks_dir}/archive/$(basename "$_archive_task")" >&2
+      echo "archived the EPIC task file: ${_tasks_dir}/archive/$(basename "$_archive_task") (a tracked file is staged as a rename in that checkout)" >&2
     else
       echo "WARN: could not archive ${_archive_task} — move it to ${_tasks_dir}/archive/ by hand" >&2
     fi

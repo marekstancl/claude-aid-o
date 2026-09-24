@@ -35,7 +35,7 @@ setup() {
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/lib/aid-queue-write.sh"* ]]
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/lib/aid-gate-profile-select.sh"* ]]
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/aid-queue-add.sh"* ]]
-  # the registry is mapped since 2.106.0 (the suites that read it)
+  # the registry is mapped since 2.107.0 (the suites that read it)
   [[ "$gap_ids" != *"selector-gap:plugins/aid-orchestrator/defaults/enforcement-registry.yaml"* ]]
 
   echo "$output" | jq -e '[.findings[] | select(.recommendation != "fix")] | length == 0' >/dev/null

@@ -92,7 +92,7 @@ _aps_count_steps() {
 }
 
 # _aps_count_epics <plan> — `**EPIC N: …**` markers (every plan states one
-# per phase since 2.106.0; an older single-EPIC plan may have 0).
+# per phase since 2.107.0; an older single-EPIC plan may have 0).
 _aps_count_epics() {
   _aps_count_stdin '^\*\*EPIC[[:space:]]+[0-9]+' "$1"
 }
