@@ -173,6 +173,19 @@ _return() {
   [ "$(git show --name-only --format= HEAD)" = "README.md" ]
 }
 
+@test "contract: a declared deletion of a promised artifact in scope is accepted; undeclared or out of scope is refused" {
+  rm tests/test-thing.bats
+  _return '{changed_files: ["src/thing.sh"], deleted_files: ["tests/test-thing.bats"]}'
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json .
+  [ "$status" -eq 0 ]
+  _return '{changed_files: ["src/thing.sh"]}'
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json .
+  [ "$status" -eq 1 ]; [[ "$output" == *"tests/test-thing.bats"* ]]
+  _return '{changed_files: ["src/thing.sh"], deleted_files: ["tests/test-thing.bats", "other/gone.txt"]}'
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json .
+  [ "$status" -eq 1 ]; [[ "$output" == *"outside the allowed paths: other/gone.txt"* ]]
+}
+
 @test "contract: with an evidence root the packet carries the step's absolute evidence directory" {
   aid_dispatch_contract_build plan.json 0 c-abs.json "$TEST_DIR/.aid-o/work/evidence/E/R"
   [ "$(jq -r .evidence_dir c-abs.json)" = "$TEST_DIR/.aid-o/work/evidence/E/R/steps/step_1_backend" ]

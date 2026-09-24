@@ -135,6 +135,8 @@ aid_dispatch_contract_build() {
   jq --arg v "$version" '. + {version: $v,
       return_shape: {contract_version: "<the version above, quoted back>",
                      changed_files: ["<every file you changed, repo-relative>"],
+                     deleted_files: ["<a file you deleted that the step may fold away; omit when none>"],
+                     repo_commits: [{repo: "<absolute path of another repository the step declares>", range: "<base>..<head> of your commits there"}],
                      gates: [{name: "<gate>", result: "pass|fail|skipped"}],
                      step_status: "done|blocked"}}' <<< "$body_json" > "$out" \
     || { echo "contract: could not write ${out}" >&2; return 1; }
@@ -297,12 +299,17 @@ aid_dispatch_contract_validate() {
     || _add reasons "the return's gates are not a list of {name, result: pass|fail|skipped}"
   jq -e '.step_status | IN("done","blocked")' "$r" >/dev/null 2>&1 || _add reasons "the return's step_status is not done|blocked"
 
-  # Artifacts: on the disk, not in the declaration.
-  local expected declared a
+  # Artifacts: on the disk, not in the declaration. A declared deletion
+  # (deleted_files) of an expected artifact inside the allowed paths is the
+  # step folding a file away, not a missing one (P100 Step 4); a deletion is a
+  # change like any other, so it counts as declared and is scope-checked below.
+  local expected declared deleted a
   expected="$(jq -r '.expected_artifacts[]? // empty' "$c")"
-  declared="$(jq -r '.changed_files[]? // empty' "$r")"
+  deleted="$(jq -r '.deleted_files[]? // empty' "$r")"
+  declared="$(jq -r '.changed_files[]?, .deleted_files[]? // empty' "$r")"
   while IFS= read -r a; do
     [[ -n "$a" ]] || continue
+    grep -qxF -- "$a" <<< "$deleted" && _aid_dc_path_allowed "$a" "$(aid_dispatch_contract_allowed "$c")" "steps/$(jq -r '.step_id // ""' "$c")" && continue
     # An ABSOLUTE expected artifact is checked where it actually is, not glued
     # behind the tree root. A step whose output lives in another repository
     # (a plan may declare one deliberately) otherwise produced
@@ -393,7 +400,7 @@ aid_dispatch_contract_commit() {
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
     if [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then files+=("$f"); fi
-  done < <(jq -r '.changed_files[]? // empty' "$r")
+  done < <(jq -r '.changed_files[]?, .deleted_files[]? // empty' "$r")
   if [[ "${#files[@]}" -eq 0 ]]; then
     echo "nothing to commit"
     return 0

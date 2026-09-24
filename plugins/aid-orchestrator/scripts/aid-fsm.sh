@@ -5115,7 +5115,7 @@ Fix: revert plan.json to init state; OR, if the PM regenerated the plan on purpo
       _prev_sc=$(yaml_field "$state_file" base_commit)
     fi
     if [[ -n "$_prev_sc" && "$_prev_sc" != "unknown" ]]; then
-      local -a _scope_paths=("$evidence_dir")
+      local -a _scope_paths=("$evidence_dir" "${_FSM_ALWAYS_ALLOWED[@]}")
       local _sp _cf _inscope
       while IFS= read -r _sp; do
         [[ -n "$_sp" ]] && _scope_paths+=("$_sp")
@@ -5380,6 +5380,11 @@ cmd_rebase_plan() {
   echo "rebase-plan: plan.json accepted (step ${cs} and every done step unchanged; future step(s) changed: ${changed_future[*]:-none}) — plan_json_hash re-stamped, recorded in ${rec#${evidence_dir}/} and the timeline. The step in flight keeps its contract and binding."
 }
 
+# Files whose only purpose is to receive findings, in scope in every state (the
+# commit-scope companion below). The pre-commit hook (defaults/hooks/pre-commit,
+# `_AID_ALWAYS_ALLOWED`) holds the same list; test-commit-guard.bats keeps them equal.
+_FSM_ALWAYS_ALLOWED=(".aid-o/work/backlog.md" ".aid-o/work/aid-plugin-issues.md" "docs/plans/BACKLOG.md")
+
 # ─── Scope amendment (PM-approved extra paths, mid-step) ─────────────────
 # Three guards read a step's scope: the pre-commit hook (plan.json, live), the
 # increment-step tamper check (plan.json, by hash stamped at init) and the
@@ -5391,8 +5396,10 @@ cmd_rebase_plan() {
 #   fsm-state  plan_json_hash re-stamped               (tamper check sees it)
 #   steps/<id>/scope-amendment.json                    (validator unions it)
 #   timeline scope_amended + audit-log                 (someone can ask why)
-# It never widens a step that is not the current one, never removes a path,
-# and refuses paths that leave the tree.
+# It never widens a step that is not the current one (after the last step: the
+# last one, whose scope the GATES/DONE union holds), never removes a path, and
+# refuses a path outside the tree unless it is an absolute path some step of
+# this plan already declared (P100 Step 4).
 cmd_amend_scope() {
   local state_file="" reason=""; local -a add=()
   while [[ $# -gt 0 ]]; do
@@ -5464,13 +5471,22 @@ cmd_amend_scope() {
   [[ -f "$plan" ]] || die "amend-scope: ${plan} not found"
   local cs; cs=$(yaml_field "$state_file" current_step); cs="${cs:-0}"
   local total; total=$(jq '.steps | length' "$plan")
-  [[ "$cs" -lt "$total" ]] || die "amend-scope: current_step ${cs} is past the last step (${total}) — nothing to widen"
+  [[ "$total" -gt 0 ]] || die "amend-scope: ${plan} has no steps — nothing to widen"
+  (( cs < total )) || cs=$(( total - 1 ))
   # Files, not subtrees, and never a path the step is forbidden: a widening
   # is a named file with a reason, not "scripts/" with a sentence.
   local p forbidden
   forbidden="$(jq -r --argjson i "$cs" '(.steps[$i].forbidden_paths // [])[]' "$plan" 2>/dev/null || true)"
+  local declared_abs; declared_abs="$(jq -r '.steps[].allowed_paths[]? | select(startswith("/"))' "$plan" 2>/dev/null || true)"
   for p in "${add[@]}"; do
-    [[ -n "$p" && "$p" != /* && "$p" != *".."* ]] || die "amend-scope: '${p}' must be a relative path inside the tree (no leading /, no ..)"
+    [[ -n "$p" && "$p" != *".."* ]] || die "amend-scope: '${p}' must be a path without .."
+    if [[ "$p" == /* ]]; then
+      local d ok=0
+      while IFS= read -r d; do
+        [[ -n "$d" && ( "$p" == "$d" || "$p" == "${d%/}/"* ) ]] && { ok=1; break; }
+      done <<< "$declared_abs"
+      (( ok )) || die "amend-scope: '${p}' is outside the tree and no step of the plan declares it — add it to the step's Files in the plan (a PM decision), then regenerate"
+    fi
     [[ "$p" != */ && "$p" != *"*"* && "$p" != *"?"* && ! -d "$p" ]] || die "amend-scope: '${p}' is a directory or a glob — amend names FILES, one --add each"
     local fb
     while IFS= read -r fb; do

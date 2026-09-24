@@ -1556,7 +1556,7 @@ EOS
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_a.py --reason "short"
   [ "$status" -ne 0 ]; [[ "$output" == *"20 characters"* ]]
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add /etc/passwd --reason "AC3 demands a test the plan forgot"
-  [ "$status" -ne 0 ]; [[ "$output" == *"relative path"* ]]
+  [ "$status" -ne 0 ]; [[ "$output" == *"no step of the plan declares it"* ]]
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src/ --reason "a whole directory is not a file"
   [ "$status" -ne 0 ]; [[ "$output" == *"FILES"* ]]
   mkdir -p "$td/lib"; ( cd "$td" && run bash "$FSM" amend-scope fsm-state.yaml --add lib --reason "an existing directory without a slash"; [ "$status" -ne 0 ] )
@@ -1585,6 +1585,21 @@ EOS
   # rebase-plan is the one that still refuses outside EXECUTE
   run bash "$FSM" rebase-plan "$td/fsm-state.yaml" --reason "a rebase at a boundary is the refused one"
   [ "$status" -ne 0 ]; [[ "$output" == *"not EXECUTE"* ]]
+}
+
+@test "amend-scope after the last step widens the last step in GATES; an absolute path is accepted only when a step declares it" {
+  local td="$TEST_EVIDENCE_DIR" other="$BATS_TEST_TMPDIR/docs-repo"
+  jq -n --arg o "$other/guide" '{steps:[{id:"s0",allowed_paths:["src/a.py"]},{id:"s1",allowed_paths:["tests/b.py",$o]}]}' > "$td/plan.json"
+  printf 'epic_id: E-AS\nrun_id: R-AS\nstate: GATES\ncurrent_step: 2\ntotal_steps: 2\nplan_json_hash: %s\n' "$(sha256sum "$td/plan.json" | awk '{print $1}')" > "$td/fsm-state.yaml"
+  : > "$td/timeline.jsonl"
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add docs/plans/finding.md --reason "the gate fix names a file no step listed"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.steps[1].allowed_paths | index("docs/plans/finding.md") != null' "$td/plan.json")" = true ]
+  [ "$(jq -r '.[0].step_id' "$td/steps/s1/scope-amendment.json")" = s1 ]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add "$other/guide/page.md" --reason "the docs page the plan declares for this step"
+  [ "$status" -eq 0 ]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add "$BATS_TEST_TMPDIR/elsewhere/x.md" --reason "a repository no step of the plan declares"
+  [ "$status" -ne 0 ]; [[ "$output" == *"no step of the plan declares it"* ]]
 }
 
 # ─── rebase-plan (agents #2): a regenerated plan is accepted under three conditions ─

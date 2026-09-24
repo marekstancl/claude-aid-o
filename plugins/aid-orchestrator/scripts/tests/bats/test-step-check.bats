@@ -6,7 +6,8 @@
 # empty range is no_change; a forbidden path or a file outside scope is never
 # a skip; a security pattern is review+security; handlers, test tiers,
 # streamlined runs, cp3 and cp6 ranges; the step_check event binds the file;
-# a recorded closed round is never overwritten by a re-run.
+# a recorded closed round is never overwritten by a re-run; a second declared
+# repository is reviewed from the step's return.
 # Origin: P094 Step 3 (step review rebuild).
 
 setup() {
@@ -148,13 +149,35 @@ _json() { jq -r "$1" "$E/$2/step-check.json"; }
   [ "$(_json '.files.scope_declared' cp6)" = false ]
   [[ "$(_json .dod cp6)" == "Task: do the thing"* ]]
 }
-@test "a re-run over a directory holding a closed failing round is refused and the index is unchanged" {
+@test "a re-run over a directory holding a closed failing round never replaces it: a small diff is review, not a skip, and the index is unchanged" {
   echo "one" >> "$R/src/app.py"; _commit s0 >/dev/null
   mkdir -p "$E/cp2/step-0/round-1"
   jq -n '{verdict: "fail", head_sha: "x", rounds: [{round: 1, verdict: "fail"}]}' > "$E/cp2/step-0/rounds.json"
   run _run --checkpoint cp2 --step 0
-  [ "$status" -eq 1 ]; [[ "$output" == *"already records a closed round"* ]]
+  [ "$status" -eq 0 ]; [ "$(_json .verdict cp2/step-0)" = review ]
   [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = fail ]
+}
+@test "a change only in a second declared repository is reviewed from the return's repo_commits; without them the repository is reported" {
+  local O="$T/docs-repo"; mkdir -p "$O/guide"; git -C "$O" init -q -b main
+  git -C "$O" config user.email t@t; git -C "$O" config user.name t
+  echo a > "$O/guide/page.md"; git -C "$O" add -A; git -C "$O" commit -qm base; local ob; ob="$(git -C "$O" rev-parse HEAD)"
+  echo b >> "$O/guide/page.md"; git -C "$O" commit -qam step; local oh; oh="$(git -C "$O" rev-parse HEAD)"
+  jq --arg o "$O/guide" '.steps[2].allowed_paths = [$o]' "$E/plan.json" > "$E/p" && mv "$E/p" "$E/plan.json"
+  run _run --checkpoint cp2 --step 2
+  [ "$status" -eq 0 ]; [ "$(_json .verdict cp2/step-2)" = review ]
+  [[ "$(_json .reason cp2/step-2)" == *"$O"* ]]
+  mkdir -p "$E/steps/s2"; jq -n --arg r "$O" --arg g "${ob}..${oh}" '{repo_commits: [{repo: $r, range: $g}]}' > "$E/steps/s2/return.json"
+  rm -rf "$E/cp2/step-2"
+  run _run --checkpoint cp2 --step 2
+  [ "$status" -eq 0 ]
+  [ "$(_json '.files.in_scope[0]' cp2/step-2)" = "$O/guide/page.md" ]
+}
+@test "a step that moves after a closed round is review, never skip" {
+  echo "s0" >> "$R/src/app.py"; _commit s0 >/dev/null
+  mkdir -p "$E/cp2/step-0"; jq -n '{verdict: "pass", head_sha: "x", rounds: [{round: 1, verdict: "pass"}]}' > "$E/cp2/step-0/rounds.json"
+  run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 0 ]; [ "$(_json .verdict cp2/step-0)" = review ]
+  [[ "$(_json .reason cp2/step-0)" == *"delta round"* ]]
 }
 @test "usage: a missing plan.json for cp2, an unreadable rules file and a bad checkpoint are refused with their code" {
   rm "$E/plan.json"; echo x >> "$R/src/app.py"; _commit s0 >/dev/null

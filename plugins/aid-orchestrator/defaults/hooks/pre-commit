@@ -84,6 +84,13 @@ _aid_emit() {
   printf '%s\n' "$_json" >> "$_tl" 2>/dev/null || true
 }
 
+# Files whose only purpose is to receive findings: always committable while a
+# run is in EXECUTE, GATES or DONE/review (ACTA #28 — a finding written to the
+# backlog during GATES was refused). The hook cannot load the plugin, so this
+# list exists twice by design: `_FSM_ALWAYS_ALLOWED` in scripts/aid-fsm.sh is
+# the other copy, and test-commit-guard.bats keeps the two equal.
+_AID_ALWAYS_ALLOWED=(".aid-o/work/backlog.md" ".aid-o/work/aid-plugin-issues.md" "docs/plans/BACKLOG.md")
+
 # _aid_in_scope <file> — true if <file> matches any entry of _AID_SCOPE[]
 # (exact path or directory-prefix match).
 _aid_in_scope() {
@@ -202,6 +209,7 @@ _aid_run_scope_check() {
     return 0
   fi
   while IFS= read -r _p; do [[ -n "$_p" ]] && _AID_SCOPE+=("$_p"); done <<< "$_paths"
+  _AID_SCOPE+=("${_AID_ALWAYS_ALLOWED[@]}")
   _aid_enforce_scope "$_label"
 }
 
