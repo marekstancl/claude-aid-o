@@ -592,7 +592,9 @@ execution_yaml_upgrade() {
       local name="${default_profile:-}" carried=""
       if [[ -z "$name" ]]; then
         name="$(yq '.gate_profile_defaults.epic // ""' "$file")"
-        if [[ -n "$name" && " ${profiles[*]} " == *" ${name} "* ]]; then carried=" (carried from gate_profile_defaults.epic)"; else name=standard; fi
+        if [[ -n "$name" && " ${profiles[*]} " == *" ${name} "* ]]; then carried=" (carried from gate_profile_defaults.epic)"
+        elif [[ -n "$name" ]]; then carried=" (gate_profile_defaults.epic '${name}' is not a declared profile)"; name=standard
+        else name=standard; fi
       fi
       if [[ ! " ${profiles[*]} " == *" ${name} "* ]]; then
         echo "[ERROR] ${file}: no profile named '${name}' to be default_profile; declared: ${profiles[*]}. Choose one and re-run with --default-profile <name>" >&2

@@ -192,9 +192,12 @@ _return() {
   echo "tests/" > .gitignore
   git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
   echo x > src/thing.sh; echo y > tests/test-thing.bats
-  _return '{}'
+  local ev=".aid-o/work/evidence/E-1/R-1/steps/step_1_backend/notes.md"
+  mkdir -p "${ev%/*}"; echo e > "$ev"
+  _return "{changed_files: [\"src/thing.sh\", \"tests/test-thing.bats\", \"$ev\"]}"
   run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
   echo "$output"; [ "$status" -eq 0 ]
+  # the ignored delivery is committed; AID's own state never is
   [ "$(git show --name-only --format= HEAD | sort | tr '\n' ' ')" = "src/thing.sh tests/test-thing.bats " ]
   # a step allowed to write into another repository: the file is named
   local other="$BATS_TEST_TMPDIR/other"; mkdir -p "$other"; echo z > "$other/doc.md"

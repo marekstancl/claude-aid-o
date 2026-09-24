@@ -337,7 +337,7 @@ _aid_lc_sync_checkout_of() {
     while IFS= read -r p; do
       [[ -f "${wt}/${p}" && "$(git -C "$wt" hash-object -- "$p")" == "$(git -C "$wt" rev-parse -q --verify "${new}:${p}")" ]] \
         && git -C "$wt" add -f -- "$p" 2>/dev/null
-    done < <(git -C "$wt" diff --name-only "$old" "$new")
+    done < <(git -C "$wt" -c core.quotepath=false diff --name-only "$old" "$new")
     git -C "$wt" read-tree -m -u "$old" "$new" 2>/dev/null && synced=1
   fi
   if (( synced )); then

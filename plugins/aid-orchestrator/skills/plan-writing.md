@@ -1422,4 +1422,3 @@ prepare-plan` sets those at the end of the plan, reading the current version
 from the files, so a step that already bumped them is bumped twice. Name the
 bump there (`--bump minor` for a new command or behaviour, `patch` for fixes);
 `--bump auto` cannot read a plan's own step commits and asks.
-

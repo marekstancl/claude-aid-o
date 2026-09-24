@@ -176,9 +176,10 @@ if [[ "$BUMP_TYPE" == "auto" ]]; then
       # A plan's own commits ("step 3: …", "merge(epic): …") carry no type, so
       # "no feat, no fix" says nothing about them: in a plan, ask instead of
       # guessing "no bump" (P101 was a new command and read as nothing).
-      local _untyped
-      _untyped="$(sed 's/^[^ ]* //' <<< "$COMMITS" | grep -Evc '^(chore|docs|refactor|test|tests|perf|build|ci|style|revert|release)(\([^)]*\))?!?:' || true)"
-      if [[ -n "${_AID_RELEASE_PLAN_MODE:-}" && "${_untyped:-0}" -gt 0 ]]; then
+      local _untyped=0
+      [[ -n "${_AID_RELEASE_PLAN_MODE:-}" ]] \
+        && _untyped="$(sed 's/^[^ ]* //' <<< "$COMMITS" | grep -Evc '^(chore|docs|refactor|test|tests|perf|build|ci|style|revert|release)(\([^)]*\))?!?:' || true)"
+      if [[ "${_untyped:-0}" -gt 0 ]]; then
         echo "PRECONDITION FAIL: --bump auto cannot read this plan: ${_untyped} commit(s) since $LAST_TAG carry no conventional type (a plan's step and merge commits), and none says feat or fix." >&2
         echo "next: aid-release.sh prepare-plan <plan_id> --bump minor|patch --plan-branch <branch>  (minor for a new command or behaviour, patch for fixes)" >&2
         exit 1

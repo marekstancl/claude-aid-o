@@ -4089,4 +4089,3 @@ enforcements:
     description: "2.107.0: the PM's MERGE/FIX/ABORT is written by plan-record-decision as the schema-valid pm_plan_decision bound to the frozen candidate (candidate, attempt, target head at freeze) into the attempt's directory; the close card and plan-continue name it before plan-merge-to-main, which refuses anything else (the card used to name release-decision.json, which the merge's schema refuses)."
     recovery: "aid-plan-fsm.sh plan-record-decision <plan> MERGE --by pm"
     test: "scripts/tests/bats/test-aid-plan-final-boundary.bats (grep: 'plan-record-decision writes the MERGE')"
-

@@ -424,7 +424,7 @@ aid_dispatch_contract_commit() {
     echo "contract: the return is not accepted, nothing is committed — $(jq -r '.reasons | join("; ")' <<< "$report" 2>/dev/null)" >&2
     return 1
   fi
-  local -a files=()
+  local -a files=() forced=()
   local f
   # Present on disk, or tracked and deleted — a declared deletion is a
   # change like any other and is staged as one. An accepted absolute path is
@@ -436,15 +436,20 @@ aid_dispatch_contract_commit() {
       echo "contract: not committed here: ${f} (another repository — commit it there and name it in the return's repo_commits)" >&2
       continue
     fi
-    if [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then files+=("$f"); fi
+    [[ "$f" == .aid-o/* ]] && continue   # AID's own state is never the step's delivery
+    if [[ -f "${root}/${f}" ]]; then forced+=("$f")
+    elif [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then files+=("$f"); fi
   done < <(jq -r '.changed_files[]?, .deleted_files[]? // empty' "$r")
-  if [[ "${#files[@]}" -eq 0 ]]; then
+  if [[ "$(( ${#files[@]} + ${#forced[@]} ))" -eq 0 ]]; then
     echo "nothing to commit"
     return 0
   fi
-  # -f: a declared path the project gitignores (docs/ in AID itself) is still
-  # the step's delivery; every path here passed the contract's scope check.
-  git -C "$root" add -A -f -- "${files[@]}" 2>/dev/null || { echo "contract: git add refused in ${root}" >&2; return 1; }
+  # -f only for a declared regular file: one the project gitignores (docs/ in
+  # AID itself) is still the step's delivery. A directory is added without it,
+  # so its ignored contents (build output, .env) never ride along.
+  { [[ "${#forced[@]}" -eq 0 ]] || git -C "$root" add -f -- "${forced[@]}"; } 2>/dev/null \
+    && { [[ "${#files[@]}" -eq 0 ]] || git -C "$root" add -A -- "${files[@]}"; } 2>/dev/null \
+    || { echo "contract: git add refused in ${root}" >&2; return 1; }
   if git -C "$root" diff --cached --quiet; then
     echo "nothing to commit"
     return 0
