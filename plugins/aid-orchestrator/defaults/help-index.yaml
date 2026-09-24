@@ -215,3 +215,13 @@ surfaces:
       purpose: "Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision",
       topic: plan, audience: power, disposition: current,
       writes: [], final_turn: "card:decision-required" }
+
+  - { command: /aid-ui, file: plugins/aid-orchestrator/commands/aid-ui.md,
+      purpose: "Guide the PM from product type to a built, verified UI whose direction the PM chose",
+      topic: ui, audience: regular, disposition: current,
+      writes: [], final_turn: "card:decision-required" }
+
+  - { command: /ui-design, file: plugins/aid-orchestrator/skills/ui-design/SKILL.md,
+      purpose: "Seven steps of /aid-ui, loaded by that command; not invoked directly",
+      topic: ui, audience: power, disposition: current,
+      writes: [], final_turn: "card:decision-required" }

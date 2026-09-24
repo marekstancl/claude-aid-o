@@ -1,0 +1,42 @@
+/* Brand page base. Reads only the fixed --brand-* names (set in roles.css);
+   every read has a neutral fallback so the page is readable before tokens exist. */
+body {
+  margin: 0;
+  background: var(--brand-bg, #ffffff);
+  color: var(--brand-ink, #1a1a1a);
+  font-family: var(--brand-body-family, system-ui, sans-serif);
+  font-size: var(--brand-body-size, 1rem);
+  font-weight: var(--brand-body-weight, 400);
+  line-height: var(--brand-body-line-height, 1.5);
+  letter-spacing: var(--brand-body-letter-spacing, normal);
+}
+header, nav, main { max-width: 60rem; margin: 0 auto; padding: 1rem; }
+h1, h2 {
+  font-family: var(--brand-display-family, system-ui, sans-serif);
+  font-weight: var(--brand-display-weight, 700);
+  line-height: var(--brand-display-line-height, 1.1);
+  letter-spacing: var(--brand-display-letter-spacing, normal);
+  overflow-wrap: anywhere;
+}
+h1 { font-size: var(--brand-display-size, 2.25rem); }
+nav ol { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; padding: 0; list-style: none; }
+a { color: var(--brand-accent, #1d4ed8); }
+a:focus-visible { outline: 2px solid var(--brand-accent, #1d4ed8); outline-offset: 2px; }
+section { padding: 2rem 0; border-top: 1px solid var(--brand-ink, #1a1a1a); }
+.status { font-size: 0.875rem; font-weight: 600; }
+[data-status="ceka"] .status::before { content: "Čeká"; }
+[data-status="navrh"] .status::before { content: "Návrh · "; }
+[data-status="schvaleno"] .status::before { content: "Schváleno · "; }
+.swatch {
+  display: inline-block;
+  width: 6rem;
+  height: 4rem;
+  margin: 0 0.5rem 0.5rem 0;
+  border: 1px solid var(--brand-ink, #1a1a1a);
+  vertical-align: top;
+}
+@media print {
+  nav { display: none; }
+  section { break-before: page; border-top: 0; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
