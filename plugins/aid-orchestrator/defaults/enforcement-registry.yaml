@@ -3356,7 +3356,7 @@ enforcements:
   - id: milestone_artifact_rendered
     type: 12
     source: "scripts/lib/aid-artifact-obligation.sh:aid_artifact_obligation_check / _close_check + defaults/hook-registry.yaml (rule milestone_artifact_rendered)"
-    instruction: "commands/aid-plan.md (Mode: Write Plan, step 8p) + skills/pipeline.md (DONE telemetry)"
+    instruction: "commands/aid-plan.md (Plan review, item 10) + skills/pipeline.md (DONE telemetry)"
     severity: blocking
     surface: llm-facing
     status: active
@@ -3364,7 +3364,7 @@ enforcements:
     tier: n/a
     enforcement_degree: 2
     not_guaranteed: "That the PM read the page, or that it says anything useful. The check is that the file exists and is newer than its source — presence and currency, never quality."
-    description: "P086 Step 4, widened by P089 Step 6, narrowed by P099 Step 4 to the two pages the PM reads — a written plan and a closed plan each owe the PM a rendered page. An EPIC, a STEP and a FAILED step owe nothing (PM, 2026-08-25 and 2026-09-23). scripts/aid-turn-gate.sh checks the plan file after the CLI returns (the primary mechanism: it survives a killed session and works in run modes with no Stop event), and the Stop hook rule catches both one turn earlier where that event exists. Promoted from `planned` — P084 filed the row deliberately so the hook layer would have one to promote rather than a new one to invent."
+    description: "P086 Step 4, widened by P089 Step 6, narrowed by P099 Step 4 to the two pages the PM reads — a reviewed plan (its plan review gate passed, 2026-09-24) and a closed plan each owe the PM a rendered page. An EPIC, a STEP and a FAILED step owe nothing (PM, 2026-08-25 and 2026-09-23). scripts/aid-turn-gate.sh checks the plan file after the CLI returns (the primary mechanism: it survives a killed session and works in run modes with no Stop event), and the Stop hook rule catches both one turn earlier where that event exists. Promoted from `planned` — P084 filed the row deliberately so the hook layer would have one to promote rather than a new one to invent."
     recovery: "The finding names the missing page and the renderer that produces it: aid_plan_summary_render for a plan, aid_plan_close_render for a closed plan. Run it, then publish the body with the Artifact tool."
     test_covers: "the CHECK and its caller. What no suite can observe is a session choosing to publish the rendered body with the Artifact tool — that act stays a session-level one, and this row no longer claims otherwise about the rest."
     test: "scripts/tests/bats/test-artifact-obligation.bats"

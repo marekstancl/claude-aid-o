@@ -31,6 +31,14 @@ models:
     blended_basis: "estimated: the opus blend scaled by the input-price ratio 2/5. P095 was to replace this with a measured figure from its own cp2 rounds; it was built OUTSIDE the AID pipeline on the PM's instruction (2026-09-20), so ZERO rounds were priced and the estimate stands. Since P099 the defaults run step reviewers on opus, so only a project that pins sonnet measures it."
     source: "https://platform.claude.com/docs/en/about-claude/pricing"
     as_of: "2026-09-19"
+  gpt-6-sol:
+    vendor_name: "gpt-6-sol (codex exec -m)"
+    input: 2.00
+    output: 10.00
+    cache_read: 0.20
+    cache_write: 0
+    source: "https://developers.openai.com/api/docs/pricing"
+    as_of: "2026-09-24"
   gpt-5.6-terra:
     vendor_name: "gpt-5.6-terra (codex exec -m)"
     input: 2.00

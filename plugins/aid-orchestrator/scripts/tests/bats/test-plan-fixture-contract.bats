@@ -109,8 +109,11 @@ _generate() {
   printf '\n<!-- a later edit -->\n' >> "$d/.aid-o/plans/P099-multi.md"
   run bash -c 'cd "$1"; source "$AID_PLUGIN_PATH/scripts/lib/aid-artifact-obligation.sh"
     aid_artifact_obligation_check "$1/.aid-o/plans/P099-multi.md"' _ "$d"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"OLDER than the plan"* ]]
+  # An edit after the review un-passes the plan review gate, so the plan owes
+  # no page until it is reviewed again (2.104.1); the stale page itself is
+  # test-artifact-obligation.bats "a page older than its plan".
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"has not passed its plan review"* ]]
 
   aid_fixture_seed_plan "$d" "$d/.aid-o/plans/P099-multi.md" P099-multi.md >/dev/null
   run bash -c 'cd "$1"; source "$AID_PLUGIN_PATH/scripts/lib/aid-artifact-obligation.sh"

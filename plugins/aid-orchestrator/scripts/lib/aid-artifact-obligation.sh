@@ -13,7 +13,7 @@
 #   so rather than leaving it to be inferred from the absence of code.
 #
 # WHY THIS EXISTS
-#   `commands/aid-plan.md` step 8p has told sessions to render the PM's page
+#   `commands/aid-plan.md` (then step 8p) has told sessions to render the PM's page
 #   since P084 and said so in its own text: "this is an INSTRUCTION, the
 #   weakest form there is — nothing fails if a session skips it". The row
 #   `plan_artifact_rendered` was filed in the enforcement registry as
@@ -40,7 +40,7 @@
 #
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 #
-# **Last Updated:** 2026-08-26
+# **Last Updated:** 2026-09-24
 # =============================================================================
 [[ -n "${_AID_ARTIFACT_OBLIGATION_SH_LOADED:-}" ]] && return 0
 _AID_ARTIFACT_OBLIGATION_SH_LOADED=1
@@ -64,7 +64,7 @@ _aid_ao_yaml() {
   printf '%s' "$v"
 }
 
-# The page commands/aid-plan.md step 8p renders, in the one place that spells
+# The page commands/aid-plan.md "Plan review" item 10 renders, in the one place that spells
 # it, so the instruction and the check cannot drift apart.
 aid_artifact_obligation_page() {
   local plan_id="$1" root
@@ -97,6 +97,18 @@ aid_artifact_obligation_check() {
   # authority on what it can render — so it is asked, not second-guessed.
   if ! aid_plan_summary_renderable "$plan"; then
     echo "${base} cannot be rendered into a page (lib/aid-plan-summary.sh refuses it), so it owes none" >&2
+    return 3
+  fi
+
+  # The PM reads the plan once, reviewed (PM, 2026-09-24): until the plan
+  # review gate passes, the plan owes no page — a page rendered mid-review
+  # would show a plan the reviewers are still changing.
+  local groot; groot="$(aid_state_root)" || {
+    echo "cannot resolve the state root — the plan review cannot be read" >&2
+    return 3
+  }
+  if ! bash "${_AID_AO_LIB_DIR}/../aid-cp1-gate.sh" --plan "$plan" --project-root "$groot" >/dev/null 2>&1; then
+    echo "${plan_id} has not passed its plan review (aid-cp1-gate.sh) — its page is owed once it does" >&2
     return 3
   fi
 

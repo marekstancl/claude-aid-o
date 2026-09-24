@@ -257,7 +257,7 @@ After the interim is written and BEFORE the plan is:
   from it.
 
 Goes in the chat, not on a page: it is a checkpoint answered on the spot, and
-the artifact belongs to the finished plan (step 8p).
+the page belongs to the reviewed plan (Plan review item 10).
 
 The PM accepts it, corrects it, or refuses it. **Refused → back to the stop in
 Step 3; the plan is not written.** Something added → it goes back through the
@@ -344,25 +344,6 @@ Write an exhaustive implementation plan from specification or topic.
 6. **Plan assembly** — write section by section per `skills/plan-writing.md` template
 7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (28 checks: 16 original + #17 + 17a-e + #18 + #19 + 20a-c + #21; eight are band-scoped — see `skills/plan-writing.md`)
 8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
-8p. **PM page (required, right after the write)** — render the plan's summary
-    and show the PM that page, not the plan:
-    ```bash
-    source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh"
-    aid_plan_summary_render ".aid-o/plans/P{NNN}-{topic}.md" \
-      ".aid-o/work/evidence/P{NNN}/plan-summary-artifact.html"
-    ```
-    Publish the rendered body with the Artifact tool (the renderer never
-    publishes — same boundary as `lib/aid-plan-close-summary.sh`). Every figure
-    on the page is counted from the plan, so do NOT restate it in prose and do
-    NOT write a summary section into the plan itself — `plan-writing.md` MUST
-    rule 17 forbids it and `aid-plan-lint.sh` reports it.
-
-    **Enforcement, stated honestly:** this is an INSTRUCTION, the weakest form
-    there is — nothing fails if a session skips it. The mechanism that will
-    make it hard is the hook layer of Plan 3 (a `Stop` hook refusing to close a
-    turn that wrote a plan without rendering its page). Until then it is a
-    deliberately accepted risk, registered as `plan_artifact_rendered` with
-    `severity: advisory` in the enforcement registry.
 8a. **Files-shape lint (automatic, before CP1)** — run
     `bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" ".aid-o/plans/P{NNN}-{topic}.md"`.
     On a non-zero exit, fix the exact Files entries it names (per the grammar in
@@ -669,6 +650,22 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
    bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan <plan>
    ```
 
+10. **PM page (required, once the gate passes)** — the PM reads the plan once,
+    complete and reviewed, so its page is rendered only now, never earlier:
+
+    ```bash
+    source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh"
+    aid_plan_summary_render <plan> .aid-o/work/evidence/<plan_id>/plan-summary-artifact.html
+    ```
+
+    Publish the rendered body with the Artifact tool (the renderer never
+    publishes). Every figure on the page is counted from the plan, so do NOT
+    restate it in prose and do NOT write a summary section into the plan —
+    `plan-writing.md` MUST rule 17 forbids it and `aid-plan-lint.sh` reports it.
+    The `Stop` rule `milestone_artifact_rendered` refuses to end a turn while a
+    plan this session wrote has passed the gate without a current page
+    (`lib/aid-artifact-obligation.sh`); before the gate passes it asks for none.
+
 **Round count.** Two rounds is the default (`review_checkpoints.plan_review.rounds_default`).
 Only when the PM says so, record one round, or a third:
 
@@ -737,9 +734,10 @@ their existing per-EPIC release text unchanged.
 ## The PM page goes stale with every plan edit
 
 `aid-plan-to-epic.sh` refuses to generate when the PM page is older than the plan file
-("has no current PM page"). That is by design — the page is what the PM approved — so after
-every plan edit, re-render it with the command the refusal prints before running generation
-again.
+("has no current PM page"). That is by design — the page is what the PM approved. An edit
+also un-passes the plan review gate, so after every plan edit run the review to a passing
+gate again ("Plan review (CP1)" items 6-9), then re-render the page (item 10) before
+generation.
 
 ## When AID itself misbehaves
 
@@ -755,7 +753,7 @@ A gate that refuses a valid plan, a script that crashes, a message that tells yo
 - `{plugin_path}/scripts/aid-review-round.sh` — plan review rounds (prepare, dispatch, collect, close, retry, fix-check, dispute, finalize, override)
 - `{plugin_path}/scripts/aid-review-adjudicate.sh` — merges a round's answers, rejects findings without proof
 - `{plugin_path}/scripts/aid-cp1-gate.sh` — the plan review gate (called once per generation transaction by aid-auto-pipeline.sh; per invocation by a standalone aid-plan-to-epic.sh)
-- `{plugin_path}/scripts/lib/aid-plan-summary.sh` — renders the PM page for a freshly written plan (step 8p)
+- `{plugin_path}/scripts/lib/aid-plan-summary.sh` — renders the PM page for a plan that passed its review (Plan review item 10)
 - `defaults/policies/review-checkpoints.yaml` — `plan_review`: reviewers, providers, models, rounds
 - `defaults/templates/plan.md` — base plan template
 

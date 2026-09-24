@@ -9,7 +9,7 @@
 # change of the five-argument signature is checked against all of them.
 
 # The model is configuration: a caller may repoint CODEX_MODEL before the call.
-CODEX_MODEL="${CODEX_MODEL:-${AID_C3_CODEX_MODEL:-gpt-5.6-terra}}"
+CODEX_MODEL="${CODEX_MODEL:-${AID_C3_CODEX_MODEL:-gpt-6-sol}}"
 
 # aid_codex_binary — the highest-version `codex` on $PATH, not the first one.
 # Two installs coexist on the dev host (/usr/local/bin/codex 0.149.1 shadows
@@ -101,7 +101,7 @@ aid_codex_probe() {
 #   One fresh, read-only codex process; its --json stream, stderr and last
 #   message land in the three output files. Independence is provider + fresh
 #   process + `--sandbox read-only`, not a filesystem jail. Reads $CODEX_MODEL
-#   and $CODEX_EFFORT (default high, as measured in
+#   and $CODEX_EFFORT (default medium, the PM choice after
 #   docs/plans/P099-codex-model-check.md) and a timeout
 #   (AID_CODEX_ISOLATED_TIMEOUT_SECONDS; AID_C3_TIMEOUT_SECONDS is the older name
 #   and still wins when set). Returns the codex/timeout exit code (124 = timed out).
@@ -122,7 +122,7 @@ _run_codex_isolated() {
       --cd "$project_root" \
       --sandbox read-only \
       -m "$CODEX_MODEL" \
-      -c model_reasoning_effort="${CODEX_EFFORT:-high}" \
+      -c model_reasoning_effort="${CODEX_EFFORT:-medium}" \
       --output-last-message "$last_out" \
       - < "$prompt_file" > "$events_out" 2> "$stderr_out" || rc=$?
   return "$rc"
