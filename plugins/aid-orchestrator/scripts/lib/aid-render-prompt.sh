@@ -43,7 +43,7 @@
 #   0 — rendered successfully (provenance JSON on stdout)
 #   1 — any usage / precondition / validation failure (message on stderr)
 #
-# **Last Updated:** 2026-07-14
+# **Last Updated:** 2026-09-24
 # =============================================================================
 set -euo pipefail
 
@@ -100,93 +100,101 @@ done
 # ---------------------------------------------------------------------------
 # Step 1: parse the frontmatter (declared variable set + template identity)
 # ---------------------------------------------------------------------------
-# Extract the YAML frontmatter block: everything strictly between the first
-# `---` (which must be line 1) and the next `---`.
-FRONTMATTER="$(awk 'NR==1 && $0=="---"{infm=1; next} infm && $0=="---"{exit} infm{print}' "$TEMPLATE")"
+# A review round renders six prompts from one template, and each external
+# process costs ~30 ms on the dev host, so the file is split in bash and every
+# question below is ONE yq or jq pass (was ~30 processes per prompt, 2026-09-24).
+#
+# Frontmatter = everything strictly between the first `---` (line 1) and the
+# next `---`; body = everything after that closing line.
+_strip_nl() { local v="$1"; while [[ "$v" == *$'\n' ]]; do v="${v%$'\n'}"; done; printf -v "$2" '%s' "$v"; }
+mapfile -t _L < "$TEMPLATE"
+FRONTMATTER=""; BODY=""
+if [[ "${_L[0]:-}" == "---" ]]; then
+  _close=0
+  for (( _i = 1; _i < ${#_L[@]}; _i++ )); do [[ "${_L[$_i]}" == "---" ]] && { _close=$_i; break; }; done
+  if (( _close > 0 )); then
+    (( _close > 1 )) && printf -v FRONTMATTER '%s\n' "${_L[@]:1:_close-1}"
+    (( _close + 1 < ${#_L[@]} )) && printf -v BODY '%s\n' "${_L[@]:_close+1}"
+  else
+    printf -v FRONTMATTER '%s\n' "${_L[@]:1}"
+  fi
+fi
+_strip_nl "$FRONTMATTER" FRONTMATTER; _strip_nl "$BODY" BODY
 [[ -n "$FRONTMATTER" ]] || _fail "template has no YAML frontmatter (expected a leading '---' block): $TEMPLATE"
 
-# Declared variables (fail closed if `variables:` is absent or not a sequence).
-declared_raw="$(printf '%s\n' "$FRONTMATTER" | yq -r '.variables // "__MISSING__"' 2>/dev/null || true)"
-[[ "$declared_raw" != "__MISSING__" && -n "$declared_raw" ]] \
-  || _fail "template frontmatter has no 'variables:' list: $TEMPLATE"
-
-declared_type="$(printf '%s\n' "$FRONTMATTER" | yq -r '.variables | type' 2>/dev/null || echo "")"
-[[ "$declared_type" == "!!seq" ]] || _fail "template frontmatter 'variables:' is not a list (got: ${declared_type:-none})"
-
-mapfile -t DECLARED < <(printf '%s\n' "$FRONTMATTER" | yq -r '.variables[]' 2>/dev/null | LC_ALL=C sort -u)
-[[ ${#DECLARED[@]} -gt 0 ]] || _fail "template frontmatter 'variables:' list is empty"
-
-TEMPLATE_ID="$(printf '%s\n' "$FRONTMATTER" | yq -r '.template_id // ""' 2>/dev/null || echo "")"
-TEMPLATE_VERSION="$(printf '%s\n' "$FRONTMATTER" | yq -r '.template_version // ""' 2>/dev/null || echo "")"
+# Line 1: the verdict on `variables:`; 2: template_id; 3: template_version;
+# then the declared variables, sorted and unique.
+mapfile -t _FM < <(printf '%s\n' "$FRONTMATTER" | yq -o=json '.' 2>/dev/null | jq -r '
+  (if (.variables // "") == "" then "missing"
+   elif (.variables | type) != "array" then "type:\(.variables | type)"
+   elif (.variables | length) == 0 then "empty"
+   else "ok" end),
+  (.template_id // "" | tostring), (.template_version // "" | tostring),
+  (if (.variables | type) == "array" then .variables | map(tostring) | unique | .[] else empty end)' 2>/dev/null)
+case "${_FM[0]:-}" in
+  ok) ;;
+  missing|"") _fail "template frontmatter has no 'variables:' list: $TEMPLATE" ;;
+  type:*)     _fail "template frontmatter 'variables:' is not a list (got: ${_FM[0]#type:})" ;;
+  empty)      _fail "template frontmatter 'variables:' list is empty" ;;
+esac
+TEMPLATE_ID="${_FM[1]}"; TEMPLATE_VERSION="${_FM[2]}"
+DECLARED=("${_FM[@]:3}")
 
 # ---------------------------------------------------------------------------
 # Step 2: validate --vars-json (object, string values, no `{{` injection)
 # ---------------------------------------------------------------------------
-jq -e . "$VARS_JSON" >/dev/null 2>&1 || _fail "vars-json is not valid JSON: $VARS_JSON"
-[[ "$(jq -r 'type' "$VARS_JSON")" == "object" ]] || _fail "vars-json is not a JSON object: $VARS_JSON"
-
-# All values must be strings.
-non_string="$(jq -r '[to_entries[] | select((.value | type) != "string") | .key] | join(", ")' "$VARS_JSON")"
-[[ -z "$non_string" ]] || _fail "vars-json values must all be strings; non-string key(s): ${non_string}"
-
-# No value may contain the placeholder opener `{{` (prevents value→placeholder bleed).
-inject_keys="$(jq -r '[to_entries[] | select(.value | contains("{{")) | .key] | join(", ")' "$VARS_JSON")"
-[[ -z "$inject_keys" ]] || _fail "vars-json values must not contain '{{'; offending key(s): ${inject_keys}"
-
-# vars-json key set (sorted, deduped).
-mapfile -t VARS_KEYS < <(jq -r 'keys_unsorted[]' "$VARS_JSON" | LC_ALL=C sort -u)
+# Line 1: the verdict; then the key set, sorted and unique.
+mapfile -t _VJ < <(jq -rs '
+  if length != 1 then "json"
+  elif (.[0] | type) != "object" then "object"
+  else .[0]
+    | ([to_entries[] | select((.value | type) != "string") | .key] | join(", ")) as $ns
+    | ([to_entries[] | select((.value | type) == "string" and (.value | contains("{{"))) | .key] | join(", ")) as $inj
+    | (if $ns != "" then "string:\($ns)" elif $inj != "" then "inject:\($inj)" else "ok" end),
+      (keys | .[])
+  end' "$VARS_JSON" 2>/dev/null)
+case "${_VJ[0]:-}" in
+  ok) ;;
+  object)   _fail "vars-json is not a JSON object: $VARS_JSON" ;;
+  string:*) _fail "vars-json values must all be strings; non-string key(s): ${_VJ[0]#string:}" ;;
+  inject:*) _fail "vars-json values must not contain '{{'; offending key(s): ${_VJ[0]#inject:}" ;;
+  *)        _fail "vars-json is not valid JSON: $VARS_JSON" ;;
+esac
+VARS_KEYS=("${_VJ[@]:1}")
 
 # ---------------------------------------------------------------------------
 # Step 3: declared set == vars key set (bidirectional, fail closed)
 # ---------------------------------------------------------------------------
-declared_joined="$(printf '%s\n' "${DECLARED[@]}")"
-vars_joined="$(printf '%s\n' "${VARS_KEYS[@]}")"
-
-missing="$(LC_ALL=C comm -23 <(printf '%s\n' "$declared_joined") <(printf '%s\n' "$vars_joined") | paste -sd, - || true)"
-unknown="$(LC_ALL=C comm -13 <(printf '%s\n' "$declared_joined") <(printf '%s\n' "$vars_joined") | paste -sd, - || true)"
+declare -A DECLARED_SET=() VARS_SET=()
+for d in "${DECLARED[@]}"; do DECLARED_SET["$d"]=1; done
+for k in "${VARS_KEYS[@]}"; do VARS_SET["$k"]=1; done
+missing=""; unknown=""
+for d in "${DECLARED[@]}"; do [[ -n "${VARS_SET[$d]:-}" ]] || missing+="${missing:+,}$d"; done
+for k in "${VARS_KEYS[@]}"; do [[ -n "${DECLARED_SET[$k]:-}" ]] || unknown+="${unknown:+,}$k"; done
 [[ -z "$missing" ]] || _fail "vars-json is MISSING declared variable(s): ${missing}"
 [[ -z "$unknown" ]] || _fail "vars-json has UNKNOWN variable(s) not declared by the template: ${unknown}"
 
 # ---------------------------------------------------------------------------
 # Step 4: every body placeholder must be a declared variable
 # ---------------------------------------------------------------------------
-# Body = template with the frontmatter block removed (so `variables:` in the
-# frontmatter is never mistaken for a body placeholder — it has no `{{}}` anyway,
-# but the body is what we substitute into).
-BODY="$(awk 'BEGIN{fm=0; done=0}
-  NR==1 && $0=="---" {fm=1; next}
-  fm==1 && done==0 && $0=="---" {done=1; next}
-  fm==1 && done==0 {next}
-  {print}' "$TEMPLATE")"
-
-# Collect declared set into an associative array for O(1) membership tests.
-declare -A DECLARED_SET=()
-for d in "${DECLARED[@]}"; do DECLARED_SET["$d"]=1; done
-
-# Well-formed placeholders in the body.
-mapfile -t BODY_PLACEHOLDERS < <(printf '%s\n' "$BODY" | grep -oE '\{\{[A-Za-z0-9_]+\}\}' | LC_ALL=C sort -u || true)
-for ph in "${BODY_PLACEHOLDERS[@]}"; do
-  name="${ph#\{\{}"; name="${name%\}\}}"
-  [[ -n "${DECLARED_SET[$name]:-}" ]] || _fail "template body uses undeclared placeholder: {{${name}}}"
+_rest="$BODY"
+while [[ "$_rest" =~ \{\{([A-Za-z0-9_]+)\}\} ]]; do
+  [[ -n "${DECLARED_SET[${BASH_REMATCH[1]}]:-}" ]] || _fail "template body uses undeclared placeholder: {{${BASH_REMATCH[1]}}}"
+  _rest="${_rest#*"${BASH_REMATCH[0]}"}"
 done
 
 # ---------------------------------------------------------------------------
 # Step 5: substitute (JSON-aware literal split/join — no eval/sed/string-glue)
 # ---------------------------------------------------------------------------
-body_tmp="$(mktemp)"
 rendered_tmp="$(mktemp)"
 # shellcheck disable=SC2064
-trap "rm -f '$body_tmp' '$rendered_tmp'" EXIT
+trap "rm -f '$rendered_tmp'" EXIT
 
-# Write the EXACT body bytes (awk above drops the trailing newline of its input
-# stream; re-add a single trailing newline to match the template's own final
-# newline — templates are authored to end with one).
-printf '%s\n' "$BODY" > "$body_tmp"
-
-# jq reduces over each {key,value}, replacing every literal "{{key}}" with the
-# value. split(str)/join(str) are LITERAL (not regex), so no metacharacter can
-# leak. `-j` emits raw bytes with no added trailing newline.
-if ! jq -jn --rawfile body "$body_tmp" --slurpfile vars "$VARS_JSON" '
+# The body plus a single trailing newline — templates are authored to end
+# with one. jq reduces over each {key,value}, replacing every literal
+# "{{key}}" with the value. split(str)/join(str) are LITERAL (not regex), so no
+# metacharacter can leak. `-j` emits raw bytes with no added trailing newline.
+if ! jq -jn --arg body "${BODY}"$'\n' --slurpfile vars "$VARS_JSON" '
       ($vars[0] // {}) as $v
       | reduce ($v | to_entries[]) as $e ($body;
           split("{{" + $e.key + "}}") | join($e.value))
@@ -197,7 +205,8 @@ fi
 # ---------------------------------------------------------------------------
 # Step 6: no residual placeholder may remain
 # ---------------------------------------------------------------------------
-if grep -qE '\{\{' "$rendered_tmp"; then
+_rendered="$(<"$rendered_tmp")"
+if [[ "$_rendered" == *'{{'* ]]; then
   residual="$(grep -oE '\{\{[^}]*\}\}' "$rendered_tmp" | LC_ALL=C sort -u | paste -sd, - || true)"
   _fail "rendered output still contains placeholder(s): ${residual:-<malformed {{>}}"
 fi
@@ -205,17 +214,16 @@ fi
 # ---------------------------------------------------------------------------
 # Step 7: write --output and emit provenance JSON
 # ---------------------------------------------------------------------------
-out_dir="$(dirname "$OUTPUT")"
-[[ -d "$out_dir" ]] || _fail "output directory does not exist: $out_dir"
+out_dir="."; [[ "$OUTPUT" == */* ]] && out_dir="${OUTPUT%/*}"
+[[ -d "${out_dir:-/}" ]] || _fail "output directory does not exist: $out_dir"
 cp "$rendered_tmp" "$OUTPUT" || _fail "cannot write output: $OUTPUT"
 
-template_sha="sha256:$(sha256sum "$TEMPLATE" | awk '{print $1}')"
-rendered_sha="sha256:$(sha256sum "$OUTPUT"   | awk '{print $1}')"
+{ read -r template_sha _; read -r rendered_sha _; } < <(sha256sum "$TEMPLATE" "$OUTPUT")
 
 jq -n \
   --arg tid "$TEMPLATE_ID" \
   --arg tver "$TEMPLATE_VERSION" \
-  --arg tsha "$template_sha" \
-  --arg rsha "$rendered_sha" \
+  --arg tsha "sha256:${template_sha}" \
+  --arg rsha "sha256:${rendered_sha}" \
   --arg out "$OUTPUT" \
   '{template_id: $tid, template_version: $tver, template_sha256: $tsha, rendered_prompt_sha256: $rsha, output: $out}'

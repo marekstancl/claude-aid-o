@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t0
 # test-aid-plan-close-check.bats — aid-plan-close-check.sh (PM plugin-infra fix,
 # branch fix/plan-close-consistency).
 #

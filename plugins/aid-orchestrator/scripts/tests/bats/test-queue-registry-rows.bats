@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-queue-registry-rows.bats — P090 Step 7.
 #
 # WHY THIS SUITE EXISTS AT ALL. The obvious answer — "the registry checks

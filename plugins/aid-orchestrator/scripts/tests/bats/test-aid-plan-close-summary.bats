@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-aid-plan-close-summary.bats — fixtures for the plan-final/close renderer
 # (P080 Step 12).
 #

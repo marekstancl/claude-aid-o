@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-artifact-obligation.bats — a finished MILESTONE owes the PM a page
 # (P086 Step 4; P089 Step 6; since P099 Step 4 two: the written plan and the
 # delivered plan — an EPIC owes nothing).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-continue-spawn.bats — P090 Step 6.
 #
 # THE STUB IS LOAD-BEARING. `claude` is replaced on PATH by a script that writes

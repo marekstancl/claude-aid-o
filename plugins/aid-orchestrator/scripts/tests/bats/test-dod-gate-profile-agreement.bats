@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 #
 # T1 BY MEASUREMENT (P099): 82 s over 6 cases (nightly journal, 2026-09-23) —
 # every case runs the real generator; T0 is under 2 s per case.

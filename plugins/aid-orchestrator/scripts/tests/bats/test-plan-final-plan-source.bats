@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # The plan-final run judges the CANDIDATE's copy of the plan (ACTA #33), the
 # state root's only as a fallback, and says which.
 

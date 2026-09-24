@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aid-tier: t0
+# aid-tier: t2
 # test-enforcement-registry-cites.sh — P080 Step 4.
 #
 # Registry hygiene: every `source:` / `instruction:` cite in

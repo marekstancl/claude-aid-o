@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t0
 # test-control-enforcement.bats — the shared per-control enforcement resolver.
 # Provenance: P062 Step 11; kept when the E10 calibration tooling was removed
 # (2026-08-29) because six shipped readers still go through this resolver.

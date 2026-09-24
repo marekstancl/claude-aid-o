@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-queue-continuation.bats — P090 Step 5, P099 Step 5.
 #
 # SessionStart names what an autonomous plan has left, and never touches the

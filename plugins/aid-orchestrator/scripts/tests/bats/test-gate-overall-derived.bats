@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 #
 # The run verdict is derived from the gate rows, once, at the end.
 #

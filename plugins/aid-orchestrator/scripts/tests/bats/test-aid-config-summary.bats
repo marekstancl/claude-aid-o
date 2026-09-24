@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-aid-config-summary.bats — scripts/aid-config-summary.sh, the shared
 # read-only configuration summary presented by /aid-init and /aid-setup.
 #

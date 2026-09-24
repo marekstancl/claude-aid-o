@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-dispatch-contract.bats — what an agent is handed and what it must hand
 # back (P087 Step 1).
 #

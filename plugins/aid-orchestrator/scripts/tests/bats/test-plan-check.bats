@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-plan-check.bats — the deterministic plan check (aid-plan-check.sh).
 # One fixture per check: a clean plan passes; each sabotage is refused by the
 # check that owns it, in strict mode; the legacy tier downgrades what it says

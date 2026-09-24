@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-gate-config-branch.bats — a gate's script is the BRANCH's script, and
 # a branch that lacks one is told so by name (P087 Step 6, narrowed).
 #

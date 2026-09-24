@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t0
 # test-release-scope.bats — a release is required by what CHANGED, never by
 # what a commit message promised (P089 Step 7).
 #

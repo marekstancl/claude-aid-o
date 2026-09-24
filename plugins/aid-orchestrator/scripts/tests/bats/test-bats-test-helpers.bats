@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-bats-test-helpers.bats — the shared bats helpers assert what they claim.
 #
 # WHY THIS SUITE EXISTS

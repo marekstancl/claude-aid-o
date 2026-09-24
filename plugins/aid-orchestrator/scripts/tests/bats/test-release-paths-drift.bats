@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-release-paths-drift.bats — the declared release paths versus what the
 # image actually packages (P089 Step 10).
 #

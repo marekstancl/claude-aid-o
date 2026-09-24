@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-queue-peek.bats — P090 Step 1.
 #
 # The whole of P090 stands on ONE property: you can ask the queue what is next

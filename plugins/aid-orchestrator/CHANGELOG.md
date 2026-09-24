@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.105.0] — 2026-09-24
+
+### Changed
+- **Merge cesta zpět v normě** — T0 + T1 se znovu vejdou do 10 minut skutečného běhu (ekosystémový standard testů), z 42,5 minuty (23. 9.). Patra 91 sad jsou přeznačená podle nočních měření: připnuté jádro a nejlevnější stráže zůstávají před mergem, zbytek běží v noci.
+- **Kontrola pater hlídá součet** — `aid-test-tier-lint.sh` odmítne T0 nad 90 s a T1 nad 390 s naměřeného součtu (rozpočty v `lib/aid-test-tier.sh`, rezerva na režii runneru). Každá sada byla levná sama o sobě, zatímco merge cesta za měsíc narostla ze 17 na 42 minut, protože součet nikdo nehlídal. Brána `tier_lint` tohoto repa čte noční deník měření (místní se zastavil 14. 8.).
+- **Jádro merge cesty** — `scripts/tests/tier-core.txt`: sady, které rozpočet nikdy nepošle do nočního běhu (stavový automat EPICu, brána revizí plánu, stav revizního kola, kontrola kroku, zadání agenta, pokračování fronty). Velký test revizních kol běží v noci.
+- **Hlídač pater najde testovaný soubor i s předponou `aid-`** — dřív poslal 201 z 238 sad do T2 jen kvůli názvu.
+- **Kontrola i hlídač pater čtou deník jednou** — 84 s → 19 s.
+- **Skládání promptu revizora** — ~10 procesů místo ~30, výstup bajt po bajtu stejný; příprava revizního kola 3,6 s → 2,4 s. Chybové cesty skládání mají test.
+
+### Fixed
+- **Dvě sady červené v nočním běhu** — `test-generation-finalize.sh` (vzorový plán bez polí přísného režimu, bez souborů v repu a bez revize) a `test-selector-honesty-check.bats` (výběr testů je mimo repo pluginu vypnutý, test ho nepřepnul).
+
 ## [2.104.1] — 2026-09-24
 
 ### Changed

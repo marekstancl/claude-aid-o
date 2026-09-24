@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aid-tier: t1
+# aid-tier: t2
 #
 # MEASURED: 17 s (nightly journal, 2026-08-15) for a single case — T0 is under
 # 2 s. It enumerates every suite in the repository through

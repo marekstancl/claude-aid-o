@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # WHY THIS FILE EXISTS (P097 Step 4): lib/aid-gate-profile-select.sh is the one
 # resolver over a project's own gate_profiles table. This suite proves the
 # selection rule (widest match wins, else default_profile), the refusals

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-aid-artifact-render.bats — golden fixtures for the deterministic
 # artifact renderer (P080 Step 10).
 #

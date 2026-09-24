@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-plan-telemetry.bats — plan-time events actually get written (P084 Step 7).
 #
 # THE FINDING THIS SUITE GUARDS

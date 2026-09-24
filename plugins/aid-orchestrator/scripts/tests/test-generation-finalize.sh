@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aid-tier: t2
+# aid-tier: t0
 set -euo pipefail
 
 # ─── P072 Step 9: canonical result line for the aggregate collector ─────────
@@ -38,6 +38,13 @@ cp "$PLAN" "$tmp/.aid-o/plans/P099.md"
 # Make the E2E path exercise the actual strict receipt consumer, not only the
 # legacy-compatible path. The plan is still low risk; strictness is explicit.
 sed -i '/^author:/a lifecycle_strict: true' "$tmp/.aid-o/plans/P099.md"
+# A strict plan owes every step the three fields aid-plan-lint.sh demands
+# (since 2026-08-22); the shared fixture is a legacy plan without them.
+sed -i '/^### Step [0-9]/a\
+\
+**Architecture Context:** fixture step.\
+**Error Handling:** none, fixture step.\
+**Edge Cases:** none, fixture step.' "$tmp/.aid-o/plans/P099.md"
 # Also exercise a legitimate phase-local edge (Step 1 -> Step 2), not only an
 # empty dependency graph. The finalizer must translate the global source edge
 # to the generated local step IDs and still accept the package.
@@ -46,12 +53,22 @@ sed -i '/^\*\*AID Role:\*\* domain$/a\
 **Dependencies:**\
 - Depends on: Step 1 (architect contracts)' "$tmp/.aid-o/plans/P099.md"
 printf 'counter: 0\n' > "$tmp/.aid-o/config/counter.yaml"
+# Generation is gated on the plan review and the PM page; this suite proves the
+# finalizer, so the review is switched off and the page rendered.
+mkdir -p "$tmp/.aid-o/config/policies"
+printf 'review_checkpoints:\n  cp1_plan_review: false\n' > "$tmp/.aid-o/config/policies/review-checkpoints.yaml"
 git -C "$tmp" init -q
 git -C "$tmp" config user.email aid-test@example.com
 git -C "$tmp" config user.name "AID Test"
 git -C "$tmp" checkout -q -b main
-git -C "$tmp" commit --allow-empty -qm "seed"
+# The files the fixture plan modifies exist, as aid-plan-check (A7) requires.
+mkdir -p "$tmp/src/api" "$tmp/src/frontend" "$tmp/docs"
+touch "$tmp/src/api/__init__.py" "$tmp/src/frontend/App.tsx" "$tmp/CHANGELOG.md" "$tmp/docs/api-reference.md"
+git -C "$tmp" add src docs CHANGELOG.md
+git -C "$tmp" commit -qm "seed"
 
+(cd "$tmp" && source "$SCRIPTS/lib/aid-plan-summary.sh" \
+  && aid_plan_summary_render "$tmp/.aid-o/plans/P099.md" "$tmp/.aid-o/work/evidence/P099/plan-summary-artifact.html") >/dev/null
 bash "$SCRIPTS/aid-generation-readiness.sh" "$tmp/.aid-o/plans/P099.md" --total 3 \
   --write-provisional "$tmp/.aid-o/work/evidence/P099/generation/provisional-graph.json" >/dev/null
 for phase in 1 2 3; do

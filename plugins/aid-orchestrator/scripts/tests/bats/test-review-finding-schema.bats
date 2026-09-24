@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-review-finding-schema.bats — the reviewer's answer contract shared by
 # every review checkpoint (review-finding.schema.json) and the one review
 # prompt template. A cp2 answer with pre-image evidence or a reproduction
@@ -126,6 +126,30 @@ _cp2() {  # a valid cp2 answer, then a jq filter applied to it
   # everything above "## Your role" except the title line is identical for both checkpoints
   diff <(sed -n '1,/^## Your role$/p' "$TEST_DIR/prompt-cp1.md" | grep -v '^# cp1 review') \
        <(sed -n '1,/^## Your role$/p' "$TEST_DIR/prompt-cp2.md" | grep -v '^# cp2 review')
+}
+@test "template: the renderer refuses a missing, unknown, non-string or injecting variable and an undeclared placeholder" {
+  local vars="$TEST_DIR/vars.json" out="$TEST_DIR/p.md"
+  _vars() { jq -n "{role_section: \"r\", checkpoint: \"cp1\", round: \"1\", output_path: \"/o\", evidence_forms: \"e\", packet_name: \"n\", confirmation_note: \"\"} $1" > "$vars"; }
+  _render() { bash "$AID_PLUGIN_PATH/scripts/lib/aid-render-prompt.sh" --template "${1:-$TEMPLATE}" --vars-json "$vars" --output "$out"; }
+  _vars '| del(.round)';            run _render; [ "$status" -eq 1 ]; [[ "$output" == *"MISSING declared variable(s): round"* ]]
+  _vars '+ {extra: "x"}';           run _render; [ "$status" -eq 1 ]; [[ "$output" == *"UNKNOWN variable(s) not declared by the template: extra"* ]]
+  _vars '+ {round: 1}';             run _render; [ "$status" -eq 1 ]; [[ "$output" == *"non-string key(s): round"* ]]
+  _vars '+ {round: "{{x}}"}';       run _render; [ "$status" -eq 1 ]; [[ "$output" == *"offending key(s): round"* ]]
+  echo '[1]' > "$vars";             run _render; [ "$status" -eq 1 ]; [[ "$output" == *"not a JSON object"* ]]
+  printf 'x' > "$vars";             run _render; [ "$status" -eq 1 ]; [[ "$output" == *"not valid JSON"* ]]
+  printf -- '---\nvariables: [a]\n---\n{{a}} {{b}}\n' > "$TEST_DIR/t.md"; echo '{"a": "1"}' > "$vars"
+  run _render "$TEST_DIR/t.md"; [ "$status" -eq 1 ]; [[ "$output" == *"undeclared placeholder: {{b}}"* ]]
+  printf -- '---\nvariables: a\n---\nx\n' > "$TEST_DIR/t.md"
+  run _render "$TEST_DIR/t.md"; [ "$status" -eq 1 ]; [[ "$output" == *"is not a list"* ]]
+  printf -- 'no frontmatter\n' > "$TEST_DIR/t.md"
+  run _render "$TEST_DIR/t.md"; [ "$status" -eq 1 ]; [[ "$output" == *"no YAML frontmatter"* ]]
+  [ ! -f "$out" ]
+  printf -- '---\nvariables: [a]\ntemplate_id: t\n---\nhi {{a}}\n\n\n' > "$TEST_DIR/t.md"; echo '{"a": "\\\\ \"x\""}' > "$vars"
+  run _render "$TEST_DIR/t.md"; [ "$status" -eq 0 ]
+  [ "$(cat "$out")" = 'hi \\ "x"' ]; [ "$(tail -c1 "$out" | od -An -c | tr -d ' ')" = '\n' ]
+  [ "$(jq -r .template_id <<<"$output")" = t ]
+  [ "$(jq -r .rendered_prompt_sha256 <<<"$output")" = "sha256:$(sha256sum "$out" | cut -d' ' -f1)" ]
+  [ "$(jq -r .template_sha256 <<<"$output")" = "sha256:$(sha256sum "$TEST_DIR/t.md" | cut -d' ' -f1)" ]
 }
 @test "template: the CP1 packet library renders through the shared template with its cp1 values" {
   mkdir -p "$TEST_DIR/round-1"

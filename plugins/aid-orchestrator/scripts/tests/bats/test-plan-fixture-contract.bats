@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-plan-fixture-contract.bats — seeding a plan makes it GENERATION-READY,
 # proven by running the real generation entry point.
 #

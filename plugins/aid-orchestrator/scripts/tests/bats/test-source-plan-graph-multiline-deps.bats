@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 #
 # A step may declare its dependencies on more than one line. Until 2026-09-02
 # every declaration after the first was silently discarded: the collector

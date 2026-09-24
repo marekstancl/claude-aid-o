@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # =============================================================================
 # test-gates-edge-matrix.bats — the edges the recorded runs never reached.
 #

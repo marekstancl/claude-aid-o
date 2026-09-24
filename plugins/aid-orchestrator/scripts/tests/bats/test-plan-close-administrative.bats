@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 #
 # `plan-close --administrative` — closing a plan that has no evidence chain.
 #

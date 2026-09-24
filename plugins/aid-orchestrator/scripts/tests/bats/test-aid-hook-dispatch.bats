@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 #   MEASURED: slowest case 1.1s (the one that waits out a real per-rule clock —
 #   a rule that overruns must actually overrun). It was t1 while a leaked
 #   watchdog descriptor added the whole timeout to every case; with that fixed

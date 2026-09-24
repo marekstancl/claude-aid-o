@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-review-config.bats — the generic reader of review_checkpoints.<block>
 # (lib/aid-review-config.sh). The CP1 cases of test-plan-review-config.bats run
 # here against the generic library with plan_review as the block (the suite

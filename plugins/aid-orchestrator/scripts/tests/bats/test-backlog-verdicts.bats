@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-backlog-verdicts.bats — P083 Step 10: the backlog records what the
 # 2026-08-11 verification found.
 #

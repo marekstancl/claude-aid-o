@@ -162,6 +162,18 @@ _aid_durations_assert_readable() {
 # it, every per-suite read that returns 3 is indistinguishable from "this suite
 # was never measured", and a corrupt journal reads as a portfolio nobody has
 # ever measured — the fail-closed rule undone one caller at a time.
+# aid_durations_latest_all — every suite's newest record in ONE read, as a JSON
+# object keyed by suite ({} when there is no journal). The lint and the
+# assigner walk ~240 suites; one read per suite of a 10k-line journal cost
+# them 84 s. Same newest-wins rule as aid_durations_latest_json.
+aid_durations_latest_all() {
+  local file; file="$(aid_durations_file)" || return $?
+  [[ -f "$file" ]] || { echo '{}'; return 0; }
+  _aid_durations_assert_readable "$file" || return $?
+  jq -Rcn '[inputs | select(length > 0) | fromjson] | group_by(.suite)
+    | map({key: .[0].suite, value: (sort_by(.at) | last)}) | from_entries' "$file"
+}
+
 aid_durations_readable() {
   local file; file="$(aid_durations_file)" || return $?
   [[ -f "$file" ]] || return 0

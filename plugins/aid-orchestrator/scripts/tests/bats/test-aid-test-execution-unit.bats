@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-aid-test-execution-unit.bats — P069 Step 1.
 #
 # Proves aid-test-execution-unit.sh's execution-unit-shaped wrapper over

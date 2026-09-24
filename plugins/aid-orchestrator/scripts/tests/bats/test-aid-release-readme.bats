@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # P083 Step 4 — a configured regex version pattern that matches nothing must
 # be reported by name and never printed (or counted) as `Updated`. Also pins,
 # on tracked fixtures, the empirical behavior of the three pattern-escaping

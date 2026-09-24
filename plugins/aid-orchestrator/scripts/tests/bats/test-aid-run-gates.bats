@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # P032 Step 7 — aid-run-gates.sh provenance fields + framing events (Step 3).
 # 3 assertions covering the gate runner's _generated_by/_at/_command_log
 # triple and the gate_runner_start / gate_runner_complete timeline events.

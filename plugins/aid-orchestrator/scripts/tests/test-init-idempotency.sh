@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aid-tier: t1
+# aid-tier: t2
 #
 # TIER DECISION, made deliberately against the assigner's own proposal.
 # Measured: 1.9 s whole suite, 235 ms mean per case, slowest case 556 ms — that is

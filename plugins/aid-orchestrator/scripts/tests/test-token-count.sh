@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t2
+# aid-tier: t0
 # Tests for aid-token-count.sh
 
 setup() {

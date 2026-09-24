@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-plan-worktree-scope.bats — phase working copies for brainstorming and
 # generation (P086 Step 6).
 #
