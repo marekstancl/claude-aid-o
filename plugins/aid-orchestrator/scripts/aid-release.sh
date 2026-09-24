@@ -943,7 +943,7 @@ git commit -m "release: v${NEW_VERSION} — ${LAST_FEAT}"
 git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
 
 echo ""
-echo "Released v${NEW_VERSION}. Push with: git push --no-verify && git push --tags"
+echo "Released v${NEW_VERSION} (tagged locally). Push main (git push origin main), verify the installed plugin, then push the tag (git push origin v${NEW_VERSION})."
 }
 
 # =============================================================================

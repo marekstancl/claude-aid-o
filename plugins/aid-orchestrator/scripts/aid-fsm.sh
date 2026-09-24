@@ -2394,6 +2394,10 @@ check_preconditions() {
             log_event "$timeline" "fsm_precondition_repeated_fail" \
               from="$from" to="$to" reason="gates_no_generated_by" attempt_count="$attempt_count"
           fi
+          if [[ ! -f "$gates_report" ]]; then
+            # No report at all: nothing to remove, the gates never ran.
+            echo "PRECONDITION FAIL: no gates report at ${gates_report} — the gates have not run for this run. Run them: bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh advance-to-gates ${state_file}" >&2
+          else
           cat <<EOF >&2
 PRECONDITION FAIL: gates_report.json missing _generated_by field.
 
@@ -2417,6 +2421,7 @@ Manual two-step alternative (debugging / crash recovery):
     --plan-json \$AID_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/${run_id}/plan.json
   bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh transition EXECUTE GATES ${state_file}
 EOF
+          fi
           _fsm_refusal_next gates_no_generated_by
           return 1
         fi
@@ -5746,7 +5751,7 @@ _fsm_declared_plan_mode() {
 
 cmd_done_advance() {
   local from_phase="$1" to_phase="$2" state_file="$3"
-  local force="false"
+  local force="false" _archive_task="" _tasks_dir=""
   [[ "${4:-}" == "--force" ]] && force="true"
 
   # P074 Step 8: re-anchor a RELATIVE state file to the state root BEFORE the
@@ -6004,7 +6009,7 @@ cmd_done_advance() {
         elif [[ "$_rp_exit" -eq 2 ]]; then
           log_event "$_rp_timeline" "review_profile_missing_lenses" \
             check="review_profile" enforcement="observe" missing_lenses="unverifiable" reason="$_rp_output"
-          log_warn "review_profile unverifiable: $_rp_output"
+          # no warning: review-profile.json is produced at plan-final, never per EPIC
         fi
       fi
       # End E3 review_profile hook
@@ -6097,14 +6102,10 @@ EOF
       # and passed silently, which is the failure direction that matters for a
       # precondition. Same legacy fallback as derive_timeline; aid_state_path
       # keeps the RELATIVE form (and both message strings) intact at root.
-      local task_file _tasks_dir
+      # 2.107.0: no longer a refusal — the file is archived below, once every
+      # other precondition has passed (a failed advance leaves it where it is).
       _tasks_dir="$(aid_state_path ".aid-o/tasks" 2>/dev/null || printf '%s' ".aid-o/tasks")"
-      task_file=$(find "${_tasks_dir}/" -maxdepth 1 -name "${epic_id}*" 2>/dev/null | head -1)
-      if [[ -n "$task_file" ]]; then
-        echo "PRECONDITION FAIL: EPIC task file still in tasks/ (not archived): $(basename "$task_file")" >&2
-        echo "Move to tasks/archive/ before advancing: mv $task_file ${_tasks_dir}/archive/" >&2
-        errors=$((errors + 1))
-      fi
+      _archive_task=$(find "${_tasks_dir}/" -maxdepth 1 \( -name "${epic_id}.md" -o -name "${epic_id}-*.md" \) 2>/dev/null | head -1)
 
       # ── Routed review findings (EPIC-LOCAL, BOTH modes) — P079 Step 7 ───────
       #
@@ -6174,6 +6175,13 @@ EOF
         exit 1
       fi
     fi
+  fi
+
+  if [[ -n "${_archive_task:-}" ]]; then
+    mkdir -p "${_tasks_dir}/archive" && mv -- "$_archive_task" "${_tasks_dir}/archive/"
+    local _at_tl; _at_tl=$(derive_timeline "$state_file") || true
+    [[ -n "$_at_tl" ]] && log_event "$_at_tl" "task_file_archived" file="$(basename "$_archive_task")"
+    echo "archived the EPIC task file: ${_tasks_dir}/archive/$(basename "$_archive_task")" >&2
   fi
 
   # Advance phase

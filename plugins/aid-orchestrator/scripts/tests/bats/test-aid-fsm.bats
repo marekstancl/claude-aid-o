@@ -157,6 +157,16 @@ teardown() {
 
 # ─── Step 3: EXECUTE→GATES precondition + grandfather (3 assertions) ─────
 
+@test "EXECUTE→GATES: no gates report at all names advance-to-gates and never says rm" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  run "$FSM" transition EXECUTE GATES "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "no gates report at" ]]
+  [[ "$output" =~ "advance-to-gates" ]]
+  [[ "$output" != *"rm "* ]]
+}
+
 @test "EXECUTE→GATES: missing _generated_by (post-deploy) → hard fail" {
   # Post-deploy fsm-state.yaml + hand-written gates_report.json.
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"

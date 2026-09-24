@@ -29,6 +29,10 @@ anything already in the project backlog. Those go where they always went.
 **What I did:** <workaround / --force with reason / gave up>
 ```
 
+Write an entry in ONE append (one `cat >> … <<'EOF'` with the heading and every
+line), never the heading first and the lines later: other sessions append to
+the same file, and split writes interleave under the wrong heading.
+
 The plugin version is what makes an entry readable a month later ("was this
 already fixed?"); read it with
 `jq -r .version "$AID_PLUGIN_PATH/.claude-plugin/plugin.json"` — the Stop-hook

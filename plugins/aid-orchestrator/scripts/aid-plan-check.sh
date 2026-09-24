@@ -395,7 +395,8 @@ if (( HAS_REPO )); then
   done <<< "$VP_BLOCKS"
   while IFS=$'\t' read -r ln p; do
     [[ -n "${p:-}" ]] || continue
-    _exists "$p" || _warn "B3" "$PLAN:$ln" "the plan says to delete \`${p}\`, which does not exist"
+    # a path the plan itself founds (a Files bullet), or names by its tail, is known
+    _known_path "$p" || _warn "B3" "$PLAN:$ln" "the plan says to delete \`${p}\`, which does not exist"
   done < <(printf '%s\n' "$BLANKED" | grep -niE '(smazat|smaže|odstranit|delete|remove) +`' | while IFS=: read -r ln rest; do
              while IFS= read -r p; do [[ -n "$p" ]] && printf '%s\t%s\n' "$ln" "$p"; done < <(_aid_backtick_paths "$rest"); done)
 

@@ -107,6 +107,12 @@ _plan() { # <file> <strict|legacy> [dep2] [files1...]
   _plan p.md strict; printf '\n## Acceptance Criteria\n\n- [ ] gone\n  ```yaml\n  verification_pattern:\n    type: must_not_exist\n    file: "src/never.py"\n  ```\n' >> p.md
   run "$CHECK" p.md; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B3"* ]]
 }
+@test "plan-check B3: deleting a path the plan founds is not a missing file; a real ghost still warns" {
+  _plan p.md strict '- Depends on: Step 1' '- Create: `src/new.py` — new, remove `src/new.py` again in cleanup'
+  run "$CHECK" p.md; [[ "$output" != *"WARN  B3"* ]]
+  _plan p.md strict '- Depends on: Step 1' '- Modify: `src/a.py` — edit, and remove `src/ghost.py`'
+  run "$CHECK" p.md; [[ "$output" == *"WARN  B3"*"src/ghost.py"* ]]
+}
 @test "plan-check B4: a Resources entry claimed as existing but absent blocks; one marked new does not" {
   _plan p.md strict; sed -i 's/`existing_helper` (`src\/a.py:1`)/`existing_helper` (`src\/a.py:1`); `phantom_helper` (`src\/a.py:9`)/' p.md
   run "$CHECK" p.md; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B4"*phantom_helper* ]]; [[ "$output" != *NEW_FLAG* ]]

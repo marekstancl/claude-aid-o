@@ -92,6 +92,14 @@ _json() { jq -r "$1" "$E/$2/step-check.json"; }
   [ "$(_json '.security.matched_rules[0]' cp2/step-0)" = subprocess_shell_true ]
   [ "$(_json '.security.lines|length' cp2/step-0)" -ge 1 ]
 }
+@test "a sys.exit( line is not a skipped test; an xit( line is" {
+  printf 'import sys\nsys.exit(1)\n' >> "$R/src/app.py"; _commit s0 >/dev/null
+  run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 0 ]; [[ "$output" != *"+security"* ]]
+  printf "xit('pending', () => {})\n" >> "$R/src/app.py"; _commit s0b >/dev/null
+  rm -rf "$E/cp2"; run _run --checkpoint cp2 --step 0
+  [ "$status" -eq 0 ]; [ "$(_json '.security.matched_rules[0]' cp2/step-0)" = skipped_test ]
+}
 @test "an upper-case secret assignment with spaces matches the secret rule (rules use \\s and are matched case-insensitively, testbed 2026-09-19)" {
   printf 'AWS_SECRET_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLEKEY0123456789"\n' >> "$R/src/app.py"; _commit s0 >/dev/null
   run _run --checkpoint cp2 --step 0
