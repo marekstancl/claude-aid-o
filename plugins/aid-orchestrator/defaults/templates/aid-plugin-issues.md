@@ -2,9 +2,10 @@
 
 <!-- created by aid-orchestrator v{{PLUGIN_VERSION}} on {{CREATED_DATE}} -->
 
-One file per project, for every plan it runs. Read by the plugin owner
-(`aid-orchestrator`), who collects these files across projects and decides
-there — nothing else reads this file, nothing is enforced by it.
+One file per project, for every plan it runs, and the one record of what it
+reports: the plugin owner (`aid-orchestrator`) lists the open entries across
+projects and writes each decision under its entry here. Nothing else reads this
+file, nothing is enforced by it.
 
 ## When to write here (and when not)
 
@@ -31,8 +32,9 @@ anything already in the project backlog. Those go where they always went.
 The plugin version is what makes an entry readable a month later ("was this
 already fixed?"); read it with
 `jq -r .version "$AID_PLUGIN_PATH/.claude-plugin/plugin.json"` — the Stop-hook
-reminder prints it too. Facts, not proposals — the fix is decided on the owner's side. The owner marks
-each entry `> **PŘEVZATO <date>**` when collected and later `HOTOVO vX.Y.Z` or
-`ZAMÍTNUTO`; entries are never deleted, this file is the project's own record.
+reminder prints it too. Facts, not proposals — the fix is decided on the owner's side. The owner
+writes the decision as the line right under the entry's heading — `> **HOTOVO vX.Y.Z …**`,
+`> **ZAMÍTNUTO …**`, `> **ČÁSTEČNĚ …**` or `> **UŽ ŘEŠENO …**`;
+entries are never deleted, this file is the project's own record.
 
 <!-- entries below, newest last -->

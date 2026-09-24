@@ -15,14 +15,18 @@
 <p>Plán je hotový: všechny EPIKY prošly, evidence sedí na HEAD, blokátory žádné.</p>
 <h2>Jádro</h2>
 <p>Merge do main je hotový (333333333333), ale plán je pořád otevřený — dokud ho nezavřeš, drží worktree a větev.</p>
-<li>Recenzovaný kandidát: 111111111111 → schválený cíl 222222222222 (main)</li>
-<li>Merge do main: 333333333333</li>
+<li>Recenzovaný kandidát: 111111111111 → schválený cíl 222222222222 (main), merge do main: 333333333333</li>
+<li>Kam šel čas: neměřeno</li>
 <li>Plan-final brány: pass (report: .aid-o/work/evidence/P080/plan-final/gates_report.json)</li>
-<li>Specialistická revize: clean</li>
+<li>Čtení celku: nezaznamenáno; uzavření: 1 pokus(ů), 12 min, 2.5 USD</li>
 <li>Evidence: pass (ověřeno na HEAD: true), waiverů 0, zbývá v backlogu 0</li>
 <h2>Čeho se to týká</h2>
 <li>Report plan-final bran</li>
 <li>Dodané shrnutí plánu</li>
 <h2>Co se čeká ode mě</h2>
 <p>Nic — ozvu se, až bude hotovo</p>
+<h2>Co plán dodal</h2>
+<li>E-080-1</li>
+<li>E-080-2</li>
+<li>E-080-3</li>
 <footer>Vyrobil aid-plan-close-summary.sh z <REPO>/plugins/aid-orchestrator/scripts/tests/fixtures/handoff/pm-brief-finished.json a <REPO>/plugins/aid-orchestrator/scripts/tests/fixtures/handoff/release-decision-merged.json. Redigováno tajemství: 0.</footer>

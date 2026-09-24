@@ -1,10 +1,10 @@
 ---
-name: implementer
+name: implementer-light
 model: opus
-effort: medium
+effort: low
 ---
 
-# Agent: implementer
+# Agent: implementer-light
 
 **Last Updated:** 2026-09-23
 

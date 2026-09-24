@@ -94,6 +94,7 @@ Setup: /aid-setup → configure permissions, integrations, CLAUDE.md, stack scan
   /aid-setup integrations   → enable/disable MCP servers
   /aid-setup claude-md      → generate project context file
   /aid-setup scan           → re-detect tech stack
+  /aid-setup parallel       → how many steps of one wave run at once
 
 Gates: edit .aid-o/config/execution.yaml → customize test/lint/build commands
 Project profile: .aid-o/config/project.yaml → stack, test/lint/build commands
@@ -579,7 +580,9 @@ turn is degraded to fail-open, and the degradation is written to the audit trail
 |---|---|---|---|
 | `hook_canary` | SessionStart | 4 | leaves one audit line per start, so the canary can prove a harness reached AID |
 | `decision_card_complete` | Stop | 2 | refuses a turn whose card asks you to decide with no options, recommendation or reason |
-| `milestone_artifact_rendered` | Stop | 2 | refuses a turn that finished a milestone — a written plan, an EPIC's review, a closed plan — without rendering your page for it |
+| `milestone_artifact_rendered` | Stop | 2 | refuses a turn that finished a milestone — a written plan or a closed plan — without rendering your page for it; an EPIC, a step and a failed step owe nothing |
+| `queue_continuation_notice` | Stop | 2 | sends the session that drives an autonomous plan back to work while work is left, up to a budget; a card or the spent budget ends it with one "agent is waiting" message |
+| `pm_reply_marker` | UserPromptSubmit | 3 | your reply gives the budget back and re-arms the "agent is waiting" message |
 | `continuity_capture` / `continuity_restore` | PreCompact / SessionStart | 3 | saves the run's bearings before a compaction and puts them back after |
 | `subagent_protocol_notice` | SubagentStart | 3 | tells a role agent when its installed protocol differs from this checkout's |
 

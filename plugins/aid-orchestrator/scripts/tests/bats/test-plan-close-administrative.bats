@@ -177,3 +177,26 @@ _evidence() {
   MANIFEST_STUB="" run _evidence "$root" P019
   [ -z "$output" ]
 }
+
+# --- P099 Step 3: the "plan delivered" message ------------------------------
+# The block runs in the close's merge branch only, after the close is durable.
+# It is exercised here with a stubbed sender (a full merge close needs the whole
+# plan-final chain, which test-aid-plan-final-boundary.bats owns).
+_delivered() {
+  local block; block="$(sed -n '/The PM.s second message (P099 Step 3)/,/|| true$/p' "$FSM")"
+  bash -c "set -euo pipefail; SCRIPT_DIR='$PLUGIN_ROOT/scripts' root='$1' plan_id=P900 run_dir_rel=ev/P900
+           _PFSM_FORCE='${2:-0}'; close() { $block
+           }; close; echo closed-ok"
+}
+@test "delivered: a close sends plan-delivered once, says forced, and a failed send leaves the close untouched" {
+  local t="$BATS_TEST_TMPDIR"; mkdir -p "$t/p"; git -C "$t/p" init -q
+  printf 'send_alert() { echo "$3|$4" >> "%s/sent"; }\n' "$t" > "$t/tg.sh"
+  AID_TEST_MODE=1 AID_TELEGRAM_LIB="$t/tg.sh" AID_SESSION_STORE="$t/store" run _delivered "$t/p" 1
+  [[ "$output" == *closed-ok* ]]
+  [ "$(cat "$t/sent")" = "plan-delivered|P900 dodán (uzavřen vynuceně)" ]
+  printf 'send_alert() { return 9; }\n' > "$t/tg.sh"
+  AID_TEST_MODE=1 AID_TELEGRAM_LIB="$t/tg.sh" AID_SESSION_STORE="$t/store2" run _delivered "$t/p" 0
+  [ "$status" -eq 0 ]; [[ "$output" == *closed-ok* ]]
+  # the abort branch sends nothing: the block sits inside `close_mode == merge`
+  [ "$(sed -n '/if \[\[ "\$close_mode" == "merge" \]\]; then/,/The PM.s second message/p' "$FSM" | tail -3 | grep -c 'second message')" -eq 1 ]
+}

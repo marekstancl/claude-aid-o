@@ -557,7 +557,7 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
 
 1. Read current step: `aid-fsm.sh get-field current_step <state_file>`
 2. Load step definition from `plan.json` → `steps[current_step]` (`step_id` = its `id`)
-3. Load role card from `skills/role-cards.md` for the step's `role`
+3. Read the step role's `**Model:**` and `**Effort:**` in `skills/role-cards.md`
 4. Build the step's **dispatch contract** (P087) and its evidence directory:
    ```bash
    step_dir="$(bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-evidence-dir "$state_file" "$N")"
@@ -570,10 +570,12 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
    (item 10 below), not something the agent is trusted to remember.
 5. Assemble dispatch prompt (see Context Assembly below); when a contract exists, paste
    `aid_dispatch_contract_prompt "$step_dir/contract.json"` verbatim after the task block —
-   it tells the agent the version it must quote back and the `aid-return` block it owes.
-6. Dispatch via Agent tool. The model tier comes from the step role's `**Model:**`
-   field in `skills/role-cards.md` (single source of truth); an optional `step.model`
-   in `plan.json` overrides it for that one step (default: `opus` if neither is set)
+   it tells the agent the version it must quote back and the `aid-return` block it owes,
+   and carries the step role's card and the shared "Write the least code that works" rule
+   (content, never a path).
+6. Dispatch via Agent tool: subagent type `aid-orchestrator:implementer-light` when the card
+   says `**Effort:** low`, else `aid-orchestrator:implementer`; model the card's `**Model:**`
+   (an optional `step.model` in `plan.json` overrides it for that one step)
 7. Save output to `$step_dir/output.md` (`evidence/{epic_id}/{run_id}/steps/{step_id}/`).
    **The controller writes this file, from the agent's final message, and nobody else.** Do
    not ask the agent to write its own `output.md`: the `aid-return` block sits in the
@@ -921,14 +923,14 @@ never assumed from the plan:
 ```bash
 source "$AID_PLUGIN_PATH/scripts/lib/aid-parallel-dispatch.sh"
 plan_path="$(bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" get-field plan_path "$state_file")"   # plan.md, recorded by init ("null" in Fast Mode → serial)
-orchestration_yaml="$(aid_state_path .aid-o/config/orchestration.yaml)"                     # state root, never the worktree
+state_root="$(aid_state_root)"                                                                # never the worktree
 tree_root="$(git rev-parse --show-toplevel)"                                                 # the tree the run executes in
-worktree_base="$(yq -r '.dispatch.worktree_base // ".aid-worktrees"' "$orchestration_yaml")"
+worktree_base="$(aid_orchestration_value "$state_root" .dispatch.worktree_base | cut -f1)"   # project file, else plugin default
 # the wave: the current step's group in plan.json → parallel_groups[] (each entry lists the step ids of one wave)
 wave_steps="$(jq -c --arg id "$step_id" '.parallel_groups[] | select(index($id))' "$evidence_dir/plan.json")"
 wave_name="$(jq -r --arg id "$step_id" '.steps[] | select(.id == $id) | .parallel_group // "---"' "$evidence_dir/plan.json")"
 wave_size="$(jq -r 'length' <<< "${wave_steps:-[]}")"
-decision="$(aid_parallel_decide "$plan_path" "$orchestration_yaml" "$wave_name" "$wave_size" "$tree_root")"
+decision="$(aid_parallel_decide "$plan_path" "$state_root" "$wave_name" "$wave_size" "$tree_root")"
 # concurrent slots=<max_parallel> | serial: <reason>   — exit 0 either way; log the line to timeline.jsonl
 ```
 
@@ -1036,8 +1038,8 @@ exit 3/11 forced a second `--profile full` pass (`lib/aid-run-gates-report.sh`).
 
 Every GATES→DONE refusal is overridable by `aid-fsm.sh transition GATES DONE <state_file> --force
 --reason '<≥20 chars — PM-authorized reason>'`, logged as `fsm_force_override` (§1). Repeated
-same-reason precondition fails (≥ 3) emit `fsm_precondition_repeated_fail` and a best-effort
-alert through `lib/aid-alert.sh`. Pre-deploy EPICs (`created_at < AID_DEPLOY_DATE`) skip the
+same-reason precondition fails (≥ 3) emit `fsm_precondition_repeated_fail` in the timeline.
+Pre-deploy EPICs (`created_at < AID_DEPLOY_DATE`) skip the
 `_generated_by` check (§2 grandfather).
 
 **Gate-boundary message (deterministic).** When the runner returns — DONE branch and failing
@@ -1045,14 +1047,12 @@ branch alike, manual and auto mode — do not summarise. Source
 `scripts/lib/aid-gate-outcome-summary.sh` and run:
 
 ```bash
-aid_gate_outcome_render "<the --report-file path passed above>" "<evidence_dir>" "<evidence_dir>/waivers"
+aid_gate_outcome_render "<the --report-file path passed above>" "<evidence_dir>"
 ```
 
-It computes every number from the report, follows `.overall` and never a per-gate row, renders a
-waiver as PM risk acceptance, and writes `<evidence_dir>/gate-outcome-artifact.html` only when the
-run BLOCKS (a passing run leaves no page; the `Artifact:` line is then absent).
-Publish the artifact body via the Artifact tool, then present the chat card verbatim.
-Card shapes and the language rule are in `skills/communication.md`. If the renderer exits
+It computes every number from the report, follows `.overall` and never a per-gate row, and counts
+a waiver as PM risk acceptance. Present the card it prints verbatim; a gate run owes the PM no
+page (the PM reads two per plan: the written plan and the delivered one). Card shapes and the language rule are in `skills/communication.md`. If the renderer exits
 non-zero, say so and present a Blocked card built only from bounded facts, routing raw-derived
 text through `aid_gate_outcome_redact` first.
 
@@ -1174,16 +1174,12 @@ Detail in [Telemetry Reference](#telemetry-reference) below.
 
 - **Epic Summary** — after `done-advance review→release`, `evidence/<epic>/<run>/epic-summary.md`
   with the delivery summary, warnings and PM trust level. Best-effort; never blocks release.
-- **EPIC page for the PM** (P089) — on the same edge `done-advance` renders
-  `evidence/<plan_id>/<epic_id>/epic-summary-artifact.html`. The Stop rule
-  `milestone_artifact_rendered` refuses a turn that finished an EPIC without one. **Publish it
-  with the Artifact tool** and hand the PM the link; the renderer writes a body and never publishes.
 - **Compliance Telemetry** — `compliance.json`; `overall: pass` if all checks ∈ {true, null}.
 - **Tiered Severity** — `done-advance review release` refuses on `severity: blocking` failures;
   soft-fail if `yq` is missing. Override via `--force --reason`. Registry:
   `.aid-o/config/check-severity.yaml`.
-- **Compliance Recovery Alert** (P042) — Telegram on block and on recovery. Config gate:
-  `notifications.telegram.alert_on_compliance_recovery` (default `true`).
+- **Compliance Recovery** (P042) — timeline events on block and on recovery; no Telegram
+  (P099: AID messages the PM only when an agent waits and when a plan is delivered).
 
 ### The PM force backdoor (P073)
 
@@ -1648,27 +1644,18 @@ Reference: `docs/plans/AID-v3-principles.md §1 — Detector without Enforcement
 is Decoration`. P038 (v2.21.0) is the first concrete application of this
 principle in AID.
 
-#### Compliance Recovery Alert (P042, v2.29.0+)
+#### Compliance Recovery (P042, v2.29.0+)
 
-Companion to the blocking flow above — the PM gets a signal in both directions:
+Companion to the blocking flow above, recorded in the timeline only (no Telegram
+since P099):
 
 1. **Block:** when `done-advance review→release` refuses transition on blocking
-   failures, the FSM sends a `🛑 <epic>: N blocking compliance failure(s) —
-   release blocked` Telegram alert and writes a `fsm_done_advance_blocked`
-   timeline event (with the `blocked_checks` list).
+   failures, the FSM writes a `fsm_done_advance_blocked` timeline event (with the
+   `blocked_checks` list).
 2. **Recovery:** on the next successful `done-advance review→release` (zero
    blocking failures), if the last `fsm_done_advance_blocked` event has no later
-   `fsm_done_advance_recovered` event, the FSM sends `✅ <epic>: compliance
-   cleared, release unblocked. Checks: <list>` and writes a
-   `fsm_done_advance_recovered` timeline event.
-
-The recovered event doubles as a **dedup marker** — exactly one recovery alert
-per block episode; subsequent clean runs stay silent until a new block occurs.
-
-**Config gate:** `notifications.telegram.alert_on_compliance_recovery` in
-`.aid-o/config/execution.yaml` (default `true`). Setting `false` suppresses the
-Telegram message only — the `fsm_done_advance_recovered` timeline event is
-always written (observable test signal, fixture 7d).
+   `fsm_done_advance_recovered` event, the FSM writes a `fsm_done_advance_recovered`
+   timeline event — one per block episode.
 
 **Soft-fail:** missing timeline.jsonl or `jq` → recovery detection silently
 skips (telemetry over correctness, same posture as compliance.json writes).
@@ -1684,7 +1671,7 @@ Designed for quick tasks that don't warrant a full EPIC.
 
 **LLM behavior:**
 1. Log task to `.aid-o/logs/aid-do-log.jsonl` (action: `aid_do_start`)
-2. Dispatch single agent (default: sonnet) with task description
+2. Dispatch single agent (`aid-orchestrator:implementer`, model opus) with task description
 3. Verify output (same as §4)
 4. **Review Checkpoint CP6:** Pre-filter (§13) runs first on `git diff`.
    If pre-filter clean + trivial → skip. If pre-filter finds pattern → immediate FAIL.
@@ -1731,6 +1718,14 @@ A missing or unreadable file defaults to `manual` (fail-safe).
 **Escalation budget:** max escalations per session = `orchestration.yaml` →
 `escalation.max_per_session` (default 3). On breach → E12 (PM must review). The trigger table above
 is the authoritative source — the YAML config files do not duplicate it.
+
+**The bound session keeps going (P099).** `/aid-run --auto` records the session in the plan's
+state (`plan-state <id> --bind-session`), and the Stop rule `queue_continuation_notice`
+(`scripts/lib/aid-queue-continuation.sh`) refuses a turn of that session that ends with work left,
+up to `orchestration.yaml → autonomy.continuation_budget` refusals; the PM's next prompt resets the
+count. A Decision or Blocked card, a last line `AID-WAIT: <what>` while an AID background job is
+live, or the spent budget lets the turn end; the card and the budget send the PM one "agent is
+waiting" message (`aid_alert_waiting`). No other session is ever refused.
 
 **Stop:** `/aid-stop` → `mode: manual`, finish current step, pause.
 
@@ -1930,7 +1925,7 @@ Two rules, both learned the expensive way:
 
 ---
 
-**Last Updated:** 2026-09-22
+**Last Updated:** 2026-09-23
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

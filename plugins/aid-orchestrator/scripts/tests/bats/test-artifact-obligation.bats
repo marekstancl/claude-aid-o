@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # aid-tier: t0
 # test-artifact-obligation.bats — a finished MILESTONE owes the PM a page
-# (P086 Step 4, extended to three milestones by P089 Step 6).
+# (P086 Step 4; P089 Step 6; since P099 Step 4 two: the written plan and the
+# delivered plan — an EPIC owes nothing).
 #
 # THE GROUNDED FAILURE MODE: `commands/aid-plan.md` step 8p has asked sessions
 # to render the page since P084 and said in its own text that nothing fails if
@@ -175,9 +176,9 @@ run_rule() { # run_rule <event_json>
   [[ "$output" == *"current PM page"* ]]
 }
 
-# ── milestones 2 and 3: an EPIC's review, and a closed plan (P089 Step 6) ──
+# ── an EPIC's review owes nothing; a closed plan owes its page ─────────────
 
-# _epic_run <done_phase> — a run state file at the layout the rule scans.
+# _epic_run <done_phase> — a run state file at the layout the old rule scanned.
 _epic_run() {
   mkdir -p "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A"
   cat > "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml" <<YAML
@@ -189,11 +190,6 @@ done_phase: ${1}
 YAML
   printf '%s' "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml"
 }
-_epic_page() {
-  mkdir -p "$ROOT/.aid-o/work/evidence/P900/E-900-1_1"
-  printf '<h1>E-900-1_1</h1>\n' > "$ROOT/.aid-o/work/evidence/P900/E-900-1_1/epic-summary-artifact.html"
-}
-
 # _closed_plan <state> — a plan-state record at the layout the rule scans.
 _closed_plan() {
   mkdir -p "$ROOT/.aid-o/work/plan-state/P900"
@@ -204,42 +200,6 @@ _closed_plan() {
 _close_page() {
   mkdir -p "$ROOT/.aid-o/work/evidence/P900/R-P900-final-1"
   printf '<h1>close</h1>\n' > "$ROOT/.aid-o/work/evidence/P900/R-P900-final-1/plan-close-artifact.html"
-}
-
-@test "AC16: a finished EPIC with no page stops the turn" {
-  local sf; sf="$(_epic_run release)"
-  run aid_artifact_obligation_epic_check "$ROOT" "$sf"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"finished its review but its PM page was not rendered"* ]]
-  [[ "$output" == *"P900/E-900-1_1/epic-summary-artifact.html"* ]]
-}
-
-@test "a finished EPIC with a current page passes" {
-  local sf; sf="$(_epic_run release)"
-  _epic_page
-  run aid_artifact_obligation_epic_check "$ROOT" "$sf"
-  [ "$status" -eq 0 ]
-}
-
-@test "an EPIC page older than the EPIC's own last commit is a finding" {
-  local sf; sf="$(_epic_run release)"
-  _epic_page
-  # The branch the state file names, with a commit on it dated well after the
-  # page — the EPIC moved after it was summarised.
-  ( cd "$ROOT" && git checkout -q -b task/E-900-1_1/main \
-      && printf 'x\n' > x.txt && git add x.txt && git commit -q -m "later work" \
-      && git checkout -q main )
-  touch -d "2019-01-01 00:00" "$ROOT/.aid-o/work/evidence/P900/E-900-1_1/epic-summary-artifact.html"
-  run aid_artifact_obligation_epic_check "$ROOT" "$sf"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"posledního commitu EPICu"* ]]
-}
-
-@test "AC17: a run that has not finished its review owes nothing" {
-  local sf; sf="$(_epic_run review)"
-  run aid_artifact_obligation_epic_check "$ROOT" "$sf"
-  [ "$status" -eq 3 ]
-  [[ "$output" == *"has not finished its review"* ]]
 }
 
 @test "a closed plan with no closing page stops the turn" {
@@ -278,15 +238,18 @@ _close_page() {
   [[ "$output" == *"is not closed"* ]]
 }
 
-@test "the Stop rule reports all three milestones, not only the plan" {
+@test "the Stop rule reports a closed plan's missing page, and a finished EPIC review owes nothing" {
   render_page
   _epic_run release >/dev/null
   _closed_plan CLOSED >/dev/null
   local t; t="$(transcript "2020-01-01T00:00:00Z")"
   run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
   [ "$status" -eq 2 ]
-  [[ "$output" == *"finished its review but its PM page was not rendered"* ]]
   [[ "$output" == *"was closed but its closing page was not rendered"* ]]
+  [[ "$output" != *"E-900-1_1"* ]]
+  rm -rf "$ROOT/.aid-o/work/plan-state"
+  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
+  [ "$status" -eq 3 ]
 }
 
 @test "AC18: the rule stays failure-closed in the registry, so the canary covers it" {
@@ -320,15 +283,6 @@ _close_page() {
 
 # ── corruption is not a way past an obligation (Codex, P089) ───────────────
 
-@test "a finished review that names no usable EPIC id is a finding, not an exemption" {
-  mkdir -p "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A"
-  printf 'run_id: R-A\nstate: DONE\ndone_phase: release\n' \
-    > "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml"
-  run aid_artifact_obligation_epic_check "$ROOT" "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"names no usable EPIC id"* ]]
-}
-
 @test "a CLOSED plan record that names no plan is a finding, not an exemption" {
   mkdir -p "$ROOT/.aid-o/work/plan-state/P900"
   printf 'plan_state: CLOSED\n' > "$ROOT/.aid-o/work/plan-state/P900/plan-state.yaml"
@@ -338,12 +292,7 @@ _close_page() {
 }
 
 @test "a state value that merely STARTS with the milestone word does not activate the rule" {
-  mkdir -p "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A" "$ROOT/.aid-o/work/plan-state/P900"
-  printf 'epic_id: E-900-1_1\ndone_phase: release_pending\n' \
-    > "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml"
-  run aid_artifact_obligation_epic_check "$ROOT" "$ROOT/.aid-o/work/evidence/E-900-1_1/R-A/fsm-state.yaml"
-  [ "$status" -eq 3 ]
-
+  mkdir -p "$ROOT/.aid-o/work/plan-state/P900"
   printf 'plan_id: P900\nplan_state: CLOSED_PENDING\n' \
     > "$ROOT/.aid-o/work/plan-state/P900/plan-state.yaml"
   run aid_artifact_obligation_close_check "$ROOT" "$ROOT/.aid-o/work/plan-state/P900/plan-state.yaml"
@@ -384,20 +333,6 @@ _close_page() {
 
   run_rule "{\"cwd\":\"$ws\",\"transcript_path\":\"$ws/transcript.jsonl\"}"
   [[ "$output" != *"P062"* ]]
-}
-
-@test "IMP-528: a run's plan is derived from its EPIC id, not only from the path's P-number" {
-  # A run's state file lives under evidence/E-900-1_1/R-… and carries no P900 in
-  # the path. Codex, 2026-08-28: the derivation branch had no test.
-  local sf; sf="$(_epic_run release)"
-  local t; t="$(transcript "2020-01-01T00:00:00Z" "P900")"
-  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
-  [[ "$output" == *"E-900-1_1"* ]]
-
-  # …and a session that names a DIFFERENT plan is not held to this run.
-  local t2; t2="$(transcript "2020-01-01T00:00:00Z" "P123")"
-  run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t2\"}"
-  [[ "$output" != *"E-900-1_1"* ]]
 }
 
 @test "IMP-528: a plan only DISCUSSED, never written, creates no obligation" {

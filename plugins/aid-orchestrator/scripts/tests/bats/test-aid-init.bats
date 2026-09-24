@@ -492,10 +492,10 @@ _p097_fixture_project() {  # <name> → project root with a copy of the fixture
   [ "$status" -eq 0 ]
   run yq '.default_profile' "$cfg"
   [ "$output" == "full" ]
-  # notifications.telegram keeps only its one read key, at the indent aid-fsm.sh greps.
-  run yq '.notifications.telegram | keys | join(",")' "$cfg"
-  [ "$output" == "alert_on_compliance_recovery" ]
-  grep -q '^    alert_on_compliance_recovery: true' "$cfg"
+  # notifications.telegram is read by nothing since P099 and goes whole.
+  run yq '.notifications.telegram' "$cfg"
+  [ "$output" == "null" ]
+  ! grep -q 'alert_on_compliance_recovery' "$cfg"
 }
 
 @test "P097 Step 3: an unparseable execution.yaml exits 2 with the parser error and nothing written" {

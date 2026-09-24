@@ -369,7 +369,7 @@ cmd_prepare() {
   echo "prepared round ${ROUND}: ${#roles[@]} reviewers → ${dir}"
   for role in "${roles[@]}"; do
     if _is_carried "$dir" "$role"; then echo "  ${role}: carried from the previous attempt (the fix touched nothing it reads, and it had no finding)"
-    else echo "  ${dir}/prompt-${role}.md  (focus $(_focus "$role"))"; fi
+    else echo "  ${dir}/prompt-${role}.md  (focus $(_focus "$role")$(_agent_note "$role"))"; fi
   done
 }
 
@@ -385,14 +385,26 @@ _closed() { [[ -f "$1/measurement.json" ]]; }
 # _stand_in <round_dir> <role> — the codex role's record says a claude stand-in
 # was asked for, because the probe could not reach a codex.
 _stand_in() { jq -e '.fallback == "claude"' "$1/codex-${2}.usage.json" >/dev/null 2>&1; }
-# _codex_probe — {available, binary, version, reason} from the shared probe.
+# _codex_probe <model> — {available, binary, version, reason} from the shared
+# probe, asked of the model the role will run on.
 # The cache belongs to the project under review, never to whatever directory the
 # controller happens to stand in — two projects reviewed from one cwd would
 # otherwise share one answer.
-_codex_probe() { ( AID_PROJECT_ROOT="$ROOT"; export AID_PROJECT_ROOT; source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"; aid_codex_probe ); }
+_codex_probe() { ( AID_PROJECT_ROOT="$ROOT" CODEX_MODEL="$1"; export AID_PROJECT_ROOT CODEX_MODEL; source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"; aid_codex_probe ); }
+# _agent_type <role> — the subagent a claude reviewer (or a codex role's
+# stand-in) is dispatched as: the role's effort, low → reviewer-light.
+_agent_type() {
+  local i; i="$(aid_review_role_index "$1")"
+  [[ "${RC_EFFORT[$i]}" == low ]] && echo aid-orchestrator:reviewer-light || echo general-purpose
+}
+# _agent_note <role> — what prepare prints next to a claude role's prompt.
+_agent_note() {
+  local i; i="$(aid_review_role_index "$1")"
+  if [[ "${RC_PROVIDER[$i]}" == claude ]]; then echo ", agent $(_agent_type "$1") at model ${RC_MODEL[$i]}"; fi
+}
 # _stand_in_line <dir> <role> <why> — what the controller must do instead of paying codex.
 _stand_in_line() {
-  echo "STAND-IN: codex is unavailable ($3); dispatch ${1}/prompt-${2}.md to a general-purpose agent at model ${RC_STAND_IN_MODEL} (see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
+  echo "STAND-IN: no codex answer ($3); dispatch ${1}/prompt-${2}.md to a $(_agent_type "$2") agent at model ${RC_STAND_IN_MODEL} (see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
 }
 
 cmd_dispatch() {
@@ -405,9 +417,11 @@ cmd_dispatch() {
     || _die "role ${ROLE} is dispatched by the controller (see scripts/lib/aid-review-adapter-claude.md)"
   local answer="${dir}/reviewer-${ROLE}.json" usage="${dir}/codex-${ROLE}.usage.json"
   [[ -e "$answer" ]] && _die "${answer} already exists; a reviewer is never paid twice (use retry after collect lists it as invalid)"
+  _stand_in "$dir" "$ROLE" && _die "a stand-in was already ordered for ${ROLE}; codex is asked again only through retry"
 
+  [[ -r "${dir}/prompt-${ROLE}.md" ]] || _die "cannot read ${dir}/prompt-${ROLE}.md; prepare the round again" 2
   local probe why
-  probe="$(_codex_probe)"
+  probe="$(_codex_probe "${RC_MODEL[$i]}")"
   if [[ "$(jq -r '.available' <<< "$probe")" != true ]]; then
     why="$(jq -r '.reason' <<< "$probe")"
     jq -n --arg r "$why" '{answered: false, reason: $r, fallback: "claude"}' > "$usage"
@@ -418,7 +432,7 @@ cmd_dispatch() {
   # In a subshell: the launcher's library sets its own shell options on load.
   ( # shellcheck source=lib/aid-codex-transport.sh
     source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"
-    CODEX_MODEL="${RC_MODEL[$i]}"
+    CODEX_MODEL="${RC_MODEL[$i]}" CODEX_EFFORT="${RC_EFFORT[$i]}"
     _run_codex_isolated "$ROOT" "${dir}/prompt-${ROLE}.md" "$events" "${dir}/codex-${ROLE}.stderr.txt" "$last"
   ) || rc=$?
 
@@ -431,17 +445,12 @@ cmd_dispatch() {
     echo "dispatched ${ROLE} (codex ${RC_MODEL[$i]}): answer in ${answer}"
   else
     rm -f "$answer"
-    local why=no_file; (( rc == 124 )) && why=timeout
+    local why=no_file; (( rc != 0 )) && why="exit_${rc}"; (( rc == 124 )) && why=timeout
     grep -qiE 'usage limit|rate.?limit|429' "${dir}/codex-${ROLE}.stderr.txt" 2>/dev/null && why=rate_limited
-    # A codex that answered the probe and then hit its limit mid-run falls back
-    # like an absent one; a codex that simply wrote nothing is a failure.
-    if [[ "$why" == rate_limited || "$why" == timeout ]]; then
-      jq -n --arg why "$why" '{answered: false, reason: $why, fallback: "claude"}' > "$usage"
-      _stand_in_line "$dir" "$ROLE" "$why"
-      return 0
-    fi
-    jq -n --arg why "$why" '{answered: false, reason: $why}' > "$usage"
-    _die "codex returned no answer for ${ROLE} (exit ${rc}); recorded as ${why}, see ${dir}/codex-${ROLE}.stderr.txt"
+    # Any run that leaves no answer falls back to the stand-in: a transport
+    # failure never costs the round its second opinion.
+    jq -n --arg why "$why" '{answered: false, reason: $why, fallback: "claude"}' > "$usage"
+    _stand_in_line "$dir" "$ROLE" "$why"
   fi
 }
 
@@ -458,7 +467,7 @@ cmd_retry() {
     # The stand-in record is the role's provenance, not a spent answer: it is
     # re-probed and rewritten, never dropped, or the retried answer would look
     # like a claude file nobody asked for (unexpected_provider).
-    local probe why; probe="$(_codex_probe)"; why="$(jq -r '.reason' <<< "$probe")"
+    local probe why; probe="$(_codex_probe "${RC_MODEL[$(aid_review_role_index "$ROLE")]}")"; why="$(jq -r '.reason' <<< "$probe")"
     if [[ "$(jq -r '.available' <<< "$probe")" == true ]]; then
       rm -f "${dir}/codex-${ROLE}".*
       echo "retry ${ROLE}: codex answers again; dispatch ${dir}/prompt-${ROLE}.md, then collect"

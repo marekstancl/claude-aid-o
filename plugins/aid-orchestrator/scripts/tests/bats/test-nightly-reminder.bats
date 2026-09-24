@@ -68,7 +68,7 @@ nightly_line" 3>&-
 _artifact() {
   jq -n --arg d "$1" --argjson f "$2" --argjson q "${3:-[]}" \
     '{date:$d, suites_run:10, passed:10, failed:$f, flaky:[], quarantined:$q,
-      duration_ms:1, exit_code:0, censored:false, log_url:"", notified:false}' \
+      duration_ms:1, exit_code:0, censored:false, log_url:""}' \
     > "$NIGHTLY_DIR/latest.json"
 }
 
@@ -104,6 +104,14 @@ _today() { date -u +%Y-%m-%d; }
   _line
   [ "$status" -eq 0 ]
   [[ "$output" == *"1 quarantined"* ]]
+}
+
+@test "4b: a merge path over its budget is named where the night is shown" {
+  _artifact "$(_today)" '[]'
+  jq '.merge_path_budget = {merge_path_seconds: 1450, merge_path_budget_s: 600, merge_path_over: true}' \
+    "$NIGHTLY_DIR/latest.json" > "$NIGHTLY_DIR/x" && mv "$NIGHTLY_DIR/x" "$NIGHTLY_DIR/latest.json"
+  _line
+  [[ "$output" == "Nightly: green ($(_today)) — merge path 1450 s over budget 600 s" ]]
 }
 
 @test "5: a nightly that stopped running is itself the finding" {
@@ -142,7 +150,7 @@ _today() { date -u +%Y-%m-%d; }
 @test "8: END TO END — the real reporter's artifact is what the real status reads" {
   printf '  Summary\n\n  Suites:  3/3 passed, 0 failed\n' > "$TEST_TMPDIR/run.log"
   run bash "$REPORT" --runner-log "$TEST_TMPDIR/run.log" --exit-code 0 \
-    --dir "$NIGHTLY_DIR" --tests-dir "$AID_PLUGIN_PATH/scripts/tests" --no-notify 3>&-
+    --dir "$NIGHTLY_DIR" --tests-dir "$AID_PLUGIN_PATH/scripts/tests" 3>&-
   [ "$status" -eq 0 ]
   _line
   [ "$status" -eq 0 ]

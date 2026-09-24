@@ -117,6 +117,10 @@ _return() {
   [[ "$output" == *"\"version\": \"$VERSION\""* ]]
   [[ "$output" == *'```aid-return'* ]]
   [[ "$output" == *"\"contract_version\": \"$VERSION\""* ]]
+  # the role's card and the shared rule travel as content, and the plugin is named
+  grep -qx '## Role: backend' <<< "$output"; grep -qx '### Write the least code that works' <<< "$output"
+  ! grep -q '^## Role: frontend' <<< "$output"
+  [[ "$output" == *"The AID plugin is at"* ]]
 }
 
 @test "contract: a status or gate result outside the declared vocabulary is refused" {

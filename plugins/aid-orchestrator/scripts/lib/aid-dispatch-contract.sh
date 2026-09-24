@@ -41,7 +41,7 @@
 #
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 #
-# **Last Updated:** 2026-08-25
+# **Last Updated:** 2026-09-23
 # =============================================================================
 [[ -n "${_AID_DISPATCH_CONTRACT_SH_LOADED:-}" ]] && return 0
 _AID_DISPATCH_CONTRACT_SH_LOADED=1
@@ -141,11 +141,23 @@ aid_dispatch_contract_build() {
   return 0
 }
 
+# _aid_dct_role_card <role> — the `## Role: <role>` section and the shared
+# `### Write the least code that works` section of skills/role-cards.md. A
+# relative path to the card does not exist in a consumer project, and the
+# installed agent copy can be older than the plugin in use, so the card travels
+# in the prompt.
+_aid_dct_role_card() {
+  awk -v role="$1" '
+    /^## / || /^### / { on = ($0 == "## Role: " role || $0 == "### Write the least code that works") }
+    on' "${_AID_DCT_LIB_DIR}/../../skills/role-cards.md"
+}
+
 # ---------------------------------------------------------------------------
 # aid_dispatch_contract_prompt <contract.json>
 #   Prints the packet as the block the controller pastes into the dispatch
-#   prompt — the packet verbatim (the agent gets content, never a path) and
-#   the return it owes, in the shape the reader below understands.
+#   prompt — the packet verbatim (the agent gets content, never a path), the
+#   return it owes in the shape the reader below understands, the step role's
+#   card and where the plugin is.
 # ---------------------------------------------------------------------------
 aid_dispatch_contract_prompt() {
   local c="${1:?contract: contract file required}"
@@ -169,6 +181,11 @@ $(jq '.return_shape | .contract_version = "'"$version"'"' "$c")
 
 A return without this block, or against another version, is refused and the
 step is dispatched again.
+
+The AID plugin is at \`$(cd "${_AID_DCT_LIB_DIR}/../.." && pwd)\`; a \`skills/...\` path
+named in your instructions is relative to it.
+
+$(_aid_dct_role_card "$(jq -r '.role' "$c")")
 PROMPT
 }
 

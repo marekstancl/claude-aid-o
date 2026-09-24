@@ -144,25 +144,35 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   run aid_review_config_load "$ROOT" step_review "$ROOT/nope.md"
   [ "$status" -eq 1 ]; [[ "$output" == *"roles skill not found"* ]]
 }
-@test "stand_in_model: read into RC_STAND_IN_MODEL, defaulted per checkpoint, refused when banned" {
+@test "stand_in_model: read into RC_STAND_IN_MODEL, opus when unset, refused when banned" {
   aid_review_config_load "$ROOT" step_review "$STEP_SKILL" 2>/dev/null
-  [ "$RC_STAND_IN_MODEL" = sonnet ]
-  aid_review_config_load "$ROOT" plan_review "$PLAN_SKILL" 2>/dev/null
   [ "$RC_STAND_IN_MODEL" = opus ]
-  _project '.review_checkpoints.step_review.stand_in_model = "opus"'
+  _project 'del(.review_checkpoints.step_review.stand_in_model)'
+  aid_review_config_load "$ROOT" step_review "$STEP_SKILL" 2>/dev/null; [ "$RC_STAND_IN_MODEL" = opus ]
+  _project '.review_checkpoints.step_review.stand_in_model = "sonnet"'
   run aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
   [ "$status" -eq 0 ]; [[ "$output" != *"unknown key"* ]]
-  aid_review_config_load "$ROOT" step_review "$STEP_SKILL" 2>/dev/null; [ "$RC_STAND_IN_MODEL" = opus ]
+  aid_review_config_load "$ROOT" step_review "$STEP_SKILL" 2>/dev/null; [ "$RC_STAND_IN_MODEL" = sonnet ]
   _project '.review_checkpoints.step_review.stand_in_model = "haiku"'
   run _load_step
   [ "$status" -eq 1 ]; [[ "$output" == *"banned_models"* ]]
+}
+
+@test "effort: read into RC_EFFORT, medium when unset, a value outside low|medium|high refused" {
+  _load_step
+  [ "${RC_EFFORT[*]}" = "low low" ]
+  _load_cp1
+  [ "${RC_EFFORT[0]}" = medium ]
+  _project '.review_checkpoints.step_review.reviewers[0].effort = "extreme"'
+  run _load_step
+  [ "$status" -eq 1 ]; [[ "$output" == *"effort must be low, medium or high (got 'extreme')"* ]]
 }
 
 # ── final_review (CP7) ────────────────────────────────────────────────────────
 @test "final_review: the default loads with three roles; its toggle switches it off; a banned model is refused" {
   aid_review_config_load "$ROOT" final_review "$STEP_SKILL" && aid_review_config_validate
   [ "${RC_ROLE[*]}" = "final_criteria final_claims final_generalist" ]
-  [ "$RC_ENABLED" = 1 ] && [ "$RC_STAND_IN_MODEL" = sonnet ]
+  [ "$RC_ENABLED" = 1 ] && [ "$RC_STAND_IN_MODEL" = opus ]
   yq '.review_checkpoints.cp7_plan_final_review = false' "$DEFAULT" > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
   aid_review_config_load "$ROOT" final_review "$STEP_SKILL"; [ "$RC_ENABLED" = 0 ]
   yq '.review_checkpoints.final_review.reviewers[0].model = "haiku"' "$DEFAULT" > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"

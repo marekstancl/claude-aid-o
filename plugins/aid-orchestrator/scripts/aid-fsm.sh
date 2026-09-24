@@ -29,11 +29,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
-# shellcheck disable=SC1091
-# 2026-08-26 — the ONE way AID alerts a human. Every call site discards its
-# return with `|| true`: an alert is telemetry, and a transition must never fail
-# because a message could not be delivered.
-source "${SCRIPT_DIR}/lib/aid-alert.sh"
 # P074 Step 1 — shared invoke-root/state-root resolution. State paths
 # (.aid-o/...) resolve through aid_state_path/aid_state_root so an invocation
 # from a linked worktree reads and writes the PRIMARY checkout's workspace;
@@ -1966,54 +1961,23 @@ fsm_check_compliance_recovery() {
   return 0
 }
 
-# fsm_emit_compliance_recovery — shared emitter for the P042 recovery alert.
-# Pairs a pending fsm_done_advance_blocked event with a ✅ Telegram alert +
+# fsm_emit_compliance_recovery — shared emitter of the P042 recovery marker.
+# Pairs a pending fsm_done_advance_blocked event with a
 # fsm_done_advance_recovered timeline event (the dedup marker). Called from
 # BOTH review→release resolution paths of cmd_done_advance: the clean re-run
-# (zero blocking failures) and the PM --force override (P044 — previously the
-# force path skipped recovery entirely, so force-cleared blocks never alerted).
+# (zero blocking failures) and the PM --force override (P044).
 #
 # Inputs:
 #   $1 — epic_id
 #   $2 — timeline path
-#   $3 — project_root
-#   $4 — alert message prefix ("; Checks: <list>" is appended here)
 #
-# The timeline event is written unconditionally (dedup marker) — only the
-# Telegram alert is gated by execution.yaml alert_on_compliance_recovery
-# (default on when key absent). Always returns 0 (best-effort, never blocks
-# the transition).
+# Always returns 0 (best-effort, never blocks the transition).
 fsm_emit_compliance_recovery() {
-  local epic_id="$1" timeline="$2" project_root="$3" message_prefix="$4"
+  local epic_id="$1" timeline="$2"
   local recovery_checks
   recovery_checks=$(fsm_check_compliance_recovery "$timeline" 2>/dev/null) || return 0
-  local recovery_gate
-  recovery_gate=$(yq -r '.notifications.telegram.alert_on_compliance_recovery // ""' "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null) || recovery_gate=""
-  recovery_gate="${recovery_gate:-true}"
-  [[ "$recovery_gate" == "false" ]] || \
-    aid_alert_run info plan-compliance-recovered "$epic_id" \
-      "${message_prefix}" \
-      "Nic hned. Při nejbližším čtení ověř, že náprava byla záměrná, ne náhodná." \
-      "checks=${recovery_checks}" || true
   [[ -f "$timeline" ]] && log_event "$timeline" "fsm_done_advance_recovered" \
     recovered_checks="$recovery_checks"
-  return 0
-}
-
-# RETIRED TRANSPORT, kept as a named refusal (2026-08-26).
-#
-# `try_telegram_alert` used to POST free text straight to the MCP bot on
-# localhost:8817 — a second transport AND a second format alongside the nightly
-# reporter's, and neither carried a single field the ecosystem alert standard
-# requires. A reader could not tell an alert about a RUNNING PLAN from one about
-# last night's tests, which is exactly the defect §2 of that standard describes.
-#
-# Everything now goes through lib/aid-alert.sh -> the shared `send_alert()`.
-# This shim stays only so an unconverted caller is LOUD rather than silently
-# unreachable: it says what to call instead and returns 0, because an alert path
-# must never fail a transition.
-try_telegram_alert() {
-  echo "aid-fsm: try_telegram_alert() is retired — use aid_alert_run/aid_alert_nightly (lib/aid-alert.sh) so the message carries severity, scope, ID, Co and Akce. Message dropped: ${1:-}" >&2
   return 0
 }
 
@@ -2380,10 +2344,6 @@ check_preconditions() {
             local timeline="${evidence_dir}/timeline.jsonl"
             log_event "$timeline" "fsm_precondition_repeated_fail" \
               from="$from" to="$to" reason="gates_no_generated_by" attempt_count="$attempt_count"
-            aid_alert_run warning plan-precondition-fail "$epic_id" \
-              "tatáž precondition selhala ${attempt_count}× v řadě na přechodu ${from}→${to} (gates_no_generated_by) — běh se zasekl a sám se z toho nedostane." \
-              "Do konce dneška rozhodni: buď ten důvod odstraň, nebo běh ukonči. Opakování samo o sobě nepomůže." \
-              "epic=${epic_id} transition=${from}→${to} reason=gates_no_generated_by" || true
           fi
           cat <<EOF >&2
 PRECONDITION FAIL: gates_report.json missing _generated_by field.
@@ -4779,18 +4739,10 @@ cmd_increment_step() {
         if (( attempt_step >= 3 )); then
           [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_repeated_fail_step" \
             step="$step" precondition="$_why" attempt_count="$attempt_step"
-          aid_alert_run warning plan-precondition-fail "$epic_id" \
-            "krok ${step} selhal ${attempt_step}× na téže precondition (${_why})." \
-            "Do konce dneška rozhodni, jestli ten krok přepsat, nebo běh ukončit." \
-            "epic=${epic_id} step=${step} precondition=${_why}" || true
         fi
         if (( attempt_epic >= 3 )); then
           [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_repeated_fail_epic" \
             precondition="$_why" attempt_count="$attempt_epic"
-          aid_alert_run critical plan-precondition-bypass "$epic_id" \
-            "tatáž precondition je obcházena napříč kroky (${attempt_epic}× v tomto EPICu) — to už není jeden špatný krok, ale vzorec." \
-            "Do zítřejšího poledne rozhodni, jestli EPIC pokračuje. Dokud to platí, jeho důkazům nevěř." \
-            "epic=${epic_id} precondition=${_why}" || true
         fi
         [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_fail" step="$step" reason="$_why"
         die "ERROR: step ${step} has no passing review round (${_why}).
@@ -5902,13 +5854,11 @@ cmd_done_advance() {
     fsm_handle_force_override "$from_phase" "$to_phase" "$state_file" "done-advance" "${@:5}"
     echo "WARNING: --force used, skipping precondition checks for done-advance $from_phase → $to_phase" >&2
 
-    # P044: pair a pending 🛑 blocked alert with a ✅ resolution even when the
+    # P044: pair a pending blocked event with its recovery marker even when the
     # block is cleared via PM force-override — the non-force recovery path in
-    # the else-branch below is skipped entirely on --force, so without this
-    # call a force-cleared block never emits the recovery alert.
+    # the else-branch below is skipped entirely on --force.
     if [[ "$from_phase" == "review" && "$to_phase" == "release" ]]; then
-      fsm_emit_compliance_recovery "$epic_id" "${evidence_dir}/timeline.jsonl" "$project_root" \
-        "✅ ${epic_id}: compliance block cleared via PM force-override, release unblocked."
+      fsm_emit_compliance_recovery "$epic_id" "${evidence_dir}/timeline.jsonl"
     fi
   else
     # Check preconditions for review → release
@@ -6035,10 +5985,6 @@ Audit log entry will be appended to .aid-o/work/audit-log.jsonl with the full re
 and blocked_checks list. See AID-v3-principles.md §1 for the enforcement contract.
 EOF
 
-          aid_alert_run critical plan-compliance-blocked "$epic_id" \
-            "${_blocking_count} blokujících nálezů compliance — vydání je zastavené." \
-            "Do zítřejšího poledne rozhodni: opravit, nebo vědomě povolit (waiver). Bez rozhodnutí to nikam nepokročí." \
-            "checks=${_blocking_names}" || true
 
           [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_blocked" \
             blocking_count="$_blocking_count" blocked_checks="$_blocking_names"
@@ -6047,11 +5993,9 @@ EOF
           exit 2
         fi
 
-        # P042: Recovery alert — fires when a previously-blocked EPIC now has zero blocking
-        # failures. Shared emitter handles the alert gate + dedup marker (see
-        # fsm_emit_compliance_recovery; the --force path calls it too, P044).
-        fsm_emit_compliance_recovery "$epic_id" "$_timeline" "$project_root" \
-          "✅ ${epic_id}: compliance cleared, release unblocked."
+        # P042: recovery marker — a previously-blocked EPIC now has zero blocking
+        # failures (fsm_emit_compliance_recovery; the --force path calls it too, P044).
+        fsm_emit_compliance_recovery "$epic_id" "$_timeline"
       fi
       # End P038/P042 compliance block.
 
@@ -6181,32 +6125,6 @@ EOF
     # Failure logs a warning but never aborts the release path.
     bash "$SCRIPT_DIR/aid-epic-summary.sh" generate "$evidence_dir" \
       2>/dev/null || log_warn "epic-summary.md generation failed (non-fatal)"
-
-    # ─── The PM's page about the finished EPIC (P089 Step 4) ─────────────
-    # HERE, and not in an instruction: the review is over at exactly this
-    # point, and the Step 6 obligation refuses a turn whose finished EPIC has
-    # no page. A rule that demands a page nobody produces is the kind of rule
-    # this plan exists to stop writing. Best-effort in the same sense as
-    # epic-summary.md above — a page that cannot be written never undoes a
-    # transition that already happened; the obligation will say so out loud on
-    # the next turn, which is the surface a PM reads.
-    # shellcheck source=lib/aid-epic-summary-page.sh
-    source "${SCRIPT_DIR}/lib/aid-epic-summary-page.sh" 2>/dev/null || true
-    if declare -F aid_epic_summary_page_render >/dev/null 2>&1; then
-      local _esp_out
-      if _esp_out="$(aid_epic_summary_page_path "$project_root" "$epic_id")"; then
-        aid_epic_summary_page_render "$evidence_dir" "$_esp_out" \
-          || log_warn "epic-summary-artifact.html render failed (non-fatal)"
-      else
-        log_warn "epic-summary-artifact.html: cannot resolve the page path for ${epic_id} (non-fatal)"
-      fi
-    else
-      # SAID OUT LOUD. The library ships beside this script, so its absence is a
-      # broken installation — and a silent skip here would mean the page is
-      # never rendered while the FSM reports a clean release edge, which is the
-      # one failure mode the obligation from Step 6 then blames on the session.
-      log_warn "lib/aid-epic-summary-page.sh did not load — the EPIC's PM page was NOT rendered (non-fatal here; the milestone_artifact_rendered rule will refuse the next turn)"
-    fi
 
     _fsm_pre_2103_services_note "$evidence_dir" "done-advance"
   fi

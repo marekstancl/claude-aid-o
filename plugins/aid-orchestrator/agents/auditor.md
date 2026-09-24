@@ -1,6 +1,7 @@
 ---
 name: auditor
-model: sonnet
+model: opus
+effort: low
 ---
 
 # Auditor Agent
@@ -26,7 +27,7 @@ model: sonnet
 > ```
 
 
-**Last Updated:** 2026-09-20
+**Last Updated:** 2026-09-23
 
 **Role:** Comprehensive project health assessment: up to ten audit categories, scored, with
 per-finding recommendations and a trend against the previous audit.

@@ -329,8 +329,8 @@ printf 'permissions: %s\n' "$permissions"
 # then the PLUGIN's own `defaults/orchestration.yaml → dispatch.mode`, then the
 # built-in `agent_tool`.
 #
-# `.aid-o/config/orchestration.yaml` is DELIBERATELY NOT CONSULTED. Nothing in the
-# plugin reads it. An earlier version of this block did, and named it as the source
+# `.aid-o/config/orchestration.yaml` is DELIBERATELY NOT CONSULTED for the mode:
+# nothing in the plugin reads `dispatch.mode` from it. An earlier version of this block did, and named it as the source
 # — so a project carrying `dispatch.mode: inline` there would have been told
 # "inline (source: .aid-o/config/orchestration.yaml)" while the FSM actually ran
 # `agent_tool`. A confident wrong answer with a citation attached is worse than no
@@ -387,6 +387,18 @@ if [[ -n "${dispatch_line:-}" ]]; then
   printf 'dispatch mode: %s\n' "$dispatch_line"
 else
   printf 'dispatch mode: %s (source: %s)\n' "$dispatch" "$dispatch_src"
+fi
+
+# ── 6b. parallel cap ─────────────────────────────────────────────────────
+# The cap in force, resolved exactly as aid_parallel_decide resolves it
+# (lib/aid-roots.sh aid_orchestration_value): the project's orchestration.yaml
+# when it sets dispatch.max_parallel, else the plugin default.
+if [[ "$have_yq" == "1" ]] && cap="$(aid_orchestration_value "$ROOT" .dispatch.max_parallel)"; then
+  cap_src="plugin default orchestration.yaml"
+  [[ "${cap#*$'\t'}" == project ]] && cap_src="$(_short "$ORCHESTRATION_YAML")"
+  printf 'parallel cap: %s (source: %s)\n' "${cap%%$'\t'*}" "$cap_src"
+else
+  printf 'parallel cap: unknown (%s unreadable or yq missing — dispatch runs serial)\n' "$(_short "$ORCHESTRATION_YAML")"
 fi
 
 # ── 7. plan lifecycle manifests ──────────────────────────────────────────

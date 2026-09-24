@@ -20,9 +20,13 @@
 #         steps: 5 (3 skip, 2 rounds), cp3: pass, 1234567 tokens, 2 unknown, 9.8765 USD[, step 3 round 1 not closed]
 #   A token value a reviewer could not report is counted as unknown, never
 #   summed as zero, so an unmeasured round never looks free.
+#   aid_plan_close_time <project_root> <plan_id> [epic_run_dir...]
+#       where the plan's time went, in minutes, as JSON (P099 Step 7).
 # NO top-level `set -e` — sourced under the caller's own shell.
 
 _AID_RS_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# shellcheck source=aid-session-store.sh
+source "$(dirname "${BASH_SOURCE[0]}")/aid-session-store.sh"
 
 aid_review_prices_file() {
   # AID_REVIEW_PRICES names a table explicitly (a PM's what-if, a test fixture).
@@ -173,3 +177,66 @@ aid_plan_close_cost() {
        usd: ([$r[].value.usd | select(type == "number")] | add // 0 | . * 10000 | round / 10000),
        usd_unknown_roles: ([$r[] | select((.value.usd | type) != "number") | .key] | unique)}'
 }
+
+# aid_plan_close_time <project_root> <plan_id> [epic_run_dir...]
+#   {work_min, review_min, gates_min, waiting_pm_min, outage_min}; a number
+#   nobody could measure is null ("neměřeno" on the page), never 0.
+#     review   every review round's own start..end (measurement.json): CP1,
+#              the EPICs' CP2/CP3, the plan-final CP7
+#     gates    gate_runner_start..gate_runner_complete in the EPIC and plan-final
+#              timelines
+#     waiting  from a Stop the continuation rule let end with a card or a spent
+#              budget to the PM's next prompt in that session (hook audit)
+#     outage   a gap over 20 minutes after a Stop the rule refused (or let wait)
+#              before the session's next hook event — a limit, a crash, a login
+#     work     the EPICs' time in EXECUTE minus all of the above
+#   Intervals are merged before summing, so two sessions on one plan count once.
+#   The sessions of the plan are the ones whose continuation lines name it; the
+#   audit is read from the session store (AID_HOOK_AUDIT overrides).
+aid_plan_close_time() {
+  local root="$1" plan="$2"; shift 2
+  local ev="${root}/.aid-o/work/evidence/${plan}" d audit sids
+  local -a m=() tl=()
+  mapfile -t m < <(ls "$ev"/cp1/round-*/measurement.json "$ev"/R-"${plan}"-final-*/cp7/round-*/measurement.json 2>/dev/null
+                   for d; do find "${root}/${d}" -path '*/cp[23]/*' -name measurement.json 2>/dev/null; done)
+  for d; do [[ -f "${root}/${d}/timeline.jsonl" ]] && tl+=("${root}/${d}/timeline.jsonl"); done
+  for d in "$ev"/R-"${plan}"-final-*/timeline.jsonl; do [[ -f "$d" ]] && tl+=("$d"); done
+  audit="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}"
+  local -a pat=()
+  if [[ -r "$audit" ]]; then
+    sids="$(grep -F '"rule":"queue_continuation_notice"' "$audit" | grep -F "plan=${plan}" | jq -r '.session_id' 2>/dev/null | sort -u)"
+    for d in $sids; do pat+=(-e "\"session_id\":\"${d}\""); done
+  fi
+  jq -n --arg plan "$plan" --argjson now "$(date -u +%s)" \
+        --slurpfile m <(cat /dev/null "${m[@]}") \
+        --slurpfile t <(for d in "${tl[@]}"; do jq -c --arg f "$d" '. + {_f: $f}' "$d" 2>/dev/null; done) \
+        --slurpfile a <( (( ${#pat[@]} )) && grep -F "${pat[@]}" "$audit") '
+    def ep: fromdateiso8601? // null;
+    def merged: sort_by(.[0]) | reduce .[] as $i ([];
+      if length > 0 and $i[0] <= .[-1][1] then .[-1][1] = ([.[-1][1], $i[1]] | max) else . + [$i] end);
+    def total: merged | map(.[1] - .[0]) | add // 0;
+    def inter($b): [.[] as $x | $b[] as $y | [([$x[0], $y[0]] | max), ([$x[1], $y[1]] | min)] | select(.[0] < .[1])];
+    def mins: . / 60 | round;
+    # pairs(start_pred; end_pred): each start with the next end in one file
+    def pairs(s; e): group_by(._f) | map(sort_by(.ts) | reduce .[] as $x ({o: null, r: []};
+        if ($x | s) and .o == null then .o = ($x.ts | ep)
+        elif ($x | e) and .o != null then .r += [[.o, ($x.ts | ep)]] | .o = null else . end) | .r) | add // [];
+    ([$m[] | [(.started_at | ep), (.finished_at | ep)] | select(.[0] and .[1])]) as $rev
+    | ($t | pairs(.event == "gate_runner_start"; .event == "gate_runner_complete")) as $gat
+    | ($t | pairs(.event == "fsm_transition" and .to == "EXECUTE"; .event == "fsm_transition" and .from == "EXECUTE")) as $exe
+    | ($a | map(. + {t: (.ts | ep)}) | group_by(.session_id) | map(sort_by(.t))) as $ses
+    | ([$ses[] | . as $l | range(0; length) as $i | $l[$i]
+        | select(.rule == "queue_continuation_notice" and (.reason | test("^outcome=(handed_over|budget_spent) plan=" + $plan)))
+        | [.t, (first($l[$i + 1:][] | select(.event == "UserPromptSubmit") | .t) // $now)]]) as $wait
+    | ([$ses[] | . as $l | range(0; length) as $i | $l[$i]
+        | select(.rule == "queue_continuation_notice" and (.reason | test("^outcome=(refused|wait) plan=" + $plan)))
+        | [.t, (first($l[$i + 1:][] | select(.t > $l[$i].t) | .t) // null)]
+        | select(.[1] != null and .[1] - .[0] > 1200)]) as $out
+    | (($rev + $gat + $wait + $out) | merged) as $busy
+    | {work_min: (if ($exe | length) == 0 then null else ((($exe | total) - ($exe | merged | inter($busy) | total)) | mins) end),
+       review_min: (if ($rev | length) == 0 then null else ($rev | total | mins) end),
+       gates_min: (if ($t | length) == 0 then null else ($gat | total | mins) end),
+       waiting_pm_min: (if ($a | length) == 0 then null else ($wait | total | mins) end),
+       outage_min: (if ($a | length) == 0 then null else ($out | total | mins) end)}'
+}
+

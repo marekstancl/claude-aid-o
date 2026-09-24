@@ -104,6 +104,14 @@ _aid_hrt_session_start() {
   date -u -d "$ts" +%s 2>/dev/null || echo 0
 }
 
+# _aid_hrt_last_message <transcript> — the text of the turn's last assistant
+# message (empty when there is none). Shared by every Stop rule that reads it.
+_aid_hrt_last_message() {
+  jq -rs '[.[] | select(.type == "assistant")] | last
+          | (.message.content // []) | map(select(.type == "text") | .text) | join("\n")' \
+    "$1" 2>/dev/null
+}
+
 # _aid_hrt_hands_over <text_file> — does the turn's last message open a
 # Decision card (validated by the card library) or a Blocked card (its label
 # in any configured language)? 0 yes, 1 no.
@@ -141,9 +149,7 @@ aid_hook_rule_turn_step_open() {
   IFS=$'\t' read -r epic run idx sid _ <<< "$line"
 
   local last tmp
-  last="$(jq -rs '[.[] | select(.type == "assistant")] | last
-                  | (.message.content // []) | map(select(.type == "text") | .text) | join("\n")' \
-          "$transcript" 2>/dev/null)"
+  last="$(_aid_hrt_last_message "$transcript")"
   if [[ -n "$last" && "$last" != "null" ]]; then
     tmp="$(mktemp)" || { echo "no temp file for the card check" >&2; return 3; }
     printf '%s\n' "$last" > "$tmp"

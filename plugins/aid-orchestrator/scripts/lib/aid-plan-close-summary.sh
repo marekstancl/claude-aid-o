@@ -24,7 +24,8 @@
 #     from RELEASE-DECISION → .release_decision.plan_summary
 #                      reviewed_candidate_sha, approved_target_sha, target_ref,
 #                      final_merge_sha, release_tag_status, epics[],
-#                      plan_final_gates.{report,result}, close, remaining_backlog
+#                      plan_final_gates.{report,result}, close, remaining_backlog,
+#                      time (optional; "neměřeno" when absent)
 #                      (producer: scripts/aid-release-policy.sh, plan_summary_json,
 #                      emitted in PLAN mode only — EPIC mode has plan_summary: null)
 #
@@ -95,11 +96,14 @@ source "${_APCS_LIB_DIR}/aid-roots.sh"   # aid_state_root for the plugin-issues 
 # Validated in aid_plan_close_render by VALUE, next to the message each failure
 # produces — "brief malformed" is not an actionable message.
 
-# The nine plan_summary fields this renderer READS, from the producer's field
-# set (scripts/aid-release-policy.sh, plan_summary_json):
+# The nine plan_summary fields this renderer READS and VALIDATES, from the
+# producer's field set (scripts/aid-release-policy.sh, plan_summary_json):
 #
 #   reviewed_candidate_sha  approved_target_sha  target_ref  release_tag_status
 #   final_merge_sha  epics  plan_final_gates  close  remaining_backlog
+#
+# and `time`, read but optional: an older decision without it renders
+# "Kam šel čas: neměřeno".
 #
 # plus the verdict of the decision's `final_review` input (the whole-plan round).
 #
@@ -318,10 +322,15 @@ aid_plan_close_render() {
           <<<"$ps" 2>/dev/null)" && [[ -n "$_pcd" ]] && deliverables_json="$_pcd"
 
   # The whole-plan round's verdict, and what closing the plan cost so far.
-  local final_review close_cost
+  local final_review close_cost time_spent
   final_review="$(jq -r '[.release_decision.inputs[]? | select(.id == "final_review") | .verdict] | first // "nezaznamenáno"' <<<"$decision_raw")"
   close_cost="$(jq -r '.close | "\(.attempts) pokus(ů), \(.minutes) min, \(.usd) USD"
                        + (if (.usd_unknown_roles | length) > 0 then " + neznámá cena u: " + (.usd_unknown_roles | join(", ")) else "" end)' <<<"$ps")"
+  # Where the plan's time went (P099 Step 7): five numbers computed by the
+  # producer (aid_plan_close_time); an unmeasured one says so.
+  time_spent="$(jq -r 'def m: if type == "number" then "\(.) min" else "neměřeno" end;
+    if (.time | type) != "object" then "neměřeno"
+    else "práce \(.time.work_min | m), revize \(.time.review_min | m), brány \(.time.gates_min | m), čekání na tebe \(.time.waiting_pm_min | m), výpadky \(.time.outage_min | m)" end' <<<"$ps")"
 
   # ── card class ────────────────────────────────────────────────────────────
   # Decision-required when the plan is not release-ready, or the merge mode is
@@ -404,11 +413,11 @@ aid_plan_close_render() {
     --arg merge "$(_apcs_short "$merge_sha")" \
     --arg gres "$gates_result" \
     --arg grep_ "${gates_report:-—}" \
-    --arg fr "$final_review" --arg cost "$close_cost" \
+    --arg fr "$final_review" --arg cost "$close_cost" --arg time "$time_spent" \
     --arg ev "$ev_status" --arg evh "$ev_at_head" \
     --arg wv "$waivers_n" --arg bl "$backlog_n" '[
-      "Recenzovaný kandidát: " + $cand + " → schválený cíl " + $tgt + " (" + $tref + ")",
-      "Merge do main: " + $merge,
+      "Recenzovaný kandidát: " + $cand + " → schválený cíl " + $tgt + " (" + $tref + "), merge do main: " + $merge,
+      "Kam šel čas: " + $time,
       "Plan-final brány: " + $gres + " (report: " + $grep_ + ")",
       "Čtení celku: " + $fr + "; uzavření: " + $cost,
       "Evidence: " + $ev + " (ověřeno na HEAD: " + $evh + "), waiverů " + $wv + ", zbývá v backlogu " + $bl

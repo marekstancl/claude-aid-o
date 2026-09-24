@@ -3,6 +3,30 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.104.0] — 2026-09-24
+
+### Changed
+- **Druhý revizor (Codex) odpovídá** — prompt jde do Codexu na stdin (argument padal na limitu délky příkazu u 189 kB CP1), odpověď bere AID z poslední zprávy a každé kolo bez odpovědi (chyba, žádný soubor, timeout, limit) automaticky dostane Claude zástupce; roli se zástupcem už `dispatch` znovu Codexu neplatí. Sonda Codexu se ptá modelu, na kterém role opravdu poběží. Model zůstává `gpt-5.6-terra` s effortem `high`: `gpt-6-sol` ChatGPT účet odmítá a `gpt-5.6-sol` na stejném balíku minul jeden ze čtyř blokerů (`docs/plans/P099-codex-model-check.md`).
+- **Opus všude, effort podle role** — všichni agenti a Claude revizoři běží na Opus; bývalé Sonnet role s effortem `low` přes dva nové typy agentů (`implementer-light`, `reviewer-light`). Effort je v datech (`review-checkpoints.yaml` → `effort`, karta role → `**Effort:**`); `prepare` vypíše ke každé roli typ agenta a model. Karta role a pravidlo „nejmenší kód" jdou agentovi přímo v zadání (dispatch contract), s cestou k pluginu — v cizím projektu relativní cesta neexistovala.
+- **Telegram jen dvakrát** — „agent stojí a čeká na tebe" (jednou za zastavení, i přes víc oken; tvoje odpověď ho znovu nabije) a „plán dodán" (jednou za plán, vynucené uzavření to řekne). Čtyři upozornění FSM a noční zpráva jsou pryč, události zůstávají v timeline a v nočním artefaktu; `/aid-status` ukazuje u noční řádky i překročený rozpočet merge cesty.
+- **Autonomní běh se sám nezastaví** — Stop hook vrací session, která plán řídí (`/aid-run --auto` ji naváže přes `plan-state --bind-session`), zpět do práce, dokud nepředá kartou Rozhodnutí/Zastaveno, nečeká na běžící bránu (`AID-WAIT:`) nebo nevyčerpá `autonomy.continuation_budget` (40, tvoje odpověď ho vrací). Pravidlo odmítá i pod `stop_hook_active` (nový klíč registru `blocks_when_active`), jeho vlastní chyba tah nikdy neblokuje. `aid-hook-verify.sh --status` hlásí prošlý verdikt kanárku jako neplatný a `/aid-run --auto` ho obnoví — blokující pravidla hooků byla od 24. 8. potichu vypnutá.
+- **Souběžné kroky opravdu běží** — generátor EPICu psal do sloupce `Parallel Group` vždy `---`, takže žádná vlna se nikdy nerozběhla; teď nese vlnu z plánu. Strop souběhu čte projekt (`.aid-o/config/orchestration.yaml`, `/aid-init` zapíše 3, `/aid-setup parallel` mění), jinak výchozí plugin; souhrn konfigurace ho ukáže se zdrojem.
+- **Stránka plánu** — krok má svůj název a pod ním celý cíl, počet kritérií končí u dalšího nadpisu (poslední krok nepřebírá kritéria celého plánu), role s číslicí (`e2e`) se čte celá.
+- **Renderer stránek je rychlejší** — ~15 volání `jq` místo ~79 na stránku (4,0 s → 2,3 s), výstup beze změny.
+- **Merge cesta** — `test-tier-ci-topology-guard` a `test-aid-nightly-report` jdou do T2, `test-dod-gate-profile-agreement` z T0 do T1; odhad ~35 min z 42,5. Cíl 20 min vyžaduje zrychlit revizní engine (`docs/plans/P099-merge-path-2026-09.md`).
+- **Nástroj Artifact je v autonomním presetu oprávnění** — zveřejnění stránky nečeká na potvrzení.
+- **Sběr hlášení z projektů jen vypisuje** — `bin/aid-plugin-issues-collect.sh` ukáže otevřené body s řádkem a nic nezapisuje; rozhodnutí se píše do souboru projektu.
+
+### Added
+- **Kam šel čas** — stránka dodaného plánu ukazuje práci, revize, brány, čekání na PM a výpadky (`aid_plan_close_time`, z revizních kol, časových os EPICů a auditu hooků mimo strom).
+
+### Removed
+- **Stránka EPICu a stránka selhaných bran** — PM čte dvě stránky na plán: plán k rozhodnutí a dodaný plán. Renderer EPIC stránky, jeho sada, profily `gates`/`epic_done` a skládání dlaždic jen pro bránu jsou pryč; brána vypisuje jen kartu.
+- **Klíč `notifications.telegram.alert_on_compliance_recovery`** — `/aid-init` ho nepíše, upgrade konfigurace odstraní celý blok.
+- **`docs/plans/plugin-issues-inbox.md`** (90 kopií, 0 rozhodnutí) — poslední roztřídění je v `docs/plans/plugin-issues-triage-2026-09-23.md`.
+
+**Poznámka pro projekty:** `scripts/` pluginu má 173 927 řádků (před plánem 175 429). Projekt s vlastním `review-checkpoints.yaml` si drží své modely; nový klíč `effort` je volitelný. `/aid-run --auto` musí po `/clear` nebo v novém okně session znovu navázat (dělá to sám v PRE-FLIGHT).
+
 ## [2.103.0] — 2026-09-23
 
 ### Changed

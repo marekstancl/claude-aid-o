@@ -179,6 +179,20 @@ run_hook() { # run_hook <event> [json]
   grep -q 'already being continued by a hook' "$AUDIT"
 }
 
+@test "blocks_when_active lets only the row that declares it refuse a continued turn, and never on its own failure" {
+  mkdir -p "$TMP/state/hooks"
+  echo "{\"verified\":true,\"tool\":\"bats\",\"version\":\"fixture\",\"checked_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$TMP/state/hooks/trust.json"
+  write_registry "$(row bounded Stop any rule_deny closed; echo '    blocks_when_active: true'; row plain Stop any rule_deny closed)"
+  run_hook Stop '{"session_id":"s1","stop_hook_active":true}'
+  [ "$status" -eq 2 ]
+  grep -q '"rule":"bounded","outcome":"deny"' "$AUDIT"
+  grep -q '"rule":"plain","outcome":"deny_suppressed"' "$AUDIT"
+  write_registry "$(row slowb Stop any rule_slow closed 1; echo '    blocks_when_active: true'; row brokenb Stop any rule_broken closed; echo '    blocks_when_active: true')"
+  run_hook Stop '{"session_id":"s1","stop_hook_active":true}'
+  [ "$status" -eq 0 ]
+  grep -q '"rule":"slowb","outcome":"timeout"' "$AUDIT"
+}
+
 @test "AC3: a controller-owned rule does not run inside a subagent" {
   write_registry "$(row controller_only Stop controller rule_context)"
   run_hook Stop '{"session_id":"s1","agent_type":"aid-orchestrator:implementer"}'

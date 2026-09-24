@@ -1,30 +1,29 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+#
+# T2 SINCE P099 (docs/plans/P099-merge-path-2026-09.md): the reporter runs only
+# in the nightly CI job, so its suite runs there too — a broken reporter shows
+# the next morning in /aid-status (NOT RUN / unreadable), not on a merge.
 #
 # MEASURED 61 s over 12 cases = 5 s per case (nightly journal, 2026-08-15); T0
 # is under 2 s per case. Each case drives the real reporter over a real runner
 # log.
-# test-aid-nightly-report.bats — P081 Step 7: the nightly result is durable
-# and the message is rare.
+# test-aid-nightly-report.bats — P081 Step 7: the nightly result is durable;
+# since P099 it sends no message at all.
 #
 # WHAT THIS SUITE PROVES, in the order it matters:
 #   * the artifact is written on every night, green or red, and it lands on the
 #     SHARED host path — not under `.aid-o/`, which no CI job could ever write
 #     somewhere the PM's checkout can read;
-#   * a green night is silent;
-#   * a red night sends exactly one message, and the SAME failure the next
-#     night counts a streak instead of sending again;
+#   * no night, green or red, reaches Telegram;
+#   * the SAME failure the next night counts a streak;
 #   * a suite that passes on its single retry is flaky and quarantined — a
-#     third state, neither a failure nor a green run;
-#   * a quarantine entry that ages past its deadline with no owner escalates
-#     even on an otherwise quiet night;
-#   * a missing Telegram helper degrades to a warning; the job still passes and
-#     the artifact still says the message was missed.
+#     third state, neither a failure nor a green run.
 #
 # Fixture suites are written with printf, never a heredoc (IMP-494).
 #
 # Result count after any edit:
-#   bats --tap test-aid-nightly-report.bats | grep -cE '^(ok|not ok)'   # == 11
+#   bats --tap test-aid-nightly-report.bats | grep -cE '^(ok|not ok)'   # == 8
 
 load test-helpers.bash
 
@@ -46,29 +45,10 @@ setup() {
   mkdir -p "$FIXTURE_TESTS/bats" "$NIGHTLY_DIR"
   cd "$ROOT"
 
-  # A stub for the shared ecosystem helper — this suite must never reach a real
-  # Telegram API, and it must be able to see whether a message was attempted.
-  #
-  # It stubs `send_alert`, NOT the legacy `send_telegram_alert`: since
-  # 2026-08-26 the reporter goes through lib/aid-alert.sh to the standard's
-  # shared sender, and a stub of the old name would have proved only that the
-  # new path is unreachable. The stub records the fields, one per line, so a
-  # case can assert on scope/ID/state instead of on prose.
+  # A stub for the shared ecosystem helper: any call it records is a message
+  # the nightly must no longer send.
   STUB_TG="$TEST_TMPDIR/telegram-notify.sh"
-  cat > "$STUB_TG" <<'STUB'
-send_alert() {
-  { printf 'severity=%s\nscope=%s\nid=%s\n' "$1" "$2" "$3"
-    printf 'co=%s\nakce=%s\n' "$4" "$5"
-    printf 'kontext=%s\nrunbook=%s\nstate=%s\nsource=%s\n' "${6:-}" "${7:-}" "${8:-}" "${9:-}"
-  } >> "$SENT"
-  return 0
-}
-STUB
-  # Pointing AID_TELEGRAM_LIB at this stub is ALSO what lets delivery happen
-  # under AID_TEST_MODE: lib/aid-alert.sh suppresses the PRODUCTION library, not
-  # a stub. A fixture that forgot to stub therefore cannot reach the real
-  # channel — the earlier design used an AID_ALERT_FORCE override, which any
-  # fixture could have inherited alongside real credentials.
+  printf 'send_alert() { echo "$3" >> "$SENT"; }\n' > "$STUB_TG"
   export AID_TELEGRAM_LIB="$STUB_TG"
 }
 
@@ -115,37 +95,24 @@ _report() {
   [ -f "$NIGHTLY_DIR/latest.json" ]
   [ ! -e "$SENT" ]
   [ "$(jq -r '.failed | length' "$NIGHTLY_DIR/latest.json")" = "0" ]
-  [ "$(jq -r '.notified' "$NIGHTLY_DIR/latest.json")" = "false" ]
   [ ! -e "$ROOT/.aid-o/work/nightly" ]
 }
 
-@test "2: a red night sends exactly one message and records the failure" {
+@test "2: a red night records the failure and sends nothing" {
   _mk_bats "$FIXTURE_TESTS/bats/test-red.bats" false
   run _report "$(_log 2 3 test-red)" --exit-code 1
   [ "$status" -eq 0 ]
   [ "$(jq -r '.failed[0].suite' "$NIGHTLY_DIR/latest.json")" = "test-red" ]
   [ "$(jq -r '.failed[0].streak' "$NIGHTLY_DIR/latest.json")" = "1" ]
-  [ "$(jq -r '.notified' "$NIGHTLY_DIR/latest.json")" = "true" ]
-  [ "$(grep -c '' "$SENT")" -ge 1 ]
-  # The FIELDS the standard makes mandatory, not the prose: one message, scoped
-  # to the nightly, and its state line says so before anything else.
-  [ "$(grep -c '^id=' "$SENT")" -eq 1 ]
-  # The scope carries the PROJECT as well as the part, so an alert from another
-  # repository running AID is not confusable with this one.
-  [ "$(grep -cE '^scope=.+-aid-testy$' "$SENT")" -eq 1 ]
-  [ "$(grep -c '^state=NOČNÍ TESTY$' "$SENT")" -eq 1 ]
-  [ "$(grep -c '^id=nightly-red$' "$SENT")" -eq 1 ]
+  [ ! -e "$SENT" ]
 }
 
-@test "3: the same failure the next night counts a streak instead of re-sending" {
+@test "3: the same failure the next night counts a streak" {
   _mk_bats "$FIXTURE_TESTS/bats/test-red.bats" false
   _report "$(_log 2 3 test-red)" --exit-code 1
-  rm -f "$SENT"
   run _report "$(_log 2 3 test-red)" --exit-code 1
   [ "$status" -eq 0 ]
   [ "$(jq -r '.failed[0].streak' "$NIGHTLY_DIR/latest.json")" = "2" ]
-  [ ! -e "$SENT" ]
-  [ "$(jq -r '.notified' "$NIGHTLY_DIR/latest.json")" = "false" ]
 }
 
 @test "4: a suite that passes on its single retry is flaky and quarantined" {
@@ -176,57 +143,11 @@ EOF
   [ ! -e "$SENT" ]
 }
 
-@test "6: an ownerless quarantine escalates the night it crosses its deadline" {
-  _quarantine test-old.bats 14
-  run _report "$(_log 3 3)" --exit-code 0
-  [ "$status" -eq 0 ]
-  [ -e "$SENT" ]
-  [[ "$(cat "$SENT")" == *"no owner"* ]]
-  [[ "$(cat "$SENT")" == *"test-old.bats"* ]]
-}
-
-@test "6b: and then weekly, not every night — a daily repeat mutes the channel" {
-  _quarantine test-old.bats 15          # one night past the crossing
-  run _report "$(_log 3 3)" --exit-code 0
-  [ "$status" -eq 0 ]
-  [ ! -e "$SENT" ]
-
-  _quarantine test-old.bats 21          # a week after the crossing
-  run _report "$(_log 3 3)" --exit-code 0
-  [ "$status" -eq 0 ]
-  [ -e "$SENT" ]
-}
-
 @test "6c: a suite that keeps flaking does NOT reset its own age" {
   _quarantine test-old.bats 14
   bash "$QUARANTINE" add test-old.bats ""      # tonight it flaked again
   [ "$(bash "$QUARANTINE" list --json | jq -r '.[0].age_days')" -eq 14 ]
   [ "$(bash "$QUARANTINE" list --json | jq 'length')" -eq 1 ]
-}
-
-@test "7: a missing Telegram helper is a warning, not a failed job" {
-  _mk_bats "$FIXTURE_TESTS/bats/test-red.bats" false
-  AID_TELEGRAM_LIB="$TEST_TMPDIR/does-not-exist.sh" \
-    run _report "$(_log 2 3 test-red)" --exit-code 1
-  [ "$status" -eq 0 ]
-  [ -f "$NIGHTLY_DIR/latest.json" ]
-  [ "$(jq -r '.notified' "$NIGHTLY_DIR/latest.json")" = "false" ]
-}
-
-@test "7b: a failure whose message never got out is re-sent, not counted silent" {
-  _mk_bats "$FIXTURE_TESTS/bats/test-red.bats" false
-  # Night one: the helper is missing, so nothing is delivered.
-  AID_TELEGRAM_LIB="$TEST_TMPDIR/does-not-exist.sh" \
-    run _report "$(_log 2 3 test-red)" --exit-code 1
-  [ "$(jq -r '.notified' "$NIGHTLY_DIR/latest.json")" = "false" ]
-  [ ! -e "$SENT" ]
-
-  # Night two: the helper is back. The failure is "known", but it was never
-  # actually reported — silence here would make the outage permanent.
-  run _report "$(_log 2 3 test-red)" --exit-code 1
-  [ "$status" -eq 0 ]
-  [ -e "$SENT" ]
-  [ "$(jq -r '.notified' "$NIGHTLY_DIR/latest.json")" = "true" ]
 }
 
 @test "8: a run cut short is recorded censored, never as a green night" {

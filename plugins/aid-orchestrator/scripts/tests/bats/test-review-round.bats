@@ -173,6 +173,16 @@ STUB
   echo "$output"; [ "$status" -eq 0 ]
   jq -e '.valid | index("generalist_b")' "$CP1/round-1/collect.json"
 }
+@test "dispatch: a codex run that leaves no answer is stood in for, and codex is not dispatched twice" {
+  "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
+  _probe true
+  mkdir -p "$ROOT/bin"; printf '#!/usr/bin/env bash\nexit 0\n' > "$ROOT/bin/codex"; chmod +x "$ROOT/bin/codex"
+  PATH="$ROOT/bin:$PATH" run "$ROUND_SH" dispatch "$PLAN" --round 1 --provider codex --role generalist_b
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"STAND-IN"*"(no_file)"* ]]
+  [ "$(jq -r '"\(.fallback) \(.reason)"' "$CP1/round-1/codex-generalist_b.usage.json")" = "claude no_file" ]
+  PATH="$ROOT/bin:$PATH" run "$ROUND_SH" dispatch "$PLAN" --round 1 --provider codex --role generalist_b
+  [ "$status" -eq 1 ]; [[ "$output" == *"only through retry"* ]]
+}
 @test "dispatch: a claude role is refused naming the controller instruction" {
   "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
   run "$ROUND_SH" dispatch "$PLAN" --round 1 --provider codex --role reuse
@@ -468,7 +478,7 @@ _probe() {
   [ "$(jq '.reviewers_expected | length' "$(D 1)/round.json")" -eq 2 ]
   _probe false rate_limited
   run "$ROUND_SH" dispatch --checkpoint cp2 --evidence-dir "$E" --step 0 --project-root "$R" --round 1 --provider codex --role step_security
-  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"STAND-IN"* ]]; [[ "$output" == *sonnet* ]]
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"STAND-IN"* ]]; [[ "$output" == *"general-purpose agent at model opus"* ]]
   [ "$(jq -r '.fallback' "$(D 1)/codex-step_security.usage.json")" = claude ]
 
   # a stand-in that was asked for and never dispatched does not close the round
@@ -482,7 +492,7 @@ _probe() {
   _bracket 1 step_generalist; _bracket 1 step_security
   run _S close --round 1 --tokens step_generalist=3 step_security=7; echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r .degraded "$(D 1)/measurement.json")" = false ]
-  [ "$(jq -r '.reviewers.step_security | "\(.provider) \(.model) \(.tokens) \(.fallback_reason)"' "$(D 1)/measurement.json")" = "claude sonnet 7 rate_limited" ]
+  [ "$(jq -r '.reviewers.step_security | "\(.provider) \(.model) \(.tokens) \(.fallback_reason)"' "$(D 1)/measurement.json")" = "claude opus 7 rate_limited" ]
 }
 
 @test "step: a claude answer for a codex role without a stand-in record is unexpected_provider" {

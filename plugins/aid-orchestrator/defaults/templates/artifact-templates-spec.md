@@ -28,7 +28,7 @@ v AID netvrdí, že stránka vznikla.
 |---|---|
 | `defaults/templates/artifact-outcome.html` | obecná šablona těla artefaktu (jen tělo — `<!doctype>`, `<head>` a `<body>` dodává nástroj Artifact) |
 | `scripts/lib/aid-artifact-render.sh` | jediný vstupní bod, který šablonu plní: `aid_artifact_render <template_id> <facts_json> <prose_json> <out_path>` |
-| `scripts/lib/aid-gate-outcome-summary.sh` | hranice bran — spočítá fakta z kanonického reportu bran a nechá tělo vykreslit |
+| `scripts/lib/aid-gate-outcome-summary.sh` | hranice bran — spočítá kartu do chatu z kanonického reportu bran; stránku nevykresluje (P099) |
 | `scripts/lib/aid-plan-close-summary.sh` | hranice uzavření plánu — spočítá fakta ze dvou kanonických vstupů (PM brief + release decision) |
 | `skills/communication.md` | čtyři karty do chatu, pořadí a věta o publikaci; šablona řeší stránku, tenhle soubor řeší zprávu |
 
@@ -42,7 +42,7 @@ naplněn a odkud se to bere.
 
 | # | Blok standardu | Povinný | Čím ho AID plní | Zdroj dat |
 |---|---|---|---|---|
-| 1 | Hlavička | ano | název výstupu, čeho se týká (plán / EPIC / běh bran), časová značka | `facts_json` — spočítané volajícím z kanonického artefaktu |
+| 1 | Hlavička | ano | název výstupu, čeho se týká (plán / uzavřený plán / brainstorming), časová značka | `facts_json` — spočítané volajícím z kanonického artefaktu |
 | 2 | Dlaždice | ano | čtyři pevné sloty v pořadí **result / duration / scope / unresolved**, každý s `.label`, `.value` a `.state` (`ok\|warn\|critical`) | `facts_json`; dlaždice bez naměřené hodnoty vykreslí pomlčku, nikdy vymyšlené číslo |
 | 3 | Shrnutí pro člověka | ano | `prose.summary`, omezené na 320 znaků | `prose_json` (text od modelu) |
 | 4 | Jádro | ano | seznam výsledků (max 5) a „jak pokračovat" (max 3) plus `prose.core` (300 znaků) | `facts_json` pro seznamy, `prose_json` pro text |
@@ -161,14 +161,13 @@ The block that lists what was produced carries a heading that follows the
 | `artifact_type` | heading |
 |---|---|
 | `plan` | Co plán dodá |
-| `epic_done` | Co EPIC dodal |
 | `plan_done` | Co plán dodal |
 
 The template holds `{{prose:deliverables_heading}}`; `lib/aid-artifact-render.sh`
 resolves it from the type before substitution. A producer supplies nothing for
 it — it is derived, never passed — and a template that hard-codes one of the
-three strings would print a plan's promise over a finished EPIC's result
+strings would print a plan's promise over a finished plan's result
 (the state before 2026-08-28).
 
-`deliverables` itself is required by the `plan`, `epic_done` and `plan_done`
+`deliverables` itself is required by the `plan` and `plan_done`
 profiles: a finished page that cannot say what it produced does not render.

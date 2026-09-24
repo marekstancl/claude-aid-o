@@ -6,7 +6,7 @@ user_invocable: false
 
 # Brainstorming — Interactive Design and Planning Skill
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-23
 
 > **Resolve `$AID_PLUGIN_PATH` before running anything below.** Nothing sets it
 > for you — not the plugin, not the workspace, not your shell. Every command
@@ -72,7 +72,7 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
    - When in doubt, be more specific rather than less. PM can always say "simplify."
 2. **Explore Alternatives** — Always offer 2-3 options with genuine tradeoffs, effort estimates (S/M/L), and risk. State the recommended option with reasoning.
    - Each option must be a real alternative, not a strawman. If PM asks "what do you recommend?", give a direct answer.
-3. **Incremental Validation** — Validate at every stage: questions → approach selection → section-by-section review → final approval. Never write files without explicit PM approval. Section and final approval are backed by the validate-then-verify cycle: a second model (Sonnet critic) validates, the author (Opus) ground-truth re-verifies every claim against the codebase, and the PM approves a verdict that carries the evidence table.
+3. **Incremental Validation** — Validate at every stage: questions → approach selection → section-by-section review → final approval. Never write files without explicit PM approval. Section and final approval are backed by the validate-then-verify cycle: a second agent (the critic) validates, the author (Opus) ground-truth re-verifies every claim against the codebase, and the PM approves a verdict that carries the evidence table.
 4. **YAGNI** — Propose the simplest solution that meets stated requirements. Complexity is a cost; justify every layer of indirection.
    - Do not propose microservice architecture for a single-service problem. Default to simpler when scope is ambiguous.
 5. **PM Attention is the Bottleneck** — One question at a time, multiple choice over open-ended, short summaries before detailed sections.
@@ -464,7 +464,7 @@ RULE 7: After all sections: present summary with statuses, ask for final approva
 RULE 8 (trivial floor): Architecture, Data Model, API, Implementation, Migration sections
         are ALWAYS non-trivial — the trivial-skip judgment may only escalate UP, never
         down. A non-trivial section skips the cycle only if it names zero codebase artifacts.
-RULE 9 (validate): After drafting a section, dispatch the Sonnet critic:
+RULE 9 (validate): After drafting a section, dispatch the critic:
           Agent({ subagent_type: "aid-orchestrator:verifier",
                   description: "section-review {name}",
                   prompt: <focus=section-review + verbatim section + codebase scope> })
@@ -691,4 +691,4 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 
 ---
 
-**Last Updated:** 2026-09-18
+**Last Updated:** 2026-09-23

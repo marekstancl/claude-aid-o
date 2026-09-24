@@ -1,5 +1,10 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+#
+# T2 SINCE P099 (docs/plans/P099-merge-path-2026-09.md): this suite tests the
+# topology CHECKER, not a product behaviour — 156 s of the merge path (nightly
+# journal, 2026-09-23). The check itself, test-tier-ci-topology.sh, stays on the
+# merge path against the real workflows; its own regression cases run nightly.
 #
 # MEASURED, not guessed: 143 s over 10 cases = 14.3 s per case (nightly journal,
 # 2026-08-15). T0 means under 2 s per case and under 2 minutes for the whole

@@ -15,10 +15,10 @@
 <p>Plán není připravený k release: evidence neprošla a zůstávají dva blokátory.</p>
 <h2>Jádro</h2>
 <p>Plán NENÍ připravený k release a režim je blocked (2 blokátorů) — merge by přenesl neuzavřené nálezy do main.</p>
-<li>Recenzovaný kandidát: 444444444444 → schválený cíl 555555555555 (main)</li>
-<li>Merge do main: —</li>
+<li>Recenzovaný kandidát: 444444444444 → schválený cíl 555555555555 (main), merge do main: —</li>
+<li>Kam šel čas: neměřeno</li>
 <li>Plan-final brány: fail (report: .aid-o/work/evidence/P080/plan-final/gates_report.json)</li>
-<li>Specialistická revize: neproběhl</li>
+<li>Čtení celku: nezaznamenáno; uzavření: 1 pokus(ů), 12 min, 2.5 USD</li>
 <li>Evidence: fail (ověřeno na HEAD: false), waiverů 1, zbývá v backlogu 2</li>
 <h2>Jak pokračovat</h2>
 <li>nedělat nic — plán zůstává otevřený, žádný příkaz se nespouští.</li>
@@ -29,4 +29,8 @@
 <li>Dodané shrnutí plánu</li>
 <h2>Co se čeká ode mě</h2>
 <p>Rozhodni, jak plán uzavřít. Doporučení: nedělat nic — plán zůstává otevřený, žádný příkaz se nespouští.</p>
+<h2>Co plán dodal</h2>
+<li>E-080-1</li>
+<li>E-080-2 (přeskočen)</li>
+<li>E-080-3</li>
 <footer>Vyrobil aid-plan-close-summary.sh z <REPO>/plugins/aid-orchestrator/scripts/tests/fixtures/handoff/pm-brief-decision-required.json a <REPO>/plugins/aid-orchestrator/scripts/tests/fixtures/handoff/release-decision-open.json. Redigováno tajemství: 0.</footer>

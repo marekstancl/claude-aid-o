@@ -749,18 +749,20 @@ plan_state_set_worktree_path() {
 }
 
 # ===========================================================================
-# plan_state_set_autonomy <plan_id> auto|manual
+# plan_state_set_autonomy <plan_id> auto|manual [session_id]
 #
 # Stamps the plan-level autonomy flag on an EXISTING record. P090 writes it at
 # plan-start; every plan started before that has no field, and continuation then
 # falls back to the project setting on every merge. This lets a plan say what it
-# is, once. Same lock and same validation path as the other field writer.
+# is, once. With a session id it also records `auto_session`, the session that
+# drives the plan (P099: the only session the Stop hook keeps working). Same
+# lock and same validation path as the other field writer.
 #
 # Returns: 0 success, 1 bad value / no state file / unwritable, 2 missing deps,
 # 3 lock timeout, 5 corrupt state file.
 # ===========================================================================
 plan_state_set_autonomy() {
-  local plan_id="$1" value="${2-}"
+  local plan_id="$1" value="${2-}" session="${3-}"
 
   _plan_state_require_deps || return 2
   _validate_plan_id "$plan_id" || return 1
@@ -792,7 +794,7 @@ plan_state_set_autonomy() {
   if [[ "$rc" -ne 0 ]]; then aid_lock_release "$fd"; return 5; fi
 
   local new_json
-  new_json="$(jq --arg a "$value" '.autonomy = $a' <<<"$json" 2>/dev/null)"
+  new_json="$(jq --arg a "$value" --arg s "$session" '.autonomy = $a | if $s == "" then . else .auto_session = $s end' <<<"$json" 2>/dev/null)"
   if [[ -z "$new_json" ]]; then
     aid_lock_release "$fd"
     _plan_warn "plan_state_set_autonomy: cannot render the updated state JSON for $plan_id"

@@ -17,12 +17,8 @@
 #      literal, defined in communication.md and pasted unchanged at each site —
 #      a loose grep would pass on a paraphrase, which is exactly how two
 #      differently-worded clauses ship and neither is enforced.
-#      The sites are FOUR, and `skills/pipeline.md` appears twice on purpose: it
-#      carries two distinct renderer invocations (gates phase and plan boundary)
-#      and each is asserted separately, anchored on its own renderer name —
-#      listing the file once would let the gates path pass on the plan path's
-#      clause. (A fifth, `commands/aid-audit-tests.md`, left with the
-#      test-portfolio audit on 2026-09-21.)
+#      The sites are the plan-close renderer's two invocations; the gate
+#      renderer prints a card only since P099 (no page, nothing to publish).
 #   3. SUPERSEDED FRAGMENTS. The shapes the contract replaces are gone: the
 #      metrics-first DONE-review header in aid-run.md, the hardcoded Czech
 #      language mandate in the two verify commands, and any second definition
@@ -174,12 +170,9 @@ done
 
 # ─── Case 3: publication wiring at every renderer site ──────────────────────
 #
-# Each entry is "<file>|<renderer anchor>|<site name>". The two pipeline.md
-# rows are separate on purpose (see header).
+# Each entry is "<file>|<renderer anchor>|<site name>".
 case_ "every renderer site carries the publish-before-present clause verbatim"
 RENDERER_SITES=(
-  'commands/aid-run.md|aid-gate-outcome-summary.sh|gate boundary'
-  'skills/pipeline.md|aid-gate-outcome-summary.sh|gates phase'
   'commands/aid-plan.md|aid-plan-close-summary.sh|plan-close boundary'
   'skills/pipeline.md|aid-plan-close-summary.sh|plan-boundary section'
 )

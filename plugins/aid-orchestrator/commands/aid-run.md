@@ -74,6 +74,29 @@ run that announced itself as AUTO was read back as manual at every checkpoint.
 If the command fails, stop: a run that cannot record its own mode is not an
 AUTO run.
 
+**Then bind this session to the plan and make sure the hook layer is in force**
+(P099: the Stop hook keeps only the bound session working, and its refusals
+count only while a canary verdict is fresh):
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh" plan-state <plan_id> --bind-session "$CLAUDE_CODE_SESSION_ID"
+bash "$AID_PLUGIN_PATH/scripts/aid-hook-verify.sh" --status >/dev/null 2>&1 \
+  || bash "$AID_PLUGIN_PATH/scripts/aid-hook-verify.sh" --canary
+```
+
+A canary that fails leaves the layer degraded; say so in one line and go on.
+After `/clear` or in a new session, `/aid-run --auto` binds again.
+
+**What ends an AUTO turn, and nothing else does.** The Stop hook refuses a turn
+of the bound session that ends with work left, up to
+`autonomy.continuation_budget` times (`orchestration.yaml`, 40) until the PM
+answers. A turn may end with:
+- a Decision card or a Blocked card (`skills/communication.md`) — the PM gets one
+  "agent is waiting" message; the PM's "zastav se" is answered with a Blocked card;
+- a last line `AID-WAIT: <what>` while a background gate job AID owns is live
+  (`aid-job.sh`); the harness brings you back when it finishes;
+- the budget spent, or an account limit — the PM gets the same one message.
+
 Requires `autonomous_mode: true` in `.aid-o/config/permissions.yaml`.
 If not set, `--auto` prints a warning and falls back to manual mode.
 
@@ -377,8 +400,8 @@ audit line).
    step, `--checkpoint cp3 --evidence-dir <run dir>` for an EPIC.
 3. Dispatch every reviewer, then `collect` and `close`, exactly as the
    controller instruction quoted below says (codex roles: `aid-review-round.sh
-   dispatch <review> --round K --provider codex --role <role>`; an absent codex
-   is `provider_absent` and the round closes degraded, never faked).
+   dispatch <review> --round K --provider codex --role <role>`; a codex
+   that gives no answer is replaced by the stand-in the quoted text describes).
 4. `close` prints the verdict. `pass` → `increment-step` / `transition`.
    `fail` with a round left (`rounds_default`, 2) → the step's own role fixes
    (the `fix_of:` dispatch in the instruction below), a new step check, then
@@ -426,9 +449,12 @@ one at a time:
    controller's own context):
 
    ```
-   Agent(subagent_type: "general-purpose", model: <the role's model from the checkpoint's reviewer block>,
+   Agent(subagent_type: <the agent prepare printed next to the role's prompt>, model: <the model printed there>,
          prompt: "Your complete instructions are in <round dir>/prompt-<role>.md. Read that whole file first and follow it exactly.")
    ```
+
+   A harness that does not know `aid-orchestrator:reviewer-light` yet (an older
+   installed plugin) takes `general-purpose` at the same model.
 
    The reviewer writes `<round dir>/reviewer-<role>.json` itself. Note the
    `subagent_tokens` figure the Agent result reports; when the result shows
@@ -452,15 +478,15 @@ one at a time:
 ## Stand-in for a Codex role
 
 When `dispatch --provider codex` prints a line starting `STAND-IN:`, no codex
-could be reached (absent, outdated, or over its usage limit) and the round
-records `fallback: "claude"` for that role. Dispatch it exactly as above — the
-same prompt file, the same start/complete bracket — at the model the STAND-IN
-line names (`stand_in_model` of the checkpoint's block), and tell the reviewer
-to write `"provider": "claude"` in its answer. `collect` accepts a claude answer
-for a codex role ONLY with that record, and counts a stand-in nobody dispatched
-as missing, which makes the round invalid. Pass its token figure to `close` like
-any claude role. The PM card names the stand-in and the reason in one line; the
-PM is told, not asked.
+answer came (absent, outdated, over its usage limit, or a run that left no
+answer) and the round records `fallback: "claude"` for that role. Dispatch it
+exactly as above — the same prompt file, the same start/complete bracket — as
+the agent and at the model the STAND-IN line names (`stand_in_model` of the
+checkpoint's block), and tell the reviewer to write `"provider": "claude"` in its answer.
+`collect` accepts a claude answer for a codex role ONLY with that record, and
+counts a stand-in nobody dispatched as missing, which makes the round invalid.
+Pass its token figure to `close` like any claude role. The PM card names the
+stand-in and the reason in one line; the PM is told, not asked.
 
 After ALL reviewers of the round (claude and codex) have been dispatched, run
 `collect`. Only when `collect` exits 0, run `close` once with a token value for
@@ -479,7 +505,8 @@ When `close` reports `fail` on a step or EPIC round and a round remains
 (`rounds_default`, or the PM's `override`), the fix is the step's own role's:
 
 ```
-Agent(subagent_type: "aid-orchestrator:implementer", model: <the model of the step's role card in skills/role-cards.md>,
+Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,
+      model: <the **Model:** of the step's role card in skills/role-cards.md>,
       prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. Touch nothing a finding does not name.")
 ```
 
@@ -578,15 +605,13 @@ returns — at the GATES→DONE boundary and equally on the failing branch — d
 summary of your own. Source `scripts/lib/aid-gate-outcome-summary.sh` and run:
 
 ```bash
-aid_gate_outcome_render "<the --report-file path you passed the runner>" "<evidence_dir>" "<evidence_dir>/waivers"
+aid_gate_outcome_render "<the --report-file path you passed the runner>" "<evidence_dir>"
 ```
 
 Pass the runner's own `--report-file` path explicitly — it is the preferred wiring; the
 renderer only falls back to `<evidence_dir>/gates/gates_report.json` and then the flat
-`<evidence_dir>/gates_report.json`. It writes `<evidence_dir>/gate-outcome-artifact.html` and
-prints the card (Finished, or Blocked when `overall: fail`) with a final `Artifact: <path>` line.
-
-Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+`<evidence_dir>/gates_report.json`. It prints the card (Finished, or Blocked when
+`overall: fail`); present it verbatim. A gate run owes the PM no page.
 
 Card shapes, the ordering rule and the language rule are defined once in `skills/communication.md`
 — do not restate or re-word them here.
@@ -770,7 +795,8 @@ is round 1 of the next attempt.
 
 1. The role that wrote the code fixes it, on the plan branch:
    ```
-   Agent(subagent_type: "aid-orchestrator:implementer", model: <the model of that role's card in skills/role-cards.md>,
+   Agent(subagent_type: <"aid-orchestrator:implementer-light" when that role's card says **Effort:** low, else "aid-orchestrator:implementer">,
+         model: <the **Model:** of that role's card in skills/role-cards.md>,
          prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the fingerprints you addressed. Touch nothing a finding does not name.")
    ```
    The owning step is the one whose declared files cover the path (`plan.json` of the EPIC whose commit last touched it: `git log -1 -- <path>`).
@@ -913,4 +939,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-09-22
+**Last Updated:** 2026-09-23

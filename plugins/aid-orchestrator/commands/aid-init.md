@@ -60,6 +60,7 @@ when a condition holds).
     plugin.yaml           # resolved plugin_path + discovered_at + dispatch_mode
     check-severity.yaml   # compliance-check severity registry (copied from defaults)
     counter.yaml          # sequential id counters, seeded at 0
+    orchestration.yaml    # the project's step cap: dispatch.max_parallel: 3 (see /aid-setup parallel)
   work/
     active.md             # GENERATED stream index (never hand-written)
     backlog.md            # improvement backlog (categorized sections)
@@ -71,7 +72,7 @@ when a condition holds).
   work/evidence/          # empty directory (for run evidence)
 ```
 
-**Total: 9 files under `.aid-o/` + 4 empty directories = 13 items.** (Ten until 2026-09-21, when `config/test-audit.yaml` left with the test-portfolio audit.) This is the only count
+**Total: 10 files under `.aid-o/` + 4 empty directories = 14 items.** This is the only count
 statement in this document; every other place that describes the fresh-init product refers back
 to it rather than restating a number.
 
@@ -81,7 +82,7 @@ document's own rules rather than convenience:
 - **`.gitignore`** is a consumer-repo file that AID backfills per line — the identical category
   as the git hooks below, which this document already excludes. Counting one and excluding the
   other would be the same inconsistency this section exists to remove.
-- **`config/` and `work/` are not empty** — they hold the nine files. The four genuinely empty
+- **`config/` and `work/` are not empty** — they hold the ten files. The four genuinely empty
   directories are `plans/`, `tasks/`, `work/quick/` and `work/evidence/`. An earlier draft of
   this line said "5 empty directories" while listing `config/` among them, which was false on
   its face.
@@ -215,7 +216,7 @@ The composer writes a single `gates:` mapping with one section per detected stac
 
 If no stacks are detected, the file is still written with an empty `gates:` mapping and a `# No stacks detected — add gate definitions manually.` comment. PM can hand-author gate sections without re-running `/aid-init`.
 
-A `notifications.telegram` block is appended with its one read key, `alert_on_compliance_recovery` (default `true`); alerts themselves go through the ecosystem's shared `send_alert()` via `lib/aid-alert.sh`, so there is nothing to enable.
+No `notifications` block is written: AID's two messages (the agent waits, the plan is delivered) go through the ecosystem's shared `send_alert()` via `lib/aid-alert.sh` and have no switch.
 
 ### Existing Project — gate_profiles Upgrade
 
@@ -227,8 +228,8 @@ after the PM has seen exactly what changes:
 
 **1. The dead-key upgrade (P097 Step 3).** Earlier composers wrote keys nothing reads any more:
 `required_when`, `needs_services`, `services`, `gate_profile_defaults`, `baseline*`,
-`runtime_baseline`, `quarantine`, an empty `quick` profile, and every `notifications.telegram.*`
-key except `alert_on_compliance_recovery`. The library's `upgrade` removes them, adds
+`runtime_baseline`, `quarantine`, an empty `quick` profile, and the whole `notifications.telegram`
+block. The library's `upgrade` removes them, adds
 `default_profile: standard` when a profile table exists, and adds `when_paths` to the profile named
 `full` (the classifier's high-risk pattern list, so every run that resolved `full` before resolves
 `full` after). It never touches `gates.<id>.command` or a non-empty `include[]`; a key it does not
@@ -747,6 +748,17 @@ already talking about, so the two are consistent — but the writer was never na
 **`/aid-init` creates it once and never overwrites it; `aid-fsm.sh promote-check` is the
 sanctioned mutator; `/aid-setup` does not touch it at all.**
 
+### orchestration.yaml — the project's step cap
+
+The PM's cap on steps of one wave running at once lives in the project (P099), so `/aid-setup
+parallel` has one place to change it:
+
+```bash
+f=.aid-o/config/orchestration.yaml
+[[ -f "$f" ]] || printf 'dispatch:\n  max_parallel: 3\n' > "$f"
+[[ "$(yq -r '.dispatch.max_parallel // ""' "$f")" != "" ]] || yq -i '.dispatch.max_parallel = 3' "$f"   # upgrade: add, never change
+```
+
 ```
 Config defaults installation:
   [INSTALLED] .aid-o/config/check-severity.yaml — severity registry (new)
@@ -762,7 +774,6 @@ These files/dirs are created on first use of the feature that needs them:
 | File | Created by | Trigger |
 |------|-----------|---------|
 | `config/queue.yaml` | `/aid-status queue add` | First queue entry |
-| `config/orchestration.yaml` | `/aid-run` | First EPIC run with custom config |
 | `config/policies/review-checkpoints.yaml` | `/aid-run` | First review checkpoint dispatch |
 
 `config/execution.yaml` is deliberately NOT in this table — it is part of the base manifest and is

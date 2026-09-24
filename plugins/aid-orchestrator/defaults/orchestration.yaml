@@ -11,10 +11,18 @@ language:
   conversation_language: auto  # detected from PM input
 
 # ─── Models ──────────────────────────────────────────────────────────────
-# Model tier per role is defined in skills/role-cards.md (single source of truth) —
-# step roles carry a `**Model:**` field; controller agents (auditor/gate-fixer/
-# verifier) carry model in their own agent-file frontmatter. An optional `step.model`
-# in plan.json overrides the card for that one step. See pipeline.md §4 for dispatch.
+# Model and effort per role are defined in skills/role-cards.md (single source of
+# truth) — step roles carry `**Model:**` and `**Effort:**`; controller agents
+# (auditor/gate-fixer/verifier) carry both in their own agent-file frontmatter. An
+# optional `step.model` in plan.json overrides the card for that one step. See
+# pipeline.md §4 for dispatch.
+
+# ─── Autonomy ────────────────────────────────────────────────────────────
+autonomy:
+  # How many times the Stop hook may send the session that drives an
+  # autonomous plan back to work before it lets the turn end and tells the PM
+  # the agent is waiting. The PM's reply resets the count. 0 disables it.
+  continuation_budget: 40
 
 # ─── Dispatch ────────────────────────────────────────────────────────────
 dispatch:

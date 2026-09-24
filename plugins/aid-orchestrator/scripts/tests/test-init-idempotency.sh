@@ -161,6 +161,8 @@ MANIFEST_FILES=(
   # said ten and this test asserted nine. The document is the one that is
   # right. (2026-09-21: test-audit.yaml left with the audit; nine again.)
   ".aid-o/config/counter.yaml"
+  # P099: the project's step cap (dispatch.max_parallel: 3), changed by /aid-setup.
+  ".aid-o/config/orchestration.yaml"
   ".aid-o/work/active.md"
   ".aid-o/work/backlog.md"
   ".aid-o/work/timeline.jsonl"
@@ -262,6 +264,7 @@ replay_init() {
     # 2. Config defaults — copied only when absent.
     mkdir -p "$root/.aid-o/config" "$root/.aid-o/work"
     [[ -f ".aid-o/config/check-severity.yaml" ]] || cp "$DEFAULTS_DIR/check-severity.yaml" ".aid-o/config/check-severity.yaml"
+    [[ -f ".aid-o/config/orchestration.yaml" ]] || printf 'dispatch:\n  max_parallel: 3\n' > ".aid-o/config/orchestration.yaml"
 
     # 3. Prose-authored templates — PLACEHOLDER content (see header: content is
     #    explicitly not covered; presence and never-overwrite are).

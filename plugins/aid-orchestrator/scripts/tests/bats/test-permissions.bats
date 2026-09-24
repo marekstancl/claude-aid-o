@@ -58,3 +58,8 @@ _set() { AID_PROJECT_ROOT="$ROOT" bash "$FSM" auto-mode "$@" >/dev/null; }
   grep -q '^stop_reason: "/aid-stop command"' "$ROOT/.aid-o/work/auto-mode-state.yaml"
   grep -q '^stopped_at:' "$ROOT/.aid-o/work/auto-mode-state.yaml"
 }
+
+@test "the autonomous preset allows the Artifact tool — publishing a page never waits on a prompt (P099)" {
+  run yq -r '.presets.autonomous.claude_code_permissions[]' "$BATS_TEST_DIRNAME/../../../defaults/policies/permissions.yaml"
+  grep -qx 'Artifact' <<< "$output"
+}

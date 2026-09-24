@@ -12,18 +12,8 @@
 #   required            dotted paths into facts_json that must exist and be
 #                       non-empty. An array counts as empty when it has no
 #                       elements; anything else when it is the empty string.
-#   outcome_from_state  the result, scope and unresolved tiles are COMPOSED by
-#                       the renderer from the four counts in facts.outcome
-#                       (passed / failed / not_run / waived) and whatever the
-#                       caller put there is dropped. The optional
-#                       `outcome.blocked` covers the one honest exception: a run
-#                       whose only failures were infrastructure still has a fail
-#                       verdict, and the tile must not read green above it. This is how "6 of 9 passed"
-#                       beside zero failures is made impossible by construction,
-#                       rather than caught by inspecting prose for a vocabulary
-#                       of failure that would never be complete.
 #
-# The five types are closed. A type outside them is an error, not a reason to
+# The three types are closed (the gate and EPIC pages left with P099 Step 4). A type outside them is an error, not a reason to
 # improvise.
 #
 # **Last Updated:** 2026-08-26
@@ -49,31 +39,6 @@ profiles:
       - tiles.unresolved.value  # risks
       - items
       - deliverables            # what the plan will DO — the reason a PM opens it
-
-  # After the gates have run. Three of the four tiles are composed from
-  # facts.outcome, so only the one the counts cannot know is required here.
-  gates:
-    outcome_from_state: true
-    required:
-      - tiles.duration.value    # how long the run took
-      - items
-
-  # After the review of a finished EPIC.
-  #
-  # `deliverables` IS REQUIRED HERE, and that is the whole point of this profile
-  # (PM, 2026-08-28). Until then it asked for four tiles and `items`, so a page
-  # could pass while its core said nothing about what the EPIC produced —
-  # measured on WAN P099, whose three EPIC pages were near-identical, said only
-  # "hotový: N kroků za T", and reported the audit report as missing. The text
-  # the PM wanted was two files away in the same run's `final_report.md`.
-  epic_done:
-    required:
-      - tiles.result.value      # verdict
-      - tiles.duration.value
-      - tiles.scope.value       # steps
-      - tiles.unresolved.value  # audit findings still open
-      - items
-      - deliverables            # what the EPIC actually produced, in plain words
 
   # After the whole plan is closed out.
   plan_done:

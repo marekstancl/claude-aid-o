@@ -11,7 +11,8 @@
 #   scripts/lib/aid-artifact-render.sh       the generic body renderer (smoke —
 #                                            the audit renderer is untouched by
 #                                            this plan and is not driven here)
-#   scripts/lib/aid-gate-outcome-summary.sh  the GATES boundary
+#   scripts/lib/aid-gate-outcome-summary.sh  the GATES boundary (a card only
+#                                            since P099: no page is owed)
 #   scripts/lib/aid-plan-close-summary.sh    the plan-final / close boundary
 #
 # WHAT IT PROVES, AND WHAT IT DELIBERATELY DOES NOT
@@ -256,7 +257,7 @@ _assert_seven_blocks() {
 #   The outcome sentence is the FIRST non-empty line, and nothing structural
 #   precedes it: no JSON, no path, no identifier.
 _assert_card_first() {
-  local name="$1" cf="$2" label="$3" first
+  local name="$1" cf="$2" label="$3" first   # $4 = no_page for the gate boundary
   first="$(grep -m1 -v '^[[:space:]]*$' "$cf" || true)"
   if [[ "$first" != "$label"* ]]; then
     fail_msg "${name}: first non-empty card line is not the '${label}' outcome sentence"
@@ -266,9 +267,17 @@ _assert_card_first() {
     fail_msg "${name}: the outcome sentence carries JSON or a path before the decision"
     echo "    got: ${first}" ; return 1
   fi
-  # Identifiers and the detail link are optional FINAL lines.
+  # A page-rendering boundary ends its card with the artifact reference; the
+  # gate boundary renders no page (P099), so its card must carry none.
   local last
   last="$(grep -v '^[[:space:]]*$' "$cf" | tail -1)"
+  if [[ "${4:-}" == no_page ]]; then
+    if grep -q '^Artifact' "$cf"; then
+      fail_msg "${name}: a gate card names an artifact, but a gate run renders no page"; return 1
+    fi
+    pass_msg "${name}: card leads with the '${label}' outcome and names no page"
+    return 0
+  fi
   if [[ "$last" != Artifact* ]]; then
     fail_msg "${name}: the artifact reference is not the card's last line (got: ${last})"
     return 1
@@ -303,24 +312,15 @@ _run_renderer() {
 
 echo "== delivery cases =="
 
-# Case 1a: FINISHED — the gate boundary.
+# Case 1a: FINISHED — the gate boundary (a card, no page).
 GRUN="${WORK}/finished-gate"; mkdir -p "${GRUN}/gates"
 cp "${FIX}/gate-report-finished.json" "${GRUN}/gates/gates_report.json"
 if _run_renderer finished-gate "${WORK}/finished-gate.card" aid_gate_outcome_render "" "$GRUN"; then
-  _assert_card_first finished-gate "${WORK}/finished-gate.card" "$CARD_FINISHED"
-  _assert_seven_blocks finished-gate "${GRUN}/gate-outcome-artifact.html"
-  _golden finished-gate "${GRUN}/gate-outcome-artifact.html"
-  # The tile is still COUNTED from the report — P089 Step 3 only changed what it
-  # counts. The headline is now HOW MANY FAILED (so a green run reads "Nic
-  # neselhalo"), and the numbers moved into four closed categories: ověřeno /
-  # selhalo / neběželo / prominuto. This asserts the counted half of that, which
-  # is the property the case is about; "2/2 prošlo" was the old wording of the
-  # same idea and is gone from the renderer, not from the requirement.
-  if grep -qF '<span class="v">2 brány</span>' "${GRUN}/gate-outcome-artifact.html" \
-     && grep -qF '<span class="k">Ověřeno</span>' "${GRUN}/gate-outcome-artifact.html"; then
-    pass_msg "finished-gate: the result tile is COUNTED from the report, not asserted"
+  _assert_card_first finished-gate "${WORK}/finished-gate.card" "$CARD_FINISHED" no_page
+  if grep -qF 'Ověřeno: 2 z 2 bran' "${WORK}/finished-gate.card" && [[ -z "$(find "$GRUN" -name '*.html')" ]]; then
+    pass_msg "finished-gate: the count is COUNTED from the report, and no page is written"
   else
-    fail_msg "finished-gate: expected a computed 'Ověřeno 2 brány' tile"
+    fail_msg "finished-gate: expected a computed 'Ověřeno: 2 z 2 bran' and no page"
   fi
 fi
 
@@ -361,9 +361,7 @@ fi
 BRUN="${WORK}/blocked"; mkdir -p "${BRUN}/gates"
 cp "${FIX}/gate-report-blocked.json" "${BRUN}/gates/gates_report.json"
 if _run_renderer blocked "${WORK}/blocked.card" aid_gate_outcome_render "" "$BRUN"; then
-  _assert_card_first blocked "${WORK}/blocked.card" "$CARD_BLOCKED"
-  _assert_seven_blocks blocked "${BRUN}/gate-outcome-artifact.html"
-  _golden blocked "${BRUN}/gate-outcome-artifact.html"
+  _assert_card_first blocked "${WORK}/blocked.card" "$CARD_BLOCKED" no_page
   # The reproduction step is the gate's OWN command from _command_log — never
   # an invented remediation.
   if grep -qF 'bash scripts/tests/run-all-tests.sh --tier t1' "${WORK}/blocked.card" \
@@ -377,76 +375,19 @@ fi
 # Case 4: FORCE-USED — a required gate failed and the PM waived it.
 WRUN="${WORK}/force-used"; mkdir -p "${WRUN}/gates"
 cp "${FIX}/gate-report-force-used.json" "${WRUN}/gates/gates_report.json"
-if _run_renderer force-used "${WORK}/force-used.card" \
-     aid_gate_outcome_render "" "$WRUN" "${FIX}/waivers"; then
-  _assert_card_first force-used "${WORK}/force-used.card" "$CARD_FINISHED"
-  _assert_seven_blocks force-used "${WRUN}/gate-outcome-artifact.html"
-  _golden force-used "${WRUN}/gate-outcome-artifact.html"
-  # A waiver is PM risk acceptance, never a pass — on BOTH surfaces.
-  #
-  # THE NEGATIVE IS SCOPED TO THE WAIVED GATE'S OWN LINE, AND COVERS CZECH.
-  # It used to be `! grep -qF 'passed' <whole file>` — one English word, over a
-  # document that is otherwise entirely Czech. A renderer that labelled the
-  # waived row `prošla` would have satisfied it exactly, which is the label a
-  # Czech renderer would actually reach for. It also could not be tightened
-  # document-wide, because the legitimate result tile says "1/2 prošlo": the
-  # word is fine on the COUNT and forbidden on the WAIVED ROW, so the row is
-  # what gets isolated and asserted.
-  # The page is one long line, so its unit is the <li>, not the line; the card's
-  # unit IS the line. Each surface is cut at its own granularity — cutting the
-  # page by line would drag the neighbouring "Prošlo 1, …" count sentence into
-  # the waived row and fail on legitimate text.
-  # THE TOKEN IS CZECH NOW, and that is the renderer being right rather than
-  # this test being wrong. P089 Step 3 gave the gates page four closed
-  # categories — ověřeno / selhalo / neběželo / PROMINUTO — on a page that is
-  # Czech throughout; `waived` was the English label of the same idea and no
-  # longer appears anywhere. The requirement is unchanged and is what these two
-  # helpers still isolate: the waived gate must be VISIBLY waived on its own
-  # row, never absorbed into the pass count. `prominut` is the shared stem of
-  # prominuta / prominuto / prominuty, so no form escapes.
-  _waived_units_page() { grep -oE '<li>[^<]*</li>' "$1" | grep -Ei 'waived|prominut'; }
-  _waived_units_card() { grep -Ei 'waived|prominut' "$1"; }
-  _pass_semantics() {  # any pass label, English or Czech, in the given text
-    # Word forms are case-insensitive; the two-letter and all-caps LABELS are
-    # not. `OK` folded to lowercase matches inside ordinary Czech words — the
-    # first draft of this helper fired on "Další krok:" — so a label only
-    # counts as a label when it is written as one.
-    grep -qiE 'passed|prošl[aoyi]|prošel|úspěch|success' <<<"$1" && return 0
-    grep -qE '\b(OK|PASS|PASSED)\b|✅' <<<"$1" && return 0
-    return 1
-  }
-  wl_page="$(_waived_units_page "${WRUN}/gate-outcome-artifact.html")"
-  wl_card="$(_waived_units_card "${WORK}/force-used.card")"
-  waiver_problems=()
-  [[ "$wl_page" == *'tests'* ]] || waiver_problems+=("the page has no result item marking gate 'tests' as waived")
-  [[ -n "$wl_card" ]] || waiver_problems+=("the card never says the word waived")
-  ! _pass_semantics "$wl_page" || waiver_problems+=("the page's waived row carries pass semantics: ${wl_page}")
-  ! _pass_semantics "$wl_card" || waiver_problems+=("the card's waived row carries pass semantics: ${wl_card}")
-  # The counts must not absorb the waiver on EITHER surface: the tile counts it
-  # out of the passes, and the card states the waived count explicitly.
-  # THE SAME REQUIREMENT ON THE SURFACE P089 STEP 3 BUILT. The counts must not
-  # absorb the waiver, and the new page states that more plainly than the old
-  # one did: the result tile NAMES the waiver ("Nic neselhalo, 1 prominuta"),
-  # the verified count EXCLUDES it ("Ověřeno 1 brána" out of two), and the core
-  # line spells out all four categories. The old assertions read "1/2 prošlo"
-  # and a bare unresolved tile, which are the previous wording of this idea.
-  grep -qE '<span class="v">[^<]*1 prominut[ay][^<]*</span>' "${WRUN}/gate-outcome-artifact.html" \
-    || waiver_problems+=("the page's result tile does not name the waiver — it absorbed it into the pass count")
-  grep -qF '<span class="v">1 brána</span>' "${WRUN}/gate-outcome-artifact.html" \
-    || waiver_problems+=("the page's verified tile does not EXCLUDE the waived gate")
-  grep -qE 'prominuto 1\b' "${WRUN}/gate-outcome-artifact.html" \
-    || waiver_problems+=("the page's core line does not state the waived count")
-  grep -qE 'prominut[oaé]' "${WORK}/force-used.card" \
-    || waiver_problems+=("the card does not state the waived count")
-  if (( ${#waiver_problems[@]} == 0 )); then
-    pass_msg "force-used: the waived row carries no pass label (EN or CZ) on either surface, and both surfaces count it unresolved"
+if _run_renderer force-used "${WORK}/force-used.card" aid_gate_outcome_render "" "$WRUN"; then
+  _assert_card_first force-used "${WORK}/force-used.card" "$CARD_FINISHED" no_page
+  # A waiver is PM risk acceptance, never a pass: the waived line carries no
+  # pass label (EN or CZ — `OK` only as a label, it hides inside "krok"), and
+  # the count names the waiver instead of absorbing it into the passes.
+  wl_card="$(grep -Ei 'waived|prominut' "${WORK}/force-used.card" | grep -v '^Ověřeno:')"
+  if [[ -n "$wl_card" ]] \
+     && ! grep -qiE 'passed|prošl[aoyi]|prošel|úspěch|success' <<<"$wl_card" \
+     && ! grep -qE '\b(OK|PASS|PASSED)\b|✅' <<<"$wl_card" \
+     && grep -qE 'Ověřeno: 1 z 2 bran.*prominuto 1\)' "${WORK}/force-used.card"; then
+    pass_msg "force-used: the waived line carries no pass label and the count keeps the waiver out of the passes"
   else
-    fail_msg "force-used: ${waiver_problems[*]}"
-  fi
-  if grep -qF 'flaky suite under investigation' "${WRUN}/gate-outcome-artifact.html"; then
-    pass_msg "force-used: the waiver receipt enriched the line"
-  else
-    fail_msg "force-used: the waiver receipt detail did not reach the page"
+    fail_msg "force-used: the card absorbs or mislabels the waiver"
   fi
 fi
 
@@ -583,20 +524,13 @@ SPECIMENS=(
 if _run_renderer malicious-gate "${WORK}/malicious-gate.card" aid_gate_outcome_render "" "$MRUN"; then
   leaked=""
   for s in "${SPECIMENS[@]}"; do
-    grep -qF -- "$s" "${MRUN}/gate-outcome-artifact.html" && leaked+=" page:${s:0:10}…"
     grep -qF -- "$s" "${WORK}/malicious-gate.card" && leaked+=" card:${s:0:10}…"
   done
   if [[ -z "$leaked" ]]; then
-    pass_msg "malicious-gate: no specimen survives into the page or the chat card"
+    pass_msg "malicious-gate: no specimen survives into the chat card"
   else
     fail_msg "malicious-gate: leaked ->${leaked}"
   fi
-  if grep -qE 'Redigováno tajemství: [1-9]' "${MRUN}/gate-outcome-artifact.html"; then
-    pass_msg "malicious-gate: the provenance footer reports a non-zero redaction count"
-  else
-    fail_msg "malicious-gate: redaction happened silently — the footer count is zero"
-  fi
-  _golden malicious-gate "${MRUN}/gate-outcome-artifact.html"
 fi
 
 # Runtime leakage through the PLAN-CLOSE renderer: the secret sits in the

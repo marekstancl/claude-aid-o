@@ -2,8 +2,8 @@
 # aid-tier: t0
 # The project's record of AID's own defects: the file exists from the first
 # run on, the Stop-hook reminder speaks only when AID refused or was bypassed
-# and nothing was written, and the owner's collector takes unmarked entries
-# once and marks them.
+# and nothing was written, and the owner's collector lists the entries nobody
+# has decided — and writes nothing.
 
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; export AID_PLUGIN_PATH AID_TEST_MODE=1
@@ -81,8 +81,8 @@ _transcript_started_at() { printf '{"type":"user","timestamp":"%s"}\n' "$1" > "$
   [ "$output" = "scripts/lib/aid-plugin-issues.sh aid_hook_rule_plugin_issues_reminder 3" ]
 }
 
-@test "collector: takes unmarked entries once, marks them in place, skips marked ones, deletes nothing" {
-  mkdir -p "$T/projects/alpha/.aid-o/work" "$T/projects/beta/.aid-o/work"
+@test "collector: lists every open entry per project with its line, and writes no file anywhere" {
+  mkdir -p "$T/projects/alpha/.aid-o/work" "$T/projects/beta/.aid-o/work" "$T/projects/gamma/.aid-o/work"
   cat > "$T/projects/alpha/.aid-o/work/aid-plugin-issues.md" <<'EOF'
 # Problems
 
@@ -92,36 +92,24 @@ _transcript_started_at() { printf '{"type":"user","timestamp":"%s"}\n' "$1" > "$
 > **HOTOVO v2.95.2 (2026-08-29):** fixed
 
 ### 2. init crashed on $6
-**Date:** 2026-08-27 · **Plugin:** v2.94.0
+> **PŘEVZATO 2026-09-01 (aid-orchestrator)**
+
 what happened here
 
 ### 3. message lied
 body three
 EOF
   printf '# Problems\n\n## 1. only one, at level two\nbody\n' > "$T/projects/beta/.aid-o/work/aid-plugin-issues.md"
-  HOME_INBOX="$T/repo"; mkdir -p "$HOME_INBOX/bin" "$HOME_INBOX/docs/plans"
-  cp "$REPO/bin/aid-plugin-issues-collect.sh" "$HOME_INBOX/bin/"
-  run bash "$HOME_INBOX/bin/aid-plugin-issues-collect.sh" --root "$T/projects"
+  printf '# Problems\n\nno headings at all\n' > "$T/projects/gamma/.aid-o/work/aid-plugin-issues.md"
+  local before; before="$(find "$T/projects" -type f -exec sha256sum {} + | sort)"
+  run bash "$REPO/bin/aid-plugin-issues-collect.sh" --root "$T/projects"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"alpha: 2 entries taken"* && "$output" == *"beta: 1 entry taken"* ]]
-  grep -c 'PŘEVZATO' "$T/projects/alpha/.aid-o/work/aid-plugin-issues.md" | grep -qx 2
-  grep -q '^### 1. gate refused' "$T/projects/alpha/.aid-o/work/aid-plugin-issues.md"   # nothing deleted
-  grep -q 'HOTOVO v2.95.2' "$T/projects/alpha/.aid-o/work/aid-plugin-issues.md"
-  grep -q '#### alpha — 2. init crashed on $6 (plugin v2.94.0)' "$HOME_INBOX/docs/plans/plugin-issues-inbox.md"
-  grep -q '#### alpha — 3. message lied (plugin: not recorded)' "$HOME_INBOX/docs/plans/plugin-issues-inbox.md"
-  grep -q '#### beta — 1. only one' "$HOME_INBOX/docs/plans/plugin-issues-inbox.md"
-  grep -q 'what happened here' "$HOME_INBOX/docs/plans/plugin-issues-inbox.md"
-  run bash "$HOME_INBOX/bin/aid-plugin-issues-collect.sh" --root "$T/projects"
-  [[ "$output" == *"nothing new across 2 project(s)"* ]]
-}
-
-@test "collector: an entry that is only a heading at the end of the file is taken once, not on every run" {
-  mkdir -p "$T/projects/gamma/.aid-o/work" "$T/repo/bin" "$T/repo/docs/plans"
-  printf '# Problems\n\n### 1. bare heading at EOF' > "$T/projects/gamma/.aid-o/work/aid-plugin-issues.md"
-  cp "$REPO/bin/aid-plugin-issues-collect.sh" "$T/repo/bin/"
-  run bash "$T/repo/bin/aid-plugin-issues-collect.sh" --root "$T/projects"
-  [[ "$output" == *"gamma: 1 entry taken"* ]]
-  grep -q 'PŘEVZATO' "$T/projects/gamma/.aid-o/work/aid-plugin-issues.md"
-  run bash "$T/repo/bin/aid-plugin-issues-collect.sh" --root "$T/projects"
-  [[ "$output" == *"nothing new"* ]]
+  [[ "$output" == *"line 8: 2. init crashed on \$6"* ]]      # PŘEVZATO alone is still open
+  [[ "$output" == *"line 13: 3. message lied"* ]]
+  [[ "$output" != *"gate refused"* ]]                          # decided
+  [[ "$output" != *"2026-08-27, run"* ]]                       # a container, not an entry
+  [[ "$output" == *"line 3: 1. only one, at level two"* ]]
+  [[ "$output" == *"gamma: nothing open"* ]]
+  [[ "$output" == *"open entries: 3"* ]]
+  [ "$(find "$T/projects" -type f -exec sha256sum {} + | sort)" = "$before" ]
 }

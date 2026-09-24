@@ -263,6 +263,17 @@ PLAN
   grep -q "změna je popsaná v nápovědě" "$o"
 }
 
+@test "deliverables: a step is its title with its Objective under it, and a plan-level list after the last step is not counted in it" {
+  local o="$BATS_TEST_TMPDIR/o.html"
+  run aid_plan_summary_render "$PLUGIN_ROOT/scripts/tests/fixtures/plan-summary/last-step-then-plan-ac.md" "$o"
+  [ "$status" -eq 0 ]
+  grep -qF '<b>Krok 1:</b> Parser reads the new field <span class="acs">· 2 kritéria</span><br>the parser accepts the field and rejects a malformed value with its line number.' "$o"
+  grep -qF '<b>Krok 2:</b> End-to-end check in the browser <span class="acs">· 1 kritérium</span><br>' "$o"
+  # The role with a digit is named whole, and the annotation keeps its first word.
+  run _aps_roles "$PLUGIN_ROOT/scripts/tests/fixtures/plan-summary/last-step-then-plan-ac.md"
+  [ "$output" = "backend, e2e" ]
+}
+
 @test "deliverables: the EPIC title never carries the step range" {
   local p="$BATS_TEST_TMPDIR/p.md" o="$BATS_TEST_TMPDIR/o.html"
   printf -- '---\nid: P901\ntype: plan\n---\n# P901 — X\n\n## Goal\nG.\n\n**EPIC 1: Steps 1-4 — Souběžný běh**\n\n### Step 1: A\n\n**Objective:** cosi.\n' > "$p"

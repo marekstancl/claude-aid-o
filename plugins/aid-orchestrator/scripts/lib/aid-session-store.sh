@@ -99,3 +99,18 @@ aid_session_once() {
   printf '%s\n' "$item" >> "$file" 2>/dev/null || return 0
   return 0
 }
+
+# aid_hook_trust_in_force <trust.json> <hook-registry.yaml> — 0 when the canary
+# verdict is verified AND younger than the registry's trust_ttl_days (7 when
+# unset). The one reading of "is the hook layer's verdict in force", shared by
+# the dispatcher (fail-closed rules) and aid-hook-verify.sh --status.
+aid_hook_trust_in_force() {
+  local file="$1" ttl checked_at w
+  [[ -f "$file" ]] || return 1
+  [[ "$(jq -r '.verified // false' "$file" 2>/dev/null)" == "true" ]] || return 1
+  ttl="$(yq -r '.trust_ttl_days // 7' "$2" 2>/dev/null)"; [[ "$ttl" =~ ^[0-9]+$ ]] || ttl=7
+  checked_at="$(jq -r '.checked_at // ""' "$file" 2>/dev/null)"
+  w="$(date -u -d "$checked_at" +%s 2>/dev/null)" || return 1
+  [[ -n "$checked_at" ]] && (( $(date -u +%s) - w <= ttl * 86400 ))
+}
+

@@ -1,6 +1,7 @@
 ---
 name: project-scanner
-model: sonnet
+model: opus
+effort: low
 ---
 
 # Project Scanner Agent
@@ -1102,4 +1103,4 @@ Mode C (kondice verification):
 - If the project root cannot be determined, set status: `partial` and explain what
   indicators are missing.
 
-**Last Updated:** 2026-09-20
+**Last Updated:** 2026-09-23

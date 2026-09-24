@@ -14,17 +14,43 @@
       "final_merge_sha": "3333333333333333333333333333333333333333",
       "release_tag_status": "v2.85.0",
       "epics": [
-        { "epic_id": "E-080-1", "run_id": "R-1", "status": "merged_to_plan", "skipped": false, "reason": null },
-        { "epic_id": "E-080-2", "run_id": "R-2", "status": "merged_to_plan", "skipped": false, "reason": null },
-        { "epic_id": "E-080-3", "run_id": "R-3", "status": "merged_to_plan", "skipped": false, "reason": null }
+        {
+          "epic_id": "E-080-1",
+          "run_id": "R-1",
+          "status": "merged_to_plan",
+          "skipped": false,
+          "reason": null
+        },
+        {
+          "epic_id": "E-080-2",
+          "run_id": "R-2",
+          "status": "merged_to_plan",
+          "skipped": false,
+          "reason": null
+        },
+        {
+          "epic_id": "E-080-3",
+          "run_id": "R-3",
+          "status": "merged_to_plan",
+          "skipped": false,
+          "reason": null
+        }
       ],
       "plan_final_gates": {
         "report": ".aid-o/work/evidence/P080/plan-final/gates_report.json",
         "result": "pass",
         "quarantine_substitutes": []
       },
-      "specialist_review": { "status": "clean" },
-      "remaining_backlog": []
+      "specialist_review": {
+        "status": "clean"
+      },
+      "remaining_backlog": [],
+      "close": {
+        "attempts": 1,
+        "minutes": 12,
+        "usd": 2.5,
+        "usd_unknown_roles": []
+      }
     }
   }
 }

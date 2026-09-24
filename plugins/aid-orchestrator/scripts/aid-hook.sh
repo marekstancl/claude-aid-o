@@ -49,7 +49,10 @@
 #   `failure: closed` rows take effect only while the trust file records a
 #   SUCCESSFUL and RECENT canary, and never on a turn the harness says is
 #   ALREADY being continued by a hook (`stop_hook_active`) — that is how a
-#   refusing Stop rule would otherwise never let a session end. Both
+#   refusing Stop rule would otherwise never let a session end. A row that
+#   declares `blocks_when_active: true` may still refuse such a turn: it bounds
+#   its own loop (P099: the continuation rule counts a budget), and its own
+#   timeout or error never blocks — only an explicit refusal does. Both
 #   degradations are audited.
 #
 #   "Recent" and not "for this tool and version", deliberately: this process
@@ -111,25 +114,13 @@ _hook_audit() {
 # between harnesses stops being covered within the window rather than never.
 # The residual gap is recorded in defaults/hook-registry.yaml; closing it needs
 # a harness marker in the event payload that neither tool sends today.
-_AID_HOOK_TRUST_TTL_DAYS_DEFAULT=7
-
 _hook_trust_ok() {
   local file="${AID_HOOK_TRUST_FILE:-}"
   if [[ -z "$file" ]]; then
     local dir; dir="$(aid_session_store_dir hooks)" || return 1
     file="${dir}/trust.json"
   fi
-  [[ -f "$file" ]] || return 1
-  [[ "$(jq -r '.verified // false' "$file" 2>/dev/null)" == "true" ]] || return 1
-
-  local ttl checked_at w now
-  ttl="$(yq -r ".trust_ttl_days // ${_AID_HOOK_TRUST_TTL_DAYS_DEFAULT}" "$REGISTRY" 2>/dev/null)"
-  [[ "$ttl" =~ ^[0-9]+$ ]] || ttl="$_AID_HOOK_TRUST_TTL_DAYS_DEFAULT"
-  checked_at="$(jq -r '.checked_at // ""' "$file" 2>/dev/null)"
-  [[ -n "$checked_at" ]] || return 1
-  w="$(date -u -d "$checked_at" +%s 2>/dev/null)" || return 1
-  now="$(date -u +%s)"
-  (( now - w <= ttl * 86400 ))
+  aid_hook_trust_in_force "$file" "$REGISTRY"
 }
 
 # --------------------------------------------------------------------------
@@ -292,7 +283,7 @@ dispatch() {
                  | (.rules[] | select(.event == "'"$event"'")
                  | [.id, .owner // "", .failure // "open",
                     (.timeout_s // $dt | tostring), (.disabled // false | tostring),
-                    .lib // "", .handler // ""]
+                    .lib // "", .handler // "", (.blocks_when_active // false | tostring)]
                  | join("'"$_AID_HOOK_FS"'"))' "$REGISTRY" 2>/dev/null)" || rrc=$?
   if [[ "$rrc" -ne 0 ]]; then
     _hook_audit "$event" "*" error "registry unreadable at ${REGISTRY} — no rule ran"
@@ -306,16 +297,17 @@ dispatch() {
   HOOK_CONTEXT="${_ctx%%$'\t'*}"
   HOOK_CONTEXT_SOURCE="${_ctx##*$'\t'}"
 
-  # NO RULE MAY BLOCK A TURN THAT IS ALREADY BEING CONTINUED BY A HOOK.
-  # A refusal on `Stop` sends the model back to work; if it cannot satisfy the
-  # rule, the next `Stop` refuses again and the session never ends. The harness
-  # marks that state with `stop_hook_active`, and honouring it belongs HERE
-  # rather than in each handler: it is a property of the event, not of any rule,
-  # and a rule author who forgot it would ship the loop.
-  local no_block=0
+  # NO RULE MAY BLOCK A TURN THAT IS ALREADY BEING CONTINUED BY A HOOK —
+  # unless its row says `blocks_when_active: true`. A refusal on `Stop` sends
+  # the model back to work; if it cannot satisfy the rule, the next `Stop`
+  # refuses again and the session never ends. The harness marks that state with
+  # `stop_hook_active`, and honouring it belongs HERE rather than in each
+  # handler: a rule author who forgot it would ship the loop. The one exception
+  # is a rule that counts its own refusals and stops at a budget.
+  local active=0
   if [[ "$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)" == "true" ]]; then
-    no_block=1
-    _hook_audit "$event" "*" degraded "stop_hook_active — the turn is already being continued by a hook, so no rule may refuse it again"
+    active=1
+    _hook_audit "$event" "*" degraded "stop_hook_active — the turn is already being continued by a hook, so only a rule that bounds its own loop (blocks_when_active) may refuse it again"
   fi
 
   local budget_total
@@ -329,8 +321,8 @@ dispatch() {
   local injections="" denials="" denied=0
   local started=$SECONDS
 
-  local id owner failure timeout_s disabled lib handler
-  while IFS="$_AID_HOOK_FS" read -r id owner failure timeout_s disabled lib handler; do
+  local id owner failure timeout_s disabled lib handler when_active no_block
+  while IFS="$_AID_HOOK_FS" read -r id owner failure timeout_s disabled lib handler when_active; do
     [[ -n "$id" ]] || continue
 
     if (( SECONDS - started >= budget_total )); then
@@ -364,7 +356,11 @@ dispatch() {
     # demonstrably run here. A `failure: open` rule that exits 2 is a
     # misdeclaration, not a veto — it is recorded and ignored, because a rule
     # that can stop work has to say so in the registry where it can be read.
-    local may_block=0
+    no_block="$active"
+    [[ "$when_active" == "true" ]] && no_block=0
+    # may_block: an explicit refusal stops the turn. fail_blocks: the rule's own
+    # timeout or error does too — never for a row that bounds its own loop.
+    local may_block=0 fail_blocks=0
     if [[ "$failure" == "closed" && "$no_block" -eq 0 ]]; then
       if (( trust_ok )); then
         may_block=1
@@ -373,6 +369,7 @@ dispatch() {
       fi
     fi
 
+    (( may_block )) && [[ "$when_active" != "true" ]] && fail_blocks=1
     local tmpd="" out_f="" err_f="" out="" reason="" rc=0
     tmpd="$(mktemp -d)" || { _hook_audit "$event" "$id" error "no temp dir for the rule run"; continue; }
     out_f="${tmpd}/out"; err_f="${tmpd}/err"
@@ -412,13 +409,13 @@ dispatch() {
         ;;
       124)
         _hook_audit "$event" "$id" timeout "exceeded ${timeout_s}s"
-        if (( may_block )); then
+        if (( fail_blocks )); then
           denied=1; denials+="rule ${id} exceeded its ${timeout_s}s budget and is fail-closed"$'\n'
         fi
         ;;
       *)
         _hook_audit "$event" "$id" error "$reason"
-        if (( may_block )); then
+        if (( fail_blocks )); then
           denied=1; denials+="rule ${id} failed (${reason}) and is fail-closed"$'\n'
         fi
         ;;

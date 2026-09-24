@@ -425,14 +425,6 @@ EOF
     # into an arbitrary tmpdir path).
     _AID_GATE_PROFILES_TARGET_FILE="$output_file" render_gate_profiles_block "${clean_stacks[@]:-}"
 
-    cat <<'EOF'
-notifications:
-  telegram:
-    # Alerts go through the ecosystem's shared send_alert() (lib/aid-alert.sh);
-    # there is no bot to enable and no chat to pick. The one key read here:
-    alert_on_compliance_recovery: true  # P042: emit ✅ recovery alert when a previously-blocked EPIC clears
-EOF
-
   } > "${output_file}" || {
     echo "[ERROR] Cannot write to ${output_file} — check permissions or run /aid-init first." >&2
     return 1
@@ -579,22 +571,13 @@ execution_yaml_upgrade() {
     _eyu_del "gate_profiles.quick" || true
   fi
 
-  # notifications.telegram: every key but the one that is read.
-  local -a tg_keys=() tg_dead=()
-  mapfile -t tg_keys < <(yq '.notifications.telegram | select(type == "!!map") | keys | .[]' "$file")
-  for key in "${tg_keys[@]}"; do
-    [[ "$key" == "alert_on_compliance_recovery" ]] || tg_dead+=("$key")
-  done
-  if (( ${#tg_dead[@]} > 0 )); then
-    if (( ${#tg_dead[@]} == ${#tg_keys[@]} )); then
-      # Nothing would remain under telegram: drop the empty parents too.
-      if [[ "$(yq '.notifications | keys | length' "$file")" == "1" ]]; then
-        _eyu_del "notifications" || true
-      else
-        _eyu_del "notifications.telegram" || true
-      fi
+  # notifications.telegram: nothing in it is read since P099 (the two AID
+  # messages have no switch). The empty parent goes with it.
+  if [[ "$(yq '.notifications | has("telegram")' "$file" 2>/dev/null)" == "true" ]]; then
+    if [[ "$(yq '.notifications | keys | length' "$file")" == "1" ]]; then
+      _eyu_del "notifications" || true
     else
-      for key in "${tg_dead[@]}"; do _eyu_del "notifications.telegram.${key}" || true; done
+      _eyu_del "notifications.telegram" || true
     fi
   fi
 

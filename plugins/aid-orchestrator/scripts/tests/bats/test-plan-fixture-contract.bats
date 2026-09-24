@@ -136,3 +136,21 @@ _generate() {
   run aid_fixture_seed_plan "$d" "$FIXTURES/multi-phase-plan-numeric.md" "sub/P099.md"
   [ "$status" -eq 2 ]
 }
+
+@test "P099: a wave declared in the plan reaches the EPIC table and plan.json parallel_groups" {
+  local d="$TEST_TMPDIR/waves"; _repo "$d"
+  # Steps 1 and 2 of the fixture name disjoint files: one wave of two.
+  sed '/^\*\*AID Role:\*\* \(architect\|domain\)$/a\
+\
+**Parallel group:** wave-1' "$FIXTURES/multi-phase-plan-numeric.md" > "$TEST_TMPDIR/two-wave.md"
+  run aid_fixture_seed_plan "$d" "$TEST_TMPDIR/two-wave.md" P099-multi.md
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  cd "$d"; _generate "$d"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  local epic; epic="$(ls "$d"/.aid-o/tasks/*.md | head -1)"
+  [ "$(grep -cE '^\| [12] \| .* \| wave-1 \|$' "$epic")" -eq 2 ]
+  run bash "$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh" --epic "$epic" \
+    --schema "$AID_PLUGIN_PATH/defaults/templates/plan.schema.json" --output-dir "$TEST_TMPDIR/json"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ "$(jq -c '[.parallel_groups[] | length]' "$(jq -r .plan_json <<< "$output")")" = "[2]" ]
+}
