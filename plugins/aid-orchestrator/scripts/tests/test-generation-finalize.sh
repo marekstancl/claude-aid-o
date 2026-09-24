@@ -103,6 +103,13 @@ done
 [[ "$(grep -o 'E-099-[123]_3' "$tmp/.aid-o/config/queue.yaml" | sort -u | wc -l | tr -d ' ')" -eq 3 ]]
 echo "PASS: receipt unlocks all FSM inits and queue entries"
 
+# A phase the pipeline proved delivered by git (P100 Step 5) is carried into the
+# receipt as it is: no outputs to verify, no hashes, not bound to these bytes.
+jq '.[0] = {phase: 1, epic_id: .[0].epic_id, status: "delivered", proven_by: "git", queue_status: "merged_to_plan", depends_on: []}' "$tmp/epics.json" > "$tmp/delivered.json"
+bash "$SCRIPTS/aid-generation-finalize.sh" --plan "$tmp/.aid-o/plans/P099.md" --total 3 --epics-json "$tmp/delivered.json" --output "$tmp/.aid-o/work/evidence/P099/generation/delivered-receipt.json" >/dev/null
+jq -e '(.epics | length == 3) and (.epics[0] | .status == "delivered" and (has("epic_sha256") | not)) and (.epics[1].plan_json_sha256 | startswith("sha256:"))' "$tmp/.aid-o/work/evidence/P099/generation/delivered-receipt.json" >/dev/null
+echo "PASS: a delivered phase is carried without hashes"
+
 jq '.[1].phase = 1' "$tmp/epics.json" > "$tmp/duplicate-phase.json"
 if bash "$SCRIPTS/aid-generation-finalize.sh" --plan "$tmp/.aid-o/plans/P099.md" --total 3 --epics-json "$tmp/duplicate-phase.json" --output "$tmp/bad.json" >/dev/null 2>&1; then
   echo "FAIL: duplicate phase was accepted" >&2; exit 1

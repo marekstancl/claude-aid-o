@@ -45,7 +45,7 @@
 # a path that might not exist (a 127 would write to fd 3 and, with fd 3 closed,
 # destroy this file's whole TAP output).
 # After any edit, verify the result count:
-#   bats --tap test-generation-resume.bats | grep -cE '^(ok|not ok)'   # == 12
+#   bats --tap test-generation-resume.bats | grep -cE '^(ok|not ok)'   # == 14
 
 load test-helpers.bash
 load generation-fixture.bash
@@ -300,6 +300,51 @@ _epic_count() { ls "$PROJ/.aid-o/tasks"/E-099-*.md 2>/dev/null | wc -l | tr -d '
   [ "$output" = "0" ]
   [ "$(jq -r '.phases["1"].epic_sha256' "$TX")" = "$epic1_sha_before" ]
   [ "$(_queue_count)" = "3" ]
+}
+
+# _deliver <epic> [--unmerged] — the queue entry an earlier generation left for a
+# delivered EPIC: merged_to_plan with a merge_target, its task branch inside main
+# (or, --unmerged, carrying a commit main does not have).
+_deliver() {
+  git -C "$PROJ" branch -f "task/$1/main" main
+  if [[ "${2:-}" == --unmerged ]]; then
+    git -C "$PROJ" checkout -q "task/$1/main" && git -C "$PROJ" commit -q --allow-empty -m "not merged" && git -C "$PROJ" checkout -q main
+  fi
+  awk -v e="$1" '
+    /^[[:space:]]*-[[:space:]]*epic_id:/ { keep = (index($0, e) > 0) }
+    /^queue:/ { print; inq = 1; next }
+    !inq || keep { if (keep && $0 ~ /^[[:space:]]*status:/) { sub(/status:.*/, "status: merged_to_plan"); print; print "    merge_target: main"; next } print }
+  ' "$QUEUE" > "$QUEUE.tmp" && mv "$QUEUE.tmp" "$QUEUE"
+}
+
+@test "a half-delivered plan: resume after a plan edit generates only the phases git has not delivered" {
+  local rc=0; _run_pipeline >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 0 ]
+  _deliver E-099-1_3
+  local e1="$PROJ/.aid-o/tasks/$(basename "$(jq -r '.phases["1"].epic_path' "$TX")")" before
+  before="$(sha256sum "$e1")"
+  printf '\nA fix after phase 1 was delivered.\n' >> "$PLAN"
+  aid_fixture_seed_plan "$PROJ" "$PLAN" P099-multi.md >/dev/null
+  run bash -c "cd '$PROJ' && bash '$PIPELINE' --plan '$PLAN' --queue-mode chain" 3>&-
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"E-099-1_3 is delivered"* ]]
+  [ "$(sha256sum "$e1")" = "$before" ]
+  jq -e '.epics[] | select(.epic_id == "E-099-1_3") | .status == "delivered" and .proven_by == "git"' "$GEN/receipt.json"
+  jq -e '[.epics[] | select(.status != "delivered") | .plan_json_sha256] | length == 2' "$GEN/receipt.json"
+  [ "$(_queue_count)" = "3" ]
+}
+
+@test "an entry marked merged whose task branch git does not prove is not delivered, and neither is a legacy entry" {
+  local rc=0; _run_pipeline >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 0 ]
+  _deliver E-099-1_3 --unmerged
+  printf '\nA fix.\n' >> "$PLAN"
+  aid_fixture_seed_plan "$PROJ" "$PLAN" P099-multi.md >/dev/null
+  run bash -c "cd '$PROJ' && bash '$PIPELINE' --plan '$PLAN' --queue-mode chain" 3>&-
+  [ "$status" -ne 0 ]; [[ "$output" == *"still has queue entries"*"E-099-1_3"* ]]
+  sed -i '/merge_target: main/d' "$QUEUE"; git -C "$PROJ" branch -f task/E-099-1_3/main main
+  run bash -c "cd '$PROJ' && bash '$PIPELINE' --plan '$PLAN' --queue-mode chain" 3>&-
+  [ "$status" -ne 0 ]; [[ "$output" == *"E-099-1_3 (merged_to_plan)"* ]]
 }
 
 # ─── the receipt ─────────────────────────────────────────────────────────

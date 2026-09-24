@@ -279,6 +279,18 @@ _gen_plan_recorded_mode() {
 # drift between plugin versions at verify time instead of at queue time.
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"
+# shellcheck source=lib/aid-queue-write.sh
+source "${SCRIPT_DIR}/lib/aid-queue-write.sh"   # _queue_dep_state, queue_get_field
+
+# _gen_phase_delivered <epic_id> — true when an earlier generation's queue entry
+# for this EPIC names a merge_target and git ancestry proves the merge (P100
+# Step 5). A legacy entry (status only) is never proof: the queue says of itself
+# that an entry is not evidence. A delivered phase is not generated again, not
+# re-queued and not bound to the current plan bytes — its work is already in git.
+_gen_phase_delivered() {
+  [[ -n "$(queue_get_field "$1" merge_target "$queue_yaml" 2>/dev/null)" ]] || return 1
+  [[ "$(_queue_dep_state "$1" "$queue_yaml" "$_aid_pipeline_state_root")" == merged ]]
+}
 
 _gen_sha256_file() { sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
 # Canonical-JSON self-hash. A PLAIN STATED CONVENTION (no in-tree precedent
@@ -1393,6 +1405,7 @@ if [[ -f "$_gen_tx_path" ]]; then
     # and only row carrying that id.
     _gen_stale_entries=""
     for _gp in $(jq -r '.phases[]?.epic_id // empty' "$_gen_tx_path" 2>/dev/null); do
+      _gen_phase_delivered "$_gp" && continue   # delivered: kept, never regenerated
       _gp_status="$(_gen_queue_status "$queue_yaml" "$_gp")"
       [[ -n "$_gp_status" ]] && _gen_stale_entries="${_gen_stale_entries:+${_gen_stale_entries}, }${_gp} (${_gp_status})"
     done
@@ -1711,6 +1724,18 @@ _gen_write_atomic "$_gen_tx_path" "$_gen_tx_bound" || { _gen_unlock; error_exit 
 # concurrently by two same-identity invocations.
 
 for phase in $(seq 1 "$total_phases"); do
+
+  # P100 Step 5 — a phase whose EPIC an earlier generation delivered (proven by
+  # git) is recorded as delivered and skipped: resuming a half-delivered plan
+  # regenerates only what is not in git yet (ACTA #10, #11).
+  _gp_e="$(jq -r --arg p "$phase" '.phases[$p].epic_id // ""' "$_gen_tx_path" 2>/dev/null)"
+  if [[ "$two_stage" == true && -n "$_gp_e" ]] && _gen_phase_delivered "$_gp_e"; then
+    epics_json="$(jq --argjson phase "$phase" --arg e "$_gp_e" --arg qs "$(_gen_queue_status "$queue_yaml" "$_gp_e")" \
+      '. + [{phase:$phase, epic_id:$e, status:"delivered", proven_by:"git", queue_status:$qs, depends_on:[]}]' <<< "$epics_json")"
+    prev_epic_id="$_gp_e"
+    echo "[INFO] Phase ${phase}/${total_phases}: ${_gp_e} is delivered (its merge is in git) — not generated again" >&2
+    continue
+  fi
 
   # -------------------------------------------------------------------------
   # P074 Step 15 — RESUME. A phase whose recorded outputs still exist and
@@ -2055,6 +2080,7 @@ if [[ "$two_stage" == true ]]; then
 
   for phase in $(seq 1 "$total_phases"); do
     _entry="$(jq -c --argjson p "$phase" '.[] | select(.phase == $p)' <<< "$epics_json")"
+    [[ "$(jq -r '.status // ""' <<< "$_entry")" == delivered ]] && continue
     _epic_id="$(jq -r '.epic_id' <<< "$_entry")"
     _epic_path="$(jq -r '.epic_path' <<< "$_entry")"
     _plan_json_path="$(jq -r '.plan_json' <<< "$_entry")"

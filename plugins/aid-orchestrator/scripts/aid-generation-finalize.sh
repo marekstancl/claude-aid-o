@@ -4,7 +4,9 @@
 #
 # This is deliberately between generation and FSM init. It proves that every
 # phase of one reviewed source plan has produced exactly one EPIC + plan.json.
-# It never starts an EPIC and never mutates Git/FSM state.
+# It never starts an EPIC and never mutates Git/FSM state. A phase the pipeline
+# recorded as delivered (status delivered, proven_by git: its EPIC's merge is in
+# git) is carried into the receipt as it is, without output hashes.
 # =============================================================================
 set -euo pipefail
 
@@ -62,6 +64,9 @@ for phase in $(seq 1 "$total"); do
   entry="$(jq -c --argjson p "$phase" '.[] | select(.phase == $p)' "$epics_file")"
   [[ -n "$entry" ]] || { echo "ERROR: missing generated phase $phase" >&2; exit 1; }
   [[ "$(printf '%s\n' "$entry" | wc -l | tr -d ' ')" == "1" ]] || { echo "ERROR: duplicate generated phase $phase" >&2; exit 1; }
+  # A delivered phase (P100 Step 5) was proven by git before generation and
+  # has no output to verify or bind to these plan bytes.
+  jq -e '.status == "delivered" and .proven_by == "git"' <<< "$entry" >/dev/null && continue
   epic_path="$(jq -r '.epic_path // empty' <<< "$entry")"
   plan_json="$(jq -r '.plan_json // empty' <<< "$entry")"
   contract_validate="$(jq -r '.contract_validate // empty' <<< "$entry")"
@@ -125,6 +130,9 @@ final_canonical="$(jq -S -c . <<< "$graph")"
 artifact_entries='[]'
 for phase in $(seq 1 "$total"); do
   entry="$(jq -c --argjson p "$phase" '.[] | select(.phase == $p)' "$epics_file")"
+  if jq -e '.status == "delivered"' <<< "$entry" >/dev/null; then
+    artifact_entries="$(jq -c --argjson e "$entry" '. + [$e]' <<< "$artifact_entries")"; continue
+  fi
   epic_path="$(jq -r '.epic_path' <<< "$entry")"; plan_json="$(jq -r '.plan_json' <<< "$entry")"
   contract_validate="$(jq -r '.contract_validate' <<< "$entry")"
   artifact_entries="$(jq -c --argjson e "$entry" --arg es "sha256:$(sha256sum "$epic_path" | awk '{print $1}')" --arg ps "sha256:$(sha256sum "$plan_json" | awk '{print $1}')" --arg cs "sha256:$(sha256sum "$contract_validate" | awk '{print $1}')" \
