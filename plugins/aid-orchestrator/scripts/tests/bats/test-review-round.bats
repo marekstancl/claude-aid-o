@@ -740,18 +740,20 @@ _close1() {
 }
 
 # ── Step 9: fast mode on the same mechanism ──
-@test "cp6: a second prepare of the same fast-mode id is refused, a re-run of the step check over a closed index too, and a switched-off checkpoint prepares nothing (exit 3)" {
+@test "cp6: a second prepare of the same fast-mode id is refused, a re-run of the step check leaves a closed index as it is, and a switched-off checkpoint prepares nothing (exit 3)" {
   _repo; D6="$ROOT/do/20260919T100000Z-abc1234"; mkdir -p "$D6"; : > "$D6/timeline.jsonl"
   seq 1 60 >> "$R/src/app.py"; echo "Task: tidy" > "$D6/task.md"
   (cd "$R" && bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint cp6 --worktree --evidence-dir "$D6" --dod-file "$D6/task.md") >/dev/null
   "$ROUND_SH" prepare --checkpoint cp6 --evidence-dir "$D6" --project-root "$R" --round 1 >/dev/null
   run "$ROUND_SH" prepare --checkpoint cp6 --evidence-dir "$D6" --project-root "$R" --round 1
   [ "$status" -eq 1 ]; [[ "$output" == *"already prepared"* ]]
-  # a closed index is never replaced by a re-run of the step check that would skip
+  # a closed index is never replaced by a re-run of the step check that would skip:
+  # the small change is review (a delta round confirms it, P100) and the index stays
   jq -n '{verdict: "fail", head_sha: "x", rounds: [{round: 1, verdict: "fail"}]}' > "$D6/cp6/rounds.json"
   git -C "$R" checkout -q -- src/app.py; echo tiny >> "$R/src/app.py"
   run bash -c "cd '$R' && bash '$AID_PLUGIN_PATH/scripts/aid-step-check.sh' --checkpoint cp6 --worktree --evidence-dir '$D6' --dod-file '$D6/task.md'"
-  [ "$status" -ne 0 ]; [[ "$output" == *"already records a closed round"* ]]
+  [ "$status" -eq 0 ]; [ "$(jq -r .verdict "$D6/cp6/step-check.json")" = review ]
+  [ "$(jq -r .verdict "$D6/cp6/rounds.json")" = fail ]
   # the PM's switch
   mkdir -p "$R/.aid-o/config/policies"
   printf 'review_checkpoints:\n  cp6_fast_mode_review: false\n' > "$R/.aid-o/config/policies/review-checkpoints.yaml"
