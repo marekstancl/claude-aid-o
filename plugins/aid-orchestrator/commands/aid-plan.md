@@ -279,7 +279,7 @@ is written).** The author runs the same check generation runs, so a plan that
 passes here is not refused there:
 
 ```bash
-bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" [--total <EPIC count>]
+bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total <EPIC count>
 ```
 
 It runs every part and prints every finding before one verdict: the Files-shape
@@ -336,7 +336,7 @@ Write an exhaustive implementation plan from specification or topic.
 7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (28 checks: 16 original + #17 + 17a-e + #18 + #19 + 20a-c + #21; eight are band-scoped — see `skills/plan-writing.md`)
 8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
 8a. **The generation check (automatic, before CP1)** — run
-    `bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md"`,
+    `bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total <EPIC count>`,
     as in Step 8 above: every finding at once; fix and re-run until it passes, BEFORE CP1.
 9. **Plan review (CP1)** — run "Plan review (CP1)" below, from item 1.
 
@@ -451,7 +451,7 @@ skipped. The gate then passes with a notice.
    revision makes it stale; rerun it after every edit):
 
    ```bash
-   bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" <plan>
+   bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" <plan> --total <EPIC count>
    ```
 
 2. Prepare round 1. It prints the round directory and one prompt per reviewer:

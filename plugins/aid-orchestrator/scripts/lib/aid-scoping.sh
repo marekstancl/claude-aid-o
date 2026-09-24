@@ -411,7 +411,7 @@ _aid_files_bullet_tier() {
 
 # _aid_test_bullet_tier_finding <bullet> <root> — THE rule for a `Test:` bullet's
 # tier (P081 Step 10; one definition since P100 Step 3): generation refuses on
-# it and the plan lint reports it as STRICT, so a plan the author's check
+# it and the plan lint reports it as an ERROR, so a plan the author's check
 # passes is not refused at generation. Prints the finding and returns 1; returns
 # 0, printing nothing, when the bullet is fine or the rule does not apply.
 #

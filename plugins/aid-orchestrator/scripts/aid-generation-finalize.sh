@@ -14,6 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 source "${SCRIPT_DIR}/lib/aid-plan-graph.sh"
 source "${SCRIPT_DIR}/lib/aid-source-plan-graph.sh"
+source "${SCRIPT_DIR}/lib/aid-roots.sh"
+source "${SCRIPT_DIR}/lib/aid-queue-write.sh"   # _queue_dep_state — a delivered phase is re-proven here
 check_prerequisites
 
 usage() {
@@ -64,9 +66,14 @@ for phase in $(seq 1 "$total"); do
   entry="$(jq -c --argjson p "$phase" '.[] | select(.phase == $p)' "$epics_file")"
   [[ -n "$entry" ]] || { echo "ERROR: missing generated phase $phase" >&2; exit 1; }
   [[ "$(printf '%s\n' "$entry" | wc -l | tr -d ' ')" == "1" ]] || { echo "ERROR: duplicate generated phase $phase" >&2; exit 1; }
-  # A delivered phase (P100 Step 5) was proven by git before generation and
-  # has no output to verify or bind to these plan bytes.
-  jq -e '.status == "delivered" and .proven_by == "git"' <<< "$entry" >/dev/null && continue
+  # A delivered phase (P100 Step 5) has no output to verify or bind to these
+  # plan bytes; the manifest's word is not proof, so git is asked again here.
+  if jq -e '.status == "delivered"' <<< "$entry" >/dev/null; then
+    _dq="$(aid_state_path .aid-o/config/queue.yaml)"; _de="$(jq -r '.epic_id' <<< "$entry")"
+    [[ -n "$(queue_get_field "$_de" merge_target "$_dq" 2>/dev/null)" && "$(_queue_dep_state "$_de" "$_dq" "$(aid_state_root)")" == merged ]] \
+      || { echo "ERROR: phase $phase is marked delivered but git does not prove ${_de} merged" >&2; exit 1; }
+    continue
+  fi
   epic_path="$(jq -r '.epic_path // empty' <<< "$entry")"
   plan_json="$(jq -r '.plan_json // empty' <<< "$entry")"
   contract_validate="$(jq -r '.contract_validate // empty' <<< "$entry")"
