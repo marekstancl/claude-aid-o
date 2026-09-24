@@ -473,6 +473,9 @@ _bracket() {
   run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"does not quote"* ]]
   echo "nález $fp" >> "$card"; touch -d '-10 seconds' "$card"
   run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"no PM prompt after"* ]]
+  # a later prompt event of another rule is not the PM's reply marker
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"queue_continuation_notice"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
+  run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]
   printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
   run _S "${pm[@]}" --finding-card "$card"; echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = pass ]

@@ -881,13 +881,14 @@ cmd_finalize() {
 }
 
 # _pm_replied_after <card> — true when the hook audit holds a PM prompt
-# (UserPromptSubmit, any session) later than the card was written. An audit
+# (the pm_reply_marker line of a UserPromptSubmit, any session) later than the
+# card was written. An audit
 # trail, not a proof: a controller that forges the audit file is not stopped.
 _pm_replied_after() {
   local audit="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}"
   [[ -r "$audit" ]] || return 1
   # ISO-8601 UTC strings sort as time; jq's fromdateiso8601 is off by the DST hour.
-  grep -F '"event":"UserPromptSubmit"' "$audit" \
+  grep -F '"event":"UserPromptSubmit"' "$audit" | grep -F '"rule":"pm_reply_marker"' \
     | jq -e --arg t "$(date -u -d "@$(stat -c %Y "$1")" +%Y-%m-%dT%H:%M:%SZ)" -s 'any(.[]; .ts > $t)' >/dev/null 2>&1
 }
 

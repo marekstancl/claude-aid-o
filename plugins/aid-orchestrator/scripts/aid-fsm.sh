@@ -833,40 +833,12 @@ _fsm_worktree_is_linked() {
   [[ "$gd" == */worktrees/* ]]
 }
 
-# _fsm_plan_worktree_recorded <plan_id> <state_root> — the ABSOLUTE recorded
-# path, or empty (legacy plan / no state file / no plan-state lib).
-#
-# EXIT CODE CARRIES THE DIFFERENCE BETWEEN "no record" AND "cannot read":
-#   0 + a path  -> the plan records that worktree
-#   0 + nothing -> the plan DEFINITIVELY records none (plan_state_get answered:
-#                  rc 0 with an empty/`null` value, or rc 1 `not_found`)
-#   2 + nothing -> the answer is UNKNOWN: plan_state_get could not read at all
-#                  (rc 2 = jq/yq missing, rc 5 = corrupt state file, or any
-#                  other non-0/1 rc such as a lock timeout)
-#
-# The distinction is load-bearing. Callers treat "definitively none" as a
-# legacy plan, and "none BUT a worktree exists at the canonical path" as the
-# plan-start crash window — a hard refusal that asserts a FACT about how the
-# plan was created. Collapsing an unreadable state file into "records none"
-# made that refusal fire on a missing `yq`, telling the operator plan-start had
-# been killed mid-transaction (and pointing at --recreate-worktree) when the
-# real fault was a missing dependency. Never diagnose from an answer you did
-# not get.
+# _fsm_plan_worktree_recorded <plan_id> <state_root> — lib/aid-plan-state.sh
+# aid_plan_recorded_worktree, asked through its CLI (this script does not source
+# the plan-state lib); same output and the same rc 2 for "unknown".
 _fsm_plan_worktree_recorded() {
-  local plan_id="$1" root="$2" rec="" rc=0
-  [[ -f "${SCRIPT_DIR}/lib/aid-plan-state.sh" ]] || { printf ''; return 0; }
-  rec="$(AID_PLAN_STATE_PROJECT_ROOT="$root" \
-    bash "${SCRIPT_DIR}/lib/aid-plan-state.sh" get "$plan_id" worktree_path 2>/dev/null)" || rc=$?
-  # rc 1 with `not_found` on stdout = no state file yet; rc 1 with nothing =
-  # the field is absent. Both are real answers. Anything else is not.
-  if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then
-    printf ''
-    return 2
-  fi
-  [[ "$rec" == "not_found" || "$rec" == "null" ]] && rec=""
-  [[ -z "$rec" ]] && { printf ''; return 0; }
-  [[ "$rec" == /* ]] || rec="${root}/${rec}"
-  printf '%s' "$rec"
+  [[ -f "${SCRIPT_DIR}/lib/aid-plan-state.sh" ]] || return 0
+  AID_PLAN_STATE_PROJECT_ROOT="$2" bash "${SCRIPT_DIR}/lib/aid-plan-state.sh" recorded-worktree "$1"
 }
 
 # _fsm_plan_worktree_canonical_if_live <state_root> <plan_id> — the canonical
@@ -1165,11 +1137,17 @@ _fsm_refusal_next() {
         next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}")"
       fi ;;
     round_not_closed)
-      next="$(_fsm_cmd bash "$rr" close "${where[@]}" --round "${last:-1}") --tokens <role>=<n|unknown> …" ;;
+      # A round is closed after its answers are collected: collect first when it was not.
+      local rd="${cpdir:-}/round-${last:-1}"
+      if [[ "$(jq -r '.status // ""' "${rd}/collect.json" 2>/dev/null)" == valid ]]; then
+        next="$(_fsm_cmd bash "$rr" close "${where[@]}" --round "${last:-1}") --tokens <role>=<n|unknown> …"
+      else
+        next="dispatch the round's reviewers (commands/aid-run.md CP2/CP3), then: $(_fsm_cmd bash "$rr" collect "${where[@]}" --round "${last:-1}")"
+      fi ;;
     review_round_failed)
       next="the step's role fixes the open findings and commits, then: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}") && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))")" ;;
     review_round_stale|cp3_stale_review)
-      next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}") && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))") — a delta round over the commits since round ${last:-?}" ;;
+      next="$(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}") && $(_fsm_cmd bash "$rr" prepare "${where[@]}" --round "$(( ${last:-0} + 1 ))")" ;;
     no_change_without_outputs)
       next="commit the step's work, then: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}")" ;;
     steps_incomplete)
