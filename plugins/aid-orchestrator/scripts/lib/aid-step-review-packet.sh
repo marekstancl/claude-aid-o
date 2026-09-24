@@ -103,7 +103,7 @@ aid_final_review_inputs_build() {
     else
       jq -c --arg e "$(basename "$epic_dir")" -s '{epic: $e, cp3: "reviewed",
         findings: (sort_by(.round) | map(.findings[]) | group_by(.fingerprint) | map(last)
-                   | map(select(.status | IN("open", "disputed", "carried", "routed")) | {severity, status, claim, evidence, fix}))}' "$run"/round-*/merged.json
+                   | map(select(.status | IN("open", "disputed", "carried", "routed", "form_invalid")) | {severity, status, claim, evidence, fix}))}' "$run"/round-*/merged.json
     fi
   done | jq -s '{epics: .}' > "$out/epic-findings.json"
 }
@@ -285,7 +285,7 @@ aid_step_review_route_open() {
     fi
   fi
   local open
-  open="$(jq -c '[.findings[] | select((.status == "open" or .status == "disputed") and (.severity == "blocker" or .severity == "major"))]' "${dir}/merged.json")"
+  open="$(jq -c '[.findings[] | select((.status | IN("open", "disputed", "form_invalid")) and (.severity == "blocker" or .severity == "major"))]' "${dir}/merged.json")"
   [[ "$(jq 'length' <<< "$open")" -gt 0 ]] || return 0
   (( last )) || return 0
   if [[ "$cp" == cp7 ]]; then

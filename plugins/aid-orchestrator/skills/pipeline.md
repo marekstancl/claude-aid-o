@@ -272,7 +272,7 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `contract_return_rejected` | the agent's return does not match its contract | work | re-dispatch the step with its packet, record the new return, `increment-step` | |
 | `contract_return_missing`, `contract_return_not_done` | no return recorded, or the agent reported blocked / a failing gate | work | extract the return; a blocked step is resumed or handed over with a Blocked card | PM, when blocked |
 | `review_round_missing` | the step or EPIC has no review round | state | `aid-step-check.sh --checkpoint <cp> …` (it decides skip or review; cp7: `plan-finalize --stage produce`) | |
-| `round_not_closed` | a round was prepared and never closed | state | `aid-review-round.sh close … --round <n>` | |
+| `round_not_closed` | a round was prepared and never closed | state | answers not collected yet: dispatch the reviewers, then `aid-review-round.sh collect … --round <n>`; collected: `close … --round <n>` | |
 | `review_round_failed` | the last round closed with open blockers (a `form_invalid` finding counts) | work | the step's role fixes them and commits, then the step check and `prepare --round <n+1>` | PM, via `dispute` (`commands/aid-run.md` CP2/CP3 item 6) |
 | `review_round_stale`, `cp3_stale_review` | HEAD moved after the round the reviewers saw | state | the step check, then `aid-review-round.sh prepare … --round <n+1>` — a delta round over the commits since; after a passed round it needs no override | |
 | `no_change_without_outputs` | the step committed nothing and declares no output that exists | work | commit the step's work, run the step check again | PM, to waive the step |
@@ -782,6 +782,8 @@ aid_dispatch_contract_commit "$tree_root" "$step_dir/contract.json" "$step_dir/r
   "step {N}: {step title}"     # validates first (a rejected return is not committed), stages only
                                # the return's changed_files; prints the SHA or "nothing to commit"
 ```
+It also stages the return's `deleted_files`, and it commits only on the run's
+`task/<epic>/main` or, in a wave, the step's own `step/<id>` branch.
 The controller is the only committer and it takes returns **one at a time**, in the order
 they arrive — that is the protocol that keeps three agents returning at once from becoming
 one commit. What the FSM guarantees is narrower and mechanical: a contracted step does not

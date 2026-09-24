@@ -1700,6 +1700,8 @@ _pfsm_cleanup_leftovers() {
       kept+=("${br}	not merged into ${ref}")
     elif git -C "$root" branch -D "$br" >/dev/null 2>&1; then
       removed+=("$br")
+    else
+      kept+=("${br}	git refused: git branch -D ${br}")
     fi
   done < <(git -C "$root" for-each-ref --format='%(refname:short)' 'refs/heads/step/*')
   mkdir -p "$(dirname "$out")" 2>/dev/null
@@ -5228,13 +5230,13 @@ _pfsm_finalize_gates_body() {
   # writing its report is re-run, and its orphaned start made the assertion
   # refuse the plan for good (WAN #16).
   if [[ -f "$timeline_file" ]]; then
-    local starts
-    starts="$(grep -c '"event":"gate_runner_complete"' "$timeline_file" 2>/dev/null || true)"
-    [[ -z "$starts" ]] && starts=0
+    local completes
+    completes="$(grep -c '"event":"gate_runner_complete"' "$timeline_file" 2>/dev/null || true)"
+    [[ -z "$completes" ]] && completes=0
     # A report made only of copied rows ran nothing; any other ran exactly once.
     expected_runs="$(jq "${AID_GATE_ROW_JQ}"'if any(.gates | gate_rows_normalize | to_entries[] | select((.key|startswith("_")|not) and (.value|type) == "object") | .value; .reused_from == null and .reason != "not_in_profile") then 1 else 0 end' "$report_file")"
-    if [[ "$starts" -ne "$expected_runs" ]]; then
-      _gassert "timeline has ${starts} completed gate runs (gate_runner_complete) for ${run_id}, expected exactly ${expected_runs} (no second broad run under a 'full' label)."
+    if [[ "$completes" -ne "$expected_runs" ]]; then
+      _gassert "timeline has ${completes} completed gate runs (gate_runner_complete) for ${run_id}, expected exactly ${expected_runs} (no second broad run under a 'full' label)."
     fi
   elif [[ "$ran_now" -eq 1 ]]; then
     _gassert "no timeline at ${run_dir_rel}/timeline.jsonl — the single-run assertion cannot be made."
@@ -7596,6 +7598,7 @@ cmd_plan_close() {
   candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
   run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
   run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
+  [[ "$run_dir_rel" == null || "$run_dir_rel" == not_found ]] && run_dir_rel=""
   # An administrative close has, by definition, no plan-final receipt to verify.
   if [[ "$close_mode" == "merge" && "${_PFSM_ADMIN_CLOSE:-0}" -ne 1 ]]; then
     _pfsm_verify_plan_final_receipt "$root" "$plan_id" "$candidate" "$run_id" || exit 1

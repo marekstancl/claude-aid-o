@@ -68,7 +68,8 @@ cleanup pass to rely on.
 **Stay on the branch you were given.** Never `checkout`, `switch` or `reset` a
 branch in the tree you work in — it is shared with the controller and, in a
 plan, with the other steps. Read another branch with `git show <branch>:<path>`.
-The controller's step commit refuses any branch but the run's task branch.
+The controller's step commit refuses any branch but the run's task branch
+(`task/<epic>/main`), or the step's own `step/<id>` branch in a wave.
 
 ---
 

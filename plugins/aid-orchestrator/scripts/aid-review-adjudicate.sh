@@ -22,7 +22,8 @@
 #   - the same fingerprint twice from one reviewer     → rejected: duplicate
 # A finding rejected on form (every reason but duplicate) is also kept in the
 # merged list as `form_invalid`: a step round's verdict counts it as open, so
-# a true finding is never lost to its form.
+# a true finding is never lost to its form. Step rounds only: `blockers_open`,
+# which the CP1 gate reads, still counts open and disputed findings alone.
 # What survives is merged by fingerprint — the five-argument formula of
 # lib/aid-finding-fingerprint.sh: project, namespace, the step (`.step`, or the
 # literal "plan"/"epic"/"do" per namespace; final_review uses "plan"), the first evidence with its line,

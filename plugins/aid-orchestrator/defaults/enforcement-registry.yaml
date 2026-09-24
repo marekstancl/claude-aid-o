@@ -4033,7 +4033,7 @@ enforcements:
   - id: generation_delivered_phase
     type: 4
     source: "scripts/aid-auto-pipeline.sh (grep: '_gen_phase_delivered')"
-    instruction: "skills/planner.md (grep: 'Two-stage generation')"
+    instruction: "skills/planner.md (grep: 'two-stage')"
     severity: blocking
     surface: internal-guard
     status: active

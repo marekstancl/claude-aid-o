@@ -1195,7 +1195,9 @@ plan_op_reconcile() {
 }
 
 # ===========================================================================
-# Standalone CLI — debugging / bats convenience only (see file header).
+# Standalone CLI — debugging and bats, and `recorded-worktree`, which the
+# scripts that do not source this library call (aid-fsm.sh, aid-pm-brief.sh,
+# lib/aid-cache-preflight.sh).
 # ===========================================================================
 _aid_plan_state_usage() {
   cat <<'EOF'
@@ -1205,8 +1207,9 @@ Subcommands:
   state-path <plan_id>
   init <plan_id> <mode> <plan_branch> <target_branch>
   get <plan_id> <field>
+  recorded-worktree <plan_id>
   set-worktree-path <plan_id> <path|"">
-  transition <plan_id> <from> <to>
+  transition <plan_id> <from> <to> [--administrative]
   op-key <command> <plan_id> <stage> <attempt> <subject>
   op-begin <plan_id> <op_id> <command> <subject> <expected_before_sha>
   op-git-applied <plan_id> <op_id> <resulting_sha>

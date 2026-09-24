@@ -63,7 +63,7 @@ source "${SCRIPT_DIR}/lib/aid-obligations.sh"
 # shellcheck source=lib/aid-ancillary.sh
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"
 
-usage() { sed -n '4,34p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '4,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 CMD="${1:-}"; [[ -n "$CMD" && "$CMD" != -h && "$CMD" != --help ]] || usage
 shift
@@ -273,7 +273,7 @@ _previous_attempt_round() {
   local d
   for d in $(_prev_attempt_rounds); do
     [[ -f "$d/measurement.json" ]] || continue
-    jq -e '[.findings[] | select((.status | IN("open", "disputed")) and (.severity == "blocker" or .severity == "major"))] | length > 0' "$d/merged.json" >/dev/null 2>&1 && echo "$d"
+    jq -e '[.findings[] | select((.status | IN("open", "disputed", "form_invalid")) and (.severity == "blocker" or .severity == "major"))] | length > 0' "$d/merged.json" >/dev/null 2>&1 && echo "$d"
     return 0
   done
 }
@@ -885,10 +885,12 @@ cmd_finalize() {
 # card was written. An audit
 # trail, not a proof: a controller that forges the audit file is not stopped.
 _pm_replied_after() {
-  local audit="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}"
-  [[ -r "$audit" ]] || return 1
+  local audit="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}" g
+  local -a gens=(); for g in "$audit" "${audit}.1" "${audit}.2"; do [[ -r "$g" ]] && gens+=("$g"); done
+  (( ${#gens[@]} )) || return 1
   # ISO-8601 UTC strings sort as time; jq's fromdateiso8601 is off by the DST hour.
-  grep -F '"event":"UserPromptSubmit"' "$audit" | grep -F '"rule":"pm_reply_marker"' \
+  # The rotated generations count too (aid-hook.sh rotates at 20 MB).
+  cat "${gens[@]}" | grep -F '"event":"UserPromptSubmit"' | grep -F '"rule":"pm_reply_marker"' \
     | jq -e --arg t "$(date -u -d "@$(stat -c %Y "$1")" +%Y-%m-%dT%H:%M:%SZ)" -s 'any(.[]; .ts > $t)' >/dev/null 2>&1
 }
 

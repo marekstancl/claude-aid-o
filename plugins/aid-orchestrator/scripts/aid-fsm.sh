@@ -1121,8 +1121,9 @@ _fsm_cmd() {
 # _fsm_refusal_next <reason> — the last two lines of a refusal agents met
 # (tests/fixtures/refusals/measured-2026-09.tsv): the one command that
 # continues and the row of skills/pipeline.md §"When AID refuses" that says
-# more. Reads $state_file, $evidence_dir, $step, $cp, $last from caller scope
-# (file convention). Returns 1, printing nothing, for a reason without a row.
+# more. Reads from caller scope (file convention) what the reason's command
+# needs: $state_file, $evidence_dir, $step, $cp, $cpdir, $last, $_c_dir,
+# $_pb_plan_id, $epic_id, $run_id, $from_phase, $to_phase. Returns 1, printing nothing, for a reason without a row.
 _fsm_refusal_next() {
   local reason="$1" next fsm="${SCRIPT_DIR}/aid-fsm.sh" rr="${SCRIPT_DIR}/aid-review-round.sh"
   local vf="${evidence_dir:-<evidence dir>}/step-${step:-N}-verify.md" sf="${state_file:-<state file>}"
@@ -1152,8 +1153,10 @@ _fsm_refusal_next() {
       next="commit the step's work, then: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-check.sh" "${where[@]}")" ;;
     steps_incomplete)
       next="finish the next step (commands/aid-run.md step loop), then: $(_fsm_cmd bash "$fsm" increment-step "$sf")" ;;
-    gates_no_generated_by|plan_gate_profile_excluded)
+    gates_no_generated_by)
       next="$(_fsm_cmd bash "$fsm" advance-to-gates "$sf")" ;;
+    plan_gate_profile_excluded)
+      next="widen the profile's include[] in execution.yaml gate_profiles (accepting the gap is a PM Decision card), then: $(_fsm_cmd bash "$fsm" advance-to-gates "$sf")" ;;
     gates_runner_exit_*)
       next="the role that wrote the failing code fixes the gates named above, then: $(_fsm_cmd bash "$fsm" advance-to-gates "$sf")" ;;
     contract_return_rejected)

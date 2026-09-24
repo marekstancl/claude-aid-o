@@ -292,7 +292,7 @@ cmd_gate() {
       local prop; prop="$(state_dir "$plan_id")/proposal.json"
       if ! jq -e '(.basis | IN("live-screen", "design-system")) and (.viewports | type == "array" and length > 0
                   and all(.[]; (.name | type == "string") and (.width | type == "number") and (.height | type == "number")))' "$prop" >/dev/null 2>&1; then
-        echo "REFUSED: ${plan_id} is a UI topic and has no proposal basis built from the application — build it: aid_ui_proposal_build <project root> $(state_dir "$plan_id") (lib/aid-ui-proposal.sh, skills/visual-companion/SKILL.md)" >&2
+        echo "REFUSED: ${plan_id} is a UI topic and has no proposal basis built from the application — build it: source \$AID_PLUGIN_PATH/scripts/lib/aid-ui-proposal.sh && aid_ui_proposal_build <project root> $(state_dir "$plan_id") (skills/visual-companion/SKILL.md)" >&2
         return 1
       fi
     fi
