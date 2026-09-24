@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aid-tier: t0
+# aid-tier: t2
 # test-gates-hygiene.sh — the gate files say why they exist, and no live text
 # teaches a removed layer (P097 Step 7).
 #

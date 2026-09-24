@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-c4-content-verdict.bats — C4 asks what the artifact SAYS, not only whether it is there.
 # Provenance: P062 Step 8 (D4).
 #

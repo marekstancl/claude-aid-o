@@ -42,8 +42,9 @@
 #
 # TEST TIERS (P081). A suite declares its tier in a header comment,
 # `# aid-tier: t0|t1|t2`, and the runner filters on it:
-#   t0  under 2 s per case   — the pulse, whole tier under 2 min
-#   t1  under 30 s per case  — what blocks a merge, whole tier under 10 min
+#   t0  under 2 s per case   — the pulse
+#   t1  under 30 s per case  — what blocks a merge; T0 + T1 together under
+#       10 min of real run (aid-test-tier-lint.sh holds the sums to 90 s + 390 s)
 #   t2  everything else, and anything cross-component — runs nightly
 # The merge-path gate below therefore runs T0+T1 and NOT the whole portfolio.
 # A project that has adopted NO tiers must run this runner WITHOUT `--tier`:

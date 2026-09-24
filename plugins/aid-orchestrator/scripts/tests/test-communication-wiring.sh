@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aid-tier: t1
+# aid-tier: t2
 #
 # MEASURED 4.4 s for its single case (nightly journal, 2026-08-15); T0 is under
 # 2 s. It reads every PM-facing surface in the plugin and parses their sections.

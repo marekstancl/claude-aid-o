@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # P083 Step 7 — a stack-detected /aid-init workspace must yield the FULL
 # canonical gate-profile ladder (quick < targeted < standard < full <
 # release), with a non-empty `release`, so a fresh consumer project can

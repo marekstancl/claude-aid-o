@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-plan-continue.bats — P090 Step 3.
 #
 # TIER. The plan proposed t0. The measurement says otherwise: proving an EPIC is

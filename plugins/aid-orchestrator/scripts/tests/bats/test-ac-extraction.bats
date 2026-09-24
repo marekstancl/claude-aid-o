@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # P083 Step 2 — the shared AC extractor (aid-ac-extract.sh) must not drop
 # continuation lines the way the two copy-pasted awk blocks in
 # aid-plan-to-epic.sh did (flush-left-only bullet match truncated every

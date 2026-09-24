@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # _aid_lc_sync_checkout_of — a ref moved by plumbing must not leave the
 # checkout that has the branch out at the pre-write state (WAN P099 #20:
 # two one-file commits silently reverted a plan merge).

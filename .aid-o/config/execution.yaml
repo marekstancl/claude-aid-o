@@ -243,7 +243,11 @@ gates:
     max_retries: 0
 
   tier_lint:
-    command: "bash plugins/aid-orchestrator/scripts/aid-test-tier-lint.sh"
+    # Reads the nightly journal: the live measurements, and with them the
+    # T0/T1 budget check that keeps the merge path in its norm (2026-09-24).
+    # The local .aid-o/work journal stopped on 2026-08-14.
+    # A host without the journal fails here, never passes on zero measurements.
+    command: "bash -c 'j=/opt/eco/data/aid-nightly/aid-orchestrator; [ -s \"$j/test-durations.jsonl\" ] || { echo \"tier_lint: no nightly journal at $j\" >&2; exit 1; }; AID_DURATIONS_DIR=$j bash plugins/aid-orchestrator/scripts/aid-test-tier-lint.sh'"
     required: true
     timeout_seconds: 120
     max_retries: 0

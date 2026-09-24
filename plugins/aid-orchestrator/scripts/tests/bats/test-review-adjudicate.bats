@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-review-adjudicate.bats — aid-review-adjudicate.sh on fixture rounds, for
 # every checkpoint. The CP1 cases of test-plan-review-adjudicate.bats run here
 # through the generic script with --namespace plan_review, asserting the

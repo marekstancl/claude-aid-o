@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-subagent-protocol-notice.bats — telling a role agent its protocol is
 # stale (P086 Step 10).
 #

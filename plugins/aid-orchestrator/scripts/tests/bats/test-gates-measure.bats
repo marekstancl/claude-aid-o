@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-gates-measure.bats — WHY THIS FILE EXISTS: gates-measure.sh is the
 # record every P097 removal cites, so its counting rules are pinned here over
 # a synthetic fixture tree (never the real projects): three reports in one

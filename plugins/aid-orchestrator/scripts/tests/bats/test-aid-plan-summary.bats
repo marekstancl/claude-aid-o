@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-aid-plan-summary.bats — the PM's page about a new plan (P084 Step 5).
 #
 # TESTABILITY BOUNDARY, STATED EXPLICITLY

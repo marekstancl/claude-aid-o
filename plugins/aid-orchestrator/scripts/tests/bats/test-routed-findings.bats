@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t2
+# aid-tier: t1
 # test-routed-findings.bats — P079 Step 7 (IMP-473): a review finding that no
 # authorized step may fix gets a recorded route, and done-advance refuses over
 # an open one.

@@ -274,15 +274,26 @@ Every test suite declares its tier in its leading comment block, once:
 
 | Tier | Cost per case | Whole-tier budget | When it runs |
 |------|---------------|-------------------|--------------|
-| `t0` | under 2 s     | under 2 min       | merge path (the pulse) |
-| `t1` | under 30 s    | under 10 min      | merge path — this is what blocks a merge |
+| `t0` | under 2 s     | T0 + T1 together under 10 min of real run | merge path (the pulse) |
+| `t1` | under 30 s    | (the lint holds the sums to 90 s + 390 s, leaving the runner's overhead) | merge path — this is what blocks a merge |
 | `t2` | more, **or cross-component at any cost** | none | nightly, 21:00 UTC = 23:00 Prague |
 
 Tier follows measured cost and scope — never importance, and never a wish to
 avoid blocking. `aid-test-tier-assign.sh` proposes from measurements and
 enforces the aggregate budgets by demoting; `aid-test-tier-lint.sh` enforces
 that every suite carries exactly one tag, that no filename carries a plan
-number, and that no tier is cheaper than its newest measurement supports.
+number, that no tier is cheaper than its newest measurement supports, and that
+the measured T0 and T1 suites fit their whole-tier budgets (`lib/aid-test-tier.sh`). That last check is
+the `tier_lint` gate of every plan here, reading the nightly journal
+(`/opt/eco/data/aid-nightly/aid-orchestrator/test-durations.jsonl`); when it
+fails, run `aid-test-tier-assign.sh` with `AID_DURATIONS_DIR` pointing there and
+restamp the tags it moves. Each suite was cheap on its own while the merge path
+grew from 17 to 42 minutes in a month (2026-08-20 to 09-23), because nothing
+checked the sum.
+
+`scripts/tests/tier-core.txt` is the core the budget never pushes off the merge
+path: the suites that guard what every plan runs through (PM, 2026-09-24).
+Every line there is minutes on every merge; the rest is chosen by cost.
 
 A tag and not a `tests/t0|t1|t2/` directory: directories were costed at ≈420
 literal path references (registry `test:` fields, catalog join keys, CI jobs,

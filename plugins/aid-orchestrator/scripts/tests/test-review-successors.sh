@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aid-tier: t0
+# aid-tier: t2
 # test-review-successors.sh — every registry id that P094 removed or retired
 # has a successor on record. Reads the id list of the registry at the commit
 # before the P094 branch (scripts/tests/fixtures/review-successors/

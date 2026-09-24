@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-brainstorm-opponent.bats — the second model in the room (P086 Step 8).
 #
 # THE GROUNDED FAILURE MODE: brainstorming was a monologue, and the only

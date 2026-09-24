@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-continuity-capsule.bats — surviving a compaction (P086 Step 5).
 #
 # THE GROUNDED FAILURE MODE: after a compaction a session's own bearings —

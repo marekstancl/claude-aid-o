@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # P083 Step 5 — a gate that appears in an active profile's include[] with no
 # `command:` is a configuration refusal, checked upfront (before any gate
 # runs), not the `skip/no_command` row it used to fall through to.

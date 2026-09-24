@@ -11,7 +11,7 @@
 # line by line and knows nothing about heredocs (IMP-494).
 #
 # Result count after any edit:
-#   bats --tap test-aid-test-tier-lint.bats | grep -cE '^(ok|not ok)'   # == 10
+#   bats --tap test-aid-test-tier-lint.bats | grep -cE '^(ok|not ok)'   # == 11
 
 load test-helpers.bash
 
@@ -149,4 +149,14 @@ _lint() { bash "$LINT" --tests-dir "$FIXTURE_TESTS" --allowlist "$ALLOWLIST" "$@
   [ "$status" -eq 0 ]
   [[ "$output" == *"UNVERIFIED"* ]]
   [[ "$output" == *"test-aid-test-durations.bats (t0)"* ]]
+}
+
+@test "11: tiers that are each affordable but OVER their summed budget are a violation" {
+  _tagged test-aid-test-tier.bats t1
+  _tagged test-aid-test-durations.bats t1
+  _measure test-aid-test-tier.bats 400000 40
+  _measure test-aid-test-durations.bats 300000 30
+  run _lint
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"T1 measures 700s in total, over its budget of 390s"* ]]
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aid-tier: t0
+# aid-tier: t2
 # test-execution-yaml-readers.sh — every key the execution.yaml composer writes
 # has a reader (P097 Step 4).
 #

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 #
 # Which TREE aid-evidence-verify.sh judges.
 #

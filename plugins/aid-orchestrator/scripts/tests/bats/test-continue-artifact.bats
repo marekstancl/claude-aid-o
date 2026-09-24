@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-continue-artifact.bats — P090 Step 4.
 #
 # The continuation runs inside a turn. When the turn ends some other way — lost

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-parallel-evidence.bats — two steps returning at once leave two evidence
 # directories and two commits, never one of either (P087 Step 2).
 #

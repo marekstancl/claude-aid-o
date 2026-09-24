@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-slug-nonascii.bats — a non-ASCII plan title must not reach a filename.
 #
 # WHY THIS SUITE EXISTS: P087 (2026-08-25) generated EPIC files named

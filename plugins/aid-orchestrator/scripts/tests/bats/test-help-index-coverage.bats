@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-help-index-coverage.bats — the enforcement half of AID's help inventory.
 #
 # WHAT IT ASSERTS: three artifacts have to agree, or a user cannot find a

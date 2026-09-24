@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aid-tier: t2
+# aid-tier: t1
 # =============================================================================
 # test-epic-to-json.sh — Unit tests for aid-epic-to-json.sh
 #

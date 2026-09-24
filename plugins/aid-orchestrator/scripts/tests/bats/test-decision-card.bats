@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-decision-card.bats — the card that asks the PM for a decision (P086 Step 3).
 #
 # THE GROUNDED FAILURE MODE: skills/communication.md has carried card 2 as a

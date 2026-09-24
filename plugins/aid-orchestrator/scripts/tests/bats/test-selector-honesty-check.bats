@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t2
+# aid-tier: t0
 # test-selector-honesty-check.bats — P081 Step 9: gaps are detected, and never
 # manufactured.
 #
@@ -132,6 +132,9 @@ _gaps() { jq -c '.gaps' "$NIGHTLY_DIR/2026-08-10-selector-gaps.json"; }
   _artifact test-aid-fsm
   _merge plugins/aid-orchestrator/scripts/aid-fsm.sh
   unset AID_SELECT_TESTS
+  # The fixture repo stands in for the plugin's own; outside it the real
+  # selector is inactive by design (2.95.10) and answers nothing.
+  export AID_SELECT_TESTS_ASSUME_OWN_REPO=1
   run _check
   [ "$status" -eq 0 ]
   [ "$(_gaps)" = "[]" ]

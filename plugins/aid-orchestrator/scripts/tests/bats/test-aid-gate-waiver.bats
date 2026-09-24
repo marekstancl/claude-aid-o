@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # IMP-270 — Gate-scoped PM waiver.
 #
 # Three layers:

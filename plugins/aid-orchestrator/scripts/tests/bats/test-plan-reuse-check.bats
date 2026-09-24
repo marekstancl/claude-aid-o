@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-plan-reuse-check.bats — the `**Reuse check:**` field (P085 Steps 1-2).
 #
 # Two things are asserted, and they are different: the GRAMMAR of the field

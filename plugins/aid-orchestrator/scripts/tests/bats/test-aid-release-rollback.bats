@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # P083 Step 3 — a rolled-back release must leave no file on the new version.
 # Exercises the FALLBACK bookkeeping path explicitly (no .aid-o/config/
 # project.yaml): that file is gitignored, so any clone or worktree — where

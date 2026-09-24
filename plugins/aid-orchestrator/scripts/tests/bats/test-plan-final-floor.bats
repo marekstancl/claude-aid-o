@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # The plan-final gate floor is bounded by the resolved profile (WAN #14) and a
 # plan with no verification_pattern owes plan_diff nothing (WAN #15).
 

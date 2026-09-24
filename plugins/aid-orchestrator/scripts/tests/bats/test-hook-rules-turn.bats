@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-hook-rules-turn.bats — a turn does not end on a half-done step, and a
 # write outside the step's paths is named before it lands (P087 Step 5).
 #

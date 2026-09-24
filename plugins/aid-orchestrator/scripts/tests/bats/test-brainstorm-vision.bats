@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-brainstorm-vision.bats — the vision step of a brainstorm (P086 Step 7).
 #
 # THE GROUNDED FAILURE MODE: "agree the shared boundaries before designing" as

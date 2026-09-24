@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 #
 # epic-start reads the run id; it does not invent one.
 #

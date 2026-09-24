@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # P083 Step 1 — fsm_check_streamlined_integration_review accepts the gates
 # report at either the canonical gates/ subdirectory (the EPIC-stage writer's
 # path, and every other reader's) or the legacy flat sibling (still written

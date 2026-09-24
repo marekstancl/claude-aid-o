@@ -1,0 +1,11 @@
+# The core of the merge path (scripts/aid-test-tier-assign.sh): suites the T1
+# budget never demotes, because every plan runs through what they guard.
+# PM, 2026-09-24. Keep it short: every line here is seconds on every merge,
+# and the whole merge path has 10 minutes. test-review-round.bats (6 min on
+# its own) runs nightly; the review flow keeps its cheaper guards here.
+test-aid-fsm.bats                # the EPIC state machine every run moves through
+test-review-round-fsm.bats       # a step cannot advance past an unclosed review round
+test-cp1-gate.bats               # generation refuses an unreviewed plan
+test-step-check.bats             # the step check every step review starts from
+test-dispatch-contract.bats      # what an agent is handed and must return
+test-queue-continuation.bats     # an autonomous run keeps going

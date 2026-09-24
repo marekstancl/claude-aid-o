@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-aid-test-adapter-bats.bats — P066 Step 2.
 #
 # Discovery against a fixture dir produces exactly one run_unit_id per FILE

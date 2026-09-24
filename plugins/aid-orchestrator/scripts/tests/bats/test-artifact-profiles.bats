@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-artifact-profiles.bats — a page must carry what its TYPE owes
 # (P089 Step 2).
 #

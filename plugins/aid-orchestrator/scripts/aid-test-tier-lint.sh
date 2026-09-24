@@ -20,6 +20,13 @@
 #      and the aggregate budgets both push suites upward, and a suite that is
 #      cheap but cross-component belongs in T2 on purpose.
 #
+#   4. WITHIN BUDGET — the measured suites tagged t0 sum to at most the T0
+#      budget and those tagged t1 to at most the T1 budget. Every suite was
+#      cheap enough on its own while the merge path grew from 17 to 42 minutes
+#      in a month (2026-08-20 to 09-23); the sum is what a merge waits for.
+#      The fix is aid-test-tier-assign.sh and a restamp, which keeps the core
+#      (tests/tier-core.txt) and sends the most expensive of the rest to T2.
+#
 # A suite with no measurement is reported UNVERIFIED and does not fail the
 # lint. The standard's rule is that measurement MOVES a tier; the absence of a
 # measurement is not evidence that a suite is cheap.
@@ -29,7 +36,7 @@
 #
 # Exit codes: 0 = clean, 1 = violations, 2 = usage.
 #
-# **Last Updated:** 2026-08-10
+# **Last Updated:** 2026-09-24
 # =============================================================================
 set -uo pipefail
 
@@ -58,16 +65,9 @@ done
 [[ -n "$TESTS_DIR" ]] || TESTS_DIR="$(aid_test_default_tests_dir)"
 [[ -n "$ALLOWLIST" ]] || ALLOWLIST="$TESTS_DIR/tier-lint-allowlist.txt"
 
-# The journal is probed ONCE, loudly. A per-suite read that returns "cannot
-# read this" would otherwise be indistinguishable from "never measured", and the
-# lint would report a corrupt journal as a clean, merely unverified tree.
-if ! aid_durations_readable; then
-  echo "aid-test-tier-lint: the durations journal cannot be read — refusing to report tiers as unverified when the real state is unknown" >&2
-  exit 2
-fi
-
 VIOLATIONS=()
 UNVERIFIED=()
+declare -A TIER_MS=()
 
 _violation() { VIOLATIONS+=("$1"); }
 _say() { [[ "$QUIET" -eq 1 ]] || echo "$*"; }
@@ -100,13 +100,14 @@ is_plan_numbered() {
 # aid-test-tier-assign.sh assigns from — this check is the floor under a tier
 # that tool proposed, so the two cannot be allowed to disagree. Cost half only:
 # scope and the aggregate budgets can push a tier UP, never down.
+# Prints "<tier> <duration_ms>" — the duration feeds the budget check.
+LATEST="$(aid_durations_latest_all)" || exit 2
 cost_tier() {
-  local rec
-  rec="$(aid_durations_latest_json "$1" 2>/dev/null)" || return 1
-  [[ "$(jq -r '.censored' <<<"$rec")" == "true" ]] && return 1
-  jq -r --argjson t0 "$AID_TIER_T0_MAX_MS" --argjson t1 "$AID_TIER_T1_MAX_MS" \
-     'if .cases > 0 then (.duration_ms / .cases) else .duration_ms end
-      | if . < $t0 then "t0" elif . < $t1 then "t1" else "t2" end' <<<"$rec"
+  jq -re --arg s "$1" --argjson t0 "$AID_TIER_T0_MAX_MS" --argjson t1 "$AID_TIER_T1_MAX_MS" \
+     '.[$s] // empty | select(.censored != true)
+      | .duration_ms as $ms
+      | (if .cases > 0 then (.duration_ms / .cases) else .duration_ms end)
+      | (if . < $t0 then "t0" elif . < $t1 then "t1" else "t2" end) + " \($ms | floor)"' <<<"$LATEST"
 }
 
 _tier_rank() { case "$1" in t0) echo 0 ;; t1) echo 1 ;; t2) echo 2 ;; *) echo -1 ;; esac; }
@@ -141,6 +142,8 @@ while IFS= read -r suite; do
 
   if [[ -n "$tier" ]]; then
     floor="$(cost_tier "$base")" || floor=""
+    ms="${floor#* }"; floor="${floor%% *}"
+    [[ -n "$floor" ]] && TIER_MS[$tier]=$(( ${TIER_MS[$tier]:-0} + ms ))
     if [[ -z "$floor" ]]; then
       UNVERIFIED+=("$base ($tier)")
     elif [[ "$(_tier_rank "$tier")" -lt "$(_tier_rank "$floor")" ]]; then
@@ -153,6 +156,13 @@ if [[ "$discovered" -eq 0 ]]; then
   echo "aid-test-tier-lint: no suites discovered under '$TESTS_DIR' — refusing to report a clean portfolio that was never read" >&2
   exit 2
 fi
+
+for _t in t0 t1; do
+  _b="AID_TIER_${_t^^}_BUDGET_MS"
+  if (( ${TIER_MS[$_t]:-0} > ${!_b} )); then
+    _violation "${_t^^} measures $(( ${TIER_MS[$_t]} / 1000 ))s in total, over its budget of $(( ${!_b} / 1000 ))s — run aid-test-tier-assign.sh and restamp the tags it moves"
+  fi
+done
 
 _say "aid-test-tier-lint: $discovered suite(s) checked in $TESTS_DIR"
 if [[ "${#UNVERIFIED[@]}" -gt 0 ]]; then

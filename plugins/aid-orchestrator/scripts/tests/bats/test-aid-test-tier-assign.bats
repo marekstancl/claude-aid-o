@@ -13,7 +13,7 @@
 # "everything is cheap", which is the state this whole plan exists to end.
 #
 # Result count after any edit:
-#   bats --tap test-aid-test-tier-assign.bats | grep -cE '^(ok|not ok)'   # == 8
+#   bats --tap test-aid-test-tier-assign.bats | grep -cE '^(ok|not ok)'   # == 11
 
 load test-helpers.bash
 
@@ -141,4 +141,34 @@ _tier_of() { awk -F'\t' -v s="$2" '$1 == s { print $7 }' <<<"$1"; }
   [[ "$output" == *"| Suite | Runner |"* ]]
   [[ "$output" == *"test-host"* ]]
   [[ "$output" == *"T0: 1 suite(s), 1000 ms total"* ]]
+}
+
+@test "9: a suite named after its unit without the aid- prefix still resolves" {
+  _suite test-review-round.bats
+  _measure test-review-round.bats 100 1
+  run _assign
+  [ "$status" -eq 0 ]
+  [ "$(awk -F'\t' '$1 == "test-review-round.bats" { print $3 }' <<<"$output")" = "scripts/aid-review-round.sh" ]
+}
+
+@test "10: a core suite stays on the merge path; the budget demotes the next most expensive" {
+  _suite test-review-round.bats
+  _suite test-review-config.bats
+  _measure test-review-round.bats  300000 100   # 3 s/case, the bigger one
+  _measure test-review-config.bats 200000 10    # 20 s/case
+  printf 'test-review-round.bats  # core\n' > "$FIXTURE_TESTS/tier-core.txt"
+  run _assign
+  [ "$status" -eq 0 ]
+  [ "$(_tier_of "$output" test-review-round.bats)" = "t1" ]
+  [ "$(_tier_of "$output" test-review-config.bats)" = "t2" ]
+  [[ "$output" == *"(core, pinned)"* ]]
+}
+
+@test "11: a core that alone exceeds the T1 budget is refused, naming the core file" {
+  _suite test-review-round.bats
+  _measure test-review-round.bats 500000 100
+  printf 'test-review-round.bats\n' > "$FIXTURE_TESTS/tier-core.txt"
+  run _assign
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"alone exceeds the T1 budget"* ]]
 }

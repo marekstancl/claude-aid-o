@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 #   MEASURED, not wished: each case runs the real artifact renderer, whose
 #   secret scan costs ~2.5s per render — above the t0 per-case ceiling. Tier
 #   follows the measurement, never the preference; it stays on the merge path.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-review-round.bats — aid-review-round.sh on small fixture trees, for every
 # checkpoint. The CP1 cases of test-plan-review-round.bats run here through the
 # generic engine (the plan passed as before); then the step cases: a round from

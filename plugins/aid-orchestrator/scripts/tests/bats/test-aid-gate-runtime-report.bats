@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-aid-gate-runtime-report.bats — P097 Step 5: aid-gate-runtime-report.sh
 # prints the proposed `timeout_seconds` (from gates_rows history, through the
 # library's `propose`) next to the configured one, per gate, and never writes.

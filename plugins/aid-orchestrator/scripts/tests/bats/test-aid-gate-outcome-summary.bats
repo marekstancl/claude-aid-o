@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-aid-gate-outcome-summary.bats — the gate-boundary card (P080 Step 11;
 # card only since P099 Step 4: a gate run owes the PM no page).
 #

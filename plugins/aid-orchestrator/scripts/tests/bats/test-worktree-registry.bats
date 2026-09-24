@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-worktree-registry.bats — a plan's execution worktree is recorded when
 # it is made, cleared when the plan finishes, and after a crash the record
 # outlives the tree and OFFERS a cleanup that nothing performs (P087 Step 7).

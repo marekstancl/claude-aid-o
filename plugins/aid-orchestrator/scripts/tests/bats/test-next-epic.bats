@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-next-epic.bats — P090 Step 2.
 #
 # `next-epic` is the READ half of the queue split as an operator/controller

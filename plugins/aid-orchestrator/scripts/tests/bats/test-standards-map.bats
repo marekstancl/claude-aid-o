@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-standards-map.bats — deriving ecosystem standards from a plan's paths
 # (P085 Step 4).
 #
