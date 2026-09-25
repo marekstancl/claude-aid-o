@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.107.1
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.108.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.107.1** (current) — administrativní uzavření ručně sloučeného plánu vydá potvrzenku (P101 → P102 odblokováno)
+- **v2.108.0** (current) — `/aid-ui` umí vizi a slogany, identitu, SEO a obrázkové komposice pod bránou PM; stránka značky má skutečné kapitoly (IMP-663)
+- **v2.107.1** — administrativní uzavření ručně sloučeného plánu vydá potvrzenku (P101 → P102 odblokováno)
 - **v2.107.0** — mantinely místo slepých uliček: každé odmítnutí jmenuje příkaz, který pokračuje; revizní kola bez slepých uliček a spor k PM; autor plánu pouští kontrolu generování; rozsah, kandidát a uzavření plánu pokrývají, co kroky legitimně dělají
 - **v2.106.0** — nový příkaz `/aid-ui` pro návrh vzhledu s PM
 - **v2.105.2** — noční běh celý zelený
