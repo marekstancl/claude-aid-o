@@ -23,7 +23,8 @@ zamítnuté návrhy s důvodem PM, `$IMP` (`SKILL.md` Start).
 1. Surface brief: `"$IMP" context --target <route>` vrací `surfaceBriefPath`;
    jinak `.impeccable/surfaces/<slug>.md` ve tvaru existujících briefů. Zapiš
    do něj směrové zadání: vybrané vzory a co z nich převzít, vytažené styly,
-   brand, anti-reference (zamítnuté návrhy + důvod PM) a větu
+   brand, anti-reference (zamítnuté návrhy + důvod PM), při `choices.pages`
+   potvrzený seznam stránek a hlavní H1 z `docs/seo/brief.md`, a větu
    „PM vyžaduje výslovný výběr směru; bez odpovědi PM se nepokračuje."
    `aid-ui-state.sh set <project> impeccable.surface_brief '"<cesta>"'`.
 2. Skill `impeccable` new-work s `IMPECCABLE_QUESTION_FORCE=1`; řekni mu:

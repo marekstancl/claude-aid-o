@@ -91,3 +91,9 @@ postup_first() { awk '/^## Postup/{f=1; next} f && NF {print; exit}' "$1"; }
     grep -qF -- "$s" "$SK/steps/1i-identity.md" || { echo "missing: $s"; return 1; }
   done
 }
+
+@test "1s-seo.md takes the pages through await-choice and writes seo through body; 3-direction.md names choices.pages" {
+  grep -qF 'await-choice <project> --kind pages --screen' "$SK/steps/1s-seo.md"
+  grep -qF 'aid-ui-state.sh body <project> seo' "$SK/steps/1s-seo.md"
+  grep -qF 'choices.pages' "$SK/steps/3-direction.md"
+}

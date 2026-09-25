@@ -23,6 +23,8 @@ přebírá postavený vzhled.
    (otevřené kolo: znovu otevři to kolo).
 2. Skill `impeccable` new-work, pokračuj ze zamčeného `## Direction contract`.
    Fáze 1 je code-led, kompoziční kolo neběží; kdyby běželo, platí MUST 1.
+   Při `choices.pages` postav každou potvrzenou stránku; title, meta
+   description, H1 a strukturovaná data ber z `docs/seo/brief.md`.
 3. Dokumentátor Impeccable zapíše `DESIGN.md`.
 4. `aid-ui-design-to-css.sh DESIGN.md docs/brand/tokens.css`.
    Písma projektu: `aid-ui-state.sh fonts <project> <URL Google Fonts>`
