@@ -177,6 +177,8 @@ case "$1" in
     dir="$(realpath -e "$2" 2>/dev/null || true)"
     [[ "$dir" == */docs/brand && -f "$dir/index.html" && -f "$dir/tokens.css" ]] \
       || refuse "$2 is not a brand page (needs <project>/docs/brand with index.html and tokens.css); refusing to serve it"
+    l="$(find "$dir" -mindepth 1 -type l -printf '%P' -quit)"
+    [[ -z "$l" ]] || refuse "$dir/$l is a symlink; the brand page serves no symlinks (it could point outside docs/brand)"
     while IFS= read -r -d '' f; do
       case "$f" in
         state.json|*/state.json|*.tmp|*.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;;

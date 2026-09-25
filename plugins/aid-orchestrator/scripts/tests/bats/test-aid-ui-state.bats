@@ -226,6 +226,19 @@ record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq
   [ "$status" -eq 2 ]
 }
 
+@test "body refuses an entity-encoded, split or vbscript/data URL scheme" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in '<a href="jav&#x61;script:alert(1)">a</a>' '<a href="&#106;avascript:alert(1)">a</a>' \
+             $'<a href="java\tscript:alert(1)">a</a>' '<a href="javascript&colon;alert(1)">a</a>' \
+             '<a href="vbscript:x">a</a>' '<a href="&#100;ata:text/html,x">a</a>'; do
+    printf '%s\n' "$bad" > "$BATS_TEST_TMPDIR/bad.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+    [ "$status" -eq 1 ]
+    [[ "$output" == ERROR:*vize*refused* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+}
+
 @test "a later chapter call leaves a written body byte-identical" {
   printf '<div class="swatch">a</div>\n<p class="note">b</p>\n' > "$BATS_TEST_TMPDIR/b.html"
   "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/b.html"
@@ -294,6 +307,15 @@ p101_project() {
   [ "$(jq .step "$PROJ/.aid-ui/state.json.migrated")" = 1 ]
 }
 
+@test "init with the new file, no index.html and an old state.json moves the old file" {
+  rm -rf "$PROJ/.aid-ui" "$HTML"
+  echo '{"step": 1}' > "$PROJ/docs/brand/state.json"
+  run "$SCRIPT" init "$PROJ"
+  [ "$status" -eq 0 ]
+  [ ! -e "$PROJ/docs/brand/state.json" ]
+  [ "$(jq .step "$PROJ/.aid-ui/state.json.migrated")" = 1 ]
+}
+
 @test "fonts refuses foreign hosts and paths outside docs/brand/fonts; writes a Google Fonts link idempotently" {
   cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
   for bad in https://evil.example/ https://fonts.googleapis.com.evil.example/css http://fonts.googleapis.com/css \
@@ -358,7 +380,7 @@ EOS
   chmod +x "$BATS_TEST_TMPDIR/bin/curl"
   export PATH="$BATS_TEST_TMPDIR/bin:$PATH" STUB_CONFIRM=""
 }
-choice() { run "$SCRIPT" await-choice "$PROJ" --kind "$1" --screen "$2" --page-url http://10.20.20.22:3916/; }
+choice() { run "$SCRIPT" await-choice "$PROJ" --kind "$1" --screen "$2" --page-url http://localhost:3916/; }
 confirm() { STUB_CONFIRM="{\"screen\":\"$1\",\"selected\":$2,\"at\":\"$3\"${4:+,\"text\":\"$4\"}}"; }
 NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
 
@@ -383,7 +405,7 @@ NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
   choice slogan slogan-1.html
   [ "$status" -eq 0 ]
   [ "$(jq '[.decisions[] | select(.what | startswith("slogan"))] | length' "$STATE")" = 1 ]
-  [ "$(sort -u "$BATS_TEST_TMPDIR/curl.log")" = "http://10.20.20.22:3916/aid/confirmed?screen=slogan-1.html" ]
+  [ "$(sort -u "$BATS_TEST_TMPDIR/curl.log")" = "http://localhost:3916/aid/confirmed?screen=slogan-1.html" ]
   [ ! -e "$PROJ/.aid-o/work/companion" ]
 }
 
@@ -429,11 +451,31 @@ NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
   [ "$(jq -r .choice_pending.key_or_screen "$STATE")" = slogan-2.html ]
 }
 
+@test "await-choice: --page-url other than this machine's http server exit 2, nothing asked" {
+  curl_stub
+  for u in http://evil.example/ -K/etc/passwd https://localhost:3916/ http://localhost.evil.example/; do
+    run "$SCRIPT" await-choice "$PROJ" --kind slogan --screen slogan-1.html --page-url "$u"
+    [ "$status" -eq 2 ]
+  done
+  [ ! -e "$BATS_TEST_TMPDIR/curl.log" ]
+  [ "$(jq .choice_pending "$STATE")" = null ]
+}
+
+@test "await-choice composition: another kind's open round refuses exit 1, Impeccable never asked" {
+  curl_stub
+  choice slogan slogan-1.html
+  run "$SCRIPT" await-choice "$PROJ" --kind composition --imp "$IMP" --key k1 --page-url http://10.20.20.22:3915/
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"slogan round is still open on slogan-1.html"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/calls" ]
+  [ "$(jq -r .choice_pending.kind "$STATE")" = slogan ]
+}
+
 @test "await-choice: unreachable server and malformed answer record nothing; bad screen name exit 2" {
   mkdir -p "$BATS_TEST_TMPDIR/bin"; printf '#!/usr/bin/env bash\nexit 7\n' > "$BATS_TEST_TMPDIR/bin/curl"; chmod +x "$BATS_TEST_TMPDIR/bin/curl"
   PATH="$BATS_TEST_TMPDIR/bin:$PATH" choice logo logo-1.html
   [ "$status" -eq 1 ]
-  [[ "$output" == *unreachable*"http://10.20.20.22:3916/"* ]]
+  [[ "$output" == *unreachable*"http://localhost:3916/"* ]]
   curl_stub
   STUB_CONFIRM='not json'
   choice logo logo-1.html

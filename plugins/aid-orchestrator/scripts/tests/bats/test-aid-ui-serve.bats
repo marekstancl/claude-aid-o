@@ -215,6 +215,16 @@ HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
   [ "$status" -eq 0 ]
 }
 
+@test "brand of a folder holding a symlink: exit 2 naming it, nothing served" {
+  mkdir -p "$BRAND/assets"
+  echo secret > "$BATS_TEST_TMPDIR/secret"
+  ln -s "$BATS_TEST_TMPDIR/secret" "$BRAND/assets/x.png"
+  run "$SERVE" brand "$BRAND"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$BRAND/assets/x.png is a symlink"* ]]
+  run get 39916; [ "$status" -ne 0 ]
+}
+
 @test "brand of another directory while one is served: restarts on the new one" {
   "$SERVE" brand "$BRAND"
   run "$SERVE" brand "$BRAND2"

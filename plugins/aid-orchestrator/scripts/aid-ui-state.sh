@@ -21,7 +21,8 @@
 #       caller supplies: the answer only ever comes from Impeccable's stdout.
 #   await-choice <project> --kind <slogan|logo|pages> --screen <kind>-<n>.html --page-url <url>
 #       a PM choice on a companion page, taken only from the page server's memory
-#       (GET <url>/aid/confirmed?screen=<file>), never from .events or a file. Opens
+#       (GET <url>/aid/confirmed?screen=<file>), never from .events or a file; <url>
+#       must be http://localhost|127.0.0.1|[::1][:port]/ (else exit 2). Opens
 #       choice_pending first (a re-run of the same round keeps its time); accepts
 #       only a confirm newer than that record; records choices.<kind> + the answer
 #       under .aid-ui/ with its hash. No confirm, older confirm, zero cards (slogan
@@ -104,8 +105,13 @@ if mode == "status":
 elif mode == "body":
     cid, src = args
     body = open(src, encoding="utf-8").read()
-    bad = re.search(r'<script|<iframe|<object|<embed|</?section|javascript:|class\s*=\s*["\']?status'
-                    r'|<!--\s*/?(body|status|fonts)|<[^>]*[\s/]on[a-z]+\s*=', body, re.I)
+    pat = (r'<script|<iframe|<object|<embed|</?section|javascript:|class\s*=\s*["\']?status'
+           r'|<!--\s*/?(body|status|fonts)|<[^>]*[\s/]on[a-z]+\s*=')
+    # The browser decodes entities and drops whitespace/control chars inside a URL
+    # scheme (jav&#x61;script:, java<TAB>script:), so check the decoded text too.
+    decoded = re.sub(r'[\x00-\x20\x7f]+', '', html.unescape(body))
+    bad = (re.search(pat, body, re.I) or re.search(pat, decoded, re.I)
+           or re.search(r'=["\'`]?(vbscript|data):', decoded, re.I))
     if bad:
         fail("body of section %s refused: %s contains %r" % (cid, src, bad.group(0)[-40:]))
     text = between(text, cid, "body", body)
@@ -221,6 +227,7 @@ impeccable_round() {
   IMP="$(opt imp "$@")"; KEY="$(opt key "$@")"; URL="$(opt page-url "$@")"
   [[ -n "$IMP" && -n "$KEY" && -n "$URL" ]] || usage "await-$kind needs --imp --key --page-url"
   [[ "$IMP" == */* ]] && IMP="$(realpath -m "$IMP")"   # a relative CLI path survives the cd below
+  [[ "$kind" == direction ]] || refuse_other_pending "$kind"
   if [[ "$kind" == direction ]]; then jq_write --arg k "$KEY" --arg u "$URL" '.direction_pending = {key: $k, page_url: $u}'
   else jq_write --arg k "$KEY" --arg u "$URL" --arg at "$(now)" '.choice_pending = {kind: "composition", key_or_screen: $k, page_url: $u, at: $at}'
   fi
@@ -253,6 +260,15 @@ impeccable_round() {
   echo "${kind^^}: $OPT"
 }
 
+# refuse_other_pending <kind> — another kind's open round is never dropped;
+# a new round of the same kind replaces the old one.
+refuse_other_pending() {
+  local pending
+  pending="$(jq -r '.choice_pending | if . then "\(.kind) \(.key_or_screen)" else "" end' "$STATE")"
+  [[ -z "$pending" || "${pending%% *}" == "$1" ]] ||
+    die "a ${pending%% *} round is still open on ${pending#* }; answer it before a $1 round"
+}
+
 # companion_choice <slogan|logo|pages> <args...> — see await-choice in the header.
 companion_choice() {
   local kind="$1"; shift
@@ -263,16 +279,17 @@ companion_choice() {
   if [[ "$(jq -r --arg k "$kind" '.choices[$k].screen // empty' "$STATE")" == "$screen" ]]; then
     echo "CHOICE $kind: already recorded from $screen"; return 0
   fi
+  # Only the companion server on this machine answers (not a page the agent could serve).
+  [[ "$url" =~ ^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/.*)?$ ]] ||
+    usage "--page-url must be http://localhost|127.0.0.1|[::1][:port]/ (the companion server on this machine): $url"
+  refuse_other_pending "$kind"
   pending="$(jq -r '.choice_pending | if . then "\(.kind) \(.key_or_screen)" else "" end' "$STATE")"
-  # Another kind's open round is never dropped; a new round of the same kind replaces the old one.
-  [[ -z "$pending" || "${pending%% *}" == "$kind" ]] ||
-    die "a ${pending%% *} round is still open on ${pending#* }; answer it before a $kind round"
   if [[ "$pending" != "$kind $screen" ]]; then
     jq_write --arg k "$kind" --arg s "$screen" --arg u "$url" --arg at "$(now)" \
       '.choice_pending = {kind: $k, key_or_screen: $s, page_url: $u, at: $at}'
   fi
   since="$(jq -r '.choice_pending.at' "$STATE")"
-  rc=0; ans="$(curl -fsS --max-time 10 "${url%/}/aid/confirmed?screen=$screen")" || rc=$?
+  rc=0; ans="$(curl -fsS --max-time 10 -- "${url%/}/aid/confirmed?screen=$screen")" || rc=$?
   [[ "$rc" -ne 22 ]] || die "no confirm on $screen yet; the round stays open: $url"
   [[ "$rc" -eq 0 ]] || die "companion server unreachable (curl exit $rc); the round stays open: $url"
   ans="$(jq -ec --arg s "$screen" 'select(type == "object" and .screen == $s and (.at | type) == "string"
@@ -318,6 +335,7 @@ case "$VERB" in
     fi
     if [[ -f "$HTML" ]]; then html_edit upgrade $CHAPTERS; fi
     if [[ -f "$OLD" ]]; then
+      mkdir -p "$PROJECT/.aid-ui"
       mv "$OLD" "$PROJECT/.aid-ui/state.json.migrated"   # out of the served folder
       echo "old $OLD moved to .aid-ui/state.json.migrated"
     fi
