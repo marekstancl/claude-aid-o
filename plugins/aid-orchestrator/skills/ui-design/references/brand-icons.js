@@ -5,15 +5,18 @@
 // constants below, then call browser_run_code_unsafe with `filename` pointing at the
 // copy. The tool calls the function with `page` only.
 // Never paste SVG markup into this file. The MCP sandbox has no Node API (no require,
-// process or dynamic import, only `page`), so the snippet can reach a file only by
-// opening it in the browser (file://), where the SVG runs as a live document. So it
-// opens ONLY files named *.checked.svg, the output of
+// process or dynamic import, only `page`), so the snippet reads each file through a
+// Playwright route: http://svg.local/<name> is fulfilled from the file as text/plain
+// and fetched as a string from an empty routed page. The SVG is never navigated to
+// (never a live document); it is rendered only as a data: URL in <img>, where an SVG
+// runs no script and loads nothing. Defence in depth: only files named *.checked.svg
+// are read, the output of
 //   python3 aid-ui-ico.py --check-svg <symbol.svg> <symbol.checked.svg>
-// which writes that name only for an SVG that passed the shape allowlist (no script,
-// event handler, DOCTYPE, remote reference). Any other name is refused before the
-// first navigation. Each path must be a plain absolute path matching
-// ^/[A-Za-z0-9._/-]+$ (no quotes, backticks, `${`, spaces or newlines); the snippet
-// re-checks and refuses anything else.
+// (the shape allowlist: no script, event handler, DOCTYPE, remote reference). The
+// sandbox cannot see whether a path is a symlink or a renamed unchecked file, so the
+// name gate is not a guarantee; the <img>-only rendering is. Each path must be a
+// plain absolute path matching ^/[A-Za-z0-9._/-]+$ (no quotes, backticks, `${`,
+// spaces or newlines); the snippet re-checks and refuses anything else.
 //
 // Writes into OUT: favicon-16/32/48.png, apple-touch-icon.png (180), icon-192.png,
 // icon-512.png, icon-maskable-512.png (mark inset to a 60 % safe zone, 20 % padding
@@ -34,12 +37,22 @@ async (page) => {
   for (const p of [SYMBOL_FILE, MICRO_FILE].filter(Boolean)) {
     if (!p.endsWith('.checked.svg')) throw new Error('refused: not a .checked.svg from aid-ui-ico.py --check-svg: ' + p);
   }
-  const read = async (file) => {
-    await page.goto('file://' + file);
-    return page.evaluate(() => document.documentElement.outerHTML);
-  };
-  const SYMBOL_SVG = await read(SYMBOL_FILE);
-  const MICRO_SVG = MICRO_FILE ? await read(MICRO_FILE) : '';
+  // Read as inert text: route, empty same-origin page, fetch(). Never goto the SVG.
+  const FILES = { '/symbol': SYMBOL_FILE, '/micro': MICRO_FILE };
+  const ORIGIN = 'http://svg.local';
+  await page.route(ORIGIN + '/**', (route) => {
+    const path = route.request().url().slice(ORIGIN.length);
+    return Object.hasOwn(FILES, path) && FILES[path]
+      ? route.fulfill({ path: FILES[path], contentType: 'text/plain' })
+      : route.fulfill({ body: '', contentType: 'text/html' });
+  });
+  await page.goto(ORIGIN + '/blank.html');
+  const read = (name) => page.evaluate((u) => fetch(u).then((r) => {
+    if (!r.ok) throw new Error('refused: could not read ' + u + ' (' + r.status + ')');
+    return r.text();
+  }), ORIGIN + '/' + name);
+  const SYMBOL_SVG = await read('symbol');
+  const MICRO_SVG = MICRO_FILE ? await read('micro') : '';
 
   for (const svg of [SYMBOL_SVG, MICRO_SVG].filter(Boolean)) {
     const vb = /viewBox\s*=\s*["']\s*([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)/.exec(svg);
@@ -61,7 +74,6 @@ async (page) => {
     return file;
   };
 
-  await page.goto('about:blank'); // setContent needs an HTML document, not the SVG one
   const small = MICRO_SVG || SYMBOL_SVG;
   const written = [
     await render(small, 16, 'favicon-16.png'),

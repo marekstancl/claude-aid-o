@@ -159,27 +159,44 @@ SVG
   run python3 "$ICO" --check-svg "$T/ok.svg" "$T/ok.checked.svg"
   [ "$status" -eq 0 ]
   cmp "$T/ok.svg" "$T/ok.checked.svg"
+  echo keep > "$T/target"; ln -s "$T/target" "$T/ok.checked.svg.tmp"   # the old predictable temp name
+  rm "$T/ok.checked.svg"; ln -s "$T/target" "$T/ok.checked.svg"        # and <out> itself as a symlink
+  run python3 "$ICO" --check-svg "$T/ok.svg" "$T/ok.checked.svg"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$T/target")" = keep ]; [ ! -L "$T/ok.checked.svg" ]; cmp "$T/ok.svg" "$T/ok.checked.svg"
+  [ -z "$(ls "$T" | grep -vxE 'bad.svg|ok.svg|ok.checked.svg|ok.checked.svg.tmp|target')" ]
   run python3 "$ICO" --check-svg "$T/ok.svg" "$T/ok.svg.out"   # output name must end in .checked.svg
   [ "$status" -eq 2 ]; [ ! -e "$T/ok.svg.out" ]
 }
 
 # run_icons <symbol> <out> — runs references/brand-icons.js in a node vm whose only global
-# is a stub page (no require, process or import, as in the Playwright MCP sandbox): goto
-# file:// reads the file and prints "GOTO <url>", screenshot() writes a PNG header of the
-# viewport size.
+# is a stub page (no require, process or import, as in the Playwright MCP sandbox).
+# route() stores handlers; goto() prints "GOTO <url>" and fails unless a route serves it;
+# evaluate(fn, url) stands in for fetch(url) through the routes; setContent() prints
+# LIVE-SVG when SVG markup or an event handler appears outside an encoded data: URL;
+# screenshot() writes a PNG header of the viewport size.
 run_icons() {
   command -v node >/dev/null || skip "node not installed"
   sed -e "s|__ABSOLUTE_SYMBOL_SVG__|$1|" -e "s|__ABSOLUTE_ICONS_DIR__|$2|" \
     "$BATS_TEST_DIRNAME/../../../skills/ui-design/references/brand-icons.js" > "$T/brand-icons.js"
   run node -e '
     const fs = require("fs"), vm = require("vm");
-    let doc = "", vp = null;
+    let vp = null;
+    const routes = [];
     const png = (n) => { const b = Buffer.alloc(24); Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").copy(b); b.writeUInt32BE(n.width, 16); b.writeUInt32BE(n.height, 20); return b; };
+    const serve = async (u) => {
+      const r = routes.find((r) => u.startsWith(r.glob.replace(/\*+$/, "")));
+      if (!r) throw new Error("unrouted " + u);
+      let res;
+      await r.fn({ request: () => ({ url: () => u }), fulfill: async (o) => { res = o; } });
+      return res.path ? fs.readFileSync(res.path, "utf8") : res.body;
+    };
     const page = {
-      goto: async (u) => { console.log("GOTO " + u); doc = u.startsWith("file://") ? fs.readFileSync(u.slice(7), "utf8") : ""; },
-      evaluate: async () => doc,
+      route: async (glob, fn) => { routes.push({ glob, fn }); },
+      goto: async (u) => { console.log("GOTO " + u); await serve(u); },
+      evaluate: async (fn, u) => serve(u),
       setViewportSize: async (v) => { vp = v; },
-      setContent: async () => {},
+      setContent: async (h) => { if (/<svg|<script|\bon[a-z]+\s*=/i.test(h)) console.log("LIVE-SVG"); },
       screenshot: async (o) => fs.writeFileSync(o.path, png(vp)),
     };
     const fn = vm.runInNewContext(fs.readFileSync(process.argv[1], "utf8"), { page });
@@ -200,6 +217,8 @@ run_icons() {
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ ! -e "$T/pwned" ]
   [[ "$output" == *"icon-maskable-512.png"* ]]
+  [ "$(grep '^GOTO ' <<<"$output")" = "GOTO http://svg.local/blank.html" ]
+  [[ "$output" != *LIVE-SVG* ]]
   ! grep -q '<svg' "$T/brand-icons.js"
   cp "$T/symbol.checked.svg" "$T/icons/favicon.svg"
   python3 "$ICO" "$T/icons/favicon.ico" "$T"/icons/favicon-{16,32,48}.png
@@ -216,6 +235,18 @@ run_icons() {
   [[ "$output" != *GOTO* ]]
   run python3 "$ICO" --check-svg "$T/symbol.svg" "$T/symbol.checked.svg"
   [ "$status" -eq 1 ]; [ ! -e "$T/symbol.checked.svg" ]
+}
+
+@test "brand-icons.js never navigates to the SVG: an onload SVG behind a .checked.svg name or symlink stays inert" {
+  mkdir -p "$T/icons"
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" onload="alert(1)"><script>alert(2)</script><rect/></svg>' > "$T/evil.svg"
+  cp "$T/evil.svg" "$T/renamed.checked.svg"; ln -s "$T/evil.svg" "$T/link.checked.svg"
+  for f in renamed link; do
+    run_icons "$T/$f.checked.svg" "$T/icons"
+    [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    [ "$(grep '^GOTO ' <<<"$output")" = "GOTO http://svg.local/blank.html" ]   # no file:, no svg URL
+    [[ "$output" != *LIVE-SVG* ]]   # the SVG reached the page only as an encoded <img> data: URL
+  done
 }
 
 @test "brand-icons.js refuses a path that is not plain absolute and a non-square viewBox" {

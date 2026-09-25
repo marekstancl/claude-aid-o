@@ -20,9 +20,9 @@ Exit: 0 ok, 1 refused / check failed, 2 usage. Python stdlib only.
 """
 import os
 import re
-import shutil
 import struct
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 
 PNG_SIG = b"\x89PNG\r\n\x1a\n"
@@ -88,13 +88,23 @@ def svg_depth(el, depth=1):
     return depth <= SVG_MAX_DEPTH and all(svg_depth(c, depth + 1) for c in el)
 
 
-def svg_problem(path):
-    """Why the SVG is unsafe or not square, or None when it is fine."""
+def read_svg(path):
+    """(bytes, None), or (None, why) when unreadable; reads at most SVG_MAX_BYTES + 1."""
     try:
         with open(path, "rb") as f:
-            raw = f.read(SVG_MAX_BYTES + 1)
+            return f.read(SVG_MAX_BYTES + 1), None
     except OSError as e:
-        return f"not readable ({e})"
+        return None, f"not readable ({e})"
+
+
+def svg_problem(path):
+    """Why the SVG file is unsafe or not square, or None when it is fine."""
+    raw, why = read_svg(path)
+    return why or svg_bytes_problem(raw)
+
+
+def svg_bytes_problem(raw):
+    """Why the SVG bytes are unsafe or not square, or None when they are fine."""
     if len(raw) > SVG_MAX_BYTES:
         return f"larger than {SVG_MAX_BYTES // 1024} KB"
     try:
@@ -195,19 +205,22 @@ def verify(d):
 
 
 def check_svg(src, out):
-    """Copy src to out only when the copy itself passes svg_problem (no check-then-copy race)."""
-    tmp = out + ".tmp"
-    try:
-        shutil.copyfile(src, tmp)
-    except OSError as e:
-        print(f"WRONG   {src} not readable ({e})")
-        return 1
-    problem = svg_problem(tmp)
+    """Write out only with the very bytes that passed; the temp file is mkstemp (0600,
+    O_EXCL, random name), so no existing file or symlink is ever followed."""
+    raw, problem = read_svg(src)
+    problem = problem or svg_bytes_problem(raw)
     if problem is not None:
-        os.remove(tmp)
         print(f"WRONG   {src} {problem}")
         return 1
-    os.replace(tmp, out)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(out)), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, out)
+    except BaseException:
+        os.unlink(tmp)
+        raise
     print(f"OK      {out}")
     return 0
 
