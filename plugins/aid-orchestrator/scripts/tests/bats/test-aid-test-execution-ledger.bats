@@ -10,6 +10,9 @@
 load test-helpers.bash
 
 setup() {
+  # The gate runner exports these when it escalates to a full run; the cases
+  # below assert the defaults, so they must not inherit them.
+  unset AID_EXECUTION_KIND AID_EXECUTION_LEDGER
   setup_test_evidence_dir
   PLUGIN_DIR="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   LEDGER="$PLUGIN_DIR/scripts/aid-test-execution-ledger.sh"

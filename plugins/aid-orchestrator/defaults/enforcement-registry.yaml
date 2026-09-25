@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 563          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 564          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4124,8 +4124,24 @@ enforcements:
     verdict: ALIGNED
     tier: t0
     enforcement_degree: 2
-    not_guaranteed: "That a session calls the script at all instead of editing state.json by hand. The answer is taken by the script from Impeccable's page server, not from a file the agent writes, but its origin is not proven beyond that."
-    description: "P101 Step 6 — /aid-ui never runs a step after the direction choice without the PM. aid-ui-state.sh refuses steps 4-6 while no PM answer is recorded, and the rule text in the skill says the same."
-    recovery: "The refusal names the missing answer. Let the PM choose on Impeccable's page, then run the step again."
-    test_covers: "the refusal of steps 4-6 without a recorded answer (test-aid-ui-state.bats) and the rule text (test-aid-ui-skill-rules.bats)."
+    not_guaranteed: "That a session calls the script at all instead of editing brand-state.json by hand. The direction and the composition comp are taken from Impeccable's serve-question output, the slogan, logo and page list from the companion server's memory (/aid/confirmed), never from a file the agent writes; their origin is not proven beyond that. A non-browser WebSocket client can send any Host/Origin, so a companion confirm proves a page answer only against a browser, not against a session that forges one."
+    description: "P101 Step 6, extended by P102 — /aid-ui never takes a PM choice without the PM: the direction (await-direction), the slogan, the logo concept, the page list and the composition comp (await-choice --kind slogan|logo|pages|composition). aid-ui-state.sh refuses steps 4-6 without a recorded direction, any step while a choice is pending, steps from 2 on while an enabled option (vision, identity, seo) has no recorded choice, and step 5 on the comp build path without a composition; the rule text in the skill says the same."
+    recovery: "The refusal names the missing answer. Let the PM choose on Impeccable's page or the companion page, then run the step again."
+    test_covers: "the refusal of steps 4-6 without a recorded direction, the await-choice rounds for slogan, logo, pages and composition (404, stale confirm, other kind open, localhost-only URL), the step gates on choice_pending and enabled options, and the build-path gate for step 5 (test-aid-ui-state.bats); the rule text naming every PM choice (test-aid-ui-skill-rules.bats)."
     test: "scripts/tests/bats/test-aid-ui-state.bats"
+
+  - id: aid_ui_brand_serves_nothing_internal
+    type: 12
+    source: "scripts/aid-ui-serve.sh (brand)"
+    instruction: "skills/ui-design/SKILL.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 1
+    not_guaranteed: "What the served files SAY: a chapter body or an image can still carry internal text the agent put there. The check covers the folder at start; a file added to docs/brand/ while the server runs is served until the next start."
+    description: "P102 — the brand page server serves only a real docs/brand/ folder (index.html and tokens.css, no symlink, not reached through one) holding only index.html, *.css, assets/ and fonts/, and refuses to start while it holds state.json, a leftover temp file or any other file; the state lives in docs/design/brand-state.json, outside what is served."
+    recovery: "The refusal names the file; move it out of docs/brand/ (state belongs in docs/design/brand-state.json, aid-ui-state.sh init migrates it) and start again."
+    test_covers: "brand of a folder holding state.json, a leftover temp file, a foreign file or a symlink, and of a folder outside docs/brand: exit 2, nothing served (test-aid-ui-serve.bats)."
+    test: "scripts/tests/bats/test-aid-ui-serve.bats"

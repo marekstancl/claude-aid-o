@@ -9,7 +9,11 @@ user_invocable: true
 Seven steps (0 start, 1 product, 2 references, 3 direction, 4 build,
 5 standard, 6 verify). The agent finds the references, the PM picks, Impeccable
 deals directions and the PM chooses one on Impeccable's page over the VPN.
-Steps 4-6 refuse to run without that recorded choice.
+Steps 4-6 refuse to run without that recorded choice. Step 0 offers four
+optional parts with a recommendation - vision and slogans, identity, SEO, image
+comps; vision, identity and SEO run inside step 1 (1v, 1i, 1s) before the
+references, and the SEO check joins step 6. Every PM choice in them (slogan,
+logo, page list, composition) is recorded the same way as the direction.
 
 ## Arguments
 
@@ -17,8 +21,8 @@ Steps 4-6 refuse to run without that recorded choice.
 /aid-ui [step]
 ```
 
-- **`step`** - `0`-`6`; default: continue from `<project>/docs/brand/state.json`
-  (no file → step 0). A jump goes through `aid-ui-state.sh step`, which refuses
+- **`step`** - `0`-`6`; default: continue from `<project>/docs/design/brand-state.json`
+  (no file → step 0). After step 6 the flow ends with `aid-ui-state.sh finish`. A jump goes through `aid-ui-state.sh step`, which refuses
   4-6 without a recorded direction and names step 3.
 
 ## What it does
@@ -29,17 +33,23 @@ Playwright MCP), routing to `skills/ui-design/steps/<n>-*.md`, MUST Rules.
 ## Reads / Writes
 
 - **Reads (target project):** `PRODUCT.md`, `DESIGN.md`, `.impeccable/`,
-  `docs/design/*brand-package*`, `docs/brand/state.json`; ecosystem standards
-  under `/opt/eco/docs/docs/ecosystem/`.
-- **Writes (target project):** `docs/brand/*` (`state.json` only through
-  `scripts/aid-ui-state.sh`), `.aid-ui/`, `.aid-o/work/companion/`,
-  `docs/design/design-standard.md`, `.gitignore`; Impeccable writes its own
-  `PRODUCT.md`, `DESIGN.md`, `.impeccable/`.
-- **Plugin scripts:** `aid-ui-design-to-css.sh`, `aid-ui-serve.sh`, `aid-ui-state.sh`.
+  `docs/design/*brand-package*`, `docs/design/brand-state.json`,
+  `docs/product-vision.md`, `docs/design/brief-logo-favicon.md`, `docs/seo/`;
+  ecosystem standards under `/opt/eco/docs/docs/ecosystem/`.
+- **Writes (target project):** `docs/design/brand-state.json`, chapter bodies and
+  statuses in `docs/brand/index.html` (both only through `scripts/aid-ui-state.sh`),
+  other `docs/brand/*`, `.aid-ui/`, `.aid-o/work/companion/`,
+  `docs/design/design-standard.md`, `docs/product-vision.md`,
+  `docs/design/brief-logo-favicon.md`, `docs/design/brand-package/`,
+  `docs/seo/`, `.gitignore`; Impeccable writes its own `PRODUCT.md`,
+  `DESIGN.md`, `.impeccable/`.
+- **Plugin scripts:** `aid-ui-design-to-css.sh`, `aid-ui-serve.sh`, `aid-ui-state.sh`,
+  `aid-ui-ico.py`, `aid-ui-seo-check.py`; `skills/ui-design/references/brand-icons.js`
+  (run through the Playwright MCP).
 
 ## Relationship
 
 Outside the FSM: no AID run, no EPIC, no gate. `/aid-run`, `/aid-plan` and
 `/aid-do` never call it.
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-09-25

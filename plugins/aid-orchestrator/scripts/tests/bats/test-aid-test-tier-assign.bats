@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # test-aid-test-tier-assign.bats — P081 Step 2: tiers come from the numbers.
 #
 # WHAT THIS SUITE PROVES: the four rules that make an assignment defensible —

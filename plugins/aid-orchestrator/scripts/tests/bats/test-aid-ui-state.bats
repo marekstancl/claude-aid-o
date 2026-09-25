@@ -3,6 +3,8 @@
 # P101 Step 5 — aid-ui-state.sh: the direction gate is code. A direction is
 # recorded only from Impeccable's own `serve-question --wait` output (a stub
 # CLI here); steps 4-6 refuse without it.
+# P102 Step 1: state in docs/design/brand-state.json, chapter bodies, fonts,
+# finish, migration from docs/brand/state.json.
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../aid-ui-state.sh"
@@ -11,7 +13,8 @@ setup() {
   mkdir -p "$PROJ/docs/brand"
   cp "$PAGE/index.html" "$PROJ/docs/brand/"
   "$SCRIPT" init "$PROJ" >/dev/null
-  STATE="$PROJ/docs/brand/state.json"
+  STATE="$PROJ/docs/design/brand-state.json"
+  HTML="$PROJ/docs/brand/index.html"
   # Stub Impeccable: first prints $STUB_WAITS times "exit 3", then $STUB_OUT with $STUB_RC.
   IMP="$BATS_TEST_TMPDIR/impeccable"
   cat > "$IMP" <<'EOF'
@@ -173,7 +176,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(jq -r .chapters.barvy.status "$STATE")" = schvaleno ]
   [ "$(jq -r .chapters.barvy.by "$STATE")" = PM ]
-  grep -q '<section id="barvy" data-status="schvaleno">.*<p class="status">[0-9-]* · PM</p>' "$PROJ/docs/brand/index.html"
+  grep -q '<section id="barvy" data-status="schvaleno">.*<p class="status"><!-- status:barvy -->[0-9-]* · PM<!-- /status:barvy --></p>' "$PROJ/docs/brand/index.html"
   grep -q '<section id="logo" data-status="ceka">' "$PROJ/docs/brand/index.html"
 }
 
@@ -191,4 +194,582 @@ EOF
   [ "$status" -eq 2 ]
   run "$SCRIPT" reset-approvals "$PROJ" nope
   [ "$status" -eq 2 ]
+}
+
+# --- P102 Step 1 -----------------------------------------------------------
+
+record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq 0 ]; }
+
+@test "body replaces only its section and is idempotent" {
+  echo '<p>Vize projektu</p>' > "$BATS_TEST_TMPDIR/b.html"
+  before_logo="$(grep -o '<section id="logo".*</section>' "$HTML")"
+  run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/b.html"
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize --><p>Vize projektu</p>' "$HTML"
+  [ "$(grep -o '<section id="logo".*</section>' "$HTML")" = "$before_logo" ]
+  cp "$HTML" "$BATS_TEST_TMPDIR/once.html"
+  "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/b.html"
+  cmp "$HTML" "$BATS_TEST_TMPDIR/once.html"
+  [ -z "$(ls -A "$PROJ/docs/brand" | grep -v '^index.html$')" ]
+}
+
+@test "body refuses script, onclick, section and a marker; unknown id exit 2" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in '<script>x()</script>' '<a href="#" onclick="x()">a</a>' '<section id="x"></section>' '<!-- status:logo -->'; do
+    printf '%s\n' "$bad" > "$BATS_TEST_TMPDIR/bad.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+    [ "$status" -eq 1 ]
+    [[ "$output" == ERROR:*vize* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  run "$SCRIPT" body "$PROJ" nope --file "$BATS_TEST_TMPDIR/bad.html"
+  [ "$status" -eq 2 ]
+}
+
+@test "body refuses an entity-encoded, split or vbscript/data URL scheme" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in '<a href="jav&#x61;script:alert(1)">a</a>' '<a href="&#106;avascript:alert(1)">a</a>' \
+             $'<a href="java\tscript:alert(1)">a</a>' '<a href="javascript&colon;alert(1)">a</a>' \
+             '<a href="vbscript:x">a</a>' '<a href="&#100;ata:text/html,x">a</a>'; do
+    printf '%s\n' "$bad" > "$BATS_TEST_TMPDIR/bad.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+    [ "$status" -eq 1 ]
+    [[ "$output" == ERROR:*vize*refused* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+}
+
+@test "body is an allowlist: glued handler, style, svg and an unfinished tag refused" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in '<img src="x"onerror="alert(1)">' '<p style="x">' '<svg onload=1>' \
+             '<img alt=">" onerror=1 ' '<p class="a status">' '<!DOCTYPE html>' \
+             '<span style="background:url(x)"></span>' '<p style="color:red">x</p>' \
+             '<p style="background: var(--x) ; behavior: y">x</p>'; do
+    printf '%s\n' "$bad" > "$BATS_TEST_TMPDIR/bad.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+    [ "$status" -eq 1 ]
+    [[ "$output" == ERROR:*"body of section vize refused"* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+}
+
+@test "body refuses a marker smuggled in an attribute; the next write leaves no handler" {
+  printf '%s\n' '<p title="<!-- /body:vize --><img src=x onerror=alert(1)>">x</p>' > "$BATS_TEST_TMPDIR/bad.html"
+  run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+  [ "$status" -eq 1 ]
+  [[ "$output" == ERROR:*"body of section vize refused"* ]]
+  echo '<p>ok</p>' > "$BATS_TEST_TMPDIR/ok.html"
+  run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/ok.html"
+  [ "$status" -eq 0 ]
+  ! grep -q onerror "$HTML" || false
+  # defence in depth: a page that already carries a duplicate end marker is not written
+  sed -i 's|<!-- /body:vize -->|&<!-- /body:vize -->|' "$HTML"
+  run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/ok.html"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"more than once"* ]]
+}
+
+@test "body refuses an end tag with attributes (parser/browser differential)" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in '<p>x</p a="> <p title="> <img src=x onerror=alert(1)> ">' \
+             "<p>x</p a='> <p title='> <img src=x onerror=alert(1)> '>" \
+             '<b>x</b title="><i title="><img src=x onerror=alert(1)>">'; do
+    printf '%s' "$bad" > "$BATS_TEST_TMPDIR/bad.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+    [ "$status" -eq 1 ]
+    [[ "$output" == ERROR:*"body of section vize refused"*"end tag"* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+}
+
+@test "body writes a re-serialization, not the raw input" {
+  printf '%s\n' '<P CLASS=lead>a &lt;script&gt; &amp; b < c<br/><a href="https://example.com?a=1&amp;b=2">x</a></P >' > "$BATS_TEST_TMPDIR/ok.html"
+  run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/ok.html"
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize --><p class="lead">a &lt;script&gt; &amp; b &lt; c<br><a href="https://example.com?a=1&amp;b=2">x</a></p>' "$HTML"
+}
+
+@test "body is written balanced; a stray end tag is refused" {
+  w() { printf '%s' "$1" > "$BATS_TEST_TMPDIR/b.html"; run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/b.html"; }
+  w '<div><table><tr><td>x'
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize --><div><table><tr><td>x</td></tr></table></div><!-- /body:vize -->' "$HTML"
+  w '<p/>x'
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize --><p></p>x<!-- /body:vize -->' "$HTML"
+  w '<p>a &#xZZ; <b>b</b></p>'
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize --><p>a &amp;#xZZ; <b>b</b></p><!-- /body:vize -->' "$HTML"
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  w '</div></div>'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unbalanced end tag </div>"* ]]
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+}
+
+@test "body refuses li/dt/dd outside their list; accepts proper lists" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in '<ul><li><div><li>x' '<ul><li><div><li>x</li></div></li></ul>' \
+             '<dl><dt><div><dt>x</dt></div></dt></dl>' '<dl><dd><div><dd>x' '<li>a<li>b'; do
+    printf '%s' "$bad" > "$BATS_TEST_TMPDIR/bad.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"refused"*"outside a"* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for ok in '<ul><li>a</li><li>b</li></ul>' '<dl><dt>a</dt><dd>b</dd></dl>'; do
+    printf '%s' "$ok" > "$BATS_TEST_TMPDIR/ok.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/ok.html"
+    [ "$status" -eq 0 ]
+    grep -qF "<!-- body:vize -->$ok<!-- /body:vize -->" "$HTML"
+  done
+}
+
+@test "body accepts allowed tags, safe links and a relative image" {
+  for ok in '<a href="https://example.com">ok</a>' '<img src="assets/logo.svg" alt="logo">' \
+            '<p>Text <strong>tučně</strong> a &lt;script&gt;</p>' \
+            '<span class="swatch" style="background: var(--color-primary)"></span>' \
+            '<p style="font-family: var(--font-display); font-size: var(--text-xl); font-weight: var(--weight-bold)">Aa</p>'; do
+    printf '%s\n' "$ok" > "$BATS_TEST_TMPDIR/ok.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/ok.html"
+    [ "$status" -eq 0 ]
+    grep -qF "<!-- body:vize -->$ok" "$HTML"
+  done
+}
+
+@test "a later chapter call leaves a written body byte-identical" {
+  printf '<div class="swatch">a</div>\n<p class="note">b</p>\n' > "$BATS_TEST_TMPDIR/b.html"
+  "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/b.html"
+  body() { sed -n '/<!-- body:barvy -->/,/<!-- \/body:barvy -->/p' "$HTML" | sed -e 's/.*<!-- body:barvy -->//' -e 's/<!-- \/body:barvy -->.*//'; }
+  b1="$(body)"
+  run "$SCRIPT" chapter "$PROJ" barvy schvaleno --by PM
+  [ "$status" -eq 0 ]
+  [ "$(body)" = "$b1" ]
+  grep -q '<section id="barvy" data-status="schvaleno">' "$HTML"
+}
+
+@test "body changed after schvaleno clears the approval; an identical body keeps it" {
+  echo '<p>a</p>' > "$BATS_TEST_TMPDIR/a.html"
+  echo '<p>b</p>' > "$BATS_TEST_TMPDIR/b.html"
+  "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/a.html"
+  "$SCRIPT" chapter "$PROJ" barvy schvaleno --by PM
+  run "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/a.html"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .chapters.barvy.status "$STATE")" = schvaleno ]
+  [[ "$output" != *"approval cleared"* ]]
+  run "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/b.html"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"approval cleared"* ]]
+  [ "$(jq -r .chapters.barvy.status "$STATE")" = navrh ]
+  [ "$(jq -r '.chapters.barvy.by // ""' "$STATE")" = "" ]
+  grep -q '<section id="barvy" data-status="navrh">' "$HTML"
+}
+
+@test "chapter vize accepted" {
+  run "$SCRIPT" chapter "$PROJ" vize navrh
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .chapters.vize.status "$STATE")" = navrh ]
+  grep -q '<section id="vize" data-status="navrh">' "$HTML"
+}
+
+# A P101 project: old state.json, old index.html without vize/seo and markers, a written body.
+p101_project() {
+  rm -rf "$PROJ"; mkdir -p "$PROJ/docs/brand"
+  git -C "$BATS_TEST_DIRNAME" show b095ba7f:plugins/aid-orchestrator/skills/ui-design/brand-page/index.html > "$HTML" 2>/dev/null \
+    || sed -e 's/<!-- \/\?\(body\|status\):[a-z]* -->//g' -e '/<!-- \/\?fonts -->/d' -e '/id="vize"\|id="seo"\|#vize\|#seo/d' "$PAGE/index.html" > "$HTML"
+  sed -i 's|<section id="barvy" data-status="ceka"><h2>Barvy</h2><p class="status"></p><div class="body"></div>|<section id="barvy" data-status="navrh"><h2>Barvy</h2><p class="status">2026-09-24</p><div class="body"><div class="swatch">x</div></div>|' "$HTML"
+  jq '.step = 2 | del(.chapters.vize, .chapters.seo, .options, .finished)' "$PAGE/state.template.json" > "$PROJ/docs/brand/state.json"
+}
+
+@test "init migrates an old state.json and index.html, keeps bodies" {
+  p101_project
+  ! grep -q 'id="vize"' "$HTML" || false
+  run "$SCRIPT" init "$PROJ"
+  [ "$status" -eq 0 ]
+  [ "$(jq .step "$STATE")" = 2 ]
+  [ "$(jq -r .chapters.seo.status "$STATE")" = ceka ]
+  [ "$(jq -c .options "$STATE")" = '{"vision":false,"identity":false,"seo":false,"images":false}' ]
+  [ ! -e "$PROJ/docs/brand/state.json" ]
+  [ -f "$PROJ/.aid-ui/state.json.migrated" ]
+  [ "$(grep -c '<section ' "$HTML")" -eq 11 ]
+  grep -qF '<div class="body"><!-- body:barvy --><div class="swatch">x</div><!-- /body:barvy --></div>' "$HTML"
+  grep -qF '<p class="status"><!-- status:barvy -->2026-09-24<!-- /status:barvy --></p>' "$HTML"
+  grep -qF '<!-- fonts -->' "$HTML"
+  grep -qF '<li><a href="#seo">SEO</a></li>' "$HTML"
+  cp "$HTML" "$BATS_TEST_TMPDIR/once.html"
+  "$SCRIPT" init "$PROJ"
+  cmp "$HTML" "$BATS_TEST_TMPDIR/once.html"
+}
+
+@test "retry after an interrupted migration (new file present, markers missing) adds the markers" {
+  p101_project
+  jq -s '.[0] * .[1]' "$PAGE/state.template.json" "$PROJ/docs/brand/state.json" > "$BATS_TEST_TMPDIR/new.json"
+  mkdir -p "$PROJ/docs/design"; mv "$BATS_TEST_TMPDIR/new.json" "$STATE"
+  rm "$PROJ/docs/brand/state.json"
+  run "$SCRIPT" init "$PROJ"
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize -->' "$HTML"
+  grep -qF '<!-- status:schvaleni -->' "$HTML"
+}
+
+@test "both files present: the new one wins, the old one is renamed" {
+  "$SCRIPT" step "$PROJ" 3
+  echo '{"step": 1}' > "$PROJ/docs/brand/state.json"
+  run "$SCRIPT" init "$PROJ"
+  [ "$status" -eq 0 ]
+  [ "$(jq .step "$STATE")" = 3 ]
+  [ ! -e "$PROJ/docs/brand/state.json" ]
+  [ "$(jq .step "$PROJ/.aid-ui/state.json.migrated")" = 1 ]
+}
+
+@test "init with the new file, no index.html and an old state.json moves the old file" {
+  rm -rf "$PROJ/.aid-ui" "$HTML"
+  echo '{"step": 1}' > "$PROJ/docs/brand/state.json"
+  run "$SCRIPT" init "$PROJ"
+  [ "$status" -eq 0 ]
+  [ ! -e "$PROJ/docs/brand/state.json" ]
+  [ "$(jq .step "$PROJ/.aid-ui/state.json.migrated")" = 1 ]
+}
+
+@test "fonts refuses foreign hosts and paths outside docs/brand/fonts; writes a Google Fonts link idempotently" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in https://evil.example/ https://fonts.googleapis.com.evil.example/css http://fonts.googleapis.com/css \
+             https://fonts.googleapis.com@evil.example/ docs/brand/tokens.css ../x.css; do
+    run "$SCRIPT" fonts "$PROJ" "$bad"
+    [ "$status" -eq 1 ]
+    [[ "$output" == ERROR:* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  url='https://fonts.googleapis.com/css2?family=Gloock&family=Inter:wght@400;700&display=swap'
+  run "$SCRIPT" fonts "$PROJ" "$url"
+  [ "$status" -eq 0 ]
+  "$SCRIPT" fonts "$PROJ" "$url"
+  [ "$(grep -c 'rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gloock&amp;family=Inter' "$HTML")" -eq 1 ]
+  mkdir -p "$PROJ/docs/brand/fonts"; echo '@font-face{}' > "$PROJ/docs/brand/fonts/local.css"
+  run "$SCRIPT" fonts "$PROJ" docs/brand/fonts/local.css
+  [ "$status" -eq 0 ]
+  grep -qF '<link rel="stylesheet" href="fonts/local.css">' "$HTML"
+  ! grep -q 'googleapis' "$HTML" || false
+}
+
+@test "finish: before step 6 exit 1, with an open choice exit 1, after that finished set" {
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]
+  record_direction
+  "$SCRIPT" step "$PROJ" 6
+  jq '.choice_pending = {kind: "slogan", key_or_screen: "s", page_url: "http://x/"}' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *slogan* ]]
+  jq '.choice_pending = null' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 0 ]
+  [[ "$(jq -r .finished "$STATE")" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+}
+
+@test "a backward step clears finished; step 7 and step done exit 2" {
+  record_direction
+  "$SCRIPT" step "$PROJ" 6
+  "$SCRIPT" finish "$PROJ"
+  "$SCRIPT" step "$PROJ" 6
+  [ "$(jq -r .finished "$STATE")" != null ]
+  "$SCRIPT" step "$PROJ" 5
+  [ "$(jq .finished "$STATE")" = null ]
+  run "$SCRIPT" step "$PROJ" 7
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" step "$PROJ" done
+  [ "$status" -eq 2 ]
+}
+
+# --- P102 Step 3: options, the companion choice gate, composition ----------
+
+# curl stub on PATH: logs its URL; $STUB_CONFIRM set -> prints it, else 404 (exit 22).
+curl_stub() {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  cat > "$BATS_TEST_TMPDIR/bin/curl" <<'EOS'
+#!/usr/bin/env bash
+echo "${@: -1}" >> "$BATS_TEST_TMPDIR/curl.log"
+[[ -n "${STUB_CONFIRM:-}" ]] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
+printf '%s\n' "$STUB_CONFIRM"
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH" STUB_CONFIRM=""
+}
+choice() { run "$SCRIPT" await-choice "$PROJ" --kind "$1" --screen "$2" --page-url http://localhost:3916/; }
+confirm() { STUB_CONFIRM="{\"screen\":\"$1\",\"selected\":$2,\"at\":\"$3\"${4:+,\"text\":\"$4\"}}"; }
+NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
+
+@test "await-choice slogan: 404 pending, older confirm pending, newer recorded once, only /aid/confirmed asked" {
+  curl_stub
+  choice slogan slogan-1.html
+  [ "$status" -eq 1 ]
+  [ "$(jq -r .choice_pending.kind "$STATE")" = slogan ]
+  [ "$(jq -r .choice_pending.key_or_screen "$STATE")" = slogan-1.html ]
+  confirm slogan-1.html '["s2"]' "$OLD"
+  choice slogan slogan-1.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *predates* ]]
+  [ "$(jq .choices.slogan "$STATE")" = null ]
+  confirm slogan-1.html '["s2"]' "$NEW"
+  choice slogan slogan-1.html
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .choices.slogan.id "$STATE")" = s2 ]
+  [ "$(jq .choice_pending "$STATE")" = null ]
+  f="$(jq -r .choices.slogan.answer_file "$STATE")"
+  [ "$(sha256sum "$PROJ/$f" | cut -d' ' -f1)" = "$(jq -r .choices.slogan.answer_sha256 "$STATE")" ]
+  choice slogan slogan-1.html
+  [ "$status" -eq 0 ]
+  [ "$(jq '[.decisions[] | select(.what | startswith("slogan"))] | length' "$STATE")" = 1 ]
+  [ "$(sort -u "$BATS_TEST_TMPDIR/curl.log")" = "http://localhost:3916/aid/confirmed?screen=slogan-1.html" ]
+  [ ! -e "$PROJ/.aid-o/work/companion" ]
+}
+
+@test "await-choice: own slogan text recorded; zero cards for logo pending, for pages accepted" {
+  curl_stub
+  confirm slogan-1.html '[]' "$NEW" "Vaříme po svém"
+  choice slogan slogan-1.html
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .text "$PROJ/$(jq -r .choices.slogan.answer_file "$STATE")")" = "Vaříme po svém" ]
+  confirm logo-1.html '[]' "$NEW"
+  choice logo logo-1.html
+  [ "$status" -eq 1 ]
+  [ "$(jq .choices.logo "$STATE")" = null ]
+  confirm logo-1.html '["l1"]' "$NEW"
+  choice logo logo-1.html
+  [ "$status" -eq 0 ]
+  confirm pages-1.html '[]' "$NEW" "úvod, ceník"
+  choice pages pages-2.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *malformed* ]]
+  confirm pages-2.html '[]' "$NEW" "úvod, ceník"
+  choice pages pages-2.html
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .choices.pages.screen "$STATE")" = pages-2.html ]
+}
+
+@test "await-choice: an open round of another kind refuses exit 1; the same kind's new round replaces it" {
+  curl_stub
+  choice slogan slogan-1.html
+  [ "$status" -eq 1 ]
+  choice logo logo-1.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"slogan round is still open on slogan-1.html"* ]]
+  [ "$(jq -r .choice_pending.key_or_screen "$STATE")" = slogan-1.html ]
+  jq '.choice_pending = {kind: "composition", key_or_screen: "k1", page_url: "http://x/", at: "2000"}' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  choice pages pages-1.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"composition round is still open on k1"* ]]
+  jq '.choice_pending = {kind: "slogan", key_or_screen: "slogan-1.html", page_url: "http://x/", at: "2000"}' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  choice slogan slogan-2.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no confirm on slogan-2.html"* ]]
+  [ "$(jq -r .choice_pending.key_or_screen "$STATE")" = slogan-2.html ]
+}
+
+@test "await-choice: --page-url other than this machine's http server exit 2, nothing asked" {
+  curl_stub
+  for u in http://evil.example/ -K/etc/passwd https://localhost:3916/ http://localhost.evil.example/; do
+    run "$SCRIPT" await-choice "$PROJ" --kind slogan --screen slogan-1.html --page-url "$u"
+    [ "$status" -eq 2 ]
+  done
+  [ ! -e "$BATS_TEST_TMPDIR/curl.log" ]
+  [ "$(jq .choice_pending "$STATE")" = null ]
+}
+
+@test "await-choice composition: another kind's open round refuses exit 1, Impeccable never asked" {
+  curl_stub
+  choice slogan slogan-1.html
+  run "$SCRIPT" await-choice "$PROJ" --kind composition --imp "$IMP" --key k1 --page-url http://10.20.20.22:3915/
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"slogan round is still open on slogan-1.html"* ]]
+  [ ! -e "$BATS_TEST_TMPDIR/calls" ]
+  [ "$(jq -r .choice_pending.kind "$STATE")" = slogan ]
+}
+
+@test "await-choice: unreachable server and malformed answer record nothing; bad screen name exit 2" {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"; printf '#!/usr/bin/env bash\nexit 7\n' > "$BATS_TEST_TMPDIR/bin/curl"; chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" choice logo logo-1.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *unreachable*"http://localhost:3916/"* ]]
+  curl_stub
+  STUB_CONFIRM='not json'
+  choice logo logo-1.html
+  [ "$status" -eq 1 ]
+  [ "$(jq .choices "$STATE")" = '{}' ]
+  choice logo slogan-1.html
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" await-choice "$PROJ" --kind nope --screen x --page-url http://x/
+  [ "$status" -eq 2 ]
+}
+
+@test "set options: validated, refused after step 0" {
+  run "$SCRIPT" set "$PROJ" options '{"vision":true,"colour":true}'
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" set "$PROJ" options '{"identity":true}'
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" set "$PROJ" options '{"vision":true,"identity":"package","seo":false}'
+  [ "$status" -eq 0 ]
+  [ "$(jq -c .options "$STATE")" = '{"vision":true,"identity":"package","seo":false,"images":false}' ]
+  "$SCRIPT" step "$PROJ" 1
+  run "$SCRIPT" set "$PROJ" options '{"vision":false}'
+  [ "$status" -eq 1 ]
+  [ "$(jq .options.vision "$STATE")" = true ]
+}
+
+@test "step gates: open choice blocks any step; enabled options need their choice from step 2" {
+  curl_stub
+  "$SCRIPT" set "$PROJ" options '{"vision":true,"identity":"package","seo":true}'
+  run "$SCRIPT" step "$PROJ" 1
+  [ "$status" -eq 0 ]
+  run "$SCRIPT" step "$PROJ" 2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *slogan* && "$output" == *"page list"* && "$output" != *logo* ]]
+  choice slogan slogan-1.html
+  run "$SCRIPT" step "$PROJ" 0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"choice is open"* ]]
+  confirm slogan-1.html '["s1"]' "$NEW"; choice slogan slogan-1.html
+  confirm pages-1.html '["uvod"]' "$NEW"; choice pages pages-1.html
+  run "$SCRIPT" step "$PROJ" 2
+  [ "$status" -eq 0 ]
+}
+
+@test "identity new needs a logo before step 2" {
+  "$SCRIPT" set "$PROJ" options '{"identity":"new"}'
+  run "$SCRIPT" step "$PROJ" 3
+  [ "$status" -eq 1 ]
+  [[ "$output" == *logo* ]]
+}
+
+@test "step 5 with build path comp needs a composition; await-choice composition behaves like await-direction" {
+  record_direction
+  jq '.direction.build_path = "comp"' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  "$SCRIPT" step "$PROJ" 4
+  run "$SCRIPT" step "$PROJ" 5
+  [ "$status" -eq 1 ]
+  [[ "$output" == *composition* ]]
+  comp() { run "$SCRIPT" await-choice "$PROJ" --kind composition --imp "$IMP" --key k1 --page-url http://10.20.20.22:3915/; }
+  STUB_OUT='ANSWER: {"optionId":"reroll","steer":""}'
+  comp
+  [ "$status" -eq 3 ]
+  STUB_RC=4 STUB_OUT=''
+  comp
+  [ "$status" -eq 1 ]
+  [ "$(jq -r .choice_pending.kind "$STATE")" = composition ]
+  run "$SCRIPT" step "$PROJ" 5
+  [ "$status" -eq 1 ]
+  STUB_RC=0 STUB_OUT='ANSWER: {"optionId":"c2"}'
+  comp
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .choices.composition.id "$STATE")" = c2 ]
+  [ "$(jq .choice_pending "$STATE")" = null ]
+  [ "$(jq -r .direction.option_id "$STATE")" = a ]
+  run "$SCRIPT" step "$PROJ" 5
+  [ "$status" -eq 0 ]
+}
+
+# --- P102 Step 8: build path and image spend --------------------------------
+
+@test "await-direction stores buildPath and buildPathFlipped from the ANSWER" {
+  STUB_OUT='ANSWER: {"optionId":"a","buildPath":"code","buildPathFlipped":true}'
+  await
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .direction.build_path "$STATE")" = code ]
+  [ "$(jq -r .direction.build_path_flipped "$STATE")" = true ]
+}
+
+@test "BUILD PATH FLIPPED without an ANSWER: exit 5, flip recorded, round stays pending" {
+  STUB_OUT='BUILD PATH FLIPPED: comp'
+  await
+  [ "$status" -eq 5 ]
+  [ "$(jq -r .direction.build_path "$STATE")" = comp ]
+  [ "$(jq -r .direction.build_path_flipped "$STATE")" = true ]
+  [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
+  run "$SCRIPT" require-direction "$PROJ"
+  [ "$status" -eq 1 ]
+  STUB_OUT='ANSWER: {"optionId":"b"}'
+  await
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .direction.build_path "$STATE")" = comp ]
+  [ "$(jq .direction_pending "$STATE")" = null ]
+}
+
+@test "BUILD PATH FLIPPED: code: exit 5, flip recorded, no comps asked for" {
+  STUB_OUT='BUILD PATH FLIPPED: code'
+  await
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"no comps are needed"* ]]
+  [[ "$output" != *"generate the comps"* ]]
+  [ "$(jq -r .direction.build_path "$STATE")" = code ]
+  [ "$(jq -r .direction.build_path_flipped "$STATE")" = true ]
+  [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
+}
+
+@test "an ANSWER whose buildPath is not comp or code: exit 1, nothing recorded" {
+  for bp in '"Comp"' '"comp-first"' '{"x":1}' 'null'; do
+    STUB_OUT="ANSWER: {\"optionId\":\"a\",\"buildPath\":$bp}"
+    await
+    [ "$status" -eq 1 ]
+    [ "$(jq -r '.direction.option_id // empty' "$STATE")" = "" ]
+    [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
+    [ ! -f "$PROJ/.aid-ui/direction-answer.json" ]
+  done
+}
+
+@test "build path comp from the answer: step 5 refused until await-choice composition records one" {
+  STUB_OUT='ANSWER: {"optionId":"a","buildPath":"comp","buildPathFlipped":false}'
+  await
+  "$SCRIPT" step "$PROJ" 4
+  run "$SCRIPT" step "$PROJ" 5
+  [ "$status" -eq 1 ]
+  STUB_OUT='ANSWER: {"optionId":"c1"}'
+  run "$SCRIPT" await-choice "$PROJ" --kind composition --imp "$IMP" --key k1 --page-url http://10.20.20.22:3915/
+  [ "$status" -eq 0 ]
+  run "$SCRIPT" step "$PROJ" 5
+  [ "$status" -eq 0 ]
+}
+
+@test "spend records each mock once, a changed image anew; model only from a sidecar naming one" {
+  M="$PROJ/.impeccable/mocks/decision"; mkdir -p "$M"
+  printf 'png-a' > "$M/a.png"; printf 'png-b' > "$M/b.png"
+  echo '{"prompt":"x","model":"gpt-image-1","usd":0.04}' > "$M/a.json"
+  echo '{"prompt":"y","usd":0.04}' > "$M/b.json"
+  run "$SCRIPT" spend "$PROJ"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 new, 0 duplicate, 2 recorded"* ]]
+  [ "$(jq '.image_spend | length' "$STATE")" = 2 ]
+  [ "$(jq -c '.image_spend[0] | {file, bytes, model, usd}' "$STATE")" = '{"file":".impeccable/mocks/decision/a.png","bytes":5,"model":"gpt-image-1","usd":0.04}' ]
+  [ "$(jq -r .image_spend[0].sha256 "$STATE")" = "$(sha256sum "$M/a.png" | cut -d' ' -f1)" ]
+  [ "$(jq -c '.image_spend[1] | keys' "$STATE")" = '["bytes","file","sha256"]' ]
+  run "$SCRIPT" spend "$PROJ"
+  [[ "$output" == *"0 new, 0 duplicate, 2 recorded"* ]]
+  printf 'png-b2' > "$M/b.png"
+  run "$SCRIPT" spend "$PROJ"
+  [[ "$output" == *"1 new, 0 duplicate, 3 recorded"* ]]
+  [ "$(jq '[.image_spend[] | select(.file | endswith("b.png"))] | length' "$STATE")" = 2 ]
+}
+
+@test "spend records a copy with the same sha256 once, naming the original" {
+  M="$PROJ/.impeccable/mocks"; mkdir -p "$M/decision"
+  printf 'png-a' > "$M/decision/assigned.png"; cp "$M/decision/assigned.png" "$M/comp-1.png"
+  run "$SCRIPT" spend "$PROJ"
+  [ "$status" -eq 0 ]
+  # find order: comp-1.png sorts first, so the original is the one named a duplicate
+  [[ "$output" == *"decision/assigned.png: duplicate of .impeccable/mocks/comp-1.png"* ]]
+  [[ "$output" == *"1 new, 1 duplicate, 1 recorded"* ]]
+  [ "$(jq '.image_spend | length' "$STATE")" = 1 ]
+}
+
+@test "spend --also picks up a plates directory; one outside the project is refused" {
+  mkdir -p "$PROJ/assets/plates" "$BATS_TEST_TMPDIR/outside"
+  printf 'plate' > "$PROJ/assets/plates/hero.png"
+  run "$SCRIPT" spend "$PROJ" --also assets/plates
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 new, 0 duplicate, 1 recorded"* ]]
+  [ "$(jq -r '.image_spend[0].file' "$STATE")" = assets/plates/hero.png ]
+  run "$SCRIPT" spend "$PROJ" --also ../outside
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" spend "$PROJ" --also "$BATS_TEST_TMPDIR/outside"
+  [ "$status" -eq 2 ]
+  [ "$(jq '.image_spend | length' "$STATE")" = 1 ]
 }

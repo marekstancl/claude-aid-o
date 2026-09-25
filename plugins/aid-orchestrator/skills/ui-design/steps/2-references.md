@@ -1,12 +1,12 @@
 ---
 name: ui-design-step-2
-description: /aid-ui step 2 - the agent finds six gallery references, the PM picks one to three
+description: /aid-ui step 2 - the agent finds six gallery or app-store references, the PM picks one to three
 user_invocable: false
 ---
 
 # Krok 2 - Vzory
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-09-25
 
 ## Cíl
 
@@ -22,10 +22,16 @@ V neinteraktivním běhu se krok nespouští (MUST 3).
 1. PM dal všechny vzory jako URL → přeskoč galerie, jdi na bod 5 s nimi.
 2. Z typu, oboru, tónu a publika sestav hledání. Projdi přes Playwright MCP jen
    veřejné stránky: godly.website, awwwards.com/websites, onepagelove.com,
-   minimal.gallery, saasframe.io, mobbin.com (aplikace).
-   403/429/captcha → zapiš „<galerie>: blokováno" a přeskoč; nikdy neobcházej.
-3. Vyber 12 kandidátů, otevři samotné weby, vyfoť první obrazovku do
-   `<project>/.aid-ui/refs/`.
+   minimal.gallery, saasframe.io.
+   Typ `webapp` a `mobile`: kandidátní aplikace najdi sám - Google Play
+   vyhledávání podle kategorie a záměru
+   (`https://play.google.com/store/search?q=<záměr>&c=apps`) a webové hledání;
+   PM může jména aplikací přidat, nemusí. Otevři jejich veřejné stránky na
+   Google Play / App Store a snímky obrazovek z nich ber jako vzory.
+   403/429/captcha, regionální blok nebo souhlasová zeď → zapiš
+   „<stránka>: blokováno" a přeskoč; nikdy neobcházej.
+3. Vyber 12 kandidátů, otevři samotné weby (u aplikací stránky v obchodě),
+   vyfoť první obrazovku do `<project>/.aid-ui/refs/`.
 4. Vyřaď nefunkční a generické podle `references/genericity-rubric.md`.
    Méně než šest použitelných → řekni PM kolik a proč, nabídni
    „jiné: <slovy>" (max. 2 nová kola) nebo vlastní URL.
@@ -55,4 +61,4 @@ kapitola `smer`: odkazy + jedna věta ke každému, pak
 Všechny galerie blokované → řekni PM, požádej o URL. Chybí Playwright → stop
 s instalací (`SKILL.md` Start).
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-09-25

@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.108.0] — 2026-09-25
+
+### Added
+- **`/aid-ui` umí vizi a slogany (1v)** — otázky podle šablony vize, `vize.md` a pět sloganů; PM vybírá na stránce companionu, volbu bere jen `await-choice --kind slogan`.
+- **Identita a balíček značky (1i)** — tři SVG koncepty loga, volba PM, pak ikony přes Playwright MCP (`brand-icons.js`) a `aid-ui-ico.py` (SVG jen přes allowlist).
+- **SEO (1s a krok 6)** — SEO brief se seznamem stránek, který PM potvrdí; krok 6 pustí na hotovou stavbu `aid-ui-seo-check.py`.
+- **Obrázkové komposice pod bránou PM** — cesta stavby, volba komposice a útrata za obrázky se zapisují; nic se nevybere bez PM.
+- **Volby na kroku 0** — vize, identita, SEO a obrázky, každá s doporučením podle toho, co projekt už má; reference aplikací se berou ze stránek obchodů.
+
+### Fixed
+- **IMP-663: stránka značky má skutečné kapitoly** — těla kapitol jdou přes `body` s allowlistem, stav je mimo servírovanou složku (`docs/design/brand-state.json`), tok končí přes `finish`, stránka načte písma projektu a deset textových vad je opraveno.
+- **Mobbin nahrazen**, patra testů přeznačena a sada ledgeru už nevidí prostředí brány.
+
 ## [2.107.1] — 2026-09-25
 
 ### Fixed

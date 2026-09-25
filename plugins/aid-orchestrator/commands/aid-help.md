@@ -299,6 +299,12 @@ Směr vybírá PM na stránce Impeccable; bez jeho zaznamenané odpovědi se kro
 nespustí (skript `aid-ui-state.sh` je odmítne). Postup nese skill `/ui-design`,
 který načítá `/aid-ui` a sám se nevolá.
 
+Na kroku 0 nabídne čtyři volitelné části, každou s doporučením podle toho, co
+projekt už má: vize a slogany, identita (logo a ikony), SEO a obrázkové návrhy
+(comps přes Impeccable). Vize, identita a SEO běží uvnitř kroku 1 před vzory;
+SEO kontrola se přidá ke kroku 6. Každou volbu PM (slogan, logo, seznam stránek,
+kompozici) bere skript jen z odpovědi na stránce, stejně jako směr.
+
 ### Topic: status
 
 `/aid-status` is the one place that answers "what is happening". It has four
