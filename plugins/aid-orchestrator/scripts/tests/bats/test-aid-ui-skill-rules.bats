@@ -84,3 +84,10 @@ postup_first() { awk '/^## Postup/{f=1; next} f && NF {print; exit}' "$1"; }
 @test "1-product.md names 1v, 1i, 1s in that order" {
   [ "$(grep -o '`1[vis]`' "$SK/steps/1-product.md" | tr -d '`' | tr '\n' ' ')" = "1v 1i 1s " ]
 }
+
+# P102 Step 5 — sub-step 1i takes the logo from the page and renders icons through the Playwright MCP.
+@test "1i-identity.md takes the logo through await-choice, names the renderer, the brief and the output check" {
+  for s in 'await-choice <project> --kind logo --screen' 'browser_run_code_unsafe' 'brief-logo-favicon.md' 'Kontrola výstupu' 'aid-ui-state.sh body <project> logo'; do
+    grep -qF -- "$s" "$SK/steps/1i-identity.md" || { echo "missing: $s"; return 1; }
+  done
+}
