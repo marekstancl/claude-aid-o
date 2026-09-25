@@ -31,6 +31,15 @@ Kapitola `seo` to nese.
    description), pak entita, strukturovaná data a připravenost na AI
    vyhledávání. U každé položky „fakt" nebo „odhad"; dotaz je odhad, pokud
    ho nedal PM. Hledanost nevymýšlej.
+   - Seznam stránek je markdown tabulka: první sloupec URL začínající `/`,
+     druhý H1, další sloupce libovolné. Z ní čte krok 6
+     (`aid-ui-seo-check.py --brief`) a H1 v buildu se musí shodovat přesně:
+
+     | URL | H1 | title | meta description | hlavní dotaz |
+     |---|---|---|---|---|
+     | / | Pekárna U Mlýna | Pekárna U Mlýna - chleba z kvásku | Kváskový chleba z Brna. | pekárna brno (odhad) |
+     | /o-nas | O nás | O nás - Pekárna U Mlýna | Kdo peče váš chleba. | (odhad) |
+
    - Webová aplikace s veřejným jen přihlášením: brief pokrývá jen veřejné
      stránky, obrazovky aplikace ne.
    - Existující web: současné URL k zachování (přesměrování) dej PM

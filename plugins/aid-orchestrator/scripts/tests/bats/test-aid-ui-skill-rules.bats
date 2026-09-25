@@ -99,3 +99,10 @@ postup_first() { awk '/^## Postup/{f=1; next} f && NF {print; exit}' "$1"; }
   ! grep -qF 'pokračuj jen s domovskou' "$SK/steps/1s-seo.md"
   grep -qF 'choices.pages' "$SK/steps/3-direction.md"
 }
+
+@test "6-verify.md runs aid-ui-seo-check.py when options.seo and writes seo through body" {
+  step="$(sed -n '/^## Postup/,/^## Co PM/p' "$SK/steps/6-verify.md")"
+  grep -qF 'options.seo' <<<"$step"
+  grep -qF 'aid-ui-seo-check.py' <<<"$step"
+  grep -qF 'aid-ui-state.sh body <project> seo' <<<"$step"
+}
