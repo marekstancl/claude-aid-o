@@ -35,3 +35,28 @@ postup_first() { awk '/^## Postup/{f=1; next} f && NF {print; exit}' "$1"; }
   done
   [ "$(ls "$SK"/steps/*.md | wc -l)" -eq 7 ]
 }
+
+# P102 Step 2 — the text defects of the P101 dry run stay fixed.
+@test "SKILL.md ends at step 6 with finish, no step 7" {
+  grep -qF 'aid-ui-state.sh finish' "$SK/SKILL.md"
+  ! grep -qF 'step <project> <n+1>' "$SK/SKILL.md"
+  ! grep -qF 'step <project> 7' "$SK/SKILL.md"
+}
+
+@test "6-verify.md names the known-debt path and finish" {
+  grep -qF 'známým dluhem' "$SK/steps/6-verify.md"
+  grep -qF 'aid-ui-state.sh finish' "$SK/steps/6-verify.md"
+}
+
+@test "5-standard.md names Impeccable document merge and overwrite" {
+  grep -qF 'merge' "$SK/steps/5-standard.md"
+  grep -qF 'overwrite' "$SK/steps/5-standard.md"
+}
+
+@test "no step file writes index.html except through aid-ui-state.sh body" {
+  # step 0 copies the template; every later step naming index.html forbids hand edits
+  for f in "$SK"/steps/[1-6]-*.md; do
+    grep -qF 'index.html' "$f" || continue
+    grep -qF 'index.html` ručně needituj' "$f" || { echo "$f"; return 1; }
+  done
+}

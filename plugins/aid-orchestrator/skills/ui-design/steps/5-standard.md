@@ -18,6 +18,8 @@ ekosystémového checklistu.
 `DESIGN.md`, postavený kód, `/opt/eco/docs/docs/ecosystem/specs/design-system-standard.md`
 (čteno živě; chybí → jmenuj to PM a poznamenej v kapitole `platformy`).
 
+Každý skript volej z kořene projektu.
+
 ## Postup
 
 1. `aid-ui-state.sh require-direction <project>` - exit 1 → stop, jdi na krok 3.
@@ -25,18 +27,23 @@ ekosystémového checklistu.
 3. `docs/design/design-standard.md`: odkaz na `DESIGN.md` a jen to, co v něm
    chybí - platformní kontrakt, přístupnost, pravidla textů.
 4. Kapitola `komponenty`: živá tlačítka, pole a stavy (default, hover, focus,
-   disabled, error) z `tokens.css`; kapitola `platformy`: platformní tabulka.
-   Obě `aid-ui-state.sh chapter <project> <id> navrh`.
+   disabled, error) z `tokens.css`; prezentační web bez interaktivních prvků
+   napíše „nemá" s důvodem, vzor si nevymýšlí. Kapitola `platformy`: platformní
+   tabulka. Těla do souborů v `.aid-ui/` a `aid-ui-state.sh body <project> <id> --file <soubor>`
+   (`index.html` ručně needituj), pak obě `aid-ui-state.sh chapter <project> <id> navrh`.
 5. `aid-ui-design-to-css.sh DESIGN.md docs/brand/tokens.css`.
 6. `aid-ui-state.sh roles <project> <map>` znovu, mapa z `brand-state.json.roles`
    (`jq -r '.roles | "bg=\(.bg),ink=\(.ink),accent=\(.accent),display=\(.display),body=\(.body)"' docs/design/brand-state.json`);
    exit 1 se jménem tokenu, který už neexistuje → vyber náhradu z nového
    `DESIGN.md` a spusť `roles` s opravenou mapou.
-7. Kapitoly se změněným obsahem: `aid-ui-state.sh reset-approvals <project> <id>...`.
+
+Kapitoly, které krok mění: `komponenty`, `platformy` (a `barvy`, `typografie`,
+když se změnily tokeny nebo role).
 
 ## Co PM rozhoduje
 
-Nic.
+Otázky Impeccable `document` (MUST 1): existující `DESIGN.md` obnovit
+(refresh), přepsat (overwrite), nebo sloučit (merge), a North Star projektu.
 
 ## Zápis
 

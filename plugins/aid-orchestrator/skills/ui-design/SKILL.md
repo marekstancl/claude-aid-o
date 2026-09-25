@@ -46,7 +46,8 @@ Do NOT invoke for:
    `mcp__plugin_playwright_playwright__browser_navigate` na `about:blank`.
    Selže (nástroj chybí, prohlížeč nejde spustit) → zkus Node Playwright
    (`node -e "require.resolve('playwright')"` nebo `@playwright/test`, z pluginu či projektu,
-   a `npx playwright --version`) a řekni PM, že snímky půjdou přes Node Playwright.
+   a `npx playwright --version`) a řekni PM, že snímky půjdou přes Node Playwright:
+   `node <plugin>/lib/ui-fidelity/ui-capture.mjs` z kořene projektu, jinak stejně.
    Nejde ani jedno → stop, řekni PM: `/plugin install playwright@claude-plugins-official`
    a `npx playwright install chromium`.
 4. Ekosystémové standardy čti živě z `/opt/eco/docs/docs/ecosystem/…`
@@ -60,9 +61,12 @@ Do NOT invoke for:
 - `/aid-ui <n>`: nejdřív `aid-ui-state.sh step <project> <n>`. Kroky 4-6 skript
   odmítne bez zaznamenaného směru a jmenuje krok 3 - řekni to PM a pokračuj
   krokem 3, ne `n`.
-- Načti jen `steps/<n>-*.md` a proveď ho. Po úspěchu
-  `aid-ui-state.sh step <project> <n+1>`; po kroku 6 místo toho
+- Načti jen `steps/<n>-*.md` a proveď ho. Po úspěchu kroků 0-5
+  `aid-ui-state.sh step <project>` s číslem následujícího kroku; po kroku 6
   `aid-ui-state.sh finish <project>` - tím běh končí (kroku 7 není).
+- `brand-state.json.finished` vyplněné → řekni PM, že běh je hotový, a nabídni
+  krok k opakování (`/aid-ui <n>`; krok zpět vynuluje `finished`, schválení
+  jeho kapitol zruš `aid-ui-state.sh reset-approvals`).
 - Selže skript: ukaž PM jeho řádek `ERROR:`, krok neposouvej.
 - Otevřené kolo (`require-direction` vypíše URL a klíč): znovu otevři TO kolo,
   nezakládej nové. `aid-ui-serve.sh forward <p>` (když neběží), dej PM URL

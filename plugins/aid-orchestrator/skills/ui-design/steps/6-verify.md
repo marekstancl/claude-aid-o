@@ -23,18 +23,26 @@ Ověřený vzhled a kapitoly schválené PM (případně zákazníkem).
 1. `aid-ui-state.sh require-direction <project>` - exit 1 → stop, jdi na krok 3.
 2. Závěrečná revize Impeccable proběhla: čerstvé `.impeccable/review/*.png`
    (novější než poslední změna kódu), `DESIGN.md` a `.impeccable/design.json`
-   existují. Jinak ji spusť přes Skill `impeccable`.
+   existují. Změnil se `DESIGN.md` nebo `.impeccable/design.json` po poslední
+   revizi → snímky neplatí, spusť novou závěrečnou revizi přes Skill `impeccable`.
+   Jinak ji spusť také.
 3. Kontrola před nasazením: mobil + desktop podle platformního kontraktu;
    prázdný, chybový a načítací stav; klávesnice a viditelný focus; žádné
-   ad-hoc varianty komponent - grep na natvrdo zapsané barvy mimo tokeny.
-4. Kapitola `schvaleni`: tabulka kapitol se stavem a nálezy kontroly.
-5. PM převezme, nebo řekne „vrať krok N" (`/aid-ui N`).
+   ad-hoc varianty komponent - grep na natvrdo zapsané barvy (`#hex`, `rgb(`,
+   `hsl(`) ve všech zdrojích včetně statického HTML/CSS; povolené jsou jen
+   definice tokenů, i když projekt pojmenuje soubor tokenů jinak než `tokens.css`.
+4. Kapitola `schvaleni` (tělo přes `aid-ui-state.sh body <project> schvaleni --file <soubor>`):
+   tabulka kapitol se stavem a nálezy kontroly; kapitola, která zůstane `ceka`
+   (např. `logo` bez balíčku), je v ní „nepoužito".
+5. PM převezme, převezme se známým dluhem (dluh vypsaný v kapitole `schvaleni`),
+   nebo řekne „vrať krok N" (`/aid-ui N`).
 6. Po převzetí `aid-ui-state.sh chapter <project> <id> schvaleno --by PM`
-   pro každou převzatou kapitolu.
+   pro každou převzatou kapitolu, `schvaleni` jako poslední.
+7. `aid-ui-state.sh finish <project>` - běh končí.
 
 ## Co PM rozhoduje
 
-Převzetí, nebo krok k opakování.
+Převzetí, převzetí se známým dluhem, nebo krok k opakování.
 
 ## Zápis
 
