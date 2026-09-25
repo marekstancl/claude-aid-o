@@ -242,7 +242,9 @@ record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq
 @test "body is an allowlist: glued handler, style, svg and an unfinished tag refused" {
   cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
   for bad in '<img src="x"onerror="alert(1)">' '<p style="x">' '<svg onload=1>' \
-             '<img alt=">" onerror=1 ' '<p class="a status">' '<!DOCTYPE html>'; do
+             '<img alt=">" onerror=1 ' '<p class="a status">' '<!DOCTYPE html>' \
+             '<span style="background:url(x)"></span>' '<p style="color:red">x</p>' \
+             '<p style="background: var(--x) ; behavior: y">x</p>'; do
     printf '%s\n' "$bad" > "$BATS_TEST_TMPDIR/bad.html"
     run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
     [ "$status" -eq 1 ]
@@ -253,7 +255,9 @@ record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq
 
 @test "body accepts allowed tags, safe links and a relative image" {
   for ok in '<a href="https://example.com">ok</a>' '<img src="assets/logo.svg" alt="logo">' \
-            '<p>Text <strong>tučně</strong> a &lt;script&gt;</p>'; do
+            '<p>Text <strong>tučně</strong> a &lt;script&gt;</p>' \
+            '<span class="swatch" style="background: var(--color-primary)"></span>' \
+            '<p style="font-family: var(--font-display); font-size: var(--text-xl); font-weight: var(--weight-bold)">Aa</p>'; do
     printf '%s\n' "$ok" > "$BATS_TEST_TMPDIR/ok.html"
     run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/ok.html"
     [ "$status" -eq 0 ]

@@ -35,10 +35,12 @@ přebírá postavený vzhled.
    `--output-dir <project>/.aid-ui/capture/<viewport>/` (mimo git, neservíruje se).
    Do `docs/brand/assets/` zkopíruj jen PNG snímky, `baseline-computed.json` tam nepatří.
 7. Napiš těla kapitol `barvy`, `typografie`, `ukazky` do souborů v `.aid-ui/`
-   a zapiš je `aid-ui-state.sh body <project> <id> --file <soubor>` (bez
-   `<script>`, `on…=` a `<section>`; `index.html` ručně needituj):
-   - `barvy`: vzorník `.swatch` pro každou `--color-*` z `tokens.css`, u každé jméno a hodnota,
-   - `typografie`: ukázka textu pro každou roli písma (display, body) jejím písmem, velikostí a váhou,
+   a zapiš je `aid-ui-state.sh body <project> <id> --file <soubor>` (`index.html` ručně needituj).
+   Tělo se kontroluje proti povolenému seznamu značek, atributů a adres (bez komentářů,
+   bez `<script>`, `on…=` a `<section>`); `style` projde jen s tokeny projektu,
+   např. `style="background: var(--color-x)"`:
+   - `barvy`: vzorník `.swatch` pro každou `--color-*` z `tokens.css` (barva přes `style` s `var(--color-…)`), u každé jméno a hodnota,
+   - `typografie`: ukázka textu pro každou roli písma (display, body) jejím písmem, velikostí a váhou (`style` s `var(--…)` tokeny),
    - `ukazky`: oba snímky z `assets/` jako `<img>` s popiskem viewportu.
 8. Teprve pak `aid-ui-state.sh chapter <project> <id> navrh` pro `barvy`, `typografie`, `ukazky`.
 9. Přestavba po dřívějším schválení:

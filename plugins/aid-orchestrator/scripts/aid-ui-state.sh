@@ -112,6 +112,10 @@ elif mode == "body":
     ATTRS = {"class": None, "alt": None, "title": None, "lang": None, "href": {"a"},
              "src": {"img"}, "width": {"img"}, "height": {"img"}, "loading": {"img"},
              "colspan": {"td", "th"}, "rowspan": {"td", "th"}}
+    # style only as project tokens (swatches, type samples): prop: var(--name); ...
+    decl = (r'(?:background|background-color|color|border-color|font-family|font-size|font-weight'
+            r'|line-height|letter-spacing)\s*:\s*var\(--[a-z0-9-]+\)')
+    STYLE = re.compile(r'%s(?:\s*;\s*%s)*\s*;?' % (decl, decl))
     def bad_url(v):   # the parser already decoded entities; the browser drops these chars
         v = re.sub(r'[\x00-\x20\x7f]+', '', v).lower()
         if v.startswith(("https://", "http://", "mailto:", "#", "/", "./", "../")):
@@ -125,6 +129,8 @@ elif mode == "body":
                 self.refuse("tag <%s>" % tag)
             for name, val in attrs:
                 allowed = ATTRS.get(name, False)
+                if name == "style" and STYLE.fullmatch((val or "").strip()):
+                    continue
                 if allowed is False or (allowed and tag not in allowed):
                     self.refuse("attribute %s on <%s>" % (name, tag))
                 if name == "class" and re.search(r'(^|\s)status(\s|$)', val or ""):
