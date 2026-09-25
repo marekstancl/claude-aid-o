@@ -718,7 +718,13 @@ aid_lifecycle_build_receipt() {
       echo "  - epic_id: ${eid}"
       [[ -n "$dsha" && "$dsha" != "null" ]] && echo "    delivery_sha: ${dsha}"
       [[ -n "$rsha" && "$rsha" != "null" ]] && echo "    reviewed_sha: ${rsha}"
-      [[ -n "$verdict" && "$verdict" != "null" ]] && echo "    verdict: ${verdict}"
+      if [[ -n "${_AID_LC_ADMIN_WAIVER:-}" && "$verdict" != accepted ]] && _aid_lc_scope_is_required "$scope"; then
+        # an administrative close of a hand merge: never a review verdict
+        echo "    verdict: administrative"
+        echo "    waivers: [\"${_AID_LC_ADMIN_WAIVER}\"]"
+      elif [[ -n "$verdict" && "$verdict" != "null" ]]; then
+        echo "    verdict: ${verdict}"
+      fi
       echo "    unresolved_blocker_count: ${blockers:-0}"
     done < <(aid_lifecycle_declared_epics "$plan_id" "$root")
   }
@@ -764,10 +770,14 @@ aid_lifecycle_commit_receipt() {
   aid_lifecycle_receipt_durable "$plan_id" "$root"
 }
 
-# aid_lifecycle_plan_close <plan_id> <root> [<plan_mode_parent>] — forward-path
-# close. Requires the manifest to show EVERY required EPIC delivered +
-# reviewed-accepted; then writes + commits the receipt (=> closed). Fail-closed:
-# any missing predicate => no receipt, non-zero.
+# aid_lifecycle_plan_close <plan_id> <root> [<plan_mode_parent>] [<admin_merged_sha> <admin_record_digest>]
+# — forward-path close. Requires the manifest to show EVERY required EPIC
+# delivered + reviewed-accepted; then writes + commits the receipt (=> closed).
+# Fail-closed: any missing predicate => no receipt, non-zero. The one exception
+# is the administrative close of a hand merge (2.107.1): with a commit that git
+# shows inside the target branch and the digest of the PM's record, an `active`
+# plan is closed and every EPIC the review did not accept reads `verdict:
+# administrative` with a hash-only waiver — never a review pass.
 #
 # P068 E-068-1_2 Step 6 — PLAN-MODE PLUMBING (the third optional argument).
 # Without it the receipt commit reaches _aid_lc_isolated_commit's ordinary path,
@@ -788,7 +798,10 @@ aid_lifecycle_commit_receipt() {
 # uncommitted receipt left on disk is what makes aid_plan_closure_state report
 # `closing_pending_commit`, which several callers and suites depend on.
 aid_lifecycle_plan_close() {
-  local plan_id="$1" root="${2:-.}" plan_parent="${3:-}"
+  local plan_id="$1" root="${2:-.}" plan_parent="${3:-}" admin_sha="${4:-}" admin_digest="${5:-}"
+  # Read by aid_lifecycle_build_receipt through bash's dynamic scope; local, so
+  # nothing exported by a caller's shell can turn an ordinary close into this.
+  local _AID_LC_ADMIN_WAIVER=""
 
   # Plan mode reads (and builds the receipt from) the TARGET BRANCH's manifest —
   # the one Step 5's bindings landed on — not the plan branch's stale worktree
@@ -807,7 +820,16 @@ aid_lifecycle_plan_close() {
     closed) echo "already closed" >&2; _pc_done 0; return 0 ;;
     not_found) echo "plan-close: ${plan_id} not found" >&2; _pc_done 3; return 3 ;;
     legacy-unverifiable) echo "plan-close: ${plan_id} is legacy-unverifiable (run plan-reconcile)" >&2; _pc_done 1; return 1 ;;
-    active) echo "plan-close: ${plan_id} is active — not all required EPICs are delivered + reviewed-accepted" >&2; _pc_done 1; return 1 ;;
+    active)
+      # The administrative close of a HAND merge (aid-plan-fsm.sh plan-close
+      # --administrative): git proves the plan is in the target branch, the PM's
+      # record is named by its digest. Anything less stays refused.
+      if [[ "$admin_sha" =~ ^[0-9a-f]{40}$ && "$admin_digest" =~ ^sha256:[0-9a-f]{64}$ ]] \
+         && git -C "$root" merge-base --is-ancestor "$admin_sha" "refs/heads/$(aid_target_branch)" 2>/dev/null; then
+        _AID_LC_ADMIN_WAIVER="administrative-close:${admin_sha}:${admin_digest}"
+      else
+        echo "plan-close: ${plan_id} is active — not all required EPICs are delivered + reviewed-accepted" >&2; _pc_done 1; return 1
+      fi ;;
     delivered-but-unreconciled|closing_pending_commit) ;;
     # CP2 L3: the case had no default arm, so an empty or unrecognised closure
     # state fell straight through and committed a receipt — declaring a plan
@@ -1088,6 +1110,7 @@ aid_lifecycle_bind_delivery() {
 # closes an in-progress plan.
 aid_lifecycle_plan_reconcile() {
   local plan_id="$1" root="${2:-.}" apply="${3:-false}"
+  local _AID_LC_ADMIN_WAIVER=""   # a reconcile receipt is never an administrative one
   local pf mf
   pf="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
   mf="$(aid_manifest_path "$plan_id" "$root")"

@@ -7585,7 +7585,9 @@ cmd_plan_close() {
       # So this close does not pretend. It writes no candidate, no run id and no
       # verdict; it records `closure_kind: administrative`, LISTS what was
       # missing, and leaves the plan closed and unmistakably not
-      # evidence-backed. The PM asked for it for two real cases: work developed
+      # evidence-backed. Since 2.107.1 a plan git shows merged into the target
+      # also gets a lifecycle receipt (so plans depending on it can start); every
+      # EPIC the review did not accept reads `verdict: administrative` there. The PM asked for it for two real cases: work developed
       # outside AID, and a plugin defect that strands a plan for hours.
       --administrative) _PFSM_ADMIN_CLOSE=1; shift ;;
       --*) echo "ERROR: plan-close: unknown flag: $1" >&2; exit 2 ;;
@@ -7612,7 +7614,7 @@ cmd_plan_close() {
       exit 2
     fi
     if [[ "${#_PFSM_FORCE_REASON}" -lt 20 ]]; then
-      echo "ERROR: plan-close --administrative needs --reason with at least 20 characters: it is recorded verbatim as the only account of why a plan was closed without evidence." >&2
+      echo "ERROR: plan-close --administrative needs --reason with at least 20 characters: it is recorded verbatim (plan-close-administrative.json) as the only account of why a plan was closed without evidence." >&2
       exit 2
     fi
   fi
@@ -7745,10 +7747,14 @@ cmd_plan_close() {
     # plan-final evidence is partial, listed, and no reason to refuse.
     local _adm_pb; _adm_pb="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_branch' 2>/dev/null)" || _adm_pb=""
     [[ -n "$_adm_pb" && "$_adm_pb" != null && "$_adm_pb" != not_found ]] || _adm_pb="plan/${plan_id}"
-    if [[ -n "$_adm_bad" ]] && git -C "$root" merge-base --is-ancestor "$_adm_pb" "${target_branch:-main}" 2>/dev/null; then
-      echo "ADMINISTRATIVE CLOSE: ${_adm_pb} is already merged into ${target_branch:-main}; its plan-final evidence is partial and recorded as such:" >&2
-      printf '%s' "$_adm_bad" >&2
-      _adm_bad=""; _PFSM_ADMIN_MERGED_REF="$_adm_pb"
+    if git -C "$root" merge-base --is-ancestor "$_adm_pb" "${target_branch:-main}" 2>/dev/null; then
+      # the git fact the lifecycle receipt of an administrative close rests on
+      _PFSM_ADMIN_MERGED_REF="$_adm_pb"
+      if [[ -n "$_adm_bad" ]]; then
+        echo "ADMINISTRATIVE CLOSE: ${_adm_pb} is already merged into ${target_branch:-main}; its plan-final evidence is partial and recorded as such:" >&2
+        printf '%s' "$_adm_bad" >&2
+        _adm_bad=""
+      fi
     fi
     if [[ -n "$_adm_bad" ]]; then
       _pfsm_close_release
@@ -7758,7 +7764,7 @@ cmd_plan_close() {
       exit 1
     fi
 
-    _PFSM_ADMIN_MISSING="$(printf '%s' "$ccout" | grep -oE '^[[:space:]]*(FAIL|check[0-9]+)[^\n]*' | head -20 | tr '\n' '|')"
+    _PFSM_ADMIN_MISSING="$(printf '%s\n' "$ccout" | grep -E '^[[:space:]]*(FAIL|check[0-9]+)' | head -20 | tr '\n' '|' || true)"
     [[ -n "$_PFSM_ADMIN_MISSING" ]] || _PFSM_ADMIN_MISSING="the close check reported nothing to record"
     echo "ADMINISTRATIVE CLOSE: ${plan_id} is being closed WITHOUT evidence. Every finding above is an absence, and each is recorded; nothing below fabricates a candidate, a run id or a verdict." >&2
     ccrc=0
@@ -7816,8 +7822,36 @@ cmd_plan_close() {
   fi
   local lc_manifest="${root}/.aid-lifecycle/manifests/${plan_id}.yaml"
 
+  # An administrative close records its reason and what it could not confirm
+  # (the reason was only ever printed); the receipt refers to this file by its
+  # digest, never by its words, so a receipt stays public-safe.
+  local adm_merged_sha="" adm_digest=""
+  if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 ]]; then
+    local adm_rec="${root}/${run_dir_rel:-.aid-o/work/evidence/${plan_id}}/plan-close-administrative.json"
+    [[ -n "${_PFSM_ADMIN_MERGED_REF:-}" ]] \
+      && adm_merged_sha="$(git -C "$root" rev-parse --verify --quiet "${_PFSM_ADMIN_MERGED_REF}^{commit}" 2>/dev/null)" || true
+    mkdir -p "$(dirname "$adm_rec")" 2>/dev/null || true
+    if ! jq -n --arg p "$plan_id" --arg r "$_PFSM_FORCE_REASON" --arg m "${_PFSM_ADMIN_MISSING:-}" \
+              --arg ref "${_PFSM_ADMIN_MERGED_REF:-}" --arg sha "$adm_merged_sha" --arg op "$op_id" \
+              --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+         '{plan_id:$p, reason:$r, not_confirmed:($m | split("|") | map(select(length > 0))),
+           merged_ref:$ref, merged_sha:$sha, op_id:$op, recorded_at:$at}' > "$adm_rec" 2>/dev/null; then
+      _pfsm_close_release
+      echo "PRECONDITION FAIL: plan-close --administrative: could not write ${adm_rec} — no marker was written." >&2
+      exit 1
+    fi
+    adm_digest="sha256:$(sha256sum "$adm_rec" | cut -d' ' -f1)"
+    echo "ADMINISTRATIVE CLOSE: the reason and what was not confirmed are recorded in ${adm_rec}." >&2
+  fi
+
   if [[ "$close_mode" == "merge" ]]; then
-    if [[ ! -f "$lc_manifest" ]]; then
+    if [[ -f "$lc_manifest" && "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 && -z "$adm_merged_sha" ]]; then
+      # A manifest, but no hand merge git can prove: no receipt is written for
+      # a plan whose delivery nothing shows, and none is faked.
+      lifecycle_note="closed_administrative"
+      applied_sha="$target_head"
+      echo "ADMINISTRATIVE CLOSE: ${plan_id} is not merged into ${target_branch}, so no lifecycle receipt is written — recorded as closed_administrative, never as closed." >&2
+    elif [[ ! -f "$lc_manifest" ]]; then
       # CP3 (2026-07-26): keyed on the FILE rather than the MODE, this was an
       # escape hatch after all — deleting the tracked manifest turned a
       # plan-branch plan's MANDATORY receipt into an optional one and closed the
@@ -7844,9 +7878,12 @@ cmd_plan_close() {
         exit 1
       fi
     fi
-    if [[ -f "$lc_manifest" ]]; then
+    if [[ -f "$lc_manifest" && "$lifecycle_note" != closed_administrative ]]; then
       local lrc=0 lout=""
-      lout="$(aid_lifecycle_plan_close "$plan_id" "$root" "$target_head" 2>&1)" || lrc=$?
+      # A hand-merged plan (git proves the branch is in the target) closes with
+      # an administrative receipt: every EPIC the review did not accept carries
+      # verdict `administrative` and a waiver naming the merge and this record.
+      lout="$(aid_lifecycle_plan_close "$plan_id" "$root" "$target_head" ${adm_merged_sha:+"$adm_merged_sha" "$adm_digest"} 2>&1)" || lrc=$?
       if [[ "$lrc" -ne 0 && "$_PFSM_FORCE" -eq 1 ]]; then
         printf '%s\n' "$lout" >&2
         if _pfsm_precondition "lifecycle_receipt_committed" forceable false; then
@@ -7868,6 +7905,10 @@ cmd_plan_close() {
       fi
       applied_sha="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || applied_sha="$target_head"
       lifecycle_note="receipt_committed"
+      # only when the committed receipt really carries the administrative waiver
+      # (an admin close of a plan that was closable anyway writes an ordinary one)
+      git -C "$root" show "${target_branch}:.aid-lifecycle/receipts/${plan_id}.yaml" 2>/dev/null \
+        | grep -q 'administrative-close:' && lifecycle_note="receipt_administrative"
     fi
   else
     # ── The abort close ────────────────────────────────────────────────────
@@ -7989,6 +8030,7 @@ cmd_plan_close() {
       # close is terminal and legitimate — and it is not the same fact as a plan
       # that went through the loop, so it never reads as one.
       echo "CLOSED ADMINISTRATIVELY: ${plan_id} is terminal WITHOUT an evidence chain. Reason: ${_PFSM_FORCE_REASON}" >&2
+      echo "  lifecycle: ${lifecycle_note}$([[ "$lifecycle_note" == receipt_administrative ]] && echo " — the receipt marks every EPIC the review did not accept as administrative")" >&2
       [[ -n "${_PFSM_ADMIN_MISSING:-}" ]] \
         && echo "  what could not be confirmed: ${_PFSM_ADMIN_MISSING//|/ · }" >&2
       echo "  Nothing here asserts a candidate, a run id or a review verdict; where an evidence-backed close is required, this one does not count as it." >&2

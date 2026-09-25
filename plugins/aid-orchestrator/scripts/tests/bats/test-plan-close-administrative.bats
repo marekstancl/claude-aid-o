@@ -244,3 +244,43 @@ _gates_plan() {
   jq -e '.kept[] | select(.path | endswith("generation-P900")) | .why == "uncommitted work"' "$R/.aid-o/work/evidence/P900/cleanup.json"
   [[ "$output" == *"kept: $R/.aid-worktrees/generation-P900 — uncommitted work"* ]]
 }
+
+# --- 2.107.1: a hand-merged plan WITH a lifecycle manifest (the P101 shape) -----
+# _lifecycle_manifest <root> — the tracked manifest a real AID plan carries: two
+# required EPICs, no deliveries (the hand merge never bound any).
+_lifecycle_manifest() {
+  local R="$1"
+  mkdir -p "$R/.aid-lifecycle/manifests"
+  printf 'schema_version: aid-lifecycle-1.0\nrepo_id: 0663532a-3dd2-40cb-91fc-5dac362bfcc0\nplan_id: P900\nsource_plan_sha: sha256:%064d\ndeclared_epics:\n  - {id: E-900-1_2, scope: required}\n  - {id: E-900-2_2, scope: required}\ndepends_on_plans: []\nmode: plan_branch\n' 0 \
+    > "$R/.aid-lifecycle/manifests/P900.yaml"
+  git -C "$R" add -f .aid-lifecycle; git -C "$R" commit -qm "lifecycle: manifest for P900"
+}
+
+@test "2.107.1: a hand-merged plan with a lifecycle manifest closes administratively with a receipt that says so, hash refs only; unmerged, no receipt" {
+  local R="$BATS_TEST_TMPDIR/p"; mkdir -p "$R"; _gates_plan "$R"; _lifecycle_manifest "$R"
+  local reason='merged by hand as 2.106.0 on /opt/x, token: none — PM 25. 9.'
+  run bash -c "cd '$R' && AID_TEST_MODE=1 bash '$FSM' plan-close P900 --project-root '$R' --administrative --reason '$reason'"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" != *"is active"* && "$output" == *"lifecycle: receipt_administrative"* ]]
+  local receipt rec; receipt="$(git -C "$R" show main:.aid-lifecycle/receipts/P900.yaml)"
+  rec="$R/.aid-o/work/evidence/P900/plan-close-administrative.json"
+  [ "$(yq -r '[.epics[].verdict] | unique | join(",")' <<<"$receipt")" = administrative ]
+  # every EPIC names the merge and the PM's record by digest, never by its words
+  [ "$(yq -r '[.epics[].waivers[0]] | unique | .[]' <<<"$receipt")" = "administrative-close:$(git -C "$R" rev-parse plan/P900):sha256:$(sha256sum "$rec" | cut -d' ' -f1)" ]
+  [[ "$receipt" != *"/opt/x"* && "$receipt" != *"token"* ]]
+  [ "$(jq -r .reason "$rec")" = "$reason" ]
+  run bash -c "cd '$R' && bash '$PLUGIN_ROOT/scripts/aid-lifecycle.sh' state P900 ."
+  [ "$output" = closed ]
+}
+
+@test "2.107.1: the lifecycle library refuses an administrative close whose commit is not in the target branch" {
+  local R="$BATS_TEST_TMPDIR/p"; mkdir -p "$R"; _gates_plan "$R"; _lifecycle_manifest "$R"
+  git -C "$R" checkout -q -b elsewhere; git -C "$R" commit -q --allow-empty -m "not merged"
+  local stray; stray="$(git -C "$R" rev-parse HEAD)"; git -C "$R" checkout -q main
+  run bash -c "cd '$R' && source '$PLUGIN_ROOT/scripts/lib/aid-lifecycle.sh' && aid_lifecycle_plan_close P900 . '' '$stray' 'sha256:$(printf %064d 0)'"
+  [ "$status" -ne 0 ]; [[ "$output" == *"is active"* ]]
+  run bash -c "cd '$R' && source '$PLUGIN_ROOT/scripts/lib/aid-lifecycle.sh' && aid_lifecycle_plan_close P900 ."
+  [ "$status" -ne 0 ]
+  [ -z "$(git -C "$R" ls-tree main .aid-lifecycle/receipts/P900.yaml)" ]
+}
+
