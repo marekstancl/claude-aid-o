@@ -1,0 +1,16 @@
+schema_version: aid-lifecycle-receipt-1.0
+repo_id: 0663532a-3dd2-40cb-91fc-5dac362bfcc0
+plan_id: P101
+plan_manifest_sha: sha256:cf379157fdb3a65e6337f83dc11e04fe6fdd6061296e78098215fd20269a3813
+state: closed
+target_branch: main
+aid_version: 2.58.0
+epics:
+  - epic_id: E-101-1_2
+    verdict: administrative
+    waivers: ["administrative-close:dec2c17b71c79bb95edd4d02ced6d15d73c22a05:sha256:512eca0e48ad72590223e148707b406c06899529d25f67fdaf688f549822e231"]
+    unresolved_blocker_count: 0
+  - epic_id: E-101-2_2
+    verdict: administrative
+    waivers: ["administrative-close:dec2c17b71c79bb95edd4d02ced6d15d73c22a05:sha256:512eca0e48ad72590223e148707b406c06899529d25f67fdaf688f549822e231"]
+    unresolved_blocker_count: 0
