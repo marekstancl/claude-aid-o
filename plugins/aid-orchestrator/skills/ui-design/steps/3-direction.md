@@ -6,7 +6,7 @@ user_invocable: false
 
 # Krok 3 - Směr
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-09-25
 
 ## Cíl
 
@@ -23,12 +23,15 @@ zamítnuté návrhy s důvodem PM, `$IMP` (`SKILL.md` Start).
 1. Surface brief: `"$IMP" context --target <route>` vrací `surfaceBriefPath`;
    jinak `.impeccable/surfaces/<slug>.md` ve tvaru existujících briefů. Zapiš
    do něj směrové zadání: vybrané vzory a co z nich převzít, vytažené styly,
-   brand, anti-reference (zamítnuté návrhy + důvod PM) a větu
+   brand, anti-reference (zamítnuté návrhy + důvod PM), při `choices.pages`
+   potvrzený seznam stránek a hlavní H1 z `docs/seo/brief.md`, a větu
    „PM vyžaduje výslovný výběr směru; bez odpovědi PM se nepokračuje."
    `aid-ui-state.sh set <project> impeccable.surface_brief '"<cesta>"'`.
 2. Skill `impeccable` new-work s `IMPECCABLE_QUESTION_FORCE=1`; řekni mu:
    zastav po zamčení směru a zapsání `## Direction contract`, v tomto kroku
-   nic nestav.
+   nic nestav. Při `options.images` (klíč jako v kroku 1) nesou karty směru
+   compy; zamčení karty je schválení compu. `await-direction` zapíše z odpovědi
+   `direction.build_path` a `build_path_flipped`.
 3. Impeccable vypíše `QUESTION URL: http://127.0.0.1:<p>/` a klíč →
    `aid-ui-serve.sh forward <p>` a PM dej JEHO URL a klíč.
 4. `aid-ui-state.sh await-direction <project> --imp "$IMP" --key <k> --page-url <url>`
@@ -36,6 +39,13 @@ zamítnuté návrhy s důvodem PM, `$IMP` (`SKILL.md` Start).
    - exit 0 → směr zaznamenán;
    - exit 3 → PM chce „znovu": re-roll přes Impeccable (`--update` na stejném
      klíči) a znovu `await-direction`;
+   - exit 5 (`BUILD PATH FLIPPED: comp`) → PM přepnul na comp-led; přepnutí je
+     zaznamenané, kolo zůstává otevřené. Vygeneruj comp každé otevřené karty do
+     její deklarované cesty (hlavní první) a znovu `await-direction` se stejným
+     klíčem;
+   - exit 5 (`BUILD PATH FLIPPED: code`) → PM přepnul na code-led; přepnutí
+     je zaznamenané, compy netřeba, jen znovu `await-direction` se stejným
+     klíčem;
    - exit 1 s otevřeným kolem → MUST 1: dej PM URL a klíč, ukonči tah.
      Nikdy nepokračuj s přiděleným směrem.
    - Znovuotevření otevřeného kola: `aid-ui-serve.sh forward <p>` (když neběží),
@@ -68,4 +78,4 @@ kapitola `smer`.
 `serve-question` odmítne start nebo `await-direction` skončí jinou chybou →
 ukaž `ERROR:` PM; směr se nezaznamená a krok 4 neběží.
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-09-25

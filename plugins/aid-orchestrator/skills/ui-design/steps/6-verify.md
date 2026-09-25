@@ -6,7 +6,7 @@ user_invocable: false
 
 # Krok 6 - Ověření
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-09-25
 
 ## Cíl
 
@@ -31,22 +31,32 @@ Ověřený vzhled a kapitoly schválené PM (případně zákazníkem).
    ad-hoc varianty komponent - grep na natvrdo zapsané barvy (`#hex`, `rgb(`,
    `hsl(`) ve všech zdrojích včetně statického HTML/CSS; povolené jsou jen
    definice tokenů, i když projekt pojmenuje soubor tokenů jinak než `tokens.css`.
-4. Kapitola `schvaleni` (tělo přes `aid-ui-state.sh body <project> schvaleni --file <soubor>`):
+4. Jen při `options.seo`: z kořene projektu
+   `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-seo-check.py" <výstup buildu> --brief docs/seo/brief.md --json .aid-ui/seo/check.json`
+   (`--base-url <produkční URL>`, když ji `PRODUCT.md` uvádí). Výstup buildu je
+   složka (Next.js `out/`, Astro `dist/`, statické HTML); u aplikace
+   renderované na serveru ulož každou potvrzenou stránku přes `curl` do
+   `.aid-ui/seo/` a zkontroluj tu složku. Stránku, kterou PM ze seznamu
+   vyřadil, nejdřív odeber z `docs/seo/brief.md`. Souhrn (řádky `BLOCKER`
+   a `WARN`, počet `OK`) do souboru v `.aid-ui/` a
+   `aid-ui-state.sh body <project> seo --file <soubor>`. `BLOCKER` (exit 1)
+   převzetí zastaví; do známého dluhu jde jen na výslovné slovo PM.
+5. Kapitola `schvaleni` (tělo přes `aid-ui-state.sh body <project> schvaleni --file <soubor>`):
    tabulka kapitol se stavem a nálezy kontroly; kapitola, která zůstane `ceka`
    (např. `logo` bez balíčku), je v ní „nepoužito".
-5. PM převezme, převezme se známým dluhem (dluh vypsaný v kapitole `schvaleni`),
+6. PM převezme, převezme se známým dluhem (dluh vypsaný v kapitole `schvaleni`),
    nebo řekne „vrať krok N" (`/aid-ui N`).
-6. Po převzetí `aid-ui-state.sh chapter <project> <id> schvaleno --by PM`
+7. Po převzetí `aid-ui-state.sh chapter <project> <id> schvaleno --by PM`
    pro každou převzatou kapitolu, `schvaleni` jako poslední.
-7. `aid-ui-state.sh finish <project>` - běh končí.
+8. `aid-ui-state.sh finish <project>` - běh končí.
 
 ## Co PM rozhoduje
 
-Převzetí, převzetí se známým dluhem, nebo krok k opakování.
+Převzetí, převzetí se známým dluhem (včetně SEO `BLOCKER`), nebo krok k opakování.
 
 ## Zápis
 
-Kapitola `schvaleni`, stavy kapitol.
+Kapitola `schvaleni`, při `options.seo` kapitola `seo`, stavy kapitol.
 
 Cesta k zákazníkovi (jen text pro PM, skill nic nevystavuje ani neposílá):
 `aid-ui-serve.sh brand docs/brand` + pravidlo Cloudflare Access pro e-mail
@@ -57,4 +67,4 @@ Schválení e-mailem → `aid-ui-state.sh chapter <project> <id> schvaleno --by 
 
 Nález kontroly → ukaž ho PM s krokem, který ho opraví; nic se neschvaluje.
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-09-25
