@@ -1,9 +1,13 @@
 {
   "step": 0,
   "product_type": "",
+  "options": {"vision": false, "identity": false, "seo": false, "images": false},
   "direction": null,
+  "choices": {},
+  "choice_pending": null,
   "chapters": {
     "produkt": {"status": "ceka"},
+    "vize": {"status": "ceka"},
     "logo": {"status": "ceka"},
     "barvy": {"status": "ceka"},
     "typografie": {"status": "ceka"},
@@ -11,9 +15,12 @@
     "komponenty": {"status": "ceka"},
     "platformy": {"status": "ceka"},
     "ukazky": {"status": "ceka"},
+    "seo": {"status": "ceka"},
     "schvaleni": {"status": "ceka"}
   },
   "refs": [],
   "impeccable": {"product": "PRODUCT.md", "design": "DESIGN.md", "surface_brief": "", "seed_key": ""},
-  "decisions": []
+  "image_spend": [],
+  "decisions": [],
+  "finished": null
 }

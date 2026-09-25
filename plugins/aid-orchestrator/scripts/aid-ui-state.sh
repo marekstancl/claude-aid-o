@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aid-ui-state.sh — the only writer of <project>/docs/brand/state.json (/aid-ui).
+# aid-ui-state.sh — the only writer of <project>/docs/design/brand-state.json
+# and of the chapter statuses, bodies and font links in docs/brand/index.html (/aid-ui).
+# The state lives outside the served docs/brand/; temp files go to <project>/.aid-ui/tmp/.
 #
-#   init <project>
+#   init <project>       creates brand-state.json; migrates an old docs/brand/state.json in
+#                        this order: write the new file (template keys + old values), add
+#                        missing sections/markers to index.html, move the old file to
+#                        .aid-ui/state.json.migrated. New file present -> it wins. Markers
+#                        are re-added on every init, so a retry repairs an interrupted run.
 #   await-direction <project> --imp <impeccable CLI> --key <key> --page-url <url>
 #       records direction_pending (key + page url) first, so steps 4-6 refuse while
 #       the round is open, then runs `<imp> serve-question --wait --key <key>`
@@ -16,17 +22,25 @@
 #   pending-direction <project> --key <key> --page-url <url>
 #   require-direction <project>
 #   set <project> <product_type|refs|impeccable.surface_brief|impeccable.seed_key> <json>
-#   step <project> <0-6>                 4-6 refused without a recorded direction
+#   step <project> <0-6>                 4-6 refused without a recorded direction;
+#                                        a backward step clears `finished`
 #   roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>
 #   chapter <project> <id> <ceka|navrh|schvaleno> [--by <who>]
 #   reset-approvals <project> <id>...
+#   body <project> <id> --file <html>    replaces only what is between <!-- body:<id> -->
+#                                        and <!-- /body:<id> -->; refuses active or
+#                                        structural content (script, on…=, section, markers)
+#   fonts <project> <url-or-path>...     <link rel="stylesheet"> lines between <!-- fonts -->
+#                                        markers; only https://fonts.googleapis.com/… or a
+#                                        .css file under docs/brand/fonts/
+#   finish <project>                     after step 6, with a direction and no open choice
 #
 # Exit: 0 ok, 1 refused, 2 usage. (await-direction: 3 = re-roll requested.)
 # =============================================================================
 set -euo pipefail
 
 TEMPLATE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../skills/ui-design/brand-page" && pwd)/state.template.json"
-CHAPTERS=" produkt logo barvy typografie smer komponenty platformy ukazky schvaleni "
+CHAPTERS=" produkt vize logo barvy typografie smer komponenty platformy ukazky seo schvaleni "
 SETTABLE=" product_type refs impeccable.surface_brief impeccable.seed_key "
 
 usage() { echo "ERROR: aid-ui-state.sh: ${1:-usage}; see the header of this script" >&2; exit 2; }
@@ -36,13 +50,111 @@ today() { date -u +%Y-%m-%d; }
 (( $# >= 2 )) || usage "need <verb> <project>"
 VERB="$1"; PROJECT="$2"; shift 2
 BRAND="$PROJECT/docs/brand"
-STATE="$BRAND/state.json"
+HTML="$BRAND/index.html"
+STATE="$PROJECT/docs/design/brand-state.json"
+OLD="$BRAND/state.json"   # P101 location, migrated by init
 
 need_state() { [[ -f "$STATE" ]] || die "no $STATE; run: aid-ui-state.sh init $PROJECT"; }
 
-# jq_write <jq filter> [jq args...] — atomic rewrite of state.json.
+tmpfile() { mkdir -p "$PROJECT/.aid-ui/tmp"; mktemp "$PROJECT/.aid-ui/tmp/$1.XXXXXX"; }
+
+# Edits of index.html. Markers keep status, body and fonts disjoint regions.
+HTML_PY="$(cat <<'PY'
+import html, os, re, sys, urllib.parse
+mode, path, args = sys.argv[1], sys.argv[2], sys.argv[3:]
+text = open(path, encoding="utf-8").read()
+
+def fail(msg):
+    print("ERROR: aid-ui-state.sh: " + msg, file=sys.stderr)
+    sys.exit(1)
+
+def between(text, cid, kind, new):   # replace what is between <!-- kind:cid --> markers
+    a, b = "<!-- %s:%s -->" % (kind, cid), "<!-- /%s:%s -->" % (kind, cid)
+    out, n = re.subn(re.escape(a) + ".*?" + re.escape(b), lambda m: a + new + b, text, count=1, flags=re.S)
+    if n != 1:
+        fail("%s markers of section %s not found in %s; run: aid-ui-state.sh init" % (kind, cid, path))
+    return out
+
+if mode == "status":
+    cid, status, date, by = args
+    text, n = re.subn(r'(<section id="%s" data-status=")[^"]*"' % re.escape(cid),
+                      lambda m: m.group(1) + status + '"', text, count=1)
+    if n != 1:
+        fail("section %s not found in %s" % (cid, path))
+    text = between(text, cid, "status", " · ".join(html.escape(x) for x in (date, by) if x))
+elif mode == "body":
+    cid, src = args
+    body = open(src, encoding="utf-8").read()
+    bad = re.search(r'<script|<iframe|<object|<embed|</?section|javascript:|class\s*=\s*["\']?status'
+                    r'|<!--\s*/?(body|status|fonts)|<[^>]*[\s/]on[a-z]+\s*=', body, re.I)
+    if bad:
+        fail("body of section %s refused: %s contains %r" % (cid, src, bad.group(0)[-40:]))
+    text = between(text, cid, "body", body)
+elif mode == "fonts":
+    project = args[0]
+    brand = os.path.realpath(os.path.join(project, "docs/brand"))
+    fonts = os.path.join(brand, "fonts") + os.sep
+    links = []
+    for a in args[1:]:
+        if "://" in a or a.startswith("//"):
+            u = urllib.parse.urlsplit(a)
+            if u.scheme != "https" or u.netloc != "fonts.googleapis.com":
+                fail("font URL refused (only https://fonts.googleapis.com/...): " + a)
+            href = a
+        else:
+            p = os.path.realpath(os.path.join(project, a))
+            if not (p.startswith(fonts) and p.endswith(".css") and os.path.isfile(p)):
+                fail("font path refused (only an existing .css under docs/brand/fonts/): " + a)
+            href = os.path.relpath(p, brand)
+        links.append('<link rel="stylesheet" href="%s">' % html.escape(href, quote=True))
+    a, b = "<!-- fonts -->", "<!-- /fonts -->"
+    text, n = re.subn(re.escape(a) + ".*?" + re.escape(b),
+                      lambda m: a + "\n" + "".join(l + "\n" for l in links) + b, text, count=1, flags=re.S)
+    if n != 1:
+        fail("fonts markers not found in %s; run: aid-ui-state.sh init" % path)
+elif mode == "upgrade":   # args: chapter ids in page order
+    new = {"vize": ("Vize", "produkt"), "seo": ("SEO", "ukazky")}
+    for cid, (title, prev) in new.items():
+        if '<section id="%s"' % cid in text:
+            continue
+        m = re.search(r'<section id="%s".*?</section>\n?' % prev, text, re.S)
+        if not m:
+            fail("section %s not found in %s" % (prev, path))
+        sec = '<section id="%s" data-status="ceka"><h2>%s</h2><p class="status"></p><div class="body"></div></section>\n' % (cid, title)
+        text = text[:m.end()] + sec + text[m.end():]
+        li = re.search(r'<li><a href="#%s">.*?</li>\n?' % prev, text)
+        if li:
+            text = text[:li.end()] + '<li><a href="#%s">%s</a></li>\n' % (cid, title) + text[li.end():]
+    for cid in args:
+        m = re.search(r'(<section id="%s"[^>]*>)(.*?)(</section>)' % cid, text, re.S)
+        if not m:
+            fail("section %s not found in %s" % (cid, path))
+        inner = m.group(2)
+        if "<!-- status:%s -->" % cid not in inner:
+            inner = re.sub(r'(<p class="status">)(.*?)(</p>)', lambda x: "%s<!-- status:%s -->%s<!-- /status:%s -->%s"
+                           % (x.group(1), cid, x.group(2), cid, x.group(3)), inner, count=1, flags=re.S)
+        if "<!-- body:%s -->" % cid not in inner:   # greedy: an old body may hold nested divs
+            inner = re.sub(r'(<div class="body">)(.*)(</div>\s*)$', lambda x: "%s<!-- body:%s -->%s<!-- /body:%s -->%s"
+                           % (x.group(1), cid, x.group(2), cid, x.group(3)), inner, count=1, flags=re.S)
+        if "<!-- status:%s -->" % cid not in inner or "<!-- body:%s -->" % cid not in inner:
+            fail("section %s in %s has no status paragraph or body div" % (cid, path))
+        text = text[:m.start(2)] + inner + text[m.end(2):]
+    if "<!-- fonts -->" not in text:
+        text = text.replace("</head>", "<!-- fonts -->\n<!-- /fonts -->\n</head>", 1)
+sys.stdout.write(text)
+PY
+)"
+
+# html_edit <mode> <args...> — atomic rewrite of index.html by $HTML_PY.
+html_edit() {
+  [[ -f "$HTML" ]] || die "no $HTML"
+  local tmp; tmp="$(tmpfile index.html)"
+  if python3 -c "$HTML_PY" "$1" "$HTML" "${@:2}" > "$tmp"; then mv "$tmp" "$HTML"; else rm -f "$tmp"; exit 1; fi
+}
+
+# jq_write <jq filter> [jq args...] — atomic rewrite of brand-state.json.
 jq_write() {
-  local tmp; tmp="$(mktemp "$STATE.XXXXXX")"
+  local tmp; tmp="$(tmpfile brand-state.json)"
   if jq "$@" "$STATE" > "$tmp"; then mv "$tmp" "$STATE"; else rm -f "$tmp"; die "could not write $STATE"; fi
 }
 
@@ -67,35 +179,32 @@ require_direction() {   # prints what is missing, returns 1 when not recorded
   return 1
 }
 
-# write_chapter <id> <status> <by> — state.json and index.html together.
+# write_chapter <id> <status> <by> — the section's data-status and status text, then the state.
 write_chapter() {
-  local id="$1" status="$2" by="$3" date="" html="$BRAND/index.html"
+  local id="$1" status="$2" by="$3" date=""
   [[ "$CHAPTERS" == *" $id "* ]] || usage "unknown chapter id: $id"
   case "$status" in ceka|navrh|schvaleno) ;; *) usage "unknown status: $status" ;; esac
-  [[ -f "$html" ]] || die "no $html"
   [[ "$status" == ceka ]] || date="$(today)"
-  local tmp; tmp="$(mktemp "$html.XXXXXX")"
-  python3 - "$html" "$id" "$status" "$date" "$by" > "$tmp" <<'PY' || { rm -f "$tmp"; die "section $id not found in $html"; }
-import html, re, sys
-path, cid, status, date, by = sys.argv[1:]
-text = open(path, encoding="utf-8").read()
-label = " · ".join(html.escape(x) for x in (date, by) if x)
-pat = re.compile(r'(<section id="%s" data-status=")[^"]*(">.*?<p class="status">).*?(</p>)' % re.escape(cid), re.S)
-new, n = pat.subn(lambda m: m.group(1) + status + m.group(2) + label + m.group(3), text, count=1)
-if n != 1:
-    sys.exit(1)
-sys.stdout.write(new)
-PY
+  html_edit status "$id" "$status" "$date" "$by"
   jq_write --arg id "$id" --arg s "$status" --arg d "$date" --arg by "$by" \
     '.chapters[$id] = ({status: $s} + (if $d != "" then {date: $d} else {} end) + (if $by != "" then {by: $by} else {} end))'
-  mv "$tmp" "$html"
 }
 
 case "$VERB" in
   init)
-    mkdir -p "$BRAND"
-    if [[ -f "$STATE" ]]; then echo "state.json exists; continuing from step $(jq -r .step "$STATE")"
-    else cp "$TEMPLATE" "$STATE"; echo "state.json created: $STATE"; fi
+    mkdir -p "$BRAND" "${STATE%/*}"
+    if [[ -f "$STATE" ]]; then echo "brand-state.json exists; continuing from step $(jq -r .step "$STATE")"
+    else
+      src="$TEMPLATE"; [[ -f "$OLD" ]] && src="$OLD"
+      tmp="$(tmpfile brand-state.json)"
+      jq -s '.[0] * .[1]' "$TEMPLATE" "$src" > "$tmp" || { rm -f "$tmp"; die "could not read $src"; }
+      mv "$tmp" "$STATE"; echo "brand-state.json created: $STATE (from $src)"
+    fi
+    if [[ -f "$HTML" ]]; then html_edit upgrade $CHAPTERS; fi
+    if [[ -f "$OLD" ]]; then
+      mv "$OLD" "$PROJECT/.aid-ui/state.json.migrated"   # out of the served folder
+      echo "old $OLD moved to .aid-ui/state.json.migrated"
+    fi
     ;;
 
   await-direction)
@@ -154,7 +263,7 @@ case "$VERB" in
     need_state
     [[ "${1:-}" =~ ^[0-6]$ ]] || usage "step needs 0-6"
     if (( $1 >= 4 )) && ! require_direction; then die "step $1 refused: run step 3 first (/aid-ui 3)"; fi
-    jq_write --argjson n "$1" '.step = $n'
+    jq_write --argjson n "$1" 'if $n < .step then .finished = null else . end | .step = $n'
     ;;
 
   roles)
@@ -171,7 +280,7 @@ case "$VERB" in
     for k in bg ink accent display body; do [[ -n "${R[$k]:-}" ]] || usage "missing role: $k"; done
     for k in bg ink accent; do grep -q -- "--color-${R[$k]}:" "$tokens" || die "unknown color '${R[$k]}' for $k in $tokens"; done
     for k in display body; do grep -q -- "--font-${R[$k]}-family:" "$tokens" || die "unknown typography role '${R[$k]}' for $k in $tokens"; done
-    tmp="$(mktemp "$BRAND/roles.css.XXXXXX")"
+    tmp="$(tmpfile roles.css)"
     {
       echo "/* Written by aid-ui-state.sh roles; do not edit. */"
       echo ":root {"
@@ -200,6 +309,31 @@ case "$VERB" in
     for id in "$@"; do
       if [[ "$(jq -r --arg id "$id" '.chapters[$id].status' "$STATE")" == schvaleno ]]; then write_chapter "$id" navrh ""; fi
     done
+    ;;
+
+  body)
+    need_state
+    (( $# == 3 )) && [[ "$2" == --file ]] || usage "body needs <id> --file <html>"
+    [[ "$CHAPTERS" == *" $1 "* ]] || usage "unknown chapter id: $1"
+    [[ -f "$3" ]] || die "no body file $3"
+    html_edit body "$1" "$3"
+    ;;
+
+  fonts)
+    need_state
+    (( $# >= 1 )) || usage "fonts needs <url-or-path>..."
+    html_edit fonts "$PROJECT" "$@"
+    ;;
+
+  finish)
+    need_state
+    st="$(jq -r .step "$STATE")"
+    [[ "$st" == 6 ]] || die "finish refused: the project is at step $st; finish comes after step 6"
+    require_direction || exit 1
+    pend="$(jq -r 'if .choice_pending then "\(.choice_pending.kind) at \(.choice_pending.page_url)" else empty end' "$STATE")"
+    [[ -z "$pend" ]] || die "finish refused: a choice is open and unanswered: $pend"
+    jq_write --arg d "$(today)" '.finished = $d'
+    echo "FINISHED: $(today)"
     ;;
 
   *) usage "unknown verb: $VERB" ;;

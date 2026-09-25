@@ -3,6 +3,8 @@
 # P101 Step 5 — aid-ui-state.sh: the direction gate is code. A direction is
 # recorded only from Impeccable's own `serve-question --wait` output (a stub
 # CLI here); steps 4-6 refuse without it.
+# P102 Step 1: state in docs/design/brand-state.json, chapter bodies, fonts,
+# finish, migration from docs/brand/state.json.
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../aid-ui-state.sh"
@@ -11,7 +13,8 @@ setup() {
   mkdir -p "$PROJ/docs/brand"
   cp "$PAGE/index.html" "$PROJ/docs/brand/"
   "$SCRIPT" init "$PROJ" >/dev/null
-  STATE="$PROJ/docs/brand/state.json"
+  STATE="$PROJ/docs/design/brand-state.json"
+  HTML="$PROJ/docs/brand/index.html"
   # Stub Impeccable: first prints $STUB_WAITS times "exit 3", then $STUB_OUT with $STUB_RC.
   IMP="$BATS_TEST_TMPDIR/impeccable"
   cat > "$IMP" <<'EOF'
@@ -173,7 +176,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(jq -r .chapters.barvy.status "$STATE")" = schvaleno ]
   [ "$(jq -r .chapters.barvy.by "$STATE")" = PM ]
-  grep -q '<section id="barvy" data-status="schvaleno">.*<p class="status">[0-9-]* · PM</p>' "$PROJ/docs/brand/index.html"
+  grep -q '<section id="barvy" data-status="schvaleno">.*<p class="status"><!-- status:barvy -->[0-9-]* · PM<!-- /status:barvy --></p>' "$PROJ/docs/brand/index.html"
   grep -q '<section id="logo" data-status="ceka">' "$PROJ/docs/brand/index.html"
 }
 
@@ -190,5 +193,153 @@ EOF
   run "$SCRIPT" chapter "$PROJ" nope navrh
   [ "$status" -eq 2 ]
   run "$SCRIPT" reset-approvals "$PROJ" nope
+  [ "$status" -eq 2 ]
+}
+
+# --- P102 Step 1 -----------------------------------------------------------
+
+record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq 0 ]; }
+
+@test "body replaces only its section and is idempotent" {
+  echo '<p>Vize projektu</p>' > "$BATS_TEST_TMPDIR/b.html"
+  before_logo="$(grep -o '<section id="logo".*</section>' "$HTML")"
+  run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/b.html"
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize --><p>Vize projektu</p>' "$HTML"
+  [ "$(grep -o '<section id="logo".*</section>' "$HTML")" = "$before_logo" ]
+  cp "$HTML" "$BATS_TEST_TMPDIR/once.html"
+  "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/b.html"
+  cmp "$HTML" "$BATS_TEST_TMPDIR/once.html"
+  [ -z "$(ls -A "$PROJ/docs/brand" | grep -v '^index.html$')" ]
+}
+
+@test "body refuses script, onclick, section and a marker; unknown id exit 2" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in '<script>x()</script>' '<a href="#" onclick="x()">a</a>' '<section id="x"></section>' '<!-- status:logo -->'; do
+    printf '%s\n' "$bad" > "$BATS_TEST_TMPDIR/bad.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+    [ "$status" -eq 1 ]
+    [[ "$output" == ERROR:*vize* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  run "$SCRIPT" body "$PROJ" nope --file "$BATS_TEST_TMPDIR/bad.html"
+  [ "$status" -eq 2 ]
+}
+
+@test "a later chapter call leaves a written body byte-identical" {
+  printf '<div class="swatch">a</div>\n<p class="note">b</p>\n' > "$BATS_TEST_TMPDIR/b.html"
+  "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/b.html"
+  body() { sed -n '/<!-- body:barvy -->/,/<!-- \/body:barvy -->/p' "$HTML" | sed -e 's/.*<!-- body:barvy -->//' -e 's/<!-- \/body:barvy -->.*//'; }
+  b1="$(body)"
+  run "$SCRIPT" chapter "$PROJ" barvy schvaleno --by PM
+  [ "$status" -eq 0 ]
+  [ "$(body)" = "$b1" ]
+  grep -q '<section id="barvy" data-status="schvaleno">' "$HTML"
+}
+
+@test "chapter vize accepted" {
+  run "$SCRIPT" chapter "$PROJ" vize navrh
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .chapters.vize.status "$STATE")" = navrh ]
+  grep -q '<section id="vize" data-status="navrh">' "$HTML"
+}
+
+# A P101 project: old state.json, old index.html without vize/seo and markers, a written body.
+p101_project() {
+  rm -rf "$PROJ"; mkdir -p "$PROJ/docs/brand"
+  git -C "$BATS_TEST_DIRNAME" show b095ba7f:plugins/aid-orchestrator/skills/ui-design/brand-page/index.html > "$HTML" 2>/dev/null \
+    || sed -e 's/<!-- \/\?\(body\|status\):[a-z]* -->//g' -e '/<!-- \/\?fonts -->/d' -e '/id="vize"\|id="seo"\|#vize\|#seo/d' "$PAGE/index.html" > "$HTML"
+  sed -i 's|<section id="barvy" data-status="ceka"><h2>Barvy</h2><p class="status"></p><div class="body"></div>|<section id="barvy" data-status="navrh"><h2>Barvy</h2><p class="status">2026-09-24</p><div class="body"><div class="swatch">x</div></div>|' "$HTML"
+  jq '.step = 2 | del(.chapters.vize, .chapters.seo, .options, .finished)' "$PAGE/state.template.json" > "$PROJ/docs/brand/state.json"
+}
+
+@test "init migrates an old state.json and index.html, keeps bodies" {
+  p101_project
+  ! grep -q 'id="vize"' "$HTML" || false
+  run "$SCRIPT" init "$PROJ"
+  [ "$status" -eq 0 ]
+  [ "$(jq .step "$STATE")" = 2 ]
+  [ "$(jq -r .chapters.seo.status "$STATE")" = ceka ]
+  [ "$(jq -c .options "$STATE")" = '{"vision":false,"identity":false,"seo":false,"images":false}' ]
+  [ ! -e "$PROJ/docs/brand/state.json" ]
+  [ -f "$PROJ/.aid-ui/state.json.migrated" ]
+  [ "$(grep -c '<section ' "$HTML")" -eq 11 ]
+  grep -qF '<div class="body"><!-- body:barvy --><div class="swatch">x</div><!-- /body:barvy --></div>' "$HTML"
+  grep -qF '<p class="status"><!-- status:barvy -->2026-09-24<!-- /status:barvy --></p>' "$HTML"
+  grep -qF '<!-- fonts -->' "$HTML"
+  grep -qF '<li><a href="#seo">SEO</a></li>' "$HTML"
+  cp "$HTML" "$BATS_TEST_TMPDIR/once.html"
+  "$SCRIPT" init "$PROJ"
+  cmp "$HTML" "$BATS_TEST_TMPDIR/once.html"
+}
+
+@test "retry after an interrupted migration (new file present, markers missing) adds the markers" {
+  p101_project
+  jq -s '.[0] * .[1]' "$PAGE/state.template.json" "$PROJ/docs/brand/state.json" > "$BATS_TEST_TMPDIR/new.json"
+  mkdir -p "$PROJ/docs/design"; mv "$BATS_TEST_TMPDIR/new.json" "$STATE"
+  rm "$PROJ/docs/brand/state.json"
+  run "$SCRIPT" init "$PROJ"
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize -->' "$HTML"
+  grep -qF '<!-- status:schvaleni -->' "$HTML"
+}
+
+@test "both files present: the new one wins, the old one is renamed" {
+  "$SCRIPT" step "$PROJ" 3
+  echo '{"step": 1}' > "$PROJ/docs/brand/state.json"
+  run "$SCRIPT" init "$PROJ"
+  [ "$status" -eq 0 ]
+  [ "$(jq .step "$STATE")" = 3 ]
+  [ ! -e "$PROJ/docs/brand/state.json" ]
+  [ "$(jq .step "$PROJ/.aid-ui/state.json.migrated")" = 1 ]
+}
+
+@test "fonts refuses foreign hosts and paths outside docs/brand/fonts; writes a Google Fonts link idempotently" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in https://evil.example/ https://fonts.googleapis.com.evil.example/css http://fonts.googleapis.com/css \
+             https://fonts.googleapis.com@evil.example/ docs/brand/tokens.css ../x.css; do
+    run "$SCRIPT" fonts "$PROJ" "$bad"
+    [ "$status" -eq 1 ]
+    [[ "$output" == ERROR:* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  url='https://fonts.googleapis.com/css2?family=Gloock&family=Inter:wght@400;700&display=swap'
+  run "$SCRIPT" fonts "$PROJ" "$url"
+  [ "$status" -eq 0 ]
+  "$SCRIPT" fonts "$PROJ" "$url"
+  [ "$(grep -c 'rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gloock&amp;family=Inter' "$HTML")" -eq 1 ]
+  mkdir -p "$PROJ/docs/brand/fonts"; echo '@font-face{}' > "$PROJ/docs/brand/fonts/local.css"
+  run "$SCRIPT" fonts "$PROJ" docs/brand/fonts/local.css
+  [ "$status" -eq 0 ]
+  grep -qF '<link rel="stylesheet" href="fonts/local.css">' "$HTML"
+  ! grep -q 'googleapis' "$HTML" || false
+}
+
+@test "finish: before step 6 exit 1, with an open choice exit 1, after that finished set" {
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]
+  record_direction
+  "$SCRIPT" step "$PROJ" 6
+  jq '.choice_pending = {kind: "slogan", key_or_screen: "s", page_url: "http://x/"}' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *slogan* ]]
+  jq '.choice_pending = null' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 0 ]
+  [[ "$(jq -r .finished "$STATE")" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+}
+
+@test "a backward step clears finished; step 7 and step done exit 2" {
+  record_direction
+  "$SCRIPT" step "$PROJ" 6
+  "$SCRIPT" finish "$PROJ"
+  "$SCRIPT" step "$PROJ" 6
+  [ "$(jq -r .finished "$STATE")" != null ]
+  "$SCRIPT" step "$PROJ" 5
+  [ "$(jq .finished "$STATE")" = null ]
+  run "$SCRIPT" step "$PROJ" 7
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" step "$PROJ" done
   [ "$status" -eq 2 ]
 }

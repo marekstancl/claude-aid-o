@@ -28,8 +28,8 @@ ekosystémového checklistu.
    disabled, error) z `tokens.css`; kapitola `platformy`: platformní tabulka.
    Obě `aid-ui-state.sh chapter <project> <id> navrh`.
 5. `aid-ui-design-to-css.sh DESIGN.md docs/brand/tokens.css`.
-6. `aid-ui-state.sh roles <project> <map>` znovu, mapa ze `state.json.roles`
-   (`jq -r '.roles | "bg=\(.bg),ink=\(.ink),accent=\(.accent),display=\(.display),body=\(.body)"' docs/brand/state.json`);
+6. `aid-ui-state.sh roles <project> <map>` znovu, mapa z `brand-state.json.roles`
+   (`jq -r '.roles | "bg=\(.bg),ink=\(.ink),accent=\(.accent),display=\(.display),body=\(.body)"' docs/design/brand-state.json`);
    exit 1 se jménem tokenu, který už neexistuje → vyber náhradu z nového
    `DESIGN.md` a spusť `roles` s opravenou mapou.
 7. Kapitoly se změněným obsahem: `aid-ui-state.sh reset-approvals <project> <id>...`.

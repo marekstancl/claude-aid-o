@@ -20,7 +20,12 @@ běžící web (`docker ps` podle názvu projektu), zamítnuté návrhy.
 
 ## Postup
 
-1. Existuje `docs/brand/state.json` → nic nepřepisuj, pokračuj krokem z něj.
+1. Existuje `docs/design/brand-state.json` → nic nepřepisuj, pokračuj krokem z něj.
+   Migrace (migration) z P101 - existuje jen staré `docs/brand/state.json` →
+   nejdřív `aid-ui-state.sh init <project>`: přesune stav do
+   `docs/design/brand-state.json`, doplní kapitoly a značky do `index.html`;
+   pak pokračuj krokem z něj. Body 3-4 (šablona přes `index.html`) se při
+   pokračování nikdy nedělají.
 2. Inventura: co z Vstupů existuje. Na zamítnuté návrhy se ptej jen, když
    z repa není jasné, které to jsou. `DESIGN.md` z dřívějšího nástroje
    **není** zvolený směr.
@@ -29,7 +34,8 @@ běžící web (`docker ps` podle názvu projektu), zamítnuté návrhy.
    `docs/brand/`; `__PROJECT__` nahraď názvem projektu (HTML-escapovaným).
 5. Do `.gitignore` projektu přidej `.aid-ui/` a `.aid-o/work/companion/`
    (jen chybějící řádky).
-6. Brand balíček existuje → vlož logo do kapitoly `logo` a
+6. Brand balíček existuje → tělo kapitoly `logo` s logem do souboru v `.aid-ui/`,
+   `aid-ui-state.sh body <project> logo --file <soubor>` a
    `aid-ui-state.sh chapter <project> logo navrh`.
 7. `aid-ui-serve.sh brand docs/brand` → URL pro PM.
 
@@ -41,7 +47,7 @@ Režim Impeccable plyne z tabulky v `SKILL.md`.
 
 ## Zápis
 
-`state.json` (init, `product_type`), `docs/brand/*`, `.gitignore`, kapitola `logo`.
+`docs/design/brand-state.json` (init, `product_type`), `docs/brand/*`, `.gitignore`, kapitola `logo`.
 
 ## Když krok selže
 
