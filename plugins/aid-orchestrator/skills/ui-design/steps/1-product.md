@@ -20,6 +20,14 @@ user_invocable: false
 
 1. `PRODUCT.md` existuje → shrň ho do tří odrážek (pro koho, co dělá, tón).
 2. Chybí → Skill `impeccable` s `init`; na chybějící údaje se ptá Impeccable.
+   Při `options.images` dostane Impeccable klíč OpenAI od `init` dál, v každém
+   svém běhu v `/aid-ui`: příkaz, který Impeccable spouští, začíná
+   `set -a; source <(grep '^OPENAI_API_KEY=' /opt/eco/services/.env); set +a;`
+   (klíč nikdy nevypisuj ani nezapisuj do projektu, MUST 7). Otázku Impeccable
+   na postup stavby (comp-first nebo code-first) dej PM; odpovídá PM, nikdy
+   agent. Klíč chybí nebo API selže → Impeccable jede code-led; řekni PM, že
+   návrhy obrázků nevznikly a proč, a nabídni jen pro hlavní obrázek (hero)
+   zadání do ručního nástroje.
 3. Shrnutí vlož do kapitoly `produkt` a
    `aid-ui-state.sh chapter <project> produkt navrh`.
 4. Pak v tomto pořadí zapnuté volitelné části: `1v` (`steps/1v-vision.md`,

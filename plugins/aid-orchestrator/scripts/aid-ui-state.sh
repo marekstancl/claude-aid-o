@@ -16,7 +16,9 @@
 #       direction-answer.json + direction recorded + direction_pending cleared;
 #       ANSWER reroll -> exit 3; page closed (exit 4) -> exit 1; anything
 #       unparseable -> exit 1, no direction recorded. All but a valid answer
-#       leave direction_pending set.
+#       leave direction_pending set. The ANSWER's buildPath/buildPathFlipped go to
+#       direction.build_path(_flipped); `BUILD PATH FLIPPED: comp|code` without an
+#       ANSWER records the flip and exits 5 (comps due, round stays pending).
 #       There is deliberately no verb that records a direction from a file the
 #       caller supplies: the answer only ever comes from Impeccable's stdout.
 #   await-choice <project> --kind <slogan|logo|pages> --screen <kind>-<n>.html --page-url <url>
@@ -53,8 +55,12 @@
 #                                        markers; only https://fonts.googleapis.com/… or a
 #                                        .css file under docs/brand/fonts/
 #   finish <project>                     after step 6, with a direction and the step gates
+#   spend <project>                      records each image under .impeccable/mocks/ not yet in
+#                                        image_spend as {file, sha256, bytes}; model (and usd)
+#                                        only when its .json sidecar names a model
 #
-# Exit: 0 ok, 1 refused, 2 usage. (await-direction, await-choice composition: 3 = re-roll requested.)
+# Exit: 0 ok, 1 refused, 2 usage. (await-direction, await-choice composition: 3 = re-roll requested;
+# await-direction: 5 = build path flipped, generate the comps and wait again.)
 # =============================================================================
 set -euo pipefail
 
@@ -316,6 +322,13 @@ impeccable_round() {
   if [[ "$rc" -eq 4 ]]; then
     die "the page closed without the PM's answer; the round stays open: URL $URL key $KEY"
   fi
+  # The PM flipped the build path on the page before answering: the comps are due, the round stays open.
+  local flip; flip="$(sed -n 's/^BUILD PATH FLIPPED: \(comp\|code\)$/\1/p' <<<"$out" | tail -n1)"
+  if [[ "$kind" == direction && -n "$flip" ]] && ! grep -q '^ANSWER: ' <<<"$out"; then
+    jq_write --arg p "$flip" '.direction.build_path = $p | .direction.build_path_flipped = true'
+    echo "BUILD PATH FLIPPED: $flip; generate the comps into the declared slots, then await-direction again with key $KEY"
+    exit 5
+  fi
   [[ "$rc" -eq 0 ]] || die "serve-question --wait exited $rc; nothing recorded: $out"
   # Impeccable prints `ANSWER: {json}`; a bare JSON line is accepted too. Last one wins.
   answer="$(sed -n 's/^ANSWER: //; /^{.*}$/p' <<<"$out" | while IFS= read -r l; do
@@ -328,10 +341,12 @@ impeccable_round() {
   printf '%s\n' "$answer" > "$PROJECT/$file"
   SHA="$(sha256sum "$PROJECT/$file" | cut -d' ' -f1)"
   jq_write --arg kind "$kind" --arg o "$OPT" --arg k "$KEY" --arg f "$file" --arg sha "$SHA" --arg u "$URL" \
-    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg d "$(today)" '
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg d "$(today)" --argjson a "$answer" '
     ({key: $k, answer_file: $f, answer_sha256: $sha, answered_at: $at, page_url: $u}) as $rec
     | if $kind == "direction"
-      then .direction = ({option_id: $o} + $rec) | del(.direction_pending) | .decisions += [{step: 3, what: "direction \($o)", date: $d}]
+      then .direction = ({option_id: $o} + $rec + {build_path: ($a.buildPath // .direction.build_path),   # an answer without them keeps a recorded flip
+        build_path_flipped: (if $a | has("buildPathFlipped") then $a.buildPathFlipped == true else .direction.build_path_flipped == true end)})
+        | del(.direction_pending) | .decisions += [{step: 3, what: "direction \($o)", date: $d}]
       else .choices.composition = ({id: $o} + $rec) | .choice_pending = null | .decisions += [{step: 4, what: "composition \($o)", date: $d}]
       end'
   echo "${kind^^}: $OPT"
@@ -528,6 +543,29 @@ case "$VERB" in
     need_state
     (( $# >= 1 )) || usage "fonts needs <url-or-path>..."
     html_edit fonts "$PROJECT" "$@"
+    ;;
+
+  spend)
+    need_state
+    added=0
+    while IFS= read -r -d '' f; do
+      rel="${f#"$PROJECT"/}"; sha="$(sha256sum "$f" | cut -d' ' -f1)"
+      jq -e --arg f "$rel" --arg s "$sha" 'any(.image_spend[]?; .file == $f and .sha256 == $s)' "$STATE" >/dev/null && continue
+      # Impeccable's prompt sidecar (<image>.json or <stem>.json); model and usd only as it states them
+      extra='{}'
+      for side in "$f.json" "${f%.*}.json"; do
+        [[ -f "$side" ]] || continue
+        extra="$(jq -c 'if (.model | type) == "string" then {model} + (if (.usd | type) == "number" then {usd} else {} end)
+                        else {} end' "$side" 2>/dev/null)" || extra='{}'
+        break
+      done
+      jq_write --arg f "$rel" --arg s "$sha" --argjson b "$(stat -c %s "$f")" --argjson x "$extra" \
+        '.image_spend += [{file: $f, sha256: $s, bytes: $b} + $x]'
+      added=$((added + 1))
+    done < <([[ -d "$PROJECT/.impeccable/mocks" ]] && find "$PROJECT/.impeccable/mocks" -type f \
+               \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) -print0 | sort -z)
+    jq -r --argjson n "$added" '"IMAGES: \($n) new, \(.image_spend | length) recorded"
+      + ([.image_spend[].usd | numbers] | if length > 0 then ", $\(add) priced" else "" end)' "$STATE"
     ;;
 
   finish)

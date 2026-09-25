@@ -6,7 +6,7 @@ user_invocable: false
 
 # ui-design
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-09-25
 
 Vede PM od typu produktu přes výběr vizuálního směru z nalezených vzorů až po
 postavený a ověřený vzhled; každý výsledek skládá do statické brand stránky
@@ -95,8 +95,9 @@ jedno rozhodnutí = jeden blok s možnostmi a doporučením.
 
 ## MUST Rules
 
-1. The direction round and any composition round never close without the PM's
-   answer. `serve-question --wait` `exit 4` or any "proceed unattended" path
+1. Every choice the PM makes in /aid-ui (direction, build path, composition,
+   slogan, logo, pages) is the PM's, never the agent's; the direction round and
+   any composition round never close without the PM's answer. `serve-question --wait` `exit 4` or any "proceed unattended" path
    means: `aid-ui-state.sh pending-direction`, give the PM the URL and key, end
    the turn. This rule overrides Impeccable's unattended fallback.
 2. Impeccable always runs with `IMPECCABLE_QUESTION_FORCE=1`, and the PM gets
@@ -113,6 +114,9 @@ jedno rozhodnutí = jeden blok s možnostmi a doporučením.
    `docs/brand/` (only `index.html`, `*.css`, `assets/`, `fonts/`).
 6. Ecosystem standards are read from `/opt/eco/docs/docs/ecosystem/…` on every
    run; a missing one is named and noted on the brand page.
+7. The OpenAI key is read from `/opt/eco/services/.env` only into Impeccable's
+   environment (`set -a; source <(grep '^OPENAI_API_KEY=' …); set +a` inside the
+   command that starts Impeccable), never printed, logged or written anywhere.
 
 ---
 
@@ -136,4 +140,4 @@ Před posunem kroku:
 - `skills/visual-companion/SKILL.md` - obrazovka šesti karet (sekce o vzdáleném hostu).
 - `lib/ui-fidelity/ui-capture.mjs`, `scripts/lib/aid-ui-proposal.sh` (`aid_ui_proposal_viewports`).
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-09-25

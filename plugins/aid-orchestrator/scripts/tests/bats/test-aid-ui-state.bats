@@ -650,3 +650,62 @@ NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
   run "$SCRIPT" step "$PROJ" 5
   [ "$status" -eq 0 ]
 }
+
+# --- P102 Step 8: build path and image spend --------------------------------
+
+@test "await-direction stores buildPath and buildPathFlipped from the ANSWER" {
+  STUB_OUT='ANSWER: {"optionId":"a","buildPath":"code","buildPathFlipped":true}'
+  await
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .direction.build_path "$STATE")" = code ]
+  [ "$(jq -r .direction.build_path_flipped "$STATE")" = true ]
+}
+
+@test "BUILD PATH FLIPPED without an ANSWER: exit 5, flip recorded, round stays pending" {
+  STUB_OUT='BUILD PATH FLIPPED: comp'
+  await
+  [ "$status" -eq 5 ]
+  [ "$(jq -r .direction.build_path "$STATE")" = comp ]
+  [ "$(jq -r .direction.build_path_flipped "$STATE")" = true ]
+  [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
+  run "$SCRIPT" require-direction "$PROJ"
+  [ "$status" -eq 1 ]
+  STUB_OUT='ANSWER: {"optionId":"b"}'
+  await
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .direction.build_path "$STATE")" = comp ]
+  [ "$(jq .direction_pending "$STATE")" = null ]
+}
+
+@test "build path comp from the answer: step 5 refused until await-choice composition records one" {
+  STUB_OUT='ANSWER: {"optionId":"a","buildPath":"comp","buildPathFlipped":false}'
+  await
+  "$SCRIPT" step "$PROJ" 4
+  run "$SCRIPT" step "$PROJ" 5
+  [ "$status" -eq 1 ]
+  STUB_OUT='ANSWER: {"optionId":"c1"}'
+  run "$SCRIPT" await-choice "$PROJ" --kind composition --imp "$IMP" --key k1 --page-url http://10.20.20.22:3915/
+  [ "$status" -eq 0 ]
+  run "$SCRIPT" step "$PROJ" 5
+  [ "$status" -eq 0 ]
+}
+
+@test "spend records each mock once, a changed image anew; model only from a sidecar naming one" {
+  M="$PROJ/.impeccable/mocks/decision"; mkdir -p "$M"
+  printf 'png-a' > "$M/a.png"; printf 'png-b' > "$M/b.png"
+  echo '{"prompt":"x","model":"gpt-image-1","usd":0.04}' > "$M/a.json"
+  echo '{"prompt":"y","usd":0.04}' > "$M/b.json"
+  run "$SCRIPT" spend "$PROJ"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"2 new, 2 recorded"* ]]
+  [ "$(jq '.image_spend | length' "$STATE")" = 2 ]
+  [ "$(jq -c '.image_spend[0] | {file, bytes, model, usd}' "$STATE")" = '{"file":".impeccable/mocks/decision/a.png","bytes":5,"model":"gpt-image-1","usd":0.04}' ]
+  [ "$(jq -r .image_spend[0].sha256 "$STATE")" = "$(sha256sum "$M/a.png" | cut -d' ' -f1)" ]
+  [ "$(jq -c '.image_spend[1] | keys' "$STATE")" = '["bytes","file","sha256"]' ]
+  run "$SCRIPT" spend "$PROJ"
+  [[ "$output" == *"0 new, 2 recorded"* ]]
+  printf 'png-b2' > "$M/b.png"
+  run "$SCRIPT" spend "$PROJ"
+  [[ "$output" == *"1 new, 3 recorded"* ]]
+  [ "$(jq '[.image_spend[] | select(.file | endswith("b.png"))] | length' "$STATE")" = 2 ]
+}

@@ -106,3 +106,25 @@ postup_first() { awk '/^## Postup/{f=1; next} f && NF {print; exit}' "$1"; }
   grep -qF 'aid-ui-seo-check.py' <<<"$step"
   grep -qF 'aid-ui-state.sh body <project> seo' <<<"$step"
 }
+
+# P102 Step 8 — image comps: every PM choice under MUST 1, the key reaches Impeccable from step 1.
+@test "SKILL.md MUST 1 names every PM choice; MUST 7 keeps the OpenAI key out of sight" {
+  must1="$(sed -n '/^1\. /,/^2\. /p' <<<"$(sed -n '/^## MUST Rules/,/^## Completeness Gate/p' "$SK/SKILL.md")")"
+  for s in direction 'build path' composition slogan logo pages; do
+    grep -qF -- "$s" <<<"$must1" || { echo "MUST 1 missing: $s"; return 1; }
+  done
+  grep -qE '^7\. The OpenAI key .*services/\.env' "$SK/SKILL.md"
+}
+
+@test "1-product.md exports the key into Impeccable from init on and the PM answers the build path" {
+  grep -qF "set -a; source <(grep '^OPENAI_API_KEY=' /opt/eco/services/.env); set +a" "$SK/steps/1-product.md"
+  grep -qF 'od `init` dál' "$SK/steps/1-product.md"
+  grep -qF 'odpovídá PM, nikdy' "$SK/steps/1-product.md"
+  ! grep -rnE 'OPENAI_API_KEY=[A-Za-z0-9]' "$SK" || false
+}
+
+@test "3-direction.md handles exit 5; 4-build.md closes the composition round through await-choice and reports spend" {
+  grep -qF 'exit 5' "$SK/steps/3-direction.md"
+  grep -qF 'await-choice <project> --kind composition' "$SK/steps/4-build.md"
+  grep -qF 'aid-ui-state.sh spend <project>' "$SK/steps/4-build.md"
+}
