@@ -118,6 +118,32 @@ SVG
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
+@test "--verify refuses what the tree never shows: PI, DOCTYPE/ATTLIST, image-set; and caps size and depth" {
+  complete_set
+  S='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'; R='<rect width="32" height="32"/>'
+  for doc in \
+    "<?xml version=\"1.0\"?><?xml-stylesheet type=\"text/xsl\" href=\"https://evil.example/x.xsl\"?>$S$R</svg>" \
+    "<?xml version=\"1.0\" standalone=\"no\"?><!DOCTYPE svg [<!ENTITY % p SYSTEM \"p.dtd\">%p;<!ATTLIST svg onload CDATA \"alert(document.domain)\">]>$S$R</svg>" \
+    "<?xml version=\"1.0\"?><?xml-stylesheet type=\"text/css\" href=\"https://evil.example/x.css\"?>$S$R</svg>" \
+    "$S<rect width=\"32\" height=\"32\" mask=\"image-set('https://evil.example/t.png' 1x)\"/></svg>" \
+    "$S<rect width=\"32\" height=\"32\" mask=\"-webkit-image-set('https://evil.example/t.png' 1x)\"/></svg>" \
+    "$S<g transform=\"translate(1 1) image-set('https://evil.example/t.png')\">$R</g></svg>"; do
+    printf '%s\n' "$doc" > "$T/favicon.svg"
+    run python3 "$ICO" --verify "$T"
+    [ "$status" -eq 1 ] || { echo "passed: $doc"; return 1; }
+    [ "$(grep -c '^WRONG   favicon.svg ' <<<"$output")" -eq 1 ]
+  done
+  python3 -c 'import sys; print(sys.argv[1] + "<g>" * 64 + "</g>" * 64 + "</svg>")' "$S" > "$T/favicon.svg"
+  run python3 "$ICO" --verify "$T"
+  [[ "$output" == *"WRONG   favicon.svg nested deeper than 64 elements"* ]]
+  python3 -c 'import sys; print(sys.argv[1] + "<path d=\"" + "M0 0" * 140000 + "\"/></svg>")' "$S" > "$T/favicon.svg"
+  run python3 "$ICO" --verify "$T"
+  [[ "$output" == *"WRONG   favicon.svg larger than 512 KB"* ]]
+  printf '\xef\xbb\xbf<?xml version="1.0" encoding="UTF-8"?>\n%s<g transform="translate(2,2) scale(.5) rotate(45 16 16)">%s</g></svg>\n' "$S" "$R" > "$T/favicon.svg"
+  run python3 "$ICO" --verify "$T"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
 # run_icons <symbol> <out> — runs references/brand-icons.js under node with a stub page
 # whose screenshot() writes an empty file, the paths filled in the way 1i step 6 says.
 run_icons() {

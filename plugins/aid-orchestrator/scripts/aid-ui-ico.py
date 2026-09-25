@@ -7,7 +7,8 @@
                                              pixel size; exit 1 when one is missing or wrong.
                                              favicon.svg must use only allowed shape elements and
                                              attributes (SVG_ELEMENTS / SVG_ATTRS below) and have
-                                             a square viewBox
+                                             a square viewBox; no DOCTYPE or PI, UTF-8, at most
+                                             512 KB and 64 levels deep
 
 Exit: 0 ok, 1 refused / check failed, 2 usage. Python stdlib only.
 """
@@ -66,17 +67,50 @@ SVG_ATTRS = {
 }
 FRAGMENT = re.compile(r"#[A-Za-z_][\w.-]*")
 URL_FRAGMENT = re.compile(r"url\(#[A-Za-z_][\w.-]*\)")
+TRANSFORM = re.compile(r"\s*(?:(?:matrix|translate|scale|rotate|skewX|skewY)\s*\([-+0-9.eE,\s]*\)[\s,]*)+")
+# ET.parse drops processing instructions and the DOCTYPE, and expat and a browser's libxml2
+# disagree on DTDs, so both are refused on the raw text before parsing.
+XML_DECL = re.compile(r"<\?xml\s[^?>]*\?>")
+MARKUP_DECL = re.compile(r"<!(?:DOCTYPE|ENTITY|ATTLIST|ELEMENT)", re.I)
+SVG_MAX_BYTES = 512 * 1024
+SVG_MAX_DEPTH = 64
+
+
+def svg_depth(el, depth=1):
+    """True when the tree under el stays within SVG_MAX_DEPTH levels."""
+    return depth <= SVG_MAX_DEPTH and all(svg_depth(c, depth + 1) for c in el)
 
 
 def svg_problem(path):
     """Why the SVG is unsafe or not square, or None when it is fine."""
     try:
-        root = ET.parse(path).getroot()
-    except (OSError, ET.ParseError) as e:
+        with open(path, "rb") as f:
+            raw = f.read(SVG_MAX_BYTES + 1)
+    except OSError as e:
+        return f"not readable ({e})"
+    if len(raw) > SVG_MAX_BYTES:
+        return f"larger than {SVG_MAX_BYTES // 1024} KB"
+    try:
+        text = raw.removeprefix(b"\xef\xbb\xbf").decode("utf-8")
+    except UnicodeDecodeError:
+        return "not UTF-8"
+    decl = XML_DECL.match(text)
+    if "\0" in text or (decl and re.search(r"encoding\s*=\s*[\"'](?!utf-8[\"'])", decl.group(), re.I)):
+        return "not UTF-8"
+    rest = text[decl.end():] if decl else text
+    if "<?" in rest:
+        return "has a processing instruction (only a leading <?xml ...?> is allowed)"
+    if MARKUP_DECL.search(text):
+        return "has a DOCTYPE or DTD declaration"
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as e:
         return f"not valid XML ({e})"
+    if not svg_depth(root):
+        return f"nested deeper than {SVG_MAX_DEPTH} elements"
     if root.tag.split("}")[-1] != "svg":
         return "root element is not <svg>"
-    for el in root.iter():  # ET.parse drops comments and processing instructions
+    for el in root.iter():  # comments and PIs are not in the tree (PIs refused above)
         tag = el.tag.split("}")[-1].lower()
         if tag not in SVG_ELEMENTS:
             return f"contains <{tag}>, not an allowed shape element"
@@ -92,8 +126,9 @@ def svg_problem(path):
                 return f"<{tag}> has the attribute {k}, not an allowed one"
             if "\\" in v:  # presentation attributes parse as CSS: u\72l( is url(
                 return f"<{tag}> {k} has a backslash escape"
-            if "url(" in v.lower() and not URL_FRAGMENT.fullmatch(v.strip()):
-                return f"<{tag}> {k}={v[:60]} is not url(#id)"
+            if "(" in v and not URL_FRAGMENT.fullmatch(v.strip()) and not (
+                    k in ("transform", "gradienttransform") and TRANSFORM.fullmatch(v)):
+                return f"<{tag}> {k}={v[:60]} is neither url(#id) nor a plain transform"
     vb = re.split(r"[\s,]+", root.get("viewBox", "").strip())
     try:
         w, h = float(vb[2]), float(vb[3])
