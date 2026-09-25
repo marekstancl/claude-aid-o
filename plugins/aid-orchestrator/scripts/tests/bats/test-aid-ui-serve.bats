@@ -151,8 +151,22 @@ HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
   [ "$(get 39916)" = brand-ok ]
   run env -u AID_UI_JOBS_DIR -u AID_UI_PROJECT bash -c 'cd / && "$0" stop brand' "$SERVE"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"stopped the brand server of project $(realpath "$BATS_TEST_TMPDIR")"* ]]
   for i in $(seq 1 50); do [[ -z "$(ss -ltnH "sport = :39916")" ]] && break; sleep 0.1; done
   [ -z "$(ss -ltnH "sport = :39916")" ]
+}
+
+@test "stop brand from another project refuses to stop this project's server, naming both" {
+  "$SERVE" brand "$BRAND"
+  other="$BATS_TEST_TMPDIR/proj2"; me="$(realpath "$BATS_TEST_TMPDIR")"
+  run env AID_UI_PROJECT="$other" AID_UI_JOBS_DIR="$other/.aid-ui/jobs" "$SERVE" stop brand
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"belongs to project $me, not $(realpath "$other")"* ]]
+  git init -q "$other"   # cwd inside a git project, no AID_UI_PROJECT
+  run env -u AID_UI_JOBS_DIR -u AID_UI_PROJECT bash -c 'cd "$1/docs" && "$0" stop brand' "$SERVE" "$other"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"belongs to project $me, not $(realpath "$other")"* ]]
+  [ "$(get 39916)" = brand-ok ]
 }
 
 @test "a port held by a foreign http.server: exit 1 naming the port, foreign alive" {

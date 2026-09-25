@@ -29,9 +29,13 @@
 #                          *.XXXXXX are named as internal);
 #                          idempotent: our job alive, answering and serving the
 #                          same (realpath) dir -> print URL, exit 0; else restart.
-#   stop <forward|brand>   cancel that role's job, found under <jobs> or, from any
-#                          cwd, through the pointer $STATE_DIR/<id> that start
-#                          writes; no job of ours -> exit 0
+#   stop <forward|brand>   cancel that role's job, found under <jobs> or else
+#                          through the pointer $STATE_DIR/<id> that start writes
+#                          (line 1 jobs dir, line 2 project root). Pointer use:
+#                          a known project ($AID_UI_PROJECT, else the git root of
+#                          $PWD) other than the pointer's -> exit 1 naming both,
+#                          nothing stopped; no known project -> stops it and
+#                          prints whose server it was; no job of ours -> exit 0
 #
 # Both servers run as `aid-job.sh` jobs (the plugin's one process owner), so a
 # stop cancels exactly that job's process group and nothing else. The job id
@@ -41,7 +45,7 @@
 #
 # <project> = $AID_UI_PROJECT, else $PWD. Jobs dir = $AID_UI_JOBS_DIR, else
 # <project>/.aid-ui/jobs. Pointer dir = $AID_UI_STATE_DIR, else ~/.cache/aid-ui
-# (one file per job id = per port, holding the jobs dir of the job started last).
+# (one file per job id = per port: jobs dir and project of the job started last).
 # Env: AID_UI_HOST (10.20.20.22), AID_UI_FORWARD_PORT (3915), AID_UI_BRAND_PORT (3916).
 # Output: URL: <url> and JOB: <id>.
 # Exit: 0 ok, 1 port in use / start failure, 2 usage or refused target.
@@ -148,7 +152,7 @@ start() {   # start <role> <cmd...>
     die "port $port in use by: $(ss -ltnpH "sport = :$port" | tr -s ' ')"
   fi
   mkdir -p "$JOBS" "$STATE_DIR"
-  realpath "$JOBS" > "$STATE_DIR/$id"
+  printf '%s\n%s\n' "$(realpath "$JOBS")" "$(realpath "$PROJECT")" > "$STATE_DIR/$id"
   local out
   out="$(bash "$JOB_SH" run --jobs-dir "$JOBS" --id "$id" --label "aid-ui $role" \
     --repo "$PROJECT" --deadline "$DEADLINE" -- "$@" 2>&1)" || die "aid-job.sh run failed: $out"
@@ -203,9 +207,16 @@ case "$1" in
     [[ "$2" == forward || "$2" == brand ]] || usage
     id="$(job_id "$2")"
     jobs="$JOBS"
-    [[ -f "$jobs/$id/job.json" ]] || jobs="$(cat "$STATE_DIR/$id" 2>/dev/null || true)"
-    [[ -n "$jobs" && -f "$jobs/$id/job.json" ]] || exit 0
+    if [[ ! -f "$jobs/$id/job.json" ]]; then
+      { IFS= read -r jobs; IFS= read -r owner; } 2>/dev/null < "$STATE_DIR/$id" || true
+      [[ -n "${jobs:-}" && -f "$jobs/$id/job.json" ]] || exit 0
+      if [[ -n "${AID_UI_PROJECT:-}" ]]; then here="$(realpath -m "$AID_UI_PROJECT")"
+      else here="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"; fi
+      [[ -z "$here" || "$here" == "${owner:-}" ]] \
+        || die "the $2 server on port $(port_of "$2") belongs to project ${owner:-<unknown>}, not $here; refusing to stop it (run stop from that project)"
+    fi
     bash "$JOB_SH" cancel --jobs-dir "$jobs" --id "$id" >/dev/null || die "cancel of $id failed"
+    [[ -z "${owner+x}" ]] || echo "stopped the $2 server of project ${owner:-<unknown>}"
     ;;
   *) usage ;;
 esac

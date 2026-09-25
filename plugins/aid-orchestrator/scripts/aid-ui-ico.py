@@ -9,11 +9,18 @@
                                              attributes (SVG_ELEMENTS / SVG_ATTRS below) and have
                                              a square viewBox; no DOCTYPE or PI, UTF-8, at most
                                              512 KB and 64 levels deep
+  python3 aid-ui-ico.py --check-svg <in.svg> <out.checked.svg>
+                                             the same SVG check on <in>; pass -> writes the
+                                             checked bytes to <out> (name must end in
+                                             .checked.svg, the only name brand-icons.js
+                                             opens), exit 0; fail -> WRONG <reason>, nothing
+                                             written, exit 1
 
 Exit: 0 ok, 1 refused / check failed, 2 usage. Python stdlib only.
 """
 import os
 import re
+import shutil
 import struct
 import sys
 import xml.etree.ElementTree as ET
@@ -187,9 +194,29 @@ def verify(d):
     return 1 if bad else 0
 
 
+def check_svg(src, out):
+    """Copy src to out only when the copy itself passes svg_problem (no check-then-copy race)."""
+    tmp = out + ".tmp"
+    try:
+        shutil.copyfile(src, tmp)
+    except OSError as e:
+        print(f"WRONG   {src} not readable ({e})")
+        return 1
+    problem = svg_problem(tmp)
+    if problem is not None:
+        os.remove(tmp)
+        print(f"WRONG   {src} {problem}")
+        return 1
+    os.replace(tmp, out)
+    print(f"OK      {out}")
+    return 0
+
+
 def main(argv):
     if len(argv) == 2 and argv[0] == "--verify":
         return verify(argv[1])
+    if len(argv) == 3 and argv[0] == "--check-svg" and argv[2].endswith(".checked.svg"):
+        return check_svg(argv[1], argv[2])
     if len(argv) >= 2 and not argv[0].startswith("-"):
         pack(argv[0], argv[1:])
         return 0

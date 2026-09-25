@@ -44,14 +44,20 @@ který prošel kontrolou výstupu šablony; kapitola `logo` to nese.
    živým textem + název a licence fontu), vedle distribuční verze s textem
    převedeným na křivky, `brand-brief.md`, `README.md`; `logo/` a `lockup/`
    jen pro kontexty ze zadání.
-6. Ikony: `references/brand-icons.js` zkopíruj do `.aid-ui/brand-icons.js`
-   a vyplň v něm jen cesty: absolutní cestu k SVG symbolu s křivkami,
-   případně k mikrovariantě, a k `docs/design/brand-package/icons/`. SVG do
-   skriptu nikdy nevkládej, skript si ho přečte sám. Každá cesta musí
-   odpovídat `^/[A-Za-z0-9._/-]+$` (bez uvozovek, mezer a `${`), jinou
-   nevyplňuj. Spusť přes
-   `mcp__plugin_playwright_playwright__browser_run_code_unsafe` s `filename`
-   (zapíše PNG). Pak `cp <symbol.svg> <icons>/favicon.svg`,
+6. Ikony: každé SVG, které jde do skriptu (symbol s křivkami, případně
+   mikrovarianta, i logo dodané PM na cestě `"package"`), nejdřív projde
+   kontrolou: `python3 scripts/aid-ui-ico.py --check-svg <symbol.svg> .aid-ui/logo/symbol.checked.svg`
+   (mikrovarianta stejně do `micro.checked.svg`). Exit 1 → `WRONG` s důvodem,
+   nic se nezapsalo; SVG oprav (u loga PM mu důvod ukaž) a zkontroluj znovu,
+   skript nespouštěj. `references/brand-icons.js` zkopíruj do
+   `.aid-ui/brand-icons.js` a vyplň v něm jen cesty: absolutní cesty ke
+   `*.checked.svg` a k `docs/design/brand-package/icons/`. Jiný soubor než
+   `*.checked.svg` skript odmítne dřív, než ho otevře. SVG do skriptu nikdy
+   nevkládej, skript si ho přečte sám. Každá cesta musí odpovídat
+   `^/[A-Za-z0-9._/-]+$` (bez uvozovek, mezer a `${`), jinou nevyplňuj.
+   Spusť přes `mcp__plugin_playwright_playwright__browser_run_code_unsafe`
+   s `filename` (zapíše PNG). Pak
+   `cp .aid-ui/logo/symbol.checked.svg <icons>/favicon.svg`,
    `python3 scripts/aid-ui-ico.py <icons>/favicon.ico <icons>/favicon-16.png <icons>/favicon-32.png <icons>/favicon-48.png`
    a `python3 scripts/aid-ui-ico.py --verify <icons>` (exit 0 = kompletní).
 7. Kontrola výstupu podle šablony (oddíl „Kontrola výstupu"): čitelnost
@@ -62,7 +68,7 @@ který prošel kontrolou výstupu šablony; kapitola `logo` to nese.
    line, polyline, polygon, defs, přechody se stop, clipPath, mask,
    symbol, use s `href="#id"`, title, desc) s atributy geometrie a barvy,
    barvy jen jako hodnota nebo `url(#id)`; nic jiného (a, animace, style,
-   text, obrázek) `--verify` z bodu 6 nepustí, licence
+   text, obrázek) `--check-svg` ani `--verify` z bodu 6 nepustí, licence
    fontu, odlišnost od značek v oboru (obrazové vyhledání je ruční úkol
    PM - napiš mu to), úplnost vůči kontextům použití.
 8. Ikony, které stránka značky ukazuje, zkopíruj do `docs/brand/assets/`.

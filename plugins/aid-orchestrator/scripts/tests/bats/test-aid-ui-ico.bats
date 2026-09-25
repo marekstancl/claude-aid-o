@@ -144,9 +144,29 @@ SVG
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
+@test "--check-svg refuses script, onload and the DOCTYPE/ATTLIST case, writes nothing; passes a clean SVG" {
+  S='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'; R='<rect width="32" height="32"/>'
+  for doc in "$S<script>alert(1)</script>$R</svg>" \
+    "$S<rect width=\"32\" height=\"32\" onload=\"alert(1)\"/></svg>" \
+    "<?xml version=\"1.0\" standalone=\"no\"?><!DOCTYPE svg [<!ENTITY % p SYSTEM \"p.dtd\">%p;<!ATTLIST svg onload CDATA \"alert(document.domain)\">]>$S$R</svg>"; do
+    printf '%s\n' "$doc" > "$T/bad.svg"
+    run python3 "$ICO" --check-svg "$T/bad.svg" "$T/bad.checked.svg"
+    [ "$status" -eq 1 ] || { echo "passed: $doc"; return 1; }
+    [[ "$output" == "WRONG   $T/bad.svg "* ]]
+    [ -z "$(ls "$T" | grep -v '^bad.svg$')" ]   # no .checked.svg, no .tmp left
+  done
+  printf '%s%s</svg>\n' "$S" "$R" > "$T/ok.svg"
+  run python3 "$ICO" --check-svg "$T/ok.svg" "$T/ok.checked.svg"
+  [ "$status" -eq 0 ]
+  cmp "$T/ok.svg" "$T/ok.checked.svg"
+  run python3 "$ICO" --check-svg "$T/ok.svg" "$T/ok.svg.out"   # output name must end in .checked.svg
+  [ "$status" -eq 2 ]; [ ! -e "$T/ok.svg.out" ]
+}
+
 # run_icons <symbol> <out> — runs references/brand-icons.js in a node vm whose only global
 # is a stub page (no require, process or import, as in the Playwright MCP sandbox): goto
-# file:// reads the file, screenshot() writes a PNG header of the viewport size.
+# file:// reads the file and prints "GOTO <url>", screenshot() writes a PNG header of the
+# viewport size.
 run_icons() {
   command -v node >/dev/null || skip "node not installed"
   sed -e "s|__ABSOLUTE_SYMBOL_SVG__|$1|" -e "s|__ABSOLUTE_ICONS_DIR__|$2|" \
@@ -156,7 +176,7 @@ run_icons() {
     let doc = "", vp = null;
     const png = (n) => { const b = Buffer.alloc(24); Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").copy(b); b.writeUInt32BE(n.width, 16); b.writeUInt32BE(n.height, 20); return b; };
     const page = {
-      goto: async (u) => { doc = u.startsWith("file://") ? fs.readFileSync(u.slice(7), "utf8") : ""; },
+      goto: async (u) => { console.log("GOTO " + u); doc = u.startsWith("file://") ? fs.readFileSync(u.slice(7), "utf8") : ""; },
       evaluate: async () => doc,
       setViewportSize: async (v) => { vp = v; },
       setContent: async () => {},
@@ -175,27 +195,39 @@ run_icons() {
 @test "brand-icons.js reads the SVG as data: backticks and \${} in it never run" {
   mkdir -p "$T/icons"
   printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><desc>`${page.screenshot({path:"%s/pwned"})}`</desc><rect/></svg>' "$T" > "$T/symbol.svg"
-  run_icons "$T/symbol.svg" "$T/icons"
+  python3 "$ICO" --check-svg "$T/symbol.svg" "$T/symbol.checked.svg"
+  run_icons "$T/symbol.checked.svg" "$T/icons"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ ! -e "$T/pwned" ]
   [[ "$output" == *"icon-maskable-512.png"* ]]
   ! grep -q '<svg' "$T/brand-icons.js"
-  cp "$T/symbol.svg" "$T/icons/favicon.svg"
+  cp "$T/symbol.checked.svg" "$T/icons/favicon.svg"
   python3 "$ICO" "$T/icons/favicon.ico" "$T"/icons/favicon-{16,32,48}.png
   run python3 "$ICO" --verify "$T/icons"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
+@test "brand-icons.js refuses an SVG that did not pass --check-svg before opening anything" {
+  mkdir -p "$T/icons"
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" onload="alert(1)"/>' > "$T/symbol.svg"
+  run_icons "$T/symbol.svg" "$T/icons"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refused: not a .checked.svg"* ]]
+  [[ "$output" != *GOTO* ]]
+  run python3 "$ICO" --check-svg "$T/symbol.svg" "$T/symbol.checked.svg"
+  [ "$status" -eq 1 ]; [ ! -e "$T/symbol.checked.svg" ]
+}
+
 @test "brand-icons.js refuses a path that is not plain absolute and a non-square viewBox" {
   mkdir -p "$T/icons"
-  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"/>' > "$T/symbol.svg"
-  run_icons "relative/symbol.svg" "$T/icons"
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"/>' > "$T/symbol.checked.svg"
+  run_icons "relative/symbol.checked.svg" "$T/icons"
   [ "$status" -eq 1 ]
   [[ "$output" == *"refused: not a plain absolute path"* ]]
-  run_icons "$T/symbol.svg" "$T/icons/../icons"
+  run_icons "$T/symbol.checked.svg" "$T/icons/../icons"
   [ "$status" -eq 1 ]
-  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 24"/>' > "$T/symbol.svg"
-  run_icons "$T/symbol.svg" "$T/icons"
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 24"/>' > "$T/symbol.checked.svg"
+  run_icons "$T/symbol.checked.svg" "$T/icons"
   [ "$status" -eq 1 ]
   [[ "$output" == *"not square"* ]]
 }
