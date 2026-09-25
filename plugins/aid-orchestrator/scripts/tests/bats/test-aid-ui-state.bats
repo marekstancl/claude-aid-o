@@ -239,6 +239,28 @@ record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq
   cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
 }
 
+@test "body is an allowlist: glued handler, style, svg and an unfinished tag refused" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in '<img src="x"onerror="alert(1)">' '<p style="x">' '<svg onload=1>' \
+             '<img alt=">" onerror=1 ' '<p class="a status">' '<!DOCTYPE html>'; do
+    printf '%s\n' "$bad" > "$BATS_TEST_TMPDIR/bad.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+    [ "$status" -eq 1 ]
+    [[ "$output" == ERROR:*"body of section vize refused"* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+}
+
+@test "body accepts allowed tags, safe links and a relative image" {
+  for ok in '<a href="https://example.com">ok</a>' '<img src="assets/logo.svg" alt="logo">' \
+            '<p>Text <strong>tučně</strong> a &lt;script&gt;</p>'; do
+    printf '%s\n' "$ok" > "$BATS_TEST_TMPDIR/ok.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/ok.html"
+    [ "$status" -eq 0 ]
+    grep -qF "<!-- body:vize -->$ok" "$HTML"
+  done
+}
+
 @test "a later chapter call leaves a written body byte-identical" {
   printf '<div class="swatch">a</div>\n<p class="note">b</p>\n' > "$BATS_TEST_TMPDIR/b.html"
   "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/b.html"

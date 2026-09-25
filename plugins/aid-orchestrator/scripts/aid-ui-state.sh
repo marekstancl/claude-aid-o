@@ -105,15 +105,52 @@ if mode == "status":
 elif mode == "body":
     cid, src = args
     body = open(src, encoding="utf-8").read()
-    pat = (r'<script|<iframe|<object|<embed|</?section|javascript:|class\s*=\s*["\']?status'
-           r'|<!--\s*/?(body|status|fonts)|<[^>]*[\s/]on[a-z]+\s*=')
-    # The browser decodes entities and drops whitespace/control chars inside a URL
-    # scheme (jav&#x61;script:, java<TAB>script:), so check the decoded text too.
-    decoded = re.sub(r'[\x00-\x20\x7f]+', '', html.unescape(body))
-    bad = (re.search(pat, body, re.I) or re.search(pat, decoded, re.I)
-           or re.search(r'=["\'`]?(vbscript|data):', decoded, re.I))
-    if bad:
-        fail("body of section %s refused: %s contains %r" % (cid, src, bad.group(0)[-40:]))
+    # Allowlist, not denylist: only these tags and attributes, links only to safe schemes.
+    from html.parser import HTMLParser
+    TAGS = set("p br hr h2 h3 h4 ul ol li strong em b i a img figure figcaption table thead tbody "
+               "tr th td blockquote code pre span div small dl dt dd".split())
+    ATTRS = {"class": None, "alt": None, "title": None, "lang": None, "href": {"a"},
+             "src": {"img"}, "width": {"img"}, "height": {"img"}, "loading": {"img"},
+             "colspan": {"td", "th"}, "rowspan": {"td", "th"}}
+    def bad_url(v):   # the parser already decoded entities; the browser drops these chars
+        v = re.sub(r'[\x00-\x20\x7f]+', '', v).lower()
+        if v.startswith(("https://", "http://", "mailto:", "#", "/", "./", "../")):
+            return False
+        return ":" in v.split("/", 1)[0]   # relative path: no scheme before the first "/"
+    class Check(HTMLParser):
+        def refuse(self, what):
+            fail("body of section %s refused: %s contains %s" % (cid, src, what))
+        def handle_starttag(self, tag, attrs):
+            if tag not in TAGS:
+                self.refuse("tag <%s>" % tag)
+            for name, val in attrs:
+                allowed = ATTRS.get(name, False)
+                if allowed is False or (allowed and tag not in allowed):
+                    self.refuse("attribute %s on <%s>" % (name, tag))
+                if name == "class" and re.search(r'(^|\s)status(\s|$)', val or ""):
+                    self.refuse("class status")
+                if name in ("href", "src") and bad_url(val or ""):
+                    self.refuse("URL %r" % (val or "")[:40])
+        handle_startendtag = handle_starttag
+        def handle_endtag(self, tag):
+            if tag not in TAGS:
+                self.refuse("tag </%s>" % tag)
+        def handle_data(self, data):   # raw text; a browser would still open a tag here (<img\0...)
+            if re.search(r'<[A-Za-z!/?]', data):
+                self.refuse("an unparsable tag %r" % data[:40])
+        def handle_comment(self, data):
+            self.refuse("a comment")
+        def handle_decl(self, decl):
+            self.refuse("a declaration")
+        def handle_pi(self, data):
+            self.refuse("a processing instruction")
+        def unknown_decl(self, data):
+            self.refuse("a declaration")
+    c = Check(convert_charrefs=False)
+    c.feed(body)
+    if re.search(r'<[A-Za-z!/?]', c.rawdata):   # close() would drop an unfinished tag silently
+        c.refuse("an unfinished tag %r" % c.rawdata[:40])
+    c.close()
     text = between(text, cid, "body", body)
 elif mode == "fonts":
     project = args[0]
