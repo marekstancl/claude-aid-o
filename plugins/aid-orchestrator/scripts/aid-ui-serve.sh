@@ -23,7 +23,10 @@
 #                          Impeccable's own endpoint who it is.
 #   brand <dir>            python3 -m http.server on AID_UI_HOST:AID_UI_BRAND_PORT
 #                          only for a brand page dir: realpath ends in /docs/brand
-#                          and it has state.json and index.html;
+#                          and it has index.html and tokens.css; refused when it
+#                          holds anything but index.html, top-level *.css,
+#                          assets/ and fonts/ (state.json, *.tmp, mktemp leftovers
+#                          *.XXXXXX are named as internal);
 #                          idempotent: our job alive, answering and serving the
 #                          same (realpath) dir -> print URL, exit 0; else restart.
 #   stop <forward|brand>   cancel that role's job; no job of ours -> exit 0
@@ -172,8 +175,19 @@ case "$1" in
     ;;
   brand)
     dir="$(realpath -e "$2" 2>/dev/null || true)"
-    [[ "$dir" == */docs/brand && -f "$dir/state.json" && -f "$dir/index.html" ]] \
-      || refuse "$2 is not a brand page (needs <project>/docs/brand with state.json and index.html); refusing to serve it"
+    [[ "$dir" == */docs/brand && -f "$dir/index.html" && -f "$dir/tokens.css" ]] \
+      || refuse "$2 is not a brand page (needs <project>/docs/brand with index.html and tokens.css); refusing to serve it"
+    l="$(find "$dir" -mindepth 1 -type l -printf '%P' -quit)"
+    [[ -z "$l" ]] || refuse "$dir/$l is a symlink; the brand page serves no symlinks (it could point outside docs/brand)"
+    while IFS= read -r -d '' f; do
+      case "$f" in
+        state.json|*/state.json|*.tmp|*.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;;
+        index.html|assets/*|fonts/*) continue ;;
+        */*) ;;
+        *.css) continue ;;
+      esac
+      refuse "$dir/$f must not be served (state.json must not be served, nor anything internal; the brand page serves only index.html, *.css, assets/, fonts/)"
+    done < <(find "$dir" -mindepth 1 ! -type d -printf '%P\0')
     id="$(job_id brand)"
     if alive "$id" && listening "$BRAND_PORT" && [[ "$(jq -r '.command[-1]' "$JOBS/$id/job.json")" == "$dir" ]]; then
       echo "URL: http://$HOST:$BRAND_PORT/"; echo "JOB: $id"; exit 0

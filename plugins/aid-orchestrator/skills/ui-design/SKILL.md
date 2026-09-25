@@ -32,7 +32,7 @@ Do NOT invoke for:
 - Nezapojuje se do běhů AIDu; nic sám veřejně nevystavuje ani neposílá.
 - Neobchází blokace galerií; cizí screenshoty nejdou do gitu ani zákazníkovi.
 - Impeccable vlastní výběrové kolo, stránku výběru, `PRODUCT.md`, `DESIGN.md`
-  a `.impeccable/`; `state.json` na ně jen odkazuje.
+  a `.impeccable/`; `docs/design/brand-state.json` na ně jen odkazuje.
 
 ## Start (každé spuštění)
 
@@ -46,7 +46,8 @@ Do NOT invoke for:
    `mcp__plugin_playwright_playwright__browser_navigate` na `about:blank`.
    Selže (nástroj chybí, prohlížeč nejde spustit) → zkus Node Playwright
    (`node -e "require.resolve('playwright')"` nebo `@playwright/test`, z pluginu či projektu,
-   a `npx playwright --version`) a řekni PM, že snímky půjdou přes Node Playwright.
+   a `npx playwright --version`) a řekni PM, že snímky půjdou přes Node Playwright:
+   `node <plugin>/lib/ui-fidelity/ui-capture.mjs` z kořene projektu, jinak stejně.
    Nejde ani jedno → stop, řekni PM: `/plugin install playwright@claude-plugins-official`
    a `npx playwright install chromium`.
 4. Ekosystémové standardy čti živě z `/opt/eco/docs/docs/ecosystem/…`
@@ -55,13 +56,17 @@ Do NOT invoke for:
 
 ## Směrování
 
-- Bez argumentu: krok = `jq .step <project>/docs/brand/state.json` (soubor
+- Bez argumentu: krok = `jq .step <project>/docs/design/brand-state.json` (soubor
   chybí → krok 0).
 - `/aid-ui <n>`: nejdřív `aid-ui-state.sh step <project> <n>`. Kroky 4-6 skript
   odmítne bez zaznamenaného směru a jmenuje krok 3 - řekni to PM a pokračuj
   krokem 3, ne `n`.
-- Načti jen `steps/<n>-*.md` a proveď ho. Po úspěchu
-  `aid-ui-state.sh step <project> <n+1>`.
+- Načti jen `steps/<n>-*.md` a proveď ho. Po úspěchu kroků 0-5
+  `aid-ui-state.sh step <project>` s číslem následujícího kroku; po kroku 6
+  `aid-ui-state.sh finish <project>` - tím běh končí (kroku 7 není).
+- `brand-state.json.finished` vyplněné → řekni PM, že běh je hotový, a nabídni
+  krok k opakování (`/aid-ui <n>`; krok zpět vynuluje `finished`, schválení
+  jeho kapitol zruš `aid-ui-state.sh reset-approvals`).
 - Selže skript: ukaž PM jeho řádek `ERROR:`, krok neposouvej.
 - Otevřené kolo (`require-direction` vypíše URL a klíč): znovu otevři TO kolo,
   nezakládej nové. `aid-ui-serve.sh forward <p>` (když neběží), dej PM URL
@@ -70,7 +75,7 @@ Do NOT invoke for:
   ho nevolej: po zavření stránky vrací hned „stránka zavřena".
 
 Skripty (`$AID_PLUGIN_PATH/scripts/`): `aid-ui-state.sh` (jediný zapisovatel
-`state.json`), `aid-ui-serve.sh`, `aid-ui-design-to-css.sh`.
+`docs/design/brand-state.json` a stavů, těl kapitol a odkazů na písma v `docs/brand/index.html`), `aid-ui-serve.sh`, `aid-ui-design-to-css.sh`.
 
 ## Typ produktu → režim Impeccable
 
@@ -101,8 +106,11 @@ jedno rozhodnutí = jeden blok s možnostmi a doporučením.
    live only in `<project>/.aid-ui/refs/` and the visual-companion session
    directory (`.aid-o/work/companion/`), both gitignored and outside the served
    `docs/brand/`, and are deleted after step 3.
-5. `state.json` is written only by `aid-ui-state.sh` and points to Impeccable's
-   files, never copies them.
+5. `docs/design/brand-state.json` is written only by `aid-ui-state.sh` and points
+   to Impeccable's files, never copies them. Chapter bodies are written only by
+   `aid-ui-state.sh body <project> <id> --file <html>`, never by editing
+   `docs/brand/index.html` by hand. Nothing internal lives in the served
+   `docs/brand/` (only `index.html`, `*.css`, `assets/`, `fonts/`).
 6. Ecosystem standards are read from `/opt/eco/docs/docs/ecosystem/…` on every
    run; a missing one is named and noted on the brand page.
 
@@ -112,8 +120,8 @@ jedno rozhodnutí = jeden blok s možnostmi a doporučením.
 
 Před posunem kroku:
 
-- [ ] skript kroku skončil 0 a `state.json` odpovídá (`jq`);
-- [ ] každá kapitola, kterou krok mění, má stav přes `aid-ui-state.sh chapter`;
+- [ ] skript kroku skončil 0 a `docs/design/brand-state.json` odpovídá (`jq`);
+- [ ] každá kapitola, kterou krok mění, má tělo přes `aid-ui-state.sh body` a stav přes `aid-ui-state.sh chapter`;
 - [ ] od kroku 4 prošel `aid-ui-state.sh require-direction`;
 - [ ] PM dostal výsledek v chatu a odkaz na brand stránku (`aid-ui-serve.sh brand docs/brand`);
 - [ ] v `docs/brand/` není nic cizího (screenshoty galerií jen v `.aid-ui/refs/`).

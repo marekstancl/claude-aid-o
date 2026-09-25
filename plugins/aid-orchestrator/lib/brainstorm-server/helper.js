@@ -32,6 +32,19 @@
     }
   }
 
+  // A data-confirm button sends the current selection (and the optional
+  // data-confirm-text field, e.g. the PM's own slogan) as the PM's answer.
+  document.addEventListener('click', (e) => {
+    const button = e.target.closest('[data-confirm]');
+    if (!button) return;
+    const selected = Array.from(document.querySelectorAll('[data-choice].selected')).map(el => el.dataset.choice);
+    const field = document.querySelector('[data-confirm-text]');
+    const text = field ? field.value.trim() : '';
+    sendEvent(Object.assign({ type: 'confirm', screen: window.AID_SCREEN || '', selected }, text ? { text } : {}));
+    const indicator = document.getElementById('indicator-text');
+    if (indicator) indicator.textContent = 'Potvrzeno (' + selected.length + ') - vrať se do terminálu';
+  });
+
   // Capture clicks on choice elements
   document.addEventListener('click', (e) => {
     const target = e.target.closest('[data-choice]');

@@ -13,7 +13,7 @@ setup() {
   mkdir -p "$BRAND" "$BRAND2" "$BATS_TEST_TMPDIR/page"
   echo brand-ok > "$BRAND/index.html"
   echo brand2-ok > "$BRAND2/index.html"
-  echo '{}' | tee "$BRAND/state.json" > "$BRAND2/state.json"
+  touch "$BRAND/tokens.css" "$BRAND2/tokens.css"
   echo page-ok > "$BATS_TEST_TMPDIR/page/index.html"
 }
 
@@ -181,7 +181,7 @@ HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
   run get 39916; [ "$status" -ne 0 ]
 }
 
-@test "brand outside a docs/brand dir, even with state.json and index.html or via a docs/brand symlink: exit 2" {
+@test "brand outside a docs/brand dir, even with index.html and tokens.css or via a docs/brand symlink: exit 2" {
   cp -r "$BRAND" "$BATS_TEST_TMPDIR/elsewhere"
   run "$SERVE" brand "$BATS_TEST_TMPDIR/elsewhere"
   [ "$status" -eq 2 ]; [[ "$output" == ERROR:* ]]
@@ -189,6 +189,39 @@ HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
   ln -s "$BATS_TEST_TMPDIR/elsewhere" "$BATS_TEST_TMPDIR/proj3/docs/brand"
   run "$SERVE" brand "$BATS_TEST_TMPDIR/proj3/docs/brand"
   [ "$status" -eq 2 ]; [[ "$output" == ERROR:* ]]
+  run get 39916; [ "$status" -ne 0 ]
+}
+
+@test "brand of a folder holding state.json: exit 2 naming it, nothing served" {
+  echo '{}' > "$BRAND/state.json"
+  run "$SERVE" brand "$BRAND"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$BRAND/state.json"*"state.json must not be served"* ]]
+  run get 39916; [ "$status" -ne 0 ]
+}
+
+@test "brand of a folder with a leftover temp file or a foreign file: exit 2 naming it" {
+  mkdir -p "$BRAND/assets" "$BRAND/fonts"
+  touch "$BRAND/assets/a.png" "$BRAND/fonts/f.woff2" "$BRAND/base.css"
+  for f in index.html.Ab3xZ9 assets/x.tmp notes.md sub/y.css; do
+    mkdir -p "$(dirname "$BRAND/$f")"; touch "$BRAND/$f"
+    run "$SERVE" brand "$BRAND"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"$BRAND/$f"* ]]
+    rm "$BRAND/$f"
+  done
+  run get 39916; [ "$status" -ne 0 ]
+  run "$SERVE" brand "$BRAND"
+  [ "$status" -eq 0 ]
+}
+
+@test "brand of a folder holding a symlink: exit 2 naming it, nothing served" {
+  mkdir -p "$BRAND/assets"
+  echo secret > "$BATS_TEST_TMPDIR/secret"
+  ln -s "$BATS_TEST_TMPDIR/secret" "$BRAND/assets/x.png"
+  run "$SERVE" brand "$BRAND"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"$BRAND/assets/x.png is a symlink"* ]]
   run get 39916; [ "$status" -ne 0 ]
 }
 

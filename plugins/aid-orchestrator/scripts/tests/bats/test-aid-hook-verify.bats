@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
 # test-aid-hook-verify.bats — the canary (P086 Step 2).
 #
 # THE GROUNDED FAILURE MODE: both harnesses fail silently and in opposite
