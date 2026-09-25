@@ -3,6 +3,12 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.107.1] — 2026-09-25
+
+### Fixed
+- **Administrativní uzavření ručně sloučeného plánu vydá potvrzenku.** Skutečný plán AID má zapsaný manifest životního cyklu. Ruční sloučení v něm žádnou dodávku nezapíše, takže uzavření dřív skončilo „active" a každý plán, který na něm závisí, se nedal spustit (P101 → P102, totéž P097). Když git prokáže, že větev plánu je v cílové větvi, potvrzenka označí každý EPIC bez přijaté revize `verdict: administrative` a výjimku uvede jen odkazem (hash sloučení a záznamu). Důvod od PM se nově ukládá do `plan-close-administrative.json`; dřív se jen vypsal. Plán, který sloučený není, dostane uzavření bez potvrzenky, nic se nepředstírá.
+- **Výpis „co se nepotvrdilo" se už neusekne u prvního písmene „n"** (`[^\n]` v `grep -E`).
+
 ## [2.107.0] — 2026-09-24
 
 ### Added

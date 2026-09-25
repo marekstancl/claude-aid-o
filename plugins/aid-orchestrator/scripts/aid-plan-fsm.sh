@@ -7585,7 +7585,9 @@ cmd_plan_close() {
       # So this close does not pretend. It writes no candidate, no run id and no
       # verdict; it records `closure_kind: administrative`, LISTS what was
       # missing, and leaves the plan closed and unmistakably not
-      # evidence-backed. The PM asked for it for two real cases: work developed
+      # evidence-backed. Since 2.107.1 a plan git shows merged into the target
+      # also gets a lifecycle receipt (so plans depending on it can start); every
+      # EPIC the review did not accept reads `verdict: administrative` there. The PM asked for it for two real cases: work developed
       # outside AID, and a plugin defect that strands a plan for hours.
       --administrative) _PFSM_ADMIN_CLOSE=1; shift ;;
       --*) echo "ERROR: plan-close: unknown flag: $1" >&2; exit 2 ;;
@@ -7902,7 +7904,11 @@ cmd_plan_close() {
         exit 1
       fi
       applied_sha="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || applied_sha="$target_head"
-      lifecycle_note="receipt_committed"; [[ -n "$adm_merged_sha" ]] && lifecycle_note="receipt_administrative"
+      lifecycle_note="receipt_committed"
+      # only when the committed receipt really carries the administrative waiver
+      # (an admin close of a plan that was closable anyway writes an ordinary one)
+      git -C "$root" show "${target_branch}:.aid-lifecycle/receipts/${plan_id}.yaml" 2>/dev/null \
+        | grep -q 'administrative-close:' && lifecycle_note="receipt_administrative"
     fi
   else
     # ── The abort close ────────────────────────────────────────────────────

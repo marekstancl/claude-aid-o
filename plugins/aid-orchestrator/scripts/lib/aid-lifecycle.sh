@@ -718,7 +718,7 @@ aid_lifecycle_build_receipt() {
       echo "  - epic_id: ${eid}"
       [[ -n "$dsha" && "$dsha" != "null" ]] && echo "    delivery_sha: ${dsha}"
       [[ -n "$rsha" && "$rsha" != "null" ]] && echo "    reviewed_sha: ${rsha}"
-      if [[ -n "${_AID_LC_ADMIN_WAIVER:-}" && "$verdict" != accepted ]]; then
+      if [[ -n "${_AID_LC_ADMIN_WAIVER:-}" && "$verdict" != accepted ]] && _aid_lc_scope_is_required "$scope"; then
         # an administrative close of a hand merge: never a review verdict
         echo "    verdict: administrative"
         echo "    waivers: [\"${_AID_LC_ADMIN_WAIVER}\"]"
@@ -1110,6 +1110,7 @@ aid_lifecycle_bind_delivery() {
 # closes an in-progress plan.
 aid_lifecycle_plan_reconcile() {
   local plan_id="$1" root="${2:-.}" apply="${3:-false}"
+  local _AID_LC_ADMIN_WAIVER=""   # a reconcile receipt is never an administrative one
   local pf mf
   pf="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
   mf="$(aid_manifest_path "$plan_id" "$root")"

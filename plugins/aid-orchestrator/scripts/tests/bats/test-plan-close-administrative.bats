@@ -261,14 +261,16 @@ _lifecycle_manifest() {
   local reason='merged by hand as 2.106.0 on /opt/x, token: none — PM 25. 9.'
   run bash -c "cd '$R' && AID_TEST_MODE=1 bash '$FSM' plan-close P900 --project-root '$R' --administrative --reason '$reason'"
   echo "$output"; [ "$status" -eq 0 ]
-  local receipt; receipt="$(git -C "$R" show main:.aid-lifecycle/receipts/P900.yaml)"
+  [[ "$output" != *"is active"* && "$output" == *"lifecycle: receipt_administrative"* ]]
+  local receipt rec; receipt="$(git -C "$R" show main:.aid-lifecycle/receipts/P900.yaml)"
+  rec="$R/.aid-o/work/evidence/P900/plan-close-administrative.json"
   [ "$(yq -r '[.epics[].verdict] | unique | join(",")' <<<"$receipt")" = administrative ]
-  [[ "$(yq -r '.epics[0].waivers[0]' <<<"$receipt")" == administrative-close:* ]]
+  # every EPIC names the merge and the PM's record by digest, never by its words
+  [ "$(yq -r '[.epics[].waivers[0]] | unique | .[]' <<<"$receipt")" = "administrative-close:$(git -C "$R" rev-parse plan/P900):sha256:$(sha256sum "$rec" | cut -d' ' -f1)" ]
   [[ "$receipt" != *"/opt/x"* && "$receipt" != *"token"* ]]
+  [ "$(jq -r .reason "$rec")" = "$reason" ]
   run bash -c "cd '$R' && bash '$PLUGIN_ROOT/scripts/aid-lifecycle.sh' state P900 ."
   [ "$output" = closed ]
-  [ "$(jq -r .reason "$R/.aid-o/work/evidence/P900/plan-close-administrative.json")" = "$reason" ]
-  [[ "$output" != *"is active"* ]]
 }
 
 @test "2.107.1: the lifecycle library refuses an administrative close whose commit is not in the target branch" {
