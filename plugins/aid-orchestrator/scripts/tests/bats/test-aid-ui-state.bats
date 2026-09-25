@@ -343,3 +343,148 @@ p101_project() {
   run "$SCRIPT" step "$PROJ" done
   [ "$status" -eq 2 ]
 }
+
+# --- P102 Step 3: options, the companion choice gate, composition ----------
+
+# curl stub on PATH: logs its URL; $STUB_CONFIRM set -> prints it, else 404 (exit 22).
+curl_stub() {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  cat > "$BATS_TEST_TMPDIR/bin/curl" <<'EOS'
+#!/usr/bin/env bash
+echo "${@: -1}" >> "$BATS_TEST_TMPDIR/curl.log"
+[[ -n "${STUB_CONFIRM:-}" ]] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
+printf '%s\n' "$STUB_CONFIRM"
+EOS
+  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH" STUB_CONFIRM=""
+}
+choice() { run "$SCRIPT" await-choice "$PROJ" --kind "$1" --screen "$2" --page-url http://10.20.20.22:3916/; }
+confirm() { STUB_CONFIRM="{\"screen\":\"$1\",\"selected\":$2,\"at\":\"$3\"${4:+,\"text\":\"$4\"}}"; }
+NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
+
+@test "await-choice slogan: 404 pending, older confirm pending, newer recorded once, only /aid/confirmed asked" {
+  curl_stub
+  choice slogan slogan-1.html
+  [ "$status" -eq 1 ]
+  [ "$(jq -r .choice_pending.kind "$STATE")" = slogan ]
+  [ "$(jq -r .choice_pending.key_or_screen "$STATE")" = slogan-1.html ]
+  confirm slogan-1.html '["s2"]' "$OLD"
+  choice slogan slogan-1.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *predates* ]]
+  [ "$(jq .choices.slogan "$STATE")" = null ]
+  confirm slogan-1.html '["s2"]' "$NEW"
+  choice slogan slogan-1.html
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .choices.slogan.id "$STATE")" = s2 ]
+  [ "$(jq .choice_pending "$STATE")" = null ]
+  f="$(jq -r .choices.slogan.answer_file "$STATE")"
+  [ "$(sha256sum "$PROJ/$f" | cut -d' ' -f1)" = "$(jq -r .choices.slogan.answer_sha256 "$STATE")" ]
+  choice slogan slogan-1.html
+  [ "$status" -eq 0 ]
+  [ "$(jq '[.decisions[] | select(.what | startswith("slogan"))] | length' "$STATE")" = 1 ]
+  [ "$(sort -u "$BATS_TEST_TMPDIR/curl.log")" = "http://10.20.20.22:3916/aid/confirmed?screen=slogan-1.html" ]
+  [ ! -e "$PROJ/.aid-o/work/companion" ]
+}
+
+@test "await-choice: own slogan text recorded; zero cards for logo pending, for pages accepted" {
+  curl_stub
+  confirm slogan-1.html '[]' "$NEW" "Vaříme po svém"
+  choice slogan slogan-1.html
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .text "$PROJ/$(jq -r .choices.slogan.answer_file "$STATE")")" = "Vaříme po svém" ]
+  confirm logo-1.html '[]' "$NEW"
+  choice logo logo-1.html
+  [ "$status" -eq 1 ]
+  [ "$(jq .choices.logo "$STATE")" = null ]
+  confirm pages-1.html '[]' "$NEW" "úvod, ceník"
+  choice pages pages-2.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *malformed* ]]
+  confirm pages-2.html '[]' "$NEW" "úvod, ceník"
+  choice pages pages-2.html
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .choices.pages.screen "$STATE")" = pages-2.html ]
+}
+
+@test "await-choice: unreachable server and malformed answer record nothing; bad screen name exit 2" {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"; printf '#!/usr/bin/env bash\nexit 7\n' > "$BATS_TEST_TMPDIR/bin/curl"; chmod +x "$BATS_TEST_TMPDIR/bin/curl"
+  PATH="$BATS_TEST_TMPDIR/bin:$PATH" choice logo logo-1.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *unreachable*"http://10.20.20.22:3916/"* ]]
+  curl_stub
+  STUB_CONFIRM='not json'
+  choice logo logo-1.html
+  [ "$status" -eq 1 ]
+  [ "$(jq .choices "$STATE")" = '{}' ]
+  choice logo slogan-1.html
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" await-choice "$PROJ" --kind nope --screen x --page-url http://x/
+  [ "$status" -eq 2 ]
+}
+
+@test "set options: validated, refused after step 0" {
+  run "$SCRIPT" set "$PROJ" options '{"vision":true,"colour":true}'
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" set "$PROJ" options '{"identity":true}'
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" set "$PROJ" options '{"vision":true,"identity":"package","seo":false}'
+  [ "$status" -eq 0 ]
+  [ "$(jq -c .options "$STATE")" = '{"vision":true,"identity":"package","seo":false,"images":false}' ]
+  "$SCRIPT" step "$PROJ" 1
+  run "$SCRIPT" set "$PROJ" options '{"vision":false}'
+  [ "$status" -eq 1 ]
+  [ "$(jq .options.vision "$STATE")" = true ]
+}
+
+@test "step gates: open choice blocks any step; enabled options need their choice from step 2" {
+  curl_stub
+  "$SCRIPT" set "$PROJ" options '{"vision":true,"identity":"package","seo":true}'
+  run "$SCRIPT" step "$PROJ" 1
+  [ "$status" -eq 0 ]
+  run "$SCRIPT" step "$PROJ" 2
+  [ "$status" -eq 1 ]
+  [[ "$output" == *slogan* && "$output" == *"page list"* && "$output" != *logo* ]]
+  choice slogan slogan-1.html
+  run "$SCRIPT" step "$PROJ" 0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"choice is open"* ]]
+  confirm slogan-1.html '["s1"]' "$NEW"; choice slogan slogan-1.html
+  confirm pages-1.html '["uvod"]' "$NEW"; choice pages pages-1.html
+  run "$SCRIPT" step "$PROJ" 2
+  [ "$status" -eq 0 ]
+}
+
+@test "identity new needs a logo before step 2" {
+  "$SCRIPT" set "$PROJ" options '{"identity":"new"}'
+  run "$SCRIPT" step "$PROJ" 3
+  [ "$status" -eq 1 ]
+  [[ "$output" == *logo* ]]
+}
+
+@test "step 5 with build path comp needs a composition; await-choice composition behaves like await-direction" {
+  record_direction
+  jq '.direction.build_path = "comp"' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  "$SCRIPT" step "$PROJ" 4
+  run "$SCRIPT" step "$PROJ" 5
+  [ "$status" -eq 1 ]
+  [[ "$output" == *composition* ]]
+  comp() { run "$SCRIPT" await-choice "$PROJ" --kind composition --imp "$IMP" --key k1 --page-url http://10.20.20.22:3915/; }
+  STUB_OUT='ANSWER: {"optionId":"reroll","steer":""}'
+  comp
+  [ "$status" -eq 3 ]
+  STUB_RC=4 STUB_OUT=''
+  comp
+  [ "$status" -eq 1 ]
+  [ "$(jq -r .choice_pending.kind "$STATE")" = composition ]
+  run "$SCRIPT" step "$PROJ" 5
+  [ "$status" -eq 1 ]
+  STUB_RC=0 STUB_OUT='ANSWER: {"optionId":"c2"}'
+  comp
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .choices.composition.id "$STATE")" = c2 ]
+  [ "$(jq .choice_pending "$STATE")" = null ]
+  [ "$(jq -r .direction.option_id "$STATE")" = a ]
+  run "$SCRIPT" step "$PROJ" 5
+  [ "$status" -eq 0 ]
+}

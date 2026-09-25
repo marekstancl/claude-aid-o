@@ -60,3 +60,13 @@ postup_first() { awk '/^## Postup/{f=1; next} f && NF {print; exit}' "$1"; }
     grep -qF 'index.html` ručně needituj' "$f" || { echo "$f"; return 1; }
   done
 }
+
+# P102 Step 3 — step 0 records the optional parts; app references without Mobbin.
+@test "0-start.md sets options through aid-ui-state.sh set" {
+  grep -qF 'aid-ui-state.sh set <project> options' "$SK/steps/0-start.md"
+}
+
+@test "2-references.md names Google Play search and no Mobbin" {
+  grep -qF 'play.google.com/store/search' "$SK/steps/2-references.md"
+  [ "$(grep -ci mobbin "$SK/steps/2-references.md")" -eq 0 ]
+}

@@ -19,11 +19,29 @@
 #       leave direction_pending set.
 #       There is deliberately no verb that records a direction from a file the
 #       caller supplies: the answer only ever comes from Impeccable's stdout.
+#   await-choice <project> --kind <slogan|logo|pages> --screen <kind>-<n>.html --page-url <url>
+#       a PM choice on a companion page, taken only from the page server's memory
+#       (GET <url>/aid/confirmed?screen=<file>), never from .events or a file. Opens
+#       choice_pending first (a re-run of the same round keeps its time); accepts
+#       only a confirm newer than that record; records choices.<kind> + the answer
+#       under .aid-ui/ with its hash. No confirm, older confirm, zero cards (slogan
+#       without own text, logo), server unreachable or malformed -> exit 1, nothing
+#       recorded. Every round is a new screen file; a recorded screen records once.
+#       ponytail: asks the server once per call; the agent re-runs it after the PM confirms.
+#   await-choice <project> --kind composition --imp <impeccable CLI> --key <key> --page-url <url>
+#       any further Impeccable round (step 4): the await-direction code path,
+#       recorded as choices.composition, open round in choice_pending.
 #   pending-direction <project> --key <key> --page-url <url>
 #   require-direction <project>
 #   set <project> <product_type|refs|impeccable.surface_brief|impeccable.seed_key> <json>
-#   step <project> <0-6>                 4-6 refused without a recorded direction;
-#                                        a backward step clears `finished`
+#   set <project> options <json>         keys vision seo images (true|false), identity
+#                                        (false|"new"|"package"); only at step 0
+#   step <project> <0-6>                 direct jumps; refused by gates: any step while a
+#                                        choice is open; 2-6 while an enabled option has
+#                                        no choice (vision->slogan, identity "new"->logo,
+#                                        seo->pages); 4-6 without a direction; 5-6 with
+#                                        build path comp and no composition.
+#                                        A backward step clears `finished`
 #   roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>
 #   chapter <project> <id> <ceka|navrh|schvaleno> [--by <who>]
 #   reset-approvals <project> <id>...
@@ -33,9 +51,9 @@
 #   fonts <project> <url-or-path>...     <link rel="stylesheet"> lines between <!-- fonts -->
 #                                        markers; only https://fonts.googleapis.com/… or a
 #                                        .css file under docs/brand/fonts/
-#   finish <project>                     after step 6, with a direction and no open choice
+#   finish <project>                     after step 6, with a direction and the step gates
 #
-# Exit: 0 ok, 1 refused, 2 usage. (await-direction: 3 = re-roll requested.)
+# Exit: 0 ok, 1 refused, 2 usage. (await-direction, await-choice composition: 3 = re-roll requested.)
 # =============================================================================
 set -euo pipefail
 
@@ -46,6 +64,7 @@ SETTABLE=" product_type refs impeccable.surface_brief impeccable.seed_key "
 usage() { echo "ERROR: aid-ui-state.sh: ${1:-usage}; see the header of this script" >&2; exit 2; }
 die() { echo "ERROR: aid-ui-state.sh: $1" >&2; exit 1; }
 today() { date -u +%Y-%m-%d; }
+now() { date -u +%Y-%m-%dT%H:%M:%S.%3NZ; }   # same shape as the companion server's `at`
 
 (( $# >= 2 )) || usage "need <verb> <project>"
 VERB="$1"; PROJECT="$2"; shift 2
@@ -179,6 +198,99 @@ require_direction() {   # prints what is missing, returns 1 when not recorded
   return 1
 }
 
+# gates <n> <what> — refuses step n (or finish) while a choice is open, an enabled
+# option has no choice, or the comp build path has no composition.
+gates() {
+  local msg
+  msg="$(jq -r --argjson n "$1" '[
+    (if .choice_pending then "a choice is open and unanswered: \(.choice_pending.kind) at \(.choice_pending.page_url)" else empty end),
+    (if $n >= 2 and .options.vision == true and (.choices.slogan | not) then "vision is on and no slogan is chosen (step 1)" else empty end),
+    (if $n >= 2 and .options.identity == "new" and (.choices.logo | not) then "identity is on and no logo is chosen (step 1)" else empty end),
+    (if $n >= 2 and .options.seo == true and (.choices.pages | not) then "SEO is on and no page list is chosen (step 1)" else empty end),
+    (if $n >= 5 and .direction.build_path == "comp" and (.choices.composition | not) then "the build path is comp and no composition is chosen (step 4)" else empty end)
+    ] | join("; ")' "$STATE")"
+  [[ -z "$msg" ]] && return 0
+  echo "ERROR: aid-ui-state.sh: $2 refused: $msg" >&2
+  return 1
+}
+
+# impeccable_round <direction|composition> <args...> — P101's gate: the answer only
+# ever comes from `<imp> serve-question --wait` stdout, run by this script.
+impeccable_round() {
+  local kind="$1"; shift
+  IMP="$(opt imp "$@")"; KEY="$(opt key "$@")"; URL="$(opt page-url "$@")"
+  [[ -n "$IMP" && -n "$KEY" && -n "$URL" ]] || usage "await-$kind needs --imp --key --page-url"
+  [[ "$IMP" == */* ]] && IMP="$(realpath -m "$IMP")"   # a relative CLI path survives the cd below
+  if [[ "$kind" == direction ]]; then jq_write --arg k "$KEY" --arg u "$URL" '.direction_pending = {key: $k, page_url: $u}'
+  else jq_write --arg k "$KEY" --arg u "$URL" --arg at "$(now)" '.choice_pending = {kind: "composition", key_or_screen: $k, page_url: $u, at: $at}'
+  fi
+  while :; do
+    # Impeccable finds .impeccable/questions/<key> in its cwd: run it from the project.
+    rc=0; out="$(cd "$PROJECT" && IMPECCABLE_QUESTION_FORCE=1 "$IMP" serve-question --wait --key "$KEY")" || rc=$?
+    [[ "$rc" -eq 3 ]] || break
+  done
+  if [[ "$rc" -eq 4 ]]; then
+    die "the page closed without the PM's answer; the round stays open: URL $URL key $KEY"
+  fi
+  [[ "$rc" -eq 0 ]] || die "serve-question --wait exited $rc; nothing recorded: $out"
+  # Impeccable prints `ANSWER: {json}`; a bare JSON line is accepted too. Last one wins.
+  answer="$(sed -n 's/^ANSWER: //; /^{.*}$/p' <<<"$out" | while IFS= read -r l; do
+    jq -ec 'select(type == "object" and (.optionId | type) == "string")' <<<"$l" 2>/dev/null || true; done | tail -n1)"
+  [[ -n "$answer" ]] || die "no ANSWER with an optionId in Impeccable's output; nothing recorded: $out"
+  OPT="$(jq -r .optionId <<<"$answer")"
+  if [[ "$OPT" == reroll ]]; then echo "REROLL: $answer"; exit 3; fi
+  local file=".aid-ui/$kind-answer.json"
+  mkdir -p "$PROJECT/.aid-ui"
+  printf '%s\n' "$answer" > "$PROJECT/$file"
+  SHA="$(sha256sum "$PROJECT/$file" | cut -d' ' -f1)"
+  jq_write --arg kind "$kind" --arg o "$OPT" --arg k "$KEY" --arg f "$file" --arg sha "$SHA" --arg u "$URL" \
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg d "$(today)" '
+    ({key: $k, answer_file: $f, answer_sha256: $sha, answered_at: $at, page_url: $u}) as $rec
+    | if $kind == "direction"
+      then .direction = ({option_id: $o} + $rec) | del(.direction_pending) | .decisions += [{step: 3, what: "direction \($o)", date: $d}]
+      else .choices.composition = ({id: $o} + $rec) | .choice_pending = null | .decisions += [{step: 4, what: "composition \($o)", date: $d}]
+      end'
+  echo "${kind^^}: $OPT"
+}
+
+# companion_choice <slogan|logo|pages> <args...> — see await-choice in the header.
+companion_choice() {
+  local kind="$1"; shift
+  local screen url since ans rc at n text file sha
+  screen="$(opt screen "$@")"; url="$(opt page-url "$@")"
+  [[ -n "$screen" && -n "$url" ]] || usage "await-choice --kind $kind needs --screen --page-url"
+  [[ "$screen" =~ ^$kind-[0-9]+\.html$ ]] || usage "--screen must be a new $kind-<n>.html file per round: $screen"
+  if [[ "$(jq -r --arg k "$kind" '.choices[$k].screen // empty' "$STATE")" == "$screen" ]]; then
+    echo "CHOICE $kind: already recorded from $screen"; return 0
+  fi
+  if [[ "$(jq -r '.choice_pending | if . then "\(.kind) \(.key_or_screen)" else "" end' "$STATE")" != "$kind $screen" ]]; then
+    jq_write --arg k "$kind" --arg s "$screen" --arg u "$url" --arg at "$(now)" \
+      '.choice_pending = {kind: $k, key_or_screen: $s, page_url: $u, at: $at}'
+  fi
+  since="$(jq -r '.choice_pending.at' "$STATE")"
+  rc=0; ans="$(curl -fsS --max-time 10 "${url%/}/aid/confirmed?screen=$screen")" || rc=$?
+  [[ "$rc" -ne 22 ]] || die "no confirm on $screen yet; the round stays open: $url"
+  [[ "$rc" -eq 0 ]] || die "companion server unreachable (curl exit $rc); the round stays open: $url"
+  ans="$(jq -ec --arg s "$screen" 'select(type == "object" and .screen == $s and (.at | type) == "string"
+    and (.selected | type) == "array" and all(.selected[]; type == "string") and ((.text // "") | type) == "string")' \
+    <<<"$ans" 2>/dev/null)" || die "malformed answer from ${url%/}/aid/confirmed; nothing recorded"
+  at="$(jq -r .at <<<"$ans")"
+  [[ "$at" > "$since" ]] || die "the confirm on $screen ($at) predates this round ($since); the round stays open: $url"
+  n="$(jq '.selected | length' <<<"$ans")"; text="$(jq -r '.text // ""' <<<"$ans")"
+  if [[ "$n" -eq 0 && "$kind" != pages ]] && [[ "$kind" == logo || -z "$text" ]]; then
+    die "the PM confirmed no $kind; the round stays open: $url"
+  fi
+  file=".aid-ui/choice-$kind.json"
+  mkdir -p "$PROJECT/.aid-ui"
+  printf '%s\n' "$ans" > "$PROJECT/$file"
+  sha="$(sha256sum "$PROJECT/$file" | cut -d' ' -f1)"
+  jq_write --arg kind "$kind" --arg f "$file" --arg sha "$sha" --arg u "$url" --arg s "$screen" \
+    --arg at "$at" --arg d "$(today)" --argjson a "$ans" '
+    .choices[$kind] = {id: ($a.selected | join(",")), screen: $s, answer_file: $f, answer_sha256: $sha, answered_at: $at, page_url: $u}
+    | .choice_pending = null | .decisions += [{step: 1, what: "\($kind) \($a.selected | join(","))", date: $d}]'
+  echo "CHOICE $kind: $(jq -c '{selected, text}' <<<"$ans")"
+}
+
 # write_chapter <id> <status> <by> — the section's data-status and status text, then the state.
 write_chapter() {
   local id="$1" status="$2" by="$3" date=""
@@ -209,33 +321,17 @@ case "$VERB" in
 
   await-direction)
     need_state
-    IMP="$(opt imp "$@")"; KEY="$(opt key "$@")"; URL="$(opt page-url "$@")"
-    [[ -n "$IMP" && -n "$KEY" && -n "$URL" ]] || usage "await-direction needs --imp --key --page-url"
-    [[ "$IMP" == */* ]] && IMP="$(realpath -m "$IMP")"   # a relative CLI path survives the cd below
-    jq_write --arg k "$KEY" --arg u "$URL" '.direction_pending = {key: $k, page_url: $u}'
-    while :; do
-      # Impeccable finds .impeccable/questions/<key> in its cwd: run it from the project.
-      rc=0; out="$(cd "$PROJECT" && IMPECCABLE_QUESTION_FORCE=1 "$IMP" serve-question --wait --key "$KEY")" || rc=$?
-      [[ "$rc" -eq 3 ]] || break
-    done
-    if [[ "$rc" -eq 4 ]]; then
-      die "the page closed without the PM's answer; the round stays open: URL $URL key $KEY"
-    fi
-    [[ "$rc" -eq 0 ]] || die "serve-question --wait exited $rc; nothing recorded: $out"
-    # Impeccable prints `ANSWER: {json}`; a bare JSON line is accepted too. Last one wins.
-    answer="$(sed -n 's/^ANSWER: //; /^{.*}$/p' <<<"$out" | while IFS= read -r l; do
-      jq -ec 'select(type == "object" and (.optionId | type) == "string")' <<<"$l" 2>/dev/null || true; done | tail -n1)"
-    [[ -n "$answer" ]] || die "no ANSWER with an optionId in Impeccable's output; nothing recorded: $out"
-    OPT="$(jq -r .optionId <<<"$answer")"
-    if [[ "$OPT" == reroll ]]; then echo "REROLL: $answer"; exit 3; fi
-    mkdir -p "$PROJECT/.aid-ui"
-    printf '%s\n' "$answer" > "$PROJECT/.aid-ui/direction-answer.json"
-    SHA="$(sha256sum "$PROJECT/.aid-ui/direction-answer.json" | cut -d' ' -f1)"
-    jq_write --arg o "$OPT" --arg k "$KEY" --arg sha "$SHA" --arg u "$URL" \
-      --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg d "$(today)" \
-      '.direction = {option_id: $o, key: $k, answer_file: ".aid-ui/direction-answer.json", answer_sha256: $sha, answered_at: $at, page_url: $u}
-       | del(.direction_pending) | .decisions += [{step: 3, what: "direction \($o)", date: $d}]'
-    echo "DIRECTION: $OPT"
+    impeccable_round direction "$@"
+    ;;
+
+  await-choice)
+    need_state
+    KIND="$(opt kind "$@")"
+    case "$KIND" in
+      slogan|logo|pages) companion_choice "$KIND" "$@" ;;
+      composition) impeccable_round composition "$@" ;;
+      *) usage "await-choice needs --kind slogan|logo|pages|composition" ;;
+    esac
     ;;
 
   pending-direction)
@@ -254,14 +350,24 @@ case "$VERB" in
   set)
     need_state
     (( $# == 2 )) || usage "set needs <key> <json>"
-    [[ "$SETTABLE" == *" $1 "* ]] || usage "set cannot write '$1' (only:$SETTABLE)"
+    [[ "$SETTABLE" == *" $1 "* || "$1" == options ]] || usage "set cannot write '$1' (only:$SETTABLE options)"
     jq -e . >/dev/null 2>&1 <<<"$2" || usage "not JSON: $2"
-    jq_write --arg p "$1" --argjson v "$2" 'setpath($p | split("."); $v)'
+    if [[ "$1" == options ]]; then
+      jq -e 'type == "object" and all(to_entries[]; if .key == "identity" then IN(.value; false, "new", "package")
+             else IN(.key; "vision", "seo", "images") and (.value | type) == "boolean" end)' >/dev/null <<<"$2" \
+        || usage "options: keys vision seo images (true|false) and identity (false|\"new\"|\"package\"): $2"
+      st="$(jq -r .step "$STATE")"
+      [[ "$st" == 0 ]] || die "set options refused at step $st: the options are chosen at step 0 and cannot change after"
+      jq_write --argjson v "$2" '.options += $v'
+    else
+      jq_write --arg p "$1" --argjson v "$2" 'setpath($p | split("."); $v)'
+    fi
     ;;
 
   step)
     need_state
     [[ "${1:-}" =~ ^[0-6]$ ]] || usage "step needs 0-6"
+    gates "$1" "step $1" || exit 1
     if (( $1 >= 4 )) && ! require_direction; then die "step $1 refused: run step 3 first (/aid-ui 3)"; fi
     jq_write --argjson n "$1" 'if $n < .step then .finished = null else . end | .step = $n'
     ;;
@@ -330,8 +436,7 @@ case "$VERB" in
     st="$(jq -r .step "$STATE")"
     [[ "$st" == 6 ]] || die "finish refused: the project is at step $st; finish comes after step 6"
     require_direction || exit 1
-    pend="$(jq -r 'if .choice_pending then "\(.choice_pending.kind) at \(.choice_pending.page_url)" else empty end' "$STATE")"
-    [[ -z "$pend" ]] || die "finish refused: a choice is open and unanswered: $pend"
+    gates 6 finish || exit 1
     jq_write --arg d "$(today)" '.finished = $d'
     echo "FINISHED: $(today)"
     ;;

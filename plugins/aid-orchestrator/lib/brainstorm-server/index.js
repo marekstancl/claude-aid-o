@@ -4,6 +4,7 @@ const WebSocket = require('ws');
 const chokidar = require('chokidar');
 const fs = require('fs');
 const path = require('path');
+const confirms = require('./confirm-store');
 
 const PORT = process.env.BRAINSTORM_PORT || (49152 + Math.floor(Math.random() * 16383));
 const HOST = process.env.BRAINSTORM_HOST || '127.0.0.1';
@@ -66,15 +67,28 @@ const wss = new WebSocket.Server({ server });
 
 const clients = new Set();
 
-wss.on('connection', (ws) => {
+// Host part of an Origin header ("http://h:p" -> "h:p"); "" when absent or malformed.
+function originHost(origin) {
+  try { return new URL(origin).host; } catch (e) { return ''; }
+}
+
+wss.on('connection', (ws, req) => {
   clients.add(ws);
   ws.on('close', () => clients.delete(ws));
 
   ws.on('message', (data) => {
-    const event = JSON.parse(data.toString());
+    let event;
+    try { event = JSON.parse(data.toString()); } catch (e) { return; }
     console.log(JSON.stringify({ source: 'user-event', ...event }));
+    // A confirm is kept in memory for GET /aid/confirmed; only confirms are
+    // checked against the request's own Host (a page of another site is refused).
+    if (event.type === 'confirm' &&
+        !confirms.record(event.screen, event, originHost(req.headers.origin), req.headers.host)) {
+      console.log(JSON.stringify({ type: 'confirm-refused', screen: event.screen, origin: req.headers.origin || null }));
+      return;
+    }
     // Write user events to .events file for Claude to read
-    if (event.choice) {
+    if (event.choice || event.type === 'confirm') {
       const eventsFile = path.join(SCREEN_DIR, '.events');
       fs.appendFileSync(eventsFile, JSON.stringify(event) + '\n');
     }
@@ -93,20 +107,30 @@ app.get('/', (req, res) => {
     html = isFullDocument(raw) ? raw : wrapInFrame(raw);
   }
 
-  // Inject helper script
+  // Inject the served screen's file name (read by helper.js for confirm) and the helper script
+  const screenName = screenFile ? path.basename(screenFile) : '';
+  const injection = `<script>window.AID_SCREEN = ${JSON.stringify(screenName).replace(/</g, '\\u003c')};</script>\n${helperInjection}`;
   if (html.includes('</body>')) {
-    html = html.replace('</body>', `${helperInjection}\n</body>`);
+    html = html.replace('</body>', () => `${injection}\n</body>`);
   } else {
-    html += helperInjection;
+    html += injection;
   }
 
   res.type('html').send(html);
+});
+
+// The PM's confirm of one screen, from memory: {screen, selected, text?, at} or 404. Read-only.
+app.get('/aid/confirmed', (req, res) => {
+  const entry = confirms.get(String(req.query.screen || ''));
+  if (!entry) return res.status(404).json({ error: 'no confirm for this screen' });
+  res.json(entry);
 });
 
 // Watch for new or changed .html files
 chokidar.watch(SCREEN_DIR, { ignoreInitial: true })
   .on('add', (filePath) => {
     if (filePath.endsWith('.html')) {
+      confirms.clear(path.basename(filePath));
       // Clear events from previous screen
       const eventsFile = path.join(SCREEN_DIR, '.events');
       if (fs.existsSync(eventsFile)) fs.unlinkSync(eventsFile);
@@ -120,6 +144,7 @@ chokidar.watch(SCREEN_DIR, { ignoreInitial: true })
   })
   .on('change', (filePath) => {
     if (filePath.endsWith('.html')) {
+      confirms.clear(path.basename(filePath));   // a rewritten screen is a new question
       console.log(JSON.stringify({ type: 'screen-updated', file: filePath }));
       clients.forEach(ws => {
         if (ws.readyState === WebSocket.OPEN) {
