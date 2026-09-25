@@ -90,6 +90,8 @@ def fail(msg):
 
 def between(text, cid, kind, new):   # replace what is between <!-- kind:cid --> markers
     a, b = "<!-- %s:%s -->" % (kind, cid), "<!-- /%s:%s -->" % (kind, cid)
+    if text.count(a) > 1 or text.count(b) > 1:   # a smuggled copy would cut the region short
+        fail("%s markers of section %s appear more than once in %s; fix the page by hand" % (kind, cid, path))
     out, n = re.subn(re.escape(a) + ".*?" + re.escape(b), lambda m: a + new + b, text, count=1, flags=re.S)
     if n != 1:
         fail("%s markers of section %s not found in %s; run: aid-ui-state.sh init" % (kind, cid, path))
@@ -153,6 +155,8 @@ elif mode == "body":
         def unknown_decl(self, data):
             self.refuse("a declaration")
     c = Check(convert_charrefs=False)
+    if "<!--" in body or "-->" in body:   # also inside attribute values: a fake marker there cuts the next write short
+        c.refuse("a comment marker")
     c.feed(body)
     if re.search(r'<[A-Za-z!/?]', c.rawdata):   # close() would drop an unfinished tag silently
         c.refuse("an unfinished tag %r" % c.rawdata[:40])

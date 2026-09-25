@@ -253,6 +253,22 @@ record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq
   cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
 }
 
+@test "body refuses a marker smuggled in an attribute; the next write leaves no handler" {
+  printf '%s\n' '<p title="<!-- /body:vize --><img src=x onerror=alert(1)>">x</p>' > "$BATS_TEST_TMPDIR/bad.html"
+  run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+  [ "$status" -eq 1 ]
+  [[ "$output" == ERROR:*"body of section vize refused"* ]]
+  echo '<p>ok</p>' > "$BATS_TEST_TMPDIR/ok.html"
+  run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/ok.html"
+  [ "$status" -eq 0 ]
+  ! grep -q onerror "$HTML" || false
+  # defence in depth: a page that already carries a duplicate end marker is not written
+  sed -i 's|<!-- /body:vize -->|&<!-- /body:vize -->|' "$HTML"
+  run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/ok.html"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"more than once"* ]]
+}
+
 @test "body accepts allowed tags, safe links and a relative image" {
   for ok in '<a href="https://example.com">ok</a>' '<img src="assets/logo.svg" alt="logo">' \
             '<p>Text <strong>tučně</strong> a &lt;script&gt;</p>' \
