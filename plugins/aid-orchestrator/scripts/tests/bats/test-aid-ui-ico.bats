@@ -144,30 +144,46 @@ SVG
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-# run_icons <symbol> <out> — runs references/brand-icons.js under node with a stub page
-# whose screenshot() writes an empty file, the paths filled in the way 1i step 6 says.
+# run_icons <symbol> <out> — runs references/brand-icons.js in a node vm whose only global
+# is a stub page (no require, process or import, as in the Playwright MCP sandbox): goto
+# file:// reads the file, screenshot() writes a PNG header of the viewport size.
 run_icons() {
   command -v node >/dev/null || skip "node not installed"
   sed -e "s|__ABSOLUTE_SYMBOL_SVG__|$1|" -e "s|__ABSOLUTE_ICONS_DIR__|$2|" \
     "$BATS_TEST_DIRNAME/../../../skills/ui-design/references/brand-icons.js" > "$T/brand-icons.js"
   run node -e '
-    const fs = require("fs");
-    const fn = eval(fs.readFileSync(process.argv[1], "utf8"));
-    const page = { setViewportSize: async () => {}, goto: async () => {},
-      locator: () => ({ screenshot: async (o) => fs.writeFileSync(o.path, "") }) };
-    fn(page).then((w) => console.log(w.join(" ")), (e) => { console.log(e.message); process.exit(1); });
+    const fs = require("fs"), vm = require("vm");
+    let doc = "", vp = null;
+    const png = (n) => { const b = Buffer.alloc(24); Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").copy(b); b.writeUInt32BE(n.width, 16); b.writeUInt32BE(n.height, 20); return b; };
+    const page = {
+      goto: async (u) => { doc = u.startsWith("file://") ? fs.readFileSync(u.slice(7), "utf8") : ""; },
+      evaluate: async () => doc,
+      setViewportSize: async (v) => { vp = v; },
+      setContent: async () => {},
+      screenshot: async (o) => fs.writeFileSync(o.path, png(vp)),
+    };
+    const fn = vm.runInNewContext(fs.readFileSync(process.argv[1], "utf8"), { page });
+    fn(page).then((w) => console.log(w), (e) => { console.log(e.message); process.exit(1); });
   ' "$T/brand-icons.js"
+}
+
+@test "brand-icons.js uses no Node API (the MCP sandbox has none)" {
+  F="$BATS_TEST_DIRNAME/../../../skills/ui-design/references/brand-icons.js"
+  ! grep -nE 'require\(|import\(|process\.' "$F"
 }
 
 @test "brand-icons.js reads the SVG as data: backticks and \${} in it never run" {
   mkdir -p "$T/icons"
-  printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><desc>`${require("fs").writeFileSync("%s/pwned","x")}`</desc><rect/></svg>' "$T" > "$T/symbol.svg"
+  printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><desc>`${page.screenshot({path:"%s/pwned"})}`</desc><rect/></svg>' "$T" > "$T/symbol.svg"
   run_icons "$T/symbol.svg" "$T/icons"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ ! -e "$T/pwned" ]
-  [[ "$output" == *"icon-maskable-512.png favicon.svg"* ]]
-  cmp "$T/symbol.svg" "$T/icons/favicon.svg"
+  [[ "$output" == *"icon-maskable-512.png"* ]]
   ! grep -q '<svg' "$T/brand-icons.js"
+  cp "$T/symbol.svg" "$T/icons/favicon.svg"
+  python3 "$ICO" "$T/icons/favicon.ico" "$T"/icons/favicon-{16,32,48}.png
+  run python3 "$ICO" --verify "$T/icons"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "brand-icons.js refuses a path that is not plain absolute and a non-square viewBox" {

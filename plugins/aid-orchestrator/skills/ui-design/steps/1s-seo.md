@@ -50,8 +50,11 @@ Kapitola `seo` to nese.
 3. Obrazovka visual-companion `pages-<n>.html` (nový soubor na každé kolo):
    karta `data-choice` s `data-multiselect` pro každou stránku (URL, H1,
    hlavní dotaz); tlačítko `data-confirm`.
-4. Po potvrzení PM
+4. Hned po zápisu obrazovky otevři kolo před potvrzením PM:
    `aid-ui-state.sh await-choice <project> --kind pages --screen pages-<n>.html --page-url http://localhost:<port>/`.
+   Skončí exit 1 „no confirm on ... yet" - to je v pořádku, kolo je otevřené.
+   Pak pošli PM odkaz na stránku a až PM napíše, že potvrdil, spusť stejný
+   příkaz znovu. Potvrzení z doby před otevřením kola skript odmítne.
 5. Tělo kapitoly do souboru v `.aid-ui/` (potvrzené stránky s H1, nebo
    texty store listingu; co je odhad) a
    `aid-ui-state.sh body <project> seo --file <soubor>`, pak
@@ -69,11 +72,12 @@ nejvýš dvě kola.
 
 ## Když krok selže
 
-- `await-choice` skončí `ERROR:` → ukaž ho PM; kolo zůstává otevřené, krok 2
+- `await-choice` skončí `ERROR:` po potvrzení PM → ukaž ho PM; kolo zůstává otevřené, krok 2
   se nepustí.
 - Po dvou kolech bez potvrzeného seznamu → polož poslední obrazovku
   `pages-<n>.html` jen s domovskou stránkou (a tlačítkem potvrzení), v chatu
-  řekni, že je to minimum pro pokračování, a zapiš ji stejně:
+  řekni, že je to minimum pro pokračování, a zapiš ji stejně jako v bodě 4
+  (otevři kolo před potvrzením PM, po potvrzení znovu):
   `aid-ui-state.sh await-choice <project> --kind pages --screen pages-<n>.html --page-url http://localhost:<port>/`.
   Bez potvrzení PM běh zůstává v kroku 1 - brána kroku chce `choices.pages`,
   když je SEO zapnuté. Nikdy bez PM. V těle kapitoly `seo` napiš, že seznam

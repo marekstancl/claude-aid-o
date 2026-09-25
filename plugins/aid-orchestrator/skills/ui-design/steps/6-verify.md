@@ -21,11 +21,12 @@ Ověřený vzhled a kapitoly schválené PM (případně zákazníkem).
 ## Postup
 
 1. `aid-ui-state.sh require-direction <project>` - exit 1 → stop, jdi na krok 3.
-2. Závěrečná revize Impeccable platí jen tehdy, když existují čerstvé
-   `.impeccable/review/*.png` (novější než poslední změna kódu), `DESIGN.md`
-   i `.impeccable/design.json` a ani jeden z těch dvou souborů se od poslední
-   revize nezměnil (změna snímky zneplatní). Platí-li vše, revizi neopakuj;
-   v každém jiném případě ji spusť přes Skill `impeccable`.
+2. Závěrečná revize Impeccable platí, když existují `.impeccable/review/*.png`,
+   `DESIGN.md` i `.impeccable/design.json` a snímky jsou novější než poslední
+   změna kódu (včetně tokenů a CSS, ze kterých build čte). `DESIGN.md`
+   a `design.json` píše dokumentátor Impeccable až po revizi, takže jejich
+   pozdější změna revizi nezneplatní. Platí-li to, revizi neopakuj; jinak ji
+   spusť přes Skill `impeccable`.
 3. Kontrola před nasazením: mobil + desktop podle platformního kontraktu;
    prázdný, chybový a načítací stav; klávesnice a viditelný focus; žádné
    ad-hoc varianty komponent - grep na natvrdo zapsané barvy (`#hex`, `rgb(`,

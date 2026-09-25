@@ -29,7 +29,9 @@
 #                          *.XXXXXX are named as internal);
 #                          idempotent: our job alive, answering and serving the
 #                          same (realpath) dir -> print URL, exit 0; else restart.
-#   stop <forward|brand>   cancel that role's job; no job of ours -> exit 0
+#   stop <forward|brand>   cancel that role's job, found under <jobs> or, from any
+#                          cwd, through the pointer $STATE_DIR/<id> that start
+#                          writes; no job of ours -> exit 0
 #
 # Both servers run as `aid-job.sh` jobs (the plugin's one process owner), so a
 # stop cancels exactly that job's process group and nothing else. The job id
@@ -38,7 +40,8 @@
 # aid-run-gates.sh).
 #
 # <project> = $AID_UI_PROJECT, else $PWD. Jobs dir = $AID_UI_JOBS_DIR, else
-# <project>/.aid-ui/jobs.
+# <project>/.aid-ui/jobs. Pointer dir = $AID_UI_STATE_DIR, else ~/.cache/aid-ui
+# (one file per job id = per port, holding the jobs dir of the job started last).
 # Env: AID_UI_HOST (10.20.20.22), AID_UI_FORWARD_PORT (3915), AID_UI_BRAND_PORT (3916).
 # Output: URL: <url> and JOB: <id>.
 # Exit: 0 ok, 1 port in use / start failure, 2 usage or refused target.
@@ -51,6 +54,7 @@ FWD_PORT="${AID_UI_FORWARD_PORT:-3915}"
 BRAND_PORT="${AID_UI_BRAND_PORT:-3916}"
 PROJECT="${AID_UI_PROJECT:-$PWD}"
 JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
+STATE_DIR="${AID_UI_STATE_DIR:-$HOME/.cache/aid-ui}"
 DEADLINE=28800   # 8 h, integer seconds as `aid-job.sh run --deadline` requires
 
 # argv: <bind host> <bind port> <upstream port>. HTTP/1.0 to the browser: the
@@ -143,7 +147,8 @@ start() {   # start <role> <cmd...>
   if listening "$port"; then
     die "port $port in use by: $(ss -ltnpH "sport = :$port" | tr -s ' ')"
   fi
-  mkdir -p "$JOBS"
+  mkdir -p "$JOBS" "$STATE_DIR"
+  realpath "$JOBS" > "$STATE_DIR/$id"
   local out
   out="$(bash "$JOB_SH" run --jobs-dir "$JOBS" --id "$id" --label "aid-ui $role" \
     --repo "$PROJECT" --deadline "$DEADLINE" -- "$@" 2>&1)" || die "aid-job.sh run failed: $out"
@@ -197,8 +202,10 @@ case "$1" in
   stop)
     [[ "$2" == forward || "$2" == brand ]] || usage
     id="$(job_id "$2")"
-    [[ -f "$JOBS/$id/job.json" ]] || exit 0
-    bash "$JOB_SH" cancel --jobs-dir "$JOBS" --id "$id" >/dev/null || die "cancel of $id failed"
+    jobs="$JOBS"
+    [[ -f "$jobs/$id/job.json" ]] || jobs="$(cat "$STATE_DIR/$id" 2>/dev/null || true)"
+    [[ -n "$jobs" && -f "$jobs/$id/job.json" ]] || exit 0
+    bash "$JOB_SH" cancel --jobs-dir "$jobs" --id "$id" >/dev/null || die "cancel of $id failed"
     ;;
   *) usage ;;
 esac

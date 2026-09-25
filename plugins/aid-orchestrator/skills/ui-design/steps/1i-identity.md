@@ -34,8 +34,11 @@ který prošel kontrolou výstupu šablony; kapitola `logo` to nese.
    (nový soubor na každé kolo): tři karty `data-choice` bez
    `data-multiselect`, v každé symbol v 16, 32, 180 px a v plné velikosti,
    na světlém i tmavém podkladu; tlačítko `data-confirm`.
-4. Po potvrzení PM
+4. Hned po zápisu obrazovky otevři kolo před potvrzením PM:
    `aid-ui-state.sh await-choice <project> --kind logo --screen logo-<n>.html --page-url http://localhost:<port>/`.
+   Skončí exit 1 „no confirm on ... yet" - to je v pořádku, kolo je otevřené.
+   Pak pošli PM odkaz na stránku a až PM napíše, že potvrdil, spusť stejný
+   příkaz znovu. Potvrzení z doby před otevřením kola skript odmítne.
 5. Balíček do `docs/design/brand-package/` podle části 2 šablony:
    `symbol/` (color, black, white, color-on-dark), `source/` (master se
    živým textem + název a licence fontu), vedle distribuční verze s textem
@@ -47,7 +50,8 @@ který prošel kontrolou výstupu šablony; kapitola `logo` to nese.
    skriptu nikdy nevkládej, skript si ho přečte sám. Každá cesta musí
    odpovídat `^/[A-Za-z0-9._/-]+$` (bez uvozovek, mezer a `${`), jinou
    nevyplňuj. Spusť přes
-   `mcp__plugin_playwright_playwright__browser_run_code_unsafe` s `filename`. Pak
+   `mcp__plugin_playwright_playwright__browser_run_code_unsafe` s `filename`
+   (zapíše PNG). Pak `cp <symbol.svg> <icons>/favicon.svg`,
    `python3 scripts/aid-ui-ico.py <icons>/favicon.ico <icons>/favicon-16.png <icons>/favicon-32.png <icons>/favicon-48.png`
    a `python3 scripts/aid-ui-ico.py --verify <icons>` (exit 0 = kompletní).
 7. Kontrola výstupu podle šablony (oddíl „Kontrola výstupu"): čitelnost
@@ -80,7 +84,7 @@ dvě kola; pak PM dodá symbol sám (cesta `"package"`).
 
 ## Když krok selže
 
-- `await-choice` skončí `ERROR:` → ukaž ho PM; kolo zůstává otevřené, krok 2
+- `await-choice` skončí `ERROR:` po potvrzení PM → ukaž ho PM; kolo zůstává otevřené, krok 2
   se nepustí.
 - Playwright MCP chybí nebo nezapíše soubory → požádej PM o ikony z ručního
   nástroje podle seznamu z `--verify`, kapitolu `logo` nech `ceka` a v jejím

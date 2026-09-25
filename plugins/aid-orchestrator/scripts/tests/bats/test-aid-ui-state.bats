@@ -348,6 +348,23 @@ record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq
   grep -q '<section id="barvy" data-status="schvaleno">' "$HTML"
 }
 
+@test "body changed after schvaleno clears the approval; an identical body keeps it" {
+  echo '<p>a</p>' > "$BATS_TEST_TMPDIR/a.html"
+  echo '<p>b</p>' > "$BATS_TEST_TMPDIR/b.html"
+  "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/a.html"
+  "$SCRIPT" chapter "$PROJ" barvy schvaleno --by PM
+  run "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/a.html"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .chapters.barvy.status "$STATE")" = schvaleno ]
+  [[ "$output" != *"approval cleared"* ]]
+  run "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/b.html"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"approval cleared"* ]]
+  [ "$(jq -r .chapters.barvy.status "$STATE")" = navrh ]
+  [ "$(jq -r '.chapters.barvy.by // ""' "$STATE")" = "" ]
+  grep -q '<section id="barvy" data-status="navrh">' "$HTML"
+}
+
 @test "chapter vize accepted" {
   run "$SCRIPT" chapter "$PROJ" vize navrh
   [ "$status" -eq 0 ]
@@ -719,15 +736,40 @@ NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
   echo '{"prompt":"y","usd":0.04}' > "$M/b.json"
   run "$SCRIPT" spend "$PROJ"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"2 new, 2 recorded"* ]]
+  [[ "$output" == *"2 new, 0 duplicate, 2 recorded"* ]]
   [ "$(jq '.image_spend | length' "$STATE")" = 2 ]
   [ "$(jq -c '.image_spend[0] | {file, bytes, model, usd}' "$STATE")" = '{"file":".impeccable/mocks/decision/a.png","bytes":5,"model":"gpt-image-1","usd":0.04}' ]
   [ "$(jq -r .image_spend[0].sha256 "$STATE")" = "$(sha256sum "$M/a.png" | cut -d' ' -f1)" ]
   [ "$(jq -c '.image_spend[1] | keys' "$STATE")" = '["bytes","file","sha256"]' ]
   run "$SCRIPT" spend "$PROJ"
-  [[ "$output" == *"0 new, 2 recorded"* ]]
+  [[ "$output" == *"0 new, 0 duplicate, 2 recorded"* ]]
   printf 'png-b2' > "$M/b.png"
   run "$SCRIPT" spend "$PROJ"
-  [[ "$output" == *"1 new, 3 recorded"* ]]
+  [[ "$output" == *"1 new, 0 duplicate, 3 recorded"* ]]
   [ "$(jq '[.image_spend[] | select(.file | endswith("b.png"))] | length' "$STATE")" = 2 ]
+}
+
+@test "spend records a copy with the same sha256 once, naming the original" {
+  M="$PROJ/.impeccable/mocks"; mkdir -p "$M/decision"
+  printf 'png-a' > "$M/decision/assigned.png"; cp "$M/decision/assigned.png" "$M/comp-1.png"
+  run "$SCRIPT" spend "$PROJ"
+  [ "$status" -eq 0 ]
+  # find order: comp-1.png sorts first, so the original is the one named a duplicate
+  [[ "$output" == *"decision/assigned.png: duplicate of .impeccable/mocks/comp-1.png"* ]]
+  [[ "$output" == *"1 new, 1 duplicate, 1 recorded"* ]]
+  [ "$(jq '.image_spend | length' "$STATE")" = 1 ]
+}
+
+@test "spend --also picks up a plates directory; one outside the project is refused" {
+  mkdir -p "$PROJ/assets/plates" "$BATS_TEST_TMPDIR/outside"
+  printf 'plate' > "$PROJ/assets/plates/hero.png"
+  run "$SCRIPT" spend "$PROJ" --also assets/plates
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 new, 0 duplicate, 1 recorded"* ]]
+  [ "$(jq -r '.image_spend[0].file' "$STATE")" = assets/plates/hero.png ]
+  run "$SCRIPT" spend "$PROJ" --also ../outside
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" spend "$PROJ" --also "$BATS_TEST_TMPDIR/outside"
+  [ "$status" -eq 2 ]
+  [ "$(jq '.image_spend | length' "$STATE")" = 1 ]
 }
