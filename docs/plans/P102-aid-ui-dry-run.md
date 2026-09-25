@@ -1,11 +1,11 @@
 # P102 Step 9: zkušební běh `/aid-ui` s volitelnými částmi (akceptační záznam)
 
-Jednou větou: na fiktivním klientovi (Truhlárna Dub) prošly scénáře E, F a G
-čistě; scénář D doběhl od kroku 0 po `finish` a PDF, ale jen s mezemi
-(chyba F1 opravená a znovu ověřená, závěrečná revize Impeccable skončila
-„fix" a otevřené body jsou převzaté jako známý dluh), proto **částečně**.
+Jednou větou: na fiktivním klientovi (Truhlárna Dub) prošly scénáře D, E, F
+a G - **PASS**. Scénář D byl nejdřív jen částečný (F1 opravené uprostřed
+běhu, Playwright MCP tehdy nešel spustit); controller pak MCP rozchodil,
+ověření přes MCP našlo chybu F9, ta je opravená a D prošel (25. 9. 11:15 UTC).
 
-Summary (EN, for the plan AC check): Scenario D: partial (end to end 0-6 with finish and PDF, but F1 needed a fix mid-run and the Impeccable finish review ended `fix` with open items taken as known debt; Playwright MCP transport not exercised), Scenario E: pass, Scenario F: pass, Scenario G: pass.
+Summary (EN, for the plan AC check): Scenario D: pass (end to end 0-6 with finish and PDF; earlier partial because F1 needed a fix mid-run and the Playwright MCP could not start; the controller then ran the real MCP on 2026-09-25 11:10-11:15 UTC, it found F9, fixed and re-verified), Scenario E: pass, Scenario F: pass, Scenario G: pass.
 
 Zapsáno 2026-09-25. Testovaný kód: worktree `.aid-worktrees/plan-P102`,
 větev `task/E-102-3_3/main` (s necommitnutými opravami F1-F3 od controlleru).
@@ -15,15 +15,13 @@ tester za fiktivního klienta a jsou tak v poznámkách označené. MUST 3 (krok
 2-3 se v automatickém běhu nespouštějí) je pro tento zkušební běh zrušené
 stejně jako v P101: „PM" je tester, který stránky otevírá a kliká.
 
-**Playwright MCP nebyl vyzkoušen.** Na hostu se nespustí (`Chromium
-distribution chrome is not found at /opt/google/chrome/chrome`, bez sudo).
-Všechny prohlížečové kroky jely přes Node Playwright s Chromiem z
-`~/.cache/ms-playwright` (moduly z `node_modules` repa přes `NODE_PATH`):
-kliky „PM" na stránkách visual-companion a Impeccable, snímky vzorů
-a `references/brand-icons.js`. Ten byl zavolán stejnou cestou kódu, jakou
-volá MCP: soubor se vyhodnotí jako funkce a zavolá se se skutečnou `page`
-(harness `run-snippet.js`). Transport MCP (`browser_run_code_unsafe`
-s `filename`) tím ověřený NENÍ.
+**Playwright MCP v bězích 1 a 2 (historie):** tehdy se na hostu nespustil
+(`Chromium distribution chrome is not found at /opt/google/chrome/chrome`,
+bez sudo), prohlížečové kroky jely přes Node Playwright s Chromiem z
+`~/.cache/ms-playwright` (moduly z `node_modules` repa přes `NODE_PATH`),
+`references/brand-icons.js` přes harness `run-snippet.js`. Transport MCP
+(`browser_run_code_unsafe` s `filename`) controller ověřil až potom - viz
+„Ověření přes Playwright MCP" (našel F9, opraveno).
 
 Běhy (UTC):
 - **Běh 1** 07:39-07:57: kroky 0-4 až po responzivní bránu, scénáře E, F, G;
@@ -161,6 +159,12 @@ Revize Impeccable (finish reviewer, Sonnet):
   Oprava: `body`, které změní obsah schválené kapitoly, ji vrátí na `navrh`
   a vypíše, že schválení zrušilo; stejné tělo stav nechá; test
   v `test-aid-ui-state.bats`.
+- **F9 (opraveno 25. 9., našlo ověření přes MCP):** `brand-icons.js` pod
+  skutečným `@playwright/mcp` spadl na `import('node:fs')` - sandbox
+  nemá `require`/`process`/dynamický import. Oprava: skript nepoužívá Node
+  API, SVG čte přes `page.goto('file://…')`, PNG píše `page.screenshot`,
+  `favicon.svg` kopíruje agent; test ho spouští ve `vm` jen s `page`.
+  Znovu ověřeno přes MCP (7 PNG, `--verify` 9× OK).
 - Ostatní meze: font-match bez prohlížeče (Impeccable nenašel Playwright
   z projektu) vzal Karantinu z katalogu bez řazení; motion bez podpisové
   interakce; `ui-capture.mjs` najde Playwright jen přes `node_modules`
