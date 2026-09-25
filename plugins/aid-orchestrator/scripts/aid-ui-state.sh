@@ -131,6 +131,10 @@ elif mode == "body":
         def handle_starttag(self, tag, attrs):
             if tag not in TAGS:
                 self.refuse("tag <%s>" % tag)
+            # a browser auto-closes li/dt/dd up through a div, popping the chapter's own wrapper
+            parent = {"li": ("ul", "ol"), "dt": ("dl",), "dd": ("dl",)}.get(tag)
+            if parent and (self.open_tags or [None])[-1] not in parent:
+                self.refuse("<%s> outside a %s" % (tag, "list" if tag == "li" else "<dl>"))
             for name, val in attrs:
                 allowed = ATTRS.get(name, False)
                 if name == "style" and STYLE.fullmatch((val or "").strip()):

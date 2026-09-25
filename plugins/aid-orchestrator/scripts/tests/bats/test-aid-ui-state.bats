@@ -307,6 +307,24 @@ record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq
   cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
 }
 
+@test "body refuses li/dt/dd outside their list; accepts proper lists" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in '<ul><li><div><li>x' '<ul><li><div><li>x</li></div></li></ul>' \
+             '<dl><dt><div><dt>x</dt></div></dt></dl>' '<dl><dd><div><dd>x' '<li>a<li>b'; do
+    printf '%s' "$bad" > "$BATS_TEST_TMPDIR/bad.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"refused"*"outside a"* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for ok in '<ul><li>a</li><li>b</li></ul>' '<dl><dt>a</dt><dd>b</dd></dl>'; do
+    printf '%s' "$ok" > "$BATS_TEST_TMPDIR/ok.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/ok.html"
+    [ "$status" -eq 0 ]
+    grep -qF "<!-- body:vize -->$ok<!-- /body:vize -->" "$HTML"
+  done
+}
+
 @test "body accepts allowed tags, safe links and a relative image" {
   for ok in '<a href="https://example.com">ok</a>' '<img src="assets/logo.svg" alt="logo">' \
             '<p>Text <strong>tučně</strong> a &lt;script&gt;</p>' \
