@@ -256,14 +256,18 @@ impeccable_round() {
 # companion_choice <slogan|logo|pages> <args...> — see await-choice in the header.
 companion_choice() {
   local kind="$1"; shift
-  local screen url since ans rc at n text file sha
+  local screen url since ans rc at n text file sha pending
   screen="$(opt screen "$@")"; url="$(opt page-url "$@")"
   [[ -n "$screen" && -n "$url" ]] || usage "await-choice --kind $kind needs --screen --page-url"
   [[ "$screen" =~ ^$kind-[0-9]+\.html$ ]] || usage "--screen must be a new $kind-<n>.html file per round: $screen"
   if [[ "$(jq -r --arg k "$kind" '.choices[$k].screen // empty' "$STATE")" == "$screen" ]]; then
     echo "CHOICE $kind: already recorded from $screen"; return 0
   fi
-  if [[ "$(jq -r '.choice_pending | if . then "\(.kind) \(.key_or_screen)" else "" end' "$STATE")" != "$kind $screen" ]]; then
+  pending="$(jq -r '.choice_pending | if . then "\(.kind) \(.key_or_screen)" else "" end' "$STATE")"
+  # Another kind's open round is never dropped; a new round of the same kind replaces the old one.
+  [[ -z "$pending" || "${pending%% *}" == "$kind" ]] ||
+    die "a ${pending%% *} round is still open on ${pending#* }; answer it before a $kind round"
+  if [[ "$pending" != "$kind $screen" ]]; then
     jq_write --arg k "$kind" --arg s "$screen" --arg u "$url" --arg at "$(now)" \
       '.choice_pending = {kind: $k, key_or_screen: $s, page_url: $u, at: $at}'
   fi

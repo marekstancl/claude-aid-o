@@ -397,6 +397,9 @@ NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
   choice logo logo-1.html
   [ "$status" -eq 1 ]
   [ "$(jq .choices.logo "$STATE")" = null ]
+  confirm logo-1.html '["l1"]' "$NEW"
+  choice logo logo-1.html
+  [ "$status" -eq 0 ]
   confirm pages-1.html '[]' "$NEW" "úvod, ceník"
   choice pages pages-2.html
   [ "$status" -eq 1 ]
@@ -405,6 +408,25 @@ NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
   choice pages pages-2.html
   [ "$status" -eq 0 ]
   [ "$(jq -r .choices.pages.screen "$STATE")" = pages-2.html ]
+}
+
+@test "await-choice: an open round of another kind refuses exit 1; the same kind's new round replaces it" {
+  curl_stub
+  choice slogan slogan-1.html
+  [ "$status" -eq 1 ]
+  choice logo logo-1.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"slogan round is still open on slogan-1.html"* ]]
+  [ "$(jq -r .choice_pending.key_or_screen "$STATE")" = slogan-1.html ]
+  jq '.choice_pending = {kind: "composition", key_or_screen: "k1", page_url: "http://x/", at: "2000"}' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  choice pages pages-1.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"composition round is still open on k1"* ]]
+  jq '.choice_pending = {kind: "slogan", key_or_screen: "slogan-1.html", page_url: "http://x/", at: "2000"}' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  choice slogan slogan-2.html
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no confirm on slogan-2.html"* ]]
+  [ "$(jq -r .choice_pending.key_or_screen "$STATE")" = slogan-2.html ]
 }
 
 @test "await-choice: unreachable server and malformed answer record nothing; bad screen name exit 2" {

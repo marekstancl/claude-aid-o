@@ -9,6 +9,8 @@ const confirms = require('./confirm-store');
 const PORT = process.env.BRAINSTORM_PORT || (49152 + Math.floor(Math.random() * 16383));
 const HOST = process.env.BRAINSTORM_HOST || '127.0.0.1';
 const URL_HOST = process.env.BRAINSTORM_URL_HOST || (HOST === '127.0.0.1' ? 'localhost' : HOST);
+// Hostnames a confirm may arrive on (the port may differ behind a port forward).
+const CONFIRM_HOSTS = ['localhost', '127.0.0.1', '::1', HOST, URL_HOST];
 const SCREEN_DIR = process.env.BRAINSTORM_DIR || '/tmp/brainstorm';
 
 if (!fs.existsSync(SCREEN_DIR)) {
@@ -81,9 +83,10 @@ wss.on('connection', (ws, req) => {
     try { event = JSON.parse(data.toString()); } catch (e) { return; }
     console.log(JSON.stringify({ source: 'user-event', ...event }));
     // A confirm is kept in memory for GET /aid/confirmed; only confirms are
-    // checked against the request's own Host (a page of another site is refused).
+    // checked against the request's own Host and the server's own names
+    // (a page of another site, or a DNS-rebound one, is refused).
     if (event.type === 'confirm' &&
-        !confirms.record(event.screen, event, originHost(req.headers.origin), req.headers.host)) {
+        !confirms.record(event.screen, event, originHost(req.headers.origin), req.headers.host, CONFIRM_HOSTS)) {
       console.log(JSON.stringify({ type: 'confirm-refused', screen: event.screen, origin: req.headers.origin || null }));
       return;
     }
