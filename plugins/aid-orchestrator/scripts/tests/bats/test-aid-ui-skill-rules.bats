@@ -33,7 +33,11 @@ postup_first() { awk '/^## Postup/{f=1; next} f && NF {print; exit}' "$1"; }
     run bash "$LINT" "$f"
     [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   done
-  [ "$(ls "$SK"/steps/*.md | wc -l)" -eq 7 ]
+  for n in 0 1 2 3 4 5 6; do ls "$SK"/steps/$n-*.md >/dev/null || return 1; done
+  for f in "$SK"/steps/1?-*.md; do
+    [ -e "$f" ] || continue
+    grep -qF "steps/$(basename "$f")" "$SK/steps/1-product.md" || { echo "not in 1-product.md: $f"; return 1; }
+  done
 }
 
 # P102 Step 2 — the text defects of the P101 dry run stay fixed.
@@ -69,4 +73,14 @@ postup_first() { awk '/^## Postup/{f=1; next} f && NF {print; exit}' "$1"; }
 @test "2-references.md names Google Play search and no Mobbin" {
   grep -qF 'play.google.com/store/search' "$SK/steps/2-references.md"
   [ "$(grep -ci mobbin "$SK/steps/2-references.md")" -eq 0 ]
+}
+
+# P102 Step 4 — sub-step 1v takes the slogan from the page and writes chapter vize.
+@test "1v-vision.md takes the slogan through await-choice and writes vize through body" {
+  grep -qF 'await-choice <project> --kind slogan --screen' "$SK/steps/1v-vision.md"
+  grep -qF 'aid-ui-state.sh body <project> vize' "$SK/steps/1v-vision.md"
+}
+
+@test "1-product.md names 1v, 1i, 1s in that order" {
+  [ "$(grep -o '`1[vis]`' "$SK/steps/1-product.md" | tr -d '`' | tr '\n' ' ')" = "1v 1i 1s " ]
 }

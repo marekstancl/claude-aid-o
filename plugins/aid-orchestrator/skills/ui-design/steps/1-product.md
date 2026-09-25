@@ -6,7 +6,7 @@ user_invocable: false
 
 # Krok 1 - Produkt
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-09-25
 
 ## Cíl
 
@@ -14,7 +14,7 @@ user_invocable: false
 
 ## Vstupy
 
-`PRODUCT.md` projektu, typ produktu ze `state.json`.
+`PRODUCT.md` projektu, typ produktu a `options` z `docs/design/brand-state.json`.
 
 ## Postup
 
@@ -22,6 +22,10 @@ user_invocable: false
 2. Chybí → Skill `impeccable` s `init`; na chybějící údaje se ptá Impeccable.
 3. Shrnutí vlož do kapitoly `produkt` a
    `aid-ui-state.sh chapter <project> produkt navrh`.
+4. Pak v tomto pořadí zapnuté volitelné části: `1v` (`steps/1v-vision.md`,
+   `options.vision`), `1i` (`steps/1i-identity.md`, `options.identity`),
+   `1s` (`steps/1s-seo.md`, `options.seo`). Vize jde první, tón značky
+   se odvozuje z ní.
 
 ## Co PM rozhoduje
 
@@ -35,4 +39,4 @@ Potvrdí shrnutí, nebo ho opraví (oprava jde do `PRODUCT.md`).
 
 Impeccable `init` skončí chybou → ukaž ji PM, krok se neposouvá.
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-09-25
