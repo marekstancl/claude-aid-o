@@ -34,8 +34,11 @@ nekopíruj).
    visual-companion `slogan-<n>.html` (nový soubor na každé kolo): karty
    `data-choice` bez `data-multiselect`, pole `data-confirm-text` pro vlastní
    slogan, tlačítko `data-confirm`.
-5. Po potvrzení PM
+5. Hned po zápisu obrazovky otevři kolo před potvrzením PM:
    `aid-ui-state.sh await-choice <project> --kind slogan --screen slogan-<n>.html --page-url http://localhost:<port>/`.
+   Skončí exit 1 „no confirm on ... yet" - to je v pořádku, kolo je otevřené.
+   Pak pošli PM odkaz na stránku a až PM napíše, že potvrdil, spusť stejný
+   příkaz znovu. Potvrzení z doby před otevřením kola skript odmítne.
 6. Tělo kapitoly do souboru v `.aid-ui/` (jádro vize, tón, zvolený slogan,
    seznam zamítnutých) a
    `aid-ui-state.sh body <project> vize --file <soubor>`, pak
@@ -54,7 +57,7 @@ Projekt v angličtině: slogany a text kapitoly anglicky, zprávy PM česky.
 
 ## Když krok selže
 
-`await-choice` skončí `ERROR:` → ukaž ho PM; kolo zůstává otevřené, krok 2
+`await-choice` skončí `ERROR:` po potvrzení PM → ukaž ho PM; kolo zůstává otevřené, krok 2
 se nepustí.
 
 **Last Updated:** 2026-09-25

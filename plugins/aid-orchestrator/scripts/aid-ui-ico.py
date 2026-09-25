@@ -9,6 +9,12 @@
                                              attributes (SVG_ELEMENTS / SVG_ATTRS below) and have
                                              a square viewBox; no DOCTYPE or PI, UTF-8, at most
                                              512 KB and 64 levels deep
+  python3 aid-ui-ico.py --check-svg <in.svg> <out.checked.svg>
+                                             the same SVG check on <in>; pass -> writes the
+                                             checked bytes to <out> (name must end in
+                                             .checked.svg, the only name brand-icons.js
+                                             opens), exit 0; fail -> WRONG <reason>, nothing
+                                             written, exit 1
 
 Exit: 0 ok, 1 refused / check failed, 2 usage. Python stdlib only.
 """
@@ -16,6 +22,7 @@ import os
 import re
 import struct
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 
 PNG_SIG = b"\x89PNG\r\n\x1a\n"
@@ -81,13 +88,23 @@ def svg_depth(el, depth=1):
     return depth <= SVG_MAX_DEPTH and all(svg_depth(c, depth + 1) for c in el)
 
 
-def svg_problem(path):
-    """Why the SVG is unsafe or not square, or None when it is fine."""
+def read_svg(path):
+    """(bytes, None), or (None, why) when unreadable; reads at most SVG_MAX_BYTES + 1."""
     try:
         with open(path, "rb") as f:
-            raw = f.read(SVG_MAX_BYTES + 1)
+            return f.read(SVG_MAX_BYTES + 1), None
     except OSError as e:
-        return f"not readable ({e})"
+        return None, f"not readable ({e})"
+
+
+def svg_problem(path):
+    """Why the SVG file is unsafe or not square, or None when it is fine."""
+    raw, why = read_svg(path)
+    return why or svg_bytes_problem(raw)
+
+
+def svg_bytes_problem(raw):
+    """Why the SVG bytes are unsafe or not square, or None when they are fine."""
     if len(raw) > SVG_MAX_BYTES:
         return f"larger than {SVG_MAX_BYTES // 1024} KB"
     try:
@@ -187,9 +204,32 @@ def verify(d):
     return 1 if bad else 0
 
 
+def check_svg(src, out):
+    """Write out only with the very bytes that passed; the temp file is mkstemp (0600,
+    O_EXCL, random name), so no existing file or symlink is ever followed."""
+    raw, problem = read_svg(src)
+    problem = problem or svg_bytes_problem(raw)
+    if problem is not None:
+        print(f"WRONG   {src} {problem}")
+        return 1
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(out)), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, out)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+    print(f"OK      {out}")
+    return 0
+
+
 def main(argv):
     if len(argv) == 2 and argv[0] == "--verify":
         return verify(argv[1])
+    if len(argv) == 3 and argv[0] == "--check-svg" and argv[2].endswith(".checked.svg"):
+        return check_svg(argv[1], argv[2])
     if len(argv) >= 2 and not argv[0].startswith("-"):
         pack(argv[0], argv[1:])
         return 0

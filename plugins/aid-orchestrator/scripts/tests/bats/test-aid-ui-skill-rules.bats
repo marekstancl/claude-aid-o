@@ -123,8 +123,18 @@ postup_first() { awk '/^## Postup/{f=1; next} f && NF {print; exit}' "$1"; }
   ! grep -rnE 'OPENAI_API_KEY=[A-Za-z0-9]' "$SK" || false
 }
 
+@test "1v, 1i, 1s open the await-choice round before the PM confirms, then re-run it" {
+  for f in 1v-vision 1i-identity 1s-seo; do
+    grep -qF 'Hned po zápisu obrazovky otevři kolo před potvrzením PM:' "$SK/steps/$f.md"
+    grep -qF 'až PM napíše, že potvrdil, spusť stejný' "$SK/steps/$f.md"
+    # the first await-choice must not be introduced by a bare "Po potvrzení PM"
+    ! grep -B1 -m1 'aid-ui-state.sh await-choice' "$SK/steps/$f.md" | grep -q 'Po potvrzení PM' || false
+  done
+}
+
 @test "3-direction.md handles exit 5; 4-build.md closes the composition round through await-choice and reports spend" {
   grep -qF 'exit 5' "$SK/steps/3-direction.md"
   grep -qF 'await-choice <project> --kind composition' "$SK/steps/4-build.md"
   grep -qF 'aid-ui-state.sh spend <project>' "$SK/steps/4-build.md"
+  grep -qF -- '--also assets/plates' "$SK/steps/4-build.md"
 }

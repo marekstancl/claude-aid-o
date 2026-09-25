@@ -54,8 +54,10 @@ přebírá postavený vzhled.
 8. Teprve pak `aid-ui-state.sh chapter <project> <id> navrh` pro `barvy`, `typografie`, `ukazky`.
 9. Přestavba po dřívějším schválení:
    `aid-ui-state.sh reset-approvals <project> barvy typografie komponenty ukazky`.
-10. Při `options.images` po stavbě `aid-ui-state.sh spend <project>` a PM řekni
-    počet obrázků (a cenu, jen když ji skript vypíše).
+10. Při `options.images` po stavbě `aid-ui-state.sh spend <project>`, a když
+    Impeccable ohlásí adresář s deskami (plates), přidej ho: `--also assets/plates`.
+    PM řekni počet obrázků (a cenu, jen když ji skript vypíše); kopie téhož
+    obrázku skript počítá jako „duplicate", ne jako nový.
 
 ## Co PM rozhoduje
 

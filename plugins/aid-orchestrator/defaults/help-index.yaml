@@ -217,7 +217,7 @@ surfaces:
       writes: [], final_turn: "card:decision-required" }
 
   - { command: /aid-ui, file: plugins/aid-orchestrator/commands/aid-ui.md,
-      purpose: "Guide the PM from product type to a built, verified UI whose direction the PM chose",
+      purpose: "Guide the PM from product type to a built, verified UI whose direction the PM chose; optional vision and slogans, identity, SEO and image comps",
       topic: ui, audience: regular, disposition: current,
       writes: [], final_turn: "card:decision-required" }
 

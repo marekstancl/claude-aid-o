@@ -8,6 +8,7 @@ setup() {
   SERVE="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/aid-ui-serve.sh"
   export AID_UI_HOST=127.0.0.1 AID_UI_FORWARD_PORT=39915 AID_UI_BRAND_PORT=39916
   export AID_UI_JOBS_DIR="$BATS_TEST_TMPDIR/jobs" AID_UI_PROJECT="$BATS_TEST_TMPDIR"
+  export AID_UI_STATE_DIR="$BATS_TEST_TMPDIR/state"
   FOREIGN_PIDS=()
   BRAND="$BATS_TEST_TMPDIR/proj/docs/brand" BRAND2="$BATS_TEST_TMPDIR/proj2/docs/brand"
   mkdir -p "$BRAND" "$BRAND2" "$BATS_TEST_TMPDIR/page"
@@ -142,6 +143,29 @@ HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
   "$SERVE" stop brand
   run "$SERVE" brand "$BRAND"
   [ "$status" -eq 0 ]
+  [ "$(get 39916)" = brand-ok ]
+}
+
+@test "stop brand from outside the project stops the server it started" {
+  "$SERVE" brand "$BRAND"
+  [ "$(get 39916)" = brand-ok ]
+  run env -u AID_UI_JOBS_DIR -u AID_UI_PROJECT bash -c 'cd / && "$0" stop brand' "$SERVE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"stopped the brand server of project $(realpath "$BATS_TEST_TMPDIR")"* ]]
+  for i in $(seq 1 50); do [[ -z "$(ss -ltnH "sport = :39916")" ]] && break; sleep 0.1; done
+  [ -z "$(ss -ltnH "sport = :39916")" ]
+}
+
+@test "stop brand from another project refuses to stop this project's server, naming both" {
+  "$SERVE" brand "$BRAND"
+  other="$BATS_TEST_TMPDIR/proj2"; me="$(realpath "$BATS_TEST_TMPDIR")"
+  run env AID_UI_PROJECT="$other" AID_UI_JOBS_DIR="$other/.aid-ui/jobs" "$SERVE" stop brand
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"belongs to project $me, not $(realpath "$other")"* ]]
+  git init -q "$other"   # cwd inside a git project, no AID_UI_PROJECT
+  run env -u AID_UI_JOBS_DIR -u AID_UI_PROJECT bash -c 'cd "$1/docs" && "$0" stop brand' "$SERVE" "$other"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"belongs to project $me, not $(realpath "$other")"* ]]
   [ "$(get 39916)" = brand-ok ]
 }
 

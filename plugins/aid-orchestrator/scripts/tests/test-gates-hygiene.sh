@@ -90,6 +90,7 @@ ALLOW=(
   'commands/aid-init.md|`required_when`, `needs_services`'
   'commands/aid-init.md|`runtime_baseline`, `quarantine`'
   'commands/aid-init.md|The missing-table upgrade'
+  'commands/aid-init.md|the old `gate_profile_defaults.epic`'
   # a leftover file a pre-P097 project may still track (nothing writes it)
   'scripts/lib/aid-ancillary.sh|.aid-o/metrics/gate-runtime-baselines.yaml'
   'defaults/policies/plan-final-policy.yaml|.aid-o/metrics/gate-runtime-baselines.yaml'

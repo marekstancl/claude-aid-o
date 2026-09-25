@@ -52,14 +52,18 @@
 #   reset-approvals <project> <id>...
 #   body <project> <id> --file <html>    replaces only what is between <!-- body:<id> -->
 #                                        and <!-- /body:<id> -->; refuses active or
-#                                        structural content (script, on…=, section, markers)
+#                                        structural content (script, on…=, section, markers);
+#                                        a changed body of a `schvaleno` chapter resets it to `navrh`
 #   fonts <project> <url-or-path>...     <link rel="stylesheet"> lines between <!-- fonts -->
 #                                        markers; only https://fonts.googleapis.com/… or a
 #                                        .css file under docs/brand/fonts/
 #   finish <project>                     after step 6, with a direction and the step gates
-#   spend <project>                      records each image under .impeccable/mocks/ not yet in
-#                                        image_spend as {file, sha256, bytes}; model (and usd)
-#                                        only when its .json sidecar names a model
+#   spend <project> [--also <dir>]...    records each image under .impeccable/mocks/ (and each
+#                                        --also dir, e.g. assets/plates; must be inside <project>,
+#                                        else exit 2) whose sha256 is not yet in image_spend, as
+#                                        {file, sha256, bytes}; model (and usd) only when its .json
+#                                        sidecar names a model. A copy of a recorded image (same
+#                                        sha256, other file) is not recorded: "duplicate of <file>"
 #
 # Exit: 0 ok, 1 refused, 2 usage. (await-direction, await-choice composition: 3 = re-roll requested;
 # await-direction: 5 = build path flipped, generate the comps and wait again.)
@@ -545,7 +549,12 @@ case "$VERB" in
     (( $# == 3 )) && [[ "$2" == --file ]] || usage "body needs <id> --file <html>"
     [[ "$CHAPTERS" == *" $1 "* ]] || usage "unknown chapter id: $1"
     [[ -f "$3" ]] || die "no body file $3"
+    before="$(cksum < "$HTML" 2>/dev/null || true)"
     html_edit body "$1" "$3"
+    if [[ "$(cksum < "$HTML")" != "$before" && "$(jq -r --arg id "$1" '.chapters[$id].status' "$STATE")" == schvaleno ]]; then
+      write_chapter "$1" navrh ""
+      echo "body of $1 changed: approval cleared, status navrh"
+    fi
     ;;
 
   fonts)
@@ -556,10 +565,22 @@ case "$VERB" in
 
   spend)
     need_state
-    added=0
+    root="$(realpath "$PROJECT")"
+    dirs=("$root/.impeccable/mocks")
+    while (( $# )); do
+      [[ "$1" == --also && -n "${2:-}" ]] || usage "spend takes only --also <dir>"
+      d="$(realpath -m "$PROJECT/$2")"
+      [[ "$d" == "$root"/* && -d "$d" ]] || usage "--also must be a directory inside $PROJECT: $2"
+      dirs+=("$d"); shift 2
+    done
+    added=0; dups=0
     while IFS= read -r -d '' f; do
-      rel="${f#"$PROJECT"/}"; sha="$(sha256sum "$f" | cut -d' ' -f1)"
-      jq -e --arg f "$rel" --arg s "$sha" 'any(.image_spend[]?; .file == $f and .sha256 == $s)' "$STATE" >/dev/null && continue
+      rel="${f#"$root"/}"; sha="$(sha256sum "$f" | cut -d' ' -f1)"
+      orig="$(jq -r --arg s "$sha" 'first(.image_spend[]? | select(.sha256 == $s) | .file) // empty' "$STATE")"
+      if [[ -n "$orig" ]]; then
+        [[ "$orig" == "$rel" ]] || { echo "  $rel: duplicate of $orig"; dups=$((dups + 1)); }
+        continue
+      fi
       # Impeccable's prompt sidecar (<image>.json or <stem>.json); model and usd only as it states them
       extra='{}'
       for side in "$f.json" "${f%.*}.json"; do
@@ -571,9 +592,9 @@ case "$VERB" in
       jq_write --arg f "$rel" --arg s "$sha" --argjson b "$(stat -c %s "$f")" --argjson x "$extra" \
         '.image_spend += [{file: $f, sha256: $s, bytes: $b} + $x]'
       added=$((added + 1))
-    done < <([[ -d "$PROJECT/.impeccable/mocks" ]] && find "$PROJECT/.impeccable/mocks" -type f \
-               \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) -print0 | sort -z)
-    jq -r --argjson n "$added" '"IMAGES: \($n) new, \(.image_spend | length) recorded"
+    done < <(for d in "${dirs[@]}"; do [[ -d "$d" ]] && find "$d" -type f \
+               \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) -print0 | sort -z; done)
+    jq -r --argjson n "$added" --argjson d "$dups" '"IMAGES: \($n) new, \($d) duplicate, \(.image_spend | length) recorded"
       + ([.image_spend[].usd | numbers] | if length > 0 then ", $\(add) priced" else "" end)' "$STATE"
     ;;
 
