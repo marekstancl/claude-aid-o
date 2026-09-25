@@ -123,7 +123,9 @@ elif mode == "body":
         if v.startswith(("https://", "http://", "mailto:", "#", "/", "./", "../")):
             return False
         return ":" in v.split("/", 1)[0]   # relative path: no scheme before the first "/"
-    class Check(HTMLParser):
+    VOID = {"br", "hr", "img"}
+    class Check(HTMLParser):   # validates and re-serializes; the raw body never reaches the page
+        out = []
         def refuse(self, what):
             fail("body of section %s refused: %s contains %s" % (cid, src, what))
         def handle_starttag(self, tag, attrs):
@@ -139,13 +141,22 @@ elif mode == "body":
                     self.refuse("class status")
                 if name in ("href", "src") and bad_url(val or ""):
                     self.refuse("URL %r" % (val or "")[:40])
+            self.out.append("<" + tag + "".join(' %s="%s"' % (n, html.escape(v or "", quote=True))
+                                                for n, v in attrs) + ">")
         handle_startendtag = handle_starttag
         def handle_endtag(self, tag):
             if tag not in TAGS:
                 self.refuse("tag </%s>" % tag)
+            if tag not in VOID:
+                self.out.append("</%s>" % tag)
         def handle_data(self, data):   # raw text; a browser would still open a tag here (<img\0...)
             if re.search(r'<[A-Za-z!/?]', data):
                 self.refuse("an unparsable tag %r" % data[:40])
+            self.out.append(html.escape(data, quote=False))
+        def handle_entityref(self, name):
+            self.out.append(html.escape(html.unescape("&%s;" % name), quote=False))
+        def handle_charref(self, name):
+            self.out.append(html.escape(html.unescape("&#%s;" % name), quote=False))
         def handle_comment(self, data):
             self.refuse("a comment")
         def handle_decl(self, decl):
@@ -157,11 +168,13 @@ elif mode == "body":
     c = Check(convert_charrefs=False)
     if "<!--" in body or "-->" in body:   # also inside attribute values: a fake marker there cuts the next write short
         c.refuse("a comment marker")
+    if re.search(r'</(?![A-Za-z][A-Za-z0-9]*\s*>)', body):   # browsers read attributes in end tags, html.parser does not
+        c.refuse("an end tag with more than its name")
     c.feed(body)
     if re.search(r'<[A-Za-z!/?]', c.rawdata):   # close() would drop an unfinished tag silently
         c.refuse("an unfinished tag %r" % c.rawdata[:40])
     c.close()
-    text = between(text, cid, "body", body)
+    text = between(text, cid, "body", "".join(c.out))
 elif mode == "fonts":
     project = args[0]
     brand = os.path.realpath(os.path.join(project, "docs/brand"))

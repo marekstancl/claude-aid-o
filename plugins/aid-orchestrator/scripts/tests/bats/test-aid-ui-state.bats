@@ -269,6 +269,26 @@ record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq
   [[ "$output" == *"more than once"* ]]
 }
 
+@test "body refuses an end tag with attributes (parser/browser differential)" {
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  for bad in '<p>x</p a="> <p title="> <img src=x onerror=alert(1)> ">' \
+             "<p>x</p a='> <p title='> <img src=x onerror=alert(1)> '>" \
+             '<b>x</b title="><i title="><img src=x onerror=alert(1)>">'; do
+    printf '%s' "$bad" > "$BATS_TEST_TMPDIR/bad.html"
+    run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/bad.html"
+    [ "$status" -eq 1 ]
+    [[ "$output" == ERROR:*"body of section vize refused"*"end tag"* ]]
+  done
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+}
+
+@test "body writes a re-serialization, not the raw input" {
+  printf '%s\n' '<P CLASS=lead>a &lt;script&gt; &amp; b < c<br/><a href="https://example.com?a=1&amp;b=2">x</a></P >' > "$BATS_TEST_TMPDIR/ok.html"
+  run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/ok.html"
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize --><p class="lead">a &lt;script&gt; &amp; b &lt; c<br><a href="https://example.com?a=1&amp;b=2">x</a></p>' "$HTML"
+}
+
 @test "body accepts allowed tags, safe links and a relative image" {
   for ok in '<a href="https://example.com">ok</a>' '<img src="assets/logo.svg" alt="logo">' \
             '<p>Text <strong>tučně</strong> a &lt;script&gt;</p>' \
