@@ -24,7 +24,7 @@ Ověřený vzhled a kapitoly schválené PM (případně zákazníkem).
 2. Závěrečná revize Impeccable proběhla: čerstvé `.impeccable/review/*.png`
    (novější než poslední změna kódu), `DESIGN.md` a `.impeccable/design.json`
    existují. Změnil se `DESIGN.md` nebo `.impeccable/design.json` po poslední
-   revizi → snímky neplatí, spusť novou závěrečnou revizi přes Skill `impeccable`.
+   Chybí čerstvé snímky nebo soubory → spusť ji přes Skill `impeccable`; jinak revizi neopakuj.
    Jinak ji spusť také.
 3. Kontrola před nasazením: mobil + desktop podle platformního kontraktu;
    prázdný, chybový a načítací stav; klávesnice a viditelný focus; žádné
