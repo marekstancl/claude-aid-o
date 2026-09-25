@@ -9,3 +9,22 @@ declared_epics:
 depends_on_plans:
   - P101
 mode: plan_branch
+deliveries:
+  E-102-1_3:
+    delivery: delivered
+    delivery_sha: 6aeca948cabea9c89f1b18b5e2b53722f0072e8c
+    reviewed_sha: 8119f7c2310285cf3315e81bc8385f2bf11377fc
+    review: accepted
+    unresolved_blockers: 0
+  E-102-2_3:
+    delivery: delivered
+    delivery_sha: 6aeca948cabea9c89f1b18b5e2b53722f0072e8c
+    reviewed_sha: 8119f7c2310285cf3315e81bc8385f2bf11377fc
+    review: accepted
+    unresolved_blockers: 0
+  E-102-3_3:
+    delivery: delivered
+    delivery_sha: 6aeca948cabea9c89f1b18b5e2b53722f0072e8c
+    reviewed_sha: 8119f7c2310285cf3315e81bc8385f2bf11377fc
+    review: accepted
+    unresolved_blockers: 0
