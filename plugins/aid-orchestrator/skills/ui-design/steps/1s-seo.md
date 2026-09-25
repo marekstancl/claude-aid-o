@@ -52,6 +52,7 @@ Kapitola `seo` to nese.
    hlavní dotaz); tlačítko `data-confirm`.
 4. Hned po zápisu obrazovky otevři kolo před potvrzením PM:
    `aid-ui-state.sh await-choice <project> --kind pages --screen pages-<n>.html --page-url http://localhost:<port>/`.
+   Server obrazovek (pokud ještě neběží) spusť přesně jako krok 2 (`steps/2-references.md`, včetně příznaků pro přístup přes VPN).
    Skončí exit 1 „no confirm on ... yet" - to je v pořádku, kolo je otevřené.
    Pak pošli PM odkaz na stránku a až PM napíše, že potvrdil, spusť stejný
    příkaz znovu. Potvrzení z doby před otevřením kola skript odmítne.

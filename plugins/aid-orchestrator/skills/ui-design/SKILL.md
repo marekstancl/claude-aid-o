@@ -48,8 +48,11 @@ Do NOT invoke for:
    (`node -e "require.resolve('playwright')"` nebo `@playwright/test`, z pluginu či projektu,
    a `npx playwright --version`) a řekni PM, že snímky půjdou přes Node Playwright:
    `node <plugin>/lib/ui-fidelity/ui-capture.mjs` z kořene projektu, jinak stejně.
-   Nejde ani jedno → stop, řekni PM: `/plugin install playwright@claude-plugins-official`
-   a `npx playwright install chromium`.
+   Nejde ani jedno → stop, řekni PM: `/plugin install playwright@claude-plugins-official`;
+   když MCP nestartuje (hledá značkový Chrome), do `env` v `~/.claude/settings.json` dát
+   `PLAYWRIGHT_MCP_BROWSER=chromium` (platí od další session) a pustit
+   `npx @playwright/mcp install-browser chrome-for-testing` (bez sudo, do `~/.cache/ms-playwright`).
+   Krok identity (1i) MCP potřebuje; bez něj skill nabídne ruční náhradu.
 4. Ekosystémové standardy čti živě z `/opt/eco/docs/docs/ecosystem/…`
    (`specs/design-system-standard.md`: checklist, platformy, „Kontrola před nasazením"). Chybí-li některý, jmenuj ho
    PM a poznamenej to v kapitole, které se týká.

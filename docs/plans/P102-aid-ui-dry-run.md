@@ -43,6 +43,10 @@ Běhy (UTC):
 | Rozhodnutí PM (tester za klienta) | 12: údaje do `PRODUCT.md` a vize, comp-first, slogan 1, logo 3 (Letokruhy), 5 stránek, 2 vzory (+1 nevybraný), směr „Katalog ÚLUV" (přidělený), kompozice comp-1, v kroku 5 ponechat `DESIGN.md` od dokumentátora, převzetí se známým dluhem v kroku 6 |
 | Utracené obrázky | viz „Obrázky a cena" |
 
+Poctivě: PROCES prošel; výsledný web produkční laťku nesplnil (písmo
+v nadpisech bez české diakritiky, vymyšlený obsah, logo jiné než zvolené,
+řídké vnitřní stránky) - vede se pro P103 v `.aid-o/work/P103-brainstorm-vstup.md`.
+
 Revize Impeccable (finish reviewer, Sonnet):
 - 1. kolo: `fix`, pět bodů: kótovací čáry u tabule stolu, celostránková shoda
   0,7971 (drift), chybí linka pod hlavičkou, značka v hlavičce malá, čtyři
@@ -64,9 +68,17 @@ Revize Impeccable (finish reviewer, Sonnet):
   s `filename`) odhalil vadu, kterou běh přes Node Playwright neukázal:
   kód běží v sandboxu bez `require`/`process`/dynamického importu, takže
   `brand-icons.js` spadl na `import('node:fs')` (**F9**). Opraveno: skript
-  nepoužívá žádné Node API, SVG čte přes `page.goto('file://…')`, PNG zapisuje
-  `page.screenshot({path})`, `favicon.svg` kopíruje agent (`cp`); test ho
-  spouští ve `vm` jen s `page`.
+  nepoužívá žádné Node API a SVG nikdy neotevírá jako stránku: krok 1i
+  nejdřív pustí `aid-ui-ico.py --check-svg`, zkontrolovaný soubor skript
+  podá přes `page.route` jako `text/plain`, přečte ho `fetch` a vykreslí jen
+  jako `<img>` z data URL; PNG zapisuje `page.screenshot({path})`,
+  `favicon.svg` kopíruje agent (`cp`); test ho spouští ve `vm` jen s `page`.
+- Controller 25. 9. znovu pustil DODANOU verzi (07ff2467) přes skutečný
+  `@playwright/mcp` 1.64: čistý symbol přes `--check-svg` → 7 PNG +
+  `favicon.ico`, `--verify` 9× OK; SVG s `onload` za symlinkem
+  `logo.checked.svg` se vykreslilo jen jako obrázek, na zkušební server
+  nedošel žádný požadavek (evidence
+  `.aid-o/work/evidence/E-102-3_3/R-E102-3/cp3/mcp-proof-07ff2467/verdict.md`).
 - Opravený skript přes MCP na logu Letokruhy: 7 PNG zapsáno, `aid-ui-ico.py`
   → `favicon.ico` 16/32/48, `--verify` 9× OK, exit 0. Ikony v evidenci
   `steps/step_1_qa/mcp-icons/`.
@@ -162,7 +174,8 @@ Revize Impeccable (finish reviewer, Sonnet):
 - **F9 (opraveno 25. 9., našlo ověření přes MCP):** `brand-icons.js` pod
   skutečným `@playwright/mcp` spadl na `import('node:fs')` - sandbox
   nemá `require`/`process`/dynamický import. Oprava: skript nepoužívá Node
-  API, SVG čte přes `page.goto('file://…')`, PNG píše `page.screenshot`,
+  API, SVG neotevírá jako stránku (po `--check-svg` ho podá `page.route`
+  jako `text/plain`, čte `fetch`, kreslí jen `<img>` z data URL), PNG píše `page.screenshot`,
   `favicon.svg` kopíruje agent; test ho spouští ve `vm` jen s `page`.
   Znovu ověřeno přes MCP (7 PNG, `--verify` 9× OK).
 - Ostatní meze: font-match bez prohlížeče (Impeccable nenašel Playwright
@@ -174,6 +187,10 @@ Revize Impeccable (finish reviewer, Sonnet):
   buildu, PM-tester zvolil ponechat).
 
 ## Důkazy
+
+Krok 1 / AC2: na kandidátovi konce plánu ad5b55a9 prošel
+`bats test-aid-ui-serve.bats` 19/19 (log
+`.aid-o/work/evidence/P102/R-P102-final-1/ac2-test-aid-ui-serve-at-ad5b55a9.tap`).
 
 Adresář `/opt/eco/projects/aid-orchestrator/.aid-o/work/evidence/E-102-3_3/R-E102-3/steps/step_1_qa/`:
 - `E-slogan-closed.png`, `D-slogan-confirmed.png`, `D-logo-1.png`,
