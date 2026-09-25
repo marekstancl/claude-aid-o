@@ -248,20 +248,36 @@ ne projekt. Soubor projektu je jediný záznam: rozhodnutí se píše do něj.
 **Přehled:** `bash bin/aid-plugin-issues-collect.sh` projde
 `/opt/eco/projects/*/.aid-o/work/aid-plugin-issues.md` a vypíše body bez
 rozhodnutí (HOTOVO / ZAMÍTNUTO / ČÁSTEČNĚ / UŽ ŘEŠENO) s číslem řádku. Nic
-nezapisuje a nic nekopíruje; bod označený jen `PŘEVZATO` (starý sběr) je
+nezapisuje a nic nekopíruje; body se značkou ČEKÁ NA DŮKAZ vypíše zvlášť, s počtem výskytů; bod označený jen `PŘEVZATO` (starý sběr) je
 pořád otevřený. Poslední roztřídění: `docs/plans/plugin-issues-triage-2026-09-23.md`.
 
+**Příčina, ne záplata (PM 25. 9. 2026).** Opravuje se příčina, ne hlášený
+příznak. U každého bodu se pojmenuje příčina a doloží (kód, data, reprodukce)
+a oprava míří na celou třídu chyby: hlášený příklad je jen jedna její varianta
+(rozbor P097–P102: 11 ze 14 nálezů z dalších kol revize byly další varianty
+díry, kterou předchozí oprava zalepila jen v hlášeném místě). Když příčina
+doložená není, bod se neopravuje naslepo ani se nepřidává další kontrola
+„pro jistotu“: dostane značku `> **ČEKÁ NA DŮKAZ (datum):** domněnka · co by
+ji potvrdilo · kdy se vrátit` a čeká na další výskyty.
+
 **Postup:**
-1. Každý bod ověřit v kódu a nechat nezávisle posoudit Codexem
-   (reálná chyba / dokumentace / design / už opraveno).
+1. Každý bod ověřit v kódu, najít a doložit příčinu a nechat nezávisle
+   posoudit Codexem (reálná chyba / dokumentace / design / už opraveno /
+   příčina nedoložená).
 2. Předložit PM lidsky: co se děje, možnosti, doporučení, proč – PM rozhodne.
    Nic nejde do backlogu bez tohoto popisu.
 3. Schválené opravy: návrh → Codex → oprava → Codex → merge cesta (t0+t1) → vydání.
 4. Výsledek dopsat pod bod v souboru projektu:
    `> **HOTOVO vX.Y.Z (datum):** co se změnilo` / `> **ZAMÍTNUTO:** proč` /
-   `> **ČÁSTEČNĚ …**` / `> **UŽ ŘEŠENO …**` — řádek hned pod nadpisem bodu, jen tenhle
-   tvar sběrač pozná. Bod, který má počkat, zůstává bez značky (je otevřený).
-   Soubor projektu je jeho záznam, nikdy se nemaže.
+   `> **ČÁSTEČNĚ …**` / `> **UŽ ŘEŠENO …**` / `> **ČEKÁ NA DŮKAZ …**` — řádek
+   hned pod nadpisem bodu, jen tenhle tvar sběrač pozná. Bod bez značky je
+   nerozhodnutý. Soubor projektu je jeho záznam, nikdy se nemaže.
+   Nový bod, který je dalším výskytem bodu s ČEKÁ NA DŮKAZ (v kterémkoli
+   projektu), dostane `> **UŽ ŘEŠENO (datum):** další výskyt bodu <projekt,
+   řádek>` a pod ten čekající bod se připíše řádek
+   `**Další výskyt:** datum · projekt · co se stalo`. Sběrač vypíše čekající
+   body zvlášť s počtem výskytů; od dvou výskytů (nebo s novým měřením) se
+   bod znovu posoudí.
 5. Designové body, které PM schválil odložit, dostanou řádek `IMP-NNN`
    v `.aid-o/work/backlog.md` s odkazem na projekt a číslo bodu. Číslo dá
    `bash plugins/aid-orchestrator/scripts/aid-fsm.sh alloc imp-id` (se zámkem;

@@ -98,6 +98,11 @@ what happened here
 
 ### 3. message lied
 body three
+
+### 4. review took a third round
+> **ČEKÁ NA DŮKAZ (2026-09-25):** guess · proof needed · when
+
+**Další výskyt:** 2026-09-30 · beta · again
 EOF
   printf '# Problems\n\n## 1. only one, at level two\nbody\n' > "$T/projects/beta/.aid-o/work/aid-plugin-issues.md"
   printf '# Problems\n\nno headings at all\n' > "$T/projects/gamma/.aid-o/work/aid-plugin-issues.md"
@@ -110,6 +115,7 @@ EOF
   [[ "$output" != *"2026-08-27, run"* ]]                       # a container, not an entry
   [[ "$output" == *"line 3: 1. only one, at level two"* ]]
   [[ "$output" == *"gamma: nothing open"* ]]
-  [[ "$output" == *"open entries: 3"* ]]
+  [[ "$output" == *"open entries: 3, waiting for evidence: 1"* ]]
+  [[ "$output" == *"čeká na důkaz:"*"line 16: 4. review took a third round (výskytů: 2) -> posoudit znovu"* ]]
   [ "$(find "$T/projects" -type f -exec sha256sum {} + | sort)" = "$before" ]
 }
