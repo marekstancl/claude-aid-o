@@ -61,7 +61,12 @@ nejvýš dvě kola.
 
 - `await-choice` skončí `ERROR:` → ukaž ho PM; kolo zůstává otevřené, krok 2
   se nepustí.
-- Po dvou kolech bez potvrzeného seznamu → pokračuj jen s domovskou stránkou
-  a napiš to v těle kapitoly `seo`.
+- Po dvou kolech bez potvrzeného seznamu → polož poslední obrazovku
+  `pages-<n>.html` jen s domovskou stránkou (a tlačítkem potvrzení), v chatu
+  řekni, že je to minimum pro pokračování, a zapiš ji stejně:
+  `aid-ui-state.sh await-choice <project> --kind pages --screen pages-<n>.html --page-url http://localhost:<port>/`.
+  Bez potvrzení PM běh zůstává v kroku 1 - brána kroku chce `choices.pages`,
+  když je SEO zapnuté. Nikdy bez PM. V těle kapitoly `seo` napiš, že seznam
+  stránek byl zúžen na domovskou.
 
 **Last Updated:** 2026-09-25
