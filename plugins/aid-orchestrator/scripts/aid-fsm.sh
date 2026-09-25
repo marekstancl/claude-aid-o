@@ -3721,7 +3721,7 @@ cmd_init() {
         _dep_state="$(aid_plan_closure_state "$_dep" "$(aid_state_root)")"
         if [[ "$_dep_state" != "closed" ]]; then
           echo "PRECONDITION FAIL: ${_cur_plan} declares depends_on_plans: ${_dep}, which is not closed (state: ${_dep_state})." >&2
-          echo "Close ${_dep} first (all required EPICs delivered + review-accepted), or override (audited):" >&2
+          echo "Close ${_dep} first (all required EPICs delivered + review-accepted; a hand-merged plan: aid-plan-fsm.sh plan-close ${_dep} --administrative --reason ...), or override (audited):" >&2
           echo "  aid-fsm.sh init ${epic_id} ... --force --reason '<why ${_dep} need not be closed first>'" >&2
           local timeline
           timeline=$(derive_timeline "$state_file") || true
