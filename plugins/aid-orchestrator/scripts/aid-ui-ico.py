@@ -5,9 +5,9 @@
                                              entries); a non-PNG or a side above 256 -> exit 1
   python3 aid-ui-ico.py --verify <dir>       reports every expected icon file with its
                                              pixel size; exit 1 when one is missing or wrong.
-                                             favicon.svg must be safe (no script, foreignObject,
-                                             iframe, on* attribute, href not starting with #)
-                                             and have a square viewBox
+                                             favicon.svg must use only allowed shape elements and
+                                             attributes (SVG_ELEMENTS / SVG_ATTRS below) and have
+                                             a square viewBox
 
 Exit: 0 ok, 1 refused / check failed, 2 usage. Python stdlib only.
 """
@@ -48,6 +48,26 @@ def ico_sizes(path):
     return [data[6 + 16 * i] or 256 for i in range(count)]
 
 
+# favicon.svg is an allowlist: plain shapes and paint only. No <a>, animation, <style>,
+# <text> (a symbol is drawn with curves), no style attribute, no remote url().
+SVG_ELEMENTS = {
+    "svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "defs",
+    "lineargradient", "radialgradient", "stop", "clippath", "mask", "symbol", "use",
+    "title", "desc", "metadata",
+}
+SVG_ATTRS = {
+    "id", "class", "d", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry",
+    "width", "height", "points", "viewbox", "fill", "fill-rule", "fill-opacity", "stroke",
+    "stroke-width", "stroke-linecap", "stroke-linejoin", "stroke-miterlimit",
+    "stroke-dasharray", "stroke-opacity", "opacity", "transform", "offset", "stop-color",
+    "stop-opacity", "gradientunits", "gradienttransform", "spreadmethod", "fx", "fy",
+    "clip-path", "clip-rule", "mask", "clippathunits", "maskunits", "preserveaspectratio",
+    "version", "xmlns",
+}
+FRAGMENT = re.compile(r"#[A-Za-z_][\w.-]*")
+URL_FRAGMENT = re.compile(r"url\(#[A-Za-z_][\w.-]*\)")
+
+
 def svg_problem(path):
     """Why the SVG is unsafe or not square, or None when it is fine."""
     try:
@@ -56,16 +76,24 @@ def svg_problem(path):
         return f"not valid XML ({e})"
     if root.tag.split("}")[-1] != "svg":
         return "root element is not <svg>"
-    for el in root.iter():
-        tag = el.tag.split("}")[-1].lower() if isinstance(el.tag, str) else ""
-        if tag in ("script", "foreignobject", "iframe"):
-            return f"contains <{tag}>"
+    for el in root.iter():  # ET.parse drops comments and processing instructions
+        tag = el.tag.split("}")[-1].lower()
+        if tag not in SVG_ELEMENTS:
+            return f"contains <{tag}>, not an allowed shape element"
+        if tag == "metadata" and len(el):
+            return "<metadata> may hold text only"
         for k, v in el.attrib.items():
             k = k.split("}")[-1].lower()
-            if k.startswith("on"):
-                return f"<{tag}> has the handler {k}"
-            if k == "href" and not v.strip().startswith("#"):
-                return f"<{tag}> has the non-fragment href {v[:60]}"
+            if k == "href":
+                if tag != "use" or not FRAGMENT.fullmatch(v.strip()):
+                    return f"<{tag}> has href {v[:60]}; only <use href=\"#id\"> is allowed"
+                continue
+            if k not in SVG_ATTRS:
+                return f"<{tag}> has the attribute {k}, not an allowed one"
+            if "\\" in v:  # presentation attributes parse as CSS: u\72l( is url(
+                return f"<{tag}> {k} has a backslash escape"
+            if "url(" in v.lower() and not URL_FRAGMENT.fullmatch(v.strip()):
+                return f"<{tag}> {k}={v[:60]} is not url(#id)"
     vb = re.split(r"[\s,]+", root.get("viewBox", "").strip())
     try:
         w, h = float(vb[2]), float(vb[3])

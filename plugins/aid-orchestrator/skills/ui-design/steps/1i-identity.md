@@ -54,8 +54,11 @@ který prošel kontrolou výstupu šablony; kapitola `logo` to nese.
    v reálných velikostech na světlém i tmavém (16 px nečitelné →
    zesílená mikrovarianta pro 16/32 px, master beze změny, znovu bod 6),
    validní SVG se skutečným poměrem 1:1 a bez rastrových vložek, bezpečné
-   SVG (`--verify` z bodu 6 odmítne `favicon.svg` se script, foreignObject,
-   iframe, atributem on…, nebo href, který nezačíná `#`), licence
+   SVG: symbol kresli jen z tvarů (svg, g, path, rect, circle, ellipse,
+   line, polyline, polygon, defs, přechody se stop, clipPath, mask,
+   symbol, use s `href="#id"`, title, desc) s atributy geometrie a barvy,
+   barvy jen jako hodnota nebo `url(#id)`; nic jiného (a, animace, style,
+   text, obrázek) `--verify` z bodu 6 nepustí, licence
    fontu, odlišnost od značek v oboru (obrazové vyhledání je ruční úkol
    PM - napiš mu to), úplnost vůči kontextům použití.
 8. Ikony, které stránka značky ukazuje, zkopíruj do `docs/brand/assets/`.

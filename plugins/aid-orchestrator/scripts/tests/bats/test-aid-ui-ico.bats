@@ -85,6 +85,39 @@ complete_set() {
   [ "$status" -eq 0 ]
 }
 
+@test "--verify allowlist: animation, <a>, <style>, style and remote url() refused; gradient + use accepted" {
+  complete_set
+  S='<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 32 32">'
+  for body in '<a><animate attributeName="href" values="javascript:alert(1)"/><rect width="32" height="32"/></a>' \
+      '<a><set attributeName="href" to="javascript:alert(1)"/><rect width="32" height="32"/></a>' \
+      '<a><animate attributeName="xlink:href" values="javascript:alert(1)"/><rect width="32" height="32"/></a>' \
+      '<style>@import url(https://evil.example/x.css);</style><rect width="32" height="32"/>' \
+      '<rect width="32" height="32" style="fill:url(https://evil.example/p.svg#g)"/>' \
+      '<rect width="32" height="32" fill="url(https://evil.example/p.svg#g)"/>' \
+      '<rect width="32" height="32" fill="u\72l(https://evil.example/p.svg#g)"/>' \
+      '<text>A</text>' '<metadata><script>alert(1)</script></metadata>'; do
+    printf '%s%s</svg>\n' "$S" "$body" > "$T/favicon.svg"
+    run python3 "$ICO" --verify "$T"
+    [ "$status" -eq 1 ] || { echo "passed: $body"; return 1; }
+    [ "$(grep -c '^WRONG   favicon.svg ' <<<"$output")" -eq 1 ]
+  done
+  cat > "$T/favicon.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" version="1.1">
+  <title>Logo</title>
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a5"/><stop offset="1" stop-color="#05a" stop-opacity=".8"/>
+    </linearGradient>
+    <path id="x" d="M4 4h24v24H4z"/>
+  </defs>
+  <use href="#x" fill="url(#grad)"/>
+  <circle cx="16" cy="16" r="6" fill="#fff" stroke="#000" stroke-width="1.5"/>
+</svg>
+SVG
+  run python3 "$ICO" --verify "$T"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
 # run_icons <symbol> <out> — runs references/brand-icons.js under node with a stub page
 # whose screenshot() writes an empty file, the paths filled in the way 1i step 6 says.
 run_icons() {
