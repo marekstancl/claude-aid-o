@@ -125,7 +125,7 @@ elif mode == "body":
         return ":" in v.split("/", 1)[0]   # relative path: no scheme before the first "/"
     VOID = {"br", "hr", "img"}
     class Check(HTMLParser):   # validates and re-serializes; the raw body never reaches the page
-        out = []
+        out, open_tags = [], []   # open_tags: non-void tags still open, closed at the end
         def refuse(self, what):
             fail("body of section %s refused: %s contains %s" % (cid, src, what))
         def handle_starttag(self, tag, attrs):
@@ -143,12 +143,24 @@ elif mode == "body":
                     self.refuse("URL %r" % (val or "")[:40])
             self.out.append("<" + tag + "".join(' %s="%s"' % (n, html.escape(v or "", quote=True))
                                                 for n, v in attrs) + ">")
-        handle_startendtag = handle_starttag
+            if tag not in VOID:
+                self.open_tags.append(tag)
+        def handle_startendtag(self, tag, attrs):   # <p/> is <p></p>
+            self.handle_starttag(tag, attrs)
+            if tag not in VOID:
+                self.out.append("</%s>" % self.open_tags.pop())
         def handle_endtag(self, tag):
             if tag not in TAGS:
                 self.refuse("tag </%s>" % tag)
-            if tag not in VOID:
-                self.out.append("</%s>" % tag)
+            if tag in VOID:
+                return
+            if tag not in self.open_tags:   # a stray end tag would close the page's own wrappers
+                self.refuse("an unbalanced end tag </%s>" % tag)
+            while True:   # an end tag of a deeper open tag closes the ones above it first
+                t = self.open_tags.pop()
+                self.out.append("</%s>" % t)
+                if t == tag:
+                    break
         def handle_data(self, data):   # raw text; a browser would still open a tag here (<img\0...)
             if re.search(r'<[A-Za-z!/?]', data):
                 self.refuse("an unparsable tag %r" % data[:40])
@@ -170,11 +182,12 @@ elif mode == "body":
         c.refuse("a comment marker")
     if re.search(r'</(?![A-Za-z][A-Za-z0-9]*\s*>)', body):   # browsers read attributes in end tags, html.parser does not
         c.refuse("an end tag with more than its name")
-    c.feed(body)
+    # an invalid char reference (&#xZZ;) is text to a browser; html.parser would stall on it
+    c.feed(re.sub(r'&#(?![0-9]|[xX][0-9a-fA-F])', '&amp;#', body))
     if re.search(r'<[A-Za-z!/?]', c.rawdata):   # close() would drop an unfinished tag silently
         c.refuse("an unfinished tag %r" % c.rawdata[:40])
     c.close()
-    text = between(text, cid, "body", "".join(c.out))
+    text = between(text, cid, "body", "".join(c.out + ["</%s>" % t for t in reversed(c.open_tags)]))
 elif mode == "fonts":
     project = args[0]
     brand = os.path.realpath(os.path.join(project, "docs/brand"))

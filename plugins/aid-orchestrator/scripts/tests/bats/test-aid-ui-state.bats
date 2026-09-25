@@ -289,6 +289,24 @@ record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq
   grep -qF '<!-- body:vize --><p class="lead">a &lt;script&gt; &amp; b &lt; c<br><a href="https://example.com?a=1&amp;b=2">x</a></p>' "$HTML"
 }
 
+@test "body is written balanced; a stray end tag is refused" {
+  w() { printf '%s' "$1" > "$BATS_TEST_TMPDIR/b.html"; run "$SCRIPT" body "$PROJ" vize --file "$BATS_TEST_TMPDIR/b.html"; }
+  w '<div><table><tr><td>x'
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize --><div><table><tr><td>x</td></tr></table></div><!-- /body:vize -->' "$HTML"
+  w '<p/>x'
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize --><p></p>x<!-- /body:vize -->' "$HTML"
+  w '<p>a &#xZZ; <b>b</b></p>'
+  [ "$status" -eq 0 ]
+  grep -qF '<!-- body:vize --><p>a &amp;#xZZ; <b>b</b></p><!-- /body:vize -->' "$HTML"
+  cp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+  w '</div></div>'
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unbalanced end tag </div>"* ]]
+  cmp "$HTML" "$BATS_TEST_TMPDIR/orig.html"
+}
+
 @test "body accepts allowed tags, safe links and a relative image" {
   for ok in '<a href="https://example.com">ok</a>' '<img src="assets/logo.svg" alt="logo">' \
             '<p>Text <strong>tučně</strong> a &lt;script&gt;</p>' \
