@@ -18,7 +18,9 @@
 #       unparseable -> exit 1, no direction recorded. All but a valid answer
 #       leave direction_pending set. The ANSWER's buildPath/buildPathFlipped go to
 #       direction.build_path(_flipped); `BUILD PATH FLIPPED: comp|code` without an
-#       ANSWER records the flip and exits 5 (comps due, round stays pending).
+#       ANSWER records the flip and exits 5, round stays pending (comp: generate the
+#       comps first; code: no comps, just await-direction again). An ANSWER whose
+#       buildPath is present and not comp|code -> exit 1, nothing recorded.
 #       There is deliberately no verb that records a direction from a file the
 #       caller supplies: the answer only ever comes from Impeccable's stdout.
 #   await-choice <project> --kind <slogan|logo|pages> --screen <kind>-<n>.html --page-url <url>
@@ -322,11 +324,16 @@ impeccable_round() {
   if [[ "$rc" -eq 4 ]]; then
     die "the page closed without the PM's answer; the round stays open: URL $URL key $KEY"
   fi
-  # The PM flipped the build path on the page before answering: the comps are due, the round stays open.
+  # The PM flipped the build path on the page before answering; the round stays open.
+  # To comp: the comps are due. To code: no comps, just wait for the answer again.
   local flip; flip="$(sed -n 's/^BUILD PATH FLIPPED: \(comp\|code\)$/\1/p' <<<"$out" | tail -n1)"
   if [[ "$kind" == direction && -n "$flip" ]] && ! grep -q '^ANSWER: ' <<<"$out"; then
     jq_write --arg p "$flip" '.direction.build_path = $p | .direction.build_path_flipped = true'
-    echo "BUILD PATH FLIPPED: $flip; generate the comps into the declared slots, then await-direction again with key $KEY"
+    if [[ "$flip" == comp ]]; then
+      echo "BUILD PATH FLIPPED: comp; generate the comps into the declared slots, then await-direction again with key $KEY"
+    else
+      echo "BUILD PATH FLIPPED: code; no comps are needed, run await-direction again with key $KEY"
+    fi
     exit 5
   fi
   [[ "$rc" -eq 0 ]] || die "serve-question --wait exited $rc; nothing recorded: $out"
@@ -334,6 +341,8 @@ impeccable_round() {
   answer="$(sed -n 's/^ANSWER: //; /^{.*}$/p' <<<"$out" | while IFS= read -r l; do
     jq -ec 'select(type == "object" and (.optionId | type) == "string")' <<<"$l" 2>/dev/null || true; done | tail -n1)"
   [[ -n "$answer" ]] || die "no ANSWER with an optionId in Impeccable's output; nothing recorded: $out"
+  [[ "$kind" != direction ]] || jq -e '(has("buildPath") | not) or .buildPath == "comp" or .buildPath == "code"' <<<"$answer" >/dev/null ||
+    die "the ANSWER's buildPath is not comp or code; nothing recorded: $answer"
   OPT="$(jq -r .optionId <<<"$answer")"
   if [[ "$OPT" == reroll ]]; then echo "REROLL: $answer"; exit 3; fi
   local file=".aid-ui/$kind-answer.json"

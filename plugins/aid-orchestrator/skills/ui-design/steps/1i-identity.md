@@ -41,17 +41,21 @@ který prošel kontrolou výstupu šablony; kapitola `logo` to nese.
    živým textem + název a licence fontu), vedle distribuční verze s textem
    převedeným na křivky, `brand-brief.md`, `README.md`; `logo/` a `lockup/`
    jen pro kontexty ze zadání.
-6. Ikony: `references/brand-icons.js` zkopíruj do `.aid-ui/brand-icons.js`,
-   vyplň konstanty (symbol s křivkami, případná mikrovarianta, barva
-   podkladu, absolutní cesta k `docs/design/brand-package/icons/`) a spusť
-   přes `mcp__plugin_playwright_playwright__browser_run_code_unsafe`
-   s `filename`. Pak
+6. Ikony: `references/brand-icons.js` zkopíruj do `.aid-ui/brand-icons.js`
+   a vyplň v něm jen cesty: absolutní cestu k SVG symbolu s křivkami,
+   případně k mikrovariantě, a k `docs/design/brand-package/icons/`. SVG do
+   skriptu nikdy nevkládej, skript si ho přečte sám. Každá cesta musí
+   odpovídat `^/[A-Za-z0-9._/-]+$` (bez uvozovek, mezer a `${`), jinou
+   nevyplňuj. Spusť přes
+   `mcp__plugin_playwright_playwright__browser_run_code_unsafe` s `filename`. Pak
    `python3 scripts/aid-ui-ico.py <icons>/favicon.ico <icons>/favicon-16.png <icons>/favicon-32.png <icons>/favicon-48.png`
    a `python3 scripts/aid-ui-ico.py --verify <icons>` (exit 0 = kompletní).
 7. Kontrola výstupu podle šablony (oddíl „Kontrola výstupu"): čitelnost
    v reálných velikostech na světlém i tmavém (16 px nečitelné →
    zesílená mikrovarianta pro 16/32 px, master beze změny, znovu bod 6),
-   validní SVG se skutečným poměrem 1:1 a bez rastrových vložek, licence
+   validní SVG se skutečným poměrem 1:1 a bez rastrových vložek, bezpečné
+   SVG (`--verify` z bodu 6 odmítne `favicon.svg` se script, foreignObject,
+   iframe, atributem on…, nebo href, který nezačíná `#`), licence
    fontu, odlišnost od značek v oboru (obrazové vyhledání je ruční úkol
    PM - napiš mu to), úplnost vůči kontextům použití.
 8. Ikony, které stránka značky ukazuje, zkopíruj do `docs/brand/assets/`.

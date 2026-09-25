@@ -43,6 +43,9 @@ zamítnuté návrhy s důvodem PM, `$IMP` (`SKILL.md` Start).
      zaznamenané, kolo zůstává otevřené. Vygeneruj comp každé otevřené karty do
      její deklarované cesty (hlavní první) a znovu `await-direction` se stejným
      klíčem;
+   - exit 5 (`BUILD PATH FLIPPED: code`) → PM přepnul na code-led; přepnutí
+     je zaznamenané, compy netřeba, jen znovu `await-direction` se stejným
+     klíčem;
    - exit 1 s otevřeným kolem → MUST 1: dej PM URL a klíč, ukonči tah.
      Nikdy nepokračuj s přiděleným směrem.
    - Znovuotevření otevřeného kola: `aid-ui-serve.sh forward <p>` (když neběží),

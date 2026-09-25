@@ -31,8 +31,9 @@ Kapitola `seo` to nese.
    description), pak entita, strukturovaná data a připravenost na AI
    vyhledávání. U každé položky „fakt" nebo „odhad"; dotaz je odhad, pokud
    ho nedal PM. Hledanost nevymýšlej.
-   - Seznam stránek je markdown tabulka: první sloupec URL začínající `/`,
-     druhý H1, další sloupce libovolné. Z ní čte krok 6
+   - Seznam stránek je markdown tabulka s hlavičkou `| URL | H1 |`: první
+     sloupec URL začínající `/`, druhý H1, další sloupce libovolné. Jiné
+     tabulky (přesměrování) krok 6 nečte. Z ní čte krok 6
      (`aid-ui-seo-check.py --brief`) a H1 v buildu se musí shodovat přesně:
 
      | URL | H1 | title | meta description | hlavní dotaz |

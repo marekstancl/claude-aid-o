@@ -90,3 +90,28 @@ fix_site() {
   [ "$status" -eq 1 ]
   grep -q "^BLOCKER /o-nas brief-h1 expected 'O pekárně'" <<<"$output"
 }
+
+@test "--brief checks only the | URL | H1 | page table; a redirects table is ignored" {
+  fix_site
+  printf '## Přesměrování\n\n| stará URL | nová URL |\n|---|---|\n| /stara-url | /o-nas |\n| /kontakt-old | /kontakt |\n\n| URL | H1 | dotaz |\n|---|---|---|\n| / | Pekárna U Mlýna | odhad |\n| /o-nas | O nás | odhad |\n' >"$BATS_TEST_TMPDIR/brief.md"
+  run python3 "$CHECK" "$SITE" --brief "$BATS_TEST_TMPDIR/brief.md"
+  [ "$status" -eq 0 ]
+  ! grep -q '^BLOCKER ' <<<"$output"
+  ! grep -q 'stara-url\|kontakt' <<<"$output"
+  grep -qx 'OK /o-nas brief-h1 O nás' <<<"$output"
+}
+
+@test "--brief with no | URL | H1 | page table is a BLOCKER" {
+  fix_site
+  printf '| stará URL | nová URL |\n|---|---|\n| /stara-url | /o-nas |\n' >"$BATS_TEST_TMPDIR/brief.md"
+  run python3 "$CHECK" "$SITE" --brief "$BATS_TEST_TMPDIR/brief.md"
+  [ "$status" -eq 1 ]
+  grep -q '^BLOCKER .*brief.md brief no page table' <<<"$output"
+}
+
+@test "a directory with no HTML pages is a BLOCKER" {
+  mkdir "$BATS_TEST_TMPDIR/empty"
+  run python3 "$CHECK" "$BATS_TEST_TMPDIR/empty"
+  [ "$status" -eq 1 ]
+  grep -q '^BLOCKER .*empty pages no pages found' <<<"$output"
+}

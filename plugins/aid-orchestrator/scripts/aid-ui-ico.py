@@ -4,13 +4,18 @@
   python3 aid-ui-ico.py <out.ico> <png>...   packs PNG images into an ICO (PNG-in-ICO
                                              entries); a non-PNG or a side above 256 -> exit 1
   python3 aid-ui-ico.py --verify <dir>       reports every expected icon file with its
-                                             pixel size; exit 1 when one is missing or wrong
+                                             pixel size; exit 1 when one is missing or wrong.
+                                             favicon.svg must be safe (no script, foreignObject,
+                                             iframe, on* attribute, href not starting with #)
+                                             and have a square viewBox
 
 Exit: 0 ok, 1 refused / check failed, 2 usage. Python stdlib only.
 """
 import os
+import re
 import struct
 import sys
+import xml.etree.ElementTree as ET
 
 PNG_SIG = b"\x89PNG\r\n\x1a\n"
 # What references/brand-icons.js writes, with the exact side in pixels.
@@ -41,6 +46,32 @@ def ico_sizes(path):
     if reserved != 0 or kind != 1 or len(data) < 6 + 16 * count:
         return None
     return [data[6 + 16 * i] or 256 for i in range(count)]
+
+
+def svg_problem(path):
+    """Why the SVG is unsafe or not square, or None when it is fine."""
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError) as e:
+        return f"not valid XML ({e})"
+    if root.tag.split("}")[-1] != "svg":
+        return "root element is not <svg>"
+    for el in root.iter():
+        tag = el.tag.split("}")[-1].lower() if isinstance(el.tag, str) else ""
+        if tag in ("script", "foreignobject", "iframe"):
+            return f"contains <{tag}>"
+        for k, v in el.attrib.items():
+            k = k.split("}")[-1].lower()
+            if k.startswith("on"):
+                return f"<{tag}> has the handler {k}"
+            if k == "href" and not v.strip().startswith("#"):
+                return f"<{tag}> has the non-fragment href {v[:60]}"
+    vb = re.split(r"[\s,]+", root.get("viewBox", "").strip())
+    try:
+        w, h = float(vb[2]), float(vb[3])
+    except (IndexError, ValueError):
+        return "no viewBox"
+    return None if len(vb) == 4 and w == h > 0 else f"viewBox {' '.join(vb)} is not square"
 
 
 def pack(out, pngs):
@@ -84,10 +115,11 @@ def verify(d):
               + ("missing" if not os.path.isfile(p) else "not an ICO" if sizes is None else "/".join(map(str, sizes))))
         bad += 1
     p = os.path.join(d, "favicon.svg")
-    if os.path.isfile(p) and os.path.getsize(p) > 0:
+    problem = svg_problem(p) if os.path.isfile(p) else "missing"
+    if problem is None:
         print("OK      favicon.svg")
     else:
-        print("WRONG   favicon.svg missing or empty")
+        print(f"WRONG   favicon.svg {problem}")
         bad += 1
     return 1 if bad else 0
 

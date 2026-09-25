@@ -64,3 +64,63 @@ complete_set() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"icon-maskable-512.png expected 512x512, got missing"* ]]
 }
+
+@test "--verify refuses an unsafe or non-square favicon.svg, one WRONG line each" {
+  complete_set
+  S='<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 32 32">'
+  for body in '<script>alert(1)</script>' '<foreignObject><p>x</p></foreignObject>' '<iframe src="x"/>' \
+      '<rect width="1" height="1" onload="alert(1)"/>' '<a href="javascript:alert(1)"><rect/></a>' \
+      '<use xlink:href="https://evil.example/s.svg#a"/>'; do
+    printf '%s%s</svg>\n' "$S" "$body" > "$T/favicon.svg"
+    run python3 "$ICO" --verify "$T"
+    [ "$status" -eq 1 ] || { echo "passed: $body"; return 1; }
+    [ "$(grep -c '^WRONG   favicon.svg ' <<<"$output")" -eq 1 ]
+  done
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 24"><use href="#a"/></svg>' > "$T/favicon.svg"
+  run python3 "$ICO" --verify "$T"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"WRONG   favicon.svg viewBox 0 0 32 24 is not square"* ]]
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><use href="#a"/></svg>' > "$T/favicon.svg"
+  run python3 "$ICO" --verify "$T"
+  [ "$status" -eq 0 ]
+}
+
+# run_icons <symbol> <out> — runs references/brand-icons.js under node with a stub page
+# whose screenshot() writes an empty file, the paths filled in the way 1i step 6 says.
+run_icons() {
+  command -v node >/dev/null || skip "node not installed"
+  sed -e "s|__ABSOLUTE_SYMBOL_SVG__|$1|" -e "s|__ABSOLUTE_ICONS_DIR__|$2|" \
+    "$BATS_TEST_DIRNAME/../../../skills/ui-design/references/brand-icons.js" > "$T/brand-icons.js"
+  run node -e '
+    const fs = require("fs");
+    const fn = eval(fs.readFileSync(process.argv[1], "utf8"));
+    const page = { setViewportSize: async () => {}, goto: async () => {},
+      locator: () => ({ screenshot: async (o) => fs.writeFileSync(o.path, "") }) };
+    fn(page).then((w) => console.log(w.join(" ")), (e) => { console.log(e.message); process.exit(1); });
+  ' "$T/brand-icons.js"
+}
+
+@test "brand-icons.js reads the SVG as data: backticks and \${} in it never run" {
+  mkdir -p "$T/icons"
+  printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><desc>`${require("fs").writeFileSync("%s/pwned","x")}`</desc><rect/></svg>' "$T" > "$T/symbol.svg"
+  run_icons "$T/symbol.svg" "$T/icons"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ ! -e "$T/pwned" ]
+  [[ "$output" == *"icon-maskable-512.png favicon.svg"* ]]
+  cmp "$T/symbol.svg" "$T/icons/favicon.svg"
+  ! grep -q '<svg' "$T/brand-icons.js"
+}
+
+@test "brand-icons.js refuses a path that is not plain absolute and a non-square viewBox" {
+  mkdir -p "$T/icons"
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"/>' > "$T/symbol.svg"
+  run_icons "relative/symbol.svg" "$T/icons"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refused: not a plain absolute path"* ]]
+  run_icons "$T/symbol.svg" "$T/icons/../icons"
+  [ "$status" -eq 1 ]
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 24"/>' > "$T/symbol.svg"
+  run_icons "$T/symbol.svg" "$T/icons"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not square"* ]]
+}

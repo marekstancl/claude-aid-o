@@ -8,8 +8,9 @@ sitemap.xml are checked there. A single .html file gets the page checks only.
 BLOCKER = what the SEO standard calls a blocker (noindex, canonical elsewhere,
 robots.txt blocking the site, an unreadable page) plus a broken JSON-LD block and
 a brief page that is missing or has another H1; everything else is WARN.
---brief reads the page list from table rows whose cell starts with "/" (the URL)
-followed by the H1 cell: `| /o-nas | O nás | ... |`.
+--brief reads the page list only from the table whose header row starts `| URL | H1 |`
+(rows `| /o-nas | O nás | ... |`); other tables are ignored, no such table is a BLOCKER.
+A directory with no *.html page is a BLOCKER.
 
 Output lines `BLOCKER|WARN|OK <page> <check> <detail>`, blockers first.
 Exit: 0 no blocker, 1 blocker, 2 usage. Python stdlib only.
@@ -168,12 +169,26 @@ def check_brief(out, brief, found):
     except OSError as e:
         out.append(("BLOCKER", brief, "brief", str(e)))
         return
-    rows = [[c.strip() for c in ln.strip().strip("|").split("|")] for ln in lines if ln.lstrip().startswith("|")]
-    for cells in rows:
-        i = next((n for n, c in enumerate(cells) if c.strip("`").startswith("/")), None)
-        if i is None or i + 1 >= len(cells):
+    # Only the page table (header `| URL | H1 | ...`, as 1s-seo.md prescribes) counts;
+    # other tables, e.g. redirects to keep, are ignored.
+    rows, table, header = [], None, False
+    for ln in lines + [""]:
+        if not ln.lstrip().startswith("|"):
+            table = None
             continue
-        url, h1 = url_path(cells[i].strip("`")), cells[i + 1]
+        cells = [c.strip().strip("`") for c in ln.strip().strip("|").split("|")]
+        if table is None:
+            table = [x.lower() for x in cells[:2]] == ["url", "h1"]
+            header = header or table
+        elif table and not set("".join(cells)) <= set("-: "):
+            rows.append(cells)
+    if not header:
+        out.append(("BLOCKER", brief, "brief", "no page table (header | URL | H1 |)"))
+        return
+    for cells in rows:
+        if len(cells) < 2 or not cells[0].startswith("/"):
+            continue
+        url, h1 = url_path(cells[0]), cells[1]
         pg = found.get(url)
         if pg is None:
             out.append(("BLOCKER", url, "brief-page", "confirmed page not built"))
@@ -201,6 +216,8 @@ def main():
                         if res:
                             found[url_path(rel)] = res[0]
                             pages.append((rel, res[1]))
+            if not pages:
+                out.append(("BLOCKER", t, "pages", "no pages found"))
             check_site(out, t, pages)
         elif t.endswith(".html") or os.path.exists(t):
             check_page(out, t, None, a.base_url)

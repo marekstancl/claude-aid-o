@@ -677,6 +677,28 @@ NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
   [ "$(jq .direction_pending "$STATE")" = null ]
 }
 
+@test "BUILD PATH FLIPPED: code: exit 5, flip recorded, no comps asked for" {
+  STUB_OUT='BUILD PATH FLIPPED: code'
+  await
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"no comps are needed"* ]]
+  [[ "$output" != *"generate the comps"* ]]
+  [ "$(jq -r .direction.build_path "$STATE")" = code ]
+  [ "$(jq -r .direction.build_path_flipped "$STATE")" = true ]
+  [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
+}
+
+@test "an ANSWER whose buildPath is not comp or code: exit 1, nothing recorded" {
+  for bp in '"Comp"' '"comp-first"' '{"x":1}' 'null'; do
+    STUB_OUT="ANSWER: {\"optionId\":\"a\",\"buildPath\":$bp}"
+    await
+    [ "$status" -eq 1 ]
+    [ "$(jq -r '.direction.option_id // empty' "$STATE")" = "" ]
+    [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
+    [ ! -f "$PROJ/.aid-ui/direction-answer.json" ]
+  done
+}
+
 @test "build path comp from the answer: step 5 refused until await-choice composition records one" {
   STUB_OUT='ANSWER: {"optionId":"a","buildPath":"comp","buildPathFlipped":false}'
   await
