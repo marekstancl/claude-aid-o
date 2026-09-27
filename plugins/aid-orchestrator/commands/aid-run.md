@@ -74,6 +74,16 @@ run that announced itself as AUTO was read back as manual at every checkpoint.
 If the command fails, stop: a run that cannot record its own mode is not an
 AUTO run.
 
+**And the last action of `--auto`** — the queue is empty, the plan is closed, or the run stops at a
+PM-authority decision it cannot pass:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" auto-mode set manual --by "aid-run --auto (finished)"
+```
+
+The state file is project-wide and outlives the run: left at `auto`, the next plain `/aid-run` would
+be read as autonomous at every decision point and stamped `auto_controller: active`.
+
 **Then bind this session to the plan and make sure the hook layer is in force**
 (P099: the Stop hook keeps only the bound session working, and its refusals
 count only while a canary verdict is fresh):
@@ -114,8 +124,8 @@ values are **storable**, and the fourth state is never stored at all.
 
 | State | Stored? | What it means | Who sets it |
 |-------|---------|---------------|-------------|
-| `active` | yes | An autonomous controller is alive and owns this run. | `init`, when `AID_AUTO_MODE=1`; re-asserted by `aid-run-gates.sh` after the run's last background job is collected, and by `aid-fsm.sh resume` — in both cases only for an AUTO run. |
-| `manual` | yes | No autonomous controller — a human drives this run. The conservative default whenever the entry is not stamped AUTO. | `init`, when `AID_AUTO_MODE=1` is not set |
+| `active` | yes | An autonomous controller is alive and owns this run. | `init`, when the run declared itself AUTO (`aid_auto_run_declared`: `AID_AUTO_MODE=1` or `auto-mode-state.yaml` says `auto`; `manual` there wins); re-asserted by `aid-run-gates.sh` after the run's last background job is collected, and by `aid-fsm.sh resume` — in both cases only for an AUTO run. |
+| `manual` | yes | No autonomous controller — a human drives this run. The conservative default whenever the entry is not stamped AUTO. | `init`, when the run did not declare itself AUTO |
 | `blocked_for_pm` | yes | The run stopped at a PM-authority decision and is waiting for a person. | `aid_ladder_escalate` (`lib/aid-recovery-ladder.sh`), through the single map writer, when a class's terminus reaches escalation. |
 | `awaiting_host_resume` | **never** | A background gate was handed off and the controller then died: the run's continuation artifact is still on disk and nothing has signalled liveness. | Nobody. It is **derived** at read time. |
 

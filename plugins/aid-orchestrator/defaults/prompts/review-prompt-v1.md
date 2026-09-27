@@ -44,6 +44,12 @@ roles; answer only the questions of your role below.
 - `major` — the work will be wrong or incomplete.
 - `minor` — anything else worth fixing.
 
+A `blocker` or `major` outside plan review (cp2, cp3, cp6, cp7) also names its
+`rule`: the invariant it breaks, stated so it can be checked everywhere, not
+only at the line you cite ("every served path resolves inside the brand root").
+The author fixes the rule, and the next round checks it holds everywhere. A
+blocker or major without one is sent back to you once.
+
 ## Your role
 
 {{role_section}}
@@ -62,7 +68,8 @@ file from that message.
                "claim": "<one sentence: what is wrong>",
                "command": "<read-only command or bash repro/<name>.sh>",
                "evidence": "<path:line>[; <path:line>]",
-               "fix": "<what must change instead>"}],
+               "fix": "<what must change instead>",
+               "rule": "<blocker/major outside plan review: the invariant it breaks>"}],
  "no_findings_reason": "<required only when findings is empty>"}
 
 The packet follows.

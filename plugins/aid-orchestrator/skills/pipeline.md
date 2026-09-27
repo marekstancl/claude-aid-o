@@ -1700,7 +1700,9 @@ as its first action.
 
 **State file:** `.aid-o/work/auto-mode-state.yaml`
 **One writer:** `aid-fsm.sh auto-mode set` (`/aid-stop` writes `manual` through it too).
-**One reader:** `aid_autonomous_mode` in `scripts/lib/aid-permissions.sh`.
+**One reader:** `aid_autonomous_mode` in `scripts/lib/aid-permissions.sh` (decision points; falls
+back to `permissions.yaml`). `aid_auto_run_declared` shares its core but never falls back: it is what
+`auto_controller` is stamped from. `--auto` writes `manual` again as its last action.
 
 **Every decision point reads the mode through that one reader**, which takes
 `mode: manual` in the state file above an exported `AID_AUTO_MODE=1` (a PM stop

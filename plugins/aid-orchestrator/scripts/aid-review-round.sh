@@ -405,7 +405,7 @@ _stamp_prompt_lengths() {
   for p in "$dir"/prompt-*.md; do
     [[ -f "$p" ]] || continue
     role="$(basename "$p" .md)"; role="${role#prompt-}"
-    n=$(( $(wc -l < "$p") + 2 ))
+    n=$(( $(grep -c '' "$p") + 2 ))   # grep -c '' counts a last line without a newline too
     { printf 'This prompt is %s lines long. Read all of it, to line %s, before you answer (Read with offset/limit in parts when it is long): the packet and the answer format are at the end.\n\n' "$n" "$n"; cat "$p"; } > "${p}.tmp" && mv "${p}.tmp" "$p" || return 1
     lines="$(jq -c --arg r "$role" --argjson n "$n" '. + {($r): $n}' <<< "$lines")"
   done

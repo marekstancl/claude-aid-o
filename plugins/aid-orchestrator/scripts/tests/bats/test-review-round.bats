@@ -441,6 +441,12 @@ _bracket() {
   _S prepare --round 2 >/dev/null
   grep -q 'rule: every new module is imported where it is used' "$(D 2)/prompt-step_generalist.md"
   grep -q 'not only at the cited line' "$(D 2)/prompt-step_generalist.md"
+  # every reviewer is told about `rule` in the prompt itself
+  grep -q '"rule": "<blocker/major outside plan review' "$(D 1)/prompt-step_generalist.md"
+  # a confirmation round asks for the rule again: its re-report without one goes back once too
+  _sanswer 2 step_generalist 'del(.findings[0].rule)'
+  run _S collect --round 2
+  [[ "$(jq -r '.invalid[0].reason' "$(D 2)/collect.json")" == *"name no \`rule\`"* ]]
 }
 
 @test "step: collect needs every expected role; close is bound to HEAD, to a token value and to a dispatch bracket; verdict fail with an open major" {

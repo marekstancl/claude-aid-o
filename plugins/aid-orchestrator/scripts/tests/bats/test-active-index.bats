@@ -161,6 +161,20 @@ _refresh() {
   [[ "$output" == *"run=R-A"* ]]
 }
 
+@test "IMP-657: init stamps auto_controller active for a run declared AUTO in auto-mode-state.yaml without the env, and manual after the run wrote manual" {
+  _mk_primary "$TEST_TMPDIR/primary"
+  local p="$TEST_TMPDIR/primary"
+  run bash -c "cd '$p' && unset AID_AUTO_MODE && '$FSM' auto-mode set auto --by test >/dev/null \
+    && '$FSM' init E-901-1_1 R-A 1 manual main HEAD '.aid-o/work/evidence/E-901-1_1/R-A/fsm-state.yaml'" 3>&-
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '."E-901-1_1".auto_controller' "$p/.aid-o/work/active-runs.json")" = active ]
+  run bash -c "cd '$p' && git checkout -q main && export AID_AUTO_MODE=1 && '$FSM' auto-mode set manual --by test >/dev/null \
+    && '$FSM' init E-902-1_1 R-B 1 manual main HEAD '.aid-o/work/evidence/E-902-1_1/R-B/fsm-state.yaml'" 3>&-
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '."E-902-1_1".auto_controller' "$p/.aid-o/work/active-runs.json")" = manual ]
+}
+
 # ─── writer 2: done-advance ──────────────────────────────────────────────
 
 @test "writer 2 (done-advance review→release) refreshes the index — the released run drops off, the concurrent run stays" {

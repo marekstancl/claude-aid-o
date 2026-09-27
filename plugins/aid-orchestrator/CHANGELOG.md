@@ -3,6 +3,31 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.109.0] — 2026-09-27
+
+Méně kol revize tím, že se chyby opravují u zdroje. Rozbor P097, P101 a P102 našel 14 vážných nálezů až ve 2. a dalším kole. 12 z nich bylo bezpečnostních a 11 z 14 byla jen další varianta díry, kterou předchozí oprava ucpala pouze v hlášeném místě. Pokyn opraváři totiž zakazoval sáhnout na cokoli, co nález výslovně nejmenoval.
+
+### Changed
+- **Opravář opravuje pravidlo, ne příklad.** Vážný nález (blocker, major) nově nese pole `rule`: pravidlo, které porušuje, formulované tak, aby šlo zkontrolovat všude. Opravář ho opraví ve všech místech, kde může selhat, a to u kořene (seznam povoleného místo zakázaného, jedna kontrola, kterou projdou všechny cesty). Přidá test na příklad revizora a na další dvě varianty. Týká se všech šesti kopií pokynu: `agents/implementer.md`, `agents/implementer-light.md`, adaptér revize, `aid-run.md` (dvakrát: kroky a EPICy mají jeden společný blok, druhý je pro konec plánu) a `aid-plan.md`.
+- **Potvrzovací kolo kontroluje pravidlo všude, ne jen citovaný řádek.** Varianta, kterou oprava minula, se vrací jako tentýž nález: stejné tvrzení, stejná první citace a za ní citace varianty. Pravidlo se přenáší do `merged.json`, do výpisu otevřených nálezů i do kontroly konce plánu.
+- **Nález bez pravidla jde jednou zpět revizorovi.** Týká se CP2, CP3, CP6 a CP7, ne CP1. Jde to stejným jediným dotazem jako kontrola formy; druhá odpověď bez pravidla se přijme tak, jak je. Pole `rule` a pokyn k němu jsou přímo v zadání každého revizora (`review-prompt-v1.md`). Pole  a pokyn k němu jsou přímo v zadání každého revizora ().
+- **Bezpečnostní revizor kontroluje každý revidovaný krok, se středním úsilím.** Dřív se zapínal jen při shodě se seznamem vzorů a dostaly ho 4 kroky z 16. Seznam nepozná webový server, cestu od volajícího ani text vykreslený jako HTML nebo SVG. Střední úsilí znamená, že místo agenta `reviewer-light` běží `general-purpose`. Odhad ceny: asi 12 běhů revizora navíc na plán velikosti P102, proti 5 kolům revize EPICu navíc (3 revizoři a opravář v každém). **Projekty s vlastním blokem `step_review`** (agents) to dostanou až po odebrání `when:` u `step_security`.
+- **Implementér nejdřív napíše hranici důvěry.** Nový oddíl „Input from outside“ v `agents/implementer*.md`: co přichází zvenku, seznam povoleného, cesta se kontroluje až po převedení na skutečnou cestu, testy s nepřátelskými variantami.
+- **Každé zadání revize začíná svou délkou a pokynem dočíst ho do konce.** Délka se zapisuje do `round.json` jako `prompt_lines`. V P102 mělo 66 ze 155 zadání přes 760 řádků a revizor EPICu přečetl „začátek a konec“ z 1780.
+
+### Fixed
+- **Stránka uzávěrky už netvrdí „hotovo“ před sloučením.** Počet hlášení počítá i nadpisy s datem a při nule vypíše jedno číslo místo „0 0“.
+- **Prázdné `measurement.json`, když opravář neznal počet tokenů** (11 ze 140). Soubor se teď zapisuje najednou (atomicky).
+- **Spouštěč bran už neumře potichu**, když výstup vybírání testů nejmenuje cestu.
+- **Zápisy životního cyklu nesou `No-Release: AID lifecycle bookkeeping`**, takže je kontrola vydání před pushem neodmítne.
+- **`dir/` v povolených cestách znamená adresář.** Dřív nezahrnul nic (4 ze 125 kontrol kroků falešně hlásily soubor mimo rozsah). Kontrola rozsahu `scope-check.sh` teď používá tentýž společný porovnávač.
+- **`epic-complete` a sloučení EPICu vyžadují `done_phase: release`.** Samotný stav DONE nestačí; P102 sloučil EPIC, jehož přechod do fáze vydání selhal.
+- **IMP-657: běh s `--auto` se zapíše jako automatický** i tehdy, když proměnná prostředí nedorazí. Všechna tři místa, která to zapisují, čtou stejnou funkci `aid_auto_run_declared`: proměnnou prostředí nebo `auto-mode-state.yaml`, přičemž zastavení od PM má přednost. Aby stav „auto“ nepřežil konec běhu, `--auto` teď jako poslední krok zapíše `auto-mode set manual`. Předtím by se další obyčejný `/aid-run` četl jako automatický. Aby stav „auto“ nepřežil konec běhu,  teď jako poslední krok zapíše . Předtím by se další obyčejný  četl jako automatický.
+
+### Not in this release
+- **Přenesené nálezy (obligations) se pořád samy neodškrtnou.** Rozbor ukázal, že navržená oprava by nikdy nezabrala: nález kroku N žádné pozdější kolo nekontroluje. Čeká na rozhodnutí PM.
+- **Zpětný dotaz revizora na nedočtené zadání** se nepostavil. Revizor by jen napsal číslo řádku, takže by nic nedokazoval, a každý dotaz by znamenal nové spuštění celého zadání. Postavila se jen délka v zadání a `prompt_lines`.
+
 ## [2.108.0] — 2026-09-25
 
 ### Added
