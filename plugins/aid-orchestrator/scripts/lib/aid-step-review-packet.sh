@@ -112,7 +112,7 @@ aid_final_review_inputs_build() {
     else
       jq -c --arg e "$(basename "$epic_dir")" -s '{epic: $e, cp3: "reviewed",
         findings: (sort_by(.round) | map(.findings[]) | group_by(.fingerprint) | map(last)
-                   | map(select(.status | IN("open", "disputed", "carried", "routed", "form_invalid")) | {severity, status, claim, evidence, fix}))}' "$run"/round-*/merged.json
+                   | map(select(.status | IN("open", "disputed", "carried", "routed", "form_invalid")) | {severity, status, claim, evidence, fix} + (if .rule then {rule} else {} end)))}' "$run"/round-*/merged.json
     fi
   done | jq -s '{epics: .}' > "$out/epic-findings.json"
 }
@@ -191,11 +191,11 @@ aid_step_review_prompt_render() {
       echo "## This is a confirmation round"
       echo
       echo "The author fixed the change after the previous round. Your job now:"
-      echo "1. For each finding below, check the current tree: if it is fixed, do not report it; if it is not, report it again (same claim)."
+      echo "1. For each finding below, check that its rule holds everywhere in the current tree, not only at the cited line: every path, input form and caller the rule covers. Fixed everywhere: do not report it. Not fixed, or fixed only where it was cited (a variant the fix missed): report it again with the same claim and the same first evidence citation, and append the variant's citation after it."
       echo "2. Report NEW problems only when the fix (fix.patch below) introduced them. Do not review the rest again."
       echo
       echo "### Findings still open"
-      jq -r '.findings[] | "- [\(.severity)] \(.claim) (evidence: \(.evidence); fix asked: \(.fix))"' "${dir}/packet/open-findings.json"
+      jq -r '.findings[] | "- [\(.severity)] \(.claim) (evidence: \(.evidence); fix asked: \(.fix)\(if .rule then "; rule: \(.rule)" else "" end))"' "${dir}/packet/open-findings.json"
       echo
       _aid_sr_patch "${dir}/packet/fix.patch" "What the author changed (fix.patch)" | sed 's/^## /### /'
       echo

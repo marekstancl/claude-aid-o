@@ -383,6 +383,7 @@ cmd_prepare() {
     done
   fi
 
+  _stamp_prompt_lengths "$dir" || exit 1
   trap - EXIT
   if (( ! MANUAL )); then
     _index_add "$ROUND" "$sha"
@@ -393,6 +394,22 @@ cmd_prepare() {
     if _is_carried "$dir" "$role"; then echo "  ${role}: carried from the previous attempt (the fix touched nothing it reads, and it had no finding)"
     else echo "  ${dir}/prompt-${role}.md  (focus $(_focus "$role")$(_agent_note "$role"))"; fi
   done
+}
+
+# _stamp_prompt_lengths <round dir> — every prompt opens with its own length and
+# the rule to read it to the end, and round.json records it (prompt_lines per
+# role). P102: 66 of 155 review prompts ran past ~760 lines, and a CP3 reviewer
+# read "the start and the end" of 1780 and passed.
+_stamp_prompt_lengths() {
+  local dir="$1" p role n lines='{}'
+  for p in "$dir"/prompt-*.md; do
+    [[ -f "$p" ]] || continue
+    role="$(basename "$p" .md)"; role="${role#prompt-}"
+    n=$(( $(wc -l < "$p") + 2 ))
+    { printf 'This prompt is %s lines long. Read all of it, to line %s, before you answer (Read with offset/limit in parts when it is long): the packet and the answer format are at the end.\n\n' "$n" "$n"; cat "$p"; } > "${p}.tmp" && mv "${p}.tmp" "$p" || return 1
+    lines="$(jq -c --arg r "$role" --argjson n "$n" '. + {($r): $n}' <<< "$lines")"
+  done
+  jq --argjson l "$lines" '. + {prompt_lines: $l}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
 }
 
 _existing_round() {
@@ -542,12 +559,18 @@ cmd_collect() {
     # adjudicator, true or not. Once per role it goes back to its reviewer instead
     # (the `retry` path, with the reason quoted); a second malformed answer is
     # accepted and the adjudicator keeps that finding as form_invalid, open.
+    # The same single ask carries a blocker or major that names no `rule` (not at
+    # cp1): the fixer fixes the rule, not the cited line, and the confirmation
+    # round checks it everywhere. A second answer without one is accepted as is.
     if [[ -z "$err" && ! -e "${dir}/reviewer-${role}.form-asked" ]]; then
-      local form
+      local form norule="" ask=""
       form="$(jq -r --slurpfile s "$AID_PR_SCHEMA" "$(aid_plan_review_proof_jq) [.findings[] | . as \$f | proof_error as \$e | \"\(\$f.id) \(\$e)\"] | join(\", \")" "$tmp" 2>/dev/null)"
-      if [[ -n "$form" ]]; then
+      [[ "$CHECKPOINT" == cp1 ]] || norule="$(jq -r '[.findings[] | select((.severity == "blocker" or .severity == "major") and ((.rule // "") == "")) | .id] | join(", ")' "$tmp" 2>/dev/null)"
+      [[ -n "$form" ]] && ask="${form} — \`command\` is ONE read-only command, \`evidence\` is citations only (path:line; path:first-last), what the line shows goes in \`claim\`"
+      [[ -n "$norule" ]] && ask="${ask:+${ask}; }${norule} name no \`rule\` — state the rule each breaks so it can be checked everywhere, not only at the cited line"
+      if [[ -n "$ask" ]]; then
         : > "${dir}/reviewer-${role}.form-asked"
-        err="form: ${form} — \`command\` is ONE read-only command, \`evidence\` is citations only (path:line; path:first-last), what the line shows goes in \`claim\`; asked once"
+        err="form: ${ask}; asked once"
       fi
     fi
     if [[ -n "$err" ]]; then

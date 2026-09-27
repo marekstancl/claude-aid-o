@@ -93,6 +93,13 @@ Severity ladder, the same for every role:
 
 Each role's stop rule below narrows what counts as `blocker` for that role.
 
+A `blocker` or `major` (not at CP1) also names its `rule`: the invariant the
+finding breaks, stated so it can be checked everywhere, not only at the cited
+line ("every served path resolves inside the brand root", "only allowlisted tags
+and attributes pass the filter"). The cited line is one place the rule fails;
+the author fixes the rule, and the confirmation round checks it holds
+everywhere. An answer whose blocker or major has no `rule` goes back once.
+
 ### The behaviour trace
 
 When `step-check.json` lists `handler_patterns` (the diff adds or changes a
@@ -114,6 +121,7 @@ else. The shape is `defaults/schemas/review-finding.schema.json`:
     "command": "grep -n 'ordinal' ui/src/lib/validationErrors.ts",
     "evidence": "ui/src/lib/validationErrors.ts:223; wan/api/scan.py:4058",
     "fix": "Read `payload_ordinal` in validationErrors.ts or keep emitting `ordinal`.",
+    "rule": "Every field the banner reads is one the confirm endpoint still sends.",
     "behaviour_trace": [{"request": "POST /api/scan/confirm", "path": "scan.confirm → _build_om_conflict → 422 detail", "sink": "banner in SessionDetail",
                          "branches": [{"name": "conflict", "outcome": "banner shows undefined ordinal"}]}]}]}
 ```

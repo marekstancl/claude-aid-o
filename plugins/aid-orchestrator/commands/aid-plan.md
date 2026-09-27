@@ -565,7 +565,7 @@ When `close` reports `fail` on a step or EPIC round and a round remains
 ```
 Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,
       model: <the **Model:** of the step's role card in skills/role-cards.md>,
-      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. Touch nothing a finding does not name.")
+      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the reviewer's example plus two other variants of the same rule. Touch nothing outside the rules the findings name.")
 ```
 
 Then `aid-step-check.sh` again (the range now ends at the fix commit) and

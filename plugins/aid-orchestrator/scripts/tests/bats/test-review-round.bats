@@ -334,7 +334,7 @@ D() { printf '%s/cp2/step-0/round-%s' "$E" "$1"; }
 # _sanswer <round> <role> [jq filter] — a valid one-finding cp2 answer
 _sanswer() {
   jq -n --arg r "$2" '{role: $r, checkpoint: "cp2", findings: [{id: "\($r)-1", checkpoint: "cp2", step: 0, severity: "major",
-      claim: "the new file is never imported by \($r)", command: "grep -n new src/app.py", evidence: "src/app.py:3", fix: "import it"}]}' \
+      claim: "the new file is never imported by \($r)", command: "grep -n new src/app.py", evidence: "src/app.py:3", fix: "import it", rule: "every new module is imported where it is used"}]}' \
     | jq "${3:-.}" > "$(D "$1")/reviewer-$2.json"
 }
 # _bracket <round> <role> — the dispatch bracket the controller records for a claude role
@@ -361,6 +361,10 @@ _bracket() {
   [ "$(jq -r .confirmation_of "$(D 1)/round.json")" = null ]
   [ "$(jq '.files | length' "$(D 1)/packet/manifest.json")" -eq 4 ]
   grep -q '^# cp2 review, round 1$' "$(D 1)/prompt-step_generalist.md"
+  # the prompt opens with its own length, and round.json records it
+  local n; n="$(wc -l < "$(D 1)/prompt-step_generalist.md")"
+  head -1 "$(D 1)/prompt-step_generalist.md" | grep -q "^This prompt is ${n} lines long. Read all of it, to line ${n},"
+  [ "$(jq -r .prompt_lines.step_generalist "$(D 1)/round.json")" = "$n" ]
   # the reviewer reads the plan's step number, not the 0-based index
   grep -q '^# Step 1 (index 0): add the thing$' "$(D 1)/packet/dod.md"
   grep -q 'the new file is never\|Definition of Done' "$(D 1)/prompt-step_generalist.md"
@@ -416,6 +420,27 @@ _bracket() {
   [ "$(jq -r '.findings[0].status' "$(D 1)/merged.json")" = form_invalid ]
   _bracket 1 step_generalist; _S close --round 1 --tokens step_generalist=1 >/dev/null
   [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = fail ]
+}
+
+@test "step: a major that names no rule goes back once; the second answer is accepted, the rule reaches merged.json and the confirmation prompt" {
+  _repo; printf 'def f():\n    return 1\n' >> "$R/src/app.py"; git -C "$R" commit -qam more; _sc
+  _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist 'del(.findings[0].rule)'
+  run _S collect --round 1
+  [[ "$(jq -r '.invalid[0].reason' "$(D 1)/collect.json")" == "form: step_generalist-1 name no \`rule\`"*"asked once" ]]
+  _S retry --round 1 --role step_generalist >/dev/null
+  _sanswer 1 step_generalist 'del(.findings[0].rule)'        # again without: accepted, stays open
+  run _S collect --round 1; [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings[0].status' "$(D 1)/merged.json")" = open ]
+  # a later answer with the rule carries it into merged.json and the next prompt
+  rm -rf "$E/cp2"; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _S collect --round 1 >/dev/null
+  [ "$(jq -r '.findings[0].rule' "$(D 1)/merged.json")" = "every new module is imported where it is used" ]
+  _bracket 1 step_generalist; _S close --round 1 --tokens step_generalist=1 >/dev/null
+  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"; _sc
+  _S prepare --round 2 >/dev/null
+  grep -q 'rule: every new module is imported where it is used' "$(D 2)/prompt-step_generalist.md"
+  grep -q 'not only at the cited line' "$(D 2)/prompt-step_generalist.md"
 }
 
 @test "step: collect needs every expected role; close is bound to HEAD, to a token value and to a dispatch bracket; verdict fail with an open major" {
@@ -640,8 +665,8 @@ _close1() {
   "$ROUND_SH" prepare "${args[@]}" --round "${ROUND_N:-1}" >/dev/null || return 1
   local d="$E/${cp}$([[ "$cp" == cp2 ]] && echo /step-0)/round-${ROUND_N:-1}"
   jq -n --arg r "$role" --arg cp "$cp" '{role: $r, checkpoint: $cp, findings: [
-      {id: "g-1", checkpoint: $cp, step: 0, severity: "blocker", claim: "app never imports new", command: "grep -n new src/app.py", evidence: "src/app.py:3", fix: "import it"},
-      {id: "g-2", checkpoint: $cp, step: 0, severity: "major", claim: "new.py contract unmet", command: "grep -n new src/new.py", evidence: "src/new.py:1", fix: "finish it"},
+      {id: "g-1", checkpoint: $cp, step: 0, severity: "blocker", claim: "app never imports new", command: "grep -n new src/app.py", evidence: "src/app.py:3", fix: "import it", rule: "every new module is imported"},
+      {id: "g-2", checkpoint: $cp, step: 0, severity: "major", claim: "new.py contract unmet", command: "grep -n new src/new.py", evidence: "src/new.py:1", fix: "finish it", rule: "every file meets its contract"},
       {id: "g-3", checkpoint: $cp, step: 0, severity: "minor", claim: "naming", command: "grep -n x src/new.py", evidence: "src/new.py:1", fix: "rename"}]}' \
     | jq "${2:-.}" > "$d/reviewer-${role}.json"
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "$f" --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
@@ -826,7 +851,7 @@ _fanswer() {
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "cp7-${2//_/-}" --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "cp7-${2//_/-}" --output-file "$d/reviewer-$2.json" --evidence-dir "$d" >/dev/null
 }
-_BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims an import the app never makes", command: "grep -n import src/app.py", evidence: "src/app.py:1", fix: "import new"}] | del(.no_findings_reason)'
+_BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims an import the app never makes", command: "grep -n import src/app.py", evidence: "src/app.py:1", fix: "import new", rule: "every change the changelog claims is in the code"}] | del(.no_findings_reason)'
 
 @test "cp7: produce's inputs hold the plan's criteria and the EPIC findings; prepare prints three prompts with cp7 foci" {
   _frepo; _fsc
