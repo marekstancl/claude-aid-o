@@ -142,6 +142,9 @@ _aid_ancillary_fallback() {
 _aid_ancillary_glob_match() {
   local path="$1" pattern="$2" strict="${3:-}"
   [[ -n "$pattern" && "$pattern" != \#* ]] || return 1
+  # `dir/` is the directory form written short: under a bare-entry reading it
+  # matched nothing (P102: 4 of 125 step checks called in-scope files out of scope).
+  [[ "$pattern" == */ ]] && pattern+="**"
   # Explicit directory form.
   if [[ "$pattern" == */\*\* ]]; then
     local base="${pattern%/\*\*}"

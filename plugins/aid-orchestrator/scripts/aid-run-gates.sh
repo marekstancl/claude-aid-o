@@ -1629,7 +1629,7 @@ run_all_gates() {
       if [[ "$_esc_exit_code" == "3" || "$_esc_exit_code" == "11" ]]; then
         local _esc_output _esc_path
         _esc_output=$(echo "$gate_result" | jq -r '.output')
-        _esc_path=$(grep -oE '(unverifiable: unknown production path [^ ]+|mapping_gap: no approved mapping row matches [^ ]+)' <<<"$_esc_output" | head -1 | awk '{print $NF}')
+        _esc_path=$(grep -oE '(unverifiable: unknown production path [^ ]+|mapping_gap: no approved mapping row matches [^ ]+)' <<<"$_esc_output" | head -1 | awk '{print $NF}' || true)
         [[ -z "$_esc_path" ]] && _esc_path="unknown"
         escalation_triggered=true
         escalation_reason="exit_code ${_esc_exit_code}: ${_esc_path}"

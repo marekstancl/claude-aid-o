@@ -151,6 +151,8 @@ _user_index_fp() { ( cd "$1" && { git diff --cached --name-status; echo "--"; gi
   # now correctly refused by the entry precheck — see the UNSTAGED-collision test.)
   ( cd r && source "$LIB" && aid_lifecycle_bind_delivery P800 E-800-1_1 . \
       && _aid_lc_isolated_commit . "lifecycle: delivery E-800-1_1 (post-merge)" ".aid-lifecycle/manifests/P800.yaml" )
+  # bookkeeping says so, or the release guard's pre-push refuses the push
+  git -C r log -1 --format=%B | grep -qx 'No-Release: AID lifecycle bookkeeping'
   ( cd r && echo "user-staged" > u_staged.txt && git add u_staged.txt )
   local fp_before; fp_before="$(_user_index_fp r)"
   # simulate interrupt: receipt written to worktree but NOT committed
