@@ -837,7 +837,9 @@ run_background_gate() {
         # Only an AUTO run may be re-asserted as `active`: a manual run's
         # controller is a human, and stamping `active` over `manual` would be
         # this map claiming an autonomous controller that does not exist.
-        if [[ "${AID_AUTO_MODE:-}" == "1" ]]; then
+        # shellcheck source=lib/aid-permissions.sh
+        source "${SCRIPT_DIR}/lib/aid-permissions.sh"
+        if [[ "$(aid_auto_run_declared "$(aid_state_root 2>/dev/null || pwd)")" == auto ]]; then
           _resume_map_field auto_controller active
         fi
       fi

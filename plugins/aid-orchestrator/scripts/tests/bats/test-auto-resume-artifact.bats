@@ -247,6 +247,34 @@ YAML
   [ "$output" = "R-1|P076|GATES" ]
 }
 
+@test "case 2b (IMP-657): an --auto run declared in auto-mode-state.yaml is re-asserted active without the env; a PM stop wins over the env" {
+  init_project
+  _seed_map manual
+  unset AID_AUTO_MODE
+  mkdir -p "$PROJ/.aid-o/work"
+  printf 'mode: auto\nset_by: "aid-run --auto"\n' > "$PROJ/.aid-o/work/auto-mode-state.yaml"
+  cat > "$PROJ/exec.yaml" <<'YAML'
+gates:
+  bg:
+    command: "echo bg-done"
+    required: true
+    timeout_seconds: 60
+    run_mode: background
+YAML
+  run run_gates
+  [ "$status" -eq 0 ]
+  run jq -r '."E-076-9_9".auto_controller' "$MAP"
+  [ "$output" = "active" ]
+
+  _seed_map manual
+  export AID_AUTO_MODE=1
+  printf 'mode: manual\nset_by: "pm"\n' > "$PROJ/.aid-o/work/auto-mode-state.yaml"
+  run run_gates
+  [ "$status" -eq 0 ]
+  run jq -r '."E-076-9_9".auto_controller' "$MAP"
+  [ "$output" = "manual" ]
+}
+
 @test "case 3: SIGKILL mid-run leaves the artifact AND the map pointing at it" {
   init_project
   _seed_map manual

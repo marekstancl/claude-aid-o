@@ -332,12 +332,15 @@ AID_AUTO_CONTROLLER_VALUES="active manual blocked_for_pm"
 # `_resume_newest_claim` at the same time — a guard whose failure mode is
 # indistinguishable from "nothing to guard".
 
-# _active_runs_auto_controller — the value init may honestly stamp. An AUTO
-# controller announces itself with AID_AUTO_MODE=1; anything else is a manual
-# run (the conservative default: claiming an autonomous controller that does
-# not exist is the failure this whole step is about).
+# _active_runs_auto_controller — the value init may honestly stamp: `active`
+# only when the run declared itself AUTO (aid_auto_run_declared: the env or
+# auto-mode-state.yaml, a PM stop winning); anything else is a manual run
+# (claiming an autonomous controller that does not exist is the failure this
+# guards against). permissions.yaml is deliberately not consulted.
 _active_runs_auto_controller() {
-  if [[ "${AID_AUTO_MODE:-}" == "1" ]]; then printf 'active'; else printf 'manual'; fi
+  # shellcheck source=lib/aid-permissions.sh
+  source "${SCRIPT_DIR}/lib/aid-permissions.sh"
+  if [[ "$(aid_auto_run_declared "$(aid_state_root 2>/dev/null || pwd)")" == auto ]]; then printf 'active'; else printf 'manual'; fi
 }
 
 # _active_runs_resume_artifact <state_file> — the run's continuation-artifact
@@ -2961,7 +2964,7 @@ _resume_claim() {
 _resume_release_pointer() {
   local epic_id="$1"
   update_active_run_field "$epic_id" resume_artifact "" >/dev/null 2>&1 || true
-  if [[ "${AID_AUTO_MODE:-}" == "1" ]]; then
+  if [[ "$(_active_runs_auto_controller)" == active ]]; then
     update_active_run_field "$epic_id" auto_controller active >/dev/null 2>&1 || true
   fi
   return 0

@@ -3452,6 +3452,25 @@ _pfsm_merge_commit_count() {
   git -C "$TEST_PROJECT_ROOT" rev-list --merges --count "$1"
 }
 
+@test "epic-complete refuses an EPIC that is DONE but never advanced to release (P102), and merge re-checks it" {
+  _pfsm_bootstrap_plan "P064"
+  PFSM_SKIP_COMPLETE=1 _pfsm_epic_with_commit "P064" "E-064-1_1"
+  _pfsm_write_epic_evidence "E-064-1_1" DONE
+  local sf="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-064-1_1/R-E-064-1_1-plan/fsm-state.yaml"
+  sed -i 's/^done_phase: release$/done_phase: review/' "$sf"
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"done_phase='review' (must be release)"* ]]
+  # completed at release, then the state file regresses: the merge refuses
+  sed -i 's/^done_phase: review$/done_phase: release/' "$sf"
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  sed -i 's/^done_phase: release$/done_phase: review/' "$sf"
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not DONE / release"* ]]
+}
+
 # ─── AC1: only plan/<plan_id> moves ────────────────────────────────────────
 @test "AC1: epic-merge-to-plan moves only plan/<plan_id>; the main SHA is byte-identical before and after" {
   _pfsm_bootstrap_plan "P064"

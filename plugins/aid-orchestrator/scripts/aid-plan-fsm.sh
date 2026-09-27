@@ -3149,6 +3149,15 @@ cmd_epic_complete() {
     echo "PRECONDITION FAIL: ${epic_id}'s FSM state file reports state='${epic_state:-<empty>}' (must be DONE) at ${state_file}." >&2
     exit 1
   fi
+  # DONE is entered at done_phase review; only done-advance to release proves the
+  # EPIC's own review and release checks passed (P102: an EPIC whose advance
+  # failed was completed and merged).
+  local epic_done_phase=""
+  epic_done_phase="$(yq -r '.done_phase // ""' "$state_file" 2>/dev/null)" || epic_done_phase=""
+  if [[ "$epic_done_phase" != "release" ]]; then
+    echo "PRECONDITION FAIL: ${epic_id} is DONE at done_phase='${epic_done_phase:-<empty>}' (must be release) at ${state_file} — run done-advance review release first." >&2
+    exit 1
+  fi
 
   # The run's gate profile. NULLABLE BY DESIGN: aid-run-gates.sh leaves
   # `.profile` null when no --profile was resolved, so an absent/null value is
@@ -3528,8 +3537,9 @@ cmd_epic_merge_to_plan() {
       exit 1
     fi
     local _mg_st; _mg_st="$(grep -E '^state:' "$_mg_state_file" 2>/dev/null | awk '{print $2}' | head -1)"
-    if [[ "$_mg_st" != "DONE" ]]; then
-      echo "PRECONDITION FAIL: epic_completion_stale: ${epic_id}'s FSM now reports state '${_mg_st:-<empty>}', not DONE — the completion this merge relies on no longer holds. Nothing was merged." >&2
+    local _mg_dp; _mg_dp="$(grep -E '^done_phase:' "$_mg_state_file" 2>/dev/null | awk '{print $2}' | head -1 || true)"
+    if [[ "$_mg_st" != "DONE" || "$_mg_dp" != "release" ]]; then
+      echo "PRECONDITION FAIL: epic_completion_stale: ${epic_id}'s FSM now reports state '${_mg_st:-<empty>}' / done_phase '${_mg_dp:-<empty>}', not DONE / release — the completion this merge relies on no longer holds. Nothing was merged." >&2
       exit 1
     fi
     # The tip TODAY must be the tip completion verified.
