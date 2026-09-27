@@ -106,6 +106,9 @@ body three
 EOF
   printf '# Problems\n\n## 1. only one, at level two\nbody\n' > "$T/projects/beta/.aid-o/work/aid-plugin-issues.md"
   printf '# Problems\n\nno headings at all\n' > "$T/projects/gamma/.aid-o/work/aid-plugin-issues.md"
+  # the owner's own file: open entries are not reports, a parked one still shows
+  mkdir -p "$T/projects/aid-orchestrator/.aid-o/work"
+  printf '# P\n\n## 2026-09-27 — own open note\nx\n\n## 2026-09-27 — own parked\n> **ČEKÁ NA DŮKAZ (2026-09-27):** g\n' > "$T/projects/aid-orchestrator/.aid-o/work/aid-plugin-issues.md"
   local before; before="$(find "$T/projects" -type f -exec sha256sum {} + | sort)"
   run bash "$REPO/bin/aid-plugin-issues-collect.sh" --root "$T/projects"
   [ "$status" -eq 0 ]
@@ -115,7 +118,9 @@ EOF
   [[ "$output" != *"2026-08-27, run"* ]]                       # a container, not an entry
   [[ "$output" == *"line 3: 1. only one, at level two"* ]]
   [[ "$output" == *"gamma: nothing open"* ]]
-  [[ "$output" == *"open entries: 3, waiting for evidence: 1"* ]]
+  [[ "$output" == *"open entries: 3, waiting for evidence: 2"* ]]
+  [[ "$output" != *"own open note"* ]]
+  [[ "$output" == *"2026-09-27 — own parked (výskytů: 1)"* ]]
   [[ "$output" == *"čeká na důkaz:"*"line 16: 4. review took a third round (výskytů: 2) -> posoudit znovu"* ]]
   [ "$(find "$T/projects" -type f -exec sha256sum {} + | sort)" = "$before" ]
 }

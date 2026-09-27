@@ -40,7 +40,6 @@ waiting=0
 for f in "$ROOT"/*/.aid-o/work/aid-plugin-issues.md; do
   [[ -f "$f" ]] || continue
   project="$(basename "$(dirname "$(dirname "$(dirname "$f")")")")"
-  [[ "$project" == "aid-orchestrator" ]] && continue     # the owner's own file is not a source
   # Plain awk on purpose: this host runs mawk (no gensub, no interval quantifiers).
   all="$(awk -v mark_re="$MARK_RE" -v wait_re="$WAIT_RE" -v entry_re="$ENTRY_RE" '
     NR == FNR { if (/^## /) last2 = FNR; else if (/^### / && last2) { container[last2] = 1; last2 = 0 }; next }
@@ -57,6 +56,9 @@ for f in "$ROOT"/*/.aid-o/work/aid-plugin-issues.md; do
     END { flush() }
   ' "$f" "$f")"
   lines="$(sed -n 's/^O //p' <<< "$all")"
+  # The owner's own file is not a source of reports, but what the owner parked
+  # there as ČEKÁ NA DŮKAZ must still show up, or it is lost.
+  [[ "$project" == "aid-orchestrator" ]] && lines=""
   waits="$(sed -n 's/^W //p' <<< "$all")"
   if [[ -z "$lines" && -z "$waits" ]]; then
     printf '%s: nothing open\n' "$project"
