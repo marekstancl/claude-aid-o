@@ -322,6 +322,11 @@ _repo() {
   jq -n '{steps: [{id: "step_1_backend", role: "backend", objective: "add the thing", acceptance_criteria: ["it works"], outputs: ["Modify: `src/app.py` — x", "Create: `src/new.py` — y"], forbidden_paths: ["secrets/**"]}]}' > "$E/plan.json"
   : > "$E/timeline.jsonl"
   seq 1 60 >> "$R/src/app.py"; echo new > "$R/src/new.py"; git -C "$R" add -A; git -C "$R" commit -qm s0
+  # Round mechanics are tested with one reviewer: the project gates step_security
+  # on a pattern, as the default did before 2.109.0 (the default is tested at "prepare needs").
+  mkdir -p "$R/.aid-o/config/policies"
+  yq '.review_checkpoints.step_review.reviewers[1].when = "review+security"' \
+    "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
 }
 _sc() { (cd "$R" && bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint "${1:-cp2}" --step "${2:-0}" --evidence-dir "$E" "${@:3}") >/dev/null; }
 _S() { "$ROUND_SH" "$1" --checkpoint cp2 --evidence-dir "$E" --step 0 --project-root "$R" "${@:2}"; }
@@ -339,10 +344,16 @@ _bracket() {
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "$f" --output-file "$d/reviewer-$2.json" --evidence-dir "$d" >/dev/null
 }
 
-@test "step: prepare needs a step check at HEAD and a review verdict; one prompt for review, two for review+security" {
+@test "step: prepare needs a step check at HEAD and a review verdict; the default asks security on every reviewed step, a gated project only on a pattern" {
   _repo
   run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"no step-check.json"* ]]
   _sc
+  # the plugin default: no security pattern in the diff, still two roles (2.109.0)
+  mv "$R/.aid-o/config/policies/review-checkpoints.yaml" "$ROOT/gated.yaml"
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(ls "$(D 1)"/prompt-*.md | wc -l)" -eq 2 ]
+  [ -f "$(D 1)/prompt-step_security.md" ]
+  rm -rf "$E/cp2"; mv "$ROOT/gated.yaml" "$R/.aid-o/config/policies/review-checkpoints.yaml"; _sc
   run _S prepare --round 1
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(ls "$(D 1)"/prompt-*.md | wc -l)" -eq 1 ]
@@ -618,8 +629,8 @@ _erepo() {
   : > "$E/timeline.jsonl"
   # cp3 with one claude role and one round, so the last round is round 1 and no codex launcher is needed
   mkdir -p "$R/.aid-o/config/policies"
-  yq '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
-     "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  yq -i '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
+     "$R/.aid-o/config/policies/review-checkpoints.yaml"
 }
 _J() { printf '%s/.aid-o/work/plan-state/P900/%s' "$R" "$1"; }
 # _close1 <checkpoint> [answer jq] — one round: prepare, one generalist answer, bracket, collect, close
@@ -671,8 +682,10 @@ _close1() {
   [ "$(wc -l < "$(_J routed-findings.jsonl)")" -eq 2 ]
   [ "$(jq -r '.source_checkpoint' "$(_J routed-findings.jsonl)" | sort -u)" = cp3 ]
   [ "$(jq -r '.findings[] | select(.severity == "minor") | .status' "$E/cp3/round-1/merged.json")" = open ]
-  # an EPIC that belongs to no plan
+  # an EPIC that belongs to no plan (the same one-role, one-round cp3 as _erepo)
   _repo; E="$ROOT/ev/adhoc/R-1"; mkdir -p "$E"; : > "$E/timeline.jsonl"
+  yq -i '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
+     "$R/.aid-o/config/policies/review-checkpoints.yaml"
   jq -n '{steps: [{id: "s0", role: "backend", objective: "x", outputs: ["Modify: `src/app.py` — x"]}]}' > "$E/plan.json"
   printf 'base_commit: %s\n' "$(git -C "$R" rev-parse HEAD~1)" > "$E/fsm-state.yaml"
   _sc cp3 ""

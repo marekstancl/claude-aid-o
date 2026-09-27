@@ -91,9 +91,12 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
 }
 
 # ── the step and EPIC blocks ───────────────────────────────────────────────
-@test "step_review: the plugin default loads with one unconditional and one conditional role; the floor is the unconditional count" {
+@test "step_review: the plugin default asks both roles on every reviewed step (2.109.0); a gated role lowers the floor to the unconditional count" {
   aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
-  [ "${#RC_ROLE[@]}" -eq 2 ]; [ "${RC_WHEN[0]}" = "" ]; [ "${RC_WHEN[1]}" = "review+security" ]
+  [ "${#RC_ROLE[@]}" -eq 2 ]; [ "${RC_WHEN[0]}" = "" ]; [ "${RC_WHEN[1]}" = "" ]
+  [ "$RC_MIN_ANSWERS" = 2 ]
+  _project '.review_checkpoints.step_review.reviewers[1].when = "review+security"'
+  aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
   [ "$RC_MIN_ANSWERS" = 1 ]; [ "$(aid_review_config_floor 2)" = 1 ]; [ "$(aid_review_config_floor 1)" = 1 ]
   [ "$RC_EXTRA_SKIP_THRESHOLD_FILES" = 1 ]; [ "$RC_EXTRA_SKIP_THRESHOLD_LINES" = 50 ]
   aid_review_config_validate
@@ -113,7 +116,7 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   _project '.review_checkpoints.step_review.reviewers[1].when = "sometimes"'
   run _load_step
   [ "$status" -eq 1 ]; [[ "$output" == *"when must be review+security"* ]]
-  _project '.review_checkpoints.step_review.reviewers[0].when = "review+security"'
+  _project '.review_checkpoints.step_review.reviewers[].when = "review+security"'
   run _load_step
   [ "$status" -eq 1 ]; [[ "$output" == *"no unconditional role"* ]]
 }
@@ -160,7 +163,7 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
 
 @test "effort: read into RC_EFFORT, medium when unset, a value outside low|medium|high refused" {
   _load_step
-  [ "${RC_EFFORT[*]}" = "low low" ]
+  [ "${RC_EFFORT[*]}" = "low medium" ]
   _load_cp1
   [ "${RC_EFFORT[0]}" = medium ]
   _project '.review_checkpoints.step_review.reviewers[0].effort = "extreme"'
