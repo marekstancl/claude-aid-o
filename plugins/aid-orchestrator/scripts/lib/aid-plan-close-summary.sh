@@ -85,6 +85,7 @@ _APCS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-artifact-render.sh
 source "${_APCS_LIB_DIR}/aid-artifact-render.sh"
 source "${_APCS_LIB_DIR}/aid-roots.sh"   # aid_state_root for the plugin-issues line
+source "${_APCS_LIB_DIR}/aid-plugin-issues.sh"   # aid_plugin_issues_count
 
 # The eight fields the brief MUST carry, from build_brief_payload
 # (scripts/aid-pm-brief.sh:116-133):
@@ -139,7 +140,7 @@ _apcs_plugin_issues_line() {
   while IFS= read -r f; do
     n=$(( n + $(jq -r 'select((.event // "") | (. == "fsm_force_override" or . == "scope_amended" or test("^fsm_.*(fail|blocked)$"))) | 1' "$f" 2>/dev/null | wc -l) ))
   done < <(find "${root}/.aid-o/work/evidence" -mindepth 3 -maxdepth 3 -path "*/E-${num}-*/*" -name timeline.jsonl 2>/dev/null)
-  entries="$(grep -cE '^#{2,3} [0-9]+\. ' "${root}/.aid-o/work/aid-plugin-issues.md" 2>/dev/null || echo 0)"
+  entries="$(aid_plugin_issues_count "${root}/.aid-o/work/aid-plugin-issues.md")"
   printf 'AID sám: během plánu %s× odmítl nebo byl obejit; aid-plugin-issues.md má %s zápisů — pokud něco z toho byla chyba pluginu a zápis chybí, teď je čas.\n' "$n" "$entries"
 }
 
@@ -336,7 +337,8 @@ aid_plan_close_render() {
   # Decision-required when the plan is not release-ready, or the merge mode is
   # not the auto-merge value. Otherwise this is recording a completed close.
   local card_kind="finished"
-  if [[ "$release_ready" != "true" || "$merge_mode" != "auto" ]]; then
+  # "finished" says nothing is left for the PM: only true once the merge landed.
+  if [[ "$release_ready" != "true" || "$merge_mode" != "auto" || -z "$merge_sha" ]]; then
     card_kind="decision"
   fi
 
