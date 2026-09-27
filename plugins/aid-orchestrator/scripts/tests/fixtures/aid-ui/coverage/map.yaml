@@ -1,0 +1,20 @@
+schema_version: 1
+items:
+  - id: "ecosystem/specs/a.md#Standard A > Rules#923b9432"
+    do: "script:http_200"
+  - id: "ecosystem/specs/a.md#Standard A > Rules#f2add2b3"
+    do: "pm:approve_page"
+  - id: "ecosystem/specs/a.md#Standard A > Rules#0ec58950"
+    do: "agent: keyboard walk of every page"
+  - id: "ecosystem/specs/a.md#Standard A > Rules#ca072b02"
+    do: "na: deployment is not a goal of /aid-ui"
+  - id: "ecosystem/specs/a.md#Standard A > Rules#9181728b"
+    do: "na: duplicate for the suffix test"
+  - id: "ecosystem/specs/a.md#Standard A > Rules#9181728b-2"
+    do: "na: duplicate for the suffix test"
+  - id: "ecosystem/specs/a.md#Standard A > Table#f14dc344"
+    do: "script:axe"
+  - id: "ecosystem/specs/a.md#Standard A > Table#267777ef"
+    do: "agent: prose rule followed"
+  - id: "ecosystem/specs/b.md#Standard B > App#c9544bbd"
+    do: {webapp: "script:app_task_states", pwa: "script:app_task_states"}

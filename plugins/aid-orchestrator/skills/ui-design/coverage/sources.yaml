@@ -1,0 +1,18 @@
+# The standard files the coverage map covers, relative to the docs root
+# (/opt/eco/docs/docs). The standards map is not this list: it holds Docusaurus
+# routes and lacks the product-vision and brand-brief templates.
+# seo/index.md is only a signpost; it stays here so a normative item added to it
+# is not silently dropped.
+sources:
+  - ecosystem/specs/design-system-standard.md
+  - ecosystem/specs/seo/index.md
+  - ecosystem/specs/seo/technicke-seo.md
+  - ecosystem/specs/seo/checklist-spusteni-prevzeti-webu.md
+  - ecosystem/specs/seo/lokalni-seo.md
+  - ecosystem/specs/seo-audit-agent-standard.md
+  - ecosystem/specs/product-vision.md
+  - ecosystem/templates/product-vision-prompt.md
+  - ecosystem/templates/brand-brief-prompt.md
+  - ecosystem/specs/pwa-notifications-standard.md
+  - ecosystem/specs/frontend-build-standard.md
+  - ecosystem/specs/webapp-tasks-states-standard.md
