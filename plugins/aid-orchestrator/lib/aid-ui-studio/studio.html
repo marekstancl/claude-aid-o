@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="cs">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AID studio</title>
+<!-- Layout pattern after Impeccable's decision page (Impeccable 4.3.1, Paul Bakaus,
+     Apache 2.0): cards with a preview slot and pending shimmer, safer/bolder re-roll,
+     steer field, calm paper palette. Markup, CSS and JS written for AID. -->
+<style>
+  :root {
+    color-scheme: light;
+    --accent: oklch(84% 0.19 80.46);
+    --patina: oklch(49% 0.11 190);
+    --paper: oklch(97.8% 0 0);
+    --raised: oklch(99.5% 0 0);
+    --gray: oklch(92% 0 0);
+    --gray-2: oklch(88% 0 0);
+    --ink: oklch(13% 0 0);
+    --text: oklch(22% 0 0);
+    --muted: oklch(46% 0 0);
+    --rule: oklch(13% 0 0 / 0.12);
+    --edge: oklch(13% 0 0 / 0.45);
+    --danger: oklch(50% 0.17 28);
+    --lift: 0 1px 1px oklch(13% 0 0 / 0.05), 0 2px 3px oklch(13% 0 0 / 0.04), 0 6px 12px oklch(13% 0 0 / 0.05);
+    --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--paper); color: var(--text); font: 15px/1.55 var(--font); padding: 1.6rem clamp(1rem, 5vw, 4rem) 0; min-height: 100dvh; display: flex; flex-direction: column; overflow-x: clip; }
+  header, main, footer { width: 100%; max-width: 90rem; margin: 0 auto; }
+  h1 { font-weight: 600; font-size: 1.75rem; letter-spacing: -0.02em; line-height: 1.2; color: var(--ink); }
+  h2 { font-weight: 600; font-size: 1.3rem; letter-spacing: -0.015em; color: var(--ink); }
+  a { color: var(--patina); }
+  :focus-visible { outline: 2px solid var(--patina); outline-offset: 2px; }
+  .rail { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; padding: 0; margin-top: 1rem; }
+  .rail li { font-size: .8125rem; padding: .25rem .7rem; border: 1px solid var(--rule); border-radius: 999px; color: var(--muted); background: var(--raised); }
+  .rail li.done { color: var(--text); }
+  .rail li.done::before { content: "✓ "; color: var(--patina); }
+  .rail li.current { color: var(--ink); border-color: var(--accent); font-weight: 600; }
+  #notice { margin-top: 1rem; padding: .8rem 1rem; border: 1px solid var(--danger); border-radius: 6px; color: var(--danger); background: var(--raised); }
+  #notice[hidden] { display: none; }
+  main { flex: 1; display: flex; flex-direction: column; gap: 2.5rem; padding: 1.8rem 0 2rem; }
+  .empty { color: var(--muted); }
+  .question { display: flex; flex-direction: column; gap: 1rem; }
+  .question .prompt { color: var(--muted); max-width: 52rem; }
+  .question .kind { font-size: .6875rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .question pre { font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--raised); border: 1px solid var(--rule); border-radius: 6px; padding: .8rem 1rem; max-height: 24rem; overflow: auto; }
+  .question.answered { opacity: .7; }
+  .done-note { color: var(--patina); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr)); gap: 1.4rem; }
+  .card { background: var(--raised); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--lift); overflow: hidden; display: flex; flex-direction: column; }
+  .card:hover, .card:focus-within { border-color: var(--edge); }
+  .media { position: relative; aspect-ratio: 16/10; background: var(--gray); }
+  .media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .media.pending img { visibility: hidden; }
+  .media .wait { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; font-size: .8125rem; color: var(--muted);
+    background: linear-gradient(100deg, var(--gray) 40%, var(--gray-2) 50%, var(--gray) 60%); background-size: 200% 100%; animation: shimmer 1.6s linear infinite; }
+  .media.pending .wait { display: flex; }
+  @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+  @media (prefers-reduced-motion: reduce) { .media .wait { animation: none; } }
+  .body { padding: 1rem 1.1rem 1.1rem; display: flex; flex-direction: column; gap: .6rem; flex: 1; }
+  .body h3 { font-size: 1.05rem; font-weight: 600; color: var(--ink); }
+  .label { display: block; font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .swatches { display: flex; gap: .3rem; }
+  .swatches span { width: 1.4rem; height: 1.4rem; border-radius: 4px; border: 1px solid var(--rule); }
+  .choose { margin-top: auto; }
+  button { font: inherit; font-size: .875rem; font-weight: 500; min-height: 42px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--edge); background: var(--raised); color: var(--ink); cursor: pointer; }
+  button:hover { border-color: var(--ink); }
+  button.primary { background: var(--ink); color: var(--raised); border-color: var(--ink); }
+  button[disabled] { opacity: .4; cursor: default; }
+  .quiet { color: var(--muted); }
+  .actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: stretch; border-top: 1px solid var(--rule); padding-top: 1rem; }
+  .actions label { flex-basis: 100%; }
+  textarea, input[type=text] { width: 100%; font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--edge); border-radius: 6px; padding: .6rem .8rem; caret-color: var(--patina); }
+  textarea { min-height: 4.5rem; resize: vertical; }
+  .status { flex-basis: 100%; font-size: .875rem; color: var(--danger); min-height: 1.2em; }
+  footer { padding: 1rem 0 1.4rem; border-top: 1px solid var(--rule); font-size: .8125rem; color: var(--muted); display: flex; gap: 1.2rem; flex-wrap: wrap; }
+</style>
+<header>
+  <h1>AID studio</h1>
+  <ol class="rail" id="rail" aria-label="Kroky"></ol>
+  <p id="notice" role="alert" hidden></p>
+</header>
+<main id="main" aria-live="polite"><p class="empty">Načítám…</p></main>
+<footer>
+  <a href="/report">Soulad se standardy</a>
+  <a href="/licence">Vzor rozhodovací stránky: Impeccable (Apache 2.0)</a>
+</footer>
+<script>
+"use strict";
+const TOKEN = "__AID_TOKEN__";
+const KIND = { variant: "Varianta", vision: "Vize", identity: "Identita", seo_brief: "SEO zadání",
+  structure: "Struktura", task_map: "Mapa úloh", content_plan: "Plán obsahu", defer_content: "Odložený obsah",
+  facts: "Fakta", references: "Reference", direction: "Směr", approve_page: "Schválení stránky",
+  exception: "Výjimka", coverage_drift: "Změna pokrytí", design_standard: "Standard návrhu" };
+let last = "", stopped = false;
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "on") for (const [ev, f] of Object.entries(v)) e.addEventListener(ev, f);
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== "") e.append(k);
+  return e;
+}
+
+function notice(text) {
+  const n = document.getElementById("notice");
+  n.textContent = text; n.hidden = !text;
+}
+
+async function call(method, url, body) {
+  const r = await fetch(url, { method, headers: { "X-AID-Token": TOKEN, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 403 && data.error === "token") {
+    stopped = true;
+    notice("Stránka se změnila, obnovte ji.");
+    throw new Error("token");
+  }
+  return { status: r.status, data };
+}
+
+function preview(q, c) {
+  const box = el("div", { class: "media pending" }, el("span", { class: "wait" }, "Náhled se připravuje…"));
+  const src = "/preview?question=" + encodeURIComponent(q.id) + "&card=" + encodeURIComponent(c.id);
+  const img = el("img", { alt: "Náhled: " + (c.title || c.id) });
+  img.addEventListener("load", () => box.classList.remove("pending"));
+  img.addEventListener("error", () => { if (!stopped) setTimeout(() => { img.src = src + "&t=" + Date.now(); }, 3000); });
+  img.src = src;
+  box.append(img);
+  return box;
+}
+
+function fact(label, text) {
+  return text ? el("p", {}, el("span", { class: "label" }, label), text) : null;
+}
+
+function card(q, c, answer) {
+  return el("article", { class: "card" },
+    preview(q, c),
+    el("div", { class: "body" },
+      el("h3", {}, c.title || c.id),
+      fact("Teze", c.thesis),
+      Array.isArray(c.palette) && c.palette.length
+        ? el("div", {}, el("span", { class: "label" }, "Paleta"),
+            el("div", { class: "swatches" }, c.palette.map(col => { const s = el("span", { title: String(col) }); s.style.background = String(col); return s; })))
+        : null,
+      fact("Riziko", c.risk),
+      fact("V čem je jedinečná", c.uniqueness),
+      q.answered ? null : el("button", { class: "choose primary", type: "button",
+        on: { click: () => answer("choose", c.id) } }, "Vybrat „" + (c.title || c.id) + "“")));
+}
+
+function question(q, cards) {
+  const idc = "comment-" + q.id, ids = "steer-" + q.id;
+  const status = el("p", { class: "status", role: "status" });
+  const sec = el("section", { class: "question" + (q.answered ? " answered" : ""), "aria-labelledby": "h-" + q.id });
+  const answer = async (decision, choice) => {
+    const comment = (document.getElementById(decision.startsWith("reroll_") ? ids : idc) || {}).value || "";
+    if (decision === "return" && !comment.trim()) { status.textContent = "Napište komentář, co upravit."; document.getElementById(idc).focus(); return; }
+    sec.querySelectorAll("button").forEach(b => b.disabled = true);
+    try {
+      const r = await call("POST", "/answer", { question: q.id, kind: q.kind, target: q.target, decision, choice, comment });
+      if (r.status === 200) { last = ""; tick(); return; }
+      status.textContent = r.status === 409 ? "Otázka se mezitím změnila nebo už má odpověď. Obnovte stránku." : (r.data.error || "Chyba " + r.status);
+    } catch (e) { if (e.message !== "token") status.textContent = "Server neodpovídá."; }
+    sec.querySelectorAll("button").forEach(b => b.disabled = false);
+  };
+  sec.append(...[
+    el("span", { class: "kind" }, KIND[q.kind] || q.kind),
+    el("h2", { id: "h-" + q.id }, q.title || KIND[q.kind] || q.id),
+    q.prompt ? el("p", { class: "prompt" }, q.prompt) : null,
+    q.body ? el("pre", {}, typeof q.body === "string" ? q.body : JSON.stringify(q.body, null, 2)) : null].filter(Boolean));
+  if (cards.length) sec.append(el("div", { class: "grid" }, cards.map(c => card(q, c, answer))));
+  else if (q.rerolled_from) sec.append(el("div", { class: "media pending", style: "max-width:24rem" }, el("span", { class: "wait" }, "Připravují se nové návrhy…")));
+  if (q.answered) { sec.append(el("p", { class: "done-note" }, "Odpověď zaznamenána.")); return sec; }
+  const acts = el("div", { class: "actions" },
+    el("label", { for: idc }, el("span", { class: "label" }, "Komentář"), el("textarea", { id: idc, placeholder: "Co upravit, co vadí…" })));
+  if (!cards.length) acts.append(el("button", { type: "button", class: "primary", on: { click: () => answer("approve") } }, "Schválit"));
+  acts.append(el("button", { type: "button", on: { click: () => answer("return") } }, "Vrátit s komentářem"));
+  if (cards.length) acts.append(
+    el("label", { for: ids }, el("span", { class: "label" }, "Směr pro nové kolo"), el("input", { type: "text", id: ids, placeholder: "Např. víc prostoru, méně barev" })),
+    el("button", { type: "button", class: "quiet", on: { click: () => answer("reroll_safer") } }, "← Bezpečněji"),
+    el("button", { type: "button", class: "quiet", on: { click: () => answer("reroll_bolder") } }, "Odvážněji →"));
+  acts.append(status);
+  sec.append(acts);
+  return sec;
+}
+
+function render(s) {
+  // Keep what the PM typed and where the focus was across a re-render.
+  const kept = {}; document.querySelectorAll("textarea, input").forEach(i => kept[i.id] = i.value);
+  const focus = document.activeElement && document.activeElement.id;
+  const rail = document.getElementById("rail");
+  rail.replaceChildren(...(s.steps || []).map(st => el("li", { class: st.status || "todo", "aria-current": st.status === "current" ? "step" : null }, st.title || st.id)));
+  const main = document.getElementById("main");
+  const qs = (s.questions || []).slice().sort((a, b) => a.answered - b.answered);
+  main.replaceChildren(...(qs.length ? qs.map(q => question(q, (s.cards || []).filter(c => c && c.question === q.id)))
+    : [el("p", { class: "empty" }, "Teď není na co odpovídat. Až bude další otázka, objeví se tu sama.")]));
+  for (const [id, v] of Object.entries(kept)) { const i = document.getElementById(id); if (i) i.value = v; }
+  if (focus && document.getElementById(focus)) document.getElementById(focus).focus();
+}
+
+async function tick() {
+  if (stopped) return;
+  try {
+    const r = await call("GET", "/state");
+    if (r.status !== 200) { notice("Chyba zadání stránky: " + (r.data.error || r.status)); return; }
+    notice("");
+    const text = JSON.stringify(r.data);
+    if (text !== last) { last = text; render(r.data); }
+  } catch (e) { if (e.message !== "token") notice("Server studia neodpovídá, zkouším znovu…"); }
+}
+tick();
+setInterval(tick, 3000);
+</script>
+</html>
