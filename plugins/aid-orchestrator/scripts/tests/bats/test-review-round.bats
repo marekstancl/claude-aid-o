@@ -463,6 +463,19 @@ _bracket() {
   [ "$(jq -c .reviewers_expected "$(D 3)/round.json")" = '["step_generalist"]' ]
   grep -q late "$(D 3)/packet/fix.patch"
 }
+@test "step: a fixer whose tokens are unknown still leaves a whole measurement.json (P102: 11 of 140 were empty)" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _S collect --round 1 >/dev/null; _bracket 1 step_generalist
+  _S close --round 1 --tokens step_generalist=10 >/dev/null
+  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"; _sc
+  _S prepare --round 2 >/dev/null
+  _sanswer 2 step_generalist '.findings = [] | .no_findings_reason = "fixed"'
+  _S collect --round 2 >/dev/null; _bracket 2 step_generalist
+  run _S close --round 2 --tokens step_generalist=7 --fixer backend=opus:unknown:unknown
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.fixer.tokens' "$(D 2)/measurement.json")" = unknown ]
+  [ "$(jq -r '.verdict' "$(D 2)/measurement.json")" = pass ]
+}
 @test "step: a disputed cp2 blocker keeps blocking; --pm accepted needs the card quoting it and a PM prompt after the card, then the verdict flips" {
   _repo; _sc; _S prepare --round 1 >/dev/null
   _sanswer 1 step_generalist '.findings[0].severity = "blocker"'; _S collect --round 1 >/dev/null; _bracket 1 step_generalist

@@ -782,7 +782,7 @@ cmd_close() {
     local fusd; fusd="$(aid_review_usd "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" 0 0)"
     fixer="$(jq -nc --arg r "${BASH_REMATCH[1]}" --arg m "${BASH_REMATCH[2]}" --arg i "${BASH_REMATCH[3]}" --arg o "${BASH_REMATCH[4]}" --arg u "$fusd" \
       '{role: $r, model: $m, tokens_in: ($i | tonumber? // $i), tokens_out: ($o | tonumber? // $o),
-        tokens: (if ($i | tonumber?) and ($o | tonumber?) then ($i | tonumber) + ($o | tonumber) else "unknown" end), usd: ($u | tonumber? // $u)}')"
+        tokens: (if ($i | test("^[0-9]+$")) and ($o | test("^[0-9]+$")) then ($i | tonumber) + ($o | tonumber) else "unknown" end), usd: ($u | tonumber? // $u)}')"
   fi
   local degraded; degraded="$(jq '.degraded' "${dir}/round.json")"
   [[ "$(jq '(.provider_absent // []) | length' "${dir}/collect.json")" -gt 0 ]] && degraded=true
@@ -805,7 +805,8 @@ cmd_close() {
         --argjson reviewers "$reviewers" --argjson degraded "$degraded" --argjson fixer "$fixer" \
         --arg dc "$dispatch_check" --arg v "$verdict" --arg cp "$CHECKPOINT" \
     '{checkpoint: $cp, round: $round, started_at: $start, finished_at: $finish, reviewers: $reviewers, degraded: $degraded,
-      dispatch_check: $dc, verdict: $v} + (if $fixer then {fixer: $fixer} else {} end)' > "$measurement"
+      dispatch_check: $dc, verdict: $v} + (if $fixer then {fixer: $fixer} else {} end)' > "${measurement}.tmp" \
+    && mv "${measurement}.tmp" "$measurement" || _die "measurement.json was not written; close can be run again"
 
   if [[ "$MODE" == step ]]; then
     local index="${BASE}/rounds.json"
