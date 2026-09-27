@@ -393,7 +393,7 @@ plugin_issues_line() {
   local _f _n _d
   _f="$(aid_state_path .aid-o/work/aid-plugin-issues.md 2>/dev/null || echo .aid-o/work/aid-plugin-issues.md)"
   [ -f "$_f" ] || return 0
-  _n="$(grep -cE '^#{2,3} [0-9]+\. ' "$_f" 2>/dev/null || echo 0)"
+  _n="$(source "$AID_PLUGIN_PATH/scripts/lib/aid-plugin-issues.sh" && aid_plugin_issues_count "$_f")"
   _d="$(date -u -r "$_f" +%Y-%m-%d 2>/dev/null || echo '?')"
   # Shown relative to the project, whatever the cwd (a plan worktree resolves
   # the state root to an absolute path, the primary checkout to a relative one).

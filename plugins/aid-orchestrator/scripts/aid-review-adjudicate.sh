@@ -322,6 +322,7 @@ jq -s --argjson round "$(jq '.round' "${DIR}/round.json")" --arg ns "$NS" \
            status: ($was.status // (if all($g[]; .form_invalid) then "form_invalid" else "open" end))}
         + (if all($g[]; .form_invalid) then {form_invalid: $top.form_invalid} else {} end)
         + (if $top.behaviour_trace then {behaviour_trace: $top.behaviour_trace} else {} end)
+        + ([$g[].rule | select(. != null)] + [$was.rule | select(. != null)] | if length > 0 then {rule: .[0]} else {} end)
         + (if $was.dispute then {dispute: $was.dispute} else {} end))
   | {namespace: $ns, plan_sha256: $sha, head_sha: $head, round: $round, findings: .,
      blockers_open: (map(select(.severity == "blocker" and (.status == "open" or .status == "disputed"))) | length)}

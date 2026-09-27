@@ -93,6 +93,13 @@ Severity ladder, the same for every role:
 
 Each role's stop rule below narrows what counts as `blocker` for that role.
 
+A `blocker` or `major` (not at CP1) also names its `rule`: the invariant the
+finding breaks, stated so it can be checked everywhere, not only at the cited
+line ("every served path resolves inside the brand root", "only allowlisted tags
+and attributes pass the filter"). The cited line is one place the rule fails;
+the author fixes the rule, and the confirmation round checks it holds
+everywhere. An answer whose blocker or major has no `rule` goes back once.
+
 ### The behaviour trace
 
 When `step-check.json` lists `handler_patterns` (the diff adds or changes a
@@ -114,6 +121,7 @@ else. The shape is `defaults/schemas/review-finding.schema.json`:
     "command": "grep -n 'ordinal' ui/src/lib/validationErrors.ts",
     "evidence": "ui/src/lib/validationErrors.ts:223; wan/api/scan.py:4058",
     "fix": "Read `payload_ordinal` in validationErrors.ts or keep emitting `ordinal`.",
+    "rule": "Every field the banner reads is one the confirm endpoint still sends.",
     "behaviour_trace": [{"request": "POST /api/scan/confirm", "path": "scan.confirm → _build_om_conflict → 422 detail", "sink": "banner in SessionDetail",
                          "branches": [{"name": "conflict", "outcome": "banner shows undefined ordinal"}]}]}]}
 ```
@@ -151,11 +159,15 @@ or an existing consumer broken.
 ## Role: step_security
 
 The step's diff as the reviewer who assumes the input is hostile. This role
-runs only when `step-check.json` reports a security pattern.
+reviews every step that is not skipped (a project can still gate it with
+`when: review+security`); the rules `step-check.json` matched, when any, are
+where to start, not the edge of the review. A web server, a path taken from a
+caller or text rendered as HTML/SVG/CSS matches no pattern and is exactly
+where the later rounds of P101/P102 found their holes.
 
 ### Questions
 
-1. For each matched rule in `step-check.json`, is the match real code or a fixture, and is the input it handles validated at the boundary?
+1. Where does the diff take input from outside (a request, a caller's path or port, a file, user or model text it renders)? Is it accepted by an allowlist, checked after it is resolved, at the boundary? For each rule `step-check.json` matched, is the match real code or a fixture?
 2. Does any new endpoint, command or job skip authorization, tenant isolation or a permission check its neighbours perform?
 3. Is a secret, token or credential written into code, a fixture, a log or an error message?
 4. Can an input reach a shell, a query, a template, a file path or a deserializer without being constrained?

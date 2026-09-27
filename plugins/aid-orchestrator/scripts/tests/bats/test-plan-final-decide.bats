@@ -104,7 +104,7 @@ _close_up_to_decide() {
   _stage produce; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   _round "${1:-.}"
 }
-_BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims a greeting the app never prints", command: "grep -n hello app.py", evidence: "app.py:1", fix: "print it"}] | del(.no_findings_reason)'
+_BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims a greeting the app never prints", command: "grep -n hello app.py", evidence: "app.py:1", fix: "print it", rule: "every change the changelog claims is in the code"}] | del(.no_findings_reason)'
 
 # ── the sabotage set ─────────────────────────────────────────────────────────
 @test "healthy: decided ready with no waiver, the receipt of version 2 sealed, the PM page shows attempts, minutes and USD" {

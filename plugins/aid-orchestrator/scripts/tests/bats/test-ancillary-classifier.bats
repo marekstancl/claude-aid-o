@@ -262,3 +262,22 @@ EOF
   run bash -c "printf ' M .aid-o/work/anything/deep/x.txt\n' | $(printf '%q' bash) -c '. \"$LIB\"; cd \"$ROOT\"; aid_ancillary_filter_porcelain --mode policy'"
   [ -z "$output" ]
 }
+
+@test "a trailing slash is the directory form, in both modes, and scope-check reads it the same way" {
+  run _anc '_aid_ancillary_glob_match "fixtures/x/a.txt" "fixtures/x/" strict && echo YES || echo NO'
+  [ "$output" = "YES" ]
+  run _anc '_aid_ancillary_glob_match "fixtures/x/a.txt" "fixtures/x/" && echo YES || echo NO'
+  [ "$output" = "YES" ]
+  run _anc '_aid_ancillary_glob_match "fixtures/xy/a.txt" "fixtures/x/" strict && echo YES || echo NO'
+  [ "$output" = "NO" ]
+  local repo="$BATS_TEST_TMPDIR/sc"
+  git init -q "$repo"; git -C "$repo" commit -q --allow-empty -m base
+  local base; base="$(git -C "$repo" rev-parse HEAD)"
+  mkdir -p "$repo/fixtures/x" "$repo/other"; echo a > "$repo/fixtures/x/a.txt"; echo b > "$repo/other/b.txt"
+  git -C "$repo" add -A; git -C "$repo" commit -q -m two
+  printf 'fixtures/x/\n' > "$BATS_TEST_TMPDIR/allowed"
+  run bash -c "cd '$repo' && bash '$AID_PLUGIN_PATH/scripts/gates/scope-check.sh' '$BATS_TEST_TMPDIR/allowed' $base"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'"other/b.txt"'* ]]
+  [[ "$(jq -c '.violations' <<< "$output")" != *fixtures* ]]
+}

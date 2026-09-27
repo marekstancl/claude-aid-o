@@ -351,6 +351,9 @@ _aid_lc_sync_checkout_of() {
 _aid_lc_isolated_commit() {
   local root="$1" msg="$2"; shift 2
   local rels=("$@")
+  # Bookkeeping, not a plugin change: the release guard's pre-push hook refuses
+  # a commit touching the plugin without a release unless it says so.
+  msg+=$'\n\n'"No-Release: AID lifecycle bookkeeping"
   # Defense-in-depth: AID has already written its canonical content to these paths,
   # so only a STAGED user collision is meaningful here (an unstaged diff would be
   # AID's own legitimate write). The full unstaged/entry guard runs at the caller.

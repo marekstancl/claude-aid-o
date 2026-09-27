@@ -322,6 +322,11 @@ _repo() {
   jq -n '{steps: [{id: "step_1_backend", role: "backend", objective: "add the thing", acceptance_criteria: ["it works"], outputs: ["Modify: `src/app.py` — x", "Create: `src/new.py` — y"], forbidden_paths: ["secrets/**"]}]}' > "$E/plan.json"
   : > "$E/timeline.jsonl"
   seq 1 60 >> "$R/src/app.py"; echo new > "$R/src/new.py"; git -C "$R" add -A; git -C "$R" commit -qm s0
+  # Round mechanics are tested with one reviewer: the project gates step_security
+  # on a pattern, as the default did before 2.109.0 (the default is tested at "prepare needs").
+  mkdir -p "$R/.aid-o/config/policies"
+  yq '.review_checkpoints.step_review.reviewers[1].when = "review+security"' \
+    "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
 }
 _sc() { (cd "$R" && bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint "${1:-cp2}" --step "${2:-0}" --evidence-dir "$E" "${@:3}") >/dev/null; }
 _S() { "$ROUND_SH" "$1" --checkpoint cp2 --evidence-dir "$E" --step 0 --project-root "$R" "${@:2}"; }
@@ -329,7 +334,7 @@ D() { printf '%s/cp2/step-0/round-%s' "$E" "$1"; }
 # _sanswer <round> <role> [jq filter] — a valid one-finding cp2 answer
 _sanswer() {
   jq -n --arg r "$2" '{role: $r, checkpoint: "cp2", findings: [{id: "\($r)-1", checkpoint: "cp2", step: 0, severity: "major",
-      claim: "the new file is never imported by \($r)", command: "grep -n new src/app.py", evidence: "src/app.py:3", fix: "import it"}]}' \
+      claim: "the new file is never imported by \($r)", command: "grep -n new src/app.py", evidence: "src/app.py:3", fix: "import it", rule: "every new module is imported where it is used"}]}' \
     | jq "${3:-.}" > "$(D "$1")/reviewer-$2.json"
 }
 # _bracket <round> <role> — the dispatch bracket the controller records for a claude role
@@ -339,10 +344,16 @@ _bracket() {
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "$f" --output-file "$d/reviewer-$2.json" --evidence-dir "$d" >/dev/null
 }
 
-@test "step: prepare needs a step check at HEAD and a review verdict; one prompt for review, two for review+security" {
+@test "step: prepare needs a step check at HEAD and a review verdict; the default asks security on every reviewed step, a gated project only on a pattern" {
   _repo
   run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"no step-check.json"* ]]
   _sc
+  # the plugin default: no security pattern in the diff, still two roles (2.109.0)
+  mv "$R/.aid-o/config/policies/review-checkpoints.yaml" "$ROOT/gated.yaml"
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(ls "$(D 1)"/prompt-*.md | wc -l)" -eq 2 ]
+  [ -f "$(D 1)/prompt-step_security.md" ]
+  rm -rf "$E/cp2"; mv "$ROOT/gated.yaml" "$R/.aid-o/config/policies/review-checkpoints.yaml"; _sc
   run _S prepare --round 1
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(ls "$(D 1)"/prompt-*.md | wc -l)" -eq 1 ]
@@ -350,6 +361,10 @@ _bracket() {
   [ "$(jq -r .confirmation_of "$(D 1)/round.json")" = null ]
   [ "$(jq '.files | length' "$(D 1)/packet/manifest.json")" -eq 4 ]
   grep -q '^# cp2 review, round 1$' "$(D 1)/prompt-step_generalist.md"
+  # the prompt opens with its own length, and round.json records it
+  local n; n="$(wc -l < "$(D 1)/prompt-step_generalist.md")"
+  head -1 "$(D 1)/prompt-step_generalist.md" | grep -q "^This prompt is ${n} lines long. Read all of it, to line ${n},"
+  [ "$(jq -r .prompt_lines.step_generalist "$(D 1)/round.json")" = "$n" ]
   # the reviewer reads the plan's step number, not the 0-based index
   grep -q '^# Step 1 (index 0): add the thing$' "$(D 1)/packet/dod.md"
   grep -q 'the new file is never\|Definition of Done' "$(D 1)/prompt-step_generalist.md"
@@ -407,6 +422,33 @@ _bracket() {
   [ "$(jq -r .verdict "$E/cp2/step-0/rounds.json")" = fail ]
 }
 
+@test "step: a major that names no rule goes back once; the second answer is accepted, the rule reaches merged.json and the confirmation prompt" {
+  _repo; printf 'def f():\n    return 1\n' >> "$R/src/app.py"; git -C "$R" commit -qam more; _sc
+  _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist 'del(.findings[0].rule)'
+  run _S collect --round 1
+  [[ "$(jq -r '.invalid[0].reason' "$(D 1)/collect.json")" == "form: step_generalist-1 name no \`rule\`"*"asked once" ]]
+  _S retry --round 1 --role step_generalist >/dev/null
+  _sanswer 1 step_generalist 'del(.findings[0].rule)'        # again without: accepted, stays open
+  run _S collect --round 1; [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings[0].status' "$(D 1)/merged.json")" = open ]
+  # a later answer with the rule carries it into merged.json and the next prompt
+  rm -rf "$E/cp2"; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _S collect --round 1 >/dev/null
+  [ "$(jq -r '.findings[0].rule' "$(D 1)/merged.json")" = "every new module is imported where it is used" ]
+  _bracket 1 step_generalist; _S close --round 1 --tokens step_generalist=1 >/dev/null
+  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"; _sc
+  _S prepare --round 2 >/dev/null
+  grep -q 'rule: every new module is imported where it is used' "$(D 2)/prompt-step_generalist.md"
+  grep -q 'not only at the cited line' "$(D 2)/prompt-step_generalist.md"
+  # every reviewer is told about `rule` in the prompt itself
+  grep -q '"rule": "<blocker/major outside plan review' "$(D 1)/prompt-step_generalist.md"
+  # a confirmation round asks for the rule again: its re-report without one goes back once too
+  _sanswer 2 step_generalist 'del(.findings[0].rule)'
+  run _S collect --round 2
+  [[ "$(jq -r '.invalid[0].reason' "$(D 2)/collect.json")" == *"name no \`rule\`"* ]]
+}
+
 @test "step: collect needs every expected role; close is bound to HEAD, to a token value and to a dispatch bracket; verdict fail with an open major" {
   _repo; printf 'import subprocess\nsubprocess.run(x, shell=True)\n' >> "$R/src/app.py"; git -C "$R" commit -qam sec; _sc
   _S prepare --round 1 >/dev/null
@@ -462,6 +504,19 @@ _bracket() {
   run _S prepare --round 3; echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -c .reviewers_expected "$(D 3)/round.json")" = '["step_generalist"]' ]
   grep -q late "$(D 3)/packet/fix.patch"
+}
+@test "step: a fixer whose tokens are unknown still leaves a whole measurement.json (P102: 11 of 140 were empty)" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _S collect --round 1 >/dev/null; _bracket 1 step_generalist
+  _S close --round 1 --tokens step_generalist=10 >/dev/null
+  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"; _sc
+  _S prepare --round 2 >/dev/null
+  _sanswer 2 step_generalist '.findings = [] | .no_findings_reason = "fixed"'
+  _S collect --round 2 >/dev/null; _bracket 2 step_generalist
+  run _S close --round 2 --tokens step_generalist=7 --fixer backend=opus:unknown:unknown
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.fixer.tokens' "$(D 2)/measurement.json")" = unknown ]
+  [ "$(jq -r '.verdict' "$(D 2)/measurement.json")" = pass ]
 }
 @test "step: a disputed cp2 blocker keeps blocking; --pm accepted needs the card quoting it and a PM prompt after the card, then the verdict flips" {
   _repo; _sc; _S prepare --round 1 >/dev/null
@@ -605,8 +660,8 @@ _erepo() {
   : > "$E/timeline.jsonl"
   # cp3 with one claude role and one round, so the last round is round 1 and no codex launcher is needed
   mkdir -p "$R/.aid-o/config/policies"
-  yq '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
-     "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  yq -i '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
+     "$R/.aid-o/config/policies/review-checkpoints.yaml"
 }
 _J() { printf '%s/.aid-o/work/plan-state/P900/%s' "$R" "$1"; }
 # _close1 <checkpoint> [answer jq] — one round: prepare, one generalist answer, bracket, collect, close
@@ -616,8 +671,8 @@ _close1() {
   "$ROUND_SH" prepare "${args[@]}" --round "${ROUND_N:-1}" >/dev/null || return 1
   local d="$E/${cp}$([[ "$cp" == cp2 ]] && echo /step-0)/round-${ROUND_N:-1}"
   jq -n --arg r "$role" --arg cp "$cp" '{role: $r, checkpoint: $cp, findings: [
-      {id: "g-1", checkpoint: $cp, step: 0, severity: "blocker", claim: "app never imports new", command: "grep -n new src/app.py", evidence: "src/app.py:3", fix: "import it"},
-      {id: "g-2", checkpoint: $cp, step: 0, severity: "major", claim: "new.py contract unmet", command: "grep -n new src/new.py", evidence: "src/new.py:1", fix: "finish it"},
+      {id: "g-1", checkpoint: $cp, step: 0, severity: "blocker", claim: "app never imports new", command: "grep -n new src/app.py", evidence: "src/app.py:3", fix: "import it", rule: "every new module is imported"},
+      {id: "g-2", checkpoint: $cp, step: 0, severity: "major", claim: "new.py contract unmet", command: "grep -n new src/new.py", evidence: "src/new.py:1", fix: "finish it", rule: "every file meets its contract"},
       {id: "g-3", checkpoint: $cp, step: 0, severity: "minor", claim: "naming", command: "grep -n x src/new.py", evidence: "src/new.py:1", fix: "rename"}]}' \
     | jq "${2:-.}" > "$d/reviewer-${role}.json"
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "$f" --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
@@ -658,8 +713,10 @@ _close1() {
   [ "$(wc -l < "$(_J routed-findings.jsonl)")" -eq 2 ]
   [ "$(jq -r '.source_checkpoint' "$(_J routed-findings.jsonl)" | sort -u)" = cp3 ]
   [ "$(jq -r '.findings[] | select(.severity == "minor") | .status' "$E/cp3/round-1/merged.json")" = open ]
-  # an EPIC that belongs to no plan
+  # an EPIC that belongs to no plan (the same one-role, one-round cp3 as _erepo)
   _repo; E="$ROOT/ev/adhoc/R-1"; mkdir -p "$E"; : > "$E/timeline.jsonl"
+  yq -i '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
+     "$R/.aid-o/config/policies/review-checkpoints.yaml"
   jq -n '{steps: [{id: "s0", role: "backend", objective: "x", outputs: ["Modify: `src/app.py` — x"]}]}' > "$E/plan.json"
   printf 'base_commit: %s\n' "$(git -C "$R" rev-parse HEAD~1)" > "$E/fsm-state.yaml"
   _sc cp3 ""
@@ -800,7 +857,7 @@ _fanswer() {
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "cp7-${2//_/-}" --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "cp7-${2//_/-}" --output-file "$d/reviewer-$2.json" --evidence-dir "$d" >/dev/null
 }
-_BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims an import the app never makes", command: "grep -n import src/app.py", evidence: "src/app.py:1", fix: "import new"}] | del(.no_findings_reason)'
+_BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims an import the app never makes", command: "grep -n import src/app.py", evidence: "src/app.py:1", fix: "import new", rule: "every change the changelog claims is in the code"}] | del(.no_findings_reason)'
 
 @test "cp7: produce's inputs hold the plan's criteria and the EPIC findings; prepare prints three prompts with cp7 foci" {
   _frepo; _fsc

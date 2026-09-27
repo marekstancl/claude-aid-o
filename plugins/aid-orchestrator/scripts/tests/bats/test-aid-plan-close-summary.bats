@@ -157,7 +157,7 @@ _blockers_two() {
 
 @test "the tag status is echoed verbatim, including the not_tagged default" {
   _brief true auto '[]'
-  _decision null not_tagged
+  _decision '"4f2a9c1e7b3d"' not_tagged
   run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
   [ "$status" -eq 0 ]
   [[ "$output" == *"tag not_tagged"* ]]
@@ -214,7 +214,7 @@ _blockers_two() {
   _brief true auto '[]'
   jq '.pm_decision_brief.delivered_summary_ref = null' "$BRIEF" > "$BRIEF.tmp"
   mv "$BRIEF.tmp" "$BRIEF"
-  _decision null not_tagged
+  _decision '"4f2a9c1e7b3d"' not_tagged
 
   run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
   [ "$status" -eq 0 ]
@@ -341,7 +341,7 @@ _blockers_two() {
   # its redaction; `gates_report` is a verbatim passthrough of a decision field
   # and reached the PM's chat untouched while `risk` beside it was scanned.
   _brief true auto '[]'
-  _decision null not_tagged
+  _decision '"4f2a9c1e7b3d"' not_tagged
   jq '.release_decision.plan_summary.plan_final_gates.report = "ghp_ABCDEFGHIJKLMNOPQRSTUV"' \
     "$DECISION" > "$DECISION.tmp"
   mv "$DECISION.tmp" "$DECISION"
@@ -357,7 +357,7 @@ _blockers_two() {
   # The same gap, in the neighbouring passthrough values: tag status and the two
   # evidence-verification fields are printed on the same card line.
   _brief true auto '[]'
-  _decision null "ghp_ABCDEFGHIJKLMNOPQRSTUV"
+  _decision '"4f2a9c1e7b3d"' "ghp_ABCDEFGHIJKLMNOPQRSTUV"
 
   run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
   [ "$status" -eq 0 ]
@@ -452,7 +452,7 @@ _blockers_two() {
   # says so and the "Jak pokračovat" list is EMPTY. The renderer refuses the
   # combination outright, which is what makes this case able to fail.
   _brief true auto '[]'
-  _decision null not_tagged
+  _decision '"4f2a9c1e7b3d"' not_tagged
 
   run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
   [ "$status" -eq 0 ]
@@ -462,6 +462,25 @@ _blockers_two() {
 }
 
 # --- P099 Step 7: where the plan's time went --------------------------------
+
+@test "release-ready + auto but NOT merged yet still asks: the page never says done before the merge (P102)" {
+  _brief true auto '[]'
+  _decision null not_tagged
+
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != Hotovo:* ]]
+  refute_grep -qF 'Nic — ozvu se, až bude hotovo' "$OUT_DIR/plan-close-artifact.html"
+}
+
+@test "the plugin-issues count reads numbered and dated headings, and prints one number on none" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-plugin-issues.sh"
+  local f="$BATS_TEST_TMPDIR/pi.md"
+  printf '# P\n\n## 2026-09-25 — companion\nx\n\n### 3. old\n' > "$f"
+  [ "$(aid_plugin_issues_count "$f")" = "2" ]
+  printf '# P\nnothing\n' > "$f"
+  [ "$(aid_plugin_issues_count "$f")" = "0" ]
+}
 
 @test "the delivered page shows where the time went, or says it was not measured" {
   _brief true auto '[]'

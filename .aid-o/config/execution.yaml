@@ -444,7 +444,6 @@ gate_profiles:
       - lint_gate_names
       - targeted_tests
       - bats_fsm
-      - plan_diff
       - docs_updated
   # bats_fsm is OUT of full, release, release_quarantine and p064-closure again
   # (2.107.0): test-aid-fsm.bats is `# aid-tier: t1` now, so `bats_all` (the
@@ -469,7 +468,6 @@ gate_profiles:
       - tier_lint
       - lint_gate_names
       - bats_all
-      - plan_diff
       - docs_updated
       - check_release_paths
     when_paths:
@@ -506,7 +504,6 @@ gate_profiles:
       - tier_lint
       - lint_gate_names
       - bats_fsm
-      - plan_diff
       - docs_updated
   release_quarantine:
     reason: >-

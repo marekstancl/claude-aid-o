@@ -74,6 +74,16 @@ run that announced itself as AUTO was read back as manual at every checkpoint.
 If the command fails, stop: a run that cannot record its own mode is not an
 AUTO run.
 
+**And the last action of `--auto`** — the queue is empty, the plan is closed, or the run stops at a
+PM-authority decision it cannot pass:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" auto-mode set manual --by "aid-run --auto (finished)"
+```
+
+The state file is project-wide and outlives the run: left at `auto`, the next plain `/aid-run` would
+be read as autonomous at every decision point and stamped `auto_controller: active`.
+
 **Then bind this session to the plan and make sure the hook layer is in force**
 (P099: the Stop hook keeps only the bound session working, and its refusals
 count only while a canary verdict is fresh):
@@ -114,8 +124,8 @@ values are **storable**, and the fourth state is never stored at all.
 
 | State | Stored? | What it means | Who sets it |
 |-------|---------|---------------|-------------|
-| `active` | yes | An autonomous controller is alive and owns this run. | `init`, when `AID_AUTO_MODE=1`; re-asserted by `aid-run-gates.sh` after the run's last background job is collected, and by `aid-fsm.sh resume` — in both cases only for an AUTO run. |
-| `manual` | yes | No autonomous controller — a human drives this run. The conservative default whenever the entry is not stamped AUTO. | `init`, when `AID_AUTO_MODE=1` is not set |
+| `active` | yes | An autonomous controller is alive and owns this run. | `init`, when the run declared itself AUTO (`aid_auto_run_declared`: `AID_AUTO_MODE=1` or `auto-mode-state.yaml` says `auto`; `manual` there wins); re-asserted by `aid-run-gates.sh` after the run's last background job is collected, and by `aid-fsm.sh resume` — in both cases only for an AUTO run. |
+| `manual` | yes | No autonomous controller — a human drives this run. The conservative default whenever the entry is not stamped AUTO. | `init`, when the run did not declare itself AUTO |
 | `blocked_for_pm` | yes | The run stopped at a PM-authority decision and is waiting for a person. | `aid_ladder_escalate` (`lib/aid-recovery-ladder.sh`), through the single map writer, when a class's terminus reaches escalation. |
 | `awaiting_host_resume` | **never** | A background gate was handed off and the controller then died: the run's continuation artifact is still on disk and nothing has signalled liveness. | Nobody. It is **derived** at read time. |
 
@@ -524,7 +534,7 @@ When `close` reports `fail` on a step or EPIC round and a round remains
 ```
 Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,
       model: <the **Model:** of the step's role card in skills/role-cards.md>,
-      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. Touch nothing a finding does not name.")
+      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the reviewer's example plus two other variants of the same rule. Touch nothing outside the rules the findings name.")
 ```
 
 Then `aid-step-check.sh` again (the range now ends at the fix commit) and
@@ -814,7 +824,7 @@ is round 1 of the next attempt.
    ```
    Agent(subagent_type: <"aid-orchestrator:implementer-light" when that role's card says **Effort:** low, else "aid-orchestrator:implementer">,
          model: <the **Model:** of that role's card in skills/role-cards.md>,
-         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the fingerprints you addressed. Touch nothing a finding does not name.")
+         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the reviewer's example plus two other variants of the same rule. Touch nothing outside the rules the findings name.")
    ```
    The owning step is the one whose declared files cover the path (`plan.json` of the EPIC whose commit last touched it: `git log -1 -- <path>`).
 2. `--stage freeze` again. It mints the next attempt and writes `fix-class.json`:

@@ -5,6 +5,8 @@
 # Stdout = JSON report
 
 set -euo pipefail
+# shellcheck source=../lib/aid-ancillary.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/aid-ancillary.sh"
 
 ALLOWED_PATHS_FILE="${1:?allowed_paths_file required}"
 BASE_COMMIT="${2:?base_commit required}"
@@ -32,11 +34,9 @@ VIOLATIONS=()
 while IFS= read -r file; do
   allowed=false
   for pattern in "${ALLOWED[@]}"; do
-    [[ -z "$pattern" || "$pattern" == \#* ]] && continue  # skip empty/comments
-    # shellcheck disable=SC2254
-    case "$file" in
-      $pattern) allowed=true; break ;;
-    esac
+    # The shared matcher, strict (a bare entry is only itself), so `dir/`
+    # means what the step check and the dispatch contract read it as.
+    _aid_ancillary_glob_match "$file" "$pattern" strict && { allowed=true; break; }
   done
   $allowed || VIOLATIONS+=("$file")
 done <<< "$CHANGED_FILES"

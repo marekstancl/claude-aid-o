@@ -246,7 +246,7 @@ fresh context, so neither is grading its own homework.
 
 Inside a run the same mechanism reviews every step (CP2) and the whole EPIC
 (CP3): a deterministic step check first (small, clean, in-scope diffs skip the
-round; a security pattern adds the security reviewer), then a round of
+round; every reviewed step gets a security reviewer), then a round of
 independent reviewers whose answers need a command and a file:line, merged by
 fingerprint. A failed round is fixed by the step's own role and confirmed by
 the next round; the FSM advances only on a closed passing round at HEAD. Fast

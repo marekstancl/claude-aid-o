@@ -27,6 +27,28 @@
 [[ -n "${_AID_PERMISSIONS_SH_LOADED:-}" ]] && return 0
 _AID_PERMISSIONS_SH_LOADED=1
 
+# _aid_auto_declared <project_root> — what the run itself declared: `manual`
+# (auto-mode-state.yaml says so — a PM stop wins over everything), `auto`
+# (AID_AUTO_MODE=1, or the state file says auto), or `none`.
+_aid_auto_declared() {
+  local state="${1%/}/.aid-o/work/auto-mode-state.yaml" smode=""
+  if [[ -f "$state" ]]; then
+    smode="$(sed -nE 's/^mode:[[:space:]]*"?([a-z]+)"?[[:space:]]*$/\1/p' "$state" | head -1)"
+  fi
+  [[ "$smode" == manual ]] && { echo manual; return 0; }
+  [[ "${AID_AUTO_MODE:-}" == "1" || "$smode" == auto ]] && { echo auto; return 0; }
+  echo none
+}
+
+# aid_auto_run_declared <project_root> — `auto` only when the run declared it
+# (above); never falls back to permissions.yaml, whose autonomous_mode is a
+# project default, not proof that an autonomous controller is running. The
+# active-runs map stamps auto_controller from this (IMP-657: it read the env
+# alone, so an --auto run whose env did not reach the script was stamped manual).
+aid_auto_run_declared() {
+  [[ "$(_aid_auto_declared "$1")" == auto ]] && echo auto || echo manual
+}
+
 # aid_autonomous_mode <project_root> — `auto` or `manual`, never empty.
 #
 # One `yq` invocation, not two: the type and the value come back together, so
@@ -41,14 +63,8 @@ _AID_PERMISSIONS_SH_LOADED=1
 aid_autonomous_mode() {
   local root="${1%/}"
   local perm="${root}/.aid-o/config/permissions.yaml"
-  local state="${root}/.aid-o/work/auto-mode-state.yaml"
-  local smode=""
-  if [[ -f "$state" ]]; then
-    smode="$(sed -nE 's/^mode:[[:space:]]*"?([a-z]+)"?[[:space:]]*$/\1/p' "$state" | head -1)"
-  fi
-  [[ "$smode" == manual ]] && { echo manual; return 0; }
-  [[ "${AID_AUTO_MODE:-}" == "1" ]] && { echo auto; return 0; }
-  [[ "$smode" == auto ]] && { echo auto; return 0; }
+  local declared; declared="$(_aid_auto_declared "$root")"
+  [[ "$declared" != none ]] && { echo "$declared"; return 0; }
   [[ -f "$perm" ]] || { echo manual; return 0; }
   command -v yq >/dev/null 2>&1 || { echo manual; return 0; }
   local pair

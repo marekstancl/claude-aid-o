@@ -40,7 +40,11 @@ review_checkpoints:
   # Step review (CP2), EPIC review (CP3) and fast-mode review (CP6): reviewer
   # roles of skills/step-review-roles.md, read by scripts/lib/aid-review-config.sh
   # (P094). `when: review+security` marks a role that runs only when
-  # aid-step-check.sh reports a security pattern. skip_threshold is what the
+  # aid-step-check.sh reports a security pattern; the default no longer uses it
+  # for step_security (2.109.0): security is a question of what the code means,
+  # which no pattern list sees (P101/P102: 4 of 16 steps got the role, CP3 then
+  # found 7 security blockers/majors and fixed them over extra rounds).
+  # skip_threshold is what the
   # step check calls small: a diff at or under both limits, inside the step's
   # scope, with no pattern matched, is `skip` and needs no reviewer.
   step_review:
@@ -50,7 +54,7 @@ review_checkpoints:
     stand_in_model: opus       # a codex role unreachable: a claude agent answers the same brief
     reviewers:
       - {role: step_generalist, provider: claude, model: opus, effort: low}
-      - {role: step_security,   provider: claude, model: opus, effort: low, when: review+security}
+      - {role: step_security,   provider: claude, model: opus, effort: medium}
   epic_review:
     rounds_default: 2
     banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
@@ -73,5 +77,6 @@ review_checkpoints:
 
   # The fix loop, the trivial-skip thresholds and the pre-filter left with
   # P094: a step is skipped by aid-step-check.sh (size, scope, no pattern), the
-  # security rules of defaults/pre-filter-rules.yaml add the security reviewer,
+  # security rules of defaults/pre-filter-rules.yaml tell the security reviewer
+  # where to look first (it reviews every non-skipped step),
   # and a failed round is fixed by the step's role within rounds_default.

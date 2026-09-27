@@ -1541,6 +1541,27 @@ YAML
   unset AID_SELECT_TESTS_PLUGIN_ROOT
 }
 
+@test "run-all targeted_tests gate: exit 3 whose output names no path still writes the report (runner does not die under pipefail)" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+
+  local exec_yaml="$TEST_PROJECT_ROOT/exec.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  targeted_tests:
+    command: "echo selector gave up; exit 3"
+    required: false
+    timeout_seconds: 60
+YAML
+  local report="$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --state-file "$TEST_EVIDENCE_DIR/fsm-state.yaml" --report-file "$report"
+  [ -s "$report" ]
+  run jq -re '.gates.targeted_tests.escalation.reason // .gates.targeted_tests.escalation' "$report"
+  [[ "$output" == *"unknown"* ]]
+}
+
 # ─── P069 Step 12 — {plugin_path} placeholder resolution ───────────────────
 
 @test "{plugin_path} resolves from .aid-o/config/plugin.yaml, taking precedence over \$AID_PLUGIN_PATH" {

@@ -61,10 +61,12 @@ aid_plugin_issues_ensure() {
   return 0
 }
 
-# aid_plugin_issues_count <file> — numbered entries ("## 3." or "### 3.").
+# aid_plugin_issues_count <file> — entries: numbered ("## 3." / "### 3.") or
+# dated ("## 2026-09-25 — …"), the two heading shapes projects write.
+# grep -c prints 0 itself on no match (exit 1): `|| true`, never `|| echo 0`.
 aid_plugin_issues_count() {
   [[ -f "${1:-}" ]] || { echo 0; return 0; }
-  grep -cE '^#{2,3} [0-9]+\. ' "$1" 2>/dev/null || echo 0
+  grep -cE '^#{2,3} ([0-9]+\. |[0-9]{4}-[0-9]{2}-[0-9]{2})' "$1" 2>/dev/null || true
 }
 
 # _aid_pi_signals <root> <since_epoch> — how many times AID refused or was

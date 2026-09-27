@@ -142,7 +142,7 @@ _seed_completed_epic() {
     git -C '$(_wt)' checkout -q plan/${PLAN_ID}
     tip=\$(git -C '$ROOT' rev-parse task/${EPIC_ID}/main)
     mkdir -p '$ROOT'/\"\$ev\"
-    printf 'state: DONE\n' > '$ROOT'/\"\$ev\"/fsm-state.yaml
+    printf 'state: DONE\ndone_phase: release\n' > '$ROOT'/\"\$ev\"/fsm-state.yaml
     plan_manifest_update ${PLAN_ID} \".plan_boundary_manifest.epic_runs |= map(
         if .epic_id == \\\"${EPIC_ID}\\\"
         then . + {merge_status: \\\"pending\\\",

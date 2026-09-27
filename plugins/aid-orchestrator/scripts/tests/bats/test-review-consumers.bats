@@ -45,7 +45,7 @@ _cp3_round() {
   (cd "$ROOT" && bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint cp3 --evidence-dir "$EV") >/dev/null
   local args=(--checkpoint cp3 --evidence-dir "$EV" --project-root "$ROOT") d="$EV/cp3/round-1"
   "$ROUND_SH" prepare "${args[@]}" --round 1 >/dev/null
-  jq -n --arg ev "$1" '{role: "epic_generalist", checkpoint: "cp3", findings: [{id: "e-1", checkpoint: "cp3", step: 0, severity: "major", claim: "the file is unfinished", command: "grep -n x src/app.py", evidence: $ev, fix: "finish"}]}' > "$d/reviewer-epic_generalist.json"
+  jq -n --arg ev "$1" '{role: "epic_generalist", checkpoint: "cp3", findings: [{id: "e-1", checkpoint: "cp3", step: 0, severity: "major", claim: "the file is unfinished", command: "grep -n x src/app.py", evidence: $ev, fix: "finish", rule: "no file ships unfinished"}]}' > "$d/reviewer-epic_generalist.json"
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus cp3-epic-generalist --output-file "$d/reviewer-epic_generalist.json" --evidence-dir "$d" >/dev/null
   "$ROUND_SH" collect "${args[@]}" --round 1 >/dev/null
