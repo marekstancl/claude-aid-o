@@ -40,7 +40,7 @@ question and opens a new one in memory: id `<base>.r<n+1>`, same kind and target
 opened_at now; the agent lists that id in the payload with the new cards.
 Missing or wrong token: 403 {"error": "token"}.
 """
-import argparse, html, json, mimetypes, os, re, sys, threading
+import argparse, html, json, os, re, sys, threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
@@ -49,6 +49,9 @@ KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "content_plan", "defer_content", "facts", "references", "direction",
          "approve_page", "exception", "coverage_drift", "design_standard"}
 DECISIONS = {"approve", "choose", "return", "reroll_safer", "reroll_bolder"}
+# Previews are raster images only: an .html/.svg preview would run script on this origin.
+IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif"}
 HERE = os.path.dirname(os.path.abspath(__file__))
 NOTICE = os.path.join(HERE, "..", "..", "skills", "ui-design", "references",
                       "LICENSES", "NOTICE-impeccable.txt")
@@ -139,7 +142,7 @@ class Studio(BaseHTTPRequestHandler):
         return (h in OWN and (o is None or o == "http://" + h)
                 and (r is None or r == "http://" + h or r.startswith("http://" + h + "/")))
 
-    def send(self, code, body, ctype="application/json; charset=utf-8"):
+    def send(self, code, body, ctype="application/json; charset=utf-8", csp="frame-ancestors 'none'"):
         if not isinstance(body, bytes):
             body = (json.dumps(body, ensure_ascii=False) if ctype.startswith("application/json")
                     else body).encode()
@@ -147,6 +150,9 @@ class Studio(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", csp)
         self.end_headers()
         self.wfile.write(body)
 
@@ -200,8 +206,12 @@ class Studio(BaseHTTPRequestHandler):
             if not c or not f.startswith(STUDIO + os.sep) or not os.path.isfile(f):
                 self.send(404, {"error": "preview pending"})
                 return
+            ctype = IMAGES.get(os.path.splitext(f)[1].lower())
+            if not ctype:
+                self.send(415, {"error": "a preview must be a png, jpeg, webp, gif or avif image"})
+                return
             with open(f, "rb") as fh:
-                self.send(200, fh.read(), mimetypes.guess_type(f)[0] or "application/octet-stream")
+                self.send(200, fh.read(), ctype, "sandbox; default-src 'none'; frame-ancestors 'none'")
         elif u.path in ("/report", "/licence"):
             if not self.gate(False):
                 return

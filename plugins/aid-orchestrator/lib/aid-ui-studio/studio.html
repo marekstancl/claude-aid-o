@@ -145,7 +145,7 @@ function card(q, c, answer) {
       fact("Teze", c.thesis),
       Array.isArray(c.palette) && c.palette.length
         ? el("div", {}, el("span", { class: "label" }, "Paleta"),
-            el("div", { class: "swatches" }, c.palette.map(col => { const s = el("span", { title: String(col) }); s.style.background = String(col); return s; })))
+            el("div", { class: "swatches" }, c.palette.map(col => { const s = el("span", { title: String(col) }); if (!/url\(/i.test(String(col)) && CSS.supports("color", String(col))) s.style.background = String(col); return s; })))
         : null,
       fact("Riziko", c.risk),
       fact("V čem je jedinečná", c.uniqueness),

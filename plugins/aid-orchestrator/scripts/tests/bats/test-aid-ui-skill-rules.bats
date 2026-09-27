@@ -13,7 +13,7 @@ postup_first() { awk '/^## Postup/{f=1; next} f && NF {print; exit}' "$1"; }
 
 @test "SKILL.md carries MUST Rules 1-3" {
   must="$(sed -n '/^## MUST Rules/,/^## Completeness Gate/p' "$SK/SKILL.md")"
-  for s in 'IMPECCABLE_QUESTION_FORCE=1' 'exit 4' 'aid-ui-serve.sh forward' 'non-interactive' 'aid-ui-state.sh pending-direction'; do
+  for s in 'IMPECCABLE_QUESTION_FORCE=1' 'exit 4' 'aid-ui-serve.sh studio' 'non-interactive' 'aid-ui-state.sh pending-direction'; do
     grep -qF -- "$s" <<<"$must" || { echo "missing: $s"; return 1; }
   done
 }

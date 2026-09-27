@@ -34,7 +34,8 @@ payload() {   # <opened_at of q1> [target of q1]
    {"id": "q1", "kind": "direction", "target": "${2:-home@abc}", "opened_at": "$1", "title": "Vyberte směr"},
    {"id": "q2", "kind": "approve_page", "target": "home@abc", "opened_at": "2020-01-01T00:00:00Z"}],
  "cards": [{"id": "a", "question": "q1", "title": "A", "preview": "a.png"},
-           {"id": "b", "question": "q1", "title": "B", "preview": "../../secret"}]}
+           {"id": "b", "question": "q1", "title": "B", "preview": "../../secret"},
+           {"id": "c", "question": "q1", "title": "C", "preview": "c.html"}]}
 JSON
 }
 
@@ -136,6 +137,24 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(code "$URL/preview?question=q1&card=a")" = 200 ]
   echo secret > "$P/secret"
   [ "$(code "$URL/preview?question=q1&card=b")" = 404 ]
+}
+
+@test "a preview that is not a raster image is refused (415); an image is sandboxed and nosniff" {
+  echo '<script>alert(1)</script>' > "$P/.aid-ui/studio/c.html"
+  [ "$(code "$URL/preview?question=q1&card=c")" = 415 ]
+  echo png > "$P/.aid-ui/studio/a.png"
+  curl -s -D "$BATS_TEST_TMPDIR/h" -o /dev/null "$URL/preview?question=q1&card=a"
+  grep -qi '^content-type: image/png' "$BATS_TEST_TMPDIR/h"
+  grep -qi '^x-content-type-options: nosniff' "$BATS_TEST_TMPDIR/h"
+  grep -qi "^content-security-policy: sandbox; default-src 'none'" "$BATS_TEST_TMPDIR/h"
+}
+
+@test "every response forbids framing" {
+  for path in / /state /nonexistent; do
+    curl -s -D "$BATS_TEST_TMPDIR/h" -o /dev/null "$URL$path"
+    grep -qi '^x-frame-options: DENY' "$BATS_TEST_TMPDIR/h"
+    grep -qi "^content-security-policy: .*frame-ancestors 'none'" "$BATS_TEST_TMPDIR/h"
+  done
 }
 
 @test "an invalid payload: 422 naming the problem, the server logs it" {

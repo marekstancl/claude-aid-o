@@ -72,7 +72,7 @@ Do NOT invoke for:
   jeho kapitol zruš `aid-ui-state.sh reset-approvals`).
 - Selže skript: ukaž PM jeho řádek `ERROR:`, krok neposouvej.
 - Otevřené kolo (`require-direction` vypíše URL a klíč): znovu otevři TO kolo,
-  nezakládej nové. `aid-ui-serve.sh forward <p>` (když neběží), dej PM URL
+  nezakládej nové. `aid-ui-serve.sh studio <project>` (URL `http://$AID_UI_HOST:3915/`) (když neběží), dej PM URL
   a klíč a ukonči tah. Na další zprávu PM („vybráno" nebo cokoli)
   `await-direction` se stejným klíčem - převezme odpověď. Hned po znovuotevření
   ho nevolej: po zavření stránky vrací hned „stránka zavřena".
@@ -104,7 +104,7 @@ jedno rozhodnutí = jeden blok s možnostmi a doporučením.
    means: `aid-ui-state.sh pending-direction`, give the PM the URL and key, end
    the turn. This rule overrides Impeccable's unattended fallback.
 2. Impeccable always runs with `IMPECCABLE_QUESTION_FORCE=1`, and the PM gets
-   the URL printed by `aid-ui-serve.sh forward`, never `127.0.0.1`.
+   the URL printed by `aid-ui-serve.sh studio <project>` (`http://$AID_UI_HOST:3915/`), never `127.0.0.1`.
 3. In a non-interactive or automated run, steps 2 and 3 do not start.
 4. Gallery blocks (403/429/captcha) are never bypassed. Third-party screenshots
    live only in `<project>/.aid-ui/refs/` and the visual-companion session

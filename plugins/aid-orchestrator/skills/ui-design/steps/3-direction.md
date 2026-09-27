@@ -33,7 +33,7 @@ zamítnuté návrhy s důvodem PM, `$IMP` (`SKILL.md` Start).
    compy; zamčení karty je schválení compu. `await-direction` zapíše z odpovědi
    `direction.build_path` a `build_path_flipped`.
 3. Impeccable vypíše `QUESTION URL: http://127.0.0.1:<p>/` a klíč →
-   `aid-ui-serve.sh forward <p>` a PM dej JEHO URL a klíč.
+   `aid-ui-serve.sh studio <project>` (URL `http://$AID_UI_HOST:3915/`) a PM dej JEHO URL a klíč.
 4. `aid-ui-state.sh await-direction <project> --imp "$IMP" --key <k> --page-url <url>`
    (hned po kroku 3, stránka je otevřená):
    - exit 0 → směr zaznamenán;
@@ -48,14 +48,14 @@ zamítnuté návrhy s důvodem PM, `$IMP` (`SKILL.md` Start).
      klíčem;
    - exit 1 s otevřeným kolem → MUST 1: dej PM URL a klíč, ukonči tah.
      Nikdy nepokračuj s přiděleným směrem.
-   - Znovuotevření otevřeného kola: `aid-ui-serve.sh forward <p>` (když neběží),
+   - Znovuotevření otevřeného kola: `aid-ui-serve.sh studio <project>` (URL `http://$AID_UI_HOST:3915/`) (když neběží),
      PM dej URL a klíč, ukonči tah. `await-direction` se stejným klíčem až na
      další zprávu PM („vybráno" nebo cokoli) - převezme jeho odpověď. Hned po
      znovuotevření ho nevolej: po zavření stránky končí okamžitě „stránka
      zavřena", dokud ji PM znovu neotevře.
 5. Kapitola `smer`: vybraná karta (barevné čipy, teze) + odkaz na brief →
    `aid-ui-state.sh chapter <project> smer navrh`.
-6. `aid-ui-serve.sh stop forward` (brand server běží dál).
+6. `aid-ui-serve.sh stop studio` (brand server běží dál).
 7. Zastav server visual-companion z kroku 2 (poslouchá na `0.0.0.0`): pro každý
    `<project>/.aid-o/work/companion/*/` se souborem `.server.pid`
    `{plugin_path}/lib/brainstorm-server/stop-server.sh <ten adresář>`. Pak smaž
