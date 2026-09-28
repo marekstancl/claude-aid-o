@@ -56,8 +56,13 @@ Do NOT invoke for:
 Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 
 1. Zapiš nebo obnov `<project>/.aid-ui/studio/payload.json`:
-   `steps[]` (`id`, `title`, `status` done|current|todo), `questions[]`
-   (`id`, `kind`, `target`, `opened_at` = teď v ISO, `title`, `prompt`, `body`),
+   `now` (`title`, `text` = co právě děláš, např. „Připravuji tři návrhy vzhledu…";
+   obnov ho při každé změně, stránka ho ukazuje vždy a sama bez otázek jen jeho),
+   `steps[]` (`id`, `title`, `status` done|current|todo, `description` = jedna věta,
+   co se v kroku děje), `questions[]`
+   (`id`, `kind`, `target`, `opened_at` = teď v ISO, `title`, `prompt`, `body`,
+   `next` = co uděláš po schválení; volitelně `eyebrow` = nadpis nad otázkou místo
+   výchozího podle druhu, u `set options` (druh variant) „Co připravit"),
    `cards[]` (`id`, `question`, `title`, `preview` = PNG/JPEG/WebP pod
    `.aid-ui/studio/`, `thesis`, `palette[]`, `risk`, `uniqueness`; volitelně
    `eyebrow` = řádek nad názvem karty, `tags[]` = štítky vedle palety, `url`
@@ -65,6 +70,20 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    Druhy otázek: variant, vision, identity, seo_brief, structure, task_map,
    content_plan, defer_content, facts, references, direction, approve_page,
    exception, coverage_drift, design_standard.
+
+   **Jak napsat otázku.** `title` = krátká lidská otázka (do ~12 slov). `body[]` =
+   2–4 krátké věty: co navrhuješ, proč (odkud to víš, např. „z vašeho zadání")
+   a co to znamená pro web. `next` = co uděláš po schválení. Vykej. Zakázané:
+   názvy souborů, technické zkratky bez vysvětlení (404, SEO, JSON…),
+   angličtina, „Souhlasí?".
+   - Špatně: „Needless: prezentační web (jedna stránka + 404), značka existuje
+     (znak N, písma Archivo a Caveat), místní firma z Mohelnice. Souhlasí?"
+   - Dobře: `title` „Jaký web pro Needless postavíme?", `body` „Navrhuji jednu
+     delší stránku, na které návštěvník během pár vteřin pozná, co děláte a pro
+     koho, a může vám rovnou napsat." „Vycházím z vašeho zadání, kde je jedna
+     stránka a vlastní stránka pro neexistující adresu.", `next` „Připravím
+     zadání pro vyhledávače a obsah stránky." (`next` se ukáže až po schválení,
+     proto začíná tím, co udělám, ne „Po schválení…")
 2. `target` je to, co PM schvaluje: u `set variant|options|structure|content-plan|refs`
    `sha256:` + `jq -S -c -j . <<<"$json" | sha256sum` přesně toho JSON, který
    pak zapíšeš (JSON vždy v souboru pod `.aid-ui/` psaném nástrojem Write,
@@ -88,7 +107,8 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    Náhled zkopíruj, jen když `sha256sum` souboru = `preview_sha256` karty;
    jinak se od odpovědi změnil a otázku otevři znovu.
    `return` → PM vrací s komentářem; oprav a otevři
-   otázku znovu (nové `opened_at`). `reroll_safer`/`reroll_bolder` → odpověď
+   otázku znovu (nové `opened_at`). `reroll`/`reroll_safer`/`reroll_bolder`
+   (Znovu = ve stejném duchu / Bezpečněji / Odvážněji) → odpověď
    nese `next_question`; vytvoř nové karty podle komentáře a zapiš je pod tím
    id do payloadu.
 

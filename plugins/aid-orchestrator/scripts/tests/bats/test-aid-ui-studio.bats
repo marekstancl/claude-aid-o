@@ -232,3 +232,39 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   grep -q 'unknown kind' "$BATS_TEST_TMPDIR/body"
   grep -q 'invalid payload' "$BATS_TEST_TMPDIR/server.log"
 }
+
+@test "reroll (Znovu) closes its question and opens <id>.r1 like reroll_safer/bolder" {
+  [ "$(answer '{"question":"q1","kind":"direction","target":"home@abc","decision":"reroll"}')" = 200 ]
+  [ "$(jq -r .next_question "$BATS_TEST_TMPDIR/body")" = q1.r1 ]
+  [ "$(answer "$choose_a")" = 409 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  [ "$(jq -r '.questions[] | select(.id=="q1.r1") | "\(.kind) \(.target) \(.answered)"' "$BATS_TEST_TMPDIR/body")" = "direction home@abc false" ]
+  [ "$(answer '{"question":"q1","kind":"direction","target":"home@abc","decision":"rerollx"}')" = 422 ]
+}
+
+@test "/state passes through now, steps[].description and questions[].next/body" {
+  jq '.now = {title: "Teď", text: "Připravuji tři návrhy vzhledu…"} | .steps[0].description = "Vybíráte vzhled."
+      | .questions[0] += {next: "Připravím stránky.", body: ["Věta jedna."]}' "$P/.aid-ui/studio/payload.json" > "$P/p.t" \
+    && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  [ "$(jq -r '.now.text' "$BATS_TEST_TMPDIR/body")" = "Připravuji tři návrhy vzhledu…" ]
+  [ "$(jq -r '.steps[0].description' "$BATS_TEST_TMPDIR/body")" = "Vybíráte vzhled." ]
+  [ "$(jq -r '.questions[0] | "\(.next) \(.body[0])"' "$BATS_TEST_TMPDIR/body")" = "Připravím stránky. Věta jedna." ]
+  rm "$P/.aid-ui/studio/payload.json"   # no payload: now is null, not an error
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  [ "$(jq -c .now "$BATS_TEST_TMPDIR/body")" = null ]
+}
+
+@test "/state shows what was decided for answered questions: decision, chosen card title, comment" {
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  [ "$(jq -c '.questions[0].answer' "$BATS_TEST_TMPDIR/body")" = null ]      # open: no answer field
+  [ "$(answer '{"question":"q1","kind":"direction","target":"home@abc","decision":"choose","choice":"b"}')" = 200 ]
+  [ "$(answer '{"question":"q2","kind":"approve_page","target":"home@abc","decision":"return","comment":"menší logo"}')" = 200 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  [ "$(jq -S -c '.questions[] | select(.id=="q1") | .answer' "$BATS_TEST_TMPDIR/body")" = '{"choice":"b","choice_title":"B","comment":"","decision":"choose"}' ]
+  [ "$(jq -S -c '.questions[] | select(.id=="q2") | .answer' "$BATS_TEST_TMPDIR/body")" = '{"choice":null,"choice_title":null,"comment":"menší logo","decision":"return"}' ]
+  # the title is the one the PM saw, not a later payload edit
+  jq '.cards[1].title = "X"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  [ "$(jq -r '.questions[] | select(.id=="q1") | .answer.choice_title' "$BATS_TEST_TMPDIR/body")" = B ]
+}

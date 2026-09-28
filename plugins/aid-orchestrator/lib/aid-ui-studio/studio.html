@@ -56,12 +56,18 @@
   .rail li.done::before { background: var(--ks-patina); }
   .rail li.current { color: var(--ks-ink); background: var(--ks-paper-raised); box-shadow: var(--ks-cap-lift); }
   .rail li.current::before { background: var(--ks-kinpaku); }
+  .step-desc { margin-top: .6rem; font-size: .875rem; color: var(--ks-text-muted); text-align: right; }
+  .step-desc:empty { display: none; }
+  #now { margin-top: 1rem; display: flex; align-items: baseline; gap: .6rem; padding: .7rem 1rem; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); color: var(--ks-text); }
+  #now[hidden] { display: none; }
+  #now b { color: var(--ks-ink); }
+  .pulse { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--ks-kinpaku); box-shadow: 0 0 0 0 oklch(84% 0.19 80.46 / .6); animation: pulse 1.8s ease-out infinite; transform: translateY(-1px); }
+  @keyframes pulse { to { box-shadow: 0 0 0 10px oklch(84% 0.19 80.46 / 0); } }
   #notice { margin-top: 1rem; padding: .7rem 1rem; border: 1px solid var(--ks-danger); border-radius: 8px; color: var(--ks-danger); background: var(--ks-paper-raised); }
   #notice[hidden] { display: none; }
 
   main { flex: 1; display: flex; flex-direction: column; gap: 4rem; padding: 2.2rem 0 2rem; }
   .question { display: flex; flex-direction: column; gap: 1.5rem; }
-  .question.answered { opacity: .6; }
   .headline { display: flex; align-items: center; gap: .75rem; }
   .headline svg { flex: none; width: 26px; height: 26px; color: var(--ks-ink); }
   .q-title { font-weight: 600; font-size: 2rem; letter-spacing: -0.025em; line-height: 1.2; color: var(--ks-ink); text-wrap: balance; }
@@ -70,8 +76,23 @@
   .tier { font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .24em; text-transform: uppercase; color: var(--ks-text-muted); }
   pre.body-json { font: 12.5px/1.5 var(--ks-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ks-paper-deep); border: 1px solid var(--ks-rule); border-radius: 6px; padding: .8rem 1rem; max-height: 22rem; overflow: auto; }
   .detail { color: var(--ks-text); font-size: .95rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .done-note { font-family: var(--ks-mono); font-size: .75rem; letter-spacing: .18em; text-transform: uppercase; color: var(--ks-patina); }
   .empty { padding: 7rem 1rem; font-size: 1.4rem; color: var(--ks-ink); text-align: center; }
+  /* Nothing waits for the PM: a calm panel saying what the agent does meanwhile. */
+  .calm { max-width: 52rem; padding: 2.4rem 2rem; display: flex; flex-direction: column; gap: .8rem; }
+  .calm .q-title { display: flex; align-items: center; gap: .8rem; }
+  .calm .detail { font-size: 1.05rem; }
+  .calm .hint { color: var(--ks-text-muted); }
+  /* An answer just given: what the PM decided and what comes next. */
+  .confirm { max-width: 52rem; border-left: 4px solid var(--ks-patina); }
+  .confirm .body { padding: 1.2rem 1.5rem 1.3rem; gap: .5rem; }
+  .confirm .q-title { font-size: 1.35rem; }
+  .verdict { display: flex; align-items: baseline; gap: .5rem; font-weight: 600; color: var(--ks-patina); font-size: 1.05rem; overflow-wrap: anywhere; }
+  .next-up { color: var(--ks-text); }
+  .next-up b { color: var(--ks-ink); }
+  details.decided { max-width: 52rem; border-top: 1px solid var(--ks-rule); padding-top: 1rem; }
+  details.decided summary { cursor: pointer; font-weight: 600; color: var(--ks-ink); }
+  details.decided ul { margin: .8rem 0 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: .5rem; }
+  details.decided li span { color: var(--ks-text-muted); }
 
   /* The deck bleeds to the viewport edges while the first card aligns with the column. */
   .deck-shell { position: relative; width: 100vw; margin-left: calc(50% - 50vw); }
@@ -158,6 +179,7 @@
   input[type=text]:focus, textarea:focus { outline: 2px solid var(--ks-patina); outline-offset: 2px; }
   textarea { min-height: 5rem; resize: vertical; }
   .status { flex-basis: 100%; font-size: .875rem; color: var(--ks-danger); }
+  .bar .hint { flex-basis: 100%; order: 9; font-size: .8125rem; color: var(--ks-text-muted); }
   .status:empty { display: none; }
 
   /* Text question, page approval, exception: one panel in the same card chrome. */
@@ -193,6 +215,7 @@
     .bar .steer { flex: 1 1 12rem; order: 1; padding: .55rem .75rem; }
     .bar .ret { order: 2; flex: none; }
     .bar .status { order: 3; }
+    .step-desc { text-align: left; }
     .long { display: none; }
     .panel.wide { display: flex; }
     .panel.wide .media { border-right: 0; border-bottom: 1px solid var(--ks-rule); }
@@ -201,29 +224,32 @@
   @media (prefers-reduced-motion: reduce) {
     .card, .card:hover, .card:focus-within { transform: none; transition: none; }
     .card-inner, #lightbox, .nav, .fade { transition: none; }
-    .shimmer, .card.skeleton .line { animation: none; }
+    .shimmer, .card.skeleton .line, .pulse { animation: none; }
   }
 </style>
 <header>
   <div class="topbar">
-    <span class="brand">AID studio</span>
+    <span class="brand">Studio</span>
     <ol class="rail" id="rail" aria-label="Kroky"></ol>
   </div>
+  <p class="step-desc" id="step-desc"></p>
+  <p id="now" role="status" hidden></p>
   <p id="notice" role="alert" hidden></p>
 </header>
 <main id="main" aria-live="polite"><p class="empty">Načítám…</p></main>
 <footer class="links">
   <a href="/report">Soulad se standardy</a>
-  <a href="/licence">Vzor rozhodovací stránky: Impeccable (Apache 2.0)</a>
+  <a href="/licence">Vzor stránky převzat z Impeccable (licence Apache 2.0)</a>
 </footer>
 <div id="lightbox" role="dialog" aria-label="Zvětšený náhled, zavřete klávesou Esc" tabindex="-1" hidden></div>
 <script>
 "use strict";
-const KIND = { variant: "Varianta", vision: "Vize", identity: "Identita", seo_brief: "SEO zadání",
-  structure: "Struktura", task_map: "Mapa úloh", content_plan: "Plán obsahu", defer_content: "Odložený obsah",
-  facts: "Fakta", references: "Reference", direction: "Směr", approve_page: "Schválení stránky",
-  exception: "Výjimka", coverage_drift: "Změna pokrytí", design_standard: "Standard návrhu" };
-const SELECTOR = { check: "kontrola", page: "stránka", viewport: "viewport", browser: "prohlížeč", role: "role", state: "stav" };
+const KIND = { variant: "Jaký web stavíme", options: "Co připravit", vision: "Vize a slogany", identity: "Logo",
+  seo_brief: "Hledání na Googlu", structure: "Stránky a jejich části", task_map: "Co v aplikaci lidé dělají",
+  content_plan: "Obsah stránek", defer_content: "Chybějící podklady", facts: "Údaje o firmě", references: "Vzory",
+  direction: "Vzhled webu", approve_page: "Kontrola hotové stránky", exception: "Výjimka z kontroly",
+  coverage_drift: "Změna ve standardech", design_standard: "Pravidla vzhledu" };
+const SELECTOR = { check: "kontrola", page: "stránka", viewport: "velikost obrazovky", browser: "prohlížeč", role: "role", state: "stav" };
 // Card fields rendered by name; any other string field shows on the card's back as "key: value".
 const KNOWN = new Set(["id", "question", "title", "preview", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags"]);
 // Fixed icon markup (constants only, never data).
@@ -235,6 +261,7 @@ const SVG = {
   next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5 16 12l-6.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' };
 const FAN = ["0deg", "1.4deg", "-1.2deg"];
 let last = "", stopped = false, navs = [];
+const wasOpen = new Set();   // questions seen open on this page: once answered they show a confirmation in place
 const scrolled = {};   // deck scroll position per question, kept across re-renders
 
 function el(tag, attrs, ...kids) {
@@ -338,13 +365,13 @@ function card(q, c, i, answer) {
     front.inert = on; back.inert = !on;
     (on ? back : front).querySelector(".chip:last-of-type, .back-head .chip").focus();
   };
-  const choose = () => q.answered ? null : el("button", { class: "choose", type: "button", "aria-label": "Vybrat „" + title + "“",
+  const choose = () => el("button", { class: "choose", type: "button", "aria-label": "Vybrat „" + title + "“",
     on: { click: () => answer("choose", c.id) } }, "Vybrat tento");
   const front = el("div", { class: "face front" + lead },
-    i === 0 ? el("span", { class: "kicker" }, q.kind === "direction" ? "Vylosováno" : "Doporučeno") : null,
+    i === 0 ? el("span", { class: "kicker" }, "Doporučuji") : null,
     media(q, c, true, flip),
     el("div", { class: "body" },
-      el("p", { class: "tier" }, str(c.eyebrow) || KIND[q.kind] || q.kind),
+      str(c.eyebrow) ? el("p", { class: "tier" }, str(c.eyebrow)) : null,
       el("h3", {}, title),
       str(c.thesis) ? el("p", { class: "thesis" }, c.thesis) : null,
       identity(c), uniqueness(c), fact("Riziko", c.risk, "clamp"), urlFact(c), choose()));
@@ -412,14 +439,14 @@ function selectorChips(target) {
 function question(q, cards) {
   const fid = "note-" + q.id;
   const status = el("p", { class: "status", role: "status" });
-  const sec = el("section", { class: "question" + (q.answered ? " answered" : ""), "aria-labelledby": "h-" + q.id });
-  const kind = KIND[q.kind] || q.kind;
+  const sec = el("section", { class: "question", "aria-labelledby": "h-" + q.id });
+  const kind = str(q.eyebrow) || KIND[q.kind] || q.kind;
   const answer = async (decision, choice, prefix) => {
     const f = document.getElementById(fid);
     let comment = f ? f.value.trim() : "";
     if (prefix) comment = prefix + (comment ? ": " + comment : "");
     if ((decision === "return" || (q.kind === "exception" && decision === "approve")) && !comment) {
-      status.textContent = q.kind === "exception" && decision === "approve" ? "Napište důvod výjimky." : "Napište komentář, co upravit.";
+      status.textContent = q.kind === "exception" ? "Napište důvod." : "Napište, co změnit.";
       if (f) f.focus();
       return;
     }
@@ -427,8 +454,8 @@ function question(q, cards) {
     try {
       const r = await call("POST", "/answer", { question: q.id, kind: q.kind, target: q.target, decision, choice, comment });
       if (r.status === 200) { last = ""; tick(); return; }
-      status.textContent = r.status === 409 ? "Stránka se změnila, obnovte ji (otázka se mezitím změnila nebo už má odpověď)."
-        : (r.data.error || "Chyba " + r.status);
+      status.textContent = r.status === 409 ? "Otázka se mezitím změnila nebo už má odpověď. Obnovte stránku."
+        : "Odpověď se nepodařilo uložit. Zkuste to prosím znovu.";
     } catch (e) { if (e.message !== "token") status.textContent = "Server neodpovídá."; }
     sec.querySelectorAll("button:not(.chip):not(.nav)").forEach(b => b.disabled = false);
   };
@@ -445,15 +472,14 @@ function question(q, cards) {
       return sec;
     }
     sec.append(deck(q, cards.map((c, i) => card(q, c, i, answer))));
-    if (q.answered) { sec.append(el("p", { class: "done-note" }, "Odpověď zaznamenána.")); return sec; }
     sec.append(el("div", { class: "bar" },
       el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_safer") } }, "← Bezpečněji"),
-      el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("return", null, "Znovu ve stejném rejstříku") } }, icon("die"), el("span", {}, "Znovu")),
+      el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll") } }, icon("die"), el("span", {}, "Znovu")),
       el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_bolder") } }, "Odvážněji →"),
-      el("input", { type: "text", id: fid, class: "steer", placeholder: "Směr pro nové kolo",
-        "aria-label": "Směr pro nové kolo, nebo komentář k vrácení" }),
-      el("button", { type: "button", class: "reroll-btn ret", "aria-label": "Vrátit s komentářem", on: { click: () => answer("return") } },
-        el("span", {}, "Vrátit", el("span", { class: "long" }, " s komentářem"))),
+      el("input", { type: "text", id: fid, class: "steer", placeholder: "Napište, co změnit",
+        "aria-label": "Napište, co změnit" }),
+      el("button", { type: "button", class: "reroll-btn ret", on: { click: () => answer("return") } }, "Chci to jinak"),
+      el("p", { class: "hint" }, "Bezpečněji = blíž tomu, co je v oboru běžné. Odvážněji = výraznější a méně obvyklé. Znovu = tři nové návrhy ve stejném duchu."),
       status));
     return sec;
   }
@@ -464,9 +490,7 @@ function question(q, cards) {
   let meta = null;
   if (page) {
     const t = String(q.target), at = t.lastIndexOf("@");
-    meta = el("div", { class: "identity" },
-      el("span", { class: "tag" }, "stránka ", el("b", {}, at > 0 ? t.slice(0, at) : t)),
-      at > 0 ? el("span", { class: "tag", title: t.slice(at + 1) }, "otisk ", el("b", {}, t.slice(at + 1).slice(0, 12))) : null);
+    meta = el("div", { class: "identity" }, el("span", { class: "tag" }, "stránka ", el("b", {}, at > 0 ? t.slice(0, at) : t)));
   }
   const body = el("div", { class: "body" },
     el("p", { class: "tier" }, kind),
@@ -475,15 +499,44 @@ function question(q, cards) {
     meta, exc ? selectorChips(q.target) : null,
     bodyLines(q.body));
   sec.append(el("div", { class: "panel face" + (page ? " wide" : "") }, shot, body));
-  if (q.answered) { body.append(el("p", { class: "done-note" }, "Odpověď zaznamenána.")); return sec; }
   body.append(
-    el("div", { class: "field" }, el("label", { class: "fact-label", for: fid }, exc ? "Důvod výjimky" : "Komentář"),
-      el("textarea", { id: fid, placeholder: exc ? "Proč tenhle řádek přijímáte…" : "Co upravit, co vadí…" })),
+    el("div", { class: "field" }, el("label", { class: "fact-label", for: fid }, exc ? "Důvod" : "Napište, co změnit"),
+      el("textarea", { id: fid, placeholder: exc ? "Proč výjimku udělit, nebo proč ne…" : "Co chcete jinak…" })),
     el("div", { class: "actions" },
-      el("button", { type: "button", class: "choose", on: { click: () => answer("approve") } }, exc ? "Udělit výjimku" : "Schválit"),
-      el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("return") } }, exc ? "Vrátit" : "Vrátit s komentářem")),
+      el("button", { type: "button", class: "choose", on: { click: () => answer("approve") } },
+        exc ? "Udělit výjimku" : page ? "Stránka je v pořádku" : "Ano, takhle"),
+      el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("return") } },
+        exc ? "Neudělit" : page ? "Chci změny" : "Chci to jinak")),
     status);
   return sec;
+}
+
+// What the PM decided, in words (from /state's `answer`).
+function verdict(q) {
+  const a = q.answer || {}, c = str(a.comment), exc = q.kind === "exception";
+  const w = { approve: exc ? "Výjimka udělena" : q.kind === "approve_page" ? "Stránka je v pořádku" : "Schváleno",
+    return: exc ? "Výjimka neudělena" : "Chcete to jinak", choose: "Vybráno: " + (a.choice_title || a.choice || ""),
+    reroll: "Chcete tři nové návrhy ve stejném duchu", reroll_safer: "Chcete bezpečnější návrhy",
+    reroll_bolder: "Chcete odvážnější návrhy" }[a.decision] || "Odpověď uložena";
+  return a.decision === "choose" || !c ? w : w + ": " + c;
+}
+function confirmation(q) {
+  return el("section", { class: "question", "aria-labelledby": "h-" + q.id },
+    el("div", { class: "panel face confirm" }, el("div", { class: "body" },
+      el("p", { class: "tier" }, str(q.eyebrow) || KIND[q.kind] || q.kind),
+      el("h2", { class: "q-title", id: "h-" + q.id }, q.title || KIND[q.kind] || q.id),
+      el("p", { class: "verdict" }, "✓ " + verdict(q)),
+      (q.answer || {}).decision === "return" ? el("p", { class: "next-up" }, el("b", {}, "Co bude dál: "), "Upravím to podle vás a zeptám se znovu.")
+        : str(q.next) ? el("p", { class: "next-up" }, el("b", {}, "Co bude dál: "), q.next) : null)));
+}
+// `answered`: every question of this round is answered, but the agent ended its turn and
+// reads the answers only on the PM's next chat message (SKILL "Jak se ptá PM" 3-4), so say so.
+function calm(now, answered) {
+  return el("section", { class: "panel face calm" },
+    el("h2", { class: "q-title" }, el("span", { class: "pulse" }), answered ? "Díky, mám všechno, co potřebuji." : "Teď od vás nic nepotřebuji."),
+    answered ? el("p", { class: "detail" }, "Napište mi do chatu, že máte hotovo, a budu pokračovat.")
+      : now && str(now.text) ? el("p", { class: "detail" }, now.text) : null,
+    el("p", { class: "hint" }, (answered ? "Další otázka se tu pak objeví sama" : "Další otázka se tu objeví sama") + ", stránku nemusíte obnovovat."));
 }
 
 function render(s) {
@@ -493,11 +546,23 @@ function render(s) {
   const rail = document.getElementById("rail");
   rail.replaceChildren(...(s.steps || []).map(st => el("li", { class: st.status || "todo", "aria-current": st.status === "current" ? "step" : null }, st.title || st.id)));
   rail.hidden = !rail.children.length;
+  const cur = (s.steps || []).find(st => st.status === "current");
+  document.getElementById("step-desc").textContent = cur && str(cur.description) || "";
+  const now = s.now && typeof s.now === "object" ? s.now : null, nowEl = document.getElementById("now");
+  nowEl.replaceChildren(el("span", { class: "pulse" }), el("span", {}, now && str(now.title) ? el("b", {}, now.title + " ") : null, now && str(now.text) || ""));
+  const qs = s.questions || [], open = qs.filter(q => !q.answered), done = qs.filter(q => q.answered);
+  const answered = !open.length && done.length > 0;   // the agent's `now` predates these answers
+  nowEl.hidden = answered || !(now && (str(now.title) || str(now.text)));
   navs = [];
   const main = document.getElementById("main");
-  const qs = (s.questions || []).slice().sort((a, b) => a.answered - b.answered);
-  main.replaceChildren(...(qs.length ? qs.map(q => question(q, (s.cards || []).filter(c => c && c.question === q.id)))
-    : [el("p", { class: "empty" }, "Teď není na co odpovídat. Až bude další otázka, objeví se tu sama.")]));
+  // Open questions and the ones just answered here (in place, as a confirmation; a re-roll's new round replaces it).
+  const items = qs.filter(q => !q.answered || (wasOpen.has(q.id) && !/^reroll/.test((q.answer || {}).decision || "")))
+    .map(q => q.answered ? confirmation(q) : question(q, (s.cards || []).filter(c => c && c.question === q.id)));
+  if (!open.length) items.push(calm(now, answered));
+  if (done.length) items.push(el("details", { class: "decided" }, el("summary", {}, "Už rozhodnuto (" + done.length + ")"),
+    el("ul", {}, done.map(q => el("li", {}, (q.title || KIND[q.kind] || q.id) + " ", el("span", {}, "– " + verdict(q)))))));
+  open.forEach(q => wasOpen.add(q.id));
+  main.replaceChildren(...items);
   for (const [id, v] of Object.entries(kept)) { const i = document.getElementById(id); if (i) i.value = v; }
   if (focus && document.getElementById(focus)) document.getElementById(focus).focus();
   requestAnimationFrame(() => navs.forEach(f => f()));
@@ -507,7 +572,7 @@ async function tick() {
   if (stopped) return;
   try {
     const r = await call("GET", "/state");
-    if (r.status !== 200) { notice("Chyba zadání stránky: " + (r.data.error || r.status)); return; }
+    if (r.status !== 200) { notice("Otázky od agenta teď nejde zobrazit, protože v nich je chyba. Dejte agentovi vědět."); return; }
     notice("");
     const text = JSON.stringify(r.data);
     if (text !== last) { last = text; render(r.data); }

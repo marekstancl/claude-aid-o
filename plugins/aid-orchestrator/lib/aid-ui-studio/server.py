@@ -6,8 +6,10 @@ usage: server.py --project <dir> --host <h> --port <p> --token-file <path>
 
 Payload: <project>/.aid-ui/studio/payload.json, written by the agent and re-read
 on every request, so the agent opens a round by rewriting it:
-  {"steps":     [{"id", "title", "status": "done|current|todo"}],
-   "questions": [{"id", "kind", "target", "opened_at": ISO-8601, "title", "prompt", "body"}],
+  {"now":       {"title", "text"}   (what the agent is doing right now; optional),
+   "steps":     [{"id", "title", "status": "done|current|todo", "description"}],
+   "questions": [{"id", "kind", "target", "opened_at": ISO-8601, "title", "prompt", "body",
+                  "next" (what the agent does after approval), "eyebrow" (heading override)}],
    "cards":     [{"id", "question", "title", "preview", "thesis", "palette": [css colours],
                   "risk", "uniqueness", "url"}]}
 Every card has a non-empty string id and a string question, and ids are unique per
@@ -27,7 +29,8 @@ sent, name the same origin; else 403):
                               to /; a used or wrong code gets the no-access page
   GET  /                      studio.html with a session cookie; without one a page
                               "Otevřete odkaz ze zprávy agenta" (no token, no state)
-  GET  /state                 [auth] payload + per-question `answered`
+  GET  /state                 [auth] payload + per-question `answered` and, when answered,
+                              `answer` = {decision, choice, choice_title, comment}
   GET  /preview?question=&card=  the card's preview file, 404 while pending
   GET  /report                <project>/docs/design/soulad-se-standardy.md, escaped
   GET  /licence               Impeccable NOTICE (the page pattern's source)
@@ -47,7 +50,7 @@ sent, name the same origin; else 403):
 preview file then, null while pending)}] sorted by id (a missing field is null), held in memory
 with the answer; `cards_sha256` = sha256 of their JSON with keys sorted, no
 whitespace. Editing payload.json afterwards never changes them.
-A re-roll (reroll_safer|reroll_bolder, steer text in `comment`) closes its
+A re-roll (reroll|reroll_safer|reroll_bolder, steer text in `comment`) closes its
 question and opens a new one in memory: id `<base>.r<n+1>`, same kind and target,
 opened_at now; the agent lists that id in the payload with the new cards.
 [auth] = the X-AID-Token header (the agent) or the session cookie (the PM's page).
@@ -63,7 +66,7 @@ KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "approve_page", "exception", "coverage_drift", "design_standard"}
 # Card fields the page shows (a step may turn any into state); snapshotted with the answer.
 CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "palette", "risk", "uniqueness")
-DECISIONS = {"approve", "choose", "return", "reroll_safer", "reroll_bolder"}
+DECISIONS = {"approve", "choose", "return", "reroll", "reroll_safer", "reroll_bolder"}
 # Previews are raster images only: an .html/.svg preview would run script on this origin.
 IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
           ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif"}
@@ -161,7 +164,7 @@ def load():
         shown.add((c["question"], c["id"]))
     with LOCK:
         qs = qs + [dict(q) for i, q in REROLLED.items() if i not in seen]
-    return {"steps": steps, "questions": qs, "cards": cards}
+    return {"now": p.get("now"), "steps": steps, "questions": qs, "cards": cards}
 
 
 def valid_answer(q):
@@ -265,7 +268,12 @@ class Studio(BaseHTTPRequestHandler):
                 return
             with LOCK:
                 for x in p["questions"]:
-                    x["answered"] = valid_answer(x) is not None
+                    a = valid_answer(x)
+                    x["answered"] = a is not None
+                    if a:   # what the PM decided, for the page's confirmation
+                        x["answer"] = {"decision": a["decision"], "choice": a["choice"], "comment": a["comment"],
+                                       "choice_title": next((c["title"] for c in a["cards"]
+                                                             if c["id"] == a["choice"]), None)}
             self.send(200, p)
         elif u.path == "/answer":
             if not self.gate(True) or (p := self.payload()) is None:
@@ -355,7 +363,7 @@ class Studio(BaseHTTPRequestHandler):
                  "choice": choice if d == "choose" else None, "comment": comment, "at": iso(t),
                  "cards": cards, "cards_sha256": hashlib.sha256(json.dumps(
                      cards, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()}
-            if d.startswith("reroll_"):
+            if d.startswith("reroll"):
                 n = next_id(qid)
                 a["next_question"] = n
                 REROLLED[n] = {"id": n, "kind": cur["kind"], "target": cur["target"],
