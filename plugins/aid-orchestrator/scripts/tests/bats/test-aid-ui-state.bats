@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # aid-ui-state.sh — P103 Step 4: every PM decision is a studio answer taken through
 # record-answer (real server.py on a free port) and used once, for its own kind and
 # target; finish needs a gate of the current build over the full matrix, per-page

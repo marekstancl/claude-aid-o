@@ -160,8 +160,8 @@ assigned="$(jq -sc --argjson t0 "$AID_TIER_T0_MAX_MS" --argjson t1 "$AID_TIER_T1
   map(. + {pinned: (.suite as $n | any($core[]; . == $n))})
   | map(. + base_tier + {demoted_from: null, ms_per_case: (per_case | floor)})
   | map(if .pinned then .reason += " (core, pinned)" else . end)
-  | demote("t0"; "t1"; $b0; "demoted: the T0 budget of 2 min was exceeded")
-  | demote("t1"; "t2"; $b1; "demoted: the T1 budget of 10 min was exceeded")
+  | demote("t0"; "t1"; $b0; ("demoted: the T0 budget of " + secs($b0) + "s was exceeded"))
+  | demote("t1"; "t2"; $b1; ("demoted: the T1 budget of " + secs($b1) + "s was exceeded"))
   | sort_by(.tier, -.duration_ms)
 ' "$rows")" || { echo "aid-test-tier-assign: could not classify the measured suites" >&2; exit 2; }
 

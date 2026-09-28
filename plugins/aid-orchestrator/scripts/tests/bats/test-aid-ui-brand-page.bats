@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # P101 Step 3 — neutral brand page template: chapters (eleven since P102), fixed --brand-*
 # names only, print rules, empty token/role placeholders, state template shape.
 

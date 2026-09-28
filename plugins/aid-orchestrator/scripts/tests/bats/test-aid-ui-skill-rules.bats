@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # P101 Step 5 — the ui-design skill carries the never-without-PM rules, and the
 # steps after the direction choice open with the state gate.
 
