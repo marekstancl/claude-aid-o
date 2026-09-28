@@ -1023,3 +1023,16 @@ _fix() { echo "fix $1" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review):
   _fix 2; run _S prepare --round 3
   [ "$status" -ne 0 ]; [[ "$output" == *"re-opened the same findings"* ]]
 }
+
+@test "standing recorded BEFORE the base budget's last close: that close routes nothing, the extended last one does" {
+  _repo
+  printf -- '---\nid: P903\ntype: regular\n---\n# Plan\n' > "$ROOT/plan.md"
+  printf 'plan_path: %s\n' "$ROOT/plan.md" >> "$E/fsm-state.yaml"
+  _sc; _round_fail 1 a >/dev/null
+  _S standing --reason "PM: už se neptej a dodělej to" >/dev/null
+  _fix 1; run _round_fail 2 b
+  [[ "$output" != *"belongs to no plan"* ]]
+  _fix 2; _round_fail 3 c >/dev/null
+  _fix 3; run _round_fail 4 d
+  [[ "$output" == *"belongs to no plan"* ]]
+}

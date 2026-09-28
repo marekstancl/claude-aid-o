@@ -137,7 +137,7 @@ EOF
   AID_INSTALLED_PLUGINS_JSON="$f" run aid_plugin_version_notice_handler <<< '{}'
   [ "$status" -eq 0 ]; [[ "$output" == *"runs plugin ${v}, but 99.0.0 is installed"*"/reload-plugins"* ]]
   AID_INSTALLED_PLUGINS_JSON="$BATS_TEST_TMPDIR/missing.json" run aid_plugin_version_notice_handler <<< '{}'
-  [ "$status" -eq 3 ]; [[ "$output" != *"/reload-plugins"* ]]
+  [ "$status" -eq 0 ]; [[ "$output" != *"/reload-plugins"* ]]
 }
 
 @test "version notice: registered on SessionStart and UserPromptSubmit with the same handler" {

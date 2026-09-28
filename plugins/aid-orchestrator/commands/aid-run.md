@@ -439,7 +439,8 @@ audit line).
 5. The PM card after an exhausted round is the **Decision required** card of
    `skills/communication.md` (built with `scripts/lib/aid-decision-card.sh`):
    what stayed open (from `merged.json`, blockers first), and the options —
-   fix and confirm in a PM-granted round, or accept. `close` has already
+   fix and confirm in a PM-granted round, or accept (with the PM's standing instruction
+   recorded — `aid-review-round.sh standing` — two such rounds need no card). `close` has already
    routed the open findings (`routed`) or carried them (`carried`), so nothing
    is lost whichever the PM picks. A third round, or only one, exists only as
    the PM's recorded words:

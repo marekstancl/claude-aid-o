@@ -503,6 +503,13 @@ _sent() { grep -c "${1:-agent-waiting}" "$TMP/sent" 2>/dev/null || echo 0; }
   jq -nc '{type:"assistant",message:{content:[{type:"text",text:"AID-WAIT: CP3 reviewer"}]}}' >> "$f"
   run aid_hook_rule_queue_continuation_stop <<< "$(jq -n --arg c "$ROOT" --arg t "$f" '{session_id:"S1",cwd:$c,transcript_path:$t}')"
   [ "$status" -eq 2 ]
+  # another tool's output that merely QUOTES the phrase is not a background agent
+  local q="$TMP/quote.jsonl"
+  jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_D",name:"Bash",input:{command:"cat log"}}]}}' > "$q"
+  jq -nc '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_D",content:"Async agent launched successfully (quoted from a log)"}]}}' >> "$q"
+  jq -nc '{type:"assistant",message:{content:[{type:"text",text:"AID-WAIT: CP3 reviewer"}]}}' >> "$q"
+  run aid_hook_rule_queue_continuation_stop <<< "$(jq -n --arg c "$ROOT" --arg t "$q" '{session_id:"S1",cwd:$c,transcript_path:$t}')"
+  [ "$status" -eq 2 ]
 }
 
 @test "the rule never refuses without knowing: an unparsable transcript or plan-state, or another plan's live job" {

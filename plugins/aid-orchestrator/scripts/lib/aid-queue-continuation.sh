@@ -253,9 +253,12 @@ _aid_qc_bg_pending() {
   # accepted; a foreground Agent's result is its output and is never pending.
   [[ -n "$(comm -23 \
     <( { jq -r 'select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and .input.run_in_background? == true) | .id' "$1" 2>/dev/null
-         jq -r 'select(.type == "user") | .message.content | arrays | .[] | select(.type? == "tool_result")
-                | select((.content | if type == "string" then . else ([.[]? | .text? // empty] | join(" ")) end)
-                         | test("Async agent launched|working in the background")) | .tool_use_id' "$1" 2>/dev/null
+         # only results of an Agent/Task call count: another tool's output may quote the phrase
+         comm -12 \
+           <(jq -r 'select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and (.name == "Agent" or .name == "Task")) | .id' "$1" 2>/dev/null | sort -u) \
+           <(jq -r 'select(.type == "user") | .message.content | arrays | .[] | select(.type? == "tool_result")
+                    | select((.content | if type == "string" then . else ([.[]? | .text? // empty] | join(" ")) end)
+                             | test("Async agent launched|working in the background")) | .tool_use_id' "$1" 2>/dev/null | sort -u)
        } | sort -u) \
     <(grep -o '<tool-use-id>[^<]*' "$1" | cut -d'>' -f2 | sort -u))" ]]
 }

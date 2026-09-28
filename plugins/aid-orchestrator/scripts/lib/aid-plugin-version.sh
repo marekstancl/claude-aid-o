@@ -37,7 +37,7 @@ aid_plugin_version_notice_handler() {
   local loaded installed
   loaded="$(aid_plugin_version_loaded)"; installed="$(aid_plugin_version_installed)"
   if [[ -z "$loaded" || -z "$installed" ]]; then
-    echo "plugin version unreadable (loaded '${loaded}', installed '${installed}')" >&2; return 3
+    echo "plugin version unreadable (loaded '${loaded}', installed '${installed}')" >&2; return 0
   fi
   if [[ "$loaded" == "$installed" ]]; then
     echo "loaded ${loaded} is the installed version" >&2; return 0
