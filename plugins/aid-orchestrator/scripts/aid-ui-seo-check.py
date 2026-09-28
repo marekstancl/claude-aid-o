@@ -6,10 +6,17 @@
 A directory is a site root: every *.html under it is a page, and robots.txt and
 sitemap.xml are checked there. A single .html file gets the page checks only.
 BLOCKER = what the SEO standard calls a blocker (noindex, canonical elsewhere,
-robots.txt blocking the site, an unreadable page) plus a broken JSON-LD block and
-a brief page that is missing or has another H1; everything else is WARN.
+robots.txt blocking the site, an unreadable page) plus a broken JSON-LD block, a
+JSON-LD business whose name, telephone or address (NAP) is not in the page's visible
+text, and a brief page that is missing or has another H1; everything else is WARN.
+Title 50-60 and description 150-160 chars, img without an alt attribute (alt="" is
+decorative, OK), duplicate title/description among indexable pages of one language,
+meta keywords, aggregateRating on a type that is not a rateable product/work
+(self-serving). A noindex not-found page needs no canonical and no length bounds.
 --brief reads the page list only from the table whose header row starts `| URL | H1 |`
 (rows `| /o-nas | O nás | ... |`); other tables are ignored, no such table is a BLOCKER.
+Optional columns `title`, `meta description` and `JSON-LD` (types, comma separated)
+are compared with the page (WARN); a missing column skips that comparison with a note.
 A directory with no *.html page is a BLOCKER.
 
 Output lines `BLOCKER|WARN|OK <page> <check> <detail>`, blockers first.
@@ -25,6 +32,12 @@ from html.parser import HTMLParser
 from urllib.parse import urlparse
 
 NOT_FOUND = re.compile(r"(^|/)(404|_?not-found)(/index)?\.html$")
+# Types Google shows review stars for when a site rates *another* thing; aggregateRating
+# on anything else (LocalBusiness, Organization, ...) is the site rating itself.
+RATEABLE = {"Book", "Course", "CreativeWorkSeason", "CreativeWorkSeries", "Episode", "Event", "Game",
+            "HowTo", "MediaObject", "Movie", "MusicPlaylist", "MusicRecording", "Product", "Recipe",
+            "SoftwareApplication"}
+HIDDEN = ("script", "style", "template", "title")
 
 
 class Page(HTMLParser):
@@ -37,7 +50,11 @@ class Page(HTMLParser):
         self.robots = []
         self.h1 = []
         self.img_no_alt = 0
+        self.keywords = False
         self.jsonld = []
+        self.items = []  # parsed JSON-LD objects, @graph flattened
+        self.text = []  # visible text
+        self._hidden = 0
         self._in = None  # "title" | "h1" | "jsonld"
         self._buf = []
 
@@ -51,11 +68,15 @@ class Page(HTMLParser):
                 self.desc = a.get("content", "").strip()
             elif name in ("robots", "googlebot"):
                 self.robots.append(a.get("content", "").lower())
+            elif name == "keywords":
+                self.keywords = True
         elif tag == "link" and "canonical" in a.get("rel", "").lower().split():
             self.canonical = a.get("href", "").strip()
-        elif tag == "img" and not a.get("alt", "").strip():
+        elif tag == "img" and "alt" not in a:  # alt="" marks a decorative image
             self.img_no_alt += 1
-        elif tag in ("title", "h1") or (tag == "script" and a.get("type", "").lower() == "application/ld+json"):
+        if tag in HIDDEN:
+            self._hidden += 1
+        if tag in ("title", "h1") or (tag == "script" and a.get("type", "").lower() == "application/ld+json"):
             self._in, self._buf = ("jsonld" if tag == "script" else tag), []
             if tag == "h1":
                 self.h1.append("")  # counted at the start tag, so an unclosed <h1> still counts
@@ -63,8 +84,12 @@ class Page(HTMLParser):
     def handle_data(self, data):
         if self._in:
             self._buf.append(data)
+        if not self._hidden:
+            self.text.append(data)
 
     def handle_endtag(self, tag):
+        if tag in HIDDEN:
+            self._hidden = max(0, self._hidden - 1)
         if self._in and tag == ("script" if self._in == "jsonld" else self._in):
             text = "".join(self._buf).strip()
             if self._in == "title":
@@ -82,6 +107,42 @@ def url_path(p):
     p = re.sub(r"(^|/)index\.html$", r"\1", p)
     p = re.sub(r"\.html$", "", p)
     return p.rstrip("/") or "/"
+
+
+def squash(s):
+    """Whitespace-free lower case, for 'is this value in the visible text'."""
+    return re.sub(r"\s", "", str(s)).lower()
+
+
+def same(a, b):
+    """Brief vs page: whitespace and dash style do not count."""
+    f = lambda s: " ".join(re.sub("[\u2013\u2014]", "-", s).split())
+    return f(a) == f(b)
+
+
+def types(item):
+    t = item.get("@type", [])
+    return {x for x in (t if isinstance(t, list) else [t]) if isinstance(x, str)}
+
+
+def check_nap(r, pg):
+    text = " ".join(pg.text)
+    flat = squash(text)
+    phones = [re.sub(r"\D", "", m) for m in re.findall(r"\+?\d[\d\s().-]{6,}\d", text)]
+    for item in pg.items:
+        if "address" not in item:  # ponytail: a business = an item with an address; nested ones not checked
+            continue
+        addr = item["address"]
+        want = [("name", item.get("name"))]
+        if isinstance(addr, dict):
+            want += [(k, addr.get(k)) for k in ("streetAddress", "postalCode", "addressLocality")]
+        else:
+            want.append(("address", addr))
+        miss = [k for k, v in want if isinstance(v, str) and v.strip() and squash(v) not in flat]
+        tel = re.sub(r"\D", "", str(item.get("telephone", "")))[-9:]
+        if tel and not any(p.endswith(tel) for p in phones):
+            miss.append("telephone")
+        r(not miss, "nap", "JSON-LD matches visible text" if not miss else "not in visible text: " + ", ".join(miss), "BLOCKER")
 
 
 def check_page(out, path, rel, base_url):
@@ -103,19 +164,23 @@ def check_page(out, path, rel, base_url):
     def r(ok, check, detail, bad="WARN"):
         out.append(("OK" if ok else bad, name, check, detail))
 
-    t = pg.title
-    r(bool(t) and len(t) <= 60, "title", "missing" if not t else f"{len(t)} chars")
-    d = pg.desc
-    r(bool(d) and len(d) <= 160, "meta-description", "missing" if not d else f"{len(d)} chars")
+    noindex = pg.noindex = any("noindex" in c for c in pg.robots)
+    quiet = nf and noindex  # not in search results: no length bounds, no canonical
+
+    def length(check, v, lo, hi):
+        ok = bool(v) and (quiet or lo <= len(v)) and len(v) <= hi
+        r(ok, check, "missing" if not v else f"{len(v)} chars" + ("" if ok else f", {lo}-{hi} expected"))
+
+    length("title", pg.title, 50, 60)
+    length("meta-description", pg.desc, 150, 160)
     r(len(pg.h1) == 1, "h1", f"{len(pg.h1)} h1")
     r(bool(pg.lang), "lang", pg.lang or "missing on <html>")
-    noindex = any("noindex" in c for c in pg.robots)
     if nf:
         r(True, "noindex", "not-found page, noindex expected" if noindex else "not-found page")
     else:
         r(not noindex, "noindex", "noindex set" if noindex else "indexable", "BLOCKER")
     if not pg.canonical:
-        r(False, "canonical", "missing")
+        r(quiet, "canonical", "not needed on a noindex not-found page" if quiet else "missing")
     elif base_url and rel is not None:
         cu = urlparse(pg.canonical)
         self_ref = pg.canonical.startswith(base_url.rstrip("/")) and url_path(cu.path) == url_path(rel)
@@ -123,15 +188,37 @@ def check_page(out, path, rel, base_url):
     else:
         r(True, "canonical", pg.canonical)
     r(pg.img_no_alt == 0, "img-alt", f"{pg.img_no_alt} img without alt")
+    if pg.keywords:
+        r(False, "meta-keywords", "present; search engines ignore it and the SEO standard forbids it")
     for i, block in enumerate(pg.jsonld, 1):
         try:
             data = json.loads(block)
             items = data if isinstance(data, list) else [data]
-            ok = all(isinstance(x, dict) and "@context" in x and "@type" in x for x in items)
+            ok = all(isinstance(x, dict) and "@context" in x and ("@type" in x or "@graph" in x) for x in items)
             r(ok, "json-ld", f"block {i}" + ("" if ok else ": @context or @type missing"), "BLOCKER")
         except ValueError as e:
             r(False, "json-ld", f"block {i}: {e}", "BLOCKER")
+            continue
+        for x in items:
+            if isinstance(x, dict):
+                pg.items += [g for g in x.get("@graph", []) if isinstance(g, dict)] or [x]
+    for item in pg.items:
+        if "aggregateRating" in item and not types(item) & RATEABLE:
+            r(False, "aggregate-rating", f"self-serving on {'/'.join(sorted(types(item)))}")
+    check_nap(r, pg)
     return pg, nf
+
+
+def check_duplicates(out, pages):
+    """Same title or description on two indexable pages of one language: WARN on the later one."""
+    for check, attr in (("duplicate-title", "title"), ("duplicate-description", "desc")):
+        seen = {}
+        for rel, pg in pages:
+            v = getattr(pg, attr)
+            if v and not pg.noindex:
+                first = seen.setdefault((pg.lang, v), rel)
+                if first != rel:
+                    out.append(("WARN", rel, check, f"same as {first}"))
 
 
 def check_site(out, root, pages):
@@ -171,7 +258,7 @@ def check_brief(out, brief, found):
         return
     # Only the page table (header `| URL | H1 | ...`, as 1s-seo.md prescribes) counts;
     # other tables, e.g. redirects to keep, are ignored.
-    rows, table, header = [], None, False
+    rows, table, header = [], None, None
     for ln in lines + [""]:
         if not ln.lstrip().startswith("|"):
             table = None
@@ -179,12 +266,18 @@ def check_brief(out, brief, found):
         cells = [c.strip().strip("`") for c in ln.strip().strip("|").split("|")]
         if table is None:
             table = [x.lower() for x in cells[:2]] == ["url", "h1"]
-            header = header or table
+            header = header or (table and [x.lower() for x in cells])
         elif table and not set("".join(cells)) <= set("-: "):
             rows.append(cells)
     if not header:
         out.append(("BLOCKER", brief, "brief", "no page table (header | URL | H1 |)"))
         return
+    col = {}
+    for check, names in (("brief-title", ("title",)), ("brief-description", ("meta description", "description")),
+                         ("brief-json-ld", ("json-ld",))):
+        col[check] = next((header.index(n) for n in names if n in header), None)
+        if col[check] is None:
+            out.append(("OK", brief, check, f"no {names[0]} column, comparison skipped"))
     for cells in rows:
         if len(cells) < 2 or not cells[0].startswith("/"):
             continue
@@ -192,9 +285,21 @@ def check_brief(out, brief, found):
         pg = found.get(url)
         if pg is None:
             out.append(("BLOCKER", url, "brief-page", "confirmed page not built"))
-        else:
-            ok = h1 in pg.h1
-            out.append(("OK" if ok else "BLOCKER", url, "brief-h1", h1 if ok else f"expected '{h1}', got {pg.h1}"))
+            continue
+        ok = h1 in pg.h1
+        out.append(("OK" if ok else "BLOCKER", url, "brief-h1", h1 if ok else f"expected '{h1}', got {pg.h1}"))
+        cell = lambda c: cells[col[c]] if col[c] is not None and col[c] < len(cells) else ""
+        for check, got in (("brief-title", pg.title), ("brief-description", pg.desc)):
+            want = cell(check)
+            if want:
+                ok = same(want, got or "")
+                out.append(("OK" if ok else "WARN", url, check, want if ok else f"expected '{want}', got '{got}'"))
+        want = {t.strip() for t in cell("brief-json-ld").split(",") if t.strip()}
+        if want:
+            have = set().union(*map(types, pg.items)) if pg.items else set()
+            miss, extra = sorted(want - have), sorted(have - want)
+            detail = "; ".join(filter(None, [miss and "missing " + ", ".join(miss), extra and "not in brief " + ", ".join(extra)]))
+            out.append(("WARN" if detail else "OK", url, "brief-json-ld", detail or ", ".join(sorted(want))))
 
 
 def main():
@@ -207,7 +312,7 @@ def main():
     out, found = [], {}
     for t in a.targets:
         if os.path.isdir(t):
-            pages = []
+            pages, parsed = [], []
             for d, _, files in os.walk(t):
                 for fn in sorted(files):
                     if fn.endswith(".html"):
@@ -216,8 +321,10 @@ def main():
                         if res:
                             found[url_path(rel)] = res[0]
                             pages.append((rel, res[1]))
+                            parsed.append((rel, res[0]))
             if not pages:
                 out.append(("BLOCKER", t, "pages", "no pages found"))
+            check_duplicates(out, parsed)
             check_site(out, t, pages)
         elif t.endswith(".html") or os.path.exists(t):
             check_page(out, t, None, a.base_url)
