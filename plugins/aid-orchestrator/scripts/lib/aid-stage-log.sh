@@ -102,6 +102,7 @@ aid_plan_log() {
   declare -F _aid_plan_id_of >/dev/null || return 0
   id="$(_aid_plan_id_of "$plan")" || return 0
   root="$(_aid_plan_project_root "$plan")" || return 0
+  root="$(aid_state_root "$root" 2>/dev/null || echo "$root")"
   tl="$(aid_plan_timeline "$root" "$id")" || return 0
   log_event "$tl" "$@" || true
 }

@@ -118,6 +118,18 @@ EOF
   grep -q '1 kolo' "$OUT"
 }
 
+@test "a plan read from a linked worktree shows the review recorded in the state root (agents 27. 9.)" {
+  local plan; plan="$(write_plan P955 'plugins/aid-orchestrator/commands/aid-help.md')"
+  mkdir -p "$TMP/.aid-o/plans" "$TMP/.aid-o/work/plan-state/P001"
+  mv "$plan" "$TMP/.aid-o/plans/P955.md"; : > "$TMP/.aid-o/work/plan-state/P001/x"
+  ( cd "$TMP" && git init -q -b main && git config user.email t@t && git config user.name t && git add -A && git commit -qm seed && git worktree add -q "$TMP/wt" -b wtb )
+  mkdir -p "$TMP/.aid-o/work/evidence/P955/cp1/round-1"
+  printf '{"reviewers": {"reuse": {"tokens": 1200, "answered": true}}, "degraded": false}\n' \
+    > "$TMP/.aid-o/work/evidence/P955/cp1/round-1/measurement.json"
+  aid_plan_summary_render "$TMP/wt/.aid-o/plans/P955.md" "$OUT"
+  grep -q 'Revize plánu: review: 1 round, 1200 tokens' "$OUT"
+}
+
 @test "a plan with no Goal is refused, naming the section — no half-empty page" {
   plan="$(write_plan P954 'plugins/aid-orchestrator/commands/aid-help.md')"
   sed -i '/^## Goal$/,+3d' "$plan"

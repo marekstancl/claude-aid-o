@@ -284,7 +284,9 @@ aid_plan_summary_render() {
   plan_id="$(_aid_fm_get "$plan" id)"; plan_id="${plan_id:-?}"
   status="$(_aid_fm_get "$plan" status)"; status="${status:-draft}"
   review="review: none"
-  root="$(_aid_plan_project_root "$plan")" && review="$(aid_review_summary "${root}/.aid-o/work/evidence/${plan_id}/cp1")"
+  # the review evidence lives in the state root, also for a plan read from a worktree
+  root="$(_aid_plan_project_root "$plan")" && root="$(aid_state_root "$root" 2>/dev/null || echo "$root")" \
+    && review="$(aid_review_summary "${root}/.aid-o/work/evidence/${plan_id}/cp1")"
   # Every active run of this plan, reviewed step by step (P094 Step 11).
   local step_reviews="" _runs _e _r
   if [[ -n "${root:-}" && -f "${root}/.aid-o/work/active-runs.json" ]]; then
