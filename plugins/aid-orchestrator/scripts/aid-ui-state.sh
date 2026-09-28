@@ -417,7 +417,7 @@ def combos(st, ck, fps, check=None):   # applies.<check>: browsers subset, flows
     if ((st.get("variant") or {}).get("type")) in ("webapp", "pwa") and ap.get("flows", True) is not False:
         s = st.get("structure") or {}
         roles = [val(r.get("id") if isinstance(r, dict) else r) for r in s.get("roles") or []] or [""]
-        out += [(val(f.get("id")), v, b, r, val(x)) for f in s.get("flows") or [] for x in f.get("states") or []
+        out += [(val(f.get("id")), v, b, r, val(x.get("id") if isinstance(x, dict) else x)) for f in s.get("flows") or [] for x in f.get("states") or []
                 for r in roles for v in vps for b in brs]
     return out
 

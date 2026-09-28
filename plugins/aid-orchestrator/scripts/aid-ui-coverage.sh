@@ -231,7 +231,20 @@ build = (state.get("build") or {}).get("id")
 rows = (gate.get("rows") or []) if build and gate.get("build_id") == build else []
 answers = (state.get("answers") or {}).values()
 attest = state.get("attestations") or {}
+# PM exceptions still standing (a changed page fingerprint voids one; resolved ones do not count)
+excs = [x for x in state.get("exceptions") or [] if isinstance(x, dict) and not x.get("resolved")]
+AXES = ("check", "page", "viewport", "browser", "role", "state")
+def excused(r):
+    for x in excs:
+        sel = x.get("selector") or {}
+        if all(sel.get(k, "*") in ("*", str(r.get(k, ""))) for k in AXES):
+            return x
+    return None
 by_id = {e.get("id"): e for e in entries}
+opts = state.get("options") or {}
+OFF = [(k, "nepoužito, protože PM v kroku 0 vynechal " + {"vision": "vizi", "seo": "SEO", "identity": "nové logo"}[k]
+        + " (důvod v kapitole " + {"vision": "Vize", "seo": "SEO", "identity": "Logo"}[k] + ")")
+       for k in ("vision", "seo", "identity") if opts.get(k) is False]
 
 def status(it):
     e = by_id.get(it["id"])
@@ -242,12 +255,24 @@ def status(it):
         return False, None
     kind, _, arg = disp.partition(":")
     arg = arg.strip()
+    # a part the PM left out in step 0 (options false) is waived for its own items; script checks keep their rows
+    if kind != "script":
+        for part, why in OFF:
+            if part == "vision" and ("product-vision" in it["file"] or disp == "pm:vision"):
+                return disp, why
+            if part == "seo" and ("/seo" in it["file"] or "seo-audit" in it["file"] or disp == "pm:seo_brief"):
+                return disp, why
+            if part == "identity" and disp == "pm:identity":
+                return disp, why
     if kind == "na":
         return disp, "nepoužito, protože " + arg
     if kind == "script":
         mine = [r for r in rows if r.get("check") == arg]
         if mine and all(r.get("status") == "pass" for r in mine):
             return disp, "použito, ověřil skript"
+        bad = [r for r in mine if r.get("status") != "pass"]
+        if bad and all(excused(r) for r in bad):
+            return disp, "výjimka PM: " + (excused(bad[0]).get("reason") or "bez důvodu")
         if any(r.get("status") == "fail" for r in mine):
             return disp, "nesplněno (skript)"
         return disp, "neověřeno"
@@ -262,7 +287,7 @@ for it in items:
     if disp is False:
         continue
     rows_out.append((it, disp or "-", st))
-    key = "nepoužito" if st.startswith("nepoužito") else st   # one count for all waiver reasons
+    key = "nepoužito" if st.startswith("nepoužito") else "výjimka PM" if st.startswith("výjimka PM") else st   # one count per kind
     counts[key] = counts.get(key, 0) + 1
     pf = per_file.setdefault(it["file"], {})
     pf[key] = pf.get(key, 0) + 1

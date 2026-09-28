@@ -167,6 +167,29 @@ row() { grep -F "| $1 |" "$P/docs/design/soulad-se-standardy.md"; }
   row "The page answers 200." | grep -q "nesplněno"
 }
 
+@test "report: failing rows all under a standing PM exception -> výjimka PM with its reason; a resolved one does not count" {
+  state web b1
+  gate b1 fail
+  jq '.exceptions = [{"selector":{"check":"http_200","page":"*","viewport":"*","browser":"*","role":"*","state":"*"},"reason":"interní nástroj"}]' \
+    "$P/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$P/docs/design/brand-state.json"
+  bash "$COV" report "$P"
+  row "The page answers 200." | grep -q "výjimka PM: interní nástroj"
+  jq -e '.counts["výjimka PM"] >= 1' "$P/docs/design/soulad-summary.json" >/dev/null
+  jq '.exceptions[0].resolved = "2026-09-28"' "$P/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$P/docs/design/brand-state.json"
+  bash "$COV" report "$P"
+  row "The page answers 200." | grep -q "nesplněno"
+}
+
+@test "report: an option the PM left out in step 0 waives its pm: items with the reason; with the option on they stay neověřeno" {
+  yq -i '(.items[] | select(.do == "pm:approve_page")).do = "pm:vision"' "$T/map.yaml"
+  state web b1
+  bash "$COV" report "$P"
+  grep "pm:vision" "$P/docs/design/soulad-se-standardy.md" | grep -q "neověřeno"
+  jq '.options = {"vision": false, "seo": true, "identity": "new"}' "$P/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$P/docs/design/brand-state.json"
+  bash "$COV" report "$P"
+  grep "pm:vision" "$P/docs/design/soulad-se-standardy.md" | grep -q "vynechal vizi"
+}
+
 @test "report: no variant recorded -> exit 1, nothing written" {
   echo '{}' > "$P/docs/design/brand-state.json"
   run bash "$COV" report "$P"

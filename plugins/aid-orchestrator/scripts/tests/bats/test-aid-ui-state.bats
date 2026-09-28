@@ -99,7 +99,8 @@ result() {
   jq --slurpfile ck <(yq -o=json . "$T/cov/checks.yaml") '.build as $b | ($ck[0]) as $c
     | ([.build.fingerprints | keys[] | select(. != "_site") | {page: ., role: "", state: ""}]
        + (if (.variant.type // "web") != "web" then [.structure.flows[] as $f | $f.states[] as $s
-          | (.structure.roles // [""])[] as $r | {page: $f.id, role: $r, state: $s}] else [] end)) as $combos
+          | (.structure.roles // [""])[] as $r
+          | {page: $f.id, role: ($r | if type == "object" then .id else . end), state: ($s | if type == "object" then .id else . end)}] else [] end)) as $combos
     | {run_at: "2026-09-28T10:00:00Z", build_id: $b.id, fingerprints: $b.fingerprints,
        rows: [$c.checks | keys[] as $k | $combos[] as $m | $c.viewports[] as $v | $c.browsers[] as $br
               | $m + {check: $k, viewport: $v, browser: $br, status: "pass"}]}' "$STATE" | jq "${1:-.}" > "$RES"
@@ -794,6 +795,17 @@ JSON
   [ "$status" -eq 0 ]
   run "$SCRIPT" finish "$PROJ"
   [ "$status" -eq 0 ]
+}
+
+@test "roles and flow states given as objects {id, …}: the gate rows use their ids" {
+  ready
+  st='{"pages":[{"id":"home"}],"roles":[{"id":"admin","name":"Správce"}],"flows":[{"id":"checkout","states":[{"id":"normal","how":"a"},{"id":"empty","how":"b"}]}]}'
+  ans s1 structure "$(sha_of "$st")"; "$SCRIPT" set "$PROJ" structure "$st" --answer s1 >/dev/null
+  ans v2 variant "$(sha_of '{"type":"webapp","brand":"new","local":false}')"
+  "$SCRIPT" set "$PROJ" variant '{"type":"webapp","brand":"new","local":false}' --answer v2 >/dev/null
+  result
+  run "$SCRIPT" gate-record "$PROJ" "$RES"
+  [ "$status" -eq 0 ] || { echo "$output" | head -3; return 1; }
 }
 
 @test "not_covered webkit rows: refused without exception; one browser=webkit page=* answer covers all; another viewport does not" {
