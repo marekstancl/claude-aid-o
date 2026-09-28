@@ -1187,6 +1187,9 @@ items:
   - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > Enforcement — jak se vynucuje#b156230c"
     text: "Každé pravidlo má číslo, aby na něj mohla odkazovat mapa pokrytí standardů v pluginu AID; "
     do: "agent: mapa pokrytí standardů je aktuální (aid-ui-coverage.sh check prošel)"
+  - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > Enforcement — jak se vynucuje#416a0946"
+    text: "Schválení PM (FB-16, FB-17) studio váže ke stránce, jejímu otisku a jedinému použití…"
+    do: "na: popisuje mez ochrany schválení (IMP-677), není to požadavek na web"
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > What — co musí aplikace mít#9eded723"
     text: "**UA-1 Mapa úloh.** Projektový design standard obsahuje tabulku úloh (co uživatel v aplika"
     do: {"webapp": "pm:task_map", "pwa": "pm:task_map"}
