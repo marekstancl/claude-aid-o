@@ -814,3 +814,13 @@ JSON
   cat "$T/o1" "$T/o2" | grep -q "already used"
   [ "$(jq -c .consumed "$STATE")" = '["a1"]' ]
 }
+
+@test "a brand-state.json.lock symlink to a file outside the project is never written" {
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  echo victim >"$T/victim"
+  ln -s "$T/victim" "$STATE.lock"
+  ans a1 approve_page "index.html@$(fp index.html)"
+  "$SCRIPT" approve-page "$PROJ" index.html --answer a1 >/dev/null
+  [ "$(cat "$T/victim")" = victim ]
+  [ "$(jq -c .consumed "$STATE")" = '["a1"]' ]
+}

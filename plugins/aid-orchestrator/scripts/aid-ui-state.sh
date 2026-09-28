@@ -30,7 +30,8 @@
 #   studio unreachable or a mismatch -> exit 1. The mutation then consumes it. This
 #   guards against an agent skipping or misapplying the PM's answer, not against one that
 #   deliberately forges files and the server. Every verb but build-id holds an flock
-#   on docs/design/brand-state.json.lock across its read-check-write. Targets:
+#   on the docs/design directory (opened read-only, nothing is created or truncated)
+#   across its read-check-write. Targets:
 #     set variant|structure|content-plan <json>   kind variant|structure|content_plan,
 #                          target sha256:<sha256 of `jq -S -c -j . <<<json`> (no newline)
 #     approve-page <project> <page>               kind approve_page, target <page>@<fingerprint
@@ -125,7 +126,7 @@ OLD="$BRAND/state.json"   # P101 location, migrated by init
 if [[ "$VERB" != build-id ]]; then   # one mutation at a time: the answer check and the write are one step
   [[ "$VERB" != init ]] || mkdir -p "${STATE%/*}"
   if [[ -d "${STATE%/*}" ]]; then
-    exec 9>"$STATE.lock"
+    exec 9<"${STATE%/*}"   # read-only fd of the directory: a project symlink cannot make us write
     flock -w 60 9 || { echo "ERROR: aid-ui-state.sh: $STATE is locked by another aid-ui-state.sh for 60 s" >&2; exit 1; }
   fi
 fi
