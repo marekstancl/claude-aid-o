@@ -1,0 +1,61 @@
+---
+name: ui-design-step-3
+description: /aid-ui step 3 - content plan per page and section (need, owner, due, status) and the facts register, confirmed on the studio page
+user_invocable: false
+---
+
+# Krok 3 - Obsahový plán
+
+**Last Updated:** 2026-09-28
+
+## Cíl
+
+Každá sekce každé stránky má položku obsahu s potřebou, vlastníkem,
+termínem a stavem; fakta leží v `docs/content/facts.yaml`; PM plán schválil
+a chybějící podstatný materiál buď dodal, nebo ho odložil.
+
+## Vstupy
+
+`structure` ze stavu, `PRODUCT.md`, `docs/product-vision.md`,
+`docs/seo/brief.md`, materiál od PM (texty, fotky, ceník).
+
+## Postup
+
+1. Pro každou stránku a sekci položka: `id` (`<stránka>.<sekce>`), `need`
+   (co je potřeba: text, fotka, ceník, reference), `owner` (PM, klient,
+   agent), `due` (datum), `status`: `missing`, `draft`, `confirmed_client`,
+   `deferred_by_pm`. PM, který dodal všechny texty: jeho položky začínají
+   `confirmed_client` tam, kde to sám označí.
+2. Registr faktů `docs/content/facts.yaml`: každé tvrzení, které stavba
+   použije (ceny, adresa, otevírací doba, čísla, citace, reference), se
+   zdrojem (`PM`, soubor projektu). Co v registru není, stavba nesmí
+   napsat (MUST 5). Otázka `facts` ve studiu, když fakt chybí.
+3. Agent smí psát `draft` jen z faktů registru; `confirmed_client` dává
+   jen PM.
+4. Otázka `content_plan` ve studiu: tabulka položek (stránka, sekce,
+   potřeba, vlastník, termín, stav), `target` = sha256 JSON pole položek.
+   Po `approve`: `aid-ui-state.sh set <project> content-plan '<json>' --answer <id>`.
+5. Chybí podstatný materiál (`missing` u sekce, bez které stránka nedává
+   smysl) → PM ho dodá, nebo otázka `defer_content` s `target` = id
+   položky a po `approve`
+   `aid-ui-state.sh defer-content <project> <item id> --answer <id>`.
+   Nikdy zástupný text místo materiálu.
+6. Tělo kapitoly `obsah` (tabulka plánu, co chybí a kdo to dodá) do
+   souboru v `.aid-ui/`, `aid-ui-state.sh body <project> obsah --file <soubor>`,
+   `aid-ui-state.sh chapter <project> obsah navrh`.
+
+## Co PM rozhoduje
+
+Plán obsahu, fakta, dodání materiálu nebo jeho odložení - ve studiu.
+`finish` v kroku 7 pustí jen položky `confirmed_client` nebo `deferred_by_pm`.
+
+## Zápis
+
+`content_plan` ve stavu (jen skript), `docs/content/facts.yaml`, kapitola
+`obsah`.
+
+## Když krok selže
+
+Odpověď chybí → odkaz na studio a konec tahu. Skript odmítne → `ERROR:` PM.
+
+**Last Updated:** 2026-09-28
