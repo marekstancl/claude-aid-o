@@ -983,3 +983,43 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   run _S prepare --round 1; [ "$status" -eq 0 ]
   [[ "$output" == *"focus cp2-step-0-step-generalist, agent general-purpose"* ]]
 }
+
+# _round_fail <n> <claim-suffix> — prepare, one failing answer, collect, close round n
+_round_fail() {
+  _S prepare --round "$1" >/dev/null || return 1
+  _sanswer "$1" step_generalist ".findings[0].claim = \"the new file is never imported, variant $2\""
+  _S collect --round "$1" >/dev/null; _bracket "$1" step_generalist
+  _S close --round "$1" --tokens step_generalist=1
+}
+_fix() { echo "fix $1" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): $1"; _sc; }
+
+@test "standing: the PM's 'don't ask, finish it' adds two fix-and-confirm rounds, routing waits for them, a repeat stops (P103)" {
+  _repo
+  printf -- '---\nid: P901\ntype: regular\n---\n# Plan\n' > "$ROOT/plan.md"
+  printf 'plan_path: %s\n' "$ROOT/plan.md" >> "$E/fsm-state.yaml"
+  _sc; run _round_fail 1 a; [ "$status" -eq 0 ]
+  _fix 1; run _round_fail 2 b; [ "$status" -eq 0 ]
+  [[ "$output" == *"belongs to no plan"* || "$output" == *"routed"* ]]   # budget 2: round 2 was the last
+  _fix 2; run _S prepare --round 3
+  [ "$status" -ne 0 ]; [[ "$output" == *"exceeds the round budget"* ]]
+  run _S standing --reason "PM: už se neptej a dodělej to"
+  [ "$status" -eq 0 ]; [ -f "$R/.aid-o/work/evidence/P901/standing-pm.json" ]
+  run _S standing --reason "PM: už se neptej a dodělej to znovu"
+  [ "$status" -ne 0 ]
+  run _round_fail 3 c; [ "$status" -eq 0 ]
+  [ "$(jq -r .standing "$(D 3)/round.json")" = true ]
+  _fix 3; run _round_fail 4 d; [ "$status" -eq 0 ]
+  _fix 4; run _S prepare --round 5
+  [ "$status" -ne 0 ]; [[ "$output" == *"+ 2 under the PM's standing instruction"* ]]
+}
+
+@test "standing: a fix-and-confirm round that re-opens the same findings stops for the PM" {
+  _repo
+  printf -- '---\nid: P902\ntype: regular\n---\n# Plan\n' > "$ROOT/plan.md"
+  printf 'plan_path: %s\n' "$ROOT/plan.md" >> "$E/fsm-state.yaml"
+  _sc; _round_fail 1 same >/dev/null
+  _fix 1; _round_fail 2 same >/dev/null
+  _S standing --reason "PM: už se neptej a dodělej to" >/dev/null
+  _fix 2; run _S prepare --round 3
+  [ "$status" -ne 0 ]; [[ "$output" == *"re-opened the same findings"* ]]
+}
