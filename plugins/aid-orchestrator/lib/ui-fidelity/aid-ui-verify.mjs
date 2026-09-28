@@ -71,10 +71,29 @@ function runSeo() {
 function brandFiles() {
   const dir = project && path.join(project, 'docs/design/brand-package');
   if (!dir || !fs.existsSync(dir)) return null;
-  const set = new Set();
-  const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); e.isDirectory() ? walk(f) : set.add(sha(f)); } };
+  const set = new Set(), svgs = new Set();
+  const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const f = path.join(d, e.name);
+    if (e.isDirectory()) { walk(f); continue; }
+    set.add(sha(f));
+    if (/\.svg$/i.test(e.name)) svgs.add(svgShape(fs.readFileSync(f, 'utf8')));
+  } };
   walk(dir);
-  return set;
+  return { has: h => set.has(h), svgs };
+}
+// the drawing of an SVG: viewBox + each shape element with its geometry attributes, in order;
+// whitespace, ids, classes and colours do not count.
+// ponytail: regex over the markup, no transforms/<use>/<g> resolution; a moved group reads as a different logo
+const GEOM = ['d', 'cx', 'cy', 'r', 'rx', 'ry', 'x', 'y', 'width', 'height', 'points', 'x1', 'y1', 'x2', 'y2'];
+function svgShape(markup) {
+  const num = v => v.trim().replace(/\s*,\s*|\s+/g, ' ');
+  const attr = (a, n) => { const m = a.match(new RegExp(`(?:^|\\s)${n}\\s*=\\s*["']([^"']*)["']`, 'i')); return m ? num(m[1]) : ''; };
+  const root = markup.match(/<svg\b([^>]*)>/i);
+  const parts = [`viewBox=${root ? attr(root[1], 'viewBox') : ''}`];
+  for (const m of markup.matchAll(/<(path|circle|rect|ellipse|polygon|polyline|line)\b([^>]*)>/gi)) {
+    parts.push(`${m[1].toLowerCase()}(${GEOM.map(n => attr(m[2], n)).join('|')})`);
+  }
+  return parts.join(';');
 }
 // every string/number leaf of facts.yaml, whitespace-normalised
 function factLeaves() {
@@ -137,7 +156,15 @@ async function inPage(page) {
     }).filter(Boolean);
     o.text = document.body.innerText;
     o.hrefs = [...document.querySelectorAll('a[href]')].map(a => a.href);
-    o.imgs = [...document.querySelectorAll('img')].map(i => ({ src: i.currentSrc || i.src, alt: i.getAttribute('alt'), cls: `${i.className} ${i.id} ${i.alt}` }));
+    // a logo: inside the home link or an element named logo/brand
+    const ctx = 'a[href="/"], a[href="./"], a[href="index.html"], a[rel~=home], [class*=logo i], [id*=logo i], [aria-label*=logo i], [class*=brand i], [id*=brand i], [aria-label*=brand i]';
+    o.imgs = [...document.querySelectorAll('img')].map(i => ({ logo: !!i.closest(ctx), src: i.currentSrc || i.src, alt: i.getAttribute('alt'), cls: `${i.className} ${i.id} ${i.alt}` }));
+    o.svgLogos = [...document.querySelectorAll('svg')].map(sv => {
+      const c = sv.closest(ctx);
+      if (!c) return null;
+      const name = `${c.tagName.toLowerCase()}${c.id ? '#' + c.id : ''}${typeof c.className === 'string' && c.className ? '.' + c.className.trim().split(/\s+/).join('.') : ''}${c.getAttribute('aria-label') ? `[aria-label="${c.getAttribute('aria-label')}"]` : ''}`;
+      return { name, markup: sv.outerHTML };
+    }).filter(Boolean);
     o.icons = [...document.querySelectorAll('link[rel~=icon], link[rel=apple-touch-icon]')].map(l => l.href);
     return o;
   });
@@ -188,10 +215,11 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand) {
   else {
     const drawn = [];
     if (!o.icons.length) drawn.push('no favicon link');
-    for (const u of [...o.icons, ...o.imgs.filter(i => /logo/i.test(i.cls) || /logo/i.test(i.src)).map(i => i.src)]) {
+    for (const u of [...o.icons, ...o.imgs.filter(i => i.logo || /logo/i.test(i.cls) || /logo/i.test(i.src)).map(i => i.src)]) {
       const f = siteFile(u);
       if (!f || !brand.has(sha(f))) drawn.push(u.replace(base, '/'));
     }
+    for (const l of o.svgLogos) if (!brand.svgs.has(svgShape(l.markup))) drawn.push(`inline <svg> in ${l.name}`);
     res.brand_assets = drawn.length ? ['fail', `not from the brand package: ${drawn.join(', ')}`] : ['pass', ''];
   }
   const broken = [...bad];

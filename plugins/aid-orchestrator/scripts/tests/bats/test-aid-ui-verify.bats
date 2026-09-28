@@ -40,11 +40,14 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$status" -eq 3 ] || { echo "$output"; return 1; }
+  # brand_assets: a hand-drawn inline SVG logo on index.html, a drawn <img> logo on o-nas
+  [ "$(st brand_assets index.html)" == fail ]
+  jq -e '[.rows[] | select(.check == "brand_assets" and .page == "index.html") | .detail] | all(contains("inline <svg> in a.znacka"))' "$RES" >/dev/null
   for c in no_overflow one_line_controls facts_match axe image_weight; do
     [ "$(st $c index.html)" == fail ] || { echo "$c index: $(st $c index.html)"; return 1; }
     [ "$(st $c o-nas/index.html)" == pass ] || { echo "$c o-nas: $(st $c o-nas/index.html)"; return 1; }
   done
-  for c in glyph_coverage no_placeholders brand_assets links_resources required_files seo; do
+  for c in glyph_coverage no_placeholders links_resources required_files seo; do
     [ "$(st $c o-nas/index.html)" == fail ] || { echo "$c o-nas: $(st $c o-nas/index.html)"; return 1; }
     [ "$(st $c index.html)" == pass ] || { echo "$c index: $(st $c index.html)"; return 1; }
   done
@@ -73,6 +76,28 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass")' "$RES" | head; return 1; }
   [ "$(jq '[.rows[] | select(.status != "pass")] | length' "$RES")" -eq 0 ]
   jq -e '.gate.build_id' "$PROJ/docs/design/brand-state.json" >/dev/null
+}
+
+@test "an inline SVG logo passes only with the brand package's drawing; colour, whitespace and ids do not count" {
+  cp -r "$FX/fixed/." "$SITE/"
+  # ok*: brand logo.svg geometry recoloured/reformatted; bad*: one coordinate moved, an extra
+  # shape, another viewBox, a hand-drawn mark; deco: an SVG outside any logo context is not a logo
+  sed -i 's#<nav>#<a href="/" id="ok1"><svg viewBox="0 0 120 32"><circle id="c" class="k" cx="16"  cy="16" r="14" fill="red"/><rect x="36" y="10" width="80" height="12" stroke="blue"/></svg></a>\
+<span class="brand-mark" id="ok2"><svg viewBox=" 0 0  120 32 "><circle cx="16" cy="16" r="14"></circle><rect height="12" width="80" y="10" x="36"></rect></svg></span>\
+<span aria-label="Logo" id="bad1"><svg viewBox="0 0 120 32"><circle cx="17" cy="16" r="14"/><rect x="36" y="10" width="80" height="12"/></svg></span>\
+<span class="logo-x" id="bad2"><svg viewBox="0 0 120 32"><circle cx="16" cy="16" r="14"/><rect x="36" y="10" width="80" height="12"/><path d="M0 0L1 1"/></svg></span>\
+<span id="brand3"><svg viewBox="0 0 64 32"><circle cx="16" cy="16" r="14"/><rect x="36" y="10" width="80" height="12"/></svg></span>\
+<a rel="home" href="/o-nas/" id="bad4"><svg viewBox="0 0 64 64"><path d="M8 8h48v48z"/></svg></a>\
+<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="4"/></svg>\
+<nav>#' "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$(st brand_assets index.html)" == fail ] || { echo "$output"; return 1; }
+  d="$(jq -r '[.rows[] | select(.check == "brand_assets" and .page == "index.html") | .detail][0]' "$RES")"
+  for id in bad1 bad2 brand3 bad4; do [[ "$d" == *"#$id"* ]] || { echo "missing $id: $d"; return 1; }; done
+  [[ "$d" != *ok1* && "$d" != *ok2* ]] || { echo "brand drawing refused: $d"; return 1; }
+  [ "$(grep -o 'inline <svg>' <<<"$d" | wc -l)" -eq 4 ] || { echo "$d"; return 1; }
+  [ "$(st brand_assets o-nas/index.html)" == pass ]
 }
 
 @test "a site edited after build-record is refused" {
