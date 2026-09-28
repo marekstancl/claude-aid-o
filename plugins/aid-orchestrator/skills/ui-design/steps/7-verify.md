@@ -30,15 +30,15 @@ a `frontend-build-standard.md` (čti živě).
    selektor jako JSON: `check`, `page`, `viewport`, `browser`, `role`,
    `state`, vynechané `"*"`); důvod = komentář PM. Po `approve`
    `aid-ui-state.sh exception <project> --check <c> [--page …] --answer <id>`.
-4. Kontrola stránek: pro každou stránku buildu otázka `approve_page`
+4. Projektový design standard (před schvalováním stránek, protože jeho úpravy mění build): `DESIGN.md` doplněný o platformní kontrakt,
+   přístupnost a pravidla textů, a stránka standardu projektu v Docusauru
+   (`/opt/eco/docs/docs/<projekt>/`) odkazující na `DESIGN.md`. Otázka
+   `design_standard` ve studiu; `return` → oprav a otevři znovu.
+5. Kontrola stránek (až je build po bodu 4 konečný): pro každou stránku buildu otázka `approve_page`
    (`target` = `<stránka>@<otisk>` z `build.fingerprints`, snímek jako
    karta); po `approve`
    `aid-ui-state.sh approve-page <project> <stránka> --answer <id>`.
    Změna buildu schválení té stránky zruší.
-5. Projektový design standard: `DESIGN.md` doplněný o platformní kontrakt,
-   přístupnost a pravidla textů, a stránka standardu projektu v Docusauru
-   (`/opt/eco/docs/docs/<projekt>/`) odkazující na `DESIGN.md`. Otázka
-   `design_standard` ve studiu; `return` → oprav a otevři znovu.
 6. `aid-ui-coverage.sh report <project>` → `docs/design/soulad-se-standardy.md`
    a `docs/design/soulad-summary.json`; položky s dispozicí `agent:` po ověření
    `aid-ui-state.sh attest <project> <item id> --note <co bylo ověřeno>`
