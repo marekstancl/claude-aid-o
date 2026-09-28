@@ -6,11 +6,14 @@
 #   studio <project>       the studio page (../lib/aid-ui-studio/server.py) on
 #                          AID_UI_HOST:AID_UI_STUDIO_PORT for <project>; writes a
 #                          fresh token to <project>/.aid-ui/studio.token before the
-#                          start (the server embeds it in the page and asks it of
-#                          every POST and GET /answer). Idempotent: our job alive,
-#                          answering and serving the same (realpath) project -> print
-#                          URL, exit 0 and keep the token (a restart would forget the
-#                          unrecorded answers held in the server's memory).
+#                          start (the agent's X-AID-Token for GET /answer) and, on
+#                          every call, a fresh one-time code to .aid-ui/studio.code
+#                          (0600); URL is the PM's one-time link /?k=<code>, whose
+#                          first use sets the page's session cookie. Idempotent: our
+#                          job alive, answering and serving the same (realpath)
+#                          project -> print a new link, exit 0 and keep the token (a
+#                          restart would forget the unrecorded answers held in the
+#                          server's memory).
 #   brand <dir>            python3 -m http.server on AID_UI_HOST:AID_UI_BRAND_PORT
 #                          only for a brand page dir: realpath ends in /docs/brand
 #                          and it has index.html and tokens.css; refused when it
@@ -90,7 +93,7 @@ start() {   # start <role> <cmd...>
     --repo "$PROJECT" --deadline "$DEADLINE" -- "$@" 2>&1)" || die "aid-job.sh run failed: $out"
   local i
   for i in $(seq 1 50); do
-    listening "$port" && { echo "URL: http://$HOST:$port/"; echo "JOB: $id"; return 0; }
+    listening "$port" && { echo "URL: http://$HOST:$port/${LINK_QS:-}"; echo "JOB: $id"; return 0; }
     alive "$id" || break
     sleep 0.1
   done
@@ -105,11 +108,14 @@ case "$1" in
     [[ -d "$dir" ]] || refuse "$2 is not a project directory"
     PROJECT="$dir"; JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
     id="$(job_id studio)"
+    mkdir -p "$dir/.aid-ui"
+    code="$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
+    rm -f "$dir/.aid-ui/studio.code"; (umask 077; printf '%s\n' "$code" > "$dir/.aid-ui/studio.code")
+    LINK_QS="?k=$code"
     if alive "$id" && listening "$STUDIO_PORT" \
        && [[ "$(jq -r '.command as $c | $c[($c | index("--project")) + 1]' "$JOBS/$id/job.json")" == "$dir" ]]; then
-      echo "URL: http://$HOST:$STUDIO_PORT/"; echo "JOB: $id"; exit 0
+      echo "URL: http://$HOST:$STUDIO_PORT/$LINK_QS"; echo "JOB: $id"; exit 0
     fi
-    mkdir -p "$dir/.aid-ui"
     tok="$dir/.aid-ui/studio.token"
     (umask 077; od -An -tx1 -N16 /dev/urandom | tr -d ' \n' > "$tok")
     start studio python3 "$STUDIO_PY" --project "$dir" --host "$HOST" --port "$STUDIO_PORT" --token-file "$tok"

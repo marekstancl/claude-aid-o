@@ -64,9 +64,38 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(answer "$choose_a" -H "Origin: $URL" -H "Referer: $URL/")" = 200 ]
 }
 
-@test "the page is served with the session token embedded" {
-  [ "$(code "$URL/")" = 200 ]
-  grep -q "const TOKEN = \"$TOKEN\"" "$BATS_TEST_TMPDIR/body"
+@test "without a cookie or a valid code the page says to open the agent's link and holds no token or state" {
+  [ "$(code "$URL/")" = 403 ]
+  grep -q "Otevřete odkaz ze zprávy agenta" "$BATS_TEST_TMPDIR/body"
+  ! grep -q "$TOKEN" "$BATS_TEST_TMPDIR/body"
+  ! grep -q "Vyberte směr" "$BATS_TEST_TMPDIR/body"
+  [ "$(code "$URL/?k=wrongcode")" = 403 ]
+  ! grep -q "$TOKEN" "$BATS_TEST_TMPDIR/body"
+}
+
+@test "the one-time code works once: cookie set, redirect to /, page without the token; reuse refused" {
+  echo 99887766554433221100aabbccddeeff > "$P/.aid-ui/studio.code"
+  J="$BATS_TEST_TMPDIR/jar"
+  curl -s -D "$BATS_TEST_TMPDIR/h" -o /dev/null -c "$J" "$URL/?k=99887766554433221100aabbccddeeff"
+  grep -q '^HTTP/1.[01] 303' "$BATS_TEST_TMPDIR/h"
+  grep -qi '^location: /\s*$' "$BATS_TEST_TMPDIR/h"
+  grep -qi '^set-cookie: aid_studio=.*HttpOnly.*SameSite=Strict' "$BATS_TEST_TMPDIR/h"
+  [ ! -e "$P/.aid-ui/studio.code" ]
+  [ "$(code -b "$J" "$URL/")" = 200 ]
+  grep -q "AID studio" "$BATS_TEST_TMPDIR/body"
+  ! grep -q "$TOKEN" "$BATS_TEST_TMPDIR/body"
+  [ "$(code -b "$J" "$URL/state")" = 200 ]                                          # the page works via the cookie
+  [ "$(code "$URL/?k=99887766554433221100aabbccddeeff")" = 403 ]                    # used once
+}
+
+@test "the session cookie authorises POST /answer; the header token still works for GET /answer" {
+  echo 00112233445566778899aabbccddeeff > "$P/.aid-ui/studio.code"
+  J="$BATS_TEST_TMPDIR/jar"
+  curl -s -o /dev/null -c "$J" "$URL/?k=00112233445566778899aabbccddeeff"
+  [ "$(code -b 'aid_studio=forged' -H 'Content-Type: application/json' -d "$choose_a" "$URL/answer")" = 403 ]
+  [ "$(code -b "$J" -H 'Content-Type: application/json' -H "Origin: $URL" -d "$choose_a" "$URL/answer")" = 200 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 200 ]
+  [ "$(jq -r .choice "$BATS_TEST_TMPDIR/body")" = a ]
 }
 
 @test "an answer before opened_at is ignored: 409 while not open, and an older answer does not count for a reopened round" {

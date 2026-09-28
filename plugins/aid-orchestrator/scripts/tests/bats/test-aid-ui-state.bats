@@ -36,12 +36,44 @@ setup() {
   RES="$PROJ/.aid-ui/verify/result.json"
 }
 
-teardown() { [[ -z "${SPID:-}" ]] || kill "$SPID" 2>/dev/null || true; }
+teardown() {
+  [[ -z "${SPID:-}" ]] || kill "$SPID" 2>/dev/null || true
+  [[ -z "${STUDIO_PID:-}" ]] || kill "$STUDIO_PID" 2>/dev/null || true
+}
 
 jqw() { jq "$@" "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"; }
 
-# ans <id> <kind> <target> [decision] — an answer as record-answer stores it
+# studio — the real studio server for this test (started once), with an empty payload
+studio() {
+  [[ -z "${STUDIO_PID:-}" ]] || return 0
+  STOKEN=0123456789abcdef0123456789abcdef
+  mkdir -p "$PROJ/.aid-ui/studio"; echo "$STOKEN" > "$PROJ/.aid-ui/studio.token"
+  echo '{"questions": [], "cards": []}' > "$PROJ/.aid-ui/studio/payload.json"
+  local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  export AID_UI_STUDIO_URL="http://127.0.0.1:$port"
+  python3 "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/server.py" --project "$PROJ" --host 127.0.0.1 --port "$port" \
+    --token-file "$PROJ/.aid-ui/studio.token" >"$T/studio.log" 2>&1 3>&- &
+  STUDIO_PID=$!
+  local i; for i in $(seq 1 50); do curl -s -o /dev/null "$AID_UI_STUDIO_URL/" && return 0; sleep 0.1; done
+  return 1
+}
+
+# ans <id> <kind> <target> [decision] — the PM answers question <id> on the real
+# studio and the agent records it (record-answer)
 ans() {
+  studio
+  local p="$PROJ/.aid-ui/studio/payload.json" d="${4:-approve}"
+  jq --arg q "$1" --arg k "$2" --arg t "$3" '.questions += [{id: $q, kind: $k, target: $t, opened_at: "2020-01-01T00:00:00Z"}]
+    | .cards += [{id: "x", question: $q}]' "$p" > "$p.t" && mv "$p.t" "$p"
+  curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg q "$1" --arg k "$2" --arg t "$3" --arg d "$d" \
+          '{question: $q, kind: $k, target: $t, decision: $d, choice: "x", comment: "PM"}')" "$AID_UI_STUDIO_URL/answer"
+  "$SCRIPT" record-answer "$PROJ" --question "$1" >/dev/null
+}
+
+# forge <id> <kind> <target> — an answer written straight into the state and
+# .aid-ui/answers/, never given on the studio
+forge() {
   mkdir -p "$PROJ/.aid-ui/answers"
   printf '{"question":"%s","kind":"%s","decision":"%s","comment":"PM"}\n' "$1" "$2" "${4:-approve}" > "$PROJ/.aid-ui/answers/$1.json"
   jqw --arg q "$1" --arg k "$2" --arg t "$3" --arg d "${4:-approve}" \
@@ -746,4 +778,39 @@ JSON
   run "$SCRIPT" build-record "$PROJ" "$T/other"
   [ "$status" -eq 1 ]
   [ "$(jq .build "$STATE")" = null ]
+}
+
+# --- P103 EPIC review round 1 ----------------------------------------------
+
+@test "a state-file answer the studio never gave, one that differs from the studio's, or no studio: the mutation refuses" {
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  studio
+  forge f1 approve_page "index.html@$(fp index.html)"
+  cp "$STATE" "$T/before.json"
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer f1
+  [ "$status" -eq 1 ]; [[ "$output" == *"studio does not hold answer f1"* ]]
+  cmp "$STATE" "$T/before.json"
+  # the PM returned the page; the agent rewrites the recorded decision to approve
+  ans r1 approve_page "index.html@$(fp index.html)" return
+  jqw '.answers.r1.decision = "approve"'
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer r1
+  [ "$status" -eq 1 ]; [[ "$output" == *"differs from the recorded one"* ]]
+  # a genuine answer, but the studio is gone at mutation time
+  ans a1 approve_page "index.html@$(fp index.html)"
+  kill "$STUDIO_PID"; wait "$STUDIO_PID" 2>/dev/null || true
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer a1
+  [ "$status" -eq 1 ]; [[ "$output" == *"studio unreachable"* ]]
+  [ "$(jq '.approvals | length' "$STATE")" = 0 ]
+}
+
+@test "two concurrent approve-page with the same answer: exactly one succeeds" {
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  ans a1 approve_page "index.html@$(fp index.html)"
+  "$SCRIPT" approve-page "$PROJ" index.html --answer a1 >"$T/o1" 2>&1 3>&- & p1=$!
+  "$SCRIPT" approve-page "$PROJ" index.html --answer a1 >"$T/o2" 2>&1 3>&- & p2=$!
+  r1=0; wait "$p1" || r1=$?
+  r2=0; wait "$p2" || r2=$?
+  [ $(( (r1 == 0) + (r2 == 0) )) -eq 1 ]
+  cat "$T/o1" "$T/o2" | grep -q "already used"
+  [ "$(jq -c .consumed "$STATE")" = '["a1"]' ]
 }

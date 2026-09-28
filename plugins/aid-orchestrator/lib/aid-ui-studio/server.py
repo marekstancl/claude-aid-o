@@ -19,18 +19,23 @@ its question is open again.
 
 Routes (every request must pass ours(): Host is this server; Origin/Referer, when
 sent, name the same origin; else 403):
-  GET  /                      studio.html with the session token embedded
-  GET  /state                 [X-AID-Token] payload + per-question `answered`
+  GET  /?k=<code>             the one-time PM link: a k equal to <token dir>/studio.code
+                              (written by aid-ui-serve.sh, removed here on use) sets
+                              an HttpOnly SameSite=Strict session cookie and redirects
+                              to /; a used or wrong code gets the no-access page
+  GET  /                      studio.html with a session cookie; without one a page
+                              "Otevřete odkaz ze zprávy agenta" (no token, no state)
+  GET  /state                 [auth] payload + per-question `answered`
   GET  /preview?question=&card=  the card's preview file, 404 while pending
   GET  /report                <project>/docs/design/soulad-se-standardy.md, escaped
   GET  /licence               Impeccable NOTICE (the page pattern's source)
-  POST /answer                [X-AID-Token] JSON {question, kind, target, decision,
+  POST /answer                [auth] JSON {question, kind, target, decision,
                               choice, comment}; kind and target must be the open
                               question's own (a stale page gets 409).
                               200 recorded; 409 = question closed, superseded
                               (not in the payload), not yet open (opened_at in the
                               future) or already answered; 422 = malformed answer.
-  GET  /answer?question=<id>  [X-AID-Token] {question, kind, target, decision,
+  GET  /answer?question=<id>  [auth] {question, kind, target, decision,
                               choice, comment, at}, only for an answer given after
                               the question's current opened_at with its current
                               kind and target; a re-roll adds `next_question`.
@@ -38,9 +43,10 @@ sent, name the same origin; else 403):
 A re-roll (reroll_safer|reroll_bolder, steer text in `comment`) closes its
 question and opens a new one in memory: id `<base>.r<n+1>`, same kind and target,
 opened_at now; the agent lists that id in the payload with the new cards.
-Missing or wrong token: 403 {"error": "token"}.
+[auth] = the X-AID-Token header (the agent) or the session cookie (the PM's page).
+Neither: 403 {"error": "token"}.
 """
-import argparse, html, json, os, re, sys, threading
+import argparse, hmac, html, json, os, re, secrets, sys, threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
@@ -63,6 +69,7 @@ args = ap.parse_args()
 PORT = int(args.port)
 PROJECT = os.path.realpath(args.project)
 STUDIO = os.path.join(PROJECT, ".aid-ui", "studio")
+CODE_FILE = os.path.join(os.path.dirname(os.path.abspath(args.token_file)), "studio.code")
 with open(args.token_file) as f:
     TOKEN = f.read().strip()
 if not re.fullmatch(r"[A-Za-z0-9]{16,}", TOKEN):
@@ -71,7 +78,26 @@ OWN = {"%s:%d" % (h, PORT) for h in (args.host, "127.0.0.1", "localhost")}
 
 ANSWERS = {}   # question id -> answer dict
 REROLLED = {}  # question id opened by a re-roll -> question dict (until restart)
+SESSIONS = set()  # session cookie values handed out through a one-time code
 LOCK = threading.Lock()
+NO_ACCESS = ('<!doctype html><meta charset="utf-8"><meta name="viewport" '
+             'content="width=device-width,initial-scale=1"><title>Studio</title>'
+             '<p style="font:18px/1.5 system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem">'
+             'Otevřete odkaz ze zprávy agenta.</p>')
+
+
+def take_code(k):
+    """True once for the code in CODE_FILE; the file is removed on use."""
+    with LOCK:
+        try:
+            with open(CODE_FILE) as f:
+                code = f.read().strip()
+        except OSError:
+            return False
+        if not (k and code and hmac.compare_digest(k, code)):
+            return False
+        os.remove(CODE_FILE)
+        return True
 
 
 def now():
@@ -156,11 +182,21 @@ class Studio(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def session(self):
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "aid_studio" and v in SESSIONS:
+                return True
+        return False
+
+    def authed(self):
+        return hmac.compare_digest(self.headers.get("X-AID-Token") or "", TOKEN) or self.session()
+
     def gate(self, token):
         if not self.ours():
             self.send(403, {"error": "request not addressed to this studio"})
             return False
-        if token and self.headers.get("X-AID-Token") != TOKEN:
+        if token and not self.authed():
             self.send(403, {"error": "token"})
             return False
         return True
@@ -179,8 +215,25 @@ class Studio(BaseHTTPRequestHandler):
         if u.path == "/":
             if not self.gate(False):
                 return
+            if "k" in q:
+                if not take_code(q["k"]):
+                    self.send(403, NO_ACCESS, "text/html; charset=utf-8")
+                    return
+                sid = secrets.token_hex(32)
+                with LOCK:
+                    SESSIONS.add(sid)
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.send_header("Set-Cookie", "aid_studio=%s; HttpOnly; SameSite=Strict; Path=/" % sid)
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            if not self.session():
+                self.send(403, NO_ACCESS, "text/html; charset=utf-8")
+                return
             with open(os.path.join(HERE, "studio.html"), encoding="utf-8") as f:
-                self.send(200, f.read().replace("__AID_TOKEN__", TOKEN), "text/html; charset=utf-8")
+                self.send(200, f.read(), "text/html; charset=utf-8")
         elif u.path == "/state":
             if not self.gate(True) or (p := self.payload()) is None:
                 return

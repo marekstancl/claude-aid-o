@@ -25,7 +25,12 @@
 #
 #   Mutations that need the PM take --answer <question id>. The answer must be recorded,
 #   of the verb's kind, for exactly the requested target, decided approve|choose, not in
-#   `consumed`, its file unchanged; the mutation then consumes it. Targets:
+#   `consumed`, its file unchanged, and the live studio must still give it (GET /answer as
+#   record-answer does, same URL rule) with the same question, kind, target and decision;
+#   studio unreachable or a mismatch -> exit 1. The mutation then consumes it. This
+#   guards against an agent skipping or misapplying the PM's answer, not against one that
+#   deliberately forges files and the server. Every verb but build-id holds an flock
+#   on docs/design/brand-state.json.lock across its read-check-write. Targets:
 #     set variant|structure|content-plan <json>   kind variant|structure|content_plan,
 #                          target sha256:<sha256 of `jq -S -c -j . <<<json`> (no newline)
 #     approve-page <project> <page>               kind approve_page, target <page>@<fingerprint
@@ -117,6 +122,13 @@ BRAND="$PROJECT/docs/brand"
 HTML="$BRAND/index.html"
 STATE="$PROJECT/docs/design/brand-state.json"
 OLD="$BRAND/state.json"   # P101 location, migrated by init
+if [[ "$VERB" != build-id ]]; then   # one mutation at a time: the answer check and the write are one step
+  [[ "$VERB" != init ]] || mkdir -p "${STATE%/*}"
+  if [[ -d "${STATE%/*}" ]]; then
+    exec 9>"$STATE.lock"
+    flock -w 60 9 || { echo "ERROR: aid-ui-state.sh: $STATE is locked by another aid-ui-state.sh for 60 s" >&2; exit 1; }
+  fi
+fi
 
 need_state() { [[ -f "$STATE" ]] || die "no $STATE; run: aid-ui-state.sh init $PROJECT"; }
 
@@ -505,6 +517,29 @@ take_answer() {
   why="${why#ok }"; sha="${why%% *}"; file="${why#* }"
   [[ -f "$PROJECT/$file" && "$(sha256sum "$PROJECT/$file" | cut -d' ' -f1)" == "$sha" ]] ||
     die "$VERB refused: the answer file $file changed or is missing since it was recorded"
+  local body; body="$(tmpfile live-answer.json)"
+  studio_fetch "$ANSWER" "$body" "$VERB refused: answer $ANSWER cannot be confirmed with the studio"
+  [[ "$STUDIO_CODE" == 200 ]] || { rm -f "$body"; die "$VERB refused: the studio does not hold answer $ANSWER (HTTP $STUDIO_CODE); the recorded answer is not confirmed by the PM's page"; }
+  jq -e --arg id "$ANSWER" --argjson s "$(jq -c --arg id "$ANSWER" '.answers[$id]' "$STATE")" \
+    'type == "object" and .question == $id and .kind == $s.kind and .target == $s.target and .decision == $s.decision' \
+    "$body" >/dev/null 2>&1 || { rm -f "$body"; die "$VERB refused: the studio's answer $ANSWER differs from the recorded one"; }
+  rm -f "$body"
+}
+
+# studio_fetch <question id> <body file> <what happens on failure> — GET /answer from
+# the studio with the token on curl's stdin; sets STUDIO_URL and STUDIO_CODE (HTTP status).
+# No token, a URL outside the allowlist or an unreachable studio -> exit 1.
+studio_fetch() {
+  local qid="$1" body="$2" tokf="$PROJECT/.aid-ui/studio.token" host rc=0
+  [[ -r "$tokf" ]] || { rm -f "$body"; die "no studio token $tokf; start the studio (aid-ui-serve.sh studio); $3"; }
+  host="${AID_UI_HOST:-10.20.20.22}"
+  STUDIO_URL="${AID_UI_STUDIO_URL:-http://$host:${AID_UI_STUDIO_PORT:-3915}}"
+  [[ "$STUDIO_URL" =~ ^http://([^/:@]+)(:[0-9]+)?/?$ ]] &&
+    [[ "${BASH_REMATCH[1]}" == 127.0.0.1 || "${BASH_REMATCH[1]}" == localhost || "${BASH_REMATCH[1]}" == "$host" ]] ||
+    { rm -f "$body"; die "studio URL refused (only http://127.0.0.1, http://localhost or http://$host, any port): $STUDIO_URL"; }
+  STUDIO_CODE="$(printf 'X-AID-Token: %s\n' "$(<"$tokf")" | curl -sS --max-time 10 -o "$body" -w '%{http_code}' -H @- \
+    -- "${STUDIO_URL%/}/answer?question=$qid")" || rc=$?
+  [[ "$rc" -eq 0 ]] || { rm -f "$body"; die "studio unreachable at $STUDIO_URL (curl exit $rc); $3"; }
 }
 
 json_sha() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
@@ -542,23 +577,15 @@ case "$VERB" in
     qid="$(opt question "$@")"
     [[ "$qid" =~ ^[A-Za-z0-9._-]+$ ]] || usage "record-answer needs --question <id> (letters, digits, . _ -)"
     jq -e --arg q "$qid" 'any(.consumed[]?; . == $q)' "$STATE" >/dev/null && die "answer $qid is already used; it is not recorded again"
-    tokf="$PROJECT/.aid-ui/studio.token"
-    [[ -r "$tokf" ]] || die "no studio token $tokf; start the studio (aid-ui-serve.sh studio); $qid stays pending"
+    [[ -r "$PROJECT/.aid-ui/studio.token" ]] || die "no studio token $PROJECT/.aid-ui/studio.token; start the studio (aid-ui-serve.sh studio); $qid stays pending"
     pq="$(jq -c --arg q "$qid" 'first(.questions[]? | select(.id == $q and (.opened_at | type) == "string"))
       | {kind, target, opened_at}' "$PROJECT/.aid-ui/studio/payload.json" 2>/dev/null)" || pq=""
     [[ -n "$pq" ]] || die "question $qid is not listed in .aid-ui/studio/payload.json; nothing recorded"
     opened="$(jq -r .opened_at <<<"$pq")"
-    host="${AID_UI_HOST:-10.20.20.22}"
-    url="${AID_UI_STUDIO_URL:-http://$host:${AID_UI_STUDIO_PORT:-3915}}"
-    [[ "$url" =~ ^http://([^/:@]+)(:[0-9]+)?/?$ ]] &&
-      [[ "${BASH_REMATCH[1]}" == 127.0.0.1 || "${BASH_REMATCH[1]}" == localhost || "${BASH_REMATCH[1]}" == "$host" ]] ||
-      die "studio URL refused (only http://127.0.0.1, http://localhost or http://$host, any port): $url"
     body="$(tmpfile answer.json)"
-    rc=0; code="$(printf 'X-AID-Token: %s\n' "$(<"$tokf")" | curl -sS --max-time 10 -o "$body" -w '%{http_code}' -H @- \
-      -- "${url%/}/answer?question=$qid")" || rc=$?
-    [[ "$rc" -eq 0 ]] || { rm -f "$body"; die "studio unreachable at $url (curl exit $rc); $qid stays pending, nothing recorded"; }
-    [[ "$code" != 404 ]] || { rm -f "$body"; die "no answer to $qid yet; it stays pending: $url"; }
-    [[ "$code" == 200 ]] || { rm -f "$body"; die "the studio answered HTTP $code for $qid; nothing recorded"; }
+    studio_fetch "$qid" "$body" "$qid stays pending, nothing recorded"
+    [[ "$STUDIO_CODE" != 404 ]] || { rm -f "$body"; die "no answer to $qid yet; it stays pending: $STUDIO_URL"; }
+    [[ "$STUDIO_CODE" == 200 ]] || { rm -f "$body"; die "the studio answered HTTP $STUDIO_CODE for $qid; nothing recorded"; }
     ans="$(jq -ec --arg q "$qid" 'select(type == "object" and .question == $q and (.kind | type) == "string"
       and has("target") and (.decision | type) == "string" and (.at | type) == "string")' "$body" 2>/dev/null)" ||
       { rm -f "$body"; die "malformed answer from the studio for $qid; nothing recorded"; }

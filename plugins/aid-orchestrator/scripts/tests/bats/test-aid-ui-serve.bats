@@ -40,27 +40,38 @@ get() { curl -sf --max-time 3 "http://127.0.0.1:$1/"; }
 @test "studio serves the page on the studio port with a fresh token in the project" {
   run "$SERVE" studio "$BATS_TEST_TMPDIR/proj"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"URL: http://127.0.0.1:39915/"* ]]
+  code="$(cat "$BATS_TEST_TMPDIR/proj/.aid-ui/studio.code")"
+  [[ "$code" =~ ^[0-9a-f]{32}$ ]]
+  [[ "$output" == *"URL: http://127.0.0.1:39915/?k=$code"* ]]
   [[ "$output" == *"JOB: aid-ui-studio-39915"* ]]
   tok="$(cat "$BATS_TEST_TMPDIR/proj/.aid-ui/studio.token")"
   [[ "$tok" =~ ^[0-9a-f]{32}$ ]]
   [ "$(stat -c %a "$BATS_TEST_TMPDIR/proj/.aid-ui/studio.token")" = 600 ]
-  get 39915 | grep -q "const TOKEN = \"$tok\""
+  [ "$(stat -c %a "$BATS_TEST_TMPDIR/proj/.aid-ui/studio.code")" = 600 ]
+  ! get 39915                                   # no link, no page
+  curl -s --max-time 3 "http://127.0.0.1:39915/" | grep -q "Otevřete odkaz ze zprávy agenta"
+  curl -s --max-time 3 -L -c "$BATS_TEST_TMPDIR/jar" -b "$BATS_TEST_TMPDIR/jar" "http://127.0.0.1:39915/?k=$code" | grep -q "AID studio"
+  ! grep -rq "$tok" <(curl -s --max-time 3 -b "$BATS_TEST_TMPDIR/jar" "http://127.0.0.1:39915/")
   [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 -H "X-AID-Token: $tok" http://127.0.0.1:39915/state)" = 200 ]
 }
 
 @test "studio twice keeps the server and its token; studio after stop studio gets a new token" {
   "$SERVE" studio "$BATS_TEST_TMPDIR/proj"
   tok="$(cat "$BATS_TEST_TMPDIR/proj/.aid-ui/studio.token")"
+  code1="$(cat "$BATS_TEST_TMPDIR/proj/.aid-ui/studio.code")"
   run "$SERVE" studio "$BATS_TEST_TMPDIR/proj"
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/proj/.aid-ui/studio.token")" = "$tok" ]
+  code2="$(cat "$BATS_TEST_TMPDIR/proj/.aid-ui/studio.code")"
+  [ "$code2" != "$code1" ]
+  [[ "$output" == *"URL: http://127.0.0.1:39915/?k=$code2"* ]]
+  curl -s --max-time 3 -L -c "$BATS_TEST_TMPDIR/jar" -b "$BATS_TEST_TMPDIR/jar" "http://127.0.0.1:39915/?k=$code2" | grep -q "AID studio"
   run "$SERVE" stop studio
   [ "$status" -eq 0 ]
   run get 39915; [ "$status" -ne 0 ]
   "$SERVE" studio "$BATS_TEST_TMPDIR/proj"
   [ "$(cat "$BATS_TEST_TMPDIR/proj/.aid-ui/studio.token")" != "$tok" ]
-  get 39915 | grep -q "AID studio"
+  curl -s --max-time 3 -L -c "$BATS_TEST_TMPDIR/jar2" -b "$BATS_TEST_TMPDIR/jar2" "http://127.0.0.1:39915/?k=$(cat "$BATS_TEST_TMPDIR/proj/.aid-ui/studio.code")" | grep -q "AID studio"
   ls -d "$AID_UI_JOBS_DIR"/aid-ui-studio-39915.superseded-*
 }
 

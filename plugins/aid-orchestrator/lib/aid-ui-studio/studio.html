@@ -87,7 +87,6 @@
 </footer>
 <script>
 "use strict";
-const TOKEN = "__AID_TOKEN__";
 const KIND = { variant: "Varianta", vision: "Vize", identity: "Identita", seo_brief: "SEO zadání",
   structure: "Struktura", task_map: "Mapa úloh", content_plan: "Plán obsahu", defer_content: "Odložený obsah",
   facts: "Fakta", references: "Reference", direction: "Směr", approve_page: "Schválení stránky",
@@ -111,12 +110,12 @@ function notice(text) {
 }
 
 async function call(method, url, body) {
-  const r = await fetch(url, { method, headers: { "X-AID-Token": TOKEN, "Content-Type": "application/json" },
+  const r = await fetch(url, { method, credentials: "same-origin", headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined });
   const data = await r.json().catch(() => ({}));
   if (r.status === 403 && data.error === "token") {
     stopped = true;
-    notice("Stránka se změnila, obnovte ji.");
+    notice("Přístup vypršel. Otevřete odkaz ze zprávy agenta.");
     throw new Error("token");
   }
   return { status: r.status, data };
