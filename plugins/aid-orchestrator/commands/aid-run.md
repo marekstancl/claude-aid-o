@@ -59,6 +59,13 @@ Escalation rules for `--auto`:
   `timeline.jsonl`, then continue. Do not ask the PM to choose between technical A/B/C options.
 - **PM-authority decisions only** (product intent, material scope expansion, destructive or
   externally visible action, security risk acceptance, secret/credential access) → pause for PM.
+- **The PM says "don't ask, finish it"** (any wording of it): record it ONCE for the plan —
+  `bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" standing --checkpoint cp2|cp3 --evidence-dir <run dir> --reason "<the PM's words>"`.
+  Every step and EPIC review of the plan may then run up to two fix-and-confirm rounds after its
+  budget (fix the finding, `prepare` the next round) before anything is routed to the PM; a round
+  that re-opens the same findings still stops. Never record it on your own judgment.
+- **"AID: this session runs plugin X, but Y is installed"** in context: run `/reload-plugins`
+  before dispatching any agent — the old agent cards lack the newer rules (P103).
 - **"no verdict" from Claude Code's permission check** (the auto-mode classifier failed, the
   command did not run) is transient and not a PM decision: wait about a minute and run the SAME
   command again, up to 5 times, before a Blocked card; say so in one line (P103, 28. 9. 2026).

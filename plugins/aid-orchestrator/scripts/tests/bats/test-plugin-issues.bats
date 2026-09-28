@@ -124,3 +124,24 @@ EOF
   [[ "$output" == *"čeká na důkaz:"*"line 16: 4. review took a third round (výskytů: 2) -> posoudit znovu"* ]]
   [ "$(find "$T/projects" -type f -exec sha256sum {} + | sort)" = "$before" ]
 }
+
+# ── plugin version notice (P103: a session on 2.108.0 cards under an installed 2.109.0) ──
+@test "version notice: silent when the loaded plugin is the installed one, names both and /reload-plugins when not" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-plugin-version.sh"
+  local v; v="$(jq -r .version "$AID_PLUGIN_PATH/.claude-plugin/plugin.json")"
+  local f="$BATS_TEST_TMPDIR/installed.json"
+  jq -n --arg v "$v" '{version:2, plugins:{"aid-orchestrator@claude-aid-o":[{scope:"user", version:$v}]}}' > "$f"
+  AID_INSTALLED_PLUGINS_JSON="$f" run aid_plugin_version_notice_handler <<< '{}'
+  [ "$status" -eq 0 ]; [[ "$output" != *"/reload-plugins"* ]]
+  jq -n '{version:2, plugins:{"aid-orchestrator@claude-aid-o":[{scope:"project", version:"0.0.1"},{scope:"user", version:"99.0.0"}]}}' > "$f"
+  AID_INSTALLED_PLUGINS_JSON="$f" run aid_plugin_version_notice_handler <<< '{}'
+  [ "$status" -eq 0 ]; [[ "$output" == *"runs plugin ${v}, but 99.0.0 is installed"*"/reload-plugins"* ]]
+  AID_INSTALLED_PLUGINS_JSON="$BATS_TEST_TMPDIR/missing.json" run aid_plugin_version_notice_handler <<< '{}'
+  [ "$status" -eq 3 ]; [[ "$output" != *"/reload-plugins"* ]]
+}
+
+@test "version notice: registered on SessionStart and UserPromptSubmit with the same handler" {
+  run yq -r '.rules[] | select(.id | test("^plugin_version_notice_")) | .event + " " + .handler' "$AID_PLUGIN_PATH/defaults/hook-registry.yaml"
+  [[ "$output" == *"SessionStart aid_plugin_version_notice_handler"* ]]
+  [[ "$output" == *"UserPromptSubmit aid_plugin_version_notice_handler"* ]]
+}
