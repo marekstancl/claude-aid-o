@@ -65,8 +65,10 @@ section > h2 { display: flex; align-items: baseline; gap: .8rem; flex-wrap: wrap
 .body figure img { border: 1px solid var(--p-rule); border-radius: 6px; }
 .body figcaption { font-size: .8125rem; color: var(--p-muted); margin-top: .4rem; }
 /* Chapter helpers: a row of figures (logo sizes, icons) and a dark tile for on-dark variants. */
-.body .row { display: flex; flex-wrap: wrap; gap: 2rem; align-items: flex-end; }
+.body .row { display: flex; flex-wrap: wrap; gap: 2rem; align-items: flex-start; }
 .body .row figure { margin: 0; }
+/* a full-page screenshot shows its top; the whole page opens from the link around it */
+.body figure img { max-height: 32rem; object-fit: cover; object-position: top; }
 .body .on-dark { background: oklch(20% 0 0); padding: 1rem; border-radius: 8px; }
 .body .on-dark figcaption { color: oklch(85% 0 0); }
 .swatch { display: inline-flex; flex-direction: column; justify-content: flex-end; width: 7rem; height: 5rem; margin: 0 .5rem .5rem 0; padding: .4rem .5rem; border: 1px solid var(--p-rule); border-radius: 6px; vertical-align: top; font: .6875rem/1.3 var(--p-mono); }

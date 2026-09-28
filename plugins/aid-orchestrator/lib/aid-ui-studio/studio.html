@@ -500,7 +500,10 @@ function question(q, cards) {
   let meta = null;
   if (page) {
     const t = String(q.target), at = t.lastIndexOf("@");
-    meta = el("div", { class: "identity" }, el("span", { class: "tag" }, "stránka ", el("b", {}, at > 0 ? t.slice(0, at) : t)));
+    // the build file (index.html, kontakt/index.html) as the address a visitor sees (/, /kontakt/)
+    const file = at > 0 ? t.slice(0, at) : t;
+    const addr = "/" + file.replace(/(^|\/)index\.html$/, "$1").replace(/\.html$/, "");
+    meta = el("div", { class: "identity" }, el("span", { class: "tag" }, "adresa ", el("b", {}, addr)));
   }
   const body = el("div", { class: "body" },
     el("p", { class: "tier" }, kind),
