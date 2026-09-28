@@ -210,14 +210,18 @@ const FACT_RE = /(\+?\d[\d ]{7,}\d)|(\d[\d  ]*(?:[.,]\d+)?\s?(?:Kč|CZK|€|EUR)
 async function pageRows(ctx, url, key, role, state, run, facts, brand) {
   const page = await ctx.newPage();
   const bad = [], imgs = [];
-  page.on('requestfailed', r => bad.push(`failed ${r.url()}`));
+  // a request the page itself cancelled by navigating away (a redirect to the login screen) is not a broken resource
+  page.on('requestfailed', r => { if (!/ABORTED|cancel/i.test(r.failure()?.errorText || '')) bad.push(`failed ${r.url()}`); });
   let bytes = 0;
   page.on('response', async r => {
     bytes += Number(r.headers()['content-length'] || (await r.body().catch(() => Buffer.alloc(0))).length) || 0;
     if (r.status() >= 400 && r.url() !== url) bad.push(`${r.status()} ${r.url()}`);
     if (r.request().resourceType() === 'image') {
       const len = Number(r.headers()['content-length'] || (await r.body().catch(() => Buffer.alloc(0))).length);
-      imgs.push({ url: r.url(), type: r.headers()['content-type'] || '', len });
+      // a 304 from the cache carries no content-type: the file extension stands in
+      const ext = { webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml', ico: 'image/x-icon', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif' };
+      const type = r.headers()['content-type'] || ext[(new URL(r.url()).pathname.match(/\.([a-z0-9]+)$/i) || [])[1]?.toLowerCase()] || '';
+      imgs.push({ url: r.url(), type, len });
     }
   });
   const res = {};

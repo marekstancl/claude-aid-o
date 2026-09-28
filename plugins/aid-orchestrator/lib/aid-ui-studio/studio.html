@@ -436,12 +436,19 @@ function bodyLines(b) {
   return el("pre", { class: "body-json" }, JSON.stringify(b, null, 2));
 }
 
+// gate check names (coverage/checks.yaml) in plain Czech for the exception chips
+const CHECK_CS = { http_200: "Stránky odpovídají", glyph_coverage: "Písmo a diakritika", no_overflow: "Posun do strany",
+  one_line_controls: "Tlačítka na jeden řádek", no_placeholders: "Zástupné texty", facts_match: "Fakta z registru",
+  brand_assets: "Logo a ikony ze značky", links_resources: "Odkazy a soubory", required_files: "Povinné soubory",
+  axe: "Přístupnost", image_weight: "Váha obrázků", lighthouse_mobile: "Rychlost na mobilu", seo: "Hledání na Googlu",
+  app_task_states: "Úlohy a stavy aplikace", screenshots_reviewed: "Kontrola snímků", no_overlap: "Překryvy",
+  brand_consistency: "Jednotná značka", page_weight: "Váha stránky", business_minimum: "IČO a zpracování údajů" };
 function selectorChips(target) {
   let sel = null;
   try { sel = JSON.parse(target); } catch (e) { /* shown raw below */ }
   if (!sel || typeof sel !== "object") return el("div", { class: "identity" }, el("span", { class: "tag" }, String(target)));
   return el("div", { class: "identity" }, Object.entries(sel).filter(([, v]) => v !== "*")
-    .map(([k, v]) => el("span", { class: "tag" }, (SELECTOR[k] || k) + " ", el("b", {}, String(v)))));
+    .map(([k, v]) => el("span", { class: "tag" }, (SELECTOR[k] || k) + " ", el("b", {}, k === "check" ? (CHECK_CS[v] || String(v)) : String(v)))));
 }
 
 function question(q, cards) {
