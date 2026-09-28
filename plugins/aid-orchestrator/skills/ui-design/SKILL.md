@@ -67,7 +67,8 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    `sha256:` + `jq -S -c -j . <<<"$json" | sha256sum` přesně toho JSON, který
    pak zapíšeš (JSON vždy v souboru pod `.aid-ui/` psaném nástrojem Write,
    do příkazu jako `"$(cat <soubor>)"`); u převzetí kapitoly
-   `aid-ui-state.sh chapter-target <project> <id>`; u ostatních druhů podle
+   `aid-ui-state.sh chapter-target <project> <id>` (váže id kapitoly i její
+   uložené tělo, odpověď pro jinou kapitolu neplatí); u ostatních druhů podle
    hlavičky `aid-ui-state.sh`.
 3. `aid-ui-serve.sh studio <project>` (spustí nebo použije běžící studio)
    vypíše jednorázový odkaz `URL: http://<host>:3915/?k=<kód>`; ten dej PM

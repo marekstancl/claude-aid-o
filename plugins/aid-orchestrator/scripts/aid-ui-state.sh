@@ -38,14 +38,16 @@
 #     set refs <json>      kind references, target sha256:<canonical refs JSON> (as above);
 #                          <json> = the shown cards [{"id": <card id>, "url", "why"}]; the answer
 #                          must be `choose` with its choice (one card id or a list) among the ids;
+#                          card ids must be non-empty and unique (else exit 1, nothing written);
 #                          picked = id in the choice (set by this script, never by the caller)
 #     chapter <project> <id> schvaleno            kind by chapter: vize vision, logo identity,
 #                          seo seo_brief, struktura structure, obsah content_plan, produkt
 #                          variant, smer direction, barvy typografie komponenty platformy
 #                          ukazky kvalita schvaleni design_standard; target = what
 #                          `chapter-target <project> <id>` prints: sha256:<sha256 of the
-#                          stored body, the bytes between <!-- body:<id> --> and
-#                          <!-- /body:<id> -->>. ceka and navrh need no answer.
+#                          chapter id, a newline, then the stored body, the bytes between
+#                          <!-- body:<id> --> and <!-- /body:<id> -->> (the id binds the
+#                          answer to this chapter). ceka and navrh need no answer.
 #     approve-page <project> <page>               kind approve_page, target <page>@<fingerprint
 #                          of the page in the recorded build>; refused when the site changed
 #     defer-content <project> <item id>           kind defer_content, target <item id>;
@@ -566,7 +568,7 @@ chapter_kind() {
   esac
 }
 
-# chapter_target <id> — sha256:<digest of the stored body of chapter <id> in index.html>
+# chapter_target <id> — sha256:<digest of "<id>\n" + the stored body of chapter <id> in index.html>
 chapter_target() {
   [[ -f "$HTML" ]] || die "no $HTML"
   python3 - "$HTML" "$1" <<'PY' || die "no body markers for chapter $1 in $HTML"
@@ -575,7 +577,7 @@ text = open(sys.argv[1], encoding="utf-8").read()
 a, b = "<!-- body:%s -->" % sys.argv[2], "<!-- /body:%s -->" % sys.argv[2]
 i, j = text.find(a), text.find(b)
 if i < 0 or j < i: sys.exit(1)
-print("sha256:" + hashlib.sha256(text[i + len(a):j].encode("utf-8")).hexdigest(), end="")
+print("sha256:" + hashlib.sha256((sys.argv[2] + "\n" + text[i + len(a):j]).encode("utf-8")).hexdigest(), end="")
 PY
 }
 
@@ -660,6 +662,8 @@ case "$VERB" in
         jq -e 'type == "array" and length > 0 and all(.[]; type == "object" and (.id | type) == "string"
                and (.url | type) == "string" and (.why | type) == "string")' >/dev/null <<<"$2" \
           || usage "refs: the shown cards [{\"id\":…,\"url\":…,\"why\":…}]: $2"
+        jq -e 'all(.[]; .id != "") and ([.[].id] | length == (unique | length))' >/dev/null <<<"$2" \
+          || die "set refs refused: card ids must be non-empty and unique: $(jq -c '[.[].id]' <<<"$2")"
         take_answer references "$(json_sha "$2")"
         picks="$(jq -c --arg q "$ANSWER" '.answers[$q] | if .decision == "choose" then [.choice | select(. != null)] | flatten else [] end' "$STATE")"
         jq -e --argjson c "$picks" 'length > 0 and ($c | length > 0) and ([.[].id] as $ids | all($c[]; IN($ids[])))' >/dev/null <<<"$2" ||

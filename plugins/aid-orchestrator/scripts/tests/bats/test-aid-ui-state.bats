@@ -474,6 +474,44 @@ p101_project() {
   [ "$status" -eq 2 ]
 }
 
+@test "two chapters with identical bodies: an answer for one does not approve the other" {
+  echo '<p>stejné</p>' > "$T/s.html"
+  "$SCRIPT" body "$PROJ" barvy --file "$T/s.html"
+  "$SCRIPT" body "$PROJ" typografie --file "$T/s.html"
+  tb="$("$SCRIPT" chapter-target "$PROJ" barvy)"; tt="$("$SCRIPT" chapter-target "$PROJ" typografie)"
+  [ "$tb" != "$tt" ]
+  ans x1 design_standard "$tb"                                    # the PM approved barvy
+  run "$SCRIPT" chapter "$PROJ" typografie schvaleno --answer x1
+  [ "$status" -eq 1 ]; [[ "$output" == *'is for'* ]]
+  [ "$(jq -r .chapters.typografie.status "$STATE")" = ceka ]
+  "$SCRIPT" body "$PROJ" komponenty --file "$T/s.html"
+  run "$SCRIPT" chapter "$PROJ" komponenty schvaleno --answer x1  # a third chapter, same body
+  [ "$status" -eq 1 ]
+  run "$SCRIPT" chapter "$PROJ" barvy schvaleno --answer x1
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .chapters.barvy.status "$STATE")" = schvaleno ]
+  # the target is sha256 of "<id>\n" + the stored body, not of the body alone
+  [ "$tb" = "$(python3 -c 'import hashlib,sys; t=open(sys.argv[1]).read(); a="<!-- body:barvy -->"; b=t[t.find(a)+len(a):t.find("<!-- /body:barvy -->")]; print("sha256:"+hashlib.sha256(("barvy\n"+b).encode()).hexdigest())' "$HTML")" ]
+}
+
+@test "set refs: duplicate or empty card ids exit 1, nothing written, no answer consumed" {
+  dup='[{"id":"x","url":"https://x.example","why":"a"},{"id":"x","url":"https://evil.example","why":"b"}]'
+  ans d1 references "$(sha_of "$dup")" choose
+  run "$SCRIPT" set "$PROJ" refs "$dup" --answer d1
+  [ "$status" -eq 1 ]; [[ "$output" == *'non-empty and unique'* ]]
+  [ "$(jq -c .refs "$STATE")" = '[]' ]
+  [ "$(jq -c .consumed "$STATE")" = '[]' ]
+  dup3='[{"id":"x","url":"https://x.example","why":"a"},{"id":"y","url":"https://y.example","why":"b"},{"id":"x","url":"https://z.example","why":"c"}]'
+  ans d2 references "$(sha_of "$dup3")" choose
+  run "$SCRIPT" set "$PROJ" refs "$dup3" --answer d2
+  [ "$status" -eq 1 ]; [ "$(jq -c .refs "$STATE")" = '[]' ]
+  empty='[{"id":"","url":"https://x.example","why":"a"},{"id":"y","url":"https://y.example","why":"b"}]'
+  ans d3 references "$(sha_of "$empty")" choose
+  run "$SCRIPT" set "$PROJ" refs "$empty" --answer d3
+  [ "$status" -eq 1 ]; [ "$(jq -c .refs "$STATE")" = '[]' ]
+  [ "$(jq -c .consumed "$STATE")" = '[]' ]
+}
+
 @test "set options: validated, needs a variant answer for exactly this JSON, refused after step 0" {
   run "$SCRIPT" set "$PROJ" options '{"vision":true,"colour":true}'
   [ "$status" -eq 2 ]
