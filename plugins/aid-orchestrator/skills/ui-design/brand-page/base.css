@@ -35,11 +35,17 @@ section { padding: 2rem 0; border-top: 1px solid var(--brand-ink, #1a1a1a); }
   border: 1px solid var(--brand-ink, #1a1a1a);
   vertical-align: top;
 }
+/* kvalita / struktura / obsah: short summaries as a <dl> of counts and tables (open exceptions by check and page) */
+.body dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; }
+.body dt { font-weight: 600; }
+.body dd { margin: 0; }
+.body table { border-collapse: collapse; width: 100%; }
+.body th, .body td { text-align: left; padding: 0.25rem 0.5rem; border-bottom: 1px solid var(--brand-ink, #1a1a1a); }
 @media print {
   nav { display: none; }
   section { break-before: page; border-top: 0; }
   /* two full-page screenshots plus the chapter heading fit one A4 page (120mm did not) */
   img { max-height: 100mm; width: auto; max-width: 100%; }
-  img, figure { break-inside: avoid; }
+  img, figure, dl, tr { break-inside: avoid; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

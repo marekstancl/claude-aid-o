@@ -9,7 +9,9 @@ on every request, so the agent opens a round by rewriting it:
   {"steps":     [{"id", "title", "status": "done|current|todo"}],
    "questions": [{"id", "kind", "target", "opened_at": ISO-8601, "title", "prompt", "body"}],
    "cards":     [{"id", "question", "title", "preview", "thesis", "palette": [css colours],
-                  "risk", "uniqueness"}]}
+                  "risk", "uniqueness", "url"}]}
+Every card has a non-empty string id and a string question, and ids are unique per
+question (else the payload is invalid: 422, logged).
 A card's `preview` is a file under <project>/.aid-ui/studio/; until it exists
 GET /preview answers 404 and the page shows the pending slot.
 
@@ -36,17 +38,22 @@ sent, name the same origin; else 403):
                               (not in the payload), not yet open (opened_at in the
                               future) or already answered; 422 = malformed answer.
   GET  /answer?question=<id>  [auth] {question, kind, target, decision,
-                              choice, comment, at}, only for an answer given after
+                              choice, comment, at, cards, cards_sha256}, only for an answer given after
                               the question's current opened_at with its current
                               kind and target; a re-roll adds `next_question`.
                               404 unknown or unanswered.
+`cards` = the question's cards as served when the answer was accepted,
+[{id, title, url, thesis, preview, palette, risk, uniqueness, preview_sha256 (of the
+preview file then, null while pending)}] sorted by id (a missing field is null), held in memory
+with the answer; `cards_sha256` = sha256 of their JSON with keys sorted, no
+whitespace. Editing payload.json afterwards never changes them.
 A re-roll (reroll_safer|reroll_bolder, steer text in `comment`) closes its
 question and opens a new one in memory: id `<base>.r<n+1>`, same kind and target,
 opened_at now; the agent lists that id in the payload with the new cards.
 [auth] = the X-AID-Token header (the agent) or the session cookie (the PM's page).
 Neither: 403 {"error": "token"}.
 """
-import argparse, hmac, html, json, os, re, secrets, sys, threading
+import argparse, hashlib, hmac, html, json, os, re, secrets, sys, threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
@@ -54,6 +61,8 @@ from urllib.parse import urlsplit, parse_qs
 KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "content_plan", "defer_content", "facts", "references", "direction",
          "approve_page", "exception", "coverage_drift", "design_standard"}
+# Card fields the page shows (a step may turn any into state); snapshotted with the answer.
+CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "palette", "risk", "uniqueness")
 DECISIONS = {"approve", "choose", "return", "reroll_safer", "reroll_bolder"}
 # Previews are raster images only: an .html/.svg preview would run script on this origin.
 IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -142,6 +151,14 @@ def load():
             parse_time(q.get("opened_at"))
         except (TypeError, ValueError):
             raise ValueError("payload.json: question %s has no valid opened_at" % q["id"])
+    shown = set()  # (question, card id): a choice names exactly one card the PM saw
+    for c in cards:
+        if not (isinstance(c, dict) and isinstance(c.get("id"), str) and c["id"]
+                and isinstance(c.get("question"), str)):
+            raise ValueError("payload.json: every card needs a non-empty string id and a string question")
+        if (c["question"], c["id"]) in shown:
+            raise ValueError("payload.json: card id %s twice in question %s" % (c["id"], c["question"]))
+        shown.add((c["question"], c["id"]))
     with LOCK:
         qs = qs + [dict(q) for i, q in REROLLED.items() if i not in seen]
     return {"steps": steps, "questions": qs, "cards": cards}
@@ -154,6 +171,15 @@ def valid_answer(q):
             and parse_time(a["at"]) > parse_time(q["opened_at"]):
         return a
     return None
+
+
+def preview_sha(c):
+    """sha256 of the card's preview file as served now, None while pending."""
+    f = os.path.realpath(os.path.join(STUDIO, str(c.get("preview") or "")))
+    if not (c.get("preview") and f.startswith(STUDIO + os.sep) and os.path.isfile(f)):
+        return None
+    with open(f, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
 
 
 def next_id(qid):
@@ -321,8 +347,14 @@ class Studio(BaseHTTPRequestHandler):
             if valid_answer(cur):
                 self.send(409, {"error": "question %s is already answered" % qid})
                 return
+            # The cards as this server shows them now, kept in memory with the answer: a
+            # later payload.json edit cannot change what the PM's choice refers to.
+            cards = sorted((dict({k: c.get(k) for k in CARD_FIELDS}, preview_sha256=preview_sha(c))
+                            for c in p["cards"] if c.get("question") == qid), key=lambda c: c["id"])
             a = {"question": qid, "kind": cur["kind"], "target": cur["target"], "decision": d,
-                 "choice": choice if d == "choose" else None, "comment": comment, "at": iso(t)}
+                 "choice": choice if d == "choose" else None, "comment": comment, "at": iso(t),
+                 "cards": cards, "cards_sha256": hashlib.sha256(json.dumps(
+                     cards, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()}
             if d.startswith("reroll_"):
                 n = next_id(qid)
                 a["next_question"] = n

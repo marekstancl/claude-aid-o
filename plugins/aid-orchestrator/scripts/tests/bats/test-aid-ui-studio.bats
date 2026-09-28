@@ -120,6 +120,28 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(answer '{"question":"q2","kind":"approve_page","target":"home@abc","decision":"approve"}')" = 200 ]   # answers never cross
 }
 
+@test "the answer keeps the cards as served when it was given; a later payload edit does not change them" {
+  jq '.cards[0] += {url: "https://a.example", thesis: "písmo", palette: ["#000"]}' "$P/.aid-ui/studio/payload.json" > "$P/p.t" \
+    && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  printf 'PNG1' > "$P/.aid-ui/studio/a.png"; echo s > "$P/secret"
+  [ "$(answer "$choose_a")" = 200 ]
+  png="$(printf 'PNG1' | sha256sum | cut -d' ' -f1)"
+  want='[{"id":"a","palette":["#000"],"preview":"a.png","preview_sha256":"'"$png"'","risk":null,"thesis":"písmo","title":"A","uniqueness":null,"url":"https://a.example"},{"id":"b","palette":null,"preview":"../../secret","preview_sha256":null,"risk":null,"thesis":null,"title":"B","uniqueness":null,"url":null},{"id":"c","palette":null,"preview":"c.html","preview_sha256":null,"risk":null,"thesis":null,"title":"C","uniqueness":null,"url":null}]'
+  [ "$(jq -S -c .cards "$BATS_TEST_TMPDIR/body")" = "$want" ]
+  sha="$(printf '%s' "$want" | sha256sum | cut -d' ' -f1)"
+  [ "$(jq -r .cards_sha256 "$BATS_TEST_TMPDIR/body")" = "$sha" ]
+  # the agent rewrites the chosen card's url, thesis and preview image, adds a card and drops one
+  printf 'PNG2' > "$P/.aid-ui/studio/a.png"
+  jq '.cards[0] += {url: "https://evil.example", thesis: "jiné"} | .cards[1].title = "X" | .cards |= (.[0:2] + [{id: "d", question: "q1"}])' \
+    "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 200 ]
+  [ "$(jq -S -c .cards "$BATS_TEST_TMPDIR/body")" = "$want" ]
+  [ "$(jq -r .cards_sha256 "$BATS_TEST_TMPDIR/body")" = "$sha" ]
+  # a question without cards keeps an empty list
+  [ "$(answer '{"question":"q2","kind":"approve_page","target":"home@abc","decision":"approve"}')" = 200 ]
+  [ "$(jq -c .cards "$BATS_TEST_TMPDIR/body")" = '[]' ]
+}
+
 @test "an answer for another kind or target, a superseded question or a foreign card is refused" {
   [ "$(answer '{"question":"q1","kind":"variant","target":"home@abc","decision":"choose","choice":"a"}')" = 409 ]
   [ "$(answer '{"question":"q1","kind":"direction","target":"home@old","decision":"choose","choice":"a"}')" = 409 ]
@@ -184,6 +206,23 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
     grep -qi '^x-frame-options: DENY' "$BATS_TEST_TMPDIR/h"
     grep -qi "^content-security-policy: .*frame-ancestors 'none'" "$BATS_TEST_TMPDIR/h"
   done
+}
+
+@test "cards: an id twice in one question, an empty id or no question make the payload invalid (422, logged)" {
+  q='{"id":"q1","kind":"direction","target":"home@abc","opened_at":"2020-01-01T00:00:00Z"}'
+  for cards in '[{"id":"a","question":"q1","url":"https://a.example"},{"id":"a","question":"q1","url":"https://evil.example"}]' \
+               '[{"id":"a","question":"q1"},{"id":"b","question":"q1"},{"id":"a","question":"q1"}]' \
+               '[{"id":"","question":"q1"}]' '[{"question":"q1"}]' '[{"id":"a"}]' '["a"]'; do
+    echo "{\"questions\":[$q],\"cards\":$cards}" > "$P/.aid-ui/studio/payload.json"
+    [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]
+    [ "$(answer "$choose_a")" = 422 ]
+  done
+  grep -q 'card id a twice in question q1' "$BATS_TEST_TMPDIR/server.log"
+  grep -q 'invalid payload: payload.json: every card needs' "$BATS_TEST_TMPDIR/server.log"
+  # the same id in two questions is fine: ids are unique per question
+  echo "{\"questions\":[$q],\"cards\":[{\"id\":\"a\",\"question\":\"q1\"},{\"id\":\"a\",\"question\":\"q2\"}]}" \
+    > "$P/.aid-ui/studio/payload.json"
+  [ "$(answer "$choose_a")" = 200 ]
 }
 
 @test "an invalid payload: 422 naming the problem, the server logs it" {

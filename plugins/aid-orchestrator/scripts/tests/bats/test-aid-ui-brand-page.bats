@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # aid-tier: t2
-# P101 Step 3 — neutral brand page template: chapters (eleven since P102), fixed --brand-*
+# P101 Step 3 — neutral brand page template: chapters (fourteen since P103), fixed --brand-*
 # names only, print rules, empty token/role placeholders, state template shape.
+# P103 Step 6 — kvalita summary written through aid-ui-state.sh body; studio links /report.
 
 setup() {
   PAGE="$BATS_TEST_DIRNAME/../../../skills/ui-design/brand-page"
@@ -9,14 +10,46 @@ setup() {
   FIX="$BATS_TEST_DIRNAME/../fixtures/aid-ui"
 }
 
-@test "all eleven chapter ids present with data-status=ceka, body and status markers" {
-  for id in produkt vize logo barvy typografie smer komponenty platformy ukazky seo schvaleni; do
+@test "all fourteen chapter ids present with data-status=ceka, body and status markers" {
+  for id in produkt vize logo barvy typografie smer komponenty platformy ukazky seo struktura obsah kvalita schvaleni; do
     grep -qF "<section id=\"$id\" data-status=\"ceka\">" "$PAGE/index.html"
     grep -qF "<p class=\"status\"><!-- status:$id --><!-- /status:$id --></p>" "$PAGE/index.html"
     grep -qF "<div class=\"body\"><!-- body:$id --><!-- /body:$id --></div>" "$PAGE/index.html"
     grep -qF "<li><a href=\"#$id\">" "$PAGE/index.html"
   done
-  [ "$(grep -c '<section ' "$PAGE/index.html")" -eq 11 ]
+  [ "$(grep -c '<section ' "$PAGE/index.html")" -eq 14 ]
+  # page order = aid-ui-state.sh CHAPTERS order
+  chapters="$(sed -n 's/^CHAPTERS=" \(.*\) "$/\1/p' "$BATS_TEST_DIRNAME/../../aid-ui-state.sh")"
+  [ "$(grep -o '<section id="[a-z]*"' "$PAGE/index.html" | cut -d'"' -f2 | tr '\n' ' ')" = "$chapters " ]
+}
+
+@test "kvalita: summary numbers from soulad-summary.json land in the chapter via aid-ui-state.sh body" {
+  P="$BATS_TEST_TMPDIR/proj"
+  mkdir -p "$P/docs/brand" "$P/docs/design"
+  cp "$PAGE/index.html" "$P/docs/brand/"
+  "$BATS_TEST_DIRNAME/../../aid-ui-state.sh" init "$P" >/dev/null
+  # fresh chapter: no summary yet -> čeká
+  grep -qF '<section id="kvalita" data-status="ceka">' "$P/docs/brand/index.html"
+  cat > "$P/docs/design/soulad-summary.json" <<'JSON'
+{"generated_at": "2026-09-28", "variant": "web", "build_id": "b1", "total": 9,
+ "counts": {"použito, ověřil skript": 4, "použito, rozhodl PM": 1, "ověřil agent": 1, "nepoužito": 2, "nesplněno (skript)": 1},
+ "by_standard": {}}
+JSON
+  jq -r '.counts as $c | ([$c | to_entries[] | select(.key | startswith("použito") or . == "ověřil agent") | .value] | add) as $a
+    | "<dl><dt>Použito</dt><dd>\($a)</dd><dt>Nepoužito s důvodem</dt><dd>\($c["nepoužito"] // 0)</dd>"
+    + "<dt>Kontrola</dt><dd>\(.generated_at)</dd></dl>"' "$P/docs/design/soulad-summary.json" > "$BATS_TEST_TMPDIR/kvalita.html"
+  run "$BATS_TEST_DIRNAME/../../aid-ui-state.sh" body "$P" kvalita --file "$BATS_TEST_TMPDIR/kvalita.html"
+  [ "$status" -eq 0 ]
+  body="$(tr -d '\n' < "$P/docs/brand/index.html" | sed -n 's/.*<!-- body:kvalita -->\(.*\)<!-- \/body:kvalita -->.*/\1/p')"
+  [[ "$body" == *"<dt>Použito</dt><dd>6</dd>"* ]]
+  [[ "$body" == *"<dt>Nepoužito s důvodem</dt><dd>2</dd>"* ]]
+  [[ "$body" == *"<dd>2026-09-28</dd>"* ]]
+  # other chapters untouched
+  grep -qF '<!-- body:obsah --><!-- /body:obsah -->' "$P/docs/brand/index.html"
+}
+
+@test "studio links the internal report route" {
+  grep -qF '<a href="/report">' "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"
 }
 
 @test "fonts markers inside head" {
