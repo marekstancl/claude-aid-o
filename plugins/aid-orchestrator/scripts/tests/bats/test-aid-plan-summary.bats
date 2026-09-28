@@ -130,6 +130,12 @@ EOF
   grep -q 'Revize plánu: review: 1 round, 1200 tokens' "$OUT"
 }
 
+@test "the page records the sha256 of the plan it was rendered from" {
+  local plan; plan="$(write_plan P956 'plugins/aid-orchestrator/commands/aid-help.md')"
+  aid_plan_summary_render "$plan" "$OUT"
+  grep -qx "<!-- aid-plan-sha256: $(sha256sum "$plan" | awk '{print $1}') -->" "$OUT"
+}
+
 @test "a plan with no Goal is refused, naming the section — no half-empty page" {
   plan="$(write_plan P954 'plugins/aid-orchestrator/commands/aid-help.md')"
   sed -i '/^## Goal$/,+3d' "$plan"

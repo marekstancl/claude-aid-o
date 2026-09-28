@@ -85,6 +85,23 @@ render_page() {
   [[ "$output" == *"OLDER than the plan"* ]]
 }
 
+@test "a page recording the plan's sha256 stays current when only the plan's mtime moves (new worktree, agents P009)" {
+  render_page
+  printf '<!-- aid-plan-sha256: %s -->\n' "$(sha256sum "$PLAN" | awk '{print $1}')" >> "$PAGE"
+  touch -d "2020-01-01 00:00" "$PAGE"; touch "$PLAN"
+  run bash "$GATE" --plan "$PLAN"
+  [ "$status" -eq 0 ]
+}
+
+@test "a page recording the plan's sha256 is stale once the plan's bytes change, whatever the mtimes say" {
+  render_page
+  printf '<!-- aid-plan-sha256: %s -->\n' "$(sha256sum "$PLAN" | awk '{print $1}')" >> "$PAGE"
+  printf '\nchanged\n' >> "$PLAN"; touch -d "2020-01-01 00:00" "$PLAN"
+  run bash "$GATE" --plan "$PLAN"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"rendered from a different version of the plan"* ]]
+}
+
 @test "a plan the RENDERER refuses owes no page — enforcement must not require the impossible" {
   # Found live 2026-08-24: this rule demanded a page for a plan with no
   # `## Goal`, aid_plan_summary_render refused to produce one, and the session

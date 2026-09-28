@@ -411,5 +411,8 @@ aid_plan_summary_render() {
     '{summary: $s, core: $c, ask: "Přečti plán a řekni, co v něm chybí. Do té doby nic negeneruju."}')"
 
   mkdir -p "$(dirname "$out_path")" 2>/dev/null
-  aid_artifact_render outcome "$facts_json" "$prose_json" "$out_path"
+  aid_artifact_render outcome "$facts_json" "$prose_json" "$out_path" || return $?
+  # The page's freshness is the plan's CONTENT, not its mtime: a checkout into a
+  # new worktree gives the same bytes a new date (agents P009, 27. 9. 2026).
+  printf '<!-- aid-plan-sha256: %s -->\n' "$(sha256sum "$plan" | awk '{print $1}')" >> "$out_path"
 }
