@@ -1,0 +1,10 @@
+# Facts register of the gate fixture (docs/content/facts.yaml shape: claim + source)
+- claim: telefon
+  value: "+420 777 123 456"
+  source: PM
+- claim: otevírací doba
+  value: "7:00 až 18:00"
+  source: PM
+- claim: cena bochníku
+  value: "65 Kč"
+  source: PM

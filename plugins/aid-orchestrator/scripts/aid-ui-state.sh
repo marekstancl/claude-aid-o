@@ -114,8 +114,9 @@
 # Required matrix: every check of checks.yaml (next to the coverage map;
 # AID_UI_COVERAGE_MAP points it at a fixture) x every combination: pages x viewports x
 # browsers (role and state ""); for variant webapp|pwa also structure.flows[].id (as page)
-# x its states x structure.roles (or "") x viewports x browsers. Rows of page _site are
-# extra. Open row = fail, not_covered, or warn on a check not in checks.yaml warn_only;
+# x its states x structure.roles (or "") x viewports x browsers. checks.yaml `applies.<check>`
+# narrows one check: `browsers: [..]` keeps only those, `flows: false` drops the flow rows;
+# a combination a check does not apply to needs no row. Rows of page _site are extra. Open row = fail, not_covered, or warn on a check not in checks.yaml warn_only;
 # only pass, or warn on a warn_only check, satisfies a row without an exception.
 #
 # Exit: 0 ok, 1 refused, 2 usage.
@@ -407,10 +408,13 @@ def val(x):
 def fp_of(st, fps, page):   # a flow row has no file of its own: bound to the whole build
     return fps.get(page, "build:" + st["build"]["id"])
 
-def combos(st, ck, fps):
+def combos(st, ck, fps, check=None):   # applies.<check>: browsers subset, flows false
+    ap = (ck.get("applies") or {}).get(check) or {}
     vps, brs = [val(v) for v in ck.get("viewports") or []], [val(b) for b in ck.get("browsers") or []]
+    if "browsers" in ap:
+        brs = [b for b in brs if b in [val(x) for x in ap["browsers"] or []]]
     out = [(p, v, b, "", "") for p in sorted(fps) if p != "_site" for v in vps for b in brs]
-    if ((st.get("variant") or {}).get("type")) in ("webapp", "pwa"):
+    if ((st.get("variant") or {}).get("type")) in ("webapp", "pwa") and ap.get("flows", True) is not False:
         s = st.get("structure") or {}
         roles = [val(r.get("id") if isinstance(r, dict) else r) for r in s.get("roles") or []] or [""]
         out += [(val(f.get("id")), v, b, r, val(x)) for f in s.get("flows") or [] for x in f.get("states") or []
@@ -419,7 +423,7 @@ def combos(st, ck, fps):
 
 def missing(st, ck, res, fps):
     have = {(val(r.get("check")),) + tuple(val(r.get(k)) for k in AX) for r in res.get("rows") or [] if isinstance(r, dict)}
-    return ["%s %s" % (c, "/".join(x or "-" for x in k)) for c in ck.get("checks") or {} for k in combos(st, ck, fps)
+    return ["%s %s" % (c, "/".join(x or "-" for x in k)) for c in ck.get("checks") or {} for k in combos(st, ck, fps, c)
             if (c,) + k not in have]
 
 def matches(sel, row):

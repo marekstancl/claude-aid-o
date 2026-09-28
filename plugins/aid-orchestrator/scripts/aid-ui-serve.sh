@@ -22,7 +22,10 @@
 #                          *.XXXXXX are named as internal);
 #                          idempotent: our job alive, answering and serving the
 #                          same (realpath) dir -> print URL, exit 0; else restart.
-#   stop <studio|brand>    cancel that role's job, found under <jobs> or else
+#   preview <dir>          python3 -m http.server on AID_UI_HOST:AID_UI_PREVIEW_PORT
+#                          for a built site (the gate, aid-ui-verify.sh): the dir
+#                          must hold index.html and no symlink; idempotent like brand.
+#   stop <studio|brand|preview>  cancel that role's job, found under <jobs> or else
 #                          through the pointer $STATE_DIR/<id> that start writes
 #                          (line 1 jobs dir, line 2 project root). Pointer use:
 #                          a known project ($AID_UI_PROJECT, else the git root of
@@ -39,7 +42,8 @@
 # <project> = $AID_UI_PROJECT, else $PWD. Jobs dir = $AID_UI_JOBS_DIR, else
 # <project>/.aid-ui/jobs. Pointer dir = $AID_UI_STATE_DIR, else ~/.cache/aid-ui
 # (one file per job id = per port: jobs dir and project of the job started last).
-# Env: AID_UI_HOST (10.20.20.22), AID_UI_STUDIO_PORT (3915), AID_UI_BRAND_PORT (3916).
+# Env: AID_UI_HOST (10.20.20.22), AID_UI_STUDIO_PORT (3915), AID_UI_BRAND_PORT (3916),
+# AID_UI_PREVIEW_PORT (3917).
 # Output: URL: <url> and JOB: <id>.
 # Exit: 0 ok, 1 port in use / start failure, 2 usage or refused target.
 # =============================================================================
@@ -50,16 +54,17 @@ HOST="${AID_UI_HOST:-10.20.20.22}"
 STUDIO_PORT="${AID_UI_STUDIO_PORT:-3915}"
 STUDIO_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib/aid-ui-studio" && pwd)/server.py"
 BRAND_PORT="${AID_UI_BRAND_PORT:-3916}"
+PREVIEW_PORT="${AID_UI_PREVIEW_PORT:-3917}"
 PROJECT="${AID_UI_PROJECT:-$PWD}"
 JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
 STATE_DIR="${AID_UI_STATE_DIR:-$HOME/.cache/aid-ui}"
 DEADLINE=28800   # 8 h, integer seconds as `aid-job.sh run --deadline` requires
 
-usage() { echo "usage: aid-ui-serve.sh studio <project> | brand <dir> | stop <studio|brand>" >&2; exit 2; }
+usage() { echo "usage: aid-ui-serve.sh studio <project> | brand <dir> | preview <dir> | stop <studio|brand|preview>" >&2; exit 2; }
 die() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 1; }
 refuse() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 2; }
 
-port_of() { [[ "$1" == studio ]] && echo "$STUDIO_PORT" || echo "$BRAND_PORT"; }
+port_of() { case "$1" in studio) echo "$STUDIO_PORT" ;; preview) echo "$PREVIEW_PORT" ;; *) echo "$BRAND_PORT" ;; esac; }
 job_id() { echo "aid-ui-$1-$(port_of "$1")"; }
 listening() { [[ -n "$(ss -ltnH "sport = :$1" 2>/dev/null)" ]]; }
 alive() {   # our job dir exists and its process is still running
@@ -141,8 +146,19 @@ case "$1" in
     fi
     start brand python3 -m http.server "$BRAND_PORT" --bind "$HOST" --directory "$dir"
     ;;
+  preview)
+    dir="$(realpath -e "$2" 2>/dev/null || true)"
+    [[ -d "$dir" && -f "$dir/index.html" ]] || refuse "$2 is not a built site (needs index.html); refusing to serve it"
+    l="$(find "$dir" -mindepth 1 -type l -printf '%P' -quit)"
+    [[ -z "$l" ]] || refuse "$dir/$l is a symlink; the preview serves no symlinks (it could point outside the site)"
+    id="$(job_id preview)"
+    if alive "$id" && listening "$PREVIEW_PORT" && [[ "$(jq -r '.command[-1]' "$JOBS/$id/job.json")" == "$dir" ]]; then
+      echo "URL: http://$HOST:$PREVIEW_PORT/"; echo "JOB: $id"; exit 0
+    fi
+    start preview python3 -m http.server "$PREVIEW_PORT" --bind "$HOST" --directory "$dir"
+    ;;
   stop)
-    [[ "$2" == studio || "$2" == brand ]] || usage
+    [[ "$2" == studio || "$2" == brand || "$2" == preview ]] || usage
     id="$(job_id "$2")"
     jobs="$JOBS"
     if [[ ! -f "$jobs/$id/job.json" ]]; then

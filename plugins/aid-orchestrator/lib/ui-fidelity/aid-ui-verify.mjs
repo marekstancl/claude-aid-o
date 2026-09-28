@@ -1,0 +1,318 @@
+// aid-ui-verify.mjs — the /aid-ui gate checks (P103 Step 7); run through aid-ui-verify.sh.
+//
+//   node aid-ui-verify.mjs --state <brand-state.json> --checks <checks.json> --site <dir>
+//        --base <url> --out <dir> --seo <aid-ui-seo-check.py> [--project <dir>] [--facts <facts.json>]
+//
+// Matrix = pages (the keys of state.build.fingerprints but _site) x checks.viewports x
+// checks.browsers, role and state ""; for variant webapp|pwa also structure.flows[].id (as
+// page) x its states x structure.roles (or "") x viewports x browsers; checks.applies narrows a
+// check (browsers subset, flows false) and no row is written outside it. One function per
+// name in checks.checks (CHECKS below); a name without one, or one without a name, exits 2.
+// Every row: {check, page, viewport, browser, role, state, status, detail};
+// status pass | fail | warn (warn_only checks) | not_covered (could not run; reason in detail).
+// Result <out>/result.json = {run_at, build_id, matrix, rows, fingerprints}: build id and
+// fingerprints are the recorded build's, which aid-ui-verify.sh has just recomputed with
+// `aid-ui-state.sh build-id` (same files -> same digests). Screenshots: <out>/shots/.
+// Browsers: chromium ($CHROME, else Playwright's), webkit (Playwright's); a launch failure
+// -> that browser's rows not_covered with the install hint.
+// App flows: <project>/.aid-ui/scenarios/<flow id>.mjs, default export
+// async ({page, base, role, state, credentials}) that drives the screen into that state and
+// throws on failure; credentials = <project>/.aid-ui/test-credentials.json[role] (test
+// accounts only). No script -> not_covered.
+// Exit: 0 result written, 1 run error, 2 usage.
+import { chromium, webkit } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const argv = process.argv.slice(2), opt = {};
+for (let i = 0; i < argv.length; i += 2) {
+  if (!argv[i].startsWith('--') || argv[i + 1] === undefined) usage();
+  opt[argv[i].slice(2)] = argv[i + 1];
+}
+function usage(m) { console.error('usage: aid-ui-verify.mjs --state <f> --checks <f> --site <dir> --base <url> --out <dir> --seo <py> [--project <dir>] [--facts <f>]' + (m ? `\n${m}` : '')); process.exit(2); }
+for (const k of ['state', 'checks', 'site', 'base', 'out', 'seo']) if (!opt[k]) usage(`missing --${k}`);
+
+const readJson = f => JSON.parse(fs.readFileSync(f, 'utf8'));
+const st = readJson(opt.state), ck = readJson(opt.checks);
+const site = path.resolve(opt.site), out = path.resolve(opt.out), project = opt.project ? path.resolve(opt.project) : null;
+const base = opt.base.endsWith('/') ? opt.base : opt.base + '/';
+const fps = st.build?.fingerprints || {};
+const pages = Object.keys(fps).filter(p => p !== '_site').sort();
+const VPS = (ck.viewports || []).map(String), BRS = (ck.browsers || []).map(String);
+const HEIGHT = { 390: 844, 768: 1024 };
+fs.mkdirSync(out, { recursive: true });
+
+// page key -> URL: a/index.html -> /a/, index.html -> /, x.html -> /x.html
+const urlOf = p => new URL(p === 'index.html' ? '' : p.endsWith('/index.html') ? p.slice(0, -10) : p, base).href;
+const sha = f => createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+const inside = (root, f) => { const r = path.resolve(root, f); return r === root || r.startsWith(root + path.sep) ? r : null; };
+// site file behind a same-origin URL, or null (outside the site or not a file)
+function siteFile(u) {
+  let x; try { x = new URL(u, base); } catch { return null; }
+  if (x.origin !== new URL(base).origin) return null;
+  let rel = decodeURIComponent(x.pathname).replace(/^\/+/, '');
+  if (rel === '' || rel.endsWith('/')) rel += 'index.html';
+  const f = inside(site, rel);
+  return f && fs.existsSync(f) && fs.statSync(f).isFile() ? f : null;
+}
+
+// ---- site-level runs (once per gate) ------------------------------------------------
+function runSeo() {
+  const json = path.join(out, 'seo.json');
+  const r = spawnSync('python3', [opt.seo, site, '--json', json], { encoding: 'utf8' });
+  if (r.status !== 0 && r.status !== 1) return { error: `aid-ui-seo-check.py exit ${r.status}: ${(r.stderr || '').slice(0, 200)}` };
+  return { findings: readJson(json) };
+}
+function brandFiles() {
+  const dir = project && path.join(project, 'docs/design/brand-package');
+  if (!dir || !fs.existsSync(dir)) return null;
+  const set = new Set();
+  const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); e.isDirectory() ? walk(f) : set.add(sha(f)); } };
+  walk(dir);
+  return set;
+}
+// every string/number leaf of facts.yaml, whitespace-normalised
+function factLeaves() {
+  if (!opt.facts) return null;
+  const acc = [];
+  const walk = v => { if (v && typeof v === 'object') Object.values(v).forEach(walk); else if (v !== null && v !== undefined) acc.push(norm(String(v))); };
+  walk(readJson(opt.facts));
+  return acc;
+}
+const norm = s => s.replace(/[\s  ]+/g, ' ').trim().toLowerCase();
+const digits = s => s.replace(/\D/g, '');
+function glyph(url) {
+  const r = spawnSync('node', [path.join(HERE, 'aid-ui-glyph-check.mjs'), url], { encoding: 'utf8', env: process.env });
+  if (r.status === 0) return { status: 'pass', detail: 'checked at 1440 px' };
+  if (r.status === 1) return { status: 'fail', detail: r.stdout.split('\n').filter(l => l.startsWith('BLOCKER')).slice(0, 5).join(' | ') };
+  return { status: 'not_covered', detail: `glyph check exit ${r.status}: ${(r.stderr || '').slice(0, 200)}` };
+}
+async function lighthouse(url) {
+  try {
+    const { default: lh } = await import('lighthouse');
+    const cl = await import('chrome-launcher');
+    const chrome = await cl.launch({ chromePath: process.env.CHROME || chromium.executablePath(), chromeFlags: ['--headless=new', '--no-sandbox'] });
+    try {
+      // fixed profile: Lighthouse's default mobile emulation and simulated throttling
+      const r = await lh(url, { port: chrome.port, output: 'json', logLevel: 'error', onlyCategories: ['performance', 'accessibility', 'best-practices', 'seo'] });
+      const sc = Object.fromEntries(Object.entries(r.lhr.categories).map(([k, c]) => [k, Math.round((c.score ?? 0) * 100)]));
+      const low = Object.values(sc).some(v => v < 90);
+      return { status: low ? 'warn' : 'pass', detail: `mobile ${JSON.stringify(sc)}` };
+    } finally { await chrome.kill(); }
+  } catch (e) { return { status: 'not_covered', detail: `Lighthouse could not run: ${String(e.message || e).slice(0, 200)}` }; }
+}
+function requiredFiles(pageHtml) {
+  const miss = [];
+  const nf = path.join(site, '404.html');
+  if (!fs.existsSync(nf)) miss.push('404.html missing');
+  else if (!/<html[^>]*\blang=/i.test(fs.readFileSync(nf, 'utf8'))) miss.push('404.html is not localised (no lang)');
+  for (const f of ['favicon.ico', 'favicon.svg', 'apple-touch-icon.png']) if (!fs.existsSync(path.join(site, f))) miss.push(`${f} missing`);
+  const og = pageHtml.match(/<meta[^>]+property=["']og:image["'][^>]*>/i);
+  const c = og && og[0].match(/content=["']([^"']+)["']/i);
+  if (!c) miss.push('no og:image');
+  else if (!/^https?:/i.test(c[1]) && !siteFile(new URL(c[1], base).href)) miss.push(`og:image ${c[1]} is not in the site`);
+  return miss;
+}
+
+// ---- per loaded page (every browser x viewport) ----------------------------------------
+async function scrollAll(page) {
+  await page.evaluate(async () => {
+    for (let y = 0; y < document.body.scrollHeight; y += 400) { scrollTo(0, y); await new Promise(r => setTimeout(r, 60)); }
+    scrollTo(0, 0);
+  });
+  await page.waitForLoadState('networkidle').catch(() => {});
+}
+async function inPage(page) {
+  return page.evaluate(() => {
+    const vis = e => !!(e.offsetParent || e.getClientRects().length);
+    const o = { overflow: document.documentElement.scrollWidth > innerWidth };
+    o.wrapped = [...document.querySelectorAll('button, a.btn, a.button, [role=button], nav a, input[type=submit]')].filter(vis).map(e => {
+      const rg = document.createRange(); rg.selectNodeContents(e);
+      return new Set([...rg.getClientRects()].filter(r => r.width > 0).map(r => Math.round(r.top))).size > 1 ? e.textContent.trim() : null;
+    }).filter(Boolean);
+    o.text = document.body.innerText;
+    o.hrefs = [...document.querySelectorAll('a[href]')].map(a => a.href);
+    o.imgs = [...document.querySelectorAll('img')].map(i => ({ src: i.currentSrc || i.src, alt: i.getAttribute('alt'), cls: `${i.className} ${i.id} ${i.alt}` }));
+    o.icons = [...document.querySelectorAll('link[rel~=icon], link[rel=apple-touch-icon]')].map(l => l.href);
+    return o;
+  });
+}
+const PLACEHOLDER = /lorem ipsum|\bTODO\b|\bXXX\b|example\.(com|org|cz)|\.invalid\b|\+420 ?000|doplní se|fiktivn/gi;
+const PLACEHOLDER_IMG = /placeholder|placehold\.|picsum\.|dummyimage/i;
+// ponytail: facts = phone numbers, prices and times in the visible text; other claims need the reviewer
+const FACT_RE = /(\+?\d[\d ]{7,}\d)|(\d[\d  ]*(?:[.,]\d+)?\s?(?:Kč|CZK|€|EUR))|(\b\d{1,2}[:.]\d{2}\b)/g;
+
+async function pageRows(ctx, url, key, role, state, run, facts, brand) {
+  const page = await ctx.newPage();
+  const bad = [], imgs = [];
+  page.on('requestfailed', r => bad.push(`failed ${r.url()}`));
+  page.on('response', async r => {
+    if (r.status() >= 400 && r.url() !== url) bad.push(`${r.status()} ${r.url()}`);
+    if (r.request().resourceType() === 'image') {
+      const len = Number(r.headers()['content-length'] || (await r.body().catch(() => Buffer.alloc(0))).length);
+      imgs.push({ url: r.url(), type: r.headers()['content-type'] || '', len });
+    }
+  });
+  const res = {};
+  let resp;
+  try {
+    resp = await page.goto(url, { waitUntil: 'networkidle' });
+    if (run) resp = (await run(page)) || resp;
+  } catch (e) {
+    await page.close();
+    return { error: String(e.message || e).slice(0, 200) };
+  }
+  res.http_200 = resp && resp.status() === 200 ? ['pass', ''] : ['fail', `HTTP ${resp ? resp.status() : 'no response'} for ${url}`];
+  await page.evaluate(() => document.fonts.ready).catch(() => {});
+  await scrollAll(page);
+  const o = await inPage(page);
+  res.no_overflow = o.overflow ? ['fail', 'the page scrolls sideways'] : ['pass', ''];
+  res.one_line_controls = o.wrapped.length ? ['fail', `wraps: ${o.wrapped.join(' | ')}`] : ['pass', ''];
+  const ph = [...(o.text.match(PLACEHOLDER) || []), ...o.hrefs.filter(h => PLACEHOLDER.test(h)), ...o.imgs.filter(i => PLACEHOLDER_IMG.test(i.src)).map(i => i.src)];
+  PLACEHOLDER.lastIndex = 0;
+  res.no_placeholders = ph.length ? ['fail', `placeholders: ${[...new Set(ph)].join(', ')}`] : ['pass', ''];
+  if (!facts) res.facts_match = ['not_covered', 'no docs/content/facts.yaml'];
+  else {
+    const unknown = [...o.text.matchAll(FACT_RE)].map(m => m[0].trim()).filter(t => {
+      const n = norm(t), d = digits(t);
+      return !facts.some(f => f.includes(n) || (d.length >= 7 && digits(f).includes(d)));
+    });
+    res.facts_match = unknown.length ? ['fail', `not in facts.yaml: ${[...new Set(unknown)].join(', ')}`] : ['pass', ''];
+  }
+  if (!brand) res.brand_assets = ['not_covered', 'no docs/design/brand-package/'];
+  else {
+    const drawn = [];
+    if (!o.icons.length) drawn.push('no favicon link');
+    for (const u of [...o.icons, ...o.imgs.filter(i => /logo/i.test(i.cls) || /logo/i.test(i.src)).map(i => i.src)]) {
+      const f = siteFile(u);
+      if (!f || !brand.has(sha(f))) drawn.push(u.replace(base, '/'));
+    }
+    res.brand_assets = drawn.length ? ['fail', `not from the brand package: ${drawn.join(', ')}`] : ['pass', ''];
+  }
+  const broken = [...bad];
+  for (const h of new Set(o.hrefs.map(h => h.split('#')[0]).filter(h => h.startsWith(new URL(base).origin)))) {
+    const r = await page.request.get(h).catch(() => null);
+    if (!r || r.status() >= 400) broken.push(`link ${h.replace(base, '/')} ${r ? r.status() : 'failed'}`);
+  }
+  res.links_resources = broken.length ? ['fail', [...new Set(broken)].join(', ')] : ['pass', ''];
+  try {
+    const ax = await new AxeBuilder({ page }).analyze();
+    const v = ax.violations.filter(x => x.impact === 'serious' || x.impact === 'critical');
+    res.axe = v.length ? ['fail', v.map(x => `${x.impact} ${x.id} (${x.nodes.length})`).join(', ')] : ['pass', ''];
+  } catch (e) { res.axe = ['not_covered', `axe could not run: ${String(e.message).slice(0, 150)}`]; }
+  const heavy = imgs.filter(i => !/image\/(webp|avif|svg\+xml|x-icon|vnd\.microsoft\.icon)/.test(i.type) && !/favicon|apple-touch-icon/.test(i.url))
+    .map(i => `${i.url.replace(base, '/')} is ${i.type || 'unknown type'}`)
+    .concat(imgs.filter(i => i.len > 200 * 1024).map(i => `${i.url.replace(base, '/')} is ${Math.round(i.len / 1024)} kB`));
+  res.image_weight = heavy.length ? ['fail', heavy.join(', ')] : ['pass', ''];
+  const shot = path.join(out, 'shots', ...key);
+  fs.mkdirSync(path.dirname(shot), { recursive: true });
+  await page.screenshot({ path: shot, fullPage: true });
+  res.screenshots_reviewed = ['pass', `screenshot ${path.relative(out, shot)}; the PM's review is approve-page`];
+  res.html = await page.content();
+  await page.close();
+  return res;
+}
+
+// ---- matrix -------------------------------------------------------------------------
+const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match',
+  'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
+  'app_task_states', 'screenshots_reviewed'];
+const named = Object.keys(ck.checks || {});
+const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
+if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
+// a fixture checks.yaml may name a subset; rows are written only for the named checks
+const want = c => named.includes(c);
+
+const isApp = ['webapp', 'pwa'].includes(st.variant?.type);
+const flows = isApp ? (st.structure?.flows || []) : [];
+const roles = (st.structure?.roles || []).map(r => String(r?.id ?? r));
+const matrix = [];
+for (const p of pages) for (const v of VPS) for (const b of BRS) matrix.push({ page: p, viewport: v, browser: b, role: '', state: '' });
+for (const f of flows) for (const s of f.states || []) for (const r of (roles.length ? roles : [''])) for (const v of VPS) for (const b of BRS)
+  matrix.push({ page: String(f.id), viewport: v, browser: b, role: r, state: String(s?.id ?? s) });
+
+const rows = [];
+const AP = ck.applies || {};
+const applies = (check, m) => { const a = AP[check] || {};
+  return (!a.browsers || a.browsers.map(String).includes(m.browser)) && !(a.flows === false && m.state); };
+const put = (m, check, status, detail) => { if (want(check) && applies(check, m)) rows.push({ check, ...m, status, detail: detail || '' }); };
+const facts = factLeaves(), brand = brandFiles();
+const seo = want('seo') ? runSeo() : null;
+const seoRow = p => {
+  if (seo.error) return ['not_covered', seo.error];
+  const mine = seo.findings.filter(f => f.page === p || !pages.includes(f.page));
+  const bl = mine.filter(f => f.level === 'BLOCKER'), wn = mine.filter(f => f.level === 'WARN');
+  const txt = xs => xs.map(f => `${f.check}: ${f.detail}`).join('; ');
+  return bl.length ? ['fail', `BLOCKER ${txt(bl)}`] : ['pass', wn.length ? `WARN ${txt(wn)}` : ''];
+};
+const glyphs = {}, lhs = {};
+for (const p of pages) {
+  if (want('glyph_coverage') && BRS.some(b => applies('glyph_coverage', { browser: b }))) glyphs[p] = glyph(urlOf(p));
+  if (want('lighthouse_mobile')) lhs[p] = await lighthouse(urlOf(p));
+}
+let creds = {};
+if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json'))) creds = readJson(path.join(project, '.aid-ui/test-credentials.json'));
+
+const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed'];
+for (const b of BRS) {
+  const type = { chromium, webkit }[b];
+  let browser = null, why = '';
+  try {
+    browser = type ? await type.launch(b === 'chromium' ? { executablePath: process.env.CHROME || undefined } : {}) : null;
+    if (!type) why = `unknown browser ${b}`;
+  } catch (e) {
+    why = `${b} could not launch (${String(e.message).split('\n')[0].slice(0, 120)}); install it: cd lib/ui-fidelity && npx playwright install ${b} (system libraries: sudo npx playwright install-deps ${b})`;
+  }
+  for (const v of VPS) {
+    const ms = matrix.filter(m => m.browser === b && m.viewport === v);
+    if (!browser) { for (const m of ms) for (const c of named) put(m, c, 'not_covered', why); continue; }
+    const ctx = await browser.newContext({ viewport: { width: Number(v), height: HEIGHT[v] || 900 } });
+    for (const m of ms) {
+      const flow = flows.find(f => String(f.id) === m.page && m.state);
+      let run = null;
+      if (flow) {
+        const script = project && path.join(project, '.aid-ui/scenarios', `${m.page}.mjs`);
+        if (!script || !fs.existsSync(script)) { for (const c of named) put(m, c, 'not_covered', `no scenario .aid-ui/scenarios/${m.page}.mjs`); continue; }
+        const { default: scenario } = await import(pathToFileURL(script).href);
+        run = async page => scenario({ page, base, role: m.role, state: m.state, credentials: creds[m.role] || null });
+      }
+      const slug = m.page.replace(/[^A-Za-z0-9._-]+/g, '_');
+      const key = [b, v, `${slug}${m.role ? '.' + m.role : ''}${m.state ? '.' + m.state : ''}.png`];
+      const r = await pageRows(ctx, flow ? base : urlOf(m.page), key, m.role, m.state, run, facts, brand);
+      if (r.error) {
+        for (const c of named) put(m, c, flow && c === 'app_task_states' ? 'fail' : 'not_covered', `${flow ? 'scenario' : 'page'} failed: ${r.error}`);
+        continue;
+      }
+      for (const c of PAGE_CHECKS) put(m, c, ...r[c]);
+      put(m, 'app_task_states', 'pass', flow ? `scenario ${m.page} / ${m.state} passed` : (isApp ? 'a page, not a task' : 'not an application'));
+      if (flow) {
+        put(m, 'glyph_coverage', 'not_covered', 'checks.yaml applies it to flow states; the gate runs it on pages only');
+        put(m, 'lighthouse_mobile', 'not_covered', 'checks.yaml applies it to flow states; the gate runs it on pages only');
+        const site = requiredFiles(r.html).filter(x => !x.startsWith('no og') && !x.startsWith('og:'));
+        put(m, 'required_files', site.length ? 'fail' : 'pass', site.join(', '));
+        put(m, 'seo', ...(seo ? seoRow('_site') : ['pass', '']));
+        continue;
+      }
+      if (b !== 'chromium') put(m, 'glyph_coverage', 'not_covered', 'the font check reads Chrome DevTools data; Chromium only');
+      // ponytail: aid-ui-glyph-check.mjs renders at 1440 px only; the result stands for every viewport
+      else if (glyphs[m.page]) put(m, 'glyph_coverage', glyphs[m.page].status, `${glyphs[m.page].detail}${m.viewport === '1440' ? '' : '; the 1440 px result, copied to this viewport'}`);
+      if (want('lighthouse_mobile')) put(m, 'lighthouse_mobile', lhs[m.page].status, `${lhs[m.page].detail} (fixed mobile profile, one run per page, copied to every viewport)`);
+      const miss = requiredFiles(r.html);
+      put(m, 'required_files', miss.length ? 'fail' : 'pass', miss.join(', '));
+      if (seo) put(m, 'seo', ...seoRow(m.page));
+    }
+    await ctx.close();
+  }
+  if (browser) await browser.close();
+}
+
+const result = { run_at: new Date().toISOString(), build_id: st.build?.id, matrix, rows, fingerprints: fps };
+fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 1));
+const count = rows.reduce((a, r) => (a[r.status] = (a[r.status] || 0) + 1, a), {});
+console.log(`VERIFY: ${JSON.stringify(count)} -> ${path.join(out, 'result.json')}`);
+if (extra.length) console.log(`note: checks not named in this checks.yaml, not run: ${extra.join(', ')}`);

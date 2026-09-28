@@ -1010,3 +1010,14 @@ JSON
   [ "$(cat "$T/victim")" = victim ]
   [ "$(jq -c .consumed "$STATE")" = '["a1"]' ]
 }
+
+@test "checks.yaml applies: no glyph rows on webkit pass gate-record; missing glyph on chromium is refused" {
+  yq -i '.checks.glyph_coverage = "glyphs" | .applies.glyph_coverage = {"browsers": ["chromium"], "flows": false}' "$T/cov/checks.yaml"
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  result '.rows |= map(select(.check != "glyph_coverage" or .browser != "webkit"))'
+  run "$SCRIPT" gate-record "$PROJ" "$RES"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  result '.rows |= map(select(.check != "glyph_coverage" or .browser != "chromium" or .page != "index.html"))'
+  run "$SCRIPT" gate-record "$PROJ" "$RES"
+  [ "$status" -eq 1 ]; [[ "$output" == *"missing row: glyph_coverage index.html/390/chromium"* ]]
+}

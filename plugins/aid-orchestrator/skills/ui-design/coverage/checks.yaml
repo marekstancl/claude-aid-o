@@ -5,6 +5,12 @@
 viewports: [390, 768, 1440]
 browsers: [chromium, webkit]
 warn_only: [lighthouse_mobile]   # measured and reported, never blocks (FB-13)
+# where a check applies (default: every page, viewport, browser and flow state); a
+# combination outside it needs no row. Glyph data comes from Chrome DevTools, Lighthouse
+# drives Chrome, and both read files (pages), not flow states.
+applies:
+  glyph_coverage: {browsers: [chromium], flows: false}
+  lighthouse_mobile: {browsers: [chromium], flows: false}
 checks:
   http_200: every page answers HTTP 200 (FB-1)
   glyph_coverage: every character renders in the intended font, Czech diacritics included, no system fallback (FB-2)
