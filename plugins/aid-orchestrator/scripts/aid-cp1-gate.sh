@@ -64,6 +64,10 @@ done
 if [[ -z "$project_root" ]]; then
   project_root="$(_aid_plan_project_root "$plan")" || project_root="$(pwd)"
 fi
+# Given or found, the plan may sit in a brainstorm, generation or plan worktree
+# (aid-plan-to-epic.sh passes its own tree); review evidence and configuration
+# live in the state root, the primary checkout.
+project_root="$(aid_state_root "$project_root" 2>/dev/null || echo "$project_root")"
 # The id becomes a directory name below; a plan without a usable one is a hard
 # condition, never a review verdict.
 plan_id="$(_aid_plan_id_of "$plan")" \

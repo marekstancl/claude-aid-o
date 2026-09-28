@@ -178,3 +178,12 @@ _quote_blocker() { sed -i 's/^- \[ \] it also works$/- [ ] it also works\n- [ ] 
   run "$GATE" --plan "$PLAN"
   [ "$status" -eq 1 ]; [[ "$output" == *retry* ]]
 }
+@test "gate: --project-root naming a linked worktree of a project that tracks plan-state reads the primary's config (agents P009)" {
+  mkdir -p "$ROOT/.aid-o/work/plan-state/P001"; : > "$ROOT/.aid-o/work/plan-state/P001/x"
+  ( cd "$ROOT" && git init -q -b main && git config user.email t@t && git config user.name t && git add -A && git commit -qm seed && git worktree add -q "$ROOT/wt" -b wtb )
+  # the primary switches plan review off AFTER the worktree was branched
+  mkdir -p "$ROOT/.aid-o/config/policies"
+  printf 'review_checkpoints:\n  cp1_plan_review: false\n' > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
+  run "$GATE" --plan "$ROOT/wt/.aid-o/plans/p.md" --project-root "$ROOT/wt"
+  [ "$status" -eq 0 ]; [[ "$output" == *"switched off"* ]]
+}

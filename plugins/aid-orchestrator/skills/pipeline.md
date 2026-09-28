@@ -726,6 +726,15 @@ and the agent keeps quoting the version it was given. Never edit `plan.json` by 
 that satisfies the hook and trips the hash, which is the contradiction this command exists to
 end. Prevention is cheaper than amendment — a plan lists its tests in `Files:` (`Test:` bullet).
 
+**After the last step** (a CP3 fix round, a gate fix) there is no current step: the widening
+lands on the LAST step, and the command says so ("widening step N (id)").
+
+**Another repository's file** (`/opt/eco/docs/...`) is a different case: amend-scope refuses an
+absolute path no step of the plan declares, because that is a PM decision. Such a file belongs in
+the step's `Files:` as an absolute path when the plan is written (`aid-plan-lint.sh` reports one
+named only in prose). The step contract never commits it in this repository: its commit names the
+owning repository, the controller commits there and lists the commit in the return's `repo_commits`.
+
 ### Plan regenerated mid-EPIC
 
 `increment-step` refuses when `plan.json` no longer matches the hash stamped at init — a

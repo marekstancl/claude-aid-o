@@ -105,6 +105,19 @@ aid_invoke_root() {
   printf '%s\n' "$top"
 }
 
+# _aid_roots_is_linked_worktree_top <abs_dir> — 0 when <abs_dir> is the top
+# level of a LINKED worktree (its git dir is not the common dir). A nested
+# fixture directory inside a worktree is not its top level; a primary checkout
+# and a standalone repository have git dir == common dir.
+_aid_roots_is_linked_worktree_top() {
+  local abs="$1" gd="" cd="" top=""
+  gd="$(git -C "$abs" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
+  cd="$(git -C "$abs" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  [[ "$gd" != "$cd" ]] || return 1
+  top="$(git -C "$abs" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [[ "$(cd "$top" 2>/dev/null && pwd -P)" == "$abs" ]]
+}
+
 aid_canonicalize_project_root() {
   local given="${1:-}" abs="" rc=0
   if [[ -z "$given" ]]; then
@@ -125,7 +138,12 @@ aid_canonicalize_project_root() {
   # local `.aid-o/config` fork must still canonicalize to the primary, never
   # be honoured. Fixture state roots must carry (or create) the plan-state
   # dir to claim the escape.
-  if [[ -d "${abs}/.aid-o/work/plan-state" ]]; then
+  # A LINKED WORKTREE never takes the escape, even when it carries plan-state:
+  # acta, agents and wan track `.aid-o/work/plan-state` in git, so every plan
+  # and EPIC worktree of theirs has the directory, and honouring it made each
+  # worktree its own state root — reviews and step checks read the branch's
+  # stale `.aid-o/config` (agents P009, 28. 9. 2026: step_security on 0 of 7).
+  if [[ -d "${abs}/.aid-o/work/plan-state" ]] && ! _aid_roots_is_linked_worktree_top "$abs"; then
     printf '%s\n' "$abs"
     return 0
   fi

@@ -5471,7 +5471,12 @@ cmd_amend_scope() {
   local cs; cs=$(yaml_field "$state_file" current_step); cs="${cs:-0}"
   local total; total=$(jq '.steps | length' "$plan")
   [[ "$total" -gt 0 ]] || die "amend-scope: ${plan} has no steps — nothing to widen"
-  (( cs < total )) || cs=$(( total - 1 ))
+  if (( cs >= total )); then
+    # Past the last step (a fix round after CP3, say): the widening lands on the
+    # last step, and the controller is told which one (agents E-009-1_3).
+    cs=$(( total - 1 ))
+    echo "amend-scope: the run is past its last step — widening step $(( cs + 1 )) ($(jq -r --argjson i "$cs" '.steps[$i].id // "?"' "$plan"))" >&2
+  fi
   # Files, not subtrees, and never a path the step is forbidden: a widening
   # is a named file with a reason, not "scripts/" with a sentence.
   local p forbidden

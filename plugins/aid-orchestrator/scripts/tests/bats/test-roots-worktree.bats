@@ -141,6 +141,37 @@ _plant_tripwire() {
   [ "$output" = "$(_phys "$TEST_TMPDIR/dogfood")" ]
 }
 
+# _mk_tracking_primary <dir> — a project that TRACKS .aid-o/work/plan-state in
+# git, as acta, agents and wan do: every linked worktree carries the directory.
+_mk_tracking_primary() {
+  local d="$1"
+  mkdir -p "$d/.aid-o/work/plan-state/P001" "$d/.aid-o/config/policies"
+  printf 'x\n' > "$d/.aid-o/work/plan-state/P001/plan-state.yaml"
+  printf 'review_checkpoints: {}\n' > "$d/.aid-o/config/policies/review-checkpoints.yaml"
+  ( cd "$d" && git init -q -b main && git config user.email t@t && git config user.name t && git add -A && git commit -qm seed )
+}
+
+@test "a project that tracks plan-state: its LINKED worktree resolves to the primary, not to itself (agents P009)" {
+  _mk_tracking_primary "$TEST_TMPDIR/tp"
+  _mk_worktree "$TEST_TMPDIR/tp" "$TEST_TMPDIR/tpwt"
+  [ -d "$TEST_TMPDIR/tpwt/.aid-o/work/plan-state" ]
+  run bash -c "source '$ROOTS' && aid_state_root '$TEST_TMPDIR/tpwt'"
+  [ "$status" -eq 0 ]; [ "$output" = "$(_phys "$TEST_TMPDIR/tp")" ]
+  run bash -c "cd / && source '$ROOTS' && AID_PROJECT_ROOT='$TEST_TMPDIR/tpwt' aid_state_root"
+  [ "$status" -eq 0 ]; [ "$output" = "$(_phys "$TEST_TMPDIR/tp")" ]
+  # the primary checkout itself keeps resolving to itself
+  run bash -c "source '$ROOTS' && aid_state_root '$TEST_TMPDIR/tp'"
+  [ "$output" = "$(_phys "$TEST_TMPDIR/tp")" ]
+}
+
+@test "a nested fixture dir with its own plan-state INSIDE a linked worktree still takes the escape" {
+  _mk_tracking_primary "$TEST_TMPDIR/tp"
+  _mk_worktree "$TEST_TMPDIR/tp" "$TEST_TMPDIR/tpwt"
+  mkdir -p "$TEST_TMPDIR/tpwt/fixtures/proj/.aid-o/work/plan-state"
+  run bash -c "source '$ROOTS' && aid_state_root '$TEST_TMPDIR/tpwt/fixtures/proj'"
+  [ "$status" -eq 0 ]; [ "$output" = "$(_phys "$TEST_TMPDIR/tpwt/fixtures/proj")" ]
+}
+
 @test "AID_PROJECT_ROOT naming neither a repo root nor a plan-state carrier fails naming both accepted forms" {
   mkdir -p "$TEST_TMPDIR/junk"
   run bash -c "source '$ROOTS' && AID_PROJECT_ROOT='$TEST_TMPDIR/junk' aid_state_root"

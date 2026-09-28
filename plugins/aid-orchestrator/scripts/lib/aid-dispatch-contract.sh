@@ -433,7 +433,12 @@ aid_dispatch_contract_commit() {
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
     if [[ "$f" == /* ]]; then
-      echo "contract: not committed here: ${f} (another repository — commit it there and name it in the return's repo_commits)" >&2
+      # Name the repository it belongs to; a deleted file's directory may be
+      # gone too, so walk up to the nearest one that exists.
+      local d="${f%/*}" owner=""
+      while [[ -n "$d" && ! -d "$d" ]]; do d="${d%/*}"; done
+      owner="$(git -C "${d:-/}" rev-parse --show-toplevel 2>/dev/null)" || owner="unknown — not inside a git repository"
+      echo "contract: not committed here: ${f} (another repository: ${owner} — commit it there and name it in the return's repo_commits)" >&2
       continue
     fi
     [[ "$f" == .aid-o/* ]] && continue   # AID's own state is never the step's delivery

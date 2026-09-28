@@ -358,3 +358,23 @@ _plan_role() { # <file> <role>
   _plan_role p.md 'backend and frontend'
   run "$LINT" p.md; [ "$status" -ne 0 ]
 }
+
+# ── another repository's file named only in prose (agents P009, 27. 9. 2026) ──
+@test "lint advisory: a foreign absolute path only in a step's prose is reported; declared in that step's Files it is not" {
+  _plan p.md strict '- Modify: `src/a.ts` — edit'
+  printf '\n**Implementation Detail:** also fix `/opt/eco/docs/docs/agents/freelo.md` via amend-scope.\n' >> p.md
+  run "$LINT" p.md
+  [[ "$output" == *'`/opt/eco/docs/docs/agents/freelo.md` names another repository'* ]]
+  _plan q.md strict '- Modify: `src/a.ts` — edit' '- Modify: `/opt/eco/docs/docs/agents/freelo.md` — the page'
+  printf '\n**Implementation Detail:** also fix `/opt/eco/docs/docs/agents/freelo.md`.\n' >> q.md
+  run "$LINT" q.md
+  [[ "$output" != *"names another repository"* ]]
+}
+
+@test "lint advisory: another step's declaration does not cover a step's prose mention" {
+  _plan p.md strict '- Modify: `src/a.ts` — edit'
+  printf '\n**Error Handling:** see `/opt/eco/docs/x.md`.\n\n### Step 2: docs\n\n**Files:**\n- Modify: `/opt/eco/docs/x.md` — page\n' >> p.md
+  run "$LINT" p.md
+  [ "$(grep -c 'names another repository' <<< "$output")" -eq 1 ]
+  grep 'names another repository' <<< "$output" | grep -q '### Step 1: work$' 
+}

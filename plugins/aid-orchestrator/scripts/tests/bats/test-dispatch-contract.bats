@@ -200,7 +200,8 @@ _return() {
   # the ignored delivery is committed; AID's own state never is
   [ "$(git show --name-only --format= HEAD | sort | tr '\n' ' ')" = "src/thing.sh tests/test-thing.bats " ]
   # a step allowed to write into another repository: the file is named
-  local other="$BATS_TEST_TMPDIR/other"; mkdir -p "$other"; echo z > "$other/doc.md"
+  local other="$BATS_TEST_TMPDIR/other"; mkdir -p "$other/docs"; echo z > "$other/doc.md"
+  git -C "$other" init -q
   jq --arg p "$other/doc.md" '.steps[0].allowed_paths += [$p] | .steps[0].outputs += ["Modify: `" + $p + "` — doc"]' plan.json > .aid-o/p2.json
   aid_dispatch_contract_build .aid-o/p2.json 0 .aid-o/c2.json
   VERSION="$(jq -r .version .aid-o/c2.json)"
@@ -208,7 +209,7 @@ _return() {
   _return "{changed_files: [\"src/thing.sh\", \"$other/doc.md\"]}"
   run aid_dispatch_contract_commit "$TEST_DIR" .aid-o/c2.json .aid-o/return.json "step 1b"
   echo "$output"; [ "$status" -eq 0 ]
-  [[ "$output" == *"not committed here: $other/doc.md"* ]]
+  [[ "$output" == *"not committed here: $other/doc.md (another repository: $(cd "$other" && pwd -P) —"* ]]
 }
 
 @test "contract: a declared deletion of a promised artifact in scope is accepted; undeclared or out of scope is refused" {

@@ -110,7 +110,8 @@ if [[ -n "$PLAN" ]]; then
   PLAN="$(realpath "$PLAN")"
   [[ -n "$ROOT" ]] || ROOT="$(_aid_plan_project_root "$PLAN")" || _die "the plan is not inside an AID workspace; pass --project-root" 2
   PLAN_ID="$(_aid_plan_id_of "$PLAN")" || _die "the plan has no valid frontmatter id" 2
-  BASE="${ROOT}/.aid-o/work/evidence/${PLAN_ID}/cp1"
+  # evidence in the state root, whichever tree holds the plan file
+  BASE="$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/.aid-o/work/evidence/${PLAN_ID}/cp1"
   NS=plan_review; BLOCK=plan_review; ROLES_SKILL="${AID_PLUGIN_PATH}/skills/plan-review-roles.md"
 elif [[ -n "$CHECKPOINT" ]]; then
   MODE=step
@@ -292,7 +293,7 @@ cmd_prepare() {
   fi
   local dir sha check
   if [[ "$MODE" == plan ]]; then
-    check="${ROOT}/.aid-o/work/evidence/${PLAN_ID}/plan-check.json"
+    check="$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/.aid-o/work/evidence/${PLAN_ID}/plan-check.json"
     [[ -f "$check" ]] || _die "no plan-check.json for ${PLAN_ID}; run aid-plan-check.sh ${PLAN} --json ${check}"
   else
     [[ -f "$STEPCHECK" ]] || _die "no step-check.json in ${BASE}; run aid-step-check.sh --checkpoint ${CHECKPOINT}${STEP:+ --step $STEP} --evidence-dir ${EVID}"
