@@ -32,8 +32,9 @@ v Docusauru), šablona `/opt/eco/docs/docs/ecosystem/templates/product-vision-pr
 4. Pět sloganů v jazyce projektu jako karty otázky `vision` (`thesis` =
    slogan, `uniqueness` = čím se liší od běžných v oboru); PM vybere kartu,
    vrátí s vlastním sloganem v komentáři, nebo požádá o nové (re-roll).
-5. Po `choose`/`approve` tělo kapitoly (jádro vize, tón, zvolený slogan,
-   zamítnuté) do souboru v `.aid-ui/`,
+5. Po `choose`/`approve` tělo kapitoly (jádro vize, tón, zvolený slogan =
+   `thesis` karty `choice` ze snímku `cards` odpovědi, ne z payloadu -
+   `SKILL.md` „Jak se ptá PM", bod 5; zamítnuté) do souboru v `.aid-ui/`,
    `aid-ui-state.sh body <project> vize --file <soubor>`, pak
    `aid-ui-state.sh chapter <project> vize navrh`.
 

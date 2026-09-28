@@ -38,7 +38,9 @@ z inventury kroku 0.
    i tmavý podklad) jako PNG pod `.aid-ui/studio/`; tři karty otázky
    `identity` (`thesis` = myšlenka symbolu, `uniqueness` = odlišnost od značek
    v oboru). Re-roll nejvýš dvakrát; pak PM dodá symbol sám (`"package"`).
-5. Balíček do `docs/design/brand-package/` podle části 2 šablony:
+5. Symbol = karta `choice` ze snímku `cards` zaznamenané odpovědi, ne
+   z payloadu, a jen se shodným `preview_sha256` (`SKILL.md` „Jak se ptá PM",
+   bod 5). Balíček do `docs/design/brand-package/` podle části 2 šablony:
    `symbol/` (color, black, white, color-on-dark), `source/` (master se
    živým textem + název a licence fontu), vedle distribuční verze s textem
    převedeným na křivky, `brand-brief.md`, `README.md`; `logo/` a `lockup/`

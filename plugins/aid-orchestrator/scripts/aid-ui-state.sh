@@ -19,14 +19,16 @@
 #       opened_at, and its question, kind and target be those of the payload's question.
 #       The URL must be http://127.0.0.1, http://localhost or http://$AID_UI_HOST (any port);
 #       the token goes to curl on stdin, never on its command line. Stores .aid-ui/answers/<id>.json and answers.<id> = {kind, target,
-#       decision, choice, answer_file, answer_sha256, opened_at, at}. Studio unreachable,
+#       decision, choice, comment, cards, cards_sha256, answer_file, answer_sha256, opened_at, at}
+#       (cards = the question's cards as the studio showed them when the PM answered). Studio unreachable,
 #       unanswered (404) or malformed -> exit 1, the question stays pending, nothing recorded.
 #       A consumed answer is never re-recorded.
 #
 #   Mutations that need the PM take --answer <question id>. The answer must be recorded,
 #   of the verb's kind, for exactly the requested target, decided approve|choose, not in
 #   `consumed`, its file unchanged, and the live studio must still give it (GET /answer as
-#   record-answer does, same URL rule) with the same question, kind, target and decision;
+#   record-answer does, same URL rule) with the same question, kind, target, decision and
+#   cards_sha256;
 #   studio unreachable or a mismatch -> exit 1. The mutation then consumes it. This
 #   guards against an agent skipping or misapplying the PM's answer, not against one that
 #   deliberately forges files and the server. Every verb but build-id holds an flock
@@ -39,8 +41,8 @@
 #                          <json> = the shown cards [{"id": <card id>, "url", "why"}]; the answer
 #                          must be `choose` with its choice (one card id or a list) among the ids;
 #                          card ids must be non-empty and unique, and the refs must be exactly
-#                          the cards of the answer's question in .aid-ui/studio/payload.json
-#                          (same count; per id the card's url = url, its thesis = why; no
+#                          the cards the studio showed for the answer's question when the PM
+#                          answered (the live answer's `cards`, never payload.json) (same count; per id the card's url = url, its thesis = why; no
 #                          other keys) (else exit 1, nothing written, answer not consumed);
 #                          picked = id in the choice (set by this script, never by the caller)
 #     chapter <project> <id> schvaleno            kind by chapter: vize vision, logo identity,
@@ -132,7 +134,7 @@ now() { date -u +%Y-%m-%dT%H:%M:%S.%3NZ; }
 
 (( $# >= 2 )) || usage "need <verb> <project>"
 VERB="$1"; PROJECT="$2"; shift 2
-ANSWER=""; rest=()   # --answer <id> may stand anywhere after <project>
+ANSWER=""; LIVE_ANSWER=""; rest=()   # --answer <id> may stand anywhere after <project>
 while (( $# )); do
   if [[ "$1" == --answer ]]; then (( $# >= 2 )) || usage "--answer needs a question id"; ANSWER="$2"; shift 2
   else rest+=("$1"); shift; fi
@@ -541,8 +543,10 @@ take_answer() {
   studio_fetch "$ANSWER" "$body" "$VERB refused: answer $ANSWER cannot be confirmed with the studio"
   [[ "$STUDIO_CODE" == 200 ]] || { rm -f "$body"; die "$VERB refused: the studio does not hold answer $ANSWER (HTTP $STUDIO_CODE); the recorded answer is not confirmed by the PM's page"; }
   jq -e --arg id "$ANSWER" --argjson s "$(jq -c --arg id "$ANSWER" '.answers[$id]' "$STATE")" \
-    'type == "object" and .question == $id and .kind == $s.kind and .target == $s.target and .decision == $s.decision' \
+    'type == "object" and .question == $id and .kind == $s.kind and .target == $s.target and .decision == $s.decision
+     and (.cards | type) == "array" and (.cards_sha256 | type) == "string" and .cards_sha256 == $s.cards_sha256' \
     "$body" >/dev/null 2>&1 || { rm -f "$body"; die "$VERB refused: the studio's answer $ANSWER differs from the recorded one"; }
+  LIVE_ANSWER="$(<"$body")"   # the studio's answer, with the cards it showed (set refs)
   rm -f "$body"
 }
 
@@ -629,7 +633,8 @@ case "$VERB" in
     [[ "$STUDIO_CODE" != 404 ]] || { rm -f "$body"; die "no answer to $qid yet; it stays pending: $STUDIO_URL"; }
     [[ "$STUDIO_CODE" == 200 ]] || { rm -f "$body"; die "the studio answered HTTP $STUDIO_CODE for $qid; nothing recorded"; }
     ans="$(jq -ec --arg q "$qid" 'select(type == "object" and .question == $q and (.kind | type) == "string"
-      and has("target") and (.decision | type) == "string" and (.at | type) == "string")' "$body" 2>/dev/null)" ||
+      and has("target") and (.decision | type) == "string" and (.at | type) == "string"
+      and (.cards | type) == "array" and (.cards_sha256 | type) == "string")' "$body" 2>/dev/null)" ||
       { rm -f "$body"; die "malformed answer from the studio for $qid; nothing recorded"; }
     jq -e --argjson p "$pq" '.kind == $p.kind and .target == $p.target' <<<"$ans" >/dev/null ||
       { rm -f "$body"; die "the studio's answer to $qid is for $(jq -c '[.kind, .target]' <<<"$ans"), not the listed question $(jq -c '[.kind, .target]' <<<"$pq"); nothing recorded"; }
@@ -643,7 +648,8 @@ case "$VERB" in
     sha="$(sha256sum "$PROJECT/$file" | cut -d' ' -f1)"
     jq_write --arg q "$qid" --arg f "$file" --arg sha "$sha" --arg o "$opened" --argjson a "$ans" \
       '.answers[$q] = {kind: $a.kind, target: $a.target, decision: $a.decision, choice: $a.choice,
-                       comment: $a.comment, answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at}'
+                       comment: $a.comment, cards: $a.cards, cards_sha256: $a.cards_sha256,
+                       answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at}'
     echo "ANSWER $qid: $(jq -c '{kind, target, decision, choice}' <<<"$ans")"
     ;;
 
@@ -668,9 +674,9 @@ case "$VERB" in
         jq -e 'all(.[]; .id != "") and ([.[].id] | length == (unique | length))' >/dev/null <<<"$2" \
           || die "set refs refused: card ids must be non-empty and unique: $(jq -c '[.[].id]' <<<"$2")"
         take_answer references "$(json_sha "$2")"
-        # the refs are exactly the cards the studio shows for this answer's question
-        shown="$(jq -c --arg q "$ANSWER" '[.cards[]? | select(type == "object" and .question == $q)
-          | {id, url, why: .thesis}] | sort_by(.id | tostring)' "$PROJECT/.aid-ui/studio/payload.json" 2>/dev/null)" || shown=""
+        # the refs are exactly the cards the studio showed when the PM answered (its
+        # in-memory snapshot, confirmed live by take_answer), never payload.json
+        shown="$(jq -c '[.cards[] | {id, url, why: .thesis}] | sort_by(.id | tostring)' <<<"$LIVE_ANSWER" 2>/dev/null)" || shown=""
         jq -e --argjson s "${shown:-null}" 'sort_by(.id) == $s' >/dev/null <<<"$2" ||
           die "set refs refused: the refs are not the cards shown for question $ANSWER (id, url, thesis): shown $shown"
         picks="$(jq -c --arg q "$ANSWER" '.answers[$q] | if .decision == "choose" then [.choice | select(. != null)] | flatten else [] end' "$STATE")"

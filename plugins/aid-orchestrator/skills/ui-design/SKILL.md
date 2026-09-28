@@ -78,8 +78,13 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 5. Rozhodnutí `approve`/`choose` → mutace s `--answer <id>` (jen tam, kde
    krok nějakou jmenuje). Po `choose` je vybraná karta ta s `id` = `choice`
    zaznamenané odpovědi (`jq '.answers["<id>"].choice' brand-state.json`)
-   mezi kartami téže otázky v payloadu; do stavu nebo těla kapitoly jde její
-   obsah beze změny (`thesis`, `url`, náhled), nikdy karta jiné otázky.
+   mezi `cards` téže odpovědi - snímkem karet, jak je studio PM ukázalo
+   v okamžiku odpovědi (`jq '.answers["<id>"].cards' brand-state.json`,
+   uložil ho `record-answer`), nikdy znovu z payloadu (ten se mohl
+   od odpovědi změnit); do stavu nebo těla kapitoly jde obsah té karty beze
+   změny (`thesis`, `url`, `palette`, náhled), nikdy karta jiné otázky.
+   Náhled zkopíruj, jen když `sha256sum` souboru = `preview_sha256` karty;
+   jinak se od odpovědi změnil a otázku otevři znovu.
    `return` → PM vrací s komentářem; oprav a otevři
    otázku znovu (nové `opened_at`). `reroll_safer`/`reroll_bolder` → odpověď
    nese `next_question`; vytvoř nové karty podle komentáře a zapiš je pod tím

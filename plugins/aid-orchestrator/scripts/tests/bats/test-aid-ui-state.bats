@@ -555,6 +555,43 @@ p101_project() {
   [ "$(jq -c '[.refs[] | [.id, .url, .picked]]' "$STATE")" = '[["x","https://x.example",true],["y","https://y.example",false]]' ]
 }
 
+@test "set refs: compared with the cards the studio showed at answer time, never with a later payload.json" {
+  refs='[{"id":"x","url":"https://x.example","why":"písmo"},{"id":"y","url":"https://y.example","why":"barvy"}]'
+  p="$PROJ/.aid-ui/studio/payload.json"
+  # the reviewer's example: after the answer the chosen card's url is rewritten in payload.json
+  evil='[{"id":"x","url":"https://evil.example","why":"písmo"},{"id":"y","url":"https://y.example","why":"barvy"}]'
+  ans s1 references "$(sha_of "$evil")" choose "$(cards_of "$refs")"
+  jq '(.cards[] | select(.question == "s1" and .id == "x")).url = "https://evil.example"' "$p" > "$p.t" && mv "$p.t" "$p"
+  run "$SCRIPT" set "$PROJ" refs "$evil" --answer s1
+  [ "$status" -eq 1 ]; [[ "$output" == *'not the cards shown for question s1'* ]]
+  [ "$(jq -c .refs "$STATE")" = '[]' ]; [ "$(jq -c .consumed "$STATE")" = '[]' ]
+  [ "$(jq -c '.answers.s1.cards | map(.url)' "$STATE")" = '["https://x.example","https://y.example"]' ]
+  # the thesis rewritten after the answer
+  why='[{"id":"x","url":"https://x.example","why":"jiné"},{"id":"y","url":"https://y.example","why":"barvy"}]'
+  ans s2 references "$(sha_of "$why")" choose "$(cards_of "$refs")"
+  jq '(.cards[] | select(.question == "s2" and .id == "x")).thesis = "jiné"' "$p" > "$p.t" && mv "$p.t" "$p"
+  run "$SCRIPT" set "$PROJ" refs "$why" --answer s2
+  [ "$status" -eq 1 ]
+  # a card added to payload.json after the answer
+  more="$(jq -c '. + [{"id":"z","url":"https://z.example","why":"nové"}]' <<<"$refs")"
+  ans s3 references "$(sha_of "$more")" choose "$(cards_of "$refs")"
+  jq '.cards += [{question: "s3", id: "z", url: "https://z.example", thesis: "nové"}]' "$p" > "$p.t" && mv "$p.t" "$p"
+  run "$SCRIPT" set "$PROJ" refs "$more" --answer s3
+  [ "$status" -eq 1 ]
+  [ "$(jq -c .refs "$STATE")" = '[]' ]; [ "$(jq -c .consumed "$STATE")" = '[]' ]
+  # the recorded snapshot digest altered in the state: the live studio disagrees
+  ans s4 references "$(sha_of "$refs")" choose "$(cards_of "$refs")"
+  jqw '.answers.s4.cards_sha256 = "0000"'
+  run "$SCRIPT" set "$PROJ" refs "$refs" --answer s4
+  [ "$status" -eq 1 ]; [[ "$output" == *'differs from the recorded one'* ]]
+  # refs matching the snapshot are accepted although payload.json now says otherwise
+  ans s5 references "$(sha_of "$refs")" choose "$(cards_of "$refs")"
+  jq '(.cards[] | select(.question == "s5" and .id == "x")).url = "https://evil.example"' "$p" > "$p.t" && mv "$p.t" "$p"
+  run "$SCRIPT" set "$PROJ" refs "$refs" --answer s5
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.refs[] | [.id, .url, .picked]]' "$STATE")" = '[["x","https://x.example",true],["y","https://y.example",false]]' ]
+}
+
 @test "set options: validated, needs a variant answer for exactly this JSON, refused after step 0" {
   run "$SCRIPT" set "$PROJ" options '{"vision":true,"colour":true}'
   [ "$status" -eq 2 ]
@@ -897,13 +934,18 @@ JSON
   AID_UI_STUDIO_URL=http://evil.example:3915 run "$SCRIPT" record-answer "$PROJ" --question q1
   [ "$status" -eq 1 ]; [[ "$output" == *"studio URL refused"* ]]
   # any HTTP server serving a file the agent wrote (python -m http.server ignores the query)
-  echo '{"question":"q1","kind":"approve_page","target":"kontakt.html@abc","decision":"approve","at":"2026-01-01T00:00:00Z"}' > "$T/fake/answer"
+  echo '{"question":"q1","kind":"approve_page","target":"kontakt.html@abc","decision":"approve","at":"2026-01-01T00:00:00Z","cards":[],"cards_sha256":"x"}' > "$T/fake/answer"
   PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
   python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$T/fake" >/dev/null 2>&1 3>&- &
   SPID=$!
   for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/answer" && break; sleep 0.1; done
   AID_UI_STUDIO_URL="http://127.0.0.1:$PORT" run "$SCRIPT" record-answer "$PROJ" --question q1
   [ "$status" -eq 1 ]; [[ "$output" == *"not the listed question"* ]]
+  [ "$(jq '.answers | length' "$STATE")" = 0 ]
+  # an answer without the studio's card snapshot is malformed
+  echo '{"question":"q1","kind":"approve_page","target":"index.html@abc","decision":"approve","at":"2026-01-01T00:00:00Z"}' > "$T/fake/answer"
+  AID_UI_STUDIO_URL="http://127.0.0.1:$PORT" run "$SCRIPT" record-answer "$PROJ" --question q1
+  [ "$status" -eq 1 ]; [[ "$output" == *"malformed answer"* ]]
   [ "$(jq '.answers | length' "$STATE")" = 0 ]
   # a curl stub records its argv and stdin
   printf '#!/bin/bash\nprintf "%%s\\n" "$@" > %s/argv; cat > %s/stdin; printf 404\n' "$T" "$T" > "$T/bin/curl"; chmod +x "$T/bin/curl"
