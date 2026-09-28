@@ -1523,7 +1523,10 @@ _fsm_routed_findings_check() {
   fi
   # A jq failure here must NOT read as "no findings": an unreadable review is
   # the one input whose silence would pass this whole check open.
-  if ! findings="$(jq -r '.semantic_review.findings[]? | select((.target_path // "") != "") | "\(.fingerprint)\t\(.target_path)"' "$review_json" 2>&1)"; then
+  # A finding the review itself closed (status resolved: fixed and confirmed by
+  # a later round, or dismissed by the PM) owes no route — P103 had to route and
+  # resolve five of them by hand after a clean confirmation.
+  if ! findings="$(jq -r '.semantic_review.findings[]? | select((.target_path // "") != "" and (.status // "open") != "resolved") | "\(.fingerprint)\t\(.target_path)"' "$review_json" 2>&1)"; then
     echo "PRECONDITION FAIL: cannot read findings from ${review_json} (${findings}) — refusing to complete ${epic_id} on a review artifact that will not parse." >&2
     return 1
   fi

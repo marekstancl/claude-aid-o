@@ -134,6 +134,19 @@ _apcs_short() {
 # refused or was bypassed during this plan's EPICs, and how many entries the
 # project's aid-plugin-issues.md carries. A count, not a judgement — the file
 # is the record, this is the nudge to look at it while the plan is fresh.
+# _apcs_standing_line <plan_id> — when the PM gave the plan a standing "don't
+# ask, finish it", how many review rounds ran under it (round.json standing:
+# true in the plan's step and EPIC runs). Nothing when there is no instruction.
+_apcs_standing_line() {
+  local plan_id="$1" num="${1#P}" root f n=0
+  root="$(aid_state_root 2>/dev/null || pwd)"
+  f="${root}/.aid-o/work/evidence/${plan_id}/standing-pm.json"
+  [[ -f "$f" ]] || return 0
+  n="$(find "${root}/.aid-o/work/evidence" -path "*/E-${num}-*/*/round.json" 2>/dev/null \
+       | xargs -r jq -r 'select(.standing == true) | 1' 2>/dev/null | wc -l)"
+  printf 'Stálý pokyn PM („%s“): pod ním proběhlo %s kol oprav a potvrzení navíc.\n' "$(jq -r '.words' "$f")" "$n"
+}
+
 _apcs_plugin_issues_line() {
   local plan_id="$1" num="${1#P}" n=0 f entries
   local root; root="$(aid_state_root 2>/dev/null || pwd)"
@@ -533,6 +546,7 @@ aid_plan_close_render() {
       "$gates_result" "${gates_report:-—}" "$ev_status" "$ev_at_head"
     printf 'Další krok: %s\n' "$opt_a"
     _apcs_plugin_issues_line "$plan_id"
+    _apcs_standing_line "$plan_id"
   else
     printf 'Potřebuji tvoje rozhodnutí: jak uzavřít plán %s?\n' "$plan_id"
     printf 'Proč teď: %s\n' "$why"
@@ -544,6 +558,7 @@ aid_plan_close_render() {
     [[ -n "$merge_sha" ]] || printf '%s\n' "$_APCS_ROLLBACK_NA"
     printf 'Riziko / co není ověřeno: %s\n' "$risk"
     _apcs_plugin_issues_line "$plan_id"
+    _apcs_standing_line "$plan_id"
   fi
   printf 'Artifact body: %s\n' "$out_path"
   return 0

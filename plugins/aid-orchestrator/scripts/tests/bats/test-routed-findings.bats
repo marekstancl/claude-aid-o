@@ -180,6 +180,15 @@ _done_advance() {
   [[ "$output" == *"no step of ${EPIC} was allowed to touch"* ]]
 }
 
+@test "an out-of-scope CP3 finding the review itself resolved (fixed and confirmed) owes no route (P103)" {
+  _seed_done_review
+  _seed_plan_json "src/in-scope.ts"
+  _seed_review "docs/somewhere-else.md"
+  jq '.semantic_review.findings[0].status = "resolved"' "$EV/semantic-review-final.json" > "$EV/s" && mv "$EV/s" "$EV/semantic-review-final.json"
+  run _done_advance
+  [[ "$output" != *"no step of ${EPIC} was allowed to touch"* ]]
+}
+
 @test "P079 Step 7: an out-of-scope finding that WAS routed satisfies the producer check" {
   _seed_done_review
   _seed_plan_json "src/in-scope.ts"

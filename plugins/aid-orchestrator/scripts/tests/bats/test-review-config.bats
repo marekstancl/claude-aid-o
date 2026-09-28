@@ -182,3 +182,11 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   aid_review_config_load "$ROOT" final_review "$STEP_SKILL"
   run aid_review_config_validate; [ "$status" -eq 1 ]; [[ "$output" == *"haiku"* ]]
 }
+
+@test "light_max_prompt_lines: 800 by default, a non-integer is refused" {
+  aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
+  [ "$RC_LIGHT_MAX_PROMPT_LINES" = 800 ]
+  _project '.review_checkpoints.step_review.light_max_prompt_lines = "lots"'
+  run _load_step
+  [ "$status" -eq 1 ]; [[ "$output" == *"light_max_prompt_lines must be a positive integer"* ]]
+}

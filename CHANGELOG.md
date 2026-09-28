@@ -3,6 +3,24 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.111.0] — 2026-09-28
+
+Opravy z běhu P103, kde automatický režim PM neustále zastavoval. Příčiny: lehcí revizoři četli jen zlomek dlouhého zadání a díry se našly až pozdě, session jela na starších kartách agentů, stálý pokyn PM „neptej se“ nešel zapsat a každý nález po posledním kole znamenal novou kartu.
+
+### Added
+- **Stálý pokyn PM pro plán** — `aid-review-round.sh standing --checkpoint cp2|cp3 --evidence-dir <run> --reason "<slova PM>"` se zapíše jednou na plán a dovolí každé revizi kroku i EPICu dvě kola „oprav a potvrď“ po vyčerpání rozpočtu, než se cokoli předá PM. Kolo, které znovu otevře tytéž nálezy, se odmítne (rozhodne PM). Kola pod pokynem nesou `standing: true`.
+- **Upozornění na starou verzi pluginu** — háky při startu session a u každého promptu porovnají načtenou verzi s nainstalovanou a řeknou „spusť /reload-plugins“ (P103 jel na kartách 2.108.0 při nainstalované 2.109.0, opravář tak neznal pravidlo „oprav celou třídu“).
+
+### Changed
+- **Dlouhé zadání dostane plného revizora** — role s nízkým úsilím jde na `reviewer-light` jen do `light_max_prompt_lines` řádků zadání (výchozí 800), nad tím na `general-purpose`. Lehký revizor v P102/P103 přečetl kolem čtvrtiny a vrátil „bez nálezů“; plný četl celé.
+
+### Fixed
+- **Čekání na agenta na pozadí** — háky uznají `AID-WAIT` i u agenta spuštěného na pozadí bez výslovného příznaku.
+- **Citace nálezu v akceptačním kritériu** — vyvážená fráze v apostrofech už není „fragment“ (dvě kontroly AID si odporovaly).
+- **Balíček revize kroku** neuvádí úroveň testu z doby psaní plánu; platí hlavička sady.
+- **Dokončení EPICu** nechce rozhodnutí u nálezu CP3, který revize sama uzavřela (opraven a potvrzen, nebo zamítnut PM).
+- **Výpadek kontroly oprávnění Claude Code** — automatický běh počká a zopakuje příkaz (až 5×), místo aby zastavil kartou.
+
 ## [2.110.0] — 2026-09-28
 
 Opravy z běhu agents P009. Hlavní: v projektech, které verzují stav plánů (acta, agents, wan), četla každá pracovní kopie plánu a EPICu nastavení ze své vlastní kopie větve místo z hlavního checkoutu. Změna nastavení během plánu se proto neprojevila; v P009 kvůli tomu neběžel bezpečnostní revizor kroku ani jednou (0 ze 7 kroků).

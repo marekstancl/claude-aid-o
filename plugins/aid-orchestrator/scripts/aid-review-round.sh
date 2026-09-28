@@ -23,6 +23,9 @@
 #       clear one invalid or missing reviewer so it can answer again
 #   override … --rounds 1|2|3 --reason "<the PM's words>"
 #       record the PM's instruction to run one round, or a third
+#   standing --checkpoint cp2|cp3 --evidence-dir <run> --reason "<the PM's words>"
+#       record, once per plan, the PM's "don't ask, finish it": two more
+#       fix-and-confirm rounds after any step or EPIC budget of the plan
 #   dispute … --round K --fingerprint <fp> --reason "<why>" [--pm accepted|rejected [--finding-card <card>]]
 #       CP1, CP2, CP3: a disputed finding stays blocking; only the PM's answer
 #       clears it, and at CP2/CP3 `--pm accepted` needs the Decision card that
@@ -177,6 +180,24 @@ _round_verdict() { jq -r "if [.findings[] | select(${AID_SR_OPEN_JQ})] | length 
 
 # _override_rounds — the PM's recorded round count, or nothing.
 _override_rounds() { [[ -f "${BASE}/override.json" ]] && jq -r '.rounds // empty' "${BASE}/override.json" 2>/dev/null; }
+# _standing_file — the PM's standing "don't ask, finish it" for the plan this
+# step or EPIC run belongs to (plan id from the run's own plan_path), or nothing.
+_standing_file() {
+  [[ "$MODE" == step && "$CHECKPOINT" =~ ^cp[23]$ ]] || return 1
+  local pp pid; pp="$(yq -r '.plan_path // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"
+  [[ -n "$pp" && "$pp" != null && -f "$pp" ]] || return 1
+  pid="$(_aid_plan_id_of "$pp")" || return 1
+  printf '%s/.aid-o/work/evidence/%s/standing-pm.json\n' "$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")" "$pid"
+}
+# _base_rounds — the budget without the standing instruction: the PM's override, else rounds_default.
+_base_rounds() { local o; o="$(_override_rounds)"; [[ -n "$o" && "$o" -gt "$RC_ROUNDS_DEFAULT" ]] && echo "$o" || echo "$RC_ROUNDS_DEFAULT"; }
+# _allowed_rounds — the base budget, plus at most two fix-and-confirm rounds
+# under the PM's standing instruction (P103: "už se neptej a dodělej" could not
+# be recorded, so every finding after the last round cost a new card).
+_allowed_rounds() {
+  local f b; b="$(_base_rounds)"
+  if f="$(_standing_file)" && [[ -f "$f" ]]; then echo $(( b + 2 )); else echo "$b"; fi
+}
 
 # _expected_roles <round> — the reviewers a round asks, one per line.
 _expected_roles() {
@@ -325,10 +346,21 @@ cmd_prepare() {
         [[ "$(jq -r '.verdict // ""' "${prev}/measurement.json")" == pass ]] && delta=1
       fi
     fi
-    if (( ROUND > RC_ROUNDS_DEFAULT && ! delta )); then
-      local allowed; allowed="$(_override_rounds)"
-      [[ -n "$allowed" && "$allowed" -ge "$ROUND" ]] \
-        || _die "round ${ROUND} exceeds rounds_default ${RC_ROUNDS_DEFAULT}; it needs the PM's override.json (aid-review-round.sh override)"
+    local standing=false
+    if (( ROUND > $(_base_rounds) && ! delta )); then
+      (( ROUND <= $(_allowed_rounds) )) \
+        || _die "round ${ROUND} exceeds the round budget ($(_base_rounds)$( (( $(_allowed_rounds) > $(_base_rounds) )) && echo " + 2 under the PM's standing instruction")); it needs the PM's override.json (aid-review-round.sh override) or a PM decision"
+      standing=true
+      # A fix-and-confirm round must make progress: when the previous round
+      # re-opened exactly what the one before it had open, the chain is not
+      # converging and the PM decides.
+      if (( ROUND >= 3 )); then
+        local open_now open_before
+        open_now="$(jq -c '[.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major")) | (.match // .fingerprint)] | sort' "${prev}/merged.json")"
+        open_before="$(jq -c '[.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major")) | (.match // .fingerprint)] | sort' "$(_round_dir $((ROUND - 2)))/merged.json" 2>/dev/null || echo '[]')"
+        [[ "$open_now" != "$open_before" ]] \
+          || _die "round $((ROUND - 1)) re-opened the same findings as round $((ROUND - 2)); a standing-instruction round needs progress — the PM decides"
+      fi
     fi
     if (( ROUND >= 2 && ! delta )); then
       if [[ "$MODE" == plan ]]; then
@@ -377,7 +409,8 @@ cmd_prepare() {
       '{checkpoint: $cp, step: $step, round: $round, head_sha: $h, step_check_sha256: $scs,
         reviewers_expected: $ARGS.positional, min_answers_effective: $min, degraded: $degraded, stub: $stub,
         confirmation_of: (if $conf == "" then null else $conf end), started_at: $at}
-       + (if ($carried | length) > 0 then {carried_from: $carried} else {} end)' \
+       + (if ($carried | length) > 0 then {carried_from: $carried} else {} end)
+       + (if $standing then {standing: true} else {} end)' --argjson standing "${standing:-false}" \
       --args "${roles[@]}" > "${dir}/round.json"
     for role in "${roles[@]}"; do
       _is_carried "$dir" "$role" || aid_step_review_prompt_render "$role" "$ROUND" "$dir" "$CHECKPOINT" "${STEP:-}" || exit 1
@@ -393,7 +426,7 @@ cmd_prepare() {
   echo "prepared round ${ROUND}: ${#roles[@]} reviewers → ${dir}"
   for role in "${roles[@]}"; do
     if _is_carried "$dir" "$role"; then echo "  ${role}: carried from the previous attempt (the fix touched nothing it reads, and it had no finding)"
-    else echo "  ${dir}/prompt-${role}.md  (focus $(_focus "$role")$(_agent_note "$role"))"; fi
+    else echo "  ${dir}/prompt-${role}.md  (focus $(_focus "$role")$(_agent_note "$role" "$dir"))"; fi
   done
 }
 
@@ -431,20 +464,28 @@ _stand_in() { jq -e '.fallback == "claude"' "$1/codex-${2}.usage.json" >/dev/nul
 # controller happens to stand in — two projects reviewed from one cwd would
 # otherwise share one answer.
 _codex_probe() { ( AID_PROJECT_ROOT="$ROOT" CODEX_MODEL="$1"; export AID_PROJECT_ROOT CODEX_MODEL; source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"; aid_codex_probe ); }
-# _agent_type <role> — the subagent a claude reviewer (or a codex role's
-# stand-in) is dispatched as: the role's effort, low → reviewer-light.
+# _agent_type <role> [round_dir] — the subagent a claude reviewer (or a codex
+# role's stand-in) is dispatched as: effort low → reviewer-light, unless the
+# role's prompt in <round_dir> is longer than light_max_prompt_lines — the light
+# reviewer read 550 of 1 980 and ~800 of 3 441 lines and passed (P102, P103),
+# the general-purpose one read the whole prompt.
 _agent_type() {
-  local i; i="$(aid_review_role_index "$1")"
-  [[ "${RC_EFFORT[$i]}" == low ]] && echo aid-orchestrator:reviewer-light || echo general-purpose
+  local i n=0; i="$(aid_review_role_index "$1")"
+  [[ -n "${2:-}" ]] && n="$(jq -r --arg r "$1" '.prompt_lines[$r] // 0' "$2/round.json" 2>/dev/null || echo 0)"
+  if [[ "${RC_EFFORT[$i]}" == low ]] && (( n <= RC_LIGHT_MAX_PROMPT_LINES )); then
+    echo aid-orchestrator:reviewer-light
+  else
+    echo general-purpose
+  fi
 }
-# _agent_note <role> — what prepare prints next to a claude role's prompt.
+# _agent_note <role> <round_dir> — what prepare prints next to a claude role's prompt.
 _agent_note() {
   local i; i="$(aid_review_role_index "$1")"
-  if [[ "${RC_PROVIDER[$i]}" == claude ]]; then echo ", agent $(_agent_type "$1") at model ${RC_MODEL[$i]}"; fi
+  if [[ "${RC_PROVIDER[$i]}" == claude ]]; then echo ", agent $(_agent_type "$1" "${2:-}") at model ${RC_MODEL[$i]}"; fi
 }
 # _stand_in_line <dir> <role> <why> — what the controller must do instead of paying codex.
 _stand_in_line() {
-  echo "STAND-IN: no codex answer ($3); dispatch ${1}/prompt-${2}.md to a $(_agent_type "$2") agent at model ${RC_STAND_IN_MODEL} (focus $(_focus "$2"); see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
+  echo "STAND-IN: no codex answer ($3); dispatch ${1}/prompt-${2}.md to a $(_agent_type "$2" "$1") agent at model ${RC_STAND_IN_MODEL} (focus $(_focus "$2"); see scripts/lib/aid-review-adapter-claude.md, \"Stand-in for a Codex role\") and have it write ${1}/reviewer-${2}.json with \"provider\": \"claude\". Then collect."
 }
 
 cmd_dispatch() {
@@ -816,7 +857,7 @@ cmd_close() {
     verdict="$(_round_verdict "${dir}/merged.json")"
     # What stays open after the LAST allowed round is routed or carried before
     # the round is marked closed, so an interrupted close is run again, not lost.
-    local last_allowed; last_allowed="$(_override_rounds)"; [[ -n "$last_allowed" ]] || last_allowed="$RC_ROUNDS_DEFAULT"
+    local last_allowed; last_allowed="$(_allowed_rounds)"
     aid_step_review_route_open "$ROOT" "$EVID" "$CHECKPOINT" "$STEP" "$dir" "$(( ROUND >= last_allowed ? 1 : 0 ))" \
       || _die "routing the open findings failed; close can be run again"
     jq --arg at "$(_now)" '. + {routed_at: $at}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
@@ -971,6 +1012,22 @@ cmd_dispute() {
     | if .dispute.pm.answer == "accepted" then "dismissed by the PM (dispute accepted)" else .status end' "${dir}/merged.json")"
 }
 
+# standing --checkpoint cp2|cp3 --evidence-dir <run> --reason "<the PM's words>"
+# Records, once per plan, the PM's standing instruction to finish without
+# asking: every step and EPIC review of the plan may then run up to two
+# fix-and-confirm rounds after its budget before routing what stays open.
+cmd_standing() {
+  [[ "$MODE" == step && "$CHECKPOINT" =~ ^cp[23]$ ]] || _die "standing is recorded from a step (cp2) or EPIC (cp3) run of the plan: --checkpoint cp2|cp3 --evidence-dir <run>" 2
+  (( ${#REASON} >= 20 )) || _die "--reason must quote the PM's words (at least 20 characters)" 2
+  local f; f="$(_standing_file)" || _die "cannot find the plan of ${EVID} (its fsm-state.yaml names no readable plan_path)"
+  [[ -f "$f" ]] && _die "the PM's standing instruction is already recorded (${f})"
+  mkdir -p "$(dirname "$f")"
+  jq -n --arg at "$(_now)" --arg why "$REASON" --arg run "$(basename "$(dirname "$EVID")")/$(basename "$EVID")" \
+    '{by: "PM", at: $at, words: $why, recorded_from: $run, grants: "up to 2 fix-and-confirm rounds after each step or EPIC review budget", recorded_by: "controller"}' > "$f"
+  _log review_standing checkpoint="$CHECKPOINT"
+  echo "recorded the PM's standing instruction for the plan (${f})"
+}
+
 cmd_override() {
   [[ "$ROUNDS" =~ ^[1-3]$ ]] || _die "--rounds takes 1, 2 or 3" 2
   (( ${#REASON} >= 20 )) || _die "--reason must quote the PM's words (at least 20 characters)" 2
@@ -1000,5 +1057,6 @@ case "$CMD" in
   finalize)  cmd_finalize ;;
   dispute)   cmd_dispute ;;
   override)  cmd_override ;;
+  standing)  cmd_standing ;;
   *) echo "unknown subcommand: ${CMD}" >&2; usage ;;
 esac

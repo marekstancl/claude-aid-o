@@ -1876,7 +1876,7 @@ Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by
 | CP | Location | Verifier Focus | Fix Loop | Escalation |
 |----|----------|----------------|----------|------------|
 | CP1 | `/aid-plan` "Plan review (CP1)" | six plan reviewer roles, not the verifier | Rounds: 2 by default, a 3rd or only 1 on the PM's recorded override | PM card after each round |
-| CP2 | `/aid-run` "Step review (CP2) and EPIC review (CP3)" | step reviewer roles, not the verifier | Rounds: 2 by default; the step's role fixes, the next round confirms | PM card after the last round |
+| CP2 | `/aid-run` "Step review (CP2) and EPIC review (CP3)" | step reviewer roles, not the verifier | Rounds: 2 by default (+2 fix-and-confirm under the PM's standing instruction, `aid-review-round.sh standing`); the step's role fixes, the next round confirms | PM card after the last round |
 | CP3 | same section, `--checkpoint cp3` | EPIC reviewer roles | same | PM card after the last round |
 | CP6 | `/aid-do` "Review Check (CP6)" | step reviewer roles over the working tree | on the PM's word | Advisory only |
 | CP7 | `/aid-run` "Closing a plan (plan-final)" | three whole-plan roles | 1 round per attempt; a fix mints the next attempt, which confirms it | Decision card (FIX / ABORT) |

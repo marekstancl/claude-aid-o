@@ -482,6 +482,19 @@ _blockers_two() {
   [ "$(aid_plugin_issues_count "$f")" = "0" ]
 }
 
+@test "the close card names the PM's standing instruction and the rounds run under it" {
+  _brief true auto '[]'
+  _decision '"4f2a9c1e7b3d"' not_tagged
+  local root="$TEST_TMPDIR/sr"; mkdir -p "$root/.aid-o/work/plan-state"
+  export AID_PROJECT_ROOT="$root"
+  mkdir -p "$root/.aid-o/work/evidence/P080" "$root/.aid-o/work/evidence/E-080-1_2/R-1/cp3/round-3"
+  printf '{"words":"už se neptej a dodělej"}\n' > "$root/.aid-o/work/evidence/P080/standing-pm.json"
+  printf '{"round":3,"standing":true}\n' > "$root/.aid-o/work/evidence/E-080-1_2/R-1/cp3/round-3/round.json"
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Stálý pokyn PM („už se neptej a dodělej“): pod ním proběhlo 1 kol"* ]]
+}
+
 @test "the delivered page shows where the time went, or says it was not measured" {
   _brief true auto '[]'
   _decision '"3333333333333333333333333333333333333333"' v2.84.0

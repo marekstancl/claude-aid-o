@@ -59,6 +59,16 @@ Escalation rules for `--auto`:
   `timeline.jsonl`, then continue. Do not ask the PM to choose between technical A/B/C options.
 - **PM-authority decisions only** (product intent, material scope expansion, destructive or
   externally visible action, security risk acceptance, secret/credential access) → pause for PM.
+- **The PM says "don't ask, finish it"** (any wording of it): record it ONCE for the plan —
+  `bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" standing --checkpoint cp2|cp3 --evidence-dir <run dir> --reason "<the PM's words>"`.
+  Every step and EPIC review of the plan may then run up to two fix-and-confirm rounds after its
+  budget (fix the finding, `prepare` the next round) before anything is routed to the PM; a round
+  that re-opens the same findings still stops. Never record it on your own judgment.
+- **"AID: this session runs plugin X, but Y is installed"** in context: run `/reload-plugins`
+  before dispatching any agent — the old agent cards lack the newer rules (P103).
+- **"no verdict" from Claude Code's permission check** (the auto-mode classifier failed, the
+  command did not run) is transient and not a PM decision: wait about a minute and run the SAME
+  command again, up to 5 times, before a Blocked card; say so in one line (P103, 28. 9. 2026).
 - Gate retries → auto-retry up to configured max (default: 2)
 - Version bump on intermediate phase → auto-defer (bump only on final phase)
 
@@ -429,7 +439,8 @@ audit line).
 5. The PM card after an exhausted round is the **Decision required** card of
    `skills/communication.md` (built with `scripts/lib/aid-decision-card.sh`):
    what stayed open (from `merged.json`, blockers first), and the options —
-   fix and confirm in a PM-granted round, or accept. `close` has already
+   fix and confirm in a PM-granted round, or accept (with the PM's standing instruction
+   recorded — `aid-review-round.sh standing` — two such rounds need no card). `close` has already
    routed the open findings (`routed`) or carried them (`carried`), so nothing
    is lost whichever the PM picks. A third round, or only one, exists only as
    the PM's recorded words:
