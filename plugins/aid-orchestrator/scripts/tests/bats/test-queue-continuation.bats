@@ -487,6 +487,24 @@ _sent() { grep -c "${1:-agent-waiting}" "$TMP/sent" 2>/dev/null || echo 0; }
   [ "$status" -eq 2 ]; [[ "$output" == *"outcome=refused"* ]]
 }
 
+@test "an Agent launched in the background WITHOUT the run_in_background flag counts as a live wait; a foreground Agent does not (P103)" {
+  _plan P090 auto EPIC_INTEGRATION; _bind P090 S1; _sink
+  local t="$TMP/bg2.jsonl"
+  jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_B",name:"Agent",input:{prompt:"x"}}]}}' > "$t"
+  jq -nc '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_B",content:[{type:"text",text:"Async agent launched successfully. The agent is working in the background."}]}]}}' >> "$t"
+  jq -nc '{type:"assistant",message:{content:[{type:"text",text:"AID-WAIT: CP3 reviewer"}]}}' >> "$t"
+  local ev; ev="$(jq -n --arg c "$ROOT" --arg t "$t" '{session_id:"S1",cwd:$c,transcript_path:$t}')"
+  run aid_hook_rule_queue_continuation_stop <<< "$ev"
+  [ "$status" -eq 3 ]; [[ "$output" == *"outcome=wait"* ]]
+  # a foreground Agent: its result is the agent's output, nothing is pending
+  local f="$TMP/fg.jsonl"
+  jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_C",name:"Agent",input:{prompt:"x"}}]}}' > "$f"
+  jq -nc '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_C",content:"the review found nothing"}]}}' >> "$f"
+  jq -nc '{type:"assistant",message:{content:[{type:"text",text:"AID-WAIT: CP3 reviewer"}]}}' >> "$f"
+  run aid_hook_rule_queue_continuation_stop <<< "$(jq -n --arg c "$ROOT" --arg t "$f" '{session_id:"S1",cwd:$c,transcript_path:$t}')"
+  [ "$status" -eq 2 ]
+}
+
 @test "the rule never refuses without knowing: an unparsable transcript or plan-state, or another plan's live job" {
   _plan P090 auto EPIC_INTEGRATION; _bind P090 S1; _sink
   printf 'not json\n' > "$TMP/bad.jsonl"
