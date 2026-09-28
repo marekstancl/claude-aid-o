@@ -193,6 +193,11 @@
   .panel .body { padding: 1.4rem 1.5rem 1.5rem; gap: .9rem; }
   .panel .q-title { font-size: 1.75rem; }
   .panel .media { border-bottom: 1px solid var(--ks-rule); }
+  .panel.full { max-width: none; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; margin-top: .4rem; }
+  .gallery figure { margin: 0; border: 1px solid var(--ks-rule); border-radius: 6px; overflow: hidden; background: var(--ks-paper-raised); }
+  .gallery figcaption { padding: .6rem .8rem .7rem; font-size: .875rem; color: var(--ks-text-muted); }
+  .gallery figcaption b { color: var(--ks-ink); }
   .field { display: flex; flex-direction: column; gap: .45rem; margin-top: .3rem; }
   .actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
   .actions button.choose { margin-top: 0; }
@@ -463,7 +468,9 @@ function question(q, cards) {
     sec.querySelectorAll("button:not(.chip):not(.nav)").forEach(b => b.disabled = false);
   };
   const title = q.title || kind || q.id;
-  const deckKind = cards.length && q.kind !== "approve_page";
+  // Approvals that show several previews (page wireframes, content per page) get a gallery, not a deck.
+  const gallery = ["structure", "task_map", "content_plan"].includes(q.kind);
+  const deckKind = cards.length && q.kind !== "approve_page" && !gallery;
 
   if (deckKind || (!cards.length && q.rerolled_from)) {
     sec.append(el("div", { class: "head" }, el("p", { class: "tier" }, kind),
@@ -500,8 +507,11 @@ function question(q, cards) {
     el("h2", { class: "q-title", id: "h-" + q.id }, title),
     str(q.prompt) ? el("p", { class: "detail" }, q.prompt) : null,
     meta, exc ? selectorChips(q.target) : null,
-    bodyLines(q.body));
-  sec.append(el("div", { class: "panel face" + (page ? " wide" : "") }, shot, body));
+    bodyLines(q.body),
+    gallery && cards.length ? el("div", { class: "gallery" }, cards.map(c => el("figure", {},
+      str(c.preview) ? media(q, c, false) : null,
+      el("figcaption", {}, el("b", {}, c.title || c.id), str(c.thesis) ? " " + c.thesis : "")))) : null);
+  sec.append(el("div", { class: "panel face" + (page ? " wide" : "") + (gallery && cards.length ? " full" : "") }, shot, body));
   body.append(
     el("div", { class: "field" }, el("label", { class: "fact-label", for: fid }, exc ? "Důvod" : "Napište, co změnit"),
       el("textarea", { id: fid, placeholder: exc ? "Proč výjimku udělit, nebo proč ne…" : "Co chcete jinak…" })),

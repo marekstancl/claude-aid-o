@@ -166,9 +166,42 @@ async function inPage(page) {
       return { name, markup: sv.outerHTML };
     }).filter(Boolean);
     o.icons = [...document.querySelectorAll('link[rel~=icon], link[rel=apple-touch-icon]')].map(l => l.href);
+    // no_overlap: visible elements that paint their own text, controls and images; two that are not
+    // nested and whose boxes intersect (by more than 2 px each way) overlap. Off-screen parking (skip links) is skipped.
+    const own = e => [...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
+    const boxes = [...document.querySelectorAll('body *')].filter(e => vis(e) && getComputedStyle(e).visibility !== 'hidden'
+      && (own(e) || /^(IMG|SVG|BUTTON|INPUT|TEXTAREA|SELECT|VIDEO)$/i.test(e.tagName)))
+      .map(e => ({ e, r: e.getBoundingClientRect() })).filter(x => x.r.width > 1 && x.r.height > 1 && x.r.right > 0 && x.r.left < document.documentElement.scrollWidth && x.r.bottom + scrollY > 0);
+    const name = e => `${e.tagName.toLowerCase()}${e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/)[0] : ''} "${(e.textContent || e.getAttribute('alt') || '').trim().slice(0, 30)}"`;
+    o.overlaps = [];
+    // ponytail: O(n^2) over leaf boxes; fine for pages of a few hundred elements
+    for (let i = 0; i < boxes.length && o.overlaps.length < 5; i++) for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      if (a.e.contains(b.e) || b.e.contains(a.e)) continue;
+      const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left), h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
+      if (w > 2 && h > 2) { o.overlaps.push(`${name(a.e)} x ${name(b.e)}`); if (o.overlaps.length >= 5) break; }
+    }
+    // brand_consistency: the first family of every text element is a webfont the site declares
+    const declared = new Set([...document.fonts].map(f => f.family.replace(/["']/g, '').toLowerCase()));
+    o.fontFamilies = [...new Set([...document.querySelectorAll('body *')].filter(e => vis(e) && own(e))
+      .map(e => getComputedStyle(e).fontFamily.split(',')[0].replace(/["']/g, '').trim()))];
+    o.undeclaredFonts = o.fontFamilies.filter(f => !declared.has(f.toLowerCase()));
+    const shape = el => el ? el.outerHTML.replace(/\s+aria-current="[^"]*"/g, '').replace(/\s+/g, ' ') : '';
+    o.header = shape(document.querySelector('body > header, header'));
+    o.footer = shape(document.querySelector('body > footer, footer'));
+    // page_weight: render-blocking scripts in <head>, large raster images without srcset
+    o.blocking = [...document.querySelectorAll('head script[src]')].filter(x => !x.async && !x.defer && x.type !== 'module').map(x => x.src);
+    o.noSrcset = [...document.querySelectorAll('img')].filter(i => i.naturalWidth > 800 && !i.srcset && !/\.svg(\?|$)/i.test(i.currentSrc || i.src)
+      && !i.closest('picture source[srcset]')).map(i => i.currentSrc || i.src);
+    // business_minimum: seller identification (IČO/IČ + 8 digits) and, next to a form, a link about personal data
+    o.ico = /\bI[ČC]O?\s*:?\s*\d{8}\b/.test(document.body.innerText.replace(/\u00a0/g, ' '));
+    o.form = !!document.querySelector('form input:not([type=hidden]), form textarea');
+    o.privacyLink = [...document.querySelectorAll('a[href]')].some(a => /osobn[ií]ch údaj|zpracování údaj|ochrana údaj|GDPR|soukromí|privacy/i.test(a.textContent + ' ' + a.getAttribute('href')));
     return o;
   });
 }
+// ponytail: one fixed page budget (bytes transferred incl. fonts and images); a per-project budget when a site needs it
+const PAGE_BUDGET = 1024 * 1024;
 const PLACEHOLDER = /lorem ipsum|\bTODO\b|\bXXX\b|example\.(com|org|cz)|\.invalid\b|\+420 ?000|doplní se|fiktivn/gi;
 const PLACEHOLDER_IMG = /placeholder|placehold\.|picsum\.|dummyimage/i;
 // ponytail: facts = phone numbers, prices and times in the visible text; other claims need the reviewer
@@ -178,7 +211,9 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand) {
   const page = await ctx.newPage();
   const bad = [], imgs = [];
   page.on('requestfailed', r => bad.push(`failed ${r.url()}`));
+  let bytes = 0;
   page.on('response', async r => {
+    bytes += Number(r.headers()['content-length'] || (await r.body().catch(() => Buffer.alloc(0))).length) || 0;
     if (r.status() >= 400 && r.url() !== url) bad.push(`${r.status()} ${r.url()}`);
     if (r.request().resourceType() === 'image') {
       const len = Number(r.headers()['content-length'] || (await r.body().catch(() => Buffer.alloc(0))).length);
@@ -237,6 +272,18 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand) {
     .map(i => `${i.url.replace(base, '/')} is ${i.type || 'unknown type'}`)
     .concat(imgs.filter(i => i.len > 200 * 1024).map(i => `${i.url.replace(base, '/')} is ${Math.round(i.len / 1024)} kB`));
   res.image_weight = heavy.length ? ['fail', heavy.join(', ')] : ['pass', ''];
+  res.no_overlap = o.overlaps.length ? ['fail', `overlaps: ${o.overlaps.join(' | ')}`] : ['pass', ''];
+  res.brand_consistency = o.undeclaredFonts.length ? ['fail', `fonts not from the site's own @font-face: ${o.undeclaredFonts.join(', ')}`] : ['pass', `fonts: ${o.fontFamilies.join(', ')}`];
+  res.header = o.header; res.footer = o.footer;
+  const heavyPage = [];
+  if (bytes > PAGE_BUDGET) heavyPage.push(`page transfers ${Math.round(bytes / 1024)} kB (budget ${PAGE_BUDGET / 1024} kB)`);
+  if (o.blocking.length) heavyPage.push(`render-blocking scripts: ${o.blocking.map(u => u.replace(base, '/')).join(', ')}`);
+  if (o.noSrcset.length) heavyPage.push(`large images without srcset: ${o.noSrcset.map(u => u.replace(base, '/')).join(', ')}`);
+  res.page_weight = heavyPage.length ? ['fail', heavyPage.join('; ')] : ['pass', `${Math.round(bytes / 1024)} kB`];
+  const biz = [];
+  if (!o.ico) biz.push('no seller identification (IČO with 8 digits) on the page');
+  if (o.form && !o.privacyLink) biz.push('a form without a link to how personal data are processed');
+  res.business_minimum = biz.length ? ['fail', biz.join('; ')] : ['pass', ''];
   const shot = inside(path.join(out, 'shots'), path.join(...key));
   if (!shot) throw new Error(`screenshot path ${key.join('/')} leaves the output directory`);
   fs.mkdirSync(path.dirname(shot), { recursive: true });
@@ -250,7 +297,7 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand) {
 // ---- matrix -------------------------------------------------------------------------
 const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match',
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
-  'app_task_states', 'screenshots_reviewed'];
+  'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -287,7 +334,10 @@ for (const p of pages) {
 let creds = {};
 if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json'))) creds = readJson(path.join(project, '.aid-ui/test-credentials.json'));
 
-const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed'];
+const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
+  'no_overlap', 'page_weight', 'business_minimum'];
+// brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
+const firstShape = {};
 for (const b of BRS) {
   const type = { chromium, webkit }[b];
   let browser = null, why = '';
@@ -323,6 +373,12 @@ for (const b of BRS) {
         continue;
       }
       for (const c of PAGE_CHECKS) put(m, c, ...r[c]);
+      if (!flow) {
+        const k = `${b}/${v}`, f0 = firstShape[k] || (firstShape[k] = { page: m.page, header: r.header, footer: r.footer });
+        const diff = [r.header !== f0.header && 'header', r.footer !== f0.footer && 'footer'].filter(Boolean);
+        put(m, 'brand_consistency', ...(r.brand_consistency[0] === 'fail' || !diff.length ? r.brand_consistency
+          : ['fail', `${diff.join(' and ')} differ from page ${f0.page}`]));
+      } else put(m, 'brand_consistency', ...r.brand_consistency);
       put(m, 'app_task_states', 'pass', flow ? `scenario ${m.page} / ${m.state} passed` : (isApp ? 'a page, not a task' : 'not an application'));
       if (flow) {
         put(m, 'glyph_coverage', 'not_covered', 'checks.yaml applies it to flow states; the gate runs it on pages only');

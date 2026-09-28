@@ -52,6 +52,11 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
     [ "$(st $c index.html)" == pass ] || { echo "$c index: $(st $c index.html)"; return 1; }
   done
   jq -e '[.rows[] | select(.check == "seo" and .status == "fail") | .detail] | all(startswith("BLOCKER"))' "$RES" >/dev/null
+  # definition-of-done rows 2, 6, 13: overlap on index, header differing from index on o-nas, no IČO on either
+  [ "$(st no_overlap index.html)" == fail ] && [ "$(st no_overlap o-nas/index.html)" == pass ]
+  [ "$(st brand_consistency o-nas/index.html)" == fail ] && [ "$(st brand_consistency index.html)" == pass ]
+  [ "$(st business_minimum index.html)" == fail ] && [ "$(st business_minimum o-nas/index.html)" == fail ]
+  [ "$(st page_weight index.html)" == pass ]
   # glyph applies to chromium only (checks.yaml applies): no webkit row
   [ "$(jq '[.rows[] | select(.check == "glyph_coverage" and .browser == "webkit")] | length' "$RES")" -eq 0 ]
   # build id and a fingerprint per page, equal to what aid-ui-state.sh computes

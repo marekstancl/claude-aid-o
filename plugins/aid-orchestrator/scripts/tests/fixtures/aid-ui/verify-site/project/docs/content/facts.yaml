@@ -8,3 +8,6 @@
 - claim: cena bochníku
   value: "65 Kč"
   source: PM
+- claim: identifikace
+  value: "IČO 27074358"
+  source: PM
