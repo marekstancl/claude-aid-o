@@ -36,7 +36,9 @@ a `frontend-build-standard.md` (čti živě).
    a `flows` jen u aplikace). Otázka `structure` (u aplikace tok×stav
    navíc `task_map`) ve studiu s drátěnými modely jako kartami, `target` =
    sha256 JSON (`SKILL.md` „Jak se ptá PM").
-5. Po `approve`: `aid-ui-state.sh set <project> structure '<json>' --answer <id>`.
+5. JSON zapiš nástrojem Write do `<project>/.aid-ui/structure.json` (nikdy ne
+   jako shellový literál) a po `approve`:
+   `aid-ui-state.sh set <project> structure "$(cat <project>/.aid-ui/structure.json)" --answer <id>`.
    `return` s komentářem → uprav JSON i obrázky, nová otázka.
 6. Tělo kapitoly `struktura` (strom stránek, u aplikace tabulka tok×stav,
    drátěné modely zkopírované do `docs/brand/assets/`) do souboru

@@ -35,7 +35,11 @@ PM ve studiu vybral 1-3 vzory a jejich vypočtené styly leží v `.aid-ui/refs/
 5. Šest karet otázky `references` ve studiu (4 blízko záměru, 2 odvážnější
    mimo obor): `preview` = zmenšený snímek pod `.aid-ui/studio/`
    (`aid-ui-tool.sh webp`), `thesis` = co převzít, `uniqueness` = čím se
-   vzor liší od šablony. PM vybere 1-3 (`choice` = id karet).
+   vzor liší od šablony. Než otázku otevřeš, zapiš nástrojem Write
+   `<project>/.aid-ui/refs.json` = pole ukázaných karet
+   `[{"id":<id karty>,"url":…,"why":<thesis>}]`; `target` = `sha256:` +
+   `jq -S -c -j . <project>/.aid-ui/refs.json | sha256sum`. PM vybere vzor
+   (`choose`, `choice` = id karty).
 6. U vybraných: `browser_evaluate` s `getComputedStyle` na
    `body, h1, h2, p, a, button` (písma, škála, barvy, zaoblení, mezery,
    pohyb) → `<project>/.aid-ui/refs/<n>.json`. Jen inspirace.
@@ -46,7 +50,8 @@ PM ve studiu vybral 1-3 vzory a jejich vypočtené styly leží v `.aid-ui/refs/
 
 ## Zápis
 
-`aid-ui-state.sh set <project> refs '[{"url":…,"why":…,"picked":true|false}]'`;
+`aid-ui-state.sh set <project> refs "$(cat <project>/.aid-ui/refs.json)" --answer <id>`
+(`picked` doplní skript podle volby PM; soubor neměň mezi otevřením otázky a zápisem);
 kapitola `smer`: odkazy + věta ke každému, pak
 `aid-ui-state.sh chapter <project> smer navrh`. Screenshoty nikdy do `docs/brand/`.
 

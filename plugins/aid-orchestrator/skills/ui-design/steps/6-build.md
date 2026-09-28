@@ -35,8 +35,11 @@ u aplikace `webapp-tasks-states-standard.md` (UA-1..UA-11) - čti živě.
 4. Obrázky: `aid-ui-tool.sh webp <src> <out.webp> <šířka> [kvalita]` pro
    každý obrázek; limit 200 kB hlídá nástroj (exit 1 → menší šířka nebo
    kvalita).
-5. Písma: stránky znovu `aid-ui-tool.sh glyph <url>` (build servírovaný
-   lokálně); exit 1 → oprav písmo.
+5. Písma: build servíruj lokálně jen na 127.0.0.1 - volný port
+   `port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')`,
+   `python3 -m http.server --bind 127.0.0.1 --directory <složka buildu> "$port" &`
+   (zapamatuj `pid=$!`), `aid-ui-tool.sh glyph http://127.0.0.1:$port/<stránka>`
+   pro každou stránku, pak `kill "$pid"`; exit 1 → oprav písmo.
 6. Česká typografie v generátoru (šablona nebo skript, který HTML píše):
    nezlomitelná mezera po jednopísmenných předložkách a spojkách
    (k s v z o u a i, i velká), jen v textu mimo značky:

@@ -34,6 +34,18 @@
 #   across its read-check-write. Targets:
 #     set variant|structure|content-plan <json>   kind variant|structure|content_plan,
 #                          target sha256:<sha256 of `jq -S -c -j . <<<json`> (no newline)
+#     set options <json>   kind variant, target sha256:<canonical options JSON> (as above)
+#     set refs <json>      kind references, target sha256:<canonical refs JSON> (as above);
+#                          <json> = the shown cards [{"id": <card id>, "url", "why"}]; the answer
+#                          must be `choose` with its choice (one card id or a list) among the ids;
+#                          picked = id in the choice (set by this script, never by the caller)
+#     chapter <project> <id> schvaleno            kind by chapter: vize vision, logo identity,
+#                          seo seo_brief, struktura structure, obsah content_plan, produkt
+#                          variant, smer direction, barvy typografie komponenty platformy
+#                          ukazky kvalita schvaleni design_standard; target = what
+#                          `chapter-target <project> <id>` prints: sha256:<sha256 of the
+#                          stored body, the bytes between <!-- body:<id> --> and
+#                          <!-- /body:<id> -->>. ceka and navrh need no answer.
 #     approve-page <project> <page>               kind approve_page, target <page>@<fingerprint
 #                          of the page in the recorded build>; refused when the site changed
 #     defer-content <project> <item id>           kind defer_content, target <item id>;
@@ -46,12 +58,14 @@
 #                          matching pages, _site and flows at that time; a changed
 #                          fingerprint voids it for that page. Reason = the answer's comment.
 #
-#   set <project> <product_type|refs> <json>
-#   set <project> options <json>         keys vision seo images (true|false), identity
+#   set <project> product_type <json>
+#   set <project> refs <json> --answer <id>      see Targets above
+#   set <project> options <json> --answer <id>   keys vision seo images (true|false), identity
 #                                        (false|"new"|"package"); only at step 0
 #   step <project> <0-7>                 a backward step clears `finished`
 #   roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>
-#   chapter <project> <id> <ceka|navrh|schvaleno> [--by <who>]
+#   chapter <project> <id> <ceka|navrh|schvaleno> [--by <who>]   schvaleno needs --answer <id>
+#   chapter-target <project> <id>        prints the target of a `schvaleno` answer for chapter <id>
 #   reset-approvals <project> <id>...
 #   body <project> <id> --file <html>    replaces only what is between <!-- body:<id> -->
 #                                        and <!-- /body:<id> -->; refuses active or
@@ -543,6 +557,28 @@ studio_fetch() {
   [[ "$rc" -eq 0 ]] || { rm -f "$body"; die "studio unreachable at $STUDIO_URL (curl exit $rc); $3"; }
 }
 
+# chapter_kind <id> — the studio question kind that approves chapter <id> (header, Targets)
+chapter_kind() {
+  case "$1" in
+    vize) echo vision ;; logo) echo identity ;; seo) echo seo_brief ;; struktura) echo structure ;;
+    obsah) echo content_plan ;; produkt) echo variant ;; smer) echo direction ;;
+    *) echo design_standard ;;
+  esac
+}
+
+# chapter_target <id> — sha256:<digest of the stored body of chapter <id> in index.html>
+chapter_target() {
+  [[ -f "$HTML" ]] || die "no $HTML"
+  python3 - "$HTML" "$1" <<'PY' || die "no body markers for chapter $1 in $HTML"
+import hashlib, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+a, b = "<!-- body:%s -->" % sys.argv[2], "<!-- /body:%s -->" % sys.argv[2]
+i, j = text.find(a), text.find(b)
+if i < 0 or j < i: sys.exit(1)
+print("sha256:" + hashlib.sha256(text[i + len(a):j].encode("utf-8")).hexdigest(), end="")
+PY
+}
+
 json_sha() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
 
 # build_current — the recorded build, refused when the site changed since build-record.
@@ -617,9 +653,21 @@ case "$VERB" in
           || usage "options: keys vision seo images (true|false) and identity (false|\"new\"|\"package\"): $2"
         st="$(jq -r .step "$STATE")"
         [[ "$st" == 0 ]] || die "set options refused at step $st: the options are chosen at step 0 and cannot change after"
-        jq_write --argjson v "$2" '.options += $v'
+        take_answer variant "$(json_sha "$2")"
+        jq_write --argjson v "$2" --arg q "$ANSWER" '.options += $v | .consumed += [$q]'
         ;;
-      product_type|refs) jq_write --arg p "$1" --argjson v "$2" '.[$p] = $v' ;;
+      refs)
+        jq -e 'type == "array" and length > 0 and all(.[]; type == "object" and (.id | type) == "string"
+               and (.url | type) == "string" and (.why | type) == "string")' >/dev/null <<<"$2" \
+          || usage "refs: the shown cards [{\"id\":…,\"url\":…,\"why\":…}]: $2"
+        take_answer references "$(json_sha "$2")"
+        picks="$(jq -c --arg q "$ANSWER" '.answers[$q] | if .decision == "choose" then [.choice | select(. != null)] | flatten else [] end' "$STATE")"
+        jq -e --argjson c "$picks" 'length > 0 and ($c | length > 0) and ([.[].id] as $ids | all($c[]; IN($ids[])))' >/dev/null <<<"$2" ||
+          die "set refs refused: answer $ANSWER chose $picks, not one or more of the shown cards $(jq -c '[.[].id]' <<<"$2")"
+        jq_write --argjson v "$2" --argjson c "$picks" --arg q "$ANSWER" \
+          '.refs = [$v[] | .picked = (.id | IN($c[]))] | .consumed += [$q]'
+        ;;
+      product_type) jq_write --argjson v "$2" '.product_type = $v' ;;
       variant|structure|content-plan)
         key="${1//-/_}"
         case "$key" in
@@ -757,7 +805,21 @@ case "$VERB" in
     need_state
     (( $# == 2 || $# == 4 )) || usage "chapter needs <id> <status> [--by <who>]"
     by=""; (( $# == 4 )) && { [[ "$3" == --by ]] || usage "unknown option $3"; by="$4"; }
-    write_chapter "$1" "$2" "$by"
+    [[ "$CHAPTERS" == *" $1 "* ]] || usage "unknown chapter id: $1"
+    if [[ "$2" == schvaleno ]]; then
+      tgt="$(chapter_target "$1")" || exit 1
+      take_answer "$(chapter_kind "$1")" "$tgt"
+      write_chapter "$1" "$2" "$by"
+      jq_write --arg id "$1" --arg q "$ANSWER" '.chapters[$id].answer = $q | .consumed += [$q]'
+    else
+      write_chapter "$1" "$2" "$by"
+    fi
+    ;;
+
+  chapter-target)
+    (( $# == 1 )) || usage "chapter-target needs <id>"
+    [[ "$CHAPTERS" == *" $1 "* ]] || usage "unknown chapter id: $1"
+    chapter_target "$1"; echo
     ;;
 
   reset-approvals)

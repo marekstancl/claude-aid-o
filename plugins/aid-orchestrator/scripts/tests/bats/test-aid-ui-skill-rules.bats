@@ -76,3 +76,25 @@ setup() {
 @test "no step or SKILL.md names a removed state verb" {
   ! grep -rnE 'await-choice|await-direction|pending-direction|require-direction|aid-ui-state.sh spend' "$SK/SKILL.md" "$SK/steps" || false
 }
+
+@test "7-verify.md writes the kvalita chapter from soulad-summary.json and brand-state.json" {
+  f="$SK/steps/7-verify.md"
+  for s in 'body <project> kvalita' 'soulad-summary.json' 'gate.run_at' 'chapter <project> kvalita navrh'; do
+    grep -qF -- "$s" "$f" || { echo "missing: $s"; return 1; }
+  done
+}
+
+@test "every PM-chosen write in the steps passes --answer: options, refs, chapter schvaleno" {
+  for s in 'set <project> options' 'set <project> refs' 'set <project> variant' 'set <project> structure' 'set <project> content-plan'; do
+    line="$(grep -rhF -- "$s" "$SK/steps")" || { echo "missing: $s"; return 1; }
+    [[ "$line" == *'--answer <id>'* ]] || { echo "no --answer: $line"; return 1; }
+  done
+  ! grep -rn 'schvaleno --by' "$SK/steps" | grep -v -- '--answer' || false
+  grep -qF 'chapter-target <project>' "$SK/steps/7-verify.md"
+}
+
+@test "no step passes JSON as a single-quoted shell literal; every http.server binds 127.0.0.1" {
+  ! grep -rnE "(set|--answer) [^\`]*'[[{<]" "$SK/steps" "$SK/SKILL.md" || false
+  ! grep -rn 'http\.server' "$SK/steps" | grep -v -- '--bind 127.0.0.1 --directory' || false
+  for f in 5-directions 6-build; do grep -qF 'kill "$pid"' "$SK/steps/$f.md" || { echo "$f"; return 1; }; done
+}

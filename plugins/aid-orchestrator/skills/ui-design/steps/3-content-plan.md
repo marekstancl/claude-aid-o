@@ -34,7 +34,9 @@ a chybějící podstatný materiál buď dodal, nebo ho odložil.
    jen PM.
 4. Otázka `content_plan` ve studiu: tabulka položek (stránka, sekce,
    potřeba, vlastník, termín, stav), `target` = sha256 JSON pole položek.
-   Po `approve`: `aid-ui-state.sh set <project> content-plan '<json>' --answer <id>`.
+   JSON zapiš nástrojem Write do `<project>/.aid-ui/content-plan.json` (nikdy ne
+   jako shellový literál) a po `approve`:
+   `aid-ui-state.sh set <project> content-plan "$(cat <project>/.aid-ui/content-plan.json)" --answer <id>`.
 5. Chybí podstatný materiál (`missing` u sekce, bez které stránka nedává
    smysl) → PM ho dodá, nebo otázka `defer_content` s `target` = id
    položky a po `approve`

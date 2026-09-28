@@ -84,6 +84,8 @@ forge() {
 sha_of() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
 fp() { jq -r --arg p "$1" '.build.fingerprints[$p]' "$STATE"; }
 approve() { ans "ap-$1-$2" approve_page "$1@$(fp "$1")"; "$SCRIPT" approve-page "$PROJ" "$1" --answer "ap-$1-$2" >/dev/null; }
+# approve_chapter <id> <kind> <question id> — the PM approves the chapter's current body on the studio
+approve_chapter() { ans "$3" "$2" "$("$SCRIPT" chapter-target "$PROJ" "$1")"; "$SCRIPT" chapter "$PROJ" "$1" schvaleno --by PM --answer "$3"; }
 
 # result [jq filter] — a gate result of the recorded build: every check x page x
 # viewport x browser (+ flow x state x role for apps) passing, then the filter
@@ -111,12 +113,34 @@ ready() {
   "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
 }
 
-@test "set refs and product_type write without an answer; set direction exit 2" {
-  run "$SCRIPT" set "$PROJ" refs '[{"url":"https://x.example","why":"písmo","picked":true}]'
+@test "set product_type writes without an answer; set direction exit 2" {
+  run "$SCRIPT" set "$PROJ" product_type '"eshop"'
   [ "$status" -eq 0 ]
-  [ "$(jq -r .refs[0].url "$STATE")" = https://x.example ]
+  [ "$(jq -r .product_type "$STATE")" = eshop ]
   run "$SCRIPT" set "$PROJ" direction '{}'
   [ "$status" -eq 2 ]
+}
+
+@test "set refs needs a references answer choosing a shown card; picked comes from the choice" {
+  refs='[{"id":"x","url":"https://x.example","why":"písmo"},{"id":"y","url":"https://y.example","why":"barvy"}]'
+  run "$SCRIPT" set "$PROJ" refs "$refs"
+  [ "$status" -eq 1 ]; [[ "$output" == *'needs --answer'* ]]
+  ans r0 variant "$(sha_of "$refs")" choose                     # another kind, same target
+  run "$SCRIPT" set "$PROJ" refs "$refs" --answer r0
+  [ "$status" -eq 1 ]; [[ "$output" == *'not references'* ]]
+  ans r1 references "$(sha_of '[{"id":"x","url":"https://x.example","why":"písmo"}]')" choose   # other JSON
+  run "$SCRIPT" set "$PROJ" refs "$refs" --answer r1
+  [ "$status" -eq 1 ]; [[ "$output" == *'is for'* ]]
+  ans r2 references "$(sha_of "$refs")"                          # approve: no card chosen
+  run "$SCRIPT" set "$PROJ" refs "$refs" --answer r2
+  [ "$status" -eq 1 ]; [[ "$output" == *'not one or more of the shown cards'* ]]
+  [ "$(jq -c .refs "$STATE")" = '[]' ]
+  ans r3 references "$(sha_of "$refs")" choose                   # the PM chose card x
+  run "$SCRIPT" set "$PROJ" refs "$refs" --answer r3
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.refs[] | [.id, .picked]]' "$STATE")" = '[["x",true],["y",false]]' ]
+  run "$SCRIPT" set "$PROJ" refs "$refs" --answer r3             # used once
+  [ "$status" -eq 1 ]; [[ "$output" == *'already used'* ]]
 }
 
 @test "roles writes var() aliases; unknown color exit 1" {
@@ -143,8 +167,9 @@ ready() {
 }
 
 @test "chapter writes state.json and index.html together" {
-  run "$SCRIPT" chapter "$PROJ" barvy schvaleno --by PM
+  run approve_chapter barvy design_standard q1
   [ "$status" -eq 0 ]
+  [ "$(jq -r .chapters.barvy.answer "$STATE")" = q1 ]
   [ "$(jq -r .chapters.barvy.status "$STATE")" = schvaleno ]
   [ "$(jq -r .chapters.barvy.by "$STATE")" = PM ]
   grep -q '<section id="barvy" data-status="schvaleno">.*<p class="status"><!-- status:barvy -->[0-9-]* · PM<!-- /status:barvy --></p>' "$PROJ/docs/brand/index.html"
@@ -152,7 +177,7 @@ ready() {
 }
 
 @test "reset-approvals turns schvaleno into navrh" {
-  "$SCRIPT" chapter "$PROJ" barvy schvaleno --by PM
+  approve_chapter barvy design_standard q1
   run "$SCRIPT" reset-approvals "$PROJ" barvy typografie
   [ "$status" -eq 0 ]
   [ "$(jq -r .chapters.barvy.status "$STATE")" = navrh ]
@@ -311,7 +336,7 @@ ready() {
   "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/b.html"
   body() { sed -n '/<!-- body:barvy -->/,/<!-- \/body:barvy -->/p' "$HTML" | sed -e 's/.*<!-- body:barvy -->//' -e 's/<!-- \/body:barvy -->.*//'; }
   b1="$(body)"
-  run "$SCRIPT" chapter "$PROJ" barvy schvaleno --by PM
+  run approve_chapter barvy design_standard q1
   [ "$status" -eq 0 ]
   [ "$(body)" = "$b1" ]
   grep -q '<section id="barvy" data-status="schvaleno">' "$HTML"
@@ -321,7 +346,7 @@ ready() {
   echo '<p>a</p>' > "$BATS_TEST_TMPDIR/a.html"
   echo '<p>b</p>' > "$BATS_TEST_TMPDIR/b.html"
   "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/a.html"
-  "$SCRIPT" chapter "$PROJ" barvy schvaleno --by PM
+  approve_chapter barvy design_standard q1
   run "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/a.html"
   [ "$status" -eq 0 ]
   [ "$(jq -r .chapters.barvy.status "$STATE")" = schvaleno ]
@@ -422,12 +447,50 @@ p101_project() {
 }
 
 
-@test "set options: validated, refused after step 0" {
+@test "chapter schvaleno needs the chapter kind's answer for the stored body; navrh and ceka need none" {
+  echo '<p>a</p>' > "$T/a.html"; echo '<p>b</p>' > "$T/b.html"
+  "$SCRIPT" body "$PROJ" vize --file "$T/a.html"
+  run "$SCRIPT" chapter "$PROJ" vize schvaleno --by PM
+  [ "$status" -eq 1 ]; [[ "$output" == *'needs --answer'* ]]
+  tgt="$("$SCRIPT" chapter-target "$PROJ" vize)"
+  [[ "$tgt" =~ ^sha256:[0-9a-f]{64}$ ]]
+  ans w1 identity "$tgt"                                          # logo's kind, not vize's
+  run "$SCRIPT" chapter "$PROJ" vize schvaleno --answer w1
+  [ "$status" -eq 1 ]; [[ "$output" == *'not vision'* ]]
+  ans w2 vision "$tgt"
+  "$SCRIPT" body "$PROJ" vize --file "$T/b.html"                  # body changed after the question
+  run "$SCRIPT" chapter "$PROJ" vize schvaleno --answer w2
+  [ "$status" -eq 1 ]; [[ "$output" == *'is for'* ]]
+  [ "$(jq -r .chapters.vize.status "$STATE")" = ceka ]
+  run approve_chapter vize vision w3
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .chapters.vize.status "$STATE")" = schvaleno ]
+  grep -q '<section id="vize" data-status="schvaleno">' "$HTML"
+  run approve_chapter struktura design_standard w4                # struktura is a structure answer
+  [ "$status" -eq 1 ]; [[ "$output" == *'not structure'* ]]
+  run "$SCRIPT" chapter "$PROJ" struktura navrh
+  [ "$status" -eq 0 ]
+  run "$SCRIPT" chapter-target "$PROJ" nope
+  [ "$status" -eq 2 ]
+}
+
+@test "set options: validated, needs a variant answer for exactly this JSON, refused after step 0" {
   run "$SCRIPT" set "$PROJ" options '{"vision":true,"colour":true}'
   [ "$status" -eq 2 ]
   run "$SCRIPT" set "$PROJ" options '{"identity":true}'
   [ "$status" -eq 2 ]
-  run "$SCRIPT" set "$PROJ" options '{"vision":true,"identity":"package","seo":false}'
+  opts='{"vision":true,"identity":"package","seo":false}'
+  run "$SCRIPT" set "$PROJ" options "$opts"
+  [ "$status" -eq 1 ]; [[ "$output" == *'needs --answer'* ]]
+  ans o0 references "$(sha_of "$opts")"                          # another kind
+  run "$SCRIPT" set "$PROJ" options "$opts" --answer o0
+  [ "$status" -eq 1 ]; [[ "$output" == *'not variant'* ]]
+  ans o1 variant "$(sha_of '{"vision":false}')"                  # another options JSON
+  run "$SCRIPT" set "$PROJ" options "$opts" --answer o1
+  [ "$status" -eq 1 ]; [[ "$output" == *'is for'* ]]
+  [ "$(jq .options.vision "$STATE")" = false ]
+  ans o2 variant "$(sha_of "$opts")"
+  run "$SCRIPT" set "$PROJ" options "$opts" --answer o2
   [ "$status" -eq 0 ]
   [ "$(jq -c .options "$STATE")" = '{"vision":true,"identity":"package","seo":false,"images":false}' ]
   "$SCRIPT" step "$PROJ" 1

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
 # aid-ui-tool.sh — the one entry to the /aid-ui browser tools in lib/ui-fidelity.
-# The installed plugin ships without node_modules: the first call runs `npm ci`
-# there (lockfile pinned). Browser: $CHROME, else the newest Chromium in
+# The installed plugin ships without node_modules: a call runs `npm ci` there
+# (lockfile pinned) unless node_modules/.aid-installed holds the sha256 of the
+# current package-lock.json. The marker is written only after `npm ci` exits 0;
+# a failed install removes node_modules. Installs run under flock on
+# lib/ui-fidelity/.aid-install.lock, so two first calls never race. Browser: $CHROME, else the newest Chromium in
 # ~/.cache/ms-playwright, else Playwright's own.
 #
 #   glyph <url>... | glyph --sample <family> <text>    aid-ui-glyph-check.mjs
@@ -33,10 +36,23 @@ if [[ "$tool" == webp && "${1:-}" == --max-kb ]]; then
   max_kb="$2"; shift 2
 fi
 
-if [[ ! -d "$LIB/node_modules" ]]; then
+# ensure_installed — npm ci unless the marker matches the lockfile (caller holds the lock)
+ensure_installed() {
+  local want marker="$LIB/node_modules/.aid-installed"
+  want="$(sha256sum "$LIB/package-lock.json" | cut -d' ' -f1)"
+  [[ -f "$marker" && "$(cat "$marker")" == "$want" ]] && return 0
   echo "aid-ui-tool.sh: installing $LIB (npm ci)" >&2
-  (cd "$LIB" && npm ci --no-audit --no-fund >&2) || { echo "ERROR: aid-ui-tool.sh: npm ci failed in $LIB" >&2; exit 1; }
-fi
+  if ! (cd "$LIB" && npm ci --no-audit --no-fund >&2); then
+    rm -rf "$LIB/node_modules"
+    echo "ERROR: aid-ui-tool.sh: npm ci failed in $LIB" >&2
+    return 1
+  fi
+  printf '%s\n' "$want" > "$marker"
+}
+exec 9>"$LIB/.aid-install.lock"
+flock 9
+ensure_installed || exit 1
+flock -u 9; exec 9>&-
 
 if [[ -z "${CHROME:-}" ]]; then
   CHROME="$(ls -d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux*/chrome 2>/dev/null | sort -V | tail -1 || true)"

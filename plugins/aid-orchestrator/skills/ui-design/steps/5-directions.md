@@ -26,9 +26,11 @@ Vybrané vzory a styly v `.aid-ui/refs/`, brand balíček, vize a tón,
    plánu a registru faktů, skutečné logo, žádný zástupný text (MUST 5).
    Směry se liší principem, ne odstínem.
 2. Písma: kandidát nejdřív `aid-ui-tool.sh glyph --sample "<rodina>" "Příliš žluťoučký kůň úpěl ďábelské ódy"`;
-   `FAIL` → jiné písmo. Hotová stránka: přes `python3 -m http.server`
-   z `.aid-ui/directions/` a `aid-ui-tool.sh glyph <url>`; exit 1 → oprav
-   písmo, směr se neukáže.
+   `FAIL` → jiné písmo. Hotová stránka: volný port
+   `port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')`,
+   `python3 -m http.server --bind 127.0.0.1 --directory <project>/.aid-ui/directions "$port" &`
+   (zapamatuj `pid=$!`), `aid-ui-tool.sh glyph http://127.0.0.1:$port/<n>/`,
+   pak `kill "$pid"`; exit 1 → oprav písmo, směr se neukáže.
 3. Snímek první obrazovky (desktop a mobil) přes Playwright, zmenšený
    `aid-ui-tool.sh webp` do `.aid-ui/studio/direction-<n>.webp`.
 4. Každý směr projde `references/genericity-rubric.md`; generický se

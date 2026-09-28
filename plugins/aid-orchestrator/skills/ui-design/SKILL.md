@@ -63,9 +63,12 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    Druhy otázek: variant, vision, identity, seo_brief, structure, task_map,
    content_plan, defer_content, facts, references, direction, approve_page,
    exception, coverage_drift, design_standard.
-2. `target` je to, co PM schvaluje: u `set variant|structure|content-plan`
+2. `target` je to, co PM schvaluje: u `set variant|options|structure|content-plan|refs`
    `sha256:` + `jq -S -c -j . <<<"$json" | sha256sum` přesně toho JSON, který
-   pak zapíšeš; u ostatních druhů podle hlavičky `aid-ui-state.sh`.
+   pak zapíšeš (JSON vždy v souboru pod `.aid-ui/` psaném nástrojem Write,
+   do příkazu jako `"$(cat <soubor>)"`); u převzetí kapitoly
+   `aid-ui-state.sh chapter-target <project> <id>`; u ostatních druhů podle
+   hlavičky `aid-ui-state.sh`.
 3. `aid-ui-serve.sh studio <project>` (spustí nebo použije běžící studio)
    vypíše jednorázový odkaz `URL: http://<host>:3915/?k=<kód>`; ten dej PM
    a **ukonči tah**. Každé další spuštění dá nový odkaz.

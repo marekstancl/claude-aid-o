@@ -49,11 +49,14 @@ podle názvu projektu), zamítnuté návrhy.
    - `local`: `true`, když jde o místní firmu (adresa, otevírací doba);
    - volitelné části kroku 1: vize, identita (`"new"`, `"package"`, nebo
      `false`), SEO.
-8. Po odpovědi `choose`/`approve`:
-   `aid-ui-state.sh set <project> variant '<json>' --answer <id>`
+8. Volitelné části jsou druhá otázka druhu `variant` s `target` = sha256 JSON
+   `{"vision":…,"identity":…,"seo":…}`. Oba JSON zapiš nástrojem Write do
+   `<project>/.aid-ui/variant.json` a `<project>/.aid-ui/options.json` (nikdy
+   ne jako shellový literál). Po odpovědi `choose`/`approve`:
+   `aid-ui-state.sh set <project> variant "$(cat <project>/.aid-ui/variant.json)" --answer <id>`
    (`{"type":…,"brand":…,"local":…}`, `target` = jeho sha256) a
-   `aid-ui-state.sh set <project> options '{"vision":…,"identity":…,"seo":…}'`
-   (jen v kroku 0).
+   `aid-ui-state.sh set <project> options "$(cat <project>/.aid-ui/options.json)" --answer <id>`
+   (odpověď na otázku voleb; jen v kroku 0).
 9. `aid-ui-serve.sh brand docs/brand` → odkaz na brand stránku pro PM.
 
 ## Co PM rozhoduje
