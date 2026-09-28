@@ -1,0 +1,6 @@
+viewports: [390, 768, 1440]
+browsers: [chromium, webkit]
+checks:
+  http_200: every page answers HTTP 200
+  axe: no serious or critical axe finding
+  app_task_states: task x state scenarios pass

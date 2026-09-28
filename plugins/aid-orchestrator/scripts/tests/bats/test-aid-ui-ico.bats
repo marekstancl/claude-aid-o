@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # P102 Step 5 — aid-ui-ico.py packs favicon.ico and checks the icon package of /aid-ui step 1i.
 
 setup() {

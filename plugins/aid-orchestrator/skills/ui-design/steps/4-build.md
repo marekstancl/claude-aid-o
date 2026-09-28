@@ -24,7 +24,7 @@ přebírá postavený vzhled.
 2. Skill `impeccable` new-work, pokračuj ze zamčeného `## Direction contract`.
    Při `options.images` klíč jako v kroku 1. `direction.build_path` je `comp`
    → Impeccable po zamčení spustí kompoziční kolo (vybraný comp a dvě varianty).
-   To kolo i každou další `serve-question`: `aid-ui-serve.sh forward <p>`, PM dej
+   To kolo i každou další `serve-question`: `aid-ui-serve.sh studio <project>` (URL `http://$AID_UI_HOST:3915/`), PM dej
    URL a klíč, pak `aid-ui-state.sh await-choice <project> --kind composition --imp "$IMP" --key <k> --page-url <url>`;
    exit 3 → re-roll a znovu, exit 1 s otevřeným kolem → MUST 1. `step 5` skript
    odmítne, dokud kompozice není zaznamenaná. Code-led (`code`): kompoziční

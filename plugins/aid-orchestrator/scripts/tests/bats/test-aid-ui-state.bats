@@ -1,149 +1,120 @@
 #!/usr/bin/env bats
-# aid-tier: t0
-# P101 Step 5 — aid-ui-state.sh: the direction gate is code. A direction is
-# recorded only from Impeccable's own `serve-question --wait` output (a stub
-# CLI here); steps 4-6 refuse without it.
-# P102 Step 1: state in docs/design/brand-state.json, chapter bodies, fonts,
-# finish, migration from docs/brand/state.json.
+# aid-tier: t2
+# aid-ui-state.sh — P103 Step 4: every PM decision is a studio answer taken through
+# record-answer (real server.py on a free port) and used once, for its own kind and
+# target; finish needs a gate of the current build over the full matrix, per-page
+# approvals and a live exception for every fail|not_covered row.
+# P102 Step 1 (kept): state in docs/design/brand-state.json, chapter bodies, fonts,
+# migration from docs/brand/state.json.
 
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../aid-ui-state.sh"
   PAGE="$BATS_TEST_DIRNAME/../../../skills/ui-design/brand-page"
-  PROJ="$BATS_TEST_TMPDIR/proj"
+  FX="$BATS_TEST_DIRNAME/../fixtures/aid-ui/coverage"
+  T="$BATS_TEST_TMPDIR"
+  PROJ="$T/proj"
   mkdir -p "$PROJ/docs/brand"
   cp "$PAGE/index.html" "$PROJ/docs/brand/"
   "$SCRIPT" init "$PROJ" >/dev/null
   STATE="$PROJ/docs/design/brand-state.json"
   HTML="$PROJ/docs/brand/index.html"
-  # Stub Impeccable: first prints $STUB_WAITS times "exit 3", then $STUB_OUT with $STUB_RC.
-  IMP="$BATS_TEST_TMPDIR/impeccable"
-  cat > "$IMP" <<'EOF'
-#!/usr/bin/env bash
-[[ "$1 $2 $3 $4" == "serve-question --wait --key k1" && "$IMPECCABLE_QUESTION_FORCE" == 1 ]] || exit 9
-n=$(cat "$BATS_TEST_TMPDIR/calls" 2>/dev/null || echo 0); echo $((n+1)) > "$BATS_TEST_TMPDIR/calls"
-(( n < ${STUB_WAITS:-0} )) && { echo "serve-question: timed out with no answer"; exit 3; }
-printf '%s\n' "${STUB_OUT:-}"; exit "${STUB_RC:-0}"
-EOF
-  chmod +x "$IMP"
-  export STUB_WAITS=0 STUB_RC=0 STUB_OUT=""
+  # coverage on fixtures: a docs root with the two fixture standards, map and checks
+  SPECS="$T/docs/ecosystem/specs"
+  mkdir -p "$SPECS" "$PROJ/.aid-o/config" "$T/cov"
+  cp "$FX/a.md" "$FX/b.md" "$SPECS/"
+  touch "$SPECS/standards-map.md"
+  printf 'standards:\n  map_path: %s\n' "$SPECS/standards-map.md" > "$PROJ/.aid-o/config/project.yaml"
+  cp "$FX/map.yaml" "$FX/checks.yaml" "$T/cov/"
+  export AID_UI_COVERAGE_MAP="$T/cov/map.yaml" AID_UI_COVERAGE_SOURCES="$FX/sources.yaml"
+  # a two-page site
+  SITE="$T/site"
+  mkdir -p "$SITE"
+  echo '<html><link href="style.css" rel="stylesheet"><a href="kontakt.html">k</a></html>' > "$SITE/index.html"
+  echo '<html><img src="/logo.webp"></html>' > "$SITE/kontakt.html"
+  echo 'body{}' > "$SITE/style.css"; echo 'L' > "$SITE/logo.webp"
+  echo 'User-agent: *' > "$SITE/robots.txt"; echo '<html>404</html>' > "$SITE/404.html"
+  RES="$PROJ/.aid-ui/verify/result.json"
 }
 
-await() { run "$SCRIPT" await-direction "$PROJ" --imp "$IMP" --key k1 --page-url http://10.20.20.22:3915/; }
-
-@test "step 4 without a recorded direction: exit 1, names step 3" {
-  run "$SCRIPT" step "$PROJ" 4
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"step 3"* ]]
-  [ "$(jq .step "$STATE")" = 0 ]
+teardown() {
+  [[ -z "${SPID:-}" ]] || kill "$SPID" 2>/dev/null || true
+  [[ -z "${STUDIO_PID:-}" ]] || kill "$STUDIO_PID" 2>/dev/null || true
 }
 
-@test "reroll answer: exit 3, no direction" {
-  STUB_OUT='ANSWER: {"optionId":"reroll","steer":""}'
-  await
-  [ "$status" -eq 3 ]
-  [ "$(jq .direction "$STATE")" = null ]
-  [ ! -e "$PROJ/.aid-ui/direction-answer.json" ]
+jqw() { jq "$@" "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"; }
+
+# studio — the real studio server for this test (started once), with an empty payload
+studio() {
+  [[ -z "${STUDIO_PID:-}" ]] || return 0
+  STOKEN=0123456789abcdef0123456789abcdef
+  mkdir -p "$PROJ/.aid-ui/studio"; echo "$STOKEN" > "$PROJ/.aid-ui/studio.token"
+  echo '{"questions": [], "cards": []}' > "$PROJ/.aid-ui/studio/payload.json"
+  local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  export AID_UI_STUDIO_URL="http://127.0.0.1:$port"
+  python3 "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/server.py" --project "$PROJ" --host 127.0.0.1 --port "$port" \
+    --token-file "$PROJ/.aid-ui/studio.token" >"$T/studio.log" 2>&1 3>&- &
+  STUDIO_PID=$!
+  local i; for i in $(seq 1 50); do curl -s -o /dev/null "$AID_UI_STUDIO_URL/" && return 0; sleep 0.1; done
+  return 1
 }
 
-@test "valid answer after two waits: direction recorded, require-direction and step 4 pass" {
-  STUB_WAITS=2 STUB_OUT='ANSWER: {"optionId":"b","steer":"tmavší"}'
-  await
-  [ "$status" -eq 0 ]
-  [ "$(cat "$BATS_TEST_TMPDIR/calls")" = 3 ]
-  [ "$(jq -r .direction.option_id "$STATE")" = b ]
-  [ "$(jq -r .direction.page_url "$STATE")" = http://10.20.20.22:3915/ ]
-  [[ "$(jq -r .direction.answered_at "$STATE")" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$ ]]
-  [ "$(jq -r .decisions[0].what "$STATE")" = "direction b" ]
-  run "$SCRIPT" require-direction "$PROJ"
-  [ "$status" -eq 0 ]
-  run "$SCRIPT" step "$PROJ" 4
-  [ "$status" -eq 0 ]
-  [ "$(jq .step "$STATE")" = 4 ]
+# ans <id> <kind> <target> [decision] — the PM answers question <id> on the real
+# studio and the agent records it (record-answer)
+ans() {
+  studio
+  local p="$PROJ/.aid-ui/studio/payload.json" d="${4:-approve}"
+  jq --arg q "$1" --arg k "$2" --arg t "$3" '.questions += [{id: $q, kind: $k, target: $t, opened_at: "2020-01-01T00:00:00Z"}]
+    | .cards += [{id: "x", question: $q}]' "$p" > "$p.t" && mv "$p.t" "$p"
+  curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg q "$1" --arg k "$2" --arg t "$3" --arg d "$d" \
+          '{question: $q, kind: $k, target: $t, decision: $d, choice: "x", comment: "PM"}')" "$AID_UI_STUDIO_URL/answer"
+  "$SCRIPT" record-answer "$PROJ" --question "$1" >/dev/null
 }
 
-@test "page closed unanswered (exit 4): direction_pending recorded, exit 1" {
-  STUB_RC=4
-  await
-  [ "$status" -eq 1 ]
-  [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
-  [ "$(jq .direction "$STATE")" = null ]
+# forge <id> <kind> <target> — an answer written straight into the state and
+# .aid-ui/answers/, never given on the studio
+forge() {
+  mkdir -p "$PROJ/.aid-ui/answers"
+  printf '{"question":"%s","kind":"%s","decision":"%s","comment":"PM"}\n' "$1" "$2" "${4:-approve}" > "$PROJ/.aid-ui/answers/$1.json"
+  jqw --arg q "$1" --arg k "$2" --arg t "$3" --arg d "${4:-approve}" \
+    --arg sha "$(sha256sum "$PROJ/.aid-ui/answers/$1.json" | cut -d' ' -f1)" \
+    '.answers[$q] = {kind: $k, target: $t, decision: $d, choice: null, comment: "PM", answer_file: ".aid-ui/answers/\($q).json",
+                     answer_sha256: $sha, opened_at: "2020-01-01T00:00:00Z", at: "2020-01-02T00:00:00Z"}'
+}
+sha_of() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
+fp() { jq -r --arg p "$1" '.build.fingerprints[$p]' "$STATE"; }
+approve() { ans "ap-$1-$2" approve_page "$1@$(fp "$1")"; "$SCRIPT" approve-page "$PROJ" "$1" --answer "ap-$1-$2" >/dev/null; }
+
+# result [jq filter] — a gate result of the recorded build: every check x page x
+# viewport x browser (+ flow x state x role for apps) passing, then the filter
+result() {
+  mkdir -p "${RES%/*}"
+  jq --slurpfile ck <(yq -o=json . "$T/cov/checks.yaml") '.build as $b | ($ck[0]) as $c
+    | ([.build.fingerprints | keys[] | select(. != "_site") | {page: ., role: "", state: ""}]
+       + (if (.variant.type // "web") != "web" then [.structure.flows[] as $f | $f.states[] as $s
+          | (.structure.roles // [""])[] as $r | {page: $f.id, role: $r, state: $s}] else [] end)) as $combos
+    | {run_at: "2026-09-28T10:00:00Z", build_id: $b.id, fingerprints: $b.fingerprints,
+       rows: [$c.checks | keys[] as $k | $combos[] as $m | $c.viewports[] as $v | $c.browsers[] as $br
+              | $m + {check: $k, viewport: $v, browser: $br, status: "pass"}]}' "$STATE" | jq "${1:-.}" > "$RES"
 }
 
-@test "await-direction run from another directory: Impeccable is asked from the project" {
-  # Impeccable reads .impeccable/questions/<key> from its cwd; elsewhere it says the server is gone (exit 2).
-  cat > "$IMP" <<'EOF'
-#!/usr/bin/env bash
-[[ "$PWD" == "$STUB_PROJ" ]] || { echo "question server is gone"; exit 2; }
-echo 'ANSWER: {"optionId":"a","steer":""}'
-EOF
-  export STUB_PROJ="$PROJ"
-  cd "$BATS_TEST_TMPDIR"
-  await
-  [ "$status" -eq 0 ]
-  [ "$(jq -r .direction.option_id "$STATE")" = a ]
+# ready — every finish condition met for a web variant with two pages
+ready() {
+  ans v1 variant "$(sha_of '{"type":"web","brand":"new","local":false}')" choose
+  "$SCRIPT" set "$PROJ" variant '{"type":"web","brand":"new","local":false}' --answer v1 >/dev/null
+  cp='[{"id":"hero","page":"index.html","status":"confirmed_client"}]'
+  ans c1 content_plan "$(sha_of "$cp")"
+  "$SCRIPT" set "$PROJ" content-plan "$cp" --answer c1 >/dev/null
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  approve index.html 1; approve kontakt.html 1
+  result
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
 }
 
-@test "unparseable output: exit 1, nothing recorded" {
-  STUB_OUT='BUILD PATH FLIPPED'
-  await
-  [ "$status" -eq 1 ]
-  [ "$(jq .direction "$STATE")" = null ]
-}
-
-@test "answer file edited after recording: require-direction exit 1" {
-  STUB_OUT='ANSWER: {"optionId":"a"}'
-  await
-  echo '{"optionId":"c"}' > "$PROJ/.aid-ui/direction-answer.json"
-  run "$SCRIPT" require-direction "$PROJ"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *changed* ]]
-}
-
-@test "recorded direction plus a newer pending round: require-direction exit 1 with URL and key" {
-  STUB_OUT='ANSWER: {"optionId":"a"}'
-  await
-  "$SCRIPT" pending-direction "$PROJ" --key k2 --page-url http://10.20.20.22:3915/?r=2
-  run "$SCRIPT" require-direction "$PROJ"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"http://10.20.20.22:3915/?r=2"* && "$output" == *k2* ]]
-}
-
-@test "recorded direction plus a new round answered reroll: require-direction and step 4 refuse" {
-  STUB_OUT='ANSWER: {"optionId":"a"}'
-  await
-  rm -f "$BATS_TEST_TMPDIR/calls"
-  STUB_OUT='ANSWER: {"optionId":"reroll","steer":""}'
-  await
-  [ "$status" -eq 3 ]
-  [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
-  run "$SCRIPT" require-direction "$PROJ"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"http://10.20.20.22:3915/"* ]]
-  run "$SCRIPT" step "$PROJ" 4
-  [ "$status" -eq 1 ]
-  STUB_OUT='ANSWER: {"optionId":"b"}'
-  await
-  [ "$status" -eq 0 ]
-  [ "$(jq .direction_pending "$STATE")" = null ]
-  run "$SCRIPT" require-direction "$PROJ"
-  [ "$status" -eq 0 ]
-}
-
-@test "no verb records a direction from a caller-supplied file" {
-  echo '{"optionId":"a"}' > "$BATS_TEST_TMPDIR/fake.json"
-  run "$SCRIPT" set "$PROJ" direction '{"option_id":"a"}'
-  [ "$status" -eq 2 ]
-  run "$SCRIPT" record-direction "$PROJ" "$BATS_TEST_TMPDIR/fake.json"
-  [ "$status" -eq 2 ]
-  [ "$(jq .direction "$STATE")" = null ]
-}
-
-@test "set refs writes; set direction exit 2" {
+@test "set refs and product_type write without an answer; set direction exit 2" {
   run "$SCRIPT" set "$PROJ" refs '[{"url":"https://x.example","why":"písmo","picked":true}]'
   [ "$status" -eq 0 ]
   [ "$(jq -r .refs[0].url "$STATE")" = https://x.example ]
-  run "$SCRIPT" set "$PROJ" impeccable.seed_key '"s1"'
-  [ "$(jq -r .impeccable.seed_key "$STATE")" = s1 ]
   run "$SCRIPT" set "$PROJ" direction '{}'
   [ "$status" -eq 2 ]
 }
@@ -197,8 +168,6 @@ EOF
 }
 
 # --- P102 Step 1 -----------------------------------------------------------
-
-record_direction() { STUB_OUT='ANSWER: {"optionId":"a"}'; await; [ "$status" -eq 0 ]; }
 
 @test "body replaces only its section and is idempotent" {
   echo '<p>Vize projektu</p>' > "$BATS_TEST_TMPDIR/b.html"
@@ -391,7 +360,7 @@ p101_project() {
   [ "$(jq -c .options "$STATE")" = '{"vision":false,"identity":false,"seo":false,"images":false}' ]
   [ ! -e "$PROJ/docs/brand/state.json" ]
   [ -f "$PROJ/.aid-ui/state.json.migrated" ]
-  [ "$(grep -c '<section ' "$HTML")" -eq 11 ]
+  [ "$(grep -c '<section ' "$HTML")" -eq 14 ]
   grep -qF '<div class="body"><!-- body:barvy --><div class="swatch">x</div><!-- /body:barvy --></div>' "$HTML"
   grep -qF '<p class="status"><!-- status:barvy -->2026-09-24<!-- /status:barvy --></p>' "$HTML"
   grep -qF '<!-- fonts -->' "$HTML"
@@ -452,155 +421,6 @@ p101_project() {
   ! grep -q 'googleapis' "$HTML" || false
 }
 
-@test "finish: before step 6 exit 1, with an open choice exit 1, after that finished set" {
-  run "$SCRIPT" finish "$PROJ"
-  [ "$status" -eq 1 ]
-  record_direction
-  "$SCRIPT" step "$PROJ" 6
-  jq '.choice_pending = {kind: "slogan", key_or_screen: "s", page_url: "http://x/"}' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
-  run "$SCRIPT" finish "$PROJ"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *slogan* ]]
-  jq '.choice_pending = null' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
-  run "$SCRIPT" finish "$PROJ"
-  [ "$status" -eq 0 ]
-  [[ "$(jq -r .finished "$STATE")" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
-}
-
-@test "a backward step clears finished; step 7 and step done exit 2" {
-  record_direction
-  "$SCRIPT" step "$PROJ" 6
-  "$SCRIPT" finish "$PROJ"
-  "$SCRIPT" step "$PROJ" 6
-  [ "$(jq -r .finished "$STATE")" != null ]
-  "$SCRIPT" step "$PROJ" 5
-  [ "$(jq .finished "$STATE")" = null ]
-  run "$SCRIPT" step "$PROJ" 7
-  [ "$status" -eq 2 ]
-  run "$SCRIPT" step "$PROJ" done
-  [ "$status" -eq 2 ]
-}
-
-# --- P102 Step 3: options, the companion choice gate, composition ----------
-
-# curl stub on PATH: logs its URL; $STUB_CONFIRM set -> prints it, else 404 (exit 22).
-curl_stub() {
-  mkdir -p "$BATS_TEST_TMPDIR/bin"
-  cat > "$BATS_TEST_TMPDIR/bin/curl" <<'EOS'
-#!/usr/bin/env bash
-echo "${@: -1}" >> "$BATS_TEST_TMPDIR/curl.log"
-[[ -n "${STUB_CONFIRM:-}" ]] || { echo "curl: (22) The requested URL returned error: 404" >&2; exit 22; }
-printf '%s\n' "$STUB_CONFIRM"
-EOS
-  chmod +x "$BATS_TEST_TMPDIR/bin/curl"
-  export PATH="$BATS_TEST_TMPDIR/bin:$PATH" STUB_CONFIRM=""
-}
-choice() { run "$SCRIPT" await-choice "$PROJ" --kind "$1" --screen "$2" --page-url http://localhost:3916/; }
-confirm() { STUB_CONFIRM="{\"screen\":\"$1\",\"selected\":$2,\"at\":\"$3\"${4:+,\"text\":\"$4\"}}"; }
-NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
-
-@test "await-choice slogan: 404 pending, older confirm pending, newer recorded once, only /aid/confirmed asked" {
-  curl_stub
-  choice slogan slogan-1.html
-  [ "$status" -eq 1 ]
-  [ "$(jq -r .choice_pending.kind "$STATE")" = slogan ]
-  [ "$(jq -r .choice_pending.key_or_screen "$STATE")" = slogan-1.html ]
-  confirm slogan-1.html '["s2"]' "$OLD"
-  choice slogan slogan-1.html
-  [ "$status" -eq 1 ]
-  [[ "$output" == *predates* ]]
-  [ "$(jq .choices.slogan "$STATE")" = null ]
-  confirm slogan-1.html '["s2"]' "$NEW"
-  choice slogan slogan-1.html
-  [ "$status" -eq 0 ]
-  [ "$(jq -r .choices.slogan.id "$STATE")" = s2 ]
-  [ "$(jq .choice_pending "$STATE")" = null ]
-  f="$(jq -r .choices.slogan.answer_file "$STATE")"
-  [ "$(sha256sum "$PROJ/$f" | cut -d' ' -f1)" = "$(jq -r .choices.slogan.answer_sha256 "$STATE")" ]
-  choice slogan slogan-1.html
-  [ "$status" -eq 0 ]
-  [ "$(jq '[.decisions[] | select(.what | startswith("slogan"))] | length' "$STATE")" = 1 ]
-  [ "$(sort -u "$BATS_TEST_TMPDIR/curl.log")" = "http://localhost:3916/aid/confirmed?screen=slogan-1.html" ]
-  [ ! -e "$PROJ/.aid-o/work/companion" ]
-}
-
-@test "await-choice: own slogan text recorded; zero cards for logo pending, for pages accepted" {
-  curl_stub
-  confirm slogan-1.html '[]' "$NEW" "Vaříme po svém"
-  choice slogan slogan-1.html
-  [ "$status" -eq 0 ]
-  [ "$(jq -r .text "$PROJ/$(jq -r .choices.slogan.answer_file "$STATE")")" = "Vaříme po svém" ]
-  confirm logo-1.html '[]' "$NEW"
-  choice logo logo-1.html
-  [ "$status" -eq 1 ]
-  [ "$(jq .choices.logo "$STATE")" = null ]
-  confirm logo-1.html '["l1"]' "$NEW"
-  choice logo logo-1.html
-  [ "$status" -eq 0 ]
-  confirm pages-1.html '[]' "$NEW" "úvod, ceník"
-  choice pages pages-2.html
-  [ "$status" -eq 1 ]
-  [[ "$output" == *malformed* ]]
-  confirm pages-2.html '[]' "$NEW" "úvod, ceník"
-  choice pages pages-2.html
-  [ "$status" -eq 0 ]
-  [ "$(jq -r .choices.pages.screen "$STATE")" = pages-2.html ]
-}
-
-@test "await-choice: an open round of another kind refuses exit 1; the same kind's new round replaces it" {
-  curl_stub
-  choice slogan slogan-1.html
-  [ "$status" -eq 1 ]
-  choice logo logo-1.html
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"slogan round is still open on slogan-1.html"* ]]
-  [ "$(jq -r .choice_pending.key_or_screen "$STATE")" = slogan-1.html ]
-  jq '.choice_pending = {kind: "composition", key_or_screen: "k1", page_url: "http://x/", at: "2000"}' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
-  choice pages pages-1.html
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"composition round is still open on k1"* ]]
-  jq '.choice_pending = {kind: "slogan", key_or_screen: "slogan-1.html", page_url: "http://x/", at: "2000"}' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
-  choice slogan slogan-2.html
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"no confirm on slogan-2.html"* ]]
-  [ "$(jq -r .choice_pending.key_or_screen "$STATE")" = slogan-2.html ]
-}
-
-@test "await-choice: --page-url other than this machine's http server exit 2, nothing asked" {
-  curl_stub
-  for u in http://evil.example/ -K/etc/passwd https://localhost:3916/ http://localhost.evil.example/; do
-    run "$SCRIPT" await-choice "$PROJ" --kind slogan --screen slogan-1.html --page-url "$u"
-    [ "$status" -eq 2 ]
-  done
-  [ ! -e "$BATS_TEST_TMPDIR/curl.log" ]
-  [ "$(jq .choice_pending "$STATE")" = null ]
-}
-
-@test "await-choice composition: another kind's open round refuses exit 1, Impeccable never asked" {
-  curl_stub
-  choice slogan slogan-1.html
-  run "$SCRIPT" await-choice "$PROJ" --kind composition --imp "$IMP" --key k1 --page-url http://10.20.20.22:3915/
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"slogan round is still open on slogan-1.html"* ]]
-  [ ! -e "$BATS_TEST_TMPDIR/calls" ]
-  [ "$(jq -r .choice_pending.kind "$STATE")" = slogan ]
-}
-
-@test "await-choice: unreachable server and malformed answer record nothing; bad screen name exit 2" {
-  mkdir -p "$BATS_TEST_TMPDIR/bin"; printf '#!/usr/bin/env bash\nexit 7\n' > "$BATS_TEST_TMPDIR/bin/curl"; chmod +x "$BATS_TEST_TMPDIR/bin/curl"
-  PATH="$BATS_TEST_TMPDIR/bin:$PATH" choice logo logo-1.html
-  [ "$status" -eq 1 ]
-  [[ "$output" == *unreachable*"http://localhost:3916/"* ]]
-  curl_stub
-  STUB_CONFIRM='not json'
-  choice logo logo-1.html
-  [ "$status" -eq 1 ]
-  [ "$(jq .choices "$STATE")" = '{}' ]
-  choice logo slogan-1.html
-  [ "$status" -eq 2 ]
-  run "$SCRIPT" await-choice "$PROJ" --kind nope --screen x --page-url http://x/
-  [ "$status" -eq 2 ]
-}
 
 @test "set options: validated, refused after step 0" {
   run "$SCRIPT" set "$PROJ" options '{"vision":true,"colour":true}'
@@ -616,160 +436,391 @@ NEW=2999-01-01T00:00:00.000Z OLD=2000-01-01T00:00:00.000Z
   [ "$(jq .options.vision "$STATE")" = true ]
 }
 
-@test "step gates: open choice blocks any step; enabled options need their choice from step 2" {
-  curl_stub
-  "$SCRIPT" set "$PROJ" options '{"vision":true,"identity":"package","seo":true}'
-  run "$SCRIPT" step "$PROJ" 1
+
+# --- P103 Step 4: answers, builds, gate, finish ----------------------------
+
+@test "record-answer against the real studio: pending before the answer and when unreachable, recorded after" {
+  SERVER="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)/lib/aid-ui-studio/server.py"
+  TOKEN=0123456789abcdef0123456789abcdef
+  mkdir -p "$PROJ/.aid-ui/studio"; echo "$TOKEN" > "$PROJ/.aid-ui/studio.token"
+  cat > "$PROJ/.aid-ui/studio/payload.json" <<'JSON'
+{"questions": [{"id": "q1", "kind": "approve_page", "target": "index.html@abc", "opened_at": "2020-01-01T00:00:00Z"},
+               {"id": "q2", "kind": "variant", "target": "sha256:x", "opened_at": "2020-01-01T00:00:00Z"}]}
+JSON
+  PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  export AID_UI_STUDIO_URL="http://127.0.0.1:$PORT"
+  python3 "$SERVER" --project "$PROJ" --host 127.0.0.1 --port "$PORT" --token-file "$PROJ/.aid-ui/studio.token" \
+    >"$T/server.log" 2>&1 3>&- &
+  SPID=$!
+  for i in $(seq 1 50); do curl -s -o /dev/null "$AID_UI_STUDIO_URL/" && break; sleep 0.1; done
+  run "$SCRIPT" record-answer "$PROJ" --question q1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *pending* ]]
+  [ "$(jq '.answers | length' "$STATE")" = 0 ]
+  run "$SCRIPT" record-answer "$PROJ" --question nope
+  [ "$status" -eq 1 ]
+  curl -s -o /dev/null -H "X-AID-Token: $TOKEN" -H 'Content-Type: application/json' \
+    -d '{"question":"q1","kind":"approve_page","target":"index.html@abc","decision":"approve"}' "$AID_UI_STUDIO_URL/answer"
+  run "$SCRIPT" record-answer "$PROJ" --question q1
   [ "$status" -eq 0 ]
-  run "$SCRIPT" step "$PROJ" 2
+  [ "$(jq -c '.answers.q1 | [.kind, .target, .decision, .opened_at]' "$STATE")" = '["approve_page","index.html@abc","approve","2020-01-01T00:00:00Z"]' ]
+  [ "$(jq -r .answers.q1.answer_sha256 "$STATE")" = "$(sha256sum "$PROJ/.aid-ui/answers/q1.json" | cut -d' ' -f1)" ]
+  kill "$SPID"; wait "$SPID" 2>/dev/null || true
+  run "$SCRIPT" record-answer "$PROJ" --question q2
   [ "$status" -eq 1 ]
-  [[ "$output" == *slogan* && "$output" == *"page list"* && "$output" != *logo* ]]
-  choice slogan slogan-1.html
-  run "$SCRIPT" step "$PROJ" 0
+  [[ "$output" == *unreachable* ]]
+  [ "$(jq '.answers | keys' -c "$STATE")" = '["q1"]' ]
+}
+
+@test "every PM mutation without --answer or with an unknown answer: exit 1, nothing written" {
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  cp "$STATE" "$T/before.json"
+  for a in "" "--answer nope"; do
+    for m in "set $PROJ variant {\"type\":\"web\",\"brand\":\"new\",\"local\":false}" "set $PROJ structure {\"pages\":[]}" \
+             "set $PROJ content-plan []" "approve-page $PROJ index.html" "exception $PROJ --check axe"; do
+      run "$SCRIPT" $m $a
+      [ "$status" -eq 1 ]
+    done
+  done
+  cmp "$STATE" "$T/before.json"
+}
+
+@test "an answer of another kind, another page, an old fingerprint, a return decision or a used answer: exit 1" {
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  ans v1 variant "index.html@$(fp index.html)"
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer v1
+  [ "$status" -eq 1 ]; [[ "$output" == *"not approve_page"* ]]
+  ans a1 approve_page "index.html@$(fp index.html)"
+  run "$SCRIPT" approve-page "$PROJ" kontakt.html --answer a1
+  [ "$status" -eq 1 ]; [[ "$output" == *"is for"* ]]
+  ans r1 approve_page "index.html@$(fp index.html)" return
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer r1
+  [ "$status" -eq 1 ]; [[ "$output" == *"decided return"* ]]
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer a1
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.approvals["index.html"].answer' "$STATE")" = a1 ]
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer a1
+  [ "$status" -eq 1 ]; [[ "$output" == *"already used"* ]]
+  old="$(fp index.html)"
+  echo 'body{color:red}' > "$SITE/style.css"
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  [ "$(fp index.html)" != "$old" ]
+  ans a2 approve_page "index.html@$old"
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer a2
   [ "$status" -eq 1 ]
-  [[ "$output" == *"choice is open"* ]]
-  confirm slogan-1.html '["s1"]' "$NEW"; choice slogan slogan-1.html
-  confirm pages-1.html '["uvod"]' "$NEW"; choice pages pages-1.html
-  run "$SCRIPT" step "$PROJ" 2
+  # a site edited after build-record: approval refused even with a matching answer
+  ans a3 approve_page "index.html@$(fp index.html)"
+  echo x >> "$SITE/index.html"
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer a3
+  [ "$status" -eq 1 ]; [[ "$output" == *"changed since build-record"* ]]
+}
+
+@test "set variant|structure|content-plan need the answer for exactly that JSON; defer-content marks the item" {
+  s='{"pages":[{"id":"home","route":"/","sections":[]}]}'
+  ans s1 structure "$(sha_of '{"pages":[]}')" choose
+  run "$SCRIPT" set "$PROJ" structure "$s" --answer s1
+  [ "$status" -eq 1 ]
+  ans s2 structure "$(sha_of "$s")" choose
+  run "$SCRIPT" set "$PROJ" structure "$s" --answer s2
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.structure.pages[0].id' "$STATE")" = home ]
+  run "$SCRIPT" set "$PROJ" variant '{"type":"blog"}' --answer s2
+  [ "$status" -eq 2 ]
+  cp='[{"id":"hero","status":"missing"},{"id":"about","status":"draft"}]'
+  ans c1 content_plan "$(sha_of "$cp")"
+  "$SCRIPT" set "$PROJ" content-plan "$cp" --answer c1
+  ans d1 defer_content about
+  run "$SCRIPT" defer-content "$PROJ" hero --answer d1
+  [ "$status" -eq 1 ]
+  run "$SCRIPT" defer-content "$PROJ" about --answer d1
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.content_plan[] | .status]' "$STATE")" = '["missing","deferred_by_pm"]' ]
+  [ "$(jq -c .consumed "$STATE")" = '["s2","c1","d1"]' ]
+}
+
+@test "all conditions met: finish succeeds; a backward step clears finished" {
+  ready
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 0 ]
+  [[ "$(jq -r .finished "$STATE")" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]
+  "$SCRIPT" step "$PROJ" 7
+  [ "$(jq -r .finished "$STATE")" != null ]
+  "$SCRIPT" step "$PROJ" 5
+  [ "$(jq .finished "$STATE")" = null ]
+  run "$SCRIPT" step "$PROJ" 8
+  [ "$status" -eq 2 ]
+}
+
+@test "build-record writes nothing into the site; build-id matches; a site file edited after it: finish refuses" {
+  before="$(cd "$SITE" && find . -type f | sort)"
+  ready
+  [ "$(cd "$SITE" && find . -type f | sort)" = "$before" ]
+  [ "$("$SCRIPT" build-id "$SITE")" = "$(jq -r .build.id "$STATE")" ]
+  [ "$(jq -r .id "$PROJ/.aid-ui/build.json")" = "$(jq -r .build.id "$STATE")" ]
+  echo 'Disallow: /' >> "$SITE/robots.txt"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"changed since build-record"* ]]
+  run "$SCRIPT" build-record "$PROJ" "$PROJ/.."
+  [ "$status" -eq 1 ]
+}
+
+@test "a rebuild after the gate refuses; a page added after the gate refuses" {
+  ready
+  echo 'User-agent: x' > "$SITE/robots.txt"
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"gate result is for build"* ]]
+  # only _site changed: both page approvals still hold
+  [[ "$output" != *"not approved"* ]]
+  echo '<html>new</html>' > "$SITE/cenik.html"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"page cenik.html is not approved"* ]]
+}
+
+@test "a result with no webkit rows: gate-record and finish refuse" {
+  ready
+  jqw '.gate = null'
+  result '.rows |= map(select(.browser != "webkit"))'
+  run "$SCRIPT" gate-record "$PROJ" "$RES"
+  [ "$status" -eq 1 ]; [[ "$output" == *"missing row: http_200 index.html/390/webkit"* ]]
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no gate result"* ]]
+  # a result edited after gate-record
+  result
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  result '.rows |= map(select(.browser != "webkit"))'
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"changed or is missing since gate-record"* ]]
+}
+
+@test "an app result missing a flow state: gate-record refuses; with it the gate records" {
+  ready
+  st='{"pages":[{"id":"home"}],"roles":["admin"],"flows":[{"id":"checkout","steps":["a"],"states":["normal","empty"]}]}'
+  ans s1 structure "$(sha_of "$st")"; "$SCRIPT" set "$PROJ" structure "$st" --answer s1 >/dev/null
+  ans v2 variant "$(sha_of '{"type":"webapp","brand":"new","local":false}')"
+  "$SCRIPT" set "$PROJ" variant '{"type":"webapp","brand":"new","local":false}' --answer v2 >/dev/null
+  # the recorded web result has no flow rows at all
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"missing row: axe checkout/390/chromium/admin/normal"* ]]
+  result '.rows |= map(select(.state != "empty"))'
+  run "$SCRIPT" gate-record "$PROJ" "$RES"
+  [ "$status" -eq 1 ]; [[ "$output" == *"missing row: axe checkout/1440/webkit/admin/empty"* ]]
+  result
+  run "$SCRIPT" gate-record "$PROJ" "$RES"
+  [ "$status" -eq 0 ]
+  run "$SCRIPT" finish "$PROJ"
   [ "$status" -eq 0 ]
 }
 
-@test "identity new needs a logo before step 2" {
-  "$SCRIPT" set "$PROJ" options '{"identity":"new"}'
-  run "$SCRIPT" step "$PROJ" 3
-  [ "$status" -eq 1 ]
-  [[ "$output" == *logo* ]]
-}
-
-@test "step 5 with build path comp needs a composition; await-choice composition behaves like await-direction" {
-  record_direction
-  jq '.direction.build_path = "comp"' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
-  "$SCRIPT" step "$PROJ" 4
-  run "$SCRIPT" step "$PROJ" 5
-  [ "$status" -eq 1 ]
-  [[ "$output" == *composition* ]]
-  comp() { run "$SCRIPT" await-choice "$PROJ" --kind composition --imp "$IMP" --key k1 --page-url http://10.20.20.22:3915/; }
-  STUB_OUT='ANSWER: {"optionId":"reroll","steer":""}'
-  comp
-  [ "$status" -eq 3 ]
-  STUB_RC=4 STUB_OUT=''
-  comp
-  [ "$status" -eq 1 ]
-  [ "$(jq -r .choice_pending.kind "$STATE")" = composition ]
-  run "$SCRIPT" step "$PROJ" 5
-  [ "$status" -eq 1 ]
-  STUB_RC=0 STUB_OUT='ANSWER: {"optionId":"c2"}'
-  comp
+@test "not_covered webkit rows: refused without exception; one browser=webkit page=* answer covers all; another viewport does not" {
+  ready
+  result '.rows |= map(if .browser == "webkit" and .check == "axe" then .status = "not_covered" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"not_covered row without a live exception: axe index.html/390/webkit"* ]]
+  ans e1 exception '{"check":"axe","page":"*","viewport":"390","browser":"webkit","role":"*","state":"*"}'
+  run "$SCRIPT" exception "$PROJ" --check axe --viewport 390 --browser webkit --answer e1
   [ "$status" -eq 0 ]
-  [ "$(jq -r .choices.composition.id "$STATE")" = c2 ]
-  [ "$(jq .choice_pending "$STATE")" = null ]
-  [ "$(jq -r .direction.option_id "$STATE")" = a ]
-  run "$SCRIPT" step "$PROJ" 5
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"axe kontakt.html/768/webkit"* ]]; [[ "$output" != *"/390/webkit"* ]]
+  # the answer's target is a selector compared as JSON: key order does not matter
+  ans e2 exception '{"browser":"webkit","check":"axe","page":"*","role":"*","state":"*","viewport":"*"}'
+  run "$SCRIPT" exception "$PROJ" --check axe --browser webkit --page '*' --answer e2
+  [ "$status" -eq 0 ]
+  run "$SCRIPT" finish "$PROJ"
   [ "$status" -eq 0 ]
 }
 
-# --- P102 Step 8: build path and image spend --------------------------------
-
-@test "await-direction stores buildPath and buildPathFlipped from the ANSWER" {
-  STUB_OUT='ANSWER: {"optionId":"a","buildPath":"code","buildPathFlipped":true}'
-  await
+@test "a changed page fingerprint voids its approval and its exception, not the other page's" {
+  ready
+  result '.rows |= map(if .page == "kontakt.html" and .check == "axe" then .status = "fail" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  ans e1 exception '{"check":"axe","page":"kontakt.html","viewport":"*","browser":"*","role":"*","state":"*"}'
+  "$SCRIPT" exception "$PROJ" --check axe --page kontakt.html --answer e1 >/dev/null
+  run "$SCRIPT" finish "$PROJ"
   [ "$status" -eq 0 ]
-  [ "$(jq -r .direction.build_path "$STATE")" = code ]
-  [ "$(jq -r .direction.build_path_flipped "$STATE")" = true ]
-}
-
-@test "BUILD PATH FLIPPED without an ANSWER: exit 5, flip recorded, round stays pending" {
-  STUB_OUT='BUILD PATH FLIPPED: comp'
-  await
-  [ "$status" -eq 5 ]
-  [ "$(jq -r .direction.build_path "$STATE")" = comp ]
-  [ "$(jq -r .direction.build_path_flipped "$STATE")" = true ]
-  [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
-  run "$SCRIPT" require-direction "$PROJ"
+  echo '<html><img src="/logo.webp"><p>nové</p></html>' > "$SITE/kontakt.html"
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  result '.rows |= map(if .page == "kontakt.html" and .check == "axe" then .status = "fail" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  run "$SCRIPT" finish "$PROJ"
   [ "$status" -eq 1 ]
-  STUB_OUT='ANSWER: {"optionId":"b"}'
-  await
+  [[ "$output" == *"page kontakt.html is not approved"* ]]
+  [[ "$output" == *"fail row without a live exception: axe kontakt.html"* ]]
+  [[ "$output" != *"page index.html"* ]]
+}
+
+@test "an exception whose check passes at the next gate is kept as resolved and covers no more" {
+  ready
+  result '.rows |= map(if .browser == "webkit" then .status = "not_covered" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  ans e1 exception '{"check":"http_200","page":"*","viewport":"*","browser":"webkit","role":"*","state":"*"}'
+  "$SCRIPT" exception "$PROJ" --check http_200 --browser webkit --answer e1 >/dev/null
+  result '.rows |= map(if .browser == "webkit" and .check != "http_200" then .status = "not_covered" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  [ "$(jq -r '.exceptions[0].resolved' "$STATE")" = 2026-09-28T10:00:00Z ]
+  result '.rows |= map(if .browser == "webkit" then .status = "not_covered" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"not_covered row without a live exception: http_200"* ]]
+}
+
+@test "an answer file edited after use: finish refuses" {
+  ready
+  echo '{"decision":"approve","forged":true}' > "$PROJ/.aid-ui/answers/ap-index.html-1.json"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"answer file of ap-index.html-1 changed"* ]]
+}
+
+@test "coverage exit 3: refused without a coverage_drift answer naming exactly the changed items" {
+  ready
+  sed -i 's/The owner approves every page./The owner approves each page./' "$SPECS/a.md"
+  new="$(bash "$BATS_TEST_DIRNAME/../../aid-ui-coverage.sh" extract "$PROJ" | grep -F 'approves each page' | cut -f1)"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no coverage_drift answer"* ]]
+  ans d1 coverage_drift "$new,other"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]
+  ans d2 coverage_drift "$new"
+  run "$SCRIPT" finish "$PROJ"
   [ "$status" -eq 0 ]
-  [ "$(jq -r .direction.build_path "$STATE")" = comp ]
-  [ "$(jq .direction_pending "$STATE")" = null ]
+  # a map gap (exit 1) refuses whatever was answered
+  printf -- '- A brand new rule.\n' >> "$SPECS/b.md"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"exited 1"* ]]
 }
 
-@test "BUILD PATH FLIPPED: code: exit 5, flip recorded, no comps asked for" {
-  STUB_OUT='BUILD PATH FLIPPED: code'
-  await
-  [ "$status" -eq 5 ]
-  [[ "$output" == *"no comps are needed"* ]]
-  [[ "$output" != *"generate the comps"* ]]
-  [ "$(jq -r .direction.build_path "$STATE")" = code ]
-  [ "$(jq -r .direction.build_path_flipped "$STATE")" = true ]
-  [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
+@test "a content item still missing: finish refuses" {
+  ready
+  cp='[{"id":"hero","status":"confirmed_client"},{"id":"team","status":"missing"}]'
+  ans c2 content_plan "$(sha_of "$cp")"; "$SCRIPT" set "$PROJ" content-plan "$cp" --answer c2 >/dev/null
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"content item team is missing"* ]]
 }
 
-@test "an ANSWER whose buildPath is not comp or code: exit 1, nothing recorded" {
-  for bp in '"Comp"' '"comp-first"' '{"x":1}' 'null'; do
-    STUB_OUT="ANSWER: {\"optionId\":\"a\",\"buildPath\":$bp}"
-    await
-    [ "$status" -eq 1 ]
-    [ "$(jq -r '.direction.option_id // empty' "$STATE")" = "" ]
-    [ "$(jq -r .direction_pending.key "$STATE")" = k1 ]
-    [ ! -f "$PROJ/.aid-ui/direction-answer.json" ]
+@test "attest records {note, at} only for an agent: item of the coverage map" {
+  run "$SCRIPT" attest "$PROJ" 'ecosystem/specs/a.md#Standard A > Rules#0ec58950' --note "prošel jsem klávesnicí"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.attestations["ecosystem/specs/a.md#Standard A > Rules#0ec58950"] | keys | join(",")' "$STATE")" = at,note ]
+  run "$SCRIPT" attest "$PROJ" 'ecosystem/specs/a.md#Standard A > Rules#923b9432' --note x
+  [ "$status" -eq 1 ]
+  run "$SCRIPT" attest "$PROJ" 'ecosystem/specs/a.md#Standard A > Rules#0ec58950'
+  [ "$status" -eq 2 ]
+}
+
+@test "no verb of the removed Impeccable and companion rounds is left" {
+  for v in await-direction await-choice pending-direction require-direction spend; do
+    run "$SCRIPT" "$v" "$PROJ"
+    [ "$status" -eq 2 ]
   done
 }
 
-@test "build path comp from the answer: step 5 refused until await-choice composition records one" {
-  STUB_OUT='ANSWER: {"optionId":"a","buildPath":"comp","buildPathFlipped":false}'
-  await
-  "$SCRIPT" step "$PROJ" 4
-  run "$SCRIPT" step "$PROJ" 5
+# --- P103 Step 4 review round 1 --------------------------------------------
+
+@test "a row status outside pass|fail|warn|not_covered: gate-record and finish refuse" {
+  ready
+  for s in '"error"' '"skipped"' null; do
+    result ".rows[0].status = $s"
+    run "$SCRIPT" gate-record "$PROJ" "$RES"
+    [ "$status" -eq 1 ]; [[ "$output" == *"row with status $s"* ]]
+  done
+  # finish checks again: a result recorded by hand past gate-record
+  result '.rows[0].status = "error"'
+  jqw --arg sha "$(sha256sum "$RES" | cut -d' ' -f1)" '.gate.result_sha256 = $sha'
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *'row with status "error"'* ]]
+}
+
+@test "warn blocks like fail unless the check is warn_only" {
+  ready
+  result '.rows |= map(if .check == "axe" and .page == "index.html" then .status = "warn" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"warn row without a live exception: axe index.html"* ]]
+  echo 'warn_only: [axe]' >> "$T/cov/checks.yaml"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 0 ]
+}
+
+@test "record-answer: a foreign studio URL is refused; an answer for another target is not recorded; the token is never on argv" {
+  mkdir -p "$PROJ/.aid-ui/studio" "$T/fake" "$T/bin"
+  echo 0123456789abcdef > "$PROJ/.aid-ui/studio.token"
+  echo '{"questions": [{"id": "q1", "kind": "approve_page", "target": "index.html@abc", "opened_at": "2020-01-01T00:00:00Z"}]}' \
+    > "$PROJ/.aid-ui/studio/payload.json"
+  AID_UI_STUDIO_URL=http://evil.example:3915 run "$SCRIPT" record-answer "$PROJ" --question q1
+  [ "$status" -eq 1 ]; [[ "$output" == *"studio URL refused"* ]]
+  # any HTTP server serving a file the agent wrote (python -m http.server ignores the query)
+  echo '{"question":"q1","kind":"approve_page","target":"kontakt.html@abc","decision":"approve","at":"2026-01-01T00:00:00Z"}' > "$T/fake/answer"
+  PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$T/fake" >/dev/null 2>&1 3>&- &
+  SPID=$!
+  for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/answer" && break; sleep 0.1; done
+  AID_UI_STUDIO_URL="http://127.0.0.1:$PORT" run "$SCRIPT" record-answer "$PROJ" --question q1
+  [ "$status" -eq 1 ]; [[ "$output" == *"not the listed question"* ]]
+  [ "$(jq '.answers | length' "$STATE")" = 0 ]
+  # a curl stub records its argv and stdin
+  printf '#!/bin/bash\nprintf "%%s\\n" "$@" > %s/argv; cat > %s/stdin; printf 404\n' "$T" "$T" > "$T/bin/curl"; chmod +x "$T/bin/curl"
+  AID_UI_STUDIO_URL=http://localhost:1 PATH="$T/bin:$PATH" run "$SCRIPT" record-answer "$PROJ" --question q1
   [ "$status" -eq 1 ]
-  STUB_OUT='ANSWER: {"optionId":"c1"}'
-  run "$SCRIPT" await-choice "$PROJ" --kind composition --imp "$IMP" --key k1 --page-url http://10.20.20.22:3915/
-  [ "$status" -eq 0 ]
-  run "$SCRIPT" step "$PROJ" 5
-  [ "$status" -eq 0 ]
+  ! grep -q 0123456789abcdef "$T/argv" || false
+  grep -qx 'X-AID-Token: 0123456789abcdef' "$T/stdin"
 }
 
-@test "spend records each mock once, a changed image anew; model only from a sidecar naming one" {
-  M="$PROJ/.impeccable/mocks/decision"; mkdir -p "$M"
-  printf 'png-a' > "$M/a.png"; printf 'png-b' > "$M/b.png"
-  echo '{"prompt":"x","model":"gpt-image-1","usd":0.04}' > "$M/a.json"
-  echo '{"prompt":"y","usd":0.04}' > "$M/b.json"
-  run "$SCRIPT" spend "$PROJ"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"2 new, 0 duplicate, 2 recorded"* ]]
-  [ "$(jq '.image_spend | length' "$STATE")" = 2 ]
-  [ "$(jq -c '.image_spend[0] | {file, bytes, model, usd}' "$STATE")" = '{"file":".impeccable/mocks/decision/a.png","bytes":5,"model":"gpt-image-1","usd":0.04}' ]
-  [ "$(jq -r .image_spend[0].sha256 "$STATE")" = "$(sha256sum "$M/a.png" | cut -d' ' -f1)" ]
-  [ "$(jq -c '.image_spend[1] | keys' "$STATE")" = '["bytes","file","sha256"]' ]
-  run "$SCRIPT" spend "$PROJ"
-  [[ "$output" == *"0 new, 0 duplicate, 2 recorded"* ]]
-  printf 'png-b2' > "$M/b.png"
-  run "$SCRIPT" spend "$PROJ"
-  [[ "$output" == *"1 new, 0 duplicate, 3 recorded"* ]]
-  [ "$(jq '[.image_spend[] | select(.file | endswith("b.png"))] | length' "$STATE")" = 2 ]
+@test "build-record refuses a site in <project>/docs or one holding .aid-ui/" {
+  run "$SCRIPT" build-record "$PROJ" "$PROJ/docs"
+  [ "$status" -eq 1 ]; [[ "$output" == *"build-record refused"* ]]
+  mkdir -p "$PROJ/.aid-ui/site" "$T/other/.aid-ui"
+  run "$SCRIPT" build-record "$PROJ" "$PROJ/.aid-ui/site"
+  [ "$status" -eq 1 ]
+  run "$SCRIPT" build-record "$PROJ" "$T/other"
+  [ "$status" -eq 1 ]
+  [ "$(jq .build "$STATE")" = null ]
 }
 
-@test "spend records a copy with the same sha256 once, naming the original" {
-  M="$PROJ/.impeccable/mocks"; mkdir -p "$M/decision"
-  printf 'png-a' > "$M/decision/assigned.png"; cp "$M/decision/assigned.png" "$M/comp-1.png"
-  run "$SCRIPT" spend "$PROJ"
-  [ "$status" -eq 0 ]
-  # find order: comp-1.png sorts first, so the original is the one named a duplicate
-  [[ "$output" == *"decision/assigned.png: duplicate of .impeccable/mocks/comp-1.png"* ]]
-  [[ "$output" == *"1 new, 1 duplicate, 1 recorded"* ]]
-  [ "$(jq '.image_spend | length' "$STATE")" = 1 ]
+# --- P103 EPIC review round 1 ----------------------------------------------
+
+@test "a state-file answer the studio never gave, one that differs from the studio's, or no studio: the mutation refuses" {
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  studio
+  forge f1 approve_page "index.html@$(fp index.html)"
+  cp "$STATE" "$T/before.json"
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer f1
+  [ "$status" -eq 1 ]; [[ "$output" == *"studio does not hold answer f1"* ]]
+  cmp "$STATE" "$T/before.json"
+  # the PM returned the page; the agent rewrites the recorded decision to approve
+  ans r1 approve_page "index.html@$(fp index.html)" return
+  jqw '.answers.r1.decision = "approve"'
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer r1
+  [ "$status" -eq 1 ]; [[ "$output" == *"differs from the recorded one"* ]]
+  # a genuine answer, but the studio is gone at mutation time
+  ans a1 approve_page "index.html@$(fp index.html)"
+  kill "$STUDIO_PID"; wait "$STUDIO_PID" 2>/dev/null || true
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer a1
+  [ "$status" -eq 1 ]; [[ "$output" == *"studio unreachable"* ]]
+  [ "$(jq '.approvals | length' "$STATE")" = 0 ]
 }
 
-@test "spend --also picks up a plates directory; one outside the project is refused" {
-  mkdir -p "$PROJ/assets/plates" "$BATS_TEST_TMPDIR/outside"
-  printf 'plate' > "$PROJ/assets/plates/hero.png"
-  run "$SCRIPT" spend "$PROJ" --also assets/plates
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"1 new, 0 duplicate, 1 recorded"* ]]
-  [ "$(jq -r '.image_spend[0].file' "$STATE")" = assets/plates/hero.png ]
-  run "$SCRIPT" spend "$PROJ" --also ../outside
-  [ "$status" -eq 2 ]
-  run "$SCRIPT" spend "$PROJ" --also "$BATS_TEST_TMPDIR/outside"
-  [ "$status" -eq 2 ]
-  [ "$(jq '.image_spend | length' "$STATE")" = 1 ]
+@test "two concurrent approve-page with the same answer: exactly one succeeds" {
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  ans a1 approve_page "index.html@$(fp index.html)"
+  "$SCRIPT" approve-page "$PROJ" index.html --answer a1 >"$T/o1" 2>&1 3>&- & p1=$!
+  "$SCRIPT" approve-page "$PROJ" index.html --answer a1 >"$T/o2" 2>&1 3>&- & p2=$!
+  r1=0; wait "$p1" || r1=$?
+  r2=0; wait "$p2" || r2=$?
+  [ $(( (r1 == 0) + (r2 == 0) )) -eq 1 ]
+  cat "$T/o1" "$T/o2" | grep -q "already used"
+  [ "$(jq -c .consumed "$STATE")" = '["a1"]' ]
+}
+
+@test "a brand-state.json.lock symlink to a file outside the project is never written" {
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  echo victim >"$T/victim"
+  ln -s "$T/victim" "$STATE.lock"
+  ans a1 approve_page "index.html@$(fp index.html)"
+  "$SCRIPT" approve-page "$PROJ" index.html --answer a1 >/dev/null
+  [ "$(cat "$T/victim")" = victim ]
+  [ "$(jq -c .consumed "$STATE")" = '["a1"]' ]
 }

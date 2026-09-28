@@ -1,0 +1,23 @@
+# Canonical gate check names of /aid-ui (P103). The gate (Step 7) implements
+# exactly these, the coverage map's script:<name> dispositions may name only
+# these, and the gate and `finish` share the matrix axes below.
+# Rules FB-1..FB-15 of /ecosystem/specs/frontend-build-standard.
+viewports: [390, 768, 1440]
+browsers: [chromium, webkit]
+warn_only: [lighthouse_mobile]   # measured and reported, never blocks (FB-13)
+checks:
+  http_200: every page answers HTTP 200 (FB-1)
+  glyph_coverage: every character renders in the intended font, Czech diacritics included, no system fallback (FB-2)
+  no_overflow: no page scrolls sideways at any viewport (FB-3)
+  one_line_controls: buttons and control-styled links do not wrap (FB-4)
+  no_placeholders: no lorem ipsum, TODO, invented contact or placeholder image (FB-5)
+  facts_match: prices, contacts, opening hours and numbers on the pages match the facts register (FB-6)
+  brand_assets: logo and favicon come from the brand package, nothing drawn outside it (FB-7)
+  links_resources: links, images, fonts and scripts all load (FB-8)
+  required_files: localised 404 page, favicon set, og image, lang attribute (FB-9)
+  axe: axe findings of severity serious and critical = 0 (FB-10)
+  image_weight: images are WebP or AVIF, each at most 200 kB (FB-12)
+  lighthouse_mobile: Lighthouse mobile score measured and reported; warning only (FB-13)
+  seo: aid-ui-seo-check.py passes, a BLOCKER finding fails (FB-14)
+  app_task_states: an application's task x state scenarios from the task map pass (FB-11)
+  screenshots_reviewed: the PM has reviewed a full-page screenshot of every page at every viewport (FB-15)
