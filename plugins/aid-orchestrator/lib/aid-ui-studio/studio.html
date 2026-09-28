@@ -2,96 +2,240 @@
 <html lang="cs">
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AID studio</title>
-<!-- Layout pattern after Impeccable's decision page (Impeccable 4.3.1, Paul Bakaus,
-     Apache 2.0): cards with a preview slot and pending shimmer, safer/bolder re-roll,
-     steer field, calm paper palette. Markup, CSS and JS written for AID. -->
+<!-- Source: the decision page of Impeccable 4.3.1 (Paul Bakaus, github.com/pbakaus/impeccable),
+     licensed under the Apache License 2.0; notice in
+     skills/ui-design/references/LICENSES/NOTICE-impeccable.txt.
+     Reused: the --ks-* paper/ink/instrument palette, lifts and cap buttons, the tilted snapping
+     deck, card faces with the preview on top, kicker badge, chips, tags, swatches, the
+     "improved by" box, the sticky footer, the lightbox and the deck arrows.
+     Modified by AID: Czech labels, AID payload (studio server contract), question types
+     (text, page approval, exception), step rail, wordmark removed. -->
 <style>
   :root {
     color-scheme: light;
-    --accent: oklch(84% 0.19 80.46);
-    --patina: oklch(49% 0.11 190);
-    --paper: oklch(97.8% 0 0);
-    --raised: oklch(99.5% 0 0);
-    --gray: oklch(92% 0 0);
-    --gray-2: oklch(88% 0 0);
-    --ink: oklch(13% 0 0);
-    --text: oklch(22% 0 0);
-    --muted: oklch(46% 0 0);
-    --rule: oklch(13% 0 0 / 0.12);
-    --edge: oklch(13% 0 0 / 0.45);
-    --danger: oklch(50% 0.17 28);
-    --lift: 0 1px 1px oklch(13% 0 0 / 0.05), 0 2px 3px oklch(13% 0 0 / 0.04), 0 6px 12px oklch(13% 0 0 / 0.05);
-    --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --ks-kinpaku: oklch(84% 0.19 80.46);
+    --ks-patina: oklch(49% 0.11 190);
+    --ks-paper: oklch(97.8% 0 0);
+    --ks-paper-raised: oklch(99.5% 0 0);
+    --ks-paper-deep: oklch(95% 0 0);
+    --ks-gray: oklch(92% 0 0);
+    --ks-gray-2: oklch(88% 0 0);
+    --ks-ink: oklch(13% 0 0);
+    --ks-text: oklch(22% 0 0);
+    --ks-text-muted: oklch(46% 0 0);
+    --ks-rule: oklch(13% 0 0 / 0.12);
+    --ks-edge: oklch(13% 0 0 / 0.45);
+    --ks-danger: oklch(50% 0.17 28);
+    --ks-instrument: oklch(24% 0 0);
+    --ks-instrument-raised: oklch(31% 0 0);
+    --ks-instrument-text: oklch(93% 0 0);
+    --ks-lift: 0 1px 1px oklch(13% 0 0 / 0.05), 0 2px 3px oklch(13% 0 0 / 0.04), 0 6px 12px oklch(13% 0 0 / 0.05);
+    --ks-cap-lift: inset 0 1px 0 oklch(100% 0 0 / 0.9), 0 1px 0 oklch(13% 0 0 / 0.14), 0 2px 3px oklch(13% 0 0 / 0.08);
+    --ks-cap-press: inset 0 1px 2px oklch(13% 0 0 / 0.14);
+    --ks-track-recess: inset 0 1px 3px oklch(13% 0 0 / 0.16), inset 0 -1px 0 oklch(100% 0 0 / 0.7);
+    --ks-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --ks-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --page-inset: max(clamp(1rem, 5vw, 4rem), calc((100vw - 90rem) / 2));
   }
   * { box-sizing: border-box; margin: 0; }
-  body { background: var(--paper); color: var(--text); font: 15px/1.55 var(--font); padding: 1.6rem clamp(1rem, 5vw, 4rem) 0; min-height: 100dvh; display: flex; flex-direction: column; overflow-x: clip; }
-  header, main, footer { width: 100%; max-width: 90rem; margin: 0 auto; }
-  h1 { font-weight: 600; font-size: 1.75rem; letter-spacing: -0.02em; line-height: 1.2; color: var(--ink); }
-  h2 { font-weight: 600; font-size: 1.3rem; letter-spacing: -0.015em; color: var(--ink); }
-  a { color: var(--patina); }
-  :focus-visible { outline: 2px solid var(--patina); outline-offset: 2px; }
-  .rail { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; padding: 0; margin-top: 1rem; }
-  .rail li { font-size: .8125rem; padding: .25rem .7rem; border: 1px solid var(--rule); border-radius: 999px; color: var(--muted); background: var(--raised); }
-  .rail li.done { color: var(--text); }
-  .rail li.done::before { content: "✓ "; color: var(--patina); }
-  .rail li.current { color: var(--ink); border-color: var(--accent); font-weight: 600; }
-  #notice { margin-top: 1rem; padding: .8rem 1rem; border: 1px solid var(--danger); border-radius: 6px; color: var(--danger); background: var(--raised); }
+  body { background: var(--ks-paper); color: var(--ks-text); font: 15px/1.55 var(--ks-font); padding: 1.8rem clamp(1rem, 5vw, 4rem) 0; min-height: 100dvh; display: flex; flex-direction: column; overflow-x: clip; }
+  header, main, .links { width: 100%; max-width: 90rem; margin: 0 auto; }
+  a { color: var(--ks-patina); }
+  ::selection { background: oklch(49% 0.11 190 / 0.18); color: var(--ks-ink); }
+  :focus-visible { outline: 2px solid var(--ks-patina); outline-offset: 3px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* Header: neutral wordmark and the step rail as a recessed segmented track. */
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem 2rem; flex-wrap: wrap; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font-size: .95rem; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--ks-ink); }
+  .brand::before { content: ""; width: 22px; height: 22px; border-radius: 5px; background: var(--ks-ink); box-shadow: inset 0 0 0 5px var(--ks-ink), inset 0 0 0 7px var(--ks-paper-raised); }
+  .rail { display: inline-flex; flex-wrap: wrap; gap: 3px; padding: 3px; list-style: none; background: var(--ks-gray); border: 1px solid var(--ks-rule); border-radius: 6px; box-shadow: var(--ks-track-recess); }
+  .rail li { display: inline-flex; align-items: center; gap: 6px; font-size: .75rem; font-weight: 500; padding: 7px 10px; border-radius: 3px; color: var(--ks-text-muted); }
+  .rail li::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--ks-edge); }
+  .rail li.done { color: var(--ks-text); }
+  .rail li.done::before { background: var(--ks-patina); }
+  .rail li.current { color: var(--ks-ink); background: var(--ks-paper-raised); box-shadow: var(--ks-cap-lift); }
+  .rail li.current::before { background: var(--ks-kinpaku); }
+  #notice { margin-top: 1rem; padding: .7rem 1rem; border: 1px solid var(--ks-danger); border-radius: 8px; color: var(--ks-danger); background: var(--ks-paper-raised); }
   #notice[hidden] { display: none; }
-  main { flex: 1; display: flex; flex-direction: column; gap: 2.5rem; padding: 1.8rem 0 2rem; }
-  .empty { color: var(--muted); }
-  .question { display: flex; flex-direction: column; gap: 1rem; }
-  .question .prompt { color: var(--muted); max-width: 52rem; }
-  .question .kind { font-size: .6875rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-  .question pre { font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--raised); border: 1px solid var(--rule); border-radius: 6px; padding: .8rem 1rem; max-height: 24rem; overflow: auto; }
-  .question.answered { opacity: .7; }
-  .done-note { color: var(--patina); font-weight: 600; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr)); gap: 1.4rem; }
-  .card { background: var(--raised); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--lift); overflow: hidden; display: flex; flex-direction: column; }
-  .card:hover, .card:focus-within { border-color: var(--edge); }
-  .media { position: relative; aspect-ratio: 16/10; background: var(--gray); }
-  .media img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .media.pending img { visibility: hidden; }
-  .media .wait { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; font-size: .8125rem; color: var(--muted);
-    background: linear-gradient(100deg, var(--gray) 40%, var(--gray-2) 50%, var(--gray) 60%); background-size: 200% 100%; animation: shimmer 1.6s linear infinite; }
-  .media.pending .wait { display: flex; }
-  @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
-  @media (prefers-reduced-motion: reduce) { .media .wait { animation: none; } }
-  .body { padding: 1rem 1.1rem 1.1rem; display: flex; flex-direction: column; gap: .6rem; flex: 1; }
-  .body h3 { font-size: 1.05rem; font-weight: 600; color: var(--ink); }
-  .label { display: block; font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-  .swatches { display: flex; gap: .3rem; }
-  .swatches span { width: 1.4rem; height: 1.4rem; border-radius: 4px; border: 1px solid var(--rule); }
-  .choose { margin-top: auto; }
-  button { font: inherit; font-size: .875rem; font-weight: 500; min-height: 42px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--edge); background: var(--raised); color: var(--ink); cursor: pointer; }
-  button:hover { border-color: var(--ink); }
-  button.primary { background: var(--ink); color: var(--raised); border-color: var(--ink); }
+
+  main { flex: 1; display: flex; flex-direction: column; gap: 4rem; padding: 2.2rem 0 2rem; }
+  .question { display: flex; flex-direction: column; gap: 1.5rem; }
+  .question.answered { opacity: .6; }
+  .headline { display: flex; align-items: center; gap: .75rem; }
+  .headline svg { flex: none; width: 26px; height: 26px; color: var(--ks-ink); }
+  .q-title { font-weight: 600; font-size: 2rem; letter-spacing: -0.025em; line-height: 1.2; color: var(--ks-ink); text-wrap: balance; }
+  .lede { color: var(--ks-text-muted); margin-top: -.8rem; max-width: 52rem; }
+  .head { display: flex; flex-direction: column; gap: .4rem; }
+  .tier { font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .24em; text-transform: uppercase; color: var(--ks-text-muted); }
+  pre.body-json { font: 12.5px/1.5 var(--ks-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ks-paper-deep); border: 1px solid var(--ks-rule); border-radius: 6px; padding: .8rem 1rem; max-height: 22rem; overflow: auto; }
+  .detail { color: var(--ks-text); font-size: .95rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .done-note { font-family: var(--ks-mono); font-size: .75rem; letter-spacing: .18em; text-transform: uppercase; color: var(--ks-patina); }
+  .empty { padding: 7rem 1rem; font-size: 1.4rem; color: var(--ks-ink); text-align: center; }
+
+  /* The deck bleeds to the viewport edges while the first card aligns with the column. */
+  .deck-shell { position: relative; width: 100vw; margin-left: calc(50% - 50vw); }
+  .grid { display: flex; gap: 1.6rem; width: 100%; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; padding: 8px var(--page-inset); scroll-padding-inline: var(--page-inset); align-items: stretch; }
+  .grid::-webkit-scrollbar { display: none; }
+  .grid > .card { flex: 0 0 clamp(24rem, 34vw, 34rem); scroll-snap-align: center; }
+  @media (min-aspect-ratio: 1/1) and (max-height: 900px) {
+    body { padding-top: 1.1rem; }
+    .grid > .card { flex-basis: clamp(20rem, 27vw, 27rem); }
+  }
+  .nav { position: absolute; z-index: 6; top: 50%; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--ks-paper-raised); border: 1px solid var(--ks-edge); color: var(--ks-ink); cursor: pointer; box-shadow: var(--ks-cap-lift); transform: translateY(-50%); transition: border-color .2s, color .2s, opacity .2s; }
+  .nav:hover { border-color: var(--ks-ink); color: var(--ks-patina); }
+  .nav[disabled] { opacity: .25; cursor: default; }
+  .nav[hidden] { display: none; }
+  .nav svg { width: 16px; height: 16px; }
+  .nav.prev { left: 14px; }
+  .nav.next { right: 14px; }
+  .fade { position: absolute; z-index: 5; top: 0; bottom: 0; width: 88px; pointer-events: none; opacity: 0; transition: opacity .3s ease; }
+  .fade-prev { left: 0; background: linear-gradient(90deg, var(--ks-paper), transparent); }
+  .fade-next { right: 0; background: linear-gradient(270deg, var(--ks-paper), transparent); }
+  .deck-shell.can-prev .fade-prev, .deck-shell.can-next .fade-next { opacity: 1; }
+
+  .card { position: relative; perspective: 1400px; transform: rotate(var(--fan, 0deg)); transition: transform .25s cubic-bezier(.16, 1, .3, 1); }
+  .card:hover, .card:focus-within { transform: rotate(0deg) translateY(-4px); }
+  .card-inner { position: relative; height: 100%; transform-style: preserve-3d; transition: transform .7s cubic-bezier(.16, 1, .3, 1); }
+  .card.flipped .card-inner { transform: rotateY(180deg); }
+  .face { background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); overflow: hidden; display: flex; flex-direction: column; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+  .face.front { position: relative; height: 100%; }
+  .face.back { position: absolute; inset: 0; transform: rotateY(180deg); pointer-events: none; }
+  .card.flipped .face.back { pointer-events: auto; }
+  .card.flipped .face.front { pointer-events: none; }
+  .face.lead { border-color: var(--ks-kinpaku); }
+  .card:hover .face { border-color: var(--ks-edge); }
+  .card:hover .face.lead { border-color: var(--ks-kinpaku); }
+  .kicker { position: absolute; z-index: 2; top: 12px; left: 12px; padding: 4px 9px; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); color: var(--ks-ink); font-size: .6875rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; border-radius: 3px; }
+  .media { position: relative; width: 100%; aspect-ratio: 16/10; min-height: 0; flex: none; overflow: hidden; background: var(--ks-gray); }
+  .media img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; position: relative; z-index: 1; cursor: zoom-in; }
+  .media img[hidden] { display: none; }
+  .media .shimmer { position: absolute; inset: 0; }
+  .media:not(.comp-pending) .shimmer { display: none; }
+  .shimmer { width: 100%; height: 100%; background: linear-gradient(100deg, var(--ks-gray) 35%, var(--ks-gray-2) 50%, var(--ks-gray) 65%); background-size: 220% 100%; animation: shimmer 1.4s linear infinite; }
+  .comp-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 1rem; font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .22em; text-transform: uppercase; color: var(--ks-text-muted); }
+  @keyframes shimmer { from { background-position: 120% 0; } to { background-position: -80% 0; } }
+  .chips { position: absolute; z-index: 2; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 5px 9px; font: 500 .6875rem var(--ks-font); color: var(--ks-instrument-text); background: var(--ks-instrument); border: 1px solid oklch(100% 0 0 / 0.3); border-radius: 5px; cursor: pointer; transition: background .2s; }
+  .chip:hover { background: var(--ks-instrument-raised); }
+  .chip[disabled] { opacity: .5; cursor: default; }
+  .chip svg { width: 12px; height: 12px; }
+  .body { padding: .95rem 1.1rem 1.2rem; display: flex; flex-direction: column; gap: .5rem; flex: 1; }
+  .card h3 { font-size: 1.125rem; font-weight: 600; line-height: 1.35; color: var(--ks-ink); }
+  .thesis { color: var(--ks-text); font-size: .95rem; line-height: 1.45; }
+  .identity { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 0; }
+  .swatches { display: inline-flex; gap: 4px; margin-right: 4px; }
+  .swatches i { width: 18px; height: 18px; border-radius: 5px; border: 1px solid oklch(100% 0 0 / 0.18); box-shadow: inset 0 0 0 1px oklch(0% 0 0 / 0.25); background: var(--ks-gray); }
+  .tag { font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .14em; text-transform: uppercase; color: var(--ks-text-muted); border: 1px solid var(--ks-rule); border-radius: 4px; padding: 3px 7px; overflow-wrap: anywhere; }
+  .tag b { color: var(--ks-ink); font-weight: 600; }
+  .fact { font-size: .8rem; color: var(--ks-text-muted); line-height: 1.45; overflow-wrap: anywhere; }
+  .fact-label { display: inline-block; font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .18em; text-transform: uppercase; color: var(--ks-text-muted); margin-right: .55em; transform: translateY(-1px); }
+  .fact.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .raises { display: flex; flex-direction: column; gap: 4px; margin: 2px 0; padding: 7px 10px 8px; background: oklch(70% 0.12 188 / 0.06); border: 1px solid oklch(70% 0.12 188 / 0.22); border-radius: 8px; }
+  .raises .fact-label { color: var(--ks-patina); }
+  .raise { font-size: .78rem; color: var(--ks-text-muted); line-height: 1.45; }
+  .back-head { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: 14px 14px 0; }
+  .back-head .chip { flex: none; }
+  .body.back-body { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--ks-edge) var(--ks-paper-deep); }
+  .card.skeleton .line { height: 11px; border-radius: 4px; background: linear-gradient(100deg, var(--ks-gray) 35%, var(--ks-gray-2) 50%, var(--ks-gray) 65%); background-size: 220% 100%; animation: shimmer 1.4s linear infinite; }
+  .card.skeleton .line.title { height: 17px; width: 70%; } .card.skeleton .w90 { width: 90%; } .card.skeleton .w60 { width: 60%; }
+
+  button.choose { margin-top: auto; align-self: start; background: var(--ks-instrument); color: var(--ks-instrument-text); border: 0; font: 600 .9375rem/1.35 var(--ks-font); padding: 11px 24px; border-radius: 6px; cursor: pointer; transition: background .15s; }
+  button.choose:hover { background: var(--ks-instrument-raised); }
+  .reroll-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 14px; font: 500 .8125rem var(--ks-font); color: var(--ks-ink); background: var(--ks-paper-raised); border: 1px solid var(--ks-edge); border-radius: 6px; box-shadow: var(--ks-cap-lift); cursor: pointer; transition: border-color .2s ease, color .2s ease; }
+  .reroll-btn:hover { border-color: var(--ks-ink); }
+  .reroll-btn:active { box-shadow: var(--ks-cap-press); }
+  .reroll-btn svg { width: 15px; height: 15px; }
+  .reroll-btn.quiet { color: var(--ks-text-muted); min-height: 38px; align-self: center; }
+  .reroll-btn.quiet:hover { color: var(--ks-text); border-color: var(--ks-text-muted); }
   button[disabled] { opacity: .4; cursor: default; }
-  .quiet { color: var(--muted); }
-  .actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: stretch; border-top: 1px solid var(--rule); padding-top: 1rem; }
-  .actions label { flex-basis: 100%; }
-  textarea, input[type=text] { width: 100%; font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--edge); border-radius: 6px; padding: .6rem .8rem; caret-color: var(--patina); }
-  textarea { min-height: 4.5rem; resize: vertical; }
-  .status { flex-basis: 100%; font-size: .875rem; color: var(--danger); min-height: 1.2em; }
-  footer { padding: 1rem 0 1.4rem; border-top: 1px solid var(--rule); font-size: .8125rem; color: var(--muted); display: flex; gap: 1.2rem; flex-wrap: wrap; }
+
+  /* The round's verbs stay reachable: a full-bleed bar stuck to the viewport bottom. */
+  .bar { position: sticky; bottom: 0; z-index: 10; width: 100vw; margin: -.3rem calc(50% - 50vw) 0; padding: .7rem var(--page-inset) calc(.7rem + env(safe-area-inset-bottom, 0px)); display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; background: var(--ks-paper); border-top: 1px solid var(--ks-rule); }
+  .steer { flex: 1; min-width: 16rem; }
+  input[type=text], textarea { width: 100%; background: var(--ks-paper-raised); color: var(--ks-text); border: 1px solid var(--ks-edge); border-radius: 6px; padding: .7rem .85rem; font: inherit; caret-color: var(--ks-patina); }
+  input[type=text]::placeholder, textarea::placeholder { color: var(--ks-text-muted); opacity: 1; }
+  input[type=text]:focus, textarea:focus { outline: 2px solid var(--ks-patina); outline-offset: 2px; }
+  textarea { min-height: 5rem; resize: vertical; }
+  .status { flex-basis: 100%; font-size: .875rem; color: var(--ks-danger); }
+  .status:empty { display: none; }
+
+  /* Text question, page approval, exception: one panel in the same card chrome. */
+  .panel { max-width: 52rem; }
+  /* Page approval: the screenshot takes the wide column, the verdict sits beside it. */
+  .panel.wide { max-width: none; display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(19rem, 1fr); align-items: start; }
+  .panel.wide .media { border-bottom: 0; border-right: 1px solid var(--ks-rule); }
+  .panel .body { padding: 1.4rem 1.5rem 1.5rem; gap: .9rem; }
+  .panel .q-title { font-size: 1.75rem; }
+  .panel .media { border-bottom: 1px solid var(--ks-rule); }
+  .field { display: flex; flex-direction: column; gap: .45rem; margin-top: .3rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+  .actions button.choose { margin-top: 0; }
+
+  #lightbox { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: oklch(97.8% 0 0 / 0.96); cursor: zoom-out; opacity: 0; transition: opacity .25s ease; }
+  #lightbox[hidden] { display: none; }
+  #lightbox.open { opacity: 1; }
+  #lightbox img { max-width: 94vw; max-height: 94vh; border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); }
+  .links { padding: 1rem 0 1.4rem; border-top: 1px solid var(--ks-rule); font-size: .8125rem; display: flex; gap: 1.2rem; flex-wrap: wrap; }
+
+  /* A tall viewport: the deck becomes a plain vertical list; the bar stays stuck. */
+  @media (max-aspect-ratio: 1/1) {
+    body { padding-top: 1.2rem; }
+    main { gap: 3rem; padding-top: 1.6rem; }
+    .q-title, .panel .q-title { font-size: 1.5rem; }
+    .deck-shell { width: auto; margin-left: 0; }
+    .grid { flex-direction: column; overflow: visible; scroll-snap-type: none; padding: 6px 0; gap: 1.3rem; }
+    .grid > .card { flex: 0 0 auto; }
+    .nav, .fade { display: none; }
+    .bar { gap: .5rem; }
+    .steer { min-width: 0; }
+    .bar .reroll-btn { flex: 1 1 26%; padding: 0 8px; min-height: 38px; }
+    .bar .steer { flex: 1 1 12rem; order: 1; padding: .55rem .75rem; }
+    .bar .ret { order: 2; flex: none; }
+    .bar .status { order: 3; }
+    .long { display: none; }
+    .panel.wide { display: flex; }
+    .panel.wide .media { border-right: 0; border-bottom: 1px solid var(--ks-rule); }
+    .panel .body { padding: 1.1rem 1rem 1.2rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card, .card:hover, .card:focus-within { transform: none; transition: none; }
+    .card-inner, #lightbox, .nav, .fade { transition: none; }
+    .shimmer, .card.skeleton .line { animation: none; }
+  }
 </style>
 <header>
-  <h1>AID studio</h1>
-  <ol class="rail" id="rail" aria-label="Kroky"></ol>
+  <div class="topbar">
+    <span class="brand">AID studio</span>
+    <ol class="rail" id="rail" aria-label="Kroky"></ol>
+  </div>
   <p id="notice" role="alert" hidden></p>
 </header>
 <main id="main" aria-live="polite"><p class="empty">Načítám…</p></main>
-<footer>
+<footer class="links">
   <a href="/report">Soulad se standardy</a>
   <a href="/licence">Vzor rozhodovací stránky: Impeccable (Apache 2.0)</a>
 </footer>
+<div id="lightbox" role="dialog" aria-label="Zvětšený náhled, zavřete klávesou Esc" tabindex="-1" hidden></div>
 <script>
 "use strict";
 const KIND = { variant: "Varianta", vision: "Vize", identity: "Identita", seo_brief: "SEO zadání",
   structure: "Struktura", task_map: "Mapa úloh", content_plan: "Plán obsahu", defer_content: "Odložený obsah",
   facts: "Fakta", references: "Reference", direction: "Směr", approve_page: "Schválení stránky",
   exception: "Výjimka", coverage_drift: "Změna pokrytí", design_standard: "Standard návrhu" };
-let last = "", stopped = false;
+const SELECTOR = { check: "kontrola", page: "stránka", viewport: "viewport", browser: "prohlížeč", role: "role", state: "stav" };
+// Card fields rendered by name; any other string field shows on the card's back as "key: value".
+const KNOWN = new Set(["id", "question", "title", "preview", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags"]);
+// Fixed icon markup (constants only, never data).
+const SVG = {
+  expand: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  flip: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-8 8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M4 5.5V12h6.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  die: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8.4" cy="8.4" r="1.5" fill="currentColor"/><circle cx="15.6" cy="8.4" r="1.5" fill="currentColor"/><circle cx="8.4" cy="15.6" r="1.5" fill="currentColor"/><circle cx="15.6" cy="15.6" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>',
+  prev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5 8 12l6.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5 16 12l-6.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' };
+const FAN = ["0deg", "1.4deg", "-1.2deg"];
+let last = "", stopped = false, navs = [];
+const scrolled = {};   // deck scroll position per question, kept across re-renders
 
 function el(tag, attrs, ...kids) {
   const e = document.createElement(tag);
@@ -103,6 +247,8 @@ function el(tag, attrs, ...kids) {
   for (const k of kids.flat()) if (k != null && k !== "") e.append(k);
   return e;
 }
+function icon(name) { const t = document.createElement("template"); t.innerHTML = SVG[name]; return t.content.firstChild; }
+function str(v) { return typeof v === "string" && v.trim() ? v : null; }
 
 function notice(text) {
   const n = document.getElementById("notice");
@@ -121,71 +267,222 @@ async function call(method, url, body) {
   return { status: r.status, data };
 }
 
-function preview(q, c) {
-  const box = el("div", { class: "media pending" }, el("span", { class: "wait" }, "Náhled se připravuje…"));
+// Lightbox: the expanded preview; Esc or a click closes it and focus returns.
+const lightbox = document.getElementById("lightbox");
+lightbox.append(el("img", { alt: "" }));
+let opener = null;
+function openLightbox(img) {
+  if (img.hidden || !img.getAttribute("src")) return;
+  opener = document.activeElement;
+  lightbox.querySelector("img").src = img.getAttribute("src");
+  lightbox.querySelector("img").alt = img.alt;
+  lightbox.hidden = false;
+  requestAnimationFrame(() => lightbox.classList.add("open"));
+  lightbox.focus();
+}
+function closeLightbox() {
+  lightbox.classList.remove("open"); lightbox.hidden = true;
+  if (opener && opener.isConnected) opener.focus();
+}
+lightbox.addEventListener("click", closeLightbox);
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !lightbox.hidden) closeLightbox(); });
+
+// The preview slot: shimmer until /preview answers 200, retried every 3 s.
+function media(q, c, withDetails, flip) {
   const src = "/preview?question=" + encodeURIComponent(q.id) + "&card=" + encodeURIComponent(c.id);
-  const img = el("img", { alt: "Náhled: " + (c.title || c.id) });
-  img.addEventListener("load", () => box.classList.remove("pending"));
+  const img = el("img", { class: "comp", alt: "Náhled: " + (c.title || c.id), hidden: true });
+  const expand = el("button", { type: "button", class: "chip", disabled: true, "aria-label": "Zvětšit náhled",
+    on: { click: () => openLightbox(img) } }, icon("expand"));
+  const box = el("div", { class: "media comp-pending" },
+    el("div", { class: "shimmer" }, el("span", { class: "comp-note" }, "Náhled se připravuje…")), img,
+    el("div", { class: "chips" }, expand,
+      withDetails ? el("button", { type: "button", class: "chip", on: { click: flip } }, icon("flip"), el("span", {}, "Detaily")) : null));
+  img.addEventListener("load", () => { img.hidden = false; expand.disabled = false; box.classList.remove("comp-pending"); });
   img.addEventListener("error", () => { if (!stopped) setTimeout(() => { img.src = src + "&t=" + Date.now(); }, 3000); });
+  img.addEventListener("click", () => openLightbox(img));
   img.src = src;
-  box.append(img);
   return box;
 }
 
-function fact(label, text) {
-  return text ? el("p", {}, el("span", { class: "label" }, label), text) : null;
+function fact(label, text, cls) {
+  return str(text) ? el("p", { class: "fact" + (cls ? " " + cls : "") }, el("span", { class: "fact-label" }, label), text) : null;
+}
+function urlFact(c) {
+  const u = str(c.url);
+  if (!u) return null;
+  return el("p", { class: "fact" }, el("span", { class: "fact-label" }, "Adresa"),
+    /^https?:\/\//i.test(u) ? el("a", { href: u, target: "_blank", rel: "noopener noreferrer" }, u) : u);
+}
+function uniqueness(c) {
+  return str(c.uniqueness) ? el("div", { class: "raises" },
+    el("p", { class: "raise" }, el("span", { class: "fact-label" }, "V čem je jedinečný"), el("br"), c.uniqueness)) : null;
+}
+function identity(c) {
+  const pal = Array.isArray(c.palette) ? c.palette : [], tags = Array.isArray(c.tags) ? c.tags.filter(str) : [];
+  if (!pal.length && !tags.length) return null;
+  return el("div", { class: "identity" },
+    pal.length ? el("span", { class: "swatches", role: "img", "aria-label": "Paleta: " + pal.join(", ") }, pal.map(col => {
+      const s = el("i", { title: String(col) });
+      if (!/url\(/i.test(String(col)) && CSS.supports("color", String(col))) s.style.background = String(col);
+      return s;
+    })) : null,
+    tags.map(t => el("span", { class: "tag" }, t)));
 }
 
-function card(q, c, answer) {
-  return el("article", { class: "card" },
-    preview(q, c),
+function card(q, c, i, answer) {
+  const title = c.title || c.id;
+  const lead = i === 0 ? " lead" : "";
+  const art = el("article", { class: "card", style: "--fan:" + FAN[i % 3] });
+  const flip = () => {
+    const on = art.classList.toggle("flipped");
+    front.inert = on; back.inert = !on;
+    (on ? back : front).querySelector(".chip:last-of-type, .back-head .chip").focus();
+  };
+  const choose = () => q.answered ? null : el("button", { class: "choose", type: "button", "aria-label": "Vybrat „" + title + "“",
+    on: { click: () => answer("choose", c.id) } }, "Vybrat tento");
+  const front = el("div", { class: "face front" + lead },
+    i === 0 ? el("span", { class: "kicker" }, q.kind === "direction" ? "Vylosováno" : "Doporučeno") : null,
+    media(q, c, true, flip),
     el("div", { class: "body" },
-      el("h3", {}, c.title || c.id),
-      fact("Teze", c.thesis),
-      fact("Adresa", typeof c.url === "string" ? c.url : null),
-      Array.isArray(c.palette) && c.palette.length
-        ? el("div", {}, el("span", { class: "label" }, "Paleta"),
-            el("div", { class: "swatches" }, c.palette.map(col => { const s = el("span", { title: String(col) }); if (!/url\(/i.test(String(col)) && CSS.supports("color", String(col))) s.style.background = String(col); return s; })))
-        : null,
-      fact("Riziko", c.risk),
-      fact("V čem je jedinečná", c.uniqueness),
-      q.answered ? null : el("button", { class: "choose primary", type: "button",
-        on: { click: () => answer("choose", c.id) } }, "Vybrat „" + (c.title || c.id) + "“")));
+      el("p", { class: "tier" }, str(c.eyebrow) || KIND[q.kind] || q.kind),
+      el("h3", {}, title),
+      str(c.thesis) ? el("p", { class: "thesis" }, c.thesis) : null,
+      identity(c), uniqueness(c), fact("Riziko", c.risk, "clamp"), urlFact(c), choose()));
+  const extras = Object.entries(c).filter(([k, v]) => !KNOWN.has(k) && (str(v) || typeof v === "number"))
+    .map(([k, v]) => fact(k.replace(/_/g, " "), String(v)));
+  const back = el("div", { class: "face back" + lead, inert: true },
+    el("div", { class: "back-head" }, el("p", { class: "tier" }, "Celé znění · " + title),
+      el("button", { type: "button", class: "chip", on: { click: flip } }, icon("flip"), el("span", {}, "Zpět"))),
+    el("div", { class: "body back-body" },
+      str(c.thesis) ? el("p", { class: "thesis" }, c.thesis) : null,
+      uniqueness(c), fact("Riziko", c.risk), urlFact(c), extras, choose()));
+  art.append(el("div", { class: "card-inner" }, front, back));
+  return art;
+}
+
+function skeleton(i) {
+  return el("article", { class: "card skeleton", style: "--fan:" + FAN[i % 3], "aria-hidden": "true" },
+    el("div", { class: "card-inner" }, el("div", { class: "face front" },
+      el("div", { class: "media" }, el("div", { class: "shimmer" })),
+      el("div", { class: "body" }, el("div", { class: "line w60" }), el("div", { class: "line title" }),
+        el("div", { class: "line w90" }), el("div", { class: "line w60" })))));
+}
+
+// Deck with arrows that appear only when it overflows, paging card by card.
+function deck(q, kids) {
+  const grid = el("div", { class: "grid" }, kids);
+  const vertical = () => matchMedia("(max-aspect-ratio: 1/1)").matches;
+  const page = dir => {
+    const first = grid.querySelector(".card");
+    if (first) grid.scrollBy({ left: dir * (first.getBoundingClientRect().width + 26),
+      behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  };
+  const prev = el("button", { type: "button", class: "nav prev", hidden: true, "aria-label": "Předchozí karta", on: { click: () => page(-1) } }, icon("prev"));
+  const next = el("button", { type: "button", class: "nav next", hidden: true, "aria-label": "Další karta", on: { click: () => page(1) } }, icon("next"));
+  const shell = el("div", { class: "deck-shell" }, grid,
+    el("div", { class: "fade fade-prev", "aria-hidden": "true" }), el("div", { class: "fade fade-next", "aria-hidden": "true" }), prev, next);
+  const update = () => {
+    const over = !vertical() && grid.scrollWidth > grid.clientWidth + 4;
+    const pos = grid.scrollLeft, max = grid.scrollWidth - grid.clientWidth;
+    prev.hidden = next.hidden = !over;
+    prev.disabled = !(over && pos > 2); next.disabled = !(over && pos < max - 2);
+    shell.classList.toggle("can-prev", !prev.disabled); shell.classList.toggle("can-next", !next.disabled);
+  };
+  grid.addEventListener("scroll", () => { scrolled[q.id] = grid.scrollLeft; update(); }, { passive: true });
+  navs.push(() => { if (scrolled[q.id]) grid.scrollLeft = scrolled[q.id]; update(); });
+  return shell;
+}
+addEventListener("resize", () => navs.forEach(f => f()));
+
+function bodyLines(b) {
+  if (b == null || b === "") return null;
+  if (typeof b === "string") return b.split("\n").filter(l => l.trim()).map(l => el("p", { class: "detail" }, l));
+  if (Array.isArray(b) && b.every(x => typeof x === "string")) return b.map(l => el("p", { class: "detail" }, l));
+  return el("pre", { class: "body-json" }, JSON.stringify(b, null, 2));
+}
+
+function selectorChips(target) {
+  let sel = null;
+  try { sel = JSON.parse(target); } catch (e) { /* shown raw below */ }
+  if (!sel || typeof sel !== "object") return el("div", { class: "identity" }, el("span", { class: "tag" }, String(target)));
+  return el("div", { class: "identity" }, Object.entries(sel).filter(([, v]) => v !== "*")
+    .map(([k, v]) => el("span", { class: "tag" }, (SELECTOR[k] || k) + " ", el("b", {}, String(v)))));
 }
 
 function question(q, cards) {
-  const idc = "comment-" + q.id, ids = "steer-" + q.id;
+  const fid = "note-" + q.id;
   const status = el("p", { class: "status", role: "status" });
   const sec = el("section", { class: "question" + (q.answered ? " answered" : ""), "aria-labelledby": "h-" + q.id });
-  const answer = async (decision, choice) => {
-    const comment = (document.getElementById(decision.startsWith("reroll_") ? ids : idc) || {}).value || "";
-    if (decision === "return" && !comment.trim()) { status.textContent = "Napište komentář, co upravit."; document.getElementById(idc).focus(); return; }
-    sec.querySelectorAll("button").forEach(b => b.disabled = true);
+  const kind = KIND[q.kind] || q.kind;
+  const answer = async (decision, choice, prefix) => {
+    const f = document.getElementById(fid);
+    let comment = f ? f.value.trim() : "";
+    if (prefix) comment = prefix + (comment ? ": " + comment : "");
+    if ((decision === "return" || (q.kind === "exception" && decision === "approve")) && !comment) {
+      status.textContent = q.kind === "exception" && decision === "approve" ? "Napište důvod výjimky." : "Napište komentář, co upravit.";
+      if (f) f.focus();
+      return;
+    }
+    sec.querySelectorAll("button:not(.chip):not(.nav)").forEach(b => b.disabled = true);
     try {
       const r = await call("POST", "/answer", { question: q.id, kind: q.kind, target: q.target, decision, choice, comment });
       if (r.status === 200) { last = ""; tick(); return; }
-      status.textContent = r.status === 409 ? "Otázka se mezitím změnila nebo už má odpověď. Obnovte stránku." : (r.data.error || "Chyba " + r.status);
+      status.textContent = r.status === 409 ? "Stránka se změnila, obnovte ji (otázka se mezitím změnila nebo už má odpověď)."
+        : (r.data.error || "Chyba " + r.status);
     } catch (e) { if (e.message !== "token") status.textContent = "Server neodpovídá."; }
-    sec.querySelectorAll("button").forEach(b => b.disabled = false);
+    sec.querySelectorAll("button:not(.chip):not(.nav)").forEach(b => b.disabled = false);
   };
-  sec.append(...[
-    el("span", { class: "kind" }, KIND[q.kind] || q.kind),
-    el("h2", { id: "h-" + q.id }, q.title || KIND[q.kind] || q.id),
-    q.prompt ? el("p", { class: "prompt" }, q.prompt) : null,
-    q.body ? el("pre", {}, typeof q.body === "string" ? q.body : JSON.stringify(q.body, null, 2)) : null].filter(Boolean));
-  if (cards.length) sec.append(el("div", { class: "grid" }, cards.map(c => card(q, c, answer))));
-  else if (q.rerolled_from) sec.append(el("div", { class: "media pending", style: "max-width:24rem" }, el("span", { class: "wait" }, "Připravují se nové návrhy…")));
-  if (q.answered) { sec.append(el("p", { class: "done-note" }, "Odpověď zaznamenána.")); return sec; }
-  const acts = el("div", { class: "actions" },
-    el("label", { for: idc }, el("span", { class: "label" }, "Komentář"), el("textarea", { id: idc, placeholder: "Co upravit, co vadí…" })));
-  if (!cards.length) acts.append(el("button", { type: "button", class: "primary", on: { click: () => answer("approve") } }, "Schválit"));
-  acts.append(el("button", { type: "button", on: { click: () => answer("return") } }, "Vrátit s komentářem"));
-  if (cards.length) acts.append(
-    el("label", { for: ids }, el("span", { class: "label" }, "Směr pro nové kolo"), el("input", { type: "text", id: ids, placeholder: "Např. víc prostoru, méně barev" })),
-    el("button", { type: "button", class: "quiet", on: { click: () => answer("reroll_safer") } }, "← Bezpečněji"),
-    el("button", { type: "button", class: "quiet", on: { click: () => answer("reroll_bolder") } }, "Odvážněji →"));
-  acts.append(status);
-  sec.append(acts);
+  const title = q.title || kind || q.id;
+  const deckKind = cards.length && q.kind !== "approve_page";
+
+  if (deckKind || (!cards.length && q.rerolled_from)) {
+    sec.append(el("div", { class: "head" }, el("p", { class: "tier" }, kind),
+      el("div", { class: "headline" }, icon("die"), el("h2", { class: "q-title", id: "h-" + q.id }, title))));
+    if (str(q.prompt)) sec.append(el("p", { class: "lede" }, q.prompt));
+    const lines = bodyLines(q.body); if (lines) sec.append(el("div", { class: "head" }, lines));
+    if (!cards.length) {
+      sec.append(el("p", { class: "tier" }, "Připravují se nové návrhy…"), deck(q, [0, 1, 2].map(skeleton)));
+      return sec;
+    }
+    sec.append(deck(q, cards.map((c, i) => card(q, c, i, answer))));
+    if (q.answered) { sec.append(el("p", { class: "done-note" }, "Odpověď zaznamenána.")); return sec; }
+    sec.append(el("div", { class: "bar" },
+      el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_safer") } }, "← Bezpečněji"),
+      el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("return", null, "Znovu ve stejném rejstříku") } }, icon("die"), el("span", {}, "Znovu")),
+      el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_bolder") } }, "Odvážněji →"),
+      el("input", { type: "text", id: fid, class: "steer", placeholder: "Směr pro nové kolo",
+        "aria-label": "Směr pro nové kolo, nebo komentář k vrácení" }),
+      el("button", { type: "button", class: "reroll-btn ret", "aria-label": "Vrátit s komentářem", on: { click: () => answer("return") } },
+        el("span", {}, "Vrátit", el("span", { class: "long" }, " s komentářem"))),
+      status));
+    return sec;
+  }
+
+  // One panel: text question, page approval or exception.
+  const page = q.kind === "approve_page", exc = q.kind === "exception";
+  const shot = page && cards[0] ? media(q, cards[0], false) : null;
+  let meta = null;
+  if (page) {
+    const t = String(q.target), at = t.lastIndexOf("@");
+    meta = el("div", { class: "identity" },
+      el("span", { class: "tag" }, "stránka ", el("b", {}, at > 0 ? t.slice(0, at) : t)),
+      at > 0 ? el("span", { class: "tag", title: t.slice(at + 1) }, "otisk ", el("b", {}, t.slice(at + 1).slice(0, 12))) : null);
+  }
+  const body = el("div", { class: "body" },
+    el("p", { class: "tier" }, kind),
+    el("h2", { class: "q-title", id: "h-" + q.id }, title),
+    str(q.prompt) ? el("p", { class: "detail" }, q.prompt) : null,
+    meta, exc ? selectorChips(q.target) : null,
+    bodyLines(q.body));
+  sec.append(el("div", { class: "panel face" + (page ? " wide" : "") }, shot, body));
+  if (q.answered) { body.append(el("p", { class: "done-note" }, "Odpověď zaznamenána.")); return sec; }
+  body.append(
+    el("div", { class: "field" }, el("label", { class: "fact-label", for: fid }, exc ? "Důvod výjimky" : "Komentář"),
+      el("textarea", { id: fid, placeholder: exc ? "Proč tenhle řádek přijímáte…" : "Co upravit, co vadí…" })),
+    el("div", { class: "actions" },
+      el("button", { type: "button", class: "choose", on: { click: () => answer("approve") } }, exc ? "Udělit výjimku" : "Schválit"),
+      el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("return") } }, exc ? "Vrátit" : "Vrátit s komentářem")),
+    status);
   return sec;
 }
 
@@ -195,12 +492,15 @@ function render(s) {
   const focus = document.activeElement && document.activeElement.id;
   const rail = document.getElementById("rail");
   rail.replaceChildren(...(s.steps || []).map(st => el("li", { class: st.status || "todo", "aria-current": st.status === "current" ? "step" : null }, st.title || st.id)));
+  rail.hidden = !rail.children.length;
+  navs = [];
   const main = document.getElementById("main");
   const qs = (s.questions || []).slice().sort((a, b) => a.answered - b.answered);
   main.replaceChildren(...(qs.length ? qs.map(q => question(q, (s.cards || []).filter(c => c && c.question === q.id)))
     : [el("p", { class: "empty" }, "Teď není na co odpovídat. Až bude další otázka, objeví se tu sama.")]));
   for (const [id, v] of Object.entries(kept)) { const i = document.getElementById(id); if (i) i.value = v; }
   if (focus && document.getElementById(focus)) document.getElementById(focus).focus();
+  requestAnimationFrame(() => navs.forEach(f => f()));
 }
 
 async function tick() {

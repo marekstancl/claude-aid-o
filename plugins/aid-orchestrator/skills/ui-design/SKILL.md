@@ -59,7 +59,9 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    `steps[]` (`id`, `title`, `status` done|current|todo), `questions[]`
    (`id`, `kind`, `target`, `opened_at` = teď v ISO, `title`, `prompt`, `body`),
    `cards[]` (`id`, `question`, `title`, `preview` = PNG/JPEG/WebP pod
-   `.aid-ui/studio/`, `thesis`, `palette[]`, `risk`, `uniqueness`).
+   `.aid-ui/studio/`, `thesis`, `palette[]`, `risk`, `uniqueness`; volitelně
+   `eyebrow` = řádek nad názvem karty, `tags[]` = štítky vedle palety, `url`
+   u referencí, a další textová pole, která se ukážou na rubu karty „Detaily").
    Druhy otázek: variant, vision, identity, seo_brief, structure, task_map,
    content_plan, defer_content, facts, references, direction, approve_page,
    exception, coverage_drift, design_standard.
