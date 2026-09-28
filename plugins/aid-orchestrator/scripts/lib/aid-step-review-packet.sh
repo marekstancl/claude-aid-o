@@ -67,10 +67,12 @@ aid_step_review_packet_build() {
     [[ -f "$plan_json" ]] || { echo "prepare: no plan.json at ${plan_json}" >&2; return 1; }
     if [[ "$cp" == cp2 ]]; then
       jq -r --argjson s "$step" "${_AID_SR_STEP_NAME_JQ}"' .steps[$s] | "# \(step_name($s)): \(.objective // "")\n\n## Acceptance criteria\n" + ((.acceptance_criteria // []) | map("- " + .) | join("\n"))' "$plan_json" > "$dir/dod.md"
-      jq --argjson s "$step" '.steps[$s] | {outputs: (.outputs // []), allowed_paths: (.allowed_paths // []), forbidden_paths: (.forbidden_paths // []), scope_declared: true}' "$plan_json" > "$dir/files.json"
+      # "(tier: tN)" in an output is what the plan declared when it was written;
+      # the suite's header is the tier, and step-check.json reports that (P103).
+      jq --argjson s "$step" 'def notier: map(gsub(" ?\\(tier: t[0-9]\\)"; "")); .steps[$s] | {outputs: ((.outputs // []) | notier), allowed_paths: (.allowed_paths // []), forbidden_paths: (.forbidden_paths // []), scope_declared: true}' "$plan_json" > "$dir/files.json"
     else
       jq -r "${_AID_SR_STEP_NAME_JQ}"' "# EPIC: \(.epic_id // .id // "")\n\n" + ((.objective // .goal // "") | tostring) + "\n\n" + ([.steps | to_entries[] | "## \(.key as $k | .value | step_name($k)): \(.value.objective // "")\n" + ((.value.acceptance_criteria // []) | map("- " + .) | join("\n"))] | join("\n\n"))' "$plan_json" > "$dir/dod.md"
-      jq '{outputs: [.steps[].outputs[]?], allowed_paths: [.steps[].allowed_paths[]?], forbidden_paths: [.steps[].forbidden_paths[]?], scope_declared: true}' "$plan_json" > "$dir/files.json"
+      jq 'def notier: map(gsub(" ?\\(tier: t[0-9]\\)"; "")); {outputs: ([.steps[].outputs[]?] | notier), allowed_paths: [.steps[].allowed_paths[]?], forbidden_paths: [.steps[].forbidden_paths[]?], scope_declared: true}' "$plan_json" > "$dir/files.json"
     fi
   fi
   _aid_sr_packet_finish "$root" "$dir" "$prev"

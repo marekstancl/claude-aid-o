@@ -723,3 +723,14 @@ JSON
   [ "$status" -ne 0 ]
   echo "$output" | jq -e '[.checks[]|select(.id=="per_step_scoping")][0].status == "fail"'
 }
+
+@test "aid-contract-validate.sh: ac_no_fragments accepts an AC quoting a finding in single quotes (P103), still flags an unbalanced one" {
+  local plan_json="$TEST_TMPDIR/quoted-finding-plan.json"
+  jq -n '{epic_id: "E-QUOTE-1_1", version: 1, dependencies: [], steps: [{id: "step_1_qa", role: "qa", outputs: ["Create: `test_a.py`"], allowed_paths: ["test_a.py"],
+    acceptance_criteria: ["Still open in part: '"'"'current build id'"'"' and the page reload are covered by one test"]}]}' > "$plan_json"
+  run "$GATE" "$plan_json"
+  echo "$output" | jq -e '[.checks[] | select(.id == "ac_no_fragments")][0].status == "pass"'
+  jq '.steps[0].acceptance_criteria = ["the check reads '"'"'.foo and stops"]' "$plan_json" > "$plan_json.2"
+  run "$GATE" "$plan_json.2"
+  echo "$output" | jq -e '[.checks[] | select(.id == "ac_no_fragments")][0].status != "pass"'
+}

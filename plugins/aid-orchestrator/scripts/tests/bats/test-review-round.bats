@@ -964,3 +964,11 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   rm -rf "$E/cp7/round-1" "$E/cp7/rounds.json"
   run _F prepare --round 1; [ "$status" -eq 0 ]; [[ "$output" == *"prompt-final_criteria.md"* ]]
 }
+
+@test "step: the packet's files.json carries no plan-time tier declaration — the suite header is the tier (P103)" {
+  _repo
+  jq '.steps[0].outputs += ["Test: `tests/x.bats` (tier: t0) — a case"]' "$E/plan.json" > "$E/p" && mv "$E/p" "$E/plan.json"
+  _sc; _S prepare --round 1 >/dev/null
+  ! grep -q '(tier:' "$(D 1)/packet/files.json"
+  grep -q 'tests/x.bats' "$(D 1)/packet/files.json"
+}

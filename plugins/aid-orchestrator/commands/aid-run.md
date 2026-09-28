@@ -59,6 +59,9 @@ Escalation rules for `--auto`:
   `timeline.jsonl`, then continue. Do not ask the PM to choose between technical A/B/C options.
 - **PM-authority decisions only** (product intent, material scope expansion, destructive or
   externally visible action, security risk acceptance, secret/credential access) → pause for PM.
+- **"no verdict" from Claude Code's permission check** (the auto-mode classifier failed, the
+  command did not run) is transient and not a PM decision: wait about a minute and run the SAME
+  command again, up to 5 times, before a Blocked card; say so in one line (P103, 28. 9. 2026).
 - Gate retries → auto-retry up to configured max (default: 2)
 - Version bump on intermediate phase → auto-defer (bump only on final phase)
 
