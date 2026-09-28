@@ -58,13 +58,16 @@ studio() {
   return 1
 }
 
-# ans <id> <kind> <target> [decision] — the PM answers question <id> on the real
-# studio and the agent records it (record-answer)
+# ans <id> <kind> <target> [decision] [cards] — the PM answers question <id> on the real
+# studio and the agent records it (record-answer); cards = the question's cards shown
+# (a JSON array, default [{"id":"x"}]); the PM picks card x
 ans() {
   studio
-  local p="$PROJ/.aid-ui/studio/payload.json" d="${4:-approve}"
-  jq --arg q "$1" --arg k "$2" --arg t "$3" '.questions += [{id: $q, kind: $k, target: $t, opened_at: "2020-01-01T00:00:00Z"}]
-    | .cards += [{id: "x", question: $q}]' "$p" > "$p.t" && mv "$p.t" "$p"
+  local p="$PROJ/.aid-ui/studio/payload.json" d="${4:-approve}" c='[{"id":"x"}]'
+  [[ -z "${5:-}" ]] || c="$5"
+  jq --arg q "$1" --arg k "$2" --arg t "$3" --argjson c "$c" \
+    '.questions += [{id: $q, kind: $k, target: $t, opened_at: "2020-01-01T00:00:00Z"}]
+    | .cards += [$c[] | .question = $q]' "$p" > "$p.t" && mv "$p.t" "$p"
   curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg q "$1" --arg k "$2" --arg t "$3" --arg d "$d" \
           '{question: $q, kind: $k, target: $t, decision: $d, choice: "x", comment: "PM"}')" "$AID_UI_STUDIO_URL/answer"
@@ -81,6 +84,8 @@ forge() {
     '.answers[$q] = {kind: $k, target: $t, decision: $d, choice: null, comment: "PM", answer_file: ".aid-ui/answers/\($q).json",
                      answer_sha256: $sha, opened_at: "2020-01-01T00:00:00Z", at: "2020-01-02T00:00:00Z"}'
 }
+# cards_of <refs json> — the studio cards the refs step shows for these refs
+cards_of() { jq -c '[.[] | {id, url, thesis: .why}]' <<<"$1"; }
 sha_of() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
 fp() { jq -r --arg p "$1" '.build.fingerprints[$p]' "$STATE"; }
 approve() { ans "ap-$1-$2" approve_page "$1@$(fp "$1")"; "$SCRIPT" approve-page "$PROJ" "$1" --answer "ap-$1-$2" >/dev/null; }
@@ -131,11 +136,11 @@ ready() {
   ans r1 references "$(sha_of '[{"id":"x","url":"https://x.example","why":"písmo"}]')" choose   # other JSON
   run "$SCRIPT" set "$PROJ" refs "$refs" --answer r1
   [ "$status" -eq 1 ]; [[ "$output" == *'is for'* ]]
-  ans r2 references "$(sha_of "$refs")"                          # approve: no card chosen
+  ans r2 references "$(sha_of "$refs")" approve "$(cards_of "$refs")"   # approve: no card chosen
   run "$SCRIPT" set "$PROJ" refs "$refs" --answer r2
   [ "$status" -eq 1 ]; [[ "$output" == *'not one or more of the shown cards'* ]]
   [ "$(jq -c .refs "$STATE")" = '[]' ]
-  ans r3 references "$(sha_of "$refs")" choose                   # the PM chose card x
+  ans r3 references "$(sha_of "$refs")" choose "$(cards_of "$refs")"   # the PM chose card x
   run "$SCRIPT" set "$PROJ" refs "$refs" --answer r3
   [ "$status" -eq 0 ]
   [ "$(jq -c '[.refs[] | [.id, .picked]]' "$STATE")" = '[["x",true],["y",false]]' ]
@@ -510,6 +515,44 @@ p101_project() {
   run "$SCRIPT" set "$PROJ" refs "$empty" --answer d3
   [ "$status" -eq 1 ]; [ "$(jq -c .refs "$STATE")" = '[]' ]
   [ "$(jq -c .consumed "$STATE")" = '[]' ]
+}
+
+@test "set refs: the refs must be exactly the cards the studio showed for the answer's question" {
+  refs='[{"id":"x","url":"https://x.example","why":"písmo"},{"id":"y","url":"https://y.example","why":"barvy"}]'
+  shown="$(cards_of "$refs")"
+  # the reviewer's example: card x shown with one URL, the refs carry another
+  evil='[{"id":"x","url":"https://evil.example","why":"písmo"},{"id":"y","url":"https://y.example","why":"barvy"}]'
+  ans m1 references "$(sha_of "$evil")" choose "$shown"
+  run "$SCRIPT" set "$PROJ" refs "$evil" --answer m1
+  [ "$status" -eq 1 ]; [[ "$output" == *'not the cards shown for question m1'* ]]
+  # the why differs from the card's thesis
+  why='[{"id":"x","url":"https://x.example","why":"jiné"},{"id":"y","url":"https://y.example","why":"barvy"}]'
+  ans m2 references "$(sha_of "$why")" choose "$shown"
+  run "$SCRIPT" set "$PROJ" refs "$why" --answer m2
+  [ "$status" -eq 1 ]
+  # a shown card left out of the refs (count differs)
+  one='[{"id":"x","url":"https://x.example","why":"písmo"}]'
+  ans m3 references "$(sha_of "$one")" choose "$shown"
+  run "$SCRIPT" set "$PROJ" refs "$one" --answer m3
+  [ "$status" -eq 1 ]
+  # an id no card of this question has; cards of another question do not count
+  other='[{"id":"x","url":"https://x.example","why":"písmo"},{"id":"z","url":"https://y.example","why":"barvy"}]'
+  ans m4 references "$(sha_of "$other")" choose "$shown"
+  run "$SCRIPT" set "$PROJ" refs "$other" --answer m4
+  [ "$status" -eq 1 ]
+  # a card without url (the payload) never matches
+  ans m5 references "$(sha_of "$refs")" choose '[{"id":"x","thesis":"písmo"},{"id":"y","url":"https://y.example","thesis":"barvy"}]'
+  run "$SCRIPT" set "$PROJ" refs "$refs" --answer m5
+  [ "$status" -eq 1 ]
+  # an extra key is refused before any answer is looked at
+  run "$SCRIPT" set "$PROJ" refs '[{"id":"x","url":"https://x.example","why":"a","picked":true}]' --answer m1
+  [ "$status" -eq 2 ]
+  [ "$(jq -c .refs "$STATE")" = '[]' ]; [ "$(jq -c .consumed "$STATE")" = '[]' ]
+  # matching, in another order: accepted
+  ans m6 references "$(sha_of "$refs")" choose "$(jq -c 'reverse' <<<"$shown")"
+  run "$SCRIPT" set "$PROJ" refs "$refs" --answer m6
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.refs[] | [.id, .url, .picked]]' "$STATE")" = '[["x","https://x.example",true],["y","https://y.example",false]]' ]
 }
 
 @test "set options: validated, needs a variant answer for exactly this JSON, refused after step 0" {

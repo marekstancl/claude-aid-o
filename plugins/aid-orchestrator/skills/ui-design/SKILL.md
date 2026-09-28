@@ -76,7 +76,11 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 4. Na další zprávu PM `aid-ui-state.sh record-answer <project> --question <id>`.
    Exit 1 = odpověď ještě není; dej PM odkaz znovu a ukonči tah.
 5. Rozhodnutí `approve`/`choose` → mutace s `--answer <id>` (jen tam, kde
-   krok nějakou jmenuje). `return` → PM vrací s komentářem; oprav a otevři
+   krok nějakou jmenuje). Po `choose` je vybraná karta ta s `id` = `choice`
+   zaznamenané odpovědi (`jq '.answers["<id>"].choice' brand-state.json`)
+   mezi kartami téže otázky v payloadu; do stavu nebo těla kapitoly jde její
+   obsah beze změny (`thesis`, `url`, náhled), nikdy karta jiné otázky.
+   `return` → PM vrací s komentářem; oprav a otevři
    otázku znovu (nové `opened_at`). `reroll_safer`/`reroll_bolder` → odpověď
    nese `next_question`; vytvoř nové karty podle komentáře a zapiš je pod tím
    id do payloadu.

@@ -9,7 +9,9 @@ on every request, so the agent opens a round by rewriting it:
   {"steps":     [{"id", "title", "status": "done|current|todo"}],
    "questions": [{"id", "kind", "target", "opened_at": ISO-8601, "title", "prompt", "body"}],
    "cards":     [{"id", "question", "title", "preview", "thesis", "palette": [css colours],
-                  "risk", "uniqueness"}]}
+                  "risk", "uniqueness", "url"}]}
+Every card has a non-empty string id and a string question, and ids are unique per
+question (else the payload is invalid: 422, logged).
 A card's `preview` is a file under <project>/.aid-ui/studio/; until it exists
 GET /preview answers 404 and the page shows the pending slot.
 
@@ -142,6 +144,14 @@ def load():
             parse_time(q.get("opened_at"))
         except (TypeError, ValueError):
             raise ValueError("payload.json: question %s has no valid opened_at" % q["id"])
+    shown = set()  # (question, card id): a choice names exactly one card the PM saw
+    for c in cards:
+        if not (isinstance(c, dict) and isinstance(c.get("id"), str) and c["id"]
+                and isinstance(c.get("question"), str)):
+            raise ValueError("payload.json: every card needs a non-empty string id and a string question")
+        if (c["question"], c["id"]) in shown:
+            raise ValueError("payload.json: card id %s twice in question %s" % (c["id"], c["question"]))
+        shown.add((c["question"], c["id"]))
     with LOCK:
         qs = qs + [dict(q) for i, q in REROLLED.items() if i not in seen]
     return {"steps": steps, "questions": qs, "cards": cards}

@@ -38,7 +38,10 @@
 #     set refs <json>      kind references, target sha256:<canonical refs JSON> (as above);
 #                          <json> = the shown cards [{"id": <card id>, "url", "why"}]; the answer
 #                          must be `choose` with its choice (one card id or a list) among the ids;
-#                          card ids must be non-empty and unique (else exit 1, nothing written);
+#                          card ids must be non-empty and unique, and the refs must be exactly
+#                          the cards of the answer's question in .aid-ui/studio/payload.json
+#                          (same count; per id the card's url = url, its thesis = why; no
+#                          other keys) (else exit 1, nothing written, answer not consumed);
 #                          picked = id in the choice (set by this script, never by the caller)
 #     chapter <project> <id> schvaleno            kind by chapter: vize vision, logo identity,
 #                          seo seo_brief, struktura structure, obsah content_plan, produkt
@@ -659,12 +662,17 @@ case "$VERB" in
         jq_write --argjson v "$2" --arg q "$ANSWER" '.options += $v | .consumed += [$q]'
         ;;
       refs)
-        jq -e 'type == "array" and length > 0 and all(.[]; type == "object" and (.id | type) == "string"
-               and (.url | type) == "string" and (.why | type) == "string")' >/dev/null <<<"$2" \
-          || usage "refs: the shown cards [{\"id\":…,\"url\":…,\"why\":…}]: $2"
+        jq -e 'type == "array" and length > 0 and all(.[]; type == "object" and keys == ["id", "url", "why"]
+               and (.id | type) == "string" and (.url | type) == "string" and (.why | type) == "string")' >/dev/null <<<"$2" \
+          || usage "refs: the shown cards [{\"id\":…,\"url\":…,\"why\":…}], no other keys: $2"
         jq -e 'all(.[]; .id != "") and ([.[].id] | length == (unique | length))' >/dev/null <<<"$2" \
           || die "set refs refused: card ids must be non-empty and unique: $(jq -c '[.[].id]' <<<"$2")"
         take_answer references "$(json_sha "$2")"
+        # the refs are exactly the cards the studio shows for this answer's question
+        shown="$(jq -c --arg q "$ANSWER" '[.cards[]? | select(type == "object" and .question == $q)
+          | {id, url, why: .thesis}] | sort_by(.id | tostring)' "$PROJECT/.aid-ui/studio/payload.json" 2>/dev/null)" || shown=""
+        jq -e --argjson s "${shown:-null}" 'sort_by(.id) == $s' >/dev/null <<<"$2" ||
+          die "set refs refused: the refs are not the cards shown for question $ANSWER (id, url, thesis): shown $shown"
         picks="$(jq -c --arg q "$ANSWER" '.answers[$q] | if .decision == "choose" then [.choice | select(. != null)] | flatten else [] end' "$STATE")"
         jq -e --argjson c "$picks" 'length > 0 and ($c | length > 0) and ([.[].id] as $ids | all($c[]; IN($ids[])))' >/dev/null <<<"$2" ||
           die "set refs refused: answer $ANSWER chose $picks, not one or more of the shown cards $(jq -c '[.[].id]' <<<"$2")"

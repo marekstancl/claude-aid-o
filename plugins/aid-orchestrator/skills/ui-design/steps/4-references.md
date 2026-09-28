@@ -34,10 +34,13 @@ PM ve studiu vybral 1-3 vzory a jejich vypočtené styly leží v `.aid-ui/refs/
    (nejvýš dvakrát) nebo vlastní URL.
 5. Šest karet otázky `references` ve studiu (4 blízko záměru, 2 odvážnější
    mimo obor): `preview` = zmenšený snímek pod `.aid-ui/studio/`
-   (`aid-ui-tool.sh webp`), `thesis` = co převzít, `uniqueness` = čím se
-   vzor liší od šablony. Než otázku otevřeš, zapiš nástrojem Write
-   `<project>/.aid-ui/refs.json` = pole ukázaných karet
-   `[{"id":<id karty>,"url":…,"why":<thesis>}]`; `target` = `sha256:` +
+   (`aid-ui-tool.sh webp`), `url` = adresa vzoru, `thesis` = co převzít,
+   `uniqueness` = čím se vzor liší od šablony; id karet v otázce jsou
+   neprázdná a různá. Než otázku otevřeš, zapiš nástrojem Write
+   `<project>/.aid-ui/refs.json` = pole právě ukázaných karet
+   `[{"id":<id karty>,"url":<url karty>,"why":<thesis karty>}]` (jiné klíče ne;
+   skript zápis odmítne, když se refs neshodují s kartami otázky v payloadu
+   - počet, id, `url`, `thesis`); `target` = `sha256:` +
    `jq -S -c -j . <project>/.aid-ui/refs.json | sha256sum`. PM vybere vzor
    (`choose`, `choice` = id karty).
 6. U vybraných: `browser_evaluate` s `getComputedStyle` na

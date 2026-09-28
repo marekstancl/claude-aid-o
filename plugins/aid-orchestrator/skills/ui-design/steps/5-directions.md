@@ -44,7 +44,9 @@ Vybrané vzory a styly v `.aid-ui/refs/`, brand balíček, vize a tón,
 6. Odpověď `reroll_safer` / `reroll_bolder` (s komentářem PM jako směrem)
    → nové tři směry podle komentáře pod id `next_question`, znovu body 1-5.
    `return` → uprav podle komentáře a otevři znovu.
-7. Po `choose`: tělo kapitoly `smer` (vybraný směr, princip, komponenty,
+7. Po `choose`: vybraný směr = karta otázky `direction` s `id` = `choice`
+   zaznamenané odpovědi (`SKILL.md` „Jak se ptá PM", bod 5); tělo kapitoly
+   `smer` (tento směr, jeho `thesis` beze změny, komponenty,
    snímek zkopírovaný do `docs/brand/assets/`, zamítnuté směry a proč)
    do souboru v `.aid-ui/`, `aid-ui-state.sh body <project> smer --file <soubor>`,
    `aid-ui-state.sh chapter <project> smer navrh`.

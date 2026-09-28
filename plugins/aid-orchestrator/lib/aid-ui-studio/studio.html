@@ -142,6 +142,7 @@ function card(q, c, answer) {
     el("div", { class: "body" },
       el("h3", {}, c.title || c.id),
       fact("Teze", c.thesis),
+      fact("Adresa", typeof c.url === "string" ? c.url : null),
       Array.isArray(c.palette) && c.palette.length
         ? el("div", {}, el("span", { class: "label" }, "Paleta"),
             el("div", { class: "swatches" }, c.palette.map(col => { const s = el("span", { title: String(col) }); if (!/url\(/i.test(String(col)) && CSS.supports("color", String(col))) s.style.background = String(col); return s; })))

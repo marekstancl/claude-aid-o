@@ -186,6 +186,23 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   done
 }
 
+@test "cards: an id twice in one question, an empty id or no question make the payload invalid (422, logged)" {
+  q='{"id":"q1","kind":"direction","target":"home@abc","opened_at":"2020-01-01T00:00:00Z"}'
+  for cards in '[{"id":"a","question":"q1","url":"https://a.example"},{"id":"a","question":"q1","url":"https://evil.example"}]' \
+               '[{"id":"a","question":"q1"},{"id":"b","question":"q1"},{"id":"a","question":"q1"}]' \
+               '[{"id":"","question":"q1"}]' '[{"question":"q1"}]' '[{"id":"a"}]' '["a"]'; do
+    echo "{\"questions\":[$q],\"cards\":$cards}" > "$P/.aid-ui/studio/payload.json"
+    [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]
+    [ "$(answer "$choose_a")" = 422 ]
+  done
+  grep -q 'card id a twice in question q1' "$BATS_TEST_TMPDIR/server.log"
+  grep -q 'invalid payload: payload.json: every card needs' "$BATS_TEST_TMPDIR/server.log"
+  # the same id in two questions is fine: ids are unique per question
+  echo "{\"questions\":[$q],\"cards\":[{\"id\":\"a\",\"question\":\"q1\"},{\"id\":\"a\",\"question\":\"q2\"}]}" \
+    > "$P/.aid-ui/studio/payload.json"
+  [ "$(answer "$choose_a")" = 200 ]
+}
+
 @test "an invalid payload: 422 naming the problem, the server logs it" {
   echo '{"questions":[{"id":"q1","kind":"nonsense","target":"x","opened_at":"2020-01-01T00:00:00Z"}]}' \
     > "$P/.aid-ui/studio/payload.json"
