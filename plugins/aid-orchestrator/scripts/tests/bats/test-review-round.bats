@@ -972,3 +972,14 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   ! grep -q '(tier:' "$(D 1)/packet/files.json"
   grep -q 'tests/x.bats' "$(D 1)/packet/files.json"
 }
+
+@test "step: a low-effort role goes to reviewer-light only while its prompt fits light_max_prompt_lines (P103)" {
+  _repo; _sc
+  run _S prepare --round 1; [ "$status" -eq 0 ]
+  [[ "$output" == *"focus cp2-step-0-step-generalist, agent aid-orchestrator:reviewer-light"* ]]
+  rm -rf "$E/cp2"
+  yq -i '.review_checkpoints.step_review.light_max_prompt_lines = 5' "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  _sc
+  run _S prepare --round 1; [ "$status" -eq 0 ]
+  [[ "$output" == *"focus cp2-step-0-step-generalist, agent general-purpose"* ]]
+}

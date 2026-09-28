@@ -40,7 +40,7 @@
 # review_config_valid; tested by scripts/tests/bats/test-review-config.bats.
 
 _AID_RC_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-_AID_RC_KNOWN_KEYS="rounds_default min_answers docs_type_reviewers banned_models reviewers skip_threshold stand_in_model"
+_AID_RC_KNOWN_KEYS="rounds_default min_answers docs_type_reviewers banned_models reviewers skip_threshold stand_in_model light_max_prompt_lines"
 _AID_RC_LEGACY_KEYS="ceremony_bands cp1_codex_review fix_loop skip_trivial trivial_threshold pre_filter"
 
 # aid_policy_file <project_root> <basename> [<yq probe>] [<warning label>]
@@ -132,6 +132,9 @@ aid_review_config_load() {
   done < <(yq -r "${b}.reviewers // [] | .[] | [.role, .provider, .model, (.effort // \"medium\"), (.when // \"\")] | @tsv" "$RC_CONFIG_FILE")
   # The model a Claude stand-in runs at when a codex role gives no answer.
   RC_STAND_IN_MODEL="$(yq -r "${b}.stand_in_model // \"opus\"" "$RC_CONFIG_FILE")"
+  # A low-effort role goes to the light reviewer only while its prompt fits:
+  # longer ones were read in part and passed (P102, P103).
+  RC_LIGHT_MAX_PROMPT_LINES="$(yq -r "${b}.light_max_prompt_lines // 800" "$RC_CONFIG_FILE")"
   RC_MIN_ANSWERS="$(yq -r "${b}.min_answers // \"\"" "$RC_CONFIG_FILE")"
   [[ -n "$RC_MIN_ANSWERS" ]] || RC_MIN_ANSWERS="$unconditional"
 
@@ -195,6 +198,8 @@ aid_review_config_validate() {
       *) _aid_rc_fail "role ${role}: when must be review+security (got '${RC_WHEN[$i]}')"; return 1 ;;
     esac
   done
+  [[ "$RC_LIGHT_MAX_PROMPT_LINES" =~ ^[1-9][0-9]*$ ]] \
+    || { _aid_rc_fail "light_max_prompt_lines must be a positive integer (got '${RC_LIGHT_MAX_PROMPT_LINES}')"; return 1; }
   [[ " $RC_BANNED_MODELS " == *" $RC_STAND_IN_MODEL "* ]] \
     && { _aid_rc_fail "stand_in_model ${RC_STAND_IN_MODEL} is in banned_models"; return 1; }
   (( unconditional > 0 )) || { _aid_rc_fail "no unconditional role (every reviewer carries a when)"; return 1; }

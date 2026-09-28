@@ -49,6 +49,7 @@ review_checkpoints:
   # scope, with no pattern matched, is `skip` and needs no reviewer.
   step_review:
     rounds_default: 2
+    light_max_prompt_lines: 800   # a low-effort role gets the full reviewer above this (P102/P103: the light one read ~25 %)
     skip_threshold: {max_files: 1, max_lines: 50}
     banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
     stand_in_model: opus       # a codex role unreachable: a claude agent answers the same brief
@@ -57,6 +58,7 @@ review_checkpoints:
       - {role: step_security,   provider: claude, model: opus, effort: medium}
   epic_review:
     rounds_default: 2
+    light_max_prompt_lines: 800   # a low-effort role gets the full reviewer above this (P102/P103: the light one read ~25 %)
     banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
     stand_in_model: opus       # a codex role unreachable: a claude agent answers the same brief
     reviewers:
