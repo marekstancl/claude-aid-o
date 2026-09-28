@@ -127,6 +127,7 @@
   .face.lead { border-color: var(--ks-kinpaku); }
   .card:hover .face { border-color: var(--ks-edge); }
   .card:hover .face.lead { border-color: var(--ks-kinpaku); }
+  .kicker.inline { position: static; align-self: flex-start; margin: 14px 0 -4px 1.1rem; }
   .kicker { position: absolute; z-index: 2; top: 12px; left: 12px; padding: 4px 9px; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); color: var(--ks-ink); font-size: .6875rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; border-radius: 3px; }
   .media { position: relative; width: 100%; aspect-ratio: 16/10; min-height: 0; flex: none; overflow: hidden; background: var(--ks-gray); }
   .media img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; position: relative; z-index: 1; cursor: zoom-in; }
@@ -368,8 +369,8 @@ function card(q, c, i, answer) {
   const choose = () => el("button", { class: "choose", type: "button", "aria-label": "Vybrat „" + title + "“",
     on: { click: () => answer("choose", c.id) } }, "Vybrat tento");
   const front = el("div", { class: "face front" + lead },
-    i === 0 ? el("span", { class: "kicker" }, "Doporučuji") : null,
-    media(q, c, true, flip),
+    i === 0 ? el("span", { class: "kicker" + (str(c.preview) ? "" : " inline") }, "Doporučuji") : null,
+    str(c.preview) ? media(q, c, true, flip) : null,
     el("div", { class: "body" },
       str(c.eyebrow) ? el("p", { class: "tier" }, str(c.eyebrow)) : null,
       el("h3", {}, title),
@@ -479,7 +480,7 @@ function question(q, cards) {
       el("input", { type: "text", id: fid, class: "steer", placeholder: "Napište, co změnit",
         "aria-label": "Napište, co změnit" }),
       el("button", { type: "button", class: "reroll-btn ret", on: { click: () => answer("return") } }, "Chci to jinak"),
-      el("p", { class: "hint" }, "Bezpečněji = blíž tomu, co je v oboru běžné. Odvážněji = výraznější a méně obvyklé. Znovu = tři nové návrhy ve stejném duchu."),
+      el("p", { class: "hint" }, "Bezpečněji = blíž tomu, co je v oboru běžné. Odvážněji = výraznější a méně obvyklé. Znovu = nové návrhy ve stejném duchu."),
       status));
     return sec;
   }
@@ -516,7 +517,7 @@ function verdict(q) {
   const a = q.answer || {}, c = str(a.comment), exc = q.kind === "exception";
   const w = { approve: exc ? "Výjimka udělena" : q.kind === "approve_page" ? "Stránka je v pořádku" : "Schváleno",
     return: exc ? "Výjimka neudělena" : "Chcete to jinak", choose: "Vybráno: " + (a.choice_title || a.choice || ""),
-    reroll: "Chcete tři nové návrhy ve stejném duchu", reroll_safer: "Chcete bezpečnější návrhy",
+    reroll: "Chcete nové návrhy ve stejném duchu", reroll_safer: "Chcete bezpečnější návrhy",
     reroll_bolder: "Chcete odvážnější návrhy" }[a.decision] || "Odpověď uložena";
   return a.decision === "choose" || !c ? w : w + ": " + c;
 }
