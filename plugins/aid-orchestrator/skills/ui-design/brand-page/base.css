@@ -33,7 +33,7 @@ img { max-width: 100%; height: auto; }
 .studio-tabs a[aria-current] { color: var(--p-ink); background: var(--p-raised); box-shadow: var(--p-cap); }
 
 header { padding: 1rem 0 .4rem; }
-header::before { content: "Značka a web"; display: block; font-family: var(--p-mono); font-size: .6875rem; letter-spacing: .24em; text-transform: uppercase; color: var(--p-muted); margin-bottom: .5rem; }
+header::before { content: "Značka a produkt"; display: block; font-family: var(--p-mono); font-size: .6875rem; letter-spacing: .24em; text-transform: uppercase; color: var(--p-muted); margin-bottom: .5rem; }
 h1 { margin: 0; font-family: var(--brand-display-family, var(--p-font)); font-weight: var(--brand-display-weight, 650); font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -0.025em; line-height: 1.1; color: var(--p-ink); overflow-wrap: anywhere; }
 h2 { margin: 0; font-size: 1.35rem; font-weight: 600; letter-spacing: -0.015em; color: var(--p-ink); }
 h3 { font-size: 1.05rem; font-weight: 600; color: var(--p-ink); margin: 1.2rem 0 .4rem; }
