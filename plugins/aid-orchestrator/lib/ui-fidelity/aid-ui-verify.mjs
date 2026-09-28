@@ -209,7 +209,8 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand) {
     .map(i => `${i.url.replace(base, '/')} is ${i.type || 'unknown type'}`)
     .concat(imgs.filter(i => i.len > 200 * 1024).map(i => `${i.url.replace(base, '/')} is ${Math.round(i.len / 1024)} kB`));
   res.image_weight = heavy.length ? ['fail', heavy.join(', ')] : ['pass', ''];
-  const shot = path.join(out, 'shots', ...key);
+  const shot = inside(path.join(out, 'shots'), path.join(...key));
+  if (!shot) throw new Error(`screenshot path ${key.join('/')} leaves the output directory`);
   fs.mkdirSync(path.dirname(shot), { recursive: true });
   await page.screenshot({ path: shot, fullPage: true });
   res.screenshots_reviewed = ['pass', `screenshot ${path.relative(out, shot)}; the PM's review is approve-page`];
@@ -276,13 +277,18 @@ for (const b of BRS) {
       const flow = flows.find(f => String(f.id) === m.page && m.state);
       let run = null;
       if (flow) {
-        const script = project && path.join(project, '.aid-ui/scenarios', `${m.page}.mjs`);
+        // flow ids come from the project's state: allowlisted, and the module must resolve inside .aid-ui/scenarios
+        if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(m.page)) { for (const c of named) put(m, c, 'not_covered', `refused flow id ${JSON.stringify(m.page)}: must match ^[a-z0-9][a-z0-9-]{0,63}$; no scenario imported`); continue; }
+        const scen = project && path.join(project, '.aid-ui/scenarios');
+        let script = scen && inside(scen, `${m.page}.mjs`);
+        // a symlinked scenario must not lead outside the scenarios directory either
+        if (script && fs.existsSync(script)) script = fs.statSync(script).isFile() && inside(fs.realpathSync(scen), path.basename(script)) === fs.realpathSync(script) ? script : null;
         if (!script || !fs.existsSync(script)) { for (const c of named) put(m, c, 'not_covered', `no scenario .aid-ui/scenarios/${m.page}.mjs`); continue; }
         const { default: scenario } = await import(pathToFileURL(script).href);
         run = async page => scenario({ page, base, role: m.role, state: m.state, credentials: creds[m.role] || null });
       }
-      const slug = m.page.replace(/[^A-Za-z0-9._-]+/g, '_');
-      const key = [b, v, `${slug}${m.role ? '.' + m.role : ''}${m.state ? '.' + m.state : ''}.png`];
+      // page, role and state come from the project's state: one filename segment, no path separators or leading dots
+      const key = [b, v, `${m.page}${m.role ? '.' + m.role : ''}${m.state ? '.' + m.state : ''}.png`.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '_')];
       const r = await pageRows(ctx, flow ? base : urlOf(m.page), key, m.role, m.state, run, facts, brand);
       if (r.error) {
         for (const c of named) put(m, c, flow && c === 'app_task_states' ? 'fail' : 'not_covered', `${flow ? 'scenario' : 'page'} failed: ${r.error}`);

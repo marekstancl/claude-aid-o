@@ -60,6 +60,10 @@ JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
 STATE_DIR="${AID_UI_STATE_DIR:-$HOME/.cache/aid-ui}"
 DEADLINE=28800   # 8 h, integer seconds as `aid-job.sh run --deadline` requires
 
+# The preview server: http.server without dotfiles (.env, .git; only .well-known passes)
+# and without directory listings (a directory serves its index.html or 404).
+# aid-job.sh stores argv one line per element, so the script is one line (exec of an escaped string).
+PREVIEW_PY="exec('import functools, http.server, sys, urllib.parse\\nclass H(http.server.SimpleHTTPRequestHandler):\\n    def send_head(self):\\n        segs = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).split(\"/\")\\n        if any(x.startswith(\".\") and x != \".well-known\" for x in segs):\\n            self.send_error(404); return None\\n        return super().send_head()\\n    def list_directory(self, path):\\n        self.send_error(404); return None\\nhttp.server.ThreadingHTTPServer((sys.argv[2], int(sys.argv[1])), functools.partial(H, directory=sys.argv[3])).serve_forever()\\n')"
 usage() { echo "usage: aid-ui-serve.sh studio <project> | brand <dir> | preview <dir> | stop <studio|brand|preview>" >&2; exit 2; }
 die() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 1; }
 refuse() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 2; }
@@ -155,7 +159,7 @@ case "$1" in
     if alive "$id" && listening "$PREVIEW_PORT" && [[ "$(jq -r '.command[-1]' "$JOBS/$id/job.json")" == "$dir" ]]; then
       echo "URL: http://$HOST:$PREVIEW_PORT/"; echo "JOB: $id"; exit 0
     fi
-    start preview python3 -m http.server "$PREVIEW_PORT" --bind "$HOST" --directory "$dir"
+    start preview python3 -c "$PREVIEW_PY" "$PREVIEW_PORT" "$HOST" "$dir"
     ;;
   stop)
     [[ "$2" == studio || "$2" == brand || "$2" == preview ]] || usage

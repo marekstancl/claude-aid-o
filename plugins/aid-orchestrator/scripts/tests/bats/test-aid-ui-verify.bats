@@ -114,3 +114,41 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$status" -eq 1 ]; [[ "$output" == *"port 39927 in use"*python3* ]]
 }
+
+@test "flow ids that are not an allowlisted name are refused and nothing is imported; a symlinked scenario is refused; role/state cannot move a screenshot" {
+  mkdir -p "$T/out" "$PROJ/.aid-ui/scenarios"
+  echo '{"viewports":[390],"browsers":["chromium"],"checks":{"http_200":"x","app_task_states":"x"}}' > "$T/ck.json"
+  for f in "$PROJ/x.mjs" "$PROJ/.aid-ui/x.mjs" "$T/evil.mjs"; do
+    echo "import fs from 'node:fs'; fs.writeFileSync('$T/imported', '$f'); export default async () => {};" > "$f"
+  done
+  ln -s "$T/evil.mjs" "$PROJ/.aid-ui/scenarios/evil.mjs"
+  echo "export default async ({ page, base }) => { await page.goto(base); };" > "$PROJ/.aid-ui/scenarios/ok.mjs"
+  jq -n '{variant:{type:"webapp"},build:{id:"x",fingerprints:{"index.html":"a"}},
+    structure:{roles:["../../../../esc"],flows:[{id:"../../x",states:["s"]},{id:"a/../../x",states:["s"]},{id:"X",states:["s"]},
+      {id:"evil",states:["s"]},{id:"ok",states:["../../../../esc2"]}]}}' > "$T/state.json"
+  url="$(AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" | sed -n 's/^URL: //p')"
+  run bash "$SC/aid-ui-tool.sh" verify --state "$T/state.json" --checks "$T/ck.json" --site "$SITE" \
+    --base "$url" --out "$T/out" --project "$PROJ" --seo "$SC/aid-ui-seo-check.py"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  RES="$T/out/result.json"
+  [ ! -e "$T/imported" ] || { echo "imported: $(cat "$T/imported")"; return 1; }
+  for p in ../../x a/../../x X; do
+    jq -e --arg p "$p" '[.rows[] | select(.page == $p)] | length > 0 and all(.status == "not_covered" and (.detail | startswith("refused flow id")))' "$RES" >/dev/null || { echo "$p"; return 1; }
+  done
+  [ "$(st app_task_states evil)" == not_covered ]
+  [ "$(st app_task_states ok)" == pass ] || { jq -c '.rows[] | select(.page == "ok")' "$RES"; return 1; }
+  [ -z "$(find "$T" -name '*esc*' -not -path "$T/out/shots/*")" ]
+  [ -n "$(find "$T/out/shots" -name '*esc*.png')" ]
+}
+
+@test "preview serves no dotfiles and no directory listings; .well-known is served" {
+  mkdir -p "$SITE/.git" "$SITE/.well-known" "$SITE/nolist"
+  echo SECRET > "$SITE/.env"; echo '[core]' > "$SITE/.git/config"; echo 'Contact: x' > "$SITE/.well-known/security.txt"
+  echo x > "$SITE/nolist/a.txt"
+  url="$(AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" | sed -n 's/^URL: //p')"
+  for p in .env .git/config %2Eenv .git/ o-nas/../.env nolist/; do
+    [ "$(curl -s -o /dev/null -w '%{http_code}' "${url}$p")" == 404 ] || { echo "$p served"; return 1; }
+  done
+  curl -sf "${url}.well-known/security.txt" | grep -q Contact
+  curl -sf "${url}o-nas/" >/dev/null
+}
