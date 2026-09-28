@@ -47,8 +47,6 @@
 
   /* Header: neutral wordmark and the step rail as a recessed segmented track. */
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem 2rem; flex-wrap: wrap; }
-  .brand { display: inline-flex; align-items: center; gap: 10px; font-size: .95rem; font-weight: 600; letter-spacing: .24em; text-transform: uppercase; color: var(--ks-ink); }
-  .brand::before { content: ""; width: 22px; height: 22px; border-radius: 5px; background: var(--ks-ink); box-shadow: inset 0 0 0 5px var(--ks-ink), inset 0 0 0 7px var(--ks-paper-raised); }
   .rail { display: inline-flex; flex-wrap: wrap; gap: 3px; padding: 3px; list-style: none; background: var(--ks-gray); border: 1px solid var(--ks-rule); border-radius: 6px; box-shadow: var(--ks-track-recess); }
   .rail li { display: inline-flex; align-items: center; gap: 6px; font-size: .75rem; font-weight: 500; padding: 7px 10px; border-radius: 3px; color: var(--ks-text-muted); }
   .rail li::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--ks-edge); }
@@ -61,8 +59,12 @@
   #now { margin-top: 1rem; display: flex; align-items: baseline; gap: .6rem; padding: .7rem 1rem; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); color: var(--ks-text); }
   #now[hidden] { display: none; }
   #now b { color: var(--ks-ink); }
-  .pulse { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--ks-kinpaku); box-shadow: 0 0 0 0 oklch(84% 0.19 80.46 / .6); animation: pulse 1.8s ease-out infinite; transform: translateY(-1px); }
-  @keyframes pulse { to { box-shadow: 0 0 0 10px oklch(84% 0.19 80.46 / 0); } }
+  .pulse { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--ks-kinpaku); transform: translateY(-1px); }
+  /* Tabs shared with the brand page (the server injects the same bar there). */
+  .studio-tabs { display: inline-flex; gap: 3px; padding: 3px; background: var(--ks-gray); border: 1px solid var(--ks-rule); border-radius: 6px; box-shadow: var(--ks-track-recess); }
+  .studio-tabs a { padding: 7px 14px; border-radius: 3px; font-size: .8125rem; font-weight: 600; color: var(--ks-text-muted); text-decoration: none; }
+  .studio-tabs a[aria-current] { color: var(--ks-ink); background: var(--ks-paper-raised); box-shadow: var(--ks-cap-lift); }
+  .studio-tabs a:hover { color: var(--ks-ink); }
   #notice { margin-top: 1rem; padding: .7rem 1rem; border: 1px solid var(--ks-danger); border-radius: 8px; color: var(--ks-danger); background: var(--ks-paper-raised); }
   #notice[hidden] { display: none; }
 
@@ -225,12 +227,12 @@
   @media (prefers-reduced-motion: reduce) {
     .card, .card:hover, .card:focus-within { transform: none; transition: none; }
     .card-inner, #lightbox, .nav, .fade { transition: none; }
-    .shimmer, .card.skeleton .line, .pulse { animation: none; }
+    .shimmer, .card.skeleton .line { animation: none; }
   }
 </style>
 <header>
   <div class="topbar">
-    <span class="brand">Studio</span>
+    <nav class="studio-tabs" aria-label="Studio"><a href="/" aria-current="page">Rozhodování</a><a href="/brand/">Výsledek pro klienta</a></nav>
     <ol class="rail" id="rail" aria-label="Kroky"></ol>
   </div>
   <p class="step-desc" id="step-desc"></p>
@@ -374,7 +376,7 @@ function card(q, c, i, answer) {
     el("div", { class: "body" },
       str(c.eyebrow) ? el("p", { class: "tier" }, str(c.eyebrow)) : null,
       el("h3", {}, title),
-      str(c.thesis) ? el("p", { class: "thesis" }, c.thesis) : null,
+      str(c.thesis) && c.thesis !== c.title ? el("p", { class: "thesis" }, c.thesis) : null,
       identity(c), uniqueness(c), fact("Riziko", c.risk, "clamp"), urlFact(c), choose()));
   const extras = Object.entries(c).filter(([k, v]) => !KNOWN.has(k) && (str(v) || typeof v === "number"))
     .map(([k, v]) => fact(k.replace(/_/g, " "), String(v)));
@@ -535,7 +537,7 @@ function confirmation(q) {
 function calm(now, answered) {
   return el("section", { class: "panel face calm" },
     el("h2", { class: "q-title" }, el("span", { class: "pulse" }), answered ? "Díky, mám všechno, co potřebuji." : "Teď od vás nic nepotřebuji."),
-    answered ? el("p", { class: "detail" }, "Napište mi do chatu, že máte hotovo, a budu pokračovat.")
+    answered ? el("p", { class: "detail" }, "Odpověď mám, pokračuji sám. Do chatu nemusíte nic psát.")
       : now && str(now.text) ? el("p", { class: "detail" }, now.text) : null,
     el("p", { class: "hint" }, (answered ? "Další otázka se tu pak objeví sama" : "Další otázka se tu objeví sama") + ", stránku nemusíte obnovovat."));
 }

@@ -268,3 +268,25 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
   [ "$(jq -r '.questions[] | select(.id=="q1") | .answer.choice_title' "$BATS_TEST_TMPDIR/body")" = B ]
 }
+
+@test "/brand/ serves the project's brand page with the studio tabs, only with auth and only its own files" {
+  mkdir -p "$P/docs/brand/assets" "$P/docs/brand/sub"
+  printf '<!doctype html><body><h1>X</h1></body>' > "$P/docs/brand/index.html"
+  printf 'body{}' > "$P/docs/brand/base.css"
+  printf 'x' > "$P/docs/brand/assets/logo.svg"
+  printf '{}' > "$P/docs/brand/state.json"
+  printf 'x' > "$P/docs/brand/sub/a.css"
+  printf 's' > "$P/secret.css"
+  [ "$(code "$URL/brand/")" = 403 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/brand/")" = 200 ]
+  grep -q 'class="studio-tabs"' "$BATS_TEST_TMPDIR/body"
+  grep -q '<h1>X</h1>' "$BATS_TEST_TMPDIR/body"
+  ! grep -q 'studio-tabs' "$P/docs/brand/index.html" || false
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/brand/base.css")" = 200 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/brand/assets/logo.svg")" = 200 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/brand/state.json")" = 404 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/brand/sub/a.css")" = 404 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" --path-as-is "$URL/brand/../../secret.css")" = 404 ]
+  curl -s -D "$BATS_TEST_TMPDIR/h" -o /dev/null -H "X-AID-Token: $TOKEN" "$URL/brand/"
+  grep -qi "content-security-policy: default-src 'none'" "$BATS_TEST_TMPDIR/h"
+}

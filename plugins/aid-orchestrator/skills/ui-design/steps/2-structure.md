@@ -55,7 +55,7 @@ Stránky a sekce, u aplikace role, navigaci a toky se stavy - ve studiu.
 
 ## Když krok selže
 
-Odpověď chybí → odkaz na studio a konec tahu. `set structure` odmítne JSON
+Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4. `set structure` odmítne JSON
 nebo odpověď → ukaž `ERROR:` PM.
 
 **Last Updated:** 2026-09-28

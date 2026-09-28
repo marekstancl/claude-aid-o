@@ -26,7 +26,8 @@ u aplikace `webapp-tasks-states-standard.md` (UA-1..UA-11) - čti živě.
 
 1. Postav každou stránku ze `structure` (u aplikace každý tok se všemi jeho
    stavy) podle snímku frontend-design a standardů. Texty jen z obsahového
-   plánu a registru faktů; položka `deferred_by_pm` dostane viditelně
+   plánu a registru faktů, psané podle „Jak psát vizi, slogany a texty"
+   (`steps/1v-vision.md`); položka `deferred_by_pm` dostane viditelně
    prázdné místo podle standardu, nikdy zástupný text.
 2. Výstup: `<project>/site/`, nebo vlastní složka buildu projektu (Next.js
    `out/`, Astro `dist/`) - mimo `docs/` a `.aid-ui/`.

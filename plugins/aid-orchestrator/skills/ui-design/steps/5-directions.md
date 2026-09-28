@@ -66,6 +66,6 @@ Kapitola `smer`, `docs/brand/assets/`; odpověď `direction` ve stavu (jen
 ## Když krok selže
 
 `glyph` nenajde písmo s češtinou → řekni PM, které rodiny prošly
-`--sample`. Odpověď chybí → odkaz na studio a konec tahu.
+`--sample`. Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4.
 
 **Last Updated:** 2026-09-28

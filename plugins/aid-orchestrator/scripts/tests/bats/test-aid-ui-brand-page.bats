@@ -63,13 +63,16 @@ JSON
   [ "$output" = $'href="tokens.css"\nhref="roles.css"\nhref="base.css"' ]
 }
 
-@test "base.css reads only --brand-* with fallbacks and has print rules" {
+@test "base.css reads only its own frame tokens or --brand-* with fallbacks and has print rules" {
   # `|| false`: bats does not fail a test on a mid-test `! cmd`
   ! grep -q -- '--color-' "$PAGE/base.css" || false
-  # every var() read is a --brand-* name with a fallback
+  # every var() read is the frame's own --p-* (defined in base.css) or a --brand-* name with a fallback
   run grep -oE 'var\([^)]*\)' "$PAGE/base.css"
   [ "$status" -eq 0 ]
-  ! grep -vE '^var\(--brand-[a-z-]+, [^)]+\)$' <<<"$output" || false
+  ! grep -vE '^var\(--brand-[a-z-]+, [^)]+\)$|^var\(--p-[a-z]+\)$' <<<"$output" || false
+  for v in $(grep -oE 'var\(--p-[a-z]+\)' "$PAGE/base.css" | sort -u | sed 's/var(\(.*\))/\1/'); do
+    grep -q -- "^  $v:" "$PAGE/base.css"
+  done
   grep -q '@media print' "$PAGE/base.css"
   grep -q 'break-before: page' "$PAGE/base.css"
   # print block caps image height so a full-page screenshot fits one A4 page

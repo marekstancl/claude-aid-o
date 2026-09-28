@@ -56,7 +56,7 @@ Seznam stránek a URL k zachování - ve studiu.
 
 ## Když krok selže
 
-Odpověď chybí → odkaz na studio a konec tahu; bez potvrzeného seznamu krok 2
+Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4; bez potvrzeného seznamu krok 2
 nezačne.
 
 **Last Updated:** 2026-09-28

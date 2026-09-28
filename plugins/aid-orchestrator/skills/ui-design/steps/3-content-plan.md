@@ -30,8 +30,8 @@ a chybějící podstatný materiál buď dodal, nebo ho odložil.
    použije (ceny, adresa, otevírací doba, čísla, citace, reference), se
    zdrojem (`PM`, soubor projektu). Co v registru není, stavba nesmí
    napsat (MUST 5). Otázka `facts` ve studiu, když fakt chybí.
-3. Agent smí psát `draft` jen z faktů registru; `confirmed_client` dává
-   jen PM.
+3. Agent smí psát `draft` jen z faktů registru a podle „Jak psát vizi,
+   slogany a texty" (`steps/1v-vision.md`); `confirmed_client` dává jen PM.
 4. Otázka `content_plan` ve studiu: tabulka položek (stránka, sekce,
    potřeba, vlastník, termín, stav), `target` = sha256 JSON pole položek.
    JSON zapiš nástrojem Write do `<project>/.aid-ui/content-plan.json` (nikdy ne
@@ -58,6 +58,6 @@ Plán obsahu, fakta, dodání materiálu nebo jeho odložení - ve studiu.
 
 ## Když krok selže
 
-Odpověď chybí → odkaz na studio a konec tahu. Skript odmítne → `ERROR:` PM.
+Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4. Skript odmítne → `ERROR:` PM.
 
 **Last Updated:** 2026-09-28

@@ -71,6 +71,6 @@ Variantu, značku, místní firmu a volitelné části kroku 1 - ve studiu.
 ## Když krok selže
 
 Ukaž PM řádek `ERROR:` skriptu; krok se neposouvá. Odpověď chybí → odkaz na
-studio a konec tahu.
+studio a čekání podle `SKILL.md` „Jak se ptá PM", bod 4.
 
 **Last Updated:** 2026-09-28

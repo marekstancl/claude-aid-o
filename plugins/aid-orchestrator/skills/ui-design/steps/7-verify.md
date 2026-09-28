@@ -88,6 +88,6 @@ zákazníka, nebo tisk do PDF.
 ## Když krok selže
 
 Brána nebo skript skončí chybou → `ERROR:` PM s krokem, který to opraví;
-nic se neschvaluje. Odpověď chybí → odkaz na studio a konec tahu.
+nic se neschvaluje. Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4.
 
 **Last Updated:** 2026-09-28

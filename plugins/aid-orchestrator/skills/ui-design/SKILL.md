@@ -93,9 +93,13 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    hlavičky `aid-ui-state.sh`.
 3. `aid-ui-serve.sh studio <project>` (spustí nebo použije běžící studio)
    vypíše jednorázový odkaz `URL: http://<host>:3915/?k=<kód>`; ten dej PM
-   a **ukonči tah**. Každé další spuštění dá nový odkaz.
-4. Na další zprávu PM `aid-ui-state.sh record-answer <project> --question <id>`.
-   Exit 1 = odpověď ještě není; dej PM odkaz znovu a ukonči tah.
+   (jen při první otázce běhu nebo po restartu studia - stránka ukazuje další
+   otázky sama).
+4. Na odpověď čekej sám, PM nemá psát do chatu: spusť na pozadí
+   (`run_in_background`) `until aid-ui-state.sh record-answer <project> --question <id>;
+   do sleep 5; done` a ukonči tah; po jeho dokončení pokračuj. Více otevřených
+   otázek = jedna smyčka na každou. Napíše-li PM mezitím do chatu, zkus
+   `record-answer` hned; exit 1 = odpověď ještě není.
 5. Rozhodnutí `approve`/`choose` → mutace s `--answer <id>` (jen tam, kde
    krok nějakou jmenuje). Po `choose` je vybraná karta ta s `id` = `choice`
    zaznamenané odpovědi (`jq '.answers["<id>"].choice' brand-state.json`)
@@ -152,8 +156,8 @@ a odkaz.
 
 1. Never without the PM: every choice and approval (variant, vision, slogan,
    logo, SEO pages, structure, content plan, references, direction, pages,
-   exceptions) is the PM's. A missing answer ends the turn with the studio
-   link; no step proceeds unattended and no step writes state directly.
+   exceptions) is the PM's. A missing answer ends the turn with a background
+   wait for it ("Jak se ptá PM", step 4); no step proceeds unattended and no step writes state directly.
 2. Answers come only through `aid-ui-state.sh record-answer`, and a mutation
    that needs the PM takes `--answer <id>`; an answer read from chat is never
    a decision.

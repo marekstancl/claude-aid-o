@@ -82,7 +82,7 @@ podobných značek.
 
 ## Když krok selže
 
-- Odpověď chybí → odkaz na studio a konec tahu.
+- Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4.
 - Playwright MCP chybí nebo nezapíše soubory → požádej PM o ikony z ručního
   nástroje podle seznamu z `--verify`, kapitolu `logo` nech `ceka` a v jejím
   těle napiš, co chybí.

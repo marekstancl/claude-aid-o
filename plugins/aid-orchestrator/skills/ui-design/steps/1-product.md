@@ -44,6 +44,6 @@ Potvrdí pravdu o produktu, nebo ji vrátí s opravou.
 
 ## Když krok selže
 
-Odpověď chybí → odkaz na studio a konec tahu; krok se neposouvá.
+Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4; krok se neposouvá.
 
 **Last Updated:** 2026-09-28

@@ -34,6 +34,9 @@ sent, name the same origin; else 403):
   GET  /preview?question=&card=  the card's preview file, 404 while pending
   GET  /report                <project>/docs/design/soulad-se-standardy.md, escaped
   GET  /licence               Impeccable NOTICE (the page pattern's source)
+  GET  /brand/<file>          [auth] the project's brand page (<project>/docs/brand/): index.html,
+                              top-level *.css, assets/ and fonts/ only (what aid-ui-serve.sh brand
+                              serves), no scripts (CSP); the studio's "Výsledek pro klienta" tab
   POST /answer                [auth] JSON {question, kind, target, decision,
                               choice, comment}; kind and target must be the open
                               question's own (a stale page gets 409).
@@ -70,6 +73,9 @@ DECISIONS = {"approve", "choose", "return", "reroll", "reroll_safer", "reroll_bo
 # Previews are raster images only: an .html/.svg preview would run script on this origin.
 IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
           ".webp": "image/webp", ".gif": "image/gif", ".avif": "image/avif"}
+BRAND_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
+               ".svg": "image/svg+xml", ".woff2": "font/woff2", ".woff": "font/woff",
+               ".ico": "image/x-icon", **IMAGES}
 HERE = os.path.dirname(os.path.abspath(__file__))
 NOTICE = os.path.join(HERE, "..", "..", "skills", "ui-design", "references",
                       "LICENSES", "NOTICE-impeccable.txt")
@@ -299,6 +305,34 @@ class Studio(BaseHTTPRequestHandler):
                 return
             with open(f, "rb") as fh:
                 self.send(200, fh.read(), ctype, "sandbox; default-src 'none'; frame-ancestors 'none'")
+        elif u.path == "/brand" or u.path.startswith("/brand/"):
+            if not self.gate(True):
+                return
+            if u.path == "/brand":
+                self.send_response(303)
+                self.send_header("Location", "/brand/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            rel = u.path[len("/brand/"):] or "index.html"
+            root = os.path.realpath(os.path.join(PROJECT, "docs", "brand"))
+            f = os.path.realpath(os.path.join(root, rel))
+            parts = os.path.relpath(f, root).split(os.sep)
+            allowed = (f.startswith(root + os.sep) and not any(x.startswith(".") for x in parts)
+                       and (parts == ["index.html"] or (len(parts) == 1 and f.endswith(".css"))
+                            or (len(parts) > 1 and parts[0] in ("assets", "fonts"))))
+            ctype = BRAND_TYPES.get(os.path.splitext(f)[1].lower())
+            if not allowed or not ctype or not os.path.isfile(f):
+                self.send(404, {"error": "not found"})
+                return
+            with open(f, "rb") as fh:
+                data = fh.read()
+            if parts == ["index.html"]:   # the studio's tab bar; the page itself stays client-clean
+                data = data.replace(b"<body>", b'<body><nav class="studio-tabs" aria-label="Studio">'
+                                    b'<a href="/">Rozhodov\xc3\xa1n\xc3\xad</a><a href="/brand/" aria-current="page">'
+                                    b'V\xc3\xbdsledek pro klienta</a></nav>', 1)
+            self.send(200, data, ctype, "default-src 'none'; style-src 'self' 'unsafe-inline'; "
+                      "img-src 'self' data:; font-src 'self'; frame-ancestors 'none'")
         elif u.path in ("/report", "/licence"):
             if not self.gate(False):
                 return

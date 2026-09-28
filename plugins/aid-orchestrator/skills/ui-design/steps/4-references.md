@@ -62,7 +62,7 @@ kapitola `smer`: odkazy + věta ke každému, pak
 ## Když krok selže
 
 Všechny galerie blokované → řekni PM, požádej o URL. Chybí Playwright →
-stop s instalací (`SKILL.md` Start). Odpověď chybí → odkaz na studio
-a konec tahu.
+stop s instalací (`SKILL.md` Start). Odpověď chybí → čekání na pozadí
+podle `SKILL.md` „Jak se ptá PM", bod 4.
 
 **Last Updated:** 2026-09-28
