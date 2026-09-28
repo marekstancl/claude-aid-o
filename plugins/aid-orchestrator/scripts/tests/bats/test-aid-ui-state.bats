@@ -685,3 +685,65 @@ JSON
     [ "$status" -eq 2 ]
   done
 }
+
+# --- P103 Step 4 review round 1 --------------------------------------------
+
+@test "a row status outside pass|fail|warn|not_covered: gate-record and finish refuse" {
+  ready
+  for s in '"error"' '"skipped"' null; do
+    result ".rows[0].status = $s"
+    run "$SCRIPT" gate-record "$PROJ" "$RES"
+    [ "$status" -eq 1 ]; [[ "$output" == *"row with status $s"* ]]
+  done
+  # finish checks again: a result recorded by hand past gate-record
+  result '.rows[0].status = "error"'
+  jqw --arg sha "$(sha256sum "$RES" | cut -d' ' -f1)" '.gate.result_sha256 = $sha'
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *'row with status "error"'* ]]
+}
+
+@test "warn blocks like fail unless the check is warn_only" {
+  ready
+  result '.rows |= map(if .check == "axe" and .page == "index.html" then .status = "warn" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"warn row without a live exception: axe index.html"* ]]
+  echo 'warn_only: [axe]' >> "$T/cov/checks.yaml"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 0 ]
+}
+
+@test "record-answer: a foreign studio URL is refused; an answer for another target is not recorded; the token is never on argv" {
+  mkdir -p "$PROJ/.aid-ui/studio" "$T/fake" "$T/bin"
+  echo 0123456789abcdef > "$PROJ/.aid-ui/studio.token"
+  echo '{"questions": [{"id": "q1", "kind": "approve_page", "target": "index.html@abc", "opened_at": "2020-01-01T00:00:00Z"}]}' \
+    > "$PROJ/.aid-ui/studio/payload.json"
+  AID_UI_STUDIO_URL=http://evil.example:3915 run "$SCRIPT" record-answer "$PROJ" --question q1
+  [ "$status" -eq 1 ]; [[ "$output" == *"studio URL refused"* ]]
+  # any HTTP server serving a file the agent wrote (python -m http.server ignores the query)
+  echo '{"question":"q1","kind":"approve_page","target":"kontakt.html@abc","decision":"approve","at":"2026-01-01T00:00:00Z"}' > "$T/fake/answer"
+  PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$T/fake" >/dev/null 2>&1 3>&- &
+  SPID=$!
+  for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/answer" && break; sleep 0.1; done
+  AID_UI_STUDIO_URL="http://127.0.0.1:$PORT" run "$SCRIPT" record-answer "$PROJ" --question q1
+  [ "$status" -eq 1 ]; [[ "$output" == *"not the listed question"* ]]
+  [ "$(jq '.answers | length' "$STATE")" = 0 ]
+  # a curl stub records its argv and stdin
+  printf '#!/bin/bash\nprintf "%%s\\n" "$@" > %s/argv; cat > %s/stdin; printf 404\n' "$T" "$T" > "$T/bin/curl"; chmod +x "$T/bin/curl"
+  AID_UI_STUDIO_URL=http://localhost:1 PATH="$T/bin:$PATH" run "$SCRIPT" record-answer "$PROJ" --question q1
+  [ "$status" -eq 1 ]
+  ! grep -q 0123456789abcdef "$T/argv" || false
+  grep -qx 'X-AID-Token: 0123456789abcdef' "$T/stdin"
+}
+
+@test "build-record refuses a site in <project>/docs or one holding .aid-ui/" {
+  run "$SCRIPT" build-record "$PROJ" "$PROJ/docs"
+  [ "$status" -eq 1 ]; [[ "$output" == *"build-record refused"* ]]
+  mkdir -p "$PROJ/.aid-ui/site" "$T/other/.aid-ui"
+  run "$SCRIPT" build-record "$PROJ" "$PROJ/.aid-ui/site"
+  [ "$status" -eq 1 ]
+  run "$SCRIPT" build-record "$PROJ" "$T/other"
+  [ "$status" -eq 1 ]
+  [ "$(jq .build "$STATE")" = null ]
+}

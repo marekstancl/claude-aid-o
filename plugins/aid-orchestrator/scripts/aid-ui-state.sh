@@ -16,7 +16,9 @@
 #       (<project>/.aid-ui/studio.token, header X-AID-Token) at $AID_UI_STUDIO_URL
 #       (default http://$AID_UI_HOST:$AID_UI_STUDIO_PORT, 10.20.20.22:3915). The question
 #       must be listed in .aid-ui/studio/payload.json and the answer be newer than its
-#       opened_at. Stores .aid-ui/answers/<id>.json and answers.<id> = {kind, target,
+#       opened_at, and its question, kind and target be those of the payload's question.
+#       The URL must be http://127.0.0.1, http://localhost or http://$AID_UI_HOST (any port);
+#       the token goes to curl on stdin, never on its command line. Stores .aid-ui/answers/<id>.json and answers.<id> = {kind, target,
 #       decision, choice, answer_file, answer_sha256, opened_at, at}. Studio unreachable,
 #       unanswered (404) or malformed -> exit 1, the question stays pending, nothing recorded.
 #       A consumed answer is never re-recorded.
@@ -54,8 +56,9 @@
 #                                        .css file under docs/brand/fonts/
 #   attest <project> <item id> --note <text>   attestations.<id> = {note, at}, only for a
 #                                        coverage map item with an agent: disposition
-#   build-record <project> <site dir>    writes nothing into the site (a site dir holding the
-#                                        project is refused). build id = sha256 over the lines
+#   build-record <project> <site dir>    writes nothing into the site: refused when the site holds
+#                                        the project, lies in <project>/docs or <project>/.aid-ui,
+#                                        or holds docs/design/brand-state.json or .aid-ui/. build id = sha256 over the lines
 #                                        "<relative path> <sha256>" of every file, sorted;
 #                                        a page = every .html but 404.html, key = its relative
 #                                        path; page fingerprint = the same digest over the page
@@ -65,26 +68,28 @@
 #                                        <project>/.aid-ui/build.json
 #   build-id <dir>                       prints the build id of <dir>
 #   gate-record <project> <result.json>  refuses a result whose build_id or fingerprints are
-#                                        not the recorded build's, or that misses a row of the
-#                                        required matrix (below); stores gate {run_at,
+#                                        not the recorded build's, that has a row status other
+#                                        than pass|fail|warn|not_covered, or that misses a row of
+#                                        the required matrix (below); stores gate {run_at,
 #                                        result_file, result_sha256, build_id}; an exception
-#                                        that matches no fail|not_covered row is marked resolved
+#                                        that matches no open row is marked resolved
 #                                        (kept as history, never covers again)
 #   finish <project>                     refuses unless: aid-ui-coverage.sh check exits 0 (3 only
 #                                        with an approve|choose coverage_drift answer whose target
 #                                        is the changed item ids, sorted, comma-joined); the site
 #                                        recomputes to the recorded build and the gate is of that
 #                                        build with its result file unchanged; the result has
-#                                        every required row; every page is approved at its
-#                                        current fingerprint; every fail|not_covered row has a
-#                                        live exception; every consumed answer file is unchanged;
+#                                        every required row and only allowed statuses; every page
+#                                        is approved at its current fingerprint; every open row
+#                                        has a live exception; every consumed answer file is unchanged;
 #                                        every content item is confirmed_client|deferred_by_pm
 #
 # Required matrix: every check of checks.yaml (next to the coverage map;
 # AID_UI_COVERAGE_MAP points it at a fixture) x every combination: pages x viewports x
 # browsers (role and state ""); for variant webapp|pwa also structure.flows[].id (as page)
 # x its states x structure.roles (or "") x viewports x browsers. Rows of page _site are
-# extra. A warn row (warn_only checks report warn) needs no exception.
+# extra. Open row = fail, not_covered, or warn on a check not in checks.yaml warn_only;
+# only pass, or warn on a warn_only check, satisfies a row without an exception.
 #
 # Exit: 0 ok, 1 refused, 2 usage.
 # =============================================================================
@@ -386,8 +391,17 @@ def missing(st, ck, res, fps):
 def matches(sel, row):
     return sel.get("check") == row.get("check") and all(sel.get(k) in ("*", val(row.get(k))) for k in AX)
 
-def open_rows(res):   # a warn row never blocks (warn_only checks report only warn)
-    return [r for r in res.get("rows") or [] if isinstance(r, dict) and r.get("status") in ("fail", "not_covered")]
+STATUSES = ("pass", "fail", "warn", "not_covered")
+
+def bad_rows(res):   # external gate output: a row of any other status is refused, never counted
+    return ["row with status %s: %s" % (json.dumps(r.get("status") if isinstance(r, dict) else r),
+            json.dumps(r, sort_keys=True)[:120]) for r in res.get("rows") or []
+            if not isinstance(r, dict) or r.get("status") not in STATUSES]
+
+def open_rows(ck, res):   # fail, not_covered, and warn on a check that is not warn_only
+    wo = ck.get("warn_only") or []
+    return [r for r in res.get("rows") or [] if isinstance(r, dict)
+            and (r.get("status") in ("fail", "not_covered") or (r.get("status") == "warn" and r.get("check") not in wo))]
 
 if mode in ("build", "id"):
     b = build(args[0])
@@ -407,9 +421,9 @@ elif mode == "gate":
     elif res.get("fingerprints") != b["fingerprints"]:
         bad.append("the result's page fingerprints are not the recorded build's")
     else:
-        bad += ["missing row: " + m for m in missing(st, ck, res, b["fingerprints"])]
+        bad += bad_rows(res) + ["missing row: " + m for m in missing(st, ck, res, b["fingerprints"])]
     if not bad:
-        rows = open_rows(res)
+        rows = open_rows(ck, res)
         print(json.dumps([i for i, e in enumerate(st.get("exceptions") or [])
                           if not e.get("resolved") and not any(matches(e["selector"], r) for r in rows)]))
 elif mode == "finish":
@@ -439,9 +453,9 @@ elif mode == "finish":
             res = load(rf)
             if res.get("build_id") != b["id"] or res.get("fingerprints") != fps:
                 bad.append("the gate result does not belong to the current build")
-            bad += ["missing row: " + m for m in missing(st, ck, res, fps)]
+            bad += bad_rows(res) + ["missing row: " + m for m in missing(st, ck, res, fps)]
             live = [e for e in st.get("exceptions") or [] if not e.get("resolved")]
-            for r in open_rows(res):
+            for r in open_rows(ck, res):
                 if not any(matches(e["selector"], r) and e.get("fingerprints", {}).get(val(r.get("page"))) == fp_of(st, fps, val(r.get("page")))
                            for e in live):
                     bad.append("%s row without a live exception: %s %s" % (r.get("status"), r.get("check"),
@@ -530,12 +544,17 @@ case "$VERB" in
     jq -e --arg q "$qid" 'any(.consumed[]?; . == $q)' "$STATE" >/dev/null && die "answer $qid is already used; it is not recorded again"
     tokf="$PROJECT/.aid-ui/studio.token"
     [[ -r "$tokf" ]] || die "no studio token $tokf; start the studio (aid-ui-serve.sh studio); $qid stays pending"
-    opened="$(jq -r --arg q "$qid" 'first(.questions[]? | select(.id == $q) | .opened_at) // empty' \
-      "$PROJECT/.aid-ui/studio/payload.json" 2>/dev/null)" || opened=""
-    [[ -n "$opened" ]] || die "question $qid is not listed in .aid-ui/studio/payload.json; nothing recorded"
-    url="${AID_UI_STUDIO_URL:-http://${AID_UI_HOST:-10.20.20.22}:${AID_UI_STUDIO_PORT:-3915}}"
+    pq="$(jq -c --arg q "$qid" 'first(.questions[]? | select(.id == $q and (.opened_at | type) == "string"))
+      | {kind, target, opened_at}' "$PROJECT/.aid-ui/studio/payload.json" 2>/dev/null)" || pq=""
+    [[ -n "$pq" ]] || die "question $qid is not listed in .aid-ui/studio/payload.json; nothing recorded"
+    opened="$(jq -r .opened_at <<<"$pq")"
+    host="${AID_UI_HOST:-10.20.20.22}"
+    url="${AID_UI_STUDIO_URL:-http://$host:${AID_UI_STUDIO_PORT:-3915}}"
+    [[ "$url" =~ ^http://([^/:@]+)(:[0-9]+)?/?$ ]] &&
+      [[ "${BASH_REMATCH[1]}" == 127.0.0.1 || "${BASH_REMATCH[1]}" == localhost || "${BASH_REMATCH[1]}" == "$host" ]] ||
+      die "studio URL refused (only http://127.0.0.1, http://localhost or http://$host, any port): $url"
     body="$(tmpfile answer.json)"
-    rc=0; code="$(curl -sS --max-time 10 -o "$body" -w '%{http_code}' -H "X-AID-Token: $(<"$tokf")" \
+    rc=0; code="$(printf 'X-AID-Token: %s\n' "$(<"$tokf")" | curl -sS --max-time 10 -o "$body" -w '%{http_code}' -H @- \
       -- "${url%/}/answer?question=$qid")" || rc=$?
     [[ "$rc" -eq 0 ]] || { rm -f "$body"; die "studio unreachable at $url (curl exit $rc); $qid stays pending, nothing recorded"; }
     [[ "$code" != 404 ]] || { rm -f "$body"; die "no answer to $qid yet; it stays pending: $url"; }
@@ -543,6 +562,8 @@ case "$VERB" in
     ans="$(jq -ec --arg q "$qid" 'select(type == "object" and .question == $q and (.kind | type) == "string"
       and has("target") and (.decision | type) == "string" and (.at | type) == "string")' "$body" 2>/dev/null)" ||
       { rm -f "$body"; die "malformed answer from the studio for $qid; nothing recorded"; }
+    jq -e --argjson p "$pq" '.kind == $p.kind and .target == $p.target' <<<"$ans" >/dev/null ||
+      { rm -f "$body"; die "the studio's answer to $qid is for $(jq -c '[.kind, .target]' <<<"$ans"), not the listed question $(jq -c '[.kind, .target]' <<<"$pq"); nothing recorded"; }
     rm -f "$body"
     at="$(jq -r .at <<<"$ans")"
     [[ "$(date -u -d "$at" +%s%N 2>/dev/null || echo 0)" -gt "$(date -u -d "$opened" +%s%N 2>/dev/null || echo 0)" ]] ||
@@ -643,7 +664,9 @@ case "$VERB" in
     need_state
     (( $# == 1 )) && [[ -d "$1" ]] || usage "build-record needs <site dir>"
     site="$(realpath "$1")"; root="$(realpath "$PROJECT")"
-    [[ "$root/" != "$site/"* ]] || die "build-record refused: the site $site holds the project; the state would land inside it"
+    [[ "$root/" != "$site/"* && "$site/" != "$root/docs/"* && "$site/" != "$root/.aid-ui/"* \
+       && ! -e "$site/docs/design/brand-state.json" && ! -e "$site/.aid-ui" ]] ||
+      die "build-record refused: the site $site holds the project or its state (docs/, .aid-ui/); the state would land inside it"
     b="$(bpy build "$site")"
     rec="$(jq -c --arg d "$site" --arg at "$(now)" '{id, dir: $d, fingerprints, at: $at}' <<<"$b")"
     mkdir -p "$PROJECT/.aid-ui"
