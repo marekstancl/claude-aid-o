@@ -3,6 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.110.0] — 2026-09-28
+
+Opravy z běhu agents P009. Hlavní: v projektech, které verzují stav plánů (acta, agents, wan), četla každá pracovní kopie plánu a EPICu nastavení ze své vlastní kopie větve místo z hlavního checkoutu. Změna nastavení během plánu se proto neprojevila; v P009 kvůli tomu neběžel bezpečnostní revizor kroku ani jednou (0 ze 7 kroků).
+
+### Fixed
+- **Pracovní kopie čte nastavení a evidenci z hlavního checkoutu.** Výjimka pro testovací projekty („adresář s vlastním `.aid-o/work/plan-state` je kořen sám sobě“) platila i pro pracovní kopie, protože acta, agents a wan mají `plan-state` ve verzování. Nově neplatí pro pracovní kopii (rozpozná se podle gitu); vnořené testovací adresáře ji mají dál. Týká se revize kroku a EPICu, kontroly kroku, revizního profilu, závazků a přesměrovaných nálezů.
+- **Stránka plánu, brána kontroly plánu, evidence kola kontroly plánu a časová osa plánu** čtou a zapisují do hlavního checkoutu i pro plán otevřený z pracovní kopie. Stránka vykreslená z pracovní kopie už netvrdí „Revize plánu: ještě neproběhla“.
+- **Stránka PM zastaralá jen kvůli času souboru.** Stránka si zapisuje otisk obsahu plánu (`<!-- aid-plan-sha256: … -->`) a kontrola porovnává otisky; čas souboru rozhoduje jen u starších stránek bez otisku. Checkout do nové pracovní kopie už generování nezastaví.
+- **`amend-scope` po posledním kroku** řekne, který krok rozšířil („widening step N (id)“), a návod to popisuje.
+- **Soubor z jiného repozitáře:** `aid-plan-lint.sh` hlásí absolutní cestu, kterou krok zmiňuje jen v textu a nemá ji v `Files:`; commit kroku u cizího souboru jmenuje repozitář, kam patří; pravidlo je v `pipeline.md`, `plan-writing.md` a `aid-run.md`.
+
 ## [2.109.0] — 2026-09-27
 
 Méně kol revize tím, že se chyby opravují u zdroje. Rozbor P097, P101 a P102 našel 14 vážných nálezů až ve 2. a dalším kole. 12 z nich bylo bezpečnostních a 11 z 14 byla jen další varianta díry, kterou předchozí oprava ucpala pouze v hlášeném místě. Pokyn opraváři totiž zakazoval sáhnout na cokoli, co nález výslovně nejmenoval.
