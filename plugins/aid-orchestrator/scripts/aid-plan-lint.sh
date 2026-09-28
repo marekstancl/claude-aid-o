@@ -469,6 +469,43 @@ _deviation_cell() {
   }'
 }
 
+# Another repository's file (P009, agents 27. 9. 2026): a step may edit a file
+# outside this repository only when ITS Files declare it — amend-scope refuses
+# anything else and the step contract cannot commit it here. An absolute path
+# a step names only in its prose (outside this repository, not under one of
+# the same step's declared absolute paths) is reported. Per step: another
+# step's declaration does not cover it.
+while IFS=$'\t' read -r _fx_ln _fx_path _fx_head; do
+  [[ -n "$_fx_path" ]] || continue
+  if [[ -n "${_project_root:-}" ]]; then
+    case "$_fx_path" in "${_project_root%/}"/*) continue ;; esac
+  fi
+  _advisory ":${_fx_ln}" "\`${_fx_path}\` names another repository's file only in prose — declare it in this step's Files (absolute path) or the step cannot touch it; the controller commits it in that repository: ${_fx_head}"
+done < <(awk '
+  function flush(   i, j, ok) {
+    for (i = 1; i <= np; i++) {
+      ok = 0
+      for (j = 1; j <= nd; j++) if (pp[i] == dd[j] || index(pp[i], dd[j] "/") == 1) ok = 1
+      if (!ok) printf "%s\t%s\t%s\n", pl[i], pp[i], head
+    }
+    np = 0; nd = 0
+  }
+  /^```/ { fence = !fence; next }
+  fence { next }
+  /^### Step / { if (head != "") flush(); head = $0; next }
+  /^## / { if (head != "") flush(); head = ""; next }
+  head == "" { next }
+  {
+    line = $0; files = (line ~ /^- (Create|Modify|Test|Rewrite): /)
+    while (match(line, /`\/[^` ]+`/)) {
+      path = substr(line, RSTART + 1, RLENGTH - 2); line = substr(line, RSTART + RLENGTH)
+      sub(/\/+$/, "", path)
+      if (files) dd[++nd] = path; else { pp[++np] = path; pl[np] = NR }
+    }
+  }
+  END { if (head != "") flush() }
+' "$PLAN")
+
 _std_derived="$(aid_standards_derive "$PLAN" "${_project_root:-}")"; _std_rc=$?
 case "$_std_rc" in
   1) [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [NOTE] no standards map configured for this project (project.yaml -> standards.map_path), so no '## Standards' section is owed." >&2 ;;

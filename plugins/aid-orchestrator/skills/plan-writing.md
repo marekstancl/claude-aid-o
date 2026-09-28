@@ -281,6 +281,11 @@ several matching `paths` | several conflicting `paths`> — {why what exists doe
 
 **Parallel group:** {wave name, e.g. `wave-1`} | `---` *(a step that runs alone)*
 
+**Another repository's file** (e.g. a page under `/opt/eco/docs/`): declare it in the step's
+`Files:` with its absolute path. Naming it only in the step's prose — or telling the step to
+take it "via amend-scope" — does not work: amend-scope refuses an undeclared absolute path, and
+the lint reports it.
+
 **Files-entry grammar (enforced — `aid-plan-lint.sh` runs at plan write time AND as a
 hard pre-flight in `aid-plan-to-epic.sh`; a violation stops generation with the exact
 line).** Each Files bullet MUST be exactly:

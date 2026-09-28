@@ -1604,6 +1604,7 @@ EOS
   : > "$td/timeline.jsonl"
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add docs/plans/finding.md --reason "the gate fix names a file no step listed"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"past its last step — widening step 2 (s1)"* ]]
   [ "$(jq -c '.steps[1].allowed_paths | index("docs/plans/finding.md") != null' "$td/plan.json")" = true ]
   [ "$(jq -r '.[0].step_id' "$td/steps/s1/scope-amendment.json")" = s1 ]
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add "$other/guide/page.md" --reason "the docs page the plan declares for this step"
