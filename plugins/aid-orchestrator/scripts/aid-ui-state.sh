@@ -3,50 +3,45 @@
 # aid-ui-state.sh — the only writer of <project>/docs/design/brand-state.json
 # and of the chapter statuses, bodies and font links in docs/brand/index.html (/aid-ui).
 # The state lives outside the served docs/brand/; temp files go to <project>/.aid-ui/tmp/.
+# Every PM decision comes from the studio page (lib/aid-ui-studio/server.py) through
+# record-answer, and a mutation that needs the PM takes that answer once (P103 Step 4).
 #
 #   init <project>       creates brand-state.json; migrates an old docs/brand/state.json in
 #                        this order: write the new file (template keys + old values), add
 #                        missing sections/markers to index.html, move the old file to
 #                        .aid-ui/state.json.migrated. New file present -> it wins. Markers
 #                        are re-added on every init, so a retry repairs an interrupted run.
-#   await-direction <project> --imp <impeccable CLI> --key <key> --page-url <url>
-#       records direction_pending (key + page url) first, so steps 4-6 refuse while
-#       the round is open, then runs `<imp> serve-question --wait --key <key>`
-#       itself from <project> (repeats on exit 3). ANSWER {optionId != reroll} -> .aid-ui/
-#       direction-answer.json + direction recorded + direction_pending cleared;
-#       ANSWER reroll -> exit 3; page closed (exit 4) -> exit 1; anything
-#       unparseable -> exit 1, no direction recorded. All but a valid answer
-#       leave direction_pending set. The ANSWER's buildPath/buildPathFlipped go to
-#       direction.build_path(_flipped); `BUILD PATH FLIPPED: comp|code` without an
-#       ANSWER records the flip and exits 5, round stays pending (comp: generate the
-#       comps first; code: no comps, just await-direction again). An ANSWER whose
-#       buildPath is present and not comp|code -> exit 1, nothing recorded.
-#       There is deliberately no verb that records a direction from a file the
-#       caller supplies: the answer only ever comes from Impeccable's stdout.
-#   await-choice <project> --kind <slogan|logo|pages> --screen <kind>-<n>.html --page-url <url>
-#       a PM choice on a companion page, taken only from the page server's memory
-#       (GET <url>/aid/confirmed?screen=<file>), never from .events or a file; <url>
-#       must be http://localhost|127.0.0.1|[::1][:port]/ (else exit 2). Opens
-#       choice_pending first (a re-run of the same round keeps its time); accepts
-#       only a confirm newer than that record; records choices.<kind> + the answer
-#       under .aid-ui/ with its hash. No confirm, older confirm, zero cards (slogan
-#       without own text, logo), server unreachable or malformed -> exit 1, nothing
-#       recorded. Every round is a new screen file; a recorded screen records once.
-#       ponytail: asks the server once per call; the agent re-runs it after the PM confirms.
-#   await-choice <project> --kind composition --imp <impeccable CLI> --key <key> --page-url <url>
-#       any further Impeccable round (step 4): the await-direction code path,
-#       recorded as choices.composition, open round in choice_pending.
-#   pending-direction <project> --key <key> --page-url <url>
-#   require-direction <project>
-#   set <project> <product_type|refs|impeccable.surface_brief|impeccable.seed_key> <json>
+#   record-answer <project> --question <id>
+#       asks the studio GET /answer?question=<id> with the session token
+#       (<project>/.aid-ui/studio.token, header X-AID-Token) at $AID_UI_STUDIO_URL
+#       (default http://$AID_UI_HOST:$AID_UI_STUDIO_PORT, 10.20.20.22:3915). The question
+#       must be listed in .aid-ui/studio/payload.json and the answer be newer than its
+#       opened_at. Stores .aid-ui/answers/<id>.json and answers.<id> = {kind, target,
+#       decision, choice, answer_file, answer_sha256, opened_at, at}. Studio unreachable,
+#       unanswered (404) or malformed -> exit 1, the question stays pending, nothing recorded.
+#       A consumed answer is never re-recorded.
+#
+#   Mutations that need the PM take --answer <question id>. The answer must be recorded,
+#   of the verb's kind, for exactly the requested target, decided approve|choose, not in
+#   `consumed`, its file unchanged; the mutation then consumes it. Targets:
+#     set variant|structure|content-plan <json>   kind variant|structure|content_plan,
+#                          target sha256:<sha256 of `jq -S -c -j . <<<json`> (no newline)
+#     approve-page <project> <page>               kind approve_page, target <page>@<fingerprint
+#                          of the page in the recorded build>; refused when the site changed
+#     defer-content <project> <item id>           kind defer_content, target <item id>;
+#                          the content item's status -> deferred_by_pm
+#     exception <project> --check <c> [--page|--viewport|--browser|--role|--state <v>]
+#                          kind exception, target = the selector as JSON: an object with
+#                          keys check page viewport browser role state, every value a string,
+#                          omitted ones "*" (compared as JSON, key order free). One answer
+#                          covers every matching row, bound to the fingerprints of the
+#                          matching pages, _site and flows at that time; a changed
+#                          fingerprint voids it for that page. Reason = the answer's comment.
+#
+#   set <project> <product_type|refs> <json>
 #   set <project> options <json>         keys vision seo images (true|false), identity
 #                                        (false|"new"|"package"); only at step 0
-#   step <project> <0-6>                 direct jumps; refused by gates: any step while a
-#                                        choice is open; 2-6 while an enabled option has
-#                                        no choice (vision->slogan, identity "new"->logo,
-#                                        seo->pages); 4-6 without a direction; 5-6 with
-#                                        build path comp and no composition.
-#                                        A backward step clears `finished`
+#   step <project> <0-7>                 a backward step clears `finished`
 #   roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>
 #   chapter <project> <id> <ceka|navrh|schvaleno> [--by <who>]
 #   reset-approvals <project> <id>...
@@ -57,30 +52,62 @@
 #   fonts <project> <url-or-path>...     <link rel="stylesheet"> lines between <!-- fonts -->
 #                                        markers; only https://fonts.googleapis.com/… or a
 #                                        .css file under docs/brand/fonts/
-#   finish <project>                     after step 6, with a direction and the step gates
-#   spend <project> [--also <dir>]...    records each image under .impeccable/mocks/ (and each
-#                                        --also dir, e.g. assets/plates; must be inside <project>,
-#                                        else exit 2) whose sha256 is not yet in image_spend, as
-#                                        {file, sha256, bytes}; model (and usd) only when its .json
-#                                        sidecar names a model. A copy of a recorded image (same
-#                                        sha256, other file) is not recorded: "duplicate of <file>"
+#   attest <project> <item id> --note <text>   attestations.<id> = {note, at}, only for a
+#                                        coverage map item with an agent: disposition
+#   build-record <project> <site dir>    writes nothing into the site (a site dir holding the
+#                                        project is refused). build id = sha256 over the lines
+#                                        "<relative path> <sha256>" of every file, sorted;
+#                                        a page = every .html but 404.html, key = its relative
+#                                        path; page fingerprint = the same digest over the page
+#                                        and the local non-.html files its href/src name;
+#                                        _site = the digest over every file that is not a page.
+#                                        -> build {id, dir, fingerprints, at} in the state and
+#                                        <project>/.aid-ui/build.json
+#   build-id <dir>                       prints the build id of <dir>
+#   gate-record <project> <result.json>  refuses a result whose build_id or fingerprints are
+#                                        not the recorded build's, or that misses a row of the
+#                                        required matrix (below); stores gate {run_at,
+#                                        result_file, result_sha256, build_id}; an exception
+#                                        that matches no fail|not_covered row is marked resolved
+#                                        (kept as history, never covers again)
+#   finish <project>                     refuses unless: aid-ui-coverage.sh check exits 0 (3 only
+#                                        with an approve|choose coverage_drift answer whose target
+#                                        is the changed item ids, sorted, comma-joined); the site
+#                                        recomputes to the recorded build and the gate is of that
+#                                        build with its result file unchanged; the result has
+#                                        every required row; every page is approved at its
+#                                        current fingerprint; every fail|not_covered row has a
+#                                        live exception; every consumed answer file is unchanged;
+#                                        every content item is confirmed_client|deferred_by_pm
 #
-# Exit: 0 ok, 1 refused, 2 usage. (await-direction, await-choice composition: 3 = re-roll requested;
-# await-direction: 5 = build path flipped, generate the comps and wait again.)
+# Required matrix: every check of checks.yaml (next to the coverage map;
+# AID_UI_COVERAGE_MAP points it at a fixture) x every combination: pages x viewports x
+# browsers (role and state ""); for variant webapp|pwa also structure.flows[].id (as page)
+# x its states x structure.roles (or "") x viewports x browsers. Rows of page _site are
+# extra. A warn row (warn_only checks report warn) needs no exception.
+#
+# Exit: 0 ok, 1 refused, 2 usage.
 # =============================================================================
 set -euo pipefail
 
-TEMPLATE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../skills/ui-design/brand-page" && pwd)/state.template.json"
-CHAPTERS=" produkt vize logo barvy typografie smer komponenty platformy ukazky seo schvaleni "
-SETTABLE=" product_type refs impeccable.surface_brief impeccable.seed_key "
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATE="$HERE/../skills/ui-design/brand-page/state.template.json"
+COVERAGE_MAP="${AID_UI_COVERAGE_MAP:-$HERE/../skills/ui-design/coverage/map.yaml}"
+CHAPTERS=" produkt vize logo barvy typografie smer komponenty platformy ukazky seo struktura obsah kvalita schvaleni "
 
 usage() { echo "ERROR: aid-ui-state.sh: ${1:-usage}; see the header of this script" >&2; exit 2; }
 die() { echo "ERROR: aid-ui-state.sh: $1" >&2; exit 1; }
 today() { date -u +%Y-%m-%d; }
-now() { date -u +%Y-%m-%dT%H:%M:%S.%3NZ; }   # same shape as the companion server's `at`
+now() { date -u +%Y-%m-%dT%H:%M:%S.%3NZ; }
 
 (( $# >= 2 )) || usage "need <verb> <project>"
 VERB="$1"; PROJECT="$2"; shift 2
+ANSWER=""; rest=()   # --answer <id> may stand anywhere after <project>
+while (( $# )); do
+  if [[ "$1" == --answer ]]; then (( $# >= 2 )) || usage "--answer needs a question id"; ANSWER="$2"; shift 2
+  else rest+=("$1"); shift; fi
+done
+set -- "${rest[@]+"${rest[@]}"}"
 BRAND="$PROJECT/docs/brand"
 HTML="$BRAND/index.html"
 STATE="$PROJECT/docs/design/brand-state.json"
@@ -227,7 +254,8 @@ elif mode == "fonts":
     if n != 1:
         fail("fonts markers not found in %s; run: aid-ui-state.sh init" % path)
 elif mode == "upgrade":   # args: chapter ids in page order
-    new = {"vize": ("Vize", "produkt"), "seo": ("SEO", "ukazky")}
+    new = {"vize": ("Vize", "produkt"), "seo": ("SEO", "ukazky"),   # dict order = insertion order
+           "struktura": ("Struktura", "seo"), "obsah": ("Obsah", "struktura"), "kvalita": ("Kvalita", "obsah")}
     for cid, (title, prev) in new.items():
         if '<section id="%s"' % cid in text:
             continue
@@ -277,146 +305,6 @@ opt() {   # opt <name> <args...> — value after --<name>
   while (( $# )); do [[ "$1" == "--$name" ]] && { echo "${2:-}"; return; }; shift; done
 }
 
-require_direction() {   # prints what is missing, returns 1 when not recorded
-  local opt_id file sha pend msg=""
-  opt_id="$(jq -r '.direction.option_id // empty' "$STATE")"
-  file="$(jq -r '.direction.answer_file // empty' "$STATE")"
-  sha="$(jq -r '.direction.answer_sha256 // empty' "$STATE")"
-  pend="$(jq -r 'if .direction_pending then "URL \(.direction_pending.page_url) key \(.direction_pending.key)" else empty end' "$STATE")"
-  if [[ -z "$opt_id" ]]; then msg="no direction recorded (direction.option_id)"
-  elif [[ ! -f "$PROJECT/$file" ]]; then msg="the answer file $file is missing"
-  elif [[ "$(sha256sum "$PROJECT/$file" | cut -d' ' -f1)" != "$sha" ]]; then msg="the answer file $file changed since it was recorded"
-  fi
-  [[ -n "$pend" ]] && msg="${msg:+$msg; }a direction round is open and unanswered: $pend"
-  [[ -z "$msg" ]] && return 0
-  echo "ERROR: aid-ui-state.sh: $msg. The direction is chosen in step 3 by the PM on Impeccable's page." >&2
-  return 1
-}
-
-# gates <n> <what> — refuses step n (or finish) while a choice is open, an enabled
-# option has no choice, or the comp build path has no composition.
-gates() {
-  local msg
-  msg="$(jq -r --argjson n "$1" '[
-    (if .choice_pending then "a choice is open and unanswered: \(.choice_pending.kind) at \(.choice_pending.page_url)" else empty end),
-    (if $n >= 2 and .options.vision == true and (.choices.slogan | not) then "vision is on and no slogan is chosen (step 1)" else empty end),
-    (if $n >= 2 and .options.identity == "new" and (.choices.logo | not) then "identity is on and no logo is chosen (step 1)" else empty end),
-    (if $n >= 2 and .options.seo == true and (.choices.pages | not) then "SEO is on and no page list is chosen (step 1)" else empty end),
-    (if $n >= 5 and .direction.build_path == "comp" and (.choices.composition | not) then "the build path is comp and no composition is chosen (step 4)" else empty end)
-    ] | join("; ")' "$STATE")"
-  [[ -z "$msg" ]] && return 0
-  echo "ERROR: aid-ui-state.sh: $2 refused: $msg" >&2
-  return 1
-}
-
-# impeccable_round <direction|composition> <args...> — P101's gate: the answer only
-# ever comes from `<imp> serve-question --wait` stdout, run by this script.
-impeccable_round() {
-  local kind="$1"; shift
-  IMP="$(opt imp "$@")"; KEY="$(opt key "$@")"; URL="$(opt page-url "$@")"
-  [[ -n "$IMP" && -n "$KEY" && -n "$URL" ]] || usage "await-$kind needs --imp --key --page-url"
-  [[ "$IMP" == */* ]] && IMP="$(realpath -m "$IMP")"   # a relative CLI path survives the cd below
-  [[ "$kind" == direction ]] || refuse_other_pending "$kind"
-  if [[ "$kind" == direction ]]; then jq_write --arg k "$KEY" --arg u "$URL" '.direction_pending = {key: $k, page_url: $u}'
-  else jq_write --arg k "$KEY" --arg u "$URL" --arg at "$(now)" '.choice_pending = {kind: "composition", key_or_screen: $k, page_url: $u, at: $at}'
-  fi
-  while :; do
-    # Impeccable finds .impeccable/questions/<key> in its cwd: run it from the project.
-    rc=0; out="$(cd "$PROJECT" && IMPECCABLE_QUESTION_FORCE=1 "$IMP" serve-question --wait --key "$KEY")" || rc=$?
-    [[ "$rc" -eq 3 ]] || break
-  done
-  if [[ "$rc" -eq 4 ]]; then
-    die "the page closed without the PM's answer; the round stays open: URL $URL key $KEY"
-  fi
-  # The PM flipped the build path on the page before answering; the round stays open.
-  # To comp: the comps are due. To code: no comps, just wait for the answer again.
-  local flip; flip="$(sed -n 's/^BUILD PATH FLIPPED: \(comp\|code\)$/\1/p' <<<"$out" | tail -n1)"
-  if [[ "$kind" == direction && -n "$flip" ]] && ! grep -q '^ANSWER: ' <<<"$out"; then
-    jq_write --arg p "$flip" '.direction.build_path = $p | .direction.build_path_flipped = true'
-    if [[ "$flip" == comp ]]; then
-      echo "BUILD PATH FLIPPED: comp; generate the comps into the declared slots, then await-direction again with key $KEY"
-    else
-      echo "BUILD PATH FLIPPED: code; no comps are needed, run await-direction again with key $KEY"
-    fi
-    exit 5
-  fi
-  [[ "$rc" -eq 0 ]] || die "serve-question --wait exited $rc; nothing recorded: $out"
-  # Impeccable prints `ANSWER: {json}`; a bare JSON line is accepted too. Last one wins.
-  answer="$(sed -n 's/^ANSWER: //; /^{.*}$/p' <<<"$out" | while IFS= read -r l; do
-    jq -ec 'select(type == "object" and (.optionId | type) == "string")' <<<"$l" 2>/dev/null || true; done | tail -n1)"
-  [[ -n "$answer" ]] || die "no ANSWER with an optionId in Impeccable's output; nothing recorded: $out"
-  [[ "$kind" != direction ]] || jq -e '(has("buildPath") | not) or .buildPath == "comp" or .buildPath == "code"' <<<"$answer" >/dev/null ||
-    die "the ANSWER's buildPath is not comp or code; nothing recorded: $answer"
-  OPT="$(jq -r .optionId <<<"$answer")"
-  if [[ "$OPT" == reroll ]]; then echo "REROLL: $answer"; exit 3; fi
-  local file=".aid-ui/$kind-answer.json"
-  mkdir -p "$PROJECT/.aid-ui"
-  printf '%s\n' "$answer" > "$PROJECT/$file"
-  SHA="$(sha256sum "$PROJECT/$file" | cut -d' ' -f1)"
-  jq_write --arg kind "$kind" --arg o "$OPT" --arg k "$KEY" --arg f "$file" --arg sha "$SHA" --arg u "$URL" \
-    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg d "$(today)" --argjson a "$answer" '
-    ({key: $k, answer_file: $f, answer_sha256: $sha, answered_at: $at, page_url: $u}) as $rec
-    | if $kind == "direction"
-      then .direction = ({option_id: $o} + $rec + {build_path: ($a.buildPath // .direction.build_path),   # an answer without them keeps a recorded flip
-        build_path_flipped: (if $a | has("buildPathFlipped") then $a.buildPathFlipped == true else .direction.build_path_flipped == true end)})
-        | del(.direction_pending) | .decisions += [{step: 3, what: "direction \($o)", date: $d}]
-      else .choices.composition = ({id: $o} + $rec) | .choice_pending = null | .decisions += [{step: 4, what: "composition \($o)", date: $d}]
-      end'
-  echo "${kind^^}: $OPT"
-}
-
-# refuse_other_pending <kind> — another kind's open round is never dropped;
-# a new round of the same kind replaces the old one.
-refuse_other_pending() {
-  local pending
-  pending="$(jq -r '.choice_pending | if . then "\(.kind) \(.key_or_screen)" else "" end' "$STATE")"
-  [[ -z "$pending" || "${pending%% *}" == "$1" ]] ||
-    die "a ${pending%% *} round is still open on ${pending#* }; answer it before a $1 round"
-}
-
-# companion_choice <slogan|logo|pages> <args...> — see await-choice in the header.
-companion_choice() {
-  local kind="$1"; shift
-  local screen url since ans rc at n text file sha pending
-  screen="$(opt screen "$@")"; url="$(opt page-url "$@")"
-  [[ -n "$screen" && -n "$url" ]] || usage "await-choice --kind $kind needs --screen --page-url"
-  [[ "$screen" =~ ^$kind-[0-9]+\.html$ ]] || usage "--screen must be a new $kind-<n>.html file per round: $screen"
-  if [[ "$(jq -r --arg k "$kind" '.choices[$k].screen // empty' "$STATE")" == "$screen" ]]; then
-    echo "CHOICE $kind: already recorded from $screen"; return 0
-  fi
-  # Only the companion server on this machine answers (not a page the agent could serve).
-  [[ "$url" =~ ^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/.*)?$ ]] ||
-    usage "--page-url must be http://localhost|127.0.0.1|[::1][:port]/ (the companion server on this machine): $url"
-  refuse_other_pending "$kind"
-  pending="$(jq -r '.choice_pending | if . then "\(.kind) \(.key_or_screen)" else "" end' "$STATE")"
-  if [[ "$pending" != "$kind $screen" ]]; then
-    jq_write --arg k "$kind" --arg s "$screen" --arg u "$url" --arg at "$(now)" \
-      '.choice_pending = {kind: $k, key_or_screen: $s, page_url: $u, at: $at}'
-  fi
-  since="$(jq -r '.choice_pending.at' "$STATE")"
-  rc=0; ans="$(curl -fsS --max-time 10 -- "${url%/}/aid/confirmed?screen=$screen")" || rc=$?
-  [[ "$rc" -ne 22 ]] || die "no confirm on $screen yet; the round stays open: $url"
-  [[ "$rc" -eq 0 ]] || die "companion server unreachable (curl exit $rc); the round stays open: $url"
-  ans="$(jq -ec --arg s "$screen" 'select(type == "object" and .screen == $s and (.at | type) == "string"
-    and (.selected | type) == "array" and all(.selected[]; type == "string") and ((.text // "") | type) == "string")' \
-    <<<"$ans" 2>/dev/null)" || die "malformed answer from ${url%/}/aid/confirmed; nothing recorded"
-  at="$(jq -r .at <<<"$ans")"
-  [[ "$at" > "$since" ]] || die "the confirm on $screen ($at) predates this round ($since); the round stays open: $url"
-  n="$(jq '.selected | length' <<<"$ans")"; text="$(jq -r '.text // ""' <<<"$ans")"
-  if [[ "$n" -eq 0 && "$kind" != pages ]] && [[ "$kind" == logo || -z "$text" ]]; then
-    die "the PM confirmed no $kind; the round stays open: $url"
-  fi
-  file=".aid-ui/choice-$kind.json"
-  mkdir -p "$PROJECT/.aid-ui"
-  printf '%s\n' "$ans" > "$PROJECT/$file"
-  sha="$(sha256sum "$PROJECT/$file" | cut -d' ' -f1)"
-  jq_write --arg kind "$kind" --arg f "$file" --arg sha "$sha" --arg u "$url" --arg s "$screen" \
-    --arg at "$at" --arg d "$(today)" --argjson a "$ans" '
-    .choices[$kind] = {id: ($a.selected | join(",")), screen: $s, answer_file: $f, answer_sha256: $sha, answered_at: $at, page_url: $u}
-    | .choice_pending = null | .decisions += [{step: 1, what: "\($kind) \($a.selected | join(","))", date: $d}]'
-  echo "CHOICE $kind: $(jq -c '{selected, text}' <<<"$ans")"
-}
-
 # write_chapter <id> <status> <by> — the section's data-status and status text, then the state.
 write_chapter() {
   local id="$1" status="$2" by="$3" date=""
@@ -427,6 +315,195 @@ write_chapter() {
   jq_write --arg id "$id" --arg s "$status" --arg d "$date" --arg by "$by" \
     '.chapters[$id] = ({status: $s} + (if $d != "" then {date: $d} else {} end) + (if $by != "" then {by: $by} else {} end))'
 }
+
+# Build ids, the required matrix and the finish conditions (see the header).
+#   build <dir>                                   -> {id, fingerprints}   (id <dir> -> the id only)
+#   exfp <state> <selector>                       -> fingerprints an exception binds to
+#   gate <state> <checks.json> <result>           -> indices of exceptions now resolved
+#   finish <state> <checks.json> <project> [<coverage_drift answer id>]
+BUILD_PY="$(cat <<'PY'
+import hashlib, json, os, re, sys
+from urllib.parse import urlsplit, unquote
+mode, args = sys.argv[1], sys.argv[2:]
+AX = ("page", "viewport", "browser", "role", "state")
+bad = []
+
+def load(p):
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError) as e:
+        print("ERROR: aid-ui-state.sh: cannot read %s: %s" % (p, e), file=sys.stderr)
+        sys.exit(1)
+
+def sha_file(p):
+    with open(p, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+def build(d):
+    files = sorted(os.path.relpath(os.path.join(r, f), d) for r, _, fs in os.walk(d) for f in fs)
+    sha = {f: sha_file(os.path.join(d, f)) for f in files}
+    digest = lambda names: hashlib.sha256("".join("%s %s\n" % (n, sha[n]) for n in sorted(names)).encode()).hexdigest()
+    pages = [f for f in files if f.endswith(".html") and os.path.basename(f) != "404.html"]
+    fps = {}
+    # ponytail: href/src attributes only; srcset and url() inside CSS are not followed (they count in _site)
+    for p in pages:
+        refs = {p}
+        text = open(os.path.join(d, p), encoding="utf-8", errors="replace").read()
+        for u in re.findall(r'''(?:href|src)\s*=\s*["']([^"']+)["']''', text, re.I):
+            s = urlsplit(u)
+            path = unquote(s.path)
+            if s.scheme or s.netloc or not path:
+                continue
+            t = os.path.normpath(path.lstrip("/") if path.startswith("/") else os.path.join(os.path.dirname(p), path))
+            if t in sha and not t.endswith(".html"):   # a link to another page is not part of this one
+                refs.add(t)
+        fps[p] = digest(refs)
+    fps["_site"] = digest([f for f in files if f not in pages])
+    return {"id": digest(files), "fingerprints": fps}
+
+def val(x):
+    return "" if x is None else str(x)
+
+def fp_of(st, fps, page):   # a flow row has no file of its own: bound to the whole build
+    return fps.get(page, "build:" + st["build"]["id"])
+
+def combos(st, ck, fps):
+    vps, brs = [val(v) for v in ck.get("viewports") or []], [val(b) for b in ck.get("browsers") or []]
+    out = [(p, v, b, "", "") for p in sorted(fps) if p != "_site" for v in vps for b in brs]
+    if ((st.get("variant") or {}).get("type")) in ("webapp", "pwa"):
+        s = st.get("structure") or {}
+        roles = [val(r.get("id") if isinstance(r, dict) else r) for r in s.get("roles") or []] or [""]
+        out += [(val(f.get("id")), v, b, r, val(x)) for f in s.get("flows") or [] for x in f.get("states") or []
+                for r in roles for v in vps for b in brs]
+    return out
+
+def missing(st, ck, res, fps):
+    have = {(val(r.get("check")),) + tuple(val(r.get(k)) for k in AX) for r in res.get("rows") or [] if isinstance(r, dict)}
+    return ["%s %s" % (c, "/".join(x or "-" for x in k)) for c in ck.get("checks") or {} for k in combos(st, ck, fps)
+            if (c,) + k not in have]
+
+def matches(sel, row):
+    return sel.get("check") == row.get("check") and all(sel.get(k) in ("*", val(row.get(k))) for k in AX)
+
+def open_rows(res):   # a warn row never blocks (warn_only checks report only warn)
+    return [r for r in res.get("rows") or [] if isinstance(r, dict) and r.get("status") in ("fail", "not_covered")]
+
+if mode in ("build", "id"):
+    b = build(args[0])
+    print(b["id"] if mode == "id" else json.dumps(b, sort_keys=True))
+    sys.exit(0)
+
+st = load(args[0])
+if mode == "exfp":
+    sel, fps = json.loads(args[1]), st["build"]["fingerprints"]
+    keys = list(fps) + [val(f.get("id")) for f in (st.get("structure") or {}).get("flows") or []]
+    print(json.dumps({k: fp_of(st, fps, k) for k in keys if sel["page"] in ("*", k)}, sort_keys=True))
+elif mode == "gate":
+    ck, res = load(args[1]), load(args[2])
+    b = st["build"]
+    if not isinstance(res, dict) or res.get("build_id") != b["id"]:
+        bad.append("the result is for build %s, the recorded build is %s" % ((res or {}).get("build_id"), b["id"]))
+    elif res.get("fingerprints") != b["fingerprints"]:
+        bad.append("the result's page fingerprints are not the recorded build's")
+    else:
+        bad += ["missing row: " + m for m in missing(st, ck, res, b["fingerprints"])]
+    if not bad:
+        rows = open_rows(res)
+        print(json.dumps([i for i, e in enumerate(st.get("exceptions") or [])
+                          if not e.get("resolved") and not any(matches(e["selector"], r) for r in rows)]))
+elif mode == "finish":
+    ck, project = load(args[1]), args[2]
+    drift = args[3] if len(args) > 3 else ""
+    b, g = st.get("build"), st.get("gate")
+    fps = {}
+    if not b:
+        bad.append("no build recorded; run build-record")
+    elif not os.path.isdir(b.get("dir") or ""):
+        bad.append("the recorded site directory %s is gone" % b.get("dir"))
+    else:
+        cur = build(b["dir"])
+        fps = cur["fingerprints"]
+        if cur["id"] != b["id"]:
+            bad.append("the site in %s changed since build-record (build id %s, recorded %s); rebuild, build-record and run the gate again"
+                       % (b["dir"], cur["id"][:12], b["id"][:12]))
+    if not g:
+        bad.append("no gate result recorded; run the gate (gate-record)")
+    elif b:
+        if g.get("build_id") != b["id"]:
+            bad.append("the gate result is for build %s, not the recorded build %s" % (g.get("build_id", "")[:12], b["id"][:12]))
+        rf = g.get("result_file") or ""
+        if not os.path.isfile(rf) or sha_file(rf) != g.get("result_sha256"):
+            bad.append("the gate result %s changed or is missing since gate-record" % rf)
+        else:
+            res = load(rf)
+            if res.get("build_id") != b["id"] or res.get("fingerprints") != fps:
+                bad.append("the gate result does not belong to the current build")
+            bad += ["missing row: " + m for m in missing(st, ck, res, fps)]
+            live = [e for e in st.get("exceptions") or [] if not e.get("resolved")]
+            for r in open_rows(res):
+                if not any(matches(e["selector"], r) and e.get("fingerprints", {}).get(val(r.get("page"))) == fp_of(st, fps, val(r.get("page")))
+                           for e in live):
+                    bad.append("%s row without a live exception: %s %s" % (r.get("status"), r.get("check"),
+                               "/".join(val(r.get(k)) or "-" for k in AX)))
+    appr = st.get("approvals") or {}
+    for p in sorted(fps):
+        if p != "_site" and (appr.get(p) or {}).get("fingerprint") != fps[p]:
+            bad.append("page %s is not approved at its current fingerprint" % p)
+    ans = st.get("answers") or {}
+    for q in list(st.get("consumed") or []) + ([drift] if drift else []):
+        a = ans.get(q) or {}
+        f = os.path.join(project, a.get("answer_file") or "-")
+        if not os.path.isfile(f) or sha_file(f) != a.get("answer_sha256"):
+            bad.append("the answer file of %s changed or is missing since it was recorded" % q)
+    for it in st.get("content_plan") or []:
+        if it.get("status") not in ("confirmed_client", "deferred_by_pm"):
+            bad.append("content item %s is %s (needs confirmed_client or deferred_by_pm)" % (it.get("id"), it.get("status")))
+for m in bad:
+    print("ERROR: aid-ui-state.sh: %s refused: %s" % ({"gate": "gate-record"}.get(mode, mode), m), file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+)"
+
+bpy() { python3 -c "$BUILD_PY" "$@"; }
+
+checks_json() {   # checks.yaml next to the coverage map, as JSON in a temp file
+  local f; f="$(tmpfile checks.json)"
+  yq -o=json . "$(dirname "$COVERAGE_MAP")/checks.yaml" > "$f" || die "cannot read $(dirname "$COVERAGE_MAP")/checks.yaml"
+  echo "$f"
+}
+
+# take_answer <kind> <target> — refuses unless --answer names a recorded, unused
+# approve|choose answer of this kind for exactly this target (see the header).
+take_answer() {
+  local kind="$1" target="$2" why file sha
+  [[ -n "$ANSWER" ]] || die "$VERB refused: needs --answer <question id>, the PM's answer on the studio page"
+  why="$(jq -r --arg id "$ANSWER" --arg k "$kind" --arg t "$target" '
+    .answers[$id] as $a
+    | if $a == null then "no recorded answer \($id); run: aid-ui-state.sh record-answer --question \($id)"
+      elif $a.kind != $k then "answer \($id) is a \($a.kind) answer, not \($k)"
+      elif (if $k == "exception" then (try ($a.target | fromjson) catch null) != ($t | fromjson) else $a.target != $t end)
+        then "answer \($id) is for \($a.target | tojson), not \($t)"
+      elif ($a.decision | IN("approve", "choose") | not) then "answer \($id) decided \($a.decision), not approve or choose"
+      elif any(.consumed[]?; . == $id) then "answer \($id) is already used"
+      else "ok \($a.answer_sha256) \($a.answer_file)" end' "$STATE")"
+  [[ "$why" == "ok "* ]] || die "$VERB refused: $why"
+  why="${why#ok }"; sha="${why%% *}"; file="${why#* }"
+  [[ -f "$PROJECT/$file" && "$(sha256sum "$PROJECT/$file" | cut -d' ' -f1)" == "$sha" ]] ||
+    die "$VERB refused: the answer file $file changed or is missing since it was recorded"
+}
+
+json_sha() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
+
+# build_current — the recorded build, refused when the site changed since build-record.
+build_current() {
+  local dir id
+  read -r id dir < <(jq -r '"\(.build.id // "-") \(.build.dir // "")"' "$STATE")
+  [[ -n "$dir" ]] || die "$VERB refused: no build recorded; run build-record"
+  [[ -d "$dir" ]] || die "$VERB refused: the recorded site directory $dir is gone"
+  [[ "$(bpy id "$dir")" == "$id" ]] || die "$VERB refused: the site in $dir changed since build-record; run build-record again"
+}
+
 
 case "$VERB" in
   init)
@@ -446,56 +523,153 @@ case "$VERB" in
     fi
     ;;
 
-  await-direction)
+  record-answer)
     need_state
-    impeccable_round direction "$@"
-    ;;
-
-  await-choice)
-    need_state
-    KIND="$(opt kind "$@")"
-    case "$KIND" in
-      slogan|logo|pages) companion_choice "$KIND" "$@" ;;
-      composition) impeccable_round composition "$@" ;;
-      *) usage "await-choice needs --kind slogan|logo|pages|composition" ;;
-    esac
-    ;;
-
-  pending-direction)
-    need_state
-    KEY="$(opt key "$@")"; URL="$(opt page-url "$@")"
-    [[ -n "$KEY" && -n "$URL" ]] || usage "pending-direction needs --key --page-url"
-    jq_write --arg k "$KEY" --arg u "$URL" '.direction_pending = {key: $k, page_url: $u}'
-    ;;
-
-  require-direction)
-    need_state
-    require_direction || exit 1
-    echo "direction: $(jq -r .direction.option_id "$STATE")"
+    qid="$(opt question "$@")"
+    [[ "$qid" =~ ^[A-Za-z0-9._-]+$ ]] || usage "record-answer needs --question <id> (letters, digits, . _ -)"
+    jq -e --arg q "$qid" 'any(.consumed[]?; . == $q)' "$STATE" >/dev/null && die "answer $qid is already used; it is not recorded again"
+    tokf="$PROJECT/.aid-ui/studio.token"
+    [[ -r "$tokf" ]] || die "no studio token $tokf; start the studio (aid-ui-serve.sh studio); $qid stays pending"
+    opened="$(jq -r --arg q "$qid" 'first(.questions[]? | select(.id == $q) | .opened_at) // empty' \
+      "$PROJECT/.aid-ui/studio/payload.json" 2>/dev/null)" || opened=""
+    [[ -n "$opened" ]] || die "question $qid is not listed in .aid-ui/studio/payload.json; nothing recorded"
+    url="${AID_UI_STUDIO_URL:-http://${AID_UI_HOST:-10.20.20.22}:${AID_UI_STUDIO_PORT:-3915}}"
+    body="$(tmpfile answer.json)"
+    rc=0; code="$(curl -sS --max-time 10 -o "$body" -w '%{http_code}' -H "X-AID-Token: $(<"$tokf")" \
+      -- "${url%/}/answer?question=$qid")" || rc=$?
+    [[ "$rc" -eq 0 ]] || { rm -f "$body"; die "studio unreachable at $url (curl exit $rc); $qid stays pending, nothing recorded"; }
+    [[ "$code" != 404 ]] || { rm -f "$body"; die "no answer to $qid yet; it stays pending: $url"; }
+    [[ "$code" == 200 ]] || { rm -f "$body"; die "the studio answered HTTP $code for $qid; nothing recorded"; }
+    ans="$(jq -ec --arg q "$qid" 'select(type == "object" and .question == $q and (.kind | type) == "string"
+      and has("target") and (.decision | type) == "string" and (.at | type) == "string")' "$body" 2>/dev/null)" ||
+      { rm -f "$body"; die "malformed answer from the studio for $qid; nothing recorded"; }
+    rm -f "$body"
+    at="$(jq -r .at <<<"$ans")"
+    [[ "$(date -u -d "$at" +%s%N 2>/dev/null || echo 0)" -gt "$(date -u -d "$opened" +%s%N 2>/dev/null || echo 0)" ]] ||
+      die "the answer to $qid ($at) is not newer than its round ($opened); nothing recorded"
+    file=".aid-ui/answers/$qid.json"
+    mkdir -p "$PROJECT/.aid-ui/answers"
+    printf '%s\n' "$ans" > "$PROJECT/$file"
+    sha="$(sha256sum "$PROJECT/$file" | cut -d' ' -f1)"
+    jq_write --arg q "$qid" --arg f "$file" --arg sha "$sha" --arg o "$opened" --argjson a "$ans" \
+      '.answers[$q] = {kind: $a.kind, target: $a.target, decision: $a.decision, choice: $a.choice,
+                       comment: $a.comment, answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at}'
+    echo "ANSWER $qid: $(jq -c '{kind, target, decision, choice}' <<<"$ans")"
     ;;
 
   set)
     need_state
     (( $# == 2 )) || usage "set needs <key> <json>"
-    [[ "$SETTABLE" == *" $1 "* || "$1" == options ]] || usage "set cannot write '$1' (only:$SETTABLE options)"
     jq -e . >/dev/null 2>&1 <<<"$2" || usage "not JSON: $2"
-    if [[ "$1" == options ]]; then
-      jq -e 'type == "object" and all(to_entries[]; if .key == "identity" then IN(.value; false, "new", "package")
-             else IN(.key; "vision", "seo", "images") and (.value | type) == "boolean" end)' >/dev/null <<<"$2" \
-        || usage "options: keys vision seo images (true|false) and identity (false|\"new\"|\"package\"): $2"
-      st="$(jq -r .step "$STATE")"
-      [[ "$st" == 0 ]] || die "set options refused at step $st: the options are chosen at step 0 and cannot change after"
-      jq_write --argjson v "$2" '.options += $v'
-    else
-      jq_write --arg p "$1" --argjson v "$2" 'setpath($p | split("."); $v)'
-    fi
+    case "$1" in
+      options)
+        jq -e 'type == "object" and all(to_entries[]; if .key == "identity" then IN(.value; false, "new", "package")
+               else IN(.key; "vision", "seo", "images") and (.value | type) == "boolean" end)' >/dev/null <<<"$2" \
+          || usage "options: keys vision seo images (true|false) and identity (false|\"new\"|\"package\"): $2"
+        st="$(jq -r .step "$STATE")"
+        [[ "$st" == 0 ]] || die "set options refused at step $st: the options are chosen at step 0 and cannot change after"
+        jq_write --argjson v "$2" '.options += $v'
+        ;;
+      product_type|refs) jq_write --arg p "$1" --argjson v "$2" '.[$p] = $v' ;;
+      variant|structure|content-plan)
+        key="${1//-/_}"
+        case "$key" in
+          variant) shape='type == "object" and IN(.type; "web", "webapp", "pwa") and IN(.brand; "new", "existing", "none")
+                          and (.local | type) == "boolean"' ;;
+          structure) shape='type == "object" and (.pages | type) == "array" and all(.pages[]; (.id | type) == "string")
+                          and ((.flows // []) | all(.[]; (.id | type) == "string" and (.states | type) == "array"))' ;;
+          content_plan) shape='type == "array" and all(.[]; (.id | type) == "string"
+                          and IN(.status; "missing", "draft", "confirmed_client", "deferred_by_pm"))' ;;
+        esac
+        jq -e "$shape" >/dev/null <<<"$2" || usage "set $1: not the $key shape of the Data Model: $2"
+        take_answer "$key" "$(json_sha "$2")"
+        jq_write --arg k "$key" --arg q "$ANSWER" --argjson v "$2" '.[$k] = $v | .consumed += [$q] | .finished = null'
+        ;;
+      *) usage "set cannot write '$1' (only: product_type refs options variant structure content-plan)" ;;
+    esac
+    ;;
+
+  approve-page)
+    need_state
+    (( $# == 1 )) || usage "approve-page needs <page>"
+    fp="$(jq -r --arg p "$1" 'if $p == "_site" then empty else .build.fingerprints[$p] // empty end' "$STATE")"
+    [[ -n "$fp" ]] || die "approve-page refused: $1 is not a page of the recorded build"
+    build_current
+    take_answer approve_page "$1@$fp"
+    jq_write --arg p "$1" --arg f "$fp" --arg q "$ANSWER" --arg at "$(now)" \
+      '.approvals[$p] = {fingerprint: $f, answer: $q, at: $at} | .consumed += [$q]'
+    echo "APPROVED: $1 at ${fp:0:12}"
+    ;;
+
+  defer-content)
+    need_state
+    (( $# == 1 )) || usage "defer-content needs <item id>"
+    jq -e --arg i "$1" 'any(.content_plan[]?; .id == $i)' "$STATE" >/dev/null || die "defer-content refused: no content item $1"
+    take_answer defer_content "$1"
+    jq_write --arg i "$1" --arg q "$ANSWER" \
+      '.content_plan |= map(if .id == $i then .status = "deferred_by_pm" | .answer = $q else . end) | .consumed += [$q]'
+    ;;
+
+  exception)
+    need_state
+    check="$(opt check "$@")"
+    [[ -n "$check" && "$check" != "*" ]] || usage "exception needs --check <check name>"
+    sel="$(jq -n -S -c --arg c "$check" --arg p "$(opt page "$@")" --arg v "$(opt viewport "$@")" --arg b "$(opt browser "$@")" \
+      --arg r "$(opt role "$@")" --arg s "$(opt state "$@")" \
+      '{check: $c, page: $p, viewport: $v, browser: $b, role: $r, state: $s} | map_values(if . == "" then "*" else . end)')"
+    build_current
+    take_answer exception "$sel"
+    fps="$(bpy exfp "$STATE" "$sel")"
+    jq_write --argjson s "$sel" --argjson f "$fps" --arg q "$ANSWER" --arg at "$(now)" \
+      '.exceptions += [{selector: $s, fingerprints: $f, answer: $q, reason: (.answers[$q].comment // ""), at: $at}] | .consumed += [$q]'
+    echo "EXCEPTION: $sel"
+    ;;
+
+  attest)
+    need_state
+    (( $# == 3 )) && [[ "$2" == --note && -n "$3" ]] || usage "attest needs <item id> --note <text>"
+    yq -o=json '.items' "$COVERAGE_MAP" | jq -e --arg i "$1" 'any(.[]; .id == $i
+      and ([.do | if type == "string" then . else .[] end] | any(startswith("agent:"))))' >/dev/null ||
+      die "attest refused: $1 is not a coverage map item with an agent: disposition ($COVERAGE_MAP)"
+    jq_write --arg i "$1" --arg n "$3" --arg at "$(now)" '.attestations[$i] = {note: $n, at: $at}'
+    ;;
+
+  build-id)
+    [[ -d "$PROJECT" ]] || usage "build-id needs <dir>"
+    bpy id "$PROJECT"
+    ;;
+
+  build-record)
+    need_state
+    (( $# == 1 )) && [[ -d "$1" ]] || usage "build-record needs <site dir>"
+    site="$(realpath "$1")"; root="$(realpath "$PROJECT")"
+    [[ "$root/" != "$site/"* ]] || die "build-record refused: the site $site holds the project; the state would land inside it"
+    b="$(bpy build "$site")"
+    rec="$(jq -c --arg d "$site" --arg at "$(now)" '{id, dir: $d, fingerprints, at: $at}' <<<"$b")"
+    mkdir -p "$PROJECT/.aid-ui"
+    tmp="$(tmpfile build.json)"; jq . <<<"$rec" > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/build.json"
+    jq_write --argjson r "$rec" '.build = $r | .finished = null'
+    echo "BUILD: $(jq -r .id <<<"$rec")"
+    ;;
+
+  gate-record)
+    need_state
+    (( $# == 1 )) && [[ -f "$1" ]] || usage "gate-record needs <result.json>"
+    jq -e '.build.id' "$STATE" >/dev/null || die "gate-record refused: no build recorded; run build-record"
+    res="$(realpath "$1")"
+    ck="$(checks_json)"
+    rc=0; resolve="$(bpy gate "$STATE" "$ck" "$res")" || rc=$?
+    rm -f "$ck"
+    [[ "$rc" -eq 0 ]] || exit 1
+    jq_write --arg f "$res" --arg sha "$(sha256sum "$res" | cut -d' ' -f1)" --argjson r "$(jq -c '{run_at, build_id}' "$res")" \
+      --argjson idx "$resolve" '.gate = {run_at: $r.run_at, result_file: $f, result_sha256: $sha, build_id: $r.build_id}
+      | reduce $idx[] as $i (.; .exceptions[$i].resolved = $r.run_at) | .finished = null'
+    echo "GATE: $(jq -r '[.rows[] | .status] | group_by(.) | map("\(.[0]) \(length)") | join(", ")' "$res")"
     ;;
 
   step)
     need_state
-    [[ "${1:-}" =~ ^[0-6]$ ]] || usage "step needs 0-6"
-    gates "$1" "step $1" || exit 1
-    if (( $1 >= 4 )) && ! require_direction; then die "step $1 refused: run step 3 first (/aid-ui 3)"; fi
+    [[ "${1:-}" =~ ^[0-7]$ ]] || usage "step needs 0-7"
     jq_write --argjson n "$1" 'if $n < .step then .finished = null else . end | .step = $n'
     ;;
 
@@ -563,47 +737,25 @@ case "$VERB" in
     html_edit fonts "$PROJECT" "$@"
     ;;
 
-  spend)
-    need_state
-    root="$(realpath "$PROJECT")"
-    dirs=("$root/.impeccable/mocks")
-    while (( $# )); do
-      [[ "$1" == --also && -n "${2:-}" ]] || usage "spend takes only --also <dir>"
-      d="$(realpath -m "$PROJECT/$2")"
-      [[ "$d" == "$root"/* && -d "$d" ]] || usage "--also must be a directory inside $PROJECT: $2"
-      dirs+=("$d"); shift 2
-    done
-    added=0; dups=0
-    while IFS= read -r -d '' f; do
-      rel="${f#"$root"/}"; sha="$(sha256sum "$f" | cut -d' ' -f1)"
-      orig="$(jq -r --arg s "$sha" 'first(.image_spend[]? | select(.sha256 == $s) | .file) // empty' "$STATE")"
-      if [[ -n "$orig" ]]; then
-        [[ "$orig" == "$rel" ]] || { echo "  $rel: duplicate of $orig"; dups=$((dups + 1)); }
-        continue
-      fi
-      # Impeccable's prompt sidecar (<image>.json or <stem>.json); model and usd only as it states them
-      extra='{}'
-      for side in "$f.json" "${f%.*}.json"; do
-        [[ -f "$side" ]] || continue
-        extra="$(jq -c 'if (.model | type) == "string" then {model} + (if (.usd | type) == "number" then {usd} else {} end)
-                        else {} end' "$side" 2>/dev/null)" || extra='{}'
-        break
-      done
-      jq_write --arg f "$rel" --arg s "$sha" --argjson b "$(stat -c %s "$f")" --argjson x "$extra" \
-        '.image_spend += [{file: $f, sha256: $s, bytes: $b} + $x]'
-      added=$((added + 1))
-    done < <(for d in "${dirs[@]}"; do [[ -d "$d" ]] && find "$d" -type f \
-               \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) -print0 | sort -z; done)
-    jq -r --argjson n "$added" --argjson d "$dups" '"IMAGES: \($n) new, \($d) duplicate, \(.image_spend | length) recorded"
-      + ([.image_spend[].usd | numbers] | if length > 0 then ", $\(add) priced" else "" end)' "$STATE"
-    ;;
 
   finish)
     need_state
-    st="$(jq -r .step "$STATE")"
-    [[ "$st" == 6 ]] || die "finish refused: the project is at step $st; finish comes after step 6"
-    require_direction || exit 1
-    gates 6 finish || exit 1
+    rc=0; cov="$(bash "$HERE/aid-ui-coverage.sh" check "$PROJECT" 2>&1)" || rc=$?
+    drift=""
+    if [[ "$rc" -eq 3 ]]; then
+      # lines "changed|moved: <old id> -> <new id>  (<text>)"; the target names the new ids
+      ids="$(while IFS= read -r l; do [[ "$l" =~ ^(changed|moved):\  ]] || continue; l="${l#* -> }"; echo "${l%%  (*}"
+             done <<<"$cov" | LC_ALL=C sort | paste -sd, -)"
+      drift="$(jq -r --arg t "$ids" 'first(.answers | to_entries[] | select(.value.kind == "coverage_drift"
+        and .value.target == $t and (.value.decision | IN("approve", "choose"))) | .key) // empty' "$STATE")"
+      [[ -n "$drift" ]] || die "finish refused: the standards changed since the coverage map and no coverage_drift answer names exactly these items: $ids"
+    elif [[ "$rc" -ne 0 ]]; then
+      die "finish refused: aid-ui-coverage.sh check exited $rc: $cov"
+    fi
+    ck="$(checks_json)"
+    rc=0; bpy finish "$STATE" "$ck" "$PROJECT" "$drift" || rc=$?
+    rm -f "$ck"
+    [[ "$rc" -eq 0 ]] || exit 1
     jq_write --arg d "$(today)" '.finished = $d'
     echo "FINISHED: $(today)"
     ;;

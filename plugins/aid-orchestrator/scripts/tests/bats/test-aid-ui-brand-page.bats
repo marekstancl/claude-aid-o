@@ -49,13 +49,15 @@ setup() {
   ! grep -qE -- '--[a-z-]+ *:' "$PAGE/roles.css" || false
 }
 
-@test "state template has the required keys including direction" {
-  jq -e '.step == 0 and .product_type == "" and has("direction") and .direction == null
-    and (.chapters | keys | length == 11) and all(.chapters[]; .status == "ceka")
+@test "state template has the Data Model keys and no Impeccable fields" {
+  jq -e '.step == 0 and .product_type == "" and .variant == null and .structure == null
+    and .content_plan == [] and .answers == {} and .consumed == [] and .attestations == {}
+    and .build == null and .approvals == {} and .gate == null and .exceptions == []
+    and (.chapters | keys | length == 14) and all(.chapters[]; .status == "ceka")
+    and (.chapters | has("kvalita") and has("struktura") and has("obsah"))
     and .options == {vision: false, identity: false, seo: false, images: false}
-    and .choices == {} and .choice_pending == null and .image_spend == [] and .finished == null
-    and (.refs | type == "array") and (.decisions | type == "array")
-    and (.impeccable | has("product") and has("design") and has("surface_brief") and has("seed_key"))' \
+    and .finished == null and (.refs | type == "array") and (.decisions | type == "array")
+    and (has("impeccable") or has("image_spend") or has("direction") or has("choices") | not)' \
     "$PAGE/state.template.json"
 }
 
