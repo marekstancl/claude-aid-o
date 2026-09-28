@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # P102 Step 7 — aid-ui-seo-check.py, the technical SEO gate of /aid-ui step 6.
 
 setup() {

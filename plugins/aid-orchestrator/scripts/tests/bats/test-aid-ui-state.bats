@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
 # P101 Step 5 — aid-ui-state.sh: the direction gate is code. A direction is
 # recorded only from Impeccable's own `serve-question --wait` output (a stub
 # CLI here); steps 4-6 refuse without it.
