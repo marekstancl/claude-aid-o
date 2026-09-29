@@ -53,6 +53,10 @@
 #                          chapter id, a newline, then the stored body, the bytes between
 #                          <!-- body:<id> --> and <!-- /body:<id> -->> (the id binds the
 #                          answer to this chapter). ceka and navrh need no answer.
+#     chapter-all <project> [--by <who>]         kind handover, target = what `chapter-all-target
+#                          <project>` prints: sha256:<sha256 of "<id>\n<chapter-target of id>\n" for
+#                          every chapter in navrh or schvaleno, in CHAPTERS order> (a changed body
+#                          of any of them changes it). One answer approves all of them.
 #     approve-page <project> <page>               kind approve_page, target <page>@<fingerprint
 #                          of the page in the recorded build>; refused when the site changed
 #     defer-content <project> <item id>           kind defer_content, target <item id>;
@@ -73,6 +77,8 @@
 #   roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>
 #   chapter <project> <id> <ceka|navrh|schvaleno> [--by <who>]   schvaleno needs --answer <id>
 #   chapter-target <project> <id>        prints the target of a `schvaleno` answer for chapter <id>
+#   chapter-all <project> [--by <who>] --answer <id>   every chapter in navrh|schvaleno -> schvaleno
+#   chapter-all-target <project>         prints the target of that one handover answer
 #   reset-approvals <project> <id>...
 #   body <project> <id> --file <html>    replaces only what is between <!-- body:<id> -->
 #                                        and <!-- /body:<id> -->; refuses active or
@@ -592,6 +598,24 @@ print("sha256:" + hashlib.sha256((sys.argv[2] + "\n" + text[i + len(a):j]).encod
 PY
 }
 
+# ready_chapters — chapter ids in navrh or schvaleno, in CHAPTERS order (what one handover covers)
+ready_chapters() {
+  local id
+  for id in $CHAPTERS; do
+    case "$(jq -r --arg id "$id" '.chapters[$id].status // "ceka"' "$STATE")" in navrh|schvaleno) echo "$id" ;; esac
+  done
+  return 0
+}
+
+# chapter_all_target — sha256 over "<id>\n<chapter_target id>\n" of every ready chapter
+chapter_all_target() {
+  local id ids t
+  ids="$(ready_chapters)"
+  [[ -n "$ids" ]] || die "no chapter in navrh or schvaleno; nothing to hand over"
+  { for id in $ids; do t="$(chapter_target "$id")" || exit 1; printf '%s\n%s\n' "$id" "$t"; done; } |
+    sha256sum | { read -r h _; printf 'sha256:%s' "$h"; }
+}
+
 json_sha() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
 
 # build_current — the recorded build, refused when the site changed since build-record.
@@ -836,6 +860,32 @@ case "$VERB" in
     else
       write_chapter "$1" "$2" "$by"
     fi
+    ;;
+
+  chapter-all)
+    need_state
+    (( $# == 0 || $# == 2 )) || usage "chapter-all takes [--by <who>]"
+    by=""; (( $# == 2 )) && { [[ "$1" == --by ]] || usage "unknown option $1"; by="$2"; }
+    tgt="$(chapter_all_target)" || exit 1
+    take_answer handover "$tgt"
+    # all or nothing: a failure part way restores index.html and the state as they were
+    # (copied back into the same files, so their mode and inode stay; also on INT/TERM)
+    bh="$(tmpfile index.html)"; bs="$(tmpfile brand-state.json)"; cp -p "$HTML" "$bh"; cp -p "$STATE" "$bs"
+    restore() { cat "$bh" > "$HTML"; cat "$bs" > "$STATE"; rm -f "$bh" "$bs"; }
+    trap 'restore; exit 1' INT TERM
+    ids="$(ready_chapters | jq -R . | jq -sc .)"
+    if ! ( for id in $(jq -r '.[]' <<<"$ids"); do write_chapter "$id" schvaleno "$by"; done
+           jq_write --arg q "$ANSWER" --argjson ids "$ids" \
+             'reduce $ids[] as $id (.; .chapters[$id].answer = $q) | .consumed += [$q]' ); then
+      trap - INT TERM; restore; die "chapter-all refused: a chapter could not be written; nothing changed"
+    fi
+    trap - INT TERM; rm -f "$bh" "$bs"
+    ;;
+
+  chapter-all-target)
+    need_state
+    (( $# == 0 )) || usage "chapter-all-target takes no arguments"
+    chapter_all_target; echo
     ;;
 
   chapter-target)

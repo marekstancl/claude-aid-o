@@ -84,13 +84,14 @@ setup() {
   done
 }
 
-@test "every PM-chosen write in the steps passes --answer: options, refs, chapter schvaleno" {
+@test "every PM-chosen write in the steps passes --answer: options, refs, chapter schvaleno, chapter-all" {
   for s in 'set <project> options' 'set <project> refs' 'set <project> variant' 'set <project> structure' 'set <project> content-plan'; do
     line="$(grep -rhF -- "$s" "$SK/steps")" || { echo "missing: $s"; return 1; }
     [[ "$line" == *'--answer <id>'* ]] || { echo "no --answer: $line"; return 1; }
   done
   ! grep -rn 'schvaleno --by' "$SK/steps" | grep -v -- '--answer' || false
-  grep -qF 'chapter-target <project>' "$SK/steps/7-verify.md"
+  grep -qF 'chapter-all-target <project>' "$SK/steps/7-verify.md"
+  grep -F 'chapter-all <project>' "$SK/steps/7-verify.md" | grep -qF -- '--answer <id'
 }
 
 @test "no step passes JSON as a single-quoted shell literal; every http.server binds 127.0.0.1" {

@@ -85,14 +85,18 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
      zadání pro vyhledávače a obsah stránky." (`next` se ukáže až po schválení,
      proto začíná tím, co udělám, ne „Po schválení…")
    Každou přijatou odpověď si studio samo uloží i s otázkou, kartami a kopií náhledů do
-   `.aid-ui/studio/history.jsonl` (záložka „Průběh", PM si proklikne všechna rozhodnutí);
+   `.aid-ui/studio/history.jsonl`; studio je jedna stránka: nahoře kroky z `steps`, v kroku
+   témata podle druhu otázky, otevřená otázka i minulé rozhodnutí ve stejném vzhledu (minulé
+   podle `step`, ve kterém padlo), takže PM si proklikne celý průběh;
    agent ho nepíše a nečte jako rozhodnutí.
 2. `target` je to, co PM schvaluje: u `set variant|options|structure|content-plan|refs`
    `sha256:` + `jq -S -c -j . <<<"$json" | sha256sum` přesně toho JSON, který
    pak zapíšeš (JSON vždy v souboru pod `.aid-ui/` psaném nástrojem Write,
    do příkazu jako `"$(cat <soubor>)"`); u převzetí kapitoly
    `aid-ui-state.sh chapter-target <project> <id>` (váže id kapitoly i její
-   uložené tělo, odpověď pro jinou kapitolu neplatí); u ostatních druhů podle
+   uložené tělo, odpověď pro jinou kapitolu neplatí), u převzetí všech kapitol
+   najednou (`handover`, krok 7) `aid-ui-state.sh chapter-all-target <project>`;
+   u ostatních druhů podle
    hlavičky `aid-ui-state.sh`.
 3. `aid-ui-serve.sh studio <project>` (spustí nebo použije běžící studio)
    vypíše jednorázový odkaz `URL: http://<host>:3915/?k=<kód>`; ten dej PM

@@ -6,7 +6,7 @@ user_invocable: false
 
 # Krok 7 - Ověření a převzetí
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-09-29
 
 ## Cíl
 
@@ -57,15 +57,16 @@ a `frontend-build-standard.md` (čti živě).
    `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-seo-check.py" <složka buildu> --brief docs/seo/brief.md --json .aid-ui/seo/check.json`;
    souhrn do kapitoly `seo` přes `aid-ui-state.sh body <project> seo --file <soubor>`.
 8. Kapitola `schvaleni` (tělo přes `aid-ui-state.sh body <project> schvaleni --file <soubor>`):
-   stránky se schválením, výjimky s důvodem, souhrn souladu. Převzetí
-   kapitoly = otázka ve studiu druhu podle hlavičky `aid-ui-state.sh`
-   (vize → `vision`, logo → `identity`, seo → `seo_brief`, struktura →
-   `structure`, obsah → `content_plan`, produkt → `variant`, smer →
-   `direction`, ostatní → `design_standard`) s `target` =
-   `aid-ui-state.sh chapter-target <project> <id>`; po `approve`
-   `aid-ui-state.sh chapter <project> <id> schvaleno --by PM --answer <id otázky>`
-   pro každou převzatou kapitolu, `schvaleni` poslední. Změna těla po
-   otevření otázky → otázka znovu.
+   stránky se schválením, výjimky s důvodem, souhrn souladu; pak
+   `aid-ui-state.sh chapter <project> schvaleni navrh`. Převzetí všech kapitol
+   = **jedna** otázka ve studiu druhu `handover` („Převzít všechny kapitoly?",
+   v `body` seznam kapitol ve stavu `navrh`/`schvaleno`) s `target` =
+   `aid-ui-state.sh chapter-all-target <project>`; po `approve`
+   `aid-ui-state.sh chapter-all <project> --by PM --answer <id otázky>`.
+   `return` s komentářem → uprav jmenované kapitoly a otázku polož znovu
+   (nový target). Změna těla kterékoli kapitoly po otevření otázky → otázka
+   znovu. Jednotlivé `chapter <id> schvaleno` zůstává pro kapitolu, kterou
+   krok schvaluje sám.
 9. `aid-ui-state.sh finish <project>` - běh končí. Odmítne → jmenuje, co
    chybí (neschválená stránka, řádek bez výjimky, položka obsahu mimo
    `confirmed_client`/`deferred_by_pm`, změna pokrytí); vrať se k bodu,
@@ -90,4 +91,4 @@ zákazníka, nebo tisk do PDF.
 Brána nebo skript skončí chybou → `ERROR:` PM s krokem, který to opraví;
 nic se neschvaluje. Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4.
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-09-29

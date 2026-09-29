@@ -30,7 +30,8 @@ sent, name the same origin; else 403):
   GET  /                      studio.html with a session cookie; without one a page
                               "Otevřete odkaz ze zprávy agenta" (no token, no state)
   GET  /state                 [auth] payload + per-question `answered` and, when answered,
-                              `answer` = {decision, choice, choice_title, comment}
+                              `answer` = {decision, choice, choice_title, comment}; `project` =
+                              the project directory's name (the page header)
   GET  /preview?question=&card=  the card's preview file, 404 while pending
   GET  /report                <project>/docs/design/soulad-se-standardy.md, escaped
   GET  /licence               Impeccable NOTICE (the page pattern's source)
@@ -71,7 +72,7 @@ from urllib.parse import urlsplit, parse_qs
 
 KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "content_plan", "defer_content", "facts", "references", "direction",
-         "approve_page", "exception", "coverage_drift", "design_standard"}
+         "approve_page", "exception", "coverage_drift", "design_standard", "handover"}
 # Card fields the page shows (a step may turn any into state); snapshotted with the answer.
 CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "palette", "risk", "uniqueness")
 DECISIONS = {"approve", "choose", "return", "reroll", "reroll_safer", "reroll_bolder"}
@@ -325,6 +326,7 @@ class Studio(BaseHTTPRequestHandler):
                         x["answer"] = {"decision": a["decision"], "choice": a["choice"], "comment": a["comment"],
                                        "choice_title": next((c["title"] for c in a["cards"]
                                                              if c["id"] == a["choice"]), None)}
+            p["project"] = os.path.basename(PROJECT)
             self.send(200, p)
         elif u.path == "/answer":
             if not self.gate(True) or (p := self.payload()) is None:
@@ -390,7 +392,7 @@ class Studio(BaseHTTPRequestHandler):
                 data = fh.read()
             if parts == ["index.html"]:   # the studio's tab bar; the page itself stays client-clean
                 data = data.replace(b"<body>", b'<body><nav class="studio-tabs" aria-label="Studio">'
-                                    b'<a href="/">Rozhodov\xc3\xa1n\xc3\xad</a><a href="/brand/" aria-current="page">'
+                                    b'<a href="/">Studio</a><a href="/brand/" aria-current="page">'
                                     b'V\xc3\xbdsledek pro klienta</a></nav>', 1)
             self.send(200, data, ctype, "default-src 'none'; style-src 'self' 'unsafe-inline'; "
                       "img-src 'self' data:; font-src 'self'; frame-ancestors 'none'")

@@ -191,6 +191,71 @@ ready() {
   grep -q '<section id="barvy" data-status="navrh">' "$PROJ/docs/brand/index.html"
 }
 
+@test "chapter-all: one handover answer approves every chapter in navrh or schvaleno, once" {
+  "$SCRIPT" chapter "$PROJ" barvy navrh
+  "$SCRIPT" chapter "$PROJ" vize navrh
+  approve_chapter logo identity q0
+  ans h1 handover "$("$SCRIPT" chapter-all-target "$PROJ")"
+  run "$SCRIPT" chapter-all "$PROJ" --by PM --answer h1
+  [ "$status" -eq 0 ]
+  for id in vize logo barvy; do
+    [ "$(jq -r --arg i "$id" '.chapters[$i].status' "$STATE")" = schvaleno ]
+    [ "$(jq -r --arg i "$id" '.chapters[$i].answer' "$STATE")" = h1 ]
+  done
+  [ "$(jq -r .chapters.typografie.status "$STATE")" = ceka ]
+  grep -q '<section id="barvy" data-status="schvaleno">' "$HTML"
+  [ "$(jq '[.consumed[] | select(. == "h1")] | length' "$STATE")" = 1 ]
+  run "$SCRIPT" chapter-all "$PROJ" --by PM --answer h1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"already used"* ]]
+}
+
+@test "chapter-all: a chapter changed after the question was asked refuses the answer" {
+  echo '<p>a</p>' > "$BATS_TEST_TMPDIR/a.html"
+  echo '<p>b</p>' > "$BATS_TEST_TMPDIR/b.html"
+  "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/a.html"
+  "$SCRIPT" chapter "$PROJ" barvy navrh
+  ans h1 handover "$("$SCRIPT" chapter-all-target "$PROJ")"
+  "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/b.html"
+  run "$SCRIPT" chapter-all "$PROJ" --answer h1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"answer h1 is for"* ]]
+  [ "$(jq -r .chapters.barvy.status "$STATE")" = navrh ]
+}
+
+@test "chapter-all: needs a handover answer; nothing ready is an error" {
+  run "$SCRIPT" chapter-all-target "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nothing to hand over"* ]]
+  "$SCRIPT" chapter "$PROJ" barvy navrh
+  ans d1 design_standard "$("$SCRIPT" chapter-all-target "$PROJ")"
+  run "$SCRIPT" chapter-all "$PROJ" --answer d1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not handover"* ]]
+  run "$SCRIPT" chapter-all "$PROJ"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"needs --answer"* ]]
+}
+
+@test "chapter-all: a chapter that cannot be written leaves every chapter and the answer untouched" {
+  "$SCRIPT" chapter "$PROJ" vize navrh
+  "$SCRIPT" chapter "$PROJ" barvy navrh
+  ans h1 handover "$("$SCRIPT" chapter-all-target "$PROJ")"
+  sed -i 's/<!-- status:barvy -->/<!-- statux:barvy -->/' "$HTML"
+  before="$(sha256sum "$HTML" "$STATE")"
+  run "$SCRIPT" chapter-all "$PROJ" --answer h1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nothing changed"* ]]
+  [ "$(sha256sum "$HTML" "$STATE")" = "$before" ]
+  [ "$(jq -r .chapters.vize.status "$STATE")" = navrh ]
+  [ "$(jq '[.consumed[]? | select(. == "h1")] | length' "$STATE")" = 0 ]
+}
+
+@test "every question kind the studio server accepts has a Czech label on the studio page" {
+  kinds="$(python3 -c "import ast,re,sys; s=open(sys.argv[1]).read(); print(' '.join(sorted(ast.literal_eval(re.search(r'KINDS = (\{[^}]*\})', s).group(1)))))" "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/server.py")"
+  for k in $kinds; do grep -q "[ {]$k: \"" "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html" || { echo "no label: $k"; false; }; done
+}
+
 @test "unknown chapter id: exit 2" {
   run "$SCRIPT" chapter "$PROJ" nope navrh
   [ "$status" -eq 2 ]
