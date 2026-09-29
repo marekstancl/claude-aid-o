@@ -84,6 +84,9 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
      stránka a vlastní stránka pro neexistující adresu.", `next` „Připravím
      zadání pro vyhledávače a obsah stránky." (`next` se ukáže až po schválení,
      proto začíná tím, co udělám, ne „Po schválení…")
+   Každou přijatou odpověď si studio samo uloží i s otázkou, kartami a kopií náhledů do
+   `.aid-ui/studio/history.jsonl` (záložka „Průběh", PM si proklikne všechna rozhodnutí);
+   agent ho nepíše a nečte jako rozhodnutí.
 2. `target` je to, co PM schvaluje: u `set variant|options|structure|content-plan|refs`
    `sha256:` + `jq -S -c -j . <<<"$json" | sha256sum` přesně toho JSON, který
    pak zapíšeš (JSON vždy v souboru pod `.aid-ui/` psaném nástrojem Write,

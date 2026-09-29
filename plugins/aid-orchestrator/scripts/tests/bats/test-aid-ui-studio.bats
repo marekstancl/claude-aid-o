@@ -290,3 +290,24 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   curl -s -D "$BATS_TEST_TMPDIR/h" -o /dev/null -H "X-AID-Token: $TOKEN" "$URL/brand/"
   grep -qi "content-security-policy: default-src 'none'" "$BATS_TEST_TMPDIR/h"
 }
+
+@test "an accepted answer is kept in the history with the question, its cards and a copy of the preview; /history serves it" {
+  printf 'PNG1' > "$P/.aid-ui/studio/a.png"
+  payload '2020-01-01T00:00:00Z'
+  [ "$(answer "$choose_a")" = 200 ]
+  [ -f "$P/.aid-ui/studio/history.jsonl" ]
+  jq -e 'select(.question.id == "q1") | .answer.decision == "choose" and .answer.choice == "a"
+         and (.cards | length) == 3 and .step == "Směr"' "$P/.aid-ui/studio/history.jsonl" >/dev/null
+  kept="$(jq -r 'select(.question.id == "q1") | .cards[] | select(.id == "a") | .preview' "$P/.aid-ui/studio/history.jsonl")"
+  [ "$kept" = "history/q1/a.png" ]
+  # a later change of the live preview does not change what the history shows
+  printf 'PNG2' > "$P/.aid-ui/studio/a.png"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/history/preview?question=q1&card=a")" = 200 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/body")" = PNG1 ]
+  # cards whose preview is not a raster file inside the studio keep no preview
+  [ "$(jq -r 'select(.question.id == "q1") | [.cards[] | select(.id != "a") | .preview] | map(. == null) | all' "$P/.aid-ui/studio/history.jsonl")" = true ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/history")" = 200 ]
+  jq -e 'length == 1 and .[0].question.title == "Vyberte směr"' "$BATS_TEST_TMPDIR/body" >/dev/null
+  [ "$(code "$URL/history")" = 403 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/history/preview?question=q1&card=b")" = 404 ]
+}

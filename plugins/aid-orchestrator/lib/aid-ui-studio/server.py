@@ -34,6 +34,11 @@ sent, name the same origin; else 403):
   GET  /preview?question=&card=  the card's preview file, 404 while pending
   GET  /report                <project>/docs/design/soulad-se-standardy.md, escaped
   GET  /licence               Impeccable NOTICE (the page pattern's source)
+  GET  /history               [auth] every answered question as the studio showed it: the question,
+                              its cards (previews copied aside) and the answer, oldest first, from
+                              <project>/.aid-ui/studio/history.jsonl (display only; decisions stay the
+                              in-memory answers above)
+  GET  /history/preview?question=&card=  a card preview kept with the history
   GET  /brand/<file>          [auth] the project's brand page (<project>/docs/brand/): index.html,
                               top-level *.css, assets/ and fonts/ only (what aid-ui-serve.sh brand
                               serves), no scripts (CSP); the studio's "Výsledek pro klienta" tab
@@ -191,6 +196,46 @@ def preview_sha(c):
         return hashlib.sha256(fh.read()).hexdigest()
 
 
+HISTORY = os.path.join(STUDIO, "history.jsonl")
+HISTORY_DIR = os.path.join(STUDIO, "history")
+SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def keep_history(q, cards, answer, steps):
+    """Append the answered question as shown (question, full cards, answer, current step) to
+    history.jsonl; each raster preview is copied under history/<question>/ so a later payload
+    or preview change does not alter what the PM saw. Display only, never read as a decision."""
+    qdir = os.path.join(HISTORY_DIR, SAFE.sub("_", q["id"]))
+    kept = []
+    for c in cards:
+        c = dict(c)
+        src = os.path.realpath(os.path.join(STUDIO, str(c.get("preview") or "")))
+        ext = os.path.splitext(src)[1].lower()
+        if c.get("preview") and src.startswith(STUDIO + os.sep) and os.path.isfile(src) and ext in IMAGES:
+            os.makedirs(qdir, exist_ok=True)
+            dst = os.path.join(qdir, SAFE.sub("_", str(c.get("id"))) + ext)
+            with open(src, "rb") as fi, open(dst, "wb") as fo:
+                fo.write(fi.read())
+            c["preview"] = os.path.relpath(dst, STUDIO)
+        else:
+            c["preview"] = None
+        kept.append(c)
+    cur = next((x for x in steps or [] if isinstance(x, dict) and x.get("status") == "current"), None)
+    entry = {"question": {k: v for k, v in q.items() if k not in ("answered", "answer")},
+             "cards": kept, "step": (cur or {}).get("title"),
+             "answer": {k: answer.get(k) for k in ("decision", "choice", "comment", "at")}}
+    with open(HISTORY, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def read_history():
+    try:
+        with open(HISTORY, encoding="utf-8") as fh:
+            return [json.loads(l) for l in fh if l.strip()]
+    except (OSError, ValueError):
+        return []
+
+
 def next_id(qid):
     m = re.fullmatch(r"(.*)\.r(\d+)", qid)
     return "%s.r%d" % (m.group(1), int(m.group(2)) + 1) if m else qid + ".r1"
@@ -305,6 +350,22 @@ class Studio(BaseHTTPRequestHandler):
                 return
             with open(f, "rb") as fh:
                 self.send(200, fh.read(), ctype, "sandbox; default-src 'none'; frame-ancestors 'none'")
+        elif u.path == "/history":
+            if not self.gate(True):
+                return
+            self.send(200, read_history())
+        elif u.path == "/history/preview":
+            if not self.gate(True):
+                return
+            e = next((h for h in read_history() if h.get("question", {}).get("id") == q.get("question")), None)
+            c = next((c for c in (e or {}).get("cards") or [] if c.get("id") == q.get("card")), None)
+            f = os.path.realpath(os.path.join(STUDIO, str((c or {}).get("preview") or "")))
+            ctype = IMAGES.get(os.path.splitext(f)[1].lower())
+            if not c or not f.startswith(HISTORY_DIR + os.sep) or not ctype or not os.path.isfile(f):
+                self.send(404, {"error": "no such preview"})
+                return
+            with open(f, "rb") as fh:
+                self.send(200, fh.read(), ctype, "sandbox; default-src 'none'; frame-ancestors 'none'")
         elif u.path == "/brand" or u.path.startswith("/brand/"):
             if not self.gate(True):
                 return
@@ -404,6 +465,10 @@ class Studio(BaseHTTPRequestHandler):
                                "opened_at": iso(t), "title": cur.get("title"),
                                "prompt": cur.get("prompt"), "rerolled_from": qid}
             ANSWERS[qid] = a
+            try:
+                keep_history(cur, [c for c in p["cards"] if isinstance(c, dict) and c.get("question") == qid], a, p.get("steps"))
+            except OSError as e:   # the history is a record for the PM, never a reason to lose the answer
+                self.log_message("history not written: %s", e)
         self.log_message("answer %s: %s", qid, d)
         self.send(200, a)
 

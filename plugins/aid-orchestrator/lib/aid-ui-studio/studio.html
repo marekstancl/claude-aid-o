@@ -129,6 +129,27 @@
   .face.lead { border-color: var(--ks-kinpaku); }
   .card:hover .face { border-color: var(--ks-edge); }
   .card:hover .face.lead { border-color: var(--ks-kinpaku); }
+  .kicker.picked { background: var(--ks-patina); color: var(--ks-paper-raised); border-color: var(--ks-patina); }
+  .card:not(.chosen) .face { opacity: .92; }
+  /* Průběh: the decisions so far, grouped by step, each opens as it was asked. */
+  .history { display: grid; grid-template-columns: minmax(15rem, 22rem) minmax(0, 1fr); gap: 2rem; align-items: start; }
+  .history nav ol { list-style: none; padding: 0; display: flex; flex-direction: column; gap: .2rem; }
+  .history nav h3 { font-size: .75rem; letter-spacing: .14em; text-transform: uppercase; color: var(--ks-text-muted); margin: 1rem 0 .4rem; }
+  .history nav button { width: 100%; text-align: left; padding: .6rem .75rem; border-radius: 6px; border: 1px solid transparent; background: none; font: inherit; color: var(--ks-text); cursor: pointer; }
+  .history nav button:hover { background: var(--ks-paper-raised); border-color: var(--ks-rule); }
+  .history nav button[aria-current] { background: var(--ks-paper-raised); border-color: var(--ks-edge); box-shadow: var(--ks-lift); }
+  .history nav button b { display: block; color: var(--ks-ink); font-weight: 600; }
+  .history nav button span { display: block; font-size: .8125rem; color: var(--ks-patina); }
+  .history .readonly .bar, .history .readonly .actions, .history .readonly .field { display: none; }
+  .rail[hidden] { display: none; }
+  .studio-tabs { flex-wrap: wrap; } .studio-tabs a { white-space: nowrap; }
+  .history > div { min-width: 0; scroll-margin-top: 1rem; }
+  .history .deck-shell { width: 100%; margin-left: 0; }
+  .history .grid { padding-inline: 4px; scroll-padding-inline: 4px; }
+  .history .grid > .card { flex-basis: clamp(18rem, 28vw, 26rem); }
+  .history nav button span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .history .was { max-width: 52rem; margin-bottom: 1rem; padding: .8rem 1rem; border-left: 4px solid var(--ks-patina); background: var(--ks-paper-raised); border-radius: 0 8px 8px 0; }
+  @media (max-width: 900px) { .history { grid-template-columns: 1fr; } }
   .kicker.inline { position: static; align-self: flex-start; margin: 14px 0 -4px 1.1rem; }
   .kicker { position: absolute; z-index: 2; top: 12px; left: 12px; padding: 4px 9px; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); color: var(--ks-ink); font-size: .6875rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; border-radius: 3px; }
   .media { position: relative; width: 100%; aspect-ratio: 16/10; min-height: 0; flex: none; overflow: hidden; background: var(--ks-gray); }
@@ -237,7 +258,7 @@
 </style>
 <header>
   <div class="topbar">
-    <nav class="studio-tabs" aria-label="Studio"><a href="/" aria-current="page">Rozhodování</a><a href="/brand/">Výsledek pro klienta</a></nav>
+    <nav class="studio-tabs" aria-label="Studio"><a href="/" id="tab-live" aria-current="page">Rozhodování</a><a href="/#prubeh" id="tab-history">Průběh</a><a href="/brand/">Výsledek pro klienta</a></nav>
     <ol class="rail" id="rail" aria-label="Kroky"></ol>
   </div>
   <p class="step-desc" id="step-desc"></p>
@@ -324,7 +345,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && !lightbox.
 
 // The preview slot: shimmer until /preview answers 200, retried every 3 s.
 function media(q, c, withDetails, flip) {
-  const src = "/preview?question=" + encodeURIComponent(q.id) + "&card=" + encodeURIComponent(c.id);
+  const src = (q._history ? "/history/preview" : "/preview") + "?question=" + encodeURIComponent(q.id) + "&card=" + encodeURIComponent(c.id);
   const img = el("img", { class: "comp", alt: "Náhled: " + (c.title || c.id), hidden: true });
   const expand = el("button", { type: "button", class: "chip", disabled: true, "aria-label": "Zvětšit náhled",
     on: { click: () => openLightbox(img) } }, icon("expand"));
@@ -375,8 +396,11 @@ function card(q, c, i, answer) {
   };
   const choose = () => el("button", { class: "choose", type: "button", "aria-label": "Vybrat „" + title + "“",
     on: { click: () => answer("choose", c.id) } }, "Vybrat tento");
-  const front = el("div", { class: "face front" + lead },
-    i === 0 ? el("span", { class: "kicker" + (str(c.preview) ? "" : " inline") }, "Doporučuji") : null,
+  const chosen = q._chosen === c.id;
+  if (chosen) art.classList.add("chosen");
+  const front = el("div", { class: "face front" + (chosen ? " lead" : q._history ? "" : lead) },
+    chosen ? el("span", { class: "kicker picked" + (str(c.preview) ? "" : " inline") }, "Vybráno")
+      : i === 0 && !q._history ? el("span", { class: "kicker" + (str(c.preview) ? "" : " inline") }, "Doporučuji") : null,
     str(c.preview) ? media(q, c, true, flip) : null,
     el("div", { class: "body" },
       str(c.eyebrow) ? el("p", { class: "tier" }, str(c.eyebrow)) : null,
@@ -591,8 +615,47 @@ function render(s) {
   requestAnimationFrame(() => navs.forEach(f => f()));
 }
 
+// ---- Průběh: every answered question as it was shown (GET /history) ----
+let histSel = null;
+function historyView(list) {
+  document.getElementById("tab-live").removeAttribute("aria-current");
+  document.getElementById("tab-history").setAttribute("aria-current", "page");
+  document.getElementById("now").hidden = true;
+  document.getElementById("rail").hidden = true;
+  document.getElementById("step-desc").textContent = "Všechna rozhodnutí, jak byla položená. Klikněte na otázku vlevo.";
+  const main = document.getElementById("main");
+  if (!list.length) { main.replaceChildren(el("p", { class: "empty" }, "Zatím tu není žádné rozhodnutí.")); return; }
+  if (histSel == null || !list[histSel]) histSel = 0;
+  const groups = [];
+  list.forEach((h, i) => { const g = h.step || "Bez kroku"; let x = groups.find(y => y.name === g); if (!x) groups.push(x = { name: g, items: [] }); x.items.push(i); });
+  const view = (i) => {
+    const h = list[i], q = Object.assign({}, h.question, { _history: true, _chosen: h.answer && h.answer.decision === "choose" ? h.answer.choice : null,
+      answer: Object.assign({}, h.answer, { choice_title: ((h.cards || []).find(c => c.id === (h.answer || {}).choice) || {}).title }) });
+    const cards = (h.cards || []).map(c => Object.assign({}, c, { question: q.id }));
+    const sec = question(q, cards);
+    sec.classList.add("readonly");
+    sec.querySelectorAll("button.choose, textarea, input").forEach(b => b.disabled = true);
+    const when = h.answer && h.answer.at ? new Date(h.answer.at).toLocaleString("cs-CZ", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+    return el("div", {}, el("p", { class: "was" }, el("b", {}, "✓ " + verdict(q)), when ? " · " + when : "",
+      h.reconstructed ? el("span", { class: "fact" }, " · otázka dohledaná zpětně ze záznamu agenta") : null), sec);
+  };
+  const nav = el("nav", { "aria-label": "Rozhodnutí" }, ...groups.flatMap(g => [el("h3", {}, g.name), el("ol", {}, ...g.items.map(i =>
+    el("li", {}, el("button", { type: "button", "aria-current": i === histSel ? "true" : null, on: { click: () => { histSel = i; historyView(list); const v = document.querySelector(".history > div"); if (v && matchMedia("(max-width: 900px)").matches) v.scrollIntoView(); else window.scrollTo(0, 0); } } },
+      el("b", {}, list[i].question.title || KIND[list[i].question.kind] || list[i].question.id),
+      el("span", {}, verdict(Object.assign({}, list[i].question, { answer: Object.assign({}, list[i].answer, { choice_title: ((list[i].cards || []).find(c => c.id === (list[i].answer || {}).choice) || {}).title }) })))))))]));
+  navs = [];
+  main.replaceChildren(el("div", { class: "history" }, nav, view(histSel)));
+  requestAnimationFrame(() => navs.forEach(f => f()));
+}
+async function showHistory() {
+  const r = await call("GET", "/history");
+  if (r.status === 200) historyView(r.data);
+}
+window.addEventListener("hashchange", () => { last = ""; if (location.hash === "#prubeh") showHistory(); else { document.getElementById("tab-history").removeAttribute("aria-current"); document.getElementById("tab-live").setAttribute("aria-current", "page"); tick(); } });
+
 async function tick() {
   if (stopped) return;
+  if (location.hash === "#prubeh") return;
   try {
     const r = await call("GET", "/state");
     if (r.status !== 200) { notice("Otázky od agenta teď nejde zobrazit, protože v nich je chyba. Dejte agentovi vědět."); return; }
@@ -601,7 +664,7 @@ async function tick() {
     if (text !== last) { last = text; render(r.data); }
   } catch (e) { if (e.message !== "token") notice("Server studia neodpovídá, zkouším znovu…"); }
 }
-tick();
+if (location.hash === "#prubeh") showHistory(); else tick();
 setInterval(tick, 3000);
 </script>
 </html>
