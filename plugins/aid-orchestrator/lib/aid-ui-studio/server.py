@@ -22,11 +22,14 @@ back from a file the agent can write). A restart forgets an unrecorded answer an
 its question is open again.
 
 Routes (every request must pass ours(): Host is this server; Origin/Referer, when
-sent, name the same origin; else 403):
+sent, name the same origin; else 403. GET / alone checks only the Host: the PM opens
+the link from another app, whose Referer is foreign):
   GET  /?k=<code>             the one-time PM link: a k equal to <token dir>/studio.code
                               (written by aid-ui-serve.sh, removed here on use) sets
                               an HttpOnly SameSite=Strict session cookie and redirects
-                              to /; a used or wrong code gets the no-access page
+                              to /; a used or wrong code gets the no-access page, which reloads /
+                              same-site once (a signed-in PM clicking the link again from another
+                              app gets the studio: the Strict cookie is sent only on that reload)
   GET  /                      studio.html with a session cookie; without one a page
                               "Otevřete odkaz ze zprávy agenta" (no token, no state)
   GET  /state                 [auth] payload + per-question `answered` and, when answered,
@@ -108,6 +111,10 @@ NO_ACCESS = ('<!doctype html><meta charset="utf-8"><meta name="viewport" '
              'content="width=device-width,initial-scale=1"><title>Studio</title>'
              '<p style="font:18px/1.5 system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem">'
              'Otevřete odkaz ze zprávy agenta.</p>')
+# A used or wrong code: the same page, but it reloads "/" once from this origin. A click from
+# another app (chat, editor) is cross-site, so the SameSite=Strict cookie of a PM who is already
+# signed in was not sent; the same-site reload sends it. Without a cookie "/" is NO_ACCESS (no loop).
+USED_CODE = NO_ACCESS.replace('<title>', '<meta http-equiv="refresh" content="0;url=/"><title>', 1)
 
 
 def take_code(k):
@@ -243,8 +250,10 @@ def next_id(qid):
 
 
 class Studio(BaseHTTPRequestHandler):
-    def ours(self):   # Host is us; Origin/Referer, when sent, name the same origin
+    def ours(self, nav=False):   # Host is us; Origin/Referer, when sent, name the same origin
         h = self.headers.get("Host")
+        if nav:   # opening the page (GET /, the link from the chat): a click from another app
+            return h in OWN   # carries its Referer; only the Host (DNS rebinding) is checked
         o, r = self.headers.get("Origin"), self.headers.get("Referer")
         return (h in OWN and (o is None or o == "http://" + h)
                 and (r is None or r == "http://" + h or r.startswith("http://" + h + "/")))
@@ -273,8 +282,8 @@ class Studio(BaseHTTPRequestHandler):
     def authed(self):
         return hmac.compare_digest(self.headers.get("X-AID-Token") or "", TOKEN) or self.session()
 
-    def gate(self, token):
-        if not self.ours():
+    def gate(self, token, nav=False):
+        if not self.ours(nav):
             self.send(403, {"error": "request not addressed to this studio"})
             return False
         if token and not self.authed():
@@ -294,11 +303,11 @@ class Studio(BaseHTTPRequestHandler):
         u = urlsplit(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         if u.path == "/":
-            if not self.gate(False):
+            if not self.gate(False, nav=True):
                 return
             if "k" in q:
                 if not take_code(q["k"]):
-                    self.send(403, NO_ACCESS, "text/html; charset=utf-8")
+                    self.send(403, USED_CODE, "text/html; charset=utf-8")
                     return
                 sid = secrets.token_hex(32)
                 with LOCK:

@@ -62,6 +62,11 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(answer "$choose_a" -H 'Host: evil.example')" = 403 ]
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 404 ]
   [ "$(answer "$choose_a" -H "Origin: $URL" -H "Referer: $URL/")" = 200 ]
+  [ "$(code -H 'Referer: http://evil.example/' "$URL/state")" = 403 ]            # data: same origin only
+  [ "$(code -H 'Referer: https://claude.ai/' "$URL/")" = 403 ]                   # the page opens from another app
+  grep -q "Otevřete odkaz ze zprávy agenta" "$BATS_TEST_TMPDIR/body"            # (no cookie: the no-access page)
+  [ "$(code -H 'Host: evil.example' "$URL/")" = 403 ]
+  ! grep -q "Otevřete odkaz" "$BATS_TEST_TMPDIR/body"
 }
 
 @test "without a cookie or a valid code the page says to open the agent's link and holds no token or state" {
@@ -86,6 +91,10 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   ! grep -q "$TOKEN" "$BATS_TEST_TMPDIR/body"
   [ "$(code -b "$J" "$URL/state")" = 200 ]                                          # the page works via the cookie
   [ "$(code "$URL/?k=99887766554433221100aabbccddeeff")" = 403 ]                    # used once
+  grep -q 'http-equiv="refresh" content="0;url=/"' "$BATS_TEST_TMPDIR/body"          # a signed-in PM lands on /
+  ! grep -qi 'set-cookie' "$BATS_TEST_TMPDIR/body"
+  [ "$(code "$URL/")" = 403 ]                                                       # no cookie: no access, no loop
+  ! grep -q 'http-equiv="refresh"' "$BATS_TEST_TMPDIR/body"
 }
 
 @test "the session cookie authorises POST /answer; the header token still works for GET /answer" {
