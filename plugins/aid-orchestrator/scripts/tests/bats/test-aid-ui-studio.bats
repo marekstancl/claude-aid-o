@@ -320,3 +320,16 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(code "$URL/history")" = 403 ]
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/history/preview?question=q1&card=b")" = 404 ]
 }
+
+@test "overview: passed through /state; a wrong type or a non-http site_url makes the payload invalid" {
+  jq '.overview = {site_url: "http://10.20.20.22:3913/", todo: [{what: "Portrét", how: "Pošlete fotku", blocking: false}]}' \
+    "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  [ "$(jq -r .overview.todo[0].what "$BATS_TEST_TMPDIR/body")" = "Portrét" ]
+  jq '.overview.site_url = "javascript:alert(1)"' "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]
+  jq '.overview = {todo: [{what: "x", blocking: "ano"}]}' "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]
+  jq '.overview = {todo: [{how: "x"}]}' "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]
+}

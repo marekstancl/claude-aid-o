@@ -11,7 +11,11 @@ on every request, so the agent opens a round by rewriting it:
    "questions": [{"id", "kind", "target", "opened_at": ISO-8601, "title", "prompt", "body",
                   "next" (what the agent does after approval), "eyebrow" (heading override)}],
    "cards":     [{"id", "question", "title", "preview", "thesis", "palette": [css colours],
-                  "risk", "uniqueness", "url"}]}
+                  "risk", "uniqueness", "url"}],
+   "overview":  {"site_url": "http(s)://…", "todo": [{"what", "how", "blocking": bool, "question": <open question id>}]}
+                (optional: the web at a glance on the studio's home view; the page derives the
+                status itself; a wrong type or a non-http(s) site_url makes the payload invalid)}
+A question may also carry "outcome": the decision in one sentence, shown once it is answered.
 Every card has a non-empty string id and a string question, and ids are unique per
 question (else the payload is invalid: 422, logged).
 A card's `preview` is a file under <project>/.aid-ui/studio/; until it exists
@@ -45,7 +49,7 @@ the link from another app, whose Referer is foreign):
   GET  /history/preview?question=&card=  a card preview kept with the history
   GET  /brand/<file>          [auth] the project's brand page (<project>/docs/brand/): index.html,
                               top-level *.css, assets/ and fonts/ only (what aid-ui-serve.sh brand
-                              serves), no scripts (CSP); the studio's "Výsledek pro klienta" tab
+                              serves), no scripts (CSP); the studio's "Značka a produkt" link
   POST /answer                [auth] JSON {question, kind, target, decision,
                               choice, comment}; kind and target must be the open
                               question's own (a stale page gets 409).
@@ -181,9 +185,22 @@ def load():
         if (c["question"], c["id"]) in shown:
             raise ValueError("payload.json: card id %s twice in question %s" % (c["id"], c["question"]))
         shown.add((c["question"], c["id"]))
+    ov = p.get("overview")
+    if ov is not None:   # the web at a glance, kept by the agent (see the header)
+        if not isinstance(ov, dict):
+            raise ValueError("payload.json: overview must be an object")
+        u = ov.get("site_url")
+        if u is not None and not (isinstance(u, str) and re.match(r"https?://[^\s\"'<>]+$", u)):
+            raise ValueError("payload.json: overview.site_url must be an http(s) address")
+        todo = ov.get("todo", [])
+        if not isinstance(todo, list) or not all(
+                isinstance(t, dict) and isinstance(t.get("what"), str) and t["what"].strip()
+                and isinstance(t.get("how", ""), str) and isinstance(t.get("blocking", False), bool)
+                and isinstance(t.get("question", ""), str) for t in todo):
+            raise ValueError("payload.json: overview.todo must be a list of {what, how, blocking, question} with a non-empty what")
     with LOCK:
         qs = qs + [dict(q) for i, q in REROLLED.items() if i not in seen]
-    return {"now": p.get("now"), "steps": steps, "questions": qs, "cards": cards}
+    return {"now": p.get("now"), "steps": steps, "questions": qs, "cards": cards, "overview": ov}
 
 
 def valid_answer(q):
@@ -402,7 +419,7 @@ class Studio(BaseHTTPRequestHandler):
             if parts == ["index.html"]:   # the studio's tab bar; the page itself stays client-clean
                 data = data.replace(b"<body>", b'<body><nav class="studio-tabs" aria-label="Studio">'
                                     b'<a href="/">Studio</a><a href="/brand/" aria-current="page">'
-                                    b'V\xc3\xbdsledek pro klienta</a></nav>', 1)
+                                    b'Zna\xc4\x8dka a produkt</a></nav>', 1)
             self.send(200, data, ctype, "default-src 'none'; style-src 'self' 'unsafe-inline'; "
                       "img-src 'self' data:; font-src 'self'; frame-ancestors 'none'")
         elif u.path in ("/report", "/licence"):

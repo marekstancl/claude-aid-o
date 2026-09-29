@@ -49,7 +49,7 @@ JSON
 }
 
 @test "studio links the internal report route" {
-  grep -qF '<a href="/report">' "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"
+  grep -qF 'href: "/report"' "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"
 }
 
 @test "fonts markers inside head" {

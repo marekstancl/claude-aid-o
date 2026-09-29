@@ -59,8 +59,9 @@ a `frontend-build-standard.md` (čti živě).
 8. Kapitola `schvaleni` (tělo přes `aid-ui-state.sh body <project> schvaleni --file <soubor>`):
    stránky se schválením, výjimky s důvodem, souhrn souladu; pak
    `aid-ui-state.sh chapter <project> schvaleni navrh`. Převzetí všech kapitol
-   = **jedna** otázka ve studiu druhu `handover` („Převzít všechny kapitoly?",
-   v `body` seznam kapitol ve stavu `navrh`/`schvaleno`) s `target` =
+   = **jedna** otázka ve studiu druhu `handover` (`title` „Předat web?", `body` = co
+   dostáváte, po položkách lidsky, a co zbývá před zveřejněním; `outcome` „Návrh webu je
+   dokončený; zveřejní se po doplnění …"; slovo „kapitola" v textu nepoužívej) s `target` =
    `aid-ui-state.sh chapter-all-target <project>`; po `approve`
    `aid-ui-state.sh chapter-all <project> --by PM --answer <id otázky>`.
    `return` s komentářem → uprav jmenované kapitoly a otázku polož znovu

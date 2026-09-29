@@ -61,15 +61,26 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    `steps[]` (`id`, `title`, `status` done|current|todo, `description` = jedna věta,
    co se v kroku děje), `questions[]`
    (`id`, `kind`, `target`, `opened_at` = teď v ISO, `title`, `prompt`, `body`,
-   `next` = co uděláš po schválení; volitelně `eyebrow` = nadpis nad otázkou místo
-   výchozího podle druhu, u `set options` (druh variant) „Co připravit"),
+   `next` = co uděláš po schválení, `outcome` = výsledek po schválení jednou větou
+   (povinné u všech druhů kromě výběru z karet, viz níže); volitelně `eyebrow` = nadpis
+   nad otázkou místo výchozího podle druhu, u `set options` (druh variant) „Co připravit"),
    `cards[]` (`id`, `question`, `title`, `preview` = PNG/JPEG/WebP pod
    `.aid-ui/studio/`, `thesis`, `palette[]`, `risk`, `uniqueness`; volitelně
    `eyebrow` = řádek nad názvem karty, `tags[]` = štítky vedle palety, `url`
    u referencí, a další textová pole, která se ukážou na rubu karty „Detaily").
    Druhy otázek: variant, vision, identity, seo_brief, structure, task_map,
    content_plan, defer_content, facts, references, direction, approve_page,
-   exception, coverage_drift, design_standard.
+   exception, coverage_drift, design_standard, handover.
+   `overview` (přehled webu, domovská obrazovka studia; udržuj ho od chvíle, kdy něco
+   existuje): `site_url` = adresa náhledu webu (`aid-ui-serve.sh preview`), `todo[]` =
+   co zbývá od PM: `what` (úkol lidsky), `how` (jak ho splnit jednou větou), `blocking`
+   (true = brání zveřejnění), `question` = id otevřené otázky ve studiu, kterou se úkol
+   splní. Na co PM odpovídá textem nebo potvrzením (fakta k ověření, souhlasy, kontrola
+   názvu), polož jako otázku `facts` s `outcome` a úkol na ni odkaž: PM pak odpoví přímo
+   ve studiu tlačítkem „Odpovědět". Todo ber z odložených položek obsahu, z faktů
+   k ověření a z výhrad souhrnu; splněné smaž. Jeden slovník stavu: „návrh (náhled)
+   hotový" → „před zveřejněním zbývá" → „zveřejněný"; nepiš „předán", „spuštěn". Stav („Web je hotový", „Před spuštěním zbývá…")
+   si stránka odvodí sama z otázek, `todo` a `steps`, nepiš ho.
 
    **Jak napsat otázku.** `title` = krátká lidská otázka (do ~12 slov). `body[]` =
    2–4 krátké věty: co navrhuješ, proč (odkud to víš, např. „z vašeho zadání")
@@ -84,10 +95,20 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
      stránka a vlastní stránka pro neexistující adresu.", `next` „Připravím
      zadání pro vyhledávače a obsah stránky." (`next` se ukáže až po schválení,
      proto začíná tím, co udělám, ne „Po schválení…")
+   **Jak napsat `outcome`.** Platný výsledek, ne další krok ani průběh; srozumitelný bez
+   otázky; do 120 znaků; bez „Schváleno", „Doplním", „Takhle". U výběru z karet (druh
+   s `choose`) ho nepiš: stránka ukáže název vybrané karty z uložené odpovědi, aby text
+   nemohl odporovat tomu, co PM vybral.
+   - Špatně: „Schváleno." · „Doplním to do vize." · „Takhle budou stránky poskládané."
+   - Dobře: „Klasický web se samostatnou stránkou pro každé téma." · „Sedm stránek, každá
+     odpovídá na jednu věc, kterou lidé hledají." · „Texty všech stránek schváleny; čtyři
+     údaje zbývá ověřit."
+   V textech pro PM (otázky, `outcome`, `todo`) nepoužívej: agent, kapitola, kolo,
+   převzetí, payload, standard (kromě odkazu na report), skill.
    Každou přijatou odpověď si studio samo uloží i s otázkou, kartami a kopií náhledů do
-   `.aid-ui/studio/history.jsonl`; studio je jedna stránka: nahoře kroky z `steps`, v kroku
-   témata podle druhu otázky, otevřená otázka i minulé rozhodnutí ve stejném vzhledu (minulé
-   podle `step`, ve kterém padlo), takže PM si proklikne celý průběh;
+   `.aid-ui/studio/history.jsonl`. Studio ukazuje: čeká-li otázka, jen ji (s odkazem na
+   přehled); jinak přehled webu (stav, „Otevřít web", co zbývá, náhled stránek, hlavní
+   volby) a z něj detail každé oblasti (výsledek, vybraný návrh velký, historie sbalená);
    agent ho nepíše a nečte jako rozhodnutí.
 2. `target` je to, co PM schvaluje: u `set variant|options|structure|content-plan|refs`
    `sha256:` + `jq -S -c -j . <<<"$json" | sha256sum` přesně toho JSON, který
