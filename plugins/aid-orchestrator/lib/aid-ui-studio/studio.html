@@ -89,6 +89,19 @@
   .todo b { display: block; color: var(--ks-ink); font-weight: 600; }
   .todo span { color: var(--ks-text-muted); font-size: .92rem; }
   .todo .cta { margin-top: .5rem; }
+  .todo .via-chat.ok { color: var(--ks-patina); }
+  .todo .via-chat { display: block; margin-top: .3rem; font-size: .88rem; font-weight: 600; color: var(--ks-text); }
+  .road { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; padding: 0; margin-top: .2rem; }
+  .road li { display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .7rem; border-radius: 999px; border: 1px solid var(--ks-rule); font-size: .88rem; color: var(--ks-text-muted); }
+  .road li.done { color: var(--ks-patina); border-color: oklch(49% 0.11 190 / .35); }
+  .road li.done::before { content: "✓"; font-weight: 700; }
+  .road li.now { color: var(--ks-ink); border-color: var(--ks-kinpaku); background: oklch(84% 0.19 80.46 / .18); font-weight: 600; }
+  .road li + li::before { }
+  .jump { display: none; flex-wrap: wrap; gap: .5rem; align-items: flex-start; }
+  .jump span { flex-basis: 100%; color: var(--ks-text-muted); }
+  .jump a { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: .25rem; text-decoration: none; color: var(--ks-ink); font-size: .8rem; }
+  .jump a img { width: 100%; aspect-ratio: 3/4; object-fit: cover; object-position: top; border: 1px solid var(--ks-rule); border-radius: 6px; display: block; }
+  .jump a b { font-weight: 600; overflow-wrap: anywhere; }
   .todo .tag-block { display: inline-block; margin-left: .5rem; font-size: .75rem; font-weight: 600; color: var(--ks-ink); background: oklch(84% 0.19 80.46 / .35); border-radius: 4px; padding: 1px 6px; vertical-align: 1px; }
 
   /* Decisions as results: a tile per area, the result in words, the chosen picture when there is one. */
@@ -282,6 +295,7 @@
     .all li a { grid-template-columns: 1fr; gap: .1rem; }
     .cta a { flex: 1 1 auto; justify-content: center; }
     .grid .face.front .raises, .grid .face.front .fact { display: none; }
+    .jump { display: flex; }
     .grid .media { aspect-ratio: 16/9; }
   }
   /* A tall viewport: the deck becomes a plain vertical list; the bar stays stuck. */
@@ -558,6 +572,9 @@ function question(q, cards) {
       sec.append(el("p", { class: "tier" }, "Připravují se nové návrhy…"), deck(q, [0, 1, 2].map(skeleton)));
       return sec;
     }
+    if (cards.length > 1) sec.append(el("nav", { class: "jump", "aria-label": "Návrhy" }, el("span", {}, plural(cards.length, "návrh", "návrhy", "návrhů") + ":"),
+      cards.map((c, i) => el("a", { href: "#", on: { click: e => { e.preventDefault(); sec.querySelectorAll(".grid > .card")[i].scrollIntoView({ behavior: "smooth", block: "start", inline: "center" }); } } },
+        str(c.preview) && !q._history ? el("img", { src: previewSrc(q, c), alt: "", loading: "lazy" }) : null, el("b", {}, c.title || c.id)))));
     sec.append(deck(q, cards.map((c, i) => card(q, c, i, answer))));
     sec.append(el("p", { class: "pick-hint" }, "Vyberte jeden návrh tlačítkem „Vybrat tento“ pod ním; podle něj budu pokračovat. Později ho můžete změnit (napište agentovi). Kliknutím na obrázek ho zvětšíte."));
     sec.append(el("div", { class: "bar" },
@@ -667,7 +684,10 @@ function model() {
     a.slug = a.name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
   }
   const steps = S.steps || [], ov = S.overview && typeof S.overview === "object" ? S.overview : {};
-  const todo = Array.isArray(ov.todo) ? [...ov.todo].sort((x, y) => (y.blocking === true) - (x.blocking === true)) : [];
+  // a todo whose studio question is answered is done for the PM (the agent removes it when it has used the answer)
+  const answered = new Set((S.questions || []).filter(q => q.answered).map(q => q.id));
+  const todo = (Array.isArray(ov.todo) ? [...ov.todo] : []).map(t => Object.assign({}, t, { done: str(t.question) && answered.has(t.question) }))
+    .sort((x, y) => (y.blocking === true && !y.done) - (x.blocking === true && !x.done));
   return { areas, open, steps, todo, site: str(ov.site_url), done: steps.length > 0 && steps.every(s => s.status === "done") };
 }
 // The pages of the web: the latest round of page approvals (screenshot per page).
@@ -689,23 +709,35 @@ const plural = (n, one, few, many) => n + " " + (n === 1 ? one : n > 1 && n < 5 
 
 // ---- Views ----
 function statusBlock(m) {
-  const block = m.todo.filter(t => t.blocking === true).length;
+  const block = m.todo.filter(t => t.blocking === true && !t.done).length;
   const now = S.now && typeof S.now === "object" ? S.now : null;
   // questions a todo points at are shown with that todo (Odpovědět), not a second time here
   const linked = new Set(m.todo.map(t => t.question).filter(str)), ask = m.open.filter(q => !linked.has(q.id));
-  let dot = "", line, sub = "";
+  let dot = "", line, sub = "", road = null;
   if (ask.length) { dot = "wait"; line = ask.length === 1 ? "Potřebuji od vás jedno rozhodnutí." : "Potřebuji od vás " + ask.length + " rozhodnutí."; }
-  else if (m.done && m.site) { line = "Náhled webu je hotový."; sub = block ? "Web zatím není zveřejněný. Před zveřejněním od vás potřebuji " + plural(block, "věc", "věci", "věcí") + "; až je budu mít, připravím web ke zveřejnění." : "Všechno od vás mám; web může jít ven."; if (block) dot = "wait"; }
+  else if (m.done && m.site) { line = "Náhled webu je hotový."; const pending = m.todo.some(t => t.done && t.blocking === true);   // answered, not yet worked in by the agent
+    sub = block ? "Web zatím není zveřejněný. Až odpovíte na " + plural(block, "věc", "věci", "věcí") + " níže, hned web upravím (udělám to já) a tady vám napíšu, že může jít ven."
+      : pending ? "Odpovědi mám. Zapracuji je do webu a řeknu vám tady, že může jít ven." : "Všechno od vás mám; web je připravený ke zveřejnění.";
+    if (block) dot = "wait"; else if (pending) dot = "work";
+    road = [["Náhled hotový", "done"], [block ? "Čekám na " + plural(block, "vaši odpověď", "vaše odpovědi", "vašich odpovědí") : "Odpovědi mám", block ? "now" : "done"],
+      [pending && !block ? "Zapracovávám odpovědi" : "Připravený ke zveřejnění", block ? "" : "now"]]; }
   else if (m.done) { line = "Hotovo."; }
   // every question of the round answered: the agent's `now` predates the answers, so do not repeat it
-  else if ((S.questions || []).some(q => q.answered)) { dot = "work"; line = "Díky, odpověď mám. Pokračuji."; sub = "Do chatu nemusíte nic psát; další otázka se tu objeví sama."; }
+  else if ((S.questions || []).some(q => q.answered)) {
+    const q = [...(S.questions || [])].reverse().find(x => x.answered), a = q.answer || {};
+    dot = "work";
+    line = a.decision === "choose" ? "Vybral(a) jste: " + (a.choice_title || a.choice) + "." : a.decision === "return" ? "Díky, upravím to podle vás." : "Díky, odpověď mám.";
+    sub = (a.decision === "return" ? "Až to bude hotové, ukážu vám to tady znovu." : str(q.next) ? "Teď: " + q.next : "Pokračuji.")
+      + " Změnu můžete kdykoli napsat agentovi do chatu.";
+  }
   else { dot = "work"; line = now && str(now.title) ? now.title : "Pracuji na webu."; sub = now && str(now.text) || "Až od vás budu něco potřebovat, objeví se to tady."; }
   return el("section", { class: "status-block" },
     el("h1", { class: "status-line" }, el("span", { class: "dot " + dot, "aria-hidden": "true" }), line),
+    road ? el("ol", { class: "road" }, road.map(([t, c]) => el("li", { class: c }, t))) : null,
     sub ? el("p", { class: "status-sub" }, sub) : null,
     ask.length ? el("ul", { class: "todo" }, ask.map(q => el("li", {}, el("b", {}, q.title || areaOf(q)),
       el("span", {}, areaOf(q)), el("div", { class: "cta" }, el("a", { class: "primary", href: "#q=" + encodeURIComponent(q.id) }, "Rozhodnout"))))) : null,
-    m.site ? el("div", { class: "cta" }, el("a", { class: ask.length ? "secondary" : "primary", href: m.site, target: "_blank", rel: "noopener" }, "Otevřít náhled webu ↗")) : null);
+    m.site ? el("div", { class: "cta" }, el("a", { class: ask.length ? "secondary" : "primary", href: m.site, target: "_blank", rel: "noopener" }, m.done && m.todo.some(t => t.blocking) ? "Otevřít náhled webu (zatím neveřejný) ↗" : "Otevřít náhled webu ↗")) : null);
 }
 function webBlock(m) {
   const pages = pagesOf(m);
@@ -727,12 +759,15 @@ function todoBlock(m) {
   const openIds = new Set(m.open.map(q => q.id));
   const list = ts => el("ul", { class: "todo" }, ts.map(t => el("li", { class: t.blocking ? "" : "later" },
     el("b", {}, t.what), str(t.how) ? el("span", {}, t.how) : null,
-    str(t.question) && openIds.has(t.question) ? el("div", { class: "cta" }, el("a", { class: "primary", href: "#q=" + encodeURIComponent(t.question) }, "Odpovědět")) : null)));
-  const now = m.todo.filter(t => t.blocking === true), later = m.todo.filter(t => t.blocking !== true);
+    t.done ? el("span", { class: "via-chat ok" }, "✓ Odpověď mám, zapracuji ji.")
+      : str(t.question) && openIds.has(t.question) ? el("div", { class: "cta" }, el("a", { class: "primary", href: "#q=" + encodeURIComponent(t.question) }, "Odpovědět"))
+      : el("span", { class: "via-chat" }, "Pošlete to agentovi do chatu."))));
+  const now = m.todo.filter(t => t.blocking === true && !t.done), later = m.todo.filter(t => t.blocking !== true && !t.done), done = m.todo.filter(t => t.done);
   return el("section", {},
     now.length ? [el("h2", { class: "section-h" }, "Před zveřejněním od vás potřebuji"), list(now)] : null,
-    later.length ? [el("h2", { class: "section-h", style: now.length ? "margin-top:1.6rem" : null }, "Může počkat"), list(later)] : null,
-    m.todo.some(t => !(str(t.question) && openIds.has(t.question))) ? el("p", { class: "change-note", style: "margin-top:.8rem" }, "Kde není tlačítko Odpovědět, napište odpověď agentovi do chatu.") : null);
+    done.length ? [el("h2", { class: "section-h", style: now.length ? "margin-top:1.6rem" : null }, "Hotovo – odpověď mám"), list(done)] : null,
+    later.length ? [el("h2", { class: "section-h", style: now.length || done.length ? "margin-top:1.6rem" : null }, "Může počkat"), list(later)] : null,
+    null);
 }
 function tile(a) {
   const c = chosenCard(a.last);
@@ -751,7 +786,7 @@ function overview(m) {
     el("p", { class: "about" }, el("a", { href: "/report" }, "Soulad se standardy"), " · ", el("a", { href: "/licence" }, "Vzor stránky: Impeccable (Apache 2.0)"))];
 }
 function allView(m) {
-  return [el("a", { class: "back", href: "#" }, "← Co je hotové a co zbývá"),
+  return [el("a", { class: "back", href: "#" }, "← Přehled práce"),
     el("section", {}, el("h1", { class: "section-h" }, "Všechna rozhodnutí"),
       el("ul", { class: "all" }, m.areas.map(a => el("li", {}, el("a", { href: "#o=" + a.slug }, el("b", {}, a.name),
         el("span", {}, resultOf(a)))))))];
@@ -768,7 +803,7 @@ function round(p) {
 function detailView(m, slug) {
   const a = m.areas.find(x => x.slug === slug);
   if (!a) return allView(m);
-  const out = [el("a", { class: "back", href: "#" }, "← Co je hotové a co zbývá")];
+  const out = [el("a", { class: "back", href: "#" }, "← Přehled práce")];
   if (a.open.length) out.push(...a.open.map(q => question(q, (S.cards || []).filter(c => c && c.question === q.id))));
   if (a.name === AREA.approve_page && a.past.length) {   // all pages of the latest round, not one approval
     out.push(el("header", { class: "detail-head" }, el("small", {}, a.name), el("h1", {}, resultOf(a))), webBlock(m));
@@ -796,7 +831,7 @@ function askingView(m, qid) {   // something waits for the PM: the question take
   const q = m.open.find(x => x.id === qid) || m.open[0], rest = m.open.filter(x => x !== q && q.kind !== "approve_page");
   const shown = q.kind === "approve_page" ? m.open.filter(x => x.kind === "approve_page") : [q];
   return [el("div", { class: "asking" }, el("b", {}, m.open.length > 1 ? "Potřebuji od vás " + m.open.length + " rozhodnutí." : "Potřebuji od vás rozhodnutí."),
-      el("a", { href: "#prehled" }, "Co je hotové a co zbývá →")),
+      el("a", { href: "#prehled" }, "Přehled práce →")),
     ...shown.map(x => question(x.kind === "handover" ? handoverOf(x) : x, (S.cards || []).filter(c => c && c.question === x.id))),
     rest.length ? el("section", {}, el("h2", { class: "section-h" }, "Potom ještě"), el("ul", { class: "todo" }, rest.filter(x => !shown.includes(x)).map(x =>
       el("li", {}, el("b", {}, x.title || areaOf(x)), el("div", { class: "cta" }, el("a", { class: "secondary", href: "#q=" + encodeURIComponent(x.id) }, "Otevřít")))))) : null];

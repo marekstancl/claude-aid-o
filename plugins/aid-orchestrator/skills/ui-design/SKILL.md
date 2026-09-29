@@ -77,7 +77,9 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    (true = brání zveřejnění), `question` = id otevřené otázky ve studiu, kterou se úkol
    splní. Na co PM odpovídá textem nebo potvrzením (fakta k ověření, souhlasy, kontrola
    názvu), polož jako otázku `facts` s `outcome` a úkol na ni odkaž: PM pak odpoví přímo
-   ve studiu tlačítkem „Odpovědět". Todo ber z odložených položek obsahu, z faktů
+   ve studiu tlačítkem „Odpovědět". Co zvládneš sám (rešerše názvu v rejstříku a na webu,
+   dohledání údaje), udělej předem a PM dej rozhodnutí nad výsledkem („Našel jsem tyto
+   podobné názvy: … Ponechat Needless?"), ne úkol „zkontrolujte". Todo ber z odložených položek obsahu, z faktů
    k ověření a z výhrad souhrnu; splněné smaž. Jeden slovník stavu: „návrh (náhled)
    hotový" → „před zveřejněním zbývá" → „zveřejněný"; nepiš „předán", „spuštěn". Stav („Web je hotový", „Před spuštěním zbývá…")
    si stránka odvodí sama z otázek, `todo` a `steps`, nepiš ho.
