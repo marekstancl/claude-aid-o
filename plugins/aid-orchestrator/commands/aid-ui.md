@@ -30,6 +30,14 @@ logo, page list, composition) is recorded the same way as the direction.
 Load `skills/ui-design/SKILL.md` and follow it: start checks (Impeccable,
 Playwright MCP), routing to `skills/ui-design/steps/<n>-*.md`, MUST Rules.
 
+## The studio page
+
+Every PM choice and approval happens on the project's studio page, which shows the run as
+six steps in order, each with its outcome in one sentence and who decided it (PM, AI or both).
+Detail opens a step's decisions in the order they were made and the cards the PM chose from;
+an open question sits inside its step and is answered there. Decisions the agent makes alone
+are recorded with `aid-ui-state.sh decide` and appear in the same list, marked AI.
+
 ## Reads / Writes
 
 - **Reads (target project):** `PRODUCT.md`, `DESIGN.md`, `.impeccable/`,
@@ -52,4 +60,4 @@ Playwright MCP), routing to `skills/ui-design/steps/<n>-*.md`, MUST Rules.
 Outside the FSM: no AID run, no EPIC, no gate. `/aid-run`, `/aid-plan` and
 `/aid-do` never call it.
 
-**Last Updated:** 2026-09-25
+**Last Updated:** 2026-09-30

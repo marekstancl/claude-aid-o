@@ -24,6 +24,11 @@ platí design systém.
 | Standard „Úlohy a stavy webové aplikace", UA-11 | UI UX Pro Max, `charts.csv` (sloupce Accessibility Notes, A11y Fallback) | `09170ee` | přepsáno česky, zobecněno | MIT | `LICENSES/MIT-ui-ux-pro-max.txt` |
 | nepřevzato: UI UX Pro Max `app-interface.csv` | UI UX Pro Max | `09170ee` | nepřevzato: pravidla pro React Native, /aid-ui staví web | MIT | `LICENSES/MIT-ui-ux-pro-max.txt` |
 
+**Vlastní práce, bez cizí licence:** rozvržení stránky studia jako průběhu stavby
+(`lib/aid-ui-studio/studio.html`: kroky pod sebou, výsledek a kdo rozhodl, Detail, otázka
+uvnitř kroku) je práce AID z brainstormu P106 (návrh B, Codex, 30. 9. 2026); nic z něj není
+převzaté. Vzhled stránky (paleta, karty, lišta) zůstává převzatý podle řádku Impeccable výše.
+
 **Nesoulad licence Impeccable:** jeho `SKILL.md` uvádí `license: Apache 2.0`, `plugin.json`
 uvádí `MIT` a v distribuci chybí soubor LICENSE i NOTICE. Používáme přísnější Apache 2.0
 (text licence, NOTICE s atribucí, popis změn).

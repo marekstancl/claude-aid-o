@@ -3,6 +3,20 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+- **P106: studio /aid-ui jako průběh stavby.** Stránka studia ukazuje běh jako šest kroků pod sebou (Druh webu, Zadání a obsah, Vzory, Vzhled, Stavba, Kontrola). U každého je výsledek jednou větou a kdo rozhodl (PM, AI, oba). Detail otevře rozhodnutí kroku a karty, ze kterých PM vybíral, a čekající otázka stojí uvnitř svého kroku. Vzhled (paleta a karty Impeccable) zůstal ze schválené verze; logika odvození je ve vlastním bloku bez DOM a testuje se pod node.
+- **Každá otázka nese `outcome`** (výsledek jednou větou, nejvýš 120 znaků, jinak 422). Server ho s `by: "pm"` zapisuje do `history.jsonl` pod zámkem souboru. Poškozený řádek historie se přeskočí a nevymaže ji celou, `/state` hlásí `history_lines`.
+
+### Added
+- **`aid-ui-state.sh decide`**: rozhodnutí, které agent udělal bez PM, jde do stejného záznamu jako odpovědi PM (`by: "agent"`, krok, co, výsledek, proč, zdroj). Krok se zadává přesným názvem nebo id, platí limity 80/120/300 znaků. Stejné rozhodnutí zapsané podruhé je jedna událost. `--reconstructed --at` slouží pro zpětný zápis a stránka ho označí „doplněno zpětně“. Skill ho volá u faktů určených agentem (1v), po stavbě (6) a u doplňků design standardu (7); MUST Rule 9. Registr: `aid_ui_decide_refuses`, `aid_ui_outcome_length`, `aid_ui_steps_record_decisions`.
+
+### Removed
+- Záložka Průběh, přehled výsledků („overview“: adresa webu, seznam úkolů, dlaždice) i pole `overview` v payloadu a jeho kontrola na serveru.
+
+Velikost kódu (V6): `studio.html` + `server.py` + `aid-ui-state.sh` měly před P106 2 340 řádků, teď mají 2 321. Stránka ubrala 87 řádků, server a stavový skript přibraly 16 a 52 za zámek historie a příkaz `decide`.
+
 ## [2.109.0] — 2026-09-27
 
 Méně kol revize tím, že se chyby opravují u zdroje. Rozbor P097, P101 a P102 našel 14 vážných nálezů až ve 2. a dalším kole. 12 z nich bylo bezpečnostních a 11 z 14 byla jen další varianta díry, kterou předchozí oprava ucpala pouze v hlášeném místě. Pokyn opraváři totiž zakazoval sáhnout na cokoli, co nález výslovně nejmenoval.
