@@ -11,11 +11,9 @@ on every request, so the agent opens a round by rewriting it:
    "questions": [{"id", "kind", "target", "opened_at": ISO-8601, "title", "prompt", "body",
                   "next" (what the agent does after approval), "eyebrow" (heading override)}],
    "cards":     [{"id", "question", "title", "preview", "thesis", "palette": [css colours],
-                  "risk", "uniqueness", "url"}],
-   "overview":  {"site_url": "http(s)://…", "todo": [{"what", "how", "blocking": bool, "question": <open question id>}]}
-                (optional: the web at a glance on the studio's home view; the page derives the
-                status itself; a wrong type or a non-http(s) site_url makes the payload invalid)}
-A question may also carry "outcome": the decision in one sentence, shown once it is answered.
+                  "risk", "uniqueness", "url"}]}
+A question may also carry "outcome": the decision in one sentence (a string of at most 120
+characters, else the payload is invalid), kept in the history line of its answer.
 Every card has a non-empty string id and a string question, and ids are unique per
 question (else the payload is invalid: 422, logged).
 A card's `preview` is a file under <project>/.aid-ui/studio/; until it exists
@@ -38,14 +36,19 @@ the link from another app, whose Referer is foreign):
                               "Otevřete odkaz ze zprávy agenta" (no token, no state)
   GET  /state                 [auth] payload + per-question `answered` and, when answered,
                               `answer` = {decision, choice, choice_title, comment}; `project` =
-                              the project directory's name (the page header)
+                              the project directory's name (the page header); `history_lines` =
+                              the lines of history.jsonl now (the page refetches
+                              /history when it changes)
   GET  /preview?question=&card=  the card's preview file, 404 while pending
   GET  /report                <project>/docs/design/soulad-se-standardy.md, escaped
   GET  /licence               Impeccable NOTICE (the page pattern's source)
-  GET  /history               [auth] every answered question as the studio showed it: the question,
-                              its cards (previews copied aside) and the answer, oldest first, from
-                              <project>/.aid-ui/studio/history.jsonl (display only; decisions stay the
-                              in-memory answers above)
+  GET  /history               [auth] the lines of <project>/.aid-ui/studio/history.jsonl in file order:
+                              every answered question as the studio showed it ({by: "pm", question,
+                              cards (previews copied aside), step, answer}) and every decision the
+                              agent recorded with `aid-ui-state.sh decide` ({by: "agent", step,
+                              event, cards: [], answer: {decision: "decided", at}}); a line that is
+                              not JSON is skipped (and still counted in /state history_lines).
+                              Display only; decisions stay the in-memory answers above
   GET  /history/preview?question=&card=  a card preview kept with the history
   GET  /brand/<file>          [auth] the project's brand page (<project>/docs/brand/): index.html,
                               top-level *.css, assets/ and fonts/ only (what aid-ui-serve.sh brand
@@ -72,7 +75,7 @@ opened_at now; the agent lists that id in the payload with the new cards.
 [auth] = the X-AID-Token header (the agent) or the session cookie (the PM's page).
 Neither: 403 {"error": "token"}.
 """
-import argparse, hashlib, hmac, html, json, os, re, secrets, sys, threading
+import argparse, fcntl, hashlib, hmac, html, json, os, re, secrets, sys, threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
@@ -173,6 +176,9 @@ def load():
             raise ValueError("payload.json: question %s has unknown kind %r" % (q["id"], q.get("kind")))
         if "target" not in q:
             raise ValueError("payload.json: question %s has no target" % q["id"])
+        o = q.get("outcome")
+        if o is not None and not (isinstance(o, str) and len(o) <= 120):
+            raise ValueError("payload.json: question %s outcome must be a string of at most 120 characters" % q["id"])
         try:
             parse_time(q.get("opened_at"))
         except (TypeError, ValueError):
@@ -185,22 +191,9 @@ def load():
         if (c["question"], c["id"]) in shown:
             raise ValueError("payload.json: card id %s twice in question %s" % (c["id"], c["question"]))
         shown.add((c["question"], c["id"]))
-    ov = p.get("overview")
-    if ov is not None:   # the web at a glance, kept by the agent (see the header)
-        if not isinstance(ov, dict):
-            raise ValueError("payload.json: overview must be an object")
-        u = ov.get("site_url")
-        if u is not None and not (isinstance(u, str) and re.match(r"https?://[^\s\"'<>]+$", u)):
-            raise ValueError("payload.json: overview.site_url must be an http(s) address")
-        todo = ov.get("todo", [])
-        if not isinstance(todo, list) or not all(
-                isinstance(t, dict) and isinstance(t.get("what"), str) and t["what"].strip()
-                and isinstance(t.get("how", ""), str) and isinstance(t.get("blocking", False), bool)
-                and isinstance(t.get("question", ""), str) for t in todo):
-            raise ValueError("payload.json: overview.todo must be a list of {what, how, blocking, question} with a non-empty what")
     with LOCK:
         qs = qs + [dict(q) for i, q in REROLLED.items() if i not in seen]
-    return {"now": p.get("now"), "steps": steps, "questions": qs, "cards": cards, "overview": ov}
+    return {"now": p.get("now"), "steps": steps, "questions": qs, "cards": cards}
 
 
 def valid_answer(q):
@@ -246,19 +239,38 @@ def keep_history(q, cards, answer, steps):
             c["preview"] = None
         kept.append(c)
     cur = next((x for x in steps or [] if isinstance(x, dict) and x.get("status") == "current"), None)
-    entry = {"question": {k: v for k, v in q.items() if k not in ("answered", "answer")},
+    entry = {"by": "pm", "question": {k: v for k, v in q.items() if k not in ("answered", "answer")},
              "cards": kept, "step": (cur or {}).get("title"),
              "answer": {k: answer.get(k) for k in ("decision", "choice", "comment", "at")}}
+    # One line, appended under the same exclusive lock `aid-ui-state.sh decide` takes (flock on
+    # the file), so a PM answer and an agent decision never interleave.
     with open(HISTORY, "a", encoding="utf-8") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        fh.flush()
 
 
 def read_history():
+    """(parsed lines in file order, number of lines in the file, lines skipped); a line that is
+    not a JSON object (a torn or foreign write) is skipped, never empties the whole history."""
     try:
-        with open(HISTORY, encoding="utf-8") as fh:
-            return [json.loads(l) for l in fh if l.strip()]
-    except (OSError, ValueError):
-        return []
+        with open(HISTORY, encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return [], 0, 0
+    out, bad = [], 0
+    for l in lines:
+        if not l.strip():
+            continue
+        try:
+            e = json.loads(l)
+        except ValueError:
+            e = None
+        if isinstance(e, dict):
+            out.append(e)
+        else:
+            bad += 1
+    return out, len(lines), bad
 
 
 def next_id(qid):
@@ -353,6 +365,7 @@ class Studio(BaseHTTPRequestHandler):
                                        "choice_title": next((c["title"] for c in a["cards"]
                                                              if c["id"] == a["choice"]), None)}
             p["project"] = os.path.basename(PROJECT)
+            p["history_lines"] = read_history()[1]
             self.send(200, p)
         elif u.path == "/answer":
             if not self.gate(True) or (p := self.payload()) is None:
@@ -381,11 +394,14 @@ class Studio(BaseHTTPRequestHandler):
         elif u.path == "/history":
             if not self.gate(True):
                 return
-            self.send(200, read_history())
+            lines, _, bad = read_history()
+            if bad:
+                self.log_message("history: %d line(s) not a JSON object, skipped", bad)
+            self.send(200, lines)
         elif u.path == "/history/preview":
             if not self.gate(True):
                 return
-            e = next((h for h in read_history() if h.get("question", {}).get("id") == q.get("question")), None)
+            e = next((h for h in read_history()[0] if h.get("question", {}).get("id") == q.get("question")), None)
             c = next((c for c in (e or {}).get("cards") or [] if c.get("id") == q.get("card")), None)
             f = os.path.realpath(os.path.join(STUDIO, str((c or {}).get("preview") or "")))
             ctype = IMAGES.get(os.path.splitext(f)[1].lower())
@@ -493,10 +509,10 @@ class Studio(BaseHTTPRequestHandler):
                                "opened_at": iso(t), "title": cur.get("title"),
                                "prompt": cur.get("prompt"), "rerolled_from": qid}
             ANSWERS[qid] = a
-            try:
-                keep_history(cur, [c for c in p["cards"] if isinstance(c, dict) and c.get("question") == qid], a, p.get("steps"))
-            except OSError as e:   # the history is a record for the PM, never a reason to lose the answer
-                self.log_message("history not written: %s", e)
+        try:   # outside LOCK: waiting for the file lock must not stall the other requests
+            keep_history(cur, [c for c in p["cards"] if isinstance(c, dict) and c.get("question") == qid], a, p.get("steps"))
+        except OSError as e:   # the history is a record for the PM, never a reason to lose the answer
+            self.log_message("history not written: %s", e)
         self.log_message("answer %s: %s", qid, d)
         self.send(200, a)
 

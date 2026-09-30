@@ -321,15 +321,45 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/history/preview?question=q1&card=b")" = 404 ]
 }
 
-@test "overview: passed through /state; a wrong type or a non-http site_url makes the payload invalid" {
-  jq '.overview = {site_url: "http://10.20.20.22:3913/", todo: [{what: "Portrét", how: "Pošlete fotku", blocking: false}]}' \
-    "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
+@test "P106: an accepted answer's history line carries by: pm and the question's outcome" {
+  jq '.questions[0].outcome = "Vzhled Zásady: klidný, věcný."' "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
+  [ "$(answer "$choose_a")" = 200 ]
+  jq -e 'select(.question.id == "q1") | .by == "pm" and .question.outcome == "Vzhled Zásady: klidný, věcný."' \
+    "$P/.aid-ui/studio/history.jsonl" >/dev/null
+}
+
+@test "P106: an outcome over 120 characters or not a string makes the payload invalid (422)" {
+  long="$(printf 'ž%.0s' $(seq 1 121))"
+  jq --arg o "$long" '.questions[0].outcome = $o' "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]
+  grep -q "outcome" "$BATS_TEST_TMPDIR/body"
+  jq --arg o "${long:1}" '.questions[0].outcome = $o' "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
-  [ "$(jq -r .overview.todo[0].what "$BATS_TEST_TMPDIR/body")" = "Portrét" ]
-  jq '.overview.site_url = "javascript:alert(1)"' "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
+  jq '.questions[0].outcome = 5' "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]
-  jq '.overview = {todo: [{what: "x", blocking: "ano"}]}' "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
-  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]
-  jq '.overview = {todo: [{how: "x"}]}' "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
-  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]
+}
+
+@test "P106: /history returns a decide line next to a PM line in file order; history_lines grows after decide" {
+  STATE_SH="$BATS_TEST_DIRNAME/../../aid-ui-state.sh"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  [ "$(jq -r .history_lines "$BATS_TEST_TMPDIR/body")" = 0 ]
+  [ "$(answer "$choose_a")" = 200 ]
+  "$STATE_SH" decide "$P" --step s1 --title "Doba odpovědi" --outcome "Do dvou dnů" --why "PM řekl vyber ty" >/dev/null
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  [ "$(jq -r .history_lines "$BATS_TEST_TMPDIR/body")" = 2 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/history")" = 200 ]
+  jq -e 'length == 2 and .[0].by == "pm" and .[1].by == "agent" and .[1].step == "Směr"
+         and .[1].event.outcome == "Do dvou dnů"' "$BATS_TEST_TMPDIR/body" >/dev/null
+}
+
+@test "P106: a torn line in the middle of the history is skipped, the rest is served and it is counted" {
+  H="$P/.aid-ui/studio/history.jsonl"
+  echo '{"by":"pm","step":"Směr","question":{"id":"x1"},"answer":{"decision":"approve"}}' > "$H"
+  echo '{"by":"pm","step":"Sm' >> "$H"
+  echo '{"by":"agent","step":"Směr","event":{"title":"t","outcome":"o","why":"w"},"answer":{"decision":"decided"}}' >> "$H"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/history")" = 200 ]
+  jq -e 'length == 2 and .[0].question.id == "x1" and .[1].by == "agent"' "$BATS_TEST_TMPDIR/body" >/dev/null
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  [ "$(jq -r .history_lines "$BATS_TEST_TMPDIR/body")" = 3 ]
+  grep -q "not a JSON object, skipped" "$BATS_TEST_TMPDIR/server.log"
 }

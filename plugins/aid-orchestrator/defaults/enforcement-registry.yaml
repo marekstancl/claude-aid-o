@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 564          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 567          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4130,6 +4130,38 @@ enforcements:
     recovery: "The refusal names the missing answer. Let the PM choose on Impeccable's page or the companion page, then run the step again."
     test_covers: "the refusal of steps 4-6 without a recorded direction, the await-choice rounds for slogan, logo, pages and composition (404, stale confirm, other kind open, localhost-only URL), the step gates on choice_pending and enabled options, and the build-path gate for step 5 (test-aid-ui-state.bats); the rule text naming every PM choice (test-aid-ui-skill-rules.bats)."
     test: "scripts/tests/bats/test-aid-ui-state.bats"
+
+  - id: aid_ui_decide_refuses
+    type: 12
+    source: "scripts/aid-ui-state.sh"
+    instruction: "skills/ui-design/SKILL.md (Když rozhoduje agent sám)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That the agent calls decide at every place it decides without the PM (the skill text says where; test-aid-ui-skill-rules.bats checks the text names it), or that the outcome it records is true. A --reconstructed event is written after the fact and is marked so on the page, not proven."
+    description: "P106 Step 1 — aid-ui-state.sh decide records a decision the agent made without the PM as one line of .aid-ui/studio/history.jsonl ({by: agent, step, event, answer.decision decided}) under the same file lock as the studio server. It refuses a step that is not a payload step title or id, an empty or over-long title/outcome/why (80/120/300), --at without --reconstructed or malformed, a missing payload.json, and a lock not taken in 10 s; the same step, title and outcome recorded twice is one event."
+    recovery: "The refusal names the field or the step. Use a step title from payload.json steps[] (the six canonical titles of SKILL.md), shorten the text, or start the studio before recording."
+    test_covers: "decide appends one line and prints at, matches --step by title and id, refuses an unknown step, an empty field, a 121-character outcome and --at without --reconstructed (exit 2), is idempotent, exits 1 without payload.json and while another process holds the lock, stores a reconstructed --at (test-aid-ui-state.bats)."
+    test: "scripts/tests/bats/test-aid-ui-state.bats"
+
+  - id: aid_ui_outcome_length
+    type: 12
+    source: "lib/aid-ui-studio/server.py"
+    instruction: "skills/ui-design/SKILL.md (Jak se ptá PM)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That a question carries an outcome at all (optional for the server; the skill requires it except for card choices) or that the sentence says what was decided."
+    description: "P106 Step 1 — the studio server refuses a payload whose question outcome is not a string of at most 120 characters (422, logged), writes every accepted answer to history.jsonl with by: pm and the question's outcome under an exclusive file lock, and reads the history line by line so one torn line never empties it (counted in /state history_lines)."
+    recovery: "The 422 names the question. Shorten its outcome to one sentence of at most 120 characters and rewrite payload.json."
+    test_covers: "an over-long outcome is 422; an accepted answer's history line carries by: pm and the outcome; /history returns an agent line next to a PM line in file order; a torn line is skipped and counted; history_lines grows after decide (test-aid-ui-studio.bats)."
+    test: "scripts/tests/bats/test-aid-ui-studio.bats"
 
   - id: aid_ui_brand_serves_nothing_internal
     type: 12

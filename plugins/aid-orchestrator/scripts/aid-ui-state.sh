@@ -23,6 +23,19 @@
 #       (cards = the question's cards as the studio showed them when the PM answered). Studio unreachable,
 #       unanswered (404) or malformed -> exit 1, the question stays pending, nothing recorded.
 #       A consumed answer is never re-recorded.
+#   decide <project> --step <title|id> --title <text> --outcome <text> --why <text>
+#          [--source <path|note>] [--reconstructed [--at <YYYY-MM-DDTHH:MM:SS[.mmm]Z>]]
+#       records a decision the agent made without the PM: appends one line
+#       {by: "agent", step: <the payload step's title>, event: {title, outcome, why, source?},
+#       cards: [], answer: {decision: "decided", at}, reconstructed?: true} to
+#       <project>/.aid-ui/studio/history.jsonl under flock -x (fd 8, 10 s; the studio server
+#       takes the same lock) and prints `at`. Display record only: it never touches
+#       brand-state.json, so a decided fact is still written by its own verb. --step must be a
+#       steps[].title or steps[].id of .aid-ui/studio/payload.json (exact); title <= 80,
+#       outcome <= 120, why <= 300 characters, none empty; --at only with --reconstructed (a
+#       decision recorded after the fact). The same step, title and outcome already recorded
+#       -> nothing appended, the recorded `at` printed, exit 0. Bad arguments -> exit 2;
+#       no payload.json or the lock not taken -> exit 1.
 #
 #   Mutations that need the PM take --answer <question id>. The answer must be recorded,
 #   of the verb's kind, for exactly the requested target, decided approve|choose, not in
@@ -943,6 +956,45 @@ case "$VERB" in
     [[ "$rc" -eq 0 ]] || exit 1
     jq_write --arg d "$(today)" '.finished = $d'
     echo "FINISHED: $(today)"
+    ;;
+
+  decide)
+    payload="$PROJECT/.aid-ui/studio/payload.json"
+    step=""; title=""; outcome=""; why=""; source=""; at=""; recon=false
+    while (( $# )); do   # own loop: --reconstructed is a flag, opt() reads only values
+      case "$1" in
+        --step|--title|--outcome|--why|--source|--at)
+          (( $# >= 2 )) || usage "decide: $1 needs a value"; printf -v "${1#--}" '%s' "$2"; shift 2 ;;
+        --reconstructed) recon=true; shift ;;
+        *) usage "decide: unknown argument $1" ;;
+      esac
+    done
+    [[ -n "$step" ]] || usage "decide needs --step <title|id>"
+    for f in title:80 outcome:120 why:300; do
+      n="${f%%:*}"; max="${f#*:}"; v="${!n}"
+      [[ -n "${v//[[:space:]]/}" ]] || usage "decide needs a non-empty --$n"
+      (( $(jq -rn --arg s "$v" '$s | length') <= max )) || usage "decide: --$n is over $max characters"
+    done
+    if [[ -n "$at" ]]; then
+      $recon || usage "decide: --at only together with --reconstructed"
+      [[ "$at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,3})?Z$ ]] ||
+        usage "decide: --at must be YYYY-MM-DDTHH:MM:SS[.mmm]Z (UTC)"
+    fi
+    [[ -f "$payload" ]] || die "decide: no studio payload in $PROJECT; the studio is not initialised"
+    st="$(jq -r --arg s "$step" 'first(.steps[]? | select(.title == $s or .id == $s) | .title) // empty' "$payload")" ||
+      die "decide: $payload is not readable JSON"
+    [[ -n "$st" ]] || usage "decide: no step \"$step\" in $payload (steps: $(jq -r '[.steps[]?.title] | join(", ")' "$payload"))"
+    hist="${payload%/*}/history.jsonl"
+    exec 8>>"$hist"
+    flock -x -w 10 8 || die "decide: $hist is locked by another writer for 10 s"
+    prev="$(jq -rRn --arg s "$st" --arg t "$title" --arg o "$outcome" 'first(inputs | fromjson? | objects
+      | select(.by == "agent" and .step == $s and .event.title == $t and .event.outcome == $o) | .answer.at) // empty' "$hist")"
+    if [[ -n "$prev" ]]; then echo "$prev"; exit 0; fi
+    [[ -n "$at" ]] || at="$(now)"
+    jq -nc --arg s "$st" --arg t "$title" --arg o "$outcome" --arg w "$why" --arg src "$source" --arg at "$at" --argjson r "$recon" \
+      '{by: "agent", step: $s, event: ({title: $t, outcome: $o, why: $w} + (if $src == "" then {} else {source: $src} end)),
+        cards: [], answer: {decision: "decided", at: $at}} + (if $r then {reconstructed: true} else {} end)' >&8
+    echo "$at"
     ;;
 
   *) usage "unknown verb: $VERB" ;;

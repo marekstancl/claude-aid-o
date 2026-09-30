@@ -1098,3 +1098,78 @@ JSON
   run "$SCRIPT" gate-record "$PROJ" "$RES"
   [ "$status" -eq 1 ]; [[ "$output" == *"missing row: glyph_coverage index.html/390/chromium"* ]]
 }
+
+# P106 Step 1 — decide: the agent's own decision as one history line
+decide_payload() {
+  mkdir -p "$PROJ/.aid-ui/studio"
+  echo '{"steps": [{"id": "s2", "title": "Zadání a obsah", "status": "done"}], "questions": [], "cards": []}' \
+    > "$PROJ/.aid-ui/studio/payload.json"
+  H="$PROJ/.aid-ui/studio/history.jsonl"
+}
+
+@test "P106 decide: appends one agent line, prints its at, matches --step by title and by id" {
+  decide_payload
+  run "$SCRIPT" decide "$PROJ" --step "Zadání a obsah" --title "Doba odpovědi" --outcome "odpovím do dvou pracovních dnů" \
+    --why "PM řekl vyber ty" --source docs/content/facts.yaml
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$ ]]
+  [ "$(wc -l < "$H")" -eq 1 ]
+  jq -e --arg at "$output" '.by == "agent" and .step == "Zadání a obsah" and .event.title == "Doba odpovědi"
+    and .event.outcome == "odpovím do dvou pracovních dnů" and .event.why == "PM řekl vyber ty"
+    and .event.source == "docs/content/facts.yaml" and .cards == [] and .answer.decision == "decided"
+    and .answer.at == $at and (has("reconstructed") | not)' "$H" >/dev/null
+  run "$SCRIPT" decide "$PROJ" --step s2 --title "Návštěva" --outcome "Jen po domluvě" --why "z webu"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'select(.event.title == "Návštěva") | .step' "$H")" = "Zadání a obsah" ]
+}
+
+@test "P106 decide: refuses an unknown step, an empty field, 121 characters and --at without --reconstructed (exit 2)" {
+  decide_payload
+  run "$SCRIPT" decide "$PROJ" --step "Nope" --title t --outcome o --why w
+  [ "$status" -eq 2 ]; [[ "$output" == *'"Nope"'* ]]
+  run "$SCRIPT" decide "$PROJ" --step "zadání a obsah" --title t --outcome o --why w   # case differs: not normalised
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" decide "$PROJ" --step s2 --title "  " --outcome o --why w
+  [ "$status" -eq 2 ]; [[ "$output" == *"--title"* ]]
+  run "$SCRIPT" decide "$PROJ" --step s2 --title t --outcome "$(printf 'ž%.0s' $(seq 1 121))" --why w
+  [ "$status" -eq 2 ]; [[ "$output" == *"120"* ]]
+  run "$SCRIPT" decide "$PROJ" --step s2 --title t --outcome o --why w --at 2026-09-28T18:05:00Z
+  [ "$status" -eq 2 ]; [[ "$output" == *"--reconstructed"* ]]
+  run "$SCRIPT" decide "$PROJ" --step s2 --title t --outcome o --why w --reconstructed --at "28. 9. 2026"
+  [ "$status" -eq 2 ]
+  [ ! -s "$H" ]
+  run "$SCRIPT" decide "$PROJ" --step s2 --title t --outcome "$(printf 'ž%.0s' $(seq 1 120))" --why w
+  [ "$status" -eq 0 ]
+}
+
+@test "P106 decide: the same step, title and outcome twice is one event; the second run prints the first at" {
+  decide_payload
+  run "$SCRIPT" decide "$PROJ" --step s2 --title t --outcome o --why w
+  first="$output"
+  run "$SCRIPT" decide "$PROJ" --step s2 --title t --outcome o --why "jiný důvod"
+  [ "$status" -eq 0 ]; [ "$output" = "$first" ]
+  [ "$(wc -l < "$H")" -eq 1 ]
+  run "$SCRIPT" decide "$PROJ" --step s2 --title t --outcome "jiný výsledek" --why w
+  [ "$(wc -l < "$H")" -eq 2 ]
+}
+
+@test "P106 decide: --reconstructed --at stores that at and the mark" {
+  decide_payload
+  run "$SCRIPT" decide "$PROJ" --step s2 --title t --outcome o --why w --reconstructed --at 2026-09-28T18:05:00Z
+  [ "$status" -eq 0 ]; [ "$output" = 2026-09-28T18:05:00Z ]
+  jq -e '.answer.at == "2026-09-28T18:05:00Z" and .reconstructed == true' "$H" >/dev/null
+}
+
+@test "P106 decide: exit 1 without payload.json, and while another process holds the history lock" {
+  run "$SCRIPT" decide "$PROJ" --step s2 --title t --outcome o --why w
+  [ "$status" -eq 1 ]; [[ "$output" == *"not initialised"* ]]
+  decide_payload
+  touch "$H"
+  flock -x "$H" sleep 15 3>&- &
+  holder=$!
+  sleep 0.3
+  run "$SCRIPT" decide "$PROJ" --step s2 --title t --outcome o --why w
+  kill "$holder" 2>/dev/null || true
+  [ "$status" -eq 1 ]; [[ "$output" == *"locked"* ]]
+  [ ! -s "$H" ]
+}
