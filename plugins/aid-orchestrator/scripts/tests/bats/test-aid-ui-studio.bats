@@ -401,6 +401,8 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
     eq(st("Zadání a obsah").outcome.text, "Schváleno", "approve without outcome, later than the agent event");
     eq(st("Zadání a obsah").events.map(e => e.by), ["agent", "pm"], "agent event sorted by at");
     eq(st("Zadání a obsah").who, "both", "who both; a line without by is pm");
+    eq(st("Zadání a obsah").events.map(e => e.label), ["Odpovím do dvou pracovních dnů.", "Schváleno"], "rows show the outcome");
+    eq(st("Druh webu").events[1].label, "Klasický web se samostatnou stránkou pro každé téma.", "approve row shows its outcome");
     eq(st("Druh webu").events[0].outcome, "Vráceno k úpravě: Nechci jednostránkový web, ale klasický web s více stránkami.", "return");
     eq(st("Druh webu").who, "pm", "who pm");
     eq(st("Stavba").who, "agent", "who agent");

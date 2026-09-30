@@ -308,7 +308,7 @@ function toEvent(line) {
   if (e.by === "agent") {
     const ev = line.event || {};
     return Object.assign(e, { type: "decided", reconstructed: line.reconstructed === true, title: text(ev.title) || "Rozhodnutí", why: text(ev.why),
-      outcome: text(ev.outcome) || "Rozhodnuto", label: "Rozhodnuto" });
+      outcome: text(ev.outcome) || "Rozhodnuto", label: text(ev.outcome) || "Rozhodnuto" });
   }
   e.type = "answer";
   e.title = text(q.title);
@@ -322,7 +322,7 @@ function toEvent(line) {
     e.outcome = null;
     e.label = { reroll_safer: "Bezpečnější návrhy", reroll_bolder: "Odvážnější návrhy" }[d] || "Nové návrhy";
   } else {
-    e.outcome = text(q.outcome) || "Schváleno"; e.label = "Schváleno";
+    e.outcome = text(q.outcome) || "Schváleno"; e.label = e.outcome;
     // a PM line marked reconstructed got its outcome sentence after the run; only that sentence is marked
     e.reconstructed = line.reconstructed === true && !!text(q.outcome);
   }
