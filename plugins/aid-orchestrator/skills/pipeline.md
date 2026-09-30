@@ -524,7 +524,7 @@ Steps: {total_steps} ({parallel_groups} parallel waves)
 Roles: {unique roles list}
 
 Wave execution:
-  Wave 0: [architect] {objective}  ~{file_count} files
+  Wave 0: [backend]   {objective}  ~{file_count} files
   Wave 1: [backend] {objective}    ~{file_count} files  ← wave 0
   Wave 2: [qa]      {objective}    ~{file_count} files  ← wave 1
 
@@ -579,7 +579,9 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
    (content, never a path).
 6. Dispatch via Agent tool: subagent type `aid-orchestrator:implementer-light` when the card
    says `**Effort:** low`, else `aid-orchestrator:implementer`; model the card's `**Model:**`
-   (an optional `step.model` in `plan.json` overrides it for that one step)
+   (an optional `step.model` in `plan.json` overrides it for that one step). Since 2.112.0
+   (P107) the code-writing roles say `sonnet` and the thinking budget is the agent card's own
+   frontmatter `effort:` (implementer high, implementer-light medium); reviewers stay on Opus.
 7. Save output to `$step_dir/output.md` (`evidence/{epic_id}/{run_id}/steps/{step_id}/`).
    **The controller writes this file, from the agent's final message, and nobody else.** Do
    not ask the agent to write its own `output.md`: the `aid-return` block sits in the
@@ -918,8 +920,7 @@ the plan-final consumers and routes what stays open (§13). The FSM reads
 
 Since P094 the reviewer round's `merged.json` is the semantic evidence of a step
 and of an EPIC; the cp3 `close` writes the per-EPIC `semantic-review-final.json`.
-The verifier's `c2_mode` dispatches at cp2 (`local`, `wiring`, `behavior`) are
-gone; only the plan-final `final` mode remains (§7, `plan-finalize`).
+The `c2_mode` verifier dispatches (`local`, `wiring`, `behavior`) are gone since 2.99.0; cp2 is a review round (`skills/step-review-roles.md`), and the plan-final boundary reads the cp7 round, never a verifier file.
 
 ### After the last step
 
@@ -1691,7 +1692,8 @@ Designed for quick tasks that don't warrant a full EPIC.
 3. Verify output (same as §4)
 4. **Review Checkpoint CP6:** Pre-filter (§13) runs first on `git diff`.
    If pre-filter clean + trivial → skip. If pre-filter finds pattern → immediate FAIL.
-   Otherwise dispatch verifier (`code-review`). Fix loop: gate-fixer → verifier, max 2.
+   Otherwise the review round `/aid-do` runs (its lines 118-150: prepare, dispatch the step
+   reviewers, collect, close; a failed round is fixed by the implementer with `fix_of:`, max 2).
    Advisory only (no ESCALATION in Fast Mode).
    Skip per `review-checkpoints.yaml` (`cp6_fast_mode_review`, `skip_trivial`).
 5. Log completion (action: `aid_do_complete`, files_changed, duration_seconds)

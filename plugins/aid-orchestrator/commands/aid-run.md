@@ -175,7 +175,7 @@ MUST keep ownership until the EPIC completes, reaches a PM-authority decision, o
 unrecoverable external outage. A recoverable technical problem is not a reason to end the turn.
 
 - The controller is the sole owner of FSM mutations, commits, gates, evidence finalization, and
-  long-running/background processes. Dispatched implementers and verifiers never own these.
+  long-running/background processes. Dispatched implementers and reviewers never own these.
 - Never finish a turn with only "waiting for tests/agent". For every asynchronous process record
   PID, log path, start HEAD, start tree hash, start time, expected p95, and hard deadline. Poll the
   process itself and collect its exit status; `tail -f` is forbidden as a completion detector.
@@ -209,7 +209,7 @@ unrecoverable external outage. A recoverable technical problem is not a reason t
   executes the same suite. A failed aggregate run may be followed by targeted diagnosis, but a fix
   requires one fresh final aggregate result; the pre-fix run cannot prove the post-fix HEAD.
 - Verifiers use an isolated worktree or immutable revision. Never run a mutating fixer concurrently
-  against the checkout a verifier is reviewing.
+  against the checkout a reviewer is reviewing.
 - Codex adjudication and PM decisions are append-only audit events. The adjudicator may choose among
   already-authorized technical recovery paths; it cannot grant PM authority or waive security risk.
 
@@ -545,7 +545,7 @@ When `close` reports `fail` on a step or EPIC round and a round remains
 ```
 Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,
       model: <the **Model:** of the step's role card in skills/role-cards.md>,
-      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the reviewer's example plus two other variants of the same rule. Touch nothing outside the rules the findings name.")
+      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
 ```
 
 Then `aid-step-check.sh` again (the range now ends at the fix commit) and
@@ -835,7 +835,7 @@ is round 1 of the next attempt.
    ```
    Agent(subagent_type: <"aid-orchestrator:implementer-light" when that role's card says **Effort:** low, else "aid-orchestrator:implementer">,
          model: <the **Model:** of that role's card in skills/role-cards.md>,
-         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the reviewer's example plus two other variants of the same rule. Touch nothing outside the rules the findings name.")
+         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
    ```
    The owning step is the one whose declared files cover the path (`plan.json` of the EPIC whose commit last touched it: `git log -1 -- <path>`).
 2. `--stage freeze` again. It mints the next attempt and writes `fix-class.json`:

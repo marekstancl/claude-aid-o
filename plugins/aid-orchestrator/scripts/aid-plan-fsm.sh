@@ -165,6 +165,7 @@ source "${SCRIPT_DIR}/lib/aid-plugin-issues.sh"   # the project's record of AID'
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"   # P090 Step 2 — the ONE plan-timeline writer
+source "${SCRIPT_DIR}/lib/aid-scoping.sh"     # P107 Step 2 — _aid_files_verification_only (the gates-stage check)
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-permissions.sh" # P090 — the ONE autonomous_mode reader
 # shellcheck source=lib/aid-generation-ids.sh
@@ -5009,6 +5010,26 @@ _pfsm_finalize_gates_body() {
     return 1
   fi
   _pfsm_say_plan_inputs gates "$plan_path" "$plan_origin" "$execution_yaml"
+
+  # ── P107 Step 2: a test marked verification-only is gone from the candidate ─
+  # The plan's `Test:` bullets marked "verification-only, delete before
+  # plan-final" name one-off checks; the working tree IS the candidate here
+  # (checked out above), so existence — tracked or not — is what is read.
+  local vo_path vo_fail=0 vo_n=0
+  while IFS= read -r vo_path; do
+    [[ -n "$vo_path" ]] || continue
+    vo_n=$((vo_n + 1))
+    if [[ -e "${troot}/${vo_path}" ]]; then
+      echo "FAIL [verification_only_removed] ${vo_path} was marked verification-only and still exists on the candidate — delete it on the plan branch and run '--stage freeze' again" >&2
+      vo_fail=1
+    fi
+  done < <(_aid_files_verification_only "$plan_path")
+  if (( vo_fail )); then
+    echo "PRECONDITION FAIL: plan-finalize --stage gates: verification-only test(s) still present — no gates were run." >&2
+    return 1
+  fi
+  if (( vo_n == 0 )); then echo "INFO [verification_only_removed] the plan marks no verification-only test" >&2
+  else echo "PASS [verification_only_removed] ${vo_n} marked path(s), none present on the candidate" >&2; fi
 
   local run_dir_abs="${root}/${run_dir_rel}"
   local report_file="${run_dir_abs}/gates_report.json"

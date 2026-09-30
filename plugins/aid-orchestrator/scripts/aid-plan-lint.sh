@@ -210,11 +210,28 @@ for _bi in "${!_bullet_lns[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
+# The verification-only marker belongs on `Test:` bullets only (P107 Step 2): a
+# production file marked "delete before plan-final" would be deleted by the
+# gates-stage check's rule, not by anyone's intent. An ERROR in both modes.
+# ---------------------------------------------------------------------------
+while IFS=$'\t' read -r _vo_verb _vo_body; do
+  [[ -n "${_vo_verb:-}" ]] || continue
+  [[ "$_vo_verb" == "Test" ]] && continue
+  errors=$((errors+1))
+  [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: ERROR verification-only marker allowed on Test: bullets only (found on ${_vo_verb}:): ${_vo_body}" >&2
+done < <(_aid_files_verification_only "$PLAN" --any-verb)
+# Under legacy_epic_release_mode there is no plan-final gates stage, so the marker
+# is prose there: say so once, so a legacy plan does not read it as enforced.
+if [[ "$mode" == "legacy" ]] && [[ -n "$(_aid_files_verification_only "$PLAN")" ]]; then
+  _advisory "" "this legacy plan marks a verification-only test, but the check that refuses a leftover marked file runs only in plan-finalize --stage gates (plan_branch mode) — in legacy_epic_release_mode the marker is a note, not a mechanism"
+fi
+
+# ---------------------------------------------------------------------------
 # AID Role is a closed set — the same list aid-epic-to-json.sh enforces. A step
 # naming a role outside it (fullstack, devops, docs) used to pass this lint,
 # CP1 and every review, and fail only inside generation, phase 1.
 # ---------------------------------------------------------------------------
-_VALID_ROLES="architect domain backend frontend qa security observability docs-writer release e2e"
+_VALID_ROLES="backend frontend qa security docs docs-writer release e2e"
 while IFS=$'\t' read -r _rl_ln _rl_role; do
   [[ -n "${_rl_role:-}" ]] || continue
   case " ${_VALID_ROLES} " in *" ${_rl_role} "*) continue;; esac

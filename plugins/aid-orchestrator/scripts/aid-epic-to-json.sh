@@ -60,7 +60,7 @@ mkdir -p "$output_dir" 2>/dev/null || error_exit "Cannot create output directory
 # =============================================================================
 # Valid roles enum (must match plan.schema.json)
 # =============================================================================
-VALID_ROLES="architect domain backend frontend qa security observability docs-writer release e2e"
+VALID_ROLES="backend frontend qa security docs docs-writer release e2e"   # one list; the jq validation below reads it too (P107)
 
 validate_role() {
   local role="$1"
@@ -231,7 +231,7 @@ while IFS= read -r row; do
 
   # Validate role
   if ! validate_role "$role"; then
-    error_exit "Invalid role '$role' in step $num. Valid roles: $VALID_ROLES" 1
+    error_exit "Invalid role '$role' in step $num. Valid roles: $VALID_ROLES (a step that is both backend and frontend — 'fullstack' — is two steps; architect, domain and observability were removed in 2.112.0: use backend)" 1
   fi
 
   # Validate objective length (schema requires minLength: 10)
@@ -479,16 +479,8 @@ for i in "${!step_nums[@]}"; do
     fi
   fi
 
-  # Rule 4: Complex outputs (objective mentions 5+ distinct items) trigger architect review
-  # Count items separated by +, commas, or "and"
-  item_count="$(echo "${step_objectives[$i]}" | { grep -oE '[+,]|( and )' || true; } | wc -l | tr -d ' ')"
-  if [[ "$item_count" -ge 4 && "$step_role" != "architect" ]]; then
-    analysis_counter=$(( analysis_counter + 1 ))
-    analysis_json="$(echo "$analysis_json" | jq \
-      --arg id "analysis_${analysis_counter}_complexity_review" \
-      --arg target "$step_id" \
-      '. + [{"id": $id, "target": $target, "agents": ["architect"], "mode": "review", "merge_strategy": "union", "trigger": "auto"}]')"
-  fi
+  # (Rule 4 — an automatic architect review group for complex objectives — was removed in
+  # 2.112.0 (P107) with the architect role; the EPIC review reads the whole diff instead.)
 done
 
 # =============================================================================
@@ -862,8 +854,8 @@ rm -rf "${__pj_tmp}"
 #     plan.schema.json; the actual gate-existence check is dynamic, done by
 #     aid-run-gates.sh against execution.yaml at run time)
 # =============================================================================
-validation_errors="$(echo "$plan_json" | jq -r '
-  def valid_roles: ["architect","domain","backend","frontend","qa","security","observability","docs-writer","release","e2e"];
+validation_errors="$(echo "$plan_json" | jq -r --arg roles "$VALID_ROLES" '
+  def valid_roles: ($roles | split(" "));
   # NOTE: gates[] intentionally has NO fixed enum (see plan.schema.json) —
   # any project/self-host gate name is valid here. This only checks the name
   # is a well-formed identifier (non-empty, starts alpha, alnum/_/- after);

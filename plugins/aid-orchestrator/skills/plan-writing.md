@@ -441,7 +441,7 @@ writing and repair its exact diagnostics before CP1/C0.
 - [ ] {Testable criterion 3 — specific, measurable}
 
 **Effort:** {S / M / L}
-**AID Role:** {architect / domain / backend / frontend / qa / e2e / security / observability / docs-writer / release}
+**AID Role:** {backend / frontend / qa / e2e / security / docs / release} (docs-writer = the older spelling of docs)
 **Visual Refs:** `{path/to/mockup-source.tsx}` lines {start}-{end} — {what part this step implements} *(optional — only for frontend/UI steps with mockups)*
 **UI Change Mode:** `existing_ui` | `new_ui` *(frontend steps that modify existing UI — omit for new UI/greenfield)*
 **UI Change Contract:** `path: .aid-o/work/.../delta-contract.json | sha256: <hash> | schema_version: 1.0.0 | viewports: desktop, mobile` *(REQUIRED when UI Change Mode is `existing_ui` — omitting this blocks controller dispatch; see plan.schema.json. `viewports` names every viewport the baseline and the verification cover: desktop AND mobile when `project.yaml → ui.responsive` is true or absent — P087 — desktop alone when it is `false`. The generators carry `path | sha256 | schema_version` into plan.json; `viewports` is read by the controller from this field in the plan text, and the proposal check (`aid_ui_proposal_check`) is what refuses a missing viewport.)*
@@ -562,6 +562,17 @@ questions in plain sentences:
    cheapest move, and the plan should say so explicitly. A NEW suite is a
    decision that costs a tier declaration and a name, so it is stated as a
    decision, not slipped in.
+
+**A one-off check is marked, and it is gone before plan-final.** A `Test:`
+bullet whose prose after the dash BEGINS with `verification-only, delete
+before plan-final` (Czech: `ověřovací, smazat před koncem plánu`) names a
+check of an assumption — a migration, a measurement, a throwaway script — that
+proves something once and guards nothing afterwards. A test of behaviour is
+never marked: it is the guard against the next regression. The marker is
+allowed on `Test:` bullets only (`aid-plan-lint.sh` blocks it on any other
+verb), and `plan-finalize --stage gates` refuses a frozen candidate on which a
+marked path still exists, tracked or not — so the file is deleted on the plan
+branch before plan-final, not after the merge.
 
 Unchanged, deliberately: a `Test:` bullet naming a suite that does not exist yet
 MUST declare its tier (`aid-plan-to-epic.sh` refuses without it). Making tests

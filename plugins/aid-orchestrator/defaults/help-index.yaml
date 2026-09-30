@@ -140,7 +140,7 @@
 #                aid-config-summary.sh at its OPENING, before the menu. Its last turn is
 #                the per-module result report, which commands/aid-setup.md → "Module
 #                Execution" names as the Finished card.
-#   /aid-audit, /aid-stop, /aid-help  no renderer exists; each ends by reporting
+#   /aid-stop, /aid-help  no renderer exists; each ends by reporting
 #                completed work or requested content → finished.
 #                Any row growing a deterministic renderer must move to `renderer:`.
 
@@ -165,10 +165,6 @@ surfaces:
       topic: recovery, audience: regular, disposition: current,
       writes: [], final_turn: "card:finished" }
 
-  - { command: /aid-audit, file: plugins/aid-orchestrator/commands/aid-audit.md,
-      purpose: "Project health audit (0-100 score) across categories A–J",
-      topic: audit, audience: power, disposition: current,
-      writes: [], final_turn: "card:finished" }
 
   - { command: /aid-help, file: plugins/aid-orchestrator/commands/aid-help.md,
       purpose: "AID help with progressive disclosure (Level 0–3)",
@@ -209,6 +205,11 @@ surfaces:
   - { command: /aid-verify-implementation, file: plugins/aid-orchestrator/commands/aid-verify-implementation.md,
       purpose: "Independent adversarial DONE review of an implementation before it is trusted as complete",
       topic: plan-lifecycle, audience: power, disposition: current,
+      writes: [], final_turn: "card:finished" }
+
+  - { command: /critic, file: plugins/aid-orchestrator/skills/critic.md,
+      purpose: "The independent critic of a proposal or plan — two levels (fix / consider the scope), assembled and checked by lib/aid-critic.sh; loaded by /aid-plan, not invoked directly",
+      topic: plan, audience: power, disposition: current,
       writes: [], final_turn: "card:finished" }
 
   - { command: /visual-companion, file: plugins/aid-orchestrator/skills/visual-companion/SKILL.md,

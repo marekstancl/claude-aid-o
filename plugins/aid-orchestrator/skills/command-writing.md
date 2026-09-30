@@ -94,13 +94,13 @@ Cardinal Rule + the Completeness Gate below, run by the author/auditor.
 
 | Band | Lines | When |
 |------|-------|------|
-| **Thin shell** | 20–60 | Pure delegators (e.g. aid-audit → auditor.md) |
+| **Thin shell** | 20–60 | Pure delegators (e.g. aid-do → the review round) |
 | **Standard** | 60–250 | Most commands |
 | **Heavy** | 250–420 | Multi-mode orchestration commands (aid-run, aid-plan, aid-init) |
 
 Over ~420 lines, the command is probably embedding script-internal detail that
 belongs in a skill or the script header — extract it and reference. Observed:
-aid-audit.md (29, thin) to aid-init.md (412, heavy-justified).
+aid-stop.md (thin) to aid-init.md (412, heavy-justified).
 
 ---
 
@@ -129,7 +129,7 @@ aid-audit.md (29, thin) to aid-init.md (412, heavy-justified).
    Principle-#1 violation (instruction without enforcement).
 4. **Restated cross-file values** — gate counts, severity vocabularies, menus
    copied from another file drift. Reference the canonical file ("severity per
-   `agents/auditor.md`"), don't restate the number/list.
+   `skills/step-review-roles.md`"), don't restate the number/list.
 5. **Version-stamped headings** — `### X (P040, v2.25.0+)`. Attribution goes in the
    body or CHANGELOG (same as skill-writing Forbidden Pattern #1).
 6. **Raw dispatch logging** — a command that dispatches an `Agent()` MUST wrap it

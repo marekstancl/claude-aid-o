@@ -21,7 +21,7 @@ AID_PR_SCHEMA="${_AID_PR_PLUGIN}/defaults/schemas/review-finding.schema.json"
 AID_PR_TEMPLATE="${_AID_PR_PLUGIN}/defaults/prompts/review-prompt-v1.md"
 AID_PR_ROLES_SKILL="${_AID_PR_PLUGIN}/skills/plan-review-roles.md"
 # The evidence forms a plan reviewer may cite; the step checkpoints pass their own.
-AID_PR_EVIDENCE_FORMS='`path:line` or `path:first-last` inside the repository, `plan.md:line` for the plan itself (the line numbers of the plan in the packet below), or `absent:path` for a file the plan presumes and the repository lacks; one citation that resolves is enough; citations only, separated by `;` — a word or a bracketed note after a line number drops the finding, so say what the line shows in `claim`'
+AID_PR_EVIDENCE_FORMS='`path:line` or `path:first-last` inside the repository, `plan.md:line` for the plan itself (the line numbers of the plan in the packet below), `critic-response.md:line` for the author'"'"'s answer to the critic when the packet carries it, or `absent:path` for a file the plan presumes and the repository lacks; one citation that resolves is enough; citations only, separated by `;` — a word or a bracketed note after a line number drops the finding, so say what the line shows in `claim`'
 
 # shellcheck source=aid-standards-map.sh
 source "${_AID_PR_PLUGIN}/scripts/lib/aid-standards-map.sh"
@@ -49,9 +49,51 @@ aid_plan_review_packet_build() {
     *) echo "a standards map is configured but could not be read" > "$dir/standards.md" ;;
   esac
 
-  (cd "$dir" && for f in plan.md plan-check.json standards.md; do
+  # P107 Step 2: the author's answer to the critic rides in the packet ONLY
+  # when the critic check passed for THIS plan and the answer was not edited
+  # since — otherwise one line says why not, so the reviewers and the PM card
+  # see it. No gate: the PM chose "answered in writing, no refusal".
+  local cdir="${4%/cp1/*}/critic/plan" note="" files="plan.md plan-check.json standards.md"
+  rm -f "$dir/critic-response.md" "$dir/critic-note.txt"
+  if [[ -f "$cdir/check.json" && -f "$cdir/critic-response.md" ]]; then
+    local passed rsha psha
+    passed="$(jq -r '.passed // false' "$cdir/check.json" 2>/dev/null)"
+    rsha="$(jq -r '.response_sha256 // ""' "$cdir/check.json" 2>/dev/null)"
+    psha="$(jq -r '.plan_sha256 // ""' "$cdir/check.json" 2>/dev/null)"
+    local psha_rev; psha_rev="$(jq -r '.plan_sha256_revised // ""' "$cdir/check.json" 2>/dev/null)"
+    if [[ "$passed" != "true" ]]; then note="critic: no passed check for this plan (the check failed)"
+    elif [[ "$rsha" != "$(sha256sum "$cdir/critic-response.md" | cut -d' ' -f1)" ]]; then note="critic: no passed check for this plan (response edited after the check)"
+    # the plan CP1 reads is the checked one, or the one revision the author rebound after accepting items
+    elif [[ "$psha" != "$sha" && "$psha_rev" != "$sha" ]]; then note="critic: no passed check for this plan (plan changed since the check — aid_critic_rebind after the revision, or a new critic run)"
+    else cp "$cdir/critic-response.md" "$dir/critic-response.md" && files="$files critic-response.md"; fi
+  else
+    note="critic: no passed check for this plan (missing — the critic did not run before this review)"
+  fi
+  [[ -n "$note" ]] && printf '%s\n' "$note" > "$dir/critic-note.txt"
+
+  (cd "$dir" && for f in $files; do
      jq -n --arg f "$f" --arg s "$(sha256sum "$f" | cut -d' ' -f1)" '{file: $f, sha256: $s}'
    done) | jq -s --arg sha "$sha" '{plan_sha256: $sha, files: .}' > "$dir/manifest.json"
+}
+
+# aid_plan_review_citation_parts <evidence> — one normalised citation per line:
+# split on `;`, trimmed, a range `path:N-M` collapsed to the line it stands on
+# (`path:N`); a reversed range is dropped with a line on stderr. The adjudicator
+# and the prompt inventory (P107 Step 6) read citations through this one
+# function, so the grammar cannot drift between them.
+aid_plan_review_citation_parts() {
+  local item; local -a items
+  IFS=';' read -ra items <<< "${1-}"
+  for item in "${items[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"; item="${item%"${item##*[![:space:]]}"}"
+    [[ -n "$item" ]] || continue
+    if [[ "$item" =~ ^(.+):([0-9]+)-([0-9]+)$ ]]; then
+      # 10# or bash aborts the arithmetic on a zero-padded number.
+      (( 10#${BASH_REMATCH[2]} <= 10#${BASH_REMATCH[3]} )) || { echo "citation dropped, reversed range: ${item}" >&2; continue; }
+      item="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
+    fi
+    printf '%s\n' "$item"
+  done
 }
 
 # aid_plan_review_role_section <role> — the role's section of the roles skill,
@@ -112,6 +154,14 @@ aid_plan_review_prompt_render() {
     echo
     echo "## plan.md (also on disk: ${dir}/packet/plan.md; cite it as plan.md:<line>)"
     awk '{ printf "%5d  %s\n", NR, $0 }' "${dir}/packet/plan.md"
+    echo
+    if [[ -f "${dir}/packet/critic-response.md" ]]; then
+      echo "## critic-response.md (the author's answer to the independent critic; a test the plan declined here with a reason is not a missing test — cite it as critic-response.md:<line>)"
+      awk '{ printf "%5d  %s\n", NR, $0 }' "${dir}/packet/critic-response.md"
+    else
+      echo "## critic-response.md"
+      cat "${dir}/packet/critic-note.txt" 2>/dev/null || echo "critic: no passed check for this plan"
+    fi
   } >> "$out"
 }
 

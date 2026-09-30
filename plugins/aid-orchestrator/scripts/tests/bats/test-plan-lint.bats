@@ -378,3 +378,12 @@ _plan_role() { # <file> <role>
   [ "$(grep -c 'names another repository' <<< "$output")" -eq 1 ]
   grep 'names another repository' <<< "$output" | grep -q '### Step 1: work$' 
 }
+
+# ─── P107 Step 2: the verification-only marker belongs on Test: bullets only ───
+@test "lint ERROR: the verification-only marker on a Modify: bullet blocks; on a Test: bullet it passes" {
+  _plan p.md strict '- Modify: `src/b.ts` — verification-only, delete before plan-final'
+  run "$LINT" p.md; [ "$status" -ne 0 ]
+  [[ "$output" == *"verification-only marker allowed on Test: bullets only"* ]]
+  _plan p.md strict '- Test: `t/x.bats` — ověřovací, smazat před koncem plánu: a one-off measurement'
+  run "$LINT" p.md; [ "$status" -eq 0 ]
+}

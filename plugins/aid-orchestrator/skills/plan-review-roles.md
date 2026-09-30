@@ -58,9 +58,10 @@ A finding exists only with both:
   the words `if`, `for` and `do` are kept out. A reproduction that needs any of
   them is a `repro/<name>.sh` file.
 - `evidence` — `path:line` or `path:first-last` inside the repository,
-  `absent:path` for a file the plan presumes and the repository lacks, or
-  `plan.md:line` for the plan itself; several separated by `;`. Every file used
-  must be cited. A range stands on its first line.
+  `absent:path` for a file the plan presumes and the repository lacks,
+  `plan.md:line` for the plan itself, or `critic-response.md:line` for the
+  author's answer to the critic when the packet carries it; several separated
+  by `;`. Every file used must be cited. A range stands on its first line.
 
 A finding without both is rejected by `scripts/aid-review-adjudicate.sh`
 and recorded in `rejected.json` with the reason. Report only what would lead to
@@ -115,6 +116,7 @@ every step can be started from what is written and that the parts agree.
 4. Does the plan contradict itself (Data Model against a step, Scope against Files, Architecture against a command)?
 5. Is anything in Scope delivered by no step, or delivered by a step while declared out of scope?
 6. Is every section the plan template requires present and filled (Goal, Scope, Files, Acceptance Criteria, Testing Strategy, Risks)?
+7. What in the plan can be dropped without changing what the PM gets? Name the step or bullet. `major` whenever the named step or bullet can go without losing an acceptance criterion (the fix is the deletion); `minor` only when the author can show the criterion it serves.
 
 ### Stop rule
 
@@ -132,7 +134,7 @@ looks for promises without mechanism and for damage to what already works.
 2. Which existing behaviour does the plan silently change or break (consumers of files it deletes or rewrites)?
 3. Which numbers, names or paths are asserted but not grounded in the repository?
 4. What does Goal or Success Criteria promise that no step's acceptance criteria covers?
-5. Where is the plan larger than it needs to be (a step that delivers nothing a later step or the Goal needs)?
+5. What in the plan can be dropped without changing what the PM gets? Name the step or bullet. `major` whenever the named step or bullet can go without losing an acceptance criterion (the fix is the deletion); `minor` only when the author can show the criterion it serves.
 
 ### Stop rule
 
@@ -152,6 +154,7 @@ inputs and states the plan does not describe.
 4. Who has authority over each artifact or resource the plan writes, and can the wrong actor or tenant write it?
 5. Does any decision depend on state that a later step can change without the decision being taken again?
 6. What does the user or PM see when something fails, is degraded or is overridden, and is that recorded in a file, not only in chat?
+7. What in the plan can be dropped without changing what the PM gets? Name the step or bullet. `major` whenever the named step or bullet can go without losing an acceptance criterion (the fix is the deletion); `minor` only when the author can show the criterion it serves.
 
 ### Stop rule
 
@@ -174,6 +177,7 @@ role checks every interface the plan relies on.
 6. Does the plan use a library or external API method, parameter or response shape that the version in use does not have?
 7. For every file or artifact a step reads at run time, which phase or command of the running pipeline writes it, and does that happen before the step runs?
 8. Is every premise the plan takes over from a report, a backlog item or an earlier plan checked by a command against today's code, and does the plan name that command?
+9. What in the plan can be dropped without changing what the PM gets? Name the step or bullet. `major` whenever the named step or bullet can go without losing an acceptance criterion (the fix is the deletion); `minor` only when the author can show the criterion it serves.
 
 ### Stop rule
 
@@ -195,6 +199,7 @@ search for something reusable was wide enough, not whether it was replayed.
 4. Is there an existing helper the plan should reuse but does not name?
 5. Does planned reuse break the reused component's contract (a different signature, contradictory state, a behaviour change for its other callers)?
 6. Do new artifacts duplicate information already recorded elsewhere?
+7. What in the plan can be dropped without changing what the PM gets? Name the step or bullet. `major` whenever the named step or bullet can go without losing an acceptance criterion (the fix is the deletion); `minor` only when the author can show the criterion it serves.
 
 ### Stop rule
 
@@ -208,11 +213,12 @@ Is every claim enforced and testable. This role follows each "refuses",
 
 ### Questions
 
-1. For each mechanism the plan claims, which step's test breaks it, and does that test exercise the refusal path?
+1. For each mechanism the plan claims, which ONE test breaks it, on the refusal path? One test per mechanism; a second case only when it takes a different code path. A `Test:` bullet the plan declined in `critic-response.md` with a reason is not a missing test — report only a mechanism with no test at all.
 2. Are test tiers right (t0 under 2 s per case, t1 under 30 s, t2 otherwise or cross-component), and does the merge path stay green at every step?
 3. Does every new enforcement have a registry row with an existing test, and does every row the plan names match the registry's field set?
 4. Is any artifact the plan relies on unreachable where it is needed (gitignored, not in CI, a test file the runner never discovers)?
 5. Is anything in Success Criteria unreachable by any test the plan names?
+6. What in the plan can be dropped without changing what the PM gets? Name the step or bullet. `major` whenever the named step or bullet can go without losing an acceptance criterion (the fix is the deletion); `minor` only when the author can show the criterion it serves. For this role: a test that names no acceptance criterion and no defect it catches is such a bullet.
 
 ### Stop rule
 

@@ -1036,3 +1036,48 @@ _fix() { echo "fix $1" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review):
   _fix 3; run _round_fail 4 d
   [[ "$output" == *"belongs to no plan"* ]]
 }
+
+# ─── P107 Step 2: the author's answer to the critic rides in the CP1 packet only with a passed check ───
+_critic_answer() {  # <plan sha for the check> — a passed check.json and a matching response
+  mkdir -p "$EV/critic/plan"
+  printf '| # | výtka | verdikt | kde |\n|---|---|---|---|\n| 1 | test bez AC | PŘIJATO | `plan.md` Step 2, Test bullet dropped |\n' > "$EV/critic/plan/critic-response.md"
+  jq -n --arg p "$1" --arg r "$(sha256sum "$EV/critic/plan/critic-response.md" | cut -d' ' -f1)" \
+    '{moment:"plan", plan_sha256:$p, response_sha256:$r, passed:true}' > "$EV/critic/plan/check.json"
+}
+
+@test "packet: a passed critic check for this plan puts critic-response.md in every prompt, numbered and citable" {
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  [ -f "$CP1/round-1/packet/critic-response.md" ]
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 4 ]
+  grep -q '^## critic-response.md (the author' "$CP1/round-1/prompt-reuse.md"
+  grep -q '    3  | 1 | test bez AC | PŘIJATO' "$CP1/round-1/prompt-enforcement_tests.md"
+  grep -q 'critic-response.md:line' "$CP1/round-1/prompt-reuse.md"
+}
+
+@test "packet: a response edited after its check, or no check at all, is one notice line in the prompt, never the file" {
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  printf '| 2 | later | PŘIJATO | `x` |\n' >> "$EV/critic/plan/critic-response.md"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 0 ]
+  [ ! -f "$CP1/round-1/packet/critic-response.md" ]
+  grep -q 'critic: no passed check for this plan (response edited after the check)' "$CP1/round-1/prompt-reuse.md"
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 3 ]
+  rm -rf "$EV/critic" "$CP1"; _check
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 0 ]
+  grep -q 'critic: no passed check for this plan (missing' "$CP1/round-1/prompt-reuse.md"
+}
+
+@test "packet: the response rides with the ONE revision the author rebound after the check; a further edit does not" {
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  printf '\nrevised for the accepted item\n' >> "$PLAN"; _check
+  jq --arg s "$(sha256sum "$PLAN" | cut -d' ' -f1)" '. + {plan_sha256_revised: $s}' "$EV/critic/plan/check.json" > "$EV/critic/plan/c.tmp" && mv "$EV/critic/plan/c.tmp" "$EV/critic/plan/check.json"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 0 ]; [ -f "$CP1/round-1/packet/critic-response.md" ]
+  rm -rf "$CP1"; printf 'edited again\n' >> "$PLAN"; _check
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 0 ]; [ ! -f "$CP1/round-1/packet/critic-response.md" ]
+  grep -q 'plan changed since the check' "$CP1/round-1/prompt-reuse.md"
+}

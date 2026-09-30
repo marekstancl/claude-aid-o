@@ -125,14 +125,14 @@ depends_on: []
 
 | # | Role | Objective | Depends On | Parallel Group |
 |---|------|-----------|------------|----------------|
-| 1 | architect | Design API contracts + ADR | — | — |
-| 2 | domain | Domain model + invariants | architect | — |
-| 3 | backend | Implement API + DB + outbox | domain | group-1 |
-| 4 | frontend | Implement UI against contracts | architect | group-1 |
+| 1 | backend | Design API contracts + ADR | — | — |
+| 2 | backend | Domain model + invariants | 1 | — |
+| 3 | backend | Implement API + DB + outbox | 2 | group-1 |
+| 4 | frontend | Implement UI against contracts | 1 | group-1 |
 | 5 | qa | Unit + integration tests | backend | group-2 |
 | 6 | security | AuthZ + SAST review | backend | group-2 |
-| 7 | observability | OTel instrumentation | backend | group-2 |
-| 8 | docs-writer | Update documentation + changelog | backend | group-3 |
+| 7 | backend | OTel instrumentation | 3 | group-2 |
+| 8 | docs | Update documentation + changelog | 3 | group-3 |
 | 9 | release | Deployment config + smoke tests | qa, security | group-3 |
 
 ## Run Breakdown

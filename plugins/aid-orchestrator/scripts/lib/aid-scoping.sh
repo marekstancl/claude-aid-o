@@ -409,6 +409,36 @@ _aid_files_bullet_tier() {
   esac
 }
 
+# THE verification-only marker (P107 Step 2): a `Test:` bullet whose prose after
+# the dash starts with it names a one-off check of an assumption that must be
+# gone before plan-final. One reader for the lint (which refuses it on any
+# other verb) and for `plan-finalize --stage gates` (which refuses a candidate
+# where a marked path still exists).
+_AID_FILES_VERIFICATION_ONLY_RE='^(verification-only, delete before plan-final|ověřovací, smazat před koncem plánu)'
+
+# _aid_files_verification_only <plan> [--any-verb]
+#   Default: one path per line, from `Test:` bullets carrying the marker.
+#   --any-verb: "<verb>\t<bullet body>" for EVERY bullet carrying it, so the
+#   lint can name the ones on Create/Modify/Rewrite.
+_aid_files_verification_only() {
+  local plan="$1" mode="${2:-}" bullet b verb body prose
+  while IFS= read -r bullet; do
+    [[ -n "$bullet" ]] || continue
+    b="${bullet#- }"
+    [[ "$b" =~ $_AID_FILES_VERB_RE ]] || continue
+    verb="${BASH_REMATCH[1]}"; body="${BASH_REMATCH[2]}"
+    prose="${body#*— }"; [[ "$prose" == "$body" ]] && prose="${body#*-- }"
+    [[ "$prose" == "$body" ]] && continue
+    [[ "$prose" =~ $_AID_FILES_VERIFICATION_ONLY_RE ]] || continue
+    if [[ "$mode" == "--any-verb" ]]; then
+      printf '%s\t%s\n' "$verb" "$body"
+    else
+      [[ "$verb" == "Test" ]] || continue
+      _aid_split_path_entry "$body" 2>/dev/null || true
+    fi
+  done < <(_aid_extract_files_bullets < "$plan") | { if [[ "$mode" == "--any-verb" ]]; then cat; else sort -u; fi; }
+}
+
 # _aid_test_bullet_tier_finding <bullet> <root> — THE rule for a `Test:` bullet's
 # tier (P081 Step 10; one definition since P100 Step 3): generation refuses on
 # it and the plan lint reports it as an ERROR, so a plan the author's check

@@ -103,7 +103,6 @@ Gates: edit .aid-o/config/execution.yaml → customize test/lint/build commands
 Project profile: .aid-o/config/project.yaml → stack, test/lint/build commands
 Permissions: .aid-o/config/permissions.yaml → autonomous_mode: true for /aid-run --auto
 
-Health: /aid-audit       → project health score (0-100) with recommendations
 Tests:  /aid-help tests  → test tiers, what runs on the merge path
 ```
 
@@ -114,7 +113,6 @@ FSM debugging:
   /aid-status <epic-id>                    → shows fsm-state.yaml FSM state
   cat .aid-o/work/evidence/{id}/*/timeline.jsonl | jq .  → full event log
 
-Audit: /aid-audit → project health, gate failure rates, recommendations
 Emergency: /aid-stop → halt auto-mode and return control to you
 ```
 
@@ -132,7 +130,6 @@ Ask for any of these with `/aid-help <topic>`:
 /aid-help status          → /aid-status deep dive (overview, EPIC detail, queue)
 /aid-help gates           → gate types, execution.yaml configuration, retry logic
 /aid-help tests           → test tiers, what runs on the merge path, the nightly
-/aid-help audit           → /aid-audit project health audit (categories A–J)
 /aid-help recovery        → /aid-stop, resume, escalation, PM overrides
 /aid-help auto            → autonomous mode, background gates, resuming a dead run
 /aid-help config          → project.yaml, execution.yaml, permissions.yaml reference
@@ -227,6 +224,17 @@ Three modes, auto-detected from what you pass:
 
 Plan IDs come from the locked allocator, never a hand edit:
   aid-fsm.sh alloc plan-id     → prints the next P{NNN}
+
+The independent critic (2.112.0) reads the PM's brief and the proposal at the
+end of the brainstorm, and the written plan before CP1, and answers in two
+levels: what to fix (the author answers every item in writing) and what the PM
+might cut or add (a suggestion on the scope card, never a verdict). Its prompt
+is assembled by code from the interim's `## Zadání PM` and `## Účel a co je
+v sázce` sections — cost figures never reach it — and its answer is refused
+without the two headings, with more than five items, or unanswered:
+  source scripts/lib/aid-critic.sh
+  aid_critic_prepare P{NNN} --moment brainstorm|plan [--plan <path>]
+  aid_critic_check   P{NNN} --moment brainstorm|plan [--plan <path>]
 
 NOT YET SUPPORTED
 Concurrent plan GENERATION works. STARTING a newly generated plan's EPIC
@@ -361,8 +369,7 @@ names the fix: `aid-init-execution-yaml.sh upgrade <project root>` (see
 ### Topic: tests
 
 Every suite carries one tier tag in its header (`# aid-tier: t0|t1|t2`).
-This is about **tests**; for the project's overall health score see
-`/aid-help audit`, which covers `/aid-audit`.
+This is about **tests**.
 
 ```
 Tiers: t0 = the pulse, t1 = what blocks a merge, t2 = nightly.
@@ -375,16 +382,12 @@ aid-test-tier-lint.sh     every suite has exactly one tag, no plan numbers in na
 The test-portfolio audit (`/aid-audit-tests`, P072) was removed on 2026-09-21:
 its one real run (2026-08-05) produced no decision the PM accepted.
 
-### Topic: audit
+### Removed commands
 
-`/aid-audit` scores the whole project's health from 0 to 100 across categories
-A–J — code, security, docs, process, tokens, frontend, database, instruction
-quality, standards and memory — and returns recommendations. For tests, see
-`/aid-help tests`.
-
-```
-/aid-audit        project health score (0-100) + prioritized recommendations
-```
+`/aid-audit` (the 0-100 health score, categories A–J) was removed in 2.112.0
+(P107): it ran once in its life. What it scored is checked where the work
+happens — the EPIC review (CP3) reads every diff, the plan-final review reads
+the whole plan, and `/aid-status` shows the nightly result.
 
 ### Topic: recovery
 

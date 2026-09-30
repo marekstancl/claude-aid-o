@@ -105,6 +105,12 @@ _evidence_item_ok() {
     [[ -n "$PLAN" ]] || return 1
     (( line >= 1 && line <= PLAN_LINES )) || return 1; return 0
   fi
+  # P107 Step 2: the author's answer to the critic, when the packet carries it.
+  if [[ -z "$sha" && "$path" == critic-response.md ]]; then
+    local resp; resp="$(dirname "${PLAN:-/nonexistent}")/critic-response.md"
+    [[ -n "$PLAN" && -f "$resp" ]] || return 1
+    (( line >= 1 && line <= $(awk 'END { print NR }' "$resp") )) || return 1; return 0
+  fi
   [[ "$path" != /* && "$path" != *..* && "$path" != .aid-worktrees/* ]] || return 1
   if [[ -n "$sha" ]]; then
     # A pre-image: the sha must be history of this checkout and the path must exist in it.
@@ -139,12 +145,11 @@ _evidence_norm() {
 # acceptance run: three real defects were lost to one wrong line number among
 # several right ones). Exit 1 when none resolves.
 _evidence_first_ok() {
-  local item norm
-  IFS=';' read -ra items <<< "$1"
-  for item in "${items[@]}"; do
-    norm="$(_evidence_norm "$item")" || continue
+  local norm
+  while IFS= read -r norm; do
+    [[ -n "$norm" ]] || continue
     _evidence_item_ok "$norm" && { printf '%s' "$norm"; return 0; }
-  done
+  done < <(aid_plan_review_citation_parts "$1" 2>/dev/null)
   return 1
 }
 
