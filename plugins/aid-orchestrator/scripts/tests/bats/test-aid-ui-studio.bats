@@ -370,6 +370,7 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
 @test "P106 page: no Průběh tab, no hash routing, no overview; no process words in labels or static markup" {
   f="$(PAGE_HTML)"
   ! grep -qE '#prubeh|#o=|overview' "$f"
+  ! grep -q "Průběh" "$f"
   kinds="$(sed -n '/^const KIND = {/,/};/p' "$f")"
   ! grep -qiE 'agent|kapitol|kolo|převzetí|payload' <<<"$kinds"
   ! sed -n '/^<header/,/^<script/p' "$f" | grep -qiE 'agent|kapitol|kolo|převzetí|payload'

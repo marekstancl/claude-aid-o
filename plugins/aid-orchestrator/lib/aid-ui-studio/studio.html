@@ -389,7 +389,7 @@ function model(S, H) {
     const hs = sortEvents(handovers), n = hs.length, all = hs.every(e => /^q-adopt-/.test(String(e.qid || "")));
     const said = [...hs].reverse().find(e => text(e.question.outcome));
     const last = steps[steps.length - 1];
-    const label = all ? n + " " + plural(n, "část převzata", "části převzaty", "částí převzato") : "Předáno";
+    const label = all ? n + " " + plural(n, "část převzata", "části převzaty", "částí převzato") : "Všechny části převzaty";
     last.events = sortEvents(last.events.concat([{ type: "handover", by: "pm", answer: hs[n - 1].answer, title: "Předání",
       label, outcome: label,   // an outcome like any row; bearing() is what keeps it out of the step's outcome
       comment: said ? text(said.question.outcome) : null, reconstructed: false, cards: [] }]));
@@ -747,8 +747,8 @@ function stepEl(st, i) {
       const on = stage.classList.toggle("open");
       if (on) openSteps.add(st.title); else openSteps.delete(st.title);
       detail.setAttribute("aria-expanded", String(on));
-      detail.textContent = on ? "Skrýt" : st.active ? "Průběh" : "Detail";
-    } } }, openSteps.has(st.title) ? "Skrýt" : st.active ? "Průběh" : "Detail") : null;
+      detail.textContent = on ? "Skrýt" : "Detail";
+    } } }, openSteps.has(st.title) ? "Skrýt" : "Detail") : null;
   const outcome = st.active ? "Čeká na vaše rozhodnutí."
     : !hOk ? "—" : st.outcome.text;
   stage.append(el("div", { class: "summary" },
