@@ -20,9 +20,14 @@ Read in combination with `skills/agent-protocol.md` for input/output format.
 
 **Model and effort are sourced here.** Each step role declares `**Model:**` and `**Effort:**` —
 the single source of truth for the dispatch (an optional `step.model` in `plan.json` overrides the
-model for one step). `Effort: low` dispatches `aid-orchestrator:implementer-light`, anything else
-`aid-orchestrator:implementer`; controller agents auditor/gate-fixer/verifier carry model and effort
-in their own agent-file frontmatter. See `pipeline.md` §4.
+model for one step). `**Model:**` is the model the Agent tool is given. `**Effort:**` on a role card
+selects the CARD only: `low` dispatches `aid-orchestrator:implementer-light`, anything else
+`aid-orchestrator:implementer` — it is NOT a thinking budget. The thinking budget is the `effort:`
+in the agent card's own frontmatter (P107, 2.112.0: implementer `sonnet`/`high`, implementer-light
+`sonnet`/`medium`, gate-fixer `sonnet`/`medium`; reviewer-light and project-scanner stay `opus`).
+Code-writing roles run on Sonnet; every reviewer stays on Opus (`review-checkpoints.yaml`).
+Deciding and designing happen in the session, not in a dispatched agent: the PM switches the
+session (`/model fable` for `/aid-ui` and the brainstorm). See `pipeline.md` §4.
 
 **Max Parallel note.** `**Max Parallel:**` documents the *intended* concurrency ceiling per role.
 The global ceiling is `orchestration.yaml → dispatch.max_parallel` (3 by default since P087; 1 is
@@ -154,7 +159,7 @@ The controller's step commit refuses any branch but the run's task branch
 - Look for: N+1 queries, missing retry on external calls, swallowed exceptions
 - Check: logging completeness, missing input validation at API boundaries
 
-**Model:** opus
+**Model:** sonnet
 **Effort:** medium
 **Max Parallel:** 2 (different service layers / modules)
 
@@ -193,7 +198,7 @@ The controller's step commit refuses any branch but the run's task branch
 - Look for: accessibility issues (missing alt text, no keyboard nav), unhandled error states
 - Check: bundle size (large imports), unnecessary re-renders, missing lazy loading
 
-**Model:** opus
+**Model:** sonnet
 **Effort:** medium
 **Max Parallel:** 2 (different pages / feature areas)
 
@@ -234,7 +239,7 @@ criteria. I test what the code DOES, not what it was supposed to do.
 - Look for: tests asserting on mocks instead of real behavior, flaky time/order dependence
 - Check: ACs with no corresponding test, happy-path-only suites (no error/edge coverage)
 
-**Model:** opus
+**Model:** sonnet
 **Effort:** low
 **Max Parallel:** 2 (different test suites / modules)
 
@@ -296,7 +301,7 @@ the implementation actually functions across every layer it touches.
 - Look for: acceptance "proven" only at the API layer for user-facing features, sleep-based waits
 - Check: layers skipped without justification, no negative-path coverage
 
-**Model:** opus
+**Model:** sonnet
 **Effort:** medium
 **Max Parallel:** 1 (owns shared infrastructure during the run)
 
@@ -324,7 +329,7 @@ the implementation actually functions across every layer it touches.
 - Look for: OWASP Top 10 patterns, missing rate limiting, weak CORS config
 - Check: dependency CVEs, missing security headers, sensitive data in error responses
 
-**Model:** opus
+**Model:** sonnet
 **Effort:** low
 **Max Parallel:** 1 (sequential security review)
 
@@ -376,7 +381,7 @@ the implementation actually functions across every layer it touches.
 - Look for: undocumented endpoints, outdated parameter descriptions
 - Check: code examples that no longer compile or match current API
 
-**Model:** opus
+**Model:** sonnet
 **Effort:** low
 **Max Parallel:** 2 (different doc sections)
 
@@ -402,7 +407,7 @@ the implementation actually functions across every layer it touches.
 - Look for: version mismatches between package.json / pyproject.toml / VERSION file
 - Check: CHANGELOG missing entries for merged PRs
 
-**Model:** opus
+**Model:** sonnet
 **Effort:** low (or bash — `aid-release.sh` handles automated bumps)
 **Max Parallel:** 1 (only one release step per run)
 

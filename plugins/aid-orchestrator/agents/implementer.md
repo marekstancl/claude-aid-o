@@ -1,7 +1,7 @@
 ---
 name: implementer
-model: opus
-effort: medium
+model: sonnet
+effort: high
 ---
 
 # Agent: implementer

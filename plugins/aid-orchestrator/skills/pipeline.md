@@ -579,7 +579,9 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
    (content, never a path).
 6. Dispatch via Agent tool: subagent type `aid-orchestrator:implementer-light` when the card
    says `**Effort:** low`, else `aid-orchestrator:implementer`; model the card's `**Model:**`
-   (an optional `step.model` in `plan.json` overrides it for that one step)
+   (an optional `step.model` in `plan.json` overrides it for that one step). Since 2.112.0
+   (P107) the code-writing roles say `sonnet` and the thinking budget is the agent card's own
+   frontmatter `effort:` (implementer high, implementer-light medium); reviewers stay on Opus.
 7. Save output to `$step_dir/output.md` (`evidence/{epic_id}/{run_id}/steps/{step_id}/`).
    **The controller writes this file, from the agent's final message, and nobody else.** Do
    not ask the agent to write its own `output.md`: the `aid-return` block sits in the

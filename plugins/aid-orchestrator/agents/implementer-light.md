@@ -1,7 +1,7 @@
 ---
 name: implementer-light
-model: opus
-effort: low
+model: sonnet
+effort: medium
 ---
 
 # Agent: implementer-light

@@ -1,7 +1,7 @@
 ---
 name: gate-fixer
-model: opus
-effort: low
+model: sonnet
+effort: medium
 ---
 
 # Gate Fixer Agent
