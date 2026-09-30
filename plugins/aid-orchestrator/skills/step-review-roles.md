@@ -191,11 +191,21 @@ checks that the steps add up to the EPIC.
 4. Is anything in the EPIC diff outside every step's scope, or in a forbidden path?
 5. Does the diff leave dead code, a stale comment or a document that now disagrees with the code?
 6. What did the step reviews route or carry forward, and is it still open?
+7. Across the steps of this EPIC, is the same logic or helper written twice, or does a block of one step duplicate a helper another step added or that already lives in this repository? Name both places and the one to keep.
+8. Did a step found an abstraction, wrapper or configuration that ends the EPIC with one real caller? Name what to inline. (Never propose removing an abstraction with more than one real caller, and never a change of a public signature, output or behaviour — that is a design change, not a simplification.)
+9. What can be cut or deferred from the whole diff so the EPIC does the same with less code? Name file and lines. A structural change across files is reported with an S/M/L estimate.
+
+(Question 5 — dead code, stale comments, documents that disagree — and `step_generalist`
+question 7 — more than the step needs — stay where they are and are not repeated here; questions
+7-9 ask only what no single step review can see. They took over the simplifier card in 2.112.0.)
 
 ### Stop rule
 
 A blocker is an EPIC acceptance criterion not delivered, two steps in conflict,
-or a forbidden path touched.
+or a forbidden path touched. For questions 7-9: `major` when the diff would be
+materially shorter or a step duplicates an existing helper (the fix round does the
+deletion); a structural change across files is `minor` with `route: backlog` and its
+estimate, never fixed in the round.
 
 ## Role: epic_behaviour
 
