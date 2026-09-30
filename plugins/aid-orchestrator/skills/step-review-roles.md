@@ -88,7 +88,7 @@ Severity ladder, the same for every role:
 | Severity | Meaning |
 |---|---|
 | `blocker` | the change does not deliver its acceptance criteria, breaks an existing behaviour, or touches what it must not |
-| `major` | the change delivers, but wrongly or incompletely (a bug, a missing test, a regression risk) |
+| `major` | the change delivers, but wrongly or incompletely (a bug, a regression risk, a missing test — only when the finding names the acceptance criterion that cannot be verified without it) |
 | `minor` | anything else worth fixing |
 
 Each role's stop rule below narrows what counts as `blocker` for that role.
@@ -145,7 +145,7 @@ that the change delivers its acceptance criteria and nothing else, correctly.
 
 1. Does the diff deliver every acceptance criterion in behaviour, not only by name (a criterion "met" by a string, a comment or a test that asserts nothing)?
 2. Is anything in the diff outside the step's `outputs` and `allowed_paths`, or inside a forbidden path, that `step-check.json` lists or that you find?
-3. Is anything added here untested? Is each added test the cheapest sufficient proof, or does an existing test already cover it (name the covering test, file and case, or concede the test is needed)?
+3. Is anything added here untested? Is each added test the cheapest sufficient proof, or does an existing test already cover it (name the covering test, file and case, or concede the test is needed)? A test that names no acceptance criterion and no defect it catches is reported as `minor` with the recommendation to delete it.
 4. Does the change break a caller, a consumer of a file it edits or deletes, or a contract another module relies on?
 5. Is there an error, retry or concurrency path the change opens that ends in a silent wrong result?
 6. Does any name, path, number or claim in the diff (code, comment, doc) disagree with the repository at this commit?

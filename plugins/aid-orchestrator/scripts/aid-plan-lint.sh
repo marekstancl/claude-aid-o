@@ -210,6 +210,18 @@ for _bi in "${!_bullet_lns[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
+# The verification-only marker belongs on `Test:` bullets only (P107 Step 2): a
+# production file marked "delete before plan-final" would be deleted by the
+# gates-stage check's rule, not by anyone's intent. An ERROR in both modes.
+# ---------------------------------------------------------------------------
+while IFS=$'\t' read -r _vo_verb _vo_body; do
+  [[ -n "${_vo_verb:-}" ]] || continue
+  [[ "$_vo_verb" == "Test" ]] && continue
+  errors=$((errors+1))
+  [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: ERROR verification-only marker allowed on Test: bullets only (found on ${_vo_verb}:): ${_vo_body}" >&2
+done < <(_aid_files_verification_only "$PLAN" --any-verb)
+
+# ---------------------------------------------------------------------------
 # AID Role is a closed set — the same list aid-epic-to-json.sh enforces. A step
 # naming a role outside it (fullstack, devops, docs) used to pass this lint,
 # CP1 and every review, and fail only inside generation, phase 1.

@@ -322,3 +322,19 @@ rm -rf /tmp/pwn'
   [ ! -s "$ROOT/err2.txt" ]
   [ "$(jq '.findings | length' "$R1/merged.json")" -eq 1 ]
 }
+
+# ─── P107 Step 2: `critic-response.md:line` is a packet citation like `plan.md:line` ───
+@test "adjudicate: a finding citing critic-response.md resolves when the packet carries it and is rejected when it does not" {
+  printf 'r1\nr2\nr3\nr4\n' > "$R1/packet/critic-response.md"
+  _finding "$R1" reuse '.evidence = "critic-response.md:3"'
+  run ADJ "$R1" --project-root "$ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq '.findings | length' "$R1/merged.json")" -eq 1 ]
+  [ "$(jq -r '.findings[0].evidence' "$R1/merged.json")" = "critic-response.md:3" ]
+  _finding "$R1" behaviour_edges '.evidence = "critic-response.md:9"'
+  rm "$R1/packet/critic-response.md" "$R1/merged.json"
+  run ADJ "$R1" --project-root "$ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(jq '.blockers_open' "$R1/merged.json")" -eq 0 ]
+  [ "$(jq '[.[] | select(.reason == "evidence_not_found")] | length' "$R1/rejected.json")" -eq 2 ]
+}

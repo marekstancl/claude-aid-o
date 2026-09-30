@@ -563,6 +563,17 @@ questions in plain sentences:
    decision that costs a tier declaration and a name, so it is stated as a
    decision, not slipped in.
 
+**A one-off check is marked, and it is gone before plan-final.** A `Test:`
+bullet whose prose after the dash BEGINS with `verification-only, delete
+before plan-final` (Czech: `ověřovací, smazat před koncem plánu`) names a
+check of an assumption — a migration, a measurement, a throwaway script — that
+proves something once and guards nothing afterwards. A test of behaviour is
+never marked: it is the guard against the next regression. The marker is
+allowed on `Test:` bullets only (`aid-plan-lint.sh` blocks it on any other
+verb), and `plan-finalize --stage gates` refuses a frozen candidate on which a
+marked path still exists, tracked or not — so the file is deleted on the plan
+branch before plan-final, not after the merge.
+
 Unchanged, deliberately: a `Test:` bullet naming a suite that does not exist yet
 MUST declare its tier (`aid-plan-to-epic.sh` refuses without it). Making tests
 optional per step and letting untiered suites in are two different things, and
