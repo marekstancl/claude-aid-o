@@ -39,7 +39,7 @@ _check() {
   run "$ROUND_SH" prepare "$PLAN" --round 1
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(ls "$CP1/round-1"/prompt-*.md | wc -l)" -eq 6 ]
-  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 3 ]
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 4 ]   # plan, plan-check, standards, lint
   [ "$(jq '.reviewers_expected | length' "$CP1/round-1/round.json")" -eq 6 ]
   [ "$(jq '.min_answers_effective' "$CP1/round-1/round.json")" -eq 4 ]
   [ "$(jq 'length' "$CP1/rounds.json")" -eq 1 ]
@@ -1050,7 +1050,7 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   run "$ROUND_SH" prepare "$PLAN" --round 1
   echo "$output"; [ "$status" -eq 0 ]
   [ -f "$CP1/round-1/packet/critic-response.md" ]
-  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 4 ]
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 5 ]
   grep -q '^## critic-response.md (the author' "$CP1/round-1/prompt-reuse.md"
   grep -q '    3  | 1 | test bez AC | PŘIJATO' "$CP1/round-1/prompt-enforcement_tests.md"
   grep -q 'critic-response.md:line' "$CP1/round-1/prompt-reuse.md"
@@ -1063,7 +1063,7 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   [ "$status" -eq 0 ]
   [ ! -f "$CP1/round-1/packet/critic-response.md" ]
   grep -q 'critic: no passed check for this plan (response edited after the check)' "$CP1/round-1/prompt-reuse.md"
-  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 3 ]
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 4 ]
   rm -rf "$EV/critic" "$CP1"; _check
   run "$ROUND_SH" prepare "$PLAN" --round 1
   [ "$status" -eq 0 ]
@@ -1088,9 +1088,11 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
   _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _bracket 1 step_security
   local seen; seen="$(git -C "$R" rev-parse HEAD)"
+  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at deadbeef
+  [ "$status" -eq 1 ]; [[ "$output" == *"not a commit of this checkout"* ]]      # checked even at an unmoved HEAD
   echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"
   run _S close --round 1 --tokens step_generalist=1 step_security=1
-  [ "$status" -eq 1 ]; [[ "$output" == *"run 'close … --at ${seen:0:12}'"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"close --checkpoint cp2 --evidence-dir $E --step 0 --round 1 --tokens step_generalist=1 step_security=1 --at ${seen:0:12}"* ]]
   run _S close --round 1 --tokens step_generalist=1 step_security=1 --at "$(git -C "$R" rev-parse HEAD)"
   [ "$status" -eq 1 ]; [[ "$output" == *"a round closes only at the revision it reviewed"* ]]
   run _S close --round 1 --tokens step_generalist=1 step_security=1 --at deadbeef
@@ -1099,6 +1101,7 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r .revision.head_sha "$(D 1)/measurement.json")" = "$seen" ]
   [ "$(jq -r .revision.closed_with_at "$(D 1)/measurement.json")" = true ]
+  [ "$(jq -r .revision.closed_at_head "$(D 1)/measurement.json")" = "$(git -C "$R" rev-parse HEAD)" ]
   grep -q "\"closed_at\":\"$seen\"" "$E/timeline.jsonl"
   # the confirmation round: HEAD has moved off the seen revision, so it is prepared normally
   _sc; run _S prepare --round 2; [ "$status" -eq 0 ]
@@ -1107,9 +1110,9 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
   _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _bracket 1 step_security
   seen="$(git -C "$R" rev-parse HEAD)"
-  echo other >> "$R/src/app.py"; git -C "$R" commit -qam other; git -C "$R" reset -q --hard HEAD~1; echo again >> "$R/src/app.py"; git -C "$R" commit -qam again
-  git -C "$R" reset -q --hard HEAD~1; echo third >> "$R/src/app.py"; git -C "$R" commit -qam third   # HEAD is a sibling of nothing; seen is still an ancestor
-  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at "$seen"; [ "$status" -eq 0 ]
+  git -C "$R" reset -q --hard HEAD~1; echo divergent >> "$R/src/app.py"; git -C "$R" commit -qam divergent   # HEAD no longer descends from the seen revision
+  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at "$seen"
+  [ "$status" -eq 1 ]; [[ "$output" == *"is not an ancestor of HEAD"* ]]
 }
 
 @test "step: a valid answer without a bracket is retried (no provenance), one with a bracket is not; close names retry" {
@@ -1125,6 +1128,8 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   [ ! -f "$(D 1)/reviewer-step_generalist.json" ]
   _sanswer 1 step_generalist; _bracket 1 step_generalist; _S collect --round 1 >/dev/null
   run _S close --round 1 --tokens step_generalist=1 step_security=1; [ "$status" -eq 0 ]
+  [ "$(jq -r .revision.closed_with_at "$(D 1)/measurement.json")" = false ]
+  [ "$(jq -r .revision.head_sha "$(D 1)/measurement.json")" = "$(git -C "$R" rev-parse HEAD)" ]
 }
 
 @test "prepare prints the bracket commands for every claude role of a step round" {
@@ -1180,4 +1185,8 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   grep -q '^## Plan lint: findings' "$CP1/round-1/prompt-generalist_a.md"
   grep -q 'remaining version files' "$CP1/round-1/prompt-generalist_a.md"
   [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 4 ]
+  # a legacy plan's STRICT-tier finding is a [WARN legacy] line and rides too (P009's case)
+  rm -rf "$CP1"; printf -- '\n**Files:**\n- Modify: `scripts/a.sh` (a note) — x\n' >> "$PLAN"; _check
+  run "$ROUND_SH" prepare "$PLAN" --round 1; [ "$status" -eq 0 ]
+  grep -q 'WARN legacy' "$CP1/round-1/prompt-generalist_a.md"
 }

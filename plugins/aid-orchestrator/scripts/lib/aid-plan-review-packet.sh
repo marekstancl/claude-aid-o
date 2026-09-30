@@ -43,8 +43,8 @@ aid_plan_review_packet_build() {
   # The lint's findings (P009: a legacy plan touched a mapped standards area,
   # the lint said so as an advisory, and three CP1 rounds never saw the line).
   # Every finding line, whatever its tier; the verdict itself is not the packet's.
-  "${_AID_PR_PLUGIN}/scripts/aid-plan-lint.sh" "$plan" --project-root "$root" 2>&1 >/dev/null \
-    | grep -E 'STRICT|ERROR|\[ADVISORY\]|\[NOTE\]' | sed "s#^${plan}##" > "$dir/lint.txt" || true
+  "${_AID_PR_PLUGIN}/scripts/aid-plan-lint.sh" "$plan" 2>&1 >/dev/null \
+    | grep -E 'STRICT|ERROR|\[WARN legacy\]|\[ADVISORY\]|\[NOTE\]' | sed "s#^${plan}##" > "$dir/lint.txt" || true
   [[ -s "$dir/lint.txt" ]] || echo "none" > "$dir/lint.txt"
 
   local derived

@@ -750,7 +750,7 @@ _semantic_final_write() {
   local rounds=() r
   for r in "${BASE}"/round-*/merged.json; do [[ -f "$r" ]] && rounds+=("$r"); done
   (( ${#rounds[@]} )) || { echo "close: no merged.json under ${BASE}" >&2; return 1; }
-  jq -s --arg base "$base" --arg head "${CLOSE_HEAD:-$(_head)}" --arg range "$range" --arg v "$verdict" --arg at "$(_now)" --arg cp "$CHECKPOINT" \
+  jq -s --arg base "$base" --arg head "${CLOSE_HEAD:-$(_head)}" --arg closed_head "$(_head)" --arg range "$range" --arg v "$verdict" --arg at "$(_now)" --arg cp "$CHECKPOINT" \
         --arg project "$(basename "$ROOT")" --arg plan "$(basename "$(dirname "$EVID")")" --arg run "$(basename "$EVID")" \
         --argjson roles "$(_json_strings "${RC_ROLE[@]}")" --argjson from "$(printf '%s\n' "${rounds[@]}" | jq -R . | jq -s .)" '
     def sev: {"blocker": "critical", "major": "medium", "minor": "low"}[.] // "low";
@@ -758,7 +758,7 @@ _semantic_final_write() {
     def file: (split(";")[0] | sub("^[0-9a-f]{7,40}:"; "") | split(":")[0]);
     (sort_by(.round) | map(.findings[]) | group_by(.fingerprint) | map(last)) as $f
     | {artifact_type: "semantic_review", generated_at: $at, generated_by: "aid-review-round.sh close \($cp)",
-       revision: {base_sha: $base, head_sha: $head}}
+       revision: {base_sha: $base, head_sha: $head, closed_at_head: $closed_head}}
       # a whole-plan file is bound to its plan and attempt (the run directory is <plan>/<run>)
       + (if $cp == "cp7" then {identity: {project_id: $project, epic_id: null, plan_id: $plan, run_id: $run}} else {} end)
       + {semantic_review: {mode: "final", range: $range, verdict: $v, lenses_run: $roles,
@@ -824,16 +824,24 @@ cmd_close() {
   fi
 
   local stub=false dispatch_check=recorded
+  [[ -z "$AT_SHA" || "$MODE" == step ]] || _die "--at is for step and EPIC rounds (bound to a revision); a plan round is bound to the plan's bytes" 2
   if [[ "$MODE" == step ]]; then
     local seen head_now; seen="$(jq -r .head_sha "${dir}/round.json")"; head_now="$(_head)"
+    if [[ -n "$AT_SHA" ]]; then
+      # A supplied --at is checked whether or not HEAD moved: it names the
+      # revision the round reviewed, and nothing else is accepted.
+      local at_full; at_full="$(git -C "$ROOT" rev-parse --verify --quiet "${AT_SHA}^{commit}" 2>/dev/null)" || _die "--at ${AT_SHA}: not a commit of this checkout"
+      [[ "$at_full" == "$seen" ]] || _die "--at ${AT_SHA}: the reviewers saw ${seen:0:12}, not ${at_full:0:12}; a round closes only at the revision it reviewed"
+    fi
     if [[ "$seen" != "$head_now" ]]; then
       # P010 (2026-09-29/30, twice): the natural reflex is to fix a clear finding
       # before closing; then close refused, prepare refused, retry refused, and the
       # only way out was a git reset the agent may not run. The verdict binds to
       # the revision the reviewers saw, not to HEAD — so close there, explicitly.
-      [[ -n "$AT_SHA" ]] || _die "head moved during round ${ROUND}; the reviewers saw ${seen:0:12}, HEAD is ${head_now:0:12} — a fix committed before close: run 'close … --at ${seen:0:12}' to close the round at the revision the reviewers saw; the fix is confirmed by the next round"
-      local at_full; at_full="$(git -C "$ROOT" rev-parse --verify --quiet "${AT_SHA}^{commit}" 2>/dev/null)" || _die "--at ${AT_SHA}: not a commit of this checkout"
-      [[ "$at_full" == "$seen" ]] || _die "--at ${AT_SHA}: the reviewers saw ${seen:0:12}, not ${at_full:0:12}; a round closes only at the revision it reviewed"
+      local cmd_tokens; cmd_tokens="$(printf ' %s' "${TOKENS[@]}")"
+      [[ -n "$AT_SHA" ]] || _die "head moved during round ${ROUND}; the reviewers saw ${seen:0:12}, HEAD is ${head_now:0:12} — a fix committed before close: run
+  bash \"\$AID_PLUGIN_PATH/scripts/aid-review-round.sh\" close --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step $STEP} --round ${ROUND} --tokens${cmd_tokens} --at ${seen:0:12}
+to close the round at the revision the reviewers saw; the fix is confirmed by the next round"
       git -C "$ROOT" merge-base --is-ancestor "$seen" "$head_now" 2>/dev/null || _die "--at ${AT_SHA}: ${seen:0:12} is not an ancestor of HEAD ${head_now:0:12} (HEAD was reset or rebased past the reviewed revision); this round cannot close"
       CLOSE_HEAD="$seen"
     fi
@@ -926,10 +934,11 @@ cmd_close() {
   jq -n --argjson round "$ROUND" --arg start "$(jq -r .started_at "${dir}/round.json")" --arg finish "$(_now)" \
         --argjson reviewers "$reviewers" --argjson degraded "$degraded" --argjson fixer "$fixer" \
         --arg dc "$dispatch_check" --arg v "$verdict" --arg cp "$CHECKPOINT" \
-        --arg seen "${CLOSE_HEAD:-}" --arg now_head "$( [[ -n "$CLOSE_HEAD" ]] && _head || echo "" )" \
+        --arg seen "$( [[ "$MODE" == step ]] && jq -r .head_sha "${dir}/round.json" || echo "" )" --arg now_head "$( [[ "$MODE" == step ]] && _head || echo "" )" \
+        --argjson with_at "$( [[ -n "$CLOSE_HEAD" ]] && echo true || echo false )" \
     '{checkpoint: $cp, round: $round, started_at: $start, finished_at: $finish, reviewers: $reviewers, degraded: $degraded,
       dispatch_check: $dc, verdict: $v} + (if $fixer then {fixer: $fixer} else {} end)
-      + (if $seen != "" then {revision: {head_sha: $seen, closed_at_head: $now_head, closed_with_at: true}} else {} end)' > "${measurement}.tmp" \
+      + (if $seen != "" then {revision: {head_sha: $seen, closed_at_head: $now_head, closed_with_at: $with_at}} else {} end)' > "${measurement}.tmp" \
     && mv "${measurement}.tmp" "$measurement" || _die "measurement.json was not written; close can be run again"
 
   if [[ "$MODE" == step ]]; then
