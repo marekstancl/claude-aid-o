@@ -6,7 +6,7 @@ user_invocable: false
 
 # Krok 7 - Ověření a převzetí
 
-**Last Updated:** 2026-09-29
+**Last Updated:** 2026-09-30
 
 ## Cíl
 
@@ -32,8 +32,12 @@ a `frontend-build-standard.md` (čti živě).
    `aid-ui-state.sh exception <project> --check <c> [--page …] --answer <id>`.
 4. Projektový design standard (před schvalováním stránek, protože jeho úpravy mění build): `DESIGN.md` doplněný o platformní kontrakt,
    přístupnost a pravidla textů, a stránka standardu projektu v Docusauru
-   (`/opt/eco/docs/docs/<projekt>/`) odkazující na `DESIGN.md`. Otázka
-   `design_standard` ve studiu; `return` → oprav a otevři znovu.
+   (`/opt/eco/docs/docs/<projekt>/`) odkazující na `DESIGN.md`. Co do standardu
+   doplníš sám podle standardu ekosystému, zapiš před otázkou: jedna skupina doplňků
+   = jedno `aid-ui-state.sh decide <project> --step "Kontrola" --title "<skupina, např.
+   Pravidla pro mobil>" --outcome "<co platí jednou větou>" --why "podle
+   design-system-standard §<číslo>" --source DESIGN.md`, nikdy jeden souhrnný řádek.
+   Otázka `design_standard` ve studiu (s `outcome`); `return` → oprav a otevři znovu.
 5. Kontrola stránek (až je build po bodu 4 konečný): pro každou stránku buildu otázka `approve_page`
    (`target` = `<stránka>@<otisk>` z `build.fingerprints`, snímek jako
    karta); po `approve`
@@ -92,4 +96,4 @@ zákazníka, nebo tisk do PDF.
 Brána nebo skript skončí chybou → `ERROR:` PM s krokem, který to opraví;
 nic se neschvaluje. Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4.
 
-**Last Updated:** 2026-09-29
+**Last Updated:** 2026-09-30

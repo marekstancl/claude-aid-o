@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 567          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 568          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4146,6 +4146,22 @@ enforcements:
     recovery: "The refusal names the field or the step. Use a step title from payload.json steps[] (the six canonical titles of SKILL.md), shorten the text, or start the studio before recording."
     test_covers: "decide appends one line and prints at, matches --step by title and id, refuses an unknown step, an empty field, a 121-character outcome and --at without --reconstructed (exit 2), is idempotent, exits 1 without payload.json and while another process holds the lock, stores a reconstructed --at (test-aid-ui-state.bats)."
     test: "scripts/tests/bats/test-aid-ui-state.bats"
+
+  - id: aid_ui_steps_record_decisions
+    type: 12
+    source: "scripts/tests/bats/test-aid-ui-skill-rules.bats"
+    instruction: "skills/ui-design/SKILL.md (Když rozhoduje agent sám; MUST Rule 9)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 1
+    not_guaranteed: "That a running step actually calls decide - only that its text names the call where the step decides without the PM (vision facts, build, design-standard additions), with one of the six canonical step titles."
+    description: "P106 Step 3 - the /aid-ui skill tells every step that decides without the PM to record it with aid-ui-state.sh decide, requires an outcome sentence on every question except card choices, and fixes the six step titles the page and decide match on; the skill text no longer describes the removed overview or Průběh tab."
+    recovery: "The failing case names the file. Put the decide call back at the point of the step's Postup where the decision is made, with a canonical --step title."
+    test_covers: "SKILL.md names decide, the outcome rule and the six titles, has no overview and no Průběh; 1v-vision, 6-build and 7-verify name the call; every --step in the steps is canonical (test-aid-ui-skill-rules.bats)."
+    test: "scripts/tests/bats/test-aid-ui-skill-rules.bats"
 
   - id: aid_ui_outcome_length
     type: 12

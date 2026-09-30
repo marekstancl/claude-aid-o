@@ -59,7 +59,8 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    `now` (`title`, `text` = co právě děláš, např. „Připravuji tři návrhy vzhledu…";
    obnov ho při každé změně, stránka ho ukazuje vždy a sama bez otázek jen jeho),
    `steps[]` (`id`, `title`, `status` done|current|todo, `description` = jedna věta,
-   co se v kroku děje), `questions[]`
+   co se v kroku děje; `title` vždy jeden z šesti názvů Druh webu, Zadání a obsah, Vzory,
+   Vzhled, Stavba, Kontrola, v tomto pořadí; `decide --step` a stránka se na ně váží), `questions[]`
    (`id`, `kind`, `target`, `opened_at` = teď v ISO, `title`, `prompt`, `body`,
    `next` = co uděláš po schválení, `outcome` = výsledek po schválení jednou větou
    (povinné u všech druhů kromě výběru z karet, viz níže); volitelně `eyebrow` = nadpis
@@ -71,18 +72,12 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    Druhy otázek: variant, vision, identity, seo_brief, structure, task_map,
    content_plan, defer_content, facts, references, direction, approve_page,
    exception, coverage_drift, design_standard, handover.
-   `overview` (přehled webu, domovská obrazovka studia; udržuj ho od chvíle, kdy něco
-   existuje): `site_url` = adresa náhledu webu (`aid-ui-serve.sh preview`), `todo[]` =
-   co zbývá od PM: `what` (úkol lidsky), `how` (jak ho splnit jednou větou), `blocking`
-   (true = brání zveřejnění), `question` = id otevřené otázky ve studiu, kterou se úkol
-   splní. Na co PM odpovídá textem nebo potvrzením (fakta k ověření, souhlasy, kontrola
-   názvu), polož jako otázku `facts` s `outcome` a úkol na ni odkaž: PM pak odpoví přímo
-   ve studiu tlačítkem „Odpovědět". Co zvládneš sám (rešerše názvu v rejstříku a na webu,
-   dohledání údaje), udělej předem a PM dej rozhodnutí nad výsledkem („Našel jsem tyto
-   podobné názvy: … Ponechat Needless?"), ne úkol „zkontrolujte". Todo ber z odložených položek obsahu, z faktů
-   k ověření a z výhrad souhrnu; splněné smaž. Jeden slovník stavu: „návrh (náhled)
-   hotový" → „před zveřejněním zbývá" → „zveřejněný"; nepiš „předán", „spuštěn". Stav („Web je hotový", „Před spuštěním zbývá…")
-   si stránka odvodí sama z otázek, `todo` a `steps`, nepiš ho.
+   Na co PM odpovídá textem nebo potvrzením (fakta k ověření, souhlasy, kontrola názvu),
+   polož jako otázku `facts` s `outcome`. Co zvládneš sám (rešerše názvu v rejstříku a na
+   webu, dohledání údaje), udělej předem a PM dej rozhodnutí nad výsledkem („Našel jsem
+   tyto podobné názvy: … Ponechat Needless?"), ne úkol „zkontrolujte". Jeden slovník
+   stavu: „návrh (náhled) hotový" → „před zveřejněním zbývá" → „zveřejněný"; nepiš
+   „předán", „spuštěn".
 
    **Jak napsat otázku.** `title` = krátká lidská otázka (do ~12 slov). `body[]` =
    2–4 krátké věty: co navrhuješ, proč (odkud to víš, např. „z vašeho zadání")
@@ -105,13 +100,23 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    - Dobře: „Klasický web se samostatnou stránkou pro každé téma." · „Sedm stránek, každá
      odpovídá na jednu věc, kterou lidé hledají." · „Texty všech stránek schváleny; čtyři
      údaje zbývá ověřit."
-   V textech pro PM (otázky, `outcome`, `todo`) nepoužívej: agent, kapitola, kolo,
+   V žádném textu, který PM uvidí (otázky, karty, `outcome`, `now`, záznamy `decide`), nepoužívej: agent, kapitola, kolo,
    převzetí, payload, standard (kromě odkazu na report), skill.
-   Každou přijatou odpověď si studio samo uloží i s otázkou, kartami a kopií náhledů do
-   `.aid-ui/studio/history.jsonl`. Studio ukazuje: čeká-li otázka, jen ji (s odkazem na
-   přehled); jinak přehled webu (stav, „Otevřít web", co zbývá, náhled stránek, hlavní
-   volby) a z něj detail každé oblasti (výsledek, vybraný návrh velký, historie sbalená);
-   agent ho nepíše a nečte jako rozhodnutí.
+   Studio ukazuje běh jako šest kroků pod sebou: u každého výsledek jednou větou a kdo
+   rozhodl (PM, AI, nebo oba). Detail kroku otevře jeho rozhodnutí a karty, ze kterých PM
+   vybíral; čekající otázka je uvnitř svého kroku. Každou přijatou odpověď si studio samo
+   uloží i s otázkou, kartami a kopií náhledů do `.aid-ui/studio/history.jsonl`; ten
+   záznam je jen pro zobrazení, nečti ho jako rozhodnutí.
+
+   **Když rozhoduje agent sám.** Když krok rozhoduje sám (fakt z PRODUCT.md, volba podle
+   standardu, výsledek stavby), zapíše to hned příkazem `aid-ui-state.sh decide <project>
+   --step "<název kroku>" --title "<co>" --outcome "<výsledek jednou větou>" --why "<odkud
+   to plyne>" [--source <soubor>]`; bez zápisu rozhodnutí neexistuje. `outcome` platí
+   stejná pravidla jako u otázek (do 120 znaků, `title` do 80, `why` do 300). `decide`
+   nic nemění ve stavu: fakt nebo volbu dál zapisuje její vlastní příkaz, `decide` jen
+   zaznamená, že ji udělal agent. Opakovaný krok, který rozhodne totéž (stejný krok,
+   `title` a `outcome`), dostane exit 0 a druhý záznam nevznikne. Exit 1/2 zastaví krok
+   jako každý jiný příkaz stavu. Kde přesně krok volá `decide`, říká jeho `Postup`.
 2. `target` je to, co PM schvaluje: u `set variant|options|structure|content-plan|refs`
    `sha256:` + `jq -S -c -j . <<<"$json" | sha256sum` přesně toho JSON, který
    pak zapíšeš (JSON vždy v souboru pod `.aid-ui/` psaném nástrojem Write,
@@ -205,6 +210,9 @@ a odkaz.
    and are deleted after step 5.
 8. Chapter bodies are written only by `aid-ui-state.sh body <project> <id> --file <html>`;
    nothing internal lives in the served `docs/brand/`.
+9. A decision a step makes without the PM (only where its `Postup` says so) is recorded
+   at once with `aid-ui-state.sh decide` ("Když rozhoduje agent sám"); an unrecorded
+   agent decision does not exist for the PM.
 
 ---
 

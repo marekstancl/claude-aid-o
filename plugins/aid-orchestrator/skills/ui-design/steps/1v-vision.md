@@ -30,6 +30,10 @@ v Docusauru), šablona `/opt/eco/docs/docs/ecosystem/templates/product-vision-pr
    odvodit (cena, kontakt, jméno klienta, číslo) - jednou otázkou `facts`,
    nejvýš osm bodů, u každého tvůj návrh. Domněnku nikdy nevydávej za fakt:
    co jsi odvodil, označ jako HYPOTÉZU i s tím, odkud plyne.
+   Každý fakt, který jsi takto určil sám, zapiš ještě před otázkou `facts` jedním
+   voláním na fakt: `aid-ui-state.sh decide <project> --step "Zadání a obsah"
+   --title "<fakt, např. Doba odpovědi>" --outcome "<hodnota jednou větou>" --why
+   "<odkud plyne>" --source PRODUCT.md` (nebo soubor, ze kterého fakt pochází).
 3. Zapiš `docs/product-vision.md` (vrstva 1, fakta oddělená od hypotéz podle
    šablony) podle oddílu „Jak psát" níže. Tón odvoď z vize a z brand briefu
    (existuje-li); jeden odstavec.

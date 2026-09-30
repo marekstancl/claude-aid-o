@@ -99,3 +99,34 @@ setup() {
   ! grep -rn 'http\.server' "$SK/steps" | grep -v -- '--bind 127.0.0.1 --directory' || false
   for f in 5-directions 6-build; do grep -qF 'kill "$pid"' "$SK/steps/$f.md" || { echo "$f"; return 1; }; done
 }
+
+@test "P106: SKILL.md names decide, the outcome rule and the six step titles; no overview, no Průběh anywhere" {
+  grep -qF 'aid-ui-state.sh decide' "$SK/SKILL.md"
+  grep -qF 'Když rozhoduje agent sám' "$SK/SKILL.md"
+  grep -qF 'do 120 znaků' "$SK/SKILL.md"
+  grep -qF 'Druh webu, Zadání a obsah, Vzory,' "$SK/SKILL.md"
+  grep -qF 'Vzhled, Stavba, Kontrola' "$SK/SKILL.md"
+  ! grep -q 'overview' "$SK/SKILL.md"
+  ! grep -rq 'Průběh' "$SK/SKILL.md" "$SK/steps"
+}
+
+@test "P106: the steps that decide without the PM record it with decide (vision facts, build, design standard)" {
+  for f in 1v-vision 6-build 7-verify; do
+    grep -qF 'aid-ui-state.sh decide' "$SK/steps/$f.md" || { echo "$f"; return 1; }
+  done
+  # every step title a step passes to decide is one of the six canonical titles
+  titles="$(grep -rhoE 'decide <project> --step "[^"]+"' "$SK/steps" | sed -E 's/.*--step "([^"]+)"/\1/' | sort -u)"
+  [ -n "$titles" ]
+  while IFS= read -r t; do
+    case "$t" in "Druh webu"|"Zadání a obsah"|"Vzory"|"Vzhled"|"Stavba"|"Kontrola") ;; *) echo "unknown step: $t"; return 1 ;; esac
+  done <<<"$titles"
+  # every call carries --step, --title, --outcome, --why and --source (read to the closing backtick)
+  for f in 1v-vision 6-build 7-verify; do
+    calls="$(tr '\n' ' ' < "$SK/steps/$f.md" | grep -oE 'aid-ui-state\.sh decide [^`]+')"
+    [ -n "$calls" ] || { echo "no call in $f"; return 1; }
+    while IFS= read -r c; do
+      for o in --step --title --outcome --why --source; do [[ "$c" == *" $o "* ]] || { echo "$f: no $o in: $c"; return 1; }; done
+    done <<<"$calls"
+  done
+  tr '\n' ' ' < "$SK/steps/6-build.md" | grep -qE -- '--step "Stavba" +--title "Web postaven" +--outcome "Postaveno <N> stránek[^"]*" +--why "[^"]+" +--source \.aid-ui/build\.json'
+}

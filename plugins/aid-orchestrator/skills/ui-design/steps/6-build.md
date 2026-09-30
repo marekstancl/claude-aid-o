@@ -6,7 +6,7 @@ user_invocable: false
 
 # Krok 6 - Stavba
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-09-30
 
 ## Cíl
 
@@ -53,7 +53,10 @@ u aplikace `webapp-tasks-states-standard.md` (UA-1..UA-11) - čti živě.
    `aid-ui-design-to-css.sh DESIGN.md docs/brand/tokens.css`, písma
    `aid-ui-state.sh fonts <project> <URL Google Fonts nebo docs/brand/fonts/*.css>`,
    role `aid-ui-state.sh roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>`.
-8. `aid-ui-state.sh build-record <project> <složka buildu>`.
+8. `aid-ui-state.sh build-record <project> <složka buildu>`, hned potom
+   `aid-ui-state.sh decide <project> --step "Stavba" --title "Web postaven"
+   --outcome "Postaveno <N> stránek podle vybraného vzhledu" --why "<název vybraného
+   vzhledu>" --source .aid-ui/build.json` (N = počet stránek buildu; 2-4 „stránky").
 9. Snímky pro kapitolu `ukazky`: `lib/ui-fidelity/ui-capture.mjs` do
    `.aid-ui/capture/<viewport>/`, do `docs/brand/assets/` jen PNG.
    Těla kapitol `barvy`, `typografie`, `komponenty`, `ukazky` do souborů
@@ -78,4 +81,4 @@ Složka buildu, `DESIGN.md`, `docs/brand/{tokens.css,roles.css,assets/*.png}`,
 → jiná složka. `aid-ui-design-to-css.sh` nebo `roles` skončí 1 → `ERROR:`
 PM; krok se neposouvá.
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-09-30
