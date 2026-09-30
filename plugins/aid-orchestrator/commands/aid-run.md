@@ -175,7 +175,7 @@ MUST keep ownership until the EPIC completes, reaches a PM-authority decision, o
 unrecoverable external outage. A recoverable technical problem is not a reason to end the turn.
 
 - The controller is the sole owner of FSM mutations, commits, gates, evidence finalization, and
-  long-running/background processes. Dispatched implementers and verifiers never own these.
+  long-running/background processes. Dispatched implementers and reviewers never own these.
 - Never finish a turn with only "waiting for tests/agent". For every asynchronous process record
   PID, log path, start HEAD, start tree hash, start time, expected p95, and hard deadline. Poll the
   process itself and collect its exit status; `tail -f` is forbidden as a completion detector.
@@ -209,7 +209,7 @@ unrecoverable external outage. A recoverable technical problem is not a reason t
   executes the same suite. A failed aggregate run may be followed by targeted diagnosis, but a fix
   requires one fresh final aggregate result; the pre-fix run cannot prove the post-fix HEAD.
 - Verifiers use an isolated worktree or immutable revision. Never run a mutating fixer concurrently
-  against the checkout a verifier is reviewing.
+  against the checkout a reviewer is reviewing.
 - Codex adjudication and PM decisions are append-only audit events. The adjudicator may choose among
   already-authorized technical recovery paths; it cannot grant PM authority or waive security risk.
 

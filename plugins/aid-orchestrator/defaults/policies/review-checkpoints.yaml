@@ -7,9 +7,9 @@ review_checkpoints:
 
   # Per-checkpoint toggles
   cp1_plan_review: true            # plan review before EPIC generation (plan_review below)
-  cp2_step_review: true            # per-step code review (verifier:code-review)
+  cp2_step_review: true            # per-step review round (skills/step-review-roles.md)
   cp3_integration_review: true     # pre-GATES integration review (code-review + security)
-  cp6_fast_mode_review: true       # post-/aid-do review (verifier:code-review)
+  cp6_fast_mode_review: true       # post-/aid-do review round
   cp7_plan_final_review: true      # the whole plan read once before the merge decision (final_review below);
                                    # switched off, plan-finalize --stage decide blocks until the PM waives it
 

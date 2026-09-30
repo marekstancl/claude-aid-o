@@ -231,7 +231,7 @@ fi
 # naming a role outside it (fullstack, devops, docs) used to pass this lint,
 # CP1 and every review, and fail only inside generation, phase 1.
 # ---------------------------------------------------------------------------
-_VALID_ROLES="architect domain backend frontend qa security observability docs-writer release e2e"
+_VALID_ROLES="backend frontend qa security docs docs-writer release e2e"
 while IFS=$'\t' read -r _rl_ln _rl_role; do
   [[ -n "${_rl_role:-}" ]] || continue
   case " ${_VALID_ROLES} " in *" ${_rl_role} "*) continue;; esac

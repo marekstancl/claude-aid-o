@@ -30,7 +30,6 @@ that is absent from a clean checkout.
 | `commands/aid-do.md` | `update` | States that Fast Mode neither creates nor releases a plan branch. P094: "Review Check (CP6)" runs the step check and the reviewer round under `evidence/do/<id>/cp6/`, advisory. |
 | `commands/aid-verify-plan.md` | `verified` | CP1 is a plan-level review already; no per-EPIC release instruction. |
 | `commands/aid-verify-implementation.md` | `verified` | Reviews an implementation, not a release cadence. |
-| `commands/aid-audit.md` | `verified` | Health audit; no lifecycle instruction. |
 | `commands/aid-help.md` | `verified` | Routes to other surfaces; carries no lifecycle instruction of its own. |
 | `commands/aid-setup.md` | `verified` | Configuration; no release cadence. |
 | `commands/aid-stop.md` | `verified` | Emergency stop; no release cadence. |
@@ -59,9 +58,6 @@ that is absent from a clean checkout.
 
 | Surface | Disposition | Note |
 |---------|-------------|------|
-| `agents/auditor.md` | `update` | The project-health audit of `/aid-audit`; no plan-final contract (P096). |
-| `agents/simplifier.md` | `update` | An agent the PM may invoke after a plan; no required report (P096). |
-| `agents/verifier.md` | `update` | P094: CP2/CP3/CP6 are reviewer rounds, not verifier dispatches; the card keeps CP4, `section-review`, `cross-section-review` and the plan-final `c2_mode: final` producer. |
 | `agents/implementer.md` | `verified` | Implements a step; no release cadence. |
 | `agents/implementer-light.md` | `verified` | P099: the implementer at `effort: low` for roles whose card says so; same protocol, no release cadence. |
 | `agents/reviewer-light.md` | `verified` | P099: a review-round reviewer at `effort: low`; reads its prompt file, writes its answer, no lifecycle instruction. |

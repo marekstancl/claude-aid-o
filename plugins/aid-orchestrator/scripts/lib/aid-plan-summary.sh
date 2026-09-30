@@ -309,7 +309,7 @@ aid_plan_summary_render() {
   # as if it were fine; it now says what it is and what it will cost.
   local bad_roles=""
   bad_roles="$(printf '%s' "$roles" | tr ',' '\n' | sed 's/^ *//;s/ *$//' \
-    | grep -vxE 'architect|domain|backend|frontend|qa|security|observability|docs-writer|release|e2e|—' \
+    | grep -vxE 'backend|frontend|qa|security|docs|docs-writer|release|e2e|—' \
     | paste -sd', ' - 2>/dev/null || true)"
   context="$(_aps_section "$plan" "Context")"
   standards="$(_aps_standards "$plan")" || standards=""

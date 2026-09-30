@@ -441,7 +441,7 @@ writing and repair its exact diagnostics before CP1/C0.
 - [ ] {Testable criterion 3 — specific, measurable}
 
 **Effort:** {S / M / L}
-**AID Role:** {architect / domain / backend / frontend / qa / e2e / security / observability / docs-writer / release}
+**AID Role:** {backend / frontend / qa / e2e / security / docs / release} (docs-writer = the older spelling of docs)
 **Visual Refs:** `{path/to/mockup-source.tsx}` lines {start}-{end} — {what part this step implements} *(optional — only for frontend/UI steps with mockups)*
 **UI Change Mode:** `existing_ui` | `new_ui` *(frontend steps that modify existing UI — omit for new UI/greenfield)*
 **UI Change Contract:** `path: .aid-o/work/.../delta-contract.json | sha256: <hash> | schema_version: 1.0.0 | viewports: desktop, mobile` *(REQUIRED when UI Change Mode is `existing_ui` — omitting this blocks controller dispatch; see plan.schema.json. `viewports` names every viewport the baseline and the verification cover: desktop AND mobile when `project.yaml → ui.responsive` is true or absent — P087 — desktop alone when it is `false`. The generators carry `path | sha256 | schema_version` into plan.json; `viewports` is read by the controller from this field in the plan text, and the proposal check (`aid_ui_proposal_check`) is what refuses a missing viewport.)*

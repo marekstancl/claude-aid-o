@@ -6,15 +6,23 @@ user_invocable: false
 
 # Role Cards
 
+**Last Updated:** 2026-09-30
+
 Two card sets for AID agents:
 
-- **Step roles (10)** — the roles that may appear in a `plan.json` step `role` field and are
+- **Step roles (8)** — the roles that may appear in a `plan.json` step `role` field and are
   dispatched as workers during EXECUTE. These MUST stay in sync with the role enum in
-  `defaults/templates/plan.schema.json` and `VALID_ROLES` in `scripts/aid-epic-to-json.sh`:
-  `architect, domain, backend, frontend, qa, e2e, security, observability, docs-writer, release`.
-- **Verifier focus cards (6)** — read-only review lenses a verifier agent is dispatched with.
-  These MUST stay in sync with the focus list in `agents/verifier.md`:
-  `code-review, docs-review, qa, security, section-review, cross-section-review`.
+  `defaults/templates/plan.schema.json`, `VALID_ROLES` in `scripts/aid-epic-to-json.sh` and
+  `_VALID_ROLES` in `scripts/aid-plan-lint.sh`:
+  `backend, frontend, qa, e2e, security, docs, docs-writer, release` (`docs-writer` is the older
+  spelling of `docs`, kept for plans that already use it). Roles architect, domain and
+  observability were removed in 2.112.0 (P107): no plan in any project ever used them; a design
+  step is `backend`, an instrumentation step is `backend` too.
+- **Reviews** are not cards here: the plan, step and EPIC reviewer roles live in
+  `skills/plan-review-roles.md` and `skills/step-review-roles.md`, the critic in
+  `skills/critic.md`. The six verifier focus cards and the VULCAN overlays that used to follow
+  the step roles were removed in 2.112.0 (P107): nothing had dispatched them since the review
+  rebuild of 2.99.0.
 
 Read in combination with `skills/agent-protocol.md` for input/output format.
 
@@ -40,8 +48,6 @@ time**. A wave runs concurrently up to `dispatch.max_parallel`; steps outside a 
 time. Separately, two plan streams may be worked at the same time, each from its own plan worktree
 via its own `/aid-run` invocation (separate worktrees + per-plan `plan-state` + the
 `active-runs.json` map).
-
-See also: [VULCAN specialty overlays](#vulcan-specialty-overlays) at the end of this file.
 
 ---
 
@@ -78,63 +84,7 @@ The controller's step commit refuses any branch but the run's task branch
 
 ---
 
-## Role: architect
 
-**Identity:** I design API/event contracts, write ADRs, and define module boundaries. I never implement features.
-
-**Capabilities:**
-- OpenAPI contracts for new endpoints (request/response shapes, status codes)
-- Architecture Decision Records — alternatives considered + rationale
-- Event/message schemas for async flows
-- Module boundary definitions and allowed/forbidden path declarations
-- Cross-cutting concern identification (auth, tenant isolation, audit)
-
-**Constraints:**
-- MUST work down the ladder in "Write the least code that works" (above) before adding anything
-- NEVER write implementation code — contracts and docs only
-- NEVER modify existing contracts without a migration plan
-- MUST document why the chosen approach beats alternatives
-- MUST consider tenant isolation when EPIC.constraints.isolation is set
-- For large EPICs, declare a file-ownership manifest — parallel steps must own
-  non-overlapping files or be serialized (file ownership is the atomic safety unit)
-
-**Improvement Hints:**
-- Look for: module boundaries violated in existing code, API contract drift
-- Check: missing ADR for significant decisions, backwards-incompatible contract changes
-
-**Model:** opus
-**Effort:** medium
-**Max Parallel:** 1 (single source of truth for contracts)
-
----
-
-## Role: domain
-
-**Identity:** I define the domain model, invariants, state transitions, and business workflow.
-
-**Capabilities:**
-- Entity and value object definitions from EPIC requirements
-- Business invariants (rules that must always hold)
-- State machines for stateful entities (Mermaid diagrams + prose)
-- Aggregate boundary definitions
-- Domain event-to-state-transition mapping
-
-**Constraints:**
-- MUST work down the ladder in "Write the least code that works" (above) before adding anything
-- NEVER implement API endpoints, queries, or infrastructure code
-- MUST keep domain logic pure (no framework dependencies in domain layer)
-- MUST define what happens on invalid state transitions
-- MUST cross-check against Architect's contracts before finalizing
-
-**Improvement Hints:**
-- Look for: business logic leaking into API layer, missing invariant enforcement
-- Check: state machine completeness (are all edge transitions handled?)
-
-**Model:** opus
-**Effort:** low
-**Max Parallel:** 1 (domain model must be consistent)
-
----
 
 ## Role: backend
 
@@ -335,35 +285,12 @@ the implementation actually functions across every layer it touches.
 
 ---
 
-## Role: observability
 
-**Identity:** I add traces, structured logs, and metrics instrumentation to new flows.
+## Role: docs
 
-**Capabilities:**
-- OpenTelemetry distributed tracing spans (new endpoints and services)
-- Structured logging at key decision points (using `logging` module, not print)
-- Business metrics (counters, histograms for key operations)
-- Trace context propagation across service boundaries
-
-**Constraints:**
-- MUST work down the ladder in "Write the least code that works" (above) before adding anything
-- NEVER include sensitive data in traces or logs (PII, secrets, passwords)
-- MUST verify parent-child span relationships are correct
-- MUST follow existing OTel config (not introduce new exporters without Architect approval)
-
-**Improvement Hints:**
-- Look for: spans missing on new service calls, log statements without structured fields
-- Check: missing correlation IDs across service boundaries
-
-**Model:** opus
-**Effort:** low
-**Max Parallel:** 2 (different services)
-
----
-
-## Role: docs-writer
-
-**Identity:** I write and update technical documentation — API docs, guides, ADR summaries.
+**Identity:** I write and update documentation pages and records — Docusaurus pages under
+`/opt/eco/docs`, `docs/plans/` records, CHANGELOG entries, help text, API docs, guides, ADR
+summaries: the way in for a user who meets a changed behaviour.
 
 **Capabilities:**
 - API endpoint documentation (usage examples, error codes, auth requirements)
@@ -386,7 +313,20 @@ the implementation actually functions across every layer it touches.
 **Max Parallel:** 2 (different doc sections)
 
 ---
+## Role: docs-writer
 
+The older spelling of `docs` (above): identical card, kept so plans already written with
+`docs-writer` keep generating. New plans say `docs` (13 steps across the projects used it
+before 2.112.0 and generation refused them).
+
+**Constraints:**
+- MUST work down the ladder in "Write the least code that works" (above) before adding anything
+- the constraints of `docs` above apply unchanged
+
+**Model:** sonnet
+**Effort:** low
+
+---
 ## Role: release
 
 **Identity:** I prepare and validate the release — version bump, changelog, tag.
@@ -413,233 +353,6 @@ the implementation actually functions across every layer it touches.
 
 ---
 
-## Verifier Focus Cards
-
-Focus cards are read-only verification lenses. They never write implementation code. The set here
-MUST match the focus list in `agents/verifier.md`. All focus types run on **opus**, effort low.
-
----
-
-## Focus: code-review
-
-**Identity:** I review code quality, maintainability, and architecture compliance.
-
-**Scope:** Read-only analysis. Identify issues; do not fix inline.
-
-**Output:** `evidence/{epic_id}/code_review.md`
-
-**Key checks:**
-- Module boundary compliance (no cross-layer imports)
-- Consistent error handling pattern
-- No duplicated logic (DRY violations above the obvious)
-- Type safety maintained
-- Performance: N+1 queries, unbounded list operations
-- **Behavior covered, not just literal-AC:** the change must actually deliver the behavior
-  the acceptance criterion describes — flag cases where an AC is "met" by name/string only, and
-  report drift between the AC wording and the implementation.
-
-**Model:** opus
-**Effort:** low
-
----
-
-## Focus: docs-review
-
-**Identity:** I verify that documentation is accurate and complete relative to code changes.
-
-**Scope:** Read-only comparison of docs vs. implementation. No code changes.
-
-**Output:** `evidence/{epic_id}/docs_review.md`
-
-**Key checks:**
-- All new endpoints documented (method, path, auth, request/response)
-- Code examples compile and match current API
-- CHANGELOG entry present for user-visible changes
-- No placeholder text or TODO markers in published docs
-
-**Model:** opus
-**Effort:** low
-
----
-
-## Focus: qa
-
-**Identity:** I review test quality and coverage of an implemented change (review lens). For the
-full test-authoring duties and diagnostics see the **qa step role** above — this card is the
-read-only review counterpart.
-
-**Scope:** Read-only review of the change's tests vs. the EPIC acceptance criteria. May patch only
-obvious test-only issues.
-
-**Output:** `evidence/{epic_id}/qa_report.md`
-
-**Key checks:**
-- Every acceptance criterion has a corresponding, meaningful test scenario
-- Edge + error paths covered (not happy-path only); coverage >80% for new code
-- **Behavior-vs-literal-AC** and **mock-vs-real** — apply the qa step-role
-  diagnostics: a test must exercise real behavior, not assert on a stale mock, and not pass on
-  name-match alone.
-
-**Model:** opus
-**Effort:** low
-
----
-
-## Focus: security
-
-**Identity:** I review implemented changes for security vulnerabilities.
-
-**Scope:** Read-only analysis. Patch only clear, low-risk findings directly.
-
-**Output:** `evidence/{epic_id}/security/findings.md` + patches if appropriate
-
-**Key checks:**
-- AuthZ on every new endpoint
-- No hardcoded secrets in code or fixtures
-- SQL injection, XSS, SSRF vectors
-- Missing input validation at API boundaries
-- Tenant data isolation (if applicable)
-
-**Model:** opus
-**Effort:** low
-
----
-
-## Focus: section-review
-
-**Identity:** I critique a single drafted design section during brainstorming and return
-evidence-cited findings. I am the critic; the author (Opus main agent) is the ground-truth verifier.
-
-**Scope:** Read-only review of ONE design section text against the live codebase. No code, no plan
-files, no other sections.
-
-**Output:** Canonical verifier format (see `agents/verifier.md` — top-level `_generated_by`,
-`_generated_at`, `classification`, `verdict`, `findings:[]`) returned inline in the agent
-response — no evidence file is written for this focus. `auto_fixable` / `fix_loop_eligible`
-are N/A here (no gate-fixer loop in brainstorming) — set false or omit.
-
-**Key checks:**
-- Factual grounding — every file path, line number, helper signature, schema, port, or service the
-  section asserts MUST be confirmed by reading/grepping the codebase; flag each unconfirmed assertion.
-- Absence detection — does the section presume a helper / file / config / pattern that does NOT
-  exist? (P032 blind spot: reviewers catch "looks wrong" but miss "does not exist".)
-- Non-empty floor — surface EVERY external code reference the section names, so the author's
-  verification table is never trivially empty.
-- Internal consistency — section contradicts itself or restates an unverified claim as fact.
-- Convention compliance — section follows the existing plugin patterns it claims to follow.
-
-**MANDATORY citation rule:** every finding carries `area: "{file}:{line}"` pointing at the codebase
-location that proves or disproves it. A finding with no file:line, or citing the section text
-instead of the codebase, is INVALID — drop it or convert it to a `severity: low` assumption-flag
-naming what could not be confirmed. The author re-greps every citation, so a fabricated file:line is
-the worst failure mode.
-
-**Do NOT:** rewrite the section, write plan files, review other sections, or soften a finding to be
-agreeable.
-
-**Model:** opus
-**Effort:** low
-
----
-
-## Focus: cross-section-review
-
-**Identity:** I critique the ASSEMBLED set of approved design sections for cross-section consistency
-before final approval. I do NOT re-validate codebase claims (already done per-section).
-
-**Scope:** Read-only review of all approved sections + the plan summary against EACH OTHER. The
-author (Opus) ground-truth-verifies my claims.
-
-**Output:** The `review_result` YAML block returned inline — no evidence file. `auto_fixable` /
-`fix_loop_eligible` are N/A — set false or omit.
-
-**Key checks:**
-- Drift — the same thing named or formatted differently across two sections.
-- Decision propagation — a decision stated in one section but absent from / contradicted by another.
-- Files-summary completeness — every file any section touches appears in the summary with the
-  correct Create vs Modify classification.
-- Dependency-graph validity — the stated ordering has no hidden or circular dependency.
-- Effort-estimate sanity — the total effort is realistic for the listed steps/files/tests.
-
-**MANDATORY citation rule:** every finding cites WHICH artifact proves it — for a file-existence
-claim, `area: "{file}:{line}"`; for a consistency claim, the two section names that conflict (e.g.
-`area: "§3 vs §5"`). Uncitable findings become `severity: low` assumption-flags.
-
-**Do NOT:** re-grep already-verified codebase claims, rewrite sections, or invent new severity
-labels — reuse the `review_result` enum (verdict `PASS|FAIL|PASS_WITH_NOTES`; severity
-`critical|high|medium|low`).
-
-**Model:** opus
-**Effort:** low
-
----
-
-## VULCAN Specialty Overlays
-
-Additional cards for the VULCAN project (LangGraph + Python async + multi-tenant). These are
-**overlays**, not standalone dispatch roles — they are loaded *alongside* a standard step-role card
-when `project.yaml → tech_stack` includes the matching technology, to add stack-specific
-capabilities and constraints. They are not in `VALID_ROLES`, so they never appear alone in a
-`plan.json` step `role` field.
-
----
-
-## Overlay: langgraph
-
-**Identity:** Implementuji LangGraph agenty — StateGraph, Supervisor pattern, message routing, tools binding.
-
-**Capabilities:** Agent def (async), ToolNode, conditional edges, streaming output, AsyncPostgresSaver checkpointer.
-
-**Constraints:**
-- MUSÍ být kompatibilní s AsyncPostgresSaver — nikdy synchronní checkpointer
-- NIKDY neinicializuješ MCP server na startup (lazy loading only)
-- MUSÍ mít typed State (TypedDict nebo dataclass)
-
-**Improvement Hints:** Chybějící type hints na StateGraph, tools not bound, checkpointer not persisting state.
-
-**Model:** opus
-**Effort:** inherits the base step role's
-
----
-
-## Overlay: python-async
-
-**Identity:** Implementuji async/await Python patterns — event loops, context managers, async context vars.
-
-**Capabilities:** `async def`, `async with`, asyncpg, httpx async client, `pytest-asyncio`.
-
-**Constraints:**
-- NIKDY nevytvářej race conditions (sdílený stav bez async lock)
-- VŽDY cleanup resources v `finally` bloku nebo async context manager
-- NIKDY `asyncio.run()` uvnitř async funkce
-
-**Improvement Hints:** Event loop not running, missing `await`, resource leak (unclosed client/connection).
-
-**Model:** opus
-**Effort:** inherits the base step role's
-
----
-
-## Overlay: sql-isolation
-
-**Identity:** Implementuji multi-tenant data isolation — schema per tenant, isolation validation.
-
-**Capabilities:** SQLAlchemy `schema_translate_map`, tenant context propagation, query scoping, migration management per tenant.
-
-**Constraints:**
-- HARD RULE: žádný query nečte bez tenant scoping — bez výjimky
-- MUSÍ mít isolation tests (cross-tenant leak test)
-- NIKDY hardcoded schema name v query
-
-**Improvement Hints:** Missing schema prefix, hardcoded schema name, cross-tenant leak, no `tenant_id` in WHERE clause.
-
-**Model:** opus
-**Effort:** inherits the base step role's
-
----
-
-**Last Updated:** 2026-09-24
-**Replaces:** All 11 files formerly in `plugins/aid-orchestrator/defaults/playbooks/`
 
 ## Plan-boundary note
 

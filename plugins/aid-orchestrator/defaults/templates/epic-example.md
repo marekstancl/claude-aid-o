@@ -107,13 +107,13 @@ operations produce structured audit logs and OpenTelemetry traces.
 
 | # | Role | Objective | Depends On | Parallel Group |
 |---|------|-----------|------------|----------------|
-| 1 | architect | Design API contracts (OpenAPI) + ADR for task state machine | -- | -- |
-| 2 | domain | Define Task entity, value objects, invariants | 1 | -- |
+| 1 | backend | Design API contracts (OpenAPI) + ADR for task state machine | -- | -- |
+| 2 | backend | Define Task entity, value objects, invariants | 1 | -- |
 | 3 | backend | Implement API endpoints + DB models + service layer | 2 | group-impl |
 | 4 | frontend | Build TaskBoard, TaskCard, TaskForm, TaskFilter components | 1 | group-impl |
 | 5 | qa | Write unit + integration tests for backend + frontend | 3, 4 | group-verify |
 | 6 | security | AuthZ review + SAST scan of new endpoints | 3 | group-verify |
-| 7 | observability | Add OTel instrumentation to API endpoints | 3 | group-verify |
+| 7 | backend | Add OTel instrumentation to API endpoints | 3 | group-verify |
 | 8 | docs-writer | Update API docs + CHANGELOG + architecture overview | 3, 4 | -- |
 | 9 | release | Deployment config + smoke test definition | 5, 6 | -- |
 

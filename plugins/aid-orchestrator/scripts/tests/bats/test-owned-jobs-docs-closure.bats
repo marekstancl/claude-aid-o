@@ -217,12 +217,9 @@ $naked"
     commands/aid-run.md
     commands/aid-status.md
     commands/aid-help.md
-    agents/auditor.md
     agents/gate-fixer.md
     agents/implementer.md
     agents/project-scanner.md
-    agents/simplifier.md
-    agents/verifier.md
   )
   for rel in "${touched[@]}"; do
     local f="$REPO_ROOT/plugins/aid-orchestrator/$rel"

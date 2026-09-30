@@ -33,12 +33,18 @@ whether `frontend` returns to Opus — `**Model:** opus` on its role card in
 `skills/role-cards.md`, or `step.model: opus` per plan. The same table is computed for the
 other roles and shown next to this one; the decision is the PM's, not a threshold in code.
 
-Command to recompute (run in the project whose plans are measured):
+Command to recompute — run in the project whose plans are measured, naming the EPIC ids of the
+plans to compare (for the Sonnet side: the first two plans with frontend steps after 2.112.0;
+for the baseline: the P102/P103 EPICs above). The role is read from the `plan.json` that sits
+beside each run's evidence, never from another EPIC's plan:
 
 ```bash
-for e in .aid-o/work/evidence/E-*; do pj=$(ls $e/*/plan.json 2>/dev/null | head -1)
-  for r in $e/*/cp2/step-*/round-1/merged.json; do [ -f "$r" ] || continue
+# usage: measure E-108-1_2 E-108-2_2 …   (EPIC ids under .aid-o/work/evidence)
+for e in "$@"; do
+  for r in .aid-o/work/evidence/$e/*/cp2/step-*/round-1/merged.json; do [ -f "$r" ] || continue
+    run="${r%/cp2/*}"; pj="$run/plan.json"; [ -f "$pj" ] || pj="$(ls "$run"/../*/plan.json 2>/dev/null | head -1)"
     idx=$(echo "$r" | sed -E 's#.*/step-([0-9]+)/.*#\1#'); role=$(jq -r ".steps[$idx].role" "$pj")
-    echo "$(basename $e) step-$idx $role $(jq '[.findings[]|select(.severity=="blocker" or .severity=="major")]|length' "$r")"
-  done; done | awk '{c[$3]++; s[$3]+=$4} END{for(r in c) printf "%s %d steps %d b/m %.2f\n", r, c[r], s[r], s[r]/c[r]}'
+    echo "$e step-$idx $role $(jq '[.findings[]|select(.severity=="blocker" or .severity=="major")]|length' "$r")"
+  done
+done | awk '{c[$3]++; s[$3]+=$4} END{for(r in c) printf "%s %d steps %d b/m %.2f\n", r, c[r], s[r], s[r]/c[r]}'
 ```

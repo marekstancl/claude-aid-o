@@ -38,11 +38,11 @@
             "type": "string",
             "pattern": "^step_[a-z0-9_]+$",
             "description": "Unique step identifier",
-            "examples": ["step_1_architect", "step_2_domain"]
+            "examples": ["step_1_backend", "step_2_docs"]
           },
           "role": {
             "type": "string",
-            "enum": ["architect", "domain", "backend", "frontend", "qa", "security", "observability", "docs-writer", "release", "e2e"],
+            "enum": ["backend", "frontend", "qa", "security", "docs", "docs-writer", "release", "e2e"],
             "description": "Agent role to execute this step"
           },
           "objective": {
@@ -211,7 +211,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["architect", "domain", "backend", "frontend", "qa", "security", "observability", "docs-writer", "release", "e2e"]
+              "enum": ["backend", "frontend", "qa", "security", "docs", "docs-writer", "release", "e2e"]
             },
             "minItems": 1,
             "description": "Agent roles performing the analysis — must NOT include the target step's own agent role"

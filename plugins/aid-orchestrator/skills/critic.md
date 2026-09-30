@@ -6,6 +6,8 @@ user_invocable: false
 
 # Critic
 
+**Last Updated:** 2026-09-30
+
 ## Task
 
 Judge this proposal or plan independently of its author and return the two
@@ -96,3 +98,7 @@ command the claim was checked against, or declined, with the reason);
 items, with a verdict, or with a response that does not answer every item.
 Level 2 reaches the PM on the scope card. A well-put item that was declined is a
 success of this role; the only failure is an item that was not put.
+
+---
+
+**Last Updated:** 2026-09-30

@@ -312,7 +312,7 @@ Standards profile:
 **Rules:**
 - Default selection: `general` (option A) if PM does not respond
 - `vulcan` inherits all `general` rules + adds ecosystem-specific rules + can override severities
-- `none` disables all standards enforcement (no `standards_compliance` gate, no auditor category)
+- `none` disables all standards enforcement (no `standards_compliance` gate)
 - Selection is stored in `project.yaml` under the `standards` key
 - On re-run (`/aid-init` on existing workspace): if `standards` key already exists in `project.yaml`, show current selection and ask "Keep current ({current})? (Y/N)" — only re-prompt if PM says N
 
@@ -397,7 +397,7 @@ Klíčová pravidla:
 - G-015: Jeden Dockerfile (prod-ready), docker-compose.override.yml pro dev
 ```
 
-**Agent MUST read the ecosystem documents** during standards-related work (auditor, planner, gate
+**Agent MUST read the ecosystem documents** during standards-related work (reviewers, planner, gate
 evaluation). The guardrails contain 19 rules (G-001 to G-019) covering architecture authority,
 language boundaries, integration patterns, deployment, security, and infrastructure.
 

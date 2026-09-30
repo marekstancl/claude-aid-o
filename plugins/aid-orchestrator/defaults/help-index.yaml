@@ -165,10 +165,6 @@ surfaces:
       topic: recovery, audience: regular, disposition: current,
       writes: [], final_turn: "card:finished" }
 
-  - { command: /aid-audit, file: plugins/aid-orchestrator/commands/aid-audit.md,
-      purpose: "Project health audit (0-100 score) across categories A–J",
-      topic: audit, audience: power, disposition: current,
-      writes: [], final_turn: "card:finished" }
 
   - { command: /aid-help, file: plugins/aid-orchestrator/commands/aid-help.md,
       purpose: "AID help with progressive disclosure (Level 0–3)",
