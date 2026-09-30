@@ -109,7 +109,8 @@ aid_critic_prepare() {
   fi
   dir="$(_aid_critic_dir "$_ac_root" "$_ac_plan_id" "$_ac_moment")"
   if [[ -f "${dir}/prompt.md" ]]; then
-    mv "$dir" "${dir}.superseded-$(date -u +%s)"
+    local keep; keep="$(mktemp -d "${dir}.superseded-$(date -u +%Y%m%dT%H%M%SZ)-XXXX")" || return 2
+    rmdir "$keep" && mv "$dir" "$keep" || { echo "critic: could not set aside the previous run at ${dir}" >&2; return 2; }
   fi
   mkdir -p "$dir" || return 2
   {
@@ -145,6 +146,10 @@ aid_critic_prepare() {
     echo "Odpověď zapiš do \`${dir}/critic.md\` přesně se dvěma nadpisy popsanými výše. Nic jiného neměň."
     [[ "$total" -gt 0 ]] && echo "" && echo "<!-- ${total} cost line(s) stripped from the interim sections -->"
   } > "${dir}/prompt.md"
+  jq -n --arg m "$_ac_moment" --arg plan "${_ac_plan:-}" \
+        --arg ps "$( [[ -n "$_ac_plan" ]] && sha256sum "$_ac_plan" | cut -d' ' -f1 || echo '' )" \
+        --arg is "$(sha256sum "$interim" | cut -d' ' -f1)" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{moment:$m, plan:$plan, plan_sha256:$ps, interim_sha256:$is, prepared_at:$at}' > "${dir}/prepare.json"
   echo "${dir}/prompt.md"
   return 0
 }
@@ -166,10 +171,23 @@ aid_critic_check() {
   local dir answer response l1 l2 items n_items level1_empty=false level2_empty=false rows expected got sha_plan="" reason=""
   dir="$(_aid_critic_dir "$_ac_root" "$_ac_plan_id" "$_ac_moment")"
   answer="${dir}/critic.md"; response="${dir}/critic-response.md"
-  [[ -f "${dir}/prompt.md" ]] || { echo "critic: nothing prepared at ${dir} — run aid_critic_prepare first" >&2; return 2; }
+  [[ -f "${dir}/prompt.md" && -f "${dir}/prepare.json" ]] || { echo "critic: nothing prepared at ${dir} — run aid_critic_prepare first" >&2; return 2; }
   [[ -f "$answer" ]] || { echo "critic: the critic did not write ${answer}" >&2; return 4; }
-  grep -Eq "$AID_CRITIC_L1_RE" "$answer" || reason="missing heading: level 1"
+  # The plan the critic read is the plan prepare hashed; a plan edited in
+  # between is checked against nothing and the check says so.
+  if [[ "$_ac_moment" == "plan" ]]; then
+    sha_plan="$(jq -r '.plan_sha256 // ""' "${dir}/prepare.json")"
+    local plan_now=""; [[ -f "$_ac_plan" ]] && plan_now="$(sha256sum "$_ac_plan" | cut -d' ' -f1)"
+    [[ "$plan_now" == "$sha_plan" ]] || reason="the plan changed since prepare (${sha_plan:0:12} → ${plan_now:0:12}); run aid_critic_prepare again"
+  fi
+  [[ -z "$reason" ]] && { grep -Eq "$AID_CRITIC_L1_RE" "$answer" || reason="missing heading: level 1"; }
   [[ -z "$reason" ]] && { grep -Eq "$AID_CRITIC_L2_RE" "$answer" || reason="missing heading: level 2"; }
+  if [[ -z "$reason" ]]; then
+    local l1_at l2_at
+    l1_at="$(grep -nE "$AID_CRITIC_L1_RE" "$answer" | head -1 | cut -d: -f1)"
+    l2_at="$(grep -nE "$AID_CRITIC_L2_RE" "$answer" | head -1 | cut -d: -f1)"
+    (( l1_at < l2_at )) || reason="level 2 comes before level 1"
+  fi
   if [[ -z "$reason" ]]; then
     l1="$(_aid_critic_between "$answer" "$AID_CRITIC_L1_RE" "$AID_CRITIC_L2_RE")"
     l2="$(_aid_critic_between "$answer" "$AID_CRITIC_L2_RE" '^### ')"
@@ -178,8 +196,12 @@ aid_critic_check() {
     if [[ "$n_items" -gt 5 ]]; then
       reason="level 1 has ${n_items} items, at most five"
     elif [[ "$n_items" -eq 0 ]]; then
-      if [[ "$(_aid_critic_nonblank "$l1")" -le 1 ]]; then level1_empty=true
+      if [[ "$(_aid_critic_nonblank "$l1")" -eq 1 ]] && printf '%s\n' "$l1" | grep -Eiq 'nic|nenašel|nenalezl|nothing|no (finding|item|defect)'; then level1_empty=true
+      elif [[ "$(_aid_critic_nonblank "$l1")" -eq 0 ]]; then reason="level 1 is blank — one sentence saying nothing was found, or the items"
       else reason="level 1 not in the prescribed item format (**N. claim** lines)"; fi
+    else
+      local numbered; numbered="$(printf '%s\n' "$items" | sed -E 's/^\*\*([0-9]+)\..*/\1/' | tr '\n' ' ')"
+      [[ "$numbered" == "$(seq 1 "$n_items" | tr '\n' ' ')" ]] || reason="level 1 items are numbered [${numbered% }], expected 1..${n_items} in order"
     fi
     if [[ -z "$reason" ]]; then
       local before_l2
@@ -202,10 +224,11 @@ aid_critic_check() {
     if [[ "$got" != "$expected" ]]; then
       reason="response rows [${got% }] do not answer items [${expected% }] exactly once each"
     else
-      # an accepted row names the file or command the claim was checked against
+      # an accepted row (verdict column) names the file or command the claim
+      # was checked against (the last column) — a backtick elsewhere does not count
       local bad
-      bad="$(printf '%s\n' "$rows" | grep -Ei 'PŘIJATO|přijato|accepted' | grep -v '`' || true)"
-      [[ -n "$bad" ]] && reason="an accepted row names no checked file or command: $(printf '%s\n' "$bad" | head -1 | cut -c1-80)"
+      bad="$(printf '%s\n' "$rows" | awk -F'|' '$4 ~ /PŘIJATO|přijato|Přijato|accepted|ACCEPTED|Accepted/ && $5 !~ /`/ { print; exit }')"
+      [[ -n "$bad" ]] && reason="an accepted row names no checked file or command in its last column: $(printf '%s' "$bad" | cut -c1-80)"
     fi
   fi
   if [[ "$_ac_moment" == "plan" && -f "$_ac_plan" ]]; then sha_plan="$(sha256sum "$_ac_plan" | cut -d' ' -f1)"; fi

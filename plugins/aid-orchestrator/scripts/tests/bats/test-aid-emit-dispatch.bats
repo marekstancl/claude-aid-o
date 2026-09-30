@@ -216,6 +216,9 @@ teardown() {
   run "$SCRIPT" start --focus critic-plan --agent-id aid-orchestrator:critic --evidence-dir "$EVID"
   [ "$status" -eq 0 ]
   grep -q '"focus":"critic-plan"' "$TIMELINE"
+  run "$SCRIPT" start --focus critic-brainstorm --agent-id aid-orchestrator:critic --evidence-dir "$EVID"
+  [ "$status" -eq 0 ]
+  grep -q '"focus":"critic-brainstorm"' "$TIMELINE"
   run "$SCRIPT" start --focus critic-x --agent-id aid-orchestrator:critic --evidence-dir "$EVID"
   [ "$status" -eq 1 ]; [[ "$output" == *"does not match allowed pattern"* ]]
 }

@@ -64,6 +64,17 @@ _response() {  # <moment> <rows...>
   printf '\n## Účel a co je v sázce\nx\n\n## Zadání PM\n- dup\n' >> "$P/.aid-o/work/interim-P9.md"
   run aid_critic_prepare P9 --moment brainstorm
   [ "$status" -eq 3 ]; [[ "$output" == *'2 "## Zadání PM" headings'* ]]
+  sed -i '/^## Zadání PM/,/^## /{/^## Účel/!d}' "$P/.aid-o/work/interim-P9.md"
+  run aid_critic_prepare P9 --moment brainstorm
+  [ "$status" -eq 3 ]; [[ "$output" == *'no "## Zadání PM" section'* ]]
+}
+
+@test "check refuses when the plan changed between prepare and check" {
+  aid_critic_prepare P9 --moment plan >/dev/null
+  _answer plan 'Nenašel jsem nic.'; _response plan
+  echo "edited" >> "$P/.aid-o/plans/P9-x.md"
+  run aid_critic_check P9 --moment plan
+  [ "$status" -eq 5 ]; [[ "$output" == *"the plan changed since prepare"* ]]
 }
 
 @test "prepare at the plan moment names the plan file and points at the brainstorm answer; a second run supersedes the first" {
@@ -72,7 +83,10 @@ _response() {  # <moment> <rows...>
   grep -q 'P9-x.md' "$D/plan/prompt.md"; grep -q 'critic/brainstorm/' "$D/plan/prompt.md"
   run aid_critic_prepare P9 --moment plan
   [ "$status" -eq 0 ]
-  ls -d "$D"/plan.superseded-* >/dev/null
+  run aid_critic_prepare P9 --moment plan
+  [ "$status" -eq 0 ]
+  [ "$(ls -d "$D"/plan.superseded-* | wc -l)" -eq 2 ]
+  [ "$(jq -r .plan_sha256 "$D/plan/prepare.json")" = "$(sha256sum "$P/.aid-o/plans/P9-x.md" | cut -d' ' -f1)" ]
 }
 
 @test "check: a valid pair passes and writes check.json with the hashes and the timeline event" {
@@ -101,6 +115,18 @@ _response() {  # <moment> <rows...>
   run aid_critic_check P9 --moment brainstorm
   [ "$status" -eq 5 ]; [[ "$output" == *"prescribed item format"* ]]
   [ "$(jq -r .passed "$D/brainstorm/check.json")" = "false" ]
+  _answer brainstorm '**2. a**\n**1. b**'
+  run aid_critic_check P9 --moment brainstorm
+  [ "$status" -eq 5 ]; [[ "$output" == *"numbered [2 1], expected 1..2"* ]]
+  _answer brainstorm ''
+  run aid_critic_check P9 --moment brainstorm
+  [ "$status" -eq 5 ]; [[ "$output" == *"level 1 is blank"* ]]
+  _answer brainstorm 'Tohle je jedna věta, která neříká výsledek.'
+  run aid_critic_check P9 --moment brainstorm
+  [ "$status" -eq 5 ]; [[ "$output" == *"prescribed item format"* ]]
+  { echo "### Úroveň 2 — x"; echo "nic"; echo "### Úroveň 1 — y"; echo "**1. a**"; } > "$D/brainstorm/critic.md"
+  run aid_critic_check P9 --moment brainstorm
+  [ "$status" -eq 5 ]; [[ "$output" == *"level 2 comes before level 1"* ]]
 }
 
 @test "check refuses a verdict outside level 2 in any spelling or prefix, and allows the phrase inside level 2" {
@@ -130,6 +156,9 @@ _response() {  # <moment> <rows...>
   run aid_critic_check P9 --moment brainstorm
   [ "$status" -eq 5 ]; [[ "$output" == *"[1] do not answer items [1 2]"* ]]
   _response brainstorm '| 1 | a | PŘIJATO | někde v plánu |' '| 2 | b | odmítnuto | proč |'
+  run aid_critic_check P9 --moment brainstorm
+  [ "$status" -eq 5 ]; [[ "$output" == *"names no checked file or command"* ]]
+  _response brainstorm '| 1 | a `x.sh` | PŘIJATO | někde v plánu |' '| 2 | b | odmítnuto | proč |'
   run aid_critic_check P9 --moment brainstorm
   [ "$status" -eq 5 ]; [[ "$output" == *"names no checked file or command"* ]]
   rm "$D/brainstorm/critic-response.md"

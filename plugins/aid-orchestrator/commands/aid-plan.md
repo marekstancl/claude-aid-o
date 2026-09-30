@@ -388,7 +388,8 @@ Write an exhaustive implementation plan from specification or topic.
     `bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total <EPIC count>`,
     as in Step 8 above: every finding at once; fix and re-run until it passes. Then the
     critic at the plan moment exactly as Step 8 above describes (`aid_critic_prepare
-    P{NNN} --moment plan`, dispatch, response, `aid_critic_check`); in this mode it is
+    P{NNN} --moment plan --plan .aid-o/plans/P{NNN}-{topic}.md`, dispatch, response,
+    `aid_critic_check P{NNN} --moment plan --plan <the same path>`); in this mode it is
     the critic's only run, there is no proposal moment without a brainstorm. Revise,
     rerun the generation check, and only then CP1.
 9. **Plan review (CP1)** — run "Plan review (CP1)" below, from item 1.
