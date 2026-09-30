@@ -148,15 +148,15 @@ The unit `aid-epic-to-json.sh` parses is a markdown **table** in the
 
 | # | Role      | Objective                        | Depends On | Parallel Group |
 |---|-----------|----------------------------------|------------|----------------|
-| 1 | architect | Design API contracts + ADR       | ---        | ---            |
-| 2 | domain    | Domain model + invariants        | 1          | ---            |
+| 1 | backend   | Design API contracts + ADR       | ---        | ---            |
+| 2 | backend   | Domain model + invariants        | 1          | ---            |
 | 3 | backend   | Implement API + DB                | 2          | group-1        |
 | 4 | frontend  | Implement UI against contracts   | 1          | group-1        |
 | 5 | qa        | Integration tests                 | 3          | group-2        |
 ```
 
 - **`Depends On`** references either a step **number** (`1`, `2`) **or a role name**
-  (`architect`, `backend` — resolved to the **last** step with that role if several share it).
+  (`backend`, `qa` — resolved to the **last** step with that role if several share it).
   Comma-separated for
   multiple (`1, 2`); `---` for none. Anything that resolves to neither → hard error.
 - **`Parallel Group`** is a label (`group-1`) or `---`. Steps sharing a label are emitted
@@ -180,13 +180,13 @@ parallel_groups, analysis_groups, gates, budget`.
   "version": 1,
   "created_at": "2026-06-02T12:00:00Z",
   "steps": [
-    { "id": "step_1_architect", "role": "architect",
+    { "id": "step_1_backend", "role": "backend",
       "objective": "Design API contracts + ADR",
       "inputs": ["EPIC specification"], "outputs": [], "constraints": [],
       "allowed_paths": ["contracts/", "docs/adr/"], "forbidden_paths": [],
       "acceptance_criteria": ["..."] }
   ],
-  "dependencies": [ { "before": "step_1_architect", "after": "step_2_domain", "reason": "..." } ],
+  "dependencies": [ { "before": "step_1_backend", "after": "step_2_backend", "reason": "..." } ],
   "parallel_groups": [ ["step_3_backend", "step_4_frontend"] ],
   "analysis_groups": [],
   "gates": ["tests_pass", "lint_pass"],

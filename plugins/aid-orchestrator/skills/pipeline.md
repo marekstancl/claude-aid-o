@@ -524,7 +524,7 @@ Steps: {total_steps} ({parallel_groups} parallel waves)
 Roles: {unique roles list}
 
 Wave execution:
-  Wave 0: [architect] {objective}  ~{file_count} files
+  Wave 0: [backend]   {objective}  ~{file_count} files
   Wave 1: [backend] {objective}    ~{file_count} files  ← wave 0
   Wave 2: [qa]      {objective}    ~{file_count} files  ← wave 1
 

@@ -100,7 +100,7 @@ Cardinal Rule + the Completeness Gate below, run by the author/auditor.
 
 Over ~420 lines, the command is probably embedding script-internal detail that
 belongs in a skill or the script header — extract it and reference. Observed:
-aid-audit.md (29, thin) to aid-init.md (412, heavy-justified).
+aid-stop.md (thin) to aid-init.md (412, heavy-justified).
 
 ---
 

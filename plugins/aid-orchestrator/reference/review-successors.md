@@ -26,6 +26,7 @@ an active id or that literal.
 | `not_acceptable_list` | `none (P107 2026-09-30, /aid-audit removed)` | same |
 | `auditor_assertion_rules` | `none (P107 2026-09-30, the auditor card removed)` | the card ran once in its life |
 | `c2_requirement_drift` | `fsm_review_round_required` | epic_generalist question 1 asks whether every EPIC criterion is delivered end to end (P107) |
+| `rolecard_sql_isolation` | `step_check_security_rules` | the sql-isolation overlay went with the VULCAN overlays (P107); the security reviewer asks the tenant and isolation questions on every security-matched step |
 | `prefilter_fail_rules` | `step_check_security_rules` | `security.matched_rules` in `step-check.json` adds the security reviewer (Step 3) |
 | `prefilter_skip_rules` | `step_check_range` | the step check decides `skip`, bound to HEAD and its timeline event (Step 3, `fsm_review_round_skip_bound`) |
 | `prefilter_conservative_default` | `step_check_range` | an undeterminable range is a refusal (Step 3) |
