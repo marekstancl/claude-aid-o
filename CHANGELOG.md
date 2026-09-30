@@ -14,6 +14,9 @@ Pět pastí z projektu agents (P010 na 2.111.0), každá zavřená mechanismem, 
 - **Kontrola dvojí kopie** — soubor pod `.aid-o` (plán, `aid-plugin-issues.md`), který existuje v hlavním checkoutu i ve worktree plánu s jiným obsahem, odmítne `prepare` a jmenuje obě cesty i tu novější (`aid_dotaid_twin_check` v `lib/aid-roots.sh`).
 - **Nálezy lintu v packetu CP1** — každý prompt kontroly plánu nese oddíl „Plan lint“ s nálezy lintu, takže upozornění u plánu bez `lifecycle_strict` (P009: standard odvozený mapou, který plán necituje) dojde revizorům; generalist_a se na necitovaný standard ptá; příklad frontmatter v `plan-writing.md` nese `lifecycle_strict: true`.
 
+### Fixed
+- **Regrese 2.112.0 v testech**: dvě fixtures plánu (`multi-phase-plan*.md`, používá je deset sad včetně generačního řetězce z worktree) měly role architect a domain, které 2.112.0 odstranilo; jsou backend a dva vložené `sed` se klíčují na nadpis kroku místo na roli.
+
 ## [2.112.0] — 2026-09-30
 
 Nezávislý kritik, Sonnet na psaní kódu, úklid karet agentů a měření toho, co revizoři dostávají (P107). Podnět PM 30. 9.: plány se při kontrole vždy zvětší (1 040 vážných nálezů CP1 za 33 kol, žádný neubírá), agenti navrhují testy „na kdejakou věc“ (+121 za 6 dní), a Sonnet 5.5 stačí na kód, ne na rozhodování a návrh UI.
