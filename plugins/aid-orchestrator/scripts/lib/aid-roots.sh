@@ -284,3 +284,31 @@ aid_orchestration_value() {
   v="$(yq -r "${2} // \"\"" "$plugin_default" 2>/dev/null)" || return 1
   printf '%s\tplugin default\n' "$v"
 }
+
+# aid_dotaid_twin_check <state_root> <tree_root> <path> — a `.aid-o` file that
+# exists in BOTH trees (the primary checkout and a plan worktree) with different
+# contents is always an operator error, never an intent (P010, 2026-09-30, twice
+# in one day: the plan edited in the main checkout, the round reading the
+# worktree's copy, the fix reported "not fixed"). <path> is absolute under
+# either tree or relative to a tree. Prints nothing and returns 0 when the trees
+# are one, the file exists in at most one of them, or the copies are identical;
+# returns 3 and names both paths, and the newer one, when they differ.
+aid_dotaid_twin_check() {
+  local state="${1%/}" tree="${2%/}" path="$3" rel a b
+  [[ -n "$state" && -n "$tree" && -n "$path" ]] || return 0
+  [[ "$state" != "$tree" ]] || return 0
+  # the worktree usually lives INSIDE the primary tree (.aid-worktrees/…), so its
+  # prefix is matched first or a worktree path would strip to a primary-relative one
+  case "$path" in
+    "$tree"/*)  rel="${path#"$tree"/}" ;;
+    "$state"/*) rel="${path#"$state"/}" ;;
+    /*)         return 0 ;;                       # outside both trees: nothing to compare
+    *)          rel="$path" ;;
+  esac
+  a="$state/$rel"; b="$tree/$rel"
+  [[ -f "$a" && -f "$b" ]] || return 0
+  cmp -s "$a" "$b" && return 0
+  local newer="$a"; [[ "$b" -nt "$a" ]] && newer="$b"
+  echo "two different contents under one name: ${rel} differs between the primary checkout (${a}) and the worktree (${b}); the newer copy is ${newer} — make them one before the round reads either (during a run, edit the worktree's copy)" >&2
+  return 3
+}

@@ -1081,3 +1081,103 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   [ "$status" -eq 0 ]; [ ! -f "$CP1/round-1/packet/critic-response.md" ]
   grep -q 'plan changed since the check' "$CP1/round-1/prompt-reuse.md"
 }
+
+# ─── 2.113.0: the traps of P010 (agents, 2026-09-28..30) ───
+@test "step: a fix committed before close closes with --at <seen sha>; a wrong sha, a non-ancestor and no --at are refused by name" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _bracket 1 step_security
+  local seen; seen="$(git -C "$R" rev-parse HEAD)"
+  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"
+  run _S close --round 1 --tokens step_generalist=1 step_security=1
+  [ "$status" -eq 1 ]; [[ "$output" == *"run 'close … --at ${seen:0:12}'"* ]]
+  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at "$(git -C "$R" rev-parse HEAD)"
+  [ "$status" -eq 1 ]; [[ "$output" == *"a round closes only at the revision it reviewed"* ]]
+  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at deadbeef
+  [ "$status" -eq 1 ]; [[ "$output" == *"not a commit of this checkout"* ]]
+  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at "${seen:0:12}"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .revision.head_sha "$(D 1)/measurement.json")" = "$seen" ]
+  [ "$(jq -r .revision.closed_with_at "$(D 1)/measurement.json")" = true ]
+  grep -q "\"closed_at\":\"$seen\"" "$E/timeline.jsonl"
+  # the confirmation round: HEAD has moved off the seen revision, so it is prepared normally
+  _sc; run _S prepare --round 2; [ "$status" -eq 0 ]
+  # a seen sha that HEAD no longer descends from is refused
+  rm -rf "$E/cp2"; git -C "$R" reset -q --hard HEAD~1; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _bracket 1 step_security
+  seen="$(git -C "$R" rev-parse HEAD)"
+  echo other >> "$R/src/app.py"; git -C "$R" commit -qam other; git -C "$R" reset -q --hard HEAD~1; echo again >> "$R/src/app.py"; git -C "$R" commit -qam again
+  git -C "$R" reset -q --hard HEAD~1; echo third >> "$R/src/app.py"; git -C "$R" commit -qam third   # HEAD is a sibling of nothing; seen is still an ancestor
+  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at "$seen"; [ "$status" -eq 0 ]
+}
+
+@test "step: a valid answer without a bracket is retried (no provenance), one with a bracket is not; close names retry" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
+  _S collect --round 1 >/dev/null; _bracket 1 step_security
+  run _S close --round 1 --tokens step_generalist=1 step_security=1
+  [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]; [[ "$output" == *"retry --round 1 --role step_generalist"* ]]
+  run _S retry --round 1 --role step_security
+  [ "$status" -eq 1 ]; [[ "$output" == *"never paid for twice"* ]]
+  run _S retry --round 1 --role step_generalist
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"no dispatch bracket records it"* ]]
+  [ ! -f "$(D 1)/reviewer-step_generalist.json" ]
+  _sanswer 1 step_generalist; _bracket 1 step_generalist; _S collect --round 1 >/dev/null
+  run _S close --round 1 --tokens step_generalist=1 step_security=1; [ "$status" -eq 0 ]
+}
+
+@test "prepare prints the bracket commands for every claude role of a step round" {
+  _repo; _sc
+  run _S prepare --round 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"aid-emit-dispatch.sh\" start --focus cp2-step-0-step-generalist --agent-id aid-orchestrator:review --evidence-dir $(D 1)"* ]]
+  [[ "$output" == *"complete --focus cp2-step-0-step-generalist --output-file $(D 1)/reviewer-step_generalist.json"* ]]
+  [[ "$output" == *"written after the answer is a forgery"* ]]
+}
+
+@test "fix-check: a consequential edit in a step no finding named passes only with --also-steps and a reason, and the next round's packet names it" {
+  _round1_closed
+  # the finding names step 1; the author edits step 2's text as a consequence
+  sed -i 's/^text$/text\n\n- Modify: `scripts\/a.sh` — the name step 1 changed/' "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"Step 2"* ]]
+  run "$ROUND_SH" fix-check "$PLAN" --round 1 --also-steps 2
+  [ "$status" -eq 2 ]; [[ "$output" == *"--also-steps needs --reason"* ]]
+  run "$ROUND_SH" fix-check "$PLAN" --round 1 --also-steps 2 --reason "step 2 restates the name step 1 changed"
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"also edited (recorded): step(s) 2"* ]]
+  [ "$(jq -c .also_steps "$CP1/round-1/fix-diff.json")" = "[2]" ]
+  [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = "1" ]
+  grep -q '"event":"fix_check"' "$EV/timeline.jsonl"
+  # a third step outside both lists is still refused
+  printf '\n### Step 3: third\n\n- Create: `scripts/three.sh` — x\n' >> "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1 --also-steps 2 --reason "same"
+  [ "$status" -eq 1 ]; [[ "$output" == *"Step 3"* ]]
+  # back to the accepted state; round 2's packet names the consequential edit
+  sed -i '/^### Step 3: third/,$d' "$PLAN"; _check
+  "$ROUND_SH" fix-check "$PLAN" --round 1 --also-steps 2 --reason "step 2 restates the name step 1 changed" >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 2; echo "$output"; [ "$status" -eq 0 ]
+  grep -q 'Consequential edits the author declared' "$CP1/round-2/prompt-generalist_a.md"
+  grep -q 'step(s) 2: step 2 restates the name step 1 changed' "$CP1/round-2/prompt-generalist_a.md"
+}
+
+@test "prepare: a plan that differs between the primary checkout and a worktree is refused naming both copies; identical copies pass" {
+  git -C "$ROOT" add -A >/dev/null 2>&1; git -C "$ROOT" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1 || true
+  git -C "$ROOT" worktree add -q "$ROOT/.aid-worktrees/plan-P900" -b plan/P900 >/dev/null 2>&1
+  mkdir -p "$ROOT/.aid-worktrees/plan-P900/.aid-o/plans"; cp "$PLAN" "$ROOT/.aid-worktrees/plan-P900/.aid-o/plans/p.md"
+  run "$ROUND_SH" prepare "$ROOT/.aid-worktrees/plan-P900/.aid-o/plans/p.md" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  rm -rf "$CP1"; echo "edited in the worktree only" >> "$ROOT/.aid-worktrees/plan-P900/.aid-o/plans/p.md"
+  run "$ROUND_SH" prepare "$ROOT/.aid-worktrees/plan-P900/.aid-o/plans/p.md" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"two different contents under one name"* ]]; [[ "$output" == *"the newer copy is $ROOT/.aid-worktrees/plan-P900/.aid-o/plans/p.md"* ]]
+}
+
+@test "packet: the plan lint's findings ride in every CP1 prompt, so a legacy plan's advisories reach the reviewers" {
+  printf -- '- Modify: the 6 remaining version files.\n' >> "$PLAN"; _check
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  [ -s "$CP1/round-1/packet/lint.txt" ]
+  grep -q '^## Plan lint: findings' "$CP1/round-1/prompt-generalist_a.md"
+  grep -q 'remaining version files' "$CP1/round-1/prompt-generalist_a.md"
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 4 ]
+}

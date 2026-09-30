@@ -40,6 +40,12 @@ aid_plan_review_packet_build() {
   fi
   mkdir -p "$dir" || return 1
   cp "$plan" "$dir/plan.md" && cp "$check" "$dir/plan-check.json" || return 1
+  # The lint's findings (P009: a legacy plan touched a mapped standards area,
+  # the lint said so as an advisory, and three CP1 rounds never saw the line).
+  # Every finding line, whatever its tier; the verdict itself is not the packet's.
+  "${_AID_PR_PLUGIN}/scripts/aid-plan-lint.sh" "$plan" --project-root "$root" 2>&1 >/dev/null \
+    | grep -E 'STRICT|ERROR|\[ADVISORY\]|\[NOTE\]' | sed "s#^${plan}##" > "$dir/lint.txt" || true
+  [[ -s "$dir/lint.txt" ]] || echo "none" > "$dir/lint.txt"
 
   local derived
   derived="$(aid_standards_derive "$plan" "$root" 2>/dev/null)" || rc=$?
@@ -53,7 +59,7 @@ aid_plan_review_packet_build() {
   # when the critic check passed for THIS plan and the answer was not edited
   # since — otherwise one line says why not, so the reviewers and the PM card
   # see it. No gate: the PM chose "answered in writing, no refusal".
-  local cdir="${4%/cp1/*}/critic/plan" note="" files="plan.md plan-check.json standards.md"
+  local cdir="${4%/cp1/*}/critic/plan" note="" files="plan.md plan-check.json standards.md lint.txt"
   rm -f "$dir/critic-response.md" "$dir/critic-note.txt"
   if [[ -f "$cdir/check.json" && -f "$cdir/critic-response.md" ]]; then
     local passed rsha psha
@@ -140,6 +146,12 @@ aid_plan_review_prompt_render() {
       jq -r '.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major"))
              | "- [\(.severity)] step \(.step // "plan"): \(.claim) (evidence: \(.evidence); fix asked: \(.fix))"' "${prev}/merged.json"
       echo
+      if [[ -f "${prev}/fix-diff.json" ]] && jq -e '.also_steps' "${prev}/fix-diff.json" >/dev/null 2>&1; then
+        echo "### Consequential edits the author declared (fix-check --also-steps)"
+        echo
+        jq -r '"- step(s) \(.also_steps | map(tostring) | join(", ")): \(.also_reason)"' "${prev}/fix-diff.json"
+        echo
+      fi
       echo "### What the author changed (diff of plan.md, round $((round - 1)) → round ${round})"
       echo '```diff'
       diff -u "${prev}/packet/plan.md" "${dir}/packet/plan.md" | tail -n +3
@@ -148,6 +160,9 @@ aid_plan_review_prompt_render() {
     fi
     echo "## Deterministic plan check: warnings (already reported, do not repeat)"
     jq -r '.warnings[]? | "- \(.id) \(.location): \(.message)"' "${dir}/packet/plan-check.json"
+    echo
+    echo "## Plan lint: findings (already reported — check that the plan answers each one; a legacy plan gets them as advisories nobody else reads)"
+    sed 's/^/- /' "${dir}/packet/lint.txt"
     echo
     echo "## Standards"
     cat "${dir}/packet/standards.md"

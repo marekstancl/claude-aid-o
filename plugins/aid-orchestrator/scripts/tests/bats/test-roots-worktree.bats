@@ -807,3 +807,17 @@ EOF
     fi
   done
 }
+
+@test "aid_dotaid_twin_check: identical or single copies pass; differing copies return 3 naming both and the newer one; one tree is a no-op" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-roots.sh"
+  local T; T="$(mktemp -d)"; mkdir -p "$T/main/.aid-o/plans" "$T/wt/.aid-o/plans"
+  printf 'same\n' > "$T/main/.aid-o/plans/P1-x.md"; printf 'same\n' > "$T/wt/.aid-o/plans/P1-x.md"
+  run aid_dotaid_twin_check "$T/main" "$T/wt" "$T/wt/.aid-o/plans/P1-x.md"; [ "$status" -eq 0 ]; [ -z "$output" ]
+  run aid_dotaid_twin_check "$T/main" "$T/wt" ".aid-o/plans/P2-only-here.md"; [ "$status" -eq 0 ]
+  run aid_dotaid_twin_check "$T/main" "$T/main" ".aid-o/plans/P1-x.md"; [ "$status" -eq 0 ]
+  sleep 1; printf 'changed\n' > "$T/wt/.aid-o/plans/P1-x.md"
+  run aid_dotaid_twin_check "$T/main" "$T/wt" ".aid-o/plans/P1-x.md"
+  [ "$status" -eq 3 ]; [[ "$output" == *"two different contents under one name: .aid-o/plans/P1-x.md"* ]]; [[ "$output" == *"the newer copy is $T/wt/.aid-o/plans/P1-x.md"* ]]
+  run aid_dotaid_twin_check "$T/main" "$T/wt" "/elsewhere/file.md"; [ "$status" -eq 0 ]
+  rm -rf "$T"
+}

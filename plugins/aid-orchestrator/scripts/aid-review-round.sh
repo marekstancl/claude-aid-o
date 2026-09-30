@@ -17,9 +17,14 @@
 #       run one codex reviewer (claude reviewers are dispatched by the controller)
 #   collect … --round K
 #       validate the answers, decide whether the round is valid, adjudicate
-#   close … --round K --tokens <role>=<n|unknown> … [--fixer <role>=<model>:<in>:<out>]
-#       write measurement.json and the verdict; a round counts only once closed
-#   retry … --round K --role <r>
+#   close … --round K --tokens <role>=<n|unknown> … [--fixer <role>=<model>:<in>:<out>] [--at <sha>]
+#       write measurement.json and the verdict; a round counts only once closed.
+#       --at <sha>: a fix was committed BEFORE close (P010, twice in one day);
+#       the round closes at the revision the reviewers saw — <sha> must be the
+#       round's recorded head and an ancestor of HEAD — and the fix goes to the
+#       confirmation round, which needs HEAD to have moved anyway
+#   retry … --round K --role <r>     a role collect listed as invalid or missing, or a
+#       valid answer with NO dispatch bracket (no provenance = not "paid once")
 #       clear one invalid or missing reviewer so it can answer again
 #   override … --rounds 1|2|3 --reason "<the PM's words>"
 #       record the PM's instruction to run one round, or a third
@@ -70,6 +75,7 @@ usage() { sed -n '4,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2;
 
 CMD="${1:-}"; [[ -n "$CMD" && "$CMD" != -h && "$CMD" != --help ]] || usage
 shift
+AT_SHA="" ALSO_STEPS="" CLOSE_HEAD=""
 PLAN="" CHECKPOINT="" EVID="" STEP="" ROUND="" ROOT="" ONLY="" MANUAL=0 STUB=0 ROLE="" PROVIDER="" FINGERPRINT="" REASON="" ROUNDS="" PM_ANSWER="" FIXER="" CARD=""
 TOKENS=()
 while [[ $# -gt 0 ]]; do
@@ -91,6 +97,8 @@ while [[ $# -gt 0 ]]; do
     --pm)           PM_ANSWER="${2:-}"; shift 2 ;;
     --fixer)        FIXER="${2:-}"; shift 2 ;;
     --finding-card) CARD="${2:-}"; shift 2 ;;
+    --at)           AT_SHA="${2:-}"; shift 2 ;;        # close: the revision the reviewers saw (a fix committed before close)
+    --also-steps)   ALSO_STEPS="${2:-}"; shift 2 ;;    # fix-check: steps edited as a consequence of the fix, with --reason
     --tokens)       shift; while [[ $# -gt 0 && "$1" != --* ]]; do TOKENS+=("$1"); shift; done ;;
     -*) echo "${CMD}: unknown option $1" >&2; exit 2 ;;
     *)  [[ -z "$PLAN" ]] && PLAN="$1"; shift ;;   # a bare path is the plan (CP1 compatibility)
@@ -373,6 +381,23 @@ cmd_prepare() {
     fi
   fi
 
+  # Two copies of a .aid-o file (primary checkout vs worktree) that differ: the
+  # round would read one and the author edit the other. Refused before the
+  # packet is built (P010, 2026-09-30).
+  local state_root tree_root twin_plan twin_rc
+  state_root="$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")"
+  if [[ "$MODE" == plan ]]; then
+    # the tree that holds the plan file, whatever ROOT canonicalised to
+    tree_root="$(git -C "$(dirname "$PLAN")" rev-parse --show-toplevel 2>/dev/null || echo "$ROOT")"; twin_plan="$PLAN"
+  else
+    tree_root="$ROOT"; twin_plan="$(yq -r '.plan_path // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"; [[ "$twin_plan" == null ]] && twin_plan=""
+  fi
+  for twin_plan in "$twin_plan" ".aid-o/work/aid-plugin-issues.md"; do
+    [[ -n "$twin_plan" ]] || continue
+    twin_rc=0; aid_dotaid_twin_check "$state_root" "$tree_root" "$twin_plan" 2>/dev/null || twin_rc=$?
+    (( twin_rc == 3 )) && _die "round ${ROUND} not prepared: $(aid_dotaid_twin_check "$state_root" "$tree_root" "$twin_plan" 2>&1)"
+  done
+
   rm -rf "$dir"; mkdir -p "$dir" || _die "cannot create ${dir}"
   # A half-prepared round is removed whole, so a second prepare can run.
   trap 'rm -rf "$dir"' EXIT
@@ -428,6 +453,18 @@ cmd_prepare() {
     if _is_carried "$dir" "$role"; then echo "  ${role}: carried from the previous attempt (the fix touched nothing it reads, and it had no finding)"
     else echo "  ${dir}/prompt-${role}.md  (focus $(_focus "$role")$(_agent_note "$role" "$dir"))"; fi
   done
+  # The bracket is copied, never composed: a controller that dispatched without
+  # it back-dated one to get out (P010) — the forgery the detector exists for.
+  if [[ "$MODE" == step ]]; then
+    echo "  brackets — run start BEFORE each dispatch and complete AFTER it (a bracket written after the answer is a forgery):"
+    for role in "${roles[@]}"; do
+      _is_carried "$dir" "$role" && continue
+      i="$(aid_review_role_index "$role")"
+      [[ "${RC_PROVIDER[$i]}" == claude ]] || continue
+      echo "    bash \"\$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh\" start --focus $(_focus "$role") --agent-id aid-orchestrator:review --evidence-dir ${dir}"
+      echo "    bash \"\$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh\" complete --focus $(_focus "$role") --output-file ${dir}/reviewer-${role}.json --evidence-dir ${dir}"
+    done
+  fi
 }
 
 # _stamp_prompt_lengths <round dir> — every prompt opens with its own length and
@@ -539,8 +576,17 @@ cmd_retry() {
   local dir; dir="$(_existing_round)" || exit 1
   [[ -n "$ROLE" ]] || _die "--role required" 2
   [[ -f "${dir}/collect.json" ]] || _die "round ${ROUND} is not collected; retry is for a role collect listed as invalid or missing"
-  jq -e --arg r "$ROLE" '(.missing | index($r)) or ([.invalid[].role] | index($r))' "${dir}/collect.json" >/dev/null \
-    || _die "role ${ROLE} answered validly in round ${ROUND}; a valid answer is never paid for twice"
+  if ! jq -e --arg r "$ROLE" '(.missing | index($r)) or ([.invalid[].role] | index($r))' "${dir}/collect.json" >/dev/null; then
+    # A valid answer nobody dispatched (no start/complete bracket) has no
+    # provenance, so "paid once" does not apply to it: it is re-dispatched
+    # inside its bracket. With the bracket, a valid answer is final.
+    local i_r; i_r="$(aid_review_role_index "$ROLE")"
+    if [[ "$MODE" == step && ( "${RC_PROVIDER[$i_r]}" == claude || "$(_stand_in "$dir" "$ROLE" && echo y)" == y ) ]] && ! _dispatch_recorded "$dir" "$ROLE"; then
+      echo "retry: role ${ROLE} answered validly in round ${ROUND} but no dispatch bracket records it — the answer has no provenance; dispatch it again inside its bracket" >&2
+    else
+      _die "role ${ROLE} answered validly in round ${ROUND}; a valid answer is never paid for twice"
+    fi
+  fi
   _closed "$dir" && _die "round ${ROUND} is closed"
   [[ "$(jq -r '.routed_at // empty' "${dir}/round.json")" == "" ]] || _die "round ${ROUND} has routed its findings; it cannot be reopened"
   rm -f "${dir}/reviewer-${ROLE}.json" "${dir}/reviewer-${ROLE}.invalid.txt" "${dir}/reviewer-${ROLE}.missing"
@@ -704,7 +750,7 @@ _semantic_final_write() {
   local rounds=() r
   for r in "${BASE}"/round-*/merged.json; do [[ -f "$r" ]] && rounds+=("$r"); done
   (( ${#rounds[@]} )) || { echo "close: no merged.json under ${BASE}" >&2; return 1; }
-  jq -s --arg base "$base" --arg head "$(_head)" --arg range "$range" --arg v "$verdict" --arg at "$(_now)" --arg cp "$CHECKPOINT" \
+  jq -s --arg base "$base" --arg head "${CLOSE_HEAD:-$(_head)}" --arg range "$range" --arg v "$verdict" --arg at "$(_now)" --arg cp "$CHECKPOINT" \
         --arg project "$(basename "$ROOT")" --arg plan "$(basename "$(dirname "$EVID")")" --arg run "$(basename "$EVID")" \
         --argjson roles "$(_json_strings "${RC_ROLE[@]}")" --argjson from "$(printf '%s\n' "${rounds[@]}" | jq -R . | jq -s .)" '
     def sev: {"blocker": "critical", "major": "medium", "minor": "low"}[.] // "low";
@@ -779,7 +825,18 @@ cmd_close() {
 
   local stub=false dispatch_check=recorded
   if [[ "$MODE" == step ]]; then
-    [[ "$(jq -r .head_sha "${dir}/round.json")" == "$(_head)" ]] || _die "head moved during round ${ROUND}; the reviewers saw $(jq -r .head_sha "${dir}/round.json" | cut -c1-12), HEAD is $(_head | cut -c1-12)"
+    local seen head_now; seen="$(jq -r .head_sha "${dir}/round.json")"; head_now="$(_head)"
+    if [[ "$seen" != "$head_now" ]]; then
+      # P010 (2026-09-29/30, twice): the natural reflex is to fix a clear finding
+      # before closing; then close refused, prepare refused, retry refused, and the
+      # only way out was a git reset the agent may not run. The verdict binds to
+      # the revision the reviewers saw, not to HEAD — so close there, explicitly.
+      [[ -n "$AT_SHA" ]] || _die "head moved during round ${ROUND}; the reviewers saw ${seen:0:12}, HEAD is ${head_now:0:12} — a fix committed before close: run 'close … --at ${seen:0:12}' to close the round at the revision the reviewers saw; the fix is confirmed by the next round"
+      local at_full; at_full="$(git -C "$ROOT" rev-parse --verify --quiet "${AT_SHA}^{commit}" 2>/dev/null)" || _die "--at ${AT_SHA}: not a commit of this checkout"
+      [[ "$at_full" == "$seen" ]] || _die "--at ${AT_SHA}: the reviewers saw ${seen:0:12}, not ${at_full:0:12}; a round closes only at the revision it reviewed"
+      git -C "$ROOT" merge-base --is-ancestor "$seen" "$head_now" 2>/dev/null || _die "--at ${AT_SHA}: ${seen:0:12} is not an ancestor of HEAD ${head_now:0:12} (HEAD was reset or rebased past the reviewed revision); this round cannot close"
+      CLOSE_HEAD="$seen"
+    fi
     stub="$(jq -r '.stub // false' "${dir}/round.json")"
     if [[ "$stub" == true ]]; then
       dispatch_check=stubbed
@@ -790,7 +847,7 @@ cmd_close() {
         # so it owes the same bracket: a stand-in nobody dispatched never closes.
         [[ "${RC_PROVIDER[$i]}" == claude ]] || _stand_in "$dir" "$role" || continue
         _is_carried "$dir" "$role" && continue
-        _dispatch_recorded "$dir" "$role" || _die "no_dispatch_record: no start/complete bracket with focus $(_focus "$role") naming reviewer-${role}.json in ${dir}/timeline.jsonl; a reviewer file nobody dispatched does not close a round"
+        _dispatch_recorded "$dir" "$role" || _die "no_dispatch_record: no start/complete bracket with focus $(_focus "$role") naming reviewer-${role}.json in ${dir}/timeline.jsonl; a reviewer file nobody dispatched does not close a round — run 'retry --round ${ROUND} --role ${role}' and dispatch it again inside its bracket (prepare prints the commands); never write a bracket after the answer"
       done
     fi
   fi
@@ -869,8 +926,10 @@ cmd_close() {
   jq -n --argjson round "$ROUND" --arg start "$(jq -r .started_at "${dir}/round.json")" --arg finish "$(_now)" \
         --argjson reviewers "$reviewers" --argjson degraded "$degraded" --argjson fixer "$fixer" \
         --arg dc "$dispatch_check" --arg v "$verdict" --arg cp "$CHECKPOINT" \
+        --arg seen "${CLOSE_HEAD:-}" --arg now_head "$( [[ -n "$CLOSE_HEAD" ]] && _head || echo "" )" \
     '{checkpoint: $cp, round: $round, started_at: $start, finished_at: $finish, reviewers: $reviewers, degraded: $degraded,
-      dispatch_check: $dc, verdict: $v} + (if $fixer then {fixer: $fixer} else {} end)' > "${measurement}.tmp" \
+      dispatch_check: $dc, verdict: $v} + (if $fixer then {fixer: $fixer} else {} end)
+      + (if $seen != "" then {revision: {head_sha: $seen, closed_at_head: $now_head, closed_with_at: true}} else {} end)' > "${measurement}.tmp" \
     && mv "${measurement}.tmp" "$measurement" || _die "measurement.json was not written; close can be run again"
 
   if [[ "$MODE" == step ]]; then
@@ -883,7 +942,7 @@ cmd_close() {
   _record_final_writes
   local blockers; blockers="$(jq -r '.blockers_open // 0' "${dir}/merged.json" 2>/dev/null || echo 0)"
   _log review_round_close checkpoint="$CHECKPOINT" step="${STEP:-null}" round="$ROUND" verdict="$verdict" \
-    status="$(jq -r .status "${dir}/collect.json")" blockers_open="$blockers"
+    status="$(jq -r .status "${dir}/collect.json")" blockers_open="$blockers" closed_at="${CLOSE_HEAD:-head}"
   # A CP1 round has no verdict of its own (aid-cp1-gate.sh judges the plan): it
   # is valid, and what it left open is the number that matters.
   local outcome="$verdict"; [[ "$MODE" == plan ]] && outcome="valid; open blockers: ${blockers}"
@@ -903,12 +962,23 @@ _open_fix_list() {
 # _check_fix <round_dir> <out.json> — aid-plan-check.sh of the current plan
 # against the round's packet and fix list; exits 2 on a usage error.
 _check_fix() {
-  local dir="$1" out="$2" fixes rc=0
+  local dir="$1" out="$2" fixes rc=0 allowed
   fixes="$(_open_fix_list "$dir")"
+  # --also-steps: a fix in step A changed a value step B restates (P010: the
+  # count of deviation kinds; P107: a Files bullet a review reworded). Editing B
+  # was refused as a design change and the plan kept a known contradiction. The
+  # rule stays; the author names the consequential steps and why, on the record.
+  allowed="$fixes"
+  if [[ -n "$ALSO_STEPS" ]]; then
+    [[ -n "$REASON" ]] || _die "--also-steps needs --reason: say which fix made these steps change (the next round's card names it)" 2
+    [[ "$ALSO_STEPS" =~ ^[0-9]+(,[0-9]+)*$ ]] || _die "--also-steps takes step numbers: 5 or 5,6" 2
+    if [[ "$allowed" == none ]]; then allowed="$ALSO_STEPS"; else allowed="${allowed},${ALSO_STEPS}"; fi
+  fi
   "${SCRIPT_DIR}/aid-plan-check.sh" "$PLAN" --project-root "$ROOT" --snapshot "${dir}/packet/plan.md" \
-    --fixes "$fixes" --json "$out" --quiet || rc=$?
+    --fixes "$allowed" --json "$out" --quiet || rc=$?
   (( rc == 2 )) && _die "aid-plan-check.sh could not check the fix (usage error)" 2
-  jq --arg f "$fixes" '. + {fix_list: $f}' "$out" > "${out}.tmp" && mv "${out}.tmp" "$out"
+  jq --arg f "$fixes" --arg a "$ALSO_STEPS" --arg r "$REASON" \
+     '. + {fix_list: $f} + (if $a != "" then {also_steps: ($a | split(",") | map(tonumber)), also_reason: $r} else {} end)' "$out" > "${out}.tmp" && mv "${out}.tmp" "$out"
 }
 
 cmd_fix_check() {
@@ -919,8 +989,9 @@ cmd_fix_check() {
   local out="${dir}/fix-diff.json"
   _check_fix "$dir" "$out"
   jq '.pass = (.added_outside_fixes | length == 0)' "$out" > "${out}.tmp" && mv "${out}.tmp" "$out"
+  _log fix_check round="$ROUND" pass="$(jq -r .pass "$out")" also_steps="${ALSO_STEPS:-none}" also_reason="${REASON:-}"
   if [[ "$(jq -r .pass "$out")" == true ]]; then
-    echo "fix-check round ${ROUND}: pass; steps changed: $(jq -r '.steps_changed | map(tostring) | join(",") | if . == "" then "none" else . end' "$out")"
+    echo "fix-check round ${ROUND}: pass; steps changed: $(jq -r '.steps_changed | map(tostring) | join(",") | if . == "" then "none" else . end' "$out")$( [[ -n "$ALSO_STEPS" ]] && echo "; also edited (recorded): step(s) ${ALSO_STEPS} — ${REASON}")"
   else
     echo "fix-check round ${ROUND}: the fix adds what no finding asked for:" >&2
     jq -r '.added_outside_fixes[] | "  Step \(.step) (\(.kind)): \(.text)"' "$out" >&2
