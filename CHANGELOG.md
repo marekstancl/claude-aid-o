@@ -3,6 +3,27 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.112.0] — 2026-09-30
+
+Nezávislý kritik, Sonnet na psaní kódu, úklid karet agentů a měření toho, co revizoři dostávají (P107). Podnět PM 30. 9.: plány se při kontrole vždy zvětší (1 040 vážných nálezů CP1 za 33 kol, žádný neubírá), agenti navrhují testy „na kdejakou věc“ (+121 za 6 dní), a Sonnet 5.5 stačí na kód, ne na rozhodování a návrh UI.
+
+### Added
+- **Kritik ve dvou úrovních** (`skills/critic.md`, `lib/aid-critic.sh`) — na konci brainstormu nad návrhem a před CP1 nad plánem, vždy před Codexem. Prompt skládá kód z interim (`## Zadání PM` doslova, `## Účel a co je v sázce`; ceny se vypouštějí; „předpokládej, že se to staví“). Úroveň 1 = co opravit (autor každou výtku písemně přijme s tím, kde ověřil, nebo odmítne s důvodem); úroveň 2 = námět PM k rozsahu, nikdy verdikt „nestavět“. `aid_critic_check` odmítne odpověď bez obou nadpisů, s víc než pěti body, s verdiktem, nebo bez odpovědi na každý bod; odpověď se váže otiskem na plán i na kontrolu. Bez brány: CP1 jen ukáže, když kontrola neproběhla. Fokusy `critic-brainstorm|plan` v `aid-emit-dispatch.sh`. Interim se maže až po bráně CP1.
+- **Otázka „co z plánu vypustit“ u každé role CP1** — major, když krok nebo odrážka jde vypustit bez ztráty akceptačního bodu (oprava = smazání). `enforcement_tests` chce jeden test na mechanismus a nehlásí test, který plán v `critic-response.md` odmítl s důvodem; odpověď kritikovi je součást packetu CP1 (jen s prošlou kontrolou) a jde citovat jako `critic-response.md:řádek`.
+- **Značka ověřovacího testu** — `Test:` odrážka s „verification-only, delete before plan-final“ (ověřovací, smazat před koncem plánu) jmenuje jednorázovou kontrolu předpokladu; lint ji odmítne na jiném slovese, `plan-finalize --stage gates` odmítne kandidáta, kde soubor ještě existuje.
+- **Role `docs`** (13 kroků ji v plánech používalo a generování je odmítalo); `docs-writer` zůstává jako starší zápis.
+- **`aid-prompt-inventory.sh`** — za každou roli a kolo řádky promptu po oddílech a kolik nálezů který oddíl cituje (citace čte stejnou gramatikou jako rozhodčí). První zpráva `docs/plans/prompt-inventory-2026-10.md`; jen měří, škrty rozhodne PM (IMP-679).
+
+### Changed
+- **Sonnet na psaní kódu**: karty implementer (`sonnet`/`high`), implementer-light (`sonnet`/`medium`), gate-fixer (`sonnet`/`medium`); sedm rolí kroků říká `sonnet`; revizoři, reviewer-light a project-scanner zůstávají Opus. `Effort:` na kartě role jen volí lehkou/plnou kartu, rozpočet přemýšlení je `effort:` v hlavičce karty agenta. Návrh UI (`/aid-ui`, brainstorm) dělá session na Fable (`/model fable`); vývoj UI podle plánu na Sonnetu s prahem návratu (`docs/plans/P107-model-measurement.md`, výchozí hodnoty z P102/P103).
+- **Pokyn opraváři** „test příkladu plus dvě varianty“ → „jeden test na pravidlo, druhý jen jinou cestou kódu“ (32 ze 125 testů od 2.107.0 vzniklo z něj); revizor kroku hlásí chybějící test jako major jen s jmenovaným akceptačním bodem, test bez bodu a chyby jako minor ke smazání.
+- **Revizor EPICu** převzal simplifier: otázky 7–9 (duplicita napříč kroky, abstrakce s jedním volajícím, co vypustit nebo odložit); major když by diff byl materiálně kratší, strukturální změna jde do backlogu.
+- **Karty agentů** přepsány do tvaru úkol / vstupy / výstup / pravidla s důvody (implementer, implementer-light, reviewer-light, gate-fixer, project-scanner 1 106 → 113 řádků); PM schválil rozpis změn pravidel (`docs/plans/P107-cards-rule-diff.md`). Paměťový sken projekt-scanneru přesunut beze změny do `reference/memory-scan-protocol.md` (IMP-682).
+- Brainstorm: validace po oddílech (`section-review`, `cross-section-review`) nahrazena jedním během kritika; interim nese `## Zadání PM` a `## Účel a co je v sázce` (RULE 1a), rozpracovaný plán čekající na CP1 se neobnovuje jako brainstorm (RULE 6).
+
+### Removed
+- Karty **auditor**, **verifier** (šest čoček) a **simplifier**, příkaz **`/aid-audit`** (1 běh za historii), role **architect, domain, observability** (0 plánů), tři VULCAN overlaye — včetně odkazů v návodech, testech a registru (řádky `removed_scoped` s nástupci v `reference/review-successors.md`). `test-agent-cards.bats` hlídá hlavičky pěti zbylých karet.
+
 ## [2.111.0] — 2026-09-28
 
 Opravy z běhu P103, kde automatický režim PM neustále zastavoval. Příčiny: lehcí revizoři četli jen zlomek dlouhého zadání a díry se našly až pozdě, session jela na starších kartách agentů, stálý pokyn PM „neptej se“ nešel zapsat a každý nález po posledním kole znamenal novou kartu.

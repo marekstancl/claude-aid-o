@@ -225,6 +225,17 @@ Three modes, auto-detected from what you pass:
 Plan IDs come from the locked allocator, never a hand edit:
   aid-fsm.sh alloc plan-id     → prints the next P{NNN}
 
+The independent critic (2.112.0) reads the PM's brief and the proposal at the
+end of the brainstorm, and the written plan before CP1, and answers in two
+levels: what to fix (the author answers every item in writing) and what the PM
+might cut or add (a suggestion on the scope card, never a verdict). Its prompt
+is assembled by code from the interim's `## Zadání PM` and `## Účel a co je
+v sázce` sections — cost figures never reach it — and its answer is refused
+without the two headings, with more than five items, or unanswered:
+  source scripts/lib/aid-critic.sh
+  aid_critic_prepare P{NNN} --moment brainstorm|plan [--plan <path>]
+  aid_critic_check   P{NNN} --moment brainstorm|plan [--plan <path>]
+
 NOT YET SUPPORTED
 Concurrent plan GENERATION works. STARTING a newly generated plan's EPIC
 while another stream is live does not — that is a known limitation.

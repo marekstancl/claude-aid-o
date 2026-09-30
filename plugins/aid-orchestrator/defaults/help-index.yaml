@@ -207,6 +207,11 @@ surfaces:
       topic: plan-lifecycle, audience: power, disposition: current,
       writes: [], final_turn: "card:finished" }
 
+  - { command: /critic, file: plugins/aid-orchestrator/skills/critic.md,
+      purpose: "The independent critic of a proposal or plan — two levels (fix / consider the scope), assembled and checked by lib/aid-critic.sh; loaded by /aid-plan, not invoked directly",
+      topic: plan, audience: power, disposition: current,
+      writes: [], final_turn: "card:finished" }
+
   - { command: /visual-companion, file: plugins/aid-orchestrator/skills/visual-companion/SKILL.md,
       purpose: "Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision",
       topic: plan, audience: power, disposition: current,

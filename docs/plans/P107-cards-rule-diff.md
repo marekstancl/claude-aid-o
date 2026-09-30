@@ -43,9 +43,9 @@ deleted (their checks live in the review rounds, see `reference/review-successor
 |---|---|
 | Identity; Three Modes (A quick, B deep, C memory) | Task: Modes A and B; Mode C (Qdrant memory scan: full, incremental, kondice — ~720 lines) moved unchanged to `reference/memory-scan-protocol.md` because nothing dispatches it (`/aid-init` writes memory from the controller, the ecosystem forbids the `qdrant-brain` tools it names, no project ran it) — backlog IMP-682 |
 | Quick Scan Protocol steps 1-5 (indicator files, tech stack detection, structure, app_type table, conventions, output) | Inputs (the indicator list, git log/branch) + Output (`app_type` values with their indicators, in prose) + Rules (conventions from evidence, quick means quick) |
-| Deep Analysis Additions | Task ("extends it with a `quality` section and writes deep-analysis-report.md") + Rules ("deep means bounded: sample, skip generated dirs") |
+| Deep Analysis Additions (code quality, dependency audit, architecture, tech debt) | Task, one sentence each (restored after the Codex review found the first rewrite said only "a `quality` section") + Rules ("deep means bounded: sample, skip generated dirs") |
 | Constraints — CRITICAL: read-only table, scan scope limits, output paths, dedup rule | read-only, no install/build, never guess a version, confidence — kept as rules with reasons; the dedup rule went with Mode C |
-| Project Profile Format (the YAML schema) | kept verbatim in Output |
+| Project Profile Format (the YAML schema); the `scanner_result` reply block | both kept verbatim in Output (the reply block restored after the Codex review) |
 | Important: specialist not role agent, confidence, quick vs deep, memory quality, project.yaml overwritten per scan, memory complementary, partial status | kept: confidence, quick/deep, partial status; "each scan overwrites" replaced by the merge rule of `skills/setup/project-scan.md` (merge, never overwrite PM fields — the rule `/aid-init` already states); memory lines went with Mode C |
 
 **PM:** „ok“ (2026-09-30, po rozpisu změn v chatu)

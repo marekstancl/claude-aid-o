@@ -213,7 +213,7 @@
     "project": "agents",
     "checkpoint": "cp2",
     "role": "step_generalist",
-    "prompts": 55,
+    "prompts": 56,
     "lines_total_median": 688,
     "lines_by_section": {
       "(before the first heading)": 9,
@@ -225,9 +225,9 @@
       "Role": 19,
       "Rules": 24,
       "Severity": 9,
-      "This is a confirmation round": 175,
+      "This is a confirmation round": 210,
       "Your role": 1,
-      "diff.patch": 595
+      "diff.patch": 607
     },
     "findings": 33,
     "citations_by_section": {
@@ -252,8 +252,8 @@
     "project": "agents",
     "checkpoint": "cp2",
     "role": "step_security",
-    "prompts": 25,
-    "lines_total_median": 975,
+    "prompts": 26,
+    "lines_total_median": 1000,
     "lines_by_section": {
       "(before the first heading)": 9,
       "Acceptance criteria": 6,
@@ -264,9 +264,9 @@
       "Role": 19,
       "Rules": 24,
       "Severity": 9,
-      "This is a confirmation round": 146,
+      "This is a confirmation round": 217,
       "Your role": 1,
-      "diff.patch": 859
+      "diff.patch": 874
     },
     "findings": 13,
     "citations_by_section": {
@@ -291,11 +291,11 @@
     "project": "agents",
     "checkpoint": "cp3",
     "role": "epic_behaviour",
-    "prompts": 19,
-    "lines_total_median": 1236,
+    "prompts": 20,
+    "lines_total_median": 988.5,
     "lines_by_section": {
       "(before the first heading)": 9,
-      "Declared scope": 30,
+      "Declared scope": 29,
       "Definition of Done": 4,
       "Deterministic step check": 8,
       "Output": 21,
@@ -311,11 +311,11 @@
       "Step 6": 4,
       "This is a confirmation round": 496,
       "Your role": 1,
-      "diff.patch": 975
+      "diff.patch": 927
     },
-    "findings": 13,
+    "findings": 18,
     "citations_by_section": {
-      "diff.patch": 37,
+      "diff.patch": 48,
       "repository (outside the prompt)": 1
     },
     "never_cited": [
@@ -342,17 +342,17 @@
     "project": "agents",
     "checkpoint": "cp3",
     "role": "epic_generalist",
-    "prompts": 17,
-    "lines_total_median": 1237,
+    "prompts": 18,
+    "lines_total_median": 877.5,
     "lines_by_section": {
       "(before the first heading)": 9,
-      "Declared scope": 26,
+      "Declared scope": 25,
       "Definition of Done": 4,
       "Deterministic step check": 8,
       "Output": 21,
       "Role": 18,
       "Rules": 24,
-      "Severity": 8,
+      "Severity": 9,
       "Step 0": 5,
       "Step 1": 5,
       "Step 2": 5,
@@ -362,12 +362,12 @@
       "Step 6": 4,
       "This is a confirmation round": 525,
       "Your role": 1,
-      "diff.patch": 975
+      "diff.patch": 922
     },
-    "findings": 14,
+    "findings": 16,
     "citations_by_section": {
-      "diff.patch": 36,
-      "repository (outside the prompt)": 8
+      "diff.patch": 40,
+      "repository (outside the prompt)": 11
     },
     "never_cited": [
       "(before the first heading)",
@@ -393,11 +393,11 @@
     "project": "agents",
     "checkpoint": "cp3",
     "role": "epic_security",
-    "prompts": 21,
-    "lines_total_median": 1241,
+    "prompts": 22,
+    "lines_total_median": 1010,
     "lines_by_section": {
       "(before the first heading)": 9,
-      "Declared scope": 28,
+      "Declared scope": 27,
       "Definition of Done": 4,
       "Deterministic step check": 8,
       "Output": 22,
@@ -413,11 +413,11 @@
       "Step 6": 4,
       "This is a confirmation round": 445,
       "Your role": 1,
-      "diff.patch": 1093
+      "diff.patch": 1044
     },
-    "findings": 17,
+    "findings": 19,
     "citations_by_section": {
-      "diff.patch": 57
+      "diff.patch": 65
     },
     "never_cited": [
       "(before the first heading)",

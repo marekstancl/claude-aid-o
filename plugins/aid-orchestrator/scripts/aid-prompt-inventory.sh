@@ -92,6 +92,9 @@ for root in "${roots[@]}"; do
     total="$(jq -r --arg r "$role" '.prompt_lines[$r] // empty' "$rd/round.json" 2>/dev/null || true)"
     [[ -n "$total" ]] || total="$(wc -l < "$prompt")"
     findings=0; cites="{}"
+    if [[ -f "$rd/merged.json" ]] && ! jq -e . "$rd/merged.json" >/dev/null 2>&1; then
+      echo "skipped, malformed merged.json: ${rd}" >&2; skipped=$((skipped+1)); continue
+    fi
     if [[ -f "$rd/merged.json" ]]; then
       # findings this role reported (reported_by), each citation mapped to a section
       while IFS=$'\t' read -r ev; do
@@ -112,7 +115,7 @@ for root in "${roots[@]}"; do
   done < <(find "$root" \( -path '*/cp1/round-*/prompt-*.md' -o -path '*/cp2/step-*/round-*/prompt-*.md' -o -path '*/cp3/round-*/prompt-*.md' \) 2>/dev/null | sort)
 done
 
-[[ -s "$tmp" ]] || { echo "no review prompts found under: ${roots[*]}" >&2; exit 1; }
+[[ -s "$tmp" ]] || { echo "no review prompts found under: ${roots[*]} (rounds skipped: ${skipped})" >&2; exit 1; }
 
 # Aggregate per project × checkpoint × role.
 agg="$(jq -s '
@@ -126,11 +129,15 @@ agg="$(jq -s '
     citations_by_section: (map(.citations_by_section | to_entries) | add // [] | group_by(.key) | map({key: .[0].key, value: (map(.value) | add)}) | from_entries)
   }) | map(. + {never_cited: ([.lines_by_section | keys[]] - [.citations_by_section | keys[]])})
 ' "$tmp")"
+# The global list comes from the totals over every row — a section one role cited is
+# cited, whatever the other roles did — not from the union of the per-role lists.
+global_never="$(jq -r '([.[] | .lines_by_section | keys[]] | unique) - ([.[] | .citations_by_section | keys[]] | unique) | .[]' <<< "$agg")"
 
 md="$( {
   echo "# Prompt inventory — what each reviewer receives and which part its findings cite"
   echo
-  echo "Generated $(date -u +%Y-%m-%d) by \`aid-prompt-inventory.sh ${roots[*]}\`. Lines per section are the mean over the role's prompts (median total). \`repository (outside the prompt)\` counts citations of files the reviewer opened itself; \`never cited\` lists sections no finding of the role ever cited. Rounds before 2.98.0 appended the plan without a `## plan.md` heading, so their plan sections appear under their own names (Goal, Scope, Step N …) and their `plan.md:N` citations count towards `plan.md`. This report measures; it recommends nothing."
+  printf 'Generated %s by `aid-prompt-inventory.sh %s`. ' "$(date -u +%Y-%m-%d)" "${roots[*]}"
+  printf '%s\n' 'Lines per section are the mean over the role'"'"'s prompts (median total). `repository (outside the prompt)` counts citations of files the reviewer opened itself; `never cited` lists sections no finding of the role ever cited. Rounds before 2.98.0 appended the plan without a `## plan.md` heading, so their plan sections appear under their own names (Goal, Scope, Step N …) and their `plan.md:N` citations count towards `plan.md`. This report measures; it recommends nothing.'
   for cp in cp1 cp2 cp3; do
     rows="$(jq -r --arg cp "$cp" '.[] | select(.checkpoint == $cp)' <<< "$agg")"
     [[ -n "$rows" ]] || continue
@@ -143,7 +150,7 @@ md="$( {
   echo
   echo "## Sections no finding cited in any project"
   echo
-  jq -r '[.[] | .never_cited[]] | group_by(.) | map("- \(.[0]) (\(length) role rows)") | .[]' <<< "$agg"
+  if [[ -n "$global_never" ]]; then printf '%s\n' "$global_never" | sed 's/^/- /'; else echo "(every section was cited by at least one finding)"; fi
   if (( skipped > 0 )); then echo; echo "Skipped roots: ${skipped}"; fi
 } )"
 

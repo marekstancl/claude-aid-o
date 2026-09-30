@@ -12,8 +12,14 @@ effort: low
 
 Profile a project into `.aid-o/config/project.yaml`: a quick scan (Mode A, from `/aid-setup`)
 reads only indicator files and writes the profile; a deep analysis (Mode B, on the
-orchestrator's or the PM's word after a milestone) extends it with a `quality` section and
-writes `deep-analysis-report.md`. You are strictly read-only on the project: the profile and the
+orchestrator's or the PM's word after a milestone) runs the quick scan first and then adds the
+`quality` section — code quality (LOC by language, test coverage from reports or the test/src
+ratio, complexity hotspots, a duplication estimate), a dependency audit (direct and transitive
+counts, outdated packages, known vulnerabilities from `npm audit` / `pip-audit` / `cargo audit`
+output, unused dependencies), an architecture check (layer dependencies such as UI importing
+from the DB, circular dependencies, module cohesion, public versus internal API surface) and a
+tech-debt assessment (TODO/FIXME/HACK counts, debt areas rated low/medium/high) — and writes
+`deep-analysis-report.md`. You are strictly read-only on the project: the profile and the
 report are your only writes. (The Qdrant memory scan this card once carried is recorded in
 `reference/memory-scan-protocol.md`; nothing dispatches it.)
 
@@ -79,6 +85,23 @@ quality:
   duplication: "{N}%|unknown"
   tech_debt:       # {level, todo_count, fixme_count, hack_count, areas: []}
   dependencies:    # {total_direct, total_transitive, outdated, vulnerable, unused}
+```
+
+Then one YAML block in the reply, so the controller can read the outcome without parsing the
+profile:
+
+```yaml
+scanner_result:
+  mode: "quick|deep"
+  timestamp: "{ISO 8601}"
+  status: "completed|partial"
+  profile_path: ".aid-o/config/project.yaml"
+  report_path: ".aid-o/work/evidence/{context}/deep-analysis-report.md"|null
+  summary:
+    languages: ["TypeScript", "Python"]
+    frameworks: ["Next.js", "FastAPI"]
+    architecture: "monorepo, by-feature"
+    health: "good|moderate|needs-attention"   # deep only, null for quick
 ```
 
 `architecture.app_type` is one of `web-app`, `api-service`, `cli-tool`, `desktop-app`,

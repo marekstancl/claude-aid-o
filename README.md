@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.111.0** (current) — méně zastavení v automatickém režimu: stálý pokyn PM, plný revizor pro dlouhé zadání, upozornění na starou verzi pluginu
+- **v2.112.0** (current) — nezávislý kritik ve dvou úrovních, Sonnet na psaní kódu, úklid karet agentů, inventura promptů revizorů
+- **v2.111.0** — méně zastavení v automatickém režimu: stálý pokyn PM, plný revizor pro dlouhé zadání, upozornění na starou verzi pluginu
 - **v2.110.0** — pracovní kopie čtou nastavení z hlavního checkoutu; stránka PM podle obsahu plánu; soubory z jiného repozitáře
 - **v2.109.0** — méně kol revize u zdroje: nález nese porušené pravidlo, opravář opraví celou třídu, bezpečnostní revizor u každého kroku
 - **v2.108.0** — `/aid-ui` umí vizi a slogany, identitu, SEO a obrázkové komposice pod bránou PM; stránka značky má skutečné kapitoly (IMP-663)
