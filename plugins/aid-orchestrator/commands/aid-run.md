@@ -548,6 +548,13 @@ Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role 
       prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
 ```
 
+**Close the round BEFORE the fix.** When the fix was committed first (the natural
+reflex on a clear finding — P010 did it twice in one day), `close` refuses with
+"head moved" and names the way out: `close … --at <sha the reviewers saw>`. The
+round then closes bound to that revision (`measurement.json` `revision.head_sha`,
+`closed_with_at: true`), and the fix is what the confirmation round confirms. `--at`
+takes only the round's recorded head, and only while HEAD still descends from it.
+
 Then `aid-step-check.sh` again (the range now ends at the fix commit) and
 `prepare --round K+1`: the confirmation round asks only the reporters of what
 stayed open and shows them the open findings and the fix diff. Record the
