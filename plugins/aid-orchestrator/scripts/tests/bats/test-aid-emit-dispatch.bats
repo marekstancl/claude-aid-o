@@ -211,3 +211,11 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+
+@test "critic-brainstorm and critic-plan are accepted foci (P107); critic-x is not" {
+  run "$SCRIPT" start --focus critic-plan --agent-id aid-orchestrator:critic --evidence-dir "$EVID"
+  [ "$status" -eq 0 ]
+  grep -q '"focus":"critic-plan"' "$TIMELINE"
+  run "$SCRIPT" start --focus critic-x --agent-id aid-orchestrator:critic --evidence-dir "$EVID"
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not match allowed pattern"* ]]
+}

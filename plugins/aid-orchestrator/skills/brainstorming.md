@@ -50,7 +50,7 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
 2. **Prefer multiple choice** — open-ended only when options cannot be predicted
 3. **Detailed output by default** — PM should never ask for more detail
 4. **2-3 approaches always** — never present a single option. Which approach WINS is settled between the models; the PM sees it only when they disagree, or when the choice is one of the five in rule 15.
-5. **Section-by-section validation, not approval** — each non-trivial section is still validated by the `section-review` critic and ground-truth re-verified by the author. What is gone is the PM sign-off per section: validation is the models' work, approval is the PM's, and only the scope list (rule 16) and the final plan need theirs.
+5. **One critic over the whole proposal, not approval per section** — at the end of Steps 4-7 the independent critic (`skills/critic.md`, prompt assembled by `lib/aid-critic.sh`) reads the PM's brief, the purpose and the assembled proposal and answers in two levels; the author verifies every accepted claim against the repository before writing its response row (`critic-response.md`), and `aid_critic_check` refuses an unanswered item. What is gone is the PM sign-off per section and the per-section validator: validation is the models' work, approval is the PM's, and only the scope list (rule 16) and the final plan need theirs.
 6. **Write files only after explicit PM approval** — of the SCOPE LIST (rule 16). That is the moment the PM says "yes, that is the work"; the plan is written after it, never before.
 7. **Follow the language split** — conversation in PM language, documents in configured language
 8. **YAGNI** — do not add complexity the requirements do not demand
@@ -464,75 +464,46 @@ RULE 7: After all sections: present summary with statuses, ask for final approva
 RULE 8 (trivial floor): Architecture, Data Model, API, Implementation, Migration sections
         are ALWAYS non-trivial — the trivial-skip judgment may only escalate UP, never
         down. A non-trivial section skips the cycle only if it names zero codebase artifacts.
-RULE 9 (validate): After drafting a section, dispatch the critic:
-          Agent({ subagent_type: "aid-orchestrator:verifier",
-                  description: "section-review {name}",
-                  prompt: <focus=section-review + verbatim section + codebase scope> })
-        The critic returns review_result findings, each with a file:line citation.
-        Do NOT wire stage-log events here (dead no-op in brainstorm — no FSM run).
-RULE 10 (ground-truth — MANDATORY, anti-hallucination): For EVERY key claim the critic
-        makes (file:line, helper signature, schema/class existence), the author goes BACK
-        into the codebase and confirms it with grep/Read. Reuse the CP1 EVIDENCE
-        REQUIREMENT contract verbatim (commands/aid-plan.md): a verification row whose
-        output_excerpt is from-memory/prose or lacks a command_run is REJECTED; max 2
-        retries, then flag PM "verification incomplete: {claims}". Taking findings at
-        nominal value and re-wording them as "I agree" is the EXACT failure this prevents.
-RULE 11 (stance): Per finding, record agree | disagree + one-line reason anchored to the
-        grep output, NOT the critic's word. A claim whose file:line cannot be confirmed is
-        marked ✗ and the stance defaults to DISAGREE (a hallucinated claim has no weight).
-RULE 12 (evidence record — MANDATORY): The verdict MUST embed the claim-verification table
-        (see Section Verdict Format). A verdict without the table is INCOMPLETE and MUST
-        NOT be shown to PM. Enforcement = AID-v3-principles §1 mechanism #3 (explicit PM
-        confirmation gate with logged justification) — NOT an FSM brake. A non-trivial
-        section whose table has zero rows = INCOMPLETE → loop back.
+RULE 9 (the critic, once): when every section is drafted and the opponent has answered,
+        run the independent critic over the ASSEMBLED proposal — not per section:
+          bash "$AID_PLUGIN_PATH/scripts/lib/aid-critic.sh"   # sourced; then:
+          aid_critic_prepare P{NNN} --moment brainstorm       # prints <dir>/prompt.md
+          Agent(subagent_type: general-purpose, model: opus,
+                prompt: "Your complete instructions are in <dir>/prompt.md. Read that whole file first and follow it exactly.")
+        Bracket the dispatch with aid-emit-dispatch.sh start/complete (--focus critic-brainstorm,
+        --agent-id aid-orchestrator:critic). The critic writes <dir>/critic.md in two levels
+        (skills/critic.md). prepare REFUSES an interim without `## Zadání PM` and
+        `## Účel a co je v sázce` (RULE 1a) — write them, do not paste a prompt by hand.
+RULE 10 (ground-truth — MANDATORY, anti-hallucination): for EVERY level-1 item the author
+        goes BACK into the codebase and confirms or refutes the claim with grep/Read, and
+        writes one row per item into <dir>/critic-response.md:
+          | # | výtka | verdikt (PŘIJATO / odmítnuto) | kde v návrhu (`file` or `command` checked) / proč ne |
+        An accepted row MUST name the file or command the claim was checked against;
+        `aid_critic_check P{NNN} --moment brainstorm` refuses a row without one, a missing
+        or duplicated row, more than five items, a missing heading, and a verdict such as
+        "nestavět" outside level 2. Taking items at face value and re-wording them as
+        "I agree" is the EXACT failure this prevents.
+RULE 11 (level 2): the critic's scope suggestions are never applied by the author; they
+        go to the PM on the scope card (Step 7a) as suggestions, each with what the PM
+        would lose. An empty level 2 is reported in one line.
+RULE 12 (evidence): the trio prompt.md / critic.md / critic-response.md plus check.json
+        stays in evidence/<plan_id>/critic/brainstorm/; the interim records the accepted
+        changes under `## Kritik` (RULE 2). A plan is not written while the check fails.
 ```
 
-### Section Verdict Format
+### Section verdicts
 
-After the cycle completes, present ONE consolidated verdict to PM in the conversation
-language, scannable (Key Principle #5). It REPLACES the bare "approve this section?" prompt.
-Six blocks, in order:
-
-1. **What I drafted** — ≤4 lines condensing the section.
-2. **Validator returned** — PASS→APPROVE / FAIL|PASS_WITH_NOTES→REVISE, with findings
-   marked 🚨 (critical) / ⚠ (low).
-3. **Claim verification** — the mandatory table (`command_run` is a VISIBLE column — the
-   anti-hallucination affordance; PM sees the real grep output):
-
-   | # | Validator claim (file:line) | command_run | output_excerpt | ✓/✗ | Opus stance |
-   |---|------------------------------|-------------|----------------|-----|-------------|
-
-4. **Validator recommends** — numbered recommendations.
-5. **My stance** — agree/disagree per finding + reason; explicit DISAGREEMENT is allowed
-   and expected — never silently capitulate to a claim ground-truth disproved.
-6. **Closing prompt** — "Souhlasíš / Upravit / Skip / Stop" (approve / revise / defer to
-   final review / abort).
-
-Severity/verdict vocabulary: reuse the verifier `review_result` enum (verdict
-PASS|FAIL|PASS_WITH_NOTES; severity critical|high|medium|low — brainstorm section-review typically uses critical|low). Map only at render: PASS→APPROVE,
-FAIL|PASS_WITH_NOTES→REVISE. Do NOT invent new labels.
-
-On approve-despite-✗ or -PENDING, record `pm_decision: <approve|revise> — <reason>` in the
-section's interim-doc block (satisfies mechanism #3's "recorded with reason"). Persistence:
-the table + verdict ride inside the existing approved-section content per Context Persistence
-RULE 2 — do NOT add a new `## Step N:` header (avoids the single-header-per-step collision).
-Evidence is ephemeral-by-design (interim doc deleted on success); it is NOT a long-term audit
-trail.
+There is no per-section verdict any more: sections are drafted, the critic
+reads the assembled proposal once (RULE 9), and the PM sees the scope list
+(Step 7a). A section the PM modified after the scope list is re-presented as
+part of the next scope list, not on its own.
 
 ### Cross-Section Validation (Step 7)
 
-Before final approval, run the cross-section profile over the ASSEMBLED approved sections:
-dispatch `Agent({ subagent_type: "aid-orchestrator:verifier", description:
-"cross-section-review", prompt: <focus=cross-section-review + all approved sections + plan
-summary> })`. It checks drift / decision-propagation / Files-summary completeness /
-dependency-graph / effort sanity — NOT a codebase re-validation (those claims were already
-verified per-section in Step 6). Anti-hallucination still applies, adapted: the author
-ground-truth-verifies the critic's claims — file-existence claims via ls/grep, consistency
-claims via cross-reference of the approved sections + interim doc; same "command_run +
-output_excerpt or INCOMPLETE" rule, with consistency rows citing the compared section
-locations (e.g. "§3 vs §5") instead of a codebase path. Reuse the review_result enum (no
-MINOR/MAJOR). 0 issues → PM final Y/N immediately; issues found → apply targeted fixes to the
-affected sections, then proceed to plan write.
+There is no separate cross-section pass any more: the critic of RULE 9 reads the whole
+assembled proposal, so drift between sections, decisions that did not propagate and
+missing pieces are its level-1 material. Fix what its response accepted, then proceed to
+the scope list (Step 7a) and the plan write.
 
 ### Document Generation Protocol
 
@@ -602,6 +573,13 @@ full conversation detail so nothing is lost.
 RULE 1: CREATE `.aid-o/work/interim-P{NNN}.md` at the START of /aid-plan (Step 1),
         using the pre-allocated plan ID. Initial content: topic, project context,
         PM's initial input, prior-plan references.
+RULE 1a: BEFORE the opponent and the critic run, the interim carries two sections the
+        critic's prompt is assembled from (`lib/aid-critic.sh` refuses without them,
+        and refuses a heading that repeats):
+          `## Zadání PM` — the PM's words verbatim (quotes, not a paraphrase);
+          `## Účel a co je v sázce` — what is at stake for the PM and the numbers behind
+          it (how often, how much, what breaks), never a price or a token count: cost
+          lines are stripped, and a critic that saw costs once answered "do not build".
 RULE 2: UPDATE after each completed step — append full detail, not summaries:
         - Each Q&A pair (question + PM answer + inferred defaults)
         - MoSCoW prioritization results
@@ -615,11 +593,15 @@ RULE 3: Write for MACHINE CONSUMPTION — structure for reliable re-reading, not
 RULE 4: On context resume (new session), READ interim doc first. Announce:
         "Found interim notes for P{NNN}. Resuming from Step {N}."
         Do NOT re-ask questions already answered in the interim doc.
-RULE 5: DELETE the interim doc when plan-writing completes successfully.
+RULE 5: The interim is deleted by the CP1 flow once the gate passes (commands/aid-plan.md,
+        "Plan review (CP1)" item 10), NEVER at plan write: the critic before CP1 reads it.
         On abort, KEEP the interim doc (it serves as recovery artifact).
 RULE 6: Before creating interim doc, CHECK if `.aid-o/work/interim-P*.md` already exists.
-        If found, announce: "Active brainstorm in progress (P{NNN}). (A) Resume it,
-        (B) Start new brainstorm with next ID." Prevents concurrent-session collisions.
+        If its plan file `.aid-o/plans/P{NNN}-*.md` does NOT exist, announce: "Active
+        brainstorm in progress (P{NNN}). (A) Resume it, (B) Start new brainstorm with next
+        ID." If the plan file EXISTS, it is a plan awaiting CP1, not a live brainstorm:
+        say so, never offer to resume it, and offer (A) leave it for its CP1, (B) delete
+        the interim because the plan was abandoned. Prevents concurrent-session collisions.
 ```
 
 ---

@@ -27,7 +27,7 @@ EOF
 }
 
 # The one focus allowlist (the start check and its error text read this).
-AID_DISPATCH_FOCUS_RE='^(cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp3-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*)$'
+AID_DISPATCH_FOCUS_RE='^(cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp3-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|critic-(brainstorm|plan))$'
 
 # Focus default duration table (resolved when --expected-duration-max not given).
 default_duration_for_focus() {
@@ -38,6 +38,7 @@ default_duration_for_focus() {
     cp3-*) echo 900 ;;
     cp6-*) echo 600 ;;
     cp7-*) echo 1200 ;;
+    critic-*) echo 900 ;;
     *)     echo 600 ;;
   esac
 }
