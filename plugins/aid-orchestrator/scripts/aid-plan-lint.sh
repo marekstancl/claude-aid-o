@@ -220,6 +220,11 @@ while IFS=$'\t' read -r _vo_verb _vo_body; do
   errors=$((errors+1))
   [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: ERROR verification-only marker allowed on Test: bullets only (found on ${_vo_verb}:): ${_vo_body}" >&2
 done < <(_aid_files_verification_only "$PLAN" --any-verb)
+# Under legacy_epic_release_mode there is no plan-final gates stage, so the marker
+# is prose there: say so once, so a legacy plan does not read it as enforced.
+if [[ "$mode" == "legacy" ]] && [[ -n "$(_aid_files_verification_only "$PLAN")" ]]; then
+  _advisory "" "this legacy plan marks a verification-only test, but the check that refuses a leftover marked file runs only in plan-finalize --stage gates (plan_branch mode) — in legacy_epic_release_mode the marker is a note, not a mechanism"
+fi
 
 # ---------------------------------------------------------------------------
 # AID Role is a closed set — the same list aid-epic-to-json.sh enforces. A step

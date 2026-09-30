@@ -150,6 +150,9 @@ aid_plan_review_prompt_render() {
     echo "## Standards"
     cat "${dir}/packet/standards.md"
     echo
+    echo "## plan.md (also on disk: ${dir}/packet/plan.md; cite it as plan.md:<line>)"
+    awk '{ printf "%5d  %s\n", NR, $0 }' "${dir}/packet/plan.md"
+    echo
     if [[ -f "${dir}/packet/critic-response.md" ]]; then
       echo "## critic-response.md (the author's answer to the independent critic; a test the plan declined here with a reason is not a missing test — cite it as critic-response.md:<line>)"
       awk '{ printf "%5d  %s\n", NR, $0 }' "${dir}/packet/critic-response.md"
@@ -157,9 +160,6 @@ aid_plan_review_prompt_render() {
       echo "## critic-response.md"
       cat "${dir}/packet/critic-note.txt" 2>/dev/null || echo "critic: no passed check for this plan"
     fi
-    echo
-    echo "## plan.md (also on disk: ${dir}/packet/plan.md; cite it as plan.md:<line>)"
-    awk '{ printf "%5d  %s\n", NR, $0 }' "${dir}/packet/plan.md"
   } >> "$out"
 }
 

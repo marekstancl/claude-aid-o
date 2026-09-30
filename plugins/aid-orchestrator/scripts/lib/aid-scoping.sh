@@ -436,7 +436,7 @@ _aid_files_verification_only() {
       [[ "$verb" == "Test" ]] || continue
       _aid_split_path_entry "$body" 2>/dev/null || true
     fi
-  done < <(_aid_extract_files_bullets < "$plan")
+  done < <(_aid_extract_files_bullets < "$plan") | { if [[ "$mode" == "--any-verb" ]]; then cat; else sort -u; fi; }
 }
 
 # _aid_test_bullet_tier_finding <bullet> <root> — THE rule for a `Test:` bullet's
