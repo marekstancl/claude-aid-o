@@ -363,3 +363,64 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(jq -r .history_lines "$BATS_TEST_TMPDIR/body")" = 3 ]
   grep -q "not a JSON object, skipped" "$BATS_TEST_TMPDIR/server.log"
 }
+
+# P106 Step 2 — the page as a pipeline
+PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; }
+
+@test "P106 page: no Průběh tab, no hash routing, no overview; no process words in labels or static markup" {
+  f="$(PAGE_HTML)"
+  ! grep -qE '#prubeh|#o=|overview' "$f"
+  kinds="$(sed -n '/^const KIND = {/,/};/p' "$f")"
+  ! grep -qiE 'agent|kapitol|kolo|převzetí|payload' <<<"$kinds"
+  ! sed -n '/^<header/,/^<script/p' "$f" | grep -qiE 'agent|kapitol|kolo|převzetí|payload'
+  # every kind the server accepts has a Czech label
+  for k in $(python3 -c "import re; s=open('$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/server.py').read(); print(' '.join(re.findall(r'\"(\w+)\"', re.search(r'KINDS = \{([^}]*)\}', s).group(1))))"); do
+    grep -qE "(^|[ {,])$k: \"" <<<"$kinds" || { echo "no label for $k"; return 1; }
+  done
+}
+
+@test "P106 page: the approved palette is unchanged and no colour value was added" {
+  f="$(PAGE_HTML)"
+  [ "$(sed -n '/:root {/,/^  }/p' "$f" | sha256sum | cut -d' ' -f1)" = "$(grep -oE '^[0-9a-f]{64}$' "$BATS_TEST_DIRNAME/../fixtures/aid-ui/studio-root-vars.sha256")" ]
+  [ "$(grep -c 'oklch(' "$f")" -le 25 ]   # 25 = the count at 34098ced
+}
+
+@test "P106 page logic: outcomes, authors, handover and page rounds from the fixture history" {
+  command -v node >/dev/null || skip "node not installed"
+  sed -n '/<script id="pipeline-model">/,/<\/script>/p' "$(PAGE_HTML)" | sed '1d;$d' > "$BATS_TEST_TMPDIR/model.js"
+  ! grep -qE 'document|window' "$BATS_TEST_TMPDIR/model.js"
+  run node -e '
+    const { model } = require(process.argv[1]);
+    const H = require("fs").readFileSync(process.argv[2], "utf8").trim().split("\n").map(l => JSON.parse(l));
+    const S = { steps: ["Druh webu", "Zadání a obsah", "Vzory", "Vzhled", "Stavba", "Kontrola"].map((t, i) =>
+      ({ id: "s" + i, title: t, status: "done", description: "popis " + t })), questions: [] };
+    const m = model(S, H), st = t => m.steps.find(s => s.title === t), eq = (a, b, what) => {
+      if (JSON.stringify(a) !== JSON.stringify(b)) { console.log(what, JSON.stringify(a), "!=", JSON.stringify(b)); process.exit(1); } };
+    eq(st("Vzhled").outcome.text, "Zásady", "choose outcome = chosen card");
+    eq(st("Druh webu").outcome.text, "Klasický web se samostatnou stránkou pro každé téma.", "approve with outcome");
+    eq(st("Zadání a obsah").outcome.text, "Schváleno", "approve without outcome, later than the agent event");
+    eq(st("Zadání a obsah").events.map(e => e.by), ["agent", "pm"], "agent event sorted by at");
+    eq(st("Zadání a obsah").who, "both", "who both; a line without by is pm");
+    eq(st("Druh webu").events[0].outcome, "Vráceno k úpravě: Nechci jednostránkový web, ale klasický web s více stránkami.", "return");
+    eq(st("Druh webu").who, "pm", "who pm");
+    eq(st("Stavba").who, "agent", "who agent");
+    eq(st("Vzory").who, null, "who none");
+    eq(st("Vzory").outcome.text, "popis Vzory", "empty step shows its description");
+    eq(st("Vzhled").events.length, 1, "handover not in Vzhled");
+    const k = st("Kontrola").events;
+    eq(k.filter(e => e.type === "handover").length, 1, "one handover row");
+    eq(k.find(e => e.type === "handover").label, "2 části převzaty", "handover label");
+    eq(k.filter(e => e.type === "pages").map(e => e.label), ["Všechny 2 stránky v pořádku", "1 z 2 v pořádku"], "two page rounds");
+    eq(st("Kontrola").outcome.text, "1 z 2 v pořádku", "handover never the outcome");
+    const empty = model(S, []);
+    eq(empty.steps.map(s => [s.outcome.text, s.who]), S.steps.map(s => [s.description, null]), "empty history");
+    eq(empty.finished, true, "finished");
+    const open = model(Object.assign({}, S, { steps: S.steps.map((s, i) => Object.assign({}, s, { status: i < 3 ? "done" : i === 3 ? "current" : "todo" })),
+      questions: [{ id: "q", kind: "direction", target: "t", opened_at: "2020-01-01T00:00:00Z", answered: false }] }), []);
+    eq(open.steps.map(s => s.active), [false, false, false, true, false, false], "open question in the current step");
+    eq(open.steps[5].outcome.text, "Čeká.", "waiting step");
+    const started = model({ steps: S.steps.map((s, i) => Object.assign({}, s, { status: i === 0 ? "current" : "todo" })), questions: [] }, []);
+    eq(started.steps.map(s => s.outcome.text), S.steps.map(() => "Čeká."), "just started: every step waits");
+  ' "$BATS_TEST_TMPDIR/model.js" "$BATS_TEST_DIRNAME/../fixtures/aid-ui/p106-history.jsonl"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}

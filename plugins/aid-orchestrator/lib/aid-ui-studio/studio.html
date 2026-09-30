@@ -9,8 +9,9 @@
      deck, card faces with the preview on top, kicker badge, chips, tags, swatches, the
      "improved by" box, the sticky footer, the lightbox and the deck arrows.
      Modified by AID: Czech labels, AID payload (studio server contract), question types
-     (text, page approval, exception, chapter handover), one page for open questions and the
-     decisions so far (steps across the top, topics inside a step), wordmark removed. -->
+     (text, page approval, exception, handover), wordmark removed; P106: the page is the run
+     as a pipeline of steps (outcome and who decided per step, Detail with the step's
+     decisions, the open question inside its step), derived from /state and /history. -->
 <style>
   :root {
     color-scheme: light;
@@ -39,133 +40,76 @@
     --page-inset: max(clamp(1rem, 5vw, 4rem), calc((100vw - 90rem) / 2));
   }
   * { box-sizing: border-box; margin: 0; }
-  body { background: var(--ks-paper); color: var(--ks-text); font: 15px/1.55 var(--ks-font); min-height: 100dvh; display: flex; flex-direction: column; overflow-x: clip; }
-  .shell { width: 100%; padding-inline: var(--page-inset); }
+  body { background: var(--ks-paper); color: var(--ks-text); font: 15px/1.55 var(--ks-font); padding: 1.8rem clamp(1rem, 5vw, 4rem) 0; min-height: 100dvh; display: flex; flex-direction: column; overflow-x: clip; }
+  header, main, .links { width: 100%; max-width: 90rem; margin: 0 auto; }
   a { color: var(--ks-patina); }
   ::selection { background: oklch(49% 0.11 190 / 0.18); color: var(--ks-ink); }
   :focus-visible { outline: 2px solid var(--ks-patina); outline-offset: 3px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-  /* Header: the project's name and the client page link; nothing else competes with the content. */
-  .mast { background: var(--ks-paper); border-bottom: 1px solid var(--ks-rule); }
-  .top { min-height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-  .brand { font-weight: 700; font-size: 1.05rem; color: var(--ks-ink); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .brand span { font-weight: 400; color: var(--ks-text-muted); }
-  .client { flex: none; font-size: .875rem; font-weight: 600; text-decoration: none; }
-  .client:hover { text-decoration: underline; }
+  /* Header: the project and the link to its brand page. */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 1rem 2rem; flex-wrap: wrap; }
+  .brand { font-size: .95rem; font-weight: 700; letter-spacing: -.01em; color: var(--ks-ink); }
+  .brand-link { padding: 7px 14px; border: 1px solid var(--ks-rule); border-radius: 6px; background: var(--ks-paper-raised); box-shadow: var(--ks-cap-lift); font-size: .8125rem; font-weight: 600; color: var(--ks-ink); text-decoration: none; }
+  .brand-link:hover { border-color: var(--ks-edge); }
   #notice { margin-top: 1rem; padding: .7rem 1rem; border: 1px solid var(--ks-danger); border-radius: 8px; color: var(--ks-danger); background: var(--ks-paper-raised); }
   #notice[hidden] { display: none; }
-  main { flex: 1; display: flex; flex-direction: column; gap: 3rem; padding-top: 2rem; padding-bottom: 4rem; }
-  .section-h { font-size: 1.25rem; font-weight: 600; color: var(--ks-ink); margin-bottom: 1rem; }
 
-  /* The status: one sentence that says where the web stands, and the one thing to do. */
-  .status-block { display: flex; flex-direction: column; gap: .6rem; }
-  .status-line { display: flex; align-items: center; gap: .7rem; font-size: clamp(1.6rem, 3.2vw, 2.4rem); font-weight: 650; letter-spacing: -.02em; line-height: 1.15; color: var(--ks-ink); text-wrap: balance; }
-  .dot { flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--ks-patina); }
-  .dot.wait { background: var(--ks-kinpaku); }
-  .dot.work { background: var(--ks-edge); }
-  .status-sub { color: var(--ks-text-muted); font-size: 1.05rem; max-width: 46rem; }
-  .cta { display: flex; flex-wrap: wrap; gap: .7rem; margin-top: .6rem; }
-  a.primary, button.primary { display: inline-flex; align-items: center; min-height: 46px; padding: 0 22px; border-radius: 8px; border: 0; background: var(--ks-instrument); color: var(--ks-instrument-text); font: 600 1rem var(--ks-font); text-decoration: none; cursor: pointer; }
-  a.primary:hover, button.primary:hover { background: var(--ks-instrument-raised); }
-  a.secondary { display: inline-flex; align-items: center; min-height: 46px; padding: 0 18px; border-radius: 8px; border: 1px solid var(--ks-edge); background: var(--ks-paper-raised); color: var(--ks-ink); font-weight: 600; text-decoration: none; }
-
-  /* The web itself: one big preview, the other pages as thumbnails that switch it. */
-  .web { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(12rem, 1fr); gap: 1.4rem; align-items: start; }
-  .web .big { border: 1px solid var(--ks-rule); border-radius: 10px; overflow: hidden; background: var(--ks-paper-raised); box-shadow: var(--ks-lift); }
-  .web .big img { width: 100%; display: block; aspect-ratio: 16/10; object-fit: cover; object-position: top; cursor: zoom-in; }
-  .web .big p { padding: .6rem .9rem; font-size: .9rem; color: var(--ks-text-muted); }
-  .web .big p b { color: var(--ks-ink); }
-  .thumbs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; list-style: none; padding: 0; }
-  .thumbs button { width: 100%; padding: 0; border: 1px solid var(--ks-rule); border-radius: 6px; overflow: hidden; background: var(--ks-paper-raised); cursor: pointer; text-align: left; font: inherit; }
-  .thumbs button[aria-current] { outline: 2px solid var(--ks-ink); outline-offset: 1px; }
-  .thumbs img { width: 100%; display: block; aspect-ratio: 16/10; object-fit: cover; object-position: top; }
-  .thumbs span { display: block; padding: .3rem .5rem; font-size: .8rem; color: var(--ks-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-  /* What is left for the PM: blocking first, each with how to do it. */
-  .todo { list-style: none; padding: 0; display: flex; flex-direction: column; gap: .6rem; max-width: 52rem; }
-  .todo li { padding: .8rem 1rem; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); border-left: 4px solid var(--ks-kinpaku); border-radius: 0 8px 8px 0; }
-  .todo li.later { border-left-color: var(--ks-edge); }
-  .todo b { display: block; color: var(--ks-ink); font-weight: 600; }
-  .todo span { color: var(--ks-text-muted); font-size: .92rem; }
-  .todo .cta { margin-top: .5rem; }
-  .todo .via-chat.ok { color: var(--ks-patina); }
-  .todo .via-chat { display: block; margin-top: .3rem; font-size: .88rem; font-weight: 600; color: var(--ks-text); }
-  .road { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; padding: 0; margin-top: .2rem; }
-  .road li { display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .7rem; border-radius: 999px; border: 1px solid var(--ks-rule); font-size: .88rem; color: var(--ks-text-muted); }
-  .road li.done { color: var(--ks-patina); border-color: oklch(49% 0.11 190 / .35); }
-  .road li.done::before { content: "✓"; font-weight: 700; }
-  .road li.now { color: var(--ks-ink); border-color: var(--ks-kinpaku); background: oklch(84% 0.19 80.46 / .18); font-weight: 600; }
-  .road li + li::before { }
-  .jump { display: none; flex-wrap: wrap; gap: .5rem; align-items: flex-start; }
-  .jump span { flex-basis: 100%; color: var(--ks-text-muted); }
-  .jump a { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: .25rem; text-decoration: none; color: var(--ks-ink); font-size: .8rem; }
-  .jump a img { width: 100%; aspect-ratio: 3/4; object-fit: cover; object-position: top; border: 1px solid var(--ks-rule); border-radius: 6px; display: block; }
-  .jump a b { font-weight: 600; overflow-wrap: anywhere; }
-  .todo .tag-block { display: inline-block; margin-left: .5rem; font-size: .75rem; font-weight: 600; color: var(--ks-ink); background: oklch(84% 0.19 80.46 / .35); border-radius: 4px; padding: 1px 6px; vertical-align: 1px; }
-
-  /* Decisions as results: a tile per area, the result in words, the chosen picture when there is one. */
-  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr)); gap: 1rem; align-items: start; }
-  a.tile { display: flex; flex-direction: column; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); border-radius: 10px; overflow: hidden; color: inherit; text-decoration: none; box-shadow: var(--ks-lift); }
-  a.tile:hover { border-color: var(--ks-edge); }
-  a.tile img { width: 100%; aspect-ratio: 16/9; object-fit: cover; object-position: top; display: block; background: var(--ks-gray); }
-  a.tile div { padding: .8rem 1rem .9rem; display: flex; flex-direction: column; gap: .25rem; }
-  a.tile small { font-size: .8rem; font-weight: 600; color: var(--ks-patina); }
-  a.tile p { color: var(--ks-ink); font-weight: 500; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  a.tile.pending small { color: var(--ks-text-muted); }
-  a.tile .tile-go { margin-top: .3rem; font-size: .88rem; font-weight: 600; color: var(--ks-patina); }
-  a.tile .tile-sub { font-size: .88rem; color: var(--ks-text-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .more-link { display: inline-block; margin-top: 1rem; font-weight: 600; }
-  .all { list-style: none; padding: 0; max-width: 60rem; }
-  .all li a { display: grid; grid-template-columns: 12rem minmax(0, 1fr); gap: 1rem; padding: .75rem 0; border-bottom: 1px solid var(--ks-rule); color: inherit; text-decoration: none; }
-  .all li a:hover b { text-decoration: underline; }
-  .all li a::after { content: "→"; color: var(--ks-patina); font-weight: 600; justify-self: end; }
-  .all li a { grid-template-columns: 12rem minmax(0, 1fr) 1.5rem; }
-  .all b { color: var(--ks-ink); font-weight: 600; }
-  .all span { color: var(--ks-text); }
-
-  /* A detail: back link, the result big, the chosen proposal big, the rest folded away. */
-  .back { font-weight: 600; text-decoration: none; }
-  .back:hover { text-decoration: underline; }
-  .detail-head small { font-size: .85rem; font-weight: 600; color: var(--ks-patina); }
-  .detail-head h1 { font-size: clamp(1.5rem, 3vw, 2.1rem); font-weight: 650; letter-spacing: -.02em; line-height: 1.2; color: var(--ks-ink); margin-top: .3rem; max-width: 52rem; text-wrap: balance; }
-  .chosen-big { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(16rem, 1fr); gap: 1.4rem; align-items: start; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); border-radius: 10px; overflow: hidden; box-shadow: var(--ks-lift); }
-  .chosen-big img { width: 100%; display: block; cursor: zoom-in; }
-  .chosen-big .body { padding: 1.2rem 1.4rem; }
-  .chosen-big.text-only { grid-template-columns: 1fr; max-width: 52rem; }
-  details.fold { max-width: 60rem; border-top: 1px solid var(--ks-rule); padding-top: .8rem; }
-  details.fold > summary { cursor: pointer; font-weight: 600; color: var(--ks-ink); padding: .3rem 0; }
-  details.fold[open] > summary { margin-bottom: 1rem; }
-  .others { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); gap: 1rem; }
-  .others figure { margin: 0; border: 1px solid var(--ks-rule); border-radius: 8px; overflow: hidden; background: var(--ks-paper-raised); }
-  .others img { width: 100%; display: block; aspect-ratio: 16/10; object-fit: cover; object-position: top; cursor: zoom-in; }
-  .others figcaption { padding: .6rem .8rem; font-size: .88rem; color: var(--ks-text-muted); }
-  .others figcaption b { display: block; color: var(--ks-ink); }
-  .round { padding: .8rem 0; border-bottom: 1px dashed var(--ks-rule); }
-  .round b { color: var(--ks-ink); }
-  .round .ans { color: var(--ks-patina); font-weight: 600; }
-  .round .said { margin-top: .3rem; color: var(--ks-text); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  .round .said.full { display: block; }
-  .round button { margin-top: .2rem; background: none; border: 0; padding: 0; color: var(--ks-patina); font: 600 .88rem var(--ks-font); cursor: pointer; }
-  .round .body-text { margin-top: .4rem; color: var(--ks-text-muted); font-size: .92rem; }
-  .change-note { color: var(--ks-text-muted); }
-  .asking { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .5rem 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--ks-rule); }
-  .asking b { font-size: 1.05rem; color: var(--ks-ink); }
-  .about { font-size: .8125rem; color: var(--ks-text-muted); }
-  .when { font-size: .8125rem; color: var(--ks-text-muted); }
-  .about a { color: var(--ks-text-muted); }
-
+  main { flex: 1; padding: 1.4rem 0 2rem; }
   .question { display: flex; flex-direction: column; gap: 1.5rem; }
   .headline { display: flex; align-items: center; gap: .75rem; }
   .headline svg { flex: none; width: 26px; height: 26px; color: var(--ks-ink); }
   .q-title { font-weight: 600; font-size: 2rem; letter-spacing: -0.025em; line-height: 1.2; color: var(--ks-ink); text-wrap: balance; }
   .lede { color: var(--ks-text-muted); margin-top: -.8rem; max-width: 52rem; }
-  .head { display: flex; flex-direction: column; gap: .4rem; max-width: 52rem; }
-  .tier { font-size: .85rem; font-weight: 600; color: var(--ks-patina); }
+  .head { display: flex; flex-direction: column; gap: .4rem; }
+  .tier { font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .24em; text-transform: uppercase; color: var(--ks-text-muted); }
   pre.body-json { font: 12.5px/1.5 var(--ks-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ks-paper-deep); border: 1px solid var(--ks-rule); border-radius: 6px; padding: .8rem 1rem; max-height: 22rem; overflow: auto; }
   .detail { color: var(--ks-text); font-size: .95rem; white-space: pre-wrap; overflow-wrap: anywhere; }
   .empty { padding: 7rem 1rem; font-size: 1.4rem; color: var(--ks-ink); text-align: center; }
-  .readonly .bar, .readonly .actions, .readonly .field, .readonly button.choose { display: none; }
+  /* The run as a pipeline (P106, proposal B): hero, then one row per step. */
+  .hero { border-top: 1px solid var(--ks-rule); padding: 28px 0 34px; display: flex; justify-content: space-between; gap: 32px; }
+  .hero h1 { font-size: clamp(32px, 5vw, 64px); line-height: .98; letter-spacing: -.055em; max-width: 760px; font-weight: 700; color: var(--ks-ink); text-wrap: balance; }
+  .hero p { flex: none; width: 310px; margin-top: 4px; color: var(--ks-text-muted); line-height: 1.5; }
+  .step { position: relative; display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 22px; padding-bottom: 18px; }
+  .step:not(:last-child)::before { content: ""; position: absolute; left: 27px; top: 38px; bottom: -1px; width: 1px; background: var(--ks-rule); }
+  .mark { position: relative; z-index: 1; width: 56px; height: 56px; border: 1px solid var(--ks-rule); border-radius: 50%; display: grid; place-items: center; background: var(--ks-paper); font-weight: 800; color: var(--ks-patina); }
+  .step.wait .mark { color: var(--ks-text-muted); }
+  .step.active .mark { border: 2px solid var(--ks-kinpaku); color: var(--ks-ink); box-shadow: 0 0 0 5px color-mix(in srgb, var(--ks-kinpaku) 20%, transparent); }
+  .stage { min-width: 0; border: 1px solid var(--ks-rule); border-radius: 9px; background: var(--ks-paper-raised); box-shadow: var(--ks-lift); overflow: clip; }
+  .summary { padding: 20px 22px; display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr) auto; align-items: start; gap: 20px; }
+  .name { font-size: 18px; font-weight: 800; letter-spacing: -.02em; color: var(--ks-ink); }
+  .desc { margin-top: 4px; color: var(--ks-text-muted); font-size: 13px; line-height: 1.4; }
+  .outcome { line-height: 1.45; color: var(--ks-text); overflow-wrap: anywhere; }
+  .step.wait .outcome { color: var(--ks-text-muted); }
+  .note { color: var(--ks-text-muted); }
+  .who { display: flex; width: max-content; margin-top: 8px; align-items: center; gap: 6px; font-size: 12px; font-weight: 800; color: var(--ks-patina); text-transform: uppercase; letter-spacing: .06em; }
+  .who::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ks-patina); }
+  .toggle { border: 1px solid var(--ks-rule); background: var(--ks-paper); border-radius: 5px; padding: 7px 10px; font: inherit; font-size: 13px; color: var(--ks-ink); white-space: nowrap; cursor: pointer; }
+  .toggle:hover { border-color: var(--ks-edge); }
+  .details { display: none; border-top: 1px solid var(--ks-rule); padding: 20px 22px; }
+  .stage.open .details { display: block; }
+  .event { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; gap: 4px 14px; padding: 12px 0; border-bottom: 1px solid var(--ks-rule); font-size: 14px; }
+  .event:last-child { border-bottom: 0; }
+  .actor { font-weight: 800; color: var(--ks-patina); }
+  .decision { color: var(--ks-text-muted); text-align: right; overflow-wrap: anywhere; }
+  .comment { grid-column: 2 / -1; margin: 4px 0 3px; padding: 10px 12px; background: var(--ks-paper); border-left: 3px solid var(--ks-kinpaku); line-height: 1.45; overflow-wrap: anywhere; }
+  .origin { grid-column: 2 / -1; font-size: 12px; color: var(--ks-text-muted); }
+  .past { margin-top: 20px; display: flex; flex-direction: column; gap: 8px; }
+  .past-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .past-card { border: 1px solid var(--ks-rule); border-radius: 7px; overflow: hidden; background: var(--ks-paper); }
+  .past-card.selected { border: 2px solid var(--ks-patina); }
+  .past-card img { display: block; width: 100%; aspect-ratio: 16/10; object-fit: cover; object-position: top; cursor: zoom-in; background: var(--ks-gray); }
+  .past-card p { padding: 10px 12px; font-size: 13px; font-weight: 700; color: var(--ks-ink); }
+  .past-card.selected p::after { content: " · vybráno"; color: var(--ks-patina); }
+  /* The open question sits inside its step: the deck and the bar stay inside the panel. */
+  .active-box { padding: 24px 22px 26px; border-top: 1px solid var(--ks-rule); display: flex; flex-direction: column; gap: 3rem; }
+  .active-box .deck-shell { width: auto; margin-left: 0; }
+  .active-box .grid { padding: 8px 4px; scroll-padding-inline: 0; }
+  .active-box .fade-prev { background: linear-gradient(90deg, var(--ks-paper-raised), transparent); }
+  .active-box .fade-next { background: linear-gradient(270deg, var(--ks-paper-raised), transparent); }
+  .active-box .grid > .card { flex-basis: max(16rem, calc((100% - 3.4rem) / 3)); }
+  /* Not sticky here: below the fold a sticky bar would sit over the question's heading. */
+  .active-box .bar { position: static; width: auto; margin: 0; padding: .7rem 0 0; background: none; border-top: 0; }
 
   /* The deck bleeds to the viewport edges while the first card aligns with the column. */
   .deck-shell { position: relative; width: 100vw; margin-left: calc(50% - 50vw); }
@@ -173,7 +117,7 @@
   .grid::-webkit-scrollbar { display: none; }
   .grid > .card { flex: 0 0 clamp(24rem, 34vw, 34rem); scroll-snap-align: center; }
   @media (min-aspect-ratio: 1/1) and (max-height: 900px) {
-    main { padding-top: 1.4rem; }
+    body { padding-top: 1.1rem; }
     .grid > .card { flex-basis: clamp(20rem, 27vw, 27rem); }
   }
   .nav { position: absolute; z-index: 6; top: 50%; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--ks-paper-raised); border: 1px solid var(--ks-edge); color: var(--ks-ink); cursor: pointer; box-shadow: var(--ks-cap-lift); transform: translateY(-50%); transition: border-color .2s, color .2s, opacity .2s; }
@@ -198,10 +142,8 @@
   .card.flipped .face.back { pointer-events: auto; }
   .card.flipped .face.front { pointer-events: none; }
   .face.lead { border-color: var(--ks-kinpaku); }
-  .card.chosen .face.front { box-shadow: 0 0 0 2px var(--ks-kinpaku), var(--ks-lift); }
   .card:hover .face { border-color: var(--ks-edge); }
   .card:hover .face.lead { border-color: var(--ks-kinpaku); }
-  .kicker.picked { background: var(--ks-patina); color: var(--ks-paper-raised); border-color: var(--ks-patina); }
   .kicker.inline { position: static; align-self: flex-start; margin: 14px 0 -4px 1.1rem; }
   .kicker { position: absolute; z-index: 2; top: 12px; left: 12px; padding: 4px 9px; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); color: var(--ks-ink); font-size: .6875rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; border-radius: 3px; }
   .media { position: relative; width: 100%; aspect-ratio: 16/10; min-height: 0; flex: none; overflow: hidden; background: var(--ks-gray); }
@@ -248,16 +190,14 @@
   button[disabled] { opacity: .4; cursor: default; }
 
   /* The round's verbs stay reachable: a full-bleed bar stuck to the viewport bottom. */
-  .bar { display: flex; flex-direction: column; gap: .7rem; max-width: 52rem; padding: 1.2rem 1.3rem; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); border-radius: 10px; }
-  .bar h3 { font-size: 1rem; font-weight: 600; color: var(--ks-ink); }
-  .bar-row { display: flex; flex-wrap: wrap; gap: .6rem; }
-  .pick-hint { color: var(--ks-text-muted); margin-top: -.6rem; }
-  .steer { flex: 1; min-width: min(100%, 16rem); }
+  .bar { position: sticky; bottom: 0; z-index: 10; width: 100vw; margin: -.3rem calc(50% - 50vw) 0; padding: .7rem var(--page-inset) calc(.7rem + env(safe-area-inset-bottom, 0px)); display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; background: var(--ks-paper); border-top: 1px solid var(--ks-rule); }
+  .steer { flex: 1; min-width: 16rem; }
   input[type=text], textarea { width: 100%; background: var(--ks-paper-raised); color: var(--ks-text); border: 1px solid var(--ks-edge); border-radius: 6px; padding: .7rem .85rem; font: inherit; caret-color: var(--ks-patina); }
   input[type=text]::placeholder, textarea::placeholder { color: var(--ks-text-muted); opacity: 1; }
   input[type=text]:focus, textarea:focus { outline: 2px solid var(--ks-patina); outline-offset: 2px; }
   textarea { min-height: 5rem; resize: vertical; }
   .status { flex-basis: 100%; font-size: .875rem; color: var(--ks-danger); }
+  .bar .hint { flex-basis: 100%; order: 9; font-size: .8125rem; color: var(--ks-text-muted); }
   .status:empty { display: none; }
 
   /* Text question, page approval, exception: one panel in the same card chrome. */
@@ -269,49 +209,56 @@
   .panel .q-title { font-size: 1.75rem; }
   .panel .media { border-bottom: 1px solid var(--ks-rule); }
   .panel.full { max-width: none; }
-  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); gap: 1rem; margin-top: .4rem; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; margin-top: .4rem; }
   .gallery figure { margin: 0; border: 1px solid var(--ks-rule); border-radius: 6px; overflow: hidden; background: var(--ks-paper-raised); }
-  .gallery figcaption { padding: .6rem .8rem .7rem; font-size: .875rem; color: var(--ks-text-muted); display: flex; flex-direction: column; gap: .15rem; }
+  .gallery figcaption { padding: .6rem .8rem .7rem; font-size: .875rem; color: var(--ks-text-muted); }
   .gallery figcaption b { color: var(--ks-ink); }
-  .gallery .ok { color: var(--ks-patina); font-weight: 600; }
-  .gallery .ret { color: var(--ks-danger); font-weight: 600; }
-  .pages .media { aspect-ratio: 4/3; }
   .field { display: flex; flex-direction: column; gap: .45rem; margin-top: .3rem; }
   .actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
   .actions button.choose { margin-top: 0; }
-  ul.chapters { columns: 2 14rem; column-gap: 2rem; padding: 0; list-style: none; }
-  ul.chapters li { padding: .25rem 0; break-inside: avoid; }
 
   #lightbox { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: oklch(97.8% 0 0 / 0.96); cursor: zoom-out; opacity: 0; transition: opacity .25s ease; }
   #lightbox[hidden] { display: none; }
   #lightbox.open { opacity: 1; }
   #lightbox img { max-width: 94vw; max-height: 94vh; border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); }
+  .links { padding: 1rem 0 1.4rem; border-top: 1px solid var(--ks-rule); font-size: .8125rem; display: flex; gap: 1.2rem; flex-wrap: wrap; }
 
-  /* Phone: one column; the web preview above its thumbnails; decision rows stacked. */
-  @media (max-width: 760px) {
-    main { gap: 2.2rem; padding-top: 1.3rem; }
-    .web, .chosen-big { grid-template-columns: 1fr; }
-    .thumbs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .all li a { grid-template-columns: 1fr; gap: .1rem; }
-    .cta a { flex: 1 1 auto; justify-content: center; }
-    .grid .face.front .raises, .grid .face.front .fact { display: none; }
-    .jump { display: flex; }
-    .grid .media { aspect-ratio: 16/9; }
-  }
   /* A tall viewport: the deck becomes a plain vertical list; the bar stays stuck. */
   @media (max-aspect-ratio: 1/1) {
-    main { padding-top: 1.4rem; }
-    .topic { gap: 3rem; }
+    body { padding-top: 1.2rem; }
+    main { gap: 3rem; padding-top: 1.6rem; }
     .q-title, .panel .q-title { font-size: 1.5rem; }
     .deck-shell { width: auto; margin-left: 0; }
     .grid { flex-direction: column; overflow: visible; scroll-snap-type: none; padding: 6px 0; gap: 1.3rem; }
     .grid > .card { flex: 0 0 auto; }
     .nav, .fade { display: none; }
+    .bar { gap: .5rem; }
     .steer { min-width: 0; }
+    .bar .reroll-btn { flex: 1 1 26%; padding: 0 8px; min-height: 38px; }
+    .bar .steer { flex: 1 1 12rem; order: 1; padding: .55rem .75rem; }
+    .bar .ret { order: 2; flex: none; }
+    .bar .status { order: 3; }
+    .step-desc { text-align: left; }
     .long { display: none; }
     .panel.wide { display: flex; }
     .panel.wide .media { border-right: 0; border-bottom: 1px solid var(--ks-rule); }
     .panel .body { padding: 1.1rem 1rem 1.2rem; }
+  }
+  @media (max-width: 700px) {
+    .hero { display: block; padding: 23px 0 27px; }
+    .hero h1 { font-size: 39px; }
+    .hero p { width: auto; margin-top: 16px; }
+    .step { grid-template-columns: 34px minmax(0, 1fr); gap: 10px; padding-bottom: 12px; }
+    .mark { width: 34px; height: 34px; font-size: 12px; }
+    .step:not(:last-child)::before { left: 16px; top: 28px; }
+    .summary { grid-template-columns: minmax(0, 1fr) auto; padding: 16px; gap: 12px; }
+    .summary > div:first-child { grid-column: 1 / -1; }
+    .name { font-size: 17px; }
+    .details, .active-box { padding: 16px; }
+    .event { grid-template-columns: 44px minmax(0, 1fr); gap: 4px 8px; }
+    .event .decision { grid-column: 2; text-align: left; }
+    .comment, .origin { grid-column: 2; }
+    .past-cards { grid-template-columns: 1fr; }
   }
   @media (prefers-reduced-motion: reduce) {
     .card, .card:hover, .card:focus-within { transform: none; transition: none; }
@@ -319,14 +266,143 @@
     .shimmer, .card.skeleton .line { animation: none; }
   }
 </style>
-<header class="mast">
-  <div class="shell top"><a class="brand" id="brand" href="#">Studio</a><a class="client" href="/brand/">Značka a produkt</a></div>
+<header class="top">
+  <p class="brand">/aid-ui · <span id="project"></span></p>
+  <a class="brand-link" href="/brand/">Značka a produkt</a>
 </header>
-<main id="main" class="shell" aria-live="polite">
-  <p id="notice" role="alert" hidden></p>
-  <div id="view"><p class="empty">Načítám…</p></div>
+<p id="notice" role="alert" hidden></p>
+<main id="main" aria-live="polite">
+  <section class="hero"><h1 id="headline">Načítám…</h1><p id="intro"></p></section>
+  <section class="pipeline" id="pipeline" aria-label="Kroky stavby"></section>
 </main>
+<footer class="links">
+  <a href="/report">Soulad se standardy</a>
+  <a href="/licence">Vzor stránky převzat z Impeccable (licence Apache 2.0)</a>
+</footer>
 <div id="lightbox" role="dialog" aria-label="Zvětšený náhled, zavřete klávesou Esc" tabindex="-1" hidden></div>
+<script id="pipeline-model">
+"use strict";
+// The run as a pipeline, derived from /state (S) and /history (H) only; no DOM, so
+// test-aid-ui-studio.bats runs this block under node. Rules: plan P106, Data Model.
+function atOf(e) { const t = Date.parse(((e || {}).answer || {}).at); return isNaN(t) ? 0 : t; }
+// Events by answer.at; equal times keep file order (a reconstructed event sorts where it happened).
+function sortEvents(list) {
+  return list.map((e, i) => [e, i]).sort((a, b) => atOf(a[0]) - atOf(b[0]) || a[1] - b[1]).map(x => x[0]);
+}
+function isHandover(line) {
+  const q = line.question || {};
+  return q.kind === "handover" || /^q-adopt-/.test(String(q.id || ""));
+}
+function isReroll(e) { return /^reroll/.test(String((e.answer || {}).decision || "")); }
+function pageOf(q) { const t = String((q || {}).target || ""), i = t.lastIndexOf("@"); return i > 0 ? t.slice(0, i) : t; }
+function plural(n, one, few, many) { return n === 1 ? one : n >= 2 && n <= 4 ? few : many; }
+function clip(s, n) { s = String(s || "").trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s; }
+function text(v) { return typeof v === "string" && v.trim() ? v.trim() : null; }
+
+// One history line -> the event row: who, what, the decision in words, the step outcome it gives.
+function toEvent(line) {
+  const a = line.answer || {}, q = line.question || {};
+  const e = { by: line.by === "agent" ? "agent" : "pm", answer: a, question: q, qid: q.id, kind: q.kind,
+    choice: a.choice, comment: text(a.comment), reconstructed: false,
+    cards: Array.isArray(line.cards) ? line.cards.filter(c => c && typeof c === "object") : [] };
+  if (e.by === "agent") {
+    const ev = line.event || {};
+    return Object.assign(e, { type: "decided", reconstructed: line.reconstructed === true, title: text(ev.title) || "Rozhodnutí", why: text(ev.why),
+      outcome: text(ev.outcome) || "Rozhodnuto", label: "Rozhodnuto" });
+  }
+  e.type = "answer";
+  e.title = text(q.title);
+  const d = a.decision;
+  if (d === "choose") {
+    const c = e.cards.find(x => x.id === a.choice), t = c && text(c.title);
+    e.outcome = t || "Vybráno"; e.label = t ? "Vybráno: " + t : "Vybráno";
+  } else if (d === "return") {
+    e.outcome = "Vráceno k úpravě" + (e.comment ? ": " + clip(e.comment, 90) : ""); e.label = "Vráceno";
+  } else if (isReroll(e)) {
+    e.outcome = null;
+    e.label = { reroll_safer: "Bezpečnější návrhy", reroll_bolder: "Odvážnější návrhy" }[d] || "Nové návrhy";
+  } else {
+    e.outcome = text(q.outcome) || "Schváleno"; e.label = "Schváleno";
+    // a PM line marked reconstructed got its outcome sentence after the run; only that sentence is marked
+    e.reconstructed = line.reconstructed === true && !!text(q.outcome);
+  }
+  return e;
+}
+
+// Page approvals of one step -> one event per round (a round starts when a page repeats).
+function collapse(events) {
+  const out = [], rounds = [];
+  let cur = null;
+  for (const e of events) {
+    if (e.kind !== "approve_page") { out.push(e); continue; }
+    const p = pageOf(e.question);
+    if (!cur || cur.pages.has(p)) { cur = { pages: new Set(), items: [] }; rounds.push(cur); }
+    cur.pages.add(p); cur.items.push(e);
+  }
+  rounds.forEach((r, i) => {
+    const n = r.items.length, ok = r.items.filter(x => x.answer.decision === "approve").length, last = r.items[n - 1];
+    const words = ok === n
+      ? (n === 1 ? "Stránka je v pořádku" : plural(n, "", "Všechny ", "Všech ") + n + plural(n, "", " stránky", " stránek") + " v pořádku")
+      : ok + (String(n)[0] === "7" ? " ze " : " z ") + n + " v pořádku";
+    const notes = r.items.filter(x => x.comment).map(x => pageOf(x.question) + ": " + x.comment);
+    out.push({ type: "pages", by: r.items.every(x => x.by === "agent") ? "agent" : "pm", answer: last.answer,
+      title: i === 0 ? "Stránky ke schválení" : "Upravené stránky ke schválení", label: words, outcome: words,
+      comment: notes.length ? notes.join(" · ") : null, reconstructed: false, cards: [],
+      foreign: (r.items.find(x => x.foreign != null) || {}).foreign });
+  });
+  return sortEvents(out);
+}
+
+// Outcome-bearing events: not the handover, not a re-roll.
+function bearing(st) { return st.events.filter(e => e.type !== "handover" && e.outcome != null); }
+function stepOutcome(st) {
+  const b = bearing(st), last = b[b.length - 1];
+  if (last) return { text: last.outcome, reconstructed: last.reconstructed };
+  return { text: st.status === "done" ? (text(st.description) || "Hotovo.") : "Čeká.",
+    reconstructed: false };
+}
+function stepWho(st) {
+  const bys = new Set(bearing(st).map(e => e.by));
+  return !bys.size ? null : bys.size > 1 ? "both" : [...bys][0];
+}
+
+function model(S, H) {
+  S = S || {};
+  let steps = (Array.isArray(S.steps) ? S.steps : []).filter(s => s && typeof s === "object").map(s => ({
+    id: s.id, title: String(s.title || s.id || ""), description: text(s.description),
+    status: ["done", "current", "todo"].includes(s.status) ? s.status : "todo", events: [], open: [], active: false }));
+  const open = (Array.isArray(S.questions) ? S.questions : []).filter(q => q && typeof q === "object" && !q.answered);
+  if (!steps.length && open.length) steps = [{ id: "", title: "Rozhodnutí", description: null, status: "current", events: [], open: [], active: false }];
+  const byTitle = new Map(steps.map(s => [s.title, s]));
+  const fallback = [...steps].reverse().find(s => s.status === "done") || steps[steps.length - 1];
+  const handovers = [];
+  for (const line of Array.isArray(H) ? H : []) {
+    if (!line || typeof line !== "object") continue;
+    const e = toEvent(line);
+    if (isHandover(line)) { handovers.push(e); continue; }
+    let st = byTitle.get(line.step);
+    if (!st) { if (!fallback) continue; st = fallback; e.foreign = text(line.step) || ""; }
+    st.events.push(e);
+  }
+  for (const st of steps) st.events = collapse(sortEvents(st.events));
+  if (handovers.length && steps.length) {   // every handover is one row in the last step, never an outcome
+    const hs = sortEvents(handovers), n = hs.length, all = hs.every(e => /^q-adopt-/.test(String(e.qid || "")));
+    const said = [...hs].reverse().find(e => text(e.question.outcome));
+    const last = steps[steps.length - 1];
+    const label = all ? n + " " + plural(n, "část převzata", "části převzaty", "částí převzato") : "Předáno";
+    last.events = sortEvents(last.events.concat([{ type: "handover", by: "pm", answer: hs[n - 1].answer, title: "Předání",
+      label, outcome: label,   // an outcome like any row; bearing() is what keeps it out of the step's outcome
+      comment: said ? text(said.question.outcome) : null, reconstructed: false, cards: [] }]));
+  }
+  for (const st of steps) { st.outcome = stepOutcome(st); st.who = stepWho(st); }
+  const act = steps.find(s => s.status === "current") || steps.find(s => s.status !== "done") || steps[steps.length - 1];
+  if (open.length && act) { act.open = open; act.active = true; }
+  return { steps, open, done: steps.filter(s => s.status === "done").length,
+    finished: steps.length > 0 && !open.length && steps.every(s => s.status === "done"),
+    answered: (Array.isArray(S.questions) ? S.questions : []).filter(q => q && q.answered) };
+}
+if (typeof module !== "undefined") module.exports = { model, stepOutcome, stepWho, collapse, sortEvents, toEvent };
+</script>
 <script>
 "use strict";
 const KIND = { variant: "Co stavíme", options: "Co připravit", vision: "Vize a slogany", identity: "Logo",
@@ -334,7 +410,6 @@ const KIND = { variant: "Co stavíme", options: "Co připravit", vision: "Vize a
   content_plan: "Obsah stránek", defer_content: "Chybějící podklady", facts: "Údaje o firmě", references: "Vzory",
   direction: "Vzhled webu", approve_page: "Kontrola hotové stránky", exception: "Výjimka z kontroly",
   coverage_drift: "Změna ve standardech", design_standard: "Pravidla vzhledu", handover: "Předání webu" };
-
 const SELECTOR = { check: "kontrola", page: "stránka", viewport: "velikost obrazovky", browser: "prohlížeč", role: "role", state: "stav" };
 // Card fields rendered by name; any other string field shows on the card's back as "key: value".
 const KNOWN = new Set(["id", "question", "title", "preview", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags"]);
@@ -347,8 +422,9 @@ const SVG = {
   next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5 16 12l-6.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' };
 const FAN = ["0deg", "1.4deg", "-1.2deg"];
 let last = "", stopped = false, navs = [];
+let S = null, H = [], hCount = null, hOk = true;   // /state, /history, its line count when fetched
+const openSteps = new Set();   // step titles whose Detail the PM opened, kept across re-renders
 const scrolled = {};   // deck scroll position per question, kept across re-renders
-let S = null, H = [], histLen = "";   // /state, /history
 
 function el(tag, attrs, ...kids) {
   const e = document.createElement(tag);
@@ -362,7 +438,6 @@ function el(tag, attrs, ...kids) {
 }
 function icon(name) { const t = document.createElement("template"); t.innerHTML = SVG[name]; return t.content.firstChild; }
 function str(v) { return typeof v === "string" && v.trim() ? v : null; }
-const when = at => at ? new Date(at).toLocaleString("cs-CZ", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
 
 function notice(text) {
   const n = document.getElementById("notice");
@@ -403,7 +478,7 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && !lightbox.
 
 // The preview slot: shimmer until /preview answers 200, retried every 3 s.
 function media(q, c, withDetails, flip) {
-  const src = (q._history ? "/history/preview" : "/preview") + "?question=" + encodeURIComponent(q.id) + "&card=" + encodeURIComponent(c.id);
+  const src = "/preview?question=" + encodeURIComponent(q.id) + "&card=" + encodeURIComponent(c.id);
   const img = el("img", { class: "comp", alt: "Náhled: " + (c.title || c.id), hidden: true });
   const expand = el("button", { type: "button", class: "chip", disabled: true, "aria-label": "Zvětšit náhled",
     on: { click: () => openLightbox(img) } }, icon("expand"));
@@ -412,7 +487,7 @@ function media(q, c, withDetails, flip) {
     el("div", { class: "chips" }, expand,
       withDetails ? el("button", { type: "button", class: "chip", on: { click: flip } }, icon("flip"), el("span", {}, "Detaily")) : null));
   img.addEventListener("load", () => { img.hidden = false; expand.disabled = false; box.classList.remove("comp-pending"); });
-  img.addEventListener("error", () => { if (!stopped && !q._history) setTimeout(() => { img.src = src + "&t=" + Date.now(); }, 3000); });
+  img.addEventListener("error", () => { if (!stopped) setTimeout(() => { img.src = src + "&t=" + Date.now(); }, 3000); });
   img.addEventListener("click", () => openLightbox(img));
   img.src = src;
   return box;
@@ -445,7 +520,7 @@ function identity(c) {
 
 function card(q, c, i, answer) {
   const title = c.title || c.id;
-  const lead = i === 0 && !q._history ? " lead" : "";
+  const lead = i === 0 ? " lead" : "";
   const art = el("article", { class: "card", style: "--fan:" + FAN[i % 3] });
   const flip = () => {
     const on = art.classList.toggle("flipped");
@@ -454,11 +529,8 @@ function card(q, c, i, answer) {
   };
   const choose = () => el("button", { class: "choose", type: "button", "aria-label": "Vybrat „" + title + "“",
     on: { click: () => answer("choose", c.id) } }, "Vybrat tento");
-  const chosen = q._chosen === c.id;
-  if (chosen) art.classList.add("chosen");
-  const front = el("div", { class: "face front" + (chosen ? " lead" : lead) },
-    chosen ? el("span", { class: "kicker picked" + (str(c.preview) ? "" : " inline") }, "Vybráno")
-      : lead ? el("span", { class: "kicker" + (str(c.preview) ? "" : " inline") }, "Doporučuji") : null,
+  const front = el("div", { class: "face front" + lead },
+    i === 0 ? el("span", { class: "kicker" + (str(c.preview) ? "" : " inline") }, "Doporučuji") : null,
     str(c.preview) ? media(q, c, true, flip) : null,
     el("div", { class: "body" },
       str(c.eyebrow) ? el("p", { class: "tier" }, str(c.eyebrow)) : null,
@@ -533,11 +605,10 @@ function selectorChips(target) {
     .map(([k, v]) => el("span", { class: "tag" }, (SELECTOR[k] || k) + " ", el("b", {}, k === "check" ? (CHECK_CS[v] || String(v)) : String(v)))));
 }
 
-// One question as it is (or was) asked. `q._history` = a past decision: same layout, read-only.
 function question(q, cards) {
   const fid = "note-" + q.id;
   const status = el("p", { class: "status", role: "status" });
-  const sec = el("section", { class: "question" + (q._history ? " readonly" : ""), "aria-labelledby": "h-" + q.id });
+  const sec = el("section", { class: "question", "aria-labelledby": "h-" + q.id });
   const kind = str(q.eyebrow) || KIND[q.kind] || q.kind;
   const answer = async (decision, choice, prefix) => {
     const f = document.getElementById(fid);
@@ -551,20 +622,19 @@ function question(q, cards) {
     sec.querySelectorAll("button:not(.chip):not(.nav)").forEach(b => b.disabled = true);
     try {
       const r = await call("POST", "/answer", { question: q.id, kind: q.kind, target: q.target, decision, choice, comment });
-      if (r.status === 200) { last = ""; histLen = ""; tick(); return; }
+      if (r.status === 200) { last = ""; tick(); return; }
       status.textContent = r.status === 409 ? "Otázka se mezitím změnila nebo už má odpověď. Obnovte stránku."
         : "Odpověď se nepodařilo uložit. Zkuste to prosím znovu.";
     } catch (e) { if (e.message !== "token") status.textContent = "Server neodpovídá."; }
     sec.querySelectorAll("button:not(.chip):not(.nav)").forEach(b => b.disabled = false);
   };
   const title = q.title || kind || q.id;
-  const waits = null;
   // Approvals that show several previews (page wireframes, content per page) get a gallery, not a deck.
   const gallery = ["structure", "task_map", "content_plan"].includes(q.kind);
   const deckKind = cards.length && q.kind !== "approve_page" && !gallery;
 
   if (deckKind || (!cards.length && q.rerolled_from)) {
-    sec.append(el("div", { class: "head" }, waits, el("p", { class: "tier" }, kind),
+    sec.append(el("div", { class: "head" }, el("p", { class: "tier" }, kind),
       el("div", { class: "headline" }, icon("die"), el("h2", { class: "q-title", id: "h-" + q.id }, title))));
     if (str(q.prompt)) sec.append(el("p", { class: "lede" }, q.prompt));
     const lines = bodyLines(q.body); if (lines) sec.append(el("div", { class: "head" }, lines));
@@ -572,26 +642,20 @@ function question(q, cards) {
       sec.append(el("p", { class: "tier" }, "Připravují se nové návrhy…"), deck(q, [0, 1, 2].map(skeleton)));
       return sec;
     }
-    if (cards.length > 1) sec.append(el("nav", { class: "jump", "aria-label": "Návrhy" }, el("span", {}, plural(cards.length, "návrh", "návrhy", "návrhů") + ":"),
-      cards.map((c, i) => el("a", { href: "#", on: { click: e => { e.preventDefault(); sec.querySelectorAll(".grid > .card")[i].scrollIntoView({ behavior: "smooth", block: "start", inline: "center" }); } } },
-        str(c.preview) && !q._history ? el("img", { src: previewSrc(q, c), alt: "", loading: "lazy" }) : null, el("b", {}, c.title || c.id)))));
     sec.append(deck(q, cards.map((c, i) => card(q, c, i, answer))));
-    sec.append(el("p", { class: "pick-hint" }, "Vyberte jeden návrh tlačítkem „Vybrat tento“ pod ním; podle něj budu pokračovat. Později ho můžete změnit (napište agentovi). Kliknutím na obrázek ho zvětšíte."));
     sec.append(el("div", { class: "bar" },
-      el("h3", {}, "Nelíbí se vám žádný?"),
-      el("div", { class: "bar-row" },
-        el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll_safer") } }, "Klidnější návrhy"),
-        el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll") } }, "Jiné návrhy ve stejném duchu"),
-        el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll_bolder") } }, "Výraznější návrhy")),
-      el("div", { class: "bar-row" },
-        el("input", { type: "text", id: fid, class: "steer", placeholder: "Nebo napište, co chcete jinak",
-          "aria-label": "Napište, co chcete jinak" }),
-        el("button", { type: "button", class: "reroll-btn ret", on: { click: () => answer("return") } }, "Poslat")),
+      el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_safer") } }, "← Bezpečněji"),
+      el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll") } }, icon("die"), el("span", {}, "Znovu")),
+      el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_bolder") } }, "Odvážněji →"),
+      el("input", { type: "text", id: fid, class: "steer", placeholder: "Napište, co změnit",
+        "aria-label": "Napište, co změnit" }),
+      el("button", { type: "button", class: "reroll-btn ret", on: { click: () => answer("return") } }, "Chci to jinak"),
+      el("p", { class: "hint" }, "Bezpečněji = blíž tomu, co je v oboru běžné. Odvážněji = výraznější a méně obvyklé. Znovu = nové návrhy ve stejném duchu."),
       status));
     return sec;
   }
 
-  // One panel: text question, page approval, exception, chapter handover.
+  // One panel: text question, page approval or exception.
   const page = q.kind === "approve_page", exc = q.kind === "exception";
   const shot = page && cards[0] ? media(q, cards[0], false) : null;
   let meta = null;
@@ -603,14 +667,14 @@ function question(q, cards) {
     meta = el("div", { class: "identity" }, el("span", { class: "tag" }, "adresa ", el("b", {}, addr)));
   }
   const body = el("div", { class: "body" },
-    waits, el("p", { class: "tier" }, kind),
+    el("p", { class: "tier" }, kind),
     el("h2", { class: "q-title", id: "h-" + q.id }, title),
     str(q.prompt) ? el("p", { class: "detail" }, q.prompt) : null,
     meta, exc ? selectorChips(q.target) : null,
-    Array.isArray(q._chapters) ? el("ul", { class: "chapters" }, q._chapters.map(c => el("li", {}, "✓ " + c))) : bodyLines(q.body),
+    bodyLines(q.body),
     gallery && cards.length ? el("div", { class: "gallery" }, cards.map(c => el("figure", {},
       str(c.preview) ? media(q, c, false) : null,
-      el("figcaption", {}, el("b", {}, c.title || c.id), str(c.thesis) ? el("span", {}, c.thesis) : null)))) : null);
+      el("figcaption", {}, el("b", {}, c.title || c.id), str(c.thesis) ? " " + c.thesis : "")))) : null);
   sec.append(el("div", { class: "panel face" + (page ? " wide" : "") + (gallery && cards.length ? " full" : "") }, shot, body));
   body.append(
     el("div", { class: "field" }, el("label", { class: "fact-label", for: fid }, exc ? "Důvod" : "Napište, co změnit"),
@@ -624,261 +688,110 @@ function question(q, cards) {
   return sec;
 }
 
-// What the PM decided, in words (an answer from /state or /history).
-function verdict(q) {
-  const a = q.answer || {}, c = str(a.comment), exc = q.kind === "exception";
-  const w = { approve: exc ? "Výjimka udělena" : q.kind === "approve_page" ? "Stránka je v pořádku" : q.kind === "handover" ? "Web předán" : "Schváleno",
-    return: exc ? "Výjimka neudělena" : "Chcete to jinak", choose: "Vybráno: " + (a.choice_title || a.choice || ""),
-    reroll: "Chcete nové návrhy ve stejném duchu", reroll_safer: "Chcete bezpečnější návrhy",
-    reroll_bolder: "Chcete odvážnější návrhy" }[a.decision] || "Odpověď uložena";
-  return a.decision === "choose" || !c ? w : w + ": " + c;
+// The page: hero from the data, then one row per step (pipeline-model above derives everything).
+const WHO = { pm: "Rozhodl PM", agent: "Rozhodla AI", both: "PM i AI" };
+const NUM = ["žádný", "jeden", "dva", "tři", "čtyři", "pět", "šest", "sedm", "osm", "devět", "deset"];
+function num(n) { return NUM[n] || String(n); }
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function hero(m) {
+  const h = document.getElementById("headline"), p = document.getElementById("intro");
+  const act = m.steps.find(st => st.active);
+  if (m.finished) {
+    h.replaceChildren("Web je hotový.", el("br"), "Rozhodnutí zůstávají.");
+    p.textContent = cap(num(m.steps.length)) + " " + plural(m.steps.length, "krok", "kroky", "kroků")
+      + " od zadání po kontrolu. U každého vidíte výsledek i to, kdo jej potvrdil.";
+  } else if (act) {
+    h.replaceChildren("Teď ladíme", el("br"), "krok " + act.title + ".");
+    const d = m.done;
+    p.textContent = (d === 0 ? "Zatím není hotový žádný krok." : cap(num(d)) + " "
+      + plural(d, "krok je hotový.", "kroky jsou hotové.", "kroků je hotových.")) + " Rozhodněte přímo tady; další kroky navážou.";
+  } else if (m.answered.length) {   // every question answered; the agent reads them on the PM's next chat message
+    h.replaceChildren("Díky, mám všechno,", el("br"), "co potřebuji.");
+    const next = [...m.answered].reverse().find(q => str(q.next) && (q.answer || {}).decision !== "return");
+    p.textContent = "Pokračuji sám, do chatu nemusíte nic psát." + (next ? " Co bude dál: " + next.next : "");
+  } else {
+    const now = S.now && typeof S.now === "object" ? S.now : {};
+    h.textContent = str(now.title) || "Pracuji na webu.";
+    p.textContent = str(now.text) || "Další otázka se tu objeví sama, stránku nemusíte obnovovat.";
+  }
 }
 
-// ---- The model: areas (what the PM gets) with their rounds (/history) and open questions (/state) ----
-// Area names say what the PM gets, not what the run did; the order is the run's order.
-const AREA = { variant: "Typ webu", options: "Co připravím", facts: "O vaší firmě", vision: "Slogan a vize", identity: "Logo",
-  seo_brief: "Stránky a vyhledávání", structure: "Rozložení stránek", task_map: "Co lidé v aplikaci dělají", content_plan: "Texty",
-  defer_content: "Podklady od vás", references: "Vzor", direction: "Vzhled", approve_page: "Stránky webu",
-  design_standard: "Technická pravidla", exception: "Výjimky z kontroly", coverage_drift: "Změny ve standardech", handover: "Předání" };
-const MAIN = ["Typ webu", "Slogan a vize", "Logo", "Vzhled", "Stránky a vyhledávání", "Texty"];   // the main choices, at most six
-const isHandover = q => q.kind === "handover" || /^Převezmete (kapitolu|souhrn)/.test(q.title || "");
-function areaOf(q) {
-  if (isHandover(q)) return AREA.handover;
-  if (q.kind === "variant" && /připrav/i.test(q.eyebrow || "")) return AREA.options;
-  return AREA[q.kind] || str(q.eyebrow) || q.kind;
-}
-function pastOf(h) {   // a history entry: the question, its cards and the answer
-  const cards = (h.cards || []).map(c => Object.assign({}, c, { question: h.question.id })), a = h.answer || {};
-  const q = Object.assign({}, h.question, { _history: true, _chosen: a.decision === "choose" ? a.choice : null,
-    answer: Object.assign({}, a, { choice_title: (cards.find(c => c.id === a.choice) || {}).title }) });
-  return { q, cards, at: a.at };
-}
-// The result of a round in words. A choice is always the chosen card's own title (from the stored
-// answer, so no text can contradict what was picked); an approval is the agent's `outcome`; never
-// guessed from the question.
-function outcomeOf(p) {
-  const a = p.q.answer || {};
-  if (a.decision === "return") return "Chtěl(a) jste změnu" + (str(a.comment) ? ": " + a.comment.trim() : ".");
-  if (a.decision === "choose") return a.choice_title || a.choice;
-  if (str(p.q.outcome)) return p.q.outcome;
-  return "Výsledek není shrnutý.";
-}
-function resultOf(a, m) {
-  if (a.open.length) return "Čeká na vaše rozhodnutí.";
-  if (a.name === AREA.approve_page) {
-    const latest = new Map(); for (const p of a.past) latest.set(p.q.title, p);
-    const all = [...latest.values()], ok = all.filter(p => (p.q.answer || {}).decision === "approve").length;
-    return ok === all.length ? "Všech " + plural(all.length, "stránka", "stránky", "stránek") + " v pořádku." : ok + " z " + all.length + " stránek v pořádku, u ostatních chcete změny.";
-  }
-  return a.last ? outcomeOf(a.last) : "Rozpracováno.";
-}
-function thesisOf(p) { const c = chosenCard(p); return c && str(c.thesis) && c.thesis !== c.title ? c.thesis : null; }
-function model() {
-  const areas = [];
-  const area = name => { let a = areas.find(x => x.name === name); if (!a) areas.push(a = { name, past: [], open: [] }); return a; };
-  for (const h of H) if (h && h.question) area(areaOf(h.question)).past.push(pastOf(h));
-  const open = (S.questions || []).filter(q => !q.answered);
-  for (const q of open) area(areaOf(q)).open.push(q);
-  for (const a of areas) {   // the valid result: the latest round that was not a re-roll
-    a.last = [...a.past].reverse().find(p => !/^reroll/.test((p.q.answer || {}).decision || ""));
-    a.slug = a.name.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  }
-  const steps = S.steps || [], ov = S.overview && typeof S.overview === "object" ? S.overview : {};
-  // a todo whose studio question is answered is done for the PM (the agent removes it when it has used the answer)
-  const answered = new Set((S.questions || []).filter(q => q.answered).map(q => q.id));
-  const todo = (Array.isArray(ov.todo) ? [...ov.todo] : []).map(t => Object.assign({}, t, { done: str(t.question) && answered.has(t.question) }))
-    .sort((x, y) => (y.blocking === true && !y.done) - (x.blocking === true && !x.done));
-  return { areas, open, steps, todo, site: str(ov.site_url), done: steps.length > 0 && steps.every(s => s.status === "done") };
-}
-// The pages of the web: the latest round of page approvals (screenshot per page).
-function pagesOf(m) {
-  const a = m.areas.find(x => x.name === AREA.approve_page);
-  if (!a) return [];
-  const seen = new Map(); for (const p of a.past) seen.set(p.q.title, p);
-  return [...seen.values()].filter(p => p.cards[0] && str(p.cards[0].preview))
-    .map(p => ({ name: (p.q.title || "").replace(/^Je stránka (.*) v pořádku\?$/, "$1"), q: p.q, card: p.cards[0] }));
-}
-const previewSrc = (q, c) => (q._history ? "/history/preview" : "/preview") + "?question=" + encodeURIComponent(q.id) + "&card=" + encodeURIComponent(c.id);
-function zoomImg(src, alt, cls) {
-  const img = el("img", { src, alt, class: cls || null, loading: "lazy" });
-  img.addEventListener("click", () => openLightbox(img));
-  return img;
-}
-function chosenCard(p) { return p && p.q._chosen ? p.cards.find(c => c.id === p.q._chosen) : null; }
-const plural = (n, one, few, many) => n + " " + (n === 1 ? one : n > 1 && n < 5 ? few : many);
-
-// ---- Views ----
-function statusBlock(m) {
-  const block = m.todo.filter(t => t.blocking === true && !t.done).length;
-  const now = S.now && typeof S.now === "object" ? S.now : null;
-  // questions a todo points at are shown with that todo (Odpovědět), not a second time here
-  const linked = new Set(m.todo.map(t => t.question).filter(str)), ask = m.open.filter(q => !linked.has(q.id));
-  let dot = "", line, sub = "", road = null;
-  if (ask.length) { dot = "wait"; line = ask.length === 1 ? "Potřebuji od vás jedno rozhodnutí." : "Potřebuji od vás " + ask.length + " rozhodnutí."; }
-  else if (m.done && m.site) { line = "Náhled webu je hotový."; const pending = m.todo.some(t => t.done && t.blocking === true);   // answered, not yet worked in by the agent
-    sub = block ? "Web zatím není zveřejněný. Až odpovíte na " + plural(block, "věc", "věci", "věcí") + " níže, hned web upravím (udělám to já) a tady vám napíšu, že může jít ven."
-      : pending ? "Odpovědi mám. Zapracuji je do webu a řeknu vám tady, že může jít ven." : "Všechno od vás mám; web je připravený ke zveřejnění.";
-    if (block) dot = "wait"; else if (pending) dot = "work";
-    road = [["Náhled hotový", "done"], [block ? "Čekám na " + plural(block, "vaši odpověď", "vaše odpovědi", "vašich odpovědí") : "Odpovědi mám", block ? "now" : "done"],
-      [pending && !block ? "Zapracovávám odpovědi" : "Připravený ke zveřejnění", block ? "" : "now"]]; }
-  else if (m.done) { line = "Hotovo."; }
-  // every question of the round answered: the agent's `now` predates the answers, so do not repeat it
-  else if ((S.questions || []).some(q => q.answered)) {
-    const q = [...(S.questions || [])].reverse().find(x => x.answered), a = q.answer || {};
-    dot = "work";
-    line = a.decision === "choose" ? "Vybral(a) jste: " + (a.choice_title || a.choice) + "." : a.decision === "return" ? "Díky, upravím to podle vás." : "Díky, odpověď mám.";
-    sub = (a.decision === "return" ? "Až to bude hotové, ukážu vám to tady znovu." : str(q.next) ? "Teď: " + q.next : "Pokračuji.")
-      + " Změnu můžete kdykoli napsat agentovi do chatu.";
-  }
-  else { dot = "work"; line = now && str(now.title) ? now.title : "Pracuji na webu."; sub = now && str(now.text) || "Až od vás budu něco potřebovat, objeví se to tady."; }
-  return el("section", { class: "status-block" },
-    el("h1", { class: "status-line" }, el("span", { class: "dot " + dot, "aria-hidden": "true" }), line),
-    road ? el("ol", { class: "road" }, road.map(([t, c]) => el("li", { class: c }, t))) : null,
-    sub ? el("p", { class: "status-sub" }, sub) : null,
-    ask.length ? el("ul", { class: "todo" }, ask.map(q => el("li", {}, el("b", {}, q.title || areaOf(q)),
-      el("span", {}, areaOf(q)), el("div", { class: "cta" }, el("a", { class: "primary", href: "#q=" + encodeURIComponent(q.id) }, "Rozhodnout"))))) : null,
-    m.site ? el("div", { class: "cta" }, el("a", { class: ask.length ? "secondary" : "primary", href: m.site, target: "_blank", rel: "noopener" }, m.done && m.todo.some(t => t.blocking) ? "Otevřít náhled webu (zatím neveřejný) ↗" : "Otevřít náhled webu ↗")) : null);
-}
-function webBlock(m) {
-  const pages = pagesOf(m);
-  if (!pages.length) return null;
-  let cur = 0;
-  const big = el("img", { alt: "" }), cap = el("p", {});
-  big.addEventListener("click", () => openLightbox(big));
-  const show = i => { cur = i; big.src = previewSrc(pages[i].q, pages[i].card); big.alt = "Stránka " + pages[i].name;
-    cap.replaceChildren(el("b", {}, pages[i].name), " – kliknutím zvětšíte");
-    thumbs.querySelectorAll("button").forEach((b, j) => b.toggleAttribute("aria-current", j === i)); };
-  const thumbs = el("ul", { class: "thumbs" }, pages.map((pg, i) => el("li", {}, el("button", { type: "button", on: { click: () => show(i) } },
-    el("img", { src: previewSrc(pg.q, pg.card), alt: "", loading: "lazy" }), el("span", {}, pg.name)))));
-  show(0);
-  return el("section", {}, el("h2", { class: "section-h" }, "Váš web (" + plural(pages.length, "stránka", "stránky", "stránek") + ")"),
-    el("div", { class: "web" }, el("div", { class: "big" }, big, cap), thumbs));
-}
-function todoBlock(m) {
-  if (!m.todo.length) return null;
-  const openIds = new Set(m.open.map(q => q.id));
-  const list = ts => el("ul", { class: "todo" }, ts.map(t => el("li", { class: t.blocking ? "" : "later" },
-    el("b", {}, t.what), str(t.how) ? el("span", {}, t.how) : null,
-    t.done ? el("span", { class: "via-chat ok" }, "✓ Odpověď mám, zapracuji ji.")
-      : str(t.question) && openIds.has(t.question) ? el("div", { class: "cta" }, el("a", { class: "primary", href: "#q=" + encodeURIComponent(t.question) }, "Odpovědět"))
-      : el("span", { class: "via-chat" }, "Pošlete to agentovi do chatu."))));
-  const now = m.todo.filter(t => t.blocking === true && !t.done), later = m.todo.filter(t => t.blocking !== true && !t.done), done = m.todo.filter(t => t.done);
-  return el("section", {},
-    now.length ? [el("h2", { class: "section-h" }, "Před zveřejněním od vás potřebuji"), list(now)] : null,
-    done.length ? [el("h2", { class: "section-h", style: now.length ? "margin-top:1.6rem" : null }, "Hotovo – odpověď mám"), list(done)] : null,
-    later.length ? [el("h2", { class: "section-h", style: now.length || done.length ? "margin-top:1.6rem" : null }, "Může počkat"), list(later)] : null,
-    null);
-}
-function tile(a) {
-  const c = chosenCard(a.last);
-  const img = c && str(c.preview) ? el("img", { src: previewSrc(a.last.q, c), alt: "", loading: "lazy" }) : null;
-  return el("a", { class: "tile" + (a.last ? "" : " pending"), href: "#o=" + a.slug }, img,
-    el("div", {}, el("small", {}, a.name), el("p", {}, resultOf(a)),
-      a.last && !a.open.length && thesisOf(a.last) ? el("span", { class: "tile-sub" }, thesisOf(a.last)) : null,
-      el("span", { class: "tile-go" }, a.open.length ? "Rozhodnout →" : "Zobrazit →")));
-}
-function overview(m) {
-  const main = MAIN.map(n => m.areas.find(a => a.name === n)).filter(Boolean);
-  return [statusBlock(m), todoBlock(m), webBlock(m),
-    main.length ? el("section", {}, el("h2", { class: "section-h" }, "Hlavní volby"), el("div", { class: "tiles" }, main.map(tile)),
-      el("p", { class: "change-note", style: "margin-top:.8rem" }, "Klikněte na volbu pro podrobnosti a ostatní návrhy."),
-      m.areas.length > main.length ? el("a", { class: "more-link", href: "#vse" }, "Všechna rozhodnutí (" + m.areas.length + ") →") : null) : null,
-    el("p", { class: "about" }, el("a", { href: "/report" }, "Soulad se standardy"), " · ", el("a", { href: "/licence" }, "Vzor stránky: Impeccable (Apache 2.0)"))];
-}
-function allView(m) {
-  return [el("a", { class: "back", href: "#" }, "← Přehled práce"),
-    el("section", {}, el("h1", { class: "section-h" }, "Všechna rozhodnutí"),
-      el("ul", { class: "all" }, m.areas.map(a => el("li", {}, el("a", { href: "#o=" + a.slug }, el("b", {}, a.name),
-        el("span", {}, resultOf(a)))))))];
-}
-function round(p) {
-  const a = p.q.answer || {}, said = str(a.comment);
-  const s = said ? el("p", { class: "said" }, "„" + said.trim() + "“") : null;
-  const more = s && said.length > 220 ? el("button", { type: "button", on: { click: () => { s.classList.toggle("full"); more.textContent = s.classList.contains("full") ? "Zobrazit méně" : "Zobrazit celé"; } } }, "Zobrazit celé") : null;
-  const body = Array.isArray(p.q.body) ? p.q.body.filter(str) : str(p.q.body) ? [p.q.body] : [];
-  return el("div", { class: "round" }, el("b", {}, p.q.title || areaOf(p.q)), " ", el("span", { class: "when" }, "· " + when(p.at)),
-    el("div", { class: "ans" }, verdict(Object.assign({}, p.q, { answer: Object.assign({}, a, { comment: null }) }))), s, more,
-    body.length ? el("details", {}, el("summary", {}, "Co jsem vám tehdy ukázal"), el("div", { class: "body-text" }, body.map(l => el("p", {}, l)))) : null);
-}
-function detailView(m, slug) {
-  const a = m.areas.find(x => x.slug === slug);
-  if (!a) return allView(m);
-  const out = [el("a", { class: "back", href: "#" }, "← Přehled práce")];
-  if (a.open.length) out.push(...a.open.map(q => question(q, (S.cards || []).filter(c => c && c.question === q.id))));
-  if (a.name === AREA.approve_page && a.past.length) {   // all pages of the latest round, not one approval
-    out.push(el("header", { class: "detail-head" }, el("small", {}, a.name), el("h1", {}, resultOf(a))), webBlock(m));
-    out.push(el("p", { class: "change-note" }, "Chcete na některé stránce něco změnit? Napište to agentovi v chatu."));
-    out.push(el("details", { class: "fold" }, el("summary", {}, "Jak jsme k tomu došli"),
-      [...a.past].reverse().map(round)));
-  } else if (a.last) {
-    const p = a.last, c = chosenCard(p);
-    out.push(el("header", { class: "detail-head" }, el("small", {}, a.name), el("h1", {}, outcomeOf(p))));
-    if (c) out.push(el("div", { class: "chosen-big" + (str(c.preview) ? "" : " text-only") },
-      str(c.preview) ? zoomImg(previewSrc(p.q, c), "Náhled: " + (c.title || c.id)) : null,
-      el("div", { class: "body" }, el("h3", {}, c.title || c.id), str(c.thesis) && c.thesis !== c.title ? el("p", { class: "thesis" }, c.thesis) : null,
-        identity(c), uniqueness(c), fact("Riziko", c.risk), urlFact(c))));
-    const rest = c ? p.cards.filter(x => x.id !== c.id) : p.cards;
-    if (rest.length) out.push(el("details", { class: "fold", open: !c }, el("summary", {}, c ? "Ostatní návrhy (" + rest.length + ")" : "Náhledy (" + rest.length + ")"),
-      el("div", { class: "others" }, rest.map(x => el("figure", {}, str(x.preview) ? zoomImg(previewSrc(p.q, x), x.title || x.id) : null,
-        el("figcaption", {}, el("b", {}, x.title || x.id), str(x.thesis) && x.thesis !== x.title ? x.thesis : ""))))));
-    out.push(el("p", { class: "change-note" }, "Chcete to změnit? Napište agentovi do chatu, co jinak – připraví to a zeptá se vás tady znovu."));
-    out.push(el("details", { class: "fold" }, el("summary", {}, "Jak jsme k tomu došli"),
-      [...a.past].reverse().map(round)));
-  }
-  return out;
-}
-function askingView(m, qid) {   // something waits for the PM: the question takes the page
-  const q = m.open.find(x => x.id === qid) || m.open[0], rest = m.open.filter(x => x !== q && q.kind !== "approve_page");
-  const shown = q.kind === "approve_page" ? m.open.filter(x => x.kind === "approve_page") : [q];
-  return [el("div", { class: "asking" }, el("b", {}, m.open.length > 1 ? "Potřebuji od vás " + m.open.length + " rozhodnutí." : "Potřebuji od vás rozhodnutí."),
-      el("a", { href: "#prehled" }, "Přehled práce →")),
-    ...shown.map(x => question(x.kind === "handover" ? handoverOf(x) : x, (S.cards || []).filter(c => c && c.question === x.id))),
-    rest.length ? el("section", {}, el("h2", { class: "section-h" }, "Potom ještě"), el("ul", { class: "todo" }, rest.filter(x => !shown.includes(x)).map(x =>
-      el("li", {}, el("b", {}, x.title || areaOf(x)), el("div", { class: "cta" }, el("a", { class: "secondary", href: "#q=" + encodeURIComponent(x.id) }, "Otevřít")))))) : null];
-}
-function handoverOf(q) {   // the one handover question: its chapter list from the body lines
-  const lines = Array.isArray(q.body) ? q.body.filter(str) : str(q.body) ? q.body.split("\n").filter(str) : [];
-  return Object.assign({}, q, { _chapters: lines.length ? lines : null });
+function eventRow(e) {
+  return el("div", { class: "event" },
+    el("span", { class: "actor" }, e.by === "agent" ? "AI" : "PM"),
+    el("span", {}, e.title || KIND[e.kind] || "Otázka", e.reconstructed ? el("span", { class: "note" }, " · doplněno zpětně") : null),
+    el("span", { class: "decision" }, e.label),
+    e.comment ? el("p", { class: "comment" }, e.comment) : null,
+    e.why ? el("p", { class: "comment" }, "Proč AI: " + e.why) : null,
+    e.foreign != null ? el("p", { class: "origin" }, e.foreign ? "Zapsáno u kroku " + e.foreign : "Zapsáno mimo kroky") : null);
 }
 
-function paint() {
+// The cards the PM chose from, as they were shown (history copies of the previews).
+function pastCards(e) {
+  return el("div", { class: "past" }, el("p", { class: "tier" }, e.title || KIND[e.kind] || "Výběr"),
+    el("div", { class: "past-cards" }, e.cards.map(c => {
+      const img = str(c.preview) ? el("img", { alt: "Náhled: " + (c.title || c.id), loading: "lazy",
+        src: "/history/preview?question=" + encodeURIComponent(e.qid) + "&card=" + encodeURIComponent(c.id) }) : null;
+      if (img) img.addEventListener("click", () => openLightbox(img));
+      return el("div", { class: "past-card" + (c.id === e.choice ? " selected" : "") }, img, el("p", {}, c.title || c.id));
+    })));
+}
+
+function stepEl(st, i) {
+  const cls = st.active || (st.status === "current" && !st.open.length) ? "active" : st.status === "done" ? "done" : "wait";
+  const events = hOk ? st.events : [];
+  const stage = el("div", { class: "stage" + (openSteps.has(st.title) ? " open" : "") });
+  const detail = events.length ? el("button", { type: "button", class: "toggle", "aria-expanded": String(openSteps.has(st.title)),
+    on: { click: () => {
+      const on = stage.classList.toggle("open");
+      if (on) openSteps.add(st.title); else openSteps.delete(st.title);
+      detail.setAttribute("aria-expanded", String(on));
+      detail.textContent = on ? "Skrýt" : st.active ? "Průběh" : "Detail";
+    } } }, openSteps.has(st.title) ? "Skrýt" : st.active ? "Průběh" : "Detail") : null;
+  const outcome = st.active ? "Čeká na vaše rozhodnutí."
+    : !hOk ? "—" : st.outcome.text;
+  stage.append(el("div", { class: "summary" },
+    el("div", {}, el("h2", { class: "name" }, st.title), st.description ? el("p", { class: "desc" }, st.description) : null),
+    el("div", { class: "outcome" }, outcome,
+      !st.active && hOk && st.outcome.reconstructed ? el("span", { class: "note" }, " · doplněno zpětně") : null,
+      !st.active && hOk && st.who ? el("span", { class: "who" }, WHO[st.who]) : null),
+    detail));
+  if (events.length) stage.append(el("div", { class: "details" }, events.map(eventRow),
+    events.filter(e => e.answer && e.answer.decision === "choose" && e.cards.length).map(pastCards)));
+  if (st.active) stage.append(el("div", { class: "active-box" },
+    st.open.map(q => question(q, (S.cards || []).filter(c => c && c.question === q.id)))));
+  return el("article", { class: "step " + cls, "aria-current": st.active ? "step" : null },
+    el("div", { class: "mark", "aria-hidden": "true" }, cls === "done" ? "✓" : cls === "active" ? String(i + 1) : "—"), stage);
+}
+
+function render() {
+  // Keep what the PM typed and where the focus was across a re-render.
   const kept = {}; document.querySelectorAll("textarea, input").forEach(i => kept[i.id] = i.value);
   const focus = document.activeElement && document.activeElement.id;
-  const m = model(), h = location.hash;
-  document.getElementById("brand").replaceChildren(str(S.project) || "Studio", el("span", {}, " · studio"));
   navs = [];
-  const view = h.startsWith("#o=") ? detailView(m, decodeURIComponent(h.slice(3)))
-    : h === "#vse" ? allView(m)
-    : h.startsWith("#q=") && m.open.length ? askingView(m, decodeURIComponent(h.slice(3)))
-    : m.open.some(q => !m.todo.some(t => t.question === q.id)) && h !== "#prehled" ? askingView(m)
-    : overview(m);
-  document.getElementById("view").replaceChildren(el("div", { style: "display:flex;flex-direction:column;gap:2.4rem" }, view));
+  const m = model(S, hOk ? H : []);
+  document.getElementById("project").textContent = S.project || "";
+  hero(m);
+  document.getElementById("pipeline").replaceChildren(...m.steps.map(stepEl));
   for (const [id, v] of Object.entries(kept)) { const i = document.getElementById(id); if (i) i.value = v; }
   if (focus && document.getElementById(focus)) document.getElementById(focus).focus();
   requestAnimationFrame(() => navs.forEach(f => f()));
 }
-// A new open question takes the page to it; the PM's own navigation otherwise stays.
-let openKey = "";
-addEventListener("hashchange", () => { if (S) { paint(); scrollTo(0, 0); } });
 
 async function tick() {
   if (stopped) return;
   try {
     const r = await call("GET", "/state");
     if (r.status !== 200) { notice("Otázky od agenta teď nejde zobrazit, protože v nich je chyba. Dejte agentovi vědět."); return; }
-    notice("");
-    const st = JSON.stringify(r.data);
-    if (st !== histLen) {   // any change of the round (an answer, a new question) may add to the history
+    if (r.data.history_lines !== hCount || !hOk) {   // an answer or a decision was written since the last fetch
       const h = await call("GET", "/history");
-      if (h.status === 200 && Array.isArray(h.data)) { H = h.data; histLen = st; }
+      hOk = h.status === 200 && Array.isArray(h.data);
+      if (hOk) { H = h.data; hCount = r.data.history_lines; }
     }
-    const text = st + H.length;
-    if (text !== last) {
-      last = text; S = r.data;
-      const key = (S.questions || []).filter(q => !q.answered).map(q => q.id).join(" ");
-      if (key && key !== openKey && location.hash) history.replaceState(null, "", location.pathname);
-      openKey = key; paint();
-    }
+    notice(hOk ? "" : "Historie rozhodnutí teď není k dispozici.");
+    const key = JSON.stringify(r.data) + "|" + hCount + "|" + hOk;
+    if (key !== last) { last = key; S = r.data; render(); }
   } catch (e) { if (e.message !== "token") notice("Server studia neodpovídá, zkouším znovu…"); }
 }
 tick();
