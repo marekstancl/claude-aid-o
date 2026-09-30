@@ -122,15 +122,17 @@ Triggered by `/aid-plan write` command with a specification file or topic.
 
 The plan document uses an extended format that is a **superset** of the standard `defaults/templates/plan.md`. All existing sections are preserved (backward compatible), and new detailed step sections are added.
 
-### Frontmatter (unchanged)
+### Frontmatter
 
 ```yaml
 ---
 id: P{NNN}
-type: plan
+type: regular
 status: draft
 created: YYYY-MM-DD
 author: PM + AI
+risk: medium
+lifecycle_strict: true   # without it the plan is LEGACY: the lint's standards and grammar findings become advisories (P009 passed three CP1 rounds without citing the standard its paths bind to)
 ---
 ```
 

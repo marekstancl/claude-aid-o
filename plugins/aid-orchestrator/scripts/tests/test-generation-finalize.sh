@@ -48,10 +48,11 @@ sed -i '/^### Step [0-9]/a\
 # Also exercise a legitimate phase-local edge (Step 1 -> Step 2), not only an
 # empty dependency graph. The finalizer must translate the global source edge
 # to the generated local step IDs and still accept the package.
-sed -i '/^\*\*AID Role:\*\* domain$/a\
+sed -i '/^### Step 2:/,/^\*\*AID Role:\*\*/{/^\*\*AID Role:\*\*/a\
 \
 **Dependencies:**\
-- Depends on: Step 1 (architect contracts)' "$tmp/.aid-o/plans/P099.md"
+- Depends on: Step 1 (architect contracts)
+}' "$tmp/.aid-o/plans/P099.md"
 printf 'counter: 0\n' > "$tmp/.aid-o/config/counter.yaml"
 # Generation is gated on the plan review and the PM page; this suite proves the
 # finalizer, so the review is switched off and the page rendered.

@@ -115,7 +115,7 @@ every step can be started from what is written and that the parts agree.
 3. Are there acceptance criteria that cannot be checked mechanically as written?
 4. Does the plan contradict itself (Data Model against a step, Scope against Files, Architecture against a command)?
 5. Is anything in Scope delivered by no step, or delivered by a step while declared out of scope?
-6. Is every section the plan template requires present and filled (Goal, Scope, Files, Acceptance Criteria, Testing Strategy, Risks)?
+6. Is every section the plan template requires present and filled (Goal, Scope, Files, Acceptance Criteria, Testing Strategy, Risks)? Does `## Standards` name a standard for every area the plan lint derived from the plan's paths (the packet's "Plan lint" section says which area is un-named; on a legacy plan that line is the only place anyone sees it)?
 7. What in the plan can be dropped without changing what the PM gets? Name the step or bullet. `major` whenever the named step or bullet can go without losing an acceptance criterion (the fix is the deletion); `minor` only when the author can show the criterion it serves.
 
 ### Stop rule

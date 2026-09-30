@@ -47,7 +47,9 @@ one at a time:
    ```
 
    A step round's `close` refuses a reviewer file with no such start/complete
-   bracket in `<round dir>/timeline.jsonl` (`no_dispatch_record`): a file
+   bracket in `<round dir>/timeline.jsonl` (`no_dispatch_record`; `prepare` prints the
+   exact start/complete commands per role — copy them, never write a bracket after the
+   answer; a valid answer without one is re-dispatched via `retry --role <r>`): a file
    nobody dispatched does not close a round. Only a round prepared with
    `--stub` by the acceptance suite skips that check, and the FSM refuses to
    advance on such a round.
