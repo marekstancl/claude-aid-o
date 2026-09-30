@@ -323,10 +323,17 @@ aid_critic_check P{NNN} --moment plan
 ```
 
 Revise the plan for what the response accepted (the plan check with `--snapshot`
-and `--fixes` applies as after any revision), rerun the generation check, and
-only then prepare CP1. The CP1 packet carries `critic-response.md` when this
-check passed for the plan CP1 reads; otherwise it carries one line saying why
-not — the reviewers and the PM card see it, nothing refuses.
+and `--fixes` applies as after any revision), then bind the checked response to
+the revised plan — once; a second revision needs a new critic run:
+
+```bash
+aid_critic_rebind P{NNN} --plan .aid-o/plans/P{NNN}-{topic}.md
+```
+
+Rerun the generation check, and only then prepare CP1. The CP1 packet carries
+`critic-response.md` when the check passed for the plan CP1 reads (the checked
+plan, or the one revision rebound to it); otherwise it carries one line saying
+why not — the reviewers and the PM card see it, nothing refuses.
 
 It runs every part and prints every finding before one verdict: the Files-shape
 lint (`aid-plan-lint.sh`, the tier of a new suite included), the deterministic
@@ -391,7 +398,7 @@ Write an exhaustive implementation plan from specification or topic.
     P{NNN} --moment plan --plan .aid-o/plans/P{NNN}-{topic}.md`, dispatch, response,
     `aid_critic_check P{NNN} --moment plan --plan <the same path>`); in this mode it is
     the critic's only run, there is no proposal moment without a brainstorm. Revise,
-    rerun the generation check, and only then CP1.
+    `aid_critic_rebind`, rerun the generation check, and only then CP1.
 9. **Plan review (CP1)** — run "Plan review (CP1)" below, from item 1.
 
 Output: plan path, step count, quality gate results, plan review verdict.

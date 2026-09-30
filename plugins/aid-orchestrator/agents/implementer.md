@@ -27,7 +27,7 @@ after the contract and bind you: what no acceptance criterion asks for is not wr
 ## Output
 
 The `aid-return` block of the contract (files changed, tests run, the contract version), then
-the output format of `agents/agent-protocol.md`. Commit as the contract says. For a review fix:
+the output format of `skills/agent-protocol.md`. Commit as the contract says. For a review fix:
 message prefix `fix(review):`, and report the finding fingerprints you addressed and any you
 could not, with the reason.
 

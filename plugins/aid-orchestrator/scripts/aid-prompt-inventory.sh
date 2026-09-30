@@ -63,12 +63,15 @@ _section_of() {
 }
 
 tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
-skipped=0
+skipped=0; empty_roots=()
 
 for root in "${roots[@]}"; do
   root="${root%/}"
   [[ -d "$root" ]] || { echo "skipped: no such directory ${root}" >&2; skipped=$((skipped+1)); continue; }
   project="$(basename "$(cd "$root/../../.." 2>/dev/null && pwd || echo "$root")")"
+  if ! find "$root" \( -path '*/cp1/round-*/prompt-*.md' -o -path '*/cp2/step-*/round-*/prompt-*.md' -o -path '*/cp3/round-*/prompt-*.md' \) -print -quit 2>/dev/null | grep -q .; then
+    empty_roots+=("${project} (${root})"); continue
+  fi
   while IFS= read -r prompt; do
     [[ -n "$prompt" ]] || continue
     rd="$(dirname "$prompt")"; role="$(basename "$prompt" .md)"; role="${role#prompt-}"
@@ -151,6 +154,11 @@ md="$( {
   echo "## Sections no finding cited in any project"
   echo
   if [[ -n "$global_never" ]]; then printf '%s\n' "$global_never" | sed 's/^/- /'; else echo "(every section was cited by at least one finding)"; fi
+  if (( ${#empty_roots[@]} > 0 )); then
+    echo; echo "## Roots with no review prompts (no data, not zero findings)"; echo
+    printf -- '- %s\n' "${empty_roots[@]}"
+    echo; echo "Their evidence predates the review rounds of 2.98.0 (no prompt files exist), so the tables above cover only the projects listed in them."
+  fi
   if (( skipped > 0 )); then echo; echo "Skipped roots: ${skipped}"; fi
 } )"
 

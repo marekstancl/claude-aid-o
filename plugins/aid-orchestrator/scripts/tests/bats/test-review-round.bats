@@ -1069,3 +1069,15 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   [ "$status" -eq 0 ]
   grep -q 'critic: no passed check for this plan (missing' "$CP1/round-1/prompt-reuse.md"
 }
+
+@test "packet: the response rides with the ONE revision the author rebound after the check; a further edit does not" {
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  printf '\nrevised for the accepted item\n' >> "$PLAN"; _check
+  jq --arg s "$(sha256sum "$PLAN" | cut -d' ' -f1)" '. + {plan_sha256_revised: $s}' "$EV/critic/plan/check.json" > "$EV/critic/plan/c.tmp" && mv "$EV/critic/plan/c.tmp" "$EV/critic/plan/check.json"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 0 ]; [ -f "$CP1/round-1/packet/critic-response.md" ]
+  rm -rf "$CP1"; printf 'edited again\n' >> "$PLAN"; _check
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 0 ]; [ ! -f "$CP1/round-1/packet/critic-response.md" ]
+  grep -q 'plan changed since the check' "$CP1/round-1/prompt-reuse.md"
+}

@@ -4,6 +4,7 @@
 #
 #   aid_critic_prepare <plan_id> --moment brainstorm|plan [--plan <path>] [--root <dir>]
 #   aid_critic_check   <plan_id> --moment brainstorm|plan [--plan <path>] [--root <dir>]
+#   aid_critic_rebind  <plan_id> --plan <path> [--root <dir>]   after the plan was revised for the accepted items
 #
 # WHY: the critic was tried twice on the same plan in the agents project (P010,
 # 2026-09-28). With cost figures in its context it returned "do not build"; with
@@ -254,4 +255,28 @@ aid_critic_check() {
   fi
   echo "critic: ${_ac_moment} check passed (${n_items} item(s), level1_empty=${level1_empty}, level2_empty=${level2_empty}) → ${dir}/check.json"
   return 0
+}
+
+# aid_critic_rebind <plan_id> --plan <path> — the author revised the plan for the
+# accepted items; record the revised plan's hash in check.json so the CP1
+# packet carries the checked response for THAT plan. Only after a passed
+# check at the plan moment, and only once per check (a second revision needs
+# a new critic run: the response no longer describes the plan).
+aid_critic_rebind() {
+  local _ac_plan_id _ac_moment _ac_plan _ac_root
+  _aid_critic_args "$1" --moment plan "${@:2}" || return 1
+  local dir; dir="$(_aid_critic_dir "$_ac_root" "$_ac_plan_id" plan)"
+  [[ -f "${dir}/check.json" ]] || { echo "critic: no check to rebind at ${dir}" >&2; return 2; }
+  [[ "$(jq -r '.passed' "${dir}/check.json")" == "true" ]] || { echo "critic: the check did not pass — fix the answer or the response first" >&2; return 5; }
+  [[ "$(jq -r '.plan_sha256_revised // ""' "${dir}/check.json")" == "" ]] || { echo "critic: already rebound once — a further revision needs a new critic run (aid_critic_prepare)" >&2; return 5; }
+  [[ -f "$_ac_plan" ]] || { echo "critic: plan file not found: ${_ac_plan}" >&2; return 2; }
+  local rsha now; rsha="$(jq -r '.response_sha256' "${dir}/check.json")"
+  [[ "$rsha" == "$(sha256sum "${dir}/critic-response.md" | cut -d' ' -f1)" ]] || { echo "critic: critic-response.md was edited after the check — run aid_critic_check again" >&2; return 5; }
+  now="$(sha256sum "$_ac_plan" | cut -d' ' -f1)"
+  jq --arg s "$now" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {plan_sha256_revised: $s, rebound_at: $at}' "${dir}/check.json" > "${dir}/check.json.tmp" && mv "${dir}/check.json.tmp" "${dir}/check.json"
+  local tl
+  if tl="$(aid_plan_timeline "$_ac_root" "$_ac_plan_id")"; then
+    jq -nc --arg s "$now" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{event:"critic_rebound", moment:"plan", plan_sha256_revised:$s, timestamp:$at}' >> "$tl"
+  fi
+  echo "critic: response rebound to the revised plan ${now:0:12} → ${dir}/check.json"
 }

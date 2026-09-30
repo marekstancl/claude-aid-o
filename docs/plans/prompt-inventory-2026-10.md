@@ -76,3 +76,10 @@ Generated 2026-09-30 by `aid-prompt-inventory.sh /opt/eco/projects/aid-orchestra
 - Testing Strategy
 - This is a confirmation round
 - Your role
+
+## Roots with no review prompts (no data, not zero findings)
+
+- acta (/opt/eco/projects/acta/.aid-o/work/evidence)
+- wan (/opt/eco/projects/wan/.aid-o/work/evidence)
+
+Their evidence predates the review rounds of 2.98.0 (no prompt files exist), so the tables above cover only the projects listed in them.

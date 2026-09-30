@@ -27,6 +27,8 @@ an active id or that literal.
 | `auditor_assertion_rules` | `none (P107 2026-09-30, the auditor card removed)` | the card ran once in its life |
 | `c2_requirement_drift` | `fsm_review_round_required` | epic_generalist question 1 asks whether every EPIC criterion is delivered end to end (P107) |
 | `rolecard_sql_isolation` | `step_check_security_rules` | the sql-isolation overlay went with the VULCAN overlays (P107); the security reviewer asks the tenant and isolation questions on every security-matched step |
+| `section_review_citation` | `critic_two_levels` | the section-review focus card went with the verifier (P107); the critic reads the whole proposal and every accepted item names its checked file or command |
+| `cross_section_citation` | `critic_two_levels` | the cross-section focus card went with the verifier (P107) |
 | `prefilter_fail_rules` | `step_check_security_rules` | `security.matched_rules` in `step-check.json` adds the security reviewer (Step 3) |
 | `prefilter_skip_rules` | `step_check_range` | the step check decides `skip`, bound to HEAD and its timeline event (Step 3, `fsm_review_round_skip_bound`) |
 | `prefilter_conservative_default` | `step_check_range` | an undeterminable range is a refusal (Step 3) |

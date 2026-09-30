@@ -60,9 +60,11 @@ aid_plan_review_packet_build() {
     passed="$(jq -r '.passed // false' "$cdir/check.json" 2>/dev/null)"
     rsha="$(jq -r '.response_sha256 // ""' "$cdir/check.json" 2>/dev/null)"
     psha="$(jq -r '.plan_sha256 // ""' "$cdir/check.json" 2>/dev/null)"
+    local psha_rev; psha_rev="$(jq -r '.plan_sha256_revised // ""' "$cdir/check.json" 2>/dev/null)"
     if [[ "$passed" != "true" ]]; then note="critic: no passed check for this plan (the check failed)"
     elif [[ "$rsha" != "$(sha256sum "$cdir/critic-response.md" | cut -d' ' -f1)" ]]; then note="critic: no passed check for this plan (response edited after the check)"
-    elif [[ "$psha" != "$sha" ]]; then note="critic: no passed check for this plan (plan changed since the check)"
+    # the plan CP1 reads is the checked one, or the one revision the author rebound after accepting items
+    elif [[ "$psha" != "$sha" && "$psha_rev" != "$sha" ]]; then note="critic: no passed check for this plan (plan changed since the check — aid_critic_rebind after the revision, or a new critic run)"
     else cp "$cdir/critic-response.md" "$dir/critic-response.md" && files="$files critic-response.md"; fi
   else
     note="critic: no passed check for this plan (missing — the critic did not run before this review)"

@@ -182,3 +182,18 @@ _response() {  # <moment> <rows...>
   run aid_critic_check P9 --moment plan
   [ "$status" -eq 4 ]; [[ "$output" == *"did not write"* ]]
 }
+
+@test "rebind: after a passed plan-moment check the revised plan's hash is recorded once; refused without a passed check, after a response edit, or a second time" {
+  aid_critic_prepare P9 --moment plan >/dev/null
+  run aid_critic_rebind P9 --plan "$P/.aid-o/plans/P9-x.md"
+  [ "$status" -eq 2 ]; [[ "$output" == *"no check to rebind"* ]]
+  _answer plan '**1. Slib.**'; _response plan '| 1 | s | PŘIJATO | `x.md` |'
+  aid_critic_check P9 --moment plan >/dev/null
+  echo "revised for item 1" >> "$P/.aid-o/plans/P9-x.md"
+  run aid_critic_rebind P9 --plan "$P/.aid-o/plans/P9-x.md"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .plan_sha256_revised "$D/plan/check.json")" = "$(sha256sum "$P/.aid-o/plans/P9-x.md" | cut -d' ' -f1)" ]
+  grep -q '"event":"critic_rebound"' "$P/.aid-o/work/evidence/P9/timeline.jsonl"
+  run aid_critic_rebind P9 --plan "$P/.aid-o/plans/P9-x.md"
+  [ "$status" -eq 5 ]; [[ "$output" == *"already rebound"* ]]
+}

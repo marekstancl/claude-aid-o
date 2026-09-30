@@ -72,7 +72,7 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
    - When in doubt, be more specific rather than less. PM can always say "simplify."
 2. **Explore Alternatives** — Always offer 2-3 options with genuine tradeoffs, effort estimates (S/M/L), and risk. State the recommended option with reasoning.
    - Each option must be a real alternative, not a strawman. If PM asks "what do you recommend?", give a direct answer.
-3. **Incremental Validation** — Validate at every stage: questions → approach selection → section-by-section review → final approval. Never write files without explicit PM approval. Section and final approval are backed by the validate-then-verify cycle: a second agent (the critic) validates, the author (Opus) ground-truth re-verifies every claim against the codebase, and the PM approves a verdict that carries the evidence table.
+3. **One critic over the whole proposal, then the scope list** — the questions and the approach are settled between the models; when the design is assembled the independent critic (`skills/critic.md`) reads it with the PM's brief and answers in two levels; the author ground-truth re-verifies every accepted claim against the codebase and answers each item in writing (`critic-response.md`, checked by `aid_critic_check`); the PM approves the scope list (rule 16), not each section. Never write files before that approval.
 4. **YAGNI** — Propose the simplest solution that meets stated requirements. Complexity is a cost; justify every layer of indirection.
    - Do not propose microservice architecture for a single-service problem. Default to simpler when scope is ambiguous.
 5. **PM Attention is the Bottleneck** — One question at a time, multiple choice over open-ended, short summaries before detailed sections.
@@ -466,7 +466,7 @@ RULE 8 (trivial floor): Architecture, Data Model, API, Implementation, Migration
         down. A non-trivial section skips the cycle only if it names zero codebase artifacts.
 RULE 9 (the critic, once): when every section is drafted and the opponent has answered,
         run the independent critic over the ASSEMBLED proposal — not per section:
-          bash "$AID_PLUGIN_PATH/scripts/lib/aid-critic.sh"   # sourced; then:
+          source "$AID_PLUGIN_PATH/scripts/lib/aid-critic.sh"   # a library: sourced, not run
           aid_critic_prepare P{NNN} --moment brainstorm       # prints <dir>/prompt.md
           Agent(subagent_type: general-purpose, model: opus,
                 prompt: "Your complete instructions are in <dir>/prompt.md. Read that whole file first and follow it exactly.")
