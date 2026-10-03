@@ -1,5 +1,7 @@
 // aid-ui-measure.mjs — measure what the built site really uses, for the project design standard.
-//   node aid-ui-measure.mjs [--storage-state <state.json>] <base url> <out.json> <page>...
+//   node aid-ui-measure.mjs [--storage-state <state.json>] [--build <build id>] <base url> <out.json> <page>...
+// --build records which build was measured (aid-ui-state.sh build-id <site dir>); the design
+// standard check refuses a document measured on another build.
 // Pages are relative to the base (index.html, kontakt/index.html); --storage-state is a Playwright
 // storage state of a logged-in test account, for an app behind a login.
 // At 390 and 1440 px in Chrome, per page: every on-screen control (<button>, [role=button],
@@ -17,10 +19,13 @@ import { chromium } from '@playwright/test';
 import fs from 'node:fs';
 
 const argv = process.argv.slice(2);
-let storageState;
-if (argv[0] === '--storage-state') { storageState = argv[1]; argv.splice(0, 2); }
+let storageState, build = null;
+while (argv[0] === '--storage-state' || argv[0] === '--build') {
+  if (argv[0] === '--storage-state') storageState = argv[1]; else build = argv[1];
+  argv.splice(0, 2);
+}
 const [base, out, ...pages] = argv;
-if (!base || !out || !pages.length) { console.error('usage: aid-ui-measure.mjs [--storage-state <f>] <base url> <out.json> <page>...'); process.exit(2); }
+if (!base || !out || !pages.length) { console.error('usage: aid-ui-measure.mjs [--storage-state <f>] [--build <id>] <base url> <out.json> <page>...'); process.exit(2); }
 const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined });
 const groups = new Map(), fields = new Map(), type = {}, bps = new Set(), trans = new Set(), z = new Set(), errors = [];
 let moves = false, icons = 0;
@@ -108,7 +113,7 @@ try {   // prefers-reduced-motion: the first page is enough to see whether anyth
   await ctx.close();
 } catch (e) { errors.push(`reduced motion: ${String(e.message).split('\n')[0]}`); }
 await browser.close();
-const res = { pages, controls: [...groups.values()].sort((a, b) => b.count - a.count).map(g => ({ ...g, pages: [...g.pages], examples: [...g.examples] })),
+const res = { build, pages, controls: [...groups.values()].sort((a, b) => b.count - a.count).map(g => ({ ...g, pages: [...g.pages], examples: [...g.examples] })),
   fields: [...fields.values()], type, breakpoints: [...bps].sort(), transitions: [...trans].sort(), zindex: [...z].sort(), icons,
   reduced_motion_moves: moves, errors };
 fs.writeFileSync(out, JSON.stringify(res, null, 1));

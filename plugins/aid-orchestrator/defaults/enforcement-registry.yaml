@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 571          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 572          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4162,6 +4162,22 @@ enforcements:
     recovery: "The failing case names the file. Put the decide call back at the point of the step's Postup where the decision is made, with a canonical --step title."
     test_covers: "SKILL.md names decide, the outcome rule and the six titles, has no overview and no Průběh; 1v-vision, 6-build and 7-verify name the call; every --step in the steps is canonical (test-aid-ui-skill-rules.bats)."
     test: "scripts/tests/bats/test-aid-ui-skill-rules.bats"
+
+  - id: aid_ui_k1b_page_checks
+    type: 12
+    source: "lib/ui-fidelity/aid-ui-verify.mjs (rows token_usage, sticky_panels, keyboard, reduced_motion, touch_targets, safe_area, privacy_before_consent, vision_doc, coverage) + scripts/aid-ui-vision-check.py"
+    instruction: "skills/ui-design/coverage/map.yaml (dispositions moved from agent:/na: to script: by the K1a review)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "Tab order sense, legibility of focus beyond an outline or shadow being present, consent banners not named cookie/consent/souhlas, dialogs opened only by app flows (keyboard covers what a page shows), the content of the vision (its parts are matched by heading words, a presence check), safe_area sees stylesheet rules only (not inline style, not viewport-fit=cover, not which panel the rule targets), translucent colours are compared by their RGB without alpha."
+    description: "P103 extension K1b - the coverage map's former agent claims as gate rows: every painted colour and text font is a DESIGN.md token (no typography token = not_covered); a sticky/fixed panel taller than the window or with visible content below its box scrolls itself and contains its scroll; Tab reaches every control (honeypots with tabindex=-1 or aria-hidden excepted, a radio group once, a frame only with a tabindex) and the focus is visible with transitions off; nothing animates under prefers-reduced-motion; 44 px touch targets at phone width (inline text links excepted); a PWA's edge panels use safe-area insets; no third-party request, no cookie (public web) and no large consent banner before consent; the product vision has the template's parts, FAKT labels, owner and date; the coverage map still matches the standards. N/A rows say so in their detail."
+    recovery: "The row names the colour, control, panel, request or missing part; fix the build or DESIGN.md and run the gate again."
+    test_covers: "planted off-token colour, small control, third-party request, tall sticky panel and animation each fail; o-nas without them passes; invisible focus and a Tab trap fail while a honeypot, a checked radio, a frame, a fading focus, a checkbox in a label, a translucent token, a hidden dropdown and a decorative fixed layer do not; a cookie on load fails privacy; safe_area fail/pass/N-A; vision N/A and coverage pass (test-aid-ui-verify.bats); vision parts, labels, owner, date (test-aid-ui-vision-check.bats)."
+    test: "scripts/tests/bats/test-aid-ui-verify.bats"
 
   - id: aid_ui_design_standard_doc
     type: 12

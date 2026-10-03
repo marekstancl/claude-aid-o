@@ -44,6 +44,9 @@ a `frontend-build-standard.md` (čti živě).
    drátěné modely zkopírované do `docs/brand/assets/`) do souboru
    v `.aid-ui/`, `aid-ui-state.sh body <project> struktura --file <soubor>`,
    `aid-ui-state.sh chapter <project> struktura navrh`.
+7. Jen PWA: otázka `notifications` - co aplikace oznamuje, kdy a komu, a jak vypadá
+   oznámení se stavy (nové, přečtené, chyba) jako snímek (`pwa-notifications-standard`).
+   Odpověď do kapitoly `struktura`.
 
 ## Co PM rozhoduje
 

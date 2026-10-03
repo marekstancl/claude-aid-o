@@ -3,6 +3,10 @@ name: Pekárna U Mlýna
 colors:
   ink: "#1a1a1a"
   flour: "#faf6ee"
+  paper: "#ffffff"
+typography:
+  body:
+    fontFamily: Geist
 ---
 
 ## Platformní kontrakt

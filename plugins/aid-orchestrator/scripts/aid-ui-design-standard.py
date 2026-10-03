@@ -134,7 +134,8 @@ def write(project, measure_path, out_rel):
     L = [f"# {name} - design standard", "",
          f"*Pracovní verze z {date.today().strftime('%-d. %-m. %Y')} (/aid-ui, krok 7). Do Docusauru se publikuje až po schválení PM. "
          "Tokeny jsou z `DESIGN.md` (z nich se generuje CSS webu), komponenty změřené na postaveném webu, "
-         "vzory a texty sepsané z postaveného webu a schválené PM.*", ""]
+         "vzory a texty sepsané z postaveného webu a schválené PM.*", "",
+         f"Měřeno na buildu `{meas.get('build') or 'neuvedeno'}`.", ""]
     brief = os.path.join(project, "docs/design/brand-package/brand-brief.md")
     L += ["## Značka", "", "Zdroj: brand balíček `docs/design/brand-package/` (symbol, logo s názvem, ikony, zdroje)."]
     if os.path.exists(brief):
@@ -216,6 +217,11 @@ def check(project, rel):
     st = state(project)
     vtype = (st.get("variant") or {}).get("type")
     res = []
+    built = (st.get("build") or {}).get("id")
+    if built:   # the measurement must be of the recorded build, not of an earlier one
+        m = re.search(r"Měřeno na buildu `([^`]+)`", doc)
+        res.append((bool(m) and m.group(1) == built, "measure", f"measured on the recorded build {built[:12]}"
+                    + ("" if m and m.group(1) == built else f" (document: {(m.group(1) if m else 'not stated')[:12]}); measure again with --build")))
     for s in SECTIONS + (["Stavy úloh"] if vtype in ("webapp", "pwa") else []):
         res.append((section(doc, s) is not None, "section", s))
     tok = section(doc, "Tokeny") or ""

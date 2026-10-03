@@ -18,6 +18,14 @@ applies:
   ai_search: {browsers: [chromium], viewports: [1440], flows: false}   # reads files, not the rendering
   brand_package: {scope: project}   # one row for the whole project (home page, last viewport, first browser)
   design_standard_doc: {scope: project}
+  vision_doc: {scope: project}
+  coverage: {scope: project}
+  safe_area: {browsers: [chromium], viewports: [390], flows: false}
+  token_usage: {browsers: [chromium], viewports: [1440]}
+  keyboard: {browsers: [chromium], viewports: [1440]}
+  reduced_motion: {browsers: [chromium], viewports: [1440]}
+  privacy_before_consent: {browsers: [chromium], viewports: [1440], flows: false}
+  touch_targets: {viewports: [390]}
 checks:
   http_200: every page answers HTTP 200 (FB-1)
   glyph_coverage: every character renders in the intended font, Czech diacritics included, no system fallback (FB-2)
@@ -34,6 +42,15 @@ checks:
   seo: aid-ui-seo-check.py passes, a BLOCKER finding fails (FB-14)
   brand_package: the brand package holds every part the project uses - derived from the variant, options.identity and the contexts of use in the logo brief; a favicon only without brand work (design-system-standard "Brand balíček", brand-brief template part 2; aid-ui-brand-package.py)
   design_standard_doc: the project design standard (docs/design/design-standard.md, a working document until the PM approves it) has the WAN structure - Značka, Tokeny, Komponenty, Vzory, Obsah a terminologie, Platformní kontrakt, Výjimky, Vynucení - every DESIGN.md colour token, the platform rows and a measured button role (design-system-standard "What"; aid-ui-design-standard.py check)
+  token_usage: every colour painted on a page (text, surfaces, borders) is a DESIGN.md colour token (design-system-standard "Tokeny", "Kontrola před nasazením")
+  sticky_panels: a sticky or fixed panel taller than the window has its own scroll and keeps it inside (overscroll-behavior); no such panel = N/A (design-system-standard "Scroll a přilepené panely")
+  keyboard: Tab reaches every control of the page and the focus is visible on each; no control = N/A (design-system-standard "Přístupnost", "Kontrola před nasazením")
+  reduced_motion: nothing animates or transitions over 10 ms under prefers-reduced-motion (design-system-standard "Tokeny - Pohyb")
+  touch_targets: at phone width every control is at least 44 x 44 px, inline text links excepted (design-system-standard "Co se na platformách liší - Dotyk")
+  safe_area: a PWA's fixed panels at a screen edge use env(safe-area-inset-*); not a PWA = N/A (design-system-standard "Systémové okraje")
+  privacy_before_consent: before any consent no third-party request, no cookie (public web) and no consent banner over 30 % of the screen (seo-audit-agent-standard "Privacy", seo/technicke-seo)
+  vision_doc: docs/product-vision.md has the parts of the product-vision template, FAKT labels, an owner and a date; no vision in the project = N/A (product-vision, templates/product-vision-prompt; aid-ui-vision-check.py)
+  coverage: the coverage map still matches the ecosystem standards (aid-ui-coverage.sh check exit 0; frontend-build-standard "Enforcement")
   ai_search: AI search and citation readiness - the PM's AI robot policy in robots.txt, JSON-LD on every indexable page matching the facts register, main text in the HTML, no snippet bans, no llms.txt without a decision (seo-audit-agent-standard §3-4, seo/technicke-seo; aid-ui-seo-check.py --ai)
   app_task_states: an application's task x state scenarios from the task map pass (FB-11)
   no_overlap: no two visible texts, controls or images overlap (FB-21)

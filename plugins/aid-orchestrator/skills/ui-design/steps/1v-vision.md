@@ -36,7 +36,12 @@ v Docusauru), šablona `/opt/eco/docs/docs/ecosystem/templates/product-vision-pr
    "<odkud plyne>" --source PRODUCT.md` (nebo soubor, ze kterého fakt pochází).
 3. Zapiš `docs/product-vision.md` (vrstva 1, fakta oddělená od hypotéz podle
    šablony) podle oddílu „Jak psát" níže. Tón odvoď z vize a z brand briefu
-   (existuje-li); jeden odstavec.
+   (existuje-li); jeden odstavec. Brána (řádek `vision_doc`, `aid-ui-vision-check.py`)
+   chce: řádek `Vlastník: …` a `Datum: d. m. rrrr`, **Elevator pitch**, oddíly nebo tučné
+   štítky Problém, Pro koho, Úspěch (změna chování), Hranice, Klíčové funkce, Ekosystém,
+   Konkurence (nebo Diferencátory), Legislativa, a tvrzení označená FAKT/ODHAD/HYPOTÉZA.
+   Vize už existuje (i v Docusauru) → do `docs/product-vision.md` ji převezmi beze změny
+   obsahu, jen doplň chybějící štítky; nepřepisuj ji.
 4. Pět sloganů v jazyce projektu jako karty otázky `vision` (`thesis` =
    slogan, `uniqueness` = čím se liší od běžných v oboru, `risk` = kde může
    narazit); aspoň jeden vychází z dřívějšího sloganu nebo motta projektu

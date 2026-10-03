@@ -82,7 +82,7 @@ from urllib.parse import urlsplit, parse_qs
 
 KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "content_plan", "defer_content", "facts", "references", "direction",
-         "approve_page", "exception", "coverage_drift", "design_standard", "handover"}
+         "approve_page", "exception", "coverage_drift", "design_standard", "handover", "notifications"}
 # Card fields the page shows (a step may turn any into state); snapshotted with the answer.
 CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "palette", "risk", "uniqueness")
 DECISIONS = {"approve", "choose", "return", "reroll", "reroll_safer", "reroll_bolder"}

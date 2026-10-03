@@ -38,7 +38,7 @@ a `frontend-build-standard.md` (čti živě).
 4. Projektový design standard (před schvalováním stránek, protože jeho úpravy mění build): `DESIGN.md` doplněný o platformní kontrakt
    (řádky Předěl, Navigace, Dotyk/kurzor, Formuláře, Systémové okraje, Gesta; u aplikace
    i Okna), přístupnost, vzory a pravidla textů. Pak změř postavený web
-   `aid-ui-tool.sh measure <url náhledu> .aid-ui/measure.json <každá stránka>` a vygeneruj
+   `aid-ui-tool.sh measure --build "$(aid-ui-state.sh build-id <složka buildu>)" <url náhledu> .aid-ui/measure.json <každá stránka>` a vygeneruj
    pracovní dokument ve struktuře WANu
    `python3 scripts/aid-ui-design-standard.py write <project> --measure .aid-ui/measure.json`
    → `docs/design/design-standard.md` (tokeny z `DESIGN.md`, role tlačítek a pole změřené,

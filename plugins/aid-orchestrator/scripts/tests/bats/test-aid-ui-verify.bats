@@ -75,6 +75,12 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   [ "$red" -gt 10000 ] || { echo "red pixels: $red"; return 1; }
 }
 
+# measured — the fixture design standard names the build just recorded (as `measure --build` would)
+measured() {
+  local id; id="$(jq -r .build.id "$PROJ/docs/design/brand-state.json")"
+  sed -i "/^Měřeno na buildu/d; 0,/^## Značka/s//Měřeno na buildu \`$id\`.\n\n## Značka/" "$PROJ/docs/design/design-standard.md"
+}
+
 @test "the fixed copy passes every row" {
   cp -r "$FX/fixed/." "$SITE/"
   # the SEO brief: page table (H1 as built) and the PM's AI robot policy the fixed robots.txt follows
@@ -85,6 +91,7 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   jq --arg t "docs/seo/brief.md@$sha" '.options.seo = true | .answers["q-seo"] = {kind: "seo_brief", decision: "approve", target: $t}' \
     "$PROJ/docs/design/brand-state.json" >"$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  measured
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass")' "$RES" | head; return 1; }
   [ "$(jq '[.rows[] | select(.status != "pass")] | length' "$RES")" -eq 0 ]
@@ -134,6 +141,83 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   printf -- '---\n[nejde: yaml\n---\n' >"$PROJ/DESIGN.md"
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   jq -e '.rows[] | select(.check == "design_standard_doc") | .status == "not_covered"' "$RES" >/dev/null
+}
+
+@test "K1b page checks: an off-token colour, a small control, a third-party request, a tall sticky panel and motion are each reported" {
+  cp -r "$FX/fixed/." "$SITE/"
+  sed -i 's|</main>|<p style="color:#ff0000">Akce</p><button style="width:30px;height:30px;padding:0;background:#1a1a1a;color:#faf6ee">x</button>\
+<aside style="position:sticky;top:0;height:3000px;background:#faf6ee">panel</aside>\
+<div style="animation:spin 2s infinite;width:10px;height:10px;background:#1a1a1a"></div><style>@keyframes spin{to{transform:rotate(1turn)}}</style>\
+<img src="https://tracker.invalid/p.gif" alt="" width="1" height="1"></main>|' "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$status" -eq 3 ]
+  jq -e '.rows[] | select(.check == "token_usage" and .page == "index.html") | .status == "fail" and (.detail | contains("#ff0000"))' "$RES" >/dev/null
+  jq -e '.rows[] | select(.check == "token_usage" and .page == "o-nas/index.html") | .status == "pass"' "$RES" >/dev/null
+  jq -e '[.rows[] | select(.check == "touch_targets" and .page == "index.html") | .status] | unique == ["fail"]' "$RES" >/dev/null
+  jq -e '.rows[] | select(.check == "privacy_before_consent" and .page == "index.html") | .status == "fail" and (.detail | contains("tracker.invalid"))' "$RES" >/dev/null
+  jq -e '[.rows[] | select(.check == "sticky_panels" and .page == "index.html") | .status] | unique == ["fail"]' "$RES" >/dev/null
+  jq -e '[.rows[] | select(.check == "sticky_panels" and .page == "o-nas/index.html") | .detail] | all(startswith("N/A"))' "$RES" >/dev/null
+  jq -e '.rows[] | select(.check == "reduced_motion" and .page == "index.html") | .status == "fail"' "$RES" >/dev/null
+  # project rows: vision N/A without options.vision, the coverage map matches the standards
+  jq -e '.rows[] | select(.check == "vision_doc") | .status == "pass" and (.detail | startswith("N/A"))' "$RES" >/dev/null
+  jq -e '.rows[] | select(.check == "coverage") | .status == "pass"' "$RES" >/dev/null
+}
+
+@test "K1b edge cases: invisible focus fails; honeypot, checked radio, frame, fading focus, label, translucent token, hidden dropdown, decorative layer do not; a cookie on load fails privacy" {
+  cp -r "$FX/fixed/." "$SITE/"
+  # a button whose focus looks like rest; a honeypot (tabindex -1 in aria-hidden); one radio group of
+  # three; a checkbox in a 44 px label; token colours written as oklch and color-mix; a tall fixed
+  # decorative layer (pointer-events none, z -1); a cookie written on load; a focus outline that fades in;
+  # a frame with nothing focusable; a translucent token colour; a sticky header with a hidden dropdown
+  sed -i 's|</main>|<style>button{font:inherit}#fade{transition:all .4s;outline:none;background:#faf6ee;color:#1a1a1a;border:0;min-width:44px;min-height:44px}#fade:focus{outline:3px solid #1a1a1a}</style><button id="fade">Plynule</button>\
+<iframe style="border:0" srcdoc="<p>mapa</p>" width="120" height="60" title="mapa"></iframe>\
+<p style="color:rgba(26,26,26,.6)">Tlumené</p>\
+<div style="position:sticky;top:0;height:50px;background:#ffffff">Lišta<ul style="position:absolute;top:50px;visibility:hidden;margin:0"><li>a</li><li>b</li><li>c</li></ul></div>\
+<button id="nofocus" style="outline:none;min-width:44px;min-height:44px;background:#1a1a1a;color:#ffffff;border:0">Koupit</button>\
+<p class="hp" aria-hidden="true"><input name="website" tabindex="-1" style="border:1px solid #1a1a1a"></p>\
+<fieldset style="border:0"><label style="display:inline-block;min-width:44px;min-height:44px"><input type="radio" name="r" value="1">a</label><label style="display:inline-block;min-width:44px;min-height:44px"><input type="radio" name="r" value="2" checked>b</label><label style="display:inline-block;min-width:44px;min-height:44px"><input type="radio" name="r" value="3">c</label></fieldset>\
+<label style="display:block;min-height:44px"><input type="checkbox"> Souhlasím s podmínkami</label>\
+<p style="color:oklch(0.2 0 0 / 1);background:color-mix(in srgb, #ffffff 100%, black)">Barvy</p>\
+<div style="position:fixed;inset:0;height:3000px;z-index:-1;pointer-events:none;background:#faf6ee"></div>\
+<script>document.cookie="sid=1; path=/"</script></main>|' "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$status" -eq 3 ] || { echo "$output"; return 1; }
+  d="$(jq -r '[.rows[] | select(.check == "keyboard" and .page == "index.html" and .status == "fail") | .detail][0]' "$RES")"
+  [[ "$d" == *"focus not visible"*"Koupit"* ]] || { echo "keyboard: $d"; return 1; }
+  [[ "$d" != *website* && "$d" != *Plynule* ]] || { echo "honeypot or fading focus counted: $d"; return 1; }
+  [ "$(st touch_targets index.html)" == pass ]
+  # oklch(0.2 0 0) is not exactly #1a1a1a: only that colour is reported, the color-mix white is a token
+  t="$(jq -r '[.rows[] | select(.check == "token_usage" and .page == "index.html") | .detail][0]' "$RES")"
+  [[ "$t" == "colours outside DESIGN.md tokens: #"??????" (1×)" ]] || { echo "token_usage: $t"; return 1; }
+  [ "$(st sticky_panels index.html)" == pass ]
+  jq -e '.rows[] | select(.check == "privacy_before_consent" and .page == "index.html") | .status == "fail" and (.detail | contains("sid"))' "$RES" >/dev/null
+  [ "$(st privacy_before_consent o-nas/index.html)" == pass ]
+}
+
+@test "K1b keyboard: a control that keeps Tab (a trap) leaves the rest unreached" {
+  cp -r "$FX/fixed/." "$SITE/"
+  sed -i 's|<nav>|<input aria-label="past" style="min-height:44px" onkeydown="if(event.key===\x27Tab\x27)event.preventDefault()"><nav>|' "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '.rows[] | select(.check == "keyboard" and .page == "index.html") | .status == "fail" and (.detail | test("Tab reaches [0-9]+ of [0-9]+"))' "$RES" >/dev/null
+}
+
+@test "K1b safe_area: a PWA panel fixed at the bottom needs env(safe-area-inset-*); a web is N/A" {
+  mkdir -p "$T/out"
+  echo '{"viewports":[390],"browsers":["chromium"],"checks":{"safe_area":"x"}}' > "$T/ck.json"
+  echo '{"variant":{"type":"pwa"},"build":{"id":"x","fingerprints":{"index.html":"a","_site":"c"}}}' > "$T/state.json"
+  sed -i 's|</main>|<nav id="dole" style="position:fixed;bottom:0;left:0;right:0;height:56px;background:#fff">menu</nav></main>|' "$SITE/index.html"
+  url="$(AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" | sed -n 's/^URL: //p')"
+  verify() { bash "$SC/aid-ui-tool.sh" verify --state "$T/state.json" --checks "$T/ck.json" --site "$SITE" \
+    --base "$url" --out "$T/out" --seo "$SC/aid-ui-seo-check.py" >/dev/null; }
+  verify; RES="$T/out/result.json"
+  jq -e '.rows[] | select(.check == "safe_area") | .status == "fail" and (.detail | contains("nav#dole"))' "$RES" >/dev/null
+  sed -i 's|</main>|<style>#dole{padding-bottom:env(safe-area-inset-bottom)}</style></main>|' "$SITE/index.html"
+  verify; [ "$(st safe_area index.html)" == pass ]
+  echo '{"variant":{"type":"web"},"build":{"id":"x","fingerprints":{"index.html":"a","_site":"c"}}}' > "$T/state.json"
+  verify; jq -e '.rows[] | select(.check == "safe_area") | .detail | startswith("N/A")' "$RES" >/dev/null
 }
 
 @test "a crashed SEO check (exit 1, no report) is not_covered, not a pass" {

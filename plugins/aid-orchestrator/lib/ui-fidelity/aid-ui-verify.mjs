@@ -247,9 +247,12 @@ const PLACEHOLDER_IMG = /placeholder|placehold\.|picsum\.|dummyimage/i;
 // ponytail: facts = phone numbers, prices and times in the visible text; other claims need the reviewer
 const FACT_RE = /(\+?\d[\d ]{7,}\d)|(\d[\d  ]*(?:[.,]\d+)?\s?(?:Kč|CZK|€|EUR))|(\b\d{1,2}[:.]\d{2}\b)/g;
 
-async function pageRows(ctx, url, key, role, state, run, facts, brand) {
+async function pageRows(ctx, url, key, role, state, run, facts, brand, applies = () => true) {
   const page = await ctx.newPage();
-  const bad = [], imgs = [];
+  const bad = [], imgs = [], requested = [];
+  page.on('request', r => requested.push(r.url()));
+  // a web is measured as a first visit (privacy_before_consent); an app keeps its logged-in session
+  if (st.variant?.type === 'web' || !st.variant?.type) await ctx.clearCookies();
   // a request the page itself cancelled by navigating away (a redirect to the login screen) is not a broken resource
   page.on('requestfailed', r => { if (!/ABORTED|cancel/i.test(r.failure()?.errorText || '')) bad.push(`failed ${r.url()}`); });
   let bytes = 0;
@@ -333,8 +336,165 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand) {
   fs.mkdirSync(path.dirname(shot), { recursive: true });
   await page.screenshot({ path: shot, fullPage: true });
   res.screenshots_reviewed = ['pass', `screenshot ${path.relative(out, shot)}; the PM's review is approve-page`];
+  Object.assign(res, await moreRows(page, url, requested, applies));   // after the screenshot: these move focus and media
   res.html = await page.content();
   await page.close();
+  return res;
+}
+
+// ---- P103 extension K1b: checks the coverage map now gives to the gate ----------------
+// tokens: the colours of DESIGN.md (frontmatter `colors`, read by yq like the CSS), as #rrggbb
+const TOKENS = (() => {
+  const f = project && path.join(project, 'DESIGN.md');
+  if (!f || !fs.existsSync(f)) return null;
+  const m = /^---\n([\s\S]*?)\n---\n/.exec(fs.readFileSync(f, 'utf8'));
+  const r = m && spawnSync('yq', ['-o=json', '{"colors": (.colors // {}), "typography": (.typography // {})}'], { input: m[1], encoding: 'utf8' });
+  try {
+    const j = JSON.parse(r.stdout);
+    const fonts = Object.values(j.typography || {}).map(t => String(t?.fontFamily || '').split(',')[0].replace(/["']/g, '').trim().toLowerCase()).filter(Boolean);
+    return { colors: Object.values(j.colors || {}).map(String), fonts };
+  } catch { return null; }
+})();
+// the project's own hosts: the preview, the domain of the facts register and its subdomains
+const OWN_HOSTS = (() => {
+  try { const d = readJson(opt.facts)?.domain; const v = typeof d === 'object' ? d?.value : d; return v ? [new URL(v).hostname.replace(/^www\./, '')] : []; } catch { return []; }
+})();
+const NA = why => ['pass', `N/A: ${why}`];
+// applies(check) for this row of the matrix: the expensive checks run only where their row is written
+async function moreRows(page, url, requested, applies) {
+  const res = {}, vw = page.viewportSize()?.width || 0;
+  const o = await page.evaluate(tokens => {
+    const cs = e => getComputedStyle(e);
+    const vis = e => { const b = e.getBoundingClientRect(); return b.width >= 2 && b.height >= 2 && cs(e).visibility !== 'hidden' && cs(e).display !== 'none'; };
+    // every CSS colour (hex, rgb, oklch, color-mix, names) as sRGB #rrggbb through a canvas; null = transparent or unreadable
+    const cv = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+    const srgb = c => {
+      if (!c || c === 'transparent') return null;
+      // rgb()/rgba(): the channels as written, alpha ignored (a translucent token is still the token)
+      const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)$/.exec(c);
+      if (m) return m[4] !== undefined && +m[4] === 0 ? null : '#' + m.slice(1, 4).map(x => (+x).toString(16).padStart(2, '0')).join('');
+      cv.clearRect(0, 0, 1, 1); cv.fillStyle = '#010203'; cv.fillStyle = c;
+      if (cv.fillStyle === '#010203' && c.replace(/\s/g, '').toLowerCase() !== '#010203') return undefined;
+      cv.fillRect(0, 0, 1, 1); const d = cv.getImageData(0, 0, 1, 1).data;
+      return d[3] === 0 ? null : '#' + [0, 1, 2].map(i => d[i].toString(16).padStart(2, '0')).join('');
+    };
+    const tokenSet = new Set((tokens?.colors || []).map(srgb).filter(Boolean));
+    const shown = [...document.querySelectorAll('body *')].filter(vis);
+    const own = e => [...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
+    const colours = {}, unreadable = new Set(), fonts = {};
+    const add = c => { const h = srgb(c); if (h === undefined) unreadable.add(c); else if (h) colours[h] = (colours[h] || 0) + 1; };
+    for (const e of shown) {
+      if (e.closest('svg') || e.tagName === 'IMG') continue;   // drawings and images carry their own colours (brand_assets)
+      const s = cs(e);
+      if (own(e)) { add(s.color); const f = s.fontFamily.split(',')[0].replace(/["']/g, '').trim().toLowerCase(); fonts[f] = (fonts[f] || 0) + 1; }
+      add(s.backgroundColor);
+      if (parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== 'none') add(s.borderTopColor);
+    }
+    const offTokens = Object.entries(colours).filter(([c]) => !tokenSet.has(c));
+    const offFonts = Object.entries(fonts).filter(([f]) => !(tokens?.fonts || []).includes(f));
+    // sticky: only a panel whose content overflows its box (or the window) must scroll itself; decorative layers are skipped
+    const sticky = shown.filter(e => /sticky|fixed/.test(cs(e).position) && e.getBoundingClientRect().height > 40
+        && cs(e).pointerEvents !== 'none' && !(parseInt(cs(e).zIndex) < 0) && !e.closest('[aria-hidden="true"]'))
+      .map(e => ({ name: e.tagName.toLowerCase() + (e.id ? '#' + e.id : ''),
+        // overflow = a visible descendant below the panel, or a panel taller than the window (hidden dropdowns do not count)
+        overflows: e.getBoundingClientRect().height > innerHeight + 1
+          || [...e.querySelectorAll('*')].some(d => vis(d) && cs(d).opacity !== '0' && d.getBoundingClientRect().bottom > e.getBoundingClientRect().bottom + 1),
+        scroll: /auto|scroll/.test(cs(e).overflowY), contain: /contain|none/.test(cs(e).overscrollBehaviorY),
+        edge: e.getBoundingClientRect().bottom >= innerHeight - 1 || e.getBoundingClientRect().top <= 0 }));
+    const inlineLink = e => e.tagName === 'A' && cs(e).display === 'inline' && [...e.parentElement.childNodes].some(n => n !== e && n.nodeType === 3 && n.textContent.trim());
+    // controls a visitor reaches by Tab: honeypots (tabindex=-1, aria-hidden, inert) and all radios of a group but one are out;
+    // an iframe only with a tabindex (an embed with nothing focusable is no tab stop)
+    const radios = new Set();
+    const interactive = shown.filter(e => e.matches('a[href], button, input:not([type=hidden]), select, textarea, [role=button], [tabindex]')
+      && e.getAttribute('tabindex') !== '-1' && !e.closest('[aria-hidden="true"], [inert]') && !e.disabled)
+      .filter(e => !(e.type === 'radio' && e.name) || (!radios.has(e.name) && radios.add(e.name)));
+    const look = e => { const s = cs(e); return [s.outlineStyle !== 'none' ? `${s.outlineWidth} ${s.outlineColor}` : '', s.boxShadow, s.backgroundColor, s.borderColor, s.textDecorationLine, s.color].join('|'); };
+    interactive.forEach((e, i) => {
+      // every radio of a group carries the group's number: Tab lands on the checked one, not always the first
+      const group = e.type === 'radio' && e.name ? [...document.querySelectorAll('input[type=radio]')].filter(r => r.name === e.name && r.form === e.form) : [e];
+      for (const g of group) { g.setAttribute('data-aid-k', String(i)); g.setAttribute('data-aid-rest', look(g)); } });
+    // touch: the larger of the control and its label (a checkbox inside a 44 px label is fine)
+    const small = interactive.filter(e => !inlineLink(e) && e.tagName !== 'IFRAME').map(e => {
+      let r = e.getBoundingClientRect();
+      for (const l of e.labels || []) { const b = l.getBoundingClientRect(); if (b.width * b.height > r.width * r.height) r = b; }
+      return { e, r };
+    }).filter(x => x.r.width < 44 || x.r.height < 44)
+      .map(x => `${x.e.tagName.toLowerCase()} "${(x.e.innerText || x.e.getAttribute('aria-label') || x.e.name || '').trim().slice(0, 25)}" ${Math.round(x.r.width)}×${Math.round(x.r.height)}`);
+    let safe = false;
+    for (const sh of document.styleSheets) { try { for (const r of sh.cssRules) if (/safe-area-inset/.test(r.cssText)) safe = true; } catch { /* cross-origin */ } }
+    const cover = shown.filter(e => /fixed|sticky/.test(cs(e).position) && /cookie|consent|souhlas/i.test(e.id + ' ' + e.className + ' ' + (e.innerText || '').slice(0, 200)))
+      .map(e => e.getBoundingClientRect()).map(r => (r.width * r.height) / (innerWidth * innerHeight));
+    return { offTokens, unreadable: [...unreadable], offFonts, ncolours: Object.keys(colours).length, sticky, small, safe, cover, tabbable: interactive.length };
+  }, TOKENS);
+  if (!TOKENS) res.token_usage = ['not_covered', 'no DESIGN.md tokens'];
+  else if (!TOKENS.fonts.length) res.token_usage = ['not_covered', 'DESIGN.md has no typography fontFamily: the fonts cannot be checked'];
+  else if (o.unreadable.length) res.token_usage = ['not_covered', `colours the browser cannot read: ${o.unreadable.slice(0, 4).join(', ')}`];
+  else {
+    const bad = [];
+    if (o.offTokens.length) bad.push(`colours outside DESIGN.md tokens: ${o.offTokens.sort((a, b) => b[1] - a[1]).slice(0, 6).map(([c, n]) => `${c} (${n}×)`).join(', ')}`);
+    if (o.offFonts.length) bad.push(`fonts outside DESIGN.md typography: ${o.offFonts.map(([f, n]) => `${f} (${n}×)`).join(', ')}`);
+    res.token_usage = bad.length ? ['fail', bad.join('; ')] : ['pass', `${o.ncolours} colours, all tokens`];
+  }
+  const broken = o.sticky.filter(x => x.overflows && (!x.scroll || !x.contain));
+  res.sticky_panels = !o.sticky.length ? NA('no sticky or fixed panel') : broken.length
+    ? ['fail', broken.map(x => `${x.name}: ${!x.scroll ? 'content overflows without its own scroll' : 'scroll spills into the page (overscroll-behavior)'}`).join('; ')]
+    : ['pass', `${o.sticky.length} panel(s) follow the scroll contract`];
+  // keyboard: Tab reaches every control; the focused look differs from the resting look
+  if (!applies('keyboard')) res.keyboard = NA('runs at the viewport and browser of its row only');
+  else if (!o.tabbable) res.keyboard = NA('no control on the page');
+  else {
+    const seen = new Set(), invisible = [];
+    // transitions off for the walk: a focus style that fades in would still read as the resting look
+    await page.evaluate(() => { const t = document.createElement('style'); t.id = 'aid-no-transition';
+      t.textContent = '*,*::before,*::after{transition:none!important}'; document.head.append(t);
+      document.activeElement?.blur(); window.scrollTo(0, 0); });
+    const read = () => page.evaluate(() => { const e = document.activeElement; if (!e || e === document.body) return null;
+      const s = getComputedStyle(e), now = [s.outlineStyle !== 'none' ? `${s.outlineWidth} ${s.outlineColor}` : '', s.boxShadow, s.backgroundColor, s.borderColor, s.textDecorationLine, s.color].join('|');
+      return { id: e.getAttribute('data-aid-k'), iframe: e.tagName === 'IFRAME', changed: now !== e.getAttribute('data-aid-rest'),
+        name: `${e.tagName.toLowerCase()} "${(e.innerText || e.getAttribute('aria-label') || '').trim().slice(0, 25)}"` }; });
+    for (let i = 0; i < o.tabbable * 3 + 40 && seen.size < o.tabbable; i++) {
+      await page.keyboard.press('Tab');
+      let f = await read();
+      if (!f || f.id === null) continue;
+      if (seen.has(f.id)) break;
+      seen.add(f.id);
+      if (f.iframe) {   // a frame keeps the focus inside: move on to the next control after it and check that one
+        const moved = await page.evaluate(id => { const n = document.querySelector(`[data-aid-k="${Number(id) + 1}"]`); if (n) n.focus(); return !!n; }, f.id);
+        if (!moved) continue;
+        f = await read();
+        if (!f || f.id === null || seen.has(f.id)) continue;
+        seen.add(f.id);
+      }
+      if (!f.iframe && !f.changed) invisible.push(f.name);
+    }
+    await page.evaluate(() => document.getElementById('aid-no-transition')?.remove());
+    res.keyboard = seen.size < o.tabbable ? ['fail', `Tab reaches ${seen.size} of ${o.tabbable} controls`]
+      : invisible.length ? ['fail', `focus not visible (no change from the resting look) on: ${invisible.slice(0, 5).join(', ')}`]
+      : ['pass', `${seen.size} controls, focus visible`];
+  }
+  if (!applies('reduced_motion')) res.reduced_motion = NA('runs at the viewport and browser of its row only');
+  else {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const moving = await page.evaluate(() => [...document.querySelectorAll('body *')].filter(e => {
+      const s = getComputedStyle(e), ms = v => Math.max(0, ...String(v).split(',').map(x => parseFloat(x) * (x.trim().endsWith('ms') ? 1 : 1000)));
+      return (s.animationName !== 'none' && ms(s.animationDuration) > 10) || ms(s.transitionDuration) > 10; }).length);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    res.reduced_motion = moving ? ['fail', `${moving} element(s) still animate under prefers-reduced-motion`] : ['pass', ''];
+  }
+  res.touch_targets = vw > 430 ? NA(`desktop width ${vw}`) : o.small.length ? ['fail', `under 44 px: ${o.small.slice(0, 6).join(', ')}`] : ['pass', ''];
+  const edge = o.sticky.filter(x => x.edge);
+  res.safe_area = st.variant?.type !== 'pwa' ? NA('not a PWA') : !edge.length ? NA('no fixed panel at a screen edge')
+    : o.safe ? ['pass', 'env(safe-area-inset-*) used'] : ['fail', `fixed panels at a screen edge without env(safe-area-inset-*): ${edge.map(x => x.name).join(', ')}`];
+  // privacy: own = the preview's origin and the site's domain with its subdomains
+  const origin = new URL(url).origin;
+  const own = h => h === new URL(url).hostname || OWN_HOSTS.some(d => h === d || h.endsWith('.' + d));
+  const third = [...new Set(requested.filter(u => /^https?:/.test(u) && new URL(u).origin !== origin && !own(new URL(u).hostname)).map(u => new URL(u).host))];
+  const cookies = st.variant?.type === 'web' || !st.variant?.type ? (await page.context().cookies(url)).map(c => c.name) : [];
+  const priv = [];
+  if (third.length) priv.push(`third-party requests before consent: ${third.join(', ')}`);
+  if (cookies.length) priv.push(`cookies set on load: ${cookies.join(', ')}`);
+  if (o.cover.some(a => a > 0.3)) priv.push('a consent banner covers more than 30 % of the screen');
+  res.privacy_before_consent = priv.length ? ['fail', priv.join('; ')] : ['pass', ''];
   return res;
 }
 
@@ -342,7 +502,8 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand) {
 const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match',
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
-  'brand_package', 'design_standard_doc'];
+  'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
+  'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -382,6 +543,21 @@ const seoRow = (p, ai = false) => {
   const txt = xs => xs.map(f => `${f.check}: ${f.detail}`).join('; ');
   return bl.length ? ['fail', `BLOCKER ${txt(bl)}`] : ['pass', wn.length ? `WARN ${txt(wn)}` : ''];
 };
+function runPy(script, args, label) {
+  const r = spawnSync('python3', [path.join(HERE, '../../scripts', script), ...args], { encoding: 'utf8' });
+  const miss = (r.stdout || '').split('\n').filter(l => l.startsWith('MISSING')).map(l => l.slice(8));
+  if (r.status !== 0 && !(r.status === 1 && miss.length)) return ['not_covered', `${label} exit ${r.status}: ${(r.stderr || '').trim().split('\n').pop().slice(0, 200)}`];
+  return miss.length ? ['fail', `missing: ${miss.join('; ')}`] : ['pass', ''];
+}
+// vision_doc: docs/product-vision.md has the template's parts (only with options.vision)
+const visionDoc = !want('vision_doc') ? null : !project ? ['not_covered', 'no --project']
+  : !st.options?.vision ? NA('no product vision in this project (options.vision false)') : runPy('aid-ui-vision-check.py', [project], 'aid-ui-vision-check.py');
+// coverage: the coverage map still matches the standards (aid-ui-coverage.sh check exit 0)
+const coverageRow = !want('coverage') ? null : (() => {
+  if (!project) return ['not_covered', 'no --project'];
+  const r = spawnSync('bash', [path.join(HERE, '../../scripts/aid-ui-coverage.sh'), 'check', project], { encoding: 'utf8' });
+  return r.status === 0 ? ['pass', ''] : r.status === 2 ? ['not_covered', `aid-ui-coverage.sh check could not read the standards: ${(r.stderr || '').trim().split('\n').pop().slice(0, 200)}`] : ['fail', `aid-ui-coverage.sh check exit ${r.status}: ${((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(0, 3).join(' | ').slice(0, 300)}`];
+})();
 const brandPkg = want('brand_package') ? (project ? runBrandPackage() : ['not_covered', 'no --project']) : null;
 const designDoc = want('design_standard_doc') ? (project ? runDesignDoc() : ['not_covered', 'no --project']) : null;
 const glyphs = {}, lhs = {};
@@ -393,6 +569,7 @@ let creds = {};
 if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json'))) creds = readJson(path.join(project, '.aid-ui/test-credentials.json'));
 
 const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
+  'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
   'no_overlap', 'page_weight', 'business_minimum'];
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
@@ -425,7 +602,7 @@ for (const b of BRS) {
       }
       // page, role and state come from the project's state: one filename segment, no path separators or leading dots
       const key = [b, v, `${m.page}${m.role ? '.' + m.role : ''}${m.state ? '.' + m.state : ''}.png`.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '_')];
-      const r = await pageRows(ctx, flow ? base : urlOf(m.page), key, m.role, m.state, run, facts, brand);
+      const r = await pageRows(ctx, flow ? base : urlOf(m.page), key, m.role, m.state, run, facts, brand, c => applies(c, m));
       if (r.error) {
         for (const c of named) put(m, c, flow && c === 'app_task_states' ? 'fail' : 'not_covered', `${flow ? 'scenario' : 'page'} failed: ${r.error}`);
         continue;
@@ -456,6 +633,8 @@ for (const b of BRS) {
       if (seo) { put(m, 'seo', ...seoRow(m.page)); put(m, 'ai_search', ...seoRow(m.page, true)); }
       if (brandPkg) put(m, 'brand_package', ...brandPkg);
       if (designDoc) put(m, 'design_standard_doc', ...designDoc);
+      if (visionDoc) put(m, 'vision_doc', ...visionDoc);
+      if (coverageRow) put(m, 'coverage', ...coverageRow);
     }
     await ctx.close();
   }

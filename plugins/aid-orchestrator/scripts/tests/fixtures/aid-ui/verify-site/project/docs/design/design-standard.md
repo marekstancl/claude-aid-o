@@ -18,11 +18,13 @@ Jediný zdroj: frontmatter `DESIGN.md` → CSS proměnné (`aid-ui-design-to-css
 |---|---|
 | `ink` | `#1a1a1a` |
 | `flour` | `#faf6ee` |
+| `paper` | `#ffffff` |
 
 ### Typografie
 
 | role | písmo | velikost | tučnost | řádkování | prostrkání |
 |---|---|---|---|---|---|
+| body | `Geist` | `` | `` | `` | `` |
 
 ### Rozměry
 

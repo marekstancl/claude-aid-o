@@ -71,7 +71,9 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    u referencí, a další textová pole, která se ukážou na rubu karty „Detaily").
    Druhy otázek: variant, vision, identity, seo_brief, structure, task_map,
    content_plan, defer_content, facts, references, direction, approve_page,
-   exception, coverage_drift, design_standard, handover.
+   exception, coverage_drift, design_standard, handover, notifications (PWA: posílá aplikace
+   oznámení, o jakých událostech a proč; když ano, obrazovka přihlášení k odběru a karta povolení
+   se stavy jako snímek - `pwa-notifications-standard`).
    Na co PM odpovídá textem nebo potvrzením (fakta k ověření, souhlasy, kontrola názvu),
    polož jako otázku `facts` s `outcome`. Co zvládneš sám (rešerše názvu v rejstříku a na
    webu, dohledání údaje), udělej předem a PM dej rozhodnutí nad výsledkem („Našel jsem

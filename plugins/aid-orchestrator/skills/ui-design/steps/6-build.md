@@ -49,6 +49,14 @@ u aplikace `webapp-tasks-states-standard.md` (UA-1..UA-11) - čti živě.
    `python3 -m http.server --bind 127.0.0.1 --directory <složka buildu> "$port" &`
    (zapamatuj `pid=$!`), `aid-ui-tool.sh glyph http://127.0.0.1:$port/<stránka>`
    pro každou stránku, pak `kill "$pid"`; exit 1 → oprav písmo.
+5b. Co brána měří na každé stránce (stav to rovnou, ne až po bráně): barvy a písma jen
+   z tokenů `DESIGN.md` (`token_usage`); ovládací prvky na mobilu aspoň 44 × 44 px včetně
+   loga v hlavičce a odkazů menu (`touch_targets`); viditelný fokus u každého prvku, past
+   na roboty s `tabindex="-1"` (`keyboard`); žádný pohyb při `prefers-reduced-motion`
+   (`reduced_motion`); přilepený panel s přetékajícím obsahem má vlastní scroll a
+   `overscroll-behavior: contain` (`sticky_panels`); před souhlasem žádný cizí požadavek
+   ani cookie, písma a obrázky z vlastní domény (`privacy_before_consent`); PWA: fixní
+   panely u okraje s `env(safe-area-inset-*)` (`safe_area`).
 6. Česká typografie v generátoru (šablona nebo skript, který HTML píše):
    nezlomitelná mezera po jednopísmenných předložkách a spojkách
    (k s v z o u a i, i velká), jen v textu mimo značky:
