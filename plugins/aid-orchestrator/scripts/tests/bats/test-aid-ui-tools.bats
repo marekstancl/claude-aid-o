@@ -137,3 +137,54 @@ STUB
   run "$TOOL" nope
   [ "$status" -eq 2 ]
 }
+
+@test "wordmark: Czech name from split font files, accents and descenders inside the viewBox; outlines vs live text; png" {
+  F="$BATS_TEST_DIRNAME/../fixtures/aid-ui/verify-site/site/fonts"
+  B="$T/pkg"; mkdir -p "$B/symbol"
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0,0,32,32" fill="#c00"><rect width="32" height="32"/></svg>' >"$B/symbol/s-color.svg"
+  cat >"$T/wm.json" <<J
+{"package": "$B", "base": "x-logo", "name": "Žluťoučký gyp", "font": ["$F/geist-latin.woff2", "$F/geist-latin-ext.woff2"],
+ "family": "Geist", "weight": 600, "licence": "SIL OFL 1.1 -- test", "variants": [{"id": "color", "symbol": "symbol/s-color.svg", "text": "#111"},
+ {"id": "color-on-dark", "symbol": "symbol/s-color.svg", "text": "#eee"}]}
+J
+  run bash "$TOOL" wordmark --spec "$T/wm.json" --root /
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '<text' "$B/source/x-logo-master.svg"
+  grep -q 'licence SIL OFL 1.1 - test' "$B/source/x-logo-master.svg"   # "--" never inside an XML comment
+  ! grep -q '<text' "$B/source/x-logo-master-outlines.svg"
+  grep -q 'fill="#c00"' "$B/logo/x-logo-color.svg"    # the symbol keeps its root fill
+  grep -q 'fill="#eee"' "$B/logo/x-logo-color-on-dark.svg"
+  # the viewBox reaches above 0 (Ž) and below 64 (g, y, p)
+  python3 - "$B/logo/x-logo-color.svg" <<'P'
+import re, sys
+x, y, w, h = map(float, re.search(r'viewBox="([^"]+)"', open(sys.argv[1]).read()).group(1).split())
+assert y < 0 and y + h > 64, (y, h)
+P
+  run bash "$TOOL" png "$B/logo/x-logo-color.svg" "$T/x.png" 600
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  python3 -c 'import struct,sys; d=open(sys.argv[1],"rb").read(24); w,h=struct.unpack(">II",d[16:24]); assert w==600 and h>50, (w,h)' "$T/x.png"
+}
+
+@test "wordmark: a name no font file can set is exit 1; a bad spec (path in id, colour, broken JSON) is exit 2; a symbol with an ENTITY is refused" {
+  F="$BATS_TEST_DIRNAME/../fixtures/aid-ui/verify-site/site/fonts"
+  B="$T/pkg"; mkdir -p "$B/symbol"
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64"/></svg>' >"$B/symbol/s.svg"
+  spec() { echo "{\"package\":\"$B\",\"base\":\"$1\",\"name\":\"$2\",\"font\":\"$F/geist-latin.woff2\",\"family\":\"Geist\",\"weight\":400,\"variants\":[{\"id\":\"color\",\"symbol\":\"symbol/s.svg\",\"text\":\"$3\"}]}" >"$T/wm.json"; }
+  spec x '日本' '#000'; run bash "$TOOL" wordmark --spec "$T/wm.json" --root /
+  [ "$status" -eq 1 ]; [[ "$output" == *"no font file has a glyph"* ]]
+  spec ../x Ok '#000'; run bash "$TOOL" wordmark --spec "$T/wm.json" --root /
+  [ "$status" -eq 2 ]
+  spec x Ok 'red" onload="x'; run bash "$TOOL" wordmark --spec "$T/wm.json" --root /
+  [ "$status" -eq 2 ]
+  echo '{"name": 1}' >"$T/wm.json"; run bash "$TOOL" wordmark --spec "$T/wm.json"
+  [ "$status" -eq 2 ]; [[ "$output" == *"bad spec"* ]]
+  printf '<?xml version="1.0"?><!DOCTYPE s [<!ENTITY e "x">]><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">&e;</svg>' >"$B/symbol/s.svg"
+  spec x Ok '#000'; run bash "$TOOL" wordmark --spec "$T/wm.json" --root /
+  [ "$status" -eq 1 ]; [[ "$output" == *"DOCTYPE or ENTITY"* ]]
+}
+
+@test "png refuses an SVG without a viewBox" {
+  echo '<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>' >"$T/n.svg"
+  run bash "$TOOL" png "$T/n.svg" "$T/n.png" 100
+  [ "$status" -eq 1 ]; [[ "$output" == *"no usable viewBox"* ]]
+}

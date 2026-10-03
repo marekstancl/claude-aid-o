@@ -47,6 +47,14 @@ z inventury kroku 0.
    jen pro kontexty ze zadání: symbol s názvem (hlavička, e-mailový podpis, PDF,
    nabídka, vizitka, tisk) → `logo/` s názvem barevně, u webu nebo tmavého kontextu
    i na tmavém, u tisku i černě, vždy SVG + PNG; PWA → `lockup/` světlý a tmavý.
+   Logo s názvem a jeho zdroj vyrábí `aid-ui-tool.sh wordmark --spec .aid-ui/wordmark.json` (z kořene projektu;
+   `font` = všechny soubory písma webu, latin i latin-ext, aby šla čeština)
+   (symbol z `symbol/` + název písmem webu, výška symbolu = 1,3× výška písmen podle
+   `brand-brief.md`; zapíše `source/<base>-master.svg` s živým textem, písmem a licencí,
+   `source/<base>-master-outlines.svg` v křivkách a `logo/<base>-<varianta>.svg`; formát
+   specifikace je v hlavičce `scripts/aid-ui-wordmark.py`). PNG každé varianty:
+   `aid-ui-tool.sh png logo/<soubor>.svg logo/<soubor>.png 1200`. Písmo webu se určuje
+   ve výběru vzhledu (krok 5), takže logo s názvem vzniká po něm, nejpozději v kroku 6.
    Co přesně je povinné, vypíše `python3 scripts/aid-ui-brand-package.py <project>`
    (seznam se odvozuje z varianty, `options.identity` a oddílu „Kontexty použití"
    zadání; exit 1 = co chybí). Rozšířená sada (sociální sítě, tiskoviny, e-mailový

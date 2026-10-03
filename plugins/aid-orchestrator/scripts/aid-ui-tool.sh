@@ -13,19 +13,47 @@
 #                                                      aid-ui-webp.mjs; the written file must be
 #                                                      at most <n> kB (default 200), else exit 1
 #   verify <args>                                      aid-ui-verify.mjs (arrives with the gate)
+#   png <src.svg> <out.png> <width>                    aid-ui-png.mjs: an SVG as a PNG (transparent)
+#   measure <base url> <out.json> <page>...            aid-ui-measure.mjs: what the built site uses
+#                                                      (control roles, fields, type, breakpoints) for
+#                                                      the project design standard (step 7 bod 4)
+#   wordmark --spec <wordmark.json>                    scripts/aid-ui-wordmark.py: the logo with the
+#                                                      name (master with live text, outlines, logo/
+#                                                      variants). Python fontTools + brotli (MIT) live in
+#                                                      ${AID_UI_PYFONT:-~/.cache/aid-ui/pyfont}, a venv made
+#                                                      on first use (pinned versions, under flock); nothing
+#                                                      is installed into the system or the project.
 #
 # Exit: the tool's own exit; 1 npm ci failed or file over --max-kb; 2 usage.
 # =============================================================================
 set -euo pipefail
 
 LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib/ui-fidelity" && pwd)"
-usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify <args>" >&2; exit 2; }
+usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify|png|measure|wordmark <args>" >&2; exit 2; }
 (( $# >= 1 )) || usage
 tool="$1"; shift
+if [[ "$tool" == wordmark ]]; then
+  VENV="${AID_UI_PYFONT:-$HOME/.cache/aid-ui/pyfont}"
+  PINS="fonttools==4.60.1 brotli==1.1.0"
+  mkdir -p "$(dirname "$VENV")"
+  exec 8>"$VENV.lock"; flock 8
+  if [[ "$(cat "$VENV/.aid-installed" 2>/dev/null)" != "$PINS" ]]; then
+    echo "aid-ui-tool.sh: installing $PINS into $VENV" >&2
+    rm -rf "$VENV"
+    if ! { python3 -m venv "$VENV" && "$VENV/bin/pip" install --quiet $PINS >&2; }; then
+      rm -rf "$VENV"; echo "ERROR: aid-ui-tool.sh: could not install $PINS into $VENV" >&2; exit 1
+    fi
+    printf '%s' "$PINS" > "$VENV/.aid-installed"
+  fi
+  flock -u 8; exec 8>&-
+  exec "$VENV/bin/python" "$(dirname "${BASH_SOURCE[0]}")/aid-ui-wordmark.py" "$@"
+fi
 case "$tool" in
   glyph)  js=aid-ui-glyph-check.mjs ;;
   webp)   js=aid-ui-webp.mjs ;;
   verify) js=aid-ui-verify.mjs ;;
+  png)    js=aid-ui-png.mjs ;;
+  measure) js=aid-ui-measure.mjs ;;
   *) usage ;;
 esac
 [[ -f "$LIB/$js" ]] || { echo "ERROR: aid-ui-tool.sh: $LIB/$js missing" >&2; exit 1; }
