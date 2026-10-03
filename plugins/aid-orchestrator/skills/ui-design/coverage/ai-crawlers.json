@@ -1,0 +1,6 @@
+{
+  "_comment": "Robots /aid-ui checks in robots.txt (aid-ui-seo-check.py --ai). search_engines are always allowed and never a PM choice; ai_search and training follow the PM's policy in docs/seo/brief.md (section 'Politika AI robotů'). Names as the operators publish them; checked 1. 10. 2026 against the SEO standard (seo-audit-agent-standard §4, technicke-seo).",
+  "search_engines": ["Googlebot", "Bingbot"],
+  "ai_search": ["OAI-SearchBot", "ChatGPT-User", "Claude-SearchBot", "Claude-User", "PerplexityBot", "Perplexity-User"],
+  "training": ["GPTBot", "Google-Extended", "ClaudeBot", "CCBot"]
+}

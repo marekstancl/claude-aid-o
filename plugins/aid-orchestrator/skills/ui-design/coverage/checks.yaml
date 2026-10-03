@@ -1,7 +1,9 @@
 # Canonical gate check names of /aid-ui (P103). The gate (Step 7) implements
 # exactly these, the coverage map's script:<name> dispositions may name only
 # these, and the gate and `finish` share the matrix axes below.
-# Rules FB-1..FB-15 and FB-21..FB-24 of /ecosystem/specs/frontend-build-standard.
+# Rules FB-1..FB-15 and FB-21..FB-24 of /ecosystem/specs/frontend-build-standard, plus checks
+# beyond the FB rules that implement other ecosystem standards (named with their source below;
+# P103 extension, rules not yet numbered in the frontend-build standard).
 viewports: [390, 768, 1440]
 browsers: [chromium, webkit]
 warn_only: [lighthouse_mobile]   # measured and reported, never blocks (FB-13)
@@ -11,6 +13,7 @@ warn_only: [lighthouse_mobile]   # measured and reported, never blocks (FB-13)
 applies:
   glyph_coverage: {browsers: [chromium], flows: false}
   lighthouse_mobile: {browsers: [chromium], flows: false}
+  ai_search: {browsers: [chromium], flows: false}   # reads files, not the rendering: one browser
 checks:
   http_200: every page answers HTTP 200 (FB-1)
   glyph_coverage: every character renders in the intended font, Czech diacritics included, no system fallback (FB-2)
@@ -25,6 +28,7 @@ checks:
   image_weight: images are WebP or AVIF, each at most 200 kB (FB-12)
   lighthouse_mobile: Lighthouse mobile score measured and reported; warning only (FB-13)
   seo: aid-ui-seo-check.py passes, a BLOCKER finding fails (FB-14)
+  ai_search: AI search and citation readiness - the PM's AI robot policy in robots.txt, JSON-LD on every indexable page matching the facts register, main text in the HTML, no snippet bans, no llms.txt without a decision (seo-audit-agent-standard §3-4, seo/technicke-seo; aid-ui-seo-check.py --ai)
   app_task_states: an application's task x state scenarios from the task map pass (FB-11)
   no_overlap: no two visible texts, controls or images overlap (FB-21)
   brand_consistency: every text uses a webfont the site declares, and header and footer are the same on every page (FB-22)

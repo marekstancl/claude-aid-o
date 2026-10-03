@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 568          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 569          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4162,6 +4162,22 @@ enforcements:
     recovery: "The failing case names the file. Put the decide call back at the point of the step's Postup where the decision is made, with a canonical --step title."
     test_covers: "SKILL.md names decide, the outcome rule and the six titles, has no overview and no Průběh; 1v-vision, 6-build and 7-verify name the call; every --step in the steps is canonical (test-aid-ui-skill-rules.bats)."
     test: "scripts/tests/bats/test-aid-ui-skill-rules.bats"
+
+  - id: aid_ui_ai_search
+    type: 12
+    source: "scripts/aid-ui-seo-check.py (--ai) + lib/ui-fidelity/aid-ui-verify.mjs (row ai_search)"
+    instruction: "skills/ui-design/steps/1s-seo.md (Politika AI robotů), steps/6-build.md bod 3"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That AI assistants actually cite the site (the SEO standard forbids promising it), that the policy the PM chose suits the business, or that the live site behind a CDN/WAF lets the robots in (checked on the build only; a live run after deployment is not part of /aid-ui)."
+    description: "P103 extension K2 - the gate's ai_search row: the PM's AI robot policy (docs/seo/brief.md 'Politika AI robotů') exists and robots.txt follows it with an own group per robot of coverage/ai-crawlers.json, search engines never blocked; JSON-LD on every indexable page; the organisation matches the facts register (brand, IČO in identifier, never in taxID); main text in the HTML; no snippet bans or llms.txt without a decision. The gate now also passes the brief (page table, H1) and the facts to the SEO check."
+    recovery: "The BLOCKER line names the robot, page or field. Ask the PM for the policy in step 1s, write robots.txt and JSON-LD per steps/6-build.md bod 3, rebuild and run the gate again."
+    test_covers: "policy followed = no ai-* blocker and the summary counts; missing policy, robot without its own group, blocked search engine, policy mismatch; page without JSON-LD, IČO in taxID, another brand, JS-only content, nosnippet; llms.txt without agreement; any business subtype recognised (test-aid-ui-seo-check.bats)."
+    test: "scripts/tests/bats/test-aid-ui-seo-check.bats"
 
   - id: aid_ui_outcome_length
     type: 12

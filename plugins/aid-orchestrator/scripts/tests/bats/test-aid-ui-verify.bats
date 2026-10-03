@@ -76,11 +76,54 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
 
 @test "the fixed copy passes every row" {
   cp -r "$FX/fixed/." "$SITE/"
+  # the SEO brief: page table (H1 as built) and the PM's AI robot policy the fixed robots.txt follows
+  mkdir -p "$PROJ/docs/seo"
+  printf '| URL | H1 |\n|---|---|\n| / | Pekárna U Mlýna |\n| /o-nas | O nás |\n\n## Politika AI robotů\n- vyhledávání a citace: povolit\n- trénink: zakázat\n' >"$PROJ/docs/seo/brief.md"
+  # SEO is part of the project and the PM approved exactly this brief (step 1s)
+  sha="$(sha256sum "$PROJ/docs/seo/brief.md" | cut -d' ' -f1)"
+  jq --arg t "docs/seo/brief.md@$sha" '.options.seo = true | .answers["q-seo"] = {kind: "seo_brief", decision: "approve", target: $t}' \
+    "$PROJ/docs/design/brand-state.json" >"$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass")' "$RES" | head; return 1; }
   [ "$(jq '[.rows[] | select(.status != "pass")] | length' "$RES")" -eq 0 ]
   jq -e '.gate.build_id' "$PROJ/docs/design/brand-state.json" >/dev/null
+  # ai_search ran (not N/A) and its findings stay out of the seo row
+  [ "$(jq '[.rows[] | select(.check == "ai_search")] | length' "$RES")" -gt 0 ]
+  ! jq -r '.rows[] | select(.check == "ai_search") | .detail' "$RES" | grep -q 'N/A'
+  ! jq -r '.rows[] | select(.check == "seo") | .detail' "$RES" | grep -q 'ai-'
+  jq -e '.indexable_pages == 2 and .pages_with_jsonld == 2 and .ai.BLOCKER == 0' "$PROJ/.aid-ui/verify/seo-summary.json" >/dev/null
+}
+
+@test "ai_search: N/A without options.seo; with it a missing policy fails the home page only, page findings on their page" {
+  cp -r "$FX/fixed/." "$SITE/"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$(st ai_search index.html)" == pass ]
+  jq -r '.rows[] | select(.check == "ai_search") | .detail' "$RES" | grep -q 'N/A: SEO is not part of this project'
+  jq '.options.seo = true' "$PROJ/docs/design/brand-state.json" >"$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$status" -eq 3 ]
+  [ "$(st ai_search index.html)" == fail ]
+  jq -r '.rows[] | select(.check == "ai_search" and .page == "index.html") | .detail' "$RES" | grep -q 'ai-policy'
+  ! jq -r '.rows[] | select(.check == "ai_search" and .page == "o-nas/index.html") | .detail' "$RES" | grep -q 'ai-policy'
+  [ "$(jq '[.rows[] | select(.check == "ai_search" and .browser == "webkit")] | length' "$RES")" -eq 0 ]
+  ! jq -r '.rows[] | select(.check == "seo") | .detail' "$RES" | grep -q 'ai-'
+}
+
+@test "a crashed SEO check (exit 1, no report) is not_covered, not a pass" {
+  mkdir -p "$T/out"
+  echo '{"viewports":[390],"browsers":["chromium"],"checks":{"seo":"x","ai_search":"x"}}' > "$T/ck.json"
+  echo '{"build":{"id":"x","fingerprints":{"index.html":"a","_site":"c"}},"options":{"seo":true}}' > "$T/state.json"
+  printf 'import sys\nsys.stderr.write("Traceback: boom\\n")\nsys.exit(1)\n' > "$T/crash.py"
+  url="$(AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" | sed -n 's/^URL: //p')"
+  run bash "$SC/aid-ui-tool.sh" verify --state "$T/state.json" --checks "$T/ck.json" --site "$SITE" \
+    --base "$url" --out "$T/out" --seo "$T/crash.py"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  RES="$T/out/result.json"
+  [ "$(st seo index.html)" == not_covered ]
+  [ "$(st ai_search index.html)" == not_covered ]
+  jq -r '.rows[] | select(.check == "seo") | .detail' "$RES" | grep -q 'exit 1: Traceback: boom'
 }
 
 @test "an inline SVG logo passes only with the brand package's drawing; colour, whitespace and ids do not count" {

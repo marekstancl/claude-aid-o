@@ -246,3 +246,127 @@ fix_site() {
   ! grep -qE '^WARN .* (img-alt|canonical) ' <<<"$output"
   grep -qx 'OK 404.html canonical not needed on a noindex not-found page' <<<"$output"
 }
+
+# ---- P103 extension K2: --ai (the gate's ai_search row) and the site-level WARN checks ----
+LOREM="Pečeme kváskový chleba každou noc z mouky od mlynáře za městem. Recept se nemění třicet let a každý bochník kyne přes noc, aby měl chuť a vydržel celý týden čerstvý. Otevřeno denně od šesti."
+ai_page() {   # ai_page <dir> <title> <jsonld or ''> [extra head] [body]
+  mkdir -p "$1"
+  cat >"$1/index.html" <<HTML
+<!doctype html><html lang="cs"><head><title>$2</title>$4
+${3:+<script type="application/ld+json">$3</script>}</head>
+<body><main>${5:-<h1>$2</h1><p>$LOREM</p><p><a href="/kontakt/">Kontakt</a> <a href="/">Úvod</a></p>}</main></body></html>
+HTML
+}
+ORG='{"@context":"https://schema.org","@graph":[{"@type":"Bakery","@id":"#org","name":"Pekárna","identifier":"12345678"},{"@type":"WebPage","publisher":{"@id":"#org"},"dateModified":"2026-10-01"}]}'
+ai_site() {
+  S="$BATS_TEST_TMPDIR/ai"; mkdir -p "$S"
+  ai_page "$S" "Kváskový chleba z Brna - Pekárna" "$ORG"
+  ai_page "$S/kontakt" "Kontakt - Pekárna" "$ORG"
+  cat >"$S/robots.txt" <<R
+User-agent: *
+Allow: /
+R
+  for b in OAI-SearchBot ChatGPT-User Claude-SearchBot Claude-User PerplexityBot Perplexity-User; do printf 'User-agent: %s\nAllow: /\n\n' "$b" >>"$S/robots.txt"; done
+  for b in GPTBot Google-Extended ClaudeBot CCBot; do printf 'User-agent: %s\nDisallow: /\n\n' "$b" >>"$S/robots.txt"; done
+  echo '{"brand":{"value":"Pekárna"},"ico":{"value":"12345678"}}' >"$BATS_TEST_TMPDIR/facts.json"
+  printf '| URL | H1 |\n|---|---|\n\n## Politika AI robotů\n- vyhledávání a citace: povolit\n- trénink: zakázat\n' >"$BATS_TEST_TMPDIR/brief.md"
+}
+ai() { run python3 "$CHECK" "$S" --ai --facts "$BATS_TEST_TMPDIR/facts.json" --brief "$BATS_TEST_TMPDIR/brief.md" "$@"; }
+
+@test "K2 --ai: a site that follows the policy has no ai-* blocker; the summary counts it" {
+  ai_site
+  ai --summary "$BATS_TEST_TMPDIR/sum.json"
+  ! grep -E '^BLOCKER .* ai-' <<<"$output"
+  grep -q "^OK index.html ai-entity IČO in identifier" <<<"$output"
+  grep -q '^OK robots.txt ai-robots GPTBot: blocked' <<<"$output"
+  grep -q '^OK robots.txt ai-robots OAI-SearchBot: allowed' <<<"$output"
+  jq -e '.indexable_pages == 2 and .pages_with_jsonld == 2 and .ai_policy == {"ai_search": true, "training": false} and .ai.BLOCKER == 0' "$BATS_TEST_TMPDIR/sum.json" >/dev/null
+}
+
+@test "K2 --ai: no policy in the brief, a robot without its own group, a blocked search engine or a policy mismatch is a BLOCKER" {
+  ai_site
+  printf '| URL | H1 |\n|---|---|\n' >"$BATS_TEST_TMPDIR/brief.md"
+  ai; [ "$status" -eq 1 ]; grep -q '^BLOCKER brief ai-policy' <<<"$output"
+  ai_site
+  sed -i '/User-agent: CCBot/,+1d' "$S/robots.txt"
+  ai; grep -q '^BLOCKER robots.txt ai-robots CCBot: allowed, no own User-agent group' <<<"$output"
+  ai_site
+  printf 'User-agent: Googlebot\nDisallow: /\n' >>"$S/robots.txt"
+  ai; grep -q '^BLOCKER robots.txt ai-robots Googlebot blocked' <<<"$output"
+  ai_site
+  sed -i 's/- trénink: zakázat/- trénink: povolit/' "$BATS_TEST_TMPDIR/brief.md"
+  ai; grep -q '^BLOCKER robots.txt ai-robots GPTBot: blocked; the policy says allow' <<<"$output"
+}
+
+@test "K2 --ai: a page without JSON-LD, the IČO in taxID, another brand name, JS-only content and nosnippet are BLOCKERs" {
+  ai_site
+  ai_page "$S/kontakt" "Kontakt - Pekárna" ""
+  ai; grep -q '^BLOCKER kontakt/index.html ai-jsonld no JSON-LD block' <<<"$output"
+  ai_site
+  # the publisher inline (nested), another name and the IČO in taxID; a client organisation is not compared
+  ai_page "$S" "Kváskový chleba z Brna - Pekárna" '{"@context":"https://schema.org","@graph":[{"@type":"WebPage","publisher":{"@type":"Bakery","name":"Jiná","taxID":"12345678"}},{"@type":"Organization","name":"Klient s.r.o.","identifier":"99999999"}]}'
+  ai; grep -q 'ai-entity the IČO is in taxID' <<<"$output"
+  grep -q "ai-entity organisation name 'Jiná', facts say 'Pekárna'" <<<"$output"
+  ! grep -q "Klient" <<<"$output"
+  ai_site
+  ai_page "$S" "Kváskový chleba z Brna - Pekárna" '{"@context":"https://schema.org","@type":"Bakery","name":"Pekárna","identifier":"12345678"}'
+  ai; grep -q '^BLOCKER index.html ai-jsonld no WebPage-like node' <<<"$output"
+  ai_site
+  ai_page "$S/kontakt" "Kontakt - Pekárna" "$ORG" "" '<div id="app"></div><a href="/">Úvod</a>'
+  ai; grep -q '^BLOCKER kontakt/index.html ai-content' <<<"$output"
+  ai_page "$S/kontakt" "Kontakt - Pekárna" "$ORG" "" '<h1>Kontakt</h1><p>Zavolejte nebo napište, odpovíme do druhého dne.</p><a href="/">Úvod</a>'
+  ai; grep -q '^OK kontakt/index.html ai-content' <<<"$output"   # a short real page is fine
+  ai_site
+  ai_page "$S/kontakt" "Kontakt - Pekárna" "$ORG" '<meta name="robots" content="nosnippet">'
+  ai; grep -q '^BLOCKER kontakt/index.html ai-snippet nosnippet' <<<"$output"
+}
+
+@test "K2 --ai: llms.txt needs 'llms.txt: ano' in the brief; build without --ai runs no ai-* check" {
+  ai_site
+  echo "# Pekárna" >"$S/llms.txt"
+  ai; grep -q '^BLOCKER llms.txt ai-llms present without' <<<"$output"
+  echo '- llms.txt: ano' >>"$BATS_TEST_TMPDIR/brief.md"
+  ai; grep -q '^OK llms.txt ai-llms present, agreed' <<<"$output"
+  run python3 "$CHECK" "$S"
+  ! grep -q ' ai-' <<<"$output"
+}
+
+@test "K2 site WARN: hidden text, a page not linked, near-duplicate pages, brand first in a title, missing hreflang" {
+  ai_site
+  ai_page "$S/praha" "Kváskový chleba Praha - Pekárna" "$ORG"
+  ai_page "$S/schovane" "Pekárna - schovaná stránka" "$ORG" "" "<h1>x</h1><p>$LOREM</p><a href=\"/kontakt/\">k</a><div style=\"display: none\">Levný chleba Brno levný chleba Praha levný</div>"
+  run python3 "$CHECK" "$S" --facts "$BATS_TEST_TMPDIR/facts.json"
+  grep -q '^WARN schovane/index.html hidden-text' <<<"$output"
+  grep -q '^WARN schovane/index.html click-depth not linked from the site' <<<"$output"
+  grep -q 'near-duplicate text differs from' <<<"$output"
+  grep -q '^WARN schovane/index.html title-brand-order brand first' <<<"$output"
+  ! grep -q ' hreflang ' <<<"$output"
+  sed -i 's/lang="cs"/lang="en"/' "$S/praha/index.html"
+  run python3 "$CHECK" "$S"
+  grep -q '^WARN praha/index.html hreflang site has 2 languages' <<<"$output"
+}
+
+@test "K2 --ai: the policy counts only when the PM approved this brief (--state seo_brief answer for its sha256)" {
+  ai_site
+  sha="$(sha256sum "$BATS_TEST_TMPDIR/brief.md" | cut -d' ' -f1)"
+  echo "{\"answers\":{\"q-seo\":{\"kind\":\"seo_brief\",\"decision\":\"approve\",\"target\":\"docs/seo/brief.md@$sha\"}}}" >"$BATS_TEST_TMPDIR/state.json"
+  ai --state "$BATS_TEST_TMPDIR/state.json"
+  grep -q '^OK brief ai-policy the PM approved this brief' <<<"$output"
+  echo "- poznámka agenta" >>"$BATS_TEST_TMPDIR/brief.md"   # changed after the approval
+  ai --state "$BATS_TEST_TMPDIR/state.json"
+  grep -q '^BLOCKER brief ai-policy the brief is not the one the PM approved' <<<"$output"
+}
+
+@test "K2 --ai: robots.txt with a BOM and Disallow: /*, a ### subheading in the policy, an agreed snippet ban, facts without brand" {
+  ai_site
+  sed -i 's|^Disallow: /$|Disallow: /*|' "$S/robots.txt"
+  printf '\xef\xbb\xbf' | cat - "$S/robots.txt" >"$S/r" && mv "$S/r" "$S/robots.txt"
+  printf '| URL | H1 |\n|---|---|\n\n## Politika AI robotů\n### Proč\nText.\n- vyhledávání a citace: povolit\n- trénink: zakázat\n- úryvky: zakázat\n' >"$BATS_TEST_TMPDIR/brief.md"
+  ai_page "$S/kontakt" "Kontakt - Pekárna" "$ORG" '<meta name="robots" content="nosnippet">'
+  echo '{"ico":{"value":"12345678"}}' >"$BATS_TEST_TMPDIR/facts.json"
+  ai
+  ! grep -E '^BLOCKER .* ai-' <<<"$output"
+  grep -q '^OK robots.txt ai-robots GPTBot: blocked' <<<"$output"
+  grep -q '^OK kontakt/index.html ai-snippet nosnippet (agreed in the brief)' <<<"$output"
+  grep -q '^WARN index.html ai-entity organisation not checked: the facts register has no brand' <<<"$output"
+}

@@ -6,7 +6,7 @@ user_invocable: false
 
 # Krok 7 - Ověření a převzetí
 
-**Last Updated:** 2026-09-30
+**Last Updated:** 2026-10-03
 
 ## Cíl
 
@@ -57,9 +57,12 @@ a `frontend-build-standard.md` (čti živě).
    a tabulka výjimek podle kontroly a stránky) a
    `aid-ui-state.sh body <project> kvalita --file <project>/.aid-ui/kvalita.html`,
    pak `aid-ui-state.sh chapter <project> kvalita navrh`.
-7. SEO (jen `options.seo`):
-   `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-seo-check.py" <složka buildu> --brief docs/seo/brief.md --json .aid-ui/seo/check.json`;
-   souhrn do kapitoly `seo` přes `aid-ui-state.sh body <project> seo --file <soubor>`.
+7. SEO (jen `options.seo`): výsledek je už v bráně (bod 1: řádky `seo` a `ai_search`,
+   čísla v `.aid-ui/verify/seo-summary.json`). Ruční běh stejně jako brána:
+   `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-seo-check.py" <složka buildu> --brief docs/seo/brief.md --ai --state docs/design/brand-state.json --facts <facts.json z docs/content/facts.yaml> [--local] --json .aid-ui/seo/check.json`.
+   `ai-policy` chybí nebo „brief is not the one the PM approved" → zpět do kroku 1s (otázka
+   `seo_brief` znovu, politiku AI robotů rozhoduje PM; nikdy ji nedopisuj sám). Souhrn do
+   kapitoly `seo` přes `aid-ui-state.sh body <project> seo --file <soubor>`.
 8. Kapitola `schvaleni` (tělo přes `aid-ui-state.sh body <project> schvaleni --file <soubor>`):
    stránky se schválením, výjimky s důvodem, souhrn souladu; pak
    `aid-ui-state.sh chapter <project> schvaleni navrh`. Převzetí všech kapitol
@@ -96,4 +99,4 @@ zákazníka, nebo tisk do PDF.
 Brána nebo skript skončí chybou → `ERROR:` PM s krokem, který to opraví;
 nic se neschvaluje. Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4.
 
-**Last Updated:** 2026-09-30
+**Last Updated:** 2026-10-03

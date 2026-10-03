@@ -6,7 +6,7 @@ user_invocable: false
 
 # Krok 3 - Obsahový plán
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-10-03
 
 ## Cíl
 
@@ -30,6 +30,10 @@ a chybějící podstatný materiál buď dodal, nebo ho odložil.
    použije (ceny, adresa, otevírací doba, čísla, citace, reference), se
    zdrojem (`PM`, soubor projektu). Co v registru není, stavba nesmí
    napsat (MUST 5). Otázka `facts` ve studiu, když fakt chybí.
+   Registr je mapa `klíč: {value, source}`; údaje o firmě mají pevné klíče, podle kterých
+   brána porovná strukturovaná data webu: `brand` (název), `ico`, `email`, `telephone`,
+   `domain` (`https://…`), `place`. Klíč, který firma nemá (telefon), se vynechá; bez
+   `brand` a `ico` brána firmu jen varuje jako nezkontrolovanou.
 3. Agent smí psát `draft` jen z faktů registru a podle „Jak psát vizi,
    slogany a texty" (`steps/1v-vision.md`); `confirmed_client` dává jen PM.
 4. Otázka `content_plan` ve studiu: tabulka položek (stránka, sekce,
@@ -60,4 +64,4 @@ Plán obsahu, fakta, dodání materiálu nebo jeho odložení - ve studiu.
 
 Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4. Skript odmítne → `ERROR:` PM.
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-10-03

@@ -32,7 +32,15 @@ u aplikace `webapp-tasks-states-standard.md` (UA-1..UA-11) - čti živě.
 2. Výstup: `<project>/site/`, nebo vlastní složka buildu projektu (Next.js
    `out/`, Astro `dist/`) - mimo `docs/` a `.aid-ui/`.
 3. SEO: title, meta description, H1 a strukturovaná data z `docs/seo/brief.md`
-   (H1 přesně podle tabulky).
+   (H1 přesně podle tabulky). Každá indexovatelná stránka má JSON-LD: typ stránky
+   (`WebPage`, `AboutPage`, `ContactPage`…) s `publisher` = organizace a `dateModified`;
+   organizace (název = `brand` z faktů, IČO v `identifier`, ne v `taxID`, to je DIČ; ulice
+   jen u místní firmy) stejně na všech stránkách. `robots.txt`: vlastní skupina
+   `User-agent` pro každého robota z `coverage/ai-crawlers.json` podle „Politika AI robotů"
+   v briefu (`Allow: /` nebo `Disallow: /`), vyhledávače povolené; `llms.txt` jen při
+   `llms.txt: ano`. Kontroluje `aid-ui-seo-check.py --ai` (řádek brány `ai_search`).
+   Brief nemá oddíl „Politika AI robotů" → stavba AI pravidla nepíše a vrací se do kroku
+   1s k otázce PM; oddíl nikdy nedopisuj sám.
 4. Obrázky: `aid-ui-tool.sh webp <src> <out.webp> <šířka> [kvalita]` pro
    každý obrázek; limit 200 kB hlídá nástroj (exit 1 → menší šířka nebo
    kvalita).

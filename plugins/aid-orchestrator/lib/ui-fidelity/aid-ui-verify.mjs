@@ -19,6 +19,11 @@
 // async ({page, base, role, state, credentials}) that drives the screen into that state and
 // throws on failure; credentials = <project>/.aid-ui/test-credentials.json[role] (test
 // accounts only). No script -> not_covered.
+// SEO (checks seo and ai_search): aid-ui-seo-check.py over the site once, with the project's
+// docs/seo/brief.md (page table, AI robot policy), --facts (brand, IČO, domain as --base-url),
+// --local when state.variant.local, and --ai --state when state.options.seo (else ai_search is
+// N/A); its ai-* findings are the ai_search row (site-wide ones on the home page only), the rest
+// the seo row. <out>/seo-summary.json holds the numbers the customer page shows.
 // Exit: 0 result written, 1 run error, 2 usage.
 import { chromium, webkit } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
@@ -64,8 +69,21 @@ function siteFile(u) {
 // ---- site-level runs (once per gate) ------------------------------------------------
 function runSeo() {
   const json = path.join(out, 'seo.json');
-  const r = spawnSync('python3', [opt.seo, site, '--json', json], { encoding: 'utf8' });
-  if (r.status !== 0 && r.status !== 1) return { error: `aid-ui-seo-check.py exit ${r.status}: ${(r.stderr || '').slice(0, 200)}` };
+  const args = [opt.seo, site, '--json', json, '--summary', path.join(out, 'seo-summary.json')];
+  const brief = project && path.join(project, 'docs/seo/brief.md');
+  if (brief && fs.existsSync(brief)) args.push('--brief', brief);
+  if (want('ai_search') && st.options?.seo) args.push('--ai', '--state', opt.state);
+  if (opt.facts) {
+    args.push('--facts', opt.facts);
+    const f = readJson(opt.facts), domain = Array.isArray(f) ? null : f?.domain;
+    const d = typeof domain === 'object' ? domain?.value : domain;
+    if (typeof d === 'string' && /^https?:\/\//.test(d)) args.push('--base-url', d);
+  }
+  if (st.variant?.local) args.push('--local');
+  const r = spawnSync('python3', args, { encoding: 'utf8' });
+  // exit 1 is "a BLOCKER found" only when the report exists; a crash also exits 1
+  if ((r.status !== 0 && r.status !== 1) || !fs.existsSync(json))
+    return { error: `aid-ui-seo-check.py exit ${r.status}: ${(r.stderr || '').trim().split('\n').pop().slice(0, 200)}` };
   return { findings: readJson(json) };
 }
 function brandFiles() {
@@ -301,7 +319,7 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand) {
 // ---- matrix -------------------------------------------------------------------------
 const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match',
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
-  'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum'];
+  'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -322,10 +340,15 @@ const applies = (check, m) => { const a = AP[check] || {};
   return (!a.browsers || a.browsers.map(String).includes(m.browser)) && !(a.flows === false && m.state); };
 const put = (m, check, status, detail) => { if (want(check) && applies(check, m)) rows.push({ check, ...m, status, detail: detail || '' }); };
 const facts = factLeaves(), brand = brandFiles();
-const seo = want('seo') ? runSeo() : null;
-const seoRow = p => {
+const seo = want('seo') || want('ai_search') ? runSeo() : null;
+// ai: false -> the seo row (every finding not named ai-*), true -> the ai_search row. Site-wide
+// ai-* findings (brief, robots.txt, llms.txt) go to the home page's rows only, not to every page.
+const home = pages.find(p => /^index\.html$/.test(p)) || pages[0];
+const seoRow = (p, ai = false) => {
   if (seo.error) return ['not_covered', seo.error];
-  const mine = seo.findings.filter(f => f.page === p || !pages.includes(f.page));
+  if (ai && !st.options?.seo) return ['pass', 'N/A: SEO is not part of this project (options.seo false)'];
+  const mine = seo.findings.filter(f => f.check.startsWith('ai-') === ai
+    && (f.page === p || (!pages.includes(f.page) && (!ai || p === home || p === '_site'))));
   const bl = mine.filter(f => f.level === 'BLOCKER'), wn = mine.filter(f => f.level === 'WARN');
   const txt = xs => xs.map(f => `${f.check}: ${f.detail}`).join('; ');
   return bl.length ? ['fail', `BLOCKER ${txt(bl)}`] : ['pass', wn.length ? `WARN ${txt(wn)}` : ''];
@@ -390,6 +413,7 @@ for (const b of BRS) {
         const site = requiredFiles(r.html).filter(x => !x.startsWith('no og') && !x.startsWith('og:'));
         put(m, 'required_files', site.length ? 'fail' : 'pass', site.join(', '));
         put(m, 'seo', ...(seo ? seoRow('_site') : ['pass', '']));
+        put(m, 'ai_search', ...(seo ? seoRow('_site', true) : ['pass', '']));
         continue;
       }
       if (b !== 'chromium') put(m, 'glyph_coverage', 'not_covered', 'the font check reads Chrome DevTools data; Chromium only');
@@ -398,7 +422,7 @@ for (const b of BRS) {
       if (want('lighthouse_mobile')) put(m, 'lighthouse_mobile', lhs[m.page].status, `${lhs[m.page].detail} (fixed mobile profile, one run per page, copied to every viewport)`);
       const miss = requiredFiles(r.html);
       put(m, 'required_files', miss.length ? 'fail' : 'pass', miss.join(', '));
-      if (seo) put(m, 'seo', ...seoRow(m.page));
+      if (seo) { put(m, 'seo', ...seoRow(m.page)); put(m, 'ai_search', ...seoRow(m.page, true)); }
     }
     await ctx.close();
   }

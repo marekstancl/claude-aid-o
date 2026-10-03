@@ -6,7 +6,7 @@ user_invocable: false
 
 # Krok 1s - SEO zadání
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-10-03
 
 ## Cíl
 
@@ -38,8 +38,24 @@ a stavba (krok 6) z něj vycházejí. Kapitola `seo` to nese.
    - `webapp` s veřejným jen přihlášením: brief pokrývá jen veřejné stránky.
    - Existující web: současné URL k zachování (přesměrování) patří do otázky.
    - `variant.local` = `false` → lokální SEO „nepoužito".
+   - Oddíl **„## Politika AI robotů"** se dvěma řádky přesně v tomto tvaru (čte je
+     `aid-ui-seo-check.py --ai`, brána ho bez nich nepustí):
+
+     ```
+     ## Politika AI robotů
+     - vyhledávání a citace: povolit
+     - trénink: zakázat
+     ```
+
+     Hodnoty určuje **PM** (standard SEO auditu §4: agent politiku robotů nikdy nemění
+     sám). Seznam robotů ve skupinách je `coverage/ai-crawlers.json`; běžné vyhledávače
+     (Google, Bing) jsou povolené vždy a nejsou volba. `llms.txt` nevzniká; jen když PM
+     výslovně chce, přidej řádek `- llms.txt: ano`.
 2. Otázka `seo_brief` ve studiu: `body` = seznam stránek (URL, H1, hlavní
-   dotaz, fakt/odhad) a URL k zachování; `target` = `docs/seo/brief.md@<sha256
+   dotaz, fakt/odhad), URL k zachování a politika AI robotů jako volba s doporučením
+   („Doporučuji povolit AI vyhledávání a citace (ChatGPT, Perplexity, Claude najdou
+   a ocitují web) a zakázat trénink modelů (texty nejdou zadarmo do dalších modelů)."),
+   v briefu zapsaná jako tento návrh; `target` = `docs/seo/brief.md@<sha256
    souboru>`. `return` s komentářem → uprav brief, otevři znovu (nejvýš dvě
    kola, pak nabídni jen domovskou stránku jako minimum - nikdy bez PM).
 3. Po `approve` tělo kapitoly (potvrzené stránky s H1, co je odhad) do
@@ -48,7 +64,7 @@ a stavba (krok 6) z něj vycházejí. Kapitola `seo` to nese.
 
 ## Co PM rozhoduje
 
-Seznam stránek a URL k zachování - ve studiu.
+Seznam stránek, URL k zachování a politika AI robotů - ve studiu.
 
 ## Zápis
 
@@ -59,4 +75,4 @@ Seznam stránek a URL k zachování - ve studiu.
 Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4; bez potvrzeného seznamu krok 2
 nezačne.
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-10-03
