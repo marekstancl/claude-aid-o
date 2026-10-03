@@ -79,6 +79,15 @@ a `frontend-build-standard.md` (čti živě).
    `ai-policy` chybí nebo „brief is not the one the PM approved" → zpět do kroku 1s (otázka
    `seo_brief` znovu, politiku AI robotů rozhoduje PM; nikdy ji nedopisuj sám). Souhrn do
    kapitoly `seo` přes `aid-ui-state.sh body <project> seo --file <soubor>`.
+7b. Stránka pro zákazníka (co všechno dostal: web, značka, viditelnost, pravidla rozvoje,
+   obsah; marketing „připravujeme"): až je brána zelená a zapsaná (`gate-record`) a jediný
+   otevřený řádek je `customer_page` (při prvním běhu `not_covered`, stránka ještě není),
+   `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-customer-page.py" <project>` →
+   `docs/zakaznik/index.html` + `www/` (`docs/zakaznik/index.html` ručně needituj, vždy znovu generátorem). Každé číslo bere ze stavu, výsledku brány, SEO
+   souhrnu brány, `DESIGN.md`, registru faktů, textů, SEO zadání, design standardu
+   a balíčku značky; nic se nepíše ručně. Odmítne (brána není zelená, jiný build) → bod 1.
+   Pak bránu znovu (bod 1, `gate-record`): řádek `customer_page` hlídá, že stránka je
+   z tohoto buildu a nemá interní slova. Odkaz na stránku pošli PM s náhledem.
 8. Kapitola `schvaleni` (tělo přes `aid-ui-state.sh body <project> schvaleni --file <soubor>`):
    stránky se schválením, výjimky s důvodem, souhrn souladu; pak
    `aid-ui-state.sh chapter <project> schvaleni navrh`. Převzetí všech kapitol

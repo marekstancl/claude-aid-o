@@ -20,6 +20,7 @@ applies:
   design_standard_doc: {scope: project}
   vision_doc: {scope: project}
   coverage: {scope: project}
+  customer_page: {scope: project}
   safe_area: {browsers: [chromium], viewports: [390], flows: false}
   token_usage: {browsers: [chromium], viewports: [1440]}
   keyboard: {browsers: [chromium], viewports: [1440]}
@@ -58,3 +59,4 @@ checks:
   page_weight: a page transfers at most 1 MB, no render-blocking script in head, large raster images have srcset (FB-23)
   business_minimum: the seller is identified (IČO) on every page and a form links to how personal data are processed (FB-24)
   screenshots_reviewed: the PM has reviewed a full-page screenshot of every page at every viewport (FB-15)
+  customer_page: the customer page (docs/zakaznik, aid-ui-customer-page.py) exists, is made from this build and holds no internal word; not_covered until it is generated after a green gate

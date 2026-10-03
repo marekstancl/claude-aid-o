@@ -92,6 +92,11 @@ measured() {
     "$PROJ/docs/design/brand-state.json" >"$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   measured
+  # step 7b: the first run has only the customer page open (not made yet), then the page, then the gate again
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$(jq -c '[.rows[] | select(.status != "pass") | [.check, .status]] | unique' "$RES")" == '[["customer_page","not_covered"]]' ] \
+    || { echo "$output"; jq -c '.rows[] | select(.status != "pass")' "$RES" | head; return 1; }
+  python3 "$SC/aid-ui-customer-page.py" "$PROJ" >/dev/null
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass")' "$RES" | head; return 1; }
   [ "$(jq '[.rows[] | select(.status != "pass")] | length' "$RES")" -eq 0 ]

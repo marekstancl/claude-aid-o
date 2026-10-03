@@ -503,7 +503,7 @@ const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls'
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
-  'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage'];
+  'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -557,6 +557,12 @@ const coverageRow = !want('coverage') ? null : (() => {
   if (!project) return ['not_covered', 'no --project'];
   const r = spawnSync('bash', [path.join(HERE, '../../scripts/aid-ui-coverage.sh'), 'check', project], { encoding: 'utf8' });
   return r.status === 0 ? ['pass', ''] : r.status === 2 ? ['not_covered', `aid-ui-coverage.sh check could not read the standards: ${(r.stderr || '').trim().split('\n').pop().slice(0, 200)}`] : ['fail', `aid-ui-coverage.sh check exit ${r.status}: ${((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(0, 3).join(' | ').slice(0, 300)}`];
+})();
+// customer_page: the page the customer gets exists, is from this build, has no internal word (exit 3 = not made yet)
+const customerPage = !want('customer_page') ? null : !project ? ['not_covered', 'no --project'] : (() => {
+  const r = spawnSync('python3', [path.join(HERE, '../../scripts/aid-ui-customer-page.py'), project, '--check'], { encoding: 'utf8' });
+  const say = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(0, 3).join(' | ').slice(0, 300);
+  return r.status === 0 ? ['pass', ''] : r.status === 1 ? ['fail', say] : ['not_covered', r.status === 3 ? 'made after a green gate (step 7b), then the gate again' : `aid-ui-customer-page.py exit ${r.status}: ${say}`];
 })();
 const brandPkg = want('brand_package') ? (project ? runBrandPackage() : ['not_covered', 'no --project']) : null;
 const designDoc = want('design_standard_doc') ? (project ? runDesignDoc() : ['not_covered', 'no --project']) : null;
@@ -635,6 +641,7 @@ for (const b of BRS) {
       if (designDoc) put(m, 'design_standard_doc', ...designDoc);
       if (visionDoc) put(m, 'vision_doc', ...visionDoc);
       if (coverageRow) put(m, 'coverage', ...coverageRow);
+      if (customerPage) put(m, 'customer_page', ...customerPage);
     }
     await ctx.close();
   }

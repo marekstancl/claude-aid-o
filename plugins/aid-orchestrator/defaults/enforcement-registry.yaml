@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 572          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 573          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4178,6 +4178,22 @@ enforcements:
     recovery: "The row names the colour, control, panel, request or missing part; fix the build or DESIGN.md and run the gate again."
     test_covers: "planted off-token colour, small control, third-party request, tall sticky panel and animation each fail; o-nas without them passes; invisible focus and a Tab trap fail while a honeypot, a checked radio, a frame, a fading focus, a checkbox in a label, a translucent token, a hidden dropdown and a decorative fixed layer do not; a cookie on load fails privacy; safe_area fail/pass/N-A; vision N/A and coverage pass (test-aid-ui-verify.bats); vision parts, labels, owner, date (test-aid-ui-vision-check.bats)."
     test: "scripts/tests/bats/test-aid-ui-verify.bats"
+
+  - id: aid_ui_customer_page
+    type: 12
+    source: "scripts/aid-ui-customer-page.py (generator and --check) + lib/ui-fidelity/aid-ui-verify.mjs (row customer_page)"
+    instruction: "skills/ui-design/steps/7-verify.md point 7b"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That the page reads well or that its wording suits the customer (the PM sees it before handing over); internal words outside the fixed list; a number the generator itself gets wrong beyond what its tests cover (the gate row does not recompute the numbers)."
+    description: "P103 extension K5 - the customer page: made only after a green gate of the current build (no fail or not_covered except its own row), every number from a machine source (state, gate result and its SEO summary, DESIGN.md, facts register, copy, SEO brief, design standard, brand package), SEO tiles always visible, no internal word. The gate row passes when the page exists, is from this build and holds no internal word; before the page is made it is not_covered, never pass."
+    recovery: "Generate the page after a green gate (step 7b) and run the gate again; a stale or hand-edited page is generated again."
+    test_covers: "numbers follow their sources and change with them; warn and customer_page rows not counted; SEO tiles outside details; AI tile from the policy or 'nenastaveno'; red gate, other build, a result edited after gate-record and --out into the site refused; N/A rows not counted; no SEO/standard/brand package/texts gives no invented zeros; --check missing/fresh/internal word/other build (test-aid-ui-customer-page.bats); the fixed copy passes every row after step 7b (test-aid-ui-verify.bats)."
+    test: "scripts/tests/bats/test-aid-ui-customer-page.bats"
 
   - id: aid_ui_design_standard_doc
     type: 12
