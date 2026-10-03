@@ -100,6 +100,14 @@
 #   fonts <project> <url-or-path>...     <link rel="stylesheet"> lines between <!-- fonts -->
 #                                        markers; only https://fonts.googleapis.com/… or a
 #                                        .css file under docs/brand/fonts/
+#   brand-waive-target <project>         prints the target of a brand package waiver: the JSON
+#                                        {"check":"brand_package","missing":[…]} of what
+#                                        aid-ui-brand-package.py reports missing now (sorted);
+#                                        refused when nothing is missing
+#   brand-waive <project> --answer <id>  kind exception, target = brand-waive-target; stores
+#                                        brand_package_waiver {missing, answer, reason, at}: the
+#                                        check passes as WAIVED only while exactly these parts
+#                                        are missing (another missing part voids it)
 #   attest <project> <item id> --note <text>   attestations.<id> = {note, at}, only for a
 #                                        coverage map item with an agent: disposition
 #   build-record <project> <site dir>    writes nothing into the site: refused when the site holds
@@ -134,7 +142,9 @@
 # AID_UI_COVERAGE_MAP points it at a fixture) x every combination: pages x viewports x
 # browsers (role and state ""); for variant webapp|pwa also structure.flows[].id (as page)
 # x its states x structure.roles (or "") x viewports x browsers. checks.yaml `applies.<check>`
-# narrows one check: `browsers: [..]` keeps only those, `flows: false` drops the flow rows;
+# narrows one check: `browsers: [..]` and `viewports: [..]` keep only those, `flows: false` drops
+# the flow rows, `scope: project` keeps one row (the home page index.html, else the first page,
+# at the last viewport and the first browser left) for a check of the whole project;
 # a combination a check does not apply to needs no row. Rows of page _site are extra. Open row = fail, not_covered, or warn on a check not in checks.yaml warn_only;
 # only pass, or warn on a warn_only check, satisfies a row without an exception.
 #
@@ -427,12 +437,18 @@ def val(x):
 def fp_of(st, fps, page):   # a flow row has no file of its own: bound to the whole build
     return fps.get(page, "build:" + st["build"]["id"])
 
-def combos(st, ck, fps, check=None):   # applies.<check>: browsers subset, flows false
+def combos(st, ck, fps, check=None):   # applies.<check>: browsers/viewports subset, flows false, scope project
     ap = (ck.get("applies") or {}).get(check) or {}
     vps, brs = [val(v) for v in ck.get("viewports") or []], [val(b) for b in ck.get("browsers") or []]
     if "browsers" in ap:
         brs = [b for b in brs if b in [val(x) for x in ap["browsers"] or []]]
-    out = [(p, v, b, "", "") for p in sorted(fps) if p != "_site" for v in vps for b in brs]
+    if "viewports" in ap:
+        vps = [v for v in vps if v in [val(x) for x in ap["viewports"] or []]]
+    pages = [p for p in sorted(fps) if p != "_site"]
+    if ap.get("scope") == "project":
+        home = "index.html" if "index.html" in pages else (pages[:1] or [""])[0]
+        return [(home, vps[-1], brs[0], "", "")] if home and vps and brs else []
+    out = [(p, v, b, "", "") for p in pages for v in vps for b in brs]
     if ((st.get("variant") or {}).get("type")) in ("webapp", "pwa") and ap.get("flows", True) is not False:
         s = st.get("structure") or {}
         roles = [val(r.get("id") if isinstance(r, dict) else r) for r in s.get("roles") or []] or [""]
@@ -779,6 +795,21 @@ case "$VERB" in
     jq_write --argjson s "$sel" --argjson f "$fps" --arg q "$ANSWER" --arg at "$(now)" \
       '.exceptions += [{selector: $s, fingerprints: $f, answer: $q, reason: (.answers[$q].comment // ""), at: $at}] | .consumed += [$q]'
     echo "EXCEPTION: $sel"
+    ;;
+
+  brand-waive-target|brand-waive)
+    need_state
+    bj="$(tmpfile brand-package.json)"
+    python3 "$HERE/aid-ui-brand-package.py" "$PROJECT" --json "$bj" >/dev/null 2>&1 || true
+    target="$(jq -S -c '{check: "brand_package", missing: (.missing | sort)}' "$bj" 2>/dev/null)" || target=""
+    rm -f "$bj"
+    [[ -n "$target" ]] || die "$VERB refused: aid-ui-brand-package.py gave no result for $PROJECT"
+    [[ "$(jq '.missing | length' <<<"$target")" -gt 0 ]] || die "$VERB refused: nothing is missing in the brand package; no waiver needed"
+    if [[ "$VERB" == brand-waive-target ]]; then echo "$target"; exit 0; fi
+    take_answer exception "$target"
+    jq_write --argjson t "$target" --arg q "$ANSWER" --arg at "$(now)" \
+      '.brand_package_waiver = {missing: $t.missing, answer: $q, reason: (.answers[$q].comment // ""), at: $at} | .consumed += [$q]'
+    echo "BRAND PACKAGE WAIVED: $(jq -r '.missing | join("; ")' <<<"$target")"
     ;;
 
   attest)

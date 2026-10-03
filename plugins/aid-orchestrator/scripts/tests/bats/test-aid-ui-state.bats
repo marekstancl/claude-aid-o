@@ -1173,3 +1173,36 @@ decide_payload() {
   [ "$status" -eq 1 ]; [[ "$output" == *"locked"* ]]
   [ ! -s "$H" ]
 }
+
+# P103 extension K3 - project scope in the required matrix; the brand package waiver
+@test "K3 checks.yaml applies scope: project needs one row (home, last viewport, first browser); viewports subset" {
+  yq -i '.checks.brand_package = "pkg" | .applies.brand_package = {"scope": "project"} | .checks.ai_search = "ai" | .applies.ai_search = {"browsers": ["chromium"], "viewports": [1440]}' "$T/cov/checks.yaml"
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  vl="$(yq -r '.viewports[-1]' "$T/cov/checks.yaml")"; b0="$(yq -r '.browsers[0]' "$T/cov/checks.yaml")"
+  result ".rows |= map(select((.check != \"brand_package\" or (.page == \"index.html\" and .viewport == $vl and .browser == \"$b0\")) and (.check != \"ai_search\" or (.browser == \"chromium\" and .viewport == 1440))))"
+  run "$SCRIPT" gate-record "$PROJ" "$RES"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  result '.rows |= map(select(.check != "brand_package"))'
+  run "$SCRIPT" gate-record "$PROJ" "$RES"
+  [ "$status" -eq 1 ]; [[ "$output" == *"missing row: brand_package index.html/$vl/$b0"* ]]
+}
+
+@test "K3 brand-waive: the target names exactly what is missing; the answer stores the waiver; an answer for another list does not fit" {
+  jqw '.variant = {"type": "web", "brand": "existing"} | .options.identity = "package"'
+  mkdir -p "$PROJ/docs/design/brand-package/icons"
+  printf '## Kontexty použití\n1. Favicon.\n' >"$PROJ/docs/design/brief-logo-favicon.md"
+  run "$SCRIPT" brand-waive-target "$PROJ"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  target="$output"
+  jq -e '.check == "brand_package" and (.missing | length) > 5 and .missing == (.missing | sort)' <<<"$target" >/dev/null
+  ans w1 exception "$target"
+  run "$SCRIPT" brand-waive "$PROJ" --answer w1
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e --argjson t "$target" '.brand_package_waiver.missing == $t.missing and .brand_package_waiver.answer == "w1" and (.consumed | index("w1"))' "$STATE" >/dev/null
+  run python3 "$BATS_TEST_DIRNAME/../../aid-ui-brand-package.py" "$PROJ"
+  [ "$status" -eq 0 ]; grep -q '^WAIVED ' <<<"$output"
+  # an answer for another missing list does not fit
+  ans w2 exception '{"check":"brand_package","missing":["icons: favicon.svg"]}'
+  run "$SCRIPT" brand-waive "$PROJ" --answer w2
+  [ "$status" -eq 1 ]; [[ "$output" == *"answer w2 is for"* ]]
+}

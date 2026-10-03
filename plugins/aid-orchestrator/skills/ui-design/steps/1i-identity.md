@@ -6,7 +6,7 @@ user_invocable: false
 
 # Krok 1i - Identita a brand balíček
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-10-03
 
 ## Cíl
 
@@ -44,7 +44,13 @@ z inventury kroku 0.
    `symbol/` (color, black, white, color-on-dark), `source/` (master se
    živým textem + název a licence fontu), vedle distribuční verze s textem
    převedeným na křivky, `brand-brief.md`, `README.md`; `logo/` a `lockup/`
-   jen pro kontexty ze zadání.
+   jen pro kontexty ze zadání: symbol s názvem (hlavička, e-mailový podpis, PDF,
+   nabídka, vizitka, tisk) → `logo/` s názvem barevně, u webu nebo tmavého kontextu
+   i na tmavém, u tisku i černě, vždy SVG + PNG; PWA → `lockup/` světlý a tmavý.
+   Co přesně je povinné, vypíše `python3 scripts/aid-ui-brand-package.py <project>`
+   (seznam se odvozuje z varianty, `options.identity` a oddílu „Kontexty použití"
+   zadání; exit 1 = co chybí). Rozšířená sada (sociální sítě, tiskoviny, e-mailový
+   podpis jako hotový soubor) se nevyrábí, dokud ji PM po schválení značky nechce.
 6. Ikony: každé SVG pro skript nejdřív projde kontrolou
    `python3 scripts/aid-ui-ico.py --check-svg <symbol.svg> .aid-ui/logo/symbol.checked.svg`
    (mikrovarianta stejně do `micro.checked.svg`). Exit 1 → `WRONG` s důvodem;
@@ -88,5 +94,11 @@ podobných značek.
   těle napiš, co chybí.
 - `--verify` skončí 1 → jmenuje chybějící nebo špatně velký soubor; kapitola
   nejde do `navrh`, dokud neprojde.
+- `aid-ui-brand-package.py` skončí 1 → doplň jmenovanou část. U balíčku, který dodal
+  klient (`identity: "package"`) a část v něm chybí (typicky verze v křivkách), otázka
+  `exception` ve studiu s `target` = `aid-ui-state.sh brand-waive-target <project>` (důvod =
+  komentář PM), po `approve` `aid-ui-state.sh brand-waive <project> --answer <id>`; výjimka
+  platí jen pro přesně ten seznam chybějících částí, bez ní brána (řádek `brand_package`)
+  neprojde.
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-10-03

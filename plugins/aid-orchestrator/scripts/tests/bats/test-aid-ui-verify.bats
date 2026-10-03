@@ -111,6 +111,18 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   ! jq -r '.rows[] | select(.check == "seo") | .detail' "$RES" | grep -q 'ai-'
 }
 
+@test "brand_package: one row on the home page; a missing part fails it with its name" {
+  cp -r "$FX/fixed/." "$SITE/"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$(jq '[.rows[] | select(.check == "brand_package")] | length' "$RES")" -eq 1 ]
+  jq -e '.rows[] | select(.check == "brand_package") | .page == "index.html" and .status == "pass"' "$RES" >/dev/null
+  rm "$PROJ/docs/design/brand-package/icons/favicon.ico" "$PROJ/docs/design/brand-package/icons/favicon.svg"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$status" -eq 3 ]
+  jq -e '.rows[] | select(.check == "brand_package") | .status == "fail" and (.detail | contains("favicon"))' "$RES" >/dev/null
+}
+
 @test "a crashed SEO check (exit 1, no report) is not_covered, not a pass" {
   mkdir -p "$T/out"
   echo '{"viewports":[390],"browsers":["chromium"],"checks":{"seo":"x","ai_search":"x"}}' > "$T/ck.json"

@@ -48,6 +48,7 @@ const site = path.resolve(opt.site), out = path.resolve(opt.out), project = opt.
 const base = opt.base.endsWith('/') ? opt.base : opt.base + '/';
 const fps = st.build?.fingerprints || {};
 const pages = Object.keys(fps).filter(p => p !== '_site').sort();
+const home = pages.find(p => /^index\.html$/.test(p)) || pages[0];
 const VPS = (ck.viewports || []).map(String), BRS = (ck.browsers || []).map(String);
 const HEIGHT = { 390: 844, 768: 1024 };
 fs.mkdirSync(out, { recursive: true });
@@ -85,6 +86,17 @@ function runSeo() {
   if ((r.status !== 0 && r.status !== 1) || !fs.existsSync(json))
     return { error: `aid-ui-seo-check.py exit ${r.status}: ${(r.stderr || '').trim().split('\n').pop().slice(0, 200)}` };
   return { findings: readJson(json) };
+}
+// brand_package: aid-ui-brand-package.py over the project once (required parts derived from the
+// variant, options.identity and the contexts of use); one row on the home page, like ai_search.
+function runBrandPackage() {
+  const json = path.join(out, 'brand-package.json');
+  const r = spawnSync('python3', [path.join(HERE, '../../scripts/aid-ui-brand-package.py'), project || '.', '--json', json], { encoding: 'utf8' });
+  if ((r.status !== 0 && r.status !== 1) || !fs.existsSync(json))
+    return ['not_covered', `aid-ui-brand-package.py exit ${r.status}: ${(r.stderr || '').trim().split('\n').pop().slice(0, 200)}`];
+  const b = readJson(json);
+  if (b.waived) return ['pass', `PM waiver for: ${b.missing.join('; ')}`];
+  return b.missing.length ? ['fail', `missing: ${b.missing.join('; ')}`] : ['pass', `${b.present}/${b.required} required parts, ${b.files} files`];
 }
 function brandFiles() {
   const dir = project && path.join(project, 'docs/design/brand-package');
@@ -319,7 +331,8 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand) {
 // ---- matrix -------------------------------------------------------------------------
 const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match',
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
-  'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search'];
+  'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
+  'brand_package'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -336,14 +349,20 @@ for (const f of flows) for (const s of f.states || []) for (const r of (roles.le
 
 const rows = [];
 const AP = ck.applies || {};
+// applies.<check>: browsers / viewports subsets, flows false, scope project = one row (home page,
+// last viewport, first browser left), the same rule as combos() in aid-ui-state.sh finish
 const applies = (check, m) => { const a = AP[check] || {};
-  return (!a.browsers || a.browsers.map(String).includes(m.browser)) && !(a.flows === false && m.state); };
+  const brs = a.browsers ? BRS.filter(b => a.browsers.map(String).includes(b)) : BRS;
+  const vps = a.viewports ? VPS.filter(v => a.viewports.map(String).includes(v)) : VPS;
+  // a partial m (only a browser: "does the check run in this browser at all?") is not narrowed further
+  if (!brs.includes(m.browser) || (m.viewport !== undefined && !vps.includes(m.viewport)) || (a.flows === false && m.state)) return false;
+  return a.scope !== 'project' || m.page === undefined
+    || (m.page === home && m.viewport === vps[vps.length - 1] && m.browser === brs[0] && !m.state); };
 const put = (m, check, status, detail) => { if (want(check) && applies(check, m)) rows.push({ check, ...m, status, detail: detail || '' }); };
 const facts = factLeaves(), brand = brandFiles();
 const seo = want('seo') || want('ai_search') ? runSeo() : null;
 // ai: false -> the seo row (every finding not named ai-*), true -> the ai_search row. Site-wide
 // ai-* findings (brief, robots.txt, llms.txt) go to the home page's rows only, not to every page.
-const home = pages.find(p => /^index\.html$/.test(p)) || pages[0];
 const seoRow = (p, ai = false) => {
   if (seo.error) return ['not_covered', seo.error];
   if (ai && !st.options?.seo) return ['pass', 'N/A: SEO is not part of this project (options.seo false)'];
@@ -353,6 +372,7 @@ const seoRow = (p, ai = false) => {
   const txt = xs => xs.map(f => `${f.check}: ${f.detail}`).join('; ');
   return bl.length ? ['fail', `BLOCKER ${txt(bl)}`] : ['pass', wn.length ? `WARN ${txt(wn)}` : ''];
 };
+const brandPkg = want('brand_package') ? (project ? runBrandPackage() : ['not_covered', 'no --project']) : null;
 const glyphs = {}, lhs = {};
 for (const p of pages) {
   if (want('glyph_coverage') && BRS.some(b => applies('glyph_coverage', { browser: b }))) glyphs[p] = glyph(urlOf(p));
@@ -423,6 +443,7 @@ for (const b of BRS) {
       const miss = requiredFiles(r.html);
       put(m, 'required_files', miss.length ? 'fail' : 'pass', miss.join(', '));
       if (seo) { put(m, 'seo', ...seoRow(m.page)); put(m, 'ai_search', ...seoRow(m.page, true)); }
+      if (brandPkg) put(m, 'brand_package', ...brandPkg);
     }
     await ctx.close();
   }

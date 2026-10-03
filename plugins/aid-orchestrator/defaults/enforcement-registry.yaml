@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 569          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 570          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4162,6 +4162,22 @@ enforcements:
     recovery: "The failing case names the file. Put the decide call back at the point of the step's Postup where the decision is made, with a canonical --step title."
     test_covers: "SKILL.md names decide, the outcome rule and the six titles, has no overview and no Průběh; 1v-vision, 6-build and 7-verify name the call; every --step in the steps is canonical (test-aid-ui-skill-rules.bats)."
     test: "scripts/tests/bats/test-aid-ui-skill-rules.bats"
+
+  - id: aid_ui_brand_package
+    type: 12
+    source: "scripts/aid-ui-brand-package.py + lib/ui-fidelity/aid-ui-verify.mjs (row brand_package)"
+    instruction: "skills/ui-design/steps/1i-identity.md bod 5"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the files are good (legible, licensed, distinct) - that is the PM's review of the logo; only that every part the project uses exists, matched by file-name tokens."
+    description: "P103 extension K3 - the gate's brand_package row: the brand package holds every part the project uses, derived (design-system standard: only what is used) from the variant, options.identity and the contexts of use in docs/design/brief-logo-favicon.md: a favicon only for an internal tool (variant.brand none); otherwise symbol in four colourings, icons (favicon.ico with 16/32/48 px), brand-brief.md, README.md, the logo with the name always (colour; on-dark for web and PWA; black for print) as SVG and PNG with its source as live <text> and in outlines; maskable icon and lockups for a PWA. Variants by whole path tokens; a client's package passes a missing part only with a PM waiver bound to the exact missing list (brand-waive)."
+    recovery: "The row names the missing part. Make it (steps/1i-identity.md bod 5); for a client's package without it, an exception with check brand_package and the PM's reason."
+    test_covers: "internal tool favicon only and brand none + identity = exit 2; public web always needs the logo with the name; print (also under ###) = black logo; webapp colour only; master with <text> and outlines without; missing brief section; whole path tokens (mobile, concern, lockup/a/dark); favicon.ico sizes; waiver exact list; no state = exit 2 (test-aid-ui-brand-package.bats); brand-waive target and answer, scope project matrix (test-aid-ui-state.bats); one gate row, fail names the part (test-aid-ui-verify.bats)."
+    test: "scripts/tests/bats/test-aid-ui-brand-package.bats"
 
   - id: aid_ui_ai_search
     type: 12

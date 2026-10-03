@@ -23,6 +23,11 @@ a `frontend-build-standard.md` (čti živě).
 
 1. Brána: `aid-ui-verify.sh <project>` → `.aid-ui/verify/result.json`,
    pak `aid-ui-state.sh gate-record <project> .aid-ui/verify/result.json`.
+   Řádek `brand_package` (jeden za celý projekt) hlásí chybějící části brand balíčku
+   podle `aid-ui-brand-package.py`: doplň je v kroku 1i; u balíčku od klienta otázka
+   `exception` s `target` = `aid-ui-state.sh brand-waive-target <project>` a po `approve`
+   `aid-ui-state.sh brand-waive <project> --answer <id>` (platí jen pro přesně tyto chybějící
+   části).
 2. Otevřený řádek (fail, not_covered, warn mimo `warn_only`) → oprav kód,
    znovu `aid-ui-state.sh build-record` a bránu (bod 1). Opakuj, dokud
    zbývají jen řádky, které oprava neřeší.
