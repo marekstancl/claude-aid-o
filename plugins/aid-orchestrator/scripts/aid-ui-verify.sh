@@ -18,8 +18,11 @@
 #
 # Inputs the checks read (all optional; missing -> the check's rows are not_covered):
 # docs/content/facts.yaml, docs/design/brand-package/, .aid-ui/scenarios/<flow id>.mjs,
-# .aid-ui/test-credentials.json (test accounts only, never real ones).
+# .aid-ui/test-credentials.json (test accounts only, never real ones), docs/seo/brief.md,
+# DESIGN.md, docs/design/design-standard.md, docs/product-vision.md, docs/zakaznik/.
 # Exit: 0 recorded with no open row, 3 recorded with open rows, 1 refused or failed, 2 usage.
+# On the first run of step 7, design_standard_doc and customer_page are open by design
+# (made in step 7 points 4 and 7b), so exit 3 is expected there.
 # =============================================================================
 set -euo pipefail
 

@@ -178,8 +178,10 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 
 Skripty (`$AID_PLUGIN_PATH/scripts/`): `aid-ui-state.sh` (jediný zapisovatel
 stavu a těl kapitol v `docs/brand/index.html`), `aid-ui-serve.sh`,
-`aid-ui-coverage.sh`, `aid-ui-tool.sh` (`glyph`, `webp`, `verify`),
-`aid-ui-design-to-css.sh`, `aid-ui-ico.py`, `aid-ui-customer-page.py` (stránka pro zákazníka po bráně, krok 7 bod 7b).
+`aid-ui-coverage.sh`, `aid-ui-tool.sh` (`glyph`, `webp`, `verify`, `measure`, `wordmark`, `png`),
+`aid-ui-design-to-css.sh`, `aid-ui-ico.py`, `aid-ui-seo-check.py` (SEO a AI, krok 1s a brána),
+`aid-ui-brand-package.py` (balíček značky), `aid-ui-design-standard.py` (design standard, krok 7),
+`aid-ui-vision-check.py` (vize), `aid-ui-customer-page.py` (stránka pro zákazníka po bráně, krok 7 bod 7b).
 
 ## Zprávy PM
 

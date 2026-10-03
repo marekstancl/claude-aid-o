@@ -6,7 +6,8 @@
 // Matrix = pages (the keys of state.build.fingerprints but _site) x checks.viewports x
 // checks.browsers, role and state ""; for variant webapp|pwa also structure.flows[].id (as
 // page) x its states x structure.roles (or "") x viewports x browsers; checks.applies narrows a
-// check (browsers subset, flows false) and no row is written outside it. One function per
+// check (browsers / viewports subsets, flows false, scope project = one row on the home page)
+// and no row is written outside it. One function per
 // name in checks.checks (CHECKS below); a name without one, or one without a name, exits 2.
 // Every row: {check, page, viewport, browser, role, state, status, detail};
 // status pass | fail | warn (warn_only checks) | not_covered (could not run; reason in detail).

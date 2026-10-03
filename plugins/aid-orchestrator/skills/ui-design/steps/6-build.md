@@ -65,7 +65,11 @@ u aplikace `webapp-tasks-states-standard.md` (UA-1..UA-11) - čti živě.
        fix = lambda m: re.sub(r'(?<=[\s>(])([ksvzouaiKSVZOUAI]) ', r'\1&nbsp;', m.group(0))
        return re.sub(r'>[^<]+<', fix, html)
    ```
-7. Tokeny a brand stránka: `DESIGN.md` projektu podle postaveného vzhledu,
+7. Logo s názvem (když ho balíček značky ještě nemá, krok 1i): po výběru vzhledu je
+   písmo dané, vyrob ho teď `aid-ui-tool.sh wordmark --spec .aid-ui/wordmark.json`
+   a PNG `aid-ui-tool.sh png` podle kroku 1i; doplň ho do kapitoly `logo`
+   (`aid-ui-state.sh body`), jinak řádek `brand_package` v bráně selže.
+   Tokeny a brand stránka: `DESIGN.md` projektu podle postaveného vzhledu,
    `aid-ui-design-to-css.sh DESIGN.md docs/brand/tokens.css`, písma
    `aid-ui-state.sh fonts <project> <URL Google Fonts nebo docs/brand/fonts/*.css>`,
    role `aid-ui-state.sh roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>`.

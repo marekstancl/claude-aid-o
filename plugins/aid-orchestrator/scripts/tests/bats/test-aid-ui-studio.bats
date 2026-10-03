@@ -234,6 +234,15 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(answer "$choose_a")" = 200 ]
 }
 
+@test "K1b: a notifications question (PWA, step 2) is accepted and answered like any kind" {
+  echo '{"questions":[{"id":"qn","kind":"notifications","target":"notif@1","opened_at":"2020-01-01T00:00:00Z"}]}' \
+    > "$P/.aid-ui/studio/payload.json"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  [ "$(answer '{"question":"qn","kind":"notifications","target":"notif@1","decision":"approve"}')" = 200 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=qn")" = 200 ]
+  [ "$(jq -r '.kind + " " + .decision' "$BATS_TEST_TMPDIR/body")" = "notifications approve" ]
+}
+
 @test "an invalid payload: 422 naming the problem, the server logs it" {
   echo '{"questions":[{"id":"q1","kind":"nonsense","target":"x","opened_at":"2020-01-01T00:00:00Z"}]}' \
     > "$P/.aid-ui/studio/payload.json"

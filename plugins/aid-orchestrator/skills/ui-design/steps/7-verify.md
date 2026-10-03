@@ -29,6 +29,8 @@ a `frontend-build-standard.md` (čti živě).
    `aid-ui-state.sh brand-waive <project> --answer <id>` (platí jen pro přesně tyto chybějící
    části).
 2. Otevřený řádek (fail, not_covered, warn mimo `warn_only`) → oprav kód,
+   kromě `design_standard_doc` a `customer_page`: ty jsou při prvním běhu otevřené
+   záměrně a řeší je body 4 a 7b;
    znovu `aid-ui-state.sh build-record` a bránu (bod 1). Opakuj, dokud
    zbývají jen řádky, které oprava neřeší.
 3. Zbylý řádek, který PM přijme: otázka `exception` ve studiu (`target` =
@@ -37,7 +39,9 @@ a `frontend-build-standard.md` (čti živě).
    `aid-ui-state.sh exception <project> --check <c> [--page …] --answer <id>`.
 4. Projektový design standard (před schvalováním stránek, protože jeho úpravy mění build): `DESIGN.md` doplněný o platformní kontrakt
    (řádky Předěl, Navigace, Dotyk/kurzor, Formuláře, Systémové okraje, Gesta; u aplikace
-   i Okna), přístupnost, vzory a pravidla textů. Pak změř postavený web
+   i Okna), přístupnost, vzory a pravidla textů. Pak změř postavený web: náhled po bráně
+   neběží, spusť ho `aid-ui-serve.sh preview <složka buildu>` (adresa je v řádku `URL:`),
+   po měření `aid-ui-serve.sh stop preview`;
    `aid-ui-tool.sh measure --build "$(aid-ui-state.sh build-id <složka buildu>)" <url náhledu> .aid-ui/measure.json <každá stránka>` a vygeneruj
    pracovní dokument ve struktuře WANu
    `python3 scripts/aid-ui-design-standard.py write <project> --measure .aid-ui/measure.json`
