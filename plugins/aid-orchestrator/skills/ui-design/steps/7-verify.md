@@ -35,14 +35,25 @@ a `frontend-build-standard.md` (čti živě).
    selektor jako JSON: `check`, `page`, `viewport`, `browser`, `role`,
    `state`, vynechané `"*"`); důvod = komentář PM. Po `approve`
    `aid-ui-state.sh exception <project> --check <c> [--page …] --answer <id>`.
-4. Projektový design standard (před schvalováním stránek, protože jeho úpravy mění build): `DESIGN.md` doplněný o platformní kontrakt,
-   přístupnost a pravidla textů, a stránka standardu projektu v Docusauru
-   (`/opt/eco/docs/docs/<projekt>/`) odkazující na `DESIGN.md`. Co do standardu
+4. Projektový design standard (před schvalováním stránek, protože jeho úpravy mění build): `DESIGN.md` doplněný o platformní kontrakt
+   (řádky Předěl, Navigace, Dotyk/kurzor, Formuláře, Systémové okraje, Gesta; u aplikace
+   i Okna), přístupnost, vzory a pravidla textů. Pak změř postavený web
+   `aid-ui-tool.sh measure <url náhledu> .aid-ui/measure.json <každá stránka>` a vygeneruj
+   pracovní dokument ve struktuře WANu
+   `python3 scripts/aid-ui-design-standard.py write <project> --measure .aid-ui/measure.json`
+   → `docs/design/design-standard.md` (tokeny z `DESIGN.md`, role tlačítek a pole změřené,
+   vzory a texty z `DESIGN.md`). Do Docusauru se **nic nepíše**, dokud PM standard
+   neschválí; publikace je samostatný krok po schválení. Po `write` (a po každé změně
+   `DESIGN.md`) **znovu bod 1** a `gate-record`: první běh brány dokument ještě neviděl, řádek
+   `design_standard_doc` hlídá oddíly, tokeny, změřené barvy a platformní řádky. U aplikace
+   za přihlášením měř s `--storage-state <stav testovacího účtu>`.
+   Co do standardu
    doplníš sám podle standardu ekosystému, zapiš před otázkou: jedna skupina doplňků
    = jedno `aid-ui-state.sh decide <project> --step "Kontrola" --title "<skupina, např.
    Pravidla pro mobil>" --outcome "<co platí jednou větou>" --why "podle
    design-system-standard §<číslo>" --source DESIGN.md`, nikdy jeden souhrnný řádek.
-   Otázka `design_standard` ve studiu (s `outcome`); `return` → oprav a otevři znovu.
+   Otázka `design_standard` ve studiu (s `outcome`; `body` = co standard říká lidsky,
+   odkaz na `docs/design/design-standard.md`); `return` → oprav a otevři znovu.
 5. Kontrola stránek (až je build po bodu 4 konečný): pro každou stránku buildu otázka `approve_page`
    (`target` = `<stránka>@<otisk>` z `build.fingerprints`, snímek jako
    karta); po `approve`
@@ -93,7 +104,7 @@ k opakování (`/aid-ui <n>`) kdykoli.
 ## Zápis
 
 `gate`, `exceptions`, `approvals`, `attestations` ve stavu (jen skript),
-`DESIGN.md`, standard v Docusauru, kapitoly `kvalita`, `seo`, `schvaleni`.
+`DESIGN.md`, `docs/design/design-standard.md` (pracovní; Docusaurus až po schválení PM), kapitoly `kvalita`, `seo`, `schvaleni`.
 
 Cesta k zákazníkovi (jen text pro PM, skill nic nevystavuje):
 `aid-ui-serve.sh brand docs/brand` + pravidlo Cloudflare Access pro e-mail

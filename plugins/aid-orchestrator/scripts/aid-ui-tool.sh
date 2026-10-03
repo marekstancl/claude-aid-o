@@ -14,7 +14,7 @@
 #                                                      at most <n> kB (default 200), else exit 1
 #   verify <args>                                      aid-ui-verify.mjs (arrives with the gate)
 #   png <src.svg> <out.png> <width>                    aid-ui-png.mjs: an SVG as a PNG (transparent)
-#   measure <base url> <out.json> <page>...            aid-ui-measure.mjs: what the built site uses
+#   measure [--storage-state <f>] <base url> <out.json> <page>...   aid-ui-measure.mjs: what the built site uses
 #                                                      (control roles, fields, type, breakpoints) for
 #                                                      the project design standard (step 7 bod 4)
 #   wordmark --spec <wordmark.json>                    scripts/aid-ui-wordmark.py: the logo with the

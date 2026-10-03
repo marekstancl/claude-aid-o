@@ -188,3 +188,22 @@ P
   run bash "$TOOL" png "$T/n.svg" "$T/n.png" 100
   [ "$status" -eq 1 ]; [[ "$output" == *"no usable viewBox"* ]]
 }
+
+@test "measure: control roles grouped by colours with count and heights, fields, type and breakpoints; an off-screen skip link is no role" {
+  D="$T/site"; mkdir -p "$D"
+  cat >"$D/index.html" <<'H'
+<!doctype html><html lang="cs"><head><style>
+.btn{background:#1a1a1a;color:#fff;padding:12px 20px;border:0;border-radius:4px;display:inline-block;text-decoration:none;font:inherit}
+.skip{position:absolute;top:-80px;background:#ff0;color:#000;padding:8px}
+@media (max-width: 760px){h1{font-size:2rem}}
+</style></head><body><a class="skip" href="#m">Přeskočit</a><main id="m"><h1>Pekárna</h1><p>Text.</p>
+<a class="btn" href="/k">Objednat</a> <button class="btn">Poslat</button> <a href="/o">obyčejný odkaz</a>
+<input type="email"></main></body></html>
+H
+  serve "$D"
+  run bash "$TOOL" measure "http://127.0.0.1:$PORT/" "$T/m.json" index.html
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '(.controls | length) == 1 and .controls[0].count == 2 and .controls[0].background == "rgb(26, 26, 26)"
+         and (.controls[0].height."390" > 0) and (.fields | length) == 1 and .type.h1 and (.breakpoints == ["max-width: 760px"])' "$T/m.json" >/dev/null \
+    || { jq -c . "$T/m.json"; return 1; }
+}

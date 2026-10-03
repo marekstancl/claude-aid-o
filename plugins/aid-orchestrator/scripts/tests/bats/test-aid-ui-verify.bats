@@ -16,6 +16,7 @@ setup() {
   mkdir -p "$PROJ/docs/brand"
   cp "$SC/../skills/ui-design/brand-page/index.html" "$PROJ/docs/brand/"
   cp -r "$FX/project/docs/." "$PROJ/docs/"
+  cp "$FX/project/DESIGN.md" "$PROJ/"
   cp -r "$FX/site" "$SITE"
   "$SC/aid-ui-state.sh" init "$PROJ" >/dev/null
 }
@@ -121,6 +122,18 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$status" -eq 3 ]
   jq -e '.rows[] | select(.check == "brand_package") | .status == "fail" and (.detail | contains("favicon"))' "$RES" >/dev/null
+}
+
+@test "design_standard_doc: one row; a missing section fails it; a broken DESIGN.md is not_covered, never a pass" {
+  cp -r "$FX/fixed/." "$SITE/"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  sed -i 's/^## Vynucení$/## Jinak/' "$PROJ/docs/design/design-standard.md"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$(jq '[.rows[] | select(.check == "design_standard_doc")] | length' "$RES")" -eq 1 ]
+  jq -e '.rows[] | select(.check == "design_standard_doc") | .status == "fail" and (.detail | contains("Vynucení"))' "$RES" >/dev/null
+  printf -- '---\n[nejde: yaml\n---\n' >"$PROJ/DESIGN.md"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '.rows[] | select(.check == "design_standard_doc") | .status == "not_covered"' "$RES" >/dev/null
 }
 
 @test "a crashed SEO check (exit 1, no report) is not_covered, not a pass" {

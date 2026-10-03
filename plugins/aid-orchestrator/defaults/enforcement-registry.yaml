@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 570          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 571          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4162,6 +4162,22 @@ enforcements:
     recovery: "The failing case names the file. Put the decide call back at the point of the step's Postup where the decision is made, with a canonical --step title."
     test_covers: "SKILL.md names decide, the outcome rule and the six titles, has no overview and no Průběh; 1v-vision, 6-build and 7-verify name the call; every --step in the steps is canonical (test-aid-ui-skill-rules.bats)."
     test: "scripts/tests/bats/test-aid-ui-skill-rules.bats"
+
+  - id: aid_ui_design_standard_doc
+    type: 12
+    source: "scripts/aid-ui-design-standard.py check + lib/ui-fidelity/aid-ui-verify.mjs (row design_standard_doc)"
+    instruction: "skills/ui-design/steps/7-verify.md bod 4"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the patterns, terminology and exceptions written by the agent are right - the PM approves the whole document (design_standard); that the document stays true after later edits (re-measure, Vynucení section)."
+    description: "P103 extension K4 - the gate's design_standard_doc row: docs/design/design-standard.md (a working document in the project until the PM approves it; nothing is written to Docusaurus before) has the WAN structure (Značka, Tokeny, Komponenty, Vzory, Obsah a terminologie, Platformní kontrakt, Výjimky, Vynucení), every DESIGN.md colour token with its value, the platform rows (Okna for an app) and at least one button role measured on the built site (aid-ui-tool.sh measure)."
+    recovery: "The row names the missing section, token or row. Complete DESIGN.md, re-measure and re-run aid-ui-design-standard.py write (step 7 bod 4)."
+    test_covers: "write composes the structure with measured roles named by tokens and quoted font names; a missing section, a changed token, a missing platform row and Okna for an app are MISSING; no document = exit 1 (test-aid-ui-design-standard.bats); measure groups roles, skips an off-screen skip link (test-aid-ui-tools.bats)."
+    test: "scripts/tests/bats/test-aid-ui-design-standard.bats"
 
   - id: aid_ui_brand_package
     type: 12

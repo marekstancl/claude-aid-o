@@ -17,6 +17,7 @@ applies:
   lighthouse_mobile: {browsers: [chromium], flows: false}
   ai_search: {browsers: [chromium], viewports: [1440], flows: false}   # reads files, not the rendering
   brand_package: {scope: project}   # one row for the whole project (home page, last viewport, first browser)
+  design_standard_doc: {scope: project}
 checks:
   http_200: every page answers HTTP 200 (FB-1)
   glyph_coverage: every character renders in the intended font, Czech diacritics included, no system fallback (FB-2)
@@ -32,6 +33,7 @@ checks:
   lighthouse_mobile: Lighthouse mobile score measured and reported; warning only (FB-13)
   seo: aid-ui-seo-check.py passes, a BLOCKER finding fails (FB-14)
   brand_package: the brand package holds every part the project uses - derived from the variant, options.identity and the contexts of use in the logo brief; a favicon only without brand work (design-system-standard "Brand balíček", brand-brief template part 2; aid-ui-brand-package.py)
+  design_standard_doc: the project design standard (docs/design/design-standard.md, a working document until the PM approves it) has the WAN structure - Značka, Tokeny, Komponenty, Vzory, Obsah a terminologie, Platformní kontrakt, Výjimky, Vynucení - every DESIGN.md colour token, the platform rows and a measured button role (design-system-standard "What"; aid-ui-design-standard.py check)
   ai_search: AI search and citation readiness - the PM's AI robot policy in robots.txt, JSON-LD on every indexable page matching the facts register, main text in the HTML, no snippet bans, no llms.txt without a decision (seo-audit-agent-standard §3-4, seo/technicke-seo; aid-ui-seo-check.py --ai)
   app_task_states: an application's task x state scenarios from the task map pass (FB-11)
   no_overlap: no two visible texts, controls or images overlap (FB-21)

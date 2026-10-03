@@ -98,6 +98,16 @@ function runBrandPackage() {
   if (b.waived) return ['pass', `PM waiver for: ${b.missing.join('; ')}`];
   return b.missing.length ? ['fail', `missing: ${b.missing.join('; ')}`] : ['pass', `${b.present}/${b.required} required parts, ${b.files} files`];
 }
+// design_standard_doc: aid-ui-design-standard.py check over docs/design/design-standard.md (sections
+// of the WAN structure, every DESIGN.md colour token, the platform rows, a measured button role)
+function runDesignDoc() {
+  const r = spawnSync('python3', [path.join(HERE, '../../scripts/aid-ui-design-standard.py'), 'check', project], { encoding: 'utf8' });
+  const miss = (r.stdout || '').split('\n').filter(l => l.startsWith('MISSING')).map(l => l.slice(8));
+  // a crash also exits 1: only a run that names what is missing is a result
+  if (r.status !== 0 && !(r.status === 1 && miss.length))
+    return ['not_covered', `aid-ui-design-standard.py exit ${r.status}: ${(r.stderr || '').trim().split('\n').pop().slice(0, 200)}`];
+  return miss.length ? ['fail', `missing: ${miss.join('; ')}`] : ['pass', 'every section, token and platform row present'];
+}
 function brandFiles() {
   const dir = project && path.join(project, 'docs/design/brand-package');
   if (!dir || !fs.existsSync(dir)) return null;
@@ -332,7 +342,7 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand) {
 const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match',
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
-  'brand_package'];
+  'brand_package', 'design_standard_doc'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -373,6 +383,7 @@ const seoRow = (p, ai = false) => {
   return bl.length ? ['fail', `BLOCKER ${txt(bl)}`] : ['pass', wn.length ? `WARN ${txt(wn)}` : ''];
 };
 const brandPkg = want('brand_package') ? (project ? runBrandPackage() : ['not_covered', 'no --project']) : null;
+const designDoc = want('design_standard_doc') ? (project ? runDesignDoc() : ['not_covered', 'no --project']) : null;
 const glyphs = {}, lhs = {};
 for (const p of pages) {
   if (want('glyph_coverage') && BRS.some(b => applies('glyph_coverage', { browser: b }))) glyphs[p] = glyph(urlOf(p));
@@ -444,6 +455,7 @@ for (const b of BRS) {
       put(m, 'required_files', miss.length ? 'fail' : 'pass', miss.join(', '));
       if (seo) { put(m, 'seo', ...seoRow(m.page)); put(m, 'ai_search', ...seoRow(m.page, true)); }
       if (brandPkg) put(m, 'brand_package', ...brandPkg);
+      if (designDoc) put(m, 'design_standard_doc', ...designDoc);
     }
     await ctx.close();
   }
