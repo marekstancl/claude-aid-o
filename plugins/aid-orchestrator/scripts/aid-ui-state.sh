@@ -11,6 +11,8 @@
 #                        missing sections/markers to index.html, move the old file to
 #                        .aid-ui/state.json.migrated. New file present -> it wins. Markers
 #                        are re-added on every init, so a retry repairs an interrupted run.
+#   changes <project>    open change questions (the PM pressed Změnit) the payload does not list yet, as
+#                        JSON lines {question, cards}; exit 1 when there are none
 #   record-answer <project> --question <id>
 #       asks the studio GET /answer?question=<id> with the session token
 #       (<project>/.aid-ui/studio.token, header X-AID-Token) at $AID_UI_STUDIO_URL
@@ -622,7 +624,7 @@ studio_fetch() {
     [[ "${BASH_REMATCH[1]}" == 127.0.0.1 || "${BASH_REMATCH[1]}" == localhost || "${BASH_REMATCH[1]}" == "$host" ]] ||
     { rm -f "$body"; die "studio URL refused (only http://127.0.0.1, http://localhost or http://$host, any port): $STUDIO_URL"; }
   STUDIO_CODE="$(printf 'X-AID-Token: %s\n' "$(<"$tokf")" | curl -sS --max-time 10 -o "$body" -w '%{http_code}' -H @- \
-    -- "${STUDIO_URL%/}/answer?question=$qid")" || rc=$?
+    -- "${STUDIO_URL%/}${4:-/answer?question=$qid}")" || rc=$?
   [[ "$rc" -eq 0 ]] || { rm -f "$body"; die "studio unreachable at $STUDIO_URL (curl exit $rc); $3"; }
 }
 
@@ -710,6 +712,22 @@ case "$VERB" in
       mv "$OLD" "$PROJECT/.aid-ui/state.json.migrated"   # out of the served folder
       echo "old $OLD moved to .aid-ui/state.json.migrated"
     fi
+    ;;
+
+  changes)
+    # the PM pressed "Změnit": print each open change question the payload does not list yet (with its cards)
+    # as one JSON line and exit 0; none -> exit 1. The agent adds it to the payload, waits for its answer
+    # and applies the step's mutation again with --answer <new id>.
+    need_state
+    body="$(tmpfile state.json)"
+    studio_fetch "" "$body" "no changes read" "/state"
+    [[ "$STUDIO_CODE" == 200 ]] || { rm -f "$body"; die "the studio answered HTTP $STUDIO_CODE for /state"; }
+    listed="$(jq -c '[.questions[]?.id]' "$PROJECT/.aid-ui/studio/payload.json" 2>/dev/null || echo '[]')"
+    out="$(jq -c --argjson l "$listed" '. as $s | .questions[]? | select(.changed_from and (.answered | not) and ((.id) as $i | $l | index($i) | not))
+      | . as $q | {question: (del(.answered, .answer, .changed_to)), cards: [$s.cards[]? | select(.question == $q.id)]}' "$body" 2>/dev/null)"
+    rm -f "$body"
+    [[ -n "$out" ]] || exit 1
+    printf '%s\n' "$out"
     ;;
 
   record-answer)

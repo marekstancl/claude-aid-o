@@ -13,6 +13,11 @@ on every request, so the agent opens a round by rewriting it:
                   "next" (what the agent does after approval), "eyebrow" (heading override)}],
    "cards":     [{"id", "question", "title", "preview", "thesis", "palette": [css colours],
                   "risk", "uniqueness", "url", "source" (key of sections.json sources)}]}
+POST /change {question} [auth]: the PM changes an answered question still listed in the payload (an
+answer held now, or "done": true set by the agent - display only, it decides nothing: the change only opens
+the same question again for the PM; a question no longer in the payload cannot be changed): a new open question <root>.c<n> with the same kind, target, part, text and card copies,
+held in memory like a re-roll; a second change of the same root while one is open -> 409. /state marks
+the original with "changed_to" and answers carry "at".
 A facts question needs at least 3 cards, each with a source from the map (first = recommended).
 /state also returns "sections": the map's six steps and their parts with a status each (skipped,
 current, done, waiting) computed from docs/design/brand-state.json and the open questions; the
@@ -118,6 +123,8 @@ OWN = {"%s:%d" % (h, PORT) for h in (args.host, "127.0.0.1", "localhost")}
 
 ANSWERS = {}   # question id -> answer dict
 REROLLED = {}  # question id opened by a re-roll -> question dict (until restart)
+CHANGED = {}   # question id opened by the PM's "Změnit" -> question dict (until restart)
+CHANGED_CARDS = {}   # that question id -> copies of the original question's cards
 SESSIONS = set()  # session cookie values handed out through a one-time code
 LOCK = threading.Lock()
 NO_ACCESS = ('<!doctype html><meta charset="utf-8"><meta name="viewport" '
@@ -335,7 +342,19 @@ def load():
                              % (q["id"], ", ".join(bad), ", ".join(SECTIONS["sources"])))
     with LOCK:
         qs = qs + [dict(q) for i, q in REROLLED.items() if i not in seen]
+        qs = qs + [dict(q) for i, q in CHANGED.items() if i not in seen]
+        # once the agent lists a change in the payload, the payload's question and cards are the ones
+        cards = cards + [dict(c) for i, cs in CHANGED_CARDS.items() if i not in seen for c in cs]
     return {"now": p.get("now"), "steps": steps, "questions": qs, "cards": cards}
+
+
+def root_of(qid):
+    return re.sub(r"(\.c\d+)+$", "", qid)
+
+
+def open_change(p, root):
+    """The id of an unanswered change of the root question, if one is open."""
+    return next((q["id"] for q in p["questions"] if q.get("changed_from") == root and not valid_answer(q)), None)
 
 
 def valid_answer(q):
@@ -421,6 +440,37 @@ def next_id(qid):
 
 
 class Studio(BaseHTTPRequestHandler):
+    def change(self):
+        """The PM changes an answer: a new open question <root>.c<n> with the same kind, target, part,
+        text and copies of the cards. Allowed for a question in the payload that the PM answered
+        (an answer held now, or one the agent marked done after recording it)."""
+        if not self.gate(True) or (p := self.payload()) is None:
+            return
+        try:
+            b = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"null")
+        except (ValueError, json.JSONDecodeError):
+            b = None
+        qid = b.get("question") if isinstance(b, dict) else None
+        cur = next((x for x in p["questions"] if x["id"] == qid), None)
+        if cur is None:
+            self.send(404, {"error": "no question %s" % qid})
+            return
+        with LOCK:
+            if not (valid_answer(cur) or cur.get("done") is True):
+                self.send(409, {"error": "question %s has no answer to change" % qid})
+                return
+            root = root_of(qid)
+            if open_change(p, root):
+                self.send(409, {"error": "a change of %s is already open; answer it first" % root})
+                return
+            taken = {x["id"] for x in p["questions"]} | set(CHANGED)
+            n = 1 + max([int(m.group(1)) for i in taken if (m := re.fullmatch(re.escape(root) + r"\.c(\d+)", i))] or [0])
+            new = "%s.c%d" % (root, n)
+            q = {k: v for k, v in cur.items() if k not in ("id", "opened_at", "answered", "answer", "done", "answer_title", "changed_to")}
+            CHANGED[new] = dict(q, id=new, opened_at=iso(now()), changed_from=root)
+            CHANGED_CARDS[new] = [dict(c, question=new) for c in p["cards"] if c.get("question") == qid]
+        self.send(200, {"next_question": new})
+
     def ours(self, nav=False):   # Host is us; Origin/Referer, when sent, name the same origin
         h = self.headers.get("Host")
         if nav:   # opening the page (GET /, the link from the chat): a click from another app
@@ -501,14 +551,19 @@ class Studio(BaseHTTPRequestHandler):
             with LOCK:
                 for x in p["questions"]:
                     a = valid_answer(x)
-                    x["answered"] = a is not None
+                    x["answered"] = a is not None or x.get("done") is True   # done: the agent recorded it
                     if a:   # what the PM decided, for the page's confirmation
-                        x["answer"] = {"decision": a["decision"], "choice": a["choice"], "comment": a["comment"],
+                        x["answer"] = {"decision": a["decision"], "choice": a["choice"], "comment": a["comment"], "at": a["at"],
                                        "choice_title": next((c["title"] for c in a["cards"]
                                                              if c["id"] == a["choice"]), None)}
             p["project"] = os.path.basename(PROJECT)
             p["history_lines"] = read_history()[1]
             p["sections"] = sections_view(p["questions"])
+            with LOCK:
+                for x in p["questions"]:   # the original shows that the PM is changing it
+                    ch = open_change(p, root_of(x["id"]))
+                    if ch and ch != x["id"]:
+                        x["changed_to"] = ch
             self.send(200, p)
         elif u.path == "/answer":
             if not self.gate(True) or (p := self.payload()) is None:
@@ -601,7 +656,10 @@ class Studio(BaseHTTPRequestHandler):
             self.send(404, {"error": "not found"})
 
     def do_POST(self):
-        if urlsplit(self.path).path != "/answer":
+        path = urlsplit(self.path).path
+        if path == "/change":
+            return self.change()
+        if path != "/answer":
             self.send(404, {"error": "not found"})
             return
         if not self.gate(True) or (p := self.payload()) is None:

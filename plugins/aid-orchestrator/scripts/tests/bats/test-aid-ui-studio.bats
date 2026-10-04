@@ -288,8 +288,8 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(answer '{"question":"q1","kind":"direction","target":"home@abc","decision":"choose","choice":"b"}')" = 200 ]
   [ "$(answer '{"question":"q2","kind":"approve_page","target":"home@abc","decision":"return","comment":"menší logo"}')" = 200 ]
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
-  [ "$(jq -S -c '.questions[] | select(.id=="q1") | .answer' "$BATS_TEST_TMPDIR/body")" = '{"choice":"b","choice_title":"B","comment":"","decision":"choose"}' ]
-  [ "$(jq -S -c '.questions[] | select(.id=="q2") | .answer' "$BATS_TEST_TMPDIR/body")" = '{"choice":null,"choice_title":null,"comment":"menší logo","decision":"return"}' ]
+  [ "$(jq -S -c '.questions[] | select(.id=="q1") | .answer | (.at | type) as $t | del(.at) + {at: $t}' "$BATS_TEST_TMPDIR/body")" = '{"at":"string","choice":"b","choice_title":"B","comment":"","decision":"choose"}' ]
+  [ "$(jq -S -c '.questions[] | select(.id=="q2") | .answer | (.at | type) as $t | del(.at) + {at: $t}' "$BATS_TEST_TMPDIR/body")" = '{"at":"string","choice":null,"choice_title":null,"comment":"menší logo","decision":"return"}' ]
   # the title is the one the PM saw, not a later payload edit
   jq '.cards[1].title = "X"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
@@ -555,4 +555,59 @@ JSON
   ' "$BATS_TEST_TMPDIR/parts.js" "$BATS_TEST_TMPDIR/model.js"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qF '"Krok " + st.n + " z " + st.of' "$f"
+}
+
+@test "Změnit: a new open question <id>.c1 with the same kind, target, part and cards; refused when unanswered, unknown or already open" {
+  chg() { code -H "X-AID-Token: $TOKEN" -H 'Content-Type: application/json' -d "{\"question\":\"$1\"}" "$URL/change"; }
+  [ "$(chg nikde)" = 404 ]
+  [ "$(chg q1)" = 409 ]                                    # not answered yet
+  [ "$(answer "$choose_a")" = 200 ]
+  [ "$(chg q1)" = 200 ]; [ "$(jq -r .next_question "$BATS_TEST_TMPDIR/body")" = q1.c1 ]
+  [ "$(chg q1)" = 409 ]                                    # one open change at a time
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+  jq -e '(.questions[] | select(.id == "q1") | .changed_to == "q1.c1" and .answer.at != null)
+     and (.questions[] | select(.id == "q1.c1") | .kind == "direction" and .target == "home@abc" and .part == "vzhled"
+          and .changed_from == "q1" and (.answered | not))
+     and ([.cards[] | select(.question == "q1.c1") | .id] | sort == ["a","b","c"])' "$BATS_TEST_TMPDIR/body" >/dev/null
+  sleep 1.1
+  [ "$(answer '{"question":"q1.c1","kind":"direction","target":"home@abc","decision":"choose","choice":"b"}')" = 200 ]
+  [ "$(chg q1.c1)" = 200 ]; [ "$(jq -r .next_question "$BATS_TEST_TMPDIR/body")" = q1.c2 ]   # changing again
+  # a question the agent marked done (the answer recorded, the server restarted) can be changed too
+  jq '.questions[1] += {done: true, answer_title: "Ano"}' "$P/.aid-ui/studio/payload.json" > "$P/p" && mv "$P/p" "$P/.aid-ui/studio/payload.json"
+  [ "$(chg q2)" = 200 ]; [ "$(jq -r .next_question "$BATS_TEST_TMPDIR/body")" = q2.c1 ]
+}
+
+@test "aid-ui-state.sh changes lists an open change the payload does not list yet, with its cards; none -> exit 1" {
+  STATE_SH="$BATS_TEST_DIRNAME/../../aid-ui-state.sh"
+  mkdir -p "$P/docs/design"; echo '{"step":0,"answers":{},"consumed":[]}' > "$P/docs/design/brand-state.json"
+  export AID_UI_STUDIO_URL="$URL"
+  run "$STATE_SH" changes "$P"; [ "$status" -eq 1 ]
+  [ "$(answer "$choose_a")" = 200 ]
+  code -H "X-AID-Token: $TOKEN" -H 'Content-Type: application/json' -d '{"question":"q1"}' "$URL/change" >/dev/null
+  run "$STATE_SH" changes "$P"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.question.id == "q1.c1" and .question.changed_from == "q1" and ([.cards[].id] | sort == ["a","b","c"])' <<<"$output" >/dev/null
+  # once the agent lists it in the payload it is no longer reported
+  jq '.questions += [{"id":"q1.c1","kind":"direction","target":"home@abc","opened_at":"2020-01-01T00:00:00Z"}]' "$P/.aid-ui/studio/payload.json" > "$P/p" && mv "$P/p" "$P/.aid-ui/studio/payload.json"
+  run "$STATE_SH" changes "$P"; [ "$status" -eq 1 ]
+  # listed by the agent: the payload's question and cards are the ones, no copy from memory mixed in
+  code -H "X-AID-Token: $TOKEN" "$URL/state" >/dev/null
+  jq -e '[.cards[] | select(.question == "q1.c1")] | length == 0' "$BATS_TEST_TMPDIR/body" >/dev/null
+}
+
+@test "page: a card click only selects; Potvrdit výběr sends choose; saved answers read as words with Změnit" {
+  command -v node >/dev/null || skip "node not installed"
+  f="$(PAGE_HTML)"
+  ! grep -qF 'answer("choose", c.id)' "$f"                         # the card itself never sends
+  grep -qF 'answer("choose", sel.id) } }, "Potvrdit výběr")' "$f"
+  grep -qF 'call("POST", "/change"' "$f"
+  sed -n '/^function savedText(/,/^}/p' "$f" > "$BATS_TEST_TMPDIR/saved.js"
+  run node -e '
+    function str(v) { return typeof v === "string" && v.trim() ? v : null; }
+    eval(require("fs").readFileSync(process.argv[1], "utf8"));
+    const t = [savedText({ answer: { decision: "choose", choice: "x", choice_title: "Web" } }), savedText({ answer: { decision: "approve" } }),
+      savedText({ answer: { decision: "return", comment: "jinak" } }), savedText({ done: true, answer_title: "Nové logo" })];
+    if (JSON.stringify(t) !== JSON.stringify(["Web", "Ano", "Vráceno: jinak", "Nové logo"])) { console.log(JSON.stringify(t)); process.exit(1); }
+  ' "$BATS_TEST_TMPDIR/saved.js"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }

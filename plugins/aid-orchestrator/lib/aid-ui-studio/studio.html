@@ -66,9 +66,21 @@
   pre.body-json { font: 12.5px/1.5 var(--ks-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ks-paper-deep); border: 1px solid var(--ks-rule); border-radius: 6px; padding: .8rem 1rem; max-height: 22rem; overflow: auto; }
   .detail { color: var(--ks-text); font-size: .95rem; white-space: pre-wrap; overflow-wrap: anywhere; }
   .step-brief { padding: 0 22px 18px; }
+  .saved { padding: 0 22px 14px; display: flex; flex-direction: column; }
+  .saved-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 14px; align-items: center; padding: 9px 10px; border-bottom: 1px solid var(--ks-rule); font-size: 14px; border-radius: 6px; }
+  .saved-row .ok { color: var(--ks-ok); font-weight: 700; white-space: nowrap; }
+  .saved-q { color: var(--ks-text-muted); }
+  .saved-a { color: var(--ks-ink); font-weight: 600; }
+  .saved-row.fresh { animation: saved-flash 2.4s ease-out; }
+  @keyframes saved-flash { from { background: color-mix(in srgb, var(--ks-ok) 22%, transparent); } to { background: transparent; } }
+  @media (prefers-reduced-motion: reduce) { .saved-row.fresh { animation: none; background: color-mix(in srgb, var(--ks-ok) 12%, transparent); } }
+  .card.picked { outline: 3px solid var(--ks-kinpaku); outline-offset: 2px; }
+  button.choose.on { background: var(--ks-kinpaku); color: var(--ks-ink); }
+  .confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 16px; border: 1px solid var(--ks-kinpaku); border-radius: 8px; background: var(--ks-paper-deep); }
+  .confirm p { margin: 0; flex: 1 1 14rem; }
   .parts { padding: 0 22px 18px; display: flex; flex-direction: column; gap: 18px; }
   .parts:empty { display: none; }
-  .brief { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 14px; line-height: 1.45; }
+  .brief { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 14px; line-height: 1.45; }
   .brief dt { color: var(--ks-text-muted); font-size: 13px; }
   .brief dd { margin: 0; color: var(--ks-text); }
   .part-list { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--ks-rule); }
@@ -264,6 +276,8 @@
     .panel .body { padding: 1.1rem 1rem 1.2rem; }
   }
   @media (max-width: 700px) {
+    .saved-row { grid-template-columns: auto minmax(0, 1fr); }
+    .saved-q { grid-column: 1 / -1; order: -1; }
     .brief { grid-template-columns: 1fr; gap: 0; }
     .brief dt { margin-top: 8px; }
     .brief dt:first-child { margin-top: 0; }
@@ -395,7 +409,7 @@ function model(S, H) {
   // agent's own payload steps are only a fallback for an older server.
   let steps = map ? map.map(s => ({ id: "s" + s.n, n: s.n, of: map.length, title: String(s.title), description: text(s.why),
       goal: text(s.goal), feeds: text(s.feeds), parts: Array.isArray(s.parts) ? s.parts : [],
-      status: s.status === "done" ? "done" : s.status === "current" ? "current" : "todo", events: [], open: [], active: false }))
+      status: s.status === "done" ? "done" : s.status === "current" ? "current" : "todo", events: [], open: [], saved: [], active: false }))
     : (Array.isArray(S.steps) ? S.steps : []).filter(s => s && typeof s === "object").map(s => ({
     id: s.id, title: String(s.title || s.id || ""), description: text(s.description), parts: [],
     status: ["done", "current", "todo"].includes(s.status) ? s.status : "todo", events: [], open: [], active: false }));
@@ -423,6 +437,13 @@ function model(S, H) {
       comment: said ? text(said.question.outcome) : null, reconstructed: false, cards: [] }]));
   }
   for (const st of steps) { st.outcome = stepOutcome(st); st.who = stepWho(st); }
+  if (map) {   // answered questions stay visible in the step of their part, with Změnit
+    for (const q of (Array.isArray(S.questions) ? S.questions : [])) {
+      if (!q || !q.answered || /^reroll/.test(String((q.answer || {}).decision || ""))) continue;
+      const st = steps.find(s => s.parts.some(p => p.id === q.part));
+      if (st) st.saved.push(q);
+    }
+  }
   if (map && open.length) {   // each open question sits in the step of its part
     for (const q of open) {
       const st = steps.find(s => s.parts.some(p => p.id === q.part)) || steps.find(s => s.status === "current") || steps[0];
@@ -440,7 +461,7 @@ if (typeof module !== "undefined") module.exports = { model, stepOutcome, stepWh
 </script>
 <script>
 "use strict";
-const KIND = { variant: "Co stavíme", options: "Co připravit", vision: "Vize a slogany", identity: "Logo",
+const KIND = { variant: "Co stavíme a co k tomu", options: "Co připravit", vision: "Hlavní sdělení a slogan", identity: "Logo",
   seo_brief: "Hledání na Googlu", structure: "Stránky a jejich části", task_map: "Co v aplikaci lidé dělají",
   content_plan: "Obsah stránek", defer_content: "Chybějící podklady", facts: "Údaje o firmě", references: "Vzory",
   direction: "Vzhled webu", approve_page: "Kontrola hotové stránky", exception: "Výjimka z kontroly",
@@ -464,6 +485,7 @@ const SVG = {
 const FAN = ["0deg", "1.4deg", "-1.2deg"];
 let last = "", stopped = false, navs = [];
 let S = null, H = [], hCount = null, hOk = true;   // /state, /history, its line count when fetched
+const SELECTED = {};   // question id -> the card the PM picked but has not confirmed yet
 const openSteps = new Set();   // step titles whose Detail the PM opened, kept across re-renders
 const scrolled = {};   // deck scroll position per question, kept across re-renders
 
@@ -568,8 +590,11 @@ function card(q, c, i, answer) {
     front.inert = on; back.inert = !on;
     (on ? back : front).querySelector(".chip:last-of-type, .back-head .chip").focus();
   };
-  const choose = () => el("button", { class: "choose", type: "button", "aria-label": "Vybrat „" + title + "“",
-    on: { click: () => answer("choose", c.id) } }, "Vybrat tento");
+  const picked = SELECTED[q.id] === c.id;
+  if (picked) art.classList.add("picked");
+  const choose = () => el("button", { class: "choose" + (picked ? " on" : ""), type: "button", "aria-pressed": String(picked),
+    "aria-label": (picked ? "Vybráno „" : "Vybrat „") + title + "“",
+    on: { click: () => { SELECTED[q.id] = picked ? undefined : c.id; render(); } } }, picked ? "Vybráno ✓" : "Vybrat tento");
   const front = el("div", { class: "face front" + lead },
     i === 0 ? el("span", { class: "kicker" + (str(c.preview) ? "" : " inline") }, "Doporučuji") : null,
     str(c.preview) ? media(q, c, true, flip) : null,
@@ -693,6 +718,11 @@ function question(q, cards) {
       return sec;
     }
     sec.append(deck(q, cards.map((c, i) => card(q, c, i, answer))));
+    const sel = cards.find(c => c.id === SELECTED[q.id]);
+    if (sel) sec.append(el("div", { class: "confirm" },
+      el("p", {}, "Vybráno: ", el("b", {}, sel.title || sel.id)),
+      el("button", { type: "button", class: "choose", on: { click: () => answer("choose", sel.id) } }, "Potvrdit výběr"),
+      el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => { SELECTED[q.id] = undefined; render(); } } }, "Zrušit")));
     sec.append(el("div", { class: "bar" },
       el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_safer") } }, "← Bezpečněji"),
       el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll") } }, icon("die"), el("span", {}, "Znovu")),
@@ -811,8 +841,9 @@ function stepEl(st, i) {
     detail));
   if (events.length) stage.append(el("div", { class: "details" }, events.map(eventRow),
     events.filter(e => e.answer && e.answer.decision === "choose" && e.cards.length).map(pastCards)));
+  if ((st.saved || []).length) stage.append(savedEl(st));
   if (cls === "active" && st.goal) stage.append(el("div", { class: "step-brief" },
-    brief([["Cíl kroku", st.goal], ["K čemu dál", st.feeds]])));
+    brief([["Co z toho bude", st.goal], ["K čemu to poslouží", st.feeds]])));
   if (st.parts.length && cls === "active") stage.append(partsEl(st));
   if (st.active) {   // each part with an open question: its why, goal, use and ask, then its questions
     const ids = [...new Set(st.open.map(q => q.part))];
@@ -829,6 +860,33 @@ function stepEl(st, i) {
 // The parts of the step: number, title and status; the part being worked on shows why, goal, what it feeds
 // and what the PM does, from the tool's map (never written by the agent per question).
 const PART_STATUS = { done: "hotovo", current: "teď", waiting: "čeká", skipped: "vynecháno" };
+// The PM's saved answers in the step: what was chosen, a short highlight when just saved, and Změnit
+// (the server opens the same question again as a new one; the agent takes the new answer).
+function savedText(q) {
+  const a = q.answer;
+  if (!a) return str(q.answer_title) || "uloženo";
+  if (a.decision === "choose") return a.choice_title || a.choice || "vybráno";
+  if (a.decision === "approve") return "Ano";
+  if (a.decision === "return") return "Vráceno: " + (a.comment || "");
+  return a.decision;
+}
+function savedEl(st) {
+  return el("div", { class: "saved" }, st.saved.map(q => {
+    const fresh = q.answer && Date.now() - Date.parse(q.answer.at) < 15000;
+    const change = async b => {
+      b.disabled = true;
+      const r = await call("POST", "/change", { question: q.id }).catch(() => ({ status: 0 }));
+      if (r.status === 200) { last = ""; tick(); return; }
+      b.disabled = false; notice(r.status === 409 ? "Změna této odpovědi už čeká níže." : "Změnu se nepodařilo otevřít.");
+    };
+    const btn = q.changed_to ? el("span", { class: "note" }, "Měníte - odpovězte níže")
+      : el("button", { type: "button", class: "reroll-btn quiet", on: { click: e => change(e.currentTarget) } }, "Změnit");
+    return el("div", { class: "saved-row" + (fresh ? " fresh" : "") },
+      el("span", { class: "ok" }, "✓ Uloženo"), el("span", { class: "saved-q" }, q.title || KIND[q.kind] || q.id),
+      el("span", { class: "saved-a" }, savedText(q)), btn);
+  }));
+}
+
 function brief(rows) {   // label left, text right - the same grid as the decision history
   return el("dl", { class: "brief" }, rows.filter(r => r[1]).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
 }
@@ -836,7 +894,7 @@ function partBox(st, p) {
   const i = st.parts.indexOf(p);
   return el("div", { class: "part-box" },
     el("p", { class: "part-head" }, st.parts.length > 1 ? "Část " + (i + 1) + " z " + st.parts.length + ": " + p.title : p.title),
-    brief([["Proč", p.why], ["Cíl", p.goal], ["K čemu dál", p.feeds], ["Co od vás", p.you]]));
+    brief([["O co jde", p.why], ["Co z toho bude", p.goal], ["K čemu to poslouží", p.feeds], ["Co uděláte vy", p.you]]));
 }
 function partsEl(st) {
   // with no open question the part being worked on still says what it is for

@@ -15,17 +15,17 @@
   {
    "n": 1,
    "title": "Druh webu",
-   "why": "Než se cokoli navrhne, musí být jasné, co stavíme.",
-   "goal": "Víme, jestli stavíme web nebo aplikaci, jestli značka už existuje a které části navíc připravíme.",
-   "feeds": "Určuje, které části kroku 2 proběhnou a které kontroly platí v kroku 6.",
+   "why": "Nejdřív si ujasníme, co vlastně stavíme.",
+   "goal": "Víme, jestli to bude obyčejný web, nebo aplikace, a co k němu ještě připravíme.",
+   "feeds": "Podle toho se řídí všechno další: jaké otázky dostanete a co se na konci zkontroluje.",
    "parts": [
     {
      "id": "co-stavime",
-     "title": "Co stavíme a co připravit",
-     "why": "Web, aplikace s přihlášením a aplikace do telefonu se staví a kontrolují jinak. Vize, nové logo a hledání na Googlu nejsou potřeba vždy.",
-     "goal": "Zvolený druh, stav značky, jestli firma obsluhuje konkrétní místo (podle toho se připraví místní hledání), a které části navíc uděláme.",
-     "feeds": "Řídí celý další postup: zapíná nebo vypíná části kroku 2 a kontroly v kroku 6.",
-     "you": "Vybrat druh webu a které části navíc připravit.",
+     "title": "Co stavíme a co k tomu",
+     "why": "Obyčejný web, web s přihlášením a aplikace do mobilu se dělají každý jinak. A ne každý web potřebuje nový slogan, nové logo nebo práci s Googlem.",
+     "goal": "Vybraný druh webu, jestli už máte logo, jestli pracujete hlavně v jednom městě a co navíc připravíme.",
+     "feeds": "Podle toho vynechám kroky, které nepotřebujete.",
+     "you": "Dvakrát vyberete jednu ze tří možností.",
      "kinds": [
       "variant"
      ],
@@ -48,17 +48,17 @@
   {
    "n": 2,
    "title": "Zadání a obsah",
-   "why": "Texty webu musí vycházet z ověřených informací o firmě a mluvit jazykem jejích zákazníků; jinak by se vymýšlely.",
-   "goal": "Schválený dokument o firmě, stránky webu a jejich části a ke každé části, co do ní přijde. U toho, co chybí, víme, kdo to dodá a kdy.",
-   "feeds": "Podklad pro vzory, tři návrhy vzhledu, texty webu i závěrečnou kontrolu pravdivosti.",
+   "why": "Web má o vaší firmě mluvit pravdivě a tak, jak mluvíte vy a vaši zákazníci.",
+   "goal": "Máme sepsané, co firma dělá, jaké stránky web bude mít a co na každé bude.",
+   "feeds": "Z toho se pak navrhuje vzhled a píšou texty.",
    "parts": [
     {
      "id": "podklady",
      "title": "Podklady",
-     "why": "Nic se nevymýšlí: vychází se z toho, co firma už napsala nebo řekla.",
-     "goal": "Schválený dokument o firmě: co dělá, pro koho, s jakými problémy jí lidé přicházejí, čím se liší, jak mluví a čím to dokládá.",
-     "feeds": "Zdroj pro vizi, všechny texty webu a pro kontrolu, že web netvrdí nic nepravdivého.",
-     "you": "Říct, kde máte podklady, a v dokumentu o firmě opravit, co nesedí.",
+     "why": "Nechci si nic vymýšlet. Vycházím z toho, co o firmě už existuje: dokumenty, starý web, vaše texty.",
+     "goal": "Jeden dokument o firmě: co dělá, pro koho, s čím lidé přicházejí, čím se liší a čím to dokládá.",
+     "feeds": "Všechny texty webu vycházejí z tohoto dokumentu.",
+     "you": "Řeknete, kde máte podklady, a přečtete si, co jsem z nich sepsal.",
      "kinds": [
       "sources",
       "product_context",
@@ -74,12 +74,12 @@
     },
     {
      "id": "vize",
-     "title": "Vize a slogany",
+     "title": "Hlavní sdělení a slogan",
      "when": "options.vision",
-     "why": "Web potřebuje jedno hlavní sdělení a jednotný tón.",
-     "goal": "Schválená vize (proč firma existuje a kam míří) a vybraný slogan.",
-     "feeds": "Hlavní nadpisy webu a tón všech textů.",
-     "you": "Vybrat slogan a schválit vizi.",
+     "why": "Web má mít jednu hlavní myšlenku, kterou si člověk zapamatuje.",
+     "goal": "Krátká vize a vybraný slogan.",
+     "feeds": "Hlavní nadpis webu a tón všech textů.",
+     "you": "Vyberete slogan ze tří návrhů.",
      "kinds": [
       "vision",
       "facts"
@@ -95,10 +95,10 @@
      "id": "logo",
      "title": "Logo",
      "when": "options.identity",
-     "why": "Značka musí fungovat všude stejně: na webu, v ikonce prohlížeče i v tisku.",
-     "goal": "Schválené logo, ikona webu a soubory značky pro web a tisk.",
-     "feeds": "Návrhy vzhledu a stavba webu.",
-     "you": "Vybrat logo.",
+     "why": "Logo musí vypadat dobře všude: na webu, v ikonce v prohlížeči i na papíře.",
+     "goal": "Hotové logo, ikonka a soubory pro web i tisk.",
+     "feeds": "Použije se ve vzhledu webu.",
+     "you": "Vyberete nebo potvrdíte logo.",
      "kinds": [
       "identity",
       "facts"
@@ -114,10 +114,10 @@
      "id": "hledani",
      "title": "Hledání na Googlu",
      "when": "options.seo",
-     "why": "Lidé vás mají najít podle toho, co hledají, nejen podle jména.",
-     "goal": "Schválený seznam stránek a to, jak se každá ukáže ve výsledcích hledání.",
-     "feeds": "Stránky webu, jejich titulky a popisky a kontrola hledání v kroku 6.",
-     "you": "Schválit seznam stránek a hledané výrazy.",
+     "why": "Aby vás našli i lidé, kteří vaše jméno neznají a hledají třeba „zubař Trenčín“.",
+     "goal": "Seznam stránek webu a jak se každá ukáže ve výsledcích Googlu.",
+     "feeds": "Podle toho se stránky postaví a pojmenují.",
+     "you": "Potvrdíte seznam stránek.",
      "kinds": [
       "seo_brief",
       "facts"
@@ -132,10 +132,10 @@
     {
      "id": "stranky",
      "title": "Stránky a jejich části",
-     "why": "Kostra webu rozhoduje, co návštěvník kde najde a jestli dojde až ke kontaktu.",
-     "goal": "U každé stránky víme, jaké má části, v jakém pořadí a co která část návštěvníkovi řekne.",
-     "feeds": "Obsah stránek, návrhy vzhledu a stavba webu.",
-     "you": "Říct, co chybí, přebývá nebo je ve špatném pořadí.",
+     "why": "Než se cokoli napíše, rozvrhneme, jaké stránky web bude mít a co na které najdete.",
+     "goal": "Seznam stránek a u každé, o čem budou jednotlivé části.",
+     "feeds": "Podle toho se navrhuje vzhled a píšou texty.",
+     "you": "Řeknete, co chybí, co je navíc nebo co dát jinam.",
      "kinds": [
       "structure",
       "task_map",
@@ -151,10 +151,10 @@
     {
      "id": "obsah",
      "title": "Obsah stránek",
-     "why": "Ke každé části webu musí být jasné, co do ní přijde a odkud to je.",
-     "goal": "U každé části je obsah z podkladů, nebo víme, kdo ho dodá a kdy; registr údajů, které web smí tvrdit.",
-     "feeds": "Z obsahu se píšou texty webu; registr hlídá kontrola údajů v kroku 6.",
-     "you": "Doplnit chybějící údaje a materiály (fotky, čísla, příběhy), nebo je vědomě odložit.",
+     "why": "Ke každé části webu potřebujeme vědět, co v ní bude a odkud to máme.",
+     "goal": "U každé části je jasný obsah: buď ho máme, nebo víme, kdo ho dodá.",
+     "feeds": "Z toho píšu texty. Co tady není, na web nenapíšu.",
+     "you": "Doplníte chybějící údaje, fotky nebo příběhy, nebo řeknete, že se dodají později.",
      "kinds": [
       "content_plan",
       "defer_content",
@@ -172,17 +172,17 @@
   {
    "n": 3,
    "title": "Vzory",
-   "why": "Než se navrhne vzhled, je dobré ukázat, co se vám líbí.",
-   "goal": "Vybrané jeden až tři weby, které se vám líbí.",
-   "feeds": "Podklad pro tři návrhy vzhledu.",
+   "why": "Ukážete mi weby, které se vám líbí.",
+   "goal": "Jeden až tři weby, které se vám líbí.",
+   "feeds": "Podle nich připravím tři návrhy vzhledu.",
    "parts": [
     {
      "id": "vzory",
      "title": "Vzory",
-     "why": "Vzhled se snáz vybírá od konkrétních webů než od popisu.",
-     "goal": "Vybrané jeden až tři weby a co se vám na nich líbí.",
-     "feeds": "Tři návrhy vzhledu v kroku 4.",
-     "you": "Vybrat jeden až tři weby.",
+     "why": "Vzhled se mnohem líp vybírá podle hotových webů než podle popisu.",
+     "goal": "Vybrané weby a co se vám na nich líbí.",
+     "feeds": "Inspirace pro tři návrhy vzhledu.",
+     "you": "Vyberete jeden až tři weby.",
      "kinds": [
       "references"
      ],
@@ -198,17 +198,17 @@
   {
    "n": 4,
    "title": "Vzhled",
-   "why": "Vzhled se vybírá na skutečné stránce s vašimi texty a logem, ne na obrázku.",
-   "goal": "Vybraný jeden ze tří návrhů vzhledu.",
-   "feeds": "Celý web se postaví v tomto vzhledu.",
+   "why": "Vzhled vybíráte na skutečné stránce s vašimi texty, ne na obrázku.",
+   "goal": "Vybraný jeden ze tří návrhů.",
+   "feeds": "V tomhle vzhledu se postaví celý web.",
    "parts": [
     {
      "id": "vzhled",
      "title": "Tři návrhy vzhledu",
-     "why": "Tři výrazně odlišné návrhy ukážou, kam se dá jít.",
-     "goal": "Vybraný jeden návrh.",
-     "feeds": "Stavba celého webu v kroku 5.",
-     "you": "Vybrat jeden návrh.",
+     "why": "Tři hodně odlišné návrhy ukážou, jakými směry se dá jít.",
+     "goal": "Jeden vybraný návrh.",
+     "feeds": "Podle něj postavím celý web.",
+     "you": "Vyberete jeden návrh.",
      "kinds": [
       "direction"
      ],
@@ -224,17 +224,17 @@
   {
    "n": 5,
    "title": "Stavba",
-   "why": "Z toho, co je schválené výše, se postaví celý web.",
-   "goal": "Celý web ve zvoleném vzhledu s texty připravenými k závěrečné kontrole.",
-   "feeds": "Závěrečná kontrola v kroku 6.",
+   "why": "Z toho, co jste schválili, postavím celý web.",
+   "goal": "Hotový web, který si můžete proklikat.",
+   "feeds": "Celý se pak zkontroluje.",
    "parts": [
     {
      "id": "stavba",
      "title": "Stavba webu",
-     "why": "Všechny stránky se postaví podle kostry, obsahu a zvoleného vzhledu.",
-     "goal": "Postavený web, který jde otevřít v náhledu.",
-     "feeds": "Kontrola textů, technická kontrola a schválení stránek.",
-     "you": "Nic, jen počkat na náhled.",
+     "why": "Postavím všechny stránky podle schválených stránek, obsahu a vzhledu.",
+     "goal": "Web v náhledu, ve kterém se dá klikat.",
+     "feeds": "Kontrola textů, techniky a stránek.",
+     "you": "Nic, jen počkáte, až vám pošlu odkaz.",
      "kinds": [],
      "files": [
       "6-build.md"
@@ -248,18 +248,18 @@
   {
    "n": 6,
    "title": "Kontrola",
-   "why": "Web se předá, až obstojí u zákazníka i technicky.",
-   "goal": "Texty, technika i každá stránka jsou schválené.",
-   "feeds": "Předání a zveřejnění.",
+   "why": "Než web pustíme ven, musí obstát u zákazníka i technicky.",
+   "goal": "Texty, technika i všechny stránky jsou v pořádku a vy je schválíte.",
+   "feeds": "Pak se web předá a může jít ven.",
    "parts": [
     {
      "id": "kontrola-textu",
      "title": "Kontrola textů",
      "section": "7-verify.md bod 1a, 1b",
-     "why": "Texty musí být pravdivé, srozumitelné a vést návštěvníka k tomu, kvůli čemu stránka je.",
-     "goal": "Automatická kontrola textů ze dvou pohledů zákazníka prošla a vy říkáte, že takhle firma mluví.",
-     "feeds": "Schválení stránek.",
-     "you": "Projít texty a vypsat věty, které chcete jinak.",
+     "why": "Texty musí být pravdivé, srozumitelné a přivést člověka k tomu, aby se ozval.",
+     "goal": "Texty prošly nezávislou kontrolou a vy říkáte, že takhle mluvíte.",
+     "feeds": "Pak schvalujete jednotlivé stránky.",
+     "you": "Přečtete texty a napíšete věty, které chcete jinak.",
      "kinds": [
       "copy_verdict"
      ],
@@ -274,10 +274,10 @@
      "id": "technicka",
      "title": "Technická kontrola",
      "section": "7-verify.md bod 1-3",
-     "why": "Web musí fungovat na mobilu i počítači, být přístupný a rychlý a splnit povinné náležitosti (IČO, ochrana údajů); když se změní pravidla, podle kterých se kontroluje, rozhodnete, jestli je přijmout.",
-     "goal": "Všechny technické kontroly prošly, nebo jste výjimku vědomě přijal.",
-     "feeds": "Schválení stránek.",
-     "you": "Rozhodnout o výjimkách, pokud nějaké jsou.",
+     "why": "Web musí fungovat na mobilu i počítači, rychle se načíst, být čitelný pro každého a mít povinné údaje (IČO, ochrana osobních údajů).",
+     "goal": "Všechny kontroly prošly, nebo jste nějakou výjimku vědomě odsouhlasili.",
+     "feeds": "Pak schvalujete jednotlivé stránky.",
+     "you": "Když něco neprojde, rozhodnete, jestli to necháme být.",
      "kinds": [
       "exception",
       "coverage_drift"
@@ -293,10 +293,10 @@
      "id": "pravidla",
      "title": "Pravidla vzhledu",
      "section": "7-verify.md bod 4",
-     "why": "Aby web zůstal jednotný i po pozdějších úpravách.",
-     "goal": "Schválená pravidla vzhledu webu (barvy, písma, prvky, jak se co používá).",
-     "feeds": "Každá další úprava webu.",
-     "you": "Schválit pravidla.",
+     "why": "Aby web vypadal jednotně i po pozdějších úpravách.",
+     "goal": "Sepsaná pravidla: barvy, písma a jak se co používá.",
+     "feeds": "Podle nich se bude web upravovat i v budoucnu.",
+     "you": "Schválíte je.",
      "kinds": [
       "design_standard"
      ],
@@ -313,8 +313,8 @@
      "section": "7-verify.md bod 5",
      "why": "Každou stránku uvidíte dřív, než půjde ven.",
      "goal": "Všechny stránky schválené.",
-     "feeds": "Předání.",
-     "you": "Projít a schválit stránky.",
+     "feeds": "Pak se web předává.",
+     "you": "Projdete stránky a schválíte je.",
      "kinds": [
       "approve_page"
      ],
@@ -329,10 +329,10 @@
      "id": "predani",
      "title": "Předání",
      "section": "7-verify.md bod 6-9",
-     "why": "Mít všechno pohromadě pro sebe i pro zákazníka.",
-     "goal": "Předávací stránka pro zákazníka (co dostal: web, značka, viditelnost, pravidla) a převzaté části značky.",
-     "feeds": "Zveřejnění webu.",
-     "you": "Zkontrolovat předávací stránku a potvrdit, že obsahuje všechno slíbené.",
+     "why": "Aby vy i zákazník měli všechno pohromadě.",
+     "goal": "Předávací stránka s tím, co zákazník dostal: web, logo, nastavení pro Google a pravidla vzhledu.",
+     "feeds": "Web může jít ven.",
+     "you": "Zkontrolujete, že tam je všechno, co jsme slíbili.",
      "kinds": [
       "handover"
      ],
