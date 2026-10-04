@@ -106,7 +106,7 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    se stavy jako snímek - `pwa-notifications-standard`).
    Na co PM odpovídá textem nebo potvrzením (fakta k ověření, souhlasy, kontrola názvu),
    polož jako otázku `facts` s `outcome` a **třemi kartami s návrhy odpovědi**: první je doporučená
-   (studio ji tak označí), vlastní odpověď dá PM přes „Chci to jinak"; každá karta má `source`
+   (studio ji tak označí), vlastní odpověď dá PM přes „Žádná mi nesedí" → „Použít moji odpověď" (`return` s komentářem); každá karta má `source`
    z mapy `sources` (z čeho návrh vychází: `product-marketing:jobs|objections|switching|customer-language|proof`,
    `copywriting:before-writing`, `podklady`, `registr`, nebo `odhad` = tvůj odhad, který PM potvrdí).
    Otázku samotnou ber z převzatého postupu, který `source` jmenuje (product-marketing: za co si
@@ -180,7 +180,7 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    `aid-ui-state.sh step` na vnitřní krok té části, zopakuj ji a vše, co z ní plyne, a pokračuj.
    Zodpovězené otázky z payloadu nemaž: po `record-answer` jim nastav `"done": true`
    a `"answer_title"` (co PM vybral, slovy), studio je ukazuje jako „Uloženo" s tlačítkem
-   „Změnit". Výběr karty PM potvrzuje tlačítkem „Potvrdit výběr"; klik na kartu nic nepošle. Více otevřených
+   „Změnit". Kartu PM vybere klikem kamkoli na ni a potvrdí jedním tlačítkem pod kartami („Potvrdit: název"); klik na kartu nic nepošle. Více otevřených
    otázek = jedna smyčka na každou. Napíše-li PM mezitím do chatu, zkus
    `record-answer` hned; exit 1 = odpověď ještě není.
 5. Rozhodnutí `approve`/`choose` → mutace s `--answer <id>` (jen tam, kde
@@ -195,7 +195,7 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    jinak se od odpovědi změnil a otázku otevři znovu.
    `return` → PM vrací s komentářem; oprav a otevři
    otázku znovu (nové `opened_at`). `reroll`/`reroll_safer`/`reroll_bolder`
-   (Znovu = ve stejném duchu / Bezpečněji / Odvážněji) → odpověď
+   („Navrhnout jiné možnosti" = ve stejném duchu, komentář PM je nepovinný a řídí nové návrhy; Bezpečnější / Odvážnější jen u vzhledu, loga a sloganu) → odpověď
    nese `next_question`; vytvoř nové karty podle komentáře a zapiš je pod tím
    id do payloadu.
 
