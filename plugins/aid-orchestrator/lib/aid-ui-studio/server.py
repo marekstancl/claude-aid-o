@@ -95,7 +95,7 @@ KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "approve_page", "exception", "coverage_drift", "design_standard", "handover", "notifications",
          "sources", "product_context", "copy_verdict"}
 # Card fields the page shows (a step may turn any into state); snapshotted with the answer.
-CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "palette", "risk", "uniqueness")
+CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "palette", "risk", "uniqueness", "value")
 DECISIONS = {"approve", "choose", "return", "reroll", "reroll_safer", "reroll_bolder"}
 # Previews are raster images only: an .html/.svg preview would run script on this origin.
 IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",

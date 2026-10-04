@@ -52,6 +52,9 @@
 #     set variant|structure|content-plan <json>   kind variant|structure|content_plan,
 #                          target sha256:<sha256 of `jq -S -c -j . <<<json`> (no newline)
 #     set options <json>   kind variant, target sha256:<canonical options JSON> (as above)
+#                          variant and options: when every card of the question carries `value` (the JSON
+#                          that card stands for), the target is sha256:<canonical {card id: value}> and
+#                          <json> must be the value of the card the PM chose
 #     set refs <json>      kind references, target sha256:<canonical refs JSON> (as above);
 #                          <json> = the shown cards [{"id": <card id>, "url", "why"}]; the answer
 #                          must be `choose` with its choice (one card id or a list) among the ids;
@@ -686,6 +689,30 @@ chapter_all_target() {
 
 json_sha() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
 
+# choice_target <json> — the target the answer must carry for this JSON. One proposal: the sha256 of
+# the JSON. Cards that each carry `value` (the JSON that card stands for): the sha256 of the map
+# {card id: value} of the cards the studio showed, and the JSON must be the value of the card the PM
+# chose - so the PM can pick any of the offered cards, not only the recommended one.
+choice_target() {
+  local m
+  # no card carries a value -> one proposal (legacy); any card carries one -> all must, or the verb is refused
+  m="$(jq -c --arg id "${ANSWER:-}" --argjson v "$1" '.answers[$id] as $a | ($a.cards // []) as $c
+       | if ($a == null) or (any($c[]; type == "object" and .value != null) | not) then "legacy"
+         elif all($c[]; type == "object" and (.value | type) == "object" and (.id | type) == "string" and .id != "") | not
+           then "bad: every card needs a string id and an object value"
+         elif ([$c[].id] | length != (unique | length)) then "bad: card ids repeat"
+         elif $a.decision != "choose" or ($a.choice | type) != "string" then "bad: the answer is not a choice of one card"
+         elif any($c[]; .id == $a.choice and .value == $v) | not then "bad: the PM chose card \($a.choice), and its value is not this JSON"
+         else ($c | map({key: .id, value}) | from_entries) end' "$STATE")" \
+    || die "$VERB refused: the recorded answer ${ANSWER:-} cannot be read"
+  case "$m" in
+    '"legacy"') json_sha "$1" ;;
+    '"bad: '*) m="${m#\"bad: }"; die "$VERB refused: answer $ANSWER: ${m%\"}" ;;
+    '{'*) json_sha "$m" ;;
+    *) die "$VERB refused: the recorded answer ${ANSWER:-} cannot be read" ;;
+  esac
+}
+
 # build_current — the recorded build, refused when the site changed since build-record.
 build_current() {
   local dir id
@@ -776,7 +803,8 @@ case "$VERB" in
           || usage "options: keys vision seo images (true|false) and identity (false|\"new\"|\"package\"): $2"
         st="$(jq -r .step "$STATE")"
         [[ "$st" == 0 ]] || die "set options refused at step $st: the options are chosen at step 0 and cannot change after"
-        take_answer variant "$(json_sha "$2")"
+        tgt="$(choice_target "$2")" || exit 1
+        take_answer variant "$tgt"
         jq_write --argjson v "$2" --arg q "$ANSWER" '.options += $v | .consumed += [$q]'
         ;;
       refs)
@@ -809,7 +837,8 @@ case "$VERB" in
                           and IN(.status; "missing", "draft", "confirmed_client", "deferred_by_pm"))' ;;
         esac
         jq -e "$shape" >/dev/null <<<"$2" || usage "set $1: not the $key shape of the Data Model: $2"
-        take_answer "$key" "$(json_sha "$2")"
+        if [[ "$key" == variant ]]; then tgt="$(choice_target "$2")" || exit 1; else tgt="$(json_sha "$2")"; fi
+        take_answer "$key" "$tgt"
         jq_write --arg k "$key" --arg q "$ANSWER" --argjson v "$2" '.[$k] = $v | .consumed += [$q] | .finished = null'
         ;;
       *) usage "set cannot write '$1' (only: product_type refs options variant structure content-plan)" ;;

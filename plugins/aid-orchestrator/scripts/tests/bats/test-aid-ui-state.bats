@@ -685,6 +685,33 @@ p101_project() {
   [ "$(jq .options.vision "$STATE")" = true ]
 }
 
+@test "set variant|options with a value on every card: the PM's card decides, not only the recommended one" {
+  a='{"vision":true,"identity":"package","seo":true}'; b='{"vision":false,"identity":"new","seo":true}'
+  cards="$(jq -nc --argjson a "$a" --argjson b "$b" '[{id: "x", value: $b}, {id: "y", value: $a}]')"
+  ans c1 variant "$(sha_of "$(jq -nc --argjson a "$a" --argjson b "$b" '{x: $b, y: $a}')")" choose "$cards"   # the PM chose x
+  run "$SCRIPT" set "$PROJ" options "$a" --answer c1                # the card the PM did not choose
+  [ "$status" -eq 1 ]; [[ "$output" == *'its value is not this JSON'* ]]
+  [ "$(jq -r .options.identity "$STATE")" = false ]
+  run "$SCRIPT" set "$PROJ" options "$b" --answer c1
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq -r .options.identity "$STATE")" = new ]
+  # a target that is not the map of the shown cards is refused (the old one-JSON target does not pass)
+  v='{"type":"web","brand":"new","local":true}'; w='{"type":"web","brand":"existing","local":true}'
+  ans c3 variant "$(sha_of "$v")" choose "$(jq -nc --argjson v "$v" '[{id: "x", value: $v}]')"
+  run "$SCRIPT" set "$PROJ" variant "$v" --answer c3
+  [ "$status" -eq 1 ]; [[ "$output" == *'is for'* ]]
+  # one card without a value does not switch the binding off
+  ans c4 variant "$(sha_of "$w")" choose "$(jq -nc --argjson v "$v" '[{id: "x", value: $v}, {id: "y"}]')"
+  run "$SCRIPT" set "$PROJ" variant "$w" --answer c4
+  [ "$status" -eq 1 ]; [[ "$output" == *'every card needs'* ]]
+  # the card the PM chose (x) decides the variant; the map hash is the same whatever the card order
+  ans c5 variant "$(sha_of "$(jq -nc --argjson v "$v" --argjson w "$w" '{y: $w, x: $v}')")" choose "$(jq -nc --argjson v "$v" --argjson w "$w" '[{id: "y", value: $w}, {id: "x", value: $v}]')"
+  run "$SCRIPT" set "$PROJ" variant "$w" --answer c5
+  [ "$status" -eq 1 ]
+  run "$SCRIPT" set "$PROJ" variant "$v" --answer c5
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq -r .variant.brand "$STATE")" = new ]
+}
 
 # --- P103 Step 4: answers, builds, gate, finish ----------------------------
 

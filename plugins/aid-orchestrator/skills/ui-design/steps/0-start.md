@@ -49,12 +49,17 @@ podle názvu projektu), zamítnuté návrhy.
    - `local`: `true`, když jde o místní firmu (adresa, otevírací doba);
    - volitelné části kroku 1: vize, identita (`"new"`, `"package"`, nebo
      `false`), SEO.
-8. Volitelné části jsou druhá otázka druhu `variant` s `target` = sha256 JSON
-   `{"vision":…,"identity":…,"seo":…}`. Oba JSON zapiš nástrojem Write do
+8. Volitelné části jsou druhá otázka druhu `variant`. Obě otázky mají tři karty
+   a **každá karta nese `value`** = JSON, který ta karta znamená (u varianty
+   `{"type":…,"brand":…,"local":…}`, u voleb `{"vision":…,"identity":…,"seo":…}`);
+   `target` otázky = sha256 kanonického JSON mapy `{id karty: value}` všech jejích
+   karet. PM tak může vybrat kteroukoli kartu, ne jen doporučenou. Vybere-li PM
+   u varianty jinou značku než doporučenou, karty voleb připrav až podle jeho
+   odpovědi. `value` vybrané karty zapiš nástrojem Write do
    `<project>/.aid-ui/variant.json` a `<project>/.aid-ui/options.json` (nikdy
-   ne jako shellový literál). Po odpovědi `choose`/`approve`:
+   ne jako shellový literál). Po odpovědi `choose`:
    `aid-ui-state.sh set <project> variant "$(cat <project>/.aid-ui/variant.json)" --answer <id>`
-   (`{"type":…,"brand":…,"local":…}`, `target` = jeho sha256) a
+   (soubor = `value` karty, kterou PM vybral; cíl odpovědi zůstává otisk mapy karet) a
    `aid-ui-state.sh set <project> options "$(cat <project>/.aid-ui/options.json)" --answer <id>`
    (odpověď na otázku voleb; jen v kroku 0).
 9. `aid-ui-serve.sh brand docs/brand` → odkaz na brand stránku pro PM.

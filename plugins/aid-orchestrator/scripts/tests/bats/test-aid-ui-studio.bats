@@ -135,7 +135,7 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   printf 'PNG1' > "$P/.aid-ui/studio/a.png"; echo s > "$P/secret"
   [ "$(answer "$choose_a")" = 200 ]
   png="$(printf 'PNG1' | sha256sum | cut -d' ' -f1)"
-  want='[{"id":"a","palette":["#000"],"preview":"a.png","preview_sha256":"'"$png"'","risk":null,"thesis":"písmo","title":"A","uniqueness":null,"url":"https://a.example"},{"id":"b","palette":null,"preview":"../../secret","preview_sha256":null,"risk":null,"thesis":null,"title":"B","uniqueness":null,"url":null},{"id":"c","palette":null,"preview":"c.html","preview_sha256":null,"risk":null,"thesis":null,"title":"C","uniqueness":null,"url":null}]'
+  want='[{"id":"a","palette":["#000"],"preview":"a.png","preview_sha256":"'"$png"'","risk":null,"thesis":"písmo","title":"A","uniqueness":null,"url":"https://a.example","value":null},{"id":"b","palette":null,"preview":"../../secret","preview_sha256":null,"risk":null,"thesis":null,"title":"B","uniqueness":null,"url":null,"value":null},{"id":"c","palette":null,"preview":"c.html","preview_sha256":null,"risk":null,"thesis":null,"title":"C","uniqueness":null,"url":null,"value":null}]'
   [ "$(jq -S -c .cards "$BATS_TEST_TMPDIR/body")" = "$want" ]
   sha="$(printf '%s' "$want" | sha256sum | cut -d' ' -f1)"
   [ "$(jq -r .cards_sha256 "$BATS_TEST_TMPDIR/body")" = "$sha" ]
