@@ -6,7 +6,7 @@
 setup() {
   SK="$BATS_TEST_DIRNAME/../../../skills/ui-design"
   LINT="$BATS_TEST_DIRNAME/../../aid-lint-skill.sh"
-  STEPS="0-start 1-product 1v-vision 1i-identity 1s-seo 2-structure 3-content-plan 4-references 5-directions 6-build 7-verify"
+  STEPS="0-start 1-product 1p-sources 1v-vision 1i-identity 1s-seo 2-structure 3-content-plan 4-references 5-directions 6-build 7-verify"
 }
 
 @test "no step names Impeccable or voice-standard" {
@@ -170,4 +170,17 @@ setup() {
   done
   grep -qF 'plain-english-alternatives.md' "$R/copy-en.md"
   grep -qF 'ai-tells.md' "$R/copy-en.md"
+}
+
+@test "P108: 1p runs first in step 1; 1v, 3 and 6 start with context-check" {
+  # in 1-product, 1p is named before any studio question is opened
+  first_q=$(grep -n 'otázk' "$SK/steps/1-product.md" | head -1 | cut -d: -f1)
+  first_p=$(grep -n '1p-sources.md' "$SK/steps/1-product.md" | head -1 | cut -d: -f1)
+  [ -n "$first_p" ] && { [ -z "$first_q" ] || [ "$first_p" -le "$first_q" ]; }
+  for f in 1v-vision 3-content-plan 6-build; do
+    sed -n '/^## Postup/,/^1\./p' "$SK/steps/$f.md" | grep -qF 'aid-ui-state.sh context-check' || { echo "$f"; return 1; }
+  done
+  grep -qF 'aid-ui-sources.py' "$SK/steps/1p-sources.md"
+  grep -qF '`sources`' "$SK/steps/1p-sources.md"
+  grep -qF '`product_context`' "$SK/steps/1p-sources.md"
 }

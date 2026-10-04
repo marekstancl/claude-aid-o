@@ -168,7 +168,7 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 | Krok | Soubor |
 |---|---|
 | 0 | `steps/0-start.md` - varianta, inventura, kontrola pokrytí |
-| 1 | `steps/1-product.md` (+ `steps/1v-vision.md`, `steps/1i-identity.md`, `steps/1s-seo.md`) |
+| 1 | `steps/1-product.md` (+ `steps/1p-sources.md`, `steps/1v-vision.md`, `steps/1i-identity.md`, `steps/1s-seo.md`) |
 | 2 | `steps/2-structure.md` - stránky, role, toky |
 | 3 | `steps/3-content-plan.md` - obsah a fakta |
 | 4 | `steps/4-references.md` - vzory |

@@ -23,12 +23,15 @@ v Docusauru), šablona `/opt/eco/docs/docs/ecosystem/templates/product-vision-pr
 
 ## Postup
 
+Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 1p (`steps/1p-sources.md`).
+
 1. Vize existuje → shrň ji jako otázku `vision` ve studiu, nepřepisuj ji.
-2. Jinak si povinné body šablony **odpověz sám** ze všeho, co projekt má:
-   `PRODUCT.md`, dosavadní web a jeho texty, dřívější slogany a motta, zadání,
-   dokumentace, repozitář. PM se ptáš jen na fakt, který nikde není a nedá se
-   odvodit (cena, kontakt, jméno klienta, číslo) - jednou otázkou `facts`,
-   nejvýš osm bodů, u každého tvůj návrh. Domněnku nikdy nevydávej za fakt:
+2. Jinak si povinné body šablony **odpověz sám** ze schváleného
+   `docs/content/product-context.md` (krok 1p; ten už přečetl `PRODUCT.md`, starý web, zadání
+   a rozhovory) a z manifestu podkladů `.aid-ui/sources/manifest.json`. PM se ptáš jen na bod
+   šablony vize, který dokument o produktu nemá a nedá se odvodit (cena, kontakt, jméno klienta,
+   číslo) - jednou otázkou `facts`, nejvýš osm bodů, u každého tvůj návrh; na nic, co dokument
+   o produktu už obsahuje, se znovu neptej. Domněnku nikdy nevydávej za fakt:
    co jsi odvodil, označ jako HYPOTÉZU i s tím, odkud plyne.
    Každý fakt, který jsi takto určil sám, zapiš ještě před otázkou `facts` jedním
    voláním na fakt: `aid-ui-state.sh decide <project> --step "Zadání a obsah"

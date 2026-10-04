@@ -60,7 +60,7 @@
 #                          picked = id in the choice (set by this script, never by the caller)
 #     chapter <project> <id> schvaleno            kind by chapter: vize vision, logo identity,
 #                          seo seo_brief, struktura structure, obsah content_plan, produkt
-#                          variant, smer direction, barvy typografie komponenty platformy
+#                          variant, smer direction, podklady product_context, barvy typografie komponenty platformy
 #                          ukazky kvalita schvaleni design_standard; target = what
 #                          `chapter-target <project> <id>` prints: sha256:<sha256 of the
 #                          chapter id, a newline, then the stored body, the bytes between
@@ -70,6 +70,10 @@
 #                          <project>` prints: sha256:<sha256 of "<id>\n<chapter-target of id>\n" for
 #                          every chapter in navrh or schvaleno, in CHAPTERS order> (a changed body
 #                          of any of them changes it). One answer approves all of them.
+#     context-check <project>                    exit 0 when an answer of kind product_context,
+#                          decision approve, targets docs/content/product-context.md@<sha256 of
+#                          the file now> (step 1p); 1 naming why (no file, no approval, changed
+#                          since approval). Steps 1v, 3 and 6 call it first.
 #     approve-page <project> <page>               kind approve_page, target <page>@<fingerprint
 #                          of the page in the recorded build>; refused when the site changed
 #     defer-content <project> <item id>           kind defer_content, target <item id>;
@@ -155,7 +159,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE="$HERE/../skills/ui-design/brand-page/state.template.json"
 COVERAGE_MAP="${AID_UI_COVERAGE_MAP:-$HERE/../skills/ui-design/coverage/map.yaml}"
-CHAPTERS=" produkt vize logo barvy typografie smer komponenty platformy ukazky seo struktura obsah kvalita schvaleni "
+CHAPTERS=" produkt podklady vize logo barvy typografie smer komponenty platformy ukazky seo struktura obsah kvalita schvaleni "
 
 usage() { echo "ERROR: aid-ui-state.sh: ${1:-usage}; see the header of this script" >&2; exit 2; }
 die() { echo "ERROR: aid-ui-state.sh: $1" >&2; exit 1; }
@@ -323,7 +327,7 @@ elif mode == "fonts":
     if n != 1:
         fail("fonts markers not found in %s; run: aid-ui-state.sh init" % path)
 elif mode == "upgrade":   # args: chapter ids in page order
-    new = {"vize": ("Vize", "produkt"), "seo": ("SEO", "ukazky"),   # dict order = insertion order
+    new = {"podklady": ("Podklady", "produkt"), "vize": ("Vize", "podklady"), "seo": ("SEO", "ukazky"),   # dict order = insertion order
            "struktura": ("Struktura", "seo"), "obsah": ("Obsah", "struktura"), "kvalita": ("Kvalita", "obsah")}
     for cid, (title, prev) in new.items():
         if '<section id="%s"' % cid in text:
@@ -609,7 +613,7 @@ studio_fetch() {
 chapter_kind() {
   case "$1" in
     vize) echo vision ;; logo) echo identity ;; seo) echo seo_brief ;; struktura) echo structure ;;
-    obsah) echo content_plan ;; produkt) echo variant ;; smer) echo direction ;;
+    obsah) echo content_plan ;; produkt) echo variant ;; smer) echo direction ;; podklady) echo product_context ;;
     *) echo design_standard ;;
   esac
 }
@@ -987,6 +991,21 @@ case "$VERB" in
     [[ "$rc" -eq 0 ]] || exit 1
     jq_write --arg d "$(today)" '.finished = $d'
     echo "FINISHED: $(today)"
+    ;;
+
+  context-check)
+    need_state
+    ctx="$PROJECT/docs/content/product-context.md"
+    [[ -f "$ctx" ]] || { echo "context-check: no docs/content/product-context.md; run step 1p (Podklady)" >&2; exit 1; }
+    csha="$(sha256sum "$ctx" | cut -d' ' -f1)"
+    if jq -e --arg t "docs/content/product-context.md@$csha" \
+         '[.answers[]? | select(.kind == "product_context" and .decision == "approve" and .target == $t)] | length > 0' "$STATE" >/dev/null; then
+      echo "product context approved: $csha"
+    elif jq -e '[.answers[]? | select(.kind == "product_context" and .decision == "approve")] | length > 0' "$STATE" >/dev/null; then
+      echo "context-check: docs/content/product-context.md changed since the PM approved it; ask again (product_context)" >&2; exit 1
+    else
+      echo "context-check: the PM has not approved docs/content/product-context.md (question product_context)" >&2; exit 1
+    fi
     ;;
 
   decide)

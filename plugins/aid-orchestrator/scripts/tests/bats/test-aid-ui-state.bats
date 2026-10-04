@@ -456,7 +456,7 @@ p101_project() {
   [ "$(jq -c .options "$STATE")" = '{"vision":false,"identity":false,"seo":false,"images":false}' ]
   [ ! -e "$PROJ/docs/brand/state.json" ]
   [ -f "$PROJ/.aid-ui/state.json.migrated" ]
-  [ "$(grep -c '<section ' "$HTML")" -eq 14 ]
+  [ "$(grep -c '<section ' "$HTML")" -eq 15 ]
   grep -qF '<div class="body"><!-- body:barvy --><div class="swatch">x</div><!-- /body:barvy --></div>' "$HTML"
   grep -qF '<p class="status"><!-- status:barvy -->2026-09-24<!-- /status:barvy --></p>' "$HTML"
   grep -qF '<!-- fonts -->' "$HTML"
@@ -1205,4 +1205,32 @@ decide_payload() {
   ans w2 exception '{"check":"brand_package","missing":["icons: favicon.svg"]}'
   run "$SCRIPT" brand-waive "$PROJ" --answer w2
   [ "$status" -eq 1 ]; [[ "$output" == *"answer w2 is for"* ]]
+}
+
+@test "P108: context-check refuses no file, no approval and a changed file; passes the approved one" {
+  run "$SCRIPT" context-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"run step 1p"* ]]
+  mkdir -p "$PROJ/docs/content"; printf '# Produkt\nStav: vyplněno\n' > "$PROJ/docs/content/product-context.md"
+  run "$SCRIPT" context-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"has not approved"* ]]
+  # an approval of another kind or another file does not count
+  ans q-other facts "docs/content/product-context.md@$(sha256sum "$PROJ/docs/content/product-context.md" | cut -d' ' -f1)"
+  run "$SCRIPT" context-check "$PROJ"; [ "$status" -eq 1 ]
+  ans q-ctx product_context "docs/content/product-context.md@$(sha256sum "$PROJ/docs/content/product-context.md" | cut -d' ' -f1)"
+  run "$SCRIPT" context-check "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  echo "změna" >> "$PROJ/docs/content/product-context.md"
+  run "$SCRIPT" context-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"changed since the PM approved"* ]]
+}
+
+@test "P108: chapter podklady exists in a page made before it and is approved by a product_context answer" {
+  # an old brand page without the podklady section gets it on init, after produkt
+  sed -i '/id="podklady"/d; /href="#podklady"/d' "$HTML"
+  ! grep -q 'id="podklady"' "$HTML"
+  "$SCRIPT" init "$PROJ" >/dev/null
+  grep -q '<section id="podklady"' "$HTML"
+  awk '/<section id="produkt"/{p=NR} /<section id="podklady"/{k=NR} END{exit !(p && k == p + 1)}' "$HTML"
+  echo '<p>zdroje</p>' > "$T/pk.html"; "$SCRIPT" body "$PROJ" podklady --file "$T/pk.html" >/dev/null
+  "$SCRIPT" chapter "$PROJ" podklady navrh >/dev/null
+  # a design_standard answer (the old default kind) is refused, a product_context one approves
+  run approve_chapter podklady design_standard q-pk1; [ "$status" -ne 0 ]
+  approve_chapter podklady product_context q-pk2 >/dev/null
+  [ "$(jq -r .chapters.podklady.status "$STATE")" = schvaleno ]
 }

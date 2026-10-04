@@ -24,6 +24,8 @@ u aplikace `webapp-tasks-states-standard.md` (UA-1..UA-11) - čti živě.
 
 ## Postup
 
+Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 1p (`steps/1p-sources.md`).
+
 1. Postav každou stránku ze `structure` (u aplikace každý tok se všemi jeho
    stavy) podle snímku frontend-design a standardů. Texty jen z obsahového
    plánu a registru faktů, psané podle „Jak psát vizi, slogany a texty"

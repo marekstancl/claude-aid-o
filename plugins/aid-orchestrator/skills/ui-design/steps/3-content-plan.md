@@ -21,6 +21,8 @@ a chybějící podstatný materiál buď dodal, nebo ho odložil.
 
 ## Postup
 
+Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 1p (`steps/1p-sources.md`).
+
 1. Pro každou stránku a sekci položka: `id` (`<stránka>.<sekce>`), `need`
    (co je potřeba: text, fotka, ceník, reference), `owner` (PM, klient,
    agent), `due` (datum), `status`: `missing`, `draft`, `confirmed_client`,

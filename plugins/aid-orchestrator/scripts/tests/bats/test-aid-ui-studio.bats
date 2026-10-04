@@ -243,6 +243,15 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(jq -r '.kind + " " + .decision' "$BATS_TEST_TMPDIR/body")" = "notifications approve" ]
 }
 
+@test "P108: sources, product_context and copy_verdict questions are accepted and answered" {
+  for k in sources product_context copy_verdict; do
+    echo "{\"questions\":[{\"id\":\"q$k\",\"kind\":\"$k\",\"target\":\"t@1\",\"opened_at\":\"2020-01-01T00:00:00Z\"}]}" \
+      > "$P/.aid-ui/studio/payload.json"
+    [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ] || { echo "state $k"; return 1; }
+    [ "$(answer "{\"question\":\"q$k\",\"kind\":\"$k\",\"target\":\"t@1\",\"decision\":\"approve\"}")" = 200 ] || { echo "answer $k"; return 1; }
+  done
+}
+
 @test "an invalid payload: 422 naming the problem, the server logs it" {
   echo '{"questions":[{"id":"q1","kind":"nonsense","target":"x","opened_at":"2020-01-01T00:00:00Z"}]}' \
     > "$P/.aid-ui/studio/payload.json"

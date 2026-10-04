@@ -20,15 +20,15 @@ inventura z kroku 0.
 
 ## Postup
 
-1. `PRODUCT.md` existuje → shrň ho (pro koho, co dělá, co nabízí, čím se
-   liší, tón). Chybí → polož PM chybějící údaje jednou otázkou ve studiu
-   (`kind` `facts`, nejvýš osm bodů) a z odpovědí `PRODUCT.md` napiš.
-   Nic nedoplňuj domněnkou (MUST 5).
-2. Shrnutí jako otázka `facts` ve studiu (`target` = `PRODUCT.md@<sha256
-   souboru>`); `return` s komentářem → oprav `PRODUCT.md`, otevři znovu.
-3. Po `approve` tělo kapitoly `produkt` do souboru v `.aid-ui/`,
+1. Nejdřív `steps/1p-sources.md` (Podklady), ještě než se na cokoli o produktu zeptáš:
+   `PRODUCT.md` je jeden z jeho zdrojů, samostatná otázka na `PRODUCT.md` už není. Když
+   `PRODUCT.md` chybí, krok 1p vezme ostatní podklady a na chybějící údaje se zeptá otázkou `facts`.
+2. Po schválení dokumentu o produktu (`aid-ui-state.sh context-check <project>` projde) tělo
+   kapitoly `produkt` (pro koho, co dělá, co nabízí, čím se liší, tón - z
+   `docs/content/product-context.md`) do souboru v `.aid-ui/`,
    `aid-ui-state.sh body <project> produkt --file <soubor>` a
    `aid-ui-state.sh chapter <project> produkt navrh`.
+3. (Bez otázky navíc: pravdu o produktu PM potvrdil schválením dokumentu v 1p.)
 4. Pak v tomto pořadí zapnuté části: `1v` (`steps/1v-vision.md`,
    `options.vision`), `1i` (`steps/1i-identity.md`, `options.identity`),
    `1s` (`steps/1s-seo.md`, `options.seo`). Vize jde první, tón značky
@@ -36,7 +36,7 @@ inventura z kroku 0.
 
 ## Co PM rozhoduje
 
-Potvrdí pravdu o produktu, nebo ji vrátí s opravou.
+Potvrdí pravdu o produktu schválením dokumentu o produktu v kroku 1p, nebo ho vrátí s opravou.
 
 ## Zápis
 

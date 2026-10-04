@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # aid-tier: t2
-# P101 Step 3 — neutral brand page template: chapters (fourteen since P103), fixed --brand-*
+# P101 Step 3 — neutral brand page template: chapters (fourteen since P103, fifteen since P108: podklady), fixed --brand-*
 # names only, print rules, empty token/role placeholders, state template shape.
 # P103 Step 6 — kvalita summary written through aid-ui-state.sh body; studio links /report.
 
@@ -10,14 +10,14 @@ setup() {
   FIX="$BATS_TEST_DIRNAME/../fixtures/aid-ui"
 }
 
-@test "all fourteen chapter ids present with data-status=ceka, body and status markers" {
-  for id in produkt vize logo barvy typografie smer komponenty platformy ukazky seo struktura obsah kvalita schvaleni; do
+@test "all fifteen chapter ids present with data-status=ceka, body and status markers" {
+  for id in produkt podklady vize logo barvy typografie smer komponenty platformy ukazky seo struktura obsah kvalita schvaleni; do
     grep -qF "<section id=\"$id\" data-status=\"ceka\">" "$PAGE/index.html"
     grep -qF "<p class=\"status\"><!-- status:$id --><!-- /status:$id --></p>" "$PAGE/index.html"
     grep -qF "<div class=\"body\"><!-- body:$id --><!-- /body:$id --></div>" "$PAGE/index.html"
     grep -qF "<li><a href=\"#$id\">" "$PAGE/index.html"
   done
-  [ "$(grep -c '<section ' "$PAGE/index.html")" -eq 14 ]
+  [ "$(grep -c '<section ' "$PAGE/index.html")" -eq 15 ]
   # page order = aid-ui-state.sh CHAPTERS order
   chapters="$(sed -n 's/^CHAPTERS=" \(.*\) "$/\1/p' "$BATS_TEST_DIRNAME/../../aid-ui-state.sh")"
   [ "$(grep -o '<section id="[a-z]*"' "$PAGE/index.html" | cut -d'"' -f2 | tr '\n' ' ')" = "$chapters " ]
@@ -89,7 +89,7 @@ JSON
   jq -e '.step == 0 and .product_type == "" and .variant == null and .structure == null
     and .content_plan == [] and .answers == {} and .consumed == [] and .attestations == {}
     and .build == null and .approvals == {} and .gate == null and .exceptions == []
-    and (.chapters | keys | length == 14) and all(.chapters[]; .status == "ceka")
+    and (.chapters | keys | length == 15) and all(.chapters[]; .status == "ceka")
     and (.chapters | has("kvalita") and has("struktura") and has("obsah"))
     and .options == {vision: false, identity: false, seo: false, images: false}
     and .finished == null and (.refs | type == "array") and (.decisions | type == "array")
