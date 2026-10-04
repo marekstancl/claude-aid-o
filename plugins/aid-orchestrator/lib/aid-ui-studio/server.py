@@ -249,7 +249,8 @@ def is_done(cond, st):
 def sections_view(questions):
     """The map with each part's status: skipped, open (a question waits), done, current (first not done), waiting."""
     st = read_state()
-    opts = st.get("options") if isinstance(st.get("options"), dict) else None
+    # the options are the PM's only once step 1 is answered (a new state carries all of them as false)
+    opts = st.get("options") if isinstance(st.get("options"), dict) and st.get("variant") else None
     open_parts = {q.get("part") for q in questions if not q.get("answered")}
     steps, first = [], None
     for s in SECTIONS["steps"]:

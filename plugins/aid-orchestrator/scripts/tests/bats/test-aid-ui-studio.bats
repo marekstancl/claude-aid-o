@@ -494,6 +494,11 @@ JSON
   [ "$(st co-stavime)" = done ]; [ "$(st podklady)" = done ]; [ "$(st vize)" = skipped ]
   [ "$(st logo)" = waiting ]; [ "$(st stranky)" = current ]; [ "$(st obsah)" = waiting ]
   jq -e '.questions[0].part == "stranky" and (.sections.steps[1].status == "current") and (.sections.steps[0].status == "done")' "$BATS_TEST_TMPDIR/body" >/dev/null
+  # a new state (options all false, no variant yet): nothing is skipped before the PM chose
+  echo '{"variant":null,"options":{"vision":false,"identity":false,"seo":false},"chapters":{},"answers":{}}' > "$P/docs/design/brand-state.json"
+  code -H "X-AID-Token: $TOKEN" "$URL/state" >/dev/null
+  [ "$(st vize)" = waiting ]; [ "$(st co-stavime)" = waiting ]
+  echo '{"variant":{"type":"web"},"options":{"vision":false,"identity":"new","seo":true},"chapters":{"podklady":{"status":"navrh"}},"answers":{}}' > "$P/docs/design/brand-state.json"
   # no open question: the first unfinished part is current
   echo '{"questions": [], "cards": []}' > "$P/.aid-ui/studio/payload.json"
   code -H "X-AID-Token: $TOKEN" "$URL/state" >/dev/null
