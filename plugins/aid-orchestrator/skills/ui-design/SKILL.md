@@ -71,8 +71,8 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    u referencí, a další textová pole, která se ukážou na rubu karty „Detaily").
    Druhy otázek: variant, vision, identity, seo_brief, structure, task_map,
    content_plan, defer_content, facts, references, direction, approve_page,
-   exception, coverage_drift, design_standard, handover, sources (krok 1p: schválení
-   rozhovoru nebo průzkumu jako zdroje), product_context (krok 1p: schválení dokumentu o produktu),
+   exception, coverage_drift, design_standard, handover, sources (krok 1p: jedno schválení
+   seznamu podkladů `manifest@<sha>`, nebo průzkumu `online@<projekt>`), product_context (krok 1p: schválení dokumentu o produktu),
    copy_verdict (verdikt PM k textům webu), notifications (PWA: posílá aplikace
    oznámení, o jakých událostech a proč; když ano, obrazovka přihlášení k odběru a karta povolení
    se stavy jako snímek - `pwa-notifications-standard`).

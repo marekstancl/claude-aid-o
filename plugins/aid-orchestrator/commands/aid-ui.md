@@ -52,8 +52,11 @@ are recorded with `aid-ui-state.sh decide` and appear in the same list, marked A
 - **Reads (target project):** `PRODUCT.md`, `DESIGN.md`, `.impeccable/`,
   `docs/design/*brand-package*`, `docs/design/brand-state.json`,
   `docs/product-vision.md`, `docs/design/brief-logo-favicon.md`, `docs/seo/`,
-  `docs/content/product-context.md`, `docs/content/facts.yaml`, Claude Code session logs of the
-  project the PM approved (`~/.claude/projects/<project>/`, step 1p);
+  `docs/content/product-context.md`, `docs/content/facts.yaml`, documents the PM named
+  (`aid-ui-sources.py --from`, read into redacted snapshots) and Claude Code session logs of the
+  project (`~/.claude/projects/<project>/`), used only after ONE approval of the listed sources
+  (`sources` answer on `manifest@<sha>`, step 1p; the text snapshots are deleted with
+  `aid-ui-sources.py <project> --purge` once the product context is approved);
   ecosystem standards under `/opt/eco/docs/docs/ecosystem/`.
 - **Writes (target project):** `docs/design/brand-state.json`, chapter bodies and
   statuses in `docs/brand/index.html` (both only through `scripts/aid-ui-state.sh`),
