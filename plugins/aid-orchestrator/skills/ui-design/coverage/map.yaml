@@ -292,7 +292,7 @@ items:
     do: "script:seo"
   - id: "ecosystem/specs/seo/technicke-seo.md#Technické SEO > AI-search připravenost#63ec0207"
     text: "Jasně definuj hlavní entitu a účel stránky; používej srozumitelné nadpisy, přímé odpovědi "
-    do: "pm:seo_brief"
+    do: script:copy_review
   - id: "ecosystem/specs/seo/technicke-seo.md#Technické SEO > AI-search připravenost#7ab8da75"
     text: "Udržuj konzistentní údaje o firmě, autorovi, datu a zdrojích."
     do: "script:facts_match"
@@ -361,10 +361,10 @@ items:
     do: "na: provoz firmy a webu po spuštění (profil firmy, katalogy, recenze, měření) není cíl /aid-ui"
   - id: "ecosystem/specs/seo/checklist-spusteni-prevzeti-webu.md#Checklist spuštění nebo převzetí webu > Obsah a rozvoj#913cb9c4"
     text: "[ ] Ukaž prokazatelné silné stránky: tým, zkušenost, reference, ceny či podmínky podle typ"
-    do: "pm:content_plan"
+    do: script:copy_review
   - id: "ecosystem/specs/seo/checklist-spusteni-prevzeti-webu.md#Checklist spuštění nebo převzetí webu > Obsah a rozvoj#bc855a9b"
     text: "[ ] Zkontroluj jasný další krok - objednání, poptávka, nákup nebo jiná relevantní konverze"
-    do: "script:seo"
+    do: script:copy_review
   - id: "ecosystem/specs/seo/checklist-spusteni-prevzeti-webu.md#Checklist spuštění nebo převzetí webu > Obsah a rozvoj#5407b880"
     text: "[ ] Lokální landing pages vytvářej jen pro reálně obsluhovaná místa a s unikátním obsahem."
     do: "pm:seo_brief"
@@ -409,7 +409,7 @@ items:
     do: "script:seo"
   - id: "ecosystem/specs/seo/lokalni-seo.md#Lokální SEO > Lokální stránky#a633d6fa"
     text: "Titulek, H1 a interní odkazy mají přirozeně vysvětlovat vztah služby a lokality."
-    do: "pm:approve_page"
+    do: script:copy_review
   - id: "ecosystem/specs/seo/lokalni-seo.md#Lokální SEO > Lokální stránky#a58266bd"
     text: "Nevytvářej kopie stejné stránky pouze s vyměněným názvem města - jde o doorway pattern."
     do: "script:seo"
@@ -421,7 +421,7 @@ items:
     do: "script:facts_match"
   - id: "ecosystem/specs/seo/lokalni-seo.md#Lokální SEO > Web jako zdroj pravdy#7d98b14b"
     text: "Kontaktní stránka má odpovídat praktickému rozhodování návštěvníka: spojení, vstup, rezerv"
-    do: "pm:approve_page"
+    do: script:copy_review
   - id: "ecosystem/specs/seo/lokalni-seo.md#Lokální SEO > Web jako zdroj pravdy#5950751c"
     text: "Recenze na webu jsou sociální důkaz pro člověka; nevydávej je ve structured data způsobem,"
     do: "script:seo"

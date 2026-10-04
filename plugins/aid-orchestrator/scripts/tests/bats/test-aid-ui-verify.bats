@@ -84,6 +84,19 @@ measured() {
   sed -i "/^Měřeno na buildu/d; 0,/^## Značka/s//Měřeno na buildu \`$id\`.\n\n## Značka/" "$PROJ/docs/design/design-standard.md"
 }
 
+# copy_reviewed [verdict] — a recorded copy review of every page of the recorded build (as
+# aid-ui-state.sh copy-record stores it after an independent review), for the current text,
+# facts and product context
+copy_reviewed() {
+  mkdir -p "$PROJ/docs/content"; [ -f "$PROJ/docs/content/product-context.md" ] || printf '# Produkt\nStav: vyplněno\n' > "$PROJ/docs/content/product-context.md"
+  bash "$SC/aid-ui-verify.sh" "$PROJ" --copy-subject "$T/subject.json" >/dev/null
+  jq --slurpfile sub "$T/subject.json" --arg f "$(sha256sum "$PROJ/docs/content/facts.yaml" | cut -d' ' -f1)" \
+     --arg c "$(sha256sum "$PROJ/docs/content/product-context.md" | cut -d' ' -f1)" --arg v "${1:-pass}" \
+    '.copy_review.pages = ($sub[0].pages | map_values({subject_sha256: .sha256, facts_sha256: $f, context_sha256: $c,
+       verdict: $v, blocking: (if $v == "pass" then [] else ["persona cílový zákazník: skóre 3"] end), provider: "codex", at: "2026-10-04T00:00:00Z"}))' \
+    "$PROJ/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
+}
+
 @test "the fixed copy passes every row" {
   cp -r "$FX/fixed/." "$SITE/"
   # the SEO brief: page table (H1 as built) and the PM's AI robot policy the fixed robots.txt follows
@@ -95,6 +108,7 @@ measured() {
     "$PROJ/docs/design/brand-state.json" >"$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   measured
+  copy_reviewed
   # step 7b: the first run has only the customer page open (not made yet), then the page, then the gate again
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$(jq -c '[.rows[] | select(.status != "pass") | [.check, .status]] | unique' "$RES")" == '[["customer_page","not_covered"]]' ] \
@@ -226,6 +240,33 @@ measured() {
   verify; [ "$(st safe_area index.html)" == pass ]
   echo '{"variant":{"type":"web"},"build":{"id":"x","fingerprints":{"index.html":"a","_site":"c"}}}' > "$T/state.json"
   verify; jq -e '.rows[] | select(.check == "safe_area") | .detail | startswith("N/A")' "$RES" >/dev/null
+}
+
+@test "P108: copy_review: not_covered without a record, pass with one, fail after a text, facts or context change or a failed review" {
+  cp -r "$FX/fixed/." "$SITE/"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$(st copy_review index.html)" = not_covered ]
+  [ "$(jq '[.rows[] | select(.check == "copy_review")] | length' "$RES")" -eq 2 ]   # chromium 1440, one row per page
+  copy_reviewed
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$(st copy_review index.html)" = pass ] && [ "$(st copy_review o-nas/index.html)" = pass ]
+  # a text change of one page: that page fails, the other stays
+  sed -i 's|Kváskový chleba pečeme každé ráno.|Kváskový chleba pečeme každý den.|' "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '.rows[] | select(.check == "copy_review" and .page == "index.html") | .status == "fail" and (.detail | contains("text se změnil"))' "$RES" >/dev/null
+  [ "$(st copy_review o-nas/index.html)" = pass ]
+  copy_reviewed
+  printf -- '- claim: nový fakt\n  value: "1"\n  source: PM\n' >> "$PROJ/docs/content/facts.yaml"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '.rows[] | select(.check == "copy_review" and .page == "index.html") | .detail | contains("fakta se změnila")' "$RES" >/dev/null
+  copy_reviewed; echo "doplněno" >> "$PROJ/docs/content/product-context.md"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '.rows[] | select(.check == "copy_review" and .page == "index.html") | .detail | contains("podklady se změnily")' "$RES" >/dev/null
+  copy_reviewed fail
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '.rows[] | select(.check == "copy_review" and .page == "index.html") | .status == "fail" and (.detail | contains("skóre 3"))' "$RES" >/dev/null
 }
 
 @test "P108: registered facts make the planted counts pass in the real gate; only the unregistered price stays" {

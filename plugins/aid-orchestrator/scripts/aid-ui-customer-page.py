@@ -31,7 +31,8 @@ import argparse, glob, hashlib, html, json, os, re, shutil, subprocess, sys
 INTERNAL = ["PM", "AID", "EPIC", "agent", "agenta", "agentem", "agenti", "agentů", "kapitola", "kapitoly", "kapitolu",
             "kapitole", "kapitol", "schváleno", "SCHVÁLENO", "schválení", "brána", "brány", "bránu", "bráně", "bránou",
             "gate", "Gate", "GATE", "Claude"]
-CRAWLERS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../skills/ui-design/coverage/ai-crawlers.json")
+HERE = os.path.dirname(os.path.abspath(__file__))
+CRAWLERS = os.path.join(HERE, "../skills/ui-design/coverage/ai-crawlers.json")
 E = html.escape
 
 
@@ -78,7 +79,22 @@ def gather(proj):
     if not res_file or not os.path.exists(res_file):
         die("no gate result yet: the page is made after the gate (step 7)")
     res = rj(res_file)
-    open_rows = [r for r in res.get("rows", []) if r.get("status") in ("fail", "not_covered") and r.get("check") != "customer_page"]
+    # a row the PM accepted by an exception (the same test finish uses) does not stop the page; it is listed
+    cov = subprocess.run(["bash", os.path.join(HERE, "aid-ui-state.sh"), "exception-covered", proj, res_file], capture_output=True, text=True)
+    if cov.returncode != 0:
+        die(f"cannot read the PM's exceptions: {cov.stderr.strip()[:200]}")
+    covered = [json.loads(l) for l in cov.stdout.splitlines() if l.strip()]
+    key = lambda r: tuple(str(r.get(k) or "") for k in ("check", "page", "viewport", "browser", "role", "state"))
+    cov_keys = {key(c["row"]) for c in covered}
+    ckf = os.path.join(os.path.dirname(res_file), "checks.json")
+    warn_only = set((rj(ckf).get("warn_only") or []) if os.path.isfile(ckf) else [])
+    is_open = lambda r: r.get("status") in ("fail", "not_covered") or (r.get("status") == "warn" and r.get("check") not in warn_only)
+    open_rows = [r for r in res.get("rows", []) if is_open(r) and r.get("check") != "customer_page" and key(r) not in cov_keys]
+    for c in covered:   # the PM's reason is shown to the customer: it must be customer words
+        bad = [w for w in INTERNAL if re.search(r"(?<![\wÀ-ž-])%s(?![\wÀ-ž-])" % re.escape(w), str(c.get("reason") or ""))]
+        if bad:
+            die(f"the PM's reason of the exception for {c['row']['check']} {c['row'].get('page')} contains {', '.join(bad)}; "
+                "it is shown on the customer page: ask the PM to word it for the customer (a new exception answer)")
     if open_rows:
         die(f"the gate is not green: {len(open_rows)} open rows (first: {open_rows[0].get('check')} {open_rows[0].get('page')})")
     if gate.get("result_sha256") and hashlib.sha256(open(res_file, "rb").read()).hexdigest() != gate["result_sha256"]:
@@ -106,7 +122,9 @@ def gather(proj):
                                      and not str(r.get("detail", "")).startswith("N/A")),
                 "shots": [wd for wd in (1440, 390) if os.path.exists(os.path.join(os.path.dirname(res_file), f"shots/chromium/{wd}/index.html.png"))],
                 "checked_pages": len({m["page"] for m in matrix}), "widths": sorted({int(m["viewport"]) for m in matrix}),
-                "browsers": sorted({m["browser"] for m in matrix}), "direction": dname.strip(), "direction_text": dtext.strip()}
+                "browsers": sorted({m["browser"] for m in matrix}), "direction": dname.strip(), "direction_text": dtext.strip(),
+                "exceptions": sorted({(CHECK_WORDS.get(c["row"]["check"], "technická kontrola webu"), str(c["row"].get("page") or ""),
+                                       str(c.get("reason") or "")) for c in covered})}
 
     # brand
     bp = os.path.join(proj, "docs/design/brand-package")
@@ -181,10 +199,32 @@ def gather(proj):
     cp = os.path.join(proj, "docs/content/copy.json")
     copy = rj(cp) if os.path.exists(cp) else {}
     parts = [k for k in copy if not k.startswith("shared")]
+    copy_rows = [r for r in res.get("rows", []) if r.get("check") == "copy_review"]
+    copy_pages = {r.get("page") for r in copy_rows}
+    # a page counts as passed only when every copy_review row of it passed (a covered fail is not passed)
     D["content"] = {"parts": len(parts), "pages": len({k.split(".")[0] for k in parts}),
+                    "copy_reviewed": len(copy_pages),
+                    "copy_passed": sum(1 for p in copy_pages if all(r.get("status") == "pass" for r in copy_rows if r.get("page") == p)),
                     "pending": [re.split(r"\s*\(", str(c.get("need", "")))[0] for c in st.get("content_plan") or []
                                 if c.get("status") in ("deferred_by_pm", "missing")]}
     return D, res_file
+
+
+# check id -> words for the customer (an exception the PM accepted is named on the page)
+# every gate check has words here (test-aid-ui-customer-page.bats compares the keys with the gate's CHECKS)
+CHECK_WORDS = {"http_200": "dostupnost stránek", "glyph_coverage": "písmo a diakritika", "no_overflow": "šířka stránky",
+               "one_line_controls": "tlačítka na jeden řádek", "no_placeholders": "žádné zástupné texty",
+               "facts_match": "údaje na stránce", "brand_assets": "logo a ikony", "links_resources": "odkazy a soubory",
+               "required_files": "povinné soubory webu", "axe": "přístupnost", "image_weight": "velikost obrázků",
+               "lighthouse_mobile": "rychlost na mobilu", "seo": "hledání na Googlu", "app_task_states": "stavy úloh v aplikaci",
+               "screenshots_reviewed": "kontrola vzhledu stránek", "no_overlap": "nic se nepřekrývá",
+               "brand_consistency": "jednotný vzhled značky", "page_weight": "velikost stránky", "business_minimum": "povinné údaje firmy",
+               "ai_search": "AI vyhledávače", "brand_package": "balíček značky", "design_standard_doc": "pravidla vzhledu webu",
+               "token_usage": "barvy a písma podle návrhu", "sticky_panels": "přilepené panely", "keyboard": "ovládání klávesnicí",
+               "reduced_motion": "omezení pohybu", "touch_targets": "velikost ovládacích prvků na mobilu",
+               "safe_area": "okraje displeje telefonu", "privacy_before_consent": "soukromí před souhlasem",
+               "vision_doc": "vize produktu", "coverage": "soulad se standardy", "customer_page": "stránka pro zákazníka",
+               "copy_review": "kontrola textů"}
 
 
 def cz(n, one, few, many):
@@ -223,7 +263,8 @@ def render(D):
                   ul([li(w["pages"], cz(w["pages"], "stránka", "stránky", "stránek")), li(w["checks_passed"], chk)])
                   + (f'<div class="nahled">{shots}</div>' if shots else "")
                   + more("k webu", [f"Stránky: {', '.join(w['h1'])}." if w["h1"] else "",
-                                    f"Kontrola: {w['checked_pages']} × {widths} ({', '.join(str(x) for x in w['widths'])} px) × {browsers} ({', '.join(w['browsers'])}), {w['checks_passed']} kontrol prošlo; kontroly, které se stránky netýkají, se nepočítají."])))
+                                    f"Kontrola: {w['checked_pages']} × {widths} ({', '.join(str(x) for x in w['widths'])} px) × {browsers} ({', '.join(w['browsers'])}), {w['checks_passed']} kontrol prošlo; kontroly, které se stránky netýkají, se nepočítají.",
+                                    ("Výjimky schválené zadavatelem: " + "; ".join(f"{c} ({p or 'celý web'}): {why or 'bez důvodu'}" for c, p, why in w["exceptions"]) + ".") if w["exceptions"] else ""])))
     # brand: only what the package really has
     lum = sorted((h for h in b["colors"].values() if re.fullmatch(r"#[0-9a-fA-F]{6}", h)), key=lambda h: sum(int(h[i:i + 2], 16) for i in (1, 3, 5)))
     bg_dark, bg_light = (lum[0], lum[-1]) if lum else ("#111111", "#ffffff")
@@ -290,12 +331,13 @@ def render(D):
                       rb + more("k pravidlům", [f"Komponenty: {', '.join(r['components'])}." if r["components"] else "",
                                                f"Vzory: {', '.join(r['patterns'])}." if r["patterns"] else "", measured])))
     # content
-    if c["parts"]:
-        cb = ul([li(c["parts"], cz(c["parts"], "část textu", "části textu", "částí textu")),
-                 li(c["pages"], cz(c["pages"], "stránka s texty", "stránky s texty", "stránek s texty"))])
+    if c["parts"] or c.get("copy_reviewed"):
+        cb = ul([li(c["parts"], cz(c["parts"], "část textu", "části textu", "částí textu")) if c["parts"] else "",
+                 li(c["pages"], cz(c["pages"], "stránka s texty", "stránky s texty", "stránek s texty")) if c["parts"] else "",
+                 li(f"{c['copy_passed']}/{c['copy_reviewed']}", "stránek prošlo nezávislou kontrolou textů") if c.get("copy_reviewed") else ""])
         if c["pending"]:
             cb += f'<div class="zbyva"><b>Před spuštěním zbývá:</b> {E(", ".join(c["pending"]))}.</div>'
-        areas.append(("obsah", "Obsah", f"texty: {c['parts']} {cz(c['parts'], 'část', 'části', 'částí')}", "", "Texty všech stránek.", cb))
+        areas.append(("obsah", "Obsah", (f"texty: {c['parts']} {cz(c['parts'], 'část', 'části', 'částí')}" if c['parts'] else "kontrola textů"), "", "Texty všech stránek.", cb))
     areas.append(("marketing", "Marketing", '<span class="stitek">připravujeme</span>', "pozdeji", "",
                   '<p style="margin:0;color:var(--muted)">Tahle část ještě není hotová.</p>'))
     out = []

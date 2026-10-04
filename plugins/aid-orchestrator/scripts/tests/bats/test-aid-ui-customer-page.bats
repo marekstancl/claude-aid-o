@@ -78,6 +78,7 @@ EOF
          {"check":"safe_area","page":"index.html","viewport":"390","browser":"chromium","status":"pass","detail":"N/A: not a PWA"},
          {"check":"customer_page","page":"index.html","viewport":"1440","browser":"chromium","status":"not_covered"}]'
   jq -n --argjson r "$rows" '{build_id:"B1", rows:$r, matrix:[$r[0,1,2] | {page,viewport,browser}]}' >"$V/result.json"
+  echo '{"warn_only":["glyph_coverage","lighthouse_mobile"]}' > "$V/checks.json"   # as the gate writes it next to the result
   echo '{"indexable_pages":2,"pages_with_jsonld":2,"jsonld_types":["Bakery","WebPage"],"seo":{"OK":40,"WARN":1,"BLOCKER":0},"ai":{"OK":9,"WARN":0,"BLOCKER":0},"ai_policy":{"ai_search":true,"training":false},"llms_txt":false}' >"$V/seo-summary.json"
   echo '[{"level":"OK","page":"index.html","check":"title"},{"level":"OK","page":"o-nas/index.html","check":"title"},
          {"level":"OK","page":"index.html","check":"meta-description"},{"level":"OK","page":"o-nas/index.html","check":"meta-description"},
@@ -191,4 +192,44 @@ text() { python3 -c 'import re,sys,html;t=open(sys.argv[1]).read();t=re.sub(r"<s
   jq '.rows[0].detail = "edited"' "$V/result.json" >"$V/r" && mv "$V/r" "$V/result.json"
   run python3 "$GEN" "$P"
   [ "$status" -eq 1 ] && [[ "$output" == *"changed after it was recorded"* ]]
+}
+
+@test "P108: a fail row with a live PM exception lets the page be made, is listed and not counted; copy reviews are counted" {
+  rows='[{"check":"copy_review","page":"index.html","viewport":"1440","browser":"chromium","role":"","state":"","status":"fail","detail":"skóre 3"},
+         {"check":"copy_review","page":"o-nas/index.html","viewport":"1440","browser":"chromium","role":"","state":"","status":"pass","detail":""}]'
+  jq --argjson r "$rows" '.rows += $r' "$V/result.json" > "$V/r" && mv "$V/r" "$V/result.json"
+  # without an exception the fail row stops the page
+  run python3 "$GEN" "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"not green"* ]]
+  jq '.exceptions = [{selector: {check:"copy_review", page:"index.html", viewport:"*", browser:"*", role:"*", state:"*"},
+        fingerprints: {"index.html": "build:B1"}, reason: "texty dodá zákazník sám", answer: "q-ex"}]' \
+     "$P/docs/design/brand-state.json" > "$V/s" && mv "$V/s" "$P/docs/design/brand-state.json"
+  run python3 "$GEN" "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(data .content.copy_passed)" -eq 1 ] && [ "$(data .content.copy_reviewed)" -eq 2 ]
+  text | grep -q "Výjimky schválené zadavatelem: kontrola textů (index.html): texty dodá zákazník sám"
+  text | grep -qE "1/2 +stránek prošlo nezávislou kontrolou textů"
+  # a resolved exception no longer covers the row
+  jq '.exceptions[0].resolved = "2026-10-04"' "$P/docs/design/brand-state.json" > "$V/s" && mv "$V/s" "$P/docs/design/brand-state.json"
+  run python3 "$GEN" "$P"; [ "$status" -eq 1 ]
+}
+
+@test "P108: a blocking warn needs an exception like finish; a reason in internal words is refused; every gate check has customer words" {
+  echo '{"warn_only":["glyph_coverage"]}' > "$V/checks.json"
+  row='{"check":"axe","page":"index.html","viewport":"1440","browser":"chromium","role":"","state":"","status":"warn","detail":"x"}'
+  jq --argjson r "$row" '.rows += [$r]' "$V/result.json" > "$V/r" && mv "$V/r" "$V/result.json"
+  run python3 "$GEN" "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"not green"*"axe"* ]]
+  ex='{selector: {check:"axe", page:"index.html", viewport:"*", browser:"*", role:"*", state:"*"}, fingerprints: {"index.html": "build:B1"}, answer: "q"}'
+  jq ".exceptions = [$ex + {reason: \"PM to schválil\"}]" "$P/docs/design/brand-state.json" > "$V/s" && mv "$V/s" "$P/docs/design/brand-state.json"
+  run python3 "$GEN" "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"contains PM"* ]]
+  jq ".exceptions = [$ex + {reason: \"kontrast loga určuje značka zákazníka\"}]" "$P/docs/design/brand-state.json" > "$V/s" && mv "$V/s" "$P/docs/design/brand-state.json"
+  run python3 "$GEN" "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  text | grep -q "přístupnost (index.html): kontrast loga určuje značka zákazníka"
+  ! text | grep -qw axe
+  # a warn on a warn_only check needs nothing
+  jq '.rows[-1].check = "glyph_coverage" | .exceptions = []' "$V/result.json" > "$V/r" && mv "$V/r" "$V/result.json"
+  jq '.exceptions = []' "$P/docs/design/brand-state.json" > "$V/s" && mv "$V/s" "$P/docs/design/brand-state.json"
+  run python3 "$GEN" "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  # the words cover exactly the gate's checks
+  gate="$(sed -n "/^const CHECKS/,/\];/p" "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity/aid-ui-verify.mjs" | grep -o "'[a-z_0-9]*'" | tr -d "'" | sort -u)"
+  words="$(python3 -c "import importlib.util as u; s=u.spec_from_file_location('c','$GEN'); m=u.module_from_spec(s); s.loader.exec_module(m); print('\n'.join(sorted(m.CHECK_WORDS)))")"
+  [ "$gate" = "$words" ] || { diff <(echo "$gate") <(echo "$words"); return 1; }
 }

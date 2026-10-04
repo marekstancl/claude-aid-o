@@ -499,7 +499,7 @@ const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls'
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
-  'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page'];
+  'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -640,6 +640,23 @@ const coverageRow = !want('coverage') ? null : (() => {
   const r = spawnSync('bash', [path.join(HERE, '../../scripts/aid-ui-coverage.sh'), 'check', project], { encoding: 'utf8' });
   return r.status === 0 ? ['pass', ''] : r.status === 2 ? ['not_covered', `aid-ui-coverage.sh check could not read the standards: ${(r.stderr || '').trim().split('\n').pop().slice(0, 200)}`] : ['fail', `aid-ui-coverage.sh check exit ${r.status}: ${((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(0, 3).join(' | ').slice(0, 300)}`];
 })();
+// copy_review (P108): the page's copy now, the facts and the approved context now, against the review
+// stored by aid-ui-state.sh copy-record; the gate never calls a model
+const fileSha = f => (fs.existsSync(f) ? sha(f) : null);
+const COPY_REC = st.copy_review?.pages || {};
+const copyNow = project ? { facts: fileSha(path.join(project, 'docs/content/facts.yaml')), context: fileSha(path.join(project, 'docs/content/product-context.md')) } : null;
+async function copyRow(browser, p) {
+  if (!project) return ['not_covered', 'no --project'];
+  const rec = COPY_REC[p];
+  if (!rec) return ['not_covered', 'kontrola textů neproběhla (krok 7 bod 1a)'];
+  const cur = await copyOf(browser, urlOf(p));
+  const why = [];
+  if (rec.subject_sha256 !== cur.sha256) why.push('text se změnil po kontrole');
+  if (rec.facts_sha256 !== copyNow.facts) why.push('fakta se změnila po kontrole textů');
+  if (rec.context_sha256 !== copyNow.context) why.push('podklady se změnily po kontrole textů');
+  if (why.length) return ['fail', why.join('; ')];
+  return rec.verdict === 'pass' ? ['pass', `${rec.provider || '?'} ${rec.at || ''}`.trim()] : ['fail', (rec.blocking || []).slice(0, 4).join('; ') || 'kontrola textů neprošla'];
+}
 // customer_page: the page the customer gets exists, is from this build, has no internal word (exit 3 = not made yet)
 const customerPage = !want('customer_page') ? null : !project ? ['not_covered', 'no --project'] : (() => {
   const r = spawnSync('python3', [path.join(HERE, '../../scripts/aid-ui-customer-page.py'), project, '--check'], { encoding: 'utf8' });
@@ -724,6 +741,7 @@ for (const b of BRS) {
       if (visionDoc) put(m, 'vision_doc', ...visionDoc);
       if (coverageRow) put(m, 'coverage', ...coverageRow);
       if (customerPage) put(m, 'customer_page', ...customerPage);
+      if (want('copy_review') && applies('copy_review', m)) put(m, 'copy_review', ...(await copyRow(browser, m.page)));
     }
     await ctx.close();
   }

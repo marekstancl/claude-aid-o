@@ -37,7 +37,9 @@ a `frontend-build-standard.md` (čti živě).
      Stránka FAIL: oprav texty (krok 6, `build-record`) a znovu od subjektu. Po třetí neúspěšné kontrole
      stránky ve stejné řadě (stejná fakta a podklady) otázka `exception` ve studiu
      (`target` = `{"check":"copy_review","page":"<stránka>",…}` jako u ostatních řádků brány,
-     důvod = komentář PM). Stránka v jazyce bez příručky projde jen takovou výjimkou.
+     důvod = komentář PM). Stránka v jazyce bez příručky projde jen takovou výjimkou. Řádek brány
+     `copy_review` zůstane neprošlý; `finish` a stránka pro zákazníka výjimku přečtou a stránka ji
+     vypíše mezi „Výjimkami schválenými zadavatelem“ s důvodem, takže důvod piš srozumitelně pro zákazníka.
 1. Brána: `aid-ui-verify.sh <project>` → `.aid-ui/verify/result.json`,
    pak `aid-ui-state.sh gate-record <project> .aid-ui/verify/result.json`.
    Řádek `brand_package` (jeden za celý projekt) hlásí chybějící části brand balíčku

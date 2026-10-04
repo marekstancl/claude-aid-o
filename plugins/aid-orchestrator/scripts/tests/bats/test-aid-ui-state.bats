@@ -1234,3 +1234,32 @@ decide_payload() {
   approve_chapter podklady product_context q-pk2 >/dev/null
   [ "$(jq -r .chapters.podklady.status "$STATE")" = schvaleno ]
 }
+
+@test "P108: exception-covered prints a covered fail row with the PM's reason, not an uncovered one" {
+  jq '.build = {id: "B1", fingerprints: {"index.html": "F1", "kontakt.html": "F2"}}
+      | .exceptions = [{selector: {check:"axe", page:"index.html", viewport:"*", browser:"*", role:"*", state:"*"}, fingerprints: {"index.html":"F1"}, reason: "PM přijal"},
+                       {selector: {check:"axe", page:"kontakt.html", viewport:"*", browser:"*", role:"*", state:"*"}, fingerprints: {"kontakt.html":"STARÝ"}, reason: "x"}]' \
+     "$STATE" > "$T/s" && mv "$T/s" "$STATE"
+  echo '{"rows":[{"check":"axe","page":"index.html","viewport":"390","browser":"chromium","role":"","state":"","status":"fail"},
+                 {"check":"axe","page":"kontakt.html","viewport":"390","browser":"chromium","role":"","state":"","status":"fail"},
+                 {"check":"seo","page":"index.html","viewport":"390","browser":"chromium","role":"","state":"","status":"fail"}]}' > "$T/res.json"
+  run "$SCRIPT" exception-covered "$PROJ" "$T/res.json"
+  [ "$status" -eq 0 ]; [ "$(wc -l <<<"$output")" -eq 1 ]
+  jq -e '.row.check == "axe" and .row.page == "index.html" and .reason == "PM přijal"' <<<"$output" >/dev/null
+}
+
+@test "P108: exception-covered counts open rows like finish: blocking warn and not_covered yes, a warn_only warn no" {
+  jq '.build = {id: "B1", fingerprints: {"index.html": "F1"}}
+      | .exceptions = [{selector: {check:"*", page:"index.html", viewport:"*", browser:"*", role:"*", state:"*"}, fingerprints: {"index.html":"F1"}, reason: "r"}]' \
+     "$STATE" > "$T/s" && mv "$T/s" "$STATE"
+  mkdir -p "$T/g"; echo '{"warn_only":["glyph_coverage"]}' > "$T/g/checks.json"
+  # the selector's check must match exactly, so give each row its own exception
+  jq '.exceptions = [ ("axe","seo","glyph_coverage") as $c | {selector: {check:$c, page:"index.html", viewport:"*", browser:"*", role:"*", state:"*"}, fingerprints: {"index.html":"F1"}, reason: $c} ]' \
+     "$STATE" > "$T/s" && mv "$T/s" "$STATE"
+  echo '{"rows":[{"check":"axe","page":"index.html","viewport":"390","browser":"chromium","role":"","state":"","status":"warn"},
+                 {"check":"seo","page":"index.html","viewport":"390","browser":"chromium","role":"","state":"","status":"not_covered"},
+                 {"check":"glyph_coverage","page":"index.html","viewport":"390","browser":"chromium","role":"","state":"","status":"warn"}]}' > "$T/g/result.json"
+  run "$SCRIPT" exception-covered "$PROJ" "$T/g/result.json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .row.check <<<"$output" | sort | tr '\n' ' ')" = "axe seo " ] || { echo "$output"; return 1; }
+}

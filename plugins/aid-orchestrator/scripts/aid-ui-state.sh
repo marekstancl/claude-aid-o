@@ -74,6 +74,10 @@
 #                          decision approve, targets docs/content/product-context.md@<sha256 of
 #                          the file now> (step 1p); 1 naming why (no file, no approval, changed
 #                          since approval). Steps 1v, 3 and 6 call it first.
+#     exception-covered <project> <result.json>   (P108) prints one JSON line per open row of the
+#                          result (fail, not_covered, warn outside warn_only of the checks.json next to
+#                          it, as finish counts them) that a live PM exception covers (same selector and
+#                          fingerprint test as finish), with the PM's reason; read by the customer page
 #     copy-record <project> <run dir>            (P108) context-check, then aid-ui-copy.py record:
 #                          the copy review of the run is verified and stored per page under
 #                          copy_review.pages (see the header of aid-ui-copy.py for every refusal).
@@ -506,6 +510,16 @@ elif mode == "gate":
         rows = open_rows(ck, res)
         print(json.dumps([i for i, e in enumerate(st.get("exceptions") or [])
                           if not e.get("resolved") and not any(matches(e["selector"], r) for r in rows)]))
+elif mode == "covered":   # open rows (as finish counts them) that a live PM exception covers
+    res, fps = load(args[1]), (st.get("build") or {}).get("fingerprints") or {}
+    ck = load(args[2]) if len(args) > 2 and os.path.isfile(args[2]) else {}
+    live = [e for e in st.get("exceptions") or [] if not e.get("resolved")]
+    for r in open_rows(ck, res):
+        hit = next((e for e in live if matches(e["selector"], r)
+                    and e.get("fingerprints", {}).get(val(r.get("page"))) == fp_of(st, fps, val(r.get("page")))), None)
+        if hit:
+            print(json.dumps({"row": {k: r.get(k) for k in ("check",) + AX}, "reason": hit.get("reason", ""), "answer": hit.get("answer")},
+                             ensure_ascii=False, sort_keys=True))
 elif mode == "finish":
     ck, project = load(args[1]), args[2]
     drift = args[3] if len(args) > 3 else ""
@@ -1010,6 +1024,12 @@ case "$VERB" in
     [[ "$rc" -eq 0 ]] || exit 1
     jq_write --arg d "$(today)" '.finished = $d'
     echo "FINISHED: $(today)"
+    ;;
+
+  exception-covered)
+    need_state
+    (( $# == 1 )) && [[ -f "$1" ]] || usage "exception-covered <project> <result.json>"
+    bpy covered "$STATE" "$1" "$(dirname "$1")/checks.json"   # warn_only from the checks the gate ran with
     ;;
 
   context-check)

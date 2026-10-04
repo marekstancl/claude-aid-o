@@ -21,6 +21,7 @@ applies:
   vision_doc: {scope: project}
   coverage: {scope: project}
   customer_page: {scope: project}
+  copy_review: {browsers: [chromium], viewports: [1440], flows: false}
   safe_area: {browsers: [chromium], viewports: [390], flows: false}
   token_usage: {browsers: [chromium], viewports: [1440]}
   keyboard: {browsers: [chromium], viewports: [1440]}
@@ -60,3 +61,4 @@ checks:
   business_minimum: the seller is identified (IČO) on every page and a form links to how personal data are processed (FB-24)
   screenshots_reviewed: the PM has reviewed a full-page screenshot of every page at every viewport (FB-15)
   customer_page: the customer page (docs/zakaznik, aid-ui-customer-page.py) exists, is made from this build and holds no internal word; not_covered until it is generated after a green gate
+  copy_review: the page's copy passed the independent copy review (aid-ui-copy.py, recorded by aid-ui-state.sh copy-record) for its current text, facts and approved product context; not_covered until reviewed; a PM exception does not make it pass (finish and the customer page read the exception)
