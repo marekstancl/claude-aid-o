@@ -102,6 +102,14 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   run "$STATE_SH" copy-record "$P" "$RUN"; [ "$status" -eq 1 ]; [[ "$output" == *"not valid JSON"* && "$output" == *"not counted"* ]]
   review '.pages["index.html"].personas[0].score = "deset"'
   run "$STATE_SH" copy-record "$P" "$RUN"; [ "$status" -eq 1 ]; [[ "$output" == *"breaks copy-review.schema.json"* ]]
+  # netyka_se needs a reason and may leave findings out (the prompt asks no more); ok/nalezy need findings
+  review '.pages["index.html"].cro.cta = {status:"netyka_se"}'
+  run "$STATE_SH" copy-record "$P" "$RUN"; [ "$status" -eq 1 ]; [[ "$output" == *"'reason' is a required property"* ]]
+  review '.pages["index.html"].cro.cta = {status:"ok"}'
+  run "$STATE_SH" copy-record "$P" "$RUN"; [ "$status" -eq 1 ]; [[ "$output" == *"'findings' is a required property"* ]]
+  # the answer the Needless pilot got refused: netyka_se with a reason and no findings on the legal page passes the schema
+  review '.pages["ochrana-udaju/index.html"].cro.cta = {status:"netyka_se", reason:"právní stránka"}'
+  run "$STATE_SH" copy-record "$P" "$RUN"; [[ "$output" != *"breaks copy-review.schema.json"* ]] || { echo "$output"; return 1; }
   review '.pages["kontakt/index.html"] = .pages["index.html"]'
   run "$STATE_SH" copy-record "$P" "$RUN"; [ "$status" -eq 1 ]; [[ "$output" == *"not in the subject: kontakt/index.html"* ]]
   review; echo "x" >> "$RUN/references/copy-rules.md"

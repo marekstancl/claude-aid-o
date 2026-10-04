@@ -3,49 +3,135 @@
   "title": "Copy review answer (P108)",
   "description": "The independent reviewer's answer for every page of the copy subject. The verdict is NOT taken from here: aid-ui-copy.py verdict recomputes it from the parts below (all seven sweeps and six cro points present, no blocking finding, no persona under 5, every claim with a facts key, a language guide for the page). This schema checks only the shape.",
   "type": "object",
-  "required": ["pages"],
+  "required": [
+    "pages"
+  ],
   "properties": {
     "pages": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/page" }
+      "additionalProperties": {
+        "$ref": "#/$defs/page"
+      }
     },
-    "verdict": { "description": "ignored; the script computes the verdict" }
+    "verdict": {
+      "description": "ignored; the script computes the verdict"
+    }
   },
   "$defs": {
     "finding": {
       "type": "object",
-      "required": ["block", "text", "severity"],
+      "required": [
+        "block",
+        "text",
+        "severity"
+      ],
       "properties": {
-        "block": { "type": "string", "description": "block id from the subject (b1, b2 ...)" },
-        "text": { "type": "string" },
-        "severity": { "enum": ["blokujici", "vazny", "drobny"] },
-        "fix": { "type": "string" }
+        "block": {
+          "type": "string",
+          "description": "block id from the subject (b1, b2 ...)"
+        },
+        "text": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "blokujici",
+            "vazny",
+            "drobny"
+          ]
+        },
+        "fix": {
+          "type": "string"
+        }
       }
     },
     "part": {
       "type": "object",
-      "required": ["status", "findings"],
+      "required": [
+        "status"
+      ],
       "properties": {
-        "status": { "enum": ["ok", "nalezy", "netyka_se"] },
-        "reason": { "type": "string", "description": "why the part does not apply (netyka_se)" },
-        "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
-      }
+        "status": {
+          "enum": [
+            "ok",
+            "nalezy",
+            "netyka_se"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "description": "why the part does not apply (netyka_se; required then, findings may be absent)"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "netyka_se"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reason"
+            ]
+          },
+          "else": {
+            "required": [
+              "findings"
+            ]
+          }
+        }
+      ]
     },
     "page": {
       "type": "object",
-      "required": ["sweeps", "cro", "personas", "claims"],
+      "required": [
+        "sweeps",
+        "cro",
+        "personas",
+        "claims"
+      ],
       "properties": {
-        "sweeps": { "type": "object", "additionalProperties": { "$ref": "#/$defs/part" } },
-        "cro": { "type": "object", "additionalProperties": { "$ref": "#/$defs/part" } },
+        "sweeps": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/part"
+          }
+        },
+        "cro": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/part"
+          }
+        },
         "personas": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["name", "score"],
+            "required": [
+              "name",
+              "score"
+            ],
             "properties": {
-              "name": { "type": "string" },
-              "score": { "type": "integer", "minimum": 1, "maximum": 10 },
-              "quote": { "type": "string" }
+              "name": {
+                "type": "string"
+              },
+              "score": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "quote": {
+                "type": "string"
+              }
             }
           }
         },
@@ -53,11 +139,24 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["block", "text", "fact_key"],
+            "required": [
+              "block",
+              "text",
+              "fact_key"
+            ],
             "properties": {
-              "block": { "type": "string" },
-              "text": { "type": "string" },
-              "fact_key": { "type": ["string", "null"] }
+              "block": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "fact_key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
             }
           }
         }

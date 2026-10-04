@@ -293,13 +293,16 @@ YML
 
 @test "P108: --copy-subject: union of 390 and 1440, lang and legal per page; CSS keeps the hash, text changes it" {
   cp -r "$FX/fixed/." "$SITE/"
-  sed -i 's|</main>|<p class="jenmobil">Jen na mobilu</p><style>@media (min-width:700px){.jenmobil{display:none}}</style></main>|' "$SITE/index.html"
+  sed -i 's|</main>|<p class="jenmobil">Jen na mobilu</p><style>@media (min-width:700px){.jenmobil{display:none}}</style><p style="position:absolute;left:-9999px" aria-hidden="true"><label>PAST NA SPAM<input name="website"></label></p><p style="position:fixed;top:-500px">PAST NAHORE</p><p style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Jen pro čtečku</p></main>|' "$SITE/index.html"
   jq '.structure = {pages: [{id:"home", url:"/"}, {id:"o-nas", url:"/o-nas", legal: true}]}' "$PROJ/docs/design/brand-state.json" > "$T/s" && mv "$T/s" "$PROJ/docs/design/brand-state.json"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   run bash "$SC/aid-ui-verify.sh" "$PROJ" --copy-subject "$T/subj1.json"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.pages["index.html"] | .lang == "cs" and .legal == false and ([.blocks[] | select(.text == "Jen na mobilu")] | length == 1)' "$T/subj1.json" >/dev/null
   jq -e '.pages["o-nas/index.html"].legal == true' "$T/subj1.json" >/dev/null
+  # a spam trap pushed off the page is not copy; a clipped screen-reader text inside the page is
+  ! grep -q "PAST NA SPAM\|PAST NAHORE" "$T/subj1.json"
+  jq -e '[.pages["index.html"].blocks[] | select(.text == "Jen pro čtečku")] | length == 1' "$T/subj1.json" >/dev/null
   jq -e '[.pages["index.html"].blocks[].kind] | index("title") != null and index("h1") != null' "$T/subj1.json" >/dev/null
   [ ! -e "$RES" ]   # the subject mode writes no gate result
   # a CSS-only change keeps every page hash
