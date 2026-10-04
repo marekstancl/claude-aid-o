@@ -32,6 +32,8 @@ Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 
    použije (ceny, adresa, otevírací doba, čísla, citace, reference), se
    zdrojem (`PM`, soubor projektu). Co v registru není, stavba nesmí
    napsat (MUST 5). Otázka `facts` ve studiu, když fakt chybí.
+   Brána (`facts_match`) chytí i počty s významem (klienti, projekty, roky praxe), procenta a
+   e-maily: zapiš je do registru s klíčem, který význam nese (`klienti: 200`, ne jen `200`).
    Registr je mapa `klíč: {value, source}`; údaje o firmě mají pevné klíče, podle kterých
    brána porovná strukturovaná data webu: `brand` (název), `ico`, `email`, `telephone`,
    `domain` (`https://…`), `place`. Klíč, který firma nemá (telefon), se vynechá; bez

@@ -53,6 +53,9 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
     [ "$(st $c index.html)" == pass ] || { echo "$c index: $(st $c index.html)"; return 1; }
   done
   jq -e '[.rows[] | select(.check == "seo" and .status == "fail") | .detail] | all(startswith("BLOCKER"))' "$RES" >/dev/null
+  # P108: invented count, percentage, years and e-mail are named in facts_match
+  d="$(jq -r '[.rows[] | select(.check == "facts_match" and .page == "index.html") | .detail][0]' "$RES")"
+  for c in "200 klientům" "40 %" "15 let" "info@neexistuje.cz"; do [[ "$d" == *"$c"* ]] || { echo "facts_match misses $c: $d"; return 1; }; done
   # definition-of-done rows 2, 6, 13: overlap on index, header differing from index on o-nas, no IČO on either
   [ "$(st no_overlap index.html)" == fail ] && [ "$(st no_overlap o-nas/index.html)" == pass ]
   [ "$(st brand_consistency o-nas/index.html)" == fail ] && [ "$(st brand_consistency index.html)" == pass ]
@@ -223,6 +226,28 @@ measured() {
   verify; [ "$(st safe_area index.html)" == pass ]
   echo '{"variant":{"type":"web"},"build":{"id":"x","fingerprints":{"index.html":"a","_site":"c"}}}' > "$T/state.json"
   verify; jq -e '.rows[] | select(.check == "safe_area") | .detail | startswith("N/A")' "$RES" >/dev/null
+}
+
+@test "P108: registered facts make the planted counts pass in the real gate; only the unregistered price stays" {
+  cat >> "$PROJ/docs/content/facts.yaml" <<'YML'
+- claim: klienti
+  value: "200"
+  source: PM
+- claim: úspora
+  value: "40 %"
+  source: PM
+- claim: praxe
+  value: "15 let"
+  source: PM
+- claim: e-mail
+  value: "info@neexistuje.cz"
+  source: PM
+YML
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  d="$(jq -r '[.rows[] | select(.check == "facts_match" and .page == "index.html") | .detail][0]' "$RES")"
+  [[ "$d" == *"999 Kč"* ]] || { echo "$d"; return 1; }
+  for c in "200 klientům" "40 %" "15 let" "info@neexistuje.cz"; do [[ "$d" != *"$c"* ]] || { echo "still named $c: $d"; return 1; }; done
 }
 
 @test "a crashed SEO check (exit 1, no report) is not_covered, not a pass" {

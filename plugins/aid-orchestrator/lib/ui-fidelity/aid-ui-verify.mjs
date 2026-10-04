@@ -33,6 +33,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { unknownClaims } from './aid-ui-facts.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2), opt = {};
@@ -136,16 +137,10 @@ function svgShape(markup) {
   }
   return parts.join(';');
 }
-// every string/number leaf of facts.yaml, whitespace-normalised
+// the facts register as read (mapping or list); aid-ui-facts.mjs reads its entries and keys
 function factLeaves() {
-  if (!opt.facts) return null;
-  const acc = [];
-  const walk = v => { if (v && typeof v === 'object') Object.values(v).forEach(walk); else if (v !== null && v !== undefined) acc.push(norm(String(v))); };
-  walk(readJson(opt.facts));
-  return acc;
+  return opt.facts ? readJson(opt.facts) : null;
 }
-const norm = s => s.replace(/[\s  ]+/g, ' ').trim().toLowerCase();
-const digits = s => s.replace(/\D/g, '');
 function glyph(url) {
   const r = spawnSync('node', [path.join(HERE, 'aid-ui-glyph-check.mjs'), url], { encoding: 'utf8', env: process.env });
   if (r.status === 0) return { status: 'pass', detail: 'checked at 1440 px' };
@@ -245,8 +240,8 @@ async function inPage(page) {
 const PAGE_BUDGET = 1024 * 1024;
 const PLACEHOLDER = /lorem ipsum|\bTODO\b|\bXXX\b|example\.(com|org|cz)|\.invalid\b|\+420 ?000|doplní se|fiktivn/gi;
 const PLACEHOLDER_IMG = /placeholder|placehold\.|picsum\.|dummyimage/i;
-// ponytail: facts = phone numbers, prices and times in the visible text; other claims need the reviewer
-const FACT_RE = /(\+?\d[\d ]{7,}\d)|(\d[\d  ]*(?:[.,]\d+)?\s?(?:Kč|CZK|€|EUR))|(\b\d{1,2}[:.]\d{2}\b)/g;
+// facts_match: phones, prices, times, percentages, counted numbers and e-mails (aid-ui-facts.mjs);
+// names and references need the copy reviewer
 
 async function pageRows(ctx, url, key, role, state, run, facts, brand, applies = () => true) {
   const page = await ctx.newPage();
@@ -288,11 +283,8 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   res.no_placeholders = ph.length ? ['fail', `placeholders: ${[...new Set(ph)].join(', ')}`] : ['pass', ''];
   if (!facts) res.facts_match = ['not_covered', 'no docs/content/facts.yaml'];
   else {
-    const unknown = [...o.text.matchAll(FACT_RE)].map(m => m[0].trim()).filter(t => {
-      const n = norm(t), d = digits(t);
-      return !facts.some(f => f.includes(n) || (d.length >= 7 && digits(f).includes(d)));
-    });
-    res.facts_match = unknown.length ? ['fail', `not in facts.yaml: ${[...new Set(unknown)].join(', ')}`] : ['pass', ''];
+    const unknown = unknownClaims(o.text, facts);
+    res.facts_match = unknown.length ? ['fail', `not in facts.yaml: ${unknown.join(', ')}`] : ['pass', ''];
   }
   if (!brand) res.brand_assets = ['not_covered', 'no docs/design/brand-package/'];
   else {
