@@ -109,7 +109,8 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   run "$STATE_SH" copy-record "$P" "$RUN"; [ "$status" -eq 1 ]; [[ "$output" == *"'findings' is a required property"* ]]
   # the answer the Needless pilot got refused: netyka_se with a reason and no findings on the legal page passes the schema
   review '.pages["ochrana-udaju/index.html"].cro.cta = {status:"netyka_se", reason:"právní stránka"}'
-  run "$STATE_SH" copy-record "$P" "$RUN"; [[ "$output" != *"breaks copy-review.schema.json"* ]] || { echo "$output"; return 1; }
+  python3 -c 'import json,sys,jsonschema; jsonschema.validate(json.load(open(sys.argv[1])), json.load(open(sys.argv[2])))' \
+    "$RUN/answer.json" "$BATS_TEST_DIRNAME/../../../skills/ui-design/references/copy-review.schema.json"
   review '.pages["kontakt/index.html"] = .pages["index.html"]'
   run "$STATE_SH" copy-record "$P" "$RUN"; [ "$status" -eq 1 ]; [[ "$output" == *"not in the subject: kontakt/index.html"* ]]
   review; echo "x" >> "$RUN/references/copy-rules.md"
