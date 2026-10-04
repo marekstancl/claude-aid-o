@@ -31,7 +31,9 @@ Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 
 2. Registr faktů `docs/content/facts.yaml`: každé tvrzení, které stavba
    použije (ceny, adresa, otevírací doba, čísla, citace, reference), se
    zdrojem (`PM`, soubor projektu). Co v registru není, stavba nesmí
-   napsat (MUST 5). Otázka `facts` ve studiu, když fakt chybí.
+   napsat (MUST 5). Otázka `facts` ve studiu, když fakt chybí: s `part` `obsah` a třemi
+   návrhy odpovědi, každý se zdrojem z mapy (`SKILL.md` „Jak se ptá PM"); u příběhů, výsledků a důkazů
+   ber otázku z product-marketing (`product-marketing:proof`, `:jobs`, `:switching`), ne z hlavy.
    Brána (`facts_match`) chytí i počty s významem (klienti, projekty, roky praxe), procenta a
    e-maily: zapiš je do registru s klíčem, který význam nese (`klienti: 200`, ne jen `200`).
    Registr je mapa `klíč: {value, source}`; údaje o firmě mají pevné klíče, podle kterých

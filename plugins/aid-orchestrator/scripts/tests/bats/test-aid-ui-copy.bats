@@ -87,6 +87,15 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   # a sweep may not be skipped even on the legal page
   review '.pages["ochrana-udaju/index.html"].sweeps.voice = {status:"netyka_se", reason:"x", findings:[]}'; run python3 "$COPY" verdict "$RUN"
   jq -e '.["ochrana-udaju/index.html"].verdict == "fail"' <<<"$output" >/dev/null
+  # a customer persona under 7 fails the page (it does not persuade); not on the legal page; a non-number fails
+  review '(.pages["index.html"].personas[] | select(.name == "skeptický zákazník") | .score) = 6'; run python3 "$COPY" verdict "$RUN"
+  [[ "$output" == *"skeptický zákazník: skóre 6 - zákazníka to nepřesvědčí"* ]]
+  review '(.pages["index.html"].personas[] | select(.name == "cílový zákazník") | .score) = 7'; run python3 "$COPY" verdict "$RUN"
+  [[ "$output" != *"nepřesvědčí"* ]]
+  review '(.pages["ochrana-udaju/index.html"].personas[] | select(.name == "cílový zákazník") | .score) = 6'; run python3 "$COPY" verdict "$RUN"
+  [[ "$output" != *"nepřesvědčí"* ]]
+  review '(.pages["index.html"].personas[] | select(.name == "cílový zákazník") | .score) = "7"'; run python3 "$COPY" verdict "$RUN"
+  [[ "$output" == *"skóre není číslo 1-10"* ]]
   # netyka_se is fine on the legal page
   review '.pages["ochrana-udaju/index.html"].cro.cta = {status:"netyka_se", reason:"právní stránka", findings:[]}'
   run python3 "$COPY" verdict "$RUN"; jq -e '.["ochrana-udaju/index.html"].verdict == "pass"' <<<"$output" >/dev/null

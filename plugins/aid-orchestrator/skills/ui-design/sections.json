@@ -1,0 +1,349 @@
+{
+ "about": "Mapa /aid-ui pro PM i agenta: šest kroků studia a jejich části v pořadí, v jakém se dělají. Jediný zdroj číslování a smyslu (proč, cíl, k čemu dál, co od vás). Studio ji ukazuje (server.py /state), payload se podle ní ověřuje. Vnitřní soubory kroků (files, section) PM nevidí.",
+ "sources": {
+  "product-marketing:jobs": "Za co si vás zákazníci najímají (převzatý postup product-marketing)",
+  "product-marketing:objections": "Nejčastější námitky zákazníků (převzatý postup product-marketing)",
+  "product-marketing:switching": "Proč zákazníci mění dodavatele: co je žene, co je táhne, co je drží, čeho se bojí (převzatý postup product-marketing)",
+  "product-marketing:customer-language": "Slova, kterými zákazníci popisují problém (převzatý postup product-marketing)",
+  "product-marketing:proof": "Čím to dokládáte: výsledky, ukázky, reference (převzatý postup product-marketing)",
+  "copywriting:before-writing": "Účel stránky, publikum, nabídka, odkud lidé přicházejí (převzatý postup copywriting)",
+  "podklady": "Vaše podklady (dokument o firmě a jeho zdroje)",
+  "registr": "Registr údajů, které web smí tvrdit",
+  "odhad": "Můj odhad - nemám ho z podkladů, potvrďte nebo opravte"
+ },
+ "steps": [
+  {
+   "n": 1,
+   "title": "Druh webu",
+   "why": "Než se cokoli navrhne, musí být jasné, co stavíme.",
+   "goal": "Víme, jestli stavíme web nebo aplikaci, jestli značka už existuje a které části navíc připravíme.",
+   "feeds": "Určuje, které části kroku 2 proběhnou a které kontroly platí v kroku 6.",
+   "parts": [
+    {
+     "id": "co-stavime",
+     "title": "Co stavíme a co připravit",
+     "why": "Web, aplikace s přihlášením a aplikace do telefonu se staví a kontrolují jinak. Vize, nové logo a hledání na Googlu nejsou potřeba vždy.",
+     "goal": "Zvolený druh, stav značky, jestli firma obsluhuje konkrétní místo (podle toho se připraví místní hledání), a které části navíc uděláme.",
+     "feeds": "Řídí celý další postup: zapíná nebo vypíná části kroku 2 a kontroly v kroku 6.",
+     "you": "Vybrat druh webu a které části navíc připravit.",
+     "kinds": [
+      "variant"
+     ],
+     "files": [
+      "0-start.md"
+     ],
+     "done": {
+      "all": [
+       {
+        "state": "variant"
+       },
+       {
+        "state": "options"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "n": 2,
+   "title": "Zadání a obsah",
+   "why": "Texty webu musí vycházet z ověřených informací o firmě a mluvit jazykem jejích zákazníků; jinak by se vymýšlely.",
+   "goal": "Schválený dokument o firmě, stránky webu a jejich části a ke každé části, co do ní přijde. U toho, co chybí, víme, kdo to dodá a kdy.",
+   "feeds": "Podklad pro vzory, tři návrhy vzhledu, texty webu i závěrečnou kontrolu pravdivosti.",
+   "parts": [
+    {
+     "id": "podklady",
+     "title": "Podklady",
+     "why": "Nic se nevymýšlí: vychází se z toho, co firma už napsala nebo řekla.",
+     "goal": "Schválený dokument o firmě: co dělá, pro koho, s jakými problémy jí lidé přicházejí, čím se liší, jak mluví a čím to dokládá.",
+     "feeds": "Zdroj pro vizi, všechny texty webu a pro kontrolu, že web netvrdí nic nepravdivého.",
+     "you": "Říct, kde máte podklady, a v dokumentu o firmě opravit, co nesedí.",
+     "kinds": [
+      "sources",
+      "product_context",
+      "facts"
+     ],
+     "files": [
+      "1-product.md",
+      "1p-sources.md"
+     ],
+     "done": {
+      "chapter": "podklady"
+     }
+    },
+    {
+     "id": "vize",
+     "title": "Vize a slogany",
+     "when": "options.vision",
+     "why": "Web potřebuje jedno hlavní sdělení a jednotný tón.",
+     "goal": "Schválená vize (proč firma existuje a kam míří) a vybraný slogan.",
+     "feeds": "Hlavní nadpisy webu a tón všech textů.",
+     "you": "Vybrat slogan a schválit vizi.",
+     "kinds": [
+      "vision",
+      "facts"
+     ],
+     "files": [
+      "1v-vision.md"
+     ],
+     "done": {
+      "chapter": "vize"
+     }
+    },
+    {
+     "id": "logo",
+     "title": "Logo",
+     "when": "options.identity",
+     "why": "Značka musí fungovat všude stejně: na webu, v ikonce prohlížeče i v tisku.",
+     "goal": "Schválené logo, ikona webu a soubory značky pro web a tisk.",
+     "feeds": "Návrhy vzhledu a stavba webu.",
+     "you": "Vybrat logo.",
+     "kinds": [
+      "identity",
+      "facts"
+     ],
+     "files": [
+      "1i-identity.md"
+     ],
+     "done": {
+      "chapter": "logo"
+     }
+    },
+    {
+     "id": "hledani",
+     "title": "Hledání na Googlu",
+     "when": "options.seo",
+     "why": "Lidé vás mají najít podle toho, co hledají, nejen podle jména.",
+     "goal": "Schválený seznam stránek a to, jak se každá ukáže ve výsledcích hledání.",
+     "feeds": "Stránky webu, jejich titulky a popisky a kontrola hledání v kroku 6.",
+     "you": "Schválit seznam stránek a hledané výrazy.",
+     "kinds": [
+      "seo_brief",
+      "facts"
+     ],
+     "files": [
+      "1s-seo.md"
+     ],
+     "done": {
+      "chapter": "seo"
+     }
+    },
+    {
+     "id": "stranky",
+     "title": "Stránky a jejich části",
+     "why": "Kostra webu rozhoduje, co návštěvník kde najde a jestli dojde až ke kontaktu.",
+     "goal": "U každé stránky víme, jaké má části, v jakém pořadí a co která část návštěvníkovi řekne.",
+     "feeds": "Obsah stránek, návrhy vzhledu a stavba webu.",
+     "you": "Říct, co chybí, přebývá nebo je ve špatném pořadí.",
+     "kinds": [
+      "structure",
+      "task_map",
+      "notifications"
+     ],
+     "files": [
+      "2-structure.md"
+     ],
+     "done": {
+      "state": "structure"
+     }
+    },
+    {
+     "id": "obsah",
+     "title": "Obsah stránek",
+     "why": "Ke každé části webu musí být jasné, co do ní přijde a odkud to je.",
+     "goal": "U každé části je obsah z podkladů, nebo víme, kdo ho dodá a kdy; registr údajů, které web smí tvrdit.",
+     "feeds": "Z obsahu se píšou texty webu; registr hlídá kontrola údajů v kroku 6.",
+     "you": "Doplnit chybějící údaje a materiály (fotky, čísla, příběhy), nebo je vědomě odložit.",
+     "kinds": [
+      "content_plan",
+      "defer_content",
+      "facts"
+     ],
+     "files": [
+      "3-content-plan.md"
+     ],
+     "done": {
+      "state": "content_plan"
+     }
+    }
+   ]
+  },
+  {
+   "n": 3,
+   "title": "Vzory",
+   "why": "Než se navrhne vzhled, je dobré ukázat, co se vám líbí.",
+   "goal": "Vybrané jeden až tři weby, které se vám líbí.",
+   "feeds": "Podklad pro tři návrhy vzhledu.",
+   "parts": [
+    {
+     "id": "vzory",
+     "title": "Vzory",
+     "why": "Vzhled se snáz vybírá od konkrétních webů než od popisu.",
+     "goal": "Vybrané jeden až tři weby a co se vám na nich líbí.",
+     "feeds": "Tři návrhy vzhledu v kroku 4.",
+     "you": "Vybrat jeden až tři weby.",
+     "kinds": [
+      "references"
+     ],
+     "files": [
+      "4-references.md"
+     ],
+     "done": {
+      "state": "refs"
+     }
+    }
+   ]
+  },
+  {
+   "n": 4,
+   "title": "Vzhled",
+   "why": "Vzhled se vybírá na skutečné stránce s vašimi texty a logem, ne na obrázku.",
+   "goal": "Vybraný jeden ze tří návrhů vzhledu.",
+   "feeds": "Celý web se postaví v tomto vzhledu.",
+   "parts": [
+    {
+     "id": "vzhled",
+     "title": "Tři návrhy vzhledu",
+     "why": "Tři výrazně odlišné návrhy ukážou, kam se dá jít.",
+     "goal": "Vybraný jeden návrh.",
+     "feeds": "Stavba celého webu v kroku 5.",
+     "you": "Vybrat jeden návrh.",
+     "kinds": [
+      "direction"
+     ],
+     "files": [
+      "5-directions.md"
+     ],
+     "done": {
+      "chapter": "smer"
+     }
+    }
+   ]
+  },
+  {
+   "n": 5,
+   "title": "Stavba",
+   "why": "Z toho, co je schválené výše, se postaví celý web.",
+   "goal": "Celý web ve zvoleném vzhledu s texty připravenými k závěrečné kontrole.",
+   "feeds": "Závěrečná kontrola v kroku 6.",
+   "parts": [
+    {
+     "id": "stavba",
+     "title": "Stavba webu",
+     "why": "Všechny stránky se postaví podle kostry, obsahu a zvoleného vzhledu.",
+     "goal": "Postavený web, který jde otevřít v náhledu.",
+     "feeds": "Kontrola textů, technická kontrola a schválení stránek.",
+     "you": "Nic, jen počkat na náhled.",
+     "kinds": [],
+     "files": [
+      "6-build.md"
+     ],
+     "done": {
+      "state": "build"
+     }
+    }
+   ]
+  },
+  {
+   "n": 6,
+   "title": "Kontrola",
+   "why": "Web se předá, až obstojí u zákazníka i technicky.",
+   "goal": "Texty, technika i každá stránka jsou schválené.",
+   "feeds": "Předání a zveřejnění.",
+   "parts": [
+    {
+     "id": "kontrola-textu",
+     "title": "Kontrola textů",
+     "section": "7-verify.md bod 1a, 1b",
+     "why": "Texty musí být pravdivé, srozumitelné a vést návštěvníka k tomu, kvůli čemu stránka je.",
+     "goal": "Automatická kontrola textů ze dvou pohledů zákazníka prošla a vy říkáte, že takhle firma mluví.",
+     "feeds": "Schválení stránek.",
+     "you": "Projít texty a vypsat věty, které chcete jinak.",
+     "kinds": [
+      "copy_verdict"
+     ],
+     "files": [
+      "7-verify.md"
+     ],
+     "done": {
+      "answer": "copy_verdict"
+     }
+    },
+    {
+     "id": "technicka",
+     "title": "Technická kontrola",
+     "section": "7-verify.md bod 1-3",
+     "why": "Web musí fungovat na mobilu i počítači, být přístupný a rychlý a splnit povinné náležitosti (IČO, ochrana údajů); když se změní pravidla, podle kterých se kontroluje, rozhodnete, jestli je přijmout.",
+     "goal": "Všechny technické kontroly prošly, nebo jste výjimku vědomě přijal.",
+     "feeds": "Schválení stránek.",
+     "you": "Rozhodnout o výjimkách, pokud nějaké jsou.",
+     "kinds": [
+      "exception",
+      "coverage_drift"
+     ],
+     "files": [
+      "7-verify.md"
+     ],
+     "done": {
+      "state": "gate"
+     }
+    },
+    {
+     "id": "pravidla",
+     "title": "Pravidla vzhledu",
+     "section": "7-verify.md bod 4",
+     "why": "Aby web zůstal jednotný i po pozdějších úpravách.",
+     "goal": "Schválená pravidla vzhledu webu (barvy, písma, prvky, jak se co používá).",
+     "feeds": "Každá další úprava webu.",
+     "you": "Schválit pravidla.",
+     "kinds": [
+      "design_standard"
+     ],
+     "files": [
+      "7-verify.md"
+     ],
+     "done": {
+      "answer": "design_standard"
+     }
+    },
+    {
+     "id": "schvaleni",
+     "title": "Schválení stránek",
+     "section": "7-verify.md bod 5",
+     "why": "Každou stránku uvidíte dřív, než půjde ven.",
+     "goal": "Všechny stránky schválené.",
+     "feeds": "Předání.",
+     "you": "Projít a schválit stránky.",
+     "kinds": [
+      "approve_page"
+     ],
+     "files": [
+      "7-verify.md"
+     ],
+     "done": {
+      "chapter": "schvaleni"
+     }
+    },
+    {
+     "id": "predani",
+     "title": "Předání",
+     "section": "7-verify.md bod 6-9",
+     "why": "Mít všechno pohromadě pro sebe i pro zákazníka.",
+     "goal": "Předávací stránka pro zákazníka (co dostal: web, značka, viditelnost, pravidla) a převzaté části značky.",
+     "feeds": "Zveřejnění webu.",
+     "you": "Zkontrolovat předávací stránku a potvrdit, že obsahuje všechno slíbené.",
+     "kinds": [
+      "handover"
+     ],
+     "files": [
+      "7-verify.md"
+     ],
+     "done": {
+      "state": "finished"
+     }
+    }
+   ]
+  }
+ ]
+}

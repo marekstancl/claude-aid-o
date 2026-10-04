@@ -6,20 +6,22 @@ user_invocable: true
 
 # /aid-ui - UI From Product Type to Approved Brand Page
 
-Seven steps (0 start, 1 product, 2 references, 3 direction, 4 build,
-5 standard, 6 verify). The agent finds the references, the PM picks, Impeccable
-deals directions and the PM chooses one on Impeccable's page over the VPN.
-Steps 4-6 refuse to run without that recorded choice. Step 0 offers four
-optional parts with a recommendation - vision and slogans, identity, SEO, image
-comps; vision, identity and SEO run inside step 1 (1v, 1i, 1s) before the
-references, and the SEO check joins step 6. Every PM choice in them (slogan,
-logo, page list, composition) is recorded the same way as the direction.
+Six steps as the PM sees them on the studio page, each with its parts in order and, for every
+step and part, why it is done, its goal, what it feeds later and what the PM does - all from one map,
+`skills/ui-design/sections.json`: 1 Druh webu, 2 Zadání a obsah (Podklady, Vize a slogany, Logo,
+Hledání na Googlu, Stránky a jejich části, Obsah stránek), 3 Vzory, 4 Vzhled, 5 Stavba, 6 Kontrola
+(Kontrola textů, Technická kontrola, Pravidla vzhledu, Schválení stránek, Předání). The internal step
+files (0-7, 1p/1v/1i/1s) are routing only and never named to the PM (table in
+`skills/ui-design/SKILL.md`). The agent finds the references, the PM picks, three directions are
+dealt as real pages and the PM chooses one; building and checking refuse to run without that
+recorded choice. Every PM choice is recorded the same way as the direction.
 
-Copy (P108): step 1 starts with Podklady (1p) - the project's files, an old site and the PM's
-own Claude Code sessions the PM approves on the studio page become one product context, and the
-PM is asked only about what is missing, contradictory or stale. Vision, content plan and page copy
+Copy (P108): step 2 Zadání a obsah starts with Podklady - the project's files, an old site and the PM's
+documents the PM names and Claude Code sessions, approved once as a list, become one product context
+shown to the PM as one draft; a question on facts always offers three answers taken from the adopted
+methods, the first recommended. Vision, content plan and page copy
 are written by the adopted marketing methods (`skills/ui-design/references/adopted/marketingskills/`,
-MIT) and the language guides; step 7 has every page's copy reviewed by an independent model
+MIT) and the language guides; step 6 Kontrola has every page's copy reviewed by an independent model
 (Codex; a Claude stand-in only when the Codex run fails or gives no answer), the verdict computed by
 a script and checked by the gate row `copy_review`; the PM then gives a verdict on the copy itself
 (question `copy_verdict`).
@@ -30,9 +32,9 @@ a script and checked by the gate row `copy_review`; the PM then gives a verdict 
 /aid-ui [step]
 ```
 
-- **`step`** - `0`-`6`; default: continue from `<project>/docs/design/brand-state.json`
-  (no file → step 0). After step 6 the flow ends with `aid-ui-state.sh finish`. A jump goes through `aid-ui-state.sh step`, which refuses
-  4-6 without a recorded direction and names step 3.
+- **`step`** - číslo kroku, jak ho vidí PM: `1`-`6` (Druh webu, Zadání a obsah, Vzory, Vzhled, Stavba, Kontrola; mapa `skills/ui-design/sections.json`); default: continue from `<project>/docs/design/brand-state.json`
+  (no file → step 1). Step 6 ends with `aid-ui-state.sh finish`. A jump goes through `aid-ui-state.sh step`
+  with the internal number, which refuses building and checking without a recorded direction.
 
 ## What it does
 

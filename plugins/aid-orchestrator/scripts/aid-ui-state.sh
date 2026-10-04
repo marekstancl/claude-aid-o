@@ -1067,9 +1067,11 @@ case "$VERB" in
         usage "decide: --at must be YYYY-MM-DDTHH:MM:SS[.mmm]Z (UTC)"
     fi
     [[ -f "$payload" ]] || die "decide: no studio payload in $PROJECT; the studio is not initialised"
-    st="$(jq -r --arg s "$step" 'first(.steps[]? | select(.title == $s or .id == $s) | .title) // empty' "$payload")" ||
-      die "decide: $payload is not readable JSON"
-    [[ -n "$st" ]] || usage "decide: no step \"$step\" in $payload (steps: $(jq -r '[.steps[]?.title] | join(", ")' "$payload"))"
+    # the step is one of the six of the map (skills/ui-design/sections.json), by title or as "s<n>"
+    map="$HERE/../skills/ui-design/sections.json"
+    st="$(jq -r --arg s "$step" 'first(.steps[] | select(.title == $s or ("s" + (.n|tostring)) == $s) | .title) // empty' "$map")" ||
+      die "decide: $map is not readable JSON"
+    [[ -n "$st" ]] || usage "decide: no step \"$step\" in the map (steps: $(jq -r '[.steps[].title] | join(", ")' "$map"))"
     hist="${payload%/*}/history.jsonl"
     exec 8>>"$hist"
     flock -x -w 10 8 || die "decide: $hist is locked by another writer for 10 s"

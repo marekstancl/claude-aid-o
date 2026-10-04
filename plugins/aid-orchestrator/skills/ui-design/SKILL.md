@@ -51,6 +51,34 @@ Do NOT invoke for:
    frontend-design) a řemeslné minimum `references/adopted/impeccable-craft-floor.md`;
    generické vzory vyřazuje `references/genericity-rubric.md`.
 
+## Kroky a části (jak o nich mluvit)
+
+Jediný zdroj číslování a smyslu je mapa `sections.json`: šest kroků studia
+(Druh webu, Zadání a obsah, Vzory, Vzhled, Stavba, Kontrola) a jejich části v pořadí, každý krok i část s `why` (proč),
+`goal` (cíl - podle čeho PM pozná, že je to dobře), `feeds` (k čemu výsledek poslouží dál) a část
+navíc s `you` (co od PM chce). Studio je ukazuje samo (server čte mapu a stav). PM i ve zprávách
+v chatu mluv jen takhle: „Krok 2 z 6: Zadání a obsah · část 5 z 6: Stránky a jejich části"
+(části se počítají všechny v pořadí mapy, i vynechané - studio je ukazuje přeškrtnuté jako „vynecháno"). Nikdy vnitřní čísla souborů (0-7, 1p, 1v, 1i, 1s) ani zkratky
+typu „2.5". Cíl a smysl nepiš do jednotlivých otázek - patří kroku a části a studio je ukáže.
+
+| Soubor kroku (vnitřní) | Krok pro PM | Část |
+|---|---|---|
+| `steps/0-start.md` | 1 Druh webu | Co stavíme a co připravit |
+| `steps/1-product.md`, `steps/1p-sources.md` | 2 Zadání a obsah | Podklady |
+| `steps/1v-vision.md` | 2 Zadání a obsah | Vize a slogany |
+| `steps/1i-identity.md` | 2 Zadání a obsah | Logo |
+| `steps/1s-seo.md` | 2 Zadání a obsah | Hledání na Googlu |
+| `steps/2-structure.md` | 2 Zadání a obsah | Stránky a jejich části |
+| `steps/3-content-plan.md` | 2 Zadání a obsah | Obsah stránek |
+| `steps/4-references.md` | 3 Vzory | Vzory |
+| `steps/5-directions.md` | 4 Vzhled | Tři návrhy vzhledu |
+| `steps/6-build.md` | 5 Stavba | Stavba webu |
+| `steps/7-verify.md` bod 1a, 1b | 6 Kontrola | Kontrola textů |
+| `steps/7-verify.md` bod 1-3 | 6 Kontrola | Technická kontrola |
+| `steps/7-verify.md` bod 4 | 6 Kontrola | Pravidla vzhledu |
+| `steps/7-verify.md` bod 5 | 6 Kontrola | Schválení stránek |
+| `steps/7-verify.md` bod 6-9 | 6 Kontrola | Předání |
+
 ## Jak se ptá PM (studio)
 
 Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
@@ -58,10 +86,10 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 1. Zapiš nebo obnov `<project>/.aid-ui/studio/payload.json`:
    `now` (`title`, `text` = co právě děláš, např. „Připravuji tři návrhy vzhledu…";
    obnov ho při každé změně, stránka ho ukazuje vždy a sama bez otázek jen jeho),
-   `steps[]` (`id`, `title`, `status` done|current|todo, `description` = jedna věta,
-   co se v kroku děje; `title` vždy jeden z šesti názvů Druh webu, Zadání a obsah, Vzory,
-   Vzhled, Stavba, Kontrola, v tomto pořadí; `decide --step` a stránka se na ně váží), `questions[]`
-   (`id`, `kind`, `target`, `opened_at` = teď v ISO, `title`, `prompt`, `body`,
+   `steps[]` nepiš: kroky, části a jejich stav bere studio z mapy `sections.json` a ze stavu
+   (`decide --step` dál bere název kroku z mapy), `questions[]`
+   (`id`, `kind`, `part` = id části z mapy (povinné u `facts` a u druhu, který patří víc částem;
+   jinak ho studio odvodí), `target`, `opened_at` = teď v ISO, `title`, `prompt`, `body`,
    `next` = co uděláš po schválení, `outcome` = výsledek po schválení jednou větou
    (povinné u všech druhů kromě výběru z karet, viz níže); volitelně `eyebrow` = nadpis
    nad otázkou místo výchozího podle druhu, u `set options` (druh variant) „Co připravit"),
@@ -77,7 +105,15 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    oznámení, o jakých událostech a proč; když ano, obrazovka přihlášení k odběru a karta povolení
    se stavy jako snímek - `pwa-notifications-standard`).
    Na co PM odpovídá textem nebo potvrzením (fakta k ověření, souhlasy, kontrola názvu),
-   polož jako otázku `facts` s `outcome`. Co zvládneš sám (rešerše názvu v rejstříku a na
+   polož jako otázku `facts` s `outcome` a **třemi kartami s návrhy odpovědi**: první je doporučená
+   (studio ji tak označí), vlastní odpověď dá PM přes „Chci to jinak"; každá karta má `source`
+   z mapy `sources` (z čeho návrh vychází: `product-marketing:jobs|objections|switching|customer-language|proof`,
+   `copywriting:before-writing`, `podklady`, `registr`, nebo `odhad` = tvůj odhad, který PM potvrdí).
+   Otázku samotnou ber z převzatého postupu, který `source` jmenuje (product-marketing: za co si
+   firmu zákazníci najímají, tři nejčastější námitky, co je žene od dnešního stavu, co je táhne, co je
+   drží, čeho se bojí, jejich doslovná slova; copywriting: účel stránky, publikum, nabídka, odkud
+   lidé přicházejí), nikdy z vlastní hlavy. Studio otázku `facts` bez tří karet s `source` odmítne;
+   pravdivost zdroje neověří - to je na tobě. Co zvládneš sám (rešerše názvu v rejstříku a na
    webu, dohledání údaje), udělej předem a PM dej rozhodnutí nad výsledkem („Našel jsem
    tyto podobné názvy: … Ponechat Needless?"), ne úkol „zkontrolujte". Jeden slovník
    stavu: „návrh (náhled) hotový" → „před zveřejněním zbývá" → „zveřejněný"; nepiš
@@ -159,7 +195,8 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 
 - Bez argumentu: krok = `jq .step <project>/docs/design/brand-state.json` (soubor
   chybí → krok 0).
-- `/aid-ui <n>` → `aid-ui-state.sh step <project> <n>`, pak ten krok.
+- `/aid-ui <n>` (číslo kroku pro PM 1-6) → vnitřní krok podle tabulky výše (1→0, 2→1, 3→4, 4→5,
+  5→6, 6→7), `aid-ui-state.sh step <project> <vnitřní>`, pak ten krok.
 - Načti jen soubor kroku a proveď ho. Po úspěchu kroků 0-6
   `aid-ui-state.sh step <project>` s číslem následujícího kroku; krok 7 končí
   `aid-ui-state.sh finish <project>`.
@@ -222,6 +259,9 @@ a odkaz.
    point 1a: `aid-ui-copy.py`, verdict computed by the script, `aid-ui-state.sh copy-record`) or a
    PM exception; the agent never reviews its own copy, never writes a run's `run.json` or answer by
    hand, and writes copy only by the adopted method (`references/copy-rules.md`, `copy-<jazyk>.md`).
+11. Steps and parts are named only by the map `sections.json` ("Krok N z 6: … · část M z K: …"); internal
+   step numbers never reach the PM. A `facts` question carries `part` and at least three cards, each
+   with a `source` from the map; the studio refuses the payload otherwise.
 10. A decision a step makes without the PM (only where its `Postup` says so) is recorded
    at once with `aid-ui-state.sh decide` ("Když rozhoduje agent sám"); an unrecorded
    agent decision does not exist for the PM.

@@ -63,7 +63,9 @@ drobný je doporučení.
 ## Kotvy skóre person
 
 Revize hodnotí každou stránku pohledem pěti person (konverzní copywriter, UX písař, cílový
-zákazník, skeptický zákazník, strážce značky) od 1 do 10. Skóre pod 5 je blokující.
+zákazník, skeptický zákazník, strážce značky) od 1 do 10. Skóre pod 5 je blokující; cílový
+a skeptický zákazník pod 7 je blokující taky (text, který zákazníka nepřesvědčí, neprojde; neplatí pro
+právní stránku). Chybějící nebo nečíselné skóre je blokující.
 
 - **1** - text škodí: zákazník odejde nebo nevěří.
 - **5** - srozumitelné, ale zaměnitelné s konkurencí; nic nepřesvědčí.

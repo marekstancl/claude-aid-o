@@ -8,10 +8,15 @@ Payload: <project>/.aid-ui/studio/payload.json, written by the agent and re-read
 on every request, so the agent opens a round by rewriting it:
   {"now":       {"title", "text"}   (what the agent is doing right now; optional),
    "steps":     [{"id", "title", "status": "done|current|todo", "description"}],
-   "questions": [{"id", "kind", "target", "opened_at": ISO-8601, "title", "prompt", "body",
+   "questions": [{"id", "kind", "part" (id from skills/ui-design/sections.json; required for facts and for
+                  a kind several parts share, else derived), "target", "opened_at": ISO-8601, "title", "prompt", "body",
                   "next" (what the agent does after approval), "eyebrow" (heading override)}],
    "cards":     [{"id", "question", "title", "preview", "thesis", "palette": [css colours],
-                  "risk", "uniqueness", "url"}]}
+                  "risk", "uniqueness", "url", "source" (key of sections.json sources)}]}
+A facts question needs at least 3 cards, each with a source from the map (first = recommended).
+/state also returns "sections": the map's six steps and their parts with a status each (skipped,
+current, done, waiting) computed from docs/design/brand-state.json and the open questions; the
+server refuses to start when the map is malformed.
 A question may also carry "outcome": the decision in one sentence (a string of at most 120
 characters, else the payload is invalid), kept in the history line of its answer.
 Every card has a non-empty string id and a string question, and ids are unique per
@@ -152,6 +157,125 @@ def parse_time(s):
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
+def load_sections():
+    """The map of steps and parts (skills/ui-design/sections.json), checked once at start."""
+    path = os.path.join(HERE, "..", "..", "skills", "ui-design", "sections.json")
+    with open(path, encoding="utf-8") as f:
+        m = json.load(f)
+    parts, kinds = {}, set()
+    if not isinstance(m.get("steps"), list) or len(m["steps"]) != 6:
+        raise ValueError("steps must be the six studio steps")
+
+    def done_ok(c):
+        if not isinstance(c, dict) or len(c) != 1:
+            return False
+        (k, v), = c.items()
+        if k == "all":
+            return isinstance(v, list) and bool(v) and all(done_ok(x) for x in v)
+        return k in ("state", "chapter", "answer") and isinstance(v, str) and bool(v)
+    for n, st in enumerate(m["steps"], 1):
+        if st.get("n") != n or not all(isinstance(st.get(k), str) and st[k] for k in ("title", "why", "goal", "feeds")):
+            raise ValueError("step %d needs n=%d, title, why, goal and feeds" % (n, n))
+        if not isinstance(st.get("parts"), list) or not st["parts"]:
+            raise ValueError("step %d has no parts" % n)
+        for p in st["parts"]:
+            if not all(isinstance(p.get(k), str) and p[k] for k in ("id", "title", "why", "goal", "feeds", "you")):
+                raise ValueError("a part of step %d needs id, title, why, goal, feeds and you" % n)
+            if p["id"] in parts or not isinstance(p.get("kinds"), list) or not done_ok(p.get("done")):
+                raise ValueError("part %s: duplicate id, no kinds list, or done not one of state|chapter|answer|all" % p["id"])
+            if [k for k in p["kinds"] if k not in KINDS]:
+                raise ValueError("part %s: unknown kinds %s" % (p["id"], [k for k in p["kinds"] if k not in KINDS]))
+            if not (isinstance(p.get("files"), list) and p["files"] and all(isinstance(x, str) and x for x in p["files"])):
+                raise ValueError("part %s: files must name the step files" % p["id"])
+            if n == 6 and not (isinstance(p.get("section"), str) and p["section"]):
+                raise ValueError("part %s: a part of step 6 names its section of 7-verify.md" % p["id"])
+            if p.get("when") not in (None, "options.vision", "options.identity", "options.seo"):
+                raise ValueError("part %s: unknown when %r" % (p["id"], p["when"]))
+            parts[p["id"]] = dict(p, step=n)
+            kinds.update(p["kinds"])
+    if KINDS - kinds:
+        raise ValueError("kinds in no part: %s" % ", ".join(sorted(KINDS - kinds)))
+    if not isinstance(m.get("sources"), dict) or not m["sources"] or \
+            not all(isinstance(k, str) and k and isinstance(v, str) and v for k, v in m["sources"].items()):
+        raise ValueError("sources must be a non-empty map of id to description")
+    return m, parts
+
+
+try:
+    SECTIONS, PARTS = load_sections()
+except (OSError, ValueError, KeyError, TypeError) as e:
+    sys.exit("ERROR: aid-ui studio: skills/ui-design/sections.json: %s" % e)
+
+
+def part_of(q):
+    """The question's part: its own `part`, or the one part its kind belongs to; raises ValueError."""
+    if "part" in q:
+        p = PARTS.get(q["part"])
+        if not p:
+            raise ValueError("question %s names unknown part %r" % (q["id"], q["part"]))
+        if q["kind"] not in p["kinds"]:
+            raise ValueError("question %s: kind %s does not belong to part %s" % (q["id"], q["kind"], q["part"]))
+        return q["part"]
+    owners = [i for i, p in PARTS.items() if q["kind"] in p["kinds"]]
+    if len(owners) != 1:
+        raise ValueError("question %s (kind %s) must name its part: one of %s" % (q["id"], q["kind"], ", ".join(owners)))
+    return owners[0]
+
+
+def read_state():
+    try:
+        with open(os.path.join(PROJECT, "docs", "design", "brand-state.json"), encoding="utf-8") as f:
+            st = json.load(f)
+        return st if isinstance(st, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def is_done(cond, st):
+    if "all" in cond:
+        return all(is_done(c, st) for c in cond["all"])
+    if "state" in cond:
+        return st.get(cond["state"]) not in (None, "", {}, [])
+    if "chapter" in cond:
+        ch = (st.get("chapters") or {}).get(cond["chapter"])
+        status = ch.get("status") if isinstance(ch, dict) else ch
+        return status in ("navrh", "schvaleno")
+    if "answer" in cond:
+        return any(isinstance(a, dict) and a.get("kind") == cond["answer"] and a.get("decision") in ("approve", "choose")
+                   for a in (st.get("answers") or {}).values())
+    return False
+
+
+def sections_view(questions):
+    """The map with each part's status: skipped, open (a question waits), done, current (first not done), waiting."""
+    st = read_state()
+    opts = st.get("options") if isinstance(st.get("options"), dict) else None
+    open_parts = {q.get("part") for q in questions if not q.get("answered")}
+    steps, first = [], None
+    for s in SECTIONS["steps"]:
+        out = []
+        for p in s["parts"]:
+            if p.get("when") and opts is not None and not opts.get(p["when"].split(".")[1]):
+                status = "skipped"
+            elif p["id"] in open_parts:
+                status = "current"
+            elif is_done(p["done"], st):
+                status = "done"
+            else:
+                status = "waiting"
+            out.append({k: p.get(k) for k in ("id", "title", "why", "goal", "feeds", "you")} | {"status": status})
+        steps.append({k: s[k] for k in ("n", "title", "why", "goal", "feeds")} | {"parts": out})
+    if not open_parts:   # nothing waits for the PM: the first unfinished part is where the work is
+        for s in steps:
+            for p in s["parts"]:
+                if first is None and p["status"] == "waiting":
+                    p["status"], first = "current", p
+    for s in steps:
+        ps = [p["status"] for p in s["parts"] if p["status"] != "skipped"]
+        s["status"] = "done" if ps and all(x == "done" for x in ps) else ("current" if "current" in ps else "waiting")
+    return {"steps": steps, "sources": SECTIONS["sources"]}
+
+
 def load():
     """Payload with in-memory re-roll questions merged in; raises ValueError."""
     try:
@@ -184,6 +308,12 @@ def load():
             parse_time(q.get("opened_at"))
         except (TypeError, ValueError):
             raise ValueError("payload.json: question %s has no valid opened_at" % q["id"])
+        if q["kind"] == "facts" and "part" not in q:
+            raise ValueError("payload.json: question %s (facts) must name its part" % q["id"])
+        try:
+            q["part"] = part_of(q)
+        except ValueError as e:
+            raise ValueError("payload.json: %s" % e)
     shown = set()  # (question, card id): a choice names exactly one card the PM saw
     for c in cards:
         if not (isinstance(c, dict) and isinstance(c.get("id"), str) and c["id"]
@@ -192,6 +322,16 @@ def load():
         if (c["question"], c["id"]) in shown:
             raise ValueError("payload.json: card id %s twice in question %s" % (c["id"], c["question"]))
         shown.add((c["question"], c["id"]))
+    for q in qs:   # a question on facts offers three answers, each saying what it rests on
+        if q["kind"] != "facts":
+            continue
+        own = [c for c in cards if c["question"] == q["id"]]
+        if len(own) < 3:
+            raise ValueError("payload.json: question %s (facts) needs at least 3 cards, the first recommended" % q["id"])
+        bad = [c["id"] for c in own if c.get("source") not in SECTIONS["sources"]]
+        if bad:
+            raise ValueError("payload.json: question %s: card %s needs a source from sections.json sources (%s)"
+                             % (q["id"], ", ".join(bad), ", ".join(SECTIONS["sources"])))
     with LOCK:
         qs = qs + [dict(q) for i, q in REROLLED.items() if i not in seen]
     return {"now": p.get("now"), "steps": steps, "questions": qs, "cards": cards}
@@ -367,6 +507,7 @@ class Studio(BaseHTTPRequestHandler):
                                                              if c["id"] == a["choice"]), None)}
             p["project"] = os.path.basename(PROJECT)
             p["history_lines"] = read_history()[1]
+            p["sections"] = sections_view(p["questions"])
             self.send(200, p)
         elif u.path == "/answer":
             if not self.gate(True) or (p := self.payload()) is None:
@@ -508,7 +649,7 @@ class Studio(BaseHTTPRequestHandler):
                 a["next_question"] = n
                 REROLLED[n] = {"id": n, "kind": cur["kind"], "target": cur["target"],
                                "opened_at": iso(t), "title": cur.get("title"),
-                               "prompt": cur.get("prompt"), "rerolled_from": qid}
+                               "prompt": cur.get("prompt"), "part": cur.get("part"), "rerolled_from": qid}
             ANSWERS[qid] = a
         try:   # outside LOCK: waiting for the file lock must not stall the other requests
             keep_history(cur, [c for c in p["cards"] if isinstance(c, dict) and c.get("question") == qid], a, p.get("steps"))

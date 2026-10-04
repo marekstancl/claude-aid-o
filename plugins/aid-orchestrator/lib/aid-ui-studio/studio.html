@@ -65,6 +65,15 @@
   .tier { font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .24em; text-transform: uppercase; color: var(--ks-text-muted); }
   pre.body-json { font: 12.5px/1.5 var(--ks-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ks-paper-deep); border: 1px solid var(--ks-rule); border-radius: 6px; padding: .8rem 1rem; max-height: 22rem; overflow: auto; }
   .detail { color: var(--ks-text); font-size: .95rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .parts { margin: .4rem 0 1rem; display: grid; gap: .8rem; }
+  .part-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .25rem; }
+  .part { display: grid; grid-template-columns: 1.8rem 1fr auto; gap: .5rem; align-items: baseline; padding: .35rem .6rem; border-radius: 6px; font-size: .95rem; }
+  .part.current { background: var(--ks-paper-deep); font-weight: 600; }
+  .part.done .part-s { color: var(--ks-ok); }
+  .part.waiting { color: var(--ks-text-soft); }
+  .part.skipped { color: var(--ks-text-soft); text-decoration: line-through; }
+  .part-n { font-variant-numeric: tabular-nums; }
+  .part-box { border-left: 3px solid var(--ks-instrument); padding: .6rem 1rem; display: grid; gap: .35rem; }
   .detail-h { font-size: 1.02rem; margin: .9rem 0 .1rem; color: var(--ks-text); }
   .detail-li { padding-left: 1.1rem; text-indent: -.7rem; }
   .empty { padding: 7rem 1rem; font-size: 1.4rem; color: var(--ks-ink); text-align: center; }
@@ -370,8 +379,14 @@ function stepWho(st) {
 
 function model(S, H) {
   S = S || {};
-  let steps = (Array.isArray(S.steps) ? S.steps : []).filter(s => s && typeof s === "object").map(s => ({
-    id: s.id, title: String(s.title || s.id || ""), description: text(s.description),
+  const map = S.sections && Array.isArray(S.sections.steps) ? S.sections.steps : null;
+  // The tool's map (sections.json via /state) is the source of the steps and their parts; the
+  // agent's own payload steps are only a fallback for an older server.
+  let steps = map ? map.map(s => ({ id: "s" + s.n, n: s.n, of: map.length, title: String(s.title), description: text(s.why),
+      goal: text(s.goal), feeds: text(s.feeds), parts: Array.isArray(s.parts) ? s.parts : [],
+      status: s.status === "done" ? "done" : s.status === "current" ? "current" : "todo", events: [], open: [], active: false }))
+    : (Array.isArray(S.steps) ? S.steps : []).filter(s => s && typeof s === "object").map(s => ({
+    id: s.id, title: String(s.title || s.id || ""), description: text(s.description), parts: [],
     status: ["done", "current", "todo"].includes(s.status) ? s.status : "todo", events: [], open: [], active: false }));
   const open = (Array.isArray(S.questions) ? S.questions : []).filter(q => q && typeof q === "object" && !q.answered);
   if (!steps.length && open.length) steps = [{ id: "", title: "Rozhodnutí", description: null, status: "current", events: [], open: [], active: false }];
@@ -397,8 +412,15 @@ function model(S, H) {
       comment: said ? text(said.question.outcome) : null, reconstructed: false, cards: [] }]));
   }
   for (const st of steps) { st.outcome = stepOutcome(st); st.who = stepWho(st); }
-  const act = steps.find(s => s.status === "current") || steps.find(s => s.status !== "done") || steps[steps.length - 1];
-  if (open.length && act) { act.open = open; act.active = true; }
+  if (map && open.length) {   // each open question sits in the step of its part
+    for (const q of open) {
+      const st = steps.find(s => s.parts.some(p => p.id === q.part)) || steps.find(s => s.status === "current") || steps[0];
+      if (st) { st.open.push(q); st.active = true; }
+    }
+  } else {
+    const act = steps.find(s => s.status === "current") || steps.find(s => s.status !== "done") || steps[steps.length - 1];
+    if (open.length && act) { act.open = open; act.active = true; }
+  }
   return { steps, open, done: steps.filter(s => s.status === "done").length,
     finished: steps.length > 0 && !open.length && steps.every(s => s.status === "done"),
     answered: (Array.isArray(S.questions) ? S.questions : []).filter(q => q && q.answered) };
@@ -416,7 +438,11 @@ const KIND = { variant: "Co stavíme", options: "Co připravit", vision: "Vize a
   copy_verdict: "Texty webu" };
 const SELECTOR = { check: "kontrola", page: "stránka", viewport: "velikost obrazovky", browser: "prohlížeč", role: "role", state: "stav" };
 // Card fields rendered by name; any other string field shows on the card's back as "key: value".
-const KNOWN = new Set(["id", "question", "title", "preview", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags"]);
+const KNOWN = new Set(["id", "question", "title", "preview", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source"]);
+function sourceOf(c) {   // what a card's proposal rests on, in the map's words
+  const m = S && S.sections && S.sections.sources;
+  return c.source && m && m[c.source] ? m[c.source] : null;
+}
 // Fixed icon markup (constants only, never data).
 const SVG = {
   expand: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -540,7 +566,7 @@ function card(q, c, i, answer) {
       str(c.eyebrow) ? el("p", { class: "tier" }, str(c.eyebrow)) : null,
       el("h3", {}, title),
       str(c.thesis) && c.thesis !== c.title ? el("p", { class: "thesis" }, c.thesis) : null,
-      identity(c), uniqueness(c), fact("Riziko", c.risk, "clamp"), urlFact(c), choose()));
+      identity(c), uniqueness(c), fact("Riziko", c.risk, "clamp"), fact("Vychází z", sourceOf(c), "clamp"), urlFact(c), choose()));
   const extras = Object.entries(c).filter(([k, v]) => !KNOWN.has(k) && (str(v) || typeof v === "number"))
     .map(([k, v]) => fact(k.replace(/_/g, " "), String(v)));
   const back = el("div", { class: "face back" + lead, inert: true },
@@ -715,7 +741,8 @@ function hero(m) {
     p.textContent = cap(num(m.steps.length)) + " " + plural(m.steps.length, "krok", "kroky", "kroků")
       + " od zadání po kontrolu. U každého vidíte výsledek i to, kdo jej potvrdil.";
   } else if (act) {
-    h.replaceChildren("Teď ladíme", el("br"), "krok " + act.title + ".");
+    h.replaceChildren(act.n ? "Krok " + act.n + " z " + act.of + ":" : "Teď ladíme", el("br"),
+      act.n ? act.title + "." : "krok " + act.title + ".");
     const d = m.done;
     p.textContent = (d === 0 ? "Zatím není hotový žádný krok." : cap(num(d)) + " "
       + plural(d, "krok je hotový.", "kroky jsou hotové.", "kroků je hotových.")) + " Rozhodněte přímo tady; další kroky navážou.";
@@ -765,17 +792,47 @@ function stepEl(st, i) {
   const outcome = st.active ? "Čeká na vaše rozhodnutí."
     : !hOk ? "—" : st.outcome.text;
   stage.append(el("div", { class: "summary" },
-    el("div", {}, el("h2", { class: "name" }, st.title), st.description ? el("p", { class: "desc" }, st.description) : null),
+    el("div", {}, el("h2", { class: "name" }, st.n ? "Krok " + st.n + " z " + st.of + ": " + st.title : st.title),
+      st.description ? el("p", { class: "desc" }, st.description) : null,
+      st.goal && cls === "active" ? el("p", { class: "desc" }, el("b", {}, "Cíl: "), st.goal) : null,
+      st.feeds && cls === "active" ? el("p", { class: "desc" }, el("b", {}, "K čemu dál: "), st.feeds) : null),
     el("div", { class: "outcome" }, outcome,
       !st.active && hOk && st.outcome.reconstructed ? el("span", { class: "note" }, " · doplněno zpětně") : null,
       !st.active && hOk && st.who ? el("span", { class: "who" }, WHO[st.who]) : null),
     detail));
   if (events.length) stage.append(el("div", { class: "details" }, events.map(eventRow),
     events.filter(e => e.answer && e.answer.decision === "choose" && e.cards.length).map(pastCards)));
-  if (st.active) stage.append(el("div", { class: "active-box" },
-    st.open.map(q => question(q, (S.cards || []).filter(c => c && c.question === q.id)))));
+  if (st.parts.length && cls === "active") stage.append(partsEl(st));
+  if (st.active) {   // each part with an open question: its why, goal, use and ask, then its questions
+    const ids = [...new Set(st.open.map(q => q.part))];
+    stage.append(el("div", { class: "active-box" }, ids.map(id => {
+      const p = st.parts.find(x => x.id === id);
+      return el("div", {}, p ? partBox(st, p) : null,
+        st.open.filter(q => q.part === id).map(q => question(q, (S.cards || []).filter(c => c && c.question === q.id))));
+    })));
+  }
   return el("article", { class: "step " + cls, "aria-current": st.active ? "step" : null },
     el("div", { class: "mark", "aria-hidden": "true" }, cls === "done" ? "✓" : cls === "active" ? String(i + 1) : "—"), stage);
+}
+
+// The parts of the step: number, title and status; the part being worked on shows why, goal, what it feeds
+// and what the PM does, from the tool's map (never written by the agent per question).
+const PART_STATUS = { done: "hotovo", current: "teď", waiting: "čeká", skipped: "vynecháno" };
+function partBox(st, p) {
+  const i = st.parts.indexOf(p);
+  return el("div", { class: "part-box" },
+    el("p", { class: "tier" }, "Část " + (i + 1) + " z " + st.parts.length + ": " + p.title),
+    el("p", {}, el("b", {}, "Proč: "), p.why), el("p", {}, el("b", {}, "Cíl: "), p.goal),
+    el("p", {}, el("b", {}, "K čemu dál: "), p.feeds), el("p", {}, el("b", {}, "Co od vás: "), p.you));
+}
+function partsEl(st) {
+  // with no open question the part being worked on still says what it is for
+  const cur = st.open.length ? [] : st.parts.filter(p => p.status === "current");
+  return el("div", { class: "parts" },
+    el("ol", { class: "part-list" }, st.parts.map((p, i) => el("li", { class: "part " + p.status, "aria-current": p.status === "current" ? "step" : null },
+      el("span", { class: "part-n" }, String(i + 1)), el("span", { class: "part-t" }, p.title),
+      el("span", { class: "part-s" }, PART_STATUS[p.status] || p.status)))),
+    cur.map(p => partBox(st, p)));
 }
 
 function render() {

@@ -31,7 +31,7 @@ ignored): all seven sweeps of copy-editing (clarity, voice, so_what, prove_it, s
 zero_risk) present and none skipped; the six cro points (value_proposition, headline, cta, trust,
 objections, friction) present, status netyka_se only on a page the subject marks legal; every
 finding and claim points at a block the page has; no finding of severity blokujici; each of the
-five personas of copy-rules.md exactly once and none under 5; every claim names a key of
+five personas of copy-rules.md exactly once, each a number 1-10, none under 5 and the target and sceptical customer at least 7 except on a legal page; every claim names a key of
 facts.yaml; a guide copy-<lang>.md exists for the page's language. Pass = none broken.
 
 record: refuses (exit 1, nothing stored) a subject from another build than the recorded one, a run
@@ -57,6 +57,7 @@ SWEEPS = ["clarity", "voice", "so_what", "prove_it", "specificity", "emotion", "
 CRO = ["value_proposition", "headline", "cta", "trust", "objections", "friction"]
 STANDIN_FOCUS = "copy-review-standin"
 PERSONAS = ["konverzní copywriter", "UX písař", "cílový zákazník", "skeptický zákazník", "strážce značky"]
+CUSTOMERS = ("cílový zákazník", "skeptický zákazník")   # below 7 the page does not persuade (PM 4. 10. 2026); not on a legal page
 # files a run directory may hold besides its MANIFEST: what run, record and the stand-in bracket write
 RUN_OUTPUTS = {"MANIFEST", "run.json", "answer.json", "codex.log", "verdict.log", "timeline.jsonl",
                "pending-dispatches.jsonl", "pending-dispatches.jsonl.lock"}
@@ -315,8 +316,13 @@ def page_verdict(page, ans, subj, keys):
     for n in sorted({x for x in names if x not in PERSONAS}, key=str):
         bad.append(f"persona {n}: není mezi pěti personami copy-rules.md")
     for p in ans.get("personas") or []:
-        if isinstance(p.get("score"), int) and p["score"] < 5:
-            bad.append(f"persona {p.get('name')}: skóre {p['score']}")
+        sc = p.get("score")
+        if not (isinstance(sc, int) and not isinstance(sc, bool) and 1 <= sc <= 10):
+            bad.append(f"persona {p.get('name')}: skóre není číslo 1-10 ({sc!r})")
+        elif sc < 5:
+            bad.append(f"persona {p.get('name')}: skóre {sc}")
+        elif sc < 7 and p.get("name") in CUSTOMERS and not subj.get("legal"):
+            bad.append(f"persona {p.get('name')}: skóre {sc} - zákazníka to nepřesvědčí (stránka potřebuje aspoň 7)")
     for c in ans.get("claims") or []:
         if c.get("block") not in blocks:
             bad.append(f"tvrzení odkazuje na blok, který stránka nemá: {c.get('block')}")

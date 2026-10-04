@@ -366,7 +366,7 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
   [ "$(jq -r .history_lines "$BATS_TEST_TMPDIR/body")" = 2 ]
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/history")" = 200 ]
-  jq -e 'length == 2 and .[0].by == "pm" and .[1].by == "agent" and .[1].step == "Směr"
+  jq -e 'length == 2 and .[0].by == "pm" and .[1].by == "agent" and .[1].step == "Druh webu"
          and .[1].event.outcome == "Do dvou dnů"' "$BATS_TEST_TMPDIR/body" >/dev/null
 }
 
@@ -466,4 +466,88 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
     }
   ' "$BATS_TEST_TMPDIR/md.js"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "map: six steps, every part with why/goal/feeds/you, every question kind in a part; a broken map stops the server" {
+  M="$BATS_TEST_DIRNAME/../../../skills/ui-design/sections.json"
+  [ "$(jq '.steps | length' "$M")" -eq 6 ]
+  [ "$(jq -r '[.steps[].title] | join(",")' "$M")" = "Druh webu,Zadání a obsah,Vzory,Vzhled,Stavba,Kontrola" ]
+  jq -e '[.steps[] | (.why, .goal, .feeds), (.parts[] | .id, .title, .why, .goal, .feeds, .you)] | all(type == "string" and length > 0)' "$M" >/dev/null
+  jq -e '[.steps[].parts[].id] | length == (unique | length)' "$M" >/dev/null
+  kinds="$(python3 -c 'import re,sys; s=open(sys.argv[1]).read(); print(" ".join(sorted(re.findall(r"\"(\w+)\"", s[s.index("KINDS = {"):s.index("}", s.index("KINDS = {"))]))))' "$SERVER")"
+  for k in $kinds; do jq -e --arg k "$k" '[.steps[].parts[].kinds[]] | index($k) != null' "$M" >/dev/null || { echo "kind in no part: $k"; return 1; }; done
+  # a broken map: the server refuses to start and says why
+  D="$BATS_TEST_TMPDIR/plug"; mkdir -p "$D/lib/aid-ui-studio" "$D/skills/ui-design"
+  cp "$SERVER" "$D/lib/aid-ui-studio/"; jq '.steps[0].parts[0].why = ""' "$M" > "$D/skills/ui-design/sections.json"
+  run python3 "$D/lib/aid-ui-studio/server.py" --project "$P" --host 127.0.0.1 --port 1 --token-file "$P/.aid-ui/studio.token"
+  [ "$status" -ne 0 ]; [[ "$output" == *"sections.json"* ]]
+}
+
+@test "/state carries the map with part statuses from the state: done, current (open question), skipped, waiting" {
+  mkdir -p "$P/docs/design"
+  echo '{"variant":{"type":"web"},"options":{"vision":false,"identity":"new","seo":true},"chapters":{"podklady":{"status":"navrh"}},"answers":{}}' > "$P/docs/design/brand-state.json"
+  cat > "$P/.aid-ui/studio/payload.json" <<'JSON'
+{"questions": [{"id": "s1", "kind": "structure", "target": "sha256:x", "opened_at": "2020-01-01T00:00:00Z"}], "cards": []}
+JSON
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ] || { cat "$BATS_TEST_TMPDIR/body"; return 1; }
+  st() { jq -r --arg id "$1" '.sections.steps[].parts[] | select(.id == $id) | .status' "$BATS_TEST_TMPDIR/body"; }
+  [ "$(st co-stavime)" = done ]; [ "$(st podklady)" = done ]; [ "$(st vize)" = skipped ]
+  [ "$(st logo)" = waiting ]; [ "$(st stranky)" = current ]; [ "$(st obsah)" = waiting ]
+  jq -e '.questions[0].part == "stranky" and (.sections.steps[1].status == "current") and (.sections.steps[0].status == "done")' "$BATS_TEST_TMPDIR/body" >/dev/null
+  # no open question: the first unfinished part is current
+  echo '{"questions": [], "cards": []}' > "$P/.aid-ui/studio/payload.json"
+  code -H "X-AID-Token: $TOKEN" "$URL/state" >/dev/null
+  [ "$(st logo)" = current ]; [ "$(st stranky)" = waiting ]
+}
+
+@test "a question's part: derived from its kind, refused when unknown or not the kind's; facts needs a part and three cards with a source" {
+  put() { printf '%s' "$1" > "$P/.aid-ui/studio/payload.json"; code -H "X-AID-Token: $TOKEN" "$URL/state"; }
+  q='{"id":"f","kind":"facts","part":"obsah","target":"t","opened_at":"2020-01-01T00:00:00Z"}'
+  c() { printf '{"id":"%s","question":"f","title":"%s","source":"%s"}' "$1" "$1" "$2"; }
+  [ "$(put '{"questions":[{"id":"x","kind":"structure","part":"nikde","target":"t","opened_at":"2020-01-01T00:00:00Z"}]}')" = 422 ]
+  [ "$(put '{"questions":[{"id":"x","kind":"structure","part":"obsah","target":"t","opened_at":"2020-01-01T00:00:00Z"}]}')" = 422 ]
+  [ "$(put '{"questions":[{"id":"f","kind":"facts","target":"t","opened_at":"2020-01-01T00:00:00Z"}]}')" = 422 ]
+  grep -q "must name its part" "$BATS_TEST_TMPDIR/server.log"
+  [ "$(put "{\"questions\":[$q],\"cards\":[$(c a podklady),$(c b odhad)]}")" = 422 ]
+  [ "$(put "{\"questions\":[$q],\"cards\":[$(c a podklady),$(c b odhad),$(c c vymysleno)]}")" = 422 ]
+  grep -q "needs a source from sections.json" "$BATS_TEST_TMPDIR/server.log"
+  [ "$(put "{\"questions\":[$q],\"cards\":[$(c a product-marketing:objections),$(c b podklady),$(c c odhad)]}")" = 200 ]
+  jq -e '.questions[0].part == "obsah" and .sections.sources.odhad != null' "$BATS_TEST_TMPDIR/body" >/dev/null
+}
+
+@test "page: six steps from the map; parts numbered in full with statuses incl. vynecháno; a box per part with an open question" {
+  command -v node >/dev/null || skip "node not installed"
+  f="$(PAGE_HTML)"
+  { sed -n '/^function el(/,/^}/p' "$f"; sed -n '/^const PART_STATUS/p' "$f";
+    sed -n '/^function partBox(/,/^}/p' "$f"; sed -n '/^function partsEl(/,/^}/p' "$f"; } > "$BATS_TEST_TMPDIR/parts.js"
+  sed -n '/<script id="pipeline-model">/,/<\/script>/p' "$f" | sed '1d;$d' > "$BATS_TEST_TMPDIR/model.js"
+  run node -e '
+    const mk = tag => ({ tag, attrs: {}, kids: [], setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {},
+      append(k) { this.kids.push(typeof k === "string" ? { text: k } : k); } });
+    global.document = { createElement: mk };
+    eval(require("fs").readFileSync(process.argv[1], "utf8") + ";global.partsEl = partsEl; global.partBox = partBox;");
+    const { model } = require(process.argv[2]);
+    const flat = n => n.text !== undefined ? n.text : n.kids.map(flat).join(" ");
+    const P = (id, status) => ({ id, title: "T-" + id, why: "W-" + id, goal: "G-" + id, feeds: "F-" + id, you: "Y-" + id, status });
+    const step = (n, status, parts) => ({ n, title: "K" + n, why: "w", goal: "g", feeds: "f", status, parts });
+    const map = [step(1, "done", [P("co-stavime", "done")]),
+      step(2, "current", [P("podklady", "done"), P("vize", "skipped"), P("logo", "current"), P("hledani", "waiting"), P("stranky", "current"), P("obsah", "waiting")]),
+      step(3, "waiting", [P("vzory", "waiting")]), step(4, "waiting", [P("vzhled", "waiting")]),
+      step(5, "waiting", [P("stavba", "waiting")]), step(6, "waiting", [P("kontrola-textu", "waiting")])];
+    const S = { sections: { steps: map }, questions: [{ id: "a", part: "logo", answered: false }, { id: "b", part: "stranky", answered: false }] };
+    const m = model(S, []), st = m.steps[1];
+    const ok = (c, w) => { if (!c) { console.log("FAIL", w); process.exit(1); } };
+    ok(m.steps.length === 6 && st.n === 2 && st.of === 6 && st.active && st.open.length === 2, "model: six steps, both questions in step 2");
+    const list = flat(partsEl(st));
+    for (const w of ["1 T-podklady hotovo", "2 T-vize vynecháno", "3 T-logo teď", "5 T-stranky teď", "6 T-obsah čeká"]) ok(list.includes(w), "list has " + w);
+    ok(!list.includes("W-logo"), "with open questions the list carries no box (each question part has its own)");
+    const b3 = flat(partBox(st, st.parts[2])), b5 = flat(partBox(st, st.parts[4]));
+    ok(b3.includes("Část 3 z 6: T-logo") && b3.includes("W-logo") && b3.includes("G-logo") && b3.includes("F-logo") && b3.includes("Y-logo"), "box of logo");
+    ok(b5.includes("Část 5 z 6: T-stranky") && b5.includes("Y-stranky"), "box of stranky");
+    // no open question: the current part shows its box in the list
+    const m2 = model({ sections: { steps: map }, questions: [] }, []), s2 = m2.steps[1];
+    ok(flat(partsEl(s2)).includes("W-logo"), "box without a question");
+  ' "$BATS_TEST_TMPDIR/parts.js" "$BATS_TEST_TMPDIR/model.js"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -qF '"Krok " + st.n + " z " + st.of' "$f"
 }

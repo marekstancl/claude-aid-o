@@ -64,9 +64,11 @@ studio() {
 ans() {
   studio
   local p="$PROJ/.aid-ui/studio/payload.json" d="${4:-approve}" c='[{"id":"x"}]'
+  # a facts question names its part and offers three sourced answers (the studio's rule)
+  [[ "$2" != facts ]] || c='[{"id":"x","source":"odhad"},{"id":"y","source":"podklady"},{"id":"z","source":"registr"}]'
   [[ -z "${5:-}" ]] || c="$5"
   jq --arg q "$1" --arg k "$2" --arg t "$3" --argjson c "$c" \
-    '.questions += [{id: $q, kind: $k, target: $t, opened_at: "2020-01-01T00:00:00Z"}]
+    '.questions += [{id: $q, kind: $k, target: $t, opened_at: "2020-01-01T00:00:00Z"} + (if $k == "facts" then {part: "obsah"} else {} end)]
     | .cards += [$c[] | .question = $q]' "$p" > "$p.t" && mv "$p.t" "$p"
   curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg q "$1" --arg k "$2" --arg t "$3" --arg d "$d" \
@@ -1102,7 +1104,8 @@ JSON
 # P106 Step 1 — decide: the agent's own decision as one history line
 decide_payload() {
   mkdir -p "$PROJ/.aid-ui/studio"
-  echo '{"steps": [{"id": "s2", "title": "Zadání a obsah", "status": "done"}], "questions": [], "cards": []}' \
+  # no steps[]: decide takes the six steps from sections.json
+  echo '{"questions": [], "cards": []}' \
     > "$PROJ/.aid-ui/studio/payload.json"
   H="$PROJ/.aid-ui/studio/history.jsonl"
 }
