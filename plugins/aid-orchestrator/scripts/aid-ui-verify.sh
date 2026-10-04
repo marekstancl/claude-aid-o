@@ -3,6 +3,8 @@
 # aid-ui-verify.sh — the /aid-ui verification gate (step 7) on the recorded build.
 #
 #   aid-ui-verify.sh <project>
+#   aid-ui-verify.sh <project> --copy-subject <out.json>   (P108) serves the recorded build and writes
+#     only the copy of every page for the copy review; the gate result in .aid-ui/verify stays untouched
 #
 # 1. The recorded build (docs/design/brand-state.json .build): recomputes the build id of
 #    its site directory with `aid-ui-state.sh build-id` and refuses (exit 1) when it
@@ -30,7 +32,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COVERAGE_MAP="${AID_UI_COVERAGE_MAP:-$HERE/../skills/ui-design/coverage/map.yaml}"
 die() { echo "ERROR: aid-ui-verify.sh: $1" >&2; exit 1; }
 
-(( $# == 1 )) && [[ -d "$1" ]] || { echo "usage: aid-ui-verify.sh <project>" >&2; exit 2; }
+subject=""
+if (( $# == 3 )) && [[ "$2" == --copy-subject ]]; then subject="$(realpath -m "$3")"
+elif (( $# != 1 )); then echo "usage: aid-ui-verify.sh <project> [--copy-subject <out.json>]" >&2; exit 2; fi
+[[ -d "$1" ]] || { echo "usage: aid-ui-verify.sh <project> [--copy-subject <out.json>]" >&2; exit 2; }
 PROJECT="$(realpath "$1")"
 STATE="$PROJECT/docs/design/brand-state.json"
 [[ -f "$STATE" ]] || die "no $STATE; run aid-ui-state.sh init"
@@ -41,7 +46,8 @@ now_id="$(bash "$HERE/aid-ui-state.sh" build-id "$dir")"
 [[ "$now_id" == "$id" ]] || die "the site in $dir changed since build-record (build id $now_id, recorded $id); rebuild and run build-record again"
 
 OUT="$PROJECT/.aid-ui/verify"
-rm -rf "$OUT"; mkdir -p "$OUT"
+if [[ -n "$subject" ]]; then OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT   # subject only: the gate result stays
+else rm -rf "$OUT"; mkdir -p "$OUT"; fi
 yq -o=json . "$(dirname "$COVERAGE_MAP")/checks.yaml" > "$OUT/checks.json" || die "cannot read checks.yaml"
 facts=()
 if [[ -f "$PROJECT/docs/content/facts.yaml" ]]; then
@@ -51,8 +57,15 @@ fi
 
 export AID_UI_PROJECT="$PROJECT"
 srv="$(bash "$HERE/aid-ui-serve.sh" preview "$dir")" || exit 1
-trap 'bash "$HERE/aid-ui-serve.sh" stop preview >/dev/null 2>&1 || true' EXIT
+trap 'bash "$HERE/aid-ui-serve.sh" stop preview >/dev/null 2>&1 || true; [[ -z "$subject" ]] || rm -rf "$OUT"' EXIT
 url="$(sed -n 's/^URL: //p' <<<"$srv")"
+if [[ -n "$subject" ]]; then
+  mkdir -p "$(dirname "$subject")"
+  bash "$HERE/aid-ui-tool.sh" verify --state "$STATE" --checks "$OUT/checks.json" --site "$dir" \
+    --base "$url" --out "$OUT" --project "$PROJECT" --seo "$HERE/aid-ui-seo-check.py" --copy-subject "$subject" \
+    || die "copy subject failed"
+  exit 0
+fi
 
 bash "$HERE/aid-ui-tool.sh" verify --state "$STATE" --checks "$OUT/checks.json" --site "$dir" \
   --base "$url" --out "$OUT" --project "$PROJECT" --seo "$HERE/aid-ui-seo-check.py" "${facts[@]}" \

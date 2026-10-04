@@ -21,6 +21,23 @@ a `frontend-build-standard.md` (čti živě).
 
 ## Postup
 
+1a. Kontrola textů (před bránou, po každé změně textu, faktů nebo podkladů):
+   - `aid-ui-verify.sh <project> --copy-subject .aid-ui/copy/subject.json` (texty všech stránek
+     na 390 a 1440 px, jazyk, právní stránky);
+   - `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-copy.py" bundle <project> --subject .aid-ui/copy/subject.json`
+     → vypíše adresář běhu `<run>` (jen pravidla, převzaté copy-editing a cro, podklady, fakta, texty);
+   - `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-copy.py" run <run>` → Codex jen pro čtení, `run.json`
+     zapíše skript. Exit 1 (Codex neodpověděl): `aid-emit-dispatch.sh start --focus copy-review-standin
+     --agent-id aid-orchestrator:review --evidence-dir <run>` (absolutní cesta), podagent Claude s čistým
+     kontextem dostane jen `<run>/prompt.md` a soubory běhu a zapíše odpověď do souboru MIMO `<run>`
+     (soubor navíc v adresáři běhu kontrola odmítne),
+     `aid-emit-dispatch.sh complete --focus copy-review-standin --output-file <odpověď> --evidence-dir <run>`,
+     pak `aid-ui-copy.py run <run> --stand-in <odpověď> --reason "<proč ne Codex>"`;
+   - `aid-ui-state.sh copy-record <project> <run>` → verdikt po stránkách (ověřený a přepočtený skriptem).
+     Stránka FAIL: oprav texty (krok 6, `build-record`) a znovu od subjektu. Po třetí neúspěšné kontrole
+     stránky ve stejné řadě (stejná fakta a podklady) otázka `exception` ve studiu
+     (`target` = `{"check":"copy_review","page":"<stránka>",…}` jako u ostatních řádků brány,
+     důvod = komentář PM). Stránka v jazyce bez příručky projde jen takovou výjimkou.
 1. Brána: `aid-ui-verify.sh <project>` → `.aid-ui/verify/result.json`,
    pak `aid-ui-state.sh gate-record <project> .aid-ui/verify/result.json`.
    Řádek `brand_package` (jeden za celý projekt) hlásí chybějící části brand balíčku

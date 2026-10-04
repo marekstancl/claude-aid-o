@@ -250,6 +250,43 @@ YML
   for c in "200 klientům" "40 %" "15 let" "info@neexistuje.cz"; do [[ "$d" != *"$c"* ]] || { echo "still named $c: $d"; return 1; }; done
 }
 
+@test "P108: --copy-subject: union of 390 and 1440, lang and legal per page; CSS keeps the hash, text changes it" {
+  cp -r "$FX/fixed/." "$SITE/"
+  sed -i 's|</main>|<p class="jenmobil">Jen na mobilu</p><style>@media (min-width:700px){.jenmobil{display:none}}</style></main>|' "$SITE/index.html"
+  jq '.structure = {pages: [{id:"home", url:"/"}, {id:"o-nas", url:"/o-nas", legal: true}]}' "$PROJ/docs/design/brand-state.json" > "$T/s" && mv "$T/s" "$PROJ/docs/design/brand-state.json"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ" --copy-subject "$T/subj1.json"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.pages["index.html"] | .lang == "cs" and .legal == false and ([.blocks[] | select(.text == "Jen na mobilu")] | length == 1)' "$T/subj1.json" >/dev/null
+  jq -e '.pages["o-nas/index.html"].legal == true' "$T/subj1.json" >/dev/null
+  jq -e '[.pages["index.html"].blocks[].kind] | index("title") != null and index("h1") != null' "$T/subj1.json" >/dev/null
+  [ ! -e "$RES" ]   # the subject mode writes no gate result
+  # a CSS-only change keeps every page hash
+  echo 'body{letter-spacing:.01em}' >> "$SITE/styl.css"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  bash "$SC/aid-ui-verify.sh" "$PROJ" --copy-subject "$T/subj2.json" >/dev/null
+  [ "$(jq -r '.pages["index.html"].sha256' "$T/subj1.json")" = "$(jq -r '.pages["index.html"].sha256' "$T/subj2.json")" ]
+  # a text change alters the hash of that page only
+  sed -i 's|Kváskový chleba pečeme každé ráno.|Kváskový chleba pečeme každý den.|' "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  bash "$SC/aid-ui-verify.sh" "$PROJ" --copy-subject "$T/subj3.json" >/dev/null
+  [ "$(jq -r '.pages["index.html"].sha256' "$T/subj2.json")" != "$(jq -r '.pages["index.html"].sha256' "$T/subj3.json")" ]
+  [ "$(jq -r '.pages["o-nas/index.html"].sha256' "$T/subj2.json")" = "$(jq -r '.pages["o-nas/index.html"].sha256' "$T/subj3.json")" ]
+  # text in a plain div is copy; a second copy of a block changes the hash; a tag change alone does not
+  sed -i 's|</main>|<div class="pas">Pečeme od rána</div></main>|' "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  bash "$SC/aid-ui-verify.sh" "$PROJ" --copy-subject "$T/subj4.json" >/dev/null
+  jq -e '[.pages["index.html"].blocks[] | select(.text == "Pečeme od rána")] | length == 1' "$T/subj4.json" >/dev/null
+  sed -i 's|<div class="pas">Pečeme od rána</div>|<div class="pas">Pečeme od rána</div><div class="pas">Pečeme od rána</div>|' "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  bash "$SC/aid-ui-verify.sh" "$PROJ" --copy-subject "$T/subj5.json" >/dev/null
+  [ "$(jq -r '.pages["index.html"].sha256' "$T/subj4.json")" != "$(jq -r '.pages["index.html"].sha256' "$T/subj5.json")" ]
+  sed -i 's|<p>Kváskový chleba pečeme každý den.|<h2>Kváskový chleba pečeme každý den.|; s|456.</p>|456.</h2>|' "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  bash "$SC/aid-ui-verify.sh" "$PROJ" --copy-subject "$T/subj6.json" >/dev/null
+  [ "$(jq -r '.pages["index.html"].sha256' "$T/subj5.json")" = "$(jq -r '.pages["index.html"].sha256' "$T/subj6.json")" ]
+}
+
 @test "a crashed SEO check (exit 1, no report) is not_covered, not a pass" {
   mkdir -p "$T/out"
   echo '{"viewports":[390],"browsers":["chromium"],"checks":{"seo":"x","ai_search":"x"}}' > "$T/ck.json"

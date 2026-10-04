@@ -74,6 +74,9 @@
 #                          decision approve, targets docs/content/product-context.md@<sha256 of
 #                          the file now> (step 1p); 1 naming why (no file, no approval, changed
 #                          since approval). Steps 1v, 3 and 6 call it first.
+#     copy-record <project> <run dir>            (P108) context-check, then aid-ui-copy.py record:
+#                          the copy review of the run is verified and stored per page under
+#                          copy_review.pages (see the header of aid-ui-copy.py for every refusal).
 #     approve-page <project> <page>               kind approve_page, target <page>@<fingerprint
 #                          of the page in the recorded build>; refused when the site changed
 #     defer-content <project> <item id>           kind defer_content, target <item id>;
@@ -609,6 +612,22 @@ studio_fetch() {
   [[ "$rc" -eq 0 ]] || { rm -f "$body"; die "studio unreachable at $STUDIO_URL (curl exit $rc); $3"; }
 }
 
+# context_ok — docs/content/product-context.md exists and an approve answer of kind product_context
+# targets its current sha256 (P108 step 1p); prints why not to stderr
+context_ok() {
+  local ctx="$PROJECT/docs/content/product-context.md" csha
+  [[ -f "$ctx" ]] || { echo "context-check: no docs/content/product-context.md; run step 1p (Podklady)" >&2; return 1; }
+  csha="$(sha256sum "$ctx" | cut -d' ' -f1)"
+  if jq -e --arg t "docs/content/product-context.md@$csha" \
+       '[.answers[]? | select(.kind == "product_context" and .decision == "approve" and .target == $t)] | length > 0' "$STATE" >/dev/null; then
+    echo "product context approved: $csha"
+  elif jq -e '[.answers[]? | select(.kind == "product_context" and .decision == "approve")] | length > 0' "$STATE" >/dev/null; then
+    echo "context-check: docs/content/product-context.md changed since the PM approved it; ask again (product_context)" >&2; return 1
+  else
+    echo "context-check: the PM has not approved docs/content/product-context.md (question product_context)" >&2; return 1
+  fi
+}
+
 # chapter_kind <id> — the studio question kind that approves chapter <id> (header, Targets)
 chapter_kind() {
   case "$1" in
@@ -995,17 +1014,14 @@ case "$VERB" in
 
   context-check)
     need_state
-    ctx="$PROJECT/docs/content/product-context.md"
-    [[ -f "$ctx" ]] || { echo "context-check: no docs/content/product-context.md; run step 1p (Podklady)" >&2; exit 1; }
-    csha="$(sha256sum "$ctx" | cut -d' ' -f1)"
-    if jq -e --arg t "docs/content/product-context.md@$csha" \
-         '[.answers[]? | select(.kind == "product_context" and .decision == "approve" and .target == $t)] | length > 0' "$STATE" >/dev/null; then
-      echo "product context approved: $csha"
-    elif jq -e '[.answers[]? | select(.kind == "product_context" and .decision == "approve")] | length > 0' "$STATE" >/dev/null; then
-      echo "context-check: docs/content/product-context.md changed since the PM approved it; ask again (product_context)" >&2; exit 1
-    else
-      echo "context-check: the PM has not approved docs/content/product-context.md (question product_context)" >&2; exit 1
-    fi
+    context_ok || exit 1
+    ;;
+
+  copy-record)
+    need_state
+    (( $# == 1 )) || usage "copy-record <project> <run dir>"
+    context_ok >/dev/null || exit 1
+    python3 "$HERE/aid-ui-copy.py" record "$PROJECT" "$1" || exit 1
     ;;
 
   decide)
