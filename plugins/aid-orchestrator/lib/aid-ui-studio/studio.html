@@ -455,7 +455,9 @@ function model(S, H) {
     if (!line || typeof line !== "object") continue;
     const e = toEvent(line);
     if (isHandover(line)) { handovers.push(e); continue; }
-    let st = byTitle.get(line.step);
+    // the map knows the step of the question's part; the step title in the line is the older way
+    const part = (line.question || {}).part;
+    let st = byTitle.get(line.step) || (map && part ? steps.find(s => s.parts.some(p => p.id === part)) : null);
     if (!st) { if (!fallback) continue; st = fallback; e.foreign = text(line.step) || ""; }
     st.events.push(e);
   }
@@ -471,8 +473,11 @@ function model(S, H) {
   }
   for (const st of steps) { st.outcome = stepOutcome(st); st.who = stepWho(st); }
   if (map) {   // answered questions stay visible in the step of their part, with Změnit
-    for (const q of (Array.isArray(S.questions) ? S.questions : [])) {
-      if (!q || !q.answered || /^reroll/.test(String((q.answer || {}).decision || ""))) continue;
+    const all = Array.isArray(S.questions) ? S.questions : [];
+    // an answer the PM changed and answered again is shown once, as the new one
+    const replaced = new Set(all.filter(q => q && q.answered && q.changed_from).map(q => q.changed_from));
+    for (const q of all) {
+      if (!q || !q.answered || replaced.has(q.id) || /^reroll/.test(String((q.answer || {}).decision || ""))) continue;
       const st = steps.find(s => s.parts.some(p => p.id === q.part));
       if (st) st.saved.push(q);
     }
