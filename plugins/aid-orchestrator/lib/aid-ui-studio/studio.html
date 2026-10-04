@@ -75,16 +75,8 @@
   @keyframes saved-flash { from { background: color-mix(in srgb, var(--ks-ok) 22%, transparent); } to { background: transparent; } }
   @media (prefers-reduced-motion: reduce) { .saved-row.fresh { animation: none; background: color-mix(in srgb, var(--ks-ok) 12%, transparent); } }
   .card.picked { outline: 3px solid var(--ks-kinpaku); outline-offset: 2px; }
-  .card[role="radio"] { cursor: pointer; }
-  .picked-mark { margin-top: auto; align-self: start; padding: 6px 12px; border-radius: 6px; background: var(--ks-kinpaku); color: var(--ks-ink); font-weight: 700; font-size: .9375rem; }
-  .decide { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; }
-  .decide .choose { margin-top: 0; }
-  button.choose:disabled { opacity: .45; cursor: default; }
-  .other { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--ks-rule); border-radius: 8px; background: var(--ks-paper-deep); }
-  .other textarea { min-height: 3.2rem; }
-  .other .fact-label { font: 600 .9375rem var(--ks-font); letter-spacing: 0; text-transform: none; color: var(--ks-ink); }
-  .other-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-  .other .hint { font-size: .8125rem; color: var(--ks-text-muted); margin: 0; }
+  .confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 16px; border: 1px solid var(--ks-kinpaku); border-radius: 8px; background: var(--ks-paper-deep); }
+  .confirm p { margin: 0; flex: 1 1 14rem; }
   .parts { padding: 0 22px 18px; display: flex; flex-direction: column; gap: 18px; }
   .parts:empty { display: none; }
   .brief { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 14px; line-height: 1.45; }
@@ -493,7 +485,6 @@ const SVG = {
 const FAN = ["0deg", "1.4deg", "-1.2deg"];
 let last = "", stopped = false, navs = [];
 let S = null, H = [], hCount = null, hOk = true;   // /state, /history, its line count when fetched
-const OTHER = {};      // question id -> the "none fits" panel is open
 const SELECTED = {};   // question id -> the card the PM picked but has not confirmed yet
 const openSteps = new Set();   // step titles whose Detail the PM opened, kept across re-renders
 const scrolled = {};   // deck scroll position per question, kept across re-renders
@@ -599,15 +590,11 @@ function card(q, c, i, answer) {
     front.inert = on; back.inert = !on;
     (on ? back : front).querySelector(".chip:last-of-type, .back-head .chip").focus();
   };
-  // The whole card selects (click, Enter or Space); its own buttons, links and the preview keep their jobs.
   const picked = SELECTED[q.id] === c.id;
   if (picked) art.classList.add("picked");
-  art.setAttribute("role", "radio"); art.setAttribute("aria-checked", String(picked)); art.setAttribute("tabindex", "0");
-  art.setAttribute("aria-label", title);
-  const pick = () => { SELECTED[q.id] = picked ? undefined : c.id; render(); };
-  art.addEventListener("click", e => { if (!e.target.closest("button, a, img")) pick(); });
-  art.addEventListener("keydown", e => { if (e.target === art && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); pick(); } });
-  const choose = () => picked ? el("p", { class: "picked-mark" }, "Vybráno ✓") : null;
+  const choose = () => el("button", { class: "choose" + (picked ? " on" : ""), type: "button", "aria-pressed": String(picked),
+    "aria-label": (picked ? "Vybráno „" : "Vybrat „") + title + "“",
+    on: { click: () => { SELECTED[q.id] = picked ? undefined : c.id; render(); } } }, picked ? "Vybráno ✓" : "Vybrat tento");
   const front = el("div", { class: "face front" + lead },
     i === 0 ? el("span", { class: "kicker" + (str(c.preview) ? "" : " inline") }, "Doporučuji") : null,
     str(c.preview) ? media(q, c, true, flip) : null,
@@ -703,8 +690,7 @@ function question(q, cards) {
     let comment = f ? f.value.trim() : "";
     if (prefix) comment = prefix + (comment ? ": " + comment : "");
     if ((decision === "return" || (q.kind === "exception" && decision === "approve")) && !comment) {
-      if (!OTHER[q.id] && cards.length && q.kind !== "approve_page") { OTHER[q.id] = true; render(); return; }
-      status.textContent = q.kind === "exception" ? "Napište důvod." : "Napište, co chcete jinak.";
+      status.textContent = q.kind === "exception" ? "Napište důvod." : "Napište, co změnit.";
       if (f) f.focus();
       return;
     }
@@ -732,25 +718,20 @@ function question(q, cards) {
       return sec;
     }
     sec.append(deck(q, cards.map((c, i) => card(q, c, i, answer))));
-    // One row under the cards: confirm the picked card, or open "none fits" (new proposals or the PM's own answer).
     const sel = cards.find(c => c.id === SELECTED[q.id]);
-    const styled = ["direction", "identity", "vision"].includes(q.kind);   // safer/bolder only where taste is the question
-    sec.append(el("div", { class: "decide" },
-      el("button", { type: "button", class: "choose", disabled: !sel, on: { click: () => answer("choose", sel.id) } },
-        sel ? "Potvrdit: " + (sel.title || sel.id) : "Vyberte jednu z možností"),
-      el("button", { type: "button", class: "reroll-btn quiet", "aria-expanded": String(!!OTHER[q.id]),
-        on: { click: () => { OTHER[q.id] = !OTHER[q.id]; render(); } } }, "Žádná mi nesedí")));
-    if (OTHER[q.id]) sec.append(el("div", { class: "other" },
-      el("label", { class: "fact-label", for: fid }, "Co chcete jinak?"),
-      el("textarea", { id: fid, rows: "2", placeholder: "Napište svými slovy…" }),
-      el("div", { class: "other-actions" },
-        el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll") } }, icon("die"), el("span", {}, "Navrhnout jiné možnosti")),
-        styled ? el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_safer") } }, "Bezpečnější") : null,
-        styled ? el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_bolder") } }, "Odvážnější") : null,
-        el("button", { type: "button", class: "reroll-btn ret", on: { click: () => answer("return") } }, "Použít moji odpověď")),
-      el("p", { class: "hint" }, "Jiné možnosti: text je nepovinný a nové návrhy se jím řídí. Moje odpověď: platí to, co napíšete."
-        + (styled ? " Bezpečnější = blíž tomu, co je v oboru běžné. Odvážnější = výraznější." : ""))));
-    sec.append(status);
+    if (sel) sec.append(el("div", { class: "confirm" },
+      el("p", {}, "Vybráno: ", el("b", {}, sel.title || sel.id)),
+      el("button", { type: "button", class: "choose", on: { click: () => answer("choose", sel.id) } }, "Potvrdit výběr"),
+      el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => { SELECTED[q.id] = undefined; render(); } } }, "Zrušit")));
+    sec.append(el("div", { class: "bar" },
+      el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_safer") } }, "← Bezpečněji"),
+      el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll") } }, icon("die"), el("span", {}, "Znovu")),
+      el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_bolder") } }, "Odvážněji →"),
+      el("input", { type: "text", id: fid, class: "steer", placeholder: "Napište, co změnit",
+        "aria-label": "Napište, co změnit" }),
+      el("button", { type: "button", class: "reroll-btn ret", on: { click: () => answer("return") } }, "Chci to jinak"),
+      el("p", { class: "hint" }, "Bezpečněji = blíž tomu, co je v oboru běžné. Odvážněji = výraznější a méně obvyklé. Znovu = nové návrhy ve stejném duchu."),
+      status));
     return sec;
   }
 

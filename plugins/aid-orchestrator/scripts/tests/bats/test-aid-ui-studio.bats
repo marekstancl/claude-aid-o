@@ -595,14 +595,11 @@ JSON
   jq -e '[.cards[] | select(.question == "q1.c1")] | length == 0' "$BATS_TEST_TMPDIR/body" >/dev/null
 }
 
-@test "page: the whole card selects; Potvrdit sends choose; none-fits opens new proposals or the PM's own answer; saved answers read as words with Změnit" {
+@test "page: a card click only selects; Potvrdit výběr sends choose; saved answers read as words with Změnit" {
   command -v node >/dev/null || skip "node not installed"
   f="$(PAGE_HTML)"
   ! grep -qF 'answer("choose", c.id)' "$f"                         # the card itself never sends
-  ! grep -qF '"Vybrat tento"' "$f"                                 # the whole card selects, no button on it
-  grep -qF 'art.setAttribute("role", "radio")' "$f"
-  grep -qF 'disabled: !sel, on: { click: () => answer("choose", sel.id) } }' "$f"
-  grep -qF '"Žádná mi nesedí"' "$f"; grep -qF '"Použít moji odpověď"' "$f"; grep -qF '"Navrhnout jiné možnosti"' "$f"
+  grep -qF 'answer("choose", sel.id) } }, "Potvrdit výběr")' "$f"
   grep -qF 'call("POST", "/change"' "$f"
   sed -n '/^function savedText(/,/^}/p' "$f" > "$BATS_TEST_TMPDIR/saved.js"
   run node -e '
