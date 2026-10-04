@@ -543,15 +543,14 @@ JSON
     const m = model(S, []), st = m.steps[1];
     const ok = (c, w) => { if (!c) { console.log("FAIL", w); process.exit(1); } };
     ok(m.steps.length === 6 && st.n === 2 && st.of === 6 && st.active && st.open.length === 2, "model: six steps, both questions in step 2");
-    const list = flat(partsEl(st));
-    for (const w of ["1 T-podklady hotovo", "2 T-vize vynecháno", "3 T-logo teď", "5 T-stranky teď", "6 T-obsah čeká"]) ok(list.includes(w), "list has " + w);
-    ok(!list.includes("W-logo"), "with open questions the list carries no box (each question part has its own)");
+    const tabs = partsEl(st, "logo"), list = flat(tabs);
+    for (const w of ["✓ T-podklady hotovo", "2 T-vize vynecháno", "3 T-logo teď", "5 T-stranky teď", "6 T-obsah čeká"]) ok(list.includes(w), "tabs have " + w);
+    ok(!list.includes("W-logo"), "the tabs carry no box (the opened part has its own)");
+    ok(tabs.kids.filter(k => k.attrs["aria-current"] === "true").length === 1 && tabs.kids[2].attrs["aria-current"] === "true", "the opened part is the marked tab");
+    ok(partsEl(m.steps[0], "co-stavime") === null, "a step with one part has no tabs");
     const b3 = flat(partBox(st, st.parts[2])), b5 = flat(partBox(st, st.parts[4]));
     ok(b3.includes("Část 3 z 6: T-logo") && b3.includes("W-logo") && b3.includes("G-logo") && b3.includes("F-logo") && b3.includes("Y-logo"), "box of logo");
     ok(b5.includes("Část 5 z 6: T-stranky") && b5.includes("Y-stranky"), "box of stranky");
-    // no open question: the current part shows its box in the list
-    const m2 = model({ sections: { steps: map }, questions: [] }, []), s2 = m2.steps[1];
-    ok(flat(partsEl(s2)).includes("W-logo"), "box without a question");
   ' "$BATS_TEST_TMPDIR/parts.js" "$BATS_TEST_TMPDIR/model.js"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qF '"Krok " + st.n + " z " + st.of' "$f"
@@ -595,11 +594,31 @@ JSON
   jq -e '[.cards[] | select(.question == "q1.c1")] | length == 0' "$BATS_TEST_TMPDIR/body" >/dev/null
 }
 
-@test "page: a card click only selects; Potvrdit výběr sends choose; saved answers read as words with Změnit" {
+@test "page: a click on the card only selects; Další sends choose; no option of the row is gone; saved answers read as words with Změnit" {
   command -v node >/dev/null || skip "node not installed"
   f="$(PAGE_HTML)"
   ! grep -qF 'answer("choose", c.id)' "$f"                         # the card itself never sends
-  grep -qF 'answer("choose", sel.id) } }, "Potvrdit výběr")' "$f"
+  ! grep -qE 'Vybrat tento|Potvrdit výběr' "$f"                    # no button on the card, no confirm bar
+  grep -qF 'role: "radio"' "$f"
+  grep -qF 'on: { click: () => answer("choose", SELECTED[q.id]) } }, "Další →")' "$f"
+  # the row keeps every way out: safer, again, bolder, the PM's own words (as an answer or as a steer for new proposals)
+  for w in 'answer("reroll_safer")' 'answer("reroll")' 'answer("reroll_bolder")' 'answer("reroll", undefined, t)' 'answer("return", undefined, t)' '"Chci to jinak"'; do
+    grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
+  done
+  grep -qF '<dialog id="ask"' "$f"                                 # the text goes into a window
+  # the part the PM opened stays until the waiting part changes, then the page follows the work
+  { sed -n '/^function defaultPart(/,/^}/p' "$f"; sed -n '/^function viewedPart(/,/^}/p' "$f"; } > "$BATS_TEST_TMPDIR/view.js"
+  run node -e '
+    const VIEW = {};
+    eval(require("fs").readFileSync(process.argv[1], "utf8"));
+    const st = { id: "s2", parts: [{ id: "a", status: "done" }, { id: "b", status: "current" }, { id: "c", status: "waiting" }], open: [{ part: "b" }] };
+    const ok = (c, w) => { if (!c) { console.log("FAIL", w); process.exit(1); } };
+    ok(defaultPart(st) === "b" && viewedPart(st, "b") === "b", "the waiting part is shown");
+    VIEW.s2 = { part: "a", auto: "b" }; ok(viewedPart(st, "b") === "a", "the opened part stays");
+    st.open = [{ part: "c" }]; ok(defaultPart(st) === "c" && viewedPart(st, "c") === "c" && !VIEW.s2, "a new waiting part takes over");
+    st.open = []; ok(defaultPart(st) === "b", "no question: the part being worked on");
+  ' "$BATS_TEST_TMPDIR/view.js"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -qF 'call("POST", "/change"' "$f"
   sed -n '/^function savedText(/,/^}/p' "$f" > "$BATS_TEST_TMPDIR/saved.js"
   run node -e '

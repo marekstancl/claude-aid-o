@@ -68,29 +68,57 @@
   .step-brief { padding: 0 22px 18px; }
   .saved { padding: 0 22px 14px; display: flex; flex-direction: column; }
   .saved-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 14px; align-items: center; padding: 9px 10px; border-bottom: 1px solid var(--ks-rule); font-size: 14px; border-radius: 6px; }
-  .saved-row .ok { color: var(--ks-ok); font-weight: 700; white-space: nowrap; }
+  .saved-row .ok { color: var(--ks-patina); font-weight: 700; white-space: nowrap; }
   .saved-q { color: var(--ks-text-muted); }
   .saved-a { color: var(--ks-ink); font-weight: 600; }
-  .saved-row.fresh { animation: saved-flash 2.4s ease-out; }
-  @keyframes saved-flash { from { background: color-mix(in srgb, var(--ks-ok) 22%, transparent); } to { background: transparent; } }
-  @media (prefers-reduced-motion: reduce) { .saved-row.fresh { animation: none; background: color-mix(in srgb, var(--ks-ok) 12%, transparent); } }
+  .details .saved, .active-box .saved { padding: 0; }
+  .saved-row.fresh { background: color-mix(in srgb, var(--ks-patina) 12%, transparent); }
+  @keyframes saved-flash { from { background: color-mix(in srgb, var(--ks-patina) 30%, transparent); } to { background: transparent; } }
+  /* Choosing: the whole card is the control; the tick and the outline say which one is picked. */
+  .card[data-card] { cursor: pointer; }
+  .card[data-card] .media img { cursor: pointer; }
   .card.picked { outline: 3px solid var(--ks-kinpaku); outline-offset: 2px; }
-  .confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 16px; border: 1px solid var(--ks-kinpaku); border-radius: 8px; background: var(--ks-paper-deep); }
-  .confirm p { margin: 0; flex: 1 1 14rem; }
-  .parts { padding: 0 22px 18px; display: flex; flex-direction: column; gap: 18px; }
-  .parts:empty { display: none; }
+  .tick { position: absolute; z-index: 7; top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; padding: 0; border: 1px solid var(--ks-edge); background: var(--ks-paper-raised); color: transparent; font-weight: 800; box-shadow: var(--ks-lift); cursor: pointer; transform: scale(0); transition: transform .25s cubic-bezier(.3, 1.6, .5, 1); }
+  .card:hover .tick, .tick:focus-visible, .card.picked .tick { transform: scale(1); }
+  .card.picked .tick { background: var(--ks-kinpaku); border-color: var(--ks-kinpaku); color: var(--ks-ink); }
+  .q-count { font-size: 13px; color: var(--ks-text-muted); }
+  .info { color: var(--ks-text-muted); font-size: 14px; padding: 12px 14px; border: 1px dashed var(--ks-rule); border-radius: 8px; }
+  .back-now { align-self: flex-start; }
+  /* The parts of the step as tabs: done, the one being worked on, waiting, left out. */
+  .tabs { display: flex; padding: 0 22px; border-top: 1px solid var(--ks-rule); overflow-x: auto; background: var(--ks-paper); scrollbar-width: thin; }
+  .tab { display: flex; align-items: center; gap: 9px; padding: 13px 16px 10px; border: 0; border-bottom: 3px solid transparent; background: none; cursor: pointer; font: inherit; font-size: 14px; color: var(--ks-text-muted); white-space: nowrap; }
+  .tab:hover { color: var(--ks-ink); }
+  .tab-n { width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--ks-rule); display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--ks-paper-raised); }
+  .tab.done .tab-n { background: var(--ks-patina); border-color: var(--ks-patina); color: var(--ks-paper-raised); }
+  .tab.current { color: var(--ks-ink); font-weight: 700; }
+  .tab.current .tab-n { border: 2px solid var(--ks-kinpaku); }
+  .tab.skipped .tab-t { text-decoration: line-through; }
+  .tab[aria-current] { border-bottom-color: var(--ks-ink); color: var(--ks-ink); }
+  /* "Chci to jinak": the text goes into a window, not into the row. */
+  dialog.ask { border: 1px solid var(--ks-rule); border-radius: 10px; padding: 24px; width: min(34rem, 92vw); margin: auto; background: var(--ks-paper-raised); color: var(--ks-text); box-shadow: var(--ks-lift); }
+  dialog.ask::backdrop { background: color-mix(in srgb, var(--ks-ink) 45%, transparent); }
+  dialog.ask h3 { font-size: 1.25rem; color: var(--ks-ink); margin-bottom: 4px; }
+  dialog.ask p { color: var(--ks-text-muted); font-size: 14px; margin-bottom: 14px; }
+  dialog.ask textarea { min-height: 7rem; }
+  dialog.ask .actions { justify-content: flex-end; margin-top: 14px; }
+  /* What just happened: the answered question leaves upwards, its saved row drops in, the next one comes from the side. */
+  @media (prefers-reduced-motion: no-preference) {
+    .question.leaving { animation: q-leave .45s ease-in forwards; }
+    .question.arriving, .active-box.slide-fwd { animation: q-arrive .5s cubic-bezier(.16, 1, .3, 1); }
+    .active-box.slide-back { animation: q-arrive-back .4s cubic-bezier(.16, 1, .3, 1); }
+    .saved-row.fresh { background: none; animation: saved-drop .5s cubic-bezier(.16, 1, .3, 1), saved-flash 2.6s ease-out; }
+    .step.just .mark, .tab-n.pop { animation: mark-pop .6s cubic-bezier(.3, 1.6, .5, 1); }
+    .step.active.just .stage { animation: stage-ring 1.6s ease-out; }
+    @keyframes q-leave { to { opacity: 0; transform: translateY(-60px) scale(.96); } }
+    @keyframes q-arrive { from { opacity: 0; transform: translateX(60px); } }
+    @keyframes q-arrive-back { from { opacity: 0; transform: translateX(-60px); } }
+    @keyframes saved-drop { from { opacity: 0; transform: translateY(40px); } }
+    @keyframes mark-pop { from { transform: scale(.4); } }
+    @keyframes stage-ring { from { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ks-kinpaku) 55%, transparent); } }
+  }
   .brief { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 14px; line-height: 1.45; }
   .brief dt { color: var(--ks-text-muted); font-size: 13px; }
   .brief dd { margin: 0; color: var(--ks-text); }
-  .part-list { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--ks-rule); }
-  .part { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--ks-rule); font-size: 14px; color: var(--ks-text); }
-  .part-n { color: var(--ks-text-muted); font-variant-numeric: tabular-nums; }
-  .part-s { color: var(--ks-text-muted); font-size: 13px; }
-  .part.current { font-weight: 700; color: var(--ks-ink); }
-  .part.current .part-s { color: var(--ks-ink); }
-  .part.waiting, .part.skipped { color: var(--ks-text-muted); }
-  .part.skipped .part-t { text-decoration: line-through; }
-  .part-wrap { display: flex; flex-direction: column; gap: 1.5rem; }
   .part-box { border-left: 2px solid var(--ks-kinpaku); padding: 2px 0 2px 16px; display: flex; flex-direction: column; gap: 10px; }
   .part-head { font-size: 15px; font-weight: 700; color: var(--ks-ink); }
   .detail-h { font-size: 1.02rem; margin: .9rem 0 .1rem; color: var(--ks-text); }
@@ -211,7 +239,7 @@
 
   button.choose { margin-top: auto; align-self: start; background: var(--ks-instrument); color: var(--ks-instrument-text); border: 0; font: 600 .9375rem/1.35 var(--ks-font); padding: 11px 24px; border-radius: 6px; cursor: pointer; transition: background .15s; }
   button.choose:hover { background: var(--ks-instrument-raised); }
-  button.choose.on, button.choose.on:hover { background: var(--ks-kinpaku); color: var(--ks-ink); }
+  button.choose.go { margin: 0; align-self: center; min-width: 9rem; }
   .reroll-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 14px; font: 500 .8125rem var(--ks-font); color: var(--ks-ink); background: var(--ks-paper-raised); border: 1px solid var(--ks-edge); border-radius: 6px; box-shadow: var(--ks-cap-lift); cursor: pointer; transition: border-color .2s ease, color .2s ease; }
   .reroll-btn:hover { border-color: var(--ks-ink); }
   .reroll-btn:active { box-shadow: var(--ks-cap-press); }
@@ -222,7 +250,9 @@
 
   /* The round's verbs stay reachable: a full-bleed bar stuck to the viewport bottom. */
   .bar { position: sticky; bottom: 0; z-index: 10; width: 100vw; margin: -.3rem calc(50% - 50vw) 0; padding: .7rem var(--page-inset) calc(.7rem + env(safe-area-inset-bottom, 0px)); display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; background: var(--ks-paper); border-top: 1px solid var(--ks-rule); }
-  .steer { flex: 1; min-width: 16rem; }
+  .bar .spacer { flex: 1; }
+  .picked-note { font-size: .875rem; color: var(--ks-text-muted); }
+  .picked-note b { color: var(--ks-ink); }
   input[type=text], textarea { width: 100%; background: var(--ks-paper-raised); color: var(--ks-text); border: 1px solid var(--ks-edge); border-radius: 6px; padding: .7rem .85rem; font: inherit; caret-color: var(--ks-patina); }
   input[type=text]::placeholder, textarea::placeholder { color: var(--ks-text-muted); opacity: 1; }
   input[type=text]:focus, textarea:focus { outline: 2px solid var(--ks-patina); outline-offset: 2px; }
@@ -244,7 +274,6 @@
   .gallery figure { margin: 0; border: 1px solid var(--ks-rule); border-radius: 6px; overflow: hidden; background: var(--ks-paper-raised); }
   .gallery figcaption { padding: .6rem .8rem .7rem; font-size: .875rem; color: var(--ks-text-muted); }
   .gallery figcaption b { color: var(--ks-ink); }
-  .field { display: flex; flex-direction: column; gap: .45rem; margin-top: .3rem; }
   .actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
   .actions button.choose { margin-top: 0; }
 
@@ -264,11 +293,9 @@
     .grid > .card { flex: 0 0 auto; }
     .nav, .fade { display: none; }
     .bar { gap: .5rem; }
-    .steer { min-width: 0; }
     .bar .reroll-btn { flex: 1 1 26%; padding: 0 8px; min-height: 38px; }
-    .bar .steer { flex: 1 1 12rem; order: 1; padding: .55rem .75rem; }
-    .bar .ret { order: 2; flex: none; }
-    .bar .status { order: 3; }
+    .bar .spacer { display: none; }
+    .bar .picked-note, .bar button.choose.go { flex: 1 1 100%; }
     .step-desc { text-align: left; }
     .long { display: none; }
     .panel.wide { display: flex; }
@@ -291,6 +318,7 @@
     .summary > div:first-child { grid-column: 1 / -1; }
     .name { font-size: 17px; }
     .details, .active-box { padding: 16px; }
+    .tabs { padding: 0 6px; }
     .event { grid-template-columns: 44px minmax(0, 1fr); gap: 4px 8px; }
     .event .decision { grid-column: 2; text-align: left; }
     .comment, .origin { grid-column: 2; }
@@ -316,6 +344,11 @@
   <a href="/licence">Vzor stránky převzat z Impeccable (licence Apache 2.0)</a>
 </footer>
 <div id="lightbox" role="dialog" aria-label="Zvětšený náhled, zavřete klávesou Esc" tabindex="-1" hidden></div>
+<dialog id="ask" class="ask" aria-labelledby="ask-title">
+  <h3 id="ask-title"></h3><p id="ask-hint"></p>
+  <textarea id="ask-text" aria-labelledby="ask-title"></textarea>
+  <div class="actions" id="ask-actions"></div>
+</dialog>
 <script id="pipeline-model">
 "use strict";
 // The run as a pipeline, derived from /state (S) and /history (H) only; no DOM, so
@@ -485,7 +518,10 @@ const SVG = {
 const FAN = ["0deg", "1.4deg", "-1.2deg"];
 let last = "", stopped = false, navs = [];
 let S = null, H = [], hCount = null, hOk = true;   // /state, /history, its line count when fetched
-const SELECTED = {};   // question id -> the card the PM picked but has not confirmed yet
+const SELECTED = {};   // question id -> the card the PM picked; Další sends it
+const VIEW = {};       // step id -> { part, auto }: the part the PM opened, and which part was waiting then
+const SEEN = new Set(), WAS = {};   // what was already drawn and the statuses at the last render: an animation plays once
+let first = true, slide = "", drawn = [], arrived = null;
 const openSteps = new Set();   // step titles whose Detail the PM opened, kept across re-renders
 const scrolled = {};   // deck scroll position per question, kept across re-renders
 
@@ -551,7 +587,7 @@ function media(q, c, withDetails, flip) {
       withDetails ? el("button", { type: "button", class: "chip", on: { click: flip } }, icon("flip"), el("span", {}, "Detaily")) : null));
   img.addEventListener("load", () => { img.hidden = false; expand.disabled = false; box.classList.remove("comp-pending"); });
   img.addEventListener("error", () => { if (!stopped) setTimeout(() => { img.src = src + "&t=" + Date.now(); }, 3000); });
-  img.addEventListener("click", () => openLightbox(img));
+  if (!withDetails) img.addEventListener("click", () => openLightbox(img));   // on a deck card the click picks it
   img.src = src;
   return box;
 }
@@ -581,20 +617,21 @@ function identity(c) {
     tags.map(t => el("span", { class: "tag" }, t)));
 }
 
-function card(q, c, i, answer) {
+function card(q, c, i, select) {
   const title = c.title || c.id;
   const lead = i === 0 ? " lead" : "";
-  const art = el("article", { class: "card", style: "--fan:" + FAN[i % 3] });
+  const picked = SELECTED[q.id] === c.id;
+  // the whole card picks; its own buttons (Detaily, zoom) and links keep doing their thing
+  const art = el("article", { class: "card" + (picked ? " picked" : ""), style: "--fan:" + FAN[i % 3], "data-card": c.id,
+    on: { click: e => { if (!e.target.closest("button, a")) select(c.id); } } });
+  // the tick is the control a keyboard and a screen reader use; the rest of the card is the same click for a mouse
+  const tick = el("button", { type: "button", class: "tick", role: "radio", "aria-checked": String(picked), "aria-label": "Vybrat: " + title,
+    on: { click: () => select(c.id) } }, "✓");
   const flip = () => {
     const on = art.classList.toggle("flipped");
     front.inert = on; back.inert = !on;
     (on ? back : front).querySelector(".chip:last-of-type, .back-head .chip").focus();
   };
-  const picked = SELECTED[q.id] === c.id;
-  if (picked) art.classList.add("picked");
-  const choose = () => el("button", { class: "choose" + (picked ? " on" : ""), type: "button", "aria-pressed": String(picked),
-    "aria-label": (picked ? "Vybráno „" : "Vybrat „") + title + "“",
-    on: { click: () => { SELECTED[q.id] = picked ? undefined : c.id; render(); } } }, picked ? "Vybráno ✓" : "Vybrat tento");
   const front = el("div", { class: "face front" + lead },
     i === 0 ? el("span", { class: "kicker" + (str(c.preview) ? "" : " inline") }, "Doporučuji") : null,
     str(c.preview) ? media(q, c, true, flip) : null,
@@ -602,7 +639,7 @@ function card(q, c, i, answer) {
       str(c.eyebrow) ? el("p", { class: "tier" }, str(c.eyebrow)) : null,
       el("h3", {}, title),
       str(c.thesis) && c.thesis !== c.title ? el("p", { class: "thesis" }, c.thesis) : null,
-      identity(c), uniqueness(c), fact("Riziko", c.risk, "clamp"), fact("Vychází z", sourceOf(c), "clamp"), urlFact(c), choose()));
+      identity(c), uniqueness(c), fact("Riziko", c.risk, "clamp"), fact("Vychází z", sourceOf(c), "clamp"), urlFact(c)));
   const extras = Object.entries(c).filter(([k, v]) => !KNOWN.has(k) && (str(v) || typeof v === "number"))
     .map(([k, v]) => fact(k.replace(/_/g, " "), String(v)));
   const back = el("div", { class: "face back" + lead, inert: true },
@@ -610,8 +647,8 @@ function card(q, c, i, answer) {
       el("button", { type: "button", class: "chip", on: { click: flip } }, icon("flip"), el("span", {}, "Zpět"))),
     el("div", { class: "body back-body" },
       str(c.thesis) ? el("p", { class: "thesis" }, c.thesis) : null,
-      uniqueness(c), fact("Riziko", c.risk), urlFact(c), extras, choose()));
-  art.append(el("div", { class: "card-inner" }, front, back));
+      uniqueness(c), fact("Riziko", c.risk), urlFact(c), extras));
+  art.append(tick, el("div", { class: "card-inner" }, front, back));
   return art;
 }
 
@@ -680,28 +717,49 @@ function selectorChips(target) {
     .map(([k, v]) => el("span", { class: "tag" }, (SELECTOR[k] || k) + " ", el("b", {}, k === "check" ? (CHECK_CS[v] || String(v)) : String(v)))));
 }
 
-function question(q, cards) {
-  const fid = "note-" + q.id;
+// The window for "Chci to jinak" and for a reason: one text, one or two ways to send it.
+const askDlg = document.getElementById("ask");
+function ask(o) {
+  const ta = document.getElementById("ask-text");
+  if (askDlg.dataset.key !== o.key) ta.value = "";   // a draft that was not saved comes back for the same question
+  askDlg.dataset.key = o.key;
+  document.getElementById("ask-title").textContent = o.title;
+  document.getElementById("ask-hint").textContent = o.hint;
+  ta.placeholder = o.placeholder || "";
+  const send = f => () => { const t = ta.value.trim(); if (!t) { ta.focus(); return; } askDlg.close(); f(t); };
+  document.getElementById("ask-actions").replaceChildren(
+    el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => askDlg.close() } }, "Zavřít"),
+    ...o.send.map(([label, f], i) => el("button", { type: "button", class: i === o.send.length - 1 ? "choose go" : "reroll-btn", on: { click: send(f) } }, label)));
+  askDlg.showModal(); ta.focus();
+}
+// The answered question leaves upwards, towards the row that says it is saved.
+function leave(node) {
+  if (!node.isConnected || matchMedia("(prefers-reduced-motion: reduce)").matches) return Promise.resolve();
+  node.classList.remove("arriving"); node.classList.add("leaving");
+  return new Promise(r => { node.addEventListener("animationend", e => { if (e.target === node) r(); }); setTimeout(r, 600); });
+}
+
+// count = { k, n } when the part asks more than one question: "Otázka k z n"
+function question(q, cards, count) {
   const status = el("p", { class: "status", role: "status" });
-  const sec = el("section", { class: "question", "aria-labelledby": "h-" + q.id });
+  const fresh = !first && !SEEN.has("q:" + q.id);
+  drawn.push("q:" + q.id);
+  const sec = el("section", { class: "question" + (fresh ? " arriving" : ""), "aria-labelledby": "h-" + q.id });
+  if (fresh) arrived = arrived || sec;
   const kind = str(q.eyebrow) || KIND[q.kind] || q.kind;
-  const answer = async (decision, choice, prefix) => {
-    const f = document.getElementById(fid);
-    let comment = f ? f.value.trim() : "";
-    if (prefix) comment = prefix + (comment ? ": " + comment : "");
-    if ((decision === "return" || (q.kind === "exception" && decision === "approve")) && !comment) {
-      status.textContent = q.kind === "exception" ? "Napište důvod." : "Napište, co změnit.";
-      if (f) f.focus();
-      return;
-    }
-    sec.querySelectorAll("button:not(.chip):not(.nav)").forEach(b => b.disabled = true);
+  const tier = () => [count ? el("p", { class: "q-count" }, "Otázka " + count.k + (/^[234]$|^[234]\d\d$/.test(String(count.n)) ? " ze " : " z ") + count.n) : null,
+    el("p", { class: "tier" }, kind)];
+  let sync = () => {};
+  const answer = async (decision, choice, comment) => {
+    const btns = sec.querySelectorAll("button:not(.chip):not(.nav):not(.tick)");
+    btns.forEach(b => b.disabled = true);
     try {
-      const r = await call("POST", "/answer", { question: q.id, kind: q.kind, target: q.target, decision, choice, comment });
-      if (r.status === 200) { last = ""; tick(); return; }
+      const r = await call("POST", "/answer", { question: q.id, kind: q.kind, target: q.target, decision, choice, comment: comment || "" });
+      if (r.status === 200) { askDlg.dataset.key = ""; if (!/^reroll/.test(decision)) await leave(sec); last = ""; tick(); return; }
       status.textContent = r.status === 409 ? "Otázka se mezitím změnila nebo už má odpověď. Obnovte stránku."
         : "Odpověď se nepodařilo uložit. Zkuste to prosím znovu.";
     } catch (e) { if (e.message !== "token") status.textContent = "Server neodpovídá."; }
-    sec.querySelectorAll("button:not(.chip):not(.nav)").forEach(b => b.disabled = false);
+    btns.forEach(b => b.disabled = false); sync();
   };
   const title = q.title || kind || q.id;
   // Approvals that show several previews (page wireframes, content per page) get a gallery, not a deck.
@@ -709,7 +767,7 @@ function question(q, cards) {
   const deckKind = cards.length && q.kind !== "approve_page" && !gallery;
 
   if (deckKind || (!cards.length && q.rerolled_from)) {
-    sec.append(el("div", { class: "head" }, el("p", { class: "tier" }, kind),
+    sec.append(el("div", { class: "head" }, tier(),
       el("div", { class: "headline" }, icon("die"), el("h2", { class: "q-title", id: "h-" + q.id }, title))));
     if (str(q.prompt)) sec.append(el("p", { class: "lede" }, q.prompt));
     const lines = bodyLines(q.body); if (lines) sec.append(el("div", { class: "head" }, lines));
@@ -717,21 +775,37 @@ function question(q, cards) {
       sec.append(el("p", { class: "tier" }, "Připravují se nové návrhy…"), deck(q, [0, 1, 2].map(skeleton)));
       return sec;
     }
-    sec.append(deck(q, cards.map((c, i) => card(q, c, i, answer))));
-    const sel = cards.find(c => c.id === SELECTED[q.id]);
-    if (sel) sec.append(el("div", { class: "confirm" },
-      el("p", {}, "Vybráno: ", el("b", {}, sel.title || sel.id)),
-      el("button", { type: "button", class: "choose", on: { click: () => answer("choose", sel.id) } }, "Potvrdit výběr"),
-      el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => { SELECTED[q.id] = undefined; render(); } } }, "Zrušit")));
+    const note = el("span", { class: "picked-note" });
+    const next = el("button", { type: "button", class: "choose go", on: { click: () => answer("choose", SELECTED[q.id]) } }, "Další →");
+    sync = () => {
+      const c = cards.find(x => x.id === SELECTED[q.id]);
+      next.disabled = !c;
+      note.replaceChildren(...(c ? ["Vybráno: ", el("b", {}, c.title || c.id)] : ["Vyberte kartu kliknutím."]));
+    };
+    const select = id => {   // a click on the picked card lets it go again
+      SELECTED[q.id] = SELECTED[q.id] === id ? undefined : id;
+      sec.querySelectorAll(".card[data-card]").forEach(a => {
+        const on = a.getAttribute("data-card") === SELECTED[q.id];
+        a.classList.toggle("picked", on); a.querySelector(".tick").setAttribute("aria-checked", String(on));
+      });
+      sync();
+    };
+    const shell = deck(q, cards.map((c, i) => card(q, c, i, select)));
+    shell.querySelector(".grid").setAttribute("role", "radiogroup");
+    shell.querySelector(".grid").setAttribute("aria-labelledby", "h-" + q.id);
+    sec.append(shell);
+    // one row: new proposals on the left, the PM's own words in a window, Další on the right
     sec.append(el("div", { class: "bar" },
       el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_safer") } }, "← Bezpečněji"),
       el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll") } }, icon("die"), el("span", {}, "Znovu")),
       el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_bolder") } }, "Odvážněji →"),
-      el("input", { type: "text", id: fid, class: "steer", placeholder: "Napište, co změnit",
-        "aria-label": "Napište, co změnit" }),
-      el("button", { type: "button", class: "reroll-btn ret", on: { click: () => answer("return") } }, "Chci to jinak"),
+      el("button", { type: "button", class: "reroll-btn", on: { click: () => ask({ key: q.id, title: "Co chcete jinak?",
+        hint: "Napište to svými slovy. Odešlete to jako svou odpověď, nebo si nechte podle toho připravit nové návrhy.",
+        send: [["Nové návrhy podle toho", t => answer("reroll", undefined, t)], ["Odeslat", t => answer("return", undefined, t)]] }) } }, "Chci to jinak"),
+      el("span", { class: "spacer" }), note, next,
       el("p", { class: "hint" }, "Bezpečněji = blíž tomu, co je v oboru běžné. Odvážněji = výraznější a méně obvyklé. Znovu = nové návrhy ve stejném duchu."),
       status));
+    sync();
     return sec;
   }
 
@@ -747,7 +821,7 @@ function question(q, cards) {
     meta = el("div", { class: "identity" }, el("span", { class: "tag" }, "adresa ", el("b", {}, addr)));
   }
   const body = el("div", { class: "body" },
-    el("p", { class: "tier" }, kind),
+    tier(),
     el("h2", { class: "q-title", id: "h-" + q.id }, title),
     str(q.prompt) ? el("p", { class: "detail" }, q.prompt) : null,
     meta, exc ? selectorChips(q.target) : null,
@@ -756,15 +830,17 @@ function question(q, cards) {
       str(c.preview) ? media(q, c, false) : null,
       el("figcaption", {}, el("b", {}, c.title || c.id), str(c.thesis) ? " " + c.thesis : "")))) : null);
   sec.append(el("div", { class: "panel face" + (page ? " wide" : "") + (gallery && cards.length ? " full" : "") }, shot, body));
-  body.append(
-    el("div", { class: "field" }, el("label", { class: "fact-label", for: fid }, exc ? "Důvod" : "Napište, co změnit"),
-      el("textarea", { id: fid, placeholder: exc ? "Proč výjimku udělit, nebo proč ne…" : q.kind === "handover" ? "Co chcete před předáním ještě upravit…" : "Co chcete jinak…" })),
-    el("div", { class: "actions" },
-      el("button", { type: "button", class: "choose", on: { click: () => answer("approve") } },
-        exc ? "Udělit výjimku" : page ? "Stránka je v pořádku" : q.kind === "handover" ? "Ano, předat" : "Ano, takhle"),
-      el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("return") } },
-        exc ? "Neudělit" : page ? "Chci změny" : "Chci to jinak")),
-    status);
+  // the same row as under the cards: the PM's own words in a window on the left, the way on on the right
+  const other = () => ask(exc ? { key: q.id + ":no", title: "Proč výjimku neudělit?", hint: "Důvod se uloží k rozhodnutí.", send: [["Neudělit", t => answer("return", undefined, t)]] }
+    : { key: q.id, title: "Co chcete jinak?", hint: q.kind === "handover" ? "Napište, co chcete před předáním ještě upravit." : "Napište to svými slovy. Když to jinak sedí a máte jen poznámku, pošlete ji se souhlasem.",
+        send: [["Souhlasím, s poznámkou", t => answer("approve", undefined, t)], ["Odeslat", t => answer("return", undefined, t)]] });
+  const yes = () => exc ? ask({ key: q.id + ":yes", title: "Proč výjimku udělit?", hint: "Důvod se uloží k rozhodnutí.", send: [["Udělit výjimku", t => answer("approve", undefined, t)]] }) : answer("approve");
+  body.append(el("div", { class: "bar" },
+    el("button", { type: "button", class: "reroll-btn", on: { click: other } }, exc ? "Neudělit" : page ? "Chci změny" : "Chci to jinak"),
+    el("span", { class: "spacer" }),
+    el("button", { type: "button", class: "choose go", on: { click: yes } },
+      exc ? "Udělit výjimku" : q.kind === "handover" ? "Ano, předat" : page ? "V pořádku, další →" : "Ano, další →"),
+    status));
   return sec;
 }
 
@@ -821,9 +897,11 @@ function pastCards(e) {
 
 function stepEl(st, i) {
   const cls = st.active || (st.status === "current" && !st.open.length) ? "active" : st.status === "done" ? "done" : "wait";
-  const events = hOk ? st.events : [];
+  const events = hOk ? st.events : [], saved = cls === "active" ? [] : (st.saved || []);   // an active step shows them in their part
+  const just = !first && WAS["s:" + st.id] && WAS["s:" + st.id] !== cls && cls !== "wait";
+  drawn.push(["s:" + st.id, cls]);
   const stage = el("div", { class: "stage" + (openSteps.has(st.title) ? " open" : "") });
-  const detail = events.length ? el("button", { type: "button", class: "toggle", "aria-expanded": String(openSteps.has(st.title)),
+  const detail = events.length || saved.length ? el("button", { type: "button", class: "toggle", "aria-expanded": String(openSteps.has(st.title)),
     on: { click: () => {
       const on = stage.classList.toggle("open");
       if (on) openSteps.add(st.title); else openSteps.delete(st.title);
@@ -839,22 +917,59 @@ function stepEl(st, i) {
       !st.active && hOk && st.outcome.reconstructed ? el("span", { class: "note" }, " · doplněno zpětně") : null,
       !st.active && hOk && st.who ? el("span", { class: "who" }, WHO[st.who]) : null),
     detail));
-  if (events.length) stage.append(el("div", { class: "details" }, events.map(eventRow),
+  if (events.length || saved.length) stage.append(el("div", { class: "details" }, saved.length ? savedEl(saved) : null, events.map(eventRow),
     events.filter(e => e.answer && e.answer.decision === "choose" && e.cards.length).map(pastCards)));
-  if ((st.saved || []).length) stage.append(savedEl(st));
   if (cls === "active" && st.goal) stage.append(el("div", { class: "step-brief" },
     brief([["Co z toho bude", st.goal], ["K čemu to poslouží", st.feeds]])));
-  if (st.parts.length && cls === "active") stage.append(partsEl(st));
-  if (st.active) {   // each part with an open question: its why, goal, use and ask, then its questions
-    const ids = [...new Set(st.open.map(q => q.part))];
-    stage.append(el("div", { class: "active-box" }, ids.map(id => {
-      const p = st.parts.find(x => x.id === id);
-      return el("div", { class: "part-wrap" }, p ? partBox(st, p) : null,
-        st.open.filter(q => q.part === id).map(q => question(q, (S.cards || []).filter(c => c && c.question === q.id))));
-    })));
+  if (cls === "active" && st.parts.length) {   // the parts as tabs, and the one the PM looks at
+    const d = defaultPart(st), vid = viewedPart(st, d);
+    const popped = new Set(st.parts.filter(p => !first && p.status === "done" && WAS["p:" + st.id + ":" + p.id] && WAS["p:" + st.id + ":" + p.id] !== "done").map(p => p.id));
+    st.parts.forEach(p => drawn.push(["p:" + st.id + ":" + p.id, p.status]));
+    const tabs = partsEl(st, vid, popped, id => {
+      slide = st.parts.findIndex(p => p.id === id) < st.parts.findIndex(p => p.id === vid) ? "back" : "fwd";
+      VIEW[st.id] = { part: id, auto: d }; render();
+    });
+    if (tabs) stage.append(tabs);
+    stage.append(partPanel(st, vid, d));
+  } else if (st.active) {   // an older server without the map: the open questions as they come
+    stage.append(el("div", { class: "active-box" }, (st.saved || []).length ? savedEl(st.saved) : null, st.open.map(q => question(q, cardsOf(q)))));
   }
-  return el("article", { class: "step " + cls, "aria-current": st.active ? "step" : null },
+  const art = el("article", { class: "step " + cls + (just ? " just" : ""), "aria-current": st.active ? "step" : null },
     el("div", { class: "mark", "aria-hidden": "true" }, cls === "done" ? "✓" : cls === "active" ? String(i + 1) : "—"), stage);
+  if (just && cls === "active") arrived = art;   // the step that just lit up is where the PM continues
+  return art;
+}
+function cardsOf(q) { return (S.cards || []).filter(c => c && c.question === q.id); }
+
+// The part that waits for the PM, else the one being worked on.
+function defaultPart(st) {
+  const p = st.parts.find(p => st.open.some(q => q.part === p.id)) || st.parts.find(p => p.status === "current");
+  return p ? p.id : null;
+}
+// The part the PM opened stays open until the waiting part changes; then the page follows the work.
+function viewedPart(st, d) {
+  const v = VIEW[st.id];
+  if (v && v.auto === d && st.parts.some(p => p.id === v.part)) return v.part;
+  delete VIEW[st.id];
+  return d || st.parts[st.parts.length - 1].id;
+}
+const PART_INFO = { done: "Tahle část je hotová.", skipped: "Tuhle část jsme vynechali, pro váš web není potřeba.",
+  waiting: "Na tuhle část přijde řada později. Zatím tu není na co odpovídat.", current: "Na téhle části teď pracuji. Otázka se tu objeví sama." };
+// One part: what it is for, the saved answers with Změnit, and the question that waits (one at a time).
+function partPanel(st, vid, d) {
+  const p = st.parts.find(x => x.id === vid), i = st.parts.indexOf(p), di = st.parts.findIndex(x => x.id === d);
+  const saved = (st.saved || []).filter(q => q.part === vid), open = st.open.filter(q => q.part === vid);
+  const stray = st.open.filter(q => !st.parts.some(x => x.id === q.part));   // never hidden behind a tab
+  const k = saved.filter(q => !q.changed_to).length, q = open[0];
+  const back = () => { slide = di < i ? "back" : "fwd"; delete VIEW[st.id]; render(); };
+  const where = st.open.length ? "otázku, která čeká" : "část, na které pracuji";
+  return el("div", { class: "active-box" + (slide ? " slide-" + slide : "") },
+    d && d !== vid ? el("button", { type: "button", class: "reroll-btn back-now", on: { click: back } }, di < i ? "← Zpět na " + where : "Zpět na " + where + " →") : null,
+    partBox(st, p),
+    saved.length ? savedEl(saved) : null,
+    q ? question(q, cardsOf(q), k + open.length > 1 ? { k: k + 1, n: k + open.length } : null)
+      : el("p", { class: "info" }, (PART_INFO[p.status] || "") + (p.status === "done" && saved.length ? " Odpověď změníte tlačítkem Změnit - otevře se stejná otázka znovu." : "")),
+    stray.map(x => question(x, cardsOf(x))));
 }
 
 // The parts of the step: number, title and status; the part being worked on shows why, goal, what it feeds
@@ -870,9 +985,11 @@ function savedText(q) {
   if (a.decision === "return") return "Vráceno: " + (a.comment || "");
   return a.decision;
 }
-function savedEl(st) {
-  return el("div", { class: "saved" }, st.saved.map(q => {
-    const fresh = q.answer && Date.now() - Date.parse(q.answer.at) < 15000;
+function savedEl(list) {
+  return el("div", { class: "saved" }, list.map(q => {
+    const key = "a:" + q.id + "@" + (q.answer || {}).at;
+    const fresh = !first && !SEEN.has(key) && q.answer && Date.now() - Date.parse(q.answer.at) < 15000;
+    drawn.push(key);
     const change = async b => {
       b.disabled = true;
       const r = await call("POST", "/change", { question: q.id }).catch(() => ({ status: 0 }));
@@ -896,21 +1013,21 @@ function partBox(st, p) {
     el("p", { class: "part-head" }, st.parts.length > 1 ? "Část " + (i + 1) + " z " + st.parts.length + ": " + p.title : p.title),
     brief([["O co jde", p.why], ["Co z toho bude", p.goal], ["K čemu to poslouží", p.feeds], ["Co uděláte vy", p.you]]));
 }
-function partsEl(st) {
-  // with no open question the part being worked on still says what it is for
-  const cur = st.open.length ? [] : st.parts.filter(p => p.status === "current");
-  return el("div", { class: "parts" },
-    st.parts.length > 1 ? el("ol", { class: "part-list" }, st.parts.map((p, i) => el("li", { class: "part " + p.status, "aria-current": p.status === "current" ? "step" : null },
-      el("span", { class: "part-n" }, String(i + 1)), el("span", { class: "part-t" }, p.title),
-      el("span", { class: "part-s" }, PART_STATUS[p.status] || p.status)))) : null,
-    cur.map(p => partBox(st, p)));
+// The parts of the step as tabs: number (a tick when done), title, status for a screen reader.
+function partsEl(st, vid, popped, pick) {
+  if (st.parts.length < 2) return null;
+  return el("nav", { class: "tabs", "aria-label": "Části kroku" }, st.parts.map((p, i) =>
+    el("button", { type: "button", class: "tab " + p.status, "aria-current": p.id === vid ? "true" : null,
+      on: { click: () => { if (p.id !== vid && pick) pick(p.id); } } },
+      el("span", { class: "tab-n" + (popped && popped.has(p.id) ? " pop" : "") }, p.status === "done" ? "✓" : String(i + 1)),
+      el("span", { class: "tab-t" }, p.title), el("span", { class: "sr" }, PART_STATUS[p.status] || p.status))));
 }
 
 function render() {
   // Keep what the PM typed and where the focus was across a re-render.
   const kept = {}; document.querySelectorAll("textarea, input").forEach(i => kept[i.id] = i.value);
   const focus = document.activeElement && document.activeElement.id;
-  navs = [];
+  navs = []; drawn = []; arrived = null;
   const m = model(S, hOk ? H : []);
   document.getElementById("project").textContent = S.project || "";
   hero(m);
@@ -918,6 +1035,11 @@ function render() {
   for (const [id, v] of Object.entries(kept)) { const i = document.getElementById(id); if (i) i.value = v; }
   if (focus && document.getElementById(focus)) document.getElementById(focus).focus();
   requestAnimationFrame(() => navs.forEach(f => f()));
+  // on a narrow screen the opened part's tab may sit outside the strip
+  document.querySelectorAll(".tab[aria-current]").forEach(t => { t.parentNode.scrollLeft = t.offsetLeft - 24; });
+  for (const d of drawn) { if (Array.isArray(d)) WAS[d[0]] = d[1]; else SEEN.add(d); }
+  if (arrived) arrived.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  first = false; slide = "";
 }
 
 async function tick() {

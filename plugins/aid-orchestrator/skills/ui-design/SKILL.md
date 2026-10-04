@@ -180,7 +180,12 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    `aid-ui-state.sh step` na vnitřní krok té části, zopakuj ji a vše, co z ní plyne, a pokračuj.
    Zodpovězené otázky z payloadu nemaž: po `record-answer` jim nastav `"done": true`
    a `"answer_title"` (co PM vybral, slovy), studio je ukazuje jako „Uloženo" s tlačítkem
-   „Změnit". Výběr karty PM potvrzuje tlačítkem „Potvrdit výběr"; klik na kartu nic nepošle. Více otevřených
+   „Změnit". Kartu PM vybere klikem kamkoli na ni a odešle tlačítkem „Další"; pod kartami je jeden
+   řádek: Bezpečněji, Znovu, Odvážněji, „Chci to jinak" (otevře okno na text: PM ho pošle jako svou
+   odpověď = `return` s komentářem, nebo jako pokyn pro nové návrhy = `reroll` s komentářem; u otázky
+   bez karet i jako souhlas s poznámkou = `approve` s komentářem) a vpravo „Další". Krok s více částmi
+   ukazuje části jako záložky; studio ukáže z každé části jednu otevřenou otázku po druhé
+   („Otázka 1 ze 2") a po poslední přejde samo na další část. Více otevřených
    otázek = jedna smyčka na každou. Napíše-li PM mezitím do chatu, zkus
    `record-answer` hned; exit 1 = odpověď ještě není.
 5. Rozhodnutí `approve`/`choose` → mutace s `--answer <id>` (jen tam, kde
