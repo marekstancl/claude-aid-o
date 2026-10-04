@@ -524,7 +524,7 @@ JSON
   command -v node >/dev/null || skip "node not installed"
   f="$(PAGE_HTML)"
   { sed -n '/^function el(/,/^}/p' "$f"; sed -n '/^const PART_STATUS/p' "$f";
-    sed -n '/^function partBox(/,/^}/p' "$f"; sed -n '/^function partsEl(/,/^}/p' "$f"; } > "$BATS_TEST_TMPDIR/parts.js"
+    sed -n '/^function brief(/,/^}/p' "$f"; sed -n '/^function partBox(/,/^}/p' "$f"; sed -n '/^function partsEl(/,/^}/p' "$f"; } > "$BATS_TEST_TMPDIR/parts.js"
   sed -n '/<script id="pipeline-model">/,/<\/script>/p' "$f" | sed '1d;$d' > "$BATS_TEST_TMPDIR/model.js"
   run node -e '
     const mk = tag => ({ tag, attrs: {}, kids: [], setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {},

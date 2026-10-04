@@ -65,15 +65,23 @@
   .tier { font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .24em; text-transform: uppercase; color: var(--ks-text-muted); }
   pre.body-json { font: 12.5px/1.5 var(--ks-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ks-paper-deep); border: 1px solid var(--ks-rule); border-radius: 6px; padding: .8rem 1rem; max-height: 22rem; overflow: auto; }
   .detail { color: var(--ks-text); font-size: .95rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .parts { margin: .4rem 0 1rem; display: grid; gap: .8rem; }
-  .part-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .25rem; }
-  .part { display: grid; grid-template-columns: 1.8rem 1fr auto; gap: .5rem; align-items: baseline; padding: .35rem .6rem; border-radius: 6px; font-size: .95rem; }
-  .part.current { background: var(--ks-paper-deep); font-weight: 600; }
-  .part.done .part-s { color: var(--ks-ok); }
-  .part.waiting { color: var(--ks-text-soft); }
-  .part.skipped { color: var(--ks-text-soft); text-decoration: line-through; }
-  .part-n { font-variant-numeric: tabular-nums; }
-  .part-box { border-left: 3px solid var(--ks-instrument); padding: .6rem 1rem; display: grid; gap: .35rem; }
+  .step-brief { padding: 0 22px 18px; }
+  .parts { padding: 0 22px 18px; display: flex; flex-direction: column; gap: 18px; }
+  .parts:empty { display: none; }
+  .brief { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 14px; line-height: 1.45; }
+  .brief dt { color: var(--ks-text-muted); font-size: 13px; }
+  .brief dd { margin: 0; color: var(--ks-text); }
+  .part-list { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--ks-rule); }
+  .part { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--ks-rule); font-size: 14px; color: var(--ks-text); }
+  .part-n { color: var(--ks-text-muted); font-variant-numeric: tabular-nums; }
+  .part-s { color: var(--ks-text-muted); font-size: 13px; }
+  .part.current { font-weight: 700; color: var(--ks-ink); }
+  .part.current .part-s { color: var(--ks-ink); }
+  .part.waiting, .part.skipped { color: var(--ks-text-muted); }
+  .part.skipped .part-t { text-decoration: line-through; }
+  .part-wrap { display: flex; flex-direction: column; gap: 1.5rem; }
+  .part-box { border-left: 2px solid var(--ks-kinpaku); padding: 2px 0 2px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .part-head { font-size: 15px; font-weight: 700; color: var(--ks-ink); }
   .detail-h { font-size: 1.02rem; margin: .9rem 0 .1rem; color: var(--ks-text); }
   .detail-li { padding-left: 1.1rem; text-indent: -.7rem; }
   .empty { padding: 7rem 1rem; font-size: 1.4rem; color: var(--ks-ink); text-align: center; }
@@ -256,6 +264,9 @@
     .panel .body { padding: 1.1rem 1rem 1.2rem; }
   }
   @media (max-width: 700px) {
+    .brief { grid-template-columns: 1fr; gap: 0; }
+    .brief dt { margin-top: 8px; }
+    .brief dt:first-child { margin-top: 0; }
     .hero { display: block; padding: 23px 0 27px; }
     .hero h1 { font-size: 39px; }
     .hero p { width: auto; margin-top: 16px; }
@@ -741,10 +752,10 @@ function hero(m) {
     p.textContent = cap(num(m.steps.length)) + " " + plural(m.steps.length, "krok", "kroky", "kroků")
       + " od zadání po kontrolu. U každého vidíte výsledek i to, kdo jej potvrdil.";
   } else if (act) {
-    h.replaceChildren(act.n ? "Krok " + act.n + " z " + act.of + ":" : "Teď ladíme", el("br"),
-      act.n ? act.title + "." : "krok " + act.title + ".");
+    if (act.n) h.textContent = act.title + ".";
+    else h.replaceChildren("Teď ladíme", el("br"), "krok " + act.title + ".");
     const d = m.done;
-    p.textContent = (d === 0 ? "Zatím není hotový žádný krok." : cap(num(d)) + " "
+    p.textContent = (act.n ? "Krok " + act.n + " z " + act.of + ". " : "") + (d === 0 ? "Zatím není hotový žádný krok." : cap(num(d)) + " "
       + plural(d, "krok je hotový.", "kroky jsou hotové.", "kroků je hotových.")) + " Rozhodněte přímo tady; další kroky navážou.";
   } else if (m.answered.length) {   // every question answered; the agent reads them on the PM's next chat message
     h.replaceChildren("Díky, mám všechno,", el("br"), "co potřebuji.");
@@ -793,21 +804,21 @@ function stepEl(st, i) {
     : !hOk ? "—" : st.outcome.text;
   stage.append(el("div", { class: "summary" },
     el("div", {}, el("h2", { class: "name" }, st.n ? "Krok " + st.n + " z " + st.of + ": " + st.title : st.title),
-      st.description ? el("p", { class: "desc" }, st.description) : null,
-      st.goal && cls === "active" ? el("p", { class: "desc" }, el("b", {}, "Cíl: "), st.goal) : null,
-      st.feeds && cls === "active" ? el("p", { class: "desc" }, el("b", {}, "K čemu dál: "), st.feeds) : null),
+      st.description ? el("p", { class: "desc" }, st.description) : null),
     el("div", { class: "outcome" }, outcome,
       !st.active && hOk && st.outcome.reconstructed ? el("span", { class: "note" }, " · doplněno zpětně") : null,
       !st.active && hOk && st.who ? el("span", { class: "who" }, WHO[st.who]) : null),
     detail));
   if (events.length) stage.append(el("div", { class: "details" }, events.map(eventRow),
     events.filter(e => e.answer && e.answer.decision === "choose" && e.cards.length).map(pastCards)));
+  if (cls === "active" && st.goal) stage.append(el("div", { class: "step-brief" },
+    brief([["Cíl kroku", st.goal], ["K čemu dál", st.feeds]])));
   if (st.parts.length && cls === "active") stage.append(partsEl(st));
   if (st.active) {   // each part with an open question: its why, goal, use and ask, then its questions
     const ids = [...new Set(st.open.map(q => q.part))];
     stage.append(el("div", { class: "active-box" }, ids.map(id => {
       const p = st.parts.find(x => x.id === id);
-      return el("div", {}, p ? partBox(st, p) : null,
+      return el("div", { class: "part-wrap" }, p ? partBox(st, p) : null,
         st.open.filter(q => q.part === id).map(q => question(q, (S.cards || []).filter(c => c && c.question === q.id))));
     })));
   }
@@ -818,20 +829,22 @@ function stepEl(st, i) {
 // The parts of the step: number, title and status; the part being worked on shows why, goal, what it feeds
 // and what the PM does, from the tool's map (never written by the agent per question).
 const PART_STATUS = { done: "hotovo", current: "teď", waiting: "čeká", skipped: "vynecháno" };
+function brief(rows) {   // label left, text right - the same grid as the decision history
+  return el("dl", { class: "brief" }, rows.filter(r => r[1]).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+}
 function partBox(st, p) {
   const i = st.parts.indexOf(p);
   return el("div", { class: "part-box" },
-    el("p", { class: "tier" }, "Část " + (i + 1) + " z " + st.parts.length + ": " + p.title),
-    el("p", {}, el("b", {}, "Proč: "), p.why), el("p", {}, el("b", {}, "Cíl: "), p.goal),
-    el("p", {}, el("b", {}, "K čemu dál: "), p.feeds), el("p", {}, el("b", {}, "Co od vás: "), p.you));
+    el("p", { class: "part-head" }, st.parts.length > 1 ? "Část " + (i + 1) + " z " + st.parts.length + ": " + p.title : p.title),
+    brief([["Proč", p.why], ["Cíl", p.goal], ["K čemu dál", p.feeds], ["Co od vás", p.you]]));
 }
 function partsEl(st) {
   // with no open question the part being worked on still says what it is for
   const cur = st.open.length ? [] : st.parts.filter(p => p.status === "current");
   return el("div", { class: "parts" },
-    el("ol", { class: "part-list" }, st.parts.map((p, i) => el("li", { class: "part " + p.status, "aria-current": p.status === "current" ? "step" : null },
+    st.parts.length > 1 ? el("ol", { class: "part-list" }, st.parts.map((p, i) => el("li", { class: "part " + p.status, "aria-current": p.status === "current" ? "step" : null },
       el("span", { class: "part-n" }, String(i + 1)), el("span", { class: "part-t" }, p.title),
-      el("span", { class: "part-s" }, PART_STATUS[p.status] || p.status)))),
+      el("span", { class: "part-s" }, PART_STATUS[p.status] || p.status)))) : null,
     cur.map(p => partBox(st, p)));
 }
 
