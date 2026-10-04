@@ -40,6 +40,11 @@ a `frontend-build-standard.md` (čti živě).
      důvod = komentář PM). Stránka v jazyce bez příručky projde jen takovou výjimkou. Řádek brány
      `copy_review` zůstane neprošlý; `finish` a stránka pro zákazníka výjimku přečtou a stránka ji
      vypíše mezi „Výjimkami schválenými zadavatelem“ s důvodem, takže důvod piš srozumitelně pro zákazníka.
+1b. Verdikt PM k textům (po kontrole textů, před schvalováním stránek): otázka `copy_verdict` ve studiu
+   (`target` = `copy@<sha256 souboru .aid-ui/copy/subject.json>`, `body` = co texty říkají a kde je PM
+   najde v náhledu, `outcome` jednou větou). `approve` = přijato beze změn; `return` s komentářem =
+   PM vypíše věty, které chce jinak → zapracuj je v kroku 6 a pusť kontrolu textů znovu (bod 1a), pak
+   otázku znovu. Odpověď a vypsané věty zapiš do těla kapitoly `obsah`.
 1. Brána: `aid-ui-verify.sh <project>` → `.aid-ui/verify/result.json`,
    pak `aid-ui-state.sh gate-record <project> .aid-ui/verify/result.json`.
    Řádek `brand_package` (jeden za celý projekt) hlásí chybějící části brand balíčku

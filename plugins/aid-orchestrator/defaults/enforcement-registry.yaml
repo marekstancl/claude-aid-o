@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 573          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 578          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4178,6 +4178,86 @@ enforcements:
     recovery: "The row names the colour, control, panel, request or missing part; fix the build or DESIGN.md and run the gate again."
     test_covers: "planted off-token colour, small control, third-party request, tall sticky panel and animation each fail; o-nas without them passes; invisible focus and a Tab trap fail while a honeypot, a checked radio, a frame, a fading focus, a checkbox in a label, a translucent token, a hidden dropdown and a decorative fixed layer do not; a cookie on load fails privacy; safe_area fail/pass/N-A; vision N/A and coverage pass (test-aid-ui-verify.bats); vision parts, labels, owner, date (test-aid-ui-vision-check.bats)."
     test: "scripts/tests/bats/test-aid-ui-verify.bats"
+
+  - id: aid_ui_marketingskills_snapshot
+    type: 12
+    source: "skills/ui-design/references/adopted/marketingskills/MANIFEST + scripts/tests/bats/test-aid-ui-adopted-sources.bats"
+    instruction: "skills/ui-design/references/adopted-sources.md (Marketingové postupy, P108)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That MANIFEST itself was made from upstream dda3841 (checked once at adoption, recorded in the P108 step 1 commit); that a reader actually applies the file it names."
+    description: "P108 - the five adopted marketingskills skills (14 files) stay byte-identical to their MANIFEST (git blob ids), no file is added or missing, nothing under adopted/ is a symlink, every register row is unique and each adopted file names a plugin file that reads it and names its path."
+    recovery: "Restore the file from the upstream commit, or make a new snapshot (files, MANIFEST and register rows in one commit)."
+    test_covers: "manifest equality, changed byte, missing and extra file, symlink, duplicate row, reader that does not name its file (test-aid-ui-adopted-sources.bats)."
+    test: "scripts/tests/bats/test-aid-ui-adopted-sources.bats"
+
+  - id: aid_ui_sources_filter
+    type: 12
+    source: "scripts/aid-ui-sources.py"
+    instruction: "skills/ui-design/steps/1p-sources.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That the PM's own messages contain only what may be used on the website (the PM approves each session on its excerpts; copy-rules keeps hypotheses out of claims); secrets the shared detector table does not know."
+    description: "P108 step 1p - the project's own files and an old site enter the manifest directly; Claude Code sessions are different: candidates are listed with redacted excerpts only, and a session's text enters the sources only after an approve answer of kind sources targets <file>@<sha256>; only records of the project (cwd) and the human's own text (no isMeta, task notification, tool result, reminder, pasted text) are kept; every record is redacted whole by _aid_artifact_redact before any cut."
+    recovery: "Approve the session in the studio (sources question) and run the manifest mode again; for a pilot copy pass --sessions-from <original project>."
+    test_covers: "foreign project files and records, every detector including a secret across the 300-char cut, unapproved and mis-approved sessions refused, torn lines counted (test-aid-ui-sources.bats)."
+    test: "scripts/tests/bats/test-aid-ui-sources.bats"
+
+  - id: aid_ui_context_approved
+    type: 12
+    source: "scripts/aid-ui-state.sh (context-check, context_ok, copy-record)"
+    instruction: "skills/ui-design/steps/1p-sources.md; steps 1v-vision.md, 3-content-plan.md, 6-build.md (first line of Postup)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That a step actually runs context-check (its text says so first; copy-record enforces it by code); the content of the context."
+    description: "P108 - docs/content/product-context.md counts only with an approve answer of kind product_context whose target is the file's current sha256; a changed file needs a new approval; copy-record refuses without it."
+    recovery: "Open the product_context question again in the studio and record the answer."
+    test_covers: "missing file, no approval, another kind or file, changed after approval (test-aid-ui-state.bats); copy-record refused without approval (test-aid-ui-copy.bats)."
+    test: "scripts/tests/bats/test-aid-ui-state.bats"
+
+  - id: aid_ui_copy_review
+    type: 12
+    source: "scripts/aid-ui-copy.py + scripts/aid-ui-state.sh copy-record + lib/ui-fidelity/aid-ui-verify.mjs (copyOf, row copy_review)"
+    instruction: "skills/ui-design/steps/7-verify.md point 1a; skills/ui-design/SKILL.md MUST 9"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "The reviewer's judgement of voice and persuasion is a model's (the PM's copy_verdict judges the voice); a run directory forged by hand (fabricated run.json, a subject relabelled with the current build id) is not detected by copy-record (the gate row re-extracts the page text); text generated by CSS is not read; names and references in claims are checked only by the reviewer."
+    description: "P108 - every page of the gate matrix needs an independent copy review: an isolated bundle (rules, adopted copy-editing and cro, product context, facts, page copy), Codex read-only or a Claude stand-in only after a failed Codex attempt with its dispatch bracket, run.json written by the script; the verdict is computed by the script (seven sweeps never skipped, six cro points, netyka_se only on legal pages, findings and claims on real blocks, the five personas once and none under 5, claims with a facts key, a language guide); copy-record stores it per page with the hashes of text, facts and context, three failed reviews per series then a PM exception; the gate row passes only for the current text, facts and context."
+    recovery: "Fix the copy (step 6), bundle and review again; after three failed reviews ask the PM for an exception worded for the customer."
+    test_covers: "every verdict rule, every copy-record refusal, stand-in provenance, the failed-review series (test-aid-ui-copy.bats); subject extraction, the gate row after text, facts and context changes (test-aid-ui-verify.bats)."
+    test: "scripts/tests/bats/test-aid-ui-copy.bats"
+
+  - id: aid_ui_fact_claims
+    type: 12
+    source: "lib/ui-fidelity/aid-ui-facts.mjs (row facts_match)"
+    instruction: "skills/ui-design/steps/3-content-plan.md point 2"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "Names, references and claims without a number; an unrelated register entry with the same percentage covers a percentage; counts of meanings outside the stem groups (clients, customers, projects, firms, members, years)."
+    description: "P108 - facts_match catches invented counted numbers (with a space, hyphen or glued), percentages and e-mails besides phones, prices and times: a count passes only with one register entry holding the same number as a whole token and a word of the same meaning; years match whole words; an e-mail must equal a register value."
+    recovery: "Register the fact with a key that carries its meaning (klienti: 200), or remove the claim."
+    test_covers: "counts, decimals, Slovak, compounds, years vs letadla, e-mail equality, legacy phones/prices/times leaf by leaf (test-aid-ui-facts.bats); planted claims and registered facts in the real gate (test-aid-ui-verify.bats)."
+    test: "scripts/tests/bats/test-aid-ui-facts.bats"
 
   - id: aid_ui_customer_page
     type: 12

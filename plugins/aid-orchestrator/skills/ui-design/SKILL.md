@@ -71,7 +71,9 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    u referencí, a další textová pole, která se ukážou na rubu karty „Detaily").
    Druhy otázek: variant, vision, identity, seo_brief, structure, task_map,
    content_plan, defer_content, facts, references, direction, approve_page,
-   exception, coverage_drift, design_standard, handover, notifications (PWA: posílá aplikace
+   exception, coverage_drift, design_standard, handover, sources (krok 1p: schválení
+   rozhovoru nebo průzkumu jako zdroje), product_context (krok 1p: schválení dokumentu o produktu),
+   copy_verdict (verdikt PM k textům webu), notifications (PWA: posílá aplikace
    oznámení, o jakých událostech a proč; když ano, obrazovka přihlášení k odběru a karta povolení
    se stavy jako snímek - `pwa-notifications-standard`).
    Na co PM odpovídá textem nebo potvrzením (fakta k ověření, souhlasy, kontrola názvu),
@@ -181,7 +183,9 @@ stavu a těl kapitol v `docs/brand/index.html`), `aid-ui-serve.sh`,
 `aid-ui-coverage.sh`, `aid-ui-tool.sh` (`glyph`, `webp`, `verify`, `measure`, `wordmark`, `png`),
 `aid-ui-design-to-css.sh`, `aid-ui-ico.py`, `aid-ui-seo-check.py` (SEO a AI, krok 1s a brána),
 `aid-ui-brand-package.py` (balíček značky), `aid-ui-design-standard.py` (design standard, krok 7),
-`aid-ui-vision-check.py` (vize), `aid-ui-customer-page.py` (stránka pro zákazníka po bráně, krok 7 bod 7b).
+`aid-ui-vision-check.py` (vize), `aid-ui-customer-page.py` (stránka pro zákazníka po bráně, krok 7 bod 7b),
+`aid-ui-sources.py` (podklady, krok 1p), `aid-ui-copy.py` (kontrola textů, krok 7 bod 1a; texty stránek dává
+`aid-ui-verify.sh <project> --copy-subject`).
 
 ## Zprávy PM
 
@@ -214,7 +218,11 @@ a odkaz.
    and are deleted after step 5.
 8. Chapter bodies are written only by `aid-ui-state.sh body <project> <id> --file <html>`;
    nothing internal lives in the served `docs/brand/`.
-9. A decision a step makes without the PM (only where its `Postup` says so) is recorded
+9. A page is "reviewed" only with a `copy_review` pass of the independent copy review (step 7
+   point 1a: `aid-ui-copy.py`, verdict computed by the script, `aid-ui-state.sh copy-record`) or a
+   PM exception; the agent never reviews its own copy, never writes a run's `run.json` or answer by
+   hand, and writes copy only by the adopted method (`references/copy-rules.md`, `copy-<jazyk>.md`).
+10. A decision a step makes without the PM (only where its `Postup` says so) is recorded
    at once with `aid-ui-state.sh decide` ("Když rozhoduje agent sám"); an unrecorded
    agent decision does not exist for the PM.
 
@@ -236,6 +244,11 @@ Před posunem kroku:
 - `steps/0-start.md` … `steps/7-verify.md` - postup kroků (tabulka výše).
 - `references/adopted/frontend-design-SKILL.md`, `references/adopted/impeccable-craft-floor.md`.
 - `references/genericity-rubric.md` - vyřazení generických vzorů a směrů.
+- `references/adopted/marketingskills/` - převzaté postupy textů (product-marketing, copywriting,
+  copy-editing, customer-research, cro; MIT, commit `dda3841`, `MANIFEST`); kdo je čte, říká
+  `references/adopted-sources.md`.
+- `references/copy-rules.md`, `references/copy-cs.md`, `references/copy-sk.md`, `references/copy-en.md` -
+  pravidla textů AID a jazykové příručky; `references/copy-review.schema.json` - tvar odpovědi revizora.
 - `references/brand-icons.js` - vykreslení ikon (krok 1i).
 - `coverage/{map,checks,sources}.yaml` - pokrytí standardů.
 - `brand-page/` - šablona brand stránky a `state.template.json`.

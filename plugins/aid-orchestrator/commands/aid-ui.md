@@ -15,6 +15,15 @@ comps; vision, identity and SEO run inside step 1 (1v, 1i, 1s) before the
 references, and the SEO check joins step 6. Every PM choice in them (slogan,
 logo, page list, composition) is recorded the same way as the direction.
 
+Copy (P108): step 1 starts with Podklady (1p) - the project's files, an old site and the PM's
+own Claude Code sessions the PM approves on the studio page become one product context, and the
+PM is asked only about what is missing, contradictory or stale. Vision, content plan and page copy
+are written by the adopted marketing methods (`skills/ui-design/references/adopted/marketingskills/`,
+MIT) and the language guides; step 7 has every page's copy reviewed by an independent model
+(Codex; a Claude stand-in only when the Codex run fails or gives no answer), the verdict computed by
+a script and checked by the gate row `copy_review`; the PM then gives a verdict on the copy itself
+(question `copy_verdict`).
+
 ## Arguments
 
 ```
@@ -42,17 +51,21 @@ are recorded with `aid-ui-state.sh decide` and appear in the same list, marked A
 
 - **Reads (target project):** `PRODUCT.md`, `DESIGN.md`, `.impeccable/`,
   `docs/design/*brand-package*`, `docs/design/brand-state.json`,
-  `docs/product-vision.md`, `docs/design/brief-logo-favicon.md`, `docs/seo/`;
+  `docs/product-vision.md`, `docs/design/brief-logo-favicon.md`, `docs/seo/`,
+  `docs/content/product-context.md`, `docs/content/facts.yaml`, Claude Code session logs of the
+  project the PM approved (`~/.claude/projects/<project>/`, step 1p);
   ecosystem standards under `/opt/eco/docs/docs/ecosystem/`.
 - **Writes (target project):** `docs/design/brand-state.json`, chapter bodies and
   statuses in `docs/brand/index.html` (both only through `scripts/aid-ui-state.sh`),
   other `docs/brand/*`, `.aid-ui/`, `.aid-o/work/companion/`,
   `docs/design/design-standard.md`, `docs/product-vision.md`,
   `docs/design/brief-logo-favicon.md`, `docs/design/brand-package/`,
-  `docs/seo/`, `.gitignore`; Impeccable writes its own `PRODUCT.md`,
+  `docs/seo/`, `docs/content/product-context.md`, `docs/content/facts.yaml`, `.aid-ui/sources/`, `.aid-ui/copy/`,
+  `.gitignore`; Impeccable writes its own `PRODUCT.md`,
   `DESIGN.md`, `.impeccable/`.
 - **Plugin scripts:** `aid-ui-design-to-css.sh`, `aid-ui-serve.sh`, `aid-ui-state.sh`,
-  `aid-ui-ico.py`, `aid-ui-seo-check.py`; `skills/ui-design/references/brand-icons.js`
+  `aid-ui-ico.py`, `aid-ui-seo-check.py`, `aid-ui-sources.py`, `aid-ui-copy.py`,
+  `aid-ui-verify.sh --copy-subject`; `skills/ui-design/references/brand-icons.js`
   (run through the Playwright MCP).
 
 ## Relationship
