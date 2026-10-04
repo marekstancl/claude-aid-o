@@ -55,26 +55,22 @@ v Docusauru), šablona `/opt/eco/docs/docs/ecosystem/templates/product-vision-pr
 
 ## Jak psát vizi, slogany a texty
 
-Platí pro vizi, slogany a všechny texty webu, které skill navrhuje (kroky 1v, 3, 6).
+Platí pro vizi, slogany a všechny texty webu (kroky 1v, 3, 6). Metoda je převzatá, nepiš
+podle vlastního citu:
 
-- **Začni problémem zákazníka jeho slovy**, ne firmou: co ho dnes stojí čas
-  nebo peníze („účetní přepisuje faktury ručně"), ne „nabízíme řešení".
-- **Proč teď:** co se změnilo, že to jde jinak (nová technologie, nižší cena,
-  kratší doba), a proč je to pro zákazníka dostupné.
-- **Konkrétní místo obecného:** podstatná jména a slovesa z provozu zákazníka,
-  čísla jen se zdrojem v `facts.yaml`. Zakázaná prázdná slova: řešení,
-  inovativní, revoluční, transformovat, komplexní, na míru bez vysvětlení čeho,
-  „posuneme vás dál".
-- **Krátce:** věta do ~15 slov, odstavec do tří vět; nadpis říká výsledek,
-  ne kategorii („Faktury se zapíšou samy", ne „Automatizace").
-- **Slogan:** 2–7 slov, dá se říct nahlas, nese jeden rozdíl oproti oboru;
-  žádná slovní hříčka, kterou je třeba vysvětlovat; nesmí sedět na libovolnou
-  jinou firmu (test: dosaď konkurenta - když sedí, přepiš).
-- **Navazuj na to, co projekt už říká:** dřívější motto, slogany a oblíbená
-  slova PM zachovej nebo rozviň, neodhazuj je bez důvodu.
-- **Tón podle vize**, vykání, jazyk projektu; žádná angličtina v českém textu.
-- **Kontrola před ukázáním PM:** přečti text nahlas očima zákazníka - pozná
-  do pěti vteřin, co firma dělá, pro koho a proč právě ona? Když ne, přepiš.
+- **Postup psaní:** `references/adopted/marketingskills/copywriting/SKILL.md` (před psaním
+  účel stránky, publikum, nabídka; přínos místo funkce, konkrétně místo obecně, slovy zákazníka,
+  jedna myšlenka na sekci).
+- **Pravidla AID:** `references/copy-rules.md` (fakta jen z registru, hypotéza řídí jen tón,
+  pořadí při rozporu, co blokuje v kontrole).
+- **Jazyk:** `references/copy-<jazyk>.md` podle `lang` webu (`copy-cs.md`, `copy-sk.md`,
+  `copy-en.md`). Pro jazyk bez příručky řekni PM ve studiu jednou, že kontrola textů takovou
+  stránku neprojde bez jeho výjimky, a piš podle `copy-rules.md` a převzatých anglických pravidel.
+- **Slogan:** 2–7 slov, dá se říct nahlas, nese jeden rozdíl oproti oboru; test dosazení
+  konkurenta (když sedí na jinou firmu, přepiš). Když manifest podkladů (krok 1p) obsahuje
+  dřívější motto nebo slogan, aspoň jeden návrh na něj navazuje a karta uvede zdroj.
+- **Tón** podle vize a dokumentu o produktu (oddíl Hlas značky); slova zákazníků z oddílu
+  Jazyk zákazníků mají přednost před vlastními.
 
 ## Co PM rozhoduje
 

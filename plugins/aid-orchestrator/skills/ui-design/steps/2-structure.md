@@ -23,6 +23,9 @@ a `frontend-build-standard.md` (čti živě).
 
 1. Web (`variant.type` = `web`): stránky (id, URL, H1 ze SEO briefu,
    je-li) a na každé sekce v pořadí (co sekce říká, jakou akci nabízí).
+   Stránka, která nic neprodává a jen plní povinnost (ochrana osobních údajů, obchodní
+   podmínky, cookies, reklamační řád), dostane `"legal": true` (`references/copy-rules.md`,
+   oddíl Právní stránky); kontrola textů u ní nečeká konverzní body.
 2. Aplikace (`webapp`, `pwa`): role, navigace (hlavní položky a kdo je
    vidí), klíčové toky (úlohy z UA-1) a u každého sedm stavů standardu:
    běžná cesta, chyba validace, prázdno, načítání, selhání, oprávnění

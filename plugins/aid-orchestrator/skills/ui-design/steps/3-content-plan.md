@@ -36,6 +36,12 @@ a chybějící podstatný materiál buď dodal, nebo ho odložil.
    `brand` a `ico` brána firmu jen varuje jako nezkontrolovanou.
 3. Agent smí psát `draft` jen z faktů registru a podle „Jak psát vizi,
    slogany a texty" (`steps/1v-vision.md`); `confirmed_client` dává jen PM.
+   Pořadí a obsah sekcí každé stránky navrhni podle rámce stránky z
+   `references/adopted/marketingskills/cro/SKILL.md` (Page-Specific Frameworks: Homepage,
+   Landing Page, Pricing Page, Feature Page; stránka služby nebo produktu jde podle Feature Page) a podle „Page Structure Framework"
+   převzatého copywritingu; právní stránka (`legal: true` z kroku 2) rámec nemá. Jazyk stránky
+   bez `references/copy-<jazyk>.md`: piš podle `copy-rules.md` a převzatých anglických pravidel
+   a PM ve studiu jednou řekni, že kontrola textů takovou stránku pustí jen s jeho výjimkou.
 4. Otázka `content_plan` ve studiu: tabulka položek (stránka, sekce,
    potřeba, vlastník, termín, stav), `target` = sha256 JSON pole položek.
    JSON zapiš nástrojem Write do `<project>/.aid-ui/content-plan.json` (nikdy ne

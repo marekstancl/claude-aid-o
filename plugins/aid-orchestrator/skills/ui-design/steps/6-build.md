@@ -27,8 +27,13 @@ u aplikace `webapp-tasks-states-standard.md` (UA-1..UA-11) - čti živě.
 1. Postav každou stránku ze `structure` (u aplikace každý tok se všemi jeho
    stavy) podle snímku frontend-design a standardů. Texty jen z obsahového
    plánu a registru faktů, psané podle „Jak psát vizi, slogany a texty"
-   (`steps/1v-vision.md`); položka `deferred_by_pm` dostane viditelně
-   prázdné místo podle standardu, nikdy zástupný text.
+   (`steps/1v-vision.md`): postup `references/adopted/marketingskills/copywriting/SKILL.md`,
+   stavba textu podle `references/adopted/marketingskills/copywriting/references/copy-frameworks.md`,
+   přechody mezi sekcemi podle `references/adopted/marketingskills/copywriting/references/natural-transitions.md`.
+   Před bránou každou stránku projdi podle `references/adopted/marketingskills/copywriting/references/ai-tells.md`
+   a `references/copy-<jazyk>.md` (oddíl Fráze prozrazující AI text) a nálezy oprav. Jazyk bez
+   příručky: `copy-rules.md` a převzatá anglická pravidla; kontrola textů ho pustí jen s výjimkou PM.
+   Položka `deferred_by_pm` dostane viditelně prázdné místo podle standardu, nikdy zástupný text.
 2. Výstup: `<project>/site/`, nebo vlastní složka buildu projektu (Next.js
    `out/`, Astro `dist/`) - mimo `docs/` a `.aid-ui/`.
 3. SEO: title, meta description, H1 a strukturovaná data z `docs/seo/brief.md`

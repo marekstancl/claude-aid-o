@@ -130,3 +130,44 @@ setup() {
   done
   tr '\n' ' ' < "$SK/steps/6-build.md" | grep -qE -- '--step "Stavba" +--title "Web postaven" +--outcome "Postaveno <N> stránek[^"]*" +--why "[^"]+" +--source \.aid-ui/build\.json'
 }
+
+@test "P108: steps 1v, 3, 6 write by the adopted method and the AID bridges; 2 marks legal pages" {
+  R="$SK/references"
+  ! grep -q "Zakázaná prázdná slova" "$SK/steps/1v-vision.md"
+  for p in adopted/marketingskills/copywriting/SKILL.md copy-rules.md 'copy-<jazyk>.md'; do
+    grep -qF "$p" "$SK/steps/1v-vision.md" || { echo "1v lacks $p"; return 1; }
+  done
+  grep -qF "adopted/marketingskills/cro/SKILL.md" "$SK/steps/3-content-plan.md"
+  for p in copywriting/SKILL.md copywriting/references/copy-frameworks.md copywriting/references/natural-transitions.md copywriting/references/ai-tells.md; do
+    grep -qF "adopted/marketingskills/$p" "$SK/steps/6-build.md" || { echo "6 lacks $p"; return 1; }
+  done
+  grep -qF '"legal": true' "$SK/steps/2-structure.md"
+  # the bridges carry their fixed headings (the skill and the review look them up by name)
+  for h in "Fakta a hypotézy" "Pořadí při rozporu" "Jak číst převzaté" "Co blokuje v revizi" "Kotvy skóre person" "Právní stránky"; do
+    grep -qx "## $h" "$R/copy-rules.md" || { echo "copy-rules.md lacks: $h"; return 1; }
+  done
+  for f in copy-cs.md copy-sk.md copy-en.md; do
+    for h in "Kancelářština → běžné slovo" "Prázdná slova" "Fráze prozrazující AI text" "Oslovení" "Typografie" "Co zakázané NENÍ"; do
+      grep -qx "## $h" "$R/$f" || { echo "$f lacks: $h"; return 1; }
+    done
+  done
+}
+
+@test "P108: the bridges carry their key rules, not just headings" {
+  R="$SK/references"
+  grep -qF 'jen z `docs/content/facts.yaml`' "$R/copy-rules.md"
+  grep -qF 'nikdy se' "$R/copy-rules.md"                          # a hypothesis never becomes a claim
+  # the conflict order: PM answer first, facts register second, product context third
+  grep '^[0-9]\. ' "$R/copy-rules.md" | head -3 | tr '\n' ' ' | grep -qE '^1\. .*odpověď PM.* 2\. .*facts\.yaml.* 3\. .*product-context\.md' \
+    || { grep '^[0-9]\. ' "$R/copy-rules.md" | head -3; return 1; }
+  grep -qF 'otázkou ve studiu' "$R/copy-rules.md"
+  grep -qF 'Skóre pod 5 je blokující' "$R/copy-rules.md"
+  grep -qF 'netyka_se' "$R/copy-rules.md"
+  grep -qF 'neplatí pro právní' "$R/copy-rules.md"
+  for f in copy-cs.md copy-sk.md; do
+    grep -q '(—)' "$R/$f"                                          # the em dash rule
+    grep -qiE 'vykání|vykanie' "$R/$f"
+  done
+  grep -qF 'plain-english-alternatives.md' "$R/copy-en.md"
+  grep -qF 'ai-tells.md' "$R/copy-en.md"
+}
