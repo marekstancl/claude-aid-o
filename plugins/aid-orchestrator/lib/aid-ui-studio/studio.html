@@ -75,7 +75,6 @@
   @keyframes saved-flash { from { background: color-mix(in srgb, var(--ks-ok) 22%, transparent); } to { background: transparent; } }
   @media (prefers-reduced-motion: reduce) { .saved-row.fresh { animation: none; background: color-mix(in srgb, var(--ks-ok) 12%, transparent); } }
   .card.picked { outline: 3px solid var(--ks-kinpaku); outline-offset: 2px; }
-  button.choose.on { background: var(--ks-kinpaku); color: var(--ks-ink); }
   .confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 16px; border: 1px solid var(--ks-kinpaku); border-radius: 8px; background: var(--ks-paper-deep); }
   .confirm p { margin: 0; flex: 1 1 14rem; }
   .parts { padding: 0 22px 18px; display: flex; flex-direction: column; gap: 18px; }
@@ -212,6 +211,7 @@
 
   button.choose { margin-top: auto; align-self: start; background: var(--ks-instrument); color: var(--ks-instrument-text); border: 0; font: 600 .9375rem/1.35 var(--ks-font); padding: 11px 24px; border-radius: 6px; cursor: pointer; transition: background .15s; }
   button.choose:hover { background: var(--ks-instrument-raised); }
+  button.choose.on, button.choose.on:hover { background: var(--ks-kinpaku); color: var(--ks-ink); }
   .reroll-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 14px; font: 500 .8125rem var(--ks-font); color: var(--ks-ink); background: var(--ks-paper-raised); border: 1px solid var(--ks-edge); border-radius: 6px; box-shadow: var(--ks-cap-lift); cursor: pointer; transition: border-color .2s ease, color .2s ease; }
   .reroll-btn:hover { border-color: var(--ks-ink); }
   .reroll-btn:active { box-shadow: var(--ks-cap-press); }
