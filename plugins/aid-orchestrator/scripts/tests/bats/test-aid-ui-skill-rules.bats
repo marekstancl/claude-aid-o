@@ -183,4 +183,10 @@ setup() {
   grep -qF 'aid-ui-sources.py' "$SK/steps/1p-sources.md"
   grep -qF '`sources`' "$SK/steps/1p-sources.md"
   grep -qF '`product_context`' "$SK/steps/1p-sources.md"
+  # 1p v2: the product context is shown as one draft, gaps and conflicts inline, no invented objections
+  grep -qF 'Ke kontrole - <co>:' "$SK/steps/1p-sources.md"
+  grep -qF 'Celý dokument ukaž PM jako návrh' "$SK/steps/1p-sources.md"
+  grep -qF 'Námitky a jazyk zákazníků nevymýšlej' "$SK/steps/1p-sources.md"
+  # the studio renders the little markdown the body uses, as text nodes
+  grep -qF 'function mdLine(l)' "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"
 }

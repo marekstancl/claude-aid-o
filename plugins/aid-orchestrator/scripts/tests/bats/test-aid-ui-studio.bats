@@ -445,3 +445,25 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
   ' "$BATS_TEST_TMPDIR/model.js" "$BATS_TEST_DIRNAME/../fixtures/aid-ui/p106-history.jsonl"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
+
+@test "P108 1p v2: question bodies render ## heading, - item and **bold** as text nodes, string and array alike" {
+  command -v node >/dev/null || skip "node not installed"
+  f="$(PAGE_HTML)"
+  { sed -n '/^function el(/,/^}/p' "$f"; sed -n '/^function mdLine(/,/^}/p' "$f"; sed -n '/^function bodyLines(/,/^}/p' "$f"; } > "$BATS_TEST_TMPDIR/md.js"
+  run node -e '
+    const mk = tag => ({ tag, attrs: {}, kids: [], setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {},
+      append(k) { this.kids.push(typeof k === "string" ? { text: k } : k); } });
+    global.document = { createElement: mk };
+    eval(require("fs").readFileSync(process.argv[1], "utf8") + ";global.bodyLines = bodyLines;");
+    const flat = n => n.text !== undefined ? n.text : "<" + n.tag + ">" + n.kids.map(flat).join("") + "</" + n.tag + ">";
+    const want = ["<h4>Pro koho</h4>", "<p>• <b>Firmy:</b> menší</p>", "<p>a <b>tučně</b> &lt;img onerror=x&gt;</p>"];
+    for (const body of ["## Pro koho\n- **Firmy:** menší\n\na **tučně** <img onerror=x>", ["## Pro koho", "- **Firmy:** menší", "", "a **tučně** <img onerror=x>"]]) {
+      const got = bodyLines(body).map(flat).map(s => s.replace("<img onerror=x>", "&lt;img onerror=x&gt;"));
+      if (JSON.stringify(got) !== JSON.stringify(want)) { console.log(JSON.stringify(got)); process.exit(1); }
+      // the markup-looking text stays one text node, never an element
+      const leaf = bodyLines(body)[2].kids.at(-1);
+      if (leaf.text === undefined || !leaf.text.includes("<img")) { console.log("not text", JSON.stringify(leaf)); process.exit(1); }
+    }
+  ' "$BATS_TEST_TMPDIR/md.js"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}

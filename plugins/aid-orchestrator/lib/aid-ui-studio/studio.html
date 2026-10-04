@@ -65,6 +65,8 @@
   .tier { font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .24em; text-transform: uppercase; color: var(--ks-text-muted); }
   pre.body-json { font: 12.5px/1.5 var(--ks-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ks-paper-deep); border: 1px solid var(--ks-rule); border-radius: 6px; padding: .8rem 1rem; max-height: 22rem; overflow: auto; }
   .detail { color: var(--ks-text); font-size: .95rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .detail-h { font-size: 1.02rem; margin: .9rem 0 .1rem; color: var(--ks-text); }
+  .detail-li { padding-left: 1.1rem; text-indent: -.7rem; }
   .empty { padding: 7rem 1rem; font-size: 1.4rem; color: var(--ks-ink); text-align: center; }
   /* The run as a pipeline (P106, proposal B): hero, then one row per step. */
   .hero { border-top: 1px solid var(--ks-rule); padding: 28px 0 34px; display: flex; justify-content: space-between; gap: 32px; }
@@ -585,10 +587,19 @@ function deck(q, kids) {
 }
 addEventListener("resize", () => navs.forEach(f => f()));
 
+// a body line with the little markdown agents write: "## " heading, "- " item, **bold**; text nodes only, never HTML
+function mdLine(l) {
+  const bold = s => s.split(/\*\*(.+?)\*\*/).map((t, i) => i % 2 ? el("b", {}, t) : t);
+  const h = l.match(/^#{2,4}\s+(.*)/);
+  if (h) return el("h4", { class: "detail-h" }, ...bold(h[1]));
+  const li = l.match(/^\s*[-*]\s+(.*)/);
+  if (li) return el("p", { class: "detail detail-li" }, "• ", ...bold(li[1]));
+  return el("p", { class: "detail" }, ...bold(l));
+}
 function bodyLines(b) {
   if (b == null || b === "") return null;
-  if (typeof b === "string") return b.split("\n").filter(l => l.trim()).map(l => el("p", { class: "detail" }, l));
-  if (Array.isArray(b) && b.every(x => typeof x === "string")) return b.map(l => el("p", { class: "detail" }, l));
+  if (typeof b === "string") return b.split("\n").filter(l => l.trim()).map(mdLine);
+  if (Array.isArray(b) && b.every(x => typeof x === "string")) return b.filter(l => l.trim()).map(mdLine);
   return el("pre", { class: "body-json" }, JSON.stringify(b, null, 2));
 }
 

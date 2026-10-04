@@ -1,6 +1,6 @@
 ---
 name: ui-design-step-1p
-description: /aid-ui sub-step 1p - asks once where the sources are, reads the documents and sessions the PM approved in one answer and writes the product context; asks only about gaps, conflicts and stale facts
+description: /aid-ui sub-step 1p - asks once where the sources are, reads the documents and sessions the PM approved in one answer and shows the product context as one draft, gaps and conflicts marked "Ke kontrole" with a proposal
 user_invocable: false
 ---
 
@@ -58,20 +58,32 @@ Nejvýš jedna úvodní otázka v chatu a jedna otázka `sources` ve studiu na k
    a `Zdroje: <id z manifestu>`. Jazyk zákazníků, námitky a spouštěče vytěž podle
    customer-research Mode 1. U přestavby přepiš staré texty podle
    `references/adopted/marketingskills/copy-editing/references/content-refresh.md`.
-   Rozpor mezi podklady (např. „my" proti „já", údaj „nastavit", podmínka před spuštěním) je vždy
-   oddíl ve stavu `rozpor`. Na konec oddíl **Co jsem z podkladů vynechal**: osobní údaje fyzických
-   osob (jméno jiné osoby než podnikatele, datum narození, rodné číslo, číslo dokladu, osobní telefon
-   a e-mail, bydliště odlišné od sídla, rodina, zdraví) a obchodně citlivé údaje (účet, IBAN, interní
-   ceny, marže, podmínky klientů) se do dokumentu ani do `facts.yaml` nepřenášejí; do výstupů jen
-   to, co produkt potřebuje, nejasné jako otázka `facts`.
-6. Otázka `facts` jen na oddíly ve stavu chybí, rozpor nebo zastaralé; každá položka nese id
-   oddílu a řádek „Nalezeno: <hodnota> (<zdroj>)" (u chybí „Nalezeno: nic"). Na oddíl ve stavu
-   vyplněno se neptej. Odpovědi zapiš do dokumentu a fakta do `docs/content/facts.yaml`
-   se zdrojem.
-7. Otázka `product_context` ve studiu (`target` = `docs/content/product-context.md@<sha256>`,
-   `outcome` jednou větou, co dokument říká; karta ukazuje i oddíl vynechaného); `return` → uprav
-   a otevři znovu (nový target). Po `approve` ověř `aid-ui-state.sh context-check <project>`
-   a smaž snímky textů `aid-ui-sources.py <project> --purge` (manifesty s otisky zůstanou).
+   Rozpor mezi podklady (např. „my" proti „já", údaj „nastavit", podmínka před spuštěním) a údaj,
+   který chybí, se nestává otázkou: zůstane v textu oddílu jako řádek
+   „**Ke kontrole - <co>:** <co bylo nalezeno a kde>. **Návrh:** <hodnota>" a oddíl má stav `rozpor`
+   nebo `chybí`. Námitky a jazyk zákazníků nevymýšlej (product-marketing: dodá je člověk) - bez nich
+   oddíl zůstane `chybí` s řádkem „Ke kontrole - …: nedoloženo. **Návrh:** doplní PM, jinak se na web
+   nepíše". Každý řádek Ke kontrole má návrh. Na konec oddíl **Co jsem z podkladů vynechal**:
+   osobní údaje fyzických osob (jméno jiné osoby než podnikatele, datum narození, rodné číslo, číslo
+   dokladu, osobní telefon a e-mail, bydliště odlišné od sídla, rodina, zdraví) a obchodně citlivé
+   údaje (účet, IBAN, interní ceny, marže, podmínky klientů) se do dokumentu ani do `facts.yaml`
+   nepřenášejí; do výstupů jen to, co produkt potřebuje.
+6. **Celý dokument ukaž PM jako návrh** (postup product-marketing „auto-draft": návrh, pak „co je
+   špatně, co chybí"), ne jako seznam otázek: jedna otázka `product_context` ve studiu (`target` =
+   `docs/content/product-context.md@<sha256>`, `outcome` jednou větou), `body` = text dokumentu od
+   prvního oddílu bez řádků `Zdroje:` (studio umí `## nadpis`, `- odrážku` a `**tučně**`), `prompt`:
+   „Přečtěte a schvalte; co je špatně nebo chybí, napište svými slovy do komentáře; u míst Ke kontrole
+   platí návrh, pokud nenapíšete jinak". V kroku 1p se samostatná otázka `facts` neklade; chce-li PM
+   odpovídat po bodech, napíše to do komentáře a dokument se vrátí s jeho odpověďmi.
+7. `return` → oprav dokument podle komentáře (opravené řádky Ke kontrole přepiš na hodnotu PM)
+   a otevři otázku znovu (nový target). Po `approve` dokument už neměň (schválení platí pro jeho
+   přesný otisk; změna = nové schválení); hodnoty z řádků „Ke kontrole" (návrhy, které PM schválil)
+   zapiš jen do `docs/content/facts.yaml` se zdrojem „PM, product_context <datum>" - jen konkrétní
+   hodnoty; návrh „nedoloženo / doplní PM / nepoužít" znamená, že klíč v registru není a na web se
+   nepíše. Stav `rozpor`/`chybí` s řádkem Ke kontrole po schválení znamená „rozhodnuto návrhem"
+   (platnou hodnotu nese registr), ne otevřenou mezeru; otevřené zůstává jen to, co je nedoloženo. Ověř
+   `aid-ui-state.sh context-check <project>` a smaž snímky textů `aid-ui-sources.py <project> --purge`
+   (manifesty s otisky zůstanou).
 8. Tělo kapitoly `podklady` (seznam použitých zdrojů, stav oddílů, co zůstalo hypotézou) do
    souboru v `.aid-ui/`, `aid-ui-state.sh body <project> podklady --file <soubor>`,
    `aid-ui-state.sh chapter <project> podklady navrh`.
@@ -79,7 +91,8 @@ Nejvýš jedna úvodní otázka v chatu a jedna otázka `sources` ve studiu na k
 ## Co PM rozhoduje
 
 Kde jsou podklady, které z nalezených se nepoužijí (jedna odpověď na seznam), zda průzkum na
-internetu, chybějící a sporné údaje, schválení dokumentu o produktu - ve studiu.
+internetu, a jednou odpovědí na celý dokument o produktu i chybějící a sporné údaje (návrhy
+v řádcích „Ke kontrole") - ve studiu.
 
 ## Zápis
 
