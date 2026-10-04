@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """aid-ui-sources.py - the sources /aid-ui reads before asking anything about the product (step 1p).
 
-  python3 aid-ui-sources.py <project> --list [--old-site <dir>] [--sessions-dir <dir>] [--sessions-from <path>]... [--out <file>]
+  python3 aid-ui-sources.py <project> --list [--old-site <dir>] [--sessions-dir <dir>]... [--sessions-from <path>]... [--out <file>]
   python3 aid-ui-sources.py <project> [--session <file.jsonl>]... [--sessions-from <path>]... [--old-site <dir>] [--out <file>]
 
 --list writes the candidates: the project's own files (PRODUCT.md, README*, *.md in the root,
@@ -98,7 +98,7 @@ def project_files(proj):
     docs = os.path.join(proj, "docs")
     for root, dirs, names in os.walk(docs):
         rel = os.path.relpath(root, proj)
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and os.path.join(rel, d) not in ("docs/brand", "docs/design")]
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and os.path.join(rel, d) not in ("docs/brand", "docs/design", "docs/zakaznik")]   # our own outputs are not sources
         files += [os.path.join(root, n) for n in sorted(names) if n.endswith(TEXT_EXT)]
     return files
 
@@ -123,7 +123,7 @@ def main():
     ap.add_argument("project")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--session", action="append", default=[])
-    ap.add_argument("--sessions-dir")
+    ap.add_argument("--sessions-dir", action="append", default=[])
     ap.add_argument("--sessions-from", action="append", default=[])
     ap.add_argument("--old-site")
     ap.add_argument("--out")
@@ -146,8 +146,8 @@ def main():
     man = {"generated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "sources": sources}
     if a.list:
         cands = []
-        sdir = a.sessions_dir or session_dir(proj)
-        for f in sorted(glob.glob(os.path.join(os.path.abspath(sdir), "*.jsonl"))):
+        files = sorted({f for sd in (a.sessions_dir or [session_dir(proj)]) for f in glob.glob(os.path.join(os.path.abspath(sd), "*.jsonl"))})
+        for f in files:
             recs, torn = human_records(f, roots)
             if not recs:
                 continue   # no record of this project: never shown
