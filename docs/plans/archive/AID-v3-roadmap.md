@@ -23,7 +23,7 @@
 - **Branch:** main (clean tree)
 - **Inventory:** v1.12 — [AID-v3-architectural-inventory.md](AID-v3-architectural-inventory.md) (43 items: AID-001 to AID-043; P041 Phase-5 reserves AID-045..058 for audit fixes)
 - **Principles:** [AID-v3-principles.md](AID-v3-principles.md) (#1 Detector without Enforcement is Decoration; #5 candidate Enforcement without Instruction is Cargo Cult — P041)
-- **Audit:** [AID-audit-2026-06/](AID-audit-2026-06/) — P041 enforcement-vs-instruction + skill/command quality audit (DELIVERED 2026-06-01, fixes pending PM-GATE-C)
+- **Audit:** [AID-audit-2026-06/](AID-audit-2026-06) — P041 enforcement-vs-instruction + skill/command quality audit (DELIVERED 2026-06-01, fixes pending PM-GATE-C)
 - **Reflections:** NR 1-17 [AID-v3-agents-outputs.md](AID-v3-agents-outputs.md) (newest-on-top)
 
 ---

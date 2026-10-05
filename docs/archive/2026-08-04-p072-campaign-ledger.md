@@ -21,10 +21,10 @@ exist is the campaign that would turn that into a portfolio-level figure.
 
 | Measurement | Figure | Where |
 |---|---|---|
-| A real 4-unit lane, serial vs concurrent, repeated twice | **29 197 ms → 14 105 ms**, and 29 200 ms → 16 256 ms | [`P072-representative-lane-evidence.md`](P072-representative-lane-evidence.md) |
+| A real 4-unit lane, serial vs concurrent, repeated twice | **29 197 ms → 14 105 ms**, and 29 200 ms → 16 256 ms | [`2026-08-03-p072-representative-lane-evidence.md`](2026-08-03-p072-representative-lane-evidence.md) |
 | `bats --jobs` genuinely parallelises here | 12.5 s serial → 3.4 s at 4 workers | measured before building the pilot, so its verdicts mean something |
 | Lane partition cost | 101 s → 60 s after batching the resolver | the hot path a gate run pays before any test starts |
-| Boundary suite lower bound | ≥ 1 200 021 ms for 57 of 245 cases | [`P072-boundary-suite-diagnosis.md`](P072-boundary-suite-diagnosis.md) |
+| Boundary suite lower bound | ≥ 1 200 021 ms for 57 of 245 cases | [`2026-08-03-p072-boundary-suite-diagnosis.md`](2026-08-03-p072-boundary-suite-diagnosis.md) |
 
 The lane figure covers **four units**. Extrapolating it to a pool of 65 is
 exactly the arithmetic this plan forbids, so it is not done here.
@@ -33,7 +33,7 @@ exactly the arithmetic this plan forbids, so it is not done here.
 
 | # | Scenario | Verdict |
 |---|---|---|
-| 1 | An ordinary user command produces a complete decision | **Not demonstrated.** A `--mode full` audit dispatches LLM analyst agents; see [`P072-real-audit-record.md`](P072-real-audit-record.md) |
+| 1 | An ordinary user command produces a complete decision | **Not demonstrated.** A `--mode full` audit dispatches LLM analyst agents; see [`2026-08-04-p072-real-audit-record.md`](2026-08-04-p072-real-audit-record.md) |
 | 2 | Approval activates real scheduled execution | **Half demonstrated.** The generated configuration is `sequential` by default and the approval scripts work; the concurrency half needs the 3-stage rollout gate, which needs divergence evidence this repository does not have. The gate was not bypassed |
 | 3 | Units whose provenance no longer matches stay serial | **Demonstrated** — `test-integration-e2e-whole-path.sh`, on a fresh 4-unit project |
 | 4 | Verdicts match the sequential baseline | **Demonstrated** — identical per-case sets and identical aggregate exit |
@@ -91,7 +91,7 @@ with exit code 124 — a timeout, not a red test. No case in the run printed
 | `plan_diff` | skip | — | — |
 
 `bats_boundary` exhausting two hours is the already-documented boundary problem
-(`P072-boundary-suite-diagnosis.md`: a lower bound of ≥ 1 200 021 ms for 57 of
+(`2026-08-03-p072-boundary-suite-diagnosis.md`: a lower bound of ≥ 1 200 021 ms for 57 of
 245 cases in one file), and it is a deferred campaign, not a regression.
 
 `bats_all` hitting a 600-second cap turned out to be older and more interesting

@@ -2,7 +2,7 @@
 
 **Role:** Living status tracker — inventory + session assignments + priority order  
 **Aktualizováno:** 2026-05-10 (post P035 + P036 deploy)  
-**Zdroje:** `AID-v3-architectural-inventory.md` (AID-001–033), `AID-v3-initial-plan.md` (body a–h), `AID-v3-diagnostic-findings-post-A.md` (round 0.b measurement)
+**Zdroje:** `AID-v3-architectural-inventory.md` (AID-001–033), `2026-08-10-aid-v3-initial-plan.md` (body a–h), `AID-v3-diagnostic-findings-post-A.md` (round 0.b measurement)
 
 ---
 
@@ -268,4 +268,4 @@ Toto jsou backlog položky (IMP-NNN) které jsou přímo relevantní pro AID v3 
 
 ---
 
-*Dokument aktualizovat po každé session nebo measurement period. Zdrojové dokumenty: `AID-v3-architectural-inventory.md` (spec), `AID-v3-initial-plan.md` (PM zápisník), `docs/plans/AID-v3-diagnostic-findings-post-*.md` (empirická data).*
+*Dokument aktualizovat po každé session nebo measurement period. Zdrojové dokumenty: `AID-v3-architectural-inventory.md` (spec), `2026-08-10-aid-v3-initial-plan.md` (PM zápisník), `docs/plans/AID-v3-diagnostic-findings-post-*.md` (empirická data).*

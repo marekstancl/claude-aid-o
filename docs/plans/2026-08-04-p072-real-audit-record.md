@@ -100,7 +100,7 @@ invariant does not.
 
 - **Step 25** did not need the audit output: it re-grounds P069 against the
   final *schema*, which exists. Complete — see
-  [`P069-recontract-check.md`](P069-recontract-check.md).
+  [`2026-08-04-p069-recontract-check.md`](2026-08-04-p069-recontract-check.md).
 - **Step 26** is keyed by gate-run receipts, not audit receipts. Complete.
 - **Step 28**'s measured-wall-clock campaign is the one thing genuinely
   blocked: it needs a real audit's decision to act on.

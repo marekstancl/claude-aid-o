@@ -164,7 +164,7 @@ Cutover blocking; odstranění redundancí potvrzených až provozními daty (E0
 >
 > Každá fáze se generuje až ve chvíli, kdy se začíná stavět (ne všechny najednou).
 >
-> Detailní copy-paste prompty: `docs/plans/AID-control-system-v2-session-prompts.md`.
+> Detailní copy-paste prompty: `docs/plans/2026-06-23-aid-control-system-v2-session-prompts.md`.
 
 ## Session Prompts for Detailed Plans
 

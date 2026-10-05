@@ -561,4 +561,4 @@ Tyto části fungují a neměnit je:
 
 ---
 
-*Tento dokument byl vygenerován syntézou 5 paralelních architektonických agentů a reflektuje opravená data z Phase 3 CRITICAL-ASSESSMENT.md (Curator funguje, AID stavěl externí projekty).*
+*Tento dokument byl vygenerován syntézou 5 paralelních architektonických agentů a reflektuje opravená data z Phase 3 2026-03-03-critical-assessment.md (Curator funguje, AID stavěl externí projekty).*
