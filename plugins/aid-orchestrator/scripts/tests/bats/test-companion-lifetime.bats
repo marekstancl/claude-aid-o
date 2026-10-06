@@ -26,3 +26,8 @@ js() { run node -e "const lt = require('$L'); let t = 0; const now = () => t; co
   js "l.keep('pm'); console.log(require('fs').readFileSync('$T/.keep','utf8').includes('\"by\":\"pm\"'))"
   [ "$output" = true ]
 }
+
+@test "the session's start survives a restart: a second create in the same directory counts the 60 days from the first" {
+  js "l.keep('pm'); const l2 = lt.create({screenDir: '$T', now: () => 60*24*H}); console.log(l2.check()); console.log(require('fs').existsSync('$T/.started'))"
+  [ "$status" -eq 0 ]; [ "$(paste -sd' ' <<<"$output")" = "expired true" ]
+}

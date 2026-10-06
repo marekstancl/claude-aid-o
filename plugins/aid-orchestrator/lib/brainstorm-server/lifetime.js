@@ -21,7 +21,18 @@ function create(opts) {
   const maxMs = opts.maxMs != null ? Number(opts.maxMs) : DEFAULT_MAX_MS;
   const now = opts.now || (() => Date.now());
   const keepFile = path.join(screenDir, '.keep');
-  const startedAt = now();
+  // the session's birth survives a restart of the process (the 60-day cap counts from it)
+  const startFile = path.join(screenDir, '.started');
+  let startedAt = now();
+  try {
+    if (fs.existsSync(startFile)) {
+      const t = Date.parse(fs.readFileSync(startFile, 'utf8').trim());
+      if (!Number.isNaN(t)) startedAt = t;
+    } else {
+      fs.mkdirSync(screenDir, { recursive: true });
+      fs.writeFileSync(startFile, new Date(startedAt).toISOString() + '\n');
+    }
+  } catch (e) { /* unwritable dir: count from this process */ }
   let lastActivity = startedAt;
   let connections = 0;
 

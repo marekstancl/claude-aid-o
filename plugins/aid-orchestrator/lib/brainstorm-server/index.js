@@ -135,10 +135,16 @@ app.get('/', BASIS ? (req, res) => res.type('html').send(basisMod.compose(BASIS,
 // "Držet" (keep): the PM decides on the page whether this companion survives
 // the idle shutdown. POST toggles, GET reads. Same-origin only (Host must be
 // one of the server's own names), like a confirm.
-function ownHost(req) { const h = String(req.headers.host || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, ''); return CONFIRM_HOSTS.includes(h); }
+// Host AND Origin must both be one of the server's own names (a foreign page
+// posting to the allowed address is refused, like a confirm; no Origin = refused).
+function hostName(v) { return String(v || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, ''); }
+function ownRequest(req) {
+  const o = originHost(req.headers.origin);
+  return !!o && CONFIRM_HOSTS.includes(hostName(o)) && CONFIRM_HOSTS.includes(hostName(req.headers.host));
+}
 app.get('/aid/keep', (req, res) => res.json({ kept: LIFE.isKept(), ...LIFE.state() }));
 app.post('/aid/keep', (req, res) => {
-  if (!ownHost(req)) return res.status(403).json({ error: 'foreign host' });
+  if (!ownRequest(req)) return res.status(403).json({ error: 'foreign origin or host' });
   const kept = LIFE.isKept() ? LIFE.unkeep() : LIFE.keep('pm');
   console.log(JSON.stringify({ type: kept ? 'kept' : 'unkept', screen_dir: SCREEN_DIR }));
   res.json({ kept });

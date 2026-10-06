@@ -28,8 +28,9 @@ function load(proposalPath) {
   const viewports = raw.viewports.map(v => ({
     name: String(v.name), width: Number(v.width), height: Number(v.height),
     baseline: v.baseline ? path.resolve(path.dirname(proposalPath), String(v.baseline)) : null,
-    // the page as rendered (ui-capture.mjs <target>.html): the agent's starting file
-    page: v.page && fs.existsSync(path.resolve(path.dirname(proposalPath), String(v.page))) ? path.resolve(path.dirname(proposalPath), String(v.page)) : null,
+    // the page as rendered (ui-capture.mjs <target>.html): the agent's starting
+    // file — only a non-empty .html INSIDE the proposal's directory is served
+    page: pageUnder(path.dirname(proposalPath), v.page),
   }));
   if (raw.basis === 'live-screen') {
     for (const v of viewports) {
@@ -39,6 +40,18 @@ function load(proposalPath) {
     }
   }
   return { basis: raw.basis, marked: raw.marked ? String(raw.marked) : '', viewports, file: proposalPath };
+}
+
+// pageUnder(dir, p) → the resolved path when p is a non-empty .html file under dir, else null
+function pageUnder(dir, p) {
+  if (!p) return null;
+  const root = fs.realpathSync(dir);
+  let full;
+  try { full = fs.realpathSync(path.resolve(dir, String(p))); } catch (e) { return null; }
+  if (!full.startsWith(root + path.sep)) return null;
+  if (!full.endsWith('.html')) return null;
+  try { if (fs.statSync(full).size === 0) return null; } catch (e) { return null; }
+  return full;
 }
 
 // A viewport name is a path segment: letters, digits, dash, underscore only.
@@ -74,7 +87,7 @@ function compose(basis, screenUrl, meta) {
   const first = vps[0];
   const label = meta && (meta.plan || meta.project) ? [meta.plan, meta.project].filter(Boolean).join(' · ') + ' — ' : '';
   const tabs = vps.length > 1
-    ? `<nav class="vp-tabs">${vps.map((v, i) => `<button type="button" data-vp="${esc(v.name)}" data-w="${v.width}" class="${i === 0 ? 'on' : ''}">${esc(v.name)} ${v.width}×${v.height}</button>`).join('')}</nav>`
+    ? `<nav class="vp-tabs">${vps.map((v, i) => `<button type="button" data-vp="${esc(v.name)}" data-w="${v.width}" data-h="${Math.max(v.height, 480)}" class="${i === 0 ? 'on' : ''}">${esc(v.name)} ${v.width}×${v.height}</button>`).join('')}</nav>`
     : '';
   const banner = basis.basis === 'design-system'
     ? `<div class="basis-banner">${esc(basis.marked || 'NO LIVE BASELINE — this proposal is built from the application\'s design system, not from a screenshot of the running application.')}</div>`
@@ -112,11 +125,21 @@ ${left}
     b.addEventListener('click', function () {
       document.querySelectorAll('.vp-tabs button').forEach(function (x) { x.classList.remove('on'); });
       b.classList.add('on');
-      var w = b.getAttribute('data-w'), vp = b.getAttribute('data-vp');
+      var w = b.getAttribute('data-w'), h = b.getAttribute('data-h'), vp = b.getAttribute('data-vp');
       var img = document.getElementById('baseline'); if (img) { img.src = '/basis/' + encodeURIComponent(vp) + '/baseline.png'; img.style.width = w + 'px'; }
-      var f = document.getElementById('proposal'); if (f) { f.style.width = w + 'px'; }
+      // the proposal is the real page's copy, responsive like the page: the same file at the viewport's width and height
+      var f = document.getElementById('proposal'); if (f) { f.style.width = w + 'px'; f.style.height = h + 'px'; }
     });
   });
+  // Držet: the PM keeps this companion alive past the idle shutdown (the frame's helper skips its own button when this one exists)
+  (function () {
+    var b = document.createElement('button'); b.id = 'aid-keep'; b.type = 'button';
+    b.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:99999;padding:6px 12px;border-radius:6px;border:1px solid #999;background:#fff;color:#111;font:13px system-ui,sans-serif;cursor:pointer;opacity:.9';
+    function render(k) { b.textContent = k ? 'Držím (zruš podržení)' : 'Držet (nevypínat po 12 h)'; b.style.background = k ? '#fde68a' : '#fff'; b.dataset.kept = k ? '1' : '0'; }
+    fetch('/aid/keep').then(function (r) { return r.json(); }).then(function (j) { render(!!j.kept); }).catch(function () { render(false); });
+    b.addEventListener('click', function () { fetch('/aid/keep', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (j) { render(!!j.kept); }); });
+    document.body.appendChild(b);
+  })();
 </script>
 </body>
 </html>`;

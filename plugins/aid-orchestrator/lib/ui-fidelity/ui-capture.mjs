@@ -197,14 +197,26 @@ async function capture({ url, selector, targetId, outputDir, apiMocksFile, viewp
       for (const link of links) {
         try {
           const res = await fetch(link.href);
-          const css = await res.text();
+          let css = await res.text();
+          // url(...) inside the sheet is relative to the SHEET, not to the page: make it absolute
+          css = css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (m, q, u) => {
+            if (/^(data:|https?:|\/\/|#)/i.test(u)) return m;
+            try { return `url(${q}${new URL(u, link.href).href}${q})`; } catch (e) { return m; }
+          });
           const style = document.createElement('style');
           style.setAttribute('data-inlined-from', link.href);
           style.textContent = css;
           link.replaceWith(style);
         } catch (e) { /* keep the link; <base> resolves it against the app */ }
       }
+      // a static copy: no scripts, no inline handlers, no javascript: URLs
       doc.querySelectorAll('script').forEach(n => n.remove());
+      doc.querySelectorAll('*').forEach(el => {
+        for (const a of Array.from(el.attributes)) {
+          if (/^on/i.test(a.name)) el.removeAttribute(a.name);
+          else if (/^(href|src|action|formaction|xlink:href)$/i.test(a.name) && /^\s*javascript:/i.test(a.value)) el.setAttribute(a.name, '#');
+        }
+      });
       const head = doc.querySelector('head') || doc.insertBefore(document.createElement('head'), doc.firstChild);
       if (!head.querySelector('base')) {
         const base = document.createElement('base'); base.setAttribute('href', baseHref); head.insertBefore(base, head.firstChild);
