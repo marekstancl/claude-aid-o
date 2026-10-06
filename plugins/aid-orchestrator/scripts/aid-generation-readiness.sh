@@ -9,7 +9,7 @@
 # — all of them, then one verdict. The plan author runs it too (commands/aid-plan.md
 # Step 8), so a plan that passes the author's check passes generation.
 #
-# Usage: aid-generation-readiness.sh <plan.md> [--total N] [--json] [--write-provisional <path>]
+# Usage: aid-generation-readiness.sh <plan.md> [--total N] [--json] [--write-provisional <path>] [--project-root <dir>]
 # =============================================================================
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,10 +22,11 @@ source "${SCRIPT_DIR}/lib/aid-roots.sh"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 check_prerequisites
 
-plan="" total="" json=0 out=""
+plan="" total="" json=0 out="" project_root=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --total) total="$2"; shift 2 ;;
+    --project-root) project_root="$2"; shift 2 ;;   # the tree the plan's paths are checked against (a dependency's worktree)
     --json) json=1; shift ;;
     --write-provisional) out="$2"; shift 2 ;;
     -*) echo "ERROR: unknown option: $1" >&2; exit 2 ;;
@@ -54,6 +55,10 @@ _pc_id="$(sed -n '1,/^---$/{/^---$/!p}' "$plan" | awk -F': *' '/^id:/{print $2; 
 _pc_root="$(dirname "$(realpath "$plan")")"; while [[ "$_pc_root" != "/" && ! -d "$_pc_root/.aid-o" ]]; do _pc_root="$(dirname "$_pc_root")"; done
 _pc_json=()
 if [[ -n "$_pc_id" && -d "$_pc_root/.aid-o" ]]; then _pc_json=(--json "$_pc_root/.aid-o/work/evidence/${_pc_id}/plan-check.json"); fi
+# --project-root (2.114.0, P106): a plan that stands on an unmerged plan's branch
+# names files only that worktree has; the check reads them from there, as
+# aid-plan-check.sh already could — readiness had no way to say so.
+[[ -z "$project_root" ]] || { [[ -d "$project_root" ]] || { echo "ERROR: --project-root is not a directory: $project_root" >&2; exit 2; }; _pc_json+=(--project-root "$project_root"); }
 if ! check_out="$(AID_PLAN_CHECK_RUN_CMDS=0 "${SCRIPT_DIR}/aid-plan-check.sh" "$plan" "${_pc_json[@]}" 2>&1)"; then
   aid_plan_log "$plan" "plan_readiness_blocked" reason="plan_check"
   fails+=("repair the aid-plan-check findings; the check list: skills/plan-writing.md §Completeness Gate (pipeline.md §When AID refuses: plan_check)")

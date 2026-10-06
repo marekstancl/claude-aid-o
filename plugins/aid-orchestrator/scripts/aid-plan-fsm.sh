@@ -9638,8 +9638,13 @@ _pfsm_finalize_produce() {
   # The subject hash is reproducible from what was aggregated (plan, candidate,
   # sources), in the `sha256:<64 hex>` shape aid-protocol-validate.sh requires.
   subject_hash="sha256:$(printf '%s\n%s\n%s' "$plan_id" "$candidate" "$(jq -S -c . <<< "$sources_json")" | sha256sum | awk '{print $1}')"
+  # What the gate did not measure travels with the verdict (2.114.0): the
+  # decision card and the release policy say it in the same numbers.
+  local unmeasured; unmeasured="$(jq -c '.summary.unmeasured // {summary_prose: 0, summary_unparsed: 0, step_bullets: 0}' "$pd" 2>/dev/null || echo '{"summary_prose":0,"summary_unparsed":0,"step_bullets":0}')"
+  local measured_n; measured_n="$(jq -r '[.results[]? | select(.verdict != "skipped")] | length' "$pd" 2>/dev/null || echo 0)"
+  echo "produce: acceptance — ${measured_n} of $(jq -r '.ac_count // 0' "$pd") summary criteria measured; unmeasured: $(jq -r '"\(.summary_prose) prose summary criteria, \(.summary_unparsed) unparsed summary bullets, \(.step_bullets) step-level bullets"' <<< "$unmeasured") (aggregation: ${verdict})" >&2
   jq --arg pid "$project_id" --arg p "$plan_id" --arg r "$run_id" --arg h "$candidate" --arg b "$base_commit" \
-     --argjson s "$sources_json" --arg v "$verdict" --arg sh "$subject_hash" \
+     --argjson s "$sources_json" --arg v "$verdict" --arg sh "$subject_hash" --argjson um "$unmeasured" --argjson mn "$measured_n" \
     '{schema_version: "aid-2.0", artifact_type: "acceptance_evidence",
       producer: "aid-plan-fsm.sh@plan-finalize-produce",
       created_at: (now | todate | sub("\\.[0-9]+Z$"; "Z")),
@@ -9647,7 +9652,7 @@ _pfsm_finalize_produce() {
       identity: {project_id: $pid, epic_id: null, plan_id: $p, run_id: $r},
       subject: {plan_id: $p, candidate_sha: $h, subject_hash: $sh},
       revision: {base_sha: $b, head_sha: $h, head_is_current: true, freshness: "current"},
-      status: "pass", verdict: {kind: "none", aggregation: $v},
+      status: "pass", verdict: {kind: "none", aggregation: $v, measured: $mn, unmeasured: $um},
       provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-plan-fsm.sh", aggregated_at_boundary: "plan-final"},
       sources: $s,
       acceptance_evidence: {source: "plan-diff.json",

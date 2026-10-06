@@ -331,7 +331,11 @@ _aid_artifact_profiles_json() {
 # has no extension. Neither is a path.
 _aid_artifact_looks_like_path() {
   local s="${1-}"
-  [[ "$s" =~ (^|[[:space:]])(/|\./|\.\./|~/)[^[:space:]] ]] && return 0
+  # A path has at least two segments, or an extension, or is a dotfile: "/opt/eco",
+  # "./x.sh", "~/.claude". A product name with a slash ("the /aid-ui studio") is
+  # not one (2.114.0, P106: the plan page refused its own title).
+  [[ "$s" =~ (^|[[:space:]])(/|\./|\.\./|~/)[^[:space:]/]+(/[^[:space:]]*|\.[A-Za-z0-9]{1,6})([[:space:]]|$) ]] && return 0
+  [[ "$s" =~ (^|[[:space:]])(/|\./|\.\./|~/)\.[A-Za-z0-9_-]+([[:space:]/]|$) ]] && return 0
   [[ "$s" =~ [^[:space:]/]+/[^[:space:]]*\.[A-Za-z0-9]{1,6}([[:space:]]|$) ]] && return 0
   return 1
 }

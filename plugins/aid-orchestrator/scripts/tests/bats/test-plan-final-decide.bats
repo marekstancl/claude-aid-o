@@ -124,6 +124,11 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   local usd; usd="$(jq -s '[.[].reviewers[].usd] | add | . * 10000 | round / 10000' "$(_run_dir)"/cp7/round-*/measurement.json)"
   [ "$(_decision plan_summary.close.usd)" = "$usd" ]
   grep -q "Close:\*\* 1 attempt" "$(_run_dir)/pm-summary.md"
+  # what the acceptance gate did not measure is said in the evidence, the policy and on the page (2.114.0)
+  [ "$(jq -c .verdict.unmeasured "$(_run_dir)/acceptance-evidence.json")" = '{"summary_prose":0,"summary_unparsed":1,"step_bullets":1}' ]
+  [ "$(jq -r .verdict.aggregation "$(_run_dir)/acceptance-evidence.json")" = prose_only ]
+  grep -q "Acceptance criteria:\*\* pass — .*1 unparsed summary bullets, 1 step-level bullets" "$(_run_dir)/pm-summary.md"
+  [[ "$(jq -r '.release_decision.inputs[] | select(.id == "acceptance_evidence") | .reason' "$(_run_dir)/release-decision.json")" == *"1 step-level bullets"* ]]
   # deciding twice changes nothing
   _stage decide; [ "$status" -eq 0 ]; [[ "$output" == *"already decided"* ]]
 }
@@ -355,4 +360,31 @@ _with_epic_bound_gate() {
   _stage freeze; [ "$status" -eq 0 ]
   printf '{"ts":"2026-09-24T10:00:00Z","event":"gate_runner_start"}\n' >> "$(_run_dir)/timeline.jsonl"
   _stage gates; echo "$output"; [ "$status" -eq 0 ]
+}
+
+# ── cp7 dispute (2.114.0): a finding settled by the PM's decision ────────────
+@test "cp7 dispute: a form_invalid major blocks decide; --pm accepted needs the card and the PM's prompt, then decide is ready and the stage record names the dispute" {
+  _project
+  # evidence outside the candidate's repository: the adjudicator keeps the finding, open as form_invalid
+  _close_up_to_decide '.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "major", claim: "the docs page names a flag the app lacks", command: "grep -n flag /opt/eco/docs/x.md", evidence: "/opt/eco/docs/x.md:3", fix: "drop the flag", rule: "docs match the code"}] | del(.no_findings_reason)'
+  local m="$(_run_dir)/cp7/round-1/merged.json" fp
+  [ "$(jq -r '.findings[0].status' "$m")" = form_invalid ]
+  _stage decide; [ "$status" -eq 1 ]; [ "$(_blockers)" = final_review ]
+  fp="$(jq -r '.findings[0].fingerprint' "$m")"
+  local RR=(bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh")
+  local D=(dispute --checkpoint cp7 --evidence-dir "$(_run_dir)" --project-root "$R" --round 1 --fingerprint "$fp")
+  run "${RR[@]}" "${D[@]}" --reason "PM: the docs repo is not this candidate, deferred as B-1" --pm accepted
+  [ "$status" -eq 1 ]; [[ "$output" == *"--finding-card"* ]]
+  export AID_HOOK_AUDIT="$R/../audit.jsonl"; local card="$R/../card.md"
+  printf 'Rozhodnutí 1: dokumentace v jiném repu\nnález %s\n' "$fp" > "$card"; touch -d '-10 seconds' "$card"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  run "${RR[@]}" "${D[@]}" --reason "PM: the docs repo is not this candidate, deferred as B-1" --pm accepted --finding-card "$card"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no PM prompt after"* ]]
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
+  run "${RR[@]}" "${D[@]}" --reason "PM: the docs repo is not this candidate, deferred as B-1" --pm accepted --finding-card "$card"
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"dismissed by the PM"* ]]
+  [ "$(jq -r .verdict "$(_run_dir)/cp7/rounds.json")" = pass ]
+  [ "$(jq -r .semantic_review.verdict "$(_run_dir)/semantic-review-final.json")" = pass ]
+  grep -q '"stage":"cp7-dispute-accepted"' "$(_run_dir)/stage-writes.jsonl"
+  _stage decide; echo "$output"; [ "$status" -eq 0 ]; [ "$(_decision release_ready)" = true ]
 }

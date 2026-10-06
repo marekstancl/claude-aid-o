@@ -264,8 +264,14 @@ check_required_present() {
         add_blocker "$bid" "blocking" "acceptance-evidence.json reports partial — criteria not met: ${_failed:-unnamed}"
         return 0
       fi
+      # The same numbers the PM card shows (2.114.0): what the gate did not measure.
+      local _um; _um="$(jq -r '.verdict.unmeasured // empty | "unmeasured: \(.summary_prose) prose summary criteria, \(.summary_unparsed) unparsed summary bullets, \(.step_bullets) step-level bullets"' "$file" 2>/dev/null)"
       if [[ "$_ae" == "prose_only" ]]; then
-        add_input "$id" "$(basename "$file")" "pass" "no acceptance criterion is machine-checkable (prose_only) — the reviews judged them" "$(_artifact_head_match "$file")" "present_ok"
+        add_input "$id" "$(basename "$file")" "pass" "no acceptance criterion is machine-checkable (prose_only) — the reviews judged them${_um:+; ${_um}}" "$(_artifact_head_match "$file")" "present_ok"
+        return 0
+      fi
+      if [[ "$_ae" == "verified" && -n "$_um" ]]; then
+        add_input "$id" "$(basename "$file")" "pass" "every machine-checkable criterion passed (verified); ${_um}" "$(_artifact_head_match "$file")" "present_ok"
         return 0
       fi
     fi

@@ -22,6 +22,10 @@ usage() {
 Usage:
   aid-emit-dispatch.sh start --focus <id> --agent-id <id> --evidence-dir <path> [--expected-duration-max <seconds>]
   aid-emit-dispatch.sh complete --focus <id> --output-file <path> --evidence-dir <path>
+  aid-emit-dispatch.sh cancel --focus <id> --evidence-dir <path> --reason "<why, 20+ chars>"
+      withdraws an open start (a role the round does not have, a reviewer that never ran)
+      without inventing an output; a cancelled start is NOT a complete, so an answer
+      filed under it still has no provenance
 EOF
   exit 1
 }
@@ -88,6 +92,23 @@ cmd_start() {
   if [[ ! "$focus" =~ $AID_DISPATCH_FOCUS_RE ]]; then
     echo "ERROR: --focus does not match allowed pattern ${AID_DISPATCH_FOCUS_RE} (got: $focus)" >&2
     exit 1
+  fi
+
+  # 2.114.0 (agents P010, CP3 round 4): the controller emitted starts for three
+  # roles where the round had one; two starts never got a complete and the only
+  # ways out were --force or a fabricated output. When the evidence dir is a
+  # review round (round.json with reviewers_expected), the focus must name one
+  # of its roles — the error falls here, not at close.
+  if [[ -f "${evidence_dir}/round.json" ]]; then
+    local role_of_focus roles
+    jq -e '.reviewers_expected | type == "array"' "${evidence_dir}/round.json" >/dev/null 2>&1 \
+      || { echo "ERROR: ${evidence_dir}/round.json has no reviewers_expected list — not a review round this script can check; repair the round (prepare) before dispatching" >&2; exit 1; }
+    role_of_focus="$(sed -E 's/^cp2-step-[0-9]+-//; s/^cp[1367]-//' <<< "$focus" | tr '-' '_')"
+    if ! jq -e --arg r "$role_of_focus" '.reviewers_expected | index($r)' "${evidence_dir}/round.json" >/dev/null 2>&1; then
+      roles="$(jq -r '.reviewers_expected | join(", ")' "${evidence_dir}/round.json")"
+      echo "ERROR: focus ${focus} names role ${role_of_focus}, which this round does not ask (reviewers_expected: ${roles}); dispatch only the roles prepare printed" >&2
+      exit 1
+    fi
   fi
 
   [[ -z "$exp_dur" ]] && exp_dur=$(default_duration_for_focus "$focus")
@@ -241,8 +262,59 @@ cmd_complete() {
   return 0
 }
 
+# cancel — withdraw the most recent open start for a focus. Removes the pending
+# line (so fsm_check_orphan_dispatches does not see an orphan) and writes
+# verifier_dispatch_cancel with the reason to the timeline. It writes NO complete:
+# _dispatch_recorded (aid-review-round.sh) still finds no complete for the
+# focus, so a reviewer file filed under a cancelled start is an answer without
+# provenance and close refuses it (no_dispatch_record).
+cmd_cancel() {
+  local focus="" evidence_dir="" reason=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --focus)        focus="$2"; shift 2 ;;
+      --evidence-dir) evidence_dir="$2"; shift 2 ;;
+      --reason)       reason="$2"; shift 2 ;;
+      *) echo "ERROR: unknown arg $1" >&2; exit 1 ;;
+    esac
+  done
+  [[ -z "$focus" || -z "$evidence_dir" ]] && usage
+  [[ ${#reason} -ge 20 ]] || { echo "ERROR: cancel needs --reason of at least 20 characters (why this start is withdrawn — it goes to the timeline)" >&2; exit 1; }
+  local pending="${evidence_dir}/pending-dispatches.jsonl"
+  [[ -f "$pending" ]] || { echo "ERROR: no pending file at $pending" >&2; exit 2; }
+  local lockfile="${pending}.lock" resultf="${pending}.result.$$"
+  touch "$lockfile"; rm -f "$resultf"
+  (
+    flock -x -w 5 200 || { echo "ERROR: flock timeout on $lockfile" >&2; exit 2; }
+    match=$(jq -c --arg f "$focus" 'select(.focus == $f and .event == "start")' "$pending" | tail -1)
+    if [[ -z "$match" ]]; then
+      echo "ERROR: nothing to cancel — no open start for focus=$focus in $pending" >&2
+      exit 2
+    fi
+    s_ts=$(echo "$match" | jq -r '.ts'); a_id=$(echo "$match" | jq -r '.agent_id'); s_nonce=$(echo "$match" | jq -r '.nonce // "null"')
+    tmp=$(mktemp "${pending}.XXXXXX")
+    if [[ "$s_nonce" == "null" ]]; then
+      jq -c --arg f "$focus" --arg ts "$s_ts" 'select(.focus != $f or .ts != $ts)' "$pending" > "$tmp"
+    else
+      jq -c --arg n "$s_nonce" 'select((.nonce // "") != $n)' "$pending" > "$tmp"
+    fi
+    # the ledger keeps the withdrawal (the FSM's orphan check reads only event
+    # "start", so a cancel line is never an orphan)
+    jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg f "$focus" --arg a "$a_id" --arg n "$s_nonce" --arg r "$reason" --arg st "$s_ts" \
+      '{ts: $ts, event: "cancel", focus: $f, agent_id: $a, start_nonce: $n, started_at: $st, reason: $r}' >> "$tmp"
+    mv "$tmp" "$pending"
+    printf '%s\t%s\n' "$s_ts" "$a_id" > "$resultf"
+  ) 200>"$lockfile"
+  local start_ts agent_id
+  IFS=$'\t' read -r start_ts agent_id < "$resultf"; rm -f "$resultf"
+  log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_cancel" \
+    focus="$focus" agent_id="$agent_id" evidence_dir="$evidence_dir" started_at="$start_ts" reason="$reason"
+  echo "cancelled start ${focus} (started ${start_ts}): ${reason}"
+}
+
 case "${1:-}" in
   start)    shift; cmd_start "$@" ;;
   complete) shift; cmd_complete "$@" ;;
+  cancel)   shift; cmd_cancel "$@" ;;
   *)        usage ;;
 esac

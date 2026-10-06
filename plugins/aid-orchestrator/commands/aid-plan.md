@@ -330,6 +330,12 @@ the revised plan — once; a second revision needs a new critic run:
 aid_critic_rebind P{NNN} --plan .aid-o/plans/P{NNN}-{topic}.md
 ```
 
+The order does not matter: a plan revised BEFORE `aid_critic_check` is recorded
+by the check itself as that one revision (`plan_sha256_revised` in
+`check.json`, `revised_before_check: true`) and `aid_critic_rebind` is then
+refused as a second one. Either way the plan may change once after the critic
+read it.
+
 Rerun the generation check, and only then prepare CP1. The CP1 packet carries
 `critic-response.md` when the check passed for the plan CP1 reads (the checked
 plan, or the one revision rebound to it); otherwise it carries one line saying
@@ -361,6 +367,10 @@ bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "<plan>" --snapshot "<plan-bef
 A revision that adds a step, a Files entry or an acceptance criterion outside
 the fix list is refused: that is a design change, and a design change is the
 PM's to make (cut it out, or bring it as a choice), not a fix to slip in.
+`fix-check` derives the list itself: every open finding that names a step
+names it (minors too); an open plan-level blocker or major makes the list
+`any`, since its fix lands in some step; `--fixes any` then skips only the
+"outside the fix list" checks.
 
 ### Step 9: Plan review (CP1)
 Run "Plan review (CP1)" below, from item 1.
@@ -731,6 +741,16 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
     Then delete the interim: `rm .aid-o/work/interim-P{NNN}.md` — this is the one
     place it is deleted (`skills/brainstorming.md` RULE 5); the critic before CP1
     read it, and the evidence under `evidence/<plan_id>/critic/` keeps what mattered.
+
+    Before `aid-brainstorm-state.sh approve P{NNN}` the brainstorm's own page
+    must exist — `approve` refuses without it, because the acceptance is based
+    on what the PM saw (P108 met the refusal here with nothing in this step
+    naming the page):
+
+    ```bash
+    source "$AID_PLUGIN_PATH/scripts/lib/aid-brainstorm-summary.sh" && \
+      aid_brainstorm_summary_render P{NNN} .aid-o/work/brainstorm/P{NNN}/brainstorm-summary-artifact.html
+    ```
 
 **Round count.** Two rounds is the default (`review_checkpoints.plan_review.rounds_default`).
 Only when the PM says so, record one round, or a third:

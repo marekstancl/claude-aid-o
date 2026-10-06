@@ -220,3 +220,10 @@ _plan() { # <file> <strict|legacy> [dep2] [files1...]
   printf -- '---\nid: P900\n---\n# x\n\n## Goal\n\nno steps\n' > p.md
   run "$CHECK" p.md; [[ "$output" != *"unbound variable"* ]]
 }
+@test "readiness --project-root: a file that exists only in a dependency's worktree fails without it and passes with it" {
+  git clone -q . ../other && printf 'def existing_helper():\n    return 2\n' > ../other/src/there.py && git -C ../other add -A && git -C ../other -c user.email=t@t -c user.name=t commit -qm there
+  mkdir -p .aid-o/plans; _plan .aid-o/plans/P900.md strict '- Depends on: Step 1' '- Modify: `src/there.py` (lines ~1-2) — extend `existing_helper`' '- Create: `src/new.py` — the new module'
+  run "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" .aid-o/plans/P900.md; [ "$status" -eq 1 ]; [[ "$output" == *"there.py"* ]]
+  run "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" .aid-o/plans/P900.md --project-root ../other; echo "$output"; [ "$status" -eq 0 ]
+  run "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" .aid-o/plans/P900.md --project-root ../nowhere; [ "$status" -eq 2 ]
+}

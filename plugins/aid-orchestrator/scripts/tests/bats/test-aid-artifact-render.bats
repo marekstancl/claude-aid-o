@@ -496,3 +496,16 @@ PY
   [ "$status" -eq 0 ]
   grep -qF '<h1>P080 běh brány</h1>' "$TEST_TMPDIR/frompath.html"
 }
+
+@test "block 5: a product name with a slash is a name and renders; the detector still calls two segments, an extension or a dotfile a path" {
+  local facts
+  facts="$(_full_facts | jq '.links = ["the /aid-ui studio", {name: "Report brány"}]')"
+  run _render "$facts" "$(_full_prose)" "$TEST_TMPDIR/slash.html"
+  [ "$status" -eq 0 ]; grep -qF 'the /aid-ui studio' "$TEST_TMPDIR/slash.html"
+  ! _aid_artifact_looks_like_path "the /aid-ui studio"
+  ! _aid_artifact_looks_like_path "/tmp"
+  _aid_artifact_looks_like_path "/opt/eco/docs/x.md"
+  _aid_artifact_looks_like_path "see ./x.sh"
+  _aid_artifact_looks_like_path "~/.claude"
+  _aid_artifact_looks_like_path "lib/a.sh"
+}

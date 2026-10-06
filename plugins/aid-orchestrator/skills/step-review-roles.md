@@ -244,6 +244,12 @@ between steps.
 A blocker is an exploitable path across the EPIC: unvalidated input reaching a
 sink, a missing authorization check, or a secret in the tree.
 
+A whole-plan finding the author refuted by measurement, the PM deferred to
+the backlog, or the adjudicator kept as `form_invalid` (evidence outside the
+candidate's repository) is settled by the controller's `dispute --checkpoint
+cp7 … --pm accepted --finding-card` with the PM's answer on record — never by
+editing the finding and never by merging around it (2.114.0).
+
 ## Role: final_criteria
 
 The finished plan against what it promised. You hold the plan's acceptance and

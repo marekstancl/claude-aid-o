@@ -33,7 +33,9 @@
 # A6, B8, C5) and hears the rest as "[WARN legacy]". --strict / --legacy force.
 #
 #   --snapshot  the plan as it was BEFORE the revision being checked (C checks)
-#   --fixes     comma-separated step numbers the revision was allowed to touch
+#   --fixes     comma-separated step numbers the revision was allowed to touch;
+#               `none` (plan-level findings only) or `any` (an open plan-level
+#               blocker/major: every step may change, C4/C5 are not reported)
 #               (e.g. "3,7,12"), or `none` when it may touch no step; required
 #               together with --snapshot. The --json report then carries
 #               steps_changed and added_outside_fixes ({step, kind: step|file|ac, text}).
@@ -134,6 +136,8 @@ done < <(_aid_extract_files_bullets_numbered < "$PLAN")
 ALL_FILES_PATHS="$(printf '%s\n' "${FB_PATHS[@]:-}" | tr ' ' '\n' | grep -v '^$' | sort -u)"
 CREATE_PATHS="$(for i in "${!FB_LN[@]}"; do [[ "${FB_VERB[$i]}" == "Create" ]] && printf '%s\n' ${FB_PATHS[$i]}; done | sort -u)"
 _in_list() { grep -qxF -- "$1" <<< "$2"; }
+# _in_fix <step> — the step is in the fix list, or the list is `any`.
+_in_fix() { [[ "${FIX_ANY:-0}" == 1 ]] || _in_list "$1" "$FIX_STEPS"; }
 # Every file the project has (tracked + untracked-not-ignored), once. Prose names
 # files by their tail as often as by their full path (`export/router.py` for
 # backend/acta/export/router.py), and the pilots' plans did exactly that.
@@ -525,7 +529,10 @@ if [[ -n "$SNAPSHOT" ]]; then
   ADDED="$(diff --unchanged-line-format= --old-line-format= --new-line-format='%dn	%L' "$SNAPSHOT" "$PLAN")"
   REMOVED="$(diff --unchanged-line-format= --new-line-format= --old-line-format='%L' "$SNAPSHOT" "$PLAN")"
   # `--fixes none`: the revision may change no step (plan-level findings only).
-  FIX_STEPS="$(tr ',' '\n' <<< "$FIXES" | tr -d ' ' | grep -vxE 'none|')"
+  # `--fixes any` (2.114.0): an open plan-level blocker or major — its fix lands
+  # in some step, so C4/C5 do not fire; every other check runs unchanged.
+  FIX_ANY=0; [[ "$FIXES" == any ]] && FIX_ANY=1
+  FIX_STEPS="$(tr ',' '\n' <<< "$FIXES" | tr -d ' ' | grep -vxE 'none|any|')"
   # C2 — new claims: paths and identifiers on added lines, checked again. Plan
   # review evidence paths (cp1/, round-N/, packet/, evidence/<plan>/) are exempt:
   # those files exist only while the plan is reviewed, never in the repository.
@@ -562,7 +569,7 @@ if [[ -n "$SNAPSHOT" ]]; then
     [[ -n "${ln:-}" ]] || continue
     idx="$(_step_index_for_line "$ln")" || continue
     n="${STEP_N[$idx]}"; TOUCHED["$n"]=1
-    if ! _in_list "$n" "$FIX_STEPS"; then
+    if ! _in_fix "$n"; then
       if [[ "$line" =~ ^-\ \[\ \] ]]; then _block "C5" "$PLAN:$ln" "revision added an acceptance criterion to Step ${n}, which is not in the fix list (${FIXES}) — a design change, not a fix: cut it or bring it to the PM"
         OUTSIDE_FIXES+=("${n}	ac	${line}")
       elif [[ "$line" =~ ^-\ (Create|Modify|Rewrite|Test): ]]; then _block "C5" "$PLAN:$ln" "revision added a Files entry to Step ${n}, outside the fix list (${FIXES})"
@@ -579,7 +586,7 @@ if [[ -n "$SNAPSHOT" ]]; then
     _block "C5" "$PLAN" "revision added step(s): ${new_steps} — a fix does not add steps; split or bring it to the PM"
     for n in $(grep -oE '[0-9]+' <<< "$new_steps"); do OUTSIDE_FIXES+=("${n}	step	### Step ${n}"); done
   fi
-  for n in "${!TOUCHED[@]}"; do _in_list "$n" "$FIX_STEPS" || _warn "C4" "$PLAN" "revision touched Step ${n}, which is not in the fix list (${FIXES})"; done
+  for n in "${!TOUCHED[@]}"; do _in_fix "$n" || _warn "C4" "$PLAN" "revision touched Step ${n}, which is not in the fix list (${FIXES})"; done
 fi
 
 # ---------------------------------------------------------------------------

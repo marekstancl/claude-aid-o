@@ -88,6 +88,18 @@ fi
 
 cd "$SCRIPT_DIR"
 
+# A plugin update replaces this directory without node_modules (2.114.0, AID
+# 2.111 → 2.113: the first companion after the update died with "Cannot find
+# module 'express'" behind "failed to start within 5 seconds"). Install them
+# here, say so in the log; a failed install prints the exact command.
+if [[ ! -d "${SCRIPT_DIR}/node_modules/express" ]]; then
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) node_modules missing — running npm install in ${SCRIPT_DIR}" >> "$LOG_FILE"
+  if ! npm install --no-audit --no-fund >> "$LOG_FILE" 2>&1; then
+    echo "{\"error\": \"dependencies missing and npm install failed (see $LOG_FILE); run: cd $SCRIPT_DIR && npm install\"}"
+    exit 1
+  fi
+fi
+
 # Foreground mode for environments that reap detached/background processes.
 if [[ "$FOREGROUND" == "true" ]]; then
   echo "$$" > "$PID_FILE"
@@ -97,7 +109,7 @@ fi
 
 # Start server, capturing output to log file
 # Use nohup to survive shell exit; disown to remove from job table
-nohup env BRAINSTORM_DIR="$SCREEN_DIR" BRAINSTORM_HOST="$BIND_HOST" BRAINSTORM_URL_HOST="$URL_HOST" node index.js > "$LOG_FILE" 2>&1 &
+nohup env BRAINSTORM_DIR="$SCREEN_DIR" BRAINSTORM_HOST="$BIND_HOST" BRAINSTORM_URL_HOST="$URL_HOST" node index.js >> "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 disown "$SERVER_PID" 2>/dev/null
 echo "$SERVER_PID" > "$PID_FILE"
