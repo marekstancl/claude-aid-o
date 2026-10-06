@@ -71,7 +71,8 @@ if [[ -z "$PLAN" || "$PLAN" == "null" ]]; then
       "head_commit": null,
       "ac_count": 0,
       "results": [],
-      "summary": {"present_count": 0, "absent_count": 0, "skipped_count": 1, "reason": $reason},
+      "summary": {"present_count": 0, "absent_count": 0, "skipped_count": 1, "reason": $reason,
+                  "unmeasured": {"summary_prose": 0, "summary_unparsed": 0, "step_bullets": 0}},
       "overall_verdict": "skipped"
     }' > "${EVIDENCE_DIR}/plan-diff.json"
   exit 2

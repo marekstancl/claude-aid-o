@@ -37,7 +37,7 @@ V neinteraktivním běhu se krok nespouští (MUST 3).
    „jiné: <slovy>" (max. 2 nová kola) nebo vlastní URL.
 5. Šest karet (4 blízko záměru, 2 odvážnější mimo obor, u každé jedna věta, co
    převzít) ve visual-companion (`skills/visual-companion/SKILL.md`):
-   `start-server.sh --project-dir <project> --host 0.0.0.0 --url-host 10.20.20.22`.
+   `start-server.sh --project-dir <project> --plan <P-id> --host 0.0.0.0 --url-host 10.20.20.22`.
    Karty jako výběr více možností: `<div class="cards" data-multiselect>`, každá
    karta `data-choice="<n>" onclick="toggleSelect(this)"`. Bez `data-multiselect`
    stránka zvýrazní jen poslední klik.

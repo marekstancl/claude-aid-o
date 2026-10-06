@@ -36,7 +36,7 @@ Každý krok s kódem: jeden bats případ na pravidlo (odmítací cesta) + řá
 - AC: plán s jedním `major` ve stavu `form_invalid` v posledním kole CP7 se po `dispute --pm accepted` dostane přes `decide`; bez karty nebo bez odpovědi PM dispute odmítne.
 
 ### Krok 2 — `retry` v nesebraném kole (aid-review-round.sh)
-- `retry --role R` v kole bez `collect.json` projde jen při přesně určeném stavu role: R je v `reviewers_expected` kola, `reviewer-R.json` neexistuje, a buď `codex-R.usage.json` říká `answered: false`, nebo role nemá v bracketu `complete`. Otevřený `start` bez `complete` retry uzavře událostí `cancel` s důvodem `retry` (krok 3), aby nový bracket nestál vedle starého. Role mimo kolo, role s odpovědí (i bez bracketu — to řeší dnešní cesta po `collect`) → odmítnuto.
+- `retry --role R` v kole bez `collect.json` projde jen při přesně určeném stavu role: R je v `reviewers_expected` kola, `reviewer-R.json` neexistuje nebo je prázdný (prázdný soubor = revizor nic nenapsal), a buď `codex-R.usage.json` říká `answered: false`, nebo role nemá v bracketu `complete`. Otevřený `start` bez `complete` retry uzavře událostí `cancel` s důvodem `retry` (krok 3), aby nový bracket nestál vedle starého. Role mimo kolo, role s odpovědí (i bez bracketu — to řeší dnešní cesta po `collect`) → odmítnuto.
 - Chování po průchodu stejné jako dnes (re-probe Codexu, nebo nový bracket pro Claude).
 - AC: kolo, kde Codex skončil `rate_limited` a ostatní role neodpověděly, dovolí `retry` té role; role s odpovědí a role mimo kolo jsou odmítnuty; otevřený start je po retry zrušený, ne sirotčí.
 
@@ -66,7 +66,7 @@ Každý krok s kódem: jeden bats případ na pravidlo (odmítací cesta) + řá
 - AC: start bez `node_modules` doběhne (test s přejmenovaným adresářem a `npm` nahrazeným stubem, který složku vytvoří); selhání `npm` vrátí JSON s příkazem.
 
 ### Krok 8 — kritik: úprava plánu před `check` nezahodí běh (lib/aid-critic.sh, commands/aid-plan.md)
-- `aid_critic_check` ověřuje odpověď proti `prompt.md` (ten nese plán doslova) a proti `prepare.json`; když se plán na disku od `prepare` změnil, zapíše tuhle revizi rovnou jako `plan_sha256_revised` (jediná povolená revize) a vypíše to; následný `rebind` pak odmítne jako dnes („already rebound once“).
+- `aid_critic_check` ověřuje formu odpovědi a reakce autora (prompt jmenuje cestu plánu, kritik ho čte z disku při běhu; otisk plánu je v `prepare.json`); když se plán na disku od `prepare` změnil, zapíše tuhle revizi rovnou jako `plan_sha256_revised` (jediná povolená revize) a vypíše to; následný `rebind` pak odmítne jako dnes („already rebound once“).
 - Codex namítá, že odpověď kritika je vázaná na kritizovanou verzi. Proč je to přesto totéž jako dnešní check → rebind: check dnes ověřuje FORMU odpovědi a odpovědi autora (nadpisy, počet položek, řádky odpovědi, soubor u přijaté položky), ne obsah proti plánu; obsahově je odpověď v obou pořadích vázaná na plán z `prepare.json` (otisk zapsaný při přípravě) a autor plán změnil jednou po ní. Rozdíl je jen v pořadí dvou příkazů, a právě to pořadí dnes stojí jeden běh kritika. Zapsat do hlavičky `aid-critic.sh`.
 - `commands/aid-plan.md` 8a: pořadí „check → úprava → rebind, nebo úprava → check (revize se zapíše při checku)“ jednou větou.
 - AC: plán změněný mezi `prepare` a `check` projde checkem s `plan_sha256_revised` a `check.json` nese oba otisky; druhá změna + `rebind` odmítnuto; packet CP1 bere `critic-response.md` i pro revizi zapsanou checkem (hash `plan_sha256_revised`).
@@ -75,7 +75,7 @@ Každý krok s kódem: jeden bats případ na pravidlo (odmítací cesta) + řá
 - Krok 10 jmenuje `aid_brainstorm_summary_render` před `approve` a říká, proč (approve bez stránky odmítne). Jen dokumentace.
 
 ### Krok 10 — konec plánu říká, co nezměřil (aid-plan-diff.sh, aid-plan-fsm.sh produce + decide)
-- `aid-plan-diff.sh`: do `summary` přidá `step_criteria_skipped` = počet odrážek pod `**Acceptance Criteria:**` v krocích, které parser nebere, a `prose_criteria` = počet souhrnných kritérií bez vzoru. Při graceful skip (žádný vzor) totéž.
+- `aid-plan-diff.sh`: do `summary.unmeasured` přidá `step_bullets` = počet odrážek pod `**Acceptance Criteria:**` v krocích, které parser nebere, `summary_prose` = počet rozparsovaných souhrnných kritérií bez vzoru a `summary_unparsed` = souhrnné odrážky bez značky `AC<N>:`, které parser nebere. Při graceful skip (žádný vzor) totéž (jména klíčů upřesněna při stavbě).
 - `produce`: do `acceptance-evidence.json` zapíše `verdict.unmeasured: {summary_prose: N, step_bullets: M}` a vypíše jednu větu („změřeno 0 ze 13 souhrnných kritérií, 57 krokových odrážek neměřeno“).
 - `decide`: karta pro PM nese tu větu jako řádek; `status: pass` zůstává (PM varianta A pro P010 — doklad je v CP2 kolech), jen už ne potichu.
 - `aid-release-policy.sh` (řádek ~255) dnes u `prose_only` říká „kritéria posoudily recenze“; jeho zdůvodnění ponese tatáž čísla („0 ze 13 souhrnných změřeno, 57 krokových odrážek neměřeno“), aby karta a politika neříkaly dvě věci. Počty odrážek jsou míra toho, co nástroj nezměřil, ne důkaz splnění — tak to i pojmenovat (`unmeasured`, ne `unmet`).

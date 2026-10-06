@@ -582,7 +582,7 @@ if [[ -n "$SNAPSHOT" ]]; then
   new_heads="$(printf '%s\n' "$BLANKED" | grep -oE '^### Step [0-9]+' | sort -u)"
   for n in $(comm -3 <(printf '%s\n' "$old_heads") <(printf '%s\n' "$new_heads") | grep -oE '[0-9]+'); do TOUCHED["$n"]=1; done
   new_steps="$(comm -13 <(printf '%s\n' "$old_heads") <(printf '%s\n' "$new_heads") | tr '\n' ';')"
-  if [[ -n "$new_steps" ]]; then
+  if [[ -n "$new_steps" && "${FIX_ANY:-0}" != 1 ]]; then
     _block "C5" "$PLAN" "revision added step(s): ${new_steps} — a fix does not add steps; split or bring it to the PM"
     for n in $(grep -oE '[0-9]+' <<< "$new_steps"); do OUTSIDE_FIXES+=("${n}	step	### Step ${n}"); done
   fi

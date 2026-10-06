@@ -569,7 +569,7 @@ When `close` reports `fail` on a step or EPIC round and a round remains
 ```
 Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,
       model: <the **Model:** of the step's role card in skills/role-cards.md>,
-      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
+      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), before you commit, list every caller of each function you changed and every place the rule you introduce applies (graphify explain, or grep), fix those too, and put the list in the commit message; then commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
 ```
 
 **Close the round BEFORE the fix.** When the fix was committed first (the natural
@@ -866,7 +866,7 @@ is round 1 of the next attempt.
    ```
    Agent(subagent_type: <"aid-orchestrator:implementer-light" when that role's card says **Effort:** low, else "aid-orchestrator:implementer">,
          model: <the **Model:** of that role's card in skills/role-cards.md>,
-         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
+         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix the open findings by CLASS, not one by one (every finding that shares a rule or a pattern is one fix); before you commit, list every caller of each function you changed and every place the rule you introduce applies (graphify explain, or grep), fix those too, and put the list in the commit message; commit with the message prefix fix(review):, and report the fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
    ```
    The owning step is the one whose declared files cover the path (`plan.json` of the EPIC whose commit last touched it: `git log -1 -- <path>`).
 2. `--stage freeze` again. It mints the next attempt and writes `fix-class.json`:
@@ -876,6 +876,24 @@ is round 1 of the next attempt.
    and which had no finding is carried. The round's packet shows the re-asked
    reviewers what stayed open and the fix diff.
 3. `gates` (unchanged gates are copied), `produce`, the round, `decide`.
+
+**Closing is not development** (P010, agents: twelve attempts, four of the last
+findings written by the fixes). Three rules, and one number to watch:
+
+- **Fix by class, not by finding.** Eight separate fixes where three would do
+  are five extra attempts. Group the open findings by the rule they break and
+  send ONE fix per class.
+- **List the callers before the commit.** The fixer names every caller of what
+  it changed and every place the new rule applies, and fixes them in the same
+  commit — the confirmation round then checks the rule everywhere, not the
+  cited line again.
+- **Three attempts feeding on themselves → the PM, not another fix.** `close`
+  prints `closing: attempt N, M min since the first freeze, findings on lines
+  written during the closing: R …` (`measurement.json` `closing`). When R is
+  above zero for the third attempt in a row, do not fix: write the open
+  findings to the backlog and show the PM a **Decision** card — close with the
+  findings disputed and recorded / one more attempt / defer the plan. This is a
+  rule for you, not a gate: the plugin counts, you stop.
 
 An ancillary-only move after the freeze (AID's own bookkeeping, e.g. the id
 counter) costs nothing: `freeze` names `--stage freeze --accept-ancillary`, which

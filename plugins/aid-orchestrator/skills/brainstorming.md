@@ -281,7 +281,7 @@ It shows interactive mockups in your browser during design.
   (N) No — text-only brainstorming (default)"
 
 If PM accepts:
-1. Start server: `bash {plugin_path}/lib/brainstorm-server/start-server.sh --project-dir {project_root}`
+1. Start server: `bash {plugin_path}/lib/brainstorm-server/start-server.sh --project-dir {project_root} --plan P{NNN}` (off loopback add `--host 0.0.0.0 --url-host 10.20.20.22`; a UI run needs its basis first — `skills/visual-companion/SKILL.md` §Existing UI)
 2. Run `cd {plugin_path}/lib/brainstorm-server && npm install` if node_modules missing (first use)
 3. Save screen_dir from server response. Tell PM to open the URL.
 4. Note `visual_companion: active` in interim document

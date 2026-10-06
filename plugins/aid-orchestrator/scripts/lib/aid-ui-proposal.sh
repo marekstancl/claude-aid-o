@@ -8,6 +8,12 @@
 #                             [--fixture-data <mocks.json>] [--selector <css>]
 #                             [--brief <file>]
 #   aid_ui_proposal_check     <proposal.json> [project_root]
+#   aid_ui_proposal_basis_check <proposal.json> [project_root]   — the INPUT basis
+#                             alone (before anything is drawn): basis type, the
+#                             viewports owed, a baseline capture per viewport on
+#                             live-screen, the NO LIVE BASELINE mark on design-system.
+#                             One check for the brainstorm gate (enter-phase design)
+#                             and the companion start (2.114.0).
 #
 # WHY THIS EXISTS
 #   The PM's words: what the agents hand over is unusable for judging a UI
@@ -40,7 +46,7 @@
 #
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 #
-# **Last Updated:** 2026-08-25
+# **Last Updated:** 2026-10-06
 # =============================================================================
 [[ -n "${_AID_UI_PROPOSAL_SH_LOADED:-}" ]] && return 0
 _AID_UI_PROPOSAL_SH_LOADED=1
@@ -124,7 +130,7 @@ aid_ui_proposal_build() {
   if [[ -n "$screen" && -n "$fixture" && -r "$fixture" ]]; then
     basis="live-screen"
   elif [[ -n "$screen" ]]; then
-    reason="a screen was named but no readable fixture data was given — the application is never captured on real data, so the proposal is built from its design system instead"
+    reason="a screen was named (${screen}) but no readable fixture data was given (${fixture:-no --fixture-data}) — the application is never captured on real data, so the proposal is built from its design system instead"
   else
     reason="no screen to capture — the proposal is built from the application's own styles and components"
   fi
@@ -173,6 +179,36 @@ aid_ui_proposal_build() {
 #   proposal's own `responsive` field decides (the fixture case). Exit 1 names
 #   the first failure; 2 when the file cannot be read.
 # ---------------------------------------------------------------------------
+aid_ui_proposal_basis_check() {
+  local f="${1:?basis check: proposal file required}" root="${2:-}"
+  [[ -f "$f" ]] || { echo "basis check: no proposal at ${f}" >&2; return 2; }
+  jq -e 'type == "object" and (.viewports | type == "array") and (.viewports | length > 0)
+         and all(.viewports[]; (.name | type == "string") and (.width | type == "number") and (.height | type == "number"))' "$f" >/dev/null 2>&1 \
+    || { echo "basis check: ${f} is not a proposal basis (viewports with name, width, height)" >&2; return 1; }
+  local basis marked
+  IFS=$'\x1f' read -r basis marked < <(jq -r '[.basis // "", .marked // ""] | join("\u001f")' "$f")
+  case "$basis" in
+    live-screen) ;;
+    design-system)
+      [[ "$marked" == "NO LIVE BASELINE"* ]] || { echo "basis check: a design-system basis must be marked NO LIVE BASELINE with its reason" >&2; return 1; } ;;
+    *) echo "basis check: basis '${basis}' is neither live-screen nor design-system" >&2; return 1 ;;
+  esac
+  local owed name w h baseline
+  if [[ -n "$root" ]]; then owed="$(aid_ui_proposal_viewports "$root")"
+  elif [[ "$(jq -r '.responsive' "$f")" == "false" ]]; then owed="$_AID_UP_DESKTOP"
+  else owed="$(printf '%s\n%s' "$_AID_UP_DESKTOP" "$_AID_UP_MOBILE")"; fi
+  while read -r name w h; do
+    [[ -n "$name" ]] || continue
+    baseline="$(jq -r --arg n "$name" '.viewports[] | select(.name == $n) | .baseline // ""' "$f" | head -1)"
+    jq -e --arg n "$name" '.viewports[] | select(.name == $n)' "$f" >/dev/null 2>&1 \
+      || { echo "basis check: the ${name} viewport (${w}x${h}) is owed by this project and is not in the basis" >&2; return 1; }
+    if [[ "$basis" == "live-screen" ]]; then
+      [[ -n "$baseline" && -s "$baseline" ]] || { echo "basis check: the ${name} viewport has no baseline capture (${baseline:-none}) — a live-screen basis without its screenshot" >&2; return 1; }
+    fi
+  done <<< "$owed"
+  return 0
+}
+
 aid_ui_proposal_check() {
   local f="${1:?check: proposal file required}" root="${2:-}"
   jq -e 'type == "object" and (.viewports | type == "array")' "$f" >/dev/null 2>&1 \

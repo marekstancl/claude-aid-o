@@ -234,6 +234,9 @@ teardown() {
   mkdir -p "$EVID/free" "$EVID/broken"
   run bash "$SCRIPT" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID/free"
   [ "$status" -eq 0 ]
+  mkdir -p "$EVID/six"; jq -n '{reviewers_expected: ["step_generalist"]}' > "$EVID/six/round.json"
+  run bash "$SCRIPT" start --focus cp6-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID/six"
+  [ "$status" -eq 0 ]                                          # every checkpoint prefix is known, cp6 included
   echo '{"round": 1}' > "$EVID/broken/round.json"
   run bash "$SCRIPT" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID/broken"
   [ "$status" -eq 1 ]; [[ "$output" == *"no reviewers_expected"* ]]

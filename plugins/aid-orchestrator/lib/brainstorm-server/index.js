@@ -5,6 +5,7 @@ const chokidar = require('chokidar');
 const fs = require('fs');
 const path = require('path');
 const confirms = require('./confirm-store');
+const basisMod = require('./basis');   // 2.114.0: the real screen a UI brainstorm's proposal stands beside
 
 const PORT = process.env.BRAINSTORM_PORT || (49152 + Math.floor(Math.random() * 16383));
 const HOST = process.env.BRAINSTORM_HOST || '127.0.0.1';
@@ -12,6 +13,7 @@ const URL_HOST = process.env.BRAINSTORM_URL_HOST || (HOST === '127.0.0.1' ? 'loc
 // Hostnames a confirm may arrive on (the port may differ behind a port forward).
 const CONFIRM_HOSTS = ['localhost', '127.0.0.1', '::1', HOST, URL_HOST];
 const SCREEN_DIR = process.env.BRAINSTORM_DIR || '/tmp/brainstorm';
+const BASIS = basisMod.load(process.env.BRAINSTORM_BASIS || '');   // throws on a broken basis: no server over a wrong one
 
 if (!fs.existsSync(SCREEN_DIR)) {
   fs.mkdirSync(SCREEN_DIR, { recursive: true });
@@ -98,8 +100,11 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// Serve newest screen with helper.js injected
-app.get('/', (req, res) => {
+// Serve newest screen with helper.js injected. With a basis (a UI brainstorm),
+// "/" is the composed page — today beside the proposal — and the agent's screen
+// itself moves to "/screen" (the frame inside the composed page loads it).
+basisMod.routes(app, BASIS);
+function serveScreen(req, res) {
   const screenFile = getNewestScreen();
   let html;
 
@@ -120,7 +125,9 @@ app.get('/', (req, res) => {
   }
 
   res.type('html').send(html);
-});
+}
+app.get('/screen', serveScreen);
+app.get('/', BASIS ? (req, res) => res.type('html').send(basisMod.compose(BASIS, '/screen')) : serveScreen);
 
 // The PM's confirm of one screen, from memory: {screen, selected, text?, at} or 404. Read-only.
 app.get('/aid/confirmed', (req, res) => {
@@ -164,6 +171,7 @@ server.listen(PORT, HOST, () => {
     host: HOST,
     url_host: URL_HOST,
     url: `http://${URL_HOST}:${PORT}`,
-    screen_dir: SCREEN_DIR
+    screen_dir: SCREEN_DIR,
+    basis: BASIS ? BASIS.basis : null
   }));
 });

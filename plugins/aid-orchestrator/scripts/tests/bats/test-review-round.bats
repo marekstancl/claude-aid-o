@@ -884,6 +884,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   local r; for r in final_criteria final_claims final_generalist; do _fanswer 1 "$r"; done
   _F collect --round 1 >/dev/null
   run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"closing: attempt 1, "*"findings on lines written during the closing: 0 (uncited: 0, unblamed: 0), codex findings refused on form: 0"* ]]   # 2.114.0
   [ "$(jq -r .verdict "$E/cp7/rounds.json")" = pass ]
   [ "$(jq -r .head_sha "$E/cp7/rounds.json")" = "$(git -C "$R" rev-parse HEAD)" ]
   local f="$E/semantic-review-final.json"
@@ -1258,4 +1259,7 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   jq '.findings[0] |= (.severity = "major" | .step = null)' "$CP1/round-1/merged.json" > "$ROOT/m" && mv "$ROOT/m" "$CP1/round-1/merged.json"
   run "$ROUND_SH" fix-check "$PLAN" --round 1
   echo "$output"; [ "$status" -eq 0 ]; [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = any ]
+  # finalize runs the same check with the same list
+  run "$ROUND_SH" finalize "$PLAN"
+  echo "$output"; [ "$status" -eq 0 ]; [ -f "$CP1/round-1/plan-final.md" ]
 }

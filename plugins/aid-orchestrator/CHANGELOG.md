@@ -3,6 +3,28 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.114.0] — 2026-10-06
+
+Co zbylo z P010 (agents) a z P106/P108: zavření plánu rozhodnutím, kola bez patu, měření, kolik toho zavírání samo rozbilo, a companion, který přes VPN naběhne a vždy ukáže skutečný stav aplikace vedle návrhu. Vše vynucené mechanismem; tvrdý strop kol a mutace jako brána zatím ne (PM 6. 10. 2026, 2A: nejdřív čísla).
+
+### Added
+- **`dispute --checkpoint cp7`** — nález závěrečné kontroly, který autor vyvrátil měřením, PM odložil do backlogu nebo rozhodčí zamítl na formě (`form_invalid`, důkaz mimo repozitář kandidáta), se vyřídí stejnou kartou a odpovědí PM jako u CP2/CP3; dispute zapíše své zápisy jako stage (`cp7-dispute-<odpověď>`), takže `plan-finalize --stage decide` čte rozhodnutí, ne „soubory změněné po close“. P010 (agents) se dvanáct kol nedal zavřít a skončil ručním merge s FSM v `PLAN_REVIEW`.
+- **`retry` před `collect`** — role, která v kole nic nedala (bez souboru odpovědi; záznam Codexu `answered: false`, nebo bracket bez `complete`), jde pustit znovu hned; otevřený start se stáhne (`cancel`, důvod `retry`). Role s odpovědí, mimo kolo nebo s dokončeným bracketem je dál odmítnuta. Limit účtu shodil všechny role najednou a kolo stálo.
+- **`aid-emit-dispatch.sh start` odmítne roli, kterou kolo nemá** (`reviewers_expected` v `round.json`; `round.json` bez seznamu rolí také odmítnut), a **`cancel --focus … --reason`** poctivě stáhne otevřený start: řádek `cancel` v ledgeru, událost `verifier_dispatch_cancel` v timeline, ŽÁDNÝ `complete` — odpověď podaná pod staženým startem nemá původ a `close` ji dál odmítá; `close` stažené starty jmenuje (`measurement.json` `cancelled_starts`). Platí poslední bracket: starý `complete` nedosvědčí soubor napsaný po novějším stažení.
+- **Měření zavírání** — každý `close` u CP7 zapíše `closing` (pokus z řetězu `fix-class.json`, minuty od prvního zmrazení, počet vážných nálezů, jejichž první citovaný řádek napsalo až zavírání — `git blame` proti prvnímu kandidátovi, korelace, ne rozsudek —, necitované řádky, nálezy Codexu zamítnuté na formě) a vypíše řádek `closing: attempt N, M min …`. `aid-run.md` dostal pravidla zavírání: opravy po třídách, seznam volajících před commitem, po třetím pokusu, který se živí sám, karta PM místo další opravy (pravidlo pro controller, ne brána).
+- **Konec plánu říká, co nezměřil** — `aid-plan-diff.sh` počítá `summary.unmeasured` (souhrnná kritéria bez vzoru, souhrnné odrážky bez značky `AC<N>:`, krokové odrážky pod `**Acceptance Criteria:**`), `produce` je zapíše do `acceptance-evidence.json` (`verdict.unmeasured`, `measured`) a vypíše, release policy je nese ve zdůvodnění a stránka pro PM má řádek „Acceptance criteria“. P010: 13 měřených proti ~57 krokovým, `status: pass` a nikdo si nevšiml.
+- **Companion na pevném portu z rozsahu AID** — mimo loopback první volný slot 3910, 3912 (`AID_COMPANION_PORTS`), `--port` mimo 3900–3999 odmítnut, obsazené sloty se nepřebírají (výpis držitelů, příkaz `stop-server.sh`), po startu `curl` na vytištěnou adresu; `stop-server.sh --stale [h] --project-dir <root>` zastaví zapomenuté companiony jednoho projektu (jen `node index.js` z `brainstorm-server`). Náhodný vysoký port přes VPN neprošel dvakrát za den (agents P013, WAN helpdesk, 6. 10. 2026); že rozsah 3900–3999 prochází, je provozní fakt ověřený studiem, ne vlastnost kódu.
+- **Companion skládá „dnes → návrh“ sám** — `--project-dir` vyžaduje `--plan`; běh musí říct `topic_kind ui|other` (zavírá únik přes scope `roadmap`); UI běh musí mít `proposal.json` z aplikace podle jedné sdílené kontroly `aid_ui_proposal_basis_check` (brána `enter-phase design` ji volá taky); server (`lib/brainstorm-server/basis.js`) servíruje snímky pod `/basis/<viewport>/baseline.png` a na `/` ukáže skutečný snímek v reálné šířce vedle obrazovky agenta ve stejné šířce (`/screen` v rámu), u základu `design-system` pruh NO LIVE BASELINE s důvodem. Agent skutečný stav nemůže vynechat. Skill má tvrdý krok „Existing UI: the basis from the application comes first“.
+- **Companion si doinstaluje závislosti** — chybějící `node_modules` po aktualizaci pluginu `start-server.sh` nainstaluje a zapíše do `.server.log`; selhání vypíše přesný příkaz místo „failed to start within 5 seconds“.
+- **`aid-generation-readiness.sh --project-root`** — plán stojící na větvi jiného plánu se kontroluje proti jeho worktree (plan-check to uměl, readiness ne; P106).
+- **Kritik: úprava plánu před `aid_critic_check`** se zapíše jako ta jedna povolená revize (`plan_sha256_revised`, `revised_before_check: true`), `aid_critic_rebind` je pak odmítnut jako druhá; check, který padne na formě, revizi nezapisuje. P108: druhý běh kritika za ~115k tokenů kvůli pořadí dvou příkazů.
+
+### Changed
+- **Fix list po kole CP1** jmenuje krok každého otevřeného nálezu (i minor); otevřený plán-level blocker/major dává `any` (`aid-plan-check.sh --fixes any` vypne jen C4/C5). P106: tři minory jmenovaly krok 5 a oprava tam byla odmítnuta jako nevyžádaná.
+- **Název s lomítkem není cesta** (`_aid_artifact_looks_like_path`: dvě složky, přípona nebo dotfile); „the /aid-ui studio“ už stránka plánu neodmítá.
+- `commands/aid-plan.md` krok 10 jmenuje vykreslení stránky brainstormu před `approve`; krok 8a říká, že pořadí check/úprava/rebind nerozhoduje; readiness zná `--project-root`.
+- Registr vynucení: devět nových řádků (590).
+
 ## [2.113.0] — 2026-09-30
 
 Pět pastí z projektu agents (P010 na 2.111.0), každá zavřená mechanismem, ne větou v návodu.

@@ -313,6 +313,11 @@ passes here is not refused there:
 bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total <EPIC count>
 ```
 
+A plan whose frontmatter names `depends_on_plans` and stands on an unmerged
+plan's work adds `--project-root .aid-worktrees/plan-<that id>` (the worktree
+of the dependency): its paths exist there, not in the main checkout, and
+without it readiness says "file not found" for work that is real (P106).
+
 **The critic over the written plan (before CP1, after the generation check
 passes).** The same trio, at the plan moment:
 
@@ -522,7 +527,7 @@ skipped. The gate then passes with a notice.
    revision makes it stale; rerun it after every edit):
 
    ```bash
-   bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" <plan> --total <EPIC count>
+   bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" <plan> --total <EPIC count>   # + --project-root .aid-worktrees/plan-<dep> for a plan on another plan's branch
    ```
 
 2. Prepare round 1. It prints the round directory and one prompt per reviewer:

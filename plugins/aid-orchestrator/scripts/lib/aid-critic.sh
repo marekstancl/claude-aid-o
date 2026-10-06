@@ -174,13 +174,16 @@ aid_critic_check() {
   answer="${dir}/critic.md"; response="${dir}/critic-response.md"
   [[ -f "${dir}/prompt.md" && -f "${dir}/prepare.json" ]] || { echo "critic: nothing prepared at ${dir} — run aid_critic_prepare first" >&2; return 2; }
   [[ -f "$answer" ]] || { echo "critic: the critic did not write ${answer}" >&2; return 4; }
-  # The plan the critic read is the plan prepare hashed (prompt.md carries it
-  # verbatim); the check judges the FORM of the answer and the response, so a
-  # plan edited between prepare and check is not "checked against nothing" —
-  # it is the one revision the author may make for the accepted items, and
-  # the check records it as such (2.114.0, P108: refusing it cost a second
-  # critic run of ~115k tokens for the order of two commands). A rebind after
-  # that is refused as the second revision it would be.
+  # prepare hashed the plan and the prompt names its path; the critic reads the
+  # file when it runs. The check judges the FORM of the answer and the response,
+  # so a plan that differs from the prepare hash at check time is not "checked
+  # against nothing": either the author edited it before the critic ran (the
+  # critic then read the edited plan) or after the critique (the one revision
+  # the author may make for the accepted items — what a rebind records). Both
+  # end in the same state, so the check records the current hash as that one
+  # revision (2.114.0, P108: refusing it cost a second critic run of ~115k
+  # tokens for the order of two commands). A rebind after that is refused as
+  # the second revision it would be.
   local revised=""
   if [[ "$_ac_moment" == "plan" ]]; then
     sha_plan="$(jq -r '.plan_sha256 // ""' "${dir}/prepare.json")"

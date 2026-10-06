@@ -770,7 +770,9 @@ _dispatch_recorded() {
   [[ "$(_bracket_last "$1" "$2")" == complete ]] || return 1
   # No `jq -e`: under pipefail it exits 4 when the LAST input yields nothing, which is the usual case.
   jq -c --arg f "$focus" 'select(.event == "verifier_dispatch_start" and .focus == $f)' "$tl" 2>/dev/null | grep -q . || return 1
-  jq -c --arg f "$focus" --arg r "$2" 'select(.event == "verifier_dispatch_complete" and .focus == $f and ((.output_file // "") | test("reviewer-" + $r + "\\.(json|missing)$")))' "$tl" 2>/dev/null | tail -1 | grep -q .
+  # the LAST complete of the focus is the one that counts, and it must name this role's file
+  jq -r --arg f "$focus" 'select(.event == "verifier_dispatch_complete" and .focus == $f) | .output_file // ""' "$tl" 2>/dev/null | tail -1 \
+    | grep -Eq "reviewer-${2}\.(json|missing)$"
 }
 
 # ── the semantic file of a whole-EPIC (cp3) or whole-plan (cp7) round ─────────
@@ -833,6 +835,71 @@ _semantic_final_write() {
     echo "close: semantic-review-final.json does not satisfy ${schema}: ${err}" >&2; rm -f "$tmp"; return 1
   fi
   mv "$tmp" "$out"
+}
+
+# _closing_measure <round dir> <measurement.json> — cp7 only (2.114.0, agents
+# P010: twelve closing rounds, four of the last findings introduced by the
+# fixes, and nothing added it up). Written into measurement.json as `closing`:
+#   attempt                            — this attempt's number in the fix-class chain
+#   minutes_since_first_freeze         — from the first attempt's first record
+#   findings_on_lines_changed_at_close — blocker/major findings whose first cited
+#                                        line was last written by a commit that is
+#                                        NOT in the first candidate's history, i.e.
+#                                        a line the closing wrote (git blame; a
+#                                        correlation, not a verdict)
+#   uncited_lines                      — findings whose first citation has no line
+#   codex_form_invalid                 — form_invalid findings of a codex role
+# The summary line names the three numbers so a closing that feeds itself is
+# visible after every round, not after a day.
+_closing_measure() {
+  local dir="$1" measurement="$2" cur="$EVID" attempt=1 fc prev first_run first_cand="" first_at="" minutes=null
+  while fc="${cur}/fix-class.json"; [[ -f "$fc" ]]; do
+    prev="$(jq -r '.previous_run_dir // ""' "$fc")"; [[ -n "$prev" ]] || break
+    prev="$(dirname "$EVID")/$(basename "$prev")"; [[ -d "$prev" && "$prev" != "$cur" ]] || break
+    cur="$prev"; attempt=$((attempt + 1))
+  done
+  first_run="$cur"
+  first_cand="$(jq -r '.rounds[0].head_sha // .head_sha // ""' "${first_run}/cp7/rounds.json" 2>/dev/null)"
+  first_at="$(jq -rs 'map(.at // empty) | sort | first // ""' "${first_run}/stage-writes.jsonl" 2>/dev/null)"
+  [[ -n "$first_at" ]] || first_at="$(jq -r '.rounds[0].prepared_at // ""' "${first_run}/cp7/rounds.json" 2>/dev/null)"
+  if [[ -n "$first_at" ]]; then
+    local t0; t0="$(date -u -d "$first_at" +%s 2>/dev/null || echo "")"
+    [[ -n "$t0" ]] && minutes=$(( ( $(date -u +%s) - t0 ) / 60 ))
+  fi
+  # uncited_lines: a first citation with no line number. unblamed: a cited line
+  # git cannot attribute at HEAD (the file or line is gone) — counted apart, so
+  # neither is mistaken for the other. No first candidate: the regression count
+  # is null and `error` says so; nothing is counted as uncited for that reason.
+  local regress=0 uncited=0 unblamed=0 measure_error="" ev first path line sha
+  [[ -n "$first_cand" ]] || measure_error="first candidate unknown: ${first_run}/cp7/rounds.json has no head_sha"
+  while IFS= read -r ev; do
+    first="$(aid_plan_review_citation_parts "$ev" 2>/dev/null | head -1)"
+    if [[ "$first" =~ ^([^:]+):([0-9]+)$ ]]; then
+      [[ -n "$first_cand" ]] || continue
+      path="${BASH_REMATCH[1]}"; line="${BASH_REMATCH[2]}"
+      sha="$(git -C "$ROOT" blame -L "${line},${line}" --porcelain HEAD -- "$path" 2>/dev/null | head -1 | cut -d' ' -f1)"
+      if [[ -n "$sha" ]]; then
+        git -C "$ROOT" merge-base --is-ancestor "$sha" "$first_cand" 2>/dev/null || regress=$((regress + 1))
+      else
+        unblamed=$((unblamed + 1))
+      fi
+    else
+      uncited=$((uncited + 1))
+    fi
+  done < <(jq -r '.findings[] | select(.severity == "blocker" or .severity == "major") | .evidence // ""' "${dir}/merged.json")
+  local codex_fi=0 role i
+  while IFS= read -r role; do
+    [[ -n "$role" ]] || continue
+    i="$(aid_review_role_index "$role" 2>/dev/null)" || continue
+    [[ "${RC_PROVIDER[$i]:-}" == codex ]] && codex_fi=$((codex_fi + 1))
+  done < <(jq -r '.findings[] | select(.status == "form_invalid") | .reported_by[0] // ""' "${dir}/merged.json")
+  local regress_json="$regress"; [[ -n "$measure_error" ]] && regress_json=null
+  jq --argjson a "$attempt" --arg fc "$first_cand" --argjson m "$minutes" --argjson r "$regress_json" --argjson u "$uncited" --argjson ub "$unblamed" --argjson c "$codex_fi" --arg e "$measure_error" \
+     '. + {closing: ({attempt: $a, first_candidate: $fc, minutes_since_first_freeze: $m, findings_on_lines_changed_at_close: $r, uncited_lines: $u, unblamed_lines: $ub, codex_form_invalid: $c}
+                     + (if $e != "" then {error: $e} else {} end))}' \
+     "$measurement" > "${measurement}.tmp" && mv "${measurement}.tmp" "$measurement"
+  CLOSING_LINE="closing: attempt ${attempt}, ${minutes} min since the first freeze, findings on lines written during the closing: ${regress_json} (uncited: ${uncited}, unblamed: ${unblamed})${measure_error:+ [${measure_error}]}, codex findings refused on form: ${codex_fi}"
+  _log review_closing_measure attempt="$attempt" minutes="$minutes" findings_on_lines_changed_at_close="$regress_json" uncited_lines="$uncited" unblamed_lines="$unblamed" codex_form_invalid="$codex_fi" error="${measure_error:-none}"
 }
 
 # _record_final_writes — a cp7 close is a stage of the plan close: what it wrote
@@ -992,6 +1059,8 @@ to close the round at the revision the reviewers saw; the fix is confirmed by th
        | (if $dc == "stubbed" then .dispatch_check = "stubbed" else . end)' "$index" > "${index}.tmp" && mv "${index}.tmp" "$index"
     jq --arg at "$(_now)" --arg v "$verdict" '. + {closed_at: $at, verdict: $v}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
   fi
+  CLOSING_LINE=""
+  [[ "$CHECKPOINT" == cp7 ]] && _closing_measure "$dir" "$measurement"
   _record_final_writes
   local blockers; blockers="$(jq -r '.blockers_open // 0' "${dir}/merged.json" 2>/dev/null || echo 0)"
   # withdrawn starts (aid-emit-dispatch.sh cancel) are named, never silent
@@ -1006,6 +1075,7 @@ to close the round at the revision the reviewers saw; the fix is confirmed by th
   # is valid, and what it left open is the number that matters.
   local outcome="$verdict"; [[ "$MODE" == plan ]] && outcome="valid; open blockers: ${blockers}"
   echo "round ${ROUND} closed (${outcome}): $(jq -r '[.reviewers | to_entries[] | "\(.key)=\(.value.tokens)"] | join(" ")' "$measurement")${cancelled:+  [withdrawn starts: ${cancelled}]}$([[ "$stub" == true ]] && echo '  [stub: no dispatch check; the FSM refuses this round]')"
+  if [[ -n "$CLOSING_LINE" ]]; then echo "$CLOSING_LINE"; fi
 }
 
 # ── CP1-only subcommands ──────────────────────────────────────────────────────

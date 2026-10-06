@@ -388,3 +388,22 @@ _with_epic_bound_gate() {
   grep -q '"stage":"cp7-dispute-accepted"' "$(_run_dir)/stage-writes.jsonl"
   _stage decide; echo "$output"; [ "$status" -eq 0 ]; [ "$(_decision release_ready)" = true ]
 }
+
+# ── 2.114.0: the closing measurement ─────────────────────────────────────────
+@test "closing measure: attempt 1 counts no line as written during the closing; a finding on a line the fix wrote counts in attempt 2, an uncited one is named" {
+  _project
+  _close_up_to_decide "$_BLOCKER"                                 # evidence app.py:1, a line of the base
+  local m1="$(_run_dir)/cp7/round-1/measurement.json"
+  [ "$(jq -c '.closing | [.attempt, .findings_on_lines_changed_at_close, .uncited_lines, .unblamed_lines, .codex_form_invalid, (.error // "none")]' "$m1")" = '[1,0,0,0,0,"none"]' ]
+  [ "$(jq -r .closing.first_candidate "$m1")" = "$(jq -r .head_sha "$(_run_dir)/cp7/rounds.json")" ]
+  echo 'print("hello!")' > "$R/app.py"; git -C "$R" commit -qam "fix(review): louder"
+  _stage freeze; [ "$status" -eq 0 ]; _stage gates; _stage produce
+  run _round '.findings = [{id: "c-2", checkpoint: "cp7", step: null, severity: "major", claim: "the greeting is now too loud", command: "grep -n hello app.py", evidence: "app.py:1", fix: "quieter", rule: "greet once"},
+                           {id: "c-3", checkpoint: "cp7", step: null, severity: "major", claim: "the readme is silent", command: "ls", evidence: "absent:README.md", fix: "write it", rule: "a readme exists"}] | del(.no_findings_reason)'
+  [ "$status" -eq 0 ]                                             # _round discards close's stdout; the line is checked in the round test below
+  local m2="$(_run_dir)/cp7/round-1/measurement.json"
+  [ "$(jq -c '.closing | [.attempt, .findings_on_lines_changed_at_close, .uncited_lines]' "$m2")" = '[2,1,1]' ]
+  [ "$(jq -r '.closing.minutes_since_first_freeze | type' "$m2")" = number ]
+  grep -q '"review_closing_measure"' "$(_run_dir)/timeline.jsonl"
+  [[ "$(jq -r 'select(.event == "review_closing_measure") | .findings_on_lines_changed_at_close' "$(_run_dir)/timeline.jsonl" | tail -1)" == 1 ]]
+}
