@@ -27,6 +27,7 @@ while [[ $# -gt 0 ]]; do case "$1" in --output-dir) out="$2";; --viewport-width)
 [[ -n "$mocks" ]] || { echo "no mocks" >&2; exit 1; }
 [[ -n "${FAIL_WIDTH:-}" && "$w" == "$FAIL_WIDTH" ]] && { echo "viewport refused" >&2; exit 1; }
 printf 'png %s' "$w" > "$out/baseline.png"
+[[ -n "${NO_PAGE:-}" ]] || printf '<html>%s</html>' "$w" > "$out/baseline.html"
 SH
   chmod +x "$TMP/capture.sh"
   export AID_UI_CAPTURE_CMD="$TMP/capture.sh"
@@ -122,4 +123,12 @@ teardown() { rm -rf "$TMP"; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"the mobile viewport (390x844) could not be captured"* ]]
   [ ! -e "$OUT/proposal.json" ]
+}
+
+@test "proposal: the page as rendered is recorded per viewport when the capture wrote it, null when it did not (2.114.0)" {
+  aid_ui_proposal_build "$TMP/proj" "$TMP/out" --screen http://x/ --fixture-data "$TMP/mocks.json"
+  [ "$(jq -r '.viewports[0].page' "$TMP/out/proposal.json")" = "$TMP/out/desktop/baseline.html" ]
+  [ -s "$TMP/out/desktop/baseline.html" ]
+  NO_PAGE=1 aid_ui_proposal_build "$TMP/proj" "$TMP/out2" --screen http://x/ --fixture-data "$TMP/mocks.json"
+  [ "$(jq -r '.viewports[0].page' "$TMP/out2/proposal.json")" = null ]
 }

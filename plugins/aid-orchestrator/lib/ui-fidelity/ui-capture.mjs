@@ -6,6 +6,7 @@
  *
  * Outputs to --output-dir:
  *   <target-id>.png           — clipped screenshot of matched element
+ *   <target-id>.html          — the whole page as rendered (stylesheets inlined, scripts dropped, <base> to the app)
  *   baseline-computed.json    — computed styles, bbox, text, aria attributes
  *
  * Part of E-056 E7A foundation. Standalone — no pipeline/FSM wiring.
@@ -53,6 +54,7 @@ Options:
 
 Output files (written to --output-dir):
   <target-id>.png           Clipped screenshot of the matched element
+  <target-id>.html          The page as rendered: stylesheets inlined, scripts dropped, <base href> to the app
   baseline-computed.json    Computed styles, bbox, text content, aria attributes
 
 API mocks file format (array):
@@ -183,6 +185,33 @@ async function capture({ url, selector, targetId, outputDir, apiMocksFile, viewp
     const locator = page.locator(selector).first();
     const pngPath = join(absOutputDir, `${targetId}.png`);
     await locator.screenshot({ path: pngPath });
+
+    // The page as the browser built it (2.114.0): stylesheets inlined, scripts
+    // dropped, a <base> so images and fonts still resolve to the running app.
+    // This is "exactly what we have" — the companion hands it to the agent as
+    // the file to lay the change into, instead of a drawing from memory.
+    const htmlPath = join(absOutputDir, `${targetId}.html`);
+    const rendered = await page.evaluate(async (baseHref) => {
+      const doc = document.documentElement.cloneNode(true);
+      const links = Array.from(doc.querySelectorAll('link[rel~="stylesheet"]'));
+      for (const link of links) {
+        try {
+          const res = await fetch(link.href);
+          const css = await res.text();
+          const style = document.createElement('style');
+          style.setAttribute('data-inlined-from', link.href);
+          style.textContent = css;
+          link.replaceWith(style);
+        } catch (e) { /* keep the link; <base> resolves it against the app */ }
+      }
+      doc.querySelectorAll('script').forEach(n => n.remove());
+      const head = doc.querySelector('head') || doc.insertBefore(document.createElement('head'), doc.firstChild);
+      if (!head.querySelector('base')) {
+        const base = document.createElement('base'); base.setAttribute('href', baseHref); head.insertBefore(base, head.firstChild);
+      }
+      return '<!DOCTYPE html>\n' + doc.outerHTML;
+    }, url);
+    writeFileSync(htmlPath, rendered, 'utf8');
 
     // Write computed JSON
     const jsonPath = join(absOutputDir, 'baseline-computed.json');

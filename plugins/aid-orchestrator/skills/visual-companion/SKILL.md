@@ -32,7 +32,7 @@ a demo / smoke-test session:
    **3b. Pick command:**
    - **Local (agent runs on PM's machine):** `start-server.sh` — no `--project-dir` (the demo lives in `/tmp` and needs no run), defaults to `127.0.0.1`, URL `http://localhost:<port>`.
    - **Remote (agent on dev server, PM on laptop/phone via VPN/SSH):**
-     `start-server.sh --host 0.0.0.0 --url-host <reachable-ip>` where `<reachable-ip>` is the VPN/LAN address PM uses to reach the host (e.g. `10.20.20.22`). Without `--host 0.0.0.0` the server binds loopback only and PM's browser gets connection refused. Without `--url-host <IP>` the returned URL still says `localhost` and PM can't paste it. The port is a companion slot from the AID range (3910, 3912) — never a random high port, which the VPN does not pass.
+     `start-server.sh --host 0.0.0.0 --url-host <reachable-ip>` where `<reachable-ip>` is the VPN/LAN address PM uses to reach the host (e.g. `10.20.20.22`). Without `--host 0.0.0.0` the server binds loopback only and PM's browser gets connection refused. Without `--url-host <IP>` the returned URL still says `localhost` and PM can't paste it. The port is a companion slot from the AID range (3930–3949) — never a random high port, which the VPN does not pass.
    - A demo inside a project (`--project-dir`) is a companion of a run and needs `--plan <id>` like any other (see "Existing UI" below).
 
 4. **Tell PM the URL** explicitly (full `http://<host>:<port>`) and write one
@@ -70,13 +70,19 @@ what you do, in order, before a single mockup of an existing screen:
 3. **Start the companion with the run:** `start-server.sh --project-dir
    <project_root> --plan <plan> …` (below). A UI run without its basis is
    refused with the build command.
-4. **The server composes the page:** left, the real screenshot at its real
-   width; right, your screen at the same width, one tab per viewport. You
-   cannot leave the current state out. Your screen is built from the
-   application's own components and tokens (`design_system` in
-   `proposal.json`): **no icons or images the application does not have.**
-   Keep the inventory of data shapes and the PM question of the "Read the Code
-   First" section — the basis does not replace knowing what the data allows.
+4. **Your screen is the real page with the change laid into it.** The capture
+   also saved the page as the browser built it (`baseline.html` per viewport,
+   stylesheets inlined, served at `/basis/<viewport>/page.html`). Copy it into
+   the session directory as your screen file and edit THAT: add the element,
+   widen the field, change the label. Same fonts, same spacing, same icons,
+   because it is the same page. Draw by hand only what the page does not show
+   (a menu that opens, a dialog) — inside that copy, with its own classes.
+   **No icons or images the application does not have.**
+5. **The server composes the page:** left, the real screenshot at its real
+   width; right, your screen at the same width, one tab per viewport; the tab
+   title names the plan and the project. You cannot leave the current state
+   out. Keep the inventory of data shapes and the PM question of the "Read the
+   Code First" section — the basis does not replace knowing what the data allows.
 
 ## Phase-Aware Baseline Capture
 
@@ -239,7 +245,7 @@ The server watches a directory for HTML files and serves the newest one to the b
 # Start server with persistence (mockups saved to project); the run it serves is named
 {plugin_path}/lib/brainstorm-server/start-server.sh --project-dir /path/to/project --plan P{NNN}
 
-# Returns: {"type":"server-started","port":3910,"url":"http://10.20.20.22:3910",
+# Returns: {"type":"server-started","port":3930,"url":"http://10.20.20.22:3930",
 #           "screen_dir":"/path/to/project/.aid-o/work/companion/12345-1706000000",
 #           "bind_host":"0.0.0.0","url_host":"10.20.20.22","hint":"open the URL from the PM's machine (VPN) …"}
 ```
@@ -248,7 +254,9 @@ Save `screen_dir` from the response. Tell user to open the URL.
 
 **Note:** Pass the project root as `--project-dir` so mockups persist in `.aid-o/work/companion/` and survive server restarts; `--project-dir` requires `--plan <the brainstorm run>` (2.114.0 — the run says whether it is a screen of an existing application, see "Existing UI" above). Without `--project-dir`, files go to `/tmp` and get cleaned up (the standalone demo). The `.aid-o/work/` directory is already gitignored by AID — no extra `.gitignore` entry needed.
 
-**Ports (2.114.0).** Off loopback (`--host 0.0.0.0`) the server takes the first free companion slot — 3910, then 3912 — from the AID range the VPN passes; a random high port is never used there (the PM got `ERR_CONNECTION` twice on 6. 10. 2026 — an operational fact of eco-dev, so the docs say "verified by use", not "guaranteed by code"). Both slots busy → the start refuses, names who holds them and never takes a running session over; stop a forgotten one (`stop-server.sh`, below) or pass `--port <3900-3999>`. The start checks that the printed URL answers from the host; the PM confirms it opens from the VPN.
+**Ports (2.114.0).** Off loopback (`--host 0.0.0.0`) the server takes the first free companion slot from 3930–3949 (twenty; the PM runs ten at once) — the AID range the VPN passes; a random high port is never used there (the PM got `ERR_CONNECTION` twice on 6. 10. 2026 — an operational fact of eco-dev, so the docs say "verified by use", not "guaranteed by code"). Every slot busy → the start refuses, names who holds them and never takes a running session over; stop a forgotten one (`stop-server.sh`, below) or pass `--port <3900-3999>`. The start checks that the printed URL answers from the host; the PM confirms it opens from the VPN.
+
+**Lifetime (2.114.0).** A companion ends itself after 12 hours with no browser connected and no new screen; the PM's **Držet** button on the page keeps it alive; kept or not, it ends 60 days after it started. The screens stay on disk either way. `stop-server.sh --list [--project-dir <root>]` prints every running companion (plan, project, port, URL, age, kept) — the answer to "co mi běží?".
 
 **`{plugin_path}`** comes from `.aid-o/config/plugin.yaml`. Missing `node_modules` (a plugin update replaced the directory) are installed by `start-server.sh` itself, noted in `.server.log`; a failed install prints the exact `npm install` command.
 
@@ -466,8 +474,10 @@ If `.events` doesn't exist, the user didn't interact with the browser — use on
 {plugin_path}/lib/brainstorm-server/stop-server.sh --stale 24 --project-dir /path/to/project
 ```
 
-Stop the server when the session ends; a forgotten one holds a companion slot
-(on 6. 10. 2026 twelve of them ran on eco-dev, the oldest 48 days).
+Stop the server when the session ends; a forgotten one ends itself after 12 idle
+hours anyway (kept ones after 60 days). `--stale` leaves kept companions alone
+and names them. On 6. 10. 2026 twelve forgotten companions ran on eco-dev, the
+oldest 48 days.
 
 Mockup files persist in `.aid-o/work/companion/` for later reference — this directory is already gitignored by AID. Only `/tmp` sessions get deleted on stop.
 

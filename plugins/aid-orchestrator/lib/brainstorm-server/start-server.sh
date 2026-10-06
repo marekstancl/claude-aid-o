@@ -28,8 +28,9 @@
 #                         3900-3999 (the VPN passes it; a random high port does not —
 #                         an operational fact of eco-dev, not a property of this code).
 #                         Without --port, a non-loopback bind takes the first free
-#                         companion slot (AID_COMPANION_PORTS, default "3910 3912");
-#                         a loopback bind keeps a random high port.
+#                         companion slot (AID_COMPANION_PORTS, default 3930-3949 —
+#                         twenty, the PM runs ten at once); a loopback bind keeps
+#                         a random high port.
 #   --foreground          Run server in the current terminal (no backgrounding).
 #   --background          Force background mode (overrides Codex auto-foreground).
 
@@ -58,6 +59,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 fail() { echo "{\"error\": $(printf '%s' "$1" | jq -Rs .)}"; exit 1; }
+# twenty companion slots (G-008: 3930-3949 reserved for the visual companion)
+COMPANION_PORTS="${AID_COMPANION_PORTS:-$(seq -s ' ' 3930 3949)}"
 
 if [[ -z "$URL_HOST" ]]; then
   if [[ "$BIND_HOST" == "127.0.0.1" || "$BIND_HOST" == "localhost" ]]; then
@@ -116,24 +119,24 @@ port_holder() {  # <port> — who listens, for the refusal: pid, command, age, a
   printf '%s' "${out:-no listener found by ss}"
 }
 # every slot comes from the AID range; a configured slot outside it is a misconfiguration, not a way around the rule
-for slot in ${AID_COMPANION_PORTS:-3910 3912}; do
+for slot in $COMPANION_PORTS; do
   [[ "$slot" =~ ^[0-9]+$ ]] && (( slot >= 3900 && slot <= 3999 )) || fail "AID_COMPANION_PORTS has '$slot', which is not a port in the AID range 3900-3999"
 done
 LOOPBACK=0; [[ "$BIND_HOST" == "127.0.0.1" || "$BIND_HOST" == "localhost" || "$BIND_HOST" == "::1" ]] && LOOPBACK=1
 if [[ -n "$PORT" ]]; then
   [[ "$PORT" =~ ^[0-9]+$ ]] || fail "--port takes a number (got '$PORT')"
   if (( ! LOOPBACK )) && (( PORT < 3900 || PORT > 3999 )); then
-    fail "port $PORT is outside the AID range 3900-3999; off loopback the PM reaches only project ports through the VPN (a random high port gave ERR_CONNECTION twice on 6. 10. 2026). Use a companion slot (${AID_COMPANION_PORTS:-3910 3912}) or --port <3900-3999>"
+    fail "port $PORT is outside the AID range 3900-3999; off loopback the PM reaches only project ports through the VPN (a random high port gave ERR_CONNECTION twice on 6. 10. 2026). Use a companion slot (${COMPANION_PORTS}) or --port <3900-3999>"
   fi
   if port_busy "$BIND_HOST" "$PORT"; then
     fail "port $PORT is in use by: $(port_holder "$PORT") Forgotten companions of a project: stop-server.sh --stale 24 --project-dir <root>; or pick another --port"
   fi
 elif (( ! LOOPBACK )); then
-  for slot in ${AID_COMPANION_PORTS:-3910 3912}; do
+  for slot in $COMPANION_PORTS; do
     port_busy "$BIND_HOST" "$slot" || { PORT="$slot"; break; }
   done
   if [[ -z "$PORT" ]]; then
-    holders=""; for slot in ${AID_COMPANION_PORTS:-3910 3912}; do holders="${holders}${slot}: $(port_holder "$slot"); "; done
+    holders=""; for slot in $COMPANION_PORTS; do holders="${holders}${slot}: $(port_holder "$slot"); "; done
     fail "every companion slot is in use (${holders% }). A running session is never taken over: stop a forgotten one with lib/brainstorm-server/stop-server.sh <screen_dir>, or stop-server.sh --stale 24 --project-dir <root>, or run this one with --port <another 3900-3999 port>"
   fi
 fi
@@ -173,6 +176,7 @@ if [[ ! -d "${SCRIPT_DIR}/node_modules/express" ]]; then
 fi
 
 SERVER_ENV=(BRAINSTORM_DIR="$SCREEN_DIR" BRAINSTORM_HOST="$BIND_HOST" BRAINSTORM_URL_HOST="$URL_HOST")
+[[ -n "$PLAN_ID" ]] && SERVER_ENV+=(BRAINSTORM_PLAN="$PLAN_ID" BRAINSTORM_PROJECT="$(basename "$PROJECT_DIR")")   # the page title names the run
 [[ -n "$PORT" ]] && SERVER_ENV+=(BRAINSTORM_PORT="$PORT")
 [[ -n "$BASIS" ]] && SERVER_ENV+=(BRAINSTORM_BASIS="$BASIS")
 
@@ -224,7 +228,7 @@ for i in {1..50}; do
       echo "{\"error\": \"server started but $url/ does not answer from this host (bind $BIND_HOST, url-host $URL_HOST) — check --host/--url-host; nothing is left running\"}"
       exit 1
     fi
-    jq -c --arg b "$BIND_HOST" --arg u "$URL_HOST" --arg h "open the URL from the PM's machine (VPN); off loopback the port is a companion slot from the AID range so the VPN passes it" \
+    jq -c --arg b "$BIND_HOST" --arg u "$URL_HOST" --arg h "open the URL from the PM's machine (VPN); off loopback the port is a companion slot from the AID range so the VPN passes it; the server ends itself after 12 h without a browser and without a new screen unless the PM presses Držet on the page (60 days at most)" \
        --arg basis "$BASIS" '. + {bind_host: $b, url_host: $u, hint: $h} + (if $basis != "" then {basis: $basis} else {} end)' <<< "$started" 2>/dev/null || echo "$started"
     exit 0
   fi

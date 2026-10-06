@@ -40,3 +40,15 @@ js() { run node -e "const b = require('$B'); $1"; }
   js "process.stdout.write(String(b.load('')))"
   [ "$status" -eq 0 ]; [ "$output" = null ]
 }
+
+@test "the rendered page copy is served per viewport when the capture wrote it; the title names the run" {
+  printf '<html><body>today</body></html>' > "$T/desktop/baseline.html"
+  jq -n --arg d "$T/desktop/baseline.png" --arg p "$T/desktop/baseline.html" '{basis: "live-screen", viewports: [{name: "desktop", width: 1280, height: 720, baseline: $d, page: $p}]}' > "$T/p5.json"
+  js "const x = b.load('$T/p5.json'); console.log(x.viewports[0].page); process.stdout.write(b.compose(x, '/screen', {plan: 'P13', project: 'agents'}))"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "$T/desktop/baseline.html"* ]]
+  [[ "$output" == *'<title>P13 · agents — dnes → návrh</title>'* ]]
+  jq -n --arg d "$T/desktop/baseline.png" --arg p "$T/nowhere.html" '{basis: "live-screen", viewports: [{name: "desktop", width: 1280, height: 720, baseline: $d, page: $p}]}' > "$T/p6.json"
+  js "const x = b.load('$T/p6.json'); console.log(x.viewports[0].page)"
+  [ "$output" = null ]
+}

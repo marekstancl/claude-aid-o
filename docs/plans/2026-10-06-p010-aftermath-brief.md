@@ -127,3 +127,7 @@ Kroky 1–11, osm nálezů, všechny zapracované výše: kontrola karty u CP7 (
 ## Hotovo, když
 - Všech 13 kroků má (kde je kód) test, CHANGELOG, registr a dokumentaci; whole-diff revize Codexem bez otevřeného nálezu; T0+T1 + dotčené sady zelené; `verify.sh --plugin` prošel; 8 míst verze = 2.114.0.
 - Po vydání: HOTOVO značky v `agents` (11 zápisů), `aid-orchestrator` (8) a `wan` (1), backlog: CP7 delta bez freeze, evidence rule CP7 (po měření), IMP-679 doplněk o `diff.patch` v potvrzovacím kole.
+
+## Doplnění PM 6. 10. 2026 odpoledne (před vydáním)
+- **1B — kopie skutečné stránky:** `ui-capture.mjs` ukládá i stránku tak, jak ji prohlížeč sestavil (`<target>.html`, styly vložené, skripty pryč, `<base>`), `proposal.json` ji nese per viewport (`page`), server ji servíruje na `/basis/<vp>/page.html`, skill říká „zkopíruj a uprav, nekresli“. Důvod: komponenta není samostatný soubor, sestavení mimo aplikaci je drahé a křehké; vyfocená stránka je přesná a editovatelná.
+- **2A + Držet:** dvacet slotů 3930–3949 (G-008), companion se vypne po 12 h bez prohlížeče a bez nové obrazovky, tlačítko „Držet“ na stránce (`.keep`, `POST /aid/keep` same-origin) ho podrží, po 60 dnech od startu skončí vždy; `stop-server.sh --list`; titulek záložky = plán · projekt. `--stale` držené nechá a jmenuje.

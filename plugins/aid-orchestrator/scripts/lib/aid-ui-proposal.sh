@@ -150,8 +150,10 @@ aid_ui_proposal_build() {
       fi
       baseline="\"${dir}/baseline.png\""
     fi
-    viewports="$(jq -c --arg n "$name" --argjson w "$w" --argjson h "$h" --argjson b "$baseline" \
-      '. + [{name: $n, width: $w, height: $h, baseline: $b, proposed: null}]' <<< "$viewports")"
+    # the page as rendered (2.114.0): the agent's starting file for the proposal, when the capture wrote it
+    local page="null"; [[ "$basis" == "live-screen" && -s "${dir}/baseline.html" ]] && page="\"${dir}/baseline.html\""
+    viewports="$(jq -c --arg n "$name" --argjson w "$w" --argjson h "$h" --argjson b "$baseline" --argjson pg "$page" \
+      '. + [{name: $n, width: $w, height: $h, baseline: $b, page: $pg, proposed: null}]' <<< "$viewports")"
   done < <(aid_ui_proposal_viewports "$root")
 
   local design="{}"

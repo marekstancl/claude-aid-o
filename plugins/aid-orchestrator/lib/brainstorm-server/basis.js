@@ -28,6 +28,8 @@ function load(proposalPath) {
   const viewports = raw.viewports.map(v => ({
     name: String(v.name), width: Number(v.width), height: Number(v.height),
     baseline: v.baseline ? path.resolve(path.dirname(proposalPath), String(v.baseline)) : null,
+    // the page as rendered (ui-capture.mjs <target>.html): the agent's starting file
+    page: v.page && fs.existsSync(path.resolve(path.dirname(proposalPath), String(v.page))) ? path.resolve(path.dirname(proposalPath), String(v.page)) : null,
   }));
   if (raw.basis === 'live-screen') {
     for (const v of viewports) {
@@ -51,18 +53,26 @@ function routes(app, basis) {
     if (!v || !v.baseline) return res.status(404).type('text').send('no baseline for this viewport');
     res.type('png').sendFile(v.baseline);
   });
+  // GET /basis/<viewport>/page.html — the page as rendered, to copy and edit
+  app.get('/basis/:vp/page.html', (req, res) => {
+    const vp = req.params.vp;
+    const v = safeName(vp) ? basis.viewports.find(x => x.name === vp) : null;
+    if (!v || !v.page) return res.status(404).type('text').send('no rendered page for this viewport');
+    res.type('html').sendFile(v.page);
+  });
 }
 
 function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 
-// compose(basis, screenUrl) → the page at "/": today (the real capture) beside
+// compose(basis, screenUrl, {plan, project}) → the page at "/": today (the real capture) beside
 // the proposal (the agent's screen in an iframe at the viewport's width), one
 // tab per viewport the project owes. The agent's screen itself stays at
 // screenUrl ("/screen"), untouched, so clicks, confirms and the reload socket
 // work as before — inside the frame.
-function compose(basis, screenUrl) {
+function compose(basis, screenUrl, meta) {
   const vps = basis.viewports;
   const first = vps[0];
+  const label = meta && (meta.plan || meta.project) ? [meta.plan, meta.project].filter(Boolean).join(' · ') + ' — ' : '';
   const tabs = vps.length > 1
     ? `<nav class="vp-tabs">${vps.map((v, i) => `<button type="button" data-vp="${esc(v.name)}" data-w="${v.width}" class="${i === 0 ? 'on' : ''}">${esc(v.name)} ${v.width}×${v.height}</button>`).join('')}</nav>`
     : '';
@@ -76,7 +86,7 @@ function compose(basis, screenUrl) {
 <html lang="cs">
 <head>
 <meta charset="utf-8">
-<title>Companion — dnes → návrh</title>
+<title>${esc(label)}dnes → návrh</title>
 <style>
   body { margin: 0; font-family: system-ui, sans-serif; background: #f3f4f6; color: #111; }
   .vp-tabs { display: flex; gap: .5rem; padding: .5rem 1rem; background: #fff; border-bottom: 1px solid #ddd; }

@@ -111,6 +111,18 @@ _start() { run bash "$S/start-server.sh" "$@"; }
   echo "$output"; [ "$status" -eq 0 ]; [ "$(tail -1 <<<"$output" | jq -r .basis)" = "$d/proposal.json" ]
 }
 
+@test "--list names every running companion of the project with its plan, port, age and kept state" {
+  _start --project-dir "$T/proj" --plan P5 --host 0.0.0.0 --url-host 127.0.0.1; [ "$status" -eq 0 ]
+  run bash "$S/stop-server.sh" --list --project-dir "$T/proj"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .plan <<<"$output")" = P5 ]; [ "$(jq -r .project <<<"$output")" = proj ]; [ "$(jq -r .port <<<"$output")" = 3990 ]; [ "$(jq -r .kept <<<"$output")" = false ]
+  [[ "$(jq -r .screen_dir <<<"$output")" == "$T/proj/.aid-o/work/companion/"* ]]
+  touch "$(jq -r .screen_dir <<<"$output")/.keep"
+  run bash "$S/stop-server.sh" --list --project-dir "$T/proj"; [ "$(jq -r .kept <<<"$output")" = true ]
+  run bash "$S/stop-server.sh" --stale 0 --project-dir "$T/proj"                     # kept: left alone, named
+  [ "$(jq -r .stopped <<<"$output")" = 0 ]; [[ "$(jq -r .left_running_not_a_companion <<<"$output")" == *"kept by the PM"* ]]
+}
+
 @test "--stale stops only this project's companions older than N hours and leaves a PID that is not a companion, naming it" {
   _start --project-dir "$T/proj" --plan P5; [ "$status" -eq 0 ]
   local d1; d1="$(ls -d "$T"/proj/.aid-o/work/companion/*/ | head -1)"
