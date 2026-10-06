@@ -877,7 +877,8 @@ _closing_measure() {
     if [[ "$first" =~ ^([^:]+):([0-9]+)$ ]]; then
       [[ -n "$first_cand" ]] || continue
       path="${BASH_REMATCH[1]}"; line="${BASH_REMATCH[2]}"
-      sha="$(git -C "$ROOT" blame -L "${line},${line}" --porcelain HEAD -- "$path" 2>/dev/null | head -1 | cut -d' ' -f1)"
+      # the revision the round closed at (close --at binds an earlier one), not whatever HEAD is now
+      sha="$(git -C "$ROOT" blame -L "${line},${line}" --porcelain "${CLOSE_HEAD:-HEAD}" -- "$path" 2>/dev/null | head -1 | cut -d' ' -f1)"
       if [[ -n "$sha" ]]; then
         git -C "$ROOT" merge-base --is-ancestor "$sha" "$first_cand" 2>/dev/null || regress=$((regress + 1))
       else
@@ -1061,14 +1062,15 @@ to close the round at the revision the reviewers saw; the fix is confirmed by th
   fi
   CLOSING_LINE=""
   [[ "$CHECKPOINT" == cp7 ]] && _closing_measure "$dir" "$measurement"
-  _record_final_writes
-  local blockers; blockers="$(jq -r '.blockers_open // 0' "${dir}/merged.json" 2>/dev/null || echo 0)"
   # withdrawn starts (aid-emit-dispatch.sh cancel) are named, never silent
   local cancelled=""
   [[ -f "${dir}/timeline.jsonl" ]] && cancelled="$(jq -r 'select(.event == "verifier_dispatch_cancel") | .focus' "${dir}/timeline.jsonl" 2>/dev/null | sort -u | paste -sd, -)"
   if [[ -n "$cancelled" ]]; then
     jq --arg c "$cancelled" '. + {cancelled_starts: ($c | split(","))}' "$measurement" > "${measurement}.tmp" && mv "${measurement}.tmp" "$measurement"
   fi
+  # the LAST write to the round's files, then the stage record (decide verifies the digests)
+  _record_final_writes
+  local blockers; blockers="$(jq -r '.blockers_open // 0' "${dir}/merged.json" 2>/dev/null || echo 0)"
   _log review_round_close checkpoint="$CHECKPOINT" step="${STEP:-null}" round="$ROUND" verdict="$verdict" \
     status="$(jq -r .status "${dir}/collect.json")" blockers_open="$blockers" closed_at="${CLOSE_HEAD:-head}" cancelled_starts="${cancelled:-none}"
   # A CP1 round has no verdict of its own (aid-cp1-gate.sh judges the plan): it

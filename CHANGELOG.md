@@ -23,7 +23,7 @@ Co zbylo z P010 (agents) a z P106/P108: zavření plánu rozhodnutím, kola bez 
 - **Fix list po kole CP1** jmenuje krok každého otevřeného nálezu (i minor); otevřený plán-level blocker/major dává `any` (`aid-plan-check.sh --fixes any` vypne jen C4/C5). P106: tři minory jmenovaly krok 5 a oprava tam byla odmítnuta jako nevyžádaná.
 - **Název s lomítkem není cesta** (`_aid_artifact_looks_like_path`: dvě složky, přípona nebo dotfile); „the /aid-ui studio“ už stránka plánu neodmítá.
 - `commands/aid-plan.md` krok 10 jmenuje vykreslení stránky brainstormu před `approve`; krok 8a říká, že pořadí check/úprava/rebind nerozhoduje; readiness zná `--project-root`.
-- Registr vynucení: devět nových řádků (590).
+- Registr vynucení: devět nových řádků (590). Dokumentace Docusauru (`/aid/` aid-run, brainstorming, critic; mapa portů G-008) je v repu docs, commit 7c8450c.
 
 ## [2.113.0] — 2026-09-30
 

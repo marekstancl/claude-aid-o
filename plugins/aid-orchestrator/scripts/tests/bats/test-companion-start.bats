@@ -79,6 +79,22 @@ _start() { run bash "$S/start-server.sh" "$@"; }
   printf 'plan_id: "P5"\nscope: "roadmap"\ntopic_kind: ""\n' > "$T/proj/.aid-o/work/brainstorm/P5/state.yaml"
   _start --project-dir "$T/proj" --plan P5
   [ "$status" -eq 1 ]; [[ "$output" == *"topic-kind P5 ui"* && "$output" == *"topic-kind P5 other --reason"* ]]
+  printf 'plan_id: "P5"\nscope: "roadmap"\ntopic_kind: "other"\ntopic_kind_reason: ""\n' > "$T/proj/.aid-o/work/brainstorm/P5/state.yaml"
+  _start --project-dir "$T/proj" --plan P5
+  [ "$status" -eq 1 ]; [[ "$output" == *"other without a reason"* ]]
+  printf 'plan_id: "P5"\nscope: "roadmap"\ntopic_kind: "sketch"\n' > "$T/proj/.aid-o/work/brainstorm/P5/state.yaml"
+  _start --project-dir "$T/proj" --plan P5
+  [ "$status" -eq 1 ]; [[ "$output" == *"neither ui nor other"* ]]
+}
+
+@test "a server that prints no url, or one whose url does not answer, is a failure and nothing is left running" {
+  printf 'console.log(JSON.stringify({type:"server-started"})); setInterval(()=>{},1000);\n' > "$S/index.js"
+  _start --project-dir "$T/proj" --plan P5
+  [ "$status" -eq 1 ]; [[ "$output" == *"printed no url"* ]]
+  [ -z "$(cat "$T"/proj/.aid-o/work/companion/*/.server.pid 2>/dev/null)" ] || ! kill -0 "$(cat "$T"/proj/.aid-o/work/companion/*/.server.pid)" 2>/dev/null
+  printf 'console.log(JSON.stringify({type:"server-started", port: 3993, url: "http://127.0.0.1:3993"})); setInterval(()=>{},1000);\n' > "$S/index.js"   # claims a port it does not listen on
+  _start --project-dir "$T/proj" --plan P5
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not answer from this host"* ]]
 }
 
 @test "a UI run without its basis is refused naming aid_ui_proposal_build; with a live-screen basis the server gets it; a basis missing a screenshot is refused" {

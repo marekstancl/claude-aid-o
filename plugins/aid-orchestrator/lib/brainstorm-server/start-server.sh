@@ -80,9 +80,13 @@ if [[ -n "$PROJECT_DIR" ]]; then
   STATE="$STATE_DIR/state.yaml"
   [[ -r "$STATE" ]] || fail "no brainstorm run $PLAN_ID at $STATE — start it: aid-brainstorm-state.sh init $PLAN_ID --scope <scope> [--topic-kind ui|other]"
   TOPIC_KIND="$(sed -n 's/^topic_kind: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' "$STATE" | head -1)"
-  if [[ -z "$TOPIC_KIND" ]]; then
-    fail "$PLAN_ID does not say whether this is a screen of an existing application. Say it first: aid-brainstorm-state.sh topic-kind $PLAN_ID ui   (or: topic-kind $PLAN_ID other --reason \"<why no screen of the application is involved>\")"
-  fi
+  TOPIC_REASON="$(sed -n 's/^topic_kind_reason: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' "$STATE" | head -1)"
+  case "$TOPIC_KIND" in
+    ui) ;;
+    other) [[ -n "$TOPIC_REASON" ]] || fail "$PLAN_ID says topic_kind other without a reason — the PM sees the reason on the design page: aid-brainstorm-state.sh topic-kind $PLAN_ID other --reason \"<why no screen of the application is involved>\"" ;;
+    "") fail "$PLAN_ID does not say whether this is a screen of an existing application. Say it first: aid-brainstorm-state.sh topic-kind $PLAN_ID ui   (or: topic-kind $PLAN_ID other --reason \"<why no screen of the application is involved>\")" ;;
+    *) fail "$PLAN_ID has topic_kind '$TOPIC_KIND', which is neither ui nor other — fix it: aid-brainstorm-state.sh topic-kind $PLAN_ID ui|other [--reason …]" ;;
+  esac
   if [[ "$TOPIC_KIND" == "ui" ]]; then
     PROPOSAL="$STATE_DIR/proposal.json"
     # shellcheck source=../../scripts/lib/aid-ui-proposal.sh
@@ -204,8 +208,18 @@ for i in {1..50}; do
     fi
     started="$(grep "server-started" "$LOG_FILE" | head -1)"
     # The printed address answers from this host, or the start is a failure, not a URL.
+    # No URL in the line, or an address that does not answer (curl, else a bare TCP
+    # connect), is refused — never a success without the proof.
     url="$(jq -r '.url // empty' <<< "$started" 2>/dev/null)"
-    if [[ -n "$url" ]] && command -v curl >/dev/null 2>&1 && ! curl -fsS -m 3 -o /dev/null "$url/" 2>/dev/null; then
+    if [[ -z "$url" ]]; then
+      kill "$SERVER_PID" 2>/dev/null; rm -f "$PID_FILE"
+      echo "{\"error\": \"server started but printed no url (see $LOG_FILE); nothing is left running\"}"
+      exit 1
+    fi
+    reach=1
+    if command -v curl >/dev/null 2>&1; then curl -fsS -m 3 -o /dev/null "$url/" 2>/dev/null || reach=0
+    else u_host="${url#http://}"; u_host="${u_host%%/*}"; u_port="${u_host##*:}"; u_host="${u_host%%:*}"; port_busy "$u_host" "$u_port" || reach=0; fi
+    if (( ! reach )); then
       kill "$SERVER_PID" 2>/dev/null; rm -f "$PID_FILE"
       echo "{\"error\": \"server started but $url/ does not answer from this host (bind $BIND_HOST, url-host $URL_HOST) — check --host/--url-host; nothing is left running\"}"
       exit 1

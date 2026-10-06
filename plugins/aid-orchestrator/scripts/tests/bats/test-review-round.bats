@@ -886,6 +886,8 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
   [[ "$output" == *"closing: attempt 1, "*"findings on lines written during the closing: 0 (uncited: 0, unblamed: 0), codex findings refused on form: 0"* ]]   # 2.114.0
   [ "$(jq -r .verdict "$E/cp7/rounds.json")" = pass ]
+  # the stage record holds the digest of measurement.json AFTER its last write (closing, cancelled_starts) — decide verifies it
+  [ "$(jq -rs 'map(select(.path == "cp7/round-1/measurement.json")) | last | .sha256' "$E/stage-writes.jsonl")" = "sha256:$(sha256sum "$(FD 1)/measurement.json" | cut -d' ' -f1)" ]
   [ "$(jq -r .head_sha "$E/cp7/rounds.json")" = "$(git -C "$R" rev-parse HEAD)" ]
   local f="$E/semantic-review-final.json"
   [ "$(jq -r .semantic_review.range "$f")" = "${FBASE}..$(git -C "$R" rev-parse HEAD)" ]
