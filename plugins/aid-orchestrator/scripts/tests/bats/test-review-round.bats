@@ -476,7 +476,7 @@ _bracket() {
   run _S retry --round 1 --role step_security; [ "$status" -eq 1 ]
   # HEAD moved before close → refused
   rm -rf "$E/cp2"; _sc; _S prepare --round 1 >/dev/null; _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
-  _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _bracket 1 step_security
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist      # step_security is not a role of this round
   echo later >> "$R/src/app.py"; git -C "$R" commit -qam later
   run _S close --round 1 --tokens step_generalist=1 step_security=1
   [ "$status" -eq 1 ]; [[ "$output" == *"head moved during round"* ]]
@@ -1114,7 +1114,7 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   # a seen sha that HEAD no longer descends from is refused
   rm -rf "$E/cp2"; git -C "$R" reset -q --hard HEAD~1; _sc; _S prepare --round 1 >/dev/null
   _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
-  _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _bracket 1 step_security
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist      # step_security is not a role of this round
   seen="$(git -C "$R" rev-parse HEAD)"
   git -C "$R" reset -q --hard HEAD~1; echo divergent >> "$R/src/app.py"; git -C "$R" commit -qam divergent   # HEAD no longer descends from the seen revision
   run _S close --round 1 --tokens step_generalist=1 step_security=1 --at "$seen"
