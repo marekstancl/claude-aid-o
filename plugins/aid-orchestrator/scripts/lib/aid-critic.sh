@@ -174,12 +174,22 @@ aid_critic_check() {
   answer="${dir}/critic.md"; response="${dir}/critic-response.md"
   [[ -f "${dir}/prompt.md" && -f "${dir}/prepare.json" ]] || { echo "critic: nothing prepared at ${dir} — run aid_critic_prepare first" >&2; return 2; }
   [[ -f "$answer" ]] || { echo "critic: the critic did not write ${answer}" >&2; return 4; }
-  # The plan the critic read is the plan prepare hashed; a plan edited in
-  # between is checked against nothing and the check says so.
+  # prepare hashed the plan and the prompt names its path; the critic reads the
+  # file when it runs. The check judges the FORM of the answer and the response,
+  # so a plan that differs from the prepare hash at check time is not "checked
+  # against nothing": either the author edited it before the critic ran (the
+  # critic then read the edited plan) or after the critique (the one revision
+  # the author may make for the accepted items — what a rebind records). Both
+  # end in the same state, so the check records the current hash as that one
+  # revision (2.114.0, P108: refusing it cost a second critic run of ~115k
+  # tokens for the order of two commands). A rebind after that is refused as
+  # the second revision it would be.
+  local revised=""
   if [[ "$_ac_moment" == "plan" ]]; then
     sha_plan="$(jq -r '.plan_sha256 // ""' "${dir}/prepare.json")"
     local plan_now=""; [[ -f "$_ac_plan" ]] && plan_now="$(sha256sum "$_ac_plan" | cut -d' ' -f1)"
-    [[ "$plan_now" == "$sha_plan" ]] || reason="the plan changed since prepare (${sha_plan:0:12} → ${plan_now:0:12}); run aid_critic_prepare again"
+    [[ -n "$plan_now" ]] || reason="plan file not found: ${_ac_plan}"
+    [[ -z "$reason" && "$plan_now" != "$sha_plan" ]] && revised="$plan_now"
   fi
   [[ -z "$reason" ]] && { grep -Eq "$AID_CRITIC_L1_RE" "$answer" || reason="missing heading: level 1"; }
   [[ -z "$reason" ]] && { grep -Eq "$AID_CRITIC_L2_RE" "$answer" || reason="missing heading: level 2"; }
@@ -240,10 +250,11 @@ aid_critic_check() {
      --arg r "$( [[ -f "$response" ]] && sha256sum "$response" | cut -d' ' -f1 || echo '' )" \
      --argjson items "${n_items:-0}" --argjson l1e "$level1_empty" --argjson l2e "$level2_empty" \
      --argjson rows "$( [[ -n "${rows:-}" ]] && printf '%s\n' "$rows" | grep -c '' || echo 0 )" \
-     --argjson passed "$passed" --arg reason "$reason" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     --argjson passed "$passed" --arg reason "$reason" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg rev "$revised" \
      '{moment:$moment, plan_sha256:$plan_sha, prompt_sha256:$p, answer_sha256:$a, response_sha256:$r,
        headings_ok:($reason|startswith("missing heading")|not), level1_items:$items, level1_empty:$l1e, level2_empty:$l2e,
-       verdict_forbidden:($reason|startswith("a verdict")), response_rows:$rows, passed:$passed, reason:$reason, checked_at:$at}' \
+       verdict_forbidden:($reason|startswith("a verdict")), response_rows:$rows, passed:$passed, reason:$reason, checked_at:$at}
+      + (if ($rev != "" and $passed) then {plan_sha256_revised:$rev, rebound_at:$at, revised_before_check:true} else {} end)' \
      > "${dir}/check.json"
   local tl
   if tl="$(aid_plan_timeline "$_ac_root" "$_ac_plan_id")"; then
@@ -252,6 +263,12 @@ aid_critic_check() {
   fi
   if [[ -n "$reason" ]]; then
     echo "critic: check FAILED — ${reason}" >&2; return 5
+  fi
+  if [[ -n "$revised" ]]; then
+    if tl="$(aid_plan_timeline "$_ac_root" "$_ac_plan_id")"; then
+      jq -nc --arg s "$revised" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{event:"critic_rebound", moment:"plan", plan_sha256_revised:$s, revised_before_check:true, timestamp:$at}' >> "$tl"
+    fi
+    echo "critic: the plan changed since prepare (${sha_plan:0:12} → ${revised:0:12}); recorded as the one revision — no aid_critic_rebind needed, a further edit needs a new critic run"
   fi
   echo "critic: ${_ac_moment} check passed (${n_items} item(s), level1_empty=${level1_empty}, level2_empty=${level2_empty}) → ${dir}/check.json"
   return 0

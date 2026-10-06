@@ -54,6 +54,22 @@ one at a time:
    `--stub` by the acceptance suite skips that check, and the FSM refuses to
    advance on such a round.
 
+   A start for a role the round does not ask is refused on the spot (the focus
+   must name one of `reviewers_expected`; `prepare` printed them). A start that
+   will never get a complete — the reviewer was stopped, the role was dispatched
+   by mistake — is withdrawn, never faked:
+
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" cancel --focus <focus> \
+     --evidence-dir <round dir> --reason "<why, 20+ characters>"
+   ```
+
+   A cancelled start is not a complete: an answer filed under it has no
+   provenance and `close` still refuses it. A role that gave nothing (a codex
+   record `answered: false`, or a start with no complete) is retried before
+   `collect` with `retry --role <r>`, which withdraws its open start itself;
+   nobody waits for the other roles to answer first.
+
 ## Stand-in for a Codex role
 
 When `dispatch --provider codex` prints a line starting `STAND-IN:`, no codex

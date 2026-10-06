@@ -233,12 +233,15 @@ _round1_closed() {
   run "$ROUND_SH" prepare "$PLAN" --round 2
   [ "$status" -eq 1 ]; [[ "$output" == *"scripts/new.sh"* ]]
 }
-@test "fix-check: only plan-level findings run with --fixes none and pass when nothing changed" {
+@test "fix-check: only plan-level findings — majors make the list any, minors alone make it none; both pass when nothing changed" {
   _round1_closed
   jq '.findings[].step = null' "$CP1/round-1/merged.json" > "$ROOT/m" && mv "$ROOT/m" "$CP1/round-1/merged.json"
   run "$ROUND_SH" fix-check "$PLAN" --round 1
   echo "$output"; [ "$status" -eq 0 ]
-  [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = none ]
+  [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = any ]
+  jq '.findings[].severity = "minor"' "$CP1/round-1/merged.json" > "$ROOT/m" && mv "$ROOT/m" "$CP1/round-1/merged.json"
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -eq 0 ]; [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = none ]
 }
 @test "override: rounds 3 is recorded with six keys and lets round 3 be prepared; a second override is refused" {
   run "$ROUND_SH" override "$PLAN" --rounds 3 --reason "PM: send a third round, please"
@@ -473,7 +476,7 @@ _bracket() {
   run _S retry --round 1 --role step_security; [ "$status" -eq 1 ]
   # HEAD moved before close → refused
   rm -rf "$E/cp2"; _sc; _S prepare --round 1 >/dev/null; _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
-  _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _bracket 1 step_security
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist      # step_security is not a role of this round
   echo later >> "$R/src/app.py"; git -C "$R" commit -qam later
   run _S close --round 1 --tokens step_generalist=1 step_security=1
   [ "$status" -eq 1 ]; [[ "$output" == *"head moved during round"* ]]
@@ -881,7 +884,10 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   local r; for r in final_criteria final_claims final_generalist; do _fanswer 1 "$r"; done
   _F collect --round 1 >/dev/null
   run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"closing: attempt 1, "*"findings on lines written during the closing: 0 (uncited: 0, unblamed: 0), codex findings refused on form: 0"* ]]   # 2.114.0
   [ "$(jq -r .verdict "$E/cp7/rounds.json")" = pass ]
+  # the stage record holds the digest of measurement.json AFTER its last write (closing, cancelled_starts) — decide verifies it
+  [ "$(jq -rs 'map(select(.path == "cp7/round-1/measurement.json")) | last | .sha256' "$E/stage-writes.jsonl")" = "sha256:$(sha256sum "$(FD 1)/measurement.json" | cut -d' ' -f1)" ]
   [ "$(jq -r .head_sha "$E/cp7/rounds.json")" = "$(git -C "$R" rev-parse HEAD)" ]
   local f="$E/semantic-review-final.json"
   [ "$(jq -r .semantic_review.range "$f")" = "${FBASE}..$(git -C "$R" rev-parse HEAD)" ]
@@ -1086,7 +1092,7 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
 @test "step: a fix committed before close closes with --at <seen sha>; a wrong sha, a non-ancestor and no --at are refused by name" {
   _repo; _sc; _S prepare --round 1 >/dev/null
   _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
-  _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _bracket 1 step_security
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist   # step_security is not a role of this round (no security pattern matched): no bracket for it
   local seen; seen="$(git -C "$R" rev-parse HEAD)"
   run _S close --round 1 --tokens step_generalist=1 step_security=1 --at deadbeef
   [ "$status" -eq 1 ]; [[ "$output" == *"not a commit of this checkout"* ]]      # checked even at an unmoved HEAD
@@ -1108,7 +1114,7 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   # a seen sha that HEAD no longer descends from is refused
   rm -rf "$E/cp2"; git -C "$R" reset -q --hard HEAD~1; _sc; _S prepare --round 1 >/dev/null
   _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
-  _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _bracket 1 step_security
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist      # step_security is not a role of this round
   seen="$(git -C "$R" rev-parse HEAD)"
   git -C "$R" reset -q --hard HEAD~1; echo divergent >> "$R/src/app.py"; git -C "$R" commit -qam divergent   # HEAD no longer descends from the seen revision
   run _S close --round 1 --tokens step_generalist=1 step_security=1 --at "$seen"
@@ -1118,15 +1124,15 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
 @test "step: a valid answer without a bracket is retried (no provenance), one with a bracket is not; close names retry" {
   _repo; _sc; _S prepare --round 1 >/dev/null
   _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
-  _S collect --round 1 >/dev/null; _bracket 1 step_security
+  _S collect --round 1 >/dev/null                                 # no bracket at all for step_generalist
   run _S close --round 1 --tokens step_generalist=1 step_security=1
   [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]; [[ "$output" == *"retry --round 1 --role step_generalist"* ]]
-  run _S retry --round 1 --role step_security
-  [ "$status" -eq 1 ]; [[ "$output" == *"never paid for twice"* ]]
   run _S retry --round 1 --role step_generalist
   echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"no dispatch bracket records it"* ]]
   [ ! -f "$(D 1)/reviewer-step_generalist.json" ]
   _sanswer 1 step_generalist; _bracket 1 step_generalist; _S collect --round 1 >/dev/null
+  run _S retry --round 1 --role step_generalist                   # with the bracket, a valid answer is final
+  [ "$status" -eq 1 ]; [[ "$output" == *"never paid for twice"* ]]
   run _S close --round 1 --tokens step_generalist=1 step_security=1; [ "$status" -eq 0 ]
   [ "$(jq -r .revision.closed_with_at "$(D 1)/measurement.json")" = false ]
   [ "$(jq -r .revision.head_sha "$(D 1)/measurement.json")" = "$(git -C "$R" rev-parse HEAD)" ]
@@ -1189,4 +1195,73 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   rm -rf "$CP1"; printf -- '\n**Files:**\n- Modify: `scripts/a.sh` (a note) — x\n' >> "$PLAN"; _check
   run "$ROUND_SH" prepare "$PLAN" --round 1; [ "$status" -eq 0 ]
   grep -q 'WARN legacy' "$CP1/round-1/prompt-generalist_a.md"
+}
+
+# ── 2.114.0: retry before collect, a cancelled start is not a complete ────────
+@test "step: retry before collect — a codex role the limit dropped is retried (its open start withdrawn), a role with an answer or outside the round is refused" {
+  _repo; _sc; _codex_role; _S prepare --round 1 >/dev/null
+  _probe false rate_limited
+  "$ROUND_SH" dispatch --checkpoint cp2 --evidence-dir "$E" --step 0 --project-root "$R" --round 1 --provider codex --role step_security >/dev/null || true
+  [ "$(jq -r .answered "$(D 1)/codex-step_security.usage.json")" = false ]
+  # the stand-in was started and never completed (the limit dropped it too)
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp2-step-0-step-security --agent-id aid-orchestrator:review --evidence-dir "$(D 1)" >/dev/null
+  _sanswer 1 step_generalist; _bracket 1 step_generalist
+  [ ! -f "$(D 1)/collect.json" ]
+  run _S retry --round 1 --role step_generalist
+  [ "$status" -eq 1 ]; [[ "$output" == *"has an answer"* ]]
+  run _S retry --round 1 --role nobody
+  [ "$status" -eq 1 ]; [[ "$output" == *"not a reviewer"* ]]
+  _probe true
+  run _S retry --round 1 --role step_security
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"withdrew the open start"* ]]
+  run bash -c "jq -r 'select(.event == \"start\") | .focus' '$(D 1)/pending-dispatches.jsonl' | grep -c . || true"; [ "$output" = "0" ]
+  grep -q '"verifier_dispatch_cancel"' "$(D 1)/timeline.jsonl"
+  grep -q '"review_retry_uncollected"' "$E/timeline.jsonl"
+}
+
+@test "step: a reviewer file filed under a cancelled start has no provenance — close refuses it even when an OLDER bracket of the same focus completed; the current bracket counts" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _bracket 1 step_generalist            # a full earlier bracket
+  local d; d="$(D 1)"
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp2-step-0-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" cancel --focus cp2-step-0-step-generalist --evidence-dir "$d" --reason "the reviewer was stopped before it wrote anything" >/dev/null
+  _sanswer 1 step_generalist                                          # rewritten after the withdrawal
+  _S collect --round 1 >/dev/null
+  run _S close --round 1 --tokens step_generalist=10
+  [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]
+  # a new complete bracket makes it good again, and close names the withdrawn start
+  _bracket 1 step_generalist
+  run _S close --round 1 --tokens step_generalist=10
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"withdrawn starts: cp2-step-0-step-generalist"* ]]
+  [ "$(jq -c .cancelled_starts "$d/measurement.json")" = '["cp2-step-0-step-generalist"]' ]
+}
+
+@test "step: retry before collect takes an empty reviewer file as nothing given; a role whose current bracket completed is sent to collect" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  : > "$(D 1)/reviewer-step_generalist.json"
+  run _S retry --round 1 --role step_generalist
+  echo "$output"; [ "$status" -eq 0 ]
+  _sanswer 1 step_generalist; _bracket 1 step_generalist; rm "$(D 1)/reviewer-step_generalist.json"
+  run _S retry --round 1 --role step_generalist
+  [ "$status" -eq 1 ]; [[ "$output" == *"completed bracket"* ]]
+}
+
+# ── 2.114.0: the fix list counts minors and plan-level findings ───────────────
+@test "fix-check: a minor names its step (a Files entry there passes, elsewhere fails); an open plan-level major makes the list any" {
+  _round1_closed
+  # every finding a minor on step 2
+  jq '.findings[] |= (.severity = "minor" | .step = 2)' "$CP1/round-1/merged.json" > "$ROOT/m" && mv "$ROOT/m" "$CP1/round-1/merged.json"
+  sed -i 's/^text$/text\n\n- Create: `scripts\/new.sh` — more/' "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]; [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = 2 ]
+  sed -i 's/^uses {{x}} literally$/uses {{x}} literally\n\n- Create: `scripts\/other.sh` — more/' "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"Step 1 (file)"* ]]
+  # one open plan-level major: any step may change
+  jq '.findings[0] |= (.severity = "major" | .step = null)' "$CP1/round-1/merged.json" > "$ROOT/m" && mv "$ROOT/m" "$CP1/round-1/merged.json"
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]; [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = any ]
+  # finalize runs the same check with the same list
+  run "$ROUND_SH" finalize "$PLAN"
+  echo "$output"; [ "$status" -eq 0 ]; [ -f "$CP1/round-1/plan-final.md" ]
 }

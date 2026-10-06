@@ -32,6 +32,24 @@
     }
   }
 
+  // "Držet" (2.114.0): a small fixed button on every screen; the PM decides
+  // whether this companion survives the idle shutdown (12 h without a browser
+  // and without a new screen). Kept or not, it ends 60 days after it started;
+  // the screens stay on disk.
+  function keepButton() {
+    if (window.top !== window.self && window.parent.document.getElementById('aid-keep')) return;   // one button per page, in the frame's parent when composed
+    var b = document.createElement('button');
+    b.id = 'aid-keep'; b.type = 'button';
+    b.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:99999;padding:6px 12px;border-radius:6px;border:1px solid #999;background:#fff;color:#111;font:13px system-ui,sans-serif;cursor:pointer;opacity:.9';
+    function render(kept) { b.textContent = kept ? 'Držím (zruš podržení)' : 'Držet (nevypínat po 12 h)'; b.style.background = kept ? '#fde68a' : '#fff'; b.dataset.kept = kept ? '1' : '0'; }
+    fetch('/aid/keep').then(function (r) { return r.json(); }).then(function (j) { render(!!j.kept); }).catch(function () { render(false); });
+    b.addEventListener('click', function () {
+      fetch('/aid/keep', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (j) { render(!!j.kept); });
+    });
+    (document.body || document.documentElement).appendChild(b);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', keepButton); else keepButton();
+
   // A data-confirm button sends the current selection (and the optional
   // data-confirm-text field, e.g. the PM's own slogan) as the PM's answer.
   document.addEventListener('click', (e) => {

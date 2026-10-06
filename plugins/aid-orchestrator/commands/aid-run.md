@@ -456,7 +456,15 @@ audit line).
    finding's fingerprint, wait for the answer, then
    `dispute … --pm accepted --finding-card <card file> --reason "<the PM's words>"`
    — refused without a PM prompt in the hook audit after the card. The round's
-   verdict is recomputed; `--pm rejected` leaves it open.
+   verdict is recomputed; `--pm rejected` leaves it open. The same command
+   settles a whole-plan (cp7) finding — one the author refuted by measurement,
+   one the PM deferred to the backlog, or one the adjudicator kept as
+   `form_invalid` because its evidence lies outside the candidate's repository:
+   `dispute --checkpoint cp7 --evidence-dir <final run> --round K …`. The
+   dispute records its writes as a stage (`cp7-dispute-accepted` in
+   `stage-writes.jsonl`), so `plan-finalize --stage decide` reads it as the
+   PM's decision, not as tampering. A plan is never merged by hand around an
+   open cp7 finding.
 
 <!-- adapter:begin -->
 # Claude reviewers of a review round — controller instruction
@@ -513,6 +521,22 @@ one at a time:
    `--stub` by the acceptance suite skips that check, and the FSM refuses to
    advance on such a round.
 
+   A start for a role the round does not ask is refused on the spot (the focus
+   must name one of `reviewers_expected`; `prepare` printed them). A start that
+   will never get a complete — the reviewer was stopped, the role was dispatched
+   by mistake — is withdrawn, never faked:
+
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" cancel --focus <focus> \
+     --evidence-dir <round dir> --reason "<why, 20+ characters>"
+   ```
+
+   A cancelled start is not a complete: an answer filed under it has no
+   provenance and `close` still refuses it. A role that gave nothing (a codex
+   record `answered: false`, or a start with no complete) is retried before
+   `collect` with `retry --role <r>`, which withdraws its open start itself;
+   nobody waits for the other roles to answer first.
+
 ## Stand-in for a Codex role
 
 When `dispatch --provider codex` prints a line starting `STAND-IN:`, no codex
@@ -545,7 +569,7 @@ When `close` reports `fail` on a step or EPIC round and a round remains
 ```
 Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,
       model: <the **Model:** of the step's role card in skills/role-cards.md>,
-      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
+      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), before you commit, list every caller of each function you changed and every place the rule you introduce applies (graphify explain, or grep), fix those too, and put the list in the commit message; then commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
 ```
 
 **Close the round BEFORE the fix.** When the fix was committed first (the natural
@@ -842,7 +866,7 @@ is round 1 of the next attempt.
    ```
    Agent(subagent_type: <"aid-orchestrator:implementer-light" when that role's card says **Effort:** low, else "aid-orchestrator:implementer">,
          model: <the **Model:** of that role's card in skills/role-cards.md>,
-         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
+         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix the open findings by CLASS, not one by one (every finding that shares a rule or a pattern is one fix); before you commit, list every caller of each function you changed and every place the rule you introduce applies (graphify explain, or grep), fix those too, and put the list in the commit message; commit with the message prefix fix(review):, and report the fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
    ```
    The owning step is the one whose declared files cover the path (`plan.json` of the EPIC whose commit last touched it: `git log -1 -- <path>`).
 2. `--stage freeze` again. It mints the next attempt and writes `fix-class.json`:
@@ -852,6 +876,24 @@ is round 1 of the next attempt.
    and which had no finding is carried. The round's packet shows the re-asked
    reviewers what stayed open and the fix diff.
 3. `gates` (unchanged gates are copied), `produce`, the round, `decide`.
+
+**Closing is not development** (P010, agents: twelve attempts, four of the last
+findings written by the fixes). Three rules, and one number to watch:
+
+- **Fix by class, not by finding.** Eight separate fixes where three would do
+  are five extra attempts. Group the open findings by the rule they break and
+  send ONE fix per class.
+- **List the callers before the commit.** The fixer names every caller of what
+  it changed and every place the new rule applies, and fixes them in the same
+  commit — the confirmation round then checks the rule everywhere, not the
+  cited line again.
+- **Three attempts feeding on themselves → the PM, not another fix.** `close`
+  prints `closing: attempt N, M min since the first freeze, findings on lines
+  written during the closing: R …` (`measurement.json` `closing`). When R is
+  above zero for the third attempt in a row, do not fix: write the open
+  findings to the backlog and show the PM a **Decision** card — close with the
+  findings disputed and recorded / one more attempt / defer the plan. This is a
+  rule for you, not a gate: the plugin counts, you stop.
 
 An ancillary-only move after the freeze (AID's own bookkeeping, e.g. the id
 counter) costs nothing: `freeze` names `--stage freeze --accept-ancillary`, which
@@ -863,8 +905,8 @@ fix path once first; escalate when it does not apply or did not help.
 | Refusal | Try once | Then show the PM |
 |---------|----------|------------------|
 | a gate is red and the failure is real | the fix path above | **Blocked** card: the gate, what it printed, the smallest fix |
-| a cp7 blocker is still open after a fixed attempt | one more fix when the finding changed; else stop | **Decision** card: FIX (what it costs) / accept with a recorded dispute / ABORT |
-| the project disputes a finding | `<round> dispute` (CP1, CP2, CP3): do not edit the finding | **Decision** card quoting the finding and its evidence |
+| a cp7 blocker is still open after a fixed attempt | one more fix when the finding changed; else stop | **Decision** card: FIX (what it costs) / accept with a recorded dispute (`dispute --checkpoint cp7 … --pm accepted --finding-card`) / ABORT |
+| the project disputes a finding | `<round> dispute` (CP1, CP2, CP3, CP7): do not edit the finding | **Decision** card quoting the finding and its evidence |
 | the branch was rewritten (`fix-class.json` reason `rewritten_branch`) | nothing is carried; run the full attempt | none, unless it repeats: then **Blocked** |
 | `verification_report` blocks | read its `git_clean` evidence: commit or discard the named tracked file | **Blocked** card naming the file |
 | `final_review_disabled` | switch `cp7_plan_final_review` back on | **Decision** card; only the PM's words go into `--stage decide --waive-final-review --reason "<words>"`, and the page then says the plan was NOT read as a whole |

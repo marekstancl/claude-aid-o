@@ -69,12 +69,24 @@ _response() {  # <moment> <rows...>
   [ "$status" -eq 3 ]; [[ "$output" == *'no "## Zadání PM" section'* ]]
 }
 
-@test "check refuses when the plan changed between prepare and check" {
+@test "check: a plan edited between prepare and check is recorded as the one revision; rebind is then refused as a second" {
   aid_critic_prepare P9 --moment plan >/dev/null
   _answer plan 'Nenašel jsem nic.'; _response plan
   echo "edited" >> "$P/.aid-o/plans/P9-x.md"
   run aid_critic_check P9 --moment plan
-  [ "$status" -eq 5 ]; [[ "$output" == *"the plan changed since prepare"* ]]
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"recorded as the one revision"* ]]
+  [ "$(jq -r .plan_sha256_revised "$D/plan/check.json")" = "$(sha256sum "$P/.aid-o/plans/P9-x.md" | cut -d' ' -f1)" ]
+  [ "$(jq -r .revised_before_check "$D/plan/check.json")" = true ]
+  grep -q '"event":"critic_rebound"' "$P/.aid-o/work/evidence/P9/timeline.jsonl"
+  echo "edited again" >> "$P/.aid-o/plans/P9-x.md"
+  run aid_critic_rebind P9 --plan "$P/.aid-o/plans/P9-x.md"
+  [ "$status" -eq 5 ]; [[ "$output" == *"already rebound"* ]]
+  # a check that fails on form records no revision
+  aid_critic_prepare P9 --moment plan >/dev/null
+  _answer plan 'Nenašel jsem nic.'; _response plan
+  echo "edited" >> "$P/.aid-o/plans/P9-x.md"; sed -i '/Úroveň 2/d' "$D/plan/critic.md"
+  run aid_critic_check P9 --moment plan
+  [ "$status" -eq 5 ]; [ "$(jq -r '.plan_sha256_revised // "none"' "$D/plan/check.json")" = none ]
 }
 
 @test "prepare at the plan moment names the plan file and points at the brainstorm answer; a second run supersedes the first" {

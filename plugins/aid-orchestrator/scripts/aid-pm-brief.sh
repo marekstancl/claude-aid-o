@@ -341,6 +341,7 @@ build_brief_md() {
              else "- **Close:** \($c.attempts) attempt(s), \($c.minutes) min, \($c.usd) USD"
                   + (if ($c.usd_unknown_roles | length) > 0 then " + cost unknown for: " + ($c.usd_unknown_roles | join(", ")) else "" end) end),
           "- **Whole-delivery review:** " + ((($r.inputs // []) | map(select(.id == "final_review")) | first | "\(.verdict) — \(.reason)") // "not recorded"),
+          "- **Acceptance criteria:** " + ((($r.inputs // []) | map(select(.id == "acceptance_evidence")) | first | "\(.verdict) — \(.reason)") // "not recorded"),
           "",
           "## At-HEAD verification warnings",
           ""

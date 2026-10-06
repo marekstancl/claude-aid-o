@@ -71,7 +71,8 @@ if [[ -z "$PLAN" || "$PLAN" == "null" ]]; then
       "head_commit": null,
       "ac_count": 0,
       "results": [],
-      "summary": {"present_count": 0, "absent_count": 0, "skipped_count": 1, "reason": $reason},
+      "summary": {"present_count": 0, "absent_count": 0, "skipped_count": 1, "reason": $reason,
+                  "unmeasured": {"summary_prose": 0, "summary_unparsed": 0, "step_bullets": 0}},
       "overall_verdict": "skipped"
     }' > "${EVIDENCE_DIR}/plan-diff.json"
   exit 2
@@ -273,6 +274,25 @@ ac_lines="$(parse_ac_blocks)"
 ac_count="$(printf '%s' "$ac_lines" | grep -c $'\x1f' || true)"
 ac_count="${ac_count:-0}"
 
+# What this gate does NOT measure, counted so the plan close can say it aloud
+# (2.114.0, agents P010: 13 summary criteria measured against ~57 step-level
+# bullets the parser never saw; `status: pass` with `criteria: []` and nobody
+# noticed until the final review raised it four rounds running):
+#   summary_prose    — summary criteria parsed (AC<N>:/[role]) with no verification_pattern
+#   summary_unparsed — bullets under the summary heading the parser does not take (no AC<N>: mark)
+#   step_bullets     — bullets under a step's **Acceptance Criteria:** (never measured here)
+summary_prose="$(printf '%s\n' "$ac_lines" | awk -F $'\x1f' 'NF > 2 && $3 == "no_verification" {n++} END {print n+0}')"
+read -r summary_unparsed step_bullets < <(awk '
+  /^## (Acceptance Criteria|Success Criteria)/ { sec=1; step=0; next }
+  /^## /  { sec=0 }
+  /^### Step [0-9]+/ { step=1; sec=0; inac=0; next }
+  sec && /^- / && $0 !~ /^- \[[ x]\] AC[0-9]+:/ && $0 !~ /^- \[[ x]\] \[[a-z_]+\]/ { u++ }
+  step && /^\*\*Acceptance Criteria:\*\*/ { inac=1; next }
+  step && inac && /^- / { b++; next }
+  step && inac && (/^\*\*/ || /^$/ || /^#/) { inac=0 }
+  END { printf "%d %d\n", u+0, b+0 }' "$PLAN")
+unmeasured_json="$(jq -nc --argjson p "$summary_prose" --argjson u "$summary_unparsed" --argjson b "$step_bullets" '{summary_prose: $p, summary_unparsed: $u, step_bullets: $b}')"
+
 if [[ "$ac_count" -eq 0 ]]; then
   # Graceful skip — no AC blocks
   jq -n \
@@ -289,10 +309,10 @@ if [[ "$ac_count" -eq 0 ]]; then
       "head_commit": $hc,
       "ac_count": 0,
       "results": [],
-      "summary": {"present_count": 0, "absent_count": 0, "skipped_count": 1},
+      "summary": {"present_count": 0, "absent_count": 0, "skipped_count": 1, "unmeasured": $um},
       "overall_verdict": "skipped"
-    }' > "$OUTPUT_FILE"
-  log_event "$TIMELINE_FILE" "plan_diff_complete" verdict="skipped" ac_count="0" || true
+    }' --argjson um "$unmeasured_json" > "$OUTPUT_FILE"
+  log_event "$TIMELINE_FILE" "plan_diff_complete" verdict="skipped" ac_count="0" step_bullets_unmeasured="$step_bullets" || true
   exit 2
 fi
 
@@ -373,9 +393,9 @@ jq -n \
     "head_commit": $hc,
     "ac_count": $cnt,
     "results": $res,
-    "summary": {"present_count": $pcnt, "absent_count": $acnt, "skipped_count": $scnt},
+    "summary": {"present_count": $pcnt, "absent_count": $acnt, "skipped_count": $scnt, "unmeasured": $um},
     "overall_verdict": $ov
-  }' > "$OUTPUT_FILE"
+  }' --argjson um "$unmeasured_json" > "$OUTPUT_FILE"
 
 log_event "$TIMELINE_FILE" "plan_diff_complete" verdict="$overall" ac_count="$ac_count" absent_count="$absent_count" || true
 

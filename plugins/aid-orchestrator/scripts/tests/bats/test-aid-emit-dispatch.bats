@@ -222,3 +222,38 @@ teardown() {
   run "$SCRIPT" start --focus critic-x --agent-id aid-orchestrator:critic --evidence-dir "$EVID"
   [ "$status" -eq 1 ]; [[ "$output" == *"does not match allowed pattern"* ]]
 }
+
+# 2.114.0 — a start names a role the round asks; cancel withdraws a start without a complete
+@test "start: a focus naming a role the round does not ask is refused with the round's roles; a round's own role and a dir without round.json pass" {
+  jq -n '{round: 4, reviewers_expected: ["epic_security"]}' > "$EVID/round.json"
+  run bash "$SCRIPT" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID"
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not ask"* && "$output" == *"epic_security"* ]]
+  [ ! -f "$PENDING" ]
+  run bash "$SCRIPT" start --focus cp3-epic-security --agent-id aid-orchestrator:review --evidence-dir "$EVID"
+  [ "$status" -eq 0 ]
+  mkdir -p "$EVID/free" "$EVID/broken"
+  run bash "$SCRIPT" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID/free"
+  [ "$status" -eq 0 ]
+  mkdir -p "$EVID/six"; jq -n '{reviewers_expected: ["step_generalist"]}' > "$EVID/six/round.json"
+  run bash "$SCRIPT" start --focus cp6-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID/six"
+  [ "$status" -eq 0 ]                                          # every checkpoint prefix is known, cp6 included
+  echo '{"round": 1}' > "$EVID/broken/round.json"
+  run bash "$SCRIPT" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID/broken"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no reviewers_expected"* ]]
+}
+
+@test "cancel: withdraws the open start (ledger empty, timeline event with the reason); refused without a 20-char reason; exit 2 with nothing open; it is not a complete" {
+  bash "$SCRIPT" start --focus cp7-final-claims --agent-id aid-orchestrator:review --evidence-dir "$EVID"
+  run bash "$SCRIPT" cancel --focus cp7-final-claims --evidence-dir "$EVID" --reason "short"
+  [ "$status" -eq 1 ]; [[ "$output" == *"20 characters"* ]]
+  run bash "$SCRIPT" cancel --focus cp7-final-claims --evidence-dir "$EVID" --reason "the round asks one role, this one was dispatched by mistake"
+  [ "$status" -eq 0 ]; [[ "$output" == *"cancelled start cp7-final-claims"* ]]
+  # the ledger keeps the withdrawal and no open start; the FSM's orphan check reads only starts
+  run bash -c "jq -r .event '$PENDING' | sort | uniq -c | tr -s ' '"; [ "$output" = " 1 cancel" ]
+  run bash -c "cd '$EVID/..' && source '$BATS_TEST_DIRNAME/../../aid-fsm.sh' && fsm_check_orphan_dispatches '$EVID'"; [ "$status" -eq 0 ]
+  run jq -e 'select(.event == "verifier_dispatch_cancel" and .focus == "cp7-final-claims" and (.reason | test("by mistake")))' "$TIMELINE"
+  [ "$status" -eq 0 ]
+  ! grep -q 'verifier_dispatch_complete' "$TIMELINE"
+  run bash "$SCRIPT" cancel --focus cp7-final-claims --evidence-dir "$EVID" --reason "nothing is open any more for this focus"
+  [ "$status" -eq 2 ]; [[ "$output" == *"nothing to cancel"* ]]
+}
