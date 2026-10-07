@@ -31,12 +31,16 @@ if (!spec.name || !Array.isArray(spec.directions) || !spec.directions.length || 
   console.error('ERROR: sheet.json needs name, out_dir and a non-empty directions list'); process.exit(2);
 }
 const MIME = { '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
-function uri(p, invert = false) {
+function uri(p, invert = false, vectorOnly = false) {
   const full = path.resolve(root, p);
   const mime = MIME[path.extname(full).toLowerCase()];
   if (!mime) { console.error(`ERROR: ${p}: not an svg/png/jpg/webp`); process.exit(1); }
   let buf;
   try { buf = fs.readFileSync(full); } catch (e) { console.error(`ERROR: ${p}: ${e.message}`); process.exit(1); }
+  // a symbol the PM sees is a vector: never a raster, never an SVG that merely wraps one
+  if (vectorOnly && (mime !== 'image/svg+xml' || /<image|<foreignObject|<script|href=|<text/i.test(buf.toString('utf8')))) {
+    console.error(`ERROR: ${p}: a symbol must be plain vector SVG (no image, text, script, links)`); process.exit(1);
+  }
   if (invert && mime === 'image/svg+xml') buf = Buffer.from(buf.toString('utf8').replace(/#111(?![0-9a-fA-F])|#111111|#000(?![0-9a-fA-F])|#000000|black/g, '#fff'));
   return `data:${mime};base64,${buf.toString('base64')}`;
 }
@@ -78,7 +82,7 @@ const head = `<meta charset="utf-8">${(spec.fonts || []).map((u) => `<link rel="
 </style>`;
 
 function card(d) {
-  const L = inlineSvg(d.lockup, 'lk'), S = uri(d.symbol), Sm = uri(d.small || d.symbol), Sw = uri(d.small || d.symbol, true);
+  const L = inlineSvg(d.lockup, 'lk'), S = uri(d.symbol, false, true), Sm = uri(d.small || d.symbol, false, true), Sw = uri(d.small || d.symbol, true, true);
   return `<!doctype html><html><head>${head}</head><body><div class="card">
   <div class="ctx hero"><div class="bar">${L}<nav><span>Služby</span><span>Cenník</span><span>Kontakt</span><b>Objednať sa</b></nav></div>
     <div class="heroin"><h1>${esc(spec.hero || spec.name)}</h1></div><span class="l">hlavička a hero webu</span></div>
@@ -91,7 +95,7 @@ function card(d) {
 function overview() {
   const n = spec.directions.length;
   const dirs = spec.directions.map((d) => `<div class="dir${d.id === spec.recommend ? ' rec' : ''}">
-    <div class="lk">${inlineSvg(d.lockup, 'lk')}</div><div class="sy"><img src="${uri(d.symbol)}"><img class="s" src="${uri(d.small || d.symbol)}"></div>
+    <div class="lk">${inlineSvg(d.lockup, 'lk')}</div><div class="sy"><img src="${uri(d.symbol, false, true)}"><img class="s" src="${uri(d.small || d.symbol, false, true)}"></div>
     <h2>${esc(d.title)}</h2>${d.id === spec.recommend ? '<div class="rc">DOPORUČENO</div>' : ''}<p>${esc(d.note || '')}</p></div>`).join('');
   const comp = (spec.competitors || []).map((c) => `<div><img src="${uri(c.image)}">${esc(c.name)}</div>`).join('');
   return `<!doctype html><html><head>${head}</head><body><div class="ov"><h1>${esc(spec.name)} - směry loga</h1><p class="sub">${esc(spec.subtitle || '')}</p>

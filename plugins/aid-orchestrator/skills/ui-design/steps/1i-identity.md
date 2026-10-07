@@ -129,11 +129,32 @@ Pravidla, která route.json nese:
      slotu jde jeho nejsilnější koncept, ostatní zůstávají v souboru jako zamítnuté; slot R začíná
      auditem dnešního loga podle `references/adopted/logo-design/references/redesign.md`
      (co má hodnotu, co zachovat - vyjmenovat);
-   - fáze 4: u každého slotu nejdřív stavba slovy (tvary, poloměry, úhly, mřížka), pak symbol
-     SVG černě na bílé podle `svg-construction.md` (`viewBox="0 0 256 256"`, málo bodů, úhly
-     0/15/30/45/60/90°, díry přes `fill-rule="evenodd"`) **a logo s názvem** (`<slot>-lockup.svg`,
-     výška 256, název písmem slotu; v konceptu smí být živý `<text>` s rodinou z Google Fonts,
-     do křivek jde až v bodě 5); verze `<slot>-v1.svg`, `<slot>-v2.svg`… se nepřepisují;
+   - fáze 4 - **symbol kreslí obrazový model, ne ty** (PM 7. 10. 2026: značky psané jako
+     souřadnice SVG byly „výsměch"): do `.aid-ui/logo/gen.json` napiš pro každý slot koncept
+     jednou větou (anglicky, vlastními slovy: nejvýš jméno značky a obor - nikdy fakta, ceny,
+     lidi ani text z podkladů; jen tahle věta a pevná omezení skriptu odcházejí k OpenAI),
+     `n` 6; `python3 scripts/aid-ui-logo-gen.py <project> --spec .aid-ui/logo/gen.json --dry-run`
+     (prompty do `gen/plan.json`, zkontroluj je), pak naostro s klíčem jen pro ten příkaz:
+     `export OPENAI_API_KEY="$(grep -m1 '^OPENAI_API_KEY=' /opt/eco/services/.env | cut -d= -f2- | tr -d "\"'")"`
+     v téže shellové větě (klíč se nikam nezapisuje, skript ho z chyb maže); `--max-cost` 3 USD
+     (medium ≈ 0,04 USD za obrázek; 5 × 6 ≈ 1,3 USD), bez retry, stav v `gen/gen.json`. Běh jiný
+     než `succeeded` = doplň jen chybějící sloty (`--force` jen pro přepsání, jinak nic nepřepíše).
+   - fáze 4b - **kurátorství** (tvoje práce, podle `testing-checklist.md` a varovných signálů
+     skillu): každou variantu si zobraz (Read) a zapiš do `gen/vyber.json`
+     `{"<slot>": {"chosen": "<soubor>", "rejected": [{"file": …, "reason": …}]}}` - vyřazuje text
+     v obrázku, víc barev, stín nebo přechod, klišé bez nové formy, rozpad v 32 px, nápadná
+     podoba se známou značkou; z každého slotu právě jedna. Žádný rastr se neukazuje PM.
+   - fáze 4c - **vektor**: `aid-ui-tool.sh vectorize gen/<zvolený>.png <slot>-symbol.svg`
+     (binarizace, vtracer; parametry v komentáři SVG; `--speckle`, `--corner` když je tvar
+     roztřepený), potom `svg_audit.py` bez FAIL (složitost smí být INFO; při stovkách bodů zvyš
+     `--length`), vykreslení 16/32 px a pohled; nesedí-li vektor na koncept (ořez, slitý otvor),
+     změň parametry, ne koncept. Malý řez pro 16 px uděláš stejně z téhož PNG s vyšším
+     `--speckle`, nebo rukou zjednodušením cest. Rukou psané SVG zůstává jen pro mikroznačku
+     z iniciál (slot W) a drobné úpravy vektoru.
+   - **logo s názvem** (`<slot>-lockup.svg`, výška 256: symbol z vektoru + název písmem slotu;
+     v konceptu smí být živý `<text>` s rodinou z Google Fonts, do křivek jde až v bodě 5);
+     verze se nepřepisují (`-v1`, `-v2`). PNG koncepty v `gen/` smaž po `record-answer` otázky
+     `identity` (gen.json a vyber.json zůstávají jako záznam).
    - fáze 5 aspoň dvakrát: `python3 references/adopted/logo-design/scripts/svg_audit.py a.svg b.svg c.svg`
      a `python3 references/adopted/logo-design/scripts/preview_sheet.py a.svg b.svg c.svg -o preview.html`
      (bez `--refs-industry`, knihovna není), snímek stránky přes `aid-ui-tool.sh`; co padá,

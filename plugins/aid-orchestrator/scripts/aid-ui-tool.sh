@@ -22,6 +22,12 @@
 #                                                      business card) as logo-<id>.png, and logo-prehled.png
 #                                                      of all directions next to the competitors' logos
 #                                                      (step 1i Rozcestník; spec format in the module header)
+#   vectorize <in.png> <out.svg> [--speckle N] [--corner N] [--length F] [--size N]
+#                                                      scripts/aid-ui-vectorize.py: a generated raster
+#                                                      concept (aid-ui-logo-gen.py) as one black SVG symbol,
+#                                                      viewBox 0 0 256 256. vtracer + Pillow (MIT/HPND) live
+#                                                      in ${AID_UI_PYVEC:-~/.cache/aid-ui/pyvec}, a venv made
+#                                                      on first use like pyfont below
 #   wordmark --spec <wordmark.json>                    scripts/aid-ui-wordmark.py: the logo with the
 #                                                      name (master with live text, outlines, logo/
 #                                                      variants). Python fontTools + brotli (MIT) live in
@@ -34,7 +40,7 @@
 set -euo pipefail
 
 LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib/ui-fidelity" && pwd)"
-usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify|png|measure|logo-sheet|wordmark <args>" >&2; exit 2; }
+usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify|png|measure|logo-sheet|vectorize|wordmark <args>" >&2; exit 2; }
 (( $# >= 1 )) || usage
 tool="$1"; shift
 if [[ "$tool" == wordmark ]]; then
@@ -52,6 +58,22 @@ if [[ "$tool" == wordmark ]]; then
   fi
   flock -u 8; exec 8>&-
   exec "$VENV/bin/python" "$(dirname "${BASH_SOURCE[0]}")/aid-ui-wordmark.py" "$@"
+fi
+if [[ "$tool" == vectorize ]]; then
+  VENV="${AID_UI_PYVEC:-$HOME/.cache/aid-ui/pyvec}"
+  PINS="vtracer==0.6.15 pillow==12.3.0"
+  mkdir -p "$(dirname "$VENV")"
+  exec 8>"$VENV.lock"; flock 8
+  if [[ "$(cat "$VENV/.aid-installed" 2>/dev/null)" != "$PINS" ]]; then
+    echo "aid-ui-tool.sh: installing $PINS into $VENV" >&2
+    rm -rf "$VENV"
+    if ! { python3 -m venv "$VENV" && "$VENV/bin/pip" install --quiet $PINS >&2; }; then
+      rm -rf "$VENV"; echo "ERROR: aid-ui-tool.sh: could not install $PINS into $VENV" >&2; exit 1
+    fi
+    printf '%s' "$PINS" > "$VENV/.aid-installed"
+  fi
+  flock -u 8; exec 8>&-
+  exec "$VENV/bin/python" "$(dirname "${BASH_SOURCE[0]}")/aid-ui-vectorize.py" "$@"
 fi
 case "$tool" in
   glyph)  js=aid-ui-glyph-check.mjs ;;

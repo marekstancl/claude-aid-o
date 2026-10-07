@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 586          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 587          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4408,6 +4408,20 @@ enforcements:
     not_guaranteed: "That the directions are conceptually different or well scored - only that the situation, the slot list, the contexts and the weights come from the state (never from a question to the PM), and that the identity question carries exactly one card per slot. Similarity of the drawings is judged by the checklist, not measured."
     description: "The logo decision tree is computed, not asked (PM 7. 10. 2026: 'to musí říkat ten skill'): assets (package) 0 directions, app (webapp/pwa) 3 symbol-first, redesign (web with a fetched old site) 5 incl. the revitalization of a usable current logo, new (web) 3; each slot a distinct construction; contexts = the situation's test contexts plus the brief's list; scoring weights per situation and a continuity bonus only when the facts register evidences it. The studio refuses an identity question without route.json or with cards that are not one per slot."
     recovery: "python3 scripts/aid-ui-logo-route.py <project> --write, then one card per slot with `slot`."
+  - id: aid_ui_logo_generated
+    type: 7
+    source: "scripts/aid-ui-logo-gen.py (prompt = constraints + slot kind + concept; gen.json record); scripts/aid-ui-vectorize.py; lib/ui-fidelity/aid-ui-logo-sheet.mjs (symbol must be plain vector SVG)"
+    instruction: "skills/ui-design/steps/1i-identity.md point 4 (fáze 4, 4b, 4c)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    test: scripts/tests/bats/test-aid-ui-logo-gen.bats
+    not_guaranteed: "That the model's concepts are good or that the curation was honest - gen.json proves what was sent and received (prompts, counts, cost), vyber.json is the agent's own record. What is mechanical: no request without the key in the environment, no slot outside route.json, caps 10 per slot / 60 per run / --max-cost, 1024x1024 PNG only, and the sheet refuses a raster or a raster-wrapping SVG as the symbol the PM sees."
+    description: "Logo symbols are drawn by an image model from the step's concept sentences, never as SVG coordinates by the language model (PM 7. 10. 2026); the chosen raster is vectorized (vtracer, binarized, one black path set, viewBox 256) and only the vector reaches the audit, the 16 px test and the PM's cards."
+    recovery: "aid-ui-logo-gen.py --dry-run, check plan.json, run with the key exported for that command; aid-ui-tool.sh vectorize the chosen PNG."
   - id: aid_ui_old_site_origin
     type: 12
     source: "scripts/aid-ui-sources.py (site_origin, --fetch-site)"
