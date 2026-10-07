@@ -38,7 +38,7 @@ Nejvýš jedna úvodní otázka v chatu a jedna otázka `sources` ve studiu na k
    (u kopie pilotu s jinou cestou `--sessions-dir <složka rozhovorů> --sessions-from <původní cesta projektu>`)
    → `.aid-ui/sources/manifest.json` + neměnný snímek `manifest-<sha16>.json`, na výstupu
    `manifest_sha256=…`. Použité dokumenty jsou v redigovaných snímcích `doc-*.txt` (HTML jen viditelný
-   text); interní (ceník, „nesdílet", složka internal…), symlinky, nečitelné formáty a soubory nad
+   text, PDF text přes `pdftotext`); interní (ceník, „nesdílet", složka internal…), symlinky, nečitelné formáty a soubory nad
    stropem jsou v seznamu nepoužité s důvodem. Rozhovory jsou kandidáti s úryvky.
 3. **Jedna otázka `sources` ve studiu**, `target` = `manifest@<manifest_sha256>`, `outcome` jednou
    větou. Karta: co přečteš (jména dokumentů a odkud, počet), co jsi vyřadil a proč (interní jmenovitě

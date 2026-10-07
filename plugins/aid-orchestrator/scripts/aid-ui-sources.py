@@ -7,7 +7,7 @@
   python3 aid-ui-sources.py <project> --purge
 
 --list reads the documents: the project's own files (PRODUCT.md, README*, *.md in the root, docs/**
-md/txt/html except docs/brand, docs/design, docs/zakaznik and docs/content/product-context.md), the old
+md/txt/html; a PDF named with --from through pdftotext except docs/brand, docs/design, docs/zakaznik and docs/content/product-context.md), the old
 site (--old-site) and whatever the PM named (--from, a folder walked in sorted order or a file). Naming a
 path is the PM's consent to read it locally; nothing leaves the machine. Each document gets an id
 (sha256 of "kind:absolute path", 10 chars) and is either used - its bytes read once, hashed, HTML
@@ -46,6 +46,7 @@ import argparse, datetime, glob, hashlib, html.parser, json, os, re, subprocess,
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENDER_LIB = os.path.join(HERE, "lib", "aid-artifact-render.sh")
 TEXT_EXT = (".md", ".txt", ".html", ".htm")
+PDF_EXT = (".pdf",)   # text through pdftotext (poppler); without it a PDF is listed unused
 MAX_WALK, MAX_USED, MAX_BYTES = 2000, 300, 2 * 1024 * 1024
 INTERNAL_PATH = {"internal", "interni", "interní", "pricing", "cenik", "ceník", "private"}
 INTERNAL_HEAD = ("nikdy nesdílet", "nesdílet", "interní dokument", "pro interní potřebu", "důvěrné", "do not share", "internal only", "confidential")
@@ -211,12 +212,12 @@ def document(proj, kind, path, reason, requested, used_n, outdir):
     it = {"id": item_id(kind, path), "kind": kind, "path": rel, "used": False, "reason": reason or ""}
     if reason:
         return it
-    if not path.endswith(TEXT_EXT):
+    if not path.endswith(TEXT_EXT + PDF_EXT):
         it["reason"] = "tento formát skript nečte"
         return it
     try:
         size = os.path.getsize(path)
-        if size > MAX_BYTES:
+        if size > MAX_BYTES and not path.endswith(PDF_EXT):   # a PDF is mostly images; its text is capped below
             it["reason"] = "nad 2 MB"
             return it
         with open(path, "rb") as f:
@@ -225,7 +226,20 @@ def document(proj, kind, path, reason, requested, used_n, outdir):
         it["reason"] = e.strerror
         return it
     it.update(size=len(raw), sha256=hashlib.sha256(raw).hexdigest())
-    text = raw.decode("utf-8", errors="replace")
+    if path.endswith(PDF_EXT):
+        try:
+            text = subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True, timeout=60).stdout.decode("utf-8", errors="replace")
+        except (OSError, subprocess.SubprocessError):
+            it["reason"] = "PDF: chybí pdftotext (poppler-utils)"
+            return it
+        if not text.strip():
+            it["reason"] = "PDF bez textu (sken)"
+            return it
+        if len(text.encode("utf-8")) > MAX_BYTES:
+            it["reason"] = "text PDF nad 2 MB"
+            return it
+    else:
+        text = raw.decode("utf-8", errors="replace")
     why = internal(rel, text[:4096])
     if why:
         it["excluded"] = "internal"
