@@ -5,7 +5,10 @@ language model drew as SVG coordinates were "a joke"; the process stays, the han
   aid-ui-logo-gen.py <project> --spec .aid-ui/logo/gen.json [--dry-run] [--max-cost USD] [--force]
 
 gen.json:
-  {"model": "gpt-image-1",                      (default; the only one wired today)
+  {"model": "gpt-image-2.5-sunburst",           (default; gpt-image-2, gpt-image-1 also wired)
+   "references": [".aid-ui/refs/inspirace/a.jpg", ...],   optional, up to 16: real logos the agent
+                                                found for the level of craft (never copied); sent as
+                                                image inputs through /v1/images/edits
    "quality": "medium", "n": 6,                 per slot; n <= 10, n x slots <= 60
    "mode": "full",                              full (default): the complete logo in colour - symbol +
                                                 name + optional tagline, white background (PM 8. 10.
@@ -39,14 +42,22 @@ CONSTRAINTS = ("Flat vector-style logo mark: a single solid pure black (#000000)
                "no shadows, no 3D, no texture, no outline strokes, no frame, no background shape. Centred, square "
                "composition, generous margin, simple geometry that still reads at 16 px, professional brand identity "
                "design, one idea only.")
-CONSTRAINTS_FULL = ("A complete, finished brand logo design for a real company, presented alone on a plain white "
-                    "background: a distinctive symbol together with the brand name \"%s\" set in clean, modern, "
-                    "professional typography%s. Flat vector style, at most two brand colours%s plus a neutral, "
-                    "high contrast, balanced horizontal composition, generous margin. No mockups, no frame, no "
-                    "photo, no gradients or shadows, no extra icon versions, no other text. The symbol must still "
-                    "read at small size. One clear idea, unique, memorable, not a stock clipart.")
+CONSTRAINTS_FULL = ("Logo design presentation by a top brand identity studio, award-winning contemporary quality, for the "
+                    "company \"%s\": one original, memorable brand mark paired with a refined, custom-feeling wordmark "
+                    "\"%s\"%s. Flat vector look, impeccable typography and letter spacing, generous negative space, "
+                    "balanced horizontal lockup centred on pure white, at most two brand colours%s plus a neutral. "
+                    "No mockups, no frame, no photo, no gradients, no shadows, no extra icon versions, no other text; "
+                    "every word spelled exactly as given. The mark must still read at small size. One clear idea, "
+                    "unique, not a stock clipart. If reference images are attached, use them only as the measure of craft "
+                    "and restraint - never copy their shapes or names.")
 PRICE_LIST = "OpenAI image pricing, read 2026-10-07, USD per 1024x1024 image"
-PRICE = {"gpt-image-1": {"low": 0.011, "medium": 0.042, "high": 0.167}}
+PRICE = {"gpt-image-1": {"low": 0.011, "medium": 0.042, "high": 0.167},
+         # token-billed models: estimate per 1024x1024 output (30 USD per 1M image-output tokens; measured
+         # 2026-10-08: sunburst high 1756 tokens, gpt-image-2 high 7024 tokens) + ~0.006 USD per reference image
+         "gpt-image-2": {"low": 0.06, "medium": 0.12, "high": 0.21},
+         "gpt-image-2.5-sunburst": {"low": 0.02, "medium": 0.04, "high": 0.06},
+         "gpt-image-2.5-flare": {"low": 0.02, "medium": 0.03, "high": 0.05}}
+REF_USD = 0.006
 MAX_PER_SLOT, MAX_RUN, MAX_BODY = 10, 60, 8 * 1024 * 1024
 SLOT_ID = re.compile(r"^[A-Z]{1,3}$")
 
@@ -60,15 +71,33 @@ def utc():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def generate(key, model, prompt, quality, mode="full"):
-    """One PNG from the API; raises urllib errors, TimeoutError or ValueError (bad response)."""
+def generate(key, model, prompt, quality, mode="full", refs=()):
+    """One PNG from the API; raises urllib errors, TimeoutError or ValueError (bad response).
+    With reference images the call goes to /v1/images/edits as multipart (image[] = the references)."""
     body = {"model": model, "prompt": prompt, "n": 1, "size": "1024x1024", "quality": quality, "output_format": "png"}
     if mode == "mark":
         body["background"] = "transparent"
-    req = urllib.request.Request(
-        "https://api.openai.com/v1/images/generations",
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
+    if refs:
+        import uuid
+        b = uuid.uuid4().hex
+        parts = []
+        for k, v in body.items():
+            parts.append(("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n" % (b, k, v)).encode("utf-8"))
+        for path in refs:
+            with open(path, "rb") as f:
+                data = f.read()
+            ext = os.path.splitext(path)[1].lower()
+            mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}[ext.lstrip(".")]
+            parts.append(("--%s\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\"%s\"\r\nContent-Type: %s\r\n\r\n"
+                          % (b, os.path.basename(path), mime)).encode("utf-8") + data + b"\r\n")
+        parts.append(("--%s--\r\n" % b).encode("utf-8"))
+        req = urllib.request.Request("https://api.openai.com/v1/images/edits", data=b"".join(parts),
+                                     headers={"Authorization": "Bearer " + key, "Content-Type": "multipart/form-data; boundary=" + b}, method="POST")
+    else:
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/images/generations",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=180) as r:
         body = r.read(MAX_BODY + 1)
     if len(body) > MAX_BODY:
@@ -104,7 +133,7 @@ def main():
     except (OSError, ValueError) as e:
         die("spec or .aid-ui/logo/route.json unreadable: %s" % e)
     slots = {s["id"]: s for s in route.get("slots", []) if isinstance(s, dict) and SLOT_ID.match(str(s.get("id", "")))}
-    model = spec.get("model", "gpt-image-1")
+    model = spec.get("model", "gpt-image-2.5-sunburst")
     quality = spec.get("quality", "medium")
     mode = spec.get("mode") or ("mark" if route.get("situation") == "app" else "full")   # app: the symbol first
     if mode not in ("full", "mark"):
@@ -124,13 +153,21 @@ def main():
         die("slots not in route.json: %s (route has %s)" % (", ".join(bad), ", ".join(slots) or "none"), 2)
     if not isinstance(n, int) or not 1 <= n <= MAX_PER_SLOT or n * len(spec["slots"]) > MAX_RUN:
         die("n must be an integer 1..%d and n x slots <= %d" % (MAX_PER_SLOT, MAX_RUN), 2)
-    unit = PRICE[model][quality]
+    refs = spec.get("references") or []
+    if not isinstance(refs, list) or len(refs) > 16 or not all(isinstance(r, str) for r in refs):
+        die("references must be a list of at most 16 image paths", 2)
+    refs = [r if os.path.isabs(r) else os.path.join(project, r) for r in refs]
+    for r in refs:
+        if not os.path.isfile(r) or os.path.splitext(r)[1].lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+            die("reference not a png/jpg/webp file: %s" % r)
+    unit = PRICE[model][quality] + REF_USD * len(refs)
     out = os.path.join(project, ".aid-ui", "logo", "gen")
     os.makedirs(out, exist_ok=True)
     if os.path.islink(out) or not os.path.realpath(out).startswith(project + os.sep):
         die("gen directory must be a plain directory under the project")
     log = {"version": 1, "run_id": time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()), "model": model, "quality": quality,
-           "n": n, "mode": mode, "price_list": PRICE_LIST, "unit_usd": unit, "max_cost_usd": max_cost, "dry_run": dry,
+           "n": n, "mode": mode, "references": [os.path.relpath(r, project) for r in refs], "price_list": PRICE_LIST,
+           "unit_usd": unit, "max_cost_usd": max_cost, "dry_run": dry,
            "started": utc(), "constraints": constraints_for(spec), "slots": {}, "requested": 0, "received": 0,
            "estimated_usd": 0.0, "status": "planned" if dry else "running"}
     spec["mode"] = mode
@@ -162,7 +199,7 @@ def main():
             log["requested"] += 1
             log["estimated_usd"] = round(log["estimated_usd"] + unit, 3)   # counted when sent, billed or not
             try:
-                png = generate(key, model, prompt, quality, mode)
+                png = generate(key, model, prompt, quality, mode, refs)
             except TimeoutError:
                 rec["errors"].append("variant %d: timeout - unknown (may have been billed); not retried" % i)
                 continue
@@ -214,8 +251,9 @@ def constraints_for(spec):
         return CONSTRAINTS
     tag = spec.get("tagline")
     pal = spec.get("palette")
-    return CONSTRAINTS_FULL % (spec.get("name", "").strip(),
-                               (' and the small tagline "%s" under it' % tag.strip()) if isinstance(tag, str) and tag.strip() else "",
+    name = spec.get("name", "").strip()
+    return CONSTRAINTS_FULL % (name, name,
+                               (' and a small tagline "%s" under it' % tag.strip()) if isinstance(tag, str) and tag.strip() else "",
                                (" (%s)" % pal.strip()) if isinstance(pal, str) and pal.strip() else "")
 
 

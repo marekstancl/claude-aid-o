@@ -29,7 +29,7 @@ setup() {
   printf '{"n": 1, "name": "Firma s.r.o.", "tagline": "pekárna · Brno", "palette": "warm ochre", "slots": {"WC": "a loaf as a letter F"}}' > "$P/.aid-ui/logo/gen.json"
   run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   pr="$(jq -r '.slots.WC.prompt' "$P/.aid-ui/logo/gen/plan.json")"
-  [[ "$pr" == *'brand name "Firma s.r.o."'* && "$pr" == *'tagline "pekárna · Brno"'* && "$pr" == *"(warm ochre)"* && "$pr" == *"plain white background"* ]]
+  [[ "$pr" == *'company "Firma s.r.o."'* && "$pr" == *'tagline "pekárna · Brno"'* && "$pr" == *"(warm ochre)"* && "$pr" == *"pure white"* ]]
   [ "$(jq -r .mode "$P/.aid-ui/logo/gen/plan.json")" = full ]
   printf '{"n": 1, "slots": {"WC": "x"}}' > "$P/.aid-ui/logo/gen.json"
   run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 2 ]; [[ "$output" == *"needs name"* ]]
