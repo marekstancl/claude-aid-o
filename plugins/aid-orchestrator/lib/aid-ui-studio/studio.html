@@ -71,7 +71,8 @@
   .saved-row .ok { color: var(--ks-patina); font-weight: 700; white-space: nowrap; }
   .saved-q { color: var(--ks-text-muted); }
   .saved-a { color: var(--ks-ink); font-weight: 600; }
-  .details .saved, .active-box .saved { padding: 0; }
+  .active-box .saved { padding: 0; }
+  .stage > .saved { padding: 14px 22px 6px; }
   .saved-row.fresh { background: color-mix(in srgb, var(--ks-patina) 12%, transparent); }
   @keyframes saved-flash { from { background: color-mix(in srgb, var(--ks-patina) 30%, transparent); } to { background: transparent; } }
   /* Choosing: the whole card is the control; the tick and the outline say which one is picked. */
@@ -871,17 +872,18 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
     const addr = "/" + file.replace(/(^|\/)index\.html$/, "$1").replace(/\.html$/, "");
     meta = el("div", { class: "identity" }, el("span", { class: "tag" }, "adresa ", el("b", {}, addr)));
   }
-  const body = el("div", { class: "body" },
-    tier(),
-    el("h2", { class: "q-title", id: "h-" + q.id }, title),
-    str(q.prompt) ? el("p", { class: "detail" }, q.prompt) : null,
+  const parts = [
+    el("div", { class: "head q-head" }, el("div", { class: "headline" }, el("h2", { class: "q-title", id: "h-" + q.id }, title)), tier()),
+    str(q.prompt) ? el("p", { class: "lede" }, q.prompt) : null,
     meta, exc ? selectorChips(q.target) : null,
-    bodyLines(q.body),
+    (lines => lines ? el("div", { class: "head" }, lines) : null)(bodyLines(q.body)),
+    partNote,
     gallery && cards.length ? el("div", { class: "gallery" }, cards.map(c => el("figure", {},
       str(c.preview) ? media(q, c, false) : null,
-      el("figcaption", {}, el("b", {}, c.title || c.id), str(c.thesis) ? " " + c.thesis : "")))) : null);
-  if (partNote) sec.append(partNote);
-  sec.append(el("div", { class: "panel face" + (page ? " wide" : "") + (gallery && cards.length ? " full" : "") }, shot, body));
+      el("figcaption", {}, el("b", {}, c.title || c.id), str(c.thesis) ? " " + c.thesis : "")))) : null];
+  // a page approval keeps its box with the screenshot; every other question reads like the ones with cards
+  const body = page ? el("div", { class: "body" }, parts) : sec;
+  if (page) sec.append(el("div", { class: "panel face wide" }, shot, body)); else sec.append(...parts.filter(Boolean));
   // the same row as under the cards: the PM's own words in a window on the left, the way on on the right
   const other = () => ask(exc ? { key: q.id + ":no", title: "Proč výjimku neudělit?", hint: "Důvod se uloží k rozhodnutí.", send: [["Neudělit", t => answer("return", undefined, t)]] }
     : { key: q.id, title: "Co chcete jinak?", hint: q.kind === "handover" ? "Napište, co chcete před předáním ještě upravit." : "Napište to svými slovy. Když to jinak sedí a máte jen poznámku, pošlete ji se souhlasem.",
@@ -972,9 +974,9 @@ function stepEl(st, i, back) {
   const just = !first && WAS["s:" + st.id] && WAS["s:" + st.id] !== cls && cls !== "wait";
   drawn.push(["s:" + st.id, cls]);
   // a step the PM opened on purpose (not the one being worked on) shows its Detail right away
-  const isOpen = openSteps.has(st.title) !== (cls !== "active");
+  const isOpen = openSteps.has(st.title);
   const stage = el("div", { class: "stage" + (isOpen ? " open" : "") + (stepMove ? " slide-" + stepMove : "") });
-  const detail = events.length || saved.length ? el("button", { type: "button", class: "toggle", "aria-expanded": String(isOpen),
+  const detail = events.length ? el("button", { type: "button", class: "toggle", "aria-expanded": String(isOpen),
     on: { click: () => {
       const on = stage.classList.toggle("open");
       if (openSteps.has(st.title)) openSteps.delete(st.title); else openSteps.add(st.title);
@@ -992,7 +994,8 @@ function stepEl(st, i, back) {
       !st.active && hOk && st.who ? el("span", { class: "who" }, WHO[st.who]) : null),
     detail));
   if (back) stage.append(el("div", { class: "step-back" }, el("button", { type: "button", class: "reroll-btn back-now", on: { click: back.go } }, back.label)));
-  if (events.length || saved.length) stage.append(el("div", { class: "details" }, saved.length ? savedEl(saved) : null, events.map(eventRow),
+  if (saved.length) stage.append(savedEl(saved));
+  if (events.length) stage.append(el("div", { class: "details" }, el("p", { class: "tier" }, "Historie rozhodnutí"), events.map(eventRow),
     events.filter(e => e.answer && e.answer.decision === "choose" && e.cards.length).map(pastCards)));
   if (cls === "wait") stage.append(el("div", { class: "step-info" }, el("p", { class: "info" }, "Na tenhle krok přijde řada později. Zatím tu není na co odpovídat.")));
   if (cls === "active" && st.parts.length) {   // the parts as tabs, and the one the PM looks at
