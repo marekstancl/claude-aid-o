@@ -94,9 +94,12 @@ from urllib.parse import urlsplit, parse_qs
 KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "content_plan", "defer_content", "facts", "references", "direction",
          "approve_page", "exception", "coverage_drift", "design_standard", "handover", "notifications",
-         "sources", "product_context", "copy_verdict"}
+         "sources", "product_context", "copy_verdict", "no_method"}
 # Card fields the page shows (a step may turn any into state); snapshotted with the answer.
-CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "palette", "risk", "uniqueness", "value")
+CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "palette", "risk", "uniqueness", "value", "method")
+RECEIPT_AGE = 12 * 3600   # a method receipt serves questions opened within this many seconds after it
+STANDARDS = "/opt/eco/docs/docs/ecosystem/"   # the only place a method file may live outside the plugin (read live)
+WAIVERS = ("pm", "without")   # no_method card values that let the kind be asked without a method
 DECISIONS = {"approve", "choose", "return", "reroll", "reroll_safer", "reroll_bolder"}
 # Previews are raster images only: an .html/.svg preview would run script on this origin.
 IMAGES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -105,21 +108,27 @@ BRAND_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=u
                ".svg": "image/svg+xml", ".woff2": "font/woff2", ".woff": "font/woff",
                ".ico": "image/x-icon", **IMAGES}
 HERE = os.path.dirname(os.path.abspath(__file__))
+PLUGIN = os.path.normpath(os.path.join(HERE, "..", ".."))
 NOTICE = os.path.join(HERE, "..", "..", "skills", "ui-design", "references",
                       "LICENSES", "NOTICE-impeccable.txt")
 
 ap = argparse.ArgumentParser()
+ap.add_argument("--check", action="store_true", help="only validate <project>/.aid-ui/studio/payload.json as load() does, then exit")
 for a in ("--project", "--host", "--port", "--token-file"):
-    ap.add_argument(a, required=True)
+    ap.add_argument(a)
 args = ap.parse_args()
-PORT = int(args.port)
+if not args.project or not (args.check or (args.host and args.port and args.token_file)):
+    ap.error("--project, --host, --port and --token-file are required (--check needs only --project)")
+PORT = int(args.port or 0)
 PROJECT = os.path.realpath(args.project)
 STUDIO = os.path.join(PROJECT, ".aid-ui", "studio")
-CODE_FILE = os.path.join(os.path.dirname(os.path.abspath(args.token_file)), "studio.code")
-with open(args.token_file) as f:
-    TOKEN = f.read().strip()
-if not re.fullmatch(r"[A-Za-z0-9]{16,}", TOKEN):
-    sys.exit("server.py: token file must hold at least 16 alphanumeric characters")
+TOKEN = CODE_FILE = None
+if not args.check:
+    CODE_FILE = os.path.join(os.path.dirname(os.path.abspath(args.token_file)), "studio.code")
+    with open(args.token_file) as f:
+        TOKEN = f.read().strip()
+    if not re.fullmatch(r"[A-Za-z0-9]{16,}", TOKEN):
+        sys.exit("server.py: token file must hold at least 16 alphanumeric characters")
 OWN = {"%s:%d" % (h, PORT) for h in (args.host, "127.0.0.1", "localhost")}
 
 ANSWERS = {}   # question id -> answer dict
@@ -201,11 +210,33 @@ def load_sections():
                 raise ValueError("part %s: unknown when %r" % (p["id"], p["when"]))
             parts[p["id"]] = dict(p, step=n)
             kinds.update(p["kinds"])
-    if KINDS - kinds:
-        raise ValueError("kinds in no part: %s" % ", ".join(sorted(KINDS - kinds)))
+    if KINDS - {"no_method"} - kinds:   # no_method is asked in whichever part lacks a method
+        raise ValueError("kinds in no part: %s" % ", ".join(sorted(KINDS - {"no_method"} - kinds)))
     if not isinstance(m.get("sources"), dict) or not m["sources"] or \
             not all(isinstance(k, str) and k and isinstance(v, str) and v for k, v in m["sources"].items()):
         raise ValueError("sources must be a non-empty map of id to description")
+    # the method before the output: every kind names the files the agent reads first, or null (no method)
+    ms = m.get("methods")
+    if not isinstance(ms, dict) or set(ms) != KINDS - {"no_method"}:
+        raise ValueError("methods must name every question kind but no_method, once (missing: %s, extra: %s)"
+                         % (", ".join(sorted(KINDS - {"no_method"} - set(ms or {}))), ", ".join(sorted(set(ms or {}) - KINDS))))
+    for k, v in ms.items():
+        if v is None:
+            continue
+        if not (isinstance(v, dict) and set(v) == {"files", "receipt"} and isinstance(v["receipt"], bool)
+                and isinstance(v["files"], list) and v["files"] and all(isinstance(x, str) and x for x in v["files"])):
+            raise ValueError("methods.%s must be null or {files: [...], receipt: true|false}" % k)
+        if len(set(v["files"])) != len(v["files"]):
+            raise ValueError("methods.%s names a file twice" % k)
+        for x in v["files"]:
+            if x.startswith(STANDARDS):   # a standard read live: checked when read, not here
+                if os.path.normpath(x) != x or os.path.islink(x) or (os.path.exists(x) and not os.path.isfile(x)):
+                    raise ValueError("methods.%s: %s is not a plain file path" % (k, x))
+                continue
+            full = os.path.join(PLUGIN, x)
+            if os.path.isabs(x) or os.path.normpath(x) != x or x.startswith("..") \
+                    or os.path.islink(full) or not os.path.isfile(full) or not os.path.realpath(full).startswith(PLUGIN + os.sep):
+                raise ValueError("methods.%s names a file that is not a plain file of the plugin: %s" % (k, x))
     return m, parts
 
 
@@ -221,13 +252,83 @@ def part_of(q):
         p = PARTS.get(q["part"])
         if not p:
             raise ValueError("question %s names unknown part %r" % (q["id"], q["part"]))
-        if q["kind"] not in p["kinds"]:
+        if q["kind"] not in p["kinds"] and q["kind"] != "no_method":
             raise ValueError("question %s: kind %s does not belong to part %s" % (q["id"], q["kind"], q["part"]))
         return q["part"]
     owners = [i for i, p in PARTS.items() if q["kind"] in p["kinds"]]
     if len(owners) != 1:
-        raise ValueError("question %s (kind %s) must name its part: one of %s" % (q["id"], q["kind"], ", ".join(owners)))
+        raise ValueError("question %s (kind %s) must name its part: one of %s" % (q["id"], q["kind"], ", ".join(owners) or "any"))
     return owners[0]
+
+
+def method_sha(path):
+    """sha256 of a method file: a plugin path, or an absolute one (a standard read live)."""
+    with open(path if os.path.isabs(path) else os.path.join(PLUGIN, path), "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def check_method(q, cards):
+    """The method before the output (PM 7. 10. 2026): an open question of a kind whose method carries a
+    receipt was written after the agent read that method - <project>/.aid-ui/method/<kind>.json, written
+    by aid-ui-state.sh method, names the current method files with their sha256 and is at most
+    RECEIPT_AGE old when the question opened; every card says what of the method it applies (`method`).
+    A kind without a method needs the PM's no_method answer in the receipt (`waived`). Done questions
+    and no_method itself are not checked. Raises ValueError."""
+    m = SECTIONS["methods"].get(q["kind"])
+    who = "question %s (%s)" % (q["id"], q["kind"])
+    if q["kind"] == "no_method":   # the question about a missing method: its own shape, no method of its own
+        kind = str(q.get("target", ""))[len("no_method@"):]
+        if not str(q.get("target", "")).startswith("no_method@") or SECTIONS["methods"].get(kind, 0) is not None:
+            raise ValueError("%s: target must be no_method@<kind> for a kind whose method is null in the map" % who)
+        if sorted(str(c.get("value")) for c in cards) != ["adopt", "pm", "without"] or any("method" in c for c in cards):
+            raise ValueError("%s: exactly three cards with value adopt, pm and without, none with `method`" % who)
+        return
+    answers = read_state().get("answers") or {}
+    if q.get("done") is True and isinstance(answers.get(q["id"]), dict):   # recorded, not merely flagged
+        return
+    if m and not m["receipt"]:
+        return
+    fix = "run: aid-ui-state.sh method <project> %s, then open the question anew (new opened_at)" % q["kind"]
+    path = os.path.join(PROJECT, ".aid-ui", "method", q["kind"] + ".json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            r = json.load(f)
+        at, files = parse_time(r["at"]), r["files"]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise ValueError("%s: no method receipt .aid-ui/method/%s.json; %s" % (who, q["kind"], fix))
+    age = (parse_time(q["opened_at"]) - at).total_seconds()
+    if not 0 <= age <= RECEIPT_AGE:
+        raise ValueError("%s: the method receipt (%s) is not from the 12 hours before the question opened (%s); %s"
+                         % (who, r["at"], q["opened_at"], fix))
+    if m is None:   # no method: the PM's no_method answer, checked here as a whole, not trusted from the receipt
+        w = r.get("waived")
+        a = answers.get(w) if isinstance(w, str) else None
+        chosen = next((c for c in (a or {}).get("cards") or [] if isinstance(c, dict) and c.get("id") == a.get("choice")), None) \
+            if isinstance(a, dict) else None
+        mode = chosen.get("value") if isinstance(chosen, dict) else None
+        if not (isinstance(a, dict) and a.get("kind") == "no_method" and a.get("target") == "no_method@" + q["kind"]
+                and a.get("decision") == "choose" and mode in WAIVERS and r.get("mode") == mode):
+            raise ValueError("%s: this kind has no method and the receipt names no no_method answer of the PM for it "
+                             "(target no_method@%s, choose, card pm or without); ask that question first" % (who, q["kind"]))
+        if mode == "pm":   # the PM supplies the output: every card rests on the PM's material
+            bad = [c["id"] for c in cards if c.get("source") != "podklady"]
+            if bad:
+                raise ValueError("%s: the PM supplies this output (no_method answer %s): card %s must have source podklady"
+                                 % (who, w, ", ".join(bad)))
+        return
+    try:
+        want = [{"path": x, "sha256": method_sha(x)} for x in m["files"]]
+    except OSError as e:
+        raise ValueError("%s: a method file cannot be read: %s" % (who, e))
+    if files != want:
+        raise ValueError("%s: the method receipt is not for the current method files (%s); %s"
+                         % (who, ", ".join(m["files"]), fix))
+    names = [os.path.basename(x) for x in m["files"]]
+    bad = [c["id"] for c in cards if not (isinstance(c.get("method"), str) and 0 < len(c["method"]) <= 300
+                                          and any(n in c["method"] for n in names))]
+    if bad:
+        raise ValueError("%s: card %s needs `method` (at most 300 characters naming one of the method files - %s - and what "
+                         "of it the card applies: formula, mark type, page framework)" % (who, ", ".join(bad), ", ".join(names)))
 
 
 def read_state():
@@ -317,8 +418,8 @@ def load():
             parse_time(q.get("opened_at"))
         except (TypeError, ValueError):
             raise ValueError("payload.json: question %s has no valid opened_at" % q["id"])
-        if q["kind"] == "facts" and "part" not in q:
-            raise ValueError("payload.json: question %s (facts) must name its part" % q["id"])
+        if q["kind"] in ("facts", "no_method") and "part" not in q:
+            raise ValueError("payload.json: question %s (%s) must name its part" % (q["id"], q["kind"]))
         try:
             q["part"] = part_of(q)
         except ValueError as e:
@@ -341,6 +442,11 @@ def load():
         if bad:
             raise ValueError("payload.json: question %s: card %s needs a source from sections.json sources (%s)"
                              % (q["id"], ", ".join(bad), ", ".join(SECTIONS["sources"])))
+    for q in qs:   # the method before the output
+        try:
+            check_method(q, [c for c in cards if c["question"] == q["id"]])
+        except ValueError as e:
+            raise ValueError("payload.json: %s" % e)
     with LOCK:
         qs = qs + [dict(q) for i, q in REROLLED.items() if i not in seen]
         qs = qs + [dict(q) for i, q in CHANGED.items() if i not in seen]
@@ -719,4 +825,11 @@ class Studio(BaseHTTPRequestHandler):
         self.send(200, a)
 
 
+if args.check:
+    try:
+        load()
+    except ValueError as e:
+        sys.exit("ERROR: %s" % e)
+    print("payload OK: %s/payload.json" % STUDIO)
+    sys.exit(0)
 ThreadingHTTPServer((args.host, PORT), Studio).serve_forever()

@@ -125,6 +125,20 @@
 #                                        brand_package_waiver {missing, answer, reason, at}: the
 #                                        check passes as WAIVED only while exactly these parts
 #                                        are missing (another missing part voids it)
+#   method <project> <kind>              the method before the output (PM 7. 10. 2026): prints every
+#                                        method file of the question kind (sections.json methods;
+#                                        "===== <path>" then its bytes - this is how the agent reads it)
+#                                        and writes the receipt .aid-ui/method/<kind>.json
+#                                        {kind, files: [{path, sha256}], at}; the studio refuses an open
+#                                        question of a receipt kind without a receipt from the 12 hours
+#                                        before it opened, or whose cards lack `method`. A kind with
+#                                        null in the map: exit 1 naming the no_method question to ask
+#                                        (target no_method@<kind>, cards adopt | pm | without); with a
+#                                        recorded choose answer for it whose card value is pm or
+#                                        without, writes {kind, files: [], waived: <answer id>, mode, at}
+#                                        (mode pm: the studio then wants source podklady on every card)
+#   payload-check <project>              validates .aid-ui/studio/payload.json as the studio does
+#                                        (server.py --check): exit 1 and the reason; run after every write
 #   attest <project> <item id> --note <text>   attestations.<id> = {note, at}, only for a
 #                                        coverage map item with an agent: disposition
 #   build-record <project> <site dir>    writes nothing into the site: refused when the site holds
@@ -1087,6 +1101,41 @@ case "$VERB" in
   context-check)
     need_state
     context_ok || exit 1
+    ;;
+
+  method)
+    (( $# == 1 )) && [[ "$1" =~ ^[a-z_]+$ ]] || usage "method needs <kind>"
+    kind="$1"; map="$HERE/../skills/ui-design/sections.json"
+    jq -e --arg k "$kind" '.methods | has($k)' "$map" >/dev/null ||
+      usage "method: no kind $kind in the map (kinds: $(jq -r '.methods | keys | join(", ")' "$map"))"
+    mkdir -p "$PROJECT/.aid-ui/method"; out="$PROJECT/.aid-ui/method/$kind.json"
+    if [[ "$(jq -r --arg k "$kind" '.methods[$k] | type' "$map")" == null ]]; then
+      need_state
+      # the PM decided on the missing method: a no_method answer, choose, card value pm or without
+      w="$(jq -r --arg t "no_method@$kind" 'first(.answers | to_entries[] | .value as $a | select($a.kind == "no_method"
+        and $a.target == $t and $a.decision == "choose" and ([$a.cards[]? | select(.id == $a.choice) | .value] | first) as $v
+        | $v == "pm" or $v == "without") | .key) // empty' "$STATE")"
+      [[ -n "$w" ]] || die "method: no method for $kind (sections.json methods: null). Put a studio question of kind no_method, part = the part you work in, target no_method@$kind, three cards with value: adopt (take over a method and register it), pm (the PM supplies the output: cards then rest on source podklady), without (go on without a method); record-answer it. adopt: register the files in the map and run method again."
+      mode="$(jq -r --arg w "$w" '.answers[$w] as $a | [$a.cards[] | select(.id == $a.choice) | .value] | first' "$STATE")"
+      jq -n --arg k "$kind" --arg w "$w" --arg m "$mode" --arg at "$(now)" '{kind: $k, files: [], waived: $w, mode: $m, at: $at}' > "$out"
+      echo "RECEIPT $out: no method, waived by the PM's answer $w ($mode)"; exit 0
+    fi
+    files=(); snap="$(tmpfile method)"
+    while IFS= read -r f; do
+      path="$f"; [[ "$f" == /* ]] || path="$HERE/../$f"
+      [[ -f "$path" ]] || die "method: file $f of the $kind method is missing (a standard read live: name it to the PM, MUST 3)"
+      cp "$path" "$snap"   # one copy: what is printed is what is hashed
+      printf '===== %s\n' "$f"; cat "$snap"; printf '\n'
+      files+=("$(jq -n --arg p "$f" --arg s "$(sha256sum "$snap" | cut -d' ' -f1)" '{path: $p, sha256: $s}')")
+    done < <(jq -r --arg k "$kind" '.methods[$k].files[]' "$map")
+    rm -f "$snap"
+    jq -n --arg k "$kind" --arg at "$(now)" --argjson f "[$(IFS=,; echo "${files[*]}")]" '{kind: $k, files: $f, at: $at}' > "$out"
+    echo "RECEIPT $out: ${#files[@]} files read at $(jq -r .at "$out"); open the question after this moment, every card with \`method\`"
+    ;;
+
+  payload-check)
+    (( $# == 0 )) || usage "payload-check takes no arguments"
+    python3 "$HERE/../lib/aid-ui-studio/server.py" --check --project "$PROJECT"
     ;;
 
   copy-record)

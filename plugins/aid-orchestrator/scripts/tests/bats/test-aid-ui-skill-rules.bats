@@ -190,3 +190,18 @@ setup() {
   # the studio renders the little markdown the body uses, as text nodes
   grep -qF 'function mdLine(l)' "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"
 }
+
+@test "P108: 1i makes logo concepts by the adopted logo-design method and SKILL.md carries the method-before-output rule" {
+  f="$SK/steps/1i-identity.md"
+  grep -qF 'aid-ui-state.sh method <project> identity' "$f"
+  for p in SKILL.md references/process.md references/mark-types.md references/svg-construction.md references/testing-checklist.md \
+           references/discovery-brief.md scripts/svg_audit.py scripts/preview_sheet.py scripts/concept_sheet.py TRADEMARKS.md; do
+    grep -qF "adopted/logo-design/$p" "$f" || { echo "1i lacks $p"; return 1; }
+  done
+  ! grep -q 'tři koncepty jako SVG (geometrický' "$f"
+  grep -q '8-12 konceptů' "$f"; grep -q 'klišé' "$f"; grep -q 'search_library.py' "$f"   # the library gap is said, not hidden
+  # the map's identity method is exactly the adopted entry and its four references, in this order
+  [ "$(jq -r '.methods.identity.files | map(sub("skills/ui-design/references/adopted/logo-design/"; "")) | join(" ")' "$SK/sections.json")" = "SKILL.md references/process.md references/mark-types.md references/svg-construction.md references/testing-checklist.md" ]
+  grep -qF 'aid-ui-state.sh method' "$SK/SKILL.md"; grep -qF 'payload-check' "$SK/SKILL.md"; grep -qF 'no_method' "$SK/SKILL.md"
+  grep -q '^12\. The method before the output' "$SK/SKILL.md"
+}

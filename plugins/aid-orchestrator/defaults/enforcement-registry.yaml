@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 582          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 585          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4352,6 +4352,48 @@ enforcements:
     not_guaranteed: "That the research, when the PM said yes, was done well - only that the question was put and answered (approve or return) before any step that needs the product context."
     description: "The online research about the firm (customer-research Mode 2) is never done unasked: context-check, which gates vision, content plan and copy review, refuses until a sources answer with target online@<project> exists, yes or no (PM 7. 10. 2026)."
     recovery: "Put the sources question online@<project> to the PM on the studio page; a no is a valid answer."
+  - id: aid_ui_method_receipt
+    type: 12
+    source: "lib/aid-ui-studio/server.py (check_method, load, --check)"
+    instruction: "skills/ui-design/SKILL.md 'Jak se ptá PM' point 0; sections.json methods"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    test: scripts/tests/bats/test-aid-ui-studio.bats
+    not_guaranteed: "That the agent understood or applied the method - only that the method files were printed to it (aid-ui-state.sh method) within the 12 hours before the question opened, that they are the current ones (sha256), and that every card names what of the method it applies."
+    description: "The method before the output (PM 7. 10. 2026): the studio refuses a payload with an open question of a receipt kind (product_context, facts, vision, identity, seo_brief, structure, task_map, content_plan, references, direction) without .aid-ui/method/<kind>.json from the 12 hours before opened_at naming the map's method files with their current sha256, or with a card lacking `method`. Done questions are not checked (nothing retroactive)."
+    recovery: "aid-ui-state.sh method <project> <kind> (reads the files, writes the receipt), then open the question anew with method on every card; aid-ui-state.sh payload-check shows the refusal before the PM sees it."
+  - id: aid_ui_no_method_stop
+    type: 12
+    source: "scripts/aid-ui-state.sh (method, null kind); lib/aid-ui-studio/server.py (check_method, waived)"
+    instruction: "skills/ui-design/SKILL.md 'Jak se ptá PM' point 0"
+    severity: blocking
+    surface: pm-visible
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    test: scripts/tests/bats/test-aid-ui-state.bats
+    not_guaranteed: "That a kind is correctly marked null in the map - a kind given a thin method file is not caught; the register of adopted material and the review are the check on that."
+    description: "A question kind whose method is null in sections.json cannot be asked at all until the PM decided the no_method question for it (target no_method@<kind>: adopt a method, PM supplies the output, or go on without); the receipt then carries the answer id (waived) and the studio verifies it against brand-state.json. 'We have no method for this' is a question to the PM, never a silent output (PM 7. 10. 2026)."
+    recovery: "Put the no_method question; after adopt, register the files in the map and run method again."
+  - id: aid_ui_logo_method
+    type: 7
+    source: "skills/ui-design/steps/1i-identity.md point 4; skills/ui-design/references/adopted/logo-design/ (MANIFEST)"
+    instruction: "skills/ui-design/steps/1i-identity.md point 4"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    test: scripts/tests/bats/test-aid-ui-adopted-sources.bats
+    not_guaranteed: "The quality of the concepts - only that the identity question cannot open without the receipt of the adopted logo-design method (aid_ui_method_receipt) and that the snapshot is byte-identical to upstream 0ecf52e."
+    description: "Logo concepts are made by the adopted logo-design skill (kaankiziltug, MIT): brief, word map, category clichés, two mark types, 8-12 one-sentence concepts, the three strongest built in black SVG, svg_audit and preview_sheet twice, concept sheet; never drawn freehand (PM 7. 10. 2026: three freehand drafts for Coufal Clinic rejected)."
+    recovery: "aid-ui-state.sh method <project> identity, then step 1i point 4 from the start."
   - id: aid_ui_old_site_origin
     type: 12
     source: "scripts/aid-ui-sources.py (site_origin, --fetch-site)"

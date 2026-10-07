@@ -28,15 +28,32 @@ start_server() {
 }
 
 payload() {   # <opened_at of q1> [target of q1]
+  receipt direction "$1"
   cat > "$P/.aid-ui/studio/payload.json" <<JSON
 {"steps": [{"id": "s1", "title": "Směr", "status": "current"}],
  "questions": [
    {"id": "q1", "kind": "direction", "target": "${2:-home@abc}", "opened_at": "$1", "title": "Vyberte směr"},
    {"id": "q2", "kind": "approve_page", "target": "home@abc", "opened_at": "2020-01-01T00:00:00Z"}],
- "cards": [{"id": "a", "question": "q1", "title": "A", "preview": "a.png"},
-           {"id": "b", "question": "q1", "title": "B", "preview": "../../secret"},
-           {"id": "c", "question": "q1", "title": "C", "preview": "c.html"}]}
+ "cards": [{"id": "a", "question": "q1", "title": "A", "preview": "a.png", "method": "5-directions.md"},
+           {"id": "b", "question": "q1", "title": "B", "preview": "../../secret", "method": "5-directions.md"},
+           {"id": "c", "question": "q1", "title": "C", "preview": "c.html", "method": "5-directions.md"}]}
 JSON
+}
+
+# receipt <kind> <opened_at> [hours before] [project] — the method receipt the studio wants for an open
+# question of <kind> opened at <opened_at>: the map's files with their sha256, dated <hours> (1) before
+receipt() {
+  local proj="${4:-$P}"; mkdir -p "$proj/.aid-ui/method"
+  python3 - "$SERVER" "$1" "$2" "${3:-1}" "$proj/.aid-ui/method/$1.json" <<'PY'
+import hashlib, json, os, sys
+from datetime import datetime, timedelta, timezone
+plug = os.path.normpath(os.path.join(os.path.dirname(sys.argv[1]), "..", ".."))
+m = json.load(open(os.path.join(plug, "skills", "ui-design", "sections.json")))["methods"][sys.argv[2]]
+t = datetime.fromisoformat(sys.argv[3].replace("Z", "+00:00")) - timedelta(hours=float(sys.argv[4]))
+files = [{"path": x, "sha256": hashlib.sha256(open(x if os.path.isabs(x) else os.path.join(plug, x), "rb").read()).hexdigest()}
+         for x in (m["files"] if m else [])]
+json.dump({"kind": sys.argv[2], "files": files, "at": t.isoformat(timespec="microseconds").replace("+00:00", "Z")}, open(sys.argv[5], "w"))
+PY
 }
 
 # code <curl args...> -> HTTP status; body in $BATS_TEST_TMPDIR/body
@@ -135,13 +152,13 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   printf 'PNG1' > "$P/.aid-ui/studio/a.png"; echo s > "$P/secret"
   [ "$(answer "$choose_a")" = 200 ]
   png="$(printf 'PNG1' | sha256sum | cut -d' ' -f1)"
-  want='[{"id":"a","palette":["#000"],"preview":"a.png","preview_sha256":"'"$png"'","risk":null,"thesis":"písmo","title":"A","uniqueness":null,"url":"https://a.example","value":null},{"id":"b","palette":null,"preview":"../../secret","preview_sha256":null,"risk":null,"thesis":null,"title":"B","uniqueness":null,"url":null,"value":null},{"id":"c","palette":null,"preview":"c.html","preview_sha256":null,"risk":null,"thesis":null,"title":"C","uniqueness":null,"url":null,"value":null}]'
+  want='[{"id":"a","method":"5-directions.md","palette":["#000"],"preview":"a.png","preview_sha256":"'"$png"'","risk":null,"thesis":"písmo","title":"A","uniqueness":null,"url":"https://a.example","value":null},{"id":"b","method":"5-directions.md","palette":null,"preview":"../../secret","preview_sha256":null,"risk":null,"thesis":null,"title":"B","uniqueness":null,"url":null,"value":null},{"id":"c","method":"5-directions.md","palette":null,"preview":"c.html","preview_sha256":null,"risk":null,"thesis":null,"title":"C","uniqueness":null,"url":null,"value":null}]'
   [ "$(jq -S -c .cards "$BATS_TEST_TMPDIR/body")" = "$want" ]
   sha="$(printf '%s' "$want" | sha256sum | cut -d' ' -f1)"
   [ "$(jq -r .cards_sha256 "$BATS_TEST_TMPDIR/body")" = "$sha" ]
   # the agent rewrites the chosen card's url, thesis and preview image, adds a card and drops one
   printf 'PNG2' > "$P/.aid-ui/studio/a.png"
-  jq '.cards[0] += {url: "https://evil.example", thesis: "jiné"} | .cards[1].title = "X" | .cards |= (.[0:2] + [{id: "d", question: "q1"}])' \
+  jq '.cards[0] += {url: "https://evil.example", thesis: "jiné"} | .cards[1].title = "X" | .cards |= (.[0:2] + [{id: "d", question: "q1", method: "5-directions.md"}])' \
     "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 200 ]
   [ "$(jq -S -c .cards "$BATS_TEST_TMPDIR/body")" = "$want" ]
@@ -229,7 +246,7 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   grep -q 'card id a twice in question q1' "$BATS_TEST_TMPDIR/server.log"
   grep -q 'invalid payload: payload.json: every card needs' "$BATS_TEST_TMPDIR/server.log"
   # the same id in two questions is fine: ids are unique per question
-  echo "{\"questions\":[$q],\"cards\":[{\"id\":\"a\",\"question\":\"q1\"},{\"id\":\"a\",\"question\":\"q2\"}]}" \
+  echo "{\"questions\":[$q],\"cards\":[{\"id\":\"a\",\"question\":\"q1\",\"method\":\"5-directions.md\"},{\"id\":\"a\",\"question\":\"q2\"}]}" \
     > "$P/.aid-ui/studio/payload.json"
   [ "$(answer "$choose_a")" = 200 ]
 }
@@ -244,6 +261,7 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
 }
 
 @test "P108: sources, product_context and copy_verdict questions are accepted and answered" {
+  receipt product_context 2020-01-01T00:00:00Z   # the one receipt kind of the three
   for k in sources product_context copy_verdict; do
     echo "{\"questions\":[{\"id\":\"q$k\",\"kind\":\"$k\",\"target\":\"t@1\",\"opened_at\":\"2020-01-01T00:00:00Z\"}]}" \
       > "$P/.aid-ui/studio/payload.json"
@@ -475,7 +493,10 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
   jq -e '[.steps[] | (.why, .goal, .feeds), (.parts[] | .id, .title, .why, .goal, .feeds, .you)] | all(type == "string" and length > 0)' "$M" >/dev/null
   jq -e '[.steps[].parts[].id] | length == (unique | length)' "$M" >/dev/null
   kinds="$(python3 -c 'import re,sys; s=open(sys.argv[1]).read(); print(" ".join(sorted(re.findall(r"\"(\w+)\"", s[s.index("KINDS = {"):s.index("}", s.index("KINDS = {"))]))))' "$SERVER")"
-  for k in $kinds; do jq -e --arg k "$k" '[.steps[].parts[].kinds[]] | index($k) != null' "$M" >/dev/null || { echo "kind in no part: $k"; return 1; }; done
+  for k in $kinds; do [ "$k" = no_method ] || jq -e --arg k "$k" '[.steps[].parts[].kinds[]] | index($k) != null' "$M" >/dev/null || { echo "kind in no part: $k"; return 1; }; done
+  # every kind but no_method has a methods row; a receipt kind names existing plain files
+  for k in $kinds; do [ "$k" = no_method ] || jq -e --arg k "$k" '.methods | has($k)' "$M" >/dev/null || { echo "no method row: $k"; return 1; }; done
+  [ "$(jq -r '[.methods[] | select(. != null and .receipt)] | length' "$M")" -eq 10 ]
   # a broken map: the server refuses to start and says why
   D="$BATS_TEST_TMPDIR/plug"; mkdir -p "$D/lib/aid-ui-studio" "$D/skills/ui-design"
   cp "$SERVER" "$D/lib/aid-ui-studio/"; jq '.steps[0].parts[0].why = ""' "$M" > "$D/skills/ui-design/sections.json"
@@ -486,6 +507,7 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
 @test "/state carries the map with part statuses from the state: done, current (open question), skipped, waiting" {
   mkdir -p "$P/docs/design"
   echo '{"variant":{"type":"web"},"options":{"vision":false,"identity":"new","seo":true},"chapters":{"podklady":{"status":"navrh"}},"answers":{}}' > "$P/docs/design/brand-state.json"
+  receipt structure 2020-01-01T00:00:00Z
   cat > "$P/.aid-ui/studio/payload.json" <<'JSON'
 {"questions": [{"id": "s1", "kind": "structure", "target": "sha256:x", "opened_at": "2020-01-01T00:00:00Z"}], "cards": []}
 JSON
@@ -508,7 +530,8 @@ JSON
 @test "a question's part: derived from its kind, refused when unknown or not the kind's; facts needs a part and three cards with a source" {
   put() { printf '%s' "$1" > "$P/.aid-ui/studio/payload.json"; code -H "X-AID-Token: $TOKEN" "$URL/state"; }
   q='{"id":"f","kind":"facts","part":"obsah","target":"t","opened_at":"2020-01-01T00:00:00Z"}'
-  c() { printf '{"id":"%s","question":"f","title":"%s","source":"%s"}' "$1" "$1" "$2"; }
+  c() { printf '{"id":"%s","question":"f","title":"%s","source":"%s","method":"source-guides.md"}' "$1" "$1" "$2"; }
+  receipt facts 2020-01-01T00:00:00Z
   [ "$(put '{"questions":[{"id":"x","kind":"structure","part":"nikde","target":"t","opened_at":"2020-01-01T00:00:00Z"}]}')" = 422 ]
   [ "$(put '{"questions":[{"id":"x","kind":"structure","part":"obsah","target":"t","opened_at":"2020-01-01T00:00:00Z"}]}')" = 422 ]
   [ "$(put '{"questions":[{"id":"f","kind":"facts","target":"t","opened_at":"2020-01-01T00:00:00Z"}]}')" = 422 ]
@@ -650,4 +673,78 @@ JSON
     if (JSON.stringify(t) !== JSON.stringify(["Web", "Ano", "Vráceno: jinak", "Nové logo"])) { console.log(JSON.stringify(t)); process.exit(1); }
   ' "$BATS_TEST_TMPDIR/saved.js"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "P108 method: an open receipt-kind question needs a fresh receipt of the current method files and `method` naming one of them on every card; done counts only with a recorded answer" {
+  chk() { python3 "$SERVER" --check --project "$P" 2>&1; }
+  q() { printf '{"questions":[{"id":"d","kind":"direction","target":"t","opened_at":"%s"%s}],"cards":[%s]}' "$1" "${2:-}" "${3:-}" > "$P/.aid-ui/studio/payload.json"; }
+  card='{"id":"a","question":"d","method":"5-directions.md: směr A"}'
+  rm -f "$P/.aid-ui/method/direction.json"
+  q 2020-01-01T00:00:00Z "" "$card"; run chk; [ "$status" -eq 1 ]; [[ "$output" == *"no method receipt .aid-ui/method/direction.json"* ]]
+  receipt direction 2020-01-01T00:00:00Z 13; run chk; [ "$status" -eq 1 ]; [[ "$output" == *"not from the 12 hours"* ]]
+  receipt direction 2020-01-01T00:00:00Z -1; run chk; [ "$status" -eq 1 ]; [[ "$output" == *"not from the 12 hours"* ]]   # written after the question opened
+  receipt direction 2020-01-01T00:00:00Z 1
+  jq '.files[0].sha256 = "0000"' "$P/.aid-ui/method/direction.json" > "$P/m.t" && mv "$P/m.t" "$P/.aid-ui/method/direction.json"
+  run chk; [ "$status" -eq 1 ]; [[ "$output" == *"not for the current method files"* ]]
+  receipt direction 2020-01-01T00:00:00Z 1
+  q 2020-01-01T00:00:00Z "" '{"id":"a","question":"d"}'; run chk; [ "$status" -eq 1 ]; [[ "$output" == *'card a needs `method`'* ]]
+  q 2020-01-01T00:00:00Z "" '{"id":"a","question":"d","method":"použit postup"}'; run chk; [ "$status" -eq 1 ]   # names no method file
+  q 2020-01-01T00:00:00Z "" "$card"; run chk; [ "$status" -eq 0 ]
+  # done is no exemption by itself: only a question whose answer the state recorded
+  rm "$P/.aid-ui/method/direction.json"
+  q 2020-01-01T00:00:00Z ',"done":true' "$card"; run chk; [ "$status" -eq 1 ]
+  mkdir -p "$P/docs/design"; echo '{"answers":{"d":{"kind":"direction","decision":"choose"}}}' > "$P/docs/design/brand-state.json"
+  run chk; [ "$status" -eq 0 ]
+  # a kind without a receipt (approve_page) needs nothing; the live server refuses the same payloads with 422
+  echo '{"questions":[{"id":"p","kind":"approve_page","target":"t","opened_at":"2020-01-01T00:00:00Z"}],"cards":[]}' > "$P/.aid-ui/studio/payload.json"
+  run chk; [ "$status" -eq 0 ]
+  q 2020-01-01T00:00:00Z "" "$card"; [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]; grep -q 'no method receipt' "$BATS_TEST_TMPDIR/body"
+  # a rerolled question the agent lists: the old receipt is older than 12 hours, a new one is needed
+  payload '2020-01-01T00:00:00Z'
+  [ "$(answer '{"question":"q1","kind":"direction","target":"home@abc","decision":"reroll"}')" = 200 ]
+  now="$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)"
+  printf '{"questions":[{"id":"q1.r1","kind":"direction","target":"home@abc","opened_at":"%s"}],"cards":[{"id":"a","question":"q1.r1","method":"5-directions.md"}]}' "$now" > "$P/.aid-ui/studio/payload.json"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]
+  receipt direction "$now" 1
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+}
+
+@test "P108 method: a kind with null in the map is asked only after the PM's no_method answer (pm: cards on podklady); the no_method question has its shape; a bad map stops the server" {
+  D="$BATS_TEST_TMPDIR/plug"; mkdir -p "$D/lib/aid-ui-studio" "$D/skills/ui-design"; cp "$SERVER" "$D/lib/aid-ui-studio/"
+  M="$BATS_TEST_DIRNAME/../../../skills/ui-design/sections.json"; B="$BATS_TEST_TMPDIR/map.json"
+  jq '.methods |= with_entries(.value = {files: ["skills/ui-design/sections.json"], receipt: true}) | .methods.direction = null' "$M" > "$B"
+  cp "$B" "$D/skills/ui-design/sections.json"
+  chk() { python3 "$D/lib/aid-ui-studio/server.py" --check --project "$P" 2>&1; }
+  mkdir -p "$P/docs/design" "$P/.aid-ui/method"
+  pay() { printf '{"questions":[{"id":"d","kind":"direction","target":"t","opened_at":"2020-01-01T00:00:00Z"}],"cards":[%s]}' "$1" > "$P/.aid-ui/studio/payload.json"; }
+  pay '{"id":"a","question":"d"}'
+  echo '{"answers":{}}' > "$P/docs/design/brand-state.json"
+  rm -f "$P/.aid-ui/method/direction.json"
+  run chk; [ "$status" -eq 1 ]; [[ "$output" == *"no method receipt"* ]]
+  echo '{"kind":"direction","files":[],"waived":"w1","mode":"without","at":"2019-12-31T23:00:00Z"}' > "$P/.aid-ui/method/direction.json"
+  run chk; [ "$status" -eq 1 ]; [[ "$output" == *"no no_method answer"* ]]
+  # the PM's answer is checked as a whole: kind, target, choose, the chosen card's value, the receipt's mode
+  pm() { jq -n --arg m "$1" --arg d "${2:-choose}" '{answers:{w1:{kind:"no_method",target:"no_method@direction",decision:$d,choice:"c",cards:[{id:"a",value:"adopt"},{id:"c",value:$m}]}}}' > "$P/docs/design/brand-state.json"; }
+  pm adopt; run chk; [ "$status" -eq 1 ]
+  pm without return; run chk; [ "$status" -eq 1 ]
+  pm without; run chk; [ "$status" -eq 0 ]
+  pm pm; run chk; [ "$status" -eq 1 ]; [[ "$output" == *"no no_method answer"* ]]
+  sed -i 's/"mode":"without"/"mode":"pm"/' "$P/.aid-ui/method/direction.json"
+  run chk; [ "$status" -eq 1 ]; [[ "$output" == *"source podklady"* ]]
+  pay '{"id":"a","question":"d","source":"podklady"}'; run chk; [ "$status" -eq 0 ]
+  # the no_method question itself: a part, the target of a null kind, three cards adopt/pm/without without method
+  nm() { printf '{"questions":[{"id":"n","kind":"no_method",%s"target":"%s","opened_at":"2020-01-01T00:00:00Z"}],"cards":[%s]}' "$1" "$2" "$3" > "$P/.aid-ui/studio/payload.json"; chk; }
+  three='{"id":"a","question":"n","value":"adopt"},{"id":"b","question":"n","value":"pm"},{"id":"c","question":"n","value":"without"}'
+  run nm '"part":"vzhled",' no_method@direction "$three"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  run nm '' no_method@direction "$three"; [ "$status" -eq 1 ]; [[ "$output" == *"must name its part"* ]]
+  run nm '"part":"vzhled",' no_method@vision "$three"; [ "$status" -eq 1 ]; [[ "$output" == *"method is null"* ]]
+  run nm '"part":"vzhled",' no_method@no_method "$three"; [ "$status" -eq 1 ]
+  run nm '"part":"vzhled",' no_method@direction '{"id":"a","question":"n","value":"adopt"},{"id":"c","question":"n","value":"without"}'; [ "$status" -eq 1 ]
+  run nm '"part":"vzhled",' no_method@direction "${three/\"value\":\"pm\"/\"value\":\"pm\",\"method\":\"x\"}"; [ "$status" -eq 1 ]
+  # the map: a kind missing from methods, a path outside the plugin or with .., an absolute one, a duplicate, a wrong shape
+  for bad in 'del(.methods.vision)' '.methods.vision.files = ["../etc/passwd"]' '.methods.vision.files = ["/etc/passwd"]' \
+             '.methods.vision.files += .methods.vision.files' '.methods.vision = {files: []}' '.methods.extra = null'; do
+    jq "$bad" "$B" > "$D/skills/ui-design/sections.json"
+    run chk; [ "$status" -ne 0 ] || { echo "accepted: $bad"; return 1; }; [[ "$output" == *"sections.json"* ]]
+  done
 }

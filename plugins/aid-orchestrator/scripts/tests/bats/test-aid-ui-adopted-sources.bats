@@ -4,6 +4,7 @@
 # P108 Step 1 — the marketingskills snapshot (adopted/marketingskills/MANIFEST: git blob id per
 # file) is byte-identical to upstream dda3841, nothing is added or missing, no symlink, and every
 # adopted marketingskills file names the plugin file that reads it (column "Čte ho").
+# P108 (7. 10.): the same for the logo-design snapshot (adopted/logo-design, upstream 0ecf52e, 25 files).
 
 setup() {
   REF="$BATS_TEST_DIRNAME/../../../skills/ui-design/references"
@@ -25,7 +26,7 @@ check() {
     [[ $(wc -l <<<"$row") -eq 1 ]] || { echo "duplicate register rows: $f"; bad=1; continue; }
     # file | source | commit | changes | licence | notice must not be empty
     awk -F'|' '{for(i=3;i<=7;i++) if ($i ~ /^ *$/) exit 1}' <<<"$row" || { echo "empty column: $f"; bad=1; }
-    if [[ "$f" == adopted/marketingskills/* ]]; then
+    if [[ "$f" == adopted/marketingskills/* || "$f" == adopted/logo-design/* ]]; then
       local reader
       reader=$(awk -F'|' -v c="$col_reader" '{print $c}' <<<"$row")
       [[ "$reader" == *"(krok P108-"* ]] && continue   # reader added by a later P108 step
@@ -41,10 +42,10 @@ check() {
   return $bad
 }
 
-# manifest <refdir> — adopted/marketingskills/MANIFEST lists exactly the files under it, each with
+# manifest <refdir> <snapshot> — adopted/<snapshot>/MANIFEST lists exactly the files under it, each with
 # the git blob id of its bytes (git hash-object), so a changed byte, a missing or an extra file fails.
 manifest() {
-  local m="$1/adopted/marketingskills" bad=0 id p listed
+  local m="$1/adopted/${2:-marketingskills}" bad=0 id p listed
   [[ -f "$m/MANIFEST" ]] || { echo "no MANIFEST"; return 1; }
   while read -r id p; do
     [[ -f "$m/$p" ]] || { echo "missing: $p"; bad=1; continue; }
@@ -87,7 +88,7 @@ manifest() {
 }
 
 @test "P108: the marketingskills snapshot matches its MANIFEST (14 files, git blob ids)" {
-  run manifest "$REF"
+  run manifest "$REF" marketingskills
   [ "$status" -eq 0 ] || { echo "$output"; false; }
   [ "$(wc -l < "$REF/adopted/marketingskills/MANIFEST")" -eq 14 ]
   grep -q "Corey Haines" "$REF/LICENSES/MIT-marketingskills.txt"
@@ -96,13 +97,13 @@ manifest() {
 @test "P108: a changed byte, a missing file and an extra file fail the manifest" {
   cp -r "$REF" "$BATS_TEST_TMPDIR/ref"; M="$BATS_TEST_TMPDIR/ref/adopted/marketingskills"
   printf ' ' >> "$M/copywriting/SKILL.md"
-  run manifest "$BATS_TEST_TMPDIR/ref"; [ "$status" -eq 1 ]; [[ "$output" == *"changed: copywriting/SKILL.md"* ]]
+  run manifest "$BATS_TEST_TMPDIR/ref" marketingskills; [ "$status" -eq 1 ]; [[ "$output" == *"changed: copywriting/SKILL.md"* ]]
   cp "$REF/adopted/marketingskills/copywriting/SKILL.md" "$M/copywriting/SKILL.md"
   rm "$M/cro/references/form.md"
-  run manifest "$BATS_TEST_TMPDIR/ref"; [ "$status" -eq 1 ]; [[ "$output" == *"missing: cro/references/form.md"* ]]
+  run manifest "$BATS_TEST_TMPDIR/ref" marketingskills; [ "$status" -eq 1 ]; [[ "$output" == *"missing: cro/references/form.md"* ]]
   cp "$REF/adopted/marketingskills/cro/references/form.md" "$M/cro/references/form.md"
   echo x > "$M/cro/extra.md"
-  run manifest "$BATS_TEST_TMPDIR/ref"; [ "$status" -eq 1 ]; [[ "$output" == *"extra: cro/extra.md"* ]]
+  run manifest "$BATS_TEST_TMPDIR/ref" marketingskills; [ "$status" -eq 1 ]; [[ "$output" == *"extra: cro/extra.md"* ]]
 }
 
 @test "P108: a symlink in adopted/ and a reader that does not name its file fail" {
@@ -115,4 +116,18 @@ manifest() {
   echo "nothing here" > "$BATS_TEST_TMPDIR/plugin/scripts/tests/bats/test-aid-ui-adopted-sources.bats"
   run check "$R" "$BATS_TEST_TMPDIR/plugin"; [ "$status" -eq 1 ]
   [[ "$output" == *"does not name adopted/marketingskills/MANIFEST"* ]]
+}
+
+@test "P108: the logo-design snapshot matches its MANIFEST (25 files, git blob ids of upstream 0ecf52e); the library is not in it" {
+  run manifest "$REF" logo-design
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ "$(wc -l < "$REF/adopted/logo-design/MANIFEST")" -eq 25 ]
+  grep -q "kaankiziltug" "$REF/LICENSES/MIT-logo-design.txt"
+  [ ! -e "$REF/adopted/logo-design/assets" ]; [ ! -e "$REF/adopted/logo-design/scripts/search_library.py" ]
+  grep -q 'nepřevzato: logo-design `assets/library/`' "$REF/adopted-sources.md"
+  # the scripts run here without the library: an audit of a plain mark passes
+  printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><circle cx="128" cy="128" r="100"/></svg>' > "$BATS_TEST_TMPDIR/m.svg"
+  run python3 "$REF/adopted/logo-design/scripts/svg_audit.py" "$BATS_TEST_TMPDIR/m.svg"; [ "$status" -eq 0 ]
+  cp -r "$REF" "$BATS_TEST_TMPDIR/ref2"; printf ' ' >> "$BATS_TEST_TMPDIR/ref2/adopted/logo-design/SKILL.md"
+  run manifest "$BATS_TEST_TMPDIR/ref2" logo-design; [ "$status" -eq 1 ]; [[ "$output" == *"changed: SKILL.md"* ]]
 }

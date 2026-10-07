@@ -6,7 +6,7 @@ user_invocable: false
 
 # ui-design
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-10-07
 
 Vede PM od varianty produktu přes produkt, strukturu, obsahový plán, vzory
 a tři směry jako skutečné stránky až k postavenému a ověřenému webu nebo
@@ -83,6 +83,20 @@ typu „2.5". Cíl a smysl nepiš do jednotlivých otázek - patří kroku a č�
 
 Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 
+0. **Postup před výstupem** (PM 7. 10. 2026). Než napíšeš otázku s kartami, přečti postup jejího
+   druhu: `aid-ui-state.sh method <project> <druh>` vypíše soubory postupu z mapy
+   (`sections.json` → `methods`) a zapíše stvrzenku `.aid-ui/method/<druh>.json`. Otázku otevři
+   až potom (`opened_at` po stvrzence, nejvýš 12 h) a na každé kartě napiš `method` = který
+   soubor postupu a co z něj karta uplatňuje (vzorec, typ značky, rámec stránky; do 300 znaků,
+   jméno souboru v něm musí být). Studio otázku druhu s výstupem (product_context, facts, vision,
+   identity, seo_brief, structure, task_map, content_plan, references, direction) bez stvrzenky,
+   se starou nebo s kartou bez `method` odmítne; hotová otázka projde jen se zaznamenanou
+   odpovědí. Po každém zápisu payloadu spusť `aid-ui-state.sh payload-check <project>` - ukáže
+   odmítnutí dřív než PM. Druh, který má v mapě `null`, postup nemá: nic nevymýšlej, polož otázku
+   `no_method` (`part` části, target `no_method@<druh>`, tři karty s `value` adopt / pm / without,
+   bez `method`); po odpovědi `method` zapíše waiver (pm: karty pak nesou `source` podklady,
+   without: bez postupu), nebo postup převezmi (adopt: snímek do `references/adopted/`, řádky
+   v `adopted-sources.md`, soubory do mapy) a `method` spusť znovu. Mapu čte studio při startu.
 1. Zapiš nebo obnov `<project>/.aid-ui/studio/payload.json`:
    `now` (`title`, `text` = co právě děláš, např. „Připravuji tři návrhy vzhledu…", `at` = kdy jsi to
    napsal, `part` = id části, pro kterou platí; studio tvou poznámku ukáže jen dokud je novější než
@@ -104,7 +118,7 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    content_plan, defer_content, facts, references, direction, approve_page,
    exception, coverage_drift, design_standard, handover, sources (krok 1p: jedno schválení
    seznamu podkladů `manifest@<sha>`, nebo průzkumu `online@<projekt>`), product_context (krok 1p: schválení dokumentu o produktu),
-   copy_verdict (verdikt PM k textům webu), notifications (PWA: posílá aplikace
+   copy_verdict (verdikt PM k textům webu), no_method (bod 0), notifications (PWA: posílá aplikace
    oznámení, o jakých událostech a proč; když ano, obrazovka přihlášení k odběru a karta povolení
    se stavy jako snímek - `pwa-notifications-standard`).
    Na co PM odpovídá textem nebo potvrzením (fakta k ověření, souhlasy, kontrola názvu),
@@ -286,6 +300,10 @@ a odkaz.
 10. A decision a step makes without the PM (only where its `Postup` says so) is recorded
    at once with `aid-ui-state.sh decide` ("Když rozhoduje agent sám"); an unrecorded
    agent decision does not exist for the PM.
+12. The method before the output: no card of a receipt kind is written before
+   `aid-ui-state.sh method` printed that kind's method files (the studio refuses it);
+   a kind whose method is null is a `no_method` question to the PM, never an output
+   from the agent's own head ("Jak se ptá PM", point 0).
 
 ---
 
@@ -314,4 +332,4 @@ Před posunem kroku:
 - `coverage/{map,checks,sources}.yaml` - pokrytí standardů.
 - `brand-page/` - šablona brand stránky a `state.template.json`.
 
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-10-07

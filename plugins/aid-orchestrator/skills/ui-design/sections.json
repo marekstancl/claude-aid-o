@@ -360,5 +360,144 @@
     }
    ]
   }
- ]
+ ],
+ "methods_about": "Postup před výstupem: pro každý druh otázky soubory (od kořene pluginu, nebo absolutní cesta = standard čtený živě), které agent čte přes `aid-ui-state.sh method` dřív, než otázku položí; `receipt: true` = otázka nese výstup agenta, studio ji bez čerstvé stvrzenky (.aid-ui/method/<druh>.json, do 12 h před opened_at) a bez `method` na každé kartě odmítne; `receipt: false` = jen postup kroku, nic se negeneruje; null = postup chybí, PM to rozhodne otázkou no_method (karty adopt | pm | without) a stvrzenka nese `waived`.",
+ "methods": {
+  "variant": {
+   "files": [
+    "skills/ui-design/steps/0-start.md"
+   ],
+   "receipt": false
+  },
+  "sources": {
+   "files": [
+    "skills/ui-design/steps/1p-sources.md",
+    "skills/ui-design/references/adopted/marketingskills/customer-research/references/source-guides.md"
+   ],
+   "receipt": false
+  },
+  "product_context": {
+   "files": [
+    "skills/ui-design/references/adopted/marketingskills/product-marketing/SKILL.md",
+    "skills/ui-design/references/adopted/marketingskills/customer-research/SKILL.md"
+   ],
+   "receipt": true
+  },
+  "facts": {
+   "files": [
+    "skills/ui-design/references/adopted/marketingskills/customer-research/SKILL.md",
+    "skills/ui-design/references/adopted/marketingskills/customer-research/references/source-guides.md"
+   ],
+   "receipt": true
+  },
+  "vision": {
+   "files": [
+    "skills/ui-design/references/adopted/marketingskills/copywriting/SKILL.md",
+    "skills/ui-design/references/adopted/marketingskills/copywriting/references/copy-frameworks.md",
+    "skills/ui-design/references/copy-rules.md"
+   ],
+   "receipt": true
+  },
+  "identity": {
+   "files": [
+    "skills/ui-design/references/adopted/logo-design/SKILL.md",
+    "skills/ui-design/references/adopted/logo-design/references/process.md",
+    "skills/ui-design/references/adopted/logo-design/references/mark-types.md",
+    "skills/ui-design/references/adopted/logo-design/references/svg-construction.md",
+    "skills/ui-design/references/adopted/logo-design/references/testing-checklist.md"
+   ],
+   "receipt": true
+  },
+  "seo_brief": {
+   "files": [
+    "skills/ui-design/steps/1s-seo.md",
+    "/opt/eco/docs/docs/ecosystem/specs/seo-audit-agent-standard.md"
+   ],
+   "receipt": true
+  },
+  "structure": {
+   "files": [
+    "skills/ui-design/steps/2-structure.md",
+    "skills/ui-design/references/adopted/marketingskills/cro/SKILL.md"
+   ],
+   "receipt": true
+  },
+  "task_map": {
+   "files": [
+    "skills/ui-design/steps/2-structure.md"
+   ],
+   "receipt": true
+  },
+  "notifications": {
+   "files": [
+    "skills/ui-design/steps/2-structure.md"
+   ],
+   "receipt": false
+  },
+  "content_plan": {
+   "files": [
+    "skills/ui-design/steps/3-content-plan.md",
+    "skills/ui-design/references/adopted/marketingskills/cro/SKILL.md"
+   ],
+   "receipt": true
+  },
+  "defer_content": {
+   "files": [
+    "skills/ui-design/steps/3-content-plan.md"
+   ],
+   "receipt": false
+  },
+  "references": {
+   "files": [
+    "skills/ui-design/steps/4-references.md",
+    "skills/ui-design/references/genericity-rubric.md"
+   ],
+   "receipt": true
+  },
+  "direction": {
+   "files": [
+    "skills/ui-design/steps/5-directions.md",
+    "skills/ui-design/references/adopted/frontend-design-SKILL.md",
+    "skills/ui-design/references/adopted/impeccable-craft-floor.md"
+   ],
+   "receipt": true
+  },
+  "copy_verdict": {
+   "files": [
+    "skills/ui-design/references/adopted/marketingskills/copy-editing/SKILL.md",
+    "skills/ui-design/references/adopted/marketingskills/copy-editing/references/checklist.md"
+   ],
+   "receipt": false
+  },
+  "exception": {
+   "files": [
+    "skills/ui-design/steps/7-verify.md"
+   ],
+   "receipt": false
+  },
+  "coverage_drift": {
+   "files": [
+    "skills/ui-design/steps/7-verify.md"
+   ],
+   "receipt": false
+  },
+  "design_standard": {
+   "files": [
+    "skills/ui-design/steps/7-verify.md"
+   ],
+   "receipt": false
+  },
+  "approve_page": {
+   "files": [
+    "skills/ui-design/steps/7-verify.md"
+   ],
+   "receipt": false
+  },
+  "handover": {
+   "files": [
+    "skills/ui-design/steps/7-verify.md"
+   ],
+   "receipt": false
+  }
+ }
 }

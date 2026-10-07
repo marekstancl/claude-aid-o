@@ -49,6 +49,10 @@ studio() {
   STOKEN=0123456789abcdef0123456789abcdef
   mkdir -p "$PROJ/.aid-ui/studio"; echo "$STOKEN" > "$PROJ/.aid-ui/studio.token"
   echo '{"questions": [], "cards": []}' > "$PROJ/.aid-ui/studio/payload.json"
+  # the method receipts the studio wants before a question of these kinds opens (ans opens them now)
+  local k; for k in references structure content_plan vision product_context identity facts; do
+    "$SCRIPT" method "$PROJ" "$k" >/dev/null
+  done
   local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
   export AID_UI_STUDIO_URL="http://127.0.0.1:$port"
   python3 "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/server.py" --project "$PROJ" --host 127.0.0.1 --port "$port" \
@@ -67,9 +71,10 @@ ans() {
   # a facts question names its part and offers three sourced answers (the studio's rule)
   [[ "$2" != facts ]] || c='[{"id":"x","source":"odhad"},{"id":"y","source":"podklady"},{"id":"z","source":"registr"}]'
   [[ -z "${5:-}" ]] || c="$5"
-  jq --arg q "$1" --arg k "$2" --arg t "$3" --argjson c "$c" \
-    '.questions += [{id: $q, kind: $k, target: $t, opened_at: "2020-01-01T00:00:00Z"} + (if $k == "facts" then {part: "obsah"} else {} end)]
-    | .cards += [$c[] | .question = $q]' "$p" > "$p.t" && mv "$p.t" "$p"
+  # the method before the output: the question opens now, after the receipts studio() wrote; every card says its method
+  jq --arg q "$1" --arg k "$2" --arg t "$3" --argjson c "$c" --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" \
+    '.questions += [{id: $q, kind: $k, target: $t, opened_at: $o} + (if $k == "facts" then {part: "obsah"} else {} end)]
+    | .cards += [$c[] | .question = $q | .method = (.method // "SKILL.md, 4-references.md")]' "$p" > "$p.t" && mv "$p.t" "$p"
   curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg q "$1" --arg k "$2" --arg t "$3" --arg d "$d" \
           '{question: $q, kind: $k, target: $t, decision: $d, choice: "x", comment: "PM"}')" "$AID_UI_STUDIO_URL/answer"
@@ -643,7 +648,7 @@ p101_project() {
   # a card added to payload.json after the answer
   more="$(jq -c '. + [{"id":"z","url":"https://z.example","why":"nové"}]' <<<"$refs")"
   ans s3 references "$(sha_of "$more")" choose "$(cards_of "$refs")"
-  jq '.cards += [{question: "s3", id: "z", url: "https://z.example", thesis: "nové"}]' "$p" > "$p.t" && mv "$p.t" "$p"
+  jq '.cards += [{question: "s3", id: "z", url: "https://z.example", thesis: "nové", method: "4-references.md"}]' "$p" > "$p.t" && mv "$p.t" "$p"
   run "$SCRIPT" set "$PROJ" refs "$more" --answer s3
   [ "$status" -eq 1 ]
   [ "$(jq -c .refs "$STATE")" = '[]' ]; [ "$(jq -c .consumed "$STATE")" = '[]' ]
@@ -1297,4 +1302,37 @@ decide_payload() {
   run "$SCRIPT" exception-covered "$PROJ" "$T/g/result.json"
   [ "$status" -eq 0 ]
   [ "$(jq -r .row.check <<<"$output" | sort | tr '\n' ' ')" = "axe seo " ] || { echo "$output"; return 1; }
+}
+
+@test "P108 method: prints the method files, writes the receipt; the live studio and payload-check refuse a question opened before it" {
+  run "$SCRIPT" method "$PROJ" identity; [ "$status" -eq 0 ]
+  [ "$(grep -c '^===== ' <<<"$output")" -eq 5 ]
+  grep -q '^===== skills/ui-design/references/adopted/logo-design/SKILL.md' <<<"$output"
+  grep -q 'Phase 3 — Concepts' <<<"$output"                    # the text itself was printed, not just named
+  R="$PROJ/.aid-ui/method/identity.json"
+  [ "$(jq -r '.files | length' "$R")" -eq 5 ]
+  [ "$(jq -r '.files[0].sha256' "$R")" = "$(sha256sum "$BATS_TEST_DIRNAME/../../../skills/ui-design/references/adopted/logo-design/SKILL.md" | cut -d' ' -f1)" ]
+  run "$SCRIPT" method "$PROJ" nonsense; [ "$status" -eq 2 ]
+  studio   # fresh receipts now
+  jq '.questions += [{id:"i1",kind:"identity",target:"t",opened_at:"2020-01-01T00:00:00Z"}] | .cards += [{id:"x",question:"i1",method:"mark-types.md: letterform"}]' \
+    "$PROJ/.aid-ui/studio/payload.json" > "$T/p.t" && mv "$T/p.t" "$PROJ/.aid-ui/studio/payload.json"
+  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"not from the 12 hours"* ]]
+  run "$SCRIPT" record-answer "$PROJ" --question i1; [ "$status" -eq 1 ]; [[ "$output" == *"HTTP 422"* ]]   # the studio refuses the payload
+  jq '.questions[-1].opened_at = (now | todate)' "$PROJ/.aid-ui/studio/payload.json" > "$T/p.t" && mv "$T/p.t" "$PROJ/.aid-ui/studio/payload.json"
+  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 0 ]
+}
+
+@test "P108 method: a kind with null in the map refuses until the PM's no_method answer, then writes the waiver with its mode" {
+  D="$T/plug"; mkdir -p "$D/scripts" "$D/skills/ui-design" "$D/lib/aid-ui-studio"
+  cp "$SCRIPT" "$D/scripts/"; cp -r "$PAGE" "$D/skills/ui-design/brand-page"; cp "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/server.py" "$D/lib/aid-ui-studio/"
+  jq '.methods.vision = null' "$BATS_TEST_DIRNAME/../../../skills/ui-design/sections.json" > "$D/skills/ui-design/sections.json"
+  run "$D/scripts/aid-ui-state.sh" method "$PROJ" vision; [ "$status" -eq 1 ]; [[ "$output" == *"no_method@vision"* ]]
+  [ ! -e "$PROJ/.aid-ui/method/vision.json" ]
+  forge w1 no_method no_method@vision choose                       # choose, but which card is not known
+  run "$D/scripts/aid-ui-state.sh" method "$PROJ" vision; [ "$status" -eq 1 ]
+  jqw '.answers.w1.choice = "a" | .answers.w1.cards = [{id:"a",value:"adopt"},{id:"c",value:"without"}]'
+  run "$D/scripts/aid-ui-state.sh" method "$PROJ" vision; [ "$status" -eq 1 ]   # adopt: take the method over first
+  jqw '.answers.w1.choice = "c"'
+  run "$D/scripts/aid-ui-state.sh" method "$PROJ" vision; [ "$status" -eq 0 ]; [[ "$output" == *"waived by the PM's answer w1 (without)"* ]]
+  [ "$(jq -r '.waived + " " + .mode + " " + (.files | length | tostring)' "$PROJ/.aid-ui/method/vision.json")" = "w1 without 0" ]
 }
