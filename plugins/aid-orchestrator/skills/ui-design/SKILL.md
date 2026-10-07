@@ -106,7 +106,10 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    se stavy jako snímek - `pwa-notifications-standard`).
    Na co PM odpovídá textem nebo potvrzením (fakta k ověření, souhlasy, kontrola názvu),
    polož jako otázku `facts` s `outcome` a **třemi kartami s návrhy odpovědi**: první je doporučená
-   (studio ji tak označí), vlastní odpověď dá PM přes „Chci to jinak"; každá karta má `source`
+   (studio ji tak označí), vlastní odpověď dá PM přes „Chci to jinak"; každá karta má `thesis`
+   (co to znamená), `uniqueness` (čím se liší od ostatních dvou, s číslem nebo faktem, když ho máš),
+   `risk` a `source` - to platí pro karty všech otázek, ne jen pro údaje; karta jen s nadpisem
+   a rizikem je tenká a PM z ní nevybere; každá karta má `source`
    z mapy `sources` (z čeho návrh vychází: `product-marketing:jobs|objections|switching|customer-language|proof`,
    `copywriting:before-writing`, `podklady`, `registr`, nebo `odhad` = tvůj odhad, který PM potvrdí).
    Otázku samotnou ber z převzatého postupu, který `source` jmenuje (product-marketing: za co si
