@@ -81,7 +81,8 @@
   .tick { position: absolute; z-index: 7; top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; padding: 0; border: 1px solid var(--ks-edge); background: var(--ks-paper-raised); color: transparent; font-weight: 800; box-shadow: var(--ks-lift); cursor: pointer; transform: scale(0); transition: transform .25s cubic-bezier(.3, 1.6, .5, 1); }
   .card:hover .tick, .tick:focus-visible, .card.picked .tick { transform: scale(1); }
   .card.picked .tick { background: var(--ks-kinpaku); border-color: var(--ks-kinpaku); color: var(--ks-ink); }
-  .info { color: var(--ks-text-muted); font-size: 14px; padding: 12px 14px; border: 1px dashed var(--ks-rule); border-radius: 8px; }
+  .info { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--ks-text-muted); font-size: 14px; padding: 12px 14px; border: 1px dashed var(--ks-rule); border-radius: 8px; }
+  .q-meta .toggle { margin-left: 4px; }
   .back-now { align-self: flex-start; }
   /* The parts of the step as tabs: done, the one being worked on, waiting, left out. */
   .tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 22px 0; }
@@ -788,7 +789,7 @@ function leave(node) {
 }
 
 // count = { k, n } when the part asks more than one question: "Otázka k z n"
-function question(q, cards, count, partNote) {   // partNote: the part's sentence, shown under the title
+function question(q, cards, count, partNote, extra) {   // partNote: the part's sentence under the title; extra: a button at the right of the title
   const status = el("p", { class: "status", role: "status" });
   const fresh = !first && !SEEN.has("q:" + q.id);
   drawn.push("q:" + q.id);
@@ -797,7 +798,7 @@ function question(q, cards, count, partNote) {   // partNote: the part's sentenc
   const kind = str(q.eyebrow) || KIND[q.kind] || q.kind;
   const tier = () => el("div", { class: "q-meta" },
     count ? el("span", { class: "q-count" }, "Otázka " + count.k + (/^[234]$|^[234]\d\d$/.test(String(count.n)) ? " ze " : " z ") + count.n) : null,
-    (S.sections ? null : el("span", { class: "tier" }, kind)));
+    (S.sections ? null : el("span", { class: "tier" }, kind)), extra);
   let sync = () => {};
   const answer = async (decision, choice, comment) => {
     const btns = sec.querySelectorAll("button:not(.chip):not(.nav):not(.tick)");
@@ -1003,9 +1004,9 @@ function stepEl(st, i, back) {
       VIEW[st.id] = { part: id, auto: d }; render();
     });
     // the parts row is always in the same place; Detail rides at its right end
-    const row = el("nav", { class: "tabs slim", "aria-label": "Části kroku" }, el("div", { class: "tabs-r" }, tabs ? [...tabs.childNodes] : []), detail);
-    if (tabs || detail) stage.append(row);
-    stage.append(partPanel(st, vid, d));
+    // one part only: no pills row, Detail sits at the right of the question's title instead
+    if (tabs) stage.append(el("nav", { class: "tabs slim", "aria-label": "Části kroku" }, el("div", { class: "tabs-r" }, [...tabs.childNodes]), detail));
+    stage.append(partPanel(st, vid, d, tabs ? null : detail));
   } else if (st.active) {   // an older server without the map: the open questions as they come
     stage.append(el("div", { class: "active-box" }, (st.saved || []).length ? savedEl(st.saved) : null, st.open.map(q => question(q, cardsOf(q)))));
   }
@@ -1034,7 +1035,7 @@ const PART_INFO = { done: "Tahle část je hotová.", skipped: "Tuhle část jsm
 function partText(p) {   // the map's own sentence when it has one, else its pieces in order
   return p.text || [p.why, p.you, p.goal ? "Z toho bude: " + p.goal : "", p.feeds].filter(Boolean).join(" ");
 }
-function partPanel(st, vid, d) {
+function partPanel(st, vid, d, detail) {   // detail: the step's Detail button when the step has no pills row
   const p = st.parts.find(x => x.id === vid), i = st.parts.indexOf(p), di = st.parts.findIndex(x => x.id === d);
   const saved = (st.saved || []).filter(q => q.part === vid), open = st.open.filter(q => q.part === vid);
   const stray = st.open.filter(q => !st.parts.some(x => x.id === q.part));   // never hidden behind a tab
@@ -1044,10 +1045,10 @@ function partPanel(st, vid, d) {
   return el("div", { class: "active-box" + (slide ? " slide-" + slide : "") },
     d && d !== vid ? el("button", { type: "button", class: "reroll-btn back-now", on: { click: back } }, di < i ? "← Zpět na " + where : "Zpět na " + where + " →") : null,
     q ? null : partBox(st, p),
-    saved.length ? savedEl(saved) : null,
-    q ? question(q, cardsOf(q), k + open.length > 1 ? { k: k + 1, n: k + open.length } : null, el("p", { class: "part-note" }, partText(p)))
-      : el("p", { class: "info" }, (PART_INFO[p.status] || "") + (p.status === "done" && saved.length ? " Odpověď změníte tlačítkem Změnit - otevře se stejná otázka znovu." : "")),
-    stray.map(x => question(x, cardsOf(x))));
+    q ? question(q, cardsOf(q), k + open.length > 1 ? { k: k + 1, n: k + open.length } : null, el("p", { class: "part-note" }, partText(p)), detail)
+      : el("p", { class: "info" }, (PART_INFO[p.status] || "") + (p.status === "done" && saved.length ? " Odpověď změníte tlačítkem Změnit - otevře se stejná otázka znovu." : ""), detail),
+    stray.map(x => question(x, cardsOf(x))),
+    saved.length ? savedEl(saved) : null);   // what the PM already answered in this part, under the question
 }
 
 // The parts of the step: number, title and status; the part being worked on shows why, goal, what it feeds
