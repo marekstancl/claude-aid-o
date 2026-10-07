@@ -56,6 +56,55 @@ Stvrzenka: `aid-ui-state.sh method <project> identity` vypíše vstup, process, 
 svg-construction a testing-checklist a zapíše `.aid-ui/method/identity.json`; bez ní studio otázku
 `identity` odmítne (`SKILL.md` „Jak se ptá PM", bod 0).
 
+## Rozcestník (co se staví, rozhoduje krok, ne PM)
+
+`python3 scripts/aid-ui-logo-route.py <project> --write` přečte stav a zapíše
+`.aid-ui/logo/route.json`: situaci, sloty směrů, kontexty a bodování. Nic z toho se PM neptá
+(PM 7. 10. 2026: „to musí říkat ten skill"). Studio pak otázku `identity` přijme jen s jednou kartou
+na každý slot (`slot` na kartě). Situace, první shoda platí:
+
+| Situace | Kdy (ze stavu) | Směrů | Sloty (id = stálé označení; každý jiná stavba) |
+|---|---|---|---|
+| assets | `options.identity` = `package` | 0 | žádný: existující symbol, jen kit (body 5-8) |
+| app | `variant.type` = `webapp` nebo `pwa` | 3 | L písmeno (jedna iniciála) nebo monogram (dvě a víc), S abstraktní glyf, P obrazový; symbol první, nápis vedle |
+| redesign | `variant.type` = `web` a stažený starý web (`.aid-ui/old-site/*/fetch.json` se stránkou 200) | 5 | R oživení dnešního loga (jen s použitelným `.aid-ui/logo/dnesni-logo.*`: SVG nebo rastr ≥ 400 px; jinak R = nápis navazující barvou a písmem), W nápis, WC nápis + oborový znak v nové formě vepsaný do písmene, WM nápis + monogram/písmeno, WP nápis + obrazový symbol z metafory (bez oboru, bez iniciály) |
+| new | `variant.type` = `web`, bez starého webu | 3 | W nápis, WC nápis + znak v písmeni (místní služba: oborový), WP nápis + obrazový symbol |
+
+Pravidla, která route.json nese:
+- **Pár vždy:** každý směr = logo s názvem (vodorovné; stojaté jen když ho kontext chce) + symbol +
+  malý řez pro 16 px. U nápisového směru (W) je symbol mikroznačka odvozená z iniciál a je tak
+  označená - nikdy se nezamění za hlavní myšlenku směru. Písmo názvu se vybírá **tady**: tři
+  kandidáti z Google Fonts (OFL, latin-ext), každý ověřený `aid-ui-tool.sh glyph --sample <rodina>
+  "<název a všechna písmena jazyka webu>"`, obodovaní proti tónu vize; každý směr má jedno písmo
+  s důvodem v `koncepty.md`; písmo vítězného směru přebírá krok Vzhled jako dané (role `display`).
+- **Oborový znak:** `variant.local` = true → slot WC nese oborový znak povinně, v nové formě
+  (zásada 4 skillu „svěží forma známého znaku"; kreslené klišé je diskvalifikace); jinak znak z vize.
+- **Kontexty:** testovací kontexty situace (web: hlavička, záložka 16 px, avatar, tisk; app: ikona
+  aplikace, záložka, hlavička, avatar) sjednocené se seznamem „Kde bude značka žít" ze zadání;
+  `aid-ui-tool.sh logo-sheet --spec .aid-ui/logo/sheet.json` vykreslí každý směr ve všech
+  (`.aid-ui/studio/logo-<slot>.png`) a přehled `logo-prehled.png` s policí konkurence.
+- **Police konkurence** (náhrada za nepřevzatou knihovnu): loga konkurentů ze zadání z jejich webů
+  do `.aid-ui/refs/competitors/` + `manifest.json` (název, URL, soubor, `state`
+  available | header-shot | unavailable | not_provided, selektor). Logo = `<img>` s „logo"
+  v src/alt v hlavičce, inline SVG hlavičky, ikona ≥ 192 px, jinak snímek hlavičky; bez jediného
+  dostupného je police `not_provided` a přehled to napíše, nic se nevymýšlí. Složka se maže až po
+  `record-answer` otázky `identity` (do té doby je důkazem), jako ostatní cizí snímky nikdy do
+  `docs/`.
+- **Bodování a první karta (deterministické):** nejdřív brány - `svg_audit.py` bez FAIL, test 16 px
+  (posouzený), úplný pár, splněný druh slotu, žádné nepřetvořené klišé, licence a latin-ext písma;
+  diskvalifikovaný směr nelze doporučit (vrací se do fáze 3-5, jen ten slot, nejvýš dvakrát; pak
+  zůstane v `koncepty.md` jako neúspěšný s důvodem a karta nese `risk` „neprošel: …"). Pak pět
+  kritérií skillu 0-4 (jasnost myšlenky, odlišnost, jednoduchost, relevance = pochopení v kontextu
+  názvu a nabídky, ne podoba s piktogramem, síla v malé velikosti) s důkazem u každého; váhy ze
+  situace (web: relevance ×2; app: malá velikost ×2); bonus kontinuity +1 jen slotu R, jen
+  s vyjmenovanými zachovanými prvky a jen když registr faktů dokládá recenze ≥ 20 nebo jméno ≥ 3
+  roky (`route.json` → `continuity_bonus.eligible`; `null` = nedoloženo, bez bonusu). Nejvyšší
+  součet = první karta (`recommend` v sheet.json), shoda: vyšší odlišnost, pak méně bodů křivky
+  (`svg_audit`), pak pořadí slotů. Tabulka s body a důkazy je v `koncepty.md`; id slotů se nemění,
+  mění se jen pořadí karet.
+- **Chybějící vstup** (vize, zadání, název v registru faktů): krok nepokládá otázku, kapitola `logo`
+  zůstane `ceka` s důvodem v těle a krok skončí jmenovanou blokací - ne obecným „zeptej se PM".
+
 ## Postup
 
 1. Existující balíček → nic nekopíruj podruhé; doplň jen chybějící soubory
@@ -66,35 +115,44 @@ svg-construction a testing-checklist a zapíše `.aid-ui/method/identity.json`; 
    kontexty použití projektu; ulož `docs/design/brief-logo-favicon.md`.
    Chybí-li údaj, zeptej se PM (`facts`), nedoplňuj domněnkou.
 4. `"package"` → symbol je dané SVG; pokračuj bodem 5. `"new"` → nejdřív
-   `aid-ui-state.sh method <project> identity`, pak fáze 1-6 převzatého skillu
-   (`references/adopted/logo-design/SKILL.md` „Design workflow"), vše v `.aid-ui/logo/`:
+   `aid-ui-state.sh method <project> identity` a `aid-ui-logo-route.py <project> --write`
+   (Rozcestník výše: situace, sloty, kontexty, bodování), pak fáze 1-6 převzatého skillu
+   (`references/adopted/logo-design/SKILL.md` „Design workflow") pro **každý slot** route.json,
+   vše v `.aid-ui/logo/`:
    - fáze 1: brief = zadání z bodu 3 + seznam předpokladů (`discovery-brief.md` §5);
    - fáze 2: klišé oboru vypsaná výslovně do `koncepty.md` (zub, úsměv, kříž, zelená
      lékárna…) jako zakázaná bez nové formy; slovní mapa (`discovery-brief.md` §6: název,
      nabídka, přídavná jména, slib → podstatná jména, metafory, opaky; průniky označit);
      aspoň dva typy značek podle `mark-types.md` §12;
-   - fáze 3: 8-12 konceptů po jedné větě napříč typy značek do `koncepty.md`, každý
-     s bodováním (jasnost, odlišnost, jednoduchost, relevance, síla v malé velikosti); tři
-     nejsilnější a nejodlišnější se staví, ostatní zůstávají v souboru jako zamítnuté;
-   - fáze 4: u každého nejdřív stavba slovy (tvary, poloměry, úhly, mřížka), pak SVG černě
-     na bílé podle `svg-construction.md`: `viewBox="0 0 256 256"`, málo bodů, úhly
-     0/15/30/45/60/90°, díry přes `fill-rule="evenodd"`, žádný `<text>`; verze
-     `a-v1.svg`, `a-v2.svg`… se nepřepisují;
+   - fáze 3: 8-12 konceptů po jedné větě do `koncepty.md`, každý přiřazený slotu route.json
+     a obodovaný (jasnost, odlišnost, jednoduchost, relevance, síla v malé velikosti); do každého
+     slotu jde jeho nejsilnější koncept, ostatní zůstávají v souboru jako zamítnuté; slot R začíná
+     auditem dnešního loga podle `references/adopted/logo-design/references/redesign.md`
+     (co má hodnotu, co zachovat - vyjmenovat);
+   - fáze 4: u každého slotu nejdřív stavba slovy (tvary, poloměry, úhly, mřížka), pak symbol
+     SVG černě na bílé podle `svg-construction.md` (`viewBox="0 0 256 256"`, málo bodů, úhly
+     0/15/30/45/60/90°, díry přes `fill-rule="evenodd"`) **a logo s názvem** (`<slot>-lockup.svg`,
+     výška 256, název písmem slotu; v konceptu smí být živý `<text>` s rodinou z Google Fonts,
+     do křivek jde až v bodě 5); verze `<slot>-v1.svg`, `<slot>-v2.svg`… se nepřepisují;
    - fáze 5 aspoň dvakrát: `python3 references/adopted/logo-design/scripts/svg_audit.py a.svg b.svg c.svg`
      a `python3 references/adopted/logo-design/scripts/preview_sheet.py a.svg b.svg c.svg -o preview.html`
      (bez `--refs-industry`, knihovna není), snímek stránky přes `aid-ui-tool.sh`; co padá,
      oprav (měřítko 16-24 px, optické korekce, rovnováha, zrcadlení a otočení, písmenový
      test, spoje) a pusť znovu - `testing-checklist.md`;
-   - fáze 6: `python3 references/adopted/logo-design/scripts/concept_sheet.py a.svg b.svg c.svg --names … --notes … --recommend N --greyscale -o .aid-ui/studio/logo-koncepty.png`
-     (`render_png.py` potřebuje Chromium v PATH; jinak náhledy přes `aid-ui-tool.sh png`) a
-     náhled každého konceptu (16, 32, 180 px a plná velikost, světlý i tmavý podklad) jako
-     PNG pod `.aid-ui/studio/`;
-   - tři karty otázky `identity`: `thesis` = koncept jednou větou, `method` = typ značky
-     a odkud (např. „mark-types.md: letterform; koncept 7 z koncepty.md"), `uniqueness` =
-     proti klišé oboru a konkurenci ze zadání, `risk` = poctivé riziko (čitelnost v 16 px,
-     podobnost), `source` = `podklady`; první je doporučená. Re-roll nejvýš dvakrát (zpět
-     do fáze 3-5); pak PM dodá symbol sám (`"package"`). Fáze 7 (kit) = body 5-8 níže, až
-     po volbě PM.
+   - fáze 6: `.aid-ui/logo/sheet.json` (formát v hlavičce `lib/ui-fidelity/aid-ui-logo-sheet.mjs`:
+     název, písma, směry se `slot` jako `id`, `recommend` = vítěz bodování, konkurence
+     z `manifest.json`) a `aid-ui-tool.sh logo-sheet --spec .aid-ui/logo/sheet.json` →
+     `.aid-ui/studio/logo-<slot>.png` (hlavička webu, záložka 16 px, ikona na telefonu, avatar,
+     vizitka černobíle) a `logo-prehled.png` (všechny směry vedle sebe, doporučený označený,
+     police konkurence); doplňkově `concept_sheet.py` skillu, když je k dispozici renderer;
+   - karty otázky `identity`, **jedna na slot**, v pořadí bodování (první = `recommend`):
+     `slot` = id slotu, `preview` = `logo-<slot>.png`, `thesis` = směr jednou větou,
+     `method` = druh slotu a typ značky s odkazem na postup (např. „mark-types.md §4 letterform;
+     slot WM, koncept 7 z koncepty.md"), `uniqueness` = proti klišé oboru a konkurenci z police,
+     `risk` = poctivé riziko (čitelnost v 16 px, podobnost, kontext, kde je slabší), `source` =
+     `podklady`. Re-roll PM: jen slot, kterého se komentář týká, stejný druh, nejvýš dvakrát; pak
+     slot zůstane s `risk` „neprošel" a nabídka pokračuje bez něj (PM nic nedodává - balíček od
+     klienta je volba kroku 0, ne náhradní cesta). Fáze 7 (kit) = body 5-8 níže, po volbě PM.
 5. Symbol = karta `choice` ze snímku `cards` zaznamenané odpovědi, ne
    z payloadu, a jen se shodným `preview_sha256` (`SKILL.md` „Jak se ptá PM",
    bod 5). Balíček do `docs/design/brand-package/` podle části 2 šablony:

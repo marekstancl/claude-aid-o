@@ -96,7 +96,7 @@ KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "approve_page", "exception", "coverage_drift", "design_standard", "handover", "notifications",
          "sources", "product_context", "copy_verdict", "no_method"}
 # Card fields the page shows (a step may turn any into state); snapshotted with the answer.
-CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "palette", "risk", "uniqueness", "value", "method")
+CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "palette", "risk", "uniqueness", "value", "method", "slot")
 RECEIPT_AGE = 12 * 3600   # a method receipt serves questions opened within this many seconds after it
 STANDARDS = "/opt/eco/docs/docs/ecosystem/"   # the only place a method file may live outside the plugin (read live)
 WAIVERS = ("pm", "without")   # no_method card values that let the kind be asked without a method
@@ -323,6 +323,17 @@ def check_method(q, cards):
     if files != want:
         raise ValueError("%s: the method receipt is not for the current method files (%s); %s"
                          % (who, ", ".join(m["files"]), fix))
+    if q["kind"] == "identity":   # the Rozcestník decided the directions: one card per slot, each naming its slot
+        rpath = os.path.join(PROJECT, ".aid-ui", "logo", "route.json")
+        try:
+            with open(rpath, encoding="utf-8") as f:
+                slots = [x["id"] for x in json.load(f)["slots"]]
+        except (OSError, ValueError, KeyError, TypeError):
+            raise ValueError("%s: no .aid-ui/logo/route.json; run: aid-ui-logo-route.py <project> --write (step 1i Rozcestník)" % who)
+        have = sorted(str(c.get("slot")) for c in cards)
+        if have != sorted(slots):
+            raise ValueError("%s: the route has slots %s, the cards name %s - one card per slot, `slot` on every card"
+                             % (who, ", ".join(slots), ", ".join(have) or "none"))
     names = [os.path.basename(x) for x in m["files"]]
     bad = [c["id"] for c in cards if not (isinstance(c.get("method"), str) and 0 < len(c["method"]) <= 300
                                           and any(n in c["method"] for n in names))]

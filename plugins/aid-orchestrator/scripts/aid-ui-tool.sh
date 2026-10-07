@@ -17,6 +17,11 @@
 #   measure [--storage-state <f>] [--build <id>] <base url> <out.json> <page>...   aid-ui-measure.mjs: what the built site uses
 #                                                      (control roles, fields, type, breakpoints) for
 #                                                      the project design standard (step 7 bod 4)
+#   logo-sheet --spec <sheet.json> [--root <project>]  aid-ui-logo-sheet.mjs: every logo direction where
+#                                                      it will live (header, tab 16 px, phone icon, avatar,
+#                                                      business card) as logo-<id>.png, and logo-prehled.png
+#                                                      of all directions next to the competitors' logos
+#                                                      (step 1i Rozcestník; spec format in the module header)
 #   wordmark --spec <wordmark.json>                    scripts/aid-ui-wordmark.py: the logo with the
 #                                                      name (master with live text, outlines, logo/
 #                                                      variants). Python fontTools + brotli (MIT) live in
@@ -29,7 +34,7 @@
 set -euo pipefail
 
 LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib/ui-fidelity" && pwd)"
-usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify|png|measure|wordmark <args>" >&2; exit 2; }
+usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify|png|measure|logo-sheet|wordmark <args>" >&2; exit 2; }
 (( $# >= 1 )) || usage
 tool="$1"; shift
 if [[ "$tool" == wordmark ]]; then
@@ -53,6 +58,7 @@ case "$tool" in
   webp)   js=aid-ui-webp.mjs ;;
   verify) js=aid-ui-verify.mjs ;;
   png)    js=aid-ui-png.mjs ;;
+  logo-sheet) js=aid-ui-logo-sheet.mjs ;;
   measure) js=aid-ui-measure.mjs ;;
   *) usage ;;
 esac

@@ -53,6 +53,8 @@ studio() {
   local k; for k in references structure content_plan vision product_context identity facts; do
     "$SCRIPT" method "$PROJ" "$k" >/dev/null
   done
+  # the logo route of this project: one slot, so an identity question carries one card with slot W
+  mkdir -p "$PROJ/.aid-ui/logo"; echo '{"situation":"new","slots":[{"id":"W","kind":"wordmark"}]}' > "$PROJ/.aid-ui/logo/route.json"
   local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
   export AID_UI_STUDIO_URL="http://127.0.0.1:$port"
   python3 "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/server.py" --project "$PROJ" --host 127.0.0.1 --port "$port" \
@@ -74,7 +76,7 @@ ans() {
   # the method before the output: the question opens now, after the receipts studio() wrote; every card says its method
   jq --arg q "$1" --arg k "$2" --arg t "$3" --argjson c "$c" --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" \
     '.questions += [{id: $q, kind: $k, target: $t, opened_at: $o} + (if $k == "facts" then {part: "obsah"} else {} end)]
-    | .cards += [$c[] | .question = $q | .method = (.method // "SKILL.md, 4-references.md")]' "$p" > "$p.t" && mv "$p.t" "$p"
+    | .cards += [$c[] | .question = $q | .method = (.method // "SKILL.md, 4-references.md") | (if $k == "identity" then .slot = "W" else . end)]' "$p" > "$p.t" && mv "$p.t" "$p"
   curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg q "$1" --arg k "$2" --arg t "$3" --arg d "$d" \
           '{question: $q, kind: $k, target: $t, decision: $d, choice: "x", comment: "PM"}')" "$AID_UI_STUDIO_URL/answer"
@@ -1314,7 +1316,7 @@ decide_payload() {
   [ "$(jq -r '.files[0].sha256' "$R")" = "$(sha256sum "$BATS_TEST_DIRNAME/../../../skills/ui-design/references/adopted/logo-design/SKILL.md" | cut -d' ' -f1)" ]
   run "$SCRIPT" method "$PROJ" nonsense; [ "$status" -eq 2 ]
   studio   # fresh receipts now
-  jq '.questions += [{id:"i1",kind:"identity",target:"t",opened_at:"2020-01-01T00:00:00Z"}] | .cards += [{id:"x",question:"i1",method:"mark-types.md: letterform"}]' \
+  jq '.questions += [{id:"i1",kind:"identity",target:"t",opened_at:"2020-01-01T00:00:00Z"}] | .cards += [{id:"x",question:"i1",method:"mark-types.md: letterform",slot:"W"}]' \
     "$PROJ/.aid-ui/studio/payload.json" > "$T/p.t" && mv "$T/p.t" "$PROJ/.aid-ui/studio/payload.json"
   run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"not from the 12 hours"* ]]
   run "$SCRIPT" record-answer "$PROJ" --question i1; [ "$status" -eq 1 ]; [[ "$output" == *"HTTP 422"* ]]   # the studio refuses the payload

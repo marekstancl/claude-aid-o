@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 585          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 586          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4394,6 +4394,20 @@ enforcements:
     not_guaranteed: "The quality of the concepts - only that the identity question cannot open without the receipt of the adopted logo-design method (aid_ui_method_receipt) and that the snapshot is byte-identical to upstream 0ecf52e."
     description: "Logo concepts are made by the adopted logo-design skill (kaankiziltug, MIT): brief, word map, category clichés, two mark types, 8-12 one-sentence concepts, the three strongest built in black SVG, svg_audit and preview_sheet twice, concept sheet; never drawn freehand (PM 7. 10. 2026: three freehand drafts for Coufal Clinic rejected)."
     recovery: "aid-ui-state.sh method <project> identity, then step 1i point 4 from the start."
+  - id: aid_ui_logo_route
+    type: 12
+    source: "scripts/aid-ui-logo-route.py; lib/aid-ui-studio/server.py (check_method, identity cards vs route.json)"
+    instruction: "skills/ui-design/steps/1i-identity.md 'Rozcestník'"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    test: scripts/tests/bats/test-aid-ui-logo-route.bats
+    not_guaranteed: "That the directions are conceptually different or well scored - only that the situation, the slot list, the contexts and the weights come from the state (never from a question to the PM), and that the identity question carries exactly one card per slot. Similarity of the drawings is judged by the checklist, not measured."
+    description: "The logo decision tree is computed, not asked (PM 7. 10. 2026: 'to musí říkat ten skill'): assets (package) 0 directions, app (webapp/pwa) 3 symbol-first, redesign (web with a fetched old site) 5 incl. the revitalization of a usable current logo, new (web) 3; each slot a distinct construction; contexts = the situation's test contexts plus the brief's list; scoring weights per situation and a continuity bonus only when the facts register evidences it. The studio refuses an identity question without route.json or with cards that are not one per slot."
+    recovery: "python3 scripts/aid-ui-logo-route.py <project> --write, then one card per slot with `slot`."
   - id: aid_ui_old_site_origin
     type: 12
     source: "scripts/aid-ui-sources.py (site_origin, --fetch-site)"
