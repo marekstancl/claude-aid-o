@@ -119,6 +119,32 @@
   .question .q-head { flex-direction: row; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 14px; }
   .q-meta { order: 2; display: flex; align-items: baseline; gap: 12px; }
   .q-count { font-size: 13px; color: var(--ks-text-muted); }
+  /* The part's questions: the one on screen as a row above it, the answered ones under the work with Změnit. */
+  .q-rail { display: flex; flex-direction: column; border: 1px solid var(--ks-rule); border-radius: 8px; overflow: hidden; }
+  .q-rail.has-now { border-color: var(--ks-kinpaku); }
+  .q-row { display: grid; grid-template-columns: 26px minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 12px; font-size: 14px; border-bottom: 1px solid var(--ks-rule); background: var(--ks-paper-raised); }
+  .q-row:last-child { border-bottom: 0; }
+  .q-n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: var(--ks-gray); color: var(--ks-text-muted); }
+  .q-row.done .q-n { background: var(--ks-patina); color: var(--ks-paper-raised); }
+  .q-row.now { background: color-mix(in srgb, var(--ks-kinpaku) 18%, var(--ks-paper-raised)); border-left: 4px solid var(--ks-kinpaku); }
+  .q-row.now .q-n { background: var(--ks-kinpaku); color: var(--ks-ink); }
+  .q-row.now .q-t { font-weight: 700; color: var(--ks-ink); }
+  .q-row.wait { color: var(--ks-text-muted); }
+  .q-t { color: var(--ks-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .q-a { color: var(--ks-ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .q-row.now .q-a, .q-row.changing .q-a { color: var(--ks-text-muted); font-weight: 400; }
+  .q-row .toggle { padding: 4px 9px; font-size: 12px; }
+  .done-box { display: flex; flex-direction: column; gap: 8px; }
+  /* The agent works and the PM waits: a live indicator, what is being done and what comes next. */
+  .working { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 16px; align-items: center; padding: 18px 20px; border: 1px solid var(--ks-rule); border-radius: 10px; background: var(--ks-paper-raised); box-shadow: var(--ks-lift); }
+  .working-gear { width: 56px; height: 56px; border-radius: 50%; border: 3px solid var(--ks-rule); border-top-color: var(--ks-kinpaku); animation: spin 1.1s linear infinite; }
+  .working b { display: block; font-size: 16px; color: var(--ks-ink); margin-bottom: 2px; }
+  .working p { color: var(--ks-text-muted); font-size: 14px; }
+  .working .bar-track { margin-top: 10px; height: 6px; border-radius: 3px; background: var(--ks-gray); overflow: hidden; }
+  .working .bar-fill { height: 100%; width: 35%; border-radius: 3px; background: var(--ks-kinpaku); animation: slide 1.6s ease-in-out infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+  @media (prefers-reduced-motion: reduce) { .working-gear, .working .bar-fill { animation: none; } }
   .step.solo::before { display: none; }
   .step-back { padding: 0 22px 16px; }
   .step-info { padding: 0 22px 20px; }
@@ -137,7 +163,11 @@
     .question.leaving { animation: q-leave .45s ease-in forwards; }
     .question.arriving, .active-box.slide-fwd, .stage.slide-fwd { animation: q-arrive .5s cubic-bezier(.16, 1, .3, 1); }
     .active-box.slide-back, .stage.slide-back { animation: q-arrive-back .4s cubic-bezier(.16, 1, .3, 1); }
-    .saved-row.fresh { background: none; animation: saved-drop .5s cubic-bezier(.16, 1, .3, 1), saved-flash 2.6s ease-out; }
+    .saved-row.fresh, .q-row.fresh { background: none; animation: saved-drop .5s cubic-bezier(.16, 1, .3, 1), saved-flash 2.6s ease-out; }
+    .q-row.now.arriving { animation: row-up .5s cubic-bezier(.16, 1, .3, 1); }
+    .q-row.leaving { animation: row-lift .4s ease-in forwards; }
+    @keyframes row-up { from { opacity: 0; transform: translateY(40px); } }
+    @keyframes row-lift { to { opacity: 0; transform: translateY(-40px); } }
     .stp.just .stp-c, .tab-n.pop { animation: mark-pop .6s cubic-bezier(.3, 1.6, .5, 1); }
     .step.active.just .stage { animation: stage-ring 1.6s ease-out; }
     @keyframes q-leave { to { opacity: 0; transform: translateY(-60px) scale(.96); } }
@@ -335,6 +365,8 @@
   }
   @media (max-width: 700px) {
     .saved-row { grid-template-columns: auto minmax(0, 1fr); }
+    .q-row { grid-template-columns: 26px minmax(0, 1fr) auto; grid-template-areas: "n t b" "n a b"; }
+    .q-row .q-n { grid-area: n; } .q-row .q-t { grid-area: t; } .q-row .q-a { grid-area: a; } .q-row .toggle { grid-area: b; }
     .saved-q { grid-column: 1 / -1; order: -1; }
     .brief { grid-template-columns: 1fr; gap: 0; }
     .brief dt { margin-top: 8px; }
@@ -783,9 +815,9 @@ function ask(o) {
   askDlg.showModal(); ta.focus();
 }
 // The answered question leaves upwards, towards the row that says it is saved.
-function leave(node) {
+function leave(node, cls) {
   if (!node.isConnected || matchMedia("(prefers-reduced-motion: reduce)").matches) return Promise.resolve();
-  node.classList.remove("arriving"); node.classList.add("leaving");
+  node.classList.remove("arriving"); node.classList.add(cls || "leaving");
   return new Promise(r => { node.addEventListener("animationend", e => { if (e.target === node) r(); }); setTimeout(r, 600); });
 }
 
@@ -1038,20 +1070,61 @@ const PART_INFO = { done: "Tahle část je hotová.", skipped: "Tuhle část jsm
 function partText(p) {   // the map's own sentence when it has one, else its pieces in order
   return p.text || [p.why, p.you, p.goal ? "Z toho bude: " + p.goal : "", p.feeds].filter(Boolean).join(" ");
 }
+// The part's questions in one place. On top of the work: the question on screen ("Teď: …") and the ones to come;
+// under the work: the answered ones with the answer and Změnit (the row lifts, the question opens above).
+// saved: the answered questions (for numbering); open: the open ones; cur: the one on screen; onlyOpen: draw the
+// open rows only (the top rail), the answered ones are drawn under the work by a second call
+function qRail(saved, open, cur, onlyOpen) {
+  const done = saved.slice().sort((a, b) => Date.parse((a.answer || {}).at || 0) - Date.parse((b.answer || {}).at || 0));
+  const rows = (onlyOpen ? [] : done.map((q, i) => ({ q, n: i + 1, cls: q.changed_to ? "changing" : "done" })))
+    .concat(open.map((q, j) => ({ q, n: done.length + j + 1, cls: q === cur ? "now" : "wait" })));
+  // a reopened question (Změnit) keeps the number of the answer it replaces
+  for (const r of rows) if (r.q.changed_from) { const i = done.findIndex(x => x.id === r.q.changed_from); if (i >= 0) r.n = i + 1; }
+  const rail = el("div", { class: "q-rail" + (cur ? " has-now" : ""), role: "list", "aria-label": "Otázky v této části" }, rows.map(r => {
+    // each animation plays once: the row that became "Teď", the answer that just got saved
+    const key = r.cls === "now" ? "now:" + r.q.id : r.cls === "done" ? "done:" + r.q.id + ":" + ((r.q.answer || {}).at || "") : null;
+    const fresh = key && !first && !SEEN.has(key); if (key) drawn.push(key);
+    const kids = [el("span", { class: "q-n" }, r.cls === "done" ? "✓" : r.cls === "changing" ? "…" : String(r.n)),
+      el("span", { class: "q-t" }, (r.cls === "now" ? (r.q.changed_from ? "Teď (změna): " : "Teď: ") : "") + (r.q.title || KIND[r.q.kind] || r.q.id)),
+      el("span", { class: "q-a" }, r.cls === "done" ? savedText(r.q) : r.cls === "changing" ? "měníte - odpovídáte výše" : r.cls === "now" ? "odpovídáte níže" : "přijde na řadu")];
+    const row = el("div", { class: "q-row " + r.cls + (fresh ? r.cls === "now" ? " arriving" : " fresh" : ""), role: "listitem" }, kids);
+    if (r.cls === "done") row.append(el("button", { type: "button", class: "toggle", on: { click: async e => {
+      const b = e.currentTarget; b.disabled = true;
+      await leave(row, "leaving");   // the row lifts towards the work above, then the question opens there
+      const x = await call("POST", "/change", { question: r.q.id }).catch(() => ({ status: 0 }));
+      if (x.status === 200) { last = ""; tick(); return; }
+      row.classList.remove("leaving"); b.disabled = false;
+      notice(x.status === 409 ? "Změna této odpovědi už čeká výše." : "Změnu se nepodařilo otevřít.");
+    } } }, "Změnit"));
+    return row;
+  }));
+  return rail;
+}
+// The agent works and the PM waits: what is being done now (the agent's now.title/text) and what comes next.
+function workingEl(detail) {
+  const now = S.now && typeof S.now === "object" ? S.now : {};
+  return el("div", { class: "working", role: "status", "aria-live": "polite" },
+    el("div", { class: "working-gear", "aria-hidden": "true" }),
+    el("div", {}, el("b", {}, str(now.title) || "Pracuji na téhle části."),
+      el("p", {}, str(now.text) || "Další otázka se tu objeví sama, stránku nemusíte obnovovat."),
+      el("div", { class: "bar-track", "aria-hidden": "true" }, el("div", { class: "bar-fill" })), detail ? el("div", { class: "actions", style: "margin-top:10px" }, detail) : null));
+}
 function partPanel(st, vid, d, detail) {   // detail: the step's Detail button when the step has no pills row
   const p = st.parts.find(x => x.id === vid), i = st.parts.indexOf(p), di = st.parts.findIndex(x => x.id === d);
   const saved = (st.saved || []).filter(q => q.part === vid), open = st.open.filter(q => q.part === vid);
   const stray = st.open.filter(q => !st.parts.some(x => x.id === q.part));   // never hidden behind a tab
-  const k = saved.filter(q => !q.changed_to).length, q = open[0];
+  const q = open.find(x => x.changed_from) || open[0];   // a reopened answer goes first
   const back = () => { slide = di < i ? "back" : "fwd"; delete VIEW[st.id]; render(); };
   const where = st.open.length ? "otázku, která čeká" : "část, na které pracuji";
   return el("div", { class: "active-box" + (slide ? " slide-" + slide : "") },
     d && d !== vid ? el("button", { type: "button", class: "reroll-btn back-now", on: { click: back } }, di < i ? "← Zpět na " + where : "Zpět na " + where + " →") : null,
     q ? null : partBox(st, p),
-    q ? question(q, cardsOf(q), k + open.length > 1 ? { k: k + 1, n: k + open.length } : null, el("p", { class: "part-note" }, partText(p)), detail)
+    q && (saved.length || open.length > 1 || q.changed_from) ? qRail(saved, open, q, true) : null,
+    q ? question(q, cardsOf(q), null, el("p", { class: "part-note" }, partText(p)), detail)
+      : p.status === "current" ? workingEl(detail)
       : el("p", { class: "info" }, (PART_INFO[p.status] || "") + (p.status === "done" && saved.length ? " Odpověď změníte tlačítkem Změnit - otevře se stejná otázka znovu." : ""), detail),
     stray.map(x => question(x, cardsOf(x))),
-    saved.length ? savedEl(saved) : null);   // what the PM already answered in this part, under the question
+    saved.length ? el("div", { class: "done-box" }, el("p", { class: "tier" }, "Hotové v této části"), qRail(saved, [], null, false)) : null);
 }
 
 // The parts of the step: number, title and status; the part being worked on shows why, goal, what it feeds
