@@ -121,9 +121,15 @@ function card(d) {
                      // tab, phone and avatar come from the chosen direction once it is rebuilt as a vector
     conceptOk(d);
     const L = uri(d.lockup);
+    // a two-step run also has the mark alone (the icon): show it in the tab, on the phone and as the avatar
+    const M = d.symbol ? uri(d.symbol) : null;
+    const icons = M ? `
+  <div class="ctx tab"><div class="tabbar"><span><img src="${M}">${esc(spec.name)}</span><span style="opacity:.6">Nová karta</span></div><span class="l">záložka prohlížeče, 16 px (symbol od modelu)</span></div>
+  <div class="ctx phone"><div class="grid"><div class="app"><i></i>app</div><div class="app"><i class="me"><img src="${M}"></i>${esc(spec.name)}</div><div class="app"><i></i>app</div><div class="app"><i></i>app</div></div><span class="l" style="color:#bbb">ikona na telefonu</span></div>
+  <div class="ctx avatar" style="grid-column:1/3"><i><img src="${M}"></i><span class="l">avatar (Google profil, najdizubara)</span></div>` : '';
     return `<!doctype html><html><head>${head}</head><body><div class="card">
   <div class="ctx hero" style="height:auto"><div class="bar"><img src="${L}" style="height:64px"><nav><span>Služby</span><span>Cenník</span><span>Kontakt</span><b>Objednať sa</b></nav></div>
-    <div class="heroin" style="padding:24px 28px"><h1>${esc(spec.hero || spec.name)}</h1></div><span class="l">hlavička a hero webu</span></div>
+    <div class="heroin" style="padding:24px 28px"><h1>${esc(spec.hero || spec.name)}</h1></div><span class="l">hlavička a hero webu</span></div>${icons}
   <div class="ctx" style="grid-column:1/3;display:flex;gap:24px;align-items:center;background:#fff"><img src="${L}" style="width:560px;height:560px;object-fit:contain"><div style="font-size:13px;color:#555;max-width:520px"><b style="display:inline-block;background:#fde68a;color:#222;padding:2px 8px;border-radius:6px;font-size:11px;letter-spacing:.06em">KONCEPT OD OBRAZOVÉHO MODELU</b><p>Tak, jak ho model nakreslil. Po volbě se přestaví do skutečného souboru: symbol jako vektor, název skutečným písmem, barvy z obrázku; teprve pak ikona v prohlížeči, na telefonu a avatar.</p></div></div>
   <div class="ctx bc" style="grid-column:1/3"><div><img src="${L}" style="height:48px"><p>${esc(spec.name)}<br>${esc(spec.address || '')}</p></div><span class="l">vizitka, černobíle</span></div>
   </div></body></html>`;
