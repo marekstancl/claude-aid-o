@@ -1104,19 +1104,23 @@ function qRail(saved, open, cur, onlyOpen) {
 // The agent's own note (now.title/text, with now.at) is shown only while it is newer than the PM's last answer;
 // after an answer the page says what it is processing and what comes next (the question's own `next`),
 // and where the finished things are.
-function workingEl(detail) {
+function workingEl(detail, st, p, saved) {
   const now = S.now && typeof S.now === "object" ? S.now : {};
   const answered = (S.questions || []).filter(q => q && q.answered && q.answer && q.answer.at && !/^reroll/.test(String(q.answer.decision || "")))
     .sort((a, b) => Date.parse(b.answer.at) - Date.parse(a.answer.at));
   const lastQ = answered[0], lastAt = lastQ ? Date.parse(lastQ.answer.at) : 0;
   const nowAt = Date.parse(now.at || "") || 0;
-  const stale = lastAt > nowAt;
-  const title = !stale && str(now.title) ? now.title : lastQ ? "Zpracovávám vaši odpověď: " + (lastQ.title || KIND[lastQ.kind] || lastQ.id) : "Pracuji na téhle části.";
-  const text = !stale && str(now.text) ? now.text : lastQ && str(lastQ.next) ? "Co bude dál: " + lastQ.next : "Další otázka se tu objeví sama, stránku nemusíte obnovovat.";
+  // the note is stale after a newer answer, and when it was written for another part than the one being worked on
+  const stale = lastAt > nowAt || (now.part && p && now.part !== p.id);
+  const title = !stale && str(now.title) ? now.title : p ? "Připravuji část " + p.title + "." : lastQ ? "Zpracovávám vaši odpověď: " + (lastQ.title || KIND[lastQ.kind] || lastQ.id) : "Pracuji na téhle části.";
+  const text = !stale && str(now.text) ? now.text : p && str(p.text) ? p.text : lastQ && str(lastQ.next) ? "Co bude dál: " + lastQ.next : "Další otázka se tu objeví sama, stránku nemusíte obnovovat.";
+  const doneParts = st ? st.parts.filter(x => x.status === "done" && x.id !== (p || {}).id).map(x => x.title) : [];
+  const where = saved && saved.length ? "odpovědi, které jste dal v této části, jsou níže v Hotové v této části"
+    : doneParts.length ? "vaše odpovědi jsou v hotových částech nahoře (" + doneParts.join(", ") + ") - klikněte na ně" : "v této části jste zatím nic neodpovídal";
   return el("div", { class: "working", role: "status", "aria-live": "polite" },
     el("div", { class: "working-gear", "aria-hidden": "true" }),
     el("div", {}, el("b", {}, title), el("p", {}, text),
-      el("p", {}, "Hotové výstupy (dokumenty, vize, logo) najdete na stránce ", el("a", { href: "/brand/" }, "Značka a produkt"), "; odpovědi, které jste dal, jsou níže v Hotové v této části."),
+      el("p", {}, "Hotové výstupy (dokumenty, vize, logo) najdete na stránce ", el("a", { href: "/brand/" }, "Značka a produkt"), "; " + where + "."),
       el("div", { class: "bar-track", "aria-hidden": "true" }, el("div", { class: "bar-fill" })), detail ? el("div", { class: "actions", style: "margin-top:10px" }, detail) : null));
 }
 function partPanel(st, vid, d, detail) {   // detail: the step's Detail button when the step has no pills row
@@ -1131,7 +1135,7 @@ function partPanel(st, vid, d, detail) {   // detail: the step's Detail button w
     q ? null : partBox(st, p),
     q && (saved.length || open.length > 1 || q.changed_from) ? qRail(saved, open, q, true) : null,
     q ? question(q, cardsOf(q), null, el("p", { class: "part-note" }, partText(p)), detail)
-      : p.status === "current" ? workingEl(detail)
+      : p.status === "current" ? workingEl(detail, st, p, saved)
       : el("p", { class: "info" }, (PART_INFO[p.status] || "") + (p.status === "done" && saved.length ? " Odpověď změníte tlačítkem Změnit - otevře se stejná otázka znovu." : ""), detail),
     stray.map(x => question(x, cardsOf(x))),
     saved.length ? el("div", { class: "done-box" }, el("p", { class: "tier" }, "Hotové v této části"), qRail(saved, [], null, false)) : null);

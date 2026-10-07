@@ -85,7 +85,8 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 
 1. Zapiš nebo obnov `<project>/.aid-ui/studio/payload.json`:
    `now` (`title`, `text` = co právě děláš, např. „Připravuji tři návrhy vzhledu…", `at` = kdy jsi to
-   napsal; studio tvou poznámku ukáže jen dokud je novější než poslední odpověď PM, pak píše samo
+   napsal, `part` = id části, pro kterou platí; studio tvou poznámku ukáže jen dokud je novější než
+   poslední odpověď PM a patří k části, na které se pracuje, pak píše samo
    „Zpracovávám vaši odpověď: …" a `next` té otázky - proto `now` přepiš hned po každém `record-answer`;
    obnov ho při každé změně, stránka ho ukazuje vždy a sama bez otázek jen jeho),
    `steps[]` nepiš: kroky, části a jejich stav bere studio z mapy `sections.json` a ze stavu
