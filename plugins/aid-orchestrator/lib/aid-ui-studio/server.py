@@ -50,7 +50,7 @@ the link from another app, whose Referer is foreign):
                               the project directory's name (the page header); `history_lines` =
                               the lines of history.jsonl now (the page refetches
                               /history when it changes)
-  GET  /preview?question=&card=  the card's preview file, 404 while pending
+  GET  /preview?question=&card=[&n=2]  the card's preview file (n=2: its preview2, the contexts), 404 while pending
   GET  /report                <project>/docs/design/soulad-se-standardy.md, escaped
   GET  /licence               Impeccable NOTICE (the page pattern's source)
   GET  /history               [auth] the lines of <project>/.aid-ui/studio/history.jsonl in file order:
@@ -96,7 +96,7 @@ KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "approve_page", "exception", "coverage_drift", "design_standard", "handover", "notifications",
          "sources", "product_context", "copy_verdict", "no_method"}
 # Card fields the page shows (a step may turn any into state); snapshotted with the answer.
-CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "palette", "risk", "uniqueness", "value", "method", "slot")
+CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "preview2", "palette", "risk", "uniqueness", "value", "method", "slot")
 RECEIPT_AGE = 12 * 3600   # a method receipt serves questions opened within this many seconds after it
 STANDARDS = "/opt/eco/docs/docs/ecosystem/"   # the only place a method file may live outside the plugin (read live)
 WAIVERS = ("pm", "without")   # no_method card values that let the kind be asked without a method
@@ -697,8 +697,9 @@ class Studio(BaseHTTPRequestHandler):
                 return
             c = next((c for c in p["cards"] if isinstance(c, dict) and c.get("question") == q.get("question")
                       and c.get("id") == q.get("card")), None)
-            f = os.path.realpath(os.path.join(STUDIO, str((c or {}).get("preview") or "")))
-            if not c or not f.startswith(STUDIO + os.sep) or not os.path.isfile(f):
+            which = "preview2" if q.get("n") == "2" else "preview"   # n=2: the card's second picture (contexts)
+            f = os.path.realpath(os.path.join(STUDIO, str((c or {}).get(which) or "")))
+            if not c or not (c.get(which) or "") or not f.startswith(STUDIO + os.sep) or not os.path.isfile(f):
                 self.send(404, {"error": "preview pending"})
                 return
             ctype = IMAGES.get(os.path.splitext(f)[1].lower())

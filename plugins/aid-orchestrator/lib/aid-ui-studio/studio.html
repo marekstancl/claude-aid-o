@@ -341,7 +341,13 @@
   #lightbox { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: oklch(97.8% 0 0 / 0.96); cursor: zoom-out; opacity: 0; transition: opacity .25s ease; }
   #lightbox[hidden] { display: none; }
   #lightbox.open { opacity: 1; }
-  #lightbox img { max-width: 94vw; max-height: 94vh; border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); }
+  #lightbox { flex-direction: column; gap: .8rem; }
+  #lightbox img { max-width: 94vw; max-height: 82vh; border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); background: #fff; }
+  .lb-bar { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; justify-content: center; cursor: default; font: 500 .8125rem var(--ks-font); color: var(--ks-ink); }
+  .lb-bar .lb-title { min-width: 12rem; text-align: center; }
+  .lb-bar .lb-count { color: var(--ks-muted, #666); }
+  .lb-bar button.choose { margin: 0; }
+  .lb-bar .chip[aria-pressed="true"] { outline: 2px solid var(--ks-accent, #222); }
   .links { padding: 1rem 0 1.4rem; border-top: 1px solid var(--ks-rule); font-size: .8125rem; display: flex; gap: 1.2rem; flex-wrap: wrap; }
 
   /* A tall viewport: the deck becomes a plain vertical list; the bar stays stuck. */
@@ -585,7 +591,7 @@ const KIND = { variant: "Co stavíme a co k tomu", options: "Co připravit", vis
   copy_verdict: "Texty webu", no_method: "Chybí postup" };
 const SELECTOR = { check: "kontrola", page: "stránka", viewport: "velikost obrazovky", browser: "prohlížeč", role: "role", state: "stav" };
 // Card fields rendered by name; any other string field shows on the card's back as "key: value".
-const KNOWN = new Set(["id", "question", "title", "preview", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source"]);
+const KNOWN = new Set(["id", "question", "title", "preview", "preview2", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source", "method", "slot", "value"]);
 function sourceOf(c) {   // what a card's proposal rests on, in the map's words
   const m = S && S.sections && S.sections.sources;
   return c.source && m && m[c.source] ? m[c.source] : null;
@@ -638,24 +644,59 @@ async function call(method, url, body) {
 }
 
 // Lightbox: the expanded preview; Esc or a click closes it and focus returns.
+// In the lightbox the PM can step through the question's cards (arrows, ← →), pick the shown one
+// ("Vybrat tento" = the card's own tick) and switch to its second picture (contexts) when the card has one.
 const lightbox = document.getElementById("lightbox");
-lightbox.append(el("img", { alt: "" }));
-let opener = null;
+const lbImg = el("img", { alt: "" });
+const lbPrev = el("button", { type: "button", class: "chip lb-prev", "aria-label": "Předchozí návrh" }, "‹ Předchozí");
+const lbNext = el("button", { type: "button", class: "chip lb-next", "aria-label": "Další návrh" }, "Další ›");
+const lbPick = el("button", { type: "button", class: "choose go lb-pick" }, "Vybrat tento");
+const lbCtx = el("button", { type: "button", class: "chip lb-ctx", "aria-pressed": "false" }, "Kontexty");
+const lbTitle = el("span", { class: "lb-title" }), lbCount = el("span", { class: "lb-count" });
+const lbBar = el("div", { class: "lb-bar", on: { click: e => e.stopPropagation() } }, lbPrev, lbTitle, lbCount, lbPick, lbCtx, lbNext);
+lightbox.append(lbImg, lbBar);
+let opener = null, LB = null;   // LB: {arts, i, ctx} while open
+function lbShow(i, ctx) {
+  LB.i = (i + LB.arts.length) % LB.arts.length; LB.ctx = !!ctx;
+  const art = LB.arts[LB.i], img = art.querySelector("img.comp");
+  const base = img.getAttribute("src").replace(/&n=2/, "").replace(/&t=\d+/, "");
+  lbImg.src = LB.ctx ? base + "&n=2" : base; lbImg.alt = img.alt;
+  lbTitle.textContent = art.querySelector("h3")?.textContent || "";
+  lbCount.textContent = LB.arts.length > 1 ? (LB.i + 1) + " / " + LB.arts.length : "";
+  lbPrev.hidden = lbNext.hidden = LB.arts.length < 2;
+  const picked = art.classList.contains("picked"), tick = art.querySelector(".tick");
+  lbPick.hidden = !tick; lbPick.disabled = picked; lbPick.textContent = picked ? "Vybráno ✓" : "Vybrat tento";
+  lbCtx.hidden = art.getAttribute("data-preview2") !== "1"; lbCtx.setAttribute("aria-pressed", String(LB.ctx));
+  lbCtx.textContent = LB.ctx ? "Zpět na návrh" : "Kontexty";
+}
 function openLightbox(img) {
   if (img.hidden || !img.getAttribute("src")) return;
   opener = document.activeElement;
-  lightbox.querySelector("img").src = img.getAttribute("src");
-  lightbox.querySelector("img").alt = img.alt;
+  const art = img.closest(".card[data-card]"), sec = img.closest("section");
+  const arts = art && sec ? [...sec.querySelectorAll(".card[data-card]")].filter(a => a.querySelector("img.comp")) : [];
+  LB = { arts: arts.length ? arts : [img.closest("article") || img.parentElement], i: Math.max(0, arts.indexOf(art)), ctx: false };
+  if (!art) { lbImg.src = img.getAttribute("src"); lbImg.alt = img.alt; lbTitle.textContent = ""; lbCount.textContent = "";
+    lbPrev.hidden = lbNext.hidden = lbPick.hidden = lbCtx.hidden = true; }
+  else lbShow(LB.i, false);
   lightbox.hidden = false;
   requestAnimationFrame(() => lightbox.classList.add("open"));
   lightbox.focus();
 }
 function closeLightbox() {
-  lightbox.classList.remove("open"); lightbox.hidden = true;
+  lightbox.classList.remove("open"); lightbox.hidden = true; LB = null;
   if (opener && opener.isConnected) opener.focus();
 }
-lightbox.addEventListener("click", closeLightbox);
-document.addEventListener("keydown", e => { if (e.key === "Escape" && !lightbox.hidden) closeLightbox(); });
+lbPrev.addEventListener("click", () => LB && lbShow(LB.i - 1, LB.ctx));
+lbNext.addEventListener("click", () => LB && lbShow(LB.i + 1, LB.ctx));
+lbCtx.addEventListener("click", () => LB && lbShow(LB.i, !LB.ctx));
+lbPick.addEventListener("click", () => { if (!LB) return; const t = LB.arts[LB.i].querySelector(".tick"); if (t && !LB.arts[LB.i].classList.contains("picked")) t.click(); lbShow(LB.i, LB.ctx); });
+lightbox.addEventListener("click", e => { if (!e.target.closest(".lb-bar")) closeLightbox(); });
+document.addEventListener("keydown", e => {
+  if (lightbox.hidden) return;
+  if (e.key === "Escape") closeLightbox();
+  else if (e.key === "ArrowLeft" && LB && LB.arts.length > 1) lbShow(LB.i - 1, LB.ctx);
+  else if (e.key === "ArrowRight" && LB && LB.arts.length > 1) lbShow(LB.i + 1, LB.ctx);
+});
 
 // The preview slot: shimmer until /preview answers 200, retried every 3 s.
 function media(q, c, withDetails, flip) {
@@ -705,6 +746,7 @@ function card(q, c, i, select) {
   const picked = SELECTED[q.id] === c.id;
   // the whole card picks; its own buttons (Detaily, zoom) and links keep doing their thing
   const art = el("article", { class: "card" + (picked ? " picked" : ""), style: "--fan:" + FAN[i % 3], "data-card": c.id,
+    "data-preview2": str(c.preview2) ? "1" : "0",
     on: { click: e => { if (!e.target.closest("button, a")) select(c.id); } } });
   // the tick is the control a keyboard and a screen reader use; the rest of the card is the same click for a mouse
   const tick = el("button", { type: "button", class: "tick", role: "radio", "aria-checked": String(picked), "aria-label": "Vybrat: " + title,

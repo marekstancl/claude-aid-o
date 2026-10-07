@@ -169,7 +169,14 @@ async function shoot(html, file, width) {
 }
 for (const d of spec.directions) {
   if (!/^[A-Za-z0-9-]+$/.test(String(d.id)) || !d.lockup || (!d.symbol && !d.concept) || !d.title) { console.error(`ERROR: direction needs id [A-Za-z0-9-], title, lockup and symbol (or concept: true): ${JSON.stringify(d.id)}`); process.exit(2); }
-  await shoot(card(d), path.join(out, `logo-${d.id}.png`), 1200);
+  if (d.concept) {   // the card thumbnail is the concept itself (crisp); the contexts are its second picture
+    conceptOk(d);
+    fs.copyFileSync(path.resolve(root, d.lockup), path.join(out, `logo-${d.id}.png`));
+    console.log(path.relative(root, path.join(out, `logo-${d.id}.png`)));
+    await shoot(card(d), path.join(out, `logo-${d.id}-kontext.png`), 1200);
+  } else {
+    await shoot(card(d), path.join(out, `logo-${d.id}.png`), 1200);
+  }
 }
 await shoot(overview(), path.join(out, 'logo-prehled.png'), 1600);
 await browser.close();

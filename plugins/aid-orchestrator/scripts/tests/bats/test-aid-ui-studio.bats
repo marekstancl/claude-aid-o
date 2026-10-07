@@ -152,7 +152,7 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   printf 'PNG1' > "$P/.aid-ui/studio/a.png"; echo s > "$P/secret"
   [ "$(answer "$choose_a")" = 200 ]
   png="$(printf 'PNG1' | sha256sum | cut -d' ' -f1)"
-  want='[{"id":"a","method":"5-directions.md","palette":["#000"],"preview":"a.png","preview_sha256":"'"$png"'","risk":null,"slot":null,"thesis":"písmo","title":"A","uniqueness":null,"url":"https://a.example","value":null},{"id":"b","method":"5-directions.md","palette":null,"preview":"../../secret","preview_sha256":null,"risk":null,"slot":null,"thesis":null,"title":"B","uniqueness":null,"url":null,"value":null},{"id":"c","method":"5-directions.md","palette":null,"preview":"c.html","preview_sha256":null,"risk":null,"slot":null,"thesis":null,"title":"C","uniqueness":null,"url":null,"value":null}]'
+  want='[{"id":"a","method":"5-directions.md","palette":["#000"],"preview":"a.png","preview2":null,"preview_sha256":"'"$png"'","risk":null,"slot":null,"thesis":"písmo","title":"A","uniqueness":null,"url":"https://a.example","value":null},{"id":"b","method":"5-directions.md","palette":null,"preview":"../../secret","preview2":null,"preview_sha256":null,"risk":null,"slot":null,"thesis":null,"title":"B","uniqueness":null,"url":null,"value":null},{"id":"c","method":"5-directions.md","palette":null,"preview":"c.html","preview2":null,"preview_sha256":null,"risk":null,"slot":null,"thesis":null,"title":"C","uniqueness":null,"url":null,"value":null}]'
   [ "$(jq -S -c .cards "$BATS_TEST_TMPDIR/body")" = "$want" ]
   sha="$(printf '%s' "$want" | sha256sum | cut -d' ' -f1)"
   [ "$(jq -r .cards_sha256 "$BATS_TEST_TMPDIR/body")" = "$sha" ]
@@ -642,7 +642,8 @@ JSON
   command -v node >/dev/null || skip "node not installed"
   f="$(PAGE_HTML)"
   ! grep -qF 'answer("choose", c.id)' "$f"                         # the card itself never sends
-  ! grep -qE 'Vybrat tento|Potvrdit výběr' "$f"                    # no button on the card, no confirm bar
+  ! grep -q 'Potvrdit výběr' "$f"                                  # no confirm bar
+  [ "$(grep -c 'Vybrat tento' "$f")" -eq 1 ] && grep -qF 'class: "choose go lb-pick" }, "Vybrat tento"' "$f"   # the pick button lives only in the lightbox
   grep -qF 'role: "radio"' "$f"
   grep -qF 'on: { click: () => answer("choose", SELECTED[q.id]) } }, "Další →")' "$f"
   # the row keeps every way out: safer, again, bolder, the PM's own words (as an answer or as a steer for new proposals)
@@ -747,4 +748,18 @@ JSON
     jq "$bad" "$B" > "$D/skills/ui-design/sections.json"
     run chk; [ "$status" -ne 0 ] || { echo "accepted: $bad"; return 1; }; [[ "$output" == *"sections.json"* ]]
   done
+}
+
+@test "P108 lightbox: arrows, a pick button and a contexts toggle; /preview&n=2 serves the card's second picture, 404 without one" {
+  f="$(PAGE_HTML)"
+  for w in 'class: "chip lb-prev"' 'class: "chip lb-next"' 'class: "choose go lb-pick"' 'class: "chip lb-ctx"' '"data-preview2": str(c.preview2) ? "1" : "0"' 'e.key === "ArrowLeft"' 'e.key === "ArrowRight"' 'if (!e.target.closest(".lb-bar")) closeLightbox()'; do
+    grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
+  done
+  grep -qF '"preview2"' "$f"; grep -qF '"method", "slot", "value"' "$f"      # hidden from the card back, like the other data fields
+  jq '.cards[0].preview2 = "a2.png"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  printf 'PNG1' > "$P/.aid-ui/studio/a.png"; printf 'PNG2' > "$P/.aid-ui/studio/a2.png"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/preview?question=q1&card=a")" = 200 ]; [ "$(cat "$BATS_TEST_TMPDIR/body")" = PNG1 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/preview?question=q1&card=a&n=2")" = 200 ]; [ "$(cat "$BATS_TEST_TMPDIR/body")" = PNG2 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/preview?question=q1&card=b&n=2")" = 404 ]   # no preview2 on b
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/preview?question=q1&card=b")" = 404 ]       # ../../secret never served
 }
