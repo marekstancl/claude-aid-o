@@ -756,6 +756,8 @@ JSON
     grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
   done
   grep -qF '"preview2"' "$f"; grep -qF '"method", "slot", "value"' "$f"      # hidden from the card back, like the other data fields
+  grep -qF 'img.classList.toggle("fit", img.naturalWidth > 1.7 * img.naturalHeight)' "$f"   # a wide logo is shown whole, not cropped
+  grep -qF '.media img.fit, .past-card img.fit { object-fit: contain' "$f"
   jq '.cards[0].preview2 = "a2.png"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
   printf 'PNG1' > "$P/.aid-ui/studio/a.png"; printf 'PNG2' > "$P/.aid-ui/studio/a2.png"
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/preview?question=q1&card=a")" = 200 ]; [ "$(cat "$BATS_TEST_TMPDIR/body")" = PNG1 ]

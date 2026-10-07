@@ -268,6 +268,8 @@
   .media { position: relative; width: 100%; aspect-ratio: 16/10; min-height: 0; flex: none; overflow: hidden; background: var(--ks-gray); }
   .media img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; position: relative; z-index: 1; cursor: zoom-in; }
   .media img[hidden] { display: none; }
+  /* a wide picture (a logo lockup, a banner) is shown whole on white; a page screenshot keeps cover-from-top */
+  .media img.fit, .past-card img.fit { object-fit: contain; object-position: center; background: #fff; }
   .media .shimmer { position: absolute; inset: 0; }
   .media:not(.comp-pending) .shimmer { display: none; }
   .shimmer { width: 100%; height: 100%; background: linear-gradient(100deg, var(--ks-gray) 35%, var(--ks-gray-2) 50%, var(--ks-gray) 65%); background-size: 220% 100%; animation: shimmer 1.4s linear infinite; }
@@ -708,7 +710,8 @@ function media(q, c, withDetails, flip) {
     el("div", { class: "shimmer" }, el("span", { class: "comp-note" }, "Náhled se připravuje…")), img,
     el("div", { class: "chips" }, expand,
       withDetails ? el("button", { type: "button", class: "chip", on: { click: flip } }, icon("flip"), el("span", {}, "Detaily")) : null));
-  img.addEventListener("load", () => { img.hidden = false; expand.disabled = false; box.classList.remove("comp-pending"); });
+  img.addEventListener("load", () => { img.hidden = false; expand.disabled = false; box.classList.remove("comp-pending");
+    img.classList.toggle("fit", img.naturalWidth > 1.7 * img.naturalHeight); });
   img.addEventListener("error", () => { if (!stopped) setTimeout(() => { img.src = src + "&t=" + Date.now(); }, 3000); });
   if (!withDetails) img.addEventListener("click", () => openLightbox(img));   // on a deck card the click picks it
   img.src = src;
@@ -1017,7 +1020,8 @@ function pastCards(e) {
   return el("div", { class: "past" }, el("p", { class: "tier" }, e.title || KIND[e.kind] || "Výběr"),
     el("div", { class: "past-cards" }, e.cards.map(c => {
       const img = str(c.preview) ? el("img", { alt: "Náhled: " + (c.title || c.id), loading: "lazy",
-        src: "/history/preview?question=" + encodeURIComponent(e.qid) + "&card=" + encodeURIComponent(c.id) }) : null;
+        src: "/history/preview?question=" + encodeURIComponent(e.qid) + "&card=" + encodeURIComponent(c.id),
+        on: { load: ev => ev.target.classList.toggle("fit", ev.target.naturalWidth > 1.7 * ev.target.naturalHeight) } }) : null;
       if (img) img.addEventListener("click", () => openLightbox(img));
       return el("div", { class: "past-card" + (c.id === e.choice ? " selected" : "") }, img, el("p", {}, c.title || c.id));
     })));
