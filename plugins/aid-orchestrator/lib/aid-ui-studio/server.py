@@ -96,7 +96,7 @@ KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "approve_page", "exception", "coverage_drift", "design_standard", "handover", "notifications",
          "sources", "product_context", "copy_verdict", "no_method"}
 # Card fields the page shows (a step may turn any into state); snapshotted with the answer.
-CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "preview2", "palette", "risk", "uniqueness", "value", "method", "slot")
+CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "preview2", "preview2_label", "palette", "risk", "uniqueness", "value", "method", "slot")
 RECEIPT_AGE = 12 * 3600   # a method receipt serves questions opened within this many seconds after it
 STANDARDS = "/opt/eco/docs/docs/ecosystem/"   # the only place a method file may live outside the plugin (read live)
 WAIVERS = ("pm", "without")   # no_method card values that let the kind be asked without a method

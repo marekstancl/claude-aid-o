@@ -343,9 +343,9 @@
   #lightbox { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: oklch(97.8% 0 0 / 0.96); cursor: zoom-out; opacity: 0; transition: opacity .25s ease; }
   #lightbox[hidden] { display: none; }
   #lightbox.open { opacity: 1; }
-  #lightbox { flex-direction: column; gap: .8rem; }
-  #lightbox img { max-width: 94vw; max-height: 82vh; border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); background: #fff; }
-  .lb-bar { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; justify-content: center; cursor: default; font: 500 .8125rem var(--ks-font); color: var(--ks-ink); }
+  #lightbox img { max-width: 94vw; max-height: calc(100vh - 7.5rem); margin-bottom: 4.5rem; border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); background: #fff; }
+  /* the bar sits at the bottom of the screen whatever the picture's size, so the controls never move */
+  .lb-bar { position: fixed; left: 0; right: 0; bottom: 1.2rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; justify-content: center; cursor: default; font: 500 .8125rem var(--ks-font); color: var(--ks-ink); }
   .lb-bar .lb-title { min-width: 12rem; text-align: center; }
   .lb-bar .lb-count { color: var(--ks-muted, #666); }
   .lb-bar button.choose { margin: 0; }
@@ -593,7 +593,7 @@ const KIND = { variant: "Co stavíme a co k tomu", options: "Co připravit", vis
   copy_verdict: "Texty webu", no_method: "Chybí postup" };
 const SELECTOR = { check: "kontrola", page: "stránka", viewport: "velikost obrazovky", browser: "prohlížeč", role: "role", state: "stav" };
 // Card fields rendered by name; any other string field shows on the card's back as "key: value".
-const KNOWN = new Set(["id", "question", "title", "preview", "preview2", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source", "method", "slot", "value"]);
+const KNOWN = new Set(["id", "question", "title", "preview", "preview2", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source", "method", "slot", "value", "preview2_label"]);
 function sourceOf(c) {   // what a card's proposal rests on, in the map's words
   const m = S && S.sections && S.sections.sources;
   return c.source && m && m[c.source] ? m[c.source] : null;
@@ -669,7 +669,7 @@ function lbShow(i, ctx) {
   const picked = art.classList.contains("picked"), tick = art.querySelector(".tick");
   lbPick.hidden = !tick; lbPick.disabled = picked; lbPick.textContent = picked ? "Vybráno ✓" : "Vybrat tento";
   lbCtx.hidden = art.getAttribute("data-preview2") !== "1"; lbCtx.setAttribute("aria-pressed", String(LB.ctx));
-  lbCtx.textContent = LB.ctx ? "Zpět na návrh" : "Kontexty";
+  lbCtx.textContent = LB.ctx ? "Zpět" : (art.getAttribute("data-preview2-label") || "Druhý pohled");
 }
 function openLightbox(img) {
   if (img.hidden || !img.getAttribute("src")) return;
@@ -749,7 +749,7 @@ function card(q, c, i, select) {
   const picked = SELECTED[q.id] === c.id;
   // the whole card picks; its own buttons (Detaily, zoom) and links keep doing their thing
   const art = el("article", { class: "card" + (picked ? " picked" : ""), style: "--fan:" + FAN[i % 3], "data-card": c.id,
-    "data-preview2": str(c.preview2) ? "1" : "0",
+    "data-preview2": str(c.preview2) ? "1" : "0", "data-preview2-label": str(c.preview2_label) || "",
     on: { click: e => { if (!e.target.closest("button, a")) select(c.id); } } });
   // the tick is the control a keyboard and a screen reader use; the rest of the card is the same click for a mouse
   const tick = el("button", { type: "button", class: "tick", role: "radio", "aria-checked": String(picked), "aria-label": "Vybrat: " + title,

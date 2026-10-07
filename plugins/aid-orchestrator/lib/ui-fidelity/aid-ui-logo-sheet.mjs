@@ -128,7 +128,7 @@ function card(d) {
   <div class="ctx phone"><div class="grid"><div class="app"><i></i>app</div><div class="app"><i class="me"><img src="${M}"></i>${esc(spec.name)}</div><div class="app"><i></i>app</div><div class="app"><i></i>app</div></div><span class="l" style="color:#bbb">ikona na telefonu</span></div>
   <div class="ctx avatar" style="grid-column:1/3"><i><img src="${M}"></i><span class="l">avatar (Google profil, najdizubara)</span></div>` : '';
     return `<!doctype html><html><head>${head}</head><body><div class="card">
-  <div class="ctx hero" style="height:auto"><div class="bar"><img src="${L}" style="height:64px"><nav><span>Služby</span><span>Cenník</span><span>Kontakt</span><b>Objednať sa</b></nav></div>
+  <div class="ctx hero" style="height:auto"><div class="bar"><img src="${L}" style="height:110px"><nav><span>Služby</span><span>Cenník</span><span>Kontakt</span><b>Objednať sa</b></nav></div>
     <div class="heroin" style="padding:24px 28px"><h1>${esc(spec.hero || spec.name)}</h1></div><span class="l">hlavička a hero webu</span></div>${icons}
   <div class="ctx" style="grid-column:1/3;display:flex;gap:24px;align-items:center;background:#fff"><img src="${L}" style="width:560px;height:560px;object-fit:contain"><div style="font-size:13px;color:#555;max-width:520px"><b style="display:inline-block;background:#fde68a;color:#222;padding:2px 8px;border-radius:6px;font-size:11px;letter-spacing:.06em">KONCEPT OD OBRAZOVÉHO MODELU</b><p>Tak, jak ho model nakreslil. Po volbě se přestaví do skutečného souboru: symbol jako vektor, název skutečným písmem, barvy z obrázku; teprve pak ikona v prohlížeči, na telefonu a avatar.</p></div></div>
   <div class="ctx bc" style="grid-column:1/3"><div><img src="${L}" style="height:48px"><p>${esc(spec.name)}<br>${esc(spec.address || '')}</p></div><span class="l">vizitka, černobíle</span></div>
@@ -159,9 +159,9 @@ function overview() {
 const out = path.resolve(root, spec.out_dir);
 fs.mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined });
-const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
-async function shoot(html, file, width) {
-  await page.setViewportSize({ width, height: 900 });
+let page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
+async function shoot(html, file, width, scale = 1) {
+  await page.close().catch(() => {}); page = await browser.newPage({ viewport: { width, height: 900 }, deviceScaleFactor: scale });
   await page.setContent(html, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => [...document.images].every((i) => i.complete) && document.fonts.status === 'loaded');
   await page.screenshot({ path: file, fullPage: true });
@@ -169,11 +169,11 @@ async function shoot(html, file, width) {
 }
 for (const d of spec.directions) {
   if (!/^[A-Za-z0-9-]+$/.test(String(d.id)) || !d.lockup || (!d.symbol && !d.concept) || !d.title) { console.error(`ERROR: direction needs id [A-Za-z0-9-], title, lockup and symbol (or concept: true): ${JSON.stringify(d.id)}`); process.exit(2); }
-  if (d.concept) {   // the card thumbnail is the concept itself (crisp); the contexts are its second picture
+  if (d.concept) {   // the thumbnail is the contexts card, rendered at 2x so the header logo stays crisp; the plain logo is the second picture
     conceptOk(d);
-    fs.copyFileSync(path.resolve(root, d.lockup), path.join(out, `logo-${d.id}.png`));
-    console.log(path.relative(root, path.join(out, `logo-${d.id}.png`)));
-    await shoot(card(d), path.join(out, `logo-${d.id}-kontext.png`), 1200);
+    await shoot(card(d), path.join(out, `logo-${d.id}.png`), 1200, 2);
+    fs.copyFileSync(path.resolve(root, d.lockup), path.join(out, `logo-${d.id}-logo.png`));
+    console.log(path.relative(root, path.join(out, `logo-${d.id}-logo.png`)));
   } else {
     await shoot(card(d), path.join(out, `logo-${d.id}.png`), 1200);
   }
