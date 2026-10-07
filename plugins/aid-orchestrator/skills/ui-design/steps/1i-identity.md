@@ -133,17 +133,26 @@ Pravidla, která route.json nese:
      souřadnice SVG byly „výsměch"; 8. 10.: černé symboly bez názvu byly ikonky aplikace -
      pravidlo skillu „nejdřív černě, jen symbol" je pro ruku designéra, modelu se jako omezení
      nedává): do `.aid-ui/logo/gen.json` napiš `mode: "full"`, `name` (jméno značky), `tagline`
-     (obor · město, když ho brief chce), `palette` (barevný směr slovy z briefu nebo dnešního
-     loga) a pro každý slot koncept jednou větou (anglicky, vlastními slovy: jméno, obor, město,
-     barvy a myšlenka směru - nikdy fakta, ceny, lidi ani text z podkladů; jen tohle a pevná
-     omezení skriptu odcházejí k OpenAI), `n` 5; model vrátí hotovou kompozici (symbol + název +
-     podtitul, bílé pozadí, max dvě barvy). `mode: "mark"` (černý symbol, průhledné pozadí) jen
-     pro favicon-first situaci app; `python3 scripts/aid-ui-logo-gen.py <project> --spec .aid-ui/logo/gen.json --dry-run`
+     (obor · město, když ho brief chce), `two_step: true` (nejdřív samotný symbol = hotová ikona,
+     pak nápis složený kolem přesně toho symbolu - PM 8. 10. 2026: nejlepší z tří zkoušených
+     promptů), `typography` (písmo jménem „v duchu …", s licencí k sazbě v bodě 5), `colors`
+     (přesné HEX: značka, název, jeden akcent, bílé pozadí), `references` (≤ 16: 6-10 skutečných
+     log stejného oboru z přehledů + ukázka, kterou PM poslal jako „takhle ano", viz níže) a pro
+     každý slot **zadání art directora** jednou až dvěma větami (anglicky, vlastními slovy: stavba
+     značky - co čte první a co druhé, z čeho je sestavená, co musí přežít v 16 px; jméno, obor,
+     město - nikdy fakta, ceny, lidi ani text z podkladů; jen tohle a šablony skriptu odcházejí
+     k OpenAI), `n` 3-5, `quality` high, `size` 1536×1024 pro lockup. Jednoslovné popisy
+     („moderní, čisté") dávají klipart - zadání musí mluvit jako brief od studia: mřížka, jeden
+     tah, pravé kruhy, optické korekce, clear space, laťka „co by předložil senior designér".
+     `mode: "mark"` (černý symbol, průhledné pozadí) jen pro favicon-first situaci app; `python3 scripts/aid-ui-logo-gen.py <project> --spec .aid-ui/logo/gen.json --dry-run`
      (prompty do `gen/plan.json`, zkontroluj je), pak naostro s klíčem jen pro ten příkaz:
      `export OPENAI_API_KEY="$(grep -m1 '^OPENAI_API_KEY=' /opt/eco/services/.env | cut -d= -f2- | tr -d "\"'")"`
      v téže shellové větě (klíč se nikam nezapisuje, skript ho z chyb maže); `--max-cost` 3 USD
      (medium ≈ 0,04 USD za obrázek; 5 × 6 ≈ 1,3 USD), bez retry, stav v `gen/gen.json`. Běh jiný
      než `succeeded` = doplň jen chybějící sloty (`--force` jen pro přepsání, jinak nic nepřepíše).
+   - reference: když PM pošle vlastní ukázku („takhle ano"), ulož ji do `.aid-ui/refs/inspirace/`
+     (manifest: od PM, datum) a dej ji jako první referenci; ostatní najdi v přehledech oboru
+     (ne u konkurence) a ukaž PM v companionu, generuje se bez čekání (2B), PM je může vyměnit.
    - fáze 4b - **kurátorství** (tvoje práce, podle `testing-checklist.md` a varovných signálů
      skillu jako síta, ne jako omezení kreslení): kontaktní arch `aid-ui-tool.sh logo-sheet
      --contact .aid-ui/logo/gen --out …`, každou variantu si zobraz a zapiš do `gen/vyber.json`

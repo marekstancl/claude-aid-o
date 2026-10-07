@@ -16,7 +16,12 @@ gen.json:
                                                 black symbol on a transparent background
    "name": "Coufal Clinic", "tagline": "zubná ambulancia · Trenčín",   full mode: what the logo says
    "palette": "deep navy and light blue",       full mode, optional: the colour direction in words
-   "slots": {"WC": "one-sentence concept of the direction", ...}}   every key a slot of
+   "typography": "a contemporary geometric grotesque with humanist warmth (in the spirit of Gilroy or Montserrat)",
+   "colors": "deep navy #1D3A8A for the mark and name, soft teal #2BB5A8 as the single accent",   optional, exact
+   "two_step": true,                            full mode: first the mark alone (= the icon, <slot>-<n>-mark.png),
+                                                then the lockup composed around exactly that mark (edits with the mark)
+   "size": "1536x1024",                         lockups (default); marks are always 1024x1024
+   "slots": {"WC": "the direction as an art-director brief: the mark's construction, what reads first and second, what it must survive", ...}   every key a slot of
                                                 .aid-ui/logo/route.json (id [A-Z]{1,3})
 The prompt = the mode's fixed constraints + the slot's mark type + the concept sentence (+ name,
 tagline and palette in full mode). Only that text leaves the machine: write the concept from the
@@ -42,6 +47,16 @@ CONSTRAINTS = ("Flat vector-style logo mark: a single solid pure black (#000000)
                "no shadows, no 3D, no texture, no outline strokes, no frame, no background shape. Centred, square "
                "composition, generous margin, simple geometry that still reads at 16 px, professional brand identity "
                "design, one idea only.")
+MARK_TEMPLATE = ("Brand mark only, isolated on pure white, large and centred, for %s. Direction: %s Constructed on a strict "
+                 "geometric grid - one consistent stroke weight, true circles and exact angles, optical corrections, no stray "
+                 "details; it must survive at 16 px. %s No text, no background shape, no gradients, no shadows, no mockup. "
+                 "The quality of a mark a senior identity designer at a top studio would present - restrained, confident, "
+                 "timeless, not clip art.")
+LOCKUP_TEMPLATE = ("Using the attached brand mark exactly as it is (do not redraw or change it), compose the final horizontal "
+                   "logo lockup for %s: the mark on the left, the wordmark \"%s\" set in %s, cap height aligned to the mark, "
+                   "tight but even letter spacing%s. %s Pure white background, generous clear space equal to the cap height, "
+                   "nothing else in the frame - no mockups, no gradients, no shadows, no extra icon versions; every word "
+                   "spelled exactly as given.")
 CONSTRAINTS_FULL = ("Logo design presentation by a top brand identity studio, award-winning contemporary quality, for the "
                     "company \"%s\": one original, memorable brand mark paired with a refined, custom-feeling wordmark "
                     "\"%s\"%s. Flat vector look, impeccable typography and letter spacing, generous negative space, "
@@ -71,10 +86,10 @@ def utc():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def generate(key, model, prompt, quality, mode="full", refs=()):
+def generate(key, model, prompt, quality, mode="full", refs=(), size="1024x1024"):
     """One PNG from the API; raises urllib errors, TimeoutError or ValueError (bad response).
     With reference images the call goes to /v1/images/edits as multipart (image[] = the references)."""
-    body = {"model": model, "prompt": prompt, "n": 1, "size": "1024x1024", "quality": quality, "output_format": "png"}
+    body = {"model": model, "prompt": prompt, "n": 1, "size": size, "quality": quality, "output_format": "png"}
     if mode == "mark":
         body["background"] = "transparent"
     if refs:
@@ -104,8 +119,9 @@ def generate(key, model, prompt, quality, mode="full", refs=()):
         raise ValueError("response over %d bytes" % MAX_BODY)
     d = json.loads(body.decode("utf-8"))
     png = base64.b64decode(d["data"][0]["b64_json"])
-    if png[:8] != b"\x89PNG\r\n\x1a\n" or struct.unpack(">II", png[16:24]) != (1024, 1024):
-        raise ValueError("not a 1024x1024 PNG")
+    w, h = struct.unpack(">II", png[16:24]) if png[:8] == b"\x89PNG\r\n\x1a\n" else (0, 0)
+    if "%dx%d" % (w, h) != size:
+        raise ValueError("not a %s PNG" % size)
     return png
 
 
@@ -190,7 +206,8 @@ def main():
     capped = False
     for slot, concept in spec["slots"].items():
         prompt = prompt_for(slots[slot], concept, spec)
-        rec = {"concept": concept, "prompt": prompt, "requested": n, "received": 0, "files": [], "errors": [], "status": "running"}
+        two = isinstance(prompt, dict)
+        rec = {"concept": concept, "prompt": prompt, "requested": n, "received": 0, "files": [], "marks": [], "errors": [], "status": "running"}
         for i in range(1, n + 1):
             if log["estimated_usd"] + unit > max_cost + 1e-9:
                 rec["errors"].append("cost cap %.2f USD reached before variant %d" % (max_cost, i))
@@ -199,7 +216,18 @@ def main():
             log["requested"] += 1
             log["estimated_usd"] = round(log["estimated_usd"] + unit, 3)   # counted when sent, billed or not
             try:
-                png = generate(key, model, prompt, quality, mode, refs)
+                if two:   # the mark first (square, with the references), then the lockup around exactly that mark
+                    mark_png = generate(key, model, prompt["mark"], quality, "full", refs, "1024x1024")
+                    mpath = os.path.join(out, "%s-%d-mark.png" % (slot, i))
+                    with open(mpath + ".part", "wb") as f:
+                        f.write(mark_png)
+                    os.replace(mpath + ".part", mpath)
+                    rec["marks"].append(os.path.relpath(mpath, project))
+                    log["requested"] += 1
+                    log["estimated_usd"] = round(log["estimated_usd"] + unit, 3)
+                    png = generate(key, model, prompt["lockup"], quality, "full", [mpath], spec.get("size", "1536x1024"))
+                else:
+                    png = generate(key, model, prompt, quality, mode, refs, spec.get("size", "1024x1024"))
             except TimeoutError:
                 rec["errors"].append("variant %d: timeout - unknown (may have been billed); not retried" % i)
                 continue
@@ -249,6 +277,8 @@ def main():
 def constraints_for(spec):
     if spec.get("mode", "full") == "mark":
         return CONSTRAINTS
+    if spec.get("two_step"):
+        return "two_step: mark = MARK_TEMPLATE, lockup = LOCKUP_TEMPLATE (see prompts per slot)"
     tag = spec.get("tagline")
     pal = spec.get("palette")
     name = spec.get("name", "").strip()
@@ -260,7 +290,28 @@ def constraints_for(spec):
 def prompt_for(slot, concept, spec=None):
     spec = dict(spec or {})
     spec.setdefault("mode", "full" if spec.get("name") else "mark")
+    if spec.get("two_step") and spec["mode"] == "full":
+        return {"mark": mark_prompt(spec, concept), "lockup": lockup_prompt(spec)}
     return "%s Mark type: %s. Concept: %s" % (constraints_for(spec), slot["kind"], concept.strip())
+
+
+def _who(spec):
+    tag = spec.get("tagline")
+    return "\"%s\"%s" % (spec.get("name", "").strip(), (" (%s)" % tag.strip()) if isinstance(tag, str) and tag.strip() else "")
+
+
+def mark_prompt(spec, concept):
+    col = spec.get("colors") or spec.get("palette") or ""
+    return MARK_TEMPLATE % (_who(spec), concept.strip(), ("Colours: %s." % col.strip()) if col else "")
+
+
+def lockup_prompt(spec):
+    name = spec.get("name", "").strip()
+    typ = (spec.get("typography") or "a clean contemporary geometric sans").strip()
+    tag = spec.get("tagline")
+    tagp = (', and the tagline "%s" in small tracked letters under the name' % tag.strip()) if isinstance(tag, str) and tag.strip() else ""
+    col = spec.get("colors") or spec.get("palette") or ""
+    return LOCKUP_TEMPLATE % (_who(spec), name, typ, tagp, ("Colours: %s." % col.strip()) if col else "")
 
 
 if __name__ == "__main__":

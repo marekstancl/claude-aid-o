@@ -33,6 +33,12 @@ setup() {
   [ "$(jq -r .mode "$P/.aid-ui/logo/gen/plan.json")" = full ]
   printf '{"n": 1, "slots": {"WC": "x"}}' > "$P/.aid-ui/logo/gen.json"
   run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 2 ]; [[ "$output" == *"needs name"* ]]
+  # two steps (the mark first, then the lockup around exactly that mark): two prompts per slot, typography and colours in the lockup prompt
+  printf '{"n": 1, "two_step": true, "name": "Firma", "tagline": "pekárna · Brno", "typography": "a warm serif", "colors": "ochre #C08A2E, ink #222", "slots": {"WC": "a loaf as a letter F"}}' > "$P/.aid-ui/logo/gen.json"
+  run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  m="$(jq -r '.slots.WC.prompt.mark' "$P/.aid-ui/logo/gen/plan.json")"; l="$(jq -r '.slots.WC.prompt.lockup' "$P/.aid-ui/logo/gen/plan.json")"
+  [[ "$m" == "Brand mark only"* && "$m" == *"a loaf as a letter F"* && "$m" == *"16 px"* && "$m" == *"ochre #C08A2E"* && "$m" == *"No text"* ]]
+  [[ "$l" == "Using the attached brand mark exactly as it is"* && "$l" == *'wordmark "Firma"'* && "$l" == *"a warm serif"* && "$l" == *'tagline "pekárna · Brno"'* ]]
 }
 
 @test "gen: no key -> exit 1 naming the variable; a slot outside the route, n over 10, n x slots over 60, a bad model -> exit 2" {
