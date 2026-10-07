@@ -642,8 +642,8 @@ context_ok() {
        '[.answers[]? | select(.kind == "product_context" and .decision == "approve" and .target == $t)] | length > 0' "$STATE" >/dev/null; then
   # the online research (customer-research Mode 2) was put to the PM as its own sources question,
   # answered yes or no - the skill never researches the public web about a firm unasked
-  jq -e --arg t "online@$(basename "$PROJECT")" '[.answers[]? | select(.kind == "sources" and .target == $t and (.decision == "approve" or .decision == "return"))] | length > 0' "$STATE" >/dev/null ||
-    { echo "context-check: the PM was not asked about the online research: put a studio question of kind sources with target online@$(basename "$PROJECT") (card: what would be searched and what taken), wait for approve or return, record-answer it; step 1p point 4. A project approved before 7. 10. 2026 asks it now, once." >&2; return 1; }
+  jq -e --arg t "online@$(basename "$(realpath "$PROJECT")")" '[.answers[]? | select(.kind == "sources" and .target == $t and (.decision == "approve" or .decision == "return"))] | length > 0' "$STATE" >/dev/null ||
+    { echo "context-check: the PM was not asked about the online research: put a studio question of kind sources with target online@$(basename "$(realpath "$PROJECT")") (card: what would be searched and what taken), wait for approve or return, record-answer it; step 1p point 4. A project approved before 7. 10. 2026 asks it now, once." >&2; return 1; }
     echo "product context approved: $csha"
   elif jq -e '[.answers[]? | select(.kind == "product_context" and .decision == "approve")] | length > 0' "$STATE" >/dev/null; then
     echo "context-check: docs/content/product-context.md changed since the PM approved it; ask again (product_context)" >&2; return 1

@@ -6,7 +6,8 @@ usage: server.py --project <dir> --host <h> --port <p> --token-file <path>
 
 Payload: <project>/.aid-ui/studio/payload.json, written by the agent and re-read
 on every request, so the agent opens a round by rewriting it:
-  {"now":       {"title", "text"}   (what the agent is doing right now; optional),
+  {"now":       {"title", "text", "at"}   (what the agent is doing right now; optional; the page shows
+                it only while `at` is newer than the PM's last answer),
    "steps":     [{"id", "title", "status": "done|current|todo", "description"}],
    "questions": [{"id", "kind", "part" (id from skills/ui-design/sections.json; required for facts and for
                   a kind several parts share, else derived), "target", "opened_at": ISO-8601, "title", "prompt", "body",

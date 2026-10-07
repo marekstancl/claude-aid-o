@@ -1101,12 +1101,22 @@ function qRail(saved, open, cur, onlyOpen) {
   return rail;
 }
 // The agent works and the PM waits: what is being done now (the agent's now.title/text) and what comes next.
+// The agent's own note (now.title/text, with now.at) is shown only while it is newer than the PM's last answer;
+// after an answer the page says what it is processing and what comes next (the question's own `next`),
+// and where the finished things are.
 function workingEl(detail) {
   const now = S.now && typeof S.now === "object" ? S.now : {};
+  const answered = (S.questions || []).filter(q => q && q.answered && q.answer && q.answer.at && !/^reroll/.test(String(q.answer.decision || "")))
+    .sort((a, b) => Date.parse(b.answer.at) - Date.parse(a.answer.at));
+  const lastQ = answered[0], lastAt = lastQ ? Date.parse(lastQ.answer.at) : 0;
+  const nowAt = Date.parse(now.at || "") || 0;
+  const stale = lastAt > nowAt;
+  const title = !stale && str(now.title) ? now.title : lastQ ? "Zpracovávám vaši odpověď: " + (lastQ.title || KIND[lastQ.kind] || lastQ.id) : "Pracuji na téhle části.";
+  const text = !stale && str(now.text) ? now.text : lastQ && str(lastQ.next) ? "Co bude dál: " + lastQ.next : "Další otázka se tu objeví sama, stránku nemusíte obnovovat.";
   return el("div", { class: "working", role: "status", "aria-live": "polite" },
     el("div", { class: "working-gear", "aria-hidden": "true" }),
-    el("div", {}, el("b", {}, str(now.title) || "Pracuji na téhle části."),
-      el("p", {}, str(now.text) || "Další otázka se tu objeví sama, stránku nemusíte obnovovat."),
+    el("div", {}, el("b", {}, title), el("p", {}, text),
+      el("p", {}, "Hotové výstupy (dokumenty, vize, logo) najdete na stránce ", el("a", { href: "/brand/" }, "Značka a produkt"), "; odpovědi, které jste dal, jsou níže v Hotové v této části."),
       el("div", { class: "bar-track", "aria-hidden": "true" }, el("div", { class: "bar-fill" })), detail ? el("div", { class: "actions", style: "margin-top:10px" }, detail) : null));
 }
 function partPanel(st, vid, d, detail) {   // detail: the step's Detail button when the step has no pills row
