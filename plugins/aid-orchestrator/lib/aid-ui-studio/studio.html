@@ -115,7 +115,7 @@
   .step.solo .part-box { border-left: 0; padding: 0; gap: 6px; }
   .step.solo .question { gap: 1.1rem; }
   .step.solo .lede { margin-top: -.3rem; }
-  .question .head { flex-direction: row; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 14px; }
+  .question .q-head { flex-direction: row; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 14px; }
   .q-meta { order: 2; display: flex; align-items: baseline; gap: 12px; }
   .q-count { font-size: 13px; color: var(--ks-text-muted); }
   .step.solo::before { display: none; }
@@ -817,7 +817,7 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
   const deckKind = cards.length && q.kind !== "approve_page" && !gallery;
 
   if (deckKind || (!cards.length && q.rerolled_from)) {
-    sec.append(el("div", { class: "head" }, tier(),
+    sec.append(el("div", { class: "head q-head" }, tier(),
       el("div", { class: "headline" }, icon("die"), el("h2", { class: "q-title", id: "h-" + q.id }, title))));
     if (str(q.prompt)) sec.append(el("p", { class: "lede" }, q.prompt));
     const lines = bodyLines(q.body); if (lines) sec.append(el("div", { class: "head" }, lines));
