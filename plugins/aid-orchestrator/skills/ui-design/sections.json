@@ -1,5 +1,5 @@
 {
- "about": "Mapa /aid-ui pro PM i agenta: šest kroků studia a jejich části v pořadí, v jakém se dělají. Jediný zdroj číslování a smyslu (proč, cíl, k čemu dál, co od vás). Studio ji ukazuje (server.py /state), payload se podle ní ověřuje. Vnitřní soubory kroků (files, section) PM nevidí.",
+ "about": "Mapa /aid-ui pro PM i agenta: šest kroků studia a jejich části v pořadí, v jakém se dělají. Jediný zdroj číslování a smyslu (proč, cíl, k čemu dál, co od vás; `text` = totéž jako jeden odstavec, který studio ukazuje pod otázkou). Studio ji ukazuje (server.py /state), payload se podle ní ověřuje. Vnitřní soubory kroků (files, section) PM nevidí.",
  "sources": {
   "product-marketing:jobs": "Za co si vás zákazníci najímají (převzatý postup product-marketing)",
   "product-marketing:objections": "Nejčastější námitky zákazníků (převzatý postup product-marketing)",
@@ -41,7 +41,8 @@
         "state": "options"
        }
       ]
-     }
+     },
+     "text": "Obyčejný web, web s přihlášením a aplikace do mobilu se dělají každý jinak, a ne každý web potřebuje nový slogan, nové logo nebo práci s Googlem. Dvakrát vyberete jednu ze tří možností; podle toho vynechám kroky, které nepotřebujete."
     }
    ]
   },
@@ -70,7 +71,8 @@
      ],
      "done": {
       "chapter": "podklady"
-     }
+     },
+     "text": "Nechci si nic vymýšlet, vycházím z toho, co o firmě už existuje: dokumenty, starý web, vaše texty. Řeknete, kde máte podklady, a přečtete si, co jsem z nich sepsal. Vznikne jeden dokument o firmě (co dělá, pro koho, s čím lidé přicházejí, čím se liší a čím to dokládá), ze kterého vycházejí všechny texty webu."
     },
     {
      "id": "vize",
@@ -89,7 +91,8 @@
      ],
      "done": {
       "chapter": "vize"
-     }
+     },
+     "text": "Web má mít jednu hlavní myšlenku, kterou si člověk zapamatuje. Vyberete slogan ze tří návrhů. Vznikne z toho krátká vize a vybraný slogan: hlavní nadpis webu a tón všech textů."
     },
     {
      "id": "logo",
@@ -108,7 +111,8 @@
      ],
      "done": {
       "chapter": "logo"
-     }
+     },
+     "text": "Logo musí vypadat dobře všude: na webu, v ikonce v prohlížeči i na papíře. Vyberete nebo potvrdíte logo. Vznikne hotové logo, ikonka a soubory pro web i tisk, které se použijí ve vzhledu webu."
     },
     {
      "id": "hledani",
@@ -127,7 +131,8 @@
      ],
      "done": {
       "chapter": "seo"
-     }
+     },
+     "text": "Aby vás našli i lidé, kteří vaše jméno neznají a hledají třeba „zubař Trenčín“. Potvrdíte seznam stránek. Vznikne seznam stránek webu a to, jak se každá ukáže ve výsledcích Googlu; podle toho se stránky postaví a pojmenují."
     },
     {
      "id": "stranky",
@@ -146,7 +151,8 @@
      ],
      "done": {
       "state": "structure"
-     }
+     },
+     "text": "Než se cokoli napíše, rozvrhneme, jaké stránky web bude mít a co na které najdete. Řeknete, co chybí, co je navíc nebo co dát jinam. Vznikne seznam stránek a u každé, o čem budou její části; podle toho se navrhuje vzhled a píšou texty."
     },
     {
      "id": "obsah",
@@ -165,7 +171,8 @@
      ],
      "done": {
       "state": "content_plan"
-     }
+     },
+     "text": "Ke každé části webu potřebujeme vědět, co v ní bude a odkud to máme. Doplníte chybějící údaje, fotky nebo příběhy, nebo řeknete, že se dodají později. U každé části pak bude jasný obsah: buď ho máme, nebo víme, kdo ho dodá. Co tady není, na web nenapíšu."
     }
    ]
   },
@@ -191,7 +198,8 @@
      ],
      "done": {
       "state": "refs"
-     }
+     },
+     "text": "Vzhled se mnohem líp vybírá podle hotových webů než podle popisu. Vyberete jeden až tři weby a řeknete, co se vám na nich líbí; podle toho připravím tři návrhy vzhledu."
     }
    ]
   },
@@ -217,7 +225,8 @@
      ],
      "done": {
       "chapter": "smer"
-     }
+     },
+     "text": "Tři hodně odlišné návrhy ukážou, jakými směry se dá jít. Vyberete jeden návrh a podle něj postavím celý web."
     }
    ]
   },
@@ -241,7 +250,8 @@
      ],
      "done": {
       "state": "build"
-     }
+     },
+     "text": "Postavím všechny stránky podle schválených stránek, obsahu a vzhledu. Vy nic, jen počkáte, až vám pošlu odkaz na web, ve kterém se dá klikat. Pak přijde kontrola textů, techniky a stránek."
     }
    ]
   },
@@ -268,7 +278,8 @@
      ],
      "done": {
       "answer": "copy_verdict"
-     }
+     },
+     "text": "Texty musí být pravdivé, srozumitelné a přivést člověka k tomu, aby se ozval. Přečtete texty a napíšete věty, které chcete jinak. Texty projdou nezávislou kontrolou a vy řeknete, že takhle mluvíte; pak schvalujete jednotlivé stránky."
     },
     {
      "id": "technicka",
@@ -287,7 +298,8 @@
      ],
      "done": {
       "state": "gate"
-     }
+     },
+     "text": "Web musí fungovat na mobilu i počítači, rychle se načíst, být čitelný pro každého a mít povinné údaje (IČO, ochrana osobních údajů). Když něco neprojde, rozhodnete, jestli to necháme být. Všechny kontroly projdou, nebo nějakou výjimku vědomě odsouhlasíte; pak schvalujete jednotlivé stránky."
     },
     {
      "id": "pravidla",
@@ -305,7 +317,8 @@
      ],
      "done": {
       "answer": "design_standard"
-     }
+     },
+     "text": "Aby web vypadal jednotně i po pozdějších úpravách. Schválíte sepsaná pravidla: barvy, písma a jak se co používá. Podle nich se bude web upravovat i v budoucnu."
     },
     {
      "id": "schvaleni",
@@ -323,7 +336,8 @@
      ],
      "done": {
       "chapter": "schvaleni"
-     }
+     },
+     "text": "Každou stránku uvidíte dřív, než půjde ven. Projdete stránky a schválíte je. Až budou všechny schválené, web se předává."
     },
     {
      "id": "predani",
@@ -341,7 +355,8 @@
      ],
      "done": {
       "state": "finished"
-     }
+     },
+     "text": "Aby vy i zákazník měli všechno pohromadě. Zkontrolujete, že na předávací stránce je všechno, co jsme slíbili: web, logo, nastavení pro Google a pravidla vzhledu. Pak může web jít ven."
     }
    ]
   }

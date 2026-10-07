@@ -59,7 +59,7 @@
   .question { display: flex; flex-direction: column; gap: 1.5rem; }
   .headline { display: flex; align-items: center; gap: .75rem; }
   .headline svg { flex: none; width: 26px; height: 26px; color: var(--ks-ink); }
-  .q-title { font-weight: 600; font-size: 2rem; letter-spacing: -0.025em; line-height: 1.2; color: var(--ks-ink); text-wrap: balance; }
+  .q-title { font-weight: 600; font-size: 1.7rem; letter-spacing: -0.025em; line-height: 1.2; color: var(--ks-ink); text-wrap: balance; }
   .lede { color: var(--ks-text-muted); margin-top: -.8rem; max-width: 52rem; }
   .head { display: flex; flex-direction: column; gap: .4rem; }
   .tier { font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .24em; text-transform: uppercase; color: var(--ks-text-muted); }
@@ -81,19 +81,48 @@
   .tick { position: absolute; z-index: 7; top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; padding: 0; border: 1px solid var(--ks-edge); background: var(--ks-paper-raised); color: transparent; font-weight: 800; box-shadow: var(--ks-lift); cursor: pointer; transform: scale(0); transition: transform .25s cubic-bezier(.3, 1.6, .5, 1); }
   .card:hover .tick, .tick:focus-visible, .card.picked .tick { transform: scale(1); }
   .card.picked .tick { background: var(--ks-kinpaku); border-color: var(--ks-kinpaku); color: var(--ks-ink); }
-  .q-count { font-size: 13px; color: var(--ks-text-muted); }
   .info { color: var(--ks-text-muted); font-size: 14px; padding: 12px 14px; border: 1px dashed var(--ks-rule); border-radius: 8px; }
   .back-now { align-self: flex-start; }
   /* The parts of the step as tabs: done, the one being worked on, waiting, left out. */
-  .tabs { display: flex; padding: 0 22px; border-top: 1px solid var(--ks-rule); overflow-x: auto; background: var(--ks-paper); scrollbar-width: thin; }
-  .tab { display: flex; align-items: center; gap: 9px; padding: 13px 16px 10px; border: 0; border-bottom: 3px solid transparent; background: none; cursor: pointer; font: inherit; font-size: 14px; color: var(--ks-text-muted); white-space: nowrap; }
-  .tab:hover { color: var(--ks-ink); }
-  .tab-n { width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--ks-rule); display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--ks-paper-raised); }
-  .tab.done .tab-n { background: var(--ks-patina); border-color: var(--ks-patina); color: var(--ks-paper-raised); }
-  .tab.current { color: var(--ks-ink); font-weight: 700; }
-  .tab.current .tab-n { border: 2px solid var(--ks-kinpaku); }
-  .tab.skipped .tab-t { text-decoration: line-through; }
-  .tab[aria-current] { border-bottom-color: var(--ks-ink); color: var(--ks-ink); }
+  .tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 22px 0; }
+  .tab { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 6px; border: 1px solid var(--ks-rule); border-radius: 999px; background: var(--ks-paper-raised); cursor: pointer; font: inherit; font-size: 12.5px; color: var(--ks-text-muted); white-space: nowrap; }
+  .tab:hover { border-color: var(--ks-edge); color: var(--ks-ink); }
+  .tab-n { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; background: var(--ks-gray); color: var(--ks-text-muted); }
+  .tab.done .tab-n { background: var(--ks-patina); color: var(--ks-paper-raised); }
+  .tab.current { color: var(--ks-ink); }
+  .tab.current .tab-n { background: var(--ks-kinpaku); color: var(--ks-ink); }
+  .tab.skipped { opacity: .6; }
+  .tab[aria-current] { background: var(--ks-instrument); border-color: var(--ks-instrument); color: var(--ks-instrument-text); }
+  .tab[aria-current] .tab-n { background: var(--ks-kinpaku); color: var(--ks-ink); }
+  /* The six steps stay on top; below them only the step the PM looks at. */
+  .strip { position: sticky; top: 0; z-index: 20; display: flex; gap: 2px; background: var(--ks-paper); border-bottom: 1px solid var(--ks-rule); margin-bottom: 10px; }
+  .stp { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 10px 8px; border: 0; border-bottom: 3px solid var(--ks-rule); background: none; cursor: pointer; text-align: left; font: inherit; color: var(--ks-text-muted); }
+  .stp-c { flex: none; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--ks-rule); display: grid; place-items: center; font-weight: 800; font-size: 11px; background: var(--ks-paper-raised); color: var(--ks-text-muted); }
+  .stp-w { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stp-w b { font-size: 13px; font-weight: 600; }
+  .stp.active .stp-w b { font-weight: 800; }
+  .stp.done { border-bottom-color: var(--ks-patina); }
+  .stp.done .stp-c { background: var(--ks-patina); border-color: var(--ks-patina); color: var(--ks-paper-raised); }
+  .stp.active { color: var(--ks-ink); border-bottom-color: var(--ks-kinpaku); }
+  .stp.active .stp-c { border: 2px solid var(--ks-kinpaku); color: var(--ks-ink); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ks-kinpaku) 20%, transparent); }
+  .stp[aria-current] { background: var(--ks-paper-raised); color: var(--ks-ink); border-radius: 8px 8px 0 0; }
+  .step.solo { grid-template-columns: minmax(0, 1fr); }
+  /* one left edge for everything in the step: summary, tabs, part, question */
+  .step.solo .summary { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; align-items: center; padding: 18px 22px; }
+  .step.solo .summary .desc { font-size: 15px; color: var(--ks-text); margin-top: 0; }
+  .step.solo .active-box { gap: 1rem; padding-top: 12px; border-top: 0; }
+  .step.solo .part-box { border-left: 0; padding: 0; gap: 6px; }
+  .step.solo .question { gap: 1.1rem; }
+  .step.solo .lede { margin-top: -.3rem; }
+  .question .head { flex-direction: row; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 14px; }
+  .q-meta { order: 2; display: flex; align-items: baseline; gap: 12px; }
+  .q-count { font-size: 13px; color: var(--ks-text-muted); }
+  .step.solo::before { display: none; }
+  .step-back { padding: 0 22px 16px; }
+  .step-info { padding: 0 22px 20px; }
+  .part-note { max-width: 62rem; color: var(--ks-text-muted); font-size: 14px; }
+  .step.solo .tabs.slim { justify-content: space-between; flex-wrap: nowrap; align-items: flex-start; padding-top: 14px; }
+  .step.solo .tabs.slim .tabs-r { display: flex; gap: 8px; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; align-items: center; }
   /* "Chci to jinak": the text goes into a window, not into the row. */
   dialog.ask { border: 1px solid var(--ks-rule); border-radius: 10px; padding: 24px; width: min(34rem, 92vw); margin: auto; background: var(--ks-paper-raised); color: var(--ks-text); box-shadow: var(--ks-lift); }
   dialog.ask::backdrop { background: color-mix(in srgb, var(--ks-ink) 45%, transparent); }
@@ -104,10 +133,10 @@
   /* What just happened: the answered question leaves upwards, its saved row drops in, the next one comes from the side. */
   @media (prefers-reduced-motion: no-preference) {
     .question.leaving { animation: q-leave .45s ease-in forwards; }
-    .question.arriving, .active-box.slide-fwd { animation: q-arrive .5s cubic-bezier(.16, 1, .3, 1); }
-    .active-box.slide-back { animation: q-arrive-back .4s cubic-bezier(.16, 1, .3, 1); }
+    .question.arriving, .active-box.slide-fwd, .stage.slide-fwd { animation: q-arrive .5s cubic-bezier(.16, 1, .3, 1); }
+    .active-box.slide-back, .stage.slide-back { animation: q-arrive-back .4s cubic-bezier(.16, 1, .3, 1); }
     .saved-row.fresh { background: none; animation: saved-drop .5s cubic-bezier(.16, 1, .3, 1), saved-flash 2.6s ease-out; }
-    .step.just .mark, .tab-n.pop { animation: mark-pop .6s cubic-bezier(.3, 1.6, .5, 1); }
+    .stp.just .stp-c, .tab-n.pop { animation: mark-pop .6s cubic-bezier(.3, 1.6, .5, 1); }
     .step.active.just .stage { animation: stage-ring 1.6s ease-out; }
     @keyframes q-leave { to { opacity: 0; transform: translateY(-60px) scale(.96); } }
     @keyframes q-arrive { from { opacity: 0; transform: translateX(60px); } }
@@ -125,9 +154,9 @@
   .detail-li { padding-left: 1.1rem; text-indent: -.7rem; }
   .empty { padding: 7rem 1rem; font-size: 1.4rem; color: var(--ks-ink); text-align: center; }
   /* The run as a pipeline (P106, proposal B): hero, then one row per step. */
-  .hero { border-top: 1px solid var(--ks-rule); padding: 28px 0 34px; display: flex; justify-content: space-between; gap: 32px; }
-  .hero h1 { font-size: clamp(32px, 5vw, 64px); line-height: .98; letter-spacing: -.055em; max-width: 760px; font-weight: 700; color: var(--ks-ink); text-wrap: balance; }
-  .hero p { flex: none; width: 310px; margin-top: 4px; color: var(--ks-text-muted); line-height: 1.5; }
+  .hero { border-top: 1px solid var(--ks-rule); padding: 14px 0 12px; display: flex; justify-content: space-between; align-items: baseline; gap: 24px; }
+  .hero h1 { font-size: 30px; line-height: 1.1; letter-spacing: -.03em; max-width: 760px; font-weight: 700; color: var(--ks-ink); text-wrap: balance; }
+  .hero p { flex: none; max-width: 36rem; margin: 0; font-size: 13px; color: var(--ks-text-muted); line-height: 1.5; }
   .step { position: relative; display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 22px; padding-bottom: 18px; }
   .step:not(:last-child)::before { content: ""; position: absolute; left: 27px; top: 38px; bottom: -1px; width: 1px; background: var(--ks-rule); }
   .mark { position: relative; z-index: 1; width: 56px; height: 56px; border: 1px solid var(--ks-rule); border-radius: 50%; display: grid; place-items: center; background: var(--ks-paper); font-weight: 800; color: var(--ks-patina); }
@@ -165,7 +194,7 @@
   .active-box .grid { padding: 8px 4px; scroll-padding-inline: 0; }
   .active-box .fade-prev { background: linear-gradient(90deg, var(--ks-paper-raised), transparent); }
   .active-box .fade-next { background: linear-gradient(270deg, var(--ks-paper-raised), transparent); }
-  .active-box .grid > .card { flex-basis: max(16rem, calc((100% - 3.4rem) / 3)); }
+  .active-box .grid > .card { flex-basis: max(18rem, calc((100% - 3.4rem) / 3)); }
   /* Not sticky here: below the fold a sticky bar would sit over the question's heading. */
   .active-box .bar { position: static; width: auto; margin: 0; padding: .7rem 0 0; background: none; border-top: 0; }
 
@@ -218,7 +247,7 @@
   .chip[disabled] { opacity: .5; cursor: default; }
   .chip svg { width: 12px; height: 12px; }
   .body { padding: .95rem 1.1rem 1.2rem; display: flex; flex-direction: column; gap: .5rem; flex: 1; }
-  .card h3 { font-size: 1.125rem; font-weight: 600; line-height: 1.35; color: var(--ks-ink); }
+  .card h3 { font-size: 1.25rem; font-weight: 600; line-height: 1.35; color: var(--ks-ink); }
   .thesis { color: var(--ks-text); font-size: .95rem; line-height: 1.45; }
   .identity { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 0; }
   .swatches { display: inline-flex; gap: 4px; margin-right: 4px; }
@@ -227,7 +256,7 @@
   .tag b { color: var(--ks-ink); font-weight: 600; }
   .fact { font-size: .8rem; color: var(--ks-text-muted); line-height: 1.45; overflow-wrap: anywhere; }
   .fact-label { display: inline-block; font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .18em; text-transform: uppercase; color: var(--ks-text-muted); margin-right: .55em; transform: translateY(-1px); }
-  .fact.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .fact.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
   .raises { display: flex; flex-direction: column; gap: 4px; margin: 2px 0; padding: 7px 10px 8px; background: oklch(70% 0.12 188 / 0.06); border: 1px solid oklch(70% 0.12 188 / 0.22); border-radius: 8px; }
   .raises .fact-label { color: var(--ks-patina); }
   .raise { font-size: .78rem; color: var(--ks-text-muted); line-height: 1.45; }
@@ -318,7 +347,13 @@
     .summary > div:first-child { grid-column: 1 / -1; }
     .name { font-size: 17px; }
     .details, .active-box { padding: 16px; }
-    .tabs { padding: 0 6px; }
+    .tabs { padding: 10px 16px 0; }
+    /* a narrow screen: the strip shows numbers, the name only for the step the PM looks at */
+    .stp { flex: 0 0 auto; padding: 7px 8px 8px; }
+    .stp[aria-current] { flex: 1 1 auto; }
+    .stp:not([aria-current]) .stp-w { display: none; }
+    .stp[aria-current] .stp-w { white-space: normal; line-height: 1.2; }
+    .stp-wrap:not(:has([aria-current])) { flex: 0 0 auto; }
     .event { grid-template-columns: 44px minmax(0, 1fr); gap: 4px 8px; }
     .event .decision { grid-column: 2; text-align: left; }
     .comment, .origin { grid-column: 2; }
@@ -329,6 +364,14 @@
     .card-inner, #lightbox, .nav, .fade { transition: none; }
     .shimmer, .card.skeleton .line { animation: none; }
   }
+
+  .stp-wrap { position: relative; flex: 1 1 0; min-width: 0; display: flex; align-items: stretch; }
+  .stp-wrap .stp { flex: 1 1 auto; }
+  .info-btn { flex: none; align-self: center; margin: 0 8px 0 -6px; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--ks-edge); padding: 0; display: grid; place-items: center; font: 700 11px/1 var(--ks-mono); color: var(--ks-text-muted); background: var(--ks-paper-raised); cursor: pointer; }
+  .info-btn:hover, .info-btn[aria-expanded=true] { color: var(--ks-ink); border-color: var(--ks-ink); }
+  .info-pop { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 26rem; max-width: 80vw; padding: 12px 14px; border: 1px solid var(--ks-rule); border-radius: 8px; background: var(--ks-paper-raised); box-shadow: var(--ks-lift); font-size: 13px; color: var(--ks-text); display: flex; flex-direction: column; gap: 6px; }
+  .info-pop[hidden] { display: none; }
+  .stp-wrap:nth-child(n+4) .info-pop { left: auto; right: 0; }
 </style>
 <header class="top">
   <p class="brand">/aid-ui · <span id="project"></span></p>
@@ -526,7 +569,7 @@ let S = null, H = [], hCount = null, hOk = true;   // /state, /history, its line
 const SELECTED = {};   // question id -> the card the PM picked; Další sends it
 const VIEW = {};       // step id -> { part, auto }: the part the PM opened, and which part was waiting then
 const SEEN = new Set(), WAS = {};   // what was already drawn and the statuses at the last render: an animation plays once
-let first = true, slide = "", drawn = [], arrived = null;
+let first = true, slide = "", stepMove = "", drawn = [], arrived = null;
 const openSteps = new Set();   // step titles whose Detail the PM opened, kept across re-renders
 const scrolled = {};   // deck scroll position per question, kept across re-renders
 
@@ -745,15 +788,16 @@ function leave(node) {
 }
 
 // count = { k, n } when the part asks more than one question: "Otázka k z n"
-function question(q, cards, count) {
+function question(q, cards, count, partNote) {   // partNote: the part's sentence, shown under the title
   const status = el("p", { class: "status", role: "status" });
   const fresh = !first && !SEEN.has("q:" + q.id);
   drawn.push("q:" + q.id);
   const sec = el("section", { class: "question" + (fresh ? " arriving" : ""), "aria-labelledby": "h-" + q.id });
   if (fresh) arrived = arrived || sec;
   const kind = str(q.eyebrow) || KIND[q.kind] || q.kind;
-  const tier = () => [count ? el("p", { class: "q-count" }, "Otázka " + count.k + (/^[234]$|^[234]\d\d$/.test(String(count.n)) ? " ze " : " z ") + count.n) : null,
-    el("p", { class: "tier" }, kind)];
+  const tier = () => el("div", { class: "q-meta" },
+    count ? el("span", { class: "q-count" }, "Otázka " + count.k + (/^[234]$|^[234]\d\d$/.test(String(count.n)) ? " ze " : " z ") + count.n) : null,
+    (S.sections ? null : el("span", { class: "tier" }, kind)));
   let sync = () => {};
   const answer = async (decision, choice, comment) => {
     const btns = sec.querySelectorAll("button:not(.chip):not(.nav):not(.tick)");
@@ -776,6 +820,7 @@ function question(q, cards, count) {
       el("div", { class: "headline" }, icon("die"), el("h2", { class: "q-title", id: "h-" + q.id }, title))));
     if (str(q.prompt)) sec.append(el("p", { class: "lede" }, q.prompt));
     const lines = bodyLines(q.body); if (lines) sec.append(el("div", { class: "head" }, lines));
+    if (partNote) sec.append(partNote);
     if (!cards.length) {
       sec.append(el("p", { class: "tier" }, "Připravují se nové návrhy…"), deck(q, [0, 1, 2].map(skeleton)));
       return sec;
@@ -834,6 +879,7 @@ function question(q, cards, count) {
     gallery && cards.length ? el("div", { class: "gallery" }, cards.map(c => el("figure", {},
       str(c.preview) ? media(q, c, false) : null,
       el("figcaption", {}, el("b", {}, c.title || c.id), str(c.thesis) ? " " + c.thesis : "")))) : null);
+  if (partNote) sec.append(partNote);
   sec.append(el("div", { class: "panel face" + (page ? " wide" : "") + (gallery && cards.length ? " full" : "") }, shot, body));
   // the same row as under the cards: the PM's own words in a window on the left, the way on on the right
   const other = () => ask(exc ? { key: q.id + ":no", title: "Proč výjimku neudělit?", hint: "Důvod se uloží k rozhodnutí.", send: [["Neudělit", t => answer("return", undefined, t)]] }
@@ -900,32 +946,54 @@ function pastCards(e) {
     })));
 }
 
-function stepEl(st, i) {
-  const cls = st.active || (st.status === "current" && !st.open.length) ? "active" : st.status === "done" ? "done" : "wait";
+function stepCls(st) { return st.active || (st.status === "current" && !st.open.length) ? "active" : st.status === "done" ? "done" : "wait"; }
+const STEP_WORD = { done: "hotovo", active: "teď", wait: "čeká" };
+// The six steps as a strip that stays on top: number (a tick when done), title, status in a word.
+function stripEl(m, vid, pick) {
+  return el("nav", { class: "strip", "aria-label": "Kroky stavby" }, m.steps.map((st, i) => {
+    const cls = stepCls(st), just = !first && WAS["s:" + st.id] && WAS["s:" + st.id] !== cls && cls !== "wait";
+    const btn = el("button", { type: "button", class: "stp " + cls + (just ? " just" : ""), "aria-current": st.id === vid ? "step" : null,
+      on: { click: () => { if (st.id !== vid) pick(st.id, i); } } },
+      el("span", { class: "stp-c" }, cls === "done" ? "✓" : String(i + 1)),
+      el("span", { class: "stp-w" }, el("b", {}, st.title), el("span", { class: "sr" }, " " + STEP_WORD[cls])));
+    if (!(st.id === vid && (st.description || st.goal || st.feeds))) return el("div", { class: "stp-wrap" }, btn);
+    // (i) next to the step the PM looks at: what the step is for, in a small pop-over (Esc or a click elsewhere closes it)
+    const pop = el("div", { class: "info-pop", id: "info-" + st.id, role: "region", "aria-label": "O tomhle kroku", hidden: true },
+      el("p", {}, st.description || ""), st.goal ? el("p", {}, "Z toho bude: " + st.goal) : null, st.feeds ? el("p", {}, st.feeds) : null);
+    const ib = el("button", { type: "button", class: "info-btn", "aria-label": "O tomhle kroku", "aria-expanded": "false", "aria-controls": "info-" + st.id,
+      on: { click: () => { pop.hidden = !pop.hidden; ib.setAttribute("aria-expanded", String(!pop.hidden)); } } }, "i");
+    return el("div", { class: "stp-wrap" }, btn, ib, pop);
+  }));
+}
+function stepEl(st, i, back) {
+  const cls = stepCls(st);
   const events = hOk ? st.events : [], saved = cls === "active" ? [] : (st.saved || []);   // an active step shows them in their part
   const just = !first && WAS["s:" + st.id] && WAS["s:" + st.id] !== cls && cls !== "wait";
   drawn.push(["s:" + st.id, cls]);
-  const stage = el("div", { class: "stage" + (openSteps.has(st.title) ? " open" : "") });
-  const detail = events.length || saved.length ? el("button", { type: "button", class: "toggle", "aria-expanded": String(openSteps.has(st.title)),
+  // a step the PM opened on purpose (not the one being worked on) shows its Detail right away
+  const isOpen = openSteps.has(st.title) !== (cls !== "active");
+  const stage = el("div", { class: "stage" + (isOpen ? " open" : "") + (stepMove ? " slide-" + stepMove : "") });
+  const detail = events.length || saved.length ? el("button", { type: "button", class: "toggle", "aria-expanded": String(isOpen),
     on: { click: () => {
       const on = stage.classList.toggle("open");
-      if (on) openSteps.add(st.title); else openSteps.delete(st.title);
+      if (openSteps.has(st.title)) openSteps.delete(st.title); else openSteps.add(st.title);
       detail.setAttribute("aria-expanded", String(on));
       detail.textContent = on ? "Skrýt" : "Detail";
-    } } }, openSteps.has(st.title) ? "Skrýt" : "Detail") : null;
+    } } }, isOpen ? "Skrýt" : "Detail") : null;
   const outcome = st.active ? "Čeká na vaše rozhodnutí."
     : !hOk ? "—" : st.outcome.text;
-  stage.append(el("div", { class: "summary" },
-    el("div", {}, el("h2", { class: "name" }, st.n ? "Krok " + st.n + " z " + st.of + ": " + st.title : st.title),
+  // the step being worked on introduces itself through the (i) in the strip; its outcome is the question
+  if (cls !== "active") stage.append(el("div", { class: "summary" },
+    el("div", {}, el("h2", { class: "name sr" }, st.n ? "Krok " + st.n + " z " + st.of + ": " + st.title : st.title),
       st.description ? el("p", { class: "desc" }, st.description) : null),
     el("div", { class: "outcome" }, outcome,
       !st.active && hOk && st.outcome.reconstructed ? el("span", { class: "note" }, " · doplněno zpětně") : null,
       !st.active && hOk && st.who ? el("span", { class: "who" }, WHO[st.who]) : null),
     detail));
+  if (back) stage.append(el("div", { class: "step-back" }, el("button", { type: "button", class: "reroll-btn back-now", on: { click: back.go } }, back.label)));
   if (events.length || saved.length) stage.append(el("div", { class: "details" }, saved.length ? savedEl(saved) : null, events.map(eventRow),
     events.filter(e => e.answer && e.answer.decision === "choose" && e.cards.length).map(pastCards)));
-  if (cls === "active" && st.goal) stage.append(el("div", { class: "step-brief" },
-    brief([["Co z toho bude", st.goal], ["K čemu to poslouží", st.feeds]])));
+  if (cls === "wait") stage.append(el("div", { class: "step-info" }, el("p", { class: "info" }, "Na tenhle krok přijde řada později. Zatím tu není na co odpovídat.")));
   if (cls === "active" && st.parts.length) {   // the parts as tabs, and the one the PM looks at
     const d = defaultPart(st), vid = viewedPart(st, d);
     const popped = new Set(st.parts.filter(p => !first && p.status === "done" && WAS["p:" + st.id + ":" + p.id] && WAS["p:" + st.id + ":" + p.id] !== "done").map(p => p.id));
@@ -934,14 +1002,15 @@ function stepEl(st, i) {
       slide = st.parts.findIndex(p => p.id === id) < st.parts.findIndex(p => p.id === vid) ? "back" : "fwd";
       VIEW[st.id] = { part: id, auto: d }; render();
     });
-    if (tabs) stage.append(tabs);
+    // the parts row is always in the same place; Detail rides at its right end
+    const row = el("nav", { class: "tabs slim", "aria-label": "Části kroku" }, el("div", { class: "tabs-r" }, tabs ? [...tabs.childNodes] : []), detail);
+    if (tabs || detail) stage.append(row);
     stage.append(partPanel(st, vid, d));
   } else if (st.active) {   // an older server without the map: the open questions as they come
     stage.append(el("div", { class: "active-box" }, (st.saved || []).length ? savedEl(st.saved) : null, st.open.map(q => question(q, cardsOf(q)))));
   }
-  const art = el("article", { class: "step " + cls + (just ? " just" : ""), "aria-current": st.active ? "step" : null },
-    el("div", { class: "mark", "aria-hidden": "true" }, cls === "done" ? "✓" : cls === "active" ? String(i + 1) : "—"), stage);
-  if (just && cls === "active") arrived = art;   // the step that just lit up is where the PM continues
+  const art = el("article", { class: "step solo " + cls + (just ? " just" : ""), "aria-current": st.active ? "step" : null }, stage);
+  if (just && cls === "active") arrived = document.getElementById("pipeline");   // the step that just lit up is where the PM continues
   return art;
 }
 function cardsOf(q) { return (S.cards || []).filter(c => c && c.question === q.id); }
@@ -961,6 +1030,10 @@ function viewedPart(st, d) {
 const PART_INFO = { done: "Tahle část je hotová.", skipped: "Tuhle část jsme vynechali, pro váš web není potřeba.",
   waiting: "Na tuhle část přijde řada později. Zatím tu není na co odpovídat.", current: "Na téhle části teď pracuji. Otázka se tu objeví sama." };
 // One part: what it is for, the saved answers with Změnit, and the question that waits (one at a time).
+// why, what the PM does, what comes out of it and what it feeds - as one paragraph
+function partText(p) {   // the map's own sentence when it has one, else its pieces in order
+  return p.text || [p.why, p.you, p.goal ? "Z toho bude: " + p.goal : "", p.feeds].filter(Boolean).join(" ");
+}
 function partPanel(st, vid, d) {
   const p = st.parts.find(x => x.id === vid), i = st.parts.indexOf(p), di = st.parts.findIndex(x => x.id === d);
   const saved = (st.saved || []).filter(q => q.part === vid), open = st.open.filter(q => q.part === vid);
@@ -970,16 +1043,19 @@ function partPanel(st, vid, d) {
   const where = st.open.length ? "otázku, která čeká" : "část, na které pracuji";
   return el("div", { class: "active-box" + (slide ? " slide-" + slide : "") },
     d && d !== vid ? el("button", { type: "button", class: "reroll-btn back-now", on: { click: back } }, di < i ? "← Zpět na " + where : "Zpět na " + where + " →") : null,
-    partBox(st, p),
+    q ? null : partBox(st, p),
     saved.length ? savedEl(saved) : null,
-    q ? question(q, cardsOf(q), k + open.length > 1 ? { k: k + 1, n: k + open.length } : null)
+    q ? question(q, cardsOf(q), k + open.length > 1 ? { k: k + 1, n: k + open.length } : null, el("p", { class: "part-note" }, partText(p)))
       : el("p", { class: "info" }, (PART_INFO[p.status] || "") + (p.status === "done" && saved.length ? " Odpověď změníte tlačítkem Změnit - otevře se stejná otázka znovu." : "")),
     stray.map(x => question(x, cardsOf(x))));
 }
 
 // The parts of the step: number, title and status; the part being worked on shows why, goal, what it feeds
 // and what the PM does, from the tool's map (never written by the agent per question).
-const PART_STATUS = { done: "hotovo", current: "teď", waiting: "čeká", skipped: "vynecháno" };
+function closeInfo() { document.querySelectorAll(".info-pop:not([hidden])").forEach(p => { p.hidden = true; p.previousSibling.setAttribute("aria-expanded", "false"); }); }
+document.addEventListener("click", e => { if (!e.target.closest(".stp-wrap")) closeInfo(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeInfo(); });
+const PART_STATUS = { done: "hotovo", current: "teď", waiting: "čeká", skipped: "není potřeba" };
 // The PM's saved answers in the step: what was chosen, a short highlight when just saved, and Změnit
 // (the server opens the same question again as a new one; the agent takes the new answer).
 function savedText(q) {
@@ -1015,13 +1091,13 @@ function brief(rows) {   // label left, text right - the same grid as the decisi
 function partBox(st, p) {
   const i = st.parts.indexOf(p);
   return el("div", { class: "part-box" },
-    el("p", { class: "part-head" }, st.parts.length > 1 ? "Část " + (i + 1) + " z " + st.parts.length + ": " + p.title : p.title),
-    brief([["O co jde", p.why], ["Co z toho bude", p.goal], ["K čemu to poslouží", p.feeds], ["Co uděláte vy", p.you]]));
+    el("p", { class: "part-head sr" }, st.parts.length > 1 ? "Část " + (i + 1) + " z " + st.parts.length + ": " + p.title : p.title),
+    el("p", { class: "part-note" }, partText(p)));
 }
 // The parts of the step as tabs: number (a tick when done), title, status for a screen reader.
 function partsEl(st, vid, popped, pick) {
   if (st.parts.length < 2) return null;
-  return el("nav", { class: "tabs", "aria-label": "Části kroku" }, st.parts.map((p, i) =>
+  return el("div", { class: "tabs" }, st.parts.map((p, i) =>
     el("button", { type: "button", class: "tab " + p.status, "aria-current": p.id === vid ? "true" : null,
       on: { click: () => { if (p.id !== vid && pick) pick(p.id); } } },
       el("span", { class: "tab-n" + (popped && popped.has(p.id) ? " pop" : "") }, p.status === "done" ? "✓" : String(i + 1)),
@@ -1036,7 +1112,19 @@ function render() {
   const m = model(S, hOk ? H : []);
   document.getElementById("project").textContent = S.project || "";
   hero(m);
-  document.getElementById("pipeline").replaceChildren(...m.steps.map(stepEl));
+  // the step that waits for the PM (or is being worked on); the one the PM opened stays until that changes
+  const dflt = (m.steps.find(s => s.active) || m.steps.find(s => s.status === "current") || [...m.steps].reverse().find(s => s.status === "done") || m.steps[0] || {}).id;
+  let sv = VIEW["/step"];
+  if (!(sv && sv.auto === dflt && m.steps.some(s => s.id === sv.part))) { delete VIEW["/step"]; sv = { part: dflt }; }
+  const vi = m.steps.findIndex(s => s.id === sv.part), di = m.steps.findIndex(s => s.id === dflt);
+  stepMove = slide === "step-back" ? "back" : slide === "step-fwd" ? "fwd" : "";
+  if (stepMove) slide = "";
+  const back = vi !== di ? { label: di < vi ? "← Zpět na krok, na kterém se pracuje" : "Zpět na krok, na kterém se pracuje →",
+    go: () => { slide = di < vi ? "step-back" : "step-fwd"; delete VIEW["/step"]; render(); } } : null;
+  const st = m.steps[vi];
+  const pickStep = (id, i) => { slide = i < vi ? "step-back" : "step-fwd"; VIEW["/step"] = { part: id, auto: dflt }; render(); };
+  document.getElementById("pipeline").replaceChildren(...(m.steps.length ? [stripEl(m, sv.part, pickStep), stepEl(st, vi, back)] : []));
+  m.steps.forEach(st => drawn.push(["s:" + st.id, stepCls(st)]));
   for (const [id, v] of Object.entries(kept)) { const i = document.getElementById(id); if (i) i.value = v; }
   if (focus && document.getElementById(focus)) document.getElementById(focus).focus();
   requestAnimationFrame(() => navs.forEach(f => f()));

@@ -271,7 +271,7 @@ def sections_view(questions):
                 status = "done"
             else:
                 status = "waiting"
-            out.append({k: p.get(k) for k in ("id", "title", "why", "goal", "feeds", "you")} | {"status": status})
+            out.append({k: p.get(k) for k in ("id", "title", "why", "goal", "feeds", "you", "text")} | {"status": status})
         steps.append({k: s[k] for k in ("n", "title", "why", "goal", "feeds")} | {"parts": out})
     if not open_parts:   # nothing waits for the PM: the first unfinished part is where the work is
         for s in steps:

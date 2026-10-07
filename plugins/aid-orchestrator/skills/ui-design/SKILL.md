@@ -183,9 +183,11 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    „Změnit". Kartu PM vybere klikem kamkoli na ni a odešle tlačítkem „Další"; pod kartami je jeden
    řádek: Bezpečněji, Znovu, Odvážněji, „Chci to jinak" (otevře okno na text: PM ho pošle jako svou
    odpověď = `return` s komentářem, nebo jako pokyn pro nové návrhy = `reroll` s komentářem; u otázky
-   bez karet i jako souhlas s poznámkou = `approve` s komentářem) a vpravo „Další". Krok s více částmi
-   ukazuje části jako záložky; studio ukáže z každé části jednu otevřenou otázku po druhé
-   („Otázka 1 ze 2") a po poslední přejde samo na další část. Více otevřených
+   bez karet i jako souhlas s poznámkou = `approve` s komentářem) a vpravo „Další". Studio ukazuje
+   šest kroků jako pruh nahoře (u prohlíženého kroku (i) s tím, o čem je) a pod ním jen jeden krok;
+   části kroku jsou řada pilulek vždy na stejném místě, pod otázkou je jeden odstavec o části (`text`
+   z mapy `sections.json`); z každé části je vidět jedna otevřená otázka po druhé („Otázka 1 ze 2")
+   a po poslední studio přejde samo na další část. Více otevřených
    otázek = jedna smyčka na každou. Napíše-li PM mezitím do chatu, zkus
    `record-answer` hned; exit 1 = odpověď ještě není.
 5. Rozhodnutí `approve`/`choose` → mutace s `--answer <id>` (jen tam, kde

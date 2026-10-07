@@ -520,10 +520,10 @@ JSON
   jq -e '.questions[0].part == "obsah" and .sections.sources.odhad != null' "$BATS_TEST_TMPDIR/body" >/dev/null
 }
 
-@test "page: six steps from the map; parts numbered in full with statuses incl. vynecháno; a box per part with an open question" {
+@test "page: six steps from the map; parts as pills with statuses incl. není potřeba; the part box carries the map sentence" {
   command -v node >/dev/null || skip "node not installed"
   f="$(PAGE_HTML)"
-  { sed -n '/^function el(/,/^}/p' "$f"; sed -n '/^const PART_STATUS/p' "$f";
+  { sed -n '/^function el(/,/^}/p' "$f"; sed -n '/^const PART_STATUS/p' "$f"; sed -n '/^function partText(/,/^}/p' "$f";
     sed -n '/^function brief(/,/^}/p' "$f"; sed -n '/^function partBox(/,/^}/p' "$f"; sed -n '/^function partsEl(/,/^}/p' "$f"; } > "$BATS_TEST_TMPDIR/parts.js"
   sed -n '/<script id="pipeline-model">/,/<\/script>/p' "$f" | sed '1d;$d' > "$BATS_TEST_TMPDIR/model.js"
   run node -e '
@@ -544,12 +544,14 @@ JSON
     const ok = (c, w) => { if (!c) { console.log("FAIL", w); process.exit(1); } };
     ok(m.steps.length === 6 && st.n === 2 && st.of === 6 && st.active && st.open.length === 2, "model: six steps, both questions in step 2");
     const tabs = partsEl(st, "logo"), list = flat(tabs);
-    for (const w of ["✓ T-podklady hotovo", "2 T-vize vynecháno", "3 T-logo teď", "5 T-stranky teď", "6 T-obsah čeká"]) ok(list.includes(w), "tabs have " + w);
+    for (const w of ["✓ T-podklady hotovo", "2 T-vize není potřeba", "3 T-logo teď", "5 T-stranky teď", "6 T-obsah čeká"]) ok(list.includes(w), "tabs have " + w);
     ok(!list.includes("W-logo"), "the tabs carry no box (the opened part has its own)");
     ok(tabs.kids.filter(k => k.attrs["aria-current"] === "true").length === 1 && tabs.kids[2].attrs["aria-current"] === "true", "the opened part is the marked tab");
     ok(partsEl(m.steps[0], "co-stavime") === null, "a step with one part has no tabs");
     const b3 = flat(partBox(st, st.parts[2])), b5 = flat(partBox(st, st.parts[4]));
     ok(b3.includes("Část 3 z 6: T-logo") && b3.includes("W-logo") && b3.includes("G-logo") && b3.includes("F-logo") && b3.includes("Y-logo"), "box of logo");
+    const bt = flat(partBox(st, Object.assign({}, st.parts[2], { text: "T-text" })));
+    ok(bt.includes("T-text") && !bt.includes("W-logo"), "the map sentence replaces the pieces");
     ok(b5.includes("Část 5 z 6: T-stranky") && b5.includes("Y-stranky"), "box of stranky");
   ' "$BATS_TEST_TMPDIR/parts.js" "$BATS_TEST_TMPDIR/model.js"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -592,6 +594,25 @@ JSON
   # listed by the agent: the payload's question and cards are the ones, no copy from memory mixed in
   code -H "X-AID-Token: $TOKEN" "$URL/state" >/dev/null
   jq -e '[.cards[] | select(.question == "q1.c1")] | length == 0' "$BATS_TEST_TMPDIR/body" >/dev/null
+}
+
+@test "page: a changed and re-answered question shows once; a history line without a step sits in the step of its part; every map part has its sentence" {
+  command -v node >/dev/null || skip "node not installed"
+  f="$(PAGE_HTML)"
+  sed -n '/<script id="pipeline-model">/,/<\/script>/p' "$f" | sed '1d;$d' > "$BATS_TEST_TMPDIR/model.js"
+  run node -e '
+    const { model } = require(process.argv[1]);
+    const P = id => ({ id, title: id, status: "current" });
+    const S = { sections: { steps: [{ n: 1, title: "A", status: "current", parts: [P("a")] }, { n: 2, title: "B", status: "waiting", parts: [P("b")] }] },
+      questions: [{ id: "q", part: "a", answered: true, answer: { decision: "choose" } }, { id: "q.c1", part: "a", answered: true, changed_from: "q", answer: { decision: "choose" } }, { id: "r", part: "a", answered: false }] };
+    const H = [{ step: null, by: "pm", question: { id: "q", part: "a", title: "T" }, answer: { decision: "choose", choice: "x", at: "2026-01-01T00:00:00Z" }, cards: [{ id: "x", title: "X" }] }];
+    const m = model(S, H);
+    if (m.steps[0].saved.map(q => q.id).join() !== "q.c1") { console.log("saved", m.steps[0].saved.map(q => q.id)); process.exit(1); }
+    if (m.steps[0].events.length !== 1 || m.steps[1].events.length !== 0) { console.log("events", m.steps.map(s => s.events.length)); process.exit(1); }
+  ' "$BATS_TEST_TMPDIR/model.js"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '[.steps[].parts[] | select((.text | type) != "string" or .text == "")] | length == 0' "$BATS_TEST_DIRNAME/../../../skills/ui-design/sections.json" >/dev/null
+  grep -qF 'class: "strip"' "$f"; grep -qF 'class: "info-btn"' "$f"   # the six steps on top, (i) with the step intro
 }
 
 @test "page: a click on the card only selects; Další sends choose; no option of the row is gone; saved answers read as words with Změnit" {
