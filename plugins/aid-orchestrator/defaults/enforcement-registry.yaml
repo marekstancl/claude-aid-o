@@ -4362,7 +4362,7 @@ enforcements:
     verdict: ALIGNED
     tier: t0
     enforcement_degree: 1
-    not_guaranteed: "That a backup is stale - only that the PM sees whether the old site in the list is a live download (date, URL) or a folder someone gave."
+    not_guaranteed: "That a backup is stale - only that the PM sees whether the old site in the list is a live download (date, URL) or a folder someone gave. The fetcher checks the address before urllib resolves it again, so DNS rebinding between the two is not caught (IMP-690)."
     description: "Every old-site page in the sources list carries its origin: 'staženo <date> z <url>' when --fetch-site read the live site, 'záloha (složka …)' otherwise; the card the PM approves names it (PM 7. 10. 2026: the backup was used instead of the live site)."
     recovery: "Run aid-ui-sources.py <project> --fetch-site <url> and list again with --old-site <that folder>."
   - id: aid_ui_ai_search

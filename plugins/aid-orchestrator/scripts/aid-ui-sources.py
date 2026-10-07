@@ -302,7 +302,10 @@ class _Links(html.parser.HTMLParser):
 
 def site_key(url, allow_local):
     """(scheme, host, port) of a URL the fetcher may touch: http(s), no credentials, a public address
-    (loopback and private ranges only with --allow-local, for tests and intranets). Raises ValueError."""
+    (loopback and private ranges only with --allow-local, for tests and intranets). Raises ValueError.
+    Known limit: the address is checked here and resolved again by urllib when it connects, so a DNS
+    name that changes its answer between the two (rebinding) is not caught; the fetcher runs on the
+    agent's host for a URL the PM named, not as a service for strangers (IMP-690)."""
     import ipaddress, socket
     u = urllib.parse.urlparse(url)
     if u.scheme not in ("http", "https"):
