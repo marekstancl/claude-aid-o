@@ -7,11 +7,18 @@ language model drew as SVG coordinates were "a joke"; the process stays, the han
 gen.json:
   {"model": "gpt-image-1",                      (default; the only one wired today)
    "quality": "medium", "n": 6,                 per slot; n <= 10, n x slots <= 60
-   "slots": {"WC": "one-sentence concept of the mark for this slot", ...}}   every key a slot of
+   "mode": "full",                              full (default): the complete logo in colour - symbol +
+                                                name + optional tagline, white background (PM 8. 10.
+                                                2026: black marks alone were app icons); mark: a single
+                                                black symbol on a transparent background
+   "name": "Coufal Clinic", "tagline": "zubná ambulancia · Trenčín",   full mode: what the logo says
+   "palette": "deep navy and light blue",       full mode, optional: the colour direction in words
+   "slots": {"WC": "one-sentence concept of the direction", ...}}   every key a slot of
                                                 .aid-ui/logo/route.json (id [A-Z]{1,3})
-The prompt = the fixed constraints below + the slot's mark type + the concept sentence. Only that
-text leaves the machine: write the concept from the brief in your own words (the brand name and
-the category at most, never facts, prices, people or anything from the sources).
+The prompt = the mode's fixed constraints + the slot's mark type + the concept sentence (+ name,
+tagline and palette in full mode). Only that text leaves the machine: write the concept from the
+brief in your own words (the brand name, the category and the town at most, never facts, prices,
+people or anything from the sources).
 Output .aid-ui/logo/gen/<slot>-<n>.png (1024x1024 PNG, transparent background, checked by
 signature and size) and .aid-ui/logo/gen/gen.json (version, run id, model, price list, prompts,
 requested / received per slot and status succeeded | partial | failed, UTC times, estimated cost);
@@ -32,6 +39,12 @@ CONSTRAINTS = ("Flat vector-style logo mark: a single solid pure black (#000000)
                "no shadows, no 3D, no texture, no outline strokes, no frame, no background shape. Centred, square "
                "composition, generous margin, simple geometry that still reads at 16 px, professional brand identity "
                "design, one idea only.")
+CONSTRAINTS_FULL = ("A complete, finished brand logo design for a real company, presented alone on a plain white "
+                    "background: a distinctive symbol together with the brand name \"%s\" set in clean, modern, "
+                    "professional typography%s. Flat vector style, at most two brand colours%s plus a neutral, "
+                    "high contrast, balanced horizontal composition, generous margin. No mockups, no frame, no "
+                    "photo, no gradients or shadows, no extra icon versions, no other text. The symbol must still "
+                    "read at small size. One clear idea, unique, memorable, not a stock clipart.")
 PRICE_LIST = "OpenAI image pricing, read 2026-10-07, USD per 1024x1024 image"
 PRICE = {"gpt-image-1": {"low": 0.011, "medium": 0.042, "high": 0.167}}
 MAX_PER_SLOT, MAX_RUN, MAX_BODY = 10, 60, 8 * 1024 * 1024
@@ -47,12 +60,14 @@ def utc():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def generate(key, model, prompt, quality):
+def generate(key, model, prompt, quality, mode="full"):
     """One PNG from the API; raises urllib errors, TimeoutError or ValueError (bad response)."""
+    body = {"model": model, "prompt": prompt, "n": 1, "size": "1024x1024", "quality": quality, "output_format": "png"}
+    if mode == "mark":
+        body["background"] = "transparent"
     req = urllib.request.Request(
         "https://api.openai.com/v1/images/generations",
-        data=json.dumps({"model": model, "prompt": prompt, "n": 1, "size": "1024x1024", "quality": quality,
-                         "output_format": "png", "background": "transparent"}).encode("utf-8"),
+        data=json.dumps(body).encode("utf-8"),
         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=180) as r:
         body = r.read(MAX_BODY + 1)
@@ -91,6 +106,13 @@ def main():
     slots = {s["id"]: s for s in route.get("slots", []) if isinstance(s, dict) and SLOT_ID.match(str(s.get("id", "")))}
     model = spec.get("model", "gpt-image-1")
     quality = spec.get("quality", "medium")
+    mode = spec.get("mode") or ("mark" if route.get("situation") == "app" else "full")   # app: the symbol first
+    if mode not in ("full", "mark"):
+        die("mode must be full or mark", 2)
+    if route.get("situation") == "assets":
+        die("situation assets: the existing symbol is used, nothing is generated (route.json)", 2)
+    if mode == "full" and not (isinstance(spec.get("name"), str) and spec["name"].strip()):
+        die("full mode needs name (and optionally tagline, palette)", 2)
     n = spec.get("n", 6)
     if model not in PRICE or quality not in PRICE[model]:
         die("model/quality not wired: %s/%s (known: %s)" % (model, quality, json.dumps(PRICE)), 2)
@@ -108,12 +130,13 @@ def main():
     if os.path.islink(out) or not os.path.realpath(out).startswith(project + os.sep):
         die("gen directory must be a plain directory under the project")
     log = {"version": 1, "run_id": time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()), "model": model, "quality": quality,
-           "n": n, "price_list": PRICE_LIST, "unit_usd": unit, "max_cost_usd": max_cost, "dry_run": dry,
-           "started": utc(), "constraints": CONSTRAINTS, "slots": {}, "requested": 0, "received": 0,
+           "n": n, "mode": mode, "price_list": PRICE_LIST, "unit_usd": unit, "max_cost_usd": max_cost, "dry_run": dry,
+           "started": utc(), "constraints": constraints_for(spec), "slots": {}, "requested": 0, "received": 0,
            "estimated_usd": 0.0, "status": "planned" if dry else "running"}
+    spec["mode"] = mode
     if dry:
         for slot, concept in spec["slots"].items():
-            log["slots"][slot] = {"concept": concept, "prompt": prompt_for(slots[slot], concept), "requested": n}
+            log["slots"][slot] = {"concept": concept, "prompt": prompt_for(slots[slot], concept, spec), "requested": n}
         log["requested"] = n * len(spec["slots"])
         log["finished"] = utc()
         with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
@@ -129,7 +152,7 @@ def main():
             die("%d file(s) already exist in .aid-ui/logo/gen (first: %s); use --force to overwrite" % (len(clash), os.path.basename(clash[0])))
     capped = False
     for slot, concept in spec["slots"].items():
-        prompt = prompt_for(slots[slot], concept)
+        prompt = prompt_for(slots[slot], concept, spec)
         rec = {"concept": concept, "prompt": prompt, "requested": n, "received": 0, "files": [], "errors": [], "status": "running"}
         for i in range(1, n + 1):
             if log["estimated_usd"] + unit > max_cost + 1e-9:
@@ -139,7 +162,7 @@ def main():
             log["requested"] += 1
             log["estimated_usd"] = round(log["estimated_usd"] + unit, 3)   # counted when sent, billed or not
             try:
-                png = generate(key, model, prompt, quality)
+                png = generate(key, model, prompt, quality, mode)
             except TimeoutError:
                 rec["errors"].append("variant %d: timeout - unknown (may have been billed); not retried" % i)
                 continue
@@ -186,8 +209,20 @@ def main():
         sys.exit(1)
 
 
-def prompt_for(slot, concept):
-    return "%s Mark type: %s. Concept: %s" % (CONSTRAINTS, slot["kind"], concept.strip())
+def constraints_for(spec):
+    if spec.get("mode", "full") == "mark":
+        return CONSTRAINTS
+    tag = spec.get("tagline")
+    pal = spec.get("palette")
+    return CONSTRAINTS_FULL % (spec.get("name", "").strip(),
+                               (' and the small tagline "%s" under it' % tag.strip()) if isinstance(tag, str) and tag.strip() else "",
+                               (" (%s)" % pal.strip()) if isinstance(pal, str) and pal.strip() else "")
+
+
+def prompt_for(slot, concept, spec=None):
+    spec = dict(spec or {})
+    spec.setdefault("mode", "full" if spec.get("name") else "mark")
+    return "%s Mark type: %s. Concept: %s" % (constraints_for(spec), slot["kind"], concept.strip())
 
 
 if __name__ == "__main__":

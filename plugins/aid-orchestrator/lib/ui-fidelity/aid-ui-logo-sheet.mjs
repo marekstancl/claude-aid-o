@@ -71,6 +71,14 @@ function uri(p, invert = false, vectorOnly = false) {
   if (invert && mime === 'image/svg+xml') buf = Buffer.from(buf.toString('utf8').replace(/#111(?![0-9a-fA-F])|#111111|#000(?![0-9a-fA-F])|#000000|black/g, '#fff'));
   return `data:${mime};base64,${buf.toString('base64')}`;
 }
+function conceptOk(d) {   // the concept PNG must be one the generation record (gen.json next to it) received
+  const full = path.resolve(root, d.lockup);
+  let rec;
+  try { rec = JSON.parse(fs.readFileSync(path.join(path.dirname(full), 'gen.json'), 'utf8')); } catch (e) { rec = null; }
+  const listed = rec && Object.values(rec.slots || {}).some((s) => (s.files || []).some((f) => path.resolve(root, f) === full));
+  if (!listed) { console.error(`ERROR: ${d.lockup}: a concept card needs a PNG that the gen.json next to it lists as received`); process.exit(1); }
+}
+
 function inlineSvg(p, cls) {
   const full = path.resolve(root, p);
   if (path.extname(full).toLowerCase() !== '.svg') return `<img class="${cls}" src="${uri(p)}">`;
@@ -109,6 +117,17 @@ const head = `<meta charset="utf-8">${(spec.fonts || []).map((u) => `<link rel="
 </style>`;
 
 function card(d) {
+  if (d.concept) {   // a complete composition from the image model (mode full): shown as it is, flagged as a concept;
+                     // tab, phone and avatar come from the chosen direction once it is rebuilt as a vector
+    conceptOk(d);
+    const L = uri(d.lockup);
+    return `<!doctype html><html><head>${head}</head><body><div class="card">
+  <div class="ctx hero" style="height:auto"><div class="bar"><img src="${L}" style="height:64px"><nav><span>Služby</span><span>Cenník</span><span>Kontakt</span><b>Objednať sa</b></nav></div>
+    <div class="heroin" style="padding:24px 28px"><h1>${esc(spec.hero || spec.name)}</h1></div><span class="l">hlavička a hero webu</span></div>
+  <div class="ctx" style="grid-column:1/3;display:flex;gap:24px;align-items:center;background:#fff"><img src="${L}" style="width:560px;height:560px;object-fit:contain"><div style="font-size:13px;color:#555;max-width:520px"><b style="display:inline-block;background:#fde68a;color:#222;padding:2px 8px;border-radius:6px;font-size:11px;letter-spacing:.06em">KONCEPT OD OBRAZOVÉHO MODELU</b><p>Tak, jak ho model nakreslil. Po volbě se přestaví do skutečného souboru: symbol jako vektor, název skutečným písmem, barvy z obrázku; teprve pak ikona v prohlížeči, na telefonu a avatar.</p></div></div>
+  <div class="ctx bc" style="grid-column:1/3"><div><img src="${L}" style="height:48px"><p>${esc(spec.name)}<br>${esc(spec.address || '')}</p></div><span class="l">vizitka, černobíle</span></div>
+  </div></body></html>`;
+  }
   const L = inlineSvg(d.lockup, 'lk'), S = uri(d.symbol, false, true), Sm = uri(d.small || d.symbol, false, true), Sw = uri(d.small || d.symbol, true, true);
   return `<!doctype html><html><head>${head}</head><body><div class="card">
   <div class="ctx hero"><div class="bar">${L}<nav><span>Služby</span><span>Cenník</span><span>Kontakt</span><b>Objednať sa</b></nav></div>
@@ -122,7 +141,8 @@ function card(d) {
 function overview() {
   const n = spec.directions.length;
   const dirs = spec.directions.map((d) => `<div class="dir${d.id === spec.recommend ? ' rec' : ''}">
-    <div class="lk">${inlineSvg(d.lockup, 'lk')}</div><div class="sy"><img src="${uri(d.symbol, false, true)}"><img class="s" src="${uri(d.small || d.symbol, false, true)}"></div>
+    ${d.concept ? `<div class="lk" style="height:200px"><img src="${uri(d.lockup)}" style="max-height:200px"></div><div style="font-size:10px;color:#92400e;letter-spacing:.06em">KONCEPT OD MODELU</div>`
+                : `<div class="lk">${inlineSvg(d.lockup, 'lk')}</div><div class="sy"><img src="${uri(d.symbol, false, true)}"><img class="s" src="${uri(d.small || d.symbol, false, true)}"></div>`}
     <h2>${esc(d.title)}</h2>${d.id === spec.recommend ? '<div class="rc">DOPORUČENO</div>' : ''}<p>${esc(d.note || '')}</p></div>`).join('');
   const comp = (spec.competitors || []).map((c) => `<div><img src="${uri(c.image)}">${esc(c.name)}</div>`).join('');
   return `<!doctype html><html><head>${head}</head><body><div class="ov"><h1>${esc(spec.name)} - směry loga</h1><p class="sub">${esc(spec.subtitle || '')}</p>
@@ -142,7 +162,7 @@ async function shoot(html, file, width) {
   console.log(path.relative(root, file));
 }
 for (const d of spec.directions) {
-  if (!/^[A-Za-z0-9-]+$/.test(String(d.id)) || !d.lockup || !d.symbol || !d.title) { console.error(`ERROR: direction needs id [A-Za-z0-9-], title, lockup, symbol: ${JSON.stringify(d.id)}`); process.exit(2); }
+  if (!/^[A-Za-z0-9-]+$/.test(String(d.id)) || !d.lockup || (!d.symbol && !d.concept) || !d.title) { console.error(`ERROR: direction needs id [A-Za-z0-9-], title, lockup and symbol (or concept: true): ${JSON.stringify(d.id)}`); process.exit(2); }
   await shoot(card(d), path.join(out, `logo-${d.id}.png`), 1200);
 }
 await shoot(overview(), path.join(out, 'logo-prehled.png'), 1600);

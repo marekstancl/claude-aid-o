@@ -11,7 +11,7 @@ setup() {
   P="$BATS_TEST_TMPDIR/proj"
   mkdir -p "$P/.aid-ui/logo" "$P/.aid-ui/studio"
   echo '{"situation":"new","slots":[{"id":"W","kind":"wordmark"},{"id":"WC","kind":"name+sign"},{"id":"WP","kind":"name+pictorial"}]}' > "$P/.aid-ui/logo/route.json"
-  spec() { printf '{"n": %s, "slots": %s}' "$1" "$2" > "$P/.aid-ui/logo/gen.json"; }
+  spec() { printf '{"mode": "mark", "n": %s, "slots": %s}' "$1" "$2" > "$P/.aid-ui/logo/gen.json"; }
   unset OPENAI_API_KEY
 }
 
@@ -25,6 +25,14 @@ setup() {
   [[ "$pr" == *"Mark type: name+sign."* && "$pr" == *"Concept: a C whose counter is a tooth crown"* ]]
   [ "$(jq -r '.requested' "$P/.aid-ui/logo/gen/plan.json")" -eq 4 ]
   [ "$(jq -r '.status + " " + .price_list' "$P/.aid-ui/logo/gen/plan.json")" = "planned $(python3 -c "import re;print(re.search(r'PRICE_LIST = \"([^\"]+)\"', open('$GEN').read()).group(1))")" ]
+  # full mode (the default): the complete logo in colour with the name, tagline and palette in the prompt; name required
+  printf '{"n": 1, "name": "Firma s.r.o.", "tagline": "pekárna · Brno", "palette": "warm ochre", "slots": {"WC": "a loaf as a letter F"}}' > "$P/.aid-ui/logo/gen.json"
+  run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  pr="$(jq -r '.slots.WC.prompt' "$P/.aid-ui/logo/gen/plan.json")"
+  [[ "$pr" == *'brand name "Firma s.r.o."'* && "$pr" == *'tagline "pekárna · Brno"'* && "$pr" == *"(warm ochre)"* && "$pr" == *"plain white background"* ]]
+  [ "$(jq -r .mode "$P/.aid-ui/logo/gen/plan.json")" = full ]
+  printf '{"n": 1, "slots": {"WC": "x"}}' > "$P/.aid-ui/logo/gen.json"
+  run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 2 ]; [[ "$output" == *"needs name"* ]]
 }
 
 @test "gen: no key -> exit 1 naming the variable; a slot outside the route, n over 10, n x slots over 60, a bad model -> exit 2" {
@@ -35,7 +43,7 @@ setup() {
   echo '{"situation":"x","slots":[{"id":"A","kind":"k"},{"id":"B","kind":"k"},{"id":"C","kind":"k"},{"id":"D","kind":"k"},{"id":"E","kind":"k"},{"id":"F","kind":"k"},{"id":"G","kind":"k"}]}' > "$P/.aid-ui/logo/route.json"
   spec 10 '{"A":"x","B":"x","C":"x","D":"x","E":"x","F":"x","G":"x"}'
   run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 2 ]; [[ "$output" == *"<= 60"* ]]
-  printf '{"model": "dall-e-9", "slots": {"A": "x"}}' > "$P/.aid-ui/logo/gen.json"
+  printf '{"model": "dall-e-9", "mode": "mark", "slots": {"A": "x"}}' > "$P/.aid-ui/logo/gen.json"
   run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 2 ]; [[ "$output" == *"not wired"* ]]
   # with a key but an unreachable API host the run fails cleanly, records the error without the key, exit 1
   spec 1 '{"A": "x"}'

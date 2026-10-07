@@ -129,22 +129,36 @@ Pravidla, která route.json nese:
      slotu jde jeho nejsilnější koncept, ostatní zůstávají v souboru jako zamítnuté; slot R začíná
      auditem dnešního loga podle `references/adopted/logo-design/references/redesign.md`
      (co má hodnotu, co zachovat - vyjmenovat);
-   - fáze 4 - **symbol kreslí obrazový model, ne ty** (PM 7. 10. 2026: značky psané jako
-     souřadnice SVG byly „výsměch"): do `.aid-ui/logo/gen.json` napiš pro každý slot koncept
-     jednou větou (anglicky, vlastními slovy: nejvýš jméno značky a obor - nikdy fakta, ceny,
-     lidi ani text z podkladů; jen tahle věta a pevná omezení skriptu odcházejí k OpenAI),
-     `n` 6; `python3 scripts/aid-ui-logo-gen.py <project> --spec .aid-ui/logo/gen.json --dry-run`
+   - fáze 4 - **celé logo kreslí obrazový model, ne ty** (PM 7. 10. 2026: značky psané jako
+     souřadnice SVG byly „výsměch"; 8. 10.: černé symboly bez názvu byly ikonky aplikace -
+     pravidlo skillu „nejdřív černě, jen symbol" je pro ruku designéra, modelu se jako omezení
+     nedává): do `.aid-ui/logo/gen.json` napiš `mode: "full"`, `name` (jméno značky), `tagline`
+     (obor · město, když ho brief chce), `palette` (barevný směr slovy z briefu nebo dnešního
+     loga) a pro každý slot koncept jednou větou (anglicky, vlastními slovy: jméno, obor, město,
+     barvy a myšlenka směru - nikdy fakta, ceny, lidi ani text z podkladů; jen tohle a pevná
+     omezení skriptu odcházejí k OpenAI), `n` 5; model vrátí hotovou kompozici (symbol + název +
+     podtitul, bílé pozadí, max dvě barvy). `mode: "mark"` (černý symbol, průhledné pozadí) jen
+     pro favicon-first situaci app; `python3 scripts/aid-ui-logo-gen.py <project> --spec .aid-ui/logo/gen.json --dry-run`
      (prompty do `gen/plan.json`, zkontroluj je), pak naostro s klíčem jen pro ten příkaz:
      `export OPENAI_API_KEY="$(grep -m1 '^OPENAI_API_KEY=' /opt/eco/services/.env | cut -d= -f2- | tr -d "\"'")"`
      v téže shellové větě (klíč se nikam nezapisuje, skript ho z chyb maže); `--max-cost` 3 USD
      (medium ≈ 0,04 USD za obrázek; 5 × 6 ≈ 1,3 USD), bez retry, stav v `gen/gen.json`. Běh jiný
      než `succeeded` = doplň jen chybějící sloty (`--force` jen pro přepsání, jinak nic nepřepíše).
    - fáze 4b - **kurátorství** (tvoje práce, podle `testing-checklist.md` a varovných signálů
-     skillu): každou variantu si zobraz (Read) a zapiš do `gen/vyber.json`
-     `{"<slot>": {"chosen": "<soubor>", "rejected": [{"file": …, "reason": …}]}}` - vyřazuje text
-     v obrázku, víc barev, stín nebo přechod, klišé bez nové formy, rozpad v 32 px, nápadná
-     podoba se známou značkou; z každého slotu právě jedna. Žádný rastr se neukazuje PM.
-   - fáze 4c - **vektor**: `aid-ui-tool.sh vectorize gen/<zvolený>.png <slot>-symbol.svg`
+     skillu jako síta, ne jako omezení kreslení): kontaktní arch `aid-ui-tool.sh logo-sheet
+     --contact .aid-ui/logo/gen --out …`, každou variantu si zobraz a zapiš do `gen/vyber.json`
+     `{"<slot>": {"chosen": "<soubor>", "rejected": [{"file": …, "reason": …}]}}` - vyřazuje
+     zkomolený nebo jiný název, víc než dvě barvy, stín, přechod nebo mockup, klišé bez nové
+     formy, symbol nečitelný v malém, nápadná podoba se známou značkou; z každého slotu právě
+     jedna; zkomolený text ve všech variantách slotu = re-roll slotu v kvalitě `high`.
+     **Karty u `mode full` nesou vygenerovanou kompozici** (rastr, štítek „koncept od modelu";
+     `logo-sheet` to dovolí jen s `concept: true` u směru): PM posuzuje hotový dojem, ne
+     stavební kámen; ikona v prohlížeči, na telefonu a avatar vzniknou až z vybraného směru.
+   - fáze 4c - **vektor** (u `mode full` až po volbě PM, pro zvolený směr; u `mode mark` před
+     kartami): `aid-ui-tool.sh vectorize gen/<zvolený>.png <slot>-symbol.svg` (z kompozice
+     nejdřív vyřízni symbol: `--crop x,y,w,h` není, použij `Pillow` v `pyvec` venv na výřez
+     podle oka a zapiš souřadnice do `koncepty.md`); název se sází znovu skutečným písmem
+     (bod 5, `wordmark`), barvy se vezmou z obrázku (dva nejčastější odstíny mimo bílou);
      (binarizace, vtracer; parametry v komentáři SVG; `--speckle`, `--corner` když je tvar
      roztřepený), potom `svg_audit.py` bez FAIL (složitost smí být INFO; při stovkách bodů zvyš
      `--length`), vykreslení 16/32 px a pohled; nesedí-li vektor na koncept (ořez, slitý otvor),
@@ -153,8 +167,9 @@ Pravidla, která route.json nese:
      z iniciál (slot W) a drobné úpravy vektoru.
    - **logo s názvem** (`<slot>-lockup.svg`, výška 256: symbol z vektoru + název písmem slotu;
      v konceptu smí být živý `<text>` s rodinou z Google Fonts, do křivek jde až v bodě 5);
-     verze se nepřepisují (`-v1`, `-v2`). PNG koncepty v `gen/` smaž po `record-answer` otázky
-     `identity` (gen.json a vyber.json zůstávají jako záznam).
+     u `mode full` je lockup na kartě sama kompozice modelu (`lockup` = její PNG). Verze se
+     nepřepisují (`-v1`, `-v2`). PNG koncepty v `gen/` smaž po `record-answer` otázky
+     `identity` kromě zvoleného (gen.json a vyber.json zůstávají jako záznam).
    - fáze 5 aspoň dvakrát: `python3 references/adopted/logo-design/scripts/svg_audit.py a.svg b.svg c.svg`
      a `python3 references/adopted/logo-design/scripts/preview_sheet.py a.svg b.svg c.svg -o preview.html`
      (bez `--refs-industry`, knihovna není), snímek stránky přes `aid-ui-tool.sh`; co padá,
@@ -166,6 +181,16 @@ Pravidla, která route.json nese:
      `.aid-ui/studio/logo-<slot>.png` (hlavička webu, záložka 16 px, ikona na telefonu, avatar,
      vizitka černobíle) a `logo-prehled.png` (všechny směry vedle sebe, doporučený označený,
      police konkurence); doplňkově `concept_sheet.py` skillu, když je k dispozici renderer;
+   - **dvě brány u `mode full`:** 1) otázka na směr (karty níže nesou koncept modelu), 2) po volbě
+     se směr přestaví (fáze 4c, bod 5: symbol vektor, název skutečným písmem - podtitul vždy znovu
+     sazbou, model ho komolí - barvy = dva nejčastější odstíny mimo neutrály) a jde jako **druhá
+     otázka `identity`** s jednou kartou: přestavěné logo v hlavičce, záložce, na telefonu, jako
+     avatar, na vizitce, v barvě, černě a reverzně; kit (body 5-8) až po jejím `approve`.
+     Selhání přestavby (symbol nejde oddělit, audit FAIL, nečitelné v 16 px) = nová karta téhož
+     směru z další varianty slotu, nikdy obejití volby PM. Re-roll kvůli zkomolenému názvu nejvýš
+     jednou na slot (`high`, samostatný spec s jedním slotem a malým `n`, zbývající rozpočet
+     z `gen.json`); dál se název sází. Stažení otázky = odstranění z payloadu (odpovědi a historie
+     zůstávají), nová otázka dostane nové id.
    - karty otázky `identity`, **jedna na slot**, v pořadí bodování (první = `recommend`):
      `slot` = id slotu, `preview` = `logo-<slot>.png`, `thesis` = směr jednou větou,
      `method` = druh slotu a typ značky s odkazem na postup (např. „mark-types.md §4 letterform;

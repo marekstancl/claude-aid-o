@@ -4420,7 +4420,7 @@ enforcements:
     enforcement_degree: 1
     test: scripts/tests/bats/test-aid-ui-logo-gen.bats
     not_guaranteed: "That the model's concepts are good or that the curation was honest - gen.json proves what was sent and received (prompts, counts, cost), vyber.json is the agent's own record. What is mechanical: no request without the key in the environment, no slot outside route.json, caps 10 per slot / 60 per run / --max-cost, 1024x1024 PNG only, and the sheet refuses a raster or a raster-wrapping SVG as the symbol the PM sees."
-    description: "Logo symbols are drawn by an image model from the step's concept sentences, never as SVG coordinates by the language model (PM 7. 10. 2026); the chosen raster is vectorized (vtracer, binarized, one black path set, viewBox 256) and only the vector reaches the audit, the 16 px test and the PM's cards."
+    description: "Logos are drawn by an image model from the step's concept sentences, never as SVG coordinates by the language model (PM 7. 10. 2026); in mode full (presentational web) the model draws the complete logo in colour and the direction question carries that composition flagged as a concept (PM 8. 10. 2026: black symbols alone were app icons); the chosen direction is then rebuilt (symbol vectorized, name set in a licensed font, colours from the image) and approved a second time in every context before the kit; mode mark (app) vectorizes before the cards."
     recovery: "aid-ui-logo-gen.py --dry-run, check plan.json, run with the key exported for that command; aid-ui-tool.sh vectorize the chosen PNG."
   - id: aid_ui_old_site_origin
     type: 12
