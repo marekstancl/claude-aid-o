@@ -18,6 +18,7 @@
 #                                                      (control roles, fields, type, breakpoints) for
 #                                                      the project design standard (step 7 bod 4)
 #   logo-sheet --spec <sheet.json> [--root <project>]  aid-ui-logo-sheet.mjs: every logo direction where
+#   logo-sheet --contact <dir> --out <png> [--root]     ... or the curation contact sheet of every concept PNG in <dir>
 #                                                      it will live (header, tab 16 px, phone icon, avatar,
 #                                                      business card) as logo-<id>.png, and logo-prehled.png
 #                                                      of all directions next to the competitors' logos

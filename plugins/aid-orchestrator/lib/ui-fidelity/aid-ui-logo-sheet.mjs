@@ -22,8 +22,35 @@ import path from 'node:path';
 const args = process.argv.slice(2);
 const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
 const specPath = opt('--spec');
-if (!specPath) { console.error('usage: aid-ui-logo-sheet.mjs --spec <sheet.json> [--root <project>]'); process.exit(2); }
+const contactDir = opt('--contact');
+if (!specPath && !contactDir) { console.error('usage: aid-ui-logo-sheet.mjs --spec <sheet.json> [--root <project>] | --contact <dir of concept PNGs> --out <png> [--root <project>]'); process.exit(2); }
 const root = path.resolve(opt('--root') || '.');
+if (contactDir) {   // the curation contact sheet (step 1i phase 4b): every concept PNG with its name, large and at 32 px
+  const dir = path.resolve(root, contactDir);
+  const outFile = path.resolve(root, opt('--out') || path.join(contactDir, 'kontakt.png'));
+  let files;
+  try { files = fs.readdirSync(dir).filter((f) => /\.png$/i.test(f) && !/^kontakt/.test(f)).sort(); } catch (e) { console.error(`ERROR: ${contactDir}: ${e.message}`); process.exit(1); }
+  if (!files.length) { console.error(`ERROR: ${contactDir}: no PNG concepts`); process.exit(1); }
+  // the page is written next to the PNGs and loaded from file://, so thirty 1 MB concepts are not inlined
+  const cell = (f) => { const u = encodeURIComponent(f);
+    return `<div class="c"><div class="big"><img src="${u}"></div><div class="row"><span class="s32"><img src="${u}"></span><span class="s16"><img src="${u}"></span><b>${f.replace(/\.png$/i, '')}</b></div></div>`; };
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff;font:12px system-ui}
+  .g{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;padding:12px;width:1500px;box-sizing:border-box}
+  .c{border:1px solid #ddd;border-radius:8px;padding:8px;background:#fff}.big{width:220px;height:220px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='8' height='8' fill='%23eee'/%3E%3Crect x='8' y='8' width='8' height='8' fill='%23eee'/%3E%3C/svg%3E")}
+  .big img{width:220px;height:220px}.row{display:flex;align-items:center;gap:8px;margin-top:6px}.s32 img{width:32px;height:32px}.s16 img{width:16px;height:16px}
+  .s32,.s16{display:inline-flex;padding:2px;background:#fff;border:1px solid #eee}</style></head><body><div class="g">${files.map(cell).join('')}</div></body></html>`;
+  const htmlFile = path.join(dir, 'kontakt.html');
+  fs.writeFileSync(htmlFile, html);
+  const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined });
+  const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+  await page.goto('file://' + htmlFile);
+  await page.waitForFunction(() => [...document.images].every((i) => i.complete));
+  await page.screenshot({ path: outFile, fullPage: true });
+  await browser.close();
+  fs.unlinkSync(htmlFile);
+  console.log(`${path.relative(root, outFile)} (${files.length} concepts)`);
+  process.exit(0);
+}
 let spec;
 try { spec = JSON.parse(fs.readFileSync(path.resolve(root, specPath), 'utf8')); }
 catch (e) { console.error(`ERROR: ${specPath}: ${e.message}`); process.exit(1); }

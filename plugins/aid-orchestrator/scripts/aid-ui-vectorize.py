@@ -70,12 +70,22 @@ def main():
         mw, mh = re.search(r'width="([\d.]+)', raw), re.search(r'height="([\d.]+)', raw)
         if mw and mh:
             w, h = float(mw.group(1)), float(mh.group(1))
-    paths = re.findall(r'<path[^>]*\sd="([^"]+)"', raw)
-    paths = [d for d in paths if not _is_background(d, w, h)]
+    # vtracer writes every path with its own transform="translate(tx,ty)" and absolute M/L/C/Q
+    # coordinates inside it: keep the offset per path (dropping it shifted every inner shape)
+    paths = []
+    for m in re.finditer(r"<path\b([^>]*)>", raw):
+        attrs = m.group(1)
+        d = re.search(r'\sd="([^"]+)"', attrs)
+        if not d:
+            continue
+        t = re.search(r'translate\(\s*(-?[\d.]+)[ ,]+(-?[\d.]+)\s*\)', attrs)
+        tx0, ty0 = (float(t.group(1)), float(t.group(2))) if t else (0.0, 0.0)
+        if not _is_background(d.group(1), w, h, tx0, ty0):
+            paths.append((d.group(1), tx0, ty0))
     if not paths or not w or not h:
         die("no shape found in %s" % src)
-    # bounds of all path points (vtracer writes absolute coordinates with M/L/C/Q)
-    nums = [float(x) for d in paths for x in re.findall(r"-?\d+\.?\d*", d)]
+    nums = [(float(x) + (tx0 if i % 2 == 0 else ty0)) for d, tx0, ty0 in paths
+            for i, x in enumerate(re.findall(r"-?\d+\.?\d*", d))]
     xs, ys = nums[0::2], nums[1::2]
     minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
     side = max(maxx - minx, maxy - miny) or 1.0
@@ -85,7 +95,8 @@ def main():
     scale = size * 0.88 / side
     tx = (size - (maxx - minx) * scale) / 2 - minx * scale
     ty = (size - (maxy - miny) * scale) / 2 - miny * scale
-    body = "".join('  <path fill="#111" fill-rule="evenodd" d="%s"/>\n' % d for d in paths)
+    body = "".join('    <path fill="#111" fill-rule="evenodd" transform="translate(%.2f %.2f)" d="%s"/>\n' % (tx0, ty0, d)
+                   for d, tx0, ty0 in paths)
     out = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" role="img" aria-labelledby="t">\n'
            '  <title id="t">%s</title>\n  <!-- aid-ui-vectorize: vtracer binary/spline speckle=%d corner=%d length=%s from %s -->\n'
            '  <g transform="translate(%.2f %.2f) scale(%.5f)">\n%s  </g>\n</svg>\n'
@@ -96,14 +107,14 @@ def main():
     print("%s: %d path(s), %d points, from %s" % (dst, len(paths), len(xs), src))
 
 
-def _is_background(d, w, h):
+def _is_background(d, w, h, tx0=0.0, ty0=0.0):
     """vtracer's first path is often the white page rectangle; drop a path that spans the whole image."""
     if not w or not h:
         return False
     nums = [float(x) for x in re.findall(r"-?\d+\.?\d*", d)]
     if len(nums) < 8:
         return False
-    xs, ys = nums[0::2], nums[1::2]
+    xs, ys = [x + tx0 for x in nums[0::2]], [y + ty0 for y in nums[1::2]]
     return min(xs) <= 1 and min(ys) <= 1 and max(xs) >= w - 1 and max(ys) >= h - 1
 
 
