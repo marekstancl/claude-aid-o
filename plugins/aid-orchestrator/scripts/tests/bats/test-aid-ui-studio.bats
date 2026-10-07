@@ -84,7 +84,7 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   curl -s -D "$BATS_TEST_TMPDIR/h" -o /dev/null -c "$J" "$URL/?k=99887766554433221100aabbccddeeff"
   grep -q '^HTTP/1.[01] 303' "$BATS_TEST_TMPDIR/h"
   grep -qi '^location: /\s*$' "$BATS_TEST_TMPDIR/h"
-  grep -qi '^set-cookie: aid_studio=.*HttpOnly.*SameSite=Strict' "$BATS_TEST_TMPDIR/h"
+  grep -qi "^set-cookie: aid_studio_$PORT=.*HttpOnly.*SameSite=Strict" "$BATS_TEST_TMPDIR/h"
   [ ! -e "$P/.aid-ui/studio.code" ]
   [ "$(code -b "$J" "$URL/")" = 200 ]
   grep -q "AID studio" "$BATS_TEST_TMPDIR/body"

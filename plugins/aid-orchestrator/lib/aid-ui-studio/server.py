@@ -496,7 +496,7 @@ class Studio(BaseHTTPRequestHandler):
     def session(self):
         for part in (self.headers.get("Cookie") or "").split(";"):
             k, _, v = part.strip().partition("=")
-            if k == "aid_studio" and v in SESSIONS:
+            if k == "aid_studio_%d" % self.server.server_port and v in SESSIONS:   # one cookie per port: two studios on one host do not log each other out
                 return True
         return False
 
@@ -535,7 +535,7 @@ class Studio(BaseHTTPRequestHandler):
                     SESSIONS.add(sid)
                 self.send_response(303)
                 self.send_header("Location", "/")
-                self.send_header("Set-Cookie", "aid_studio=%s; HttpOnly; SameSite=Strict; Path=/" % sid)
+                self.send_header("Set-Cookie", "aid_studio_%d=%s; HttpOnly; SameSite=Strict; Path=/" % (self.server.server_port, sid))
                 self.send_header("Content-Length", "0")
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
