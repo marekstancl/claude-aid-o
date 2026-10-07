@@ -75,7 +75,8 @@
 #                          <project>` prints: sha256:<sha256 of "<id>\n<chapter-target of id>\n" for
 #                          every chapter in navrh or schvaleno, in CHAPTERS order> (a changed body
 #                          of any of them changes it). One answer approves all of them.
-#     context-check <project>                    exit 0 when an answer of kind product_context,
+#     context-check <project>                    exit 0 when the online research was put to the PM (a sources
+#                          answer, approve or return, with target online@<project dir name>) and an answer of kind product_context,
 #                          decision approve, targets docs/content/product-context.md@<sha256 of
 #                          the file now> (step 1p); 1 naming why (no file, no approval, changed
 #                          since approval). Steps 1v, 3 and 6 call it first.
@@ -639,6 +640,10 @@ context_ok() {
   csha="$(sha256sum "$ctx" | cut -d' ' -f1)"
   if jq -e --arg t "docs/content/product-context.md@$csha" \
        '[.answers[]? | select(.kind == "product_context" and .decision == "approve" and .target == $t)] | length > 0' "$STATE" >/dev/null; then
+  # the online research (customer-research Mode 2) was put to the PM as its own sources question,
+  # answered yes or no - the skill never researches the public web about a firm unasked
+  jq -e --arg t "online@$(basename "$PROJECT")" '[.answers[]? | select(.kind == "sources" and .target == $t and (.decision == "approve" or .decision == "return"))] | length > 0' "$STATE" >/dev/null ||
+    { echo "context-check: the PM was not asked about the online research: put a studio question of kind sources with target online@$(basename "$PROJECT") (card: what would be searched and what taken), wait for approve or return, record-answer it; step 1p point 4. A project approved before 7. 10. 2026 asks it now, once." >&2; return 1; }
     echo "product context approved: $csha"
   elif jq -e '[.answers[]? | select(.kind == "product_context" and .decision == "approve")] | length > 0' "$STATE" >/dev/null; then
     echo "context-check: docs/content/product-context.md changed since the PM approved it; ask again (product_context)" >&2; return 1

@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 580          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 582          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4339,6 +4339,32 @@ enforcements:
     test_covers: "internal tool favicon only and brand none + identity = exit 2; public web always needs the logo with the name; print (also under ###) = black logo; webapp colour only; master with <text> and outlines without; missing brief section; whole path tokens (mobile, concern, lockup/a/dark); favicon.ico sizes; waiver exact list; no state = exit 2 (test-aid-ui-brand-package.bats); brand-waive target and answer, scope project matrix (test-aid-ui-state.bats); one gate row, fail names the part (test-aid-ui-verify.bats)."
     test: "scripts/tests/bats/test-aid-ui-brand-package.bats"
 
+  - id: aid_ui_online_research_asked
+    type: 12
+    source: "scripts/aid-ui-state.sh (context_ok)"
+    instruction: "skills/ui-design/steps/1p-sources.md point 4"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the research, when the PM said yes, was done well - only that the question was put and answered (approve or return) before any step that needs the product context."
+    description: "The online research about the firm (customer-research Mode 2) is never done unasked: context-check, which gates vision, content plan and copy review, refuses until a sources answer with target online@<project> exists, yes or no (PM 7. 10. 2026)."
+    recovery: "Put the sources question online@<project> to the PM on the studio page; a no is a valid answer."
+  - id: aid_ui_old_site_origin
+    type: 12
+    source: "scripts/aid-ui-sources.py (site_origin, --fetch-site)"
+    instruction: "skills/ui-design/steps/1p-sources.md point 2"
+    severity: advisory
+    surface: pm-visible
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    not_guaranteed: "That a backup is stale - only that the PM sees whether the old site in the list is a live download (date, URL) or a folder someone gave."
+    description: "Every old-site page in the sources list carries its origin: 'staženo <date> z <url>' when --fetch-site read the live site, 'záloha (složka …)' otherwise; the card the PM approves names it (PM 7. 10. 2026: the backup was used instead of the live site)."
+    recovery: "Run aid-ui-sources.py <project> --fetch-site <url> and list again with --old-site <that folder>."
   - id: aid_ui_ai_search
     type: 12
     source: "scripts/aid-ui-seo-check.py (--ai) + lib/ui-fidelity/aid-ui-verify.mjs (row ai_search)"

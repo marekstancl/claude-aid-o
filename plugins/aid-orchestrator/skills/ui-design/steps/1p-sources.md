@@ -34,7 +34,12 @@ Nejvýš jedna úvodní otázka v chatu a jedna otázka `sources` ve studiu na k
    co jmenujete, přečtu jen tady na počítači, nikam to neposílám." Když PM podklady jmenoval
    už v zadání, neptej se. Raď jmenovat konkrétní soubory nebo úzkou složku: ze široké složky
    se přečtou i dokumenty klientů.
-2. `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-sources.py" <project> --list [--from <cesta>]… [--old-site <složka>]`
+2. U přestavby nejdřív živý web: `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-sources.py" <project> --fetch-site <url>`
+   (úvodní stránka a stránky, na které odkazuje, do `.aid-ui/old-site/<host>/` s `fetch.json`: kdy a odkud; jen http(s)
+   na veřejnou adresu, přesměrování jen v rámci webu, stránka nejvýš 2 MB; vnitřní síť jen s `--allow-local`).
+   Záloha od PM jen když web neběží; seznam u každé stránky webu ukáže původ („staženo <datum> z <url>",
+   nebo „záloha (složka …) - ne živý web") a karta ho PM řekne.
+   `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-sources.py" <project> --list [--from <cesta>]… [--old-site <složka>]`
    (u kopie pilotu s jinou cestou `--sessions-dir <složka rozhovorů> --sessions-from <původní cesta projektu>`)
    → `.aid-ui/sources/manifest.json` + neměnný snímek `manifest-<sha16>.json`, na výstupu
    `manifest_sha256=…`. Použité dokumenty jsou v redigovaných snímcích `doc-*.txt` (HTML jen viditelný
@@ -51,7 +56,11 @@ Nejvýš jedna úvodní otázka v chatu a jedna otázka `sources` ve studiu na k
    ověří snímek a zapíše do `manifest.json`, co smíš číst (bez vyškrtnutých). Čti jen soubory z jeho
    polí `text`; rozhovor necituj doslova, jen parafrázi se zdrojem (`session <id> <datum>`); doslovné
    citace jen v oddílu Jazyk zákazníků po schválení. Průzkum zákazníků na internetu (customer-research
-   Mode 2) jen jako samostatná otázka `sources` s `target` `online@<projekt>` a jen po `approve`.
+   Mode 2: recenze, Google, co o firmě píší lidé) jen jako samostatná otázka `sources` s `target`
+   `online@<název složky projektu>`, položená vždy, hned po `approve` seznamu, s kartou: co a kde bych
+   hledal, co z toho vezmu (jazyk zákazníků, námitky, spouštěče), co ne (osobní údaje). `approve` = udělej
+   a zapiš zdroje jako `online:<url>`; `return` = bez průzkumu, oddíly Jazyk zákazníků a Námitky zůstanou
+   `chybí`. `aid-ui-state.sh context-check` (kroky 1v, 3, 6) bez téhle odpovědi neprojde.
 5. Napiš `docs/content/product-context.md` podle product-marketing: 12 oddílů s českými nadpisy
    (Produkt, Pro koho, Persony, Problémy, Konkurence, Čím se liší, Námitky, Přechod, Jazyk
    zákazníků, Hlas značky, Důkazy, Cíle); pod každým `Stav: vyplněno|hypotéza|chybí|rozpor|zastaralé`

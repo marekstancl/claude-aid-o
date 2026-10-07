@@ -76,6 +76,54 @@ idof() { jq -r --arg p "$1" '[.sources[], .candidates[]?] | map(select((.path //
   jq -e '[.candidates[].file] | length == 3' "$M" >/dev/null
 }
 
+@test "--fetch-site: the home page and its same-host links are saved with fetch.json; --old-site tells a live download from a backup" {
+  site="$T/site"; mkdir -p "$site/o-nas"
+  printf '<html><body><a href="/o-nas/">O nás</a> <a href="https://jiny.example/x">cizí</a> <p>Rohlíky každé ráno</p></body></html>' > "$site/index.html"
+  printf '<html><body><p>Pekárna od roku 2015</p></body></html>' > "$site/o-nas/index.html"
+  PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$site" >/dev/null 2>&1 & HP=$!   # python itself, so kill reaches it
+  for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 0.1; done
+  # a local address is refused unless the caller says so; other schemes and credentials always
+  run python3 "$SRC" "$P" --fetch-site "http://127.0.0.1:$PORT/"; [ "$status" -eq 2 ]; [[ "$output" == *"vnitřní sítě"* ]]
+  run python3 "$SRC" "$P" --fetch-site "ftp://example.org/"; [ "$status" -eq 2 ]
+  run python3 "$SRC" "$P" --fetch-site "http://u:p@example.org/"; [ "$status" -eq 2 ]
+  run python3 "$SRC" "$P" --fetch-site "http://127.0.0.1:$PORT/" --allow-local
+  kill $HP 2>/dev/null || true; wait $HP 2>/dev/null || true
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  d="$P/.aid-ui/old-site/127.0.0.1-$PORT"
+  [ "$(stat -c %a "$d")" = 700 ]; [ -f "$d/fetch.json" ]
+  ls "$d" | grep -q '^index-[0-9a-f]\{8\}\.html$'; ls "$d" | grep -q '^o-nas-[0-9a-f]\{8\}\.html$'
+  [ "$(stat -c %a "$d/fetch.json")" = 600 ]
+  jq -e '.version == 1 and .url and .final_url and .fetched_at and ([.pages[] | select(.file)] | length == 2) and ([.pages[].url] | all(startswith("http://127.0.0.1")))' "$d/fetch.json" >/dev/null
+  # a home page that is not HTML fails, nothing is recorded as live
+  mkdir -p "$T/bin"; printf 'just text' > "$T/bin/index.html"
+  python3 -c '
+import http.server, os, sys
+os.chdir(sys.argv[2])
+class H(http.server.SimpleHTTPRequestHandler):
+    def guess_type(self, p): return "text/plain"
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()' "$PORT" "$T/bin" >/dev/null 2>&1 & HP=$!
+  for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 0.1; done
+  run python3 "$SRC" "$P" --fetch-site "http://127.0.0.1:$PORT/" --allow-local
+  kill $HP 2>/dev/null || true; wait $HP 2>/dev/null || true
+  [ "$status" -eq 1 ]; [[ "$output" == *"not fetched as HTML"* ]]; [ ! -f "$d/fetch.json" ]
+  # the list only trusts the tool's own record; a forged one reads as a backup
+  mkdir -p "$T/falesny"; printf '{"url":"https://x","fetched_at":"2026-01-01T00:00:00Z"}' > "$T/falesny/fetch.json"; cp "$site/index.html" "$T/falesny/a.html"
+  python3 "$SRC" "$P" --list --old-site "$T/falesny" --sessions-dir "$S" >/dev/null
+  jq -e '.sources[] | select(.kind == "old_site") | .origin | test("záloha") and test("není záznam")' "$M" >/dev/null
+  # the live download again, for the origin check below
+  python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$site" >/dev/null 2>&1 & HP=$!
+  for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 0.1; done
+  python3 "$SRC" "$P" --fetch-site "http://127.0.0.1:$PORT/" --allow-local >/dev/null
+  kill $HP 2>/dev/null || true; wait $HP 2>/dev/null || true
+  python3 "$SRC" "$P" --list --old-site "$d" --sessions-dir "$S" >/dev/null
+  jq -e '[.sources[] | select(.kind == "old_site")] | length == 2 and all(.origin | startswith("staženo"))' "$M" >/dev/null
+  mkdir -p "$T/zaloha"; cp "$site/index.html" "$T/zaloha/uvod.html"
+  python3 "$SRC" "$P" --list --old-site "$T/zaloha" --sessions-dir "$S" >/dev/null
+  jq -e '.sources[] | select(.kind == "old_site") | .origin | test("záloha")' "$M" >/dev/null
+}
+
 @test "sessions enter only after ONE approval of the manifest snapshot; every secret redacted" {
   run python3 "$SRC" "$P"
   [ "$status" -eq 1 ]; [[ "$output" == *"no 'sources' answer on a manifest"* ]]

@@ -41,7 +41,7 @@ redacted into session-<id>.txt. A changed or missing session is refused. --purge
 snapshots (*.txt) and keeps the manifests (their hashes are the record). .aid-ui/sources is mode 700.
 Exit 0 written, 1 refused, 2 usage.
 """
-import argparse, datetime, glob, hashlib, html.parser, json, os, re, subprocess, sys
+import argparse, datetime, glob, hashlib, html.parser, json, os, re, subprocess, sys, urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RENDER_LIB = os.path.join(HERE, "lib", "aid-artifact-render.sh")
@@ -285,21 +285,192 @@ def approval(proj):
     return last["target"].split("@", 1)[1], bez
 
 
+MAX_PAGES = 40
+
+
+class _Links(html.parser.HTMLParser):
+    """href values of <a> and <base> - a parser, not a regex, so case, quoting and entities do not matter."""
+    def __init__(self):
+        super().__init__(); self.hrefs = []; self.base = None
+    def handle_starttag(self, tag, attrs):
+        d = dict(attrs)
+        if tag == "a" and d.get("href"):
+            self.hrefs.append(d["href"])
+        elif tag == "base" and d.get("href") and self.base is None:
+            self.base = d["href"]
+
+
+def site_key(url, allow_local):
+    """(scheme, host, port) of a URL the fetcher may touch: http(s), no credentials, a public address
+    (loopback and private ranges only with --allow-local, for tests and intranets). Raises ValueError."""
+    import ipaddress, socket
+    u = urllib.parse.urlparse(url)
+    if u.scheme not in ("http", "https"):
+        raise ValueError("jen http(s)")
+    if u.username or u.password:
+        raise ValueError("adresa s přihlašovacími údaji")
+    host = (u.hostname or "").lower()
+    if not host or not re.fullmatch(r"[a-z0-9.-]+", host):
+        raise ValueError("neplatný název hosta")
+    port = u.port or (443 if u.scheme == "https" else 80)
+    if not allow_local:
+        try:
+            infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+        except socket.gaierror:
+            raise ValueError("host nejde přeložit")
+        for info in infos:
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+                raise ValueError("adresa vede do vnitřní sítě (%s)" % ip)
+    return u.scheme, host, port
+
+
+class _SameSite(urllib.request.HTTPRedirectHandler):
+    """Redirects stay on the site being fetched (host and port), at most five, never to a local address."""
+    def __init__(self, key, allow_local):
+        super().__init__(); self.key = key; self.allow_local = allow_local; self.hops = 0
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        self.hops += 1
+        if self.hops > 5:
+            raise urllib.error.HTTPError(newurl, code, "příliš mnoho přesměrování", headers, fp)
+        k = site_key(newurl, self.allow_local)
+        if k[1:] != self.key[1:]:
+            raise urllib.error.HTTPError(newurl, code, "přesměrování mimo web (%s)" % k[1], headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def fetch_page(url, key, allow_local):
+    """(status, content type, bytes, final url) of one page; the body is read in chunks up to MAX_BYTES."""
+    handler = _SameSite(key, allow_local)
+    opener = urllib.request.build_opener(handler)
+    with opener.open(urllib.request.Request(url, headers={"User-Agent": "aid-ui-sources"}), timeout=30) as r:
+        ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ctype not in ("text/html", "application/xhtml+xml"):
+            return r.status, ctype, b"", r.geturl()
+        chunks, total = [], 0
+        while True:
+            chunk = r.read(65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_BYTES:
+                raise ValueError("stránka nad 2 MB")
+            chunks.append(chunk)
+        return r.status, ctype, b"".join(chunks), r.geturl()
+
+
+def _open_new(path):
+    """A regular file created fresh under a directory the tool made: no symlink is followed, nothing is overwritten."""
+    return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), "wb")
+
+
+def fetch_site(proj, url, allow_local=False):
+    """--fetch-site <url>: the home page and the same-site pages it links to (one level, up to MAX_PAGES)
+    into .aid-ui/old-site/<host>/, with fetch.json (url, final url, fetched_at, pages) - the record that
+    the old site was read live, when, and what exactly. Fails when the home page is not an HTML page."""
+    try:
+        key = site_key(url, allow_local)
+    except ValueError as e:
+        die(f"--fetch-site {url}: {e}", 2)
+    base = os.path.realpath(os.path.join(proj, ".aid-ui/old-site"))
+    os.makedirs(base, mode=0o700, exist_ok=True)
+    outdir = os.path.join(base, key[1] + ("" if key[2] in (80, 443) else "-%d" % key[2]))
+    if os.path.islink(base) or os.path.islink(outdir) or os.path.commonpath([base, os.path.realpath(outdir)]) != base:
+        die(f"--fetch-site: {outdir} is not a plain directory under .aid-ui/old-site", 1)
+    os.makedirs(outdir, mode=0o700, exist_ok=True)
+    for old in os.listdir(outdir):   # a fresh download replaces the last one; only the tool's own files go
+        f = os.path.join(outdir, old)
+        if os.path.isfile(f) and not os.path.islink(f):
+            os.remove(f)
+    seen, queue, pages, names = set(), [url], [], set()
+    home = None
+    while queue and len(pages) < MAX_PAGES:
+        u = queue.pop(0).split("#")[0]
+        if u in seen:
+            continue
+        seen.add(u)
+        try:
+            site_key(u, allow_local)
+            status, ctype, raw, final = fetch_page(u, key, allow_local)
+        except Exception as e:  # noqa: BLE001 - every failure is a listed page, not a crash
+            pages.append({"url": u, "status": str(e)[:160], "file": None})
+            continue
+        if not raw:
+            pages.append({"url": u, "status": "skipped (%s)" % (ctype or "unknown type"), "file": None})
+            continue
+        slug = re.sub(r"[^A-Za-z0-9._-]+", "-", urllib.parse.urlparse(u).path.strip("/") or "index")[:60].strip("-.") or "index"
+        name = "%s-%s.html" % (slug, hashlib.sha256(u.encode()).hexdigest()[:8])
+        if name in names:
+            continue
+        names.add(name)
+        with _open_new(os.path.join(outdir, name)) as fh:
+            fh.write(raw)
+        pages.append({"url": u, "final_url": final, "status": status, "file": name, "sha256": hashlib.sha256(raw).hexdigest()})
+        if home is None:   # links from the home page only
+            home = final
+            parser = _Links()
+            charset = "utf-8"
+            m = re.search(rb'charset=["\']?([A-Za-z0-9_-]+)', raw[:4096])
+            if m:
+                charset = m.group(1).decode("ascii", "replace")
+            try:
+                parser.feed(raw.decode(charset, errors="replace"))
+            except LookupError:
+                parser.feed(raw.decode("utf-8", errors="replace"))
+            root = urllib.parse.urljoin(final, parser.base) if parser.base else final
+            for href in parser.hrefs:
+                full = urllib.parse.urljoin(root, href).split("#")[0]
+                try:
+                    k = site_key(full, allow_local)
+                except ValueError:
+                    continue
+                if k[1:] == key[1:] and full not in seen and full not in queue:
+                    queue.append(full)
+    if home is None:
+        die(f"--fetch-site {url}: the home page was not fetched as HTML ({pages[0]['status'] if pages else 'no response'})", 1)
+    rec = {"version": 1, "url": url, "final_url": home, "fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), "pages": pages}
+    with _open_new(os.path.join(outdir, "fetch.json")) as fh:
+        fh.write(json.dumps(rec, ensure_ascii=False, indent=1).encode("utf-8"))
+    return outdir
+
+
+def site_origin(dirpath):
+    """What an --old-site folder is: a live download the tool made (when, from where), a backup the PM
+    gave (no fetch.json), or a folder whose fetch.json is not the tool's (treated as a backup, said so)."""
+    f = os.path.join(dirpath, "fetch.json")
+    if not os.path.isfile(f):
+        return "záloha (složka %s) - ne živý web" % os.path.basename(os.path.normpath(dirpath))
+    try:
+        rec = json.load(open(f, encoding="utf-8"))
+        ok = rec.get("version") == 1 and isinstance(rec.get("url"), str) and isinstance(rec.get("fetched_at"), str) \
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}T.*", rec["fetched_at"]) and isinstance(rec.get("pages"), list) \
+            and any(isinstance(x, dict) and x.get("file") for x in rec["pages"])
+    except (OSError, ValueError, AttributeError):
+        ok = False
+    if not ok:
+        return "záloha (složka %s, fetch.json není záznam nástroje) - ne živý web" % os.path.basename(os.path.normpath(dirpath))
+    return "staženo %s z %s" % (rec["fetched_at"][:10], re.sub(r"[^\x20-\x7e\u00a0-\uffff]", "", rec["url"])[:120])
+
+
 def listing(proj, a, outdir):
     requested = set(a.request)
     budget = [MAX_WALK]
     entries = [("project", p, None) for p in project_files(proj)]
     if a.old_site:
-        entries += [("old_site", p, r) for p, r in walk(a.old_site, budget)]
+        root_rec = os.path.realpath(os.path.join(a.old_site, "fetch.json"))
+        entries += [("old_site", p, r) for p, r in walk(a.old_site, budget) if not (p and os.path.realpath(p) == root_rec)]
+        origin = site_origin(a.old_site)
     for f in a.from_:
         entries += [("from", p, r) for p, r in walk(f, budget)]
     docs, used_n, stopped = [], 0, 0
     for kind, p, r in entries:
         if not p:
             stopped += 1
-            docs.append({"id": f"stop{stopped}", "kind": kind, "path": "", "used": False, "reason": r})
+            docs.append({"id": f"stop{stopped}", "kind": kind, "path": "", "used": False, "reason": r} | ({"origin": origin} if kind == "old_site" else {}))
             continue
         it = document(proj, kind, p, r, requested, used_n, outdir)
+        if kind == "old_site":
+            it["origin"] = origin   # live download (when, from where) or a backup - the PM sees which
         used_n += it["used"]
         docs.append(it)
     unknown = requested - {d["id"] for d in docs if d.get("excluded") == "internal"}
@@ -398,10 +569,18 @@ def main():
     ap.add_argument("--sessions-dir", action="append", default=[])
     ap.add_argument("--sessions-from", action="append", default=[])
     ap.add_argument("--old-site")
+    ap.add_argument("--fetch-site", metavar="URL")
+    ap.add_argument("--allow-local", action="store_true", help="--fetch-site may read a loopback or private address (tests, intranet)")
     a = ap.parse_args()
     proj = os.path.abspath(a.project)
     if not os.path.isdir(proj):
         die(f"no project directory {proj}", 2)
+    if a.fetch_site:
+        d = fetch_site(proj, a.fetch_site, a.allow_local)
+        rec = json.load(open(os.path.join(d, "fetch.json"), encoding="utf-8"))
+        print(d)
+        print("pages=%d ok=%d" % (len(rec["pages"]), sum(1 for x in rec["pages"] if x.get("file"))))
+        return 0
     outdir = os.path.join(proj, ".aid-ui/sources")
     os.makedirs(outdir, exist_ok=True)
     os.chmod(outdir, 0o700)

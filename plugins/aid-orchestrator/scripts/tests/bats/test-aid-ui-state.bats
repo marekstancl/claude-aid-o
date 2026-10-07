@@ -1245,6 +1245,11 @@ decide_payload() {
   ans q-other facts "docs/content/product-context.md@$(sha256sum "$PROJ/docs/content/product-context.md" | cut -d' ' -f1)"
   run "$SCRIPT" context-check "$PROJ"; [ "$status" -eq 1 ]
   ans q-ctx product_context "docs/content/product-context.md@$(sha256sum "$PROJ/docs/content/product-context.md" | cut -d' ' -f1)"
+  # the online research must have been put to the PM - a no counts as much as a yes
+  run "$SCRIPT" context-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"online research"* ]]
+  forge q-onl0 sources "online@$(basename "$PROJ")" reroll              # neither yes nor no does not count
+  run "$SCRIPT" context-check "$PROJ"; [ "$status" -eq 1 ]
+  ans q-online sources "online@$(basename "$PROJ")" return
   run "$SCRIPT" context-check "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   echo "změna" >> "$PROJ/docs/content/product-context.md"
   run "$SCRIPT" context-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"changed since the PM approved"* ]]

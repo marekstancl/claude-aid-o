@@ -33,7 +33,7 @@ EOF
 
 approve_context() {
   jq --arg t "docs/content/product-context.md@$(sha256sum "$P/docs/content/product-context.md" | cut -d' ' -f1)" \
-    '.answers.qctx = {kind:"product_context", decision:"approve", target:$t}' "$ST" > "$T/s" && mv "$T/s" "$ST"
+    '.answers.qctx = {kind:"product_context", decision:"approve", target:$t} | .answers.qonl = {kind:"sources", decision:"return", target:("online@" + ($p | split("/") | last))}' --arg p "$P" "$ST" > "$T/s" && mv "$T/s" "$ST"
 }
 # answer [jq edit] — a complete passing answer for both pages, optionally edited
 answer() {
