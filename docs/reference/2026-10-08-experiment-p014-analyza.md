@@ -182,6 +182,135 @@ Rozhodnutí a volby jsou v chatu (8. 10. 2026). Co bude rozhodnuto, sem doplnit.
 8. Doporučení přesahuje jedno backendové měření. → Proto je rozhodnutí formulované pro úlohy
    typu P014 s hranicí a druhým experimentem na druhé straně hranice, ne jako konec AID.
 
+
+## 6. Rozhodnutí 1 rozvedené: lehká cesta po částech, s důkazy (doplněno 8. 10. odpoledne)
+
+PM: „na základě pěti vět se nedá rozhodnout, potřebuju důkazy, že to pomůže.“ Níže je lehká cesta
+rozložená na šest částí; u každé je (a) co má dělat, (b) důkaz, že to funguje, z P014 nebo
+z nových zkoušek 8. 10., (c) co to stojí, (d) co se tím nezíská. Zkoušky 8. 10. = tři běhy Codexu
+nad skutečnými podklady P014 (`scratchpad/probes/p1..p3`), každý read-only, bez plánu a bez AID;
+zadání i výstupy jsou uložené vedle tohoto souboru v `2026-10-08-experiment-p014-zkousky/`.
+
+### 6.1 Zadání ve tvaru P014 jako standard (ne plán)
+
+(a) Každá úloha dostane zadání s: PM doslova, změřený výchozí stav (cesty, funkce, data),
+„co udělat“ s hranicí „co sem nepatří“, tabulka „kde co je“, pravidla, a číslované
+měřitelné body hotovo. Lint odmítne zadání bez měřeného stavu nebo s neměřitelným bodem.
+(b) Důkaz: rameno A vzalo bod 2 zadání jako návrhové pravidlo v prvním napsaném souboru
+(přepis 20:43) a jako jediné ho splnilo; B a C stavěly z plánu, který ten bod ztratil. Zadání
+P014 zabralo PM a agentovi ~30 min a 14 bodů tabulky „kde co je“ dalo A celou orientaci: 15 min
+čtení, žádný ztracený krok. Opak: P013-6 (CP1 schválila kritérium o stránkování API, které
+neexistuje; šest revizorů, dvě kola) — zadání s měřeným stavem by to neobsahovalo.
+(c) ~30–60 min PM + agent na úlohu, lint 1 den práce (gramatika už existuje v `aid-plan-lint`).
+(d) Nedá: rozklad na kroky pro souběžnou práci víc oken.
+
+### 6.2 Jedna levná revize zadání (Codex, read-only nad repem)
+
+(a) Před startem jedna revize zadání proti kódu: co nejde splnit, co zadání nevyjmenovává,
+co nejde změřit. Nálezy zapracuje PM/agent do zadání, ne do plánu.
+(b) Důkaz (zkouška P1, 8. 10.): Codex dostal PŮVODNÍ, široké zadání P014 (`ce43dd3`, před
+zúžením) a kopii repa před P014. **Našel totéž, co tři kola CP1 (18 revizorů, 158 nálezů,
+44,8 USD):** zrcadlo `hlaseni_stav` je přes `ticket_id` vázané na `tickets`, `conversation_id`
+je povinný, ruční hlášení nemá kam uložit vazbu na člověka → nutná migrace (jeho nález 1). To je
+přesně důvod, proč PM po třetím kole CP1 zúžil rozsah. K tomu 8 dalších věcných bodů (oznámení
+neunese můstek po zavření widgetu, měření nemá schéma ani definici období, konfigurace ve třech
+místech, stránka portů předbíhá kód). Rameno B totéž: 4 nálezy Codexu u zadání, všechny skutečné,
+předešly chybám v kódu (prázdný e-mail, výjimka mimo karanténu, chybějící vzorek, relace bez
+e-mailu). Cena jedné takové revize: 1–3 USD, 5–10 min.
+(c) Viz výše. (d) Nedá: revizi po krocích (tu dá 6.5 jednou na konci).
+
+### 6.3 Zadání v ruce každého revizora (a kritik povinný, pokud zůstane těžká cesta)
+
+(a) Kdokoli něco posuzuje (zadání, plán, diff), dostane zadání PM a otázku „zachovává, změkčuje,
+vypouští, odporuje?“ bod po bodu.
+(b) Důkaz (zkouška P2, 8. 10.): Codex dostal zadání + plán P014 a tuhle otázku. **Během jednoho
+běhu našel, že Success Criteria plánu bod 2 úplně vypouští**, body 1, 4 a 8 vypouští zčásti
+(test procházející zdroje, „e-mail z těla se ignoruje“, patro podle ceny) a že architektura říká
+čtyři úkony, krok sedm. Tři kola CP1 (bez zadání) to neviděla; jeden revizor navrhl bod 2 vypustit.
+Cena: ~1 USD.
+(c) Změna packetu CP1/CP2/CP3/CP7 o jeden soubor; kritik povinný = jedno odmítnutí v `prepare`.
+(d) Nedá nic navíc, jen odstraní slepotu; platí i pro těžkou cestu, pokud zůstane.
+
+### 6.4 Samostatné okno v pracovní kopii, commit po bodech hotovo
+
+(a) Jedno okno (Opus nebo Fable), vlastní worktree, žádné EPICy, kontrakty ani kola během práce;
+commit po každém splněném bodu hotovo (ne jeden na konci jako A), deník tření jako dnes.
+(b) Důkaz: A 1:06, B 1:26 (B commitovalo po krocích a první výsledek mělo za 20 min — to je
+lepší zvyk než A). C 3:34 aktivně, 61 % tahů orchestrátoru účetnictví, 4 běhy testů proti ~25 u A
+a ~72 u B. Za 14 dní stály revize AID 41–261 USD na plán a plány trvaly 12–116 h od první
+revize k uzavření (tabulka níže).
+(c) Nic nového; `git worktree` a `aid-plugin-issues.md` existují.
+(d) Nedá: souběh víc oken na jedné úloze; obnovu po přerušení z evidence (zůstává přepis + git);
+PM karty během práce. Rizika doložená u A: kontext 598 k bez zhuštění (hranice: úloha
+stupně ≤ 4 nebo rozdělit na dvě zadání), omyl v checkoutu (zadání musí jmenovat kopii).
+
+### 6.5 Přijetí spuštěním proti bodům hotovo (měřič)
+
+(a) Po dokončení jeden měřič (subagent s vlastní DB, síť zakázaná) spustí každý bod hotovo tak,
+jak je napsaný (start s vadnou konfigurací, celá cesta, mutace), ne čtením kódu.
+(b) Důkaz: v P014 měřič našel K2 u B i C a K7 u C — vady, které **34 revizních běhů AID
+(CP2, CP3, CP7) a 9 revizí Codexu v B neviděly**, protože nikdo proces nespustil. Mutace ukázaly
+u všech ramen stejnou díru (M5b). Cena měřiče: ~10 USD a ~20 min na rameno (subagent `agent-a7`:
+27,6 M čtení cache, 0,9 M zápis).
+(c) Nástroje už existují (`skills/srovnavaci-experiment-aid/nastroje`, `sablona-zadani-merice.md`);
+zobecnit na „měřič hotovo“ = 1 den.
+(d) Nedá: nic o kvalitě kódu mimo body hotovo (to dělá 6.6).
+
+### 6.6 Jedna revize celého diffu kotvená na zadání + bezpečnostní a provozní seznam
+
+(a) Na konci jeden nezávislý revizor (Codex; u změn dat nebo oprávnění druhý, Opus, s otázkami
+bezpečnostní role AID) dostane zadání, diff a krátký seznam: nový osobní údaj a jeho mazání,
+rozložení repo vs. hostitel (deploy-manifest), nové závislosti v CI i na hostiteli, build
+dokumentace, únik údajů do logu/Telegramu, hranice účtů.
+(b) Důkaz (zkouška P3, 8. 10.): Codex dostal zadání + diff ramene A + ten seznam. **Našel obě
+vady, které A vynechalo a které nechytila žádná ze tří vrstev hodnocení experimentu:** retenci
+`sessions.email` (nález 1, s odkazem na `uklid.py:295`) a rozložení na hostiteli (nález 2:
+test čte bránu z `bin/`, manifest ji kopíruje do `telegram/` — přesně to, na čem nasazení A
+8. 10. spadlo). Nenašel chybějící PyYAML v jobu brány v CI (řekl „bez nálezu“, protože
+`requirements.txt` ho má — job brány ho ale neinstaluje): seznam musí říkat „každý job CI zvlášť“.
+V P014 to našlo CP2 až ve druhém kole. Cena: ~2 USD, 10 min. Rameno A: jeho vlastní závěrečná
+revize Codexem dala 5 nálezů, všechny zapracované, včetně testu startu služby, který pak chytil
+mutaci. Rameno B: závěrečná revize zvedla body 2 a 7 z „částečně“ na „platí“.
+Bezpečnost: v evidenci AID je **71 opravených bezpečnostních nálezů** (blocker/major) ze CP2/CP3
+za 14 dní (podvržené cesty, únik údajů do chybového výstupu, padělané schválení PM, symlinky
+při mazání, XSS přes font). To je skutečná hodnota role `security`; lehká cesta ji neztrácí,
+když tuhle roli pustí jednou na konci (a u rizikových kroků i uprostřed) místo v každém kole.
+(c) ~2–10 USD na úlohu. (d) Nedá: nálezy po krocích uprostřed práce — u úloh, kde chyba
+v kroku 1 zdražuje kroky 2–5, je to ztráta (viz hranice v 6.8).
+
+### 6.7 Čísla za 14 dní (všechny projekty, jen revizoři, bez orchestrátoru a implementátorů)
+
+| Plán | CP1 | CP2+CP3 (kol) | CP7 (pokusů) | revize celkem | nálezů / opraveno kódem | od 1. revize k uzavření |
+|---|---|---|---|---|---|---|
+| agents P010 | 43 | 137 (45) | 80 (20) | **261 USD** | 178 / 64 | 116 h |
+| wan P108 | 29 | 149 (36) | 52 (8) | **229 USD** | 76 / 23 | 74 h |
+| agents P013 | 37 | 106 (26) | 17 (3) | 160 USD | 67 / 17 | 24 h (nedokončeno) |
+| agents P012 | 34 | 87 (27) | 37 (7) | 159 USD | 66 / 26 | 33 h |
+| agents P014 (C) | 45 | 47 (14) | 18 (3) | 109 USD | 35 / 12 | 12 h |
+| aid-orch. P102 | 24 | 41 (22) | 8 (2) | 73 USD | 34 / 10 | – |
+| agents P009 | 30 | 21 (13) | 17 (4) | 69 USD | 18 / 3 | 63 h |
+
+Kódu se dotkla třetina nálezů (P010 36 %, P108 30 %, P012 39 %, P014 34 %); 10–16 % padlo na
+formě; zhruba polovina zůstala otevřená, přenesená nebo routovaná. Cena jednoho nálezu, který změnil
+kód: 4–10 USD. V rameni B stál jeden skutečný nález Codexu ~0,3 USD (19 nálezů, 17 skutečných,
+5 USD). Zkoušky 8. 10.: tři revize, které našly totéž co CP1, odhalily změkčení plánu a obě
+díry ramene A, dohromady pod 10 USD a půl hodiny.
+
+### 6.8 Hranice: kdy lehká cesta ne
+
+Z dat P014 a zápisů P010/P012/P013/P108 lehká cesta neunese: (1) úlohu nad stupeň 4 nebo takovou,
+kde kontext jednoho okna překročí ~600 k (A: 598 k za 66 min) — rozdělit na dvě zadání, nebo
+těžká cesta; (2) souběžnou práci víc oken na jedné úloze; (3) úlohu s víc než jedním cizím
+repozitářem, kde dnes i AID stojí (kontrakt s absolutní cestou); (4) UI úlohu bez companionu —
+companion zůstává povinný (2.114.0). Pro (1) a (2) zůstává těžká cesta, ale až po 6.3.
+
+### 6.9 Co by ukázalo, že lehká cesta nepomáhá
+
+Druhý experiment na úloze z druhé strany hranice (UI nebo dvě repa nebo migrace zákaznických dat),
+ramena: solo Opus se zadáním + 6.2/6.5/6.6, solo Fable totéž, těžká cesta po 6.3. Kontroly zmrazené
+před startem, stejný model v ramenech A. Pokud těžká cesta dodá lépe nebo rychleji při poctivém
+účtu (včetně plánu), lehká cesta se omezí na úlohy do stupně 3.
+
 ## 5. Nové zápisy v plugin issues (6.–8. 10.), roztříděné
 
 - **Tření těžké cesty** (kola, kontrakty, delegace): P012 (10 zápisů: delegace na Codex nejde
