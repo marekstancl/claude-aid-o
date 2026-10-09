@@ -278,6 +278,8 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `no_change_without_outputs` | the step committed nothing and declares no output that exists | work | commit the step's work, run the step check again | PM, to waive the step |
 | `plan_manifest_missing`, `plan_branch_mismatch` | the EPIC was not started through its plan | state | `aid-plan-fsm.sh epic-start <plan> <epic> --run-id <run>`, then `init` again | |
 | `missing_lenses`, `done_advance_preconditions` | a done-advance precondition failed (each prints its own line above) | work | correct what the lines name, run the same `done-advance` again | |
+| `critic_required` | `prepare --round 1` found no passed critic check for the plan it would copy (or a later round for round 1's `critic_check_sha`) | work | `aid_critic_prepare <id> --moment plan --plan <plan>`, `aid_critic_dispatch <id> --moment plan`, write `critic-response.md`, `aid_critic_check <id> --moment plan`, then prepare again | |
+| `no_passed_critic_check` | the CP1 gate found no passed critic check bound to the plan that entered round 1 (or, with no round, to the plan as it is) — HARD: `--force` does not waive it, a switched-off review does not either | work | the three critic commands of `critic_required`; a plan fixed after round 1 needs none (the binding is the plan that entered round 1) | |
 | `missing_verifier_output`, `missing_cp3_code_review` | retired in 2.99.0 (P094): the step and EPIC review rounds replaced the verifier files | — | the `review_round_*` rows | |
 
 ### FSM States

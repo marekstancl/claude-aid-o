@@ -256,12 +256,16 @@ order, and never a hand-written prompt:
 source "$AID_PLUGIN_PATH/scripts/lib/aid-critic.sh"
 aid_critic_prepare P{NNN} --moment brainstorm        # prints <dir>/prompt.md; refuses without
                                                     # `## Zadání PM` + `## Účel a co je v sázce` in the interim
-bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus critic-brainstorm \
-  --agent-id aid-orchestrator:critic --evidence-dir <dir>
-#   Agent(subagent_type: general-purpose, model: opus,
+aid_critic_dispatch P{NNN} --moment brainstorm     # Codex through the shared transport, inside the
+                                                    # dispatch bracket; its final message IS <dir>/critic.md
+# exit 4 + "STAND-IN: …" (codex unusable, timed out, or answered without the two
+# level headings): dispatch <dir>/prompt.md yourself, bracketed —
+#   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus critic-brainstorm \
+#     --agent-id aid-orchestrator:critic --evidence-dir <dir>
+#   Agent(subagent_type: general-purpose, model: <the line's model>,
 #         prompt: "Your complete instructions are in <dir>/prompt.md. Read that whole file first and follow it exactly.")
-bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus critic-brainstorm \
-  --output-file <dir>/critic.md --evidence-dir <dir>
+#   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus critic-brainstorm \
+#     --output-file <dir>/critic.md --evidence-dir <dir>
 # write <dir>/critic-response.md: one row per level-1 item, accepted rows name the checked file or command
 aid_critic_check P{NNN} --moment brainstorm          # refuses shape violations and unanswered items
 ```
@@ -343,7 +347,9 @@ passes).** The same trio, at the plan moment:
 
 ```bash
 aid_critic_prepare P{NNN} --moment plan --plan .aid-o/plans/P{NNN}-{topic}.md
-# dispatch as above with --focus critic-plan; write critic-response.md; then
+                                 # a plan naming its brief (zadani:) is criticised from the BRIEF FILE
+aid_critic_dispatch P{NNN} --moment plan   # STAND-IN as above with --focus critic-plan
+# write critic-response.md; then
 aid_critic_check P{NNN} --moment plan
 ```
 
@@ -361,10 +367,16 @@ by the check itself as that one revision (`plan_sha256_revised` in
 refused as a second one. Either way the plan may change once after the critic
 read it.
 
-Rerun the generation check, and only then prepare CP1. The CP1 packet carries
-`critic-response.md` when the check passed for the plan CP1 reads (the checked
-plan, or the one revision rebound to it); otherwise it carries one line saying
-why not — the reviewers and the PM card see it, nothing refuses.
+Rerun the generation check, and only then prepare CP1. **The critic is
+mandatory (P109):** `aid-review-round.sh prepare --round 1` refuses a plan
+without a passed check for the plan it copies (the checked plan, or the one
+revision rebound to it) — `critic_required` — and records that plan's sha as
+`critic_check_sha` in the round manifest; every later round is held to the same
+sha, so a plan fixed after round 1 needs no second critic run. `aid-cp1-gate.sh`
+checks the same binding as a HARD condition (`no_passed_critic_check`):
+generation's `--force` does not waive it, and with the plan review switched off
+the gate checks it against the plan as it is. The packet carries
+`critic-response.md` for the reviewers.
 
 It runs every part and prints every finding before one verdict: the Files-shape
 lint (`aid-plan-lint.sh`, the tier of a new suite included), the deterministic
@@ -561,6 +573,11 @@ skipped. The gate then passes with a notice.
    ```bash
    bash "$R" prepare <plan> --round 1
    ```
+
+   It refuses without a passed critic check for this plan (`critic_required`,
+   P109): run `aid_critic_prepare P{NNN} --moment plan --plan <plan>`,
+   `aid_critic_dispatch P{NNN} --moment plan` and `aid_critic_check P{NNN} --moment plan`
+   (Step 8), then prepare again.
 
 3. Dispatch every reviewer of the round. A role with `provider: codex`:
 

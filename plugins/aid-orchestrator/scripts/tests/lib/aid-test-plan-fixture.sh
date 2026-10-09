@@ -31,6 +31,8 @@
 #     suite that places its plan itself)
 #   aid_fixture_seed_plan_decided <project_root> <plan_id>   (a plan whose close
 #     has been decided ready: what plan-merge-to-main and plan-close read)
+#   aid_fixture_seed_critic_check <project_root> <plan> [<plan_sha>]   (P109: the
+#     passed critic check a plan needs before its review round and at the gate)
 #   aid_fixture_write_brief <project_root> <plan>   (P109: the brief a strict plan
 #     must name, generated from the plan's OWN criteria; aid_fixture_seed_plan
 #     calls it for every lifecycle_strict plan that names none)
@@ -188,10 +190,33 @@ aid_fixture_seed_plan() {
     fi
   fi
 
-  # ── 5. P093 Step 7 (2026-09-18): the CP1 gate needs a closed plan-review round.
+  # ── 5. P093 Step 7 (2026-09-18): the CP1 gate needs a closed plan-review round
+  #       (and since P109 Step 3, a passed critic check — seeded inside it).
   aid_fixture_seed_plan_review "$root" "$plan" || return 1
 
   printf '%s\n' "$plan"
+}
+
+# aid_fixture_seed_critic_check <project_root> <plan> [<plan_sha>]
+#
+# A passed plan-moment critic check for <plan> (or for <plan_sha> when given):
+# critic.md with its two levels and one item, the author's response answering
+# it, and check.json in the shape aid_critic_check writes — what
+# aid_critic_verdict reads. Running the real critic is a model call; its shape
+# check has its own suite (test-critic.bats).
+aid_fixture_seed_critic_check() {
+  local root="${1:?aid_fixture_seed_critic_check: project root required}"
+  local plan="${2:?aid_fixture_seed_critic_check: plan required}" sha="${3:-}" id dir
+  id="$(awk -F': *' 'NR > 1 && /^---$/ {exit} /^id:/ {gsub(/["\x27]/, "", $2); print $2; exit}' "$plan")"
+  [[ -n "$id" ]] || { echo "aid_fixture_seed_critic_check: ${plan} has no frontmatter id" >&2; return 2; }
+  [[ -n "$sha" ]] || sha="$(sha256sum "$plan" | cut -d' ' -f1)"
+  dir="$root/.aid-o/work/evidence/${id}/critic/plan"
+  mkdir -p "$dir"
+  printf '### Úroveň 1\n\n**1. fixture: one item.** It holds.\n\n### Úroveň 2\n\nnic\n' > "$dir/critic.md"
+  printf '| # | výtka | verdikt | kde |\n|---|---|---|---|\n| 1 | fixture item | PŘIJATO | `plan.md` checked |\n' > "$dir/critic-response.md"
+  jq -n --arg p "$sha" --arg r "$(sha256sum "$dir/critic-response.md" | cut -d' ' -f1)" \
+        --arg a "$(sha256sum "$dir/critic.md" | cut -d' ' -f1)" \
+    '{moment:"plan", plan_sha256:$p, answer_sha256:$a, response_sha256:$r, level1_items:1, response_rows:1, passed:true, reason:""}' > "$dir/check.json"
 }
 
 # aid_fixture_write_brief <project_root> <plan>
@@ -292,6 +317,8 @@ aid_fixture_seed_plan_review() {
   dir="$root/.aid-o/work/evidence/${id}/cp1"
   # A re-seed replaces the fixture's own earlier round; nothing else lives here.
   rm -rf "$dir"
+  # P109 Step 3: no round is prepared without a passed critic check.
+  aid_fixture_seed_critic_check "$root" "$plan" || return 1
   bash "$plugin/scripts/aid-plan-check.sh" "$plan" --project-root "$root" \
     --json "$root/.aid-o/work/evidence/${id}/plan-check.json" --quiet >/dev/null 2>&1 || true
   bash "$round_sh" prepare --plan "$plan" --round 1 --project-root "$root" >/dev/null 2>&1 || {

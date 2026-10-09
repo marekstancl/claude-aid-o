@@ -29,6 +29,8 @@ teardown() { rm -rf "$ROOT"; }
 _plan() {
   printf -- '---\nid: P900\ntype: %s\n---\n# Plan\n\n### Step 1: first\n\nuses {{x}} literally\n\n### Step 2: second\n\ntext\n' "$1" > "$PLAN"
   _check
+  # P109: no round without a passed critic check for the plan entering it
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
 }
 _check() {
   jq -n --arg s "$(sha256sum "$PLAN" | cut -d' ' -f1)" \
@@ -39,7 +41,7 @@ _check() {
   run "$ROUND_SH" prepare "$PLAN" --round 1
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(ls "$CP1/round-1"/prompt-*.md | wc -l)" -eq 6 ]
-  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 4 ]   # plan, plan-check, standards, lint
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 5 ]   # plan, plan-check, standards, lint, critic-response
   [ "$(jq '.reviewers_expected | length' "$CP1/round-1/round.json")" -eq 6 ]
   [ "$(jq '.min_answers_effective' "$CP1/round-1/round.json")" -eq 4 ]
   [ "$(jq 'length' "$CP1/rounds.json")" -eq 1 ]
@@ -1045,10 +1047,10 @@ _fix() { echo "fix $1" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review):
 
 # ─── P107 Step 2: the author's answer to the critic rides in the CP1 packet only with a passed check ───
 _critic_answer() {  # <plan sha for the check> — a passed check.json and a matching response
-  mkdir -p "$EV/critic/plan"
+  aid_fixture_seed_critic_check "$ROOT" "$PLAN" "$1"
   printf '| # | výtka | verdikt | kde |\n|---|---|---|---|\n| 1 | test bez AC | PŘIJATO | `plan.md` Step 2, Test bullet dropped |\n' > "$EV/critic/plan/critic-response.md"
-  jq -n --arg p "$1" --arg r "$(sha256sum "$EV/critic/plan/critic-response.md" | cut -d' ' -f1)" \
-    '{moment:"plan", plan_sha256:$p, response_sha256:$r, passed:true}' > "$EV/critic/plan/check.json"
+  jq --arg r "$(sha256sum "$EV/critic/plan/critic-response.md" | cut -d' ' -f1)" '.response_sha256 = $r' \
+    "$EV/critic/plan/check.json" > "$EV/critic/plan/check.tmp" && mv "$EV/critic/plan/check.tmp" "$EV/critic/plan/check.json"
 }
 
 @test "packet: a passed critic check for this plan puts critic-response.md in every prompt, numbered and citable" {
@@ -1062,21 +1064,22 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   grep -q 'critic-response.md:line' "$CP1/round-1/prompt-reuse.md"
 }
 
-@test "packet: a response edited after its check, or no check at all, is one notice line in the prompt, never the file" {
+@test "critic: prepare refuses round 1 without a passed critic check — an edited response, no check at all — and writes no round" {
   _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
   printf '| 2 | later | PŘIJATO | `x` |\n' >> "$EV/critic/plan/critic-response.md"
   run "$ROUND_SH" prepare "$PLAN" --round 1
-  [ "$status" -eq 0 ]
-  [ ! -f "$CP1/round-1/packet/critic-response.md" ]
-  grep -q 'critic: no passed check for this plan (response edited after the check)' "$CP1/round-1/prompt-reuse.md"
-  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 4 ]
-  rm -rf "$EV/critic" "$CP1"; _check
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"critic required"*"edited after the check"* ]]
+  [[ "$output" == *"next: source lib/aid-critic.sh; aid_critic_prepare P900"* ]]
+  [[ "$output" == *"(pipeline.md §When AID refuses: critic_required)"* ]]
+  [ ! -d "$CP1/round-1" ]
+  rm -rf "$EV/critic"
   run "$ROUND_SH" prepare "$PLAN" --round 1
-  [ "$status" -eq 0 ]
-  grep -q 'critic: no passed check for this plan (missing' "$CP1/round-1/prompt-reuse.md"
+  [ "$status" -ne 0 ]; [[ "$output" == *"critic required"*"evidence missing"* ]]
+  [ ! -d "$CP1/round-1" ]
 }
 
-@test "packet: the response rides with the ONE revision the author rebound after the check; a further edit does not" {
+@test "critic: the response rides with the ONE revision the author rebound after the check; a further edit is refused" {
   _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
   printf '\nrevised for the accepted item\n' >> "$PLAN"; _check
   jq --arg s "$(sha256sum "$PLAN" | cut -d' ' -f1)" '. + {plan_sha256_revised: $s}' "$EV/critic/plan/check.json" > "$EV/critic/plan/c.tmp" && mv "$EV/critic/plan/c.tmp" "$EV/critic/plan/check.json"
@@ -1084,8 +1087,21 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   [ "$status" -eq 0 ]; [ -f "$CP1/round-1/packet/critic-response.md" ]
   rm -rf "$CP1"; printf 'edited again\n' >> "$PLAN"; _check
   run "$ROUND_SH" prepare "$PLAN" --round 1
-  [ "$status" -eq 0 ]; [ ! -f "$CP1/round-1/packet/critic-response.md" ]
-  grep -q 'plan changed since the check' "$CP1/round-1/prompt-reuse.md"
+  [ "$status" -ne 0 ]; [[ "$output" == *"made for another plan"* ]]
+}
+
+@test "critic: round 1's manifest records critic_check_sha; round 2 after a fix carries the same value and is not re-checked against the fixed plan" {
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 0 ]
+  local bound; bound="$(jq -r .critic_check_sha "$CP1/round-1/packet/manifest.json")"
+  [ "$bound" = "$(jq -r .plan_sha256 "$CP1/round-1/packet/manifest.json")" ]
+  rm -rf "$CP1"; _round1_closed
+  sed -i 's/^text$/text changed by the fix/' "$PLAN"; _check
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .critic_check_sha "$CP1/round-2/packet/manifest.json")" = "$(jq -r .critic_check_sha "$CP1/round-1/packet/manifest.json")" ]
+  [ "$(jq -r .critic_check_sha "$CP1/round-2/packet/manifest.json")" != "$(jq -r .plan_sha256 "$CP1/round-2/packet/manifest.json")" ]
 }
 
 # ─── 2.113.0: the traps of P010 (agents, 2026-09-28..30) ───
@@ -1185,14 +1201,16 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
 
 @test "packet: the plan lint's findings ride in every CP1 prompt, so a legacy plan's advisories reach the reviewers" {
   printf -- '- Modify: the 6 remaining version files.\n' >> "$PLAN"; _check
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
   run "$ROUND_SH" prepare "$PLAN" --round 1
   echo "$output"; [ "$status" -eq 0 ]
   [ -s "$CP1/round-1/packet/lint.txt" ]
   grep -q '^## Plan lint: findings' "$CP1/round-1/prompt-generalist_a.md"
   grep -q 'remaining version files' "$CP1/round-1/prompt-generalist_a.md"
-  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 4 ]
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 5 ]
   # a legacy plan's STRICT-tier finding is a [WARN legacy] line and rides too (P009's case)
   rm -rf "$CP1"; printf -- '\n**Files:**\n- Modify: `scripts/a.sh` (a note) — x\n' >> "$PLAN"; _check
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
   run "$ROUND_SH" prepare "$PLAN" --round 1; [ "$status" -eq 0 ]
   grep -q 'WARN legacy' "$CP1/round-1/prompt-generalist_a.md"
 }

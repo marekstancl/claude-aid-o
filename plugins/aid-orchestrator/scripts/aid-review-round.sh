@@ -406,7 +406,8 @@ cmd_prepare() {
   trap 'rm -rf "$dir"' EXIT
   local roles=() role
   if [[ "$MODE" == plan ]]; then
-    aid_plan_review_packet_build "$PLAN" "$ROOT" "$check" "$dir" || exit 1
+    # exit 3 = critic_required (P109): the caller tells a missing critic from a broken packet
+    aid_plan_review_packet_build "$PLAN" "$ROOT" "$check" "$dir" || exit $?
     sha="$(jq -r .plan_sha256 "${dir}/packet/manifest.json")"
     mapfile -t roles < <(_expected_roles "$ROUND" | grep -v '^$')
     local min; min="$(aid_review_config_floor "${#roles[@]}")"

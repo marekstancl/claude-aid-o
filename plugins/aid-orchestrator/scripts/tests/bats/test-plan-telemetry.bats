@@ -121,6 +121,7 @@ timeline_of() { printf '%s/.aid-o/work/evidence/%s/timeline.jsonl' "$TMP" "$1"; 
   # paths would count exactly the runs nobody needs counted (codex review of
   # EPIC 2, finding 3).
   plan="$(write_plan P966 'plugins/aid-orchestrator/scripts/aid-fsm.sh')"
+  aid_fixture_seed_critic_check "$TMP" "$plan"   # this case measures telemetry, not the critic
   run bash "$GATE" --plan "$plan" --project-root "$TMP"
   [ "$status" -eq 1 ]
   run jq -r 'select(.event == "cp1_gate_result") | "\(.result) \(.exit_code)"' "$(timeline_of P966)"

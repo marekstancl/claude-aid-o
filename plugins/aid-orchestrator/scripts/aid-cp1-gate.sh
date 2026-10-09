@@ -23,6 +23,12 @@
 # review_checkpoints.enabled or cp1_plan_review set to false passes with a
 # notice; a plan outside any .aid-o/ workspace is not gated.
 #
+# The critic (P109 Step 3) is checked FIRST and as a hard condition, so neither
+# --force nor a switched-off review waives it: a passed critic check must bind
+# to round 1's `critic_check_sha`, or — when cp1/ holds no round at all — to
+# the plan as it is now. A round 1 prepared before 2.115.0 (no key) is not
+# checked backwards.
+#
 # Exit: 0 pass
 #       1 a review condition fails (forceable by the PM through
 #         aid-auto-pipeline.sh --force; every failure is named)
@@ -47,6 +53,8 @@ source "${SCRIPT_DIR}/lib/aid-review-config.sh"
 _roles_skill="${SCRIPT_DIR}/../skills/plan-review-roles.md"
 # shellcheck source=lib/aid-ac-extract.sh
 source "${SCRIPT_DIR}/lib/aid-ac-extract.sh"
+# shellcheck source=lib/aid-critic.sh
+source "${SCRIPT_DIR}/lib/aid-critic.sh"
 
 plan="" project_root="" json_out=""
 while [[ $# -gt 0 ]]; do
@@ -113,6 +121,22 @@ done
 _cfg_err="$(aid_review_config_load "$project_root" plan_review "$_roles_skill" 2>&1 && aid_review_config_validate 2>&1)" \
   || { _hard "$(grep 'plan_review config:' <<< "$_cfg_err" | tail -1)"; _finish; }
 aid_review_config_load "$project_root" plan_review "$_roles_skill" 2>/dev/null
+
+# --- the critic: hard, and before the switched-off return (P109 Step 3) ------
+_critic_sha="" _critic_which=""
+if [[ -f "${CP1}/round-1/packet/manifest.json" ]]; then
+  _critic_sha="$(jq -r '.critic_check_sha // ""' "${CP1}/round-1/packet/manifest.json" 2>/dev/null)"
+  _critic_which="the plan that entered round 1"
+elif ! compgen -G "${CP1}/round-*" >/dev/null; then
+  _critic_sha="$(sha256sum "$plan" | cut -d' ' -f1)"
+  _critic_which="the plan as it is (no review round exists)"
+fi
+if [[ -n "$_critic_sha" ]] && ! _critic_why="$(aid_critic_verdict "$plan_id" "$_critic_sha" --root "$project_root")"; then
+  _hard "no passed critic check for ${_critic_which} (${_critic_sha:0:12}): ${_critic_why}
+  next: aid_critic_prepare ${plan_id} --moment plan --plan ${plan}; aid_critic_dispatch ${plan_id} --moment plan; aid_critic_check ${plan_id} --moment plan (pipeline.md §When AID refuses: no_passed_critic_check)"
+  _finish
+fi
+
 if [[ "$RC_ENABLED" != 1 ]]; then
   _finish "plan review is switched off (review_checkpoints.enabled or cp1_plan_review is false)"
 fi

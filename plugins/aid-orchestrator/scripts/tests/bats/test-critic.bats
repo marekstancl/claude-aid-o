@@ -209,3 +209,107 @@ _response() {  # <moment> <rows...>
   run aid_critic_rebind P9 --plan "$P/.aid-o/plans/P9-x.md"
   [ "$status" -eq 5 ]; [[ "$output" == *"already rebound"* ]]
 }
+
+# ── P109 Step 3: the critic through Codex, the brief as its input, one verdict ──
+# Defects: a critic run whose answer is a refusal to write, recorded as if it
+# were an answer (9. 10. 2026); a critic that cannot run once the interim is
+# gone; two readers of check.json disagreeing on "passed for this plan".
+
+# _stub_codex <mode> — a codex on PATH that answers / complains / times out.
+_stub_codex() {
+  local bin="$T/bin"; mkdir -p "$bin"
+  cat > "$bin/codex" <<STUB
+#!/usr/bin/env bash
+[[ "\$1" == --version ]] && { echo "codex-cli 9.9.9"; exit 0; }
+last=""; while [[ \$# -gt 0 ]]; do [[ "\$1" == --output-last-message ]] && last="\$2"; shift; done
+cat > /dev/null
+case "$1" in
+  answer)   printf '### Úroveň 1\n\nnic\n\n### Úroveň 2\n\nnic\n' > "\$last" ;;
+  complain) printf 'I cannot write critic.md: the sandbox is read-only.\n' > "\$last" ;;
+  timeout)  exit 124 ;;
+esac
+STUB
+  chmod +x "$bin/codex"
+  export AID_CODEX_BIN="$bin/codex"
+  printf '{"available":true,"binary":"%s","version":"9.9.9","model":"m","reason":"none"}\n' "$bin/codex" > "$T/probe.json"
+  export AID_CODEX_PROBE_STUB="$T/probe.json"
+}
+
+@test "dispatch: Codex printing the two levels writes critic.md inside the dispatch bracket" {
+  aid_critic_prepare P9 --moment brainstorm >/dev/null
+  _stub_codex answer
+  run aid_critic_dispatch P9 --moment brainstorm
+  echo "$output"; [ "$status" -eq 0 ]
+  grep -q '^### Úroveň 1' "$D/brainstorm/critic.md"
+  grep -q 'critic-brainstorm' "$D/brainstorm/timeline.jsonl"
+}
+
+@test "dispatch: a Codex sandbox complaint is no critique — exit 4 and the STAND-IN line" {
+  aid_critic_prepare P9 --moment brainstorm >/dev/null
+  _stub_codex complain
+  run aid_critic_dispatch P9 --moment brainstorm
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"STAND-IN:"*"without the two level headings"*"prompt.md"* ]]
+  [ ! -f "$D/brainstorm/critic.md" ]
+}
+
+@test "dispatch: a Codex timeout (124) is exit 4 and the STAND-IN line" {
+  aid_critic_prepare P9 --moment brainstorm >/dev/null
+  _stub_codex timeout
+  run aid_critic_dispatch P9 --moment brainstorm
+  [ "$status" -eq 4 ]; [[ "$output" == *"STAND-IN: codex exited 124 (timeout)"* ]]
+}
+
+@test "prepare: prompt-codex.md asks to print and write nothing; prompt.md keeps the write instruction" {
+  aid_critic_prepare P9 --moment brainstorm >/dev/null
+  grep -q 'vypiš jako svou závěrečnou zprávu' "$D/brainstorm/prompt-codex.md"
+  ! grep -q 'zapiš do' "$D/brainstorm/prompt-codex.md"
+  grep -q 'zapiš do' "$D/brainstorm/prompt.md"
+}
+
+@test "prepare --moment plan: a plan naming its brief is criticised from the brief file, no interim needed" {
+  rm "$P/.aid-o/work/interim-P9.md"
+  cp "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md" "$P/.aid-o/plans/P9-zadani.md"
+  printf -- '---\nid: P9\nzadani: .aid-o/plans/P9-zadani.md\n---\n# Plan: x\n' > "$P/.aid-o/plans/P9-x.md"
+  run aid_critic_prepare P9 --moment plan --plan "$P/.aid-o/plans/P9-x.md"
+  echo "$output"; [ "$status" -eq 0 ]
+  grep -q 'potřebuju aby asistent byl pořád vyvýjen' "$D/plan/prompt.md"
+  grep -q 'druhý zákazník, který nepoužívá Freelo' "$D/plan/prompt.md"
+  [ "$(jq -r .source "$D/plan/prepare.json")" = brief ]
+}
+
+@test "verdict: passes for the checked plan, fails on a foreign sha and on an edited response" {
+  local sha; sha="$(sha256sum "$P/.aid-o/plans/P9-x.md" | cut -d' ' -f1)"
+  source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"
+  aid_fixture_seed_critic_check "$P" "$P/.aid-o/plans/P9-x.md"
+  run aid_critic_verdict P9 "$sha" --root "$P"
+  [ "$status" -eq 0 ]
+  run aid_critic_verdict P9 "$(printf x | sha256sum | cut -d' ' -f1)" --root "$P"
+  [ "$status" -eq 1 ]; [[ "$output" == *"made for another plan"* ]]
+  echo "| 2 | later | PŘIJATO | \`x\` |" >> "$D/plan/critic-response.md"
+  run aid_critic_verdict P9 "$sha" --root "$P"
+  [ "$status" -eq 1 ]; [[ "$output" == *"edited after the check"* ]]
+}
+
+@test "dispatch: two level-1 headings and no level 2 is no critique; --provider claude prints the STAND-IN at once" {
+  aid_critic_prepare P9 --moment brainstorm >/dev/null
+  _stub_codex answer
+  cat > "$T/bin/codex" <<'STUB'
+#!/usr/bin/env bash
+[[ "$1" == --version ]] && { echo "codex-cli 9.9.9"; exit 0; }
+last=""; while [[ $# -gt 0 ]]; do [[ "$1" == --output-last-message ]] && last="$2"; shift; done
+cat > /dev/null
+printf '### Úroveň 1\n\nnic\n\n### Úroveň 1\n\nznovu\n' > "$last"
+STUB
+  run aid_critic_dispatch P9 --moment brainstorm
+  [ "$status" -eq 4 ]; [[ "$output" == *"without the two level headings"* ]]
+  run aid_critic_dispatch P9 --moment brainstorm --provider claude
+  [ "$status" -eq 4 ]; [[ "$output" == *"STAND-IN: provider claude asked"*"prompt.md"* ]]
+}
+
+@test "prepare --moment plan: a plan naming a brief that does not exist is refused, never criticised from the interim" {
+  printf -- '---\nid: P9\nzadani: .aid-o/plans/P9-zadani.md\n---\n# Plan: x\n' > "$P/.aid-o/plans/P9-x.md"
+  run aid_critic_prepare P9 --moment plan --plan "$P/.aid-o/plans/P9-x.md"
+  [ "$status" -eq 2 ]; [[ "$output" == *"names the brief"*"does not exist"* ]]
+  [ ! -f "$D/plan/prompt.md" ]
+}

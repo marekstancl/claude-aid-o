@@ -5,6 +5,10 @@
 #   aid_critic_prepare <plan_id> --moment brainstorm|plan [--plan <path>] [--root <dir>]
 #   aid_critic_check   <plan_id> --moment brainstorm|plan [--plan <path>] [--root <dir>]
 #   aid_critic_rebind  <plan_id> --plan <path> [--root <dir>]   after the plan was revised for the accepted items
+#   aid_critic_dispatch <plan_id> --moment brainstorm|plan [--provider codex|claude] [--root <dir>]
+#                      runs the critic (Codex through the shared transport), or prints STAND-IN
+#   aid_critic_verdict <plan_id> <plan_sha> [--root <dir>]   is there a passed plan-moment check for
+#                      exactly this plan? The review packet and the CP1 gate both ask here (P109)
 #
 # WHY: the critic was tried twice on the same plan in the agents project (P010,
 # 2026-09-28). With cost figures in its context it returned "do not build"; with
@@ -27,6 +31,8 @@ source "${_AID_CRITIC_LIB_DIR}/aid-roots.sh"
 source "${_AID_CRITIC_LIB_DIR}/aid-scoping.sh"
 # shellcheck source=aid-stage-log.sh
 source "${_AID_CRITIC_LIB_DIR}/aid-stage-log.sh"
+# shellcheck source=aid-zadani.sh
+source "${_AID_CRITIC_LIB_DIR}/aid-zadani.sh"
 
 AID_CRITIC_ROLE_FILE="${_AID_CRITIC_LIB_DIR}/../../skills/critic.md"
 AID_CRITIC_ASSUME='Předpokládej, že se to staví.'
@@ -92,16 +98,55 @@ _aid_critic_section() {
   return 0
 }
 
+# _aid_critic_brief_file <plan> <root> — the brief file the plan names, resolved
+# against the project root; nothing when it names none or the file is absent.
+_aid_critic_brief_file() {
+  local z; z="$(_aid_fm_get "$1" zadani)"
+  [[ -n "$z" ]] || return 1
+  [[ "$z" == /* ]] || z="$2/$z"
+  [[ -f "$z" ]] || return 1
+  printf '%s' "$z"
+}
+
+# _aid_critic_strip_cost <text> — sets _acs_body/_acs_stripped like _aid_critic_section.
+_aid_critic_strip_cost() {
+  local kept
+  kept="$(printf '%s\n' "$1" | grep -Ev "$AID_CRITIC_COST_RE" || true)"
+  _acs_stripped=$(( $(printf '%s\n' "$1" | grep -c '') - $(printf '%s\n' "$kept" | grep -c '') ))
+  _acs_body="$kept"
+}
+
 aid_critic_prepare() {
   local _ac_plan_id _ac_moment _ac_plan _ac_root
   _aid_critic_args "$@" || return 1
   local interim="${_ac_root}/.aid-o/work/interim-${_ac_plan_id}.md" dir brief stakes subject="" _acs_body _acs_stripped total=0
-  [[ -f "$interim" ]] || { echo "critic: no interim for ${_ac_plan_id} at ${interim}" >&2; return 2; }
+  local zfile="" source_sha=""
   [[ -f "$AID_CRITIC_ROLE_FILE" ]] || { echo "critic: role text missing at ${AID_CRITIC_ROLE_FILE}" >&2; return 2; }
-  _aid_critic_section "$interim" "$AID_CRITIC_SECTION_BRIEF" || return 3
-  brief="$_acs_body"; total=$(( total + _acs_stripped ))
-  _aid_critic_section "$interim" "$AID_CRITIC_SECTION_STAKES" || return 3
-  stakes="$_acs_body"; total=$(( total + _acs_stripped ))
+  # At the plan moment a plan bound to a brief is criticised against the BRIEF
+  # FILE (P109): the interim is deleted after CP1, the brief is not, so a
+  # critic rerun after a brief change needs no interim.
+  # A plan that NAMES a brief the critic cannot read is refused: falling back
+  # to an interim would criticise the plan against other input than it names.
+  if [[ "$_ac_moment" == "plan" && -f "$_ac_plan" && -n "$(_aid_fm_get "$_ac_plan" zadani)" ]] \
+     && ! _aid_critic_brief_file "$_ac_plan" "$_ac_root" >/dev/null; then
+    echo "critic: the plan names the brief '$(_aid_fm_get "$_ac_plan" zadani)', which does not exist — fix zadani: or write the brief (aid-plan-lint.sh --zadani)" >&2
+    return 2
+  fi
+  if [[ "$_ac_moment" == "plan" && -f "$_ac_plan" ]] && zfile="$(_aid_critic_brief_file "$_ac_plan" "$_ac_root")"; then
+    _aid_critic_strip_cost "$(_aid_plan_section "$zfile" "${AID_ZADANI_HEADINGS[0]}" | awk '/^\*\*Co je v sázce:\*\*/ { exit } { print }')"
+    brief="$_acs_body"; total=$(( total + _acs_stripped ))
+    _aid_critic_strip_cost "$(aid_zadani_stakes "$zfile")" || true
+    [[ -n "${_acs_body// /}" ]] || { echo "critic: the brief ${zfile} has no **Co je v sázce:** paragraph — aid-plan-lint.sh --zadani ${zfile}" >&2; return 3; }
+    stakes="$_acs_body"; total=$(( total + _acs_stripped ))
+    source_sha="$(sha256sum "$zfile" | cut -d' ' -f1)"
+  else
+    [[ -f "$interim" ]] || { echo "critic: no interim for ${_ac_plan_id} at ${interim}$( [[ "$_ac_moment" == plan ]] && echo ' (and the plan names no brief file — zadani:)')" >&2; return 2; }
+    _aid_critic_section "$interim" "$AID_CRITIC_SECTION_BRIEF" || return 3
+    brief="$_acs_body"; total=$(( total + _acs_stripped ))
+    _aid_critic_section "$interim" "$AID_CRITIC_SECTION_STAKES" || return 3
+    stakes="$_acs_body"; total=$(( total + _acs_stripped ))
+    source_sha="$(sha256sum "$interim" | cut -d' ' -f1)"
+  fi
   if [[ "$_ac_moment" == "brainstorm" ]]; then
     _aid_critic_section "$interim" "$AID_CRITIC_SECTION_PROPOSAL" || return 3
     subject="$_acs_body"; total=$(( total + _acs_stripped ))
@@ -144,13 +189,20 @@ aid_critic_prepare() {
     echo
     echo "## Kam psát"
     echo
-    echo "Odpověď zapiš do \`${dir}/critic.md\` přesně se dvěma nadpisy popsanými výše. Nic jiného neměň."
-    [[ "$total" -gt 0 ]] && echo "" && echo "<!-- ${total} cost line(s) stripped from the interim sections -->"
-  } > "${dir}/prompt.md"
+    echo "AID_CRITIC_OUTPUT_LINE"
+    [[ "$total" -gt 0 ]] && echo "" && echo "<!-- ${total} cost line(s) stripped from the $( [[ -n "$zfile" ]] && echo brief || echo interim) sections -->"
+  } > "${dir}/prompt.tmpl"
+  # Two renderings of one prompt: a Claude agent writes the file; Codex runs in
+  # a read-only sandbox and cannot, so it prints (9. 10. 2026: `-o` saved its
+  # complaint about the sandbox instead of a critique).
+  sed "s#^AID_CRITIC_OUTPUT_LINE\$#Odpověď zapiš do \`${dir}/critic.md\` přesně se dvěma nadpisy popsanými výše. Nic jiného neměň.#" "${dir}/prompt.tmpl" > "${dir}/prompt.md"
+  sed "s#^AID_CRITIC_OUTPUT_LINE\$#Celou odpověď v předepsaném tvaru (dva nadpisy popsané výše) vypiš jako svou závěrečnou zprávu. Žádný soubor nepiš ani neměň.#" "${dir}/prompt.tmpl" > "${dir}/prompt-codex.md"
+  rm -f "${dir}/prompt.tmpl"
   jq -n --arg m "$_ac_moment" --arg plan "${_ac_plan:-}" \
         --arg ps "$( [[ -n "$_ac_plan" ]] && sha256sum "$_ac_plan" | cut -d' ' -f1 || echo '' )" \
-        --arg is "$(sha256sum "$interim" | cut -d' ' -f1)" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        '{moment:$m, plan:$plan, plan_sha256:$ps, interim_sha256:$is, prepared_at:$at}' > "${dir}/prepare.json"
+        --arg is "$source_sha" --arg src "$( [[ -n "$zfile" ]] && echo brief || echo interim)" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{moment:$m, plan:$plan, plan_sha256:$ps, source:$src, source_sha256:$is, prepared_at:$at}
+         + (if $src == "interim" then {interim_sha256:$is} else {zadani_sha256:$is} end)' > "${dir}/prepare.json"
   echo "${dir}/prompt.md"
   return 0
 }
@@ -296,4 +348,92 @@ aid_critic_rebind() {
     jq -nc --arg s "$now" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{event:"critic_rebound", moment:"plan", plan_sha256_revised:$s, timestamp:$at}' >> "$tl"
   fi
   echo "critic: response rebound to the revised plan ${now:0:12} → ${dir}/check.json"
+}
+
+# aid_critic_verdict <plan_id> <plan_sha> [--root <dir>] — exit 0 when the plan
+# moment's check.json passed, its response is unedited since, and it was made
+# for <plan_sha> (the checked plan or its one rebound revision); otherwise exit
+# 1 printing the reason. ONE answer for the CP1 packet and the CP1 gate (P109):
+# two readers of check.json would drift on what "passed for this plan" means.
+aid_critic_verdict() {
+  local plan_id="${1-}" want="${2-}" root="" dir c
+  shift 2 || true
+  [[ "${1-}" == --root ]] && root="${2-}"
+  root="${root:-${AID_PROJECT_ROOT:-$PWD}}"
+  # a project that is not a git repository (a fixture) is its own state root, as in the gate
+  root="$(aid_state_root "$root" 2>/dev/null || printf '%s' "$root")"
+  dir="$(_aid_critic_dir "$root" "$plan_id" plan)"; c="${dir}/check.json"
+  [[ -d "$dir" ]] || { echo "evidence missing — the critic did not run at the plan moment (${dir})"; return 1; }
+  [[ -f "$c" ]] || { echo "no check.json — aid_critic_check was not run"; return 1; }
+  [[ "$(jq -r '.passed // false' "$c" 2>/dev/null)" == true ]] || { echo "the check did not pass: $(jq -r '.reason // "unreadable"' "$c" 2>/dev/null)"; return 1; }
+  [[ -f "${dir}/critic-response.md" && "$(jq -r '.response_sha256 // ""' "$c")" == "$(sha256sum "${dir}/critic-response.md" | cut -d' ' -f1)" ]] \
+    || { echo "critic-response.md was edited after the check"; return 1; }
+  if [[ "$(jq -r '.plan_sha256 // ""' "$c")" != "$want" && "$(jq -r '.plan_sha256_revised // ""' "$c")" != "$want" ]]; then
+    echo "the check was made for another plan ($(jq -r '.plan_sha256 // ""' "$c" | cut -c1-12)) — aid_critic_rebind after the one revision, or a new critic run"
+    return 1
+  fi
+  return 0
+}
+
+# aid_critic_dispatch <plan_id> --moment brainstorm|plan [--provider codex|claude] [--root <dir>]
+#   codex (default): one fresh read-only Codex through _run_codex_isolated with
+#   prompt-codex.md (print, do not write); its last message IS critic.md, inside
+#   the dispatch bracket. A non-zero exit (124 = timeout), an unusable probe or
+#   fewer than two level headings in the answer → the STAND-IN line and exit 4,
+#   as the brainstorm opponent does: the controller dispatches prompt.md to a
+#   Claude agent at the policy's stand_in_model. claude: prints that line, exit 4.
+aid_critic_dispatch() {
+  local plan_id="${1-}" moment="" provider=codex root="" dir rc=0 why=""
+  shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --moment) moment="${2-}"; shift 2 ;;
+      --provider) provider="${2-}"; shift 2 ;;
+      --root) root="${2-}"; shift 2 ;;
+      *) echo "critic: unknown argument '$1'" >&2; return 1 ;;
+    esac
+  done
+  [[ "$plan_id" =~ ^P[0-9]+$ ]] || { echo "critic: <plan_id> must look like P107" >&2; return 1; }
+  case "$moment" in brainstorm|plan) ;; *) echo "critic: --moment must be brainstorm or plan" >&2; return 1 ;; esac
+  root="$(aid_state_root "${root:-${AID_PROJECT_ROOT:-$PWD}}")" || return 1
+  dir="$(_aid_critic_dir "$root" "$plan_id" "$moment")"
+  [[ -f "${dir}/prompt.md" && -f "${dir}/prompt-codex.md" ]] || { echo "critic: nothing prepared at ${dir} — run aid_critic_prepare first" >&2; return 2; }
+  local stand_in=opus
+  # shellcheck source=aid-review-config.sh
+  source "${_AID_CRITIC_LIB_DIR}/aid-review-config.sh"
+  if aid_review_config_load "$root" plan_review "${_AID_CRITIC_LIB_DIR}/../../skills/plan-review-roles.md" >/dev/null 2>&1; then
+    stand_in="${RC_STAND_IN_MODEL:-opus}"
+    local i; for i in "${!RC_PROVIDER[@]}"; do
+      [[ "${RC_PROVIDER[$i]}" == codex ]] && { CODEX_MODEL="${RC_MODEL[$i]}"; CODEX_EFFORT="${RC_EFFORT[$i]}"; break; }
+    done
+  fi
+  _aid_critic_stand_in() {
+    echo "STAND-IN: ${1}; dispatch ${dir}/prompt.md to a general-purpose agent at model ${stand_in} (it writes ${dir}/critic.md), then write critic-response.md and run aid_critic_check" >&2
+    return 4
+  }
+  [[ "$provider" == claude ]] && { _aid_critic_stand_in "provider claude asked"; return 4; }
+  [[ "$provider" == codex ]] || { echo "critic: --provider must be codex or claude" >&2; return 1; }
+  # shellcheck source=aid-codex-transport.sh
+  source "${_AID_CRITIC_LIB_DIR}/aid-codex-transport.sh"
+  local probe; probe="$(AID_PROJECT_ROOT="$root" aid_codex_probe 2>/dev/null)"
+  if [[ "$(jq -r '.available // false' <<< "$probe" 2>/dev/null)" != true ]]; then
+    _aid_critic_stand_in "codex is unavailable ($(jq -r '.reason // "unknown"' <<< "$probe" 2>/dev/null))"; return 4
+  fi
+  local emit="${_AID_CRITIC_LIB_DIR}/../aid-emit-dispatch.sh"
+  bash "$emit" start --focus "critic-${moment}" --agent-id "codex:${CODEX_MODEL}" --evidence-dir "$dir" >/dev/null 2>&1 || true
+  rm -f "${dir}/critic.md"
+  _run_codex_isolated "$root" "${dir}/prompt-codex.md" "${dir}/codex-events.jsonl" "${dir}/codex-stderr.log" "${dir}/critic.md" || rc=$?
+  [[ -f "${dir}/critic.md" ]] || : > "${dir}/critic.md"
+  bash "$emit" complete --focus "critic-${moment}" --output-file "${dir}/critic.md" --evidence-dir "$dir" >/dev/null 2>&1 || true
+  if (( rc != 0 )); then
+    why="codex exited ${rc}$( (( rc == 124 )) && echo ' (timeout)')"
+  elif ! grep -qE "$AID_CRITIC_L1_RE" "${dir}/critic.md" || ! grep -qE "$AID_CRITIC_L2_RE" "${dir}/critic.md"; then
+    why="codex answered without the two level headings (a refusal or a complaint is not a critique)"
+  fi
+  if [[ -n "$why" ]]; then
+    mv "${dir}/critic.md" "${dir}/critic-codex-rejected.md" 2>/dev/null || true
+    _aid_critic_stand_in "$why"; return 4
+  fi
+  echo "critic: Codex answered → ${dir}/critic.md; write critic-response.md, then aid_critic_check ${plan_id} --moment ${moment}"
+  return 0
 }
