@@ -42,7 +42,9 @@ a `frontend-build-standard.md` (čti živě).
 5. JSON zapiš nástrojem Write do `<project>/.aid-ui/structure.json` (nikdy ne
    jako shellový literál) a po `approve`:
    `aid-ui-state.sh set <project> structure "$(cat <project>/.aid-ui/structure.json)" --answer <id>`.
-   `return` s komentářem → uprav JSON i obrázky, nová otázka.
+   `return` s komentářem → uprav JSON i obrázky, nová otázka. Komentář z „Vrátit s poznámkami“
+   má řádek na stránku (`Stránka „<název>“: <co jinak>`): předělej jen jmenované stránky podle téhož
+   rámce (cro, Page-Specific Frameworks) s poznámkou jako vstupem, ostatní nech beze změny.
 6. Tělo kapitoly `struktura` (strom stránek, u aplikace tabulka tok×stav,
    drátěné modely zkopírované do `docs/brand/assets/`) do souboru
    v `.aid-ui/`, `aid-ui-state.sh body <project> struktura --file <soubor>`,

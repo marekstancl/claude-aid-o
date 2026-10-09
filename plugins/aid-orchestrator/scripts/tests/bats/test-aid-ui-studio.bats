@@ -765,6 +765,10 @@ JSON
   grep -qF '"návrh " + (LB.i + 1) + " z " + LB.arts.length' "$f"
   grep -qF 'const FRAMES = ".card[data-card], .gallery figure";' "$f"    # a gallery (structure, texts) steps like the cards
   grep -qF 'art.querySelector("h3, figcaption b")' "$f"
+  # per-page notes (PM 9. 10.): "Chci jinak" in the lightbox of a gallery figure, sent together as one return; edge-fixed arrows
+  for w in 'class: "chip lb-note"' 'sec.noteFor = (id, then)' '"Vrátit s poznámkami (" + n + ")"' 'answer("return", undefined, Object.entries(notes)' '.lb-bar .lb-prev { justify-self: start; } .lb-bar .lb-next { justify-self: end; }' 'el("figure", { "data-fig": c.id }'; do
+    grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
+  done
   jq '.cards[0].preview2 = "a2.png"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
   printf 'PNG1' > "$P/.aid-ui/studio/a.png"; printf 'PNG2' > "$P/.aid-ui/studio/a2.png"
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/preview?question=q1&card=a")" = 200 ]; [ "$(cat "$BATS_TEST_TMPDIR/body")" = PNG1 ]
