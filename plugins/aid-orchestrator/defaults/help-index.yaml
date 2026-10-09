@@ -210,7 +210,7 @@ surfaces:
 
   - { command: /critic, file: plugins/aid-orchestrator/skills/critic.md,
       purpose: "The independent critic of a proposal or plan — two levels (fix / consider the scope), assembled and checked by lib/aid-critic.sh; loaded by /aid-plan, not invoked directly",
-      topic: plan, audience: power, disposition: current,
+      topic: none, audience: internal, disposition: intentionally_internal,
       writes: [], final_turn: "card:finished" }
 
   - { command: /visual-companion, file: plugins/aid-orchestrator/skills/visual-companion/SKILL.md,

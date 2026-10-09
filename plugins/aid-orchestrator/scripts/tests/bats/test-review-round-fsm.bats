@@ -83,15 +83,26 @@ _check() {
   [[ "$output" == *"next: bash $AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint cp2 --step 0 --evidence-dir $E && bash $AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare --checkpoint cp2 --step 0 --evidence-dir $E --round 2"* ]]
   [[ "$output" == *"(pipeline.md §When AID refuses: review_round_stale)"* ]]
 }
-@test "drift: every measured reason in aid-fsm.sh has a next: line and a row in pipeline.md" {
+@test "drift: every measured reason has a row in pipeline.md and, where a script prints it, a next: line" {
+  # P109 Step 7: four scripts print refusal codes. aid-fsm.sh through the arms
+  # of _fsm_refusal_next (as before); aid-review-round.sh, aid-cp1-gate.sh and
+  # lib/aid-plan-review-packet.sh at the refusal site — a `next:` within the
+  # three lines that end with the code's `(pipeline.md §When AID refuses: …)`
+  # suffix. A fixture reason no scanned script prints stays row-only.
   local tsv="$AID_PLUGIN_PATH/scripts/tests/fixtures/refusals/measured-2026-09.tsv"
-  local table="$AID_PLUGIN_PATH/skills/pipeline.md" arms r missing=""
+  local table="$AID_PLUGIN_PATH/skills/pipeline.md" arms r missing="" f ln
+  local -a sites=("$AID_PLUGIN_PATH/scripts/aid-review-round.sh" "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-packet.sh")
   arms="$(sed -n '/^_fsm_refusal_next()/,/^}/p' "$FSM")"
   while IFS=$'\t' read -r _ _ r; do
     r="${r%%_[0-9]*}"   # gates_runner_exit_1 → its row gates_runner_exit_<n>
     grep -q "\`${r}" "$table" || missing+=" row:$r"
-    grep -q "$r" "$FSM" || continue
-    [[ "$arms" == *"$r"* ]] || missing+=" next:$r"
+    if grep -q "$r" "$FSM"; then [[ "$arms" == *"$r"* ]] || missing+=" next:$r"; fi
+    for f in "${sites[@]}"; do
+      while IFS=: read -r ln _; do
+        [[ -n "$ln" ]] || continue
+        sed -n "$(( ln > 2 ? ln - 2 : 1 )),${ln}p" "$f" | grep -q 'next:' || missing+=" next:$r@${f##*/}:$ln"
+      done < <(grep -n "When AID refuses: ${r})" "$f")
+    done
   done < <(grep -v '^#' "$tsv")
   [[ -z "$missing" ]] || { echo "missing:$missing"; false; }
 }

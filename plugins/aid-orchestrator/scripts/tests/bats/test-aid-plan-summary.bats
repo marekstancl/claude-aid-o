@@ -341,7 +341,9 @@ PLAN
 
 @test "an AID Role outside the valid set is named as a defect, with its consequence" {
   local p="$BATS_TEST_TMPDIR/p.md" o="$BATS_TEST_TMPDIR/o.html"
-  printf -- '---\nid: P906\ntype: plan\n---\n# P906 — X\n\n## Goal\nG.\n\n### Step 1: A\n\n**Objective:** cosi.\n\n**AID Role:** docs\n' > "$p"
+  # `docs` became a valid role in 2.112.0 (docs-writer its older spelling), so
+  # the defect case is a role that never was one: a step that is both sides.
+  printf -- '---\nid: P906\ntype: plan\n---\n# P906 — X\n\n## Goal\nG.\n\n### Step 1: A\n\n**Objective:** cosi.\n\n**AID Role:** fullstack\n' > "$p"
   run aid_plan_summary_render "$p" "$o"
   [ "$status" -eq 0 ]
   grep -q "VADA" "$o"

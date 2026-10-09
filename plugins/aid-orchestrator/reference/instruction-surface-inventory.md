@@ -48,7 +48,10 @@ that is absent from a clean checkout.
 | `skills/run-management.md` | `update` | `active.md` guidance made mode-aware. |
 | `skills/plan-writing.md` | `update` | Documentation-step rule and lifecycle references made mode-aware. |
 | `skills/planner.md` | `verified` | Plans work; does not instruct on release cadence. |
-| `skills/brainstorming.md` | `verified` | Pre-plan activity. |
+| `skills/brainstorming.md` | `verified` | Pre-plan activity. P109: RULE 1b — the brief file is written at Step 8 and survives the interim. |
+| `skills/critic.md` | `verified` | P107/P109: the critic's role; mandatory before CP1, read from the brief file at the plan moment; no release cadence. |
+| `defaults/templates/zadani.md` | `verified` | P109: the brief file template `/aid-plan` copies; six sections and AC points; no lifecycle instruction. |
+| `evidence/<plan>/critic/<moment>/prompt.md`, `prompt-codex.md` | `verified` | P109: rendered by `lib/aid-critic.sh` (Claude writes the file; Codex prints and writes nothing); no lifecycle instruction. |
 | `skills/memory.md`, `skills/memory-mcp.md` | `verified` | Memory protocol; no lifecycle instruction. |
 | `skills/skill-writing.md`, `skills/command-writing.md` | `verified` | Authoring standards; no lifecycle instruction. |
 | `skills/communication.md` | `verified` | P080. Card shapes and the publish-before-present clause; says nothing about release cadence, so neither mode changes what it instructs. |
@@ -71,6 +74,8 @@ that is absent from a clean checkout.
 | `CHANGELOG.md` | `no-scope` | History. Rewriting it to match current behaviour would destroy the audit trail. |
 | `README.md`, `plugins/aid-orchestrator/README.md` | `update` | Human-facing, but they describe the lifecycle, so they are kept correct. |
 | `defaults/enforcement-registry.yaml` | `no-scope` | Records enforcements, including superseded ones, by design. |
+| `scripts/lib/aid-zadani.sh`, `scripts/lib/aid-verification-pattern.sh` | `no-scope` | P109: code — the brief reader and the one criterion parser/validator; agents act on the lint's messages, not on these files. |
+| `scripts/tests/lib/aid-test-plan-fixture.sh` (`aid_fixture_write_brief`, `aid_fixture_seed_critic_check`) | `no-scope` | P109: test fixtures — a brief from a fixture plan's own criteria, a passed critic check; never read by an agent at work. |
 
 ## Backward compatibility
 
