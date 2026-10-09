@@ -662,7 +662,7 @@ JSON
   grep -qF 'role: "radio"' "$f"
   grep -qF 'on: { click: () => answer("choose", SELECTED[q.id]) } }, "Další →")' "$f"
   # the row keeps every way out: safer, again, bolder, the PM's own words (as an answer or as a steer for new proposals)
-  for w in 'answer("reroll_safer")' 'answer("reroll")' 'answer("reroll_bolder")' 'answer("reroll", undefined, t)' 'answer("return", undefined, t)' '"Chci to jinak"'; do
+  for w in 'answer("reroll_safer")' 'answer("reroll")' 'answer("reroll_bolder")' 'answer("reroll", undefined, withPick(q, cards, t))' 'answer("return", undefined, withPick(q, cards, t))' '"Chci to jinak"'; do
     grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
   done
   grep -qF '<dialog id="ask"' "$f"                                 # the text goes into a window
