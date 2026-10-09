@@ -235,7 +235,7 @@ async function inPage(page) {
     // business_minimum: seller identification (IČO/IČ + 8 digits) and, next to a form, a link about personal data
     o.ico = /\bI[ČC]O?\s*:?\s*\d{8}\b/.test(document.body.innerText.replace(/\u00a0/g, ' '));
     o.form = !!document.querySelector('form input:not([type=hidden]), form textarea');
-    o.privacyLink = [...document.querySelectorAll('a[href]')].some(a => /osobn[ií]ch údaj|zpracování údaj|ochrana údaj|GDPR|soukromí|privacy/i.test(a.textContent + ' ' + a.getAttribute('href')));
+    o.privacyLink = [...document.querySelectorAll('a[href]')].some(a => /osobn[ií]ch údaj|osobných údaj|osobnych[-_ ]udaj|zpracování údaj|spracúvan|ochrana údaj|ochrana osobn|GDPR|soukromí|súkrom|privacy/i.test(a.textContent + ' ' + a.getAttribute('href')));
     return o;
   });
 }
