@@ -104,6 +104,18 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   review; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"bez jazykové příručky (de)"* ]]
 }
 
+@test "a block reference may be a list or a range (b1,b1 / b1-b1) when every block exists; a range past the page fails" {
+  for edit in '.pages["index.html"].claims[0].block = "b1-b1"' '.pages["index.html"].claims[0].block = "b1, b1"' \
+              '.pages["index.html"].sweeps.clarity = {status:"nalezy", findings:[{block:"b1-b1", text:"x", severity:"drobny"}]}'; do
+    review "$edit"; run python3 "$COPY" verdict "$RUN"
+    jq -e '.["index.html"].verdict == "pass"' <<<"$output" >/dev/null || { echo "should pass: $edit"; echo "$output"; return 1; }
+  done
+  for edit in '.pages["index.html"].claims[0].block = "b1-b99"' '.pages["index.html"].claims[0].block = "b2-b1"' '.pages["index.html"].claims[0].block = ""'; do
+    review "$edit"; run python3 "$COPY" verdict "$RUN"
+    jq -e '.["index.html"].verdict == "fail"' <<<"$output" >/dev/null || { echo "should fail: $edit"; echo "$output"; return 1; }
+  done
+}
+
 @test "copy-record refuses: no run.json, not JSON, schema break, a foreign page, a changed bundle, stale facts or context, no approval" {
   answer; RUN="$(bundle)"; cp "$T/answer.json" "$RUN/answer.json"
   run "$STATE_SH" copy-record "$P" "$RUN"; [ "$status" -eq 1 ]; [[ "$output" == *"no run.json"* ]]

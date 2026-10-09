@@ -302,10 +302,21 @@ def page_verdict(page, ans, subj, keys):
             bad.append(f"chybí bod cro {c}")
         elif part.get("status") == "netyka_se" and not subj.get("legal"):
             bad.append(f"bod cro {c} jako netýká se na stránce, která není právní")
+    def known(ref):
+        """A block reference as reviewers write it: one id (b7), a list (b1,b3) or a range (b16-b19);
+        true when every block it names is on the page (Coufal 9. 10. 2026: Codex wrote ranges, four runs failed on form)."""
+        if not isinstance(ref, str) or not ref.strip():
+            return False
+        for part in re.split(r"[,\s]+", ref.strip()):
+            m = re.fullmatch(r"b(\d+)-b?(\d+)", part)
+            ids = ["b%d" % i for i in range(int(m.group(1)), int(m.group(2)) + 1)] if m and int(m.group(1)) <= int(m.group(2)) else [part]
+            if not ids or any(i not in blocks for i in ids):
+                return False
+        return True
     for group in ("sweeps", "cro"):
         for name, part in (ans.get(group) or {}).items():
             for f in part.get("findings") or []:
-                if f.get("block") not in blocks:
+                if not known(f.get("block")):
                     bad.append(f"nález ({name}) odkazuje na blok, který stránka nemá: {f.get('block')}")
                 if f.get("severity") == "blokujici":
                     bad.append(f"blokující nález ({name}): {f.get('text', '')[:120]}")
@@ -324,7 +335,7 @@ def page_verdict(page, ans, subj, keys):
         elif sc < 7 and p.get("name") in CUSTOMERS and not subj.get("legal"):
             bad.append(f"persona {p.get('name')}: skóre {sc} - zákazníka to nepřesvědčí (stránka potřebuje aspoň 7)")
     for c in ans.get("claims") or []:
-        if c.get("block") not in blocks:
+        if not known(c.get("block")):
             bad.append(f"tvrzení odkazuje na blok, který stránka nemá: {c.get('block')}")
         if not c.get("fact_key") or str(c.get("fact_key")) not in keys:
             bad.append(f"tvrzení bez faktu v registru: {c.get('text', '')[:120]}")
