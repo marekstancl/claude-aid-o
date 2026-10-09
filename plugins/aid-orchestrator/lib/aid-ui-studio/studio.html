@@ -79,6 +79,16 @@
   .card[data-card] { cursor: pointer; }
   .card[data-card] .media img { cursor: pointer; }
   .card.picked { outline: 3px solid var(--ks-kinpaku); outline-offset: 2px; }
+  /* A question on a fact or a consent (PM 9. 10. 2026: A): three answers as rows, the recommended one preselected,
+     one sentence each and a small line with the risk and the source; no deck, no flip, no Bezpečněji / Odvážněji */
+  .opts { display: grid; gap: .55rem; margin-top: .4rem; }
+  .card.opt { display: flex; gap: .9rem; align-items: flex-start; width: auto; padding: .8rem 1rem .8rem .9rem; border: 1.5px solid var(--ks-rule); border-radius: 8px; background: var(--ks-paper-raised); cursor: pointer; text-align: left; font: inherit; color: inherit; transform: none; perspective: none; }
+  .card.opt:hover, .card.opt:focus-within { transform: none; border-color: var(--ks-edge); }
+  .card.opt.picked { outline: none; border-color: var(--ks-kinpaku); box-shadow: inset 0 0 0 1.5px var(--ks-kinpaku); }
+  .card.opt .tick { position: static; width: 22px; height: 22px; flex: none; margin-top: .15rem; transform: scale(1); box-shadow: none; font-size: .75rem; }
+  .card.opt .opt-body { min-width: 0; } .card.opt .opt-body b { display: block; font-size: 1rem; }
+  .card.opt .opt-body .kicker { position: static; display: inline-block; margin-left: .5rem; vertical-align: middle; }
+  .card.opt .opt-t { margin: .15rem 0 0; } .card.opt .opt-m { margin: .3rem 0 0; font-size: .8rem; color: var(--ks-text-muted); }
   .tick { position: absolute; z-index: 7; top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; padding: 0; border: 1px solid var(--ks-edge); background: var(--ks-paper-raised); color: transparent; font-weight: 800; box-shadow: var(--ks-lift); cursor: pointer; transform: scale(0); transition: transform .25s cubic-bezier(.3, 1.6, .5, 1); }
   .card:hover .tick, .tick:focus-visible, .card.picked .tick { transform: scale(1); }
   .card.picked .tick { background: var(--ks-kinpaku); border-color: var(--ks-kinpaku); color: var(--ks-ink); }
@@ -759,6 +769,16 @@ function identity(c) {
     tags.map(t => el("span", { class: "tag" }, t)));
 }
 
+function optionRow(q, c, i, select) {   // one answer as a row (facts, no_method): the tick is the radio, the row is the click
+  const title = c.title || c.id, picked = SELECTED[q.id] === c.id;
+  const meta = [str(c.risk) ? "Riziko: " + c.risk : null, str(sourceOf(c)) ? "Vychází z: " + sourceOf(c) : null].filter(Boolean).join(" · ");
+  return el("article", { class: "card opt" + (picked ? " picked" : ""), "data-card": c.id, on: { click: e => { if (!e.target.closest("a")) select(c.id); } } },
+    el("button", { type: "button", class: "tick", role: "radio", "aria-checked": String(picked), "aria-label": "Vybrat: " + title, on: { click: e => { e.stopPropagation(); select(c.id); } } }, "✓"),
+    el("div", { class: "opt-body" }, el("b", {}, title, i === 0 ? el("span", { class: "kicker" }, "Doporučuji") : null),
+      str(c.thesis) && c.thesis !== c.title ? el("p", { class: "opt-t" }, c.thesis) : null,
+      meta ? el("p", { class: "opt-m" }, meta) : null));
+}
+
 function card(q, c, i, select) {
   const title = c.title || c.id;
   const lead = i === 0 ? " lead" : "";
@@ -910,6 +930,9 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
   // Approvals that show several previews (page wireframes, content per page) get a gallery, not a deck.
   const gallery = ["structure", "task_map", "content_plan"].includes(q.kind);
   const deckKind = cards.length && q.kind !== "approve_page" && !gallery;
+  // a fact or a consent: rows, the recommended answer preselected (PM 9. 10. 2026: A); the degree buttons belong to looks only
+  const rows = deckKind && ["facts", "no_method"].includes(q.kind) && !cards.some(c => str(c.preview));
+  if (rows && SELECTED[q.id] === undefined) SELECTED[q.id] = cards[0].id;
 
   if (deckKind || (!cards.length && q.rerolled_from)) {
     sec.append(el("div", { class: "head q-head" }, tier(),
@@ -936,6 +959,16 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
       });
       sync();
     };
+    if (rows) {
+      sec.append(el("div", { class: "opts", role: "radiogroup", "aria-labelledby": "h-" + q.id }, cards.map((c, i) => optionRow(q, c, i, select))));
+      sec.append(el("div", { class: "bar" },
+        el("button", { type: "button", class: "reroll-btn", on: { click: () => ask({ key: q.id, title: "Co chcete jinak?",
+          hint: "Napište odpověď svými slovy (třeba rovnou údaj); uloží se jako vaše odpověď.",
+          send: [["Odeslat", t => answer("return", undefined, t)]] }) } }, "Chci to jinak"),
+        el("span", { class: "spacer" }), note, next, status));
+      sync();
+      return sec;
+    }
     const shell = deck(q, cards.map((c, i) => card(q, c, i, select)));
     shell.querySelector(".grid").setAttribute("role", "radiogroup");
     shell.querySelector(".grid").setAttribute("aria-labelledby", "h-" + q.id);
