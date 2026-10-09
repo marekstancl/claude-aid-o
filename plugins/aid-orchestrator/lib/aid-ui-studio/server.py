@@ -477,13 +477,10 @@ def open_change(p, root):
 
 def valid_answer(q):
     """The stored answer to q if it was given for q as it stands now. After a restart the memory is empty:
-    an answer the state script already recorded from this studio (brand-state.json answers) counts the
-    same way, so `set --answer` does not refuse what the PM did answer (Coufal 9. 10. 2026)."""
-    a = ANSWERS.get(q["id"])
-    if not a:
-        r = (read_state().get("answers") or {}).get(q["id"])
-        if isinstance(r, dict) and r.get("kind") and r.get("target") and r.get("at"):
-            a = dict(r, question=q["id"])   # the record has no question field; the state script checks it
+    the studio's own history (history.jsonl, written by this server for every answer it accepted) is
+    read back, never the state script's record - `set --answer` checks the studio as the independent
+    side, so the studio must not echo what the script wrote (security review 9. 10. 2026)."""
+    a = ANSWERS.get(q["id"]) or answer_from_history(q["id"])
     try:
         if a and a["kind"] == q["kind"] and a["target"] == q["target"] \
                 and parse_time(a["at"]) > parse_time(q["opened_at"]):
@@ -491,6 +488,29 @@ def valid_answer(q):
     except (TypeError, ValueError):
         return None
     return None
+
+
+def answer_from_history(qid):
+    """The latest answer the PM gave to qid as this studio recorded it in history.jsonl (by: pm,
+    with cards_sha256); None when there is none or the file cannot be read."""
+    found = None
+    try:
+        with open(HISTORY, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if not (isinstance(e, dict) and e.get("by") == "pm" and isinstance(e.get("question"), dict)
+                        and e["question"].get("id") == qid and isinstance(e.get("answer"), dict) and e.get("cards_sha256")):
+                    continue
+                qq, an = e["question"], e["answer"]
+                found = {"question": qid, "kind": qq.get("kind"), "target": qq.get("target"), "decision": an.get("decision"),
+                         "choice": an.get("choice"), "comment": an.get("comment"), "at": an.get("at"),
+                         "cards": e.get("cards") or [], "cards_sha256": e["cards_sha256"]}
+    except OSError:
+        return None
+    return found
 
 
 def preview_sha(c):
@@ -510,7 +530,8 @@ SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 def keep_history(q, cards, answer, steps):
     """Append the answered question as shown (question, full cards, answer, current step) to
     history.jsonl; each raster preview is copied under history/<question>/ so a later payload
-    or preview change does not alter what the PM saw. Display only, never read as a decision."""
+    or preview change does not alter what the PM saw. Display, and after a restart the studio's own
+    memory of what it accepted (answer_from_history); the agent never reads it as a decision."""
     qdir = os.path.join(HISTORY_DIR, SAFE.sub("_", q["id"]))
     kept = []
     for c in cards:
@@ -528,7 +549,7 @@ def keep_history(q, cards, answer, steps):
         kept.append(c)
     cur = next((x for x in steps or [] if isinstance(x, dict) and x.get("status") == "current"), None)
     entry = {"by": "pm", "question": {k: v for k, v in q.items() if k not in ("answered", "answer")},
-             "cards": kept, "step": (cur or {}).get("title"),
+             "cards": kept, "cards_sha256": answer.get("cards_sha256"), "step": (cur or {}).get("title"),
              "answer": {k: answer.get(k) for k in ("decision", "choice", "comment", "at")}}
     # One line, appended under the same exclusive lock `aid-ui-state.sh decide` takes (flock on
     # the file), so a PM answer and an agent decision never interleave.

@@ -124,12 +124,14 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(jq -r .choice "$BATS_TEST_TMPDIR/body")" = a ]
 }
 
-@test "after a restart a recorded answer (brand-state.json) still answers GET /answer; an older one does not count for a reopened round" {
+@test "after a restart the studio's own history answers GET /answer (never the state script's record); an older one does not count for a reopened round" {
   payload '2020-01-01T00:00:00Z'
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 404 ]
-  mkdir -p "$P/docs/design"
+  mkdir -p "$P/docs/design"   # the state script's record alone is not an answer: the studio is the independent side
   printf '{"answers":{"q1":{"kind":"direction","target":"home@abc","decision":"choose","choice":"a","comment":"","at":"%s"}}}' "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" > "$P/docs/design/brand-state.json"
-  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 200 ]; [ "$(jq -r '.choice + " " + .question' "$BATS_TEST_TMPDIR/body")" = "a q1" ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 404 ]
+  printf '{"by":"pm","question":{"id":"q1","kind":"direction","target":"home@abc"},"cards":[],"cards_sha256":"deadbeef","step":null,"answer":{"decision":"choose","choice":"a","comment":"","at":"%s"}}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" >> "$P/.aid-ui/studio/history.jsonl"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 200 ]; [ "$(jq -r '.choice + " " + .question + " " + .cards_sha256' "$BATS_TEST_TMPDIR/body")" = "a q1 deadbeef" ]
   sleep 0.01; payload "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)"
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 404 ]
   rm "$P/docs/design/brand-state.json"
