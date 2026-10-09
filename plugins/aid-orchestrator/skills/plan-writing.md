@@ -155,8 +155,28 @@ rendered artifact — see MUST rule 17.
 | `## Testing Strategy` | Which behaviour this plan verifies, why that behaviour, and where the verification goes. **Required, with content** — `aid-plan-lint.sh` refuses a plan without it. | Brainstorming testing section |
 | `## Constraints` | Technical, business, timeline constraints | PM answers |
 | `## Risks` | Risk table with probability, impact, mitigation | Brainstorming risks |
+| `## Acceptance Criteria` | The brief's `AC<n>` points verbatim (line and `verification_pattern` block), then the plan's own from `AC<n+1>` (Completeness Gate #20) | The brief file |
 | `## Success Criteria` | Testable success criteria | PM answers |
 | `## Next Steps` | Follow-up actions | Standard |
+
+### The brief file
+
+Before the plan, `/aid-plan` writes the brief: `.aid-o/plans/P{NNN}-zadani.md`
+from `defaults/templates/zadani.md` (brainstorm Step 8, Write mode item 3). It is
+the PM's specification as a file, and it outlives the interim.
+
+- Frontmatter: `zadani: P{NNN}`, `verze: <int ≥ 1>`, `datum`, `autor`, optional `roadmapa`.
+- Six sections, numbered, in this order: `## 1. Co PM chce` (the PM's words
+  verbatim and one paragraph starting `**Co je v sázce:**`), `## 2. Změřený výchozí
+  stav`, `## 3. Co udělat`, `## 4. Kde co je`, `## 5. Pravidla práce`,
+  `## 6. Hotovo, když`.
+- Every point of section 6 is `- [ ] AC<n>: <text>` (AC1, AC2, … without gaps) with
+  a `verification_pattern` block within 5 lines — the grammar of #20 below, checked
+  by the same validator (`lib/aid-verification-pattern.sh`) the plan check's A6 uses.
+- Check it: `bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" --zadani <file>` —
+  every finding at once, `zadani OK (<n> points)` when it is in shape.
+- A point changes only through a new version of the file (`verze` +1); the plan
+  carries the points, it never rewords them.
 
 **Conditional sections** (include only when relevant, omit otherwise):
 - `## Infrastructure` — Docker Compose, deployment, CI/CD (when Docker/infra was discussed)
@@ -1012,7 +1032,9 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
                                   P021 F4, P022 F6, P023 F7; orthogonal to #17e
                                   CLI grounding and #19 Design Defeat):
   20. Plan-level AC section ## Acceptance Criteria must use executable verification_pattern.
-      Three sub-rules — all must pass:
+      Three sub-rules — all must pass. The brief file's points use the same grammar
+      and are checked by the same code (`lib/aid-verification-pattern.sh`, called by
+      A6 of `aid-plan-check.sh` and by `aid-plan-lint.sh --zadani`):
 
       20a. Every AC checkbox má sibling verification_pattern yaml block.
            → Extract AC labels: `grep "^- \[ \] AC" <plan>` → list

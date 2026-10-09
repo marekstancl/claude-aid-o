@@ -580,6 +580,13 @@ RULE 1a: BEFORE the opponent and the critic run, the interim carries two section
           `## Účel a co je v sázce` — what is at stake for the PM and the numbers behind
           it (how often, how much, what breaks), never a price or a token count: cost
           lines are stripped, and a critic that saw costs once answered "do not build".
+RULE 1b: At Step 8 the brief file `.aid-o/plans/P{NNN}-zadani.md` is written from the
+        interim (`defaults/templates/zadani.md`; section 1 = `## Zadání PM` verbatim plus
+        the stakes paragraph, section 6 = the done-when points as `- [ ] AC<n>:` with a
+        `verification_pattern` block) and must pass `aid-plan-lint.sh --zadani`. The
+        brief is the artifact that SURVIVES: the plan binds to it, CP1 reads it, and it
+        is never deleted with the interim. The plan check refuses a lifecycle_strict
+        plan without it.
 RULE 2: UPDATE after each completed step — append full detail, not summaries:
         - Each Q&A pair (question + PM answer + inferred defaults)
         - MoSCoW prioritization results
@@ -595,6 +602,7 @@ RULE 4: On context resume (new session), READ interim doc first. Announce:
         Do NOT re-ask questions already answered in the interim doc.
 RULE 5: The interim is deleted by the CP1 flow once the gate passes (commands/aid-plan.md,
         "Plan review (CP1)" item 10), NEVER at plan write: the critic before CP1 reads it.
+        The brief file (RULE 1b) is NOT deleted — it stays with the plan.
         On abort, KEEP the interim doc (it serves as recovery artifact).
 RULE 6: Before creating interim doc, CHECK if `.aid-o/work/interim-P*.md` already exists.
         If its plan file `.aid-o/plans/P{NNN}-*.md` does NOT exist, announce: "Active
@@ -602,6 +610,10 @@ RULE 6: Before creating interim doc, CHECK if `.aid-o/work/interim-P*.md` alread
         ID." If the plan file EXISTS, it is a plan awaiting CP1, not a live brainstorm:
         say so, never offer to resume it, and offer (A) leave it for its CP1, (B) delete
         the interim because the plan was abandoned. Prevents concurrent-session collisions.
+        The plan file is `P{NNN}-*.md` OTHER than the brief `P{NNN}-zadani.md`: a brief
+        with no plan beside it is "brief without plan" — a brainstorm that stopped after
+        Step 8 wrote the brief. Offer (A) continue from it (Mode: Write Plan takes it as
+        the specification), (B) delete it. Never delete it unasked.
 ```
 
 ---

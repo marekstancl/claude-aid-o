@@ -24,6 +24,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # shellcheck source=lib/aid-roots.sh
 source "${SCRIPT_DIR}/lib/aid-roots.sh"   # aid_state_path — a relative evidence dir lives in the state root
+# shellcheck source=lib/aid-verification-pattern.sh
+source "${SCRIPT_DIR}/lib/aid-verification-pattern.sh"
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.67.0}"
 
@@ -99,108 +101,11 @@ AC_CMD_TIMEOUT="${AID_PLAN_DIFF_AC_TIMEOUT:-120}"
 
 log_event "$TIMELINE_FILE" "plan_diff_start" plan="$PLAN" base_commit="$BASE_COMMIT" head_commit="$HEAD_COMMIT" || true
 
-# Extract AC section + parse verification_pattern blocks
+# Extract AC section + parse verification_pattern blocks. The parser lives in
+# lib/aid-verification-pattern.sh (P109): the plan check, the brief lint and the
+# plan lint read criteria through the same function this runner does.
 parse_ac_blocks() {
-  # NOTE: Uses portable awk (mawk-compatible) — no gensub(). Helper functions
-  # extract_label / extract_text / extract_yaml_val use sub() + substr() so the
-  # parser works on both gawk and mawk (default awk on Debian).
-  #
-  # Output field separator is ASCII Unit Separator (0x1F, "\x1f"). We cannot use
-  # `|` because cmd: values commonly contain shell pipes which would corrupt
-  # downstream `IFS='|' read` splitting and break field alignment.
-  awk -v US=$'\x1f' '
-    function extract_label(s,   tmp) {
-      tmp = s
-      sub(/^- \[[ x]\] /, "", tmp)
-      sub(/:.*$/, "", tmp)
-      return tmp
-    }
-    function extract_text(s,   tmp) {
-      tmp = s
-      sub(/^- \[[ x]\] AC[0-9]+: */, "", tmp)
-      return tmp
-    }
-    function extract_text_role(s,   tmp) {
-      tmp = s
-      sub(/^- \[[ x]\] \[[a-z_]+\] */, "", tmp)
-      return tmp
-    }
-    function extract_yaml_val(s, key,   tmp, prefix) {
-      tmp = s
-      prefix = ".*" key ":[[:space:]]*"
-      sub(prefix, "", tmp)
-      # Strip leading quote
-      sub(/^"/, "", tmp)
-      # Strip trailing quote
-      sub(/"[[:space:]]*$/, "", tmp)
-      # Strip trailing whitespace
-      sub(/[[:space:]]+$/, "", tmp)
-      # Unescape YAML double-quoted-scalar escape sequences: \" -> " and
-      # \\ -> \. Without this, a cmd value containing embedded double
-      # quotes or backslash-escaped single quotes (e.g. verification_pattern
-      # shell commands with nested quoting, as used throughout P052-P058
-      # own Success Criteria) is later handed to eval still carrying
-      # literal backslashes, which corrupts the command actual quoting
-      # and produces a bash syntax error (exit 2) or a jq compile error
-      # (exit 3) instead of running the intended check, silently reporting
-      # absent for a criterion that would otherwise pass. Order matters:
-      # protect literal double-backslash behind a placeholder BEFORE
-      # unescaping the quote form, so an escaped-backslash-then-escaped-
-      # quote sequence is not misread as one combined escape.
-      gsub(/\\\\/, "\001", tmp)
-      gsub(/\\"/, "\"", tmp)
-      gsub(/\001/, "\\", tmp)
-      return tmp
-    }
-    function flush_no_verify(  ) {
-      if (ac_label != "" && !ac_flushed) {
-        printf "%s%s%s%s%s%s%s%s%s%s%s%s%s\n", \
-          ac_label, US, ac_text, US, "no_verification", US, "", US, "", US, "", US, "0"
-        ac_flushed=1
-      }
-    }
-    # AC-section flag: turns on at "## Acceptance Criteria" OR "## Success Criteria"
-    # (P052-P058-era plans use "Success Criteria" as the heading for the same
-    # verification_pattern-bearing bullets) and turns off at the next "## " heading.
-    # A start/end range pattern (start = the AC heading; end = a heading whose
-    # first letter is not "A") is NOT used here on purpose: a "Success Criteria"
-    # heading itself starts with "S", so that not-"A" terminator would match it
-    # as an end-of-range marker on the very next occurrence and collapse the
-    # whole section to zero AC rows (empirically confirmed 0 AC
-    # false-negative). The flag-based form below has no such collision.
-    /^## (Acceptance Criteria|Success Criteria)/ { f=1; next }
-    /^## / { f=0 }
-    f {
-      if ($0 ~ /^- \[[ x]\] AC[0-9]+:/ || $0 ~ /^- \[[ x]\] \[[a-z_]+\]/) {
-        flush_no_verify()
-        ac_label=extract_label($0)
-        if ($0 ~ /^- \[[ x]\] AC[0-9]+:/) {
-          ac_text=extract_text($0)
-        } else {
-          ac_text=extract_text_role($0)
-        }
-        in_yaml=0; ac_flushed=0
-        ac_type=""; ac_cmd=""; ac_file=""; ac_regex=""; ac_expected_exit="0"
-      }
-      if ($0 ~ /^[[:space:]]*```yaml/) { in_yaml=1; next }
-      if ($0 ~ /^[[:space:]]*```$/ && in_yaml) {
-        in_yaml=0
-        if (ac_type != "") {
-          printf "%s%s%s%s%s%s%s%s%s%s%s%s%s\n", ac_label, US, ac_text, US, ac_type, US, ac_cmd, US, ac_file, US, ac_regex, US, ac_expected_exit
-          ac_flushed=1
-        }
-        next
-      }
-      if (in_yaml) {
-        if ($0 ~ /type:/)          ac_type=extract_yaml_val($0, "type")
-        if ($0 ~ /cmd:/)           ac_cmd=extract_yaml_val($0, "cmd")
-        if ($0 ~ /file:/)          ac_file=extract_yaml_val($0, "file")
-        if ($0 ~ /regex:/)         ac_regex=extract_yaml_val($0, "regex")
-        if ($0 ~ /expected_exit:/) ac_expected_exit=extract_yaml_val($0, "expected_exit")
-      }
-    }
-    END { flush_no_verify() }
-  ' "$PLAN"
+  _aid_vp_parse_ac "$PLAN" "Acceptance Criteria|Success Criteria"
 }
 
 # Run a single verification_pattern, output verdict + evidence.

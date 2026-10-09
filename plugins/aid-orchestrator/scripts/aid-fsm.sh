@@ -3754,7 +3754,7 @@ cmd_init() {
         delivered-but-unreconciled) _unrec+=" ${_pid}";;
         legacy-unverifiable)        _legacy_n=$((_legacy_n+1));;
       esac
-    done < <(ls "$_plans_dir"/P*-*.md 2>/dev/null)
+    done < <(for _pf in "$_plans_dir"/P*-*.md; do [[ -f "$_pf" ]] && ! aid_is_brief_file "$_pf" && printf '%s\n' "$_pf"; done)   # a brief is not a second plan (P109)
     if [[ -n "$_unrec" ]]; then
       echo "ADVISORY: plan(s) delivered but not reconciled:${_unrec}. Reconcile with:" >&2
       echo "  aid-fsm.sh plan-reconcile <PNN> --apply" >&2

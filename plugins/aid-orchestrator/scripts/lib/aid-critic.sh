@@ -57,7 +57,7 @@ _aid_critic_args() {
   case "$_ac_moment" in brainstorm|plan) ;; *) echo "critic: --moment must be brainstorm or plan (got '${_ac_moment}')" >&2; return 1 ;; esac
   _ac_root="$(aid_state_root "${_ac_root:-${AID_PROJECT_ROOT:-$PWD}}")" || return 1
   if [[ "$_ac_moment" == "plan" && -z "$_ac_plan" ]]; then
-    _ac_plan="$(ls "${_ac_root}/.aid-o/plans/${_ac_plan_id}-"*.md 2>/dev/null | head -1)"
+    _ac_plan="$(aid_plan_files "${_ac_root}/.aid-o/plans" "$_ac_plan_id" | head -1)"
     [[ -n "$_ac_plan" ]] || { echo "critic: --moment plan needs --plan <path> (no .aid-o/plans/${_ac_plan_id}-*.md found)" >&2; return 1; }
   fi
   return 0

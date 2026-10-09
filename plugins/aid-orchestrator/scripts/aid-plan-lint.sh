@@ -40,7 +40,13 @@
 # advisory for a legacy one — the same two-tier treatment the Files grammar
 # gets, and for the same reason.
 #
+# THE BRIEF FILE (P109 Step 1)
+# `--zadani <file>` lints a brief alone (lib/aid-zadani.sh reads it, the block
+# validator of lib/aid-verification-pattern.sh checks its points); no plan is
+# read. Every finding is an ERROR.
+#
 # Usage: aid-plan-lint.sh <plan.md> [--strict|--legacy] [--quiet]
+#        aid-plan-lint.sh --zadani <brief.md> [--quiet]
 # Exit:  0 = no blocking violations   1 = blocking violation(s)   2 = usage/IO
 # =============================================================================
 set -uo pipefail
@@ -60,8 +66,11 @@ source "${SCRIPT_DIR}/lib/aid-standards-map.sh"
 PLAN=""
 FORCE_MODE=""     # "strict" | "legacy" | "" (=auto from frontmatter)
 QUIET=0
+ZADANI=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --zadani) [[ -n "${2:-}" ]] || { echo "aid-plan-lint: --zadani needs a file" >&2; exit 2; }
+              ZADANI="$2"; shift 2 ;;
     --strict) FORCE_MODE="strict"; shift ;;
     --legacy) FORCE_MODE="legacy"; shift ;;
     --quiet)  QUIET=1; shift ;;
@@ -70,7 +79,31 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$PLAN" ]] || { echo "Usage: aid-plan-lint.sh <plan.md> [--strict|--legacy] [--quiet]" >&2; exit 2; }
+# --zadani: the brief alone. Each reader lists every finding it sees (never
+# only the first), so one run shows the author everything to fix.
+if [[ -n "$ZADANI" ]]; then
+  [[ -f "$ZADANI" ]] || { echo "aid-plan-lint: file not found: $ZADANI" >&2; exit 2; }
+  # shellcheck source=lib/aid-zadani.sh
+  source "${SCRIPT_DIR}/lib/aid-zadani.sh"
+  z_err="$(mktemp)"; z_bad=0
+  aid_zadani_sections "$ZADANI" >/dev/null 2>>"$z_err" || z_bad=1
+  aid_zadani_stakes "$ZADANI" >/dev/null 2>>"$z_err" || z_bad=1
+  z_points="$(aid_zadani_points "$ZADANI" 2>>"$z_err")" || z_bad=1
+  z_verze="$(_aid_fm_get "$ZADANI" verze)"
+  if [[ ! "$z_verze" =~ ^[1-9][0-9]*$ ]]; then
+    echo "zadani: $ZADANI: frontmatter verze '${z_verze}' is not a positive integer — the plan binds to a version" >>"$z_err"; z_bad=1
+  fi
+  if (( z_bad )); then
+    [[ "$QUIET" -eq 0 ]] && { sed 's/^/ERROR /' "$z_err" >&2
+      echo "aid-plan-lint: zadani FAIL — template: defaults/templates/zadani.md; grammar of a point: skills/plan-writing.md #20" >&2; }
+    rm -f "$z_err"; exit 1
+  fi
+  rm -f "$z_err"
+  [[ "$QUIET" -eq 0 ]] && echo "aid-plan-lint: zadani OK ($(grep -c . <<< "$z_points") points)"
+  exit 0
+fi
+
+[[ -n "$PLAN" ]] || { echo "Usage: aid-plan-lint.sh <plan.md> [--strict|--legacy] [--quiet] | --zadani <brief.md>" >&2; exit 2; }
 [[ -f "$PLAN" ]] || { echo "aid-plan-lint: file not found: $PLAN" >&2; exit 2; }
 
 # Strict cohort = plans that opted into the lifecycle model (new template default).
