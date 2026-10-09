@@ -951,10 +951,12 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
     }
     const note = el("span", { class: "picked-note" });
     const next = el("button", { type: "button", class: "choose go", on: { click: () => answer("choose", SELECTED[q.id]) } }, "Další →");
+    let otherBtn = null;   // "Chci to jinak" turns into "Poznámka k výběru" once a card is picked
     sync = () => {
       const c = cards.find(x => x.id === SELECTED[q.id]);
       next.disabled = !c;
       note.replaceChildren(...(c ? ["Vybráno: ", el("b", {}, c.title || c.id)] : ["Vyberte kartu kliknutím."]));
+      if (otherBtn) otherBtn.textContent = c ? "Poznámka k výběru" : "Chci to jinak";
     };
     const select = id => {   // a click on the picked card lets it go again
       SELECTED[q.id] = SELECTED[q.id] === id ? undefined : id;
@@ -983,11 +985,13 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
       el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_safer") } }, "← Bezpečněji"),
       el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll") } }, icon("die"), el("span", {}, "Znovu")),
       el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_bolder") } }, "Odvážněji →"),
-      el("button", { type: "button", class: "reroll-btn", on: { click: () => ask({ key: q.id, title: "Co chcete jinak?",
-        hint: "Napište to svými slovy. Odešlete to jako svou odpověď, nebo si nechte podle toho připravit nové návrhy." + (SELECTED[q.id] ? " Vybraná karta se pošle s tím." : ""),
-        // the picked card travels with the words: a "return" has no choice field, and "I like the chosen one, take its
-        // animations" without the card is unreadable (Coufal 9. 10. 2026)
-        send: [["Nové návrhy podle toho", t => answer("reroll", undefined, withPick(q, cards, t))], ["Odeslat", t => answer("return", undefined, withPick(q, cards, t))]] }) } }, "Chci to jinak"),
+      (otherBtn = el("button", { type: "button", class: "reroll-btn", on: { click: () => ask({ key: q.id, title: SELECTED[q.id] ? "Poznámka k výběru" : "Co chcete jinak?",
+        hint: SELECTED[q.id] ? "Poznámku k vybrané kartě pošlete s výběrem („Vybrat s poznámkou“), nebo napište, co chcete jinak."
+          : "Napište to svými slovy. Odešlete to jako svou odpověď, nebo si nechte podle toho připravit nové návrhy.",
+        // a picked card can go with words (choose + comment: "this one, and take its animations"); without a pick the
+        // words are a return or a re-roll, and a pick travels inside them anyway (Coufal 9. 10. 2026)
+        send: [["Nové návrhy podle toho", t => answer("reroll", undefined, withPick(q, cards, t))], ["Odeslat jako odpověď", t => answer("return", undefined, withPick(q, cards, t))]]
+          .concat(SELECTED[q.id] ? [["Vybrat s poznámkou", t => answer("choose", SELECTED[q.id], t)]] : []) }) } }, "Chci to jinak")),
       el("span", { class: "spacer" }), note, next,
       el("p", { class: "hint" }, "Bezpečněji = blíž tomu, co je v oboru běžné. Odvážněji = výraznější a méně obvyklé. Znovu = nové návrhy ve stejném duchu."),
       status));

@@ -782,7 +782,7 @@ JSON
   grep -qF 'art.querySelector("h3, figcaption b")' "$f"
   # per-page notes (PM 9. 10.): "Chci jinak" in the lightbox of a gallery figure, sent together as one return; edge-fixed arrows
   # a fact or consent question (facts, no_method) is three rows, the first preselected, no degree buttons (PM 9. 10.: A)
-  for w in 'function withPick(q, cards, text)' 'answer("return", undefined, withPick(q, cards, t))' 'function optionRow(q, c, i, select)' 'const rows = deckKind && ["facts", "no_method"].includes(q.kind)' 'if (rows && SELECTED[q.id] === undefined) SELECTED[q.id] = cards[0].id;' '.card.opt .tick { position: static;'; do
+  for w in 'function withPick(q, cards, text)' 'answer("return", undefined, withPick(q, cards, t))' '["Vybrat s poznámkou", t => answer("choose", SELECTED[q.id], t)]' 'function optionRow(q, c, i, select)' 'const rows = deckKind && ["facts", "no_method"].includes(q.kind)' 'if (rows && SELECTED[q.id] === undefined) SELECTED[q.id] = cards[0].id;' '.card.opt .tick { position: static;'; do
     grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
   done
   for w in 'class: "chip lb-note"' 'sec.noteFor = (id, then)' '"Vrátit s poznámkami (" + n + ")"' 'answer("return", undefined, Object.entries(notes)' '.lb-bar .lb-prev { justify-self: start; } .lb-bar .lb-next { justify-self: end; }' '#lightbox img { display: inline-block; width: min(94vw, 48rem); height: auto;' 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' 'el("figure", { "data-fig": c.id }' 'const notes = NOTES[q.id] = NOTES[q.id] || {};' 'extra: notes[id] ? [["Smazat poznámku"' 'return i && !i.hidden && i.naturalWidth;' 'width: min(94vw, 44rem); display: grid; grid-template-columns: auto minmax(0, 1fr) auto'; do
