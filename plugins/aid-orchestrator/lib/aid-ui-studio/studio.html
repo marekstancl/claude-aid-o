@@ -350,6 +350,7 @@
   .lb-bar .lb-count { color: var(--ks-muted, #666); }
   .lb-bar button.choose { margin: 0; }
   .lb-bar .chip[aria-pressed="true"] { outline: 2px solid var(--ks-accent, #222); }
+  .lb-bar [hidden] { display: none; }   /* .chip sets display, so the attribute alone did not hide the contexts button on a card without a second picture */
   .links { padding: 1rem 0 1.4rem; border-top: 1px solid var(--ks-rule); font-size: .8125rem; display: flex; gap: 1.2rem; flex-wrap: wrap; }
 
   /* A tall viewport: the deck becomes a plain vertical list; the bar stays stuck. */
@@ -659,12 +660,13 @@ const lbBar = el("div", { class: "lb-bar", on: { click: e => e.stopPropagation()
 lightbox.append(lbImg, lbBar);
 let opener = null, LB = null;   // LB: {arts, i, ctx} while open
 function lbShow(i, ctx) {
-  LB.i = (i + LB.arts.length) % LB.arts.length; LB.ctx = !!ctx;
+  LB.i = (i + LB.arts.length) % LB.arts.length;
   const art = LB.arts[LB.i], img = art.querySelector("img.comp");
+  LB.ctx = !!ctx && art.getAttribute("data-preview2") === "1";   // the second picture exists only on some cards; stepping onto one without it shows its first
   const base = img.getAttribute("src").replace(/&n=2/, "").replace(/&t=\d+/, "");
   lbImg.src = LB.ctx ? base + "&n=2" : base; lbImg.alt = img.alt;
   lbTitle.textContent = art.querySelector("h3")?.textContent || "";
-  lbCount.textContent = LB.arts.length > 1 ? (LB.i + 1) + " / " + LB.arts.length : "";
+  lbCount.textContent = LB.arts.length > 1 ? "návrh " + (LB.i + 1) + " z " + LB.arts.length : "";
   lbPrev.hidden = lbNext.hidden = LB.arts.length < 2;
   const picked = art.classList.contains("picked"), tick = art.querySelector(".tick");
   lbPick.hidden = !tick; lbPick.disabled = picked; lbPick.textContent = picked ? "Vybráno ✓" : "Vybrat tento";

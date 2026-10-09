@@ -758,6 +758,11 @@ JSON
   grep -qF '"preview2"' "$f"; grep -qF '"method", "slot", "value"' "$f"      # hidden from the card back, like the other data fields
   grep -qF 'img.classList.toggle("fit", img.naturalWidth > 1.7 * img.naturalHeight)' "$f"   # a wide logo is shown whole, not cropped
   grep -qF '.media img.fit, .past-card img.fit { object-fit: contain' "$f"
+  # 9. 10. 2026, Coufal: the hidden contexts button stayed visible (.chip sets display) and stepping kept ctx on a card
+  # without a second picture -> /preview&n=2 404 and a broken image; the counter says which card of how many
+  grep -qF '.lb-bar [hidden] { display: none; }' "$f"
+  grep -qF 'LB.ctx = !!ctx && art.getAttribute("data-preview2") === "1"' "$f"
+  grep -qF '"návrh " + (LB.i + 1) + " z " + LB.arts.length' "$f"
   jq '.cards[0].preview2 = "a2.png"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
   printf 'PNG1' > "$P/.aid-ui/studio/a.png"; printf 'PNG2' > "$P/.aid-ui/studio/a2.png"
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/preview?question=q1&card=a")" = 200 ]; [ "$(cat "$BATS_TEST_TMPDIR/body")" = PNG1 ]
