@@ -345,11 +345,11 @@
   #lightbox.open { opacity: 1; }
   #lightbox img { max-width: 94vw; max-height: calc(100vh - 7.5rem); margin-bottom: 4.5rem; border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); background: #fff; }
   /* the bar sits at the bottom of the screen whatever the picture's size, so the controls never move */
-  .lb-bar { position: fixed; left: 0; right: 0; bottom: 1.2rem; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: .6rem; padding: 0 1.2rem; cursor: default; font: 500 .8125rem var(--ks-font); color: var(--ks-ink); }
+  .lb-bar { position: fixed; left: 0; right: 0; bottom: 1.2rem; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr); align-items: center; gap: .6rem; padding: 0 1.2rem; cursor: default; font: 500 .8125rem var(--ks-font); color: var(--ks-ink); }
   /* Předchozí and Další never move: one at each edge, whatever the title's length (PM 9. 10. 2026) */
   .lb-bar .lb-prev { justify-self: start; } .lb-bar .lb-next { justify-self: end; }
-  .lb-bar .lb-mid { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; justify-content: center; }
-  .lb-bar .lb-title { text-align: center; }
+  .lb-bar .lb-mid { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; justify-content: center; min-width: 0; }
+  .lb-bar .lb-title { text-align: center; overflow-wrap: anywhere; }
   .gallery figure.noted figcaption::after { content: " · poznámka"; color: var(--ks-patina); }
   .lb-bar .lb-count { color: var(--ks-muted, #666); }
   .lb-bar button.choose { margin: 0; }
@@ -615,7 +615,8 @@ let last = "", stopped = false, navs = [];
 let S = null, H = [], hCount = null, hOk = true;   // /state, /history, its line count when fetched
 const SELECTED = {};   // question id -> the card the PM picked; Další sends it
 const VIEW = {};       // step id -> { part, auto }: the part the PM opened, and which part was waiting then
-const SEEN = new Set(), WAS = {};   // what was already drawn and the statuses at the last render: an animation plays once
+const SEEN = new Set(), WAS = {}, NOTES = {};   // NOTES[question][figure] = the PM's note to one page, until sent
+const oneLine = t => String(t).replace(/[\r\n]+/g, " ").replace(/[„“]/g, "\"");   // what was already drawn and the statuses at the last render: an animation plays once
 let first = true, slide = "", stepMove = "", drawn = [], arrived = null;
 const openSteps = new Set();   // step titles whose Detail the PM opened, kept across re-renders
 const scrolled = {};   // deck scroll position per question, kept across re-renders
@@ -689,7 +690,7 @@ function openLightbox(img) {
   // question answered with "Ano, další" (page layouts, texts) - Coufal 9. 10. 2026: the layouts had no arrows
   const FRAMES = ".card[data-card], .gallery figure";
   const art = img.closest(FRAMES), sec = img.closest("section");
-  const arts = art && sec ? [...sec.querySelectorAll(FRAMES)].filter(a => a.querySelector("img.comp")) : [];
+  const arts = art && sec ? [...sec.querySelectorAll(FRAMES)].filter(a => { const i = a.querySelector("img.comp"); return i && !i.hidden && i.naturalWidth; }) : [];
   LB = { arts: arts.length ? arts : [art || img.closest("article, figure") || img.parentElement], i: Math.max(0, arts.indexOf(art)), ctx: false };
   lbShow(LB.i, false);
   lightbox.hidden = false;
@@ -698,7 +699,7 @@ function openLightbox(img) {
 }
 function closeLightbox() {
   lightbox.classList.remove("open"); lightbox.hidden = true; LB = null;
-  if (opener && opener.isConnected) opener.focus();
+  if (opener && opener.isConnected) opener.focus(); else document.querySelector("#pipeline button, main, body")?.focus();
 }
 lbPrev.addEventListener("click", () => LB && lbShow(LB.i - 1, LB.ctx));
 lbNext.addEventListener("click", () => LB && lbShow(LB.i + 1, LB.ctx));
@@ -869,6 +870,7 @@ function ask(o) {
   const send = f => () => { const t = ta.value.trim(); if (!t) { ta.focus(); return; } askDlg.close(); f(t); };
   document.getElementById("ask-actions").replaceChildren(
     el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => askDlg.close() } }, "Zavřít"),
+    ...(o.extra || []).map(([label, f]) => el("button", { type: "button", class: "reroll-btn", on: { click: () => { askDlg.close(); f(); } } }, label)),
     ...o.send.map(([label, f], i) => el("button", { type: "button", class: i === o.send.length - 1 ? "choose go" : "reroll-btn", on: { click: send(f) } }, label)));
   askDlg.showModal(); ta.focus();
 }
@@ -962,26 +964,31 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
     const addr = "/" + file.replace(/(^|\/)index\.html$/, "$1").replace(/\.html$/, "");
     meta = el("div", { class: "identity" }, el("span", { class: "tag" }, "adresa ", el("b", {}, addr)));
   }
+  const galleryEl = gallery && cards.length ? el("div", { class: "gallery" }, cards.map(c => el("figure", { "data-fig": c.id },
+    str(c.preview) ? media(q, c, false) : null,
+    el("figcaption", {}, el("b", {}, c.title || c.id), str(c.thesis) ? " " + c.thesis : "")))) : null;
   const parts = [
     el("div", { class: "head q-head" }, el("div", { class: "headline" }, el("h2", { class: "q-title", id: "h-" + q.id }, title)), tier()),
     str(q.prompt) ? el("p", { class: "lede" }, q.prompt) : null,
     meta, exc ? selectorChips(q.target) : null,
     (lines => lines ? el("div", { class: "head" }, lines) : null)(bodyLines(q.body)),
     partNote,
-    gallery && cards.length ? el("div", { class: "gallery" }, cards.map(c => el("figure", { "data-fig": c.id },
-      str(c.preview) ? media(q, c, false) : null,
-      el("figcaption", {}, el("b", {}, c.title || c.id), str(c.thesis) ? " " + c.thesis : "")))) : null];
+    galleryEl];
   // Notes to single pages (lightbox "Chci jinak", PM 9. 10. 2026): kept here until "Vrátit s poznámkami" sends them
   // all as one return, one line per page, so the agent redoes only the pages named.
-  const notes = {};
+  const notes = NOTES[q.id] = NOTES[q.id] || {};   // survives render(): a poll redraws the section, the notes stay
   const notesBtn = el("button", { type: "button", class: "reroll-btn", hidden: true, on: { click: () =>
-    answer("return", undefined, Object.entries(notes).map(([id, t]) => "Stránka „" + (cards.find(c => c.id === id)?.title || id) + "“: " + t).join("\n")) } });
+    answer("return", undefined, Object.entries(notes).map(([id, t]) => "Stránka „" + oneLine(cards.find(c => c.id === id)?.title || id) + "“: " + oneLine(t)).join("\n")) } });
   const refreshNotes = () => { const n = Object.keys(notes).length; notesBtn.hidden = !n; notesBtn.textContent = "Vrátit s poznámkami (" + n + ")";
-    sec.querySelectorAll(".gallery figure").forEach(f => f.classList.toggle("noted", f.getAttribute("data-fig") in notes)); };
+    galleryEl?.querySelectorAll("figure").forEach(f => f.classList.toggle("noted", f.getAttribute("data-fig") in notes)); };   // the gallery, not the section: it is marked before the section is assembled
   sec.hasNote = id => id in notes;
+  // the dialog writes to the store and refreshes whatever section is on the page now (the one it was opened from may be redrawn)
+  const live = () => document.querySelector('section[aria-labelledby="h-' + CSS.escape(q.id) + '"]');
   sec.noteFor = (id, then) => { const c = cards.find(x => x.id === id); ask({ key: q.id + ":note:" + id, title: "Co má být na stránce „" + (c?.title || id) + "“ jinak?",
     hint: "Poznámka zůstane u stránky; odejde až tlačítkem „Vrátit s poznámkami“ pod otázkou. Napište, co chybí, přebývá nebo má být jinde.",
-    send: [["Uložit poznámku", t => { notes[id] = t; refreshNotes(); if (then) then(); }]] }); };
+    send: [["Uložit poznámku", t => { notes[id] = t; (live()?.refreshNotes || refreshNotes)(); if (then) then(); }]],
+    extra: notes[id] ? [["Smazat poznámku", () => { delete notes[id]; (live()?.refreshNotes || refreshNotes)(); if (then) then(); }]] : [] }); };
+  sec.refreshNotes = refreshNotes; refreshNotes();
   // a page approval keeps its box with the screenshot; every other question reads like the ones with cards
   const body = page ? el("div", { class: "body" }, parts) : sec;
   if (page) sec.append(el("div", { class: "panel face wide" }, shot, body)); else sec.append(...parts.filter(Boolean));
