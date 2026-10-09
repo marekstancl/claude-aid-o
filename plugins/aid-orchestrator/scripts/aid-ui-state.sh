@@ -91,6 +91,13 @@
 #                          of the page in the recorded build>; refused when the site changed
 #     defer-content <project> <item id>           kind defer_content, target <item id>;
 #                          the content item's status -> deferred_by_pm
+#     confirm-content <project> [--item <id>]     (P108) the PM's approved copy verdict (kind
+#                          copy_verdict, target copy@<sha256 of .aid-ui/copy/subject.json>) marks
+#                          every draft|missing item sourced from docs/content/copy.json
+#                          confirmed_client (approve only); with --item <id> --fact <key>, a facts
+#                          answer about the registry as it is now (target docs/content/facts.yaml@<sha>)
+#                          marks that one item, which must name the fact key in its id or need.
+#                          confirmed_client is never written without an answer.
 #     exception <project> --check <c> [--page|--viewport|--browser|--role|--state <v>]
 #                          kind exception, target = the selector as JSON: an object with
 #                          keys check page viewport browser role state, every value a string,
@@ -610,7 +617,8 @@ take_answer() {
     .answers[$id] as $a
     | if $a == null then "no recorded answer \($id); run: aid-ui-state.sh record-answer --question \($id)"
       elif $a.kind != $k then "answer \($id) is a \($a.kind) answer, not \($k)"
-      elif (if $k == "exception" then (try ($a.target | fromjson) catch null) != ($t | fromjson) else $a.target != $t end)
+      elif (if $k == "exception" then ((try ($a.target | fromjson) catch null) | if type == "object" then with_entries(select(.value != "*")) else . end)
+              != (($t | fromjson) | with_entries(select(.value != "*"))) else $a.target != $t end)
         then "answer \($id) is for \($a.target | tojson), not \($t)"
       elif ($a.decision | IN("approve", "choose") | not) then "answer \($id) decided \($a.decision), not approve or choose"
       elif any(.consumed[]?; . == $id) then "answer \($id) is already used"
@@ -883,6 +891,40 @@ case "$VERB" in
     take_answer defer_content "$1"
     jq_write --arg i "$1" --arg q "$ANSWER" \
       '.content_plan |= map(if .id == $i then .status = "deferred_by_pm" | .answer = $q else . end) | .consumed += [$q]'
+    ;;
+
+  confirm-content)
+    need_state
+    item="$(opt item "$@")"; fact="$(opt fact "$@")"
+    if [[ -n "$item" || -n "$fact" ]]; then
+      [[ -n "$item" && -n "$fact" ]] || usage "confirm-content needs --item <id> --fact <key> together"
+      jq -e --arg i "$item" 'any(.content_plan[]?; .id == $i)' "$STATE" >/dev/null || die "confirm-content refused: no content item $item"
+      fy="$PROJECT/docs/content/facts.yaml"
+      [[ -f "$fy" ]] || die "confirm-content refused: no $fy"
+      yq -e --arg k "$fact" '.[$k] != null' "$fy" >/dev/null 2>&1 || yq -e ".\"$fact\" != null" "$fy" >/dev/null 2>&1 ||
+        die "confirm-content refused: no fact $fact in docs/content/facts.yaml"
+      # the item must name the fact: its id or its need, compared without case and diacritics
+      jq -e --arg i "$item" --arg k "$fact" '
+        def norm: ascii_downcase | gsub("č";"c") | gsub("ě";"e") | gsub("š";"s") | gsub("ř";"r") | gsub("ž";"z") | gsub("ý";"y") | gsub("á";"a") | gsub("í";"i") | gsub("é";"e") | gsub("ú";"u") | gsub("ů";"u") | gsub("ň";"n") | gsub("ť";"t") | gsub("ď";"d") | gsub("ô";"o") | gsub("ľ";"l") | gsub("ä";"a");
+        any(.content_plan[]; .id == $i and ((.id | norm) + " " + ((.need // "") | norm) | contains($k | norm)))' "$STATE" >/dev/null ||
+        die "confirm-content refused: item $item does not name the fact $fact (in its id or need)"
+      # the facts answer is about the registry as it is now (the question's target)
+      take_answer facts "docs/content/facts.yaml@$(sha256sum "$fy" | cut -d' ' -f1)"
+      jq_write --arg i "$item" --arg q "$ANSWER" --arg k "$fact" \
+        '.content_plan |= map(if .id == $i then .status = "confirmed_client" | .answer = $q | .fact = $k else . end) | .consumed += [$q]'
+      echo "CONFIRMED: $item (fact $fact)"
+    else
+      [[ -n "$ANSWER" ]] || die "confirm-content refused: needs --answer <question id>, the PM's copy verdict on the studio page"
+      sub="$PROJECT/.aid-ui/copy/subject.json"
+      [[ -f "$sub" ]] || die "confirm-content refused: no $sub (aid-ui-verify.sh --copy-subject)"
+      [[ "$(jq -r --arg q "$ANSWER" '.answers[$q].decision // ""' "$STATE")" == approve ]] ||
+        die "confirm-content refused: the copy verdict $ANSWER is not an approve (texts accepted as they are)"
+      take_answer copy_verdict "copy@$(sha256sum "$sub" | cut -d' ' -f1)"
+      n="$(jq '[.content_plan[]? | select(.source == "docs/content/copy.json" and IN(.status; "draft", "missing"))] | length' "$STATE")"
+      jq_write --arg q "$ANSWER" '.content_plan |= map(if .source == "docs/content/copy.json" and IN(.status; "draft", "missing")
+        then .status = "confirmed_client" | .answer = $q else . end) | .consumed += [$q]'
+      echo "CONFIRMED: $n text items"
+    fi
     ;;
 
   exception)

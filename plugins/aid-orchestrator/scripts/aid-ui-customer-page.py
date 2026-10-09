@@ -205,8 +205,8 @@ def gather(proj):
     D["content"] = {"parts": len(parts), "pages": len({k.split(".")[0] for k in parts}),
                     "copy_reviewed": len(copy_pages),
                     "copy_passed": sum(1 for p in copy_pages if all(r.get("status") == "pass" for r in copy_rows if r.get("page") == p)),
-                    "pending": [re.split(r"\s*\(", str(c.get("need", "")))[0] for c in st.get("content_plan") or []
-                                if c.get("status") in ("deferred_by_pm", "missing")]}
+                    "pending": list(dict.fromkeys(re.split(r"\s*\(", str(c.get("need", "")))[0].strip() for c in st.get("content_plan") or []
+                                if c.get("status") in ("deferred_by_pm", "missing")))}
     return D, res_file
 
 

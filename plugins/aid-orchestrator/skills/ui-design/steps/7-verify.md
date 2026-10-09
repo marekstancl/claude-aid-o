@@ -44,7 +44,13 @@ a `frontend-build-standard.md` (čti živě).
    (`target` = `copy@<sha256 souboru .aid-ui/copy/subject.json>`, `body` = co texty říkají a kde je PM
    najde v náhledu, `outcome` jednou větou). `approve` = přijato beze změn; `return` s komentářem =
    PM vypíše věty, které chce jinak → zapracuj je v kroku 6 a pusť kontrolu textů znovu (bod 1a), pak
-   otázku znovu. Odpověď a vypsané věty zapiš do těla kapitoly `obsah`.
+   otázku znovu. Po `approve` `aid-ui-state.sh confirm-content <project> --answer <id>`: položky plánu
+   obsahu se zdrojem `docs/content/copy.json` (texty) přejdou na `confirmed_client` - schválení textů
+   PM je potvrzení klienta (jen `approve`; `return` = texty se mění), bez něj `finish` položky
+   v `draft` nepustí. Položku bez textového zdroje, kterou uzavřela odpověď na údaj (IČO), potvrdí
+   `confirm-content <project> --item <id> --fact <klíč registru> --answer <id otázky facts>`: položka
+   musí klíč jmenovat (v id nebo potřebě) a otázka se musela ptát na registr v dnešní podobě
+   (`target docs/content/facts.yaml@<sha>` = aktuální soubor); jinou odpověď na údaj příkaz odmítne. Odpověď a vypsané věty zapiš do těla kapitoly `obsah`.
 1. Brána: `aid-ui-verify.sh <project>` → `.aid-ui/verify/result.json`,
    pak `aid-ui-state.sh gate-record <project> .aid-ui/verify/result.json`.
    Řádek `brand_package` (jeden za celý projekt) hlásí chybějící části brand balíčku
@@ -59,7 +65,7 @@ a `frontend-build-standard.md` (čti živě).
    zbývají jen řádky, které oprava neřeší.
 3. Zbylý řádek, který PM přijme: otázka `exception` ve studiu (`target` =
    selektor jako JSON: `check`, `page`, `viewport`, `browser`, `role`,
-   `state`, vynechané `"*"`); důvod = komentář PM. Po `approve`
+   `state`; klíč vynechaný nebo `"*"` = všechno, obě podoby se berou stejně); důvod = komentář PM. Po `approve`
    `aid-ui-state.sh exception <project> --check <c> [--page …] --answer <id>`.
 4. Projektový design standard (před schvalováním stránek, protože jeho úpravy mění build): `DESIGN.md` doplněný o platformní kontrakt
    (řádky Předěl, Navigace, Dotyk/kurzor, Formuláře, Systémové okraje, Gesta; u aplikace
@@ -83,7 +89,7 @@ a `frontend-build-standard.md` (čti živě).
    Otázka `design_standard` ve studiu (s `outcome`; `body` = co standard říká lidsky,
    odkaz na `docs/design/design-standard.md`); `return` → oprav a otevři znovu.
 5. Kontrola stránek (až je build po bodu 4 konečný): pro každou stránku buildu otázka `approve_page`
-   (`target` = `<stránka>@<otisk>` z `build.fingerprints`, snímek jako
+   (`target` = `<stránka>@<otisk>` z `build.fingerprints`; klíč `_site` není stránka, na ten se neptej - stránka 404 a soubory jsou v něm a schválení nepotřebují; snímek jako
    karta); po `approve`
    `aid-ui-state.sh approve-page <project> <stránka> --answer <id>`.
    Změna buildu schválení té stránky zruší.

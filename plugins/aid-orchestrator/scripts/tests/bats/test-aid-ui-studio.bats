@@ -431,6 +431,18 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
   done
 }
 
+@test "P108 page: an exception shows the check by its Czech name and folds the gate's missing list behind a count" {
+  f="$(PAGE_HTML)"
+  fn="$(sed -n '/^function selectorChips(target)/,/^}/p' "$f")"
+  grep -q 'k !== "missing"' <<<"$fn"                      # the list is never a chip
+  grep -q '"chybí " + miss.length' <<<"$fn"               # the count, in words
+  grep -q 'el("details"' <<<"$fn"                         # folded, not spread out
+  grep -q 'CHECK_CS\[v\]' <<<"$fn"                        # the check by its Czech name
+  for k in brand_package copy_review design_standard_doc customer_page ai_search; do
+    grep -qE "$k: \"[^\"]+\"" <<<"$(sed -n '/^const CHECK_CS = {/,/};/p' "$f")" || { echo "no Czech name for $k"; return 1; }
+  done
+}
+
 @test "P106 page: the approved palette is unchanged and no colour value was added" {
   f="$(PAGE_HTML)"
   [ "$(sed -n '/:root {/,/^  }/p' "$f" | sha256sum | cut -d' ' -f1)" = "$(grep -oE '^[0-9a-f]{64}$' "$BATS_TEST_DIRNAME/../fixtures/aid-ui/studio-root-vars.sha256")" ]

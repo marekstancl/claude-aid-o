@@ -821,6 +821,58 @@ JSON
   [ "$(jq -c .consumed "$STATE")" = '["s2","c1","d1"]' ]
 }
 
+@test "P108: confirm-content takes the approved copy verdict for the text items, a facts answer bound to one item; finish then passes" {
+  ans v1 variant "$(sha_of '{"type":"web","brand":"new","local":false}')" choose
+  "$SCRIPT" set "$PROJ" variant '{"type":"web","brand":"new","local":false}' --answer v1 >/dev/null
+  cp='[{"id":"hero","status":"draft","source":"docs/content/copy.json"},{"id":"about","status":"missing","source":"docs/content/copy.json"},{"id":"shared.ico","need":"IČO do pätičky","status":"missing"},{"id":"foto","need":"fotka","status":"missing"}]'
+  ans c1 content_plan "$(sha_of "$cp")"
+  "$SCRIPT" set "$PROJ" content-plan "$cp" --answer c1 >/dev/null
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  approve index.html 1; approve kontakt.html 1
+  result; "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"content item hero is draft"* ]]
+  before="$(jq -c '[.content_plan[] | .status], .consumed' "$STATE")"
+  run "$SCRIPT" confirm-content "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"needs --answer"* ]]
+  mkdir -p "$PROJ/.aid-ui/copy"; echo '{"pages":[]}' > "$PROJ/.aid-ui/copy/subject.json"
+  sub="copy@$(sha256sum "$PROJ/.aid-ui/copy/subject.json" | cut -d' ' -f1)"
+  ans t0 copy_verdict "copy@0000"
+  run "$SCRIPT" confirm-content "$PROJ" --answer t0
+  [ "$status" -eq 1 ]; [[ "$output" == *"is for"* ]]
+  ans tc copy_verdict "$sub" choose
+  run "$SCRIPT" confirm-content "$PROJ" --answer tc
+  [ "$status" -eq 1 ]; [[ "$output" == *"not an approve"* ]]
+  run "$SCRIPT" confirm-content "$PROJ" --answer c1       # another kind, and already used
+  [ "$status" -eq 1 ]
+  [ "$(jq -c '[.content_plan[] | .status], .consumed' "$STATE")" = "$before" ]
+  ans t1 copy_verdict "$sub"
+  run "$SCRIPT" confirm-content "$PROJ" --answer t1
+  [ "$status" -eq 0 ]; [[ "$output" == *"CONFIRMED: 2 text items"* ]]
+  [ "$(jq -c '[.content_plan[] | .status]' "$STATE")" = '["confirmed_client","confirmed_client","missing","missing"]' ]
+  run "$SCRIPT" confirm-content "$PROJ" --answer t1       # used once
+  [ "$status" -eq 1 ]; [[ "$output" == *"already used"* ]]
+  # one item: the facts answer must be about the registry as it is now, and the item must name the fact
+  mkdir -p "$PROJ/docs/content"; printf 'ico: {value: "52123723", source: PM}\n' > "$PROJ/docs/content/facts.yaml"
+  ans f0 facts "docs/content/facts.yaml@stale" choose
+  run "$SCRIPT" confirm-content "$PROJ" --item shared.ico --fact ico --answer f0
+  [ "$status" -eq 1 ]; [[ "$output" == *"is for"* ]]
+  ans f1 facts "docs/content/facts.yaml@$(sha256sum "$PROJ/docs/content/facts.yaml" | cut -d' ' -f1)" choose
+  run "$SCRIPT" confirm-content "$PROJ" --item foto --fact ico --answer f1
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not name the fact"* ]]
+  run "$SCRIPT" confirm-content "$PROJ" --item shared.ico --fact phone --answer f1
+  [ "$status" -eq 1 ]; [[ "$output" == *"no fact phone"* ]]
+  run "$SCRIPT" confirm-content "$PROJ" --item shared.ico --answer f1
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '.content_plan[2].status' "$STATE")" = missing ]
+  run "$SCRIPT" confirm-content "$PROJ" --item shared.ico --fact ico --answer f1
+  [ "$status" -eq 0 ]; [[ "$output" == *"CONFIRMED: shared.ico (fact ico)"* ]]
+  ans d1 defer_content foto
+  "$SCRIPT" defer-content "$PROJ" foto --answer d1 >/dev/null
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 0 ]
+}
+
 @test "all conditions met: finish succeeds; a backward step clears finished" {
   ready
   run "$SCRIPT" finish "$PROJ"
@@ -926,6 +978,19 @@ JSON
   [ "$status" -eq 0 ]
   run "$SCRIPT" finish "$PROJ"
   [ "$status" -eq 0 ]
+}
+
+@test "P108: an exception answer may leave out the selector keys that are *, as step 7 says (Coufal 9. 10.)" {
+  ready
+  result '.rows |= map(if .page == "kontakt.html" and .check == "axe" then .status = "fail" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  ans e1 exception '{"check":"axe","page":"kontakt.html"}'
+  run "$SCRIPT" exception "$PROJ" --check axe --page kontakt.html --answer e1
+  [ "$status" -eq 0 ]
+  # a different page is still a different selector
+  ans e2 exception '{"check":"axe","page":"index.html"}'
+  run "$SCRIPT" exception "$PROJ" --check axe --page kontakt.html --answer e2
+  [ "$status" -eq 1 ]; [[ "$output" == *"is for"* ]]
 }
 
 @test "a changed page fingerprint voids its approval and its exception, not the other page's" {

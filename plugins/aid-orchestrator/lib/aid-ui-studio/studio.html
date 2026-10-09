@@ -296,6 +296,9 @@
   .identity { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 0; }
   .swatches { display: inline-flex; gap: 4px; margin-right: 4px; }
   .swatches i { width: 18px; height: 18px; border-radius: 5px; border: 1px solid oklch(100% 0 0 / 0.18); box-shadow: inset 0 0 0 1px oklch(0% 0 0 / 0.25); background: var(--ks-gray); }
+  .missing { flex-basis: 100%; font-size: .8125rem; color: var(--ks-text-muted); }
+  .missing summary { cursor: pointer; }
+  .missing ul { margin: 4px 0 0; padding-left: 18px; }
   .tag { font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .14em; text-transform: uppercase; color: var(--ks-text-muted); border: 1px solid var(--ks-rule); border-radius: 4px; padding: 3px 7px; overflow-wrap: anywhere; }
   .tag b { color: var(--ks-ink); font-weight: 600; }
   .fact { font-size: .8rem; color: var(--ks-text-muted); line-height: 1.45; overflow-wrap: anywhere; }
@@ -897,13 +900,19 @@ const CHECK_CS = { http_200: "Stránky odpovídají", glyph_coverage: "Písmo a 
   brand_assets: "Logo a ikony ze značky", links_resources: "Odkazy a soubory", required_files: "Povinné soubory",
   axe: "Přístupnost", image_weight: "Váha obrázků", lighthouse_mobile: "Rychlost na mobilu", seo: "Hledání na Googlu",
   app_task_states: "Úlohy a stavy aplikace", screenshots_reviewed: "Kontrola snímků", no_overlap: "Překryvy",
-  brand_consistency: "Jednotná značka", page_weight: "Váha stránky", business_minimum: "IČO a zpracování údajů" };
+  brand_consistency: "Jednotná značka", page_weight: "Váha stránky", business_minimum: "IČO a zpracování údajů",
+  brand_package: "Balíček značky (logo)", copy_review: "Kontrola textů", design_standard_doc: "Pravidla vzhledu webu", customer_page: "Stránka pro zákazníka", ai_search: "AI vyhledávače" };
 function selectorChips(target) {
   let sel = null;
   try { sel = JSON.parse(target); } catch (e) { /* shown raw below */ }
   if (!sel || typeof sel !== "object") return el("div", { class: "identity" }, el("span", { class: "tag" }, String(target)));
-  return el("div", { class: "identity" }, Object.entries(sel).filter(([, v]) => v !== "*")
-    .map(([k, v]) => el("span", { class: "tag" }, (SELECTOR[k] || k) + " ", el("b", {}, k === "check" ? (CHECK_CS[v] || String(v)) : String(v)))));
+  // human words only: the check by its Czech name, the page; the gate's item list folds behind a count
+  const chips = Object.entries(sel).filter(([k, v]) => v !== "*" && k !== "missing")
+    .map(([k, v]) => el("span", { class: "tag" }, (SELECTOR[k] || k) + " ", el("b", {}, k === "check" ? (CHECK_CS[v] || String(v)) : String(v))));
+  const miss = Array.isArray(sel.missing) ? sel.missing : [];
+  return el("div", { class: "identity" }, chips, miss.length ? el("details", { class: "missing" },
+    el("summary", {}, "chybí " + miss.length + " položek balíčku (seznam z kontroly)"),
+    el("ul", {}, miss.map(m => el("li", {}, String(m))))) : null);
 }
 
 // The window for "Chci to jinak" and for a reason: one text, one or two ways to send it.

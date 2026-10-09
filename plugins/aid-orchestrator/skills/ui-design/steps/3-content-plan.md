@@ -65,7 +65,8 @@ Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 
 ## Co PM rozhoduje
 
 Plán obsahu, fakta, dodání materiálu nebo jeho odložení - ve studiu.
-`finish` v kroku 7 pustí jen položky `confirmed_client` nebo `deferred_by_pm`.
+`finish` v kroku 7 pustí jen položky `confirmed_client` nebo `deferred_by_pm`; `confirmed_client` dává
+schválený verdikt textů (`confirm-content`, krok 7 bod 1b) nebo odpověď na údaj u jedné položky.
 
 ## Zápis
 
