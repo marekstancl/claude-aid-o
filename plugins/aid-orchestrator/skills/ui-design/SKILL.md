@@ -97,6 +97,11 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    bez `method`); po odpovědi `method` zapíše waiver (pm: karty pak nesou `source` podklady,
    without: bez postupu), nebo postup převezmi (adopt: snímek do `references/adopted/`, řádky
    v `adopted-sources.md`, soubory do mapy) a `method` spusť znovu. Mapu čte studio při startu.
+0b. **Předchozí rozhodnutí PM se nese dál** (PM 9. 10. 2026). Otázka, která staví na dřívější volbě PM
+   (dnes `direction` na `references`; mapa `PRIOR` v serveru), nese `prior` = přesně zaznamenanou
+   odpověď (`question`, `choice`, `comment`) a každá karta `honours` = jak volbu a slova PM ctí
+   (jmenuje id volby). Studio otázku bez toho odmítne a volbu i slova PM ukáže nad otázkou - PM nemá
+   znovu vysvětlovat, co už řekl.
 1. Zapiš nebo obnov `<project>/.aid-ui/studio/payload.json`:
    `now` (`title`, `text` = co právě děláš, např. „Připravuji tři návrhy vzhledu…", `at` = kdy jsi to
    napsal, `part` = id části, pro kterou platí; studio tvou poznámku ukáže jen dokud je novější než

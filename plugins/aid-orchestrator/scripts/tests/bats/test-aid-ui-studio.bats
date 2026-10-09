@@ -165,7 +165,7 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   printf 'PNG1' > "$P/.aid-ui/studio/a.png"; echo s > "$P/secret"
   [ "$(answer "$choose_a")" = 200 ]
   png="$(printf 'PNG1' | sha256sum | cut -d' ' -f1)"
-  want='[{"id":"a","method":"5-directions.md","palette":["#000"],"preview":"a.png","preview2":null,"preview2_label":null,"preview_sha256":"'"$png"'","risk":null,"slot":null,"thesis":"písmo","title":"A","uniqueness":null,"url":"https://a.example","value":null},{"id":"b","method":"5-directions.md","palette":null,"preview":"../../secret","preview2":null,"preview2_label":null,"preview_sha256":null,"risk":null,"slot":null,"thesis":null,"title":"B","uniqueness":null,"url":null,"value":null},{"id":"c","method":"5-directions.md","palette":null,"preview":"c.html","preview2":null,"preview2_label":null,"preview_sha256":null,"risk":null,"slot":null,"thesis":null,"title":"C","uniqueness":null,"url":null,"value":null}]'
+  want='[{"honours":null,"id":"a","method":"5-directions.md","palette":["#000"],"preview":"a.png","preview2":null,"preview2_label":null,"preview_sha256":"'"$png"'","risk":null,"slot":null,"thesis":"písmo","title":"A","uniqueness":null,"url":"https://a.example","value":null},{"honours":null,"id":"b","method":"5-directions.md","palette":null,"preview":"../../secret","preview2":null,"preview2_label":null,"preview_sha256":null,"risk":null,"slot":null,"thesis":null,"title":"B","uniqueness":null,"url":null,"value":null},{"honours":null,"id":"c","method":"5-directions.md","palette":null,"preview":"c.html","preview2":null,"preview2_label":null,"preview_sha256":null,"risk":null,"slot":null,"thesis":null,"title":"C","uniqueness":null,"url":null,"value":null}]'
   [ "$(jq -S -c .cards "$BATS_TEST_TMPDIR/body")" = "$want" ]
   sha="$(printf '%s' "$want" | sha256sum | cut -d' ' -f1)"
   [ "$(jq -r .cards_sha256 "$BATS_TEST_TMPDIR/body")" = "$sha" ]
@@ -723,6 +723,28 @@ JSON
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]
   receipt direction "$now" 1
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
+}
+
+@test "P108 prior: a direction question repeats the PM's recorded references choice and words (prior) and every card says how it honours them (honours); none recorded = nothing required; done = skipped" {
+  chk() { python3 "$SERVER" --check --project "$P" 2>&1; }
+  mkdir -p "$P/docs/design"
+  payload '2020-01-01T00:00:00Z'
+  echo '{"answers":{}}' > "$P/docs/design/brand-state.json"
+  chk >/dev/null   # no references answer: the direction question is free
+  printf '{"answers":{"r1":{"kind":"references","target":"sha256:x","decision":"choose","choice":"alley","comment":"líbí se mi animace","at":"%s"}}}' "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" > "$P/docs/design/brand-state.json"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'`prior` must repeat'* && "$output" == *'"choice": "alley"'* ]]
+  jq '.questions[0].prior = {"question":"r1","choice":"alley","comment":"jiná slova"}' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'`prior` must repeat'* ]]
+  jq '.questions[0].prior = {"question":"r1","choice":"alley","comment":"líbí se mi animace"}' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'needs `honours`'* && "$output" == *"'líbí se mi animace'"* ]]
+  jq '.cards |= map(.honours = "alley: panel, křivka a úvodní animace jako u vzoru")' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  chk >/dev/null
+  jq '.cards[0].honours = "bez jména vzoru"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'card a needs `honours`'* ]]
+  jq '.questions[0].done = true | .questions[0].prior = null' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  printf '{"answers":{"r1":{"kind":"references","target":"sha256:x","decision":"choose","choice":"alley","comment":"líbí se mi animace","at":"%s"},"q1":{"kind":"direction","target":"home@abc","decision":"choose","choice":"a","comment":"","at":"%s"}}}' "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" > "$P/docs/design/brand-state.json"
+  chk >/dev/null
+  rm "$P/docs/design/brand-state.json"
 }
 
 @test "P108 method: a kind with null in the map is asked only after the PM's no_method answer (pm: cards on podklady); the no_method question has its shape; a bad map stops the server" {

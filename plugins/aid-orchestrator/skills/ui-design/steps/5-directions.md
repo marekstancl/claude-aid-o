@@ -35,7 +35,12 @@ Vybrané vzory a styly v `.aid-ui/refs/`, brand balíček, vize a tón,
    `aid-ui-tool.sh webp` do `.aid-ui/studio/direction-<n>.webp`.
 4. Každý směr projde `references/genericity-rubric.md`; generický se
    přepracuje, neukáže.
-5. Tři karty otázky `direction` ve studiu, každá s:
+5. Tři karty otázky `direction` ve studiu. Všechny tři vycházejí z vybraného vzoru a z toho, co
+   k němu PM napsal; liší se tím, jak daleko vzor vezmou (věrně / s obsahem navíc / odvážněji),
+   ne tím, že by dva šly jinam. Otázka nese `prior` = přesně zaznamenaná odpověď PM k vzorům
+   (`{"question", "choice", "comment"}` z `brand-state.json`), studio ji ukáže nad otázkou; každá karta
+   má `honours` (do 300 znaků, jmenuje id vybraného vzoru) = jak směr ctí volbu a slova PM. Bez toho
+   studio otázku odmítne (`aid_ui_prior_decision`; PM 9. 10. 2026). Každá karta dál s:
    - `thesis` - princip odvozený ze značky a vybraných vzorů,
    - charakteristické komponenty (2-3, v `body` otázky nebo `thesis`),
    - `uniqueness` - jedna věta, čím se liší od šablony (povinná, bez ní

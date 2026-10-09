@@ -4451,6 +4451,22 @@ enforcements:
     test_covers: "policy followed = no ai-* blocker and the summary counts; missing policy, robot without its own group, blocked search engine, policy mismatch; page without JSON-LD, IČO in taxID, another brand, JS-only content, nosnippet; llms.txt without agreement; any business subtype recognised (test-aid-ui-seo-check.bats)."
     test: "scripts/tests/bats/test-aid-ui-seo-check.bats"
 
+  - id: aid_ui_prior_decision
+    type: 12
+    source: "lib/aid-ui-studio/server.py (check_prior, PRIOR)"
+    instruction: "skills/ui-design/SKILL.md Jak se ptá PM, point 0b; skills/ui-design/steps/5-directions.md point 5"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the directions really follow the chosen reference and the PM's words - the studio checks that the question repeats the recorded choice and words exactly and that every card names the choice in `honours`, not the design itself; the agent writes the state file it is checked against."
+    description: "A direction question carries `prior` = the PM's latest recorded references answer (question, choice, comment) and every card an `honours` text naming that choice; the studio shows the choice and the PM's words above the question and `honours` on the card. Without a recorded references answer nothing is required (PM 9. 10. 2026: the chosen reference and 'I like its animations' were dropped by the next step)."
+    recovery: "Copy the recorded references answer into the question's `prior` and write on every card how it honours the choice (naming its id)."
+    test_covers: "no references answer = free; missing or different prior refused; card without honours or without the choice id refused; complete payload passes; a done question is skipped (test-aid-ui-studio.bats)."
+    test: "scripts/tests/bats/test-aid-ui-studio.bats"
+
   - id: aid_ui_outcome_length
     type: 12
     source: "lib/aid-ui-studio/server.py"

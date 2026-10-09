@@ -371,7 +371,8 @@
   .lb-bar .lb-count { color: var(--ks-muted, #666); }
   .lb-bar button.choose { margin: 0; }
   .lb-bar .chip[aria-pressed="true"] { outline: 2px solid var(--ks-accent, #222); }
-  .lb-bar [hidden] { display: none; }   /* .chip sets display, so the attribute alone did not hide the contexts button on a card without a second picture */
+  .lb-bar [hidden] { display: none; }
+  .prior { margin: 0 0 .8rem; padding: .6rem .9rem; border-left: 3px solid var(--ks-kinpaku); background: var(--ks-paper-raised); font-size: .95rem; }   /* .chip sets display, so the attribute alone did not hide the contexts button on a card without a second picture */
   .links { padding: 1rem 0 1.4rem; border-top: 1px solid var(--ks-rule); font-size: .8125rem; display: flex; gap: 1.2rem; flex-wrap: wrap; }
 
   /* A tall viewport: the deck becomes a plain vertical list; the bar stays stuck. */
@@ -615,7 +616,13 @@ const KIND = { variant: "Co stavíme a co k tomu", options: "Co připravit", vis
   copy_verdict: "Texty webu", no_method: "Chybí postup" };
 const SELECTOR = { check: "kontrola", page: "stránka", viewport: "velikost obrazovky", browser: "prohlížeč", role: "role", state: "stav" };
 // Card fields rendered by name; any other string field shows on the card's back as "key: value".
-const KNOWN = new Set(["id", "question", "title", "preview", "preview2", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source", "method", "slot", "value", "preview2_label"]);
+const KNOWN = new Set(["id", "question", "title", "preview", "preview2", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source", "method", "slot", "value", "preview2_label", "honours"]);
+// the PM's earlier choice this question builds on (checked by the server against the recorded answer)
+function priorLine(q) {
+  const p = q.prior; if (!p || typeof p !== "object") return null;
+  return el("p", { class: "prior" }, "Vaše volba, ze které vycházím: ", el("b", {}, String(p.choice || p.question)),
+    str(p.comment) ? el("span", {}, " · „" + p.comment + "“") : null);
+}
 function sourceOf(c) {   // what a card's proposal rests on, in the map's words
   const m = S && S.sections && S.sections.sources;
   return c.source && m && m[c.source] ? m[c.source] : null;
@@ -821,7 +828,7 @@ function card(q, c, i, select) {
       str(c.eyebrow) ? el("p", { class: "tier" }, str(c.eyebrow)) : null,
       el("h3", {}, title),
       str(c.thesis) && c.thesis !== c.title ? el("p", { class: "thesis" }, c.thesis) : null,
-      identity(c), uniqueness(c), fact("Riziko", c.risk, "clamp"), fact("Vychází z", sourceOf(c), "clamp"), urlFact(c)));
+      identity(c), uniqueness(c), fact("Ctí vaši volbu", c.honours, "clamp"), fact("Riziko", c.risk, "clamp"), fact("Vychází z", sourceOf(c), "clamp"), urlFact(c)));
   const extras = Object.entries(c).filter(([k, v]) => !KNOWN.has(k) && (str(v) || typeof v === "number"))
     .map(([k, v]) => fact(k.replace(/_/g, " "), String(v)));
   const back = el("div", { class: "face back" + lead, inert: true },
@@ -957,6 +964,7 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
     sec.append(el("div", { class: "head q-head" }, tier(),
       el("div", { class: "headline" }, icon("die"), el("h2", { class: "q-title", id: "h-" + q.id }, title))));
     if (str(q.prompt)) sec.append(el("p", { class: "lede" }, q.prompt));
+    const prior = priorLine(q); if (prior) sec.append(prior);
     const lines = bodyLines(q.body); if (lines) sec.append(el("div", { class: "head" }, lines));
     if (partNote) sec.append(partNote);
     if (!cards.length) {

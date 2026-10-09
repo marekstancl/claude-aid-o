@@ -96,7 +96,11 @@ KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "approve_page", "exception", "coverage_drift", "design_standard", "handover", "notifications",
          "sources", "product_context", "copy_verdict", "no_method"}
 # Card fields the page shows (a step may turn any into state); snapshotted with the answer.
-CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "preview2", "preview2_label", "palette", "risk", "uniqueness", "value", "method", "slot")
+CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "preview2", "preview2_label", "palette", "risk", "uniqueness", "value", "method", "slot", "honours")
+# A question that builds on what the PM chose earlier carries that choice and the PM's words (`prior`), and every
+# card says how it honours them (`honours`) - the studio checks both against the recorded answer (PM 9. 10. 2026:
+# the chosen reference and "I like its animations" were dropped by the next step).
+PRIOR = {"direction": "references"}
 RECEIPT_AGE = 12 * 3600   # a method receipt serves questions opened within this many seconds after it
 STANDARDS = "/opt/eco/docs/docs/ecosystem/"   # the only place a method file may live outside the plugin (read live)
 WAIVERS = ("pm", "without")   # no_method card values that let the kind be asked without a method
@@ -265,6 +269,39 @@ def method_sha(path):
     """sha256 of a method file: a plugin path, or an absolute one (a standard read live)."""
     with open(path if os.path.isabs(path) else os.path.join(PLUGIN, path), "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
+
+
+def prior_answer(kind):
+    """The latest recorded choose/approve answer of `kind` in the state: (question id, answer) or None."""
+    best = None
+    for qid, a in (read_state().get("answers") or {}).items():
+        if isinstance(a, dict) and a.get("kind") == kind and a.get("decision") in ("choose", "approve") and a.get("at"):
+            if best is None or str(a["at"]) > str(best[1]["at"]):
+                best = (qid, a)
+    return best
+
+
+def check_prior(q, cards):
+    """A `direction` question (PRIOR) must carry `prior` = {question, choice, comment} equal to the latest recorded
+    references answer, and every card an `honours` text (1-300 chars) naming that choice. Without a recorded
+    references answer nothing is required (a run that never asked for references). Done questions are not
+    checked. Raises ValueError."""
+    kind = PRIOR.get(q["kind"])
+    if not kind or q.get("done") is True:
+        return
+    found = prior_answer(kind)
+    if not found:
+        return
+    qid, a = found
+    want = {"question": qid, "choice": a.get("choice"), "comment": a.get("comment") or ""}
+    who = "question %s (%s)" % (q["id"], q["kind"])
+    if q.get("prior") != want:
+        raise ValueError("%s: `prior` must repeat the PM's recorded %s answer exactly: %s" % (who, kind, json.dumps(want, ensure_ascii=False)))
+    for c in cards:
+        h = c.get("honours")
+        if not (isinstance(h, str) and 0 < len(h) <= 300 and (not want["choice"] or str(want["choice"]) in h)):
+            raise ValueError("%s: card %s needs `honours` (1-300 characters) saying how it honours the PM's choice %r%s"
+                             % (who, c.get("id"), want["choice"], (" and the words %r" % want["comment"]) if want["comment"] else ""))
 
 
 def check_method(q, cards):
@@ -453,9 +490,10 @@ def load():
         if bad:
             raise ValueError("payload.json: question %s: card %s needs a source from sections.json sources (%s)"
                              % (q["id"], ", ".join(bad), ", ".join(SECTIONS["sources"])))
-    for q in qs:   # the method before the output
+    for q in qs:   # the method before the output, and the PM's earlier choice carried into the next question
         try:
             check_method(q, [c for c in cards if c["question"] == q["id"]])
+            check_prior(q, [c for c in cards if c["question"] == q["id"]])
         except ValueError as e:
             raise ValueError("payload.json: %s" % e)
     with LOCK:
