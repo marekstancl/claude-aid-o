@@ -257,12 +257,13 @@ ladder_wired_from_code() {
 @test "case 5: the two budgets the plan names by value are the values found live" {
   # These are read out of the SOURCE files, never out of the policy — the
   # policy's own agreement with them is case 4's job. This case pins the three
-  # numbers the plans state in prose (plan review rounds 2, gate fix 3),
+  # numbers the plans state in prose (plan review rounds 1 since P109 — P093
+  # said 2 —, gate fix 3),
   # so a change to any of them surfaces as a decision rather than as silence.
   local rounds gatefix
   rounds="$(yq -r '.review_checkpoints.plan_review.rounds_default' "$PLUGIN_ROOT/defaults/policies/review-checkpoints.yaml")"
   gatefix="$(grep -Eo 'max ([0-9]+) cycles per check' "$PLUGIN_ROOT/skills/pipeline.md" | head -1 | grep -Eo '[0-9]+')"
-  [ "$rounds" = "2" ] || { echo "plan_review.rounds_default is now '$rounds', P093 says 2"; false; }
+  [ "$rounds" = "1" ] || { echo "plan_review.rounds_default is now '$rounds', P109 says 1"; false; }
   [ "$gatefix" = "3" ]|| { echo "pipeline.md gate fix loop is now '$gatefix', plan says 3"; false; }
 }
 

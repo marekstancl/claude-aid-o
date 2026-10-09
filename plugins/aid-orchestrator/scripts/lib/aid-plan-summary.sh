@@ -407,7 +407,7 @@ aid_plan_summary_render() {
 
   next_json="$(jq -n '[
       "Přečíst plán a říct, co v něm chybí",
-      "Nechat ho projít revizí plánu (šest revizorů, dvě kola)",
+      "Nechat ho projít revizí plánu (šest revizorů se zadáním, jedno kolo; druhé jen po blockeru)",
       "Pustit generaci EPIKŮ"
     ]')"
 

@@ -187,8 +187,9 @@ PRE-FLIGHT (bash, before FSM):
   1. generation-readiness validates the source plan + provisional graph
   2. transaction skeleton written under the generation lock
   3. CP1 gate — ONCE per plan → generation-authority.json (needs closed
-     plan review rounds: six reviewer roles, two rounds by default, a third
-     or only one on the PM's recorded override)
+     plan review rounds: six reviewer roles, one round by default, a second
+     after a blocker and a passing fix-check, any other on the PM's recorded
+     override; and a passed critic check — hard, --force does not waive it)
   4. aid-plan-to-epic.sh → every EPIC file (verifies the authority,
      never re-runs the gate)
   5. aid-epic-to-json.sh → every plan.json + contract validation

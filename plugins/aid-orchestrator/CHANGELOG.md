@@ -3,6 +3,37 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.115.0] — 2026-10-09
+
+Plán drží zadání (P109, vydání 1 roadmapy po experimentu P014). Zadání PM je soubor, plán nese jeho body doslova, kritik je povinný a generace ho nepřeskočí, každý revizor plánu čte zadání a stačí jedno kolo, oprava po kole i rozšíření rozsahu za běhu se k zadání vážou. V P014 plán bod 2 zadání vypustil a nic to neporovnalo; teď to odmítne lint, revizoři mají zadání před sebou a změna bodu je nová verze souboru zadání. Stavěno mimo AID (PM 9. 10. 2026), po každém kroku revize Codexem.
+
+### Added
+- **Zadání jako soubor** — `/aid-plan` (brainstorm krok 8 i Write) píše nejdřív `.aid-o/plans/P<NNN>-zadani.md` ze šablony `defaults/templates/zadani.md`: šest očíslovaných částí, odstavec „Co je v sázce“, body hotovo `- [ ] AC<n>:` s blokem `verification_pattern` v gramatice, kterou plugin už měl. `aid-plan-lint.sh --zadani` vypíše všechna zjištění najednou. Jeden čtecí kód zadání (`lib/aid-zadani.sh`) a jeden čtecí kód a validátor kritérií (`lib/aid-verification-pattern.sh`) pro spouštěč, kontrolu plánu A6, lint zadání i lint plánu.
+- **Plán nese zadání** — lint odmítne plán, v jehož `## Acceptance Criteria` chybí nebo je přepsaný bod zadání (text i blok, stejný parser na obou stranách), bod, který nezavírá žádný krok (`**Zavírá:** AC<n>`), nesedící `zadani_verze`/`zadani_sha256`, návrhový oddíl bez `**Odvozeno z:** AC<n>`, a přísný plán bez zadání (`--only zadani` pouští jen tenhle průchod). `Zavírá:` jde přes šestý sloupec tabulky EPICu do `plan.json` jako `steps[].zavira`; `plan.json` nese `zadani` a `zadani_sha256`. Stránka PM ukáže body zadání s kroky, které je zavírají, a rozhodnutí označená `(mění výsledek pro uživatele)`.
+- **Kritik povinný a nepřepsatelný** — `prepare --round 1` odmítne plán bez prošlé kontroly kritika pro plán, který kopíruje, a zapíše `critic_check_sha`; brána CP1 to kontroluje tvrdě (`--force` ani vypnutá revize to neodpustí), proti plánu, který vstoupil do kola 1, nebo bez kola proti plánu, jak je. Kritik nad plánem čte zadání ze souboru, ne z interimu; `aid_critic_dispatch` ho pouští přes sdílený transport Codexu s promptem „vypiš, nezapisuj“ a odpověď bez obou nadpisů úrovní je záskok (STAND-IN), ne kritika. Jeden verdikt `aid_critic_verdict` pro balík i bránu.
+- **CP1 se zadáním a jedním kolem** — balík nese `zadani.md` a jeho otisk; první otázka každé ze šesti rolí je bod po bodu: zachovává / změkčuje / vypouští / odporuje (kromě „zachovává“ blocker); `zadani.md:<řádek>` je citovatelný. Výchozí počet kol je jedno; druhé bez přepisu PM jen po kole 1 s blockerem a prošlým `fix-check` (`second_round_when: blocker_and_fix_check`, jedna funkce pro `prepare` i bránu). Zadání změněné po kole 1 odmítne brána i příprava dalšího kola.
+- **Změny po kole a za běhu proti zadání** — `fix-check` pustí průchod zadání z lintu: bod se mění jen novou verzí zadání (`verze` +1), jinak odmítnuto; revize se pak restartuje v novém pokusu (`prepare --round 1 --restart --reason`, staré kola v `cp1/attempt-<k>/`; nic se nepřesune, dokud nové kolo 1 nejde připravit). `amend-scope` u plánu vázaného na zadání chce v důvodu bod `AC<n>` aktuálního kroku (v GATES kteréhokoli), jinak odmítne, a zapíše ho jako `zadani_point`.
+- **Pět mantinelů v Docusauru** (`/aid/architecture/mantinely`) a standard souboru zadání (`/aid/specs/zadani`).
+
+### Changed
+- **Sonda Codexu se zapisuje do kořene stavu** (z worktree plánu ho už nešpiní); **kontrola dvou kopií porovnává jen plán**, deník ne (agents P013-3/5/12); `/aid-init` zapíše `.gitattributes` s `merge=union` pro deník (P108 §17).
+- **Hledání souboru plánu podle čísla vynechá soubor zadání** (`aid_plan_files`) — zadání leží vedle plánu pod stejným číslem; brána konce plánu by jinak mohla pustit kontrolu kritérií nad zadáním a projít naprázdno.
+- `skills/pipeline.md` §„When AID refuses“: 11 nových řádků s `next:`; test souladu teď prochází i `aid-review-round.sh`, `aid-cp1-gate.sh` a balík. Registr vynucení: 14 nových řádků (604).
+- Testbed: `plan-clean.md` nese vlastní zadání a jeho kolo CP1 zasévá kritika (repo testbedu, commit fbd3420). Dokumentace Docusauru v repu docs, commit f018e76. Roadmapa `docs/plans/2026-10-09-roadmapa-p109.md`; P104 archivován.
+
+### Fixed
+- Čtyři noční červené sady zelené: řádek `/critic` v rejstříku nápovědy (skill nebyl nikdy veřejný povrch), vzor odkazu na sdílenou sekci v testu karet agentů (formulace od 2.112.0), zastaralá citace `stop-server.sh` v registru, test stránky PM s rolí `docs`, platnou od 2.112.0.
+
+### Velikost pluginu (řádky, `wc -l`)
+
+| část | před | po |
+|---|---|---|
+| scripts | 71 195 | 72 060 |
+| skills | 8 169 | 8 270 |
+| commands | 5 699 | 5 796 |
+
+Měřeno: `scripts/*.sh` + `scripts/lib/*.sh`, `skills/*.md` + `skills/*/SKILL.md`, `commands/*.md`. Přibylo hlavně kontrol a jejich testů; čistší plugin je cílem vydání 2 a 3 (V7 roadmapy: měří se, necílí).
+
 ## [2.114.0] — 2026-10-06
 
 Co zbylo z P010 (agents) a z P106/P108: zavření plánu rozhodnutím, kola bez patu, měření, kolik toho zavírání samo rozbilo, a companion, který přes VPN naběhne a vždy ukáže skutečný stav aplikace vedle návrhu. Vše vynucené mechanismem; tvrdý strop kol a mutace jako brána zatím ne (PM 6. 10. 2026, 2A: nejdřív čísla).
