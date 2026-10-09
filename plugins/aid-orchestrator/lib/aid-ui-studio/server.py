@@ -483,7 +483,7 @@ def valid_answer(q):
     if not a:
         r = (read_state().get("answers") or {}).get(q["id"])
         if isinstance(r, dict) and r.get("kind") and r.get("target") and r.get("at"):
-            a = r
+            a = dict(r, question=q["id"])   # the record has no question field; the state script checks it
     try:
         if a and a["kind"] == q["kind"] and a["target"] == q["target"] \
                 and parse_time(a["at"]) > parse_time(q["opened_at"]):

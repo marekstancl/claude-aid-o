@@ -129,7 +129,7 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 404 ]
   mkdir -p "$P/docs/design"
   printf '{"answers":{"q1":{"kind":"direction","target":"home@abc","decision":"choose","choice":"a","comment":"","at":"%s"}}}' "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" > "$P/docs/design/brand-state.json"
-  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 200 ]; [ "$(jq -r .choice "$BATS_TEST_TMPDIR/body")" = a ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 200 ]; [ "$(jq -r '.choice + " " + .question' "$BATS_TEST_TMPDIR/body")" = "a q1" ]
   sleep 0.01; payload "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)"
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 404 ]
   rm "$P/docs/design/brand-state.json"
