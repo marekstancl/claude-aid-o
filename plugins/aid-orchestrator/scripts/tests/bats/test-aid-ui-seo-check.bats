@@ -352,6 +352,13 @@ ai() { run python3 "$CHECK" "$S" --ai --facts "$BATS_TEST_TMPDIR/facts.json" --b
   echo "{\"answers\":{\"q-seo\":{\"kind\":\"seo_brief\",\"decision\":\"approve\",\"target\":\"docs/seo/brief.md@$sha\"}}}" >"$BATS_TEST_TMPDIR/state.json"
   ai --state "$BATS_TEST_TMPDIR/state.json"
   grep -q '^OK brief ai-policy the PM approved this brief' <<<"$output"
+  # a card chosen on the question bound to this brief counts the same (the brief as shown; 9. 10. 2026)
+  echo "{\"answers\":{\"q-seo\":{\"kind\":\"seo_brief\",\"decision\":\"choose\",\"choice\":\"a\",\"target\":\"docs/seo/brief.md@$sha\"}}}" >"$BATS_TEST_TMPDIR/state.json"
+  ai --state "$BATS_TEST_TMPDIR/state.json"
+  grep -q '^OK brief ai-policy the PM approved this brief' <<<"$output"
+  echo "{\"answers\":{\"q-seo\":{\"kind\":\"seo_brief\",\"decision\":\"return\",\"target\":\"docs/seo/brief.md@$sha\"}}}" >"$BATS_TEST_TMPDIR/state.json"
+  ai --state "$BATS_TEST_TMPDIR/state.json"
+  grep -q '^BLOCKER brief ai-policy the brief is not the one the PM approved' <<<"$output"
   echo "- poznámka agenta" >>"$BATS_TEST_TMPDIR/brief.md"   # changed after the approval
   ai --state "$BATS_TEST_TMPDIR/state.json"
   grep -q '^BLOCKER brief ai-policy the brief is not the one the PM approved' <<<"$output"

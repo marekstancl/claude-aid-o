@@ -657,8 +657,10 @@ def main():
                     import hashlib
                     st = json.load(open(a.state, encoding="utf-8"))
                     sha = hashlib.sha256(open(a.brief, "rb").read()).hexdigest() if brief_text else ""
+                    # approve, or a card chosen on the question bound to exactly this brief (the agent rewrites the
+                    # brief and asks anew when a card changes it, so a choose on this sha is the brief as shown; 9. 10. 2026)
                     approved = bool(sha) and any(
-                        isinstance(v, dict) and v.get("kind") == "seo_brief" and v.get("decision") == "approve"
+                        isinstance(v, dict) and v.get("kind") == "seo_brief" and v.get("decision") in ("approve", "choose")
                         and str(v.get("target", "")).endswith("@" + sha) for v in (st.get("answers") or {}).values())
                 pol = check_ai_site(out, t, brief_text, crawlers, approved)
                 ids = site_ids(parsed)
