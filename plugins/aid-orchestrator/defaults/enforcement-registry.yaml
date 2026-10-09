@@ -4461,7 +4461,7 @@ enforcements:
     verdict: ALIGNED
     tier: t0
     enforcement_degree: 2
-    not_guaranteed: "That the directions really follow the chosen reference and the PM's words - the studio checks that the question repeats the recorded choice and words exactly and that every card names the choice in `honours`, not the design itself; the agent writes the state file it is checked against."
+    not_guaranteed: "That the directions really follow the chosen reference and the PM's words - the studio checks that the question repeats the recorded choice and words exactly and that every card names the choice id in `honours`; whether a card honours the words is the agent's judgement; the agent writes the state file it is checked against."
     description: "A direction question carries `prior` = the PM's latest recorded references answer (question, choice, comment) and every card an `honours` text naming that choice; the studio shows the choice and the PM's words above the question and `honours` on the card. Without a recorded references answer nothing is required (PM 9. 10. 2026: the chosen reference and 'I like its animations' were dropped by the next step)."
     recovery: "Copy the recorded references answer into the question's `prior` and write on every card how it honours the choice (naming its id)."
     test_covers: "no references answer = free; missing or different prior refused; card without honours or without the choice id refused; complete payload passes; a done question is skipped (test-aid-ui-studio.bats)."

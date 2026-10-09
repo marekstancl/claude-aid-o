@@ -980,8 +980,8 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
       note.replaceChildren(...(c ? ["Vybráno: ", el("b", {}, c.title || c.id)] : ["Vyberte kartu kliknutím."]));
       if (otherBtn) otherBtn.textContent = c ? "Poznámka k výběru" : "Chci to jinak";
     };
-    const select = id => {   // a click on the picked card lets it go again
-      SELECTED[q.id] = SELECTED[q.id] === id ? undefined : id;
+    const select = id => {   // a click on the picked card lets it go again; a row question (radio) keeps one picked
+      SELECTED[q.id] = SELECTED[q.id] === id && !rows ? undefined : id;
       sec.querySelectorAll(".card[data-card]").forEach(a => {
         const on = a.getAttribute("data-card") === SELECTED[q.id];
         a.classList.toggle("picked", on); a.querySelector(".tick").setAttribute("aria-checked", String(on));

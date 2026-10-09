@@ -39,8 +39,9 @@ Vybrané vzory a styly v `.aid-ui/refs/`, brand balíček, vize a tón,
    k němu PM napsal; liší se tím, jak daleko vzor vezmou (věrně / s obsahem navíc / odvážněji),
    ne tím, že by dva šly jinam. Otázka nese `prior` = přesně zaznamenaná odpověď PM k vzorům
    (`{"question", "choice", "comment"}` z `brand-state.json`), studio ji ukáže nad otázkou; každá karta
-   má `honours` (do 300 znaků, jmenuje id vybraného vzoru) = jak směr ctí volbu a slova PM. Bez toho
-   studio otázku odmítne (`aid_ui_prior_decision`; PM 9. 10. 2026). Každá karta dál s:
+   má `honours` (do 300 znaků, jmenuje id vybraného vzoru) = jak směr ctí volbu a slova PM; studio
+   hlídá přesnost `prior` a jméno volby v `honours`, slova PM ctíš ty. Bez toho studio otázku odmítne
+   (`aid_ui_prior_decision`; PM 9. 10. 2026). Každá karta dál s:
    - `thesis` - princip odvozený ze značky a vybraných vzorů,
    - charakteristické komponenty (2-3, v `body` otázky nebo `thesis`),
    - `uniqueness` - jedna věta, čím se liší od šablony (povinná, bez ní

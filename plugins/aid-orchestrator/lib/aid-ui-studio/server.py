@@ -30,7 +30,9 @@ question (else the payload is invalid: 422, logged).
 A card's `preview` is a file under <project>/.aid-ui/studio/; until it exists
 GET /preview answers 404 and the page shows the pending slot.
 
-Answers live in this process's memory only (the confirm-store rule: never read
+Answers live in this process's memory and, after a restart, come back from the studio's own
+history.jsonl (the entries this server wrote, latest by `at`) - never from the state script's files
+(the confirm-store rule: never read
 back from a file the agent can write). A restart forgets an unrecorded answer and
 its question is open again.
 
@@ -290,16 +292,21 @@ def check_prior(q, cards):
     if not kind or q.get("done") is True:
         return
     found = prior_answer(kind)
+    who = "question %s (%s)" % (q["id"], q["kind"])
     if not found:
+        held = [i for i, a in ANSWERS.items() if a.get("kind") == kind and a.get("decision") in ("choose", "approve")]
+        if held:   # the PM answered the references question here, the state script has not recorded it yet
+            raise ValueError("%s: the PM's %s answer %s is not recorded in the state yet; run aid-ui-state.sh record-answer first" % (who, kind, held[0]))
         return
     qid, a = found
+    if not a.get("choice"):
+        raise ValueError("%s: the recorded %s answer %s names no choice; a card question is expected there" % (who, kind, qid))
     want = {"question": qid, "choice": a.get("choice"), "comment": a.get("comment") or ""}
-    who = "question %s (%s)" % (q["id"], q["kind"])
     if q.get("prior") != want:
         raise ValueError("%s: `prior` must repeat the PM's recorded %s answer exactly: %s" % (who, kind, json.dumps(want, ensure_ascii=False)))
     for c in cards:
         h = c.get("honours")
-        if not (isinstance(h, str) and 0 < len(h) <= 300 and (not want["choice"] or str(want["choice"]) in h)):
+        if not (isinstance(h, str) and 0 < len(h) <= 300 and str(want["choice"]) in h):
             raise ValueError("%s: card %s needs `honours` (1-300 characters) saying how it honours the PM's choice %r%s"
                              % (who, c.get("id"), want["choice"], (" and the words %r" % want["comment"]) if want["comment"] else ""))
 
@@ -531,7 +538,7 @@ def valid_answer(q):
 def answer_from_history(qid):
     """The latest answer the PM gave to qid as this studio recorded it in history.jsonl (by: pm,
     with cards_sha256); None when there is none or the file cannot be read."""
-    found = None
+    found = None   # the latest by answer.at, not the last line (a stale later line must not shadow it)
     try:
         with open(HISTORY, encoding="utf-8") as fh:
             for line in fh:
@@ -543,6 +550,12 @@ def answer_from_history(qid):
                         and e["question"].get("id") == qid and isinstance(e.get("answer"), dict) and e.get("cards_sha256")):
                     continue
                 qq, an = e["question"], e["answer"]
+                try:
+                    parse_time(an.get("at"))
+                except (TypeError, ValueError):
+                    continue
+                if found and str(an.get("at")) <= str(found["at"]):
+                    continue
                 found = {"question": qid, "kind": qq.get("kind"), "target": qq.get("target"), "decision": an.get("decision"),
                          "choice": an.get("choice"), "comment": an.get("comment"), "at": an.get("at"),
                          "cards": e.get("cards") or [], "cards_sha256": e["cards_sha256"]}
