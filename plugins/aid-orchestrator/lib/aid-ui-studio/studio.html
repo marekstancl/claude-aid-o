@@ -769,6 +769,11 @@ function identity(c) {
     tags.map(t => el("span", { class: "tag" }, t)));
 }
 
+function withPick(q, cards, text) {   // "[vybráno: <id> · <název>] " before the PM's words when a card is picked
+  const c = cards.find(x => x.id === SELECTED[q.id]);
+  return c ? "[vybráno: " + c.id + " · " + (c.title || c.id) + "] " + text : text;
+}
+
 function optionRow(q, c, i, select) {   // one answer as a row (facts, no_method): the tick is the radio, the row is the click
   const title = c.title || c.id, picked = SELECTED[q.id] === c.id;
   const meta = [str(c.risk) ? "Riziko: " + c.risk : null, str(sourceOf(c)) ? "Vychází z: " + sourceOf(c) : null].filter(Boolean).join(" · ");
@@ -979,8 +984,10 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
       el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll") } }, icon("die"), el("span", {}, "Znovu")),
       el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_bolder") } }, "Odvážněji →"),
       el("button", { type: "button", class: "reroll-btn", on: { click: () => ask({ key: q.id, title: "Co chcete jinak?",
-        hint: "Napište to svými slovy. Odešlete to jako svou odpověď, nebo si nechte podle toho připravit nové návrhy.",
-        send: [["Nové návrhy podle toho", t => answer("reroll", undefined, t)], ["Odeslat", t => answer("return", undefined, t)]] }) } }, "Chci to jinak"),
+        hint: "Napište to svými slovy. Odešlete to jako svou odpověď, nebo si nechte podle toho připravit nové návrhy." + (SELECTED[q.id] ? " Vybraná karta se pošle s tím." : ""),
+        // the picked card travels with the words: a "return" has no choice field, and "I like the chosen one, take its
+        // animations" without the card is unreadable (Coufal 9. 10. 2026)
+        send: [["Nové návrhy podle toho", t => answer("reroll", undefined, withPick(q, cards, t))], ["Odeslat", t => answer("return", undefined, withPick(q, cards, t))]] }) } }, "Chci to jinak"),
       el("span", { class: "spacer" }), note, next,
       el("p", { class: "hint" }, "Bezpečněji = blíž tomu, co je v oboru běžné. Odvážněji = výraznější a méně obvyklé. Znovu = nové návrhy ve stejném duchu."),
       status));
