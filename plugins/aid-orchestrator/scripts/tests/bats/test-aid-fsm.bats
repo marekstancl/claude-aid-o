@@ -1837,3 +1837,61 @@ YAML
   [ "$status" -eq 0 ]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
 }
+
+# ─── P109 Step 5: amend-scope on a brief-bound plan names the point it serves ──
+# The plan.json is PRODUCED by aid-epic-to-json.sh from a six-column EPIC table
+# and a source plan with zadani_sha256 — not hand-written — so the binding the
+# generator writes is the one this reads. Defects: P014 C — six scope_amended
+# events, none tied to a point of the brief; a plan.json the generator never binds.
+_zp_plan_json() {   # <td> — generate plan.json (step 1 closes AC2, step 2 closes AC3) into <td>
+  local td="$1" g; g="$(mktemp -d)"
+  printf -- '---\nid: P930\nzadani: .aid-o/plans/P930-zadani.md\nzadani_sha256: %s\n---\n# Plan\n' "$(printf brief | sha256sum | cut -d' ' -f1)" > "$g/P930-plan.md"
+  { printf -- '---\nepic_id: E-930-1_1\ntitle: Brief-bound\nplan_ref: %s\n---\n## Acceptance Criteria\n\n' "$g/P930-plan.md"
+    printf -- '- [ ] [backend] step one deliverable verified\n- [ ] [qa] step two deliverable verified\n\n## Steps (Role Pipeline)\n\n'
+    printf '| # | Role | Objective | Depends On | Parallel Group | Closes |\n|---|------|-----------|------------|----------------|--------|\n'
+    printf '| 1 | backend | do the first thing properly | - | - | AC2 |\n| 2 | qa | verify the first thing works | 1 | - | AC3 |\n'
+  } > "$g/E-930-1_1-x.md"
+  local m; m="$(bash "$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh" --epic "$g/E-930-1_1-x.md" \
+    --schema "$AID_PLUGIN_PATH/defaults/templates/plan.schema.json" --output-dir "$g/out" 2>/dev/null)"
+  cp "$(jq -r .plan_json <<< "$m")" "$td/plan.json"
+  rm -rf "$g"
+}
+_zp_state() {   # <td> <state> <current_step>
+  printf 'epic_id: E-930-1_1\nrun_id: R-930\nstate: %s\ncurrent_step: %s\ntotal_steps: 2\nplan_json_hash: %s\n' \
+    "$2" "$3" "$(sha256sum "$1/plan.json" | awk '{print $1}')" > "$1/fsm-state.yaml"
+  : > "$1/timeline.jsonl"
+}
+
+@test "amend-scope-zadani: in EXECUTE the reason must name the current step's point; the record carries it" {
+  local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"; _zp_state "$td" EXECUTE 0
+  [ "$(jq -c '.steps[0].zavira' "$td/plan.json")" = '["AC2"]' ]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_h.py --reason "need the helper file for the test"
+  [ "$status" -ne 0 ]; [[ "$output" == *"--reason must name the brief point this widening serves (one of: AC2)"* ]]
+  [[ "$output" == *"(pipeline.md §When AID refuses: amend_scope_reason_names_no_point)"* ]]; [[ "$output" == *"next: "* ]]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_h.py --reason "AC3 needs the helper file for the test"
+  [ "$status" -ne 0 ]                       # AC3 is step 2's, not this step's
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_h.py --reason "AC2 needs the helper file for the test"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.[-1].zadani_point' "$td/steps/step_1_backend/scope-amendment.json")" = AC2 ]
+  grep -q '"zadani_point":"AC2"' "$td/timeline.jsonl"
+}
+
+@test "amend-scope-zadani: in GATES a point of any step is accepted (the union); a step closing no point is refused naming rule 11" {
+  local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"; _zp_state "$td" GATES 1
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src/fix.py --reason "AC2 fails its gate without this file fixed"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.[-1].zadani_point' "$td/steps/step_2_qa/scope-amendment.json")" = AC2 ]
+  jq '.steps[0].zavira = [] | .steps[1].zavira = []' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"
+  _zp_state "$td" EXECUTE 0
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src/x.py --reason "AC2 needs it, but the step closes nothing"
+  [ "$status" -ne 0 ]; [[ "$output" == *"closes no point of the brief"*"rule 11"* ]]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
+}
+
+@test "amend-scope-zadani: a plan.json without zadani_sha256 records zadani_point null" {
+  local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"
+  jq 'del(.zadani, .zadani_sha256)' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"
+  _zp_state "$td" EXECUTE 0
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_h.py --reason "the helper file for the test is needed"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[-1].zadani_point' "$td/steps/step_1_backend/scope-amendment.json")" = null ]
+}

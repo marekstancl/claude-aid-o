@@ -1365,11 +1365,108 @@ _bind_brief() {   # <brief source> — the plan names it; check and critic redon
 }
 
 @test "zadani: a brief changed between round 1 and prepare --round 2 is refused — a confirmation round reads the brief round 1 read" {
-  _bind_brief "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md"
+  aid_fixture_write_brief "$ROOT" "$PLAN" >/dev/null; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
   _round1_closed
   "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
-  printf '\n<!-- edited -->\n' >> "$ROOT/.aid-o/plans/P900-zadani.md"
+  printf '\n<!-- edited after fix-check -->\n' >> "$ROOT/.aid-o/plans/P900-zadani.md"
   run "$ROUND_SH" prepare "$PLAN" --round 2
   [ "$status" -ne 0 ]; [[ "$output" == *"the brief changed after round 1"* ]]; [[ "$output" == *"brief_changed_after_round"* ]]
   [ ! -d "$CP1/round-2" ]
+}
+
+# ── P109 Step 5: a revision after a round is checked against the brief ──────
+# Defects: P014's plan line 243/253 — the point rewritten after a reviewer
+# argued against it; a brief silently swapped under a review.
+_bound_plan() {   # the P900 plan bound to a brief generated from its own criteria
+  aid_fixture_write_brief "$ROOT" "$PLAN" >/dev/null
+  _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+}
+_brief() { printf '%s' "$ROOT/.aid-o/plans/P900-zadani.md"; }
+_rebind() {   # the plan follows the brief: verze and sha
+  sed -i "s/^zadani_verze: .*/zadani_verze: $(awk -F': *' '/^verze:/ {print $2; exit}' "$(_brief)")/; s/^zadani_sha256: .*/zadani_sha256: $(sha256sum "$(_brief)" | cut -d' ' -f1)/" "$PLAN"
+  _check
+}
+
+@test "fix-check-zadani: a revision that rewords or drops a brief point is refused naming it" {
+  _bound_plan; _round1_closed
+  sed -i 's/^- \[ \] AC1: the fixture plan does what its steps say$/- [ ] AC1: the plan does roughly what it says/' "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"AC1 missing or rewritten"* ]]; [[ "$output" == *"fix_check_brief_point_changed"* ]]
+  [[ "$output" == *"next: restore the point"* ]]
+  sed -i 's/^- \[ \] AC1: the plan does roughly what it says$/- [ ] AC9: something else/' "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"AC1 missing or rewritten"* ]]
+}
+
+@test "fix-check-zadani: a revision that keeps the points passes with zadani_pass and the brief's sha and verze" {
+  _bound_plan; _round1_closed
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  jq -e '.zadani_pass == true and .brief_changed == false and .zadani_verze == 1 and (.zadani_sha256 | length) == 64' "$CP1/round-1/fix-diff.json"
+}
+
+@test "fix-check-zadani: a brief changed with the same verze is refused; with verze raised it passes as brief_changed and round 2 is refused" {
+  _bound_plan; _round1_closed
+  printf '\n<!-- the PM asked for more -->\n' >> "$(_brief)"; _rebind
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"its verze did not rise (1 → 1)"* ]]; [[ "$output" == *"fix_check_brief_version_not_raised"* ]]
+  sed -i 's/^verze: 1$/verze: 2/' "$(_brief)"; _rebind
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  jq -e '.brief_changed == true and .zadani_verze == 2' "$CP1/round-1/fix-diff.json"
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  [ "$status" -ne 0 ]; [[ "$output" == *"brief_changed_after_round"* ]]
+}
+
+@test "restart: a changed brief restarts the review in a new attempt; without it, or without a reason, it is refused" {
+  _bound_plan; _round1_closed
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM changed what they want here"
+  [ "$status" -ne 0 ]; [[ "$output" == *"restart_needs_brief_change"* ]]
+  sed -i 's/^verze: 1$/verze: 2/' "$(_brief)"; _rebind
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "short"
+  [ "$status" -ne 0 ]; [[ "$output" == *"at least 20 characters"* ]]
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"already prepared"* ]]
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"   # the critic reran on the changed plan
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM changed what they want here"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ -d "$CP1/attempt-1/round-1" ]
+  jq -e '.k == 1 and (.zadani_sha256_before != .zadani_sha256_after)' "$CP1/attempt-1/attempt.json"
+  [ "$(jq -r .zadani_sha256 "$CP1/round-1/packet/manifest.json")" = "$(sha256sum "$(_brief)" | cut -d' ' -f1)" ]
+}
+
+@test "fix-check-zadani: a revision that adds the plan's own AC2 after the brief's points passes" {
+  _bound_plan; _round1_closed
+  awk '/^- \[ \] AC1: the fixture plan/ { a = 1 } { print } a && /^  ```$/ { print "- [ ] AC2: the plan adds its own criterion"; print "  ```yaml"; print "  verification_pattern:"; print "    type: cmd"; print "    cmd: \"true\""; print "    expected_exit: 0"; print "  ```"; a = 0 }' "$PLAN" > "$ROOT/p2" && mv "$ROOT/p2" "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  jq -e '.zadani_pass == true and .brief_changed == false' "$CP1/round-1/fix-diff.json"
+}
+
+@test "restart: the PM's words restart a review without a brief change and are recorded; blank words do not; --manual is refused" {
+  _bound_plan; _round1_closed
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM wants the review redone now" --pm "   "
+  [ "$status" -ne 0 ]; [[ "$output" == *"restart_needs_brief_change"* ]]
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --manual --reason "the PM wants the review redone now" --pm "PM: start the review again"
+  [ "$status" -ne 0 ]; [[ "$output" == *"not both"* ]]
+  [ -d "$CP1/round-1" ]
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM wants the review redone now" --pm "PM: start the review again"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .pm "$CP1/attempt-1/attempt.json")" = "PM: start the review again" ]
+  [ -f "$CP1/round-1/round.json" ]
+}
+
+@test "restart: nothing moves when the new round 1 could not be prepared (critic stale), and a restart with no live round recovers" {
+  _bound_plan; _round1_closed
+  sed -i 's/^verze: 1$/verze: 2/' "$(_brief)"; _rebind
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM changed what they want here"
+  [ "$status" -ne 0 ]; [[ "$output" == *"nothing was moved"* ]]; [[ "$output" == *"critic_required"* ]]
+  [ -d "$CP1/round-1" ]; [ ! -d "$CP1/attempt-1" ]
+  # an earlier restart that moved the rounds and stopped: the same command recovers
+  mkdir -p "$CP1/attempt-1"; mv "$CP1"/round-* "$CP1/attempt-1/"
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM changed what they want here"
+  echo "$output"; [ "$status" -eq 0 ]; [ -f "$CP1/round-1/round.json" ]
 }

@@ -875,6 +875,22 @@ Blocked card "plan-close brief missing — run aid-pm-brief.sh" rather than
 assembling a summary from evidence files. `legacy_epic_release_mode` plans keep
 their existing per-EPIC release text unchanged.
 
+## The brief changes
+
+A brief point is never changed in the plan alone — `fix-check` runs the lint's brief pass and
+refuses it (`fix_check_brief_point_changed`). When the PM changes what they want: bump `verze:`
+in the brief, update `zadani_verze` and `zadani_sha256` in the plan, rerun `aid-plan-lint.sh`,
+`fix-check` (it records `brief_changed: true`), rerun the critic from the brief file
+(`aid_critic_prepare P{NNN} --moment plan --plan <plan>`, dispatch, check), then restart the
+review in a new attempt:
+
+```bash
+bash "$R" prepare <plan> --round 1 --restart --reason "<why the brief changed>"
+```
+
+The old rounds stay under `cp1/attempt-<k>/`. A brief change is never a "fix", and a
+confirmation round never reads a different brief than round 1 (`brief_changed_after_round`).
+
 ## The PM page goes stale with every plan edit
 
 `aid-plan-to-epic.sh` refuses to generate when the PM page is older than the plan file
