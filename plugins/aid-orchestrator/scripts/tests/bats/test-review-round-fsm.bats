@@ -104,6 +104,13 @@ _check() {
       done < <(grep -n "When AID refuses: ${r})" "$f")
     done
   done < <(grep -v '^#' "$tsv")
+  # and the other direction: every code those three scripts print is in the
+  # fixture and has its row — a new refusal cannot skip both
+  local code
+  while IFS= read -r code; do
+    grep -qP "\t${code}$" "$tsv" || missing+=" fixture:$code"
+    grep -q "\`${code}" "$table" || missing+=" row:$code"
+  done < <(grep -ohE 'When AID refuses: [a-z_]+\)' "${sites[@]}" | sed -E 's/.*: ([a-z_]+)\)/\1/' | sort -u)
   [[ -z "$missing" ]] || { echo "missing:$missing"; false; }
 }
 @test "cp3 without the semantic file blocks; a missing index names the step check command" {
