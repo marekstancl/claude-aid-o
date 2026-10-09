@@ -762,11 +762,11 @@ JSON
   # without a second picture -> /preview&n=2 404 and a broken image; the counter says which card of how many
   grep -qF '.lb-bar [hidden] { display: none; }' "$f"
   grep -qF 'LB.ctx = !!ctx && art.getAttribute("data-preview2") === "1"' "$f"
-  grep -qF '"návrh " + (LB.i + 1) + " z " + LB.arts.length' "$f"
+  grep -qF '(art.hasAttribute("data-fig") ? "stránka " : "návrh ") + (LB.i + 1) + " z " + LB.arts.length' "$f"
   grep -qF 'const FRAMES = ".card[data-card], .gallery figure";' "$f"    # a gallery (structure, texts) steps like the cards
   grep -qF 'art.querySelector("h3, figcaption b")' "$f"
   # per-page notes (PM 9. 10.): "Chci jinak" in the lightbox of a gallery figure, sent together as one return; edge-fixed arrows
-  for w in 'class: "chip lb-note"' 'sec.noteFor = (id, then)' '"Vrátit s poznámkami (" + n + ")"' 'answer("return", undefined, Object.entries(notes)' '.lb-bar .lb-prev { justify-self: start; } .lb-bar .lb-next { justify-self: end; }' 'el("figure", { "data-fig": c.id }' 'const notes = NOTES[q.id] = NOTES[q.id] || {};' 'extra: notes[id] ? [["Smazat poznámku"' 'return i && !i.hidden && i.naturalWidth;' 'minmax(0, 1fr) minmax(0, auto) minmax(0, 1fr)'; do
+  for w in 'class: "chip lb-note"' 'sec.noteFor = (id, then)' '"Vrátit s poznámkami (" + n + ")"' 'answer("return", undefined, Object.entries(notes)' '.lb-bar .lb-prev { justify-self: start; } .lb-bar .lb-next { justify-self: end; }' '#lightbox img { display: inline-block; width: min(94vw, 48rem); height: auto;' 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' 'el("figure", { "data-fig": c.id }' 'const notes = NOTES[q.id] = NOTES[q.id] || {};' 'extra: notes[id] ? [["Smazat poznámku"' 'return i && !i.hidden && i.naturalWidth;' 'width: min(94vw, 44rem); display: grid; grid-template-columns: auto minmax(0, 1fr) auto'; do
     grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
   done
   jq '.cards[0].preview2 = "a2.png"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
