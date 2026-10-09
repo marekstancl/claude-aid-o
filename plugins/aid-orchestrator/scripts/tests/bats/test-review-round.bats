@@ -1470,3 +1470,18 @@ _rebind() {   # the plan follows the brief: verze and sha
   run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM changed what they want here"
   echo "$output"; [ "$status" -eq 0 ]; [ -f "$CP1/round-1/round.json" ]
 }
+
+# P109 Step 6 — defect: P013-3, a diary entry blocking a review round.
+@test "twin: a diary that differs between the primary and a worktree no longer stops prepare; a plan that differs still does" {
+  git -C "$ROOT" add -A >/dev/null 2>&1; git -C "$ROOT" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1 || true
+  git -C "$ROOT" worktree add -q "$ROOT/.aid-worktrees/plan-P900" -b plan/P900 >/dev/null 2>&1
+  local wt="$ROOT/.aid-worktrees/plan-P900"
+  mkdir -p "$wt/.aid-o/plans" "$wt/.aid-o/work"; cp "$PLAN" "$wt/.aid-o/plans/p.md"
+  echo "primary diary" > "$ROOT/.aid-o/work/aid-plugin-issues.md"
+  sleep 1; echo "worktree diary, newer" > "$wt/.aid-o/work/aid-plugin-issues.md"
+  run "$ROUND_SH" prepare "$wt/.aid-o/plans/p.md" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  rm -rf "$CP1"; echo "edited in the worktree only" >> "$wt/.aid-o/plans/p.md"
+  run "$ROUND_SH" prepare "$wt/.aid-o/plans/p.md" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"two different contents under one name"* ]]
+}

@@ -469,7 +469,10 @@ cmd_prepare() {
   else
     tree_root="$ROOT"; twin_plan="$(yq -r '.plan_path // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"; [[ "$twin_plan" == null ]] && twin_plan=""
   fi
-  for twin_plan in "$twin_plan" ".aid-o/work/aid-plugin-issues.md"; do
+  # The plan only: the diary (.aid-o/work/aid-plugin-issues.md) resolves to the
+  # state root already, and comparing its two copies stopped review rounds over
+  # an append-only log (agents P013-3/5, 2026-10-07; P109 Step 6).
+  for twin_plan in "$twin_plan"; do
     [[ -n "$twin_plan" ]] || continue
     twin_rc=0; aid_dotaid_twin_check "$state_root" "$tree_root" "$twin_plan" 2>/dev/null || twin_rc=$?
     (( twin_rc == 3 )) && _die "round ${ROUND} not prepared: $(aid_dotaid_twin_check "$state_root" "$tree_root" "$twin_plan" 2>&1)"

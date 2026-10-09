@@ -180,6 +180,7 @@ surfaces:
                "creates:.aid-o/config/plugin.yaml",
                "creates:.aid-o/config/check-severity.yaml",
                "creates-if:.aid-o/config/integrations.yaml",
+               "creates-if:.gitattributes",
                "mutates:.aid-o/config/execution.yaml"],
       final_turn: "renderer:scripts/aid-config-summary.sh" }
 
