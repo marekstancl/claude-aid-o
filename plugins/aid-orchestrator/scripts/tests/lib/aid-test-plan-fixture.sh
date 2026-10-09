@@ -277,8 +277,9 @@ aid_fixture_write_brief() {
   } > "$brief"
   # every step closes the points; design sections name them
   tmp="$(mktemp)"
-  # **Zavírá:** goes right after **AID Role:** (a one-line field), or at the
-  # step's end when the step has no role line
+  # **Zavírá:** goes right BEFORE **AID Role:** (so text a caller appends to the
+  # step later cannot run into its value), or at the step's end when the step
+  # has no role line
   awk -v ids="$ids" '
     function close_step() { if (instep && !has) print "\n**Zavírá:** " ids "\n"; instep = 0; has = 0 }
     /^```/ { fence = !fence }
@@ -288,7 +289,7 @@ aid_fixture_write_brief() {
     skipodv && /^\*\*Odvozeno z:\*\*/ { skipodv = 0; next }
     skipodv && NF { skipodv = 0 }
     instep && /^\*\*Zavírá:\*\*/ { has = 1 }
-    instep && !has && /^\*\*AID Role:?\*\*/ { print; print ""; print "**Zavírá:** " ids; has = 1; next }
+    instep && !has && /^\*\*AID Role:?\*\*/ { print "**Zavírá:** " ids; print ""; print; has = 1; next }
     { print }
     END { close_step() }' "$plan" > "$tmp"
   sha="$(sha256sum "$brief" | cut -d' ' -f1)"

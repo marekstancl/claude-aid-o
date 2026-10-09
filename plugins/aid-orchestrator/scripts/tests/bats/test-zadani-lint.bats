@@ -162,3 +162,29 @@ EOF
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; aid_lifecycle_plan_file P7 '$T'"
   [ -z "$output" ]
 }
+
+@test "parser: a block under an unlabelled bullet, or in a second criteria section, belongs to no criterion" {
+  cat > "$T/p.md" <<'PLAN'
+## Acceptance Criteria
+
+- [ ] AC1: the first
+  ```yaml
+  verification_pattern:
+    type: cmd
+    cmd: "true"
+    expected_exit: 0
+  ```
+
+## Acceptance Criteria
+
+- [ ] there
+  ```yaml
+  verification_pattern:
+    type: must_contain
+    file: "x.txt"
+    regex: "y"
+  ```
+PLAN
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-verification-pattern.sh'; _aid_vp_parse_ac '$T/p.md' 'Acceptance Criteria' | cut -d\$'\\x1f' -f1,3,4 | tr '\\037' ' '"
+  [ "$output" = "AC1 cmd true" ]
+}

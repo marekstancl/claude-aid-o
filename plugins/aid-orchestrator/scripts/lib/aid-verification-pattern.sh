@@ -74,6 +74,7 @@ _aid_vp_parse_ac() {
   [[ "${3:-}" == "--lines" ]] && lines=1
   awk -v US=$'\x1f' -v sec="$sec" -v lines="$lines" "$_AID_VP_AWK_FUNCS"'
     function emit(t) {
+      if (ac_label == "") return
       printf "%s%s%s%s%s%s%s%s%s%s%s%s%s", ac_label, US, ac_text, US, t, US, ac_cmd, US, ac_file, US, ac_regex, US, ac_expected_exit
       if (lines) printf "%s%s%s%s", US, ac_line, US, blk_line
       printf "\n"
@@ -88,8 +89,12 @@ _aid_vp_parse_ac() {
     # Section flag: on at a matching `## ` heading, off at the next `## `.
     # (A start/end range pattern collapses when the heading itself would match
     # the terminator — the flag form has no such collision.)
-    $0 ~ ("^## (" sec ")") { f=1; next }
+    # A new section, or a bullet that is no criterion, ends the criterion before
+    # it: a block under an unlabelled bullet belongs to no criterion (it used to
+    # overwrite the criterion before it).
+    $0 ~ ("^## (" sec ")") { flush_no_verify(); ac_label=""; in_yaml=0; f=1; next }
     /^## / { f=0 }
+    f && /^- / && $0 !~ /^- \[[ x]\] AC[0-9]+:/ && $0 !~ /^- \[[ x]\] \[[a-z_]+\]/ { flush_no_verify(); ac_label=""; in_yaml=0; next }
     f {
       if ($0 ~ /^- \[[ x]\] AC[0-9]+:/ || $0 ~ /^- \[[ x]\] \[[a-z_]+\]/) {
         flush_no_verify()

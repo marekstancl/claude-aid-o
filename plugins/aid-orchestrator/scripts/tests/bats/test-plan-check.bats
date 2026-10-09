@@ -16,6 +16,7 @@ setup() {
   printf 'x\n%.0s' $(seq 1 50) > src/b.py
   printf 'ok\n' > tests/test_a.py
   git init -q . && git add -A && git -c user.email=t@t -c user.name=t commit -qm init
+  source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"
 }
 teardown() { rm -rf "$TEST_DIR"; }
 
@@ -29,6 +30,9 @@ _plan() { # <file> <strict|legacy> [dep2] [files1...]
     if [[ $# -gt 0 ]]; then printf '%s\n' "$@"; else printf -- '- Modify: `src/a.py` (lines ~1-2) — extend `existing_helper`\n- Create: `src/new.py` — the new module\n'; fi
     printf '\n**Reuse check:** searched: `find src -name "new*"` → none — nothing exists yet\n\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nnone\n\n**Edge Cases:**\n- one\n- two\n- three\n\n**Dependencies:**\n- Depends on: none\n\n**Acceptance Criteria:**\n- [ ] `src/new.py` exists\n- [ ] `existing_helper` still returns 1\n- [ ] tests pass\n\n**Effort:** M\n**AID Role:** backend\n\n### Step 2: second\n\n**Objective:** do the second thing.\n\n**Files:**\n- Modify: `src/new.py` — use it\n\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nnone\n\n**Edge Cases:** (a) one; (b) two; (c) three\n\n**Dependencies:**\n%s\n\n**Acceptance Criteria:**\n- [ ] one\n- [ ] two\n- [ ] three\n\n**Effort:** S\n**AID Role:** backend\n' "$dep2"
   } > "$f"
+  # P109: a strict plan names its brief; these cases test the plan check
+  [[ "$strict" == "strict" ]] && aid_fixture_write_brief "$TEST_DIR" "$f" >/dev/null
+  return 0
 }
 
 @test "plan-check: a whole valid plan passes (strict)" {
