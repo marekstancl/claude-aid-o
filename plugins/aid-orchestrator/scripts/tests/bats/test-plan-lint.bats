@@ -22,6 +22,7 @@ setup() {
   # plan-state marker is the documented escape in lib/aid-roots.sh: a directory
   # carrying it is honoured as a project root as-given, without a git repo.
   mkdir -p .aid-o/work/plan-state
+  source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"
 }
 teardown() { rm -rf "$TEST_DIR"; }
 
@@ -41,6 +42,9 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
     printf '\n**Reuse check:** searched: `find . -name no-such-component.xyz` → none — nothing exists yet\n'
     printf '\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nn/a\n\n**Edge Cases:**\nn/a\n'
   } > "$f"
+  # P109: a strict plan names its brief; these fixtures test other things
+  [[ "$strict" == "strict" ]] && aid_fixture_write_brief "$TEST_DIR" "$f" >/dev/null
+  return 0
 }
 
 # ── clean canonical forms => PASS ────────────────────────────────────────────
@@ -386,4 +390,115 @@ _plan_role() { # <file> <role>
   [[ "$output" == *"verification-only marker allowed on Test: bullets only"* ]]
   _plan p.md strict '- Test: `t/x.bats` — ověřovací, smazat před koncem plánu: a one-off measurement'
   run "$LINT" p.md; [ "$status" -eq 0 ]
+}
+
+# ── P109 Step 2: the plan carries the brief ──────────────────────────────────
+# The P014 pair: the brief of the comparative experiment and the plan that
+# dropped its point 2 (fixtures/zadani/). Defect: a plan that quietly drops or
+# rewrites a point of the brief, which nothing compared in P014.
+_p014() {
+  mkdir -p .aid-o/plans
+  cp "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md" .aid-o/plans/P014-zadani.md
+  sed "s/SHA_OF_THE_BRIEF/$(sha256sum .aid-o/plans/P014-zadani.md | cut -d' ' -f1)/" \
+    "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-plan.md" > .aid-o/plans/P014-plan.md
+}
+# A strict plan with a brief generated from its own criteria, then broken per case.
+_bound() { _plan p.md strict '- Modify: `src/a.ts` — edit'; }
+
+@test "zadani: the P014 plan fails the lint naming AC2" {
+  _p014
+  run "$LINT" .aid-o/plans/P014-plan.md --only zadani
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AC2 missing or rewritten"* ]]
+  [[ "$output" == *"neznámá hodnota v konfiguraci skončí chybou při startu"* ]]
+}
+
+@test "zadani: a plan carrying every point verbatim passes; a rewritten block fails" {
+  _bound
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 0 ]
+  sed -i '0,/expected_exit: 0/s//expected_exit: 1/' p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]; [[ "$output" == *"AC1 missing or rewritten"* ]]
+}
+
+@test "zadani: a point no step closes, and a Zavírá naming AC99, are refused" {
+  _bound
+  sed -i 's/^\*\*Zavírá:\*\* AC1$/**Zavírá:** AC99/' p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"names AC99, which the brief does not have"* ]]
+  [[ "$output" == *"AC1 of the brief is closed by no step"* ]]
+}
+
+@test "zadani: a step of a brief-bound plan without Zavírá is refused; the same step in a plan without a brief is not" {
+  _bound
+  sed -i '/^\*\*Zavírá:\*\*/d' p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]; [[ "$output" == *"has no **Zavírá:** field"* ]]
+  _plan q.md legacy '- Modify: `src/a.ts` — edit'
+  run "$LINT" q.md --only zadani
+  [ "$status" -eq 0 ]
+}
+
+@test "zadani: a wrong zadani_sha256 and a brief path outside the project are refused" {
+  _bound
+  sed -i 's/^zadani_sha256: .*/zadani_sha256: 0000/' p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]; [[ "$output" == *"is not the sha of"* ]]
+  _bound
+  sed -i 's#^zadani: .*#zadani: ../outside-zadani.md#' p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]; [[ "$output" == *"path escapes the project"* ]]
+}
+
+@test "zadani-required: a lifecycle_strict plan without zadani: is refused, a legacy one only warned" {
+  _bound
+  sed -i '/^zadani/d' p.md
+  run "$LINT" p.md
+  [ "$status" -eq 1 ]; [[ "$output" == *"strict plan without zadani:"* ]]
+  _plan q.md legacy '- Modify: `src/a.ts` — edit'
+  AID_QUIET=0 run "$LINT" q.md
+  [ "$status" -eq 0 ]; [[ "$output" == *"[WARN legacy] plan names no brief"* ]]
+}
+
+@test "odvozeno: ## Architecture without Odvozeno z: is refused, with it accepted" {
+  _bound
+  printf '\n## Architecture\n\nOne reader.\n' >> p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]; [[ "$output" == *"## Architecture does not open with **Odvozeno z:** AC<n>"* ]]
+  sed -i 's/^One reader\.$/**Odvozeno z:** AC1\n\nOne reader./' p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 0 ]
+}
+
+@test "zadani: zadani_verze absent or not the brief's verze is refused" {
+  _bound
+  sed -i '/^zadani_verze:/d' p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]; [[ "$output" == *"zadani_verze '<absent>' is not a positive integer"* ]]
+  _bound
+  sed -i 's/^zadani_verze: .*/zadani_verze: 2/' p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]; [[ "$output" == *"zadani_verze 2 but the brief"* ]]
+}
+
+@test "zadani: Zavírá naming a criterion the brief does not have (the plan's own included), or out of grammar, is refused" {
+  _bound
+  # AC2 is the plan's own here: generated briefs carry AC1 only
+  awk '/^## Acceptance Criteria/ { print; print ""; print "- [ ] AC2: the plan adds its own"; print "  ```yaml"; print "  verification_pattern:"; print "    type: cmd"; print "    cmd: \"true\""; print "    expected_exit: 0"; print "  ```"; next } 1' p.md > p2 && mv p2 p.md
+  sed -i 's/^\*\*Zavírá:\*\* AC1$/**Zavírá:** AC1, AC2/' p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]; [[ "$output" == *"names AC2, which the brief does not have"* ]]
+  _bound
+  sed -i 's/^\*\*Zavírá:\*\* AC1$/**Zavírá:** AC1 AC1/' p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]; [[ "$output" == *"is not \"AC<n>[, AC<m>]\" or \"—\""* ]]
+}
+
+@test "odvozeno: a line that names no AC number is refused" {
+  _bound
+  printf '\n## Data Model\n\n**Odvozeno z:** ACbanana\n' >> p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]; [[ "$output" == *"## Data Model does not open with"* ]]
 }

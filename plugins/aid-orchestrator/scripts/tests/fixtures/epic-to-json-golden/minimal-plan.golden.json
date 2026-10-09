@@ -39,7 +39,8 @@
       ],
       "role": "backend",
       "ui_change_contract": null,
-      "ui_change_mode": null
+      "ui_change_mode": null,
+      "zavira": []
     },
     {
       "acceptance_criteria": [
@@ -69,7 +70,8 @@
       ],
       "role": "qa",
       "ui_change_contract": null,
-      "ui_change_mode": null
+      "ui_change_mode": null,
+      "zavira": []
     }
   ],
   "version": 1

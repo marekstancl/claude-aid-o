@@ -31,6 +31,9 @@
 #     suite that places its plan itself)
 #   aid_fixture_seed_plan_decided <project_root> <plan_id>   (a plan whose close
 #     has been decided ready: what plan-merge-to-main and plan-close read)
+#   aid_fixture_write_brief <project_root> <plan>   (P109: the brief a strict plan
+#     must name, generated from the plan's OWN criteria; aid_fixture_seed_plan
+#     calls it for every lifecycle_strict plan that names none)
 #
 # Sourced, never executed.
 # =============================================================================
@@ -83,6 +86,12 @@ aid_fixture_seed_plan() {
     cp -- "$src" "$plan" || return 2
   fi
 
+  # ── 2b. P109 Step 2 (2026-10-09): a lifecycle_strict plan names its brief, or
+  #        the lint refuses it. Generated from the plan's own criteria.
+  if grep -qE '^lifecycle_strict:[[:space:]]*true' "$plan" && ! grep -qE '^zadani:' "$plan"; then
+    aid_fixture_write_brief "$root" "$plan" >/dev/null || return 1
+  fi
+
   # ── 3. P073 Step 11 (2026-08-05): generation refuses a source plan that is
   #       not committed on the target branch — UNLESS the workspace deliberately
   #       does not track it. `.aid-o/` gitignored is the "unshared" shape the
@@ -97,7 +106,9 @@ aid_fixture_seed_plan() {
         return 1
       }
       git -C "$root" add -- "$plan" >/dev/null 2>&1 || true
-      if ! git -C "$root" diff --cached --quiet -- "$plan" 2>/dev/null; then
+      local brief="${plan%/*}/$(basename "$name" | sed -E 's/^(P[0-9]+).*/\1/')-zadani.md"
+      [[ -f "$brief" ]] && git -C "$root" add -- "$brief" >/dev/null 2>&1
+      if ! git -C "$root" diff --cached --quiet -- "$plan" "$brief" 2>/dev/null; then
         git -C "$root" commit -q -m "fixture: the source plan, committed (generation refuses an uncommitted one)" \
           >/dev/null 2>&1 || {
             echo "aid_fixture_seed_plan: could not commit ${plan} — generation will refuse it" >&2
@@ -181,6 +192,88 @@ aid_fixture_seed_plan() {
   aid_fixture_seed_plan_review "$root" "$plan" || return 1
 
   printf '%s\n' "$plan"
+}
+
+# aid_fixture_write_brief <project_root> <plan>
+#
+# The brief a lifecycle_strict plan must name (P109 Step 2), built FROM THE
+# PLAN'S OWN criteria so the plan carries it verbatim by construction:
+#   - the points are the plan's leading run AC1..ACk of criteria with a block
+#     under ## Acceptance Criteria; a plan with no AC1 at all gets one fixture
+#     point appended (a section of its own, the parser reads every such section)
+#   - sections 1-5 hold one fixture sentence each, the stakes paragraph included
+#   - every step without **Zavírá:** gets one naming every point, at its end
+#   - ## Architecture / ## Data Model / ## API Design get **Odvozeno z:** AC1
+#   - the plan's frontmatter gains zadani:, zadani_verze: 1, zadani_sha256:
+# Echoes the brief's path. Refuses a plan whose AC1 has no block: the author of
+# that fixture decides what the point is, not this helper.
+aid_fixture_write_brief() {
+  local root="${1:?aid_fixture_write_brief: project root required}"
+  local plan="${2:?aid_fixture_write_brief: plan required}"
+  local plugin="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+  local id brief rec label n=0 points="" ids="" sha tmp
+  id="$(awk -F': *' 'NR > 1 && /^---$/ {exit} /^id:/ {gsub(/["\x27]/, "", $2); print $2; exit}' "$plan")"
+  [[ "$id" =~ ^P[0-9]+$ ]] || { echo "aid_fixture_write_brief: ${plan} has no frontmatter id P<n>" >&2; return 2; }
+  brief="$root/.aid-o/plans/${id}-zadani.md"
+  mkdir -p "$root/.aid-o/plans"
+  # shellcheck source=/dev/null
+  source "$plugin/scripts/lib/aid-verification-pattern.sh"
+  # shellcheck source=/dev/null
+  source "$plugin/scripts/lib/aid-scoping.sh"
+  while IFS= read -r rec; do
+    label="${rec%%$'\x1f'*}"
+    [[ "$label" == "AC$((n + 1))" ]] || break
+    [[ "$(cut -d$'\x1f' -f3 <<< "$rec")" != no_verification ]] || {
+      [[ "$n" -eq 0 ]] && { echo "aid_fixture_write_brief: ${plan}: AC1 has no verification_pattern block — give it one" >&2; return 2; }
+      break; }
+    n=$((n + 1))
+  done < <(_aid_vp_parse_ac "$plan" "Acceptance Criteria")
+  if [[ "$n" -eq 0 ]]; then
+    # before the first `## ` section, so a caller appending to the plan's last
+    # step after this still appends to that step
+    tmp="$(mktemp)"
+    awk 'BEGIN { sec = "## Acceptance Criteria\n\n- [ ] AC1: the fixture plan does what its steps say\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: \"true\"\n    expected_exit: 0\n  ```\n" }
+      !done && /^## / { print sec; done = 1 } { print } END { if (!done) printf "\n%s", sec }' "$plan" > "$tmp" && mv "$tmp" "$plan"
+    n=1
+  fi
+  # the points: the plan's own lines and blocks, copied byte for byte
+  points="$(awk -v k="$n" '
+    /^## Acceptance Criteria/ { f = 1; next } /^## / { f = 0 }
+    f && /^- / { keep = 0
+      if ($0 ~ /^- \[[ x]\] AC[0-9]+:/) { lab = substr($0, 7); sub(/:.*/, "", lab); keep = (substr(lab, 3) + 0 <= k) } }
+    f && keep' "$plan")"
+  ids="$(seq -f 'AC%g' 1 "$n" | paste -sd, - | sed 's/,/, /g')"
+  {
+    printf -- '---\nzadani: %s\nverze: 1\ndatum: 2026-10-09\nautor: fixture\n---\n\n# %s - fixture brief\n\n' "$id" "$id"
+    printf '## 1. Co PM chce\n\n> „the fixture plan, as written“\n\n**Co je v sázce:** nothing — a test fixture.\n\n'
+    printf '## 2. Změřený výchozí stav\n\n- a fixture project\n\n## 3. Co udělat\n\n**(1)** what the plan says.\n\n'
+    printf '## 4. Kde co je\n\n| Co | Kde |\n|---|---|\n| the plan | `%s` |\n\n## 5. Pravidla práce\n\n- none beyond the plugin'"'"'s\n\n' "${plan##*/}"
+    printf '## 6. Hotovo, když\n\n%s\n' "$points"
+  } > "$brief"
+  # every step closes the points; design sections name them
+  tmp="$(mktemp)"
+  # **Zavírá:** goes right after **AID Role:** (a one-line field), or at the
+  # step's end when the step has no role line
+  awk -v ids="$ids" '
+    function close_step() { if (instep && !has) print "\n**Zavírá:** " ids "\n"; instep = 0; has = 0 }
+    /^```/ { fence = !fence }
+    !fence && /^### Step / { close_step(); instep = 1 }
+    !fence && /^## / { close_step()
+      if ($0 ~ /^## (Architecture|Data Model|API Design)([^[:alnum:]]|$)/) { print; print ""; print "**Odvozeno z:** AC1"; skipodv = 1; next } }
+    skipodv && /^\*\*Odvozeno z:\*\*/ { skipodv = 0; next }
+    skipodv && NF { skipodv = 0 }
+    instep && /^\*\*Zavírá:\*\*/ { has = 1 }
+    instep && !has && /^\*\*AID Role:?\*\*/ { print; print ""; print "**Zavírá:** " ids; has = 1; next }
+    { print }
+    END { close_step() }' "$plan" > "$tmp"
+  sha="$(sha256sum "$brief" | cut -d' ' -f1)"
+  awk -v z=".aid-o/plans/${id}-zadani.md" -v s="$sha" '
+    NR == 1 && $0 == "---" { fm = 1; print; next }
+    fm && $0 == "---" { print "zadani: " z; print "zadani_verze: 1"; print "zadani_sha256: " s; fm = 0 }
+    fm && /^zadani(_verze|_sha256)?:/ { next }
+    { print }' "$tmp" > "$plan"
+  rm -f "$tmp"
+  printf '%s\n' "$brief"
 }
 
 # aid_fixture_seed_plan_review <project_root> <plan>

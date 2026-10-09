@@ -21,6 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"  # _aid_parse_scoping_line, _aid_split_path_entry, _aid_allowed_paths_from_files_json (shared with gates/aid-contract-validate.sh, v2.58.0 IMP-232)
+source "${SCRIPT_DIR}/lib/aid-roots.sh"   # _aid_fm_get, aid_state_root — the source plan's brief binding (P109)
 source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"  # aid_gen_run_id — THE run_id derivation, shared with aid-auto-pipeline.sh (which seals it into the transaction) and aid-plan-to-epic.sh (which re-derives and verifies it)
 check_prerequisites
 
@@ -141,6 +142,7 @@ declare -a step_roles=()
 declare -a step_objectives=()
 declare -a step_depends=()
 declare -a step_parallel=()
+declare -a step_closes=()
 
 # Parse table using awk — extract data rows (skip header/separator)
 table_data="$(echo "$steps_section" | awk '
@@ -213,9 +215,12 @@ while IFS= read -r row; do
 
   # Hard arity check (P074 Step 17). The old path silently padded short rows
   # with `---`, which masked genuinely broken rows as no-dependency steps.
-  if [[ "${#fields[@]}" -ne 5 ]]; then
-    error_exit "EPIC Steps table row has ${#fields[@]} fields, expected 5 (| # | Role | Objective | Depends On | Parallel Group |): ${row}" 1
-  fi
+  # Five fields = an EPIC generated before P109 (no Closes column, zavira []).
+  case "${#fields[@]}" in
+    5) closes="—" ;;
+    6) closes="$(echo "${fields[5]}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')" ;;
+    *) error_exit "EPIC Steps table row has ${#fields[@]} fields, expected 5 or 6 (| # | Role | Objective | Depends On | Parallel Group | Closes |): ${row}" 1 ;;
+  esac
 
   # Trim whitespace from each field
   num="$(echo "${fields[0]}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
@@ -244,6 +249,7 @@ while IFS= read -r row; do
   step_objectives+=("$objective")
   step_depends+=("$depends_on")
   step_parallel+=("$parallel_group")
+  step_closes+=("$closes")
   row_count=$(( row_count + 1 ))
 done <<< "$table_data"
 
@@ -622,6 +628,8 @@ for i in "${!step_nums[@]}"; do
   step_id="${step_ids[$i]}"
   step_role="${step_roles[$i]}"
   step_objective="${step_objectives[$i]}"
+  # P109: the brief points this step closes, from the table's Closes column
+  step_zavira_json="$( { grep -oE '\bAC[0-9]+\b' <<< "${step_closes[$i]:-}" || true; } | jq -R . | jq -sc .)"
   step_n="${step_nums[$i]}"
 
   # Build inputs: EPIC spec + outputs from dependency steps
@@ -749,6 +757,7 @@ for i in "${!step_nums[@]}"; do
     --argjson acceptance_criteria "$step_ac_json" \
     --argjson ui_change_mode "$step_ui_mode" \
     --argjson ui_change_contract "$step_ui_contract" \
+    --argjson zavira "$step_zavira_json" \
     '{
       id: $id,
       role: $role,
@@ -760,7 +769,8 @@ for i in "${!step_nums[@]}"; do
       forbidden_paths: $forbidden_paths,
       acceptance_criteria: $acceptance_criteria,
       ui_change_mode: $ui_change_mode,
-      ui_change_contract: $ui_change_contract
+      ui_change_contract: $ui_change_contract,
+      zavira: $zavira
     }')"
 
   steps_json="$(echo "$steps_json" | jq --argjson step "$step_obj" '. + [$step]')"
@@ -816,9 +826,23 @@ printf '%s' "$parallel_json" > "${__pj_tmp}/parallel.json"
 printf '%s' "$analysis_json" > "${__pj_tmp}/analysis.json"
 printf '%s' "$gates_json"    > "${__pj_tmp}/gates.json"
 printf '%s' "$budget_json"   > "${__pj_tmp}/budget.json"
+# P109: the brief the source plan is bound to, copied to the top of plan.json
+# (amend-scope reads it at run time). Absent when the plan names no brief.
+__src_plan_file=""
+if [[ -n "$plan_source" && "$plan_source" != "null" ]]; then
+  if [[ -f "$plan_source" ]]; then __src_plan_file="$plan_source"
+  elif __sr="$(aid_state_root 2>/dev/null)" && [[ -f "${__sr}/${plan_source}" ]]; then __src_plan_file="${__sr}/${plan_source}"
+  fi
+fi
+zadani_json='{}'
+if [[ -n "$__src_plan_file" ]]; then
+  __z="$(_aid_fm_get "$__src_plan_file" zadani)"; __zs="$(_aid_fm_get "$__src_plan_file" zadani_sha256)"
+  zadani_json="$(jq -nc --arg z "$__z" --arg s "$__zs" '(if $z == "" then {} else {zadani: $z} end) + (if $s == "" then {} else {zadani_sha256: $s} end)')"
+fi
 plan_json="$(jq -n \
   --arg epic_id "$epic_id" \
   --argjson source_plan "$plan_source_arg" \
+  --argjson zadani "$zadani_json" \
   --slurpfile steps "${__pj_tmp}/steps.json" \
   --slurpfile deps "${__pj_tmp}/deps.json" \
   --slurpfile parallel "${__pj_tmp}/parallel.json" \
@@ -836,7 +860,7 @@ plan_json="$(jq -n \
     analysis_groups: $analysis[0],
     gates: $gates[0],
     budget: $budget[0]
-  }')"
+  } + $zadani')"
 rm -rf "${__pj_tmp}"
 
 # =============================================================================
