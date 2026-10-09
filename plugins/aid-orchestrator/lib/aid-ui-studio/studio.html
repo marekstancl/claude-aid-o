@@ -661,11 +661,11 @@ lightbox.append(lbImg, lbBar);
 let opener = null, LB = null;   // LB: {arts, i, ctx} while open
 function lbShow(i, ctx) {
   LB.i = (i + LB.arts.length) % LB.arts.length;
-  const art = LB.arts[LB.i], img = art.querySelector("img.comp");
+  const art = LB.arts[LB.i], img = art.querySelector("img.comp") || art.querySelector("img");
   LB.ctx = !!ctx && art.getAttribute("data-preview2") === "1";   // the second picture exists only on some cards; stepping onto one without it shows its first
   const base = img.getAttribute("src").replace(/&n=2/, "").replace(/&t=\d+/, "");
   lbImg.src = LB.ctx ? base + "&n=2" : base; lbImg.alt = img.alt;
-  lbTitle.textContent = art.querySelector("h3")?.textContent || "";
+  lbTitle.textContent = art.querySelector("h3, figcaption b")?.textContent || "";
   lbCount.textContent = LB.arts.length > 1 ? "návrh " + (LB.i + 1) + " z " + LB.arts.length : "";
   lbPrev.hidden = lbNext.hidden = LB.arts.length < 2;
   const picked = art.classList.contains("picked"), tick = art.querySelector(".tick");
@@ -676,12 +676,13 @@ function lbShow(i, ctx) {
 function openLightbox(img) {
   if (img.hidden || !img.getAttribute("src")) return;
   opener = document.activeElement;
-  const art = img.closest(".card[data-card]"), sec = img.closest("section");
-  const arts = art && sec ? [...sec.querySelectorAll(".card[data-card]")].filter(a => a.querySelector("img.comp")) : [];
-  LB = { arts: arts.length ? arts : [img.closest("article") || img.parentElement], i: Math.max(0, arts.indexOf(art)), ctx: false };
-  if (!art) { lbImg.src = img.getAttribute("src"); lbImg.alt = img.alt; lbTitle.textContent = ""; lbCount.textContent = "";
-    lbPrev.hidden = lbNext.hidden = lbPick.hidden = lbCtx.hidden = true; }
-  else lbShow(LB.i, false);
+  // every picture of the question steps the same way: the cards the PM picks from and the gallery of a
+  // question answered with "Ano, další" (page layouts, texts) - Coufal 9. 10. 2026: the layouts had no arrows
+  const FRAMES = ".card[data-card], .gallery figure";
+  const art = img.closest(FRAMES), sec = img.closest("section");
+  const arts = art && sec ? [...sec.querySelectorAll(FRAMES)].filter(a => a.querySelector("img.comp")) : [];
+  LB = { arts: arts.length ? arts : [art || img.closest("article, figure") || img.parentElement], i: Math.max(0, arts.indexOf(art)), ctx: false };
+  lbShow(LB.i, false);
   lightbox.hidden = false;
   requestAnimationFrame(() => lightbox.classList.add("open"));
   lightbox.focus();

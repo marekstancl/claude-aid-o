@@ -763,6 +763,8 @@ JSON
   grep -qF '.lb-bar [hidden] { display: none; }' "$f"
   grep -qF 'LB.ctx = !!ctx && art.getAttribute("data-preview2") === "1"' "$f"
   grep -qF '"návrh " + (LB.i + 1) + " z " + LB.arts.length' "$f"
+  grep -qF 'const FRAMES = ".card[data-card], .gallery figure";' "$f"    # a gallery (structure, texts) steps like the cards
+  grep -qF 'art.querySelector("h3, figcaption b")' "$f"
   jq '.cards[0].preview2 = "a2.png"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
   printf 'PNG1' > "$P/.aid-ui/studio/a.png"; printf 'PNG2' > "$P/.aid-ui/studio/a2.png"
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/preview?question=q1&card=a")" = 200 ]; [ "$(cat "$BATS_TEST_TMPDIR/body")" = PNG1 ]
