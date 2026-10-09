@@ -202,13 +202,15 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(jq -r .next_question "$BATS_TEST_TMPDIR/body")" = q1.r2 ]
 }
 
-@test "a restart forgets an unrecorded answer and the question is open again" {
+@test "a restart keeps the answer the studio accepted (its own history), so the PM does not answer twice; a reopened round asks anew" {
   [ "$(answer "$choose_a")" = 200 ]
   kill "$SPID"; wait "$SPID" 2>/dev/null || true
   start_server
-  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 404 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 200 ]; [ "$(jq -r .choice "$BATS_TEST_TMPDIR/body")" = a ]
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
-  [ "$(jq -r '.questions[] | select(.id=="q1") | .answered' "$BATS_TEST_TMPDIR/body")" = false ]
+  [ "$(jq -r '.questions[] | select(.id=="q1") | .answered' "$BATS_TEST_TMPDIR/body")" = true ]
+  sleep 0.01; payload "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 404 ]
   [ "$(answer "$choose_a")" = 200 ]
 }
 
