@@ -954,7 +954,7 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
   };
   const title = q.title || kind || q.id;
   // Approvals that show several previews (page wireframes, content per page) get a gallery, not a deck.
-  const gallery = ["structure", "task_map", "content_plan"].includes(q.kind);
+  const gallery = ["structure", "task_map", "content_plan", "copy_verdict"].includes(q.kind);   // the texts verdict shows the pages it is about (PM 9. 10. 2026)
   const deckKind = cards.length && q.kind !== "approve_page" && !gallery;
   // a fact or a consent: rows, the recommended answer preselected (PM 9. 10. 2026: A); the degree buttons belong to looks only
   const rows = deckKind && ["facts", "no_method"].includes(q.kind) && !cards.some(c => str(c.preview));
