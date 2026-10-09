@@ -50,6 +50,7 @@ _section_of() {
   case "$c" in
     plan.md:*) echo "plan.md"; return ;;
     critic-response.md:*) echo "critic-response.md"; return ;;
+    zadani.md:*) echo "zadani.md"; return ;;
     diff.patch*) echo "diff.patch"; return ;;
     files.json*) echo "Declared scope"; return ;;
     absent:*) echo "other"; return ;;

@@ -40,7 +40,7 @@
 # review_config_valid; tested by scripts/tests/bats/test-review-config.bats.
 
 _AID_RC_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-_AID_RC_KNOWN_KEYS="rounds_default min_answers docs_type_reviewers banned_models reviewers skip_threshold stand_in_model light_max_prompt_lines"
+_AID_RC_KNOWN_KEYS="rounds_default second_round_when min_answers docs_type_reviewers banned_models reviewers skip_threshold stand_in_model light_max_prompt_lines"
 _AID_RC_LEGACY_KEYS="ceremony_bands cp1_codex_review fix_loop skip_trivial trivial_threshold pre_filter"
 
 # aid_policy_file <project_root> <basename> [<yq probe>] [<warning label>]
@@ -135,6 +135,8 @@ aid_review_config_load() {
   # A low-effort role goes to the light reviewer only while its prompt fits:
   # longer ones were read in part and passed (P102, P103).
   RC_LIGHT_MAX_PROMPT_LINES="$(yq -r "${b}.light_max_prompt_lines // 800" "$RC_CONFIG_FILE")"
+  # P109: when a round past rounds_default needs no PM override (plan review only)
+  RC_SECOND_ROUND_WHEN="$(yq -r "${b}.second_round_when // \"\"" "$RC_CONFIG_FILE")"
   RC_MIN_ANSWERS="$(yq -r "${b}.min_answers // \"\"" "$RC_CONFIG_FILE")"
   [[ -n "$RC_MIN_ANSWERS" ]] || RC_MIN_ANSWERS="$unconditional"
 
@@ -212,8 +214,29 @@ aid_review_config_validate() {
   [[ "$RC_MIN_ANSWERS" =~ ^[0-9]+$ ]] && (( RC_MIN_ANSWERS >= 1 && RC_MIN_ANSWERS <= (roles_n > 6 ? roles_n : 6) )) \
     || { _aid_rc_fail "min_answers must be 1..6 (got '${RC_MIN_ANSWERS}')"; return 1; }
   [[ "$RC_ROUNDS_DEFAULT" =~ ^[1-3]$ ]] || { _aid_rc_fail "rounds_default must be 1..3 (got '${RC_ROUNDS_DEFAULT}')"; return 1; }
+  [[ -z "${RC_SECOND_ROUND_WHEN:-}" || "$RC_SECOND_ROUND_WHEN" == blocker_and_fix_check ]] \
+    || { _aid_rc_fail "second_round_when must be blocker_and_fix_check (got '${RC_SECOND_ROUND_WHEN}')"; return 1; }
   for role in $RC_EXTRA_DOCS_TYPE_REVIEWERS; do
     [[ "$seen" == *" $role "* ]] || { _aid_rc_fail "docs_type_reviewers names ${role}, which is not a reviewer"; return 1; }
   done
   return 0
+}
+
+# aid_review_second_round_allowed <cp1_dir> <n> — may plan-review round <n> run
+# past rounds_default without the PM's override? (P109) True only when the policy
+# says `second_round_when: blocker_and_fix_check`, <n> is rounds_default + 1,
+# round <n-1> is closed and had at least one blocker the PM did not dismiss
+# (majors alone do not qualify), and its fix passed fix-check. The blocker count
+# ignores status: the next round's adjudication marks a confirmed fix `fixed`
+# in round <n-1>'s merged.json, and the question is what round <n-1> FOUND.
+# The ONE implementation `aid-review-round.sh prepare` and `aid-cp1-gate.sh`
+# both call, so they cannot disagree. Needs aid_review_config_load first.
+aid_review_second_round_allowed() {
+  local cp1="$1" n="$2" prev
+  [[ "${RC_SECOND_ROUND_WHEN:-}" == blocker_and_fix_check ]] || return 1
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n == RC_ROUNDS_DEFAULT + 1 )) || return 1
+  prev="${cp1}/round-$((n - 1))"
+  [[ -f "${prev}/measurement.json" && -f "${prev}/merged.json" && -f "${prev}/fix-diff.json" ]] || return 1
+  (( $(jq '[.findings[] | select(.severity == "blocker" and ((.dispute.pm.answer // "") != "accepted"))] | length' "${prev}/merged.json" 2>/dev/null || echo 0) > 0 )) || return 1
+  [[ "$(jq -r '.pass // false' "${prev}/fix-diff.json" 2>/dev/null)" == true ]]
 }

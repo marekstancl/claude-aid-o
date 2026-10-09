@@ -24,7 +24,9 @@ review_checkpoints:
   # codex role's reasoning effort. When both generalists use the same model
   # the round is recorded as degraded.
   plan_review:
-    rounds_default: 2            # a third round, or only one, needs the PM's recorded override
+    rounds_default: 1            # P109: one round; a further one needs the PM's recorded override, except:
+    second_round_when: blocker_and_fix_check   # round 2 without an override when round 1 found a blocker
+                                               # and its fix passed fix-check (lib/aid-review-config.sh)
     min_answers: 4               # a round with fewer valid answers is invalid
     docs_type_reviewers: [generalist_a, generalist_b]   # plans with frontmatter type: docs
     banned_models: [haiku, gpt-5-mini, gpt-4o-mini]

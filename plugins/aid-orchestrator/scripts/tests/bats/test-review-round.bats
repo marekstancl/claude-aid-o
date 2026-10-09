@@ -41,7 +41,7 @@ _check() {
   run "$ROUND_SH" prepare "$PLAN" --round 1
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(ls "$CP1/round-1"/prompt-*.md | wc -l)" -eq 6 ]
-  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 5 ]   # plan, plan-check, standards, lint, critic-response
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 6 ]   # plan, plan-check, standards, lint, zadani-note, critic-response
   [ "$(jq '.reviewers_expected | length' "$CP1/round-1/round.json")" -eq 6 ]
   [ "$(jq '.min_answers_effective' "$CP1/round-1/round.json")" -eq 4 ]
   [ "$(jq 'length' "$CP1/rounds.json")" -eq 1 ]
@@ -293,6 +293,8 @@ _round1_closed() {
 @test "prepare: the confirmation round asks the reporter of an open major on an unchanged step" {
   _round1_closed '.findings[0].severity = "major" | .findings[0].step = null'
   "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  # P109: after majors only, a second round is the PM's (one round by default)
+  "$ROUND_SH" override "$PLAN" --rounds 2 --reason "PM: confirm the major fix in a second round" >/dev/null
   run "$ROUND_SH" prepare "$PLAN" --round 2
   [ "$status" -eq 0 ]
   [ "$(jq '.reviewers_expected | length' "$CP1/round-2/round.json")" -gt 0 ]
@@ -1058,7 +1060,7 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   run "$ROUND_SH" prepare "$PLAN" --round 1
   echo "$output"; [ "$status" -eq 0 ]
   [ -f "$CP1/round-1/packet/critic-response.md" ]
-  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 5 ]
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 6 ]
   grep -q '^## critic-response.md (the author' "$CP1/round-1/prompt-reuse.md"
   grep -q '    3  | 1 | test bez AC | PŘIJATO' "$CP1/round-1/prompt-enforcement_tests.md"
   grep -q 'critic-response.md:line' "$CP1/round-1/prompt-reuse.md"
@@ -1207,7 +1209,7 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   [ -s "$CP1/round-1/packet/lint.txt" ]
   grep -q '^## Plan lint: findings' "$CP1/round-1/prompt-generalist_a.md"
   grep -q 'remaining version files' "$CP1/round-1/prompt-generalist_a.md"
-  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 5 ]
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 6 ]
   # a legacy plan's STRICT-tier finding is a [WARN legacy] line and rides too (P009's case)
   rm -rf "$CP1"; printf -- '\n**Files:**\n- Modify: `scripts/a.sh` (a note) — x\n' >> "$PLAN"; _check
   _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
@@ -1282,4 +1284,92 @@ _critic_answer() {  # <plan sha for the check> — a passed check.json and a mat
   # finalize runs the same check with the same list
   run "$ROUND_SH" finalize "$PLAN"
   echo "$output"; [ "$status" -eq 0 ]; [ -f "$CP1/round-1/plan-final.md" ]
+}
+
+# ── P109 Step 4: the plan review reads the brief ─────────────────────────────
+# Defects: a reviewer who never sees the brief (P014), and a second round paid
+# for nothing (P014: three rounds, 45 USD, the softening unseen).
+_bind_brief() {   # <brief source> — the plan names it; check and critic redone for the new bytes
+  cp "$1" "$ROOT/.aid-o/plans/P900-zadani.md"
+  sed -i 's/^type: \(.*\)$/type: \1\nzadani: .aid-o\/plans\/P900-zadani.md/' "$PLAN"
+  _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+}
+
+@test "zadani: prepare copies the brief, records its sha, and every role's prompt shows it with question 1 point by point" {
+  _bind_brief "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  cmp -s "$CP1/round-1/packet/zadani.md" "$ROOT/.aid-o/plans/P900-zadani.md"
+  [ "$(jq -r .zadani_sha256 "$CP1/round-1/packet/manifest.json")" = "$(sha256sum "$ROOT/.aid-o/plans/P900-zadani.md" | cut -d' ' -f1)" ]
+  [ "$(jq -r .zadani_verze "$CP1/round-1/packet/manifest.json")" = 1 ]
+  local r
+  for r in generalist_a generalist_b behaviour_edges feasibility_deps reuse enforcement_tests; do
+    grep -q "^## zadani.md (the PM's brief; cite it as zadani.md:<line>)" "$CP1/round-1/prompt-$r.md"
+    grep -q '^1\. For each point `AC<n>` of `zadani.md`' "$CP1/round-1/prompt-$r.md"
+  done
+  # the brief's point 2 is in front of every reviewer, line-numbered
+  grep -qE '^ +[0-9]+  - \[ \] AC2: Zakládání úkolu, čtečka i testovací scénář jdou přes rozhraní' "$CP1/round-1/prompt-reuse.md"
+}
+
+@test "zadani: the P014 pair in one packet — the brief's point 2 and the plan's contradicting edge case side by side" {
+  cp "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md" "$ROOT/.aid-o/plans/P900-zadani.md"
+  sed -e 's/^id: P014$/id: P900/' -e 's#^zadani: .*#zadani: .aid-o/plans/P900-zadani.md#' -e '/^lifecycle_strict/d' \
+    "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-plan.md" > "$PLAN"
+  _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  local p="$CP1/round-1/prompt-behaviour_edges.md"
+  grep -qE '^ +[0-9]+  - \[ \] AC2: .*neznámá hodnota v konfiguraci skončí chybou při startu' "$p"
+  grep -qE '^ +[0-9]+  - An unknown value of `doruceni` in apps.yaml falls back to Freelo with a warning' "$p"
+}
+
+@test "zadani: a strict plan without a brief and a brief outside the project are refused by the packet" {
+  sed -i 's/^type: \(.*\)$/type: \1\nlifecycle_strict: true/' "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"plan names no brief (zadani:)"* ]]; [[ "$output" == *"plan_names_no_brief"* ]]
+  [ ! -d "$CP1/round-1" ]
+  sed -i 's/^lifecycle_strict: true$/zadani: ..\/outside-zadani.md/' "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"zadani path escapes the project"* ]]; [[ "$output" == *"zadani_path_escapes"* ]]
+}
+
+@test "zadani: a legacy plan without a brief gets the note, not a refusal" {
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 0 ]
+  grep -q 'no brief: this plan names no zadani: file' "$CP1/round-1/prompt-reuse.md"
+}
+
+@test "zadani: collect accepts a finding citing zadani.md:<line>" {
+  _bind_brief "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md"
+  "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
+  _answer_all
+  _answer reuse '.findings[0].severity = "blocker" | .findings[0].evidence = "zadani.md:12; scripts/a.sh:2"'
+  run "$ROUND_SH" collect "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  jq -e '[.findings[] | select(.evidence | contains("zadani.md:12"))] | length == 1' "$CP1/round-1/merged.json"
+}
+
+@test "zadani: prepare --round 2 after a clean round or one with majors only is refused naming the rule; after a blocker and fix-check it is prepared" {
+  _round1_closed '.findings = [] | .no_findings_reason = "clean"'
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  [ "$status" -ne 0 ]; [[ "$output" == *"second_round_needs_open_blocker"* ]]
+  rm -rf "$CP1"; _round1_closed '.findings[0].severity = "major"'
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  [ "$status" -ne 0 ]; [[ "$output" == *"second_round_needs_open_blocker"* ]]
+  rm -rf "$CP1"; _round1_closed
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  echo "$output"; [ "$status" -eq 0 ]
+}
+
+@test "zadani: a brief changed between round 1 and prepare --round 2 is refused — a confirmation round reads the brief round 1 read" {
+  _bind_brief "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md"
+  _round1_closed
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  printf '\n<!-- edited -->\n' >> "$ROOT/.aid-o/plans/P900-zadani.md"
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  [ "$status" -ne 0 ]; [[ "$output" == *"the brief changed after round 1"* ]]; [[ "$output" == *"brief_changed_after_round"* ]]
+  [ ! -d "$CP1/round-2" ]
 }

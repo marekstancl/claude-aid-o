@@ -137,6 +137,25 @@ if [[ -n "$_critic_sha" ]] && ! _critic_why="$(aid_critic_verdict "$plan_id" "$_
   _finish
 fi
 
+# --- the brief the round read is the brief the plan names (P109 Step 4) -------
+# A round 1 prepared by 2.115.0 or later (it carries critic_check_sha) records
+# the brief it read, or none: the plan must still name exactly that brief —
+# a brief swapped, edited, added or removed after round 1 is the same change.
+if [[ -f "${CP1}/round-1/packet/manifest.json" ]] \
+   && jq -e 'has("critic_check_sha")' "${CP1}/round-1/packet/manifest.json" >/dev/null 2>&1; then
+  _z_round="$(jq -r '.zadani_sha256 // "none"' "${CP1}/round-1/packet/manifest.json" 2>/dev/null)"
+  _z_rel="$(_aid_fm_get "$plan" zadani)" _z_now=none
+  if [[ -n "$_z_rel" ]]; then
+    [[ "$_z_rel" == /* ]] && _z_abs="$_z_rel" || _z_abs="${project_root}/${_z_rel}"
+    _z_now="$( [[ -f "$_z_abs" ]] && sha256sum "$_z_abs" | cut -d' ' -f1 || echo missing)"
+  fi
+  if [[ "$_z_now" != "$_z_round" ]]; then
+    _hard "the brief changed after round 1 (${_z_rel:-the plan names no zadani: now}: ${_z_round:0:12} → ${_z_now:0:12}): bump verze, update zadani_sha256 in the plan, rerun the critic and restart the review
+  next: aid-review-round.sh prepare ${plan} --round 1 --restart --reason \"<why the brief changed>\" (pipeline.md §When AID refuses: brief_changed_after_round)"
+    _finish
+  fi
+fi
+
 if [[ "$RC_ENABLED" != 1 ]]; then
   _finish "plan review is switched off (review_checkpoints.enabled or cp1_plan_review is false)"
 fi
@@ -175,7 +194,9 @@ last=""
 allowed="${override_rounds:-$RC_ROUNDS_DEFAULT}"
 for n in "${rounds[@]}"; do
   d="$(_round_dir "$n")"
-  (( n > RC_ROUNDS_DEFAULT && n > allowed )) \
+  # P109: the second round the policy allows (round 1 found a blocker, its fix
+  # passed fix-check) needs no override — the same function prepare asks.
+  (( n > RC_ROUNDS_DEFAULT && n > allowed )) && ! aid_review_second_round_allowed "$CP1" "$n" \
     && _fail "round-${n} exists without the PM's override.json allowing ${n} rounds"
   if [[ ! -f "${d}/measurement.json" ]]; then
     _fail "round-${n} is not closed (measurement.json missing): run collect and close for round ${n}"

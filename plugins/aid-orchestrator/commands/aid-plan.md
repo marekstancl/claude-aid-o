@@ -549,8 +549,10 @@ command accountable, so an unrecordable archive is not performed.
 ## Plan review (CP1)
 
 Both modes end here, once `aid-generation-readiness.sh` passes on the written plan. Six
-reviewer roles (`skills/plan-review-roles.md`) answer the same packet in at most
-two rounds by default; `aid-review-round.sh` runs the rounds and
+reviewer roles (`skills/plan-review-roles.md`) answer the same packet — the plan
+AND the PM's brief (`zadani.md`, P109), which each role checks point by point
+first — in one round by default, two when round 1 found a blocker;
+`aid-review-round.sh` runs the rounds and
 `aid-cp1-gate.sh` refuses EPIC generation until the evidence is complete. Every
 item below is a command. You never write, edit or complete a reviewer's answer.
 
@@ -731,7 +733,11 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
 6. No blocker open: if you changed the plan after the round (fixing majors,
    say), run `finalize` (item 8) before the gate; otherwise go to item 9.
    Blockers open: fix the plan — only the steps the
-   open blockers and majors name — then check the fix and prepare round 2:
+   open blockers and majors name — then check the fix and prepare round 2
+   (round 2 needs no override exactly then: round 1 found a blocker and the fix
+   passed `fix-check` — `second_round_when: blocker_and_fix_check`; after a
+   round with majors only, `prepare --round 2` refuses with
+   `second_round_needs_open_blocker` and the majors are fixed and `finalize`d):
 
    ```bash
    bash "$R" fix-check <plan> --round 1
@@ -800,8 +806,12 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
       aid_brainstorm_summary_render P{NNN} .aid-o/work/brainstorm/P{NNN}/brainstorm-summary-artifact.html
     ```
 
-**Round count.** Two rounds is the default (`review_checkpoints.plan_review.rounds_default`).
-Only when the PM says so, record one round, or a third:
+**Round count.** One round is the default (`review_checkpoints.plan_review.rounds_default: 1`,
+P109); the second round follows by itself when round 1 found a blocker and its
+fix passed `fix-check` (`second_round_when: blocker_and_fix_check` — prepare and
+the gate ask the same function, `aid_review_second_round_allowed`). Any other
+round past the default, and a second round after a round with majors only, needs
+the PM. Only when the PM says so, record one round, or a further one:
 
 ```bash
 bash "$R" override <plan> --rounds 3 --reason "<the PM's words, quoted>"

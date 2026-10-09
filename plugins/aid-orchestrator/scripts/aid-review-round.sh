@@ -358,9 +358,22 @@ cmd_prepare() {
       fi
     fi
     local standing=false
-    if (( ROUND > $(_base_rounds) && ! delta )); then
-      (( ROUND <= $(_allowed_rounds) )) \
-        || _die "round ${ROUND} exceeds the round budget ($(_base_rounds)$( (( $(_allowed_rounds) > $(_base_rounds) )) && echo " + 2 under the PM's standing instruction")); it needs the PM's override.json (aid-review-round.sh override) or a PM decision"
+    # P109: the one second round the plan-review policy allows without an
+    # override (round 1 found a blocker, its fix passed fix-check) is in budget.
+    if (( ROUND > $(_base_rounds) && ! delta )) && [[ "$MODE" == plan ]] && aid_review_second_round_allowed "$BASE" "$ROUND"; then
+      :
+    elif (( ROUND > $(_base_rounds) && ! delta )); then
+      if (( ROUND > $(_allowed_rounds) )); then
+        # the fix itself is what failed: say that, not the rule
+        local pfd="${BASE}/round-$((ROUND - 1))/fix-diff.json"
+        if [[ "$MODE" == plan && -f "$pfd" && "$(jq -r '.pass' "$pfd")" != true ]]; then
+          _die "the fix of round $((ROUND - 1)) did not pass fix-check: $(jq -c '.added_outside_fixes' "$pfd")"
+        fi
+        [[ "$MODE" == plan && -n "${RC_SECOND_ROUND_WHEN:-}" ]] && (( ROUND == RC_ROUNDS_DEFAULT + 1 )) \
+          && _die "round ${ROUND} needs a blocker found in round $((ROUND - 1)) and its fix passed by fix-check — or the PM's override.json (aid-review-round.sh override)
+  next: bash aid-review-round.sh fix-check ${PLAN} --round $((ROUND - 1)) (after fixing the blocker), or the PM's override (pipeline.md §When AID refuses: second_round_needs_open_blocker)"
+        _die "round ${ROUND} exceeds the round budget ($(_base_rounds)$( (( $(_allowed_rounds) > $(_base_rounds) )) && echo " + 2 under the PM's standing instruction")); it needs the PM's override.json (aid-review-round.sh override) or a PM decision"
+      fi
       standing=true
       # A fix-and-confirm round must make progress: when the previous round
       # re-opened exactly what the one before it had open, the chain is not
