@@ -354,7 +354,12 @@
   #lightbox { position: fixed; inset: 0; z-index: 50; display: block; overflow-y: auto; text-align: center; background: oklch(97.8% 0 0 / 0.96); cursor: zoom-out; opacity: 0; transition: opacity .25s ease; }
   #lightbox[hidden] { display: none; }
   #lightbox.open { opacity: 1; }
-  #lightbox img { display: inline-block; width: min(94vw, 48rem); height: auto; margin: 1.5rem auto 6rem; border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); background: #fff; }
+  /* a page screenshot (wide picture) fills the width, a wireframe keeps a reading width; a click on the picture switches to 1:1
+     pixels and the lightbox scrolls both ways (PM 9. 10. 2026: the previews were tiny and could not be zoomed) */
+  #lightbox img { display: inline-block; width: min(94vw, 48rem); height: auto; margin: 1.5rem auto 6rem; border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); background: #fff; cursor: zoom-in; }
+  #lightbox img.wide { width: min(96vw, 92rem); }
+  #lightbox img.zoomed { width: auto; max-width: none; cursor: zoom-out; }
+  #lightbox.zoomed { overflow: auto; text-align: left; }
   /* the bar sits at the bottom of the screen whatever the picture's size, so the controls never move */
   .lb-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 1.2rem; width: min(94vw, 44rem); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .6rem; padding: .4rem .6rem; border-radius: 8px; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); box-shadow: var(--ks-lift); cursor: default; font: 500 .8125rem var(--ks-font); color: var(--ks-ink); }
   /* Předchozí and Další never move: the bar has a fixed width, they sit at its ends next to the middle, a long title is cut with an ellipsis (PM 9. 10. 2026: A) */
@@ -673,9 +678,16 @@ const lbNext = el("button", { type: "button", class: "chip lb-next", "aria-label
 const lbPick = el("button", { type: "button", class: "choose go lb-pick" }, "Vybrat tento");
 const lbCtx = el("button", { type: "button", class: "chip lb-ctx", "aria-pressed": "false" }, "Kontexty");
 const lbNote = el("button", { type: "button", class: "chip lb-note" }, "Chci jinak");   // a note to one page of a gallery (structure, texts)
+const lbZoom = el("button", { type: "button", class: "chip lb-zoom", "aria-pressed": "false", "aria-label": "Zobrazit 1:1" }, "1:1");
+function lbToggleZoom() {
+  const on = lbImg.classList.toggle("zoomed"); lightbox.classList.toggle("zoomed", on);
+  lbZoom.setAttribute("aria-pressed", String(on)); lbZoom.textContent = on ? "Přizpůsobit" : "1:1";
+}
+lbImg.addEventListener("load", () => lbImg.classList.toggle("wide", lbImg.naturalWidth >= 1100));
+lbImg.addEventListener("click", e => { e.stopPropagation(); lbToggleZoom(); });
 const lbTitle = el("span", { class: "lb-title" }), lbCount = el("span", { class: "lb-count" });
 const lbBar = el("div", { class: "lb-bar", on: { click: e => e.stopPropagation() } }, lbPrev,
-  el("div", { class: "lb-mid" }, lbCount, lbTitle, lbPick, lbCtx, lbNote), lbNext);
+  el("div", { class: "lb-mid" }, lbCount, lbTitle, lbPick, lbCtx, lbNote, lbZoom), lbNext);
 lightbox.append(lbImg, lbBar);
 let opener = null, LB = null;   // LB: {arts, i, ctx} while open
 function lbShow(i, ctx) {
@@ -684,6 +696,7 @@ function lbShow(i, ctx) {
   LB.ctx = !!ctx && art.getAttribute("data-preview2") === "1";   // the second picture exists only on some cards; stepping onto one without it shows its first
   const base = img.getAttribute("src").replace(/&n=2/, "").replace(/&t=\d+/, "");
   lbImg.src = LB.ctx ? base + "&n=2" : base; lbImg.alt = img.alt;
+  lbImg.classList.remove("zoomed"); lightbox.classList.remove("zoomed"); lbZoom.setAttribute("aria-pressed", "false"); lbZoom.textContent = "1:1";
   lbTitle.textContent = art.querySelector("h3, figcaption b")?.textContent || "";
   lbCount.textContent = LB.arts.length > 1 ? (art.hasAttribute("data-fig") ? "stránka " : "návrh ") + (LB.i + 1) + " z " + LB.arts.length + " ·" : "";
   lbPrev.hidden = lbNext.hidden = LB.arts.length < 2;
@@ -716,9 +729,10 @@ function closeLightbox() {
 lbPrev.addEventListener("click", () => LB && lbShow(LB.i - 1, LB.ctx));
 lbNext.addEventListener("click", () => LB && lbShow(LB.i + 1, LB.ctx));
 lbCtx.addEventListener("click", () => LB && lbShow(LB.i, !LB.ctx));
+lbZoom.addEventListener("click", lbToggleZoom);
 lbNote.addEventListener("click", () => { if (!LB) return; const art = LB.arts[LB.i]; art.closest("section").noteFor(art.getAttribute("data-fig"), () => lbShow(LB.i, LB.ctx)); });
 lbPick.addEventListener("click", () => { if (!LB) return; const t = LB.arts[LB.i].querySelector(".tick"); if (t && !LB.arts[LB.i].classList.contains("picked")) t.click(); lbShow(LB.i, LB.ctx); });
-lightbox.addEventListener("click", e => { if (!e.target.closest(".lb-bar")) closeLightbox(); });
+lightbox.addEventListener("click", e => { if (!e.target.closest(".lb-bar") && e.target !== lbImg) closeLightbox(); });
 document.addEventListener("keydown", e => {
   if (lightbox.hidden) return;
   if (e.key === "Escape") closeLightbox();

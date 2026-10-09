@@ -767,7 +767,7 @@ JSON
 
 @test "P108 lightbox: arrows, a pick button and a contexts toggle; /preview&n=2 serves the card's second picture, 404 without one" {
   f="$(PAGE_HTML)"
-  for w in 'class: "chip lb-prev"' 'class: "chip lb-next"' 'class: "choose go lb-pick"' 'class: "chip lb-ctx"' '"data-preview2": str(c.preview2) ? "1" : "0"' 'e.key === "ArrowLeft"' 'e.key === "ArrowRight"' 'if (!e.target.closest(".lb-bar")) closeLightbox()'; do
+  for w in 'class: "chip lb-prev"' 'class: "chip lb-next"' 'class: "choose go lb-pick"' 'class: "chip lb-ctx"' '"data-preview2": str(c.preview2) ? "1" : "0"' 'e.key === "ArrowLeft"' 'e.key === "ArrowRight"' 'if (!e.target.closest(".lb-bar") && e.target !== lbImg) closeLightbox()'; do
     grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
   done
   grep -qF '"preview2"' "$f"; grep -qF '"method", "slot", "value"' "$f"      # hidden from the card back, like the other data fields
@@ -785,7 +785,7 @@ JSON
   for w in 'function withPick(q, cards, text)' 'answer("return", undefined, withPick(q, cards, t))' '["Vybrat s poznámkou", t => answer("choose", SELECTED[q.id], t)]' 'function optionRow(q, c, i, select)' 'const rows = deckKind && ["facts", "no_method"].includes(q.kind)' 'if (rows && SELECTED[q.id] === undefined) SELECTED[q.id] = cards[0].id;' '.card.opt .tick { position: static;'; do
     grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
   done
-  for w in 'class: "chip lb-note"' 'sec.noteFor = (id, then)' '"Vrátit s poznámkami (" + n + ")"' 'answer("return", undefined, Object.entries(notes)' '.lb-bar .lb-prev { justify-self: start; } .lb-bar .lb-next { justify-self: end; }' '#lightbox img { display: inline-block; width: min(94vw, 48rem); height: auto;' 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' 'el("figure", { "data-fig": c.id }' 'const notes = NOTES[q.id] = NOTES[q.id] || {};' 'extra: notes[id] ? [["Smazat poznámku"' 'return i && !i.hidden && i.naturalWidth;' 'width: min(94vw, 44rem); display: grid; grid-template-columns: auto minmax(0, 1fr) auto'; do
+  for w in 'class: "chip lb-zoom"' '#lightbox img.wide { width: min(96vw, 92rem); }' '#lightbox img.zoomed { width: auto; max-width: none;' 'lbImg.classList.toggle("wide", lbImg.naturalWidth >= 1100)' 'class: "chip lb-note"' 'sec.noteFor = (id, then)' '"Vrátit s poznámkami (" + n + ")"' 'answer("return", undefined, Object.entries(notes)' '.lb-bar .lb-prev { justify-self: start; } .lb-bar .lb-next { justify-self: end; }' '#lightbox img { display: inline-block; width: min(94vw, 48rem); height: auto;' 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' 'el("figure", { "data-fig": c.id }' 'const notes = NOTES[q.id] = NOTES[q.id] || {};' 'extra: notes[id] ? [["Smazat poznámku"' 'return i && !i.hidden && i.naturalWidth;' 'width: min(94vw, 44rem); display: grid; grid-template-columns: auto minmax(0, 1fr) auto'; do
     grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
   done
   jq '.cards[0].preview2 = "a2.png"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
