@@ -394,7 +394,9 @@
    "files": [
     "skills/ui-design/references/adopted/marketingskills/copywriting/SKILL.md",
     "skills/ui-design/references/adopted/marketingskills/copywriting/references/copy-frameworks.md",
-    "skills/ui-design/references/copy-rules.md"
+    "skills/ui-design/references/copy-rules.md",
+    "skills/ui-design/references/copy-sk.md",
+    "skills/ui-design/references/copy-cs.md"
    ],
    "receipt": true
   },
@@ -437,7 +439,12 @@
   "content_plan": {
    "files": [
     "skills/ui-design/steps/3-content-plan.md",
-    "skills/ui-design/references/adopted/marketingskills/cro/SKILL.md"
+    "skills/ui-design/references/adopted/marketingskills/cro/SKILL.md",
+    "skills/ui-design/references/adopted/marketingskills/copywriting/SKILL.md",
+    "skills/ui-design/references/adopted/marketingskills/copywriting/references/copy-frameworks.md",
+    "skills/ui-design/references/copy-rules.md",
+    "skills/ui-design/references/copy-sk.md",
+    "skills/ui-design/references/copy-cs.md"
    ],
    "receipt": true
   },
