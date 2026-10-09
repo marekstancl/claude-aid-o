@@ -124,6 +124,17 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ "$(jq -r .choice "$BATS_TEST_TMPDIR/body")" = a ]
 }
 
+@test "after a restart a recorded answer (brand-state.json) still answers GET /answer; an older one does not count for a reopened round" {
+  payload '2020-01-01T00:00:00Z'
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 404 ]
+  mkdir -p "$P/docs/design"
+  printf '{"answers":{"q1":{"kind":"direction","target":"home@abc","decision":"choose","choice":"a","comment":"","at":"%s"}}}' "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" > "$P/docs/design/brand-state.json"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 200 ]; [ "$(jq -r .choice "$BATS_TEST_TMPDIR/body")" = a ]
+  sleep 0.01; payload "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 404 ]
+  rm "$P/docs/design/brand-state.json"
+}
+
 @test "an answer before opened_at is ignored: 409 while not open, and an older answer does not count for a reopened round" {
   payload '2999-01-01T00:00:00Z'
   [ "$(answer "$choose_a")" = 409 ]

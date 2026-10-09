@@ -476,11 +476,20 @@ def open_change(p, root):
 
 
 def valid_answer(q):
-    """The stored answer to q if it was given for q as it stands now."""
+    """The stored answer to q if it was given for q as it stands now. After a restart the memory is empty:
+    an answer the state script already recorded from this studio (brand-state.json answers) counts the
+    same way, so `set --answer` does not refuse what the PM did answer (Coufal 9. 10. 2026)."""
     a = ANSWERS.get(q["id"])
-    if a and a["kind"] == q["kind"] and a["target"] == q["target"] \
-            and parse_time(a["at"]) > parse_time(q["opened_at"]):
-        return a
+    if not a:
+        r = (read_state().get("answers") or {}).get(q["id"])
+        if isinstance(r, dict) and r.get("kind") and r.get("target") and r.get("at"):
+            a = r
+    try:
+        if a and a["kind"] == q["kind"] and a["target"] == q["target"] \
+                and parse_time(a["at"]) > parse_time(q["opened_at"]):
+            return a
+    except (TypeError, ValueError):
+        return None
     return None
 
 
