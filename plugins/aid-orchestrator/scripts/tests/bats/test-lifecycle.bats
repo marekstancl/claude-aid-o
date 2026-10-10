@@ -201,3 +201,15 @@ YML
   run "$CLI" target-branch
   [ "$output" = "main" ]
 }
+
+@test "review status: with CP3 off the last step's CP2 index is the EPIC's review record — pass is accepted, fail rejected (P110)" {
+  mkdir -p .aid-o/work/evidence/E-950-1_1/R-1/cp2/step-0 .aid-o/work/evidence/E-950-1_1/R-1/cp2/step-1
+  echo '{"verdict":"pass","head_sha":"x"}' > .aid-o/work/evidence/E-950-1_1/R-1/cp2/step-0/rounds.json
+  echo '{"verdict":"pass","head_sha":"y"}' > .aid-o/work/evidence/E-950-1_1/R-1/cp2/step-1/rounds.json
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; _aid_lc_epic_review_file E-950-1_1 .; _aid_lc_epic_review_status E-950-1_1 ."
+  echo "$output"
+  [[ "$output" == *"cp2/step-1/rounds.json"* ]]; [[ "$output" == *accepted* ]]
+  echo '{"verdict":"fail"}' > .aid-o/work/evidence/E-950-1_1/R-1/cp2/step-1/rounds.json
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; _aid_lc_epic_review_status E-950-1_1 ."
+  [[ "$output" == *rejected* ]]
+}

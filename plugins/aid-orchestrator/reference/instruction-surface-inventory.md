@@ -75,6 +75,8 @@ that is absent from a clean checkout.
 | `README.md`, `plugins/aid-orchestrator/README.md` | `update` | Human-facing, but they describe the lifecycle, so they are kept correct. |
 | `defaults/enforcement-registry.yaml` | `no-scope` | Records enforcements, including superseded ones, by design. |
 | `scripts/lib/aid-zadani.sh`, `scripts/lib/aid-verification-pattern.sh` | `no-scope` | P109: code — the brief reader and the one criterion parser/validator; agents act on the lint's messages, not on these files. |
+| `scripts/aid-plan-diff.sh` (`--step`, `--plan-json`, `--isolated`, `--cwd`), `scripts/aid-fsm.sh increment-step` (`--defer-criterion`, `--finding-card`), `scripts/aid-run-gates.sh` (`--lint-profiles`, `record-tests`), `scripts/tests/run-all-tests.sh --evidence-file` | `verified` | P110: new options; every refusal they print carries `next:` and a row of `skills/pipeline.md` §When AID refuses (drift test in `test-review-round-fsm.bats`). |
+| `defaults/policies/review-checkpoints.yaml` (`full_when`, `second_round_when: open_finding_and_fix`, `cp3_integration_review: false`, optional `epic_review`), `defaults/execution.yaml` (`verification_env`, `project_tests`, `runs_project_tests`), `verification_pattern` `timeout:`, `plan.json` `plan_step` | `verified` | P110: new keys, each documented where it is read (the policy and template comments, `commands/aid-run.md`, `skills/plan-writing.md` #20b3/#20b4, `plan.schema.json`). |
 | `scripts/tests/lib/aid-test-plan-fixture.sh` (`aid_fixture_write_brief`, `aid_fixture_seed_critic_check`) | `no-scope` | P109: test fixtures — a brief from a fixture plan's own criteria, a passed critic check; never read by an agent at work. |
 
 ## Backward compatibility

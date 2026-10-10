@@ -344,3 +344,7 @@ _d() { jq -r "$1" "$DEC"; }
   grep -qF -- '- **Cena běhu:** 12.5 USD, 7 kol, 2 pokusů + neznámá u: step_security' "$BM"
   grep -qF -- '- **Cena plánu:** 53.1 USD (CP1 3 kol, kritik neznámá)' "$BM"
 }
+@test "cost: an EPIC-level brief (no plan close) prints no cost lines" {
+  _seed_valid; _run "$DIR"; [ "$status" -eq 0 ]
+  ! grep -q 'Cena běhu' "$BM"
+}

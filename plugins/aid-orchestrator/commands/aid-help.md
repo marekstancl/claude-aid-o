@@ -177,6 +177,19 @@ Flags:
   --epic    Specify EPIC ID
 ```
 
+Since 2.116.0 (P110) a step buys the review its change needs: a small step
+in scope with no security pattern (≤ 3 files, ≤ 120 lines) gets none, a larger
+one two light reviewers (security full on a pattern, `full_when`), one round
+plus a confirmation over the fix only (`second_round_when:
+open_finding_and_fix`). The step's own points run after it
+(`aid-plan-diff.sh --step N --plan-json`; a block may carry `timeout:` up to
+1800 s); `increment-step` refuses an absent point (`step_criteria_failed`) and
+lets it pass only on the PM's answered card (`--defer-criterion AC<n> --reason
+… --finding-card <card>`). The EPIC review (CP3) is off by default. The close
+measures every point in isolation (`aid-plan-diff.sh --isolated --cwd`,
+`verification_env:` for a host database), reads the brief with two roles and
+writes what the run and the plan cost (`plan_summary.run_cost`, `plan_cost`).
+
 ### Topic: generation
 
 Generation is what `/aid-run` does before the FSM exists, and what `/aid-plan epic`
@@ -379,6 +392,15 @@ last 20 runs next to the configured value; it never writes.
 A key the runner no longer reads stops the run before any gate starts and
 names the fix: `aid-init-execution-yaml.sh upgrade <project root>` (see
 `/aid-help init`).
+
+The project's tests (2.116.0, P110): `project_tests:` (globs; `**/` = any
+depth) and a gate flagged `runs_project_tests: true` whose command writes
+`--evidence-file {evidence_dir}/gates/<gate>.evidence.json` (`run-all-tests.sh`
+writes it; `aid-run-gates.sh record-tests --glob … --evidence-file … -- <cmd>`
+wraps a whole-suite runner). A change to the tests with no such gate in the
+profile fails `profile_skips_project_tests`; a flagged gate that did not run
+the changed tests fails `project_tests_not_selected`.
+`aid-run-gates.sh --lint-profiles <execution.yaml>` checks every profile.
 
 ### Topic: tests
 

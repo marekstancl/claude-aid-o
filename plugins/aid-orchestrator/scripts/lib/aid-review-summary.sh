@@ -235,7 +235,7 @@ aid_plan_run_cost() {
 # {usd, usd_unknown_roles, tokens, cp1_rounds, critic, critic_reason}; null with
 # reason no_cp1_evidence for a plan that has none. Returns 3 like aid_plan_run_cost.
 aid_plan_plan_cost() {
-  local dir="$1" plan_id="$2" out ev model t cusd ctok='0' cfound=0 cunknown=0
+  local dir="$1" plan_id="$2" out ev model t cusd ctok='0' cfound=0 cunknown=0 crejected=0
   local -a files=()
   while IFS= read -r f; do files+=("$f"); done < <(ls "$dir"/cp1/round-*/measurement.json "$dir"/cp1/attempt-*/round-*/measurement.json 2>/dev/null)
   if (( ${#files[@]} == 0 )); then
@@ -245,19 +245,22 @@ aid_plan_plan_cost() {
   cusd=0
   for ev in "$dir"/critic/*/codex-events.jsonl; do
     [[ -s "$ev" ]] || continue
-    model="$(grep -o '"agent_id":"codex:[^"]*"' "$(dirname "$ev")/timeline.jsonl" 2>/dev/null | tail -1 | sed 's/.*codex://; s/"$//')"
+    model="$(cat "$(dirname "$ev")/codex-model" 2>/dev/null)"
+    [[ -n "$model" ]] || model="$(grep -o '"agent_id":"codex:[^"]*"' "$(dirname "$ev")/timeline.jsonl" 2>/dev/null | tail -1 | sed 's/.*codex://; s/"$//')"
+    [[ -f "$(dirname "$ev")/critic-codex-rejected.md" ]] && crejected=1
     t="$(aid_review_tokens_from_events "$ev")"
     local p; p="$(aid_review_usd "${model:-unknown}" "$(jq -r .tokens_in <<< "$t")" "$(jq -r .tokens_out <<< "$t")" "$(jq -r .cache_read <<< "$t")" 0)"
     cfound=$((cfound + 1))
     if [[ "$p" == unknown ]]; then cunknown=$((cunknown + 1)); else cusd="$(awk -v a="$cusd" -v b="$p" 'BEGIN { printf "%.4f", a + b }')"; fi
     ctok="$(jq -n --argjson a "$ctok" --argjson t "$t" '$a + ([$t.tokens_in, $t.tokens_out] | map(select(type == "number")) | add // 0)')"
   done
-  jq -c --argjson f "$cfound" --argjson u "$cunknown" --argjson cu "$cusd" --argjson ct "$ctok" '
+  jq -c --argjson f "$cfound" --argjson u "$cunknown" --argjson cu "$cusd" --argjson ct "$ctok" --argjson rj "$crejected" '
     . as $c | {usd: (.usd + (if $f > 0 then $cu else 0 end) | . * 10000 | round / 10000),
                usd_unknown_roles: (.usd_unknown_roles + (if $u > 0 then ["critic"] else [] end)),
                tokens: (.tokens + $ct), cp1_rounds: .rounds,
                critic: (if $f > 0 then {usd: (if $u > 0 then null else $cu end), tokens: $ct, runs: $f} else null end),
-               critic_reason: (if $f > 0 then null else "stand-in or no events" end)}' <<< "$out"
+               critic_reason: (if $rj > 0 then "codex answer rejected, a stand-in answered (its cost is in no file)"
+                               elif $f > 0 then null else "stand-in or no events" end)}' <<< "$out"
 }
 
 # aid_plan_close_time <project_root> <plan_id> [epic_run_dir...]

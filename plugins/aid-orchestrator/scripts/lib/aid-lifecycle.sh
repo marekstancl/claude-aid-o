@@ -1025,7 +1025,7 @@ _aid_lc_epic_review_status() {
   if _aid_lc_plan_mode; then _aid_lc_plan_review_status "$root" "$plan_id"; return 0; fi
   rep="$(_aid_lc_epic_review_file "$epic_id" "$root")"
   [[ -z "$rep" ]] && { echo "none"; return 0; }
-  if [[ "$rep" == */cp3/rounds.json ]]; then
+  if [[ "$rep" == */cp3/rounds.json || "$rep" == */cp2/step-*/rounds.json ]]; then   # cp2: CP3 off (2.116.0)
     case "$(jq -r '.verdict // ""' "$rep" 2>/dev/null)" in
       pass|skip|no_change) echo "accepted" ;;
       fail)                echo "rejected" ;;

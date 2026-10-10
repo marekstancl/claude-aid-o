@@ -992,7 +992,8 @@ main() {
     # (the EPIC runs' cp2/cp3, the close attempts' cp7; CP1 and the critic).
     local run_cost plan_cost _cost_rc=0 _e _cost_err; _cost_err="$(mktemp)"
     local -a _epic_dirs=()
-    while IFS= read -r _e; do [[ -n "$_e" ]] && _epic_dirs+=("${PROJECT_ROOT}/${_e}"); done < <(jq -r '.[].evidence_dir // empty' <<< "$PLAN_EPICS_JSON")
+    # the EPIC's dir, not its last run: an EPIC run twice (R-1, R-2) cost both runs
+    while IFS= read -r _e; do [[ -n "$_e" ]] && _epic_dirs+=("$(dirname "${PROJECT_ROOT}/${_e}")"); done < <(jq -r '.[].evidence_dir // empty' <<< "$PLAN_EPICS_JSON")
     run_cost="$(aid_plan_run_cost "$(dirname "$EVIDENCE_DIR")" "$PLAN_ID" ${_epic_dirs[@]+"${_epic_dirs[@]}"} 2>"$_cost_err")" || _cost_rc=$?
     (( _cost_rc == 0 )) && { plan_cost="$(aid_plan_plan_cost "$(dirname "$EVIDENCE_DIR")" "$PLAN_ID" 2>>"$_cost_err")" || _cost_rc=$?; }
     if (( _cost_rc != 0 )); then

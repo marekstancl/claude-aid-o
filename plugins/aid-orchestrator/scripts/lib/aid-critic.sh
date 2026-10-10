@@ -422,6 +422,7 @@ aid_critic_dispatch() {
   local emit="${_AID_CRITIC_LIB_DIR}/../aid-emit-dispatch.sh"
   bash "$emit" start --focus "critic-${moment}" --agent-id "codex:${CODEX_MODEL}" --evidence-dir "$dir" >/dev/null 2>&1 || true
   rm -f "${dir}/critic.md"
+  printf '%s\n' "$CODEX_MODEL" > "${dir}/codex-model"   # the model the critic's cost is priced at (P110)
   _run_codex_isolated "$root" "${dir}/prompt-codex.md" "${dir}/codex-events.jsonl" "${dir}/codex-stderr.log" "${dir}/critic.md" || rc=$?
   [[ -f "${dir}/critic.md" ]] || : > "${dir}/critic.md"
   bash "$emit" complete --focus "critic-${moment}" --output-file "${dir}/critic.md" --evidence-dir "$dir" >/dev/null 2>&1 || true

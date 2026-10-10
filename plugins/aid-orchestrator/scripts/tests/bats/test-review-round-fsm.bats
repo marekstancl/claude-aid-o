@@ -22,6 +22,9 @@ setup() {
   E="$TEST_EVIDENCE_DIR"; : > "$E/timeline.jsonl"
   mkdir -p src; echo a > src/app.py; git add -A; git commit -qm step0
   jq -n '{steps: [{id: "s0", role: "backend", objective: "o", outputs: ["Modify: `src/app.py` — x"]}, {id: "s1", role: "backend", objective: "o"}]}' > "$E/plan.json"
+  # the cp3 cases are a project that keeps CP3 (off by default since 2.116.0, P110)
+  mkdir -p .aid-o/config/policies; echo '.aid-o/config/policies/' >> "$(git rev-parse --git-dir)/info/exclude"
+  printf 'review_checkpoints:\n  cp3_integration_review: true\n  epic_review:\n    rounds_default: 1\n    reviewers:\n      - {role: epic_generalist, provider: claude, model: opus}\n' > .aid-o/config/policies/review-checkpoints.yaml
 }
 teardown() { unset CP3_FRESHNESS_POLICY || true; teardown_test_evidence_dir; }
 
@@ -91,7 +94,8 @@ _check() {
   # suffix. A fixture reason no scanned script prints stays row-only.
   local tsv="$AID_PLUGIN_PATH/scripts/tests/fixtures/refusals/measured-2026-09.tsv"
   local table="$AID_PLUGIN_PATH/skills/pipeline.md" arms r missing="" f ln
-  local -a sites=("$AID_PLUGIN_PATH/scripts/aid-review-round.sh" "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-packet.sh")
+  local -a sites=("$AID_PLUGIN_PATH/scripts/aid-review-round.sh" "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-packet.sh"
+                  "$AID_PLUGIN_PATH/scripts/aid-run-gates.sh" "$AID_PLUGIN_PATH/scripts/aid-plan-diff.sh" "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh")   # + P110
   arms="$(sed -n '/^_fsm_refusal_next()/,/^}/p' "$FSM")"
   while IFS=$'\t' read -r _ _ r; do
     r="${r%%_[0-9]*}"   # gates_runner_exit_1 → its row gates_runner_exit_<n>

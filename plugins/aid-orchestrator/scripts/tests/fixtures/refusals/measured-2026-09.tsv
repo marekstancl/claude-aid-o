@@ -44,3 +44,7 @@
 0	fsm_increment_fail	defer_refused
 0	plan_diff_refused	no_isolation
 0	plan_diff_refused	cwd_not_worktree
+0	gates_refused	profile_skips_project_tests
+0	gates_refused	project_tests_not_selected
+0	gates_refused	project_tests_evidence_missing
+0	decide_refused	measurement_unreadable
