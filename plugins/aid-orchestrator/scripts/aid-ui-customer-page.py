@@ -221,7 +221,11 @@ def gather(proj):
            for e in st.get("exceptions") or [] if not e.get("resolved")]
     if st.get("brand_package_waiver"):
         exc.append({"check": "balíček značky", "page": "", "reason": str(st["brand_package_waiver"].get("reason") or "")})
-    opened = [{"text": str(i.get("text") or ""), "owner": str(i.get("owner") or ""), "due": str(i.get("due") or "")}
+    # the customer reads "zadavateľ" where the state says PM; an outcome written for the PM loses its internal word
+    OWNER = {"PM": "zadavateľ", "klient": "klient", "agent": "zhotoviteľ"}
+    def customer_words(s):
+        return re.sub(r"(?<![\wÀ-ž-])(schváleno|SCHVÁLENO)(?![\wÀ-ž-])", "odsúhlasené", re.sub(r"(?<![\wÀ-ž-])schválení(?![\wÀ-ž-])", "odsúhlasenie", re.sub(r"(?<![\wÀ-ž-])PM(?![\wÀ-ž-])", "zadavateľ", str(s))))
+    opened = [{"text": customer_words(i.get("text") or ""), "owner": OWNER.get(str(i.get("owner") or ""), str(i.get("owner") or "")), "due": str(i.get("due") or "")}
               for i in st.get("open_items") or [] if isinstance(i, dict) and i.get("status") != "done"]
     known = {str(i.get("id")) for i in st.get("open_items") or [] if isinstance(i, dict)}
     decided = []
@@ -238,14 +242,14 @@ def gather(proj):
                 if h.get("kind") == "open_item" and isinstance(h.get("text"), str) and re.match(r"\d{4}-\d{2}-\d{2}T", str(h.get("at") or "")):
                     hid = "pm-" + re.sub(r"[^0-9]", "", str(h.get("at")))[:20]
                     if hid not in known:   # the PM's point not yet synced into the state: listed all the same
-                        opened.append({"text": h["text"][:500], "owner": "PM", "due": ""}); known.add(hid)
+                        opened.append({"text": customer_words(h["text"][:500]), "owner": "zadavateľ", "due": ""}); known.add(hid)
                     continue
                 q, a = h.get("question") or {}, h.get("answer") or {}
                 if isinstance(q.get("outcome"), str) and q["outcome"].strip() and a.get("decision") in ("approve", "choose"):
-                    decided.append({"at": str(a.get("at") or "")[:10], "outcome": q["outcome"].strip()})
+                    decided.append({"at": str(a.get("at") or "")[:10], "outcome": customer_words(q["outcome"].strip())})
     for d in st.get("decisions") or []:
         if isinstance(d, dict) and (d.get("outcome") or d.get("title")):
-            decided.append({"at": str(d.get("at") or "")[:10], "outcome": str(d.get("outcome") or d.get("title"))})
+            decided.append({"at": str(d.get("at") or "")[:10], "outcome": customer_words(d.get("outcome") or d.get("title"))})
     decided = [dict(x) for x in {json.dumps(d, sort_keys=True): d for d in decided}.values()]
     D["zbyva"] = {"open": opened, "deferred": deferred, "exceptions": exc, "decided": decided}
     return D, res_file

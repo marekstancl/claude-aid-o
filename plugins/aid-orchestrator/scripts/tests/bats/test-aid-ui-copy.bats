@@ -82,6 +82,9 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   review 'del(.pages["index.html"].sweeps.voice)'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"chybí průchod voice"* ]]
   review '.pages["index.html"].personas[0].score = 4'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"skóre 4"* ]]
   review '.pages["index.html"].personas = []'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"persona strážce značky: chybí"* ]]
+  # P108: a reviewer writing Slovak or without diacritics names the same persona (stand-in reviewers did on 10. 10. 2026)
+  review '.pages["index.html"].personas |= map(.name |= (if . == "konverzní copywriter" then "konverzný copywriter" elif . == "UX písař" then "UX písar" elif . == "cílový zákazník" then "cieľový zákazník" elif . == "strážce značky" then "strazca znacky" else . end))'
+  run python3 "$COPY" verdict "$RUN"; jq -e '.["index.html"].verdict == "pass"' <<<"$output" >/dev/null || { echo "$output"; return 1; }
   review '.pages["index.html"].sweeps.voice = {status:"netyka_se", reason:"x", findings:[]}'; run python3 "$COPY" verdict "$RUN"
   [[ "$output" == *"průchod voice nelze vynechat"* ]]
   # a sweep may not be skipped even on the legal page
