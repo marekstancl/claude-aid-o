@@ -341,8 +341,8 @@ _d() { jq -r "$1" "$DEC"; }
           run_cost: {usd: 12.5, usd_unknown_roles: ["step_security"], tokens: 9000, rounds: 7, attempts: 2},
           plan_cost: {usd: 53.1, usd_unknown_roles: [], tokens: 1, cp1_rounds: 3, critic: null, critic_reason: "stand-in or no events"}}'
   _run "$DIR"; [ "$status" -eq 0 ]
-  grep -qF -- '- **Cena běhu:** 12.5 USD, 7 kol, 2 pokusů + neznámá u: step_security' "$BM"
-  grep -qF -- '- **Cena plánu:** 53.1 USD (CP1 3 kol, kritik neznámá)' "$BM"
+  grep -qF -- '- **Cena běhu:** 12.5 USD, 7 kol, 2 pokus(ů) + neznámá u: step_security' "$BM"
+  grep -qF -- '- **Cena plánu:** 53.1 USD (CP1 3 kol, kritik neznámá — stand-in or no events)' "$BM"
 }
 @test "cost: an EPIC-level brief (no plan close) prints no cost lines" {
   _seed_valid; _run "$DIR"; [ "$status" -eq 0 ]

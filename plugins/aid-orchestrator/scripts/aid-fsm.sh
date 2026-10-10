@@ -1187,6 +1187,8 @@ _fsm_refusal_next() {
       else
       next="fix the step and commit, or render the Decision card (lib/aid-decision-card.sh) and wait for the PM, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words>" --finding-card "<card>")"
       fi ;;
+    streamlined_cp3_off)
+      next="keep CP3 for this project (cp3_integration_review: true + an epic_review block in .aid-o/config/policies/review-checkpoints.yaml) and run the EPIC review, or run the plan in plan_branch mode, then: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-review}" "${to_phase:-release}" "$sf")" ;;
     defer_refused)
       next="render the Decision card quoting ${_sc_label:-the point} (lib/aid-decision-card.sh), wait for the PM's answer, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words, 20+ chars>" --finding-card "<card>")" ;;
     missing_lenses|done_advance_preconditions)
@@ -1711,8 +1713,8 @@ fsm_check_streamlined_integration_review() {
   local cp3_pass=false
   [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] && cp3_pass=true
   if cp3_off="$(aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review)" && [[ "$pmode" != plan_branch && "$cp3_pass" != true ]]; then
-    echo "ERROR: streamlined run with the EPIC review (CP3) off and no whole-plan review after it (plan mode: ${pmode:-legacy}) — nothing would review this code." >&2
-    echo "Fix: set cp3_integration_review: true with an epic_review block in .aid-o/config/policies/review-checkpoints.yaml and run the EPIC review, or run the plan in plan_branch mode (CP7 reads it)." >&2
+    echo "REFUSED (streamlined_cp3_off): streamlined run with the EPIC review (CP3) off and no whole-plan review after it (plan mode: ${pmode:-legacy}) — nothing would review this code." >&2
+    echo "next: set cp3_integration_review: true with an epic_review block in .aid-o/config/policies/review-checkpoints.yaml and run the EPIC review (aid-step-check.sh --checkpoint cp3, aid-review-round.sh), or run the plan in plan_branch mode (CP7 reads it) (pipeline.md §When AID refuses: streamlined_cp3_off)" >&2
     fsm_emit_audit_log "streamlined_integration_review_fail" --evidence-dir "$evidence_dir" --reason "streamlined, cp3 off, mode ${pmode:-legacy}" 2>/dev/null || true
     return 1
   elif [[ -n "$cp3_off" ]]; then

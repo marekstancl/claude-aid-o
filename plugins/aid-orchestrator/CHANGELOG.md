@@ -20,6 +20,10 @@ Levnější běh (P110, vydání 2 roadmapy po experimentu P014). Krok si koupí
 - **Kontrola karty PM sdílená** — `aid_pm_card_check` v `lib/aid-decision-card.sh` (citace jako celé slovo) pro `dispute --pm accepted` i odklad bodu.
 - `skills/pipeline.md` §„When AID refuses“: 15 nových řádků s `next:`; test souladu skenuje i `aid-run-gates.sh`, `aid-plan-diff.sh` a `aid-release-policy.sh`. Registr vynucení: 10 nových řádků (614). Docusaurus `/aid/` (aid-run, mantinely) v repu docs.
 
+### Fixed
+- **Uzávěr čte řádek brány přes normalizovaný stav** (`aid-plan-fsm.sh` hledal neprošlou bránu přes `.value.result`; noční kontrola `P097 rows` byla červená už v `main`).
+- **S vypnutým CP3 dostane uzávěr, co nechaly otevřené revize kroků** (`epic-findings.json` `cp3: "off"` s otevřenými blockery a majory posledního kola každého kroku) a revizor ho už nečte jako EPIC, který nikdo neviděl.
+
 ### Not done in this release
 - **Bezpečnostní revize zúžení Codexem** (`docs/reference/2026-10-p110-bezpecnostni-revize.md`, AC6) čeká na Codex (limit do 14. 10. 2026); plán záskok nepovoluje.
 
@@ -27,9 +31,9 @@ Levnější běh (P110, vydání 2 roadmapy po experimentu P014). Krok si koupí
 
 | část | před | po |
 |---|---|---|
-| scripts | 72 060 | 73 077 |
-| skills | 8 270 | 8 327 |
-| commands | 5 796 | 5 884 |
+| scripts | 72 060 | 73 090 |
+| skills | 8 270 | 8 328 |
+| commands | 5 796 | 5 896 |
 
 Měřeno: `scripts/*.sh` + `scripts/lib/*.sh`, `skills/*.md` + `skills/*/SKILL.md`, `commands/*.md`. Přibylo kontrol a jejich testů; V7 roadmapy měří, necílí.
 

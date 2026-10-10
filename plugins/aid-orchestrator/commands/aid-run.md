@@ -885,6 +885,18 @@ worktree (`.aid-worktrees/plan-<id>`) on `plan/<id>` for the whole close.
 | 4 | `<round> prepare\|collect\|close --checkpoint cp7 --evidence-dir <run dir> --project-root <plan worktree> --round 1` | the whole-plan review: `final_criteria` (the brief point by point against the isolated measurement) and `final_generalist` (Codex: across the EPICs, the claims, the security and operations checklist); a project may add `final_claims` | `produce` has not run; HEAD is not the candidate; a reviewer file has no dispatch bracket; the plan-diff was not measured in isolation (`cp7_measurement_stale`); the brief is not the one the plan is bound to (`cp7_brief_sha_mismatch`), missing (`zadani_file_missing`) or, for a strict plan, not named (`plan_names_no_brief`) |
 | 5 | `<fsm> plan-finalize <plan> --stage decide` | the one aggregate: `release-decision.json`, the sealed receipt, the PM page with attempts, minutes and USD | the round is not closed; a decision input was edited by hand (named); the candidate moved |
 
+**Gates and the project's tests (P110).** With `project_tests:` declared in
+`execution.yaml`, a change to the project's test files needs a gate of the
+run's profile flagged `runs_project_tests: true` that proves, through
+`--evidence-file {evidence_dir}/gates/<gate>.evidence.json`, that it ran them —
+otherwise the row `project_tests` fails (`profile_skips_project_tests`,
+`project_tests_evidence_missing`, `project_tests_not_selected`); a suite left to
+the nightly tier is `nightly_covers`, a project without the key is only advised
+(`project_tests_undeclared`). `run-all-tests.sh --evidence-file` writes the
+evidence; `aid-run-gates.sh record-tests --glob … --evidence-file … -- <cmd>`
+wraps a whole-suite runner; `aid-run-gates.sh --lint-profiles <execution.yaml>`
+checks every profile. The PM waives with `aid-gate-waiver.sh issue project_tests`.
+
 **The measurer at the close (row 3, P110).** `produce` runs every brief point
 through `aid-plan-diff.sh --isolated --cwd <the plan worktree>` (the release
 profile's `plan_diff` gate passes `--isolated --cwd .`). The rule is the

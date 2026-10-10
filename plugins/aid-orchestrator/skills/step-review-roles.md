@@ -45,8 +45,8 @@ after the `--- PACKET ---` marker:
 At CP7 `dod.md` is the plan's acceptance and success criteria, `files.json`
 declares no scope, and the packet adds `plan-diff.json` (which executed test
 proves which criterion), `gates_report.json` (the gates at the candidate),
-`epic-findings.json` (what each EPIC's CP3 round left open, so it is not
-judged twice) and `claims.patch` (the CHANGELOG, README and docs hunks).
+`epic-findings.json` (what each EPIC's CP3 round left open — with CP3 off,
+what its step rounds left open — so it is not judged twice) and `claims.patch` (the CHANGELOG, README and docs hunks).
 
 Reviewers may read the repository at the reviewed commit with read-only tools
 beyond the packet; the findings worth paying for usually lie in callers and
@@ -309,7 +309,7 @@ EPICs. The per-EPIC reviews already judged each EPIC alone
 
 1. Does a change of one EPIC break a caller, a consumer or a test that another EPIC of the same plan touched or relied on?
 2. Is anything half-done across the EPICs: a function one EPIC adds and no EPIC calls, a flag one EPIC reads and none sets?
-3. Was an EPIC of the plan not reviewed as a whole (`cp3: absent`)? Then read its part of the range as its EPIC reviewer would have.
+3. Was an EPIC of the plan closed before the EPIC review existed (`cp3: absent`)? Then read its part of the range as its EPIC reviewer would have. (`cp3: off` — the EPIC review switched off, the default since 2.116.0 — is no such case: its steps were reviewed and what they left open is listed; question 1 and 2 are the cross-step read.)
 4. Does the range remove or weaken an existing behaviour that no criterion of the plan asked to change?
 5. Is a finding the per-EPIC reviews left open still true at the candidate? Report it once, with today's evidence.
 6. Claims (`claims.patch`: CHANGELOG, README and docs hunks): does the code at the candidate do every behavioural claim, and does a binding instruction for whoever deploys or operates this live only outside the delivered files? (A project that keeps `final_claims` has that role ask this too.)

@@ -5102,7 +5102,7 @@ _pfsm_finalize_gates_body() {
           while IFS= read -r fs; do
             [[ -n "$fs" ]] && echo "    suite: ${fs} — reproduce: (cd ${troot} && bash ${frunner} --only ${fs})" >&2
           done < <(sed -nE '/^[[:space:]]*Failed suites:/,/^$/ s/^[[:space:]]+- (.+)$/\1/p' "${run_dir_abs}/${fev}")
-        done < <(jq -r '.gates | to_entries[] | select((.value.result // .value.status) == "fail")
+        done < <(jq -r '.gates | to_entries[] | select(.value.status == "fail")
                    | "\(.key)\t\(.value.evidence // "")"' "$report_file" 2>/dev/null)
         return 1
       fi

@@ -1709,3 +1709,12 @@ _rebind() {   # the plan follows the brief: verze and sha
   run "$ROUND_SH" prepare "$wt/.aid-o/plans/p.md" --round 1
   [ "$status" -eq 1 ]; [[ "$output" == *"two different contents under one name"* ]]
 }
+@test "cp7-zadani: with CP3 off an EPIC is cp3: off and carries what its step rounds left open; the prompt says so" {
+  _frepo
+  local ep="$R/.aid-o/work/evidence/E-901-1_1/R-1/cp2/step-0"; mkdir -p "$ep/round-1"
+  jq -n '{findings: [{severity: "major", status: "open", claim: "the import is never used", evidence: "src/app.py:1", fix: "use it"}, {severity: "minor", status: "open", claim: "style", evidence: "src/app.py:2", fix: "x"}]}' > "$ep/round-1/merged.json"
+  bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
+  [ "$(jq -c '.epics[0] | {cp3, n: (.findings | length)}' "$E/cp7/epic-findings.json")" = '{"cp3":"off","n":1}' ]
+  _fsc; _F prepare --round 1 >/dev/null
+  grep -q 'EPIC review switched off; its steps were reviewed one by one — 1 finding' "$(FD 1)/prompt-final_generalist.md"
+}

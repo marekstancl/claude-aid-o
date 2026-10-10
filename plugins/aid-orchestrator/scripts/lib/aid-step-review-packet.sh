@@ -118,7 +118,16 @@ aid_final_review_inputs_build() {
   for epic_dir in "${state_root}/.aid-o/work/evidence/E-${plan_id#P}-"*; do
     [[ -d "$epic_dir" ]] || continue
     run="$(ls -dt "$epic_dir"/*/cp3 2>/dev/null | head -n1)"
-    if [[ -z "$run" ]]; then
+    declare -F aid_review_switched_off >/dev/null || source "${_AID_SR_PLUGIN}/scripts/lib/aid-review-config.sh"
+    if [[ -z "$run" ]] && aid_review_switched_off "$state_root" cp3_integration_review >/dev/null 2>&1; then
+      # P110: CP3 off — what the step rounds of the EPIC's latest run left open
+      # reaches the close instead (the last round of each step, open blockers and majors)
+      local lrun; lrun="$(ls -dt "$epic_dir"/*/cp2 2>/dev/null | head -n1)"
+      { for st in ${lrun:+"$lrun"/step-*}; do
+          ls "$st"/round-*/merged.json 2>/dev/null | sort -V | tail -1
+        done; } | xargs -r cat | jq -sc --arg e "$(basename "$epic_dir")" \
+        '{epic: $e, cp3: "off", findings: [.[].findings[]? | select((.status | IN("open", "disputed", "carried", "routed", "form_invalid")) and (.severity == "blocker" or .severity == "major")) | {severity, status, claim, evidence, fix} + (if .rule then {rule} else {} end)]}'
+    elif [[ -z "$run" ]]; then
       jq -nc --arg e "$(basename "$epic_dir")" '{epic: $e, cp3: "absent", findings: []}'
     else
       jq -c --arg e "$(basename "$epic_dir")" -s '{epic: $e, cp3: "reviewed",
@@ -249,7 +258,8 @@ aid_step_review_prompt_render() {
     fi
     if [[ "$cp" == cp7 ]]; then
       echo "## What the per-EPIC reviews already judged (do not repeat; read ACROSS the EPICs)"
-      jq -r '.epics[] | if .cp3 == "absent" then "- \(.epic): NOT reviewed as a whole (no EPIC review round: switched off since 2.116.0, or closed before it existed) — this round is the only cross-step read of its code"
+      jq -r '.epics[] | if .cp3 == "absent" then "- \(.epic): NOT reviewed as a whole (closed before the EPIC review existed)"
+                        elif .cp3 == "off" then "- \(.epic): EPIC review switched off; its steps were reviewed one by one — \(.findings | length) finding(s) the step rounds left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join("")))
                         else "- \(.epic): \(.findings | length) finding(s) left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join(""))) end' "${dir}/packet/epic-findings.json"
       echo
       echo "## Gates at the candidate (gates_report.json on disk: ${dir}/packet/gates_report.json)"
