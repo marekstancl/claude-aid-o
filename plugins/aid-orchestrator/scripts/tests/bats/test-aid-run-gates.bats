@@ -2020,3 +2020,10 @@ _ptrow() { jq -r ".gates.project_tests.$1 // empty" "$REPORT"; }
   run "$RUN_GATES" record-tests --evidence-file "$TEST_PROJECT/r.json" -- pytest -m smoke
   [ "$status" -eq 2 ]; [[ "$output" == *"selects a subset"* ]]; [ ! -f "$TEST_PROJECT/r.json" ]
 }
+@test "project-tests: record-tests sees a selector glued to its value, inside bash -c and in PYTEST_ADDOPTS; python -m pytest is no selector" {
+  local ev="$TEST_PROJECT/r.json"
+  run "$RUN_GATES" record-tests --evidence-file "$ev" -- true pytest -msmoke; [ "$status" -eq 2 ]
+  run "$RUN_GATES" record-tests --evidence-file "$ev" -- bash -c 'pytest -k foo'; [ "$status" -eq 2 ]
+  PYTEST_ADDOPTS="-k x" run "$RUN_GATES" record-tests --evidence-file "$ev" -- true; [ "$status" -eq 2 ]
+  run "$RUN_GATES" record-tests --evidence-file "$ev" -- true python -m pytest -q; [ "$status" -eq 0 ]
+}

@@ -1172,12 +1172,19 @@ record_tests() {
     esac
   done
   [[ -n "$ev" && $# -gt 0 ]] || { echo "Usage: aid-run-gates.sh record-tests --evidence-file <path> [--execution-yaml <file>] -- <command…>" >&2; return 2; }
-  # a runner told to run a subset proves nothing about the rest (P110 security review)
-  local a; for a in "$@"; do
-    case "$a" in -k|-m|--filter|--filter=*|-run|-run=*|--grep|--grep=*|-t|--testNamePattern*|--only)
-      echo "record-tests: '$a' selects a subset — record-tests claims the whole suite ran; let the runner write its own evidence instead" >&2; return 2 ;;
-    esac
-  done
+  # a runner told to run a subset proves nothing about the rest (P110 security
+  # review). Read over the WHOLE command text — a selector inside `bash -c '…'`
+  # or glued to its value (-mfoo, -k=x) counts — and over the runners' own
+  # option variables. A best-effort guard, not a proof: a wrapper script can
+  # still select; only evidence the runner writes itself (run-all-tests.sh
+  # --evidence-file, aid-select-tests.sh) proves the selection (IMP-691 note).
+  local cmdtext=" $* "
+  cmdtext="$(sed -E 's/python[0-9.]*[[:space:]]+-m[[:space:]]+[A-Za-z_.]+//g' <<< "$cmdtext")"   # `python -m pytest` names a module, not a marker
+  if grep -qE -- '(^|[[:space:]"'"'"'=])(-k|-m|--filter|-run|--grep|--testNamePattern|--only|--deselect|--lf|--last-failed|--exitfirst)([[:space:]=]|[^[:space:]-]|$)' <<< "$cmdtext" \
+     || [[ -n "${PYTEST_ADDOPTS:-}${BATS_TEST_FILTER:-}${GOFLAGS:-}" ]]; then
+    echo "record-tests: the command selects a subset (or PYTEST_ADDOPTS/BATS_TEST_FILTER/GOFLAGS is set) — record-tests claims the whole suite ran; let the runner write its own evidence instead" >&2
+    return 2
+  fi
   [[ -n "$yaml" ]] || yaml="$(aid_state_root 2>/dev/null || pwd)/.aid-o/config/execution.yaml"
   "$@" || rc=$?
   # the runner's own test files (--glob, written per stack): a flag on a gate

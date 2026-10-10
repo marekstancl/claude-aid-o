@@ -36,5 +36,5 @@ vstup: diff zúžení (politika revizí, čtečka konfigurace, kola revize, bal�
 6. Odloženo do backlogu IMP-692 (starší než P110); zmírněno v kroku 4: nálezy zamítnuté PM jdou do balíku CP7 jako `dismissed_by_pm`.
 7. Opraveno v kroku 4: s vypnutým CP3 se složka `cp3/` nečte a bere se nejnovější běh.
 8. Opraveno v kroku 6: rozhodují všechny kroky posledního běhu — jeden `fail` = `rejected`, jiný stav než pass/skip/no_change = `unverifiable`.
-9. Opraveno v kroku 5: `record-tests` odmítne běžec s výběrovým přepínačem (`-k`, `-m`, `--filter`, `-run`, `--grep`, `-t`, `--testNamePattern`, `--only`).
+9. Opraveno v kroku 5: `record-tests` odmítne výběr testů v celém textu příkazu (i uvnitř `bash -c '…'` a přilepený k hodnotě, `-mfoo`, `-k=x`) a při nastaveném `PYTEST_ADDOPTS`/`BATS_TEST_FILTER`/`GOFLAGS`; `python -m pytest` výběr není. Hranice (automatická kontrola commitu 8fb38a15): je to seznam zakázaných voleb, skript-obal může testy vybrat i tak; úplný důkaz dává jen evidence, kterou zapisuje sám běžec (`run-all-tests.sh --evidence-file`, `aid-select-tests.sh`) — poznámka u IMP-691.
 10. Odloženo do backlogu IMP-693 (starší chování).
