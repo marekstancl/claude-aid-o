@@ -849,7 +849,7 @@ fi
 zadani_json='{}'
 if [[ -n "$__src_plan_file" ]]; then
   __z="$(_aid_fm_get "$__src_plan_file" zadani)"; __zs="$(_aid_fm_get "$__src_plan_file" zadani_sha256)"
-  zadani_json="$(jq -nc --arg z "$__z" --arg s "$__zs" '(if $z == "" then {} else {zadani: $z} end) + (if $s == "" then {} else {zadani_sha256: $s} end)')"
+  zadani_json="$(jq -nc --arg z "$__z" --arg s "$__zs" --arg p "$(sha256sum "$__src_plan_file" | cut -d' ' -f1)" '(if $z == "" then {} else {zadani: $z} end) + (if $s == "" then {} else {zadani_sha256: $s} end) + {source_plan_sha256: $p}')"   # P110: the step measurement reads this plan
 fi
 plan_json="$(jq -n \
   --arg epic_id "$epic_id" \

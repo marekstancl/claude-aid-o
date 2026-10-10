@@ -320,6 +320,9 @@ EPICs. The per-EPIC reviews already judged each EPIC alone
    - the documentation build: does a changed doc page still build (links, frontmatter, sidebar)?
    - data leaking to logs or notifications (Telegram, e-mail): a secret, a token, a personal datum, a whole request?
    - account boundaries: can one user, tenant or role now read or change what another owns?
+   - injection across the range: does an input one step adds (a request field, a CLI option, a file name, model text) reach a shell, a query, a template rendered as HTML/SVG/CSS or a file path in another step, unconstrained? Trace each new input to its sinks.
+   - paths and deletion: a path taken from a caller resolved after the check, a symlink followed while deleting or writing?
+   - forged trust: can an approval, a review record or other evidence the code trusts be written by the one it is meant to check?
 
 ### Stop rule
 

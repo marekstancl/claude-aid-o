@@ -210,3 +210,17 @@ _json() { jq -r "$1" "$E/$2/step-check.json"; }
   [ "$status" -eq 2 ]
   run _run --checkpoint cp4; [ "$status" -eq 2 ]
 }
+
+# ── P110 security review ────────────────────────────────────────────────────
+@test "security: a small in-scope step that adds an entry point (handler pattern) is review, never skip" {
+  printf 'import argparse\np = argparse.ArgumentParser()\n' >> "$R/src/app.py"; _commit s0 >/dev/null
+  run _run --checkpoint cp2 --step 0; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = review ]
+  [[ "$(_json .reason cp2/step-0)" == *"handler pattern: command_entry_point"* ]]
+}
+@test "security: a string handed to a shell (bash -c, eval of a variable, execSync) is review+security" {
+  printf 'bash -c "$cmd"\n' >> "$R/src/app.py"; _commit s0 >/dev/null
+  run _run --checkpoint cp2 --step 0; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = "review+security" ]
+  [[ "$(_json .reason cp2/step-0)" == *shell_string_exec* ]]
+}

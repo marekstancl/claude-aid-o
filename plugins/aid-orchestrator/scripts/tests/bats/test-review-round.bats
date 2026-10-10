@@ -1718,3 +1718,11 @@ _rebind() {   # the plan follows the brief: verze and sha
   _fsc; _F prepare --round 1 >/dev/null
   grep -q 'EPIC review switched off; its steps were reviewed one by one — 1 finding' "$(FD 1)/prompt-final_generalist.md"
 }
+@test "cp7-zadani: with CP3 off a leftover cp3/ is not read, and a finding the PM dismissed is listed for the close" {
+  _frepo
+  local base="$R/.aid-o/work/evidence/E-901-1_1"; mkdir -p "$base/R-1/cp3/round-1" "$base/R-2/cp2/step-0/round-1"
+  echo '{"findings": []}' > "$base/R-1/cp3/round-1/merged.json"
+  jq -n '{findings: [{severity: "blocker", status: "fixed", claim: "shell injection in run", evidence: "src/app.py:1", fix: "quote it", dispute: {pm: {answer: "accepted"}}}]}' > "$base/R-2/cp2/step-0/round-1/merged.json"
+  bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
+  [ "$(jq -c '.epics[0] | {cp3, s: [.findings[].status]}' "$E/cp7/epic-findings.json")" = '{"cp3":"off","s":["dismissed_by_pm"]}' ]
+}

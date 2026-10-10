@@ -1172,6 +1172,12 @@ record_tests() {
     esac
   done
   [[ -n "$ev" && $# -gt 0 ]] || { echo "Usage: aid-run-gates.sh record-tests --evidence-file <path> [--execution-yaml <file>] -- <command…>" >&2; return 2; }
+  # a runner told to run a subset proves nothing about the rest (P110 security review)
+  local a; for a in "$@"; do
+    case "$a" in -k|-m|--filter|--filter=*|-run|-run=*|--grep|--grep=*|-t|--testNamePattern*|--only)
+      echo "record-tests: '$a' selects a subset — record-tests claims the whole suite ran; let the runner write its own evidence instead" >&2; return 2 ;;
+    esac
+  done
   [[ -n "$yaml" ]] || yaml="$(aid_state_root 2>/dev/null || pwd)/.aid-o/config/execution.yaml"
   "$@" || rc=$?
   # the runner's own test files (--glob, written per stack): a flag on a gate

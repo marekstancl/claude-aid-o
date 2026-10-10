@@ -252,6 +252,7 @@ elif [[ -f "$CPDIR/rounds.json" ]] && jq -e '(.rounds // []) | length > 0' "$CPD
   # A step that moved after a closed round is not skipped: the delta round of
   # aid-review-round.sh confirms it (P100 Step 2).
   verdict=review; reason="the step moved after a closed round; a delta round confirms it"
+elif (( ${#handler_ids[@]} > 0 )); then verdict=review; reason="handler pattern: ${handler_ids[*]} (an entry point is never skipped, P110)"
 elif [[ "$CHECKPOINT" != cp7 ]] && (( ${#FILES[@]} <= MAX_FILES && LINES <= MAX_LINES )); then verdict=skip; reason="${#FILES[@]} file(s), $LINES line(s), inside scope, no pattern matched"
 else verdict=review; reason="${#FILES[@]} file(s), $LINES line(s)"
 fi

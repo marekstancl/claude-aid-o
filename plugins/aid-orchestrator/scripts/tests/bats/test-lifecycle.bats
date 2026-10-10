@@ -213,3 +213,10 @@ YML
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; _aid_lc_epic_review_status E-950-1_1 ."
   [[ "$output" == *rejected* ]]
 }
+@test "review status: with CP3 off one failed step of the run rejects it, whichever step is last (P110 security review)" {
+  mkdir -p .aid-o/work/evidence/E-951-1_1/R-1/cp2/step-0 .aid-o/work/evidence/E-951-1_1/R-1/cp2/step-1
+  echo '{"verdict":"fail"}' > .aid-o/work/evidence/E-951-1_1/R-1/cp2/step-0/rounds.json
+  echo '{"verdict":"pass"}' > .aid-o/work/evidence/E-951-1_1/R-1/cp2/step-1/rounds.json
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; _aid_lc_epic_review_status E-951-1_1 ."
+  [[ "$output" == *rejected* ]]
+}

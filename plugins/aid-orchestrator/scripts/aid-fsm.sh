@@ -4604,6 +4604,13 @@ _fsm_step_measure() {
   pp="$(yq -r '.plan_path // ""' "$sf" 2>/dev/null)"
   [[ -n "$pp" && "$pp" != null ]] || return 4   # Fast Mode: no plan, nothing to measure
   [[ -f "$pp" && -f "${ev}/plan.json" ]] || return 3
+  # the criteria come from the plan the EPIC was generated from: a plan edited
+  # since (a criterion weakened or deleted) is not measured (P110 security review)
+  local want; want="$(jq -r '.source_plan_sha256 // ""' "${ev}/plan.json")"
+  if [[ -n "$want" && "$(sha256sum "$pp" | cut -d' ' -f1)" != "$want" ]]; then
+    echo "REFUSED (step_criteria_failed): ${pp} changed since the EPIC was generated (source_plan_sha256) — its criteria are not measured from an edited plan" >&2
+    return 1
+  fi
   pd="${ev}/cp2/step-${n}/plan-diff.json"
   # Reused only when bound to HEAD AND written by the measurer: the run's
   # timeline holds its plan_diff_complete event with the file's sha256 (a

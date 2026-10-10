@@ -2072,3 +2072,11 @@ SC_WHY="the PM moved this point to the close of the plan"
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_config_load '$TEST_PROJECT_ROOT' epic_review '$AID_PLUGIN_PATH/skills/step-review-roles.md'"
   [ "$status" -eq 1 ]; [[ "$output" == *"cannot read epic_review"* ]]
 }
+@test "step-criteria: a plan edited since the EPIC was generated (source_plan_sha256) is not measured — refused" {
+  _sc_seed; touch ok.txt
+  jq --arg s "$(sha256sum "$SC_PLAN" | cut -d' ' -f1)" '. + {source_plan_sha256: $s}' "$TEST_EVIDENCE_DIR/plan.json" > "$TEST_EVIDENCE_DIR/p.tmp" && mv "$TEST_EVIDENCE_DIR/p.tmp" "$TEST_EVIDENCE_DIR/plan.json"
+  _imp263_write_bound_verify "$TEST_EVIDENCE_DIR/step-0-verify.md" 0 step_1_backend "$(_imp263_plan_step_hash "$TEST_EVIDENCE_DIR/plan.json" 0)" "$(git rev-parse HEAD)" TOK-SC
+  sed -i 's/cmd: "test -f ok.txt"/cmd: "true"/' "$SC_PLAN"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"changed since the EPIC was generated"* ]]
+}

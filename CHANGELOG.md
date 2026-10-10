@@ -24,15 +24,16 @@ Levnější běh (P110, vydání 2 roadmapy po experimentu P014). Krok si koupí
 - **Uzávěr čte řádek brány přes normalizovaný stav** (`aid-plan-fsm.sh` hledal neprošlou bránu přes `.value.result`; noční kontrola `P097 rows` byla červená už v `main`).
 - **S vypnutým CP3 dostane uzávěr, co nechaly otevřené revize kroků** (`epic-findings.json` `cp3: "off"` s otevřenými blockery a majory posledního kola každého kroku) a revizor ho už nečte jako EPIC, který nikdo neviděl.
 
-### Not done in this release
-- **Bezpečnostní revize zúžení Codexem** (`docs/reference/2026-10-p110-bezpecnostni-revize.md`, AC6) čeká na Codex (limit do 14. 10. 2026); plán záskok nepovoluje.
+### Security
+- **Bezpečnostní revize zúžení** (AC6, `docs/reference/2026-10-p110-bezpecnostni-revize.md`): nezávislý Claude agent s čistým kontextem jako záskok za Codex (limit do 14. 10. 2026; PM 1B). Deset nálezů, sedm opraveno: krok se vzorem obsluhy (routa, CLI vstup) se nepřeskočí a nový vzor `shell_string_exec` (`bash -c`, `eval` proměnné, `execSync`) vede k plnému revizorovi; kontrolní seznam CP7 má injection napříč kroky, cesty a symlinky a padělanou důvěru; body kroku se měří jen z plánu, ze kterého vznikl EPIC (`plan.json` `source_plan_sha256`); s vypnutým CP3 se zbylá `cp3/` nečte a uzávěr vidí i nálezy zamítnuté PM; lifecycle rozhoduje podle všech kroků běhu; `record-tests` odmítne běžec s výběrem testů. Tři do backlogu (IMP-691..693), jeden čeká na rozhodnutí PM.
+- **Krok nikdy nečeká na Codex** — `skills/plan-writing.md` pravidlo 20: revizi přidělenou Codexu udělá při jeho nedostupnosti nezávislý Claude agent, jak to plugin dělá od P095.
 
 ### Velikost pluginu (řádky, `wc -l`)
 
 | část | před | po |
 |---|---|---|
-| scripts | 72 060 | 73 089 |
-| skills | 8 270 | 8 328 |
+| scripts | 72 060 | 73 115 |
+| skills | 8 270 | 8 332 |
 | commands | 5 796 | 5 896 |
 
 Měřeno: `scripts/*.sh` + `scripts/lib/*.sh`, `skills/*.md` + `skills/*/SKILL.md`, `commands/*.md`. Přibylo kontrol a jejich testů; V7 roadmapy měří, necílí.

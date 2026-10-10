@@ -117,8 +117,10 @@ aid_final_review_inputs_build() {
   [[ -s "$out/criteria.md" ]] || { echo "produce: ${plan_file} has no acceptance or success criteria" >&2; return 1; }
   for epic_dir in "${state_root}/.aid-o/work/evidence/E-${plan_id#P}-"*; do
     [[ -d "$epic_dir" ]] || continue
-    run="$(ls -dt "$epic_dir"/*/cp3 2>/dev/null | head -n1)"
     declare -F aid_review_switched_off >/dev/null || source "${_AID_SR_PLUGIN}/scripts/lib/aid-review-config.sh"
+    # CP3 off: a leftover or stray cp3/ is not read — it would hide what the steps left open
+    if aid_review_switched_off "$state_root" cp3_integration_review >/dev/null 2>&1; then run=""
+    else run="$(ls -dt "$epic_dir"/*/cp3 2>/dev/null | head -n1)"; fi
     if [[ -z "$run" ]] && aid_review_switched_off "$state_root" cp3_integration_review >/dev/null 2>&1; then
       # P110: CP3 off — what the step rounds of the EPIC's latest run left open
       # reaches the close instead (the last round of each step, open blockers and majors)
@@ -126,7 +128,8 @@ aid_final_review_inputs_build() {
       { for st in ${lrun:+"$lrun"/step-*}; do
           ls "$st"/round-*/merged.json 2>/dev/null | sort -V | tail -1
         done; } | xargs -r cat | jq -sc --arg e "$(basename "$epic_dir")" \
-        '{epic: $e, cp3: "off", findings: [.[].findings[]? | select((.status | IN("open", "disputed", "carried", "routed", "form_invalid")) and (.severity == "blocker" or .severity == "major")) | {severity, status, claim, evidence, fix} + (if .rule then {rule} else {} end)]}'
+        '{epic: $e, cp3: "off", findings: [.[].findings[]? | select(((.status | IN("open", "disputed", "carried", "routed", "form_invalid")) or (.dispute.pm.answer == "accepted")) and (.severity == "blocker" or .severity == "major"))
+           | {severity, status: (if .dispute.pm.answer == "accepted" then "dismissed_by_pm" else .status end), claim, evidence, fix} + (if .rule then {rule} else {} end)]}'
     elif [[ -z "$run" ]]; then
       jq -nc --arg e "$(basename "$epic_dir")" '{epic: $e, cp3: "absent", findings: []}'
     else

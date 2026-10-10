@@ -10,6 +10,7 @@
   ],
   "parallel_groups": [],
   "source_plan": "plugins/aid-orchestrator/scripts/tests/fixtures/minimal-plan.md",
+  "source_plan_sha256": "306b3b8e56148dc616fd623c84d81b50dbf192843aee1e23aedbc37a8fe71ede",
   "steps": [
     {
       "acceptance_criteria": [

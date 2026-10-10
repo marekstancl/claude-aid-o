@@ -20,6 +20,11 @@
       "type": "string",
       "description": "The brief file the source plan is bound to (its frontmatter zadani:, P109). Absent when the plan names no brief."
     },
+    "source_plan_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 of the plan file this plan.json was generated from (P110): increment-step measures the step's criteria only from that plan, never from one edited since."
+    },
     "zadani_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",

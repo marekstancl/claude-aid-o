@@ -2016,3 +2016,7 @@ _ptrow() { jq -r ".gates.project_tests.$1 // empty" "$REPORT"; }
   _ptrepo; _ptyaml '[smoke]' '"tests/**"'
   _ptrun; [ "$status" -eq 2 ]; [[ "$output" == *"project_tests must be a list"* ]]
 }
+@test "project-tests: record-tests refuses a runner told to run a subset (-k, -m, --filter)" {
+  run "$RUN_GATES" record-tests --evidence-file "$TEST_PROJECT/r.json" -- pytest -m smoke
+  [ "$status" -eq 2 ]; [[ "$output" == *"selects a subset"* ]]; [ ! -f "$TEST_PROJECT/r.json" ]
+}
