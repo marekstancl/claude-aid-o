@@ -222,6 +222,22 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   jq -e '.release_decision.blockers | any(.reason | test("criteria unmeasured.*verification_env_unset"))' "$(_run_dir)/release-decision.json"
   ! jq -e '.release_decision.blockers | any(.reason == "plan-diff reports absent acceptance criteria")' "$(_run_dir)/release-decision.json"
 }
+@test "cost: the decision carries plan_summary.run_cost and plan_cost with the fixture's figures (P110)" {
+  _project
+  mkdir -p "$R/.aid-o/work/evidence/E-900-1_1/R-E-900-1_1-1/cp2/step-0/round-1"
+  jq -n '{reviewers: {step_generalist: {tokens: 1000, usd: 1.5}}}' > "$R/.aid-o/work/evidence/E-900-1_1/R-E-900-1_1-1/cp2/step-0/round-1/measurement.json"
+  _close_up_to_decide; _stage decide; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_decision plan_summary.run_cost.rounds)" = 2 ]          # the step round and the cp7 round
+  [ "$(_decision plan_summary.run_cost.attempts)" = 1 ]
+  [ "$(_decision plan_summary.plan_cost.reason)" = no_cp1_evidence ]
+}
+@test "cost: an unreadable measurement.json refuses the decision measurement_unreadable (P110)" {
+  _project
+  mkdir -p "$R/.aid-o/work/evidence/E-900-1_1/R-E-900-1_1-1/cp2/step-0/round-1"
+  echo '{broken' > "$R/.aid-o/work/evidence/E-900-1_1/R-E-900-1_1-1/cp2/step-0/round-1/measurement.json"
+  _close_up_to_decide; _stage decide; echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"measurement_unreadable"* ]]
+}
 @test "the whole-plan review switched off: blocked as final_review_disabled until the PM waives it for this candidate, with the audit entry" {
   _project '.review_checkpoints.cp7_plan_final_review = false'
   _stage freeze; _stage gates; _stage produce; [ "$status" -eq 0 ]

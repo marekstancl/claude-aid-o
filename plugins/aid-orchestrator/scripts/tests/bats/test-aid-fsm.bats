@@ -2049,14 +2049,22 @@ SC_WHY="the PM moved this point to the close of the plan"
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
   grep -q 'review_checkpoint_disabled' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
 }
-@test "cp3-off: streamlined done-advance check with the toggle off and no cp3 round passes and writes the audit" {
+@test "cp3-off: a legacy-mode streamlined run with the toggle off and no cp3 round is refused — nothing would review it" {
   _streamlined_seed_state true
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _write_three_event_timeline
   echo '{}' > "$TEST_EVIDENCE_DIR/gates_report.json"
   _run_streamlined_check fsm_check_streamlined_integration_review "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
-  echo "$output"; [ "$status" -eq 0 ]
-  grep -q 'review_checkpoint_disabled' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"nothing would review this code"* ]]
+  grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+@test "cp3-off: the toggle is read from the state root, not from a linked worktree without .aid-o" {
+  _cp3_on
+  git -C "$TEST_PROJECT_ROOT" worktree add -q "$TEST_PROJECT_ROOT/../wt-cp3" -b wt-cp3 2>/dev/null || skip "no git repo in the fixture"
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-roots.sh'; source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_switched_off '$TEST_PROJECT_ROOT/../wt-cp3' cp3_integration_review"
+  git -C "$TEST_PROJECT_ROOT" worktree remove --force "$TEST_PROJECT_ROOT/../wt-cp3"
+  [ "$status" -eq 1 ]   # not off: the state root's policy keeps CP3
 }
 @test "cp3-off: the toggle on without an epic_review block is refused naming the block" {
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"

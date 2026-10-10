@@ -340,6 +340,15 @@ build_brief_md() {
            | if $c == null then "_Not a plan close._"
              else "- **Close:** \($c.attempts) attempt(s), \($c.minutes) min, \($c.usd) USD"
                   + (if ($c.usd_unknown_roles | length) > 0 then " + cost unknown for: " + ($c.usd_unknown_roles | join(", ")) else "" end) end),
+          (($r.plan_summary.run_cost // null) as $c
+           | if $c == null then "- **Cena běhu:** nezměřeno"
+             else "- **Cena běhu:** \($c.usd) USD, \($c.rounds) kol, \($c.attempts) pokusů"
+                  + (if ($c.usd_unknown_roles | length) > 0 then " + neznámá u: " + ($c.usd_unknown_roles | join(", ")) else "" end) end),
+          (($r.plan_summary.plan_cost // null) as $c
+           | if $c == null or $c.usd == null then "- **Cena plánu:** nezměřeno"
+             else "- **Cena plánu:** \($c.usd) USD (CP1 \($c.cp1_rounds) kol, kritik "
+                  + (if $c.critic == null or $c.critic.usd == null then "neznámá" else "\($c.critic.usd) USD" end) + ")"
+                  + (if ($c.usd_unknown_roles | length) > 0 then " + neznámá u: " + ($c.usd_unknown_roles | join(", ")) else "" end) end),
           "- **Whole-delivery review:** " + ((($r.inputs // []) | map(select(.id == "final_review")) | first | "\(.verdict) — \(.reason)") // "not recorded"),
           "- **Acceptance criteria:** " + ((($r.inputs // []) | map(select(.id == "acceptance_evidence")) | first | "\(.verdict) — \(.reason)") // "not recorded"),
           "",

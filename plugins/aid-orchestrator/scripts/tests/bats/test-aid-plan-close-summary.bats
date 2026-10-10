@@ -544,3 +544,17 @@ _blockers_two() {
   AID_HOOK_AUDIT="$a" run aid_plan_close_time "$r" P900 .aid-o/work/evidence/E-900-1_1/R-1
   [ "$(jq -c '[.waiting_pm_min, .outage_min]' <<< "$output")" = '[null,null]' ]
 }
+
+@test "cost: a decision with both keys renders both lines; an unknown USD says neznámá with the roles; an older decision says nezměřeno (P110)" {
+  _brief true auto '[]'
+  _decision '"3333333333333333333333333333333333333333"' v2.84.0
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"; [ "$status" -eq 0 ]
+  grep -qF 'Cena běhu: nezměřeno' "$OUT_DIR/plan-close-artifact.html"
+  grep -qF 'Cena plánu: nezměřeno' "$OUT_DIR/plan-close-artifact.html"
+  jq '.release_decision.plan_summary += {run_cost: {usd: 12.5, usd_unknown_roles: ["final_generalist"], tokens: 9, rounds: 7, attempts: 2},
+        plan_cost: {usd: 53.1, usd_unknown_roles: [], tokens: 1, cp1_rounds: 3, critic: {usd: 1.2, tokens: 5, runs: 1}, critic_reason: null}}' \
+    "$DECISION" > "$DECISION.x" && mv "$DECISION.x" "$DECISION"
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"; [ "$status" -eq 0 ]
+  grep -qF 'Cena běhu: 12.5 USD, 7 kol, 2 pokus(ů) + neznámá u: final_generalist' "$OUT_DIR/plan-close-artifact.html"
+  grep -qF 'Cena plánu: 53.1 USD (CP1 3 kol, kritik 1.2 USD)' "$OUT_DIR/plan-close-artifact.html"
+}

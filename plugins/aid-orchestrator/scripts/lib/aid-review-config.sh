@@ -65,11 +65,14 @@ aid_policy_file() {
 # file that sets it decides, the project's before the plugin default. Prints
 # "<switch>\t<file>" and returns 0 when one of them is false; returns 1 otherwise.
 aid_review_switched_off() {
-  local flag file value
+  local flag file value root="$1"
+  # the policy belongs to the state root: a linked worktree has no .aid-o (P110
+  # review — with CP3 off by default, a worktree read fell through to "off")
+  declare -F aid_state_root >/dev/null && root="$(aid_state_root "$1" 2>/dev/null || printf '%s' "$1")"
   for flag in enabled "$2"; do
     [[ -n "$flag" ]] || continue
     value=""
-    for file in "${1}/.aid-o/config/policies/review-checkpoints.yaml" "${_AID_RC_PLUGIN}/defaults/policies/review-checkpoints.yaml"; do
+    for file in "${root}/.aid-o/config/policies/review-checkpoints.yaml" "${_AID_RC_PLUGIN}/defaults/policies/review-checkpoints.yaml"; do
       [[ -f "$file" ]] || continue
       value="$(yq -r ".review_checkpoints.${flag}" "$file" 2>/dev/null)"
       [[ "$value" == true || "$value" == false ]] && break
@@ -106,9 +109,11 @@ aid_review_config_load() {
   if ! yq -e ".review_checkpoints.${block}" "$RC_CONFIG_FILE" >/dev/null 2>&1 \
      && aid_review_switched_off "$root" "$(_aid_rc_toggle_key "$block")" >/dev/null; then
     RC_ENABLED=0; RC_ROLE=(); RC_PROVIDER=(); RC_MODEL=(); RC_EFFORT=(); RC_WHEN=(); RC_FULL_WHEN=()
-    RC_ROUNDS_DEFAULT=1; RC_MIN_ANSWERS=0; RC_DEGRADED=0
-    echo "${block} config: no ${block} block and its checkpoint is switched off — disabled" >&2
-    export RC_BLOCK RC_CONFIG_FILE RC_ENABLED RC_ROUNDS_DEFAULT RC_MIN_ANSWERS RC_DEGRADED
+    RC_ROUNDS_DEFAULT=1; RC_MIN_ANSWERS=0; RC_DEGRADED=0; RC_BANNED_MODELS=""; RC_STAND_IN_MODEL=opus
+    RC_LIGHT_MAX_PROMPT_LINES=800; RC_SECOND_ROUND_WHEN=""; RC_EXTRA_DOCS_TYPE_REVIEWERS=""
+    RC_EXTRA_SKIP_THRESHOLD_FILES=""; RC_EXTRA_SKIP_THRESHOLD_LINES=""; RC_ROLES_SKILL="$skill"
+    export RC_BLOCK RC_CONFIG_FILE RC_ENABLED RC_ROUNDS_DEFAULT RC_MIN_ANSWERS RC_DEGRADED RC_BANNED_MODELS \
+           RC_EXTRA_DOCS_TYPE_REVIEWERS RC_EXTRA_SKIP_THRESHOLD_FILES RC_EXTRA_SKIP_THRESHOLD_LINES RC_ROLES_SKILL
     return 0
   fi
   if ! err="$(yq -e ".review_checkpoints.${block}" "$RC_CONFIG_FILE" 2>&1 >/dev/null)"; then
@@ -188,6 +193,8 @@ aid_review_config_floor() {
 _aid_rc_fail() { echo "${RC_BLOCK:-review} config: $1" >&2; }
 
 aid_review_config_validate() {
+  # a checkpoint switched off without its block has nothing to validate (P110)
+  (( ${RC_ENABLED:-1} == 0 && ${#RC_ROLE[@]} == 0 )) && return 0
   local expected role i seen=" " required unconditional=0
   expected="$(grep -oE '^## Role: [a-z_]+' "$RC_ROLES_SKILL" | sed 's/^## Role: //' | sort | tr '\n' ' ')"
   required="$(yq --front-matter=extract -r '.required_roles // "none"' "$RC_ROLES_SKILL" 2>/dev/null)"

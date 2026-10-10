@@ -989,7 +989,9 @@ aid_lifecycle_ensure_manifest() {
 # audit-report.json an EPIC closed before 2.101.0 left behind. Empty if neither.
 _aid_lc_epic_review_file() {
   { ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp3/rounds.json 2>/dev/null \
-    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null || true; } | sort -V | tail -1   # the latest run
+    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null \
+    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp2/step-*/rounds.json 2>/dev/null || true; } | sort -V | tail -1
+  # the latest run; with CP3 off (2.116.0) the last step's CP2 index is the review record
 }
 
 # _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the review

@@ -182,6 +182,84 @@ aid_plan_close_cost() {
        usd_unknown_roles: ([$r[] | select((.value.usd | type) != "number") | .key] | unique)}'
 }
 
+# aid_review_tokens_from_events <codex-events.jsonl> — the last turn.completed
+# usage of a Codex run as {tokens_in, cache_read, tokens_out} ("unknown" for a
+# field the run did not report). The ONE reader: `dispatch` and the critic's
+# cost read Codex tokens through it (P110).
+aid_review_tokens_from_events() {
+  jq -sc 'map(select(.type == "turn.completed")) | last | .usage // {}
+          | {tokens_in: (.input_tokens // "unknown"), cache_read: (.cached_input_tokens // "unknown"),
+             tokens_out: (.output_tokens // "unknown")}' "$1"
+}
+
+# _aid_rs_cost_json <measurement files…> — {usd, usd_unknown_roles, tokens, rounds}
+# over closed review rounds (fixers included). Returns 3 naming the first file
+# that does not parse (measurement_unreadable: a cost over a file nobody can
+# read would be a guess).
+_aid_rs_cost_json() {
+  local f
+  for f in "$@"; do
+    jq -e '.reviewers | type == "object"' "$f" >/dev/null 2>&1 \
+      || { echo "measurement_unreadable: ${f}" >&2; return 3; }
+  done
+  jq -n --slurpfile m <(cat /dev/null "$@") --argjson n "$#" '
+    ([$m[] | (.reviewers | to_entries[]), (.fixer // empty | {key: "fixer:\(.role)", value: .})]) as $r
+    | {usd: ([$r[].value.usd | select(type == "number")] | add // 0 | . * 10000 | round / 10000),
+       usd_unknown_roles: ([$r[] | select((.value.usd | type) != "number") | .key] | unique),
+       tokens: ([$r[].value.tokens | select(type == "number")] | add // 0),
+       rounds: $n}'
+}
+
+# aid_plan_run_cost <plan evidence dir> <plan_id> <epic evidence dir>… — what
+# the RUN of the plan cost (P110): every closed round of every EPIC run (cp2 per
+# step, cp3) plus the close attempts' cp7 rounds. {usd, usd_unknown_roles,
+# tokens, rounds, attempts}; attempts_partial when an EPIC dir is missing.
+# Returns 3 on an unreadable measurement.json (measurement_unreadable).
+aid_plan_run_cost() {
+  local dir="$1" plan_id="$2" e partial=false out; shift 2
+  local -a files=()
+  for e in "$@"; do
+    [[ -d "$e" ]] || { partial=true; continue; }
+    while IFS= read -r f; do files+=("$f"); done < <(find "$e" \( -path '*/cp2/step-*/round-*/measurement.json' -o -path '*/cp3/round-*/measurement.json' \) 2>/dev/null | sort)
+  done
+  while IFS= read -r f; do files+=("$f"); done < <(ls "$dir"/R-"${plan_id}"-final-*/cp7/round-*/measurement.json 2>/dev/null)
+  out="$(_aid_rs_cost_json ${files[@]+"${files[@]}"})" || return 3
+  jq -c --argjson a "$(ls -d "$dir"/R-"${plan_id}"-final-* 2>/dev/null | wc -l)" --argjson p "$partial" \
+    '. + {attempts: $a} + (if $p then {attempts_partial: true} else {} end)' <<< "$out"
+}
+
+# aid_plan_plan_cost <plan evidence dir> <plan_id> — what PLANNING cost (P110):
+# the CP1 rounds (live and set-aside attempts) and the critic, priced from its
+# Codex events (aid_review_tokens_from_events + aid_review_usd at the model the
+# critic ran on); a stand-in leaves no events: critic null with the reason.
+# {usd, usd_unknown_roles, tokens, cp1_rounds, critic, critic_reason}; null with
+# reason no_cp1_evidence for a plan that has none. Returns 3 like aid_plan_run_cost.
+aid_plan_plan_cost() {
+  local dir="$1" plan_id="$2" out ev model t cusd ctok='0' cfound=0 cunknown=0
+  local -a files=()
+  while IFS= read -r f; do files+=("$f"); done < <(ls "$dir"/cp1/round-*/measurement.json "$dir"/cp1/attempt-*/round-*/measurement.json 2>/dev/null)
+  if (( ${#files[@]} == 0 )); then
+    jq -nc '{usd: null, reason: "no_cp1_evidence", critic: null, critic_reason: "no_cp1_evidence"}'; return 0
+  fi
+  out="$(_aid_rs_cost_json "${files[@]}")" || return 3
+  cusd=0
+  for ev in "$dir"/critic/*/codex-events.jsonl; do
+    [[ -s "$ev" ]] || continue
+    model="$(grep -o '"agent_id":"codex:[^"]*"' "$(dirname "$ev")/timeline.jsonl" 2>/dev/null | tail -1 | sed 's/.*codex://; s/"$//')"
+    t="$(aid_review_tokens_from_events "$ev")"
+    local p; p="$(aid_review_usd "${model:-unknown}" "$(jq -r .tokens_in <<< "$t")" "$(jq -r .tokens_out <<< "$t")" "$(jq -r .cache_read <<< "$t")" 0)"
+    cfound=$((cfound + 1))
+    if [[ "$p" == unknown ]]; then cunknown=$((cunknown + 1)); else cusd="$(awk -v a="$cusd" -v b="$p" 'BEGIN { printf "%.4f", a + b }')"; fi
+    ctok="$(jq -n --argjson a "$ctok" --argjson t "$t" '$a + ([$t.tokens_in, $t.tokens_out] | map(select(type == "number")) | add // 0)')"
+  done
+  jq -c --argjson f "$cfound" --argjson u "$cunknown" --argjson cu "$cusd" --argjson ct "$ctok" '
+    . as $c | {usd: (.usd + (if $f > 0 then $cu else 0 end) | . * 10000 | round / 10000),
+               usd_unknown_roles: (.usd_unknown_roles + (if $u > 0 then ["critic"] else [] end)),
+               tokens: (.tokens + $ct), cp1_rounds: .rounds,
+               critic: (if $f > 0 then {usd: (if $u > 0 then null else $cu end), tokens: $ct, runs: $f} else null end),
+               critic_reason: (if $f > 0 then null else "stand-in or no events" end)}' <<< "$out"
+}
+
 # aid_plan_close_time <project_root> <plan_id> [epic_run_dir...]
 #   {work_min, review_min, gates_min, waiting_pm_min, outage_min}; a number
 #   nobody could measure is null ("neměřeno" on the page), never 0.

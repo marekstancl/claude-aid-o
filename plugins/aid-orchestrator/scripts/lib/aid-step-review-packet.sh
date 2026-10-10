@@ -249,7 +249,7 @@ aid_step_review_prompt_render() {
     fi
     if [[ "$cp" == cp7 ]]; then
       echo "## What the per-EPIC reviews already judged (do not repeat; read ACROSS the EPICs)"
-      jq -r '.epics[] | if .cp3 == "absent" then "- \(.epic): NOT reviewed as a whole (closed before the EPIC review existed)"
+      jq -r '.epics[] | if .cp3 == "absent" then "- \(.epic): NOT reviewed as a whole (no EPIC review round: switched off since 2.116.0, or closed before it existed) — this round is the only cross-step read of its code"
                         else "- \(.epic): \(.findings | length) finding(s) left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join(""))) end' "${dir}/packet/epic-findings.json"
       echo
       echo "## Gates at the candidate (gates_report.json on disk: ${dir}/packet/gates_report.json)"

@@ -273,6 +273,7 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `project_tests_evidence_missing` | a flagged gate wrote no evidence of what it ran | work | give its command `--evidence-file {evidence_dir}/gates/<gate>.evidence.json` (or wrap it in `aid-run-gates.sh record-tests`), run the gates again | |
 | `project_tests_not_selected` | a flagged gate's evidence does not list the changed test files — the flag proves nothing | work | run them in the flagged gate, run the gates again | PM, to waive |
 | `project_tests_undeclared` | advisory, never a refusal: the change touches usual test paths and `execution.yaml` declares no `project_tests:` | state | declare `project_tests:` and flag the gate that runs them (`/aid-init` offers it) | |
+| `measurement_unreadable` | a review round's `measurement.json` does not parse, so the cost of the run or the plan cannot be summed (P110; `plan-finalize --stage decide`) | state | restore the file (an interrupted `aid-review-round.sh close` is run again), then `--stage decide` again | |
 | `zadani_file_missing` | the plan's `zadani:` names a brief file that is not there (CP1 or CP7 packet, P110) | work | restore the brief, or fix the plan's `zadani:` path — `aid-plan-lint.sh <plan> --only zadani` | |
 | `cp7_brief_sha_mismatch` | the brief the whole-plan round would read is not the one the plan is bound to (`zadani_sha256`) | work | a changed brief is a new `verze`: bump it and the plan's `zadani_verze`/`zadani_sha256` with the PM, or restore the brief | PM, when the points changed |
 | `cp7_measurement_stale` | `plan-diff.json` of the close was not measured in isolation (no `isolation` key — produced before 2.116.0) | state | `aid-plan-fsm.sh plan-finalize <plan> --stage produce` again | |
@@ -948,7 +949,10 @@ and nothing else. This skill does not restate the commands.
 
 ### EPIC review (CP3) — one section, in the run command
 
-After the last step, before `transition EXECUTE GATES`: the same step check
+OFF by default since 2.116.0 (`cp3_integration_review: false`, no `epic_review`
+block; P110): the FSM records `review_checkpoint_disabled` and moves on. A
+project that keeps it sets the toggle true with an `epic_review` block; then,
+after the last step, before `transition EXECUTE GATES`: the same step check
 and round with `--checkpoint cp3` (`commands/aid-run.md` "Step review (CP2)
 and EPIC review (CP3)"). `close` writes `<run>/semantic-review-final.json` for
 the plan-final consumers and routes what stays open (§13). The FSM reads
@@ -1201,7 +1205,7 @@ set via `set-field`. The decision is automatically cleared after the transition 
 **Mechanical enforcement:**
 1. `aid-fsm.sh done-advance review release` — requires `pm_decision=merge`, the archived task
    file, routed findings settled and tiered-severity compliance; in `legacy_epic_release_mode`
-   also a fresh EPIC review (`cp3/rounds.json` at HEAD) and, under `enforcement: blocking`, a
+   also a fresh EPIC review (`cp3/rounds.json` at HEAD) when CP3 is on, and, under `enforcement: blocking`, a
    `release_ready: true` decision.
 2. `aid-release.sh` — refuses a release while `done_phase != release`.
 3. Git pre-commit hook — blocks commits on `task/*/epic/*` branches in DONE/review.
@@ -1217,9 +1221,12 @@ both described once in `commands/aid-run.md`. A `plan_branch` plan is then close
 **`commands/aid-run.md` → "Closing a plan (plan-final)"** and follow it; nothing here repeats it.
 An intermediate EPIC of such a plan skips the per-EPIC release stack (the names are
 `AID_PLAN_BRANCH_SKIPPED_STAGES` in `scripts/aid-fsm.sh`, echoed into the
-`done_advance_plan_branch_mode` timeline event); its own CP3 round is NOT skipped, and under
-`streamlined_mode: true` `fsm_check_streamlined_integration_review` hard-fails `done-advance`
-when `cp3/rounds.json` is missing or did not close with `pass`.
+`done_advance_plan_branch_mode` timeline event); its own CP3 round runs when the project keeps
+CP3 (off by default since 2.116.0). Under `streamlined_mode: true` — no step review at all —
+`fsm_check_streamlined_integration_review` hard-fails `done-advance` when CP3 is on and
+`cp3/rounds.json` is missing or did not close with `pass`, and, with CP3 off, unless the plan
+runs in `plan_branch` mode (the whole-plan round reads the code) or a passing cp3 round exists:
+a legacy-mode streamlined run with CP3 off would ship unreviewed.
 
 Anything a review DEFERS rather than fixes is recorded with `aid_obligation_add`
 (§13 *Carried obligations*) before you move on — the close refuses an open `release_blocker`.

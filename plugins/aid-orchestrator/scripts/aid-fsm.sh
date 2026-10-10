@@ -1514,7 +1514,9 @@ _fsm_routed_findings_check() {
   # "nothing to reconcile" once a cp3 round closed (verdict pass or fail). A
   # skipped or no_change cp3 ran no reviewer and passes with an audit line;
   # a run with no cp3 index at all keeps the legacy zero-cost path.
-  if [[ ! -f "$review_json" && -f "${evidence_dir}/cp3/rounds.json" ]]; then
+  # (a leftover cp3/ of a run started before CP3 was switched off is not read: P110)
+  if [[ ! -f "$review_json" && -f "${evidence_dir}/cp3/rounds.json" ]] \
+     && ! aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review >/dev/null; then
     local cp3_verdict; cp3_verdict="$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)"
     case "$cp3_verdict" in
       pass|fail)
@@ -1700,10 +1702,20 @@ fsm_check_streamlined_integration_review() {
     gates_source="legacy_flat"
     echo "NOTE: streamlined integration review read gates_report.json from the legacy flat path (${gates_flat})." >&2
   fi
-  local missing=() cp3_off
+  local missing=() cp3_off pmode=""
   # P110: CP3 switched off (the default since 2.116.0) needs no cp3 round here
-  # either; the same audit the review-round check writes records it.
-  if cp3_off="$(aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review)"; then
+  # — but a streamlined run skips every step review, so without CP3 it is
+  # reviewed only when the whole-plan round (CP7, plan_branch) follows; a
+  # legacy-mode streamlined run with CP3 off would ship unreviewed and is refused.
+  IFS=$'\t' read -r pmode _ _ < <(_fsm_declared_plan_mode "${epic_id:-}" 2>/dev/null) || true
+  local cp3_pass=false
+  [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] && cp3_pass=true
+  if cp3_off="$(aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review)" && [[ "$pmode" != plan_branch && "$cp3_pass" != true ]]; then
+    echo "ERROR: streamlined run with the EPIC review (CP3) off and no whole-plan review after it (plan mode: ${pmode:-legacy}) — nothing would review this code." >&2
+    echo "Fix: set cp3_integration_review: true with an epic_review block in .aid-o/config/policies/review-checkpoints.yaml and run the EPIC review, or run the plan in plan_branch mode (CP7 reads it)." >&2
+    fsm_emit_audit_log "streamlined_integration_review_fail" --evidence-dir "$evidence_dir" --reason "streamlined, cp3 off, mode ${pmode:-legacy}" 2>/dev/null || true
+    return 1
+  elif [[ -n "$cp3_off" ]]; then
     fsm_emit_audit_log review_checkpoint_disabled --evidence-dir "$evidence_dir" --reason "cp3_integration_review off (${cp3_off//$'\t'/ in }): streamlined done-advance proceeds from the steps' reviews and the gates" 2>/dev/null || true
   else
     [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] || missing+=("cp3/rounds.json with verdict pass (the closed EPIC review round)")

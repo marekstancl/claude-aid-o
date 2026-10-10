@@ -701,9 +701,7 @@ cmd_dispatch() {
 
   [[ -s "$last" ]] && aid_plan_review_unfence "$last" "$answer"
   if [[ -s "$answer" ]]; then
-    jq -s 'map(select(.type == "turn.completed")) | last | .usage // {}
-           | {answered: true, tokens_in: (.input_tokens // "unknown"), cache_read: (.cached_input_tokens // "unknown"),
-              tokens_out: (.output_tokens // "unknown")}' "$events" > "$usage" 2>/dev/null \
+    aid_review_tokens_from_events "$events" 2>/dev/null | jq -c '{answered: true} + .' > "$usage" 2>/dev/null \
       || jq -n '{answered: true, tokens_in: "unknown", tokens_out: "unknown"}' > "$usage"
     echo "dispatched ${ROLE} (codex ${RC_MODEL[$i]}): answer in ${answer}"
   else

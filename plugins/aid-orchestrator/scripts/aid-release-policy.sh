@@ -988,6 +988,20 @@ main() {
     if [[ -n "$gates_report_path" ]] && _is_json "$gates_report_path"; then
       gates_result="$(jq -r '(.overall // .gates_report.result // .status // "unknown")' "$gates_report_path" 2>/dev/null || echo unknown)"
     fi
+    # P110: what the run and the plan cost, from the rounds where they live
+    # (the EPIC runs' cp2/cp3, the close attempts' cp7; CP1 and the critic).
+    local run_cost plan_cost _cost_rc=0 _e _cost_err; _cost_err="$(mktemp)"
+    local -a _epic_dirs=()
+    while IFS= read -r _e; do [[ -n "$_e" ]] && _epic_dirs+=("${PROJECT_ROOT}/${_e}"); done < <(jq -r '.[].evidence_dir // empty' <<< "$PLAN_EPICS_JSON")
+    run_cost="$(aid_plan_run_cost "$(dirname "$EVIDENCE_DIR")" "$PLAN_ID" ${_epic_dirs[@]+"${_epic_dirs[@]}"} 2>"$_cost_err")" || _cost_rc=$?
+    (( _cost_rc == 0 )) && { plan_cost="$(aid_plan_plan_cost "$(dirname "$EVIDENCE_DIR")" "$PLAN_ID" 2>>"$_cost_err")" || _cost_rc=$?; }
+    if (( _cost_rc != 0 )); then
+      echo "REFUSED (measurement_unreadable): $(cat "$_cost_err" 2>/dev/null) — the cost of the run cannot be summed over a file nobody can read
+next: restore the round's measurement.json (aid-review-round.sh close writes it; an interrupted close is run again), then plan-finalize --stage decide again (pipeline.md §When AID refuses: measurement_unreadable)" >&2
+      rm -f "$_cost_err"
+      exit 3
+    fi
+    rm -f "$_cost_err"
     plan_summary_json="$(jq -n \
       --slurpfile m "$manifest_s" \
       --arg plan "$PLAN_ID" --arg run "$RUN_ID" \
@@ -1012,8 +1026,10 @@ main() {
           specialist_review: ($b.plan_final_review // null),
           remaining_backlog: ($b.plan_final_backlog // []),
           close: $close,
+          run_cost: $run_cost,
+          plan_cost: $plan_cost,
           time: $time
-        }')" || plan_summary_json="null"
+        }' --argjson run_cost "$run_cost" --argjson plan_cost "$plan_cost")" || plan_summary_json="null"
   fi
 
   # --- envelope-derived fields ---
