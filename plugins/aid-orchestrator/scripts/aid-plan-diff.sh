@@ -127,7 +127,8 @@ fi
 STATE_ROOT="$(aid_state_root 2>/dev/null || pwd)"
 if [[ -n "$RUN_CWD" ]]; then
   # the worktree's top, not a directory inside it (points run from the top)
-  if [[ "$(git -C "$RUN_CWD" rev-parse --show-toplevel 2>/dev/null)" != "$(cd "$RUN_CWD" 2>/dev/null && pwd -P)" ]]; then
+  _pd_top="$(git -C "$RUN_CWD" rev-parse --show-toplevel 2>/dev/null)" || _pd_top=""
+  if [[ -z "$_pd_top" || "$_pd_top" != "$(cd "$RUN_CWD" 2>/dev/null && pwd -P)" ]]; then
     echo "REFUSED (cwd_not_worktree): --cwd ${RUN_CWD} is not a git worktree
 next: pass the candidate worktree (plan-finalize --stage freeze creates it), or run from inside it with --cwd .
 (pipeline.md §When AID refuses: cwd_not_worktree)" >&2

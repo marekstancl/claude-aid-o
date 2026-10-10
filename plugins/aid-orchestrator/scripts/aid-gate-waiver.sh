@@ -121,6 +121,9 @@ cmd_issue() {
   [[ -f "$execution_yaml" ]] || _die "execution.yaml not found at ${execution_yaml} (pass --execution-yaml)"
   local cmd
   cmd=$(GATE="$gate_id" yq '.gates[strenv(GATE)].command' "$execution_yaml" 2>/dev/null || echo "null")
+  # project_tests (P110) is the runner's own check, not a configured gate: its
+  # "command" is the project_tests: globs the check read.
+  [[ "$gate_id" == project_tests ]] && cmd="project_tests:$(yq -o=json -I=0 '.project_tests // null' "$execution_yaml")"
   [[ -n "$cmd" && "$cmd" != "null" ]] || _die "unknown gate '${gate_id}' — no such key under .gates in ${execution_yaml} (refusing to issue)"
   local command_sha256
   command_sha256=$(printf '%s' "$cmd" | sha256sum | cut -d' ' -f1)

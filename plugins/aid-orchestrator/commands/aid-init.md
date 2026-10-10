@@ -273,6 +273,17 @@ choosing; on yes, `/aid-init` re-runs the same command with `--confirm-upgrade <
 bound to the file's current bytes and to the proposed result, so an edit between preview and confirm
 makes the hash stale: the command refuses (exit 2), writes nothing, and prints the current diff again.
 
+**1a. The project_tests offer (P110).** When the file has no `project_tests:` key
+(`execution_yaml_lacks_project_tests` in `scripts/lib/aid-init-execution-yaml.sh`), `/aid-init`
+shows the PM the block `render_project_tests_block <detected stacks>` prints — the test-file globs
+of each stack — and appends it only on the PM's yes. Without the key the gate runner refuses
+nothing (`declared: false`) and only advises (`project_tests_undeclared`). With it, a change under
+those globs needs a gate flagged `runs_project_tests: true` whose command writes
+`--evidence-file {evidence_dir}/gates/<gate>.evidence.json`; a fresh `/aid-init` writes both, and
+the stack's test gate is wrapped in `aid-run-gates.sh record-tests` (it runs the whole suite and
+records the test files it covered). `aid-run-gates.sh --lint-profiles .aid-o/config/execution.yaml`
+names every profile without such a gate.
+
 **2. The missing-table upgrade (P061 E1 Step 6).** A file with neither `gate_profile_defaults` nor
 `gate_profiles` is offered a `gate_profiles` block appended at the end of the file:
 

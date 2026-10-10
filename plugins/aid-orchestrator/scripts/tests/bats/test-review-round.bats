@@ -1093,7 +1093,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   run _F prepare --round 2; [ "$status" -eq 1 ]; [[ "$output" == *"--stage freeze"* ]]
   # the next attempt, as freeze and produce leave it after a code fix
   local first="$E"; E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E/cp7"
-  cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$E/cp7/"; : > "$E/timeline.jsonl"
+  cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$first/cp7/brief.json" "$E/cp7/"; : > "$E/timeline.jsonl"
   jq -n '{previous_run_dir: ".aid-o/work/evidence/P901/R-P901-final-1", class: "delivery", docs_only: false, invalidated_feeds: ["diff"]}' > "$E/fix-class.json"
   _fsc
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
@@ -1114,24 +1114,24 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   grep -q '"path":"cp7/round-1/merged.json"' "$E/stage-writes.jsonl"          # the close recorded what it wrote
   local first="$E"; echo "- **Fix** — wording" >> "$R/CHANGELOG.md"; git -C "$R" commit -qam "docs: wording"
   E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E"; cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; : > "$E/timeline.jsonl"
-  mkdir -p "$E/cp7"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$E/cp7/"
+  mkdir -p "$E/cp7"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$first/cp7/brief.json" "$E/cp7/"
   jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: true, invalidated_feeds: ["claims"]}' > "$E/fix-class.json"
   _fsc
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]
   [ -f "$(FD 1)/prompt-final_criteria.md" ] && [ -f "$(FD 1)/prompt-final_generalist.md" ]
 }
-@test "cp7-zadani: a fix that touched only the plan's criteria carries a clean final_generalist, never final_criteria" {
+@test "cp7-zadani: a fix that touched only the plan's criteria asks both roles again (final_generalist reads the criteria too), never carries final_criteria" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   local r; for r in final_criteria final_generalist; do _fanswer 1 "$r"; done
   _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null
   local first="$E"; E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E/cp7"
-  cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$E/cp7/"; : > "$E/timeline.jsonl"
+  cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$first/cp7/brief.json" "$E/cp7/"; : > "$E/timeline.jsonl"
   jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: false, invalidated_feeds: ["criteria"]}' > "$E/fix-class.json"
   _fsc
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
-  [ "$(jq -r '.carried_from | keys | join(",")' "$(FD 1)/round.json")" = final_generalist ]
-  [ -f "$(FD 1)/prompt-final_criteria.md" ]
+  [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]
+  [ -f "$(FD 1)/prompt-final_criteria.md" ] && [ -f "$(FD 1)/prompt-final_generalist.md" ]
 }
 @test "cp7-zadani: a project that lists three roles still prepares three (final_claims is optional, 3B)" {
   _frepo
@@ -1163,6 +1163,14 @@ _fzadani() {
     grep -q "$item" "$(FD 1)/prompt-final_generalist.md" || { echo "missing: $item"; return 1; }
   done
   grep -q 'claims.patch' "$(FD 1)/prompt-final_generalist.md"
+  # the brief itself and the measured verdicts are in the prompt, not only named
+  grep -q 'AC1: the app imports new' "$(FD 1)/prompt-final_criteria.md"
+  grep -q '^## Measured points at the close' "$(FD 1)/prompt-final_criteria.md"
+  grep -q '"network":"unshare"' "$(FD 1)/prompt-final_criteria.md"
+}
+@test "cp7-zadani: a run without cp7/brief.json (produced before 2.116.0) is refused cp7_measurement_stale" {
+  _frepo; rm "$E/cp7/brief.json"; _fsc
+  run _F prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"cp7_measurement_stale"* ]]
 }
 @test "cp7-zadani: a brief whose file is missing is refused zadani_file_missing" {
   _frepo; _fzadani; rm "$R/.aid-o/plans/P901-zadani.md"; _fsc

@@ -292,7 +292,9 @@ _carried_roles() {
   for role in "$@"; do
     case "$role" in
       final_criteria)   continue ;;   # never carried: a new candidate re-measures every point (P110)
-      final_claims|final_generalist) feeds='["claims","diff"]' ;;   # the generalist holds the claims question since 2.116.0
+      final_claims) feeds='["claims","diff"]' ;;
+      # holds the claims question since 2.116.0, and its question 4 reads the criteria
+      final_generalist) feeds='["criteria","claims","diff"]' ;;
       *)                feeds='["diff"]' ;;
     esac
     jq -e --argjson f "$feeds" '(.invalidated_feeds - $f) == .invalidated_feeds' "$fc" >/dev/null || continue
@@ -525,7 +527,8 @@ cmd_prepare() {
     if [[ "$CHECKPOINT" == cp7 ]]; then
       # P110: the round argues from the isolated close measurement and the brief
       # the plan is bound to — never from a pre-2.116.0 measurement or another brief.
-      jq -e '.isolation != null' "${EVID}/plan-diff.json" >/dev/null 2>&1 \
+      [[ ! -f "${EVID}/plan-diff.json" ]] \
+        || { jq -e '.isolation != null' "${EVID}/plan-diff.json" >/dev/null 2>&1 && [[ -f "${EVID}/cp7/brief.json" ]]; } \
         || _die "REFUSED (cp7_measurement_stale): ${EVID}/plan-diff.json was not measured in isolation (no isolation key)
   next: bash ${SCRIPT_DIR}/aid-plan-fsm.sh plan-finalize <plan> --stage produce (it runs aid-plan-diff.sh --isolated --cwd <candidate>) (pipeline.md §When AID refuses: cp7_measurement_stale)"
       aid_final_review_packet_build "$ROOT" "$dir" "$STEPCHECK" "$EVID" "$prevdir" || exit 1

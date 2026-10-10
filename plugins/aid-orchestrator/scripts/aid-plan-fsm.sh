@@ -9677,7 +9677,7 @@ _pfsm_finalize_produce() {
       return 1; }
   ( source "${SCRIPT_DIR}/lib/aid-step-review-packet.sh" && aid_final_review_inputs_build "$root" "$run_dir_abs" "$plan_file" "$plan_id" ) || return 1
   aid_stage_writes_record "$run_dir_abs" produce review-profile.json plan-diff.json acceptance-evidence.json \
-    cp7/step-check.json cp7/criteria.md cp7/epic-findings.json
+    cp7/step-check.json cp7/criteria.md cp7/epic-findings.json cp7/brief.json
 
   echo "PRODUCED: ${plan_id} — review profile, plan-diff, acceptance evidence and the whole-plan round's inputs over ${base_commit:0:8}..${candidate:0:8} in ${run_dir_rel}/." >&2
   echo "next: bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare --checkpoint cp7 --evidence-dir ${run_dir_abs} --project-root ${_in_troot} --round 1 — dispatch the prompts it prints, then collect and close (commands/aid-plan.md, \"Plan close\"); then: plan-finalize ${plan_id} --stage decide" >&2

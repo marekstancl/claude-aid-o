@@ -73,6 +73,25 @@
 #     ASISTENT_TEST_DATABASE_URL: "${ASISTENT_TEST_DATABASE_URL}"
 # The rule is read from the state root's copy of this file, never the candidate's.
 
+# `project_tests:` (optional, top level; P110) — globs of the project's test
+# files (`**/` = any number of directories, none included). When the run's
+# changed paths (git diff <base>..HEAD) touch one, the gate runner requires a
+# gate of the profile flagged `runs_project_tests: true` that PROVES it ran
+# them: its command names `--evidence-file {evidence_dir}/gates/<gate>.evidence.json`
+# ({ran_tests|selected_tests, skipped_by_tier} — run-all-tests.sh and
+# aid-select-tests.sh write it; `aid-run-gates.sh record-tests --evidence-file
+# <path> -- <command>` wraps a whole-suite runner such as pytest). Otherwise the
+# row `project_tests` fails: profile_skips_project_tests, project_tests_evidence_missing
+# or project_tests_not_selected (a suite skipped by tier is `nightly_covers`).
+# Without the key nothing is refused (an advisory project_tests_undeclared).
+# `aid-run-gates.sh --lint-profiles <this file>` checks it statically. This
+# template declares none: /aid-init writes them from the detected stacks.
+#   project_tests: ["**/tests/**/*.py"]
+#   gates:
+#     unit:
+#       command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --evidence-file {evidence_dir}/gates/unit.evidence.json -- pytest -q"
+#       runs_project_tests: true
+
 gates:
   tests_pass:
     description: "Merge-path tests pass — the T0 and T1 tiers, not the whole portfolio"

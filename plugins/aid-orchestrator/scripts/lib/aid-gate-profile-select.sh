@@ -57,6 +57,16 @@ gate_profile_has_required_gate() {
   jq -e --arg p "${2:-}" '. as $j | .gate_profiles[$p].include // [] | any(.[]; . as $g | $j.gates[$g].required == true)' <<<"$j" >/dev/null
 }
 
+# gate_profile_flagged_gates <yaml> [<profile>] — the gates flagged
+# `runs_project_tests: true`, one per line: of the profile's include[] when a
+# profile is named, else of every gate (P110).
+gate_profile_flagged_gates() {
+  local j; j="$(_gps_json "$1")" || return $?
+  jq -r --arg p "${2:-}" '. as $j
+    | (if $p == "" then ($j.gates // {} | keys_unsorted) else ($j.gate_profiles[$p].include // []) end)[]
+    | select($j.gates[.].runs_project_tests == true)' <<<"$j"
+}
+
 gate_profile_wider() {
   local ia ib
   ia="$(gate_profile_index "$1" "$2")" || ia=-1

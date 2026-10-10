@@ -256,3 +256,7 @@ _unlisten() { kill "$LPID" 2>/dev/null || true; }
   _irun; [ "$status" -eq 0 ]
   grep -qx 'true' "$EV/cmd-AC1.sh" && grep -qx 'test 1 = 1' "$EV/cmd-AC2.sh"
 }
+@test "isolation: --cwd on a directory that does not exist exits 3 cwd_not_worktree" {
+  _iplan '"true"'
+  _irun --cwd /nonexistent-p110; [ "$status" -eq 3 ]; [[ "$output" == *"cwd_not_worktree"* ]]
+}

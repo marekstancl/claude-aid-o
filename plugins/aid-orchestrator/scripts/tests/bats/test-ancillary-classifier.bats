@@ -281,3 +281,25 @@ EOF
   [[ "$output" == *'"other/b.txt"'* ]]
   [[ "$(jq -c '.violations' <<< "$output")" != *fixtures* ]]
 }
+
+# ── P110: `**/` in a glob (project_tests) ───────────────────────────────────
+_gm() { bash -c 'source "$LIB"; _aid_ancillary_glob_match "$1" "$2" ${3:+"$3"}' _ "$@"; }
+@test "glob: **/tests/**/*.py matches tests/test_a.py and asistent/tests/test_a.py, not src/x.py" {
+  _gm tests/test_a.py '**/tests/**/*.py'; _gm asistent/tests/test_a.py '**/tests/**/*.py'
+  ! _gm src/x.py '**/tests/**/*.py'
+}
+@test "glob: dir/** semantics unchanged (the directory itself and everything under it)" {
+  _gm src 'src/**'; _gm src/a/b.py 'src/**'; ! _gm srcx/a 'src/**'
+  ! _gm src 'src/**' strict; _gm src/a 'src/**' strict
+}
+@test "glob: a leading **/ now matches a root-level path" {
+  _gm dist/x '**/dist/**'; _gm a/dist/x '**/dist/**'; _gm x.bats '**/*.bats'
+}
+@test "glob: the step check's scope globs, scope-check strict and the FSM's protected set behave as before" {
+  # step check (allowed_paths as plans write them)
+  _gm src/app.py 'src/*.py'; _gm src/a/b.py 'src/'; ! _gm lib/x.py 'src/'
+  # scope-check strict
+  _gm .aid-o/work/plan-state/x '.aid-o/work/plan-state/**' strict; ! _gm .aid-o/work/plan-state '.aid-o/work/plan-state/**' strict
+  # the protected set (bare entries cover what is under them)
+  _gm .aid-o/config/queue.yaml '.aid-o/config/queue.yaml'; ! _gm .aid-o/config/queue.yaml/nested.txt '.aid-o/config/queue.yaml' strict
+}

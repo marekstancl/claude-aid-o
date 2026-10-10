@@ -1,7 +1,9 @@
 gates:
+# project_tests: ["**/tests/**/*.py", "**/test_*.py"]
 py_test:
   # DEPENDENCY: pytest must be installed (pip install pytest)
-  command: "pytest -q"
+  command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --evidence-file {evidence_dir}/gates/py_test.evidence.json -- pytest -q"
+  runs_project_tests: true   # P110: it runs the project's tests and proves it (evidence file)
   required: true
 py_lint:
   # DEPENDENCY: ruff must be installed (pip install ruff)

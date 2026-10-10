@@ -46,7 +46,7 @@ _AID_SR_STEP_NAME_JQ='def step_name($i): ([(.id // "") | capture("^step_(?<n>[0-
 # round's packet and the roles it asks read this (a form_invalid finding is open
 # until answered, like a disputed one).
 AID_SR_OPEN_JQ='(.status | IN("open", "disputed", "routed", "carried", "form_invalid")) and (.severity == "blocker" or .severity == "major")'
-AID_SR_EVIDENCE_FORMS='`path:line` or `path:first-last` at the reviewed commit, `<sha>:path:line` for a line of a file the diff deleted or moved (the pre-image at that commit), or `absent:path` for a file the step should have produced and did not; one citation that resolves is enough, but cite the exact line (a wrong number wastes the citation); citations only, separated by `;` — a word or a bracketed note after a line number drops the finding, so say what the line shows in `claim`'
+AID_SR_EVIDENCE_FORMS='`path:line` or `path:first-last` at the reviewed commit (in a whole-plan round also `zadani.md:line`, the brief in the packet), `<sha>:path:line` for a line of a file the diff deleted or moved (the pre-image at that commit), or `absent:path` for a file the step should have produced and did not; one citation that resolves is enough, but cite the exact line (a wrong number wastes the citation); citations only, separated by `;` — a word or a bracketed note after a line number drops the finding, so say what the line shows in `claim`'
 
 aid_step_review_packet_build() {
   local root="$1" cp="$2" dir="$3/packet" sc="$4" plan_json="$5" step="${6:-}" prev="${7:-}"
@@ -257,7 +257,17 @@ aid_step_review_prompt_render() {
              | "- \(.key): \(.value.status) (\(.value.reason))" + (if .value.waived then " waived" else "" end)
                + (if .value.reused_from then " (reused from \(.value.reused_from))" else "" end)' "${dir}/packet/gates_report.json"
       echo
-      echo "## Executed tests per criterion: ${dir}/packet/plan-diff.json"
+      # P110: the PM's brief and the isolated close measurement, in the prompt
+      # itself — final_criteria answers point by point from these two.
+      if [[ -f "${dir}/packet/zadani.md" ]]; then
+        echo "## The PM's brief (packet/zadani.md; cite it as zadani.md:<line>)"
+        echo '~~~~~markdown'; cat -n "${dir}/packet/zadani.md"; echo '~~~~~'
+      elif [[ -f "${dir}/packet/zadani-note.txt" ]]; then
+        echo "## The PM's brief: $(cat "${dir}/packet/zadani-note.txt")"
+      fi
+      echo
+      echo "## Measured points at the close (aid-plan-diff.sh --isolated; ${dir}/packet/plan-diff.json)"
+      jq -r '"isolation: \(.isolation | tojson)", (.results[]? | "- \(.ac_label): \(.verdict) — \(.evidence)")' "${dir}/packet/plan-diff.json"
       echo
       _aid_sr_patch "${dir}/packet/claims.patch" "claims.patch (CHANGELOG, README and docs hunks of the range)"
       echo

@@ -1,7 +1,9 @@
 gates:
+# project_tests: ["**/tests/**/*.rs"]
 rust_test:
   # DEPENDENCY: cargo (rustup toolchain)
-  command: "cargo test"
+  command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --evidence-file {evidence_dir}/gates/rust_test.evidence.json -- cargo test"
+  runs_project_tests: true   # P110: it runs the project's tests and proves it (evidence file)
   required: true
 rust_clippy:
   # DEPENDENCY: clippy (rustup component add clippy)
