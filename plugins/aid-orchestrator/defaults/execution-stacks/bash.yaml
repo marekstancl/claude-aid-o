@@ -1,5 +1,11 @@
 gates:
 # project_tests: ["**/*.bats", "**/test-*.sh"]
+bash_test:
+  # DEPENDENCY: bats for *.bats suites (apt install bats); test-*.sh run with bash
+  # P110: runs the project's tests and proves it (evidence file); exits 0 when there are none
+  command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --glob '**/*.bats' --glob '**/test-*.sh' --evidence-file {evidence_dir}/gates/bash_test.evidence.json -- bash -c 'set -e; b=$(git ls-files \":(glob)**/*.bats\"); [ -z \"$b\" ] || bats $b; for t in $(git ls-files \":(glob)**/test-*.sh\"); do bash \"$t\"; done'"
+  required: true
+  runs_project_tests: true
 bash_syntax:
   # DEPENDENCY: bash (always present on Linux/macOS)
   command: "find . -name '*.sh' -not -path './node_modules/*' -not -path './.git/*' -exec bash -n {} +"
@@ -8,9 +14,3 @@ bash_lint:
   # DEPENDENCY: shellcheck must be installed (apt install shellcheck)
   command: "find . -name '*.sh' -not -path './node_modules/*' -not -path './.git/*' -exec shellcheck {} +"
   required: true
-bash_test:
-  # DEPENDENCY: bats for *.bats suites (apt install bats); test-*.sh run with bash
-  # P110: runs the project's tests and proves it (evidence file); exits 0 when there are none
-  command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --evidence-file {evidence_dir}/gates/bash_test.evidence.json -- bash -c 'set -e; b=$(git ls-files \"*.bats\"); [ -z \"$b\" ] || bats $b; for t in $(git ls-files \"*test-*.sh\"); do bash \"$t\"; done'"
-  required: true
-  runs_project_tests: true

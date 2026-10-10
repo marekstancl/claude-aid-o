@@ -5069,7 +5069,13 @@ _pfsm_finalize_gates_body() {
       # AID_GATES_REUSE_OF: the runner skips its "profile has no required
       # gate" refusal for a reuse copy whose required rows were copied above.
       local -a reuse_env=()
-      [[ "$run_yaml" != "$execution_yaml" ]] && reuse_env=("AID_GATES_REUSE_OF=${reuse_from}")
+      # P110: which gates were carried and where their evidence lives, so a
+      # carried gate flagged runs_project_tests is proven by THAT run's evidence
+      local reuse_dir; reuse_dir="$(dirname "$(jq -r '.report // ""' <<<"$reuse")")"
+      [[ "$(basename "$reuse_dir")" == gates ]] && reuse_dir="$(dirname "$reuse_dir")"
+      [[ "$reuse_dir" == /* ]] || reuse_dir="${root}/${reuse_dir}"
+      [[ "$run_yaml" != "$execution_yaml" ]] && reuse_env=("AID_GATES_REUSE_OF=${reuse_from}" \
+        "AID_GATES_REUSE_CARRIED=$(jq -r '.rows | keys | join(" ")' <<<"$reuse")" "AID_GATES_REUSE_DIR=${reuse_dir}")
       ( cd "$troot" && env "${reuse_env[@]}" "${SCRIPT_DIR}/aid-run-gates.sh" run-all "$run_yaml" \
           "$plan_id" "$run_id" "$timeline_file" \
           --report-file "$report_file" \

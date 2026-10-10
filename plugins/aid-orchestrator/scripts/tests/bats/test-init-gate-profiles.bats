@@ -369,7 +369,7 @@ YAML
   [ "$(yq -r '.gates.py_test.runs_project_tests' .aid-o/config/execution.yaml)" = true ]
   yq -r '.gates.py_test.command' .aid-o/config/execution.yaml | grep -q -- '--evidence-file {evidence_dir}/gates/py_test.evidence.json'
   run bash "$AID_PLUGIN_PATH/scripts/aid-run-gates.sh" --lint-profiles .aid-o/config/execution.yaml; echo "$output"
-  [[ "$output" == *"(py_test)"* ]]
+  [ "$status" -eq 0 ]; [[ "$output" == *"(py_test)"* ]]
 }
 @test "project-tests: compose writes project_tests and flags the bash stack's test gate with an evidence file" {
   source "$HELPER"; mkdir -p .aid-o/config
@@ -377,6 +377,9 @@ YAML
   [ "$(yq -o=json -I=0 '.project_tests' .aid-o/config/execution.yaml)" = '["**/*.bats","**/test-*.sh"]' ]
   [ "$(yq -r '.gates.bash_test.runs_project_tests' .aid-o/config/execution.yaml)" = true ]
   yq -r '.gates.bash_test.command' .aid-o/config/execution.yaml | grep -q -- '--evidence-file {evidence_dir}/gates/bash_test.evidence.json'
+  # every composed profile, targeted included, holds the flagged gate
+  run bash "$AID_PLUGIN_PATH/scripts/aid-run-gates.sh" --lint-profiles .aid-o/config/execution.yaml; echo "$output"
+  [ "$status" -eq 0 ]
 }
 @test "project-tests: the upgrade offers the key to a file without it (never written silently)" {
   source "$HELPER"; mkdir -p .aid-o/config

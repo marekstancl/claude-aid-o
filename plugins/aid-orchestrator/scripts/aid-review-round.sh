@@ -527,9 +527,8 @@ cmd_prepare() {
     if [[ "$CHECKPOINT" == cp7 ]]; then
       # P110: the round argues from the isolated close measurement and the brief
       # the plan is bound to — never from a pre-2.116.0 measurement or another brief.
-      [[ ! -f "${EVID}/plan-diff.json" ]] \
-        || { jq -e '.isolation != null' "${EVID}/plan-diff.json" >/dev/null 2>&1 && [[ -f "${EVID}/cp7/brief.json" ]]; } \
-        || _die "REFUSED (cp7_measurement_stale): ${EVID}/plan-diff.json was not measured in isolation (no isolation key)
+      { jq -e '.isolation != null' "${EVID}/plan-diff.json" >/dev/null 2>&1 && [[ -f "${EVID}/cp7/brief.json" ]]; } \
+        || _die "REFUSED (cp7_measurement_stale): the close's inputs predate 2.116.0 or are missing — ${EVID}/plan-diff.json without an isolation key, or no cp7/brief.json
   next: bash ${SCRIPT_DIR}/aid-plan-fsm.sh plan-finalize <plan> --stage produce (it runs aid-plan-diff.sh --isolated --cwd <candidate>) (pipeline.md §When AID refuses: cp7_measurement_stale)"
       aid_final_review_packet_build "$ROOT" "$dir" "$STEPCHECK" "$EVID" "$prevdir" || exit 1
       if [[ -f "${dir}/packet/zadani.md" ]]; then

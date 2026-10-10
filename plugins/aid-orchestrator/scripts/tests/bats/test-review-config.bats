@@ -109,8 +109,10 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   [ "$RC_EXTRA_SKIP_THRESHOLD_FILES" = 3 ]; [ "$RC_EXTRA_SKIP_THRESHOLD_LINES" = 120 ]   # P110 threshold
   aid_review_config_validate
 }
-@test "step_review: a single-role block passes; epic_review loads three roles" {
-  _project '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"}]'
+@test "step_review: a single-role block passes; a project's epic_review (the commented block, CP3 on) loads three roles" {
+  _project '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"}]
+    | .review_checkpoints.cp3_integration_review = true
+    | .review_checkpoints.epic_review = {"rounds_default": 2, "reviewers": [{"role":"epic_generalist","provider":"claude","model":"opus","effort":"low"},{"role":"epic_behaviour","provider":"claude","model":"opus","effort":"low"},{"role":"epic_security","provider":"codex","model":"gpt-6-sol"}]}'
   run _load_step; [ "$status" -eq 0 ]
   aid_review_config_load "$ROOT" epic_review "$STEP_SKILL"
   [ "${#RC_ROLE[@]}" -eq 3 ]; [ "$RC_MIN_ANSWERS" = 3 ]; aid_review_config_validate
@@ -235,4 +237,11 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   _project '.review_checkpoints.final_review.reviewers += [{"role": "final_claims", "provider": "claude", "model": "opus", "effort": "low"}]'
   aid_review_config_load "$ROOT" final_review "$STEP_SKILL" && aid_review_config_validate
   [ "${RC_ROLE[*]}" = "final_criteria final_generalist final_claims" ]
+}
+
+@test "cp3-off: epic_review absent with the toggle false loads as disabled (the shipped default since 2.116.0)" {
+  [ "$(yq -r '.review_checkpoints.cp3_integration_review' "$DEFAULT")" = false ]
+  ! yq -e '.review_checkpoints.epic_review' "$DEFAULT" >/dev/null
+  aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" 2>/dev/null
+  [ "$RC_ENABLED" = 0 ] && [ "${#RC_ROLE[@]}" -eq 0 ]
 }

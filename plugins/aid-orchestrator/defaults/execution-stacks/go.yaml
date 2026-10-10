@@ -2,7 +2,7 @@ gates:
 # project_tests: ["**/*_test.go"]
 go_test:
   # DEPENDENCY: go toolchain (go test is built-in)
-  command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --evidence-file {evidence_dir}/gates/go_test.evidence.json -- go test ./..."
+  command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --glob '**/*_test.go' --evidence-file {evidence_dir}/gates/go_test.evidence.json -- go test ./..."
   runs_project_tests: true   # P110: it runs the project's tests and proves it (evidence file)
   required: true
 go_lint:

@@ -678,8 +678,15 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
    later measurement re-checks its card, and the close measures the point.
 6. Log to `timeline.jsonl`
 
-**EPIC review (CP3):** when all steps are done, before transitioning to GATES —
-the same section, `--checkpoint cp3`.
+**EPIC review (CP3):** OFF by default since 2.116.0 (P110): `cp3_integration_review:
+false` in the shipped policy, no `epic_review` block. `EXECUTE→GATES` and done-advance
+(the streamlined path too) then proceed from the last step's CP2 and the gates, with
+the audit `review_checkpoint_disabled`; security is reviewed on every reviewed step
+(`step_security`) and the close reads the whole plan (CP7). A project that keeps CP3
+sets `cp3_integration_review: true` AND copies the commented `epic_review` block
+into its own `.aid-o/config/policies/review-checkpoints.yaml` (the toggle on without
+the block is refused, naming it); then, when all steps are done, before
+transitioning to GATES — the same section, `--checkpoint cp3`.
 
 **Transition:**
 - All steps done + cp3 round `pass` → GATES
@@ -763,7 +770,7 @@ DONE uses two mechanically enforced sub-phases: `review` → `release`, managed 
 3. `work/active.md` refreshes automatically at the done-advance boundary (generated index of active streams — never hand-edit it; detail lives in `work/plan-state/`)
 4. Generate `final_report.md`
 5. Produce `review-profile.json` (`pipeline.md §7`, step 5)
-6. **EPIC review (CP3)** — "Step review (CP2) and EPIC review (CP3)" above. A finding is fixed by
+6. **EPIC review (CP3)** — only for a project that keeps it (off by default since 2.116.0) — "Step review (CP2) and EPIC review (CP3)" above. A finding is fixed by
    the role that wrote the code and confirmed by the next round.
 7. **PM Summary** (see `pipeline.md` §7 for the full template):
     ```

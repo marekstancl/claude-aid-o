@@ -2,7 +2,7 @@ gates:
 # project_tests: ["**/*.test.*"]
 ts_test:
   # DEPENDENCY: package.json scripts.test must exist
-  command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --evidence-file {evidence_dir}/gates/ts_test.evidence.json -- npm test"
+  command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --glob '**/*.test.*' --evidence-file {evidence_dir}/gates/ts_test.evidence.json -- npm test"
   runs_project_tests: true   # P110: it runs the project's tests and proves it (evidence file)
   required: true
 ts_lint:

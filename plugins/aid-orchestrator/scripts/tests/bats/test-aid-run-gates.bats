@@ -1966,12 +1966,27 @@ _ptrow() { jq -r ".gates.project_tests.$1 // empty" "$REPORT"; }
     printf 'gate_profiles:\n  full:\n    include: [smoke]\n'; } > "$EXEC_YAML"
   mkdir -p "$TEST_PROJECT/.aid-o/work/evidence/E-X/R-0/gates"
   echo '{"ran_tests": ["tests/test_a.py"]}' > "$TEST_PROJECT/.aid-o/work/evidence/E-X/R-0/gates/unit.evidence.json"
-  AID_GATES_REUSE_OF=R-0 _ptrun; echo "$output"
+  AID_GATES_REUSE_OF=R-0 AID_GATES_REUSE_CARRIED="unit" AID_GATES_REUSE_DIR="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-0" _ptrun; echo "$output"
   [ "$(_ptrow status)" = pass ]; [ "$(jq -r .project_tests.covered_by "$REPORT")" = unit ]
+  # a flagged gate that was NOT carried (another profile's) is not counted as carried
+  AID_GATES_REUSE_OF=R-0 AID_GATES_REUSE_CARRIED="" AID_GATES_REUSE_DIR="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-0" _ptrun
+  [ "$(_ptrow reason)" = profile_skips_project_tests ]
 }
 @test "project-tests: a flagged gate that failed on its own → the coverage row is skip gate_failed" {
   _ptrepo; UNIT_CMD="exit 1 # --evidence-file {evidence_dir}/gates/unit.evidence.json" _ptyaml '[smoke, unit]'
   _ptrun; [ "$(_ptrow reason)" = gate_failed ]; [ "$(_ptrow status)" = skip ]
+  [ "$(jq -r .overall "$REPORT")" = fail ]   # the flagged gate's own required row blocks
+}
+@test "project-tests: a flagged gate that is not required and fails → the coverage row fails (the changed tests failed)" {
+  _ptrepo; UNIT_CMD="exit 1 # --evidence-file {evidence_dir}/gates/unit.evidence.json" _ptyaml '[smoke, unit]'
+  yq -i '.gates.unit.required = false' "$EXEC_YAML"
+  _ptrun; [ "$(_ptrow reason)" = gate_failed ]; [ "$(_ptrow status)" = fail ]; [ "$(jq -r .overall "$REPORT")" = fail ]
+}
+@test "project-tests: record-tests runs the command and records only its own --glob matches, with the exit status" {
+  _ptrepo; echo x > tests/test_b.bats; git add -A; git commit -qm bats
+  run "$RUN_GATES" record-tests --glob 'tests/*.py' --evidence-file "$EV/r.json" -- bash -c 'exit 3'
+  [ "$status" -eq 3 ]
+  [ "$(jq -c .ran_tests "$EV/r.json")" = '["tests/test_a.py"]' ] && [ "$(jq -r .exit_status "$EV/r.json")" = 3 ]
 }
 @test "project-tests: without project_tests: declared false, nothing refused, an advisory project_tests_undeclared row" {
   _ptrepo; _ptyaml '[smoke]'; sed -i '/^project_tests:/d' "$EXEC_YAML"

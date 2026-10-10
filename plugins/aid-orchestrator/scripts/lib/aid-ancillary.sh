@@ -153,7 +153,9 @@ _aid_ancillary_glob_match() {
     local re="" i c n="${#pattern}"
     for (( i = 0; i < n; i++ )); do
       c="${pattern:i:1}"
-      if [[ "${pattern:i:3}" == '**/' ]]; then re+='(.*/)?'; i=$((i + 2))
+      if [[ "${pattern:i:3}" == '**/' ]]; then
+        # strict keeps the old meaning (at least one directory); permissive allows none
+        [[ "$strict" == strict ]] && re+='(.*/)' || re+='(.*/)?'; i=$((i + 2))
       elif [[ "${pattern:i}" == '/**' ]]; then re+='(/.*)?'; i=$((i + 2))
       elif [[ "$c" == '*' ]]; then re+='.*'
       elif [[ "$c" == '?' ]]; then re+='.'

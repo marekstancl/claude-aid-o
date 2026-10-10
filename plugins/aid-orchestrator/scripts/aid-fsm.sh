@@ -1700,8 +1700,14 @@ fsm_check_streamlined_integration_review() {
     gates_source="legacy_flat"
     echo "NOTE: streamlined integration review read gates_report.json from the legacy flat path (${gates_flat})." >&2
   fi
-  local missing=()
-  [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] || missing+=("cp3/rounds.json with verdict pass (the closed EPIC review round)")
+  local missing=() cp3_off
+  # P110: CP3 switched off (the default since 2.116.0) needs no cp3 round here
+  # either; the same audit the review-round check writes records it.
+  if cp3_off="$(aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review)"; then
+    fsm_emit_audit_log review_checkpoint_disabled --evidence-dir "$evidence_dir" --reason "cp3_integration_review off (${cp3_off//$'\t'/ in }): streamlined done-advance proceeds from the steps' reviews and the gates" 2>/dev/null || true
+  else
+    [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] || missing+=("cp3/rounds.json with verdict pass (the closed EPIC review round)")
+  fi
   [[ -n "$gates" ]]    || missing+=("gates_report.json (searched ${gates_canonical} and ${gates_flat})")
   if [[ ${#missing[@]} -gt 0 ]]; then
     local joined
@@ -2121,7 +2127,9 @@ evaluate_compliance_checks() {
     cp3_round_json='{"verdict":null,"rounds":0}'; cp3_d=false; cp3_v=null
   fi
   if [[ "$cp2_dispatched" == null ]]; then aggregate=null
-  elif [[ "$cp2_dispatched" == true && "$cp3_d" == true && "$cp3_v" == '"pass"' && "$cp2_verdict" == '"pass"' ]]; then aggregate=true
+  elif [[ "$cp2_dispatched" == true && "$cp2_verdict" == '"pass"' ]] \
+       && { [[ "$cp3_d" == true && "$cp3_v" == '"pass"' ]] \
+            || aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review >/dev/null; }; then aggregate=true   # P110: CP3 off needs no cp3 pass
   else aggregate=false; fi
 
   # Phase 2 (P037) — plan_ac_match dimension

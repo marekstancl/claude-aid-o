@@ -372,10 +372,17 @@ PLAN
   ! assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_transition"
 }
 
+# _cp3_on — the project keeps CP3 (P110: off by default): the toggle and an epic_review block
+_cp3_on() {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
+  printf 'review_checkpoints:\n  cp3_integration_review: true\n  epic_review:\n    rounds_default: 1\n    reviewers:\n      - {role: epic_generalist, provider: claude, model: opus}\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/config/policies/review-checkpoints.yaml"
+}
 @test "advance-to-gates: missing cp3 round index → cmd_transition fails after gates pass" {
   seed_test_state_files "EXECUTE" "5" "5"
   # NOTE: NO cp3/rounds.json (intentional — gates run, transition rejects)
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  _cp3_on   # P110: CP3 is off by default; this project keeps it
   setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
@@ -671,7 +678,7 @@ EOF
 }
 
 @test "streamlined: integration-review without a passing cp3 round blocks" {
-  _streamlined_seed_state true
+  _streamlined_seed_state true; _cp3_on   # P110: a project that keeps CP3
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _write_three_event_timeline
   # gates_report present; the cp3 round closed with verdict fail.
@@ -2029,4 +2036,31 @@ SC_WHY="the PM moved this point to the close of the plan"
   [ "$(grep -c '"event":"plan_diff_complete"' "$TEST_EVIDENCE_DIR/timeline.jsonl")" -eq 1 ]
   run "$FSM" increment-step "$SF"; echo "$output"; [ "$status" -eq 0 ]
   [ "$(grep -c '"event":"plan_diff_complete"' "$TEST_EVIDENCE_DIR/timeline.jsonl")" -eq 1 ]
+}
+
+# ── P110 Step 6: CP3 off by default ─────────────────────────────────────────
+@test "cp3-off: advance-to-gates with the default toggle and no cp3 directory moves to GATES and writes review_checkpoint_disabled" {
+  seed_test_state_files "EXECUTE" "5" "5"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  [ ! -d "$TEST_EVIDENCE_DIR/cp3" ]
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  grep -q 'review_checkpoint_disabled' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+@test "cp3-off: streamlined done-advance check with the toggle off and no cp3 round passes and writes the audit" {
+  _streamlined_seed_state true
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _write_three_event_timeline
+  echo '{}' > "$TEST_EVIDENCE_DIR/gates_report.json"
+  _run_streamlined_check fsm_check_streamlined_integration_review "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  grep -q 'review_checkpoint_disabled' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+@test "cp3-off: the toggle on without an epic_review block is refused naming the block" {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
+  printf 'review_checkpoints:\n  cp3_integration_review: true\n' > "$TEST_PROJECT_ROOT/.aid-o/config/policies/review-checkpoints.yaml"
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_config_load '$TEST_PROJECT_ROOT' epic_review '$AID_PLUGIN_PATH/skills/step-review-roles.md'"
+  [ "$status" -eq 1 ]; [[ "$output" == *"cannot read epic_review"* ]]
 }

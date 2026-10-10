@@ -101,6 +101,16 @@ aid_review_config_load() {
   RC_CONFIG_FILE="$(aid_policy_file "$root" review-checkpoints.yaml ".review_checkpoints.${block}" "${block} config")"
 
   local err
+  # P110: a block the policy no longer ships (epic_review) is fine while its
+  # checkpoint is switched off; switched on without the block is still exit 1.
+  if ! yq -e ".review_checkpoints.${block}" "$RC_CONFIG_FILE" >/dev/null 2>&1 \
+     && aid_review_switched_off "$root" "$(_aid_rc_toggle_key "$block")" >/dev/null; then
+    RC_ENABLED=0; RC_ROLE=(); RC_PROVIDER=(); RC_MODEL=(); RC_EFFORT=(); RC_WHEN=(); RC_FULL_WHEN=()
+    RC_ROUNDS_DEFAULT=1; RC_MIN_ANSWERS=0; RC_DEGRADED=0
+    echo "${block} config: no ${block} block and its checkpoint is switched off — disabled" >&2
+    export RC_BLOCK RC_CONFIG_FILE RC_ENABLED RC_ROUNDS_DEFAULT RC_MIN_ANSWERS RC_DEGRADED
+    return 0
+  fi
   if ! err="$(yq -e ".review_checkpoints.${block}" "$RC_CONFIG_FILE" 2>&1 >/dev/null)"; then
     printf '%s config: cannot read %s from %s\n%s\n' "$block" "$block" "$RC_CONFIG_FILE" "$err" >&2
     return 1
