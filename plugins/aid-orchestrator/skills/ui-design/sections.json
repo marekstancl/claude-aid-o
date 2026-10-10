@@ -505,6 +505,15 @@
     "skills/ui-design/steps/7-verify.md"
    ],
    "receipt": false
+  },
+  "build": {
+   "files": [
+    "skills/ui-design/steps/6-build.md",
+    "skills/ui-design/references/adopted/frontend-design-SKILL.md",
+    "skills/ui-design/references/adopted/impeccable-craft-floor.md",
+    "/opt/eco/docs/docs/ecosystem/specs/frontend-build-standard.md"
+   ],
+   "receipt": true
   }
  }
 }

@@ -320,6 +320,20 @@ def page_verdict(page, ans, subj, keys):
                     bad.append(f"nález ({name}) odkazuje na blok, který stránka nemá: {f.get('block')}")
                 if f.get("severity") == "blokujici":
                     bad.append(f"blokující nález ({name}): {f.get('text', '')[:120]}")
+    # the five personas by meaning, not spelling: a reviewer writing Slovak (konverzný copywriter, UX písar,
+    # cieľový zákazník, strážca značky) or without diacritics names the same persona
+    def canon(n):
+        import unicodedata
+        s = unicodedata.normalize("NFKD", str(n or "")).encode("ascii", "ignore").decode().lower().strip()
+        s = s.replace("konverzny", "konverzni").replace("pisar", "pisar").replace("cielovy", "cilovy").replace("strazca", "strazce")
+        for c in PERSONAS:
+            cc = unicodedata.normalize("NFKD", c).encode("ascii", "ignore").decode().lower()
+            if s == cc or s == cc.replace("pisar", "pisar"):
+                return c
+        return str(n)
+    for p in ans.get("personas") or []:
+        if isinstance(p, dict):
+            p["name"] = canon(p.get("name"))
     names = [p.get("name") for p in ans.get("personas") or []]
     for n in PERSONAS:
         if names.count(n) != 1:

@@ -22,6 +22,7 @@ applies:
   coverage: {scope: project}
   customer_page: {scope: project}
   copy_review: {browsers: [chromium], viewports: [1440], flows: false}
+  motion_fidelity: {scope: project}   # the gate observes the home page's motion itself (aid-ui-motion.mjs) and checks it against .aid-ui/motion.json
   safe_area: {browsers: [chromium], viewports: [390], flows: false}
   token_usage: {browsers: [chromium], viewports: [1440]}
   keyboard: {browsers: [chromium], viewports: [1440]}
@@ -38,7 +39,7 @@ checks:
   brand_assets: logo and favicon come from the brand package, nothing drawn outside it (FB-7)
   links_resources: links, images, fonts and scripts all load (FB-8)
   required_files: localised 404 page, favicon set, og image, lang attribute (FB-9)
-  axe: axe findings of severity serious and critical = 0 (FB-10)
+  axe: axe findings of severity serious and critical = 0 (FB-10); measured after motion_settled, so a reveal through opacity is not a contrast failure
   image_weight: images are WebP or AVIF, each at most 200 kB (FB-12)
   lighthouse_mobile: Lighthouse mobile score measured and reported; warning only (FB-13)
   seo: aid-ui-seo-check.py passes, a BLOCKER finding fails (FB-14)
@@ -62,3 +63,5 @@ checks:
   screenshots_reviewed: the PM has reviewed a full-page screenshot of every page at every viewport (FB-15)
   customer_page: the customer page (docs/zakaznik, aid-ui-customer-page.py) exists, is made from this build and holds no internal word; not_covered until it is generated after a green gate
   copy_review: the page's copy passed the independent copy review (aid-ui-copy.py, recorded by aid-ui-state.sh copy-record) for its current text, facts and approved product context; not_covered until reviewed; a PM exception does not make it pass (finish and the customer page read the exception)
+  motion_settled: every finite animation of the page ended, nothing new started for 500 ms and the intro overlay (data-aid-intro, the one contract for an intro) is gone within 10 s; the page is measured and photographed at that moment (P108; design-system-standard "Tokeny - Pohyb")
+  motion_fidelity: the built home page carries the reference's motion as the PM saw it listed with the directions - every adopt/replace item of .aid-ui/motion.json was observed to run (load, second load, scroll, hover, page) by aid-ui-motion.mjs over the site itself; no picked reference = N/A (P108)

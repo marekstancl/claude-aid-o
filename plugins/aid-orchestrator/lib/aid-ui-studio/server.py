@@ -66,6 +66,8 @@ the link from another app, whose Referer is foreign):
   GET  /brand/<file>          [auth] the project's brand page (<project>/docs/brand/): index.html,
                               top-level *.css, assets/ and fonts/ only (what aid-ui-serve.sh brand
                               serves), no scripts (CSP); the studio's "Značka a produkt" link
+  POST /open-item             [auth] JSON {text}: the PM's own open point -> history.jsonl (by pm,
+                              kind open_item); aid-ui-state.sh open-items-sync takes it into the state
   POST /answer                [auth] JSON {question, kind, target, decision,
                               choice, comment}; kind and target must be the open
                               question's own (a stale page gets 409).
@@ -103,6 +105,7 @@ CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "preview2", "preview2_
 # card says how it honours them (`honours`) - the studio checks both against the recorded answer (PM 9. 10. 2026:
 # the chosen reference and "I like its animations" were dropped by the next step).
 PRIOR = {"direction": "references"}
+STEP_METHODS = {"build"}   # P108: the build has a method and a receipt (aid-ui-state.sh build-record), no question
 RECEIPT_AGE = 12 * 3600   # a method receipt serves questions opened within this many seconds after it
 STANDARDS = "/opt/eco/docs/docs/ecosystem/"   # the only place a method file may live outside the plugin (read live)
 WAIVERS = ("pm", "without")   # no_method card values that let the kind be asked without a method
@@ -223,7 +226,8 @@ def load_sections():
         raise ValueError("sources must be a non-empty map of id to description")
     # the method before the output: every kind names the files the agent reads first, or null (no method)
     ms = m.get("methods")
-    if not isinstance(ms, dict) or set(ms) != KINDS - {"no_method"}:
+    # STEP_METHODS: methods of steps that have no studio question (the build), read before the output too
+    if not isinstance(ms, dict) or set(ms) != (KINDS - {"no_method"}) | STEP_METHODS:
         raise ValueError("methods must name every question kind but no_method, once (missing: %s, extra: %s)"
                          % (", ".join(sorted(KINDS - {"no_method"} - set(ms or {}))), ", ".join(sorted(set(ms or {}) - KINDS))))
     for k, v in ms.items():
@@ -309,6 +313,98 @@ def check_prior(q, cards):
         if not (isinstance(h, str) and 0 < len(h) <= 300 and str(want["choice"]) in h):
             raise ValueError("%s: card %s needs `honours` (1-300 characters) saying how it honours the PM's choice %r%s"
                              % (who, c.get("id"), want["choice"], (" and the words %r" % want["comment"]) if want["comment"] else ""))
+
+
+MOTION_KINDS = {"direction"}
+
+
+def motion_module():
+    """scripts/aid-ui-motion.py loaded as a module (summary_of, dirsha, sha_file)."""
+    import importlib.util
+    path = os.path.join(HERE, "..", "..", "scripts", "aid-ui-motion.py")
+    spec = importlib.util.spec_from_file_location("aid_ui_motion", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def check_motion(q, cards):
+    """A `direction` question carries the reference's motion inventory (P108, 10. 10. 2026): its target is
+    smer:<sha256 of <project>/.aid-ui/motion.json>, its `motion` block repeats the inventory's summary
+    (sentence + every replace/omit with label and reason, so the PM's choice is also the PM's consent to
+    them), and every card names its prototype `dir` under .aid-ui/directions/ whose motion was observed
+    at runtime (<dir>.motion.json beside the directory, carrying the directory's sha) and checked here
+    against the inventory by the server itself (a hand-written check file proves nothing). Only when the
+    state has a picked reference; a run that never chose one carries no motion. A done question must
+    have a recorded answer whose target is smer:<sha>. Raises ValueError."""
+    if q["kind"] not in MOTION_KINDS:
+        return
+    # the inventory follows the reference: a run without a picked reference has no motion to carry
+    state = read_state()
+    refs = state.get("refs") or []
+    if not any(isinstance(r, dict) and r.get("picked") for r in refs):
+        return
+    who = "question %s (%s)" % (q["id"], q["kind"])
+    if q.get("done") is True:   # closed: its recorded answer must have been about an inventory
+        a = (state.get("answers") or {}).get(q["id"]) or {}
+        if not str(a.get("target", "")).startswith("smer:"):
+            raise ValueError("%s: done, but its recorded answer's target is not smer:<inventory sha>; a direction chosen without the motion inventory does not count" % who)
+        return
+    inv = os.path.join(PROJECT, ".aid-ui", "motion.json")
+    if not os.path.isfile(inv):
+        raise ValueError("%s: no .aid-ui/motion.json (aid-ui-motion.py inventory): the reference's motion must be listed before directions" % who)
+    mod = motion_module()
+    sha = mod.sha_file(inv)
+    if q.get("target") != "smer:" + sha:
+        raise ValueError("%s: target must be smer:%s (the sha256 of .aid-ui/motion.json as it is now)" % (who, sha))
+    try:
+        with open(inv, encoding="utf-8") as f:
+            summ = mod.summary_of(json.load(f))
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise ValueError("%s: .aid-ui/motion.json unreadable: %s" % (who, e))
+    want = {"sha256": sha, "sentence": summ["sentence"], "exceptions": summ["exceptions"]}
+    if q.get("motion") != want:
+        raise ValueError("%s: `motion` must repeat the inventory: %s" % (who, json.dumps(want, ensure_ascii=False)[:300]))
+    for c in cards:
+        d = c.get("dir")
+        if not (isinstance(d, str) and re.fullmatch(r"[A-Za-z0-9._-]+", d)):
+            raise ValueError("%s: card %s needs `dir` = its prototype directory name under .aid-ui/directions/" % (who, c.get("id")))
+        ddir = os.path.join(PROJECT, ".aid-ui", "directions", d)
+        obs = os.path.join(PROJECT, ".aid-ui", "directions", d + ".motion.json")
+        if not os.path.isdir(ddir):
+            raise ValueError("%s: card %s: no directory .aid-ui/directions/%s" % (who, c.get("id"), d))
+        if not os.path.isfile(obs):
+            raise ValueError("%s: card %s: no .aid-ui/directions/%s.motion.json (aid-ui-tool.sh motion over the prototype, --dir-sha256 of its directory)" % (who, c.get("id"), d))
+        # the server runs the check itself over the observed record: a hand-written check file proves nothing
+        try:
+            r = mod.check(PROJECT, obs, ddir)
+        except ValueError as e:
+            raise ValueError("%s: card %s: %s" % (who, c.get("id"), e))
+        if not r["ok"]:
+            raise ValueError("%s: card %s: the motion check of %s did not pass: %s" % (who, c.get("id"), d, "; ".join(r["failures"][:3])))
+
+
+def check_handover(q, cards):
+    """A `handover` question (P108): the PM sees where the web is before taking it over. .aid-ui/links.json
+    (aid-ui-state.sh links) must exist and both its addresses must appear in the body; the question
+    carries three cards with value prevzit (8-10/10), vyhrada (6-7/10, a comment is required with it)
+    and vratit, in that order, so the PM's verdict is a number. Done questions are not checked."""
+    if q["kind"] != "handover" or q.get("done") is True:
+        return
+    who = "question %s (handover)" % q["id"]
+    lf = os.path.join(PROJECT, ".aid-ui", "links.json")
+    try:
+        with open(lf, encoding="utf-8") as f:
+            links = json.load(f)
+    except (OSError, ValueError):
+        raise ValueError("%s: no .aid-ui/links.json (aid-ui-state.sh links --web --customer): the PM must see the web before handing it over" % who)
+    body = " ".join(str(x) for x in (q.get("body") or []))
+    for k in ("web", "customer"):
+        u = links.get(k)
+        if not (isinstance(u, str) and u in body):
+            raise ValueError("%s: the body must carry the %s link from links.json (%s)" % (who, k, u))
+    if [c.get("value") for c in cards] != ["prevzit", "vyhrada", "vratit"]:
+        raise ValueError("%s: exactly three cards with value prevzit, vyhrada, vratit in that order (the PM's verdict)" % who)
 
 
 def check_method(q, cards):
@@ -501,6 +597,8 @@ def load():
         try:
             check_method(q, [c for c in cards if c["question"] == q["id"]])
             check_prior(q, [c for c in cards if c["question"] == q["id"]])
+            check_motion(q, [c for c in cards if c["question"] == q["id"]])
+            check_handover(q, [c for c in cards if c["question"] == q["id"]])
         except ValueError as e:
             raise ValueError("payload.json: %s" % e)
     with LOCK:
@@ -535,9 +633,25 @@ def valid_answer(q):
     return None
 
 
+def payload_cards_sha(qid):
+    """The sha256 of qid's cards as payload.json lists them now (the same hashing POST /answer uses), or
+    None: for a history line written before 9. 10. 2026 (no cards_sha256). The state script accepts
+    the restored answer only when this equals the hash it recorded live - the cards did not change."""
+    try:
+        with open(os.path.join(STUDIO, "payload.json"), encoding="utf-8") as f:
+            p = json.load(f)
+        cards = sorted((dict({k: c.get(k) for k in CARD_FIELDS}, preview_sha256=preview_sha(c))
+                        for c in p.get("cards", []) if isinstance(c, dict) and c.get("question") == qid), key=lambda c: c["id"])
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+    return hashlib.sha256(json.dumps(cards, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
 def answer_from_history(qid):
     """The latest answer the PM gave to qid as this studio recorded it in history.jsonl (by: pm,
-    with cards_sha256); None when there is none or the file cannot be read."""
+    with cards_sha256 - or, for a line from before 9. 10. 2026 without it, with the hash of the
+    question's cards as the payload lists them now, marked migrated); None when there is none or
+    the file cannot be read."""
     found = None   # the latest by answer.at, not the last line (a stale later line must not shadow it)
     try:
         with open(HISTORY, encoding="utf-8") as fh:
@@ -547,8 +661,15 @@ def answer_from_history(qid):
                 except ValueError:
                     continue
                 if not (isinstance(e, dict) and e.get("by") == "pm" and isinstance(e.get("question"), dict)
-                        and e["question"].get("id") == qid and isinstance(e.get("answer"), dict) and e.get("cards_sha256")):
+                        and e["question"].get("id") == qid and isinstance(e.get("answer"), dict)):
                     continue
+                migrated = False
+                if not e.get("cards_sha256"):   # a line from before the hash was kept: the payload's cards stand in
+                    sha = payload_cards_sha(qid)
+                    if not sha:
+                        continue
+                    e["cards_sha256"] = sha
+                    migrated = True
                 qq, an = e["question"], e["answer"]
                 try:
                     parse_time(an.get("at"))
@@ -558,7 +679,7 @@ def answer_from_history(qid):
                     continue
                 found = {"question": qid, "kind": qq.get("kind"), "target": qq.get("target"), "decision": an.get("decision"),
                          "choice": an.get("choice"), "comment": an.get("comment"), "at": an.get("at"),
-                         "cards": e.get("cards") or [], "cards_sha256": e["cards_sha256"]}
+                         "cards": e.get("cards") or [], "cards_sha256": e["cards_sha256"], "migrated": migrated}
     except OSError:
         return None
     return found
@@ -757,6 +878,24 @@ class Studio(BaseHTTPRequestHandler):
                                                              if c["id"] == a["choice"]), None)}
             p["project"] = os.path.basename(PROJECT)
             p["history_lines"] = read_history()[1]
+            # P108: where the web is, whether the run finished, and what stays open (the state's items
+            # plus the PM's own from the history, not yet synced)
+            for name in ("links", "finish"):
+                try:
+                    with open(os.path.join(PROJECT, ".aid-ui", name + ".json"), encoding="utf-8") as f:
+                        p[name] = json.load(f)
+                except (OSError, ValueError):
+                    p[name] = None
+            st = read_state()
+            items = [i for i in (st.get("open_items") or []) if isinstance(i, dict)]
+            seen = {i.get("id") for i in items}
+            for h in read_history()[0]:
+                if isinstance(h, dict) and h.get("by") == "pm" and h.get("kind") == "open_item" and isinstance(h.get("text"), str) \
+                        and re.match(r"\d{4}-\d{2}-\d{2}T", str(h.get("at") or "")):
+                    hid = "pm-" + re.sub(r"[^0-9]", "", str(h.get("at")))[:20]
+                    if hid not in seen:
+                        items.append({"id": hid, "text": h["text"][:500], "owner": "PM", "by": "pm", "at": h.get("at"), "status": "open"})
+            p["open_items"] = items
             p["sections"] = sections_view(p["questions"])
             with LOCK:
                 for x in p["questions"]:   # the original shows that the PM is changing it
@@ -855,10 +994,38 @@ class Studio(BaseHTTPRequestHandler):
         else:
             self.send(404, {"error": "not found"})
 
+    def open_item(self):
+        """POST /open-item {text}: the PM adds an open point (what still has to happen) from the page; the
+        same protection as /answer (session cookie or token, same-site), text 1-500 characters; one
+        line in history.jsonl (by pm, kind open_item) that aid-ui-state.sh open-items-sync takes over."""
+        if not self.gate(True):
+            return
+        try:
+            b = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"null")
+        except (ValueError, json.JSONDecodeError):
+            b = None
+        text = str((b or {}).get("text") or "").strip() if isinstance(b, dict) else ""
+        if not text or len(text) > 500:
+            self.send(422, {"error": "open-item needs text (1-500 characters)"})
+            return
+        entry = {"by": "pm", "kind": "open_item", "text": text, "at": iso(now())}
+        try:
+            with open(HISTORY, "a", encoding="utf-8") as fh:
+                fcntl.flock(fh, fcntl.LOCK_EX)
+                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                fh.flush()
+        except OSError as e:
+            self.send(500, {"error": "history not written: %s" % e})
+            return
+        self.log_message("open item: %s", text[:60])
+        self.send(200, entry)
+
     def do_POST(self):
         path = urlsplit(self.path).path
         if path == "/change":
             return self.change()
+        if path == "/open-item":
+            return self.open_item()
         if path != "/answer":
             self.send(404, {"error": "not found"})
             return
@@ -890,6 +1057,10 @@ class Studio(BaseHTTPRequestHandler):
             return
         if d == "return" and not comment:
             self.send(422, {"error": "return needs a comment"})
+            return
+        if d == "choose" and cur["kind"] == "handover" and not comment and any(
+                isinstance(c, dict) and c.get("question") == qid and c.get("id") == choice and c.get("value") == "vyhrada" for c in p["cards"]):
+            self.send(422, {"error": "a handover with a reservation (vyhrada) needs a comment saying what"})
             return
         with LOCK:
             if valid_answer(cur):

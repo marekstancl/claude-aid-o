@@ -309,7 +309,8 @@ for f in sources:
 out_dir = os.path.join(project, "docs/design")
 os.makedirs(out_dir, exist_ok=True)
 open(os.path.join(out_dir, "soulad-se-standardy.md"), "w", encoding="utf-8").write("\n".join(md) + "\n")
-json.dump({"generated_at": today, "variant": variant, "build_id": build, "total": len(rows_out),
+json.dump({"generated_at": today, "gate_run_at": (state.get("gate") or {}).get("run_at") if isinstance(state, dict) else None,
+           "variant": variant, "build_id": build, "total": len(rows_out),
            "counts": counts, "by_standard": per_file},
           open(os.path.join(out_dir, "soulad-summary.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 print("report: %d items -> docs/design/soulad-se-standardy.md, soulad-summary.json" % len(rows_out))

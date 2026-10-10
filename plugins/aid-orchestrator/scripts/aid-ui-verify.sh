@@ -64,6 +64,7 @@ if [[ -n "$subject" ]]; then
   bash "$HERE/aid-ui-tool.sh" verify --state "$STATE" --checks "$OUT/checks.json" --site "$dir" \
     --base "$url" --out "$OUT" --project "$PROJECT" --seo "$HERE/aid-ui-seo-check.py" --copy-subject "$subject" \
     || die "copy subject failed"
+  echo "BRÁNA NEBĚŽELA (jen texty pro kontrolu textů; result.json beze změny)"
   exit 0
 fi
 

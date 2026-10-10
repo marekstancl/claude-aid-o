@@ -443,6 +443,13 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
   done
 }
 
+@test "P108 page: the Hotovo panel shows the web and customer links, the handover sentence, the open items and a field to add one; a reservation asks for words" {
+  f="$(PAGE_HTML)"
+  for w in 'function donePanel(sec)' '"Otevřít web"' '"Co jste dostali"' '"Doplnit bod"' 'call("POST", "/open-item", { text })' 'S.open_items' 'q.kind === "handover" && q.answered' 'donePanel(h.closest("section"))' 'c.value === "vyhrada"' '"Převzít s výhradou"' '["facts", "no_method", "handover"].includes(q.kind)'; do
+    grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
+  done
+}
+
 @test "P106 page: the approved palette is unchanged and no colour value was added" {
   f="$(PAGE_HTML)"
   [ "$(sed -n '/:root {/,/^  }/p' "$f" | sha256sum | cut -d' ' -f1)" = "$(grep -oE '^[0-9a-f]{64}$' "$BATS_TEST_DIRNAME/../fixtures/aid-ui/studio-root-vars.sha256")" ]
@@ -523,7 +530,7 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
   for k in $kinds; do [ "$k" = no_method ] || jq -e --arg k "$k" '[.steps[].parts[].kinds[]] | index($k) != null' "$M" >/dev/null || { echo "kind in no part: $k"; return 1; }; done
   # every kind but no_method has a methods row; a receipt kind names existing plain files
   for k in $kinds; do [ "$k" = no_method ] || jq -e --arg k "$k" '.methods | has($k)' "$M" >/dev/null || { echo "no method row: $k"; return 1; }; done
-  [ "$(jq -r '[.methods[] | select(. != null and .receipt)] | length' "$M")" -eq 10 ]
+  [ "$(jq -r '[.methods[] | select(. != null and .receipt)] | length' "$M")" -eq 11 ]   # + build (P108)
   # a broken map: the server refuses to start and says why
   D="$BATS_TEST_TMPDIR/plug"; mkdir -p "$D/lib/aid-ui-studio" "$D/skills/ui-design"
   cp "$SERVER" "$D/lib/aid-ui-studio/"; jq '.steps[0].parts[0].why = ""' "$M" > "$D/skills/ui-design/sections.json"
@@ -672,7 +679,7 @@ JSON
   ! grep -q 'Potvrdit výběr' "$f"                                  # no confirm bar
   [ "$(grep -c 'Vybrat tento' "$f")" -eq 1 ] && grep -qF 'class: "choose go lb-pick" }, "Vybrat tento"' "$f"   # the pick button lives only in the lightbox
   grep -qF 'role: "radio"' "$f"
-  grep -qF 'on: { click: () => answer("choose", SELECTED[q.id]) } }, "Další →")' "$f"
+  grep -qF 'q.kind === "handover" ? "Potvrdit →" : "Další →"' "$f"; grep -qF 'else answer("choose", SELECTED[q.id]);' "$f"
   # the row keeps every way out: safer, again, bolder, the PM's own words (as an answer or as a steer for new proposals)
   for w in 'answer("reroll_safer")' 'answer("reroll")' 'answer("reroll_bolder")' 'answer("reroll", undefined, withPick(q, cards, t))' 'answer("return", undefined, withPick(q, cards, t))' '"Chci to jinak"'; do
     grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
@@ -759,6 +766,111 @@ JSON
   rm "$P/docs/design/brand-state.json"
 }
 
+@test "P108 motion: with a picked reference a direction question carries the motion inventory (target smer:<sha>, motion block) and every card a checked prototype dir; without a picked reference nothing is required" {
+  chk() { python3 "$SERVER" --check --project "$P" 2>&1; }
+  MP="$BATS_TEST_DIRNAME/../../aid-ui-motion.py"; FXR="$BATS_TEST_DIRNAME/../fixtures/aid-ui/motion-record.json"
+  mkdir -p "$P/docs/design" "$P/.aid-ui/refs" "$P/.aid-ui/directions/1" "$P/.aid-ui/directions/2"
+  payload '2020-01-01T00:00:00Z'
+  echo '{"answers":{},"refs":[]}' > "$P/docs/design/brand-state.json"
+  chk >/dev/null   # no picked reference: free
+  echo '{"answers":{},"refs":[{"id":"fx","url":"http://127.0.0.1:39931/index.html","picked":true}]}' > "$P/docs/design/brand-state.json"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'no .aid-ui/motion.json'* ]]
+  cp "$FXR" "$P/.aid-ui/refs/fx.motion.json"
+  python3 "$MP" inventory "$P" >/dev/null
+  python3 - "$P/.aid-ui/motion.json" <<'PY'
+import json, sys
+p = sys.argv[1]; inv = json.load(open(p))
+for i in inv["items"]:
+    i["disposition"] = "adopt"; i["target"] = i.get("name") or i.get("property") or "leave,arrive"
+inv["items"][3]["disposition"] = "omit"; inv["items"][3]["label"] = "otáčení pečeti"; inv["items"][3]["reason"] = "ordinace pečeť nemá"
+json.dump(inv, open(p, "w"), ensure_ascii=False)
+PY
+  sha="$(sha256sum "$P/.aid-ui/motion.json" | cut -d' ' -f1)"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *"target must be smer:$sha"* ]]
+  jq --arg t "smer:$sha" '.questions[0].target = $t' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'`motion` must repeat the inventory'* && "$output" == *'otáčení pečeti'* ]]
+  m="$(python3 "$MP" summary "$P")"
+  jq --arg s "$sha" --argjson m "$m" '.questions[0].motion = {sha256: $s, sentence: $m.sentence, exceptions: $m.exceptions}' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'card a needs `dir`'* ]]
+  jq '.cards[0].dir = "1" | .cards[1].dir = "2" | .cards[2].dir = "2"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'no .aid-ui/directions/1.motion.json'* ]]
+  # the prototypes: their observed motion is the fixture record, bound to the directory's sha
+  echo '<p>1</p>' > "$P/.aid-ui/directions/1/index.html"; echo '<p>2</p>' > "$P/.aid-ui/directions/2/index.html"
+  for d in 1 2; do
+    jq --arg s "$(python3 "$MP" dirsha "$P/.aid-ui/directions/$d")" '.dir_sha256 = $s' "$FXR" > "$P/.aid-ui/directions/$d.motion.json"
+    python3 "$MP" check "$P" --observed "$P/.aid-ui/directions/$d.motion.json" --dir "$P/.aid-ui/directions/$d" --write "$P/.aid-ui/directions/$d.motion.check.json" >/dev/null
+  done
+  chk >/dev/null
+  # a prototype that lost the spin: its check fails and the question is refused
+  jq '.keyframes |= map(select(.name != "spin"))' "$P/.aid-ui/directions/2.motion.json" > "$P/m.t" && mv "$P/m.t" "$P/.aid-ui/directions/2.motion.json"
+  jq '.items[3].disposition = "adopt" | .items[3].target = "spin"' "$P/.aid-ui/motion.json" > "$P/m.t" && mv "$P/m.t" "$P/.aid-ui/motion.json"
+  sha="$(sha256sum "$P/.aid-ui/motion.json" | cut -d' ' -f1)"; m="$(python3 "$MP" summary "$P")"
+  jq --arg t "smer:$sha" --arg s "$sha" --argjson m "$m" '.questions[0].target = $t | .questions[0].motion = {sha256: $s, sentence: $m.sentence, exceptions: $m.exceptions}' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  run python3 "$MP" check "$P" --observed "$P/.aid-ui/directions/2.motion.json" --dir "$P/.aid-ui/directions/2" --write "$P/.aid-ui/directions/2.motion.check.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"'spin' never ran"* ]]
+  python3 "$MP" check "$P" --observed "$P/.aid-ui/directions/1.motion.json" --dir "$P/.aid-ui/directions/1" --write "$P/.aid-ui/directions/1.motion.check.json" >/dev/null
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'the motion check of 2 did not pass'* && "$output" == *"spin"* ]]
+  # the prototype changed after its observation: refused until observed again
+  python3 "$MP" check "$P" --observed "$P/.aid-ui/directions/2.motion.json" --dir "$P/.aid-ui/directions/2" --write "$P/.aid-ui/directions/2.motion.check.json" >/dev/null 2>&1 || true
+  jq '.keyframes += [{"name":"spin","scenarios":["load"],"where":["below"],"selectors":["div.badge"],"duration_ms":8000,"delay_ms":0,"iteration":"infinite","intro":false,"count":1,"frequency":"every_load"}]' "$P/.aid-ui/directions/2.motion.json" > "$P/m.t" && mv "$P/m.t" "$P/.aid-ui/directions/2.motion.json"
+  python3 "$MP" check "$P" --observed "$P/.aid-ui/directions/2.motion.json" --dir "$P/.aid-ui/directions/2" --write "$P/.aid-ui/directions/2.motion.check.json" >/dev/null
+  chk >/dev/null
+  echo '<p>2 změněno</p>' > "$P/.aid-ui/directions/2/index.html"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'the motion check of 2 did not pass: the record was not observed over the directory as it is now'* ]]
+  rm "$P/docs/design/brand-state.json"
+}
+
+@test "P108 end: a handover question needs links.json and both links in its body and the three verdict cards; a reservation needs a comment; POST /open-item takes the PM's point into the history and /state lists it" {
+  chk() { python3 "$SERVER" --check --project "$P" 2>&1; }
+  cat > "$P/.aid-ui/studio/payload.json" <<'JSON'
+{"questions": [{"id": "h1", "kind": "handover", "target": "sha256:x", "opened_at": "2020-01-01T00:00:00Z", "title": "Předat web?", "body": ["Co dostáváte…"]}],
+ "cards": [{"id": "a", "question": "h1", "title": "Převzít", "value": "prevzit"}, {"id": "b", "question": "h1", "title": "S výhradou", "value": "vyhrada"}, {"id": "c", "question": "h1", "title": "Vrátit", "value": "vratit"}]}
+JSON
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'no .aid-ui/links.json'* ]]
+  echo '{"web":"http://10.0.0.1:3917/","customer":"http://10.0.0.1:3918/","at":"2026-10-10T00:00:00Z"}' > "$P/.aid-ui/links.json"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'must carry the web link'* ]]
+  jq '.questions[0].body += ["Web: http://10.0.0.1:3917/ · Co jste dostali: http://10.0.0.1:3918/"]' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  jq '.cards[2].value = "jine"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  run chk; [ "$status" -ne 0 ]; [[ "$output" == *'exactly three cards with value prevzit, vyhrada, vratit'* ]]
+  jq '.cards[2].value = "vratit"' "$P/.aid-ui/studio/payload.json" > "$P/p.t" && mv "$P/p.t" "$P/.aid-ui/studio/payload.json"
+  chk >/dev/null
+  # live: a reservation without words is refused, with words accepted
+  kill "$SPID"; wait 2>/dev/null || true; start_server
+  [ "$(answer '{"question":"h1","kind":"handover","target":"sha256:x","decision":"choose","choice":"b"}')" = 422 ]
+  [ "$(answer '{"question":"h1","kind":"handover","target":"sha256:x","decision":"choose","choice":"b","comment":"fotky chybí"}')" = 200 ]
+  # the PM's own open point
+  [ "$(code -H "X-AID-Token: $TOKEN" -H 'Content-Type: application/json' -d '{"text":""}' "$URL/open-item")" = 422 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" -H 'Content-Type: application/json' -d "{\"text\":\"$(head -c 600 /dev/zero | tr '\0' 'a')\"}" "$URL/open-item")" = 422 ]
+  [ "$(code -H 'Content-Type: application/json' -d '{"text":"Doména do konce měsíce"}' "$URL/open-item")" = 403 ]
+  [ "$(code -H "X-AID-Token: $TOKEN" -H 'Content-Type: application/json' -d '{"text":"Doména do konce měsíce"}' "$URL/open-item")" = 200 ]
+  jq -e 'select(.kind == "open_item") | .by == "pm" and .text == "Doména do konce měsíce"' "$P/.aid-ui/studio/history.jsonl" >/dev/null
+  code -H "X-AID-Token: $TOKEN" "$URL/state" >/dev/null
+  [ "$(jq -r '.open_items | length, .[0].text, .[0].owner' "$BATS_TEST_TMPDIR/body" | paste -sd'|')" == "1|Doména do konce měsíce|PM" ]
+  [ "$(jq -r '.links.web' "$BATS_TEST_TMPDIR/body")" == "http://10.0.0.1:3917/" ]
+}
+
+@test "P108 migration: a history line from before the cards hash answers GET /answer with the hash of the payload's cards now and migrated=true; without those cards it does not count" {
+  kill "$SPID"; wait 2>/dev/null || true
+  printf '{"by":"pm","question":{"id":"q1","kind":"direction","target":"home@abc"},"cards":[],"step":null,"answer":{"decision":"choose","choice":"a","comment":"","at":"%s"}}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" >> "$P/.aid-ui/studio/history.jsonl"
+  start_server
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=q1")" = 200 ]
+  [ "$(jq -r '.migrated, (.cards_sha256 | length)' "$BATS_TEST_TMPDIR/body" | paste -sd' ')" == "true 64" ]
+  want="$(python3 - "$P/.aid-ui/studio/payload.json" <<'PY'
+import hashlib, json, sys
+p = json.load(open(sys.argv[1]))
+F = ["id", "title", "preview", "preview2", "preview2_label", "thesis", "palette", "risk", "uniqueness", "url", "method", "slot", "value", "honours"]
+cards = sorted((dict({k: c.get(k) for k in F}, preview_sha256=None) for c in p["cards"] if c["question"] == "q1"), key=lambda c: c["id"])
+print(hashlib.sha256(json.dumps(cards, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
+PY
+)"
+  [ "$(jq -r .cards_sha256 "$BATS_TEST_TMPDIR/body")" == "$want" ] || { echo "hash differs: $(jq -c . "$BATS_TEST_TMPDIR/body")"; return 1; }
+  # a question the payload no longer lists has no cards to stand in: no answer
+  kill "$SPID"; wait 2>/dev/null || true
+  printf '{"by":"pm","question":{"id":"gone","kind":"direction","target":"x"},"cards":[],"step":null,"answer":{"decision":"approve","at":"%s"}}\n' "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" >> "$P/.aid-ui/studio/history.jsonl"
+  start_server
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=gone")" = 404 ]
+}
+
 @test "P108 method: a kind with null in the map is asked only after the PM's no_method answer (pm: cards on podklady); the no_method question has its shape; a bad map stops the server" {
   D="$BATS_TEST_TMPDIR/plug"; mkdir -p "$D/lib/aid-ui-studio" "$D/skills/ui-design"; cp "$SERVER" "$D/lib/aid-ui-studio/"
   M="$BATS_TEST_DIRNAME/../../../skills/ui-design/sections.json"; B="$BATS_TEST_TMPDIR/map.json"
@@ -816,7 +928,7 @@ JSON
   grep -qF 'art.querySelector("h3, figcaption b")' "$f"
   # per-page notes (PM 9. 10.): "Chci jinak" in the lightbox of a gallery figure, sent together as one return; edge-fixed arrows
   # a fact or consent question (facts, no_method) is three rows, the first preselected, no degree buttons (PM 9. 10.: A)
-  for w in 'function withPick(q, cards, text)' 'answer("return", undefined, withPick(q, cards, t))' '["Vybrat s poznámkou", t => answer("choose", SELECTED[q.id], t)]' 'function optionRow(q, c, i, select)' 'const rows = deckKind && ["facts", "no_method"].includes(q.kind)' 'if (rows && SELECTED[q.id] === undefined) SELECTED[q.id] = cards[0].id;' '.card.opt .tick { position: static;'; do
+  for w in 'function withPick(q, cards, text)' 'answer("return", undefined, withPick(q, cards, t))' '["Vybrat s poznámkou", t => answer("choose", SELECTED[q.id], t)]' 'function optionRow(q, c, i, select)' 'const rows = deckKind && ["facts", "no_method", "handover"].includes(q.kind)' 'if (rows && SELECTED[q.id] === undefined) SELECTED[q.id] = cards[0].id;' '.card.opt .tick { position: static;'; do
     grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
   done
   for w in 'class: "chip lb-zoom"' '#lightbox img.wide { width: min(96vw, 92rem); }' '#lightbox img.zoomed { width: auto; max-width: none;' 'lbImg.classList.toggle("wide", lbImg.naturalWidth >= 1100)' 'class: "chip lb-note"' 'sec.noteFor = (id, then)' '"Vrátit s poznámkami (" + n + ")"' 'answer("return", undefined, Object.entries(notes)' '.lb-bar .lb-prev { justify-self: start; } .lb-bar .lb-next { justify-self: end; }' '#lightbox img { display: inline-block; width: min(94vw, 48rem); height: auto;' 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;' 'el("figure", { "data-fig": c.id }' 'const notes = NOTES[q.id] = NOTES[q.id] || {};' 'extra: notes[id] ? [["Smazat poznámku"' 'return i && !i.hidden && i.naturalWidth;' 'width: min(94vw, 44rem); display: grid; grid-template-columns: auto minmax(0, 1fr) auto'; do

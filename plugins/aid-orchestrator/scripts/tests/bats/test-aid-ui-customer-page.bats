@@ -178,7 +178,7 @@ text() { python3 -c 'import re,sys,html;t=open(sys.argv[1]).read();t=re.sub(r"<s
   ! text | grep -qE '(^|[^0-9])0 +(variant|barev|částí|rolí)'
   # the brand area keeps what exists (the font), the list numbers areas without gaps
   grep -q 'id="znacka"' "$OUT"
-  [ "$(grep -o '<span class="n">0[0-9]</span>' "$OUT" | sort -u | wc -l)" -eq 4 ]
+  [ "$(grep -o '<span class="n">0[0-9]</span>' "$OUT" | sort -u | wc -l)" -eq 5 ]   # + Co zbývá a co bylo rozhodnuto (P108)
   # a font weight that is not a number is skipped, not a crash
   sed -i 's/fontWeight: 400/fontWeight: bold/' "$P/DESIGN.md"
   run python3 "$GEN" "$P"
@@ -232,4 +232,24 @@ text() { python3 -c 'import re,sys,html;t=open(sys.argv[1]).read();t=re.sub(r"<s
   gate="$(sed -n "/^const CHECKS/,/\];/p" "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity/aid-ui-verify.mjs" | grep -o "'[a-z_0-9]*'" | tr -d "'" | sort -u)"
   words="$(python3 -c "import importlib.util as u; s=u.spec_from_file_location('c','$GEN'); m=u.module_from_spec(s); s.loader.exec_module(m); print('\n'.join(sorted(m.CHECK_WORDS)))")"
   [ "$gate" = "$words" ] || { diff <(echo "$gate") <(echo "$words"); return 1; }
+}
+
+@test "P108: the page lists what stays open (agent and PM items, deferred content with the PM's words, exceptions) and every accepted decision with its date" {
+  jq '.open_items = [{"id":"oi-1","text":"Fotka lékaře","owner":"klient","due":"2026-11-01","status":"open"},{"id":"oi-2","text":"hotovo","owner":"PM","status":"done"},{"id":"pm-1","text":"Doména","owner":"PM","status":"open"}]
+      | .answers = {"d1":{"kind":"defer_content","decision":"approve","comment":"pošlu v listopadu"}}
+      | .content_plan[1].answer = "d1"
+      | .exceptions = [{"selector":{"check":"copy_review","page":"ochrana/index.html"},"reason":"lhůta pro právníka"}]
+      | .brand_package_waiver = {"reason":"vektor později"}
+      | .decisions = [{"at":"2026-10-09T10:00:00Z","title":"Pravidla pro mobil","outcome":"menu za tlačítkem"}]' "$P/docs/design/brand-state.json" > "$P/s.t" && mv "$P/s.t" "$P/docs/design/brand-state.json"
+  mkdir -p "$P/.aid-ui/studio"
+  printf '{"by":"pm","question":{"id":"q1","kind":"direction","outcome":"Web ve směru Mouka."},"answer":{"decision":"choose","choice":"a","at":"2026-10-08T12:00:00Z"}}\n{"by":"pm","question":{"id":"q2","kind":"approve_page","outcome":"Vráceno."},"answer":{"decision":"return","at":"2026-10-08T13:00:00Z"}}\n' > "$P/.aid-ui/studio/history.jsonl"
+  run python3 "$GEN" "$P"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(data '.zbyva.open | map(.text) | join(",")')" == "Fotka lékaře,Doména" ]
+  [ "$(data '.zbyva.deferred[0].need + "|" + .zbyva.deferred[0].words')" == "fotka pekaře|pošlu v listopadu" ]
+  [ "$(data '.zbyva.exceptions | map(.check) | join(",")')" == "kontrola textů,balíček značky" ]
+  [ "$(data '.zbyva.decided | map(.at + ":" + .outcome) | join(";")')" == "2026-10-08:Web ve směru Mouka.;2026-10-09:menu za tlačítkem" ]
+  t="$(text)"
+  [[ "$t" == *"Co zbývá a co bylo rozhodnuto"* && "$t" == *"Fotka lékaře · klient · do 2026-11-01"* && "$t" == *"Výjimka zadavatele: kontrola textů (ochrana/index.html) - lhůta pro právníka"* && "$t" == *"Přijatá rozhodnutí (2)"* ]]
+  [[ "$t" != *"hotovo"* ]]
 }

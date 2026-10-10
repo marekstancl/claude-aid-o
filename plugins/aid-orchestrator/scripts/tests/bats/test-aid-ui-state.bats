@@ -16,6 +16,7 @@ setup() {
   mkdir -p "$PROJ/docs/brand"
   cp "$PAGE/index.html" "$PROJ/docs/brand/"
   "$SCRIPT" init "$PROJ" >/dev/null
+  "$SCRIPT" method "$PROJ" build >/dev/null   # P108: build-record wants the build method receipt
   STATE="$PROJ/docs/design/brand-state.json"
   HTML="$PROJ/docs/brand/index.html"
   # coverage on fixtures: a docs root with the two fixture standards, map and checks
@@ -37,6 +38,8 @@ setup() {
 }
 
 teardown() {
+  [[ -z "${LINK_PID:-}" ]] || kill "$LINK_PID" 2>/dev/null || true
+  [[ -z "${CUST_PID:-}" ]] || kill "$CUST_PID" 2>/dev/null || true
   [[ -z "${SPID:-}" ]] || kill "$SPID" 2>/dev/null || true
   [[ -z "${STUDIO_PID:-}" ]] || kill "$STUDIO_PID" 2>/dev/null || true
 }
@@ -72,10 +75,13 @@ ans() {
   local p="$PROJ/.aid-ui/studio/payload.json" d="${4:-approve}" c='[{"id":"x"}]'
   # a facts question names its part and offers three sourced answers (the studio's rule)
   [[ "$2" != facts ]] || c='[{"id":"x","source":"odhad"},{"id":"y","source":"podklady"},{"id":"z","source":"registr"}]'
+  # a handover question carries the links the PM opens (links.json) and the three verdict cards (P108)
+  local hb='[]'; [[ "$2" != handover ]] || { c='[{"id":"x","value":"prevzit"},{"id":"y","value":"vyhrada"},{"id":"z","value":"vratit"}]'
+    [[ ! -f "$PROJ/.aid-ui/links.json" ]] || hb="$(jq -c '[("Web: " + .web), ("Co jste dostali: " + .customer)]' "$PROJ/.aid-ui/links.json")"; }
   [[ -z "${5:-}" ]] || c="$5"
   # the method before the output: the question opens now, after the receipts studio() wrote; every card says its method
-  jq --arg q "$1" --arg k "$2" --arg t "$3" --argjson c "$c" --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" \
-    '.questions += [{id: $q, kind: $k, target: $t, opened_at: $o} + (if $k == "facts" then {part: "obsah"} else {} end)]
+  jq --arg q "$1" --arg k "$2" --arg t "$3" --argjson c "$c" --argjson hb "$hb" --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" \
+    '.questions += [{id: $q, kind: $k, target: $t, opened_at: $o} + (if $k == "facts" then {part: "obsah"} elif $k == "handover" then {body: $hb} else {} end)]
     | .cards += [$c[] | .question = $q | .method = (.method // "SKILL.md, 4-references.md") | (if $k == "identity" then .slot = "W" else . end)]' "$p" > "$p.t" && mv "$p.t" "$p"
   curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg q "$1" --arg k "$2" --arg t "$3" --arg d "$d" \
@@ -105,14 +111,18 @@ approve_chapter() { ans "$3" "$2" "$("$SCRIPT" chapter-target "$PROJ" "$1")"; "$
 # viewport x browser (+ flow x state x role for apps) passing, then the filter
 result() {
   mkdir -p "${RES%/*}"
-  jq --slurpfile ck <(yq -o=json . "$T/cov/checks.yaml") '.build as $b | ($ck[0]) as $c
+  jq --arg now "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" --slurpfile ck <(yq -o=json . "$T/cov/checks.yaml") '.build as $b | ($ck[0]) as $c
     | ([.build.fingerprints | keys[] | select(. != "_site") | {page: ., role: "", state: ""}]
        + (if (.variant.type // "web") != "web" then [.structure.flows[] as $f | $f.states[] as $s
           | (.structure.roles // [""])[] as $r
           | {page: $f.id, role: ($r | if type == "object" then .id else . end), state: ($s | if type == "object" then .id else . end)}] else [] end)) as $combos
-    | {run_at: "2026-09-28T10:00:00Z", build_id: $b.id, fingerprints: $b.fingerprints,
-       rows: [$c.checks | keys[] as $k | $combos[] as $m | $c.viewports[] as $v | $c.browsers[] as $br
-              | $m + {check: $k, viewport: $v, browser: $br, status: "pass"}]}' "$STATE" | jq "${1:-.}" > "$RES"
+    | {run_at: $now, build_id: $b.id, fingerprints: $b.fingerprints,
+       rows: ([$c.checks | keys[] as $k | select((($c.applies // {})[$k].scope // "") != "project")
+               | $combos[] as $m | $c.viewports[] as $v | $c.browsers[] as $br
+               | $m + {check: $k, viewport: $v, browser: $br, status: "pass"}]
+              # a project-scope check (customer_page): one row - the home page, the last viewport, the first browser
+              + [$c.checks | keys[] as $k | select((($c.applies // {})[$k].scope // "") == "project")
+                 | ($combos | map(select(.page == "index.html")) | first // $combos[0]) + {check: $k, viewport: ($c.viewports | last), browser: $c.browsers[0], status: "pass"}])}' "$STATE" | jq "${1:-.}" > "$RES"
 }
 
 # ready — every finish condition met for a web variant with two pages
@@ -126,6 +136,36 @@ ready() {
   approve index.html 1; approve kontakt.html 1
   result
   "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  end_order   # P108: the customer page the gate checked and a coverage report after the gate
+  serve_200; "$SCRIPT" links "$PROJ" --web "$LINK_URL" --customer "$CUST_URL" >/dev/null
+}
+# gate_ready — a recorded gate with the end-order artifacts and the links (what chapter-all wants, P108)
+gate_ready() {
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  result; "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  end_order
+  serve_200; "$SCRIPT" links "$PROJ" --web "$LINK_URL" --customer "$CUST_URL" >/dev/null
+}
+# end_order — the artifacts chapter-all wants in order: the customer page older than the gate result, the
+# coverage report not older than it (the fixture result passes every row, customer_page included)
+end_order() {
+  mkdir -p "$PROJ/docs/zakaznik"; [[ -f "$PROJ/docs/zakaznik/index.html" ]] || echo '<p>zakaznik</p>' > "$PROJ/docs/zakaznik/index.html"
+  jqw --arg s "$(sha256sum "$PROJ/docs/zakaznik/index.html" | cut -d' ' -f1)" '.gate.customer_page_sha256 = $s'
+  jq -n --arg g "$(jq -r .gate.run_at "$STATE")" '{counts: {}, gate_run_at: $g}' > "$PROJ/docs/design/soulad-summary.json"
+}
+# serve_200 — the recorded build and the project's docs served locally (links binds the web link to the
+# build's index.html and the customer link to docs/zakaznik/index.html); LINK_URL = web, CUST_URL = customer
+serve_200() {
+  [[ -z "${LINK_PID:-}" ]] || { kill "$LINK_PID" 2>/dev/null || true; wait "$LINK_PID" 2>/dev/null || true; }
+  [[ -z "${CUST_PID:-}" ]] || { kill "$CUST_PID" 2>/dev/null || true; wait "$CUST_PID" 2>/dev/null || true; }
+  local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 -m http.server "$port" --bind 127.0.0.1 --directory "$SITE" >/dev/null 2>&1 &
+  LINK_PID=$!; LINK_URL="http://127.0.0.1:$port/"
+  local p2; p2="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  mkdir -p "$PROJ/docs/zakaznik"; [[ -f "$PROJ/docs/zakaznik/index.html" ]] || echo '<p>zakaznik</p>' > "$PROJ/docs/zakaznik/index.html"
+  python3 -m http.server "$p2" --bind 127.0.0.1 --directory "$PROJ/docs" >/dev/null 2>&1 &
+  CUST_PID=$!; CUST_URL="http://127.0.0.1:$p2/zakaznik/index.html"
+  local i; for i in $(seq 1 30); do curl -sf -o /dev/null "$LINK_URL" && curl -sf -o /dev/null "$CUST_URL" && return 0; sleep 0.1; done; return 1
 }
 
 @test "set product_type writes without an answer; set direction exit 2" {
@@ -201,6 +241,7 @@ ready() {
 }
 
 @test "chapter-all: one handover answer approves every chapter in navrh or schvaleno, once" {
+  gate_ready
   "$SCRIPT" chapter "$PROJ" barvy navrh
   "$SCRIPT" chapter "$PROJ" vize navrh
   approve_chapter logo identity q0
@@ -220,6 +261,7 @@ ready() {
 }
 
 @test "chapter-all: a chapter changed after the question was asked refuses the answer" {
+  gate_ready
   echo '<p>a</p>' > "$BATS_TEST_TMPDIR/a.html"
   echo '<p>b</p>' > "$BATS_TEST_TMPDIR/b.html"
   "$SCRIPT" body "$PROJ" barvy --file "$BATS_TEST_TMPDIR/a.html"
@@ -237,6 +279,9 @@ ready() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"nothing to hand over"* ]]
   "$SCRIPT" chapter "$PROJ" barvy navrh
+  run "$SCRIPT" chapter-all-target "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no gate recorded"* ]]   # P108: the handover comes after the final gate
+  gate_ready
   ans d1 design_standard "$("$SCRIPT" chapter-all-target "$PROJ")"
   run "$SCRIPT" chapter-all "$PROJ" --answer d1
   [ "$status" -eq 1 ]
@@ -247,6 +292,7 @@ ready() {
 }
 
 @test "chapter-all: a chapter that cannot be written leaves every chapter and the answer untouched" {
+  gate_ready
   "$SCRIPT" chapter "$PROJ" vize navrh
   "$SCRIPT" chapter "$PROJ" barvy navrh
   ans h1 handover "$("$SCRIPT" chapter-all-target "$PROJ")"
@@ -830,6 +876,7 @@ JSON
   "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
   approve index.html 1; approve kontakt.html 1
   result; "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  end_order; serve_200; "$SCRIPT" links "$PROJ" --web "$LINK_URL" --customer "$CUST_URL" >/dev/null
   run "$SCRIPT" finish "$PROJ"
   [ "$status" -eq 1 ]; [[ "$output" == *"content item hero is draft"* ]]
   before="$(jq -c '[.content_plan[] | .status], .consumed' "$STATE")"
@@ -871,6 +918,161 @@ JSON
   "$SCRIPT" defer-content "$PROJ" foto --answer d1 >/dev/null
   run "$SCRIPT" finish "$PROJ"
   [ "$status" -eq 0 ]
+}
+
+@test "P108 build: build-record wants a fresh build method receipt and, with a picked reference, the PM's direction choice over the inventory as it is and a motion check of the site as it is" {
+  MP="$BATS_TEST_DIRNAME/../../aid-ui-motion.py"; FXR="$BATS_TEST_DIRNAME/../fixtures/aid-ui/motion-record.json"
+  rm "$PROJ/.aid-ui/method/build.json"
+  run "$SCRIPT" build-record "$PROJ" "$SITE"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no method receipt for build"* ]]
+  "$SCRIPT" method "$PROJ" build >/dev/null
+  jq '.at = "2020-01-01T00:00:00.000000Z"' "$PROJ/.aid-ui/method/build.json" > "$PROJ/r.t" && mv "$PROJ/r.t" "$PROJ/.aid-ui/method/build.json"
+  run "$SCRIPT" build-record "$PROJ" "$SITE"
+  [ "$status" -eq 1 ]; [[ "$output" == *"receipt is"*"h old"* ]]
+  "$SCRIPT" method "$PROJ" build >/dev/null
+  jq '.files[0].sha256 = "0000"' "$PROJ/.aid-ui/method/build.json" > "$PROJ/r.t" && mv "$PROJ/r.t" "$PROJ/.aid-ui/method/build.json"
+  run "$SCRIPT" build-record "$PROJ" "$SITE"
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not cover the current"* ]]
+  "$SCRIPT" method "$PROJ" build >/dev/null
+  run "$SCRIPT" build-record "$PROJ" "$SITE"     # no reference picked: nothing about motion
+  [ "$status" -eq 0 ]
+  # a picked reference: inventory, the PM's direction choice over it, the site observed as it is
+  ans r1 references "$(sha_of '[{"id":"fx","url":"http://127.0.0.1:39931/index.html","why":"pohyb"}]')" choose
+  jqw '.refs = [{"id":"fx","url":"http://127.0.0.1:39931/index.html","why":"pohyb","picked":true}]'
+  run "$SCRIPT" build-record "$PROJ" "$SITE"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no .aid-ui/motion.json"* ]]
+  mkdir -p "$PROJ/.aid-ui/refs"; cp "$FXR" "$PROJ/.aid-ui/refs/fx.motion.json"
+  python3 "$MP" inventory "$PROJ" >/dev/null
+  python3 - "$PROJ/.aid-ui/motion.json" <<'PY'
+import json, sys
+p = sys.argv[1]; inv = json.load(open(p))
+for i in inv["items"]:
+    i["disposition"] = "adopt"; i["target"] = i.get("name") or i.get("property") or "leave,arrive"
+json.dump(inv, open(p, "w"), ensure_ascii=False)
+PY
+  msha="$(sha256sum "$PROJ/.aid-ui/motion.json" | cut -d' ' -f1)"
+  run "$SCRIPT" build-record "$PROJ" "$SITE"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no recorded direction choice for the inventory as it is now"* ]]
+  forge d1 direction "smer:$msha" choose
+  run "$SCRIPT" build-record "$PROJ" "$SITE"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no .aid-ui/build.motion.json"* ]]
+  jq --arg s "$(python3 "$MP" dirsha "$SITE")" '.dir_sha256 = $s | .keyframes |= map(select(.name != "spin"))' "$FXR" > "$PROJ/.aid-ui/build.motion.json"
+  run "$SCRIPT" build-record "$PROJ" "$SITE"
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not carry the reference's motion"* && "$output" == *"'spin' never ran"* ]]
+  jq --arg s "$(python3 "$MP" dirsha "$SITE")" '.dir_sha256 = $s' "$FXR" > "$PROJ/.aid-ui/build.motion.json"
+  run "$SCRIPT" build-record "$PROJ" "$SITE"
+  [ "$status" -eq 0 ]; [[ "$output" == *"BUILD: "*"PASS: z 9 pohybů vzoru"* ]]
+  [ -f "$PROJ/.aid-ui/build.motion.check.json" ]
+  echo '<p>změna</p>' >> "$SITE/index.html"
+  run "$SCRIPT" build-record "$PROJ" "$SITE"
+  [ "$status" -eq 1 ]; [[ "$output" == *"was not observed over the directory as it is now"* ]]
+}
+
+@test "P108 end: links binds the web to the recorded build and the customer link to the customer page; chapter-all refuses before the final gate's page and report and a returned web; finish re-checks the links and writes the verdict" {
+  ready
+  run "$SCRIPT" links "$PROJ" --web "http://127.0.0.1:9/" --customer "$CUST_URL"
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not answer 200"* ]]
+  run "$SCRIPT" links "$PROJ" --web "${LINK_URL}kontakt.html" --customer "$CUST_URL"      # answers 200, but it is not the home page of the build
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not serve the recorded build's index.html"* ]]
+  run "$SCRIPT" links "$PROJ" --web "$LINK_URL" --customer "${LINK_URL}index.html"
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not serve docs/zakaznik/index.html"* ]]
+  "$SCRIPT" links "$PROJ" --web "$LINK_URL" --customer "$CUST_URL" >/dev/null
+  [ "$(jq -r .web "$PROJ/.aid-ui/links.json")" == "$LINK_URL" ]
+  # the end in order: the page the gate ran over (sha), the coverage report of that gate
+  "$SCRIPT" chapter "$PROJ" barvy navrh
+  echo '<p>jiná</p>' > "$PROJ/docs/zakaznik/index.html"
+  run "$SCRIPT" chapter-all-target "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"not the page the recorded gate ran over"* ]]
+  echo '<p>zakaznik</p>' > "$PROJ/docs/zakaznik/index.html"
+  jq '.gate_run_at = "2020-01-01T00:00:00Z"' "$PROJ/docs/design/soulad-summary.json" > "$PROJ/s.t" && mv "$PROJ/s.t" "$PROJ/docs/design/soulad-summary.json"
+  run "$SCRIPT" chapter-all-target "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"not from the recorded gate"* ]]
+  result '.rows |= map(if .check == "customer_page" then .status = "not_covered" else . end)'; "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null; end_order
+  run "$SCRIPT" chapter-all-target "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"did not pass the customer page"* ]]
+  result; "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null; end_order
+  [ ! -f "$PROJ/.aid-ui/finish.json" ]
+  run "$SCRIPT" chapter-all-target "$PROJ"
+  [ "$status" -eq 0 ]
+  # a returned web is no handover
+  ans h0 handover "$("$SCRIPT" chapter-all-target "$PROJ")" choose '[{"id":"a","value":"prevzit"},{"id":"b","value":"vyhrada"},{"id":"x","value":"vratit"}]'
+  run "$SCRIPT" chapter-all "$PROJ" --by PM --answer h0
+  [ "$status" -eq 1 ]; [[ "$output" == *"the PM returned the web"* ]]
+  [ "$(jq -r '.chapters.barvy.status' "$STATE")" == navrh ]
+  ans h1 handover "$("$SCRIPT" chapter-all-target "$PROJ")" choose
+  "$SCRIPT" chapter-all "$PROJ" --by PM --answer h1 >/dev/null
+  [ "$(jq -r '.handover.verdict, .handover.rating' "$STATE" | paste -sd' ')" == "prevzit 8-10" ]
+  # finish: links must still answer; the verdict lands in finish.json; a new build forgets it
+  rm "$PROJ/.aid-ui/links.json"
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no .aid-ui/links.json"* ]]
+  "$SCRIPT" links "$PROJ" --web "$LINK_URL" --customer "$CUST_URL" >/dev/null
+  kill "$LINK_PID"; wait "$LINK_PID" 2>/dev/null || true; LINK_PID=""
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no longer answers 200"* ]]
+  serve_200; "$SCRIPT" links "$PROJ" --web "$LINK_URL" --customer "$CUST_URL" >/dev/null
+  run "$SCRIPT" finish "$PROJ"
+  [ "$status" -eq 0 ]; [[ "$output" == *"verdict prevzit (8-10/10)"* ]]
+  [ "$(jq -r '.web, .verdict, .rating' "$PROJ/.aid-ui/finish.json" | paste -sd' ')" == "$LINK_URL prevzit 8-10" ]
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  [ ! -f "$PROJ/.aid-ui/finish.json" ] && [ ! -f "$PROJ/.aid-ui/links.json" ]
+}
+
+@test "P108 migration: a restored answer without a live record is taken only when the studio's migrated cards hash equals the one recorded live" {
+  ans v1 variant "$(sha_of '{"type":"web","brand":"new","local":false}')" choose
+  # the studio restarts without its in-memory answer and with a history line from before the hash was kept
+  kill "$STUDIO_PID"; wait "$STUDIO_PID" 2>/dev/null || true
+  python3 - "$PROJ/.aid-ui/studio/history.jsonl" <<'PY'
+import json, sys
+p = sys.argv[1]; lines = [json.loads(l) for l in open(p) if l.strip()]
+out = []
+for e in lines:
+    if e.get("question", {}).get("id") == "v1": e.pop("cards_sha256", None)
+    out.append(json.dumps(e, ensure_ascii=False))
+open(p, "w").write("\n".join(out) + "\n")
+PY
+  cp "$PROJ/.aid-ui/studio/payload.json" "$T/payload.keep"
+  STUDIO_PID=""; studio; cp "$T/payload.keep" "$PROJ/.aid-ui/studio/payload.json"   # studio() resets the payload; the question stays listed
+  run "$SCRIPT" set "$PROJ" variant '{"type":"web","brand":"new","local":false}' --answer v1
+  [ "$status" -eq 0 ]
+  # the same, with the cards changed in the payload since: the migrated hash differs, refused
+  ans v2 variant "$(sha_of '{"type":"web","brand":"new","local":true}')" choose
+  kill "$STUDIO_PID"; wait "$STUDIO_PID" 2>/dev/null || true
+  python3 - "$PROJ/.aid-ui/studio/history.jsonl" "$PROJ/.aid-ui/studio/payload.json" <<'PY'
+import json, sys
+p = sys.argv[1]; lines = [json.loads(l) for l in open(p) if l.strip()]
+open(p, "w").write("\n".join(json.dumps({k: v for k, v in e.items() if not (e.get("question", {}).get("id") == "v2" and k == "cards_sha256")}, ensure_ascii=False) for e in lines) + "\n")
+q = sys.argv[2]; pl = json.load(open(q))
+for c in pl["cards"]:
+    if c["question"] == "v2": c["title"] = "jiná karta"
+json.dump(pl, open(q, "w"))
+PY
+  cp "$PROJ/.aid-ui/studio/payload.json" "$T/payload.keep"
+  STUDIO_PID=""; studio; cp "$T/payload.keep" "$PROJ/.aid-ui/studio/payload.json"
+  run "$SCRIPT" set "$PROJ" variant '{"type":"web","brand":"new","local":true}' --answer v2
+  [ "$status" -eq 1 ]; [[ "$output" == *"differs from the recorded one"* ]]
+}
+
+@test "P108 open items: add and done need shape; the PM's own items come from the studio history once each; the customer page lists what stays open" {
+  run "$SCRIPT" open-item "$PROJ" add --text "" --owner PM
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" open-item "$PROJ" add --text "Fotka lékaře" --owner nekdo
+  [ "$status" -eq 2 ]
+  run "$SCRIPT" open-item "$PROJ" add --text "Fotka lékaře" --owner klient --due 2026-11-01
+  [ "$status" -eq 0 ]; [[ "$output" == "OPEN ITEM: oi-1" ]]
+  "$SCRIPT" open-item "$PROJ" add --text "Doména" --owner PM >/dev/null
+  [ "$(jq -c '[.open_items[] | [.id, .owner, .due, .status]]' "$STATE")" == '[["oi-1","klient","2026-11-01","open"],["oi-2","PM",null,"open"]]' ]
+  "$SCRIPT" open-item "$PROJ" done oi-2
+  [ "$(jq -r '.open_items[1].status' "$STATE")" == done ]
+  run "$SCRIPT" open-item "$PROJ" done oi-9
+  [ "$status" -eq 1 ]
+  mkdir -p "$PROJ/.aid-ui/studio"
+  printf '{"by":"pm","kind":"open_item","text":"Právník zkontroluje text","at":"2026-10-10T08:00:00.123456Z"}\n{"by":"pm","kind":"open_item","text":"x","at":"nic"}\nnot json\n' >> "$PROJ/.aid-ui/studio/history.jsonl"
+  run "$SCRIPT" open-items-sync "$PROJ"
+  [ "$status" -eq 0 ]; [[ "$output" == "SYNC: 1 new open item(s) from the PM" ]]
+  run "$SCRIPT" open-items-sync "$PROJ"
+  [[ "$output" == "SYNC: 0 new open item(s) from the PM" ]]
+  [ "$(jq -c '[.open_items[] | select(.by == "pm") | .id]' "$STATE")" == '["pm-20261010080000123456"]' ]
 }
 
 @test "all conditions met: finish succeeds; a backward step clears finished" {
@@ -1020,7 +1222,7 @@ JSON
   "$SCRIPT" exception "$PROJ" --check http_200 --browser webkit --answer e1 >/dev/null
   result '.rows |= map(if .browser == "webkit" and .check != "http_200" then .status = "not_covered" else . end)'
   "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
-  [ "$(jq -r '.exceptions[0].resolved' "$STATE")" = 2026-09-28T10:00:00Z ]
+  [ "$(jq -r '.exceptions[0].resolved' "$STATE")" = "$(jq -r .run_at "$RES")" ]
   result '.rows |= map(if .browser == "webkit" then .status = "not_covered" else . end)'
   "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
   run "$SCRIPT" finish "$PROJ"

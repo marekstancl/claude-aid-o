@@ -188,6 +188,12 @@ items:
   - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > What — definice hotového frontu#2d4601cf"
     text: "**FB-24 Minimum pro firmu** | na každé stránce identifikace podnikatele (IČO), u formuláře"
     do: "script:business_minimum"
+  - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > How — fáze a kdo rozhoduje > Pohyb a měření (FB-25, FB-26; 10. 10. 2026)#119c1728"
+    text: "**FB-25 Úvodní overlay má jediný tvar:** prvek s atributem `data-aid-intro`, kte"
+    do: "script:motion_settled"
+  - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > How — fáze a kdo rozhoduje > Pohyb a měření (FB-25, FB-26; 10. 10. 2026)#319ef040"
+    text: "**FB-26 Stavba nese pohyb vybraného vzoru** tak, jak ho zadavatel viděl u směrů "
+    do: "script:motion_fidelity"
   - id: "ecosystem/specs/design-system-standard.md#Design systém aplikací > Kontrola před nasazením#9fbc1652"
     text: "Prázdný, chybový a načítací stav existují (ne jen šťastná cesta)."
     do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}

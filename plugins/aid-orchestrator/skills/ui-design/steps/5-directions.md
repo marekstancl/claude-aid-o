@@ -35,6 +35,27 @@ Vybrané vzory a styly v `.aid-ui/refs/`, brand balíček, vize a tón,
    `aid-ui-tool.sh webp` do `.aid-ui/studio/direction-<n>.webp`.
 4. Každý směr projde `references/genericity-rubric.md`; generický se
    přepracuje, neukáže.
+4m. **Soupis pohybu vzoru, před stavbou směrů** (P108, 10. 10. 2026; PM: „animace i níže, ne jen
+   úvod"): `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-motion.py" inventory <project>` vyrobí
+   `.aid-ui/motion.json` ze záznamu vybraného vzoru (krok 4 bod 7): položka za každý keyframe, každou
+   skupinu přechodů (vlastnost + scénář: načtení / posun / najetí / zaměření), každý pohyb řízený
+   skriptem a přechod mezi stránkami. U každé položky vyplň `disposition` (`adopt` = převezmu,
+   `replace` = nahradím jiným pohybem, `omit` = vynechám), `target` (jméno keyframe nebo vlastnost
+   přechodu, které ponesou všechny tři směry i stavba - směry stav nad společným základem), u `replace`
+   a `omit` `reason` a `label` (lidské jméno pohybu, které uvidí PM, např. „otáčení pečeti"), u
+   načítacích animací `frequency` (`every_load` jako vzor; `first_load_only` jen s důvodem - 9. 10.
+   PM úvodní animaci neviděl, protože agent sám zvolil „jednou za relaci"). Vlastní pohyb navíc jde
+   jen do `extra` s důvodem. Nic z hlavy: položky jsou jen ze záznamu.
+   Každý směr musí pohyb **nést a prokázat**: po stavbě směru ho nástroj pozoruje jako cizí web -
+   `bash "$AID_PLUGIN_PATH/scripts/aid-ui-tool.sh" motion --dir <project>/.aid-ui/directions/<n>
+   <project>/.aid-ui/directions/<n>.motion.json` (nástroj složku servíruje sám na volném portu
+   a otisk složky zapíše sám; záznam z jiné adresy kontrola s `--dir` odmítne)
+   a pak `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-motion.py" check <project> --observed
+   <project>/.aid-ui/directions/<n>.motion.json --dir <project>/.aid-ui/directions/<n> --write
+   <project>/.aid-ui/directions/<n>.motion.check.json` (záznam i kontrola leží VEDLE složky směru,
+   ne v ní). FAIL vyjmenuje, co se nespustilo (keyframe, který neběžel; vyplutí jen nahoře, když vzor
+   má i dole; úvod, který při druhém načtení neběžel) - oprav směr a pozoruj znovu. Změna složky po
+   pozorování = pozorovat znovu (otisk složky).
 5. Tři karty otázky `direction` ve studiu. Všechny tři vycházejí z vybraného vzoru a z toho, co
    k němu PM napsal; liší se tím, jak daleko vzor vezmou (věrně / s obsahem navíc / odvážněji),
    ne tím, že by dva šly jinam. Otázka nese `prior` = přesně zaznamenaná odpověď PM k vzorům
@@ -59,6 +80,12 @@ Vybrané vzory a styly v `.aid-ui/refs/`, brand balíček, vize a tón,
    do souboru v `.aid-ui/`, `aid-ui-state.sh body <project> smer --file <soubor>`,
    `aid-ui-state.sh chapter <project> smer navrh`.
 8. Smaž `.aid-ui/refs/*.png` (MUST 7); styly `.json` zůstávají.
+9. Otázka `direction` nese soupis (studio ji jinak odmítne, když má projekt vybraný vzor):
+   `target` = `smer:<sha256 .aid-ui/motion.json>`, `motion` = `{sha256, sentence, exceptions}` přesně
+   z `aid-ui-motion.py summary <project>` (věta „z N pohybů vzoru: a převzato, b nahrazeno,
+   c vynecháno" a každé nahrazení či vynechání jmenovitě s důvodem - volba směru je zároveň souhlas
+   PM s nimi), každá karta `dir` = jméno složky směru s PASS kontrolou nad aktuálním otiskem složky.
+   Vrácení s poznámkou k pohybu → uprav soupis, pozoruj směry znovu, otázku znovu (nový otisk).
 
 ## Co PM rozhoduje
 

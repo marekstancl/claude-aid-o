@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 587          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 594          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4498,3 +4498,99 @@ enforcements:
     recovery: "The refusal names the file; move it out of docs/brand/ (state belongs in docs/design/brand-state.json, aid-ui-state.sh init migrates it) and start again."
     test_covers: "brand of a folder holding state.json, a leftover temp file, a foreign file or a symlink, and of a folder outside docs/brand: exit 2, nothing served (test-aid-ui-serve.bats)."
     test: "scripts/tests/bats/test-aid-ui-serve.bats"
+
+  - id: aid_ui_motion_observed
+    type: 12
+    source: "lib/ui-fidelity/aid-ui-motion.mjs (aid-ui-tool.sh motion); skills/ui-design/references/motion-record.schema.json"
+    instruction: "skills/ui-design/steps/4-references.md point 7"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "Completeness over a foreign site: cross-origin stylesheets, iframes, shadow DOM and motion no scenario triggers (a carousel started by a timer after 8 s) stay unseen; they are listed under coverage, never invented."
+    description: "P108 — the motion of a page is observed at runtime, not guessed from CSS: scenarios load, second load (frequency), scroll by wheel, hover and focus of every control, click on the first inner link; every keyframe, transition (property, scenario), script-driven change and the page transition with where (hero / below / overlay) and timing; a record that breaks the schema is not written."
+    recovery: "A page that does not load is exit 1 (the url); the record's coverage names what was not seen - tell the PM at the reference card."
+    test_covers: "intro overlay first load only, hero fade-up, reveal below on scroll, infinite spin below, hover and focus transitions, leave and arrive animations across a page transition, schema, a record without coverage refused, exit 1 and 2"
+    test: "scripts/tests/bats/test-aid-ui-motion.bats"
+
+  - id: aid_ui_motion_inventory
+    type: 12
+    source: "scripts/aid-ui-motion.py (inventory, check); lib/aid-ui-studio/server.py (check_motion)"
+    instruction: "skills/ui-design/steps/5-directions.md points 4m and 9"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That a replaced motion is as good as the reference's, or that an omission the PM consented to was wise - the studio proves every adopt/replace ran in its scenario and place and shows every replace/omit by name and reason; the judgement is the PM's choice of a direction. A run with no picked reference carries no inventory. A transition group is (property, scenario), not (property, selector): the reference's selectors do not exist in our pages, so one hover transition of that property on any control satisfies the group unless the target pins a selector (property@selector). The observation record itself is unsigned: aid-ui-tool.sh motion --dir serves the directory itself and writes its sha, check refuses a record not observed at a local copy, and the gate re-observes the build; a forged record over a direction prototype is not detected beyond that."
+    description: "P108 — the reference's motion record becomes .aid-ui/motion.json (one item per keyframe, transition group, script motion, page transition) with adopt / replace / omit, reason and label where the rules want them; a direction question needs target smer:<sha256 of the inventory>, a `motion` block equal to the inventory's summary, and for every card a prototype directory whose runtime observation (beside it, bound to the directory's sha) the server checks itself against the inventory; a done direction question must have a recorded answer about an inventory."
+    recovery: "The refusal names the item that never ran, ran only above the fold, did not run on the second load, or the card without dir / observation; fix the prototype, observe again (aid-ui-tool.sh motion --dir-sha256), check, reopen the question with the inventory's current sha."
+    test_covers: "inventory needs the picked reference's record of its url and schema; one item per source; no overwrite without --force; check passes against its own record and names a missing keyframe, hero-only reveal, lost second-load run; replace/omit need reason and label; extra needs reason and presence; --dir binds the directory sha; studio: no picked reference = free, missing inventory, wrong target, wrong motion block, card without dir, missing observation, failed check, changed directory each refused"
+    test: "scripts/tests/bats/test-aid-ui-motion-inventory.bats; scripts/tests/bats/test-aid-ui-studio.bats"
+
+  - id: aid_ui_build_method
+    type: 12
+    source: "scripts/aid-ui-state.sh (build-record: receipt_fresh build, aid-ui-motion.py check over .aid-ui/build.motion.json); skills/ui-design/sections.json methods.build"
+    instruction: "skills/ui-design/steps/6-build.md (Postup před stavbou, point 8)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the agent applied what it read: the receipt proves the method files were printed within 12 h before the build was recorded, the motion check proves the chosen direction's motion runs in the build. The craft itself is the gate's and the PM's page approval."
+    description: "P108 — build-record refuses without a fresh `build` method receipt (frontend-design, Impeccable craft floor, step 6, the live frontend-build standard) and, with a picked reference, without the PM's recorded direction choice over the inventory as it is now and a PASS of the motion check over an observation of the site as it is (dir sha)."
+    recovery: "Run aid-ui-state.sh method <project> build and read it; observe the served build with aid-ui-tool.sh motion --dir-sha256 \"$(aid-ui-motion.py dirsha <site>)\"; build-record names the motion that did not run."
+    test_covers: "no receipt, stale receipt, receipt of changed files refused; no reference = free; picked reference without inventory, without a direction choice over it, without an observation, with a lost keyframe, with a site changed after the observation refused; passes with all"
+    test: "scripts/tests/bats/test-aid-ui-state.bats"
+
+  - id: aid_ui_motion_gate_rows
+    type: 12
+    source: "lib/ui-fidelity/aid-ui-verify.mjs (settleMotion, runMotionFidelity); skills/ui-design/coverage/checks.yaml"
+    instruction: "skills/ui-design/steps/7-verify.md point 1"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "An infinite animation is left running (a mid-frame sample of it can still fail contrast); the fidelity row observes the home page only."
+    description: "P108 — motion_settled: every page is measured and photographed after its finite animations ended, 500 ms quiet and the data-aid-intro overlay gone (10 s cap, else fail), so a reveal through opacity is not a contrast failure and no agent has a reason to cut motion; motion_fidelity: the gate observes the built home page itself and checks it against .aid-ui/motion.json (N/A without a picked reference, fail without an inventory or with a motion that did not run)."
+    recovery: "motion_settled fail: an intro over 10 s or an animation that never ends - shorten it or make it infinite on purpose; motion_fidelity fail: the row names the motion, fix the build (step 6), never the inventory."
+    test_covers: "settled pass after the fixture intro; fail with an intro that never ends; fidelity N/A without a reference, fail without an inventory, pass with the fixture motion, fail when the spin is removed"
+    test: "scripts/tests/bats/test-aid-ui-verify.bats"
+
+  - id: aid_ui_end_in_order
+    type: 12
+    source: "scripts/aid-ui-state.sh (links, finish, chapter-all-target / chapter-all: end_in_order, gate-record same run_at); lib/aid-ui-studio/server.py (check_handover, vyhrada comment); scripts/aid-ui-verify.sh (--copy-subject note)"
+    instruction: "skills/ui-design/steps/7-verify.md points 7c, 7d, 8, 9"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the linked preview is the deployed site (deployment is outside the run) or that the PM read the page before clicking; the links answer 200 from the host and sit in the handover text."
+    description: "P108 — the end of a run is in order: links (two addresses answering 200) before the handover question, which must carry both and three verdict cards (prevzit / vyhrada with a comment / vratit); chapter-all only after the final gate passed the customer page, with the page not newer than the result and the coverage report not older; gate-record refuses a result with the recorded run_at (a --copy-subject run is not a gate run); finish checks the links again and writes finish.json; the studio's Hotovo panel shows the links, the verdict sentence and the open items."
+    recovery: "Each refusal names the step: serve the pages and run links; make the customer page, run the gate, gate-record, the coverage report, then the chapters and the handover; run aid-ui-verify.sh without --copy-subject."
+    test_covers: "links refuses a non-200 address; chapter-all-target refuses a page newer than the result, a report older than it, a gate without the customer_page pass; finish refuses without links.json and with a dead link, writes finish.json with the verdict; studio refuses a handover without links.json, without both links in the body, with wrong cards; a reservation without a comment is 422"
+    test: "scripts/tests/bats/test-aid-ui-state.bats; scripts/tests/bats/test-aid-ui-studio.bats"
+
+  - id: aid_ui_open_items
+    type: 12
+    source: "scripts/aid-ui-state.sh (open-item, open-items-sync); lib/aid-ui-studio/server.py (POST /open-item, /state open_items); scripts/aid-ui-customer-page.py (zbyva)"
+    instruction: "skills/ui-design/steps/7-verify.md point 7d"
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    not_guaranteed: "That every open point was written down - the agent's items are its judgement, the PM's come from the page; what is written is listed, nothing is invented."
+    description: "P108 — what stays open after the run (the agent's items with owner and date, the PM's own points from the studio's Doplnit bod, deferred content with the PM's words, the exceptions the PM granted) and every accepted decision with its date are on the customer page under 'Co zbývá a co bylo rozhodnuto' and on the studio's Hotovo panel."
+    recovery: "aid-ui-state.sh open-item add / done; open-items-sync before the customer page and finish."
+    test_covers: "add needs text and owner; done; sync takes the PM's history lines once each and skips a line without a time; POST /open-item 422 empty or over 500, 403 without auth, 200 appends the history line and /state lists it; the customer page lists open, deferred, exceptions and decisions and hides done items"
+    test: "scripts/tests/bats/test-aid-ui-state.bats; scripts/tests/bats/test-aid-ui-studio.bats; scripts/tests/bats/test-aid-ui-customer-page.bats"

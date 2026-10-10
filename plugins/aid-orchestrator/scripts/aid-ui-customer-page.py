@@ -207,6 +207,47 @@ def gather(proj):
                     "copy_passed": sum(1 for p in copy_pages if all(r.get("status") == "pass" for r in copy_rows if r.get("page") == p)),
                     "pending": list(dict.fromkeys(re.split(r"\s*\(", str(c.get("need", "")))[0].strip() for c in st.get("content_plan") or []
                                 if c.get("status") in ("deferred_by_pm", "missing")))}
+
+    # open and decided (P108, PM 10. 10. 2026): what stays open after the run (the agent's and the PM's own
+    # items, deferred content with the PM's words, the exceptions the PM granted) and what was decided
+    # (every answered question's outcome from the studio history, plus the agent's recorded decisions)
+    answers = st.get("answers") or {}
+    deferred = [{"need": re.split(r"\s*\(", str(c.get("need", "")))[0].strip(),
+                 "words": str((answers.get(c.get("answer")) or {}).get("comment") or "")}
+                for c in st.get("content_plan") or [] if c.get("status") == "deferred_by_pm"]
+    deferred = [dict(x) for x in {json.dumps(d, sort_keys=True): d for d in deferred}.values()]
+    exc = [{"check": CHECK_WORDS.get((e.get("selector") or {}).get("check"), "technická kontrola webu"),
+            "page": str((e.get("selector") or {}).get("page") or "").replace("*", ""), "reason": str(e.get("reason") or "")}
+           for e in st.get("exceptions") or [] if not e.get("resolved")]
+    if st.get("brand_package_waiver"):
+        exc.append({"check": "balíček značky", "page": "", "reason": str(st["brand_package_waiver"].get("reason") or "")})
+    opened = [{"text": str(i.get("text") or ""), "owner": str(i.get("owner") or ""), "due": str(i.get("due") or "")}
+              for i in st.get("open_items") or [] if isinstance(i, dict) and i.get("status") != "done"]
+    known = {str(i.get("id")) for i in st.get("open_items") or [] if isinstance(i, dict)}
+    decided = []
+    hist = os.path.join(proj, ".aid-ui/studio/history.jsonl")
+    if os.path.exists(hist):
+        with open(hist, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    h = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(h, dict) or h.get("by") != "pm":
+                    continue
+                if h.get("kind") == "open_item" and isinstance(h.get("text"), str) and re.match(r"\d{4}-\d{2}-\d{2}T", str(h.get("at") or "")):
+                    hid = "pm-" + re.sub(r"[^0-9]", "", str(h.get("at")))[:20]
+                    if hid not in known:   # the PM's point not yet synced into the state: listed all the same
+                        opened.append({"text": h["text"][:500], "owner": "PM", "due": ""}); known.add(hid)
+                    continue
+                q, a = h.get("question") or {}, h.get("answer") or {}
+                if isinstance(q.get("outcome"), str) and q["outcome"].strip() and a.get("decision") in ("approve", "choose"):
+                    decided.append({"at": str(a.get("at") or "")[:10], "outcome": q["outcome"].strip()})
+    for d in st.get("decisions") or []:
+        if isinstance(d, dict) and (d.get("outcome") or d.get("title")):
+            decided.append({"at": str(d.get("at") or "")[:10], "outcome": str(d.get("outcome") or d.get("title"))})
+    decided = [dict(x) for x in {json.dumps(d, sort_keys=True): d for d in decided}.values()]
+    D["zbyva"] = {"open": opened, "deferred": deferred, "exceptions": exc, "decided": decided}
     return D, res_file
 
 
@@ -224,7 +265,7 @@ CHECK_WORDS = {"http_200": "dostupnost stránek", "glyph_coverage": "písmo a di
                "reduced_motion": "omezení pohybu", "touch_targets": "velikost ovládacích prvků na mobilu",
                "safe_area": "okraje displeje telefonu", "privacy_before_consent": "soukromí před souhlasem",
                "vision_doc": "vize produktu", "coverage": "soulad se standardy", "customer_page": "stránka pro zákazníka",
-               "copy_review": "kontrola textů"}
+               "copy_review": "kontrola textů", "motion_settled": "doběhnutí animací před měřením", "motion_fidelity": "pohyb podle vzoru"}
 
 
 def cz(n, one, few, many):
@@ -338,6 +379,21 @@ def render(D):
         if c["pending"]:
             cb += f'<div class="zbyva"><b>Před spuštěním zbývá:</b> {E(", ".join(c["pending"]))}.</div>'
         areas.append(("obsah", "Obsah", (f"texty: {c['parts']} {cz(c['parts'], 'část', 'části', 'částí')}" if c['parts'] else "kontrola textů"), "", "Texty všech stránek.", cb))
+    # what stays open and what was decided (P108)
+    z = D.get("zbyva") or {}
+    rows = []
+    for i in z.get("open", []):
+        rows.append(f'<li>{E(i["text"])}{(" · " + E(i["owner"])) if i.get("owner") else ""}{(" · do " + E(i["due"])) if i.get("due") else ""}</li>')
+    for d in z.get("deferred", []):
+        rows.append(f'<li>{E(d["need"])} - doplní se po dodání{(" („" + E(d["words"]) + "“)") if d.get("words") else ""}</li>')
+    for e in z.get("exceptions", []):
+        rows.append(f'<li>Výjimka zadavatele: {E(e["check"])}{(" (" + E(e["page"]) + ")") if e.get("page") else ""}{(" - " + E(e["reason"])) if e.get("reason") else ""}</li>')
+    dec = "".join(f'<li>{E(d["at"])}: {E(d["outcome"])}</li>' for d in z.get("decided", []))
+    zb = (f'<ul class="zbyva-list">{"".join(rows)}</ul>' if rows else '<p style="margin:0">Nic otevřeného.</p>') + \
+         (f'<details><summary>Přijatá rozhodnutí ({len(z.get("decided", []))})</summary><ul>{dec}</ul></details>' if dec else "")
+    n_open = len(rows)
+    areas.append(("zbyva", "Co zbývá a co bylo rozhodnuto", f"{n_open} {cz(n_open, 'otevřený bod', 'otevřené body', 'otevřených bodů')}, {len(z.get('decided', []))} {cz(len(z.get('decided', [])), 'rozhodnutí', 'rozhodnutí', 'rozhodnutí')}", "",
+                  "Co ještě přijde a kdo to dodá; pod tím každé rozhodnutí zadavatele s datem.", zb))
     areas.append(("marketing", "Marketing", '<span class="stitek">připravujeme</span>', "pozdeji", "",
                   '<p style="margin:0;color:var(--muted)">Tahle část ještě není hotová.</p>'))
     out = []

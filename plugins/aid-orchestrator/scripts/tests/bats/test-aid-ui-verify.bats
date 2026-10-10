@@ -19,6 +19,7 @@ setup() {
   cp "$FX/project/DESIGN.md" "$PROJ/"
   cp -r "$FX/site" "$SITE"
   "$SC/aid-ui-state.sh" init "$PROJ" >/dev/null
+  "$SC/aid-ui-state.sh" method "$PROJ" build >/dev/null   # P108: build-record wants the build method receipt
 }
 
 teardown() {
@@ -297,6 +298,7 @@ YML
   jq '.structure = {pages: [{id:"home", url:"/"}, {id:"o-nas", url:"/o-nas", legal: true}]}' "$PROJ/docs/design/brand-state.json" > "$T/s" && mv "$T/s" "$PROJ/docs/design/brand-state.json"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   run bash "$SC/aid-ui-verify.sh" "$PROJ" --copy-subject "$T/subj1.json"
+  [[ "$output" == *"BRÁNA NEBĚŽELA"* ]]   # P108: a texts-only run says so
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.pages["index.html"] | .lang == "cs" and .legal == false and ([.blocks[] | select(.text == "Jen na mobilu")] | length == 1)' "$T/subj1.json" >/dev/null
   jq -e '.pages["o-nas/index.html"].legal == true' "$T/subj1.json" >/dev/null
@@ -444,4 +446,45 @@ YML
   done
   curl -sf "${url}.well-known/security.txt" | grep -q Contact
   curl -sf "${url}o-nas/" >/dev/null
+}
+
+@test "P108 motion rows: motion_settled passes once the intro (data-aid-intro) and finite animations ended and fails when they do not; motion_fidelity is N/A without a reference, fails on a missing inventory or a lost motion, passes with the motion seen" {
+  MP="$SC/aid-ui-motion.py"; FXR="$BATS_TEST_DIRNAME/../fixtures/aid-ui/motion-record.json"; MS="$BATS_TEST_DIRNAME/../fixtures/aid-ui/motion-site"
+  # the motion fixture as the site: its intro ends after 1.8 s, the reveals through opacity
+  rm -rf "$SITE"; cp -r "$MS" "$SITE"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$(st motion_settled index.html)" == pass ] || { jq -c '.rows[] | select(.check == "motion_settled")' "$RES"; return 1; }
+  jq -e '[.rows[] | select(.check == "motion_fidelity")] | length == 1 and all(.[]; .status == "pass" and (.detail | startswith("N/A: no reference picked")))' "$RES" >/dev/null
+  # an intro that never ends: motion_settled fails within the cap
+  sed -i 's/setTimeout(function(){intro.remove()},1800)/void 0/' "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$(st motion_settled index.html)" == fail ]
+  jq -e '[.rows[] | select(.check == "motion_settled" and .page == "index.html") | .detail] | all(contains("did not end within 10 s"))' "$RES" >/dev/null
+  cp "$MS/index.html" "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  # a picked reference: without an inventory the row fails; with the inventory the gate observes the site itself
+  jq '.refs = [{"id":"fx","url":"http://127.0.0.1:39931/index.html","picked":true}]' "$PROJ/docs/design/brand-state.json" > "$PROJ/s.t" && mv "$PROJ/s.t" "$PROJ/docs/design/brand-state.json"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '[.rows[] | select(.check == "motion_fidelity")] | all(.[]; .status == "fail" and (.detail | contains("no .aid-ui/motion.json")))' "$RES" >/dev/null || { jq -c '.rows[] | select(.check == "motion_fidelity")' "$RES"; return 1; }
+  mkdir -p "$PROJ/.aid-ui/refs"; cp "$FXR" "$PROJ/.aid-ui/refs/fx.motion.json"
+  python3 "$MP" inventory "$PROJ" >/dev/null
+  python3 - "$PROJ/.aid-ui/motion.json" <<'PY'
+import json, sys
+p = sys.argv[1]; inv = json.load(open(p))
+for i in inv["items"]:
+    i["disposition"] = "adopt"; i["target"] = i.get("name") or i.get("property") or "leave,arrive"
+json.dump(inv, open(p, "w"), ensure_ascii=False)
+PY
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '[.rows[] | select(.check == "motion_fidelity")] | all(.[]; .status == "pass" and (.detail | startswith("PASS: z 9 pohybů vzoru: 9 převzato")))' "$RES" >/dev/null || { jq -c '.rows[] | select(.check == "motion_fidelity")' "$RES"; return 1; }
+  # the build loses the spin: the gate names it (the build is re-recorded without the motion proof here:
+  # build-record's own motion check is test-aid-ui-state's; the gate re-observes regardless)
+  sed -i 's/animation:spin 8s linear infinite/animation:none/' "$SITE/index.html"
+  jq '.refs = []' "$PROJ/docs/design/brand-state.json" > "$PROJ/s.t" && mv "$PROJ/s.t" "$PROJ/docs/design/brand-state.json"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  jq '.refs = [{"id":"fx","url":"http://127.0.0.1:39931/index.html","picked":true}]' "$PROJ/docs/design/brand-state.json" > "$PROJ/s.t" && mv "$PROJ/s.t" "$PROJ/docs/design/brand-state.json"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '[.rows[] | select(.check == "motion_fidelity")] | all(.[]; .status == "fail" and (.detail | contains("spin")))' "$RES" >/dev/null || { jq -c '.rows[] | select(.check == "motion_fidelity")' "$RES"; return 1; }
 }

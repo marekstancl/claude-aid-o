@@ -45,8 +45,18 @@ PM ve studiu vybral 1-3 vzory a jejich vypočtené styly leží v `.aid-ui/refs/
    `jq -S -c -j . <project>/.aid-ui/refs.json | sha256sum`. PM vybere vzor
    (`choose`, `choice` = id karty).
 6. U vybraných: `browser_evaluate` s `getComputedStyle` na
-   `body, h1, h2, p, a, button` (písma, škála, barvy, zaoblení, mezery,
-   pohyb) → `<project>/.aid-ui/refs/<n>.json`. Jen inspirace.
+   `body, h1, h2, p, a, button` (písma, škála, barvy, zaoblení, mezery)
+   → `<project>/.aid-ui/refs/<n>.json`. Jen inspirace.
+7. **Pohyb vzoru pozoruje nástroj, ne agent** (po `set refs --answer`, pro vybraný vzor):
+   `bash "$AID_PLUGIN_PATH/scripts/aid-ui-tool.sh" motion <url vzoru> <project>/.aid-ui/refs/<id>.motion.json`
+   (Chromium 1440×900; scénáře načtení, druhé načtení, posun až dolů, najetí a zaměření
+   prvků, klik na první vnitřní odkaz). Záznam říká, co se **skutečně spustilo**: každý
+   keyframe se scénářem, místem (`hero` / `below` / `overlay`), délkou, opakováním
+   a četností (`every_load` / `first_load_only`), každý přechod (vlastnost, scénář), přechod
+   mezi stránkami (knihovna, co odjíždí, co přijíždí) a `coverage` - co nástroj nevidí
+   (cizí stylesheety, iframy, shadow DOM, chyby). Nic z CSS cizího webu se nedomýšlí.
+   `coverage` s nepokrytými zdroji řekni PM větou u vzoru. Ze záznamu krok 5 staví soupis
+   pohybu (`aid-ui-motion.py inventory`); bez záznamu vybraného vzoru soupis nevznikne.
 
 ## Co PM rozhoduje
 

@@ -26,6 +26,16 @@ u aplikace `webapp-tasks-states-standard.md` (UA-1..UA-11) - čti živě.
 
 Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 1p (`steps/1p-sources.md`).
 
+**Postup před stavbou (P108, 10. 10. 2026; pilot Coufal: stavba psaná z hlavy = 6/10).**
+`aid-ui-state.sh method <project> build` vypíše převzatý postup (frontend-design, převzatý
+craft floor, tento krok, živý frontend-build standard) a zapíše stvrzenku; `build-record` bez
+stvrzenky z posledních 12 h odmítne. Stavba nese pohyb vybraného směru beze změn: tytéž
+keyframes a přechody, které soupis `.aid-ui/motion.json` jmenuje (krok 5 bod 4m), včetně pohybu
+pod úvodem, při najetí myší a mezi stránkami. Úvodní overlay (je-li) má atribut `data-aid-intro`
+a skončí do 10 s - brána měří a fotí až po doběhnutí animací (řádek `motion_settled`), takže
+vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně, oprav bránu. Četnost
+úvodu podle soupisu (`every_load` jako vzor, `first_load_only` jen s důvodem, který PM viděl).
+
 1. Postav každou stránku ze `structure` (u aplikace každý tok se všemi jeho
    stavy) podle snímku frontend-design a standardů. Texty jen z obsahového
    plánu a registru faktů, psané podle „Jak psát vizi, slogany a texty"
@@ -80,7 +90,12 @@ Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 
    `aid-ui-design-to-css.sh DESIGN.md docs/brand/tokens.css`, písma
    `aid-ui-state.sh fonts <project> <URL Google Fonts nebo docs/brand/fonts/*.css>`,
    role `aid-ui-state.sh roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>`.
-8. `aid-ui-state.sh build-record <project> <složka buildu>`, hned potom
+8. Pozorování pohybu stavby (před zápisem buildu):
+   `aid-ui-tool.sh motion --dir <složka buildu> <project>/.aid-ui/build.motion.json`
+   (nástroj build servíruje sám a otisk složky zapíše sám);
+   `build-record` pak sám pustí `aid-ui-motion.py check` nad tím záznamem a odmítne, když
+   kterýkoli převzatý pohyb v buildu neběžel (vyjmenuje je) nebo build od pozorování změnil.
+   `aid-ui-state.sh build-record <project> <složka buildu>`, hned potom
    `aid-ui-state.sh decide <project> --step "Stavba" --title "Web postaven"
    --outcome "Postaveno <N> stránek podle vybraného vzhledu" --why "<název vybraného
    vzhledu>" --source .aid-ui/build.json` (N = počet stránek buildu; 2-4 „stránky").

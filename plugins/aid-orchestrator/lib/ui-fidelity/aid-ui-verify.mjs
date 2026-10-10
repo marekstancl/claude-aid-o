@@ -103,6 +103,23 @@ function runBrandPackage() {
   if (b.waived) return ['pass', `PM waiver for: ${b.missing.join('; ')}`];
   return b.missing.length ? ['fail', `missing: ${b.missing.join('; ')}`] : ['pass', `${b.present}/${b.required} required parts, ${b.files} files`];
 }
+// motion_fidelity (P108): the built site carries the motion of the PM's reference. The gate observes the
+// home page itself (aid-ui-motion.mjs: load, second load, scroll, hover, page) and aid-ui-motion.py
+// checks the observation against .aid-ui/motion.json (the inventory the PM saw with the directions).
+// No picked reference = N/A; a picked reference without an inventory = fail.
+function runMotionFidelity() {
+  if (!(st.refs || []).some(r => r && r.picked)) return NA('no reference picked: no motion to carry');
+  if (!fs.existsSync(path.join(project, '.aid-ui/motion.json'))) return ['fail', 'no .aid-ui/motion.json (aid-ui-motion.py inventory) although a reference is picked'];
+  const rec = path.join(out, 'motion.json');
+  const home = pages.includes('index.html') ? 'index.html' : pages[0];
+  const r1 = spawnSync('node', [path.join(HERE, 'aid-ui-motion.mjs'), urlOf(home), rec, '--settle-ms', '8000'], { encoding: 'utf8' });
+  if (r1.status !== 0 || !fs.existsSync(rec)) return ['not_covered', `aid-ui-motion.mjs exit ${r1.status}: ${(r1.stderr || '').trim().split('\n').pop().slice(0, 200)}`];
+  const r2 = spawnSync('python3', [path.join(HERE, '../../scripts/aid-ui-motion.py'), 'check', project, '--observed', rec, '--write', path.join(out, 'motion-check.json')], { encoding: 'utf8' });
+  const lines = (r2.stdout || '').trim().split('\n');
+  if (r2.status === 0) return ['pass', lines[0] || ''];
+  if (r2.status === 1) return ['fail', lines.join(' | ').slice(0, 400)];
+  return ['not_covered', `aid-ui-motion.py exit ${r2.status}: ${(r2.stderr || '').trim().split('\n').pop().slice(0, 200)}`];
+}
 // design_standard_doc: aid-ui-design-standard.py check over docs/design/design-standard.md (sections
 // of the WAN structure, every DESIGN.md colour token, the platform rows, a measured button role)
 function runDesignDoc() {
@@ -277,7 +294,11 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   }
   res.http_200 = resp && resp.status() === 200 ? ['pass', ''] : ['fail', `HTTP ${resp ? resp.status() : 'no response'} for ${url}`];
   await page.evaluate(() => document.fonts.ready).catch(() => {});
+  const settled = await settleMotion(page);
   await scrollAll(page);
+  // reveals fire while scrolling: settle again before anything is measured or photographed
+  const settled2 = settled.ok ? await settleMotion(page) : settled;
+  res.motion_settled = settled2.ok ? ['pass', `settled after ${settled.ms} ms, ${settled2.ms} ms after scrolling`] : ['fail', settled2.why];
   const o = await inPage(page);
   res.no_overflow = o.overflow ? ['fail', 'the page scrolls sideways'] : ['pass', ''];
   res.one_line_controls = o.wrapped.length ? ['fail', `wraps: ${o.wrapped.join(' | ')}`] : ['pass', ''];
@@ -356,6 +377,25 @@ const OWN_HOSTS = (() => {
   try { const d = readJson(opt.facts)?.domain; const v = typeof d === 'object' ? d?.value : d; return v ? [new URL(v).hostname.replace(/^www\./, '')] : []; } catch { return []; }
 })();
 const NA = why => ['pass', `N/A: ${why}`];
+// motion_settled (P108): the page is measured once its motion has settled - every finite animation
+// ended, 500 ms with no new one, and the intro overlay (the element marked data-aid-intro, the one
+// contract for an intro) gone from the document or display:none; 10 s cap. Infinite animations are
+// left alone. Until then a mid-animation sample would fail contrast for text that is still arriving.
+async function settleMotion(page) {
+  const t0 = Date.now(); let quiet = 0, last = -1;
+  while (Date.now() - t0 < 10000) {
+    const s = await page.evaluate(() => {
+      const anims = document.getAnimations();
+      const running = anims.filter(a => a.playState === 'running' && !(a.effect && a.effect.getTiming && a.effect.getTiming().iterations === Infinity)).length;
+      const intro = [...document.querySelectorAll('[data-aid-intro]')].filter(e => e.isConnected && getComputedStyle(e).display !== 'none').length;
+      return { running, started: anims.length, intro };
+    }).catch(() => ({ running: 0, started: 0, intro: 0 }));
+    if (s.running === 0 && s.intro === 0) { quiet = s.started === last ? quiet + 250 : 0; if (quiet >= 500) return { ok: true, ms: Date.now() - t0 }; }
+    else quiet = 0;
+    last = s.started; await page.waitForTimeout(250);
+  }
+  return { ok: false, why: 'the intro or a finite animation did not end within 10 s (data-aid-intro still shown, or an animation still running)' };
+}
 // applies(check) for this row of the matrix: the expensive checks run only where their row is written
 async function moreRows(page, url, requested, applies) {
   const res = {}, vw = page.viewportSize()?.width || 0;
@@ -499,7 +539,7 @@ const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls'
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
-  'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review'];
+  'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review', 'motion_settled', 'motion_fidelity'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -520,8 +560,9 @@ const COPY_JS = () => {
   // pushed wholly off the page to the left or top (a spam trap at left:-9999px) is not seen; a 1px
   // clipped screen-reader text inside the page is, and stays copy; a fixed element is measured against
   // the viewport (no scroll added). Limit: text moved out of its own box (text-indent) is still read
+  // the intro overlay (data-aid-intro, FB-25) is decoration that leaves within seconds: its letters are not copy
   const vis = e => { const r = e.getBoundingClientRect(), s = getComputedStyle(e);
-    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !e.closest('[data-aid-intro]')
       && r.right + (s.position === 'fixed' ? 0 : scrollX) > 0 && r.bottom + (s.position === 'fixed' ? 0 : scrollY) > 0; };
   const clean = x => (x || '').replace(/\s+/g, ' ').trim();
   const out = [], taken = new Set();
@@ -670,6 +711,7 @@ const customerPage = !want('customer_page') ? null : !project ? ['not_covered', 
   return r.status === 0 ? ['pass', ''] : r.status === 1 ? ['fail', say] : ['not_covered', r.status === 3 ? 'made after a green gate (step 7b), then the gate again' : `aid-ui-customer-page.py exit ${r.status}: ${say}`];
 })();
 const brandPkg = want('brand_package') ? (project ? runBrandPackage() : ['not_covered', 'no --project']) : null;
+const motionFid = want('motion_fidelity') ? (project ? runMotionFidelity() : ['not_covered', 'no --project']) : null;
 const designDoc = want('design_standard_doc') ? (project ? runDesignDoc() : ['not_covered', 'no --project']) : null;
 const glyphs = {}, lhs = {};
 for (const p of pages) {
@@ -681,7 +723,7 @@ if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json')
 
 const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
   'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
-  'no_overlap', 'page_weight', 'business_minimum'];
+  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled'];
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
 for (const b of BRS) {
@@ -743,6 +785,7 @@ for (const b of BRS) {
       put(m, 'required_files', miss.length ? 'fail' : 'pass', miss.join(', '));
       if (seo) { put(m, 'seo', ...seoRow(m.page)); put(m, 'ai_search', ...seoRow(m.page, true)); }
       if (brandPkg) put(m, 'brand_package', ...brandPkg);
+      if (motionFid) put(m, 'motion_fidelity', ...motionFid);
       if (designDoc) put(m, 'design_standard_doc', ...designDoc);
       if (visionDoc) put(m, 'vision_doc', ...visionDoc);
       if (coverageRow) put(m, 'coverage', ...coverageRow);

@@ -41,7 +41,7 @@
 set -euo pipefail
 
 LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib/ui-fidelity" && pwd)"
-usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify|png|measure|logo-sheet|vectorize|wordmark <args>" >&2; exit 2; }
+usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify|png|measure|motion|logo-sheet|vectorize|wordmark <args>" >&2; exit 2; }
 (( $# >= 1 )) || usage
 tool="$1"; shift
 if [[ "$tool" == wordmark ]]; then
@@ -83,6 +83,7 @@ case "$tool" in
   png)    js=aid-ui-png.mjs ;;
   logo-sheet) js=aid-ui-logo-sheet.mjs ;;
   measure) js=aid-ui-measure.mjs ;;
+  motion) js=aid-ui-motion.mjs ;;
   *) usage ;;
 esac
 [[ -f "$LIB/$js" ]] || { echo "ERROR: aid-ui-tool.sh: $LIB/$js missing" >&2; exit 1; }

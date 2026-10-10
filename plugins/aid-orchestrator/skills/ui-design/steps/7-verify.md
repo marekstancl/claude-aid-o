@@ -33,6 +33,12 @@ a `frontend-build-standard.md` (čti živě).
      (soubor navíc v adresáři běhu kontrola odmítne),
      `aid-emit-dispatch.sh complete --focus copy-review-standin --output-file <odpověď> --evidence-dir <run>`,
      pak `aid-ui-copy.py run <run> --stand-in <odpověď> --reason "<proč ne Codex>"`;
+   - Codex bez odpovědi (kvóta, výpadek): `aid-ui-copy.py run` to zapíše jako neúspěšný pokus; pak
+     `aid-emit-dispatch.sh start --focus copy-review-standin --agent-id aid-orchestrator:reviewer-light
+     --evidence-dir <run>`, JEDEN podagent Claude s čistým kontextem (model sonnet) dostane jen
+     `<run>/prompt.md` a soubory běhu a zapíše odpověď MIMO běh (scratchpad), `aid-emit-dispatch.sh
+     complete --focus copy-review-standin --output-file <odpověď> --evidence-dir <run>`, nakonec
+     `aid-ui-copy.py run <run> --stand-in <odpověď> --reason "<proč Codex neodpověděl>"`.
    - `aid-ui-state.sh copy-record <project> <run>` → verdikt po stránkách (ověřený a přepočtený skriptem).
      Stránka FAIL: oprav texty (krok 6, `build-record`) a znovu od subjektu. Po třetí neúspěšné kontrole
      stránky ve stejné řadě (stejná fakta a podklady) otázka `exception` ve studiu
@@ -53,6 +59,11 @@ a `frontend-build-standard.md` (čti živě).
    (`target docs/content/facts.yaml@<sha>` = aktuální soubor); jinou odpověď na údaj příkaz odmítne. Odpověď a vypsané věty zapiš do těla kapitoly `obsah`.
 1. Brána: `aid-ui-verify.sh <project>` → `.aid-ui/verify/result.json`,
    pak `aid-ui-state.sh gate-record <project> .aid-ui/verify/result.json`.
+   Řádek `motion_settled` (každá stránka): brána měří a fotí až po doběhnutí konečných animací
+   a zmizení úvodu `data-aid-intro` (strop 10 s; fail = úvod nebo animace neskončily). Řádek
+   `motion_fidelity` (jeden za web): brána sama pozoruje úvodní stránku (`aid-ui-motion.mjs`)
+   a kontroluje ji soupisem `.aid-ui/motion.json`; fail vyjmenuje pohyby vzoru, které v buildu
+   neběžely - oprav build (krok 6), ne soupis; bez vybraného vzoru N/A.
    Řádek `brand_package` (jeden za celý projekt) hlásí chybějící části brand balíčku
    podle `aid-ui-brand-package.py`: doplň je v kroku 1i; u balíčku od klienta otázka
    `exception` s `target` = `aid-ui-state.sh brand-waive-target <project>` a po `approve`
@@ -122,22 +133,45 @@ a `frontend-build-standard.md` (čti živě).
    a balíčku značky; nic se nepíše ručně. Odmítne (brána není zelená, jiný build) → bod 1.
    Pak bránu znovu (bod 1, `gate-record`): řádek `customer_page` hlídá, že stránka je
    z tohoto buildu a nemá interní slova. Odkaz na stránku pošli PM s náhledem.
+7c. Pořadí konce je natvrdo (P108; 9. 10. PM přebíral dvakrát, protože poslední brána změnila čísla
+   po jeho odpovědi): **poslední brána → `gate-record` → `aid-ui-coverage.sh report` → kapitoly
+   `kvalita` a `schvaleni` → otázka `handover`.** `chapter-all-target` i `chapter-all` odmítnou,
+   když zapsaná brána neprošla řádek `customer_page`, stránka `docs/zakaznik/index.html` není ta,
+   nad kterou brána běžela (otisk zapsaný při `gate-record`), nebo zpráva souladu není z této brány
+   (`gate_run_at`).
+7d. Otevřené body a odkazy (P108): co po běhu zůstává otevřené, zapiš
+   `aid-ui-state.sh open-item <project> add --text "<co>" --owner <PM|klient|agent> [--due <datum>]`
+   (fotky, právník, doména, hosting…); PM si může bod přidat sám ve studiu („Doplnit bod" na panelu
+   Hotovo) - před stránkou pro zákazníka a před `finish` je převezmi `aid-ui-state.sh open-items-sync
+   <project>`. Stránka pro zákazníka má oddíl „Co zbývá a co bylo rozhodnuto" (otevřené body, odložený
+   obsah se slovy PM, výjimky s důvodem, každé přijaté rozhodnutí s datem). Před otázkou `handover`:
+   `aid-ui-state.sh links <project> --web <adresa náhledu webu> --customer <adresa stránky pro
+   zákazníka>` - obě musí odpovědět 200 a servírovat přesně `index.html` zapsaného buildu a
+   `docs/zakaznik/index.html` (náhledy na hostu studia; nasazení na doménu je mimo běh). Nová
+   stavba nebo nová brána odkazy a `finish.json` zahodí.
 8. Kapitola `schvaleni` (tělo přes `aid-ui-state.sh body <project> schvaleni --file <soubor>`):
    stránky se schválením, výjimky s důvodem, souhrn souladu; pak
    `aid-ui-state.sh chapter <project> schvaleni navrh`. Převzetí všech kapitol
    = **jedna** otázka ve studiu druhu `handover` (`title` „Předat web?", `body` = co
-   dostáváte, po položkách lidsky, a co zbývá před zveřejněním; `outcome` „Návrh webu je
+   dostáváte, po položkách lidsky, **obě adresy z `links.json`** (studio otázku bez nich odmítne),
+   a co zbývá před zveřejněním; `outcome` „Návrh webu je
    dokončený; zveřejní se po doplnění …"; slovo „kapitola" v textu nepoužívej) s `target` =
-   `aid-ui-state.sh chapter-all-target <project>`; po `approve`
-   `aid-ui-state.sh chapter-all <project> --by PM --answer <id otázky>`.
+   `aid-ui-state.sh chapter-all-target <project>` a **třemi kartami** `value` `prevzit` („Převzít",
+   8-10/10), `vyhrada` („Převzít s výhradou", 6-7/10; studio si vyžádá, co vadí), `vratit` („Vrátit")
+   v tomto pořadí - PM tím dává hodnocení (`handover.verdict` a `rating` ve stavu, pak ve
+   `finish.json`); po `choose` prevzit nebo vyhrada
+   `aid-ui-state.sh chapter-all <project> --by PM --answer <id otázky>`; `vratit` chapter-all
+   odmítne - oprav, co komentář jmenuje, a ptej se znovu.
    `return` s komentářem → uprav jmenované kapitoly a otázku polož znovu
    (nový target). Změna těla kterékoli kapitoly po otevření otázky → otázka
    znovu. Jednotlivé `chapter <id> schvaleno` zůstává pro kapitolu, kterou
    krok schvaluje sám.
-9. `aid-ui-state.sh finish <project>` - běh končí. Odmítne → jmenuje, co
+9. `aid-ui-state.sh finish <project>` - běh končí: adresy z `links.json` musí znovu odpovědět 200,
+   zapíše `.aid-ui/finish.json` (datum, adresy, verdikt PM) a studio ukáže panel **Hotovo**:
+   větu z převzetí, „Otevřít web", „Co jste dostali", co zbývá a pole „Doplnit bod". Odmítne → jmenuje, co
    chybí (neschválená stránka, řádek bez výjimky, položka obsahu mimo
-   `confirmed_client`/`deferred_by_pm`, změna pokrytí); vrať se k bodu,
-   který to řeší.
+   `confirmed_client`/`deferred_by_pm`, změna pokrytí, chybějící nebo mrtvé odkazy); vrať se k bodu,
+   který to řeší. Nikdy neukonči běh bez odkazu, na který PM klikne a web uvidí.
 
 ## Co PM rozhoduje
 

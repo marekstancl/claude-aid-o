@@ -232,6 +232,23 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    nese `next_question`; vytvoř nové karty podle komentáře a zapiš je pod tím
    id do payloadu.
 
+## Co ještě nástroj hlídá (P108, 10. 10. 2026 - po pilotu Coufal 6/10)
+
+- **Pohyb vzoru** (`aid-ui-tool.sh motion`, `aid-ui-motion.py`): záznam vybraného vzoru pozoruje nástroj
+  za běhu (načtení, druhé načtení, posun, najetí, zaměření, přechod stránky); soupis
+  `.aid-ui/motion.json` říká u každého pohybu převzat / nahrazen / vynechán s důvodem a lidským
+  jménem; studio odmítne otázku `direction` bez soupisu (cíl `smer:<otisk>`, blok `motion`) nebo se
+  směrem, jehož pozorování soupis neprokáže (server kontrolu přepočítá sám); `build-record` odmítne
+  stavbu bez stvrzenky postupu `build` a bez téhož důkazu nad stavbou; brána má řádky
+  `motion_settled` (měří po doběhnutí animací, úvod jen přes `data-aid-intro`) a `motion_fidelity`
+  (pozoruje stavbu sama). Pohyb se nikdy neosekává kvůli bráně.
+- **Konec běhu**: `links` (dvě adresy, 200) před otázkou `handover`, která je nese v textu a má tři
+  karty (převzít / s výhradou / vrátit = hodnocení PM); `chapter-all` jen po poslední bráně nad
+  stránkou pro zákazníka a zprávě souladu; `finish` zapíše `finish.json` a studio ukáže Hotovo
+  s odkazy, otevřenými body (`open-item`, PM si přidá sám) a větou z převzetí.
+- **Stará historie studia** (před 9. 10. bez otisku karet): obnovená odpověď nese otisk karet z dnešního
+  payloadu a `migrated: true`; stavový skript ji přijme jen při shodě s otiskem, který zapsal živě.
+
 ## Směrování
 
 - Bez argumentu: krok = `jq .step <project>/docs/design/brand-state.json` (soubor

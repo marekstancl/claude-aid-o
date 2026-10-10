@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "aid-ui motion record",
+  "description": "What aid-ui-tool.sh motion SAW run on a page (reference site, direction prototype or built site). Every item was observed in a driven scenario; coverage says what the tool could not see.",
+  "type": "object",
+  "required": ["tool", "version", "url", "observed_at", "viewport", "keyframes", "transitions", "page", "libs", "coverage", "sha256"],
+  "properties": {
+    "tool": {"const": "aid-ui-motion"},
+    "version": {"const": 1},
+    "url": {"type": "string", "pattern": "^https?://"},
+    "observed_at": {"type": "string"},
+    "viewport": {"type": "object", "required": ["width", "height", "dpr"]},
+    "settle_ms": {"type": "integer"},
+    "dir_sha256": {"type": ["string", "null"]},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "keyframes": {"type": "array", "items": {"type": "object",
+      "required": ["name", "scenarios", "where", "selectors", "duration_ms", "iteration", "frequency"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "scenarios": {"type": "array", "minItems": 1, "items": {"enum": ["load", "scroll", "hover", "focus", "page", "page-arrive"]}},
+        "where": {"type": "array", "minItems": 1, "items": {"enum": ["hero", "below", "overlay", "unknown"]}},
+        "selectors": {"type": "array", "items": {"type": "string"}},
+        "duration_ms": {"type": "number"}, "delay_ms": {"type": "number"},
+        "iteration": {"anyOf": [{"type": "number"}, {"const": "infinite"}]},
+        "intro": {"type": "boolean"},
+        "frequency": {"enum": ["every_load", "first_load_only", "unknown", null]}
+      }}},
+    "transitions": {"type": "array", "items": {"type": "object",
+      "required": ["property", "scenario", "selectors", "where"],
+      "properties": {
+        "property": {"type": "string", "minLength": 1},
+        "scenario": {"enum": ["load", "scroll", "hover", "focus", "page", "page-arrive"]},
+        "selectors": {"type": "array", "items": {"type": "string"}},
+        "where": {"type": "array", "items": {"enum": ["hero", "below", "overlay", "unknown"]}},
+        "duration_ms": {"type": "number"}
+      }}},
+    "js_motion": {"type": "array", "items": {"type": "object", "required": ["property", "scenario", "selectors", "where", "count"],
+      "properties": {"property": {"enum": ["opacity", "transform", "clip-path", "waapi"]}, "scenario": {"enum": ["load", "scroll", "hover", "focus", "page", "page-arrive"]}}}},
+    "page": {"type": "object", "required": ["link", "libs", "leave", "arrive", "observed"],
+      "properties": {"link": {"type": ["string", "null"]}, "libs": {"type": "array"}, "leave": {"type": "array"}, "arrive": {"type": "array"}, "observed": {"type": "boolean"}, "arrived_at": {"type": ["string", "null"]}}},
+    "libs": {"type": "array", "items": {"type": "string"}},
+    "coverage": {"type": "object",
+      "required": ["stylesheets", "stylesheets_unreadable", "iframes_skipped", "shadow_roots_not_traversed", "hover_targets", "hover_cap", "scroll_steps", "errors"],
+      "properties": {
+        "stylesheets": {"type": "integer"}, "stylesheets_unreadable": {"type": "array"}, "iframes_skipped": {"type": "array"},
+        "shadow_roots_not_traversed": {"type": "integer"}, "hover_targets": {"type": "integer"}, "hover_cap": {"type": "integer"},
+        "scroll_steps": {"type": "integer"}, "errors": {"type": "array"}
+      }}
+  }
+}

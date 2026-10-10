@@ -296,6 +296,10 @@
   .identity { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 0; }
   .swatches { display: inline-flex; gap: 4px; margin-right: 4px; }
   .swatches i { width: 18px; height: 18px; border-radius: 5px; border: 1px solid oklch(100% 0 0 / 0.18); box-shadow: inset 0 0 0 1px oklch(0% 0 0 / 0.25); background: var(--ks-gray); }
+  .motion { margin: 4px 0 8px; font-size: .9375rem; } .motion p { margin: 0 0 4px; } .motion ul { margin: 0; padding-left: 18px; color: var(--ks-text-muted); }
+  .done { margin-top: 18px; max-width: 720px; } .done-links { display: flex; gap: 10px; margin: 8px 0 14px; flex-wrap: wrap; } .done-links a { text-decoration: none; display: inline-flex; align-items: center; }
+  .done h3 { margin: 10px 0 4px; font-size: 1rem; } .open-items { margin: 0; padding-left: 18px; } .add-item { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; }
+  .add-item textarea { flex: 1; min-width: 0; font: inherit; padding: 8px; border: 1px solid var(--ks-rule); border-radius: 6px; background: transparent; color: inherit; } .muted { color: var(--ks-text-muted); }
   .missing { flex-basis: 100%; font-size: .8125rem; color: var(--ks-text-muted); }
   .missing summary { cursor: pointer; }
   .missing ul { margin: 4px 0 0; padding-left: 18px; }
@@ -619,12 +623,18 @@ const KIND = { variant: "Co stavíme a co k tomu", options: "Co připravit", vis
   copy_verdict: "Texty webu", no_method: "Chybí postup" };
 const SELECTOR = { check: "kontrola", page: "stránka", viewport: "velikost obrazovky", browser: "prohlížeč", role: "role", state: "stav" };
 // Card fields rendered by name; any other string field shows on the card's back as "key: value".
-const KNOWN = new Set(["id", "question", "title", "preview", "preview2", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source", "method", "slot", "value", "preview2_label", "honours"]);
+const KNOWN = new Set(["id", "question", "title", "preview", "preview2", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source", "method", "slot", "value", "preview2_label", "honours", "dir"]);
 // the PM's earlier choice this question builds on (checked by the server against the recorded answer)
 function priorLine(q) {
   const p = q.prior; if (!p || typeof p !== "object") return null;
   return el("p", { class: "prior" }, "Vaše volba, ze které vycházím: ", el("b", {}, String(p.choice || p.question)),
     str(p.comment) ? el("span", {}, " · „" + p.comment + "“") : null);
+}
+function motionBlock(q) {   // the reference's motion the directions carry (P108): the sentence, then every replacement or omission by name
+  const m = q.motion; if (!m || typeof m !== "object") return null;
+  const ex = Array.isArray(m.exceptions) ? m.exceptions : [];
+  return el("div", { class: "motion" }, el("p", {}, "Pohyb vzoru: ", el("b", {}, String(m.sentence || ""))),
+    ex.length ? el("ul", {}, ex.map(e => el("li", {}, el("b", {}, String(e.label || e.id)), e.disposition === "omit" ? " - vynecháno: " : " - nahrazeno: ", String(e.reason || "")))) : null);
 }
 function sourceOf(c) {   // what a card's proposal rests on, in the map's words
   const m = S && S.sections && S.sections.sources;
@@ -966,7 +976,7 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
   const gallery = ["structure", "task_map", "content_plan", "copy_verdict"].includes(q.kind);   // the texts verdict shows the pages it is about (PM 9. 10. 2026)
   const deckKind = cards.length && q.kind !== "approve_page" && !gallery;
   // a fact or a consent: rows, the recommended answer preselected (PM 9. 10. 2026: A); the degree buttons belong to looks only
-  const rows = deckKind && ["facts", "no_method"].includes(q.kind) && !cards.some(c => str(c.preview));
+  const rows = deckKind && ["facts", "no_method", "handover"].includes(q.kind) && !cards.some(c => str(c.preview));
   if (rows && SELECTED[q.id] === undefined) SELECTED[q.id] = cards[0].id;
 
   if (deckKind || (!cards.length && q.rerolled_from)) {
@@ -974,6 +984,7 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
       el("div", { class: "headline" }, icon("die"), el("h2", { class: "q-title", id: "h-" + q.id }, title))));
     if (str(q.prompt)) sec.append(el("p", { class: "lede" }, q.prompt));
     const prior = priorLine(q); if (prior) sec.append(prior);
+    const motion = motionBlock(q); if (motion) sec.append(motion);
     const lines = bodyLines(q.body); if (lines) sec.append(el("div", { class: "head" }, lines));
     if (partNote) sec.append(partNote);
     if (!cards.length) {
@@ -981,7 +992,12 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
       return sec;
     }
     const note = el("span", { class: "picked-note" });
-    const next = el("button", { type: "button", class: "choose go", on: { click: () => answer("choose", SELECTED[q.id]) } }, "Další →");
+    const next = el("button", { type: "button", class: "choose go", on: { click: () => {
+      const c = cards.find(x => x.id === SELECTED[q.id]);
+      // a handover with a reservation carries the PM's words (the server refuses it without them)
+      if (q.kind === "handover" && c && c.value === "vyhrada") ask({ key: q.id + ":vyhrada", title: "Co vám před převzetím vadí?", hint: "Výhrada se uloží k převzetí; web se předá s ní.", send: [["Převzít s výhradou", t => answer("choose", c.id, t)]] });
+      else answer("choose", SELECTED[q.id]);
+    } } }, q.kind === "handover" ? "Potvrdit →" : "Další →");
     let otherBtn = null;   // "Chci to jinak" turns into "Poznámka k výběru" once a card is picked
     sync = () => {
       const c = cards.find(x => x.id === SELECTED[q.id]);
@@ -1084,6 +1100,30 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
   return sec;
 }
 
+// Hotovo (P108): where the web is, what the PM took over, what stays open, and a field to add a point.
+function donePanel(sec) {
+  const f = S.finish && typeof S.finish === "object" ? S.finish : {}, l = S.links && typeof S.links === "object" ? S.links : {};
+  const items = (Array.isArray(S.open_items) ? S.open_items : []).filter(i => i && i.status !== "done");
+  const hand = (S.questions || []).filter(q => q.kind === "handover" && q.answered && str(q.outcome)).pop();
+  const web = str(f.web) || str(l.web), cust = str(f.customer) || str(l.customer);
+  const ta = el("textarea", { maxlength: "500", rows: "2", placeholder: "Co má ještě přijít - co, kdo, dokdy…", "aria-label": "Nový otevřený bod" });
+  const btn = el("button", { type: "button", class: "reroll-btn", on: { click: async () => {
+    const text = ta.value.trim(); if (!text) return; btn.disabled = true;
+    const r = await call("POST", "/open-item", { text }).catch(() => ({ status: 0, data: {} }));
+    btn.disabled = false;
+    if (r.status === 200) location.reload(); else notice(r.data.error || "Bod se neuložil.");
+  } } }, "Doplnit bod");
+  sec.append(el("div", { id: "done-panel", class: "done" },
+    hand ? el("p", { class: "lede" }, hand.outcome) : null,
+    el("div", { class: "done-links" },
+      web ? el("a", { class: "choose go", href: web, target: "_blank", rel: "noopener" }, "Otevřít web") : null,
+      cust ? el("a", { class: "reroll-btn", href: cust, target: "_blank", rel: "noopener" }, "Co jste dostali") : null),
+    el("h3", {}, "Co zbývá"),
+    items.length ? el("ul", { class: "open-items" }, items.map(i => el("li", {}, String(i.text || ""),
+      el("span", { class: "muted" }, " · " + (i.owner || "") + (i.due ? " · do " + i.due : ""))))) : el("p", { class: "muted" }, "Nic otevřeného."),
+    el("div", { class: "add-item" }, ta, btn)));
+}
+
 // The page: hero from the data, then one row per step (pipeline-model above derives everything).
 const WHO = { pm: "Rozhodl PM", agent: "Rozhodla AI", both: "PM i AI" };
 const NUM = ["žádný", "jeden", "dva", "tři", "čtyři", "pět", "šest", "sedm", "osm", "devět", "deset"];
@@ -1093,10 +1133,12 @@ function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function hero(m) {
   const h = document.getElementById("headline"), p = document.getElementById("intro");
   const act = m.steps.find(st => st.active);
-  if (m.finished) {
-    h.replaceChildren("Web je hotový.", el("br"), "Rozhodnutí zůstávají.");
-    p.textContent = cap(num(m.steps.length)) + " " + plural(m.steps.length, "krok", "kroky", "kroků")
-      + " od zadání po kontrolu. U každého vidíte výsledek i to, kdo jej potvrdil.";
+  document.getElementById("done-panel")?.remove();
+  if (m.finished || (S.finish && typeof S.finish === "object")) {
+    h.replaceChildren("Hurá, máme hotovo.", el("br"), "Tady je váš web.");
+    p.textContent = "Od vás už nic nepotřebujeme. Web si otevřete tlačítkem níže; co ještě přijde před zveřejněním, je pod ním. "
+      + cap(num(m.steps.length)) + " " + plural(m.steps.length, "krok", "kroky", "kroků") + " s vašimi rozhodnutími zůstává k nahlédnutí.";
+    donePanel(h.closest("section"));
   } else if (act) {
     if (act.n) h.textContent = act.title + ".";
     else h.replaceChildren("Teď ladíme", el("br"), "krok " + act.title + ".");

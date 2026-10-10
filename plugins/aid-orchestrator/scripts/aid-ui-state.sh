@@ -166,7 +166,18 @@
 #                                        result_file, result_sha256, build_id}; an exception
 #                                        that matches no open row is marked resolved
 #                                        (kept as history, never covers again)
-#   finish <project>                     refuses unless: aid-ui-coverage.sh check exits 0 (3 only
+#   links <project> --web <url> --customer <url>   (P108) the addresses the PM opens (both 200 after
+#                                        redirects, no login) -> .aid-ui/links.json; the studio
+#                                        refuses a handover question without them in its body
+#   open-item <project> add --text <t> --owner <PM|klient|agent> [--due <date>] | done <id>
+#                                        (P108) what stays open after the run (customer page)
+#   open-items-sync <project>            (P108) the PM's own items from the studio history (by pm)
+#   chapter-all-target / chapter-all     (P108) refused before the final gate: the customer page must
+#                                        be the one the recorded gate checked and the coverage report
+#                                        not older than the gate result
+#   finish <project>                     needs .aid-ui/links.json (both 200 again) and writes
+#                                        .aid-ui/finish.json {finished, web, customer, verdict};
+#                                        refuses unless: aid-ui-coverage.sh check exits 0 (3 only
 #                                        with an approve|choose coverage_drift answer whose target
 #                                        is the changed item ids, sorted, comma-joined); the site
 #                                        recomputes to the recorded build and the gate is of that
@@ -410,6 +421,35 @@ jq_write() {
 opt() {   # opt <name> <args...> — value after --<name>
   local name="$1"; shift
   while (( $# )); do [[ "$1" == "--$name" ]] && { echo "${2:-}"; return; }; shift; done
+}
+
+# receipt_fresh <kind> [hours] — the method receipt .aid-ui/method/<kind>.json names every current
+# file of the kind's method with its sha256 and is at most <hours> (12) old; else die with what to run.
+receipt_fresh() {
+  local kind="$1" hours="${2:-12}" r="$PROJECT/.aid-ui/method/$1.json" map="$HERE/../skills/ui-design/sections.json"
+  [[ -f "$r" ]] || die "$VERB refused: no method receipt for $kind; run: aid-ui-state.sh method $PROJECT $kind (and read what it prints)"
+  local at; at="$(jq -r '.at // empty' "$r")"
+  [[ -n "$at" ]] || die "$VERB refused: receipt $r has no time"
+  local age=$(( $(date -u +%s) - $(date -u -d "$at" +%s 2>/dev/null || echo 0) ))
+  (( age >= 0 && age <= hours * 3600 )) || die "$VERB refused: the $kind receipt is $(( age / 3600 )) h old (limit $hours h); run aid-ui-state.sh method $PROJECT $kind again"
+  local f path want have
+  while IFS= read -r f; do
+    path="$f"; [[ "$f" == /* ]] || path="$HERE/../$f"
+    want="$(jq -r --arg f "$f" '.files[] | select(.path == $f) | .sha256' "$r")"
+    have="$(sha256sum "$path" 2>/dev/null | cut -d' ' -f1)"
+    [[ -n "$want" && "$want" == "$have" ]] || die "$VERB refused: the $kind receipt does not cover the current $f; run aid-ui-state.sh method $PROJECT $kind again"
+  done < <(jq -r --arg k "$kind" '.methods[$k].files[]' "$map")
+}
+
+# url_ok <url> — the address answers 200 after redirects within 10 s, without a login (what the PM clicks)
+url_ok() { [[ "$1" =~ ^https?:// ]] && [[ "$(curl -sS -o /dev/null -L --max-time 10 -w '%{http_code}' "$1" 2>/dev/null)" == 200 ]]; }
+
+# links_json — .aid-ui/links.json (links <project> --web --customer) or die
+links_json() {
+  local f="$PROJECT/.aid-ui/links.json"
+  [[ -f "$f" ]] && jq -e '(.web | type) == "string" and (.customer | type) == "string"' "$f" >/dev/null ||
+    die "$VERB refused: no .aid-ui/links.json with web and customer; run: aid-ui-state.sh links $PROJECT --web <url> --customer <url>"
+  echo "$f"
 }
 
 # write_chapter <id> <status> <by> — the section's data-status and status text, then the state.
@@ -706,10 +746,28 @@ ready_chapters() {
 }
 
 # chapter_all_target — sha256 over "<id>\n<chapter_target id>\n" of every ready chapter
+# end_in_order — the handover comes after the final gate: the customer page is the one the recorded gate
+# checked (aid-ui-customer-page.py --check = 0) and the coverage report is not older than the gate result
+# (P108: on 9. 10. the PM handed over twice because the last gate changed the numbers after his answer).
+end_in_order() {
+  jq -e '.gate.result_file' "$STATE" >/dev/null || die "$VERB refused: no gate recorded; the handover comes after the final gate (step 7)"
+  local res; res="$(jq -r '.gate.result_file' "$STATE")"
+  [[ -f "$res" ]] || die "$VERB refused: the recorded gate result $res is gone"
+  jq -e '[.rows[] | select(.check == "customer_page")] | length > 0 and all(.[]; .status == "pass")' "$res" >/dev/null ||
+    die "$VERB refused: the recorded gate did not pass the customer page (row customer_page); make the page, run the gate, gate-record, then the handover"
+  local page="$PROJECT/docs/zakaznik/index.html"
+  [[ -f "$page" && "$(sha256sum "$page" | cut -d' ' -f1)" == "$(jq -r '.gate.customer_page_sha256 // ""' "$STATE")" ]] ||
+    die "$VERB refused: docs/zakaznik/index.html is missing or not the page the recorded gate ran over (sha); the gate must run over the page the PM gets, then gate-record, then the handover"
+  local summ="$PROJECT/docs/design/soulad-summary.json"
+  [[ -f "$summ" && "$(jq -r '.gate_run_at // ""' "$summ")" == "$(jq -r '.gate.run_at' "$STATE")" ]] ||
+    die "$VERB refused: docs/design/soulad-summary.json is not from the recorded gate (gate_run_at); run aid-ui-coverage.sh report after the final gate, then the chapters, then the handover"
+}
+
 chapter_all_target() {
   local id ids t
   ids="$(ready_chapters)"
   [[ -n "$ids" ]] || die "no chapter in navrh or schvaleno; nothing to hand over"
+  end_in_order
   { for id in $ids; do t="$(chapter_target "$id")" || exit 1; printf '%s\n%s\n' "$id" "$t"; done; } |
     sha256sum | { read -r h _; printf 'sha256:%s' "$h"; }
 }
@@ -978,12 +1036,28 @@ case "$VERB" in
     [[ "$root/" != "$site/"* && "$site/" != "$root/docs/"* && "$site/" != "$root/.aid-ui/"* \
        && ! -e "$site/docs/design/brand-state.json" && ! -e "$site/.aid-ui" ]] ||
       die "build-record refused: the site $site holds the project or its state (docs/, .aid-ui/); the state would land inside it"
+    # the method before the output (P108, 10. 10. 2026): the build was made after reading the build method
+    receipt_fresh build
+    # the reference's motion, as the PM saw it with the directions, runs in the build (P108)
+    motion_note=""
+    if jq -e 'any(.refs[]?; .picked == true)' "$STATE" >/dev/null; then
+      inv="$PROJECT/.aid-ui/motion.json"
+      [[ -f "$inv" ]] || die "build-record refused: a reference is picked but there is no .aid-ui/motion.json (aid-ui-motion.py inventory, step 5)"
+      msha="$(sha256sum "$inv" | cut -d' ' -f1)"
+      jq -e --arg t "smer:$msha" 'any(.answers[]?; .kind == "direction" and .decision == "choose" and .target == $t)' "$STATE" >/dev/null ||
+        die "build-record refused: no recorded direction choice for the inventory as it is now (target smer:$msha); the PM chose a direction over another inventory, or the inventory changed since"
+      obs="$PROJECT/.aid-ui/build.motion.json"
+      [[ -f "$obs" ]] || die "build-record refused: no .aid-ui/build.motion.json: observe the built site first - aid-ui-tool.sh motion <url of the served site> $obs --dir-sha256 \"\$(aid-ui-motion.py dirsha $site)\""
+      motion_note="$(python3 "$HERE/aid-ui-motion.py" check "$PROJECT" --observed "$obs" --dir "$site" --write "$PROJECT/.aid-ui/build.motion.check.json" 2>&1)" ||
+        die "build-record refused: the build does not carry the reference's motion: $motion_note"
+    fi
     b="$(bpy build "$site")"
     rec="$(jq -c --arg d "$site" --arg at "$(now)" '{id, dir: $d, fingerprints, at: $at}' <<<"$b")"
     mkdir -p "$PROJECT/.aid-ui"
     tmp="$(tmpfile build.json)"; jq . <<<"$rec" > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/build.json"
     jq_write --argjson r "$rec" '.build = $r | .finished = null'
-    echo "BUILD: $(jq -r .id <<<"$rec")"
+    rm -f "$PROJECT/.aid-ui/finish.json" "$PROJECT/.aid-ui/links.json"   # a new build: the end starts over
+    echo "BUILD: $(jq -r .id <<<"$rec")${motion_note:+ · ${motion_note%%$'\n'*}}"
     ;;
 
   gate-record)
@@ -991,6 +1065,9 @@ case "$VERB" in
     (( $# == 1 )) && [[ -f "$1" ]] || usage "gate-record needs <result.json>"
     jq -e '.build.id' "$STATE" >/dev/null || die "gate-record refused: no build recorded; run build-record"
     res="$(realpath "$1")"
+    # the same run recorded twice = the gate did not run (9. 10.: --copy-subject mistaken for a gate run)
+    [[ "$(jq -r '.run_at // ""' "$res")" != "$(jq -r '.gate.run_at // ""' "$STATE")" ]] ||
+      die "gate-record refused: this result (run_at $(jq -r .run_at "$res")) is already the recorded gate; the gate did not run again (aid-ui-verify.sh without --copy-subject)"
     ck="$(checks_json)"
     rc=0; resolve="$(bpy gate "$STATE" "$ck" "$res")" || rc=$?
     rm -f "$ck"
@@ -998,6 +1075,10 @@ case "$VERB" in
     jq_write --arg f "$res" --arg sha "$(sha256sum "$res" | cut -d' ' -f1)" --argjson r "$(jq -c '{run_at, build_id}' "$res")" \
       --argjson idx "$resolve" '.gate = {run_at: $r.run_at, result_file: $f, result_sha256: $sha, build_id: $r.build_id}
       | reduce $idx[] as $i (.; .exceptions[$i].resolved = $r.run_at) | .finished = null'
+    # the customer page the gate ran over, by sha (end_in_order compares); a new gate forgets finish.json
+    cp_sha=""; [[ ! -f "$PROJECT/docs/zakaznik/index.html" ]] || cp_sha="$(sha256sum "$PROJECT/docs/zakaznik/index.html" | cut -d' ' -f1)"
+    jq_write --arg s "$cp_sha" '.gate.customer_page_sha256 = (if $s == "" then null else $s end)'
+    rm -f "$PROJECT/.aid-ui/finish.json"
     echo "GATE: $(jq -r '[.rows[] | .status] | group_by(.) | map("\(.[0]) \(length)") | join(", ")' "$res")"
     ;;
 
@@ -1057,6 +1138,10 @@ case "$VERB" in
     by=""; (( $# == 2 )) && { [[ "$1" == --by ]] || usage "unknown option $1"; by="$2"; }
     tgt="$(chapter_all_target)" || exit 1
     take_answer handover "$tgt"
+    # the PM's verdict by the card's value: prevzit (8-10) | vyhrada (6-7, with words) | vratit = no handover
+    hv="$(jq -r '.choice as $c | ([.cards[] | select(.id == $c) | .value] | first) // "approve"' <<<"$LIVE_ANSWER")"
+    [[ "$hv" != vratit ]] || die "chapter-all refused: the PM returned the web (vratit): fix what the comment names and ask again"
+    hband="$(case "$hv" in prevzit) echo "8-10";; vyhrada) echo "6-7";; *) echo "";; esac)"
     # all or nothing: a failure part way restores index.html and the state as they were
     # (copied back into the same files, so their mode and inode stay; also on INT/TERM)
     bh="$(tmpfile index.html)"; bs="$(tmpfile brand-state.json)"; cp -p "$HTML" "$bh"; cp -p "$STATE" "$bs"
@@ -1069,6 +1154,8 @@ case "$VERB" in
       trap - INT TERM; restore; die "chapter-all refused: a chapter could not be written; nothing changed"
     fi
     trap - INT TERM; rm -f "$bh" "$bs"
+    # the PM's verdict, written once every chapter is taken over (a failed write leaves the state untouched)
+    jq_write --arg v "$hv" --arg b "$hband" --arg q "$ANSWER" '.handover = {verdict: $v, rating: (if $b == "" then null else $b end), answer: $q}'
     ;;
 
   chapter-all-target)
@@ -1112,6 +1199,61 @@ case "$VERB" in
     ;;
 
 
+  links)
+    need_state
+    web="$(opt web "$@")"; customer="$(opt customer "$@")"
+    [[ -n "$web" && -n "$customer" ]] || usage "links needs --web <url> --customer <url>"
+    url_ok "$web" || die "links refused: $web does not answer 200 (after redirects, no login) from this host"
+    url_ok "$customer" || die "links refused: $customer does not answer 200 (after redirects, no login) from this host"
+    # the web link serves the recorded build's home page and the customer link the customer page - byte for byte
+    bdir="$(jq -r '.build.dir // empty' "$STATE")"
+    [[ -n "$bdir" && -f "$bdir/index.html" ]] || die "links refused: no recorded build with index.html (build-record first)"
+    [[ "$(curl -sS -L --max-time 10 "$web" 2>/dev/null | sha256sum | cut -d' ' -f1)" == "$(sha256sum "$bdir/index.html" | cut -d' ' -f1)" ]] ||
+      die "links refused: $web does not serve the recorded build's index.html (another site, another build, or a wrapper)"
+    [[ -f "$PROJECT/docs/zakaznik/index.html" ]] || die "links refused: no docs/zakaznik/index.html (aid-ui-customer-page.py first)"
+    [[ "$(curl -sS -L --max-time 10 "$customer" 2>/dev/null | sha256sum | cut -d' ' -f1)" == "$(sha256sum "$PROJECT/docs/zakaznik/index.html" | cut -d' ' -f1)" ]] ||
+      die "links refused: $customer does not serve docs/zakaznik/index.html as it is now"
+    mkdir -p "$PROJECT/.aid-ui"; tmp="$(tmpfile links.json)"
+    jq -n --arg w "$web" --arg c "$customer" --arg at "$(now)" '{web: $w, customer: $c, at: $at}' > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/links.json"
+    echo "LINKS: web $web · customer $customer"
+    ;;
+
+  open-item)
+    need_state
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      add)
+        text="$(opt text "$@")"; owner="$(opt owner "$@")"; due="$(opt due "$@")"
+        [[ -n "${text//[[:space:]]/}" && ${#text} -le 500 ]] || usage "open-item add needs --text (1-500 characters)"
+        [[ "$owner" =~ ^(PM|klient|agent)$ ]] || usage "open-item add needs --owner PM|klient|agent"
+        [[ -z "$due" || "$due" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || usage "open-item --due is a date YYYY-MM-DD"
+        n="$(jq '[.open_items[]? | select(.id | startswith("oi-"))] | length + 1' "$STATE")"
+        jq_write --arg id "oi-$n" --arg t "$text" --arg o "$owner" --arg d "$due" --arg at "$(now)" \
+          '.open_items += [{id: $id, text: $t, owner: $o, due: (if $d == "" then null else $d end), by: "agent", at: $at, status: "open"}]'
+        echo "OPEN ITEM: oi-$n"
+        ;;
+      done)
+        id="${1:-}"; [[ -n "$id" ]] || usage "open-item done needs <id>"
+        jq -e --arg i "$id" 'any(.open_items[]?; .id == $i)' "$STATE" >/dev/null || die "open-item: no item $id"
+        jq_write --arg i "$id" --arg at "$(now)" '.open_items |= map(if .id == $i then .status = "done" | .done_at = $at else . end)'
+        ;;
+      *) usage "open-item needs add --text <t> --owner <PM|klient|agent> [--due <date>] | done <id>" ;;
+    esac
+    ;;
+
+  open-items-sync)
+    need_state
+    # the PM's own items from the studio (POST /open-item -> history.jsonl, by pm, kind open_item): taken over once each
+    hist="$PROJECT/.aid-ui/studio/history.jsonl"
+    [[ -f "$hist" ]] || { echo "SYNC: 0 new (no history)"; exit 0; }
+    # raw lines, fromjson?: a torn or foreign line is skipped, never kills the sync
+    new="$(jq -R -c 'fromjson? // empty | select(type == "object" and .by == "pm" and .kind == "open_item" and (.text | type) == "string" and (.at | type) == "string" and (.at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T")))
+      | {id: ("pm-" + (.at | gsub("[^0-9]"; "") | .[0:20])), text: (.text | .[0:500]), owner: "PM", due: null, by: "pm", at: .at, status: "open"}' "$hist" 2>/dev/null | jq -sc .)"
+    cnt="$(jq --argjson n "$new" '[$n[] | .id] - [.open_items[]?.id] | length' "$STATE")"
+    jq_write --argjson n "$new" '.open_items = ((.open_items // []) as $have | $have + [$n[] | select(.id as $i | ($have | map(.id) | index($i)) == null)])'
+    echo "SYNC: $cnt new open item(s) from the PM"
+    ;;
+
   finish)
     need_state
     rc=0; cov="$(bash "$HERE/aid-ui-coverage.sh" check "$PROJECT" 2>&1)" || rc=$?
@@ -1130,8 +1272,18 @@ case "$VERB" in
     rc=0; bpy finish "$STATE" "$ck" "$PROJECT" "$drift" || rc=$?
     rm -f "$ck"
     [[ "$rc" -eq 0 ]] || exit 1
+    # last: the links the Hotovo panel shows must still answer (the content, pages and gate are named first)
+    lf="$(links_json)"
+    web="$(jq -r .web "$lf")"; customer="$(jq -r .customer "$lf")"
+    url_ok "$web" || die "finish refused: the web link $web no longer answers 200; serve it, or run links again"
+    url_ok "$customer" || die "finish refused: the customer link $customer no longer answers 200; serve it, or run links again"
     jq_write --arg d "$(today)" '.finished = $d'
-    echo "FINISHED: $(today)"
+    # the PM's handover verdict (card prevzit | vyhrada | vratit) and the links the Hotovo panel shows
+    verdict="$(jq -r '.handover.verdict // "approve"' "$STATE")"; rating="$(jq -r '.handover.rating // ""' "$STATE")"
+    tmp="$(tmpfile finish.json)"
+    jq -n --arg at "$(now)" --arg d "$(today)" --arg w "$web" --arg c "$customer" --arg v "$verdict" --arg r "$rating" \
+      '{finished: $d, at: $at, web: $w, customer: $c, verdict: $v, rating: (if $r == "" then null else $r end)}' > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/finish.json"
+    echo "FINISHED: $(today) · $web · $customer · verdict $verdict${rating:+ ($rating/10)}"
     ;;
 
   exception-covered)
