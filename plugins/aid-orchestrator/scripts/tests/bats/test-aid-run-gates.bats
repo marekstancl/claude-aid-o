@@ -2025,5 +2025,6 @@ _ptrow() { jq -r ".gates.project_tests.$1 // empty" "$REPORT"; }
   run "$RUN_GATES" record-tests --evidence-file "$ev" -- true pytest -msmoke; [ "$status" -eq 2 ]
   run "$RUN_GATES" record-tests --evidence-file "$ev" -- bash -c 'pytest -k foo'; [ "$status" -eq 2 ]
   PYTEST_ADDOPTS="-k x" run "$RUN_GATES" record-tests --evidence-file "$ev" -- true; [ "$status" -eq 2 ]
+  run "$RUN_GATES" record-tests --evidence-file "$ev" -- true npx jest -t login; [ "$status" -eq 2 ]
   run "$RUN_GATES" record-tests --evidence-file "$ev" -- true python -m pytest -q; [ "$status" -eq 0 ]
 }

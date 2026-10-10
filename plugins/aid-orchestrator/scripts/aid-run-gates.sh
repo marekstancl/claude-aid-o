@@ -1180,7 +1180,7 @@ record_tests() {
   # --evidence-file, aid-select-tests.sh) proves the selection (IMP-691 note).
   local cmdtext=" $* "
   cmdtext="$(sed -E 's/python[0-9.]*[[:space:]]+-m[[:space:]]+[A-Za-z_.]+//g' <<< "$cmdtext")"   # `python -m pytest` names a module, not a marker
-  if grep -qE -- '(^|[[:space:]"'"'"'=])(-k|-m|--filter|-run|--grep|--testNamePattern|--only|--deselect|--lf|--last-failed|--exitfirst)([[:space:]=]|[^[:space:]-]|$)' <<< "$cmdtext" \
+  if grep -qE -- '(^|[[:space:]"'"'"'=])(-k|-m|-t|--filter|-run|--grep|--testNamePattern|--only|--deselect|--lf|--last-failed|--exitfirst)([[:space:]=]|[^[:space:]-]|$)' <<< "$cmdtext" \
      || [[ -n "${PYTEST_ADDOPTS:-}${BATS_TEST_FILTER:-}${GOFLAGS:-}" ]]; then
     echo "record-tests: the command selects a subset (or PYTEST_ADDOPTS/BATS_TEST_FILTER/GOFLAGS is set) — record-tests claims the whole suite ran; let the runner write its own evidence instead" >&2
     return 2
