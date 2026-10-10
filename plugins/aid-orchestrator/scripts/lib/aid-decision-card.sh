@@ -352,7 +352,8 @@ aid_pm_card_check() {
   local card="${1:-}" text="${2:?aid_pm_card_check: quoted text required}"
   [[ -n "$card" && -f "$card" ]] \
     || { echo "--finding-card names no card file (${card:-none}): render the Decision card (skills/communication.md, lib/aid-decision-card.sh) and wait for the PM"; return 1; }
-  grep -qF -- "$text" "$card" \
+  # a whole word: a card quoting AC10 does not quote AC1
+  grep -qwF -- "$text" "$card" \
     || { echo "the card ${card} does not quote ${text}; the PM must have been asked about it"; return 1; }
   _pm_replied_after "$card" \
     || { echo "no PM prompt after ${card} in the hook audit; the PM has not answered the card yet"; return 1; }

@@ -120,7 +120,9 @@ _aid_vp_parse_ac() {
       if ($0 ~ /^[[:space:]]*```yaml/) { in_yaml=1; if (!blk_line) blk_line=NR; next }
       if ($0 ~ /^[[:space:]]*```$/ && in_yaml) {
         in_yaml=0
-        if (ac_type != "") emit(ac_type)
+        # one record per criterion: a later yaml example in a step section
+        # (config snippet, Implementation Detail) is not a second criterion
+        if (ac_type != "" && !ac_flushed) emit(ac_type)
         next
       }
       if (in_yaml) take($0)

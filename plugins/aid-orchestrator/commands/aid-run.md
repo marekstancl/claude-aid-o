@@ -878,6 +878,24 @@ worktree (`.aid-worktrees/plan-<id>`) on `plan/<id>` for the whole close.
 | 4 | `<round> prepare\|collect\|close --checkpoint cp7 --evidence-dir <run dir> --project-root <plan worktree> --round 1` | the whole-plan review: `final_criteria`, `final_claims`, `final_generalist` | `produce` has not run; HEAD is not the candidate; a reviewer file has no dispatch bracket |
 | 5 | `<fsm> plan-finalize <plan> --stage decide` | the one aggregate: `release-decision.json`, the sealed receipt, the PM page with attempts, minutes and USD | the round is not closed; a decision input was edited by hand (named); the candidate moved |
 
+**The measurer at the close (row 3, P110).** `produce` runs every brief point
+through `aid-plan-diff.sh --isolated --cwd <the plan worktree>` (the release
+profile's `plan_diff` gate passes `--isolated --cwd .`). The rule is the
+project's, read from the state root's `execution.yaml`: without
+`verification_env:` each `cmd` point runs in a new network namespace with
+loopback up and your own uid (no host service, no outbound network, a clean
+environment, and whatever it starts in the background dies with it); with
+`verification_env:` it runs with those variables and the host network,
+recorded as `network: host (verification_env)`. A point the close cannot run
+that way is `absent` with a reason and never counts as verified:
+`no_isolation` (no usable `unshare --map-user` — `next:` names util-linux ≥ 2.38
+and user namespaces), `env_stripped: <VAR>` (a test-service variable such as
+`*_TEST_DATABASE_URL` is in your environment but not declared — declare it),
+`no_verification_env` (the command names a database URL),
+`verification_env_unset: <VAR>`. `--cwd` on a directory that is not a git
+worktree exits 3 (`cwd_not_worktree`). `plan-diff.json` records
+`isolation {worktree, env_keys, network}`; `produce` prints it.
+
 **The round (row 4)** is dispatched exactly as a step or EPIC round: the
 procedure, the prompt files, the dispatch bracket (`aid-emit-dispatch.sh start` …
 `complete`, focus `cp7-<role>`), the Codex role and its stand-in are the ones in

@@ -9585,7 +9585,12 @@ _pfsm_finalize_produce() {
     echo "PRECONDITION FAIL: plan-finalize --stage produce: C3 requires a real plan source and aid-plan-diff.sh; no plan-diff evidence can be fabricated." >&2
     return 1
   fi
-  bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$plan_file" --evidence-dir "$run_dir_abs" --base-commit "$base_commit" >/dev/null 2>&1 || pdrc=$?
+  # P110: the close's measurer runs every point in the candidate worktree under
+  # the project's isolation rule (the state root's verification_env).
+  local pd_cwd; pd_cwd="$(_pfsm_plan_tree_root "$root" "$plan_id")"
+  bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$plan_file" --evidence-dir "$run_dir_abs" --base-commit "$base_commit" \
+    --isolated --cwd "$pd_cwd" >/dev/null 2>"${run_dir_abs}/plan-diff.stderr" || pdrc=$?
+  [[ -s "$pd" ]] && echo "plan-diff: isolation $(jq -c '.isolation // {}' "$pd" 2>/dev/null)$(jq -r '.next // "" | if . == "" then "" else " — " + . end' "$pd" 2>/dev/null)"
   local pd_verdict=""
   if [[ "$pdrc" -eq 0 || "$pdrc" -eq 1 || "$pdrc" -eq 2 ]] && [[ -s "$pd" ]]; then
     pd_verdict="$(jq -r --arg b "$base_commit" --arg h "$candidate" \

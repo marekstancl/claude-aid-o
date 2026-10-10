@@ -1181,7 +1181,12 @@ _fsm_refusal_next() {
     amend_scope_reason_names_no_point)
       next="$(_fsm_cmd bash "$fsm" amend-scope "$sf" --add "<path>" --reason "<AC<n> of ${_ZP_SET:-the step points}> needs <path> because …")" ;;
     step_criteria_failed)
-      next="fix the step and commit, or render the Decision card (lib/aid-decision-card.sh) and wait for the PM, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words>" --finding-card "<card>")" ;;
+      # a step's own labelled criterion is not a brief point: no PM deferral, only a fix
+      if [[ ! "${_sc_label:-AC}" =~ ^AC[0-9]*$ ]]; then
+        next="fix the step so its own criterion holds, commit, then: $inc"
+      else
+      next="fix the step and commit, or render the Decision card (lib/aid-decision-card.sh) and wait for the PM, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words>" --finding-card "<card>")"
+      fi ;;
     defer_refused)
       next="render the Decision card quoting ${_sc_label:-the point} (lib/aid-decision-card.sh), wait for the PM's answer, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words, 20+ chars>" --finding-card "<card>")" ;;
     missing_lenses|done_advance_preconditions)
@@ -4578,10 +4583,17 @@ _fsm_step_measure() {
   [[ -n "$pp" && "$pp" != null ]] || return 4   # Fast Mode: no plan, nothing to measure
   [[ -f "$pp" && -f "${ev}/plan.json" ]] || return 3
   pd="${ev}/cp2/step-${n}/plan-diff.json"
-  [[ -f "$pd" && "$(jq -r '.head_commit // ""' "$pd" 2>/dev/null)" == "$(git rev-parse HEAD 2>/dev/null)" ]] && return 0
+  # Reused only when bound to HEAD AND written by the measurer: the run's
+  # timeline holds its plan_diff_complete event with the file's sha256 (a
+  # hand-written file is measured again, never trusted).
+  if [[ -f "$pd" && "$(jq -r '.head_commit // ""' "$pd" 2>/dev/null)" == "$(git rev-parse HEAD 2>/dev/null)" ]] \
+     && grep -F '"event":"plan_diff_complete"' "${ev}/timeline.jsonl" 2>/dev/null \
+        | jq -e --arg s "$(sha256sum "$pd" | cut -d' ' -f1)" --arg n "$n" 'select(.step == $n and .sha256 == $s)' >/dev/null 2>&1; then
+    return 0
+  fi
   base="$(yaml_field "$sf" base_commit)"
   bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$pp" --evidence-dir "$ev" --base-commit "${base:-HEAD}" \
-    --step "$n" --plan-json "${ev}/plan.json" >/dev/null 2>&1 || rc=$?
+    --step "$n" --plan-json "${ev}/plan.json" >/dev/null || rc=$?   # stderr through: a dropped deferral says why
   (( rc <= 2 )) || { echo "step ${n}: the measurer failed (aid-plan-diff.sh exit ${rc})" >&2; return 1; }
   return 0
 }
@@ -4786,9 +4798,10 @@ cmd_increment_step() {
   local _sc_rc=0
   _fsm_step_measure "$evidence_dir" "$step" "$state_file" || _sc_rc=$?
   if (( _sc_rc == 4 )); then
-    :
+    [[ -n "$_sc_label" ]] && echo "--defer-criterion ${_sc_label}: the run has no plan (Fast Mode); nothing to defer" >&2
   elif (( _sc_rc == 3 )); then
-    echo "step ${step}: brief points not measured (the plan file or the run's plan.json is missing)" >&2
+    echo "REFUSED (step_criteria_failed): step ${step} cannot be measured — the run names a plan but the plan file or ${evidence_dir}/plan.json is missing" >&2
+    exit 1
   elif (( _sc_rc != 0 )); then
     exit 1
   else

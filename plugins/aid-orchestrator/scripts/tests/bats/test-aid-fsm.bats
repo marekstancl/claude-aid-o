@@ -1997,3 +1997,29 @@ SC_WHY="the PM moved this point to the close of the plan"
   [ "$status" -eq 0 ]
   [ "$(jq -r .head_commit "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json")" = "$(git rev-parse HEAD)" ]
 }
+@test "step-criteria: a hand-written plan-diff.json bound to HEAD but without the measurer's timeline event is measured again" {
+  _sc_seed
+  mkdir -p "$TEST_EVIDENCE_DIR/cp2/step-0"
+  jq -n --arg h "$(git rev-parse HEAD)" '{head_commit: $h, results: [{ac_label: "AC1", ac_text: "x", verdict: "present", evidence: "forged"}]}' > "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"step_criteria_failed"* ]]
+}
+@test "step-criteria: a card quoting AC10 does not defer AC1 (whole-word quote)" {
+  _sc_seed; _sc_card answered; echo "Rozhodnutí 1: AC10 počká" > "$SC_CARD"; touch -d '-10 seconds' "$SC_CARD"
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not quote AC1"* ]]
+}
+@test "step-criteria: an absent own labelled criterion gets a fix-only next: (no deferral of a non-brief criterion)" {
+  _sc_seed ""
+  printf '\n### Step 1: own\n' >> /dev/null
+  sed -i 's/^\*\*Zavírá:\*\* AC1$/- [ ] [backend] own file exists\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "test -f own.txt"\n    expected_exit: 0\n  ```\n\n**Zavírá:** —/' "$SC_PLAN"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"step_criteria_failed"* ]]
+  [[ "$output" == *"next: fix the step so its own criterion holds"* ]]
+  [[ "$output" != *"--defer-criterion"* ]]
+}
+@test "step-criteria: a run naming a plan whose plan.json is missing is refused, not advanced" {
+  _sc_seed; rm "$TEST_EVIDENCE_DIR/plan.json"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"cannot be measured"* ]]
+}

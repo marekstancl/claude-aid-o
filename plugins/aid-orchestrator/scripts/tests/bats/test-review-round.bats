@@ -483,6 +483,19 @@ _mplan() {
   grep -q '^## Measured criteria of this step' "$(D 1)/prompt-step_generalist.md"
   grep -q '^- AC1: present — exit=0' "$(D 1)/prompt-step_generalist.md"
 }
+@test "step-measured: dispute --pm accepted refuses the three card causes through the shared aid_pm_card_check" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist '.findings[0].severity = "blocker"'; _S collect --round 1 >/dev/null; _bracket 1 step_generalist
+  _S close --round 1 --tokens step_generalist=10 >/dev/null
+  local fp card="$ROOT/card.md"; fp="$(jq -r '.findings[0].fingerprint' "$(D 1)/merged.json")"
+  export AID_HOOK_AUDIT="$ROOT/audit.jsonl"; : > "$AID_HOOK_AUDIT"
+  local pm=(dispute --round 1 --fingerprint "$fp" --reason "PM: the criterion is wrong, accepted" --pm accepted)
+  run _S "${pm[@]}"; [ "$status" -eq 1 ]; [[ "$output" == *"--finding-card names no card file"* ]]
+  echo "Rozhodnutí 1: ${fp}x" > "$card"; touch -d '-10 seconds' "$card"
+  run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"does not quote ${fp}"* ]]
+  echo "nález $fp" >> "$card"; touch -d '-10 seconds' "$card"
+  run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"no PM prompt after"* ]]
+}
 @test "step: prepare needs a step check at HEAD and a review verdict; the default asks security on every reviewed step, a gated project only on a pattern" {
   _repo
   run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"no step-check.json"* ]]

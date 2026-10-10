@@ -37,7 +37,7 @@ teardown() { teardown_test_evidence_dir; }
 _project() {
   printf '.aid-o/work/\n.aid-o/reports/\n' > "$R/.gitignore"
   mkdir -p "$R/.aid-o/plans" "$R/.aid-o/config/policies" "$R/docs"
-  printf -- '---\nid: %s\ntype: feature\n---\n# Plan\n\n### Step 1: the work\n\n**Acceptance Criteria:**\n- [ ] the app greets\n\n**Effort:** S\n\n## Success Criteria\n\n- it runs\n' "$PLAN_ID" > "$R/.aid-o/plans/${PLAN_ID}-x.md"
+  printf -- '---\nid: %s\ntype: feature\n---\n# Plan\n\n### Step 1: the work\n\n**Acceptance Criteria:**\n- [ ] the app greets\n\n**Effort:** S\n\n## Success Criteria\n\n- it runs\n%s' "$PLAN_ID" "${PLAN_EXTRA:-}" > "$R/.aid-o/plans/${PLAN_ID}-x.md"
   cat > "$R/.aid-o/config/execution.yaml" <<'YAML'
 version: '1.0'
 gates:
@@ -185,6 +185,22 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ ! -e "$(_run_dir)/release-decision.json" ]
 }
 
+@test "produce: plan-diff.json of --stage produce carries isolation.worktree and the candidate's head_commit (P110)" {
+  _project
+  _stage freeze; _stage gates; _stage produce; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"plan-diff: isolation"* ]]
+  [ "$(jq -r .isolation.worktree "$(_run_dir)/plan-diff.json")" != null ]
+  [ "$(jq -r .head_commit "$(_run_dir)/plan-diff.json")" = "$(_field candidate_sha)" ]
+}
+@test "unmeasured: a point the close could not isolate (env_stripped) blocks as unmeasured, never verified (P110)" {
+  # a machine-checkable success criterion the close runs
+  PLAN_EXTRA="$(printf -- '- [ ] AC1: it runs\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "true"\n    expected_exit: 0\n  ```')" _project
+  _stage freeze; _stage gates
+  FOO_TEST_DATABASE_URL=postgresql://x _stage produce; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.results[0].reason' "$(_run_dir)/plan-diff.json")" = "env_stripped: FOO_TEST_DATABASE_URL" ]
+  _round; _stage decide; echo "$output"; [ "$status" -eq 1 ]
+  jq -e '.release_decision.blockers | any(.reason | test("criteria unmeasured.*AC1 \\(env_stripped"))' "$(_run_dir)/release-decision.json"
+}
 @test "the whole-plan review switched off: blocked as final_review_disabled until the PM waives it for this candidate, with the audit entry" {
   _project '.review_checkpoints.cp7_plan_final_review = false'
   _stage freeze; _stage gates; _stage produce; [ "$status" -eq 0 ]

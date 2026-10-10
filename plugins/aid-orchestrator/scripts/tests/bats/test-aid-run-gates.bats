@@ -1880,3 +1880,19 @@ YAML
   run jq -r -s '[.[] | select(.event == "gate_job_superseded" and .reason == "deadline_changed")] | length' "$TIMELINE"
   [ "$output" = "1" ]
 }
+
+@test "plan-diff-gate: the template's plan_diff command runs from a candidate worktree with --cwd . and writes isolation.worktree (P110)" {
+  git init -q . && git config user.email t@t && git config user.name t
+  printf '.aid-o/\n' > .gitignore; echo seed > seed; git add -A; git commit -qm seed
+  git worktree add -q -b cand "$TEST_TMPDIR/cand"
+  printf -- '---\nid: P953\n---\n# Plan\n\n## Acceptance Criteria\n\n- [ ] AC1: the candidate has its seed\n  ```yaml\n  verification_pattern:\n    type: must_contain\n    file: seed\n    regex: seed\n  ```\n' > "$TEST_TMPDIR/plan.md"
+  # the shipped gate, its command untouched but for where the plugin lives
+  yq '{"gates": {"plan_diff": .gates.plan_diff}}' "$AID_PLUGIN_PATH/defaults/execution.yaml" \
+    | sed "s|plugins/aid-orchestrator/scripts/|$AID_PLUGIN_PATH/scripts/|" > "$EXEC_YAML"
+  grep -q -- '--isolated --cwd \.' "$EXEC_YAML"
+  cd "$TEST_TMPDIR/cand"
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --plan-path "$TEST_TMPDIR/plan.md" --base-commit HEAD
+  echo "$output"
+  [ "$(jq -r .gates.plan_diff.result "$REPORT")" = pass ]
+  [ "$(jq -r .isolation.worktree "$TEST_PROJECT/.aid-o/work/evidence/E-X/R-1/plan-diff.json")" = "$TEST_TMPDIR/cand" ]
+}

@@ -61,6 +61,18 @@
 # gate without `inputs:` depends on the whole tree, so it is copied only when
 # the tree did not change at all. Declare inputs only when they are true: a
 # test gate that lists `["**", "!docs/**"]` says docs cannot break its tests.
+# `verification_env:` (optional, top level; P110) — how the close's measurer
+# (aid-plan-diff.sh --isolated, plan-finalize --stage produce and the plan_diff
+# gate) runs the brief's points. Absent or empty: every point runs in a new
+# network namespace with loopback up and your uid, with a clean environment —
+# no host service, no outbound network. A map: every point runs with these
+# variables and the HOST network, recorded as `network: host (verification_env)`
+# — declare it when the tests need a host service (a test database). A value
+# `${VAR}` names a host variable (unset → the point is absent, never passed):
+#   verification_env:
+#     ASISTENT_TEST_DATABASE_URL: "${ASISTENT_TEST_DATABASE_URL}"
+# The rule is read from the state root's copy of this file, never the candidate's.
+
 gates:
   tests_pass:
     description: "Merge-path tests pass — the T0 and T1 tiers, not the whole portfolio"
@@ -113,9 +125,13 @@ gates:
     description: "Plan AC blocks materially satisfied in codebase HEAD"
     required: true
     type: deterministic
-    command: "plugins/aid-orchestrator/scripts/aid-plan-diff.sh --plan {plan_path} --evidence-dir .aid-o/work/evidence/{epic_id}/{run_id} --base-commit {base_commit}"
-    timeout_seconds: 120
-    pass_criteria: "exit 0 (all present) or exit 2 (legacy plan / Fast Mode graceful skip)"
+    # P110: --isolated --cwd . — the plan-final gates run inside the candidate
+    # worktree (aid-plan-fsm.sh cd's there), so `.` is the candidate; each point
+    # runs under the project rule (verification_env above). 1900 s: room for an
+    # isolated point of up to 1800 s (its block's timeout:, the grammar's maximum).
+    command: "plugins/aid-orchestrator/scripts/aid-plan-diff.sh --plan {plan_path} --evidence-dir .aid-o/work/evidence/{epic_id}/{run_id} --base-commit {base_commit} --isolated --cwd ."
+    timeout_seconds: 1900
+    pass_criteria: "exit 0 (all present) or exit 2 (legacy plan / Fast Mode graceful skip); exit 3 cwd_not_worktree is a failure, not a skip"
     max_retries: 0
 
   lint_pass:

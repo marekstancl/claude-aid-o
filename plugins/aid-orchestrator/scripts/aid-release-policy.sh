@@ -698,9 +698,16 @@ main() {
           fail)            pd_row_verdict="blocked" ;;
         esac
         add_input plan_diff "plan-diff.json" "$pd_row_verdict" "bound plan AC verdict=${pd_verdict}" true
+        # P110: a point the close could not run in isolation (no_isolation,
+        # no_verification_env, verification_env_unset, env_stripped) is
+        # UNMEASURED — named as such, never counted as verified.
+        local pd_um
+        pd_um="$(jq -r '[.results[] | select(.verdict == "absent" and ((.reason // "") | test("^(no_isolation|no_verification_env|verification_env_unset|env_stripped)"))) | "\(.ac_label) (\(.reason))"] | join(", ")' "$pd" 2>/dev/null || true)"
+        [[ -n "$pd_um" ]] && add_blocker plan_diff "blocking" "plan-diff: criteria unmeasured, the close could not run them isolated: ${pd_um}"
         case "$pd_verdict" in
           pass|skipped|partial) : ;;
-          *) add_blocker plan_diff "blocking" "plan-diff reports absent acceptance criteria" ;;
+          *) [[ -n "$pd_um" ]] && (( $(jq '[.results[] | select(.verdict == "absent")] | length' "$pd") == $(jq '[.results[] | select(.verdict == "absent" and ((.reason // "") | test("^(no_isolation|no_verification_env|verification_env_unset|env_stripped)")))] | length' "$pd") )) \
+               || add_blocker plan_diff "blocking" "plan-diff reports absent acceptance criteria" ;;
         esac
       fi
     fi

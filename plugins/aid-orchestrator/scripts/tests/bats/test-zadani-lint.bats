@@ -188,3 +188,13 @@ PLAN
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-verification-pattern.sh'; _aid_vp_parse_ac '$T/p.md' 'Acceptance Criteria' | cut -d\$'\\x1f' -f1,3,4 | tr '\\037' ' '"
   [ "$output" = "AC1 cmd true" ]
 }
+
+@test "timeout: a block with timeout: 2000 is refused, timeout: 900 accepted (P110, the shared validator through --zadani)" {
+  # the first block of the brief gains a timeout: line after its expected_exit
+  awk '!done && /^    expected_exit:/ { print; print "    timeout: 2000"; done = 1; next } { print }' "$GOOD" > "$B"
+  run "$LINT" --zadani "$B"
+  [ "$status" -eq 1 ]; [[ "$output" == *"timeout '2000' must be whole seconds from 1 to 1800"* ]]
+  sed -i 's/^    timeout: 2000/    timeout: 900/' "$B"
+  run "$LINT" --zadani "$B"
+  [ "$status" -eq 0 ]
+}
