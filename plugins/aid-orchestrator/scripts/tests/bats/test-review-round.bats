@@ -1005,7 +1005,7 @@ _frepo() {
   seq 1 60 >> "$R/src/app.py"; echo "- **New thing** — the app now imports new" > "$R/CHANGELOG.md"; git -C "$R" add -A; git -C "$R" commit -qm "feat: the plan's work"
   printf -- '---\nid: P901\ntype: feature\n---\n# Plan\n\n### Step 1: first\n\n**Acceptance Criteria:**\n- [ ] the app imports new\n\n**Effort:** S\n\n## Success Criteria\n\n- it works end to end\n' > "$R/.aid-o/plans/P901-x.md"
   echo '{"gates": {"tests_pass": {"gate": "tests_pass", "result": "pass"}}, "overall_status": "pass"}' > "$E/gates_report.json"
-  echo '{"criteria": []}' > "$E/plan-diff.json"; : > "$E/timeline.jsonl"
+  jq -n --arg w "$R" '{criteria: [], results: [], isolation: {worktree: $w, env_keys: [], network: "unshare"}}' > "$E/plan-diff.json"; : > "$E/timeline.jsonl"
   yq '.review_checkpoints.final_review.reviewers |= map(.provider = "claude" | .model = "sonnet")' \
      "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
   bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
@@ -1022,28 +1022,28 @@ _fanswer() {
 }
 _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims an import the app never makes", command: "grep -n import src/app.py", evidence: "src/app.py:1", fix: "import new", rule: "every change the changelog claims is in the code"}] | del(.no_findings_reason)'
 
-@test "cp7: produce's inputs hold the plan's criteria and the EPIC findings; prepare prints three prompts with cp7 foci" {
+@test "cp7: produce's inputs hold the plan's criteria and the EPIC findings; prepare prints the two default prompts with cp7 foci" {
   _frepo; _fsc
   grep -q "the app imports new" "$E/cp7/criteria.md"; grep -q "it works end to end" "$E/cp7/criteria.md"
   [ "$(jq -c .epics "$E/cp7/epic-findings.json")" = "[]" ]
   [ ! -e "$E/plan.json" ]
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
-  [[ "$output" == *"focus cp7-final-criteria"* && "$output" == *"focus cp7-final-claims"* && "$output" == *"focus cp7-final-generalist"* ]]
+  [[ "$output" == *"focus cp7-final-criteria"* && "$output" == *"focus cp7-final-generalist"* && "$output" != *"final-claims"* ]]
   grep -q "CHANGELOG" "$(FD 1)/packet/claims.patch"
-  grep -q "every EPIC together" "$(FD 1)/prompt-final_claims.md"
-  grep -q '^+60$' "$(FD 1)/prompt-final_claims.md"                       # a small diff is inline
+  grep -q "every EPIC together" "$(FD 1)/prompt-final_generalist.md"
+  grep -q '^+60$' "$(FD 1)/prompt-final_generalist.md"                       # a small diff is inline
   # a diff too large for one prompt is pointed at, with its files, never truncated
   rm -rf "$E/cp7/round-1" "$E/cp7/rounds.json"
   AID_REVIEW_INLINE_MAX_BYTES=100 run _F prepare --round 1; [ "$status" -eq 0 ]
-  grep -q "too large to inline. READ IT FROM DISK" "$(FD 1)/prompt-final_claims.md"
-  grep -q '^- src/app.py$' "$(FD 1)/prompt-final_claims.md"; ! grep -q '^+60$' "$(FD 1)/prompt-final_claims.md"
+  grep -q "too large to inline. READ IT FROM DISK" "$(FD 1)/prompt-final_generalist.md"
+  grep -q '^- src/app.py$' "$(FD 1)/prompt-final_generalist.md"; ! grep -q '^+60$' "$(FD 1)/prompt-final_generalist.md"
 }
 
 @test "cp7: a closed round writes rounds.json and a schema-shaped semantic file over base..candidate, lenses = the round's roles" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
-  local r; for r in final_criteria final_claims final_generalist; do _fanswer 1 "$r"; done
+  local r; for r in final_criteria final_generalist; do _fanswer 1 "$r"; done
   _F collect --round 1 >/dev/null
-  run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
   [[ "$output" == *"closing: attempt 1, "*"findings on lines written during the closing: 0 (uncited: 0, unblamed: 0), codex findings refused on form: 0"* ]]   # 2.114.0
   [ "$(jq -r .verdict "$E/cp7/rounds.json")" = pass ]
   # the stage record holds the digest of measurement.json AFTER its last write (closing, cancelled_starts) — decide verifies it
@@ -1052,7 +1052,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   local f="$E/semantic-review-final.json"
   [ "$(jq -r .semantic_review.range "$f")" = "${FBASE}..$(git -C "$R" rev-parse HEAD)" ]
   [ "$(jq -r .revision.base_sha "$f")" = "$FBASE" ]
-  [ "$(jq -c '.semantic_review.lenses_run | sort' "$f")" = '["final_claims","final_criteria","final_generalist"]' ]
+  [ "$(jq -c '.semantic_review.lenses_run | sort' "$f")" = '["final_criteria","final_generalist"]' ]
   [ "$(jq -r .generated_by "$f")" = "aid-review-round.sh close cp7" ]
   run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' && fsm_check_review_round '$E' cp7"
   [ "$status" -eq 0 ]
@@ -1074,18 +1074,18 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
 
 @test "cp7: close refuses a reviewer file nobody dispatched" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
-  _fanswer 1 final_criteria; _fanswer 1 final_claims
+  _fanswer 1 final_criteria
   jq -n '{role: "final_generalist", checkpoint: "cp7", findings: [], no_findings_reason: "hand-written"}' > "$(FD 1)/reviewer-final_generalist.json"
   _F collect --round 1 >/dev/null
-  run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5
   [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]
 }
 
 @test "cp7: an open blocker fails the round; round 2 is refused because a fix moves the candidate; the next attempt's round 1 shows what stayed open and the fix" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
-  _fanswer 1 final_criteria; _fanswer 1 final_generalist; _fanswer 1 final_claims "$_BLOCKER"
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_BLOCKER"
   _F collect --round 1 >/dev/null
-  run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5; [ "$status" -eq 0 ]
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5; [ "$status" -eq 0 ]
   [[ "$output" == *"decide blocks on them"* ]]; [ "$(jq -r .verdict "$E/cp7/rounds.json")" = fail ]
   [ "$(jq -r '.findings[0].status' "$(FD 1)/merged.json")" = open ]
   run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' && fsm_check_review_round '$E' cp7"; [ "$status" -eq 1 ]
@@ -1099,7 +1099,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]           # a code fix carries nobody
   [ -s "$(FD 1)/packet/fix.patch" ]; [ "$(jq '.findings | length' "$(FD 1)/packet/open-findings.json")" -eq 1 ]
-  grep -q "This is a confirmation round" "$(FD 1)/prompt-final_claims.md"
+  grep -q "This is a confirmation round" "$(FD 1)/prompt-final_generalist.md"
 }
 
 @test "cp7: a finding of a final role validates against the finding schema's checkpoint and role lists" {
@@ -1107,28 +1107,88 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   jq -e '."$defs".roles_step.enum | (index("final_criteria") and index("final_claims") and index("final_generalist"))' "$AID_PLUGIN_PATH/defaults/schemas/review-finding.schema.json"
 }
 
-@test "cp7: after a docs-only fix the next attempt carries the clean roles the fix did not touch and asks only final_claims" {
+@test "cp7: after a docs-only fix both default roles are asked again — final_criteria is never carried, final_generalist reads the claims" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
-  local r; for r in final_criteria final_claims final_generalist; do _fanswer 1 "$r"; done
-  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5 >/dev/null
+  local r; for r in final_criteria final_generalist; do _fanswer 1 "$r"; done
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null
   grep -q '"path":"cp7/round-1/merged.json"' "$E/stage-writes.jsonl"          # the close recorded what it wrote
-  # the fix, and the second attempt's run directory as freeze and produce leave it
   local first="$E"; echo "- **Fix** — wording" >> "$R/CHANGELOG.md"; git -C "$R" commit -qam "docs: wording"
   E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E"; cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; : > "$E/timeline.jsonl"
   mkdir -p "$E/cp7"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$E/cp7/"
   jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: true, invalidated_feeds: ["claims"]}' > "$E/fix-class.json"
   _fsc
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
-  [[ "$output" == *"final_criteria: carried"* && "$output" == *"final_generalist: carried"* && "$output" == *"prompt-final_claims.md"* ]]
-  [ "$(jq -r '.carried_from | keys | join(",")' "$(FD 1)/round.json")" = "final_criteria,final_generalist" ]
-  [ ! -f "$(FD 1)/prompt-final_criteria.md" ]
-  _fanswer 1 final_claims; _F collect --round 1 >/dev/null
-  run _F close --round 1 --tokens final_claims=7; echo "$output"; [ "$status" -eq 0 ]
-  [ "$(jq -r '.reviewers.final_criteria | "\(.tokens) \(.usd)"' "$(FD 1)/measurement.json")" = "0 0" ]
-  # a role that reported a finding is never carried
-  jq "$_BLOCKER" "$first/cp7/round-1/reviewer-final_criteria.json" > "$first/x" && mv "$first/x" "$first/cp7/round-1/reviewer-final_criteria.json"
-  rm -rf "$E/cp7/round-1" "$E/cp7/rounds.json"
-  run _F prepare --round 1; [ "$status" -eq 0 ]; [[ "$output" == *"prompt-final_criteria.md"* ]]
+  [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]
+  [ -f "$(FD 1)/prompt-final_criteria.md" ] && [ -f "$(FD 1)/prompt-final_generalist.md" ]
+}
+@test "cp7-zadani: a fix that touched only the plan's criteria carries a clean final_generalist, never final_criteria" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  local r; for r in final_criteria final_generalist; do _fanswer 1 "$r"; done
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null
+  local first="$E"; E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E/cp7"
+  cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$E/cp7/"; : > "$E/timeline.jsonl"
+  jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: false, invalidated_feeds: ["criteria"]}' > "$E/fix-class.json"
+  _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.carried_from | keys | join(",")' "$(FD 1)/round.json")" = final_generalist ]
+  [ -f "$(FD 1)/prompt-final_criteria.md" ]
+}
+@test "cp7-zadani: a project that lists three roles still prepares three (final_claims is optional, 3B)" {
+  _frepo
+  yq -i '.review_checkpoints.final_review.reviewers += [{"role": "final_claims", "provider": "claude", "model": "sonnet", "effort": "low"}]' "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -c '.reviewers_expected | sort' "$(FD 1)/round.json")" = '["final_claims","final_criteria","final_generalist"]' ]
+}
+# _fzadani — bind the fixture plan to a brief, as a P109+ plan is
+_fzadani() {
+  printf -- '---\nzadani: P901\nverze: 1\n---\n# brief\n\n## 6. Hotovo, když\n\n- [ ] AC1: the app imports new\n' > "$R/.aid-o/plans/P901-zadani.md"
+  local sha; sha="$(sha256sum "$R/.aid-o/plans/P901-zadani.md" | cut -d' ' -f1)"
+  sed -i "s|^type: feature|type: feature\nzadani: .aid-o/plans/P901-zadani.md\nzadani_verze: 1\nzadani_sha256: ${sha}|" "$R/.aid-o/plans/P901-x.md"
+}
+@test "cp7-zadani: prepare copies the brief with its sha (round.json, manifest.json) and asks exactly the two default roles" {
+  _frepo; _fzadani; _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  local sha; sha="$(sha256sum "$R/.aid-o/plans/P901-zadani.md" | cut -d' ' -f1)"
+  cmp -s "$R/.aid-o/plans/P901-zadani.md" "$(FD 1)/packet/zadani.md"
+  [ "$(jq -r .zadani_sha256 "$(FD 1)/round.json")" = "$sha" ]
+  jq -e --arg s "$sha" '.files | any(.file == "zadani.md" and .sha256 == $s)' "$(FD 1)/packet/manifest.json"
+  [ "$(jq -c .reviewers_expected "$(FD 1)/round.json")" = '["final_criteria","final_generalist"]' ]
+}
+@test "cp7-zadani: the rendered prompts carry the point-by-point question and the checklist" {
+  _frepo; _fzadani; _fsc; _F prepare --round 1 >/dev/null
+  grep -q 'Point by point of the brief' "$(FD 1)/prompt-final_criteria.md"
+  grep -q 'zachovává' "$(FD 1)/prompt-final_criteria.md"
+  local item; for item in "a new personal datum" "repository layout vs. host layout" "new dependencies, per CI job" "the documentation build" "data leaking to logs" "account boundaries"; do
+    grep -q "$item" "$(FD 1)/prompt-final_generalist.md" || { echo "missing: $item"; return 1; }
+  done
+  grep -q 'claims.patch' "$(FD 1)/prompt-final_generalist.md"
+}
+@test "cp7-zadani: a brief whose file is missing is refused zadani_file_missing" {
+  _frepo; _fzadani; rm "$R/.aid-o/plans/P901-zadani.md"; _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"zadani_file_missing"* ]]
+}
+@test "cp7-zadani: a strict plan without zadani: is refused plan_names_no_brief" {
+  _frepo; sed -i 's/^type: feature/type: feature\nlifecycle_strict: true/' "$R/.aid-o/plans/P901-x.md"; _fsc
+  run _F prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"plan_names_no_brief"* ]]
+}
+@test "cp7-zadani: a brief path outside the project is refused zadani_path_escapes" {
+  _frepo; sed -i 's|^type: feature|type: feature\nzadani: /etc/hostname|' "$R/.aid-o/plans/P901-x.md"; _fsc
+  run _F prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"zadani_path_escapes"* ]]
+}
+@test "cp7-zadani: a brief whose sha is not the plan's is refused cp7_brief_sha_mismatch" {
+  _frepo; _fzadani; echo "- [ ] AC2: added later" >> "$R/.aid-o/plans/P901-zadani.md"; _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"cp7_brief_sha_mismatch"*"next:"* ]]
+}
+@test "cp7-zadani: a plan-diff.json without isolation is refused cp7_measurement_stale" {
+  _frepo; echo '{"criteria": []}' > "$E/plan-diff.json"; _fsc
+  run _F prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"cp7_measurement_stale"*"next:"* ]]
+}
+@test "cp7-zadani: a legacy plan without zadani: gets zadani-note.txt" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  [ -f "$(FD 1)/packet/zadani-note.txt" ] && [ ! -f "$(FD 1)/packet/zadani.md" ]
 }
 
 @test "step: the packet's files.json carries no plan-time tier declaration — the suite header is the tier (P103)" {

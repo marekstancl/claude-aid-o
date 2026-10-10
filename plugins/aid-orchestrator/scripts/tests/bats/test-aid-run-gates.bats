@@ -1885,7 +1885,8 @@ YAML
   git init -q . && git config user.email t@t && git config user.name t
   printf '.aid-o/\n' > .gitignore; echo seed > seed; git add -A; git commit -qm seed
   git worktree add -q -b cand "$TEST_TMPDIR/cand"
-  printf -- '---\nid: P953\n---\n# Plan\n\n## Acceptance Criteria\n\n- [ ] AC1: the candidate has its seed\n  ```yaml\n  verification_pattern:\n    type: must_contain\n    file: seed\n    regex: seed\n  ```\n' > "$TEST_TMPDIR/plan.md"
+  echo only-in-candidate > "$TEST_TMPDIR/cand/cand.txt"; git -C "$TEST_TMPDIR/cand" add cand.txt; git -C "$TEST_TMPDIR/cand" commit -qm cand
+  printf -- '---\nid: P953\n---\n# Plan\n\n## Acceptance Criteria\n\n- [ ] AC1: the candidate has its file\n  ```yaml\n  verification_pattern:\n    type: must_contain\n    file: cand.txt\n    regex: only-in-candidate\n  ```\n' > "$TEST_TMPDIR/plan.md"
   # the shipped gate, its command untouched but for where the plugin lives
   yq '{"gates": {"plan_diff": .gates.plan_diff}}' "$AID_PLUGIN_PATH/defaults/execution.yaml" \
     | sed "s|plugins/aid-orchestrator/scripts/|$AID_PLUGIN_PATH/scripts/|" > "$EXEC_YAML"

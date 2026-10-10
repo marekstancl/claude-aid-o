@@ -80,13 +80,18 @@ review_checkpoints:
   # Whole-plan review (CP7): one round over plan_base_commit..candidate before
   # plan-finalize --stage decide. A fix moves the candidate, so its confirmation
   # is round 1 of the next attempt (carrying what stayed open and the fix diff).
+  # Two roles since 2.116.0 (P110): final_criteria reads the brief (zadani.md in
+  # the packet) point by point against the isolated measurement; final_generalist
+  # carries the security and operations checklist and the claims question. A
+  # project that keeps final_claims lists it in its own file (the role section
+  # stays in skills/step-review-roles.md):
+  #   - {role: final_claims, provider: claude, model: opus, effort: low}
   final_review:
     rounds_default: 1
     banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
     stand_in_model: opus
     reviewers:
       - {role: final_criteria,   provider: claude, model: opus}
-      - {role: final_claims,     provider: claude, model: opus, effort: low}
       - {role: final_generalist, provider: codex,  model: gpt-6-sol, effort: medium}
 
   # The fix loop, the trivial-skip thresholds and the pre-filter left with

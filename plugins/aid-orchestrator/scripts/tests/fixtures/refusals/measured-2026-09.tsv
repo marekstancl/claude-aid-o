@@ -37,3 +37,10 @@
 0	cp1_prepare_refused	restart_needs_brief_change
 0	fsm_amend_scope_refused	amend_scope_no_brief_point
 0	fsm_amend_scope_refused	amend_scope_reason_names_no_point
+0	cp1_prepare_refused	zadani_file_missing
+0	cp7_prepare_refused	cp7_brief_sha_mismatch
+0	cp7_prepare_refused	cp7_measurement_stale
+0	fsm_increment_fail	step_criteria_failed
+0	fsm_increment_fail	defer_refused
+0	plan_diff_refused	no_isolation
+0	plan_diff_refused	cwd_not_worktree

@@ -9590,6 +9590,11 @@ _pfsm_finalize_produce() {
   local pd_cwd; pd_cwd="$(_pfsm_plan_tree_root "$root" "$plan_id")"
   bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$plan_file" --evidence-dir "$run_dir_abs" --base-commit "$base_commit" \
     --isolated --cwd "$pd_cwd" >/dev/null 2>"${run_dir_abs}/plan-diff.stderr" || pdrc=$?
+  if (( pdrc > 2 )); then
+    echo "PRECONDITION FAIL: plan-finalize --stage produce: aid-plan-diff.sh exited ${pdrc}:" >&2
+    cat "${run_dir_abs}/plan-diff.stderr" >&2
+    return 1
+  fi
   [[ -s "$pd" ]] && echo "plan-diff: isolation $(jq -c '.isolation // {}' "$pd" 2>/dev/null)$(jq -r '.next // "" | if . == "" then "" else " — " + . end' "$pd" 2>/dev/null)"
   local pd_verdict=""
   if [[ "$pdrc" -eq 0 || "$pdrc" -eq 1 || "$pdrc" -eq 2 ]] && [[ -s "$pd" ]]; then

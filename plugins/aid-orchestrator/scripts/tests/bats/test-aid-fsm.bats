@@ -2023,3 +2023,10 @@ SC_WHY="the PM moved this point to the close of the plan"
   run "$FSM" increment-step "$SF"; echo "$output"
   [ "$status" -eq 1 ]; [[ "$output" == *"cannot be measured"* ]]
 }
+@test "step-criteria: a plan-diff.json the measurer wrote at HEAD is reused, not measured again" {
+  _sc_seed; touch ok.txt
+  bash "$AID_PLUGIN_PATH/scripts/aid-plan-diff.sh" --plan "$SC_PLAN" --evidence-dir "$TEST_EVIDENCE_DIR" --base-commit HEAD --step 0 --plan-json "$TEST_EVIDENCE_DIR/plan.json" >/dev/null
+  [ "$(grep -c '"event":"plan_diff_complete"' "$TEST_EVIDENCE_DIR/timeline.jsonl")" -eq 1 ]
+  run "$FSM" increment-step "$SF"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(grep -c '"event":"plan_diff_complete"' "$TEST_EVIDENCE_DIR/timeline.jsonl")" -eq 1 ]
+}

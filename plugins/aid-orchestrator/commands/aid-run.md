@@ -875,7 +875,7 @@ worktree (`.aid-worktrees/plan-<id>`) on `plan/<id>` for the whole close.
 | 1 | `<fsm> plan-finalize <plan> --stage freeze` | merges the target branch into `plan/<plan>`, freezes the candidate, mints `R-<plan>-final-<N>` | an EPIC is not terminal; the merge conflicts (exit 4, state CONFLICT); the tree is dirty |
 | 2 | `<fsm> plan-finalize <plan> --stage gates` | the plan-final gate run; a gate that passed in the previous attempt and whose `inputs:` did not change is copied (`reused_from`), not executed | a gate fails (the report names it); the branch moved off the candidate |
 | 3 | `<fsm> plan-finalize <plan> --stage produce` | review profile, plan-diff, acceptance evidence, and what the round reads (`cp7/`) | gates have not passed; the candidate moved |
-| 4 | `<round> prepare\|collect\|close --checkpoint cp7 --evidence-dir <run dir> --project-root <plan worktree> --round 1` | the whole-plan review: `final_criteria`, `final_claims`, `final_generalist` | `produce` has not run; HEAD is not the candidate; a reviewer file has no dispatch bracket |
+| 4 | `<round> prepare\|collect\|close --checkpoint cp7 --evidence-dir <run dir> --project-root <plan worktree> --round 1` | the whole-plan review: `final_criteria` (the brief point by point against the isolated measurement) and `final_generalist` (Codex: across the EPICs, the claims, the security and operations checklist); a project may add `final_claims` | `produce` has not run; HEAD is not the candidate; a reviewer file has no dispatch bracket; the plan-diff was not measured in isolation (`cp7_measurement_stale`); the brief is not the one the plan is bound to (`cp7_brief_sha_mismatch`), missing (`zadani_file_missing`) or, for a strict plan, not named (`plan_names_no_brief`) |
 | 5 | `<fsm> plan-finalize <plan> --stage decide` | the one aggregate: `release-decision.json`, the sealed receipt, the PM page with attempts, minutes and USD | the round is not closed; a decision input was edited by hand (named); the candidate moved |
 
 **The measurer at the close (row 3, P110).** `produce` runs every brief point
@@ -916,10 +916,12 @@ is round 1 of the next attempt.
    ```
    The owning step is the one whose declared files cover the path (`plan.json` of the EPIC whose commit last touched it: `git log -1 -- <path>`).
 2. `--stage freeze` again. It mints the next attempt and writes `fix-class.json`:
-   what the fix touched decides what is read again. A change to CHANGELOG, README
-   or docs re-asks `final_claims`; an edit of the plan's criteria re-asks
-   `final_criteria`; code re-asks everyone; a role whose inputs were not touched
-   and which had no finding is carried. The round's packet shows the re-asked
+   what the fix touched decides what is read again. `final_criteria` is never
+   carried — every attempt re-measures every point. A change to CHANGELOG,
+   README or docs or to the code re-asks `final_generalist` (and `final_claims`
+   where a project keeps it); a role whose inputs were not touched and which
+   had no finding is carried. A brief point measured `absent` is a blocker
+   finding of `final_criteria`. The round's packet shows the re-asked
    reviewers what stayed open and the fix diff.
 3. `gates` (unchanged gates are copied), `produce`, the round, `decide`.
 

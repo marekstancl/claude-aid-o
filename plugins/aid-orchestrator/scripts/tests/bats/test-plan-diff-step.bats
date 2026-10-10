@@ -246,3 +246,13 @@ _unlisten() { kill "$LPID" 2>/dev/null || true; }
   [ "$(jq -r .head_commit "$EV/plan-diff.json")" = "$(git -C "$ROOT/cand" rev-parse HEAD)" ]
   [ "$(jq -r .isolation.worktree "$EV/plan-diff.json")" = "$ROOT/cand" ]
 }
+@test "isolation: --cwd on a subdirectory of a worktree exits 3 (points run from the worktree's top)" {
+  _iplan '"true"'; mkdir -p sub
+  _irun --cwd "$ROOT/sub"; [ "$status" -eq 3 ]; [[ "$output" == *"cwd_not_worktree"* ]]
+}
+@test "isolation: each point's command is kept as cmd-<label>.sh" {
+  _nsprobe
+  _iplan '"true"' '"test 1 = 1"'
+  _irun; [ "$status" -eq 0 ]
+  grep -qx 'true' "$EV/cmd-AC1.sh" && grep -qx 'test 1 = 1' "$EV/cmd-AC2.sh"
+}

@@ -180,9 +180,9 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
 }
 
 # ── final_review (CP7) ────────────────────────────────────────────────────────
-@test "final_review: the default loads with three roles; its toggle switches it off; a banned model is refused" {
+@test "final_review: the default loads with two roles (P110); its toggle switches it off; a banned model is refused" {
   aid_review_config_load "$ROOT" final_review "$STEP_SKILL" && aid_review_config_validate
-  [ "${RC_ROLE[*]}" = "final_criteria final_claims final_generalist" ]
+  [ "${RC_ROLE[*]}" = "final_criteria final_generalist" ]
   [ "$RC_ENABLED" = 1 ] && [ "$RC_STAND_IN_MODEL" = opus ]
   yq '.review_checkpoints.cp7_plan_final_review = false' "$DEFAULT" > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
   aid_review_config_load "$ROOT" final_review "$STEP_SKILL"; [ "$RC_ENABLED" = 0 ]
@@ -229,4 +229,10 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   ! aid_review_second_round_allowed "$cp" 3 bbb          # only rounds_default + 1
   echo '{"findings":[{"severity":"minor","status":"open"},{"severity":"major","status":"fixed"}]}' > "$cp/round-1/merged.json"
   ! aid_review_second_round_allowed "$cp" 2 bbb          # nothing open to confirm
+}
+
+@test "final_review: final_claims listed by a project is accepted (the role section stays optional)" {
+  _project '.review_checkpoints.final_review.reviewers += [{"role": "final_claims", "provider": "claude", "model": "opus", "effort": "low"}]'
+  aid_review_config_load "$ROOT" final_review "$STEP_SKILL" && aid_review_config_validate
+  [ "${RC_ROLE[*]}" = "final_criteria final_generalist final_claims" ]
 }

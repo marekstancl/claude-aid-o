@@ -291,8 +291,8 @@ _carried_roles() {
   [[ -f "$fc" ]] || { echo '{}'; return 0; }
   for role in "$@"; do
     case "$role" in
-      final_criteria)   feeds='["criteria","diff"]' ;;
-      final_claims)     feeds='["claims","diff"]' ;;
+      final_criteria)   continue ;;   # never carried: a new candidate re-measures every point (P110)
+      final_claims|final_generalist) feeds='["claims","diff"]' ;;   # the generalist holds the claims question since 2.116.0
       *)                feeds='["diff"]' ;;
     esac
     jq -e --argjson f "$feeds" '(.invalidated_feeds - $f) == .invalidated_feeds' "$fc" >/dev/null || continue
@@ -523,7 +523,18 @@ cmd_prepare() {
     local prevdir=""; (( ROUND >= 2 )) && prevdir="$(_round_dir $((ROUND - 1)))"
     [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 ]] && prevdir="$(_previous_attempt_round)"
     if [[ "$CHECKPOINT" == cp7 ]]; then
+      # P110: the round argues from the isolated close measurement and the brief
+      # the plan is bound to — never from a pre-2.116.0 measurement or another brief.
+      jq -e '.isolation != null' "${EVID}/plan-diff.json" >/dev/null 2>&1 \
+        || _die "REFUSED (cp7_measurement_stale): ${EVID}/plan-diff.json was not measured in isolation (no isolation key)
+  next: bash ${SCRIPT_DIR}/aid-plan-fsm.sh plan-finalize <plan> --stage produce (it runs aid-plan-diff.sh --isolated --cwd <candidate>) (pipeline.md §When AID refuses: cp7_measurement_stale)"
       aid_final_review_packet_build "$ROOT" "$dir" "$STEPCHECK" "$EVID" "$prevdir" || exit 1
+      if [[ -f "${dir}/packet/zadani.md" ]]; then
+        local zwant zgot zplan; zplan="$(jq -r .plan "${EVID}/cp7/brief.json")"
+        zwant="$(_aid_fm_get "$zplan" zadani_sha256)"; zgot="$(sha256sum "${dir}/packet/zadani.md" | cut -d' ' -f1)"
+        [[ "$zwant" == "$zgot" ]] || _die "REFUSED (cp7_brief_sha_mismatch): the brief is ${zgot:0:12}, the plan is bound to ${zwant:-<none>} — the brief changed after the plan was written
+  next: bump the brief's verze and the plan's zadani_verze/zadani_sha256 (a PM decision: the points changed), or restore the brief (pipeline.md §When AID refuses: cp7_brief_sha_mismatch)"
+      fi
     else
       aid_step_review_packet_build "$ROOT" "$CHECKPOINT" "$dir" "$STEPCHECK" "${EVID}/plan.json" "${STEP:-}" "$prevdir" || exit 1
     fi
@@ -550,6 +561,9 @@ cmd_prepare() {
 
   _stamp_prompt_lengths "$dir" || exit 1
   [[ "$MODE" == step ]] && { _record_agents "$dir" "${roles[@]}" || exit 1; }
+  if [[ "$CHECKPOINT" == cp7 && -f "${dir}/packet/zadani.md" ]]; then
+    jq --arg z "$(sha256sum "${dir}/packet/zadani.md" | cut -d' ' -f1)" '. + {zadani_sha256: $z}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
+  fi
   if [[ -f "${dir}/packet/open-findings.json" && ! -f "${dir}/packet/fix.patch" ]]; then
     jq '. + {confirmation_fallback: "full_diff"}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
   fi

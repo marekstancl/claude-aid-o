@@ -257,24 +257,31 @@ editing the finding and never by merging around it (2.114.0).
 
 ## Role: final_criteria
 
-The finished plan against what it promised. You hold the plan's acceptance and
-success criteria (`dod.md`) and the record of what was executed
-(`plan-diff.json`, `gates_report.json`), and you check each promise against a
-proof that ran.
+The finished plan against what it promised. You hold the PM's brief
+(`zadani.md`), the plan's acceptance and success criteria (`dod.md`) and the
+record of what was executed (`plan-diff.json`, measured at the close in
+isolation; `gates_report.json`), and you check each promise against a proof
+that ran.
 
 ### Questions
 
-1. For every acceptance criterion of the plan: which executed test or gate row proves it? Name the test by `path:line` and its result in `plan-diff.json`.
-2. Is any criterion recorded as verified while its test was skipped, not selected, or does not assert what the criterion says?
-3. Is any criterion proven only by a manual step, a live system or a later deployment that the range does not contain?
-4. Does a success criterion of the plan as a whole have no proof at all in the range?
+1. Point by point of the brief (`zadani.md`, every `AC<n>`): quote the measured verdict of `plan-diff.json` for it (`present`, `absent` with its reason, or `skipped`), and judge the delivery against the point's TEXT — does it keep it (`zachovává`), soften it (`změkčuje`), drop part of it (`vypouští`) or contradict it (`odporuje`)? A point whose measured verdict is `absent` is a blocker finding, whatever else proves it; an `absent` with a reason of `no_isolation`, `env_stripped`, `no_verification_env` or `verification_env_unset` was NOT measured — say so, never count it as passed.
+2. For every other acceptance criterion of the plan: which executed test or gate row proves it? Name the test by `path:line` and its result in `plan-diff.json`.
+3. Is any criterion recorded as verified while its test was skipped, not selected, or does not assert what the criterion says?
+4. Is any criterion proven only by a manual step, a live system or a later deployment that the range does not contain?
+5. Does a success criterion of the plan as a whole have no proof at all in the range?
 
 ### Stop rule
 
-A blocker is an acceptance criterion with no executed proof at the candidate.
-A criterion whose proof is weaker than its wording is a major.
+A blocker is a brief point measured `absent`, or an acceptance criterion with
+no executed proof at the candidate. A delivery that softens or drops part of a
+brief point, or a criterion whose proof is weaker than its wording, is a major.
 
 ## Role: final_claims
+
+Optional — not in the default policy since 2.116.0 (P110): `final_generalist`
+holds the claims question. A project that lists `final_claims` in its own
+`review-checkpoints.yaml` gets this role as before.
 
 What the delivery says about itself against what the code does. You hold
 `claims.patch` (CHANGELOG, README and docs hunks of the range) and the code at
@@ -305,11 +312,20 @@ EPICs. The per-EPIC reviews already judged each EPIC alone
 3. Was an EPIC of the plan not reviewed as a whole (`cp3: absent`)? Then read its part of the range as its EPIC reviewer would have.
 4. Does the range remove or weaken an existing behaviour that no criterion of the plan asked to change?
 5. Is a finding the per-EPIC reviews left open still true at the candidate? Report it once, with today's evidence.
+6. Claims (`claims.patch`: CHANGELOG, README and docs hunks): does the code at the candidate do every behavioural claim, and does a binding instruction for whoever deploys or operates this live only outside the delivered files? (A project that keeps `final_claims` has that role ask this too.)
+7. Security and operations, across the range — answer each, `none` when it does not apply:
+   - a new personal datum: where is it stored, and how is it deleted (retention, the user's request)?
+   - repository layout vs. host layout: does a path, mount, port or file the code expects exist on the host it deploys to?
+   - new dependencies, per CI job: is each one installed in every job that runs the code (a library the tests import, a binary a script calls)?
+   - the documentation build: does a changed doc page still build (links, frontmatter, sidebar)?
+   - data leaking to logs or notifications (Telegram, e-mail): a secret, a token, a personal datum, a whole request?
+   - account boundaries: can one user, tenant or role now read or change what another owns?
 
 ### Stop rule
 
-A blocker is a break that exists only when the EPICs are read together: a
-broken consumer, an unwired half, or a behaviour lost that nobody asked to lose.
+A blocker is a break that exists only when the EPICs are read together (a
+broken consumer, an unwired half, a behaviour lost that nobody asked to lose),
+a false claim, or an exploitable path or data leak from the checklist.
 
 ## Anti-patterns
 

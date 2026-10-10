@@ -126,7 +126,8 @@ fi
 # resolved before the run moves into --cwd.
 STATE_ROOT="$(aid_state_root 2>/dev/null || pwd)"
 if [[ -n "$RUN_CWD" ]]; then
-  if ! git -C "$RUN_CWD" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  # the worktree's top, not a directory inside it (points run from the top)
+  if [[ "$(git -C "$RUN_CWD" rev-parse --show-toplevel 2>/dev/null)" != "$(cd "$RUN_CWD" 2>/dev/null && pwd -P)" ]]; then
     echo "REFUSED (cwd_not_worktree): --cwd ${RUN_CWD} is not a git worktree
 next: pass the candidate worktree (plan-finalize --stage freeze creates it), or run from inside it with --cwd .
 (pipeline.md §When AID refuses: cwd_not_worktree)" >&2
@@ -168,7 +169,7 @@ AC_CMD_TIMEOUT="${AID_PLAN_DIFF_AC_TIMEOUT:-120}"
 
 # ── isolation (P110, --isolated) ────────────────────────────────────────────
 # PD_NET: unshare | host | none | env_stripped:<VAR> | verification_env_unset:<VAR>
-PD_NET="" PD_NET_LABEL="null" PD_ENV=() PD_ENV_KEYS="[]" PD_NEXT="" PD_CMD_N=0
+PD_NET="" PD_NET_LABEL="null" PD_ENV=() PD_ENV_KEYS="[]" PD_NEXT=""
 # <timeout> <cmd file> — the namespace prefix: loopback up as root, then back to
 # the caller's uid. Its own pid namespace too: whatever the point starts in the
 # background (a listener) dies with it instead of outliving the measurer.
@@ -266,7 +267,7 @@ parse_step_blocks() {
 # Run a single verification_pattern, output verdict + evidence.
 # Supported types: cmd (exit code), must_not_exist (file absent), must_contain (regex match).
 run_pattern() {
-  local type=$1 cmd=$2 file=$3 regex=$4 expected_exit=$5 t="${6:-}"
+  local type=$1 cmd=$2 file=$3 regex=$4 expected_exit=$5 t="${6:-}" label="${7:-ac}"
   # the block's own timeout: (P110, 1..1800 s) or the runner's default
   [[ "$t" =~ ^[1-9][0-9]*$ ]] || t="$AC_CMD_TIMEOUT"
 
@@ -299,8 +300,7 @@ run_pattern() {
           printf 'absent\x1fthe point needs a database and the project declares no verification_env (reason=no_verification_env)\x1f0\n'; return 0
         fi
         # written verbatim, so no shell re-parses the command (nested quotes, $x)
-        PD_CMD_N=$((PD_CMD_N + 1))
-        local cf="${EVIDENCE_DIR}/cmd-${PD_CMD_N}.sh"; printf '%s\n' "$cmd" > "$cf"
+        local cf="${EVIDENCE_DIR}/cmd-${label//[^A-Za-z0-9_-]/_}.sh"; printf '%s\n' "$cmd" > "$cf"
         if [[ "$PD_NET" == unshare ]]; then
           _pd_ns_run "$t" "$cf" </dev/null >/dev/null 2>&1 || actual_exit=$?
         else
@@ -382,8 +382,10 @@ if [[ "$ac_count" -eq 0 && "$SCOPE" == step ]]; then
   jq -n --arg gb "aid-plan-diff.sh@${PLUGIN_VERSION}" --arg ga "$GEN_AT" --arg pl "$PLAN" \
     --arg bc "$BASE_COMMIT" --arg hc "$HEAD_COMMIT" --argjson st "$STEP_N" --argjson ps "$PLAN_STEP" \
     '{_generated_by: $gb, _generated_at: $ga, plan_path: $pl, base_commit: $bc, head_commit: $hc,
-      scope: "step", step: $st, plan_step: $ps, isolation: null, unmeasured_step: true, ac_count: 0, results: [],
-      summary: {present_count: 0, absent_count: 0, skipped_count: 0}, overall_verdict: "skipped"}' > "$OUTPUT_FILE"
+      scope: "step", step: $st, plan_step: $ps, unmeasured_step: true, ac_count: 0, results: [],
+      summary: {present_count: 0, absent_count: 0, skipped_count: 0}, overall_verdict: "skipped"}
+     + {isolation: (if $iso == 1 then {worktree: $wt, env_keys: $ek, network: (if $net == "null" then null else $net end)} else null end)}' \
+    --argjson iso "$ISOLATED" --arg wt "$(pwd)" --argjson ek "$PD_ENV_KEYS" --arg net "$PD_NET_LABEL" > "$OUTPUT_FILE"
   log_event "$TIMELINE_FILE" "plan_diff_complete" scope="step" step="$STEP_N" verdict="unmeasured_step" sha256="$(sha256sum "$OUTPUT_FILE" | cut -d' ' -f1)" || true
   exit 2
 fi
@@ -426,7 +428,7 @@ while IFS= read -r line; do
   ac_timeout=""
   IFS=$'\x1f' read -r ac_label ac_text pat_type cmd file regex expected_exit ac_timeout <<< "$line"
 
-  IFS=$'\x1f' read -r verdict evidence duration_ms <<< "$(run_pattern "$pat_type" "$cmd" "$file" "$regex" "$expected_exit" "$ac_timeout")"
+  IFS=$'\x1f' read -r verdict evidence duration_ms <<< "$(run_pattern "$pat_type" "$cmd" "$file" "$regex" "$expected_exit" "$ac_timeout" "$ac_label")"
 
   [[ "$verdict" == "present" ]] && present_count=$((present_count + 1))
   [[ "$verdict" == "absent"  ]] && absent_count=$((absent_count + 1))

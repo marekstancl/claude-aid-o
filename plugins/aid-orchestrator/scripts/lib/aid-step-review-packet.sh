@@ -17,7 +17,8 @@
 # aid_final_review_packet_build <root> <round_dir> <step_check> <run_dir> [<prev_round_dir>]
 #   The cp7 packet: diff.patch, claims.patch (CHANGELOG, README and docs hunks),
 #   dod.md (criteria.md), epic-findings.json, plan-diff.json, gates_report.json,
-#   files.json, step-check.json, manifest.json. No plan.json is needed. A range
+#   files.json, step-check.json, manifest.json, and the brief as zadani.md
+#   (zadani-note.txt for a legacy plan) through aid_plan_review_brief_resolve. No plan.json is needed. A range
 #   of more than 400 files also gets one diff-<EPIC>.patch per contributing
 #   EPIC, named in the prompt; nothing is truncated.
 # aid_step_review_prompt_render <role> <round> <round_dir> <checkpoint> <step>
@@ -125,6 +126,9 @@ aid_final_review_inputs_build() {
                    | map(select(.status | IN("open", "disputed", "carried", "routed", "form_invalid")) | {severity, status, claim, evidence, fix} + (if .rule then {rule} else {} end)))}' "$run"/round-*/merged.json
     fi
   done | jq -s '{epics: .}' > "$out/epic-findings.json"
+  # P110: which brief the whole-plan round reads — resolved again at every
+  # prepare (aid_plan_review_brief_resolve), so the packet carries the file as it is.
+  jq -n --arg p "$plan_file" --arg r "$state_root" '{plan: $p, root: $r}' > "$out/brief.json"
 }
 
 aid_final_review_packet_build() {
@@ -140,6 +144,11 @@ aid_final_review_packet_build() {
   range="$(jq -r .range "$sc")"
   git -C "$root" diff "$range" > "$dir/diff.patch" || return 1
   git -C "$root" diff "$range" -- '*CHANGELOG*' '*README*' 'docs/**' '*.md' > "$dir/claims.patch" || return 1
+  # P110: the brief, through the CP1 resolver and its refusals
+  if [[ -f "${run}/cp7/brief.json" ]]; then
+    declare -F aid_plan_review_brief_resolve >/dev/null || source "${_AID_SR_PLUGIN}/scripts/lib/aid-plan-review-packet.sh"
+    aid_plan_review_brief_resolve "$(jq -r .root "${run}/cp7/brief.json")" "$(jq -r .plan "${run}/cp7/brief.json")" "$dir" || return 1
+  fi
   if (( $(jq '.size.files' "$sc") > 400 )); then
     local epic
     while IFS= read -r epic; do

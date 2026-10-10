@@ -4588,7 +4588,7 @@ _fsm_step_measure() {
   # hand-written file is measured again, never trusted).
   if [[ -f "$pd" && "$(jq -r '.head_commit // ""' "$pd" 2>/dev/null)" == "$(git rev-parse HEAD 2>/dev/null)" ]] \
      && grep -F '"event":"plan_diff_complete"' "${ev}/timeline.jsonl" 2>/dev/null \
-        | jq -e --arg s "$(sha256sum "$pd" | cut -d' ' -f1)" --arg n "$n" 'select(.step == $n and .sha256 == $s)' >/dev/null 2>&1; then
+        | jq -e --arg s "$(sha256sum "$pd" | cut -d' ' -f1)" --arg n "$n" 'select((.step | tostring) == $n and .sha256 == $s)' >/dev/null 2>&1; then
     return 0
   fi
   base="$(yaml_field "$sf" base_commit)"

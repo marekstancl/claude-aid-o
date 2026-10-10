@@ -30,6 +30,46 @@ source "${_AID_PR_PLUGIN}/scripts/lib/aid-plan-state.sh"   # _plan_path_inside_r
 # shellcheck source=aid-critic.sh
 source "${_AID_PR_PLUGIN}/scripts/lib/aid-critic.sh"   # the one answer to "did the critic pass for this plan" (P109)
 
+# aid_plan_review_brief_resolve <root> <plan> <dest dir>
+#   The plan's brief (frontmatter `zadani:`), copied as <dest>/zadani.md; a
+#   legacy plan without one gets <dest>/zadani-note.txt. Sets ZR_FILE (the file
+#   written), ZR_SHA and ZR_VER (empty for a legacy plan). Refuses (return 1,
+#   with `next:`): plan_names_no_brief (a strict plan without `zadani:`),
+#   zadani_path_escapes (a path outside the project), zadani_file_missing (the
+#   named file is not there). The ONE resolver of the CP1 and CP7 packets (P110).
+aid_plan_review_brief_resolve() {
+  local root="$1" plan="$2" dir="$3" zrel zabs zroot
+  ZR_FILE="" ZR_SHA="" ZR_VER=""
+  rm -f "$dir/zadani.md" "$dir/zadani-note.txt"
+  zrel="$(_aid_fm_get "$plan" zadani)"
+  if [[ -z "$zrel" ]]; then
+    if grep -qE '^lifecycle_strict:[[:space:]]*true' "$plan"; then
+      echo "packet: plan names no brief (zadani:) — a strict plan needs one" >&2
+      echo "  next: write .aid-o/plans/<id>-zadani.md from defaults/templates/zadani.md and bind the plan to it (pipeline.md §When AID refuses: plan_names_no_brief)" >&2
+      return 1
+    fi
+    echo "no brief: this plan names no zadani: file (a legacy plan)" > "$dir/zadani-note.txt"
+    ZR_FILE=zadani-note.txt
+    return 0
+  fi
+  command -v realpath >/dev/null 2>&1 || { echo "packet: realpath required" >&2; return 1; }
+  zroot="$(realpath -m "$root")"
+  [[ "$zrel" == /* ]] && zabs="$(realpath -m "$zrel")" || zabs="$(realpath -m "${zroot}/${zrel}")"
+  if ! _plan_path_inside_root "$zabs" "$zroot"; then
+    echo "packet: zadani path escapes the project: ${zrel}" >&2
+    echo "  next: point zadani: at a file inside the project (.aid-o/plans/<id>-zadani.md) (pipeline.md §When AID refuses: zadani_path_escapes)" >&2
+    return 1
+  fi
+  if [[ ! -f "$zabs" ]]; then
+    echo "packet: the brief ${zrel} does not exist" >&2
+    echo "  next: restore the brief file the plan names, or fix the plan's zadani: path — aid-plan-lint.sh ${plan} --only zadani (pipeline.md §When AID refuses: zadani_file_missing)" >&2
+    return 1
+  fi
+  cp "$zabs" "$dir/zadani.md" || return 1
+  ZR_FILE=zadani.md
+  ZR_SHA="$(sha256sum "$dir/zadani.md" | cut -d' ' -f1)"; ZR_VER="$(_aid_fm_get "$dir/zadani.md" verze)"
+}
+
 # aid_plan_review_packet_build <plan> <project_root> <plan_check_json> <round_dir>
 #   Writes <round_dir>/packet/{plan.md, plan-check.json, standards.md,
 #   critic-response.md, manifest.json}. Refuses (return 1) when the script report
@@ -49,33 +89,10 @@ aid_plan_review_packet_build() {
   cp "$plan" "$dir/plan.md" && cp "$check" "$dir/plan-check.json" || return 1
 
   # P109 Step 4: the PM's brief rides with the plan, so every reviewer can hold
-  # the plan to it point by point. A strict plan must name one; the path must
-  # stay inside the project.
-  local zrel zabs zroot zsha="" zver="" zfiles=""
-  rm -f "$dir/zadani.md" "$dir/zadani-note.txt"
-  zrel="$(_aid_fm_get "$plan" zadani)"
-  if [[ -z "$zrel" ]]; then
-    if grep -qE '^lifecycle_strict:[[:space:]]*true' "$plan"; then
-      echo "packet: plan names no brief (zadani:) — a strict plan needs one" >&2
-      echo "  next: write .aid-o/plans/<id>-zadani.md from defaults/templates/zadani.md and bind the plan to it (pipeline.md §When AID refuses: plan_names_no_brief)" >&2
-      return 1
-    fi
-    echo "no brief: this plan names no zadani: file (a legacy plan)" > "$dir/zadani-note.txt"
-    zfiles=" zadani-note.txt"
-  else
-    command -v realpath >/dev/null 2>&1 || { echo "packet: realpath required" >&2; return 1; }
-    zroot="$(realpath -m "$root")"
-    [[ "$zrel" == /* ]] && zabs="$(realpath -m "$zrel")" || zabs="$(realpath -m "${zroot}/${zrel}")"
-    if ! _plan_path_inside_root "$zabs" "$zroot"; then
-      echo "packet: zadani path escapes the project: ${zrel}" >&2
-      echo "  next: point zadani: at a file inside the project (.aid-o/plans/<id>-zadani.md) (pipeline.md §When AID refuses: zadani_path_escapes)" >&2
-      return 1
-    fi
-    [[ -f "$zabs" ]] || { echo "packet: the brief ${zrel} does not exist — aid-plan-lint.sh ${plan}" >&2; return 1; }
-    cp "$zabs" "$dir/zadani.md" || return 1
-    zsha="$(sha256sum "$dir/zadani.md" | cut -d' ' -f1)"; zver="$(_aid_fm_get "$dir/zadani.md" verze)"
-    zfiles=" zadani.md"
-  fi
+  # the plan to it point by point (the resolver is shared with CP7, P110).
+  local zsha="" zver="" zfiles=""
+  aid_plan_review_brief_resolve "$root" "$plan" "$dir" || return 1
+  zsha="$ZR_SHA"; zver="$ZR_VER"; zfiles=" $ZR_FILE"
   # The lint's findings (P009: a legacy plan touched a mapped standards area,
   # the lint said so as an advisory, and three CP1 rounds never saw the line).
   # Every finding line, whatever its tier; the verdict itself is not the packet's.
