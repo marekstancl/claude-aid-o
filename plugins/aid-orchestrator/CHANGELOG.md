@@ -31,7 +31,7 @@ Levnější běh (P110, vydání 2 roadmapy po experimentu P014). Krok si koupí
 
 | část | před | po |
 |---|---|---|
-| scripts | 72 060 | 73 090 |
+| scripts | 72 060 | 73 089 |
 | skills | 8 270 | 8 328 |
 | commands | 5 796 | 5 896 |
 

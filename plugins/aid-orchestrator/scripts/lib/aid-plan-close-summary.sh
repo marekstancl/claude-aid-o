@@ -447,8 +447,7 @@ aid_plan_close_render() {
     --arg wv "$waivers_n" --arg bl "$backlog_n" '[
       "Recenzovaný kandidát: " + $cand + " → schválený cíl " + $tgt + " (" + $tref + "), merge do main: " + $merge,
       "Kam šel čas: " + $time,
-      "Cena běhu: " + $rcost,
-      "Cena plánu: " + $pcost,
+      "Cena běhu: " + $rcost + "; Cena plánu: " + $pcost,   # one row: the block shows six
       "Plan-final brány: " + $gres + " (report: " + $grep_ + ")",
       "Čtení celku: " + $fr + "; uzavření: " + $cost,
       "Evidence: " + $ev + " (ověřeno na HEAD: " + $evh + "), waiverů " + $wv + ", zbývá v backlogu " + $bl
