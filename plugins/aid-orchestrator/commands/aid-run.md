@@ -662,6 +662,20 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
 5. **Step review (CP2)** — the section "Step review (CP2) and EPIC review (CP3)"
    above: step check, round, `close`; `increment-step` refuses without the
    step's round index at HEAD
+5a. **The step's points run (P110)** — `prepare --checkpoint cp2` runs
+   `aid-plan-diff.sh --step N --plan-json <run>/plan.json` before it builds the
+   packet (the brief points the step closes — a point several steps name is
+   measured at the last one — and the step's own `- [ ] [<role>]` criteria with
+   a block), so the reviewer reads measured verdicts. `increment-step` reads
+   `cp2/step-N/plan-diff.json` bound to HEAD (stale or missing: it measures
+   again) and refuses any `absent` point (`step_criteria_failed`, with `next:`);
+   `--force` does not waive it. The one way out is the PM's answer on a
+   Decision card that quotes the point:
+   `aid-fsm.sh increment-step <state> --defer-criterion AC<n> --reason "<the PM's words>" --finding-card <card>`
+   (`defer_refused` names what is missing: no card, the card does not quote the
+   point, no PM reply after it, a point the step does not close, a reason under
+   20 characters). The deferral lands in `cp2/step-N/deferred.json`; every
+   later measurement re-checks its card, and the close measures the point.
 6. Log to `timeline.jsonl`
 
 **EPIC review (CP3):** when all steps are done, before transitioning to GATES —

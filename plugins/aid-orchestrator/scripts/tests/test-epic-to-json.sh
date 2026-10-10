@@ -444,6 +444,25 @@ else
   fail "legacy five-column row" "plan.json missing or wrong: ${cl_json2:-<none>}"
 fi
 
+run_test "P110: source_step_ids \"4,5,6\" yields plan_step 4/5/6; an EPIC without the key yields plan_step null"
+_closes_epic "$CL_EPIC" "$CL_PLAN2" \
+  '| # | Role | Objective | Depends On | Parallel Group |' \
+  '|---|------|-----------|------------|----------------|' \
+  '| 1 | backend | do the first thing properly | - | - |' \
+  '| 2 | backend | do the second thing properly | 1 | - |'
+cl_out3="$(make_output_dir plan_step_null)"
+cl_json3="$(bash "$SCRIPT_UNDER_TEST" --epic "$CL_EPIC" --schema "$SCHEMA_FILE" --output-dir "$cl_out3" 2>/dev/null | jq -r '.plan_json // empty')"
+sed -i 's/^plan_ref: /source_step_ids: "4,5"\nplan_ref: /' "$CL_EPIC"
+cl_out4="$(make_output_dir plan_step_4)"
+cl_json4="$(bash "$SCRIPT_UNDER_TEST" --epic "$CL_EPIC" --schema "$SCHEMA_FILE" --output-dir "$cl_out4" 2>/dev/null | jq -r '.plan_json // empty')"
+if [[ -f "$cl_json3" && -f "$cl_json4" ]] \
+   && [[ "$(jq -c '[.steps[].plan_step]' "$cl_json3")" == '[null,null]' ]] \
+   && [[ "$(jq -c '[.steps[].plan_step]' "$cl_json4")" == '[4,5]' ]]; then
+  pass "source_step_ids → plan_step; absent → null"
+else
+  fail "source_step_ids → plan_step" "null case: $(jq -c '[.steps[].plan_step]' "$cl_json3" 2>/dev/null); 4,5 case: $(jq -c '[.steps[].plan_step]' "$cl_json4" 2>/dev/null)"
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

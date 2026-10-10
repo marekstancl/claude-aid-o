@@ -6,6 +6,16 @@
 #
 # Usage:
 #   aid-plan-diff.sh --plan <path> --evidence-dir <path> --base-commit <sha>
+#   aid-plan-diff.sh ... --step <N> --plan-json <plan.json>      (P110)
+#     The run's step N (0-based, as cp2/step-N): the brief points of
+#     plan.json steps[N].zavira that no LATER plan step names (a point named by
+#     several steps is measured at the last one — read over the whole plan
+#     file's **Zavírá:** fields; the earlier steps list it as deferred_to_step),
+#     plus the step's own labelled criteria (`- [ ] [<role>] …` with a block)
+#     under `### Step <plan_step>:`. Writes <evidence-dir>/cp2/step-N/plan-diff.json
+#     (scope: step); merges cp2/step-N/deferred.json entries whose Decision card
+#     the PM answered (aid_pm_card_check); neither points nor own criteria →
+#     unmeasured_step: true, exit 2.
 #
 # Exit codes:
 #   0  — all ACs present (gate pass)
@@ -26,6 +36,10 @@ source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 source "${SCRIPT_DIR}/lib/aid-roots.sh"   # aid_state_path — a relative evidence dir lives in the state root
 # shellcheck source=lib/aid-verification-pattern.sh
 source "${SCRIPT_DIR}/lib/aid-verification-pattern.sh"
+# shellcheck source=lib/aid-scoping.sh
+source "${SCRIPT_DIR}/lib/aid-scoping.sh"   # _aid_plan_step_bounds, _aid_plan_step_field (P110 --step)
+# shellcheck source=lib/aid-decision-card.sh
+source "${SCRIPT_DIR}/lib/aid-decision-card.sh"   # aid_pm_card_check — a deferral the PM answered (P110)
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.67.0}"
 
@@ -37,13 +51,17 @@ Options:
   --plan <path>           Path to plan.md (e.g., .aid-o/plans/P037-*.md)
   --evidence-dir <path>   Run evidence directory (output written here as plan-diff.json)
   --base-commit <sha>     Git base commit for diff context (recorded in output)
+  --step <N>              The run's step index (0-based): measure that step only (P110)
+  --plan-json <path>      The run's plan.json (required with --step)
 EOF
 }
 
 # Parse CLI
-PLAN=""; EVIDENCE_DIR=""; BASE_COMMIT=""
+PLAN=""; EVIDENCE_DIR=""; BASE_COMMIT=""; STEP_N=""; PLAN_JSON=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --step) STEP_N="$2"; shift 2 ;;
+    --plan-json) PLAN_JSON="$2"; shift 2 ;;
     --plan) PLAN="$2"; shift 2 ;;
     --evidence-dir) EVIDENCE_DIR="$2"; shift 2 ;;
     --base-commit) BASE_COMMIT="$2"; shift 2 ;;
@@ -88,6 +106,18 @@ fi
 HEAD_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 TIMELINE_FILE="${EVIDENCE_DIR}/timeline.jsonl"
 OUTPUT_FILE="${EVIDENCE_DIR}/plan-diff.json"
+SCOPE=plan PLAN_STEP=null STEP_DIR=""
+if [[ -n "$STEP_N" ]]; then
+  [[ "$STEP_N" =~ ^[0-9]+$ ]] || { echo "--step takes the run's 0-based step index (got '${STEP_N}')" >&2; exit 10; }
+  [[ -f "$PLAN_JSON" ]] || { echo "--step needs --plan-json <the run's plan.json> (not found: ${PLAN_JSON:-none})" >&2; exit 10; }
+  jq -e --argjson n "$STEP_N" '.steps[$n] != null' "$PLAN_JSON" >/dev/null \
+    || { echo "--step ${STEP_N}: ${PLAN_JSON} has no step at that index" >&2; exit 10; }
+  SCOPE=step
+  PLAN_STEP="$(jq -r --argjson n "$STEP_N" '.steps[$n].plan_step // null' "$PLAN_JSON")"
+  STEP_DIR="${EVIDENCE_DIR}/cp2/step-${STEP_N}"
+  mkdir -p "$STEP_DIR"
+  OUTPUT_FILE="${STEP_DIR}/plan-diff.json"
+fi
 GEN_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # Per-AC command timeout (seconds). A hanging or pathologically slow AC
@@ -105,13 +135,55 @@ log_event "$TIMELINE_FILE" "plan_diff_start" plan="$PLAN" base_commit="$BASE_COM
 # lib/aid-verification-pattern.sh (P109): the plan check, the brief lint and the
 # plan lint read criteria through the same function this runner does.
 parse_ac_blocks() {
+  if [[ "$SCOPE" == step ]]; then parse_step_blocks; else
   _aid_vp_parse_ac "$PLAN" "Acceptance Criteria|Success Criteria"
+  fi
+}
+
+# _last_naming_step — "AC<n>\t<highest plan step whose **Zavírá:** names it>",
+# over the WHOLE plan file, so EPIC boundaries do not matter (P110).
+_last_naming_step() {
+  local s e head n val id
+  while IFS=$'\t' read -r s e head; do
+    [[ "$head" =~ ^###\ Step\ ([0-9]+) ]] || continue
+    n="${BASH_REMATCH[1]}"
+    val="$(_aid_plan_step_field "$PLAN" "$s" "$e" "Zavírá")" || continue
+    for id in $(grep -oE '\bAC[0-9]+\b' <<< "$val"); do printf '%s\t%s\n' "$id" "$n"; done
+  done < <(_aid_plan_step_bounds "$PLAN") | sort -k1,1 -k2,2n | awk -F'\t' '{last[$1] = $2} END {for (k in last) print k "\t" last[k]}'
+}
+
+# parse_step_blocks — the records of one run step (--step): its brief points
+# measured here, the ones a later step measures (type `deferred`, cmd = that
+# step), and the step's own labelled criteria.
+parse_step_blocks() {
+  local zav rec label last
+  zav=" $(jq -r --argjson n "$STEP_N" '(.steps[$n].zavira // [])[]' "$PLAN_JSON" | tr '\n' ' ') "
+  declare -A lastof=()
+  while IFS=$'\t' read -r label last; do [[ -n "$label" ]] && lastof[$label]="$last"; done < <(_last_naming_step)
+  if [[ "$zav" != "  " ]]; then
+    while IFS= read -r rec; do
+      [[ -n "$rec" ]] || continue
+      label="${rec%%$'\x1f'*}"
+      [[ "$zav" == *" $label "* ]] || continue
+      last="${lastof[$label]:-}"
+      if [[ "$PLAN_STEP" != null && -n "$last" ]] && (( last > PLAN_STEP )); then
+        IFS=$'\x1f' read -r _ text _ <<< "$rec"
+        printf '%s\x1f%s\x1fdeferred\x1f%s\x1f\x1f\x1f0\n' "$label" "$text" "$last"
+      else
+        printf '%s\n' "$rec"
+      fi
+    done < <(_aid_vp_parse_ac "$PLAN" "Acceptance Criteria")
+  fi
+  [[ "$PLAN_STEP" != null ]] && _aid_vp_parse_ac "$PLAN" "Step ${PLAN_STEP}:"
+  return 0
 }
 
 # Run a single verification_pattern, output verdict + evidence.
 # Supported types: cmd (exit code), must_not_exist (file absent), must_contain (regex match).
 run_pattern() {
-  local type=$1 cmd=$2 file=$3 regex=$4 expected_exit=$5
+  local type=$1 cmd=$2 file=$3 regex=$4 expected_exit=$5 t="${6:-}"
+  # the block's own timeout: (P110, 1..1800 s) or the runner's default
+  [[ "$t" =~ ^[1-9][0-9]*$ ]] || t="$AC_CMD_TIMEOUT"
 
   local start_ms end_ms duration_ms
   start_ms=$(date +%s%3N)
@@ -133,9 +205,9 @@ run_pattern() {
       # kill-able (PM fix 2026-07-08; per-AC timeout added 2026-07-10).
       # </dev/null: a command that reads stdin would eat the remaining criteria of
       # the loop's here-string (the same guard run_gate carries).
-      timeout "$AC_CMD_TIMEOUT" bash -c "$cmd" </dev/null >/dev/null 2>&1 || actual_exit=$?
+      timeout "$t" bash -c "$cmd" </dev/null >/dev/null 2>&1 || actual_exit=$?
       if [[ "$actual_exit" -eq 124 && "$expected_exit" -ne 124 ]]; then
-        verdict="absent"; evidence="timeout after ${AC_CMD_TIMEOUT}s (reason=timeout)"
+        verdict="absent"; evidence="timeout after ${t}s (reason=timeout)"
       elif [[ "$actual_exit" -eq "$expected_exit" ]]; then
         verdict="present"; evidence="exit=$actual_exit"
       else
@@ -160,6 +232,9 @@ run_pattern() {
       ;;
     no_verification)
       verdict="skipped"; evidence="no verification_pattern block — prose AC, cannot auto-verify"
+      ;;
+    deferred)
+      verdict="skipped"; evidence="measured at plan step ${cmd} (deferred_to_step)"
       ;;
     *)
       verdict="absent"; evidence="unknown pattern type: $type"
@@ -198,6 +273,18 @@ read -r summary_unparsed step_bullets < <(awk '
   END { printf "%d %d\n", u+0, b+0 }' "$PLAN")
 unmeasured_json="$(jq -nc --argjson p "$summary_prose" --argjson u "$summary_unparsed" --argjson b "$step_bullets" '{summary_prose: $p, summary_unparsed: $u, step_bullets: $b}')"
 
+if [[ "$ac_count" -eq 0 && "$SCOPE" == step ]]; then
+  # A step that closes no brief point and has no labelled criterion of its own:
+  # nothing to run, said aloud (P110).
+  jq -n --arg gb "aid-plan-diff.sh@${PLUGIN_VERSION}" --arg ga "$GEN_AT" --arg pl "$PLAN" \
+    --arg bc "$BASE_COMMIT" --arg hc "$HEAD_COMMIT" --argjson st "$STEP_N" --argjson ps "$PLAN_STEP" \
+    '{_generated_by: $gb, _generated_at: $ga, plan_path: $pl, base_commit: $bc, head_commit: $hc,
+      scope: "step", step: $st, plan_step: $ps, isolation: null, unmeasured_step: true, ac_count: 0, results: [],
+      summary: {present_count: 0, absent_count: 0, skipped_count: 0}, overall_verdict: "skipped"}' > "$OUTPUT_FILE"
+  log_event "$TIMELINE_FILE" "plan_diff_complete" scope="step" step="$STEP_N" verdict="unmeasured_step" || true
+  exit 2
+fi
+
 if [[ "$ac_count" -eq 0 ]]; then
   # Graceful skip — no AC blocks
   jq -n \
@@ -231,9 +318,10 @@ while IFS= read -r line; do
   # Split on ASCII Unit Separator (0x1f) — cmd: values often contain | so we
   # cannot use that as field delimiter (would corrupt expected_exit, causing
   # `[[ N -eq <garbage> ]]` arithmetic failure under set -u).
-  IFS=$'\x1f' read -r ac_label ac_text pat_type cmd file regex expected_exit <<< "$line"
+  ac_timeout=""
+  IFS=$'\x1f' read -r ac_label ac_text pat_type cmd file regex expected_exit ac_timeout <<< "$line"
 
-  IFS=$'\x1f' read -r verdict evidence duration_ms <<< "$(run_pattern "$pat_type" "$cmd" "$file" "$regex" "$expected_exit")"
+  IFS=$'\x1f' read -r verdict evidence duration_ms <<< "$(run_pattern "$pat_type" "$cmd" "$file" "$regex" "$expected_exit" "$ac_timeout")"
 
   [[ "$verdict" == "present" ]] && present_count=$((present_count + 1))
   [[ "$verdict" == "absent"  ]] && absent_count=$((absent_count + 1))
@@ -255,7 +343,9 @@ while IFS= read -r line; do
     --arg vrd "$verdict" \
     --arg evidence "$evidence" \
     --argjson dur "$duration_ms" \
-    '{ac_label: $lbl, ac_text: $text, pattern_type: $ptype, verdict: $vrd, evidence: $evidence, duration_ms: $dur}')")
+    --arg dts "$([[ "$pat_type" == deferred ]] && echo "$cmd")" \
+    '{ac_label: $lbl, ac_text: $text, pattern_type: $ptype, verdict: $vrd, evidence: $evidence, duration_ms: $dur}
+     + (if $dts == "" then {} else {deferred_to_step: ($dts | tonumber)} end)')")
 done <<< "$ac_lines"
 
 # Single jq slurp builds final results array — O(1) jq invocation vs O(n).
@@ -263,6 +353,23 @@ if (( ${#ac_result_lines[@]} == 0 )); then
   results_json="[]"
 else
   results_json=$(printf '%s\n' "${ac_result_lines[@]}" | jq -sc '.')
+fi
+
+# A step's deferrals (P110): cp2/step-N/deferred.json, written by
+# `aid-fsm.sh increment-step --defer-criterion`. Each entry is honoured only
+# while its Decision card passes aid_pm_card_check again — a hand-written file
+# defers nothing. A deferred absent point no longer counts as absent here.
+if [[ "$SCOPE" == step && -f "${STEP_DIR}/deferred.json" ]]; then
+  while IFS=$'\t' read -r dlabel dcard; do
+    [[ -n "$dlabel" ]] || continue
+    if why="$(aid_pm_card_check "$dcard" "$dlabel")"; then
+      results_json="$(jq -c --arg l "$dlabel" --slurpfile d "${STEP_DIR}/deferred.json" \
+        'map(if .ac_label == $l then . + {deferred: $d[0][$l]} else . end)' <<< "$results_json")"
+    else
+      echo "aid-plan-diff: deferral of ${dlabel} not honoured: ${why}" >&2
+    fi
+  done < <(jq -r 'to_entries[] | "\(.key)\t\(.value.card // "")"' "${STEP_DIR}/deferred.json" 2>/dev/null)
+  absent_count="$(jq '[.[] | select(.verdict == "absent" and .deferred == null)] | length' <<< "$results_json")"
 fi
 
 # `pass` means EVERY criterion was checked and found. A skipped criterion (prose,
@@ -300,9 +407,12 @@ jq -n \
     "results": $res,
     "summary": {"present_count": $pcnt, "absent_count": $acnt, "skipped_count": $scnt, "unmeasured": $um},
     "overall_verdict": $ov
-  }' --argjson um "$unmeasured_json" > "$OUTPUT_FILE"
+  }
+  + {scope: $scope, step: $st, plan_step: $ps}
+  + (if $scope == "step" then {isolation: null, unmeasured_step: false} else {} end)' \
+  --argjson um "$unmeasured_json" --arg scope "$SCOPE" --argjson st "${STEP_N:-null}" --argjson ps "$PLAN_STEP" > "$OUTPUT_FILE"
 
-log_event "$TIMELINE_FILE" "plan_diff_complete" verdict="$overall" ac_count="$ac_count" absent_count="$absent_count" || true
+log_event "$TIMELINE_FILE" "plan_diff_complete" scope="$SCOPE" verdict="$overall" ac_count="$ac_count" absent_count="$absent_count" || true
 
 [[ "$absent_count" -gt 0 ]] && exit 1
 exit 0

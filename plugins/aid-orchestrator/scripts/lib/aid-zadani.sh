@@ -8,7 +8,7 @@
 #   aid_zadani_stakes <file>     the `**Co je v sázce:**` paragraph of section 1; exit 2 when absent
 #   aid_zadani_points <file>     one record per done-when point, in the format of
 #                                _aid_vp_parse_ac (label, text, type, cmd, file, regex,
-#                                expected_exit — 0x1F-separated); exit 2 on a gap, a
+#                                expected_exit, timeout — 0x1F-separated); exit 2 on a gap, a
 #                                duplicate, a point without a block within 5 lines,
 #                                or a block _aid_vp_validate refuses
 #   aid_zadani_sha256 <file>     sha256 of the whole file
@@ -106,7 +106,7 @@ aid_zadani_points() {
   [[ -f "$f" ]] || { _aid_zadani_err "$f: not found"; return 2; }
   while IFS= read -r rec; do
     [[ -n "$rec" ]] || continue
-    IFS=$'\x1f' read -r label text type _ _ _ _ acl bl <<< "$rec"
+    IFS=$'\x1f' read -r label text type _ _ _ _ acl bl _ <<< "$rec"
     if [[ ! "$label" =~ ^AC([0-9]+)$ ]]; then
       continue   # reported below with the other checkboxes that carry no AC<n>
     fi
@@ -133,7 +133,7 @@ aid_zadani_points() {
     while IFS= read -r msg; do
       [[ -n "$msg" ]] && { _aid_zadani_err "$f:$bl: AC$n: $msg"; bad=1; }
     done < <(_aid_vp_validate "$rec")
-    out+="$(cut -d$'\x1f' -f1-7 <<< "$rec")"$'\n'
+    out+="$(cut -d$'\x1f' -f1-7,10 <<< "$rec")"$'\n'   # the seven fields and timeout (P110)
   done < <(_aid_vp_parse_ac "$f" "$AID_ZADANI_DONE_HEADING" --lines)
   # a checkbox the parser does not take (no AC<n>) is a point nobody can reference
   while IFS=: read -r ln _; do

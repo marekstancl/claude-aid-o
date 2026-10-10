@@ -89,6 +89,18 @@ for phase in 1 2 3; do
     '{phase:$phase,epic_id:$epic_id,epic_path:$epic_path,plan_json:$plan_json,contract_validate:$contract_validate}'
 done | jq -s . > "$tmp/epics.json"
 
+# P110: each step's plan_step is the plan's global step number (source_step_ids
+# of the generated EPIC at the local index) — EPIC 2's first step is not step 1.
+for row in $(jq -c '.[]' "$tmp/epics.json"); do
+  ep="$(jq -r .epic_path <<< "$row")"; pj="$(jq -r .plan_json <<< "$row")"
+  want="$(awk -F': ' '/^source_step_ids:/{gsub(/"/, "", $2); print $2; exit}' "$ep")"
+  got="$(jq -r '[.steps[].plan_step] | map(tostring) | join(",")' "$pj")"
+  [[ -n "$want" && "$got" == "$want" ]] || { echo "FAIL: plan_step of $(basename "$ep"): ${got} != source_step_ids ${want}" >&2; exit 1; }
+done
+[[ "$(jq -r '.[1].plan_json' "$tmp/epics.json" | xargs jq -r '.steps[0].plan_step')" != 1 ]] \
+  || { echo "FAIL: EPIC 2's first step carries plan_step 1" >&2; exit 1; }
+echo "PASS: plan_step follows source_step_ids across EPICs"
+
 receipt="$tmp/.aid-o/work/evidence/P099/generation/receipt.json"
 bash "$SCRIPTS/aid-generation-finalize.sh" --plan "$tmp/.aid-o/plans/P099.md" --total 3 --epics-json "$tmp/epics.json" --output "$receipt" >/dev/null
 jq -e '.schema == "aid-generation-receipt/v1" and (.epics|length == 3)' "$receipt" >/dev/null

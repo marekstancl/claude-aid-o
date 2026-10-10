@@ -5,6 +5,11 @@
 #
 #   aid_decision_card_render   <data.json|-> [out_file]
 #   aid_decision_card_validate <card_file>
+#   aid_pm_card_check          <card_file> <quoted text>
+#       Did the PM answer a card about <quoted text>? The card exists, quotes the
+#       text, and the hook audit holds a PM prompt later than the card was
+#       written. Prints the cause and returns 1 otherwise. The ONE check behind
+#       `dispute --pm accepted` and `increment-step --defer-criterion` (P110).
 #
 # A BATCH is the same card, N times, under one opening line. It exists because
 # the single planned stop (P088) asks everything at once: the one-question card
@@ -327,4 +332,28 @@ aid_hook_rule_decision_card() {
     3) echo "the turn does not ask for a decision" >&2; return 3 ;;
     *) printf '%s\n' "$err" >&2; return 2 ;;
   esac
+}
+
+# _pm_replied_after <card> — true when the hook audit holds a PM prompt
+# (the pm_reply_marker line of a UserPromptSubmit, any session) later than the
+# card was written. An audit trail, not a proof: a controller that forges the
+# audit file is not stopped. Moved here from aid-review-round.sh (P110).
+_pm_replied_after() {
+  declare -F aid_hook_audit_files >/dev/null || source "${_AID_DC_LIB_DIR}/aid-review-summary.sh"
+  local -a gens=(); mapfile -t gens < <(aid_hook_audit_files)
+  (( ${#gens[@]} )) || return 1
+  # ISO-8601 UTC strings sort as time; jq's fromdateiso8601 is off by the DST hour.
+  # The rotated generations count too (aid-hook.sh rotates at 20 MB).
+  cat "${gens[@]}" | grep -F '"event":"UserPromptSubmit"' | grep -F '"rule":"pm_reply_marker"' \
+    | jq -e --arg t "$(date -u -d "@$(stat -c %Y "$1")" +%Y-%m-%dT%H:%M:%SZ)" -s 'any(.[]; .ts > $t)' >/dev/null 2>&1
+}
+
+aid_pm_card_check() {
+  local card="${1:-}" text="${2:?aid_pm_card_check: quoted text required}"
+  [[ -n "$card" && -f "$card" ]] \
+    || { echo "--finding-card names no card file (${card:-none}): render the Decision card (skills/communication.md, lib/aid-decision-card.sh) and wait for the PM"; return 1; }
+  grep -qF -- "$text" "$card" \
+    || { echo "the card ${card} does not quote ${text}; the PM must have been asked about it"; return 1; }
+  _pm_replied_after "$card" \
+    || { echo "no PM prompt after ${card} in the hook audit; the PM has not answered the card yet"; return 1; }
 }

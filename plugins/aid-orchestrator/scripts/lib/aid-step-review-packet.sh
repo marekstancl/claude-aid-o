@@ -70,6 +70,9 @@ aid_step_review_packet_build() {
       # "(tier: tN)" in an output is what the plan declared when it was written;
       # the suite's header is the tier, and step-check.json reports that (P103).
       jq --argjson s "$step" 'def notier: map(gsub(" ?\\(tier: t[0-9]\\)"; "")); .steps[$s] | {outputs: ((.outputs // []) | notier), allowed_paths: (.allowed_paths // []), forbidden_paths: (.forbidden_paths // []), scope_declared: true}' "$plan_json" > "$dir/files.json"
+      # the step's measured criteria (P110), when prepare measured it
+      local measured; measured="$(dirname "$plan_json")/cp2/step-${step}/plan-diff.json"
+      [[ -f "$measured" ]] && cp "$measured" "$dir/plan-diff.json"
     else
       jq -r "${_AID_SR_STEP_NAME_JQ}"' "# EPIC: \(.epic_id // .id // "")\n\n" + ((.objective // .goal // "") | tostring) + "\n\n" + ([.steps | to_entries[] | "## \(.key as $k | .value | step_name($k)): \(.value.objective // "")\n" + ((.value.acceptance_criteria // []) | map("- " + .) | join("\n"))] | join("\n\n"))' "$plan_json" > "$dir/dod.md"
       jq 'def notier: map(gsub(" ?\\(tier: t[0-9]\\)"; "")); {outputs: ([.steps[].outputs[]?] | notier), allowed_paths: [.steps[].allowed_paths[]?], forbidden_paths: [.steps[].forbidden_paths[]?], scope_declared: true}' "$plan_json" > "$dir/files.json"
@@ -215,7 +218,11 @@ aid_step_review_prompt_render() {
       echo "### Findings still open"
       jq -r '.findings[] | "- [\(.severity)] \(.claim) (evidence: \(.evidence); fix asked: \(.fix)\(if .rule then "; rule: \(.rule)" else "" end))"' "${dir}/packet/open-findings.json"
       echo
-      _aid_sr_patch "${dir}/packet/fix.patch" "What the author changed (fix.patch)" | sed 's/^## /### /'
+      if [[ -f "${dir}/packet/fix.patch" ]]; then
+        _aid_sr_patch "${dir}/packet/fix.patch" "What the author changed (fix.patch)" | sed 's/^## /### /'
+      else
+        echo "The previous round recorded no head commit, so no fix diff could be cut: the whole diff follows below (round.json confirmation_fallback)."
+      fi
       echo
     fi
     echo "## Deterministic step check (already reported, do not repeat)"
@@ -224,6 +231,13 @@ aid_step_review_prompt_render() {
     echo "## Definition of Done"
     cat "${dir}/packet/dod.md"
     echo
+    if [[ "$cp" == cp2 && -f "${dir}/packet/plan-diff.json" ]]; then
+      echo "## Measured criteria of this step (aid-plan-diff.sh --step, run at this commit; packet/plan-diff.json)"
+      jq -r '.results[] | "- \(.ac_label): \(.verdict) — \(.evidence)" + (if .deferred_to_step then " (measured at plan step \(.deferred_to_step))" else "" end) + (if .deferred then " (deferred by the PM: \(.deferred.reason))" else "" end)' "${dir}/packet/plan-diff.json"
+      [[ "$(jq -r '.unmeasured_step // false' "${dir}/packet/plan-diff.json")" == true ]] && echo "- (the step closes no brief point and has no labelled criterion of its own: nothing was run)"
+      echo "An absent criterion is a blocker unless the PM deferred it."
+      echo
+    fi
     if [[ "$cp" == cp7 ]]; then
       echo "## What the per-EPIC reviews already judged (do not repeat; read ACROSS the EPICs)"
       jq -r '.epics[] | if .cp3 == "absent" then "- \(.epic): NOT reviewed as a whole (closed before the EPIC review existed)"

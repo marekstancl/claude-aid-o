@@ -1180,6 +1180,10 @@ _fsm_refusal_next() {
       next="the widening serves no point this step closes: bring it to the PM as a scope change (skills/pipeline.md escalations, rule 11) — or, at GATES, name the point of any step" ;;
     amend_scope_reason_names_no_point)
       next="$(_fsm_cmd bash "$fsm" amend-scope "$sf" --add "<path>" --reason "<AC<n> of ${_ZP_SET:-the step points}> needs <path> because …")" ;;
+    step_criteria_failed)
+      next="fix the step and commit, or render the Decision card (lib/aid-decision-card.sh) and wait for the PM, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words>" --finding-card "<card>")" ;;
+    defer_refused)
+      next="render the Decision card quoting ${_sc_label:-the point} (lib/aid-decision-card.sh), wait for the PM's answer, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words, 20+ chars>" --finding-card "<card>")" ;;
     missing_lenses|done_advance_preconditions)
       next="correct what the lines above name, then run the same done-advance again: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-<from>}" "${to_phase:-<to>}" "$sf")" ;;
     *) return 1 ;;
@@ -4563,6 +4567,62 @@ _increment_binding_verified() {
   return 0
 }
 
+# _fsm_step_measure <evidence_dir> <step> <state_file> — run the step's points
+# (aid-plan-diff.sh --step) unless cp2/step-N/plan-diff.json is bound to HEAD.
+# Prints nothing; returns 4 when the run has no plan (Fast Mode), 3 when the
+# plan file or plan.json is missing, never fails
+# on an absent point (that is the caller's refusal).
+_fsm_step_measure() {
+  local ev="$1" n="$2" sf="$3" pp base pd rc=0
+  pp="$(yq -r '.plan_path // ""' "$sf" 2>/dev/null)"
+  [[ -n "$pp" && "$pp" != null ]] || return 4   # Fast Mode: no plan, nothing to measure
+  [[ -f "$pp" && -f "${ev}/plan.json" ]] || return 3
+  pd="${ev}/cp2/step-${n}/plan-diff.json"
+  [[ -f "$pd" && "$(jq -r '.head_commit // ""' "$pd" 2>/dev/null)" == "$(git rev-parse HEAD 2>/dev/null)" ]] && return 0
+  base="$(yaml_field "$sf" base_commit)"
+  bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$pp" --evidence-dir "$ev" --base-commit "${base:-HEAD}" \
+    --step "$n" --plan-json "${ev}/plan.json" >/dev/null 2>&1 || rc=$?
+  (( rc <= 2 )) || { echo "step ${n}: the measurer failed (aid-plan-diff.sh exit ${rc})" >&2; return 1; }
+  return 0
+}
+
+# _fsm_step_absent <evidence_dir> <step> — "<label>\t<text>\t<evidence>" per
+# point of the step that is absent and neither deferred by an answered card
+# nor measured at a later step (P110).
+_fsm_step_absent() {
+  local pd="${1}/cp2/step-${2}/plan-diff.json"
+  [[ -f "$pd" ]] || return 0
+  jq -r '.results[] | select(.verdict == "absent" and .deferred == null and .deferred_to_step == null) | "\(.ac_label)\t\(.ac_text)\t\(.evidence)"' "$pd"
+}
+
+# _fsm_defer_criterion <evidence_dir> <step> <label> <reason> <card> — the one
+# way out of step_criteria_failed: the PM's answer on a Decision card that
+# quotes the point (aid_pm_card_check, the same check dispute --pm accepted
+# makes). Writes cp2/step-N/deferred.json and the timeline event.
+_fsm_defer_criterion() {
+  local ev="$1" n="$2" label="$3" reason="$4" card="$5" pd df why
+  pd="${ev}/cp2/step-${n}/plan-diff.json"; df="${ev}/cp2/step-${n}/deferred.json"
+  _sc_label="$label"
+  declare -F aid_pm_card_check >/dev/null || source "${SCRIPT_DIR}/lib/aid-decision-card.sh"
+  _defer_fail() { echo "REFUSED (defer_refused): --defer-criterion ${label}: $1" >&2; _fsm_refusal_next defer_refused || true; exit 1; }
+  [[ "$label" =~ ^AC[0-9]+$ ]] || _defer_fail "takes a brief point AC<n> (got '${label}')"
+  (( ${#reason} >= 20 )) || _defer_fail "--reason must carry the PM's words, at least 20 characters (got ${#reason})"
+  jq -e --arg l "$label" '[.results[] | select(.ac_label == $l)] | length > 0' "$pd" >/dev/null 2>&1 \
+    || _defer_fail "the step does not close ${label} (not among the points measured in ${pd})"
+  why="$(aid_pm_card_check "$card" "$label")" || _defer_fail "$why"
+  if jq -e --arg l "$label" 'has($l)' "$df" >/dev/null 2>&1; then
+    echo "--defer-criterion ${label}: already deferred (${df}); nothing changed"; return 0
+  fi
+  [[ -f "$df" ]] || echo '{}' > "$df"
+  jq --arg l "$label" --arg r "$reason" --arg c "$card" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '. + {($l): {by: "pm", reason: $r, card: $c, at: $at}}' "$df" > "${df}.tmp" && mv "${df}.tmp" "$df"
+  local tl; tl=$(derive_timeline "$state_file") || true
+  [[ -n "$tl" ]] && log_event "$tl" "step_criterion_deferred" step="$n" criterion="$label" card="$card"
+  # the measurement merges it (and re-checks the card) on its next run
+  rm -f "$pd"
+  echo "--defer-criterion ${label}: deferred by the PM (${df}); measured again at the close"
+}
+
 cmd_increment_step() {
   local state_file="${1:-}"
   if [[ -z "$state_file" ]]; then
@@ -4710,6 +4770,45 @@ cmd_increment_step() {
     printf '  - %s\n' "${_vf_lines[@]}" >&2
     _fsm_refusal_next "${_vf_reasons[0]}"
     exit 1
+  fi
+
+  # P110: the step's brief points and own labelled criteria run after the step;
+  # one absent and not deferred on a card the PM answered stops the step.
+  # --force does not waive it: the way out is --defer-criterion.
+  local _sc_label="" _sc_reason="" _sc_card="" _sc_a=("${@:2}") _sc_i
+  for (( _sc_i=0; _sc_i<${#_sc_a[@]}; _sc_i++ )); do
+    case "${_sc_a[$_sc_i]}" in
+      --defer-criterion) _sc_label="${_sc_a[$((_sc_i+1))]:-}" ;;
+      --finding-card)    _sc_card="${_sc_a[$((_sc_i+1))]:-}" ;;
+      --reason)          _sc_reason="${_sc_a[$((_sc_i+1))]:-}" ;;
+    esac
+  done
+  local _sc_rc=0
+  _fsm_step_measure "$evidence_dir" "$step" "$state_file" || _sc_rc=$?
+  if (( _sc_rc == 4 )); then
+    :
+  elif (( _sc_rc == 3 )); then
+    echo "step ${step}: brief points not measured (the plan file or the run's plan.json is missing)" >&2
+  elif (( _sc_rc != 0 )); then
+    exit 1
+  else
+    if [[ -n "$_sc_label" ]]; then
+      _fsm_defer_criterion "$evidence_dir" "$step" "$_sc_label" "$_sc_reason" "$_sc_card"
+      _fsm_step_measure "$evidence_dir" "$step" "$state_file" || exit 1
+    fi
+    local _sc_absent; _sc_absent="$(_fsm_step_absent "$evidence_dir" "$step")"
+    if [[ -n "$_sc_absent" ]]; then
+      _sc_label="$(head -1 <<< "$_sc_absent" | cut -f1)"
+      local _sc_tl; _sc_tl=$(derive_timeline "$state_file") || true
+      [[ -n "$_sc_tl" ]] && log_event "$_sc_tl" "fsm_increment_fail" step="$step" reason="step_criteria_failed"
+      {
+        echo "REFUSED (step_criteria_failed): step ${step} leaves brief points or its own criteria absent (${evidence_dir}/cp2/step-${step}/plan-diff.json):"
+        awk -F'\t' '{printf "  - %s \"%s\" (%s)\n", $1, $2, $3}' <<< "$_sc_absent"
+        echo "--force does not waive this: fix the step, or defer the point on the PM's answered Decision card."
+      } >&2
+      _fsm_refusal_next step_criteria_failed || true
+      exit 1
+    fi
   fi
 
   if [[ "$force" != "true" ]]; then

@@ -59,6 +59,11 @@
             "minLength": 10,
             "description": "What this step must accomplish"
           },
+          "plan_step": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "description": "The plan's global step number (`### Step <n>:`) of this step, from the EPIC frontmatter's source_step_ids at the step's local index (P110). The per-step criterion run (aid-plan-diff.sh --step) reads that section's labelled criteria. null for an EPIC generated before 2.116.0."
+          },
           "zavira": {
             "type": "array",
             "items": { "type": "string", "pattern": "^AC[0-9]+$" },

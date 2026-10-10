@@ -439,6 +439,50 @@ _kclose() {
   [ "$(jq '.findings | length' "$(D 2)/packet/open-findings.json")" -eq 0 ]
   grep -q '^## This is a delta round$' "$(D 2)/prompt-step_security.md"
 }
+@test "step-kind: under the PM's standing instruction a delta round 3 after two passed rounds is prepared (no false 'no progress')" {
+  _krepo 5 30
+  printf -- '---\nid: P903\ntype: regular\n---\n# Plan\n' > "$ROOT/plan.md"
+  printf 'plan_path: %s\n' "$ROOT/plan.md" >> "$E/fsm-state.yaml"
+  _sc; _S prepare --round 1 >/dev/null; _kclose 1 '.findings = [] | .no_findings_reason = "clean"'
+  echo late >> "$R/src/f3.py"; git -C "$R" commit -qam late; _sc
+  _S prepare --round 2 >/dev/null; _kclose 2 '.findings = [] | .no_findings_reason = "clean"'
+  _S standing --reason "PM: už se neptej a dodělej to" >/dev/null
+  echo later >> "$R/src/f4.py"; git -C "$R" commit -qam later; _sc
+  run _S prepare --round 3; echo "$output"; [ "$status" -eq 0 ]
+}
+@test "step-kind: a confirmation round whose previous round has no head_sha falls back to the whole diff and says so" {
+  _krepo 5 30; _sc; _S prepare --round 1 >/dev/null; _kclose 1
+  jq 'del(.head_sha)' "$(D 1)/round.json" > "$(D 1)/r.tmp" && mv "$(D 1)/r.tmp" "$(D 1)/round.json"
+  echo "fix = 1" >> "$R/src/f2.py"; git -C "$R" commit -qam "fix(review): x"; _sc
+  run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .confirmation_fallback "$(D 2)/round.json")" = full_diff ]
+  grep -q 'no fix diff could be cut' "$(D 2)/prompt-step_generalist.md"
+  grep -q '^## diff.patch' "$(D 2)/prompt-step_generalist.md"
+}
+# _mplan — the run's plan: AC1 (`true`) closed by plan step 1, plan.json step 0 = plan step 1
+_mplan() {
+  printf -- '---\nid: P904\n---\n# Plan\n\n### Step 1: one\n\n**Zavírá:** AC1\n\n## Acceptance Criteria\n\n- [ ] AC1: it runs\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "true"\n    expected_exit: 0\n  ```\n' > "$ROOT/mplan.md"
+  printf 'plan_path: %s\n' "$ROOT/mplan.md" >> "$E/fsm-state.yaml"
+  jq '.steps[0] += {plan_step: 1, zavira: ["AC1"]}' "$E/plan.json" > "$E/p.tmp" && mv "$E/p.tmp" "$E/plan.json"
+}
+@test "step-measured: prepare --checkpoint cp2 measures the step before the packet; the packet and its manifest carry plan-diff.json" {
+  _krepo 5 30; _mplan; _sc
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.results[0].verdict' "$E/cp2/step-0/plan-diff.json")" = present ]
+  [ -f "$(D 1)/packet/plan-diff.json" ]
+  jq -e '.files | map(.file) | index("plan-diff.json") != null' "$(D 1)/packet/manifest.json"
+}
+@test "step-measured: a skip-verdict step is measured too" {
+  _krepo 2 20; _mplan; _sc
+  run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"verdict is skip"* ]]
+  [ "$(jq -r .scope "$E/cp2/step-0/plan-diff.json")" = step ]
+}
+@test "step-measured: the reviewer's prompt carries the measured verdicts" {
+  _krepo 5 30; _mplan; _sc
+  _S prepare --round 1 >/dev/null
+  grep -q '^## Measured criteria of this step' "$(D 1)/prompt-step_generalist.md"
+  grep -q '^- AC1: present — exit=0' "$(D 1)/prompt-step_generalist.md"
+}
 @test "step: prepare needs a step check at HEAD and a review verdict; the default asks security on every reviewed step, a gated project only on a pattern" {
   _repo
   run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"no step-check.json"* ]]
@@ -774,6 +818,17 @@ _close1() {
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "$f" --output-file "$d/reviewer-${role}.json" --evidence-dir "$d" >/dev/null
   "$ROUND_SH" collect "${args[@]}" --round "${ROUND_N:-1}" >/dev/null || return 1
   "$ROUND_SH" close "${args[@]}" --round "${ROUND_N:-1}" --tokens ${role}=5
+}
+@test "step-kind: under the shipped one-round policy a failed round 1 routes nothing — the confirmation round is the last" {
+  _erepo
+  yq -i '.review_checkpoints.step_review.rounds_default = 1 | .review_checkpoints.step_review.second_round_when = "open_finding_and_fix"' \
+     "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  _sc
+  run _close1 cp2; echo "$output"; [ "$status" -eq 0 ]
+  [ ! -f "$(_J routed-findings.jsonl)" ]
+  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): partial"; _sc
+  ROUND_N=2 run _close1 cp2; echo "$output"; [ "$status" -eq 0 ]
+  [ -f "$(_J routed-findings.jsonl)" ]
 }
 @test "routing: close of the last cp2 round routes the uncovered blocker, carries the major a later step covers, and a second close adds nothing" {
   _erepo; _sc

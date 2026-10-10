@@ -1052,6 +1052,17 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
            in the language of the file it checks (a record for the PM is Czech:
            "Scénář B", not "Scenario B").
 
+      20b3. A block may carry `timeout:` — whole seconds, 1-1800 (default 120):
+           the runner (aid-plan-diff.sh) kills the command after it and the
+           point is `absent (reason=timeout)`; another value is refused by the
+           shared validator (lib/aid-verification-pattern.sh, P110).
+
+      20b4. A step's own measurable criterion is a labelled bullet under the
+           step's **Acceptance Criteria:** — `- [ ] [<role>] <text>` with a
+           `verification_pattern` block. `aid-plan-diff.sh --step` runs it after
+           the step together with the brief points of the step's **Zavírá:**;
+           an unlabelled bullet stays prose and is not run (P110).
+
       20c. Every pattern arguments are self-contained — no placeholder brackets.
            → REJECT regex matches: `<[a-z_]+>` in cmd/file/regex/expected_exit fields
                 (e.g., `cmd: "test <path>"` is REJECT; `cmd: "test ./tests/"` is ACCEPT)

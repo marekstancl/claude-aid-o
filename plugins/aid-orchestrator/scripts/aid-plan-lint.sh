@@ -284,7 +284,7 @@ _zadani_pass() {
     else
       IFS=$'\x1f' read -r -a a <<< "$rec"
       IFS=$'\x1f' read -r -a b <<< "$mine"
-      for i in 0 1 2 3 4 5 6; do
+      for i in 0 1 2 3 4 5 6 7; do   # 7: timeout (P110)
         [[ "$(_zadani_trim "${a[$i]:-}")" == "$(_zadani_trim "${b[$i]:-}")" ]] || same=0
       done
     fi

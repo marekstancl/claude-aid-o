@@ -1895,3 +1895,105 @@ _zp_state() {   # <td> <state> <current_step>
   [ "$status" -eq 0 ]
   [ "$(jq -r '.[-1].zadani_point' "$td/steps/step_1_backend/scope-amendment.json")" = null ]
 }
+
+# ── P110 Step 2: the step's brief points run before increment-step ─────────
+# _sc_seed [zavira] — a bound step 0 whose plan.json names a plan (plan_path)
+# with AC1 (`test -f ok.txt`) closed by plan step 1.
+_sc_seed() {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml" z="${1-AC1}"
+  write_post_deploy_state_yaml "$state_file"
+  sed -i 's/^current_step: .*/current_step: 0/; s/^total_steps: .*/total_steps: 2/' "$state_file"
+  SC_PLAN="$BATS_TEST_TMPDIR/plan-sc.md"
+  printf -- '---\nid: P960\n---\n# Plan\n\n### Step 1: one\n\n**Zavírá:** AC1\n\n### Step 2: two\n\n**Zavírá:** —\n\n## Acceptance Criteria\n\n- [ ] AC1: the ok file exists\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "test -f ok.txt"\n    expected_exit: 0\n  ```\n' > "$SC_PLAN"
+  echo "plan_path: $SC_PLAN" >> "$state_file"
+  jq -n --arg z "$z" '{epic_id: "E-test", version: "1.0", dependencies: [],
+    steps: [{id: "step_1_backend", role: "backend", objective: "a", plan_step: 1, zavira: ($z | split(",") | map(select(. != "")))},
+            {id: "step_2_backend", role: "backend", objective: "b", plan_step: 2, zavira: []}]}' > "$TEST_EVIDENCE_DIR/plan.json"
+  _imp263_write_bound_verify "$TEST_EVIDENCE_DIR/step-0-verify.md" 0 step_1_backend \
+    "$(_imp263_plan_step_hash "$TEST_EVIDENCE_DIR/plan.json" 0)" "$(git rev-parse HEAD)" TOK-SC
+  _imp263_write_verifier_output 0
+  SF="$state_file"
+}
+# _sc_card [answered] — a Decision card quoting AC1
+_sc_card() {
+  SC_CARD="$BATS_TEST_TMPDIR/card-$RANDOM.md"; echo "Rozhodnutí 1: AC1 počká na uzávěr" > "$SC_CARD"; touch -d '-10 seconds' "$SC_CARD"
+  export AID_HOOK_AUDIT="$BATS_TEST_TMPDIR/audit.jsonl"; : > "$AID_HOOK_AUDIT"
+  [[ "${1:-}" == answered ]] && printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  return 0
+}
+_cur() { grep '^current_step:' "$SF" | awk '{print $2}'; }
+SC_WHY="the PM moved this point to the close of the plan"
+
+@test "step-criteria: an absent point stops increment-step, naming the point, with next:" {
+  _sc_seed
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"step_criteria_failed"*'AC1 "the ok file exists"'* ]]
+  [[ "$output" == *"next: fix the step and commit"*"--defer-criterion AC1"* ]]
+  [ "$(_cur)" = 0 ]
+}
+@test "step-criteria: --force does not waive an absent point" {
+  _sc_seed
+  run "$FSM" increment-step "$SF" --force --reason "the PM said to move on regardless of this"
+  [ "$status" -eq 1 ]; [[ "$output" == *"step_criteria_failed"* ]]; [ "$(_cur)" = 0 ]
+}
+@test "step-criteria: --defer-criterion without a card is refused defer_refused" {
+  _sc_seed
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"*"--finding-card names no card file"* ]]
+}
+@test "step-criteria: --defer-criterion with a card that does not quote the point is refused" {
+  _sc_seed; _sc_card answered; echo "Rozhodnutí 1: jiná věc" > "$SC_CARD"; touch -d '-10 seconds' "$SC_CARD"
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"*"does not quote AC1"* ]]
+}
+@test "step-criteria: --defer-criterion with a card the PM has not answered is refused" {
+  _sc_seed; _sc_card
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"*"no PM prompt after"* ]]
+}
+@test "step-criteria: --defer-criterion naming a point the step does not close is refused" {
+  _sc_seed; _sc_card answered; echo "AC7" >> "$SC_CARD"; touch -d '-10 seconds' "$SC_CARD"
+  run "$FSM" increment-step "$SF" --defer-criterion AC7 --reason "$SC_WHY" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"*"the step does not close AC7"* ]]
+}
+@test "step-criteria: --defer-criterion with a reason under 20 characters is refused" {
+  _sc_seed; _sc_card answered
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "later" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"*"at least 20 characters"* ]]
+}
+@test "step-criteria: a valid answered card defers the point, the step advances, a re-measurement keeps the deferral" {
+  _sc_seed; _sc_card answered
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY" --finding-card "$SC_CARD"; echo "$output"
+  [ "$status" -eq 0 ]; [ "$(_cur)" = 1 ]
+  [ "$(jq -r .AC1.by "$TEST_EVIDENCE_DIR/cp2/step-0/deferred.json")" = pm ]
+  [ "$(jq -r '.results[0].deferred.card' "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json")" = "$SC_CARD" ]
+  grep -q '"step_criterion_deferred"' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+}
+@test "step-criteria: a hand-written deferred.json without an answered card defers nothing" {
+  _sc_seed; _sc_card
+  mkdir -p "$TEST_EVIDENCE_DIR/cp2/step-0"
+  jq -n --arg c "$SC_CARD" '{AC1: {by: "pm", reason: "x", card: $c}}' > "$TEST_EVIDENCE_DIR/cp2/step-0/deferred.json"
+  run "$FSM" increment-step "$SF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"step_criteria_failed"* ]]
+}
+@test "step-criteria: all points present → the step advances" {
+  _sc_seed; touch ok.txt
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 0 ]; [ "$(_cur)" = 1 ]
+  [ "$(jq -r '.results[0].verdict' "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json")" = present ]
+}
+@test "step-criteria: a step with no points and no own criteria (unmeasured_step) advances" {
+  _sc_seed ""
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .unmeasured_step "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json")" = true ]
+}
+@test "step-criteria: a plan-diff.json bound to another commit is measured again" {
+  _sc_seed; touch ok.txt
+  mkdir -p "$TEST_EVIDENCE_DIR/cp2/step-0"
+  echo '{"head_commit":"0000000","results":[{"ac_label":"AC1","ac_text":"x","verdict":"absent","evidence":"old"}]}' > "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .head_commit "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json")" = "$(git rev-parse HEAD)" ]
+}
