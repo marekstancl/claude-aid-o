@@ -406,8 +406,9 @@ cmd_prepare() {
       _die "a whole-plan round is bound to one candidate, and a fix moves it: commit the fix, run plan-finalize --stage freeze, and prepare round 1 of the new attempt (its packet carries what stayed open and the fix)"
     fi
     # A step that moves after a PASSED round gets a delta round over the new
-    # commits: nothing to fix, so it is neither a fix round nor one the round
-    # budget counts — the reviewers only have to see what they have not seen.
+    # commits: nothing to fix, so it is not a fix round — the reviewers only have
+    # to see what they have not seen. The budget lets ONE such round past it
+    # (round rounds_default + 1, P110); a later one needs the PM's override.
     local prev="" delta=0
     if (( ROUND >= 2 )); then
       prev="$(_round_dir $((ROUND - 1)))"
@@ -418,12 +419,14 @@ cmd_prepare() {
         [[ "$(jq -r '.verdict // ""' "${prev}/measurement.json")" == pass ]] && delta=1
       fi
     fi
-    local standing=false
-    # P109: the one second round the plan-review policy allows without an
-    # override (round 1 found a blocker, its fix passed fix-check) is in budget.
-    if (( ROUND > $(_base_rounds) && ! delta )) && [[ "$MODE" == plan ]] && aid_review_second_round_allowed "$BASE" "$ROUND"; then
+    local standing=false delta_in_budget=0
+    (( delta && ROUND == $(_base_rounds) + 1 )) && delta_in_budget=1
+    # P109/P110: the one second round the policy allows without an override
+    # (plan review: round 1 found a blocker, its fix passed fix-check; step
+    # rounds: round 1 left a blocker or major open and HEAD moved) is in budget.
+    if (( ROUND > $(_base_rounds) && ! delta_in_budget )) && aid_review_second_round_allowed "$BASE" "$ROUND" "$( [[ "$MODE" == plan ]] || _head)"; then
       :
-    elif (( ROUND > $(_base_rounds) && ! delta )); then
+    elif (( ROUND > $(_base_rounds) && ! delta_in_budget )); then
       if (( ROUND > $(_allowed_rounds) )); then
         # the fix itself is what failed: say that, not the rule
         local pfd="${BASE}/round-$((ROUND - 1))/fix-diff.json"
@@ -524,6 +527,10 @@ cmd_prepare() {
   fi
 
   _stamp_prompt_lengths "$dir" || exit 1
+  [[ "$MODE" == step ]] && { _record_agents "$dir" "${roles[@]}" || exit 1; }
+  if [[ -f "${dir}/packet/open-findings.json" && ! -f "${dir}/packet/fix.patch" ]]; then
+    jq '. + {confirmation_fallback: "full_diff"}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
+  fi
   trap - EXIT
   if (( ! MANUAL )); then
     _index_add "$ROUND" "$sha"
@@ -564,6 +571,20 @@ _stamp_prompt_lengths() {
   jq --argjson l "$lines" '. + {prompt_lines: $l}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
 }
 
+# _record_agents <round dir> <role>... — round.json `agents`: the subagent each
+# claude role is dispatched as (what _agent_type chose), so a test and the PM
+# read the choice instead of recomputing it (P110).
+_record_agents() {
+  local dir="$1" role i a='{}'; shift
+  for role in "$@"; do
+    _is_carried "$dir" "$role" && continue
+    i="$(aid_review_role_index "$role")" || continue
+    [[ "${RC_PROVIDER[$i]}" == claude ]] || continue
+    a="$(jq -c --arg r "$role" --arg t "$(_agent_type "$role" "$dir")" '. + {($r): $t}' <<< "$a")"
+  done
+  jq --argjson a "$a" '. + {agents: $a}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
+}
+
 _existing_round() {
   _need_round
   local dir; dir="$(_round_dir "$ROUND")"
@@ -587,10 +608,15 @@ _codex_probe() { ( AID_PROJECT_ROOT="$ROOT" CODEX_MODEL="$1"; export AID_PROJECT
 # role's prompt in <round_dir> is longer than light_max_prompt_lines — the light
 # reviewer read 550 of 1 980 and ~800 of 3 441 lines and passed (P102, P103),
 # the general-purpose one read the whole prompt.
+# A role whose full_when equals the step check's verdict (packet/step-check.json
+# of the round) gets the full reviewer too: step_security on review+security (P110).
 _agent_type() {
-  local i n=0; i="$(aid_review_role_index "$1")"
+  local i n=0 verdict=""; i="$(aid_review_role_index "$1")"
   [[ -n "${2:-}" ]] && n="$(jq -r --arg r "$1" '.prompt_lines[$r] // 0' "$2/round.json" 2>/dev/null || echo 0)"
-  if [[ "${RC_EFFORT[$i]}" == low ]] && (( n <= RC_LIGHT_MAX_PROMPT_LINES )); then
+  [[ -n "${2:-}" ]] && verdict="$(jq -r '.verdict // ""' "$2/packet/step-check.json" 2>/dev/null)"
+  if [[ -n "${RC_FULL_WHEN[$i]:-}" && "${RC_FULL_WHEN[$i]}" == "$verdict" ]]; then
+    echo general-purpose
+  elif [[ "${RC_EFFORT[$i]}" == low ]] && (( n <= RC_LIGHT_MAX_PROMPT_LINES )); then
     echo aid-orchestrator:reviewer-light
   else
     echo general-purpose

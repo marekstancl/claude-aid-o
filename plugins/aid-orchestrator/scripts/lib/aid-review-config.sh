@@ -18,9 +18,10 @@
 #   read from the project file first, then the default), RC_ROUNDS_DEFAULT,
 #   RC_MIN_ANSWERS (the block's min_answers when it declares one, else the
 #   number of unconditional roles), RC_BANNED_MODELS (space-separated), arrays
-#   RC_ROLE[], RC_PROVIDER[], RC_MODEL[], RC_EFFORT[], RC_WHEN[] (same index =
-#   same reviewer; RC_EFFORT is low|medium|high, medium when unset; RC_WHEN is ""
-#   or the step-check verdict that enables the role),
+#   RC_ROLE[], RC_PROVIDER[], RC_MODEL[], RC_EFFORT[], RC_WHEN[], RC_FULL_WHEN[]
+#   (same index = same reviewer; RC_EFFORT is low|medium|high, medium when unset;
+#   RC_WHEN is "" or the step-check verdict that enables the role; RC_FULL_WHEN
+#   is "" or the verdict on which a low-effort role gets the full reviewer, P110),
 #   RC_DEGRADED, RC_EXTRA_DOCS_TYPE_REVIEWERS (space-separated),
 #   RC_EXTRA_SKIP_THRESHOLD_FILES, RC_EXTRA_SKIP_THRESHOLD_LINES.
 #   Returns 2 without yq, 1 on unreadable YAML, a missing block or a missing
@@ -123,19 +124,22 @@ aid_review_config_load() {
   RC_EXTRA_DOCS_TYPE_REVIEWERS="$(yq -r "${b}.docs_type_reviewers // [] | .[]" "$RC_CONFIG_FILE" | tr '\n' ' ')"
   RC_EXTRA_SKIP_THRESHOLD_FILES="$(yq -r "${b}.skip_threshold.max_files // \"\"" "$RC_CONFIG_FILE")"
   RC_EXTRA_SKIP_THRESHOLD_LINES="$(yq -r "${b}.skip_threshold.max_lines // \"\"" "$RC_CONFIG_FILE")"
-  RC_ROLE=(); RC_PROVIDER=(); RC_MODEL=(); RC_EFFORT=(); RC_WHEN=()
-  local role provider model effort when unconditional=0
-  while IFS=$'\t' read -r role provider model effort when; do
+  RC_ROLE=(); RC_PROVIDER=(); RC_MODEL=(); RC_EFFORT=(); RC_WHEN=(); RC_FULL_WHEN=()
+  local role provider model effort when full_when unconditional=0
+  # "-" stands for an empty field: read with a tab IFS collapses empty fields.
+  while IFS=$'\t' read -r role provider model effort when full_when; do
     [[ -n "$role" ]] || continue
-    RC_ROLE+=("$role"); RC_PROVIDER+=("$provider"); RC_MODEL+=("$model"); RC_EFFORT+=("$effort"); RC_WHEN+=("$when")
+    [[ "$when" == - ]] && when=""; [[ "$full_when" == - ]] && full_when=""
+    RC_ROLE+=("$role"); RC_PROVIDER+=("$provider"); RC_MODEL+=("$model"); RC_EFFORT+=("$effort"); RC_WHEN+=("$when"); RC_FULL_WHEN+=("$full_when")
     [[ -z "$when" ]] && unconditional=$((unconditional + 1))
-  done < <(yq -r "${b}.reviewers // [] | .[] | [.role, .provider, .model, (.effort // \"medium\"), (.when // \"\")] | @tsv" "$RC_CONFIG_FILE")
+  done < <(yq -r "${b}.reviewers // [] | .[] | [.role, .provider, .model, (.effort // \"medium\"), (.when // \"-\"), (.full_when // \"-\")] | @tsv" "$RC_CONFIG_FILE")
   # The model a Claude stand-in runs at when a codex role gives no answer.
   RC_STAND_IN_MODEL="$(yq -r "${b}.stand_in_model // \"opus\"" "$RC_CONFIG_FILE")"
   # A low-effort role goes to the light reviewer only while its prompt fits:
   # longer ones were read in part and passed (P102, P103).
   RC_LIGHT_MAX_PROMPT_LINES="$(yq -r "${b}.light_max_prompt_lines // 800" "$RC_CONFIG_FILE")"
-  # P109: when a round past rounds_default needs no PM override (plan review only)
+  # P109/P110: when a round past rounds_default needs no PM override
+  # (plan review: blocker_and_fix_check; step rounds: open_finding_and_fix)
   RC_SECOND_ROUND_WHEN="$(yq -r "${b}.second_round_when // \"\"" "$RC_CONFIG_FILE")"
   RC_MIN_ANSWERS="$(yq -r "${b}.min_answers // \"\"" "$RC_CONFIG_FILE")"
   [[ -n "$RC_MIN_ANSWERS" ]] || RC_MIN_ANSWERS="$unconditional"
@@ -199,6 +203,10 @@ aid_review_config_validate() {
       review+security) ;;
       *) _aid_rc_fail "role ${role}: when must be review+security (got '${RC_WHEN[$i]}')"; return 1 ;;
     esac
+    case "${RC_FULL_WHEN[$i]:-}" in
+      ""|review+security) ;;
+      *) _aid_rc_fail "role ${role}: full_when must be review+security (got '${RC_FULL_WHEN[$i]}')"; return 1 ;;
+    esac
   done
   [[ "$RC_LIGHT_MAX_PROMPT_LINES" =~ ^[1-9][0-9]*$ ]] \
     || { _aid_rc_fail "light_max_prompt_lines must be a positive integer (got '${RC_LIGHT_MAX_PROMPT_LINES}')"; return 1; }
@@ -214,29 +222,42 @@ aid_review_config_validate() {
   [[ "$RC_MIN_ANSWERS" =~ ^[0-9]+$ ]] && (( RC_MIN_ANSWERS >= 1 && RC_MIN_ANSWERS <= (roles_n > 6 ? roles_n : 6) )) \
     || { _aid_rc_fail "min_answers must be 1..6 (got '${RC_MIN_ANSWERS}')"; return 1; }
   [[ "$RC_ROUNDS_DEFAULT" =~ ^[1-3]$ ]] || { _aid_rc_fail "rounds_default must be 1..3 (got '${RC_ROUNDS_DEFAULT}')"; return 1; }
-  [[ -z "${RC_SECOND_ROUND_WHEN:-}" || "$RC_SECOND_ROUND_WHEN" == blocker_and_fix_check ]] \
-    || { _aid_rc_fail "second_round_when must be blocker_and_fix_check (got '${RC_SECOND_ROUND_WHEN}')"; return 1; }
+  local srw=open_finding_and_fix; [[ "$RC_BLOCK" == plan_review ]] && srw=blocker_and_fix_check
+  [[ -z "${RC_SECOND_ROUND_WHEN:-}" || "$RC_SECOND_ROUND_WHEN" == "$srw" ]] \
+    || { _aid_rc_fail "second_round_when must be ${srw} (got '${RC_SECOND_ROUND_WHEN}')"; return 1; }
   for role in $RC_EXTRA_DOCS_TYPE_REVIEWERS; do
     [[ "$seen" == *" $role "* ]] || { _aid_rc_fail "docs_type_reviewers names ${role}, which is not a reviewer"; return 1; }
   done
   return 0
 }
 
-# aid_review_second_round_allowed <cp1_dir> <n> — may plan-review round <n> run
-# past rounds_default without the PM's override? (P109) True only when the policy
-# says `second_round_when: blocker_and_fix_check`, <n> is rounds_default + 1,
-# round <n-1> is closed and had at least one blocker the PM did not dismiss
-# (majors alone do not qualify), and its fix passed fix-check. The blocker count
-# ignores status: the next round's adjudication marks a confirmed fix `fixed`
-# in round <n-1>'s merged.json, and the question is what round <n-1> FOUND.
+# aid_review_second_round_allowed <cp_dir> <n> [<head_sha>] — may round <n>
+# run past rounds_default without the PM's override? <n> must be
+# rounds_default + 1 and round <n-1> closed. The policy's second_round_when
+# decides the rest:
+#   blocker_and_fix_check (plan review, P109): round <n-1> had at least one
+#     blocker the PM did not dismiss (majors alone do not qualify), and its fix
+#     passed fix-check. The blocker count ignores status: the next round's
+#     adjudication marks a confirmed fix `fixed` in round <n-1>'s merged.json,
+#     and the question is what round <n-1> FOUND.
+#   open_finding_and_fix (step rounds, P110): round <n-1> left a blocker or
+#     major open and HEAD (<head_sha>) moved since it — a fix to confirm. The
+#     delta round after a PASSED round is prepare's own rule, not this one.
 # The ONE implementation `aid-review-round.sh prepare` and `aid-cp1-gate.sh`
 # both call, so they cannot disagree. Needs aid_review_config_load first.
 aid_review_second_round_allowed() {
-  local cp1="$1" n="$2" prev
-  [[ "${RC_SECOND_ROUND_WHEN:-}" == blocker_and_fix_check ]] || return 1
+  local cp="$1" n="$2" head="${3:-}" prev
   [[ "$n" =~ ^[0-9]+$ ]] && (( n == RC_ROUNDS_DEFAULT + 1 )) || return 1
-  prev="${cp1}/round-$((n - 1))"
-  [[ -f "${prev}/measurement.json" && -f "${prev}/merged.json" && -f "${prev}/fix-diff.json" ]] || return 1
-  (( $(jq '[.findings[] | select(.severity == "blocker" and ((.dispute.pm.answer // "") != "accepted"))] | length' "${prev}/merged.json" 2>/dev/null || echo 0) > 0 )) || return 1
-  [[ "$(jq -r '.pass // false' "${prev}/fix-diff.json" 2>/dev/null)" == true ]]
+  prev="${cp}/round-$((n - 1))"
+  [[ -f "${prev}/measurement.json" && -f "${prev}/merged.json" ]] || return 1
+  case "${RC_SECOND_ROUND_WHEN:-}" in
+    blocker_and_fix_check)
+      [[ -f "${prev}/fix-diff.json" ]] || return 1
+      (( $(jq '[.findings[] | select(.severity == "blocker" and ((.dispute.pm.answer // "") != "accepted"))] | length' "${prev}/merged.json" 2>/dev/null || echo 0) > 0 )) || return 1
+      [[ "$(jq -r '.pass // false' "${prev}/fix-diff.json" 2>/dev/null)" == true ]] ;;
+    open_finding_and_fix)
+      [[ -n "$head" && "$(jq -r '.head_sha // ""' "${prev}/round.json" 2>/dev/null)" != "$head" ]] || return 1
+      (( $(jq '[.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major"))] | length' "${prev}/merged.json" 2>/dev/null || echo 0) > 0 )) ;;
+    *) return 1 ;;
+  esac
 }

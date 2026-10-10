@@ -236,8 +236,8 @@ _cfg() {  # <yq path> <default>: the project's review-checkpoints.yaml first, th
   done
   printf '%s' "${v:-$2}"
 }
-MAX_FILES="$(_cfg '.review_checkpoints.step_review.skip_threshold.max_files' 1)"
-MAX_LINES="$(_cfg '.review_checkpoints.step_review.skip_threshold.max_lines' 50)"
+MAX_FILES="$(_cfg '.review_checkpoints.step_review.skip_threshold.max_files' 3)"
+MAX_LINES="$(_cfg '.review_checkpoints.step_review.skip_threshold.max_lines' 120)"
 STREAMLINED=false
 [[ -f "$STATE" ]] && STREAMLINED="$(yq -r '.streamlined_mode // false' "$STATE" 2>/dev/null || echo false)"
 

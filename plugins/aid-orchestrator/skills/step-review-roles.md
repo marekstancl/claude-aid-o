@@ -140,6 +140,9 @@ configuration either way.
 
 The step's diff as the colleague who reviews the pull request. This role checks
 that the change delivers its acceptance criteria and nothing else, correctly.
+It reads every step the step check does not skip, as the light reviewer
+(`effort: low`; the full one above `light_max_prompt_lines`); the choice is in
+`round.json` `agents` (`aid-review-round.sh` `_agent_type`).
 
 ### Questions
 
@@ -160,7 +163,9 @@ or an existing consumer broken.
 
 The step's diff as the reviewer who assumes the input is hostile. This role
 reviews every step that is not skipped (a project can still gate it with
-`when: review+security`); the rules `step-check.json` matched, when any, are
+`when: review+security`): as the light reviewer on the verdict `review`, as the
+full reviewer on `review+security` (`full_when`, P110; `round.json` `agents`
+records which). The rules `step-check.json` matched, when any, are
 where to start, not the edge of the review. A web server, a path taken from a
 caller or text rendered as HTML/SVG/CSS matches no pattern and is exactly
 where the later rounds of P101/P102 found their holes.

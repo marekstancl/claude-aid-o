@@ -331,8 +331,13 @@ _repo() {
   seq 1 60 >> "$R/src/app.py"; echo new > "$R/src/new.py"; git -C "$R" add -A; git -C "$R" commit -qm s0
   # Round mechanics are tested with one reviewer: the project gates step_security
   # on a pattern, as the default did before 2.109.0 (the default is tested at "prepare needs").
+  # The project keeps the pre-2.116.0 step budget (3B): threshold 1/50, two
+  # rounds, CP3 on — the step-kind cases set the shipped defaults back.
   mkdir -p "$R/.aid-o/config/policies"
-  yq '.review_checkpoints.step_review.reviewers[1].when = "review+security"' \
+  yq '.review_checkpoints.step_review.reviewers[1].when = "review+security"
+      | .review_checkpoints.step_review.skip_threshold = {"max_files": 1, "max_lines": 50}
+      | .review_checkpoints.step_review.rounds_default = 2 | del(.review_checkpoints.step_review.second_round_when)
+      | .review_checkpoints.cp3_integration_review = true' \
     "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
 }
 _sc() { (cd "$R" && bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint "${1:-cp2}" --step "${2:-0}" --evidence-dir "$E" "${@:3}") >/dev/null; }
@@ -351,6 +356,89 @@ _bracket() {
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "$f" --output-file "$d/reviewer-$2.json" --evidence-dir "$d" >/dev/null
 }
 
+# _krepo <files> <lines per file> [extra line] — _repo with the shipped step
+# policy (P110: one round, threshold 3/120, both roles light, security full on a
+# pattern) and a step-0 commit of <files> new files under src/ (all in scope).
+_krepo() {
+  _repo
+  cp "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  git -C "$R" reset -q --hard HEAD~1
+  jq '.steps[0].outputs = [] | .steps[0].allowed_paths = ["src/**"]' "$E/plan.json" > "$E/p.tmp" && mv "$E/p.tmp" "$E/plan.json"
+  local i
+  for i in $(seq 1 "$1"); do seq 1 "$2" > "$R/src/f$i.py"; done
+  [[ -n "${3:-}" ]] && echo "$3" >> "$R/src/f1.py"
+  git -C "$R" add src; git -C "$R" commit -qm s0
+}
+# _kclose <round> <verdict jq for both roles> — answer, bracket, collect, close one round with both roles
+_kclose() {
+  _sanswer "$1" step_generalist "$2"; _sanswer "$1" step_security "$2"
+  _S collect --round "$1" >/dev/null; _bracket "$1" step_generalist; _bracket "$1" step_security
+  _S close --round "$1" --tokens step_generalist=10 --tokens step_security=10 >/dev/null
+}
+@test "step-kind: a 2-file/40-line step inside scope with no pattern is skip, and prepare refuses a round" {
+  _krepo 2 20; _sc
+  [ "$(jq -r .verdict "$E/cp2/step-0/step-check.json")" = skip ]
+  run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"verdict is skip"* ]]
+}
+@test "step-kind: a 5-file step is review; round 1 asks both roles as light reviewers (round.json agents)" {
+  _krepo 5 30; _sc
+  [ "$(jq -r .verdict "$E/cp2/step-0/step-check.json")" = review ]
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -c '.reviewers_expected | sort' "$(D 1)/round.json")" = '["step_generalist","step_security"]' ]
+  [ "$(jq -r .agents.step_generalist "$(D 1)/round.json")" = aid-orchestrator:reviewer-light ]
+  [ "$(jq -r .agents.step_security "$(D 1)/round.json")" = aid-orchestrator:reviewer-light ]
+}
+@test "step-kind: a step matching exec_keyword is review+security; step_security gets the full reviewer (full_when)" {
+  _krepo 1 5 'eval("x")'; _sc
+  [ "$(jq -r .verdict "$E/cp2/step-0/step-check.json")" = "review+security" ]
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .agents.step_security "$(D 1)/round.json")" = general-purpose ]
+  [ "$(jq -r .agents.step_generalist "$(D 1)/round.json")" = aid-orchestrator:reviewer-light ]
+  [[ "$output" == *"step_security.md  (focus cp2-step-0-step-security, agent general-purpose"* ]]
+}
+@test "step-kind: a closed round 1 with an open major and a new commit allows round 2; its prompt carries fix.patch, not diff.patch" {
+  _krepo 5 30; _sc; _S prepare --round 1 >/dev/null; _kclose 1
+  [ "$(jq -r .verdict "$(D 1)/measurement.json")" = fail ]
+  run _S prepare --round 2; [ "$status" -eq 1 ]; [[ "$output" == *"HEAD has not moved"* ]]
+  echo "fixed_marker = 1" >> "$R/src/f2.py"; git -C "$R" commit -qam "fix(review): x"; _sc
+  run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
+  local p="$(D 2)/prompt-step_generalist.md"
+  grep -q '^## This is a confirmation round$' "$p"
+  grep -q 'fixed_marker' "$p"
+  grep -q '^### What the author changed (fix.patch)' "$p"
+  ! grep -q '^## diff.patch' "$p"
+  ! grep -q '^## Declared scope' "$p"
+}
+@test "step-kind: a delta round 2 after a passed round 1 passes; a delta round 3 after a passed round 2 is refused by the budget" {
+  _krepo 5 30; _sc; _S prepare --round 1 >/dev/null
+  _kclose 1 '.findings = [] | .no_findings_reason = "clean"'
+  [ "$(jq -r .verdict "$(D 1)/measurement.json")" = pass ]
+  echo late >> "$R/src/f3.py"; git -C "$R" commit -qam late; _sc
+  run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
+  grep -q '^## This is a delta round$' "$(D 2)/prompt-step_generalist.md"
+  ! grep -q '^## diff.patch' "$(D 2)/prompt-step_generalist.md"
+  _kclose 2 '.findings = [] | .no_findings_reason = "clean"'
+  echo later >> "$R/src/f4.py"; git -C "$R" commit -qam later; _sc
+  run _S prepare --round 3; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"exceeds the round budget (1)"* ]]
+}
+@test "step-kind: a third round after a confirmation that still left a major open is refused without the PM's override" {
+  _krepo 5 30; _sc; _S prepare --round 1 >/dev/null; _kclose 1
+  echo "fix = 1" >> "$R/src/f2.py"; git -C "$R" commit -qam "fix(review): x"; _sc
+  _S prepare --round 2 >/dev/null; _kclose 2
+  echo "fix = 2" >> "$R/src/f2.py"; git -C "$R" commit -qam "fix(review): y"; _sc
+  run _S prepare --round 3; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"exceeds the round budget (1)"* ]]
+}
+@test "step-kind: round 1 closed with only minors and a new commit gets a delta round (nothing open to confirm)" {
+  _krepo 5 30; _sc; _S prepare --round 1 >/dev/null
+  _kclose 1 '.findings[0].severity = "minor"'
+  [ "$(jq -r .verdict "$(D 1)/measurement.json")" = pass ]
+  echo "fix = 1" >> "$R/src/f2.py"; git -C "$R" commit -qam "fix(review): x"; _sc
+  run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq '.findings | length' "$(D 2)/packet/open-findings.json")" -eq 0 ]
+  grep -q '^## This is a delta round$' "$(D 2)/prompt-step_security.md"
+}
 @test "step: prepare needs a step check at HEAD and a review verdict; the default asks security on every reviewed step, a gated project only on a pattern" {
   _repo
   run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"no step-check.json"* ]]

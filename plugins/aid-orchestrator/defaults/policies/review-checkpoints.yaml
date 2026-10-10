@@ -41,23 +41,33 @@ review_checkpoints:
 
   # Step review (CP2), EPIC review (CP3) and fast-mode review (CP6): reviewer
   # roles of skills/step-review-roles.md, read by scripts/lib/aid-review-config.sh
-  # (P094). `when: review+security` marks a role that runs only when
-  # aid-step-check.sh reports a security pattern; the default no longer uses it
-  # for step_security (2.109.0): security is a question of what the code means,
-  # which no pattern list sees (P101/P102: 4 of 16 steps got the role, CP3 then
-  # found 7 security blockers/majors and fixed them over extra rounds).
-  # skip_threshold is what the
-  # step check calls small: a diff at or under both limits, inside the step's
-  # scope, with no pattern matched, is `skip` and needs no reviewer.
+  # (P094). The review a step buys follows the verdict of aid-step-check.sh
+  # (P110, 2.116.0):
+  #   skip            — at or under skip_threshold, inside the step's scope, no
+  #                     security pattern: no reviewer, the gates and the step's
+  #                     own points (aid-plan-diff.sh --step) only;
+  #   review          — both roles as light reviewers (effort low);
+  #   review+security — step_security as the full reviewer (full_when).
+  # step_security runs on EVERY reviewed step: security is a question of what the
+  # code means, which no pattern list sees (2.109.0, P101/P102: patterns flagged
+  # 4 of 16 steps, CP3 then found 7 security blockers/majors). `when:` (a role
+  # that runs only on one verdict) stays available to a project.
+  # One round; a second only as a confirmation over the fix of an open blocker
+  # or major (second_round_when: open_finding_and_fix), or as a delta round over
+  # new commits after a passed round; a third only under the PM's override or
+  # standing instruction. A project keeps the old behaviour in its own
+  # .aid-o/config/policies/review-checkpoints.yaml (rounds_default: 2,
+  # skip_threshold 1/50).
   step_review:
-    rounds_default: 2
+    rounds_default: 1
+    second_round_when: open_finding_and_fix
     light_max_prompt_lines: 800   # a low-effort role gets the full reviewer above this (P102/P103: the light one read ~25 %)
-    skip_threshold: {max_files: 1, max_lines: 50}
+    skip_threshold: {max_files: 3, max_lines: 120}
     banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
     stand_in_model: opus       # a codex role unreachable: a claude agent answers the same brief
     reviewers:
       - {role: step_generalist, provider: claude, model: opus, effort: low}
-      - {role: step_security,   provider: claude, model: opus, effort: medium}
+      - {role: step_security,   provider: claude, model: opus, effort: low, full_when: review+security}
   epic_review:
     rounds_default: 2
     light_max_prompt_lines: 800   # a low-effort role gets the full reviewer above this (P102/P103: the light one read ~25 %)

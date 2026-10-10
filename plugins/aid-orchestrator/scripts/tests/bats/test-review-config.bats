@@ -106,7 +106,7 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   _project '.review_checkpoints.step_review.reviewers[1].when = "review+security"'
   aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
   [ "$RC_MIN_ANSWERS" = 1 ]; [ "$(aid_review_config_floor 2)" = 1 ]; [ "$(aid_review_config_floor 1)" = 1 ]
-  [ "$RC_EXTRA_SKIP_THRESHOLD_FILES" = 1 ]; [ "$RC_EXTRA_SKIP_THRESHOLD_LINES" = 50 ]
+  [ "$RC_EXTRA_SKIP_THRESHOLD_FILES" = 3 ]; [ "$RC_EXTRA_SKIP_THRESHOLD_LINES" = 120 ]   # P110 threshold
   aid_review_config_validate
 }
 @test "step_review: a single-role block passes; epic_review loads three roles" {
@@ -171,7 +171,7 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
 
 @test "effort: read into RC_EFFORT, medium when unset, a value outside low|medium|high refused" {
   _load_step
-  [ "${RC_EFFORT[*]}" = "low medium" ]
+  [ "${RC_EFFORT[*]}" = "low low" ]   # P110: both step roles light, security full via full_when
   _load_cp1
   [ "${RC_EFFORT[0]}" = medium ]
   _project '.review_checkpoints.step_review.reviewers[0].effort = "extreme"'
@@ -197,4 +197,36 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   _project '.review_checkpoints.step_review.light_max_prompt_lines = "lots"'
   run _load_step
   [ "$status" -eq 1 ]; [[ "$output" == *"light_max_prompt_lines must be a positive integer"* ]]
+}
+
+# ── P110: the step review sized by the change ──────────────────────────────
+@test "second-round: open_finding_and_fix is the step_review default and is refused for plan_review" {
+  _load_step
+  [ "$RC_SECOND_ROUND_WHEN" = open_finding_and_fix ] && [ "$RC_ROUNDS_DEFAULT" = 1 ]
+  _project '.review_checkpoints.plan_review.second_round_when = "open_finding_and_fix"'
+  run _load_cp1
+  [ "$status" -eq 1 ]; [[ "$output" == *"second_round_when must be blocker_and_fix_check (got 'open_finding_and_fix')"* ]]
+  _project '.review_checkpoints.step_review.second_round_when = "blocker_and_fix_check"'
+  run _load_step
+  [ "$status" -eq 1 ]; [[ "$output" == *"second_round_when must be open_finding_and_fix"* ]]
+}
+@test "second-round: full_when is read per role (step_security on review+security); another value is refused by name" {
+  _load_step
+  i="$(aid_review_role_index step_security)"; [ "${RC_FULL_WHEN[$i]}" = "review+security" ]
+  [ "${RC_EFFORT[$i]}" = low ]
+  i="$(aid_review_role_index step_generalist)"; [ -z "${RC_FULL_WHEN[$i]}" ] && [ -z "${RC_WHEN[$i]}" ]
+  _project '.review_checkpoints.step_review.reviewers[1].full_when = "review"'
+  run _load_step
+  [ "$status" -eq 1 ]; [[ "$output" == *"role step_security: full_when must be review+security (got 'review')"* ]]
+}
+@test "second-round: the open_finding_and_fix arm needs round n-1 closed with an open blocker or major and HEAD moved" {
+  _load_step
+  local cp="$ROOT/cp2/step-0"; mkdir -p "$cp/round-1"
+  echo '{}' > "$cp/round-1/measurement.json"; echo '{"head_sha":"aaa"}' > "$cp/round-1/round.json"
+  echo '{"findings":[{"severity":"major","status":"open"}]}' > "$cp/round-1/merged.json"
+  aid_review_second_round_allowed "$cp" 2 bbb
+  ! aid_review_second_round_allowed "$cp" 2 aaa          # HEAD has not moved
+  ! aid_review_second_round_allowed "$cp" 3 bbb          # only rounds_default + 1
+  echo '{"findings":[{"severity":"minor","status":"open"},{"severity":"major","status":"fixed"}]}' > "$cp/round-1/merged.json"
+  ! aid_review_second_round_allowed "$cp" 2 bbb          # nothing open to confirm
 }

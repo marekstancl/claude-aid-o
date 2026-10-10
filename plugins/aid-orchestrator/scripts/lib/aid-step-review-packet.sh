@@ -84,7 +84,12 @@ _aid_sr_packet_finish() {
   local root="$1" dir="$2" prev="${3:-}" f
   if [[ -n "$prev" && -f "$prev/merged.json" ]]; then
     jq "{findings: [.findings[] | select(${AID_SR_OPEN_JQ})]}" "$prev/merged.json" > "$dir/open-findings.json"
-    git -C "$root" diff "$(jq -r .head_sha "$prev/round.json")..HEAD" > "$dir/fix.patch" || return 1
+    # A previous round prepared without head_sha: no fix diff can be cut, and
+    # the prompt falls back to the whole diff (round.json confirmation_fallback).
+    local ph; ph="$(jq -r '.head_sha // ""' "$prev/round.json" 2>/dev/null)"
+    if [[ -n "$ph" && "$ph" != null ]]; then
+      git -C "$root" diff "${ph}..HEAD" > "$dir/fix.patch" || return 1
+    fi
   fi
   (cd "$dir" && for f in *; do
      jq -n --arg f "$f" --arg s "$(sha256sum "$f" | cut -d' ' -f1)" '{file: $f, sha256: $s}'
@@ -189,7 +194,18 @@ aid_step_review_prompt_render() {
     echo
     echo "The repository to read is $(jq -r '.head_sha' "${dir}/packet/step-check.json" | cut -c1-12) (HEAD of the checkout you run in; read-only). Evidence is \`path:line\` at that commit."
     echo
-    if [[ -f "${dir}/packet/open-findings.json" ]]; then
+    # A confirmation or delta round (P110, IMP-689) reads the fix diff and what
+    # stays open, not the whole step again; without a fix.patch it falls back.
+    local narrow=0
+    [[ -f "${dir}/packet/open-findings.json" && -f "${dir}/packet/fix.patch" && "$cp" != cp7 ]] && narrow=1
+    if (( narrow )) && [[ "$(jq '.findings | length' "${dir}/packet/open-findings.json")" == 0 ]]; then
+      echo "## This is a delta round"
+      echo
+      echo "The previous round passed and the step moved since. Review only the new commits (fix.patch below) against the Definition of Done; do not review the rest again."
+      echo
+      _aid_sr_patch "${dir}/packet/fix.patch" "The new commits (fix.patch)" | sed 's/^## /### /'
+      echo
+    elif [[ -f "${dir}/packet/open-findings.json" ]]; then
       echo "## This is a confirmation round"
       echo
       echo "The author fixed the change after the previous round. Your job now:"
@@ -227,10 +243,14 @@ aid_step_review_prompt_render() {
         [[ -f "$part" ]] && echo "The range is large; one part per EPIC is on disk: ${part}"
       done
     fi
-    echo "## Declared scope (files.json)"
-    jq -r '"outputs:\n" + ((.outputs // []) | map("- " + .) | join("\n")) + "\nallowed_paths: " + ((.allowed_paths // []) | join(", ")) + "\nforbidden_paths: " + ((.forbidden_paths // []) | join(", "))' "${dir}/packet/files.json"
-    echo
-    _aid_sr_patch "${dir}/packet/diff.patch" "diff.patch"
+    if (( narrow )); then
+      echo "The whole step's diff is on disk (${dir}/packet/diff.patch) for a variant the fix may have missed; it is not repeated here."
+    else
+      echo "## Declared scope (files.json)"
+      jq -r '"outputs:\n" + ((.outputs // []) | map("- " + .) | join("\n")) + "\nallowed_paths: " + ((.allowed_paths // []) | join(", ")) + "\nforbidden_paths: " + ((.forbidden_paths // []) | join(", "))' "${dir}/packet/files.json"
+      echo
+      _aid_sr_patch "${dir}/packet/diff.patch" "diff.patch"
+    fi
   } >> "$out"
 }
 

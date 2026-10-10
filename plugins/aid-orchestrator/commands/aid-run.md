@@ -408,6 +408,15 @@ the branch, before `increment-step`. cp3: after the last step, before
 checkpoint's key is `false` (`prepare` then exits 3; the FSM passes with an
 audit line).
 
+**What a step buys (P110, 2.116.0).** The verdict decides: `skip` (at most 3
+files and 120 lines, inside the step's scope, no security pattern —
+`step_review.skip_threshold`) has no reviewer; `review` asks `step_generalist`
+and `step_security` as light reviewers; `review+security` asks `step_security`
+as the full reviewer (`full_when`). `prepare` records the choice in
+`round.json` `agents` and prints it next to each prompt; dispatch exactly that
+agent type. A project keeps the old budget (two rounds, 1/50) in its own
+`.aid-o/config/policies/review-checkpoints.yaml`.
+
 1. The step check (deterministic, no model). It writes `<cp dir>/step-check.json`
    and, for `skip` or `no_change`, the round index itself — nothing to dispatch:
    ```bash
@@ -426,14 +435,19 @@ audit line).
    dispatch <review> --round K --provider codex --role <role>`; a codex
    that gives no answer is replaced by the stand-in the quoted text describes).
 4. `close` prints the verdict. `pass` → `increment-step` / `transition`.
-   `fail` with a round left (`rounds_default`, 2) → the step's own role fixes
-   (the `fix_of:` dispatch in the instruction below), a new step check, then
-   `prepare --round 2`: the confirmation round asks only the reporters of what
-   stayed open. `fail` after the last round → the PM card.
+   `fail` (cp2 `rounds_default` is 1) → the step's own role fixes (the
+   `fix_of:` dispatch in the instruction below), a new step check, then
+   `prepare --round 2`: the confirmation round (`second_round_when:
+   open_finding_and_fix` — round 1 left a blocker or major open and HEAD
+   moved) asks only the reporters of what stayed open, and its prompt carries
+   `fix.patch` and the open findings, not the whole step again. `fail` after
+   that round → the PM card; a third round needs the PM's override or standing
+   instruction (`prepare` refuses it otherwise).
    A step that moves after a `pass` (a later commit on the same step) is
    confirmed the same way — a new step check, then `prepare --round <n+1>`: a
-   delta round over the commits since, asking every role, which the round
-   budget does not count and which needs no override.
+   delta round over the commits since, asking every role. ONE delta round
+   (round `rounds_default + 1`) needs no override; a later one meets the
+   round budget like any other round.
    A finding the adjudicator could not accept on form (`form_invalid` in
    `merged.json`) is open like any other: fix it, or dispute it.
 5. The PM card after an exhausted round is the **Decision required** card of

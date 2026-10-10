@@ -28,7 +28,10 @@ setup() {
   cp "$FIX/config/execution.yaml" "$ROOT/.aid-o/config/execution.yaml"
   cp "$FIX/config/permissions-auto.yaml" "$ROOT/.aid-o/config/permissions.yaml"
   mkdir -p "$ROOT/.aid-o/config/policies"
-  yq '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
+  # the project keeps the pre-2.116.0 step budget and CP3 on (3B; P110)
+  yq '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]
+      | .review_checkpoints.step_review.skip_threshold = {"max_files": 1, "max_lines": 50} | .review_checkpoints.step_review.rounds_default = 2 | del(.review_checkpoints.step_review.second_round_when)
+      | .review_checkpoints.cp3_integration_review = true' \
      "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
   BASE_SHA="$(git -C "$ROOT" rev-parse HEAD)"
   echo base > "$ROOT/src/app.py"; git -C "$ROOT" add src; git -C "$ROOT" commit -qm s0
