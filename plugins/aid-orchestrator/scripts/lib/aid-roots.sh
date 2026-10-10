@@ -236,6 +236,23 @@ aid_run_checkout_root() {
   printf '%s\n' "$fallback"
 }
 
+# aid_plan_files <dir> <plan_id> — the plan file(s) of <plan_id> in <dir>, one per
+# line, sorted: every `<plan_id>-*.md` EXCEPT the brief `<plan_id>-zadani.md`
+# (P109). The brief sits beside the plan under the same id, so a bare
+# `<plan_id>-*.md` glob can hand the brief to whoever asked for the plan — and a
+# plan_diff over the brief finds no `## Acceptance Criteria` and skips green.
+aid_plan_files() {
+  local f
+  for f in "$1/$2"-*.md; do
+    [[ -f "$f" ]] || continue
+    aid_is_brief_file "$f" && continue
+    printf '%s\n' "$f"
+  done
+}
+
+# aid_is_brief_file <path> — is this a brief `P<NNN>-zadani.md`, not a plan?
+aid_is_brief_file() { [[ "${1##*/}" =~ ^P[A-Za-z0-9_]+-zadani\.md$ ]]; }
+
 # _aid_fm_get <plan> <key> — one scalar from the plan's YAML frontmatter block
 # (first `---` to its closing `---`), trimmed and unquoted. Nothing when the
 # key, or the block, is absent.

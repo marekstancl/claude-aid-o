@@ -29,7 +29,9 @@ AGENTS_DIR="$PLUGIN_DIR/agents"
 PROTOCOL="$PLUGIN_DIR/skills/agent-protocol.md"
 
 # The one reference marker. Cards are checked for this exact substring.
-MARKER='Read `skills/agent-protocol.md` → **Controller boundary (non-negotiable)**'
+# The wording the cards carry since P107 Step 5 (2.112.0) rewrote all five;
+# the older "Read … → **Controller boundary …**" form left this suite red.
+MARKER='`skills/agent-protocol.md` §"Controller boundary (non-negotiable)" binds this card in full'
 
 # Distinctive phrases from the contract body. Their presence in an agent card
 # (outside a code fence) means a divergent copy exists.
@@ -88,10 +90,7 @@ _cards() {
     {
       echo "Every agent card must point at the shared contract. Add:"
       echo
-      echo "## Controller boundary (non-negotiable)"
-      echo
-      echo "${MARKER}; it binds this card in"
-      echo "full. The contract is stated there once and is deliberately not restated here."
+      echo "${MARKER} and is stated only there."
       echo
       printf '%s' "$bad"
     } >&2

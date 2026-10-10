@@ -155,8 +155,28 @@ rendered artifact — see MUST rule 17.
 | `## Testing Strategy` | Which behaviour this plan verifies, why that behaviour, and where the verification goes. **Required, with content** — `aid-plan-lint.sh` refuses a plan without it. | Brainstorming testing section |
 | `## Constraints` | Technical, business, timeline constraints | PM answers |
 | `## Risks` | Risk table with probability, impact, mitigation | Brainstorming risks |
+| `## Acceptance Criteria` | The brief's `AC<n>` points verbatim (line and `verification_pattern` block), then the plan's own from `AC<n+1>` (Completeness Gate #20) | The brief file |
 | `## Success Criteria` | Testable success criteria | PM answers |
 | `## Next Steps` | Follow-up actions | Standard |
+
+### The brief file
+
+Before the plan, `/aid-plan` writes the brief: `.aid-o/plans/P{NNN}-zadani.md`
+from `defaults/templates/zadani.md` (brainstorm Step 8, Write mode item 3). It is
+the PM's specification as a file, and it outlives the interim.
+
+- Frontmatter: `zadani: P{NNN}`, `verze: <int ≥ 1>`, `datum`, `autor`, optional `roadmapa`.
+- Six sections, numbered, in this order: `## 1. Co PM chce` (the PM's words
+  verbatim and one paragraph starting `**Co je v sázce:**`), `## 2. Změřený výchozí
+  stav`, `## 3. Co udělat`, `## 4. Kde co je`, `## 5. Pravidla práce`,
+  `## 6. Hotovo, když`.
+- Every point of section 6 is `- [ ] AC<n>: <text>` (AC1, AC2, … without gaps) with
+  a `verification_pattern` block within 5 lines — the grammar of #20 below, checked
+  by the same validator (`lib/aid-verification-pattern.sh`) the plan check's A6 uses.
+- Check it: `bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" --zadani <file>` —
+  every finding at once, `zadani OK (<n> points)` when it is in shape.
+- A point changes only through a new version of the file (`verze` +1); the plan
+  carries the points, it never rewords them.
 
 **Conditional sections** (include only when relevant, omit otherwise):
 - `## Infrastructure` — Docker Compose, deployment, CI/CD (when Docker/infra was discussed)
@@ -444,6 +464,7 @@ writing and repair its exact diagnostics before CP1/C0.
 
 **Effort:** {S / M / L}
 **AID Role:** {backend / frontend / qa / e2e / security / docs / release} (docs-writer = the older spelling of docs)
+**Zavírá:** {AC1, AC3 — the brief points this step closes; `—` when it closes none} *(mandatory in a plan bound to a brief — aid-plan-lint.sh; it reaches plan.json as `zavira` and `amend-scope` reads it at run time)*
 **Visual Refs:** `{path/to/mockup-source.tsx}` lines {start}-{end} — {what part this step implements} *(optional — only for frontend/UI steps with mockups)*
 **UI Change Mode:** `existing_ui` | `new_ui` *(frontend steps that modify existing UI — omit for new UI/greenfield)*
 **UI Change Contract:** `path: .aid-o/work/.../delta-contract.json | sha256: <hash> | schema_version: 1.0.0 | viewports: desktop, mobile` *(REQUIRED when UI Change Mode is `existing_ui` — omitting this blocks controller dispatch; see plan.schema.json. `viewports` names every viewport the baseline and the verification cover: desktop AND mobile when `project.yaml → ui.responsive` is true or absent — P087 — desktop alone when it is `false`. The generators carry `path | sha256 | schema_version` into plan.json; `viewports` is read by the controller from this field in the plan text, and the proposal check (`aid_ui_proposal_check`) is what refuses a missing viewport.)*
@@ -1012,7 +1033,9 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
                                   P021 F4, P022 F6, P023 F7; orthogonal to #17e
                                   CLI grounding and #19 Design Defeat):
   20. Plan-level AC section ## Acceptance Criteria must use executable verification_pattern.
-      Three sub-rules — all must pass:
+      Three sub-rules — all must pass. The brief file's points use the same grammar
+      and are checked by the same code (`lib/aid-verification-pattern.sh`, called by
+      A6 of `aid-plan-check.sh` and by `aid-plan-lint.sh --zadani`):
 
       20a. Every AC checkbox má sibling verification_pattern yaml block.
            → Extract AC labels: `grep "^- \[ \] AC" <plan>` → list
@@ -1095,6 +1118,19 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
       Test fixture (for #21 pre-screen activation test): see
       `scripts/tests/bats/test-plan-writing-rules.bats` fixture `handler_fixture.md`
       — a minimal plan with a FastAPI handler that activates the pre-screen.
+
+BRIEF BINDING (P109 — enforced by `aid-plan-lint.sh`, every finding an ERROR;
+               not judged, so not counted in the 28 below):
+  22. Every point AC<n> of the brief stands in ## Acceptance Criteria verbatim —
+      the same label, text and verification_pattern block, read by the same parser
+      on both sides (`lib/aid-verification-pattern.sh`). Missing, reworded or merged
+      → refused, quoting the brief's text. A change is a new `verze` of the brief.
+  23. Every brief point is named by some step's **Zavírá:**, every step of a
+      brief-bound plan carries the field, and no **Zavírá:** names an AC<n> that
+      neither the brief nor ## Acceptance Criteria has.
+  What the lint does NOT see: a point kept verbatim while a step's text
+  contradicts it (P014: the criterion line kept, an Edge Case saying the
+  opposite). That is the first question every CP1 role answers.
 
 EVALUATION:
   COUNT checks passed out of 28 (24 existing + 20a + 20b + 20c + 21).
@@ -1318,6 +1354,8 @@ RULE AC-10: DO NOT provide less detail for "simple" steps.
 15. **ALWAYS delete the interim document after successful plan write** — remove `.aid-o/work/interim-P{NNN}.md` if it exists (cleanup from brainstorming context persistence)
 16. **ALWAYS include a documentation update step** — if the plan changes API, models, architecture, or workflow, the LAST implementation step (before E2E) MUST update shared documentation (Docusaurus, README, API docs). For vulcan ecosystem projects, this means updating `/opt/eco/docs/docs/` or project-level docs. No exceptions — undocumented changes are incomplete changes.
 17. **NEVER write a summary section for a human into the plan** — no `Stakeholder Brief`, `Executive Summary`, `Human Review Summary` or `Shrnutí pro PM`. The PM's page is RENDERED from the plan's own facts (`lib/aid-plan-summary.sh`, published by `/aid-plan`), so a hand-written one is a second copy that nothing checks and that is free to flatter the plan. `aid-plan-lint.sh` reports all four headings.
+18. **ALWAYS carry the brief's points verbatim** — `## Acceptance Criteria` holds every point AC<n> of the brief with its line and its `verification_pattern` block exactly as the brief has them; the plan may ADD its own from AC<n+1>, never reword, merge or drop one (`aid-plan-lint.sh`, checks #22-#23). A point that must change is a new `verze` of the brief file, and the review restarts.
+19. **ALWAYS say where the design comes from** — `## Architecture`, `## Data Model` and `## API Design` open with `**Odvozeno z:** AC<n>[, AC<m>]`; a decision that changes what a user meets carries the literal marker `(mění výsledek pro uživatele)`, and the PM page lists every such line (`lib/aid-plan-summary.sh`).
 
 ---
 

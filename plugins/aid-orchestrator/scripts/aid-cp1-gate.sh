@@ -23,6 +23,12 @@
 # review_checkpoints.enabled or cp1_plan_review set to false passes with a
 # notice; a plan outside any .aid-o/ workspace is not gated.
 #
+# The critic (P109 Step 3) is checked FIRST and as a hard condition, so neither
+# --force nor a switched-off review waives it: a passed critic check must bind
+# to round 1's `critic_check_sha`, or — when cp1/ holds no round at all — to
+# the plan as it is now. A round 1 prepared before 2.115.0 (no key) is not
+# checked backwards.
+#
 # Exit: 0 pass
 #       1 a review condition fails (forceable by the PM through
 #         aid-auto-pipeline.sh --force; every failure is named)
@@ -47,6 +53,8 @@ source "${SCRIPT_DIR}/lib/aid-review-config.sh"
 _roles_skill="${SCRIPT_DIR}/../skills/plan-review-roles.md"
 # shellcheck source=lib/aid-ac-extract.sh
 source "${SCRIPT_DIR}/lib/aid-ac-extract.sh"
+# shellcheck source=lib/aid-critic.sh
+source "${SCRIPT_DIR}/lib/aid-critic.sh"
 
 plan="" project_root="" json_out=""
 while [[ $# -gt 0 ]]; do
@@ -113,6 +121,41 @@ done
 _cfg_err="$(aid_review_config_load "$project_root" plan_review "$_roles_skill" 2>&1 && aid_review_config_validate 2>&1)" \
   || { _hard "$(grep 'plan_review config:' <<< "$_cfg_err" | tail -1)"; _finish; }
 aid_review_config_load "$project_root" plan_review "$_roles_skill" 2>/dev/null
+
+# --- the critic: hard, and before the switched-off return (P109 Step 3) ------
+_critic_sha="" _critic_which=""
+if [[ -f "${CP1}/round-1/packet/manifest.json" ]]; then
+  _critic_sha="$(jq -r '.critic_check_sha // ""' "${CP1}/round-1/packet/manifest.json" 2>/dev/null)"
+  _critic_which="the plan that entered round 1"
+elif ! compgen -G "${CP1}/round-*" >/dev/null; then
+  _critic_sha="$(sha256sum "$plan" | cut -d' ' -f1)"
+  _critic_which="the plan as it is (no review round exists)"
+fi
+if [[ -n "$_critic_sha" ]] && ! _critic_why="$(aid_critic_verdict "$plan_id" "$_critic_sha" --root "$project_root")"; then
+  _hard "no passed critic check for ${_critic_which} (${_critic_sha:0:12}): ${_critic_why}
+  next: aid_critic_prepare ${plan_id} --moment plan --plan ${plan}; aid_critic_dispatch ${plan_id} --moment plan; aid_critic_check ${plan_id} --moment plan (pipeline.md §When AID refuses: no_passed_critic_check)"
+  _finish
+fi
+
+# --- the brief the round read is the brief the plan names (P109 Step 4) -------
+# A round 1 prepared by 2.115.0 or later (it carries critic_check_sha) records
+# the brief it read, or none: the plan must still name exactly that brief —
+# a brief swapped, edited, added or removed after round 1 is the same change.
+if [[ -f "${CP1}/round-1/packet/manifest.json" ]] \
+   && jq -e 'has("critic_check_sha")' "${CP1}/round-1/packet/manifest.json" >/dev/null 2>&1; then
+  _z_round="$(jq -r '.zadani_sha256 // "none"' "${CP1}/round-1/packet/manifest.json" 2>/dev/null)"
+  _z_rel="$(_aid_fm_get "$plan" zadani)" _z_now=none
+  if [[ -n "$_z_rel" ]]; then
+    [[ "$_z_rel" == /* ]] && _z_abs="$_z_rel" || _z_abs="${project_root}/${_z_rel}"
+    _z_now="$( [[ -f "$_z_abs" ]] && sha256sum "$_z_abs" | cut -d' ' -f1 || echo missing)"
+  fi
+  if [[ "$_z_now" != "$_z_round" ]]; then
+    _hard "the brief changed after round 1 (${_z_rel:-the plan names no zadani: now}: ${_z_round:0:12} → ${_z_now:0:12}): bump verze, update zadani_sha256 in the plan, rerun the critic and restart the review
+  next: aid-review-round.sh prepare ${plan} --round 1 --restart --reason \"<why the brief changed>\" (pipeline.md §When AID refuses: brief_changed_after_round)"
+    _finish
+  fi
+fi
+
 if [[ "$RC_ENABLED" != 1 ]]; then
   _finish "plan review is switched off (review_checkpoints.enabled or cp1_plan_review is false)"
 fi
@@ -151,7 +194,9 @@ last=""
 allowed="${override_rounds:-$RC_ROUNDS_DEFAULT}"
 for n in "${rounds[@]}"; do
   d="$(_round_dir "$n")"
-  (( n > RC_ROUNDS_DEFAULT && n > allowed )) \
+  # P109: the second round the policy allows (round 1 found a blocker, its fix
+  # passed fix-check) needs no override — the same function prepare asks.
+  (( n > RC_ROUNDS_DEFAULT && n > allowed )) && ! aid_review_second_round_allowed "$CP1" "$n" \
     && _fail "round-${n} exists without the PM's override.json allowing ${n} rounds"
   if [[ ! -f "${d}/measurement.json" ]]; then
     _fail "round-${n} is not closed (measurement.json missing): run collect and close for round ${n}"

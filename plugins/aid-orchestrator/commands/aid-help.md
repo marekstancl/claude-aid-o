@@ -187,8 +187,9 @@ PRE-FLIGHT (bash, before FSM):
   1. generation-readiness validates the source plan + provisional graph
   2. transaction skeleton written under the generation lock
   3. CP1 gate — ONCE per plan → generation-authority.json (needs closed
-     plan review rounds: six reviewer roles, two rounds by default, a third
-     or only one on the PM's recorded override)
+     plan review rounds: six reviewer roles, one round by default, a second
+     after a blocker and a passing fix-check, any other on the PM's recorded
+     override; and a passed critic check — hard, --force does not waive it)
   4. aid-plan-to-epic.sh → every EPIC file (verifies the authority,
      never re-runs the gate)
   5. aid-epic-to-json.sh → every plan.json + contract validation
@@ -225,16 +226,27 @@ Three modes, auto-detected from what you pass:
 Plan IDs come from the locked allocator, never a hand edit:
   aid-fsm.sh alloc plan-id     → prints the next P{NNN}
 
+The brief comes first (2.115.0): .aid-o/plans/P{NNN}-zadani.md from
+defaults/templates/zadani.md — six sections, done-when points as AC<n> with a
+verification_pattern block. Check it, and check the plan carries it:
+  aid-plan-lint.sh --zadani .aid-o/plans/P{NNN}-zadani.md
+  aid-plan-lint.sh <plan> --only zadani
+The brief is read at review (the CP1 packet), at revision (fix-check) and at
+run time (amend-scope names the AC<n> a widening serves).
+
 The independent critic (2.112.0) reads the PM's brief and the proposal at the
 end of the brainstorm, and the written plan before CP1, and answers in two
 levels: what to fix (the author answers every item in writing) and what the PM
 might cut or add (a suggestion on the scope card, never a verdict). Its prompt
-is assembled by code from the interim's `## Zadání PM` and `## Účel a co je
-v sázce` sections — cost figures never reach it — and its answer is refused
-without the two headings, with more than five items, or unanswered:
+is assembled by code from the brief file (or, in a brainstorm, the interim's
+`## Zadání PM` and `## Účel a co je v sázce`) — cost figures never reach it —
+and its answer is refused without the two headings, with more than five items,
+or unanswered. Since 2.115.0 it is MANDATORY: no review round and no EPIC
+generation without a passed check (--force does not waive it):
   source scripts/lib/aid-critic.sh
-  aid_critic_prepare P{NNN} --moment brainstorm|plan [--plan <path>]
-  aid_critic_check   P{NNN} --moment brainstorm|plan [--plan <path>]
+  aid_critic_prepare  P{NNN} --moment brainstorm|plan [--plan <path>]
+  aid_critic_dispatch P{NNN} --moment brainstorm|plan    (Codex; STAND-IN → Claude)
+  aid_critic_check    P{NNN} --moment brainstorm|plan [--plan <path>]
 
 NOT YET SUPPORTED
 Concurrent plan GENERATION works. STARTING a newly generated plan's EPIC
@@ -246,8 +258,10 @@ while another stream is live does not — that is a known limitation.
 A plan owns a git worktree and a branch, and declares how it releases.
 Before EPIC generation a plan goes through plan review (CP1): six reviewer
 roles answer the same packet, each finding needs a command and a file:line or
-it is rejected, two rounds by default, a third or only one only on the PM's
-recorded override (`aid-review-round.sh override`). `/aid-verify-plan`
+it is rejected, one round by default (2.115.0) — a second when round 1 found a
+blocker and its fix passed fix-check — any other only on the PM's recorded
+override (`aid-review-round.sh override`). Every reviewer gets the PM's brief
+(`zadani.md`) and first answers, point by point, whether the plan keeps it. `/aid-verify-plan`
 runs one of those reviewers by hand, outside the rounds; `/aid-verify-implementation`
 reviews a result that claims to be done. Both dispatch an independent agent in a
 fresh context, so neither is grading its own homework.

@@ -389,6 +389,61 @@ else
   fail "per-step-AC EPIC passes the pre-flight" "it exited non-zero"
 fi
 
+# ===========================================================================
+# P109 Step 2: the Closes column becomes steps[].zavira; the source plan's
+# brief binding reaches the top of plan.json. Defect caught: amend-scope
+# (P109 Step 5) reading an empty array for every step, or no binding at all,
+# while every other test stays green.
+# ===========================================================================
+_closes_epic() {   # <file> <plan_ref> <rows...>
+  local f="$1" ref="$2"; shift 2
+  { printf -- '---\nepic_id: E-903-1_1\ntitle: Closes\nplan_ref: %s\n---\n## Acceptance Criteria\n\n' "$ref"
+    printf -- '- [ ] [backend] step one deliverable verified\n- [ ] [backend] step two deliverable verified\n\n'
+    printf -- '## Steps (Role Pipeline)\n\n'
+    printf '%s\n' "$@"
+  } > "$f"
+}
+run_test "a six-column row yields zavira; — yields []; the source plan's zadani binding reaches plan.json"
+CL_PLAN="$TMPDIR_ROOT/P903-bound.md"
+printf -- '---\nid: P903\nzadani: .aid-o/plans/P903-zadani.md\nzadani_sha256: %s\n---\n# Plan\n' "$(printf 'x' | sha256sum | cut -d' ' -f1)" > "$CL_PLAN"
+CL_EPIC="$TMPDIR_ROOT/E-903-1_1-closes.md"
+_closes_epic "$CL_EPIC" "$CL_PLAN" \
+  '| # | Role | Objective | Depends On | Parallel Group | Closes |' \
+  '|---|------|-----------|------------|----------------|--------|' \
+  '| 1 | backend | do the first thing properly | - | - | AC1, AC3 |' \
+  '| 2 | backend | do the second thing properly | 1 | - | — |'
+cl_out="$(make_output_dir closes6)"
+cl_manifest="$(bash "$SCRIPT_UNDER_TEST" --epic "$CL_EPIC" --schema "$SCHEMA_FILE" --output-dir "$cl_out" 2>/dev/null)" || true
+cl_json="$(jq -r '.plan_json // empty' <<< "$cl_manifest" 2>/dev/null)"
+if [[ -f "$cl_json" ]] \
+   && [[ "$(jq -c '.steps[0].zavira' "$cl_json")" == '["AC1","AC3"]' ]] \
+   && [[ "$(jq -c '.steps[1].zavira' "$cl_json")" == '[]' ]] \
+   && [[ "$(jq -r '.zadani' "$cl_json")" == ".aid-o/plans/P903-zadani.md" ]] \
+   && [[ "$(jq -r '.zadani_sha256' "$cl_json")" =~ ^[0-9a-f]{64}$ ]]; then
+  pass "Closes → zavira, — → [], zadani + zadani_sha256 at the top"
+else
+  fail "Closes → zavira and the brief binding" "plan.json: $(cat "$cl_json" 2>/dev/null | jq -c '{z: .zadani, s: .zadani_sha256, a: [.steps[].zavira]}' 2>/dev/null)"
+fi
+
+run_test "a five-column row (EPIC before P109) yields zavira [] and no arity error; a plan without a brief yields no binding"
+CL_PLAN2="$TMPDIR_ROOT/P904-free.md"
+printf -- '---\nid: P904\n---\n# Plan\n' > "$CL_PLAN2"
+_closes_epic "$CL_EPIC" "$CL_PLAN2" \
+  '| # | Role | Objective | Depends On | Parallel Group |' \
+  '|---|------|-----------|------------|----------------|' \
+  '| 1 | backend | do the first thing properly | - | - |' \
+  '| 2 | backend | do the second thing properly | 1 | - |'
+cl_out2="$(make_output_dir closes5)"
+cl_manifest2="$(bash "$SCRIPT_UNDER_TEST" --epic "$CL_EPIC" --schema "$SCHEMA_FILE" --output-dir "$cl_out2" 2>/dev/null)" || true
+cl_json2="$(jq -r '.plan_json // empty' <<< "$cl_manifest2" 2>/dev/null)"
+if [[ -f "$cl_json2" ]] \
+   && [[ "$(jq -c '[.steps[].zavira]' "$cl_json2")" == '[[],[]]' ]] \
+   && [[ "$(jq -r 'has("zadani") or has("zadani_sha256")' "$cl_json2")" == false ]]; then
+  pass "legacy five-column row → zavira [], no binding"
+else
+  fail "legacy five-column row" "plan.json missing or wrong: ${cl_json2:-<none>}"
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

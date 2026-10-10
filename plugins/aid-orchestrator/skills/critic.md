@@ -6,7 +6,7 @@ user_invocable: false
 
 # Critic
 
-**Last Updated:** 2026-09-30
+**Last Updated:** 2026-10-09
 
 ## Task
 
@@ -26,10 +26,25 @@ end of a brainstorm, or the plan file before CP1), and the sentence
 run that had them in its context returned "do not build", which the PM cannot
 use. Read the repository as much as you need; change nothing.
 
+At the plan moment, for a plan bound to a brief (`zadani:` in its frontmatter),
+the PM's words and the stakes come from the BRIEF FILE — its section
+`1. Co PM chce` and its `**Co je v sázce:**` paragraph — not from the interim,
+which the flow deletes after CP1 (P109).
+
 ## Output
 
 Write to the path the prompt names, in the PM's language, with exactly these two
-headings (Czech, or `### Level 1 — …` / `### Level 2 — …`):
+headings (Czech, or `### Level 1 — …` / `### Level 2 — …`). Through Codex
+(`aid_critic_dispatch`, the default) you run in a read-only sandbox: the prompt
+(`prompt-codex.md`) asks you to PRINT the whole answer as your final message and
+write nothing — the shape is the same. An answer without both level headings is
+not recorded as a critique: the dispatch prints a STAND-IN line and the
+controller sends `prompt.md` to a Claude agent at the policy's `stand_in_model`.
+
+The critic is MANDATORY before CP1 (P109): `aid-review-round.sh prepare` refuses
+round 1 without a passed check for the plan entering it, and `aid-cp1-gate.sh`
+refuses generation — hard, `--force` does not waive it, nor does a switched-off
+plan review — without a passed check bound to that plan.
 
 ### Úroveň 1 — Kritika návrhu, jak je zadaný
 

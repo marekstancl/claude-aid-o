@@ -16,6 +16,15 @@
       "description": "Path to the source plan .md file (from EPIC plan_ref). Null for standalone EPICs without a source plan. When set, executing agents receive relevant plan sections for implementation detail.",
       "examples": [".aid-o/plans/2026-02-19-aido-v040-measurement-optimization.md", null]
     },
+    "zadani": {
+      "type": "string",
+      "description": "The brief file the source plan is bound to (its frontmatter zadani:, P109). Absent when the plan names no brief."
+    },
+    "zadani_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "The brief's sha256 the source plan was bound to. Its presence makes the plan brief-bound: amend-scope then requires the brief point a widening serves."
+    },
     "version": {
       "type": "integer",
       "minimum": 1,
@@ -49,6 +58,12 @@
             "type": "string",
             "minLength": 10,
             "description": "What this step must accomplish"
+          },
+          "zavira": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^AC[0-9]+$" },
+            "default": [],
+            "description": "The brief points (AC<n>) this step closes, from the plan step's **Zavírá:** through the EPIC steps table's Closes column (P109). Empty for a step that closes none and for an EPIC generated before 2.115.0."
           },
           "inputs": {
             "type": "array",

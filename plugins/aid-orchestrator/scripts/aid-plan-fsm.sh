@@ -4444,10 +4444,9 @@ _pfsm_finalize_freeze() {
     # wrong source plan (adversarial-review finding). Two matches means the
     # set is incomplete and equivalence is off for this freeze.
     local _g; local -a _src_matches=()
-    for _g in "${root}/.aid-o/plans/${plan_id}"-*.md; do
-      [[ -f "$_g" ]] || continue
+    while IFS= read -r _g; do
       _src_matches+=("${_g#"${root}/"}")
-    done
+    done < <(aid_plan_files "${root}/.aid-o/plans" "$plan_id")
     if [[ "${#_src_matches[@]}" -eq 1 ]]; then
       _src_path="${_src_matches[0]}"
     elif [[ "${#_src_matches[@]}" -gt 1 ]]; then
@@ -4836,16 +4835,14 @@ _pfsm_finalize_gates() {
 # gitignored .aid-o has no copy in a worktree). Prints "<path>\t<origin>",
 # origin ∈ candidate|state_root; exit 1 when neither exists.
 _pfsm_plan_file_for_gates() {
-  local root="$1" troot="$2" plan_id="$3" cand
-  if [[ -n "$troot" && "$troot" != "$root" ]]; then
-    for cand in "${troot}/.aid-o/plans/${plan_id}"-*.md "${troot}/.aid-o/plans/${plan_id}"*.md; do
-      [[ -f "$cand" ]] || continue
-      printf '%s\tcandidate\n' "$cand"; return 0
-    done
-  fi
-  for cand in "${root}/.aid-o/plans/${plan_id}"-*.md "${root}/.aid-o/plans/${plan_id}"*.md; do
-    [[ -f "$cand" ]] || continue
-    printf '%s\tstate_root\n' "$cand"; return 0
+  local root="$1" troot="$2" plan_id="$3" cand dir origin
+  # the brief (<id>-zadani.md) is never the plan: aid_plan_files leaves it out (P109)
+  for dir in "$troot" "$root"; do
+    [[ -n "$dir" ]] || continue
+    [[ "$dir" == "$root" ]] && origin=state_root || origin=candidate
+    cand="$(aid_plan_files "${dir}/.aid-o/plans" "$plan_id" | head -1)"
+    [[ -n "$cand" ]] || { [[ -f "${dir}/.aid-o/plans/${plan_id}.md" ]] && cand="${dir}/.aid-o/plans/${plan_id}.md"; }
+    [[ -n "$cand" ]] && { printf '%s\t%s\n' "$cand" "$origin"; return 0; }
   done
   return 1
 }
@@ -9760,6 +9757,7 @@ _pfsm_inv_plan_ids() {
   {
     for f in "${root}"/.aid-o/plans/P*.md; do
       [[ -e "$f" ]] || continue
+      aid_is_brief_file "$f" && continue   # a brief alone is not a plan (P109)
       id="$(basename "$f")"; id="${id%%-*}"
       [[ "$id" =~ ^P[0-9]+$ ]] && printf '%s\n' "$id"
     done

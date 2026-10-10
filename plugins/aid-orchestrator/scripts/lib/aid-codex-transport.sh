@@ -56,6 +56,9 @@ aid_codex_binary() {
 # A `codex exec` of a one-token prompt is the only way to see the usage limit,
 # so the answer is cached for ten minutes under <root>/.aid-o/work/codex-probe.json,
 # per model: a cached answer about another model is probed again.
+# The cache lives at the STATE ROOT (the primary checkout) whichever tree the
+# caller runs in (agents 7. 10. 2026, P013-12): a probe file written into a
+# plan's worktree dirtied it and tripped the contract validator (P109 Step 6).
 # AID_CODEX_PROBE_STUB=<file> replaces the whole probe with that file's content
 # (tests only; never a production path).
 aid_codex_probe() {
@@ -65,7 +68,9 @@ aid_codex_probe() {
     [[ -n "$out" ]] && printf '%s\n' "$result" > "$out"
     printf '%s\n' "$result"; return 0
   fi
-  root="${AID_PROJECT_ROOT:-$PWD}"; cache="${root}/.aid-o/work/codex-probe.json"
+  declare -F aid_state_root >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/aid-roots.sh"
+  root="$(aid_state_root "${AID_PROJECT_ROOT:-$PWD}" 2>/dev/null || echo "${AID_PROJECT_ROOT:-$PWD}")"
+  cache="${root}/.aid-o/work/codex-probe.json"
   now="$(date -u +%s)"
   if [[ -r "$cache" ]]; then
     age=$(( now - $(date -u -r "$cache" +%s 2>/dev/null || echo 0) ))

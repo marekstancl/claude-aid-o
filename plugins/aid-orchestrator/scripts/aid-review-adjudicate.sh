@@ -105,6 +105,12 @@ _evidence_item_ok() {
     [[ -n "$PLAN" ]] || return 1
     (( line >= 1 && line <= PLAN_LINES )) || return 1; return 0
   fi
+  # P109 Step 4: the PM's brief, when the packet carries it.
+  if [[ -z "$sha" && "$path" == zadani.md ]]; then
+    local zd; zd="$(dirname "${PLAN:-/nonexistent}")/zadani.md"
+    [[ -n "$PLAN" && -f "$zd" ]] || return 1
+    (( line >= 1 && line <= $(awk 'END { print NR }' "$zd") )) || return 1; return 0
+  fi
   # P107 Step 2: the author's answer to the critic, when the packet carries it.
   if [[ -z "$sha" && "$path" == critic-response.md ]]; then
     local resp; resp="$(dirname "${PLAN:-/nonexistent}")/critic-response.md"

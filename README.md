@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.114.0** (current) — zavření plánu rozhodnutím (dispute CP7), retry před collect, cancel dispatch startu, měření zavírání, neměřená kritéria nahlas, companion na pevném portu a vždy nad skutečným snímkem aplikace
+- **v2.115.0** (current) — plán drží zadání: zadání jako soubor, plán nese body doslova, povinný kritik, jedno kolo kontroly plánu se zadáním, oprava po kole i rozšíření rozsahu proti zadání
+- **v2.114.0** — zavření plánu rozhodnutím (dispute CP7), retry před collect, cancel dispatch startu, měření zavírání, neměřená kritéria nahlas, companion na pevném portu a vždy nad skutečným snímkem aplikace
 - **v2.113.0** — pět pastí z P010 zavřených mechanismem: close --at, retry bez bracketu, fix-check --also-steps, dvojí kopie plánu, lint v packetu CP1
 - **v2.112.0** — nezávislý kritik ve dvou úrovních, Sonnet na psaní kódu, úklid karet agentů, inventura promptů revizorů
 - **v2.111.0** — méně zastavení v automatickém režimu: stálý pokyn PM, plný revizor pro dlouhé zadání, upozornění na starou verzi pluginu

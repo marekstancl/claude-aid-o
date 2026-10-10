@@ -26,6 +26,8 @@ _AID_LIFECYCLE_SH_LOADED=1
 
 # Resolve the plugin's defaults dir (for orchestration.yaml) relative to this lib.
 _AID_LC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=aid-roots.sh
+source "${_AID_LC_LIB_DIR}/aid-roots.sh"   # aid_plan_files — a plan file, never its brief
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 aid_lifecycle_dir()   { echo "${1:-.}/.aid-lifecycle"; }
@@ -1397,7 +1399,7 @@ aid_lifecycle_plan_merge_bind() {
 aid_lifecycle_plan_file() {
   local plan_id="$1" root="${2:-.}"
   local hit
-  hit="$(ls "${root}/.aid-o/plans/${plan_id}"-*.md "${root}/.aid-o/plans/archive/${plan_id}"-*.md 2>/dev/null | head -1 || true)"
+  hit="$( { aid_plan_files "${root}/.aid-o/plans" "$plan_id"; aid_plan_files "${root}/.aid-o/plans/archive" "$plan_id"; } | head -1 || true)"
   [[ -n "$hit" ]] && echo "$hit"
   return 0   # never non-zero: a caller under `set -e` must not abort when absent
 }

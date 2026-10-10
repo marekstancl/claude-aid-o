@@ -459,7 +459,7 @@ else
   # Step 5 is its own dependency (the range includes 5), so the self-reference is
   # dropped, leaving global {4}, remapped to EPIC-local 1. The row shows "1".
   step2_row="$(grep "^| 2 |" "$epic_path_t13" 2>/dev/null || true)"
-  if echo "$step2_row" | grep -qE '\| 1 \| --- \|$'; then
+  if echo "$step2_row" | grep -qE '\| 1 \| --- \| — \|$'; then
     pass "range expansion + cross-phase strip + local remap + self-drop: global '4, 5' (self 5 dropped) -> local '1'"
   else
     fail "range expansion + cross-phase strip + local remap + self-drop: -> local '1'" "row: $step2_row"
@@ -702,9 +702,9 @@ else
   row2="$(grep "^| 2 |" "$epic_path_t21" 2>/dev/null || true)"
   row3="$(grep "^| 3 |" "$epic_path_t21" 2>/dev/null || true)"
   ok=1
-  echo "$row1" | grep -qE '\| --- \| --- \|$' || ok=0   # local 1: cross-phase dep stripped
-  echo "$row2" | grep -qE '\| 1 \| --- \|$'   || ok=0   # local 2 depends on local 1
-  echo "$row3" | grep -qE '\| 2 \| --- \|$'   || ok=0   # local 3 depends on local 2
+  echo "$row1" | grep -qE '\| --- \| --- \| — \|$' || ok=0   # local 1: cross-phase dep stripped
+  echo "$row2" | grep -qE '\| 1 \| --- \| — \|$'   || ok=0   # local 2 depends on local 1
+  echo "$row3" | grep -qE '\| 2 \| --- \| — \|$'   || ok=0   # local 3 depends on local 2
   # And guard: no dependency cell may reference a step number > 3
   if echo "$epic_path_t21" >/dev/null && grep -qE '^\| [0-9]+ \|.*\| [4-9][0-9]* \|' "$epic_path_t21"; then
     ok=0
@@ -868,6 +868,58 @@ else
   else
     fail "plain-bullet AC + role extraction" "ac_count=$ac_count (want >=4), frontend rows=$role_rows (want >=2)"
   fi
+fi
+
+# P109 Step 2: **Zavírá:** becomes the sixth column Closes. Defect caught: a
+# generator that never writes the column, leaving zavira [] on every step while
+# every downstream test stays green (CP1 round 2 blocker).
+run_test "Zavírá: a step closing AC1, AC3 writes Closes = AC1, AC3; a step with — writes —; the header has Closes"
+
+env_dir="$(make_test_env "zavira_closes")"
+output_dir="$env_dir/output"
+counter_yaml="$env_dir/epic-counter.yaml"
+plan_file="$env_dir/P701-closes.md"
+cat > "$plan_file" <<'EOF'
+---
+id: P701
+title: Closes plan
+---
+## Implementation Steps
+
+### Step 1: First thing
+Body text.
+
+**Acceptance Criteria**
+- the first thing works end to end
+
+**AID Role:** backend
+
+**Zavírá:** AC1, AC3
+
+### Step 2: Second thing
+Body text.
+
+**Acceptance Criteria**
+- the second thing works end to end
+
+**AID Role:** backend
+
+**Zavírá:** —
+EOF
+
+gen_epic="$("$SCRIPT_UNDER_TEST" \
+  --plan "$plan_file" --phase 1 --total 1 \
+  --epic-template "$TEMPLATES_DIR/epic.md" \
+  --output-dir "$output_dir" --counter-yaml "$counter_yaml" 2>/dev/null)"
+
+if [[ -z "$gen_epic" || ! -f "$gen_epic" ]]; then
+  fail "Closes column" "no EPIC generated"
+elif grep -qE '^\| # \| Role \| Objective \| Depends On \| Parallel Group \| Closes \|$' "$gen_epic" \
+   && grep -qE '^\| 1 \| backend \| .* \| AC1, AC3 \|$' "$gen_epic" \
+   && grep -qE '^\| 2 \| backend \| .* \| — \|$' "$gen_epic"; then
+  pass "Closes column carries AC1, AC3 and —"
+else
+  fail "Closes column" "$(grep -E '^\|' "$gen_epic" | head -5)"
 fi
 
 # ---------------------------------------------------------------------------

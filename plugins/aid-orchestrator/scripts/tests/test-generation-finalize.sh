@@ -68,6 +68,12 @@ touch "$tmp/src/api/__init__.py" "$tmp/src/frontend/App.tsx" "$tmp/CHANGELOG.md"
 git -C "$tmp" add src docs CHANGELOG.md
 git -C "$tmp" commit -qm "seed"
 
+# P109: a strict plan carries its brief, and the gate owes the critic even with
+# the review switched off — both through the one fixture library.
+# shellcheck source=lib/aid-test-plan-fixture.sh
+source "$ROOT/plugins/aid-orchestrator/scripts/tests/lib/aid-test-plan-fixture.sh"
+AID_PLUGIN_PATH="$ROOT/plugins/aid-orchestrator" aid_fixture_write_brief "$tmp" "$tmp/.aid-o/plans/P099.md" >/dev/null
+AID_PLUGIN_PATH="$ROOT/plugins/aid-orchestrator" aid_fixture_seed_critic_check "$tmp" "$tmp/.aid-o/plans/P099.md"
 (cd "$tmp" && source "$SCRIPTS/lib/aid-plan-summary.sh" \
   && aid_plan_summary_render "$tmp/.aid-o/plans/P099.md" "$tmp/.aid-o/work/evidence/P099/plan-summary-artifact.html") >/dev/null
 bash "$SCRIPTS/aid-generation-readiness.sh" "$tmp/.aid-o/plans/P099.md" --total 3 \

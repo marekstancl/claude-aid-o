@@ -50,6 +50,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 # shellcheck source=lib/aid-plan-graph.sh
 source "${SCRIPT_DIR}/lib/aid-plan-graph.sh"
+# shellcheck source=lib/aid-verification-pattern.sh
+source "${SCRIPT_DIR}/lib/aid-verification-pattern.sh"
 
 PLAN="" ROOT="" JSON_OUT="" SNAPSHOT="" FIXES="" QUIET=0 FORCE_MODE="" RUN_CMDS="${AID_PLAN_CHECK_RUN_CMDS:-0}"
 while [[ $# -gt 0 ]]; do
@@ -276,22 +278,15 @@ HAS_REPO=0; [[ -n "$ROOT" && -d "$ROOT" && -n "$REPO_FILES" ]] && HAS_REPO=1
 done
 
 # A6 — verification_pattern blocks: valid type, required keys, no placeholders.
-# (Read from the RAW plan: the blocks live inside fences.)
-VP_BLOCKS="$(awk '
-  /verification_pattern:/ { inside = 1; start = NR; blk = ""; next }
-  inside && /^[[:space:]]*```/ { print start "\t" blk; inside = 0; next }
-  inside { gsub(/^[[:space:]]+/, ""); blk = blk $0 "|" }
-' "$PLAN")"
-while IFS=$'\t' read -r ln blk; do
+# (Read from the RAW plan: the blocks live inside fences.) Extraction and rules
+# live in lib/aid-verification-pattern.sh — the same reader the runner uses.
+# VP_BLOCKS: "<line>\t<record>" per block; B3, B7 and B10 read the same records.
+VP_BLOCKS="$(_aid_vp_extract "$PLAN")"
+while IFS=$'\t' read -r ln rec; do
   [[ -n "${ln:-}" ]] || continue
-  typ="$(tr '|' '\n' <<< "$blk" | grep -E '^type:' | head -1 | sed -E 's/^type:[[:space:]]*//; s/["'\'']//g')"
-  case "$typ" in
-    cmd)            tr '|' '\n' <<< "$blk" | grep -qE '^cmd:' || _block "A6" "$PLAN:$ln" "verification_pattern type cmd without cmd:" ;;
-    must_not_exist) tr '|' '\n' <<< "$blk" | grep -qE '^file:' || _block "A6" "$PLAN:$ln" "verification_pattern type must_not_exist without file:" ;;
-    must_contain)   { tr '|' '\n' <<< "$blk" | grep -qE '^file:' && tr '|' '\n' <<< "$blk" | grep -qE '^regex:'; } || _block "A6" "$PLAN:$ln" "verification_pattern type must_contain needs file: and regex:" ;;
-    *)              _block "A6" "$PLAN:$ln" "verification_pattern type '${typ:-<missing>}' is not one of cmd | must_not_exist | must_contain" ;;
-  esac
-  grep -qE '<[A-Za-z_ -]+>|\{[A-Za-z_ -]+\}' <<< "$blk" && _block "A6" "$PLAN:$ln" "verification_pattern carries a placeholder (<...> or {...})"
+  while IFS= read -r msg; do
+    [[ -n "$msg" ]] && _block "A6" "$PLAN:$ln" "$msg"
+  done < <(_aid_vp_validate "$rec")
 done <<< "$VP_BLOCKS"
 
 # A7 — a Modify:/Rewrite: path that neither exists nor is created by an earlier step.
@@ -391,10 +386,10 @@ if (( HAS_REPO )); then
   done
 
   # B3 — a file the plan promises to remove must exist today.
-  while IFS=$'\t' read -r ln blk; do
+  while IFS=$'\t' read -r ln rec; do
     [[ -n "${ln:-}" ]] || continue
-    f="$(tr '|' '\n' <<< "$blk" | grep -E '^file:' | head -1 | sed -E 's/^file:[[:space:]]*//; s/["'\'']//g')"
-    tr '|' '\n' <<< "$blk" | grep -qE '^type:[[:space:]]*"?must_not_exist' || continue
+    IFS=$'\x1f' read -r _ _ typ _ f _ _ <<< "$rec"
+    [[ "$typ" == must_not_exist ]] || continue
     [[ -n "$f" ]] && ! _exists "$f" && _block "B3" "$PLAN:$ln" "must_not_exist \`${f}\` — the file is already absent, the criterion proves nothing"
   done <<< "$VP_BLOCKS"
   while IFS=$'\t' read -r ln p; do
@@ -470,18 +465,14 @@ if (( HAS_REPO )); then
   fi
 
   # B7 — a criterion that already holds on HEAD proves nothing about the plan.
-  while IFS=$'\t' read -r ln blk; do
+  while IFS=$'\t' read -r ln rec; do
     [[ -n "${ln:-}" ]] || continue
-    typ="$(tr '|' '\n' <<< "$blk" | grep -E '^type:' | head -1 | sed -E 's/^type:[[:space:]]*//; s/["'\'']//g')"
+    IFS=$'\x1f' read -r _ _ typ c f rx ex <<< "$rec"
     case "$typ" in
       must_contain)
-        f="$(tr '|' '\n' <<< "$blk" | grep -E '^file:' | head -1 | sed -E 's/^file:[[:space:]]*//; s/^"//; s/"$//')"
-        rx="$(tr '|' '\n' <<< "$blk" | grep -E '^regex:' | head -1 | sed -E 's/^regex:[[:space:]]*//; s/^"//; s/"$//')"
         [[ -n "$f" && -n "$rx" ]] && _exists "$f" && grep -qE -- "$rx" "$(_abs "$f")" 2>/dev/null && _warn "B7" "$PLAN:$ln" "must_contain already holds on HEAD (\`${f}\` matches /${rx}/) — this criterion passes before any work"
         ;;
       cmd)
-        c="$(tr '|' '\n' <<< "$blk" | grep -E '^cmd:' | head -1 | sed -E 's/^cmd:[[:space:]]*//; s/^"//; s/"$//')"
-        ex="$(tr '|' '\n' <<< "$blk" | grep -E '^expected_exit:' | head -1 | sed -E 's/^expected_exit:[[:space:]]*//')"
         [[ -n "$c" && "$RUN_CMDS" == "1" ]] || continue
         ( cd "$ROOT" && timeout 20 bash -c "$c" >/dev/null 2>&1 ); rc=$?
         [[ "$rc" == "${ex:-0}" ]] && _warn "B7" "$PLAN:$ln" "cmd criterion already exits ${rc} on HEAD — it passes before any work: ${c}"
@@ -505,7 +496,7 @@ if (( HAS_REPO )); then
   done
   # B10 — a file the plan removes that other files still import or reference
   # (ACTA: db/env.py imported a model the plan deleted; four checks found it).
-  for f in $(tr '|' '\n' <<< "$VP_BLOCKS" | grep -E '^file:' | sed -E 's/^file:[[:space:]]*//; s/["'"'"']//g' | sort -u); do
+  for f in $(cut -f2- <<< "$VP_BLOCKS" | awk -F $'\x1f' '$5 != "" {print $5}' | sort -u); do
     _exists "$f" || continue
     stem="${f##*/}"; stem="${stem%.*}"
     [[ ${#stem} -ge 4 ]] || continue

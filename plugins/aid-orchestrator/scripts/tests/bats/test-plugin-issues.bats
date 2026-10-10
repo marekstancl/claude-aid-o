@@ -145,3 +145,34 @@ EOF
   [[ "$output" == *"SessionStart aid_plugin_version_notice_handler"* ]]
   [[ "$output" == *"UserPromptSubmit aid_plugin_version_notice_handler"* ]]
 }
+
+# P109 Step 6 — defect: P108 §17, a freeze ending in a conflict on an
+# append-only diary.
+@test "gitattributes: run twice it leaves exactly one merge=union line and keeps the other lines" {
+  local r; r="$(mktemp -d)"
+  printf '*.png binary' > "$r/.gitattributes"          # no trailing newline
+  run aid_plugin_issues_gitattributes "$r"
+  [ "$status" -eq 0 ]; [ "$output" = "gitattributes: merge=union present" ]
+  run aid_plugin_issues_gitattributes "$r"
+  [ "$(grep -cxF '.aid-o/work/aid-plugin-issues.md merge=union' "$r/.gitattributes")" -eq 1 ]
+  grep -qxF '*.png binary' "$r/.gitattributes"
+  local fresh; fresh="$(mktemp -d)"
+  aid_plugin_issues_gitattributes "$fresh" >/dev/null
+  [ "$(cat "$fresh/.gitattributes")" = ".aid-o/work/aid-plugin-issues.md merge=union" ]
+  rm -rf "$r" "$fresh"
+}
+
+@test "gitattributes: the /aid-init recipe from a subdirectory and from a linked worktree writes the primary checkout's file" {
+  local r; r="$(mktemp -d)"
+  git -C "$r" init -q -b main && git -C "$r" -c user.email=t@t -c user.name=t commit -q --allow-empty -m seed
+  mkdir -p "$r/sub" "$r/.aid-o/work"
+  local recipe; recipe="$(awk '/aid_plugin_issues_gitattributes "\$\(aid_state_root\)"/ { sub(/^bash -c /, ""); print; exit }' "$AID_PLUGIN_PATH/commands/aid-init.md")"
+  [ -n "$recipe" ]
+  ( cd "$r/sub" && AID_PLUGIN_PATH="$AID_PLUGIN_PATH" bash -c "$(eval echo "$recipe")" >/dev/null )
+  [ -f "$r/.gitattributes" ]; [ ! -e "$r/sub/.gitattributes" ]
+  git -C "$r" worktree add -q "$r/wt" -b wtb
+  ( cd "$r/wt" && AID_PROJECT_ROOT= AID_PLUGIN_PATH="$AID_PLUGIN_PATH" bash -c "$(eval echo "$recipe")" >/dev/null )
+  [ ! -e "$r/wt/.gitattributes" ] || ! grep -q merge=union "$r/wt/.gitattributes"
+  [ "$(grep -c merge=union "$r/.gitattributes")" -eq 1 ]
+  git -C "$r" worktree remove --force "$r/wt"; rm -rf "$r"
+}

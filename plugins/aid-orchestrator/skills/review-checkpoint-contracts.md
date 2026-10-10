@@ -97,7 +97,8 @@ command, is the "Step review (CP2) and EPIC review (CP3)" section of
 ## CP1 Contract — Plan Review
 
 Plan review is not a verifier dispatch. Six reviewer roles answer from one
-template, in at most two rounds by default, and a deterministic adjudicator
+template, in one round by default (a second after a blocker and a passing
+fix-check, P109), and a deterministic adjudicator
 merges what survives the evidence rule:
 
 - the roles, their questions, the evidence rule and the answer shape:

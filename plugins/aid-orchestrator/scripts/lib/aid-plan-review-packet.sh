@@ -21,15 +21,22 @@ AID_PR_SCHEMA="${_AID_PR_PLUGIN}/defaults/schemas/review-finding.schema.json"
 AID_PR_TEMPLATE="${_AID_PR_PLUGIN}/defaults/prompts/review-prompt-v1.md"
 AID_PR_ROLES_SKILL="${_AID_PR_PLUGIN}/skills/plan-review-roles.md"
 # The evidence forms a plan reviewer may cite; the step checkpoints pass their own.
-AID_PR_EVIDENCE_FORMS='`path:line` or `path:first-last` inside the repository, `plan.md:line` for the plan itself (the line numbers of the plan in the packet below), `critic-response.md:line` for the author'"'"'s answer to the critic when the packet carries it, or `absent:path` for a file the plan presumes and the repository lacks; one citation that resolves is enough; citations only, separated by `;` — a word or a bracketed note after a line number drops the finding, so say what the line shows in `claim`'
+AID_PR_EVIDENCE_FORMS='`path:line` or `path:first-last` inside the repository, `plan.md:line` for the plan itself (the line numbers of the plan in the packet below), `zadani.md:line` for the PM'"'"'s brief when the packet carries it, `critic-response.md:line` for the author'"'"'s answer to the critic when the packet carries it, or `absent:path` for a file the plan presumes and the repository lacks; one citation that resolves is enough; citations only, separated by `;` — a word or a bracketed note after a line number drops the finding, so say what the line shows in `claim`'
 
 # shellcheck source=aid-standards-map.sh
 source "${_AID_PR_PLUGIN}/scripts/lib/aid-standards-map.sh"
+# shellcheck source=aid-plan-state.sh
+source "${_AID_PR_PLUGIN}/scripts/lib/aid-plan-state.sh"   # _plan_path_inside_root — the brief stays inside the project
+# shellcheck source=aid-critic.sh
+source "${_AID_PR_PLUGIN}/scripts/lib/aid-critic.sh"   # the one answer to "did the critic pass for this plan" (P109)
 
 # aid_plan_review_packet_build <plan> <project_root> <plan_check_json> <round_dir>
 #   Writes <round_dir>/packet/{plan.md, plan-check.json, standards.md,
-#   manifest.json}. Refuses (return 1) when the script report was made for other
-#   plan bytes: reviewers must review what the deterministic check saw.
+#   critic-response.md, manifest.json}. Refuses (return 1) when the script report
+#   was made for other plan bytes: reviewers must review what the deterministic
+#   check saw. Refuses (return 3) when no passed critic check binds to the plan
+#   (P109): round 1 to the plan it copies, every later round to round 1's
+#   `critic_check_sha` — a plan fixed after round 1 is not checked again.
 aid_plan_review_packet_build() {
   local plan="$1" root="$2" check="$3" dir="$4/packet" sha checked rc=0
   sha="$(sha256sum "$plan" | cut -d' ' -f1)"
@@ -40,6 +47,35 @@ aid_plan_review_packet_build() {
   fi
   mkdir -p "$dir" || return 1
   cp "$plan" "$dir/plan.md" && cp "$check" "$dir/plan-check.json" || return 1
+
+  # P109 Step 4: the PM's brief rides with the plan, so every reviewer can hold
+  # the plan to it point by point. A strict plan must name one; the path must
+  # stay inside the project.
+  local zrel zabs zroot zsha="" zver="" zfiles=""
+  rm -f "$dir/zadani.md" "$dir/zadani-note.txt"
+  zrel="$(_aid_fm_get "$plan" zadani)"
+  if [[ -z "$zrel" ]]; then
+    if grep -qE '^lifecycle_strict:[[:space:]]*true' "$plan"; then
+      echo "packet: plan names no brief (zadani:) — a strict plan needs one" >&2
+      echo "  next: write .aid-o/plans/<id>-zadani.md from defaults/templates/zadani.md and bind the plan to it (pipeline.md §When AID refuses: plan_names_no_brief)" >&2
+      return 1
+    fi
+    echo "no brief: this plan names no zadani: file (a legacy plan)" > "$dir/zadani-note.txt"
+    zfiles=" zadani-note.txt"
+  else
+    command -v realpath >/dev/null 2>&1 || { echo "packet: realpath required" >&2; return 1; }
+    zroot="$(realpath -m "$root")"
+    [[ "$zrel" == /* ]] && zabs="$(realpath -m "$zrel")" || zabs="$(realpath -m "${zroot}/${zrel}")"
+    if ! _plan_path_inside_root "$zabs" "$zroot"; then
+      echo "packet: zadani path escapes the project: ${zrel}" >&2
+      echo "  next: point zadani: at a file inside the project (.aid-o/plans/<id>-zadani.md) (pipeline.md §When AID refuses: zadani_path_escapes)" >&2
+      return 1
+    fi
+    [[ -f "$zabs" ]] || { echo "packet: the brief ${zrel} does not exist — aid-plan-lint.sh ${plan}" >&2; return 1; }
+    cp "$zabs" "$dir/zadani.md" || return 1
+    zsha="$(sha256sum "$dir/zadani.md" | cut -d' ' -f1)"; zver="$(_aid_fm_get "$dir/zadani.md" verze)"
+    zfiles=" zadani.md"
+  fi
   # The lint's findings (P009: a legacy plan touched a mapped standards area,
   # the lint said so as an advisory, and three CP1 rounds never saw the line).
   # Every finding line, whatever its tier; the verdict itself is not the packet's.
@@ -55,31 +91,42 @@ aid_plan_review_packet_build() {
     *) echo "a standards map is configured but could not be read" > "$dir/standards.md" ;;
   esac
 
-  # P107 Step 2: the author's answer to the critic rides in the packet ONLY
-  # when the critic check passed for THIS plan and the answer was not edited
-  # since — otherwise one line says why not, so the reviewers and the PM card
-  # see it. No gate: the PM chose "answered in writing, no refusal".
-  local cdir="${4%/cp1/*}/critic/plan" note="" files="plan.md plan-check.json standards.md lint.txt"
-  rm -f "$dir/critic-response.md" "$dir/critic-note.txt"
-  if [[ -f "$cdir/check.json" && -f "$cdir/critic-response.md" ]]; then
-    local passed rsha psha
-    passed="$(jq -r '.passed // false' "$cdir/check.json" 2>/dev/null)"
-    rsha="$(jq -r '.response_sha256 // ""' "$cdir/check.json" 2>/dev/null)"
-    psha="$(jq -r '.plan_sha256 // ""' "$cdir/check.json" 2>/dev/null)"
-    local psha_rev; psha_rev="$(jq -r '.plan_sha256_revised // ""' "$cdir/check.json" 2>/dev/null)"
-    if [[ "$passed" != "true" ]]; then note="critic: no passed check for this plan (the check failed)"
-    elif [[ "$rsha" != "$(sha256sum "$cdir/critic-response.md" | cut -d' ' -f1)" ]]; then note="critic: no passed check for this plan (response edited after the check)"
-    # the plan CP1 reads is the checked one, or the one revision the author rebound after accepting items
-    elif [[ "$psha" != "$sha" && "$psha_rev" != "$sha" ]]; then note="critic: no passed check for this plan (plan changed since the check — aid_critic_rebind after the revision, or a new critic run)"
-    else cp "$cdir/critic-response.md" "$dir/critic-response.md" && files="$files critic-response.md"; fi
+  # P109 Step 3: the critic is mandatory. The answer rides in the packet, and a
+  # plan without a passed check for the plan entering round 1 gets no round.
+  local files="plan.md plan-check.json standards.md lint.txt${zfiles}" round_n bind="" why legacy=0
+  round_n="${4##*/round-}"
+  rm -f "$dir/critic-response.md"
+  if [[ "$round_n" =~ ^[0-9]+$ ]] && (( round_n >= 2 )); then
+    local m1="${4%/round-*}/round-1/packet/manifest.json"
+    bind="$(jq -r '.critic_check_sha // ""' "$m1" 2>/dev/null)"
+    # the brief a later round reads is the brief round 1 read (P109): a changed
+    # one restarts the review, it never slips into a confirmation round
+    if [[ -n "$bind" ]] && [[ "$(jq -r '.zadani_sha256 // "none"' "$m1" 2>/dev/null)" != "${zsha:-none}" ]]; then
+      echo "packet: the brief changed after round 1 ($(jq -r '.zadani_sha256 // "none"' "$m1" | cut -c1-12) → $(printf '%s' "${zsha:-none}" | cut -c1-12)) — a confirmation round reads the brief round 1 read" >&2
+      echo "  next: aid-review-round.sh prepare ${plan} --round 1 --restart --reason \"<why the brief changed>\" (pipeline.md §When AID refuses: brief_changed_after_round)" >&2
+      return 1
+    fi
+    # round 1 prepared before 2.115.0 carries no binding: not checked backwards
+    [[ -n "$bind" ]] || legacy=1
   else
-    note="critic: no passed check for this plan (missing — the critic did not run before this review)"
+    bind="$sha"
   fi
-  [[ -n "$note" ]] && printf '%s\n' "$note" > "$dir/critic-note.txt"
+  local plan_id; plan_id="$(_aid_plan_id_of "$plan" 2>/dev/null)"
+  if (( ! legacy )); then
+    if ! why="$(aid_critic_verdict "$plan_id" "$bind" --root "$root")"; then
+      echo "prepare: critic required — no passed critic check for the plan ${bind:0:12}: ${why}" >&2
+      echo "  next: source lib/aid-critic.sh; aid_critic_prepare ${plan_id} --moment plan --plan ${plan}; aid_critic_dispatch ${plan_id} --moment plan; aid_critic_check ${plan_id} --moment plan (pipeline.md §When AID refuses: critic_required)" >&2
+      return 3
+    fi
+    cp "$(_aid_critic_dir "$(aid_state_root "$root" 2>/dev/null || printf '%s' "$root")" "$plan_id" plan)/critic-response.md" "$dir/critic-response.md" \
+      && files="$files critic-response.md"
+  fi
 
   (cd "$dir" && for f in $files; do
      jq -n --arg f "$f" --arg s "$(sha256sum "$f" | cut -d' ' -f1)" '{file: $f, sha256: $s}'
-   done) | jq -s --arg sha "$sha" '{plan_sha256: $sha, files: .}' > "$dir/manifest.json"
+   done) | jq -s --arg sha "$sha" --arg c "$bind" --argjson legacy "$legacy" --arg zs "$zsha" --arg zv "$zver" \
+     '{plan_sha256: $sha, files: .} + (if $legacy == 1 then {} else {critic_check_sha: $c} end)
+      + (if $zs == "" then {} else {zadani_sha256: $zs, zadani_verze: ($zv | tonumber? // $zv)} end)' > "$dir/manifest.json"
 }
 
 # aid_plan_review_citation_parts <evidence> — one normalised citation per line:
@@ -167,6 +214,14 @@ aid_plan_review_prompt_render() {
     echo "## Standards"
     cat "${dir}/packet/standards.md"
     echo
+    if [[ -f "${dir}/packet/zadani.md" ]]; then
+      echo "## zadani.md (the PM's brief; cite it as zadani.md:<line>)"
+      awk '{ printf "%5d  %s\n", NR, $0 }' "${dir}/packet/zadani.md"
+    else
+      echo "## zadani.md"
+      cat "${dir}/packet/zadani-note.txt" 2>/dev/null || echo "no brief in this packet"
+    fi
+    echo
     echo "## plan.md (also on disk: ${dir}/packet/plan.md; cite it as plan.md:<line>)"
     awk '{ printf "%5d  %s\n", NR, $0 }' "${dir}/packet/plan.md"
     echo
@@ -175,7 +230,7 @@ aid_plan_review_prompt_render() {
       awk '{ printf "%5d  %s\n", NR, $0 }' "${dir}/packet/critic-response.md"
     else
       echo "## critic-response.md"
-      cat "${dir}/packet/critic-note.txt" 2>/dev/null || echo "critic: no passed check for this plan"
+      echo "round 1 of this review was prepared before the critic became mandatory (2.115.0); no critic answer rides with it"
     fi
   } >> "$out"
 }

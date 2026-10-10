@@ -326,6 +326,8 @@ _mk_tracking_primary() {
   ( cd "$primary" && source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh" \
     && aid_plan_summary_render "$primary/.aid-o/plans/P099-multi.md" \
          "$primary/.aid-o/work/evidence/P099/plan-summary-artifact.html" ) >/dev/null 2>&1
+  # P109: the gate owes the critic even with the review off — in the state root
+  aid_fixture_seed_critic_check "$primary" "$primary/.aid-o/plans/P099-multi.md"
 
   run bash -c "cd '$TEST_TMPDIR/wt' && bash '$PIPELINE' --plan '$primary/.aid-o/plans/P099-multi.md' --queue-mode chain" 3>&-
   [ "$status" -eq 0 ]
@@ -416,6 +418,8 @@ _mk_tracking_primary() {
   _mk_primary "$TEST_TMPDIR/fnew"
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$TEST_TMPDIR/fold/.aid-o/plans/P099-multi.md"
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$TEST_TMPDIR/fnew/.aid-o/plans/P099-multi.md"
+  aid_fixture_seed_critic_check "$TEST_TMPDIR/fold" "$TEST_TMPDIR/fold/.aid-o/plans/P099-multi.md"
+  aid_fixture_seed_critic_check "$TEST_TMPDIR/fnew" "$TEST_TMPDIR/fnew/.aid-o/plans/P099-multi.md"
 
   _golden_seq "$OLD_S" "$TEST_TMPDIR/fold" | _golden_norm "$(_phys "$TEST_TMPDIR/fold")" > "$TEST_TMPDIR/out-old.txt"
   _golden_seq "$NEW_S" "$TEST_TMPDIR/fnew" | _golden_norm "$(_phys "$TEST_TMPDIR/fnew")" > "$TEST_TMPDIR/out-new.txt"

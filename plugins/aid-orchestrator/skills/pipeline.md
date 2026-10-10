@@ -278,7 +278,28 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `no_change_without_outputs` | the step committed nothing and declares no output that exists | work | commit the step's work, run the step check again | PM, to waive the step |
 | `plan_manifest_missing`, `plan_branch_mismatch` | the EPIC was not started through its plan | state | `aid-plan-fsm.sh epic-start <plan> <epic> --run-id <run>`, then `init` again | |
 | `missing_lenses`, `done_advance_preconditions` | a done-advance precondition failed (each prints its own line above) | work | correct what the lines name, run the same `done-advance` again | |
+| `critic_required` | `prepare --round 1` found no passed critic check for the plan it would copy (or a later round for round 1's `critic_check_sha`) | work | `aid_critic_prepare <id> --moment plan --plan <plan>`, `aid_critic_dispatch <id> --moment plan`, write `critic-response.md`, `aid_critic_check <id> --moment plan`, then prepare again | |
+| `no_passed_critic_check` | the CP1 gate found no passed critic check bound to the plan that entered round 1 (or, with no round, to the plan as it is) — HARD: `--force` does not waive it, a switched-off review does not either | work | the three critic commands of `critic_required`; a plan fixed after round 1 needs none (the binding is the plan that entered round 1) | |
+| `plan_names_no_brief` | the CP1 packet refused a `lifecycle_strict` plan that names no brief (`zadani:`) | work | write `.aid-o/plans/<id>-zadani.md` from `defaults/templates/zadani.md`, lint it (`aid-plan-lint.sh --zadani`), bind the plan (`zadani`, `zadani_verze`, `zadani_sha256`), prepare again | |
+| `zadani_path_escapes` | the plan's `zadani:` resolves outside the project | work | point `zadani:` at the brief inside the project, prepare again | |
+| `second_round_needs_open_blocker` | `prepare --round 2` past `rounds_default: 1` without a blocker found in round 1 and a passing `fix-check` | work | after a blocker: fix it, `fix-check`, prepare again; after majors only: fix them and `finalize` — no second round | PM, for an override.json |
+| `brief_changed_after_round` | the brief's sha differs from the one round 1 read (the gate), or a fix changed it (prepare round ≥ 2) | work | bump the brief's `verze`, update the plan's `zadani_verze` and `zadani_sha256`, rerun the critic, `prepare --round 1 --restart --reason "<why>"` | |
+| `fix_check_brief_point_changed` | a revision after a round changed, dropped or merged a brief point in the plan (the lint's brief pass, run by `fix-check`) | work | restore the point as the brief has it; a point that must change is a new brief version (§Restarting a plan review) | |
+| `fix_check_brief_version_not_raised` | the brief file changed since round 1 but its `verze` did not rise | work | raise `verze`, update the plan's `zadani_verze` and `zadani_sha256`, `fix-check` again | |
+| `restart_needs_brief_change` | `prepare --round 1 --restart` with neither `brief_changed` in the last fix-check nor the PM's words | work | change the brief (new `verze`) and `fix-check`, or ask the PM (`--pm "<…>"`) | PM |
+| `amend_scope_no_brief_point` | `amend-scope` on a brief-bound plan for a step that closes no brief point | work | a widening that serves no point is a scope change: bring it to the PM (rule 11) | PM |
+| `amend_scope_reason_names_no_point` | `amend-scope --reason` names no `AC<n>` the step closes (any step's at GATES) | work | say which point the file serves: `--reason "AC<n> needs <path> because …"` | |
 | `missing_verifier_output`, `missing_cp3_code_review` | retired in 2.99.0 (P094): the step and EPIC review rounds replaced the verifier files | — | the `review_round_*` rows | |
+
+#### Restarting a plan review
+
+A brief point changes only as a new version of the brief file (P109): raise its `verze`,
+update the plan's `zadani_verze` and `zadani_sha256`, run `fix-check` (it records
+`brief_changed: true`), rerun the critic from the brief file, then
+`aid-review-round.sh prepare <plan> --round 1 --restart --reason "<why the brief changed>"`.
+The live rounds move to `cp1/attempt-<k>/` with `attempt.json`; the gate and `prepare` read
+only the live ones. Without `brief_changed` a restart needs the PM's words (`--pm "<…>"`):
+it is never a way around a round with open blockers.
 
 ### FSM States
 
@@ -730,6 +751,13 @@ end. Prevention is cheaper than amendment — a plan lists its tests in `Files:`
 
 **After the last step** (a CP3 fix round, a gate fix) there is no current step: the widening
 lands on the LAST step, and the command says so ("widening step N (id)").
+
+**A plan bound to a brief** (`plan.json` carries `zadani_sha256`, P109): `--reason` must name
+the brief point the widening serves as `AC<n>` — one the current step closes (`steps[].zavira`,
+from the plan's `**Zavírá:**`), or, during GATES, any step's (a gate fix serves the whole plan).
+The point is recorded in the amendment as `zadani_point`; a plan without a brief records `null`.
+A step that closes no point refuses any widening: that is a scope change for the PM (rule 11).
+The trace says which point a widening was for; whether the change serves it is the step review's.
 
 **Another repository's file** (`/opt/eco/docs/...`) is a different case: amend-scope refuses an
 absolute path no step of the plan declares, because that is a PM decision. Such a file belongs in

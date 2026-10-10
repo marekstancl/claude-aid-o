@@ -1176,6 +1176,10 @@ _fsm_refusal_next() {
       next="write $(_fsm_cmd "$vf") (pipeline.md §Output verification), then: $inc" ;;
     binding_wrong_commit|binding_plan_step_hash_mismatch|incomplete_step_binding)
       next="rewrite the binding of $(_fsm_cmd "$vf") after the step commit (reviewed_commit = HEAD, plan_step_hash from the live plan.json — pipeline.md §Output verification), then: $inc" ;;
+    amend_scope_no_brief_point)
+      next="the widening serves no point this step closes: bring it to the PM as a scope change (skills/pipeline.md escalations, rule 11) — or, at GATES, name the point of any step" ;;
+    amend_scope_reason_names_no_point)
+      next="$(_fsm_cmd bash "$fsm" amend-scope "$sf" --add "<path>" --reason "<AC<n> of ${_ZP_SET:-the step points}> needs <path> because …")" ;;
     missing_lenses|done_advance_preconditions)
       next="correct what the lines above name, then run the same done-advance again: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-<from>}" "${to_phase:-<to>}" "$sf")" ;;
     *) return 1 ;;
@@ -3754,7 +3758,7 @@ cmd_init() {
         delivered-but-unreconciled) _unrec+=" ${_pid}";;
         legacy-unverifiable)        _legacy_n=$((_legacy_n+1));;
       esac
-    done < <(ls "$_plans_dir"/P*-*.md 2>/dev/null)
+    done < <(for _pf in "$_plans_dir"/P*-*.md; do [[ -f "$_pf" ]] && ! aid_is_brief_file "$_pf" && printf '%s\n' "$_pf"; done)   # a brief is not a second plan (P109)
     if [[ -n "$_unrec" ]]; then
       echo "ADVISORY: plan(s) delivered but not reconciled:${_unrec}. Reconcile with:" >&2
       echo "  aid-fsm.sh plan-reconcile <PNN> --apply" >&2
@@ -5427,6 +5431,33 @@ cmd_amend_scope() {
     EXECUTE|GATES) ;;
     *) die "amend-scope: the run is in ${state:-<unknown>} — scope is amended while a step is being worked (EXECUTE) or while a gate is asking for a file the step does not declare (GATES), never after the run is terminal" ;;
   esac
+  # P109 Step 5: a plan bound to a brief (plan.json carries zadani_sha256) widens
+  # only for a point of the brief, named in --reason: the current step's points
+  # in EXECUTE, any step's in GATES (a gate fix serves the whole plan). Checked
+  # BEFORE anything is retired or written. A plan without a brief traces null.
+  local _zp_plan _zp_cs _zp_total _zp_point="" _zp_set=""
+  _zp_plan="$(cd "$(dirname "$state_file")" && pwd)/plan.json"
+  if [[ -f "$_zp_plan" ]] && [[ -n "$(jq -r '.zadani_sha256 // ""' "$_zp_plan" 2>/dev/null)" ]]; then
+    _zp_cs=$(yaml_field "$state_file" current_step); _zp_cs="${_zp_cs:-0}"
+    _zp_total=$(jq '.steps | length' "$_zp_plan")
+    (( _zp_cs >= _zp_total && _zp_total > 0 )) && _zp_cs=$(( _zp_total - 1 ))
+    if [[ "$state" == GATES ]]; then
+      _zp_set="$(jq -r '[.steps[].zavira[]?] | unique | .[]' "$_zp_plan")"
+    else
+      _zp_set="$(jq -r --argjson i "$_zp_cs" '.steps[$i].zavira[]? // empty' "$_zp_plan")"
+    fi
+    if [[ -z "$_zp_set" ]]; then
+      echo "amend-scope: step $(( _zp_cs + 1 )) closes no point of the brief — a widening here is a scope change for the PM (rule 11)" >&2
+      _fsm_refusal_next amend_scope_no_brief_point || true
+      exit 1
+    fi
+    _zp_point="$(grep -Eow 'AC[0-9]+' <<< "$reason" | grep -xF -f <(printf '%s\n' "$_zp_set") | head -1 || true)"
+    if [[ -z "$_zp_point" ]]; then
+      echo "amend-scope: --reason must name the brief point this widening serves (one of: $(paste -sd, <<< "$_zp_set" | sed 's/,/, /g'))" >&2
+      _ZP_SET="$(paste -sd, <<< "$_zp_set")" _fsm_refusal_next amend_scope_reason_names_no_point || true
+      exit 1
+    fi
+  fi
   if [[ "$state" == "GATES" ]]; then
     # A widened scope during GATES invalidates what the gates already decided:
     # the tree they judged is not the tree that will exist. SAYING so was not
@@ -5514,8 +5545,8 @@ cmd_amend_scope() {
   local step_dir="${evidence_dir}/steps/${step_id}"; mkdir -p "$step_dir"
   local amend="${step_dir}/scope-amendment.json"
   local now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  local entry; entry="$(jq -n --arg at "$now" --argjson step "$cs" --arg sid "$step_id" --argjson paths "$add_json" --arg reason "$reason" \
-    '{at:$at, step:$step, step_id:$sid, paths:$paths, reason:$reason}')"
+  local entry; entry="$(jq -n --arg at "$now" --argjson step "$cs" --arg sid "$step_id" --argjson paths "$add_json" --arg reason "$reason" --arg zp "$_zp_point" \
+    '{at:$at, step:$step, step_id:$sid, paths:$paths, reason:$reason, zadani_point: (if $zp == "" then null else $zp end)}')"
   local tmp_amend tmp_plan; tmp_amend="$(mktemp)"; tmp_plan="$(mktemp)"
   if [[ -f "$amend" ]]; then
     jq --argjson e "$entry" '. + [$e]' "$amend" > "$tmp_amend" || { rm -f "$tmp_amend" "$tmp_plan"; die "amend-scope: ${amend} is not a JSON array — repair or remove it first; nothing was changed"; }
@@ -5545,7 +5576,7 @@ cmd_amend_scope() {
   # Known limit: the generation-time D5 gate (gates/aid-contract-validate.sh)
   # compares plan.json against the EPIC's scope blocks; it runs at generation,
   # not mid-EPIC, and a REGENERATION resets the amendment by design.
-  log_event "${evidence_dir}/timeline.jsonl" "scope_amended" step="$cs" step_id="$step_id" paths="$(jq -r 'join(",")' <<<"$add_json")" reason="$reason"
+  log_event "${evidence_dir}/timeline.jsonl" "scope_amended" step="$cs" step_id="$step_id" paths="$(jq -r 'join(",")' <<<"$add_json")" reason="$reason" zadani_point="${_zp_point:-null}"
   fsm_emit_audit_log "scope_amended" --evidence-dir "$evidence_dir" --step "$cs" --paths "$(jq -r 'join(",")' <<<"$add_json")" --reason "$reason" 2>/dev/null || true
   echo "amend-scope: step ${cs} (${step_id}) may now also change: $(jq -r 'join(", ")' <<<"$add_json") — recorded in ${amend#${evidence_dir}/} and the timeline; plan_json_hash re-stamped. Continue the step; the agent's return must list these files like any other."
 }

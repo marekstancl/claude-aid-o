@@ -1197,7 +1197,15 @@ ${_dropped_bullets}Every top-level Files bullet must read \`- <Create|Modify|Tes
     parallel_group="${parallel_group%%[[:space:]]*}"
   fi
 
-  steps_table_rows="${steps_table_rows}| ${step_counter} | ${role} | ${safe_objective} | ${depends_on_str} | ${parallel_group} |"$'\n'
+  # P109: the brief points this step closes (**Zavírá:**), the sixth column —
+  # the only road a step field has into plan.json. `—` when it names none.
+  safe_closes="—"
+  if [[ -n "$_pg_s" ]] && _closes="$(_aid_plan_step_field "$plan" "$_pg_s" "$_pg_e" "Zavírá")"; then
+    _closes="$( { grep -oE '\bAC[0-9]+\b' <<< "$_closes" || true; } | paste -sd, - | sed 's/,/, /g')"
+    [[ -n "$_closes" ]] && safe_closes="$_closes"
+  fi
+
+  steps_table_rows="${steps_table_rows}| ${step_counter} | ${role} | ${safe_objective} | ${depends_on_str} | ${parallel_group} | ${safe_closes} |"$'\n'
 done
 
 # ---------------------------------------------------------------------------
@@ -1483,8 +1491,8 @@ source_plan_sha256="sha256:$(sha256sum "$plan" | awk '{print $1}')"
 source_step_ids="$(IFS=,; echo "${phase_steps[*]}")"
 
 # Build the steps table
-steps_table_header="| # | Role | Objective | Depends On | Parallel Group |
-|---|------|-----------|------------|----------------|"
+steps_table_header="| # | Role | Objective | Depends On | Parallel Group | Closes |
+|---|------|-----------|------------|----------------|--------|"
 steps_table="${steps_table_header}
 ${steps_table_rows}"
 

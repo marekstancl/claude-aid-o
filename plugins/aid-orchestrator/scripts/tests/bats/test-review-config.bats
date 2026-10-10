@@ -31,8 +31,16 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
 @test "cp1: the plugin default loads with six roles and validates" {
   aid_review_config_load "$ROOT" plan_review "$PLAN_SKILL"
   [ "${#RC_ROLE[@]}" -eq 6 ]
-  [ "$RC_ROUNDS_DEFAULT" = 2 ] && [ "$RC_MIN_ANSWERS" = 4 ]
+  [ "$RC_ROUNDS_DEFAULT" = 1 ] && [ "$RC_MIN_ANSWERS" = 4 ]
+  [ "$RC_SECOND_ROUND_WHEN" = blocker_and_fix_check ]
   aid_review_config_validate
+}
+@test "cp1: second_round_when is a known key; a value other than blocker_and_fix_check is refused by name (P109)" {
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_config_load '$ROOT' plan_review '$PLAN_SKILL' 2>&1"
+  [[ "$output" != *"second_round_when"* ]]   # known: no unknown-key notice
+  _project '.review_checkpoints.plan_review.second_round_when = "sometimes"'
+  run _load_cp1
+  [ "$status" -eq 1 ]; [[ "$output" == *"second_round_when must be blocker_and_fix_check (got 'sometimes')"* ]]
 }
 @test "cp1: a seventh role is refused" {
   _project '.review_checkpoints.plan_review.reviewers += [{"role":"lens_l1","provider":"claude","model":"opus"}]'

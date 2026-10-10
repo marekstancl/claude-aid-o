@@ -99,6 +99,17 @@ project may legitimately carry its own hook logic outside the markers.
 | File | Written when |
 |------|--------------|
 | `.aid-o/config/integrations.yaml` | the Qdrant memory integration is detected as available — `/aid-init` writes only `memory.enabled: true` at creation |
+| `.gitattributes` | always, through `aid_plugin_issues_gitattributes <root>` (`scripts/lib/aid-plugin-issues.sh`): one line `.aid-o/work/aid-plugin-issues.md merge=union`, appended when absent, idempotent — the diary merges as a union at freeze instead of conflicting (P109) |
+
+Run it on every `/aid-init` (create and upgrade); it resolves the state root itself, so a
+worktree or a subdirectory writes the primary checkout's `.gitattributes`:
+
+```bash
+bash -c 'source "$AID_PLUGIN_PATH/scripts/lib/aid-plugin-issues.sh" && aid_plugin_issues_gitattributes "$(aid_state_root)"'
+```
+
+It prints `gitattributes: merge=union present`; an unwritable `.gitattributes` is a warning,
+never a stop.
 
 ### Where `.aid-o/` is created
 

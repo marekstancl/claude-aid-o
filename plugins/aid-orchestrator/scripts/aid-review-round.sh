@@ -12,6 +12,9 @@
 #   --checkpoint cp7 --evidence-dir <final run dir>     evidence/<plan>/<R-…-final-N>/cp7/
 #
 #   prepare … --round K [--only <role>] [--manual] [--stub]
+#   prepare --plan <plan> --round 1 --restart --reason "<≥ 20 chars>" [--pm "<the PM's words>"]
+#             a new review attempt after the brief changed (fix-check recorded
+#             brief_changed) or on the PM's word: the live rounds move to cp1/attempt-<k>/
 #       build the packet and one prompt per expected reviewer
 #   dispatch … --round K --provider codex --role <r>
 #       run one codex reviewer (claude reviewers are dispatched by the controller)
@@ -78,7 +81,7 @@ usage() { sed -n '4,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2;
 
 CMD="${1:-}"; [[ -n "$CMD" && "$CMD" != -h && "$CMD" != --help ]] || usage
 shift
-AT_SHA="" ALSO_STEPS="" CLOSE_HEAD=""
+AT_SHA="" ALSO_STEPS="" CLOSE_HEAD="" RESTART=0
 PLAN="" CHECKPOINT="" EVID="" STEP="" ROUND="" ROOT="" ONLY="" MANUAL=0 STUB=0 ROLE="" PROVIDER="" FINGERPRINT="" REASON="" ROUNDS="" PM_ANSWER="" FIXER="" CARD=""
 TOKENS=()
 while [[ $# -gt 0 ]]; do
@@ -102,6 +105,7 @@ while [[ $# -gt 0 ]]; do
     --finding-card) CARD="${2:-}"; shift 2 ;;
     --at)           AT_SHA="${2:-}"; shift 2 ;;        # close: the revision the reviewers saw (a fix committed before close)
     --also-steps)   ALSO_STEPS="${2:-}"; shift 2 ;;    # fix-check: steps edited as a consequence of the fix, with --reason
+    --restart)      RESTART=1; shift ;;                # prepare --round 1: a new review attempt (P109)
     --tokens)       shift; while [[ $# -gt 0 && "$1" != --* ]]; do TOKENS+=("$1"); shift; done ;;
     -*) echo "${CMD}: unknown option $1" >&2; exit 2 ;;
     *)  [[ -z "$PLAN" ]] && PLAN="$1"; shift ;;   # a bare path is the plan (CP1 compatibility)
@@ -315,6 +319,62 @@ _previous_attempt_round() {
 }
 _is_carried() { jq -e --arg r "$2" '(.carried_from // {}) | has($r)' "$1/round.json" >/dev/null 2>&1; }
 
+# _restart_attempt — prepare --round 1 --restart (P109): the only sanctioned way
+# to restart a plan review. Allowed when the live attempt's last fix-check
+# recorded `brief_changed: true` (the brief got a new verze) or with --pm (the
+# PM's words, the same standing as `override`) — never to sweep away a round
+# with open blockers. The live round-*, rounds.json, override.json move to
+# cp1/attempt-<k>/ with attempt.json; the gate and prepare read only the live ones.
+_restart_attempt() {
+  [[ "$MODE" == plan ]] || _die "--restart restarts a plan review (CP1)" 2
+  (( ROUND == 1 )) || _die "--restart prepares round 1 of a new attempt; use --round 1" 2
+  (( ! MANUAL )) || _die "--restart prepares the live round 1; --manual runs one reviewer outside the rounds — not both" 2
+  (( ${#REASON} >= 20 )) || _die "--restart needs --reason with at least 20 characters (why the review restarts)" 2
+  # Recovery: no live round (an earlier restart moved them and then stopped)
+  # — nothing to move, round 1 is prepared as usual.
+  if ! compgen -G "${BASE}/round-*" >/dev/null; then
+    compgen -G "${BASE}/attempt-*" >/dev/null || _die "nothing to restart: no round in ${BASE}"
+    echo "restart: no live round (an earlier restart moved them) — preparing round 1" >&2
+    return 0
+  fi
+  local last="" d n fd
+  for d in "${BASE}"/round-*/; do
+    n="${d%/}"; n="${n##*-}"; [[ "$n" =~ ^[0-9]+$ && -f "${d}fix-diff.json" ]] && { [[ -z "$last" ]] || (( n > last )); } && last="$n"
+  done
+  fd="${BASE}/round-${last:-0}/fix-diff.json"
+  if [[ "$(jq -r '.brief_changed // false' "$fd" 2>/dev/null)" != true ]]; then
+    [[ "$(tr -d '[:space:]' <<< "$PM_ANSWER" | wc -c)" -ge 10 ]] \
+      || _die "--restart needs a changed brief (the last fix-check records brief_changed) or the PM's words (--pm \"<what the PM said>\", at least 10 characters)
+  next: bump the brief's verze, update the plan's zadani_verze and zadani_sha256, run fix-check; or ask the PM (pipeline.md §When AID refuses: restart_needs_brief_change)"
+  fi
+  # Nothing moves until round 1 of the new attempt can be prepared: the critic
+  # bound to the plan as it is now, and the plan check made for these bytes.
+  local why chk="$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/.aid-o/work/evidence/${PLAN_ID}/plan-check.json"
+  [[ "$(jq -r '.plan_sha256 // ""' "$chk" 2>/dev/null)" == "$(sha256sum "$PLAN" | cut -d' ' -f1)" ]] \
+    || _die "restart: plan-check.json was not made for the plan as it is — run aid-plan-check.sh ${PLAN} --json ${chk} first; nothing was moved"
+  why="$(aid_critic_verdict "$PLAN_ID" "$(sha256sum "$PLAN" | cut -d' ' -f1)" --root "$ROOT")" \
+    || _die "restart: no passed critic check for the plan as it is (${why}) — rerun the critic first; nothing was moved
+  next: aid_critic_prepare ${PLAN_ID} --moment plan --plan ${PLAN}; aid_critic_dispatch ${PLAN_ID} --moment plan; aid_critic_check ${PLAN_ID} --moment plan (pipeline.md §When AID refuses: critic_required)"
+  # attempt-<k> claimed atomically (mkdir without -p), attempt.json written
+  # before anything moves, so an archive is never without its record.
+  local k=1; while ! mkdir "${BASE}/attempt-${k}" 2>/dev/null; do k=$((k + 1)); (( k < 1000 )) || _die "cannot claim an attempt directory in ${BASE}"; done
+  local dest="${BASE}/attempt-${k}" before after zrel
+  before="$(jq -r '.zadani_sha256 // ""' "${BASE}/round-1/packet/manifest.json" 2>/dev/null)"
+  zrel="$(_aid_fm_get "$PLAN" zadani)"; after=""
+  if [[ -n "$zrel" ]]; then
+    [[ "$zrel" == /* ]] || zrel="$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/${zrel}"
+    [[ -f "$zrel" ]] && after="$(sha256sum "$zrel" | cut -d' ' -f1)"
+  fi
+  jq -n --argjson k "$k" --arg r "$REASON" --arg pm "$PM_ANSWER" --arg b "$before" --arg a "$after" --arg at "$(_now)" \
+    '{k: $k, reason: $r, zadani_sha256_before: $b, zadani_sha256_after: $a, moved_at: $at}
+     + (if $pm == "" then {} else {pm: $pm} end)' > "${dest}/attempt.json" \
+    || { rmdir "$dest" 2>/dev/null; _die "restart: attempt.json could not be written; nothing was moved"; }
+  mv "${BASE}"/round-* "$dest/" || _die "could not move the live rounds to ${dest} (attempt.json is there; move the rest by hand)"
+  local f; for f in rounds.json override.json; do [[ -e "${BASE}/${f}" ]] && mv "${BASE}/${f}" "$dest/"; done
+  _log plan_review_restarted attempt="$k" reason="$REASON"
+  echo "restart: the live rounds moved to ${dest}; preparing round 1 of attempt $((k + 1))"
+}
+
 cmd_prepare() {
   _need_round
   # The PM's switch (review_checkpoints.enabled / the checkpoint's own key) is
@@ -334,6 +394,7 @@ cmd_prepare() {
     [[ "$verdict" == review || "$verdict" == "review+security" ]] || _die "verdict is ${verdict}; no round (rounds.json was written by the step check)"
   fi
 
+  (( RESTART )) && _restart_attempt
   if (( MANUAL )); then
     (( ROUND == 1 )) || _die "--manual runs one reviewer on the change as it is; use --round 1" 2
     dir="${BASE}/manual/$(date -u +%Y%m%dT%H%M%SZ)"
@@ -358,9 +419,22 @@ cmd_prepare() {
       fi
     fi
     local standing=false
-    if (( ROUND > $(_base_rounds) && ! delta )); then
-      (( ROUND <= $(_allowed_rounds) )) \
-        || _die "round ${ROUND} exceeds the round budget ($(_base_rounds)$( (( $(_allowed_rounds) > $(_base_rounds) )) && echo " + 2 under the PM's standing instruction")); it needs the PM's override.json (aid-review-round.sh override) or a PM decision"
+    # P109: the one second round the plan-review policy allows without an
+    # override (round 1 found a blocker, its fix passed fix-check) is in budget.
+    if (( ROUND > $(_base_rounds) && ! delta )) && [[ "$MODE" == plan ]] && aid_review_second_round_allowed "$BASE" "$ROUND"; then
+      :
+    elif (( ROUND > $(_base_rounds) && ! delta )); then
+      if (( ROUND > $(_allowed_rounds) )); then
+        # the fix itself is what failed: say that, not the rule
+        local pfd="${BASE}/round-$((ROUND - 1))/fix-diff.json"
+        if [[ "$MODE" == plan && -f "$pfd" && "$(jq -r '.pass' "$pfd")" != true ]]; then
+          _die "the fix of round $((ROUND - 1)) did not pass fix-check: $(jq -c '.added_outside_fixes' "$pfd")"
+        fi
+        [[ "$MODE" == plan && -n "${RC_SECOND_ROUND_WHEN:-}" ]] && (( ROUND == RC_ROUNDS_DEFAULT + 1 )) \
+          && _die "round ${ROUND} needs a blocker found in round $((ROUND - 1)) and its fix passed by fix-check — or the PM's override.json (aid-review-round.sh override)
+  next: bash aid-review-round.sh fix-check ${PLAN} --round $((ROUND - 1)) (after fixing the blocker), or the PM's override (pipeline.md §When AID refuses: second_round_needs_open_blocker)"
+        _die "round ${ROUND} exceeds the round budget ($(_base_rounds)$( (( $(_allowed_rounds) > $(_base_rounds) )) && echo " + 2 under the PM's standing instruction")); it needs the PM's override.json (aid-review-round.sh override) or a PM decision"
+      fi
       standing=true
       # A fix-and-confirm round must make progress: when the previous round
       # re-opened exactly what the one before it had open, the chain is not
@@ -395,7 +469,10 @@ cmd_prepare() {
   else
     tree_root="$ROOT"; twin_plan="$(yq -r '.plan_path // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"; [[ "$twin_plan" == null ]] && twin_plan=""
   fi
-  for twin_plan in "$twin_plan" ".aid-o/work/aid-plugin-issues.md"; do
+  # The plan only: the diary (.aid-o/work/aid-plugin-issues.md) resolves to the
+  # state root already, and comparing its two copies stopped review rounds over
+  # an append-only log (agents P013-3/5, 2026-10-07; P109 Step 6).
+  for twin_plan in "$twin_plan"; do
     [[ -n "$twin_plan" ]] || continue
     twin_rc=0; aid_dotaid_twin_check "$state_root" "$tree_root" "$twin_plan" 2>/dev/null || twin_rc=$?
     (( twin_rc == 3 )) && _die "round ${ROUND} not prepared: $(aid_dotaid_twin_check "$state_root" "$tree_root" "$twin_plan" 2>&1)"
@@ -406,7 +483,8 @@ cmd_prepare() {
   trap 'rm -rf "$dir"' EXIT
   local roles=() role
   if [[ "$MODE" == plan ]]; then
-    aid_plan_review_packet_build "$PLAN" "$ROOT" "$check" "$dir" || exit 1
+    # exit 3 = critic_required (P109): the caller tells a missing critic from a broken packet
+    aid_plan_review_packet_build "$PLAN" "$ROOT" "$check" "$dir" || exit $?
     sha="$(jq -r .plan_sha256 "${dir}/packet/manifest.json")"
     mapfile -t roles < <(_expected_roles "$ROUND" | grep -v '^$')
     local min; min="$(aid_review_config_floor "${#roles[@]}")"
@@ -1123,8 +1201,31 @@ cmd_fix_check() {
   [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
   _closed "$dir" || _die "round ${ROUND} is not closed; run close first"
   local out="${dir}/fix-diff.json"
+  # P109: a revision passes the brief pass the lint runs (one implementation): a
+  # brief point changes in the plan only through a new version of the brief.
+  local zmsg zrc=0
+  zmsg="$("${SCRIPT_DIR}/aid-plan-lint.sh" "$PLAN" --only zadani 2>&1 >/dev/null)" || zrc=$?
+  if (( zrc != 0 )); then
+    _die "$(grep -m3 'ERROR' <<< "$zmsg" | sed 's/^.*ERROR //') — a brief point changes only through a new version of the brief file (verze +1, zadani_sha256 updated), never in the plan alone
+  next: restore the point in ## Acceptance Criteria as the brief has it, or change the brief (verze +1) and the plan's zadani_verze and zadani_sha256, then fix-check again (pipeline.md §When AID refuses: fix_check_brief_point_changed)"
+  fi
+  local zrel zsha="" zver="" m1="${BASE}/round-1/packet/manifest.json" r1sha r1ver changed=false
+  zrel="$(_aid_fm_get "$PLAN" zadani)"
+  if [[ -n "$zrel" ]]; then
+    [[ "$zrel" == /* ]] || zrel="$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/${zrel}"
+    zsha="$(sha256sum "$zrel" | cut -d' ' -f1)"; zver="$(_aid_fm_get "$zrel" verze)"
+  fi
+  r1sha="$(jq -r '.zadani_sha256 // ""' "$m1" 2>/dev/null)"; r1ver="$(jq -r '.zadani_verze // 0' "$m1" 2>/dev/null)"
+  if [[ -n "$r1sha" && "$zsha" != "$r1sha" ]]; then
+    [[ "$zver" =~ ^[0-9]+$ && "$r1ver" =~ ^[0-9]+$ ]] && (( zver > r1ver )) \
+      || _die "the brief changed since round 1 but its verze did not rise (${r1ver} → ${zver:-none}) — a changed brief is a new version
+  next: raise verze in the brief, update the plan's zadani_verze and zadani_sha256, then fix-check again (pipeline.md §When AID refuses: fix_check_brief_version_not_raised)"
+    changed=true
+  fi
   _check_fix "$dir" "$out"
-  jq '.pass = (.added_outside_fixes | length == 0)' "$out" > "${out}.tmp" && mv "${out}.tmp" "$out"
+  jq --arg zs "$zsha" --arg zv "$zver" --argjson ch "$changed" \
+     '(.pass = (.added_outside_fixes | length == 0) | .zadani_pass = true | .brief_changed = $ch)
+      + (if $zs == "" then {} else {zadani_sha256: $zs, zadani_verze: ($zv | tonumber? // $zv)} end)' "$out" > "${out}.tmp" && mv "${out}.tmp" "$out"
   _log fix_check round="$ROUND" pass="$(jq -r .pass "$out")" also_steps="${ALSO_STEPS:-none}" also_reason="${REASON:-}"
   if [[ "$(jq -r .pass "$out")" == true ]]; then
     echo "fix-check round ${ROUND}: pass; steps changed: $(jq -r '.steps_changed | map(tostring) | join(",") | if . == "" then "none" else . end' "$out")$( [[ -n "$ALSO_STEPS" ]] && echo "; also edited (recorded): step(s) ${ALSO_STEPS} — ${REASON}")"
