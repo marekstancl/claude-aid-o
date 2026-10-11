@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+- **Kontrola textů čte i odpovědi v zavřených `<details>`** (klient-Codex, Coufal 11. 10. 2026): subjekt textů (`aid-ui-verify.sh --copy-subject`) před čtením otevře každé `details`, takže revizor nevidí „deset otázok, žiadne odpovede“ a nestrhne stránku za text, který nečetl. Test v `test-aid-ui-verify.bats`.
+- **Měření webu pro design standard čte stav najetí a zaměření až po doběhnutí přechodu** (`aid-ui-tool.sh measure`): dřív snímek uprostřed 0,5 s přechodu barvy dal odstín, který žádný token nemá, a `aid-ui-design-standard.py check` ho hlásil jako MISSING. Test „measure reads a hover state at the end of its transition“.
+
 ### Changed
 - **P106: studio /aid-ui jako průběh stavby.** Stránka studia ukazuje běh jako šest kroků pod sebou (Druh webu, Zadání a obsah, Vzory, Vzhled, Stavba, Kontrola). U každého je výsledek jednou větou a kdo rozhodl (PM, AI, oba). Detail otevře rozhodnutí kroku a karty, ze kterých PM vybíral, a čekající otázka stojí uvnitř svého kroku. Vzhled (paleta a karty Impeccable) zůstal ze schválené verze; logika odvození je ve vlastním bloku bez DOM a testuje se pod node.
 - **Každá otázka nese `outcome`** (výsledek jednou větou, nejvýš 120 znaků, jinak 422). Server ho s `by: "pm"` zapisuje do `history.jsonl` pod zámkem souboru. Poškozený řádek historie se přeskočí a nevymaže ji celou, `/state` hlásí `history_lines`.

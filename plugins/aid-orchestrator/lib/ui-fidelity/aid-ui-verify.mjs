@@ -612,6 +612,9 @@ async function copyOf(browser, url) {
     const page = await ctx.newPage();
     await page.goto(url, { waitUntil: 'load', timeout: 30000 });
     await page.waitForTimeout(300);
+    // a closed <details> hides its answer, and a reviewer that sees ten questions and no answers fails the
+    // page for text it never read (Coufal 11. 10. 2026): open every one before reading
+    await page.evaluate(() => document.querySelectorAll('details').forEach(d => { d.open = true; }));
     const r = await page.evaluate(COPY_JS);
     lang = lang || r.lang;
     runs.push(r.blocks);

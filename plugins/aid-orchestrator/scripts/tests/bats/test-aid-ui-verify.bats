@@ -305,6 +305,11 @@ YML
   # a spam trap pushed off the page is not copy; a clipped screen-reader text inside the page is
   ! grep -q "PAST NA SPAM\|PAST NAHORE" "$T/subj1.json"
   jq -e '[.pages["index.html"].blocks[] | select(.text == "Jen pro čtečku")] | length == 1' "$T/subj1.json" >/dev/null
+  # the answer inside a closed <details> is copy (Coufal 11. 10. 2026: ten questions, no answers, page failed)
+  sed -i 's|</main>|<details><summary>Bolí to?</summary><p>Odpověď schovaná v details</p></details></main>|' "$SITE/index.html"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  bash "$SC/aid-ui-verify.sh" "$PROJ" --copy-subject "$T/subj1.json" >/dev/null
+  jq -e '[.pages["index.html"].blocks[] | select(.text == "Odpověď schovaná v details")] | length == 1' "$T/subj1.json" >/dev/null
   jq -e '[.pages["index.html"].blocks[].kind] | index("title") != null and index("h1") != null' "$T/subj1.json" >/dev/null
   [ ! -e "$RES" ]   # the subject mode writes no gate result
   # a CSS-only change keeps every page hash
@@ -390,6 +395,16 @@ YML
   [ "$(st http_200 gone.html)" == fail ]
   [ "$(st http_200 index.html)" == pass ]
   jq -e '.rows[] | select(.page == "gone.html") | .detail | contains("HTTP 404")' "$RES" >/dev/null
+}
+
+@test "measure reads a hover state at the end of its transition, not half-way (Coufal 11. 10. 2026)" {
+  cp -r "$FX/fixed/." "$SITE/"
+  sed -i 's|</main>|<a class="btn pomalu" href="/x">Pomalu</a><style>.pomalu{display:inline-block;padding:12px;background:#183870;color:#fff;transition:background-color 3s linear}.pomalu:hover{background:#122a55}</style></main>|' "$SITE/index.html"
+  AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" >/dev/null
+  run bash "$SC/aid-ui-tool.sh" measure "http://127.0.0.1:39927" "$T/measure.json" /
+  AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" stop preview >/dev/null
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '[.controls[] | select(.examples | index("Pomalu")) | .states.hover] | length == 1 and (.[0] | startswith("rgb(18, 42, 85)"))' "$T/measure.json" >/dev/null
 }
 
 @test "preview runs while the brand page is served; a port held by another process is named" {

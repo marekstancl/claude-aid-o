@@ -88,7 +88,9 @@ for (const [w, h] of [[390, 844], [1440, 900]]) {
       g.pages.add(p); if (g.examples.size < 4 && c.text) g.examples.add(c.text);
       g.height[w] = Math.max(g.height[w] || 0, c.height); g.font[w] = g.font[w] || c.font;
       if (!g.states && w === 1440) {   // one element per role: hover, focus, disabled
-        const sel = `[data-aid-measure="${c.tag}"]`, look = () => page.$eval(sel, e => { const s = getComputedStyle(e);
+        // a state is read at the END of its transition (finish() every running one), or a 0.5 s colour
+        // change is measured half-way and the standard shows a colour no token has (Coufal 11. 10. 2026)
+        const sel = `[data-aid-measure="${c.tag}"]`, look = () => page.$eval(sel, e => { e.getAnimations().forEach(a => { try { a.finish(); } catch {} }); const s = getComputedStyle(e);
           return `${s.backgroundColor} / ${s.color}${s.outlineStyle !== 'none' && s.outlineWidth !== '0px' ? ` / obrys ${s.outlineWidth} ${s.outlineColor}` : ''}`; });
         g.states = {};
         try { await page.hover(sel, { timeout: 2000 }); g.states.hover = await look(); } catch { g.states.hover = '-'; }
