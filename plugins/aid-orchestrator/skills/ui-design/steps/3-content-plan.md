@@ -78,3 +78,5 @@ schválený verdikt textů (`confirm-content`, krok 7 bod 1b) nebo odpověď na 
 Odpověď chybí → čekání na pozadí podle `SKILL.md` „Jak se ptá PM", bod 4. Skript odmítne → `ERROR:` PM.
 
 **Last Updated:** 2026-10-03
+
+**Zdroj textu položky.** Každá položka, kterou píše studio (`owner: agent`), nese `source: docs/content/copy.json`; `set content-plan` ho doplní sám, když chybí. Podle něj `confirm-content` (krok 7) zapisuje schválení textů klientem k položkám - položka bez zdroje se schválením textů nepotvrdí (Coufal 11. 10. 2026: plán bez zdrojů potvrdil 0 z 35 položek a odpověď propadla).

@@ -936,7 +936,11 @@ case "$VERB" in
         jq -e "$shape" >/dev/null <<<"$2" || usage "set $1: not the $key shape of the Data Model: $2"
         if [[ "$key" == variant ]]; then tgt="$(choice_target "$2")" || exit 1; else tgt="$(json_sha "$2")"; fi
         take_answer "$key" "$tgt"
-        jq_write --arg k "$key" --arg q "$ANSWER" --argjson v "$2" '.[$k] = $v | .consumed += [$q] | .finished = null'
+        # a content item the studio writes (owner agent, not deferred) gets its text source when the plan names none:
+        # confirm-content confirms texts by that source (Coufal 11. 10. 2026: a plan without sources confirmed 0 items)
+        v="$2"
+        [[ "$key" == content_plan ]] && v="$(jq -c '[.[] | if (.owner == "agent" and .status != "deferred_by_pm" and ((.source // "") == "")) then . + {source: "docs/content/copy.json"} else . end]' <<<"$2")"
+        jq_write --arg k "$key" --arg q "$ANSWER" --argjson v "$v" '.[$k] = $v | .consumed += [$q] | .finished = null'
         ;;
       *) usage "set cannot write '$1' (only: product_type refs options variant structure content-plan)" ;;
     esac
@@ -990,7 +994,10 @@ case "$VERB" in
       [[ "$(jq -r --arg q "$ANSWER" '.answers[$q].decision // ""' "$STATE")" == approve ]] ||
         die "confirm-content refused: the copy verdict $ANSWER is not an approve (texts accepted as they are)"
       take_answer copy_verdict "copy@$(sha256sum "$sub" | cut -d' ' -f1)"
+      # a text item names docs/content/copy.json as its source (step 3 writes it); a plan without any such item
+      # cannot be confirmed as a whole, and the verdict is NOT consumed for nothing (Coufal 11. 10. 2026: 0 of 35)
       n="$(jq '[.content_plan[]? | select(.source == "docs/content/copy.json" and IN(.status; "draft", "missing"))] | length' "$STATE")"
+      (( n > 0 )) || die "confirm-content refused: no draft or missing item with source docs/content/copy.json (step 3 sets it on every text the studio writes); nothing consumed"
       jq_write --arg q "$ANSWER" '.content_plan |= map(if .source == "docs/content/copy.json" and IN(.status; "draft", "missing")
         then .status = "confirmed_client" | .answer = $q else . end) | .consumed += [$q]'
       echo "CONFIRMED: $n text items"
