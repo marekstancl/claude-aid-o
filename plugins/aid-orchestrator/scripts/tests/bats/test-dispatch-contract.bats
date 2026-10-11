@@ -227,10 +227,16 @@ _return() {
 
 @test "contract: a repo_commits range that does not resolve in its repository is refused, naming it" {
   git init -q "$TEST_DIR/other"; git -C "$TEST_DIR/other" -c user.email=t@t -c user.name=t commit -q --allow-empty -m a
-  local a; a="$(git -C "$TEST_DIR/other" rev-parse HEAD)"
-  _return "{repo_commits: [{repo: \"$TEST_DIR/other\", range: \"$a..$a\"}]}"
+  local a b; a="$(git -C "$TEST_DIR/other" rev-parse HEAD)"
+  git -C "$TEST_DIR/other" -c user.email=t@t -c user.name=t commit -q --allow-empty -m b; b="$(git -C "$TEST_DIR/other" rev-parse HEAD)"
+  _return "{repo_commits: [{repo: \"$TEST_DIR/other\", range: \"$a..$b\"}]}"
   run aid_dispatch_contract_validate contract.json .aid-o/return.json .
   [ "$status" -eq 0 ]
+  # P111: an empty range (base = head) names no commits and is refused, so a
+  # foreign change cannot vanish from the step's review
+  _return "{repo_commits: [{repo: \"$TEST_DIR/other\", range: \"$a..$a\"}]}"
+  run aid_dispatch_contract_validate contract.json .aid-o/return.json .
+  [ "$status" -eq 1 ]
   _return "{repo_commits: [{repo: \"$TEST_DIR/other\", range: \"$a..0123456789abcdef\"}]}"
   run aid_dispatch_contract_validate contract.json .aid-o/return.json .
   [ "$status" -eq 1 ]; [[ "$output" == *"$a..0123456789abcdef in $TEST_DIR/other, and it is not"* ]]
