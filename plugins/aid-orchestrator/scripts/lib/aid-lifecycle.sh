@@ -988,10 +988,16 @@ aid_lifecycle_ensure_manifest() {
 # gitignored evidence: the EPIC round index (cp3/rounds.json), else the
 # audit-report.json an EPIC closed before 2.101.0 left behind. Empty if neither.
 _aid_lc_epic_review_file() {
+  local cp2=""
+  # the CP2 indexes stand in for the EPIC review ONLY while CP3 is switched off
+  # (2.116.0); a project that keeps CP3 and has no cp3 record stays unverifiable,
+  # never accepted from its step rounds (fail-closed; 2.116.1)
+  declare -F aid_review_switched_off >/dev/null || source "${_AID_LC_LIB_DIR}/aid-review-config.sh"
+  aid_review_switched_off "${2:-.}" cp3_integration_review >/dev/null 2>&1 \
+    && cp2="$(ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp2/step-*/rounds.json 2>/dev/null)"
   { ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp3/rounds.json 2>/dev/null \
     || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null \
-    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp2/step-*/rounds.json 2>/dev/null || true; } | sort -V | tail -1
-  # the latest run; with CP3 off (2.116.0) the last step's CP2 index is the review record
+    || { [[ -n "$cp2" ]] && printf '%s\n' "$cp2"; } || true; } | sort -V | tail -1   # the latest run
 }
 
 # _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the review

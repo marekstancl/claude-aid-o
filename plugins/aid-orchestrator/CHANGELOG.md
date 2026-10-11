@@ -3,6 +3,13 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.116.1] — 2026-10-11
+
+Oprava po vydání 2.116.0 (nález automatické bezpečnostní kontroly pushe).
+
+### Fixed
+- **Revize kroků zastupují revizi EPICu jen při vypnutém CP3** — lifecycle (`_aid_lc_epic_review_file`) v 2.116.0 brala poslední kolo revize kroku jako záznam revize EPICu i u projektu, který CP3 zapnuté nechal a revizí EPICu neprošel; doručení takového EPICu pak prošlo jako zrevidované. Teď u zapnutého CP3 bez záznamu cp3 zůstává doručení neověřitelné, jako před 2.116.0.
+
 ## [2.116.0] — 2026-10-10
 
 Levnější běh (P110, vydání 2 roadmapy po experimentu P014). Krok si koupí revizi podle druhu změny, body hotovo se spouští po každém kroku a v uzávěru izolovaně, uzávěr čte zadání se dvěma rolemi, brány musí doložit, že pustily testy projektu, CP3 je vypnuté jako výchozí a uzávěr vyčíslí, co stál běh a plán. V P014 šlo 54 min na revize kroků a EPICů, 64 min na tři pokusy uzávěru a dva body hotovo nikdo nespustil. Stavěno mimo AID (PM 10. 10. 2026); revize po každém kroku dělal Claude podagent s čistým kontextem, protože Codex měl vyčerpaný limit do 14. 10. 2026.
