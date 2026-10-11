@@ -179,15 +179,18 @@ def write(project, measure_path, out_rel):
             for it in (json.load(open(inv, encoding="utf-8")).get("items") or []):
                 if it.get("disposition") not in ("adopt", "replace"): continue
                 src = it.get("source") or {}
-                what = labels.get(it.get("id")) or it.get("label") or it.get("name") or (f"{it.get('property')} ({it.get('kind')})" if it.get("property") else it.get("id"))
-                # one row per trigger: the built site's own triggers for a keyframe it runs, else the reference's
-                scen = seen_scen.get(it.get("target") or it.get("name")) or src.get("scenarios") or ([it.get("scenario")] if it.get("scenario") else []) or (["page"] if it.get("kind") == "page" else [])
+                # sidecar entry: "label", or {"label", "scenarios" (the real triggers), "per": {scenario: label}}
+                side_it = labels.get(it.get("id")) or {}
+                if isinstance(side_it, str): side_it = {"label": side_it}
+                what = side_it.get("label") or it.get("label") or it.get("name") or (f"{it.get('property')} ({it.get('kind')})" if it.get("property") else it.get("id"))
+                # one row per trigger: the sidecar's real triggers, else the built site's own for a keyframe it runs, else the reference's
+                scen = side_it.get("scenarios") or seen_scen.get(it.get("target") or it.get("name")) or src.get("scenarios") or ([it.get("scenario")] if it.get("scenario") else []) or (["page"] if it.get("kind") == "page" else [])
                 ms = src.get("duration_ms") or seen.get(it.get("target") or it.get("name")) or seen.get((it.get("property"), it.get("scenario")))
                 if it.get("kind") == "page":   # the built site's own leave + arrive keyframes
                     ms = (seen.get("page-leave") or 0) + (seen.get("page-arrive") or 0)
                 dur = (str(round(ms / 1000, 2)).rstrip('0').rstrip('.') + ' s') if isinstance(ms, (int, float)) and ms else 'okamžitě'
                 for x in (scen or ["-"]):
-                    rows.append(f"| {what} | {TRIG.get(x, x)} | {dur} |")
+                    rows.append(f"| {(side_it.get('per') or {}).get(x) or what} | {TRIG.get(x, x)} | {dur} |")
         except (OSError, ValueError, TypeError, AttributeError): rows = []
     if rows:   # the motion as rules: what the visitor sees, on what, how long (the client could not use a bag of durations)
         L += ["Podle soupisu pohybu vzoru (`.aid-ui/motion.json`): co se hýbe, na jaký podnět a jak dlouho.", "",
