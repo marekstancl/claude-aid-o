@@ -1,5 +1,8 @@
 // aid-ui-motion.mjs — observe the motion of a page at runtime: what animates, where, on what.
-//   node aid-ui-motion.mjs <url> <out.json> [--max-hover 60] [--dir-sha256 <sha>] [--settle-ms 8000]
+//   node aid-ui-motion.mjs <url> <out.json> [--max-hover 60] [--dir-sha256 <sha>] [--settle-ms 8000] [--pages N]
+//   --pages N: after the start page, up to N same-site sub-pages (the first N distinct paths linked from
+//   nav, header, footer, then anywhere; PM 11. 10. 2026, 2B: the motion of the whole reference, not only its
+//   home) get the load, scroll and hover scenarios too; every item carries `pages` = where it was seen.
 //   node aid-ui-motion.mjs --dir <folder> <out.json> [--max-hover 60] [--settle-ms 8000]
 //     (serves the folder itself on a free loopback port and records its sha: a prototype, a build)
 // One tool for three subjects: the PM's reference site (step 4), each direction prototype
@@ -39,6 +42,7 @@ for (let i = 0; i < argv.length;) {
   else if (argv[i] === '--dir-sha256') { opt.dirSha = argv[i + 1]; argv.splice(i, 2); }
   else if (argv[i] === '--dir') { opt.dir = argv[i + 1]; argv.splice(i, 2); }
   else if (argv[i] === '--settle-ms') { opt.settle = parseInt(argv[i + 1], 10); argv.splice(i, 2); }
+  else if (argv[i] === '--pages') { opt.pages = Math.max(0, parseInt(argv[i + 1], 10) || 0); argv.splice(i, 2); }
   else i++;
 }
 // --dir <folder>: the tool serves the folder itself on a free loopback port and records the folder's
@@ -96,7 +100,7 @@ const INIT = () => {
   };
   const rec = (kind, ev) => {
     const e = ev.target; const cs = e instanceof Element ? getComputedStyle(e) : null;
-    const item = { kind, scenario: window.__aidScenario, selector: sel(e), where: where(e), t: Math.round(performance.now()),
+    const item = { kind, scenario: window.__aidScenario, page: location.pathname, selector: sel(e), where: where(e), t: Math.round(performance.now()),
       intro: e instanceof Element && e.hasAttribute('data-aid-intro') };
     if (kind === 'keyframes') {
       item.name = ev.animationName;
@@ -116,7 +120,7 @@ const INIT = () => {
     const st = e.getAttribute('style') || ''; const prop = /transform/.test(st) ? 'transform' : /opacity/.test(st) ? 'opacity' : /clip-path/.test(st) ? 'clip-path' : null;
     if (!prop) continue;
     const key = window.__aidScenario + '|' + prop + '|' + sel(e); const n = (seen.get(key) || 0) + 1; seen.set(key, n);
-    if (n === 1) window.__aidEvents.push({ kind: 'js', scenario: window.__aidScenario, selector: sel(e), where: where(e), property: prop, t: Math.round(performance.now()) });
+    if (n === 1) window.__aidEvents.push({ kind: 'js', scenario: window.__aidScenario, page: location.pathname, selector: sel(e), where: where(e), property: prop, t: Math.round(performance.now()) });
   } });
   const start = () => mo.observe(document.documentElement, { attributes: true, attributeFilter: ['style'], subtree: true });
   if (document.documentElement) start(); else document.addEventListener('DOMContentLoaded', start, { once: true });
@@ -139,7 +143,7 @@ const snapshot = async scenario => { try { return await page.evaluate(sc => {
   for (const a of document.getAnimations()) {
     const tg = a.effect && a.effect.target; const tm = a.effect && a.effect.getTiming ? a.effect.getTiming() : {};
     const kind = a.constructor && a.constructor.name;
-    if (kind === 'Animation') out.push({ kind: 'js', scenario: sc, selector: sel(tg), where: 'unknown', property: 'waapi', duration_ms: typeof tm.duration === 'number' ? tm.duration : null, iteration: tm.iterations === Infinity ? 'infinite' : tm.iterations });
+    if (kind === 'Animation') out.push({ kind: 'js', scenario: sc, page: location.pathname, selector: sel(tg), where: 'unknown', property: 'waapi', duration_ms: typeof tm.duration === 'number' ? tm.duration : null, iteration: tm.iterations === Infinity ? 'infinite' : tm.iterations });
     else if (kind === 'CSSAnimation' && a.animationName) out.push({ kind: 'timing', name: a.animationName, duration_ms: typeof tm.duration === 'number' ? tm.duration : null, iteration: tm.iterations === Infinity ? 'infinite' : tm.iterations });
   }
   return out; }, scenario); } catch { return []; } };
@@ -186,15 +190,19 @@ const coverage = await page.evaluate(() => {
     height: document.documentElement.scrollHeight };
 });
 
-// scroll
-await setScenario('scroll');
-const steps = Math.min(80, Math.ceil(coverage.height / VH));
-await page.mouse.move(VW / 2, VH / 2);
-for (let i = 1; i <= steps; i++) { await page.mouse.wheel(0, VH); await page.waitForTimeout(600); }
-all.push(...await take()); absorb(await snapshot('scroll'));
-await page.mouse.wheel(0, -VH * steps); await page.evaluate(() => scrollTo(0, 0)); await page.waitForTimeout(600); await take();
-
-// hover + focus
+// scroll: by the wheel, a viewport at a time, to the end (smooth-scroll libraries see real wheel events)
+const scrollPass = async () => {
+  await setScenario('scroll');
+  const h = await page.evaluate(() => document.documentElement.scrollHeight);
+  const n = Math.min(80, Math.ceil(h / VH));
+  await page.mouse.move(VW / 2, VH / 2);
+  for (let i = 1; i <= n; i++) { await page.mouse.wheel(0, VH); await page.waitForTimeout(600); }
+  all.push(...await take()); absorb(await snapshot('scroll'));
+  await page.mouse.wheel(0, -VH * n); await page.evaluate(() => scrollTo(0, 0)); await page.waitForTimeout(600); await take();
+  return n;
+};
+// hover + focus over sampled targets (half above the fold, the rest spread below)
+const hoverPass = async max => {
 const targets = await page.evaluate(max => {
   const vis = e => { const r = e.getBoundingClientRect(); const cs = getComputedStyle(e); return r.width >= 2 && r.height >= 2 && cs.visibility !== 'hidden' && cs.display !== 'none'; };
   const els = [...document.querySelectorAll('a, button, [role=button], input[type=submit], input[type=button], [tabindex]')];
@@ -207,7 +215,7 @@ const targets = await page.evaluate(max => {
     pick = top.slice(0, nt).concat(below.filter((_, i) => Math.floor(i % step) === 0).slice(0, nb)); }
   const tags = pick.map((e, n) => { const t = `h${n}`; e.setAttribute('data-aid-hover', t); return t; });
   return tags;
-}, opt.maxHover);
+}, max);
 for (const t of targets) {
   const loc = page.locator(`[data-aid-hover="${t}"]`).first();
   try {
@@ -219,6 +227,10 @@ for (const t of targets) {
 }
 await page.keyboard.press('Tab').catch(() => {});
 all.push(...(await take()).filter(e => e.scenario === 'hover' || e.scenario === 'focus')); absorb(await snapshot('hover'));
+return targets;
+};
+const steps = await scrollPass();
+const targets = await hoverPass(opt.maxHover);
 
 // page transition: the first same-site link to another path
 const link = await page.evaluate(() => {
@@ -252,6 +264,30 @@ if (link) {
   } catch (e) { errors.push(`page: ${String(e.message).slice(0, 120)}`); }
 }
 
+// sub-pages (--pages N): load, scroll and hover on each; the record says which page saw what
+const subpages = [];
+if (opt.pages > 0) {
+  try { await goto(url, 'load'); await settle(1500); await take(); } catch (e) { errors.push(`pages: ${String(e.message).slice(0, 120)}`); }
+  const links = await page.evaluate(max => {
+    const here = new URL(location.href); const seen = new Set([here.pathname]); const out = [];
+    for (const a of document.querySelectorAll('nav a[href], header a[href], footer a[href], a[href]')) {
+      let u; try { u = new URL(a.getAttribute('href'), location.href); } catch { continue; }
+      if (u.origin !== here.origin || seen.has(u.pathname) || u.hash || /^(mailto|tel|javascript):/.test(u.protocol)) continue;
+      seen.add(u.pathname); out.push(u.origin + u.pathname); if (out.length >= max) break;
+    }
+    return out;
+  }, opt.pages).catch(() => []);
+  for (const sub of links) {
+    const rec = { url: sub, ok: false, keyframes: 0, transitions: 0, error: null };
+    try {
+      await goto(sub, 'load'); const ev = await settle(opt.settle, true); all.push(...ev); absorb(await snapshot('load'));
+      rec.keyframes = ev.filter(e => e.kind === 'keyframes').length; rec.transitions = ev.filter(e => e.kind === 'transition').length;
+      await scrollPass(); await hoverPass(Math.min(opt.maxHover, 20)); rec.ok = true;
+    } catch (e) { rec.error = String(e.message).slice(0, 120); }
+    subpages.push(rec);
+  }
+}
+
 await browser.close();
 if (served) served.close();
 
@@ -261,13 +297,13 @@ const first = new Set(loadEvents.filter(e => e.kind === 'keyframes').map(e => e.
 const second = new Set(load2Events.filter(e => e.kind === 'keyframes').map(e => e.name));
 const kf = new Map();
 for (const e of all.filter(e => e.kind === 'keyframes')) {
-  const k = kf.get(e.name) || { name: e.name, scenarios: new Set(), wheres: new Set(), selectors: new Set(), duration_ms: 0, delay_ms: 0, iteration: 1, intro: false, count: 0 };
-  k.scenarios.add(e.scenario === 'load2' ? 'load' : e.scenario); k.wheres.add(e.where); k.selectors.add(e.selector); k.count++;
+  const k = kf.get(e.name) || { name: e.name, scenarios: new Set(), wheres: new Set(), selectors: new Set(), pages: new Set(), duration_ms: 0, delay_ms: 0, iteration: 1, intro: false, count: 0 };
+  k.scenarios.add(e.scenario === 'load2' ? 'load' : e.scenario); k.wheres.add(e.where); k.selectors.add(e.selector); k.pages.add(e.page || '/'); k.count++;
   k.duration_ms = Math.max(k.duration_ms, e.duration_ms || 0); k.delay_ms = Math.max(k.delay_ms, e.delay_ms || 0);
   if (e.iteration === 'infinite') k.iteration = 'infinite'; else if (k.iteration !== 'infinite') k.iteration = Math.max(k.iteration, e.iteration || 1);
   k.intro = k.intro || e.intro; kf.set(e.name, k);
 }
-const keyframes = [...kf.values()].map(k => ({ name: k.name, scenarios: [...k.scenarios].sort(), where: [...k.wheres].sort(), selectors: [...k.selectors].slice(0, 6),
+const keyframes = [...kf.values()].map(k => ({ name: k.name, scenarios: [...k.scenarios].sort(), where: [...k.wheres].sort(), selectors: [...k.selectors].slice(0, 6), pages: [...k.pages].sort(),
   duration_ms: k.duration_ms || (timings.get(k.name) || {}).duration_ms || 0, delay_ms: k.delay_ms,
   iteration: k.iteration === 1 && timings.has(k.name) && timings.get(k.name).iteration ? timings.get(k.name).iteration : k.iteration, intro: k.intro, count: k.count,
   frequency: k.scenarios.has('load') ? (first.has(k.name) && !second.has(k.name) ? 'first_load_only' : (first.has(k.name) ? 'every_load' : 'unknown')) : null }))
@@ -276,27 +312,28 @@ const tr = new Map();
 for (const e of all.filter(e => e.kind === 'transition')) {
   const sc = e.scenario === 'load2' ? 'load' : e.scenario;   // the second load is the load scenario too
   const key = `${e.property}@${sc}`;
-  const t = tr.get(key) || { property: e.property, scenario: sc, selectors: new Set(), wheres: new Set(), duration_ms: 0, count: 0 };
-  t.selectors.add(e.selector); t.wheres.add(e.where); t.duration_ms = Math.max(t.duration_ms, e.duration_ms || 0); t.count++; tr.set(key, t);
+  const t = tr.get(key) || { property: e.property, scenario: sc, selectors: new Set(), wheres: new Set(), pages: new Set(), duration_ms: 0, count: 0 };
+  t.selectors.add(e.selector); t.wheres.add(e.where); t.pages.add(e.page || '/'); t.duration_ms = Math.max(t.duration_ms, e.duration_ms || 0); t.count++; tr.set(key, t);
 }
-const transitions = [...tr.values()].map(t => ({ property: t.property, scenario: t.scenario, selectors: [...t.selectors].slice(0, 6), where: [...t.wheres].sort(), duration_ms: t.duration_ms, count: t.count }))
+const transitions = [...tr.values()].map(t => ({ property: t.property, scenario: t.scenario, selectors: [...t.selectors].slice(0, 6), where: [...t.wheres].sort(), pages: [...t.pages].sort(), duration_ms: t.duration_ms, count: t.count }))
   .sort((a, b) => (a.scenario + a.property) < (b.scenario + b.property) ? -1 : 1);
 const js = new Map();
 for (const e of [...all, ...pageT.leave, ...pageT.arrive].filter(e => e.kind === 'js')) {
   const sc = e.scenario === 'load2' ? 'load' : e.scenario; const key = `${e.property}@${sc}`;
-  const j = js.get(key) || { property: e.property, scenario: sc, selectors: new Set(), wheres: new Set(), count: 0 };
-  j.selectors.add(e.selector); j.wheres.add(e.where); j.count++; js.set(key, j);
+  const j = js.get(key) || { property: e.property, scenario: sc, selectors: new Set(), wheres: new Set(), pages: new Set(), count: 0 };
+  j.selectors.add(e.selector); j.wheres.add(e.where); j.pages.add(e.page || '/'); j.count++; js.set(key, j);
 }
-const js_motion = [...js.values()].map(j => ({ property: j.property, scenario: j.scenario, selectors: [...j.selectors].slice(0, 6), where: [...j.wheres].sort(), count: j.count }))
+const js_motion = [...js.values()].map(j => ({ property: j.property, scenario: j.scenario, selectors: [...j.selectors].slice(0, 6), where: [...j.wheres].sort(), pages: [...j.pages].sort(), count: j.count }))
   .sort((a, b) => (a.scenario + a.property) < (b.scenario + b.property) ? -1 : 1);
 const tag = e => e.kind === 'keyframes' ? `keyframes:${e.name}@${e.selector}` : e.kind === 'js' ? `js:${e.property}@${e.selector}` : `transition:${e.property}@${e.selector}`;
 const pageItem = { link: pageT.link, libs: pageT.libs, arrived_at: pageT.arrived_at, leave: [...new Set(pageT.leave.map(tag))], arrive: [...new Set(pageT.arrive.map(tag))] };
 pageItem.observed = Boolean(pageT.libs.length || pageItem.leave.length || pageItem.arrive.length);
 
 const record = { tool: 'aid-ui-motion', version: 1, url, observed_at: new Date().toISOString(), viewport: { width: VW, height: VH, dpr: 1 },
-  settle_ms: opt.settle, dir_sha256: opt.dirSha, keyframes, transitions, js_motion, page: pageItem, libs: [...new Set([...coverage.libs, ...coverage.globals])],
+  settle_ms: opt.settle, dir_sha256: opt.dirSha, keyframes, transitions, js_motion, page: pageItem, pages: subpages, libs: [...new Set([...coverage.libs, ...coverage.globals])],
   coverage: { stylesheets: coverage.stylesheets, stylesheets_unreadable: coverage.stylesheets_unreadable, iframes_skipped: coverage.iframes_skipped,
-    shadow_roots_not_traversed: coverage.shadow_roots_not_traversed, hover_targets: targets.length, hover_cap: opt.maxHover, scroll_steps: steps, errors } };
+    shadow_roots_not_traversed: coverage.shadow_roots_not_traversed, hover_targets: targets.length, hover_cap: opt.maxHover, scroll_steps: steps,
+    pages: subpages.filter(s => s.ok).length, pages_requested: opt.pages, errors } };
 record.sha256 = crypto.createHash('sha256').update(JSON.stringify({ ...record, observed_at: null })).digest('hex');
 fs.writeFileSync(out + '.tmp', JSON.stringify(record, null, 1)); fs.renameSync(out + '.tmp', out);   // atomic: never a half record
-console.log(JSON.stringify({ keyframes: keyframes.length, transitions: transitions.length, page: pageItem.observed, libs: record.libs, below: keyframes.filter(k => k.where.includes('below')).length, hover: transitions.filter(t => t.scenario === 'hover').length + keyframes.filter(k => k.scenarios.includes('hover')).length }));
+console.log(JSON.stringify({ keyframes: keyframes.length, transitions: transitions.length, page: pageItem.observed, pages: subpages.length, libs: record.libs, below: keyframes.filter(k => k.where.includes('below')).length, hover: transitions.filter(t => t.scenario === 'hover').length + keyframes.filter(k => k.scenarios.includes('hover')).length }));

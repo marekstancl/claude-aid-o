@@ -241,7 +241,9 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
   směrem, jehož pozorování soupis neprokáže (server kontrolu přepočítá sám); `build-record` odmítne
   stavbu bez stvrzenky postupu `build` a bez téhož důkazu nad stavbou; brána má řádky
   `motion_settled` (měří po doběhnutí animací, úvod jen přes `data-aid-intro`) a `motion_fidelity`
-  (pozoruje stavbu sama). Pohyb se nikdy neosekává kvůli bráně.
+  (pozoruje stavbu sama). Pohyb se nikdy neosekává kvůli bráně. Od 11. 10. 2026 (PM 2B) záznam vzoru
+  pokrývá i podstránky (`--pages 8`, položky s `pages`) a soupis smí u `replace` uvést `from` = druhý vzor
+  PM, jehož záznam pohyb prokáže.
 - **Konec běhu**: `links` (dvě adresy, 200) před otázkou `handover`, která je nese v textu a má tři
   karty (převzít / s výhradou / vrátit = hodnocení PM); `chapter-all` jen po poslední bráně nad
   stránkou pro zákazníka a zprávě souladu; `finish` zapíše `finish.json` a studio ukáže Hotovo

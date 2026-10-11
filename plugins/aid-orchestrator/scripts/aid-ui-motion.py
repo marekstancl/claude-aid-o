@@ -20,6 +20,9 @@ the build carry, proven against what aid-ui-tool.sh motion SAW run (P108, 10. 10
         script-driven change of that property in that scenario; page: target names what carries it
         (library, leave, arrive); extra: the target observed anywhere); a `below` item must have
         been seen below; an every_load item must have run on the second load too.
+        `replace` may carry `from` = the id of ANOTHER reference the PM saw (brand-state refs) whose
+        record <project>/.aid-ui/refs/<from>.motion.json shows the target: the motion is taken from
+        a second reference (PM 11. 10. 2026, 2B), proven on both sides - in that record and in the build.
       With --dir the record must carry dir_sha256 = the directory's sha (aid-ui-motion.py dirsha).
       Prints the summary sentence and every failure; exit 0 pass, 1 fail, 2 usage. --write stores
       {ok, failures, summary, inventory_sha256, observed_sha256, dir_sha256, checked_at}.
@@ -99,15 +102,17 @@ def items_from_record(rec):
     for k in rec.get("keyframes", []):
         items.append({"id": f"kf:{k['name']}", "kind": "keyframes", "name": k["name"],
                       "source": {"scenarios": k["scenarios"], "where": k["where"], "duration_ms": k.get("duration_ms"),
-                                 "iteration": k.get("iteration"), "frequency": k.get("frequency"), "selectors": k.get("selectors", [])[:3]},
+                                 "iteration": k.get("iteration"), "frequency": k.get("frequency"), "selectors": k.get("selectors", [])[:3],
+                                 "pages": k.get("pages", [])},
                       "disposition": "", "reason": "", "label": "", "target": "", "frequency": k.get("frequency") if "load" in k["scenarios"] else None})
     for t in rec.get("transitions", []):
         items.append({"id": f"tr:{t['property']}@{t['scenario']}", "kind": "transition", "property": t["property"], "scenario": t["scenario"],
-                      "source": {"scenarios": [t["scenario"]], "where": t.get("where", []), "duration_ms": t.get("duration_ms"), "selectors": t.get("selectors", [])[:3]},
+                      "source": {"scenarios": [t["scenario"]], "where": t.get("where", []), "duration_ms": t.get("duration_ms"), "selectors": t.get("selectors", [])[:3],
+                                 "pages": t.get("pages", [])},
                       "disposition": "", "reason": "", "label": "", "target": ""})
     for j in rec.get("js_motion", []) or []:
         items.append({"id": f"js:{j['property']}@{j['scenario']}", "kind": "js", "property": j["property"], "scenario": j["scenario"],
-                      "source": {"scenarios": [j["scenario"]], "where": j.get("where", []), "selectors": j.get("selectors", [])[:3]},
+                      "source": {"scenarios": [j["scenario"]], "where": j.get("where", []), "selectors": j.get("selectors", [])[:3], "pages": j.get("pages", [])},
                       "disposition": "", "reason": "", "label": "", "target": ""})
     pg = rec.get("page") or {}
     if pg.get("observed"):
@@ -163,7 +168,8 @@ def summary_of(inv):
         if d in n:
             n[d] += 1
         if d in ("replace", "omit"):
-            named.append({"id": i["id"], "label": i.get("label", ""), "disposition": d, "reason": i.get("reason", "")})
+            named.append({"id": i["id"], "label": i.get("label", ""), "disposition": d, "reason": i.get("reason", ""),
+                          **({"from": i["from"]} if i.get("from") else {})})
     extra = [e for e in inv.get("extra", [])]
     sent = (f"z {len(items)} pohybů vzoru: {n['adopt']} převzato, {n['replace']} nahrazeno, {n['omit']} vynecháno"
             + (f", {len(extra)} navíc" if extra else ""))
@@ -177,7 +183,36 @@ def observed_index(rec):
     return kf, tr, js
 
 
-def check_item(i, kf, tr, js, rec, failures):
+def second_reference(project, frm, cache):
+    """The record of another reference the PM saw: (kf, tr, js) indexes, or a failure string."""
+    if frm in cache:
+        return cache[frm]
+    try:
+        st = rj(os.path.join(project, "docs", "design", "brand-state.json"))
+        ids = {r.get("id") for r in (st.get("refs") or [])}
+    except (OSError, ValueError):
+        ids = set()
+    path = os.path.join(project, ".aid-ui", "refs", f"{frm}.motion.json")
+    if frm not in ids:
+        res = f"from '{frm}' is not one of the references the PM saw (brand-state refs)"
+    elif not os.path.isfile(path):
+        res = f"from '{frm}': no record .aid-ui/refs/{frm}.motion.json (aid-ui-tool.sh motion <url> <that file>)"
+    else:
+        rec2 = rj(path)
+        err = validate_record(rec2)
+        res = f"from '{frm}': its record breaks motion-record.schema.json at {err}" if err else observed_index(rec2)
+    cache[frm] = res
+    return res
+
+
+def seen_in(kind, target, scenario, kf, tr, js):
+    if kind == "keyframes":
+        return target in kf
+    prop = target.partition("@")[0]
+    return (prop, scenario) in tr or (prop, scenario) in js
+
+
+def check_item(i, kf, tr, js, rec, failures, project=None, cache=None):
     d = i.get("disposition")
     iid = i.get("id", "?")
     if d not in DISPOSITIONS:
@@ -198,6 +233,21 @@ def check_item(i, kf, tr, js, rec, failures):
     kind = i.get("kind")
     src_sc = i["source"].get("scenarios") or []
     want_below = "below" in (i["source"].get("where") or [])
+    frm = (i.get("from") or "").strip()
+    if frm:
+        if d != "replace":
+            failures.append(f"{iid}: `from` is only for replace (the motion of a second reference)")
+            return
+        if kind == "page":
+            failures.append(f"{iid}: `from` does not apply to the page transition")
+            return
+        r2 = second_reference(project or ".", frm, cache if cache is not None else {})
+        if isinstance(r2, str):
+            failures.append(f"{iid}: {r2}")
+            return
+        if not seen_in(kind, target, i.get("scenario"), *r2):
+            failures.append(f"{iid}: replace from '{frm}': '{target}' never ran in that reference")
+            return
     # adopt = the reference's motion under its own name; another target is a replace the PM must see
     if d == "adopt":
         own = i.get("name") if kind == "keyframes" else i.get("property") if kind in ("transition", "js") else None
@@ -270,7 +320,7 @@ def check(project, observed, dir_=None):
     err = validate_record(rec)
     if err:
         raise ValueError(f"{observed} breaks motion-record.schema.json at {err}")
-    return check_records(inv, path, rec, dir_)
+    return check_records(inv, path, rec, dir_, project)
 
 
 def cmd_check(project, observed, dir_, write):
@@ -287,8 +337,11 @@ def cmd_check(project, observed, dir_, write):
     sys.exit(0 if res["ok"] else 1)
 
 
-def check_records(inv, inv_path, rec, dir_):
+def check_records(inv, inv_path, rec, dir_, project=None):
     failures = []
+    cache = {}
+    if project is None:
+        project = os.path.dirname(os.path.dirname(os.path.abspath(inv_path)))   # <project>/.aid-ui/motion.json
     if dir_:
         if not os.path.isdir(dir_):
             raise ValueError(f"no directory {dir_}")
@@ -300,7 +353,7 @@ def check_records(inv, inv_path, rec, dir_):
             failures.append(f"the record was not observed over the directory as it is now (dir_sha256 {str(rec.get('dir_sha256'))[:12]} vs {ds[:12]}); observe again")
     kf, tr, js = observed_index(rec)
     for i in inv["items"]:
-        check_item(i, kf, tr, js, rec, failures)
+        check_item(i, kf, tr, js, rec, failures, project, cache)
     for e in inv.get("extra", []):
         check_extra(e, kf, tr, js, failures)
     summ = summary_of(inv)

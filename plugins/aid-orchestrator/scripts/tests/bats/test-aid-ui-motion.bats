@@ -46,6 +46,23 @@ assert list(Draft202012Validator(s).iter_errors(r)), "a record without coverage 
 PY
 }
 
+@test "motion --pages: the sub-pages linked from the start page get load, scroll and hover too; every item says on which pages it ran; the record lists the sub-pages" {
+  run bash "$SC/aid-ui-tool.sh" motion "http://127.0.0.1:$PORT/index.html" "$OUT" --settle-ms 3000 --pages 3
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq -r '.pages | length' "$OUT")" -eq 1 ]
+  [ "$(jq -r '.pages[0].url' "$OUT")" == "http://127.0.0.1:$PORT/druha.html" ]
+  [ "$(jq -r '.pages[0].ok' "$OUT")" == true ]
+  [ "$(kf arrive '.pages | join(",")')" == "/druha.html" ]
+  [ "$(kf pop '.pages | join(",")')" == "/index.html" ]
+  [ "$(jq -r '.coverage.pages, .coverage.pages_requested' "$OUT" | paste -sd' ')" == "1 3" ]
+  python3 - "$SC/../skills/ui-design/references/motion-record.schema.json" "$OUT" <<'PY'
+import json, sys
+from jsonschema.validators import Draft202012Validator
+s = json.load(open(sys.argv[1])); r = json.load(open(sys.argv[2]))
+errs = list(Draft202012Validator(s).iter_errors(r)); assert not errs, [e.message for e in errs][:3]
+PY
+}
+
 @test "motion: a page that does not load is exit 1, usage is exit 2" {
   run bash "$SC/aid-ui-tool.sh" motion "http://127.0.0.1:$PORT/neni.html" "$OUT"
   [ "$status" -eq 1 ]

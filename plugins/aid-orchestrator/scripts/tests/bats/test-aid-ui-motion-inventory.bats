@@ -78,6 +78,29 @@ PY
   [ "$(python3 "$MP" summary "$P" | jq -r '.exceptions | map(.label) | join(";")')" == "otáčení pečeti;barva odkazu při najetí" ]
 }
 
+@test "check: replace from a second reference is proven in that reference's record (PM saw it, record exists, motion ran there) and in the build" {
+  cp "$FXR" "$P/.aid-ui/refs/fx.motion.json"; python3 "$MP" inventory "$P" >/dev/null; fill
+  # the build carries `glow` instead of the reference's `spin`, taken from reference `alt`
+  jq '.keyframes += [(.keyframes[] | select(.name == "spin") | .name = "glow")]' "$FXR" > "$P/build.json"
+  jq '(.items[] | select(.id == "kf:spin")) |= (.disposition = "replace" | .target = "glow" | .from = "alt" | .reason = "jemnější než otáčení" | .label = "záře pečeti")' "$P/.aid-ui/motion.json" > "$P/m.t" && mv "$P/m.t" "$P/.aid-ui/motion.json"
+  run python3 "$MP" check "$P" --observed "$P/build.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"kf:spin: from 'alt' is not one of the references the PM saw"* ]]
+  echo '{"refs":[{"id":"fx","url":"http://127.0.0.1:39931/index.html","picked":true},{"id":"alt","url":"http://alt.example/"}]}' > "$P/docs/design/brand-state.json"
+  run python3 "$MP" check "$P" --observed "$P/build.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"kf:spin: from 'alt': no record .aid-ui/refs/alt.motion.json"* ]]
+  jq '.url = "http://alt.example/"' "$FXR" > "$P/.aid-ui/refs/alt.motion.json"
+  run python3 "$MP" check "$P" --observed "$P/build.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"kf:spin: replace from 'alt': 'glow' never ran in that reference"* ]]
+  jq '.url = "http://alt.example/" | .keyframes += [(.keyframes[] | select(.name == "spin") | .name = "glow")]' "$FXR" > "$P/.aid-ui/refs/alt.motion.json"
+  run python3 "$MP" check "$P" --observed "$P/build.json"
+  [ "$status" -eq 0 ]; [[ "$output" == "PASS: z 9 pohybů vzoru: 8 převzato, 1 nahrazeno, 0 vynecháno" ]]
+  [ "$(python3 "$MP" summary "$P" | jq -r '.exceptions[0].from')" == alt ]
+  # `from` on adopt is refused; the build without glow fails as before
+  jq '(.items[] | select(.id == "kf:spin")) |= (.disposition = "adopt" | .target = "spin")' "$P/.aid-ui/motion.json" > "$P/m.t" && mv "$P/m.t" "$P/.aid-ui/motion.json"
+  run python3 "$MP" check "$P" --observed "$P/build.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"kf:spin: \`from\` is only for replace"* ]]
+}
+
 @test "check --dir: the record must carry the directory's current sha; dirsha changes with content" {
   cp "$FXR" "$P/.aid-ui/refs/fx.motion.json"; python3 "$MP" inventory "$P" >/dev/null; fill
   D="$P/.aid-ui/directions/1"; mkdir -p "$D"; echo '<p>a</p>' > "$D/index.html"

@@ -45,7 +45,10 @@ Vybrané vzory a styly v `.aid-ui/refs/`, brand balíček, vize a tón,
    a `omit` `reason` a `label` (lidské jméno pohybu, které uvidí PM, např. „otáčení pečeti"), u
    načítacích animací `frequency` (`every_load` jako vzor; `first_load_only` jen s důvodem - 9. 10.
    PM úvodní animaci neviděl, protože agent sám zvolil „jednou za relaci"). Vlastní pohyb navíc jde
-   jen do `extra` s důvodem. Nic z hlavy: položky jsou jen ze záznamu.
+   jen do `extra` s důvodem. Nic z hlavy: položky jsou jen ze záznamu. Položka `replace` smí nést
+   `from` = id DRUHÉHO vzoru, který PM viděl (brand-state `refs`) a jehož záznam
+   `.aid-ui/refs/<from>.motion.json` ten pohyb obsahuje (PM 11. 10. 2026, 2B: pohyb pod přehybem z jiného
+   vzoru); kontrola ho ověří v tom záznamu i ve stavbě a otázka `direction` ho ukáže jako „nahrazeno z <vzor>".
    Každý směr musí pohyb **nést a prokázat**: po stavbě směru ho nástroj pozoruje jako cizí web -
    `bash "$AID_PLUGIN_PATH/scripts/aid-ui-tool.sh" motion --dir <project>/.aid-ui/directions/<n>
    <project>/.aid-ui/directions/<n>.motion.json` (nástroj složku servíruje sám na volném portu

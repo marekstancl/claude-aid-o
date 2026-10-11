@@ -48,9 +48,12 @@ PM ve studiu vybral 1-3 vzory a jejich vypočtené styly leží v `.aid-ui/refs/
    `body, h1, h2, p, a, button` (písma, škála, barvy, zaoblení, mezery)
    → `<project>/.aid-ui/refs/<n>.json`. Jen inspirace.
 7. **Pohyb vzoru pozoruje nástroj, ne agent** (po `set refs --answer`, pro vybraný vzor):
-   `bash "$AID_PLUGIN_PATH/scripts/aid-ui-tool.sh" motion <url vzoru> <project>/.aid-ui/refs/<id>.motion.json`
+   `bash "$AID_PLUGIN_PATH/scripts/aid-ui-tool.sh" motion <url vzoru> <project>/.aid-ui/refs/<id>.motion.json --pages 8`
    (Chromium 1440×900; scénáře načtení, druhé načtení, posun až dolů, najetí a zaměření
-   prvků, klik na první vnitřní odkaz). Záznam říká, co se **skutečně spustilo**: každý
+   prvků, klik na první vnitřní odkaz; `--pages 8` = i prvních osm podstránek vzoru z menu a patičky
+   dostane načtení, posun a najetí - PM 11. 10. 2026, 2B: pohyb celého vzoru, ne jen úvodní stránky;
+   každá položka záznamu říká v `pages`, kde běžela). Záznam pohybu si vyžádej i u DRUHÉHO vzoru,
+   který PM jmenoval jako zdroj pohybu níž na stránce (soupis v kroku 5 smí u `replace` uvést `from`). Záznam říká, co se **skutečně spustilo**: každý
    keyframe se scénářem, místem (`hero` / `below` / `overlay`), délkou, opakováním
    a četností (`every_load` / `first_load_only`), každý přechod (vlastnost, scénář), přechod
    mezi stránkami (knihovna, co odjíždí, co přijíždí) a `coverage` - co nástroj nevidí
