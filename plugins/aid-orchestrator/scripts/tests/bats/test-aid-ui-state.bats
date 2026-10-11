@@ -242,6 +242,23 @@ serve_200() {
   [ "$(grep -c 'rel="icon"' "$HTML")" -eq 1 ]
 }
 
+@test "payload-check: the rebuilt-logo question (target logo:rebuilt:<slot>, 1i mode full) carries exactly one card of that slot; other identity questions still one card per slot" {
+  studio
+  echo '{"situation":"redesign","slots":[{"id":"W","kind":"wordmark"},{"id":"WC","kind":"name+sign"}]}' > "$PROJ/.aid-ui/logo/route.json"
+  pl="$PROJ/.aid-ui/studio/payload.json"; mkdir -p "$PROJ/.aid-ui/studio"
+  mk() { jq -n --arg t "$1" --argjson cards "$2" --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" \
+    '{now:{title:"x",text:"y",at:$o,part:"logo"},questions:[{id:"q-l2",kind:"identity",part:"logo",target:$t,opened_at:$o,title:"Logo?",body:["b"],next:"n",outcome:"Logo schváleno."}],
+      cards:($cards|map(.question="q-l2"|.method="process.md fáze 7 (kit)"|.thesis="t"|.risk="r"|.uniqueness="u"|.source="podklady"|.preview=null))}' > "$pl"; }
+  mk "logo:rebuilt:WC" '[{"id":"WC","slot":"WC","title":"WC"}]'
+  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  mk "logo:rebuilt:WC" '[{"id":"W","slot":"W","title":"W"}]'
+  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"exactly one card of that slot (WC)"* ]]
+  mk "logo:rebuilt:WC" '[{"id":"W","slot":"W","title":"W"},{"id":"WC","slot":"WC","title":"WC"}]'
+  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 1 ]
+  mk "logo:route:redesign" '[{"id":"WC","slot":"WC","title":"WC"}]'
+  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"one card per slot"* ]]
+}
+
 @test "reset-approvals turns schvaleno into navrh" {
   approve_chapter barvy design_standard q1
   run "$SCRIPT" reset-approvals "$PROJ" barvy typografie
