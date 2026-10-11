@@ -231,6 +231,45 @@ _zadani_err() {   # <location-suffix> <message>
   return 0
 }
 _zadani_trim() { local v="$1"; v="${v%"${v##*[![:space:]]}"}"; printf '%s' "$v"; }
+# ---------------------------------------------------------------------------
+# repo_roots (P111 Step 1): every foreign repository the plan declares is a git
+# repository outside the project, under a unique slug, with a base branch that
+# resolves there. ERRORs in both modes; plan-run refuses the same entries.
+# ---------------------------------------------------------------------------
+_repo_roots_pass() {
+  local raw n i name path bb proj real seen=" "
+  raw="$(yq --front-matter=extract -o=json '.repo_roots // []' "$PLAN" 2>/dev/null)" || raw="[]"
+  [[ -n "$raw" && "$raw" != "null" ]] || return 0
+  if [[ "$(jq -r 'type' <<< "$raw" 2>/dev/null)" != "array" ]]; then
+    _zadani_err "" "repo_root_invalid: repo_roots must be a list of {name, path[, base_branch]}"; return 0
+  fi
+  proj="$(realpath -e "${_project_root:-$(dirname "$PLAN")}" 2>/dev/null)" || proj=""
+  n="$(jq 'length' <<< "$raw")"
+  for (( i=0; i<n; i++ )); do
+    name="$(jq -r --argjson i "$i" '.[$i].name // ""' <<< "$raw")"
+    path="$(jq -r --argjson i "$i" '.[$i].path // ""' <<< "$raw")"
+    bb="$(jq -r --argjson i "$i" '.[$i].base_branch // ""' <<< "$raw")"
+    if [[ ! "$name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+      _zadani_err "" "repo_root_invalid: repo_roots[$i].name '${name}' must be a slug ([a-z0-9_-])"; continue
+    fi
+    if [[ "$seen" == *" ${name} "* ]]; then
+      _zadani_err "" "repo_root_invalid: repo_roots name '${name}' is declared twice"; continue
+    fi
+    seen+="${name} "
+    real="$(realpath -e "$path" 2>/dev/null)" || real=""
+    if [[ -z "$real" ]] || ! git -C "$real" rev-parse --git-dir >/dev/null 2>&1; then
+      _zadani_err "" "repo_root_invalid: repo_roots '${name}' path '${path}' is not a git repository"; continue
+    fi
+    if [[ -n "$proj" ]] && { [[ "$real" == "$proj" || "$real" == "$proj"/* ]] \
+         || [[ "$(git -C "$real" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" == "$(git -C "$proj" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ]]; }; then
+      _zadani_err "" "repo_root_invalid: repo_roots '${name}' path '${path}' is the project itself or inside it — repo_roots names OTHER repositories"; continue
+    fi
+    if [[ -n "$bb" ]] && ! git -C "$real" rev-parse --verify --quiet "${bb}^{commit}" >/dev/null 2>&1; then
+      _zadani_err "" "repo_root_invalid: repo_roots '${name}' base_branch '${bb}' does not resolve in ${path}"; continue
+    fi
+  done
+  return 0
+}
 _zadani_pass() {
   local z zpath root zsha want rec label text type cmd file regex xexit f
   local -A plan_rec=() brief_ids=() plan_ids=() closed=()
@@ -894,6 +933,7 @@ done < <(_ts_names)
 
 # Blocking = any ERROR (both modes), or any STRICT on a strict-cohort plan.
 _zadani_pass
+_repo_roots_pass
 blocking=$errors
 [[ "$mode" == "strict" ]] && blocking=$((blocking + strict_hits))
 

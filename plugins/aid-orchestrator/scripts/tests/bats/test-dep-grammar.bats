@@ -239,7 +239,7 @@ _to_epic() {
     step_counter=2
     # Load only the function under test (its enclosing script runs work at
     # source time), bounded by the next function definition.
-    eval "$(sed -n "/^parse_step_deps() {/,/^}/p" "$1")"
+    source "$(dirname "$1")/lib/aid-plan-json.sh"; parse_step_deps() { aid_plan_parse_step_deps "$@"; }   # moved to the library (P111)
     parse_step_deps "Step 1, banana"
   ' _ "$PLAN_TO_EPIC"
   [ "$status" -ne 0 ]
@@ -250,7 +250,7 @@ _to_epic() {
   run bash -c '
     set -uo pipefail
     step_counter=2
-    eval "$(sed -n "/^parse_step_deps() {/,/^}/p" "$1")"
+    source "$(dirname "$1")/lib/aid-plan-json.sh"; parse_step_deps() { aid_plan_parse_step_deps "$@"; }   # moved to the library (P111)
     parse_step_deps "none" && echo "none-ok"
     parse_step_deps "---" && echo "dashes-ok"
     printf "refs=%s\n" "$(parse_step_deps "Step 1, Steps 3-4")"
@@ -363,7 +363,7 @@ _to_epic() {
   run bash -c '
     set -uo pipefail
     step_counter=2
-    eval "$(sed -n "/^parse_step_deps() {/,/^}/p" "$1")"
+    source "$(dirname "$1")/lib/aid-plan-json.sh"; parse_step_deps() { aid_plan_parse_step_deps "$@"; }   # moved to the library (P111)
     printf "em=%s\n"    "$(parse_step_deps "Step 1 — note")"
     printf "en=%s\n"    "$(parse_step_deps "Step 1 – note")"
     printf "hyph=%s\n"  "$(parse_step_deps "Step 1 - note")"

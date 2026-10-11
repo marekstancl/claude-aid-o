@@ -25,6 +25,26 @@
       "pattern": "^[0-9a-f]{64}$",
       "description": "sha256 of the plan file this plan.json was generated from (P110): increment-step measures the step's criteria only from that plan, never from one edited since."
     },
+    "direct": {
+      "type": "boolean",
+      "description": "P111: true when this plan.json was built by `aid-plan-fsm.sh plan-run` from the WHOLE plan (the direct run on plan/<id>), absent on the EPIC path."
+    },
+    "repo_roots": {
+      "type": "array",
+      "description": "P111: the foreign repositories the plan declares (frontmatter repo_roots), each worked in a worktree on plan/<id>-<project> — the ONE mapping the step contract, the step's return and the step check read.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "path", "worktree", "branch", "base"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$", "description": "The slug a step's return names in repo_commits[].repo." },
+          "path": { "type": "string", "description": "Physical path (realpath) of the foreign repository's live checkout — never written by a run." },
+          "worktree": { "type": "string", "description": "<path>/.aid-worktrees/plan-<id>--<name>, where the run's foreign changes are made." },
+          "branch": { "type": "string", "description": "plan/<id>-<project> — plan ids are per project." },
+          "base": { "type": "string", "pattern": "^[0-9a-f]{40}$", "description": "The foreign base branch's head the worktree branch was created from." }
+        }
+      }
+    },
     "zadani_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",

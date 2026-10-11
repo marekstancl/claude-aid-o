@@ -34,6 +34,7 @@ source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 # shellcheck source=lib/aid-ac-extract.sh
 source "${SCRIPT_DIR}/lib/aid-ac-extract.sh"   # aid_ac_extract_criteria
 source "${SCRIPT_DIR}/lib/aid-roots.sh"        # aid_state_root — the SAME root the runner reads
+source "${SCRIPT_DIR}/lib/aid-plan-json.sh"    # THE per-step plan reader + DoD gates derivation (P111), shared with the direct run
 check_prerequisites
 
 # ---------------------------------------------------------------------------
@@ -574,42 +575,10 @@ done
 # Step 5: Extract data from each phase step
 # ---------------------------------------------------------------------------
 
-# Helper: extract content for a given step number directly from the plan file.
-# Returns everything between ### Step N and the next ### Step header (or the
-# next **EPIC M:** marker, or section boundary), excluding the header itself.
+# Helper: a step's section of the plan — THE per-step reader lives in
+# lib/aid-plan-json.sh (P111), shared with the direct run.
 extract_step_content() {
-  local step_num="$1"
-  # F13: track fence depth to ignore quoted ### Step / **EPIC** lines.
-  # Fence lines inside the matched step body ARE printed verbatim.
-  awk -v snum="$step_num" '
-    BEGIN { found = 0; in_fence = 0 }
-    {
-      gsub(/\r$/, "")
-      # Fence toggles — when inside the matched step body, the fence line
-      # itself is part of the body and must be printed.
-      if ($0 ~ /^[[:space:]]*```/) {
-        in_fence = 1 - in_fence
-        if (found) print
-        next
-      }
-      # Only detect headers/markers outside of fenced blocks.
-      if (!in_fence) {
-        # Match multiple header formats: ### Step N, ## Task N, ## Step N
-        if ($0 ~ /^###?[[:space:]]+(Step|Task)[[:space:]]+[0-9]+/) {
-          # Extract step number from this header
-          line = $0
-          sub(/^###?[[:space:]]+(Step|Task)[[:space:]]+/, "", line)
-          sub(/:.*/, "", line)
-          sub(/[^0-9].*/, "", line)
-          if (found) exit
-          if (line == snum) { found = 1; next }
-        }
-        # Stop at EPIC markers (they separate step groups)
-        if (found && $0 ~ /^\*\*EPIC[[:space:]]+[0-9]+/) exit
-      }
-      if (found) print
-    }
-  ' "$plan"
+  aid_plan_step_content "$plan" "$1"
 }
 
 # Helper: extract a bold-prefixed field value from step content
@@ -642,101 +611,10 @@ extract_bold_field() {
   '
 }
 
-# Helper: parse step dependency references from a raw dependency string.
-# Handles singular ("Step 1"), plural ranges ("Steps 3-5"), mixed formats,
-# trailing descriptive text after step references, and reversed ranges.
-#
-# Args:
-#   $1 — raw dependency string, e.g. "Step 1, Steps 3-5 — all needed"
-#
-# Output (stdout): comma-separated step numbers, e.g. "1, 3, 4, 5"
-# Stderr: warning on reversed ranges
+# Helper: parse step dependency references ("Step 1, Steps 3-5 — why" ->
+# "1, 3, 4, 5") — the one grammar, in lib/aid-plan-json.sh (P111).
 parse_step_deps() {
-  local raw="$1"
-  local result=()
-
-  # P073 Step 5 — one dependency grammar, shared with the canonical parser in
-  # lib/aid-source-plan-graph.sh:
-  #   * everything from the FIRST annotation separator on (em dash, en dash,
-  #     a SPACED ASCII hyphen — unspaced would collide with `Steps 1-3` — or a
-  #     space-preceded opening parenthesis) is human prose, discarded before
-  #     parsing;
-  #   * `none` (authoring form) and `---` (generated-canonical form) are the
-  #     two accepted no-dependency markers;
-  #   * every remaining token must be recognised IN FULL (the patterns are
-  #     end-anchored) — an unrecognised one used to be silently dropped, which
-  #     turned a typo into "no dependency", and an unanchored match silently
-  #     discarded the tail, so `Steps 1-3 and 5` lost the 5.
-  raw="$(printf '%s' "$raw" | sed 's/[—–].*$//; s/ - .*$//; s/ (.*$//')"
-  case "$(printf '%s' "$raw" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
-    ---|none|'') return 0 ;;
-  esac
-
-  # Tokenize by splitting on commas first, then process each token.
-  # We use a while-read loop with newlines as separators after replacing commas.
-  local tokens
-  tokens="$(echo "$raw" | sed 's/,/\n/g')"
-
-  while IFS= read -r token; do
-    # Trim leading/trailing whitespace
-    token="$(echo "$token" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    [[ -z "$token" ]] && continue
-
-    # Match range pattern: "Steps M-N" or "steps M-N" (with optional trailing text)
-    if [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+)[[:space:]]*$ ]]; then
-      local range_start="${BASH_REMATCH[1]}"
-      local range_end="${BASH_REMATCH[2]}"
-
-      if [[ "$range_start" -gt "$range_end" ]]; then
-        echo "WARNING: Reversed range Steps ${range_start}-${range_end} — skipping" >&2
-        continue
-      fi
-
-      for (( i=range_start; i<=range_end; i++ )); do
-        result+=("$i")
-      done
-
-    # Match singular pattern: "Step N" (with optional trailing text)
-    elif [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*$ ]]; then
-      result+=("${BASH_REMATCH[1]}")
-
-    # Match "Task" range — plans that use "## Task N:" headers reference deps
-    # the same way (e.g. "Depends on: Tasks 3-5"). Mirror the Steps logic so
-    # Task-style dependency lines are not silently dropped.
-    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+)[[:space:]]*$ ]]; then
-      local range_start="${BASH_REMATCH[1]}"
-      local range_end="${BASH_REMATCH[2]}"
-
-      if [[ "$range_start" -gt "$range_end" ]]; then
-        echo "WARNING: Reversed range Tasks ${range_start}-${range_end} — skipping" >&2
-        continue
-      fi
-
-      for (( i=range_start; i<=range_end; i++ )); do
-        result+=("$i")
-      done
-
-    # Match "Task N" singular
-    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*$ ]]; then
-      result+=("${BASH_REMATCH[1]}")
-
-    # Match bare number (possibly left after earlier processing). Anchored
-    # too: `2 and 5` must not silently become `2`.
-    elif [[ "$token" =~ ^([0-9]+)[[:space:]]*$ ]]; then
-      result+=("${BASH_REMATCH[1]}")
-
-    else
-      # P073 Step 5: loud, not silent. The message names the step and the
-      # offending token verbatim so the author can fix the exact line.
-      echo "ERROR: step ${step_counter:-?}: unrecognised dependency token '${token}' — accepted: 'Step N', 'Steps N-M', 'none', '---', comma-separated, optionally followed by an annotation after ' — ', ' – ', ' - ' or ' ('" >&2
-      return 1
-    fi
-  done <<< "$tokens"
-
-  # Deduplicate and sort numerically, then join with ", "
-  if [[ "${#result[@]}" -gt 0 ]]; then
-    printf '%s\n' "${result[@]}" | sort -n -u | paste -sd ',' - | sed 's/,/, /g'
-  fi
+  aid_plan_parse_step_deps "$@"
 }
 
 # Helper: strip cross-phase dependencies.
@@ -840,84 +718,30 @@ all_step_scoping_meta=""
 # "-->" when parsing block values — this exact token is the parse contract.
 AID_ARROW_SENTINEL='@@AID_ARROW@@'
 
-# The plan's step sections, read once: the Parallel Group column comes from the
-# same field reader aid-plan-parallel-check.sh validates with (P099 Step 6), so
-# generation writes exactly the wave readiness accepted.
-plan_step_bounds="$(_aid_plan_step_bounds "$plan")"
+# P111: the phase's steps are read once through THE per-step plan reader
+# (lib/aid-plan-json.sh: objective, role, criteria, Files bullets and their
+# paths, dependencies, Parallel group, Zavírá, UI fields) — the direct run reads
+# the whole plan through the same function. This loop only formats the EPIC.
+_rc=0
+_phase_steps_json="$(aid_plan_json_steps_from_plan "$plan" "${phase_steps[@]}")" || _rc=$?
+if [[ "$_rc" -eq 5 ]]; then
+  # P073 Step 5: an unrecognised dependency token aborts generation (the reader
+  # printed it); no EPIC file has been written for this plan yet.
+  echo "ERROR: EPIC generation aborted — repair the dependency declaration above and rerun. Full grammar: skills/plan-writing.md" >&2
+  exit 1
+fi
+[[ "$_rc" -eq 0 ]] || exit "$_rc"
 
 for sn in "${phase_steps[@]}"; do
   step_counter=$(( step_counter + 1 ))
-  step_content="$(extract_step_content "$sn")"
-
-  # Extract objective — priority chain:
-  #   1. Explicit **Objective:** field in step content
-  #   2. Text after colon in step header (### Step N: <objective text>)
-  #   3. First non-empty line of step content
-  objective="$(echo "$step_content" | awk '
-    BEGIN { found = 0 }
-    {
-      gsub(/\r$/, "")
-      if ($0 ~ /^\*\*Objective:\*\*/) {
-        sub(/^\*\*Objective:\*\*[[:space:]]*/, "", $0)
-        print
-        found = 1
-        next
-      }
-      if (found && ($0 ~ /^[[:space:]]*$/ || $0 ~ /^\*\*[A-Z]/)) exit
-      if (found) print
-    }
-  ')"
-  # Fallback 2: extract from step header text (after "Step N:" or "Task N:")
-  if [[ -z "$objective" ]]; then
-    # F13: ignore step headers inside fenced code blocks.
-    objective="$(awk -v snum="$sn" '
-      BEGIN { in_fence = 0 }
-      {
-        gsub(/\r$/, "")
-        if ($0 ~ /^[[:space:]]*```/) { in_fence = 1 - in_fence; next }
-        if (in_fence) next
-        if ($0 ~ /^###?[[:space:]]+(Step|Task)[[:space:]]+/) {
-          line = $0
-          sub(/^###?[[:space:]]+(Step|Task)[[:space:]]+/, "", line)
-          # Check if this is the right step number
-          num = line
-          sub(/:.*/, "", num)
-          sub(/[^0-9].*/, "", num)
-          if (num == snum) {
-            # Extract text after "N: " or "N — "
-            sub(/^[0-9]+[[:space:]]*[:—–-][[:space:]]*/, "", line)
-            if (line != "" && line != num) print line
-            exit
-          }
-        }
-      }
-    ' "$plan")"
-  fi
-  # Fallback 3: first non-empty line of step content
-  if [[ -z "$objective" ]]; then
-    objective="$(echo "$step_content" | awk 'NF { print; exit }')"
-  fi
-
-  # Extract AID Role. Accept the header WITH or WITHOUT a colon — plans author it
-  # both as `**AID Role:** frontend` and `**AID Role** frontend`. (Matching only
-  # the colon form silently defaulted every step to `backend`.)
-  role="$(echo "$step_content" | awk '
-    /^\*\*AID Role:?\*\*/ {
-      sub(/^\*\*AID Role:?\*\*[[:space:]]*/, "")
-      gsub(/[[:space:]]+$/, "")
-      print tolower($0)
-      exit
-    }
-  ')"
+  _st="$(jq -c --argjson i "$(( step_counter - 1 ))" '.[$i]' <<< "$_phase_steps_json")"
+  objective="$(jq -r '.objective' <<< "$_st")"
+  role="$(jq -r '.role' <<< "$_st")"
   [[ -z "$role" ]] && role="backend"
 
-  # Extract acceptance criteria — one whole criterion per line, unprefixed (see
-  # aid_ac_extract_criteria for the header/bullet/continuation rules it accepts).
-  # Used twice: flattened with a `- [ ] [role] ` wrapper into all_ac right below,
-  # and RAW into the per-step scoping block's ac[] further down (D2) — the block
-  # is already step-scoped, so no role tag is forced on there.
-  step_ac_raw="$(echo "$step_content" | aid_ac_extract_criteria)"
-
+  # Acceptance criteria: flattened with a `- [ ] [role] ` wrapper into all_ac,
+  # and RAW into the per-step scoping block's ac[] below (D2).
+  step_ac_raw="$(jq -r '.acceptance_criteria[]' <<< "$_st")"
   if [[ -n "$step_ac_raw" ]]; then
     while IFS= read -r ac_line; do
       # A criterion that already carries its own [role] prefix keeps it.
@@ -926,231 +750,55 @@ for sn in "${phase_steps[@]}"; do
     done <<< "$step_ac_raw"
   fi
 
-  # Extract artifacts (RAW Files bullets, verbatim "Create: `path` — desc" /
-  # "Modify: `a` + `b` (desc)" form). This drives both:
-  #  (a) all_artifacts — the flattened `## Artifacts` section (unchanged use)
-  #  (b) the per-step scoping block's `files=[...]` value below (D2/D4) — the
-  #      block gets the RAW text, not the cleaned/split step_files derivation.
-  step_artifacts="$(echo "$step_content" | awk '
-    BEGIN { in_files = 0 }
-    {
-      gsub(/\r$/, "")
-      if ($0 ~ /^\*\*Files:\*\*/) { in_files = 1; next }
-      if (in_files && $0 ~ /^\*\*/) { in_files = 0 }
-      if (in_files && $0 ~ /^[[:space:]]*-/) {
-        sub(/^[[:space:]]*-[[:space:]]*/, "", $0)
-        if ($0 != "") print "- " $0
-      }
-    }
-  ')"
-  if [[ -n "$step_artifacts" ]]; then
-    all_artifacts="${all_artifacts}${step_artifacts}"$'\n'
-  fi
+  # Every Files bullet into the flattened `## Artifacts`; the cleaned paths of
+  # the top-level bullets into `## Scope > Allowed files/paths`.
+  step_artifacts="$(jq -r '.artifacts[]' <<< "$_st")"
+  [[ -n "$step_artifacts" ]] && all_artifacts="${all_artifacts}${step_artifacts}"$'\n'
+  step_files="$(jq -r '.allowed_paths[]' <<< "$_st")"
+  [[ -n "$step_files" ]] && all_allowed_paths="${all_allowed_paths}${step_files}"$'\n'
 
-  # Top-level-only variant of the above, for the per-step scoping block's
-  # files=[...] value (below) ONLY — NOT for all_artifacts (legacy flattened
-  # section stays on the indentation-agnostic extraction above, unchanged,
-  # to avoid regressing existing goldens). A Files entry sometimes carries
-  # further-INDENTED sub-bullets that elaborate on a single top-level
-  # "Create:"/"Modify:" bullet — those are prose continuation, not separate
-  # files, and must NOT be surfaced as their own files[] array entry. Only a
-  # bullet with NO leading whitespace before its "-" is a real, distinct entry.
-  #
-  # v2.58.3: this is now the SHARED extractor _aid_extract_files_bullets (single
-  # source of truth in lib/aid-scoping.sh, byte-identical to the awk it replaces),
-  # so aid-plan-lint.sh sees exactly the same "which lines are Files entries" as
-  # this generator — they cannot disagree on indented sub-bullets or Test: entries.
-  step_artifacts_top_level="$(printf '%s\n' "$step_content" | _aid_extract_files_bullets)"
-
-  # Extract files (Create/Modify paths) for the flattened `## Scope >
-  # Allowed files/paths` section — UNCHANGED from before this step. D4's
-  # improved multi-path SPLIT + trailing-prose-strip logic (see
-  # _aid_split_path_entry below) deliberately does NOT replace this
-  # extraction: this section is read today by aid-epic-to-json.sh and
-  # broadcast into plan.json's steps[].allowed_paths, so any change here
-  # changes plan.json output NOW, before Step 3 exists to consume the new
-  # per-step block. Verified: this step's change must be inert on the JSON
-  # side (byte-identical plan.json before/after, module docstring "Testing"
-  # requirement) — an earlier draft that fixed this extraction in place was
-  # reverted after a before/after `aid-epic-to-json.sh` diff showed it
-  # was NOT inert (allowed_paths content changed). aid-epic-to-json.sh does
-  # NOT source this script (no shared entry point exists between the two
-  # CLI scripts, only lib/common.sh) — Step 3 must PORT/reimplement this
-  # exact algorithm directly inside aid-epic-to-json.sh when it derives
-  # per-step allowed_paths from the block's RAW files[] values, using
-  # _aid_split_path_entry below as the reference spec, not as callable code.
-  # P079 Step 5 (IMP-480): a top-level Files bullet that does not match the
-  # verb grammar used to be dropped by a bare `continue`. Generation then
-  # succeeded with a narrower scope than the plan declared — and the EPIC ran
-  # with a file its own plan named missing from allowed_paths, which nothing
-  # downstream could notice. A parser may refuse, it may not narrow silently.
-  step_files=""
-  _dropped_bullets=""
-  while IFS= read -r _raw_file; do
-    [[ -n "${_raw_file// /}" ]] || continue          # blank line, not a bullet
-    _raw_file="${_raw_file#- }"
-    # The verb vocabulary is the shared one (lib/aid-scoping.sh), so the
-    # plan lint's ERROR tier and this refusal are provably the same rule.
-    if [[ ! "$_raw_file" =~ $_AID_FILES_VERB_RE ]]; then
-      _dropped_bullets+="  step ${sn}: unparseable Files bullet dropped: \"${_raw_file}\""$'\n'
-      continue
-    fi
-    if [[ -z "${BASH_REMATCH[2]//[[:space:]]/}" ]]; then
-      _dropped_bullets+="  step ${sn}: Files bullet has a verb but no path: \"${_raw_file}\""$'\n'
-      continue
-    fi
-    if ! _split_paths="$(_aid_split_path_entry "${BASH_REMATCH[2]}")"; then
-      error_exit "Invalid Files entry in step ${sn}: ${_raw_file}. Canonical multi-path form: \`a\` + \`b\` — description." 1
-    fi
-    # The tier of a new suite (lib/aid-scoping.sh, the rule the plan lint reports).
-    _tier_finding="$(_aid_test_bullet_tier_finding "$_raw_file" .)" \
-      || _dropped_bullets+="  step ${sn}: ${_tier_finding}: \"${_raw_file}\""$'\n'
-    while IFS= read -r _path; do
-      [[ -n "$_path" ]] && step_files+="${_path}"$'\n'
-    done <<< "$_split_paths"
-  done <<< "$step_artifacts_top_level"
-  if [[ -n "$_dropped_bullets" ]]; then
-    error_exit "Files block in ${plan} has bullets this generator cannot parse:
-${_dropped_bullets}Every top-level Files bullet must read \`- <Create|Modify|Test|Rewrite>: <path> — <why>\`, and a \`Test:\` bullet naming a suite that does not exist yet must state its tier: \`- Test: \\\`path\\\` (tier: t1) — <what it proves>\`. See skills/plan-writing.md (Files block grammar). Fix the plan and re-run generation." 1
-  fi
-  if [[ -n "$step_files" ]]; then
-    all_allowed_paths="${all_allowed_paths}${step_files}"$'\n'
-  fi
-
-  # Extract UI Change Mode from step content
-  ui_change_mode="$(echo "$step_content" | awk '
-    /^\*\*UI Change Mode:\*\*/ {
-      sub(/^\*\*UI Change Mode:\*\*[[:space:]]*`?/, "")
-      sub(/`.*/, "")
-      gsub(/[[:space:]]/, "")
-      if ($0 == "existing_ui" || $0 == "new_ui") print $0
-      exit
-    }
-  ')"
-
-  # Extract UI Change Contract from step content
-  ui_change_contract_raw="$(echo "$step_content" | awk '
-    /^\*\*UI Change Contract:\*\*/ {
-      sub(/^\*\*UI Change Contract:\*\*[[:space:]]*`?/, "")
-      sub(/`.*/, "")
-      print
-      exit
-    }
-  ')"
-  ui_change_path="$(echo "$ui_change_contract_raw" | sed -n "s/.*path:[[:space:]]*\([^|]*\).*/\1/p" | tr -d ' ')"
-  ui_change_sha256="$(echo "$ui_change_contract_raw" | sed -n "s/.*sha256:[[:space:]]*\([^|]*\).*/\1/p" | tr -d ' ')"
-  ui_change_schema_version="$(echo "$ui_change_contract_raw" | sed -n "s/.*schema_version:[[:space:]]*\([^|]*\).*/\1/p" | tr -d ' ')"
-
-  # Build per-step UI metadata comment line
+  # Per-step UI metadata comment line.
+  ui_change_mode="$(jq -r '.ui_change_mode' <<< "$_st")"
+  ui_change_path="$(jq -r '.ui_change_path' <<< "$_st")"
   if [[ -n "$ui_change_mode" ]]; then
     step_ui_meta="<!-- step-${step_counter}: ui_change_mode=${ui_change_mode}"
     if [[ -n "$ui_change_path" ]]; then
       step_ui_meta="${step_ui_meta} | path=${ui_change_path}"
-      step_ui_meta="${step_ui_meta} | sha256=${ui_change_sha256}"
-      step_ui_meta="${step_ui_meta} | schema_version=${ui_change_schema_version}"
+      step_ui_meta="${step_ui_meta} | sha256=$(jq -r '.ui_change_sha256' <<< "$_st")"
+      step_ui_meta="${step_ui_meta} | schema_version=$(jq -r '.ui_change_schema_version' <<< "$_st")"
     fi
     step_ui_meta="${step_ui_meta} -->"
     all_step_ui_meta="${all_step_ui_meta}${step_ui_meta}"$'\n'
   fi
 
-  # Build per-step scoping metadata block (D2 — per-step files/ac, same
-  # HTML-comment-block pattern as step_ui_meta above, emitted under
-  # `## Step UI Contracts`). This is the block aid-epic-to-json.sh (P058
-  # Step 3) will read PER STEP instead of broadcasting the flattened
-  # `## Artifacts` / `## Acceptance Criteria` sections to every step. It is
-  # inert today — nothing parses "files="/"ac=" yet, so plan.json output is
-  # unaffected by this block's presence.
-  #
-  # Shape (frozen by the E-TEST-005 fixture, P058 Step 1):
-  #   <!-- step-N: files=["Create: `path` — desc","Modify: `a` + `b`"]; ac=["AC text 1","AC text 2"] -->
-  #   - files[]: RAW step_artifacts entries, one JSON string per Files bullet,
-  #     leading "- " stripped but otherwise verbatim (label + backticks +
-  #     description kept) — Step 3 derives outputs=verbatim / allowed_paths=
-  #     cleaned FROM this raw text, it does not read the already-cleaned
-  #     step_files/all_allowed_paths values.
-  #   - ac[]: RAW step_ac_raw entries — AC text with the leading "- " bullet
-  #     and "[ ]" checkbox stripped, but WITHOUT the "[role]" prefix that
-  #     all_ac forces on (block is already step-scoped, so no role tag).
-  #   - Both arrays are JSON-encoded via `jq -R -s -c` (compact, one string
-  #     per source line); any literal "-->" substring in a value is replaced
-  #     with $AID_ARROW_SENTINEL BEFORE JSON-encoding, so the block's own
-  #     closing "-->" can never be truncated early. Step 3 must reverse this
-  #     substitution after JSON-decoding each string.
-  step_files_json="[]"
-  if [[ -n "$step_artifacts_top_level" ]]; then
-    step_files_json="$(echo "$step_artifacts_top_level" \
-      | sed 's/^- //' \
-      | sed "s/-->/${AID_ARROW_SENTINEL}/g" \
-      | jq -R -s -c 'split("\n") | map(select(length > 0))')"
-  fi
-  step_ac_json="[]"
-  if [[ -n "$step_ac_raw" ]]; then
-    step_ac_json="$(echo "$step_ac_raw" \
-      | sed "s/-->/${AID_ARROW_SENTINEL}/g" \
-      | jq -R -s -c 'split("\n") | map(select(length > 0))')"
-  fi
+  # Per-step scoping block (D2), read by aid-epic-to-json.sh per step:
+  #   <!-- step-N: files=["Create: `path` — desc"]; ac=["AC text"] -->
+  # files[] = the RAW top-level Files bullets, ac[] = the RAW criteria (no
+  # [role] prefix); a literal "-->" in a value is encoded as $AID_ARROW_SENTINEL
+  # so the block's own closer cannot be truncated (aid-epic-to-json.sh decodes).
+  step_files_json="$(jq -c --arg s "$AID_ARROW_SENTINEL" '.files | map(gsub("-->"; $s))' <<< "$_st")"
+  step_ac_json="$(jq -c --arg s "$AID_ARROW_SENTINEL" '.acceptance_criteria | map(gsub("-->"; $s))' <<< "$_st")"
   step_scoping_meta="<!-- step-${step_counter}: files=${step_files_json}; ac=${step_ac_json} -->"
   all_step_scoping_meta="${all_step_scoping_meta}${step_scoping_meta}"$'\n'
 
-  # Build step objectives list for Goal section.
-  # Use the EPIC-local step number (step_counter) so the Goal list stays
-  # consistent with the renumbered Steps table; the global number ($sn) only
-  # exists in the source plan.
+  # The Goal list uses the EPIC-local step number (step_counter), matching the
+  # renumbered Steps table; the global number ($sn) only exists in the plan.
   step_objectives="${step_objectives}- Step ${step_counter}: ${objective}"$'\n'
 
-  # Extract raw dependency line from step content
-  raw_dep_line="$(echo "$step_content" | awk '
-    BEGIN { in_deps = 0 }
-    {
-      gsub(/\r$/, "")
-      if ($0 ~ /^\*\*Dependencies:\*\*/) { in_deps = 1; next }
-      if (in_deps && $0 ~ /^\*\*/) { in_deps = 0 }
-      if (in_deps && $0 ~ /Depends on:/) {
-        sub(/.*Depends on:[[:space:]]*/, "", $0)
-        print
-      }
-    }
-  ')"
-
-  # Parse step references from the raw dependency line.
-  # Handles:
-  #   - "Step 1" -> 1
-  #   - "Steps 3-5" -> 3, 4, 5
-  #   - "Step 1, Steps 3-5" -> 1, 3, 4, 5
-  #   - Trailing descriptive text: "Step 1 — provides base config" -> 1
-  #   - Reversed ranges: "Steps 14-1" -> warning + empty
-  step_deps=""
-  if [[ -n "$raw_dep_line" ]]; then
-    # P073 Step 5: an unrecognised token aborts generation. The previous code
-    # mapped an unparseable declaration to `---` further down and carried on,
-    # so a typo silently became "no dependency" in the generated EPIC. No EPIC
-    # file has been written for this plan at this point, so there is no
-    # partial output to clean up.
-    if ! step_deps="$(parse_step_deps "$raw_dep_line")"; then
-      echo "ERROR: EPIC generation aborted — repair the dependency declaration above and rerun. Full grammar: skills/plan-writing.md" >&2
-      exit 1
-    fi
-  fi
-
-  # Strip cross-phase dependencies: remove any step numbers that fall
-  # outside the current EPIC's step range
+  # Dependencies (global numbers from the reader): cross-phase references are
+  # stripped, the rest remapped to the EPIC-local numbers of the # column.
+  step_deps="$(jq -r '.depends_on' <<< "$_st")"
   if [[ -n "$step_deps" ]]; then
     step_deps="$(strip_cross_phase_deps "$step_deps" "${phase_steps[*]}")"
   fi
-
-  # Remap surviving (intra-EPIC) dependencies from global to local step
-  # numbers so the Depends On column matches the renumbered # column. After
-  # the strip above, every remaining number is in phase_steps and therefore
-  # has a global_to_local entry.
   if [[ -n "$step_deps" ]]; then
     remapped_deps=()
     IFS=',' read -ra _dep_nums <<< "$step_deps"
     for _dn in "${_dep_nums[@]}"; do
       _dn="$(echo "$_dn" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
       [[ -z "$_dn" ]] && continue
-      # Drop self-references: a range like "Steps 7-9" on step 9 expands to
-      # include 9 itself, which would produce a meaningless self-edge that
-      # downstream cycle detection (aid-epic-to-json.sh) rejects.
+      # Drop self-references ("Steps 7-9" on step 9) — downstream cycle
+      # detection would reject the self-edge.
       [[ "$_dn" == "$sn" ]] && continue
       if [[ -n "${global_to_local[$_dn]+_}" ]]; then
         remapped_deps+=("${global_to_local[$_dn]}")
@@ -1163,47 +811,30 @@ ${_dropped_bullets}Every top-level Files bullet must read \`- <Create|Modify|Tes
     fi
   fi
 
-  # Build Steps table row
-  # Collapse multi-line objective to single line for table
+  # Steps table row. The objective is collapsed to one line and truncated
+  # BEFORE escaping, so an escape sequence is never cut in half; then the
+  # two-rule escape grammar (P074 Step 17): backslash -> \\ first, pipe -> \|.
   safe_objective="$(echo "$objective" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//')"
-  # Truncate to reasonable length for table BEFORE escaping, so an escape
-  # sequence can never be split in half by the cut (P074 Step 17).
   if [[ "${#safe_objective}" -gt 100 ]]; then
     safe_objective="${safe_objective:0:97}..."
   fi
-  # Two-rule escape grammar (P074 Step 17), unambiguous by construction:
-  # literal backslash → \\ FIRST, then literal pipe → \|. Escaping only pipes
-  # left `\|` ambiguous between "escaped pipe" and "field-final backslash +
-  # delimiter". Decoded by the character-walk splitter in aid-epic-to-json.sh.
   safe_objective="${safe_objective//\\/\\\\}"
   safe_objective="${safe_objective//|/\\|}"
 
-  # Determine depends_on for this step within the phase. `---` here is the
-  # GENERATED-CANONICAL no-dependency marker, reached only when the author
-  # genuinely declared none (or every reference was cross-phase and stripped)
-  # — never as a fallback for an unparseable declaration, which now aborts
-  # generation in parse_step_deps (P073 Step 5).
+  # `---` is the generated-canonical no-dependency marker (an unparseable
+  # declaration aborted above, P073 Step 5).
   depends_on_str="---"
   if [[ -n "$step_deps" ]]; then
-    # parse_step_deps already returns "N, M, ..." format — use as-is
     depends_on_str="$(echo "$step_deps" | head -1)"
     [[ -z "$depends_on_str" ]] && depends_on_str="---"
   fi
 
-  parallel_group="---" _pg_s="" _pg_e=""
-  read -r _pg_s _pg_e _ < <(awk -F'\t' -v n="$sn" '$3 ~ "^### Step " n ":" { print; exit }' <<< "$plan_step_bounds") || true
-  if [[ -n "$_pg_s" ]]; then
-    parallel_group="$(_aid_plan_step_field "$plan" "$_pg_s" "$_pg_e" "Parallel group")" || parallel_group="---"
-    parallel_group="${parallel_group%%[[:space:]]*}"
-  fi
+  parallel_group="$(jq -r '.parallel_group' <<< "$_st")"
 
   # P109: the brief points this step closes (**Zavírá:**), the sixth column —
   # the only road a step field has into plan.json. `—` when it names none.
-  safe_closes="—"
-  if [[ -n "$_pg_s" ]] && _closes="$(_aid_plan_step_field "$plan" "$_pg_s" "$_pg_e" "Zavírá")"; then
-    _closes="$( { grep -oE '\bAC[0-9]+\b' <<< "$_closes" || true; } | paste -sd, - | sed 's/,/, /g')"
-    [[ -n "$_closes" ]] && safe_closes="$_closes"
-  fi
+  safe_closes="$(jq -r '.zavira | join(", ")' <<< "$_st")"
+  [[ -n "$safe_closes" ]] || safe_closes="—"
 
   steps_table_rows="${steps_table_rows}| ${step_counter} | ${role} | ${safe_objective} | ${depends_on_str} | ${parallel_group} | ${safe_closes} |"$'\n'
 done
@@ -1330,73 +961,19 @@ plan_constraints="$(echo "$plan_constraints" | sed '/^[[:space:]]*$/d')"
 # config while the runner reconciled against another — the same undefined_gate
 # outage, now nondeterministic. Reading the same root the runner reads is the
 # whole point (and the exact trap recorded as IMP-497 the day before).
-_dod_candidates=("docs_updated" "check_docs_updated")
-dod_gates=""
+# The derivation and its checks live in lib/aid-plan-json.sh (P111): the
+# direct run derives its plan.json gates from the same function.
 _exec_yaml=""
 if _dod_root="$(aid_state_root 2>/dev/null)" && [[ -n "$_dod_root" ]]; then
   _exec_yaml="${_dod_root}/.aid-o/config/execution.yaml"
 fi
-
-# "Could not determine" is NOT "the project chose no gate". Conflating them is
-# the fail-open this whole change exists to stop: a missing yq, unreadable or
-# malformed YAML would have produced an apparently deliberate empty gate list,
-# hash-bound into plan.json, while the runner — which requires yq — fails later
-# for a reason nobody can trace back here.
-if [[ -z "$_exec_yaml" || ! -f "$_exec_yaml" ]]; then
-  error_exit "DoD gates: cannot resolve the project's execution.yaml (looked for '${_exec_yaml:-<no state root>}'). Generation refuses rather than emitting an empty gate list that would look like a deliberate choice." 3
-fi
-command -v yq >/dev/null 2>&1 || \
-  error_exit "DoD gates: yq is required to read ${_exec_yaml} — the gate runner requires it too, so a missing yq is a broken environment, not a project without gates." 2
-if ! yq -e '.' "$_exec_yaml" >/dev/null 2>&1; then
-  error_exit "DoD gates: ${_exec_yaml} is not parseable YAML. Refusing to infer 'no gates' from a file that could not be read." 1
-fi
-if [[ "$(yq -r 'has("gates")' "$_exec_yaml" 2>/dev/null)" != "true" ]]; then
-  error_exit "DoD gates: ${_exec_yaml} has no 'gates:' key at all. The runner reads '.gates | keys'; an absent map is a malformed config, not an empty one." 1
-fi
-
-for _cand in "${_dod_candidates[@]}"; do
-  if [[ "$(yq -r ".gates.\"${_cand}\" != null" "$_exec_yaml" 2>/dev/null)" == "true" ]]; then
-    dod_gates="- ${_cand}"
-    break
-  fi
-done
-if [[ -z "$dod_gates" ]]; then
+_dod_gate_name="$(aid_plan_json_gate_name "$_exec_yaml")" || exit $?
+if [[ -n "$_dod_gate_name" ]]; then
+  dod_gates="- ${_dod_gate_name}"
+else
   # Reached only when the config WAS read and genuinely defines none of them —
   # a valid state for a project whose DoD rides on review rather than a gate.
-  dod_gates="<!-- no DoD gate declared: ${_exec_yaml} defines none of ${_dod_candidates[*]} -->"
-else
-  # The two maps must agree, and until 2026-09-02 nothing checked that they did.
-  # The gate above is chosen from `gates:` and written into plan.json; the
-  # GATES -> DONE precondition then judges the run against `gate_profiles:`,
-  # refusing when the plan requires a gate the active profile excludes. A
-  # project with hand-authored profiles (ACTA) had `docs_updated` in `gates:`
-  # and not in `standard`, so EVERY run the FSM auto-resolved to `standard`
-  # passed its gates and then wedged on the transition — after the whole gate
-  # run had been paid for, and with nothing at generation time to warn it.
-  #
-  # Checked here because generation is the last moment where both maps are
-  # visible and nothing is hash-bound yet. The FSM precondition stays as it is:
-  # an explicit `--profile <name>` can still exclude the gate, and only the FSM
-  # sees that. This is the earlier, cheaper half of the same guarantee.
-  #
-  # The set asked about is what the resolver can land on without anybody
-  # choosing (P097 Step 4, lib/aid-gate-profile-select.sh): every declared
-  # profile with `when_paths`, plus `default_profile`. The check reads the
-  # project's own table — no hard-coded names. A file without gate_profiles
-  # runs every gate, so its exclusion list is empty by definition.
-  _dod_gate_name="${dod_gates#- }"
-  _dod_bad=""
-  if [[ "$(yq -r '.gate_profiles != null' "$_exec_yaml" 2>/dev/null)" == "true" ]]; then
-    while IFS= read -r _prof; do
-      [[ -n "$_prof" ]] || continue
-      if [[ "$(P="$_prof" G="$_dod_gate_name" yq -r '[.gate_profiles[strenv(P)].include[]? | select(. == strenv(G))] | length' "$_exec_yaml" 2>/dev/null)" == "0" ]]; then
-        _dod_bad="${_dod_bad:+${_dod_bad}, }${_prof}"
-      fi
-    done < <(yq -r '[(.gate_profiles | to_entries[] | select(.value.when_paths != null) | .key), (.default_profile | select(. != null))] | unique | .[]' "$_exec_yaml" 2>/dev/null)
-  fi
-  if [[ -n "$_dod_bad" ]]; then
-    error_exit "DoD gate '${_dod_gate_name}' is defined in ${_exec_yaml} under gates: and would be written into this EPIC's plan.json, but the auto-resolvable profile(s) [${_dod_bad}] do not include it. Every run the FSM resolves to one of those would pass its gates and then be refused at GATES -> DONE (plan_gate_profile_excluded). Fix one of the two: add '${_dod_gate_name}' to those profiles' include[] in gate_profiles, or remove it from gates:." 1
-  fi
+  dod_gates="<!-- no DoD gate declared: ${_exec_yaml} defines none of ${AID_PLAN_JSON_DOD_CANDIDATES[*]} -->"
 fi
 
 # Dependencies section
