@@ -165,11 +165,11 @@ def write(project, measure_path, out_rel):
     rows = []
     if os.path.exists(inv):
         try:
-            seen = {}   # what the built site runs: keyframe name / (property, scenario) -> duration (ms)
+            seen, seen_scen = {}, {}   # what the built site runs: keyframe name / (property, scenario) -> duration (ms), name -> scenarios
             rec = os.path.join(project, ".aid-ui/build.motion.json")
             if os.path.exists(rec):
                 r = json.load(open(rec, encoding="utf-8"))
-                for k in r.get("keyframes") or []: seen[k.get("name")] = k.get("duration_ms")
+                for k in r.get("keyframes") or []: seen[k.get("name")] = k.get("duration_ms"); seen_scen[k.get("name")] = k.get("scenarios") or []
                 for t in r.get("transitions") or []: seen[(t.get("property"), t.get("scenario"))] = t.get("duration_ms")
             TRIG = {"load": "načtení", "scroll": "posun", "hover": "najetí", "focus": "zaměření", "page": "přechod stránky"}
             # labels for adopted items live beside the inventory (.aid-ui/motion-labels.json {id: label}): a label
@@ -179,13 +179,15 @@ def write(project, measure_path, out_rel):
             for it in (json.load(open(inv, encoding="utf-8")).get("items") or []):
                 if it.get("disposition") not in ("adopt", "replace"): continue
                 src = it.get("source") or {}
-                what = it.get("label") or labels.get(it.get("id")) or it.get("name") or (f"{it.get('property')} ({it.get('kind')})" if it.get("property") else it.get("id"))
-                scen = src.get("scenarios") or ([it.get("scenario")] if it.get("scenario") else []) or (["page"] if it.get("kind") == "page" else [])
+                what = labels.get(it.get("id")) or it.get("label") or it.get("name") or (f"{it.get('property')} ({it.get('kind')})" if it.get("property") else it.get("id"))
+                # one row per trigger: the built site's own triggers for a keyframe it runs, else the reference's
+                scen = seen_scen.get(it.get("target") or it.get("name")) or src.get("scenarios") or ([it.get("scenario")] if it.get("scenario") else []) or (["page"] if it.get("kind") == "page" else [])
                 ms = src.get("duration_ms") or seen.get(it.get("target") or it.get("name")) or seen.get((it.get("property"), it.get("scenario")))
                 if it.get("kind") == "page":   # the built site's own leave + arrive keyframes
                     ms = (seen.get("page-leave") or 0) + (seen.get("page-arrive") or 0)
-                rows.append(f"| {what} | {', '.join(TRIG.get(x, x) for x in scen) or '-'} | "
-                            f"{(str(round(ms / 1000, 2)).rstrip('0').rstrip('.') + ' s') if isinstance(ms, (int, float)) and ms else 'okamžitě'} |")
+                dur = (str(round(ms / 1000, 2)).rstrip('0').rstrip('.') + ' s') if isinstance(ms, (int, float)) and ms else 'okamžitě'
+                for x in (scen or ["-"]):
+                    rows.append(f"| {what} | {TRIG.get(x, x)} | {dur} |")
         except (OSError, ValueError, TypeError, AttributeError): rows = []
     if rows:   # the motion as rules: what the visitor sees, on what, how long (the client could not use a bag of durations)
         L += ["Podle soupisu pohybu vzoru (`.aid-ui/motion.json`): co se hýbe, na jaký podnět a jak dlouho.", "",
