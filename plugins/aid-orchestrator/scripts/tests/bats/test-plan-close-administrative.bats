@@ -439,3 +439,18 @@ _st() { yq -r ".$2" "$1"; }
   [[ "$output" == *"finished"* ]]
   [ "$(_st "$sf" state)" = "DONE" ]
 }
+
+@test "abandon: when the map entry cannot be removed, abandon fails and says so; the rerun completes it" {
+  _ab_project
+  local sf; sf="$(aid_fixture_direct_run "$AB" P910 EXECUTE)"
+  jq -n --arg sf "$sf" '{"E-910-1_1": {state_file: $sf, run_id: "R-E910-1", state: "EXECUTE", branch: "plan/P910", plan_id: "P910"}}' > "$MAP"
+  chmod 555 "$AB/.aid-o/work"
+  run bash "$AFSM" abandon "$sf" --reason "the map is not writable right now"
+  chmod 755 "$AB/.aid-o/work"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not be removed"* ]]
+  [ "$(_st "$sf" abandoned)" = "true" ]
+  run bash "$AFSM" abandon "$sf" --reason "the map is not writable right now"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("E-910-1_1")' "$MAP")" = "false" ]
+}

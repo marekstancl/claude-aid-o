@@ -705,8 +705,11 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
 1. Read `fsm-state.yaml` → find `current_step`
 2. Check dependency graph → pick the next step with all deps satisfied
 3. Dispatch the step — or the wave, when `aid_parallel_decide` says `concurrent` (rule 15):
-   - Serial: work happens on the EPIC branch `task/{epic_id}/main` (created by `aid-fsm.sh init`).
-     Concurrent: each step in `.aid-worktrees/step-<step_id>` on `step/<step_id>`, merged back one at a time.
+   - Serial: work happens on the run's branch — `fsm-state.yaml` `branch`: `task/{epic_id}/main`
+     for an EPIC run (created by `aid-fsm.sh init`), `plan/{plan_id}` itself for a direct run
+     (`direct: true`, P111 — no task branch exists and none is created).
+     Concurrent: each step in `.aid-worktrees/step-<step_id>` on `step/<step_id>`, merged back one
+     at a time into the run's branch (the tree it is checked out in).
    - Build the dispatch contract + agent prompt (per `pipeline.md §4`)
    - Dispatch agent via Task tool
    - Collect output → save to `work/evidence/{epic_id}/{run_id}/steps/{step_id}/`; validate the `aid-return` block

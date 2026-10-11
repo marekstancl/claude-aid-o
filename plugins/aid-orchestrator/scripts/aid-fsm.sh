@@ -4306,6 +4306,13 @@ cmd_abandon() {
   if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
     aid_active_boundary_sync "$root" "$epic_id" abandon "$state_file" || true
   fi
+  # The map entry is what /aid-status and the main-branch guard read: success
+  # is reported only once it is really gone (the sync itself is best-effort).
+  local _map="${root}/.aid-o/work/active-runs.json"
+  if [[ -f "$_map" ]] && jq -e --arg e "$epic_id" 'has($e)' "$_map" >/dev/null 2>&1; then
+    echo "ERROR: abandon: ${epic_id} is ERROR and abandoned in its state, but its active-runs.json entry could not be removed (lock or write failure) — run the same command again; it completes the removal." >&2
+    exit 1
+  fi
   # A direct run's foreign worktrees are the PM's to remove (named, never copied).
   local fw=""
   fw="$(jq -r '[.repo_roots[]?.worktree] | join(", ")' "$(dirname "$state_file")/plan.json" 2>/dev/null || true)"

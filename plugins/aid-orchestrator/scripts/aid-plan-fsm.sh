@@ -11182,11 +11182,13 @@ _pr_main() {
     fi
   else
     local wt init_rc=0 steps
+    local -a init_force=()
+    [[ -n "$force_init_reason" ]] && init_force=(--force --reason "$force_init_reason")
     wt="$(plan_state_get "$plan_id" worktree_path 2>/dev/null || true)"
     [[ -n "$wt" && -d "$wt" ]] || wt="${PR_ROOT}/.aid-worktrees/plan-${plan_id}"
     steps="$(jq '.steps | length' "$pj")"
     ( cd "$wt" && bash "${SCRIPT_DIR}/aid-fsm.sh" init "$PR_EPIC" "$PR_RUN" "$steps" full "plan/${plan_id}" "$tip" "$state_file" \
-        --plan "$plan_abs" --direct ${force_init_reason:+--force --reason "$force_init_reason"} ) || init_rc=$?
+        --plan "$plan_abs" --direct "${init_force[@]}" ) || init_rc=$?
     if [[ "$init_rc" -ne 0 ]]; then
       echo "ERROR: plan-run: aid-fsm.sh init --direct failed (rc=${init_rc}); the manifest entry stays running — rerun plan-run to repeat init." >&2
       exit "$init_rc"

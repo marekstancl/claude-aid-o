@@ -457,3 +457,10 @@ _seed_rr() {   # <project> <foreign> [base_branch] — the fixture plan declarin
   [[ "$output" == *"plan_json_unverified"* ]]
   [ ! -f "$EV/fsm-state.yaml" ]
 }
+
+@test "direct: --force-init-reason with spaces reaches init as one reason" {
+  _run --force-init-reason "approved lineage recovery; with spaces & a semicolon"
+  [ "$status" -eq 0 ]
+  grep -q 'approved lineage recovery; with spaces & a semicolon' "$EV/timeline.jsonl" \
+    || grep -rq 'approved lineage recovery; with spaces & a semicolon' "$R/.aid-o/work/audit-log.jsonl"
+}
