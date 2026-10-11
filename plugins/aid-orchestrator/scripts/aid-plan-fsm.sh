@@ -2152,10 +2152,11 @@ _pfsm_refuse_inside_plan_worktree() {
 # dispatcher (i.e. when P068 lands them).
 # =============================================================================
 cmd_plan_start() {
-  local plan_id="" mode="" project_root_opt="" op_id_opt="" plan_file_opt="" autonomy_opt=""
+  local plan_id="" mode="" project_root_opt="" op_id_opt="" plan_file_opt="" autonomy_opt="" declared_epics_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --mode) mode="${2:-}"; shift 2 ;;
+      --declared-epics) declared_epics_opt="${2:-}"; shift 2 ;;   # P111: plan-run declares its one run
       --project-root) project_root_opt="${2:-}"; shift 2 ;;
       --op-id) op_id_opt="${2:-}"; shift 2 ;;
       # P073 Step 11 (P083): the path of the source plan this lifecycle is
@@ -2434,7 +2435,7 @@ cmd_plan_start() {
   # ── Shared tail (both fresh and crash-resumed paths land here with
   #    target_head set and the op record at git_applied) ────────────────────
   local lc_rc=0
-  aid_lifecycle_set_plan_mode "$plan_id" "$mode" "$project_root" || lc_rc=$?
+  aid_lifecycle_set_plan_mode "$plan_id" "$mode" "$project_root" "$declared_epics_opt" || lc_rc=$?
   if [[ "$lc_rc" -ne 0 ]]; then
     local lc_why="op remains at git_applied, retry converges"
     case "$lc_rc" in   # the return codes lib/aid-lifecycle.sh documents
@@ -2969,10 +2970,11 @@ _pfsm_record_merged() {
 # =============================================================================
 cmd_epic_complete() {
   local plan_id="" epic_id="" abandon=0 supersede_by="" reason="" full_tests=0 \
-        project_root_opt="" op_id_opt=""
+        project_root_opt="" op_id_opt="" direct=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --abandon) abandon=1; shift ;;
+      --direct) direct=1; shift ;;   # P111: the direct run's record (done-advance --direct calls it)
       --supersede-by)
         _pfsm_require_optval "epic-complete" "$1" "$#" || exit 2
         supersede_by="$2"; shift 2 ;;
@@ -3060,6 +3062,11 @@ cmd_epic_complete() {
 
   local cur_status
   cur_status="$(jq -r '.status // empty' <<<"$entry_json" 2>/dev/null)"
+  local entry_direct; entry_direct="$(jq -r '.direct // false' <<<"$entry_json" 2>/dev/null)"
+  if [[ "$direct" -eq 1 && "$entry_direct" != "true" ]]; then
+    echo "PRECONDITION FAIL: epic-complete --direct: ${epic_id} is not a direct run of ${plan_id} — it completes on its task branch $(jq -r '.task_branch // "<none>"' <<<"$entry_json"): epic-complete ${plan_id} ${epic_id}" >&2
+    exit 1
+  fi
 
   local now esc_now esc_reason
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -3155,7 +3162,18 @@ cmd_epic_complete() {
   # failed was completed and merged).
   local epic_done_phase=""
   epic_done_phase="$(yq -r '.done_phase // ""' "$state_file" 2>/dev/null)" || epic_done_phase=""
-  if [[ "$epic_done_phase" != "release" ]]; then
+  # P111: a direct run is recorded by done-advance BEFORE release is written,
+  # so its precondition is done_phase review.
+  if [[ "$direct" -eq 1 ]]; then
+    if [[ "$(yq -r '.direct // false' "$state_file" 2>/dev/null)" != "true" ]]; then
+      echo "PRECONDITION FAIL: epic-complete --direct: ${state_file} is not a direct run's state (direct: true)." >&2
+      exit 1
+    fi
+    if [[ "$epic_done_phase" != "review" ]]; then
+      echo "PRECONDITION FAIL: epic-complete --direct: ${epic_id} is DONE at done_phase='${epic_done_phase:-<empty>}' (must be review — done-advance review release --direct records it)." >&2
+      exit 1
+    fi
+  elif [[ "$epic_done_phase" != "release" ]]; then
     echo "PRECONDITION FAIL: ${epic_id} is DONE at done_phase='${epic_done_phase:-<empty>}' (must be release) at ${state_file} — run done-advance review release first." >&2
     exit 1
   fi
@@ -3184,6 +3202,8 @@ cmd_epic_complete() {
   local _ec_base _ec_task_branch
   _ec_base="$(jq -r '.epic_base_commit // empty' <<<"$entry_json" 2>/dev/null)" || _ec_base=""
   _ec_task_branch="$(jq -r '.task_branch // empty' <<<"$entry_json" 2>/dev/null)" || _ec_task_branch=""
+  # P111: a direct run's work is on plan/<id>; the gate floor reads its diff there.
+  [[ "$direct" -eq 1 ]] && _ec_task_branch="plan/${plan_id}"
   if [[ -f "$_ec_exec_yaml" && -n "$_ec_base" && -n "$_ec_task_branch" ]] \
      && git -C "$project_root" rev-parse --verify --quiet "$_ec_task_branch" >/dev/null 2>&1; then
     local _ec_paths _ec_rc=0
@@ -3327,6 +3347,19 @@ cmd_epic_complete() {
     exit "$urc"
   fi
 
+  if [[ "$direct" -eq 1 ]]; then
+    # P111: the steps committed on plan/<id> — the run IS on the plan branch.
+    # merged_to_plan at its tip (the state half of a merge), then PLAN_SYNC:
+    # plan-finalize reads exactly what it reads after the last EPIC merged.
+    local mrc=0
+    _pfsm_record_merged "$plan_id" "$epic_id" "$_ec_tip" "$cur_status" || mrc=$?
+    [[ "$mrc" -eq 0 ]] || exit "$mrc"
+    if ! _pfsm_plan_state_set "$plan_id" PLAN_SYNC; then
+      echo "PRECONDITION FAIL: epic-complete --direct: ${epic_id} is merged_to_plan but ${plan_id} could not move to PLAN_SYNC (plan state $(plan_state_get "$plan_id" plan_state 2>/dev/null)) — rerun converges." >&2
+      exit 1
+    fi
+  fi
+
   local crc=0
   plan_op_commit "$plan_id" "$op_id" || crc=$?
   if [[ "$crc" -ne 0 ]]; then
@@ -3334,7 +3367,7 @@ cmd_epic_complete() {
     exit "$crc"
   fi
 
-  echo "${epic_id} pending"
+  if [[ "$direct" -eq 1 ]]; then echo "${epic_id} merged_to_plan (direct, plan/${plan_id} at ${_ec_tip})"; else echo "${epic_id} pending"; fi
   exit 0
 }
 
@@ -3436,6 +3469,13 @@ cmd_epic_merge_to_plan() {
   if [[ "$erc" -eq 5 ]]; then
     echo "PRECONDITION FAIL: manifest for ${plan_id} is corrupt." >&2
     exit 5
+  fi
+  if [[ "$(jq -r '.direct // false' <<<"$entry_json" 2>/dev/null)" == "true" ]]; then
+    # P111: a direct run's commits are already on plan/<id> — nothing to merge.
+    echo "PRECONDITION FAIL: ${epic_id} is a direct run of ${plan_id} (its steps committed on plan/${plan_id}) — there is no task branch to merge." >&2
+    echo "next: aid-fsm.sh done-advance review release <state_file> --direct (it records merged_to_plan)" >&2
+    echo "(pipeline.md §When AID refuses: direct_run_no_epic_merge)" >&2
+    exit 1
   fi
   if [[ -z "$entry_json" ]]; then
     echo "PRECONDITION FAIL: no epic_runs entry for ${epic_id} in ${plan_id}'s manifest — nothing to merge (run epic-start first)." >&2
@@ -4237,6 +4277,67 @@ _pfsm_fix_class() {
 # ---------------------------------------------------------------------------
 # _pfsm_finalize_freeze <root> <plan_id> [frozen_at] [accept_ancillary]  — the `--stage freeze` body.
 # ---------------------------------------------------------------------------
+
+# ── P111 repo_roots at the close ─────────────────────────────────────────────
+# _pfsm_direct_plan_json <root> <plan_id> — the direct run's plan.json, or nothing.
+_pfsm_direct_plan_json() {
+  local d
+  d="$(plan_manifest_get "$2" '[.plan_boundary_manifest.epic_runs[]? | select(.direct == true) | .evidence_dir][0] // ""' 2>/dev/null || true)"
+  [[ -n "$d" && "$d" != "null" && -f "$1/$d/plan.json" ]] && printf '%s\n' "$1/$d/plan.json"
+}
+
+# _pfsm_foreign_freeze <root> <plan_id> — record each foreign branch's head (and
+# its commit count since the recorded base) in the candidate manifest.
+_pfsm_foreign_freeze() {
+  local root="$1" plan_id="$2" pj rr='[]' n i name path br base head cnt
+  pj="$(_pfsm_direct_plan_json "$root" "$plan_id")" || true
+  [[ -n "$pj" ]] || return 0
+  n="$(jq '.repo_roots // [] | length' "$pj")"
+  [[ "$n" -gt 0 ]] || return 0
+  for (( i=0; i<n; i++ )); do
+    IFS=$'\t' read -r name path br base < <(jq -r --argjson i "$i" '.repo_roots[$i] | [.name, .path, .branch, .base] | @tsv' "$pj")
+    head="$(git -C "$path" rev-parse --verify --quiet "refs/heads/${br}" 2>/dev/null || true)"
+    cnt=0; [[ -n "$head" ]] && cnt="$(git -C "$path" rev-list --count "${base}..${head}" 2>/dev/null || echo 0)"
+    rr="$(jq -c --arg n "$name" --arg b "$br" --arg h "$head" --arg base "$base" --argjson c "$cnt" '. + [{name: $n, branch: $b, head: $h, base: $base, commits: $c}]' <<< "$rr")"
+  done
+  _plan_manifest_atomic_mutate "$plan_id" '.plan_boundary_manifest.repo_roots = $rr' --argjson rr "$rr" >/dev/null
+}
+
+# _pfsm_foreign_verify <root> <plan_id> <stage> — the close's check of the
+# foreign branches against the FROZEN heads: the worktree still exists, the
+# branch has not moved since freeze, and every step's reported repo_commits
+# range is reachable from the frozen head (a commit only in the live checkout
+# is not). Prints the refusal and returns 1 (foreign_branch_unverified).
+_pfsm_foreign_verify() {
+  local root="$1" plan_id="$2" stage="$3" pj frozen n i name path wt br head tip errs="" ret slug range
+  pj="$(_pfsm_direct_plan_json "$root" "$plan_id")" || true
+  [[ -n "$pj" ]] || return 0
+  n="$(jq '.repo_roots // [] | length' "$pj")"
+  [[ "$n" -gt 0 ]] || return 0
+  frozen="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.repo_roots // []' 2>/dev/null || echo '[]')"
+  for (( i=0; i<n; i++ )); do
+    IFS=$'\t' read -r name path wt br < <(jq -r --argjson i "$i" '.repo_roots[$i] | [.name, .path, .worktree, .branch] | @tsv' "$pj")
+    head="$(jq -r --arg n "$name" 'first(.[]? | select(.name == $n) | .head) // ""' <<< "$frozen")"
+    if [[ -z "$head" ]]; then errs+="  ${name}: no head of ${br} was frozen (the branch is missing, or freeze ran before it existed)"$'\n'; continue; fi
+    if [[ ! -d "$wt" ]]; then errs+="  ${name}: the worktree ${wt} is gone"$'\n'; continue; fi
+    tip="$(git -C "$path" rev-parse --verify --quiet "refs/heads/${br}" 2>/dev/null || true)"
+    if [[ "$tip" != "$head" ]]; then errs+="  ${name}: ${br} moved after freeze (frozen ${head}, now ${tip:-<missing>})"$'\n'; continue; fi
+    while IFS= read -r ret; do
+      while IFS=$'\t' read -r slug range; do
+        [[ "$slug" == "$name" && -n "$range" ]] || continue
+        git -C "$path" merge-base --is-ancestor "${range##*..}" "$head" 2>/dev/null \
+          || errs+="  ${name}: the reported range ${range} ($(basename "$(dirname "$ret")")) is not on ${br} at the frozen head ${head} — a commit in ${path}'s live checkout does not count; drop it there by hand"$'\n'
+      done < <(jq -r '.repo_commits[]? | [(.repo // ""), (.range // "")] | @tsv' "$ret" 2>/dev/null)
+    done < <(find "$(dirname "$pj")/steps" -name return.json 2>/dev/null | sort)
+  done
+  [[ -z "$errs" ]] && return 0
+  echo "PRECONDITION FAIL: plan-finalize --stage ${stage}: ${plan_id}'s foreign branches do not carry what the steps reported:" >&2
+  printf '%s' "$errs" >&2
+  echo "next: commit the foreign work in its worktree on its branch (or restore the worktree), then plan-finalize ${plan_id} --stage freeze again" >&2
+  echo "(pipeline.md §When AID refuses: foreign_branch_unverified)" >&2
+  return 1
+}
+
 _pfsm_finalize_freeze() {
   local root="$1" plan_id="$2" frozen_at="${3:-}" accept_ancillary="${4:-0}"
   # P074 Step 8/10: the TREE this stage acts on is the plan's execution
@@ -4547,6 +4648,9 @@ _pfsm_finalize_freeze() {
   # leave one function above — and here it would ALSO never self-heal on its own,
   # because a re-run short-circuits on the "already frozen at the same head"
   # branch. Fail closed and name the repair; the candidate itself is durable.
+  _pfsm_foreign_freeze "$root" "$plan_id" \
+    || { echo "PRECONDITION FAIL: could not record ${plan_id}'s foreign branch heads in the candidate — re-run '--stage freeze'." >&2; return 1; }
+
   if ! _pfsm_plan_state_set "$plan_id" "PLAN_GATES"; then
     echo "PRECONDITION FAIL: the candidate for ${plan_id} was recorded (manifest is at PLAN_GATES with the candidate pair), but the plan STATE FILE could not be moved to PLAN_GATES — the two records now disagree. Re-run '--stage freeze': it reconciles the state file from the recorded candidate. Do not proceed to the gate run until both read PLAN_GATES." >&2
     return 1
@@ -6234,6 +6338,7 @@ _pfsm_finalize_decide() {
     echo "PRECONDITION FAIL: plan-finalize --stage decide: ${plan_id} is in state '${cur_state:-<none>}' — the decision runs out of PLAN_REVIEW. Run: plan-finalize ${plan_id} --stage gates" >&2
     return 1
   fi
+  _pfsm_foreign_verify "$root" "$plan_id" decide || return 1
   # The plan worktree stands on the plan branch head: the candidate, or the head
   # an ancillary-only move was accepted at (the drift check above proved it).
   if [[ "$(git -C "$troot" rev-parse HEAD 2>/dev/null)" != "$(git -C "$troot" rev-parse "refs/heads/plan/${plan_id}" 2>/dev/null)" ]]; then
@@ -6342,6 +6447,9 @@ _pfsm_finalize_decide() {
   plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "AWAITING_PM"' >/dev/null 2>&1 || true
 
   echo "$candidate"
+  # P111: the foreign branches the PM merges by hand (the decision names them).
+  local _fb; _fb="$(jq -r '[.plan_summary.foreign_branches[]? | "\(.name): \(.branch) at \(.head[0:12]) (\(.commits) commit(s))"] | join("; ")' "$decision" 2>/dev/null || true)"
+  [[ -n "$_fb" ]] && echo "Foreign branches to merge by hand after MERGE (repo_roots): ${_fb}" >&2
   echo "READY: ${plan_id} at ${candidate:0:12} — gates green, the whole-plan round closed, obligations settled. PM page: ${run_dir_rel}/pm-summary.md. ${plan_id} is AWAITING_PM: show the PM the MERGE | FIX | ABORT card; MERGE runs plan-merge-to-main." >&2
   return 0
 }
@@ -8119,11 +8227,44 @@ cmd_worktrees() {
   return 0
 }
 
+# _pfsm_declare_epics <project_root> <plan_id> <list> <reason> — P111: rewrite
+# the committed lifecycle manifest's declared_epics (the repair the
+# lifecycle_epics_mismatch refusal names: a plan started before plan-run
+# declared its bold EPIC markers, the direct run is one run E-<nnn>-1_1).
+# Only while no run exists (epic_runs empty); on the target branch, through
+# the lifecycle layer's isolated commit; never without a reason.
+_pfsm_declare_epics() {
+  local root="$1" plan_id="$2" list="$3" reason="$4" mf rel tmp d n
+  if [[ ${#reason} -lt 10 ]]; then
+    echo "ERROR: plan-state --declare-epics needs --reason (at least 10 characters) — the rewrite of a committed declaration is recorded with its why." >&2
+    return 2
+  fi
+  for d in ${list//,/ }; do
+    [[ "$d" =~ ^E-[0-9]{3,}-[0-9]+_[0-9]+$ ]] || { echo "ERROR: plan-state --declare-epics: '${d}' is not an EPIC id (E-<nnn>-<k>_<K>)" >&2; return 2; }
+  done
+  n="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.epic_runs | length' 2>/dev/null || echo 0)"
+  if [[ -n "$n" && "$n" != "0" && "$n" != "null" ]]; then
+    echo "PRECONDITION FAIL: ${plan_id} already has ${n} run(s) in its plan-boundary manifest — declared_epics is rewritten only before any run exists (a declaration under a running EPIC would change the close's denominator mid-plan)." >&2
+    return 1
+  fi
+  rel=".aid-lifecycle/manifests/${plan_id}.yaml"; mf="$(aid_manifest_path "$plan_id" "$root")"
+  [[ -f "$mf" ]] || { echo "PRECONDITION FAIL: ${plan_id} has no lifecycle manifest (${rel}) — run plan-start first." >&2; return 1; }
+  _aid_lc_precheck_write "$root" "$rel" || return $?
+  tmp="$(mktemp)"
+  { yq 'del(.declared_epics)' "$mf" | grep -v '^null$'; echo "declared_epics:"; for d in ${list//,/ }; do echo "  - {id: ${d}, scope: required}"; done; } > "$tmp" 2>/dev/null
+  if ! aid_lifecycle_validate_artifact "$tmp" "plan-lifecycle-manifest.schema.json"; then rm -f "$tmp"; return 1; fi
+  mv "$tmp" "$mf"
+  _aid_lc_isolated_commit "$root" "lifecycle: ${plan_id} declares ${list} (${reason})" "$rel" >/dev/null || { echo "PRECONDITION FAIL: the declared_epics rewrite for ${plan_id} could not be committed — re-run." >&2; return 5; }
+  echo "plan-state: ${plan_id} declared_epics = ${list}" >&2
+  return 0
+}
+
 cmd_plan_state() {
-  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt="" supersede_epic="" recreate_wt=0 set_autonomy="" bind_session="" bind_given=0
+  local plan_id="" repair=0 attest_ref="" attest_reason="" attest_epic="" project_root_opt="" supersede_epic="" recreate_wt=0 set_autonomy="" bind_session="" bind_given=0 declare_epics=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --repair) repair=1; shift ;;
+      --declare-epics) declare_epics="${2:-}"; shift 2 ;;   # P111: the lifecycle_epics_mismatch repair
       # P074 Step 11: the audited repair for a damaged, deleted or unrecorded
       # execution worktree. Like --supersede-epic it is a TRANSACTION, not a
       # force: nothing is bypassed, so it writes no waiver and sets no
@@ -8164,6 +8305,11 @@ cmd_plan_state() {
   project_root="$(_pfsm_resolve_project_root "$project_root_opt")"
   export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
+
+  if [[ -n "$declare_epics" ]]; then
+    _pfsm_declare_epics "$project_root" "$plan_id" "$declare_epics" "$attest_reason"
+    exit $?
+  fi
 
   if (( bind_given )); then
     [[ -n "$bind_session" ]] || { echo "ERROR: plan-state: --bind-session needs the session id — run it from the session itself: --bind-session \"\$CLAUDE_CODE_SESSION_ID\"" >&2; exit 2; }
@@ -9548,6 +9694,7 @@ _pfsm_finalize_produce() {
     echo "PRECONDITION FAIL: plan-finalize --stage produce runs out of PLAN_REVIEW (the gates stage puts the plan there). Run: plan-finalize ${plan_id} --stage gates" >&2
     return 1
   fi
+  _pfsm_foreign_verify "$root" "$plan_id" produce || return 1
 
   mkdir -p "$run_dir_abs" 2>/dev/null || {
     echo "PRECONDITION FAIL: plan-finalize --stage produce: cannot create ${run_dir_abs}." >&2; return 1; }
@@ -10653,11 +10800,335 @@ cmd_epic_base() {
   jq -r '.epic_base_commit' <<<"$entry_json"
 }
 
+# ═══════════════════════════════════════════════════════════════════════════
+# plan-run (P111) — the direct run: the plan starts straight from its file.
+#
+#   aid-plan-fsm.sh plan-run <plan_id> [--auto] [--force --reason <text>]
+#                            [--force-init-reason <text>] [--project-root <dir>]
+#
+# Every duty generation performs, without generation's artefacts (no EPIC file,
+# no queue entry, no task branch): plan-start in plan_branch mode with the one
+# run declared, readiness, the CP1 seal, the whole plan's plan.json from the
+# shared reader (lib/aid-plan-json.sh), the D5 contract check, epic_input.md,
+# the manifest entry (direct, no task branch), the receipt check, and
+# `aid-fsm.sh init --direct` on plan/<id>. One transaction under the
+# GENERATION lock (the pipeline's own, so the two roads exclude each other),
+# recorded stage by stage in the one generation/transaction.json
+# (kind: plan_run); a rerun after any interruption skips what is recorded.
+# The plan lock is never taken here — the commands called take it themselves
+# (aid_lock_acquire is not re-entrant).
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _pr_refuse <code> <message> <next> [rc] — every plan-run refusal: the line,
+# a `next:` line and the pipeline.md suffix (the drift scan reads all three).
+_pr_refuse() {
+  echo "PRECONDITION FAIL: plan-run: $2" >&2
+  echo "next: $3" >&2
+  echo "(pipeline.md §When AID refuses: $1)" >&2
+  exit "${4:-1}"
+}
+
+_pr_tx() { aid_gen_transaction_path "$PR_PLAN_ID"; }
+_pr_stage_done() { jq -e --arg n "$1" 'any(.stages[]?; .name == $n)' "$(_pr_tx)" >/dev/null 2>&1; }
+_pr_stage_record() {   # <name> [sha]
+  aid_gen_tx_update "$PR_PLAN_ID" '.stages = ((.stages // []) | map(select(.name != $n)) + [{name: $n, done_at: $t} + (if $s == "" then {} else {sha: $s} end)])' \
+    --arg n "$1" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg s "${2:-}"
+  _pfsm_crash_seam "$1"
+}
+
+# _pr_generation_trace — prints what proves the plan went the EPIC way, or nothing.
+_pr_generation_trace() {
+  local tx gd n f
+  tx="$(_pr_tx)"; gd="$(dirname "$tx")"
+  if [[ -f "$tx" && "$(jq -r '.kind // "generation"' "$tx" 2>/dev/null)" != "plan_run" ]]; then
+    echo "a generation transaction (${tx})"; return 0
+  fi
+  for f in "$tx".completed-* "$tx".superseded-*; do
+    [[ -e "$f" ]] && { echo "an archived generation transaction ($(basename "$f"))"; return 0; }
+  done
+  if [[ -f "$(plan_manifest_path "$PR_PLAN_ID")" ]]; then
+    n="$(plan_manifest_get "$PR_PLAN_ID" '[.plan_boundary_manifest.epic_runs[]? | select(.direct != true) | .epic_id] | join(",")' 2>/dev/null || true)"
+    [[ -n "$n" ]] && { echo "a generated EPIC run in the plan manifest (${n})"; return 0; }
+  fi
+  for f in "${PR_ROOT}/.aid-o/tasks/E-${PR_NNN}-"*.md "${PR_ROOT}/.aid-o/tasks/archive/E-${PR_NNN}-"*.md; do
+    [[ -e "$f" ]] && { echo "an EPIC file ($(basename "$f"))"; return 0; }
+  done
+  return 0
+}
+
+# _pr_dead_run — prints why the plan's direct run can no longer be started.
+_pr_dead_run() {
+  local tx e st
+  tx="$(_pr_tx)"
+  if [[ -f "$tx" ]] && _pr_stage_done done; then echo "its direct run ${PR_EPIC} already started (transaction complete)"; return 0; fi
+  if [[ -f "$(plan_manifest_path "$PR_PLAN_ID")" ]]; then
+    e="$(plan_manifest_get "$PR_PLAN_ID" ".plan_boundary_manifest.epic_runs[]? | select(.epic_id == \"${PR_EPIC}\" and .direct == true) | .status" 2>/dev/null || true)"
+    [[ "$e" == abandoned ]] && { echo "its direct run ${PR_EPIC} was abandoned"; return 0; }
+  fi
+  st="$(aid_state_path ".aid-o/work/evidence/${PR_EPIC}/${PR_RUN}/fsm-state.yaml")"
+  if [[ -f "$st" && "$(yq -r '.abandoned // false' "$st" 2>/dev/null)" == "true" ]]; then
+    echo "its direct run ${PR_EPIC} was abandoned"; return 0
+  fi
+  return 0
+}
+
+_pr_main() {
+  local plan_id="" auto=0 force=false force_reason="" force_init_reason="" project_root_opt=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --auto) auto=1; shift ;;
+      --force) force=true; shift ;;
+      --reason) force_reason="${2:-}"; shift 2 ;;
+      --force-init-reason) force_init_reason="${2:-}"; shift 2 ;;
+      --project-root) project_root_opt="${2:-}"; shift 2 ;;
+      --*) echo "ERROR: plan-run: unknown flag: $1" >&2; exit 2 ;;
+      *) if [[ -z "$plan_id" ]]; then plan_id="$1"; else echo "ERROR: plan-run: unexpected argument: $1" >&2; exit 2; fi; shift ;;
+    esac
+  done
+  [[ -n "$plan_id" ]] || { echo "Usage: aid-plan-fsm.sh plan-run <plan_id> [--auto] [--force --reason <text>] [--force-init-reason <text>] [--project-root <dir>]" >&2; exit 2; }
+  _pfsm_validate_plan_id "$plan_id" || { echo "ERROR: plan-run: plan_id must match ^P[0-9]{3}\$ (got '${plan_id}')" >&2; exit 2; }
+  if [[ "$force" == true && ${#force_reason} -lt 20 ]]; then
+    echo "ERROR: plan-run: --force needs --reason of at least 20 characters (the waiver records it)." >&2; exit 2
+  fi
+
+  # shellcheck source=lib/common.sh
+  source "${SCRIPT_DIR}/lib/common.sh"            # error_exit (inside this subshell only)
+  set +e
+  source "${SCRIPT_DIR}/lib/aid-generation-authority.sh"
+  source "${SCRIPT_DIR}/lib/aid-plan-json.sh"
+  source "${SCRIPT_DIR}/lib/aid-source-plan-graph.sh"
+
+  PR_PLAN_ID="$plan_id"
+  PR_ROOT="$(_pfsm_resolve_project_root "$project_root_opt")"
+  export AID_PLAN_STATE_PROJECT_ROOT="$PR_ROOT" AID_PLAN_MANIFEST_PROJECT_ROOT="$PR_ROOT"
+  _aid_pipeline_state_root="$PR_ROOT"
+  PR_NNN="$(aid_gen_plan_num "$plan_id")"
+  PR_EPIC="$(aid_gen_epic_id "$plan_id" 1 1)"
+  PR_RUN="$(aid_gen_run_id "$PR_EPIC")"
+  local plan plan_rel plan_abs ev_rel ev_dir pj tx gd
+  plan="$(aid_lifecycle_plan_file "$plan_id" "$PR_ROOT")"
+  [[ -n "$plan" && -f "$plan" ]] || _pr_refuse plan_not_found "no plan file for ${plan_id} under ${PR_ROOT}/.aid-o/plans" "write the plan first (/aid-plan)" 1
+  plan_abs="$(realpath "$plan")"
+  # The state root's plan, never a scratch tree (the generators' rule since P079).
+  case "$plan_abs" in
+    "$(realpath "$PR_ROOT")/.aid-worktrees/"*)
+      _pr_refuse plan_in_scratch_tree "the plan ${plan_abs} lives only in a scratch tree" "put it in ${PR_ROOT}/.aid-o/plans/ and run again" 1 ;;
+  esac
+  plan_rel="${plan_abs#"$(realpath "$PR_ROOT")/"}"
+  ev_rel=".aid-o/work/evidence/${PR_EPIC}/${PR_RUN}"; ev_dir="${PR_ROOT}/${ev_rel}"; pj="${ev_dir}/plan.json"
+  tx="$(_pr_tx)"; gd="$(dirname "$tx")"
+  mkdir -p "$gd" || exit 3
+
+  # ── ONE hold for the whole transaction: the generation lock ───────────────
+  if ! aid_gen_lock "$plan_id"; then
+    _pr_refuse generation_lock_held "a generation or plan-run for ${plan_id} holds $(_gen_transaction_path "$plan_id").lock (holder pid $(aid_gen_lock_holder "$plan_id")); waited ${AID_GEN_LOCK_TIMEOUT}s" \
+      "wait for that run to finish, then run plan-run again — it resumes" 3
+  fi
+  trap 'aid_gen_unlock' EXIT
+
+  # ── the two roads exclude each other by their artefacts ───────────────────
+  local trace dead
+  trace="$(_pr_generation_trace)"
+  [[ -z "$trace" ]] || _pr_refuse generation_already_started "${plan_id} was already generated the EPIC way: ${trace} — the two roads never mix on one plan" \
+    "finish it on the old path (/aid-run ${PR_EPIC%_*}_<K>), or close it administratively and write a new plan" 1
+  dead="$(_pr_dead_run)"
+  if [[ -n "$dead" ]]; then
+    local fw
+    fw="$(jq -r '[.repo_roots[]?.worktree] | join(", ")' "$pj" 2>/dev/null || true)"
+    _pr_refuse plan_run_already_started "${plan_id}: ${dead}${fw:+ — foreign worktrees to remove by hand: ${fw}}" \
+      "/aid-run --resume ${plan_id}, or close the plan administratively: aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\"" 1
+  fi
+
+  # ── the transaction file (kind: plan_run) ─────────────────────────────────
+  local plan_sha
+  plan_sha="$(sha256sum "$plan" | awk '{print $1}')"
+  if [[ ! -f "$tx" ]]; then
+    local skel
+    skel="$(jq -n --arg schema "aid-generation-transaction/v1" --arg plan_id "$plan_id" --arg plan_path "$plan" \
+      --arg plan_sha256 "$plan_sha" --arg tb "$(aid_gen_target_branch)" --arg th "$(aid_gen_target_head)" \
+      --argjson pdv "$AID_GEN_PHASE_DERIVATION_VERSION" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --arg e "$PR_EPIC" --arg r "$PR_RUN" \
+      '{schema:$schema, kind:"plan_run", plan_id:$plan_id, plan_path:$plan_path, plan_sha256:$plan_sha256,
+        target_branch:$tb, target_head:$th, phase_derivation_version:$pdv, total_phases:1,
+        authority_sha256:null, phases:{"1": {epic_id:$e, run_id:$r}}, stages:[],
+        direct:{epic_id:$e, run_id:$r, repo_roots:[]}, created_at:$now, updated_at:$now}')"
+    aid_gen_write_atomic "$tx" "$skel" || exit 3
+  elif [[ "$(jq -r '.plan_sha256 // ""' "$tx")" != "$plan_sha" ]]; then
+    _pr_refuse plan_changed_since_seal "${plan} changed since this plan-run sealed it (recorded $(jq -r '.plan_sha256' "$tx"), now ${plan_sha}) — a run never starts from a plan other than the one CP1 passed" \
+      "restore the sealed plan bytes and rerun, or (no run started yet) archive the transaction: mv ${tx} ${tx}.superseded-\$(date +%s), then rerun plan-run — CP1 is consulted again" 1
+  fi
+
+  # Stage 1 — plan-start in plan_branch mode, the one run declared.
+  if [[ ! -f "$(plan_state_path "$plan_id")" ]]; then
+    local ps_rc=0
+    bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-start "$plan_id" --mode plan_branch --project-root "$PR_ROOT" \
+      --plan-file "$plan" --declared-epics "$PR_EPIC" $([[ "$auto" -eq 1 ]] && echo --autonomy auto) >/dev/null || ps_rc=$?
+    [[ "$ps_rc" -eq 0 ]] || { echo "ERROR: plan-run: plan-start ${plan_id} failed (rc=${ps_rc}) — see above; nothing else was started." >&2; exit "$ps_rc"; }
+  fi
+  _pr_stage_done plan_start || _pr_stage_record plan_start
+
+  # Stage 2 — readiness (the canonical pre-generation contract), one run.
+  if ! _pr_stage_done readiness; then
+    local r_out r_rc=0
+    r_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$plan" --total 1 --project-root "$PR_ROOT" \
+      --write-provisional "${gd}/provisional-graph.json" 2>&1)" || r_rc=$?
+    if [[ "$r_rc" -ne 0 ]]; then printf '%s\n' "$r_out" >&2; echo "ERROR: plan-run: readiness failed for ${plan} — repair the plan; nothing was sealed." >&2; exit 7; fi
+    _pr_stage_record readiness
+  fi
+
+  # Stage 3 — the CP1 seal (reused when it still binds this identity; a moved
+  # target head re-seals, the gate is cheap). The transaction's identity
+  # follows the head the seal records.
+  aid_gen_tx_update "$plan_id" '.target_head = $h' --arg h "$(aid_gen_target_head)"
+  aid_gen_seal "$plan" "$plan_id" 1 direct "$force" "$force_reason" \
+    "$(printf "aid-plan-fsm.sh plan-run %q --force --reason %q" "$plan_id" "<why, at least 20 characters>")"
+  _gen_flush_stderr
+  _pr_stage_record seal "$(jq -r '.self_sha256' "$(aid_gen_authority_path "$plan_id")")"
+
+  # Stage 4 — the committed lifecycle manifest declares exactly the one run.
+  local declared
+  declared="$(git -C "$PR_ROOT" show "$(aid_gen_target_branch):.aid-lifecycle/manifests/${plan_id}.yaml" 2>/dev/null | yq -r '[.declared_epics[]?.id] | join(",")' 2>/dev/null || true)"
+  [[ "$declared" == "$PR_EPIC" ]] || _pr_refuse lifecycle_epics_mismatch \
+    "${plan_id}'s committed lifecycle manifest declares '${declared:-<none>}', a direct run is exactly ${PR_EPIC} (the plan was started before plan-run with its EPIC markers)" \
+    "aid-plan-fsm.sh plan-state ${plan_id} --declare-epics ${PR_EPIC} --reason \"direct run: one run per plan\"" 1
+  _pr_stage_done lifecycle || _pr_stage_record lifecycle
+
+  # Stage 5 — plan.json of the WHOLE plan, through the shared reader.
+  if ! _pr_stage_done plan_json || [[ ! -f "$pj" ]]; then
+    mkdir -p "$ev_dir" || exit 3
+    local steps_tmp; steps_tmp="$(mktemp)"
+    ( aid_plan_json_steps_from_plan "$plan" > "$steps_tmp" ) || { rm -f "$steps_tmp"; echo "ERROR: plan-run: the plan's steps could not be read (see above)." >&2; exit 1; }
+    ( aid_plan_json_build --steps-json "$steps_tmp" --out "$pj" --epic-id "$PR_EPIC" --plan "$plan_rel" \
+        --direct --execution "${PR_ROOT}/.aid-o/config/execution.yaml" ) || { rm -f "$steps_tmp"; echo "ERROR: plan-run: plan.json could not be built (see above)." >&2; exit 1; }
+    rm -f "$steps_tmp"
+    aid_gen_tx_update "$plan_id" '.direct.repo_roots = $rr' --argjson rr "$(jq -c '.repo_roots // []' "$pj")"
+    _pr_stage_record plan_json "$(sha256sum "$pj" | awk '{print $1}')"
+  fi
+
+  # Stage 6 — D5: the contract check over the built plan.json.
+  if ! _pr_stage_done contract_validate; then
+    local cv_dir="${gd}/c0" cv_json cv_rc=0
+    mkdir -p "$cv_dir"
+    cv_json="$(bash "${SCRIPT_DIR}/gates/aid-contract-validate.sh" "$pj" 2>>"${cv_dir}/c0-producer.log")" || cv_rc=$?
+    printf '%s\n' "$cv_json" > "${cv_dir}/contract-validate.json"
+    if [[ "$cv_rc" -ne 0 ]] || ! jq -e '.result == "pass"' "${cv_dir}/contract-validate.json" >/dev/null 2>&1; then
+      echo "ERROR: plan-run: the D5 contract check failed for ${pj} — see ${cv_dir}/contract-validate.json" >&2; exit 4
+    fi
+    _pr_stage_record contract_validate
+  fi
+
+  # Stage 7 — epic_input.md: the file the close reads the plan from (plan_ref).
+  if ! _pr_stage_done epic_input || [[ ! -f "${ev_dir}/epic_input.md" ]]; then
+    printf -- '---\nplan_ref: %s\nrun: direct\nepic_id: %s\n---\n\n# %s — the direct run of %s\n\nThis run was started by `aid-plan-fsm.sh plan-run %s` straight from the plan (P111): no EPIC file; the plan is the specification.\n' \
+      "$plan_rel" "$PR_EPIC" "$PR_EPIC" "$plan_id" "$plan_id" > "${ev_dir}/epic_input.md"
+    _pr_stage_record epic_input
+  fi
+
+  # Stage 8 — foreign worktrees (repo_roots): created or adopted here.
+  _pr_repo_roots_worktrees "$pj" || exit $?
+  _pr_stage_done worktrees || _pr_stage_record worktrees
+
+  # Stage 9 — the manifest entry: direct, no task branch, proven on plan/<id>.
+  local tip entry
+  tip="$(git -C "$PR_ROOT" rev-parse --verify --quiet "plan/${plan_id}" 2>/dev/null)" || tip=""
+  [[ -n "$tip" ]] || _pr_refuse direct_run_needs_plan_branch "plan/${plan_id} does not exist after plan-start" "aid-plan-fsm.sh plan-start ${plan_id} --mode plan_branch" 1
+  entry="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.epic_runs[]? | select(.epic_id == \"${PR_EPIC}\")" 2>/dev/null || true)"
+  local state_file="${ev_dir}/fsm-state.yaml"
+  if [[ -z "$entry" ]]; then
+    plan_manifest_add_epic "$plan_id" "$PR_EPIC" "$PR_RUN" "" "$tip" "plan/${plan_id}" "$ev_rel" proven direct >/dev/null \
+      || { echo "ERROR: plan-run: the manifest entry for ${PR_EPIC} could not be written — rerun." >&2; exit 1; }
+  elif [[ ! -f "$state_file" && "$(jq -r '.epic_base_commit' <<<"$entry")" != "$tip" ]]; then
+    # The run has not started: its base is whatever the plan branch's tip is.
+    plan_manifest_update_epic_base "$plan_id" "$PR_EPIC" "$(jq -r '.epic_base_commit' <<<"$entry")" "$tip" >/dev/null \
+      || { echo "ERROR: plan-run: the base of ${PR_EPIC} could not be re-recorded at ${tip} — rerun." >&2; exit 1; }
+  fi
+  _pr_stage_done manifest || _pr_stage_record manifest
+
+  # Stage 10 — the receipt: plan.json against the plan's own graph and bytes,
+  # checked every time right before init (a tampered plan.json never runs).
+  local graph
+  graph="$(aid_source_plan_graph "$plan" 1 2>/dev/null)" || _pr_refuse plan_json_unverified "the source graph of ${plan} cannot be built" "aid-generation-readiness.sh ${plan} --total 1" 1
+  # One run takes every step: EPIC markers the plan still carries are ignored.
+  graph="$(jq -c '.steps |= map(.epic = 1)' <<< "$graph")"
+  if ! aid_gen_receipt_check "$graph" 1 "$pj" "$(realpath "$PR_ROOT/$plan_rel")" \
+     || [[ "$(jq -r '.source_plan_sha256 // ""' "$pj")" != "$plan_sha" ]]; then
+    _pr_refuse plan_json_unverified "${pj} does not match the plan's step graph or bytes — FSM init was not attempted" \
+      "rebuild it: remove ${pj} and rerun plan-run" 1
+  fi
+  _pr_stage_record receipt "$(sha256sum "$pj" | awk '{print $1}')"
+
+  # Stage 11 — init --direct on plan/<id> (idempotent on this run's own state).
+  if [[ -f "$state_file" ]]; then
+    if [[ "$(yq -r '.direct // false' "$state_file")" != "true" || "$(yq -r '.branch // ""' "$state_file")" != "plan/${plan_id}" ]]; then
+      _pr_refuse plan_run_already_started "${state_file} exists and is not this direct run" "inspect it; a stale state is moved aside by hand" 1
+    fi
+  else
+    local wt init_rc=0 steps
+    wt="$(plan_state_get "$plan_id" worktree_path 2>/dev/null || true)"
+    [[ -n "$wt" && -d "$wt" ]] || wt="${PR_ROOT}/.aid-worktrees/plan-${plan_id}"
+    steps="$(jq '.steps | length' "$pj")"
+    ( cd "$wt" && bash "${SCRIPT_DIR}/aid-fsm.sh" init "$PR_EPIC" "$PR_RUN" "$steps" full "plan/${plan_id}" "$tip" "$state_file" \
+        --plan "$plan_abs" --direct ${force_init_reason:+--force --reason "$force_init_reason"} ) || init_rc=$?
+    if [[ "$init_rc" -ne 0 ]]; then
+      echo "ERROR: plan-run: aid-fsm.sh init --direct failed (rc=${init_rc}); the manifest entry stays running — rerun plan-run to repeat init." >&2
+      exit "$init_rc"
+    fi
+    _pfsm_crash_seam init_written
+  fi
+  _pr_stage_done init || _pr_stage_record init
+  [[ "$auto" -eq 1 ]] && plan_state_set_autonomy "$plan_id" auto >/dev/null 2>&1 || true
+  _pr_stage_record done
+  echo "plan-run: ${plan_id} runs as ${PR_EPIC} (${PR_RUN}) on plan/${plan_id} — state ${state_file}" >&2
+  printf '%s\n' "$state_file"
+}
+
+# _pr_repo_roots_worktrees <plan.json> — every repo_roots entry gets its
+# worktree <path>/.aid-worktrees/plan-<id>--<name> on plan/<id>-<project>,
+# created from the recorded base through the plan's own worktree helper
+# (_pfsm_worktree_add), or adopted when that path already has that branch out
+# (a resumed plan-run). A branch that exists WITHOUT the worktree is refused:
+# _pfsm_worktree_add would check it out, which is how another attempt's (or a
+# hand-made) branch would be built on. `.aid-worktrees/` goes into the foreign
+# repository's info/exclude first, so its live checkout stays clean.
+_pr_repo_roots_worktrees() {
+  local pj="$1" n i name path wt br base cur
+  n="$(jq '.repo_roots // [] | length' "$pj" 2>/dev/null || echo 0)"
+  [[ "$n" -gt 0 ]] || return 0
+  source "${SCRIPT_DIR}/lib/aid-gitignore-backfill.sh"
+  for (( i=0; i<n; i++ )); do
+    name="$(jq -r --argjson i "$i" '.repo_roots[$i].name' "$pj")"
+    path="$(jq -r --argjson i "$i" '.repo_roots[$i].path' "$pj")"
+    wt="$(jq -r --argjson i "$i" '.repo_roots[$i].worktree' "$pj")"
+    br="$(jq -r --argjson i "$i" '.repo_roots[$i].branch' "$pj")"
+    base="$(jq -r --argjson i "$i" '.repo_roots[$i].base' "$pj")"
+    gitignore_exclude_append "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/info/exclude" ".aid-worktrees/"
+    if [[ -d "$wt" ]]; then
+      cur="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+      if [[ "$cur" == "$br" ]]; then _pr_stage_done "worktree:${name}" || _pr_stage_record "worktree:${name}"; continue; fi
+      _pr_refuse repo_root_invalid "repo_roots '${name}': ${wt} exists but is on '${cur:-<not a worktree>}', not ${br}" \
+        "move ${wt} aside (it is not this run's), then run plan-run again" 1
+    fi
+    if git -C "$path" rev-parse --verify --quiet "refs/heads/${br}" >/dev/null 2>&1; then
+      _pr_refuse repo_root_invalid "repo_roots '${name}': ${path} already has the branch ${br} but no worktree at ${wt} — an earlier attempt or a hand-made branch; a direct run never builds on a branch it did not create" \
+        "delete or rename it: git -C ${path} branch -m ${br} ${br}-old (or -D after checking it), then run plan-run again" 1
+    fi
+    _pfsm_worktree_add "$path" "$wt" "$br" "plan-run never deletes a directory it did not create." "$base" >/dev/null \
+      || _pr_refuse repo_root_invalid "repo_roots '${name}': the worktree ${wt} on ${br} could not be created (see above)" \
+           "fix what git said, then run plan-run again" 1
+    _pr_stage_record "worktree:${name}"
+    _pfsm_crash_seam worktree
+  done
+  return 0
+}
+
+cmd_plan_run() { ( _pr_main "$@" ); }
+
 main() {
   local sub="${1:-}"
   [[ $# -gt 0 ]] && shift
   case "$sub" in
     plan-start) cmd_plan_start "$@" ;;
+    plan-run) cmd_plan_run "$@" ;;
     epic-start) cmd_epic_start "$@" ;;
     epic-complete) cmd_epic_complete "$@" ;;
     epic-merge-to-plan) cmd_epic_merge_to_plan "$@" ;;

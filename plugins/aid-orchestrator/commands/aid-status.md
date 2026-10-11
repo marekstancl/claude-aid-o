@@ -886,18 +886,22 @@ EOF
 # epic_row, so the controller column, the STALLED? marker and the resume lines
 # are rendered in exactly one place.
 plan_epics() {
-  local _root _map _facts _epic _state _run _branch _gm
+  local _root _map _facts _epic _state _run _branch _gm _sf
   _root="$(aid_state_root)" || return 1
   _map="$_root/.aid-o/work/active-runs.json"
   [ -f "$_map" ] || return 0
   _facts="$(controller_facts)"
   # Sorted FIRST, then annotated: a note line is emitted with its own row, so
-  # it can never be sorted away from it.
+  # it can never be sorted away from it. A run whose state file says
+  # `abandoned: true` is not shown (P111: abandon removes its map entry; a
+  # stale entry must not render it as work).
   jq -r --arg p "${1:-}" '
     to_entries[] | select((.value.plan_id // "") == $p)
     | [.key, (.value.state // "?"), (.value.run_id // "?"), (.value.branch // "?"),
-       (if .value.governs_main then "governs-main" else "-" end)] | @tsv' \
-    "$_map" 2>/dev/null | sort | while IFS="$(printf '\t')" read -r _epic _state _run _branch _gm; do
+       (if .value.governs_main then "governs-main" else "-" end), (.value.state_file // "-")] | @tsv' \
+    "$_map" 2>/dev/null | sort | while IFS="$(printf '\t')" read -r _epic _state _run _branch _gm _sf; do
+      case "$_sf" in /*|-) ;; *) _sf="$_root/$_sf" ;; esac
+      [ "$_sf" != "-" ] && grep -q '^abandoned: true' "$_sf" 2>/dev/null </dev/null && continue
       epic_row "    " "$_epic" "$_state" "$_run" "$_branch" "$_gm" "$_facts"
       epic_review_line "$_epic" "$_run"
     done
@@ -940,12 +944,21 @@ _queue_reader() {
   source "${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must point at the installed plugin}/scripts/lib/aid-queue-write.sh"
 }
 
+# _epic_abandoned <plan_id> <epic_id> — the plan manifest records the EPIC
+# abandoned (P111: a queue entry an abandon left behind is not work).
+_epic_abandoned() {
+  local _mf
+  _mf="$(aid_state_root)/.aid-o/work/plan-state/${1}/plan-boundary-manifest.json"
+  [ -f "$_mf" ] && jq -e --arg e "$2" 'any(.plan_boundary_manifest.epic_runs[]?; .epic_id == $e and .status == "abandoned")' "$_mf" >/dev/null 2>&1
+}
+
 queue_rows() {
   local _want="${1:-}" _id _st _pr
   _queue_reader || return 0
   while IFS= read -r _id; do
     [ -n "$_id" ] || continue
     [ "$(queue_get_field "$_id" plan_id)" = "$_want" ] || continue
+    _epic_abandoned "$_want" "$_id" && continue
     _st="$(queue_get_status "$_id")"
     _pr="$(queue_get_field "$_id" priority)"
     printf '    %s  [%s]  %s\n' "$_id" "${_st:-pending}" "${_pr:--}"
@@ -966,6 +979,7 @@ queue_candidate() {
     [ "$(queue_get_field "$_id" plan_id)" = "$_want" ] || continue
     _st="$(queue_get_status "$_id")"
     case "$_st" in pending|blocked|"") ;; *) continue ;; esac
+    _epic_abandoned "$_want" "$_id" && continue
     _nd="$(queue_get_deps "$_id" | grep -c '[^[:space:]]' || true)"
     if [ "${_nd:-0}" -gt 0 ]; then
       printf '%s  [queue:%s, %s dep(s) unverified]\n' "$_id" "${_st:-pending}" "$_nd"

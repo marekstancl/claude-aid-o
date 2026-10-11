@@ -2080,3 +2080,90 @@ SC_WHY="the PM moved this point to the close of the plan"
   run "$FSM" increment-step "$SF"; echo "$output"
   [ "$status" -eq 1 ]; [[ "$output" == *"changed since the EPIC was generated"* ]]
 }
+
+# ── P111 Step 3: done-advance --direct records the direct run on plan/<id> ───
+_direct_done() {   # a direct run of P910 in DONE/review (aid_fixture_direct_run)
+  source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"
+  DSF="$(aid_fixture_direct_run "$TEST_PROJECT_ROOT" P910 DONE review)" || return 1
+  DMF="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P910/plan-boundary-manifest.json"
+  PFSM="$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"
+}
+
+@test "direct: done-advance review release --direct records merged_to_plan at the plan tip, PLAN_SYNC and release" {
+  _direct_done
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.plan_boundary_manifest.epic_runs[0].status' "$DMF")" = "merged_to_plan" ]
+  [ "$(jq -r '.plan_boundary_manifest.epic_runs[0].epic_merge_commit' "$DMF")" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P910)" ]
+  [ "$(yq -r '.plan_state' "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P910/plan-state.yaml")" = "PLAN_SYNC" ]
+  [ "$(yq -r '.done_phase' "$DSF")" = "release" ]
+}
+
+@test "direct: a failed epic-complete call leaves done_phase review, names the rerun, and the same done-advance then succeeds" {
+  _direct_done
+  cp "$DMF" "$DMF.keep"
+  jq '.plan_boundary_manifest.epic_runs = []' "$DMF.keep" > "$DMF"
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 1 ]
+  [ "$(yq -r '.done_phase' "$DSF")" = "review" ]
+  [[ "$output" == *"next: "*"done-advance review release"*"--direct"* ]]
+  cp "$DMF.keep" "$DMF"
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.done_phase' "$DSF")" = "release" ]
+}
+
+@test "direct: done-advance without --direct on a direct state, and with it on a non-direct state, is refused done_advance_needs_direct" {
+  _direct_done
+  run "$FSM" done-advance review release "$DSF"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: done_advance_needs_direct)"* ]]
+  sed -i '/^direct: true$/d' "$DSF"
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"done_advance_needs_direct"* ]]
+  [ "$(yq -r '.done_phase' "$DSF")" = "review" ]
+}
+
+@test "direct: a second epic-complete --direct is a no-op with a line" {
+  _direct_done
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 0 ]
+  run bash "$PFSM" epic-complete P910 E-910-1_1 --direct --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"E-910-1_1 merged_to_plan"* ]]
+}
+
+@test "direct: epic-complete --direct on a non-direct run is refused naming its task branch" {
+  _direct_done
+  jq '.plan_boundary_manifest.epic_runs[0] |= (del(.direct) | .task_branch = "task/E-910-1_1/main")' "$DMF" > "$DMF.t" && mv "$DMF.t" "$DMF"
+  run bash "$PFSM" epic-complete P910 E-910-1_1 --direct --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not a direct run"*"task/E-910-1_1/main"* ]]
+}
+
+@test "direct: epic-complete --direct derives the gate floor from the plan branch's diff" {
+  _direct_done
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" <<'YML'
+gates:
+  lint: {command: "true", required: true}
+  tests: {command: "true", required: true}
+gate_profiles:
+  docs: {include: [lint], when_paths: ["docs/**"]}
+  full: {include: [lint, tests]}
+default_profile: full
+YML
+  local wt="$TEST_PROJECT_ROOT/.aid-worktrees/plan-P910"
+  mkdir -p "$wt/src"; echo x > "$wt/src/code.sh"; git -C "$wt" add src/code.sh; git -C "$wt" commit -qm "a code change on the plan branch"
+  run bash "$PFSM" epic-complete P910 E-910-1_1 --direct --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.plan_boundary_manifest.epic_runs[0].epic_completion_sha' "$DMF")" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P910)" ]
+  [ "$(jq -r '.plan_boundary_manifest.epic_runs[0].epic_final_profile_floor' "$DMF")" = "full" ]
+}
+
+@test "direct: epic-merge-to-plan on a direct run is refused direct_run_no_epic_merge" {
+  _direct_done
+  run bash "$PFSM" epic-merge-to-plan P910 E-910-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: direct_run_no_epic_merge)"* && "$output" == *"next: "* ]]
+}

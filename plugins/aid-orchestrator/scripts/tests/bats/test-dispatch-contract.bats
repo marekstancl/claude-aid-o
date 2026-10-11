@@ -298,3 +298,128 @@ JSON
   [ "$status" -eq 0 ]
   [ "$VERSION" = "$(jq -r .version contract.json)" ]   # the packet is untouched
 }
+
+# ── P111 Step 3: a direct run commits on plan/<id> ──────────────────────────
+_direct_contract() {   # <branch-in-state> — the contract inside a direct run's evidence dir
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  git add -A; git commit -q -m seed
+  DEV=".aid-o/work/evidence/E-111-1_1/R-E111-1"
+  mkdir -p "$DEV/steps/step_1_backend"
+  cp contract.json "$DEV/steps/step_1_backend/contract.json"
+  printf 'epic_id: E-111-1_1\nrun_id: R-E111-1\nstate: EXECUTE\nbranch: %s\ndirect: true\n' "$1" > "$DEV/fsm-state.yaml"
+  printf 'x\n' > src/thing.sh
+  _return '{}'
+}
+
+@test "direct: a step commit from a direct run lands on plan/<id>" {
+  _direct_contract plan/P111
+  git checkout -q -b plan/P111
+  run aid_dispatch_contract_commit "$TEST_DIR" "$DEV/steps/step_1_backend/contract.json" .aid-o/return.json "step 1"
+  [ "$status" -eq 0 ]
+  [ "$(git log -1 --format=%s plan/P111)" = "step 1" ]
+}
+
+@test "direct: the same direct run's commit on a task branch is refused" {
+  _direct_contract plan/P111
+  git checkout -q -b task/E-111-1_1/main
+  run aid_dispatch_contract_commit "$TEST_DIR" "$DEV/steps/step_1_backend/contract.json" .aid-o/return.json "step 1"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not the direct run's plan branch"*"checkout plan/P111"* ]]
+}
+
+@test "direct: a state that names another plan branch does not open plan/<id> (identity binding)" {
+  _direct_contract plan/P222
+  git checkout -q -b plan/P111
+  run aid_dispatch_contract_commit "$TEST_DIR" "$DEV/steps/step_1_backend/contract.json" .aid-o/return.json "step 1"
+  [ "$status" -eq 1 ]
+  [ "$(git rev-list --count HEAD)" -eq 1 ]
+}
+
+# ── P111 Step 4: repo_roots — one mapping in plan.json ──────────────────────
+_rr_setup() {   # a direct plan.json whose step names a file in the declared foreign repo "docs"
+  git init -q -b main . 2>/dev/null || git init -q .
+  printf 'foreign/\nother/\ndocs-link\nrr*.json\nret*.json\n' > .gitignore   # the fixture's own files are not the step's changes
+  git config user.email t@t; git config user.name T; git add -A; git commit -q -m seed
+  F="$TEST_DIR/foreign/docs"; mkdir -p "$F"; git -C "$F" init -q -b main
+  git -C "$F" config user.email t@t; git -C "$F" config user.name T
+  echo a > "$F/page.md"; git -C "$F" add page.md; git -C "$F" commit -q -m init
+  WT="$F/.aid-worktrees/plan-P111--docs"
+  git -C "$F" worktree add -q -b plan/P111-proj "$WT" main
+  jq -n --arg f "$F" --arg wt "$WT" '{direct: true,
+    repo_roots: [{name: "docs", path: $f, worktree: $wt, branch: "plan/P111-proj", base: "x"}],
+    steps: [{id: "step_1_docs", role: "docs", objective: "write the foreign page",
+             outputs: ["Create: `\($f)/new.md` — page", "Modify: `\($f)/page.md` — edit"],
+             allowed_paths: ["\($f)/new.md", "\($f)/page.md", "src/thing.sh"], acceptance_criteria: []}]}' > rr-plan.json
+}
+
+@test "repo-roots: a Files entry under the declared path is rewritten to the worktree in allowed_paths and expected_artifacts" {
+  _rr_setup
+  run aid_dispatch_contract_build rr-plan.json 0 rr-contract.json
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.allowed_paths' rr-contract.json)" = "$(jq -nc --arg w "$WT" '["\($w)/new.md", "\($w)/page.md", "src/thing.sh"]')" ]
+  [ "$(jq -c '.expected_artifacts' rr-contract.json)" = "$(jq -nc --arg w "$WT" '["\($w)/new.md"]')" ]
+  [ "$(jq -r '.repo_roots[0].never' rr-contract.json)" = "$F" ]
+  run aid_dispatch_contract_prompt rr-contract.json
+  [[ "$output" == *"work in ${WT}"*"never in ${F}"* ]]
+}
+
+@test "repo-roots: a symlinked or trailing-slash spelling of the declared path is rewritten too" {
+  _rr_setup
+  ln -s "$F" "$TEST_DIR/docs-link"
+  jq --arg l "$TEST_DIR/docs-link" '.steps[0].allowed_paths = ["\($l)/new.md", "\($l)/sub/"] | .steps[0].outputs = []' rr-plan.json > rr2.json
+  run aid_dispatch_contract_build rr2.json 0 rr2-contract.json
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.allowed_paths' rr2-contract.json)" = "$(jq -nc --arg w "$WT" '["\($w)/new.md", "\($w)/sub/"]')" ]
+}
+
+@test "repo-roots: an entry in an undeclared foreign repository is refused foreign_repo_undeclared" {
+  _rr_setup
+  local G="$TEST_DIR/other"; mkdir -p "$G"; git -C "$G" init -q
+  jq --arg g "$G" '.steps[0].allowed_paths += ["\($g)/x.md"]' rr-plan.json > rr3.json
+  run aid_dispatch_contract_build rr3.json 0 rr3-contract.json
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: foreign_repo_undeclared)"* && "$output" == *"next: "* ]]
+  [ ! -f rr3-contract.json ]
+}
+
+@test "repo-roots: a foreign worktree removed mid-run makes the next build refuse, naming it and how to recreate it" {
+  _rr_setup
+  git -C "$F" worktree remove --force "$WT"
+  run aid_dispatch_contract_build rr-plan.json 0 rr-contract.json
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"${WT} of repo_roots 'docs' is gone"* && "$output" == *"worktree add ${WT} plan/P111-proj"* ]]
+}
+
+@test "repo-roots: aid_dispatch_repo_resolve prints the worktree and the branch; range_ok with a branch demands reachability" {
+  _rr_setup
+  run aid_dispatch_repo_resolve rr-plan.json docs
+  [ "$output" = "$(printf '%s\t%s' "$WT" plan/P111-proj)" ]
+  run aid_dispatch_repo_resolve rr-plan.json nope
+  [ "$status" -eq 1 ]
+  local base; base="$(git -C "$WT" rev-parse HEAD)"
+  echo b >> "$WT/page.md"; git -C "$WT" commit -qam "on the worktree branch"
+  aid_dispatch_repo_range_ok "$WT" "${base}..$(git -C "$WT" rev-parse HEAD)" plan/P111-proj
+  echo c >> "$F/page.md"; git -C "$F" commit -qam "only in the live checkout"
+  run aid_dispatch_repo_range_ok "$WT" "${base}..$(git -C "$F" rev-parse HEAD)" plan/P111-proj
+  [ "$status" -ne 0 ]
+  aid_dispatch_repo_range_ok "$WT" "${base}..$(git -C "$F" rev-parse HEAD)"   # present, not reachable: only the branch form refuses
+}
+
+@test "repo-roots: the return validator accepts repo_commits named by the slug and refuses a range off the worktree branch" {
+  _rr_setup
+  local DEV=".aid-o/work/evidence/E-111-1_1/R-E111-1"; mkdir -p "$DEV/steps/step_1_docs"
+  cp rr-plan.json "$DEV/plan.json"
+  aid_dispatch_contract_build "$DEV/plan.json" 0 "$DEV/steps/step_1_docs/contract.json"
+  local base; base="$(git -C "$WT" rev-parse HEAD)"
+  echo new > "$WT/new.md"; git -C "$WT" add new.md; git -C "$WT" commit -qm "foreign step"
+  jq -n --arg v "$(jq -r .version "$DEV/steps/step_1_docs/contract.json")" --arg r "${base}..$(git -C "$WT" rev-parse HEAD)" \
+    '{contract_version: $v, changed_files: [], gates: [], step_status: "done", repo_commits: [{repo: "docs", range: $r}]}' > ret.json
+  run aid_dispatch_contract_validate "$DEV/steps/step_1_docs/contract.json" ret.json "$TEST_DIR"
+  [ "$status" -eq 0 ]
+  echo c >> "$F/page.md"; git -C "$F" commit -qam "live checkout commit"
+  jq --arg r "${base}..$(git -C "$F" rev-parse HEAD)" '.repo_commits[0].range = $r' ret.json > ret2.json
+  run aid_dispatch_contract_validate "$DEV/steps/step_1_docs/contract.json" ret2.json "$TEST_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not a <base>..<head> reachable from plan/P111-proj"* ]]
+}

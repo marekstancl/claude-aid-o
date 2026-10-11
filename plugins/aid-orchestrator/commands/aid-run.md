@@ -27,8 +27,10 @@ and nothing said why.
 ## Usage
 
 ```
+/aid-run P<NNN>                 # the direct run: start the plan straight from its file (plan-run, P111)
+/aid-run --auto P<NNN>          # the direct run, autonomous
 /aid-run                        # manual mode — start or auto-detect active EPIC
-/aid-run <epic-id>              # manual mode — start specific EPIC
+/aid-run <epic-id>              # manual mode — start specific EPIC (the old EPIC path, removed by P112)
 /aid-run --auto                 # autonomous mode — auto-approve S-effort fixes
 /aid-run --auto --epic <id>     # autonomous mode for specific EPIC
 /aid-run --resume               # resume interrupted run from fsm-state.yaml
@@ -310,13 +312,60 @@ carve-out exists to distinguish itself from.
 
 ## PRE-FLIGHT (before FSM starts)
 
+PRE-FLIGHT branches on the argument:
+
+- **A plan id (`/aid-run P<NNN>`) — the direct run (P111), the default for a new
+  plan.** One command does everything generation did, without EPIC files, a
+  queue or task branches:
+  `{plugin_path}/scripts/aid-plan-fsm.sh plan-run P<NNN> [--auto]`. It holds the
+  generation lock and records its stages in the plan's one
+  `generation/transaction.json` (`kind: plan_run`), so an interrupted start is
+  resumed by running the same command: plan-start in plan_branch mode with the
+  one run `E-<nnn>-1_1` declared → readiness → the CP1 seal → `plan.json` of the
+  WHOLE plan (`lib/aid-plan-json.sh`; `direct: true`) → D5 → `epic_input.md` →
+  the worktrees of the plan's `repo_roots` → the manifest entry (`direct: true`,
+  no task branch) → the receipt check → `aid-fsm.sh init … plan/<id> … --direct`.
+  It prints the state file; the run is one run of every step, on `plan/<id>`.
+  It refuses a plan generated the old way (`generation_already_started`) and a
+  second start (`plan_run_already_started`); the old pipeline refuses a plan
+  with a direct run the same way. `--force --reason` passes a forceable CP1
+  refusal (the PM's call, as below).
+- **An EPIC id (`/aid-run E-…`) — the old EPIC path, kept until P112** for plans
+  already generated: the pipeline below, unchanged.
+
+**`repo_roots` — another repository is a worktree, never its live checkout
+(direct run, P111).** A plan that changes files in another git repository
+declares it in its frontmatter:
+`repo_roots: [{name: docs, path: /opt/eco/docs, base_branch: main}]` (the lint
+refuses a path that is not a git repository outside the project —
+`repo_root_invalid`). `plan-run` creates — or on a rerun adopts — the worktree
+`<path>/.aid-worktrees/plan-<id>--<name>` on the branch `plan/<id>-<project>`
+(plan ids are per project) from the base branch's head, adds `.aid-worktrees/`
+to that repository's `info/exclude`, and records the ONE mapping
+`repo_roots[] = {name, path, worktree, branch, base}` in `plan.json`. In
+EXECUTE the step's contract names the worktree path for every such file
+(allowed paths and expected artifacts alike) and says "never in <path>"; the
+agent commits there and its return names the repository by its name:
+`repo_commits: [{repo: "docs", range: "<base>..<head>"}]`. The step check and
+the return validator resolve the name through the same mapping and require the
+range to be reachable from the worktree's branch — a commit made in the live
+checkout (it shares the object store) is refused (`OTHER_MISSING: docs`). A
+step naming a foreign repository the plan does not declare is refused
+(`foreign_repo_undeclared`). At the close, `plan-finalize --stage freeze`
+records each foreign branch's head; `produce` and `decide` refuse a missing
+worktree, a branch that moved after freeze, or a reported range not on it
+(`foreign_branch_unverified`); the decision, the PM card and the close page
+list the foreign branches (name, branch, head, commits). **Merging them is the
+PM's, by hand, after MERGE** — their gates are not run. The old EPIC path does
+not read `repo_roots` (absolute paths as before).
+
 **Plugin path verification:**
 1. Read `plugin_path` from `.aid-o/config/plugin.yaml`
 2. Verify: `test -f {plugin_path}/scripts/aid-fsm.sh`
 3. If stale or missing → re-discover: `glob ~/.claude/plugins/**/aid-orchestrator/scripts/aid-fsm.sh` → update `plugin.yaml`
 4. If still not found → abort with: "Plugin scripts not found. Run `/aid-init` to refresh."
 
-**Bash pipeline** (using resolved `plugin_path`) — when running from a plan,
+**Bash pipeline — the old EPIC path (until P112)** (using resolved `plugin_path`) — when running from a plan,
 steps 1–3 are ONE TRANSACTION held under a single lock:
 1. `{plugin_path}/scripts/aid-cp1-gate.sh` — the ONE CP1 call for the whole plan, before any output exists (skipped when a valid sealed authority already binds this identity).
 2. `generation-authority.json` + `transaction.json` — the sealed decision and the per-phase record, written under `.aid-o/work/evidence/<plan_id>/generation/`.
@@ -342,7 +391,10 @@ steps 1–3 are ONE TRANSACTION held under a single lock:
 
 **Before you commit anything, be on the branch you mean to commit to.** The
 pipeline leaves the plan worktree on `plan/<id>` after each init (step 7), so a
-step's commit belongs on that step's `task/<epic>/main` and getting there is the
+step's commit belongs on that step's `task/<epic>/main` (a DIRECT run's commit
+belongs on `plan/<id>` itself — `aid_dispatch_contract_commit` accepts that
+branch only for the run whose `fsm-state.yaml` says `direct: true` and names it)
+and getting there is the
 caller's job — no script switches for you at commit time. This is written here
 because agents were told they had got it wrong without ever having been told the
 rule (ACTA, 2026-08-31).
@@ -821,6 +873,21 @@ DONE uses two mechanically enforced sub-phases: `review` → `release`, managed 
 Steps 14-16 fork on the plan's declared release mode
 (`.aid-lifecycle/manifests/{plan_id}.yaml` → `mode`). Full instructions in
 `pipeline.md §7` — "Sub-phase: `release`".
+
+*A direct run (`direct: true` in `fsm-state.yaml`, started by `plan-run`, P111):*
+the controller runs `aid-fsm.sh done-advance review release <state> --direct` —
+ONE command, and it calls neither `epic-complete` nor `epic-merge-to-plan` from
+the controller. Before it writes `done_phase: release` it records the run
+`merged_to_plan` at the tip of `plan/{plan_id}` and moves the plan to
+`PLAN_SYNC` (it invokes `aid-plan-fsm.sh epic-complete … --direct` itself); a
+failure leaves `done_phase: review` and the same command is run again. The flag
+is required on a direct run and refused on an EPIC run
+(`done_advance_needs_direct`); `epic-merge-to-plan` refuses a direct run
+(`direct_run_no_epic_merge`). `--resume` after a crash inside it reruns
+`done-advance review release <state> --direct` (a second record is a no-op).
+Steps 14-16 below do not apply: the close is `plan-finalize` as for any plan.
+The pre-commit hook guards `plan/{plan_id}` until `done_phase: release`; the
+close's commits after that are `plan-finalize`'s.
 
 *In `plan_branch` mode (an intermediate EPIC inside an open plan):*
 

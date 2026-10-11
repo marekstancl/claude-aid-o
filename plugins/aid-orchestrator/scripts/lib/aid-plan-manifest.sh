@@ -596,7 +596,9 @@ _pm_check_invariants() {
   # ── epic_runs[]: required subfields present ──────────────────────────────
   local -a epic_run_required=(epic_id run_id task_branch epic_base_commit lineage evidence_dir status)
   for f in "${epic_run_required[@]}"; do
-    if ! jq -e --arg f "$f" '[.plan_boundary_manifest.epic_runs[] | .[$f] != null] | all' "$file" >/dev/null 2>&1; then
+    # P111: a direct run (one run on plan/<id>) has no task branch — task_branch
+    # may be null only on an entry that carries direct: true.
+    if ! jq -e --arg f "$f" '[.plan_boundary_manifest.epic_runs[] | (.[$f] != null or ($f == "task_branch" and .direct == true))] | all' "$file" >/dev/null 2>&1; then
       echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — an epic_runs[] entry is missing required field: $f" >&2
       return 1
     fi
@@ -967,7 +969,10 @@ plan_manifest_update() {
 # ===========================================================================
 # plan_manifest_add_epic <plan_id> <epic_id> <run_id> <task_branch>
 #                         <epic_base_commit> <epic_source_ref> <evidence_dir>
-#                         [lineage]
+#                         [lineage] [direct]
+#
+# The OPTIONAL 9th positional `direct` (P111) marks the one run of a plan run
+# straight from the plan on plan/<id>: `direct: true`, `task_branch: null`.
 #
 # Upserts one `epic_runs[]` entry (Edge Case: a second call for the SAME
 # epic_id updates the existing entry in place, never appends a duplicate),
@@ -995,11 +1000,16 @@ plan_manifest_update() {
 plan_manifest_add_epic() {
   local plan_id="$1" epic_id="$2" run_id="$3" task_branch="$4" \
         epic_base_commit="$5" epic_source_ref="$6" evidence_dir="$7" \
-        lineage="${8:-unproven}"
+        lineage="${8:-unproven}" direct="${9:-}"
 
   _plan_manifest_require_jq || return 2
   _pm_validate_plan_id_charset "$plan_id" || return 1
-  if [[ -z "$epic_id" || -z "$run_id" || -z "$task_branch" || -z "$epic_base_commit" || -z "$evidence_dir" ]]; then
+  if [[ -n "$direct" && "$direct" != "direct" ]]; then
+    _pm_warn "plan_manifest_add_epic: the optional 9th argument must be exactly 'direct' (got '${direct}') — nothing written"
+    return 1
+  fi
+  # A direct run (P111) has no task branch; every other entry needs one.
+  if [[ -z "$epic_id" || -z "$run_id" || ( -z "$task_branch" && -z "$direct" ) || -z "$epic_base_commit" || -z "$evidence_dir" ]]; then
     _pm_warn "plan_manifest_add_epic: epic_id, run_id, task_branch, epic_base_commit and evidence_dir are all required"
     return 1
   fi
@@ -1012,12 +1022,13 @@ plan_manifest_add_epic() {
   entry="$(jq -n \
     --arg epic_id "$epic_id" --arg run_id "$run_id" --arg task_branch "$task_branch" \
     --arg epic_base_commit "$epic_base_commit" --arg evidence_dir "$evidence_dir" \
-    --arg epic_source_ref "$epic_source_ref" --arg lineage "$lineage" \
-    '{epic_id: $epic_id, run_id: $run_id, task_branch: $task_branch,
+    --arg epic_source_ref "$epic_source_ref" --arg lineage "$lineage" --arg direct "$direct" \
+    '{epic_id: $epic_id, run_id: $run_id, task_branch: (if $direct == "direct" then null else $task_branch end),
       epic_base_commit: $epic_base_commit,
       epic_source_ref: (if $epic_source_ref == "" then null else $epic_source_ref end),
       lineage: $lineage, epic_merge_commit: null,
-      evidence_dir: $evidence_dir, status: "running"}')"
+      evidence_dir: $evidence_dir, status: "running"}
+     + (if $direct == "direct" then {direct: true} else {} end)')"
   if [[ -z "$entry" ]]; then
     _pm_warn "plan_manifest_add_epic: cannot build epic_runs entry JSON"
     return 1

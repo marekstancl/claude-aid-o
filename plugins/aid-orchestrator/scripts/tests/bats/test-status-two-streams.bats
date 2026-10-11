@@ -1219,3 +1219,50 @@ JSON
   run _doc_render 2; [ -n "$output" ]
   grep -Fq 'plan <id>: state unreadable — run plan-state <id>' "$DOC"
 }
+
+# ── P111 Step 5: an abandoned run is not work ───────────────────────────────
+@test "abandon: plan_epics and next_epic omit a run whose state file says abandoned (a stale map entry)" {
+  local d="$TEST_TMPDIR/ab1"
+  _repo "$d"; mkdir -p "$d/.aid-o/work"
+  _plan "$d" P080 EPIC_INTEGRATION
+  _run_state "$d" E-080-2_3 R-B READY
+  printf 'abandoned: true\nabandon_reason: closed administratively\n' >> "$d/.aid-o/work/evidence/E-080-2_3/R-B/fsm-state.yaml"
+  _run_state "$d" E-080-3_3 R-C READY
+  cat > "$d/.aid-o/work/active-runs.json" <<'JSON'
+{
+  "E-080-2_3": {"state_file": ".aid-o/work/evidence/E-080-2_3/R-B/fsm-state.yaml", "run_id": "R-B", "state": "READY", "branch": "task/E-080-2_3/main", "plan_id": "P080"},
+  "E-080-3_3": {"state_file": ".aid-o/work/evidence/E-080-3_3/R-C/fsm-state.yaml", "run_id": "R-C", "state": "READY", "branch": "task/E-080-3_3/main", "plan_id": "P080"}
+}
+JSON
+  _call "$d" 'plan_epics P080'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"E-080-2_3"* && "$output" == *"E-080-3_3"* ]]
+  _call "$d" 'next_epic P080'
+  [ "$output" = "E-080-3_3  [READY]" ]
+}
+
+@test "abandon: queue_rows and queue_candidate skip a queue entry whose EPIC the manifest records abandoned (the P080 shape)" {
+  local d="$TEST_TMPDIR/ab2"
+  _repo "$d"; mkdir -p "$d/.aid-o/work/plan-state/P080" "$d/.aid-o/config"
+  _plan "$d" P080 EPIC_INTEGRATION
+  echo '{}' > "$d/.aid-o/work/active-runs.json"
+  jq -n '{plan_boundary_manifest: {epic_runs: [{epic_id: "E-080-2_3", status: "abandoned"}, {epic_id: "E-080-3_3", status: "pending"}]}}' \
+    > "$d/.aid-o/work/plan-state/P080/plan-boundary-manifest.json"
+  cat > "$d/.aid-o/config/queue.yaml" <<'YAML'
+queue:
+  - epic_id: E-080-2_3
+    status: pending
+    priority: high
+    depends_on: []
+    plan_id: "P080"
+  - epic_id: E-080-3_3
+    status: pending
+    priority: low
+    depends_on: []
+    plan_id: "P080"
+YAML
+  _call "$d" 'queue_rows P080'
+  [[ "$output" != *"E-080-2_3"* && "$output" == *"E-080-3_3"* ]]
+  _call "$d" 'next_epic P080'
+  [ "$output" = "E-080-3_3  [queue:pending]" ]
+}

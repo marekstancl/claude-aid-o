@@ -72,8 +72,11 @@ I found: {file_or_topic}
 What would you like to do?
   (A) Brainstorm — explore the idea interactively
   (B) Write plan — create implementation plan from this input
-  (C) Generate EPIC — create EPICs from this plan
+  (C) Run it — the plan is reviewed: /aid-run P<NNN> (the direct run, P111)
 ```
+
+(Generating EPICs, `/aid-plan epic`, is the old path for plans generated
+already; P112 removes it.)
 
 ## Working while another plan is live
 
@@ -412,6 +415,7 @@ names it (minors too); an open plan-level blocker or major makes the list
 ### Step 9: Plan review (CP1)
 Run "Plan review (CP1)" below, from item 1.
 Output: `=== Step 9/9: Plan review ===`, then the PM card of its item 5.
+When it passes, the plan is ready to run: `/aid-run P<NNN>` (no EPIC generation).
 
 **Rules (hard failures if violated):**
 1. ONE question at a time — never batch
@@ -455,8 +459,14 @@ Write an exhaustive implementation plan from specification or topic.
 9. **Plan review (CP1)** — run "Plan review (CP1)" below, from item 1.
 
 Output: plan path, step count, quality gate results, plan review verdict.
+When the plan review passes, **the plan is ready to run: `/aid-run P<NNN>`** —
+the direct run (`aid-plan-fsm.sh plan-run`, P111) starts it straight from the
+plan, one run on `plan/<id>`, with no EPIC generation.
 
-## Mode: Generate EPIC
+## Mode: Generate EPIC — the old path (until P112)
+
+New plans do not need this mode: `/aid-run P<NNN>` runs them directly (P111).
+It stays for plans that are generated already, and P112 removes it.
 
 Parse a Plan file, generate every EPIC and plan.json first, verify one complete
 generation receipt, then create run files/FSM state and queue entries.

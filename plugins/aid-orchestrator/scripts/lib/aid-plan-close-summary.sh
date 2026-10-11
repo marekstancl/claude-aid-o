@@ -433,8 +433,14 @@ aid_plan_close_render() {
   fi
   if (( blockers_n > 0 )); then unresolved_state="critical"; else unresolved_state="ok"; fi
 
+  # P111: the foreign branches (repo_roots) the PM merges by hand — counted by
+  # the producer (plan_summary.foreign_branches), joined onto the merge row (the
+  # block's six rows are its cap).
+  local foreign
+  foreign="$(jq -r '[(.foreign_branches // [])[] | "\(.name) \(.branch) @\(.head[0:7]) (\(.commits) commit(ů))"] | join(", ")' <<<"$ps" 2>/dev/null || true)"
   local items_json next_json links_json
   items_json="$(jq -n \
+    --arg foreign "$foreign" \
     --arg cand "$(_apcs_short "$cand_sha")" \
     --arg tgt "$(_apcs_short "$target_sha")" \
     --arg tref "${target_ref:-—}" \
@@ -445,7 +451,8 @@ aid_plan_close_render() {
     --arg rcost "$run_cost" --arg pcost "$plan_cost" \
     --arg ev "$ev_status" --arg evh "$ev_at_head" \
     --arg wv "$waivers_n" --arg bl "$backlog_n" '[
-      "Recenzovaný kandidát: " + $cand + " → schválený cíl " + $tgt + " (" + $tref + "), merge do main: " + $merge,
+      "Recenzovaný kandidát: " + $cand + " → schválený cíl " + $tgt + " (" + $tref + "), merge do main: " + $merge
+        + (if $foreign == "" then "" else "; cizí větve k ručnímu merge: " + $foreign end),
       "Kam šel čas: " + $time,
       "Cena běhu: " + $rcost + "; Cena plánu: " + $pcost,   # one row: the block shows six
       "Plan-final brány: " + $gres + " (report: " + $grep_ + ")",

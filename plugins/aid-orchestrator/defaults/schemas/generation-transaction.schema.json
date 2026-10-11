@@ -32,6 +32,35 @@
       "pattern": "^[0-9a-f]{64}$",
       "description": "The self_sha256 of the generation authority this transaction was decided under. Null only in the skeleton written before the authority is sealed; every phase verifier requires the match, which is what makes a leaked authority useless outside its own transaction."
     },
+    "kind": {
+      "enum": ["generation", "plan_run"],
+      "description": "P111: `plan_run` when `aid-plan-fsm.sh plan-run` owns this transaction (the direct run, no EPIC files); absent or `generation` when the pipeline does. Each road refuses the other's transaction."
+    },
+    "stages": {
+      "type": "array",
+      "description": "P111: the stages a plan-run transaction has completed, in order — a rerun skips what is recorded.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "done_at"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "done_at": { "type": "string" },
+          "sha": { "type": "string" }
+        }
+      }
+    },
+    "direct": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "P111: the direct run this plan-run transaction starts.",
+      "required": ["epic_id", "run_id"],
+      "properties": {
+        "epic_id": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1 },
+        "repo_roots": { "type": "array" }
+      }
+    },
     "phases": {
       "type": "object",
       "description": "Map of phase number (as a string key) to that phase's record. Every phase's ids are pre-derived in the skeleton, so the verifier compares a RE-DERIVED id against a RECORDED one; the two hashes stay absent until that phase's outputs exist.",

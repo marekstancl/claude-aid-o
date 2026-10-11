@@ -5,10 +5,10 @@
 # One builder for both roads to a run until P112 removes the old one:
 #   * the direct run (`aid-plan-fsm.sh plan-run`) reads the WHOLE plan through
 #     aid_plan_json_steps_from_plan and builds with aid_plan_json_build --direct;
-#   * the EPIC path keeps its own table parser (aid-epic-to-json.sh) and hands
-#     the parsed rows over as a step list; aid-plan-to-epic.sh reads its phase's
+#   * the EPIC path keeps its own table parser (the EPIC-to-plan.json converter) and hands
+#     the parsed rows over as a step list; the plan-to-EPIC generator reads its phase's
 #     steps through aid_plan_json_steps_from_plan and only formats the EPIC.
-# The builder body is the former aid-epic-to-json.sh "Step 4 .. Step 14"
+# The builder body is the EPIC converter's former "Step 4 .. Step 14"
 # moved here unchanged, so the EPIC path's golden output is byte-identical
 # (scripts/tests/test-epic-to-json-regression.sh).
 #
@@ -39,7 +39,7 @@ _aid_pj_is_none() {
 }
 
 # =============================================================================
-# The per-step plan reader (moved from aid-plan-to-epic.sh, P111 Step 1)
+# The per-step plan reader (moved from the plan-to-EPIC generator, P111 Step 1)
 # =============================================================================
 
 # aid_plan_step_content <plan> <n> — everything between `### Step N` and the
@@ -292,7 +292,7 @@ ${dropped}Every top-level Files bullet must read \`- <Create|Modify|Test|Rewrite
 }
 
 # =============================================================================
-# DoD gates from the project's execution.yaml (moved from aid-plan-to-epic.sh)
+# DoD gates from the project's execution.yaml (moved from the plan-to-EPIC generator)
 # =============================================================================
 
 AID_PLAN_JSON_DOD_CANDIDATES=("docs_updated" "check_docs_updated")
@@ -403,7 +403,7 @@ aid_plan_repo_roots_json() {
 }
 
 # =============================================================================
-# The builder (moved from aid-epic-to-json.sh, P111 Step 1)
+# The builder (moved from the EPIC-to-plan.json converter, P111 Step 1)
 # =============================================================================
 
 # aid_plan_json_build --steps-json <file> --out <file> --epic-id <id>

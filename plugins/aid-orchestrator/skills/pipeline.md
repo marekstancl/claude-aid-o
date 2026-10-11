@@ -303,6 +303,21 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `amend_scope_no_brief_point` | `amend-scope` on a brief-bound plan for a step that closes no brief point | work | a widening that serves no point is a scope change: bring it to the PM (rule 11) | PM |
 | `amend_scope_reason_names_no_point` | `amend-scope --reason` names no `AC<n>` the step closes (any step's at GATES) | work | say which point the file serves: `--reason "AC<n> needs <path> because …"` | |
 | `missing_verifier_output`, `missing_cp3_code_review` | retired in 2.99.0 (P094): the step and EPIC review rounds replaced the verifier files | — | the `review_round_*` rows | |
+| `plan_run_already_started` | the plan already has a direct run (`plan-run` started it, it was abandoned, or it is complete); a second start and EPIC generation are refused (P111) | state | `/aid-run --resume P<NNN>`; a dead run: close the plan administratively and write a new plan | |
+| `generation_already_started` | the plan was generated the EPIC way (an EPIC file, a non-direct manifest entry, a generation transaction or its archive) — the two roads never mix on one plan (P111) | state | finish it on the old path (`/aid-run E-…`) until P112, or close it administratively and write a new plan | |
+| `plan_changed_since_seal` | the plan file changed after `plan-run` sealed it; a run never starts from bytes CP1 did not pass (P111) | work | restore the sealed bytes and rerun `plan-run`; or (no run started) archive the transaction as the line says and rerun — CP1 is consulted again | |
+| `lifecycle_epics_mismatch` | the plan was started before `plan-run` and its committed lifecycle manifest declares its EPIC markers, not the one direct run (P111) | state | `aid-plan-fsm.sh plan-state P<NNN> --declare-epics E-<nnn>-1_1 --reason "<why>"`, then `plan-run` again | |
+| `direct_run_needs_plan_branch` | a direct run starts and commits only on `plan/<id>` (its plan worktree), in a plan_branch plan (P111) | state | `aid-plan-fsm.sh plan-run P<NNN>` from the project (it starts the plan in plan_branch mode); a renamed branch: restore `plan/<id>` | |
+| `plan_json_unverified` | the direct run's `plan.json` disagrees with the plan's step graph or bytes; init was not attempted (P111) | state | remove the named `plan.json` and rerun `plan-run` (it rebuilds it) | |
+| `plan_in_scratch_tree` | the plan file resolves into `.aid-worktrees/`, a scratch tree released after the run (P111) | work | put the plan in `.aid-o/plans/` and rerun `plan-run` | |
+| `generation_lock_held` | another generation or `plan-run` of this plan holds the generation lock (P111) | state | wait for it to finish, then rerun — it resumes; never delete the `.lock` file | |
+| `plan_not_found` | `plan-run` found no plan file for the id under `.aid-o/plans/` (P111) | work | write the plan (`/aid-plan`), then `plan-run` | |
+| `direct_run_no_epic_merge` | a direct run's steps committed on `plan/<id>` — there is no task branch to merge (P111) | state | `aid-fsm.sh done-advance review release <state> --direct` (it records `merged_to_plan`) | |
+| `done_advance_needs_direct` | `--direct` is required on a direct run's `done-advance` and refused on an EPIC run's (P111) | state | the `done-advance` line `next:` prints — with `--direct` on a direct run, without it (then `epic-merge-to-plan`) on an EPIC run | |
+| `run_abandoned` | the pre-commit hook: the branch belongs to an abandoned run (direct `plan/<id>` or an EPIC's task branch) and takes no more commits (P111) | state | stop the agent working on it; the work continues in a new plan | |
+| `foreign_repo_undeclared` | a direct plan's step names a path in a git repository outside the project that `repo_roots` does not declare, or a declared repository's worktree is gone (P111) | work | declare it in the plan's frontmatter (`repo_roots: [{name, path}]`) and restart the run, or drop the path; a gone worktree: recreate it on its recorded branch as the line says | |
+| `foreign_branch_unverified` | at the close a foreign branch is missing, moved after freeze, or does not carry a range a step reported (a commit in the live checkout does not count) (P111) | work | commit the foreign work in its worktree on its branch (drop a stray live-checkout commit by hand), then `plan-finalize --stage freeze` again | |
+| `repo_root_invalid` | a `repo_roots` entry is not a slug + git repository outside the project, its base branch does not resolve, or its branch `plan/<id>-<project>` already exists without the worktree (P111) | work | fix the frontmatter entry, or rename/delete the stray branch as the line says, then `plan-run` again | |
 
 #### Restarting a plan review
 
@@ -600,7 +615,7 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
    ```bash
    step_dir="$(bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-evidence-dir "$state_file" "$N")"
    source "$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh"
-   aid_dispatch_contract_build "$evidence_dir/plan.json" "$N" "$step_dir/contract.json" "$evidence_dir"   # exit 3 = no paths, no contract owed
+   aid_dispatch_contract_build "$evidence_dir/plan.json" "$N" "$step_dir/contract.json" "$evidence_dir"   # exit 3 = no paths, no contract owed; exit 4 = a foreign path refused (foreign_repo_undeclared — follow its next:)
    ```
    The packet is built by code from `plan.json` — objective, allowed paths, dependencies,
    expected artifacts, acceptance criteria, UI contract, the step's own evidence dir — and

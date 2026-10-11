@@ -1025,6 +1025,7 @@ next: restore the round's measurement.json (aid-review-round.sh close writes it;
           plan_final_gates: {report: $gpath, result: $gres,
                              quarantine_substitutes: ($b.quarantine_substitutes // [])},
           specialist_review: ($b.plan_final_review // null),
+          foreign_branches: [($b.repo_roots // [])[] | {name, branch, head, commits}],
           remaining_backlog: ($b.plan_final_backlog // []),
           close: $close,
           run_cost: $run_cost,

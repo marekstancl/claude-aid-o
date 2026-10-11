@@ -322,6 +322,8 @@ build_brief_md() {
               "",
               "- **Release ready:** " + yn($r.release_ready),
               "- **Merge mode:** " + (($r.merge_mode // "unknown") | tostring),
+              (if (($ps.foreign_branches // []) | length) == 0 then empty
+               else "- **Foreign branches (merge by hand, repo_roots):** " + ([$ps.foreign_branches[] | "`\(.name)` \(.branch) at `\(.head[0:12])` (\(.commits) commit(s))"] | join("; ")) end),
               (if ($ps.final_merge_sha // null) == null
                  then "- **Merged to target:** not yet — the merge is a separate, PM-authorized step; this summary records only the decision."
                  else "- **Merged to target:** `" + ($ps.final_merge_sha | tostring) + "`" end) ]
