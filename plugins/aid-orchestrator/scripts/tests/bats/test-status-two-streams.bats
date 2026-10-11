@@ -1266,3 +1266,18 @@ YAML
   _call "$d" 'next_epic P080'
   [ "$output" = "E-080-3_3  [queue:pending]" ]
 }
+
+@test "direct: plan_epics renders a direct run as běh 1/1 (přímý) and next_epic still picks it" {
+  local d="$TEST_TMPDIR/dr"
+  _repo "$d"; mkdir -p "$d/.aid-o/work"
+  _plan "$d" P111 OPEN
+  _run_state "$d" E-111-1_1 R-E111-1 EXECUTE
+  echo 'direct: true' >> "$d/.aid-o/work/evidence/E-111-1_1/R-E111-1/fsm-state.yaml"
+  cat > "$d/.aid-o/work/active-runs.json" <<'JSON'
+{"E-111-1_1": {"state_file": ".aid-o/work/evidence/E-111-1_1/R-E111-1/fsm-state.yaml", "run_id": "R-E111-1", "state": "EXECUTE", "branch": "plan/P111", "plan_id": "P111"}}
+JSON
+  _call "$d" 'plan_epics P111'
+  [[ "$output" == "    E-111-1_1  [EXECUTE]  run=R-E111-1  branch=plan/P111  běh 1/1 (přímý)  ctl=manual"* ]]
+  _call "$d" 'next_epic P111'
+  [ "$output" = "E-111-1_1  [EXECUTE]" ]
+}

@@ -78,7 +78,10 @@ linked worktree has no `.aid-o` of its own.
    is not an ordering and must never be rendered as one. Both render every row
    through recipe **`controller-state`**, which supplies the `ctl=` column, the
    `STALLED?` marker (recipe **`stalled-runs`**) and the resume lines — see
-   "The controller column" and "Stalled runs" below.
+   "The controller column" and "Stalled runs" below. A direct run (one run of
+   the whole plan on `plan/<id>`, P111) shows `běh 1/1 (přímý)` after its
+   branch; a run whose state file says `abandoned: true`, and a queue entry whose
+   EPIC the plan manifest records `abandoned`, are not shown (P111).
 3. **Read the queue** — recipe **`queue-rows`** (which defines both
    `queue_rows`, the plan's rows, and `queue_candidate`, its next claimable
    entry) and recipe **`queue-summary`** (the `N queued, N running, N done`
@@ -902,6 +905,8 @@ plan_epics() {
     "$_map" 2>/dev/null | sort | while IFS="$(printf '\t')" read -r _epic _state _run _branch _gm _sf; do
       case "$_sf" in /*|-) ;; *) _sf="$_root/$_sf" ;; esac
       [ "$_sf" != "-" ] && grep -q '^abandoned: true' "$_sf" 2>/dev/null </dev/null && continue
+      # P111: the direct run of a plan (one run on plan/<id>) says so.
+      [ "$_sf" != "-" ] && grep -q '^direct: true' "$_sf" 2>/dev/null </dev/null && _branch="${_branch}  běh 1/1 (přímý)"
       epic_row "    " "$_epic" "$_state" "$_run" "$_branch" "$_gm" "$_facts"
       epic_review_line "$_epic" "$_run"
     done
