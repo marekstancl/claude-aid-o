@@ -81,7 +81,7 @@ M
   grep -q 'Ochranná zóna' "$D"
   grep -q '^- \*\*Reverz:\*\* bílá verze na tmavém; nikdy modrá na modré.$' "$D"   # a wrapped bullet is one rule
   ! grep -q '^Odstavec' "$D"
-  grep -q '^| fade-in | hero | load | 1.2 s | adopt |$' "$D"; ! grep -q 'tr:x\|color (transition)' "$D"   # motion by element, adopted only
+  grep -q '^| fade-in | načtení | 1.2 s |$' "$D"; ! grep -q 'tr:x\|color (transition)' "$D"   # motion by element, adopted only
   grep -q 'Do Docusauru se publikuje až po schválení PM' "$D"
   run python3 "$S" check "$P"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }

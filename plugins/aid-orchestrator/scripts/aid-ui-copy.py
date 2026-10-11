@@ -272,7 +272,13 @@ def load_answer(path):
     m = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.S)   # a fenced answer is unwrapped
     if m:
         text = m.group(1)
-    return json.loads(text)
+    # a model's answer may end with a stray bracket after a complete value (Coufal 11. 10. 2026, run 4: one
+    # extra "}" after 32 KB of valid JSON); the first complete value counts, anything but brackets and
+    # whitespace after it does not
+    value, end = json.JSONDecoder().raw_decode(text)
+    if text[end:].strip(" \t\r\n}]"):
+        raise ValueError("extra data after the JSON value")
+    return value
 
 
 def schema_error(answer):
