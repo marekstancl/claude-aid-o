@@ -5069,7 +5069,13 @@ _pfsm_finalize_gates_body() {
       # AID_GATES_REUSE_OF: the runner skips its "profile has no required
       # gate" refusal for a reuse copy whose required rows were copied above.
       local -a reuse_env=()
-      [[ "$run_yaml" != "$execution_yaml" ]] && reuse_env=("AID_GATES_REUSE_OF=${reuse_from}")
+      # P110: which gates were carried and where their evidence lives, so a
+      # carried gate flagged runs_project_tests is proven by THAT run's evidence
+      local reuse_dir; reuse_dir="$(dirname "$(jq -r '.report // ""' <<<"$reuse")")"
+      [[ "$(basename "$reuse_dir")" == gates ]] && reuse_dir="$(dirname "$reuse_dir")"
+      [[ "$reuse_dir" == /* ]] || reuse_dir="${root}/${reuse_dir}"
+      [[ "$run_yaml" != "$execution_yaml" ]] && reuse_env=("AID_GATES_REUSE_OF=${reuse_from}" \
+        "AID_GATES_REUSE_CARRIED=$(jq -r '.rows | keys | join(" ")' <<<"$reuse")" "AID_GATES_REUSE_DIR=${reuse_dir}")
       ( cd "$troot" && env "${reuse_env[@]}" "${SCRIPT_DIR}/aid-run-gates.sh" run-all "$run_yaml" \
           "$plan_id" "$run_id" "$timeline_file" \
           --report-file "$report_file" \
@@ -5096,7 +5102,7 @@ _pfsm_finalize_gates_body() {
           while IFS= read -r fs; do
             [[ -n "$fs" ]] && echo "    suite: ${fs} — reproduce: (cd ${troot} && bash ${frunner} --only ${fs})" >&2
           done < <(sed -nE '/^[[:space:]]*Failed suites:/,/^$/ s/^[[:space:]]+- (.+)$/\1/p' "${run_dir_abs}/${fev}")
-        done < <(jq -r '.gates | to_entries[] | select((.value.result // .value.status) == "fail")
+        done < <(jq -r '.gates | to_entries[] | select(.value.status == "fail")
                    | "\(.key)\t\(.value.evidence // "")"' "$report_file" 2>/dev/null)
         return 1
       fi
@@ -9585,7 +9591,17 @@ _pfsm_finalize_produce() {
     echo "PRECONDITION FAIL: plan-finalize --stage produce: C3 requires a real plan source and aid-plan-diff.sh; no plan-diff evidence can be fabricated." >&2
     return 1
   fi
-  bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$plan_file" --evidence-dir "$run_dir_abs" --base-commit "$base_commit" >/dev/null 2>&1 || pdrc=$?
+  # P110: the close's measurer runs every point in the candidate worktree under
+  # the project's isolation rule (the state root's verification_env).
+  local pd_cwd; pd_cwd="$(_pfsm_plan_tree_root "$root" "$plan_id")"
+  bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$plan_file" --evidence-dir "$run_dir_abs" --base-commit "$base_commit" \
+    --isolated --cwd "$pd_cwd" >/dev/null 2>"${run_dir_abs}/plan-diff.stderr" || pdrc=$?
+  if (( pdrc > 2 )); then
+    echo "PRECONDITION FAIL: plan-finalize --stage produce: aid-plan-diff.sh exited ${pdrc}:" >&2
+    cat "${run_dir_abs}/plan-diff.stderr" >&2
+    return 1
+  fi
+  [[ -s "$pd" ]] && echo "plan-diff: isolation $(jq -c '.isolation // {}' "$pd" 2>/dev/null)$(jq -r '.next // "" | if . == "" then "" else " — " + . end' "$pd" 2>/dev/null)"
   local pd_verdict=""
   if [[ "$pdrc" -eq 0 || "$pdrc" -eq 1 || "$pdrc" -eq 2 ]] && [[ -s "$pd" ]]; then
     pd_verdict="$(jq -r --arg b "$base_commit" --arg h "$candidate" \
@@ -9667,7 +9683,7 @@ _pfsm_finalize_produce() {
       return 1; }
   ( source "${SCRIPT_DIR}/lib/aid-step-review-packet.sh" && aid_final_review_inputs_build "$root" "$run_dir_abs" "$plan_file" "$plan_id" ) || return 1
   aid_stage_writes_record "$run_dir_abs" produce review-profile.json plan-diff.json acceptance-evidence.json \
-    cp7/step-check.json cp7/criteria.md cp7/epic-findings.json
+    cp7/step-check.json cp7/criteria.md cp7/epic-findings.json cp7/brief.json
 
   echo "PRODUCED: ${plan_id} — review profile, plan-diff, acceptance evidence and the whole-plan round's inputs over ${base_commit:0:8}..${candidate:0:8} in ${run_dir_rel}/." >&2
   echo "next: bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare --checkpoint cp7 --evidence-dir ${run_dir_abs} --project-root ${_in_troot} --round 1 — dispatch the prompts it prints, then collect and close (commands/aid-plan.md, \"Plan close\"); then: plan-finalize ${plan_id} --stage decide" >&2

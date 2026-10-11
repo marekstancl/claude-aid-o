@@ -3,6 +3,41 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.116.0] — 2026-10-10
+
+Levnější běh (P110, vydání 2 roadmapy po experimentu P014). Krok si koupí revizi podle druhu změny, body hotovo se spouští po každém kroku a v uzávěru izolovaně, uzávěr čte zadání se dvěma rolemi, brány musí doložit, že pustily testy projektu, CP3 je vypnuté jako výchozí a uzávěr vyčíslí, co stál běh a plán. V P014 šlo 54 min na revize kroků a EPICů, 64 min na tři pokusy uzávěru a dva body hotovo nikdo nespustil. Stavěno mimo AID (PM 10. 10. 2026); revize po každém kroku dělal Claude podagent s čistým kontextem, protože Codex měl vyčerpaný limit do 14. 10. 2026.
+
+### Added
+- **Revize kroku podle druhu změny** — `step_review` má jedno kolo, práh přeskočení 3 soubory / 120 řádků, `step_generalist` i `step_security` běží jako lehcí revizoři a `step_security` jako plný při verdiktu `review+security` (`full_when`); `round.json` `agents` zapíše volbu. Druhé kolo jen jako potvrzení opravy otevřeného blockeru nebo majoru (`second_round_when: open_finding_and_fix`; prompt nese jen `fix.patch` a otevřené nálezy) nebo jedno delta kolo po prošlém kole; třetí jen s přepisem nebo stálým pokynem PM. Projekt si staré chování podrží ve vlastní `review-checkpoints.yaml`.
+- **Body hotovo po kroku** — `aid-plan-diff.sh --step N --plan-json` spustí body zadání, které krok zavírá (bod jmenovaný víc kroky až u posledního, napříč EPICy), a vlastní kritéria kroku `- [ ] [<role>]` s blokem; `prepare --checkpoint cp2` ho pustí před balíkem a revizor vidí naměřené verdikty. `increment-step` odmítne krok s bodem `absent` (`step_criteria_failed`, i s `--force`); jediná cesta ven je odpověď PM na kartě: `--defer-criterion AC<n> --reason … --finding-card <karta>` (`defer_refused`). Měření se přijme jen se svou událostí v timeline (otisk souboru). `plan.json` nese `plan_step`, blok smí nést `timeout:` (1–1800 s).
+- **Izolovaný měřič uzávěru** — `aid-plan-diff.sh --isolated --cwd <kandidát>`: bez `verification_env:` každý bod v novém síťovém prostoru se zapnutým loopbackem, pod původním uid a ve vlastním prostoru procesů; s `verification_env:` s jeho proměnnými a sítí hostitele (`network: host (verification_env)`). Bod, který tak běžet nejde, je `absent` s důvodem (`no_isolation`, `env_stripped`, `no_verification_env`, `verification_env_unset`) a rozhodnutí o vydání ho jmenuje jako neměřený. Volá ho `plan-finalize --stage produce` i brána `plan_diff` šablony.
+- **Uzávěr se zadáním a dvěma rolemi** — výchozí `final_review` má `final_criteria` (zadání bod po bodu proti izolovanému měření) a `final_generalist` (Codex: napříč EPICy, tvrzení v CHANGELOG/README a bezpečnostní a provozní seznam); `final_claims` zůstává volitelná. Balík i prompt nesou `zadani.md` přes sdílený resolver CP1 (`aid_plan_review_brief_resolve`, nové `zadani_file_missing`); `prepare` odmítne cizí zadání (`cp7_brief_sha_mismatch`) a neizolované měření (`cp7_measurement_stale`).
+- **Brány s testy projektu** — `execution.yaml` `project_tests:` a brána `runs_project_tests: true`, která evidencí (`--evidence-file`) dokládá, co spustila; změna testů bez takové brány v profilu je `profile_skips_project_tests`, brána bez důkazu `project_tests_evidence_missing`, nespuštěné změněné testy `project_tests_not_selected`, sada vynechaná patrem `nightly_covers`; bez klíče jen rada `project_tests_undeclared`. `run-all-tests.sh --evidence-file`, `aid-run-gates.sh record-tests` (obal běžce celé sady) a `--lint-profiles`; `/aid-init` klíč zapíše podle zásobníků a existujícímu souboru ho nabídne; zásobník bash má bránu `bash_test`. Vzory umí `**/`.
+- **Cena běhu a plánu** — `release-decision.json` `plan_summary.run_cost` (každé kolo každého běhu EPICů a pokusů uzávěru) a `plan_cost` (CP1 a kritik z událostí Codexu, u záskoku `null` s důvodem); karta, brief a stránka uzávěru mají řádky „Cena běhu“ a „Cena plánu“; nečitelné měření je `measurement_unreadable`.
+
+### Changed
+- **CP3 vypnuté jako výchozí** (PM 2B) — `cp3_integration_review: false`, blok `epic_review` jen jako komentář; přechody zapíšou `review_checkpoint_disabled`. Běh „streamlined“ (bez revizí kroků) s vypnutým CP3 projde jen v režimu `plan_branch` (čte ho CP7), jinak odmítnut — šel by ven nerevidovaný. Přepínače se čtou z kořene stavu. Kód CP3 odejde s EPICy ve vydání 3.
+- **Kontrola karty PM sdílená** — `aid_pm_card_check` v `lib/aid-decision-card.sh` (citace jako celé slovo) pro `dispute --pm accepted` i odklad bodu.
+- `skills/pipeline.md` §„When AID refuses“: 15 nových řádků s `next:`; test souladu skenuje i `aid-run-gates.sh`, `aid-plan-diff.sh` a `aid-release-policy.sh`. Registr vynucení: 10 nových řádků (614). Docusaurus `/aid/` (aid-run, mantinely) v repu docs.
+
+### Fixed
+- **Uzávěr čte řádek brány přes normalizovaný stav** (`aid-plan-fsm.sh` hledal neprošlou bránu přes `.value.result`; noční kontrola `P097 rows` byla červená už v `main`).
+- **S vypnutým CP3 dostane uzávěr, co nechaly otevřené revize kroků** (`epic-findings.json` `cp3: "off"` s otevřenými blockery a majory posledního kola každého kroku) a revizor ho už nečte jako EPIC, který nikdo neviděl.
+
+### Security
+- **Bezpečnostní revize zúžení** (AC6, `docs/reference/2026-10-p110-bezpecnostni-revize.md`): nezávislý Claude agent s čistým kontextem jako záskok za Codex (limit do 14. 10. 2026; PM 1B). Deset nálezů, sedm opraveno: krok se vzorem obsluhy (routa, CLI vstup) se nepřeskočí a nový vzor `shell_string_exec` (`bash -c`, `eval` proměnné, `execSync`) vede k plnému revizorovi; kontrolní seznam CP7 má injection napříč kroky, cesty a symlinky a padělanou důvěru; body kroku se měří jen z plánu, ze kterého vznikl EPIC (`plan.json` `source_plan_sha256`); s vypnutým CP3 se zbylá `cp3/` nečte a uzávěr vidí i nálezy zamítnuté PM; lifecycle rozhoduje podle všech kroků běhu; `record-tests` odmítne běžec s výběrem testů. Tři do backlogu (IMP-691..693); běh starého režimu (historické plány) s vypnutým CP3 a malými kroky zůstává bez revize celku — vědomě přijato (PM 11. 10. 2026), nové plány běží v `plan_branch` a celek čte uzávěr.
+- **Krok nikdy nečeká na Codex** — `skills/plan-writing.md` pravidlo 20: revizi přidělenou Codexu udělá při jeho nedostupnosti nezávislý Claude agent, jak to plugin dělá od P095.
+
+### Velikost pluginu (řádky, `wc -l`)
+
+| část | před | po |
+|---|---|---|
+| scripts | 72 060 | 73 115 |
+| skills | 8 270 | 8 332 |
+| commands | 5 796 | 5 896 |
+
+Měřeno: `scripts/*.sh` + `scripts/lib/*.sh`, `skills/*.md` + `skills/*/SKILL.md`, `commands/*.md`. Přibylo kontrol a jejich testů; V7 roadmapy měří, necílí.
+
 ## [2.115.0] — 2026-10-09
 
 Plán drží zadání (P109, vydání 1 roadmapy po experimentu P014). Zadání PM je soubor, plán nese jeho body doslova, kritik je povinný a generace ho nepřeskočí, každý revizor plánu čte zadání a stačí jedno kolo, oprava po kole i rozšíření rozsahu za běhu se k zadání vážou. V P014 plán bod 2 zadání vypustil a nic to neporovnalo; teď to odmítne lint, revizoři mají zadání před sebou a změna bodu je nová verze souboru zadání. Stavěno mimo AID (PM 9. 10. 2026), po každém kroku revize Codexem.

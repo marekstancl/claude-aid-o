@@ -1052,6 +1052,17 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
            in the language of the file it checks (a record for the PM is Czech:
            "Scénář B", not "Scenario B").
 
+      20b3. A block may carry `timeout:` — whole seconds, 1-1800 (default 120):
+           the runner (aid-plan-diff.sh) kills the command after it and the
+           point is `absent (reason=timeout)`; another value is refused by the
+           shared validator (lib/aid-verification-pattern.sh, P110).
+
+      20b4. A step's own measurable criterion is a labelled bullet under the
+           step's **Acceptance Criteria:** — `- [ ] [<role>] <text>` with a
+           `verification_pattern` block. `aid-plan-diff.sh --step` runs it after
+           the step together with the brief points of the step's **Zavírá:**;
+           an unlabelled bullet stays prose and is not run (P110).
+
       20c. Every pattern arguments are self-contained — no placeholder brackets.
            → REJECT regex matches: `<[a-z_]+>` in cmd/file/regex/expected_exit fields
                 (e.g., `cmd: "test <path>"` is REJECT; `cmd: "test ./tests/"` is ACCEPT)
@@ -1356,6 +1367,7 @@ RULE AC-10: DO NOT provide less detail for "simple" steps.
 17. **NEVER write a summary section for a human into the plan** — no `Stakeholder Brief`, `Executive Summary`, `Human Review Summary` or `Shrnutí pro PM`. The PM's page is RENDERED from the plan's own facts (`lib/aid-plan-summary.sh`, published by `/aid-plan`), so a hand-written one is a second copy that nothing checks and that is free to flatter the plan. `aid-plan-lint.sh` reports all four headings.
 18. **ALWAYS carry the brief's points verbatim** — `## Acceptance Criteria` holds every point AC<n> of the brief with its line and its `verification_pattern` block exactly as the brief has them; the plan may ADD its own from AC<n+1>, never reword, merge or drop one (`aid-plan-lint.sh`, checks #22-#23). A point that must change is a new `verze` of the brief file, and the review restarts.
 19. **ALWAYS say where the design comes from** — `## Architecture`, `## Data Model` and `## API Design` open with `**Odvozeno z:** AC<n>[, AC<m>]`; a decision that changes what a user meets carries the literal marker `(mění výsledek pro uživatele)`, and the PM page lists every such line (`lib/aid-plan-summary.sh`).
+20. **NEVER make a step wait for Codex** — a review a step assigns to Codex is done, when Codex is unreachable (absent, over its usage limit, no answer), by an independent Claude agent with a clean context: the automatic stand-in every Codex role already has (P095, registry `codex_stand_in_recorded`; PM 10. 10. 2026). The record names who answered (`provider: claude`, the reason); "Codex or it waits" and "no stand-in" are not plan wording.
 
 ---
 

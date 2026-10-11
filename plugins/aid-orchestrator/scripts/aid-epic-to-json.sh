@@ -80,10 +80,12 @@ frontmatter="$(parse_frontmatter "$epic")"
 fm_plan_ref=""
 fm_plan_epics_total=""
 fm_status=""
+fm_source_step_ids=""
 
 while IFS='=' read -r key val; do
   case "$key" in
     plan_ref)          fm_plan_ref="$val" ;;
+    source_step_ids)   fm_source_step_ids="${val//\"/}" ;;
     plan_epics_total)  fm_plan_epics_total="$val" ;;
     status)            fm_status="$val" ;;
   esac
@@ -631,6 +633,14 @@ for i in "${!step_nums[@]}"; do
   # P109: the brief points this step closes, from the table's Closes column
   step_zavira_json="$( { grep -oE '\bAC[0-9]+\b' <<< "${step_closes[$i]:-}" || true; } | jq -R . | jq -sc .)"
   step_n="${step_nums[$i]}"
+  # P110: the plan's global step number of this step — source_step_ids (written
+  # by aid-plan-to-epic.sh, table order) at the local index; null for an EPIC
+  # generated before 2.116.0. The per-step criterion run reads `### Step <n>:`.
+  step_plan_step=null
+  if [[ -n "$fm_source_step_ids" ]]; then
+    IFS=',' read -ra __ssids <<< "$fm_source_step_ids"
+    [[ "${__ssids[$i]:-}" =~ ^[[:space:]]*([0-9]+)[[:space:]]*$ ]] && step_plan_step="${BASH_REMATCH[1]}"
+  fi
 
   # Build inputs: EPIC spec + outputs from dependency steps
   inputs_json='["EPIC specification"]'
@@ -758,6 +768,7 @@ for i in "${!step_nums[@]}"; do
     --argjson ui_change_mode "$step_ui_mode" \
     --argjson ui_change_contract "$step_ui_contract" \
     --argjson zavira "$step_zavira_json" \
+    --argjson plan_step "$step_plan_step" \
     '{
       id: $id,
       role: $role,
@@ -770,7 +781,8 @@ for i in "${!step_nums[@]}"; do
       acceptance_criteria: $acceptance_criteria,
       ui_change_mode: $ui_change_mode,
       ui_change_contract: $ui_change_contract,
-      zavira: $zavira
+      zavira: $zavira,
+      plan_step: $plan_step
     }')"
 
   steps_json="$(echo "$steps_json" | jq --argjson step "$step_obj" '. + [$step]')"
@@ -837,7 +849,7 @@ fi
 zadani_json='{}'
 if [[ -n "$__src_plan_file" ]]; then
   __z="$(_aid_fm_get "$__src_plan_file" zadani)"; __zs="$(_aid_fm_get "$__src_plan_file" zadani_sha256)"
-  zadani_json="$(jq -nc --arg z "$__z" --arg s "$__zs" '(if $z == "" then {} else {zadani: $z} end) + (if $s == "" then {} else {zadani_sha256: $s} end)')"
+  zadani_json="$(jq -nc --arg z "$__z" --arg s "$__zs" --arg p "$(sha256sum "$__src_plan_file" | cut -d' ' -f1)" '(if $z == "" then {} else {zadani: $z} end) + (if $s == "" then {} else {zadani_sha256: $s} end) + {source_plan_sha256: $p}')"   # P110: the step measurement reads this plan
 fi
 plan_json="$(jq -n \
   --arg epic_id "$epic_id" \

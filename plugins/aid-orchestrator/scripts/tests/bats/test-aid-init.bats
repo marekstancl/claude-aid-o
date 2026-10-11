@@ -32,7 +32,7 @@ teardown() {
   run yq '.gates | has("py_test")' .aid-o/config/execution.yaml
   [ "$output" == "true" ]
   run yq '.gates.py_test.command' .aid-o/config/execution.yaml
-  [ "$output" == "pytest -q" ]
+  [[ "$output" == *"record-tests"*"-- pytest -q" ]]   # P110: wrapped so the gate proves which tests it ran
 }
 
 @test "stack detection: package.json → typescript in detected stacks → execution.yaml has TS gates" {

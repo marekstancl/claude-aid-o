@@ -76,6 +76,8 @@ source "${SCRIPT_DIR}/lib/aid-routed-findings.sh"
 source "${SCRIPT_DIR}/lib/aid-obligations.sh"
 # shellcheck source=lib/aid-ancillary.sh
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"
+# shellcheck source=lib/aid-decision-card.sh
+source "${SCRIPT_DIR}/lib/aid-decision-card.sh"   # aid_pm_card_check (dispute --pm accepted; P110)
 
 usage() { sed -n '4,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
@@ -289,8 +291,10 @@ _carried_roles() {
   [[ -f "$fc" ]] || { echo '{}'; return 0; }
   for role in "$@"; do
     case "$role" in
-      final_criteria)   feeds='["criteria","diff"]' ;;
-      final_claims)     feeds='["claims","diff"]' ;;
+      final_criteria)   continue ;;   # never carried: a new candidate re-measures every point (P110)
+      final_claims) feeds='["claims","diff"]' ;;
+      # holds the claims question since 2.116.0, and its question 4 reads the criteria
+      final_generalist) feeds='["criteria","claims","diff"]' ;;
       *)                feeds='["diff"]' ;;
     esac
     jq -e --argjson f "$feeds" '(.invalidated_feeds - $f) == .invalidated_feeds' "$fc" >/dev/null || continue
@@ -375,6 +379,23 @@ _restart_attempt() {
   echo "restart: the live rounds moved to ${dest}; preparing round 1 of attempt $((k + 1))"
 }
 
+# _measure_step — the step's brief points and own labelled criteria, run before
+# the packet is built so the reviewer argues about measured verdicts (P110):
+# aid-plan-diff.sh --step writes <run>/cp2/step-N/plan-diff.json. A run without
+# a plan (Fast Mode, plan_path null) or without plan.json is not measured.
+_measure_step() {
+  local pp base rc=0
+  pp="$(yq -r '.plan_path // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"
+  if [[ -z "$pp" || "$pp" == null || ! -f "$pp" || ! -f "${EVID}/plan.json" ]]; then
+    echo "prepare: step ${STEP} not measured (no plan file or plan.json for this run)" >&2; return 0
+  fi
+  base="$(yq -r '.base_commit // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"
+  (cd "$ROOT" && bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$pp" --evidence-dir "$EVID" --base-commit "${base:-HEAD}" \
+     --step "$STEP" --plan-json "${EVID}/plan.json" >/dev/null) || rc=$?
+  (( rc <= 2 )) || _die "measuring step ${STEP} failed (aid-plan-diff.sh exit ${rc})"
+  echo "prepare: step ${STEP} measured → ${EVID}/cp2/step-${STEP}/plan-diff.json" >&2
+}
+
 cmd_prepare() {
   _need_round
   # The PM's switch (review_checkpoints.enabled / the checkpoint's own key) is
@@ -390,6 +411,7 @@ cmd_prepare() {
   else
     [[ -f "$STEPCHECK" ]] || _die "no step-check.json in ${BASE}; run aid-step-check.sh --checkpoint ${CHECKPOINT}${STEP:+ --step $STEP} --evidence-dir ${EVID}"
     [[ "$(jq -r .head_sha "$STEPCHECK")" == "$(_head)" ]] || _die "step-check.json is stale (head moved); run aid-step-check.sh again"
+    [[ "$CHECKPOINT" == cp2 && -n "${STEP:-}" ]] && _measure_step
     local verdict; verdict="$(jq -r .verdict "$STEPCHECK")"
     [[ "$verdict" == review || "$verdict" == "review+security" ]] || _die "verdict is ${verdict}; no round (rounds.json was written by the step check)"
   fi
@@ -406,8 +428,9 @@ cmd_prepare() {
       _die "a whole-plan round is bound to one candidate, and a fix moves it: commit the fix, run plan-finalize --stage freeze, and prepare round 1 of the new attempt (its packet carries what stayed open and the fix)"
     fi
     # A step that moves after a PASSED round gets a delta round over the new
-    # commits: nothing to fix, so it is neither a fix round nor one the round
-    # budget counts — the reviewers only have to see what they have not seen.
+    # commits: nothing to fix, so it is not a fix round — the reviewers only have
+    # to see what they have not seen. The budget lets ONE such round past it
+    # (round rounds_default + 1, P110); a later one needs the PM's override.
     local prev="" delta=0
     if (( ROUND >= 2 )); then
       prev="$(_round_dir $((ROUND - 1)))"
@@ -418,12 +441,14 @@ cmd_prepare() {
         [[ "$(jq -r '.verdict // ""' "${prev}/measurement.json")" == pass ]] && delta=1
       fi
     fi
-    local standing=false
-    # P109: the one second round the plan-review policy allows without an
-    # override (round 1 found a blocker, its fix passed fix-check) is in budget.
-    if (( ROUND > $(_base_rounds) && ! delta )) && [[ "$MODE" == plan ]] && aid_review_second_round_allowed "$BASE" "$ROUND"; then
+    local standing=false delta_in_budget=0
+    (( delta && ROUND == $(_base_rounds) + 1 )) && delta_in_budget=1
+    # P109/P110: the one second round the policy allows without an override
+    # (plan review: round 1 found a blocker, its fix passed fix-check; step
+    # rounds: round 1 left a blocker or major open and HEAD moved) is in budget.
+    if (( ROUND > $(_base_rounds) && ! delta_in_budget )) && aid_review_second_round_allowed "$BASE" "$ROUND" "$( [[ "$MODE" == plan ]] || _head)"; then
       :
-    elif (( ROUND > $(_base_rounds) && ! delta )); then
+    elif (( ROUND > $(_base_rounds) && ! delta_in_budget )); then
       if (( ROUND > $(_allowed_rounds) )); then
         # the fix itself is what failed: say that, not the rule
         local pfd="${BASE}/round-$((ROUND - 1))/fix-diff.json"
@@ -439,7 +464,9 @@ cmd_prepare() {
       # A fix-and-confirm round must make progress: when the previous round
       # re-opened exactly what the one before it had open, the chain is not
       # converging and the PM decides.
-      if (( ROUND >= 3 )); then
+      # (a delta round confirms new commits after a pass: nothing is open, so
+      # there is no chain to converge — P110 review)
+      if (( ROUND >= 3 && ! delta )); then
         local open_now open_before
         open_now="$(jq -c '[.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major")) | (.match // .fingerprint)] | sort' "${prev}/merged.json")"
         open_before="$(jq -c '[.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major")) | (.match // .fingerprint)] | sort' "$(_round_dir $((ROUND - 2)))/merged.json" 2>/dev/null || echo '[]')"
@@ -498,7 +525,18 @@ cmd_prepare() {
     local prevdir=""; (( ROUND >= 2 )) && prevdir="$(_round_dir $((ROUND - 1)))"
     [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 ]] && prevdir="$(_previous_attempt_round)"
     if [[ "$CHECKPOINT" == cp7 ]]; then
+      # P110: the round argues from the isolated close measurement and the brief
+      # the plan is bound to — never from a pre-2.116.0 measurement or another brief.
+      { jq -e '.isolation != null' "${EVID}/plan-diff.json" >/dev/null 2>&1 && [[ -f "${EVID}/cp7/brief.json" ]]; } \
+        || _die "REFUSED (cp7_measurement_stale): the close's inputs predate 2.116.0 or are missing — ${EVID}/plan-diff.json without an isolation key, or no cp7/brief.json
+  next: bash ${SCRIPT_DIR}/aid-plan-fsm.sh plan-finalize <plan> --stage produce (it runs aid-plan-diff.sh --isolated --cwd <candidate>) (pipeline.md §When AID refuses: cp7_measurement_stale)"
       aid_final_review_packet_build "$ROOT" "$dir" "$STEPCHECK" "$EVID" "$prevdir" || exit 1
+      if [[ -f "${dir}/packet/zadani.md" ]]; then
+        local zwant zgot zplan; zplan="$(jq -r .plan "${EVID}/cp7/brief.json")"
+        zwant="$(_aid_fm_get "$zplan" zadani_sha256)"; zgot="$(sha256sum "${dir}/packet/zadani.md" | cut -d' ' -f1)"
+        [[ "$zwant" == "$zgot" ]] || _die "REFUSED (cp7_brief_sha_mismatch): the brief is ${zgot:0:12}, the plan is bound to ${zwant:-<none>} — the brief changed after the plan was written
+  next: bump the brief's verze and the plan's zadani_verze/zadani_sha256 (a PM decision: the points changed), or restore the brief (pipeline.md §When AID refuses: cp7_brief_sha_mismatch)"
+      fi
     else
       aid_step_review_packet_build "$ROOT" "$CHECKPOINT" "$dir" "$STEPCHECK" "${EVID}/plan.json" "${STEP:-}" "$prevdir" || exit 1
     fi
@@ -524,6 +562,13 @@ cmd_prepare() {
   fi
 
   _stamp_prompt_lengths "$dir" || exit 1
+  [[ "$MODE" == step ]] && { _record_agents "$dir" "${roles[@]}" || exit 1; }
+  if [[ "$CHECKPOINT" == cp7 && -f "${dir}/packet/zadani.md" ]]; then
+    jq --arg z "$(sha256sum "${dir}/packet/zadani.md" | cut -d' ' -f1)" '. + {zadani_sha256: $z}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
+  fi
+  if [[ -f "${dir}/packet/open-findings.json" && ! -f "${dir}/packet/fix.patch" ]]; then
+    jq '. + {confirmation_fallback: "full_diff"}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
+  fi
   trap - EXIT
   if (( ! MANUAL )); then
     _index_add "$ROUND" "$sha"
@@ -564,6 +609,20 @@ _stamp_prompt_lengths() {
   jq --argjson l "$lines" '. + {prompt_lines: $l}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
 }
 
+# _record_agents <round dir> <role>... — round.json `agents`: the subagent each
+# claude role is dispatched as (what _agent_type chose), so a test and the PM
+# read the choice instead of recomputing it (P110).
+_record_agents() {
+  local dir="$1" role i a='{}'; shift
+  for role in "$@"; do
+    _is_carried "$dir" "$role" && continue
+    i="$(aid_review_role_index "$role")" || continue
+    [[ "${RC_PROVIDER[$i]}" == claude ]] || continue
+    a="$(jq -c --arg r "$role" --arg t "$(_agent_type "$role" "$dir")" '. + {($r): $t}' <<< "$a")"
+  done
+  jq --argjson a "$a" '. + {agents: $a}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
+}
+
 _existing_round() {
   _need_round
   local dir; dir="$(_round_dir "$ROUND")"
@@ -587,10 +646,15 @@ _codex_probe() { ( AID_PROJECT_ROOT="$ROOT" CODEX_MODEL="$1"; export AID_PROJECT
 # role's prompt in <round_dir> is longer than light_max_prompt_lines — the light
 # reviewer read 550 of 1 980 and ~800 of 3 441 lines and passed (P102, P103),
 # the general-purpose one read the whole prompt.
+# A role whose full_when equals the step check's verdict (packet/step-check.json
+# of the round) gets the full reviewer too: step_security on review+security (P110).
 _agent_type() {
-  local i n=0; i="$(aid_review_role_index "$1")"
+  local i n=0 verdict=""; i="$(aid_review_role_index "$1")"
   [[ -n "${2:-}" ]] && n="$(jq -r --arg r "$1" '.prompt_lines[$r] // 0' "$2/round.json" 2>/dev/null || echo 0)"
-  if [[ "${RC_EFFORT[$i]}" == low ]] && (( n <= RC_LIGHT_MAX_PROMPT_LINES )); then
+  [[ -n "${2:-}" ]] && verdict="$(jq -r '.verdict // ""' "$2/packet/step-check.json" 2>/dev/null)"
+  if [[ -n "${RC_FULL_WHEN[$i]:-}" && "${RC_FULL_WHEN[$i]}" == "$verdict" ]]; then
+    echo general-purpose
+  elif [[ "${RC_EFFORT[$i]}" == low ]] && (( n <= RC_LIGHT_MAX_PROMPT_LINES )); then
     echo aid-orchestrator:reviewer-light
   else
     echo general-purpose
@@ -637,9 +701,7 @@ cmd_dispatch() {
 
   [[ -s "$last" ]] && aid_plan_review_unfence "$last" "$answer"
   if [[ -s "$answer" ]]; then
-    jq -s 'map(select(.type == "turn.completed")) | last | .usage // {}
-           | {answered: true, tokens_in: (.input_tokens // "unknown"), cache_read: (.cached_input_tokens // "unknown"),
-              tokens_out: (.output_tokens // "unknown")}' "$events" > "$usage" 2>/dev/null \
+    aid_review_tokens_from_events "$events" 2>/dev/null | jq -c '{answered: true} + .' > "$usage" 2>/dev/null \
       || jq -n '{answered: true, tokens_in: "unknown", tokens_out: "unknown"}' > "$usage"
     echo "dispatched ${ROLE} (codex ${RC_MODEL[$i]}): answer in ${answer}"
   else
@@ -1112,7 +1174,11 @@ to close the round at the revision the reviewers saw; the fix is confirmed by th
     verdict="$(_round_verdict "${dir}/merged.json")"
     # What stays open after the LAST allowed round is routed or carried before
     # the round is marked closed, so an interrupted close is run again, not lost.
+    # Under second_round_when: open_finding_and_fix (P110) the confirmation round
+    # rounds_default + 1 is still to come: routing waits for it.
     local last_allowed; last_allowed="$(_allowed_rounds)"
+    [[ "${RC_SECOND_ROUND_WHEN:-}" == open_finding_and_fix ]] && (( last_allowed <= RC_ROUNDS_DEFAULT )) \
+      && last_allowed=$(( RC_ROUNDS_DEFAULT + 1 ))
     aid_step_review_route_open "$ROOT" "$EVID" "$CHECKPOINT" "$STEP" "$dir" "$(( ROUND >= last_allowed ? 1 : 0 ))" \
       || _die "routing the open findings failed; close can be run again"
     jq --arg at "$(_now)" '. + {routed_at: $at}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
@@ -1261,19 +1327,6 @@ cmd_finalize() {
   echo "finalized after round ${last}: plan snapshot ${dir}/plan-final.md"
 }
 
-# _pm_replied_after <card> — true when the hook audit holds a PM prompt
-# (the pm_reply_marker line of a UserPromptSubmit, any session) later than the
-# card was written. An audit
-# trail, not a proof: a controller that forges the audit file is not stopped.
-_pm_replied_after() {
-  local -a gens=(); mapfile -t gens < <(aid_hook_audit_files)
-  (( ${#gens[@]} )) || return 1
-  # ISO-8601 UTC strings sort as time; jq's fromdateiso8601 is off by the DST hour.
-  # The rotated generations count too (aid-hook.sh rotates at 20 MB).
-  cat "${gens[@]}" | grep -F '"event":"UserPromptSubmit"' | grep -F '"rule":"pm_reply_marker"' \
-    | jq -e --arg t "$(date -u -d "@$(stat -c %Y "$1")" +%Y-%m-%dT%H:%M:%SZ)" -s 'any(.[]; .ts > $t)' >/dev/null 2>&1
-}
-
 cmd_dispute() {
   # cp7 since 2.114.0: a whole-plan finding the author refuted by measurement or
   # the PM consciously deferred had no path but "fix it" (P010 closed by a manual
@@ -1292,9 +1345,8 @@ cmd_dispute() {
   jq -e --arg f "$FINGERPRINT" '.findings | map(.fingerprint) | index($f) != null' "${dir}/merged.json" >/dev/null \
     || _die "no finding ${FINGERPRINT} in round ${ROUND}"
   if [[ "$MODE" == step && "$PM_ANSWER" == accepted ]]; then
-    [[ -f "$CARD" ]] || _die "--pm accepted needs --finding-card <the Decision card the PM answered> (skills/communication.md); render it and wait for the PM"
-    grep -qF "$FINGERPRINT" "$CARD" || _die "the card ${CARD} does not quote finding ${FINGERPRINT}; the PM must have been asked about this finding"
-    _pm_replied_after "$CARD" || _die "no PM prompt after ${CARD} in the hook audit; the PM has not answered the card yet"
+    local why_not
+    why_not="$(aid_pm_card_check "$CARD" "$FINGERPRINT")" || _die "--pm accepted: ${why_not}"
   fi
   local filter
   case "$PM_ANSWER" in

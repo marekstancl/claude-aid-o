@@ -408,6 +408,15 @@ the branch, before `increment-step`. cp3: after the last step, before
 checkpoint's key is `false` (`prepare` then exits 3; the FSM passes with an
 audit line).
 
+**What a step buys (P110, 2.116.0).** The verdict decides: `skip` (at most 3
+files and 120 lines, inside the step's scope, no security pattern —
+`step_review.skip_threshold`) has no reviewer; `review` asks `step_generalist`
+and `step_security` as light reviewers; `review+security` asks `step_security`
+as the full reviewer (`full_when`). `prepare` records the choice in
+`round.json` `agents` and prints it next to each prompt; dispatch exactly that
+agent type. A project keeps the old budget (two rounds, 1/50) in its own
+`.aid-o/config/policies/review-checkpoints.yaml`.
+
 1. The step check (deterministic, no model). It writes `<cp dir>/step-check.json`
    and, for `skip` or `no_change`, the round index itself — nothing to dispatch:
    ```bash
@@ -426,14 +435,19 @@ audit line).
    dispatch <review> --round K --provider codex --role <role>`; a codex
    that gives no answer is replaced by the stand-in the quoted text describes).
 4. `close` prints the verdict. `pass` → `increment-step` / `transition`.
-   `fail` with a round left (`rounds_default`, 2) → the step's own role fixes
-   (the `fix_of:` dispatch in the instruction below), a new step check, then
-   `prepare --round 2`: the confirmation round asks only the reporters of what
-   stayed open. `fail` after the last round → the PM card.
+   `fail` (cp2 `rounds_default` is 1) → the step's own role fixes (the
+   `fix_of:` dispatch in the instruction below), a new step check, then
+   `prepare --round 2`: the confirmation round (`second_round_when:
+   open_finding_and_fix` — round 1 left a blocker or major open and HEAD
+   moved) asks only the reporters of what stayed open, and its prompt carries
+   `fix.patch` and the open findings, not the whole step again. `fail` after
+   that round → the PM card; a third round needs the PM's override or standing
+   instruction (`prepare` refuses it otherwise).
    A step that moves after a `pass` (a later commit on the same step) is
    confirmed the same way — a new step check, then `prepare --round <n+1>`: a
-   delta round over the commits since, asking every role, which the round
-   budget does not count and which needs no override.
+   delta round over the commits since, asking every role. ONE delta round
+   (round `rounds_default + 1`) needs no override; a later one meets the
+   round budget like any other round.
    A finding the adjudicator could not accept on form (`form_invalid` in
    `merged.json`) is open like any other: fix it, or dispute it.
 5. The PM card after an exhausted round is the **Decision required** card of
@@ -648,10 +662,31 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
 5. **Step review (CP2)** — the section "Step review (CP2) and EPIC review (CP3)"
    above: step check, round, `close`; `increment-step` refuses without the
    step's round index at HEAD
+5a. **The step's points run (P110)** — `prepare --checkpoint cp2` runs
+   `aid-plan-diff.sh --step N --plan-json <run>/plan.json` before it builds the
+   packet (the brief points the step closes — a point several steps name is
+   measured at the last one — and the step's own `- [ ] [<role>]` criteria with
+   a block), so the reviewer reads measured verdicts. `increment-step` reads
+   `cp2/step-N/plan-diff.json` bound to HEAD (stale or missing: it measures
+   again) and refuses any `absent` point (`step_criteria_failed`, with `next:`);
+   `--force` does not waive it. The one way out is the PM's answer on a
+   Decision card that quotes the point:
+   `aid-fsm.sh increment-step <state> --defer-criterion AC<n> --reason "<the PM's words>" --finding-card <card>`
+   (`defer_refused` names what is missing: no card, the card does not quote the
+   point, no PM reply after it, a point the step does not close, a reason under
+   20 characters). The deferral lands in `cp2/step-N/deferred.json`; every
+   later measurement re-checks its card, and the close measures the point.
 6. Log to `timeline.jsonl`
 
-**EPIC review (CP3):** when all steps are done, before transitioning to GATES —
-the same section, `--checkpoint cp3`.
+**EPIC review (CP3):** OFF by default since 2.116.0 (P110): `cp3_integration_review:
+false` in the shipped policy, no `epic_review` block. `EXECUTE→GATES` and done-advance
+(the streamlined path too) then proceed from the last step's CP2 and the gates, with
+the audit `review_checkpoint_disabled`; security is reviewed on every reviewed step
+(`step_security`) and the close reads the whole plan (CP7). A project that keeps CP3
+sets `cp3_integration_review: true` AND copies the commented `epic_review` block
+into its own `.aid-o/config/policies/review-checkpoints.yaml` (the toggle on without
+the block is refused, naming it); then, when all steps are done, before
+transitioning to GATES — the same section, `--checkpoint cp3`.
 
 **Transition:**
 - All steps done + cp3 round `pass` → GATES
@@ -735,7 +770,7 @@ DONE uses two mechanically enforced sub-phases: `review` → `release`, managed 
 3. `work/active.md` refreshes automatically at the done-advance boundary (generated index of active streams — never hand-edit it; detail lives in `work/plan-state/`)
 4. Generate `final_report.md`
 5. Produce `review-profile.json` (`pipeline.md §7`, step 5)
-6. **EPIC review (CP3)** — "Step review (CP2) and EPIC review (CP3)" above. A finding is fixed by
+6. **EPIC review (CP3)** — only for a project that keeps it (off by default since 2.116.0) — "Step review (CP2) and EPIC review (CP3)" above. A finding is fixed by
    the role that wrote the code and confirmed by the next round.
 7. **PM Summary** (see `pipeline.md` §7 for the full template):
     ```
@@ -847,8 +882,38 @@ worktree (`.aid-worktrees/plan-<id>`) on `plan/<id>` for the whole close.
 | 1 | `<fsm> plan-finalize <plan> --stage freeze` | merges the target branch into `plan/<plan>`, freezes the candidate, mints `R-<plan>-final-<N>` | an EPIC is not terminal; the merge conflicts (exit 4, state CONFLICT); the tree is dirty |
 | 2 | `<fsm> plan-finalize <plan> --stage gates` | the plan-final gate run; a gate that passed in the previous attempt and whose `inputs:` did not change is copied (`reused_from`), not executed | a gate fails (the report names it); the branch moved off the candidate |
 | 3 | `<fsm> plan-finalize <plan> --stage produce` | review profile, plan-diff, acceptance evidence, and what the round reads (`cp7/`) | gates have not passed; the candidate moved |
-| 4 | `<round> prepare\|collect\|close --checkpoint cp7 --evidence-dir <run dir> --project-root <plan worktree> --round 1` | the whole-plan review: `final_criteria`, `final_claims`, `final_generalist` | `produce` has not run; HEAD is not the candidate; a reviewer file has no dispatch bracket |
+| 4 | `<round> prepare\|collect\|close --checkpoint cp7 --evidence-dir <run dir> --project-root <plan worktree> --round 1` | the whole-plan review: `final_criteria` (the brief point by point against the isolated measurement) and `final_generalist` (Codex: across the EPICs, the claims, the security and operations checklist); a project may add `final_claims` | `produce` has not run; HEAD is not the candidate; a reviewer file has no dispatch bracket; the plan-diff was not measured in isolation (`cp7_measurement_stale`); the brief is not the one the plan is bound to (`cp7_brief_sha_mismatch`), missing (`zadani_file_missing`) or, for a strict plan, not named (`plan_names_no_brief`) |
 | 5 | `<fsm> plan-finalize <plan> --stage decide` | the one aggregate: `release-decision.json`, the sealed receipt, the PM page with attempts, minutes and USD | the round is not closed; a decision input was edited by hand (named); the candidate moved |
+
+**Gates and the project's tests (P110).** With `project_tests:` declared in
+`execution.yaml`, a change to the project's test files needs a gate of the
+run's profile flagged `runs_project_tests: true` that proves, through
+`--evidence-file {evidence_dir}/gates/<gate>.evidence.json`, that it ran them —
+otherwise the row `project_tests` fails (`profile_skips_project_tests`,
+`project_tests_evidence_missing`, `project_tests_not_selected`); a suite left to
+the nightly tier is `nightly_covers`, a project without the key is only advised
+(`project_tests_undeclared`). `run-all-tests.sh --evidence-file` writes the
+evidence; `aid-run-gates.sh record-tests --glob … --evidence-file … -- <cmd>`
+wraps a whole-suite runner; `aid-run-gates.sh --lint-profiles <execution.yaml>`
+checks every profile. The PM waives with `aid-gate-waiver.sh issue project_tests`.
+
+**The measurer at the close (row 3, P110).** `produce` runs every brief point
+through `aid-plan-diff.sh --isolated --cwd <the plan worktree>` (the release
+profile's `plan_diff` gate passes `--isolated --cwd .`). The rule is the
+project's, read from the state root's `execution.yaml`: without
+`verification_env:` each `cmd` point runs in a new network namespace with
+loopback up and your own uid (no host service, no outbound network, a clean
+environment, and whatever it starts in the background dies with it); with
+`verification_env:` it runs with those variables and the host network,
+recorded as `network: host (verification_env)`. A point the close cannot run
+that way is `absent` with a reason and never counts as verified:
+`no_isolation` (no usable `unshare --map-user` — `next:` names util-linux ≥ 2.38
+and user namespaces), `env_stripped: <VAR>` (a test-service variable such as
+`*_TEST_DATABASE_URL` is in your environment but not declared — declare it),
+`no_verification_env` (the command names a database URL),
+`verification_env_unset: <VAR>`. `--cwd` on a directory that is not a git
+worktree exits 3 (`cwd_not_worktree`). `plan-diff.json` records
+`isolation {worktree, env_keys, network}`; `produce` prints it.
 
 **The round (row 4)** is dispatched exactly as a step or EPIC round: the
 procedure, the prompt files, the dispatch bracket (`aid-emit-dispatch.sh start` …
@@ -870,10 +935,12 @@ is round 1 of the next attempt.
    ```
    The owning step is the one whose declared files cover the path (`plan.json` of the EPIC whose commit last touched it: `git log -1 -- <path>`).
 2. `--stage freeze` again. It mints the next attempt and writes `fix-class.json`:
-   what the fix touched decides what is read again. A change to CHANGELOG, README
-   or docs re-asks `final_claims`; an edit of the plan's criteria re-asks
-   `final_criteria`; code re-asks everyone; a role whose inputs were not touched
-   and which had no finding is carried. The round's packet shows the re-asked
+   what the fix touched decides what is read again. `final_criteria` is never
+   carried — every attempt re-measures every point. A change to CHANGELOG,
+   README or docs or to the code re-asks `final_generalist` (and `final_claims`
+   where a project keeps it); a role whose inputs were not touched and which
+   had no finding is carried. A brief point measured `absent` is a blocker
+   finding of `final_criteria`. The round's packet shows the re-asked
    reviewers what stayed open and the fix diff.
 3. `gates` (unchanged gates are copied), `produce`, the round, `decide`.
 

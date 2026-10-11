@@ -118,7 +118,8 @@ DURATIONS_WARNED=0
 # P081 Step 5 — empty means every tier, which is exactly today's behaviour.
 TIER=""
 ONLY=""
-USAGE="Usage: $(basename "$0") [--verbose] [--list] [--tier t0|t1|t2] [--timing] [--include-delegated]"
+EVIDENCE_FILE=""
+USAGE="Usage: $(basename "$0") [--verbose] [--list] [--tier t0|t1|t2] [--timing] [--evidence-file <path>] [--include-delegated]"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --verbose|-v)
@@ -130,6 +131,9 @@ while [[ $# -gt 0 ]]; do
     --only)
       [[ $# -ge 2 ]] || { echo "--only requires a suite basename" >&2; exit 2; }
       ONLY="$2"; shift 2; continue ;;
+    --evidence-file)
+      [[ $# -ge 2 ]] || { echo "--evidence-file requires a path" >&2; exit 2; }
+      EVIDENCE_FILE="$2"; shift 2; continue ;;
     --tier)
       TIER="${2:-}"; shift
       case "$TIER" in
@@ -163,6 +167,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --tier <t0|t1|t2>    Run only suites declaring that tier (see aid-test-tier-lint.sh)"
       echo "  --only <basename>    Run exactly one suite, under the runner's own conditions"
       echo "  --timing             Record one duration per suite into the durations journal"
+      echo "  --evidence-file <p>  Write {ran_tests, skipped_by_tier, tier, exit_status} on exit;"
+      echo "                       an existing file is merged (P110: a gate proves what it ran)"
       echo "  --include-delegated  DEPRECATED no-op (delegation removed 2026-08-14; untiered = full portfolio)"
       echo "  --help, -h           Show this help message"
       exit 0
@@ -331,6 +337,7 @@ if [[ "$TAGGED_COUNT" -gt 0 && "${#UNTAGGED_SUITES[@]}" -gt 0 ]]; then
 fi
 
 SKIPPED_BY_TIER=0
+SKIPPED_BY_TIER_SUITES=()
 if [[ -n "$TIER" ]]; then
   _kept=()
   for suite in ${SUITES[@]+"${SUITES[@]}"}; do
@@ -338,6 +345,7 @@ if [[ -n "$TIER" ]]; then
       _kept+=("$suite")
     else
       SKIPPED_BY_TIER=$(( SKIPPED_BY_TIER + 1 ))
+      SKIPPED_BY_TIER_SUITES+=("$suite")
     fi
   done
   SUITES=(${_kept[@]+"${_kept[@]}"})
@@ -378,6 +386,34 @@ if [[ -n "$ONLY" ]]; then
   fi
   SUITES=("${_o[@]}")
 fi
+
+# --evidence-file (P110): what this run executed and what the tier left out,
+# written on every exit, merged with an existing file (two invocations in one
+# gate — `--tier t0 && --tier t1` — make one record; a non-zero exit wins).
+# Paths are relative to the repository root, so a gate compares them with the
+# changed paths git reports.
+_evidence_write() {
+  local rc=$? root tmp
+  [[ -n "$EVIDENCE_FILE" ]] || return 0
+  root="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo /)"
+  _rel() { local f; for f in "$@"; do realpath --relative-to="$root" "$f"; done; }
+  tmp="$(mktemp)"
+  jq -n --argjson ran "$(_rel ${SUITES[@]+"${SUITES[@]}"} | jq -R . | jq -sc .)" \
+        --argjson skip "$(_rel ${SKIPPED_BY_TIER_SUITES[@]+"${SKIPPED_BY_TIER_SUITES[@]}"} | jq -R . | jq -sc .)" \
+        --arg tier "$TIER" --argjson rc "$rc" \
+    '{ran_tests: $ran, skipped_by_tier: $skip, tier: (if $tier == "" then null else [$tier] end), exit_status: $rc}' > "$tmp"
+  mkdir -p "$(dirname "$EVIDENCE_FILE")"
+  if [[ -s "$EVIDENCE_FILE" ]] && jq -e . "$EVIDENCE_FILE" >/dev/null 2>&1; then
+    jq -s '.[0] as $a | .[1] as $b | {ran_tests: (($a.ran_tests // []) + $b.ran_tests | unique),
+      skipped_by_tier: ((($a.skipped_by_tier // []) + $b.skipped_by_tier | unique) - (($a.ran_tests // []) + $b.ran_tests)),
+      tier: ((($a.tier // []) + ($b.tier // [])) | unique),
+      exit_status: (if ($a.exit_status // 0) != 0 then $a.exit_status else $b.exit_status end)}' "$EVIDENCE_FILE" "$tmp" > "${tmp}.m" && mv "${tmp}.m" "$EVIDENCE_FILE"
+  else
+    mv "$tmp" "$EVIDENCE_FILE"
+  fi
+  rm -f "$tmp"
+}
+[[ -n "$EVIDENCE_FILE" && "$LIST_ONLY" -ne 1 ]] && trap _evidence_write EXIT
 
 if [[ "$LIST_ONLY" -eq 1 ]]; then
   echo "Discovered ${#SUITES[@]} test suite(s)"

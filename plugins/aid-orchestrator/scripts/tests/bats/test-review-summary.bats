@@ -102,3 +102,44 @@ _measure() {
   # while the CP1-only suite existed, this one had to carry at least its cases (P094 Step 14 removed it)
   [ ! -f "$BATS_TEST_DIRNAME/test-plan-review-summary.bats" ] || [ "$(grep -c '^@test' "$BATS_TEST_DIRNAME/test-plan-review-summary.bats")" -le "$(grep -c '^@test' "$BATS_TEST_FILENAME")" ]
 }
+
+# ── P110 Step 7: the run and the plan costed ────────────────────────────────
+_r() { _measure "$@"; }
+@test "cost: aid_plan_run_cost sums two EPIC runs (three cp2 rounds, one cp3) and two close attempts, counting rounds and attempts" {
+  local e1="$ROOT/.aid-o/work/evidence/E-900-1_2/R-1" e2="$ROOT/.aid-o/work/evidence/E-900-2_2/R-1"
+  _r "$e1/cp2/step-0" 1 '{"step_generalist": {"tokens": 1000, "usd": 1.5}}'
+  _r "$e1/cp2/step-0" 2 '{"step_generalist": {"tokens": 500, "usd": 0.5}}'
+  _r "$e2/cp2/step-1" 1 '{"step_security": {"tokens": 2000, "usd": 2}}'
+  _r "$e2/cp3" 1 '{"epic_generalist": {"tokens": 100, "usd": 0.25}}'
+  _r "$EV/R-P900-final-1/cp7" 1 '{"final_criteria": {"tokens": 300, "usd": 3}}'
+  mkdir -p "$EV/R-P900-final-2/cp7"; _r "$EV/R-P900-final-2/cp7" 1 '{"final_criteria": {"tokens": 200, "usd": 1}}'
+  run aid_plan_run_cost "$EV" P900 "$e1" "$e2"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -c '{usd, tokens, rounds, attempts}' <<< "$output")" = '{"usd":8.25,"tokens":4100,"rounds":6,"attempts":2}' ]
+}
+@test "cost: a role with an unknown USD lands in usd_unknown_roles and the known sum is kept" {
+  local e1="$ROOT/.aid-o/work/evidence/E-900-1_1/R-1"
+  _r "$e1/cp2/step-0" 1 '{"step_generalist": {"tokens": 1000, "usd": 1.5}, "step_security": {"tokens": "unknown", "usd": "unknown"}}'
+  run aid_plan_run_cost "$EV" P900 "$e1"
+  [ "$(jq -c '{usd, usd_unknown_roles}' <<< "$output")" = '{"usd":1.5,"usd_unknown_roles":["step_security"]}' ]
+}
+@test "cost: aid_plan_plan_cost sums a CP1 round and a set-aside attempt and prices the Codex critic from its events" {
+  _r "$EV/cp1" 1 '{"generalist_a": {"tokens": 1000, "usd": 2}}'
+  _r "$EV/cp1/attempt-1" 1 '{"generalist_a": {"tokens": 1000, "usd": 3}}'
+  mkdir -p "$EV/critic/plan"
+  printf '{"type":"turn.completed","usage":{"input_tokens":1000000,"cached_input_tokens":0,"output_tokens":0}}\n' > "$EV/critic/plan/codex-events.jsonl"
+  printf '{"event":"dispatch_start","agent_id":"codex:sonnet"}\n' > "$EV/critic/plan/timeline.jsonl"
+  run aid_plan_plan_cost "$EV" P900; echo "$output"
+  [ "$(jq -c '{usd, cp1_rounds, critic, critic_reason}' <<< "$output")" = '{"usd":7,"cp1_rounds":2,"critic":{"usd":2,"tokens":1000000,"runs":1},"critic_reason":null}' ]
+}
+@test "cost: a critic answered by the stand-in leaves no events — critic null with the reason" {
+  _r "$EV/cp1" 1 '{"generalist_a": {"tokens": 1000, "usd": 2}}'
+  mkdir -p "$EV/critic/plan"
+  run aid_plan_plan_cost "$EV" P900
+  [ "$(jq -c '{critic, critic_reason}' <<< "$output")" = '{"critic":null,"critic_reason":"stand-in or no events"}' ]
+}
+@test "cost: aid_review_tokens_from_events returns what dispatch used to compute; an unreadable measurement is measurement_unreadable" {
+  printf '{"type":"x"}\n{"type":"turn.completed","usage":{"input_tokens":5,"cached_input_tokens":2,"output_tokens":7}}\n' > "$ROOT/ev.jsonl"
+  [ "$(aid_review_tokens_from_events "$ROOT/ev.jsonl")" = '{"tokens_in":5,"cache_read":2,"tokens_out":7}' ]
+  mkdir -p "$EV/R-P900-final-1/cp7/round-1"; echo "{broken" > "$EV/R-P900-final-1/cp7/round-1/measurement.json"
+  run aid_plan_run_cost "$EV" P900; [ "$status" -eq 3 ]; [[ "$output" == *"measurement_unreadable"* ]]
+}

@@ -989,7 +989,9 @@ aid_lifecycle_ensure_manifest() {
 # audit-report.json an EPIC closed before 2.101.0 left behind. Empty if neither.
 _aid_lc_epic_review_file() {
   { ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp3/rounds.json 2>/dev/null \
-    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null || true; } | sort -V | tail -1   # the latest run
+    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null \
+    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp2/step-*/rounds.json 2>/dev/null || true; } | sort -V | tail -1
+  # the latest run; with CP3 off (2.116.0) the last step's CP2 index is the review record
 }
 
 # _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the review
@@ -1023,6 +1025,15 @@ _aid_lc_epic_review_status() {
   if _aid_lc_plan_mode; then _aid_lc_plan_review_status "$root" "$plan_id"; return 0; fi
   rep="$(_aid_lc_epic_review_file "$epic_id" "$root")"
   [[ -z "$rep" ]] && { echo "none"; return 0; }
+  if [[ "$rep" == */cp2/step-*/rounds.json ]]; then
+    # CP3 off (2.116.0): every step of that run decides — one fail rejects, a state
+    # other than pass/skip/no_change leaves it unverifiable (P110 security review)
+    local vs; vs="$(jq -rs '[.[].verdict // "none"] | unique | join(" ")' "${rep%/step-*/rounds.json}"/step-*/rounds.json 2>/dev/null)"
+    if [[ " $vs " == *" fail "* ]]; then echo rejected
+    elif [[ -n "$vs" && -z "$(tr ' ' '\n' <<< "$vs" | grep -vxE 'pass|skip|no_change')" ]]; then echo accepted
+    else echo unverifiable; fi
+    return 0
+  fi
   if [[ "$rep" == */cp3/rounds.json ]]; then
     case "$(jq -r '.verdict // ""' "$rep" 2>/dev/null)" in
       pass|skip|no_change) echo "accepted" ;;

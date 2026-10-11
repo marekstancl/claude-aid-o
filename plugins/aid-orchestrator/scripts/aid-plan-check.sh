@@ -467,7 +467,7 @@ if (( HAS_REPO )); then
   # B7 — a criterion that already holds on HEAD proves nothing about the plan.
   while IFS=$'\t' read -r ln rec; do
     [[ -n "${ln:-}" ]] || continue
-    IFS=$'\x1f' read -r _ _ typ c f rx ex <<< "$rec"
+    IFS=$'\x1f' read -r _ _ typ c f rx ex _ <<< "$rec"
     case "$typ" in
       must_contain)
         [[ -n "$f" && -n "$rx" ]] && _exists "$f" && grep -qE -- "$rx" "$(_abs "$f")" 2>/dev/null && _warn "B7" "$PLAN:$ln" "must_contain already holds on HEAD (\`${f}\` matches /${rx}/) — this criterion passes before any work"

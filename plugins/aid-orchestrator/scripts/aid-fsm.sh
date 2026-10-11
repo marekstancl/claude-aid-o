@@ -1180,6 +1180,17 @@ _fsm_refusal_next() {
       next="the widening serves no point this step closes: bring it to the PM as a scope change (skills/pipeline.md escalations, rule 11) — or, at GATES, name the point of any step" ;;
     amend_scope_reason_names_no_point)
       next="$(_fsm_cmd bash "$fsm" amend-scope "$sf" --add "<path>" --reason "<AC<n> of ${_ZP_SET:-the step points}> needs <path> because …")" ;;
+    step_criteria_failed)
+      # a step's own labelled criterion is not a brief point: no PM deferral, only a fix
+      if [[ ! "${_sc_label:-AC}" =~ ^AC[0-9]*$ ]]; then
+        next="fix the step so its own criterion holds, commit, then: $inc"
+      else
+      next="fix the step and commit, or render the Decision card (lib/aid-decision-card.sh) and wait for the PM, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words>" --finding-card "<card>")"
+      fi ;;
+    streamlined_cp3_off)
+      next="keep CP3 for this project (cp3_integration_review: true + an epic_review block in .aid-o/config/policies/review-checkpoints.yaml) and run the EPIC review, or run the plan in plan_branch mode, then: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-review}" "${to_phase:-release}" "$sf")" ;;
+    defer_refused)
+      next="render the Decision card quoting ${_sc_label:-the point} (lib/aid-decision-card.sh), wait for the PM's answer, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words, 20+ chars>" --finding-card "<card>")" ;;
     missing_lenses|done_advance_preconditions)
       next="correct what the lines above name, then run the same done-advance again: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-<from>}" "${to_phase:-<to>}" "$sf")" ;;
     *) return 1 ;;
@@ -1505,7 +1516,9 @@ _fsm_routed_findings_check() {
   # "nothing to reconcile" once a cp3 round closed (verdict pass or fail). A
   # skipped or no_change cp3 ran no reviewer and passes with an audit line;
   # a run with no cp3 index at all keeps the legacy zero-cost path.
-  if [[ ! -f "$review_json" && -f "${evidence_dir}/cp3/rounds.json" ]]; then
+  # (a leftover cp3/ of a run started before CP3 was switched off is not read: P110)
+  if [[ ! -f "$review_json" && -f "${evidence_dir}/cp3/rounds.json" ]] \
+     && ! aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review >/dev/null; then
     local cp3_verdict; cp3_verdict="$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)"
     case "$cp3_verdict" in
       pass|fail)
@@ -1691,8 +1704,24 @@ fsm_check_streamlined_integration_review() {
     gates_source="legacy_flat"
     echo "NOTE: streamlined integration review read gates_report.json from the legacy flat path (${gates_flat})." >&2
   fi
-  local missing=()
-  [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] || missing+=("cp3/rounds.json with verdict pass (the closed EPIC review round)")
+  local missing=() cp3_off pmode=""
+  # P110: CP3 switched off (the default since 2.116.0) needs no cp3 round here
+  # — but a streamlined run skips every step review, so without CP3 it is
+  # reviewed only when the whole-plan round (CP7, plan_branch) follows; a
+  # legacy-mode streamlined run with CP3 off would ship unreviewed and is refused.
+  IFS=$'\t' read -r pmode _ _ < <(_fsm_declared_plan_mode "${epic_id:-}" 2>/dev/null) || true
+  local cp3_pass=false
+  [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] && cp3_pass=true
+  if cp3_off="$(aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review)" && [[ "$pmode" != plan_branch && "$cp3_pass" != true ]]; then
+    echo "REFUSED (streamlined_cp3_off): streamlined run with the EPIC review (CP3) off and no whole-plan review after it (plan mode: ${pmode:-legacy}) — nothing would review this code." >&2
+    echo "next: set cp3_integration_review: true with an epic_review block in .aid-o/config/policies/review-checkpoints.yaml and run the EPIC review (aid-step-check.sh --checkpoint cp3, aid-review-round.sh), or run the plan in plan_branch mode (CP7 reads it) (pipeline.md §When AID refuses: streamlined_cp3_off)" >&2
+    fsm_emit_audit_log "streamlined_integration_review_fail" --evidence-dir "$evidence_dir" --reason "streamlined, cp3 off, mode ${pmode:-legacy}" 2>/dev/null || true
+    return 1
+  elif [[ -n "$cp3_off" ]]; then
+    fsm_emit_audit_log review_checkpoint_disabled --evidence-dir "$evidence_dir" --reason "cp3_integration_review off (${cp3_off//$'\t'/ in }): streamlined done-advance proceeds from the steps' reviews and the gates" 2>/dev/null || true
+  else
+    [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] || missing+=("cp3/rounds.json with verdict pass (the closed EPIC review round)")
+  fi
   [[ -n "$gates" ]]    || missing+=("gates_report.json (searched ${gates_canonical} and ${gates_flat})")
   if [[ ${#missing[@]} -gt 0 ]]; then
     local joined
@@ -2112,7 +2141,9 @@ evaluate_compliance_checks() {
     cp3_round_json='{"verdict":null,"rounds":0}'; cp3_d=false; cp3_v=null
   fi
   if [[ "$cp2_dispatched" == null ]]; then aggregate=null
-  elif [[ "$cp2_dispatched" == true && "$cp3_d" == true && "$cp3_v" == '"pass"' && "$cp2_verdict" == '"pass"' ]]; then aggregate=true
+  elif [[ "$cp2_dispatched" == true && "$cp2_verdict" == '"pass"' ]] \
+       && { [[ "$cp3_d" == true && "$cp3_v" == '"pass"' ]] \
+            || aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review >/dev/null; }; then aggregate=true   # P110: CP3 off needs no cp3 pass
   else aggregate=false; fi
 
   # Phase 2 (P037) — plan_ac_match dimension
@@ -4563,6 +4594,76 @@ _increment_binding_verified() {
   return 0
 }
 
+# _fsm_step_measure <evidence_dir> <step> <state_file> — run the step's points
+# (aid-plan-diff.sh --step) unless cp2/step-N/plan-diff.json is bound to HEAD.
+# Prints nothing; returns 4 when the run has no plan (Fast Mode), 3 when the
+# plan file or plan.json is missing, never fails
+# on an absent point (that is the caller's refusal).
+_fsm_step_measure() {
+  local ev="$1" n="$2" sf="$3" pp base pd rc=0
+  pp="$(yq -r '.plan_path // ""' "$sf" 2>/dev/null)"
+  [[ -n "$pp" && "$pp" != null ]] || return 4   # Fast Mode: no plan, nothing to measure
+  [[ -f "$pp" && -f "${ev}/plan.json" ]] || return 3
+  # the criteria come from the plan the EPIC was generated from: a plan edited
+  # since (a criterion weakened or deleted) is not measured (P110 security review)
+  local want; want="$(jq -r '.source_plan_sha256 // ""' "${ev}/plan.json")"
+  if [[ -n "$want" && "$(sha256sum "$pp" | cut -d' ' -f1)" != "$want" ]]; then
+    echo "REFUSED (step_criteria_failed): ${pp} changed since the EPIC was generated (source_plan_sha256) — its criteria are not measured from an edited plan" >&2
+    return 1
+  fi
+  pd="${ev}/cp2/step-${n}/plan-diff.json"
+  # Reused only when bound to HEAD AND written by the measurer: the run's
+  # timeline holds its plan_diff_complete event with the file's sha256 (a
+  # hand-written file is measured again, never trusted).
+  if [[ -f "$pd" && "$(jq -r '.head_commit // ""' "$pd" 2>/dev/null)" == "$(git rev-parse HEAD 2>/dev/null)" ]] \
+     && grep -F '"event":"plan_diff_complete"' "${ev}/timeline.jsonl" 2>/dev/null \
+        | jq -e --arg s "$(sha256sum "$pd" | cut -d' ' -f1)" --arg n "$n" 'select((.step | tostring) == $n and .sha256 == $s)' >/dev/null 2>&1; then
+    return 0
+  fi
+  base="$(yaml_field "$sf" base_commit)"
+  bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$pp" --evidence-dir "$ev" --base-commit "${base:-HEAD}" \
+    --step "$n" --plan-json "${ev}/plan.json" >/dev/null || rc=$?   # stderr through: a dropped deferral says why
+  (( rc <= 2 )) || { echo "step ${n}: the measurer failed (aid-plan-diff.sh exit ${rc})" >&2; return 1; }
+  return 0
+}
+
+# _fsm_step_absent <evidence_dir> <step> — "<label>\t<text>\t<evidence>" per
+# point of the step that is absent and neither deferred by an answered card
+# nor measured at a later step (P110).
+_fsm_step_absent() {
+  local pd="${1}/cp2/step-${2}/plan-diff.json"
+  [[ -f "$pd" ]] || return 0
+  jq -r '.results[] | select(.verdict == "absent" and .deferred == null and .deferred_to_step == null) | "\(.ac_label)\t\(.ac_text)\t\(.evidence)"' "$pd"
+}
+
+# _fsm_defer_criterion <evidence_dir> <step> <label> <reason> <card> — the one
+# way out of step_criteria_failed: the PM's answer on a Decision card that
+# quotes the point (aid_pm_card_check, the same check dispute --pm accepted
+# makes). Writes cp2/step-N/deferred.json and the timeline event.
+_fsm_defer_criterion() {
+  local ev="$1" n="$2" label="$3" reason="$4" card="$5" pd df why
+  pd="${ev}/cp2/step-${n}/plan-diff.json"; df="${ev}/cp2/step-${n}/deferred.json"
+  _sc_label="$label"
+  declare -F aid_pm_card_check >/dev/null || source "${SCRIPT_DIR}/lib/aid-decision-card.sh"
+  _defer_fail() { echo "REFUSED (defer_refused): --defer-criterion ${label}: $1" >&2; _fsm_refusal_next defer_refused || true; exit 1; }
+  [[ "$label" =~ ^AC[0-9]+$ ]] || _defer_fail "takes a brief point AC<n> (got '${label}')"
+  (( ${#reason} >= 20 )) || _defer_fail "--reason must carry the PM's words, at least 20 characters (got ${#reason})"
+  jq -e --arg l "$label" '[.results[] | select(.ac_label == $l)] | length > 0' "$pd" >/dev/null 2>&1 \
+    || _defer_fail "the step does not close ${label} (not among the points measured in ${pd})"
+  why="$(aid_pm_card_check "$card" "$label")" || _defer_fail "$why"
+  if jq -e --arg l "$label" 'has($l)' "$df" >/dev/null 2>&1; then
+    echo "--defer-criterion ${label}: already deferred (${df}); nothing changed"; return 0
+  fi
+  [[ -f "$df" ]] || echo '{}' > "$df"
+  jq --arg l "$label" --arg r "$reason" --arg c "$card" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '. + {($l): {by: "pm", reason: $r, card: $c, at: $at}}' "$df" > "${df}.tmp" && mv "${df}.tmp" "$df"
+  local tl; tl=$(derive_timeline "$state_file") || true
+  [[ -n "$tl" ]] && log_event "$tl" "step_criterion_deferred" step="$n" criterion="$label" card="$card"
+  # the measurement merges it (and re-checks the card) on its next run
+  rm -f "$pd"
+  echo "--defer-criterion ${label}: deferred by the PM (${df}); measured again at the close"
+}
+
 cmd_increment_step() {
   local state_file="${1:-}"
   if [[ -z "$state_file" ]]; then
@@ -4710,6 +4811,46 @@ cmd_increment_step() {
     printf '  - %s\n' "${_vf_lines[@]}" >&2
     _fsm_refusal_next "${_vf_reasons[0]}"
     exit 1
+  fi
+
+  # P110: the step's brief points and own labelled criteria run after the step;
+  # one absent and not deferred on a card the PM answered stops the step.
+  # --force does not waive it: the way out is --defer-criterion.
+  local _sc_label="" _sc_reason="" _sc_card="" _sc_a=("${@:2}") _sc_i
+  for (( _sc_i=0; _sc_i<${#_sc_a[@]}; _sc_i++ )); do
+    case "${_sc_a[$_sc_i]}" in
+      --defer-criterion) _sc_label="${_sc_a[$((_sc_i+1))]:-}" ;;
+      --finding-card)    _sc_card="${_sc_a[$((_sc_i+1))]:-}" ;;
+      --reason)          _sc_reason="${_sc_a[$((_sc_i+1))]:-}" ;;
+    esac
+  done
+  local _sc_rc=0
+  _fsm_step_measure "$evidence_dir" "$step" "$state_file" || _sc_rc=$?
+  if (( _sc_rc == 4 )); then
+    [[ -n "$_sc_label" ]] && echo "--defer-criterion ${_sc_label}: the run has no plan (Fast Mode); nothing to defer" >&2
+  elif (( _sc_rc == 3 )); then
+    echo "REFUSED (step_criteria_failed): step ${step} cannot be measured — the run names a plan but the plan file or ${evidence_dir}/plan.json is missing" >&2
+    exit 1
+  elif (( _sc_rc != 0 )); then
+    exit 1
+  else
+    if [[ -n "$_sc_label" ]]; then
+      _fsm_defer_criterion "$evidence_dir" "$step" "$_sc_label" "$_sc_reason" "$_sc_card"
+      _fsm_step_measure "$evidence_dir" "$step" "$state_file" || exit 1
+    fi
+    local _sc_absent; _sc_absent="$(_fsm_step_absent "$evidence_dir" "$step")"
+    if [[ -n "$_sc_absent" ]]; then
+      _sc_label="$(head -1 <<< "$_sc_absent" | cut -f1)"
+      local _sc_tl; _sc_tl=$(derive_timeline "$state_file") || true
+      [[ -n "$_sc_tl" ]] && log_event "$_sc_tl" "fsm_increment_fail" step="$step" reason="step_criteria_failed"
+      {
+        echo "REFUSED (step_criteria_failed): step ${step} leaves brief points or its own criteria absent (${evidence_dir}/cp2/step-${step}/plan-diff.json):"
+        awk -F'\t' '{printf "  - %s \"%s\" (%s)\n", $1, $2, $3}' <<< "$_sc_absent"
+        echo "--force does not waive this: fix the step, or defer the point on the PM's answered Decision card."
+      } >&2
+      _fsm_refusal_next step_criteria_failed || true
+      exit 1
+    fi
   fi
 
   if [[ "$force" != "true" ]]; then

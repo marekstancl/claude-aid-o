@@ -37,7 +37,7 @@ teardown() { teardown_test_evidence_dir; }
 _project() {
   printf '.aid-o/work/\n.aid-o/reports/\n' > "$R/.gitignore"
   mkdir -p "$R/.aid-o/plans" "$R/.aid-o/config/policies" "$R/docs"
-  printf -- '---\nid: %s\ntype: feature\n---\n# Plan\n\n### Step 1: the work\n\n**Acceptance Criteria:**\n- [ ] the app greets\n\n**Effort:** S\n\n## Success Criteria\n\n- it runs\n' "$PLAN_ID" > "$R/.aid-o/plans/${PLAN_ID}-x.md"
+  printf -- '---\nid: %s\ntype: feature\n---\n# Plan\n\n### Step 1: the work\n\n**Acceptance Criteria:**\n- [ ] the app greets\n\n**Effort:** S\n\n## Success Criteria\n\n- it runs\n%s' "$PLAN_ID" "${PLAN_EXTRA:-}" > "$R/.aid-o/plans/${PLAN_ID}-x.md"
   cat > "$R/.aid-o/config/execution.yaml" <<'YAML'
 version: '1.0'
 gates:
@@ -56,6 +56,7 @@ gate_profiles:
   release:
     include: [tests_pass, plan_diff]
 YAML
+  [[ -n "${EXEC_EXTRA:-}" ]] && printf '%s\n' "$EXEC_EXTRA" >> "$R/.aid-o/config/execution.yaml"
   # three claude reviewers, so no codex launcher is needed
   yq ".review_checkpoints.final_review.reviewers |= map(.provider = \"claude\" | .model = \"sonnet\") | ${1:-.}" \
     "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
@@ -91,7 +92,8 @@ _round() {
   local args=(--checkpoint cp7 --evidence-dir "$(_run_dir)" --project-root "${PLAN_TREE:-$R}" --round "${N:-1}") role tokens=()
   "$ROUND" prepare "${args[@]}" >/dev/null || return 1
   for role in $(jq -r '.reviewers_expected - ((.carried_from // {}) | keys) | .[]' "$(_run_dir)/cp7/round-${N:-1}/round.json"); do
-    if [[ "$role" == final_claims ]]; then _answer "$role" "${1:-.}"; else _answer "$role"; fi
+    # the claims question is the generalist's since 2.116.0 (P110)
+    if [[ "$role" == final_generalist ]]; then _answer "$role" "${1:-.}"; else _answer "$role"; fi
     tokens+=("${role}=1000")
   done
   "$ROUND" collect "${args[@]}" >/dev/null || return 1
@@ -185,6 +187,57 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ ! -e "$(_run_dir)/release-decision.json" ]
 }
 
+@test "produce: plan-diff.json of --stage produce carries isolation.worktree and the candidate's head_commit (P110)" {
+  _project
+  _stage freeze; _stage gates; _stage produce; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"plan-diff: isolation"* ]]
+  # legacy mode (no plan worktree): the plan's tree is the project root
+  [ "$(jq -r .isolation.worktree "$(_run_dir)/plan-diff.json")" = "$(cd "$R" && pwd -P)" ]
+  [ "$(jq -r .head_commit "$(_run_dir)/plan-diff.json")" = "$(_field candidate_sha)" ]
+}
+@test "unmeasured: a point the close could not isolate (env_stripped) blocks as unmeasured, never verified (P110)" {
+  # a machine-checkable success criterion the close runs
+  PLAN_EXTRA="$(printf -- '- [ ] AC1: it runs\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "true"\n    expected_exit: 0\n  ```')" _project
+  _stage freeze; _stage gates
+  FOO_TEST_DATABASE_URL=postgresql://x _stage produce; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.results[0].reason' "$(_run_dir)/plan-diff.json")" = "env_stripped: FOO_TEST_DATABASE_URL" ]
+  _round; _stage decide; echo "$output"; [ "$status" -eq 1 ]
+  jq -e '.release_decision.blockers | any(.reason | test("criteria unmeasured.*AC1 \\(env_stripped"))' "$(_run_dir)/release-decision.json"
+}
+@test "unmeasured: no_verification_env and verification_env_unset count as unmeasured; a real absent beside them keeps its own blocker (P110)" {
+  # AC1 names a database URL (no_verification_env without the map), AC2 fails for real
+  PLAN_EXTRA="$(printf -- '- [ ] AC1: db\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "psql postgresql://localhost/x -c 1"\n    expected_exit: 0\n  ```\n- [ ] AC2: fails\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "false"\n    expected_exit: 0\n  ```')" _project
+  _stage freeze; _stage gates; _stage produce; echo "$output"; [ "$status" -eq 0 ]
+  local r; r="$(jq -r '.results[0].reason // ""' "$(_run_dir)/plan-diff.json")"
+  [[ "$r" == no_verification_env || "$r" == no_isolation ]]
+  _round; _stage decide; [ "$status" -eq 1 ]
+  jq -e '.release_decision.blockers | any(.reason | test("criteria unmeasured.*AC1"))' "$(_run_dir)/release-decision.json"
+  jq -e '.release_decision.blockers | any(.reason == "plan-diff reports absent acceptance criteria")' "$(_run_dir)/release-decision.json"
+}
+@test "unmeasured: a verification_env value naming an unset variable is unmeasured, never verified (P110)" {
+  PLAN_EXTRA="$(printf -- '- [ ] AC1: it runs\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "true"\n    expected_exit: 0\n  ```')" EXEC_EXTRA="$(printf 'verification_env:\n  DB: "${P110_NOPE}"')" _project
+  _stage freeze; _stage gates; _stage produce; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.results[0].reason' "$(_run_dir)/plan-diff.json")" = "verification_env_unset: P110_NOPE" ]
+  _round; _stage decide; [ "$status" -eq 1 ]
+  jq -e '.release_decision.blockers | any(.reason | test("criteria unmeasured.*verification_env_unset"))' "$(_run_dir)/release-decision.json"
+  ! jq -e '.release_decision.blockers | any(.reason == "plan-diff reports absent acceptance criteria")' "$(_run_dir)/release-decision.json"
+}
+@test "cost: the decision carries plan_summary.run_cost and plan_cost with the fixture's figures (P110)" {
+  _project
+  mkdir -p "$R/.aid-o/work/evidence/E-900-1_1/R-E-900-1_1-1/cp2/step-0/round-1"
+  jq -n '{reviewers: {step_generalist: {tokens: 1000, usd: 1.5}}}' > "$R/.aid-o/work/evidence/E-900-1_1/R-E-900-1_1-1/cp2/step-0/round-1/measurement.json"
+  _close_up_to_decide; _stage decide; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_decision plan_summary.run_cost.rounds)" = 2 ]          # the step round and the cp7 round
+  [ "$(_decision plan_summary.run_cost.attempts)" = 1 ]
+  [ "$(_decision plan_summary.plan_cost.reason)" = no_cp1_evidence ]
+}
+@test "cost: an unreadable measurement.json refuses the decision measurement_unreadable (P110)" {
+  _project
+  mkdir -p "$R/.aid-o/work/evidence/E-900-1_1/R-E-900-1_1-1/cp2/step-0/round-1"
+  echo '{broken' > "$R/.aid-o/work/evidence/E-900-1_1/R-E-900-1_1-1/cp2/step-0/round-1/measurement.json"
+  _close_up_to_decide; _stage decide; echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"measurement_unreadable"* ]]
+}
 @test "the whole-plan review switched off: blocked as final_review_disabled until the PM waives it for this candidate, with the audit entry" {
   _project '.review_checkpoints.cp7_plan_final_review = false'
   _stage freeze; _stage gates; _stage produce; [ "$status" -eq 0 ]
@@ -211,7 +264,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
 }
 
 # ── a fix after the freeze ───────────────────────────────────────────────────
-@test "a docs-only fix: one command mints attempt 2, the test gate is copied, only final_claims is asked again" {
+@test "a docs-only fix: one command mints attempt 2, the test gate is copied, both default roles are asked again (final_criteria never carried, final_generalist reads the claims)" {
   _project
   _close_up_to_decide "$_BLOCKER"; _stage decide; [ "$status" -eq 1 ]
   local first; first="$(_run_dir)"
@@ -222,7 +275,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ "$(jq -r '.gates.tests_pass.reused_from' "$(_run_dir)/gates_report.json")" = "${PLAN_ID/#/R-}-final-1" ]
   _stage produce; [ "$status" -eq 0 ]
   _round
-  [ "$(jq -c '.reviewers_expected - (.carried_from | keys)' "$(_run_dir)/cp7/round-1/round.json")" = '["final_claims"]' ]
+  [ "$(jq -c '(.reviewers_expected - ((.carried_from // {}) | keys)) | sort' "$(_run_dir)/cp7/round-1/round.json")" = '["final_criteria","final_generalist"]' ]
   _stage decide; echo "$output"; [ "$status" -eq 0 ]
   [ "$(_decision plan_summary.close.attempts)" -eq 2 ]
   [ -s "$first/release-decision.json" ]                          # attempt 1 is left as it was
@@ -278,7 +331,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
     jq -n --arg r "$role" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "forged"}' > "$d/reviewer-$role.json"
   done
   "$ROUND" collect "${args[@]}" >/dev/null
-  run "$ROUND" close "${args[@]}" --tokens final_criteria=1 final_claims=1 final_generalist=1
+  run "$ROUND" close "${args[@]}" --tokens final_criteria=1 final_generalist=1
   [ "$status" -ne 0 ]; [[ "$output" == *dispatch* ]]
   _stage decide; [ "$status" -eq 1 ]                          # no closed round, nothing decided
 }

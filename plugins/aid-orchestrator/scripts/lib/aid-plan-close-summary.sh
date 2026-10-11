@@ -336,10 +336,20 @@ aid_plan_close_render() {
           <<<"$ps" 2>/dev/null)" && [[ -n "$_pcd" ]] && deliverables_json="$_pcd"
 
   # The whole-plan round's verdict, and what closing the plan cost so far.
-  local final_review close_cost time_spent
+  local final_review close_cost time_spent run_cost plan_cost
   final_review="$(jq -r '[.release_decision.inputs[]? | select(.id == "final_review") | .verdict] | first // "nezaznamenáno"' <<<"$decision_raw")"
   close_cost="$(jq -r '.close | "\(.attempts) pokus(ů), \(.minutes) min, \(.usd) USD"
                        + (if (.usd_unknown_roles | length) > 0 then " + neznámá cena u: " + (.usd_unknown_roles | join(", ")) else "" end)' <<<"$ps")"
+  # What the run and the plan cost (P110): counted by the producer
+  # (aid_plan_run_cost, aid_plan_plan_cost), never restated here.
+  run_cost="$(jq -r 'if (.run_cost | type) != "object" then "nezměřeno"
+    else "\(.run_cost.usd) USD, \(.run_cost.rounds) kol, \(.run_cost.attempts) pokus(ů)"
+         + (if (.run_cost.usd_unknown_roles | length) > 0 then " + neznámá u: " + (.run_cost.usd_unknown_roles | join(", ")) else "" end) end' <<<"$ps")"
+  plan_cost="$(jq -r 'if (.plan_cost | type) != "object" then "nezměřeno"
+    elif .plan_cost.usd == null then "nezměřeno (\(.plan_cost.reason // "bez CP1"))"
+    else "\(.plan_cost.usd) USD (CP1 \(.plan_cost.cp1_rounds) kol, kritik "
+         + (if .plan_cost.critic == null then "neznámá — \(.plan_cost.critic_reason)" elif .plan_cost.critic.usd == null then "neznámá" else "\(.plan_cost.critic.usd) USD" end) + ")"
+         + (if (.plan_cost.usd_unknown_roles | length) > 0 then " + neznámá u: " + (.plan_cost.usd_unknown_roles | join(", ")) else "" end) end' <<<"$ps")"
   # Where the plan's time went (P099 Step 7): five numbers computed by the
   # producer (aid_plan_close_time); an unmeasured one says so.
   time_spent="$(jq -r 'def m: if type == "number" then "\(.) min" else "neměřeno" end;
@@ -432,10 +442,12 @@ aid_plan_close_render() {
     --arg gres "$gates_result" \
     --arg grep_ "${gates_report:-—}" \
     --arg fr "$final_review" --arg cost "$close_cost" --arg time "$time_spent" \
+    --arg rcost "$run_cost" --arg pcost "$plan_cost" \
     --arg ev "$ev_status" --arg evh "$ev_at_head" \
     --arg wv "$waivers_n" --arg bl "$backlog_n" '[
       "Recenzovaný kandidát: " + $cand + " → schválený cíl " + $tgt + " (" + $tref + "), merge do main: " + $merge,
       "Kam šel čas: " + $time,
+      "Cena běhu: " + $rcost + "; Cena plánu: " + $pcost,   # one row: the block shows six
       "Plan-final brány: " + $gres + " (report: " + $grep_ + ")",
       "Čtení celku: " + $fr + "; uzavření: " + $cost,
       "Evidence: " + $ev + " (ověřeno na HEAD: " + $evh + "), waiverů " + $wv + ", zbývá v backlogu " + $bl

@@ -295,3 +295,22 @@ SH
   names="$(sed -nE '/^[[:space:]]*Failed suites:/,/^$/ s/^[[:space:]]+- (.+)$/\1/p' <<<"$output")"
   [ "$names" = "$(printf 'test-red\ntest-silent')" ]
 }
+
+# ── P110: --evidence-file, what a gate ran ──────────────────────────────────
+@test "evidence: --evidence-file lists the executed and the tier-skipped suites" {
+  local ev="$TEST_TMPDIR/ev.json"
+  run bash "$RUNNER" --tier t0 --only test-zadani-lint --evidence-file "$ev"
+  [ "$status" -eq 0 ]
+  [ "$(jq -c .ran_tests "$ev")" = '["plugins/aid-orchestrator/scripts/tests/bats/test-zadani-lint.bats"]' ]
+  jq -e '.skipped_by_tier | index("plugins/aid-orchestrator/scripts/tests/bats/test-plan-diff-step.bats")' "$ev"
+  [ "$(jq -c '[.tier, .exit_status]' "$ev")" = '[["t0"],0]' ]
+}
+@test "evidence: a second invocation merges (union of ran, a tier run later leaves the skipped list)" {
+  local ev="$TEST_TMPDIR/ev.json"
+  bash "$RUNNER" --tier t0 --only test-zadani-lint --evidence-file "$ev" >/dev/null
+  bash "$RUNNER" --tier t1 --only test-plan-diff-step --evidence-file "$ev" >/dev/null || true
+  jq -e '.ran_tests | index("plugins/aid-orchestrator/scripts/tests/bats/test-zadani-lint.bats")' "$ev"
+  jq -e '.ran_tests | index("plugins/aid-orchestrator/scripts/tests/bats/test-plan-diff-step.bats")' "$ev"
+  ! jq -e '.skipped_by_tier | index("plugins/aid-orchestrator/scripts/tests/bats/test-plan-diff-step.bats")' "$ev"
+  [ "$(jq -c .tier "$ev")" = '["t0","t1"]' ]
+}

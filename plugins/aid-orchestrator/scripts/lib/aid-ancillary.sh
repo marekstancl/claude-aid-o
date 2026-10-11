@@ -145,6 +145,27 @@ _aid_ancillary_glob_match() {
   # `dir/` is the directory form written short: under a bare-entry reading it
   # matched nothing (P102: 4 of 125 step checks called in-scope files out of scope).
   [[ "$pattern" == */ ]] && pattern+="**"
+  # A `**/` segment (P110: project_tests globs such as `**/tests/**/*.py`)
+  # stands for any number of directories, NONE included — so `tests/test_a.py`
+  # matches as well as `asistent/tests/test_a.py`. Read as a regex; every other
+  # `*` keeps the case rule below (it crosses `/`).
+  if [[ "$pattern" == *'**/'* ]]; then
+    local re="" i c n="${#pattern}"
+    for (( i = 0; i < n; i++ )); do
+      c="${pattern:i:1}"
+      if [[ "${pattern:i:3}" == '**/' ]]; then
+        # strict keeps the old meaning (at least one directory); permissive allows none
+        [[ "$strict" == strict ]] && re+='(.*/)' || re+='(.*/)?'; i=$((i + 2))
+      elif [[ "${pattern:i}" == '/**' ]]; then
+        [[ "$strict" == strict ]] && re+='/.*' || re+='(/.*)?'; i=$((i + 2))
+      elif [[ "$c" == '*' ]]; then re+='.*'
+      elif [[ "$c" == '?' ]]; then re+='.'
+      elif [[ "$c" =~ [].^$+(){}|\\[] ]]; then re+="\\$c"
+      else re+="$c"; fi
+    done
+    [[ "$path" =~ ^${re}$ ]] && return 0
+    return 1
+  fi
   # Explicit directory form.
   if [[ "$pattern" == */\*\* ]]; then
     local base="${pattern%/\*\*}"

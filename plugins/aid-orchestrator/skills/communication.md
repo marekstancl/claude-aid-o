@@ -46,6 +46,13 @@ Ověřeno: <tests/gates or "neověřeno", with the reason>.
 Další krok: <one concrete recommendation, or "nic dalšího není potřeba">.
 ```
 
+At the close of a plan the card also carries the two cost lines the close
+page renders from `release-decision.json` `plan_summary` (P110) — copied, never
+recomputed or estimated: `Cena běhu: <usd> USD, <rounds> kol, <attempts> pokusů`
+(every review round of the run and the close) and `Cena plánu: <usd> USD (CP1
+<n> kol, kritik <usd|neznámá>)`; a figure the producer could not count reads
+`nezměřeno`.
+
 **2. Decision required.**
 
 ```text
