@@ -1025,13 +1025,13 @@ next: restore the round's measurement.json (aid-review-round.sh close writes it;
           plan_final_gates: {report: $gpath, result: $gres,
                              quarantine_substitutes: ($b.quarantine_substitutes // [])},
           specialist_review: ($b.plan_final_review // null),
-          foreign_branches: [($b.repo_roots // [])[] | {name, branch, head, commits}],
           remaining_backlog: ($b.plan_final_backlog // []),
           close: $close,
           run_cost: $run_cost,
           plan_cost: $plan_cost,
           time: $time
-        }' --argjson run_cost "$run_cost" --argjson plan_cost "$plan_cost")" || plan_summary_json="null"
+        } + (if (($b.repo_roots // []) | length) > 0
+             then {foreign_branches: [$b.repo_roots[] | {name, branch, head, commits}]} else {} end)' --argjson run_cost "$run_cost" --argjson plan_cost "$plan_cost")" || plan_summary_json="null"
   fi
 
   # --- envelope-derived fields ---

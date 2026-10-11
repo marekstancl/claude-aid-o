@@ -754,6 +754,9 @@ aid_gen_receipt_check() {
     echo "ERROR: phase $phase plan.json dependencies disagree with the source-plan graph" >&2; return 1;
   }
   source_plan="$(jq -r '.source_plan // empty' "$plan_json" 2>/dev/null || true)"
+  # a relative source_plan is relative to the state root (P111: never the cwd)
+  [[ -z "$source_plan" || "$source_plan" == /* ]] \
+    || source_plan="${_aid_pipeline_state_root:-$(aid_state_root 2>/dev/null || pwd)}/${source_plan}"
   [[ -n "$source_plan" && "$(realpath "$source_plan" 2>/dev/null || true)" == "$plan_abs" ]] || {
     echo "ERROR: phase $phase plan.json is not bound to this source plan" >&2; return 1;
   }

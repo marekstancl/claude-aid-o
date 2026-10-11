@@ -187,3 +187,26 @@ _foreign_decision() {   # <dir> — a plan-mode release-decision carrying one fo
   run aid_plan_close_render "$TMP/ev/pm-decision-brief.json" "$TMP/ev/release-decision.json" P910 "$TMP/out"
   grep -q 'cizí větve k ručnímu merge: docs plan/P910-proj @abcdef1 (2 commit(ů))' "$TMP/out/plan-close-artifact.html"
 }
+
+@test "direct: freeze refuses a direct run recorded merged without its own done-advance (DONE/review)" {
+  export AID_PLUGIN_PATH="$PLUGIN_DIR"
+  source "$PLUGIN_DIR/scripts/tests/lib/aid-test-plan-fixture.sh"
+  local sf; sf="$(aid_fixture_direct_run "$TMP" P910 DONE review)"; cd "$TMP"
+  run bash "$PLUGIN_DIR/scripts/aid-plan-fsm.sh" epic-complete P910 E-910-1_1 --direct --project-root "$TMP"
+  [ "$status" -eq 0 ]
+  run bash "$PLUGIN_DIR/scripts/aid-plan-fsm.sh" plan-finalize P910 --stage freeze
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"is not DONE/release"* && "$output" == *"--direct"* ]]
+}
+
+@test "foreign: after the branch moved, committing and freezing again re-records the head and clears the refusal" {
+  _foreign_frozen
+  echo d >> "$FWT/page.md"; git -C "$FWT" commit -qam "after freeze"
+  _produce
+  [[ "$output" == *"moved after freeze"* ]]
+  run bash "$PLUGIN_DIR/scripts/aid-plan-fsm.sh" plan-finalize P910 --stage freeze
+  [ "$(jq -r '.plan_boundary_manifest.repo_roots[0].head' "$MFP")" = "$(git -C "$FR" rev-parse plan/P910-proj)" ]
+  yq -i '.plan_state = "PLAN_REVIEW"' "$TMP/.aid-o/work/plan-state/P910/plan-state.yaml"
+  _produce
+  [[ "$output" != *"foreign_branch_unverified"* ]]
+}

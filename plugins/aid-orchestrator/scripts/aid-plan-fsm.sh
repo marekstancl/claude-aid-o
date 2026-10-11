@@ -3193,6 +3193,10 @@ cmd_epic_complete() {
       exit 1
       ;;
     merged_to_plan)
+      if [[ "$direct" -eq 1 ]] && ! _pfsm_plan_state_set "$plan_id" PLAN_SYNC; then
+        echo "PRECONDITION FAIL: epic-complete --direct: ${epic_id} is merged_to_plan but ${plan_id} could not move to PLAN_SYNC — rerun." >&2
+        exit 1
+      fi
       echo "${epic_id} merged_to_plan"
       exit 0
       ;;
@@ -4434,6 +4438,20 @@ _pfsm_finalize_freeze() {
     return $?
   fi
 
+  # P111: a direct run is closed only after its own done-advance (DONE/release);
+  # epic-complete --direct called on its own records merged_to_plan at review.
+  local _dr_e _dr_d _dr_sf
+  while IFS=$'\t' read -r _dr_e _dr_d; do
+    [[ -n "$_dr_e" ]] || continue
+    _dr_sf="${root}/${_dr_d}/fsm-state.yaml"
+    if [[ "$(yq -r '.state // ""' "$_dr_sf" 2>/dev/null)" != "DONE" || "$(yq -r '.done_phase // ""' "$_dr_sf" 2>/dev/null)" != "release" ]]; then
+      echo "PRECONDITION FAIL: plan-finalize --stage freeze: the direct run ${_dr_e} is not DONE/release (${_dr_sf}) — its own review→release checks have not run." >&2
+      echo "next: aid-fsm.sh done-advance review release ${_dr_sf} --direct" >&2
+      echo "(pipeline.md §When AID refuses: done_advance_preconditions)" >&2
+      return 1
+    fi
+  done < <(plan_manifest_get "$plan_id" '.plan_boundary_manifest.epic_runs[]? | select(.direct == true and .status != "abandoned") | [.epic_id, .evidence_dir] | @tsv' 2>/dev/null || true)
+
   local cur_candidate="" prev_candidate="" prev_run_dir=""
   cur_candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || cur_candidate=""
 
@@ -4449,6 +4467,16 @@ _pfsm_finalize_freeze() {
     if [[ "$cur_candidate" == "$plan_head" ]]; then
       local run_dir=""
       run_dir="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir=""
+      # P111: the foreign branches are re-recorded on an unchanged candidate —
+      # the recovery foreign_branch_unverified names (commit in the worktree,
+      # freeze again). Out of PLAN_REVIEW that is all a rerun does.
+      _pfsm_foreign_freeze "$root" "$plan_id" \
+        || { echo "PRECONDITION FAIL: could not record ${plan_id}'s foreign branch heads — re-run '--stage freeze'." >&2; return 1; }
+      if [[ "$(plan_state_get "$plan_id" "plan_state" 2>/dev/null)" == "PLAN_REVIEW" ]]; then
+        echo "$cur_candidate"
+        echo "already frozen at ${cur_candidate} — the foreign branch heads were re-recorded; next: plan-finalize ${plan_id} --stage produce" >&2
+        return 0
+      fi
       # CP2 M1 (2026-07-25): this idempotent branch is also the RECOVERY path for a
       # freeze whose manifest write landed but whose state-file write did not. It
       # must therefore reconcile the state file rather than return 0 on the
@@ -10922,7 +10950,10 @@ _pr_generation_trace() {
     echo "a generation transaction (${tx})"; return 0
   fi
   for f in "$tx".completed-* "$tx".superseded-*; do
-    [[ -e "$f" ]] && { echo "an archived generation transaction ($(basename "$f"))"; return 0; }
+    [[ -e "$f" ]] || continue
+    # an archived plan-run transaction (the plan_changed_since_seal recovery) is not one
+    [[ "$(jq -r '.kind // "generation"' "$f" 2>/dev/null || echo generation)" == "plan_run" ]] && continue
+    echo "an archived generation transaction ($(basename "$f"))"; return 0
   done
   if [[ -f "$(plan_manifest_path "$PR_PLAN_ID")" ]]; then
     n="$(plan_manifest_get "$PR_PLAN_ID" '[.plan_boundary_manifest.epic_runs[]? | select(.direct != true) | .epic_id] | join(",")' 2>/dev/null || true)"
@@ -10993,6 +11024,7 @@ _pr_main() {
       _pr_refuse plan_in_scratch_tree "the plan ${plan_abs} lives only in a scratch tree" "put it in ${PR_ROOT}/.aid-o/plans/ and run again" 1 ;;
   esac
   plan_rel="${plan_abs#"$(realpath "$PR_ROOT")/"}"
+  cd "$PR_ROOT" || exit 3   # plan.json's source_plan is relative to the state root
   ev_rel=".aid-o/work/evidence/${PR_EPIC}/${PR_RUN}"; ev_dir="${PR_ROOT}/${ev_rel}"; pj="${ev_dir}/plan.json"
   tx="$(_pr_tx)"; gd="$(dirname "$tx")"
   mkdir -p "$gd" || exit 3
@@ -11079,7 +11111,7 @@ _pr_main() {
     ( aid_plan_json_build --steps-json "$steps_tmp" --out "$pj" --epic-id "$PR_EPIC" --plan "$plan_rel" \
         --direct --execution "${PR_ROOT}/.aid-o/config/execution.yaml" ) || { rm -f "$steps_tmp"; echo "ERROR: plan-run: plan.json could not be built (see above)." >&2; exit 1; }
     rm -f "$steps_tmp"
-    aid_gen_tx_update "$plan_id" '.direct.repo_roots = $rr' --argjson rr "$(jq -c '.repo_roots // []' "$pj")"
+    aid_gen_tx_update "$plan_id" '.direct.repo_roots = $rr | .stages = ((.stages // []) | map(select(.name != "contract_validate")))' --argjson rr "$(jq -c '.repo_roots // []' "$pj")"
     _pr_stage_record plan_json "$(sha256sum "$pj" | awk '{print $1}')"
   fi
 
@@ -11128,9 +11160,12 @@ _pr_main() {
   graph="$(aid_source_plan_graph "$plan" 1 2>/dev/null)" || _pr_refuse plan_json_unverified "the source graph of ${plan} cannot be built" "aid-generation-readiness.sh ${plan} --total 1" 1
   # One run takes every step: EPIC markers the plan still carries are ignored.
   graph="$(jq -c '.steps |= map(.epic = 1)' <<< "$graph")"
+  local pj_sha_rec
+  pj_sha_rec="$(jq -r 'first(.stages[]? | select(.name == "plan_json") | .sha) // ""' "$(_pr_tx)")"
   if ! aid_gen_receipt_check "$graph" 1 "$pj" "$(realpath "$PR_ROOT/$plan_rel")" \
-     || [[ "$(jq -r '.source_plan_sha256 // ""' "$pj")" != "$plan_sha" ]]; then
-    _pr_refuse plan_json_unverified "${pj} does not match the plan's step graph or bytes — FSM init was not attempted" \
+     || [[ "$(jq -r '.source_plan_sha256 // ""' "$pj")" != "$plan_sha" ]] \
+     || [[ "$(sha256sum "$pj" | awk '{print $1}')" != "$pj_sha_rec" ]]; then
+    _pr_refuse plan_json_unverified "${pj} does not match the plan's step graph or bytes, or is not the file the plan_json stage built — FSM init was not attempted" \
       "rebuild it: remove ${pj} and rerun plan-run" 1
   fi
   _pr_stage_record receipt "$(sha256sum "$pj" | awk '{print $1}')"

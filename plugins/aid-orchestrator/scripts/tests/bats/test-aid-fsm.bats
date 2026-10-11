@@ -2167,3 +2167,13 @@ YML
   [ "$status" -eq 1 ]
   [[ "$output" == *"(pipeline.md §When AID refuses: direct_run_no_epic_merge)"* && "$output" == *"next: "* ]]
 }
+
+@test "direct: a rerun of epic-complete --direct on a merged run still moves the plan to PLAN_SYNC" {
+  _direct_done
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 0 ]
+  yq -i '.plan_state = "EPIC_INTEGRATION"' "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P910/plan-state.yaml"
+  run bash "$PFSM" epic-complete P910 E-910-1_1 --direct --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.plan_state' "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P910/plan-state.yaml")" = "PLAN_SYNC" ]
+}

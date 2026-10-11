@@ -424,3 +424,36 @@ _seed_rr() {   # <project> <foreign> [base_branch] — the fixture plan declarin
   [ "$(git -C "$F" rev-parse plan/P900)" = "$(git -C "$F" rev-parse main)" ]
   git -C "$F" rev-parse --verify -q plan/P900-proj >/dev/null
 }
+
+# ── review of steps 2-4: the recoveries the refusals name, and the binding ──
+@test "direct: the plan_changed_since_seal recovery (archive the plan-run transaction) leads to a fresh start" {
+  AID_PLAN_FSM_CRASH_AFTER=seal _run
+  [ "$status" -eq 99 ]
+  echo "edited after the seal" >> "$PLAN"
+  git -C "$R" add -f "$PLAN" && git -C "$R" commit -qm "edited plan"
+  ( export AID_PLUGIN_PATH="$PLUGIN_DIR"; source "$PLUGIN_DIR/scripts/tests/lib/aid-test-plan-fixture.sh"; aid_fixture_seed_plan_review "$R" "$PLAN" >/dev/null )
+  _run
+  [ "$status" -eq 1 ]; [[ "$output" == *plan_changed_since_seal* ]]
+  mv "$GEN/transaction.json" "$GEN/transaction.json.superseded-1"
+  _run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *generation_already_started* ]]
+}
+
+@test "direct: plan-run resumed from another directory (the plan worktree) passes its receipt check" {
+  AID_PLAN_FSM_CRASH_AFTER=receipt _run
+  [ "$status" -eq 99 ]
+  run bash -c "cd '$R/.aid-worktrees/plan-P900' && bash '$PFSM' plan-run P900 --project-root '$R'"
+  [ "$status" -eq 0 ]
+  [ -f "$EV/fsm-state.yaml" ]
+}
+
+@test "direct: a plan.json widened after the plan_json stage is refused before init (its hash is the stage's)" {
+  AID_PLAN_FSM_CRASH_AFTER=contract_validate _run
+  [ "$status" -eq 99 ]
+  jq '.steps[0].allowed_paths += ["**"] | .gates = []' "$EV/plan.json" > "$EV/t" && mv "$EV/t" "$EV/plan.json"
+  _run
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"plan_json_unverified"* ]]
+  [ ! -f "$EV/fsm-state.yaml" ]
+}
