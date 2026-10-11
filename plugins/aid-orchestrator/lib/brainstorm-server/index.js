@@ -82,6 +82,11 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// The AID tab icon, shared with the studio (lib/aid-ui-studio/aid-icon.svg)
+const ICON_FILE = path.join(__dirname, '..', 'aid-ui-studio', 'aid-icon.svg');
+const ICON_LINK = '<link rel="icon" href="/favicon.svg" type="image/svg+xml">';
+app.get('/favicon.svg', (req, res) => { res.type('image/svg+xml').send(fs.readFileSync(ICON_FILE)); });
+
 // Serve newest screen with helper.js injected
 app.get('/', (req, res) => {
   const screenFile = getNewestScreen();
@@ -92,6 +97,11 @@ app.get('/', (req, res) => {
   } else {
     const raw = fs.readFileSync(screenFile, 'utf-8');
     html = isFullDocument(raw) ? raw : wrapInFrame(raw);
+  }
+
+  // A page without its own tab icon gets the AID one
+  if (!/rel=["']?(shortcut )?icon/i.test(html)) {
+    html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, m => `${m}\n${ICON_LINK}`) : ICON_LINK + html;
   }
 
   // Inject the helper script

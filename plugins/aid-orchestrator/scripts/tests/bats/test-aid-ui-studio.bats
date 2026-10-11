@@ -116,6 +116,8 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   [ ! -e "$P/.aid-ui/studio.code" ]
   [ "$(code -b "$J" "$URL/")" = 200 ]
   grep -q "AID studio" "$BATS_TEST_TMPDIR/body"
+  grep -qF '<link rel="icon" href="/favicon.svg" type="image/svg+xml">' "$BATS_TEST_TMPDIR/body"
+  [ "$(code "$URL/favicon.svg")" = 200 ]; grep -q '<svg' "$BATS_TEST_TMPDIR/body"   # the AID tab icon, public
   ! grep -q "$TOKEN" "$BATS_TEST_TMPDIR/body"
   [ "$(code -b "$J" "$URL/state")" = 200 ]                                          # the page works via the cookie
   [ "$(code "$URL/?k=99887766554433221100aabbccddeeff")" = 403 ]                    # used once

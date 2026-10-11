@@ -148,7 +148,7 @@ CHANGED_CARDS = {}   # that question id -> copies of the original question's car
 SESSIONS = set()  # session cookie values handed out through a one-time code
 LOCK = threading.Lock()
 NO_ACCESS = ('<!doctype html><meta charset="utf-8"><meta name="viewport" '
-             'content="width=device-width,initial-scale=1"><title>Studio</title>'
+             'content="width=device-width,initial-scale=1"><link rel="icon" href="/favicon.svg" type="image/svg+xml"><title>Studio</title>'
              '<p style="font:18px/1.5 system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem">'
              'Otevřete odkaz ze zprávy agenta.</p>')
 # A used or wrong code: the same page, but it reloads "/" once from this origin. A click from
@@ -846,6 +846,10 @@ class Studio(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlsplit(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        if u.path == "/favicon.svg":   # the AID tab icon (lib/aid-ui-studio/aid-icon.svg); public, nothing of the project in it
+            with open(os.path.join(HERE, "aid-icon.svg"), "rb") as f:
+                self.send(200, f.read(), "image/svg+xml")
+            return
         if u.path == "/":
             if not self.gate(False, nav=True):
                 return

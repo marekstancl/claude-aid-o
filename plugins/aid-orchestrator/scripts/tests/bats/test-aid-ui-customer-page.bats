@@ -122,6 +122,15 @@ text() { python3 -c 'import re,sys,html;t=open(sys.argv[1]).read();t=re.sub(r"<s
   text | grep -qE "4 +části textu"
 }
 
+@test "the customer page carries the client's favicon when the brand package has one, nothing otherwise" {
+  python3 "$GEN" "$P" >/dev/null
+  ! grep -q 'rel="icon"' "$OUT"; [ ! -e "$P/docs/zakaznik/www/favicon.svg" ]
+  echo '<svg id="client"/>' > "$P/docs/design/brand-package/icons/favicon.svg"
+  python3 "$GEN" "$P" >/dev/null
+  grep -qF '<link rel="icon" href="www/favicon.svg" type="image/svg+xml">' "$OUT"
+  [ "$(cat "$P/docs/zakaznik/www/favicon.svg")" = '<svg id="client"/>' ]
+}
+
 @test "the SEO tiles are outside <details>; the AI tile follows the policy; no internal word" {
   python3 "$GEN" "$P" >/dev/null
   # the visibility panel up to its own <details>

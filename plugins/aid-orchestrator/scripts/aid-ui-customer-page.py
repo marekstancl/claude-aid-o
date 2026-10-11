@@ -147,7 +147,8 @@ def gather(proj):
                   "logos": sorted(os.path.basename(f) for f in glob.glob(os.path.join(bp, "logo/*.svg"))),
                   # the sample: the logo with the name in colour on light and on dark, else the symbol
                   "logo_sample": sample_pair(glob.glob(os.path.join(bp, "logo/*.svg"))) or sample_pair(glob.glob(os.path.join(bp, "symbol/*.svg"))),
-                  "colors": {k: str(v) for k, v in colors.items()}, "fonts": fams, "weights": sorted(weights), "icon_sizes": icons}
+                  "colors": {k: str(v) for k, v in colors.items()}, "fonts": fams, "weights": sorted(weights), "icon_sizes": icons,
+                  "favicon": os.path.isfile(os.path.join(bp, "icons/favicon.svg"))}
 
     # visibility: what the gate's SEO run wrote
     # pages the gate checked (the 404 page is outside the matrix and outside "N / indexable")
@@ -425,6 +426,8 @@ def render(D):
                     f'<span>{sub if pid == "marketing" else E(sub)}</span></a></li>' for i, (pid, t, sub, cls) in enumerate(soupis))
     data = json.dumps(D, ensure_ascii=False).replace("</", "<\\/")
     fonts = '<link rel="stylesheet" href="www/fonts/fonts.css">' if font else ""
+    if D["brand"].get("favicon"):   # the client's own tab icon (brand package), copied to www/ by main()
+        fonts = '<link rel="icon" href="www/favicon.svg" type="image/svg+xml">' + fonts
     return f"""<!doctype html>
 <html lang="cs">
 <head>
@@ -610,6 +613,9 @@ def main():
             if os.path.exists(src):
                 shutil.copyfile(src, os.path.join(www, f))
                 break
+    fav = os.path.join(proj, "docs/design/brand-package/icons/favicon.svg")
+    if os.path.isfile(fav):
+        shutil.copyfile(fav, os.path.join(www, "favicon.svg"))
     fonts = os.path.join(proj, "docs/brand/fonts")
     if os.path.isdir(fonts):
         shutil.copytree(fonts, os.path.join(www, "fonts"), dirs_exist_ok=True)

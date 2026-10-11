@@ -231,6 +231,17 @@ serve_200() {
   grep -q '<section id="logo" data-status="ceka">' "$PROJ/docs/brand/index.html"
 }
 
+@test "brand page: the client's favicon from the brand package is copied next to the page and linked on the next rewrite" {
+  approve_chapter barvy design_standard q1
+  ! grep -q 'rel="icon"' "$HTML"; [ ! -e "$PROJ/docs/brand/favicon.svg" ]
+  mkdir -p "$PROJ/docs/design/brand-package/icons"; echo '<svg id="client"/>' > "$PROJ/docs/design/brand-package/icons/favicon.svg"
+  approve_chapter typografie design_standard q2
+  [ "$(cat "$PROJ/docs/brand/favicon.svg")" = '<svg id="client"/>' ]
+  [ "$(grep -c '<link rel="icon" href="favicon.svg" type="image/svg+xml">' "$HTML")" -eq 1 ]
+  approve_chapter komponenty design_standard q3   # rewritten again: still one link
+  [ "$(grep -c 'rel="icon"' "$HTML")" -eq 1 ]
+}
+
 @test "reset-approvals turns schvaleno into navrh" {
   approve_chapter barvy design_standard q1
   run "$SCRIPT" reset-approvals "$PROJ" barvy typografie

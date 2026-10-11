@@ -401,6 +401,18 @@ elif mode == "upgrade":   # args: chapter ids in page order
         text = text[:m.start(2)] + inner + text[m.end(2):]
     if "<!-- fonts -->" not in text:
         text = text.replace("</head>", "<!-- fonts -->\n<!-- /fonts -->\n</head>", 1)
+# The client's tab icon: once the brand package holds icons/favicon.svg, a copy sits next to the page
+# (docs/brand/favicon.svg, served as is) and the head links it. Done on every rewrite, so a page made
+# before the package gets it with the next chapter (PM 11. 10. 2026, 1A).
+_brand = os.path.dirname(os.path.realpath(path))
+_src = os.path.join(os.path.dirname(_brand), "design/brand-package/icons/favicon.svg")   # docs/design/...
+_dst = os.path.join(_brand, "favicon.svg")
+if os.path.isfile(_src):
+    _b = open(_src, "rb").read()
+    if not os.path.isfile(_dst) or open(_dst, "rb").read() != _b:
+        open(_dst, "wb").write(_b)
+if os.path.isfile(_dst) and 'rel="icon"' not in text:
+    text = text.replace("</head>", '<link rel="icon" href="favicon.svg" type="image/svg+xml">\n</head>', 1)
 sys.stdout.write(text)
 PY
 )"
