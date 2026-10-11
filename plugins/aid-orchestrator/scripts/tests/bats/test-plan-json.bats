@@ -255,3 +255,21 @@ PY
   run bash "$LINT" "$PLAN"
   [[ "$output" != *"repo_root_invalid"* ]]
 }
+
+@test "json: --direct derives repo_roots from the plan frontmatter itself (no prepared mapping)" {
+  _write_plan "repo_roots:
+  - name: docs
+    path: ${FOREIGN}"
+  run bash -c 'set -e; source "$AID_PLUGIN_PATH/scripts/lib/common.sh"; source "$LIB"; aid_plan_json_steps_from_plan "$PLAN" > "$TEST_TMPDIR/steps.json"; aid_plan_json_build --steps-json "$TEST_TMPDIR/steps.json" --out "$TEST_TMPDIR/plan.json" --epic-id E-900-1_1 --plan "$PLAN" --direct --execution "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"'
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.repo_roots[0].name + " " + .repo_roots[0].branch' "$TEST_TMPDIR/plan.json")" = "docs plan/P900-project" ]
+}
+
+@test "json: a step list without prepared Files/criteria fields gets them from the plan's step section" {
+  _write_plan
+  echo '[{"number":2,"role":"docs","objective":"Document the parser reference","depends_on":"","parallel_group":"---"}]' > "$TEST_TMPDIR/steps.json"
+  run bash -c 'source "$AID_PLUGIN_PATH/scripts/lib/common.sh"; source "$LIB"; aid_plan_json_build --steps-json "$TEST_TMPDIR/steps.json" --out "$TEST_TMPDIR/plan.json" --epic-id E-900-1_1 --plan "$PLAN"'
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.steps[0].allowed_paths' "$TEST_TMPDIR/plan.json")" = '["docs/parser.md"]' ]
+  [ "$(jq -r '.steps[0].acceptance_criteria[0]' "$TEST_TMPDIR/plan.json")" = '`grep -q parser docs/parser.md` exits 0.' ]
+}

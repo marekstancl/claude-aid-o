@@ -581,10 +581,23 @@ aid_plan_json_build() {
   done
 
   # Steps.
-  local steps_json="[]" spec_label="EPIC specification" st inputs_json dp dep_sid step_obj
+  local steps_json="[]" spec_label="EPIC specification" st inputs_json dp dep_sid step_obj src_plan_file="" sr
   [[ "$direct" -eq 1 ]] && spec_label="Plan specification"
+  if [[ -n "$plan_source" && "$plan_source" != "null" ]]; then
+    if [[ -f "$plan_source" ]]; then src_plan_file="$plan_source"
+    elif sr="$(aid_state_root 2>/dev/null)" && [[ -f "${sr}/${plan_source}" ]]; then src_plan_file="${sr}/${plan_source}"
+    fi
+  fi
   for i in "${!step_nums[@]}"; do
     st="$(jq -c --argjson i "$i" '.[$i]' "$steps_file")"
+    # A step list without its prepared Files/criteria fields: derive them from
+    # the plan's own step section through the shared reader.
+    if [[ -n "$src_plan_file" ]] && ! jq -e 'has("outputs") and has("acceptance_criteria") and has("allowed_paths")' <<< "$st" >/dev/null; then
+      local derived
+      derived="$(aid_plan_json_steps_from_plan "$src_plan_file" "${step_nums[$i]}")" || exit $?
+      st="$(jq -c --argjson d "$derived" '. as $s | $d[0] as $p
+        | $s + {outputs: ($s.outputs // $p.outputs), acceptance_criteria: ($s.acceptance_criteria // $p.acceptance_criteria), allowed_paths: ($s.allowed_paths // $p.allowed_paths)}' <<< "$st")"
+    fi
     inputs_json="$(jq -nc --arg s "$spec_label" '[$s]')"
     dep_val="${step_depends[$i]}"
     if ! _aid_pj_is_none "$dep_val"; then
@@ -634,21 +647,23 @@ aid_plan_json_build() {
     gates_json="$(cat "$gates_file")"
   fi
 
-  local plan_source_arg="null" src_plan_file="" zadani_json='{}' sr z zs
-  if [[ -n "$plan_source" && "$plan_source" != "null" ]]; then
-    plan_source_arg="$(jq -n --arg s "$plan_source" '$s')"
-    if [[ -f "$plan_source" ]]; then src_plan_file="$plan_source"
-    elif sr="$(aid_state_root 2>/dev/null)" && [[ -f "${sr}/${plan_source}" ]]; then src_plan_file="${sr}/${plan_source}"
-    fi
-  fi
+  local plan_source_arg="null" zadani_json='{}' z zs
+  [[ -n "$plan_source" && "$plan_source" != "null" ]] && plan_source_arg="$(jq -n --arg s "$plan_source" '$s')"
   if [[ -n "$src_plan_file" ]]; then
     z="$(_aid_fm_get "$src_plan_file" zadani)"; zs="$(_aid_fm_get "$src_plan_file" zadani_sha256)"
     zadani_json="$(jq -nc --arg z "$z" --arg s "$zs" --arg p "$(sha256sum "$src_plan_file" | cut -d' ' -f1)" '(if $z == "" then {} else {zadani: $z} end) + (if $s == "" then {} else {zadani_sha256: $s} end) + {source_plan_sha256: $p}')"   # P110: the step measurement reads this plan
   fi
   local direct_json='{}'
   if [[ "$direct" -eq 1 ]]; then
-    local rr='[]'
-    [[ -n "$rr_file" ]] && rr="$(cat "$rr_file")"
+    local rr='[]' pid proj
+    if [[ -n "$rr_file" ]]; then
+      rr="$(cat "$rr_file")"
+    elif [[ -n "$src_plan_file" ]]; then
+      # The plan's own repo_roots frontmatter; the branch carries the project name.
+      pid="$(_aid_fm_get "$src_plan_file" id)"
+      proj="$(basename "$(aid_state_root 2>/dev/null || pwd)")"
+      rr="$(aid_plan_repo_roots_json "$src_plan_file" "$pid" "$proj")" || exit $?
+    fi
     direct_json="$(jq -nc --argjson rr "$rr" '{direct: true, repo_roots: $rr}')"
   fi
 
