@@ -403,7 +403,7 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   echo c >> "$F/page.md"; git -C "$F" commit -qam "only in the live checkout"
   run aid_dispatch_repo_range_ok "$WT" "${base}..$(git -C "$F" rev-parse HEAD)" plan/P111-proj
   [ "$status" -ne 0 ]
-  aid_dispatch_repo_range_ok "$WT" "${base}..$(git -C "$F" rev-parse HEAD)"   # present, not reachable: only the branch form refuses
+  run aid_dispatch_repo_range_ok "$WT" "${base}..${base}"; [ "$status" -ne 0 ]   # an empty range fails even without a branch
 }
 
 @test "repo-roots: the return validator accepts repo_commits named by the slug and refuses a range off the worktree branch" {

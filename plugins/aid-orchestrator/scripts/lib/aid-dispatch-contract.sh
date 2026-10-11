@@ -240,9 +240,9 @@ aid_dispatch_contract_extract() {
 aid_dispatch_repo_range_ok() {
   [[ "$2" == *..* ]] && git -C "$1" rev-parse -q --verify "${2%%..*}^{commit}" >/dev/null 2>&1 \
     && git -C "$1" rev-parse -q --verify "${2##*..}^{commit}" >/dev/null 2>&1 \
-    && { [[ -z "${3:-}" ]] || { git -C "$1" merge-base --is-ancestor "${2##*..}" "$3" 2>/dev/null \
-           && [[ "$(git -C "$1" rev-parse "${2%%..*}^{commit}" 2>/dev/null)" != "$(git -C "$1" rev-parse "${2##*..}^{commit}" 2>/dev/null)" ]] \
-           && git -C "$1" merge-base --is-ancestor "${2%%..*}" "${2##*..}" 2>/dev/null; }; }
+    && [[ "$(git -C "$1" rev-parse "${2%%..*}^{commit}" 2>/dev/null)" != "$(git -C "$1" rev-parse "${2##*..}^{commit}" 2>/dev/null)" ]] \
+    && git -C "$1" merge-base --is-ancestor "${2%%..*}" "${2##*..}" 2>/dev/null \
+    && { [[ -z "${3:-}" ]] || git -C "$1" merge-base --is-ancestor "${2##*..}" "$3" 2>/dev/null; }
 }
 
 # aid_dispatch_repo_resolve <plan.json> <slug> — prints "<worktree>\t<branch>"

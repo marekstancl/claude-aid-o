@@ -2980,8 +2980,13 @@ _pm_abandon_run() {
   st="$(jq -r '.status // ""' <<<"$entry")"
   case "$st" in
     running|pending)
+      # The reason first, the status second: an interruption between the two
+      # leaves the reason recorded, and the rerun keeps it (Codex, steps 5-7).
+      rec="$(jq -r '.terminal_reason // ""' <<<"$entry")"
+      if [[ -n "$rec" ]]; then reason="$rec"
+      else _pfsm_entry_update "$plan_id" "$epic_id" ".terminal_reason = $(jq -Rn --arg s "$reason" '$s') | .terminal_recorded_at = \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" || return 1
+      fi
       plan_manifest_set_epic_status "$plan_id" "$epic_id" abandoned >/dev/null || return 1
-      _pfsm_entry_update "$plan_id" "$epic_id" ".terminal_reason = $(jq -Rn --arg s "$reason" '$s') | .terminal_recorded_at = \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" || return 1
       ;;
     abandoned)
       rec="$(jq -r '.terminal_reason // ""' <<<"$entry")"; [[ -n "$rec" ]] && reason="$rec"

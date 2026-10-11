@@ -240,6 +240,12 @@ JSON
     # and for E-901-5_5 the continuation artifact its dead controller left.
     _run_state "$d" E-901-5_5 R-E GATES
     _run_state "$d" E-901-6_6 R-G EXECUTE
+    # P111: an abandoned run whose map entry an interruption left behind — the
+    # published example does not show it, so the byte-for-byte case guards it.
+    _run_state "$d" E-901-7_7 R-H READY
+    printf 'abandoned: true\nabandon_reason: replaced by a new plan\n' >> "$d/.aid-o/work/evidence/E-901-7_7/R-H/fsm-state.yaml"
+    jq '. + {"E-901-7_7": {"state_file": ".aid-o/work/evidence/E-901-7_7/R-H/fsm-state.yaml", "run_id": "R-H", "state": "READY", "branch": "task/E-901-7_7/main", "plan_id": "P901", "governs_main": false, "updated_at": "2026-08-06T00:00:00Z"}}' \
+      "$d/.aid-o/work/active-runs.json" > "$d/.aid-o/work/active-runs.json.t" && mv "$d/.aid-o/work/active-runs.json.t" "$d/.aid-o/work/active-runs.json"
     printf '%s\n' '{"schema":"aid-auto-resume/1","safe_next_action":"bash /x/aid-run-gates.sh run-all exec.yaml E-901-5_5 R-E"}' \
       > "$d/.aid-o/work/evidence/E-901-5_5/R-E/auto_resume_required.json"
   else
