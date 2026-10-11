@@ -95,7 +95,9 @@ _check() {
   local tsv="$AID_PLUGIN_PATH/scripts/tests/fixtures/refusals/measured-2026-09.tsv"
   local table="$AID_PLUGIN_PATH/skills/pipeline.md" arms r missing="" f ln
   local -a sites=("$AID_PLUGIN_PATH/scripts/aid-review-round.sh" "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-packet.sh"
-                  "$AID_PLUGIN_PATH/scripts/aid-run-gates.sh" "$AID_PLUGIN_PATH/scripts/aid-plan-diff.sh" "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh")   # + P110
+                  "$AID_PLUGIN_PATH/scripts/aid-run-gates.sh" "$AID_PLUGIN_PATH/scripts/aid-plan-diff.sh" "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh"   # + P110
+                  "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh" "$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh" "$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh"
+                  "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" "$AID_PLUGIN_PATH/defaults/hooks/pre-commit")   # + P111
   arms="$(sed -n '/^_fsm_refusal_next()/,/^}/p' "$FSM")"
   while IFS=$'\t' read -r _ _ r; do
     r="${r%%_[0-9]*}"   # gates_runner_exit_1 → its row gates_runner_exit_<n>
