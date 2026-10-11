@@ -215,7 +215,7 @@ def gather(proj):
         links = rj(lp) if os.path.exists(lp) else {}
     except ValueError:
         links = {}
-    D["links"] = {"web": str(links.get("web") or ""), "customer": str(links.get("customer") or "")}
+    D["links"] = {"web": str(links.get("web") or ""), "customer": str(links.get("customer") or ""), "brand": str(links.get("brand") or "")}
 
     # open and decided (P108, PM 10. 10. 2026): what stays open after the run (the agent's and the PM's own
     # items, deferred content with the PM's words, the exceptions the PM granted) and what was decided
@@ -409,11 +409,16 @@ def render(D):
                   "Co ještě přijde a kdo to dodá; pod tím každé rozhodnutí zadavatele s datem.", zb))
     areas.append(("marketing", "Marketing", '<span class="stitek">připravujeme</span>', "pozdeji", "",
                   '<p style="margin:0;color:var(--muted)">Tahle část ještě není hotová.</p>'))
+    # each area points into the brand book's chapter that holds the detail (PM 11. 10. 2026, 3A): the book
+    # is the one source of detail, this page the short way in
+    CHAPTER = {"web": "smer", "znacka": "logo", "viditelnost": "seo", "pravidla": "komponenty", "obsah": "obsah", "zbyva": "schvaleni"}
+    brand = (D.get("links") or {}).get("brand") or ""
     out = []
     for i, (pid, title, _, _, lead, body) in enumerate(areas):
         lead_html = '<span class="stitek">připravujeme</span>' if pid == "marketing" else E(lead)
+        detail = f'<p class="kniha"><a href="{E(brand.rstrip("/"))}/#{CHAPTER[pid]}" target="_blank" rel="noopener">Detail v knize značky →</a></p>' if brand and pid in CHAPTER else ""
         out.append(f'<section class="panel" id="{pid}"><div class="hlava"><span class="n">{i + 1:02d}</span><h2>{E(title)}</h2>'
-                   f'<p>{lead_html}</p></div><div class="telo">{body}</div></section>')
+                   f'<p>{lead_html}</p></div><div class="telo">{body}{detail}</div></section>')
     short = {"viditelnost": "Viditelnost"}
     soupis = [(pid, short.get(pid, t), sub, cls) for pid, t, sub, cls, _, _ in areas]
     items = "".join(f'<li{f" class={chr(34)}{cls}{chr(34)}" if cls else ""}><a href="#{pid}"><span class="n">{i + 1:02d}</span><strong>{E(t)}</strong>'
@@ -427,7 +432,8 @@ def render(D):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{E(name)} – co jste dostali</title>
 {fonts}
-<style>{CSS}</style>
+<style>{CSS}  .kniha{{margin:14px 0 0;font-size:.95rem}}.kniha a{{text-decoration:underline;text-underline-offset:.15em}}
+</style>
 </head>
 <body>
 <div class="wrap">

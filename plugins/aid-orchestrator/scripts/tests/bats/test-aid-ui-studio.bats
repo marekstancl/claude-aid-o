@@ -95,6 +95,17 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   ! grep -q "$TOKEN" "$BATS_TEST_TMPDIR/body"
 }
 
+@test "P108: once .aid-ui/finish.json exists the code is kept, so the PM returns to Hotovo as often as he likes" {
+  echo '{"finished":"2026-10-11"}' > "$P/.aid-ui/finish.json"
+  code=deadbeefdeadbeefdeadbeefdeadbeef; echo "$code" > "$P/.aid-ui/studio.code"
+  [ "$(code "$URL/?k=$code")" = 303 ]
+  [ -f "$P/.aid-ui/studio.code" ]
+  [ "$(code "$URL/?k=$code")" = 303 ]
+  rm "$P/.aid-ui/finish.json"
+  [ "$(code "$URL/?k=$code")" = 303 ]
+  [ ! -f "$P/.aid-ui/studio.code" ]
+}
+
 @test "the one-time code works once: cookie set, redirect to /, page without the token; reuse refused" {
   echo 99887766554433221100aabbccddeeff > "$P/.aid-ui/studio.code"
   J="$BATS_TEST_TMPDIR/jar"
@@ -450,7 +461,9 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
   grep -qF 'if (q.kind === "handover" && S.links && typeof S.links === "object") sec.append(el("div", { class: "done-links" },' "$f"
   # the finished run is one card with two equal buttons; the steps fold behind one line (companion A, PM 11. 10. 2026)
   grep -qF 'sec.classList.toggle("done-card"' "$f"; grep -qF 'class: "hbtn-go"' "$f"; grep -qF 'class: "hbtn-ghost"' "$f"
-  grep -qF 'pipe.hidden = !SHOW_STEPS;' "$f"; grep -qF 'id: "fold", class: "foldline"' "$f"
+  grep -qF 'if (finished && !SHOW_STEPS) {' "$f"; grep -qF 'id: "fold", class: "foldline"' "$f"
+  # Zobrazit shows the run as it was, with one link back to Hotovo (PM 11. 10. 2026)
+  grep -qF 'if (fin && SHOW_STEPS) {' "$f"; grep -qF '"← Zpět na Hotovo"' "$f"
 }
 
 @test "P108 page: the Hotovo panel shows the web and customer links, the handover sentence, the open items and a field to add one; a reservation asks for words" {

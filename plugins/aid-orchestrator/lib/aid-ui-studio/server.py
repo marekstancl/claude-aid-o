@@ -39,7 +39,8 @@ its question is open again.
 Routes (every request must pass ours(): Host is this server; Origin/Referer, when
 sent, name the same origin; else 403. GET / alone checks only the Host: the PM opens
 the link from another app, whose Referer is foreign):
-  GET  /?k=<code>             the one-time PM link: a k equal to <token dir>/studio.code
+  GET  /?k=<code>             the one-time PM link: a k equal to <token dir>/studio.code (kept, not
+                              removed, once .aid-ui/finish.json exists: the finished run is revisited)
                               (written by aid-ui-serve.sh, removed here on use) sets
                               an HttpOnly SameSite=Strict session cookie and redirects
                               to /; a used or wrong code gets the no-access page, which reloads /
@@ -166,7 +167,9 @@ def take_code(k):
             return False
         if not (k and code and hmac.compare_digest(k, code)):
             return False
-        os.remove(CODE_FILE)
+        # after finish the PM comes back to Hotovo as often as he likes: the code stays (PM 11. 10. 2026)
+        if not os.path.isfile(os.path.join(PROJECT, ".aid-ui", "finish.json")):
+            os.remove(CODE_FILE)
         return True
 
 

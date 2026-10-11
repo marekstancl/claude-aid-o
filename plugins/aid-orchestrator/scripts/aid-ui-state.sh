@@ -1201,8 +1201,9 @@ case "$VERB" in
 
   links)
     need_state
-    web="$(opt web "$@")"; customer="$(opt customer "$@")"
-    [[ -n "$web" && -n "$customer" ]] || usage "links needs --web <url> --customer <url>"
+    web="$(opt web "$@")"; customer="$(opt customer "$@")"; brand="$(opt brand "$@")"
+    [[ -n "$web" && -n "$customer" ]] || usage "links needs --web <url> --customer <url> [--brand <url>]"
+    [[ -z "$brand" ]] || url_ok "$brand" || die "links refused: $brand (the brand book) does not answer 200 from this host"
     url_ok "$web" || die "links refused: $web does not answer 200 (after redirects, no login) from this host"
     url_ok "$customer" || die "links refused: $customer does not answer 200 (after redirects, no login) from this host"
     # the web link serves the recorded build's home page and the customer link the customer page - byte for byte
@@ -1214,8 +1215,8 @@ case "$VERB" in
     [[ "$(curl -sS -L --max-time 10 "$customer" 2>/dev/null | sha256sum | cut -d' ' -f1)" == "$(sha256sum "$PROJECT/docs/zakaznik/index.html" | cut -d' ' -f1)" ]] ||
       die "links refused: $customer does not serve docs/zakaznik/index.html as it is now"
     mkdir -p "$PROJECT/.aid-ui"; tmp="$(tmpfile links.json)"
-    jq -n --arg w "$web" --arg c "$customer" --arg at "$(now)" '{web: $w, customer: $c, at: $at}' > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/links.json"
-    echo "LINKS: web $web · customer $customer"
+    jq -n --arg w "$web" --arg c "$customer" --arg b "$brand" --arg at "$(now)" '{web: $w, customer: $c, brand: (if $b == "" then null else $b end), at: $at}' > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/links.json"
+    echo "LINKS: web $web · customer $customer${brand:+ · brand $brand}"
     ;;
 
   open-item)
