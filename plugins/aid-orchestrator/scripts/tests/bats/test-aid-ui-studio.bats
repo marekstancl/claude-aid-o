@@ -464,6 +464,9 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
   grep -qF 'if (finished && !SHOW_STEPS) {' "$f"; grep -qF 'id: "fold", class: "foldline"' "$f"
   # Zobrazit shows the run as it was, with one link back to Hotovo (PM 11. 10. 2026)
   grep -qF 'if (fin && SHOW_STEPS) {' "$f"; grep -qF '"← Zpět na Hotovo"' "$f"
+  # the saved rows: Zobrazit (read-only, from history) always, Změnit only while the run is open; no Detail, full width when finished
+  grep -qF 'function savedView(q)' "$f"; grep -qF ': finished ? null : el("button", { type: "button", class: "reroll-btn quiet"' "$f"
+  grep -qF 'const detail = null;' "$f"; ! grep -q '"Historie rozhodnutí"' "$f"
 }
 
 @test "P108 page: the Hotovo panel shows the web and customer links, the handover sentence, the open items and a field to add one; a reservation asks for words" {

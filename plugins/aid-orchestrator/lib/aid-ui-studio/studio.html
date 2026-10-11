@@ -303,8 +303,9 @@
   .done-links a.hbtn-go, .done-links a.hbtn-ghost { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 22px; border-radius: 8px; font-weight: 600; border: 1px solid var(--ks-accent, #0f766e); }
   .done-links a.hbtn-go { background: var(--ks-accent, #0f766e); color: #fff; } .done-links a.hbtn-ghost { background: transparent; color: var(--ks-accent, #0f766e); }
   .back-done { font-weight: 600; white-space: nowrap; }
+  .saved-btns { display: inline-flex; gap: 6px; } .saved-view { padding: 10px 12px 16px 36px; border-bottom: 1px solid var(--ks-rule); } .saved-answer { margin: 8px 0 0; }
   .foldline { max-width: 760px; margin: 0 auto 30px; text-align: center; color: var(--ks-text-muted); font-size: .95rem; } .foldline a { color: inherit; }
-  .done { margin-top: 18px; max-width: 720px; } .done-links { display: flex; gap: 10px; margin: 8px 0 14px; flex-wrap: wrap; } .done-links a { text-decoration: none; display: inline-flex; align-items: center; }
+  #done-panel { margin-top: 18px; max-width: 720px; } .done-links { display: flex; gap: 10px; margin: 8px 0 14px; flex-wrap: wrap; } .done-links a { text-decoration: none; display: inline-flex; align-items: center; }
   .done h3 { margin: 10px 0 4px; font-size: 1rem; } .open-items { margin: 0; padding-left: 18px; } .add-item { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; }
   .add-item textarea { flex: 1; min-width: 0; font: inherit; padding: 8px; border: 1px solid var(--ks-rule); border-radius: 6px; background: transparent; color: inherit; } .muted { color: var(--ks-text-muted); }
   .missing { flex-basis: 100%; font-size: .8125rem; color: var(--ks-text-muted); }
@@ -1147,6 +1148,7 @@ function hero(m) {
   const act = m.steps.find(st => st.active);
   document.getElementById("done-panel")?.remove();
   const fin = Boolean(m.finished || (S.finish && typeof S.finish === "object"));
+  document.body.classList.toggle("finished", fin);
   const sec = h.closest("section"); sec.classList.toggle("done-card", fin && !SHOW_STEPS);
   if (fin && SHOW_STEPS) {   // the PM walks the run as it was; one link leads back to Hotovo (PM 11. 10. 2026)
     h.replaceChildren("Web je hotový.", el("br"), "Rozhodnutí zůstávají.");
@@ -1222,13 +1224,7 @@ function stepEl(st, i, back) {
   // a step the PM opened on purpose (not the one being worked on) shows its Detail right away
   const isOpen = openSteps.has(st.title);
   const stage = el("div", { class: "stage" + (isOpen ? " open" : "") + (stepMove ? " slide-" + stepMove : "") });
-  const detail = events.length ? el("button", { type: "button", class: "toggle", "aria-expanded": String(isOpen),
-    on: { click: () => {
-      const on = stage.classList.toggle("open");
-      if (openSteps.has(st.title)) openSteps.delete(st.title); else openSteps.add(st.title);
-      detail.setAttribute("aria-expanded", String(on));
-      detail.textContent = on ? "Skrýt" : "Detail";
-    } } }, isOpen ? "Skrýt" : "Detail") : null;
+  const detail = null;   // Detail duplicated the saved rows (PM 11. 10. 2026: A); each row has Zobrazit instead
   const outcome = st.active ? "Čeká na vaše rozhodnutí."
     : !hOk ? "—" : st.outcome.text;
   // the step being worked on introduces itself through the (i) in the strip; its outcome is the question
@@ -1241,8 +1237,7 @@ function stepEl(st, i, back) {
     detail));
   if (back) stage.append(el("div", { class: "step-back" }, el("button", { type: "button", class: "reroll-btn back-now", on: { click: back.go } }, back.label)));
   if (saved.length) stage.append(savedEl(saved));
-  if (events.length) stage.append(el("div", { class: "details" }, el("p", { class: "tier" }, "Historie rozhodnutí"), events.map(eventRow),
-    events.filter(e => e.answer && e.answer.decision === "choose" && e.cards.length).map(pastCards)));
+  void events;   // the decision history lives in the rows' Zobrazit now
   if (cls === "wait") stage.append(el("div", { class: "step-info" }, el("p", { class: "info" }, "Na tenhle krok přijde řada později. Zatím tu není na co odpovídat.")));
   if (cls === "active" && st.parts.length) {   // the parts as tabs, and the one the PM looks at
     const d = defaultPart(st), vid = viewedPart(st, d);
@@ -1382,12 +1377,32 @@ function savedEl(list) {
       if (r.status === 200) { last = ""; tick(); return; }
       b.disabled = false; notice(r.status === 409 ? "Změna této odpovědi už čeká níže." : "Změnu se nepodařilo otevřít.");
     };
+    const finished = Boolean(S.finish && typeof S.finish === "object");
     const btn = q.changed_to ? el("span", { class: "note" }, "Měníte - odpovězte níže")
-      : el("button", { type: "button", class: "reroll-btn quiet", on: { click: e => change(e.currentTarget) } }, "Změnit");
-    return el("div", { class: "saved-row" + (fresh ? " fresh" : "") },
+      : finished ? null : el("button", { type: "button", class: "reroll-btn quiet", on: { click: e => change(e.currentTarget) } }, "Změnit");
+    // Zobrazit: the question as the PM saw it (text, the cards shown, his answer), read only, from the studio's own history (PM 11. 10. 2026: A)
+    const view = el("div", { class: "saved-view", hidden: true });
+    const show = el("button", { type: "button", class: "reroll-btn quiet", "aria-expanded": "false", on: { click: () => {
+      const on = view.hidden; view.hidden = !on; show.textContent = on ? "Skrýt" : "Zobrazit"; show.setAttribute("aria-expanded", String(on));
+      if (on && !view.childNodes.length) view.append(...savedView(q));
+    } } }, "Zobrazit");
+    return el("div", { class: "saved-wrap" }, el("div", { class: "saved-row" + (fresh ? " fresh" : "") },
       el("span", { class: "ok" }, "✓ Uloženo"), el("span", { class: "saved-q" }, q.title || KIND[q.kind] || q.id),
-      el("span", { class: "saved-a" }, savedText(q)), btn);
+      el("span", { class: "saved-a" }, savedText(q)), el("span", { class: "saved-btns" }, show, btn)), view);
   }));
+}
+// what the PM saw and answered, from history.jsonl (the latest line of this question): body, cards, answer
+function savedView(q) {
+  const lines = (hOk ? H : []).filter(h => h && h.by === "pm" && h.question && h.question.id === q.id);
+  const e = lines.length ? lines[lines.length - 1] : null;
+  if (!e) return [el("p", { class: "muted" }, "Záznam této odpovědi studio nemá (odpověď přišla mimo něj).")];
+  const body = bodyLines(e.question.body) || [];
+  const cards = Array.isArray(e.cards) ? e.cards : [];
+  const a = e.answer || {};
+  const chosen = cards.find(c => c.id === a.choice);
+  return [el("div", { class: "head" }, body),
+    cards.length ? pastCards({ qid: q.id, title: "Co jste viděl", cards, choice: a.choice }) : null,
+    el("p", { class: "saved-answer" }, el("b", {}, "Vaše odpověď: "), savedText(q), chosen ? " (" + (chosen.title || chosen.id) + ")" : "", a.comment ? el("span", {}, " · „" + a.comment + "“") : null)].filter(Boolean);
 }
 
 function brief(rows) {   // label left, text right - the same grid as the decision history
