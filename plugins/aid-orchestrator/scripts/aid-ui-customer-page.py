@@ -208,6 +208,15 @@ def gather(proj):
                     "pending": list(dict.fromkeys(re.split(r"\s*\(", str(c.get("need", "")))[0].strip() for c in st.get("content_plan") or []
                                 if c.get("status") in ("deferred_by_pm", "missing")))}
 
+    # where the web is today (P108, PM 11. 10. 2026: the domain button led nowhere before the launch):
+    # the preview from .aid-ui/links.json until the site is deployed; the domain stays as the future address
+    lp = os.path.join(proj, ".aid-ui/links.json")
+    try:
+        links = rj(lp) if os.path.exists(lp) else {}
+    except ValueError:
+        links = {}
+    D["links"] = {"web": str(links.get("web") or ""), "customer": str(links.get("customer") or "")}
+
     # open and decided (P108, PM 10. 10. 2026): what stays open after the run (the agent's and the PM's own
     # items, deferred content with the PM's words, the exceptions the PM granted) and what was decided
     # (every answered question's outcome from the studio history, plus the agent's recorded decisions)
@@ -422,7 +431,7 @@ def render(D):
 </head>
 <body>
 <div class="wrap">
-<header class="top"><b>/aid-ui · {E(name)}</b>{f'<a class="btn" href="https://{E(dom)}">{E(dom)}</a>' if dom else ''}</header>
+<header class="top"><b>/aid-ui · {E(name)}</b>{(f'<a class="btn" href="{E(D["links"]["web"])}" target="_blank" rel="noopener">Otevřít web</a>' + (f'<span class="muted" style="margin-left:10px">bude na {E(dom)}</span>' if dom else '')) if D.get("links", {}).get("web") else (f'<a class="btn" href="https://{E(dom)}">{E(dom)}</a>' if dom else '')}</header>
 <div class="hero"><h1>Nedostáváte jen vzhled webu.</h1>
 <p>Web, značku, místo na Googlu i v AI vyhledávačích, pravidla pro další rozvoj a texty. Tady je všechno pohromadě, u každé části to nejdůležitější a zbytek pod rozbalením.</p></div>
 <ol class="soupis" aria-label="Co jste dostali">{items}</ol>
