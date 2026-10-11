@@ -220,3 +220,10 @@ YML
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; _aid_lc_epic_review_status E-951-1_1 ."
   [[ "$output" == *rejected* ]]
 }
+@test "review status: a project that keeps CP3 and has only CP2 indexes is unverifiable, never accepted from its step rounds (2.116.1, fail-closed)" {
+  mkdir -p .aid-o/work/evidence/E-952-1_1/R-1/cp2/step-0 .aid-o/config/policies
+  echo '{"verdict":"pass"}' > .aid-o/work/evidence/E-952-1_1/R-1/cp2/step-0/rounds.json
+  printf 'review_checkpoints:\n  cp3_integration_review: true\n' > .aid-o/config/policies/review-checkpoints.yaml
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; _aid_lc_epic_review_status E-952-1_1 ."
+  [[ "$output" == *none* ]]
+}
