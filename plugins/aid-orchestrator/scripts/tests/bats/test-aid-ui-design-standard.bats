@@ -8,7 +8,8 @@ setup() {
   S="$BATS_TEST_DIRNAME/../../aid-ui-design-standard.py"
   P="$BATS_TEST_TMPDIR/p"; mkdir -p "$P/docs/design/brand-package"
   echo '{"variant":{"type":"web"},"exceptions":[]}' >"$P/docs/design/brand-state.json"
-  printf -- '- **Ochranná zóna:** čtvrtina šířky symbolu.\n' >"$P/docs/design/brand-package/brand-brief.md"
+  printf -- '- **Ochranná zóna:** čtvrtina šířky symbolu.\n- **Reverz:** bílá verze na tmavém;\n  nikdy modrá na modré.\n\nOdstavec.\n' >"$P/docs/design/brand-package/brand-brief.md"
+  mkdir -p "$P/.aid-ui"; echo '{"items":[{"id":"kf:a","kind":"keyframes","name":"fade-in","source":{"scenarios":["load"],"where":["hero"],"duration_ms":1200},"disposition":"adopt"},{"id":"tr:x","kind":"transition","property":"color","scenario":"hover","source":{"scenarios":["hover"],"where":["nav"],"duration_ms":300},"disposition":"omit"}]}' >"$P/.aid-ui/motion.json"
   cat >"$P/DESIGN.md" <<'D'
 ---
 name: Pekárna
@@ -78,6 +79,9 @@ M
   grep -q '`signal`\|`design_standard_doc`' "$D"                       # enforcement lists the gate checks
   grep -q '1px `#1a1a1a` (ink)' "$D"
   grep -q 'Ochranná zóna' "$D"
+  grep -q '^- \*\*Reverz:\*\* bílá verze na tmavém; nikdy modrá na modré.$' "$D"   # a wrapped bullet is one rule
+  ! grep -q '^Odstavec' "$D"
+  grep -q '^| fade-in | hero | load | 1.2 s | adopt |$' "$D"; ! grep -q 'tr:x\|color (transition)' "$D"   # motion by element, adopted only
   grep -q 'Do Docusauru se publikuje až po schválení PM' "$D"
   run python3 "$S" check "$P"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }

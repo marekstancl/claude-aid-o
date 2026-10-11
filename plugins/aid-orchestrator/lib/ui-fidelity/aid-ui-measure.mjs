@@ -50,7 +50,11 @@ const COLLECT = () => {
     .map(e => { const s = cs(e); return { tag: e.tagName.toLowerCase() + (e.type ? `[${e.type}]` : ''), border: `${s.borderTopWidth} ${s.borderTopColor}`,
       radius: s.borderTopLeftRadius, height: Math.round(e.getBoundingClientRect().height), background: s.backgroundColor }; });
   const t = {};
-  for (const sel of ['h1', 'h2', 'h3', 'p']) { const e = [...document.querySelectorAll(sel)].find(vis); if (e) { const s = cs(e);
+  // p: the most common visible paragraph style, not the first one (a lead paragraph is bigger and the
+  // standard then contradicts DESIGN.md's body size - Coufal 11. 10. 2026)
+  const common = sel => { const n = new Map(); for (const e of [...document.querySelectorAll(sel)].filter(vis)) { const k = cs(e).fontSize + cs(e).fontWeight; n.set(k, [(n.get(k)?.[0] || 0) + 1, e]); }
+    return [...n.values()].sort((a, b) => b[0] - a[0])[0]?.[1]; };
+  for (const sel of ['h1', 'h2', 'h3', 'p']) { const e = sel === 'p' ? common('p') : [...document.querySelectorAll(sel)].find(vis); if (e) { const s = cs(e);
     t[sel] = { family: s.fontFamily, size: s.fontSize, weight: s.fontWeight, line: s.lineHeight, spacing: s.letterSpacing }; } }
   const bps = [];
   const walk = rules => { for (const r of rules) {

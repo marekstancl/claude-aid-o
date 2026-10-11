@@ -139,7 +139,14 @@ def write(project, measure_path, out_rel):
     brief = os.path.join(project, "docs/design/brand-package/brand-brief.md")
     L += ["## Značka", "", "Zdroj: brand balíček `docs/design/brand-package/` (symbol, logo s názvem, ikony, zdroje)."]
     if os.path.exists(brief):
-        L += ["Zásady použití (`brand-brief.md`):", ""] + [l for l in open(brief, encoding="utf-8").read().splitlines() if l.startswith("- ")]
+        # a bullet wrapped over several lines (the brief is hard-wrapped) is one rule, not a sentence cut
+        # at the first line (Coufal 11. 10. 2026: the client returned the standard for "unfinished rules")
+        rules, cur = [], None
+        for l in open(brief, encoding="utf-8").read().splitlines():
+            if l.startswith("- "): cur = l; rules.append(cur)
+            elif cur is not None and l.startswith("  ") and l.strip(): rules[-1] = rules[-1] + " " + l.strip()
+            else: cur = None
+        L += ["Zásady použití (`brand-brief.md`):", ""] + rules
     L += ["", "- Logo se nikdy neskládá z textu, vždy soubor z balíčku.", ""]
     L += ["## Tokeny", "", "Jediný zdroj: frontmatter `DESIGN.md` → CSS proměnné (`aid-ui-design-to-css.sh`).", "",
           "### Barvy", "", "| token | hodnota |", "|---|---|"] + [f"| `{k}` | `{v}` |" for k, v in colors.items()]
@@ -153,7 +160,23 @@ def write(project, measure_path, out_rel):
     L += ["", "### Rozměry", ""]
     L += [f"- `{g}.{k}`: `{v}`" for g, k, v in tokens(fm) if g in ("rounded", "spacing")]
     L += [f"- zlomy šířky (změřeno v CSS): {', '.join(meas.get('breakpoints') or ['žádné'])}"]
-    L += ["", "### Pohyb", "", "- přechody (změřeno, nad 10 ms): " + (", ".join(meas.get("transitions") or []) or "žádné"),
+    L += ["", "### Pohyb", ""]
+    inv = os.path.join(project, ".aid-ui/motion.json")
+    rows = []
+    if os.path.exists(inv):
+        try:
+            for it in (json.load(open(inv, encoding="utf-8")).get("items") or []):
+                if it.get("disposition") not in ("adopt", "replace"): continue
+                src = it.get("source") or {}
+                what = it.get("label") or it.get("name") or (f"{it.get('property')} ({it.get('kind')})" if it.get("property") else it.get("id"))
+                ms = src.get("duration_ms")
+                rows.append(f"| {what} | {', '.join(src.get('where') or []) or '-'} | {', '.join(src.get('scenarios') or [it.get('scenario') or '-'])} | "
+                            f"{(str(round(ms / 1000, 2)) + ' s') if isinstance(ms, (int, float)) else '-'} | {it.get('disposition')} |")
+        except (OSError, ValueError, TypeError, AttributeError): rows = []
+    if rows:   # the motion as rules: element, trigger, duration (the client could not use a bag of durations)
+        L += ["Podle soupisu pohybu vzoru (`.aid-ui/motion.json`): co se hýbe, kde, na co a jak dlouho.", "",
+              "| pohyb | kde | spouštěč | trvání | převzato |", "|---|---|---|---|---|"] + rows + [""]
+    L += ["- přechody (změřeno, nad 10 ms): " + (", ".join(meas.get("transitions") or []) or "žádné"),
           f"- při `prefers-reduced-motion` se {'něco hýbe - opravit' if meas.get('reduced_motion_moves') else 'nic nehýbe'} (změřeno)"]
     L += ["", "### Ikony", "", f"- ikon na webu (změřeno: `svg`/`img` do 48 px mimo logo): {meas.get('icons', 'neměřeno')}"]
     L += ["", "### Vrstvy", "", "- prvky s `z-index` (změřeno, i skryté): " + (", ".join(meas.get("zindex") or []) or "žádné")]
