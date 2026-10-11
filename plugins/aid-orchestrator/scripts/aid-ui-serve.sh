@@ -58,7 +58,7 @@ PREVIEW_PORT="${AID_UI_PREVIEW_PORT:-3917}"
 PROJECT="${AID_UI_PROJECT:-$PWD}"
 JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
 STATE_DIR="${AID_UI_STATE_DIR:-$HOME/.cache/aid-ui}"
-DEADLINE=28800   # 8 h, integer seconds as `aid-job.sh run --deadline` requires
+DEADLINE=604800   # 7 days (P108, 11. 10. 2026: the studio died after exactly 8 h twice while the PM was away); integer seconds as `aid-job.sh run --deadline` requires
 
 # The preview server: http.server without dotfiles (.env, .git; only .well-known passes)
 # and without directory listings (a directory serves its index.html or 404).
