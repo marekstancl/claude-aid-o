@@ -28,7 +28,7 @@ vstup: diff zúžení (politika revizí, čtečka konfigurace, kola revize, bal�
 
 ## Vyřízení
 
-1. Čeká na rozhodnutí PM (karta 10. 10. 2026: legacy a běh bez plánu s vypnutým CP3 — ponechat EPIC revizi s jednou bezpečnostní rolí, odmítnout vydání, nebo přijmout).
+1. Přijato rozhodnutím PM (11. 10. 2026, „historické plány mě jsou asi jedno, nějak se prostě zavřou“): bez změny kódu. Nové plány mají výchozí režim `plan_branch` (`defaults/policies/plan-boundary-policy.yaml`, žádný projekt ho nepřepisuje), takže celek čte uzávěr CP7; starý režim zůstává jen u historických plánů a u projektu bez profilů bran. Riziko pro ně je vědomě přijaté.
 2. Opraveno v kroku 1/6 (commit dále): krok se shodou na `handler_patterns` je vždy `review` (`aid-step-check.sh`); nový bezpečnostní vzor `shell_string_exec` (`bash|sh -c`, `eval` proměnné, `exec`/`execSync` řetězce, `child_process`). Sčítání po sobě jdoucích malých kroků odmítnuto: dělení kroků řeší nález 1 a CP7.
 3. Opraveno v kroku 4: otázka 7 `final_generalist` doplněná o injection napříč rozsahem (sledovat každý nový vstup k sinkům), cesty a symlinky, padělanou důvěru.
 4. Odloženo do backlogu IMP-691 (stejná úroveň důvěry jako dnešní bracket dispatche, který zapisuje controller; skutečné vynucení patří do hooku).
