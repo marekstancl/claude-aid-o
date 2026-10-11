@@ -443,6 +443,13 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
   done
 }
 
+@test "P108 page: an address in a question's text is a clickable link and a handover shows the two link buttons above its text" {
+  f="$(PAGE_HTML)"
+  grep -qF 'const linkify = s => s.split(/(https?:' "$f"
+  grep -qF 'class: "body-link" }, t)' "$f"
+  grep -qF 'if (q.kind === "handover" && S.links && typeof S.links === "object") sec.append(el("div", { class: "done-links" },' "$f"
+}
+
 @test "P108 page: the Hotovo panel shows the web and customer links, the handover sentence, the open items and a field to add one; a reservation asks for words" {
   f="$(PAGE_HTML)"
   for w in 'function donePanel(sec)' '"Otevřít web"' '"Co jste dostali"' '"Doplnit bod"' 'call("POST", "/open-item", { text })' 'S.open_items' 'q.kind === "handover" && q.answered' 'donePanel(h.closest("section"))' 'c.value === "vyhrada"' '"Převzít s výhradou"' '["facts", "no_method", "handover"].includes(q.kind)'; do

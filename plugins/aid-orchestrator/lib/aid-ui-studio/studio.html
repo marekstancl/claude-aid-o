@@ -297,6 +297,7 @@
   .swatches { display: inline-flex; gap: 4px; margin-right: 4px; }
   .swatches i { width: 18px; height: 18px; border-radius: 5px; border: 1px solid oklch(100% 0 0 / 0.18); box-shadow: inset 0 0 0 1px oklch(0% 0 0 / 0.25); background: var(--ks-gray); }
   .motion { margin: 4px 0 8px; font-size: .9375rem; } .motion p { margin: 0 0 4px; } .motion ul { margin: 0; padding-left: 18px; color: var(--ks-text-muted); }
+  .body-link { text-decoration: underline; text-underline-offset: .15em; word-break: break-all; }
   .done { margin-top: 18px; max-width: 720px; } .done-links { display: flex; gap: 10px; margin: 8px 0 14px; flex-wrap: wrap; } .done-links a { text-decoration: none; display: inline-flex; align-items: center; }
   .done h3 { margin: 10px 0 4px; font-size: 1rem; } .open-items { margin: 0; padding-left: 18px; } .add-item { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; }
   .add-item textarea { flex: 1; min-width: 0; font: inherit; padding: 8px; border: 1px solid var(--ks-rule); border-radius: 6px; background: transparent; color: inherit; } .muted { color: var(--ks-text-muted); }
@@ -890,7 +891,9 @@ addEventListener("resize", () => navs.forEach(f => f()));
 
 // a body line with the little markdown agents write: "## " heading, "- " item, **bold**; text nodes only, never HTML
 function mdLine(l) {
-  const bold = s => s.split(/\*\*(.+?)\*\*/).map((t, i) => i % 2 ? el("b", {}, t) : t);
+  // an address in the text is a link the PM can click (PM 11. 10. 2026: the handover question showed bare URLs)
+  const linkify = s => s.split(/(https?:\/\/[^\s<>"“”)]+)/).map((t, i) => i % 2 ? el("a", { href: t, target: "_blank", rel: "noopener", class: "body-link" }, t) : t);
+  const bold = s => s.split(/\*\*(.+?)\*\*/).flatMap((t, i) => i % 2 ? [el("b", {}, t)] : linkify(t));
   const h = l.match(/^#{2,4}\s+(.*)/);
   if (h) return el("h4", { class: "detail-h" }, ...bold(h[1]));
   const li = l.match(/^\s*[-*]\s+(.*)/);
@@ -985,6 +988,9 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
     if (str(q.prompt)) sec.append(el("p", { class: "lede" }, q.prompt));
     const prior = priorLine(q); if (prior) sec.append(prior);
     const motion = motionBlock(q); if (motion) sec.append(motion);
+    if (q.kind === "handover" && S.links && typeof S.links === "object") sec.append(el("div", { class: "done-links" },
+      str(S.links.web) ? el("a", { class: "choose go", href: S.links.web, target: "_blank", rel: "noopener" }, "Otevřít web") : null,
+      str(S.links.customer) ? el("a", { class: "reroll-btn", href: S.links.customer, target: "_blank", rel: "noopener" }, "Co jste dostali") : null));
     const lines = bodyLines(q.body); if (lines) sec.append(el("div", { class: "head" }, lines));
     if (partNote) sec.append(partNote);
     if (!cards.length) {
