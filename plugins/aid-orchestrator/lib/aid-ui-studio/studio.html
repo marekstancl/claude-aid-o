@@ -298,6 +298,11 @@
   .swatches i { width: 18px; height: 18px; border-radius: 5px; border: 1px solid oklch(100% 0 0 / 0.18); box-shadow: inset 0 0 0 1px oklch(0% 0 0 / 0.25); background: var(--ks-gray); }
   .motion { margin: 4px 0 8px; font-size: .9375rem; } .motion p { margin: 0 0 4px; } .motion ul { margin: 0; padding-left: 18px; color: var(--ks-text-muted); }
   .body-link { text-decoration: underline; text-underline-offset: .15em; word-break: break-all; }
+  .hero.done-card { display: block; max-width: 760px; margin: 36px auto 10px; padding: 34px 36px; border: 1px solid var(--ks-rule); border-radius: 14px; box-shadow: 0 6px 30px rgba(0,0,0,.06); }
+  .hero.done-card h1 { font-size: 2.3rem; line-height: 1.1; margin: 0 0 10px; } .hero.done-card #intro { margin: 0 0 18px; color: var(--ks-text-muted); }
+  .done-links a.hbtn-go, .done-links a.hbtn-ghost { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 22px; border-radius: 8px; font-weight: 600; border: 1px solid var(--ks-accent, #0f766e); }
+  .done-links a.hbtn-go { background: var(--ks-accent, #0f766e); color: #fff; } .done-links a.hbtn-ghost { background: transparent; color: var(--ks-accent, #0f766e); }
+  .foldline { max-width: 760px; margin: 0 auto 30px; text-align: center; color: var(--ks-text-muted); font-size: .95rem; } .foldline a { color: inherit; }
   .done { margin-top: 18px; max-width: 720px; } .done-links { display: flex; gap: 10px; margin: 8px 0 14px; flex-wrap: wrap; } .done-links a { text-decoration: none; display: inline-flex; align-items: center; }
   .done h3 { margin: 10px 0 4px; font-size: 1rem; } .open-items { margin: 0; padding-left: 18px; } .add-item { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; }
   .add-item textarea { flex: 1; min-width: 0; font: inherit; padding: 8px; border: 1px solid var(--ks-rule); border-radius: 6px; background: transparent; color: inherit; } .muted { color: var(--ks-text-muted); }
@@ -650,7 +655,7 @@ const SVG = {
   next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5 16 12l-6.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' };
 const FAN = ["0deg", "1.4deg", "-1.2deg"];
 let last = "", stopped = false, navs = [];
-let S = null, H = [], hCount = null, hOk = true;   // /state, /history, its line count when fetched
+let S = null, H = [], hCount = null, hOk = true, SHOW_STEPS = false;   // /state, /history, its line count when fetched
 const SELECTED = {};   // question id -> the card the PM picked; Další sends it
 const VIEW = {};       // step id -> { part, auto }: the part the PM opened, and which part was waiting then
 const SEEN = new Set(), WAS = {}, NOTES = {};   // NOTES[question][figure] = the PM's note to one page, until sent
@@ -1120,11 +1125,11 @@ function donePanel(sec) {
     if (r.status === 200) location.reload(); else notice(r.data.error || "Bod se neuložil.");
   } } }, "Doplnit bod");
   sec.append(el("div", { id: "done-panel", class: "done" },
-    hand ? el("p", { class: "lede" }, hand.outcome) : null,
     el("div", { class: "done-links" },
-      web ? el("a", { class: "choose go", href: web, target: "_blank", rel: "noopener" }, "Otevřít web") : null,
-      cust ? el("a", { class: "reroll-btn", href: cust, target: "_blank", rel: "noopener" }, "Co jste dostali") : null),
-    el("h3", {}, "Co zbývá"),
+      web ? el("a", { class: "hbtn-go", href: web, target: "_blank", rel: "noopener" }, "Otevřít web") : null,
+      cust ? el("a", { class: "hbtn-ghost", href: cust, target: "_blank", rel: "noopener" }, "Co jste dostali") : null),
+    hand ? el("p", { class: "muted" }, hand.outcome) : null,
+    el("h3", {}, "Co zbývá před zveřejněním"),
     items.length ? el("ul", { class: "open-items" }, items.map(i => el("li", {}, String(i.text || ""),
       el("span", { class: "muted" }, " · " + (i.owner || "") + (i.due ? " · do " + i.due : ""))))) : el("p", { class: "muted" }, "Nic otevřeného."),
     el("div", { class: "add-item" }, ta, btn)));
@@ -1140,11 +1145,11 @@ function hero(m) {
   const h = document.getElementById("headline"), p = document.getElementById("intro");
   const act = m.steps.find(st => st.active);
   document.getElementById("done-panel")?.remove();
+  const sec = h.closest("section"); sec.classList.toggle("done-card", Boolean(m.finished || (S.finish && typeof S.finish === "object")));
   if (m.finished || (S.finish && typeof S.finish === "object")) {
     h.replaceChildren("Hurá, máme hotovo.", el("br"), "Tady je váš web.");
-    p.textContent = "Od vás už nic nepotřebujeme. Web si otevřete tlačítkem níže; co ještě přijde před zveřejněním, je pod ním. "
-      + cap(num(m.steps.length)) + " " + plural(m.steps.length, "krok", "kroky", "kroků") + " s vašimi rozhodnutími zůstává k nahlédnutí.";
-    donePanel(h.closest("section"));
+    p.textContent = "Web si otevřete tlačítkem; stránka „Co jste dostali“ má všechno pohromadě. Od vás teď nic nepotřebujeme.";
+    donePanel(sec);
   } else if (act) {
     if (act.n) h.textContent = act.title + ".";
     else h.replaceChildren("Teď ladíme", el("br"), "krok " + act.title + ".");
@@ -1417,7 +1422,16 @@ function render() {
     go: () => { slide = di < vi ? "step-back" : "step-fwd"; delete VIEW["/step"]; render(); } } : null;
   const st = m.steps[vi];
   const pickStep = (id, i) => { slide = i < vi ? "step-back" : "step-fwd"; VIEW["/step"] = { part: id, auto: dflt }; render(); };
-  document.getElementById("pipeline").replaceChildren(...(m.steps.length ? [stripEl(m, sv.part, pickStep), stepEl(st, vi, back)] : []));
+  const finished = Boolean(m.finished || (S.finish && typeof S.finish === "object"));
+  const pipe = document.getElementById("pipeline");
+  pipe.replaceChildren(...(m.steps.length ? [stripEl(m, sv.part, pickStep), stepEl(st, vi, back)] : []));
+  document.getElementById("fold")?.remove();
+  if (finished) {   // one card is the page; the steps and the PM's decisions stay a click away (companion A, PM 11. 10. 2026)
+    pipe.hidden = !SHOW_STEPS;
+    const n = (S.questions || []).filter(q => q.answered).length;
+    pipe.before(el("p", { id: "fold", class: "foldline" }, cap(num(m.steps.length)) + " " + plural(m.steps.length, "krok", "kroky", "kroků") + " a " + n + " vašich rozhodnutí zůstává k nahlédnutí · ",
+      el("a", { href: "#", on: { click: e => { e.preventDefault(); SHOW_STEPS = !SHOW_STEPS; render(); } } }, SHOW_STEPS ? "Skrýt" : "Zobrazit")));
+  } else pipe.hidden = false;
   m.steps.forEach(st => drawn.push(["s:" + st.id, stepCls(st)]));
   for (const [id, v] of Object.entries(kept)) { const i = document.getElementById(id); if (i) i.value = v; }
   if (focus && document.getElementById(focus)) document.getElementById(focus).focus();

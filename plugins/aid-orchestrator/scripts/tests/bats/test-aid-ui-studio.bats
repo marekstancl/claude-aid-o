@@ -448,11 +448,14 @@ PAGE_HTML() { echo "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"; 
   grep -qF 'const linkify = s => s.split(/(https?:' "$f"
   grep -qF 'class: "body-link" }, t)' "$f"
   grep -qF 'if (q.kind === "handover" && S.links && typeof S.links === "object") sec.append(el("div", { class: "done-links" },' "$f"
+  # the finished run is one card with two equal buttons; the steps fold behind one line (companion A, PM 11. 10. 2026)
+  grep -qF 'sec.classList.toggle("done-card"' "$f"; grep -qF 'class: "hbtn-go"' "$f"; grep -qF 'class: "hbtn-ghost"' "$f"
+  grep -qF 'pipe.hidden = !SHOW_STEPS;' "$f"; grep -qF 'id: "fold", class: "foldline"' "$f"
 }
 
 @test "P108 page: the Hotovo panel shows the web and customer links, the handover sentence, the open items and a field to add one; a reservation asks for words" {
   f="$(PAGE_HTML)"
-  for w in 'function donePanel(sec)' '"Otevřít web"' '"Co jste dostali"' '"Doplnit bod"' 'call("POST", "/open-item", { text })' 'S.open_items' 'q.kind === "handover" && q.answered' 'donePanel(h.closest("section"))' 'c.value === "vyhrada"' '"Převzít s výhradou"' '["facts", "no_method", "handover"].includes(q.kind)'; do
+  for w in 'function donePanel(sec)' '"Otevřít web"' '"Co jste dostali"' '"Doplnit bod"' 'call("POST", "/open-item", { text })' 'S.open_items' 'q.kind === "handover" && q.answered' 'donePanel(sec)' 'c.value === "vyhrada"' '"Převzít s výhradou"' '["facts", "no_method", "handover"].includes(q.kind)'; do
     grep -qF "$w" "$f" || { echo "missing: $w"; return 1; }
   done
 }
