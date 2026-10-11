@@ -423,3 +423,15 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [ "$status" -eq 1 ]
   [[ "$output" == *"not a <base>..<head> reachable from plan/P111-proj"* ]]
 }
+
+@test "repo-roots: an empty or reversed range on the branch does not pass (the foreign work cannot vanish from review)" {
+  _rr_setup
+  local base; base="$(git -C "$WT" rev-parse HEAD)"
+  echo b >> "$WT/page.md"; git -C "$WT" commit -qam "on the branch"
+  local head; head="$(git -C "$WT" rev-parse HEAD)"
+  run aid_dispatch_repo_range_ok "$WT" "${head}..${head}" plan/P111-proj
+  [ "$status" -ne 0 ]
+  run aid_dispatch_repo_range_ok "$WT" "${head}..${base}" plan/P111-proj
+  [ "$status" -ne 0 ]
+  aid_dispatch_repo_range_ok "$WT" "${base}..${head}" plan/P111-proj
+}

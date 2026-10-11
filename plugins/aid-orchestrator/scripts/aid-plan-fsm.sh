@@ -2968,6 +2968,54 @@ _pfsm_record_merged() {
 # is completed from its own task branch, where a dirty tree is the operator's
 # business and blocking would buy nothing.
 # =============================================================================
+# _pm_abandon_run <root> <plan_id> <epic_id> <reason> — P111 Step 5: ONE
+# resumable transition manifest → FSM → map for one run. Each write is
+# idempotent; a rerun after an interruption completes what is missing, with the
+# reason the manifest recorded first. Entries merged_to_plan / superseded are
+# never touched.
+_pm_abandon_run() {
+  local root="$1" plan_id="$2" epic_id="$3" reason="$4" entry st evd sf rec
+  entry="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.epic_runs[]? | select(.epic_id == \"${epic_id}\")" 2>/dev/null || true)"
+  [[ -n "$entry" ]] || return 0
+  st="$(jq -r '.status // ""' <<<"$entry")"
+  case "$st" in
+    running|pending)
+      plan_manifest_set_epic_status "$plan_id" "$epic_id" abandoned >/dev/null || return 1
+      _pfsm_entry_update "$plan_id" "$epic_id" ".terminal_reason = $(jq -Rn --arg s "$reason" '$s') | .terminal_recorded_at = \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" || return 1
+      ;;
+    abandoned)
+      rec="$(jq -r '.terminal_reason // ""' <<<"$entry")"; [[ -n "$rec" ]] && reason="$rec"
+      ;;
+    *) return 0 ;;
+  esac
+  _pfsm_crash_seam manifest
+  evd="$(jq -r '.evidence_dir // ""' <<<"$entry")"
+  sf="${root}/${evd}/fsm-state.yaml"
+  local need=0 map="${root}/.aid-o/work/active-runs.json"
+  if [[ -f "$sf" ]]; then
+    local s dp ab
+    s="$(yq -r '.state // ""' "$sf")"; dp="$(yq -r '.done_phase // ""' "$sf")"; ab="$(yq -r '.abandoned // false' "$sf")"
+    [[ "$ab" != "true" ]] && ! { [[ "$s" == "DONE" && "$dp" == "release" ]]; } && need=1
+  fi
+  [[ -f "$map" ]] && jq -e --arg e "$epic_id" 'has($e)' "$map" >/dev/null 2>&1 && need=1
+  if [[ "$need" -eq 1 ]]; then
+    # aid-fsm.sh abandon is idempotent: ERROR + the fields if missing, the map entry always.
+    ( cd "$root" && bash "${SCRIPT_DIR}/aid-fsm.sh" abandon "$sf" --reason "$reason" --epic "$epic_id" ) || return $?
+  fi
+  return 0
+}
+
+# _pm_abandon_unfinished <root> <plan_id> <reason> — every entry the close
+# must end: running/pending, and abandoned ones whose FSM or map entry an
+# interruption left behind.
+_pm_abandon_unfinished() {
+  local root="$1" plan_id="$2" reason="$3" e
+  while IFS= read -r e; do
+    [[ -n "$e" ]] || continue
+    _pm_abandon_run "$root" "$plan_id" "$e" "$reason" || return 1
+  done < <(plan_manifest_get "$plan_id" '.plan_boundary_manifest.epic_runs[]? | select(.status == "running" or .status == "pending" or .status == "abandoned") | .epic_id' 2>/dev/null || true)
+}
+
 cmd_epic_complete() {
   local plan_id="" epic_id="" abandon=0 supersede_by="" reason="" full_tests=0 \
         project_root_opt="" op_id_opt="" direct=0
@@ -3026,8 +3074,10 @@ cmd_epic_complete() {
     echo "ERROR: epic-complete: --supersede-by must be an EPIC id matching ^E-[0-9]{3}-[0-9]+_[0-9]+\$ (got '${supersede_by}')" >&2
     exit 2
   fi
-  if [[ "$abandon" -eq 1 && -z "$reason" ]]; then
-    echo "ERROR: epic-complete: --abandon requires --reason <text>." >&2
+  if [[ "$abandon" -eq 1 && -z "${reason//[[:space:]]/}" ]]; then
+    echo "ERROR: epic-complete: --abandon requires --reason <text> — the reason is recorded in the manifest, the run's state and its timeline; nothing was written." >&2
+    echo "next: aid-plan-fsm.sh epic-complete ${plan_id:-<plan>} ${epic_id:-<epic>} --abandon --reason \"<why>\"" >&2
+    echo "(pipeline.md §When AID refuses: abandon_needs_reason)" >&2
     exit 2
   fi
   if [[ -n "$supersede_by" && -z "$reason" ]]; then
@@ -3079,6 +3129,20 @@ cmd_epic_complete() {
   local target_status=""
   [[ "$abandon" -eq 1 ]] && target_status="abandoned"
   [[ -n "$supersede_by" ]] && target_status="superseded"
+
+  # P111 Step 5: --abandon ends the run in the FSM and active-runs.json too —
+  # one resumable transition (manifest → FSM → map); a rerun completes it.
+  if [[ "$abandon" -eq 1 ]]; then
+    local _ab_rc=0
+    if [[ "$cur_status" == "merged_to_plan" || "$cur_status" == "superseded" ]]; then
+      echo "PRECONDITION FAIL: ${epic_id} is '${cur_status}' (terminal) — it is not abandoned." >&2
+      exit 1
+    fi
+    _pm_abandon_run "$project_root" "$plan_id" "$epic_id" "$reason" || _ab_rc=$?
+    [[ "$_ab_rc" -eq 0 ]] || exit "$_ab_rc"
+    echo "${epic_id} abandoned"
+    exit 0
+  fi
 
   if [[ -n "$target_status" ]]; then
     local brc=0
@@ -7804,6 +7868,11 @@ cmd_plan_close() {
         # teardown. It does now: the teardown is idempotent and says so when
         # there is nothing left, so a genuine no-op stays a no-op while a
         # leaked worktree is finally reconciled.
+        # P111: a rerun of the administrative close completes what an earlier
+        # one (or the P080-era close) left: unfinished runs end in the FSM too.
+        if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 ]]; then
+          _pm_abandon_unfinished "$root" "$plan_id" "$_PFSM_FORCE_REASON" || exit $?
+        fi
         echo "ALREADY CLOSED: ${plan_id} is CLOSED and ${marker} is present — plan-close is a no-op (the execution worktree is reconciled below)." >&2
         _pfsm_teardown_plan_worktree "$root" "$plan_id"
         exit 0
@@ -7840,6 +7909,15 @@ cmd_plan_close() {
   fi
   local close_fd="$AID_LOCK_FD"
   _pfsm_close_release() { [[ -n "${close_fd:-}" ]] && aid_lock_release "$close_fd" >/dev/null 2>&1; close_fd=""; return 0; }
+
+  # P111 Step 5: an administrative close ends the plan's unfinished runs FIRST —
+  # manifest, FSM and active-runs.json, one resumable transition per run (the
+  # P080 defect left them READY in the FSM and the map). Merged work is untouched.
+  if [[ "${_PFSM_ADMIN_CLOSE:-0}" -eq 1 ]]; then
+    local _ab_rc=0
+    _pm_abandon_unfinished "$root" "$plan_id" "$_PFSM_FORCE_REASON" || _ab_rc=$?
+    if [[ "$_ab_rc" -ne 0 ]]; then _pfsm_close_release; exit "$_ab_rc"; fi
+  fi
 
   # ── 2. every precondition, in one place, with the owned lock excluded ─────
   # The operation key is derived HERE rather than at step 3 because the check's

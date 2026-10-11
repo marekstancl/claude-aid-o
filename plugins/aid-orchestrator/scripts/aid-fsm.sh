@@ -120,6 +120,7 @@ VALID_TRANSITIONS=(
   "EXECUTE:ERROR"
   "GATES:ERROR"
   "ESCALATION:ERROR"
+  "DONE:ERROR"   # P111: abandon of a run stuck in DONE/review (cmd_abandon refuses release)
 )
 
 is_valid_state() {
@@ -1174,6 +1175,8 @@ _fsm_refusal_next() {
       else
         next="$(_fsm_cmd bash "$fsm" done-advance review release "$sf"), then epic-merge-to-plan as today"
       fi ;;
+    abandon_needs_reason)
+      next="$(_fsm_cmd bash "$fsm" abandon "$sf" --reason "<why the run is abandoned>")" ;;
     direct_run_needs_plan_branch)
       next="start the plan in plan_branch mode and run from its plan worktree: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}")" ;;
     plan_manifest_missing|plan_branch_mismatch)
@@ -4243,6 +4246,70 @@ read_steps_array() {
   else
     echo "[]"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# cmd_abandon <state_file> --reason <text> [--epic <epic_id>]   (P111 Step 5)
+#   The run ends in the FSM: ERROR through the transition table (DONE:ERROR only
+#   from done_phase review — a run at release is finished), abandoned: true with
+#   the reason and the time, the timeline event `abandoned`, and its entry
+#   removed from active-runs.json (aid_active_boundary_sync, which also refreshes
+#   active.md). Idempotent: a rerun completes whatever an interruption left.
+#   A gone state file: --epic names the map entry to remove.
+# ---------------------------------------------------------------------------
+cmd_abandon() {
+  local state_file="${1:-}" reason="" epic_opt=""
+  shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reason) reason="${2:-}"; shift 2 ;;
+      --epic) epic_opt="${2:-}"; shift 2 ;;
+      *) echo "ERROR: abandon: unknown argument: $1" >&2; exit 2 ;;
+    esac
+  done
+  if [[ -z "${reason//[[:space:]]/}" ]]; then
+    echo "ERROR: abandon: a run is abandoned with a reason — it is recorded in the state, the manifest and the timeline." >&2
+    _fsm_refusal_next abandon_needs_reason
+    exit 1
+  fi
+  [[ -n "$state_file" ]] || { echo "Usage: aid-fsm.sh abandon <state_file> --reason <text> [--epic <epic_id>]" >&2; exit 2; }
+  local root; root="$(aid_state_root 2>/dev/null || pwd)"
+  if [[ ! -f "$state_file" ]]; then
+    if [[ -n "$epic_opt" ]] && declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+      aid_active_boundary_sync "$root" "$epic_opt" abandon || true
+    fi
+    echo "abandon: ${state_file} is gone — the run's map entry ${epic_opt:-<unnamed>} was removed; nothing else to end." >&2
+    exit 0
+  fi
+  state_file="$(_fsm_resolve_state_file "$state_file")"
+  local epic_id run_id cur dp
+  epic_id="$(yaml_field "$state_file" epic_id)"; run_id="$(yaml_field "$state_file" run_id)"
+  _fsm_require_plan_worktree "$epic_id"
+  cur="$(yaml_field "$state_file" state)"; dp="$(yaml_field "$state_file" done_phase 2>/dev/null || true)"
+  if [[ "$cur" == "DONE" && "$dp" == "release" ]]; then
+    echo "ERROR: abandon: ${epic_id} is DONE at done_phase release — the run is finished; there is nothing to abandon (close the plan instead)." >&2
+    exit 1
+  fi
+  if [[ "$cur" != "ERROR" ]]; then
+    ( cmd_transition "$cur" ERROR "$state_file" ) >/dev/null \
+      || { echo "ERROR: abandon: ${epic_id} could not move ${cur} → ERROR (see above) — nothing else was written." >&2; exit 1; }
+  fi
+  if [[ "$(yaml_field "$state_file" abandoned 2>/dev/null || true)" != "true" ]]; then
+    R="$reason" T="$(date -u +%Y-%m-%dT%H:%M:%SZ)" yq -i '.abandoned = true | .abandon_reason = strenv(R) | .abandoned_at = strenv(T)' "$state_file" \
+      || { echo "ERROR: abandon: could not record the abandon fields in ${state_file} — rerun converges." >&2; exit 1; }
+    local timeline; timeline="$(derive_timeline "$state_file")" || true
+    [[ -n "$timeline" ]] && log_event "$timeline" "abandoned" epic_id="$epic_id" run_id="$run_id" from_state="$cur" reason="$reason"
+  fi
+  if [[ "${AID_PLAN_FSM_CRASH_AFTER:-}" == fsm ]]; then   # test seam: the FSM written, the map not yet
+    echo "CRASH SEAM: AID_PLAN_FSM_CRASH_AFTER=fsm — exiting 99 after the FSM write, before the map." >&2; exit 99
+  fi
+  if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+    aid_active_boundary_sync "$root" "$epic_id" abandon "$state_file" || true
+  fi
+  # A direct run's foreign worktrees are the PM's to remove (named, never copied).
+  local fw=""
+  fw="$(jq -r '[.repo_roots[]?.worktree] | join(", ")' "$(dirname "$state_file")/plan.json" 2>/dev/null || true)"
+  echo "abandoned: ${epic_id} (${run_id}) is ERROR, out of active-runs.json; stop any agent still working on its branch${fw:+; foreign worktrees to remove by hand: ${fw}}" >&2
 }
 
 cmd_transition() {
@@ -7597,6 +7664,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     amend-scope)       shift; cmd_amend_scope "$@" ;;
     rebase-plan)       shift; cmd_rebase_plan "$@" ;;
     done-advance)               shift; cmd_done_advance "$@" ;;
+    abandon)                    shift; cmd_abandon "$@" ;;
     promote-check)              shift; cmd_promote_check "$@" ;;
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
     plan-close)                 shift; cmd_plan_close "$@" ;;

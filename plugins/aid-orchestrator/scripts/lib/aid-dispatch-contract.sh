@@ -233,12 +233,16 @@ aid_dispatch_contract_extract() {
 # aid_dispatch_repo_range_ok <repo> <base>..<head> [<branch>] — both ends are
 # commits in <repo>; given <branch>, the head is also REACHABLE from it (P111:
 # a commit that exists only in the live checkout shares the object store with
-# the worktree, so presence alone proves nothing). The return validator and the
-# step check ask the same question.
+# the worktree, so presence alone proves nothing) — and the range is a real one:
+# its base is an ancestor of its head and the two differ, so an empty or
+# reversed range cannot make the step's foreign work vanish from its review.
+# The return validator and the step check ask the same question.
 aid_dispatch_repo_range_ok() {
   [[ "$2" == *..* ]] && git -C "$1" rev-parse -q --verify "${2%%..*}^{commit}" >/dev/null 2>&1 \
     && git -C "$1" rev-parse -q --verify "${2##*..}^{commit}" >/dev/null 2>&1 \
-    && { [[ -z "${3:-}" ]] || git -C "$1" merge-base --is-ancestor "${2##*..}" "$3" 2>/dev/null; }
+    && { [[ -z "${3:-}" ]] || { git -C "$1" merge-base --is-ancestor "${2##*..}" "$3" 2>/dev/null \
+           && [[ "$(git -C "$1" rev-parse "${2%%..*}^{commit}" 2>/dev/null)" != "$(git -C "$1" rev-parse "${2##*..}^{commit}" 2>/dev/null)" ]] \
+           && git -C "$1" merge-base --is-ancestor "${2%%..*}" "${2##*..}" 2>/dev/null; }; }
 }
 
 # aid_dispatch_repo_resolve <plan.json> <slug> — prints "<worktree>\t<branch>"

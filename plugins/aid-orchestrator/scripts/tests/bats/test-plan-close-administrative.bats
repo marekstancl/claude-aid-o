@@ -284,3 +284,158 @@ _lifecycle_manifest() {
   [ -z "$(git -C "$R" ls-tree main .aid-lifecycle/receipts/P900.yaml)" ]
 }
 
+
+# ── P111 Step 5: cancellation reaches the FSM and active-runs.json ──────────
+_ab_project() {
+  export AID_TEST_MODE=1 AID_PLUGIN_PATH="$PLUGIN_ROOT"
+  AB="$BATS_TEST_TMPDIR/p"; mkdir -p "$AB"; cd "$AB"
+  git init -q -b main; git config user.email t@t; git config user.name t
+  echo x > a; git add a; git commit -qm init
+  AFSM="$PLUGIN_ROOT/scripts/aid-fsm.sh"
+  MAP="$AB/.aid-o/work/active-runs.json"
+  source "$PLUGIN_ROOT/scripts/tests/lib/aid-test-plan-fixture.sh"
+}
+
+# _ab_two_epics — plan P920 (plan_branch) with two EPIC runs READY in the FSM,
+# the map and the manifest (the P080 shape before its close).
+_ab_two_epics() {
+  _ab_project
+  mkdir -p .aid-o/plans .aid-o/config
+  printf 'gates: {}\n' > .aid-o/config/execution.yaml
+  printf -- '---\nid: P920\n---\n\n# Plan: two runs\n\n**EPIC 1: one**\n\n### Step 1: a\n\n**AID Role:** backend\n\n**EPIC 2: two**\n\n### Step 2: b\n\n**AID Role:** backend\n' > .aid-o/plans/P920-two.md
+  git add -f .aid-o; git commit -qm plan
+  bash "$FSM" plan-start P920 --mode plan_branch --project-root "$AB" >/dev/null 2>&1
+  local tip e r; tip="$(git rev-parse plan/P920)"
+  echo '{}' > "$MAP"
+  for e in E-920-1_2 E-920-2_2; do
+    r="R-E920-${e:6:1}"
+    mkdir -p ".aid-o/work/evidence/$e/$r"
+    printf 'epic_id: %s\nrun_id: %s\nstate: READY\ncurrent_step: 0\ntotal_steps: 1\nmode: full\nbranch: task/%s/main\nbase_commit: %s\n' "$e" "$r" "$e" "$tip" > ".aid-o/work/evidence/$e/$r/fsm-state.yaml"
+    ( export AID_PLAN_MANIFEST_PROJECT_ROOT="$AB"; source "$PLUGIN_ROOT/scripts/lib/aid-plan-manifest.sh"
+      plan_manifest_add_epic P920 "$e" "$r" "task/$e/main" "$tip" plan/P920 ".aid-o/work/evidence/$e/$r" proven >/dev/null )
+    jq --arg e "$e" --arg sf ".aid-o/work/evidence/$e/$r/fsm-state.yaml" --arg r "$r" \
+      '.[$e] = {state_file: $sf, run_id: $r, state: "READY", branch: ("task/" + $e + "/main"), plan_id: "P920"}' "$MAP" > "$MAP.t" && mv "$MAP.t" "$MAP"
+  done
+  MF="$AB/.aid-o/work/plan-state/P920/plan-boundary-manifest.json"
+  SF1="$AB/.aid-o/work/evidence/E-920-1_2/R-E920-1/fsm-state.yaml"
+  SF2="$AB/.aid-o/work/evidence/E-920-2_2/R-E920-2/fsm-state.yaml"
+}
+_st() { yq -r ".$2" "$1"; }
+
+@test "abandon: an administrative close ends both READY runs in the FSM and removes them from active-runs.json" {
+  _ab_two_epics
+  run bash "$FSM" plan-close P920 --administrative --reason "the plan was replaced by a new plan, P921"
+  for sf in "$SF1" "$SF2"; do
+    [ "$(_st "$sf" state)" = "ERROR" ]; [ "$(_st "$sf" abandoned)" = "true" ]
+    [ "$(_st "$sf" abandon_reason)" = "the plan was replaced by a new plan, P921" ]
+    grep -q '"event":"abandoned"' "$(dirname "$sf")/timeline.jsonl"
+  done
+  [ "$(jq 'length' "$MAP")" = "0" ]
+  [ "$(jq -c '[.plan_boundary_manifest.epic_runs[].status]' "$MF")" = '["abandoned","abandoned"]' ]
+}
+
+@test "abandon: an administrative close abandons only the running run, never the merged one" {
+  _ab_two_epics
+  ( export AID_PLAN_MANIFEST_PROJECT_ROOT="$AB"; source "$PLUGIN_ROOT/scripts/lib/aid-plan-manifest.sh"
+    plan_manifest_set_epic_status P920 E-920-1_2 merged_to_plan "$(git rev-parse plan/P920)" >/dev/null )
+  run bash "$FSM" plan-close P920 --administrative --reason "closing after a hand merge of the first run"
+  [ "$(jq -r '.plan_boundary_manifest.epic_runs[0].status' "$MF")" = "merged_to_plan" ]
+  [ "$(_st "$SF1" state)" = "READY" ]
+  [ "$(_st "$SF2" state)" = "ERROR" ]; [ "$(_st "$SF2" abandoned)" = "true" ]
+}
+
+@test "abandon: epic-complete --abandon ends that one run only" {
+  _ab_two_epics
+  run bash "$FSM" epic-complete P920 E-920-2_2 --abandon --reason "superseded by a later design"
+  [ "$status" -eq 0 ]
+  [ "$(_st "$SF2" state)" = "ERROR" ]; [ "$(_st "$SF1" state)" = "READY" ]
+  [ "$(jq -r 'keys | join(",")' "$MAP")" = "E-920-1_2" ]
+}
+
+@test "abandon: --abandon with an empty reason is refused abandon_needs_reason before any write" {
+  _ab_two_epics
+  run bash "$FSM" epic-complete P920 E-920-2_2 --abandon --reason "  "
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: abandon_needs_reason)"* ]]
+  [ "$(jq -r '.plan_boundary_manifest.epic_runs[1].status' "$MF")" = "running" ]
+  [ "$(_st "$SF2" state)" = "READY" ]
+  run bash "$AFSM" abandon "$SF2" --reason ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"abandon_needs_reason"* ]]
+}
+
+@test "abandon: interrupted after the manifest write, the same epic-complete --abandon completes FSM and map with the same reason" {
+  _ab_two_epics
+  AID_PLAN_FSM_CRASH_AFTER=manifest run bash "$FSM" epic-complete P920 E-920-2_2 --abandon --reason "first reason recorded"
+  [ "$status" -eq 99 ]
+  [ "$(_st "$SF2" state)" = "READY" ]; [ "$(jq -r 'has("E-920-2_2")' "$MAP")" = "true" ]
+  run bash "$FSM" epic-complete P920 E-920-2_2 --abandon --reason "a different reason on the rerun"
+  [ "$status" -eq 0 ]
+  [ "$(_st "$SF2" state)" = "ERROR" ]; [ "$(_st "$SF2" abandon_reason)" = "first reason recorded" ]
+  [ "$(jq -r 'has("E-920-2_2")' "$MAP")" = "false" ]
+}
+
+@test "abandon: interrupted after the manifest write, plan-close --administrative selects the abandoned entry by its unfinished FSM and completes it" {
+  _ab_two_epics
+  AID_PLAN_FSM_CRASH_AFTER=manifest run bash "$FSM" epic-complete P920 E-920-2_2 --abandon --reason "abandoned before the close ran"
+  [ "$status" -eq 99 ]
+  run bash "$FSM" plan-close P920 --administrative --reason "closing the plan administratively now"
+  [ "$(_st "$SF2" state)" = "ERROR" ]; [ "$(_st "$SF2" abandon_reason)" = "abandoned before the close ran" ]
+  [ "$(jq 'length' "$MAP")" = "0" ]
+}
+
+@test "abandon: interrupted after the FSM write only the map entry is left, and the rerun removes it" {
+  _ab_two_epics
+  AID_PLAN_FSM_CRASH_AFTER=fsm run bash "$FSM" epic-complete P920 E-920-2_2 --abandon --reason "abandon in two halves"
+  [ "$status" -eq 99 ]
+  [ "$(_st "$SF2" state)" = "ERROR" ]; [ "$(jq -r 'has("E-920-2_2")' "$MAP")" = "true" ]
+  run bash "$FSM" epic-complete P920 E-920-2_2 --abandon --reason "abandon in two halves"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("E-920-2_2")' "$MAP")" = "false" ]
+}
+
+@test "abandon: the P080 shape — a plan CLOSED with its marker and two READY runs — gets both abandoned before ALREADY CLOSED" {
+  _ab_two_epics
+  ( export AID_PLAN_STATE_PROJECT_ROOT="$AB"; source "$PLUGIN_ROOT/scripts/lib/aid-plan-state.sh"
+    f="$(plan_state_path P920)"; yq -i '.plan_state = "CLOSED"' "$f" )
+  local marker; marker="$(bash -c "source '$PLUGIN_ROOT/scripts/aid-plan-fsm.sh' >/dev/null 2>&1; export AID_PLAN_STATE_PROJECT_ROOT='$AB' AID_PLAN_MANIFEST_PROJECT_ROOT='$AB'; _pfsm_close_marker_path P920" 2>/dev/null || true)"
+  [ -n "$marker" ] || marker="$AB/.aid-o/work/plan-state/P920/plan-closed"
+  mkdir -p "$(dirname "$marker")"; : > "$marker"
+  run bash "$FSM" plan-close P920 --administrative --reason "the P080 shape: closed, runs left READY"
+  [[ "$output" == *"ALREADY CLOSED"* ]]
+  [ "$(_st "$SF1" state)" = "ERROR" ]; [ "$(_st "$SF2" state)" = "ERROR" ]
+  [ "$(jq 'length' "$MAP")" = "0" ]
+}
+
+@test "abandon: a direct run's abandon prints its foreign worktrees from plan.json and copies nothing into the state" {
+  _ab_project
+  local sf; sf="$(aid_fixture_direct_run "$AB" P910 EXECUTE)"
+  jq '.repo_roots = [{name: "docs", path: "/x/docs", worktree: "/x/docs/.aid-worktrees/plan-P910--docs", branch: "plan/P910-p", base: "b"}]' \
+    "$(dirname "$sf")/plan.json" > "$(dirname "$sf")/p" && mv "$(dirname "$sf")/p" "$(dirname "$sf")/plan.json"
+  run bash "$FSM" epic-complete P910 E-910-1_1 --abandon --reason "the direct run is stopped by the PM"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"foreign worktrees to remove by hand: /x/docs/.aid-worktrees/plan-P910--docs"* ]]
+  ! grep -q 'worktree' "$sf"
+}
+
+@test "abandon: a direct run in DONE with done_phase review is abandoned, and the hook then refuses its branch" {
+  _ab_project
+  local sf; sf="$(aid_fixture_direct_run "$AB" P910 DONE review)"
+  run bash "$AFSM" abandon "$sf" --reason "stopped after its last gate"
+  [ "$status" -eq 0 ]
+  [ "$(_st "$sf" state)" = "ERROR" ]; [ "$(_st "$sf" abandoned)" = "true" ]
+  local wt="$AB/.aid-worktrees/plan-P910"
+  echo y > "$wt/late.txt"; git -C "$wt" add late.txt
+  run bash -c "cd '$wt' && AID_PROJECT_ROOT='$AB' bash '$PLUGIN_ROOT/defaults/hooks/pre-commit'"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"run_abandoned"* ]]
+}
+
+@test "abandon: a run at done_phase release is finished and refused by abandon (DONE)" {
+  _ab_project
+  local sf; sf="$(aid_fixture_direct_run "$AB" P910 DONE release)"
+  run bash "$AFSM" abandon "$sf" --reason "too late to abandon"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"finished"* ]]
+  [ "$(_st "$sf" state)" = "DONE" ]
+}
