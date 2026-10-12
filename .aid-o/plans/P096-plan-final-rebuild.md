@@ -1,7 +1,7 @@
 ---
 id: P096
 type: refactor
-status: draft
+status: done
 created: 2026-09-20
 author: PM + AI
 risk: high
