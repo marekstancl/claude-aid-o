@@ -29,6 +29,7 @@ cat >/dev/null
 exit "${CODEX_RC:-0}"
 EOF
   chmod +x "$T/bin/codex"; export PATH="$T/bin:$PATH"
+  export AID_UI_STANDIN=off   # the H2 test turns the automatic Claude stand-in on
 }
 
 approve_context() {
@@ -171,7 +172,7 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   answer; RUN="$(bundle)"
   # a stand-in before any codex attempt is refused
   run python3 "$COPY" run "$RUN" --stand-in "$T/answer.json" --reason "test"; [ "$status" -eq 1 ]; [[ "$output" == *"failed Codex attempt"* ]]
-  CODEX_RC=3 run python3 "$COPY" run "$RUN"; [ "$status" -eq 1 ]
+  AID_UI_STANDIN=off CODEX_RC=3 run python3 "$COPY" run "$RUN"; [ "$status" -eq 1 ]
   [ ! -s "$RUN/answer.json" ]; jq -e '.provider == null and .codex_attempt.rc == 3' "$RUN/run.json" >/dev/null
   # failed attempt, but no dispatch bracket: refused
   run python3 "$COPY" run "$RUN" --stand-in "$T/answer.json" --reason "Codex nedostupný"; [ "$status" -eq 1 ]; [[ "$output" == *"dispatch bracket"* ]]
@@ -185,6 +186,27 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   RUN2="$(bundle)"; cp "$T/answer.json" "$RUN2/answer.json"
   echo '{"provider":"claude","codex_attempt":{"rc":1},"stand_in_source":"/nowhere"}' > "$RUN2/run.json"
   run "$STATE_SH" copy-record "$P" "$RUN2"; [ "$status" -eq 1 ]; [[ "$output" == *"dispatch bracket"* ]]
+}
+
+@test "H2: a refused codex hands the bundle to an independent Claude stand-in by itself, inside the dispatch bracket; no claude = both failed" {
+  export AID_UI_STANDIN=on AID_UI_STANDIN_CLAUDE="$T/bin/claude"
+  answer; RUN="$(bundle)"
+  printf '#!/usr/bin/env bash\ncat >/dev/null; python3 -c "import json;print(json.dumps({\\"result\\": \\"odpoved: \\" + open(\\"%s\\").read()}))"\n' "$T/answer.json" > "$T/bin/claude"
+  chmod +x "$T/bin/claude"
+  CODEX_RC=3 run python3 "$COPY" run "$RUN"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"claude stand-in answered"* ]]
+  jq -e '.provider == "claude" and .codex_attempt.rc == 3 and (.stand_in_reason | startswith("codex gave no answer"))' "$RUN/run.json" >/dev/null
+  grep -q '"verifier_dispatch_start"' "$RUN/timeline.jsonl"; grep -q '"verifier_dispatch_complete"' "$RUN/timeline.jsonl"
+  run "$STATE_SH" copy-record "$P" "$RUN"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.copy_review.pages["index.html"].provider == "claude"' "$ST" >/dev/null
+  # an unusable codex answer (invalid JSON) goes to the stand-in too
+  RUN3="$(bundle)"; printf '{"pages": {' > "$T/bad.json"
+  CODEX_ANSWER="$T/bad.json" run python3 "$COPY" run "$RUN3"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.provider == "claude" and (.stand_in_reason | contains("unusable"))' "$RUN3/run.json" >/dev/null
+  # no claude on PATH: both providers failed, nothing recorded as a review
+  rm "$T/bin/claude"; RUN4="$(bundle)"
+  CODEX_RC=3 run python3 "$COPY" run "$RUN4"; [ "$status" -eq 1 ]; [[ "$output" == *"stand-in failed too"* ]]
+  [ ! -s "$RUN4/answer.json" ]
 }
 
 @test "failed reviews: a pass consumes nothing, the fourth fail in a series is refused, new facts start a new series" {

@@ -60,7 +60,7 @@ PERSONAS = ["konverzní copywriter", "UX písař", "cílový zákazník", "skept
 CUSTOMERS = ("cílový zákazník", "skeptický zákazník")   # below 7 the page does not persuade (PM 4. 10. 2026); not on a legal page
 # files a run directory may hold besides its MANIFEST: what run, record and the stand-in bracket write
 RUN_OUTPUTS = {"MANIFEST", "run.json", "answer.json", "codex.log", "verdict.log", "timeline.jsonl",
-               "pending-dispatches.jsonl", "pending-dispatches.jsonl.lock"}
+               "pending-dispatches.jsonl", "pending-dispatches.jsonl.lock", "standin-answer.json", "claude.log"}
 
 PROMPT = """# Nezávislá kontrola textů webu
 
@@ -259,11 +259,71 @@ def run(a):
     rec = {"provider": None if (rc or no_answer) else "codex", "model": model or "codex-default", "command": " ".join(cmd),
            "rc": rc, "started_at": started, "ended_at": now(), "codex_attempt": {"rc": rc, "no_answer": no_answer, "at": started}}
     wj(runf, rec)
-    if rc or no_answer:
-        print(f"codex gave no answer (rc {rc}); dispatch a stand-in and pass it with --stand-in", file=sys.stderr)
-        return 1
+    bad = None
+    if not (rc or no_answer):
+        try:
+            load_answer(ans)   # a schema break stays the review's own failure (verdict/record name it); unreadable JSON is not an answer
+        except ValueError as e:
+            bad = f"not valid JSON ({e})"
+    if rc or no_answer or bad:
+        why = f"codex gave no answer (rc {rc})" if (rc or no_answer) else f"codex answer unusable: {bad}"
+        if os.environ.get("AID_UI_STANDIN", "on") == "off":
+            print(f"{why}; dispatch a stand-in and pass it with --stand-in", file=sys.stderr)
+            return 1
+        # H2 (PM 12. 10. 2026): the stand-in is wired in - an independent Claude Code with a clean context reads
+        # the same bundle; never an API key for text
+        ok, note = standin_claude(d, ans, why)
+        if not ok:
+            rec.update({"stand_in_attempt": note, "ended_at": now()}); wj(runf, rec)
+            print(f"{why}; Claude stand-in failed too: {note}", file=sys.stderr)
+            return 1
+        rec.update({"provider": "claude", "model": os.environ.get("AID_UI_STANDIN_MODEL", "sonnet"), "stand_in_reason": why,
+                    "stand_in_source": os.path.join(d, "standin-answer.json"), "rc": 0, "ended_at": now()})
+        wj(runf, rec)
+        print(f"claude stand-in answered ({why}): {ans}")
+        return 0
     print(f"codex answered: {ans}")
     return 0
+
+
+def standin_claude(d, ans, why):
+    """Run the review with an independent Claude Code (clean context, read-only tools, the bundle as cwd), inside
+    the dispatch bracket copy-record demands. Writes <d>/standin-answer.json and copies it to answer.json."""
+    emit = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aid-emit-dispatch.sh")
+    model = os.environ.get("AID_UI_STANDIN_MODEL", "sonnet")
+    out = os.path.join(d, "standin-answer.json")
+    try:
+        subprocess.run(["bash", emit, "start", "--focus", STANDIN_FOCUS, "--agent-id", "aid-orchestrator:copy-review-standin",
+                        "--evidence-dir", d], check=True, capture_output=True, text=True, timeout=60)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        return False, f"dispatch bracket start failed: {getattr(e, 'stderr', '') or e}"[:200]
+    prompt = open(os.path.join(d, "prompt.md"), encoding="utf-8").read()
+    cmd = [os.environ.get("AID_UI_STANDIN_CLAUDE", "claude"), "-p", "--output-format", "json", "--model", model, "--allowedTools", "Read", "Glob", "Grep",
+           "--add-dir", d]
+    try:
+        with open(os.path.join(d, "claude.log"), "w") as log:
+            r = subprocess.run(cmd, input=prompt, cwd=d, capture_output=True, text=True,
+                               timeout=int(os.environ.get("AID_UI_COPY_TIMEOUT", "1800")))
+            log.write((r.stderr or "")[-4000:])
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        return False, "claude not found" if isinstance(e, FileNotFoundError) else "claude timed out"
+    text = ""
+    try:
+        text = json.loads(r.stdout or "{}").get("result") or ""
+    except ValueError:
+        text = r.stdout or ""
+    m = re.search(r"\{.*\}", text, re.S)
+    if r.returncode or not m:
+        return False, f"claude rc {r.returncode}, no JSON in its answer"
+    with open(out, "w", encoding="utf-8") as fo:
+        fo.write(m.group(0))
+    try:
+        subprocess.run(["bash", emit, "complete", "--focus", STANDIN_FOCUS, "--output-file", out, "--evidence-dir", d],
+                       check=True, capture_output=True, text=True, timeout=60)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        return False, f"dispatch bracket complete failed: {getattr(e, 'stderr', '') or e}"[:200]
+    shutil.copyfile(out, ans)
+    return True, ""
 
 
 # ---- verdict ----------------------------------------------------------------------------

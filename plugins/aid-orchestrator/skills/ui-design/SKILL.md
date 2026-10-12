@@ -240,6 +240,7 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
   jménem; studio odmítne otázku `direction` bez soupisu (cíl `smer:<otisk>`, blok `motion`) nebo se
   směrem, jehož pozorování soupis neprokáže (server kontrolu přepočítá sám); `build-record` odmítne
   stavbu bez stvrzenky postupu `build` a bez téhož důkazu nad stavbou; brána má řádky
+  `content_without_js` a `first_paint_visible` (FB-27: obsah čitelný bez skriptu, hned po načtení a při omezeném pohybu),
   `motion_settled` (měří po doběhnutí animací, úvod jen přes `data-aid-intro`) a `motion_fidelity`
   (pozoruje stavbu sama). Pohyb se nikdy neosekává kvůli bráně. Od 11. 10. 2026 (PM 2B) záznam vzoru
   pokrývá i podstránky (`--pages 8`, položky s `pages`) a soupis smí u `replace` uvést `from` = druhý vzor

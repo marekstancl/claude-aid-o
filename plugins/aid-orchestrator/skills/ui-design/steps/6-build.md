@@ -92,6 +92,12 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
    role `aid-ui-state.sh roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>`.
 8. Pozorování pohybu stavby (před zápisem buildu):
    `aid-ui-tool.sh motion --dir <složka buildu> <project>/.aid-ui/build.motion.json`
+   **FB-27 (12. 10. 2026, retro klienta Coufal: „prázdné stránky“):** skryté výchozí stavy pohybu
+   (`opacity:0`, posun, ořez) piš jen pod `html.js` (`<script>document.documentElement.className+=" js"</script>`
+   v `<head>`), pozorovatel odhalení se spouští hned po načtení (prvky ve výřezu se odhalí bez kolečka),
+   při `prefers-reduced-motion` je vše čitelné hned. Brána to hlídá řádky `content_without_js` (bez skriptu
+   stejné obsahové texty) a `first_paint_visible` (h1 a první blok čitelné hned po načtení, nic zesláblé);
+   oba blokují.
    (nástroj build servíruje sám a otisk složky zapíše sám);
    `build-record` pak sám pustí `aid-ui-motion.py check` nad tím záznamem a odmítne, když
    kterýkoli převzatý pohyb v buildu neběžel (vyjmenuje je) nebo build od pozorování změnil.

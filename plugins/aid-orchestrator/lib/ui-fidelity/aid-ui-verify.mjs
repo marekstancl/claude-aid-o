@@ -299,6 +299,14 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   // reveals fire while scrolling: settle again before anything is measured or photographed
   const settled2 = settled.ok ? await settleMotion(page) : settled;
   res.motion_settled = settled2.ok ? ['pass', `settled after ${settled.ms} ms, ${settled2.ms} ms after scrolling`] : ['fail', settled2.why];
+  // H1 (12. 10. 2026, klient-Codex retro): what the visitor sees without scripts and before any scroll
+  {
+    const vp = page.viewportSize();
+    res.content_without_js = applies('content_without_js') ? await contentWithoutJs(ctx.browser(), url, vp, await page.evaluate(VISIBLE_TEXTS_JS))
+      : NA('runs at the viewport and browser of its row only');
+    res.first_paint_visible = applies('first_paint_visible') ? await firstPaintVisible(ctx.browser(), url, vp)
+      : NA('runs at the viewport and browser of its row only');
+  }
   const o = await inPage(page);
   res.no_overflow = o.overflow ? ['fail', 'the page scrolls sideways'] : ['pass', ''];
   res.one_line_controls = o.wrapped.length ? ['fail', `wraps: ${o.wrapped.join(' | ')}`] : ['pass', ''];
@@ -534,12 +542,82 @@ async function moreRows(page, url, requested, applies) {
   return res;
 }
 
+// ---- H1: content without JS, first paint (12. 10. 2026) ---------------------------------
+// Texts a visitor can read: every element with text of its own whose effective opacity (its own times its
+// ancestors') is at least 0.5, is displayed, and has a box. Clip-paths and transforms that move a box off
+// the page count through the box test. The copy subject is not reused: it takes opacity 0 as visible.
+const VISIBLE_TEXTS_JS = () => {
+  const eff = e => { let o = 1; for (let n = e; n && n.nodeType === 1; n = n.parentElement) { o *= parseFloat(getComputedStyle(n).opacity); if (o < 0.5) return o; } return o; };
+  const out = [];
+  // content elements only: menus, buttons and form messages may legitimately differ with scripts off
+  for (const e of document.body.querySelectorAll('p, li, h1, h2, h3, td, dt, dd, summary, blockquote')) {
+    if (e.closest('script, style, noscript, template, svg, [data-aid-intro], [aria-hidden="true"]')) continue;
+    const own = [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim();
+    if (own.length < 3) continue;
+    const s = getComputedStyle(e), r = e.getBoundingClientRect();
+    if (s.display === 'none' || s.visibility === 'hidden' || r.width < 1 || r.height < 1) continue;
+    if (r.right + scrollX <= 0 || r.bottom + scrollY <= 0) continue;
+    if (eff(e) < 0.5) continue;
+    out.push(own.slice(0, 80));
+  }
+  return out;
+};
+// content_without_js: the page with scripts off shows every text the scripted page shows (after its motion settled
+// and it was scrolled); a text the visitor only gets after a script ran is named
+async function contentWithoutJs(browser, url, viewport, withJs) {
+  const ctx = await browser.newContext({ viewport, javaScriptEnabled: false });
+  try {
+    const p = await ctx.newPage();
+    await p.goto(url, { waitUntil: 'load', timeout: 30000 });
+    await p.waitForTimeout(300);
+    const seen = new Set(await p.evaluate(VISIBLE_TEXTS_JS));   // no scripts: page.evaluate still runs
+    const missing = [...new Set(withJs)].filter(t => !seen.has(t));
+    return missing.length ? ['fail', `${missing.length} text(s) only a script shows (no JS: hidden or missing): ${missing.slice(0, 4).map(t => `"${t.slice(0, 40)}"`).join(', ')}`] : ['pass', `${seen.size} texts visible without JS`];
+  } catch (e) { return ['fail', `no-JS load failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
+}
+// first_paint_visible: right after load, no scroll, no waiting for motion: the h1 and the first content block
+// in the viewport are readable; and under prefers-reduced-motion nothing readable stays faded
+async function firstPaintVisible(browser, url, viewport) {
+  const look = () => {
+    const eff = e => { let o = 1; for (let n = e; n && n.nodeType === 1; n = n.parentElement) { o *= parseFloat(getComputedStyle(n).opacity); } return o; };
+    const inView = e => { const r = e.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight && r.width > 0 && r.height > 0; };
+    const h1 = document.querySelector('h1');
+    const blocks = [...document.querySelectorAll('main p, main li, main td, main h2, main h3, p, li, h2')].filter(e => e !== h1 && (e.innerText || '').trim().length >= 20 && inView(e));
+    const faded = [...document.querySelectorAll('h1, h2, h3, p, li, td, a, button')].filter(e => (e.innerText || '').trim().length >= 3 && inView(e) && eff(e) < 0.5)
+      .map(e => `${e.tagName.toLowerCase()} "${(e.innerText || '').trim().slice(0, 30)}"`);
+    return { h1: h1 ? (inView(h1) ? eff(h1) : -1) : null, firstBlock: blocks.length ? eff(blocks[0]) : null, faded };
+  };
+  const ctx = await browser.newContext({ viewport });
+  try {
+    const p = await ctx.newPage();
+    await p.goto(url, { waitUntil: 'load', timeout: 30000 });
+    await p.evaluate(() => document.fonts.ready).catch(() => {});
+    // no scroll, no settling of the whole page: an entrance that finishes on its own within 1.5 s is motion,
+    // a text still faded after that only a scroll (or nothing) would reveal
+    let a = await p.evaluate(look);
+    for (let t = 0; t < 1500 && (a.faded.length || (a.h1 !== null && a.h1 >= 0 && a.h1 < 0.5) || (a.firstBlock !== null && a.firstBlock < 0.5)); t += 250) { await p.waitForTimeout(250); a = await p.evaluate(look); }
+    await p.emulateMedia({ reducedMotion: 'reduce' });
+    await p.reload({ waitUntil: 'load' });
+    await p.waitForTimeout(400);   // reduced motion: readable at once, no entrance to wait for
+    const b = await p.evaluate(look);
+    const why = [];
+    if (a.h1 === null) why.push('no h1');
+    else if (a.h1 === -1) why.push('h1 outside the first screen');
+    else if (a.h1 < 0.5) why.push(`h1 still faded (opacity ${a.h1.toFixed(2)}) right after load`);
+    if (a.firstBlock !== null && a.firstBlock < 0.5) why.push(`first content block faded (opacity ${a.firstBlock.toFixed(2)}) right after load`);
+    if (a.faded.length) why.push(`${a.faded.length} readable element(s) faded before any scroll: ${a.faded.slice(0, 3).join(', ')}`);
+    if (b.faded.length) why.push(`under prefers-reduced-motion ${b.faded.length} element(s) stay faded: ${b.faded.slice(0, 3).join(', ')}`);
+    return why.length ? ['fail', why.join('; ')] : ['pass', 'h1 and first block readable at first paint, nothing faded under reduced motion'];
+  } catch (e) { return ['fail', `first-paint load failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
+}
+
 // ---- matrix -------------------------------------------------------------------------
 const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match',
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
-  'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review', 'motion_settled', 'motion_fidelity'];
+  'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review', 'motion_settled', 'motion_fidelity',
+  'content_without_js', 'first_paint_visible'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -726,7 +804,7 @@ if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json')
 
 const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
   'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
-  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled'];
+  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible'];
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
 for (const b of BRS) {
