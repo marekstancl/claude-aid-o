@@ -30,14 +30,17 @@ while (argv.length) {
 if (!out || (!urls.length && !studio)) { console.error('usage: aid-ui-shot.mjs <out-dir> [--cookie <file> --studio <url>] <url>...'); process.exit(2); }
 fs.mkdirSync(out, { recursive: true });
 const b = await launch();
+// the PM's session cookie only in the studio's own context: cookies ignore the port, so a page served on the
+// same host must never be opened where the cookie is
 const ctx = await b.newContext();
+const sctx = await b.newContext();
 if (cookie && studio) {
   const [name, value] = cookie.split('=');
-  await ctx.addCookies([{ name, value, domain: new URL(studio).hostname, path: '/' }]);
+  await sctx.addCookies([{ name, value, domain: new URL(studio).hostname, path: '/' }]);
 }
 const files = [];
-async function shot(url, name, width) {
-  const p = await ctx.newPage();   // a context page takes no options: the width is set here, or both shots are desktop
+async function shot(url, name, width, c = ctx) {
+  const p = await c.newPage();   // a context page takes no options: the width is set here, or both shots are desktop
   await p.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
   try {
     await p.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
@@ -51,7 +54,7 @@ async function shot(url, name, width) {
   } catch (e) { files.push(`ERR ${name}: ${String(e.message).slice(0, 100)}`); }
   await p.close();
 }
-if (studio) await shot(studio, 'studio', 1440);
+if (studio) await shot(studio, 'studio', 1440, sctx);
 for (const u of urls) {
   const name = new URL(u).pathname.replace(/^\/+|\/+$/g, '').replace(/\/index\.html$/, '').replace(/[^a-z0-9]+/gi, '-') || 'index';
   await shot(u, name, 1440); await shot(u, name, 390);

@@ -248,7 +248,7 @@ def run(a):
     if os.path.exists(ans):
         os.remove(ans)   # only an answer written by this run counts
     model = os.environ.get("AID_UI_COPY_CODEX_MODEL", "")
-    env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}   # text never on the API key (PM 12. 10. 2026)
+    env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}   # text never on the API key (PM 12. 10. 2026)
     cmd = ["codex", "exec", "--skip-git-repo-check", "-s", "read-only", "-C", d, "-o", ans] + (["-m", model] if model else []) + ["-"]
     started = now()
 
@@ -320,7 +320,7 @@ def standin_claude(d, ans, why):
     try:
         with open(os.path.join(d, "claude.log"), "w") as log:
             r = subprocess.run(cmd, input=prompt, cwd=d, capture_output=True, text=True,
-                               env={k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"},
+                               env={k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")},
                                timeout=int(os.environ.get("AID_UI_COPY_TIMEOUT", "1800")))
             log.write((r.stderr or "")[-4000:])
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:

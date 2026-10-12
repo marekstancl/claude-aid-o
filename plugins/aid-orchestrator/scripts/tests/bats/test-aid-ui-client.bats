@@ -13,7 +13,7 @@ setup() {
   echo '<html lang="cs"><title>Pekárna</title><body>chleba</body></html>' > "$P/site/index.html"
   echo '<html lang="cs"><title>Ceník</title><body>ceny</body></html>' > "$P/site/cennik/index.html"
   python3 "$CR" freeze "$P" --type web-local >/dev/null
-  export OPENAI_API_KEY=sk-should-never-reach-text PATH="$T/bin:$PATH" AID_UI_TOOL="$T/bin/tool" ANS="$T/ans.json"
+  export OPENAI_API_KEY=sk-should-never-reach-text ANTHROPIC_API_KEY=sk-ant-never PATH="$T/bin:$PATH" AID_UI_TOOL="$T/bin/tool" ANS="$T/ans.json"
   python3 - "$SC/../skills/ui-design/critic/web-local.yaml" > "$ANS" <<'PY'
 import sys, json, yaml
 r = yaml.safe_load(open(sys.argv[1]))
@@ -47,7 +47,7 @@ python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"
 EOF
   cat > "$T/bin/claude" <<'EOF'
 #!/usr/bin/env bash
-cat > "$BATS_TEST_TMPDIR/claude-prompt"; pwd > "$BATS_TEST_TMPDIR/claude-cwd"; echo "${OPENAI_API_KEY:-none}" > "$BATS_TEST_TMPDIR/claude-key"
+cat > "$BATS_TEST_TMPDIR/claude-prompt"; pwd > "$BATS_TEST_TMPDIR/claude-cwd"; echo "${OPENAI_API_KEY:-none}${ANTHROPIC_API_KEY:-}" > "$BATS_TEST_TMPDIR/claude-key"
 [[ "${FAKE_CLAUDE:-ok}" == fail ]] && exit 1
 python3 -c 'import json,sys; print(json.dumps({"result": "tady je: " + open(sys.argv[1]).read(), "usage": {"input_tokens": 500, "output_tokens": 100}, "total_cost_usd": 0.02}))' "${CLAUDE_ANS:-$ANS}"
 EOF
@@ -119,7 +119,8 @@ class H(http.server.BaseHTTPRequestHandler):
             done = os.path.exists(T + "/answered")
             qs = [] if done else [{"id": "q1", "kind": "choice", "target": "direction", "title": "Smer"}, {"id": "q2", "kind": "choice", "target": "x", "title": "Druhá"}]
             return self.send(200, {"questions": qs,
-                                   "cards": [{"id": "a", "question": "q1", "title": "Teplý"}, {"id": "b", "question": "q1", "title": "Chladný"}]})
+                                   "cards": [{"id": "a", "question": "q1", "title": "Teplý", "url": "http://127.0.0.1:1/a/"},
+                                             {"id": "b", "question": "q1", "title": "Chladný", "url": "http://127.0.0.1@evil.example/b/"}]})
         self.send(404, {})
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -134,6 +135,8 @@ PY
   printf '{"answer": {"decision": "choose", "choice": "a", "comment": "teplejší"}, "feedback": {"question_clear": 4}}' > "$T/client.json"
   CODEX_ANS="$T/client.json" run python3 "$CL" answer "$P" --studio "http://127.0.0.1:$PORT" --once; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"answered q1: choose a"* ]]
+  # only the card page on the studio's own host is photographed; a look-alike "host@elsewhere" address is not
+  ls "$P/.aid-ui/client/turns/q1-1/" | grep -q "^a-1440.png"; ! ls "$P/.aid-ui/client/turns/q1-1/" | grep -q "^b-"
   [ "$(wc -l < "$T/posts.jsonl")" -eq 2 ]; jq -se '.[1].question == "q1" and .[1].choice == "a"' "$T/posts.jsonl" >/dev/null
   grep -q "Studio odmítlo odpověď" "$T/codex-prompt-2"; grep -q "Teplý" "$T/codex-prompt-1"; grep -q "Pekárna U Mlýna\|majitel" "$T/codex-prompt-1"
   jq -e '.provider == "codex" and .question == "q1"' "$P/.aid-ui/client/feedback.jsonl" >/dev/null

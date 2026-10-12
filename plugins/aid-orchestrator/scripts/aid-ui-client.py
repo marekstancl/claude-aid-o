@@ -19,8 +19,8 @@
   costs <project>
       The project's cost book in one JSON line (aid_ui_costs.summary).
 
-Providers (H2, PM 12. 10. 2026): Codex on the subscription first (OPENAI_API_KEY removed from its environment:
-text never goes over the paid API); a refusal (usage/rate limit, failed run, no answer) or an invalid answer
+Providers (H2, PM 12. 10. 2026): Codex on the subscription first (OPENAI_API_KEY, ANTHROPIC_API_KEY and
+ANTHROPIC_AUTH_TOKEN removed from every text process: text never goes over a paid API); a refusal (usage/rate limit, failed run, no answer) or an invalid answer
 twice hands the same prompt and images, in the same working directory, to an independent Claude Code (clean
 context, read-only tools, AID_UI_STANDIN_MODEL, default sonnet). Both failing: answer writes
 .aid-ui/client/stop and stops; critic exits 1. AID_UI_STANDIN=off disables the stand-in. Every call is
@@ -28,6 +28,7 @@ written to the cost book (.aid-ui/costs.jsonl) at its list-price equivalent.
 """
 import hashlib, http.cookiejar, json, os, re, secrets, shutil, subprocess, sys, tempfile, time
 import urllib.error, urllib.request
+from urllib.parse import urlsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.join(HERE, "..", "skills", "ui-design")
@@ -79,8 +80,11 @@ def parse_json(text):
 
 # ---------------------------------------------------------------- providers
 
+PAID_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
 def text_env():
-    return {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}   # text never on the paid API
+    return {k: v for k, v in os.environ.items() if k not in PAID_KEYS}   # text never on a paid API, only subscriptions
 
 
 def codex(prompt, images, cwd, out):
@@ -394,8 +398,9 @@ def answer_one(s, role, dry):
     n = 1 + sum(1 for x in os.listdir(s.turns) if x.startswith(q["id"] + "-"))
     out = os.path.join(s.turns, "%s-%d" % (q["id"], n))
     os.makedirs(out, exist_ok=True)
-    web_host = re.match(r"https?://[^/]+", s.url).group(0).rsplit(":", 1)[0]
-    urls = [c["url"] for c in cards if isinstance(c.get("url"), str) and c["url"].startswith(web_host)][:3]
+    host = urlsplit(s.url).hostname   # parsed, not a string prefix: "http://<host>@elsewhere/" goes elsewhere
+    urls = [c["url"] for c in cards if isinstance(c.get("url"), str) and urlsplit(c["url"]).scheme in ("http", "https")
+            and urlsplit(c["url"]).hostname == host][:3]
     images = shots(out, urls, s.cookie_f, s.url + "/")
     for c in cards:
         for k in (1, 2):
