@@ -178,6 +178,8 @@
 #   chapter-all-target / chapter-all     (P108) refused before the final gate: the customer page must
 #                                        be the one the recorded gate checked and the coverage report
 #                                        not older than the gate result
+#   gate-check <project>                 (P113a) exit 0 when the site is the recorded build, the gate ran on it and
+#                                        every open row has a live exception (finish without approvals/answers/content)
 #   finish <project>                     needs .aid-ui/links.json (both 200 again) and writes
 #                                        .aid-ui/finish.json {finished, web, customer, verdict};
 #                                        refuses unless: aid-ui-coverage.sh check exits 0 (3 only
@@ -643,7 +645,7 @@ elif mode == "covered":   # open rows (as finish counts them) that a live PM exc
         if hit:
             print(json.dumps({"row": {k: r.get(k) for k in ("check",) + AX}, "reason": hit.get("reason", ""), "answer": hit.get("answer")},
                              ensure_ascii=False, sort_keys=True))
-elif mode == "finish":
+elif mode in ("finish", "gatecheck"):   # gatecheck (P113a): only the build and the gate, for the quality loop
     ck, project = load(args[1]), args[2]
     drift = args[3] if len(args) > 3 else ""
     b, g = st.get("build"), st.get("gate")
@@ -676,19 +678,19 @@ elif mode == "finish":
                 if not any(covers(st, fps, e, r) for e in live):
                     bad.append("%s row without a live exception: %s %s" % (r.get("status"), r.get("check"),
                                "/".join(val(r.get(k)) or "-" for k in AX)))
-    appr = st.get("approvals") or {}
-    for p in sorted(fps):
+    appr = st.get("approvals") or {} if mode == "finish" else {}
+    for p in sorted(fps) if mode == "finish" else []:
         if p != "_site" and (appr.get(p) or {}).get("fingerprint") != fps[p]:
             bad.append("page %s is not approved at its current fingerprint" % p)
-    if b and b.get("shared") and (appr.get("_shared") or {}).get("fingerprint") != b["shared"]:
+    if mode == "finish" and b and b.get("shared") and (appr.get("_shared") or {}).get("fingerprint") != b["shared"]:
         bad.append("the shared look (_shared: inline style and script on every page) is not approved at its current fingerprint")
     ans = st.get("answers") or {}
-    for q in list(st.get("consumed") or []) + ([drift] if drift else []):
+    for q in (list(st.get("consumed") or []) + ([drift] if drift else [])) if mode == "finish" else []:
         a = ans.get(q) or {}
         f = os.path.join(project, a.get("answer_file") or "-")
         if not os.path.isfile(f) or sha_file(f) != a.get("answer_sha256"):
             bad.append("the answer file of %s changed or is missing since it was recorded" % q)
-    for it in st.get("content_plan") or []:
+    for it in st.get("content_plan") or [] if mode == "finish" else []:
         if it.get("status") not in ("confirmed_client", "deferred_by_pm"):
             bad.append("content item %s is %s (needs confirmed_client or deferred_by_pm)" % (it.get("id"), it.get("status")))
 for m in bad:
@@ -1388,6 +1390,16 @@ case "$VERB" in
       '{finished: $d, at: $at, web: $w, customer: $c, verdict: $v, rating: (if $r == "" then null else $r end), publish_blocked_by: $b}' > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/finish.json"
     echo "FINISHED: $(today) · $web · $customer · verdict $verdict${rating:+ ($rating/10)}"
     [[ "$blocked" == "[]" ]] || echo "PUBLISH BLOCKED by $(jq length <<<"$blocked") critical open item(s): $(jq -r 'map(.id) | join(", ")' <<<"$blocked")"
+    ;;
+
+  gate-check)
+    # P113a: the quality loop's regression check after a fix - the site is the recorded build, the gate ran on it
+    # and every open row has a live exception; approvals and answers are the handover's business (finish)
+    need_state
+    ck="$(checks_json)"; rc=0; bpy gatecheck "$STATE" "$ck" "$PROJECT" "" || rc=$?
+    rm -f "$ck"
+    [[ "$rc" -eq 0 ]] || exit 1
+    echo "GATE OK: build $(jq -r '.build.id[0:12]' "$STATE")"
     ;;
 
   exception-covered)

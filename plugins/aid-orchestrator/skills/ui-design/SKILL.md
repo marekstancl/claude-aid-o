@@ -82,6 +82,7 @@ typu „2.5". Cíl a smysl nepiš do jednotlivých otázek - patří kroku a č�
 | `steps/7-verify.md` bod 4 | 6 Kontrola | Pravidla vzhledu |
 | `steps/7-verify.md` bod 5 | 6 Kontrola | Schválení stránek |
 | `steps/7-verify.md` bod 6-9 | 6 Kontrola | Předání |
+| `steps/8-quality.md` | po předání (panel Hotovo) | Hodnocení nezávislého kritika |
 
 ## Jak se ptá PM (studio)
 
@@ -279,6 +280,7 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 | 5 | `steps/5-directions.md` - tři směry jako stránky |
 | 6 | `steps/6-build.md` - stavba |
 | 7 | `steps/7-verify.md` - ověření, schválení, `finish` |
+| po `finish` | `steps/8-quality.md` - smyčka kvality s nezávislým kritikem do přijetí (není krok stavu, `step 8` neexistuje) |
 
 Skripty (`$AID_PLUGIN_PATH/scripts/`): `aid-ui-state.sh` (jediný zapisovatel
 stavu a těl kapitol v `docs/brand/index.html`), `aid-ui-serve.sh`,
@@ -287,7 +289,8 @@ stavu a těl kapitol v `docs/brand/index.html`), `aid-ui-serve.sh`,
 `aid-ui-brand-package.py` (balíček značky), `aid-ui-design-standard.py` (design standard, krok 7),
 `aid-ui-vision-check.py` (vize), `aid-ui-customer-page.py` (stránka pro zákazníka po bráně, krok 7 bod 7b),
 `aid-ui-sources.py` (podklady, krok 1p), `aid-ui-copy.py` (kontrola textů, krok 7 bod 1a; texty stránek dává
-`aid-ui-verify.sh <project> --copy-subject`).
+`aid-ui-verify.sh <project> --copy-subject`), `aid-ui-critic.py` (měřítko a zmrazený kritik), `aid-ui-client.py`
+(klient-agent ve studiu, hodnocení kritika, kniha nákladů), `aid-ui-quality.py` (smyčka kvality po předání).
 
 ## Zprávy PM
 
@@ -350,7 +353,7 @@ Před posunem kroku:
 
 ## Reference Files
 
-- `steps/0-start.md` … `steps/7-verify.md` - postup kroků (tabulka výše).
+- `steps/0-start.md` … `steps/7-verify.md` - postup kroků (tabulka výše); `steps/8-quality.md` - smyčka kvality po předání.
 - `references/adopted/frontend-design-SKILL.md`, `references/adopted/impeccable-craft-floor.md`.
 - `references/genericity-rubric.md` - vyřazení generických vzorů a směrů.
 - `references/adopted/marketingskills/` - převzaté postupy textů (product-marketing, copywriting,

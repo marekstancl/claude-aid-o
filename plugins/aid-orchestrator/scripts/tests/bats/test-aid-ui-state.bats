@@ -1361,6 +1361,15 @@ PY
   [ "$status" -eq 1 ]; [[ "$output" == *"content item team is missing"* ]]
 }
 
+@test "P113a gate-check: the build and the gate only - a missing content item passes it, a site edited after the gate does not" {
+  ready
+  cp='[{"id":"hero","status":"confirmed_client"},{"id":"team","status":"missing"}]'
+  ans c2 content_plan "$(sha_of "$cp")"; "$SCRIPT" set "$PROJ" content-plan "$cp" --answer c2 >/dev/null
+  run "$SCRIPT" gate-check "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }; [[ "$output" == "GATE OK: build "* ]]
+  echo 'User-agent: x' > "$SITE/robots.txt"; "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  run "$SCRIPT" gate-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"gate result is for build"* ]]
+}
+
 @test "attest records {note, at} only for an agent: item of the coverage map" {
   run "$SCRIPT" attest "$PROJ" 'ecosystem/specs/a.md#Standard A > Rules#0ec58950' --note "prošel jsem klávesnicí"
   [ "$status" -eq 0 ]

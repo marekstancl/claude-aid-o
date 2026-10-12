@@ -896,9 +896,9 @@ class Studio(BaseHTTPRequestHandler):
             p["history_lines"] = read_history()[1]
             # P108: where the web is, whether the run finished, and what stays open (the state's items
             # plus the PM's own from the history, not yet synced)
-            for name in ("links", "finish"):
+            for name, rel in (("links", "links.json"), ("finish", "finish.json"), ("quality", "critic/loop.json")):   # quality: P113a loop
                 try:
-                    with open(os.path.join(PROJECT, ".aid-ui", name + ".json"), encoding="utf-8") as f:
+                    with open(os.path.join(PROJECT, ".aid-ui", rel), encoding="utf-8") as f:
                         p[name] = json.load(f)
                 except (OSError, ValueError):
                     p[name] = None

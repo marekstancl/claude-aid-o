@@ -1133,6 +1133,7 @@ function donePanel(sec) {
       web ? el("a", { class: "hbtn-go", href: web, target: "_blank", rel: "noopener" }, "Otevřít web") : null,
       cust ? el("a", { class: "hbtn-ghost", href: cust, target: "_blank", rel: "noopener" }, "Co jste dostali") : null),
     hand ? el("p", { class: "muted" }, hand.outcome) : null,
+    qualityBlock(),
     el("h3", {}, "Co zbývá před zveřejněním"),
     // H7: a critical open item blocks publication - said once above the list, and the item is marked
     items.some(i => i.critical === true) ? el("p", { class: "blocked", role: "status" },
@@ -1141,6 +1142,28 @@ function donePanel(sec) {
       i.critical === true ? el("b", {}, "Blokuje zveřejnění: ") : null, String(i.text || ""),
       el("span", { class: "muted" }, " · " + (i.owner || "") + (i.due ? " · do " + i.due : ""))))) : el("p", { class: "muted" }, "Nic otevřeného."),
     el("div", { class: "add-item" }, ta, btn)));
+}
+
+// P113a: the quality loop - every round of the independent critic, what was fixed, where the loop stands.
+const LOOP_SAYS = {
+  triage: "Kritik ohodnotil web; AI třídí jeho připomínky.", fix: "AI opravuje přijaté připomínky.",
+  round: "Opravy jsou hotové; kritik hodnotí znovu.", audit: "Web dosáhl přijatelné známky; následují tři slepá hodnocení.",
+  done: "Tři slepá hodnocení potvrdila známku.", "stop:conflict": "Zastaveno: dvě připomínky si odporují, rozhoduje PM.",
+  "stop:stagnation": "Zastaveno: dvě kola oprav bez zlepšení.", "stop:round_cap": "Zastaveno: pět kol oprav bez přijatelné známky."
+};
+function qualityBlock() {
+  const qy = S.quality && typeof S.quality === "object" ? S.quality : null;
+  if (!qy || !Array.isArray(qy.history) || !qy.history.length) return null;
+  const n1 = x => Number(x).toLocaleString("cs-CZ", { maximumFractionDigits: 1 });
+  return el("div", { class: "quality" },
+    el("h3", {}, "Hodnocení nezávislého kritika"),
+    el("p", { role: "status" }, LOOP_SAYS[qy.decision] || ""),
+    el("ul", { class: "open-items" }, qy.history.map(r => {
+      const fs = Array.isArray(r.findings) ? r.findings.filter(f => f.owner === "agent") : [];
+      const done = fs.filter(f => f.evidence).length;
+      return el("li", {}, el("b", {}, "Kolo " + r.n + ": " + n1(r.quality_score) + "/10"),
+        el("span", { class: "muted" }, " · nejslabší kritérium " + n1(r.min_criterion) + " · opraveno " + done + " z " + fs.length + " připomínek"));
+    })));
 }
 
 // The page: hero from the data, then one row per step (pipeline-model above derives everything).
