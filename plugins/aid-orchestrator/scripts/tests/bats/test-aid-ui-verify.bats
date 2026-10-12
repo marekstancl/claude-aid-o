@@ -128,7 +128,7 @@ copy_reviewed() {
   jq --arg t "docs/seo/brief.md@$sha" '.options.seo = true | .answers["q-seo"] = {kind: "seo_brief", decision: "approve", target: $t}' \
     "$PROJ/docs/design/brand-state.json" >"$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
   # the customer tasks without the invented one (FB-29): the fixed site shows the 65 Kč loaf
-  printf -- '- {id: hours, task: "Kdy", expect: ["7:00 až 18:00"]}\n- {id: price, task: "Bochník", expect: ["65 Kč"]}\n- {id: booking, task: "Objednat", form: true}\n' > "$PROJ/docs/content/tasks.yaml"
+  printf -- '- {id: hours, task: "Kdy", expect: ["7:00 až 18:00"]}\n- {id: price, task: "Bochník", expect: ["Bochník", "65 Kč"]}\n- {id: booking, task: "Objednat", form: true}\n' > "$PROJ/docs/content/tasks.yaml"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   measured
   copy_reviewed
@@ -269,8 +269,9 @@ copy_reviewed() {
   mkdir -p "$T/out"
   echo '{"viewports":[390,1440],"browsers":["chromium"],"checks":{"photo_slots":"x"}}' > "$T/ck.json"
   echo '{"variant":{"type":"web"},"build":{"id":"x","fingerprints":{"index.html":"a","_site":"c"}}}' > "$T/state.json"
-  echo '[{"id":"a","page":"index.html","ratio":"4:5","shape":"rect"},{"id":"b","page":"index.html","ratio":"1:1","shape":"round"},{"id":"c","page":"index.html","ratio":"3:2","shape":"rect"},{"id":"d","page":"index.html","ratio":"1:1","shape":"rect"}]' > "$T/photos.json"
-  cam='<svg viewBox="0 0 24 24" width="40" height="40"><path d="M4 7h16v12H4z"/></svg>'
+  w='"where":"Úvod","what":"x","min_px":"1200x1200"'
+  echo "[{\"id\":\"a\",\"page\":\"index.html\",\"ratio\":\"4:5\",\"shape\":\"rect\",$w},{\"id\":\"b\",\"page\":\"index.html\",\"ratio\":\"1:1\",\"shape\":\"round\",$w},{\"id\":\"c\",\"page\":\"index.html\",\"ratio\":\"3:2\",\"shape\":\"rect\",$w},{\"id\":\"d\",\"page\":\"index.html\",\"ratio\":\"1:1\",\"shape\":\"rect\",$w}]" > "$T/photos.json"
+  cam='<svg data-aid-icon="camera" viewBox="0 0 24 24" width="40" height="40"><path d="M4 7h16v12H4z"/></svg>'
   sed -i "s|</main>|<div data-aid-photo=\"a\" style=\"aspect-ratio:1/1;width:200px\">Foto lékaře</div><div data-aid-photo=\"b\" aria-hidden=\"true\" style=\"position:relative;aspect-ratio:1/1;width:120px\">$cam</div><div data-aid-photo=\"c\" aria-hidden=\"true\" style=\"width:300px;height:200px\"><a href=\"/\">x</a>$cam</div><div data-aid-photo=\"d\" aria-hidden=\"true\" style=\"width:150px\">$cam</div></main>|" "$SITE/index.html"
   url="$(AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" | sed -n 's/^URL: //p')"
   verify() { bash "$SC/aid-ui-tool.sh" verify --state "$T/state.json" --checks "$T/ck.json" --site "$SITE" \

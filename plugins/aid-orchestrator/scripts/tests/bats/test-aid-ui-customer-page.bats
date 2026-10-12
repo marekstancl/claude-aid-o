@@ -139,6 +139,9 @@ text() { python3 -c 'import re,sys,html;t=open(sys.argv[1]).read();t=re.sub(r"<s
   grep -qF "Fotky, které dodáte (2)" "$OUT"; grep -qF "O nás, vedle textu" "$OUT"; grep -qF "kulatá 1:1" "$OUT"; grep -qF "1600x2000 px" "$OUT"
   grep -qF "aspect-ratio:4/5;border-radius:6px" "$OUT"; grep -qF "aspect-ratio:1/1;border-radius:50%" "$OUT"
   run python3 "$GEN" "$P" --check; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  # a brief without what is on the photo: no page
+  printf -- '- {id: pec, page: index.html, where: "Úvod", shape: rect, ratio: "4:5", min_px: "1600x2000"}\n' > "$P/docs/content/photos.yaml"
+  run python3 "$GEN" "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"photos.yaml pec: needs"* ]]
 }
 
 @test "the SEO tiles are outside <details>; the AI tile follows the policy; no internal word" {

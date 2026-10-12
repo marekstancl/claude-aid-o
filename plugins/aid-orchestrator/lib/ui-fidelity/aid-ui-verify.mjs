@@ -688,15 +688,16 @@ async function photoSlots(browser, url, viewport) {
     await loaded(p, url);
     const slots = await p.evaluate(() => [...document.querySelectorAll('[data-aid-photo]')].map(e => {
       const r = e.getBoundingClientRect(), s = getComputedStyle(e), img = e.querySelector('img');
-      const FOC = 'a[href],button,input,select,textarea,[tabindex]';
+      const FOC = 'a[href],button,input,select,textarea,iframe,audio[controls],video[controls],[contenteditable]:not([contenteditable="false"]),[tabindex]:not([tabindex="-1"])';
       return { id: e.dataset.aidPhoto, w: r.width, h: r.height, radius: s.borderTopLeftRadius, hidden: e.getAttribute('aria-hidden') === 'true',
-        text: (e.innerText || '').trim(), focusable: e.matches(FOC) || !!e.querySelector(FOC), svg: !!e.querySelector('svg'),
-        img: img ? { alt: (img.getAttribute('alt') || '').trim(), fit: getComputedStyle(img).objectFit } : null };
+        text: (e.innerText || '').trim(), focusable: e.matches(FOC) || !!e.querySelector(FOC), svg: !!e.querySelector('svg[data-aid-icon="camera"]'),
+        img: img ? { alt: (img.getAttribute('alt') || '').trim(), fit: getComputedStyle(img).objectFit, hidden: !!img.closest('[aria-hidden="true"]') } : null };
     }));
     const mine = Array.isArray(specs) ? specs.filter(x => x && x.page === key) : [];
+    const incomplete = mine.filter(x => !['id', 'where', 'what', 'shape', 'ratio', 'min_px'].every(k => String(x[k] || '').trim()) || !/^\d+x\d+$/.test(String(x.min_px)));
     if (!slots.length && !mine.length) return NA('no photo on this page');
     if (!Array.isArray(specs)) return ['fail', `${slots.length} photo slot(s) but no docs/content/photos.yaml`];
-    const why = [];
+    const why = incomplete.map(x => `photos.yaml ${x.id || '?'}: needs id, where, what, shape, ratio and min_px as WxH`);
     for (const x of mine) if (!slots.some(y => y.id === x.id)) why.push(`photo ${x.id} (${x.where || ''}) has no slot on the page`);
     for (const x of slots) {
       const sp = mine.find(y => y.id === x.id);
@@ -706,19 +707,25 @@ async function photoSlots(browser, url, viewport) {
       if (!(x.w > 0 && x.h > 0)) { why.push(`${x.id}: the slot has no size`); continue; }
       if (Math.abs(x.w / x.h - a / b) > (a / b) * PHOTO_TOL) why.push(`${x.id}: ${Math.round(x.w)}×${Math.round(x.h)} is not ${sp.ratio}`);
       const rad = x.radius.endsWith('%') ? parseFloat(x.radius) * Math.min(x.w, x.h) / 100 : parseFloat(x.radius) || 0;
-      if (sp.shape === 'round' && rad < Math.min(x.w, x.h) / 2 - 1) why.push(`${x.id}: the slot is not round`);
+      if (!['rect', 'round'].includes(sp.shape)) why.push(`${x.id}: shape "${sp.shape}" is not rect or round`);
+      else if (sp.shape === 'round' && rad < Math.min(x.w, x.h) / 2 - 1) why.push(`${x.id}: the slot is not round`);
+      else if (sp.shape === 'rect' && rad >= Math.min(x.w, x.h) / 4) why.push(`${x.id}: a rectangular photo's slot is rounded like a circle`);
       if (!x.img) {
         if (!x.hidden) why.push(`${x.id}: an empty slot needs aria-hidden="true"`);
         if (x.text) why.push(`${x.id}: an empty slot carries text ("${x.text.slice(0, 30)}")`);
         if (x.focusable) why.push(`${x.id}: an empty slot is focusable`);
-        if (!x.svg) why.push(`${x.id}: an empty slot shows no camera icon (svg)`);
+        if (!x.svg) why.push(`${x.id}: an empty slot shows no camera icon (svg data-aid-icon="camera")`);
       } else {
-        if (!x.hidden && !x.img.alt) why.push(`${x.id}: the photo has no alt text`);
+        if (!x.img.alt) why.push(`${x.id}: the photo has no alt text`);
+        if (x.hidden || x.img.hidden) why.push(`${x.id}: the delivered photo is hidden from screen readers (aria-hidden)`);
         if (x.img.fit !== 'cover') why.push(`${x.id}: the photo is not object-fit: cover`);
       }
     }
     const swap = await p.evaluate(async () => {
       const height = () => document.documentElement.scrollHeight, before = height(), moved = [];
+      // every element outside the slots: where it is before the photos go in (a shift of any of them is a layout shift)
+      const others = [...document.body.querySelectorAll('*')].filter(e => !e.closest('[data-aid-photo]')).slice(0, 2000);
+      const pos = others.map(e => { const b = e.getBoundingClientRect(); return [b.left + scrollX, b.top + scrollY, b.width, b.height]; });
       const c = document.createElement('canvas'); c.width = 300; c.height = 97;
       for (const e of document.querySelectorAll('[data-aid-photo]')) {
         if (e.querySelector('img')) continue;
@@ -728,8 +735,13 @@ async function photoSlots(browser, url, viewport) {
         e.replaceChildren(img); await img.decode().catch(() => {}); await new Promise(r => requestAnimationFrame(r));
         const r1 = e.getBoundingClientRect(), ri = img.getBoundingClientRect();
         if (Math.abs(r1.width - r0.width) > 1 || Math.abs(r1.height - r0.height) > 1) moved.push(`${e.dataset.aidPhoto}: the slot changes ${Math.round(r0.width)}×${Math.round(r0.height)} -> ${Math.round(r1.width)}×${Math.round(r1.height)}`);
-        else if (Math.abs(ri.width - r1.width) > 1 || Math.abs(ri.height - r1.height) > 1 || Math.abs(ri.top - r1.top) > 1) moved.push(`${e.dataset.aidPhoto}: the photo does not cover the slot (the slot needs position: relative)`);
+        else if (Math.abs(ri.width - r1.width) > 1 || Math.abs(ri.height - r1.height) > 1 || Math.abs(ri.top - r1.top) > 1 || Math.abs(ri.left - r1.left) > 1)
+          moved.push(`${e.dataset.aidPhoto}: the photo does not cover the slot (the slot needs position: relative)`);
+        else if (getComputedStyle(e).overflow === 'visible' && getComputedStyle(e).borderTopLeftRadius !== '0px') moved.push(`${e.dataset.aidPhoto}: a rounded slot does not clip the photo (overflow: hidden)`);
       }
+      const shifted = others.filter((e, i) => { const b = e.getBoundingClientRect(), q = pos[i];
+        return Math.abs(b.left + scrollX - q[0]) > 1 || Math.abs(b.top + scrollY - q[1]) > 1 || Math.abs(b.width - q[2]) > 1 || Math.abs(b.height - q[3]) > 1; });
+      if (shifted.length) moved.push(`putting the photos in moves ${shifted.length} other element(s), first ${shifted[0].tagName.toLowerCase()}${shifted[0].className ? '.' + String(shifted[0].className).split(' ')[0] : ''}`);
       return { moved, grew: height() - before };
     });
     why.push(...swap.moved);
@@ -748,24 +760,29 @@ async function photoSlots(browser, url, viewport) {
 const TASK_HOPS = 2;
 async function taskTest(browser) {
   if (isApp) return NA('an application: its tasks are the flows (app_task_states)');
-  if (!opt.tasks) return ['not_covered', 'no docs/content/tasks.yaml (step 3: what a customer comes for, from the facts)'];
+  if (!opt.tasks) return ['fail', 'no docs/content/tasks.yaml (step 3: what a customer comes for, from the facts)'];
   const tasks = readJson(opt.tasks);
   if (!Array.isArray(tasks) || !tasks.length) return ['fail', 'docs/content/tasks.yaml is not a list of tasks'];
   const why = [];
   const factsText = opt.facts ? JSON.stringify(readJson(opt.facts)).toLowerCase() : '';
   const norm = x => String(x || '').replace(/[\s\u00a0]+/g, ' ').trim().toLowerCase();
   const ok = [];   // a task with a bad definition is named and not searched for
+  // the shape of the required tasks: a price names the service and the amount, hours at least the day, booking is a form
+  const SHAPE = { price: t => !t.form && (t.expect || []).length >= 2, hours: t => !t.form && (t.expect || []).length >= 1, booking: t => t.form === true };
   for (const t of tasks) {
     if (!t?.id || !(t.form === true || (Array.isArray(t.expect) && t.expect.length))) { why.push(`task ${t?.id || '?'} needs expect texts or form: true`); continue; }
+    if (SHAPE[t.id] && !SHAPE[t.id](t)) { why.push(`task ${t.id}: ${t.id === 'booking' ? 'is form: true' : t.id === 'price' ? 'expects the service and its price (two texts)' : 'expects the day and its hours'}`); continue; }
     const bad = (t.expect || []).filter(e => !factsText.includes(norm(e).replace(/"/g, '\\"')));
     for (const e of bad) why.push(`task ${t.id}: "${e}" is not in the facts register`);
     if (!bad.length) ok.push(t);
   }
-  if (project) {
-    try { const fz = readJson(path.join(project, '.aid-ui/critic/frozen.json'));
-      for (const id of (fz.rubric?.task_test || []).map(x => x.id)) if (!tasks.some(t => t.id === id)) why.push(`task ${id} of the critic's rubric is missing`);
-    } catch { /* no frozen critic yet: the tasks file alone */ }
+  // required ids: the frozen critic's rubric when the loop has one, else those of a local-service web (web-local.yaml)
+  let need = ['price', 'hours', 'booking'];
+  const fzp = project && path.join(project, '.aid-ui/critic/frozen.json');
+  if (fzp && fs.existsSync(fzp)) {
+    try { need = (readJson(fzp).rubric?.task_test || []).map(x => x.id); } catch { return ['fail', '.aid-ui/critic/frozen.json is unreadable'] }
   }
+  for (const id of need) if (!tasks.some(t => t?.id === id)) why.push(`task ${id} is missing`);
   const found = {};
   for (const w of [1440, 390]) {
     const ctx = await browser.newContext({ viewport: { width: w, height: HEIGHT[w] || 900 } });
@@ -778,15 +795,29 @@ async function taskTest(browser) {
         await p.evaluate(async () => { document.querySelectorAll('details').forEach(d => { d.open = true; });
           for (let y = 0; y < document.documentElement.scrollHeight; y += 600) { scrollTo(0, y); await new Promise(r => setTimeout(r, 40)); } scrollTo(0, 0); });
         await p.waitForTimeout(1500);   // entrance motion settles, as content_without_js waits
-        const r = await p.evaluate(({ tasks }) => {
+        // a closed menu (a button with aria-expanded="false") is opened first: on the phone its links are the way on
+        for (const b of await p.$$('button[aria-expanded="false"]')) await b.click().catch(() => {});
+        await p.waitForTimeout(200);
+        const r = await p.evaluate(async ({ tasks }) => {
           const n = x => (x || '').replace(/[\s\u00a0]+/g, ' ').trim().toLowerCase();
-          const vis = e => { const b = e.getBoundingClientRect(), s = getComputedStyle(e); return b.width > 0 && b.height > 0 && s.visibility !== 'hidden' && Number(s.opacity) > 0.5; };
+          // seen = laid out, not transparent, inside the page and not covered at its centre once scrolled to
+          const seen = async e => { const s = getComputedStyle(e); if (s.visibility === 'hidden' || Number(s.opacity) <= 0.5) return false;
+            e.scrollIntoView({ block: 'center' }); await new Promise(r => requestAnimationFrame(r));
+            const b = e.getBoundingClientRect(); if (!(b.width > 0 && b.height > 0) || b.right < 0 || b.bottom < 0 || b.left > innerWidth) return false;
+            const top = document.elementFromPoint(Math.min(Math.max(b.left + b.width / 2, 0), innerWidth - 1), Math.min(Math.max(b.top + b.height / 2, 0), innerHeight - 1));
+            return !!top && (e.contains(top) || top.contains(e)); };
           const hit = {};
           for (const t of tasks) {
-            if (t.form) hit[t.id] = [...document.forms].some(f => vis(f) && f.querySelector('input:not([type=hidden]), textarea, select') && f.querySelector('button:not([type=button]), input[type=submit]'));
-            else { const want = t.expect.map(n); hit[t.id] = [...document.body.querySelectorAll('*')].some(e => vis(e) && want.every(x => n(e.innerText).includes(x))); }
+            if (t.form) { hit[t.id] = false; for (const f of document.forms) if (f.querySelector('input:not([type=hidden]), textarea, select') && f.querySelector('button:not([type=button]), input[type=submit]') && await seen(f)) { hit[t.id] = true; break; } continue; }
+            // one short block holds every text (a table row, a list item, a paragraph): the price beside its service
+            const want = t.expect.map(n);
+            const blocks = [...document.body.querySelectorAll('*')].filter(e => { const x = n(e.innerText); return x.length <= 300 && want.every(w => x.includes(w)); });
+            hit[t.id] = false; for (const e of blocks) if (await seen(e)) { hit[t.id] = true; break; }
           }
-          return { hit, links: [...document.querySelectorAll('a[href]')].map(a => a.href) };
+          const links = [];
+          for (const a of document.querySelectorAll('a[href]')) if (await seen(a)) links.push(a.href);   // only links a visitor can see and press
+          scrollTo(0, 0);
+          return { hit, links };
         }, { tasks: ok });
         for (const [id, ok] of Object.entries(r.hit)) if (ok && !(found[`${id}@${w}`])) found[`${id}@${w}`] = { page: key, hops };
         if (hops >= TASK_HOPS) continue;
