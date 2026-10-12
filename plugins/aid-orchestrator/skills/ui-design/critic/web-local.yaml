@@ -88,7 +88,7 @@ task_test:
 launch_inputs:
   - {id: company, name: "IČO a údaje firmy (název, sídlo)", public: true, critical: true, where: "obchodní / živnostenský rejstřík"}
   - {id: hours, name: "Otevírací / ordinační hodiny pro každý den", public: true, critical: true, where: "starý web, Google profil, katalogy"}
-  - {id: prices, name: "Ceník služeb", public: true, critical: false, where: "starý web"}
+  - {id: prices, name: "Ceník služeb", public: true, critical: true, where: "starý web"}
   - {id: photos, name: "Vlastní fotky (místo, lidé, práce)", public: false, critical: true, brief: "podle zadání fotek na stránce „co jste dostali“"}
   - {id: legal, name: "Ochrana osobních údajů a právní texty", public: false, critical: true, brief: "kontrola právníkem nebo hotové texty klienta"}
   - {id: form, name: "Příjem zpráv z formuláře na hostingu", public: false, critical: true, owner: agent, brief: "koncový bod na hostingu klienta, test doručení (form_delivery)"}

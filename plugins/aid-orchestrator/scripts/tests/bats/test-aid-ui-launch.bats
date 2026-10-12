@@ -32,9 +32,10 @@ answer() {   # answer <qid> <decision> [target]
   run python3 "$L" confirm "$P" --answer r1; [ "$status" -eq 1 ]; [[ "$output" == *"already used"* ]]
   answer a1 approve; run python3 "$L" confirm "$P" --answer a1; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.items[] | select(.id == "company") | .status == "confirmed"' "$P/.aid-ui/launch.json" >/dev/null
-  # six missing items became open items: five critical with evidence, the price list not; the form is the agent's
-  jq -e '(.open_items | length) == 6 and ([.open_items[] | select(.critical)] | length) == 5 and (.open_items[] | select(.text | startswith("Příjem zpráv")) | .owner == "agent")
-         and (.open_items[] | select(.text | startswith("Ceník")) | .critical == false) and ([.open_items[] | .due | test("^[0-9]{4}-")] | all)' "$ST" >/dev/null
+  yq -e '.launch_company.value == "Coufal Clinic s.r.o., IČO 12345678" and .launch_company.source == "https://www.orsr.sk/x" and .launch_company.read_at == "2026-10-12" and .launch_company.confirmed_by == "klient"' "$P/docs/content/facts.yaml" >/dev/null
+  # six missing items became open items, all critical (an unconfirmed fact is only ever a critical item); the form is the agent's
+  jq -e '(.open_items | length) == 6 and ([.open_items[] | select(.critical)] | length) == 6 and (.open_items[] | select(.text | startswith("Příjem zpráv")) | .owner == "agent")
+         and (.open_items[] | select(.text | startswith("Ceník")) | .critical == true) and ([.open_items[] | .due | test("^[0-9]{4}-")] | all)' "$ST" >/dev/null
   # a second card run keeps the items' open-item ids; no duplicate items on a later confirmation
   python3 "$L" card "$P" >/dev/null; answer a2 approve; python3 "$L" confirm "$P" --answer a2 >/dev/null
   [ "$(jq '.open_items | length' "$ST")" -eq 6 ]

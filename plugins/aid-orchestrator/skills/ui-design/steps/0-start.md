@@ -71,8 +71,8 @@ podle názvu projektu), zamítnuté návrhy.
       Zdroje jsou rejstřík, starý web, profil a katalog. Odhad se nezapisuje.
     - `aid-ui-launch.py question <project>` vypíše otázku `launch_inputs` (část Podklady) do `payload.json`.
       Klient ji potvrdí jednou odpovědí, v pilotu za něj odpovídá klient-agent.
-    - Po odpovědi `aid-ui-launch.py confirm <project> --answer <id>`. Potvrzené údaje zapiš do
-      `docs/content/facts.yaml` se zdrojem „klient potvrdil“. Z chybějících vzniknou otevřené body
+    - Po odpovědi `aid-ui-launch.py confirm <project> --answer <id>`. Potvrzené údaje zapíše sám do
+      `docs/content/facts.yaml` jako `launch_<id>` (zdroj, den čtení, potvrzení klientem). Z chybějících vzniknou otevřené body
       s vlastníkem a termínem. Kritické blokují zveřejnění, ne stavbu ani smyčku kvality.
     - Nepotvrzený údaj se na web nedostane.
 

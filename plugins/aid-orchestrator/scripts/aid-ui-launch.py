@@ -14,7 +14,8 @@
       answer to an older list does not count.
   confirm <project> --answer <question id>
       The client's answer (recorded in brand-state.json answers, kind launch_inputs, this list's target).
-      approve: found items become confirmed (the agent writes them to facts.yaml with source "klient potvrdil"),
+      approve: found items become confirmed and go into docs/content/facts.yaml as launch_<id> {value, source, read_at,
+      confirmed_by: klient, confirmed_at, answer},
       and every item still missing becomes an open item with its owner, a due date (14 days) and its brief;
       critical ones block publishing (aid-ui-state.sh open-item --critical) but not the quality loop.
       return: nothing changes; the comment says what to fix. An answer is used once.
@@ -132,8 +133,19 @@ def confirm(p, qid):
         print("returned: %s" % (a.get("comment") or ""))
         return
     due = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
+    facts = os.path.join(p, "docs", "content", "facts.yaml")
     for i in d["items"]:
         if i["status"] == "found":
+            # into the facts register: the public source and the day it was read stay; the client's confirmation
+            # is its own field (never a replacement of the source)
+            entry = {"value": i["value"], "source": i["source"], "read_at": i["date"], "confirmed_by": "klient",
+                     "confirmed_at": datetime.date.today().isoformat(), "answer": qid}
+            os.makedirs(os.path.dirname(facts), exist_ok=True)
+            if not os.path.exists(facts):
+                open(facts, "w").write("{}\n")
+            r = subprocess.run(["yq", "-i", '.["launch_%s"] = %s' % (i["id"], json.dumps(entry, ensure_ascii=False)), facts], capture_output=True, text=True)
+            if r.returncode:
+                die("cannot write %s to docs/content/facts.yaml (a mapping register): %s" % (i["id"], r.stderr.strip()))
             i["status"] = "confirmed"
             continue
         if i["status"] in ("needed", "client") and not i.get("item"):
