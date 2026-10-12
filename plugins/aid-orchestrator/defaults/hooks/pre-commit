@@ -229,9 +229,25 @@ for _dir in "$_AID_ROOT/.aid-o/work/runs/" "$_AID_ROOT/.aid-o/work/evidence/"; d
   done < <(find "$_dir" \( -name "state.yaml" -o -name "fsm-state.yaml" \) 2>/dev/null | sort)
 done
 for _sf in "${_AID_ALL_STATE_FILES[@]}"; do
+  _br=$(grep '^branch:' "$_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')
+  # P111: the branch of an abandoned run takes no more commits — checked before
+  # the state filter, because abandon writes ERROR (task branch or plan/<id>).
+  if [[ -n "$_AID_BRANCH" && "$_br" == "$_AID_BRANCH" ]] && grep -q '^abandoned: true' "$_sf" 2>/dev/null; then
+    echo "AID HOOK: BLOCKED — ${_AID_BRANCH} belongs to the abandoned run $(grep '^epic_id:' "$_sf" | awk '{print $2}') ($(grep '^abandon_reason:' "$_sf" | sed 's/^abandon_reason: *//')); it takes no more commits." >&2
+    echo "next: stop the agent working on it; continue in a new plan (the abandoned plan is closed administratively)" >&2
+    echo "(pipeline.md §When AID refuses: run_abandoned)" >&2
+    exit 1
+  fi
   _st=$(grep '^state:' "$_sf" 2>/dev/null | awk '{print $2}')
   case "$_st" in EXECUTE|GATES|DONE) ;; *) continue ;; esac
-  _br=$(grep '^branch:' "$_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')
+  # P111: a direct run (plan/<id>) is finished for the hook at DONE with
+  # done_phase: release — the close's commits on plan/<id> are plan-finalize's.
+  # At DONE/review it is still guarded (merged_to_plan is recorded before
+  # release is written, so there is no unguarded window).
+  if [[ "$_st" == "DONE" ]] && grep -q '^direct: true' "$_sf" 2>/dev/null \
+     && [[ "$(grep '^done_phase:' "$_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')" == "release" ]]; then
+    continue
+  fi
   if [[ -n "$_AID_BRANCH" && "$_br" == "$_AID_BRANCH" ]]; then
     _AID_STATE_FILE="$_sf"
     break

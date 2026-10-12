@@ -1030,7 +1030,8 @@ next: restore the round's measurement.json (aid-review-round.sh close writes it;
           run_cost: $run_cost,
           plan_cost: $plan_cost,
           time: $time
-        }' --argjson run_cost "$run_cost" --argjson plan_cost "$plan_cost")" || plan_summary_json="null"
+        } + (if (($b.repo_roots // []) | length) > 0
+             then {foreign_branches: [$b.repo_roots[] | {name, branch, head, commits}]} else {} end)' --argjson run_cost "$run_cost" --argjson plan_cost "$plan_cost")" || plan_summary_json="null"
   fi
 
   # --- envelope-derived fields ---

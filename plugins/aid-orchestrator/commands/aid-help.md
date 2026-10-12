@@ -122,8 +122,8 @@ Ask for any of these with `/aid-help <topic>`:
 
 ```
 /aid-help do              → /aid-do deep dive (scope detection, escalation triggers)
-/aid-help run             → /aid-run deep dive (6-state FSM, flags, what a run does)
-/aid-help generation      → PRE-FLIGHT: plan → EPIC → plan.json as one transaction
+/aid-help run             → /aid-run deep dive (the direct run /aid-run P<NNN>, repo_roots, cancelling, 6-state FSM)
+/aid-help generation      → PRE-FLIGHT: the direct run's transaction; the old plan → EPIC path (until P112)
 /aid-help plan            → /aid-plan deep dive (brainstorm, write, epic modes)
 /aid-help plan-lifecycle  → plan branches, release model, verification commands
 /aid-help ui              → /aid-ui: UI from product type to an approved brand page
@@ -158,9 +158,17 @@ Post-check: verifies actual scope after implementation, warns if exceeded
 
 ### Topic: run
 
-`/aid-run` executes one EPIC through the 6-state FSM. Everything that happens
-before the FSM starts — turning a plan into EPIC files and `plan.json` — is the
-generation transaction; see `/aid-help generation`.
+`/aid-run P<NNN>` runs a reviewed plan **directly** (P111, AID 2.117.0):
+`aid-plan-fsm.sh plan-run` does generation's duties in one resumable
+transaction and starts ONE run of the whole plan on `plan/<id>` — no EPIC file,
+no queue, no task branch. Steps commit on `plan/<id>`; the last step's
+`done-advance review release <state> --direct` records the run and the close
+is `plan-finalize`. A plan that changes another repository declares
+`repo_roots:` in its frontmatter and works there in a worktree on
+`plan/<id>-<project>` (never the live checkout); the PM merges those branches by
+hand after MERGE. `plan-close --administrative` (and `epic-complete --abandon`)
+end the run in the FSM and `active-runs.json`. `/aid-run E-…` runs one EPIC of
+a plan generated the old way (until P112); see `/aid-help generation`.
 
 ```
 /aid-run — EPIC Pipeline

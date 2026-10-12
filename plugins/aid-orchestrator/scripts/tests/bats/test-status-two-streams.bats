@@ -240,6 +240,12 @@ JSON
     # and for E-901-5_5 the continuation artifact its dead controller left.
     _run_state "$d" E-901-5_5 R-E GATES
     _run_state "$d" E-901-6_6 R-G EXECUTE
+    # P111: an abandoned run whose map entry an interruption left behind — the
+    # published example does not show it, so the byte-for-byte case guards it.
+    _run_state "$d" E-901-7_7 R-H READY
+    printf 'abandoned: true\nabandon_reason: replaced by a new plan\n' >> "$d/.aid-o/work/evidence/E-901-7_7/R-H/fsm-state.yaml"
+    jq '. + {"E-901-7_7": {"state_file": ".aid-o/work/evidence/E-901-7_7/R-H/fsm-state.yaml", "run_id": "R-H", "state": "READY", "branch": "task/E-901-7_7/main", "plan_id": "P901", "governs_main": false, "updated_at": "2026-08-06T00:00:00Z"}}' \
+      "$d/.aid-o/work/active-runs.json" > "$d/.aid-o/work/active-runs.json.t" && mv "$d/.aid-o/work/active-runs.json.t" "$d/.aid-o/work/active-runs.json"
     printf '%s\n' '{"schema":"aid-auto-resume/1","safe_next_action":"bash /x/aid-run-gates.sh run-all exec.yaml E-901-5_5 R-E"}' \
       > "$d/.aid-o/work/evidence/E-901-5_5/R-E/auto_resume_required.json"
   else
@@ -1218,4 +1224,66 @@ JSON
   run _doc_render 1; [ -n "$output" ]
   run _doc_render 2; [ -n "$output" ]
   grep -Fq 'plan <id>: state unreadable — run plan-state <id>' "$DOC"
+}
+
+# ── P111 Step 5: an abandoned run is not work ───────────────────────────────
+@test "abandon: plan_epics and next_epic omit a run whose state file says abandoned (a stale map entry)" {
+  local d="$TEST_TMPDIR/ab1"
+  _repo "$d"; mkdir -p "$d/.aid-o/work"
+  _plan "$d" P080 EPIC_INTEGRATION
+  _run_state "$d" E-080-2_3 R-B READY
+  printf 'abandoned: true\nabandon_reason: closed administratively\n' >> "$d/.aid-o/work/evidence/E-080-2_3/R-B/fsm-state.yaml"
+  _run_state "$d" E-080-3_3 R-C READY
+  cat > "$d/.aid-o/work/active-runs.json" <<'JSON'
+{
+  "E-080-2_3": {"state_file": ".aid-o/work/evidence/E-080-2_3/R-B/fsm-state.yaml", "run_id": "R-B", "state": "READY", "branch": "task/E-080-2_3/main", "plan_id": "P080"},
+  "E-080-3_3": {"state_file": ".aid-o/work/evidence/E-080-3_3/R-C/fsm-state.yaml", "run_id": "R-C", "state": "READY", "branch": "task/E-080-3_3/main", "plan_id": "P080"}
+}
+JSON
+  _call "$d" 'plan_epics P080'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"E-080-2_3"* && "$output" == *"E-080-3_3"* ]]
+  _call "$d" 'next_epic P080'
+  [ "$output" = "E-080-3_3  [READY]" ]
+}
+
+@test "abandon: queue_rows and queue_candidate skip a queue entry whose EPIC the manifest records abandoned (the P080 shape)" {
+  local d="$TEST_TMPDIR/ab2"
+  _repo "$d"; mkdir -p "$d/.aid-o/work/plan-state/P080" "$d/.aid-o/config"
+  _plan "$d" P080 EPIC_INTEGRATION
+  echo '{}' > "$d/.aid-o/work/active-runs.json"
+  jq -n '{plan_boundary_manifest: {epic_runs: [{epic_id: "E-080-2_3", status: "abandoned"}, {epic_id: "E-080-3_3", status: "pending"}]}}' \
+    > "$d/.aid-o/work/plan-state/P080/plan-boundary-manifest.json"
+  cat > "$d/.aid-o/config/queue.yaml" <<'YAML'
+queue:
+  - epic_id: E-080-2_3
+    status: pending
+    priority: high
+    depends_on: []
+    plan_id: "P080"
+  - epic_id: E-080-3_3
+    status: pending
+    priority: low
+    depends_on: []
+    plan_id: "P080"
+YAML
+  _call "$d" 'queue_rows P080'
+  [[ "$output" != *"E-080-2_3"* && "$output" == *"E-080-3_3"* ]]
+  _call "$d" 'next_epic P080'
+  [ "$output" = "E-080-3_3  [queue:pending]" ]
+}
+
+@test "direct: plan_epics renders a direct run as běh 1/1 (přímý) and next_epic still picks it" {
+  local d="$TEST_TMPDIR/dr"
+  _repo "$d"; mkdir -p "$d/.aid-o/work"
+  _plan "$d" P111 OPEN
+  _run_state "$d" E-111-1_1 R-E111-1 EXECUTE
+  echo 'direct: true' >> "$d/.aid-o/work/evidence/E-111-1_1/R-E111-1/fsm-state.yaml"
+  cat > "$d/.aid-o/work/active-runs.json" <<'JSON'
+{"E-111-1_1": {"state_file": ".aid-o/work/evidence/E-111-1_1/R-E111-1/fsm-state.yaml", "run_id": "R-E111-1", "state": "EXECUTE", "branch": "plan/P111", "plan_id": "P111"}}
+JSON
+  _call "$d" 'plan_epics P111'
+  [[ "$output" == "    E-111-1_1  [EXECUTE]  run=R-E111-1  branch=plan/P111  běh 1/1 (přímý)  ctl=manual"* ]]
+  _call "$d" 'next_epic P111'
+  [ "$output" = "E-111-1_1  [EXECUTE]" ]
 }

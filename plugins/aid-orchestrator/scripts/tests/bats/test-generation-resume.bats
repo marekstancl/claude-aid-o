@@ -439,6 +439,9 @@ _deliver() {
 
 @test "two CONCURRENT invocations: exactly one generates, the other resumes to a verified no-op, and there are no duplicate artifacts" {
   local o1="$TEST_TMPDIR/c1.log" o2="$TEST_TMPDIR/c2.log" r1=0 r2=0
+  # The waiter must outlast a whole generation (~55 s on this fixture, close to
+  # the 60 s default): this case is about the resume, the timeout has its own.
+  export AID_GEN_LOCK_TIMEOUT=600
   ( cd "$PROJ" && bash "$PIPELINE" --plan "$PLAN" --queue-mode chain 3>&- ) >"$o1" 2>&1 &
   local p1=$!
   ( cd "$PROJ" && bash "$PIPELINE" --plan "$PLAN" --queue-mode chain 3>&- ) >"$o2" 2>&1 &

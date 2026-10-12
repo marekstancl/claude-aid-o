@@ -383,3 +383,45 @@ aid_fixture_seed_plan_decided() {
     | .plan_boundary_manifest.plan_final_evidence_receipt_sha256 = \"${receipt_hash}\"
     | .plan_boundary_manifest.plan_final_c4 = {run_id: \"${run_id}\", candidate_sha: \"${cand}\", target_head_sha: \"${thead}\", enforcement: \"blocking\", release_ready: true, blockers: 0}" >/dev/null
 }
+
+# aid_fixture_direct_run <project_root> <plan_id> <state> [done_phase]
+#
+# P111: a DIRECT run of <plan_id> in <state> (READY | EXECUTE | GATES | DONE),
+# cheaply — the way plan-run leaves it, without paying for readiness, the CP1
+# gate and the seal (test-plan-run.bats pays for those once): plan-start in
+# plan_branch mode with the one run declared, the manifest entry (direct, no
+# task branch, proven on plan/<id>), a two-step plan.json and fsm-state.yaml on
+# plan/<id> with direct: true. <project_root> is a git repo on main. Echoes the
+# state file. The plan worktree is <root>/.aid-worktrees/plan-<id>.
+aid_fixture_direct_run() {
+  local root="$1" pid="$2" state="$3" dphase="${4:-}"
+  local plugin="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+  local nnn="${pid#P}" epic run ev sf tip
+  epic="E-${nnn}-1_1"; run="R-E${nnn}-1"
+  ev="$root/.aid-o/work/evidence/${epic}/${run}"; sf="$ev/fsm-state.yaml"
+  mkdir -p "$root/.aid-o/plans" "$root/.aid-o/config" "$ev"
+  [[ -f "$root/.aid-o/config/execution.yaml" ]] || printf 'gates: {}\n' > "$root/.aid-o/config/execution.yaml"
+  printf -- '---\nid: %s\n---\n\n# Plan: %s direct fixture\n\n### Step 1: one\n\n**AID Role:** backend\n\n### Step 2: two\n\n**AID Role:** backend\n' "$pid" "$pid" \
+    > "$root/.aid-o/plans/${pid}-direct.md"
+  git -C "$root" add -f .aid-o/plans .aid-o/config >/dev/null 2>&1
+  git -C "$root" commit -qm "fixture: ${pid} direct plan" >/dev/null 2>&1 || true
+  ( cd "$root" && bash "$plugin/scripts/aid-plan-fsm.sh" plan-start "$pid" --mode plan_branch \
+      --project-root "$root" --declared-epics "$epic" >/dev/null 2>&1 ) \
+    || { echo "aid_fixture_direct_run: plan-start ${pid} failed" >&2; return 1; }
+  tip="$(git -C "$root" rev-parse "plan/${pid}")"
+  ( export AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
+    source "$plugin/scripts/lib/aid-plan-manifest.sh"
+    plan_manifest_add_epic "$pid" "$epic" "$run" "" "$tip" "plan/${pid}" ".aid-o/work/evidence/${epic}/${run}" proven direct >/dev/null ) \
+    || { echo "aid_fixture_direct_run: manifest entry failed" >&2; return 1; }
+  jq -n --arg e "$epic" --arg p ".aid-o/plans/${pid}-direct.md" \
+    '{epic_id:$e, source_plan:$p, version:1, direct:true, repo_roots:[], gates:[], dependencies:[], parallel_groups:[], analysis_groups:[],
+      steps:[{id:"step_1_backend", role:"backend", objective:"first step objective", plan_step:1, allowed_paths:["src/one.txt"], outputs:[], acceptance_criteria:[], zavira:[]},
+             {id:"step_2_backend", role:"backend", objective:"second step objective", plan_step:2, allowed_paths:["src/two.txt"], outputs:[], acceptance_criteria:[], zavira:[]}]}' > "$ev/plan.json"
+  {
+    printf 'epic_id: %s\nrun_id: %s\nstate: %s\ncurrent_step: 0\ntotal_steps: 2\nmode: full\nbranch: plan/%s\nbase_commit: %s\n' "$epic" "$run" "$state" "$pid" "$tip"
+    printf 'gate_retries: 0\nescalation_count: 0\nstreamlined_mode: false\ndirect: true\n'
+    printf 'pm_decision: merge\n'
+    [[ -n "$dphase" ]] && printf 'done_phase: %s\n' "$dphase"
+  } > "$sf"
+  printf '%s\n' "$sf"
+}

@@ -526,7 +526,7 @@ aid_lifecycle_plan_mode() {
 # 3 plan not found / not on target_branch, 4 user staged/unstaged collision,
 # 5 commit not durable (recoverable — re-run).
 aid_lifecycle_set_plan_mode() {
-  local plan_id="$1" mode="$2" root="${3:-.}"
+  local plan_id="$1" mode="$2" root="${3:-.}" declared="${4:-}"   # P111: optional declared-EPIC list (plan-run)
   case "$mode" in
     plan_branch|legacy_epic_release_mode) ;;
     *)
@@ -541,7 +541,7 @@ aid_lifecycle_set_plan_mode() {
   # UNTOUCHED — a mode write must never proceed on a manifest that isn't
   # itself durably in place.
   local mrc=0
-  aid_lifecycle_ensure_manifest "$plan_id" "$root" >/dev/null 2>&1 || mrc=$?
+  aid_lifecycle_ensure_manifest "$plan_id" "$root" "$declared" >/dev/null 2>&1 || mrc=$?
   [[ "$mrc" -ne 0 ]] && return "$mrc"
 
   local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
@@ -907,12 +907,14 @@ _aid_lc_frontmatter_depends() {
     | yq -r '.depends_on_plans // [] | .[]' 2>/dev/null || true
 }
 
-# aid_lifecycle_ensure_manifest <plan_id> <root> — create + commit a git-tracked
-# manifest from the STRICT legacy parse if none exists. NEVER edits the prose
+# aid_lifecycle_ensure_manifest <plan_id> <root> [declared] — create + commit a git-tracked
+# manifest from the STRICT legacy parse if none exists. `declared` (P111, the
+# direct run: "E-<nnn>-1_1") replaces the bold-marker parse — one run per plan,
+# whatever EPIC markers the plan still carries. NEVER edits the prose
 # plan. Returns 0 (present/created), 2 (ambiguous => legacy-unverifiable),
 # 3 (plan not found), 4 (user collision on the manifest path), 5 (commit not durable).
 aid_lifecycle_ensure_manifest() {
-  local plan_id="$1" root="${2:-.}"
+  local plan_id="$1" root="${2:-.}" declared="${3:-}"
   local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
   # Fast path ONLY when the manifest is already DURABLE on the target branch. A
   # manifest that exists on disk but is NOT yet committed (an interrupted commit,
@@ -928,7 +930,15 @@ aid_lifecycle_ensure_manifest() {
   # Fail-closed BEFORE creating any artifact: target_branch + no staged collision.
   _aid_lc_precheck_write "$root" ".aid-lifecycle/repo-identity.yaml" ".aid-lifecycle/manifests/${plan_id}.yaml" || return $?
   local parsed rc=0
-  parsed="$(aid_lifecycle_parse_legacy_epics "$plan_id" "$plan_file")" || rc=$?
+  if [[ -n "$declared" ]]; then
+    local _d; parsed=""
+    for _d in ${declared//,/ }; do
+      [[ "$_d" =~ ^E-[0-9]{3,}-[0-9]+_[0-9]+$ ]] || return 2
+      parsed+="${_d} required"$'\n'
+    done
+  else
+    parsed="$(aid_lifecycle_parse_legacy_epics "$plan_id" "$plan_file")" || rc=$?
+  fi
   [[ "$rc" -ne 0 ]] && return 2
   local repo_id; repo_id="$(aid_repo_id "$root")"
   local spsha="sha256:$(sha256sum "$plan_file" 2>/dev/null | cut -c1-64)"

@@ -426,3 +426,52 @@ _farm_excluding() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"union of all steps"* ]]
 }
+
+# ── P111 Step 3: a direct run on plan/<id>; Step 5: an abandoned run's branch ──
+_write_direct() { _write_state "$@"; echo "direct: true" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"; }
+
+@test "direct: the hook governs a direct run in EXECUTE on plan/<id> (an out-of-scope file is refused)" {
+  git checkout -q -b plan/P111
+  _write_plan; _write_direct EXECUTE plan/P111 "" 1
+  _stage src/a.txt
+  run bash "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"outside EXECUTE step 1 scope"* ]]
+}
+
+@test "direct: the hook still governs a direct run in DONE with done_phase: review" {
+  git checkout -q -b plan/P111
+  _write_plan; _write_direct DONE plan/P111 review 2
+  _stage src/outside.txt
+  run bash "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DONE/review"* ]]
+}
+
+@test "direct: the hook lets the close's commit through at done_phase: release" {
+  git checkout -q -b plan/P111
+  _write_plan; _write_direct DONE plan/P111 release 2
+  _stage src/outside.txt
+  run bash "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "abandon: a commit on the plan branch of an abandoned direct run is refused run_abandoned" {
+  git checkout -q -b plan/P111
+  _write_plan; _write_direct ERROR plan/P111 "" 1
+  printf 'abandoned: true\nabandon_reason: the PM stopped it\n' >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _stage src/a.txt
+  run bash "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: run_abandoned)"* && "$output" == *"next: "* ]]
+}
+
+@test "abandon: a commit on the task branch of an abandoned EPIC run is refused run_abandoned" {
+  git checkout -q -b task/E-test/main
+  _write_plan; _write_state ERROR task/E-test/main "" 1
+  printf 'abandoned: true\nabandon_reason: superseded by a new plan\n' >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _stage src/a.txt
+  run bash "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"run_abandoned"* ]]
+}

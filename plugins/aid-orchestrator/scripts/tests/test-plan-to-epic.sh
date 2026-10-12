@@ -571,7 +571,7 @@ mixed_result="$(bash -c '
   source "'"$REPO_ROOT"'/plugins/aid-orchestrator/scripts/lib/common.sh"
 
   # Source parse_step_deps from the main script by extracting it
-  eval "$(sed -n "/^parse_step_deps()/,/^}/p" "'"$SCRIPT_UNDER_TEST"'")"
+  source "'"$REPO_ROOT"'/plugins/aid-orchestrator/scripts/lib/aid-plan-json.sh"; parse_step_deps() { aid_plan_parse_step_deps "$@"; }   # moved to the library (P111)
 
   parse_step_deps "Step 1, Steps 3-5"
 ' 2>/dev/null)"
@@ -590,7 +590,7 @@ run_test "Range 'Steps 1-14' expands to '1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 
 range_result="$(bash -c '
   set -euo pipefail
   source "'"$REPO_ROOT"'/plugins/aid-orchestrator/scripts/lib/common.sh"
-  eval "$(sed -n "/^parse_step_deps()/,/^}/p" "'"$SCRIPT_UNDER_TEST"'")"
+  source "'"$REPO_ROOT"'/plugins/aid-orchestrator/scripts/lib/aid-plan-json.sh"; parse_step_deps() { aid_plan_parse_step_deps "$@"; }   # moved to the library (P111)
   parse_step_deps "Steps 1-14"
 ' 2>/dev/null)"
 
@@ -803,7 +803,7 @@ run_test "Dependency parser: 'Task 2, Tasks 4-5' parses to '2, 4, 5'"
 task_result="$(bash -c '
   set -euo pipefail
   source "'"$REPO_ROOT"'/plugins/aid-orchestrator/scripts/lib/common.sh"
-  eval "$(sed -n "/^parse_step_deps()/,/^}/p" "'"$SCRIPT_UNDER_TEST"'")"
+  source "'"$REPO_ROOT"'/plugins/aid-orchestrator/scripts/lib/aid-plan-json.sh"; parse_step_deps() { aid_plan_parse_step_deps "$@"; }   # moved to the library (P111)
   parse_step_deps "Task 2, Tasks 4-5"
 ' 2>/dev/null)"
 

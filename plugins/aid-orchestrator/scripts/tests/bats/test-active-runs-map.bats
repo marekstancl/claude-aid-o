@@ -364,3 +364,17 @@ JSON
   run git -C "$TEST_TMPDIR/primary" log --oneline -1
   [[ "$output" == *"plain commit on main"* ]]
 }
+
+@test "abandon: cmd_abandon removes the entry and refreshes active.md through aid_active_boundary_sync" {
+  local d="$TEST_TMPDIR/ab"; mkdir -p "$d"; cd "$d"
+  git init -q -b main; git config user.email t@t; git config user.name t; echo x > a; git add a; git commit -qm i
+  local sf="$d/.aid-o/work/evidence/E-001-1_1/R-1/fsm-state.yaml"; mkdir -p "$(dirname "$sf")"
+  printf 'epic_id: E-001-1_1\nrun_id: R-1\nstate: EXECUTE\ncurrent_step: 0\ntotal_steps: 1\nbranch: task/E-001-1_1/main\n' > "$sf"
+  jq -n --arg sf "$sf" '{"E-001-1_1": {state_file: $sf, run_id: "R-1", state: "EXECUTE", branch: "task/E-001-1_1/main", plan_id: null}}' > "$d/.aid-o/work/active-runs.json"
+  printf '# stale index naming E-001-1_1\n' > "$d/.aid-o/work/active.md"
+  run bash "$FSM" abandon "$sf" --reason "the run is no longer needed"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r 'has("E-001-1_1")' "$d/.aid-o/work/active-runs.json")" = "false" ]
+  ! grep -q 'E-001-1_1' "$d/.aid-o/work/active.md"
+  [[ "$output" != *"unknown boundary"* ]]
+}

@@ -120,6 +120,7 @@ VALID_TRANSITIONS=(
   "EXECUTE:ERROR"
   "GATES:ERROR"
   "ESCALATION:ERROR"
+  "DONE:ERROR"   # P111: abandon of a run stuck in DONE/review (cmd_abandon refuses release)
 )
 
 is_valid_state() {
@@ -1168,6 +1169,16 @@ _fsm_refusal_next() {
       next="the role that wrote the failing code fixes the gates named above, then: $adv" ;;
     contract_return_rejected)
       next="re-dispatch the step with its packet $(_fsm_cmd "${_c_dir:-<step dir>}/contract.json") and record the new return, then: $inc" ;;
+    done_advance_needs_direct)
+      if [[ "${_da_state_direct:-}" == "true" ]]; then
+        next="$(_fsm_cmd bash "$fsm" done-advance review release "$sf" --direct)"
+      else
+        next="$(_fsm_cmd bash "$fsm" done-advance review release "$sf"), then epic-merge-to-plan as today"
+      fi ;;
+    abandon_needs_reason)
+      next="$(_fsm_cmd bash "$fsm" abandon "$sf" --reason "<why the run is abandoned>")" ;;
+    direct_run_needs_plan_branch)
+      next="start the plan in plan_branch mode and run from its plan worktree: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}")" ;;
     plan_manifest_missing|plan_branch_mismatch)
       next="start the EPIC through its plan (task branch and manifest entry), then init again: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" epic-start "${_pb_plan_id:-<plan>}" "${epic_id:-<epic>}" --run-id "${run_id:-<run>}")" ;;
     contract_return_missing|contract_return_not_done)
@@ -1192,7 +1203,7 @@ _fsm_refusal_next() {
     defer_refused)
       next="render the Decision card quoting ${_sc_label:-the point} (lib/aid-decision-card.sh), wait for the PM's answer, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words, 20+ chars>" --finding-card "<card>")" ;;
     missing_lenses|done_advance_preconditions)
-      next="correct what the lines above name, then run the same done-advance again: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-<from>}" "${to_phase:-<to>}" "$sf")" ;;
+      next="correct what the lines above name, then run the same done-advance again: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-<from>}" "${to_phase:-<to>}" "$sf")$([[ "${direct_flag:-}" == true ]] && printf ' --direct')" ;;
     *) return 1 ;;
   esac
   printf 'next: %s\n(pipeline.md §When AID refuses: %s)\n' "$next" "$reason" >&2
@@ -2082,7 +2093,8 @@ evaluate_compliance_checks() {
   # Session A scope; Sessions B/C may relax the regex.
   local branch_value branch_correct
   branch_value=$(yaml_field "$state_file" branch)
-  if [[ "$branch_value" =~ ^task/E- ]]; then
+  if [[ "$branch_value" =~ ^task/E- ]] \
+     || { [[ "$(yaml_field "$state_file" direct 2>/dev/null)" == "true" ]] && [[ "$branch_value" =~ ^plan/P[0-9]+$ ]]; }; then   # P111: a direct run runs on plan/<id>
     branch_correct=true
   else
     branch_correct=false
@@ -3424,6 +3436,7 @@ cmd_init() {
   local plan_path_arg=""
   local force="false"
   local streamlined=false
+  local direct=false
   local i=8
   while [[ $i -le $# ]]; do
     case "${!i}" in
@@ -3436,6 +3449,11 @@ cmd_init() {
         ;;
       --streamlined)
         streamlined=true
+        ;;
+      --direct)
+        # P111: the one run of a plan run straight from the plan — it runs
+        # on plan/<id> itself, no task branch (aid-plan-fsm.sh plan-run).
+        direct=true
         ;;
       --force)
         # D1 (IMP-232 v2.58.0): the old global cross-plan ca-review pre-scan is
@@ -3483,7 +3501,7 @@ cmd_init() {
           : # a known force-payload flag, already consumed above
         else
           echo "ERROR: Unknown flag for init: ${!i}" >&2
-          echo "  init accepts: --plan <path>, --streamlined, --force --reason <text>" >&2
+          echo "  init accepts: --plan <path>, --streamlined, --direct, --force --reason <text>" >&2
           exit 2
         fi
         ;;
@@ -3547,6 +3565,17 @@ cmd_init() {
   _pb_nnn="$(_fsm_epic_plan_nnn "$epic_id")"
   local _pb_plan_id=""
   [[ -n "$_pb_nnn" ]] && _pb_plan_id="P${_pb_nnn}"
+  # P111: a direct run's branch IS the plan branch.
+  [[ "$direct" == true && -n "$_pb_plan_id" ]] && _plan_expected_branch="plan/${_pb_plan_id}"
+  if [[ "$direct" == true ]]; then
+    local _dr_mode=""
+    [[ -n "$_pb_plan_id" ]] && IFS=$'\t' read -r _dr_mode _ _ < <(_fsm_declared_plan_mode "$epic_id") || true
+    if [[ "$_dr_mode" != "plan_branch" ]]; then
+      echo "PRECONDITION FAIL: init --direct ${epic_id}: a direct run runs on plan/<id>, but ${_pb_plan_id:-<no plan id>} is not a plan_branch plan (mode '${_dr_mode:-<unresolved>}') — there is no plan branch to run on." >&2
+      _fsm_refusal_next direct_run_needs_plan_branch
+      exit 1
+    fi
+  fi
 
   if [[ -n "$_pb_plan_id" ]]; then
     # Resolve the plan's DECLARED release mode through the ONE committed-tree,
@@ -3632,7 +3661,11 @@ cmd_init() {
             elif [[ "$_pb_lineage" != "proven" || "$_pb_epic_source_ref" != "plan/${_pb_plan_id}" ]]; then
               _pb_reason="epic_lineage_unproven"
               _pb_detail="${epic_id}'s manifest entry has lineage='${_pb_lineage:-<empty>}' and epic_source_ref='${_pb_epic_source_ref:-<empty>}' — refusing to treat it as authoritative (must be proven with epic_source_ref=plan/${_pb_plan_id} to execute within this plan). Use 'aid-plan-fsm.sh epic-start ${_pb_plan_id} ${epic_id}' to create a new proven entry, or attest this entry with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --attest-source-ref <ref> --reason \"<reason>\" --epic ${epic_id}'. If the old task branch is fully contained in the target (git branch --merged shows it), the shortest safe path is: git branch -d <task_branch>, then epic-start."
-            elif [[ "$_pb_task_branch" != "$_plan_expected_branch" ]]; then
+            elif [[ "$direct" == true && "$(jq -r '.direct // false' <<<"$_pb_entry" 2>/dev/null)" != "true" ]]; then
+              # P111: a direct run's entry has no task branch; it must say direct.
+              _pb_reason="plan_branch_mismatch"
+              _pb_detail="init --direct ${epic_id}: ${_pb_plan_id}'s manifest entry is not a direct run (task_branch=${_pb_task_branch:-<empty>}) — it belongs to the EPIC path; run it with /aid-run ${epic_id}."
+            elif [[ "$direct" != true && "$_pb_task_branch" != "$_plan_expected_branch" ]]; then
               _pb_reason="plan_branch_mismatch"
               _pb_detail="${_pb_plan_id}'s manifest records task_branch=${_pb_task_branch:-<empty>} for ${epic_id}, but this run expects ${_plan_expected_branch}."
             else
@@ -3866,7 +3899,18 @@ Fix: restore ${_wt_plan_branch} (e.g. 'git branch ${_wt_plan_branch} <the merge 
     fi
   fi
 
-  if is_worktree && [[ -z "$_wt_plan_branch" ]]; then
+  if [[ "$direct" == true ]]; then
+    # P111: no task branch is created — the run's branch is plan/<id> and HEAD
+    # must already be it (plan-run runs init inside the plan worktree).
+    local _dr_head=""
+    _dr_head="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    if [[ "$_dr_head" != "plan/${_pb_plan_id}" ]]; then
+      echo "PRECONDITION FAIL: init --direct ${epic_id}: HEAD is '${_dr_head:-<detached>}', but a direct run starts on plan/${_pb_plan_id} (its plan worktree)." >&2
+      log_event "$timeline_path" "fsm_init_blocked" reason="direct_run_needs_plan_branch" epic_id="$epic_id" current_branch="$_dr_head"
+      _fsm_refusal_next direct_run_needs_plan_branch
+      exit 1
+    fi
+  elif is_worktree && [[ -z "$_wt_plan_branch" ]]; then
     log_info "Worktree mode detected (git_dir under .git/worktrees/) — skipping branch enforcement"
   else
     local current_branch expected_branch
@@ -4046,6 +4090,7 @@ streamlined_mode: $streamlined
 started_at: "${_now_iso}"
 created_at: ${_now_iso}
 EOF
+  [[ "$direct" == true ]] && echo "direct: true" >> "$state_file"
 
   # ─── PRE-FLIGHT: cache staleness — consumer controller recording ─────────
   # anchor: cache_preflight_init_record
@@ -4201,6 +4246,77 @@ read_steps_array() {
   else
     echo "[]"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# cmd_abandon <state_file> --reason <text> [--epic <epic_id>]   (P111 Step 5)
+#   The run ends in the FSM: ERROR through the transition table (DONE:ERROR only
+#   from done_phase review — a run at release is finished), abandoned: true with
+#   the reason and the time, the timeline event `abandoned`, and its entry
+#   removed from active-runs.json (aid_active_boundary_sync, which also refreshes
+#   active.md). Idempotent: a rerun completes whatever an interruption left.
+#   A gone state file: --epic names the map entry to remove.
+# ---------------------------------------------------------------------------
+cmd_abandon() {
+  local state_file="${1:-}" reason="" epic_opt=""
+  shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reason) reason="${2:-}"; shift 2 ;;
+      --epic) epic_opt="${2:-}"; shift 2 ;;
+      *) echo "ERROR: abandon: unknown argument: $1" >&2; exit 2 ;;
+    esac
+  done
+  if [[ -z "${reason//[[:space:]]/}" ]]; then
+    echo "ERROR: abandon: a run is abandoned with a reason — it is recorded in the state, the manifest and the timeline." >&2
+    _fsm_refusal_next abandon_needs_reason
+    exit 1
+  fi
+  [[ -n "$state_file" ]] || { echo "Usage: aid-fsm.sh abandon <state_file> --reason <text> [--epic <epic_id>]" >&2; exit 2; }
+  local root; root="$(aid_state_root 2>/dev/null || pwd)"
+  if [[ ! -f "$state_file" ]]; then
+    if [[ -n "$epic_opt" ]] && declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+      aid_active_boundary_sync "$root" "$epic_opt" abandon || true
+    fi
+    echo "abandon: ${state_file} is gone — the run's map entry ${epic_opt:-<unnamed>} was removed; nothing else to end." >&2
+    exit 0
+  fi
+  state_file="$(_fsm_resolve_state_file "$state_file")"
+  local epic_id run_id cur dp
+  epic_id="$(yaml_field "$state_file" epic_id)"; run_id="$(yaml_field "$state_file" run_id)"
+  _fsm_require_plan_worktree "$epic_id"
+  cur="$(yaml_field "$state_file" state)"; dp="$(yaml_field "$state_file" done_phase 2>/dev/null || true)"
+  if [[ "$cur" == "DONE" && "$dp" == "release" ]]; then
+    echo "ERROR: abandon: ${epic_id} is DONE at done_phase release — the run is finished; there is nothing to abandon (close the plan instead)." >&2
+    exit 1
+  fi
+  if [[ "$cur" != "ERROR" ]]; then
+    ( cmd_transition "$cur" ERROR "$state_file" ) >/dev/null \
+      || { echo "ERROR: abandon: ${epic_id} could not move ${cur} → ERROR (see above) — nothing else was written." >&2; exit 1; }
+  fi
+  if [[ "$(yaml_field "$state_file" abandoned 2>/dev/null || true)" != "true" ]]; then
+    R="$reason" T="$(date -u +%Y-%m-%dT%H:%M:%SZ)" yq -i '.abandoned = true | .abandon_reason = strenv(R) | .abandoned_at = strenv(T)' "$state_file" \
+      || { echo "ERROR: abandon: could not record the abandon fields in ${state_file} — rerun converges." >&2; exit 1; }
+    local timeline; timeline="$(derive_timeline "$state_file")" || true
+    [[ -n "$timeline" ]] && log_event "$timeline" "abandoned" epic_id="$epic_id" run_id="$run_id" from_state="$cur" reason="$reason"
+  fi
+  if [[ "${AID_PLAN_FSM_CRASH_AFTER:-}" == fsm ]]; then   # test seam: the FSM written, the map not yet
+    echo "CRASH SEAM: AID_PLAN_FSM_CRASH_AFTER=fsm — exiting 99 after the FSM write, before the map." >&2; exit 99
+  fi
+  if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+    aid_active_boundary_sync "$root" "$epic_id" abandon "$state_file" || true
+  fi
+  # The map entry is what /aid-status and the main-branch guard read: success
+  # is reported only once it is really gone (the sync itself is best-effort).
+  local _map="${root}/.aid-o/work/active-runs.json"
+  if [[ -f "$_map" ]] && jq -e --arg e "$epic_id" 'has($e)' "$_map" >/dev/null 2>&1; then
+    echo "ERROR: abandon: ${epic_id} is ERROR and abandoned in its state, but its active-runs.json entry could not be removed (lock or write failure) — run the same command again; it completes the removal." >&2
+    exit 1
+  fi
+  # A direct run's foreign worktrees are the PM's to remove (named, never copied).
+  local fw=""
+  fw="$(jq -r '[.repo_roots[]?.worktree] | join(", ")' "$(dirname "$state_file")/plan.json" 2>/dev/null || true)"
+  echo "abandoned: ${epic_id} (${run_id}) is ERROR, out of active-runs.json; stop any agent still working on its branch${fw:+; foreign worktrees to remove by hand: ${fw}}" >&2
 }
 
 cmd_transition() {
@@ -5934,8 +6050,13 @@ _fsm_declared_plan_mode() {
 
 cmd_done_advance() {
   local from_phase="$1" to_phase="$2" state_file="$3"
-  local force="false" _archive_task="" _tasks_dir=""
-  [[ "${4:-}" == "--force" ]] && force="true"
+  local force="false" _archive_task="" _tasks_dir="" direct_flag="false" _a
+  for _a in "${@:4}"; do
+    case "$_a" in
+      --force) force="true" ;;
+      --direct) direct_flag="true" ;;   # P111: the direct run's done-advance
+    esac
+  done
 
   # P074 Step 8: re-anchor a RELATIVE state file to the state root BEFORE the
   # existence test. `.aid-o` exists only in the primary checkout, so the old
@@ -5988,6 +6109,21 @@ cmd_done_advance() {
     echo "ERROR: illegal done_phase transition: $from_phase -> $to_phase (only review -> release is allowed)" >&2
     exit 1
   }
+
+  # P111: --direct is required on a direct run and refused on any other — the
+  # flag is what makes this call record merged_to_plan instead of handing over
+  # to epic-merge-to-plan.
+  local _da_state_direct; _da_state_direct="$(yaml_field "$state_file" direct 2>/dev/null || true)"
+  [[ "$_da_state_direct" == "true" ]] || _da_state_direct="false"
+  if [[ "$_da_state_direct" != "$direct_flag" ]]; then
+    if [[ "$_da_state_direct" == "true" ]]; then
+      echo "ERROR: done-advance: $(yaml_field "$state_file" epic_id) is a direct run (plan/<id>) — its done-advance records merged_to_plan and needs --direct." >&2
+    else
+      echo "ERROR: done-advance --direct: $(yaml_field "$state_file" epic_id) is not a direct run — its task branch is merged by epic-merge-to-plan; drop --direct." >&2
+    fi
+    _fsm_refusal_next done_advance_needs_direct
+    exit 1
+  fi
 
   # ── P064 plan Step 9: resolve the owning plan's DECLARED release model ────
   # Runs on the review→release edge and nowhere else (it is the only legal
@@ -6094,7 +6230,9 @@ cmd_done_advance() {
     local _pb_wt
     _pb_wt="$(_fsm_plan_worktree_for_epic "$_pb_epic_id")"
     if [[ -n "$_pb_wt" ]]; then
+      if [[ "${direct_flag:-}" == true ]]; then echo "NOTE: ${_pb_epic_id} is the DIRECT run of ${_pb_mode_plan} — this advance evaluates the plan worktree ${_pb_wt} and records merged_to_plan on plan/${_pb_mode_plan} (no task branch to merge)." >&2; else
       echo "NOTE: ${_pb_epic_id} is a plan_branch EPIC of ${_pb_mode_plan} — this advance evaluates the PLAN WORKTREE ${_pb_wt} (its HEAD and its base..HEAD diff), and the next step merges task/${_pb_epic_id}/main into plan/${_pb_mode_plan} THERE, not into the target branch." >&2
+      fi
       log_event "$_pb_mode_timeline" "done_advance_plan_worktree" \
         epic_id="$_pb_epic_id" plan_id="$_pb_mode_plan" worktree_path="$_pb_wt"
     fi
@@ -6372,6 +6510,23 @@ EOF
       echo "archived the EPIC task file: ${_tasks_dir}/archive/$(basename "$_archive_task") (a tracked file is staged as a rename in that checkout)" >&2
     else
       echo "WARN: could not archive ${_archive_task} — move it to ${_tasks_dir}/archive/ by hand" >&2
+    fi
+  fi
+
+  # P111: a direct run is recorded merged_to_plan (at the tip of plan/<id>)
+  # and its plan moved to PLAN_SYNC BEFORE release is written — the hook guards
+  # the branch until release, so no commit slips between DONE and the record.
+  # A failure leaves done_phase review: the same done-advance is legal again.
+  if [[ "$direct_flag" == "true" ]]; then
+    local _da_epic _da_out _da_rc=0
+    _da_epic="$(yaml_field "$state_file" epic_id)"
+    _da_out="$(bash "${SCRIPT_DIR}/aid-plan-fsm.sh" epic-complete "P$(_fsm_epic_plan_nnn "$_da_epic")" "$_da_epic" --direct 2>&1)" || _da_rc=$?
+    printf '%s\n' "$_da_out" >&2
+    if [[ "$_da_rc" -ne 0 ]]; then
+      echo "ERROR: done-advance --direct: epic-complete --direct failed (rc=${_da_rc}) — done_phase stays review; fix what it names and run the same done-advance again." >&2
+      echo "next: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-fsm.sh" done-advance review release "$state_file" --direct)" >&2
+      echo "(pipeline.md §When AID refuses: done_advance_preconditions)" >&2
+      exit 1
     fi
   fi
 
@@ -7516,6 +7671,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     amend-scope)       shift; cmd_amend_scope "$@" ;;
     rebase-plan)       shift; cmd_rebase_plan "$@" ;;
     done-advance)               shift; cmd_done_advance "$@" ;;
+    abandon)                    shift; cmd_abandon "$@" ;;
     promote-check)              shift; cmd_promote_check "$@" ;;
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
     plan-close)                 shift; cmd_plan_close "$@" ;;

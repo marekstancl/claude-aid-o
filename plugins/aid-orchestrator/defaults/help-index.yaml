@@ -150,10 +150,14 @@ surfaces:
       topic: do, audience: beginner, disposition: current,
       writes: [], final_turn: "card:finished" }
 
-  - { command: /aid-run, file: plugins/aid-orchestrator/commands/aid-run.md,
-      purpose: "Execute EPIC pipeline — 6-state FSM with optional autonomous mode",
-      topic: run, audience: beginner, disposition: current,
-      writes: ["mutates:.aid-o/config/plugin.yaml"], final_turn: "card:finished" }
+  - command: /aid-run
+    file: plugins/aid-orchestrator/commands/aid-run.md
+    purpose: "Run a plan — /aid-run P<NNN> starts it straight from the plan (the direct run, P111; repo_roots, cancellation); /aid-run E-… the old EPIC path until P112 — 6-state FSM with optional autonomous mode"
+    topic: run
+    audience: beginner
+    disposition: current
+    writes: ["mutates:.aid-o/config/plugin.yaml"]
+    final_turn: "card:finished"
 
   - { command: /aid-status, file: plugins/aid-orchestrator/commands/aid-status.md,
       purpose: "Show EPIC status, queue, and pipeline overview",

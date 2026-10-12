@@ -64,6 +64,8 @@ _aid_dc_version() {
 # aid_dispatch_contract_build <plan.json> <step_index> <out_file> [evidence_root]
 #   0  written
 #   1  plan unreadable or the step does not exist
+#   4  a direct plan's step names a foreign repository it does not declare in
+#      repo_roots, or a declared one's worktree is gone (P111; refusal printed)
 #   3  the step declares no paths — no contract is owed (a plan decision: a
 #      pure-analysis step is not made to fake artifacts; its output.md is
 #      still verified by the step-verify file like any other)
@@ -110,6 +112,22 @@ aid_dispatch_contract_build() {
 
   local step_id; step_id="$(jq -r '.id // ""' <<< "$step")"
 
+  # P111 repo_roots — ONE mapping in plan.json: a path in a declared foreign
+  # repository is rewritten to that repository's worktree (allowed paths and
+  # expected artifacts alike), so the agent is never sent into the live
+  # checkout. On a direct plan, a path in an undeclared foreign repository is
+  # refused (exit 4); the EPIC path keeps today's absolute paths.
+  local rr direct rr_out
+  rr="$(jq -c '.repo_roots // []' "$plan" 2>/dev/null || echo '[]')"
+  direct="$(jq -r '.direct // false' "$plan" 2>/dev/null || echo false)"
+  if [[ "$direct" == "true" ]]; then
+    rr_out="$(_aid_dc_rewrite_foreign "$plan" "$rr" "$(jq -c '.allowed_paths // []' <<< "$step")")" || return 4
+    step="$(jq -c --argjson a "$rr_out" '.allowed_paths = $a' <<< "$step")"
+    if [[ "$artifacts" != "[]" ]]; then
+      artifacts="$(_aid_dc_rewrite_foreign "$plan" "$rr" "$artifacts")" || return 4
+    fi
+  fi
+
   local body_json
   body_json="$(jq -c \
     --argjson i "$idx" \
@@ -129,14 +147,15 @@ aid_dispatch_contract_build() {
       acceptance_criteria: (.acceptance_criteria // []),
       ui_change_contract: (.ui_change_contract // null),
       evidence_dir: $evidence
-    }' <<< "$step")" || { echo "contract: could not assemble the packet for step ${idx}" >&2; return 1; }
+    } + (if (($plan[0].repo_roots // []) | length) > 0 and ($plan[0].direct // false)
+         then {repo_roots: [($plan[0].repo_roots)[] | {name, worktree, branch, never: .path}]} else {} end)' <<< "$step")" || { echo "contract: could not assemble the packet for step ${idx}" >&2; return 1; }
 
   local version; version="$(_aid_dc_version "$body_json")"
   jq --arg v "$version" '. + {version: $v,
       return_shape: {contract_version: "<the version above, quoted back>",
                      changed_files: ["<every file you changed, repo-relative>"],
                      deleted_files: ["<a file you deleted that the step may fold away; omit when none>"],
-                     repo_commits: [{repo: "<absolute path of another repository the step declares>", range: "<base>..<head> of your commits there"}],
+                     repo_commits: [{repo: "<the repo_roots name of a foreign repository (or, without repo_roots, its absolute path)>", range: "<base>..<head> of your commits there, on its worktree branch"}],
                      gates: [{name: "<gate>", result: "pass|fail|skipped"}],
                      step_status: "done|blocked"}}' <<< "$body_json" > "$out" \
     || { echo "contract: could not write ${out}" >&2; return 1; }
@@ -173,7 +192,7 @@ $(jq 'del(.return_shape)' "$c")
 \`\`\`
 
 Write evidence only under \`$(jq -r '.evidence_dir' "$c")\`. Change files only
-under the allowed paths. When you finish, end your output with a fenced block
+under the allowed paths.$(jq -r 'if (.repo_roots // []) | length > 0 then "\nForeign repositories: " + ([.repo_roots[] | "`" + .name + "` — work in " + .worktree + " (branch " + .branch + "), never in " + .never] | join("; ")) + ". Commit there and name the repository by its name in repo_commits." else "" end' "$c") When you finish, end your output with a fenced block
 tagged \`${_AID_DCT_RETURN_FENCE}\` holding this object (the LAST such block is
 the one read):
 
@@ -211,11 +230,79 @@ aid_dispatch_contract_extract() {
     || { echo "contract: the ${_AID_DCT_RETURN_FENCE} block in ${out} is not one JSON object" >&2; return 1; }
 }
 
-# aid_dispatch_repo_range_ok <repo> <base>..<head> — both ends are commits in
-# <repo>. The return validator and the step check ask the same question.
+# aid_dispatch_repo_range_ok <repo> <base>..<head> [<branch>] — both ends are
+# commits in <repo>; given <branch>, the head is also REACHABLE from it (P111:
+# a commit that exists only in the live checkout shares the object store with
+# the worktree, so presence alone proves nothing) — and the range is a real one:
+# its base is an ancestor of its head and the two differ, so an empty or
+# reversed range cannot make the step's foreign work vanish from its review.
+# The return validator and the step check ask the same question.
 aid_dispatch_repo_range_ok() {
   [[ "$2" == *..* ]] && git -C "$1" rev-parse -q --verify "${2%%..*}^{commit}" >/dev/null 2>&1 \
-    && git -C "$1" rev-parse -q --verify "${2##*..}^{commit}" >/dev/null 2>&1
+    && git -C "$1" rev-parse -q --verify "${2##*..}^{commit}" >/dev/null 2>&1 \
+    && [[ "$(git -C "$1" rev-parse "${2%%..*}^{commit}" 2>/dev/null)" != "$(git -C "$1" rev-parse "${2##*..}^{commit}" 2>/dev/null)" ]] \
+    && git -C "$1" merge-base --is-ancestor "${2%%..*}" "${2##*..}" 2>/dev/null \
+    && { [[ -z "${3:-}" ]] || git -C "$1" merge-base --is-ancestor "${2##*..}" "$3" 2>/dev/null; }
+}
+
+# aid_dispatch_repo_resolve <plan.json> <slug> — prints "<worktree>\t<branch>"
+# of the repo_roots entry named <slug> (P111: the one mapping the contract, the
+# step's return and the step check read). Exit 1 when the plan declares none.
+aid_dispatch_repo_resolve() {
+  local out
+  out="$(jq -r --arg n "$2" 'first(.repo_roots[]? | select(.name == $n) | [.worktree, .branch] | @tsv) // empty' "$1" 2>/dev/null)"
+  [[ -n "$out" ]] || return 1
+  printf '%s\n' "$out"
+}
+
+# _aid_dc_phys_repo <path> — the physical toplevel of the git repository a
+# (possibly not yet existing) path lies in, or nothing.
+_aid_dc_phys_repo() {
+  local d="$1"
+  while [[ -n "$d" && ! -d "$d" ]]; do d="${d%/*}"; done
+  [[ -n "$d" ]] || d=/
+  ( cd "$d" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null ) | xargs -r realpath 2>/dev/null
+}
+
+# _aid_dc_rewrite_foreign <plan.json> <repo_roots-json> <paths-json> — the paths
+# with every one under a declared repo_roots path rewritten to its worktree.
+# Refuses (exit 1, foreign_repo_undeclared) a path in a foreign git repository
+# the plan does not declare, and a declared one whose worktree is gone.
+_aid_dc_rewrite_foreign() {
+  local plan="$1" rr="$2" paths="$3" own out="[]" p repo n i rp wt hit
+  own="$(_aid_dc_phys_repo "$(dirname "$(realpath "$plan")")")"
+  n="$(jq 'length' <<< "$rr")"
+  while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
+    if [[ "$p" != /* ]]; then out="$(jq -c --arg p "$p" '. + [$p]' <<< "$out")"; continue; fi
+    repo="$(_aid_dc_phys_repo "$p")"
+    if [[ -z "$repo" || "$repo" == "$own" ]]; then out="$(jq -c --arg p "$p" '. + [$p]' <<< "$out")"; continue; fi
+    hit=""
+    for (( i=0; i<n; i++ )); do
+      rp="$(realpath -m "$(jq -r --argjson i "$i" '.[$i].path' <<< "$rr")")"
+      [[ "$repo" == "$rp" ]] || continue
+      wt="$(jq -r --argjson i "$i" '.[$i].worktree' <<< "$rr")"
+      if [[ ! -d "$wt" ]]; then
+        echo "contract: the worktree ${wt} of repo_roots '$(jq -r --argjson i "$i" '.[$i].name' <<< "$rr")' is gone — no step is sent into ${rp}'s live checkout instead." >&2
+        echo "next: recreate it on its recorded branch: git -C ${rp} worktree add ${wt} $(jq -r --argjson i "$i" '.[$i].branch' <<< "$rr")" >&2
+        echo "(pipeline.md §When AID refuses: foreign_repo_undeclared)" >&2
+        return 1
+      fi
+      # the physical spelling of p (symlinks, trailing slash), then the tail under the repo
+      local pp; pp="$(realpath -m "$p")"
+      hit="${wt}${pp#"$rp"}"
+      [[ "$p" == */ ]] && hit="${hit%/}/"
+      break
+    done
+    if [[ -z "$hit" ]]; then
+      echo "contract: ${p} lies in ${repo}, a git repository outside the project that the plan does not declare in repo_roots — a direct run works in a foreign repository only through its worktree." >&2
+      echo "next: declare it in the plan's frontmatter (repo_roots: [{name: <slug>, path: ${repo}}]) and restart the run, or drop the path from the step" >&2
+      echo "(pipeline.md §When AID refuses: foreign_repo_undeclared)" >&2
+      return 1
+    fi
+    out="$(jq -c --arg p "$hit" '. + [$p]' <<< "$out")"
+  done < <(jq -r '.[]' <<< "$paths")
+  printf '%s\n' "$out"
 }
 
 # _aid_dc_path_allowed <path> <allowed-json> <own_evidence_suffix> — bash glob
@@ -333,9 +420,20 @@ aid_dispatch_contract_validate() {
 
   # Commits the step made in another repository (repo_commits, read by the step
   # check) must exist there: a range that does not resolve is refused, named.
-  local rc_repo rc_range
+  # P111: a repo_roots name resolves through plan.json to the worktree and its
+  # branch, and the range must be reachable from that branch.
+  local rc_repo rc_range rc_pj="" rc_wt rc_br cand
+  for cand in "$(dirname "$c")/../../plan.json" "$(dirname "$c")/plan.json"; do [[ -f "$cand" ]] && { rc_pj="$cand"; break; }; done
   while IFS=$'\t' read -r rc_repo rc_range; do
     [[ -n "$rc_repo" ]] || continue
+    if [[ "$rc_repo" != /* ]]; then
+      if [[ -z "$rc_pj" ]] || ! IFS=$'\t' read -r rc_wt rc_br < <(aid_dispatch_repo_resolve "$rc_pj" "$rc_repo"); then
+        _add reasons "repo_commits names '${rc_repo}', which is no repo_roots entry of this plan"; continue
+      fi
+      aid_dispatch_repo_range_ok "$rc_wt" "$rc_range" "$rc_br" \
+        || _add reasons "repo_commits names ${rc_range} in ${rc_repo}, and it is not a <base>..<head> reachable from ${rc_br} (a commit in the live checkout does not count)"
+      continue
+    fi
     aid_dispatch_repo_range_ok "$rc_repo" "$rc_range" \
       || _add reasons "repo_commits names ${rc_range} in ${rc_repo}, and it is not a <base>..<head> of commits there"
   done < <(jq -r '.repo_commits[]? | [(.repo // ""), (.range // "")] | @tsv' "$r" 2>/dev/null)
@@ -414,9 +512,20 @@ aid_dispatch_contract_commit() {
   local branch sid epic want; branch="$(git -C "$root" branch --show-current 2>/dev/null)"; sid="$(jq -r '.step_id // ""' "$c")"
   epic="$(realpath "$c")"; epic="${epic%/*/steps/*}"; epic="${epic##*/}"
   want='task/*/main'; [[ "$epic" == E-* ]] && want="task/${epic}/main"
+  # P111: a direct run commits on plan/<id> — bound to the run's identity: its
+  # fsm-state.yaml says direct: true, and its branch is plan/P<nnn> of its epic.
+  local _sfd; _sfd="$(realpath "$c")"; _sfd="${_sfd%/steps/*}/fsm-state.yaml"
+  if [[ -f "$_sfd" && "$(yq -r '.direct // false' "$_sfd" 2>/dev/null)" == "true" && "$epic" =~ ^E-([0-9]+)- ]] \
+     && [[ "$(yq -r '.branch // ""' "$_sfd" 2>/dev/null)" == "plan/P${BASH_REMATCH[1]}" ]]; then
+    want="plan/P${BASH_REMATCH[1]}"
+  fi
   # shellcheck disable=SC2053  # $want is a pattern only when the EPIC is unknown
   if [[ "$branch" != $want && "$branch" != "step/${sid}" ]]; then
-    echo "contract: ${root} is on '${branch:-detached HEAD}', not the run's task branch — nothing is committed; switch back: git -C ${root} checkout task/<epic>/main" >&2
+    if [[ "$want" == plan/* ]]; then
+      echo "contract: ${root} is on '${branch:-detached HEAD}', not the direct run's plan branch — nothing is committed; switch back: git -C ${root} checkout ${want}" >&2
+    else
+      echo "contract: ${root} is on '${branch:-detached HEAD}', not the run's task branch — nothing is committed; switch back: git -C ${root} checkout task/<epic>/main" >&2
+    fi
     return 1
   fi
   local report

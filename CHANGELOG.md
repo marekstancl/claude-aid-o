@@ -3,6 +3,37 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.117.0] — 2026-10-11
+
+Běh rovnou z plánu (P111, první půlka vydání 3 roadmapy po experimentu P014; PM 2B: P111 přidává, P112 maže). Recenzovaný plán se spustí `/aid-run P<NNN>` jako jeden běh na větvi `plan/<id>` — bez EPIC souborů, fronty, task větví a merge EPICu; jiné repo je pracovní kopie (worktree), nikdy jeho živý checkout; zrušení plánu ukončí běh i ve FSM a v mapě běhů. Stará EPIC cesta (`/aid-run E-…`) funguje beze změny do P112. Stavěno mimo AID (PM 11. 10. 2026); revize po krocích Codex, při jeho vyčerpaném limitu nezávislý Claude agent s čistým kontextem.
+
+### Added
+- **Přímý start `aid-plan-fsm.sh plan-run P<NNN> [--auto]`** — povinnosti generace v jedné transakci pod zámkem generace (tentýž jako pipeline, takže se obě cesty vylučují), zapisované po stupních do jediného `generation/transaction.json` (`kind: plan_run`), takže přerušený start dokončí stejný příkaz: `plan-start` v režimu `plan_branch` s jediným deklarovaným během `E-<nnn>-1_1` (i v projektu bez `gate_profiles`), readiness, pečeť CP1, `plan.json` celého plánu, D5, `epic_input.md`, worktree cizích rep, záznam v manifestu (`direct: true`, bez task větve), kontrola účtenky (graf plánu, bajty plánu, otisk `plan.json`) a `aid-fsm.sh init … plan/<id> … --direct`. Odmítnutí: `plan_run_already_started`, `generation_already_started`, `plan_changed_since_seal`, `lifecycle_epics_mismatch` (oprava `plan-state --declare-epics`), `plan_json_unverified`, `plan_in_scratch_tree`, `generation_lock_held`, `plan_not_found`.
+- **Jeden stavitel `plan.json`** — `lib/aid-plan-json.sh` (stavitel přesunutý z `aid-epic-to-json.sh` a čtečka kroků přesunutá z `aid-plan-to-epic.sh`); EPIC cesta volá tutéž knihovnu, golden výstup beze změny (a 80 porovnání starého a nového generátoru na skutečných plánech beze rozdílu). `plan.schema.json`: `direct`, `repo_roots`.
+- **Větev plánu je větví běhu** — commit kroku přímého běhu na `plan/<id>` (jen pro běh, jehož stav říká `direct: true` a tu větev jmenuje); pre-commit hook hlídá větev až do `DONE`/`done_phase: release`; `done-advance review release <state> --direct` zapíše běh `merged_to_plan` na tipu `plan/<id>` a převede plán do `PLAN_SYNC` (přes `epic-complete --direct`) ještě před zápisem `release`; `epic-merge-to-plan` přímý běh odmítne (`direct_run_no_epic_merge`), `done-advance` bez/s `--direct` na nesedícím běhu `done_advance_needs_direct`; freeze odmítne přímý běh, který neprošel svým `done-advance`.
+- **`repo_roots`** — hlavička plánu `repo_roots: [{name, path[, base_branch]}]` (lint: `repo_root_invalid`); `plan-run` založí, nebo při obnově převezme, worktree `<path>/.aid-worktrees/plan-<id>--<name>` na větvi `plan/<id>-<projekt>` a jedno mapování v `plan.json`. Kontrakt kroku pošle cizí soubor do worktree („never in <path>“), návrat jmenuje repo jménem, kontrola kroku i validátor návratu přijmou jen neprázdný rozsah dosažitelný z větve worktree (commit v živém checkoutu sdílí objekty, a přesto neprojde); krok jmenující nedeklarované repo nedostane kontrakt (`foreign_repo_undeclared`). Uzávěr zmrazí hlavy cizích větví, `produce`/`decide` odmítnou chybějící worktree, větev posunutou po zmrazení nebo nahlášený rozsah mimo ni (`foreign_branch_unverified`); rozhodnutí, karta PM a stránka uzávěru cizí větve vypíšou — mergne je PM ručně.
+- **Zrušení až do konce** — `aid-fsm.sh abandon <state> --reason` (ERROR přes tabulku přechodů, `DONE:ERROR` jen z `done_phase: review`, `abandoned: true`, událost `abandoned`, záznam pryč z `active-runs.json`); `epic-complete --abandon` a `plan-close --administrative` to dělají jako jeden opakovatelný přechod manifest → FSM → mapa, administrativní uzávěr ještě před svými kontrolami i u plánu už zavřeného (tvar P080: běhy zůstaly READY). Hook odmítne commit na větvi opuštěného běhu (`run_abandoned`); prázdný důvod `abandon_needs_reason`. Staré běhy P080 (E-080-2_3, E-080-3_3) lze ukončit ručně: `aid-fsm.sh abandon <state> --reason …`.
+- **Inventura EPIC cesty** — `docs/reference/2026-10-p111-inventura-epic-cesty.md`: 52 řádků registru vynucení s verdiktem (16 přechází, 24 zaniká v P112, 12 zůstává); podle ní P112 maže.
+
+### Changed
+- Pečeť CP1, její ověření, zámek a zapisovač transakce generace jsou knihovna `lib/aid-generation-authority.sh` (přesunuté beze změny; pipeline a generátor ji volají).
+- `/aid-run P<NNN>` je výchozí cesta pro nový plán; `/aid-plan` končí „plán je připraven ke spuštění `/aid-run P<NNN>`“, režim Generate EPIC je stará cesta do P112. `/aid-status` ukáže přímý běh jako „běh 1/1 (přímý)“ a opuštěné běhy ani jejich položky fronty neukazuje.
+- `skills/pipeline.md` §„When AID refuses“: 16 nových řádků s `next:`; kontrola souladu skenuje i `aid-plan-fsm.sh`, `aid-auto-pipeline.sh`, `lib/aid-dispatch-contract.sh`, `aid-plan-lint.sh` a pre-commit hook. Registr vynucení: 14 nových řádků (628). Docusaurus `/aid/` (aid-run, aid-plan, architektura) v repu docs. Testbed: lany `direct_run` (přímý běh na klonu testbedu: tři skutečné kroky, brány, `done-advance --direct` a uzávěr až k rozhodnutí AWAITING_PM, bez `--force`) a `repo_roots` (worktree cizího repa, odmítnutí nedeklarovaného repa a rozsahu z živého checkoutu při uzávěru).
+- Generace zrychlená skoro zpět na 2.116.1: sdílená čtečka kroků a stavitel `plan.json` čtou krok jedním voláním `jq` místo jednoho na pole a lint spouští `yq` pro `repo_roots` jen tehdy, když hlavička to slovo obsahuje (fixture o třech fázích 62 s → 58 s, 2.116.1 55 s; test souběžné generace čekal na zámek 60 s a padal). Test souběhu má vlastní delší čekání, čekání na zámek zkouší samostatný test. Opravena zestárlá očekávaná hodnota v `test-plan-fixture-contract.bats` (šestý sloupec Zavírá od 2.115.0).
+
+### Security
+- Rozsah z cizího repa musí být neprázdný a dopředný (začátek předkem konce) — i na staré cestě s absolutní cestou; jinak by prázdný rozsah schoval cizí změnu před revizí (nález automatické bezpečnostní revize commitu).
+
+### Velikost pluginu (řádky, `wc -l`)
+
+| část | před | po |
+|---|---|---|
+| scripts | 73 115 | 74 076 |
+| skills | 8 332 | 8 348 |
+| commands | 5 896 | 6 003 |
+
+Měřeno: `scripts/*.sh` + `scripts/lib/*.sh`, `skills/*.md` + `skills/*/SKILL.md`, `commands/*.md`. „Před“ je číslo zadání; na 2.116.1 je scripts přesně 73 128 (+13 z opravy 2.116.1). P111 přidává novou cestu vedle staré; ubírat bude P112 (V5 vize se měří po něm).
+
 ## [2.116.1] — 2026-10-11
 
 Oprava po vydání 2.116.0 (nález automatické bezpečnostní kontroly pushe).

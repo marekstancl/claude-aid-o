@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 614          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 628          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4195,3 +4195,200 @@ enforcements:
     recovery: "The refusal names the file; move it out of docs/brand/ (state belongs in docs/design/brand-state.json, aid-ui-state.sh init migrates it) and start again."
     test_covers: "brand of a folder holding state.json, a leftover temp file, a foreign file or a symlink, and of a folder outside docs/brand: exit 2, nothing served (test-aid-ui-serve.bats)."
     test: "scripts/tests/bats/test-aid-ui-serve.bats"
+
+  - id: plan_run_direct
+    type: 12
+    source: "scripts/aid-plan-fsm.sh (cmd_plan_run)"
+    instruction: "commands/aid-run.md (PRE-FLIGHT, the direct run)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    description: "P111 — /aid-run P<NNN> = aid-plan-fsm.sh plan-run: every duty of generation (plan-start in plan_branch mode with the one run declared, readiness, the CP1 seal, plan.json of the whole plan, D5, epic_input.md, the manifest entry, the receipt) and aid-fsm.sh init --direct on plan/<id>, with no EPIC file, no queue entry and no task branch."
+    recovery: "The refusal names the stage; fix what it says and run plan-run again — it resumes."
+    test_covers: "a two-step plan starts on plan/<id> with no EPIC artefact, queue entry or task branch; init --direct records branch plan/<id> (test-plan-run.bats direct:)."
+    test: "scripts/tests/bats/test-plan-run.bats"
+  - id: plan_run_transaction
+    type: 12
+    source: "scripts/aid-plan-fsm.sh (_pr_stage_record, transaction.json kind: plan_run)"
+    instruction: "commands/aid-run.md (PRE-FLIGHT)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    description: "P111 — plan-run records its stages in the one generation/transaction.json (kind: plan_run) under the generation lock; a rerun skips recorded stages, refuses a plan edited after the seal (plan_changed_since_seal) and a plan.json that is not the one the plan_json stage built or that disagrees with the plan's graph (plan_json_unverified)."
+    recovery: "Restore the sealed plan bytes, or archive the transaction as the refusal says, and run plan-run again."
+    test_covers: "crashes after the seal, after init and after the manifest stage resume; an edited plan and a tampered plan.json are refused before init (test-plan-run.bats direct:)."
+    test: "scripts/tests/bats/test-plan-run.bats"
+  - id: plan_run_excludes_generation
+    type: 12
+    source: "scripts/aid-plan-fsm.sh (_pr_generation_trace) + scripts/aid-auto-pipeline.sh (_gen_refuse_plan_run)"
+    instruction: "skills/pipeline.md §When AID refuses (plan_run_already_started, generation_already_started)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    description: "P111 — the two roads never mix on one plan: plan-run refuses a plan with any generation trace (generation_already_started) and the pipeline and supersede-generation refuse a plan with a direct run (plan_run_already_started), checked under the shared generation lock before anything moves."
+    recovery: "Finish the plan on the road it started on, or close it administratively and write a new plan."
+    test_covers: "each trace alone refuses plan-run, each plan-run trace alone refuses the pipeline, an edited plan is refused before the mode stamp (test-plan-run.bats direct:)."
+    test: "scripts/tests/bats/test-plan-run.bats"
+  - id: plan_json_shared_builder
+    type: 12
+    source: "scripts/lib/aid-plan-json.sh"
+    instruction: "commands/aid-run.md (PRE-FLIGHT)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    description: "P111 — one plan.json builder and one per-step plan reader for the direct path and the EPIC path; the EPIC path's output is byte-identical (golden)."
+    recovery: "A builder refusal names the step (role, cycle, Files bullet); fix the plan."
+    test_covers: "the direct plan.json carries plan_step, zavira, waves, Files outputs and allowed paths, criteria, gates and repo_roots and validates against plan.schema.json (test-plan-json.bats); the EPIC golden is unchanged (test-epic-to-json-regression.sh)."
+    test: "scripts/tests/bats/test-plan-json.bats"
+  - id: direct_commit_branch
+    type: 12
+    source: "scripts/lib/aid-dispatch-contract.sh (aid_dispatch_contract_commit) + defaults/hooks/pre-commit"
+    instruction: "commands/aid-run.md (EXECUTE)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    description: "P111 — a direct run's step commits on plan/<id>, accepted only for the run whose fsm-state.yaml says direct: true and names that branch; the pre-commit hook guards the plan branch until DONE with done_phase: release."
+    recovery: "Check out the run's branch the refusal names and commit again."
+    test_covers: "a commit on plan/<id> passes, the same run on a task branch and a state naming another plan branch are refused (test-dispatch-contract.bats direct:); the hook governs EXECUTE and DONE/review and passes at release (test-commit-guard.bats direct:)."
+    test: "scripts/tests/bats/test-dispatch-contract.bats"
+  - id: epic_complete_direct
+    type: 12
+    source: "scripts/aid-fsm.sh (cmd_done_advance --direct) + scripts/aid-plan-fsm.sh (cmd_epic_complete --direct)"
+    instruction: "commands/aid-run.md (Sub-phase release, direct run)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    description: "P111 — done-advance review release --direct records the direct run merged_to_plan at the tip of plan/<id> and moves the plan to PLAN_SYNC before writing release; epic-merge-to-plan refuses a direct run; freeze refuses a direct run that is not DONE/release."
+    recovery: "Run done-advance review release <state> --direct; a failed record leaves done_phase review and the same command is run again."
+    test_covers: "the record, the failed-call rerun, the flag/state mismatch, the gate floor from the plan branch and the merge refusal (test-aid-fsm.bats direct:); freeze from PLAN_SYNC and the refusal without done-advance (test-plan-close.bats direct:)."
+    test: "scripts/tests/bats/test-aid-fsm.bats"
+  - id: repo_roots_mapping
+    type: 12
+    source: "scripts/lib/aid-dispatch-contract.sh (_aid_dc_rewrite_foreign, aid_dispatch_repo_resolve, aid_dispatch_repo_range_ok) + scripts/aid-step-check.sh"
+    instruction: "commands/aid-run.md (repo_roots)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    description: "P111 — one repo_roots mapping in plan.json: the contract sends a foreign file to its worktree on plan/<id>-<project>, the return names the repository by its slug, and the return validator and the step check accept only a non-empty range reachable from the worktree's branch."
+    recovery: "Commit the foreign work in the worktree the contract names and report its range under the repository's name."
+    test_covers: "rewrite to the worktree (also through a symlink), resolve, reachability and empty ranges (test-dispatch-contract.bats repo-roots:); the step check in the worktree and the live-checkout commit (test-step-check.bats repo-roots:); worktrees created, adopted and refused (test-plan-run.bats repo-roots:)."
+    test: "scripts/tests/bats/test-dispatch-contract.bats"
+  - id: foreign_repo_undeclared
+    type: 12
+    source: "scripts/lib/aid-dispatch-contract.sh (_aid_dc_rewrite_foreign)"
+    instruction: "skills/pipeline.md §When AID refuses (foreign_repo_undeclared)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    description: "P111 — a direct plan's step that names a path in a foreign git repository the plan does not declare in repo_roots, or whose declared worktree is gone, gets no contract (exit 4)."
+    recovery: "Declare the repository in the plan's repo_roots and restart, drop the path, or recreate the worktree as the refusal says."
+    test_covers: "an undeclared repository and a removed worktree refuse the contract build (test-dispatch-contract.bats repo-roots:)."
+    test: "scripts/tests/bats/test-dispatch-contract.bats"
+  - id: foreign_branch_unverified
+    type: 12
+    source: "scripts/aid-plan-fsm.sh (_pfsm_foreign_freeze, _pfsm_foreign_verify)"
+    instruction: "skills/pipeline.md §When AID refuses (foreign_branch_unverified)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    description: "P111 — the close freezes each foreign branch's head and produce/decide refuse a missing worktree, a branch moved after freeze or a reported range not on the frozen head; the decision, the PM card and the close page list the foreign branches for the PM's hand merge."
+    recovery: "Commit the foreign work in its worktree (drop a stray live-checkout commit by hand), then plan-finalize --stage freeze again."
+    test_covers: "freeze records the heads, the three refusals, the re-freeze recovery, a plan without repo_roots untouched, card and page rows (test-plan-close.bats foreign:)."
+    test: "scripts/tests/bats/test-plan-close.bats"
+  - id: repo_root_invalid
+    type: 12
+    source: "scripts/aid-plan-lint.sh (_repo_roots_pass) + scripts/lib/aid-plan-json.sh (aid_plan_repo_roots_json) + scripts/aid-plan-fsm.sh (_pr_repo_roots_worktrees)"
+    instruction: "skills/pipeline.md §When AID refuses (repo_root_invalid)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    description: "P111 — a repo_roots entry must be a slug and a git repository outside the project whose base branch resolves; plan-run refuses a plan/<id>-<project> branch that exists without its worktree."
+    recovery: "Fix the frontmatter entry, or rename or delete the stray branch, and run plan-run again."
+    test_covers: "the lint and the builder refuse a non-repository and a path inside the project (test-plan-json.bats json:); an existing branch without the worktree (test-plan-run.bats repo-roots:)."
+    test: "scripts/tests/bats/test-plan-json.bats"
+  - id: run_abandon_terminal
+    type: 12
+    source: "scripts/aid-fsm.sh (cmd_abandon) + scripts/aid-plan-fsm.sh (_pm_abandon_run)"
+    instruction: "commands/aid-run.md (cancelling a plan)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    description: "P111 — epic-complete --abandon and plan-close --administrative end a run in the manifest, the FSM (ERROR, abandoned: true) and active-runs.json as one resumable transition; merged work is untouched; /aid-status no longer shows the run."
+    recovery: "Run the same command again — it completes what an interruption left, with the recorded reason."
+    test_covers: "two READY runs closed administratively, merged work untouched, interruptions after the manifest and the FSM, the P080 shape, a direct run in DONE/review, release refused (test-plan-close-administrative.bats abandon:)."
+    test: "scripts/tests/bats/test-plan-close-administrative.bats"
+  - id: abandon_needs_reason
+    type: 12
+    source: "scripts/aid-fsm.sh (cmd_abandon) + scripts/aid-plan-fsm.sh (cmd_epic_complete --abandon)"
+    instruction: "skills/pipeline.md §When AID refuses (abandon_needs_reason)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    description: "P111 — a run is abandoned only with a non-empty reason, refused before any write."
+    recovery: "The same command with --reason \"<why>\"."
+    test_covers: "an empty reason refuses epic-complete --abandon and aid-fsm.sh abandon before any write (test-plan-close-administrative.bats abandon:)."
+    test: "scripts/tests/bats/test-plan-close-administrative.bats"
+  - id: run_abandoned
+    type: 12
+    source: "defaults/hooks/pre-commit"
+    instruction: "skills/pipeline.md §When AID refuses (run_abandoned)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    description: "P111 — the pre-commit hook refuses every commit on the branch of an abandoned run (a direct run's plan/<id> or an EPIC's task branch)."
+    recovery: "Stop the agent working on it; the work continues in a new plan."
+    test_covers: "a commit on an abandoned direct run's plan branch and on an abandoned EPIC's task branch is refused (test-commit-guard.bats abandon:)."
+    test: "scripts/tests/bats/test-commit-guard.bats"
+  - id: done_advance_needs_direct
+    type: 12
+    source: "scripts/aid-fsm.sh (cmd_done_advance)"
+    instruction: "skills/pipeline.md §When AID refuses (done_advance_needs_direct)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    description: "P111 — done-advance --direct is required on a direct run and refused on an EPIC run, so a direct run never hands over to epic-merge-to-plan and an EPIC run never skips it."
+    recovery: "The done-advance line next: prints."
+    test_covers: "both mismatches refused with done_phase unchanged (test-aid-fsm.bats direct:)."
+    test: "scripts/tests/bats/test-aid-fsm.bats"

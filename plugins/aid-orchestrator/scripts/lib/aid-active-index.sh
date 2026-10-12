@@ -206,7 +206,7 @@ aid_active_boundary_sync() {
         upsert_active_run "$state_file" || true
       fi
       ;;
-    done-advance|plan-close)
+    done-advance|plan-close|abandon)   # abandon: P111 Step 5
       if [[ -n "$epic_id" && "$epic_id" != "-" ]] && declare -F remove_active_run >/dev/null 2>&1; then
         remove_active_run "$epic_id" "$boundary" || true
       fi
