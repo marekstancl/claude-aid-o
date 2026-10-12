@@ -63,7 +63,8 @@
      "kinds": [
       "sources",
       "product_context",
-      "facts"
+      "facts",
+      "launch_inputs"
      ],
      "files": [
       "1-product.md",
@@ -389,6 +390,13 @@
     "skills/ui-design/references/adopted/marketingskills/customer-research/references/source-guides.md"
    ],
    "receipt": true
+  },
+  "launch_inputs": {
+   "files": [
+    "skills/ui-design/steps/0-start.md",
+    "scripts/aid-ui-launch.py"
+   ],
+   "receipt": false
   },
   "vision": {
    "files": [

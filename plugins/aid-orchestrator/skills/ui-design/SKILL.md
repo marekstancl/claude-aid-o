@@ -290,7 +290,7 @@ stavu a těl kapitol v `docs/brand/index.html`), `aid-ui-serve.sh`,
 `aid-ui-vision-check.py` (vize), `aid-ui-customer-page.py` (stránka pro zákazníka po bráně, krok 7 bod 7b),
 `aid-ui-sources.py` (podklady, krok 1p), `aid-ui-copy.py` (kontrola textů, krok 7 bod 1a; texty stránek dává
 `aid-ui-verify.sh <project> --copy-subject`), `aid-ui-critic.py` (měřítko a zmrazený kritik), `aid-ui-client.py`
-(klient-agent ve studiu, hodnocení kritika, kniha nákladů), `aid-ui-quality.py` (smyčka kvality po předání).
+(klient-agent ve studiu, hodnocení kritika, kniha nákladů), `aid-ui-quality.py` (smyčka kvality po předání), `aid-ui-launch.py` (podklady ke spuštění, krok 0 bod 10), `aid-ui-preview.py` (náhled a příjemce formuláře).
 
 ## Zprávy PM
 
