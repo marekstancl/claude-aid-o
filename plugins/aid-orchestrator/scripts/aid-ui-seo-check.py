@@ -162,7 +162,8 @@ class Page(HTMLParser):
         if self._in and tag == ("script" if self._in == "jsonld" else self._in):
             text = "".join(self._buf).strip()
             if self._in == "title":
-                self.title = text
+                if self.title is None:   # the document's title is the first one; an inline SVG's <title> later is not it (Coufal 12. 10. 2026)
+                    self.title = text
             elif self._in == "h1":
                 self.h1[-1] = " ".join(text.split())
             else:

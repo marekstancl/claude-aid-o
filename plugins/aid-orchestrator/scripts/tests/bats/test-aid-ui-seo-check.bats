@@ -38,6 +38,14 @@ fix_site() {
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d and all(x["level"]=="OK" for x in d)' "$BATS_TEST_TMPDIR/out.json"
 }
 
+@test "an inline SVG with its own <title> in the body does not replace the document title (Coufal 12. 10. 2026)" {
+  fix_site
+  sed -i 's|<body>|<body><svg role="img"><title>WC-symbol-v1</title><path d="M0 0"/></svg>|' "$SITE/index.html" "$SITE/o-nas/index.html"
+  run python3 "$CHECK" "$SITE" --base-url https://example.cz
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  ! grep -q "WC-symbol" <<<"$output"
+}
+
 @test "404.html with noindex absent from the sitemap is OK" {
   fix_site
   sed -e 's|<title>.*</title>|<title>Stránka nenalezena</title>|' \
