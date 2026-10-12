@@ -10,6 +10,7 @@
 #
 #   glyph <url>... | glyph --sample <family> <text>    aid-ui-glyph-check.mjs
 #   webp [--max-kb <n>] <src> <out.webp> <width> [quality 0-1]
+#   shot <out-dir> [--cookie <f> --studio <url>] <url>... | shot convert <a.webp>...   aid-ui-shot.mjs (P113a)
 #                                                      aid-ui-webp.mjs; the written file must be
 #                                                      at most <n> kB (default 200), else exit 1
 #   verify <args>                                      aid-ui-verify.mjs (arrives with the gate)
@@ -41,7 +42,7 @@
 set -euo pipefail
 
 LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib/ui-fidelity" && pwd)"
-usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify|png|measure|motion|logo-sheet|vectorize|wordmark <args>" >&2; exit 2; }
+usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify|png|measure|motion|shot|logo-sheet|vectorize|wordmark <args>" >&2; exit 2; }
 (( $# >= 1 )) || usage
 tool="$1"; shift
 if [[ "$tool" == wordmark ]]; then
@@ -84,6 +85,7 @@ case "$tool" in
   logo-sheet) js=aid-ui-logo-sheet.mjs ;;
   measure) js=aid-ui-measure.mjs ;;
   motion) js=aid-ui-motion.mjs ;;
+  shot)   js=aid-ui-shot.mjs ;;
   *) usage ;;
 esac
 [[ -f "$LIB/$js" ]] || { echo "ERROR: aid-ui-tool.sh: $LIB/$js missing" >&2; exit 1; }

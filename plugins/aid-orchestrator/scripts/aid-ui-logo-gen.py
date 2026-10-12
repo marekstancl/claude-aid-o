@@ -38,9 +38,15 @@ stops before the request that would exceed it. Existing files are never overwrit
 --force. A raster from here is a concept: the card the PM sees carries the vector made from it
 (aid-ui-tool.sh vectorize), never the PNG; delete gen/*.png after the identity answer is recorded,
 gen.json stays as the record.
+Every image sent is written to the project's cost book (.aid-ui/costs.jsonl, billing api) and none is sent
+when it would take the project's paid API total over AID_UI_IMAGE_BUDGET_USD (default 2.00, PM 12. 10. 2026:
+for the whole project, all rounds together) - on top of the per-run --max-cost.
 Exit: 0 every slot succeeded, 1 no key / no route / a slot partial or failed / cost cap hit, 2 usage.
 """
 import base64, json, os, re, struct, sys, time, urllib.error, urllib.request
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import aid_ui_costs as costs   # noqa: E402  the project's cost book and its image budget (P113a)
 
 CONSTRAINTS = ("Flat vector-style logo mark: a single solid pure black (#000000) shape, isolated on a transparent "
                "background, nothing else in the image. No text, no letters unless the concept names one, no gradients, "
@@ -204,15 +210,31 @@ def main():
         if clash:
             die("%d file(s) already exist in .aid-ui/logo/gen (first: %s); use --force to overwrite" % (len(clash), os.path.basename(clash[0])))
     capped = False
+
+    def send_one(what):
+        """Book one image before it is sent (billed or not); refuse it over the project's image budget."""
+        why = costs.image_room(project, unit)
+        if why:
+            return why
+        costs.add(project, {"provider": "openai", "model": model, "billing": "api", "purpose": "logo:" + what,
+                            "units": {"images": 1, "references": len(refs)}, "unit_usd": unit, "price_list": PRICE_LIST, "usd": unit})
+        return None
+
     for slot, concept in spec["slots"].items():
         prompt = prompt_for(slots[slot], concept, spec)
         two = isinstance(prompt, dict)
         rec = {"concept": concept, "prompt": prompt, "requested": n, "received": 0, "files": [], "marks": [], "errors": [], "status": "running"}
         for i in range(1, n + 1):
-            if log["estimated_usd"] + unit > max_cost + 1e-9:
+            if log["estimated_usd"] + unit * (2 if two else 1) > max_cost + 1e-9:
                 rec["errors"].append("cost cap %.2f USD reached before variant %d" % (max_cost, i))
                 capped = True
                 break
+            budget = costs.image_room(project, unit * (2 if two else 1))
+            if budget:
+                rec["errors"].append(budget + " before variant %d" % i)
+                capped = True
+                break
+            send_one(slot)
             log["requested"] += 1
             log["estimated_usd"] = round(log["estimated_usd"] + unit, 3)   # counted when sent, billed or not
             try:
@@ -225,6 +247,7 @@ def main():
                     rec["marks"].append(os.path.relpath(mpath, project))
                     log["requested"] += 1
                     log["estimated_usd"] = round(log["estimated_usd"] + unit, 3)
+                    send_one(slot + ":lockup")
                     png = generate(key, model, prompt["lockup"], quality, "full", [mpath], spec.get("size", "1536x1024"))
                 else:
                     png = generate(key, model, prompt, quality, mode, refs, spec.get("size", "1024x1024"))
