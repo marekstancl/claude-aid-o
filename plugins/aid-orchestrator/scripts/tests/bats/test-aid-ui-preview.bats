@@ -40,6 +40,9 @@ post() { curl -s -o "$T/body" -w '%{http_code}' -X POST "$@"; }
   # no value in the log, only status and id
   ! grep -qE "Jana|421905111222|bolí|Peter|Eva|0911|Bot|spam" "$T/log"
   grep -q "FORM 200 delivered" "$T/log"; grep -q "FORM 200 spam dropped" "$T/log"; grep -q "FORM 422 missing telefon" "$T/log"
+  # more than 20 messages a minute from one address: 429
+  for i in $(seq 1 25); do post "$U/api/objednanie" -d "meno=R$i&telefon=$i" >/dev/null; done
+  [ "$(post "$U/api/objednanie" -d 'meno=Z&telefon=0')" = 429 ]
   # no form.json: no receiver
   rm "$P/.aid-ui/form.json"; [ "$(post "$U/api/objednanie" -d 'meno=a&telefon=b')" = 404 ]
 }

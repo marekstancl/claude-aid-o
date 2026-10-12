@@ -147,6 +147,14 @@ copy_reviewed() {
   # the real send went through and the test messages are gone again; the log names no value
   jq -e '.rows[] | select(.check == "form_delivery") | .detail | startswith("delivered and removed again")' "$RES" >/dev/null
   [ -z "$(ls -A "$PROJ/.aid-ui/inbox" 2>/dev/null)" ]
+  # the receiver down for the form (it posts to /api/zprava, the receiver waits elsewhere): nothing delivered, the row fails
+  echo '{"endpoint": "/api/jinde", "required": ["tel"], "honeypot": "website"}' > "$PROJ/.aid-ui/form.json"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"; [ "$status" -eq 3 ]
+  jq -e '.rows[] | select(.check == "form_delivery") | .status == "fail" and (.detail | contains("delivered nothing"))' "$RES" >/dev/null
+  # a broken receiver config is named
+  echo '{"endpoint": "/api/zprava", "required": "tel"}' > "$PROJ/.aid-ui/form.json"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '.rows[] | select(.check == "form_delivery") | .detail | contains("needs endpoint")' "$RES" >/dev/null
   jq -e '.gate.build_id' "$PROJ/docs/design/brand-state.json" >/dev/null
   # ai_search ran (not N/A) and its findings stay out of the seo row
   [ "$(jq '[.rows[] | select(.check == "ai_search")] | length' "$RES")" -gt 0 ]

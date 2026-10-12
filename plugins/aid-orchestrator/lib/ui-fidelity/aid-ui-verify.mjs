@@ -676,14 +676,19 @@ async function formStates(browser, url, viewport) {
 // (.aid-ui/form.json; aid-ui-preview.py): filled the way a visitor fills it at 390 px and sent with its own button,
 // it shows a message and the message lands in .aid-ui/inbox (the test message is removed again); the receiver
 // refuses an incomplete message (422), drops a filled spam trap without delivering, delivers a repeated message
-// once; the preview's log holds none of the sent values. A failing receiver (FB-28) is form_states' row.
-// No form on the site = N/A. On the client's domain only the endpoint changes; the same row checks it there.
+// once; the preview's log holds none of the sent values. Through the real form too: a double click delivers once, a
+// filled spam trap delivers nothing. No receiver (no form.json, or the endpoint down) = the form delivers nothing and
+// the row fails. No form on the site = N/A. The client's domain receiver is checked after deployment (not here).
 async function formDelivery(browser) {
   const withForm = [];
   for (const p of pages) { try { if (/<form[\s>]/i.test(fs.readFileSync(path.join(site, p), 'utf8'))) withForm.push(p); } catch { /* not a file */ } }
   if (!withForm.length) return NA('no form on the site');
   if (!project) return ['not_covered', 'no --project'];
   let cfg; try { cfg = readJson(path.join(project, '.aid-ui/form.json')); } catch { return ['fail', 'no .aid-ui/form.json: the preview has no receiver (endpoint, required, honeypot)'] }
+  const okName = x => typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x);
+  if (!(typeof cfg?.endpoint === 'string' && cfg.endpoint.startsWith('/') && Array.isArray(cfg.required) && cfg.required.length && cfg.required.every(okName)
+        && okName(cfg.honeypot) && !(cfg.max_field !== undefined && !(Number.isInteger(cfg.max_field) && cfg.max_field > 0))))
+    return ['fail', '.aid-ui/form.json needs endpoint "/…", required [field names], honeypot (a field name) and max_field > 0 if given'];
   const box = path.join(project, '.aid-ui/inbox'), inbox = () => { try { return fs.readdirSync(box); } catch { return []; } };
   const token = `AIDTEST${Date.now().toString(36)}`, mail = `${token.toLowerCase()}@example.invalid`, tel = '+421900000999';
   const why = [], ctx = await browser.newContext({ viewport: { width: 390, height: HEIGHT[390] } });
@@ -692,6 +697,8 @@ async function formDelivery(browser) {
     await loaded(p, urlOf(withForm[0]));
     const before = inbox();
     const form = p.locator('form').first();
+    const live = () => p.evaluate(() => [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].map(e => (e.innerText || '').trim()).filter(Boolean).join(' | '));
+    const shown = await live();   // what the live regions say before the send: the success message must be new
     for (const el of await form.locator('input, textarea, select').all()) {
       const t = ((await el.getAttribute('type')) || '').toLowerCase(), name = await el.getAttribute('name'), tag = await el.evaluate(e => e.tagName);
       if (['hidden', 'submit', 'button', 'reset', 'file'].includes(t) || (cfg.honeypot && name === cfg.honeypot) || !(await el.isVisible())) continue;
@@ -699,13 +706,26 @@ async function formDelivery(browser) {
       if (tag === 'SELECT') { const v = await el.evaluate(e => [...e.options].map(o => o.value).find(x => x)); if (v) await el.selectOption(v); continue; }
       await el.fill(t === 'email' ? mail : t === 'tel' ? tel : t === 'date' ? '2030-01-15' : t === 'number' ? '1' : `${token} test`);
     }
-    await form.locator('button:not([type=button]), input[type=submit]').first().click();
-    await p.waitForFunction(() => [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].some(e => (e.innerText || '').trim() && !/odosiel|odesíl|sending/i.test(e.innerText)), null, { timeout: 12000 }).catch(() => {});
-    const msg = await p.evaluate(() => [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].map(e => (e.innerText || '').trim()).filter(Boolean).join(' | '));
+    await form.locator('button:not([type=button]), input[type=submit]').first().dblclick();   // a double click: one message
+    await p.waitForFunction(old => { const t = [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].map(e => (e.innerText || '').trim()).filter(Boolean).join(' | ');
+      return t && t !== old && !/odosiel|odesíl|sending/i.test(t); }, shown, { timeout: 12000 }).catch(() => {});
+    const msg = await live();
     const fresh = inbox().filter(x => !before.includes(x));
     const mine = fresh.filter(x => { const m = fs.readFileSync(path.join(box, x), 'utf8'); return [token, mail, tel].some(v => m.includes(v)); });
     if (!mine.length) why.push(`a filled form sent with its button delivered nothing (message on the page: "${msg.slice(0, 80)}")`);
-    else if (!msg) why.push('delivered, but the page shows no message');
+    else if (mine.length > 1) why.push(`a double click delivered ${mine.length} messages`);
+    else if (!msg || msg === shown) why.push('delivered, but the page shows no new message');
+    // the spam trap through the real form: filled by a bot (a hidden field), the message is not delivered
+    if (cfg.honeypot) {
+      await loaded(p, urlOf(withForm[0]));
+      const n0 = inbox().length;
+      for (const el of await form.locator('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea').all())
+        if (await el.isVisible()) await el.fill(((await el.getAttribute('type')) || '') === 'email' ? mail : ((await el.getAttribute('type')) || '') === 'tel' ? tel + '1' : `${token} bot`).catch(() => {});
+      const trap = await p.evaluate(n => { const f = document.forms[0], e = f && f.elements[n]; if (!e) return false; e.value = 'http://spam.example'; return true; }, cfg.honeypot);
+      if (!trap) why.push(`the form has no spam trap field "${cfg.honeypot}"`);
+      else { await form.locator('button:not([type=button]), input[type=submit]').first().click(); await p.waitForTimeout(1500);
+        if (inbox().length !== n0) why.push('a form with its spam trap filled was delivered'); }
+    }
     for (const x of mine) fs.rmSync(path.join(box, x), { force: true });   // the test message is not the client's
     // the receiver itself: an incomplete message, a filled spam trap, the same message twice
     const send = body => p.evaluate(async ({ ep, body }) => { const r = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

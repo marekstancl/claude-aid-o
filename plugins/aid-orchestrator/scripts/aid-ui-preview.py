@@ -10,15 +10,17 @@ Form receiver (only with <project>/.aid-ui/form.json {endpoint, required: [field
   - a required field empty, a field over max_field -> 422 {"error": "...", "field": "<name>"}
   - the same message again within 10 minutes -> 200 {"ok": true, "duplicate": true}, delivered once
   - otherwise delivered: <project>/.aid-ui/inbox/<utc>-<id>.json (mode 600) -> 200 {"ok": true, "id": "<id>"}
-  No or a bad Content-Length -> 411/413 (the body is never read to its end); a full inbox (500) -> 503.
+  No or a bad Content-Length -> 411/413 (the body is never read to its end); a full inbox (500) -> 503; more than
+  20 messages a minute from one address -> 429; a stalled body times out after 10 s.
   Any other POST -> 404. The log (stderr) carries the status and the message id, never a field value.
-On the client's domain the form posts to the hosting's receiver instead; only the endpoint in DESIGN.md / form.json
-changes and the same gate row (form_delivery) checks it.
+This receiver is the preview's only. On the client's domain the form posts to the hosting's receiver; that one is
+checked after the deployment (out of P113a's scope), until then it is a critical open item (FB-28).
 """
 import email.parser, email.policy, functools, hashlib, http.server, json, os, secrets, sys, threading, time, urllib.parse
 
 MAX_BODY, DUP_SECONDS, MAX_INBOX = 32 * 1024, 600, 500   # a preview inbox never grows past MAX_INBOX messages
-_seen, _lock = {}, threading.Lock()
+RATE = 20   # messages per address and minute
+_seen, _lock, _hits = {}, threading.Lock(), {}
 
 
 def form_cfg(project):
@@ -47,6 +49,7 @@ def fields_of(ctype, body):
 
 class H(http.server.SimpleHTTPRequestHandler):
     project = None
+    timeout = 10   # a client that stops sending mid-body does not hold a thread
 
     def log_message(self, fmt, *args):   # no query strings or bodies in the log
         sys.stderr.write("%s %s\n" % (self.command, args[1] if len(args) > 1 else ""))
@@ -75,6 +78,11 @@ class H(http.server.SimpleHTTPRequestHandler):
         cfg = form_cfg(self.project) if self.project else None
         if not cfg or urllib.parse.urlsplit(self.path).path != cfg["endpoint"]:
             return self.send_error(404)
+        ip, now0 = self.client_address[0], time.time()
+        with _lock:
+            _hits[ip] = [t for t in _hits.get(ip, []) if now0 - t < 60] + [now0]
+            if len(_hits[ip]) > RATE:
+                return self.reply(429, {"error": "too many"}, "rate limited")
         try:
             n = int(self.headers.get("Content-Length") or "")
         except ValueError:

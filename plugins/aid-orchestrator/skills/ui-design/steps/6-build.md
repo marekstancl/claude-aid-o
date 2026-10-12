@@ -113,7 +113,8 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
    "<skryté pole proti spamu>", "max_field": 2000}`; náhled (`aid-ui-serve.sh preview`) pak zprávy přijímá do
    `.aid-ui/inbox/` (jen vlastník, do logu nic z obsahu). Formulář má skryté pole proti spamu se stejným jménem.
    Brána `form_delivery` formulář skutečně vyplní a odešle a ověří doručení, odmítnutí neúplné zprávy, zahození
-   spamu a jedno doručení opakované zprávy. Na doméně klienta se mění jen adresa příjemce.
+   spamu (i přes skutečný formulář) a jedno doručení při dvojím kliknutí. Příjemce na hostingu klienta se ověří až
+   po nasazení; do té doby je to kritický otevřený bod (viz výše).
    (nástroj build servíruje sám a otisk složky zapíše sám);
    `build-record` pak sám pustí `aid-ui-motion.py check` nad tím záznamem a odmítne, když
    kterýkoli převzatý pohyb v buildu neběžel (vyjmenuje je) nebo build od pozorování změnil.
