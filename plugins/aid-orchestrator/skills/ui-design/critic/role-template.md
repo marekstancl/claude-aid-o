@@ -15,9 +15,9 @@ Pravidla:
 {persona_rules}
 
 U každého kritéria níže vyber kotvu (4, 6, 8, 10), jejíž podmínky web skutečně splňuje, dej známku 1-10
-(mezihodnota = splněná nižší kotva a část vyšší), napiš **důkaz** (co přesně jsi na webu viděl: stránka,
+(5, 7, 9 = splněná nižší kotva a část vyšší; 1-3 = nesplní ani kotvu 4, pak anchor null), napiš **důkaz** (co přesně jsi na webu viděl: stránka,
 místo, text) a **co chybí do vyšší kotvy**. Kritérium, které nejde posoudit, má score a anchor null a důvod
-v `not_assessable`. Nález = konkrétní vada s místem, závažností (blocking/major/minor), vlastníkem
+v `not_assessable`. Nález = konkrétní vada s místem (`where`: stránka a místo na ní), závažností (blocking/major/minor), vlastníkem
 (`agent` = opraví studio, `client` = může dodat jen majitel) a návrhem opravy. Co je jen na majiteli a má
 hotové zadání, dej do `readiness`, ne do nálezů a ne do známky.
 

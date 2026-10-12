@@ -15,10 +15,10 @@ answer() {
   python3 - "$1" > "$BATS_TEST_TMPDIR/a.json" <<'PY'
 import sys, json, yaml, os
 s = int(sys.argv[1]); r = yaml.safe_load(open(os.environ["RUB"]))
-anchor = lambda x: max(a for a in (4, 6, 8, 10) if a <= x) if x >= 4 else 4
+anchor = lambda x: max(a for a in (4, 6, 8, 10) if a <= x) if x >= 4 else None
 print(json.dumps({"criteria": [{"id": c["id"], "score": s, "anchor": anchor(s), "evidence": "úvod: nadpis a fotka pece",
   "missing_for_next": "více obrazu"} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": "copy", "severity": "minor",
-  "owner": "agent", "text": "opakované slovo", "fix": "zkrátit"}], "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
+  "owner": "agent", "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}], "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
   [ -z "${2:-}" ] || { jq "$2" "$BATS_TEST_TMPDIR/a.json" > "$BATS_TEST_TMPDIR/b.json" && mv "$BATS_TEST_TMPDIR/b.json" "$BATS_TEST_TMPDIR/a.json"; }
 }
@@ -31,6 +31,19 @@ export RUB="$BATS_TEST_DIRNAME/../../../skills/ui-design/critic/web-local.yaml"
   run python3 "$C" freeze "$P" --type nic; [ "$status" -eq 1 ] || [ "$status" -eq 2 ]
   jq '.role += " a buď mírný"' "$P/.aid-ui/critic/frozen.json" > "$P/f.t" && mv "$P/f.t" "$P/.aid-ui/critic/frozen.json"
   run python3 "$C" prompt "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"edited after freezing"* ]]
+  # the schema is frozen with the role: an edit of the stored schema is caught too
+  python3 "$C" freeze "$P" --type web-local --force >/dev/null
+  jq '.schema.required = ["summary"]' "$P/.aid-ui/critic/frozen.json" > "$P/f.t" && mv "$P/f.t" "$P/.aid-ui/critic/frozen.json"
+  run python3 "$C" prompt "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"edited after freezing"* ]]
+  # --force is refused once a loop has rounds
+  mkdir -p "$P/.aid-ui/critic/rounds/r1"
+  run python3 "$C" freeze "$P" --type web-local --force; [ "$status" -eq 1 ]; [[ "$output" == *"cannot change under it"* ]]
+}
+
+@test "freeze drops context lines that talk about scores or acceptance" {
+  printf '# Pekárna U Mlýna\nMinule 7,5/10, cílem je projít akceptací.\nKváskový chleba.\n' > "$P/docs/content/product-context.md"
+  run python3 "$C" freeze "$P" --type web-local; [ "$status" -eq 0 ]; [[ "$output" == *"DROPPED 1"* ]]
+  jq -e '(.role | contains("Kváskový")) and (.role | contains("7,5") | not)' "$P/.aid-ui/critic/frozen.json" >/dev/null
 }
 
 @test "the prompt names no threshold and no acceptance; another project gets another role" {
@@ -58,9 +71,14 @@ export RUB="$BATS_TEST_DIRNAME/../../../skills/ui-design/critic/web-local.yaml"
   answer 8 '(.criteria[] | select(.id == "accessibility")) |= (.score = null | .anchor = null | .not_assessable = "bez čtečky nešlo ověřit")'
   run python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json"; [ "$status" -eq 0 ]; jq -e '.quality_score == 8 and (.criteria | has("accessibility") | not)' <<<"$output" >/dev/null
   answer 8 '(.criteria[] | select(.id == "accessibility")) |= (.score = null | .anchor = null)'
-  run python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json"; [ "$status" -eq 1 ]; [[ "$output" == *"no score and no reason"* ]]
+  run python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json"; [ "$status" -eq 1 ]; [[ "$output" == *"not_assessable"* ]]
   answer 8 'del(.criteria[0])'; run python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json"; [ "$status" -eq 1 ]; [[ "$output" == *"criteria answered"* ]]
   answer 8 '.criteria[0].score = 10'; run python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json"; [ "$status" -eq 1 ]; [[ "$output" == *"does not sit on its anchor"* ]]
+  answer 8 '(.criteria[] | select(.id == "copy")) |= (.score = 2 | .anchor = 10)'; run python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json"; [ "$status" -eq 1 ]; [[ "$output" == *"does not sit on its anchor"* ]]
+  answer 3; run python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  answer 8 'del(.findings[0].where)'; run python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json"; [ "$status" -eq 1 ]; [[ "$output" == *"where"* ]]
+  answer 8 '.criteria[0].not_assessable = "nešlo"'; run python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json"; [ "$status" -eq 1 ]; [[ "$output" == *"schema"* ]]
+  answer 8 '.criteria[0].missing_for_next = ""'; run python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json"; [ "$status" -eq 1 ]
   answer 8 '.findings[0].owner = "studio"'; run python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json"; [ "$status" -eq 1 ]; [[ "$output" == *"schema"* ]]
 }
 
@@ -68,7 +86,9 @@ export RUB="$BATS_TEST_DIRNAME/../../../skills/ui-design/critic/web-local.yaml"
   python3 "$C" freeze "$P" --type web-local >/dev/null
   for s in 8 9 8; do answer $s; cp "$BATS_TEST_TMPDIR/a.json" "$BATS_TEST_TMPDIR/r$s-$RANDOM.json"; done
   run python3 "$C" verdict "$P" "$BATS_TEST_TMPDIR"/r*.json; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  jq -e '.ratings == 3 and .median_quality_score == 8 and .accepted == true' <<<"$output" >/dev/null
+  jq -e '.ratings == 3 and .median_quality_score == 8 and .accepted == true and .publish_blocked_by == ["vlastní fotky"] and (.verdict | startswith("přijato, zveřejnění blokuje"))' <<<"$output" >/dev/null
+  run python3 "$C" verdict "$P" "$BATS_TEST_TMPDIR"/r8-*.json; [ "$status" -eq 1 ]; [[ "$output" == *"exactly 3"* ]]
   answer 7 '(.criteria[] | select(.id != "copy")) |= (.score = 7)'; cp "$BATS_TEST_TMPDIR/a.json" "$BATS_TEST_TMPDIR/r-low.json"
-  run python3 "$C" verdict "$P" "$BATS_TEST_TMPDIR"/r*.json; [ "$status" -eq 3 ]; jq -e '.accepted == false and .lowest_rating < 7.5' <<<"$output" >/dev/null
+  rm "$(ls "$BATS_TEST_TMPDIR"/r9-*.json)"
+  run python3 "$C" verdict "$P" "$BATS_TEST_TMPDIR"/r*.json; [ "$status" -eq 3 ]; jq -e '.accepted == false and .lowest_rating < 7.5 and .verdict == "nepřijato"' <<<"$output" >/dev/null
 }

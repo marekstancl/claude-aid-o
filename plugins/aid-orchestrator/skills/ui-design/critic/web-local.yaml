@@ -1,6 +1,7 @@
 # Měřítko kritika pro typ „prezentační web lokální služby“ (P113a, 12. 10. 2026).
 # Kritik práh akceptace NEZNÁ (je jen v aid-ui-critic.py); hodnotí podle kotev s důkazem.
-# Kotva = pozorovatelné podmínky. Mezihodnota (5, 7, 9) = splněná nižší kotva a část podmínek vyšší.
+# Kotva = pozorovatelné podmínky. Mezihodnota (5, 7, 9) = splněná nižší kotva a část podmínek vyšší; 1-3 = ani kotva 4 (anchor null).
+# Rychlost načtení měří brána (aid-ui-verify), ne kritik.
 type: web-local
 title: "Prezentační web lokální služby"
 persona:
@@ -18,15 +19,15 @@ criteria:
       4: "Působí jako šablona: obecné plochy nebo cizí fotky, žádná nálada podniku; nic se neliší od konkurence."
       6: "Čistý a jednotný vzhled značky, ale sterilní: chybí obraz místa, lidí nebo práce; první obrazovka neřekne, proč právě sem."
       8: "První obrazovka má vlastní atmosféru (obraz, motiv nebo pohyb vázaný na podnik) a do 5 s řekne co, kde a proč sem; vzhled je jednotný na všech stránkách."
-      10: "Nezaměnitelné: atmosféra podniku je cítit z každé stránky, obraz i pohyb mají důvod, detailní řemeslo (typografie, rytmus, mikrointerakce) bez jediné šablonovité části."
+      10: "Navíc aspoň tři prvky vlastní jen tomuto podniku (obraz, motiv, pohyb, text) se vracejí na všech stránkách; žádná sekce by nešla přenést na web konkurence beze změny."
   - id: trust
     name: "Důvěra a doklady"
     weight: 15
     anchors:
       4: "Chybí kdo za podnikem stojí, kontakty nebo údaje firmy; tvrzení bez dokladu."
       6: "Kontakty a kdo podnik vede jsou, ale doklady slabé (žádná hodnocení, kvalifikace jen zmíněná, chybí identifikace firmy)."
-      8: "Kdo za podnikem stojí, kvalifikace, hodnocení se zdrojem a datem, úplné údaje firmy; každé tvrzení dohledatelné."
-      10: "Navíc konkrétní důkazy práce (postupy, výsledky, ocenění) podané přirozeně, bez přehánění; důvěra roste s každou stránkou."
+      8: "Kdo za podnikem stojí a jak ho zastihnout je jasné; kvalifikace, hodnocení a údaje firmy, které jsou v podkladech, jsou podané se zdrojem; každé tvrzení dohledatelné. Co v podkladech chybí, nesnižuje známku (patří do readiness)."
+      10: "Navíc důkazy práce z podkladů (postupy, výsledky, ocenění) stojí u služeb, ke kterým patří, bez přehánění."
   - id: offer_prices
     name: "Jasnost nabídky a cen"
     weight: 15
@@ -34,7 +35,7 @@ criteria:
       4: "Není jasné, co podnik dělá a za kolik."
       6: "Služby a ceny jsou, ale hledá se v nich (dlouhé seznamy, nevysvětlené zkratky, nejasné jednotky)."
       8: "Služby přehledně podle potřeby zákazníka, ceny u služeb i v úplném ceníku, zkratky a jednotky vysvětlené, co je v ceně a co ne."
-      10: "Zákazník bez otázky ví, co ho čeká a kolik zaplatí; srovnání nebo průvodce výběrem služby."
+      10: "Navíc průvodce výběrem (podle potíže nebo situace) a u každé služby, co zákazníka čeká krok za krokem a kolik zaplatí."
   - id: booking
     name: "Cesta k objednání"
     weight: 15
@@ -42,15 +43,15 @@ criteria:
       4: "Objednání nejde nebo jen přes e-mailovou aplikaci; telefon schovaný."
       6: "Telefon a formulář jsou, ale formulář nic nedoručí nebo chybí stavy; cesta má zbytečné kroky."
       8: "Z každé stránky do 2 kroků k objednání; formulář doručí zprávu a ukáže výsledek; telefon a e-mail klikací; je jasné, co se stane po odeslání."
-      10: "Objednání je nejsnazší věc na webu, i na mobilu jednou rukou; zákazník ví termín nebo kdy se ozvou."
+      10: "Navíc na mobilu tlačítko objednání stále v dosahu palce, formulář nejvýš 4 povinná pole a po odeslání konkrétně kdy se podnik ozve."
   - id: mobile
     name: "Mobil"
     weight: 10
     anchors:
       4: "Na mobilu se rozpadá rozložení nebo se nedá ovládat."
       6: "Funguje, ale je dlouhé, s malými cíli nebo prázdnými plochami."
-      8: "Mobil je promyšlený: hlavní akce v dosahu palce, dotykové cíle ≥ 44 px, žádné prázdné plochy, rychlé načtení."
-      10: "Mobil je lepší zážitek než počítač: zkratky, volání a navigace jedním dotykem."
+      8: "Mobil je promyšlený: hlavní akce v dosahu palce, dotykové cíle ≥ 44 px, žádné prázdné plochy."
+      10: "Navíc volání, cesta a objednání jedním dotykem z každé stránky a text čitelný bez přiblížení."
   - id: copy
     name: "Texty"
     weight: 10
@@ -58,15 +59,15 @@ criteria:
       4: "Obecné fráze, chyby, cizí slova, tvrzení bez dokladu."
       6: "Správně, ale ploše; opakování, technická slova, chybí odpovědi na obavy zákazníka."
       8: "Krátké, konkrétní texty v jazyce zákazníka, odpovídají na jeho otázky a obavy, bez chyb a bez nepodložených slibů."
-      10: "Texty mají hlas podniku, zákazník se v nich pozná a chce se objednat."
+      10: "Navíc každá stránka odpovídá na obavu zákazníka z podkladů konkrétní větou podniku; žádná věta by nešla použít na jiném webu beze změny."
   - id: findability
-    name: "Rychlost a dohledatelnost"
+    name: "Dohledatelnost"
     weight: 10
     anchors:
-      4: "Pomalé, chybí titulky a popisy, vyhledávač nepozná místo a služby."
-      6: "Rychlé, ale titulky a popisy nevyužité (délka, místo, služba), varování SEO."
-      8: "Rychlé, každá stránka má vlastní titulek a popis s místem a službou, strukturovaná data podniku, žádné varování SEO."
-      10: "Navíc obsah na hlavní dotazy zákazníků a místní signály (profil, katalogy, odkazy) sladěné."
+      4: "Chybí titulky a popisy, vyhledávač nepozná místo a služby."
+      6: "Titulky a popisy jsou, ale obecné (bez místa nebo služby) nebo stejné na více stránkách."
+      8: "Každá stránka má vlastní titulek a popis s místem a službou (v souborech webu), strukturovaná data podniku, nadpisy říkají, co zákazník hledá."
+      10: "Navíc stránka nebo sekce na každý hlavní dotaz z podkladů (služba + místo) s odkazy mezi nimi; profily a katalogy z podkladů jsou odkázané."
   - id: accessibility
     name: "Přístupnost"
     weight: 5
@@ -74,7 +75,7 @@ criteria:
       4: "Bez klávesnice nejde, kontrast nečitelný, obsah se ztrácí."
       6: "Základ funguje, ale něco vypadne (fokus, kontrast, omezení pohybu)."
       8: "Klávesnice, čtečka, kontrast a omezení pohybu fungují na všech stránkách."
-      10: "Navíc srozumitelné pro starší a nervózní zákazníky (velikost textu, jasná struktura)."
+      10: "Navíc čitelné při 200 % přiblížení bez vodorovného posunu, nadpisy v pořadí, odkazy pojmenované cílem."
 task_test:
   - id: price
     task: "Najdi cenu {price_item}."
