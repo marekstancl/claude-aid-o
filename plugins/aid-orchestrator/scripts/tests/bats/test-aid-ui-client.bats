@@ -67,11 +67,17 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WE
   run python3 "$CL" critic "$P" --web "$W" --out "$T/r1"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.provider == "codex" and .quality_score == 8' <<<"${lines[-1]}" >/dev/null
   [ "$(cat "$T/codex-cwd")" = "$T/r1/bundle" ]; [ -f "$T/r1/bundle/site/cennik/index.html" ]; [ ! -e "$T/r1/bundle/.aid-ui" ]
+  jq -se 'length == 1 and .[0].provider == "codex" and .[0].billing == "subscription" and .[0].purpose == "critic:critic" and .[0].usd > 0' "$P/.aid-ui/costs.jsonl" >/dev/null
+  [ ! -e "$T/r1/bundle/podklady" ]; ! grep -q "podklady/facts.yaml" "$T/r1/prompt.md"   # no facts register: none in the bundle
+  # the confirmed facts go with the web (the frozen context may be older than a confirmation)
+  echo 'novi: {value: "áno", source: "klient 11. 10."}' > "$P/docs/content/facts.yaml"
+  python3 "$CL" critic "$P" --web "$W" --out "$T/r1f" >/dev/null
+  cmp -s "$P/docs/content/facts.yaml" "$T/r1f/bundle/podklady/facts.yaml"; grep -q "podklady/facts.yaml" "$T/r1f/prompt.md"
+  jq -e '.facts_sha | length == 64' "$T/r1f/run.json" >/dev/null; rm "$P/docs/content/facts.yaml"
   [ "$(cat "$T/codex-key")" = none ]
   jq -e '.kind == "critic" and (.site_sha | length) == 64 and .frozen_sha == $f and (.images | length) == 4 and .score.accepted == true
          and (.pages | index($w + "cennik/")) != null' --arg w "$W" --arg f "$(jq -r .sha256 "$P/.aid-ui/critic/frozen.json")" "$T/r1/run.json" >/dev/null
   grep -q "cennik-390.png" "$T/r1/prompt.md"; ! grep -qiE "akcept|threshold|8/10" "$T/r1/prompt.md"
-  jq -se 'length == 1 and .[0].provider == "codex" and .[0].billing == "subscription" and .[0].purpose == "critic:critic" and .[0].usd > 0' "$P/.aid-ui/costs.jsonl" >/dev/null
   # an audit is the same bundle, recorded as an audit
   run python3 "$CL" critic "$P" --web "$W" --audit --out "$T/r2"; [ "$status" -eq 0 ]
   jq -e '.kind == "audit"' "$T/r2/run.json" >/dev/null

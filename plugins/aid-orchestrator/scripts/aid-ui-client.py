@@ -243,6 +243,14 @@ def critic(project, web, audit, out):
     os.makedirs(out, exist_ok=True)
     bundle = os.path.join(out, "bundle")
     shutil.copytree(site, os.path.join(bundle, "site"), dirs_exist_ok=True)   # the critic's whole world: the web
+    # and the facts the client confirmed (the frozen context may predate a confirmation: Coufal round 1 flagged two
+    # facts the client had confirmed the day before as unconfirmed)
+    facts_src = os.path.join(project, "docs", "content", "facts.yaml")
+    facts_sha = None
+    if os.path.isfile(facts_src):
+        os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
+        shutil.copyfile(facts_src, os.path.join(bundle, "podklady", "facts.yaml"))
+        facts_sha = sha_file(facts_src)
     pages = site_pages(site)
     base = web.rstrip("/") + "/"
     # the address must serve this site: its home page is byte for byte site/index.html (or the rating would be
@@ -264,7 +272,10 @@ def critic(project, web, audit, out):
         die("no rating without a desktop and a mobile shot of every page; missing: " + ", ".join(n for n in want if n not in names))
     prompt = (role + "\n\n# Hodnocený web\n\nŽivý web: " + base + "\nStránky:\n" + "\n".join("- " + u for u in urls)
               + "\n\nSoubory webu máš v pracovním adresáři v `site/` (jen ke čtení; texty, titulky, popisy). Nic mimo"
-                " pracovní adresář nečti.\n\n# Přiložené snímky (celá stránka; 1440 = počítač, 390 = mobil)\n"
+                " pracovní adresář nečti."
+              + ("\n\nRegistr faktů, které podnik potvrdil (hodnota, zdroj, kdo a kdy potvrdil), je v `podklady/facts.yaml`."
+                 " Má přednost před staršími podklady výše: co je v něm potvrzené, není nepodložené tvrzení." if facts_sha else "")
+              + "\n\n# Přiložené snímky (celá stránka; 1440 = počítač, 390 = mobil)\n"
               + "\n".join("- " + os.path.basename(i) for i in images))
     with open(os.path.join(out, "prompt.md"), "w", encoding="utf-8") as f:
         f.write(prompt)
@@ -282,7 +293,7 @@ def critic(project, web, audit, out):
         return {"answer": a, "score": json.loads(s.stdout)}, None
 
     got, rec = ask(project, prompt, images, bundle, out, valid, "critic:" + kind)
-    run = {"kind": kind, "web": base, "site_sha": site_sha(site), "frozen_sha": frozen["sha256"], "images": image_meta(images),
+    run = {"kind": kind, "web": base, "site_sha": site_sha(site), "frozen_sha": frozen["sha256"], "facts_sha": facts_sha, "images": image_meta(images),
            "pages": urls, "at": now(), **rec}
     if got:
         wj(os.path.join(out, "answer.json"), got["answer"])
