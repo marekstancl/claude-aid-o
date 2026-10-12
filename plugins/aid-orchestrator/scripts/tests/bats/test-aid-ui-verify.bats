@@ -299,6 +299,8 @@ copy_reviewed() {
   # the right slots: exact ratio, round, aria-hidden, icon only, position relative; a photo put in moves nothing
   cp "$FX/fixed/index.html" "$SITE/index.html"
   sed -i "s|</main>|<div data-aid-photo=\"a\" aria-hidden=\"true\" style=\"position:relative;overflow:hidden;aspect-ratio:4/5;width:200px\">$cam</div><div data-aid-photo=\"b\" aria-hidden=\"true\" style=\"position:relative;overflow:hidden;aspect-ratio:1/1;width:120px;border-radius:50%\">$cam</div><div data-aid-photo=\"c\" aria-hidden=\"true\" style=\"position:relative;aspect-ratio:3/2;width:300px\">$cam</div><div data-aid-photo=\"d\" aria-hidden=\"true\" style=\"position:relative;aspect-ratio:1/1;width:150px\">$cam</div></main>|" "$SITE/index.html"
+  # a fixed progress bar and an element that moves by itself are not the photo's doing
+  sed -i 's|</main>|<div id="pb" style="position:fixed;top:0;left:0;height:3px;width:10%;background:#1a1a1a"></div><p id="mv" style="position:relative">pohyb</p><script>setInterval(function(){pb.style.width=(Math.random()*100)+"%";mv.style.left=(Math.random()*20)+"px"},40)</script></main>|' "$SITE/index.html"
   verify; [ "$(st photo_slots index.html)" == pass ] || { jq -c '.rows[] | select(.check == "photo_slots")' "$RES"; return 1; }
   # no photos register but a slot on the page: fail; no slot and no register: N/A
   bash "$SC/aid-ui-tool.sh" verify --state "$T/state.json" --checks "$T/ck.json" --site "$SITE" --base "$url" --out "$T/out" --seo "$SC/aid-ui-seo-check.py" >/dev/null

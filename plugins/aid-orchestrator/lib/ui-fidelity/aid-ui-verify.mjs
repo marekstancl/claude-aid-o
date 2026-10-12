@@ -234,6 +234,8 @@ async function inPage(page) {
     for (let i = 0; i < boxes.length && o.overlaps.length < 5; i++) for (let j = i + 1; j < boxes.length; j++) {
       const a = boxes[i], b = boxes[j];
       if (a.e.contains(b.e) || b.e.contains(a.e)) continue;
+      // inside one photo slot (FB-30) the icon over the brand mark is the slot's decoration, not an overlap
+      const sa = a.e.closest('[data-aid-photo]'); if (sa && sa === b.e.closest('[data-aid-photo]')) continue;
       const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left), h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
       if (w > 2 && h > 2) { o.overlaps.push(`${name(a.e)} x ${name(b.e)}`); if (o.overlaps.length >= 5) break; }
     }
@@ -801,8 +803,17 @@ async function photoSlots(browser, url, viewport) {
     const swap = await p.evaluate(async () => {
       const height = () => document.documentElement.scrollHeight, before = height(), moved = [];
       // every element outside the slots: where it is before the photos go in (a shift of any of them is a layout shift)
-      const others = [...document.body.querySelectorAll('*')].filter(e => !e.closest('[data-aid-photo]')).slice(0, 2000);
-      const pos = others.map(e => { const b = e.getBoundingClientRect(); return [b.left + scrollX, b.top + scrollY, b.width, b.height]; });
+      // fixed panels (a scroll progress bar) and anything that moves on its own (motion still running) are left out:
+      // the baseline is taken twice, and an element that moved between the two is not the photo's doing
+      const at = e => { const b = e.getBoundingClientRect(); return [b.left + scrollX, b.top + scrollY, b.width, b.height]; };
+      const differs = (a, b) => a.some((v, k) => Math.abs(v - b[k]) > 1);
+      let others = [...document.body.querySelectorAll('*')].filter(e => !e.closest('[data-aid-photo]')
+        && ![e, ...(function* up(x) { while ((x = x.parentElement)) yield x; })(e)].some(x => ['fixed', 'sticky'].includes(getComputedStyle(x).position))).slice(0, 2000);
+      const p0 = others.map(at);
+      await new Promise(r => setTimeout(r, 300));
+      const keep = others.map((e, i) => !differs(at(e), p0[i]));
+      others = others.filter((e, i) => keep[i]);
+      const pos = others.map(at);
       const c = document.createElement('canvas'); c.width = 300; c.height = 97;
       for (const e of document.querySelectorAll('[data-aid-photo]')) {
         if (e.querySelector('img')) continue;
@@ -816,8 +827,7 @@ async function photoSlots(browser, url, viewport) {
           moved.push(`${e.dataset.aidPhoto}: the photo does not cover the slot (the slot needs position: relative)`);
         else if (getComputedStyle(e).overflow === 'visible' && getComputedStyle(e).borderTopLeftRadius !== '0px') moved.push(`${e.dataset.aidPhoto}: a rounded slot does not clip the photo (overflow: hidden)`);
       }
-      const shifted = others.filter((e, i) => { const b = e.getBoundingClientRect(), q = pos[i];
-        return Math.abs(b.left + scrollX - q[0]) > 1 || Math.abs(b.top + scrollY - q[1]) > 1 || Math.abs(b.width - q[2]) > 1 || Math.abs(b.height - q[3]) > 1; });
+      const shifted = others.filter((e, i) => differs(at(e), pos[i]));
       if (shifted.length) moved.push(`putting the photos in moves ${shifted.length} other element(s), first ${shifted[0].tagName.toLowerCase()}${shifted[0].className ? '.' + String(shifted[0].className).split(' ')[0] : ''}`);
       return { moved, grew: height() - before };
     });
