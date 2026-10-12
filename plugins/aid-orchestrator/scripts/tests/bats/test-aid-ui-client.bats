@@ -28,7 +28,7 @@ PY
 [[ "$1" == shot ]] || exit 2; shift; out="$1"; shift; mkdir -p "$out"; files=()
 while (($#)); do case "$1" in --cookie|--studio) [[ "$1" == --studio ]] && { printf x > "$out/studio-1440.png"; files+=("\"$out/studio-1440.png\""); }; shift 2;;
   *) n="$(sed -E 's#https?://[^/]+/?##; s#/$##; s#[^a-z0-9]+#-#g' <<<"$1")"; n="${n:-index}"
-     for w in 1440 390; do printf x > "$out/$n-$w.png"; files+=("\"$out/$n-$w.png\""); done; shift;; esac; done
+     for w in 1440 390; do [[ "${FAKE_SHOT_DROP:-}" == "$n-$w" ]] && { files+=("\"ERR $n: timeout\""); continue; }; printf x > "$out/$n-$w.png"; files+=("\"$out/$n-$w.png\""); done; shift;; esac; done
 IFS=,; echo "{\"files\": [${files[*]}]}"
 EOF
   # codex: FAKE_CODEX = valid | limit | empty | invalid; records its prompt, cwd and whether it saw the key
@@ -84,7 +84,7 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; }
   jq -e '.stand_in_reason == "no answer"' "$T/s-empty/run.json" >/dev/null
   jq -e '(.stand_in_reason | startswith("invalid answer twice")) and (.attempts | length) == 3' "$T/s-invalid/run.json" >/dev/null
   [ "$(cat "$T/codex-n")" = 2 ]   # an invalid answer goes back to Codex once before the stand-in
-  jq -se 'map(select(.provider == "claude")) | length == 3 and .[0].usd == 0.02' "$P/.aid-ui/costs.jsonl" >/dev/null
+  jq -se 'map(select(.provider == "claude")) | length == 3 and .[0].reported_usd == 0.02 and .[0].usd == 0.003' "$P/.aid-ui/costs.jsonl" >/dev/null
 }
 
 @test "critic: both providers failing, an answer off the frozen schema, or no frozen critic -> exit 1 with the record" {
@@ -95,6 +95,9 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; }
   [ "$status" -eq 1 ]; jq -e '.attempts[0].error | contains("does not sit on its anchor")' "$T/f2/run.json" >/dev/null
   AID_UI_STANDIN=off FAKE_CODEX=limit run python3 "$CL" critic "$P" --web http://127.0.0.1:1/ --out "$T/f3"
   [ "$status" -eq 1 ]; [ ! -e "$T/claude-prompt" ] || [ "$(jq '.attempts | length' "$T/f3/run.json")" -eq 1 ]
+  # a page without its mobile shot: no rating, the model is never asked
+  rm -f "$T/codex-n"; FAKE_SHOT_DROP=cennik-390 run python3 "$CL" critic "$P" --web http://127.0.0.1:1/ --out "$T/f4"
+  [ "$status" -eq 1 ]; [[ "$output" == *"missing: cennik-390.png"* ]]; [ ! -e "$T/codex-n" ]
   Q="$T/q"; mkdir -p "$Q/site"; echo x > "$Q/site/index.html"
   run python3 "$CL" critic "$Q" --web http://127.0.0.1:1/; [ "$status" -eq 1 ]; [[ "$output" == *"frozen"* ]]
 }
@@ -157,4 +160,50 @@ PY
   run python3 "$SC/aid-ui-logo-gen.py" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 1 ]
   [[ "$output" == *"image budget 2.00 USD"* ]]; [ "$(wc -l < "$P/.aid-ui/costs.jsonl")" -eq 1 ]
   AID_UI_IMAGE_BUDGET_USD=1.5 run python3 "$CL" costs "$P"; jq -e '.api_usd == 1.99 and .image_budget_left_usd == -0.49' <<<"$output" >/dev/null
+}
+
+@test "image budget: the reservation is atomic - at the boundary and with parallel generators the project never passes the budget" {
+  python3 - "$SC/lib" "$P" <<'PY'
+import sys, multiprocessing as mp
+sys.path.insert(0, sys.argv[1]); import aid_ui_costs as c
+P = sys.argv[2]
+assert c.reserve(P, {"provider": "openai", "usd": 1.96}) is None
+assert c.reserve(P, {"provider": "openai", "usd": 0.04}) is None          # exactly 2.00 fits
+assert "image budget 2.00" in c.reserve(P, {"provider": "openai", "usd": 0.001})
+open(c.path(P), "w").close()
+def one(_): return c.reserve(P, {"provider": "openai", "usd": 0.15}) is None
+with mp.Pool(20) as pool: ok = sum(pool.map(one, range(20)))
+assert ok == 13 and c.api_spent(P) == 1.95, (ok, c.api_spent(P))
+c.tokens(P, "codex", None, {"input": 1000, "cached": 0, "output": 0}, "x")
+assert c.api_spent(P) == 1.95                                              # subscription rows never count against it
+PY
+}
+
+@test "shot: the real browser tool takes full pages at 1440 and 390 with the mobile layout" {
+  [ -f "$SC/../lib/ui-fidelity/node_modules/.aid-installed" ] || skip "lib/ui-fidelity not installed here"
+  W="$T/w"; mkdir -p "$W"
+  printf '<html><style>main{display:grid;grid-template-columns:1fr 1fr}@media(max-width:600px){main{grid-template-columns:1fr}}div{height:900px;border:1px solid}</style><main><div>a</div><div>b</div><div>c</div><div>d</div></main></html>' > "$W/index.html"
+  PORT=$(( 39100 + RANDOM % 300 )); python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$W" >/dev/null 2>&1 & SRV=$!
+  for _ in $(seq 50); do curl -s "http://127.0.0.1:$PORT/" >/dev/null && break; sleep 0.1; done
+  run bash "$SC/aid-ui-tool.sh" shot "$T/sh" "http://127.0.0.1:$PORT/"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  python3 - "$T/sh" <<'PY'
+import sys, struct
+dim = lambda f: struct.unpack(">II", open(f, "rb").read(24)[16:24])
+d, m = dim(sys.argv[1] + "/index-1440.png"), dim(sys.argv[1] + "/index-390.png")
+assert d[0] == 1440 and m[0] == 390, (d, m)
+assert m[1] > d[1] * 1.8, (d, m)   # one column on the phone: about twice as tall as the two-column desktop
+PY
+}
+
+@test "answer: a card preview read from the payload never leaves the studio folder" {
+  mkdir -p "$P/.aid-ui/studio/previews"; echo x > "$P/.aid-ui/studio/previews/a.png"; echo key > "$P/secret"
+  echo '{"questions":[{"id":"q1","cards":[{"id":"a","preview":"previews/a.png"},{"id":"b","preview":"../../secret"}]}]}' > "$P/.aid-ui/studio/payload.json"
+  python3 - "$CL" "$P" <<'PY'
+import importlib.util, sys
+cl, proj = sys.argv[1], sys.argv[2]
+spec = importlib.util.spec_from_file_location("c", cl); m = importlib.util.module_from_spec(spec); sys.argv = ["x"]; spec.loader.exec_module(m)
+class S: project = proj
+cs = m.question_cards(S(), {"cards": []}, {"id": "q1"})
+assert cs[0]["_file"].endswith("previews/a.png") and cs[1]["_file"] is None, cs
+PY
 }

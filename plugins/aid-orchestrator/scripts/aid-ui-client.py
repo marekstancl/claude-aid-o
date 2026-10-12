@@ -247,6 +247,12 @@ def critic(project, web, audit, out):
     base = web.rstrip("/") + "/"
     urls = [base + p for p in pages[:MAX_PAGES]]
     images = shots(os.path.join(out, "shots"), urls)
+    names = {os.path.basename(i) for i in images}
+    want = [(re.sub(r"[^a-z0-9]+", "-", p.strip("/"), flags=re.I) or "index") + "-%d.png" % w for p in pages[:MAX_PAGES] for w in (1440, 390)]
+    if [n for n in want if n not in names]:   # the critic rates the live web on both widths, never from files alone
+        wj(os.path.join(out, "run.json"), {"kind": kind, "web": base, "pages": urls, "at": now(), "error": "missing shots",
+                                          "missing": [n for n in want if n not in names]})
+        die("no rating without a desktop and a mobile shot of every page; missing: " + ", ".join(n for n in want if n not in names))
     prompt = (role + "\n\n# Hodnocený web\n\nŽivý web: " + base + "\nStránky:\n" + "\n".join("- " + u for u in urls)
               + "\n\nSoubory webu máš v pracovním adresáři v `site/` (jen ke čtení; texty, titulky, popisy). Nic mimo"
                 " pracovní adresář nečti.\n\n# Přiložené snímky (celá stránka; 1440 = počítač, 390 = mobil)\n"
@@ -335,8 +341,8 @@ class Studio:
         return d
 
     def preview(self, q, c, n, out):
-        if c.get("_file"):
-            if n == 2:
+        if "_file" in c:   # a card read from the payload: its own preview file, or nothing when the path left the studio
+            if n == 2 or not c["_file"]:
                 return None
             dst = os.path.join(out, "card-%s%s" % (c["id"], os.path.splitext(c["_file"])[1]))
             try:
@@ -383,7 +389,10 @@ def question_cards(s, d, q):
         return cards
     try:   # with several open questions the studio lists one's cards; read this one's from the payload
         pq = [x for x in json.load(open(os.path.join(s.project, ".aid-ui/studio/payload.json")))["questions"] if x["id"] == q["id"]]
-        return [dict(c, question=q["id"], _file=os.path.join(s.project, ".aid-ui/studio", c["preview"])) for c in (pq[0].get("cards") or [])] if pq else []
+        sd = os.path.realpath(os.path.join(s.project, ".aid-ui", "studio"))
+        inside = lambda p: p if p.startswith(sd + os.sep) and os.path.isfile(p) else None   # a preview path never leaves the studio folder
+        return [dict(c, question=q["id"], _file=inside(os.path.realpath(os.path.join(sd, str(c.get("preview") or "")))))
+                for c in (pq[0].get("cards") or [])] if pq else []
     except (OSError, ValueError, KeyError):
         return []
 

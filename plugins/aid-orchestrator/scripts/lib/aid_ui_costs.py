@@ -52,7 +52,22 @@ def image_room(project, unit):
     return None
 
 
-def tokens(project, provider, model, usage, purpose, usd=None):
+def reserve(project, row):
+    """Book one paid call of row['usd'] before it is sent, atomically: the read, the budget check and the append
+    happen under one exclusive lock, so two generators never both pass on the same spend. None = booked, else why not."""
+    os.makedirs(os.path.dirname(path(project)), exist_ok=True)
+    with open(path(project), "a+", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.seek(0)
+        spent = round(sum((json.loads(x).get("usd") or 0) for x in f if x.strip() and json.loads(x).get("billing") == "api"), 4)
+        cap = image_budget()
+        if spent + row["usd"] > cap + 1e-9:
+            return "image budget %.2f USD for the project reached (spent %.2f, next image %.3f)" % (cap, spent, row["usd"])
+        f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "billing": "api", **row}, ensure_ascii=False) + "\n")
+    return None
+
+
+def tokens(project, provider, model, usage, purpose, reported_usd=None):
     """A subscription call at its list-price equivalent; usage {input, cached, output} in tokens (input incl. cached)."""
     key = "codex" if provider == "codex" else "claude:" + ("opus" if "opus" in (model or "") else "sonnet")
     p = TOKEN_PRICES[key]
@@ -61,7 +76,7 @@ def tokens(project, provider, model, usage, purpose, usd=None):
     return add(project, {"provider": provider, "model": model or "default", "billing": "subscription", "purpose": purpose,
                          "units": {"input": inp, "cached": cached, "output": out},
                          "unit_usd_per_1m": {k: p[k] for k in ("input", "cached", "output")}, "price_list": p["list"],
-                         "usd": usd if usd is not None else est})
+                         "usd": est, **({"reported_usd": reported_usd} if reported_usd is not None else {})})
 
 
 def summary(project):

@@ -211,14 +211,12 @@ def main():
             die("%d file(s) already exist in .aid-ui/logo/gen (first: %s); use --force to overwrite" % (len(clash), os.path.basename(clash[0])))
     capped = False
 
-    def send_one(what):
-        """Book one image before it is sent (billed or not); refuse it over the project's image budget."""
-        why = costs.image_room(project, unit)
-        if why:
-            return why
-        costs.add(project, {"provider": "openai", "model": model, "billing": "api", "purpose": "logo:" + what,
-                            "units": {"images": 1, "references": len(refs)}, "unit_usd": unit, "price_list": PRICE_LIST, "usd": unit})
-        return None
+    lockup_unit = PRICE[model][quality] + REF_USD   # the lockup call carries one reference: the mark just made
+
+    def send_one(what, nrefs, cost):
+        """Book one image before it is sent (billed or not), atomically against the project's image budget."""
+        return costs.reserve(project, {"provider": "openai", "model": model, "purpose": "logo:" + what,
+                                       "units": {"images": 1, "references": nrefs}, "unit_usd": cost, "price_list": PRICE_LIST, "usd": cost})
 
     for slot, concept in spec["slots"].items():
         prompt = prompt_for(slots[slot], concept, spec)
@@ -229,12 +227,11 @@ def main():
                 rec["errors"].append("cost cap %.2f USD reached before variant %d" % (max_cost, i))
                 capped = True
                 break
-            budget = costs.image_room(project, unit * (2 if two else 1))
+            budget = costs.image_room(project, unit + (lockup_unit if two else 0)) or send_one(slot, len(refs), unit)
             if budget:
                 rec["errors"].append(budget + " before variant %d" % i)
                 capped = True
                 break
-            send_one(slot)
             log["requested"] += 1
             log["estimated_usd"] = round(log["estimated_usd"] + unit, 3)   # counted when sent, billed or not
             try:
@@ -245,9 +242,13 @@ def main():
                         f.write(mark_png)
                     os.replace(mpath + ".part", mpath)
                     rec["marks"].append(os.path.relpath(mpath, project))
+                    budget = send_one(slot + ":lockup", 1, lockup_unit)
+                    if budget:
+                        rec["errors"].append(budget + " before the lockup of variant %d" % i)
+                        capped = True
+                        break
                     log["requested"] += 1
-                    log["estimated_usd"] = round(log["estimated_usd"] + unit, 3)
-                    send_one(slot + ":lockup")
+                    log["estimated_usd"] = round(log["estimated_usd"] + lockup_unit, 3)
                     png = generate(key, model, prompt["lockup"], quality, "full", [mpath], spec.get("size", "1536x1024"))
                 else:
                     png = generate(key, model, prompt, quality, mode, refs, spec.get("size", "1024x1024"))
