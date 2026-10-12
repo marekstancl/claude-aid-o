@@ -58,6 +58,13 @@ teardown() {
 }
 
 # 3. complete without matching start exits 2
+@test "P108: the copy review stand-in focus (copy-review-standin) is accepted; a free focus is still refused" {
+  run bash "$SCRIPT" start --focus copy-review-standin --agent-id aid-orchestrator:reviewer-light --evidence-dir "$EVID"
+  [ "$status" -eq 0 ]
+  run bash "$SCRIPT" start --focus kontrola-textu --agent-id aid-orchestrator:reviewer-light --evidence-dir "$EVID"
+  [ "$status" -ne 0 ]; [[ "$output" == *"allowed pattern"* ]]
+}
+
 @test "complete without matching start exits 2 (orphan)" {
   touch "${TMPDIR_TEST}/out.md"
   # Seed a pending file for an unrelated focus so we reach the orphan path,

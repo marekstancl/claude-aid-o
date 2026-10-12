@@ -1,0 +1,13 @@
+Impeccable
+Copyright Paul Bakaus and contributors
+https://github.com/pbakaus/impeccable
+
+This plugin contains material adopted from Impeccable 4.3.1:
+- references/adopted/impeccable-craft-floor.md (reference/craft-floor.md, header added)
+- rules marked "Impeccable" in the ecosystem standard
+  "Úlohy a stavy webové aplikace" (rewritten in Czech, not verbatim)
+
+Impeccable's SKILL.md declares "license: Apache 2.0" while its plugin.json
+declares "MIT"; no LICENSE or NOTICE file ships in the distributed plugin.
+AID treats the material under Apache License 2.0 (the stricter of the two):
+full text in Apache-2.0.txt next to this file.

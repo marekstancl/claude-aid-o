@@ -1,0 +1,9 @@
+viewports: [390, 768, 1440]
+browsers: [chromium, webkit]
+applies:
+  customer_page: {scope: project}   # one row for the whole project (P108: the handover comes after it passed)
+checks:
+  http_200: every page answers HTTP 200
+  axe: no serious or critical axe finding
+  app_task_states: task x state scenarios pass
+  customer_page: the customer page is of this build and holds no internal word

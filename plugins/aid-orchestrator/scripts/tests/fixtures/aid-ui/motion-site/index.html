@@ -1,0 +1,30 @@
+<!doctype html><html lang="cs"><head><meta charset="utf-8"><title>Pohyb</title>
+<style>
+body{margin:0;font-family:sans-serif}
+.intro{position:fixed;inset:0;background:#fff;display:grid;place-items:center;animation:leave .5s ease 1.2s both}
+.intro b{animation:pop .6s ease both}
+@keyframes pop{from{opacity:0;transform:scale(.8)}to{opacity:1;transform:none}}
+@keyframes leave{to{opacity:0;visibility:hidden}}
+.hero{height:100vh;background:#4d75a8;color:#fff;padding:40px}
+.hero h1{animation:fadeup .6s ease 1.4s both}
+@keyframes fadeup{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+.btn{display:inline-block;padding:12px 20px;background:#fff;color:#16327f;transition:background-color .3s ease,color .3s ease}
+.btn:hover,.btn:focus{background:#16327f;color:#fff}
+section{min-height:70vh;padding:40px}
+.reveal{opacity:0}.reveal.in{animation:fadeup .6s ease both}
+.badge{width:60px;height:60px;border:2px dashed #16327f;border-radius:50%;animation:spin 8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+body.leaving{animation:fadeout .25s ease both}
+@keyframes fadeout{to{opacity:0}}
+</style></head><body>
+<div class="intro" data-aid-intro><b>Pohyb</b></div>
+<div class="hero"><h1>Úvod</h1><a class="btn" href="druha.html" id="dal">Druhá stránka</a></div>
+<section class="reveal"><h2>Pod úvodem</h2><div class="badge"></div></section>
+<section class="reveal"><h2>Ještě níž</h2></section>
+<script>
+var intro=document.querySelector('.intro');
+try{if(sessionStorage.getItem('intro')==='1')intro.remove();else{sessionStorage.setItem('intro','1');setTimeout(function(){intro.remove()},1800)}}catch(e){}
+var io=new IntersectionObserver(function(es){es.forEach(function(en){if(en.isIntersecting){en.target.classList.add('in');io.unobserve(en.target)}})});
+document.querySelectorAll('.reveal').forEach(function(s){io.observe(s)});
+document.getElementById('dal').addEventListener('click',function(ev){ev.preventDefault();var h=this.href;document.body.classList.add('leaving');setTimeout(function(){location.href=h},260)});
+</script></body></html>

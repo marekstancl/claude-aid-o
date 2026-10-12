@@ -1,45 +1,93 @@
-/* Brand page base. Reads only the fixed --brand-* names (set in roles.css);
-   every read has a neutral fallback so the page is readable before tokens exist. */
-body {
-  margin: 0;
-  background: var(--brand-bg, #ffffff);
-  color: var(--brand-ink, #1a1a1a);
-  font-family: var(--brand-body-family, system-ui, sans-serif);
-  font-size: var(--brand-body-size, 1rem);
-  font-weight: var(--brand-body-weight, 400);
-  line-height: var(--brand-body-line-height, 1.5);
-  letter-spacing: var(--brand-body-letter-spacing, normal);
+/* Brand page base: the studio's look (paper, ink, patina and kinpaku of the studio page,
+   lib/aid-ui-studio/studio.html), so the PM's result reads as the same web as the studio.
+   The project's own brand shows inside the chapters (logo, swatches, type specimens,
+   screenshots) through the fixed --brand-* names set in roles.css; the frame stays neutral. */
+:root {
+  color-scheme: light;
+  --p-kinpaku: oklch(84% 0.19 80.46);
+  --p-patina: oklch(49% 0.11 190);
+  --p-paper: oklch(97.8% 0 0);
+  --p-raised: oklch(99.5% 0 0);
+  --p-deep: oklch(95% 0 0);
+  --p-gray: oklch(92% 0 0);
+  --p-ink: oklch(13% 0 0);
+  --p-text: oklch(22% 0 0);
+  --p-muted: oklch(46% 0 0);
+  --p-rule: oklch(13% 0 0 / 0.12);
+  --p-lift: 0 1px 1px oklch(13% 0 0 / 0.05), 0 2px 3px oklch(13% 0 0 / 0.04), 0 6px 12px oklch(13% 0 0 / 0.05);
+  --p-cap: inset 0 1px 0 oklch(100% 0 0 / 0.9), 0 1px 0 oklch(13% 0 0 / 0.14), 0 2px 3px oklch(13% 0 0 / 0.08);
+  --p-recess: inset 0 1px 3px oklch(13% 0 0 / 0.16), inset 0 -1px 0 oklch(100% 0 0 / 0.7);
+  --p-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --p-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
-header, nav, main { max-width: 60rem; margin: 0 auto; padding: 1rem; }
-h1, h2 {
-  font-family: var(--brand-display-family, system-ui, sans-serif);
-  font-weight: var(--brand-display-weight, 700);
-  line-height: var(--brand-display-line-height, 1.1);
-  letter-spacing: var(--brand-display-letter-spacing, normal);
-  overflow-wrap: anywhere;
-}
-h1 { font-size: var(--brand-display-size, 2.25rem); }
-nav ol { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; padding: 0; list-style: none; }
-a { color: var(--brand-accent, #1d4ed8); }
-a:focus-visible { outline: 2px solid var(--brand-accent, #1d4ed8); outline-offset: 2px; }
-section { padding: 2rem 0; border-top: 1px solid var(--brand-ink, #1a1a1a); }
-.status { font-size: 0.875rem; font-weight: 600; }
-[data-status="ceka"] .status::before { content: "Čeká"; }
-[data-status="navrh"] .status::before { content: "Návrh · "; }
-[data-status="schvaleno"] .status::before { content: "Schváleno · "; }
-.swatch {
-  display: inline-block;
-  width: 6rem;
-  height: 4rem;
-  margin: 0 0.5rem 0.5rem 0;
-  border: 1px solid var(--brand-ink, #1a1a1a);
-  vertical-align: top;
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--p-paper); color: var(--p-text); font: 15px/1.6 var(--p-font); padding: 1.8rem clamp(1rem, 5vw, 4rem) 3rem; overflow-x: clip; }
+header, nav[aria-label="Obsah"], main { max-width: 72rem; margin: 0 auto; }
+a { color: var(--p-patina); }
+:focus-visible { outline: 2px solid var(--p-patina); outline-offset: 3px; }
+img { max-width: 100%; height: auto; }
+
+/* The studio's tab bar (injected by the studio server; absent in the copy sent to a client). */
+.studio-tabs { display: flex; width: max-content; max-width: 100%; margin: 0 0 1.6rem max(0px, calc((100% - 72rem) / 2)); gap: 3px; padding: 3px; background: var(--p-gray); border: 1px solid var(--p-rule); border-radius: 6px; box-shadow: var(--p-recess); }
+.studio-tabs a { padding: 7px 14px; border-radius: 3px; font-size: .8125rem; font-weight: 600; color: var(--p-muted); text-decoration: none; }
+.studio-tabs a[aria-current] { color: var(--p-ink); background: var(--p-raised); box-shadow: var(--p-cap); }
+
+header { padding: 1rem 0 .4rem; }
+header::before { content: "Značka a produkt"; display: block; font-family: var(--p-mono); font-size: .6875rem; letter-spacing: .24em; text-transform: uppercase; color: var(--p-muted); margin-bottom: .5rem; }
+h1 { margin: 0; font-family: var(--brand-display-family, var(--p-font)); font-weight: var(--brand-display-weight, 650); font-size: clamp(2rem, 5vw, 3rem); letter-spacing: -0.025em; line-height: 1.1; color: var(--p-ink); overflow-wrap: anywhere; }
+h2 { margin: 0; font-size: 1.35rem; font-weight: 600; letter-spacing: -0.015em; color: var(--p-ink); }
+h3 { font-size: 1.05rem; font-weight: 600; color: var(--p-ink); margin: 1.2rem 0 .4rem; }
+
+/* Chapter index: the studio's recessed segmented track, wrapping on small screens. */
+nav[aria-label="Obsah"] { position: sticky; top: 0; z-index: 5; padding: .8rem 0; background: var(--p-paper); }
+nav ol { display: flex; flex-wrap: wrap; gap: 3px; margin: 0; padding: 3px; list-style: none; background: var(--p-gray); border: 1px solid var(--p-rule); border-radius: 6px; box-shadow: var(--p-recess); }
+nav ol a { display: block; padding: 6px 10px; border-radius: 3px; font-size: .75rem; font-weight: 500; color: var(--p-text); text-decoration: none; }
+nav ol a:hover { background: var(--p-raised); box-shadow: var(--p-cap); color: var(--p-ink); }
+
+main { display: flex; flex-direction: column; gap: 1.2rem; padding-top: 1rem; }
+section { scroll-margin-top: 4.5rem; background: var(--p-raised); border: 1px solid var(--p-rule); border-radius: 8px; box-shadow: var(--p-lift); padding: 1.4rem 1.5rem 1.5rem; }
+section > h2 { display: flex; align-items: baseline; gap: .8rem; flex-wrap: wrap; }
+.status { margin: .3rem 0 0; font-size: .8125rem; color: var(--p-muted); }
+.status::before { display: inline-block; margin-right: .5rem; padding: 2px 8px; border-radius: 3px; border: 1px solid var(--p-rule); font-size: .6875rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--p-ink); background: var(--p-deep); }
+[data-status="ceka"] .status::before { content: "Připravuji"; }
+[data-status="navrh"] .status::before { content: "Návrh"; border-color: var(--p-kinpaku); }
+[data-status="schvaleno"] .status::before { content: "Schváleno"; color: var(--p-raised); background: var(--p-patina); border-color: var(--p-patina); }
+/* A chapter not started yet stays one quiet line, not an empty box. */
+[data-status="ceka"] { padding: .9rem 1.5rem; box-shadow: none; background: transparent; }
+[data-status="ceka"] > h2 { font-size: 1rem; color: var(--p-muted); }
+[data-status="ceka"] .body:empty { display: none; }
+
+.body { margin-top: 1rem; max-width: 62rem; }
+.body > :first-child { margin-top: 0; }
+.body p, .body li { max-width: 46rem; }
+.body blockquote { margin: 1rem 0; padding: .8rem 1.1rem; border-left: 4px solid var(--p-kinpaku); background: var(--p-deep); border-radius: 0 6px 6px 0; font-size: 1.25rem; color: var(--p-ink); }
+.body figure { margin: 1rem 0; }
+.body figure img { border: 1px solid var(--p-rule); border-radius: 6px; }
+.body figcaption { font-size: .8125rem; color: var(--p-muted); margin-top: .4rem; }
+/* Chapter helpers: a row of figures (logo sizes, icons) and a dark tile for on-dark variants. */
+.body .row { display: flex; flex-wrap: wrap; gap: 2rem; align-items: flex-start; }
+.body .row figure { margin: 0; }
+/* a full-page screenshot shows its top; the whole page opens from the link around it */
+.body figure img { max-height: 32rem; object-fit: cover; object-position: top; }
+.body .on-dark { background: oklch(20% 0 0); padding: 1rem; border-radius: 8px; }
+.body .on-dark figcaption { color: oklch(85% 0 0); }
+.swatch { display: inline-flex; flex-direction: column; justify-content: flex-end; width: 7rem; height: 5rem; margin: 0 .5rem .5rem 0; padding: .4rem .5rem; border: 1px solid var(--p-rule); border-radius: 6px; vertical-align: top; font: .6875rem/1.3 var(--p-mono); }
+.body dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1.2rem; }
+.body dt { font-weight: 600; color: var(--p-ink); }
+.body dd { margin: 0; }
+.body table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+.body th, .body td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--p-rule); vertical-align: top; }
+.body th { font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; color: var(--p-muted); }
+@media (max-width: 40rem) {
+  section { padding: 1.1rem 1rem 1.2rem; }
+  .body table { display: block; overflow-x: auto; }
 }
 @media print {
-  nav { display: none; }
-  section { break-before: page; border-top: 0; }
-  /* two full-page screenshots plus the chapter heading fit one A4 page (120mm did not) */
+  .studio-tabs, nav { display: none; }
+  body { background: #fff; padding: 0; }
+  section { break-before: page; border: 0; box-shadow: none; }
+  [data-status="ceka"] { display: none; }
   img { max-height: 100mm; width: auto; max-width: 100%; }
-  img, figure { break-inside: avoid; }
+  img, figure, dl, tr { break-inside: avoid; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

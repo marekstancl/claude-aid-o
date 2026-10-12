@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://truhlarnadub.cz/sitemap.xml

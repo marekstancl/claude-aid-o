@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.117.0** (current) — běh rovnou z plánu: `/aid-run P<NNN>` jako jeden běh na `plan/<id>` bez EPIC souborů, `repo_roots` (cizí repo jako worktree), zrušení plánu až do FSM (P111)
+- **v2.118.0** (current) — /aid-ui do vydání: produkční web se studiem, branou, texty, design standardem a předáním; opravy z testu s klientem-agentem (obsah bez skriptu, formulář, schválení podle rozsahu změny, záskok Claude, blokace publikace) (P103, P108)
+- **v2.117.0** — běh rovnou z plánu: `/aid-run P<NNN>` jako jeden běh na `plan/<id>` bez EPIC souborů, `repo_roots` (cizí repo jako worktree), zrušení plánu až do FSM (P111)
 - **v2.116.1** — oprava: revize kroků zastupují revizi EPICu jen při vypnutém CP3
 - **v2.116.0** — levnější běh: revize kroku podle druhu změny, body hotovo po kroku a izolovaně v uzávěru, uzávěr se zadáním a dvěma rolemi, brány s testy projektu, CP3 vypnuté, cena běhu a plánu
 - **v2.115.0** — plán drží zadání: zadání jako soubor, plán nese body doslova, povinný kritik, jedno kolo kontroly plánu se zadáním, oprava po kole i rozšíření rozsahu proti zadání

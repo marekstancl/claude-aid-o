@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://pekarna-mlyn.cz/sitemap.xml

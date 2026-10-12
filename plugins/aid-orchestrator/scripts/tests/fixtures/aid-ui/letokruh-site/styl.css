@@ -1,0 +1,91 @@
+/* Truhlárna Dub — směr Letokruh. Tokeny: med, kůra, míza; písmo Bricolage Grotesque. */
+:root{
+  --honey:#c98f45; --honey-deep:#b57a33; --bark:#2a1d12; --sap:#f1e2c6; --sap-soft:#f7eedd; --moss:#44563a;
+  --r-pill:999px; --r-card:22px; --gutter:clamp(20px,5vw,64px); --measure:62ch;
+}
+*{box-sizing:border-box;margin:0}
+html,body{overflow-x:clip}
+body{font-family:"Bricolage Grotesque",system-ui,sans-serif;color:var(--bark);background:var(--sap-soft);font-size:1.0625rem;line-height:1.55;-webkit-font-smoothing:antialiased}
+img{display:block;max-width:100%;height:auto}
+a{color:inherit}
+:focus-visible{outline:3px solid var(--bark);outline-offset:3px;border-radius:4px}
+.skip{position:absolute;left:-9999px}.skip:focus{left:var(--gutter);top:8px;background:var(--sap);padding:8px 14px;z-index:9}
+
+/* hlavička */
+.top{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:22px var(--gutter);background:var(--honey)}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:800;font-size:1.2rem;white-space:nowrap}
+.mark{width:38px;height:38px;flex:none}
+.top nav{display:flex;gap:clamp(12px,2.2vw,30px);font-weight:700}
+.top nav a{text-decoration:none;white-space:nowrap;padding:6px 0;border-bottom:2px solid transparent}
+.top nav a:hover,.top nav a[aria-current="page"]{border-color:var(--bark)}
+
+/* úvodní obrazovka */
+.hero{position:relative;overflow:hidden;min-height:calc(100svh - 86px);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;padding:0 var(--gutter) 48px;background:var(--honey)}
+.ring{position:absolute;right:-12vw;top:50%;transform:translateY(-50%);width:min(78vw,980px);aspect-ratio:1;border-radius:50%;overflow:hidden;box-shadow:0 0 0 22px var(--honey),0 0 0 24px var(--bark),0 0 0 60px var(--honey),0 0 0 62px rgba(42,29,18,.55)}
+.ring img{width:100%;height:100%;object-fit:cover}
+.hero .copy{position:relative;z-index:1;max-width:min(560px,44vw)}
+h1{font-weight:800;font-size:clamp(2.7rem,6.4vw,6rem);line-height:.95;letter-spacing:-.03em;font-variation-settings:"opsz" 96;text-wrap:balance}
+.lede{margin-top:22px;font-size:1.18rem;max-width:30ch}
+.btn{display:inline-block;margin-top:30px;background:var(--bark);color:var(--sap);font-weight:700;padding:16px 28px;border-radius:var(--r-pill);text-decoration:none;white-space:nowrap}
+.btn:hover{background:#000}
+.cap{position:absolute;right:var(--gutter);bottom:16px;font-size:.8rem;color:var(--sap);z-index:1}
+
+/* sekce */
+section{padding:clamp(56px,9vw,112px) var(--gutter)}
+.eyebrowless h2,h2{font-weight:800;font-size:clamp(2rem,4vw,3.2rem);line-height:1;letter-spacing:-.02em;font-variation-settings:"opsz" 72;max-width:18ch}
+.intro{margin-top:18px;max-width:var(--measure);font-size:1.12rem}
+
+.offer{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:clamp(16px,2vw,28px);margin-top:44px;list-style:none;padding:0}
+.offer li{border-top:3px solid var(--bark);padding-top:18px}
+.offer h3{font-size:1.25rem;font-weight:800;line-height:1.15}
+.offer p{margin-top:8px}
+
+.work{background:var(--bark);color:var(--sap)}
+.work h2{color:var(--sap)}
+.steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:clamp(16px,2vw,28px);margin-top:48px;list-style:none;padding:0;counter-reset:s}
+.steps li{position:relative;padding-top:74px}
+.steps li::before{counter-increment:s;content:counter(s);position:absolute;top:0;left:0;width:56px;height:56px;border-radius:50%;border:2px solid var(--honey);display:grid;place-items:center;font-weight:800;font-size:1.3rem;color:var(--honey)}
+.steps h3{font-size:1.2rem;font-weight:800}
+.steps p{margin-top:6px;color:#e6d6b7}
+
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(24px,5vw,72px);align-items:center}
+.split figure{margin:0}
+.split figcaption{font-size:.8rem;margin-top:8px;color:#6b5a45}
+.why{background:var(--sap)}
+
+.cta-band{background:var(--honey);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:24px}
+.cta-band p{font-weight:800;font-size:clamp(1.5rem,3vw,2.2rem);line-height:1.1;max-width:22ch}
+.cta-band .btn{margin-top:0}
+
+/* O nás */
+.page-head{background:var(--honey);padding:clamp(48px,8vw,96px) var(--gutter)}
+.page-head .lede{max-width:44ch}
+.people{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:clamp(20px,3vw,40px);margin-top:40px}
+.person{background:var(--sap);border-radius:var(--r-card);padding:28px}
+.person .ringlet{width:64px;height:64px;color:var(--honey-deep)}
+.person h3{margin-top:14px;font-size:1.4rem;font-weight:800}
+.person .role{font-weight:700;color:var(--moss)}
+.person p{margin-top:10px}
+.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin-top:40px;list-style:none;padding:0}
+.facts li{border-top:3px solid var(--bark);padding-top:12px}
+.facts strong{display:block;font-size:1.5rem;font-weight:800}
+
+/* patička */
+.foot{background:var(--bark);color:var(--sap);padding:40px var(--gutter);display:grid;grid-template-columns:2fr 1fr 1fr;gap:24px;font-size:.95rem}
+.foot a{color:var(--sap)}
+.foot .legal{grid-column:1/-1;border-top:1px solid rgba(241,226,198,.3);padding-top:16px;font-size:.85rem;color:#d9c7a4}
+
+@media (max-width:900px){
+  .offer,.steps{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .split{grid-template-columns:1fr}
+  .foot{grid-template-columns:1fr}
+}
+@media (max-width:760px){
+  .top nav a:nth-child(-n+3){display:none}
+  .hero{grid-template-columns:1fr;align-items:end;padding-top:32px}
+  .ring{width:120vw;right:-50vw;top:36%;opacity:.4}
+  .hero .copy{max-width:none}
+  .people,.facts{grid-template-columns:1fr}
+}
+@media (max-width:480px){.offer,.steps{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}

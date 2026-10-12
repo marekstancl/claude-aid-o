@@ -1,0 +1,167 @@
+{
+ "tool": "aid-ui-motion",
+ "version": 1,
+ "url": "http://127.0.0.1:39931/index.html",
+ "observed_at": "2026-10-10T03:14:31.157Z",
+ "viewport": {
+  "width": 1440,
+  "height": 900,
+  "dpr": 1
+ },
+ "settle_ms": 3000,
+ "dir_sha256": null,
+ "keyframes": [
+  {
+   "name": "leave",
+   "scenarios": [
+    "load"
+   ],
+   "where": [
+    "overlay"
+   ],
+   "selectors": [
+    "div.intro"
+   ],
+   "duration_ms": 500,
+   "delay_ms": 1200,
+   "iteration": 1,
+   "intro": true,
+   "count": 1,
+   "frequency": "first_load_only"
+  },
+  {
+   "name": "pop",
+   "scenarios": [
+    "load"
+   ],
+   "where": [
+    "hero"
+   ],
+   "selectors": [
+    "b"
+   ],
+   "duration_ms": 600,
+   "delay_ms": 0,
+   "iteration": 1,
+   "intro": false,
+   "count": 1,
+   "frequency": "first_load_only"
+  },
+  {
+   "name": "spin",
+   "scenarios": [
+    "load"
+   ],
+   "where": [
+    "below"
+   ],
+   "selectors": [
+    "div.badge"
+   ],
+   "duration_ms": 8000,
+   "delay_ms": 0,
+   "iteration": "infinite",
+   "intro": false,
+   "count": 2,
+   "frequency": "every_load"
+  },
+  {
+   "name": "fadeup",
+   "scenarios": [
+    "load",
+    "scroll"
+   ],
+   "where": [
+    "below",
+    "hero"
+   ],
+   "selectors": [
+    "h1",
+    "section.reveal.in"
+   ],
+   "duration_ms": 600,
+   "delay_ms": 1400,
+   "iteration": 1,
+   "intro": false,
+   "count": 4,
+   "frequency": "every_load"
+  }
+ ],
+ "transitions": [
+  {
+   "property": "background-color",
+   "scenario": "focus",
+   "selectors": [
+    "a#dal.btn"
+   ],
+   "where": [
+    "hero"
+   ],
+   "duration_ms": 300,
+   "count": 1
+  },
+  {
+   "property": "color",
+   "scenario": "focus",
+   "selectors": [
+    "a#dal.btn"
+   ],
+   "where": [
+    "hero"
+   ],
+   "duration_ms": 300,
+   "count": 1
+  },
+  {
+   "property": "background-color",
+   "scenario": "hover",
+   "selectors": [
+    "a#dal.btn"
+   ],
+   "where": [
+    "hero"
+   ],
+   "duration_ms": 300,
+   "count": 2
+  },
+  {
+   "property": "color",
+   "scenario": "hover",
+   "selectors": [
+    "a#dal.btn"
+   ],
+   "where": [
+    "hero"
+   ],
+   "duration_ms": 300,
+   "count": 2
+  }
+ ],
+ "js_motion": [],
+ "page": {
+  "link": "http://127.0.0.1:39931/druha.html",
+  "libs": [],
+  "arrived_at": "http://127.0.0.1:39931/druha.html",
+  "leave": [
+   "transition:background-color@a#dal.btn",
+   "transition:color@a#dal.btn",
+   "keyframes:fadeout@body.leaving"
+  ],
+  "arrive": [
+   "keyframes:arrive@body"
+  ],
+  "observed": true
+ },
+ "libs": [],
+ "coverage": {
+  "stylesheets": 1,
+  "stylesheets_unreadable": [],
+  "iframes_skipped": [],
+  "shadow_roots_not_traversed": 0,
+  "hover_targets": 1,
+  "hover_cap": 60,
+  "scroll_steps": 3,
+  "errors": []
+ },
+ "sha256": "4cf6f6dfe6ca3db27dcb8e9699ee511e1ebda727b95b501b1a0c8f6a28a963e3"
+}

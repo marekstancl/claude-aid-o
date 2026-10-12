@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 628          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 657          # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
 
 # ── Plan amendments recorded here because this file is the TRACKED authority ──
 # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
@@ -4392,3 +4392,451 @@ enforcements:
     recovery: "The done-advance line next: prints."
     test_covers: "both mismatches refused with done_phase unchanged (test-aid-fsm.bats direct:)."
     test: "scripts/tests/bats/test-aid-fsm.bats"
+
+  - id: aid_ui_decide_refuses
+    type: 12
+    source: "scripts/aid-ui-state.sh"
+    instruction: "skills/ui-design/SKILL.md (Když rozhoduje agent sám)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That the agent calls decide at every place it decides without the PM (the skill text says where; test-aid-ui-skill-rules.bats checks the text names it), or that the outcome it records is true. A --reconstructed event is written after the fact and is marked so on the page, not proven."
+    description: "P106 Step 1 — aid-ui-state.sh decide records a decision the agent made without the PM as one line of .aid-ui/studio/history.jsonl ({by: agent, step, event, answer.decision decided}) under the same file lock as the studio server. It refuses a step that is not a payload step title or id, an empty or over-long title/outcome/why (80/120/300), --at without --reconstructed or malformed, a missing payload.json, and a lock not taken in 10 s; the same step, title and outcome recorded twice is one event."
+    recovery: "The refusal names the field or the step. Use a step title from payload.json steps[] (the six canonical titles of SKILL.md), shorten the text, or start the studio before recording."
+    test_covers: "decide appends one line and prints at, matches --step by title and id, refuses an unknown step, an empty field, a 121-character outcome and --at without --reconstructed (exit 2), is idempotent, exits 1 without payload.json and while another process holds the lock, stores a reconstructed --at (test-aid-ui-state.bats)."
+    test: "scripts/tests/bats/test-aid-ui-state.bats"
+
+  - id: aid_ui_steps_record_decisions
+    type: 12
+    source: "scripts/tests/bats/test-aid-ui-skill-rules.bats"
+    instruction: "skills/ui-design/SKILL.md (Když rozhoduje agent sám; MUST Rule 9)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 1
+    not_guaranteed: "That a running step actually calls decide - only that its text names the call where the step decides without the PM (vision facts, build, design-standard additions), with one of the six canonical step titles."
+    description: "P106 Step 3 - the /aid-ui skill tells every step that decides without the PM to record it with aid-ui-state.sh decide, requires an outcome sentence on every question except card choices, and fixes the six step titles the page and decide match on; the skill text no longer describes the removed overview or Průběh tab."
+    recovery: "The failing case names the file. Put the decide call back at the point of the step's Postup where the decision is made, with a canonical --step title."
+    test_covers: "SKILL.md names decide, the outcome rule and the six titles, has no overview and no Průběh; 1v-vision, 6-build and 7-verify name the call; every --step in the steps is canonical (test-aid-ui-skill-rules.bats)."
+    test: "scripts/tests/bats/test-aid-ui-skill-rules.bats"
+
+  - id: aid_ui_k1b_page_checks
+    type: 12
+    source: "lib/ui-fidelity/aid-ui-verify.mjs (rows token_usage, sticky_panels, keyboard, reduced_motion, touch_targets, safe_area, privacy_before_consent, vision_doc, coverage) + scripts/aid-ui-vision-check.py"
+    instruction: "skills/ui-design/coverage/map.yaml (dispositions moved from agent:/na: to script: by the K1a review)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "Tab order sense, legibility of focus beyond an outline or shadow being present, consent banners not named cookie/consent/souhlas, dialogs opened only by app flows (keyboard covers what a page shows), the content of the vision (its parts are matched by heading words, a presence check), safe_area sees stylesheet rules only (not inline style, not viewport-fit=cover, not which panel the rule targets), translucent colours are compared by their RGB without alpha."
+    description: "P103 extension K1b - the coverage map's former agent claims as gate rows: every painted colour and text font is a DESIGN.md token (no typography token = not_covered); a sticky/fixed panel taller than the window or with visible content below its box scrolls itself and contains its scroll; Tab reaches every control (honeypots with tabindex=-1 or aria-hidden excepted, a radio group once, a frame only with a tabindex) and the focus is visible with transitions off; nothing animates under prefers-reduced-motion; 44 px touch targets at phone width (inline text links excepted); a PWA's edge panels use safe-area insets; no third-party request, no cookie (public web) and no large consent banner before consent; the product vision has the template's parts, FAKT labels, owner and date; the coverage map still matches the standards. N/A rows say so in their detail."
+    recovery: "The row names the colour, control, panel, request or missing part; fix the build or DESIGN.md and run the gate again."
+    test_covers: "planted off-token colour, small control, third-party request, tall sticky panel and animation each fail; o-nas without them passes; invisible focus and a Tab trap fail while a honeypot, a checked radio, a frame, a fading focus, a checkbox in a label, a translucent token, a hidden dropdown and a decorative fixed layer do not; a cookie on load fails privacy; safe_area fail/pass/N-A; vision N/A and coverage pass (test-aid-ui-verify.bats); vision parts, labels, owner, date (test-aid-ui-vision-check.bats)."
+    test: "scripts/tests/bats/test-aid-ui-verify.bats"
+
+  - id: aid_ui_marketingskills_snapshot
+    type: 12
+    source: "skills/ui-design/references/adopted/marketingskills/MANIFEST + scripts/tests/bats/test-aid-ui-adopted-sources.bats"
+    instruction: "skills/ui-design/references/adopted-sources.md (Marketingové postupy, P108)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That MANIFEST itself was made from upstream dda3841 (checked once at adoption, recorded in the P108 step 1 commit); that a reader actually applies the file it names."
+    description: "P108 - the five adopted marketingskills skills (14 files) stay byte-identical to their MANIFEST (git blob ids), no file is added or missing, nothing under adopted/ is a symlink, every register row is unique and each adopted file names a plugin file that reads it and names its path."
+    recovery: "Restore the file from the upstream commit, or make a new snapshot (files, MANIFEST and register rows in one commit)."
+    test_covers: "manifest equality, changed byte, missing and extra file, symlink, duplicate row, reader that does not name its file (test-aid-ui-adopted-sources.bats)."
+    test: "scripts/tests/bats/test-aid-ui-adopted-sources.bats"
+
+  - id: aid_ui_sources_filter
+    type: 12
+    source: "scripts/aid-ui-sources.py"
+    instruction: "skills/ui-design/steps/1p-sources.md"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That a named document holds only what may be used on the website (the PM approves the list on its names and excerpts; the internal filter - path parts and header words - is a helper, not a boundary; personal data is kept out by an instruction in step 1p, no detector); secrets the shared detector table does not know; text in formats the script does not read (.docx, .pdf), which is only listed."
+    description: "P108 step 1p (v2 4. 10. 2026) - --list reads the project's files, an old site and the documents the PM named (--from) into redacted snapshots (HTML visible text only), lists internal documents, symlinks, unread formats and files over the caps unused with a reason that never quotes the line, lists Claude Code sessions of the project (cwd) as candidates with redacted excerpts, and writes an immutable snapshot under its canonical hash; nothing beyond the listing is read until ONE approve answer of kind sources targets manifest@<sha256>: the approved mode loads that snapshot, checks its hash, re-hashes every document snapshot, filters sessions by the roots stored in it, refuses an unknown id in bez:, a changed or missing session and changed or purged texts, and lists what the agent may read; only the human's own records are kept; every record is redacted whole before any cut."
+    recovery: "Run --list again (with the right --from / --request) and ask one new sources question; for a pilot copy pass --sessions-from <original project>."
+    test_covers: "foreign project files and records, every detector including a secret across the 300-char cut, no answer / another manifest / return refused, internal by header and path with no text leak, --request, HTML script and hidden text dropped, symlinks and hidden dirs not read, stable hash, origin and content change the hash, rewritten manifest.json ignored, tampered manifest and document snapshots, original changed after approval not read, new --sessions-from cannot widen a session, --from order keeps the hash, snapshot not rewritten, caps 2 MB / 300 / 2000 shared across paths, bez:, unknown id, changed session, purge (test-aid-ui-sources.bats)."
+    test: "scripts/tests/bats/test-aid-ui-sources.bats"
+
+  - id: aid_ui_context_approved
+    type: 12
+    source: "scripts/aid-ui-state.sh (context-check, context_ok, copy-record)"
+    instruction: "skills/ui-design/steps/1p-sources.md; steps 1v-vision.md, 3-content-plan.md, 6-build.md (first line of Postup)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That a step actually runs context-check (its text says so first; copy-record enforces it by code); the content of the context."
+    description: "P108 - docs/content/product-context.md counts only with an approve answer of kind product_context whose target is the file's current sha256; a changed file needs a new approval; copy-record refuses without it."
+    recovery: "Open the product_context question again in the studio and record the answer."
+    test_covers: "missing file, no approval, another kind or file, changed after approval (test-aid-ui-state.bats); copy-record refused without approval (test-aid-ui-copy.bats)."
+    test: "scripts/tests/bats/test-aid-ui-state.bats"
+
+  - id: aid_ui_sections_map
+    type: 12
+    source: "lib/aid-ui-studio/server.py (load_sections, part_of, sections_view) + skills/ui-design/sections.json"
+    instruction: "skills/ui-design/SKILL.md Kroky a části, MUST 11"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the agent's chat messages name steps the map's way (an instruction); that a part's done condition matches its goal beyond the listed state keys, chapters and answers."
+    description: "One map of six studio steps and their parts, each with why, goal, what it feeds and what the PM does; the studio takes steps, parts and their status (skipped, current, done, waiting) from it and the project state, never from the agent's payload; every question belongs to a part (derived from its kind or named, a wrong part or kind refused); the server refuses to start on a malformed map (PM 4. 10. 2026: numbering natural for the PM, every section says why and what for)."
+    recovery: "Fix sections.json (the server names the field) or name the question's part."
+    test_covers: "map shape and kind coverage, broken map stops the server, part statuses from the state, part derivation and refusals, the page's step header and part box (test-aid-ui-studio.bats)."
+    test: "scripts/tests/bats/test-aid-ui-studio.bats"
+
+  - id: aid_ui_facts_three_answers
+    type: 12
+    source: "lib/aid-ui-studio/server.py (load: facts cards)"
+    instruction: "skills/ui-design/SKILL.md Jak se ptá PM, MUST 11; skills/ui-design/steps/3-content-plan.md point 2"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the question and the proposals really come from the named adopted method or document - the studio checks the shape and that the source id exists, not its truth."
+    description: "A facts question names its part and offers at least three answers as cards, the first recommended, each with a source id from the map (an adopted product-marketing or copywriting section, the PM's documents, the facts register, or an explicit guess); the PM's own answer goes through Chci to jinak (PM 4. 10. 2026)."
+    recovery: "Give the question its part and three cards, each with a source from sections.json sources."
+    test_covers: "facts without part, with two cards, with an unknown source refused; with three sourced cards served (test-aid-ui-studio.bats)."
+    test: "scripts/tests/bats/test-aid-ui-studio.bats"
+
+  - id: aid_ui_copy_review
+    type: 12
+    source: "scripts/aid-ui-copy.py + scripts/aid-ui-state.sh copy-record + lib/ui-fidelity/aid-ui-verify.mjs (copyOf, row copy_review)"
+    instruction: "skills/ui-design/steps/7-verify.md point 1a; skills/ui-design/SKILL.md MUST 9"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "The reviewer's judgement of voice and persuasion is a model's (the PM's copy_verdict judges the voice); a run directory forged by hand (fabricated run.json, a subject relabelled with the current build id) is not detected by copy-record (the gate row re-extracts the page text); text generated by CSS is not read; names and references in claims are checked only by the reviewer."
+    description: "P108 - every page of the gate matrix needs an independent copy review: an isolated bundle (rules, adopted copy-editing and cro, product context, facts, page copy), Codex read-only or a Claude stand-in only after a failed Codex attempt with its dispatch bracket, run.json written by the script; the verdict is computed by the script (seven sweeps never skipped, six cro points, netyka_se only on legal pages, findings and claims on real blocks, the five personas once with a 1-10 number, none under 5, and the target and sceptical customer at least 7 except on a legal page (PM 4. 10. 2026), claims with a facts key, a language guide); copy-record stores it per page with the hashes of text, facts and context, three failed reviews per series then a PM exception; the gate row passes only for the current text, facts and context."
+    recovery: "Fix the copy (step 6), bundle and review again; after three failed reviews ask the PM for an exception worded for the customer."
+    test_covers: "every verdict rule, every copy-record refusal, stand-in provenance, the failed-review series (test-aid-ui-copy.bats); subject extraction, the gate row after text, facts and context changes (test-aid-ui-verify.bats)."
+    test: "scripts/tests/bats/test-aid-ui-copy.bats"
+
+  - id: aid_ui_fact_claims
+    type: 12
+    source: "lib/ui-fidelity/aid-ui-facts.mjs (row facts_match)"
+    instruction: "skills/ui-design/steps/3-content-plan.md point 2"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "Names, references and claims without a number; an unrelated register entry with the same percentage covers a percentage; counts of meanings outside the stem groups (clients, customers, projects, firms, members, years)."
+    description: "P108 - facts_match catches invented counted numbers (with a space, hyphen or glued), percentages and e-mails besides phones, prices and times: a count passes only with one register entry holding the same number as a whole token and a word of the same meaning; years match whole words; an e-mail must equal a register value."
+    recovery: "Register the fact with a key that carries its meaning (klienti: 200), or remove the claim."
+    test_covers: "counts, decimals, Slovak, compounds, years vs letadla, e-mail equality, legacy phones/prices/times leaf by leaf (test-aid-ui-facts.bats); planted claims and registered facts in the real gate (test-aid-ui-verify.bats)."
+    test: "scripts/tests/bats/test-aid-ui-facts.bats"
+
+  - id: aid_ui_customer_page
+    type: 12
+    source: "scripts/aid-ui-customer-page.py (generator and --check) + lib/ui-fidelity/aid-ui-verify.mjs (row customer_page)"
+    instruction: "skills/ui-design/steps/7-verify.md point 7b"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That the page reads well or that its wording suits the customer (the PM sees it before handing over); internal words outside the fixed list; a number the generator itself gets wrong beyond what its tests cover (the gate row does not recompute the numbers)."
+    description: "P103 extension K5 - the customer page: made only after a green gate of the current build (no fail or not_covered except its own row), every number from a machine source (state, gate result and its SEO summary, DESIGN.md, facts register, copy, SEO brief, design standard, brand package), SEO tiles always visible, no internal word. The gate row passes when the page exists, is from this build and holds no internal word; before the page is made it is not_covered, never pass."
+    recovery: "Generate the page after a green gate (step 7b) and run the gate again; a stale or hand-edited page is generated again."
+    test_covers: "numbers follow their sources and change with them; warn and customer_page rows not counted; SEO tiles outside details; AI tile from the policy or 'nenastaveno'; red gate, other build, a result edited after gate-record and --out into the site refused; N/A rows not counted; no SEO/standard/brand package/texts gives no invented zeros; --check missing/fresh/internal word/other build (test-aid-ui-customer-page.bats); the fixed copy passes every row after step 7b (test-aid-ui-verify.bats)."
+    test: "scripts/tests/bats/test-aid-ui-customer-page.bats"
+
+  - id: aid_ui_design_standard_doc
+    type: 12
+    source: "scripts/aid-ui-design-standard.py check + lib/ui-fidelity/aid-ui-verify.mjs (row design_standard_doc)"
+    instruction: "skills/ui-design/steps/7-verify.md bod 4"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the patterns, terminology and exceptions written by the agent are right - the PM approves the whole document (design_standard); that the document stays true after later edits (re-measure, Vynucení section)."
+    description: "P103 extension K4 - the gate's design_standard_doc row: docs/design/design-standard.md (a working document in the project until the PM approves it; nothing is written to Docusaurus before) has the WAN structure (Značka, Tokeny, Komponenty, Vzory, Obsah a terminologie, Platformní kontrakt, Výjimky, Vynucení), every DESIGN.md colour token with its value, the platform rows (Okna for an app) and at least one button role measured on the built site (aid-ui-tool.sh measure)."
+    recovery: "The row names the missing section, token or row. Complete DESIGN.md, re-measure and re-run aid-ui-design-standard.py write (step 7 bod 4)."
+    test_covers: "write composes the structure with measured roles named by tokens and quoted font names; a missing section, a changed token, a missing platform row and Okna for an app are MISSING; no document = exit 1 (test-aid-ui-design-standard.bats); measure groups roles, skips an off-screen skip link (test-aid-ui-tools.bats)."
+    test: "scripts/tests/bats/test-aid-ui-design-standard.bats"
+
+  - id: aid_ui_brand_package
+    type: 12
+    source: "scripts/aid-ui-brand-package.py + lib/ui-fidelity/aid-ui-verify.mjs (row brand_package)"
+    instruction: "skills/ui-design/steps/1i-identity.md bod 5"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the files are good (legible, licensed, distinct) - that is the PM's review of the logo; only that every part the project uses exists, matched by file-name tokens."
+    description: "P103 extension K3 - the gate's brand_package row: the brand package holds every part the project uses, derived (design-system standard: only what is used) from the variant, options.identity and the contexts of use in docs/design/brief-logo-favicon.md: a favicon only for an internal tool (variant.brand none); otherwise symbol in four colourings, icons (favicon.ico with 16/32/48 px), brand-brief.md, README.md, the logo with the name always (colour; on-dark for web and PWA; black for print) as SVG and PNG with its source as live <text> and in outlines; maskable icon and lockups for a PWA. Variants by whole path tokens; a client's package passes a missing part only with a PM waiver bound to the exact missing list (brand-waive)."
+    recovery: "The row names the missing part. Make it (steps/1i-identity.md bod 5); for a client's package without it, an exception with check brand_package and the PM's reason."
+    test_covers: "internal tool favicon only and brand none + identity = exit 2; public web always needs the logo with the name; print (also under ###) = black logo; webapp colour only; master with <text> and outlines without; missing brief section; whole path tokens (mobile, concern, lockup/a/dark); favicon.ico sizes; waiver exact list; no state = exit 2 (test-aid-ui-brand-package.bats); brand-waive target and answer, scope project matrix (test-aid-ui-state.bats); one gate row, fail names the part (test-aid-ui-verify.bats)."
+    test: "scripts/tests/bats/test-aid-ui-brand-package.bats"
+
+  - id: aid_ui_online_research_asked
+    type: 12
+    source: "scripts/aid-ui-state.sh (context_ok)"
+    instruction: "skills/ui-design/steps/1p-sources.md point 4"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the research, when the PM said yes, was done well - only that the question was put and answered (approve or return) before any step that needs the product context."
+    description: "The online research about the firm (customer-research Mode 2) is never done unasked: context-check, which gates vision, content plan and copy review, refuses until a sources answer with target online@<project> exists, yes or no (PM 7. 10. 2026)."
+    recovery: "Put the sources question online@<project> to the PM on the studio page; a no is a valid answer."
+  - id: aid_ui_method_receipt
+    type: 12
+    source: "lib/aid-ui-studio/server.py (check_method, load, --check)"
+    instruction: "skills/ui-design/SKILL.md 'Jak se ptá PM' point 0; sections.json methods"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    test: scripts/tests/bats/test-aid-ui-studio.bats
+    not_guaranteed: "That the agent understood or applied the method - only that the method files were printed to it (aid-ui-state.sh method) within the 12 hours before the question opened, that they are the current ones (sha256), and that every card names what of the method it applies."
+    description: "The method before the output (PM 7. 10. 2026): the studio refuses a payload with an open question of a receipt kind (product_context, facts, vision, identity, seo_brief, structure, task_map, content_plan, references, direction) without .aid-ui/method/<kind>.json from the 12 hours before opened_at naming the map's method files with their current sha256, or with a card lacking `method`. Done questions are not checked (nothing retroactive)."
+    recovery: "aid-ui-state.sh method <project> <kind> (reads the files, writes the receipt), then open the question anew with method on every card; aid-ui-state.sh payload-check shows the refusal before the PM sees it."
+  - id: aid_ui_no_method_stop
+    type: 12
+    source: "scripts/aid-ui-state.sh (method, null kind); lib/aid-ui-studio/server.py (check_method, waived)"
+    instruction: "skills/ui-design/SKILL.md 'Jak se ptá PM' point 0"
+    severity: blocking
+    surface: pm-visible
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    test: scripts/tests/bats/test-aid-ui-state.bats
+    not_guaranteed: "That a kind is correctly marked null in the map - a kind given a thin method file is not caught; the register of adopted material and the review are the check on that."
+    description: "A question kind whose method is null in sections.json cannot be asked at all until the PM decided the no_method question for it (target no_method@<kind>: adopt a method, PM supplies the output, or go on without); the receipt then carries the answer id (waived) and the studio verifies it against brand-state.json. 'We have no method for this' is a question to the PM, never a silent output (PM 7. 10. 2026)."
+    recovery: "Put the no_method question; after adopt, register the files in the map and run method again."
+  - id: aid_ui_logo_method
+    type: 7
+    source: "skills/ui-design/steps/1i-identity.md point 4; skills/ui-design/references/adopted/logo-design/ (MANIFEST)"
+    instruction: "skills/ui-design/steps/1i-identity.md point 4"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    test: scripts/tests/bats/test-aid-ui-adopted-sources.bats
+    not_guaranteed: "The quality of the concepts - only that the identity question cannot open without the receipt of the adopted logo-design method (aid_ui_method_receipt) and that the snapshot is byte-identical to upstream 0ecf52e."
+    description: "Logo concepts are made by the adopted logo-design skill (kaankiziltug, MIT): brief, word map, category clichés, two mark types, 8-12 one-sentence concepts, the three strongest built in black SVG, svg_audit and preview_sheet twice, concept sheet; never drawn freehand (PM 7. 10. 2026: three freehand drafts for Coufal Clinic rejected)."
+    recovery: "aid-ui-state.sh method <project> identity, then step 1i point 4 from the start."
+  - id: aid_ui_logo_route
+    type: 12
+    source: "scripts/aid-ui-logo-route.py; lib/aid-ui-studio/server.py (check_method, identity cards vs route.json)"
+    instruction: "skills/ui-design/steps/1i-identity.md 'Rozcestník'"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    test: scripts/tests/bats/test-aid-ui-logo-route.bats
+    not_guaranteed: "That the directions are conceptually different or well scored - only that the situation, the slot list, the contexts and the weights come from the state (never from a question to the PM), and that the identity question carries exactly one card per slot. Similarity of the drawings is judged by the checklist, not measured."
+    description: "The logo decision tree is computed, not asked (PM 7. 10. 2026: 'to musí říkat ten skill'): assets (package) 0 directions, app (webapp/pwa) 3 symbol-first, redesign (web with a fetched old site) 5 incl. the revitalization of a usable current logo, new (web) 3; each slot a distinct construction; contexts = the situation's test contexts plus the brief's list; scoring weights per situation and a continuity bonus only when the facts register evidences it. The studio refuses an identity question without route.json or with cards that are not one per slot."
+    recovery: "python3 scripts/aid-ui-logo-route.py <project> --write, then one card per slot with `slot`."
+  - id: aid_ui_logo_generated
+    type: 7
+    source: "scripts/aid-ui-logo-gen.py (prompt = constraints + slot kind + concept; gen.json record); scripts/aid-ui-vectorize.py; lib/ui-fidelity/aid-ui-logo-sheet.mjs (symbol must be plain vector SVG)"
+    instruction: "skills/ui-design/steps/1i-identity.md point 4 (fáze 4, 4b, 4c)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    test: scripts/tests/bats/test-aid-ui-logo-gen.bats
+    not_guaranteed: "That the model's concepts are good or that the curation was honest - gen.json proves what was sent and received (prompts, counts, cost), vyber.json is the agent's own record. What is mechanical: no request without the key in the environment, no slot outside route.json, caps 10 per slot / 60 per run / --max-cost, 1024x1024 PNG only, and the sheet refuses a raster or a raster-wrapping SVG as the symbol the PM sees."
+    description: "Logos are drawn by an image model from the step's concept sentences, never as SVG coordinates by the language model (PM 7. 10. 2026); in mode full (presentational web) the model draws the complete logo in colour and the direction question carries that composition flagged as a concept (PM 8. 10. 2026: black symbols alone were app icons); the chosen direction is then rebuilt (symbol vectorized, name set in a licensed font, colours from the image) and approved a second time in every context before the kit; mode mark (app) vectorizes before the cards."
+    recovery: "aid-ui-logo-gen.py --dry-run, check plan.json, run with the key exported for that command; aid-ui-tool.sh vectorize the chosen PNG."
+  - id: aid_ui_old_site_origin
+    type: 12
+    source: "scripts/aid-ui-sources.py (site_origin, --fetch-site)"
+    instruction: "skills/ui-design/steps/1p-sources.md point 2"
+    severity: advisory
+    surface: pm-visible
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    not_guaranteed: "That a backup is stale - only that the PM sees whether the old site in the list is a live download (date, URL) or a folder someone gave. The fetcher checks the address before urllib resolves it again, so DNS rebinding between the two is not caught (IMP-690)."
+    description: "Every old-site page in the sources list carries its origin: 'staženo <date> z <url>' when --fetch-site read the live site, 'záloha (složka …)' otherwise; the card the PM approves names it (PM 7. 10. 2026: the backup was used instead of the live site)."
+    recovery: "Run aid-ui-sources.py <project> --fetch-site <url> and list again with --old-site <that folder>."
+  - id: aid_ui_ai_search
+    type: 12
+    source: "scripts/aid-ui-seo-check.py (--ai) + lib/ui-fidelity/aid-ui-verify.mjs (row ai_search)"
+    instruction: "skills/ui-design/steps/1s-seo.md (Politika AI robotů), steps/6-build.md bod 3"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That AI assistants actually cite the site (the SEO standard forbids promising it), that the policy the PM chose suits the business, or that the live site behind a CDN/WAF lets the robots in (checked on the build only; a live run after deployment is not part of /aid-ui)."
+    description: "P103 extension K2 - the gate's ai_search row: the PM's AI robot policy (docs/seo/brief.md 'Politika AI robotů') exists and robots.txt follows it with an own group per robot of coverage/ai-crawlers.json, search engines never blocked; JSON-LD on every indexable page; the organisation matches the facts register (brand, IČO in identifier, never in taxID); main text in the HTML; no snippet bans or llms.txt without a decision. The gate now also passes the brief (page table, H1) and the facts to the SEO check."
+    recovery: "The BLOCKER line names the robot, page or field. Ask the PM for the policy in step 1s, write robots.txt and JSON-LD per steps/6-build.md bod 3, rebuild and run the gate again."
+    test_covers: "policy followed = no ai-* blocker and the summary counts; missing policy, robot without its own group, blocked search engine, policy mismatch; page without JSON-LD, IČO in taxID, another brand, JS-only content, nosnippet; llms.txt without agreement; any business subtype recognised (test-aid-ui-seo-check.bats)."
+    test: "scripts/tests/bats/test-aid-ui-seo-check.bats"
+
+  - id: aid_ui_prior_decision
+    type: 12
+    source: "lib/aid-ui-studio/server.py (check_prior, PRIOR)"
+    instruction: "skills/ui-design/SKILL.md Jak se ptá PM, point 0b; skills/ui-design/steps/5-directions.md point 5"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the directions really follow the chosen reference and the PM's words - the studio checks that the question repeats the recorded choice and words exactly and that every card names the choice id in `honours`; whether a card honours the words is the agent's judgement; the agent writes the state file it is checked against."
+    description: "A direction question carries `prior` = the PM's latest recorded references answer (question, choice, comment) and every card an `honours` text naming that choice; the studio shows the choice and the PM's words above the question and `honours` on the card. Without a recorded references answer nothing is required (PM 9. 10. 2026: the chosen reference and 'I like its animations' were dropped by the next step)."
+    recovery: "Copy the recorded references answer into the question's `prior` and write on every card how it honours the choice (naming its id)."
+    test_covers: "no references answer = free; missing or different prior refused; card without honours or without the choice id refused; complete payload passes; a done question is skipped (test-aid-ui-studio.bats)."
+    test: "scripts/tests/bats/test-aid-ui-studio.bats"
+
+  - id: aid_ui_outcome_length
+    type: 12
+    source: "lib/aid-ui-studio/server.py"
+    instruction: "skills/ui-design/SKILL.md (Jak se ptá PM)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That a question carries an outcome at all (optional for the server; the skill requires it except for card choices) or that the sentence says what was decided."
+    description: "P106 Step 1 — the studio server refuses a payload whose question outcome is not a string of at most 120 characters (422, logged), writes every accepted answer to history.jsonl with by: pm and the question's outcome under an exclusive file lock, and reads the history line by line so one torn line never empties it (counted in /state history_lines)."
+    recovery: "The 422 names the question. Shorten its outcome to one sentence of at most 120 characters and rewrite payload.json."
+    test_covers: "an over-long outcome is 422; an accepted answer's history line carries by: pm and the outcome; /history returns an agent line next to a PM line in file order; a torn line is skipped and counted; history_lines grows after decide (test-aid-ui-studio.bats)."
+    test: "scripts/tests/bats/test-aid-ui-studio.bats"
+
+  - id: aid_ui_motion_observed
+    type: 12
+    source: "lib/ui-fidelity/aid-ui-motion.mjs (aid-ui-tool.sh motion); skills/ui-design/references/motion-record.schema.json"
+    instruction: "skills/ui-design/steps/4-references.md point 7"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "Completeness over a foreign site: cross-origin stylesheets, iframes, shadow DOM and motion no scenario triggers (a carousel started by a timer after 8 s) stay unseen; they are listed under coverage, never invented."
+    description: "P108 — the motion of a page is observed at runtime, not guessed from CSS: scenarios load, second load (frequency), scroll by wheel, hover and focus of every control, click on the first inner link; every keyframe, transition (property, scenario), script-driven change and the page transition with where (hero / below / overlay) and timing; a record that breaks the schema is not written."
+    recovery: "A page that does not load is exit 1 (the url); the record's coverage names what was not seen - tell the PM at the reference card."
+    test_covers: "intro overlay first load only, hero fade-up, reveal below on scroll, infinite spin below, hover and focus transitions, leave and arrive animations across a page transition, schema, a record without coverage refused, exit 1 and 2"
+    test: "scripts/tests/bats/test-aid-ui-motion.bats"
+
+  - id: aid_ui_motion_inventory
+    type: 12
+    source: "scripts/aid-ui-motion.py (inventory, check); lib/aid-ui-studio/server.py (check_motion)"
+    instruction: "skills/ui-design/steps/5-directions.md points 4m and 9"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That a replaced motion is as good as the reference's, or that an omission the PM consented to was wise - the studio proves every adopt/replace ran in its scenario and place and shows every replace/omit by name and reason; the judgement is the PM's choice of a direction. A run with no picked reference carries no inventory. A transition group is (property, scenario), not (property, selector): the reference's selectors do not exist in our pages, so one hover transition of that property on any control satisfies the group unless the target pins a selector (property@selector). The observation record itself is unsigned: aid-ui-tool.sh motion --dir serves the directory itself and writes its sha, check refuses a record not observed at a local copy, and the gate re-observes the build; a forged record over a direction prototype is not detected beyond that."
+    description: "P108 — the reference's motion record becomes .aid-ui/motion.json (one item per keyframe, transition group, script motion, page transition) with adopt / replace / omit, reason and label where the rules want them; a direction question needs target smer:<sha256 of the inventory>, a `motion` block equal to the inventory's summary, and for every card a prototype directory whose runtime observation (beside it, bound to the directory's sha) the server checks itself against the inventory; a done direction question must have a recorded answer about an inventory."
+    recovery: "The refusal names the item that never ran, ran only above the fold, did not run on the second load, or the card without dir / observation; fix the prototype, observe again (aid-ui-tool.sh motion --dir-sha256), check, reopen the question with the inventory's current sha."
+    test_covers: "inventory needs the picked reference's record of its url and schema; one item per source; no overwrite without --force; check passes against its own record and names a missing keyframe, hero-only reveal, lost second-load run; replace/omit need reason and label; extra needs reason and presence; --dir binds the directory sha; studio: no picked reference = free, missing inventory, wrong target, wrong motion block, card without dir, missing observation, failed check, changed directory each refused"
+    test: "scripts/tests/bats/test-aid-ui-motion-inventory.bats; scripts/tests/bats/test-aid-ui-studio.bats"
+
+  - id: aid_ui_build_method
+    type: 12
+    source: "scripts/aid-ui-state.sh (build-record: receipt_fresh build, aid-ui-motion.py check over .aid-ui/build.motion.json); skills/ui-design/sections.json methods.build"
+    instruction: "skills/ui-design/steps/6-build.md (Postup před stavbou, point 8)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the agent applied what it read: the receipt proves the method files were printed within 12 h before the build was recorded, the motion check proves the chosen direction's motion runs in the build. The craft itself is the gate's and the PM's page approval."
+    description: "P108 — build-record refuses without a fresh `build` method receipt (frontend-design, Impeccable craft floor, step 6, the live frontend-build standard) and, with a picked reference, without the PM's recorded direction choice over the inventory as it is now and a PASS of the motion check over an observation of the site as it is (dir sha)."
+    recovery: "Run aid-ui-state.sh method <project> build and read it; observe the served build with aid-ui-tool.sh motion --dir-sha256 \"$(aid-ui-motion.py dirsha <site>)\"; build-record names the motion that did not run."
+    test_covers: "no receipt, stale receipt, receipt of changed files refused; no reference = free; picked reference without inventory, without a direction choice over it, without an observation, with a lost keyframe, with a site changed after the observation refused; passes with all"
+    test: "scripts/tests/bats/test-aid-ui-state.bats"
+
+  - id: aid_ui_motion_gate_rows
+    type: 12
+    source: "lib/ui-fidelity/aid-ui-verify.mjs (settleMotion, runMotionFidelity); skills/ui-design/coverage/checks.yaml"
+    instruction: "skills/ui-design/steps/7-verify.md point 1"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "An infinite animation is left running (a mid-frame sample of it can still fail contrast); the fidelity row observes the home page only."
+    description: "P108 — motion_settled: every page is measured and photographed after its finite animations ended, 500 ms quiet and the data-aid-intro overlay gone (10 s cap, else fail), so a reveal through opacity is not a contrast failure and no agent has a reason to cut motion; motion_fidelity: the gate observes the built home page itself and checks it against .aid-ui/motion.json (N/A without a picked reference, fail without an inventory or with a motion that did not run)."
+    recovery: "motion_settled fail: an intro over 10 s or an animation that never ends - shorten it or make it infinite on purpose; motion_fidelity fail: the row names the motion, fix the build (step 6), never the inventory."
+    test_covers: "settled pass after the fixture intro; fail with an intro that never ends; fidelity N/A without a reference, fail without an inventory, pass with the fixture motion, fail when the spin is removed"
+    test: "scripts/tests/bats/test-aid-ui-verify.bats"
+
+  - id: aid_ui_end_in_order
+    type: 12
+    source: "scripts/aid-ui-state.sh (links, finish, chapter-all-target / chapter-all: end_in_order, gate-record same run_at); lib/aid-ui-studio/server.py (check_handover, vyhrada comment); scripts/aid-ui-verify.sh (--copy-subject note)"
+    instruction: "skills/ui-design/steps/7-verify.md points 7c, 7d, 8, 9"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 2
+    not_guaranteed: "That the linked preview is the deployed site (deployment is outside the run) or that the PM read the page before clicking; the links answer 200 from the host and sit in the handover text."
+    description: "P108 — the end of a run is in order: links (two addresses answering 200) before the handover question, which must carry both and three verdict cards (prevzit / vyhrada with a comment / vratit); chapter-all only after the final gate passed the customer page, with the page not newer than the result and the coverage report not older; gate-record refuses a result with the recorded run_at (a --copy-subject run is not a gate run); finish checks the links again and writes finish.json; the studio's Hotovo panel shows the links, the verdict sentence and the open items."
+    recovery: "Each refusal names the step: serve the pages and run links; make the customer page, run the gate, gate-record, the coverage report, then the chapters and the handover; run aid-ui-verify.sh without --copy-subject."
+    test_covers: "links refuses a non-200 address; chapter-all-target refuses a page newer than the result, a report older than it, a gate without the customer_page pass; finish refuses without links.json and with a dead link, writes finish.json with the verdict; studio refuses a handover without links.json, without both links in the body, with wrong cards; a reservation without a comment is 422"
+    test: "scripts/tests/bats/test-aid-ui-state.bats; scripts/tests/bats/test-aid-ui-studio.bats"
+
+  - id: aid_ui_open_items
+    type: 12
+    source: "scripts/aid-ui-state.sh (open-item, open-items-sync); lib/aid-ui-studio/server.py (POST /open-item, /state open_items); scripts/aid-ui-customer-page.py (zbyva)"
+    instruction: "skills/ui-design/steps/7-verify.md point 7d"
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t0
+    enforcement_degree: 1
+    not_guaranteed: "That every open point was written down - the agent's items are its judgement, the PM's come from the page; what is written is listed, nothing is invented."
+    description: "P108 — what stays open after the run (the agent's items with owner and date, the PM's own points from the studio's Doplnit bod, deferred content with the PM's words, the exceptions the PM granted) and every accepted decision with its date are on the customer page under 'Co zbývá a co bylo rozhodnuto' and on the studio's Hotovo panel."
+    recovery: "aid-ui-state.sh open-item add / done; open-items-sync before the customer page and finish."
+    test_covers: "add needs text and owner; done; sync takes the PM's history lines once each and skips a line without a time; POST /open-item 422 empty or over 500, 403 without auth, 200 appends the history line and /state lists it; the customer page lists open, deferred, exceptions and decisions and hides done items"
+    test: "scripts/tests/bats/test-aid-ui-state.bats; scripts/tests/bats/test-aid-ui-studio.bats; scripts/tests/bats/test-aid-ui-customer-page.bats"

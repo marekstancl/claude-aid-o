@@ -1,0 +1,1491 @@
+<!doctype html>
+<html lang="cs">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AID studio</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<!-- Source: the decision page of Impeccable 4.3.1 (Paul Bakaus, github.com/pbakaus/impeccable),
+     licensed under the Apache License 2.0; notice in
+     skills/ui-design/references/LICENSES/NOTICE-impeccable.txt.
+     Reused: the --ks-* paper/ink/instrument palette, lifts and cap buttons, the tilted snapping
+     deck, card faces with the preview on top, kicker badge, chips, tags, swatches, the
+     "improved by" box, the sticky footer, the lightbox and the deck arrows.
+     Modified by AID: Czech labels, AID payload (studio server contract), question types
+     (text, page approval, exception, handover), wordmark removed; P106: the page is the run
+     as a pipeline of steps (outcome and who decided per step, Detail with the step's
+     decisions, the open question inside its step), derived from /state and /history. -->
+<style>
+  :root {
+    color-scheme: light;
+    --ks-kinpaku: oklch(84% 0.19 80.46);
+    --ks-patina: oklch(49% 0.11 190);
+    --ks-paper: oklch(97.8% 0 0);
+    --ks-paper-raised: oklch(99.5% 0 0);
+    --ks-paper-deep: oklch(95% 0 0);
+    --ks-gray: oklch(92% 0 0);
+    --ks-gray-2: oklch(88% 0 0);
+    --ks-ink: oklch(13% 0 0);
+    --ks-text: oklch(22% 0 0);
+    --ks-text-muted: oklch(46% 0 0);
+    --ks-rule: oklch(13% 0 0 / 0.12);
+    --ks-edge: oklch(13% 0 0 / 0.45);
+    --ks-danger: oklch(50% 0.17 28);
+    --ks-instrument: oklch(24% 0 0);
+    --ks-instrument-raised: oklch(31% 0 0);
+    --ks-instrument-text: oklch(93% 0 0);
+    --ks-lift: 0 1px 1px oklch(13% 0 0 / 0.05), 0 2px 3px oklch(13% 0 0 / 0.04), 0 6px 12px oklch(13% 0 0 / 0.05);
+    --ks-cap-lift: inset 0 1px 0 oklch(100% 0 0 / 0.9), 0 1px 0 oklch(13% 0 0 / 0.14), 0 2px 3px oklch(13% 0 0 / 0.08);
+    --ks-cap-press: inset 0 1px 2px oklch(13% 0 0 / 0.14);
+    --ks-track-recess: inset 0 1px 3px oklch(13% 0 0 / 0.16), inset 0 -1px 0 oklch(100% 0 0 / 0.7);
+    --ks-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --ks-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    --page-inset: max(clamp(1rem, 5vw, 4rem), calc((100vw - 90rem) / 2));
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--ks-paper); color: var(--ks-text); font: 15px/1.55 var(--ks-font); padding: 1.8rem clamp(1rem, 5vw, 4rem) 0; min-height: 100dvh; display: flex; flex-direction: column; overflow-x: clip; }
+  header, main, .links { width: 100%; max-width: 90rem; margin: 0 auto; }
+  a { color: var(--ks-patina); }
+  ::selection { background: oklch(49% 0.11 190 / 0.18); color: var(--ks-ink); }
+  :focus-visible { outline: 2px solid var(--ks-patina); outline-offset: 3px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* Header: the project and the link to its brand page. */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 1rem 2rem; flex-wrap: wrap; }
+  .brand { font-size: .95rem; font-weight: 700; letter-spacing: -.01em; color: var(--ks-ink); }
+  .brand-link { padding: 7px 14px; border: 1px solid var(--ks-rule); border-radius: 6px; background: var(--ks-paper-raised); box-shadow: var(--ks-cap-lift); font-size: .8125rem; font-weight: 600; color: var(--ks-ink); text-decoration: none; }
+  .brand-link:hover { border-color: var(--ks-edge); }
+  #notice { margin-top: 1rem; padding: .7rem 1rem; border: 1px solid var(--ks-danger); border-radius: 8px; color: var(--ks-danger); background: var(--ks-paper-raised); }
+  #notice[hidden] { display: none; }
+
+  main { flex: 1; padding: 1.4rem 0 2rem; }
+  .question { display: flex; flex-direction: column; gap: 1.5rem; }
+  .headline { display: flex; align-items: center; gap: .75rem; }
+  .headline svg { flex: none; width: 26px; height: 26px; color: var(--ks-ink); }
+  .q-title { font-weight: 600; font-size: 1.7rem; letter-spacing: -0.025em; line-height: 1.2; color: var(--ks-ink); text-wrap: balance; }
+  .lede { color: var(--ks-text-muted); margin-top: -.8rem; max-width: 52rem; }
+  .head { display: flex; flex-direction: column; gap: .4rem; }
+  .tier { font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .24em; text-transform: uppercase; color: var(--ks-text-muted); }
+  pre.body-json { font: 12.5px/1.5 var(--ks-mono); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--ks-paper-deep); border: 1px solid var(--ks-rule); border-radius: 6px; padding: .8rem 1rem; max-height: 22rem; overflow: auto; }
+  .detail { color: var(--ks-text); font-size: .95rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .step-brief { padding: 0 22px 18px; }
+  .saved { padding: 0 22px 14px; display: flex; flex-direction: column; }
+  .saved-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 14px; align-items: center; padding: 9px 10px; border-bottom: 1px solid var(--ks-rule); font-size: 14px; border-radius: 6px; }
+  .saved-row .ok { color: var(--ks-patina); font-weight: 700; white-space: nowrap; }
+  .saved-q { color: var(--ks-text-muted); }
+  .saved-a { color: var(--ks-ink); font-weight: 600; }
+  .active-box .saved { padding: 0; }
+  .stage > .saved { padding: 14px 22px 6px; }
+  .saved-row.fresh { background: color-mix(in srgb, var(--ks-patina) 12%, transparent); }
+  @keyframes saved-flash { from { background: color-mix(in srgb, var(--ks-patina) 30%, transparent); } to { background: transparent; } }
+  /* Choosing: the whole card is the control; the tick and the outline say which one is picked. */
+  .card[data-card] { cursor: pointer; }
+  .card[data-card] .media img { cursor: pointer; }
+  .card.picked { outline: 3px solid var(--ks-kinpaku); outline-offset: 2px; }
+  /* A question on a fact or a consent (PM 9. 10. 2026: A): three answers as rows, the recommended one preselected,
+     one sentence each and a small line with the risk and the source; no deck, no flip, no Bezpečněji / Odvážněji */
+  .opts { display: grid; gap: .55rem; margin-top: .4rem; }
+  .card.opt { display: flex; gap: .9rem; align-items: flex-start; width: auto; padding: .8rem 1rem .8rem .9rem; border: 1.5px solid var(--ks-rule); border-radius: 8px; background: var(--ks-paper-raised); cursor: pointer; text-align: left; font: inherit; color: inherit; transform: none; perspective: none; }
+  .card.opt:hover, .card.opt:focus-within { transform: none; border-color: var(--ks-edge); }
+  .card.opt.picked { outline: none; border-color: var(--ks-kinpaku); box-shadow: inset 0 0 0 1.5px var(--ks-kinpaku); }
+  .card.opt .tick { position: static; width: 22px; height: 22px; flex: none; margin-top: .15rem; transform: scale(1); box-shadow: none; font-size: .75rem; }
+  .card.opt .opt-body { min-width: 0; } .card.opt .opt-body b { display: block; font-size: 1rem; }
+  .card.opt .opt-body .kicker { position: static; display: inline-block; margin-left: .5rem; vertical-align: middle; }
+  .card.opt .opt-t { margin: .15rem 0 0; } .card.opt .opt-m { margin: .3rem 0 0; font-size: .8rem; color: var(--ks-text-muted); }
+  .tick { position: absolute; z-index: 7; top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; padding: 0; border: 1px solid var(--ks-edge); background: var(--ks-paper-raised); color: transparent; font-weight: 800; box-shadow: var(--ks-lift); cursor: pointer; transform: scale(0); transition: transform .25s cubic-bezier(.3, 1.6, .5, 1); }
+  .card:hover .tick, .tick:focus-visible, .card.picked .tick { transform: scale(1); }
+  .card.picked .tick { background: var(--ks-kinpaku); border-color: var(--ks-kinpaku); color: var(--ks-ink); }
+  .info { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--ks-text-muted); font-size: 14px; padding: 12px 14px; border: 1px dashed var(--ks-rule); border-radius: 8px; }
+  .q-meta .toggle { margin-left: 4px; }
+  .back-now { align-self: flex-start; }
+  /* The parts of the step as tabs: done, the one being worked on, waiting, left out. */
+  .tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 22px 0; }
+  .tab { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 6px; border: 1px solid var(--ks-rule); border-radius: 999px; background: var(--ks-paper-raised); cursor: pointer; font: inherit; font-size: 12.5px; color: var(--ks-text-muted); white-space: nowrap; }
+  .tab:hover { border-color: var(--ks-edge); color: var(--ks-ink); }
+  .tab-n { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; background: var(--ks-gray); color: var(--ks-text-muted); }
+  .tab.done .tab-n { background: var(--ks-patina); color: var(--ks-paper-raised); }
+  .tab.current { color: var(--ks-ink); }
+  .tab.current .tab-n { background: var(--ks-kinpaku); color: var(--ks-ink); }
+  .tab.skipped { opacity: .6; }
+  .tab[aria-current] { background: var(--ks-instrument); border-color: var(--ks-instrument); color: var(--ks-instrument-text); }
+  .tab[aria-current] .tab-n { background: var(--ks-kinpaku); color: var(--ks-ink); }
+  /* The six steps stay on top; below them only the step the PM looks at. */
+  .strip { position: sticky; top: 0; z-index: 20; display: flex; gap: 2px; background: var(--ks-paper); border-bottom: 1px solid var(--ks-rule); margin-bottom: 10px; }
+  .stp { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 10px 8px; border: 0; border-bottom: 3px solid var(--ks-rule); background: none; cursor: pointer; text-align: left; font: inherit; color: var(--ks-text-muted); }
+  .stp-c { flex: none; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--ks-rule); display: grid; place-items: center; font-weight: 800; font-size: 11px; background: var(--ks-paper-raised); color: var(--ks-text-muted); }
+  .stp-w { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stp-w b { font-size: 13px; font-weight: 600; }
+  .stp.active .stp-w b { font-weight: 800; }
+  .stp.done { border-bottom-color: var(--ks-patina); }
+  .stp.done .stp-c { background: var(--ks-patina); border-color: var(--ks-patina); color: var(--ks-paper-raised); }
+  .stp.active { color: var(--ks-ink); border-bottom-color: var(--ks-kinpaku); }
+  .stp.active .stp-c { border: 2px solid var(--ks-kinpaku); color: var(--ks-ink); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ks-kinpaku) 20%, transparent); }
+  .stp[aria-current] { background: var(--ks-paper-raised); color: var(--ks-ink); border-radius: 8px 8px 0 0; }
+  .step.solo { grid-template-columns: minmax(0, 1fr); }
+  /* one left edge for everything in the step: summary, tabs, part, question */
+  .step.solo .summary { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto; align-items: center; padding: 18px 22px; }
+  .step.solo .summary .desc { font-size: 15px; color: var(--ks-text); margin-top: 0; }
+  .step.solo .active-box { gap: 1rem; padding-top: 12px; border-top: 0; }
+  .step.solo .part-box { border-left: 0; padding: 0; gap: 6px; }
+  .step.solo .question { gap: 1.1rem; }
+  .step.solo .lede { margin-top: -.3rem; }
+  .question .q-head { flex-direction: row; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 6px 14px; }
+  .q-meta { order: 2; display: flex; align-items: baseline; gap: 12px; }
+  .q-count { font-size: 13px; color: var(--ks-text-muted); }
+  /* The part's questions: the one on screen as a row above it, the answered ones under the work with Změnit. */
+  .q-rail { display: flex; flex-direction: column; border: 1px solid var(--ks-rule); border-radius: 8px; overflow: hidden; }
+  .q-rail.has-now { border-color: var(--ks-kinpaku); }
+  .q-row { display: grid; grid-template-columns: 26px minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 12px; font-size: 14px; border-bottom: 1px solid var(--ks-rule); background: var(--ks-paper-raised); }
+  .q-row:last-child { border-bottom: 0; }
+  .q-n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: var(--ks-gray); color: var(--ks-text-muted); }
+  .q-row.done .q-n { background: var(--ks-patina); color: var(--ks-paper-raised); }
+  .q-row.now { background: color-mix(in srgb, var(--ks-kinpaku) 18%, var(--ks-paper-raised)); border-left: 4px solid var(--ks-kinpaku); }
+  .q-row.now .q-n { background: var(--ks-kinpaku); color: var(--ks-ink); }
+  .q-row.now .q-t { font-weight: 700; color: var(--ks-ink); }
+  .q-row.wait { color: var(--ks-text-muted); }
+  .q-t { color: var(--ks-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .q-a { color: var(--ks-ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .q-row.now .q-a, .q-row.changing .q-a { color: var(--ks-text-muted); font-weight: 400; }
+  .q-row .toggle { padding: 4px 9px; font-size: 12px; }
+  .done-box { display: flex; flex-direction: column; gap: 8px; }
+  /* The agent works and the PM waits: a live indicator, what is being done and what comes next. */
+  .working { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 16px; align-items: center; padding: 18px 20px; border: 1px solid var(--ks-rule); border-radius: 10px; background: var(--ks-paper-raised); box-shadow: var(--ks-lift); }
+  .working-gear { width: 56px; height: 56px; border-radius: 50%; border: 3px solid var(--ks-rule); border-top-color: var(--ks-kinpaku); animation: spin 1.1s linear infinite; }
+  .working b { display: block; font-size: 16px; color: var(--ks-ink); margin-bottom: 2px; }
+  .working p { color: var(--ks-text-muted); font-size: 14px; }
+  .working .bar-track { margin-top: 10px; height: 6px; border-radius: 3px; background: var(--ks-gray); overflow: hidden; }
+  .working .bar-fill { height: 100%; width: 35%; border-radius: 3px; background: var(--ks-kinpaku); animation: slide 1.6s ease-in-out infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+  @media (prefers-reduced-motion: reduce) { .working-gear, .working .bar-fill { animation: none; } }
+  .step.solo::before { display: none; }
+  .step-back { padding: 0 22px 16px; }
+  .step-info { padding: 0 22px 20px; }
+  .part-note { max-width: 62rem; color: var(--ks-text-muted); font-size: 14px; }
+  .step.solo .tabs.slim { justify-content: space-between; flex-wrap: nowrap; align-items: flex-start; padding-top: 14px; }
+  .step.solo .tabs.slim .tabs-r { display: flex; gap: 8px; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; align-items: center; }
+  /* "Chci to jinak": the text goes into a window, not into the row. */
+  dialog.ask { border: 1px solid var(--ks-rule); border-radius: 10px; padding: 24px; width: min(34rem, 92vw); margin: auto; background: var(--ks-paper-raised); color: var(--ks-text); box-shadow: var(--ks-lift); }
+  dialog.ask::backdrop { background: color-mix(in srgb, var(--ks-ink) 45%, transparent); }
+  dialog.ask h3 { font-size: 1.25rem; color: var(--ks-ink); margin-bottom: 4px; }
+  dialog.ask p { color: var(--ks-text-muted); font-size: 14px; margin-bottom: 14px; }
+  dialog.ask textarea { min-height: 7rem; }
+  dialog.ask .actions { justify-content: flex-end; margin-top: 14px; }
+  /* What just happened: the answered question leaves upwards, its saved row drops in, the next one comes from the side. */
+  @media (prefers-reduced-motion: no-preference) {
+    .question.leaving { animation: q-leave .45s ease-in forwards; }
+    .question.arriving, .active-box.slide-fwd, .stage.slide-fwd { animation: q-arrive .5s cubic-bezier(.16, 1, .3, 1); }
+    .active-box.slide-back, .stage.slide-back { animation: q-arrive-back .4s cubic-bezier(.16, 1, .3, 1); }
+    .saved-row.fresh, .q-row.fresh { background: none; animation: saved-drop .5s cubic-bezier(.16, 1, .3, 1), saved-flash 2.6s ease-out; }
+    .q-row.now.arriving { animation: row-up .5s cubic-bezier(.16, 1, .3, 1); }
+    .q-row.leaving { animation: row-lift .4s ease-in forwards; }
+    @keyframes row-up { from { opacity: 0; transform: translateY(40px); } }
+    @keyframes row-lift { to { opacity: 0; transform: translateY(-40px); } }
+    .stp.just .stp-c, .tab-n.pop { animation: mark-pop .6s cubic-bezier(.3, 1.6, .5, 1); }
+    .step.active.just .stage { animation: stage-ring 1.6s ease-out; }
+    @keyframes q-leave { to { opacity: 0; transform: translateY(-60px) scale(.96); } }
+    @keyframes q-arrive { from { opacity: 0; transform: translateX(60px); } }
+    @keyframes q-arrive-back { from { opacity: 0; transform: translateX(-60px); } }
+    @keyframes saved-drop { from { opacity: 0; transform: translateY(40px); } }
+    @keyframes mark-pop { from { transform: scale(.4); } }
+    @keyframes stage-ring { from { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ks-kinpaku) 55%, transparent); } }
+  }
+  .brief { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 14px; line-height: 1.45; }
+  .brief dt { color: var(--ks-text-muted); font-size: 13px; }
+  .brief dd { margin: 0; color: var(--ks-text); }
+  .part-box { border-left: 2px solid var(--ks-kinpaku); padding: 2px 0 2px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .part-head { font-size: 15px; font-weight: 700; color: var(--ks-ink); }
+  .detail-h { font-size: 1.02rem; margin: .9rem 0 .1rem; color: var(--ks-text); }
+  .detail-li { padding-left: 1.1rem; text-indent: -.7rem; }
+  .empty { padding: 7rem 1rem; font-size: 1.4rem; color: var(--ks-ink); text-align: center; }
+  /* The run as a pipeline (P106, proposal B): hero, then one row per step. */
+  .hero { border-top: 1px solid var(--ks-rule); padding: 14px 0 12px; display: flex; justify-content: space-between; align-items: baseline; gap: 24px; }
+  .hero h1 { font-size: 30px; line-height: 1.1; letter-spacing: -.03em; max-width: 760px; font-weight: 700; color: var(--ks-ink); text-wrap: balance; }
+  .hero p { flex: none; max-width: 36rem; margin: 0; font-size: 13px; color: var(--ks-text-muted); line-height: 1.5; }
+  .step { position: relative; display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 22px; padding-bottom: 18px; }
+  .step:not(:last-child)::before { content: ""; position: absolute; left: 27px; top: 38px; bottom: -1px; width: 1px; background: var(--ks-rule); }
+  .mark { position: relative; z-index: 1; width: 56px; height: 56px; border: 1px solid var(--ks-rule); border-radius: 50%; display: grid; place-items: center; background: var(--ks-paper); font-weight: 800; color: var(--ks-patina); }
+  .step.wait .mark { color: var(--ks-text-muted); }
+  .step.active .mark { border: 2px solid var(--ks-kinpaku); color: var(--ks-ink); box-shadow: 0 0 0 5px color-mix(in srgb, var(--ks-kinpaku) 20%, transparent); }
+  .stage { min-width: 0; border: 1px solid var(--ks-rule); border-radius: 9px; background: var(--ks-paper-raised); box-shadow: var(--ks-lift); overflow: clip; }
+  .summary { padding: 20px 22px; display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr) auto; align-items: start; gap: 20px; }
+  .name { font-size: 18px; font-weight: 800; letter-spacing: -.02em; color: var(--ks-ink); }
+  .desc { margin-top: 4px; color: var(--ks-text-muted); font-size: 13px; line-height: 1.4; }
+  .outcome { line-height: 1.45; color: var(--ks-text); overflow-wrap: anywhere; }
+  .step.wait .outcome { color: var(--ks-text-muted); }
+  .note { color: var(--ks-text-muted); }
+  .who { display: flex; width: max-content; margin-top: 8px; align-items: center; gap: 6px; font-size: 12px; font-weight: 800; color: var(--ks-patina); text-transform: uppercase; letter-spacing: .06em; }
+  .who::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ks-patina); }
+  .toggle { border: 1px solid var(--ks-rule); background: var(--ks-paper); border-radius: 5px; padding: 7px 10px; font: inherit; font-size: 13px; color: var(--ks-ink); white-space: nowrap; cursor: pointer; }
+  .toggle:hover { border-color: var(--ks-edge); }
+  .details { display: none; border-top: 1px solid var(--ks-rule); padding: 20px 22px; }
+  .stage.open .details { display: block; }
+  .event { display: grid; grid-template-columns: 88px minmax(0, 1fr) auto; gap: 4px 14px; padding: 12px 0; border-bottom: 1px solid var(--ks-rule); font-size: 14px; }
+  .event:last-child { border-bottom: 0; }
+  .actor { font-weight: 800; color: var(--ks-patina); }
+  .decision { color: var(--ks-text-muted); text-align: right; overflow-wrap: anywhere; }
+  .comment { grid-column: 2 / -1; margin: 4px 0 3px; padding: 10px 12px; background: var(--ks-paper); border-left: 3px solid var(--ks-kinpaku); line-height: 1.45; overflow-wrap: anywhere; }
+  .origin { grid-column: 2 / -1; font-size: 12px; color: var(--ks-text-muted); }
+  .past { margin-top: 20px; display: flex; flex-direction: column; gap: 8px; }
+  .past-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .past-card { border: 1px solid var(--ks-rule); border-radius: 7px; overflow: hidden; background: var(--ks-paper); }
+  .past-card.selected { border: 2px solid var(--ks-patina); }
+  .past-card img { display: block; width: 100%; aspect-ratio: 16/10; object-fit: cover; object-position: top; cursor: zoom-in; background: var(--ks-gray); }
+  .past-card p { padding: 10px 12px; font-size: 13px; font-weight: 700; color: var(--ks-ink); }
+  .past-card.selected p::after { content: " · vybráno"; color: var(--ks-patina); }
+  /* The open question sits inside its step: the deck and the bar stay inside the panel. */
+  .active-box { padding: 24px 22px 26px; border-top: 1px solid var(--ks-rule); display: flex; flex-direction: column; gap: 3rem; }
+  .active-box .deck-shell { width: auto; margin-left: 0; }
+  .active-box .grid { padding: 8px 4px; scroll-padding-inline: 0; }
+  .active-box .fade-prev { background: linear-gradient(90deg, var(--ks-paper-raised), transparent); }
+  .active-box .fade-next { background: linear-gradient(270deg, var(--ks-paper-raised), transparent); }
+  .active-box .grid > .card { flex-basis: max(18rem, calc((100% - 3.4rem) / 3)); }
+  /* Not sticky here: below the fold a sticky bar would sit over the question's heading. */
+  .active-box .bar { position: static; width: auto; margin: 0; padding: .7rem 0 0; background: none; border-top: 0; }
+
+  /* The deck bleeds to the viewport edges while the first card aligns with the column. */
+  .deck-shell { position: relative; width: 100vw; margin-left: calc(50% - 50vw); }
+  .grid { display: flex; gap: 1.6rem; width: 100%; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; padding: 8px var(--page-inset); scroll-padding-inline: var(--page-inset); align-items: stretch; }
+  .grid::-webkit-scrollbar { display: none; }
+  .grid > .card { flex: 0 0 clamp(24rem, 34vw, 34rem); scroll-snap-align: center; }
+  @media (min-aspect-ratio: 1/1) and (max-height: 900px) {
+    body { padding-top: 1.1rem; }
+    .grid > .card { flex-basis: clamp(20rem, 27vw, 27rem); }
+  }
+  .nav { position: absolute; z-index: 6; top: 50%; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--ks-paper-raised); border: 1px solid var(--ks-edge); color: var(--ks-ink); cursor: pointer; box-shadow: var(--ks-cap-lift); transform: translateY(-50%); transition: border-color .2s, color .2s, opacity .2s; }
+  .nav:hover { border-color: var(--ks-ink); color: var(--ks-patina); }
+  .nav[disabled] { opacity: .25; cursor: default; }
+  .nav[hidden] { display: none; }
+  .nav svg { width: 16px; height: 16px; }
+  .nav.prev { left: 14px; }
+  .nav.next { right: 14px; }
+  .fade { position: absolute; z-index: 5; top: 0; bottom: 0; width: 88px; pointer-events: none; opacity: 0; transition: opacity .3s ease; }
+  .fade-prev { left: 0; background: linear-gradient(90deg, var(--ks-paper), transparent); }
+  .fade-next { right: 0; background: linear-gradient(270deg, var(--ks-paper), transparent); }
+  .deck-shell.can-prev .fade-prev, .deck-shell.can-next .fade-next { opacity: 1; }
+
+  .card { position: relative; perspective: 1400px; transform: rotate(var(--fan, 0deg)); transition: transform .25s cubic-bezier(.16, 1, .3, 1); }
+  .card:hover, .card:focus-within { transform: rotate(0deg) translateY(-4px); }
+  .card-inner { position: relative; height: 100%; transform-style: preserve-3d; transition: transform .7s cubic-bezier(.16, 1, .3, 1); }
+  .card.flipped .card-inner { transform: rotateY(180deg); }
+  .face { background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); overflow: hidden; display: flex; flex-direction: column; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+  .face.front { position: relative; height: 100%; }
+  .face.back { position: absolute; inset: 0; transform: rotateY(180deg); pointer-events: none; }
+  .card.flipped .face.back { pointer-events: auto; }
+  .card.flipped .face.front { pointer-events: none; }
+  .face.lead { border-color: var(--ks-kinpaku); }
+  .card:hover .face { border-color: var(--ks-edge); }
+  .card:hover .face.lead { border-color: var(--ks-kinpaku); }
+  .kicker.inline { position: static; align-self: flex-start; margin: 14px 0 -4px 1.1rem; }
+  .kicker { position: absolute; z-index: 2; top: 12px; left: 12px; padding: 4px 9px; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); color: var(--ks-ink); font-size: .6875rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; border-radius: 3px; }
+  .media { position: relative; width: 100%; aspect-ratio: 16/10; min-height: 0; flex: none; overflow: hidden; background: var(--ks-gray); }
+  .media img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; position: relative; z-index: 1; cursor: zoom-in; }
+  .media img[hidden] { display: none; }
+  /* a wide picture (a logo lockup, a banner) is shown whole on white; a page screenshot keeps cover-from-top */
+  .media img.fit, .past-card img.fit { object-fit: contain; object-position: center; background: #fff; }
+  .media .shimmer { position: absolute; inset: 0; }
+  .media:not(.comp-pending) .shimmer { display: none; }
+  .shimmer { width: 100%; height: 100%; background: linear-gradient(100deg, var(--ks-gray) 35%, var(--ks-gray-2) 50%, var(--ks-gray) 65%); background-size: 220% 100%; animation: shimmer 1.4s linear infinite; }
+  .comp-note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0 1rem; font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .22em; text-transform: uppercase; color: var(--ks-text-muted); }
+  @keyframes shimmer { from { background-position: 120% 0; } to { background-position: -80% 0; } }
+  .chips { position: absolute; z-index: 2; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 5px 9px; font: 500 .6875rem var(--ks-font); color: var(--ks-instrument-text); background: var(--ks-instrument); border: 1px solid oklch(100% 0 0 / 0.3); border-radius: 5px; cursor: pointer; transition: background .2s; }
+  .chip:hover { background: var(--ks-instrument-raised); }
+  .chip[disabled] { opacity: .5; cursor: default; }
+  .chip svg { width: 12px; height: 12px; }
+  .body { padding: .95rem 1.1rem 1.2rem; display: flex; flex-direction: column; gap: .5rem; flex: 1; }
+  .card h3 { font-size: 1.25rem; font-weight: 600; line-height: 1.35; color: var(--ks-ink); }
+  .thesis { color: var(--ks-text); font-size: .95rem; line-height: 1.45; }
+  .identity { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 2px 0; }
+  .swatches { display: inline-flex; gap: 4px; margin-right: 4px; }
+  .swatches i { width: 18px; height: 18px; border-radius: 5px; border: 1px solid oklch(100% 0 0 / 0.18); box-shadow: inset 0 0 0 1px oklch(0% 0 0 / 0.25); background: var(--ks-gray); }
+  .motion { margin: 4px 0 8px; font-size: .9375rem; } .motion p { margin: 0 0 4px; } .motion ul { margin: 0; padding-left: 18px; color: var(--ks-text-muted); }
+  .body-link { text-decoration: underline; text-underline-offset: .15em; word-break: break-all; }
+  .hero.done-card { display: block; max-width: 760px; margin: 36px auto 10px; padding: 34px 36px; border: 1px solid var(--ks-rule); border-radius: 14px; box-shadow: 0 6px 30px rgba(0,0,0,.06); }
+  .hero.done-card h1 { font-size: 2.3rem; line-height: 1.1; margin: 0 0 10px; } .hero.done-card #intro { margin: 0 0 18px; color: var(--ks-text-muted); }
+  .done-links a.hbtn-go, .done-links a.hbtn-ghost { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 22px; border-radius: 8px; font-weight: 600; border: 1px solid var(--ks-accent, #0f766e); }
+  .done-links a.hbtn-go { background: var(--ks-accent, #0f766e); color: #fff; } .done-links a.hbtn-ghost { background: transparent; color: var(--ks-accent, #0f766e); }
+  .back-done { font-weight: 600; white-space: nowrap; }
+  .saved-btns { display: inline-flex; gap: 6px; } .saved-view { padding: 10px 12px 16px 36px; border-bottom: 1px solid var(--ks-rule); } .saved-answer { margin: 8px 0 0; }
+  .foldline { max-width: 760px; margin: 0 auto 30px; text-align: center; color: var(--ks-text-muted); font-size: .95rem; } .foldline a { color: inherit; }
+  #done-panel { margin-top: 18px; max-width: 720px; } .done-links { display: flex; gap: 10px; margin: 8px 0 14px; flex-wrap: wrap; } .done-links a { text-decoration: none; display: inline-flex; align-items: center; }
+  .done h3 { margin: 10px 0 4px; font-size: 1rem; } .open-items { margin: 0; padding-left: 18px; } .add-item { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; }
+  .add-item textarea { flex: 1; min-width: 0; font: inherit; padding: 8px; border: 1px solid var(--ks-rule); border-radius: 6px; background: transparent; color: inherit; } .muted { color: var(--ks-text-muted); }
+  .missing { flex-basis: 100%; font-size: .8125rem; color: var(--ks-text-muted); }
+  .missing summary { cursor: pointer; }
+  .missing ul { margin: 4px 0 0; padding-left: 18px; }
+  .tag { font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .14em; text-transform: uppercase; color: var(--ks-text-muted); border: 1px solid var(--ks-rule); border-radius: 4px; padding: 3px 7px; overflow-wrap: anywhere; }
+  .tag b { color: var(--ks-ink); font-weight: 600; }
+  .fact { font-size: .8rem; color: var(--ks-text-muted); line-height: 1.45; overflow-wrap: anywhere; }
+  .fact-label { display: inline-block; font-family: var(--ks-mono); font-size: .6875rem; letter-spacing: .18em; text-transform: uppercase; color: var(--ks-text-muted); margin-right: .55em; transform: translateY(-1px); }
+  .fact.clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .raises { display: flex; flex-direction: column; gap: 4px; margin: 2px 0; padding: 7px 10px 8px; background: oklch(70% 0.12 188 / 0.06); border: 1px solid oklch(70% 0.12 188 / 0.22); border-radius: 8px; }
+  .raises .fact-label { color: var(--ks-patina); }
+  .raise { font-size: .78rem; color: var(--ks-text-muted); line-height: 1.45; }
+  .back-head { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: 14px 14px 0; }
+  .back-head .chip { flex: none; }
+  .body.back-body { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--ks-edge) var(--ks-paper-deep); }
+  .card.skeleton .line { height: 11px; border-radius: 4px; background: linear-gradient(100deg, var(--ks-gray) 35%, var(--ks-gray-2) 50%, var(--ks-gray) 65%); background-size: 220% 100%; animation: shimmer 1.4s linear infinite; }
+  .card.skeleton .line.title { height: 17px; width: 70%; } .card.skeleton .w90 { width: 90%; } .card.skeleton .w60 { width: 60%; }
+
+  button.choose { margin-top: auto; align-self: start; background: var(--ks-instrument); color: var(--ks-instrument-text); border: 0; font: 600 .9375rem/1.35 var(--ks-font); padding: 11px 24px; border-radius: 6px; cursor: pointer; transition: background .15s; }
+  button.choose:hover { background: var(--ks-instrument-raised); }
+  button.choose.go { margin: 0; align-self: center; min-width: 9rem; }
+  .reroll-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 14px; font: 500 .8125rem var(--ks-font); color: var(--ks-ink); background: var(--ks-paper-raised); border: 1px solid var(--ks-edge); border-radius: 6px; box-shadow: var(--ks-cap-lift); cursor: pointer; transition: border-color .2s ease, color .2s ease; }
+  .reroll-btn:hover { border-color: var(--ks-ink); }
+  .reroll-btn:active { box-shadow: var(--ks-cap-press); }
+  .reroll-btn svg { width: 15px; height: 15px; }
+  .reroll-btn.quiet { color: var(--ks-text-muted); min-height: 38px; align-self: center; }
+  .reroll-btn.quiet:hover { color: var(--ks-text); border-color: var(--ks-text-muted); }
+  button[disabled] { opacity: .4; cursor: default; }
+
+  /* The round's verbs stay reachable: a full-bleed bar stuck to the viewport bottom. */
+  .bar { position: sticky; bottom: 0; z-index: 10; width: 100vw; margin: -.3rem calc(50% - 50vw) 0; padding: .7rem var(--page-inset) calc(.7rem + env(safe-area-inset-bottom, 0px)); display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; background: var(--ks-paper); border-top: 1px solid var(--ks-rule); }
+  .bar .spacer { flex: 1; }
+  .picked-note { font-size: .875rem; color: var(--ks-text-muted); }
+  .picked-note b { color: var(--ks-ink); }
+  input[type=text], textarea { width: 100%; background: var(--ks-paper-raised); color: var(--ks-text); border: 1px solid var(--ks-edge); border-radius: 6px; padding: .7rem .85rem; font: inherit; caret-color: var(--ks-patina); }
+  input[type=text]::placeholder, textarea::placeholder { color: var(--ks-text-muted); opacity: 1; }
+  input[type=text]:focus, textarea:focus { outline: 2px solid var(--ks-patina); outline-offset: 2px; }
+  textarea { min-height: 5rem; resize: vertical; }
+  .status { flex-basis: 100%; font-size: .875rem; color: var(--ks-danger); }
+  .bar .hint { flex-basis: 100%; order: 9; font-size: .8125rem; color: var(--ks-text-muted); }
+  .status:empty { display: none; }
+
+  /* Text question, page approval, exception: one panel in the same card chrome. */
+  .panel { max-width: 52rem; }
+  /* Page approval: the screenshot takes the wide column, the verdict sits beside it. */
+  .panel.wide { max-width: none; display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(19rem, 1fr); align-items: start; }
+  .panel.wide .media { border-bottom: 0; border-right: 1px solid var(--ks-rule); }
+  .panel .body { padding: 1.4rem 1.5rem 1.5rem; gap: .9rem; }
+  .panel .q-title { font-size: 1.75rem; }
+  .panel .media { border-bottom: 1px solid var(--ks-rule); }
+  .panel.full { max-width: none; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; margin-top: .4rem; }
+  .gallery figure { margin: 0; border: 1px solid var(--ks-rule); border-radius: 6px; overflow: hidden; background: var(--ks-paper-raised); }
+  .gallery figcaption { padding: .6rem .8rem .7rem; font-size: .875rem; color: var(--ks-text-muted); }
+  .gallery figcaption b { color: var(--ks-ink); }
+  .actions { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+  .actions button.choose { margin-top: 0; }
+
+  /* every picture the same width; a taller page scrolls inside the lightbox (PM 9. 10. 2026) */
+  #lightbox { position: fixed; inset: 0; z-index: 50; display: block; overflow-y: auto; text-align: center; background: oklch(97.8% 0 0 / 0.96); cursor: zoom-out; opacity: 0; transition: opacity .25s ease; }
+  #lightbox[hidden] { display: none; }
+  #lightbox.open { opacity: 1; }
+  /* a page screenshot (wide picture) fills the width, a wireframe keeps a reading width; a click on the picture switches to 1:1
+     pixels and the lightbox scrolls both ways (PM 9. 10. 2026: the previews were tiny and could not be zoomed) */
+  #lightbox img { display: inline-block; width: min(94vw, 48rem); height: auto; margin: 1.5rem auto 6rem; border: 1px solid var(--ks-rule); border-radius: 8px; box-shadow: var(--ks-lift); background: #fff; cursor: zoom-in; }
+  #lightbox img.wide { width: min(96vw, 92rem); }
+  #lightbox img.zoomed { width: auto; max-width: none; cursor: zoom-out; }
+  #lightbox.zoomed { overflow: auto; text-align: left; }
+  /* the bar sits at the bottom of the screen whatever the picture's size, so the controls never move */
+  .lb-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 1.2rem; width: min(94vw, 44rem); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .6rem; padding: .4rem .6rem; border-radius: 8px; background: var(--ks-paper-raised); border: 1px solid var(--ks-rule); box-shadow: var(--ks-lift); cursor: default; font: 500 .8125rem var(--ks-font); color: var(--ks-ink); }
+  /* Předchozí and Další never move: the bar has a fixed width, they sit at its ends next to the middle, a long title is cut with an ellipsis (PM 9. 10. 2026: A) */
+  .lb-bar .lb-prev { justify-self: start; } .lb-bar .lb-next { justify-self: end; }
+  .lb-bar .lb-mid { display: flex; align-items: center; gap: .6rem; flex-wrap: nowrap; justify-content: center; min-width: 0; }
+  .lb-bar .lb-title { min-width: 0; max-width: 16rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lb-bar .lb-count { white-space: nowrap; }
+  .gallery figure.noted figcaption::after { content: " · poznámka"; color: var(--ks-patina); }
+  .lb-bar .lb-count { color: var(--ks-muted, #666); }
+  .lb-bar button.choose { margin: 0; }
+  .lb-bar .chip[aria-pressed="true"] { outline: 2px solid var(--ks-accent, #222); }
+  .lb-bar [hidden] { display: none; }
+  .prior { margin: 0 0 .8rem; padding: .6rem .9rem; border-left: 3px solid var(--ks-kinpaku); background: var(--ks-paper-raised); font-size: .95rem; }   /* .chip sets display, so the attribute alone did not hide the contexts button on a card without a second picture */
+  .links { padding: 1rem 0 1.4rem; border-top: 1px solid var(--ks-rule); font-size: .8125rem; display: flex; gap: 1.2rem; flex-wrap: wrap; }
+
+  /* A tall viewport: the deck becomes a plain vertical list; the bar stays stuck. */
+  @media (max-aspect-ratio: 1/1) {
+    body { padding-top: 1.2rem; }
+    main { gap: 3rem; padding-top: 1.6rem; }
+    .q-title, .panel .q-title { font-size: 1.5rem; }
+    .deck-shell { width: auto; margin-left: 0; }
+    .grid { flex-direction: column; overflow: visible; scroll-snap-type: none; padding: 6px 0; gap: 1.3rem; }
+    .grid > .card { flex: 0 0 auto; }
+    .nav, .fade { display: none; }
+    .bar { gap: .5rem; }
+    .bar .reroll-btn { flex: 1 1 26%; padding: 0 8px; min-height: 38px; }
+    .bar .spacer { display: none; }
+    .bar .picked-note, .bar button.choose.go { flex: 1 1 100%; }
+    .step-desc { text-align: left; }
+    .long { display: none; }
+    .panel.wide { display: flex; }
+    .panel.wide .media { border-right: 0; border-bottom: 1px solid var(--ks-rule); }
+    .panel .body { padding: 1.1rem 1rem 1.2rem; }
+  }
+  @media (max-width: 700px) {
+    .saved-row { grid-template-columns: auto minmax(0, 1fr); }
+    .q-row { grid-template-columns: 26px minmax(0, 1fr) auto; grid-template-areas: "n t b" "n a b"; }
+    .q-row .q-n { grid-area: n; } .q-row .q-t { grid-area: t; } .q-row .q-a { grid-area: a; } .q-row .toggle { grid-area: b; }
+    .saved-q { grid-column: 1 / -1; order: -1; }
+    .brief { grid-template-columns: 1fr; gap: 0; }
+    .brief dt { margin-top: 8px; }
+    .brief dt:first-child { margin-top: 0; }
+    .hero { display: block; padding: 23px 0 27px; }
+    .hero h1 { font-size: 39px; }
+    .hero p { width: auto; margin-top: 16px; }
+    .step { grid-template-columns: 34px minmax(0, 1fr); gap: 10px; padding-bottom: 12px; }
+    .mark { width: 34px; height: 34px; font-size: 12px; }
+    .step:not(:last-child)::before { left: 16px; top: 28px; }
+    .summary { grid-template-columns: minmax(0, 1fr) auto; padding: 16px; gap: 12px; }
+    .summary > div:first-child { grid-column: 1 / -1; }
+    .name { font-size: 17px; }
+    .details, .active-box { padding: 16px; }
+    .tabs { padding: 10px 16px 0; }
+    /* a narrow screen: the strip shows numbers, the name only for the step the PM looks at */
+    .stp { flex: 0 0 auto; padding: 7px 8px 8px; }
+    .stp[aria-current] { flex: 1 1 auto; }
+    .stp:not([aria-current]) .stp-w { display: none; }
+    .stp[aria-current] .stp-w { white-space: normal; line-height: 1.2; }
+    .stp-wrap:not(:has([aria-current])) { flex: 0 0 auto; }
+    .event { grid-template-columns: 44px minmax(0, 1fr); gap: 4px 8px; }
+    .event .decision { grid-column: 2; text-align: left; }
+    .comment, .origin { grid-column: 2; }
+    .past-cards { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card, .card:hover, .card:focus-within { transform: none; transition: none; }
+    .card-inner, #lightbox, .nav, .fade { transition: none; }
+    .shimmer, .card.skeleton .line { animation: none; }
+  }
+
+  .stp-wrap { position: relative; flex: 1 1 0; min-width: 0; display: flex; align-items: stretch; }
+  .stp-wrap .stp { flex: 1 1 auto; }
+  .info-btn { flex: none; align-self: center; margin: 0 8px 0 -6px; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--ks-edge); padding: 0; display: grid; place-items: center; font: 700 11px/1 var(--ks-mono); color: var(--ks-text-muted); background: var(--ks-paper-raised); cursor: pointer; }
+  .info-btn:hover, .info-btn[aria-expanded=true] { color: var(--ks-ink); border-color: var(--ks-ink); }
+  .info-pop { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 26rem; max-width: 80vw; padding: 12px 14px; border: 1px solid var(--ks-rule); border-radius: 8px; background: var(--ks-paper-raised); box-shadow: var(--ks-lift); font-size: 13px; color: var(--ks-text); display: flex; flex-direction: column; gap: 6px; }
+  .info-pop[hidden] { display: none; }
+  .stp-wrap:nth-child(n+4) .info-pop { left: auto; right: 0; }
+.done .blocked{margin:8px 0 12px;padding:10px 12px;border:1px solid #e0b4b4;border-radius:8px;background:#fdf1f1;font-weight:600}
+</style>
+<header class="top">
+  <p class="brand">/aid-ui · <span id="project"></span></p>
+  <a class="brand-link" href="/brand/">Značka a produkt</a>
+</header>
+<p id="notice" role="alert" hidden></p>
+<main id="main" aria-live="polite">
+  <section class="hero"><h1 id="headline">Načítám…</h1><p id="intro"></p></section>
+  <section class="pipeline" id="pipeline" aria-label="Kroky stavby"></section>
+</main>
+<footer class="links">
+  <a href="/report">Soulad se standardy</a>
+  <a href="/licence">Vzor stránky převzat z Impeccable (licence Apache 2.0)</a>
+</footer>
+<div id="lightbox" role="dialog" aria-label="Zvětšený náhled, zavřete klávesou Esc" tabindex="-1" hidden></div>
+<dialog id="ask" class="ask" aria-labelledby="ask-title">
+  <h3 id="ask-title"></h3><p id="ask-hint"></p>
+  <textarea id="ask-text" aria-labelledby="ask-title"></textarea>
+  <div class="actions" id="ask-actions"></div>
+</dialog>
+<script id="pipeline-model">
+"use strict";
+// The run as a pipeline, derived from /state (S) and /history (H) only; no DOM, so
+// test-aid-ui-studio.bats runs this block under node. Rules: plan P106, Data Model.
+function atOf(e) { const t = Date.parse(((e || {}).answer || {}).at); return isNaN(t) ? 0 : t; }
+// Events by answer.at; equal times keep file order (a reconstructed event sorts where it happened).
+function sortEvents(list) {
+  return list.map((e, i) => [e, i]).sort((a, b) => atOf(a[0]) - atOf(b[0]) || a[1] - b[1]).map(x => x[0]);
+}
+function isHandover(line) {
+  const q = line.question || {};
+  return q.kind === "handover" || /^q-adopt-/.test(String(q.id || ""));
+}
+function isReroll(e) { return /^reroll/.test(String((e.answer || {}).decision || "")); }
+function pageOf(q) { const t = String((q || {}).target || ""), i = t.lastIndexOf("@"); return i > 0 ? t.slice(0, i) : t; }
+function plural(n, one, few, many) { return n === 1 ? one : n >= 2 && n <= 4 ? few : many; }
+function clip(s, n) { s = String(s || "").trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s; }
+function text(v) { return typeof v === "string" && v.trim() ? v.trim() : null; }
+
+// One history line -> the event row: who, what, the decision in words, the step outcome it gives.
+function toEvent(line) {
+  const a = line.answer || {}, q = line.question || {};
+  const e = { by: line.by === "agent" ? "agent" : "pm", answer: a, question: q, qid: q.id, kind: q.kind,
+    choice: a.choice, comment: text(a.comment), reconstructed: false,
+    cards: Array.isArray(line.cards) ? line.cards.filter(c => c && typeof c === "object") : [] };
+  if (e.by === "agent") {
+    const ev = line.event || {};
+    return Object.assign(e, { type: "decided", reconstructed: line.reconstructed === true, title: text(ev.title) || "Rozhodnutí", why: text(ev.why),
+      outcome: text(ev.outcome) || "Rozhodnuto", label: text(ev.outcome) || "Rozhodnuto" });
+  }
+  e.type = "answer";
+  e.title = text(q.title);
+  const d = a.decision;
+  if (d === "choose") {
+    const c = e.cards.find(x => x.id === a.choice), t = c && text(c.title);
+    e.outcome = t || "Vybráno"; e.label = t ? "Vybráno: " + t : "Vybráno";
+  } else if (d === "return") {
+    e.outcome = "Vráceno k úpravě" + (e.comment ? ": " + clip(e.comment, 90) : ""); e.label = "Vráceno";
+  } else if (isReroll(e)) {
+    e.outcome = null;
+    e.label = { reroll_safer: "Bezpečnější návrhy", reroll_bolder: "Odvážnější návrhy" }[d] || "Nové návrhy";
+  } else {
+    e.outcome = text(q.outcome) || "Schváleno"; e.label = e.outcome;
+    // a PM line marked reconstructed got its outcome sentence after the run; only that sentence is marked
+    e.reconstructed = line.reconstructed === true && !!text(q.outcome);
+  }
+  return e;
+}
+
+// Page approvals of one step -> one event per round (a round starts when a page repeats).
+function collapse(events) {
+  const out = [], rounds = [];
+  let cur = null;
+  for (const e of events) {
+    if (e.kind !== "approve_page") { out.push(e); continue; }
+    const p = pageOf(e.question);
+    if (!cur || cur.pages.has(p)) { cur = { pages: new Set(), items: [] }; rounds.push(cur); }
+    cur.pages.add(p); cur.items.push(e);
+  }
+  rounds.forEach((r, i) => {
+    const n = r.items.length, ok = r.items.filter(x => x.answer.decision === "approve").length, last = r.items[n - 1];
+    const words = ok === n
+      ? (n === 1 ? "Stránka je v pořádku" : plural(n, "", "Všechny ", "Všech ") + n + plural(n, "", " stránky", " stránek") + " v pořádku")
+      : ok + (String(n)[0] === "7" ? " ze " : " z ") + n + " v pořádku";
+    const notes = r.items.filter(x => x.comment).map(x => pageOf(x.question) + ": " + x.comment);
+    out.push({ type: "pages", by: r.items.every(x => x.by === "agent") ? "agent" : "pm", answer: last.answer,
+      title: i === 0 ? "Stránky ke schválení" : "Upravené stránky ke schválení", label: words, outcome: words,
+      comment: notes.length ? notes.join(" · ") : null, reconstructed: false, cards: [],
+      foreign: (r.items.find(x => x.foreign != null) || {}).foreign });
+  });
+  return sortEvents(out);
+}
+
+// Outcome-bearing events: not the handover, not a re-roll.
+function bearing(st) { return st.events.filter(e => e.type !== "handover" && e.outcome != null); }
+function stepOutcome(st) {
+  const b = bearing(st), last = b[b.length - 1];
+  if (last) return { text: last.outcome, reconstructed: last.reconstructed };
+  return { text: st.status === "done" ? (text(st.description) || "Hotovo.") : "Čeká.",
+    reconstructed: false };
+}
+function stepWho(st) {
+  const bys = new Set(bearing(st).map(e => e.by));
+  return !bys.size ? null : bys.size > 1 ? "both" : [...bys][0];
+}
+
+function model(S, H) {
+  S = S || {};
+  const map = S.sections && Array.isArray(S.sections.steps) ? S.sections.steps : null;
+  // The tool's map (sections.json via /state) is the source of the steps and their parts; the
+  // agent's own payload steps are only a fallback for an older server.
+  let steps = map ? map.map(s => ({ id: "s" + s.n, n: s.n, of: map.length, title: String(s.title), description: text(s.why),
+      goal: text(s.goal), feeds: text(s.feeds), parts: Array.isArray(s.parts) ? s.parts : [],
+      status: s.status === "done" ? "done" : s.status === "current" ? "current" : "todo", events: [], open: [], saved: [], active: false }))
+    : (Array.isArray(S.steps) ? S.steps : []).filter(s => s && typeof s === "object").map(s => ({
+    id: s.id, title: String(s.title || s.id || ""), description: text(s.description), parts: [],
+    status: ["done", "current", "todo"].includes(s.status) ? s.status : "todo", events: [], open: [], active: false }));
+  const open = (Array.isArray(S.questions) ? S.questions : []).filter(q => q && typeof q === "object" && !q.answered);
+  if (!steps.length && open.length) steps = [{ id: "", title: "Rozhodnutí", description: null, status: "current", events: [], open: [], active: false }];
+  const byTitle = new Map(steps.map(s => [s.title, s]));
+  const fallback = [...steps].reverse().find(s => s.status === "done") || steps[steps.length - 1];
+  const handovers = [];
+  for (const line of Array.isArray(H) ? H : []) {
+    if (!line || typeof line !== "object") continue;
+    const e = toEvent(line);
+    if (isHandover(line)) { handovers.push(e); continue; }
+    // the map knows the step of the question's part; the step title in the line is the older way
+    const part = (line.question || {}).part;
+    let st = byTitle.get(line.step) || (map && part ? steps.find(s => s.parts.some(p => p.id === part)) : null);
+    if (!st) { if (!fallback) continue; st = fallback; e.foreign = text(line.step) || ""; }
+    st.events.push(e);
+  }
+  for (const st of steps) st.events = collapse(sortEvents(st.events));
+  if (handovers.length && steps.length) {   // every handover is one row in the last step, never an outcome
+    const hs = sortEvents(handovers), n = hs.length, all = hs.every(e => /^q-adopt-/.test(String(e.qid || "")));
+    const said = [...hs].reverse().find(e => text(e.question.outcome));
+    const last = steps[steps.length - 1];
+    const label = all ? n + " " + plural(n, "část převzata", "části převzaty", "částí převzato") : "Všechny části převzaty";
+    last.events = sortEvents(last.events.concat([{ type: "handover", by: "pm", answer: hs[n - 1].answer, title: "Předání",
+      label, outcome: label,   // an outcome like any row; bearing() is what keeps it out of the step's outcome
+      comment: said ? text(said.question.outcome) : null, reconstructed: false, cards: [] }]));
+  }
+  for (const st of steps) { st.outcome = stepOutcome(st); st.who = stepWho(st); }
+  if (map) {   // answered questions stay visible in the step of their part, with Změnit
+    const all = Array.isArray(S.questions) ? S.questions : [];
+    // an answer the PM changed and answered again is shown once, as the new one
+    const replaced = new Set(all.filter(q => q && q.answered && q.changed_from).map(q => q.changed_from));
+    for (const q of all) {
+      if (!q || !q.answered || replaced.has(q.id) || /^reroll/.test(String((q.answer || {}).decision || ""))) continue;
+      const st = steps.find(s => s.parts.some(p => p.id === q.part));
+      if (st) st.saved.push(q);
+    }
+  }
+  if (map && open.length) {   // each open question sits in the step of its part
+    for (const q of open) {
+      const st = steps.find(s => s.parts.some(p => p.id === q.part)) || steps.find(s => s.status === "current") || steps[0];
+      if (st) { st.open.push(q); st.active = true; }
+    }
+  } else {
+    const act = steps.find(s => s.status === "current") || steps.find(s => s.status !== "done") || steps[steps.length - 1];
+    if (open.length && act) { act.open = open; act.active = true; }
+  }
+  return { steps, open, done: steps.filter(s => s.status === "done").length,
+    finished: steps.length > 0 && !open.length && steps.every(s => s.status === "done"),
+    answered: (Array.isArray(S.questions) ? S.questions : []).filter(q => q && q.answered) };
+}
+if (typeof module !== "undefined") module.exports = { model, stepOutcome, stepWho, collapse, sortEvents, toEvent };
+</script>
+<script>
+"use strict";
+const KIND = { variant: "Co stavíme a co k tomu", options: "Co připravit", vision: "Hlavní sdělení a slogan", identity: "Logo",
+  seo_brief: "Hledání na Googlu", structure: "Stránky a jejich části", task_map: "Co v aplikaci lidé dělají",
+  content_plan: "Obsah stránek", defer_content: "Chybějící podklady", facts: "Údaje o firmě", references: "Vzory",
+  direction: "Vzhled webu", approve_page: "Kontrola hotové stránky", exception: "Výjimka z kontroly",
+  coverage_drift: "Změna ve standardech", design_standard: "Pravidla vzhledu", handover: "Předání webu",
+  notifications: "Oznámení v aplikaci", sources: "Podklady", product_context: "Podklady o produktu",
+  copy_verdict: "Texty webu", no_method: "Chybí postup" };
+const SELECTOR = { check: "kontrola", page: "stránka", viewport: "velikost obrazovky", browser: "prohlížeč", role: "role", state: "stav" };
+// Card fields rendered by name; any other string field shows on the card's back as "key: value".
+const KNOWN = new Set(["id", "question", "title", "preview", "preview2", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source", "method", "slot", "value", "preview2_label", "honours", "dir"]);
+// the PM's earlier choice this question builds on (checked by the server against the recorded answer)
+function priorLine(q) {
+  const p = q.prior; if (!p || typeof p !== "object") return null;
+  return el("p", { class: "prior" }, "Vaše volba, ze které vycházím: ", el("b", {}, String(p.choice || p.question)),
+    str(p.comment) ? el("span", {}, " · „" + p.comment + "“") : null);
+}
+function motionBlock(q) {   // the reference's motion the directions carry (P108): the sentence, then every replacement or omission by name
+  const m = q.motion; if (!m || typeof m !== "object") return null;
+  const ex = Array.isArray(m.exceptions) ? m.exceptions : [];
+  return el("div", { class: "motion" }, el("p", {}, "Pohyb vzoru: ", el("b", {}, String(m.sentence || ""))),
+    ex.length ? el("ul", {}, ex.map(e => el("li", {}, el("b", {}, String(e.label || e.id)), e.disposition === "omit" ? " - vynecháno: " : " - nahrazeno: ", String(e.reason || "")))) : null);
+}
+function sourceOf(c) {   // what a card's proposal rests on, in the map's words
+  const m = S && S.sections && S.sections.sources;
+  return c.source && m && m[c.source] ? m[c.source] : null;
+}
+// Fixed icon markup (constants only, never data).
+const SVG = {
+  expand: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  flip: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 1-8 8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M4 5.5V12h6.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  die: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8.4" cy="8.4" r="1.5" fill="currentColor"/><circle cx="15.6" cy="8.4" r="1.5" fill="currentColor"/><circle cx="8.4" cy="15.6" r="1.5" fill="currentColor"/><circle cx="15.6" cy="15.6" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>',
+  prev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5 8 12l6.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 5 16 12l-6.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' };
+const FAN = ["0deg", "1.4deg", "-1.2deg"];
+let last = "", stopped = false, navs = [];
+let S = null, H = [], hCount = null, hOk = true, SHOW_STEPS = false;   // /state, /history, its line count when fetched
+const SELECTED = {};   // question id -> the card the PM picked; Další sends it
+const VIEW = {};       // step id -> { part, auto }: the part the PM opened, and which part was waiting then
+const SEEN = new Set(), WAS = {}, NOTES = {};   // NOTES[question][figure] = the PM's note to one page, until sent
+const oneLine = t => String(t).replace(/[\r\n]+/g, " ").replace(/[„“]/g, "\"");   // what was already drawn and the statuses at the last render: an animation plays once
+let first = true, slide = "", stepMove = "", drawn = [], arrived = null;
+const openSteps = new Set();   // step titles whose Detail the PM opened, kept across re-renders
+const scrolled = {};   // deck scroll position per question, kept across re-renders
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "on") for (const [ev, f] of Object.entries(v)) e.addEventListener(ev, f);
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== "") e.append(k);
+  return e;
+}
+function icon(name) { const t = document.createElement("template"); t.innerHTML = SVG[name]; return t.content.firstChild; }
+function str(v) { return typeof v === "string" && v.trim() ? v : null; }
+
+function notice(text) {
+  const n = document.getElementById("notice");
+  n.textContent = text; n.hidden = !text;
+}
+
+async function call(method, url, body) {
+  const r = await fetch(url, { method, credentials: "same-origin", headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 403 && data.error === "token") {
+    stopped = true;
+    notice("Přístup vypršel. Otevřete odkaz ze zprávy agenta.");
+    throw new Error("token");
+  }
+  return { status: r.status, data };
+}
+
+// Lightbox: the expanded preview; Esc or a click closes it and focus returns.
+// In the lightbox the PM can step through the question's cards (arrows, ← →), pick the shown one
+// ("Vybrat tento" = the card's own tick) and switch to its second picture (contexts) when the card has one.
+const lightbox = document.getElementById("lightbox");
+const lbImg = el("img", { alt: "" });
+const lbPrev = el("button", { type: "button", class: "chip lb-prev", "aria-label": "Předchozí návrh" }, "‹ Předchozí");
+const lbNext = el("button", { type: "button", class: "chip lb-next", "aria-label": "Další návrh" }, "Další ›");
+const lbPick = el("button", { type: "button", class: "choose go lb-pick" }, "Vybrat tento");
+const lbCtx = el("button", { type: "button", class: "chip lb-ctx", "aria-pressed": "false" }, "Kontexty");
+const lbNote = el("button", { type: "button", class: "chip lb-note" }, "Chci jinak");   // a note to one page of a gallery (structure, texts)
+const lbZoom = el("button", { type: "button", class: "chip lb-zoom", "aria-pressed": "false", "aria-label": "Zobrazit 1:1" }, "1:1");
+function lbToggleZoom() {
+  const on = lbImg.classList.toggle("zoomed"); lightbox.classList.toggle("zoomed", on);
+  lbZoom.setAttribute("aria-pressed", String(on)); lbZoom.textContent = on ? "Přizpůsobit" : "1:1";
+}
+lbImg.addEventListener("load", () => lbImg.classList.toggle("wide", lbImg.naturalWidth >= 1100));
+lbImg.addEventListener("click", e => { e.stopPropagation(); lbToggleZoom(); });
+const lbTitle = el("span", { class: "lb-title" }), lbCount = el("span", { class: "lb-count" });
+const lbBar = el("div", { class: "lb-bar", on: { click: e => e.stopPropagation() } }, lbPrev,
+  el("div", { class: "lb-mid" }, lbCount, lbTitle, lbPick, lbCtx, lbNote, lbZoom), lbNext);
+lightbox.append(lbImg, lbBar);
+let opener = null, LB = null;   // LB: {arts, i, ctx} while open
+function lbShow(i, ctx) {
+  LB.i = (i + LB.arts.length) % LB.arts.length;
+  const art = LB.arts[LB.i], img = art.querySelector("img.comp") || art.querySelector("img");
+  LB.ctx = !!ctx && art.getAttribute("data-preview2") === "1";   // the second picture exists only on some cards; stepping onto one without it shows its first
+  const base = img.getAttribute("src").replace(/&n=2/, "").replace(/&t=\d+/, "");
+  lbImg.src = LB.ctx ? base + "&n=2" : base; lbImg.alt = img.alt;
+  lbImg.classList.remove("zoomed"); lightbox.classList.remove("zoomed"); lbZoom.setAttribute("aria-pressed", "false"); lbZoom.textContent = "1:1";
+  lbTitle.textContent = art.querySelector("h3, figcaption b")?.textContent || "";
+  lbCount.textContent = LB.arts.length > 1 ? (art.hasAttribute("data-fig") ? "stránka " : "návrh ") + (LB.i + 1) + " z " + LB.arts.length + " ·" : "";
+  lbPrev.hidden = lbNext.hidden = LB.arts.length < 2;
+  const picked = art.classList.contains("picked"), tick = art.querySelector(".tick");
+  lbPick.hidden = !tick; lbPick.disabled = picked; lbPick.textContent = picked ? "Vybráno ✓" : "Vybrat tento";
+  lbCtx.hidden = art.getAttribute("data-preview2") !== "1"; lbCtx.setAttribute("aria-pressed", String(LB.ctx));
+  lbCtx.textContent = LB.ctx ? "Zpět" : (art.getAttribute("data-preview2-label") || "Druhý pohled");
+  const sec = art.closest("section"), fig = art.getAttribute("data-fig");
+  lbNote.hidden = !(fig && sec && sec.noteFor);
+  if (!lbNote.hidden) lbNote.textContent = sec.hasNote(fig) ? "Poznámka ✓ (upravit)" : "Chci jinak";
+}
+function openLightbox(img) {
+  if (img.hidden || !img.getAttribute("src")) return;
+  opener = document.activeElement;
+  // every picture of the question steps the same way: the cards the PM picks from and the gallery of a
+  // question answered with "Ano, další" (page layouts, texts) - Coufal 9. 10. 2026: the layouts had no arrows
+  const FRAMES = ".card[data-card], .gallery figure";
+  const art = img.closest(FRAMES), sec = img.closest("section");
+  const arts = art && sec ? [...sec.querySelectorAll(FRAMES)].filter(a => { const i = a.querySelector("img.comp"); return i && !i.hidden && i.naturalWidth; }) : [];
+  LB = { arts: arts.length ? arts : [art || img.closest("article, figure") || img.parentElement], i: Math.max(0, arts.indexOf(art)), ctx: false };
+  lbShow(LB.i, false);
+  lightbox.hidden = false;
+  requestAnimationFrame(() => lightbox.classList.add("open"));
+  lightbox.focus();
+}
+function closeLightbox() {
+  lightbox.classList.remove("open"); lightbox.hidden = true; LB = null;
+  if (opener && opener.isConnected) opener.focus(); else document.querySelector("#pipeline button, main, body")?.focus();
+}
+lbPrev.addEventListener("click", () => LB && lbShow(LB.i - 1, LB.ctx));
+lbNext.addEventListener("click", () => LB && lbShow(LB.i + 1, LB.ctx));
+lbCtx.addEventListener("click", () => LB && lbShow(LB.i, !LB.ctx));
+lbZoom.addEventListener("click", lbToggleZoom);
+lbNote.addEventListener("click", () => { if (!LB) return; const art = LB.arts[LB.i]; art.closest("section").noteFor(art.getAttribute("data-fig"), () => lbShow(LB.i, LB.ctx)); });
+lbPick.addEventListener("click", () => { if (!LB) return; const t = LB.arts[LB.i].querySelector(".tick"); if (t && !LB.arts[LB.i].classList.contains("picked")) t.click(); lbShow(LB.i, LB.ctx); });
+lightbox.addEventListener("click", e => { if (!e.target.closest(".lb-bar") && e.target !== lbImg) closeLightbox(); });
+document.addEventListener("keydown", e => {
+  if (lightbox.hidden) return;
+  if (e.key === "Escape") closeLightbox();
+  else if (e.key === "ArrowLeft" && LB && LB.arts.length > 1) lbShow(LB.i - 1, LB.ctx);
+  else if (e.key === "ArrowRight" && LB && LB.arts.length > 1) lbShow(LB.i + 1, LB.ctx);
+});
+
+// The preview slot: shimmer until /preview answers 200, retried every 3 s.
+function media(q, c, withDetails, flip) {
+  const src = "/preview?question=" + encodeURIComponent(q.id) + "&card=" + encodeURIComponent(c.id);
+  const img = el("img", { class: "comp", alt: "Náhled: " + (c.title || c.id), hidden: true });
+  const expand = el("button", { type: "button", class: "chip", disabled: true, "aria-label": "Zvětšit náhled",
+    on: { click: () => openLightbox(img) } }, icon("expand"));
+  const box = el("div", { class: "media comp-pending" },
+    el("div", { class: "shimmer" }, el("span", { class: "comp-note" }, "Náhled se připravuje…")), img,
+    el("div", { class: "chips" }, expand,
+      withDetails ? el("button", { type: "button", class: "chip", on: { click: flip } }, icon("flip"), el("span", {}, "Detaily")) : null));
+  img.addEventListener("load", () => { img.hidden = false; expand.disabled = false; box.classList.remove("comp-pending");
+    img.classList.toggle("fit", img.naturalWidth > 1.7 * img.naturalHeight); });
+  img.addEventListener("error", () => { if (!stopped) setTimeout(() => { img.src = src + "&t=" + Date.now(); }, 3000); });
+  if (!withDetails) img.addEventListener("click", () => openLightbox(img));   // on a deck card the click picks it
+  img.src = src;
+  return box;
+}
+
+function fact(label, text, cls) {
+  return str(text) ? el("p", { class: "fact" + (cls ? " " + cls : "") }, el("span", { class: "fact-label" }, label), text) : null;
+}
+function urlFact(c) {
+  const u = str(c.url);
+  if (!u) return null;
+  return el("p", { class: "fact" }, el("span", { class: "fact-label" }, "Adresa"),
+    /^https?:\/\//i.test(u) ? el("a", { href: u, target: "_blank", rel: "noopener noreferrer" }, u) : u);
+}
+function uniqueness(c) {
+  return str(c.uniqueness) ? el("div", { class: "raises" },
+    el("p", { class: "raise" }, el("span", { class: "fact-label" }, "V čem je jedinečný"), el("br"), c.uniqueness)) : null;
+}
+function identity(c) {
+  const pal = Array.isArray(c.palette) ? c.palette : [], tags = Array.isArray(c.tags) ? c.tags.filter(str) : [];
+  if (!pal.length && !tags.length) return null;
+  return el("div", { class: "identity" },
+    pal.length ? el("span", { class: "swatches", role: "img", "aria-label": "Paleta: " + pal.join(", ") }, pal.map(col => {
+      const s = el("i", { title: String(col) });
+      if (!/url\(/i.test(String(col)) && CSS.supports("color", String(col))) s.style.background = String(col);
+      return s;
+    })) : null,
+    tags.map(t => el("span", { class: "tag" }, t)));
+}
+
+function withPick(q, cards, text) {   // "[vybráno: <id> · <název>] " before the PM's words when a card is picked
+  const c = cards.find(x => x.id === SELECTED[q.id]);
+  return c ? "[vybráno: " + c.id + " · " + (c.title || c.id) + "] " + text : text;
+}
+
+function optionRow(q, c, i, select) {   // one answer as a row (facts, no_method): the tick is the radio, the row is the click
+  const title = c.title || c.id, picked = SELECTED[q.id] === c.id;
+  const meta = [str(c.risk) ? "Riziko: " + c.risk : null, str(sourceOf(c)) ? "Vychází z: " + sourceOf(c) : null].filter(Boolean).join(" · ");
+  return el("article", { class: "card opt" + (picked ? " picked" : ""), "data-card": c.id, on: { click: e => { if (!e.target.closest("a")) select(c.id); } } },
+    el("button", { type: "button", class: "tick", role: "radio", "aria-checked": String(picked), "aria-label": "Vybrat: " + title, on: { click: e => { e.stopPropagation(); select(c.id); } } }, "✓"),
+    el("div", { class: "opt-body" }, el("b", {}, title, i === 0 ? el("span", { class: "kicker" }, "Doporučuji") : null),
+      str(c.thesis) && c.thesis !== c.title ? el("p", { class: "opt-t" }, c.thesis) : null,
+      meta ? el("p", { class: "opt-m" }, meta) : null));
+}
+
+function card(q, c, i, select) {
+  const title = c.title || c.id;
+  const lead = i === 0 ? " lead" : "";
+  const picked = SELECTED[q.id] === c.id;
+  // the whole card picks; its own buttons (Detaily, zoom) and links keep doing their thing
+  const art = el("article", { class: "card" + (picked ? " picked" : ""), style: "--fan:" + FAN[i % 3], "data-card": c.id,
+    "data-preview2": str(c.preview2) ? "1" : "0", "data-preview2-label": str(c.preview2_label) || "",
+    on: { click: e => { if (!e.target.closest("button, a")) select(c.id); } } });
+  // the tick is the control a keyboard and a screen reader use; the rest of the card is the same click for a mouse
+  const tick = el("button", { type: "button", class: "tick", role: "radio", "aria-checked": String(picked), "aria-label": "Vybrat: " + title,
+    on: { click: () => select(c.id) } }, "✓");
+  const flip = () => {
+    const on = art.classList.toggle("flipped");
+    front.inert = on; back.inert = !on;
+    (on ? back : front).querySelector(".chip:last-of-type, .back-head .chip").focus();
+  };
+  const front = el("div", { class: "face front" + lead },
+    i === 0 ? el("span", { class: "kicker" + (str(c.preview) ? "" : " inline") }, "Doporučuji") : null,
+    str(c.preview) ? media(q, c, true, flip) : null,
+    el("div", { class: "body" },
+      str(c.eyebrow) ? el("p", { class: "tier" }, str(c.eyebrow)) : null,
+      el("h3", {}, title),
+      str(c.thesis) && c.thesis !== c.title ? el("p", { class: "thesis" }, c.thesis) : null,
+      identity(c), uniqueness(c), fact("Ctí vaši volbu", c.honours, "clamp"), fact("Riziko", c.risk, "clamp"), fact("Vychází z", sourceOf(c), "clamp"), urlFact(c)));
+  const extras = Object.entries(c).filter(([k, v]) => !KNOWN.has(k) && (str(v) || typeof v === "number"))
+    .map(([k, v]) => fact(k.replace(/_/g, " "), String(v)));
+  const back = el("div", { class: "face back" + lead, inert: true },
+    el("div", { class: "back-head" }, el("p", { class: "tier" }, "Celé znění · " + title),
+      el("button", { type: "button", class: "chip", on: { click: flip } }, icon("flip"), el("span", {}, "Zpět"))),
+    el("div", { class: "body back-body" },
+      str(c.thesis) ? el("p", { class: "thesis" }, c.thesis) : null,
+      uniqueness(c), fact("Riziko", c.risk), urlFact(c), extras));
+  art.append(tick, el("div", { class: "card-inner" }, front, back));
+  return art;
+}
+
+function skeleton(i) {
+  return el("article", { class: "card skeleton", style: "--fan:" + FAN[i % 3], "aria-hidden": "true" },
+    el("div", { class: "card-inner" }, el("div", { class: "face front" },
+      el("div", { class: "media" }, el("div", { class: "shimmer" })),
+      el("div", { class: "body" }, el("div", { class: "line w60" }), el("div", { class: "line title" }),
+        el("div", { class: "line w90" }), el("div", { class: "line w60" })))));
+}
+
+// Deck with arrows that appear only when it overflows, paging card by card.
+function deck(q, kids) {
+  const grid = el("div", { class: "grid" }, kids);
+  const vertical = () => matchMedia("(max-aspect-ratio: 1/1)").matches;
+  const page = dir => {
+    const first = grid.querySelector(".card");
+    if (first) grid.scrollBy({ left: dir * (first.getBoundingClientRect().width + 26),
+      behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  };
+  const prev = el("button", { type: "button", class: "nav prev", hidden: true, "aria-label": "Předchozí karta", on: { click: () => page(-1) } }, icon("prev"));
+  const next = el("button", { type: "button", class: "nav next", hidden: true, "aria-label": "Další karta", on: { click: () => page(1) } }, icon("next"));
+  const shell = el("div", { class: "deck-shell" }, grid,
+    el("div", { class: "fade fade-prev", "aria-hidden": "true" }), el("div", { class: "fade fade-next", "aria-hidden": "true" }), prev, next);
+  const update = () => {
+    const over = !vertical() && grid.scrollWidth > grid.clientWidth + 4;
+    const pos = grid.scrollLeft, max = grid.scrollWidth - grid.clientWidth;
+    prev.hidden = next.hidden = !over;
+    prev.disabled = !(over && pos > 2); next.disabled = !(over && pos < max - 2);
+    shell.classList.toggle("can-prev", !prev.disabled); shell.classList.toggle("can-next", !next.disabled);
+  };
+  grid.addEventListener("scroll", () => { scrolled[q.id] = grid.scrollLeft; update(); }, { passive: true });
+  navs.push(() => { if (scrolled[q.id]) grid.scrollLeft = scrolled[q.id]; update(); });
+  return shell;
+}
+addEventListener("resize", () => navs.forEach(f => f()));
+
+// a body line with the little markdown agents write: "## " heading, "- " item, **bold**; text nodes only, never HTML
+function mdLine(l) {
+  // an address in the text is a link the PM can click (PM 11. 10. 2026: the handover question showed bare URLs)
+  const linkify = s => s.split(/(https?:\/\/[^\s<>"“”)]+)/).map((t, i) => i % 2 ? el("a", { href: t, target: "_blank", rel: "noopener", class: "body-link" }, t) : t);
+  const bold = s => s.split(/\*\*(.+?)\*\*/).flatMap((t, i) => i % 2 ? [el("b", {}, t)] : linkify(t));
+  const h = l.match(/^#{2,4}\s+(.*)/);
+  if (h) return el("h4", { class: "detail-h" }, ...bold(h[1]));
+  const li = l.match(/^\s*[-*]\s+(.*)/);
+  if (li) return el("p", { class: "detail detail-li" }, "• ", ...bold(li[1]));
+  return el("p", { class: "detail" }, ...bold(l));
+}
+function bodyLines(b) {
+  if (b == null || b === "") return null;
+  if (typeof b === "string") return b.split("\n").filter(l => l.trim()).map(mdLine);
+  if (Array.isArray(b) && b.every(x => typeof x === "string")) return b.filter(l => l.trim()).map(mdLine);
+  return el("pre", { class: "body-json" }, JSON.stringify(b, null, 2));
+}
+
+// gate check names (coverage/checks.yaml) in plain Czech for the exception chips
+const CHECK_CS = { http_200: "Stránky odpovídají", glyph_coverage: "Písmo a diakritika", no_overflow: "Posun do strany",
+  one_line_controls: "Tlačítka na jeden řádek", no_placeholders: "Zástupné texty", facts_match: "Fakta z registru",
+  brand_assets: "Logo a ikony ze značky", links_resources: "Odkazy a soubory", required_files: "Povinné soubory",
+  axe: "Přístupnost", image_weight: "Váha obrázků", lighthouse_mobile: "Rychlost na mobilu", seo: "Hledání na Googlu",
+  app_task_states: "Úlohy a stavy aplikace", screenshots_reviewed: "Kontrola snímků", no_overlap: "Překryvy",
+  brand_consistency: "Jednotná značka", page_weight: "Váha stránky", business_minimum: "IČO a zpracování údajů",
+  brand_package: "Balíček značky (logo)", copy_review: "Kontrola textů", design_standard_doc: "Pravidla vzhledu webu", customer_page: "Stránka pro zákazníka", ai_search: "AI vyhledávače" };
+function selectorChips(target) {
+  let sel = null;
+  try { sel = JSON.parse(target); } catch (e) { /* shown raw below */ }
+  if (!sel || typeof sel !== "object") return el("div", { class: "identity" }, el("span", { class: "tag" }, String(target)));
+  // human words only: the check by its Czech name, the page; the gate's item list folds behind a count
+  const chips = Object.entries(sel).filter(([k, v]) => v !== "*" && k !== "missing")
+    .map(([k, v]) => el("span", { class: "tag" }, (SELECTOR[k] || k) + " ", el("b", {}, k === "check" ? (CHECK_CS[v] || String(v)) : String(v))));
+  const miss = Array.isArray(sel.missing) ? sel.missing : [];
+  return el("div", { class: "identity" }, chips, miss.length ? el("details", { class: "missing" },
+    el("summary", {}, "chybí " + miss.length + " položek balíčku (seznam z kontroly)"),
+    el("ul", {}, miss.map(m => el("li", {}, String(m))))) : null);
+}
+
+// The window for "Chci to jinak" and for a reason: one text, one or two ways to send it.
+const askDlg = document.getElementById("ask");
+function ask(o) {
+  const ta = document.getElementById("ask-text");
+  if (askDlg.dataset.key !== o.key) ta.value = "";   // a draft that was not saved comes back for the same question
+  askDlg.dataset.key = o.key;
+  document.getElementById("ask-title").textContent = o.title;
+  document.getElementById("ask-hint").textContent = o.hint;
+  ta.placeholder = o.placeholder || "";
+  const send = f => () => { const t = ta.value.trim(); if (!t) { ta.focus(); return; } askDlg.close(); f(t); };
+  document.getElementById("ask-actions").replaceChildren(
+    el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => askDlg.close() } }, "Zavřít"),
+    ...(o.extra || []).map(([label, f]) => el("button", { type: "button", class: "reroll-btn", on: { click: () => { askDlg.close(); f(); } } }, label)),
+    ...o.send.map(([label, f], i) => el("button", { type: "button", class: i === o.send.length - 1 ? "choose go" : "reroll-btn", on: { click: send(f) } }, label)));
+  askDlg.showModal(); ta.focus();
+}
+// The answered question leaves upwards, towards the row that says it is saved.
+function leave(node, cls) {
+  if (!node.isConnected || matchMedia("(prefers-reduced-motion: reduce)").matches) return Promise.resolve();
+  node.classList.remove("arriving"); node.classList.add(cls || "leaving");
+  return new Promise(r => { node.addEventListener("animationend", e => { if (e.target === node) r(); }); setTimeout(r, 600); });
+}
+
+// count = { k, n } when the part asks more than one question: "Otázka k z n"
+function question(q, cards, count, partNote, extra) {   // partNote: the part's sentence under the title; extra: a button at the right of the title
+  const status = el("p", { class: "status", role: "status" });
+  const fresh = !first && !SEEN.has("q:" + q.id);
+  drawn.push("q:" + q.id);
+  const sec = el("section", { class: "question" + (fresh ? " arriving" : ""), "aria-labelledby": "h-" + q.id });
+  if (fresh) arrived = arrived || sec;
+  const kind = str(q.eyebrow) || KIND[q.kind] || q.kind;
+  const tier = () => el("div", { class: "q-meta" },
+    count ? el("span", { class: "q-count" }, "Otázka " + count.k + (/^[234]$|^[234]\d\d$/.test(String(count.n)) ? " ze " : " z ") + count.n) : null,
+    (S.sections ? null : el("span", { class: "tier" }, kind)), extra);
+  let sync = () => {};
+  const answer = async (decision, choice, comment) => {
+    const btns = sec.querySelectorAll("button:not(.chip):not(.nav):not(.tick)");
+    btns.forEach(b => b.disabled = true);
+    try {
+      const r = await call("POST", "/answer", { question: q.id, kind: q.kind, target: q.target, decision, choice, comment: comment || "" });
+      if (r.status === 200) { askDlg.dataset.key = ""; if (!/^reroll/.test(decision)) await leave(sec); last = ""; tick(); return; }
+      status.textContent = r.status === 409 ? "Otázka se mezitím změnila nebo už má odpověď. Obnovte stránku."
+        : "Odpověď se nepodařilo uložit. Zkuste to prosím znovu.";
+    } catch (e) { if (e.message !== "token") status.textContent = "Server neodpovídá."; }
+    btns.forEach(b => b.disabled = false); sync();
+  };
+  const title = q.title || kind || q.id;
+  // Approvals that show several previews (page wireframes, content per page) get a gallery, not a deck.
+  const gallery = ["structure", "task_map", "content_plan", "copy_verdict"].includes(q.kind);   // the texts verdict shows the pages it is about (PM 9. 10. 2026)
+  const deckKind = cards.length && q.kind !== "approve_page" && !gallery;
+  // a fact or a consent: rows, the recommended answer preselected (PM 9. 10. 2026: A); the degree buttons belong to looks only
+  const rows = deckKind && ["facts", "no_method", "handover"].includes(q.kind) && !cards.some(c => str(c.preview));
+  if (rows && SELECTED[q.id] === undefined) SELECTED[q.id] = cards[0].id;
+
+  if (deckKind || (!cards.length && q.rerolled_from)) {
+    sec.append(el("div", { class: "head q-head" }, tier(),
+      el("div", { class: "headline" }, icon("die"), el("h2", { class: "q-title", id: "h-" + q.id }, title))));
+    if (str(q.prompt)) sec.append(el("p", { class: "lede" }, q.prompt));
+    const prior = priorLine(q); if (prior) sec.append(prior);
+    const motion = motionBlock(q); if (motion) sec.append(motion);
+    if (q.kind === "handover" && S.links && typeof S.links === "object") sec.append(el("div", { class: "done-links" },
+      str(S.links.web) ? el("a", { class: "choose go", href: S.links.web, target: "_blank", rel: "noopener" }, "Otevřít web") : null,
+      str(S.links.customer) ? el("a", { class: "reroll-btn", href: S.links.customer, target: "_blank", rel: "noopener" }, "Co jste dostali") : null));
+    const lines = bodyLines(q.body); if (lines) sec.append(el("div", { class: "head" }, lines));
+    if (partNote) sec.append(partNote);
+    if (!cards.length) {
+      sec.append(el("p", { class: "tier" }, "Připravují se nové návrhy…"), deck(q, [0, 1, 2].map(skeleton)));
+      return sec;
+    }
+    const note = el("span", { class: "picked-note" });
+    const next = el("button", { type: "button", class: "choose go", on: { click: () => {
+      const c = cards.find(x => x.id === SELECTED[q.id]);
+      // a handover with a reservation carries the PM's words (the server refuses it without them)
+      if (q.kind === "handover" && c && c.value === "vyhrada") ask({ key: q.id + ":vyhrada", title: "Co vám před převzetím vadí?", hint: "Výhrada se uloží k převzetí; web se předá s ní.", send: [["Převzít s výhradou", t => answer("choose", c.id, t)]] });
+      else answer("choose", SELECTED[q.id]);
+    } } }, q.kind === "handover" ? "Potvrdit →" : "Další →");
+    let otherBtn = null;   // "Chci to jinak" turns into "Poznámka k výběru" once a card is picked
+    sync = () => {
+      const c = cards.find(x => x.id === SELECTED[q.id]);
+      next.disabled = !c;
+      note.replaceChildren(...(c ? ["Vybráno: ", el("b", {}, c.title || c.id)] : ["Vyberte kartu kliknutím."]));
+      if (otherBtn) otherBtn.textContent = c ? "Poznámka k výběru" : "Chci to jinak";
+    };
+    const select = id => {   // a click on the picked card lets it go again; a row question (radio) keeps one picked
+      SELECTED[q.id] = SELECTED[q.id] === id && !rows ? undefined : id;
+      sec.querySelectorAll(".card[data-card]").forEach(a => {
+        const on = a.getAttribute("data-card") === SELECTED[q.id];
+        a.classList.toggle("picked", on); a.querySelector(".tick").setAttribute("aria-checked", String(on));
+      });
+      sync();
+    };
+    if (rows) {
+      sec.append(el("div", { class: "opts", role: "radiogroup", "aria-labelledby": "h-" + q.id }, cards.map((c, i) => optionRow(q, c, i, select))));
+      sec.append(el("div", { class: "bar" },
+        el("button", { type: "button", class: "reroll-btn", on: { click: () => ask({ key: q.id, title: "Co chcete jinak?",
+          hint: "Napište odpověď svými slovy (třeba rovnou údaj); uloží se jako vaše odpověď.",
+          send: [["Odeslat", t => answer("return", undefined, t)]] }) } }, "Chci to jinak"),
+        el("span", { class: "spacer" }), note, next, status));
+      sync();
+      return sec;
+    }
+    const shell = deck(q, cards.map((c, i) => card(q, c, i, select)));
+    shell.querySelector(".grid").setAttribute("role", "radiogroup");
+    shell.querySelector(".grid").setAttribute("aria-labelledby", "h-" + q.id);
+    sec.append(shell);
+    // one row: new proposals on the left, the PM's own words in a window, Další on the right
+    sec.append(el("div", { class: "bar" },
+      el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_safer") } }, "← Bezpečněji"),
+      el("button", { type: "button", class: "reroll-btn", on: { click: () => answer("reroll") } }, icon("die"), el("span", {}, "Znovu")),
+      el("button", { type: "button", class: "reroll-btn quiet", on: { click: () => answer("reroll_bolder") } }, "Odvážněji →"),
+      (otherBtn = el("button", { type: "button", class: "reroll-btn", on: { click: () => ask({ key: q.id, title: SELECTED[q.id] ? "Poznámka k výběru" : "Co chcete jinak?",
+        hint: SELECTED[q.id] ? "Poznámku k vybrané kartě pošlete s výběrem („Vybrat s poznámkou“), nebo napište, co chcete jinak."
+          : "Napište to svými slovy. Odešlete to jako svou odpověď, nebo si nechte podle toho připravit nové návrhy.",
+        // a picked card can go with words (choose + comment: "this one, and take its animations"); without a pick the
+        // words are a return or a re-roll, and a pick travels inside them anyway (Coufal 9. 10. 2026)
+        send: [["Nové návrhy podle toho", t => answer("reroll", undefined, withPick(q, cards, t))], ["Odeslat jako odpověď", t => answer("return", undefined, withPick(q, cards, t))]]
+          .concat(SELECTED[q.id] ? [["Vybrat s poznámkou", t => answer("choose", SELECTED[q.id], t)]] : []) }) } }, "Chci to jinak")),
+      el("span", { class: "spacer" }), note, next,
+      el("p", { class: "hint" }, "Bezpečněji = blíž tomu, co je v oboru běžné. Odvážněji = výraznější a méně obvyklé. Znovu = nové návrhy ve stejném duchu."),
+      status));
+    sync();
+    return sec;
+  }
+
+  // One panel: text question, page approval or exception.
+  const page = q.kind === "approve_page", exc = q.kind === "exception";
+  const shot = page && cards[0] ? media(q, cards[0], false) : null;
+  let meta = null;
+  if (page) {
+    const t = String(q.target), at = t.lastIndexOf("@");
+    // the build file (index.html, kontakt/index.html) as the address a visitor sees (/, /kontakt/)
+    const file = at > 0 ? t.slice(0, at) : t;
+    const addr = "/" + file.replace(/(^|\/)index\.html$/, "$1").replace(/\.html$/, "");
+    meta = el("div", { class: "identity" }, el("span", { class: "tag" }, "adresa ", el("b", {}, addr)));
+  }
+  const galleryEl = gallery && cards.length ? el("div", { class: "gallery" }, cards.map(c => el("figure", { "data-fig": c.id },
+    str(c.preview) ? media(q, c, false) : null,
+    el("figcaption", {}, el("b", {}, c.title || c.id), str(c.thesis) ? " " + c.thesis : "")))) : null;
+  const parts = [
+    el("div", { class: "head q-head" }, el("div", { class: "headline" }, el("h2", { class: "q-title", id: "h-" + q.id }, title)), tier()),
+    str(q.prompt) ? el("p", { class: "lede" }, q.prompt) : null,
+    meta, exc ? selectorChips(q.target) : null,
+    (lines => lines ? el("div", { class: "head" }, lines) : null)(bodyLines(q.body)),
+    partNote,
+    galleryEl];
+  // Notes to single pages (lightbox "Chci jinak", PM 9. 10. 2026): kept here until "Vrátit s poznámkami" sends them
+  // all as one return, one line per page, so the agent redoes only the pages named.
+  const notes = NOTES[q.id] = NOTES[q.id] || {};   // survives render(): a poll redraws the section, the notes stay
+  const notesBtn = el("button", { type: "button", class: "reroll-btn", hidden: true, on: { click: () =>
+    answer("return", undefined, Object.entries(notes).map(([id, t]) => "Stránka „" + oneLine(cards.find(c => c.id === id)?.title || id) + "“: " + oneLine(t)).join("\n")) } });
+  const refreshNotes = () => { const n = Object.keys(notes).length; notesBtn.hidden = !n; notesBtn.textContent = "Vrátit s poznámkami (" + n + ")";
+    galleryEl?.querySelectorAll("figure").forEach(f => f.classList.toggle("noted", f.getAttribute("data-fig") in notes)); };   // the gallery, not the section: it is marked before the section is assembled
+  sec.hasNote = id => id in notes;
+  // the dialog writes to the store and refreshes whatever section is on the page now (the one it was opened from may be redrawn)
+  const live = () => document.querySelector('section[aria-labelledby="h-' + CSS.escape(q.id) + '"]');
+  sec.noteFor = (id, then) => { const c = cards.find(x => x.id === id); ask({ key: q.id + ":note:" + id, title: "Co má být na stránce „" + (c?.title || id) + "“ jinak?",
+    hint: "Poznámka zůstane u stránky; odejde až tlačítkem „Vrátit s poznámkami“ pod otázkou. Napište, co chybí, přebývá nebo má být jinde.",
+    send: [["Uložit poznámku", t => { notes[id] = t; (live()?.refreshNotes || refreshNotes)(); if (then) then(); }]],
+    extra: notes[id] ? [["Smazat poznámku", () => { delete notes[id]; (live()?.refreshNotes || refreshNotes)(); if (then) then(); }]] : [] }); };
+  sec.refreshNotes = refreshNotes; refreshNotes();
+  // a page approval keeps its box with the screenshot; every other question reads like the ones with cards
+  const body = page ? el("div", { class: "body" }, parts) : sec;
+  if (page) sec.append(el("div", { class: "panel face wide" }, shot, body)); else sec.append(...parts.filter(Boolean));
+  // the same row as under the cards: the PM's own words in a window on the left, the way on on the right
+  const other = () => ask(exc ? { key: q.id + ":no", title: "Proč výjimku neudělit?", hint: "Důvod se uloží k rozhodnutí.", send: [["Neudělit", t => answer("return", undefined, t)]] }
+    : { key: q.id, title: "Co chcete jinak?", hint: q.kind === "handover" ? "Napište, co chcete před předáním ještě upravit." : "Napište to svými slovy. Když to jinak sedí a máte jen poznámku, pošlete ji se souhlasem.",
+        send: [["Souhlasím, s poznámkou", t => answer("approve", undefined, t)], ["Odeslat", t => answer("return", undefined, t)]] });
+  const yes = () => exc ? ask({ key: q.id + ":yes", title: "Proč výjimku udělit?", hint: "Důvod se uloží k rozhodnutí.", send: [["Udělit výjimku", t => answer("approve", undefined, t)]] }) : answer("approve");
+  body.append(el("div", { class: "bar" },
+    el("button", { type: "button", class: "reroll-btn", on: { click: other } }, exc ? "Neudělit" : page ? "Chci změny" : "Chci to jinak"),
+    gallery ? notesBtn : null,
+    el("span", { class: "spacer" }),
+    el("button", { type: "button", class: "choose go", on: { click: yes } },
+      exc ? "Udělit výjimku" : q.kind === "handover" ? "Ano, předat" : page ? "V pořádku, další →" : "Ano, další →"),
+    status));
+  return sec;
+}
+
+// Hotovo (P108): where the web is, what the PM took over, what stays open, and a field to add a point.
+function donePanel(sec) {
+  const f = S.finish && typeof S.finish === "object" ? S.finish : {}, l = S.links && typeof S.links === "object" ? S.links : {};
+  const items = (Array.isArray(S.open_items) ? S.open_items : []).filter(i => i && i.status !== "done");
+  const hand = (S.questions || []).filter(q => q.kind === "handover" && q.answered && str(q.outcome)).pop();
+  const web = str(f.web) || str(l.web), cust = str(f.customer) || str(l.customer);
+  const ta = el("textarea", { maxlength: "500", rows: "2", placeholder: "Co má ještě přijít - co, kdo, dokdy…", "aria-label": "Nový otevřený bod" });
+  const btn = el("button", { type: "button", class: "reroll-btn", on: { click: async () => {
+    const text = ta.value.trim(); if (!text) return; btn.disabled = true;
+    const r = await call("POST", "/open-item", { text }).catch(() => ({ status: 0, data: {} }));
+    btn.disabled = false;
+    if (r.status === 200) location.reload(); else notice(r.data.error || "Bod se neuložil.");
+  } } }, "Doplnit bod");
+  sec.append(el("div", { id: "done-panel", class: "done" },
+    el("div", { class: "done-links" },
+      web ? el("a", { class: "hbtn-go", href: web, target: "_blank", rel: "noopener" }, "Otevřít web") : null,
+      cust ? el("a", { class: "hbtn-ghost", href: cust, target: "_blank", rel: "noopener" }, "Co jste dostali") : null),
+    hand ? el("p", { class: "muted" }, hand.outcome) : null,
+    el("h3", {}, "Co zbývá před zveřejněním"),
+    // H7: a critical open item blocks publication - said once above the list, and the item is marked
+    items.some(i => i.critical === true) ? el("p", { class: "blocked", role: "status" },
+      "Publikace blokovaná, dokud nejsou splněné body označené „Blokuje zveřejnění“.") : null,
+    items.length ? el("ul", { class: "open-items" }, items.slice().sort((a, b) => (b.critical === true) - (a.critical === true)).map(i => el("li", {},
+      i.critical === true ? el("b", {}, "Blokuje zveřejnění: ") : null, String(i.text || ""),
+      el("span", { class: "muted" }, " · " + (i.owner || "") + (i.due ? " · do " + i.due : ""))))) : el("p", { class: "muted" }, "Nic otevřeného."),
+    el("div", { class: "add-item" }, ta, btn)));
+}
+
+// The page: hero from the data, then one row per step (pipeline-model above derives everything).
+const WHO = { pm: "Rozhodl PM", agent: "Rozhodla AI", both: "PM i AI" };
+const NUM = ["žádný", "jeden", "dva", "tři", "čtyři", "pět", "šest", "sedm", "osm", "devět", "deset"];
+function num(n) { return NUM[n] || String(n); }
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function hero(m) {
+  const h = document.getElementById("headline"), p = document.getElementById("intro");
+  const act = m.steps.find(st => st.active);
+  document.getElementById("done-panel")?.remove();
+  const fin = Boolean(m.finished || (S.finish && typeof S.finish === "object"));
+  document.body.classList.toggle("finished", fin);
+  const sec = h.closest("section"); sec.classList.toggle("done-card", fin && !SHOW_STEPS);
+  if (fin && SHOW_STEPS) {   // the PM walks the run as it was; one link leads back to Hotovo (PM 11. 10. 2026)
+    h.replaceChildren("Web je hotový.", el("br"), "Rozhodnutí zůstávají.");
+    p.replaceChildren(cap(num(m.steps.length)) + " " + plural(m.steps.length, "krok", "kroky", "kroků") + " od zadání po kontrolu; klikněte na krok a projděte si otázky a své odpovědi. ",
+      el("a", { href: "#", class: "back-done", on: { click: e => { e.preventDefault(); SHOW_STEPS = false; render(); window.scrollTo(0, 0); } } }, "← Zpět na Hotovo"));
+  } else if (fin) {
+    h.replaceChildren("Hurá, máme hotovo.", el("br"), "Tady je váš web.");
+    p.textContent = "Web si otevřete tlačítkem; stránka „Co jste dostali“ má všechno pohromadě. Od vás teď nic nepotřebujeme.";
+    donePanel(sec);
+  } else if (act) {
+    if (act.n) h.textContent = act.title + ".";
+    else h.replaceChildren("Teď ladíme", el("br"), "krok " + act.title + ".");
+    const d = m.done;
+    p.textContent = (act.n ? "Krok " + act.n + " z " + act.of + ". " : "") + (d === 0 ? "Zatím není hotový žádný krok." : cap(num(d)) + " "
+      + plural(d, "krok je hotový.", "kroky jsou hotové.", "kroků je hotových.")) + " Rozhodněte přímo tady; další kroky navážou.";
+  } else if (m.answered.length) {   // every question answered; the agent reads them on the PM's next chat message
+    h.replaceChildren("Díky, mám všechno,", el("br"), "co potřebuji.");
+    const next = [...m.answered].reverse().find(q => str(q.next) && (q.answer || {}).decision !== "return");
+    p.textContent = "Pokračuji sám, do chatu nemusíte nic psát." + (next ? " Co bude dál: " + next.next : "");
+  } else {
+    const now = S.now && typeof S.now === "object" ? S.now : {};
+    h.textContent = str(now.title) || "Pracuji na webu.";
+    p.textContent = str(now.text) || "Další otázka se tu objeví sama, stránku nemusíte obnovovat.";
+  }
+}
+
+function eventRow(e) {
+  return el("div", { class: "event" },
+    el("span", { class: "actor" }, e.by === "agent" ? "AI" : "PM"),
+    el("span", {}, e.title || KIND[e.kind] || "Otázka", e.reconstructed ? el("span", { class: "note" }, " · doplněno zpětně") : null),
+    el("span", { class: "decision" }, e.label),
+    e.comment ? el("p", { class: "comment" }, e.comment) : null,
+    e.why ? el("p", { class: "comment" }, "Proč AI: " + e.why) : null,
+    e.foreign != null ? el("p", { class: "origin" }, e.foreign ? "Zapsáno u kroku " + e.foreign : "Zapsáno mimo kroky") : null);
+}
+
+// The cards the PM chose from, as they were shown (history copies of the previews).
+function pastCards(e) {
+  return el("div", { class: "past" }, el("p", { class: "tier" }, e.title || KIND[e.kind] || "Výběr"),
+    el("div", { class: "past-cards" }, e.cards.map(c => {
+      const img = str(c.preview) ? el("img", { alt: "Náhled: " + (c.title || c.id), loading: "lazy",
+        src: "/history/preview?question=" + encodeURIComponent(e.qid) + "&card=" + encodeURIComponent(c.id),
+        on: { load: ev => ev.target.classList.toggle("fit", ev.target.naturalWidth > 1.7 * ev.target.naturalHeight) } }) : null;
+      if (img) img.addEventListener("click", () => openLightbox(img));
+      return el("div", { class: "past-card" + (c.id === e.choice ? " selected" : "") }, img, el("p", {}, c.title || c.id));
+    })));
+}
+
+function stepCls(st) { return st.active || (st.status === "current" && !st.open.length) ? "active" : st.status === "done" ? "done" : "wait"; }
+const STEP_WORD = { done: "hotovo", active: "teď", wait: "čeká" };
+// The six steps as a strip that stays on top: number (a tick when done), title, status in a word.
+function stripEl(m, vid, pick) {
+  return el("nav", { class: "strip", "aria-label": "Kroky stavby" }, m.steps.map((st, i) => {
+    const cls = stepCls(st), just = !first && WAS["s:" + st.id] && WAS["s:" + st.id] !== cls && cls !== "wait";
+    const btn = el("button", { type: "button", class: "stp " + cls + (just ? " just" : ""), "aria-current": st.id === vid ? "step" : null,
+      on: { click: () => { if (st.id !== vid) pick(st.id, i); } } },
+      el("span", { class: "stp-c" }, cls === "done" ? "✓" : String(i + 1)),
+      el("span", { class: "stp-w" }, el("b", {}, st.title), el("span", { class: "sr" }, " " + STEP_WORD[cls])));
+    if (!(st.id === vid && (st.description || st.goal || st.feeds))) return el("div", { class: "stp-wrap" }, btn);
+    // (i) next to the step the PM looks at: what the step is for, in a small pop-over (Esc or a click elsewhere closes it)
+    const pop = el("div", { class: "info-pop", id: "info-" + st.id, role: "region", "aria-label": "O tomhle kroku", hidden: true },
+      el("p", {}, st.description || ""), st.goal ? el("p", {}, "Z toho bude: " + st.goal) : null, st.feeds ? el("p", {}, st.feeds) : null);
+    const ib = el("button", { type: "button", class: "info-btn", "aria-label": "O tomhle kroku", "aria-expanded": "false", "aria-controls": "info-" + st.id,
+      on: { click: () => { pop.hidden = !pop.hidden; ib.setAttribute("aria-expanded", String(!pop.hidden)); } } }, "i");
+    return el("div", { class: "stp-wrap" }, btn, ib, pop);
+  }));
+}
+function stepEl(st, i, back) {
+  const cls = stepCls(st);
+  const events = hOk ? st.events : [], saved = cls === "active" ? [] : (st.saved || []);   // an active step shows them in their part
+  const just = !first && WAS["s:" + st.id] && WAS["s:" + st.id] !== cls && cls !== "wait";
+  drawn.push(["s:" + st.id, cls]);
+  // a step the PM opened on purpose (not the one being worked on) shows its Detail right away
+  const isOpen = openSteps.has(st.title);
+  const stage = el("div", { class: "stage" + (isOpen ? " open" : "") + (stepMove ? " slide-" + stepMove : "") });
+  const detail = null;   // Detail duplicated the saved rows (PM 11. 10. 2026: A); each row has Zobrazit instead
+  const outcome = st.active ? "Čeká na vaše rozhodnutí."
+    : !hOk ? "—" : st.outcome.text;
+  // the step being worked on introduces itself through the (i) in the strip; its outcome is the question
+  if (cls !== "active") stage.append(el("div", { class: "summary" },
+    el("div", {}, el("h2", { class: "name sr" }, st.n ? "Krok " + st.n + " z " + st.of + ": " + st.title : st.title),
+      st.description ? el("p", { class: "desc" }, st.description) : null),
+    el("div", { class: "outcome" }, outcome,
+      !st.active && hOk && st.outcome.reconstructed ? el("span", { class: "note" }, " · doplněno zpětně") : null,
+      !st.active && hOk && st.who ? el("span", { class: "who" }, WHO[st.who]) : null),
+    detail));
+  if (back) stage.append(el("div", { class: "step-back" }, el("button", { type: "button", class: "reroll-btn back-now", on: { click: back.go } }, back.label)));
+  if (saved.length) stage.append(savedEl(saved));
+  void events;   // the decision history lives in the rows' Zobrazit now
+  if (cls === "wait") stage.append(el("div", { class: "step-info" }, el("p", { class: "info" }, "Na tenhle krok přijde řada později. Zatím tu není na co odpovídat.")));
+  if (cls === "active" && st.parts.length) {   // the parts as tabs, and the one the PM looks at
+    const d = defaultPart(st), vid = viewedPart(st, d);
+    const popped = new Set(st.parts.filter(p => !first && p.status === "done" && WAS["p:" + st.id + ":" + p.id] && WAS["p:" + st.id + ":" + p.id] !== "done").map(p => p.id));
+    st.parts.forEach(p => drawn.push(["p:" + st.id + ":" + p.id, p.status]));
+    const tabs = partsEl(st, vid, popped, id => {
+      slide = st.parts.findIndex(p => p.id === id) < st.parts.findIndex(p => p.id === vid) ? "back" : "fwd";
+      VIEW[st.id] = { part: id, auto: d }; render();
+    });
+    // the parts row is always in the same place; Detail rides at its right end
+    // one part only: no pills row, Detail sits at the right of the question's title instead
+    if (tabs) stage.append(el("nav", { class: "tabs slim", "aria-label": "Části kroku" }, el("div", { class: "tabs-r" }, [...tabs.childNodes]), detail));
+    stage.append(partPanel(st, vid, d, tabs ? null : detail));
+  } else if (st.active) {   // an older server without the map: the open questions as they come
+    stage.append(el("div", { class: "active-box" }, (st.saved || []).length ? savedEl(st.saved) : null, st.open.map(q => question(q, cardsOf(q)))));
+  }
+  const art = el("article", { class: "step solo " + cls + (just ? " just" : ""), "aria-current": st.active ? "step" : null }, stage);
+  if (just && cls === "active") arrived = document.getElementById("pipeline");   // the step that just lit up is where the PM continues
+  return art;
+}
+function cardsOf(q) { return (S.cards || []).filter(c => c && c.question === q.id); }
+
+// The part that waits for the PM, else the one being worked on.
+function defaultPart(st) {
+  const p = st.parts.find(p => st.open.some(q => q.part === p.id)) || st.parts.find(p => p.status === "current");
+  return p ? p.id : null;
+}
+// The part the PM opened stays open until the waiting part changes; then the page follows the work.
+function viewedPart(st, d) {
+  const v = VIEW[st.id];
+  if (v && v.auto === d && st.parts.some(p => p.id === v.part)) return v.part;
+  delete VIEW[st.id];
+  return d || st.parts[st.parts.length - 1].id;
+}
+const PART_INFO = { done: "Tahle část je hotová.", skipped: "Tuhle část jsme vynechali, pro váš web není potřeba.",
+  waiting: "Na tuhle část přijde řada později. Zatím tu není na co odpovídat.", current: "Na téhle části teď pracuji. Otázka se tu objeví sama." };
+// One part: what it is for, the saved answers with Změnit, and the question that waits (one at a time).
+// why, what the PM does, what comes out of it and what it feeds - as one paragraph
+function partText(p) {   // the map's own sentence when it has one, else its pieces in order
+  return p.text || [p.why, p.you, p.goal ? "Z toho bude: " + p.goal : "", p.feeds].filter(Boolean).join(" ");
+}
+// The part's questions in one place. On top of the work: the question on screen ("Teď: …") and the ones to come;
+// under the work: the answered ones with the answer and Změnit (the row lifts, the question opens above).
+// saved: the answered questions (for numbering); open: the open ones; cur: the one on screen; onlyOpen: draw the
+// open rows only (the top rail), the answered ones are drawn under the work by a second call
+function qRail(saved, open, cur, onlyOpen) {
+  const done = saved.slice().sort((a, b) => Date.parse((a.answer || {}).at || 0) - Date.parse((b.answer || {}).at || 0));
+  const rows = (onlyOpen ? [] : done.map((q, i) => ({ q, n: i + 1, cls: q.changed_to ? "changing" : "done" })))
+    .concat(open.map((q, j) => ({ q, n: done.length + j + 1, cls: q === cur ? "now" : "wait" })));
+  // a reopened question (Změnit) keeps the number of the answer it replaces
+  for (const r of rows) if (r.q.changed_from) { const i = done.findIndex(x => x.id === r.q.changed_from); if (i >= 0) r.n = i + 1; }
+  const rail = el("div", { class: "q-rail" + (cur ? " has-now" : ""), role: "list", "aria-label": "Otázky v této části" }, rows.map(r => {
+    // each animation plays once: the row that became "Teď", the answer that just got saved
+    const key = r.cls === "now" ? "now:" + r.q.id : r.cls === "done" ? "done:" + r.q.id + ":" + ((r.q.answer || {}).at || "") : null;
+    const fresh = key && !first && !SEEN.has(key); if (key) drawn.push(key);
+    const kids = [el("span", { class: "q-n" }, r.cls === "done" ? "✓" : r.cls === "changing" ? "…" : String(r.n)),
+      el("span", { class: "q-t" }, (r.cls === "now" ? (r.q.changed_from ? "Teď (změna): " : "Teď: ") : "") + (r.q.title || KIND[r.q.kind] || r.q.id)),
+      el("span", { class: "q-a" }, r.cls === "done" ? savedText(r.q) : r.cls === "changing" ? "měníte - odpovídáte výše" : r.cls === "now" ? "odpovídáte níže" : "přijde na řadu")];
+    const row = el("div", { class: "q-row " + r.cls + (fresh ? r.cls === "now" ? " arriving" : " fresh" : ""), role: "listitem" }, kids);
+    if (r.cls === "done") row.append(el("button", { type: "button", class: "toggle", on: { click: async e => {
+      const b = e.currentTarget; b.disabled = true;
+      await leave(row, "leaving");   // the row lifts towards the work above, then the question opens there
+      const x = await call("POST", "/change", { question: r.q.id }).catch(() => ({ status: 0 }));
+      if (x.status === 200) { last = ""; tick(); return; }
+      row.classList.remove("leaving"); b.disabled = false;
+      notice(x.status === 409 ? "Změna této odpovědi už čeká výše." : "Změnu se nepodařilo otevřít.");
+    } } }, "Změnit"));
+    return row;
+  }));
+  return rail;
+}
+// The agent works and the PM waits: what is being done now (the agent's now.title/text) and what comes next.
+// The agent's own note (now.title/text, with now.at) is shown only while it is newer than the PM's last answer;
+// after an answer the page says what it is processing and what comes next (the question's own `next`),
+// and where the finished things are.
+function workingEl(detail, st, p, saved) {
+  const now = S.now && typeof S.now === "object" ? S.now : {};
+  const answered = (S.questions || []).filter(q => q && q.answered && q.answer && q.answer.at && !/^reroll/.test(String(q.answer.decision || "")))
+    .sort((a, b) => Date.parse(b.answer.at) - Date.parse(a.answer.at));
+  const lastQ = answered[0], lastAt = lastQ ? Date.parse(lastQ.answer.at) : 0;
+  const nowAt = Date.parse(now.at || "") || 0;
+  // the note is stale after a newer answer, and when it was written for another part than the one being worked on
+  const stale = lastAt > nowAt || (now.part && p && now.part !== p.id);
+  const title = !stale && str(now.title) ? now.title : p ? "Připravuji část " + p.title + "." : lastQ ? "Zpracovávám vaši odpověď: " + (lastQ.title || KIND[lastQ.kind] || lastQ.id) : "Pracuji na téhle části.";
+  const text = !stale && str(now.text) ? now.text : p && str(p.text) ? p.text : lastQ && str(lastQ.next) ? "Co bude dál: " + lastQ.next : "Další otázka se tu objeví sama, stránku nemusíte obnovovat.";
+  const doneParts = st ? st.parts.filter(x => x.status === "done" && x.id !== (p || {}).id).map(x => x.title) : [];
+  const where = saved && saved.length ? "odpovědi, které jste dal v této části, jsou níže v Hotové v této části"
+    : doneParts.length ? "vaše odpovědi jsou v hotových částech nahoře (" + doneParts.join(", ") + ") - klikněte na ně" : "v této části jste zatím nic neodpovídal";
+  return el("div", { class: "working", role: "status", "aria-live": "polite" },
+    el("div", { class: "working-gear", "aria-hidden": "true" }),
+    el("div", {}, el("b", {}, title), el("p", {}, text),
+      el("p", {}, "Hotové výstupy (dokumenty, vize, logo) najdete na stránce ", el("a", { href: "/brand/" }, "Značka a produkt"), "; " + where + "."),
+      el("div", { class: "bar-track", "aria-hidden": "true" }, el("div", { class: "bar-fill" })), detail ? el("div", { class: "actions", style: "margin-top:10px" }, detail) : null));
+}
+function partPanel(st, vid, d, detail) {   // detail: the step's Detail button when the step has no pills row
+  const p = st.parts.find(x => x.id === vid), i = st.parts.indexOf(p), di = st.parts.findIndex(x => x.id === d);
+  const saved = (st.saved || []).filter(q => q.part === vid), open = st.open.filter(q => q.part === vid);
+  const stray = st.open.filter(q => !st.parts.some(x => x.id === q.part));   // never hidden behind a tab
+  const q = open.find(x => x.changed_from) || open[0];   // a reopened answer goes first
+  const back = () => { slide = di < i ? "back" : "fwd"; delete VIEW[st.id]; render(); };
+  const where = st.open.length ? "otázku, která čeká" : "část, na které pracuji";
+  return el("div", { class: "active-box" + (slide ? " slide-" + slide : "") },
+    d && d !== vid ? el("button", { type: "button", class: "reroll-btn back-now", on: { click: back } }, di < i ? "← Zpět na " + where : "Zpět na " + where + " →") : null,
+    q ? null : partBox(st, p),
+    q && (saved.length || open.length > 1 || q.changed_from) ? qRail(saved, open, q, true) : null,
+    q ? question(q, cardsOf(q), null, el("p", { class: "part-note" }, partText(p)), detail)
+      : p.status === "current" ? workingEl(detail, st, p, saved)
+      : el("p", { class: "info" }, (PART_INFO[p.status] || "") + (p.status === "done" && saved.length ? " Odpověď změníte tlačítkem Změnit - otevře se stejná otázka znovu." : ""), detail),
+    stray.map(x => question(x, cardsOf(x))),
+    saved.length ? el("div", { class: "done-box" }, el("p", { class: "tier" }, "Hotové v této části"), qRail(saved, [], null, false)) : null);
+}
+
+// The parts of the step: number, title and status; the part being worked on shows why, goal, what it feeds
+// and what the PM does, from the tool's map (never written by the agent per question).
+function closeInfo() { document.querySelectorAll(".info-pop:not([hidden])").forEach(p => { p.hidden = true; p.previousSibling.setAttribute("aria-expanded", "false"); }); }
+document.addEventListener("click", e => { if (!e.target.closest(".stp-wrap")) closeInfo(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeInfo(); });
+const PART_STATUS = { done: "hotovo", current: "teď", waiting: "čeká", skipped: "není potřeba" };
+// The PM's saved answers in the step: what was chosen, a short highlight when just saved, and Změnit
+// (the server opens the same question again as a new one; the agent takes the new answer).
+function savedText(q) {
+  const a = q.answer;
+  if (!a) return str(q.answer_title) || "uloženo";
+  if (a.decision === "choose") return a.choice_title || a.choice || "vybráno";
+  if (a.decision === "approve") return "Ano";
+  if (a.decision === "return") return "Vráceno: " + (a.comment || "");
+  return a.decision;
+}
+function savedEl(list) {
+  return el("div", { class: "saved" }, list.map(q => {
+    const key = "a:" + q.id + "@" + (q.answer || {}).at;
+    const fresh = !first && !SEEN.has(key) && q.answer && Date.now() - Date.parse(q.answer.at) < 15000;
+    drawn.push(key);
+    const change = async b => {
+      b.disabled = true;
+      const r = await call("POST", "/change", { question: q.id }).catch(() => ({ status: 0 }));
+      if (r.status === 200) { last = ""; tick(); return; }
+      b.disabled = false; notice(r.status === 409 ? "Změna této odpovědi už čeká níže." : "Změnu se nepodařilo otevřít.");
+    };
+    const finished = Boolean(S.finish && typeof S.finish === "object");
+    const btn = q.changed_to ? el("span", { class: "note" }, "Měníte - odpovězte níže")
+      : finished ? null : el("button", { type: "button", class: "reroll-btn quiet", on: { click: e => change(e.currentTarget) } }, "Změnit");
+    // Zobrazit: the question as the PM saw it (text, the cards shown, his answer), read only, from the studio's own history (PM 11. 10. 2026: A)
+    const view = el("div", { class: "saved-view", hidden: true });
+    const show = el("button", { type: "button", class: "reroll-btn quiet", "aria-expanded": "false", on: { click: () => {
+      const on = view.hidden; view.hidden = !on; show.textContent = on ? "Skrýt" : "Zobrazit"; show.setAttribute("aria-expanded", String(on));
+      if (on && !view.childNodes.length) view.append(...savedView(q));
+    } } }, "Zobrazit");
+    return el("div", { class: "saved-wrap" }, el("div", { class: "saved-row" + (fresh ? " fresh" : "") },
+      el("span", { class: "ok" }, "✓ Uloženo"), el("span", { class: "saved-q" }, q.title || KIND[q.kind] || q.id),
+      el("span", { class: "saved-a" }, savedText(q)), el("span", { class: "saved-btns" }, show, btn)), view);
+  }));
+}
+// what the PM saw and answered, from history.jsonl (the latest line of this question): body, cards, answer
+function savedView(q) {
+  const lines = (hOk ? H : []).filter(h => h && h.by === "pm" && h.question && h.question.id === q.id);
+  const e = lines.length ? lines[lines.length - 1] : null;
+  if (!e) return [el("p", { class: "muted" }, "Záznam této odpovědi studio nemá (odpověď přišla mimo něj).")];
+  const body = bodyLines(e.question.body) || [];
+  const cards = Array.isArray(e.cards) ? e.cards : [];
+  const a = e.answer || {};
+  const chosen = cards.find(c => c.id === a.choice);
+  return [el("div", { class: "head" }, body),
+    cards.length ? pastCards({ qid: q.id, title: "Co jste viděl", cards, choice: a.choice }) : null,
+    el("p", { class: "saved-answer" }, el("b", {}, "Vaše odpověď: "), savedText(q), chosen ? " (" + (chosen.title || chosen.id) + ")" : "", a.comment ? el("span", {}, " · „" + a.comment + "“") : null)].filter(Boolean);
+}
+
+function brief(rows) {   // label left, text right - the same grid as the decision history
+  return el("dl", { class: "brief" }, rows.filter(r => r[1]).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+}
+function partBox(st, p) {
+  const i = st.parts.indexOf(p);
+  return el("div", { class: "part-box" },
+    el("p", { class: "part-head sr" }, st.parts.length > 1 ? "Část " + (i + 1) + " z " + st.parts.length + ": " + p.title : p.title),
+    el("p", { class: "part-note" }, partText(p)));
+}
+// The parts of the step as tabs: number (a tick when done), title, status for a screen reader.
+function partsEl(st, vid, popped, pick) {
+  if (st.parts.length < 2) return null;
+  return el("div", { class: "tabs" }, st.parts.map((p, i) =>
+    el("button", { type: "button", class: "tab " + p.status, "aria-current": p.id === vid ? "true" : null,
+      on: { click: () => { if (p.id !== vid && pick) pick(p.id); } } },
+      el("span", { class: "tab-n" + (popped && popped.has(p.id) ? " pop" : "") }, p.status === "done" ? "✓" : String(i + 1)),
+      el("span", { class: "tab-t" }, p.title), el("span", { class: "sr" }, PART_STATUS[p.status] || p.status))));
+}
+
+function render() {
+  // Keep what the PM typed and where the focus was across a re-render.
+  const kept = {}; document.querySelectorAll("textarea, input").forEach(i => kept[i.id] = i.value);
+  const focus = document.activeElement && document.activeElement.id;
+  navs = []; drawn = []; arrived = null;
+  const m = model(S, hOk ? H : []);
+  document.getElementById("project").textContent = S.project || "";
+  hero(m);
+  // the step that waits for the PM (or is being worked on); the one the PM opened stays until that changes
+  const dflt = (m.steps.find(s => s.active) || m.steps.find(s => s.status === "current") || [...m.steps].reverse().find(s => s.status === "done") || m.steps[0] || {}).id;
+  let sv = VIEW["/step"];
+  if (!(sv && sv.auto === dflt && m.steps.some(s => s.id === sv.part))) { delete VIEW["/step"]; sv = { part: dflt }; }
+  const vi = m.steps.findIndex(s => s.id === sv.part), di = m.steps.findIndex(s => s.id === dflt);
+  stepMove = slide === "step-back" ? "back" : slide === "step-fwd" ? "fwd" : "";
+  if (stepMove) slide = "";
+  const back = vi !== di ? { label: di < vi ? "← Zpět na krok, na kterém se pracuje" : "Zpět na krok, na kterém se pracuje →",
+    go: () => { slide = di < vi ? "step-back" : "step-fwd"; delete VIEW["/step"]; render(); } } : null;
+  const st = m.steps[vi];
+  const pickStep = (id, i) => { slide = i < vi ? "step-back" : "step-fwd"; VIEW["/step"] = { part: id, auto: dflt }; render(); };
+  const finished = Boolean(m.finished || (S.finish && typeof S.finish === "object"));
+  const pipe = document.getElementById("pipeline");
+  pipe.replaceChildren(...(m.steps.length ? [stripEl(m, sv.part, pickStep), stepEl(st, vi, back)] : []));
+  document.getElementById("fold")?.remove();
+  if (finished && !SHOW_STEPS) {   // one card is the page; the steps and the PM's decisions stay a click away (companion A, PM 11. 10. 2026)
+    pipe.hidden = true;
+    const n = (S.questions || []).filter(q => q.answered).length;
+    pipe.before(el("p", { id: "fold", class: "foldline" }, cap(num(m.steps.length)) + " " + plural(m.steps.length, "krok", "kroky", "kroků") + " a " + n + " vašich rozhodnutí zůstává k nahlédnutí · ",
+      el("a", { href: "#", on: { click: e => { e.preventDefault(); SHOW_STEPS = true; render(); } } }, "Zobrazit")));
+  } else pipe.hidden = false;
+  m.steps.forEach(st => drawn.push(["s:" + st.id, stepCls(st)]));
+  for (const [id, v] of Object.entries(kept)) { const i = document.getElementById(id); if (i) i.value = v; }
+  if (focus && document.getElementById(focus)) document.getElementById(focus).focus();
+  requestAnimationFrame(() => navs.forEach(f => f()));
+  // on a narrow screen the opened part's tab may sit outside the strip
+  document.querySelectorAll(".tab[aria-current]").forEach(t => { t.parentNode.scrollLeft = t.offsetLeft - 24; });
+  for (const d of drawn) { if (Array.isArray(d)) WAS[d[0]] = d[1]; else SEEN.add(d); }
+  if (arrived) arrived.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  first = false; slide = "";
+}
+
+async function tick() {
+  if (stopped) return;
+  try {
+    const r = await call("GET", "/state");
+    if (r.status !== 200) { notice("Otázky od agenta teď nejde zobrazit, protože v nich je chyba. Dejte agentovi vědět."); return; }
+    if (r.data.history_lines !== hCount || !hOk) {   // an answer or a decision was written since the last fetch
+      const h = await call("GET", "/history");
+      hOk = h.status === 200 && Array.isArray(h.data);
+      if (hOk) { H = h.data; hCount = r.data.history_lines; }
+    }
+    notice(hOk ? "" : "Historie rozhodnutí teď není k dispozici.");
+    const key = JSON.stringify(r.data) + "|" + hCount + "|" + hOk;
+    if (key !== last) { last = key; S = r.data; render(); }
+  } catch (e) { if (e.message !== "token") notice("Server studia neodpovídá, zkouším znovu…"); }
+}
+tick();
+setInterval(tick, 3000);
+</script>
+</html>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>O nás - Pekárna U Mlýna</title>
+<meta name="description" content="Kdo peče chleba v Pekárně U Mlýna a odkud bereme mouku.">
+<link rel="canonical" href="https://pekarna-mlyn.cz/o-nas/">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/styl.css">
+</head>
+<body>
+<header><img class="logo" src="/img/logo-kresleny.svg" alt="Pekárna U Mlýna" width="120" height="32">
+<nav><a href="/">Úvod</a><a href="/o-nas/">O nás</a></nav></header>
+<main>
+<h1>O nás</h1>
+<p>Pečeme od roku 1998 z mouky ze mlýna za rohem.</p>
+<p style="font-family: monospace">Příliš žluťoučký kůň úpěl ďábelské ódy.</p>
+<p>Lorem ipsum dolor sit amet.</p>
+<p><a href="/neni.html">Stará stránka</a></p>
+<form class="obj" action="/api/zprava" method="post"><style>form.obj,form.obj *{font:inherit;color:inherit;background:transparent;border:1px solid currentColor}form.obj label,form.obj p,form.obj small,form.obj a{border:0}</style><label>Telefon <input type="tel" name="tel" required style="min-height:44px"></label><button type="submit" style="min-height:44px;min-width:44px">Odeslat</button><p class="msg" role="status" hidden></p><small><a href="/o-nas/#udaje" style="display:inline-block;min-height:44px">Ochrana osobních údajů</a></small></form><script>(function(){var f=document.querySelector("form.obj"),m=f.querySelector(".msg"),b=f.querySelector("button");f.addEventListener("submit",function(e){e.preventDefault();b.disabled=true;m.hidden=false;m.textContent="Odesílám…";fetch(f.action,{method:"POST",body:new FormData(f)}).then(function(r){if(!r.ok)throw 0;m.textContent="Odesláno, ozveme se.";}).catch(function(){m.innerHTML='Nepovedlo se. Zavolejte <a href="tel:+420777123456">+420 777 123 456</a>.';}).finally(function(){b.disabled=false;});});})();</script></main>
+</body>
+</html>

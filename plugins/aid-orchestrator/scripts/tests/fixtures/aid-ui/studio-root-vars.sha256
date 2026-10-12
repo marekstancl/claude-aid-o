@@ -1,0 +1,3 @@
+# sha256 of the :root { … } block of lib/aid-ui-studio/studio.html as approved at 34098ced
+# (the Impeccable palette; P106 V5). Recompute: sed -n '/:root {/,/^  }/p' studio.html | sha256sum
+60837904c4cf89ba84dae250a56c4a79488f2da177898a0de3b51e304153081d
