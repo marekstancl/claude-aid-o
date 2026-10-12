@@ -49,7 +49,7 @@ Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 
    `- {id: price, task: "Najdi cenu preventivní prohlídky", expect: ["Preventivní prohlídka", "56 €"]}`.
 2b. **Fotky, které dodá klient** `docs/content/photos.yaml` (FB-30): každá fotka, kterou web potřebuje
    a podklady ji nemají, jako `{id, page, where, what, shape: rect|round, ratio: "4:5", min_px: "1600x2000"}`
-   (`page` = soubor stavby, např. `o-nas/index.html`). Stavba z ní udělá rámeček v přesném tvaru
+   (`page` = soubor stránky ve stavbě, jak ho jmenuje brána). Stavba z ní udělá rámeček v přesném tvaru
    (krok 6, bod 4a), stránka „co jste dostali“ z ní ukáže zadání fotek pro klienta.
 3. Agent smí psát `draft` jen z faktů registru a podle „Jak psát vizi,
    slogany a texty" (`steps/1v-vision.md`); `confirmed_client` dává jen PM.
