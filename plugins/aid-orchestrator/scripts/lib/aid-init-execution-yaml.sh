@@ -332,6 +332,32 @@ execution_yaml_has_gate_profiles() {
 #   mechanism that makes hand-edited `gates:` `command:` values byte-identical
 #   before and after the upgrade: nothing before the appended block is ever
 #   touched.
+# render_project_tests_block [stack ...] (P110)
+#   The top-level `project_tests:` list for the given stacks: the globs each
+#   fragment declares on its `# project_tests: [...]` line, merged in stack
+#   order. Nothing for no stack. Used by compose_execution_yaml (fresh init)
+#   and offered by /aid-init to a file without the key (never written silently).
+render_project_tests_block() {
+  local plugin_dir s frag globs='[]'
+  plugin_dir=$(_resolve_plugin_dir) || return 1
+  for s in "$@"; do
+    [[ -n "$s" ]] || continue
+    frag="${plugin_dir}/defaults/execution-stacks/${s}.yaml"
+    [[ -f "$frag" ]] || continue
+    globs="$(jq -c --argjson g "$(sed -n 's/^# project_tests: //p' "$frag" | head -1 | jq -c '. // []' 2>/dev/null || echo '[]')" '. + $g | unique' <<< "$globs")"
+  done
+  [[ "$globs" == "[]" ]] && return 0
+  echo "# The project's test files (P110): a change under them needs a gate flagged"
+  echo "# runs_project_tests that proves it ran them (aid-run-gates.sh --lint-profiles)."
+  echo "project_tests: $(jq -c . <<< "$globs")"
+}
+
+# execution_yaml_lacks_project_tests <file> — 0 when the file has no
+# project_tests: key, so /aid-init offers render_project_tests_block (P110).
+execution_yaml_lacks_project_tests() {
+  [[ -f "$1" ]] && ! yq -e 'has("project_tests")' "$1" >/dev/null 2>&1
+}
+
 append_gate_profiles_block() {
   local file="$1"
   local block_text="$2"
@@ -384,8 +410,10 @@ compose_execution_yaml() {
 # Detected stacks: ${stacks_label}
 # Review and customize commands; remove sections for stacks you don't use.
 
-gates:
 EOF
+    render_project_tests_block "${clean_stacks[@]:-}"
+    echo ""
+    echo "gates:"
 
     if (( ${#clean_stacks[@]} == 0 )); then
       echo "  # No stacks detected — add gate definitions manually."

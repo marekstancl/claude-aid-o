@@ -1880,3 +1880,151 @@ YAML
   run jq -r -s '[.[] | select(.event == "gate_job_superseded" and .reason == "deadline_changed")] | length' "$TIMELINE"
   [ "$output" = "1" ]
 }
+
+@test "plan-diff-gate: the template's plan_diff command runs from a candidate worktree with --cwd . and writes isolation.worktree (P110)" {
+  git init -q . && git config user.email t@t && git config user.name t
+  printf '.aid-o/\n' > .gitignore; echo seed > seed; git add -A; git commit -qm seed
+  git worktree add -q -b cand "$TEST_TMPDIR/cand"
+  echo only-in-candidate > "$TEST_TMPDIR/cand/cand.txt"; git -C "$TEST_TMPDIR/cand" add cand.txt; git -C "$TEST_TMPDIR/cand" commit -qm cand
+  printf -- '---\nid: P953\n---\n# Plan\n\n## Acceptance Criteria\n\n- [ ] AC1: the candidate has its file\n  ```yaml\n  verification_pattern:\n    type: must_contain\n    file: cand.txt\n    regex: only-in-candidate\n  ```\n' > "$TEST_TMPDIR/plan.md"
+  # the shipped gate, its command untouched but for where the plugin lives
+  yq '{"gates": {"plan_diff": .gates.plan_diff}}' "$AID_PLUGIN_PATH/defaults/execution.yaml" \
+    | sed "s|plugins/aid-orchestrator/scripts/|$AID_PLUGIN_PATH/scripts/|" > "$EXEC_YAML"
+  grep -q -- '--isolated --cwd \.' "$EXEC_YAML"
+  cd "$TEST_TMPDIR/cand"
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --plan-path "$TEST_TMPDIR/plan.md" --base-commit HEAD
+  echo "$output"
+  [ "$(jq -r .gates.plan_diff.result "$REPORT")" = pass ]
+  [ "$(jq -r .isolation.worktree "$TEST_PROJECT/.aid-o/work/evidence/E-X/R-1/plan-diff.json")" = "$TEST_TMPDIR/cand" ]
+}
+
+# ── P110 Step 5: the gates run the project's tests ─────────────────────────
+# _ptrepo — a git repo at TEST_PROJECT: a base commit, then a commit that
+# changes tests/test_a.py and src/app.py; sets PTBASE.
+_ptrepo() {
+  git init -q . && git config user.email t@t && git config user.name t
+  printf '.aid-o/\nexec.yaml\n' > .gitignore; mkdir -p tests src; echo base > src/app.py; echo base > tests/test_a.py
+  git add -A; git commit -qm base; PTBASE="$(git rev-parse HEAD)"
+  echo change >> src/app.py; echo change >> tests/test_a.py; git commit -qam work
+  EV="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-1"
+}
+# _ptyaml <profile include> [project_tests line] [extra gates] — writes EXEC_YAML
+_ptyaml() {
+  local unit_default="mkdir -p {evidence_dir}/gates; echo '{\\\"ran_tests\\\": [\\\"tests/test_a.py\\\"], \\\"skipped_by_tier\\\": []}' > {evidence_dir}/gates/unit.evidence.json # --evidence-file {evidence_dir}/gates/unit.evidence.json"
+  { printf 'project_tests: %s\n' "${2-[\"tests/**\"]}"
+    printf 'gates:\n  smoke:\n    command: "exit 0"\n    required: true\n'
+    printf '  unit:\n    command: "%s"\n    required: true\n    runs_project_tests: true\n' "${UNIT_CMD:-$unit_default}"
+    printf 'gate_profiles:\n  full:\n    include: %s\n' "$1"
+  } > "$EXEC_YAML"
+}
+_ptrun() { run "$RUN_GATES" run-all "$EXEC_YAML" E-X R-1 --report-file "$REPORT" --profile full --base-commit "$PTBASE" "$@"; }
+_ptrow() { jq -r ".gates.project_tests.$1 // empty" "$REPORT"; }
+
+@test "project-tests: a changed test file and a profile without a flagged gate → profile_skips_project_tests, overall fail" {
+  _ptrepo; _ptyaml '[smoke]'
+  _ptrun; echo "$output"
+  [ "$(_ptrow reason)" = profile_skips_project_tests ] && [ "$(_ptrow status)" = fail ]
+  [ "$(jq -r .overall "$REPORT")" = fail ]
+  [[ "$(_ptrow output)" == *"next:"* ]]
+  [ "$(jq -c '.project_tests.changed_test_files' "$REPORT")" = '["tests/test_a.py"]' ]
+}
+@test "project-tests: the same with the PM's waiver → waived, overall not failed by it" {
+  _ptrepo; _ptyaml '[smoke]'
+  "$AID_PLUGIN_PATH/scripts/aid-gate-waiver.sh" issue project_tests --evidence-dir "$EV" --reason "PM: the test change is a typo fix, ship it" --epic E-X --run R-1 --execution-yaml "$EXEC_YAML"
+  _ptrun; echo "$output"
+  [ "$(_ptrow waived)" = true ]; [ "$(jq -r .overall "$REPORT")" = pass ]
+  jq -e '.waived_gates | index("project_tests")' "$REPORT"
+}
+@test "project-tests: a flagged gate whose evidence lists the changed test → pass, covered_by set" {
+  _ptrepo; _ptyaml '[smoke, unit]'
+  _ptrun; echo "$output"
+  [ "$(_ptrow status)" = pass ]; [ "$(jq -r .project_tests.covered_by "$REPORT")" = unit ]
+}
+@test "project-tests: a flag on a gate whose evidence lacks the changed test → project_tests_not_selected" {
+  _ptrepo; UNIT_CMD="mkdir -p {evidence_dir}/gates; echo '{\\\"ran_tests\\\": [\\\"tests/test_other.py\\\"]}' > {evidence_dir}/gates/unit.evidence.json # --evidence-file {evidence_dir}/gates/unit.evidence.json" _ptyaml '[smoke, unit]'
+  _ptrun; echo "$output"
+  [ "$(_ptrow reason)" = project_tests_not_selected ]; [[ "$(_ptrow output)" == *"tests/test_a.py"* ]]
+}
+@test "project-tests: a flagged gate without --evidence-file → project_tests_evidence_missing" {
+  _ptrepo; UNIT_CMD="exit 0" _ptyaml '[smoke, unit]'
+  _ptrun; echo "$output"; [ "$(_ptrow reason)" = project_tests_evidence_missing ]
+}
+@test "project-tests: a stale evidence file is deleted before the gate runs" {
+  _ptrepo; UNIT_CMD="true # --evidence-file {evidence_dir}/gates/unit.evidence.json" _ptyaml '[smoke, unit]'
+  mkdir -p "$EV/gates"; echo '{"ran_tests": ["tests/test_a.py"]}' > "$EV/gates/unit.evidence.json"
+  _ptrun; [ ! -f "$EV/gates/unit.evidence.json" ]; [ "$(_ptrow reason)" = project_tests_evidence_missing ]
+}
+@test "project-tests: a changed suite the gate skipped by tier is nightly_covers, not a refusal" {
+  _ptrepo; UNIT_CMD="mkdir -p {evidence_dir}/gates; echo '{\\\"ran_tests\\\": [], \\\"skipped_by_tier\\\": [\\\"tests/test_a.py\\\"]}' > {evidence_dir}/gates/unit.evidence.json # --evidence-file {evidence_dir}/gates/unit.evidence.json" _ptyaml '[smoke, unit]'
+  _ptrun; echo "$output"
+  [ "$(_ptrow status)" = pass ]; [ "$(jq -c .project_tests.nightly_covers "$REPORT")" = '["tests/test_a.py"]' ]
+}
+@test "project-tests: a carried flagged gate (AID_GATES_REUSE_OF) is proven by the previous attempt's evidence" {
+  _ptrepo; _ptyaml '[smoke]'
+  { printf 'project_tests: ["tests/**"]\ngates:\n  smoke:\n    command: "exit 0"\n    required: true\n'
+    printf '  unit:\n    command: "true --evidence-file {evidence_dir}/gates/unit.evidence.json"\n    required: true\n    runs_project_tests: true\n'
+    printf 'gate_profiles:\n  full:\n    include: [smoke]\n'; } > "$EXEC_YAML"
+  mkdir -p "$TEST_PROJECT/.aid-o/work/evidence/E-X/R-0/gates"
+  echo '{"ran_tests": ["tests/test_a.py"]}' > "$TEST_PROJECT/.aid-o/work/evidence/E-X/R-0/gates/unit.evidence.json"
+  AID_GATES_REUSE_OF=R-0 AID_GATES_REUSE_CARRIED="unit" AID_GATES_REUSE_DIR="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-0" _ptrun; echo "$output"
+  [ "$(_ptrow status)" = pass ]; [ "$(jq -r .project_tests.covered_by "$REPORT")" = unit ]
+  # a flagged gate that was NOT carried (another profile's) is not counted as carried
+  AID_GATES_REUSE_OF=R-0 AID_GATES_REUSE_CARRIED="" AID_GATES_REUSE_DIR="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-0" _ptrun
+  [ "$(_ptrow reason)" = profile_skips_project_tests ]
+}
+@test "project-tests: a flagged gate that failed on its own → the coverage row is skip gate_failed" {
+  _ptrepo; UNIT_CMD="exit 1 # --evidence-file {evidence_dir}/gates/unit.evidence.json" _ptyaml '[smoke, unit]'
+  _ptrun; [ "$(_ptrow reason)" = gate_failed ]; [ "$(_ptrow status)" = skip ]
+  [ "$(jq -r .overall "$REPORT")" = fail ]   # the flagged gate's own required row blocks
+}
+@test "project-tests: a flagged gate that is not required and fails → the coverage row fails (the changed tests failed)" {
+  _ptrepo; UNIT_CMD="exit 1 # --evidence-file {evidence_dir}/gates/unit.evidence.json" _ptyaml '[smoke, unit]'
+  yq -i '.gates.unit.required = false' "$EXEC_YAML"
+  _ptrun; [ "$(_ptrow reason)" = gate_failed ]; [ "$(_ptrow status)" = fail ]; [ "$(jq -r .overall "$REPORT")" = fail ]
+}
+@test "project-tests: record-tests runs the command and records only its own --glob matches, with the exit status" {
+  _ptrepo; echo x > tests/test_b.bats; git add -A; git commit -qm bats
+  run "$RUN_GATES" record-tests --glob 'tests/*.py' --evidence-file "$EV/r.json" -- bash -c 'exit 3'
+  [ "$status" -eq 3 ]
+  [ "$(jq -c .ran_tests "$EV/r.json")" = '["tests/test_a.py"]' ] && [ "$(jq -r .exit_status "$EV/r.json")" = 3 ]
+}
+@test "project-tests: without project_tests: declared false, nothing refused, an advisory project_tests_undeclared row" {
+  _ptrepo; _ptyaml '[smoke]'; sed -i '/^project_tests:/d' "$EXEC_YAML"
+  _ptrun; echo "$output"
+  [ "$(jq -r .project_tests.declared "$REPORT")" = false ]
+  [ "$(_ptrow reason)" = project_tests_undeclared ]; [ "$(jq -r .gates.project_tests.required "$REPORT")" = false ]
+  [ "$(jq -r .overall "$REPORT")" = pass ]
+}
+@test "project-tests: --lint-profiles on agents' shape (a full profile without a flagged gate) exits 1 naming the profile" {
+  _ptyaml '[smoke]'
+  run "$RUN_GATES" --lint-profiles "$EXEC_YAML"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"profile full: profile_skips_project_tests"* ]]
+}
+@test "project-tests: --lint-profiles on a profile with a flagged gate naming its evidence file exits 0" {
+  _ptyaml '[smoke, unit]'
+  run "$RUN_GATES" --lint-profiles "$EXEC_YAML"; echo "$output"
+  [ "$status" -eq 0 ]; [[ "$output" == *"profile full: ok (unit)"* ]]
+}
+@test "project-tests: every new row passes gate_row_check against the schema" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-gate-row.sh"
+  local r; for r in profile_skips_project_tests project_tests_not_selected project_tests_evidence_missing project_tests_undeclared gate_failed; do
+    row="$(jq -nc --arg r "$r" '{gate: "project_tests", result: "fail", reason: $r, exit_code: null, duration_ms: 0, output: "", attempts: 0, required: true}' | gate_row_normalize)"
+    gate_row_check project_tests "$row" || { echo "refused: $r"; return 1; }
+  done
+}
+@test "project-tests: project_tests that is not a list stops the run (exit 2)" {
+  _ptrepo; _ptyaml '[smoke]' '"tests/**"'
+  _ptrun; [ "$status" -eq 2 ]; [[ "$output" == *"project_tests must be a list"* ]]
+}
+@test "project-tests: record-tests refuses a runner told to run a subset (-k, -m, --filter)" {
+  run "$RUN_GATES" record-tests --evidence-file "$TEST_PROJECT/r.json" -- pytest -m smoke
+  [ "$status" -eq 2 ]; [[ "$output" == *"selects a subset"* ]]; [ ! -f "$TEST_PROJECT/r.json" ]
+}
+@test "project-tests: record-tests sees a selector glued to its value, inside bash -c and in PYTEST_ADDOPTS; python -m pytest is no selector" {
+  local ev="$TEST_PROJECT/r.json"
+  run "$RUN_GATES" record-tests --evidence-file "$ev" -- true pytest -msmoke; [ "$status" -eq 2 ]
+  run "$RUN_GATES" record-tests --evidence-file "$ev" -- bash -c 'pytest -k foo'; [ "$status" -eq 2 ]
+  PYTEST_ADDOPTS="-k x" run "$RUN_GATES" record-tests --evidence-file "$ev" -- true; [ "$status" -eq 2 ]
+  run "$RUN_GATES" record-tests --evidence-file "$ev" -- true npx jest -t login; [ "$status" -eq 2 ]
+  run "$RUN_GATES" record-tests --evidence-file "$ev" -- true python -m pytest -q; [ "$status" -eq 0 ]
+}

@@ -152,11 +152,24 @@ if [[ "$CHECKPOINT" == cp2 && -f "$PLAN_JSON" ]]; then
     repo="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" || continue
     [[ "$repo" != "$root_phys" && -z "${seen_repo[$repo]:-}" ]] || continue
     seen_repo[$repo]=1
-    r="$(jq -r --arg r "$repo" 'first(.repo_commits[]? | select(.repo == $r) | .range) // ""' "$ret" 2>/dev/null || true)"
-    aid_dispatch_repo_range_ok "$repo" "$r" || { OTHER_MISSING+=("$repo"); continue; }
-    while IFS= read -r f; do [[ -n "$f" ]] && FILES+=("${repo}/${f}"); done < <(git -C "$repo" diff --name-only "$r")
-    DIFF+=$'\n'"$(git -C "$repo" diff "$r")"
-    NUMSTAT+=$'\n'"$(git -C "$repo" diff --numstat "$r")"
+    # P111: a repository the plan declares in repo_roots is named by its slug
+    # in the return and reviewed in its worktree; its range must be reachable
+    # from the worktree's branch (a commit only in the live checkout shares the
+    # object store and is still refused).
+    slug="$(jq -r --arg r "$repo" 'first(.repo_roots[]? | select((.path | sub("/+$"; "")) == $r) | .name) // ""' "$PLAN_JSON" 2>/dev/null || true)"
+    if [[ -n "$slug" ]]; then
+      IFS=$'\t' read -r wt br < <(aid_dispatch_repo_resolve "$PLAN_JSON" "$slug")
+      r="$(jq -r --arg r "$slug" 'first(.repo_commits[]? | select(.repo == $r) | .range) // ""' "$ret" 2>/dev/null || true)"
+      aid_dispatch_repo_range_ok "$wt" "$r" "$br" || { OTHER_MISSING+=("$slug"); continue; }
+      src="$wt"   # diffed in the worktree, named under the declared path (plan.json's scope)
+    else
+      r="$(jq -r --arg r "$repo" 'first(.repo_commits[]? | select(.repo == $r) | .range) // ""' "$ret" 2>/dev/null || true)"
+      aid_dispatch_repo_range_ok "$repo" "$r" || { OTHER_MISSING+=("$repo"); continue; }
+      src="$repo"
+    fi
+    while IFS= read -r f; do [[ -n "$f" ]] && FILES+=("${repo}/${f}"); done < <(git -C "$src" diff --name-only "$r")
+    DIFF+=$'\n'"$(git -C "$src" diff "$r")"
+    NUMSTAT+=$'\n'"$(git -C "$src" diff --numstat "$r")"
   done < <(jq -r --argjson s "$STEP" '.steps[$s].allowed_paths[]? | select(startswith("/"))' "$PLAN_JSON")
 fi
 LINES="$(awk '{a+=$1+$2} END{print a+0}' <<<"$NUMSTAT")"
@@ -236,8 +249,8 @@ _cfg() {  # <yq path> <default>: the project's review-checkpoints.yaml first, th
   done
   printf '%s' "${v:-$2}"
 }
-MAX_FILES="$(_cfg '.review_checkpoints.step_review.skip_threshold.max_files' 1)"
-MAX_LINES="$(_cfg '.review_checkpoints.step_review.skip_threshold.max_lines' 50)"
+MAX_FILES="$(_cfg '.review_checkpoints.step_review.skip_threshold.max_files' 3)"
+MAX_LINES="$(_cfg '.review_checkpoints.step_review.skip_threshold.max_lines' 120)"
 STREAMLINED=false
 [[ -f "$STATE" ]] && STREAMLINED="$(yq -r '.streamlined_mode // false' "$STATE" 2>/dev/null || echo false)"
 
@@ -252,6 +265,7 @@ elif [[ -f "$CPDIR/rounds.json" ]] && jq -e '(.rounds // []) | length > 0' "$CPD
   # A step that moved after a closed round is not skipped: the delta round of
   # aid-review-round.sh confirms it (P100 Step 2).
   verdict=review; reason="the step moved after a closed round; a delta round confirms it"
+elif (( ${#handler_ids[@]} > 0 )); then verdict=review; reason="handler pattern: ${handler_ids[*]} (an entry point is never skipped, P110)"
 elif [[ "$CHECKPOINT" != cp7 ]] && (( ${#FILES[@]} <= MAX_FILES && LINES <= MAX_LINES )); then verdict=skip; reason="${#FILES[@]} file(s), $LINES line(s), inside scope, no pattern matched"
 else verdict=review; reason="${#FILES[@]} file(s), $LINES line(s)"
 fi

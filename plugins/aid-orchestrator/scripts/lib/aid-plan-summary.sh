@@ -263,6 +263,51 @@ _aps_plan_name() {
   printf '%s' "${t:-$2}"
 }
 
+# _aps_zadani_groups <plan> — the two P109 blocks, as deliverables groups (the
+# renderer's existing group-of-rows shape, so the page standard's template is
+# untouched): "Body zadání" (each brief point → the steps whose **Zavírá:**
+# names it; only for a plan bound to a brief) and "Rozhodnutí, která mění
+# výsledek pro uživatele" (every plan line carrying that marker, with its
+# section; only when there is one). Prints a JSON array, `[]` for neither.
+_aps_zadani_groups() {
+  local plan="$1" out="[]" z root zpath rec label text s e head val n rows="[]" sec line
+  z="$(_aid_fm_get "$plan" zadani)"
+  if [[ -n "$z" ]]; then
+    root="$(_aid_plan_project_root "$plan" 2>/dev/null)" || root="$PWD"
+    [[ "$z" == /* ]] && zpath="$z" || zpath="${root}/${z}"
+    if [[ -f "$zpath" ]]; then
+      # shellcheck source=aid-zadani.sh
+      source "${_AID_PLAN_SUMMARY_LIB_DIR}/aid-zadani.sh"
+      local -A closers=()
+      while IFS=$'\t' read -r s e head; do
+        [[ -n "${s:-}" ]] || continue
+        n="$(sed -E 's/^### Step ([0-9]+).*/\1/' <<< "$head")"
+        val="$(_aid_plan_step_field "$plan" "$s" "$e" "Zavírá")" || continue
+        for label in $(grep -oE '\bAC[0-9]+\b' <<< "$val"); do
+          closers[$label]+="${closers[$label]:+, }${n}"
+        done
+      done < <(_aid_plan_step_bounds "$plan")
+      while IFS= read -r rec; do
+        [[ -n "$rec" ]] || continue
+        IFS=$'\x1f' read -r label text _ <<< "$rec"
+        rows="$(jq -c --arg t "${label} → $( [[ -n "${closers[$label]:-}" ]] && printf 'krok %s' "${closers[$label]}" || printf 'žádný krok' ): ${text}" \
+          '. + [{n: "", text: $t, detail: "", acs: "0"}]' <<< "$rows")"
+      done < <(aid_zadani_points "$zpath" 2>/dev/null)
+      out="$(jq -c --argjson r "$rows" '. + [{epic: "Body zadání", steps: $r}]' <<< "$out")"
+    fi
+  fi
+  rows="[]"
+  while IFS=$'\t' read -r sec line; do
+    [[ -n "$line" ]] || continue
+    rows="$(jq -c --arg t "${sec}: ${line}" '. + [{n: "", text: $t, detail: "", acs: "0"}]' <<< "$rows")"
+  done < <(_aid_blank_fenced < "$plan" | awk '
+    /^## / { sec = substr($0, 4) }
+    sec ~ /^(Acceptance|Success) Criteria/ { next }   # the brief points quote the marker, they are not decisions
+    /\(mění výsledek pro uživatele\)/ { l = $0; sub(/^[[:space:]]*- /, "", l); print sec "\t" l }')
+  [[ "$rows" != "[]" ]] && out="$(jq -c --argjson r "$rows" '. + [{epic: "Rozhodnutí, která mění výsledek pro uživatele", steps: $r}]' <<< "$out")"
+  printf '%s' "$out"
+}
+
 aid_plan_summary_render() {
   local plan="${1-}" out_path="${2-}"
   if [[ -z "$plan" || -z "$out_path" ]]; then
@@ -284,7 +329,9 @@ aid_plan_summary_render() {
   plan_id="$(_aid_fm_get "$plan" id)"; plan_id="${plan_id:-?}"
   status="$(_aid_fm_get "$plan" status)"; status="${status:-draft}"
   review="review: none"
-  root="$(_aid_plan_project_root "$plan")" && review="$(aid_review_summary "${root}/.aid-o/work/evidence/${plan_id}/cp1")"
+  # the review evidence lives in the state root, also for a plan read from a worktree
+  root="$(_aid_plan_project_root "$plan")" && root="$(aid_state_root "$root" 2>/dev/null || echo "$root")" \
+    && review="$(aid_review_summary "${root}/.aid-o/work/evidence/${plan_id}/cp1")"
   # Every active run of this plan, reviewed step by step (P094 Step 11).
   local step_reviews="" _runs _e _r
   if [[ -n "${root:-}" && -f "${root}/.aid-o/work/active-runs.json" ]]; then
@@ -307,7 +354,7 @@ aid_plan_summary_render() {
   # as if it were fine; it now says what it is and what it will cost.
   local bad_roles=""
   bad_roles="$(printf '%s' "$roles" | tr ',' '\n' | sed 's/^ *//;s/ *$//' \
-    | grep -vxE 'architect|domain|backend|frontend|qa|security|observability|docs-writer|release|e2e|—' \
+    | grep -vxE 'backend|frontend|qa|security|docs|docs-writer|release|e2e|—' \
     | paste -sd', ' - 2>/dev/null || true)"
   context="$(_aps_section "$plan" "Context")"
   standards="$(_aps_standards "$plan")" || standards=""
@@ -360,7 +407,7 @@ aid_plan_summary_render() {
 
   next_json="$(jq -n '[
       "Přečíst plán a říct, co v něm chybí",
-      "Nechat ho projít revizí plánu (šest revizorů, dvě kola)",
+      "Nechat ho projít revizí plánu (šest revizorů se zadáním, jedno kolo; druhé jen po blockeru)",
       "Pustit generaci EPIKŮ"
     ]')"
 
@@ -376,7 +423,7 @@ aid_plan_summary_render() {
     --arg when "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
     --arg rv "$review_value" --arg rvs "$review_state" \
     --arg steps "$steps" --arg scope "$scope_label" --arg files "$files" \
-    --argjson deliverables "$(_aps_deliverables "$plan")" \
+    --argjson deliverables "$(jq -c --argjson z "$(_aps_zadani_groups "$plan")" '. + $z' <<< "$(_aps_deliverables "$plan")")" \
     --arg risks "$risks" \
     --arg rs "$( [[ "$risks" -gt 0 ]] && echo warn || echo ok )" \
     --argjson items "$items_json" \
@@ -409,5 +456,8 @@ aid_plan_summary_render() {
     '{summary: $s, core: $c, ask: "Přečti plán a řekni, co v něm chybí. Do té doby nic negeneruju."}')"
 
   mkdir -p "$(dirname "$out_path")" 2>/dev/null
-  aid_artifact_render outcome "$facts_json" "$prose_json" "$out_path"
+  aid_artifact_render outcome "$facts_json" "$prose_json" "$out_path" || return $?
+  # The page's freshness is the plan's CONTENT, not its mtime: a checkout into a
+  # new worktree gives the same bytes a new date (agents P009, 27. 9. 2026).
+  printf '<!-- aid-plan-sha256: %s -->\n' "$(sha256sum "$plan" | awk '{print $1}')" >> "$out_path"
 }

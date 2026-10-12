@@ -17,7 +17,8 @@
 # aid_final_review_packet_build <root> <round_dir> <step_check> <run_dir> [<prev_round_dir>]
 #   The cp7 packet: diff.patch, claims.patch (CHANGELOG, README and docs hunks),
 #   dod.md (criteria.md), epic-findings.json, plan-diff.json, gates_report.json,
-#   files.json, step-check.json, manifest.json. No plan.json is needed. A range
+#   files.json, step-check.json, manifest.json, and the brief as zadani.md
+#   (zadani-note.txt for a legacy plan) through aid_plan_review_brief_resolve. No plan.json is needed. A range
 #   of more than 400 files also gets one diff-<EPIC>.patch per contributing
 #   EPIC, named in the prompt; nothing is truncated.
 # aid_step_review_prompt_render <role> <round> <round_dir> <checkpoint> <step>
@@ -45,7 +46,7 @@ _AID_SR_STEP_NAME_JQ='def step_name($i): ([(.id // "") | capture("^step_(?<n>[0-
 # round's packet and the roles it asks read this (a form_invalid finding is open
 # until answered, like a disputed one).
 AID_SR_OPEN_JQ='(.status | IN("open", "disputed", "routed", "carried", "form_invalid")) and (.severity == "blocker" or .severity == "major")'
-AID_SR_EVIDENCE_FORMS='`path:line` or `path:first-last` at the reviewed commit, `<sha>:path:line` for a line of a file the diff deleted or moved (the pre-image at that commit), or `absent:path` for a file the step should have produced and did not; one citation that resolves is enough, but cite the exact line (a wrong number wastes the citation); citations only, separated by `;` — a word or a bracketed note after a line number drops the finding, so say what the line shows in `claim`'
+AID_SR_EVIDENCE_FORMS='`path:line` or `path:first-last` at the reviewed commit (in a whole-plan round also `zadani.md:line`, the brief in the packet), `<sha>:path:line` for a line of a file the diff deleted or moved (the pre-image at that commit), or `absent:path` for a file the step should have produced and did not; one citation that resolves is enough, but cite the exact line (a wrong number wastes the citation); citations only, separated by `;` — a word or a bracketed note after a line number drops the finding, so say what the line shows in `claim`'
 
 aid_step_review_packet_build() {
   local root="$1" cp="$2" dir="$3/packet" sc="$4" plan_json="$5" step="${6:-}" prev="${7:-}"
@@ -67,10 +68,15 @@ aid_step_review_packet_build() {
     [[ -f "$plan_json" ]] || { echo "prepare: no plan.json at ${plan_json}" >&2; return 1; }
     if [[ "$cp" == cp2 ]]; then
       jq -r --argjson s "$step" "${_AID_SR_STEP_NAME_JQ}"' .steps[$s] | "# \(step_name($s)): \(.objective // "")\n\n## Acceptance criteria\n" + ((.acceptance_criteria // []) | map("- " + .) | join("\n"))' "$plan_json" > "$dir/dod.md"
-      jq --argjson s "$step" '.steps[$s] | {outputs: (.outputs // []), allowed_paths: (.allowed_paths // []), forbidden_paths: (.forbidden_paths // []), scope_declared: true}' "$plan_json" > "$dir/files.json"
+      # "(tier: tN)" in an output is what the plan declared when it was written;
+      # the suite's header is the tier, and step-check.json reports that (P103).
+      jq --argjson s "$step" 'def notier: map(gsub(" ?\\(tier: t[0-9]\\)"; "")); .steps[$s] | {outputs: ((.outputs // []) | notier), allowed_paths: (.allowed_paths // []), forbidden_paths: (.forbidden_paths // []), scope_declared: true}' "$plan_json" > "$dir/files.json"
+      # the step's measured criteria (P110), when prepare measured it
+      local measured; measured="$(dirname "$plan_json")/cp2/step-${step}/plan-diff.json"
+      [[ -f "$measured" ]] && cp "$measured" "$dir/plan-diff.json"
     else
       jq -r "${_AID_SR_STEP_NAME_JQ}"' "# EPIC: \(.epic_id // .id // "")\n\n" + ((.objective // .goal // "") | tostring) + "\n\n" + ([.steps | to_entries[] | "## \(.key as $k | .value | step_name($k)): \(.value.objective // "")\n" + ((.value.acceptance_criteria // []) | map("- " + .) | join("\n"))] | join("\n\n"))' "$plan_json" > "$dir/dod.md"
-      jq '{outputs: [.steps[].outputs[]?], allowed_paths: [.steps[].allowed_paths[]?], forbidden_paths: [.steps[].forbidden_paths[]?], scope_declared: true}' "$plan_json" > "$dir/files.json"
+      jq 'def notier: map(gsub(" ?\\(tier: t[0-9]\\)"; "")); {outputs: ([.steps[].outputs[]?] | notier), allowed_paths: [.steps[].allowed_paths[]?], forbidden_paths: [.steps[].forbidden_paths[]?], scope_declared: true}' "$plan_json" > "$dir/files.json"
     fi
   fi
   _aid_sr_packet_finish "$root" "$dir" "$prev"
@@ -82,7 +88,12 @@ _aid_sr_packet_finish() {
   local root="$1" dir="$2" prev="${3:-}" f
   if [[ -n "$prev" && -f "$prev/merged.json" ]]; then
     jq "{findings: [.findings[] | select(${AID_SR_OPEN_JQ})]}" "$prev/merged.json" > "$dir/open-findings.json"
-    git -C "$root" diff "$(jq -r .head_sha "$prev/round.json")..HEAD" > "$dir/fix.patch" || return 1
+    # A previous round prepared without head_sha: no fix diff can be cut, and
+    # the prompt falls back to the whole diff (round.json confirmation_fallback).
+    local ph; ph="$(jq -r '.head_sha // ""' "$prev/round.json" 2>/dev/null)"
+    if [[ -n "$ph" && "$ph" != null ]]; then
+      git -C "$root" diff "${ph}..HEAD" > "$dir/fix.patch" || return 1
+    fi
   fi
   (cd "$dir" && for f in *; do
      jq -n --arg f "$f" --arg s "$(sha256sum "$f" | cut -d' ' -f1)" '{file: $f, sha256: $s}'
@@ -106,8 +117,20 @@ aid_final_review_inputs_build() {
   [[ -s "$out/criteria.md" ]] || { echo "produce: ${plan_file} has no acceptance or success criteria" >&2; return 1; }
   for epic_dir in "${state_root}/.aid-o/work/evidence/E-${plan_id#P}-"*; do
     [[ -d "$epic_dir" ]] || continue
-    run="$(ls -dt "$epic_dir"/*/cp3 2>/dev/null | head -n1)"
-    if [[ -z "$run" ]]; then
+    declare -F aid_review_switched_off >/dev/null || source "${_AID_SR_PLUGIN}/scripts/lib/aid-review-config.sh"
+    # CP3 off: a leftover or stray cp3/ is not read — it would hide what the steps left open
+    if aid_review_switched_off "$state_root" cp3_integration_review >/dev/null 2>&1; then run=""
+    else run="$(ls -dt "$epic_dir"/*/cp3 2>/dev/null | head -n1)"; fi
+    if [[ -z "$run" ]] && aid_review_switched_off "$state_root" cp3_integration_review >/dev/null 2>&1; then
+      # P110: CP3 off — what the step rounds of the EPIC's latest run left open
+      # reaches the close instead (the last round of each step, open blockers and majors)
+      local lrun; lrun="$(ls -dt "$epic_dir"/*/cp2 2>/dev/null | head -n1)"
+      { for st in ${lrun:+"$lrun"/step-*}; do
+          ls "$st"/round-*/merged.json 2>/dev/null | sort -V | tail -1
+        done; } | xargs -r cat | jq -sc --arg e "$(basename "$epic_dir")" \
+        '{epic: $e, cp3: "off", findings: [.[].findings[]? | select(((.status | IN("open", "disputed", "carried", "routed", "form_invalid")) or (.dispute.pm.answer == "accepted")) and (.severity == "blocker" or .severity == "major"))
+           | {severity, status: (if .dispute.pm.answer == "accepted" then "dismissed_by_pm" else .status end), claim, evidence, fix} + (if .rule then {rule} else {} end)]}'
+    elif [[ -z "$run" ]]; then
       jq -nc --arg e "$(basename "$epic_dir")" '{epic: $e, cp3: "absent", findings: []}'
     else
       jq -c --arg e "$(basename "$epic_dir")" -s '{epic: $e, cp3: "reviewed",
@@ -115,6 +138,9 @@ aid_final_review_inputs_build() {
                    | map(select(.status | IN("open", "disputed", "carried", "routed", "form_invalid")) | {severity, status, claim, evidence, fix} + (if .rule then {rule} else {} end)))}' "$run"/round-*/merged.json
     fi
   done | jq -s '{epics: .}' > "$out/epic-findings.json"
+  # P110: which brief the whole-plan round reads — resolved again at every
+  # prepare (aid_plan_review_brief_resolve), so the packet carries the file as it is.
+  jq -n --arg p "$plan_file" --arg r "$state_root" '{plan: $p, root: $r}' > "$out/brief.json"
 }
 
 aid_final_review_packet_build() {
@@ -130,6 +156,11 @@ aid_final_review_packet_build() {
   range="$(jq -r .range "$sc")"
   git -C "$root" diff "$range" > "$dir/diff.patch" || return 1
   git -C "$root" diff "$range" -- '*CHANGELOG*' '*README*' 'docs/**' '*.md' > "$dir/claims.patch" || return 1
+  # P110: the brief, through the CP1 resolver and its refusals
+  if [[ -f "${run}/cp7/brief.json" ]]; then
+    declare -F aid_plan_review_brief_resolve >/dev/null || source "${_AID_SR_PLUGIN}/scripts/lib/aid-plan-review-packet.sh"
+    aid_plan_review_brief_resolve "$(jq -r .root "${run}/cp7/brief.json")" "$(jq -r .plan "${run}/cp7/brief.json")" "$dir" || return 1
+  fi
   if (( $(jq '.size.files' "$sc") > 400 )); then
     local epic
     while IFS= read -r epic; do
@@ -187,7 +218,18 @@ aid_step_review_prompt_render() {
     echo
     echo "The repository to read is $(jq -r '.head_sha' "${dir}/packet/step-check.json" | cut -c1-12) (HEAD of the checkout you run in; read-only). Evidence is \`path:line\` at that commit."
     echo
-    if [[ -f "${dir}/packet/open-findings.json" ]]; then
+    # A confirmation or delta round (P110, IMP-689) reads the fix diff and what
+    # stays open, not the whole step again; without a fix.patch it falls back.
+    local narrow=0
+    [[ -f "${dir}/packet/open-findings.json" && -f "${dir}/packet/fix.patch" && "$cp" != cp7 ]] && narrow=1
+    if (( narrow )) && [[ "$(jq '.findings | length' "${dir}/packet/open-findings.json")" == 0 ]]; then
+      echo "## This is a delta round"
+      echo
+      echo "The previous round passed and the step moved since. Review only the new commits (fix.patch below) against the Definition of Done; do not review the rest again."
+      echo
+      _aid_sr_patch "${dir}/packet/fix.patch" "The new commits (fix.patch)" | sed 's/^## /### /'
+      echo
+    elif [[ -f "${dir}/packet/open-findings.json" ]]; then
       echo "## This is a confirmation round"
       echo
       echo "The author fixed the change after the previous round. Your job now:"
@@ -197,7 +239,11 @@ aid_step_review_prompt_render() {
       echo "### Findings still open"
       jq -r '.findings[] | "- [\(.severity)] \(.claim) (evidence: \(.evidence); fix asked: \(.fix)\(if .rule then "; rule: \(.rule)" else "" end))"' "${dir}/packet/open-findings.json"
       echo
-      _aid_sr_patch "${dir}/packet/fix.patch" "What the author changed (fix.patch)" | sed 's/^## /### /'
+      if [[ -f "${dir}/packet/fix.patch" ]]; then
+        _aid_sr_patch "${dir}/packet/fix.patch" "What the author changed (fix.patch)" | sed 's/^## /### /'
+      else
+        echo "The previous round recorded no head commit, so no fix diff could be cut: the whole diff follows below (round.json confirmation_fallback)."
+      fi
       echo
     fi
     echo "## Deterministic step check (already reported, do not repeat)"
@@ -206,9 +252,17 @@ aid_step_review_prompt_render() {
     echo "## Definition of Done"
     cat "${dir}/packet/dod.md"
     echo
+    if [[ "$cp" == cp2 && -f "${dir}/packet/plan-diff.json" ]]; then
+      echo "## Measured criteria of this step (aid-plan-diff.sh --step, run at this commit; packet/plan-diff.json)"
+      jq -r '.results[] | "- \(.ac_label): \(.verdict) — \(.evidence)" + (if .deferred_to_step then " (measured at plan step \(.deferred_to_step))" else "" end) + (if .deferred then " (deferred by the PM: \(.deferred.reason))" else "" end)' "${dir}/packet/plan-diff.json"
+      [[ "$(jq -r '.unmeasured_step // false' "${dir}/packet/plan-diff.json")" == true ]] && echo "- (the step closes no brief point and has no labelled criterion of its own: nothing was run)"
+      echo "An absent criterion is a blocker unless the PM deferred it."
+      echo
+    fi
     if [[ "$cp" == cp7 ]]; then
       echo "## What the per-EPIC reviews already judged (do not repeat; read ACROSS the EPICs)"
       jq -r '.epics[] | if .cp3 == "absent" then "- \(.epic): NOT reviewed as a whole (closed before the EPIC review existed)"
+                        elif .cp3 == "off" then "- \(.epic): EPIC review switched off; its steps were reviewed one by one — \(.findings | length) finding(s) the step rounds left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join("")))
                         else "- \(.epic): \(.findings | length) finding(s) left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join(""))) end' "${dir}/packet/epic-findings.json"
       echo
       echo "## Gates at the candidate (gates_report.json on disk: ${dir}/packet/gates_report.json)"
@@ -216,7 +270,17 @@ aid_step_review_prompt_render() {
              | "- \(.key): \(.value.status) (\(.value.reason))" + (if .value.waived then " waived" else "" end)
                + (if .value.reused_from then " (reused from \(.value.reused_from))" else "" end)' "${dir}/packet/gates_report.json"
       echo
-      echo "## Executed tests per criterion: ${dir}/packet/plan-diff.json"
+      # P110: the PM's brief and the isolated close measurement, in the prompt
+      # itself — final_criteria answers point by point from these two.
+      if [[ -f "${dir}/packet/zadani.md" ]]; then
+        echo "## The PM's brief (packet/zadani.md; cite it as zadani.md:<line>)"
+        echo '~~~~~markdown'; cat -n "${dir}/packet/zadani.md"; echo '~~~~~'
+      elif [[ -f "${dir}/packet/zadani-note.txt" ]]; then
+        echo "## The PM's brief: $(cat "${dir}/packet/zadani-note.txt")"
+      fi
+      echo
+      echo "## Measured points at the close (aid-plan-diff.sh --isolated; ${dir}/packet/plan-diff.json)"
+      jq -r '"isolation: \(.isolation | tojson)", (.results[]? | "- \(.ac_label): \(.verdict) — \(.evidence)")' "${dir}/packet/plan-diff.json"
       echo
       _aid_sr_patch "${dir}/packet/claims.patch" "claims.patch (CHANGELOG, README and docs hunks of the range)"
       echo
@@ -225,10 +289,14 @@ aid_step_review_prompt_render() {
         [[ -f "$part" ]] && echo "The range is large; one part per EPIC is on disk: ${part}"
       done
     fi
-    echo "## Declared scope (files.json)"
-    jq -r '"outputs:\n" + ((.outputs // []) | map("- " + .) | join("\n")) + "\nallowed_paths: " + ((.allowed_paths // []) | join(", ")) + "\nforbidden_paths: " + ((.forbidden_paths // []) | join(", "))' "${dir}/packet/files.json"
-    echo
-    _aid_sr_patch "${dir}/packet/diff.patch" "diff.patch"
+    if (( narrow )); then
+      echo "The whole step's diff is on disk (${dir}/packet/diff.patch) for a variant the fix may have missed; it is not repeated here."
+    else
+      echo "## Declared scope (files.json)"
+      jq -r '"outputs:\n" + ((.outputs // []) | map("- " + .) | join("\n")) + "\nallowed_paths: " + ((.allowed_paths // []) | join(", ")) + "\nforbidden_paths: " + ((.forbidden_paths // []) | join(", "))' "${dir}/packet/files.json"
+      echo
+      _aid_sr_patch "${dir}/packet/diff.patch" "diff.patch"
+    fi
   } >> "$out"
 }
 

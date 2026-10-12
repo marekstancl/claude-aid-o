@@ -153,7 +153,6 @@ REQUIRED_SURFACES=(
   commands/aid-plan.md
   skills/run-management.md
   skills/pipeline.md
-  agents/simplifier.md
   commands/aid-verify-implementation.md
   commands/aid-verify-plan.md
 )

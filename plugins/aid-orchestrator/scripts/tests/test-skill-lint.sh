@@ -35,7 +35,6 @@ skills/pipeline.md
 skills/planner.md
 skills/role-cards.md
 skills/run-management.md
-commands/aid-audit.md
 commands/aid-do.md
 commands/aid-run.md
 commands/aid-status.md

@@ -59,7 +59,7 @@ Phase 1 designs contracts, Phase 2 implements in parallel, Phase 3 validates.
 
 **Objective:** Define REST API contracts, request/response schemas, and core domain model invariants in architecture decision records.
 
-**AID Role:** architect
+**AID Role:** backend
 
 **Files:**
 - Create: `docs/adr/ADR-001-api-design.md`
@@ -76,7 +76,7 @@ Phase 1 designs contracts, Phase 2 implements in parallel, Phase 3 validates.
 
 **Objective:** Implement the domain model, aggregate roots, and business rule enforcement based on the architect contracts.
 
-**AID Role:** domain
+**AID Role:** backend
 
 **Files:**
 - Create: `src/domain/models.py`

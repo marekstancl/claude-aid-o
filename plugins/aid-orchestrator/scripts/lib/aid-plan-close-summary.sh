@@ -134,6 +134,19 @@ _apcs_short() {
 # refused or was bypassed during this plan's EPICs, and how many entries the
 # project's aid-plugin-issues.md carries. A count, not a judgement — the file
 # is the record, this is the nudge to look at it while the plan is fresh.
+# _apcs_standing_line <plan_id> — when the PM gave the plan a standing "don't
+# ask, finish it", how many review rounds ran under it (round.json standing:
+# true in the plan's step and EPIC runs). Nothing when there is no instruction.
+_apcs_standing_line() {
+  local plan_id="$1" num="${1#P}" root f n=0
+  root="$(aid_state_root 2>/dev/null || pwd)"
+  f="${root}/.aid-o/work/evidence/${plan_id}/standing-pm.json"
+  [[ -f "$f" ]] || return 0
+  n="$(find "${root}/.aid-o/work/evidence" -path "*/E-${num}-*/*/round.json" 2>/dev/null \
+       | xargs -r jq -r 'select(.standing == true) | 1' 2>/dev/null | wc -l)"
+  printf 'Stálý pokyn PM („%s“): pod ním proběhlo %s kol oprav a potvrzení navíc.\n' "$(jq -r '.words' "$f")" "$n"
+}
+
 _apcs_plugin_issues_line() {
   local plan_id="$1" num="${1#P}" n=0 f entries
   local root; root="$(aid_state_root 2>/dev/null || pwd)"
@@ -323,10 +336,20 @@ aid_plan_close_render() {
           <<<"$ps" 2>/dev/null)" && [[ -n "$_pcd" ]] && deliverables_json="$_pcd"
 
   # The whole-plan round's verdict, and what closing the plan cost so far.
-  local final_review close_cost time_spent
+  local final_review close_cost time_spent run_cost plan_cost
   final_review="$(jq -r '[.release_decision.inputs[]? | select(.id == "final_review") | .verdict] | first // "nezaznamenáno"' <<<"$decision_raw")"
   close_cost="$(jq -r '.close | "\(.attempts) pokus(ů), \(.minutes) min, \(.usd) USD"
                        + (if (.usd_unknown_roles | length) > 0 then " + neznámá cena u: " + (.usd_unknown_roles | join(", ")) else "" end)' <<<"$ps")"
+  # What the run and the plan cost (P110): counted by the producer
+  # (aid_plan_run_cost, aid_plan_plan_cost), never restated here.
+  run_cost="$(jq -r 'if (.run_cost | type) != "object" then "nezměřeno"
+    else "\(.run_cost.usd) USD, \(.run_cost.rounds) kol, \(.run_cost.attempts) pokus(ů)"
+         + (if (.run_cost.usd_unknown_roles | length) > 0 then " + neznámá u: " + (.run_cost.usd_unknown_roles | join(", ")) else "" end) end' <<<"$ps")"
+  plan_cost="$(jq -r 'if (.plan_cost | type) != "object" then "nezměřeno"
+    elif .plan_cost.usd == null then "nezměřeno (\(.plan_cost.reason // "bez CP1"))"
+    else "\(.plan_cost.usd) USD (CP1 \(.plan_cost.cp1_rounds) kol, kritik "
+         + (if .plan_cost.critic == null then "neznámá — \(.plan_cost.critic_reason)" elif .plan_cost.critic.usd == null then "neznámá" else "\(.plan_cost.critic.usd) USD" end) + ")"
+         + (if (.plan_cost.usd_unknown_roles | length) > 0 then " + neznámá u: " + (.plan_cost.usd_unknown_roles | join(", ")) else "" end) end' <<<"$ps")"
   # Where the plan's time went (P099 Step 7): five numbers computed by the
   # producer (aid_plan_close_time); an unmeasured one says so.
   time_spent="$(jq -r 'def m: if type == "number" then "\(.) min" else "neměřeno" end;
@@ -410,8 +433,14 @@ aid_plan_close_render() {
   fi
   if (( blockers_n > 0 )); then unresolved_state="critical"; else unresolved_state="ok"; fi
 
+  # P111: the foreign branches (repo_roots) the PM merges by hand — counted by
+  # the producer (plan_summary.foreign_branches), joined onto the merge row (the
+  # block's six rows are its cap).
+  local foreign
+  foreign="$(jq -r '[(.foreign_branches // [])[] | "\(.name) \(.branch) @\(.head[0:7]) (\(.commits) commit(ů))"] | join(", ")' <<<"$ps" 2>/dev/null || true)"
   local items_json next_json links_json
   items_json="$(jq -n \
+    --arg foreign "$foreign" \
     --arg cand "$(_apcs_short "$cand_sha")" \
     --arg tgt "$(_apcs_short "$target_sha")" \
     --arg tref "${target_ref:-—}" \
@@ -419,10 +448,13 @@ aid_plan_close_render() {
     --arg gres "$gates_result" \
     --arg grep_ "${gates_report:-—}" \
     --arg fr "$final_review" --arg cost "$close_cost" --arg time "$time_spent" \
+    --arg rcost "$run_cost" --arg pcost "$plan_cost" \
     --arg ev "$ev_status" --arg evh "$ev_at_head" \
     --arg wv "$waivers_n" --arg bl "$backlog_n" '[
-      "Recenzovaný kandidát: " + $cand + " → schválený cíl " + $tgt + " (" + $tref + "), merge do main: " + $merge,
+      "Recenzovaný kandidát: " + $cand + " → schválený cíl " + $tgt + " (" + $tref + "), merge do main: " + $merge
+        + (if $foreign == "" then "" else "; cizí větve k ručnímu merge: " + $foreign end),
       "Kam šel čas: " + $time,
+      "Cena běhu: " + $rcost + "; Cena plánu: " + $pcost,   # one row: the block shows six
       "Plan-final brány: " + $gres + " (report: " + $grep_ + ")",
       "Čtení celku: " + $fr + "; uzavření: " + $cost,
       "Evidence: " + $ev + " (ověřeno na HEAD: " + $evh + "), waiverů " + $wv + ", zbývá v backlogu " + $bl
@@ -533,6 +565,7 @@ aid_plan_close_render() {
       "$gates_result" "${gates_report:-—}" "$ev_status" "$ev_at_head"
     printf 'Další krok: %s\n' "$opt_a"
     _apcs_plugin_issues_line "$plan_id"
+    _apcs_standing_line "$plan_id"
   else
     printf 'Potřebuji tvoje rozhodnutí: jak uzavřít plán %s?\n' "$plan_id"
     printf 'Proč teď: %s\n' "$why"
@@ -544,6 +577,7 @@ aid_plan_close_render() {
     [[ -n "$merge_sha" ]] || printf '%s\n' "$_APCS_ROLLBACK_NA"
     printf 'Riziko / co není ověřeno: %s\n' "$risk"
     _apcs_plugin_issues_line "$plan_id"
+    _apcs_standing_line "$plan_id"
   fi
   printf 'Artifact body: %s\n' "$out_path"
   return 0

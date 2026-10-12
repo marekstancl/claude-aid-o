@@ -41,6 +41,9 @@ setup() {
   # plan that owes its page (the gate itself is aid-cp1-gate.sh's own suite).
   mkdir -p "$ROOT/.aid-o/config/policies"
   printf 'review_checkpoints:\n  cp1_plan_review: false\n' > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
+  # P109: with the review off the gate still owes the critic, against this plan
+  source "$PLUGIN_ROOT/scripts/tests/lib/aid-test-plan-fixture.sh"
+  aid_fixture_seed_critic_check "$ROOT" "$PLAN"
   # The milestone-2 and -3 cases call the checks directly; the Stop-rule cases
   # source the library in their own subshell, deliberately (see run_rule).
   # shellcheck disable=SC1090
@@ -85,6 +88,24 @@ render_page() {
   [[ "$output" == *"OLDER than the plan"* ]]
 }
 
+@test "a page recording the plan's sha256 stays current when only the plan's mtime moves (new worktree, agents P009)" {
+  render_page
+  printf '<!-- aid-plan-sha256: %s -->\n' "$(sha256sum "$PLAN" | awk '{print $1}')" >> "$PAGE"
+  touch -d "2020-01-01 00:00" "$PAGE"; touch "$PLAN"
+  run bash "$GATE" --plan "$PLAN"
+  [ "$status" -eq 0 ]
+}
+
+@test "a page recording the plan's sha256 is stale once the plan's bytes change, whatever the mtimes say" {
+  render_page
+  printf '<!-- aid-plan-sha256: %s -->\n' "$(sha256sum "$PLAN" | awk '{print $1}')" >> "$PAGE"
+  printf '\nchanged\n' >> "$PLAN"; touch -d "2020-01-01 00:00" "$PLAN"
+  aid_fixture_seed_critic_check "$ROOT" "$PLAN"   # the critic read the changed plan too (review off: bound to the plan as it is)
+  run bash "$GATE" --plan "$PLAN"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"rendered from a different version of the plan"* ]]
+}
+
 @test "a plan the RENDERER refuses owes no page — enforcement must not require the impossible" {
   # Found live 2026-08-24: this rule demanded a page for a plan with no
   # `## Goal`, aid_plan_summary_render refused to produce one, and the session
@@ -120,6 +141,7 @@ render_page() {
 ### Step 1: do the thing
 **AID Role:** backend
 P
+  aid_fixture_seed_critic_check "$ROOT" "$PLAN"
   mkdir -p "$TMP/out"
   printf 'plan: 900\nepic: 0\n' > "$TMP/counter.yaml"
   run bash "$PLUGIN_ROOT/scripts/aid-plan-to-epic.sh" --plan "$PLAN" --phase 1 --total 1 --epic-template "$PLUGIN_ROOT/defaults/templates/epic.md" --output-dir "$TMP/out" --counter-yaml "$TMP/counter.yaml"
@@ -329,6 +351,7 @@ _close_page() {
   ( cd "$ws" && git init -q . )
   mkdir -p "$ws/.aid-o/config/policies"
   cp "$ROOT/.aid-o/config/policies/review-checkpoints.yaml" "$ws/.aid-o/config/policies/"
+  for id in P062 P091; do aid_fixture_seed_critic_check "$ws" "$ws/.aid-o/plans/$id-x.md"; done
 
   run_rule "{\"cwd\":\"$ws\",\"transcript_path\":\"$ws/transcript.jsonl\"}"
   [[ "$output" == *"P091"* ]]
@@ -406,6 +429,7 @@ _close_page() {
   # A CONTENT change, and no sleep: the key is a content hash precisely so that
   # two edits inside one second are still two findings (Codex, 2026-08-28).
   printf '\n<!-- edited again -->\n' >> "$PLAN"
+  aid_fixture_seed_critic_check "$ROOT" "$PLAN"
   run_rule "{\"cwd\":\"$ROOT\",\"transcript_path\":\"$t\"}"
   [[ "$output" == *"P900"* ]]           # …so it is said again
 }

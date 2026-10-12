@@ -29,6 +29,8 @@ teardown() { rm -rf "$ROOT"; }
 _plan() {
   printf -- '---\nid: P900\ntype: %s\n---\n# Plan\n\n### Step 1: first\n\nuses {{x}} literally\n\n### Step 2: second\n\ntext\n' "$1" > "$PLAN"
   _check
+  # P109: no round without a passed critic check for the plan entering it
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
 }
 _check() {
   jq -n --arg s "$(sha256sum "$PLAN" | cut -d' ' -f1)" \
@@ -39,7 +41,7 @@ _check() {
   run "$ROUND_SH" prepare "$PLAN" --round 1
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(ls "$CP1/round-1"/prompt-*.md | wc -l)" -eq 6 ]
-  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 3 ]
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 6 ]   # plan, plan-check, standards, lint, zadani-note, critic-response
   [ "$(jq '.reviewers_expected | length' "$CP1/round-1/round.json")" -eq 6 ]
   [ "$(jq '.min_answers_effective' "$CP1/round-1/round.json")" -eq 4 ]
   [ "$(jq 'length' "$CP1/rounds.json")" -eq 1 ]
@@ -233,12 +235,15 @@ _round1_closed() {
   run "$ROUND_SH" prepare "$PLAN" --round 2
   [ "$status" -eq 1 ]; [[ "$output" == *"scripts/new.sh"* ]]
 }
-@test "fix-check: only plan-level findings run with --fixes none and pass when nothing changed" {
+@test "fix-check: only plan-level findings — majors make the list any, minors alone make it none; both pass when nothing changed" {
   _round1_closed
   jq '.findings[].step = null' "$CP1/round-1/merged.json" > "$ROOT/m" && mv "$ROOT/m" "$CP1/round-1/merged.json"
   run "$ROUND_SH" fix-check "$PLAN" --round 1
   echo "$output"; [ "$status" -eq 0 ]
-  [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = none ]
+  [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = any ]
+  jq '.findings[].severity = "minor"' "$CP1/round-1/merged.json" > "$ROOT/m" && mv "$ROOT/m" "$CP1/round-1/merged.json"
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -eq 0 ]; [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = none ]
 }
 @test "override: rounds 3 is recorded with six keys and lets round 3 be prepared; a second override is refused" {
   run "$ROUND_SH" override "$PLAN" --rounds 3 --reason "PM: send a third round, please"
@@ -288,6 +293,8 @@ _round1_closed() {
 @test "prepare: the confirmation round asks the reporter of an open major on an unchanged step" {
   _round1_closed '.findings[0].severity = "major" | .findings[0].step = null'
   "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  # P109: after majors only, a second round is the PM's (one round by default)
+  "$ROUND_SH" override "$PLAN" --rounds 2 --reason "PM: confirm the major fix in a second round" >/dev/null
   run "$ROUND_SH" prepare "$PLAN" --round 2
   [ "$status" -eq 0 ]
   [ "$(jq '.reviewers_expected | length' "$CP1/round-2/round.json")" -gt 0 ]
@@ -324,8 +331,13 @@ _repo() {
   seq 1 60 >> "$R/src/app.py"; echo new > "$R/src/new.py"; git -C "$R" add -A; git -C "$R" commit -qm s0
   # Round mechanics are tested with one reviewer: the project gates step_security
   # on a pattern, as the default did before 2.109.0 (the default is tested at "prepare needs").
+  # The project keeps the pre-2.116.0 step budget (3B): threshold 1/50, two
+  # rounds, CP3 on — the step-kind cases set the shipped defaults back.
   mkdir -p "$R/.aid-o/config/policies"
-  yq '.review_checkpoints.step_review.reviewers[1].when = "review+security"' \
+  yq '.review_checkpoints.step_review.reviewers[1].when = "review+security"
+      | .review_checkpoints.step_review.skip_threshold = {"max_files": 1, "max_lines": 50}
+      | .review_checkpoints.step_review.rounds_default = 2 | del(.review_checkpoints.step_review.second_round_when)
+      | .review_checkpoints.cp3_integration_review = true' \
     "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
 }
 _sc() { (cd "$R" && bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint "${1:-cp2}" --step "${2:-0}" --evidence-dir "$E" "${@:3}") >/dev/null; }
@@ -344,6 +356,146 @@ _bracket() {
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "$f" --output-file "$d/reviewer-$2.json" --evidence-dir "$d" >/dev/null
 }
 
+# _krepo <files> <lines per file> [extra line] — _repo with the shipped step
+# policy (P110: one round, threshold 3/120, both roles light, security full on a
+# pattern) and a step-0 commit of <files> new files under src/ (all in scope).
+_krepo() {
+  _repo
+  cp "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  git -C "$R" reset -q --hard HEAD~1
+  jq '.steps[0].outputs = [] | .steps[0].allowed_paths = ["src/**"]' "$E/plan.json" > "$E/p.tmp" && mv "$E/p.tmp" "$E/plan.json"
+  local i
+  for i in $(seq 1 "$1"); do seq 1 "$2" > "$R/src/f$i.py"; done
+  [[ -n "${3:-}" ]] && echo "$3" >> "$R/src/f1.py"
+  git -C "$R" add src; git -C "$R" commit -qm s0
+}
+# _kclose <round> <verdict jq for both roles> — answer, bracket, collect, close one round with both roles
+_kclose() {
+  _sanswer "$1" step_generalist "$2"; _sanswer "$1" step_security "$2"
+  _S collect --round "$1" >/dev/null; _bracket "$1" step_generalist; _bracket "$1" step_security
+  _S close --round "$1" --tokens step_generalist=10 --tokens step_security=10 >/dev/null
+}
+@test "step-kind: a 2-file/40-line step inside scope with no pattern is skip, and prepare refuses a round" {
+  _krepo 2 20; _sc
+  [ "$(jq -r .verdict "$E/cp2/step-0/step-check.json")" = skip ]
+  run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"verdict is skip"* ]]
+}
+@test "step-kind: a 5-file step is review; round 1 asks both roles as light reviewers (round.json agents)" {
+  _krepo 5 30; _sc
+  [ "$(jq -r .verdict "$E/cp2/step-0/step-check.json")" = review ]
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -c '.reviewers_expected | sort' "$(D 1)/round.json")" = '["step_generalist","step_security"]' ]
+  [ "$(jq -r .agents.step_generalist "$(D 1)/round.json")" = aid-orchestrator:reviewer-light ]
+  [ "$(jq -r .agents.step_security "$(D 1)/round.json")" = aid-orchestrator:reviewer-light ]
+}
+@test "step-kind: a step matching exec_keyword is review+security; step_security gets the full reviewer (full_when)" {
+  _krepo 1 5 'eval("x")'; _sc
+  [ "$(jq -r .verdict "$E/cp2/step-0/step-check.json")" = "review+security" ]
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .agents.step_security "$(D 1)/round.json")" = general-purpose ]
+  [ "$(jq -r .agents.step_generalist "$(D 1)/round.json")" = aid-orchestrator:reviewer-light ]
+  [[ "$output" == *"step_security.md  (focus cp2-step-0-step-security, agent general-purpose"* ]]
+}
+@test "step-kind: a closed round 1 with an open major and a new commit allows round 2; its prompt carries fix.patch, not diff.patch" {
+  _krepo 5 30; _sc; _S prepare --round 1 >/dev/null; _kclose 1
+  [ "$(jq -r .verdict "$(D 1)/measurement.json")" = fail ]
+  run _S prepare --round 2; [ "$status" -eq 1 ]; [[ "$output" == *"HEAD has not moved"* ]]
+  echo "fixed_marker = 1" >> "$R/src/f2.py"; git -C "$R" commit -qam "fix(review): x"; _sc
+  run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
+  local p="$(D 2)/prompt-step_generalist.md"
+  grep -q '^## This is a confirmation round$' "$p"
+  grep -q 'fixed_marker' "$p"
+  grep -q '^### What the author changed (fix.patch)' "$p"
+  ! grep -q '^## diff.patch' "$p"
+  ! grep -q '^## Declared scope' "$p"
+}
+@test "step-kind: a delta round 2 after a passed round 1 passes; a delta round 3 after a passed round 2 is refused by the budget" {
+  _krepo 5 30; _sc; _S prepare --round 1 >/dev/null
+  _kclose 1 '.findings = [] | .no_findings_reason = "clean"'
+  [ "$(jq -r .verdict "$(D 1)/measurement.json")" = pass ]
+  echo late >> "$R/src/f3.py"; git -C "$R" commit -qam late; _sc
+  run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
+  grep -q '^## This is a delta round$' "$(D 2)/prompt-step_generalist.md"
+  ! grep -q '^## diff.patch' "$(D 2)/prompt-step_generalist.md"
+  _kclose 2 '.findings = [] | .no_findings_reason = "clean"'
+  echo later >> "$R/src/f4.py"; git -C "$R" commit -qam later; _sc
+  run _S prepare --round 3; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"exceeds the round budget (1)"* ]]
+}
+@test "step-kind: a third round after a confirmation that still left a major open is refused without the PM's override" {
+  _krepo 5 30; _sc; _S prepare --round 1 >/dev/null; _kclose 1
+  echo "fix = 1" >> "$R/src/f2.py"; git -C "$R" commit -qam "fix(review): x"; _sc
+  _S prepare --round 2 >/dev/null; _kclose 2
+  echo "fix = 2" >> "$R/src/f2.py"; git -C "$R" commit -qam "fix(review): y"; _sc
+  run _S prepare --round 3; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"exceeds the round budget (1)"* ]]
+}
+@test "step-kind: round 1 closed with only minors and a new commit gets a delta round (nothing open to confirm)" {
+  _krepo 5 30; _sc; _S prepare --round 1 >/dev/null
+  _kclose 1 '.findings[0].severity = "minor"'
+  [ "$(jq -r .verdict "$(D 1)/measurement.json")" = pass ]
+  echo "fix = 1" >> "$R/src/f2.py"; git -C "$R" commit -qam "fix(review): x"; _sc
+  run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq '.findings | length' "$(D 2)/packet/open-findings.json")" -eq 0 ]
+  grep -q '^## This is a delta round$' "$(D 2)/prompt-step_security.md"
+}
+@test "step-kind: under the PM's standing instruction a delta round 3 after two passed rounds is prepared (no false 'no progress')" {
+  _krepo 5 30
+  printf -- '---\nid: P903\ntype: regular\n---\n# Plan\n' > "$ROOT/plan.md"
+  printf 'plan_path: %s\n' "$ROOT/plan.md" >> "$E/fsm-state.yaml"
+  _sc; _S prepare --round 1 >/dev/null; _kclose 1 '.findings = [] | .no_findings_reason = "clean"'
+  echo late >> "$R/src/f3.py"; git -C "$R" commit -qam late; _sc
+  _S prepare --round 2 >/dev/null; _kclose 2 '.findings = [] | .no_findings_reason = "clean"'
+  _S standing --reason "PM: už se neptej a dodělej to" >/dev/null
+  echo later >> "$R/src/f4.py"; git -C "$R" commit -qam later; _sc
+  run _S prepare --round 3; echo "$output"; [ "$status" -eq 0 ]
+}
+@test "step-kind: a confirmation round whose previous round has no head_sha falls back to the whole diff and says so" {
+  _krepo 5 30; _sc; _S prepare --round 1 >/dev/null; _kclose 1
+  jq 'del(.head_sha)' "$(D 1)/round.json" > "$(D 1)/r.tmp" && mv "$(D 1)/r.tmp" "$(D 1)/round.json"
+  echo "fix = 1" >> "$R/src/f2.py"; git -C "$R" commit -qam "fix(review): x"; _sc
+  run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .confirmation_fallback "$(D 2)/round.json")" = full_diff ]
+  grep -q 'no fix diff could be cut' "$(D 2)/prompt-step_generalist.md"
+  grep -q '^## diff.patch' "$(D 2)/prompt-step_generalist.md"
+}
+# _mplan — the run's plan: AC1 (`true`) closed by plan step 1, plan.json step 0 = plan step 1
+_mplan() {
+  printf -- '---\nid: P904\n---\n# Plan\n\n### Step 1: one\n\n**Zavírá:** AC1\n\n## Acceptance Criteria\n\n- [ ] AC1: it runs\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "true"\n    expected_exit: 0\n  ```\n' > "$ROOT/mplan.md"
+  printf 'plan_path: %s\n' "$ROOT/mplan.md" >> "$E/fsm-state.yaml"
+  jq '.steps[0] += {plan_step: 1, zavira: ["AC1"]}' "$E/plan.json" > "$E/p.tmp" && mv "$E/p.tmp" "$E/plan.json"
+}
+@test "step-measured: prepare --checkpoint cp2 measures the step before the packet; the packet and its manifest carry plan-diff.json" {
+  _krepo 5 30; _mplan; _sc
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.results[0].verdict' "$E/cp2/step-0/plan-diff.json")" = present ]
+  [ -f "$(D 1)/packet/plan-diff.json" ]
+  jq -e '.files | map(.file) | index("plan-diff.json") != null' "$(D 1)/packet/manifest.json"
+}
+@test "step-measured: a skip-verdict step is measured too" {
+  _krepo 2 20; _mplan; _sc
+  run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"verdict is skip"* ]]
+  [ "$(jq -r .scope "$E/cp2/step-0/plan-diff.json")" = step ]
+}
+@test "step-measured: the reviewer's prompt carries the measured verdicts" {
+  _krepo 5 30; _mplan; _sc
+  _S prepare --round 1 >/dev/null
+  grep -q '^## Measured criteria of this step' "$(D 1)/prompt-step_generalist.md"
+  grep -q '^- AC1: present — exit=0' "$(D 1)/prompt-step_generalist.md"
+}
+@test "step-measured: dispute --pm accepted refuses the three card causes through the shared aid_pm_card_check" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist '.findings[0].severity = "blocker"'; _S collect --round 1 >/dev/null; _bracket 1 step_generalist
+  _S close --round 1 --tokens step_generalist=10 >/dev/null
+  local fp card="$ROOT/card.md"; fp="$(jq -r '.findings[0].fingerprint' "$(D 1)/merged.json")"
+  export AID_HOOK_AUDIT="$ROOT/audit.jsonl"; : > "$AID_HOOK_AUDIT"
+  local pm=(dispute --round 1 --fingerprint "$fp" --reason "PM: the criterion is wrong, accepted" --pm accepted)
+  run _S "${pm[@]}"; [ "$status" -eq 1 ]; [[ "$output" == *"--finding-card names no card file"* ]]
+  echo "Rozhodnutí 1: ${fp}x" > "$card"; touch -d '-10 seconds' "$card"
+  run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"does not quote ${fp}"* ]]
+  echo "nález $fp" >> "$card"; touch -d '-10 seconds' "$card"
+  run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"no PM prompt after"* ]]
+}
 @test "step: prepare needs a step check at HEAD and a review verdict; the default asks security on every reviewed step, a gated project only on a pattern" {
   _repo
   run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"no step-check.json"* ]]
@@ -473,7 +625,7 @@ _bracket() {
   run _S retry --round 1 --role step_security; [ "$status" -eq 1 ]
   # HEAD moved before close → refused
   rm -rf "$E/cp2"; _sc; _S prepare --round 1 >/dev/null; _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
-  _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _bracket 1 step_security
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist      # step_security is not a role of this round
   echo later >> "$R/src/app.py"; git -C "$R" commit -qam later
   run _S close --round 1 --tokens step_generalist=1 step_security=1
   [ "$status" -eq 1 ]; [[ "$output" == *"head moved during round"* ]]
@@ -680,6 +832,17 @@ _close1() {
   "$ROUND_SH" collect "${args[@]}" --round "${ROUND_N:-1}" >/dev/null || return 1
   "$ROUND_SH" close "${args[@]}" --round "${ROUND_N:-1}" --tokens ${role}=5
 }
+@test "step-kind: under the shipped one-round policy a failed round 1 routes nothing — the confirmation round is the last" {
+  _erepo
+  yq -i '.review_checkpoints.step_review.rounds_default = 1 | .review_checkpoints.step_review.second_round_when = "open_finding_and_fix"' \
+     "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  _sc
+  run _close1 cp2; echo "$output"; [ "$status" -eq 0 ]
+  [ ! -f "$(_J routed-findings.jsonl)" ]
+  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): partial"; _sc
+  ROUND_N=2 run _close1 cp2; echo "$output"; [ "$status" -eq 0 ]
+  [ -f "$(_J routed-findings.jsonl)" ]
+}
 @test "routing: close of the last cp2 round routes the uncovered blocker, carries the major a later step covers, and a second close adds nothing" {
   _erepo; _sc
   # round 1 of rounds_default 2: nothing is written yet
@@ -842,7 +1005,7 @@ _frepo() {
   seq 1 60 >> "$R/src/app.py"; echo "- **New thing** — the app now imports new" > "$R/CHANGELOG.md"; git -C "$R" add -A; git -C "$R" commit -qm "feat: the plan's work"
   printf -- '---\nid: P901\ntype: feature\n---\n# Plan\n\n### Step 1: first\n\n**Acceptance Criteria:**\n- [ ] the app imports new\n\n**Effort:** S\n\n## Success Criteria\n\n- it works end to end\n' > "$R/.aid-o/plans/P901-x.md"
   echo '{"gates": {"tests_pass": {"gate": "tests_pass", "result": "pass"}}, "overall_status": "pass"}' > "$E/gates_report.json"
-  echo '{"criteria": []}' > "$E/plan-diff.json"; : > "$E/timeline.jsonl"
+  jq -n --arg w "$R" '{criteria: [], results: [], isolation: {worktree: $w, env_keys: [], network: "unshare"}}' > "$E/plan-diff.json"; : > "$E/timeline.jsonl"
   yq '.review_checkpoints.final_review.reviewers |= map(.provider = "claude" | .model = "sonnet")' \
      "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
   bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
@@ -859,34 +1022,37 @@ _fanswer() {
 }
 _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims an import the app never makes", command: "grep -n import src/app.py", evidence: "src/app.py:1", fix: "import new", rule: "every change the changelog claims is in the code"}] | del(.no_findings_reason)'
 
-@test "cp7: produce's inputs hold the plan's criteria and the EPIC findings; prepare prints three prompts with cp7 foci" {
+@test "cp7: produce's inputs hold the plan's criteria and the EPIC findings; prepare prints the two default prompts with cp7 foci" {
   _frepo; _fsc
   grep -q "the app imports new" "$E/cp7/criteria.md"; grep -q "it works end to end" "$E/cp7/criteria.md"
   [ "$(jq -c .epics "$E/cp7/epic-findings.json")" = "[]" ]
   [ ! -e "$E/plan.json" ]
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
-  [[ "$output" == *"focus cp7-final-criteria"* && "$output" == *"focus cp7-final-claims"* && "$output" == *"focus cp7-final-generalist"* ]]
+  [[ "$output" == *"focus cp7-final-criteria"* && "$output" == *"focus cp7-final-generalist"* && "$output" != *"final-claims"* ]]
   grep -q "CHANGELOG" "$(FD 1)/packet/claims.patch"
-  grep -q "every EPIC together" "$(FD 1)/prompt-final_claims.md"
-  grep -q '^+60$' "$(FD 1)/prompt-final_claims.md"                       # a small diff is inline
+  grep -q "every EPIC together" "$(FD 1)/prompt-final_generalist.md"
+  grep -q '^+60$' "$(FD 1)/prompt-final_generalist.md"                       # a small diff is inline
   # a diff too large for one prompt is pointed at, with its files, never truncated
   rm -rf "$E/cp7/round-1" "$E/cp7/rounds.json"
   AID_REVIEW_INLINE_MAX_BYTES=100 run _F prepare --round 1; [ "$status" -eq 0 ]
-  grep -q "too large to inline. READ IT FROM DISK" "$(FD 1)/prompt-final_claims.md"
-  grep -q '^- src/app.py$' "$(FD 1)/prompt-final_claims.md"; ! grep -q '^+60$' "$(FD 1)/prompt-final_claims.md"
+  grep -q "too large to inline. READ IT FROM DISK" "$(FD 1)/prompt-final_generalist.md"
+  grep -q '^- src/app.py$' "$(FD 1)/prompt-final_generalist.md"; ! grep -q '^+60$' "$(FD 1)/prompt-final_generalist.md"
 }
 
 @test "cp7: a closed round writes rounds.json and a schema-shaped semantic file over base..candidate, lenses = the round's roles" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
-  local r; for r in final_criteria final_claims final_generalist; do _fanswer 1 "$r"; done
+  local r; for r in final_criteria final_generalist; do _fanswer 1 "$r"; done
   _F collect --round 1 >/dev/null
-  run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"closing: attempt 1, "*"findings on lines written during the closing: 0 (uncited: 0, unblamed: 0), codex findings refused on form: 0"* ]]   # 2.114.0
   [ "$(jq -r .verdict "$E/cp7/rounds.json")" = pass ]
+  # the stage record holds the digest of measurement.json AFTER its last write (closing, cancelled_starts) — decide verifies it
+  [ "$(jq -rs 'map(select(.path == "cp7/round-1/measurement.json")) | last | .sha256' "$E/stage-writes.jsonl")" = "sha256:$(sha256sum "$(FD 1)/measurement.json" | cut -d' ' -f1)" ]
   [ "$(jq -r .head_sha "$E/cp7/rounds.json")" = "$(git -C "$R" rev-parse HEAD)" ]
   local f="$E/semantic-review-final.json"
   [ "$(jq -r .semantic_review.range "$f")" = "${FBASE}..$(git -C "$R" rev-parse HEAD)" ]
   [ "$(jq -r .revision.base_sha "$f")" = "$FBASE" ]
-  [ "$(jq -c '.semantic_review.lenses_run | sort' "$f")" = '["final_claims","final_criteria","final_generalist"]' ]
+  [ "$(jq -c '.semantic_review.lenses_run | sort' "$f")" = '["final_criteria","final_generalist"]' ]
   [ "$(jq -r .generated_by "$f")" = "aid-review-round.sh close cp7" ]
   run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' && fsm_check_review_round '$E' cp7"
   [ "$status" -eq 0 ]
@@ -908,18 +1074,18 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
 
 @test "cp7: close refuses a reviewer file nobody dispatched" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
-  _fanswer 1 final_criteria; _fanswer 1 final_claims
+  _fanswer 1 final_criteria
   jq -n '{role: "final_generalist", checkpoint: "cp7", findings: [], no_findings_reason: "hand-written"}' > "$(FD 1)/reviewer-final_generalist.json"
   _F collect --round 1 >/dev/null
-  run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5
   [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]
 }
 
 @test "cp7: an open blocker fails the round; round 2 is refused because a fix moves the candidate; the next attempt's round 1 shows what stayed open and the fix" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
-  _fanswer 1 final_criteria; _fanswer 1 final_generalist; _fanswer 1 final_claims "$_BLOCKER"
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_BLOCKER"
   _F collect --round 1 >/dev/null
-  run _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5; [ "$status" -eq 0 ]
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5; [ "$status" -eq 0 ]
   [[ "$output" == *"decide blocks on them"* ]]; [ "$(jq -r .verdict "$E/cp7/rounds.json")" = fail ]
   [ "$(jq -r '.findings[0].status' "$(FD 1)/merged.json")" = open ]
   run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/aid-fsm.sh' && fsm_check_review_round '$E' cp7"; [ "$status" -eq 1 ]
@@ -927,13 +1093,13 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   run _F prepare --round 2; [ "$status" -eq 1 ]; [[ "$output" == *"--stage freeze"* ]]
   # the next attempt, as freeze and produce leave it after a code fix
   local first="$E"; E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E/cp7"
-  cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$E/cp7/"; : > "$E/timeline.jsonl"
+  cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$first/cp7/brief.json" "$E/cp7/"; : > "$E/timeline.jsonl"
   jq -n '{previous_run_dir: ".aid-o/work/evidence/P901/R-P901-final-1", class: "delivery", docs_only: false, invalidated_feeds: ["diff"]}' > "$E/fix-class.json"
   _fsc
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]           # a code fix carries nobody
   [ -s "$(FD 1)/packet/fix.patch" ]; [ "$(jq '.findings | length' "$(FD 1)/packet/open-findings.json")" -eq 1 ]
-  grep -q "This is a confirmation round" "$(FD 1)/prompt-final_claims.md"
+  grep -q "This is a confirmation round" "$(FD 1)/prompt-final_generalist.md"
 }
 
 @test "cp7: a finding of a final role validates against the finding schema's checkpoint and role lists" {
@@ -941,26 +1107,622 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   jq -e '."$defs".roles_step.enum | (index("final_criteria") and index("final_claims") and index("final_generalist"))' "$AID_PLUGIN_PATH/defaults/schemas/review-finding.schema.json"
 }
 
-@test "cp7: after a docs-only fix the next attempt carries the clean roles the fix did not touch and asks only final_claims" {
+@test "cp7: after a docs-only fix both default roles are asked again — final_criteria is never carried, final_generalist reads the claims" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
-  local r; for r in final_criteria final_claims final_generalist; do _fanswer 1 "$r"; done
-  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_claims=5 final_generalist=5 >/dev/null
+  local r; for r in final_criteria final_generalist; do _fanswer 1 "$r"; done
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null
   grep -q '"path":"cp7/round-1/merged.json"' "$E/stage-writes.jsonl"          # the close recorded what it wrote
-  # the fix, and the second attempt's run directory as freeze and produce leave it
   local first="$E"; echo "- **Fix** — wording" >> "$R/CHANGELOG.md"; git -C "$R" commit -qam "docs: wording"
   E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E"; cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; : > "$E/timeline.jsonl"
-  mkdir -p "$E/cp7"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$E/cp7/"
+  mkdir -p "$E/cp7"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$first/cp7/brief.json" "$E/cp7/"
   jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: true, invalidated_feeds: ["claims"]}' > "$E/fix-class.json"
   _fsc
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
-  [[ "$output" == *"final_criteria: carried"* && "$output" == *"final_generalist: carried"* && "$output" == *"prompt-final_claims.md"* ]]
-  [ "$(jq -r '.carried_from | keys | join(",")' "$(FD 1)/round.json")" = "final_criteria,final_generalist" ]
-  [ ! -f "$(FD 1)/prompt-final_criteria.md" ]
-  _fanswer 1 final_claims; _F collect --round 1 >/dev/null
-  run _F close --round 1 --tokens final_claims=7; echo "$output"; [ "$status" -eq 0 ]
-  [ "$(jq -r '.reviewers.final_criteria | "\(.tokens) \(.usd)"' "$(FD 1)/measurement.json")" = "0 0" ]
-  # a role that reported a finding is never carried
-  jq "$_BLOCKER" "$first/cp7/round-1/reviewer-final_criteria.json" > "$first/x" && mv "$first/x" "$first/cp7/round-1/reviewer-final_criteria.json"
-  rm -rf "$E/cp7/round-1" "$E/cp7/rounds.json"
-  run _F prepare --round 1; [ "$status" -eq 0 ]; [[ "$output" == *"prompt-final_criteria.md"* ]]
+  [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]
+  [ -f "$(FD 1)/prompt-final_criteria.md" ] && [ -f "$(FD 1)/prompt-final_generalist.md" ]
+}
+@test "cp7-zadani: a fix that touched only the plan's criteria asks both roles again (final_generalist reads the criteria too), never carries final_criteria" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  local r; for r in final_criteria final_generalist; do _fanswer 1 "$r"; done
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null
+  local first="$E"; E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E/cp7"
+  cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$first/cp7/brief.json" "$E/cp7/"; : > "$E/timeline.jsonl"
+  jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: false, invalidated_feeds: ["criteria"]}' > "$E/fix-class.json"
+  _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]
+  [ -f "$(FD 1)/prompt-final_criteria.md" ] && [ -f "$(FD 1)/prompt-final_generalist.md" ]
+}
+@test "cp7-zadani: a project that lists three roles still prepares three (final_claims is optional, 3B)" {
+  _frepo
+  yq -i '.review_checkpoints.final_review.reviewers += [{"role": "final_claims", "provider": "claude", "model": "sonnet", "effort": "low"}]' "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -c '.reviewers_expected | sort' "$(FD 1)/round.json")" = '["final_claims","final_criteria","final_generalist"]' ]
+}
+# _fzadani — bind the fixture plan to a brief, as a P109+ plan is
+_fzadani() {
+  printf -- '---\nzadani: P901\nverze: 1\n---\n# brief\n\n## 6. Hotovo, když\n\n- [ ] AC1: the app imports new\n' > "$R/.aid-o/plans/P901-zadani.md"
+  local sha; sha="$(sha256sum "$R/.aid-o/plans/P901-zadani.md" | cut -d' ' -f1)"
+  sed -i "s|^type: feature|type: feature\nzadani: .aid-o/plans/P901-zadani.md\nzadani_verze: 1\nzadani_sha256: ${sha}|" "$R/.aid-o/plans/P901-x.md"
+}
+@test "cp7-zadani: prepare copies the brief with its sha (round.json, manifest.json) and asks exactly the two default roles" {
+  _frepo; _fzadani; _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  local sha; sha="$(sha256sum "$R/.aid-o/plans/P901-zadani.md" | cut -d' ' -f1)"
+  cmp -s "$R/.aid-o/plans/P901-zadani.md" "$(FD 1)/packet/zadani.md"
+  [ "$(jq -r .zadani_sha256 "$(FD 1)/round.json")" = "$sha" ]
+  jq -e --arg s "$sha" '.files | any(.file == "zadani.md" and .sha256 == $s)' "$(FD 1)/packet/manifest.json"
+  [ "$(jq -c .reviewers_expected "$(FD 1)/round.json")" = '["final_criteria","final_generalist"]' ]
+}
+@test "cp7-zadani: the rendered prompts carry the point-by-point question and the checklist" {
+  _frepo; _fzadani; _fsc; _F prepare --round 1 >/dev/null
+  grep -q 'Point by point of the brief' "$(FD 1)/prompt-final_criteria.md"
+  grep -q 'zachovává' "$(FD 1)/prompt-final_criteria.md"
+  local item; for item in "a new personal datum" "repository layout vs. host layout" "new dependencies, per CI job" "the documentation build" "data leaking to logs" "account boundaries"; do
+    grep -q "$item" "$(FD 1)/prompt-final_generalist.md" || { echo "missing: $item"; return 1; }
+  done
+  grep -q 'claims.patch' "$(FD 1)/prompt-final_generalist.md"
+  # the brief itself and the measured verdicts are in the prompt, not only named
+  grep -q 'AC1: the app imports new' "$(FD 1)/prompt-final_criteria.md"
+  grep -q '^## Measured points at the close' "$(FD 1)/prompt-final_criteria.md"
+  grep -q '"network":"unshare"' "$(FD 1)/prompt-final_criteria.md"
+}
+@test "cp7-zadani: a run without cp7/brief.json (produced before 2.116.0) is refused cp7_measurement_stale" {
+  _frepo; rm "$E/cp7/brief.json"; _fsc
+  run _F prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"cp7_measurement_stale"* ]]
+}
+@test "cp7-zadani: a brief whose file is missing is refused zadani_file_missing" {
+  _frepo; _fzadani; rm "$R/.aid-o/plans/P901-zadani.md"; _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"zadani_file_missing"* ]]
+}
+@test "cp7-zadani: a strict plan without zadani: is refused plan_names_no_brief" {
+  _frepo; sed -i 's/^type: feature/type: feature\nlifecycle_strict: true/' "$R/.aid-o/plans/P901-x.md"; _fsc
+  run _F prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"plan_names_no_brief"* ]]
+}
+@test "cp7-zadani: a brief path outside the project is refused zadani_path_escapes" {
+  _frepo; sed -i 's|^type: feature|type: feature\nzadani: /etc/hostname|' "$R/.aid-o/plans/P901-x.md"; _fsc
+  run _F prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"zadani_path_escapes"* ]]
+}
+@test "cp7-zadani: a brief whose sha is not the plan's is refused cp7_brief_sha_mismatch" {
+  _frepo; _fzadani; echo "- [ ] AC2: added later" >> "$R/.aid-o/plans/P901-zadani.md"; _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"cp7_brief_sha_mismatch"*"next:"* ]]
+}
+@test "cp7-zadani: a plan-diff.json without isolation is refused cp7_measurement_stale" {
+  _frepo; echo '{"criteria": []}' > "$E/plan-diff.json"; _fsc
+  run _F prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"cp7_measurement_stale"*"next:"* ]]
+}
+@test "cp7-zadani: a legacy plan without zadani: gets zadani-note.txt" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  [ -f "$(FD 1)/packet/zadani-note.txt" ] && [ ! -f "$(FD 1)/packet/zadani.md" ]
+}
+
+@test "step: the packet's files.json carries no plan-time tier declaration — the suite header is the tier (P103)" {
+  _repo
+  jq '.steps[0].outputs += ["Test: `tests/x.bats` (tier: t0) — a case"]' "$E/plan.json" > "$E/p" && mv "$E/p" "$E/plan.json"
+  _sc; _S prepare --round 1 >/dev/null
+  ! grep -q '(tier:' "$(D 1)/packet/files.json"
+  grep -q 'tests/x.bats' "$(D 1)/packet/files.json"
+}
+
+@test "step: a low-effort role goes to reviewer-light only while its prompt fits light_max_prompt_lines (P103)" {
+  _repo; _sc
+  run _S prepare --round 1; [ "$status" -eq 0 ]
+  [[ "$output" == *"focus cp2-step-0-step-generalist, agent aid-orchestrator:reviewer-light"* ]]
+  rm -rf "$E/cp2"
+  yq -i '.review_checkpoints.step_review.light_max_prompt_lines = 5' "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  _sc
+  run _S prepare --round 1; [ "$status" -eq 0 ]
+  [[ "$output" == *"focus cp2-step-0-step-generalist, agent general-purpose"* ]]
+}
+
+# _round_fail <n> <claim-suffix> — prepare, one failing answer, collect, close round n
+_round_fail() {
+  _S prepare --round "$1" >/dev/null || return 1
+  _sanswer "$1" step_generalist ".findings[0].claim = \"the new file is never imported, variant $2\""
+  _S collect --round "$1" >/dev/null; _bracket "$1" step_generalist
+  _S close --round "$1" --tokens step_generalist=1
+}
+_fix() { echo "fix $1" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): $1"; _sc; }
+
+@test "standing: the PM's 'don't ask, finish it' adds two fix-and-confirm rounds, routing waits for them, a repeat stops (P103)" {
+  _repo
+  printf -- '---\nid: P901\ntype: regular\n---\n# Plan\n' > "$ROOT/plan.md"
+  printf 'plan_path: %s\n' "$ROOT/plan.md" >> "$E/fsm-state.yaml"
+  _sc; run _round_fail 1 a; [ "$status" -eq 0 ]
+  _fix 1; run _round_fail 2 b; [ "$status" -eq 0 ]
+  [[ "$output" == *"belongs to no plan"* || "$output" == *"routed"* ]]   # budget 2: round 2 was the last
+  _fix 2; run _S prepare --round 3
+  [ "$status" -ne 0 ]; [[ "$output" == *"exceeds the round budget"* ]]
+  run _S standing --reason "PM: už se neptej a dodělej to"
+  [ "$status" -eq 0 ]; [ -f "$R/.aid-o/work/evidence/P901/standing-pm.json" ]
+  run _S standing --reason "PM: už se neptej a dodělej to znovu"
+  [ "$status" -ne 0 ]
+  run _round_fail 3 c; [ "$status" -eq 0 ]
+  [ "$(jq -r .standing "$(D 3)/round.json")" = true ]
+  _fix 3; run _round_fail 4 d; [ "$status" -eq 0 ]
+  _fix 4; run _S prepare --round 5
+  [ "$status" -ne 0 ]; [[ "$output" == *"+ 2 under the PM's standing instruction"* ]]
+}
+
+@test "standing: a fix-and-confirm round that re-opens the same findings stops for the PM" {
+  _repo
+  printf -- '---\nid: P902\ntype: regular\n---\n# Plan\n' > "$ROOT/plan.md"
+  printf 'plan_path: %s\n' "$ROOT/plan.md" >> "$E/fsm-state.yaml"
+  _sc; _round_fail 1 same >/dev/null
+  _fix 1; _round_fail 2 same >/dev/null
+  _S standing --reason "PM: už se neptej a dodělej to" >/dev/null
+  _fix 2; run _S prepare --round 3
+  [ "$status" -ne 0 ]; [[ "$output" == *"re-opened the same findings"* ]]
+}
+
+@test "standing recorded BEFORE the base budget's last close: that close routes nothing, the extended last one does" {
+  _repo
+  printf -- '---\nid: P903\ntype: regular\n---\n# Plan\n' > "$ROOT/plan.md"
+  printf 'plan_path: %s\n' "$ROOT/plan.md" >> "$E/fsm-state.yaml"
+  _sc; _round_fail 1 a >/dev/null
+  _S standing --reason "PM: už se neptej a dodělej to" >/dev/null
+  _fix 1; run _round_fail 2 b
+  [[ "$output" != *"belongs to no plan"* ]]
+  _fix 2; _round_fail 3 c >/dev/null
+  _fix 3; run _round_fail 4 d
+  [[ "$output" == *"belongs to no plan"* ]]
+}
+
+# ─── P107 Step 2: the author's answer to the critic rides in the CP1 packet only with a passed check ───
+_critic_answer() {  # <plan sha for the check> — a passed check.json and a matching response
+  aid_fixture_seed_critic_check "$ROOT" "$PLAN" "$1"
+  printf '| # | výtka | verdikt | kde |\n|---|---|---|---|\n| 1 | test bez AC | PŘIJATO | `plan.md` Step 2, Test bullet dropped |\n' > "$EV/critic/plan/critic-response.md"
+  jq --arg r "$(sha256sum "$EV/critic/plan/critic-response.md" | cut -d' ' -f1)" '.response_sha256 = $r' \
+    "$EV/critic/plan/check.json" > "$EV/critic/plan/check.tmp" && mv "$EV/critic/plan/check.tmp" "$EV/critic/plan/check.json"
+}
+
+@test "packet: a passed critic check for this plan puts critic-response.md in every prompt, numbered and citable" {
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  [ -f "$CP1/round-1/packet/critic-response.md" ]
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 6 ]
+  grep -q '^## critic-response.md (the author' "$CP1/round-1/prompt-reuse.md"
+  grep -q '    3  | 1 | test bez AC | PŘIJATO' "$CP1/round-1/prompt-enforcement_tests.md"
+  grep -q 'critic-response.md:line' "$CP1/round-1/prompt-reuse.md"
+}
+
+@test "critic: prepare refuses round 1 without a passed critic check — an edited response, no check at all — and writes no round" {
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  printf '| 2 | later | PŘIJATO | `x` |\n' >> "$EV/critic/plan/critic-response.md"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"critic required"*"edited after the check"* ]]
+  [[ "$output" == *"next: source lib/aid-critic.sh; aid_critic_prepare P900"* ]]
+  [[ "$output" == *"(pipeline.md §When AID refuses: critic_required)"* ]]
+  [ ! -d "$CP1/round-1" ]
+  rm -rf "$EV/critic"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"critic required"*"evidence missing"* ]]
+  [ ! -d "$CP1/round-1" ]
+}
+
+@test "critic: the response rides with the ONE revision the author rebound after the check; a further edit is refused" {
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  printf '\nrevised for the accepted item\n' >> "$PLAN"; _check
+  jq --arg s "$(sha256sum "$PLAN" | cut -d' ' -f1)" '. + {plan_sha256_revised: $s}' "$EV/critic/plan/check.json" > "$EV/critic/plan/c.tmp" && mv "$EV/critic/plan/c.tmp" "$EV/critic/plan/check.json"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 0 ]; [ -f "$CP1/round-1/packet/critic-response.md" ]
+  rm -rf "$CP1"; printf 'edited again\n' >> "$PLAN"; _check
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"made for another plan"* ]]
+}
+
+@test "critic: round 1's manifest records critic_check_sha; round 2 after a fix carries the same value and is not re-checked against the fixed plan" {
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 0 ]
+  local bound; bound="$(jq -r .critic_check_sha "$CP1/round-1/packet/manifest.json")"
+  [ "$bound" = "$(jq -r .plan_sha256 "$CP1/round-1/packet/manifest.json")" ]
+  rm -rf "$CP1"; _round1_closed
+  sed -i 's/^text$/text changed by the fix/' "$PLAN"; _check
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .critic_check_sha "$CP1/round-2/packet/manifest.json")" = "$(jq -r .critic_check_sha "$CP1/round-1/packet/manifest.json")" ]
+  [ "$(jq -r .critic_check_sha "$CP1/round-2/packet/manifest.json")" != "$(jq -r .plan_sha256 "$CP1/round-2/packet/manifest.json")" ]
+}
+
+# ─── 2.113.0: the traps of P010 (agents, 2026-09-28..30) ───
+@test "step: a fix committed before close closes with --at <seen sha>; a wrong sha, a non-ancestor and no --at are refused by name" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist   # step_security is not a role of this round (no security pattern matched): no bracket for it
+  local seen; seen="$(git -C "$R" rev-parse HEAD)"
+  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at deadbeef
+  [ "$status" -eq 1 ]; [[ "$output" == *"not a commit of this checkout"* ]]      # checked even at an unmoved HEAD
+  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"
+  run _S close --round 1 --tokens step_generalist=1 step_security=1
+  [ "$status" -eq 1 ]; [[ "$output" == *"close --checkpoint cp2 --evidence-dir $E --step 0 --round 1 --tokens step_generalist=1 step_security=1 --at ${seen:0:12}"* ]]
+  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at "$(git -C "$R" rev-parse HEAD)"
+  [ "$status" -eq 1 ]; [[ "$output" == *"a round closes only at the revision it reviewed"* ]]
+  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at deadbeef
+  [ "$status" -eq 1 ]; [[ "$output" == *"not a commit of this checkout"* ]]
+  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at "${seen:0:12}"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .revision.head_sha "$(D 1)/measurement.json")" = "$seen" ]
+  [ "$(jq -r .revision.closed_with_at "$(D 1)/measurement.json")" = true ]
+  [ "$(jq -r .revision.closed_at_head "$(D 1)/measurement.json")" = "$(git -C "$R" rev-parse HEAD)" ]
+  grep -q "\"closed_at\":\"$seen\"" "$E/timeline.jsonl"
+  # the confirmation round: HEAD has moved off the seen revision, so it is prepared normally
+  _sc; run _S prepare --round 2; [ "$status" -eq 0 ]
+  # a seen sha that HEAD no longer descends from is refused
+  rm -rf "$E/cp2"; git -C "$R" reset -q --hard HEAD~1; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist      # step_security is not a role of this round
+  seen="$(git -C "$R" rev-parse HEAD)"
+  git -C "$R" reset -q --hard HEAD~1; echo divergent >> "$R/src/app.py"; git -C "$R" commit -qam divergent   # HEAD no longer descends from the seen revision
+  run _S close --round 1 --tokens step_generalist=1 step_security=1 --at "$seen"
+  [ "$status" -eq 1 ]; [[ "$output" == *"is not an ancestor of HEAD"* ]]
+}
+
+@test "step: a valid answer without a bracket is retried (no provenance), one with a bracket is not; close names retry" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _sanswer 1 step_security '.findings = [] | .no_findings_reason = "x"'
+  _S collect --round 1 >/dev/null                                 # no bracket at all for step_generalist
+  run _S close --round 1 --tokens step_generalist=1 step_security=1
+  [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]; [[ "$output" == *"retry --round 1 --role step_generalist"* ]]
+  run _S retry --round 1 --role step_generalist
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"no dispatch bracket records it"* ]]
+  [ ! -f "$(D 1)/reviewer-step_generalist.json" ]
+  _sanswer 1 step_generalist; _bracket 1 step_generalist; _S collect --round 1 >/dev/null
+  run _S retry --round 1 --role step_generalist                   # with the bracket, a valid answer is final
+  [ "$status" -eq 1 ]; [[ "$output" == *"never paid for twice"* ]]
+  run _S close --round 1 --tokens step_generalist=1 step_security=1; [ "$status" -eq 0 ]
+  [ "$(jq -r .revision.closed_with_at "$(D 1)/measurement.json")" = false ]
+  [ "$(jq -r .revision.head_sha "$(D 1)/measurement.json")" = "$(git -C "$R" rev-parse HEAD)" ]
+}
+
+@test "prepare prints the bracket commands for every claude role of a step round" {
+  _repo; _sc
+  run _S prepare --round 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"aid-emit-dispatch.sh\" start --focus cp2-step-0-step-generalist --agent-id aid-orchestrator:review --evidence-dir $(D 1)"* ]]
+  [[ "$output" == *"complete --focus cp2-step-0-step-generalist --output-file $(D 1)/reviewer-step_generalist.json"* ]]
+  [[ "$output" == *"written after the answer is a forgery"* ]]
+}
+
+@test "fix-check: a consequential edit in a step no finding named passes only with --also-steps and a reason, and the next round's packet names it" {
+  _round1_closed
+  # the finding names step 1; the author edits step 2's text as a consequence
+  sed -i 's/^text$/text\n\n- Modify: `scripts\/a.sh` — the name step 1 changed/' "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"Step 2"* ]]
+  run "$ROUND_SH" fix-check "$PLAN" --round 1 --also-steps 2
+  [ "$status" -eq 2 ]; [[ "$output" == *"--also-steps needs --reason"* ]]
+  run "$ROUND_SH" fix-check "$PLAN" --round 1 --also-steps 2 --reason "step 2 restates the name step 1 changed"
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"also edited (recorded): step(s) 2"* ]]
+  [ "$(jq -c .also_steps "$CP1/round-1/fix-diff.json")" = "[2]" ]
+  [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = "1" ]
+  grep -q '"event":"fix_check"' "$EV/timeline.jsonl"
+  # a third step outside both lists is still refused
+  printf '\n### Step 3: third\n\n- Create: `scripts/three.sh` — x\n' >> "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1 --also-steps 2 --reason "same"
+  [ "$status" -eq 1 ]; [[ "$output" == *"Step 3"* ]]
+  # back to the accepted state; round 2's packet names the consequential edit
+  sed -i '/^### Step 3: third/,$d' "$PLAN"; _check
+  "$ROUND_SH" fix-check "$PLAN" --round 1 --also-steps 2 --reason "step 2 restates the name step 1 changed" >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 2; echo "$output"; [ "$status" -eq 0 ]
+  grep -q 'Consequential edits the author declared' "$CP1/round-2/prompt-generalist_a.md"
+  grep -q 'step(s) 2: step 2 restates the name step 1 changed' "$CP1/round-2/prompt-generalist_a.md"
+}
+
+@test "prepare: a plan that differs between the primary checkout and a worktree is refused naming both copies; identical copies pass" {
+  git -C "$ROOT" add -A >/dev/null 2>&1; git -C "$ROOT" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1 || true
+  git -C "$ROOT" worktree add -q "$ROOT/.aid-worktrees/plan-P900" -b plan/P900 >/dev/null 2>&1
+  mkdir -p "$ROOT/.aid-worktrees/plan-P900/.aid-o/plans"; cp "$PLAN" "$ROOT/.aid-worktrees/plan-P900/.aid-o/plans/p.md"
+  run "$ROUND_SH" prepare "$ROOT/.aid-worktrees/plan-P900/.aid-o/plans/p.md" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  rm -rf "$CP1"; echo "edited in the worktree only" >> "$ROOT/.aid-worktrees/plan-P900/.aid-o/plans/p.md"
+  run "$ROUND_SH" prepare "$ROOT/.aid-worktrees/plan-P900/.aid-o/plans/p.md" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"two different contents under one name"* ]]; [[ "$output" == *"the newer copy is $ROOT/.aid-worktrees/plan-P900/.aid-o/plans/p.md"* ]]
+}
+
+@test "packet: the plan lint's findings ride in every CP1 prompt, so a legacy plan's advisories reach the reviewers" {
+  printf -- '- Modify: the 6 remaining version files.\n' >> "$PLAN"; _check
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  [ -s "$CP1/round-1/packet/lint.txt" ]
+  grep -q '^## Plan lint: findings' "$CP1/round-1/prompt-generalist_a.md"
+  grep -q 'remaining version files' "$CP1/round-1/prompt-generalist_a.md"
+  [ "$(jq '.files | length' "$CP1/round-1/packet/manifest.json")" -eq 6 ]
+  # a legacy plan's STRICT-tier finding is a [WARN legacy] line and rides too (P009's case)
+  rm -rf "$CP1"; printf -- '\n**Files:**\n- Modify: `scripts/a.sh` (a note) — x\n' >> "$PLAN"; _check
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1; [ "$status" -eq 0 ]
+  grep -q 'WARN legacy' "$CP1/round-1/prompt-generalist_a.md"
+}
+
+# ── 2.114.0: retry before collect, a cancelled start is not a complete ────────
+@test "step: retry before collect — a codex role the limit dropped is retried (its open start withdrawn), a role with an answer or outside the round is refused" {
+  _repo; _sc; _codex_role; _S prepare --round 1 >/dev/null
+  _probe false rate_limited
+  "$ROUND_SH" dispatch --checkpoint cp2 --evidence-dir "$E" --step 0 --project-root "$R" --round 1 --provider codex --role step_security >/dev/null || true
+  [ "$(jq -r .answered "$(D 1)/codex-step_security.usage.json")" = false ]
+  # the stand-in was started and never completed (the limit dropped it too)
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp2-step-0-step-security --agent-id aid-orchestrator:review --evidence-dir "$(D 1)" >/dev/null
+  _sanswer 1 step_generalist; _bracket 1 step_generalist
+  [ ! -f "$(D 1)/collect.json" ]
+  run _S retry --round 1 --role step_generalist
+  [ "$status" -eq 1 ]; [[ "$output" == *"has an answer"* ]]
+  run _S retry --round 1 --role nobody
+  [ "$status" -eq 1 ]; [[ "$output" == *"not a reviewer"* ]]
+  _probe true
+  run _S retry --round 1 --role step_security
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"withdrew the open start"* ]]
+  run bash -c "jq -r 'select(.event == \"start\") | .focus' '$(D 1)/pending-dispatches.jsonl' | grep -c . || true"; [ "$output" = "0" ]
+  grep -q '"verifier_dispatch_cancel"' "$(D 1)/timeline.jsonl"
+  grep -q '"review_retry_uncollected"' "$E/timeline.jsonl"
+}
+
+@test "step: a reviewer file filed under a cancelled start has no provenance — close refuses it even when an OLDER bracket of the same focus completed; the current bracket counts" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist; _bracket 1 step_generalist            # a full earlier bracket
+  local d; d="$(D 1)"
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp2-step-0-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" cancel --focus cp2-step-0-step-generalist --evidence-dir "$d" --reason "the reviewer was stopped before it wrote anything" >/dev/null
+  _sanswer 1 step_generalist                                          # rewritten after the withdrawal
+  _S collect --round 1 >/dev/null
+  run _S close --round 1 --tokens step_generalist=10
+  [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]
+  # a new complete bracket makes it good again, and close names the withdrawn start
+  _bracket 1 step_generalist
+  run _S close --round 1 --tokens step_generalist=10
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"withdrawn starts: cp2-step-0-step-generalist"* ]]
+  [ "$(jq -c .cancelled_starts "$d/measurement.json")" = '["cp2-step-0-step-generalist"]' ]
+}
+
+@test "step: retry before collect takes an empty reviewer file as nothing given; a role whose current bracket completed is sent to collect" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  : > "$(D 1)/reviewer-step_generalist.json"
+  run _S retry --round 1 --role step_generalist
+  echo "$output"; [ "$status" -eq 0 ]
+  _sanswer 1 step_generalist; _bracket 1 step_generalist; rm "$(D 1)/reviewer-step_generalist.json"
+  run _S retry --round 1 --role step_generalist
+  [ "$status" -eq 1 ]; [[ "$output" == *"completed bracket"* ]]
+}
+
+# ── 2.114.0: the fix list counts minors and plan-level findings ───────────────
+@test "fix-check: a minor names its step (a Files entry there passes, elsewhere fails); an open plan-level major makes the list any" {
+  _round1_closed
+  # every finding a minor on step 2
+  jq '.findings[] |= (.severity = "minor" | .step = 2)' "$CP1/round-1/merged.json" > "$ROOT/m" && mv "$ROOT/m" "$CP1/round-1/merged.json"
+  sed -i 's/^text$/text\n\n- Create: `scripts\/new.sh` — more/' "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]; [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = 2 ]
+  sed -i 's/^uses {{x}} literally$/uses {{x}} literally\n\n- Create: `scripts\/other.sh` — more/' "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"Step 1 (file)"* ]]
+  # one open plan-level major: any step may change
+  jq '.findings[0] |= (.severity = "major" | .step = null)' "$CP1/round-1/merged.json" > "$ROOT/m" && mv "$ROOT/m" "$CP1/round-1/merged.json"
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]; [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = any ]
+  # finalize runs the same check with the same list
+  run "$ROUND_SH" finalize "$PLAN"
+  echo "$output"; [ "$status" -eq 0 ]; [ -f "$CP1/round-1/plan-final.md" ]
+}
+
+# ── P109 Step 4: the plan review reads the brief ─────────────────────────────
+# Defects: a reviewer who never sees the brief (P014), and a second round paid
+# for nothing (P014: three rounds, 45 USD, the softening unseen).
+_bind_brief() {   # <brief source> — the plan names it; check and critic redone for the new bytes
+  cp "$1" "$ROOT/.aid-o/plans/P900-zadani.md"
+  sed -i 's/^type: \(.*\)$/type: \1\nzadani: .aid-o\/plans\/P900-zadani.md/' "$PLAN"
+  _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+}
+
+@test "zadani: prepare copies the brief, records its sha, and every role's prompt shows it with question 1 point by point" {
+  _bind_brief "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  cmp -s "$CP1/round-1/packet/zadani.md" "$ROOT/.aid-o/plans/P900-zadani.md"
+  [ "$(jq -r .zadani_sha256 "$CP1/round-1/packet/manifest.json")" = "$(sha256sum "$ROOT/.aid-o/plans/P900-zadani.md" | cut -d' ' -f1)" ]
+  [ "$(jq -r .zadani_verze "$CP1/round-1/packet/manifest.json")" = 1 ]
+  local r
+  for r in generalist_a generalist_b behaviour_edges feasibility_deps reuse enforcement_tests; do
+    grep -q "^## zadani.md (the PM's brief; cite it as zadani.md:<line>)" "$CP1/round-1/prompt-$r.md"
+    grep -q '^1\. For each point `AC<n>` of `zadani.md`' "$CP1/round-1/prompt-$r.md"
+  done
+  # the brief's point 2 is in front of every reviewer, line-numbered
+  grep -qE '^ +[0-9]+  - \[ \] AC2: Zakládání úkolu, čtečka i testovací scénář jdou přes rozhraní' "$CP1/round-1/prompt-reuse.md"
+}
+
+@test "zadani: the P014 pair in one packet — the brief's point 2 and the plan's contradicting edge case side by side" {
+  cp "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md" "$ROOT/.aid-o/plans/P900-zadani.md"
+  sed -e 's/^id: P014$/id: P900/' -e 's#^zadani: .*#zadani: .aid-o/plans/P900-zadani.md#' -e '/^lifecycle_strict/d' \
+    "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-plan.md" > "$PLAN"
+  _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  local p="$CP1/round-1/prompt-behaviour_edges.md"
+  grep -qE '^ +[0-9]+  - \[ \] AC2: .*neznámá hodnota v konfiguraci skončí chybou při startu' "$p"
+  grep -qE '^ +[0-9]+  - An unknown value of `doruceni` in apps.yaml falls back to Freelo with a warning' "$p"
+}
+
+@test "zadani: a strict plan without a brief and a brief outside the project are refused by the packet" {
+  sed -i 's/^type: \(.*\)$/type: \1\nlifecycle_strict: true/' "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"plan names no brief (zadani:)"* ]]; [[ "$output" == *"plan_names_no_brief"* ]]
+  [ ! -d "$CP1/round-1" ]
+  sed -i 's/^lifecycle_strict: true$/zadani: ..\/outside-zadani.md/' "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"zadani path escapes the project"* ]]; [[ "$output" == *"zadani_path_escapes"* ]]
+}
+
+@test "zadani: a legacy plan without a brief gets the note, not a refusal" {
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 0 ]
+  grep -q 'no brief: this plan names no zadani: file' "$CP1/round-1/prompt-reuse.md"
+}
+
+@test "zadani: collect accepts a finding citing zadani.md:<line>" {
+  _bind_brief "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md"
+  "$ROUND_SH" prepare "$PLAN" --round 1 >/dev/null
+  _answer_all
+  _answer reuse '.findings[0].severity = "blocker" | .findings[0].evidence = "zadani.md:12; scripts/a.sh:2"'
+  run "$ROUND_SH" collect "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  jq -e '[.findings[] | select(.evidence | contains("zadani.md:12"))] | length == 1' "$CP1/round-1/merged.json"
+}
+
+@test "zadani: prepare --round 2 after a clean round or one with majors only is refused naming the rule; after a blocker and fix-check it is prepared" {
+  _round1_closed '.findings = [] | .no_findings_reason = "clean"'
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  [ "$status" -ne 0 ]; [[ "$output" == *"second_round_needs_open_blocker"* ]]
+  rm -rf "$CP1"; _round1_closed '.findings[0].severity = "major"'
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  [ "$status" -ne 0 ]; [[ "$output" == *"second_round_needs_open_blocker"* ]]
+  rm -rf "$CP1"; _round1_closed
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  echo "$output"; [ "$status" -eq 0 ]
+}
+
+@test "zadani: a brief changed between round 1 and prepare --round 2 is refused — a confirmation round reads the brief round 1 read" {
+  aid_fixture_write_brief "$ROOT" "$PLAN" >/dev/null; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  _round1_closed
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  printf '\n<!-- edited after fix-check -->\n' >> "$ROOT/.aid-o/plans/P900-zadani.md"
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  [ "$status" -ne 0 ]; [[ "$output" == *"the brief changed after round 1"* ]]; [[ "$output" == *"brief_changed_after_round"* ]]
+  [ ! -d "$CP1/round-2" ]
+}
+
+# ── P109 Step 5: a revision after a round is checked against the brief ──────
+# Defects: P014's plan line 243/253 — the point rewritten after a reviewer
+# argued against it; a brief silently swapped under a review.
+_bound_plan() {   # the P900 plan bound to a brief generated from its own criteria
+  aid_fixture_write_brief "$ROOT" "$PLAN" >/dev/null
+  _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+}
+_brief() { printf '%s' "$ROOT/.aid-o/plans/P900-zadani.md"; }
+_rebind() {   # the plan follows the brief: verze and sha
+  sed -i "s/^zadani_verze: .*/zadani_verze: $(awk -F': *' '/^verze:/ {print $2; exit}' "$(_brief)")/; s/^zadani_sha256: .*/zadani_sha256: $(sha256sum "$(_brief)" | cut -d' ' -f1)/" "$PLAN"
+  _check
+}
+
+@test "fix-check-zadani: a revision that rewords or drops a brief point is refused naming it" {
+  _bound_plan; _round1_closed
+  sed -i 's/^- \[ \] AC1: the fixture plan does what its steps say$/- [ ] AC1: the plan does roughly what it says/' "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"AC1 missing or rewritten"* ]]; [[ "$output" == *"fix_check_brief_point_changed"* ]]
+  [[ "$output" == *"next: restore the point"* ]]
+  sed -i 's/^- \[ \] AC1: the plan does roughly what it says$/- [ ] AC9: something else/' "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"AC1 missing or rewritten"* ]]
+}
+
+@test "fix-check-zadani: a revision that keeps the points passes with zadani_pass and the brief's sha and verze" {
+  _bound_plan; _round1_closed
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  jq -e '.zadani_pass == true and .brief_changed == false and .zadani_verze == 1 and (.zadani_sha256 | length) == 64' "$CP1/round-1/fix-diff.json"
+}
+
+@test "fix-check-zadani: a brief changed with the same verze is refused; with verze raised it passes as brief_changed and round 2 is refused" {
+  _bound_plan; _round1_closed
+  printf '\n<!-- the PM asked for more -->\n' >> "$(_brief)"; _rebind
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"its verze did not rise (1 → 1)"* ]]; [[ "$output" == *"fix_check_brief_version_not_raised"* ]]
+  sed -i 's/^verze: 1$/verze: 2/' "$(_brief)"; _rebind
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  jq -e '.brief_changed == true and .zadani_verze == 2' "$CP1/round-1/fix-diff.json"
+  run "$ROUND_SH" prepare "$PLAN" --round 2
+  [ "$status" -ne 0 ]; [[ "$output" == *"brief_changed_after_round"* ]]
+}
+
+@test "restart: a changed brief restarts the review in a new attempt; without it, or without a reason, it is refused" {
+  _bound_plan; _round1_closed
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM changed what they want here"
+  [ "$status" -ne 0 ]; [[ "$output" == *"restart_needs_brief_change"* ]]
+  sed -i 's/^verze: 1$/verze: 2/' "$(_brief)"; _rebind
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "short"
+  [ "$status" -ne 0 ]; [[ "$output" == *"at least 20 characters"* ]]
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -ne 0 ]; [[ "$output" == *"already prepared"* ]]
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"   # the critic reran on the changed plan
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM changed what they want here"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ -d "$CP1/attempt-1/round-1" ]
+  jq -e '.k == 1 and (.zadani_sha256_before != .zadani_sha256_after)' "$CP1/attempt-1/attempt.json"
+  [ "$(jq -r .zadani_sha256 "$CP1/round-1/packet/manifest.json")" = "$(sha256sum "$(_brief)" | cut -d' ' -f1)" ]
+}
+
+@test "fix-check-zadani: a revision that adds the plan's own AC2 after the brief's points passes" {
+  _bound_plan; _round1_closed
+  awk '/^- \[ \] AC1: the fixture plan/ { a = 1 } { print } a && /^  ```$/ { print "- [ ] AC2: the plan adds its own criterion"; print "  ```yaml"; print "  verification_pattern:"; print "    type: cmd"; print "    cmd: \"true\""; print "    expected_exit: 0"; print "  ```"; a = 0 }' "$PLAN" > "$ROOT/p2" && mv "$ROOT/p2" "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  jq -e '.zadani_pass == true and .brief_changed == false' "$CP1/round-1/fix-diff.json"
+}
+
+@test "restart: the PM's words restart a review without a brief change and are recorded; blank words do not; --manual is refused" {
+  _bound_plan; _round1_closed
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM wants the review redone now" --pm "   "
+  [ "$status" -ne 0 ]; [[ "$output" == *"restart_needs_brief_change"* ]]
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --manual --reason "the PM wants the review redone now" --pm "PM: start the review again"
+  [ "$status" -ne 0 ]; [[ "$output" == *"not both"* ]]
+  [ -d "$CP1/round-1" ]
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM wants the review redone now" --pm "PM: start the review again"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .pm "$CP1/attempt-1/attempt.json")" = "PM: start the review again" ]
+  [ -f "$CP1/round-1/round.json" ]
+}
+
+@test "restart: nothing moves when the new round 1 could not be prepared (critic stale), and a restart with no live round recovers" {
+  _bound_plan; _round1_closed
+  sed -i 's/^verze: 1$/verze: 2/' "$(_brief)"; _rebind
+  "$ROUND_SH" fix-check "$PLAN" --round 1 >/dev/null
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM changed what they want here"
+  [ "$status" -ne 0 ]; [[ "$output" == *"nothing was moved"* ]]; [[ "$output" == *"critic_required"* ]]
+  [ -d "$CP1/round-1" ]; [ ! -d "$CP1/attempt-1" ]
+  # an earlier restart that moved the rounds and stopped: the same command recovers
+  mkdir -p "$CP1/attempt-1"; mv "$CP1"/round-* "$CP1/attempt-1/"
+  _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1 --restart --reason "the PM changed what they want here"
+  echo "$output"; [ "$status" -eq 0 ]; [ -f "$CP1/round-1/round.json" ]
+}
+
+# P109 Step 6 — defect: P013-3, a diary entry blocking a review round.
+@test "twin: a diary that differs between the primary and a worktree no longer stops prepare; a plan that differs still does" {
+  git -C "$ROOT" add -A >/dev/null 2>&1; git -C "$ROOT" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1 || true
+  git -C "$ROOT" worktree add -q "$ROOT/.aid-worktrees/plan-P900" -b plan/P900 >/dev/null 2>&1
+  local wt="$ROOT/.aid-worktrees/plan-P900"
+  mkdir -p "$wt/.aid-o/plans" "$wt/.aid-o/work"; cp "$PLAN" "$wt/.aid-o/plans/p.md"
+  echo "primary diary" > "$ROOT/.aid-o/work/aid-plugin-issues.md"
+  sleep 1; echo "worktree diary, newer" > "$wt/.aid-o/work/aid-plugin-issues.md"
+  run "$ROUND_SH" prepare "$wt/.aid-o/plans/p.md" --round 1
+  echo "$output"; [ "$status" -eq 0 ]
+  rm -rf "$CP1"; echo "edited in the worktree only" >> "$wt/.aid-o/plans/p.md"
+  run "$ROUND_SH" prepare "$wt/.aid-o/plans/p.md" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"two different contents under one name"* ]]
+}
+@test "cp7-zadani: with CP3 off an EPIC is cp3: off and carries what its step rounds left open; the prompt says so" {
+  _frepo
+  local ep="$R/.aid-o/work/evidence/E-901-1_1/R-1/cp2/step-0"; mkdir -p "$ep/round-1"
+  jq -n '{findings: [{severity: "major", status: "open", claim: "the import is never used", evidence: "src/app.py:1", fix: "use it"}, {severity: "minor", status: "open", claim: "style", evidence: "src/app.py:2", fix: "x"}]}' > "$ep/round-1/merged.json"
+  bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
+  [ "$(jq -c '.epics[0] | {cp3, n: (.findings | length)}' "$E/cp7/epic-findings.json")" = '{"cp3":"off","n":1}' ]
+  _fsc; _F prepare --round 1 >/dev/null
+  grep -q 'EPIC review switched off; its steps were reviewed one by one — 1 finding' "$(FD 1)/prompt-final_generalist.md"
+}
+@test "cp7-zadani: with CP3 off a leftover cp3/ is not read, and a finding the PM dismissed is listed for the close" {
+  _frepo
+  local base="$R/.aid-o/work/evidence/E-901-1_1"; mkdir -p "$base/R-1/cp3/round-1" "$base/R-2/cp2/step-0/round-1"
+  echo '{"findings": []}' > "$base/R-1/cp3/round-1/merged.json"
+  jq -n '{findings: [{severity: "blocker", status: "fixed", claim: "shell injection in run", evidence: "src/app.py:1", fix: "quote it", dispute: {pm: {answer: "accepted"}}}]}' > "$base/R-2/cp2/step-0/round-1/merged.json"
+  bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
+  [ "$(jq -c '.epics[0] | {cp3, s: [.findings[].status]}' "$E/cp7/epic-findings.json")" = '{"cp3":"off","s":["dismissed_by_pm"]}' ]
 }

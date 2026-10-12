@@ -31,8 +31,16 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
 @test "cp1: the plugin default loads with six roles and validates" {
   aid_review_config_load "$ROOT" plan_review "$PLAN_SKILL"
   [ "${#RC_ROLE[@]}" -eq 6 ]
-  [ "$RC_ROUNDS_DEFAULT" = 2 ] && [ "$RC_MIN_ANSWERS" = 4 ]
+  [ "$RC_ROUNDS_DEFAULT" = 1 ] && [ "$RC_MIN_ANSWERS" = 4 ]
+  [ "$RC_SECOND_ROUND_WHEN" = blocker_and_fix_check ]
   aid_review_config_validate
+}
+@test "cp1: second_round_when is a known key; a value other than blocker_and_fix_check is refused by name (P109)" {
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_config_load '$ROOT' plan_review '$PLAN_SKILL' 2>&1"
+  [[ "$output" != *"second_round_when"* ]]   # known: no unknown-key notice
+  _project '.review_checkpoints.plan_review.second_round_when = "sometimes"'
+  run _load_cp1
+  [ "$status" -eq 1 ]; [[ "$output" == *"second_round_when must be blocker_and_fix_check (got 'sometimes')"* ]]
 }
 @test "cp1: a seventh role is refused" {
   _project '.review_checkpoints.plan_review.reviewers += [{"role":"lens_l1","provider":"claude","model":"opus"}]'
@@ -98,11 +106,13 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   _project '.review_checkpoints.step_review.reviewers[1].when = "review+security"'
   aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
   [ "$RC_MIN_ANSWERS" = 1 ]; [ "$(aid_review_config_floor 2)" = 1 ]; [ "$(aid_review_config_floor 1)" = 1 ]
-  [ "$RC_EXTRA_SKIP_THRESHOLD_FILES" = 1 ]; [ "$RC_EXTRA_SKIP_THRESHOLD_LINES" = 50 ]
+  [ "$RC_EXTRA_SKIP_THRESHOLD_FILES" = 3 ]; [ "$RC_EXTRA_SKIP_THRESHOLD_LINES" = 120 ]   # P110 threshold
   aid_review_config_validate
 }
-@test "step_review: a single-role block passes; epic_review loads three roles" {
-  _project '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"}]'
+@test "step_review: a single-role block passes; a project's epic_review (the commented block, CP3 on) loads three roles" {
+  _project '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"}]
+    | .review_checkpoints.cp3_integration_review = true
+    | .review_checkpoints.epic_review = {"rounds_default": 2, "reviewers": [{"role":"epic_generalist","provider":"claude","model":"opus","effort":"low"},{"role":"epic_behaviour","provider":"claude","model":"opus","effort":"low"},{"role":"epic_security","provider":"codex","model":"gpt-6-sol"}]}'
   run _load_step; [ "$status" -eq 0 ]
   aid_review_config_load "$ROOT" epic_review "$STEP_SKILL"
   [ "${#RC_ROLE[@]}" -eq 3 ]; [ "$RC_MIN_ANSWERS" = 3 ]; aid_review_config_validate
@@ -163,7 +173,7 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
 
 @test "effort: read into RC_EFFORT, medium when unset, a value outside low|medium|high refused" {
   _load_step
-  [ "${RC_EFFORT[*]}" = "low medium" ]
+  [ "${RC_EFFORT[*]}" = "low low" ]   # P110: both step roles light, security full via full_when
   _load_cp1
   [ "${RC_EFFORT[0]}" = medium ]
   _project '.review_checkpoints.step_review.reviewers[0].effort = "extreme"'
@@ -172,13 +182,66 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
 }
 
 # ── final_review (CP7) ────────────────────────────────────────────────────────
-@test "final_review: the default loads with three roles; its toggle switches it off; a banned model is refused" {
+@test "final_review: the default loads with two roles (P110); its toggle switches it off; a banned model is refused" {
   aid_review_config_load "$ROOT" final_review "$STEP_SKILL" && aid_review_config_validate
-  [ "${RC_ROLE[*]}" = "final_criteria final_claims final_generalist" ]
+  [ "${RC_ROLE[*]}" = "final_criteria final_generalist" ]
   [ "$RC_ENABLED" = 1 ] && [ "$RC_STAND_IN_MODEL" = opus ]
   yq '.review_checkpoints.cp7_plan_final_review = false' "$DEFAULT" > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
   aid_review_config_load "$ROOT" final_review "$STEP_SKILL"; [ "$RC_ENABLED" = 0 ]
   yq '.review_checkpoints.final_review.reviewers[0].model = "haiku"' "$DEFAULT" > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
   aid_review_config_load "$ROOT" final_review "$STEP_SKILL"
   run aid_review_config_validate; [ "$status" -eq 1 ]; [[ "$output" == *"haiku"* ]]
+}
+
+@test "light_max_prompt_lines: 800 by default, a non-integer is refused" {
+  aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
+  [ "$RC_LIGHT_MAX_PROMPT_LINES" = 800 ]
+  _project '.review_checkpoints.step_review.light_max_prompt_lines = "lots"'
+  run _load_step
+  [ "$status" -eq 1 ]; [[ "$output" == *"light_max_prompt_lines must be a positive integer"* ]]
+}
+
+# ── P110: the step review sized by the change ──────────────────────────────
+@test "second-round: open_finding_and_fix is the step_review default and is refused for plan_review" {
+  _load_step
+  [ "$RC_SECOND_ROUND_WHEN" = open_finding_and_fix ] && [ "$RC_ROUNDS_DEFAULT" = 1 ]
+  _project '.review_checkpoints.plan_review.second_round_when = "open_finding_and_fix"'
+  run _load_cp1
+  [ "$status" -eq 1 ]; [[ "$output" == *"second_round_when must be blocker_and_fix_check (got 'open_finding_and_fix')"* ]]
+  _project '.review_checkpoints.step_review.second_round_when = "blocker_and_fix_check"'
+  run _load_step
+  [ "$status" -eq 1 ]; [[ "$output" == *"second_round_when must be open_finding_and_fix"* ]]
+}
+@test "second-round: full_when is read per role (step_security on review+security); another value is refused by name" {
+  _load_step
+  i="$(aid_review_role_index step_security)"; [ "${RC_FULL_WHEN[$i]}" = "review+security" ]
+  [ "${RC_EFFORT[$i]}" = low ]
+  i="$(aid_review_role_index step_generalist)"; [ -z "${RC_FULL_WHEN[$i]}" ] && [ -z "${RC_WHEN[$i]}" ]
+  _project '.review_checkpoints.step_review.reviewers[1].full_when = "review"'
+  run _load_step
+  [ "$status" -eq 1 ]; [[ "$output" == *"role step_security: full_when must be review+security (got 'review')"* ]]
+}
+@test "second-round: the open_finding_and_fix arm needs round n-1 closed with an open blocker or major and HEAD moved" {
+  _load_step
+  local cp="$ROOT/cp2/step-0"; mkdir -p "$cp/round-1"
+  echo '{}' > "$cp/round-1/measurement.json"; echo '{"head_sha":"aaa"}' > "$cp/round-1/round.json"
+  echo '{"findings":[{"severity":"major","status":"open"}]}' > "$cp/round-1/merged.json"
+  aid_review_second_round_allowed "$cp" 2 bbb
+  ! aid_review_second_round_allowed "$cp" 2 aaa          # HEAD has not moved
+  ! aid_review_second_round_allowed "$cp" 3 bbb          # only rounds_default + 1
+  echo '{"findings":[{"severity":"minor","status":"open"},{"severity":"major","status":"fixed"}]}' > "$cp/round-1/merged.json"
+  ! aid_review_second_round_allowed "$cp" 2 bbb          # nothing open to confirm
+}
+
+@test "final_review: final_claims listed by a project is accepted (the role section stays optional)" {
+  _project '.review_checkpoints.final_review.reviewers += [{"role": "final_claims", "provider": "claude", "model": "opus", "effort": "low"}]'
+  aid_review_config_load "$ROOT" final_review "$STEP_SKILL" && aid_review_config_validate
+  [ "${RC_ROLE[*]}" = "final_criteria final_generalist final_claims" ]
+}
+
+@test "cp3-off: epic_review absent with the toggle false loads as disabled (the shipped default since 2.116.0)" {
+  [ "$(yq -r '.review_checkpoints.cp3_integration_review' "$DEFAULT")" = false ]
+  ! yq -e '.review_checkpoints.epic_review' "$DEFAULT" >/dev/null
+  aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" 2>/dev/null
+  [ "$RC_ENABLED" = 0 ] && [ "${#RC_ROLE[@]}" -eq 0 ]
 }

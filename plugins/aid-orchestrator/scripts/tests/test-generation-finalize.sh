@@ -48,10 +48,11 @@ sed -i '/^### Step [0-9]/a\
 # Also exercise a legitimate phase-local edge (Step 1 -> Step 2), not only an
 # empty dependency graph. The finalizer must translate the global source edge
 # to the generated local step IDs and still accept the package.
-sed -i '/^\*\*AID Role:\*\* domain$/a\
+sed -i '/^### Step 2:/,/^\*\*AID Role:\*\*/{/^\*\*AID Role:\*\*/a\
 \
 **Dependencies:**\
-- Depends on: Step 1 (architect contracts)' "$tmp/.aid-o/plans/P099.md"
+- Depends on: Step 1 (architect contracts)
+}' "$tmp/.aid-o/plans/P099.md"
 printf 'counter: 0\n' > "$tmp/.aid-o/config/counter.yaml"
 # Generation is gated on the plan review and the PM page; this suite proves the
 # finalizer, so the review is switched off and the page rendered.
@@ -67,6 +68,12 @@ touch "$tmp/src/api/__init__.py" "$tmp/src/frontend/App.tsx" "$tmp/CHANGELOG.md"
 git -C "$tmp" add src docs CHANGELOG.md
 git -C "$tmp" commit -qm "seed"
 
+# P109: a strict plan carries its brief, and the gate owes the critic even with
+# the review switched off — both through the one fixture library.
+# shellcheck source=lib/aid-test-plan-fixture.sh
+source "$ROOT/plugins/aid-orchestrator/scripts/tests/lib/aid-test-plan-fixture.sh"
+AID_PLUGIN_PATH="$ROOT/plugins/aid-orchestrator" aid_fixture_write_brief "$tmp" "$tmp/.aid-o/plans/P099.md" >/dev/null
+AID_PLUGIN_PATH="$ROOT/plugins/aid-orchestrator" aid_fixture_seed_critic_check "$tmp" "$tmp/.aid-o/plans/P099.md"
 (cd "$tmp" && source "$SCRIPTS/lib/aid-plan-summary.sh" \
   && aid_plan_summary_render "$tmp/.aid-o/plans/P099.md" "$tmp/.aid-o/work/evidence/P099/plan-summary-artifact.html") >/dev/null
 bash "$SCRIPTS/aid-generation-readiness.sh" "$tmp/.aid-o/plans/P099.md" --total 3 \
@@ -81,6 +88,18 @@ for phase in 1 2 3; do
   jq -n --argjson phase "$phase" --arg epic_id "$(jq -r '.epic_id' "$plan_json")" --arg epic_path "$epic" --arg plan_json "$plan_json" --arg contract_validate "$contract_dir/contract-validate.json" \
     '{phase:$phase,epic_id:$epic_id,epic_path:$epic_path,plan_json:$plan_json,contract_validate:$contract_validate}'
 done | jq -s . > "$tmp/epics.json"
+
+# P110: each step's plan_step is the plan's global step number (source_step_ids
+# of the generated EPIC at the local index) — EPIC 2's first step is not step 1.
+for row in $(jq -c '.[]' "$tmp/epics.json"); do
+  ep="$(jq -r .epic_path <<< "$row")"; pj="$(jq -r .plan_json <<< "$row")"
+  want="$(awk -F': ' '/^source_step_ids:/{gsub(/"/, "", $2); print $2; exit}' "$ep")"
+  got="$(jq -r '[.steps[].plan_step] | map(tostring) | join(",")' "$pj")"
+  [[ -n "$want" && "$got" == "$want" ]] || { echo "FAIL: plan_step of $(basename "$ep"): ${got} != source_step_ids ${want}" >&2; exit 1; }
+done
+[[ "$(jq -r '.[1].plan_json' "$tmp/epics.json" | xargs jq -r '.steps[0].plan_step')" != 1 ]] \
+  || { echo "FAIL: EPIC 2's first step carries plan_step 1" >&2; exit 1; }
+echo "PASS: plan_step follows source_step_ids across EPICs"
 
 receipt="$tmp/.aid-o/work/evidence/P099/generation/receipt.json"
 bash "$SCRIPTS/aid-generation-finalize.sh" --plan "$tmp/.aid-o/plans/P099.md" --total 3 --epics-json "$tmp/epics.json" --output "$receipt" >/dev/null

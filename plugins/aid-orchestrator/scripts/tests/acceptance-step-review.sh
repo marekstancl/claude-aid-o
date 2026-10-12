@@ -5,8 +5,8 @@
 # flow and record what each review found and cost (P094 Steps 1 and 13).
 #
 # Modes
-#   --mode baseline   today's flow: the verbatim verifier prompt header of
-#                     agents/verifier.md over the diff and the DoD, one dispatch
+#   --mode baseline   the pre-2.99.0 flow: the verbatim verifier prompt header of
+#                     the retired agents/verifier.md (kept as a fixture below) over the diff and the DoD, one dispatch
 #                     per entry (Step 1 of P094)
 #   --mode new        the P094 engine (aid-step-check.sh + aid-review-round.sh),
 #                     available from Step 6 onward
@@ -47,7 +47,7 @@ need jq; need git
 # the text the card carries, not a copy that could drift.
 verifier_header() {
   awk '/^### Required Prompt Header/{on=1; next} on && /^```$/{if(seen){exit} seen=1; next} on && seen{print}' \
-    "$PLUGIN_DIR/agents/verifier.md"
+    "$PLUGIN_DIR/scripts/tests/fixtures/step-review/verifier-card-2.98.md"
 }
 
 # entries [<mode>] — the sample's entries; an entry may name the modes it belongs

@@ -103,7 +103,6 @@ Gates: edit .aid-o/config/execution.yaml → customize test/lint/build commands
 Project profile: .aid-o/config/project.yaml → stack, test/lint/build commands
 Permissions: .aid-o/config/permissions.yaml → autonomous_mode: true for /aid-run --auto
 
-Health: /aid-audit       → project health score (0-100) with recommendations
 Tests:  /aid-help tests  → test tiers, what runs on the merge path
 ```
 
@@ -114,7 +113,6 @@ FSM debugging:
   /aid-status <epic-id>                    → shows fsm-state.yaml FSM state
   cat .aid-o/work/evidence/{id}/*/timeline.jsonl | jq .  → full event log
 
-Audit: /aid-audit → project health, gate failure rates, recommendations
 Emergency: /aid-stop → halt auto-mode and return control to you
 ```
 
@@ -124,15 +122,14 @@ Ask for any of these with `/aid-help <topic>`:
 
 ```
 /aid-help do              → /aid-do deep dive (scope detection, escalation triggers)
-/aid-help run             → /aid-run deep dive (6-state FSM, flags, what a run does)
-/aid-help generation      → PRE-FLIGHT: plan → EPIC → plan.json as one transaction
+/aid-help run             → /aid-run deep dive (the direct run /aid-run P<NNN>, repo_roots, cancelling, 6-state FSM)
+/aid-help generation      → PRE-FLIGHT: the direct run's transaction; the old plan → EPIC path (until P112)
 /aid-help plan            → /aid-plan deep dive (brainstorm, write, epic modes)
 /aid-help plan-lifecycle  → plan branches, release model, verification commands
 /aid-help ui              → /aid-ui: UI from product type to an approved brand page
 /aid-help status          → /aid-status deep dive (overview, EPIC detail, queue)
 /aid-help gates           → gate types, execution.yaml configuration, retry logic
 /aid-help tests           → test tiers, what runs on the merge path, the nightly
-/aid-help audit           → /aid-audit project health audit (categories A–J)
 /aid-help recovery        → /aid-stop, resume, escalation, PM overrides
 /aid-help auto            → autonomous mode, background gates, resuming a dead run
 /aid-help config          → project.yaml, execution.yaml, permissions.yaml reference
@@ -161,9 +158,17 @@ Post-check: verifies actual scope after implementation, warns if exceeded
 
 ### Topic: run
 
-`/aid-run` executes one EPIC through the 6-state FSM. Everything that happens
-before the FSM starts — turning a plan into EPIC files and `plan.json` — is the
-generation transaction; see `/aid-help generation`.
+`/aid-run P<NNN>` runs a reviewed plan **directly** (P111, AID 2.117.0):
+`aid-plan-fsm.sh plan-run` does generation's duties in one resumable
+transaction and starts ONE run of the whole plan on `plan/<id>` — no EPIC file,
+no queue, no task branch. Steps commit on `plan/<id>`; the last step's
+`done-advance review release <state> --direct` records the run and the close
+is `plan-finalize`. A plan that changes another repository declares
+`repo_roots:` in its frontmatter and works there in a worktree on
+`plan/<id>-<project>` (never the live checkout); the PM merges those branches by
+hand after MERGE. `plan-close --administrative` (and `epic-complete --abandon`)
+end the run in the FSM and `active-runs.json`. `/aid-run E-…` runs one EPIC of
+a plan generated the old way (until P112); see `/aid-help generation`.
 
 ```
 /aid-run — EPIC Pipeline
@@ -180,6 +185,19 @@ Flags:
   --epic    Specify EPIC ID
 ```
 
+Since 2.116.0 (P110) a step buys the review its change needs: a small step
+in scope with no security pattern (≤ 3 files, ≤ 120 lines) gets none, a larger
+one two light reviewers (security full on a pattern, `full_when`), one round
+plus a confirmation over the fix only (`second_round_when:
+open_finding_and_fix`). The step's own points run after it
+(`aid-plan-diff.sh --step N --plan-json`; a block may carry `timeout:` up to
+1800 s); `increment-step` refuses an absent point (`step_criteria_failed`) and
+lets it pass only on the PM's answered card (`--defer-criterion AC<n> --reason
+… --finding-card <card>`). The EPIC review (CP3) is off by default. The close
+measures every point in isolation (`aid-plan-diff.sh --isolated --cwd`,
+`verification_env:` for a host database), reads the brief with two roles and
+writes what the run and the plan cost (`plan_summary.run_cost`, `plan_cost`).
+
 ### Topic: generation
 
 Generation is what `/aid-run` does before the FSM exists, and what `/aid-plan epic`
@@ -190,8 +208,9 @@ PRE-FLIGHT (bash, before FSM):
   1. generation-readiness validates the source plan + provisional graph
   2. transaction skeleton written under the generation lock
   3. CP1 gate — ONCE per plan → generation-authority.json (needs closed
-     plan review rounds: six reviewer roles, two rounds by default, a third
-     or only one on the PM's recorded override)
+     plan review rounds: six reviewer roles, one round by default, a second
+     after a blocker and a passing fix-check, any other on the PM's recorded
+     override; and a passed critic check — hard, --force does not waive it)
   4. aid-plan-to-epic.sh → every EPIC file (verifies the authority,
      never re-runs the gate)
   5. aid-epic-to-json.sh → every plan.json + contract validation
@@ -228,6 +247,28 @@ Three modes, auto-detected from what you pass:
 Plan IDs come from the locked allocator, never a hand edit:
   aid-fsm.sh alloc plan-id     → prints the next P{NNN}
 
+The brief comes first (2.115.0): .aid-o/plans/P{NNN}-zadani.md from
+defaults/templates/zadani.md — six sections, done-when points as AC<n> with a
+verification_pattern block. Check it, and check the plan carries it:
+  aid-plan-lint.sh --zadani .aid-o/plans/P{NNN}-zadani.md
+  aid-plan-lint.sh <plan> --only zadani
+The brief is read at review (the CP1 packet), at revision (fix-check) and at
+run time (amend-scope names the AC<n> a widening serves).
+
+The independent critic (2.112.0) reads the PM's brief and the proposal at the
+end of the brainstorm, and the written plan before CP1, and answers in two
+levels: what to fix (the author answers every item in writing) and what the PM
+might cut or add (a suggestion on the scope card, never a verdict). Its prompt
+is assembled by code from the brief file (or, in a brainstorm, the interim's
+`## Zadání PM` and `## Účel a co je v sázce`) — cost figures never reach it —
+and its answer is refused without the two headings, with more than five items,
+or unanswered. Since 2.115.0 it is MANDATORY: no review round and no EPIC
+generation without a passed check (--force does not waive it):
+  source scripts/lib/aid-critic.sh
+  aid_critic_prepare  P{NNN} --moment brainstorm|plan [--plan <path>]
+  aid_critic_dispatch P{NNN} --moment brainstorm|plan    (Codex; STAND-IN → Claude)
+  aid_critic_check    P{NNN} --moment brainstorm|plan [--plan <path>]
+
 NOT YET SUPPORTED
 Concurrent plan GENERATION works. STARTING a newly generated plan's EPIC
 while another stream is live does not — that is a known limitation.
@@ -238,8 +279,10 @@ while another stream is live does not — that is a known limitation.
 A plan owns a git worktree and a branch, and declares how it releases.
 Before EPIC generation a plan goes through plan review (CP1): six reviewer
 roles answer the same packet, each finding needs a command and a file:line or
-it is rejected, two rounds by default, a third or only one only on the PM's
-recorded override (`aid-review-round.sh override`). `/aid-verify-plan`
+it is rejected, one round by default (2.115.0) — a second when round 1 found a
+blocker and its fix passed fix-check — any other only on the PM's recorded
+override (`aid-review-round.sh override`). Every reviewer gets the PM's brief
+(`zadani.md`) and first answers, point by point, whether the plan keeps it. `/aid-verify-plan`
 runs one of those reviewers by hand, outside the rounds; `/aid-verify-implementation`
 reviews a result that claims to be done. Both dispatch an independent agent in a
 fresh context, so neither is grading its own homework.
@@ -358,11 +401,19 @@ A key the runner no longer reads stops the run before any gate starts and
 names the fix: `aid-init-execution-yaml.sh upgrade <project root>` (see
 `/aid-help init`).
 
+The project's tests (2.116.0, P110): `project_tests:` (globs; `**/` = any
+depth) and a gate flagged `runs_project_tests: true` whose command writes
+`--evidence-file {evidence_dir}/gates/<gate>.evidence.json` (`run-all-tests.sh`
+writes it; `aid-run-gates.sh record-tests --glob … --evidence-file … -- <cmd>`
+wraps a whole-suite runner). A change to the tests with no such gate in the
+profile fails `profile_skips_project_tests`; a flagged gate that did not run
+the changed tests fails `project_tests_not_selected`.
+`aid-run-gates.sh --lint-profiles <execution.yaml>` checks every profile.
+
 ### Topic: tests
 
 Every suite carries one tier tag in its header (`# aid-tier: t0|t1|t2`).
-This is about **tests**; for the project's overall health score see
-`/aid-help audit`, which covers `/aid-audit`.
+This is about **tests**.
 
 ```
 Tiers: t0 = the pulse, t1 = what blocks a merge, t2 = nightly.
@@ -375,16 +426,12 @@ aid-test-tier-lint.sh     every suite has exactly one tag, no plan numbers in na
 The test-portfolio audit (`/aid-audit-tests`, P072) was removed on 2026-09-21:
 its one real run (2026-08-05) produced no decision the PM accepted.
 
-### Topic: audit
+### Removed commands
 
-`/aid-audit` scores the whole project's health from 0 to 100 across categories
-A–J — code, security, docs, process, tokens, frontend, database, instruction
-quality, standards and memory — and returns recommendations. For tests, see
-`/aid-help tests`.
-
-```
-/aid-audit        project health score (0-100) + prioritized recommendations
-```
+`/aid-audit` (the 0-100 health score, categories A–J) was removed in 2.112.0
+(P107): it ran once in its life. What it scored is checked where the work
+happens — the EPIC review (CP3) reads every diff, the plan-final review reads
+the whole plan, and `/aid-status` shows the nightly result.
 
 ### Topic: recovery
 

@@ -358,9 +358,6 @@ assert_instruction "$PLUGIN_DIR/skills/agent-protocol.md" \
 assert_instruction "$PLUGIN_DIR/skills/agent-protocol.md" \
   'Do not detach long-running work with `nohup`, `disown`, `tail -f`' \
   "dispatched agents cannot orphan long-running work"
-assert_instruction "$PLUGIN_DIR/agents/verifier.md" \
-  'Review an immutable revision in an isolated worktree' \
-  "verifier reviews immutable isolated revision"
 
 
 REPO_ROOT="$(cd "${PLUGIN_DIR}/../.." && pwd)"
@@ -413,7 +410,7 @@ rm -f "$ARCHIVE_FIXTURE"
 echo ""
 echo "TEST: no instruction names a mechanism P096 retired, or a former plan-finalize stage"
 # Precise names, not the bare words: "the reporters of a finding" is plain English.
-RETIRED_RE='agents/(reporter|curator)\.md|curator-report|-delivery\.md|delivery-report|aid-c3-dispatch|c3-audit-policy|aid-delivery-gate|\bCP4\b|\bCP5\b|cp4_curator|--stage (sync|inputs|review|c4|summary|accept-ancillary)\b|--focus (reporter|simplifier)'
+RETIRED_RE='agents/(reporter|curator|auditor|verifier|simplifier)\.md|commands/aid-audit\.md|curator-report|-delivery\.md|delivery-report|aid-c3-dispatch|c3-audit-policy|aid-delivery-gate|\bCP4\b|\bCP5\b|cp4_curator|--stage (sync|inputs|review|c4|summary|accept-ancillary)\b|--focus (reporter|simplifier)'
 RETIRED_HITS="$(grep -rnE "$RETIRED_RE" "$PLUGIN_DIR/commands" "$PLUGIN_DIR/skills" "$PLUGIN_DIR/agents" \
                   "$PLUGIN_DIR/scripts/lib/aid-review-adapter-claude.md" 2>/dev/null || true)"
 if [[ -z "$RETIRED_HITS" ]]; then

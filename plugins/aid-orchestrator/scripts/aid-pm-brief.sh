@@ -322,6 +322,8 @@ build_brief_md() {
               "",
               "- **Release ready:** " + yn($r.release_ready),
               "- **Merge mode:** " + (($r.merge_mode // "unknown") | tostring),
+              (if (($ps.foreign_branches // []) | length) == 0 then empty
+               else "- **Foreign branches (merge by hand, repo_roots):** " + ([$ps.foreign_branches[] | "`\(.name)` \(.branch) at `\(.head[0:12])` (\(.commits) commit(s))"] | join("; ")) end),
               (if ($ps.final_merge_sha // null) == null
                  then "- **Merged to target:** not yet — the merge is a separate, PM-authorized step; this summary records only the decision."
                  else "- **Merged to target:** `" + ($ps.final_merge_sha | tostring) + "`" end) ]
@@ -340,7 +342,19 @@ build_brief_md() {
            | if $c == null then "_Not a plan close._"
              else "- **Close:** \($c.attempts) attempt(s), \($c.minutes) min, \($c.usd) USD"
                   + (if ($c.usd_unknown_roles | length) > 0 then " + cost unknown for: " + ($c.usd_unknown_roles | join(", ")) else "" end) end),
+          (if ($r.plan_summary.close // null) == null then empty else
+          (($r.plan_summary.run_cost // null) as $c
+           | if $c == null then "- **Cena běhu:** nezměřeno"
+             else "- **Cena běhu:** \($c.usd) USD, \($c.rounds) kol, \($c.attempts) pokus(ů)"
+                  + (if ($c.usd_unknown_roles | length) > 0 then " + neznámá u: " + ($c.usd_unknown_roles | join(", ")) else "" end) end),
+          (($r.plan_summary.plan_cost // null) as $c
+           | if $c == null then "- **Cena plánu:** nezměřeno"
+             elif $c.usd == null then "- **Cena plánu:** nezměřeno (\($c.reason // "bez CP1"))"
+             else "- **Cena plánu:** \($c.usd) USD (CP1 \($c.cp1_rounds) kol, kritik "
+                  + (if $c.critic == null then "neznámá — \($c.critic_reason)" elif $c.critic.usd == null then "neznámá" else "\($c.critic.usd) USD" end) + ")"
+                  + (if ($c.usd_unknown_roles | length) > 0 then " + neznámá u: " + ($c.usd_unknown_roles | join(", ")) else "" end) end) end),
           "- **Whole-delivery review:** " + ((($r.inputs // []) | map(select(.id == "final_review")) | first | "\(.verdict) — \(.reason)") // "not recorded"),
+          "- **Acceptance criteria:** " + ((($r.inputs // []) | map(select(.id == "acceptance_evidence")) | first | "\(.verdict) — \(.reason)") // "not recorded"),
           "",
           "## At-HEAD verification warnings",
           ""

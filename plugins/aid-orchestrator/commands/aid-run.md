@@ -27,8 +27,10 @@ and nothing said why.
 ## Usage
 
 ```
+/aid-run P<NNN>                 # the direct run: start the plan straight from its file (plan-run, P111)
+/aid-run --auto P<NNN>          # the direct run, autonomous
 /aid-run                        # manual mode — start or auto-detect active EPIC
-/aid-run <epic-id>              # manual mode — start specific EPIC
+/aid-run <epic-id>              # manual mode — start specific EPIC (the old EPIC path, removed by P112)
 /aid-run --auto                 # autonomous mode — auto-approve S-effort fixes
 /aid-run --auto --epic <id>     # autonomous mode for specific EPIC
 /aid-run --resume               # resume interrupted run from fsm-state.yaml
@@ -59,6 +61,16 @@ Escalation rules for `--auto`:
   `timeline.jsonl`, then continue. Do not ask the PM to choose between technical A/B/C options.
 - **PM-authority decisions only** (product intent, material scope expansion, destructive or
   externally visible action, security risk acceptance, secret/credential access) → pause for PM.
+- **The PM says "don't ask, finish it"** (any wording of it): record it ONCE for the plan —
+  `bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" standing --checkpoint cp2|cp3 --evidence-dir <run dir> --reason "<the PM's words>"`.
+  Every step and EPIC review of the plan may then run up to two fix-and-confirm rounds after its
+  budget (fix the finding, `prepare` the next round) before anything is routed to the PM; a round
+  that re-opens the same findings still stops. Never record it on your own judgment.
+- **"AID: this session runs plugin X, but Y is installed"** in context: run `/reload-plugins`
+  before dispatching any agent — the old agent cards lack the newer rules (P103).
+- **"no verdict" from Claude Code's permission check** (the auto-mode classifier failed, the
+  command did not run) is transient and not a PM decision: wait about a minute and run the SAME
+  command again, up to 5 times, before a Blocked card; say so in one line (P103, 28. 9. 2026).
 - Gate retries → auto-retry up to configured max (default: 2)
 - Version bump on intermediate phase → auto-defer (bump only on final phase)
 
@@ -165,7 +177,7 @@ MUST keep ownership until the EPIC completes, reaches a PM-authority decision, o
 unrecoverable external outage. A recoverable technical problem is not a reason to end the turn.
 
 - The controller is the sole owner of FSM mutations, commits, gates, evidence finalization, and
-  long-running/background processes. Dispatched implementers and verifiers never own these.
+  long-running/background processes. Dispatched implementers and reviewers never own these.
 - Never finish a turn with only "waiting for tests/agent". For every asynchronous process record
   PID, log path, start HEAD, start tree hash, start time, expected p95, and hard deadline. Poll the
   process itself and collect its exit status; `tail -f` is forbidden as a completion detector.
@@ -199,7 +211,7 @@ unrecoverable external outage. A recoverable technical problem is not a reason t
   executes the same suite. A failed aggregate run may be followed by targeted diagnosis, but a fix
   requires one fresh final aggregate result; the pre-fix run cannot prove the post-fix HEAD.
 - Verifiers use an isolated worktree or immutable revision. Never run a mutating fixer concurrently
-  against the checkout a verifier is reviewing.
+  against the checkout a reviewer is reviewing.
 - Codex adjudication and PM decisions are append-only audit events. The adjudicator may choose among
   already-authorized technical recovery paths; it cannot grant PM authority or waive security risk.
 
@@ -241,7 +253,7 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 14. **Per-plan C+A review** — after last EPIC in a plan, ALL C+A findings (S+M+L) must be addressed before starting next plan
 15. **Wave dispatch is decided by code** — before a wave, `aid_parallel_decide` (`lib/aid-parallel-dispatch.sh`) says `concurrent` or `serial: <reason>`; only `concurrent` may dispatch several agents at once, each in its own step worktree, and never more than `orchestration.yaml → dispatch.max_parallel`. Returns are still taken ONE at a time: validate the contract return, commit, write step-verify, merge, increment-step (`pipeline.md §4` "Parallel groups").
 16c. **A regenerated plan is accepted through `rebase-plan`, never by hand** — when `increment-step` reports "plan.json hash mismatch" after the PM regenerated the plan, run `bash {plugin_path}/scripts/aid-fsm.sh rebase-plan <state_file> --reason "<why, 20+ chars>"`. It accepts only when the step in flight and every done step are unchanged (future steps may change), re-stamps the hash and records the rebase. Never `set-field plan_json_hash`; re-init is the last resort (it rewrites `base_commit`).
-16b. **Scope grows through `amend-scope`, never by hand** — when a step needs a file its `allowed_paths` do not list, run `bash {plugin_path}/scripts/aid-fsm.sh amend-scope <state_file> --add <path> [--add ...] --reason "<why, 20+ chars>"` and re-dispatch. It widens `plan.json` for the current step, re-stamps `plan_json_hash`, writes `steps/<id>/scope-amendment.json` and a timeline event — so the commit hook, `increment-step` and the contract validator all accept the file. A missing test file beside an in-scope source is routine (no PM ask); new production files are a PM decision (rule 11 of `skills/pipeline.md` escalations).
+16b. **Scope grows through `amend-scope`, never by hand** — when a step needs a file its `allowed_paths` do not list, run `bash {plugin_path}/scripts/aid-fsm.sh amend-scope <state_file> --add <path> [--add ...] --reason "<why, 20+ chars>"` and re-dispatch. It widens `plan.json` for the current step, re-stamps `plan_json_hash`, writes `steps/<id>/scope-amendment.json` and a timeline event — so the commit hook, `increment-step` and the contract validator all accept the file. A missing test file beside an in-scope source is routine (no PM ask); new production files are a PM decision (rule 11 of `skills/pipeline.md` escalations). After the last step it widens the last step and says which; another repository's file cannot be added this way — it must be in the step's `Files:` (`skills/pipeline.md` §Scope amendment). **A plan bound to a brief (P109):** the `--reason` names the `AC<n>` of the brief the widening serves — one the current step closes (`**Zavírá:**`), any step's during GATES — and the record carries it as `zadani_point`; a widening that serves none is refused (`amend_scope_no_brief_point`, `amend_scope_reason_names_no_point`) and is the PM's decision (rule 11). The trace is for the step review and the close; it does not judge the content.
 16a. **AID's own defects go to `.aid-o/work/aid-plugin-issues.md`** (date → plugin version → what happened → what it caused → what you did), never to the project backlog — see `skills/agent-protocol.md` §"Problems with AID itself". The file exists from the first run (created at plan-start / init, rules in its header). This includes anything you had to `--force` past and every `amend-scope`, and plugin defects Codex reports (you write those — Codex is read-only). The Stop hook reminds once per session when AID refused or was bypassed and nothing was written.
 16. **Per-step commit** — the controller commits each accepted return (`aid_dispatch_contract_commit`) BEFORE calling `increment-step`. One commit per step, never a bulk commit at the end — also when steps ran concurrently.
 
@@ -300,13 +312,60 @@ carve-out exists to distinguish itself from.
 
 ## PRE-FLIGHT (before FSM starts)
 
+PRE-FLIGHT branches on the argument:
+
+- **A plan id (`/aid-run P<NNN>`) — the direct run (P111), the default for a new
+  plan.** One command does everything generation did, without EPIC files, a
+  queue or task branches:
+  `{plugin_path}/scripts/aid-plan-fsm.sh plan-run P<NNN> [--auto]`. It holds the
+  generation lock and records its stages in the plan's one
+  `generation/transaction.json` (`kind: plan_run`), so an interrupted start is
+  resumed by running the same command: plan-start in plan_branch mode with the
+  one run `E-<nnn>-1_1` declared → readiness → the CP1 seal → `plan.json` of the
+  WHOLE plan (`lib/aid-plan-json.sh`; `direct: true`) → D5 → `epic_input.md` →
+  the worktrees of the plan's `repo_roots` → the manifest entry (`direct: true`,
+  no task branch) → the receipt check → `aid-fsm.sh init … plan/<id> … --direct`.
+  It prints the state file; the run is one run of every step, on `plan/<id>`.
+  It refuses a plan generated the old way (`generation_already_started`) and a
+  second start (`plan_run_already_started`); the old pipeline refuses a plan
+  with a direct run the same way. `--force --reason` passes a forceable CP1
+  refusal (the PM's call, as below).
+- **An EPIC id (`/aid-run E-…`) — the old EPIC path, kept until P112** for plans
+  already generated: the pipeline below, unchanged.
+
+**`repo_roots` — another repository is a worktree, never its live checkout
+(direct run, P111).** A plan that changes files in another git repository
+declares it in its frontmatter:
+`repo_roots: [{name: docs, path: /opt/eco/docs, base_branch: main}]` (the lint
+refuses a path that is not a git repository outside the project —
+`repo_root_invalid`). `plan-run` creates — or on a rerun adopts — the worktree
+`<path>/.aid-worktrees/plan-<id>--<name>` on the branch `plan/<id>-<project>`
+(plan ids are per project) from the base branch's head, adds `.aid-worktrees/`
+to that repository's `info/exclude`, and records the ONE mapping
+`repo_roots[] = {name, path, worktree, branch, base}` in `plan.json`. In
+EXECUTE the step's contract names the worktree path for every such file
+(allowed paths and expected artifacts alike) and says "never in <path>"; the
+agent commits there and its return names the repository by its name:
+`repo_commits: [{repo: "docs", range: "<base>..<head>"}]`. The step check and
+the return validator resolve the name through the same mapping and require the
+range to be reachable from the worktree's branch — a commit made in the live
+checkout (it shares the object store) is refused (`OTHER_MISSING: docs`). A
+step naming a foreign repository the plan does not declare is refused
+(`foreign_repo_undeclared`). At the close, `plan-finalize --stage freeze`
+records each foreign branch's head; `produce` and `decide` refuse a missing
+worktree, a branch that moved after freeze, or a reported range not on it
+(`foreign_branch_unverified`); the decision, the PM card and the close page
+list the foreign branches (name, branch, head, commits). **Merging them is the
+PM's, by hand, after MERGE** — their gates are not run. The old EPIC path does
+not read `repo_roots` (absolute paths as before).
+
 **Plugin path verification:**
 1. Read `plugin_path` from `.aid-o/config/plugin.yaml`
 2. Verify: `test -f {plugin_path}/scripts/aid-fsm.sh`
 3. If stale or missing → re-discover: `glob ~/.claude/plugins/**/aid-orchestrator/scripts/aid-fsm.sh` → update `plugin.yaml`
 4. If still not found → abort with: "Plugin scripts not found. Run `/aid-init` to refresh."
 
-**Bash pipeline** (using resolved `plugin_path`) — when running from a plan,
+**Bash pipeline — the old EPIC path (until P112)** (using resolved `plugin_path`) — when running from a plan,
 steps 1–3 are ONE TRANSACTION held under a single lock:
 1. `{plugin_path}/scripts/aid-cp1-gate.sh` — the ONE CP1 call for the whole plan, before any output exists (skipped when a valid sealed authority already binds this identity).
 2. `generation-authority.json` + `transaction.json` — the sealed decision and the per-phase record, written under `.aid-o/work/evidence/<plan_id>/generation/`.
@@ -332,7 +391,10 @@ steps 1–3 are ONE TRANSACTION held under a single lock:
 
 **Before you commit anything, be on the branch you mean to commit to.** The
 pipeline leaves the plan worktree on `plan/<id>` after each init (step 7), so a
-step's commit belongs on that step's `task/<epic>/main` and getting there is the
+step's commit belongs on that step's `task/<epic>/main` (a DIRECT run's commit
+belongs on `plan/<id>` itself — `aid_dispatch_contract_commit` accepts that
+branch only for the run whose `fsm-state.yaml` says `direct: true` and names it)
+and getting there is the
 caller's job — no script switches for you at commit time. This is written here
 because agents were told they had got it wrong without ever having been told the
 rule (ACTA, 2026-08-31).
@@ -398,6 +460,15 @@ the branch, before `increment-step`. cp3: after the last step, before
 checkpoint's key is `false` (`prepare` then exits 3; the FSM passes with an
 audit line).
 
+**What a step buys (P110, 2.116.0).** The verdict decides: `skip` (at most 3
+files and 120 lines, inside the step's scope, no security pattern —
+`step_review.skip_threshold`) has no reviewer; `review` asks `step_generalist`
+and `step_security` as light reviewers; `review+security` asks `step_security`
+as the full reviewer (`full_when`). `prepare` records the choice in
+`round.json` `agents` and prints it next to each prompt; dispatch exactly that
+agent type. A project keeps the old budget (two rounds, 1/50) in its own
+`.aid-o/config/policies/review-checkpoints.yaml`.
+
 1. The step check (deterministic, no model). It writes `<cp dir>/step-check.json`
    and, for `skip` or `no_change`, the round index itself — nothing to dispatch:
    ```bash
@@ -416,20 +487,26 @@ audit line).
    dispatch <review> --round K --provider codex --role <role>`; a codex
    that gives no answer is replaced by the stand-in the quoted text describes).
 4. `close` prints the verdict. `pass` → `increment-step` / `transition`.
-   `fail` with a round left (`rounds_default`, 2) → the step's own role fixes
-   (the `fix_of:` dispatch in the instruction below), a new step check, then
-   `prepare --round 2`: the confirmation round asks only the reporters of what
-   stayed open. `fail` after the last round → the PM card.
+   `fail` (cp2 `rounds_default` is 1) → the step's own role fixes (the
+   `fix_of:` dispatch in the instruction below), a new step check, then
+   `prepare --round 2`: the confirmation round (`second_round_when:
+   open_finding_and_fix` — round 1 left a blocker or major open and HEAD
+   moved) asks only the reporters of what stayed open, and its prompt carries
+   `fix.patch` and the open findings, not the whole step again. `fail` after
+   that round → the PM card; a third round needs the PM's override or standing
+   instruction (`prepare` refuses it otherwise).
    A step that moves after a `pass` (a later commit on the same step) is
    confirmed the same way — a new step check, then `prepare --round <n+1>`: a
-   delta round over the commits since, asking every role, which the round
-   budget does not count and which needs no override.
+   delta round over the commits since, asking every role. ONE delta round
+   (round `rounds_default + 1`) needs no override; a later one meets the
+   round budget like any other round.
    A finding the adjudicator could not accept on form (`form_invalid` in
    `merged.json`) is open like any other: fix it, or dispute it.
 5. The PM card after an exhausted round is the **Decision required** card of
    `skills/communication.md` (built with `scripts/lib/aid-decision-card.sh`):
    what stayed open (from `merged.json`, blockers first), and the options —
-   fix and confirm in a PM-granted round, or accept. `close` has already
+   fix and confirm in a PM-granted round, or accept (with the PM's standing instruction
+   recorded — `aid-review-round.sh standing` — two such rounds need no card). `close` has already
    routed the open findings (`routed`) or carried them (`carried`), so nothing
    is lost whichever the PM picks. A third round, or only one, exists only as
    the PM's recorded words:
@@ -445,7 +522,15 @@ audit line).
    finding's fingerprint, wait for the answer, then
    `dispute … --pm accepted --finding-card <card file> --reason "<the PM's words>"`
    — refused without a PM prompt in the hook audit after the card. The round's
-   verdict is recomputed; `--pm rejected` leaves it open.
+   verdict is recomputed; `--pm rejected` leaves it open. The same command
+   settles a whole-plan (cp7) finding — one the author refuted by measurement,
+   one the PM deferred to the backlog, or one the adjudicator kept as
+   `form_invalid` because its evidence lies outside the candidate's repository:
+   `dispute --checkpoint cp7 --evidence-dir <final run> --round K …`. The
+   dispute records its writes as a stage (`cp7-dispute-accepted` in
+   `stage-writes.jsonl`), so `plan-finalize --stage decide` reads it as the
+   PM's decision, not as tampering. A plan is never merged by hand around an
+   open cp7 finding.
 
 <!-- adapter:begin -->
 # Claude reviewers of a review round — controller instruction
@@ -502,6 +587,22 @@ one at a time:
    `--stub` by the acceptance suite skips that check, and the FSM refuses to
    advance on such a round.
 
+   A start for a role the round does not ask is refused on the spot (the focus
+   must name one of `reviewers_expected`; `prepare` printed them). A start that
+   will never get a complete — the reviewer was stopped, the role was dispatched
+   by mistake — is withdrawn, never faked:
+
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" cancel --focus <focus> \
+     --evidence-dir <round dir> --reason "<why, 20+ characters>"
+   ```
+
+   A cancelled start is not a complete: an answer filed under it has no
+   provenance and `close` still refuses it. A role that gave nothing (a codex
+   record `answered: false`, or a start with no complete) is retried before
+   `collect` with `retry --role <r>`, which withdraws its open start itself;
+   nobody waits for the other roles to answer first.
+
 ## Stand-in for a Codex role
 
 When `dispatch --provider codex` prints a line starting `STAND-IN:`, no codex
@@ -534,8 +635,15 @@ When `close` reports `fail` on a step or EPIC round and a round remains
 ```
 Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,
       model: <the **Model:** of the step's role card in skills/role-cards.md>,
-      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the reviewer's example plus two other variants of the same rule. Touch nothing outside the rules the findings name.")
+      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), before you commit, list every caller of each function you changed and every place the rule you introduce applies (graphify explain, or grep), fix those too, and put the list in the commit message; then commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
 ```
+
+**Close the round BEFORE the fix.** When the fix was committed first (the natural
+reflex on a clear finding — P010 did it twice in one day), `close` refuses with
+"head moved" and names the way out: `close … --at <sha the reviewers saw>`. The
+round then closes bound to that revision (`measurement.json` `revision.head_sha`,
+`closed_with_at: true`), and the fix is what the confirmation round confirms. `--at`
+takes only the round's recorded head, and only while HEAD still descends from it.
 
 Then `aid-step-check.sh` again (the range now ends at the fix commit) and
 `prepare --round K+1`: the confirmation round asks only the reporters of what
@@ -597,8 +705,11 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
 1. Read `fsm-state.yaml` → find `current_step`
 2. Check dependency graph → pick the next step with all deps satisfied
 3. Dispatch the step — or the wave, when `aid_parallel_decide` says `concurrent` (rule 15):
-   - Serial: work happens on the EPIC branch `task/{epic_id}/main` (created by `aid-fsm.sh init`).
-     Concurrent: each step in `.aid-worktrees/step-<step_id>` on `step/<step_id>`, merged back one at a time.
+   - Serial: work happens on the run's branch — `fsm-state.yaml` `branch`: `task/{epic_id}/main`
+     for an EPIC run (created by `aid-fsm.sh init`), `plan/{plan_id}` itself for a direct run
+     (`direct: true`, P111 — no task branch exists and none is created).
+     Concurrent: each step in `.aid-worktrees/step-<step_id>` on `step/<step_id>`, merged back one
+     at a time into the run's branch (the tree it is checked out in).
    - Build the dispatch contract + agent prompt (per `pipeline.md §4`)
    - Dispatch agent via Task tool
    - Collect output → save to `work/evidence/{epic_id}/{run_id}/steps/{step_id}/`; validate the `aid-return` block
@@ -606,10 +717,31 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
 5. **Step review (CP2)** — the section "Step review (CP2) and EPIC review (CP3)"
    above: step check, round, `close`; `increment-step` refuses without the
    step's round index at HEAD
+5a. **The step's points run (P110)** — `prepare --checkpoint cp2` runs
+   `aid-plan-diff.sh --step N --plan-json <run>/plan.json` before it builds the
+   packet (the brief points the step closes — a point several steps name is
+   measured at the last one — and the step's own `- [ ] [<role>]` criteria with
+   a block), so the reviewer reads measured verdicts. `increment-step` reads
+   `cp2/step-N/plan-diff.json` bound to HEAD (stale or missing: it measures
+   again) and refuses any `absent` point (`step_criteria_failed`, with `next:`);
+   `--force` does not waive it. The one way out is the PM's answer on a
+   Decision card that quotes the point:
+   `aid-fsm.sh increment-step <state> --defer-criterion AC<n> --reason "<the PM's words>" --finding-card <card>`
+   (`defer_refused` names what is missing: no card, the card does not quote the
+   point, no PM reply after it, a point the step does not close, a reason under
+   20 characters). The deferral lands in `cp2/step-N/deferred.json`; every
+   later measurement re-checks its card, and the close measures the point.
 6. Log to `timeline.jsonl`
 
-**EPIC review (CP3):** when all steps are done, before transitioning to GATES —
-the same section, `--checkpoint cp3`.
+**EPIC review (CP3):** OFF by default since 2.116.0 (P110): `cp3_integration_review:
+false` in the shipped policy, no `epic_review` block. `EXECUTE→GATES` and done-advance
+(the streamlined path too) then proceed from the last step's CP2 and the gates, with
+the audit `review_checkpoint_disabled`; security is reviewed on every reviewed step
+(`step_security`) and the close reads the whole plan (CP7). A project that keeps CP3
+sets `cp3_integration_review: true` AND copies the commented `epic_review` block
+into its own `.aid-o/config/policies/review-checkpoints.yaml` (the toggle on without
+the block is refused, naming it); then, when all steps are done, before
+transitioning to GATES — the same section, `--checkpoint cp3`.
 
 **Transition:**
 - All steps done + cp3 round `pass` → GATES
@@ -693,7 +825,7 @@ DONE uses two mechanically enforced sub-phases: `review` → `release`, managed 
 3. `work/active.md` refreshes automatically at the done-advance boundary (generated index of active streams — never hand-edit it; detail lives in `work/plan-state/`)
 4. Generate `final_report.md`
 5. Produce `review-profile.json` (`pipeline.md §7`, step 5)
-6. **EPIC review (CP3)** — "Step review (CP2) and EPIC review (CP3)" above. A finding is fixed by
+6. **EPIC review (CP3)** — only for a project that keeps it (off by default since 2.116.0) — "Step review (CP2) and EPIC review (CP3)" above. A finding is fixed by
    the role that wrote the code and confirmed by the next round.
 7. **PM Summary** (see `pipeline.md` §7 for the full template):
     ```
@@ -744,6 +876,21 @@ DONE uses two mechanically enforced sub-phases: `review` → `release`, managed 
 Steps 14-16 fork on the plan's declared release mode
 (`.aid-lifecycle/manifests/{plan_id}.yaml` → `mode`). Full instructions in
 `pipeline.md §7` — "Sub-phase: `release`".
+
+*A direct run (`direct: true` in `fsm-state.yaml`, started by `plan-run`, P111):*
+the controller runs `aid-fsm.sh done-advance review release <state> --direct` —
+ONE command, and it calls neither `epic-complete` nor `epic-merge-to-plan` from
+the controller. Before it writes `done_phase: release` it records the run
+`merged_to_plan` at the tip of `plan/{plan_id}` and moves the plan to
+`PLAN_SYNC` (it invokes `aid-plan-fsm.sh epic-complete … --direct` itself); a
+failure leaves `done_phase: review` and the same command is run again. The flag
+is required on a direct run and refused on an EPIC run
+(`done_advance_needs_direct`); `epic-merge-to-plan` refuses a direct run
+(`direct_run_no_epic_merge`). `--resume` after a crash inside it reruns
+`done-advance review release <state> --direct` (a second record is a no-op).
+Steps 14-16 below do not apply: the close is `plan-finalize` as for any plan.
+The pre-commit hook guards `plan/{plan_id}` until `done_phase: release`; the
+close's commits after that are `plan-finalize`'s.
 
 *In `plan_branch` mode (an intermediate EPIC inside an open plan):*
 
@@ -805,8 +952,38 @@ worktree (`.aid-worktrees/plan-<id>`) on `plan/<id>` for the whole close.
 | 1 | `<fsm> plan-finalize <plan> --stage freeze` | merges the target branch into `plan/<plan>`, freezes the candidate, mints `R-<plan>-final-<N>` | an EPIC is not terminal; the merge conflicts (exit 4, state CONFLICT); the tree is dirty |
 | 2 | `<fsm> plan-finalize <plan> --stage gates` | the plan-final gate run; a gate that passed in the previous attempt and whose `inputs:` did not change is copied (`reused_from`), not executed | a gate fails (the report names it); the branch moved off the candidate |
 | 3 | `<fsm> plan-finalize <plan> --stage produce` | review profile, plan-diff, acceptance evidence, and what the round reads (`cp7/`) | gates have not passed; the candidate moved |
-| 4 | `<round> prepare\|collect\|close --checkpoint cp7 --evidence-dir <run dir> --project-root <plan worktree> --round 1` | the whole-plan review: `final_criteria`, `final_claims`, `final_generalist` | `produce` has not run; HEAD is not the candidate; a reviewer file has no dispatch bracket |
+| 4 | `<round> prepare\|collect\|close --checkpoint cp7 --evidence-dir <run dir> --project-root <plan worktree> --round 1` | the whole-plan review: `final_criteria` (the brief point by point against the isolated measurement) and `final_generalist` (Codex: across the EPICs, the claims, the security and operations checklist); a project may add `final_claims` | `produce` has not run; HEAD is not the candidate; a reviewer file has no dispatch bracket; the plan-diff was not measured in isolation (`cp7_measurement_stale`); the brief is not the one the plan is bound to (`cp7_brief_sha_mismatch`), missing (`zadani_file_missing`) or, for a strict plan, not named (`plan_names_no_brief`) |
 | 5 | `<fsm> plan-finalize <plan> --stage decide` | the one aggregate: `release-decision.json`, the sealed receipt, the PM page with attempts, minutes and USD | the round is not closed; a decision input was edited by hand (named); the candidate moved |
+
+**Gates and the project's tests (P110).** With `project_tests:` declared in
+`execution.yaml`, a change to the project's test files needs a gate of the
+run's profile flagged `runs_project_tests: true` that proves, through
+`--evidence-file {evidence_dir}/gates/<gate>.evidence.json`, that it ran them —
+otherwise the row `project_tests` fails (`profile_skips_project_tests`,
+`project_tests_evidence_missing`, `project_tests_not_selected`); a suite left to
+the nightly tier is `nightly_covers`, a project without the key is only advised
+(`project_tests_undeclared`). `run-all-tests.sh --evidence-file` writes the
+evidence; `aid-run-gates.sh record-tests --glob … --evidence-file … -- <cmd>`
+wraps a whole-suite runner; `aid-run-gates.sh --lint-profiles <execution.yaml>`
+checks every profile. The PM waives with `aid-gate-waiver.sh issue project_tests`.
+
+**The measurer at the close (row 3, P110).** `produce` runs every brief point
+through `aid-plan-diff.sh --isolated --cwd <the plan worktree>` (the release
+profile's `plan_diff` gate passes `--isolated --cwd .`). The rule is the
+project's, read from the state root's `execution.yaml`: without
+`verification_env:` each `cmd` point runs in a new network namespace with
+loopback up and your own uid (no host service, no outbound network, a clean
+environment, and whatever it starts in the background dies with it); with
+`verification_env:` it runs with those variables and the host network,
+recorded as `network: host (verification_env)`. A point the close cannot run
+that way is `absent` with a reason and never counts as verified:
+`no_isolation` (no usable `unshare --map-user` — `next:` names util-linux ≥ 2.38
+and user namespaces), `env_stripped: <VAR>` (a test-service variable such as
+`*_TEST_DATABASE_URL` is in your environment but not declared — declare it),
+`no_verification_env` (the command names a database URL),
+`verification_env_unset: <VAR>`. `--cwd` on a directory that is not a git
+worktree exits 3 (`cwd_not_worktree`). `plan-diff.json` records
+`isolation {worktree, env_keys, network}`; `produce` prints it.
 
 **The round (row 4)** is dispatched exactly as a step or EPIC round: the
 procedure, the prompt files, the dispatch bracket (`aid-emit-dispatch.sh start` …
@@ -824,16 +1001,36 @@ is round 1 of the next attempt.
    ```
    Agent(subagent_type: <"aid-orchestrator:implementer-light" when that role's card says **Effort:** low, else "aid-orchestrator:implementer">,
          model: <the **Model:** of that role's card in skills/role-cards.md>,
-         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the reviewer's example plus two other variants of the same rule. Touch nothing outside the rules the findings name.")
+         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix the open findings by CLASS, not one by one (every finding that shares a rule or a pattern is one fix); before you commit, list every caller of each function you changed and every place the rule you introduce applies (graphify explain, or grep), fix those too, and put the list in the commit message; commit with the message prefix fix(review):, and report the fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
    ```
    The owning step is the one whose declared files cover the path (`plan.json` of the EPIC whose commit last touched it: `git log -1 -- <path>`).
 2. `--stage freeze` again. It mints the next attempt and writes `fix-class.json`:
-   what the fix touched decides what is read again. A change to CHANGELOG, README
-   or docs re-asks `final_claims`; an edit of the plan's criteria re-asks
-   `final_criteria`; code re-asks everyone; a role whose inputs were not touched
-   and which had no finding is carried. The round's packet shows the re-asked
+   what the fix touched decides what is read again. `final_criteria` is never
+   carried — every attempt re-measures every point. A change to CHANGELOG,
+   README or docs or to the code re-asks `final_generalist` (and `final_claims`
+   where a project keeps it); a role whose inputs were not touched and which
+   had no finding is carried. A brief point measured `absent` is a blocker
+   finding of `final_criteria`. The round's packet shows the re-asked
    reviewers what stayed open and the fix diff.
 3. `gates` (unchanged gates are copied), `produce`, the round, `decide`.
+
+**Closing is not development** (P010, agents: twelve attempts, four of the last
+findings written by the fixes). Three rules, and one number to watch:
+
+- **Fix by class, not by finding.** Eight separate fixes where three would do
+  are five extra attempts. Group the open findings by the rule they break and
+  send ONE fix per class.
+- **List the callers before the commit.** The fixer names every caller of what
+  it changed and every place the new rule applies, and fixes them in the same
+  commit — the confirmation round then checks the rule everywhere, not the
+  cited line again.
+- **Three attempts feeding on themselves → the PM, not another fix.** `close`
+  prints `closing: attempt N, M min since the first freeze, findings on lines
+  written during the closing: R …` (`measurement.json` `closing`). When R is
+  above zero for the third attempt in a row, do not fix: write the open
+  findings to the backlog and show the PM a **Decision** card — close with the
+  findings disputed and recorded / one more attempt / defer the plan. This is a
+  rule for you, not a gate: the plugin counts, you stop.
 
 An ancillary-only move after the freeze (AID's own bookkeeping, e.g. the id
 counter) costs nothing: `freeze` names `--stage freeze --accept-ancillary`, which
@@ -845,8 +1042,8 @@ fix path once first; escalate when it does not apply or did not help.
 | Refusal | Try once | Then show the PM |
 |---------|----------|------------------|
 | a gate is red and the failure is real | the fix path above | **Blocked** card: the gate, what it printed, the smallest fix |
-| a cp7 blocker is still open after a fixed attempt | one more fix when the finding changed; else stop | **Decision** card: FIX (what it costs) / accept with a recorded dispute / ABORT |
-| the project disputes a finding | `<round> dispute` (CP1, CP2, CP3): do not edit the finding | **Decision** card quoting the finding and its evidence |
+| a cp7 blocker is still open after a fixed attempt | one more fix when the finding changed; else stop | **Decision** card: FIX (what it costs) / accept with a recorded dispute (`dispute --checkpoint cp7 … --pm accepted --finding-card`) / ABORT |
+| the project disputes a finding | `<round> dispute` (CP1, CP2, CP3, CP7): do not edit the finding | **Decision** card quoting the finding and its evidence |
 | the branch was rewritten (`fix-class.json` reason `rewritten_branch`) | nothing is carried; run the full attempt | none, unless it repeats: then **Blocked** |
 | `verification_report` blocks | read its `git_clean` evidence: commit or discard the named tracked file | **Blocked** card naming the file |
 | `final_review_disabled` | switch `cp7_plan_final_review` back on | **Decision** card; only the PM's words go into `--stage decide --waive-final-review --reason "<words>"`, and the page then says the plan was NOT read as a whole |

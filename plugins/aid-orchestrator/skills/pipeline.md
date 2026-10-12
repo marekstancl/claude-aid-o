@@ -267,6 +267,19 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `gates_runner_exit_<n>` | a required gate failed | work | the role that wrote the failing code fixes it, then `advance-to-gates` | |
 | `plan_gate_profile_excluded` | the plan requires a gate the run's profile left out | state | widen the profile in `execution.yaml`, then `advance-to-gates` | PM, to accept the gap |
 | `steps_incomplete` | not every step advanced | state | finish the next step, `increment-step` | |
+| `step_criteria_failed` | a brief point the step closes, or its own labelled criterion, ran `absent` (`cp2/step-N/plan-diff.json`, P110); `--force` does not waive it | work | fix the step and commit, `increment-step`; or render the Decision card quoting the point and, after the PM's answer, `increment-step <state> --defer-criterion AC<n> --reason "<the PM's words>" --finding-card <card>` | PM, to defer the point |
+| `no_isolation` | the close's measurer has no usable nested `unshare` (util-linux < 2.38 or user namespaces off): every `cmd` point is `absent`, never passed (P110) | state | install util-linux ≥ 2.38 and allow user namespaces (`sysctl kernel.unprivileged_userns_clone=1`), then `plan-finalize --stage produce` again | PM, to accept the gap |
+| `profile_skips_project_tests` | the change touches the project's tests (`project_tests:` globs, changed paths from git) and the run's profile has no gate flagged `runs_project_tests` (P110) | state | add the gate that runs the project's tests to the profile (flagged, with `--evidence-file`), run the gates again — `aid-run-gates.sh --lint-profiles <execution.yaml>` | PM, to waive (`aid-gate-waiver.sh issue project_tests --reason`) |
+| `project_tests_evidence_missing` | a flagged gate wrote no evidence of what it ran | work | give its command `--evidence-file {evidence_dir}/gates/<gate>.evidence.json` (or wrap it in `aid-run-gates.sh record-tests`), run the gates again | |
+| `project_tests_not_selected` | a flagged gate's evidence does not list the changed test files — the flag proves nothing | work | run them in the flagged gate, run the gates again | PM, to waive |
+| `project_tests_undeclared` | advisory, never a refusal: the change touches usual test paths and `execution.yaml` declares no `project_tests:` | state | declare `project_tests:` and flag the gate that runs them (`/aid-init` offers it) | |
+| `measurement_unreadable` | a review round's `measurement.json` does not parse, so the cost of the run or the plan cannot be summed (P110; `plan-finalize --stage decide`) | state | restore the file (an interrupted `aid-review-round.sh close` is run again), then `--stage decide` again | |
+| `streamlined_cp3_off` | a streamlined run (no step review) in legacy mode with CP3 off — nothing would review its code (P110) | state | keep CP3 for it (`cp3_integration_review: true` + an `epic_review` block) and run the EPIC review, or run the plan in `plan_branch` mode | PM, for the mode |
+| `zadani_file_missing` | the plan's `zadani:` names a brief file that is not there (CP1 or CP7 packet, P110) | work | restore the brief, or fix the plan's `zadani:` path — `aid-plan-lint.sh <plan> --only zadani` | |
+| `cp7_brief_sha_mismatch` | the brief the whole-plan round would read is not the one the plan is bound to (`zadani_sha256`) | work | a changed brief is a new `verze`: bump it and the plan's `zadani_verze`/`zadani_sha256` with the PM, or restore the brief | PM, when the points changed |
+| `cp7_measurement_stale` | `plan-diff.json` of the close was not measured in isolation (no `isolation` key — produced before 2.116.0) | state | `aid-plan-fsm.sh plan-finalize <plan> --stage produce` again | |
+| `cwd_not_worktree` | `aid-plan-diff.sh --cwd` names a directory that is not a git worktree (exit 3) | state | pass the candidate worktree, or run from inside it with `--cwd .` | |
+| `defer_refused` | `--defer-criterion` without a card, with a card that does not quote the point, without a PM reply after the card, for a point the step does not close, or with a reason under 20 characters | work | render the card (`lib/aid-decision-card.sh`), wait for the PM's answer, then the same command | PM |
 | `missing_step_verify`, `verify_no_ac_checklist`, `verify_no_memory_used`, `verify_no_memory_written`, `step_verify_not_pass`, `verify_no_commit_ref` | `step-N-verify.md` is missing or incomplete | work | write it (§4 Output verification), `increment-step` | |
 | `binding_wrong_commit`, `binding_plan_step_hash_mismatch`, `incomplete_step_binding` | the verify file's binding does not name this step at HEAD | state | rewrite the binding after the step commit (`reviewed_commit` = HEAD, `plan_step_hash` from the live `plan.json`), `increment-step` | |
 | `contract_return_rejected` | the agent's return does not match its contract | work | re-dispatch the step with its packet, record the new return, `increment-step` | |
@@ -278,7 +291,44 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `no_change_without_outputs` | the step committed nothing and declares no output that exists | work | commit the step's work, run the step check again | PM, to waive the step |
 | `plan_manifest_missing`, `plan_branch_mismatch` | the EPIC was not started through its plan | state | `aid-plan-fsm.sh epic-start <plan> <epic> --run-id <run>`, then `init` again | |
 | `missing_lenses`, `done_advance_preconditions` | a done-advance precondition failed (each prints its own line above) | work | correct what the lines name, run the same `done-advance` again | |
+| `critic_required` | `prepare --round 1` found no passed critic check for the plan it would copy (or a later round for round 1's `critic_check_sha`) | work | `aid_critic_prepare <id> --moment plan --plan <plan>`, `aid_critic_dispatch <id> --moment plan`, write `critic-response.md`, `aid_critic_check <id> --moment plan`, then prepare again | |
+| `no_passed_critic_check` | the CP1 gate found no passed critic check bound to the plan that entered round 1 (or, with no round, to the plan as it is) — HARD: `--force` does not waive it, a switched-off review does not either | work | the three critic commands of `critic_required`; a plan fixed after round 1 needs none (the binding is the plan that entered round 1) | |
+| `plan_names_no_brief` | the CP1 packet refused a `lifecycle_strict` plan that names no brief (`zadani:`) | work | write `.aid-o/plans/<id>-zadani.md` from `defaults/templates/zadani.md`, lint it (`aid-plan-lint.sh --zadani`), bind the plan (`zadani`, `zadani_verze`, `zadani_sha256`), prepare again | |
+| `zadani_path_escapes` | the plan's `zadani:` resolves outside the project | work | point `zadani:` at the brief inside the project, prepare again | |
+| `second_round_needs_open_blocker` | `prepare --round 2` past `rounds_default: 1` without a blocker found in round 1 and a passing `fix-check` | work | after a blocker: fix it, `fix-check`, prepare again; after majors only: fix them and `finalize` — no second round | PM, for an override.json |
+| `brief_changed_after_round` | the brief's sha differs from the one round 1 read (the gate), or a fix changed it (prepare round ≥ 2) | work | bump the brief's `verze`, update the plan's `zadani_verze` and `zadani_sha256`, rerun the critic, `prepare --round 1 --restart --reason "<why>"` | |
+| `fix_check_brief_point_changed` | a revision after a round changed, dropped or merged a brief point in the plan (the lint's brief pass, run by `fix-check`) | work | restore the point as the brief has it; a point that must change is a new brief version (§Restarting a plan review) | |
+| `fix_check_brief_version_not_raised` | the brief file changed since round 1 but its `verze` did not rise | work | raise `verze`, update the plan's `zadani_verze` and `zadani_sha256`, `fix-check` again | |
+| `restart_needs_brief_change` | `prepare --round 1 --restart` with neither `brief_changed` in the last fix-check nor the PM's words | work | change the brief (new `verze`) and `fix-check`, or ask the PM (`--pm "<…>"`) | PM |
+| `amend_scope_no_brief_point` | `amend-scope` on a brief-bound plan for a step that closes no brief point | work | a widening that serves no point is a scope change: bring it to the PM (rule 11) | PM |
+| `amend_scope_reason_names_no_point` | `amend-scope --reason` names no `AC<n>` the step closes (any step's at GATES) | work | say which point the file serves: `--reason "AC<n> needs <path> because …"` | |
 | `missing_verifier_output`, `missing_cp3_code_review` | retired in 2.99.0 (P094): the step and EPIC review rounds replaced the verifier files | — | the `review_round_*` rows | |
+| `plan_run_already_started` | the plan already has a direct run (`plan-run` started it, it was abandoned, or it is complete); a second start and EPIC generation are refused (P111) | state | `/aid-run --resume P<NNN>`; a dead run: close the plan administratively and write a new plan | |
+| `generation_already_started` | the plan was generated the EPIC way (an EPIC file, a non-direct manifest entry, a generation transaction or its archive) — the two roads never mix on one plan (P111) | state | finish it on the old path (`/aid-run E-…`) until P112, or close it administratively and write a new plan | |
+| `plan_changed_since_seal` | the plan file changed after `plan-run` sealed it; a run never starts from bytes CP1 did not pass (P111) | work | restore the sealed bytes and rerun `plan-run`; or (no run started) archive the transaction as the line says and rerun — CP1 is consulted again | |
+| `lifecycle_epics_mismatch` | the plan was started before `plan-run` and its committed lifecycle manifest declares its EPIC markers, not the one direct run (P111) | state | `aid-plan-fsm.sh plan-state P<NNN> --declare-epics E-<nnn>-1_1 --reason "<why>"`, then `plan-run` again | |
+| `direct_run_needs_plan_branch` | a direct run starts and commits only on `plan/<id>` (its plan worktree), in a plan_branch plan (P111) | state | `aid-plan-fsm.sh plan-run P<NNN>` from the project (it starts the plan in plan_branch mode); a renamed branch: restore `plan/<id>` | |
+| `plan_json_unverified` | the direct run's `plan.json` disagrees with the plan's step graph or bytes; init was not attempted (P111) | state | remove the named `plan.json` and rerun `plan-run` (it rebuilds it) | |
+| `plan_in_scratch_tree` | the plan file resolves into `.aid-worktrees/`, a scratch tree released after the run (P111) | work | put the plan in `.aid-o/plans/` and rerun `plan-run` | |
+| `generation_lock_held` | another generation or `plan-run` of this plan holds the generation lock (P111) | state | wait for it to finish, then rerun — it resumes; never delete the `.lock` file | |
+| `plan_not_found` | `plan-run` found no plan file for the id under `.aid-o/plans/` (P111) | work | write the plan (`/aid-plan`), then `plan-run` | |
+| `direct_run_no_epic_merge` | a direct run's steps committed on `plan/<id>` — there is no task branch to merge (P111) | state | `aid-fsm.sh done-advance review release <state> --direct` (it records `merged_to_plan`) | |
+| `done_advance_needs_direct` | `--direct` is required on a direct run's `done-advance` and refused on an EPIC run's (P111) | state | the `done-advance` line `next:` prints — with `--direct` on a direct run, without it (then `epic-merge-to-plan`) on an EPIC run | |
+| `abandon_needs_reason` | a run is abandoned (`aid-fsm.sh abandon`, `epic-complete --abandon`, the administrative close) only with a non-empty reason — it is written to the manifest, the run's state and its timeline; nothing was written (P111) | work | the same command with `--reason "<why>"` | |
+| `run_abandoned` | the pre-commit hook: the branch belongs to an abandoned run (direct `plan/<id>` or an EPIC's task branch) and takes no more commits (P111) | state | stop the agent working on it; the work continues in a new plan | |
+| `foreign_repo_undeclared` | a direct plan's step names a path in a git repository outside the project that `repo_roots` does not declare, or a declared repository's worktree is gone (P111) | work | declare it in the plan's frontmatter (`repo_roots: [{name, path}]`) and restart the run, or drop the path; a gone worktree: recreate it on its recorded branch as the line says | |
+| `foreign_branch_unverified` | at the close a foreign branch is missing, moved after freeze, or does not carry a range a step reported (a commit in the live checkout does not count) (P111) | work | commit the foreign work in its worktree on its branch (drop a stray live-checkout commit by hand), then `plan-finalize --stage freeze` again | |
+| `repo_root_invalid` | a `repo_roots` entry is not a slug + git repository outside the project, its base branch does not resolve, or its branch `plan/<id>-<project>` already exists without the worktree (P111) | work | fix the frontmatter entry, or rename/delete the stray branch as the line says, then `plan-run` again | |
+
+#### Restarting a plan review
+
+A brief point changes only as a new version of the brief file (P109): raise its `verze`,
+update the plan's `zadani_verze` and `zadani_sha256`, run `fix-check` (it records
+`brief_changed: true`), rerun the critic from the brief file, then
+`aid-review-round.sh prepare <plan> --round 1 --restart --reason "<why the brief changed>"`.
+The live rounds move to `cp1/attempt-<k>/` with `attempt.json`; the gate and `prepare` read
+only the live ones. Without `brief_changed` a restart needs the PM's words (`--pm "<…>"`):
+it is never a way around a round with open blockers.
 
 ### FSM States
 
@@ -524,7 +574,7 @@ Steps: {total_steps} ({parallel_groups} parallel waves)
 Roles: {unique roles list}
 
 Wave execution:
-  Wave 0: [architect] {objective}  ~{file_count} files
+  Wave 0: [backend]   {objective}  ~{file_count} files
   Wave 1: [backend] {objective}    ~{file_count} files  ← wave 0
   Wave 2: [qa]      {objective}    ~{file_count} files  ← wave 1
 
@@ -566,7 +616,7 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
    ```bash
    step_dir="$(bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-evidence-dir "$state_file" "$N")"
    source "$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh"
-   aid_dispatch_contract_build "$evidence_dir/plan.json" "$N" "$step_dir/contract.json" "$evidence_dir"   # exit 3 = no paths, no contract owed
+   aid_dispatch_contract_build "$evidence_dir/plan.json" "$N" "$step_dir/contract.json" "$evidence_dir"   # exit 3 = no paths, no contract owed; exit 4 = a foreign path refused (foreign_repo_undeclared — follow its next:)
    ```
    The packet is built by code from `plan.json` — objective, allowed paths, dependencies,
    expected artifacts, acceptance criteria, UI contract, the step's own evidence dir — and
@@ -579,7 +629,9 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
    (content, never a path).
 6. Dispatch via Agent tool: subagent type `aid-orchestrator:implementer-light` when the card
    says `**Effort:** low`, else `aid-orchestrator:implementer`; model the card's `**Model:**`
-   (an optional `step.model` in `plan.json` overrides it for that one step)
+   (an optional `step.model` in `plan.json` overrides it for that one step). Since 2.112.0
+   (P107) the code-writing roles say `sonnet` and the thinking budget is the agent card's own
+   frontmatter `effort:` (implementer high, implementer-light medium); reviewers stay on Opus.
 7. Save output to `$step_dir/output.md` (`evidence/{epic_id}/{run_id}/steps/{step_id}/`).
    **The controller writes this file, from the agent's final message, and nobody else.** Do
    not ask the agent to write its own `output.md`: the `aid-return` block sits in the
@@ -725,6 +777,22 @@ It updates the three readers of scope together: `plan.json` (the commit hook), t
 and the agent keeps quoting the version it was given. Never edit `plan.json` by hand mid-step:
 that satisfies the hook and trips the hash, which is the contradiction this command exists to
 end. Prevention is cheaper than amendment — a plan lists its tests in `Files:` (`Test:` bullet).
+
+**After the last step** (a CP3 fix round, a gate fix) there is no current step: the widening
+lands on the LAST step, and the command says so ("widening step N (id)").
+
+**A plan bound to a brief** (`plan.json` carries `zadani_sha256`, P109): `--reason` must name
+the brief point the widening serves as `AC<n>` — one the current step closes (`steps[].zavira`,
+from the plan's `**Zavírá:**`), or, during GATES, any step's (a gate fix serves the whole plan).
+The point is recorded in the amendment as `zadani_point`; a plan without a brief records `null`.
+A step that closes no point refuses any widening: that is a scope change for the PM (rule 11).
+The trace says which point a widening was for; whether the change serves it is the step review's.
+
+**Another repository's file** (`/opt/eco/docs/...`) is a different case: amend-scope refuses an
+absolute path no step of the plan declares, because that is a PM decision. Such a file belongs in
+the step's `Files:` as an absolute path when the plan is written (`aid-plan-lint.sh` reports one
+named only in prose). The step contract never commits it in this repository: its commit names the
+owning repository, the controller commits there and lists the commit in the return's `repo_commits`.
 
 ### Plan regenerated mid-EPIC
 
@@ -898,7 +966,10 @@ and nothing else. This skill does not restate the commands.
 
 ### EPIC review (CP3) — one section, in the run command
 
-After the last step, before `transition EXECUTE GATES`: the same step check
+OFF by default since 2.116.0 (`cp3_integration_review: false`, no `epic_review`
+block; P110): the FSM records `review_checkpoint_disabled` and moves on. A
+project that keeps it sets the toggle true with an `epic_review` block; then,
+after the last step, before `transition EXECUTE GATES`: the same step check
 and round with `--checkpoint cp3` (`commands/aid-run.md` "Step review (CP2)
 and EPIC review (CP3)"). `close` writes `<run>/semantic-review-final.json` for
 the plan-final consumers and routes what stays open (§13). The FSM reads
@@ -909,8 +980,7 @@ the plan-final consumers and routes what stays open (§13). The FSM reads
 
 Since P094 the reviewer round's `merged.json` is the semantic evidence of a step
 and of an EPIC; the cp3 `close` writes the per-EPIC `semantic-review-final.json`.
-The verifier's `c2_mode` dispatches at cp2 (`local`, `wiring`, `behavior`) are
-gone; only the plan-final `final` mode remains (§7, `plan-finalize`).
+The `c2_mode` verifier dispatches (`local`, `wiring`, `behavior`) are gone since 2.99.0; cp2 is a review round (`skills/step-review-roles.md`), and the plan-final boundary reads the cp7 round, never a verifier file.
 
 ### After the last step
 
@@ -1152,7 +1222,7 @@ set via `set-field`. The decision is automatically cleared after the transition 
 **Mechanical enforcement:**
 1. `aid-fsm.sh done-advance review release` — requires `pm_decision=merge`, the archived task
    file, routed findings settled and tiered-severity compliance; in `legacy_epic_release_mode`
-   also a fresh EPIC review (`cp3/rounds.json` at HEAD) and, under `enforcement: blocking`, a
+   also a fresh EPIC review (`cp3/rounds.json` at HEAD) when CP3 is on, and, under `enforcement: blocking`, a
    `release_ready: true` decision.
 2. `aid-release.sh` — refuses a release while `done_phase != release`.
 3. Git pre-commit hook — blocks commits on `task/*/epic/*` branches in DONE/review.
@@ -1168,9 +1238,12 @@ both described once in `commands/aid-run.md`. A `plan_branch` plan is then close
 **`commands/aid-run.md` → "Closing a plan (plan-final)"** and follow it; nothing here repeats it.
 An intermediate EPIC of such a plan skips the per-EPIC release stack (the names are
 `AID_PLAN_BRANCH_SKIPPED_STAGES` in `scripts/aid-fsm.sh`, echoed into the
-`done_advance_plan_branch_mode` timeline event); its own CP3 round is NOT skipped, and under
-`streamlined_mode: true` `fsm_check_streamlined_integration_review` hard-fails `done-advance`
-when `cp3/rounds.json` is missing or did not close with `pass`.
+`done_advance_plan_branch_mode` timeline event); its own CP3 round runs when the project keeps
+CP3 (off by default since 2.116.0). Under `streamlined_mode: true` — no step review at all —
+`fsm_check_streamlined_integration_review` hard-fails `done-advance` when CP3 is on and
+`cp3/rounds.json` is missing or did not close with `pass`, and, with CP3 off, unless the plan
+runs in `plan_branch` mode (the whole-plan round reads the code) or a passing cp3 round exists:
+a legacy-mode streamlined run with CP3 off would ship unreviewed.
 
 Anything a review DEFERS rather than fixes is recorded with `aid_obligation_add`
 (§13 *Carried obligations*) before you move on — the close refuses an open `release_blocker`.
@@ -1682,7 +1755,8 @@ Designed for quick tasks that don't warrant a full EPIC.
 3. Verify output (same as §4)
 4. **Review Checkpoint CP6:** Pre-filter (§13) runs first on `git diff`.
    If pre-filter clean + trivial → skip. If pre-filter finds pattern → immediate FAIL.
-   Otherwise dispatch verifier (`code-review`). Fix loop: gate-fixer → verifier, max 2.
+   Otherwise the review round `/aid-do` runs (its lines 118-150: prepare, dispatch the step
+   reviewers, collect, close; a failed round is fixed by the implementer with `fix_of:`, max 2).
    Advisory only (no ESCALATION in Fast Mode).
    Skip per `review-checkpoints.yaml` (`cp6_fast_mode_review`, `skip_trivial`).
 5. Log completion (action: `aid_do_complete`, files_changed, duration_seconds)
@@ -1867,7 +1941,7 @@ Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by
 | CP | Location | Verifier Focus | Fix Loop | Escalation |
 |----|----------|----------------|----------|------------|
 | CP1 | `/aid-plan` "Plan review (CP1)" | six plan reviewer roles, not the verifier | Rounds: 2 by default, a 3rd or only 1 on the PM's recorded override | PM card after each round |
-| CP2 | `/aid-run` "Step review (CP2) and EPIC review (CP3)" | step reviewer roles, not the verifier | Rounds: 2 by default; the step's role fixes, the next round confirms | PM card after the last round |
+| CP2 | `/aid-run` "Step review (CP2) and EPIC review (CP3)" | step reviewer roles, not the verifier | Rounds: 2 by default (+2 fix-and-confirm under the PM's standing instruction, `aid-review-round.sh standing`); the step's role fixes, the next round confirms | PM card after the last round |
 | CP3 | same section, `--checkpoint cp3` | EPIC reviewer roles | same | PM card after the last round |
 | CP6 | `/aid-do` "Review Check (CP6)" | step reviewer roles over the working tree | on the PM's word | Advisory only |
 | CP7 | `/aid-run` "Closing a plan (plan-final)" | three whole-plan roles | 1 round per attempt; a fix mints the next attempt, which confirms it | Decision card (FIX / ABORT) |

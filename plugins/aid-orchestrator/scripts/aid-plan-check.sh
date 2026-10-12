@@ -33,7 +33,9 @@
 # A6, B8, C5) and hears the rest as "[WARN legacy]". --strict / --legacy force.
 #
 #   --snapshot  the plan as it was BEFORE the revision being checked (C checks)
-#   --fixes     comma-separated step numbers the revision was allowed to touch
+#   --fixes     comma-separated step numbers the revision was allowed to touch;
+#               `none` (plan-level findings only) or `any` (an open plan-level
+#               blocker/major: every step may change, C4/C5 are not reported)
 #               (e.g. "3,7,12"), or `none` when it may touch no step; required
 #               together with --snapshot. The --json report then carries
 #               steps_changed and added_outside_fixes ({step, kind: step|file|ac, text}).
@@ -48,6 +50,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 # shellcheck source=lib/aid-plan-graph.sh
 source "${SCRIPT_DIR}/lib/aid-plan-graph.sh"
+# shellcheck source=lib/aid-verification-pattern.sh
+source "${SCRIPT_DIR}/lib/aid-verification-pattern.sh"
 
 PLAN="" ROOT="" JSON_OUT="" SNAPSHOT="" FIXES="" QUIET=0 FORCE_MODE="" RUN_CMDS="${AID_PLAN_CHECK_RUN_CMDS:-0}"
 while [[ $# -gt 0 ]]; do
@@ -134,6 +138,8 @@ done < <(_aid_extract_files_bullets_numbered < "$PLAN")
 ALL_FILES_PATHS="$(printf '%s\n' "${FB_PATHS[@]:-}" | tr ' ' '\n' | grep -v '^$' | sort -u)"
 CREATE_PATHS="$(for i in "${!FB_LN[@]}"; do [[ "${FB_VERB[$i]}" == "Create" ]] && printf '%s\n' ${FB_PATHS[$i]}; done | sort -u)"
 _in_list() { grep -qxF -- "$1" <<< "$2"; }
+# _in_fix <step> — the step is in the fix list, or the list is `any`.
+_in_fix() { [[ "${FIX_ANY:-0}" == 1 ]] || _in_list "$1" "$FIX_STEPS"; }
 # Every file the project has (tracked + untracked-not-ignored), once. Prose names
 # files by their tail as often as by their full path (`export/router.py` for
 # backend/acta/export/router.py), and the pilots' plans did exactly that.
@@ -272,22 +278,15 @@ HAS_REPO=0; [[ -n "$ROOT" && -d "$ROOT" && -n "$REPO_FILES" ]] && HAS_REPO=1
 done
 
 # A6 — verification_pattern blocks: valid type, required keys, no placeholders.
-# (Read from the RAW plan: the blocks live inside fences.)
-VP_BLOCKS="$(awk '
-  /verification_pattern:/ { inside = 1; start = NR; blk = ""; next }
-  inside && /^[[:space:]]*```/ { print start "\t" blk; inside = 0; next }
-  inside { gsub(/^[[:space:]]+/, ""); blk = blk $0 "|" }
-' "$PLAN")"
-while IFS=$'\t' read -r ln blk; do
+# (Read from the RAW plan: the blocks live inside fences.) Extraction and rules
+# live in lib/aid-verification-pattern.sh — the same reader the runner uses.
+# VP_BLOCKS: "<line>\t<record>" per block; B3, B7 and B10 read the same records.
+VP_BLOCKS="$(_aid_vp_extract "$PLAN")"
+while IFS=$'\t' read -r ln rec; do
   [[ -n "${ln:-}" ]] || continue
-  typ="$(tr '|' '\n' <<< "$blk" | grep -E '^type:' | head -1 | sed -E 's/^type:[[:space:]]*//; s/["'\'']//g')"
-  case "$typ" in
-    cmd)            tr '|' '\n' <<< "$blk" | grep -qE '^cmd:' || _block "A6" "$PLAN:$ln" "verification_pattern type cmd without cmd:" ;;
-    must_not_exist) tr '|' '\n' <<< "$blk" | grep -qE '^file:' || _block "A6" "$PLAN:$ln" "verification_pattern type must_not_exist without file:" ;;
-    must_contain)   { tr '|' '\n' <<< "$blk" | grep -qE '^file:' && tr '|' '\n' <<< "$blk" | grep -qE '^regex:'; } || _block "A6" "$PLAN:$ln" "verification_pattern type must_contain needs file: and regex:" ;;
-    *)              _block "A6" "$PLAN:$ln" "verification_pattern type '${typ:-<missing>}' is not one of cmd | must_not_exist | must_contain" ;;
-  esac
-  grep -qE '<[A-Za-z_ -]+>|\{[A-Za-z_ -]+\}' <<< "$blk" && _block "A6" "$PLAN:$ln" "verification_pattern carries a placeholder (<...> or {...})"
+  while IFS= read -r msg; do
+    [[ -n "$msg" ]] && _block "A6" "$PLAN:$ln" "$msg"
+  done < <(_aid_vp_validate "$rec")
 done <<< "$VP_BLOCKS"
 
 # A7 — a Modify:/Rewrite: path that neither exists nor is created by an earlier step.
@@ -387,10 +386,10 @@ if (( HAS_REPO )); then
   done
 
   # B3 — a file the plan promises to remove must exist today.
-  while IFS=$'\t' read -r ln blk; do
+  while IFS=$'\t' read -r ln rec; do
     [[ -n "${ln:-}" ]] || continue
-    f="$(tr '|' '\n' <<< "$blk" | grep -E '^file:' | head -1 | sed -E 's/^file:[[:space:]]*//; s/["'\'']//g')"
-    tr '|' '\n' <<< "$blk" | grep -qE '^type:[[:space:]]*"?must_not_exist' || continue
+    IFS=$'\x1f' read -r _ _ typ _ f _ _ <<< "$rec"
+    [[ "$typ" == must_not_exist ]] || continue
     [[ -n "$f" ]] && ! _exists "$f" && _block "B3" "$PLAN:$ln" "must_not_exist \`${f}\` — the file is already absent, the criterion proves nothing"
   done <<< "$VP_BLOCKS"
   while IFS=$'\t' read -r ln p; do
@@ -466,18 +465,14 @@ if (( HAS_REPO )); then
   fi
 
   # B7 — a criterion that already holds on HEAD proves nothing about the plan.
-  while IFS=$'\t' read -r ln blk; do
+  while IFS=$'\t' read -r ln rec; do
     [[ -n "${ln:-}" ]] || continue
-    typ="$(tr '|' '\n' <<< "$blk" | grep -E '^type:' | head -1 | sed -E 's/^type:[[:space:]]*//; s/["'\'']//g')"
+    IFS=$'\x1f' read -r _ _ typ c f rx ex _ <<< "$rec"
     case "$typ" in
       must_contain)
-        f="$(tr '|' '\n' <<< "$blk" | grep -E '^file:' | head -1 | sed -E 's/^file:[[:space:]]*//; s/^"//; s/"$//')"
-        rx="$(tr '|' '\n' <<< "$blk" | grep -E '^regex:' | head -1 | sed -E 's/^regex:[[:space:]]*//; s/^"//; s/"$//')"
         [[ -n "$f" && -n "$rx" ]] && _exists "$f" && grep -qE -- "$rx" "$(_abs "$f")" 2>/dev/null && _warn "B7" "$PLAN:$ln" "must_contain already holds on HEAD (\`${f}\` matches /${rx}/) — this criterion passes before any work"
         ;;
       cmd)
-        c="$(tr '|' '\n' <<< "$blk" | grep -E '^cmd:' | head -1 | sed -E 's/^cmd:[[:space:]]*//; s/^"//; s/"$//')"
-        ex="$(tr '|' '\n' <<< "$blk" | grep -E '^expected_exit:' | head -1 | sed -E 's/^expected_exit:[[:space:]]*//')"
         [[ -n "$c" && "$RUN_CMDS" == "1" ]] || continue
         ( cd "$ROOT" && timeout 20 bash -c "$c" >/dev/null 2>&1 ); rc=$?
         [[ "$rc" == "${ex:-0}" ]] && _warn "B7" "$PLAN:$ln" "cmd criterion already exits ${rc} on HEAD — it passes before any work: ${c}"
@@ -501,7 +496,7 @@ if (( HAS_REPO )); then
   done
   # B10 — a file the plan removes that other files still import or reference
   # (ACTA: db/env.py imported a model the plan deleted; four checks found it).
-  for f in $(tr '|' '\n' <<< "$VP_BLOCKS" | grep -E '^file:' | sed -E 's/^file:[[:space:]]*//; s/["'"'"']//g' | sort -u); do
+  for f in $(cut -f2- <<< "$VP_BLOCKS" | awk -F $'\x1f' '$5 != "" {print $5}' | sort -u); do
     _exists "$f" || continue
     stem="${f##*/}"; stem="${stem%.*}"
     [[ ${#stem} -ge 4 ]] || continue
@@ -525,7 +520,10 @@ if [[ -n "$SNAPSHOT" ]]; then
   ADDED="$(diff --unchanged-line-format= --old-line-format= --new-line-format='%dn	%L' "$SNAPSHOT" "$PLAN")"
   REMOVED="$(diff --unchanged-line-format= --new-line-format= --old-line-format='%L' "$SNAPSHOT" "$PLAN")"
   # `--fixes none`: the revision may change no step (plan-level findings only).
-  FIX_STEPS="$(tr ',' '\n' <<< "$FIXES" | tr -d ' ' | grep -vxE 'none|')"
+  # `--fixes any` (2.114.0): an open plan-level blocker or major — its fix lands
+  # in some step, so C4/C5 do not fire; every other check runs unchanged.
+  FIX_ANY=0; [[ "$FIXES" == any ]] && FIX_ANY=1
+  FIX_STEPS="$(tr ',' '\n' <<< "$FIXES" | tr -d ' ' | grep -vxE 'none|any|')"
   # C2 — new claims: paths and identifiers on added lines, checked again. Plan
   # review evidence paths (cp1/, round-N/, packet/, evidence/<plan>/) are exempt:
   # those files exist only while the plan is reviewed, never in the repository.
@@ -562,7 +560,7 @@ if [[ -n "$SNAPSHOT" ]]; then
     [[ -n "${ln:-}" ]] || continue
     idx="$(_step_index_for_line "$ln")" || continue
     n="${STEP_N[$idx]}"; TOUCHED["$n"]=1
-    if ! _in_list "$n" "$FIX_STEPS"; then
+    if ! _in_fix "$n"; then
       if [[ "$line" =~ ^-\ \[\ \] ]]; then _block "C5" "$PLAN:$ln" "revision added an acceptance criterion to Step ${n}, which is not in the fix list (${FIXES}) — a design change, not a fix: cut it or bring it to the PM"
         OUTSIDE_FIXES+=("${n}	ac	${line}")
       elif [[ "$line" =~ ^-\ (Create|Modify|Rewrite|Test): ]]; then _block "C5" "$PLAN:$ln" "revision added a Files entry to Step ${n}, outside the fix list (${FIXES})"
@@ -575,11 +573,11 @@ if [[ -n "$SNAPSHOT" ]]; then
   new_heads="$(printf '%s\n' "$BLANKED" | grep -oE '^### Step [0-9]+' | sort -u)"
   for n in $(comm -3 <(printf '%s\n' "$old_heads") <(printf '%s\n' "$new_heads") | grep -oE '[0-9]+'); do TOUCHED["$n"]=1; done
   new_steps="$(comm -13 <(printf '%s\n' "$old_heads") <(printf '%s\n' "$new_heads") | tr '\n' ';')"
-  if [[ -n "$new_steps" ]]; then
+  if [[ -n "$new_steps" && "${FIX_ANY:-0}" != 1 ]]; then
     _block "C5" "$PLAN" "revision added step(s): ${new_steps} — a fix does not add steps; split or bring it to the PM"
     for n in $(grep -oE '[0-9]+' <<< "$new_steps"); do OUTSIDE_FIXES+=("${n}	step	### Step ${n}"); done
   fi
-  for n in "${!TOUCHED[@]}"; do _in_list "$n" "$FIX_STEPS" || _warn "C4" "$PLAN" "revision touched Step ${n}, which is not in the fix list (${FIXES})"; done
+  for n in "${!TOUCHED[@]}"; do _in_fix "$n" || _warn "C4" "$PLAN" "revision touched Step ${n}, which is not in the fix list (${FIXES})"; done
 fi
 
 # ---------------------------------------------------------------------------

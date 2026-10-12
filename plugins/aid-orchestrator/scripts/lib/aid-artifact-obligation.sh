@@ -121,6 +121,15 @@ aid_artifact_obligation_check() {
     echo "${plan_id} was written but its PM page was not rendered — expected ${page}. Render it: source \"\$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh\" && aid_plan_summary_render \"${plan}\" \"${page}\" (then publish it with the Artifact tool)." >&2
     return 1
   fi
+  local recorded=""
+  recorded="$(sed -n 's/^<!-- aid-plan-sha256: \([0-9a-f]\{64\}\) -->$/\1/p' "$page" | tail -1)"
+  if [[ -n "$recorded" ]]; then
+    # A page that recorded the plan it was rendered from is fresh exactly when
+    # the plan's bytes are the same; mtime is only for older pages.
+    [[ "$recorded" == "$(sha256sum "$plan" | awk '{print $1}')" ]] && return 0
+    echo "${plan_id}'s PM page ${page} was rendered from a different version of the plan — every figure on it may be one the plan no longer holds. Re-render it." >&2
+    return 1
+  fi
   if [[ "$plan" -nt "$page" ]]; then
     echo "${plan_id}'s PM page ${page} is OLDER than the plan — the plan changed after it was summarised, so every figure on the page is a number the plan no longer holds. Re-render it." >&2
     return 1

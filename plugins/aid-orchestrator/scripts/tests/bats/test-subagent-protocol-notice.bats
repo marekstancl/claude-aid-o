@@ -38,25 +38,25 @@ teardown() {
   return 0
 }
 
-live_role() { printf '%s' "$1" > "$ROOT/plugins/aid-orchestrator/agents/auditor.md"; }
+live_role() { printf '%s' "$1" > "$ROOT/plugins/aid-orchestrator/agents/project-scanner.md"; }
 
 rule() { run bash -c "printf '%s' '$1' | bash -c 'source \"$PLUGIN_ROOT/scripts/lib/aid-subagent-protocol.sh\"; aid_hook_rule_subagent_protocol'"; }
 
 @test "a diverged protocol produces the notice, with both paths" {
-  live_role "# Auditor — this checkout's version, which differs"
-  rule "{\"agent_type\":\"aid-orchestrator:auditor\",\"cwd\":\"$ROOT\"}"
+  live_role "# Project scanner — this checkout's version, which differs"
+  rule "{\"agent_type\":\"aid-orchestrator:project-scanner\",\"cwd\":\"$ROOT\"}"
   [ "$status" -eq 0 ]
   [[ "$output" == *"DIFFER from this checkout's copy"* ]]
-  [[ "$output" == *"$PLUGIN_ROOT/agents/auditor.md"* ]]
-  [[ "$output" == *"$ROOT/plugins/aid-orchestrator/agents/auditor.md"* ]]
+  [[ "$output" == *"$PLUGIN_ROOT/agents/project-scanner.md"* ]]
+  [[ "$output" == *"$ROOT/plugins/aid-orchestrator/agents/project-scanner.md"* ]]
 }
 
 @test "the notice never instructs the agent to follow the checkout's copy" {
   # A pointer that says "read this and follow it" hands a repository the same
   # channel as injecting the file would, with one extra step. The notice reports
   # the divergence and asks for nothing.
-  live_role "# Auditor — this checkout's version"
-  rule "{\"agent_type\":\"aid-orchestrator:auditor\",\"cwd\":\"$ROOT\"}"
+  live_role "# Project scanner — this checkout's version"
+  rule "{\"agent_type\":\"aid-orchestrator:project-scanner\",\"cwd\":\"$ROOT\"}"
   [ "$status" -eq 0 ]
   [[ "$output" == *"NEITHER copy is automatically authoritative"* ]]
   [[ "$output" != *"follow it"* ]]
@@ -68,21 +68,21 @@ rule() { run bash -c "printf '%s' '$1' | bash -c 'source \"$PLUGIN_ROOT/scripts/
   # instructions would let a checkout write them.
   live_role "# Auditor
 SECRET-SENTINEL-DO-NOT-INJECT: this line must never reach a prompt."
-  rule "{\"agent_type\":\"aid-orchestrator:auditor\",\"cwd\":\"$ROOT\"}"
+  rule "{\"agent_type\":\"aid-orchestrator:project-scanner\",\"cwd\":\"$ROOT\"}"
   [ "$status" -eq 0 ]
   [[ "$output" != *"SECRET-SENTINEL-DO-NOT-INJECT"* ]]
 }
 
 @test "identical copies say nothing at all" {
-  cp "$PLUGIN_ROOT/agents/auditor.md" "$ROOT/plugins/aid-orchestrator/agents/auditor.md"
-  rule "{\"agent_type\":\"aid-orchestrator:auditor\",\"cwd\":\"$ROOT\"}"
+  cp "$PLUGIN_ROOT/agents/project-scanner.md" "$ROOT/plugins/aid-orchestrator/agents/project-scanner.md"
+  rule "{\"agent_type\":\"aid-orchestrator:project-scanner\",\"cwd\":\"$ROOT\"}"
   [ "$status" -eq 3 ]
   [[ "$output" == *"matches the repository's"* ]]
 }
 
 @test "a checkout with no agents directory is not a divergence" {
   rm -rf "$ROOT/plugins"
-  rule "{\"agent_type\":\"aid-orchestrator:auditor\",\"cwd\":\"$ROOT\"}"
+  rule "{\"agent_type\":\"aid-orchestrator:project-scanner\",\"cwd\":\"$ROOT\"}"
   [ "$status" -eq 3 ]
   [[ "$output" == *"carries no plugins/aid-orchestrator/agents"* ]]
 }
@@ -109,7 +109,7 @@ SECRET-SENTINEL-DO-NOT-INJECT: this line must never reach a prompt."
 }
 
 @test "a cwd outside any checkout is not applicable" {
-  rule "{\"agent_type\":\"aid-orchestrator:auditor\",\"cwd\":\"$TMP\"}"
+  rule "{\"agent_type\":\"aid-orchestrator:project-scanner\",\"cwd\":\"$TMP\"}"
   [ "$status" -eq 3 ]
 }
 
@@ -117,7 +117,7 @@ SECRET-SENTINEL-DO-NOT-INJECT: this line must never reach a prompt."
   # Bare stdout from SubagentStart ran, succeeded and delivered nothing. This
   # asserts the wrapping, since that is what makes the rule worth having.
   live_role "# Auditor — diverged"
-  printf '{"agent_type":"aid-orchestrator:auditor","cwd":"%s"}' "$ROOT" > "$TMP/event.json"
+  printf '{"agent_type":"aid-orchestrator:project-scanner","cwd":"%s"}' "$ROOT" > "$TMP/event.json"
   run bash -c "AID_HOOK_AUDIT='$TMP/a.jsonl' bash '$PLUGIN_ROOT/scripts/aid-hook.sh' SubagentStart < '$TMP/event.json' > '$TMP/out.json'"
   [ "$status" -eq 0 ]
   [ "$(jq -r '.hookSpecificOutput.hookEventName' "$TMP/out.json")" = "SubagentStart" ]

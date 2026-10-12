@@ -72,8 +72,11 @@ I found: {file_or_topic}
 What would you like to do?
   (A) Brainstorm — explore the idea interactively
   (B) Write plan — create implementation plan from this input
-  (C) Generate EPIC — create EPICs from this plan
+  (C) Run it — the plan is reviewed: /aid-run P<NNN> (the direct run, P111)
 ```
+
+(Generating EPICs, `/aid-plan epic`, is the old path for plans generated
+already; P112 removes it.)
 
 ## Working while another plan is live
 
@@ -120,6 +123,7 @@ shape `/aid-status` renders) and carry on. No artifact at all: say nothing.
 | A worktree directory exists that `git worktree list` does not know | Leftover from a crash plus a manual prune. Name it and `git worktree prune`; do not delete a directory you did not create. |
 | `git worktree list` shows trees OUTSIDE `.aid-worktrees/` | Not AID's. Someone else's branch checkout, another session, a sibling clone. AID neither manages nor tears these down. Name them once so the PM knows what else is checked out, note which branch each is on, and leave them alone — in particular, a branch checked out there cannot be checked out again, which is the one way they can make a later `plan-start` or `--recreate-worktree` fail. |
 | Three or more streams already active | Say how many and which, and ask whether to add another — this is a PM capacity question, not a technical limit. |
+| A brief `.aid-o/plans/P{NNN}-zadani.md` and no plan file beside it (no `P{NNN}-*.md` other than the brief itself) | "Brief without plan" — a brainstorm stopped after Step 8 wrote the brief. Name it, and offer to continue from it (Mode: Write Plan takes it as the specification) or delete it. Never delete it unasked. |
 | The nightly artifact is red, stale or unreadable | One line, then continue. Naming it is the whole obligation: planning is never blocked by a test result, and a red night the PM never hears about is the failure this read exists to prevent. |
 
 **Generating AND starting both work.** A newly generated plan's EPICs are
@@ -247,8 +251,33 @@ The opponent gets **the brief**, not your conclusions: handing it your positions
 anchors it, and an opponent that agrees because it was told what to think is a
 second opinion in name only.
 
-Section validation stays (`section-review` critic + ground-truth re-verification
-by the author, MUST 5); what is gone is asking the PM to sign off each one.
+**The critic, once the design is assembled** (`skills/critic.md`, MUST 5 of
+`skills/brainstorming.md` RULE 9-12). Prepare, dispatch, answer, check — in that
+order, and never a hand-written prompt:
+
+```bash
+source "$AID_PLUGIN_PATH/scripts/lib/aid-critic.sh"
+aid_critic_prepare P{NNN} --moment brainstorm        # prints <dir>/prompt.md; refuses without
+                                                    # `## Zadání PM` + `## Účel a co je v sázce` in the interim
+aid_critic_dispatch P{NNN} --moment brainstorm     # Codex through the shared transport, inside the
+                                                    # dispatch bracket; its final message IS <dir>/critic.md
+# exit 4 + "STAND-IN: …" (codex unusable, timed out, or answered without the two
+# level headings): dispatch <dir>/prompt.md yourself, bracketed —
+#   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus critic-brainstorm \
+#     --agent-id aid-orchestrator:critic --evidence-dir <dir>
+#   Agent(subagent_type: general-purpose, model: <the line's model>,
+#         prompt: "Your complete instructions are in <dir>/prompt.md. Read that whole file first and follow it exactly.")
+#   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus critic-brainstorm \
+#     --output-file <dir>/critic.md --evidence-dir <dir>
+# write <dir>/critic-response.md: one row per level-1 item, accepted rows name the checked file or command
+aid_critic_check P{NNN} --moment brainstorm          # refuses shape violations and unanswered items
+```
+
+The critic runs AFTER the opponent and the design (it needs the result) and
+BEFORE the scope list: its level-2 notes are what Step 7a shows the PM as
+suggestions. What its response accepted goes into the interim; what it declined
+stays in the response with the reason. The section-by-section validator is gone;
+what is gone with it is asking the PM to sign off each section.
 
 **The only other interruption** is a fundamental unknown no assumption can
 safely cover. Say that it IS an exception and why.
@@ -264,7 +293,10 @@ After the interim is written and BEFORE the plan is:
   from it.
 
 Goes in the chat, not on a page: it is a checkpoint answered on the spot, and
-the page belongs to the reviewed plan (Plan review item 10).
+the page belongs to the reviewed plan (Plan review item 10). The critic's level-2
+notes (a smaller or larger scope, a different symptom, opportunity cost) are
+listed here as suggestions, each with what the PM would lose; an empty level 2
+is one line.
 
 The PM accepts it, corrects it, or refuses it. **Refused → back to the stop in
 Step 3; the plan is not written.** Something added → it goes back through the
@@ -277,7 +309,26 @@ session writes the plan without showing the list first — the same weakest form
 is registered at that strength rather than described as more.
 
 ### Step 8: Document
-Delegate to `skills/plan-writing.md` (Mode A — Post-Brainstorming).
+
+**Write the brief first** — `.aid-o/plans/P{NNN}-zadani.md` from
+`defaults/templates/zadani.md` (`skills/plan-writing.md` §"The brief file"):
+section 1 from the interim's `## Zadání PM` verbatim plus the `**Co je v sázce:**`
+paragraph from `## Účel a co je v sázce`, section 2 from the grounding reads,
+section 3 from the approved scope list (Step 7a), section 4 from the measured
+paths, section 5 from the project's rules, section 6 from the done-when points,
+each `- [ ] AC<n>:` with its `verification_pattern` block. Then:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" --zadani .aid-o/plans/P{NNN}-zadani.md
+```
+
+It must print `zadani OK` before the plan is written. The brief is the artifact
+that survives the brainstorm: the interim is deleted after CP1, the brief is not.
+Writing it is an instruction; the plan check refuses a `lifecycle_strict` plan
+without the brief (`aid-plan-lint.sh`, P109 Step 2), so a plan that skipped it
+does not reach CP1.
+
+Then delegate to `skills/plan-writing.md` (Mode A — Post-Brainstorming).
 Pass all approved sections. Plan written to `.aid-o/plans/P{NNN}-{topic}.md`.
 Output: `=== Step 8/9: Document ===`
 
@@ -288,6 +339,47 @@ passes here is not refused there:
 ```bash
 bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total <EPIC count>
 ```
+
+A plan whose frontmatter names `depends_on_plans` and stands on an unmerged
+plan's work adds `--project-root .aid-worktrees/plan-<that id>` (the worktree
+of the dependency): its paths exist there, not in the main checkout, and
+without it readiness says "file not found" for work that is real (P106).
+
+**The critic over the written plan (before CP1, after the generation check
+passes).** The same trio, at the plan moment:
+
+```bash
+aid_critic_prepare P{NNN} --moment plan --plan .aid-o/plans/P{NNN}-{topic}.md
+                                 # a plan naming its brief (zadani:) is criticised from the BRIEF FILE
+aid_critic_dispatch P{NNN} --moment plan   # STAND-IN as above with --focus critic-plan
+# write critic-response.md; then
+aid_critic_check P{NNN} --moment plan
+```
+
+Revise the plan for what the response accepted (the plan check with `--snapshot`
+and `--fixes` applies as after any revision), then bind the checked response to
+the revised plan — once; a second revision needs a new critic run:
+
+```bash
+aid_critic_rebind P{NNN} --plan .aid-o/plans/P{NNN}-{topic}.md
+```
+
+The order does not matter: a plan revised BEFORE `aid_critic_check` is recorded
+by the check itself as that one revision (`plan_sha256_revised` in
+`check.json`, `revised_before_check: true`) and `aid_critic_rebind` is then
+refused as a second one. Either way the plan may change once after the critic
+read it.
+
+Rerun the generation check, and only then prepare CP1. **The critic is
+mandatory (P109):** `aid-review-round.sh prepare --round 1` refuses a plan
+without a passed check for the plan it copies (the checked plan, or the one
+revision rebound to it) — `critic_required` — and records that plan's sha as
+`critic_check_sha` in the round manifest; every later round is held to the same
+sha, so a plan fixed after round 1 needs no second critic run. `aid-cp1-gate.sh`
+checks the same binding as a HARD condition (`no_passed_critic_check`):
+generation's `--force` does not waive it, and with the plan review switched off
+the gate checks it against the plan as it is. The packet carries
+`critic-response.md` for the reviewers.
 
 It runs every part and prints every finding before one verdict: the Files-shape
 lint (`aid-plan-lint.sh`, the tier of a new suite included), the deterministic
@@ -315,10 +407,15 @@ bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "<plan>" --snapshot "<plan-bef
 A revision that adds a step, a Files entry or an acceptance criterion outside
 the fix list is refused: that is a design change, and a design change is the
 PM's to make (cut it out, or bring it as a choice), not a fix to slip in.
+`fix-check` derives the list itself: every open finding that names a step
+names it (minors too); an open plan-level blocker or major makes the list
+`any`, since its fix lands in some step; `--fixes any` then skips only the
+"outside the fix list" checks.
 
 ### Step 9: Plan review (CP1)
 Run "Plan review (CP1)" below, from item 1.
 Output: `=== Step 9/9: Plan review ===`, then the PM card of its item 5.
+When it passes, the plan is ready to run: `/aid-run P<NNN>` (no EPIC generation).
 
 **Rules (hard failures if violated):**
 1. ONE question at a time — never batch
@@ -333,23 +430,43 @@ Output: `=== Step 9/9: Plan review ===`, then the PM card of its item 5.
 
 Write an exhaustive implementation plan from specification or topic.
 
-1. **Input resolution** — read spec file, detect format (EPIC/plan/free-form)
+1. **Input resolution** — read spec file, detect format (brief/EPIC/plan/free-form);
+   a brief file (frontmatter `zadani:`, the six sections of `defaults/templates/zadani.md`)
+   IS the specification — lint it with `aid-plan-lint.sh --zadani <file>` and keep it
 2. **Context** — read `config/project.yaml`, `work/active.md` (generated index — read-only), scan related plans
-3. **Interim document** — allocate plan ID and create `.aid-o/work/interim-P{NNN}.md`
-   with input, context, and analysis notes (same as brainstorm mode)
+3. **The brief, then the interim** — allocate plan ID; from a free-form specification
+   FIRST write `.aid-o/plans/P{NNN}-zadani.md` from `defaults/templates/zadani.md` as
+   Brainstorm Step 8 describes and run `aid-plan-lint.sh --zadani` until it prints
+   `zadani OK` (the plan check refuses a strict plan without the brief, P109 Step 2);
+   a brief given as input is kept as it is. Then create `.aid-o/work/interim-P{NNN}.md`
+   with input, context, and analysis notes (same as brainstorm mode), including
+   `## Zadání PM` (the specification's request verbatim) and `## Účel a co je v sázce`
+   (`skills/brainstorming.md` RULE 1a)
 4. **Codebase analysis** — identify affected areas, read key files, note patterns
 5. **Clarification** — max 5 questions if spec has gaps (skip if clear)
 6. **Plan assembly** — write section by section per `skills/plan-writing.md` template
 7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (28 checks: 16 original + #17 + 17a-e + #18 + #19 + 20a-c + #21; eight are band-scoped — see `skills/plan-writing.md`)
-8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
-8a. **The generation check (automatic, before CP1)** — run
+8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`; the interim stays until
+   the CP1 gate passes (Plan review item 10 deletes it)
+8a. **The generation check and the critic (automatic, before CP1)** — run
     `bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total <EPIC count>`,
-    as in Step 8 above: every finding at once; fix and re-run until it passes, BEFORE CP1.
+    as in Step 8 above: every finding at once; fix and re-run until it passes. Then the
+    critic at the plan moment exactly as Step 8 above describes (`aid_critic_prepare
+    P{NNN} --moment plan --plan .aid-o/plans/P{NNN}-{topic}.md`, dispatch, response,
+    `aid_critic_check P{NNN} --moment plan --plan <the same path>`); in this mode it is
+    the critic's only run, there is no proposal moment without a brainstorm. Revise,
+    `aid_critic_rebind`, rerun the generation check, and only then CP1.
 9. **Plan review (CP1)** — run "Plan review (CP1)" below, from item 1.
 
 Output: plan path, step count, quality gate results, plan review verdict.
+When the plan review passes, **the plan is ready to run: `/aid-run P<NNN>`** —
+the direct run (`aid-plan-fsm.sh plan-run`, P111) starts it straight from the
+plan, one run on `plan/<id>`, with no EPIC generation.
 
-## Mode: Generate EPIC
+## Mode: Generate EPIC — the old path (until P112)
+
+New plans do not need this mode: `/aid-run P<NNN>` runs them directly (P111).
+It stays for plans that are generated already, and P112 removes it.
 
 Parse a Plan file, generate every EPIC and plan.json first, verify one complete
 generation receipt, then create run files/FSM state and queue entries.
@@ -442,8 +559,10 @@ command accountable, so an unrecordable archive is not performed.
 ## Plan review (CP1)
 
 Both modes end here, once `aid-generation-readiness.sh` passes on the written plan. Six
-reviewer roles (`skills/plan-review-roles.md`) answer the same packet in at most
-two rounds by default; `aid-review-round.sh` runs the rounds and
+reviewer roles (`skills/plan-review-roles.md`) answer the same packet — the plan
+AND the PM's brief (`zadani.md`, P109), which each role checks point by point
+first — in one round by default, two when round 1 found a blocker;
+`aid-review-round.sh` runs the rounds and
 `aid-cp1-gate.sh` refuses EPIC generation until the evidence is complete. Every
 item below is a command. You never write, edit or complete a reviewer's answer.
 
@@ -458,7 +577,7 @@ skipped. The gate then passes with a notice.
    revision makes it stale; rerun it after every edit):
 
    ```bash
-   bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" <plan> --total <EPIC count>
+   bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" <plan> --total <EPIC count>   # + --project-root .aid-worktrees/plan-<dep> for a plan on another plan's branch
    ```
 
 2. Prepare round 1. It prints the round directory and one prompt per reviewer:
@@ -466,6 +585,11 @@ skipped. The gate then passes with a notice.
    ```bash
    bash "$R" prepare <plan> --round 1
    ```
+
+   It refuses without a passed critic check for this plan (`critic_required`,
+   P109): run `aid_critic_prepare P{NNN} --moment plan --plan <plan>`,
+   `aid_critic_dispatch P{NNN} --moment plan` and `aid_critic_check P{NNN} --moment plan`
+   (Step 8), then prepare again.
 
 3. Dispatch every reviewer of the round. A role with `provider: codex`:
 
@@ -565,8 +689,15 @@ When `close` reports `fail` on a step or EPIC round and a round remains
 ```
 Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,
       model: <the **Model:** of the step's role card in skills/role-cards.md>,
-      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the reviewer's example plus two other variants of the same rule. Touch nothing outside the rules the findings name.")
+      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
 ```
+
+**Close the round BEFORE the fix.** When the fix was committed first (the natural
+reflex on a clear finding — P010 did it twice in one day), `close` refuses with
+"head moved" and names the way out: `close … --at <sha the reviewers saw>`. The
+round then closes bound to that revision (`measurement.json` `revision.head_sha`,
+`closed_with_at: true`), and the fix is what the confirmation round confirms. `--at`
+takes only the round's recorded head, and only while HEAD still descends from it.
 
 Then `aid-step-check.sh` again (the range now ends at the fix commit) and
 `prepare --round K+1`: the confirmation round asks only the reporters of what
@@ -612,7 +743,11 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
 6. No blocker open: if you changed the plan after the round (fixing majors,
    say), run `finalize` (item 8) before the gate; otherwise go to item 9.
    Blockers open: fix the plan — only the steps the
-   open blockers and majors name — then check the fix and prepare round 2:
+   open blockers and majors name — then check the fix and prepare round 2
+   (round 2 needs no override exactly then: round 1 found a blocker and the fix
+   passed `fix-check` — `second_round_when: blocker_and_fix_check`; after a
+   round with majors only, `prepare --round 2` refuses with
+   `second_round_needs_open_blocker` and the majors are fixed and `finalize`d):
 
    ```bash
    bash "$R" fix-check <plan> --round 1
@@ -622,8 +757,14 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
 
    `fix-check` refuses a fix that adds a step, a Files entry or an acceptance
    criterion to a step no finding named: cut it, or bring it to the PM as a
-   design change. Round 2 asks only the reviewers whose findings touch a
-   changed step, plus every reviewer that reported a blocker.
+   design change. A CONSEQUENTIAL edit — step B restates a value the fix of
+   step A changed (P010: a count; P107: a reworded Files bullet) — is declared,
+   not smuggled: `fix-check <plan> --round 1 --also-steps B --reason "<what the fix
+   of A changed in B>"`; the record lands in `fix-diff.json` and the next round's
+   packet names it ("Consequential edits the author declared"), so a reviewer
+   reads the edit instead of a silent contradiction. Round 2 asks only the
+   reviewers whose findings touch a changed step, plus every reviewer that
+   reported a blocker.
 
 7. Run round 2 exactly as items 3 to 5, with `--round 2`.
 
@@ -661,8 +802,26 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
     plan this session wrote has passed the gate without a current page
     (`lib/aid-artifact-obligation.sh`); before the gate passes it asks for none.
 
-**Round count.** Two rounds is the default (`review_checkpoints.plan_review.rounds_default`).
-Only when the PM says so, record one round, or a third:
+    Then delete the interim: `rm .aid-o/work/interim-P{NNN}.md` — this is the one
+    place it is deleted (`skills/brainstorming.md` RULE 5); the critic before CP1
+    read it, and the evidence under `evidence/<plan_id>/critic/` keeps what mattered.
+
+    Before `aid-brainstorm-state.sh approve P{NNN}` the brainstorm's own page
+    must exist — `approve` refuses without it, because the acceptance is based
+    on what the PM saw (P108 met the refusal here with nothing in this step
+    naming the page):
+
+    ```bash
+    source "$AID_PLUGIN_PATH/scripts/lib/aid-brainstorm-summary.sh" && \
+      aid_brainstorm_summary_render P{NNN} .aid-o/work/brainstorm/P{NNN}/brainstorm-summary-artifact.html
+    ```
+
+**Round count.** One round is the default (`review_checkpoints.plan_review.rounds_default: 1`,
+P109); the second round follows by itself when round 1 found a blocker and its
+fix passed `fix-check` (`second_round_when: blocker_and_fix_check` — prepare and
+the gate ask the same function, `aid_review_second_round_allowed`). Any other
+round past the default, and a second round after a round with majors only, needs
+the PM. Only when the PM says so, record one round, or a further one:
 
 ```bash
 bash "$R" override <plan> --rounds 3 --reason "<the PM's words, quoted>"
@@ -726,6 +885,22 @@ Blocked card "plan-close brief missing — run aid-pm-brief.sh" rather than
 assembling a summary from evidence files. `legacy_epic_release_mode` plans keep
 their existing per-EPIC release text unchanged.
 
+## The brief changes
+
+A brief point is never changed in the plan alone — `fix-check` runs the lint's brief pass and
+refuses it (`fix_check_brief_point_changed`). When the PM changes what they want: bump `verze:`
+in the brief, update `zadani_verze` and `zadani_sha256` in the plan, rerun `aid-plan-lint.sh`,
+`fix-check` (it records `brief_changed: true`), rerun the critic from the brief file
+(`aid_critic_prepare P{NNN} --moment plan --plan <plan>`, dispatch, check), then restart the
+review in a new attempt:
+
+```bash
+bash "$R" prepare <plan> --round 1 --restart --reason "<why the brief changed>"
+```
+
+The old rounds stay under `cp1/attempt-<k>/`. A brief change is never a "fix", and a
+confirmation round never reads a different brief than round 1 (`brief_changed_after_round`).
+
 ## The PM page goes stale with every plan edit
 
 `aid-plan-to-epic.sh` refuses to generate when the PM page is older than the plan file
@@ -751,6 +926,9 @@ A gate that refuses a valid plan, a script that crashes, a message that tells yo
 - `{plugin_path}/scripts/lib/aid-plan-summary.sh` — renders the PM page for a plan that passed its review (Plan review item 10)
 - `defaults/policies/review-checkpoints.yaml` — `plan_review`: reviewers, providers, models, rounds
 - `defaults/templates/plan.md` — base plan template
+- `defaults/templates/zadani.md` — the brief file template (six sections, `AC<n>` points)
+- `{plugin_path}/scripts/lib/aid-zadani.sh` — the one reader of a brief file
+- `{plugin_path}/scripts/lib/aid-verification-pattern.sh` — the one reader and validator of `AC<n>` criteria and their `verification_pattern` blocks (runner, plan check A6, brief lint)
 
 ## Important
 

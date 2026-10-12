@@ -25,8 +25,8 @@ tenhle projekt měří a hlídá sám sebe:
 
 | | Co | Kde |
 |---|---|---|
-| **A** | Merge cesta je **81 % nad rozpočtem** (18 min proti 10) a **jedna sada je 47 % celého portfolia** (199 min). Noční běh proto tři noci nedoběhl. | `HANDOFF-2026-08-14.md`, okno A — IMP-505, IMP-501 |
-| **B** | Riziko plánu se pozná **z prózy, ne z dotčených souborů** (P080 „srovnej nápovědu" se trefil 13×, první výskyt je odkaz v hlavičce). Spadne jeden test → pouští se celá sada. Nastavení se čte z jiného stromu, než ve kterém běží kód — kouslo to dvakrát za den. | `HANDOFF-2026-08-14.md`, okno B — IMP-497/498/499 |
+| **A** | Merge cesta je **81 % nad rozpočtem** (18 min proti 10) a **jedna sada je 47 % celého portfolia** (199 min). Noční běh proto tři noci nedoběhl. | `2026-08-14-handoff.md`, okno A — IMP-505, IMP-501 |
+| **B** | Riziko plánu se pozná **z prózy, ne z dotčených souborů** (P080 „srovnej nápovědu" se trefil 13×, první výskyt je odkaz v hlavičce). Spadne jeden test → pouští se celá sada. Nastavení se čte z jiného stromu, než ve kterém běží kód — kouslo to dvakrát za den. | `2026-08-14-handoff.md`, okno B — IMP-497/498/499 |
 | **C** | Tento checklist + entry-point dokument = podklady pro **P061 → P062/E10** | tento soubor a `2026-08-02-IMP-AID-ENTRYPOINT-UX-HELP-INIT-SETUP-HANDOFFS.md` |
 
 **Předchozí znění statusu (2026-08-10):** P064, Phase 1,

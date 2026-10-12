@@ -86,7 +86,7 @@ orchestrated: true|false (if orchestrated by Controller)
 and why narrowing the root cause first prevents wasted effort on symptoms rather than the
 underlying defect.}
 
-**Agent / Role:** {role name — e.g., backend, frontend, architect, security, qa}
+**Agent / Role:** {role name — e.g., backend, frontend, security, qa}
 
 **Inputs:**
 <!-- Files, context, or outputs from previous phases that this phase needs. -->
@@ -114,7 +114,7 @@ underlying defect.}
 the fix strategy and why it's preferred over alternatives. This phase should change only what
 is necessary to resolve the defect without introducing side effects.}
 
-**Agent / Role:** {role name — e.g., backend, frontend, architect, security, qa}
+**Agent / Role:** {role name — e.g., backend, frontend, security, qa}
 
 **Inputs:**
 <!-- Files, context, or outputs from previous phases that this phase needs. -->
@@ -142,7 +142,7 @@ is necessary to resolve the defect without introducing side effects.}
 Write regression tests that would catch this bug if it were re-introduced. Confirm all
 existing test suites still pass.}
 
-**Agent / Role:** {role name — e.g., backend, frontend, architect, security, qa}
+**Agent / Role:** {role name — e.g., backend, frontend, security, qa}
 
 **Inputs:**
 <!-- Files, context, or outputs from previous phases that this phase needs. -->

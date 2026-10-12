@@ -16,6 +16,9 @@ fail_rules:
   - id: exec_keyword
     description: "Direct exec/eval/system/popen calls"
     pattern: '\b(exec|eval|system|popen)\s*\('
+  - id: shell_string_exec
+    description: "A string handed to a shell: bash/sh -c, eval of a variable, Node child_process exec/execSync (P110: no parenthesis needed)"
+    pattern: '\b(bash|sh)\s+-c\s|\beval\s+["$]|\bexec(Sync)?\s*\(\s*[`"$]|child_process'
   - id: subprocess_shell_true
     description: "subprocess with shell=True — arbitrary shell command injection vector"
     pattern: 'subprocess\.[a-zA-Z]+\s*\([^)]*shell\s*=\s*True'

@@ -4675,3 +4675,44 @@ EOF
   [ "$(jq -r '[.acceptance_evidence.criteria[] | select(.verdict == "fail")] | length' "$ae")" -eq 1 ]
   [[ "$(jq -r '[.acceptance_evidence.criteria[] | select(.verdict == "fail") | .ac] | join(",")' "$ae")" == *"promise"* ]]
 }
+
+# =============================================================================
+# ─── P107 Step 2: a verification-only test must be gone from the frozen candidate ───
+# =============================================================================
+# _seed_vo_project present|absent — a candidate whose plan marks tests/one-off.sh
+# as verification-only; the file is committed (present) or never created (absent).
+_seed_vo_project() {
+  _bootstrap
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans" "$TEST_PROJECT_ROOT/tests"
+  printf '# %s\n\n### Step 1: measure\n\n**Files:**\n- Test: `tests/one-off.sh` — verification-only, delete before plan-final: a one-off measurement\n\n## Acceptance Criteria\n- [ ] something\n' "$PLAN_ID" \
+    > "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-test-plan.md"
+  git -C "$TEST_PROJECT_ROOT" add -- ".aid-o/plans/${PLAN_ID}-test-plan.md"
+  if [[ "$1" == present ]]; then
+    printf 'echo measured\n' > "$TEST_PROJECT_ROOT/tests/one-off.sh"
+    git -C "$TEST_PROJECT_ROOT" add -- tests/one-off.sh
+  fi
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "the plan file"
+  git -C "$TEST_PROJECT_ROOT" branch -f "plan/${PLAN_ID}" main
+  _finalize "$PLAN_ID" freeze
+}
+
+@test "verification-only: --stage gates refuses a candidate on which a marked test still exists, and runs when it is gone" {
+  _seed_vo_project present
+  _write_exec_yaml
+  local receipt; receipt="$(_write_receipt bats_all)"
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL [verification_only_removed] tests/one-off.sh"* ]]
+  [ ! -f "$(_report)" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_GATES" ]
+
+  _seed_vo_project absent
+  _write_exec_yaml
+  receipt="$(_write_receipt bats_all)"
+  _gates --substitute-receipt "bats_all=${receipt}"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS [verification_only_removed] 1 marked path(s)"* ]]
+  run jq -r '.overall' "$(_report)"
+  [ "$output" = "pass" ]
+}

@@ -19,6 +19,7 @@ setup() {
   LINT="$PLUGIN_ROOT/scripts/aid-plan-lint.sh"
   TMP="$(mktemp -d)"
   mkdir -p "$TMP/.aid-o/work/evidence"
+  source "$PLUGIN_ROOT/scripts/tests/lib/aid-test-plan-fixture.sh"
 }
 
 teardown() {
@@ -62,6 +63,8 @@ ${extra}
 **Effort:** S
 **AID Role:** backend
 EOF
+  # P109: a lifecycle_strict plan names its brief; this suite measures telemetry
+  aid_fixture_write_brief "$TMP" "$f" >/dev/null
   printf '%s' "$f"
 }
 
@@ -105,6 +108,8 @@ timeline_of() { printf '%s/.aid-o/work/evidence/%s/timeline.jsonl' "$TMP" "$1"; 
 @test "no workspace means no telemetry and no failure" {
   outside="$(mktemp -d)"
   cp "$(write_plan P965 'plugins/aid-orchestrator/commands/aid-help.md')" "$outside/P965.md"
+  # a brief lives in a workspace, and this case has none: a legacy plan here
+  sed -i '/^lifecycle_strict:/d; /^zadani/d' "$outside/P965.md"
   run bash "$LINT" "$outside/P965.md"
   [ "$status" -eq 0 ]
   [ ! -e "$outside/.aid-o" ]
@@ -116,6 +121,7 @@ timeline_of() { printf '%s/.aid-o/work/evidence/%s/timeline.jsonl' "$TMP" "$1"; 
   # paths would count exactly the runs nobody needs counted (codex review of
   # EPIC 2, finding 3).
   plan="$(write_plan P966 'plugins/aid-orchestrator/scripts/aid-fsm.sh')"
+  aid_fixture_seed_critic_check "$TMP" "$plan"   # this case measures telemetry, not the critic
   run bash "$GATE" --plan "$plan" --project-root "$TMP"
   [ "$status" -eq 1 ]
   run jq -r 'select(.event == "cp1_gate_result") | "\(.result) \(.exit_code)"' "$(timeline_of P966)"

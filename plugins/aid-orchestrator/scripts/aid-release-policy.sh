@@ -264,8 +264,14 @@ check_required_present() {
         add_blocker "$bid" "blocking" "acceptance-evidence.json reports partial — criteria not met: ${_failed:-unnamed}"
         return 0
       fi
+      # The same numbers the PM card shows (2.114.0): what the gate did not measure.
+      local _um; _um="$(jq -r '.verdict.unmeasured // empty | "unmeasured: \(.summary_prose) prose summary criteria, \(.summary_unparsed) unparsed summary bullets, \(.step_bullets) step-level bullets"' "$file" 2>/dev/null)"
       if [[ "$_ae" == "prose_only" ]]; then
-        add_input "$id" "$(basename "$file")" "pass" "no acceptance criterion is machine-checkable (prose_only) — the reviews judged them" "$(_artifact_head_match "$file")" "present_ok"
+        add_input "$id" "$(basename "$file")" "pass" "no acceptance criterion is machine-checkable (prose_only) — the reviews judged them${_um:+; ${_um}}" "$(_artifact_head_match "$file")" "present_ok"
+        return 0
+      fi
+      if [[ "$_ae" == "verified" && -n "$_um" ]]; then
+        add_input "$id" "$(basename "$file")" "pass" "every machine-checkable criterion passed (verified); ${_um}" "$(_artifact_head_match "$file")" "present_ok"
         return 0
       fi
     fi
@@ -692,9 +698,16 @@ main() {
           fail)            pd_row_verdict="blocked" ;;
         esac
         add_input plan_diff "plan-diff.json" "$pd_row_verdict" "bound plan AC verdict=${pd_verdict}" true
+        # P110: a point the close could not run in isolation (no_isolation,
+        # no_verification_env, verification_env_unset, env_stripped) is
+        # UNMEASURED — named as such, never counted as verified.
+        local pd_um
+        pd_um="$(jq -r '[.results[] | select(.verdict == "absent" and ((.reason // "") | test("^(no_isolation|no_verification_env|verification_env_unset|env_stripped)"))) | "\(.ac_label) (\(.reason))"] | join(", ")' "$pd" 2>/dev/null || true)"
+        [[ -n "$pd_um" ]] && add_blocker plan_diff "blocking" "plan-diff: criteria unmeasured, the close could not run them isolated: ${pd_um}"
         case "$pd_verdict" in
           pass|skipped|partial) : ;;
-          *) add_blocker plan_diff "blocking" "plan-diff reports absent acceptance criteria" ;;
+          *) [[ -n "$pd_um" ]] && (( $(jq '[.results[] | select(.verdict == "absent")] | length' "$pd") == $(jq '[.results[] | select(.verdict == "absent" and ((.reason // "") | test("^(no_isolation|no_verification_env|verification_env_unset|env_stripped)")))] | length' "$pd") )) \
+               || add_blocker plan_diff "blocking" "plan-diff reports absent acceptance criteria" ;;
         esac
       fi
     fi
@@ -975,6 +988,21 @@ main() {
     if [[ -n "$gates_report_path" ]] && _is_json "$gates_report_path"; then
       gates_result="$(jq -r '(.overall // .gates_report.result // .status // "unknown")' "$gates_report_path" 2>/dev/null || echo unknown)"
     fi
+    # P110: what the run and the plan cost, from the rounds where they live
+    # (the EPIC runs' cp2/cp3, the close attempts' cp7; CP1 and the critic).
+    local run_cost plan_cost _cost_rc=0 _e _cost_err; _cost_err="$(mktemp)"
+    local -a _epic_dirs=()
+    # the EPIC's dir, not its last run: an EPIC run twice (R-1, R-2) cost both runs
+    while IFS= read -r _e; do [[ -n "$_e" ]] && _epic_dirs+=("$(dirname "${PROJECT_ROOT}/${_e}")"); done < <(jq -r '.[].evidence_dir // empty' <<< "$PLAN_EPICS_JSON")
+    run_cost="$(aid_plan_run_cost "$(dirname "$EVIDENCE_DIR")" "$PLAN_ID" ${_epic_dirs[@]+"${_epic_dirs[@]}"} 2>"$_cost_err")" || _cost_rc=$?
+    (( _cost_rc == 0 )) && { plan_cost="$(aid_plan_plan_cost "$(dirname "$EVIDENCE_DIR")" "$PLAN_ID" 2>>"$_cost_err")" || _cost_rc=$?; }
+    if (( _cost_rc != 0 )); then
+      echo "REFUSED (measurement_unreadable): $(cat "$_cost_err" 2>/dev/null) — the cost of the run cannot be summed over a file nobody can read
+next: restore the round's measurement.json (aid-review-round.sh close writes it; an interrupted close is run again), then plan-finalize --stage decide again (pipeline.md §When AID refuses: measurement_unreadable)" >&2
+      rm -f "$_cost_err"
+      exit 3
+    fi
+    rm -f "$_cost_err"
     plan_summary_json="$(jq -n \
       --slurpfile m "$manifest_s" \
       --arg plan "$PLAN_ID" --arg run "$RUN_ID" \
@@ -999,8 +1027,11 @@ main() {
           specialist_review: ($b.plan_final_review // null),
           remaining_backlog: ($b.plan_final_backlog // []),
           close: $close,
+          run_cost: $run_cost,
+          plan_cost: $plan_cost,
           time: $time
-        }')" || plan_summary_json="null"
+        } + (if (($b.repo_roots // []) | length) > 0
+             then {foreign_branches: [$b.repo_roots[] | {name, branch, head, commits}]} else {} end)' --argjson run_cost "$run_cost" --argjson plan_cost "$plan_cost")" || plan_summary_json="null"
   fi
 
   # --- envelope-derived fields ---

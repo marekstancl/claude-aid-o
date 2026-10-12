@@ -34,6 +34,22 @@ aid_plugin_issues_path() {
   aid_state_path "$AID_PLUGIN_ISSUES_REL" 2>/dev/null || printf '%s' "$AID_PLUGIN_ISSUES_REL"
 }
 
+# aid_plugin_issues_gitattributes <root> — the diary merges as a union, so a
+# freeze or merge never conflicts on an append-only log (P108 §17; P109 Step 6).
+# Appends `.aid-o/work/aid-plugin-issues.md merge=union` to <root>/.gitattributes
+# when the exact line is absent (creating the file); idempotent; other lines are
+# kept. An unwritable file is a warning, never a failure: the line is a
+# convenience for merges, not a precondition of /aid-init.
+aid_plugin_issues_gitattributes() {
+  local root="${1:?aid_plugin_issues_gitattributes: root required}" line="${AID_PLUGIN_ISSUES_REL} merge=union"
+  local f="${root%/}/.gitattributes"
+  if ! grep -qxF "$line" "$f" 2>/dev/null; then
+    { [[ ! -s "$f" || "$(tail -c1 "$f")" == "" ]] || echo; printf '%s\n' "$line"; } >> "$f" 2>/dev/null \
+      || { echo "gitattributes: WARNING — could not write ${f}; the diary is not merged as a union" >&2; return 0; }
+  fi
+  echo "gitattributes: merge=union present"
+}
+
 # aid_plugin_issues_version — this plugin's version, from its own manifest
 # (../../.claude-plugin/plugin.json relative to this lib — the same path the
 # cache preflight uses, valid for the marketplace cache, a worktree and

@@ -80,7 +80,7 @@ init_git_repo() {
   local repo="$WORK/agentskew"
   make_dogfood_fixture "$repo" match
   init_git_repo "$repo"
-  echo "# a card the cache does not have" >> "$repo/plugins/aid-orchestrator/agents/auditor.md"
+  echo "# a card the cache does not have" >> "$repo/plugins/aid-orchestrator/agents/implementer.md"
   ( cd "$repo" && git add -A && git commit -q -m "agent card drift" )
   cd "$repo"
   run bash -c 'source "$LIB"; run_cache_preflight "" ""'
@@ -105,7 +105,7 @@ init_git_repo() {
   local repo="$WORK/artskew"
   make_dogfood_fixture "$repo" match
   init_git_repo "$repo"
-  echo "# drift" >> "$repo/plugins/aid-orchestrator/agents/auditor.md"
+  echo "# drift" >> "$repo/plugins/aid-orchestrator/agents/implementer.md"
   ( cd "$repo" && git add -A && git commit -q -m drift )
   cd "$repo"
   run bash -c 'source "$LIB"; run_cache_preflight "" "" || true; aid_cache_preflight_freshness_artifact "$WORK/af.json"'

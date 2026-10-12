@@ -21,6 +21,7 @@ setup() {
   echo 'export function isoNow() { return "x" }' > src/b.ts
   PLAN=".aid-o/plans/P901-fixture.md"
   CMD='grep -rln isoNow src/'
+  source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"
 }
 teardown() { cd /; rm -rf "$TEST_DIR"; }
 
@@ -78,6 +79,9 @@ _plan_conflicting() {   # <strict|legacy> <reuse-check-value>
     printf '\n**Reuse check:** %s\n' "$reuse"
     printf '\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nn/a\n\n**Edge Cases:**\n- none\n'
   } > "$PLAN"
+  # P109: a strict plan names its brief; these cases are about the N+1 rule
+  [[ "$strict" == "strict" ]] && aid_fixture_write_brief "$TEST_DIR" "$PLAN" >/dev/null
+  return 0
 }
 
 @test "N+1: founding another variant after declaring conflict, with no argument, is refused" {

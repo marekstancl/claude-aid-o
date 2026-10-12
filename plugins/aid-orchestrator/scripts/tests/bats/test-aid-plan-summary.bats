@@ -118,6 +118,24 @@ EOF
   grep -q '1 kolo' "$OUT"
 }
 
+@test "a plan read from a linked worktree shows the review recorded in the state root (agents 27. 9.)" {
+  local plan; plan="$(write_plan P955 'plugins/aid-orchestrator/commands/aid-help.md')"
+  mkdir -p "$TMP/.aid-o/plans" "$TMP/.aid-o/work/plan-state/P001"
+  mv "$plan" "$TMP/.aid-o/plans/P955.md"; : > "$TMP/.aid-o/work/plan-state/P001/x"
+  ( cd "$TMP" && git init -q -b main && git config user.email t@t && git config user.name t && git add -A && git commit -qm seed && git worktree add -q "$TMP/wt" -b wtb )
+  mkdir -p "$TMP/.aid-o/work/evidence/P955/cp1/round-1"
+  printf '{"reviewers": {"reuse": {"tokens": 1200, "answered": true}}, "degraded": false}\n' \
+    > "$TMP/.aid-o/work/evidence/P955/cp1/round-1/measurement.json"
+  aid_plan_summary_render "$TMP/wt/.aid-o/plans/P955.md" "$OUT"
+  grep -q 'Revize plánu: review: 1 round, 1200 tokens' "$OUT"
+}
+
+@test "the page records the sha256 of the plan it was rendered from" {
+  local plan; plan="$(write_plan P956 'plugins/aid-orchestrator/commands/aid-help.md')"
+  aid_plan_summary_render "$plan" "$OUT"
+  grep -qx "<!-- aid-plan-sha256: $(sha256sum "$plan" | awk '{print $1}') -->" "$OUT"
+}
+
 @test "a plan with no Goal is refused, naming the section — no half-empty page" {
   plan="$(write_plan P954 'plugins/aid-orchestrator/commands/aid-help.md')"
   sed -i '/^## Goal$/,+3d' "$plan"
@@ -323,7 +341,9 @@ PLAN
 
 @test "an AID Role outside the valid set is named as a defect, with its consequence" {
   local p="$BATS_TEST_TMPDIR/p.md" o="$BATS_TEST_TMPDIR/o.html"
-  printf -- '---\nid: P906\ntype: plan\n---\n# P906 — X\n\n## Goal\nG.\n\n### Step 1: A\n\n**Objective:** cosi.\n\n**AID Role:** docs\n' > "$p"
+  # `docs` became a valid role in 2.112.0 (docs-writer its older spelling), so
+  # the defect case is a role that never was one: a step that is both sides.
+  printf -- '---\nid: P906\ntype: plan\n---\n# P906 — X\n\n## Goal\nG.\n\n### Step 1: A\n\n**Objective:** cosi.\n\n**AID Role:** fullstack\n' > "$p"
   run aid_plan_summary_render "$p" "$o"
   [ "$status" -eq 0 ]
   grep -q "VADA" "$o"
@@ -344,4 +364,52 @@ PLAN
   run aid_plan_summary_render "$p" "$o"
   [ "$status" -eq 0 ]
   [[ "$output" != *"declares no artifact_type"* ]]
+}
+
+# ── P109 Step 2: the brief on the PM page ────────────────────────────────────
+# Defect caught: AC3's page blocks missing, or counting wrong.
+_bound_plan() {   # a brief-bound plan with two marker lines
+  mkdir -p "$TMP/.aid-o/plans"
+  cp "$PLUGIN_ROOT/scripts/tests/fixtures/zadani/p014-zadani.md" "$TMP/.aid-o/plans/P014-zadani.md"
+  sed "s/SHA_OF_THE_BRIEF/$(sha256sum "$TMP/.aid-o/plans/P014-zadani.md" | cut -d' ' -f1)/" \
+    "$PLUGIN_ROOT/scripts/tests/fixtures/zadani/p014-plan.md" > "$TMP/.aid-o/plans/P014-plan.md"
+  printf '\n## Goal\n\nThe person who reports outside Lisa hears back.\n\n## Approach\n\n- an unknown value stops the start (mění výsledek pro uživatele)\n- the e-mail is shown to support (mění výsledek pro uživatele)\n' >> "$TMP/.aid-o/plans/P014-plan.md"
+  printf '%s' "$TMP/.aid-o/plans/P014-plan.md"
+}
+_groups() { python3 -c '
+import re, html, sys
+s = open(sys.argv[1]).read()
+for m in re.finditer(r"<h3 class=\"deliv-epic\">(.*?)</h3><ul class=\"deliv\">(.*?)</ul>", s, re.S):
+    for li in re.findall(r"<li>(.*?)</li>", m.group(2), re.S):
+        print(html.unescape(m.group(1)) + "\t" + html.unescape(re.sub("<[^>]+>", "", li)))
+' "$1"; }
+
+@test "zadani: a brief-bound plan renders Body zadání, one row per point with its closing steps" {
+  plan="$(_bound_plan)"
+  aid_plan_summary_render "$plan" "$OUT"
+  run _groups "$OUT"
+  [ "$(grep -c '^Body zadání' <<< "$output")" -eq 9 ]
+  grep -q $'^Body zadání\tAC1 → krok 1: ' <<< "$output"
+  grep -q $'^Body zadání\tAC2 → krok 1: ' <<< "$output"
+  grep -q $'^Body zadání\tAC9 → krok 3: ' <<< "$output"
+}
+
+@test "zadani: two marker lines render the decisions block with two entries; none renders no block" {
+  plan="$(_bound_plan)"
+  aid_plan_summary_render "$plan" "$OUT"
+  run _groups "$OUT"
+  [ "$(grep -c '^Rozhodnutí, která mění výsledek pro uživatele' <<< "$output")" -eq 2 ]
+  grep -q $'\tApproach: an unknown value stops the start' <<< "$output"
+  sed -i '/(mění výsledek pro uživatele)/d' "$plan"
+  aid_plan_summary_render "$plan" "$OUT"
+  run _groups "$OUT"
+  [ "$(grep -c '^Rozhodnutí' <<< "$output")" -eq 0 ]
+}
+
+@test "zadani: a plan with no brief renders no Body zadání block" {
+  plan="$(_bound_plan)"
+  sed -i '/^zadani/d' "$plan"
+  aid_plan_summary_render "$plan" "$OUT"
+  run _groups "$OUT"
+  [ "$(grep -c '^Body zadání' <<< "$output")" -eq 0 ]
 }

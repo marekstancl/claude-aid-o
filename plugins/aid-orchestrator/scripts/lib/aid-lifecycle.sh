@@ -26,6 +26,8 @@ _AID_LIFECYCLE_SH_LOADED=1
 
 # Resolve the plugin's defaults dir (for orchestration.yaml) relative to this lib.
 _AID_LC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=aid-roots.sh
+source "${_AID_LC_LIB_DIR}/aid-roots.sh"   # aid_plan_files — a plan file, never its brief
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 aid_lifecycle_dir()   { echo "${1:-.}/.aid-lifecycle"; }
@@ -524,7 +526,7 @@ aid_lifecycle_plan_mode() {
 # 3 plan not found / not on target_branch, 4 user staged/unstaged collision,
 # 5 commit not durable (recoverable — re-run).
 aid_lifecycle_set_plan_mode() {
-  local plan_id="$1" mode="$2" root="${3:-.}"
+  local plan_id="$1" mode="$2" root="${3:-.}" declared="${4:-}"   # P111: optional declared-EPIC list (plan-run)
   case "$mode" in
     plan_branch|legacy_epic_release_mode) ;;
     *)
@@ -539,7 +541,7 @@ aid_lifecycle_set_plan_mode() {
   # UNTOUCHED — a mode write must never proceed on a manifest that isn't
   # itself durably in place.
   local mrc=0
-  aid_lifecycle_ensure_manifest "$plan_id" "$root" >/dev/null 2>&1 || mrc=$?
+  aid_lifecycle_ensure_manifest "$plan_id" "$root" "$declared" >/dev/null 2>&1 || mrc=$?
   [[ "$mrc" -ne 0 ]] && return "$mrc"
 
   local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
@@ -905,12 +907,14 @@ _aid_lc_frontmatter_depends() {
     | yq -r '.depends_on_plans // [] | .[]' 2>/dev/null || true
 }
 
-# aid_lifecycle_ensure_manifest <plan_id> <root> — create + commit a git-tracked
-# manifest from the STRICT legacy parse if none exists. NEVER edits the prose
+# aid_lifecycle_ensure_manifest <plan_id> <root> [declared] — create + commit a git-tracked
+# manifest from the STRICT legacy parse if none exists. `declared` (P111, the
+# direct run: "E-<nnn>-1_1") replaces the bold-marker parse — one run per plan,
+# whatever EPIC markers the plan still carries. NEVER edits the prose
 # plan. Returns 0 (present/created), 2 (ambiguous => legacy-unverifiable),
 # 3 (plan not found), 4 (user collision on the manifest path), 5 (commit not durable).
 aid_lifecycle_ensure_manifest() {
-  local plan_id="$1" root="${2:-.}"
+  local plan_id="$1" root="${2:-.}" declared="${3:-}"
   local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
   # Fast path ONLY when the manifest is already DURABLE on the target branch. A
   # manifest that exists on disk but is NOT yet committed (an interrupted commit,
@@ -926,7 +930,15 @@ aid_lifecycle_ensure_manifest() {
   # Fail-closed BEFORE creating any artifact: target_branch + no staged collision.
   _aid_lc_precheck_write "$root" ".aid-lifecycle/repo-identity.yaml" ".aid-lifecycle/manifests/${plan_id}.yaml" || return $?
   local parsed rc=0
-  parsed="$(aid_lifecycle_parse_legacy_epics "$plan_id" "$plan_file")" || rc=$?
+  if [[ -n "$declared" ]]; then
+    local _d; parsed=""
+    for _d in ${declared//,/ }; do
+      [[ "$_d" =~ ^E-[0-9]{3,}-[0-9]+_[0-9]+$ ]] || return 2
+      parsed+="${_d} required"$'\n'
+    done
+  else
+    parsed="$(aid_lifecycle_parse_legacy_epics "$plan_id" "$plan_file")" || rc=$?
+  fi
   [[ "$rc" -ne 0 ]] && return 2
   local repo_id; repo_id="$(aid_repo_id "$root")"
   local spsha="sha256:$(sha256sum "$plan_file" 2>/dev/null | cut -c1-64)"
@@ -986,8 +998,16 @@ aid_lifecycle_ensure_manifest() {
 # gitignored evidence: the EPIC round index (cp3/rounds.json), else the
 # audit-report.json an EPIC closed before 2.101.0 left behind. Empty if neither.
 _aid_lc_epic_review_file() {
+  local cp2=""
+  # the CP2 indexes stand in for the EPIC review ONLY while CP3 is switched off
+  # (2.116.0); a project that keeps CP3 and has no cp3 record stays unverifiable,
+  # never accepted from its step rounds (fail-closed; 2.116.1)
+  declare -F aid_review_switched_off >/dev/null || source "${_AID_LC_LIB_DIR}/aid-review-config.sh"
+  aid_review_switched_off "${2:-.}" cp3_integration_review >/dev/null 2>&1 \
+    && cp2="$(ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp2/step-*/rounds.json 2>/dev/null)"
   { ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp3/rounds.json 2>/dev/null \
-    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null || true; } | sort -V | tail -1   # the latest run
+    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null \
+    || { [[ -n "$cp2" ]] && printf '%s\n' "$cp2"; } || true; } | sort -V | tail -1   # the latest run
 }
 
 # _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the review
@@ -1021,6 +1041,15 @@ _aid_lc_epic_review_status() {
   if _aid_lc_plan_mode; then _aid_lc_plan_review_status "$root" "$plan_id"; return 0; fi
   rep="$(_aid_lc_epic_review_file "$epic_id" "$root")"
   [[ -z "$rep" ]] && { echo "none"; return 0; }
+  if [[ "$rep" == */cp2/step-*/rounds.json ]]; then
+    # CP3 off (2.116.0): every step of that run decides — one fail rejects, a state
+    # other than pass/skip/no_change leaves it unverifiable (P110 security review)
+    local vs; vs="$(jq -rs '[.[].verdict // "none"] | unique | join(" ")' "${rep%/step-*/rounds.json}"/step-*/rounds.json 2>/dev/null)"
+    if [[ " $vs " == *" fail "* ]]; then echo rejected
+    elif [[ -n "$vs" && -z "$(tr ' ' '\n' <<< "$vs" | grep -vxE 'pass|skip|no_change')" ]]; then echo accepted
+    else echo unverifiable; fi
+    return 0
+  fi
   if [[ "$rep" == */cp3/rounds.json ]]; then
     case "$(jq -r '.verdict // ""' "$rep" 2>/dev/null)" in
       pass|skip|no_change) echo "accepted" ;;
@@ -1397,7 +1426,7 @@ aid_lifecycle_plan_merge_bind() {
 aid_lifecycle_plan_file() {
   local plan_id="$1" root="${2:-.}"
   local hit
-  hit="$(ls "${root}/.aid-o/plans/${plan_id}"-*.md "${root}/.aid-o/plans/archive/${plan_id}"-*.md 2>/dev/null | head -1 || true)"
+  hit="$( { aid_plan_files "${root}/.aid-o/plans" "$plan_id"; aid_plan_files "${root}/.aid-o/plans/archive" "$plan_id"; } | head -1 || true)"
   [[ -n "$hit" ]] && echo "$hit"
   return 0   # never non-zero: a caller under `set -e` must not abort when absent
 }

@@ -172,8 +172,13 @@
                 "minLength": 1
               },
               "task_branch": {
-                "type": "string",
-                "pattern": "^task/E-[0-9]{3}-[0-9]+_[0-9]+/main$"
+                "type": ["string", "null"],
+                "pattern": "^task/E-[0-9]{3}-[0-9]+_[0-9]+/main$",
+                "description": "null only on a direct run (direct: true, P111) — the validator enforces the pairing."
+              },
+              "direct": {
+                "type": "boolean",
+                "description": "P111: the one run of a plan run straight from the plan on plan/<id> (no task branch, no EPIC merge)."
               },
               "epic_base_commit": {
                 "type": "string",

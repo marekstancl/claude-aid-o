@@ -120,6 +120,7 @@ VALID_TRANSITIONS=(
   "EXECUTE:ERROR"
   "GATES:ERROR"
   "ESCALATION:ERROR"
+  "DONE:ERROR"   # P111: abandon of a run stuck in DONE/review (cmd_abandon refuses release)
 )
 
 is_valid_state() {
@@ -1168,6 +1169,16 @@ _fsm_refusal_next() {
       next="the role that wrote the failing code fixes the gates named above, then: $adv" ;;
     contract_return_rejected)
       next="re-dispatch the step with its packet $(_fsm_cmd "${_c_dir:-<step dir>}/contract.json") and record the new return, then: $inc" ;;
+    done_advance_needs_direct)
+      if [[ "${_da_state_direct:-}" == "true" ]]; then
+        next="$(_fsm_cmd bash "$fsm" done-advance review release "$sf" --direct)"
+      else
+        next="$(_fsm_cmd bash "$fsm" done-advance review release "$sf"), then epic-merge-to-plan as today"
+      fi ;;
+    abandon_needs_reason)
+      next="$(_fsm_cmd bash "$fsm" abandon "$sf" --reason "<why the run is abandoned>")" ;;
+    direct_run_needs_plan_branch)
+      next="start the plan in plan_branch mode and run from its plan worktree: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}")" ;;
     plan_manifest_missing|plan_branch_mismatch)
       next="start the EPIC through its plan (task branch and manifest entry), then init again: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" epic-start "${_pb_plan_id:-<plan>}" "${epic_id:-<epic>}" --run-id "${run_id:-<run>}")" ;;
     contract_return_missing|contract_return_not_done)
@@ -1176,8 +1187,23 @@ _fsm_refusal_next() {
       next="write $(_fsm_cmd "$vf") (pipeline.md §Output verification), then: $inc" ;;
     binding_wrong_commit|binding_plan_step_hash_mismatch|incomplete_step_binding)
       next="rewrite the binding of $(_fsm_cmd "$vf") after the step commit (reviewed_commit = HEAD, plan_step_hash from the live plan.json — pipeline.md §Output verification), then: $inc" ;;
+    amend_scope_no_brief_point)
+      next="the widening serves no point this step closes: bring it to the PM as a scope change (skills/pipeline.md escalations, rule 11) — or, at GATES, name the point of any step" ;;
+    amend_scope_reason_names_no_point)
+      next="$(_fsm_cmd bash "$fsm" amend-scope "$sf" --add "<path>" --reason "<AC<n> of ${_ZP_SET:-the step points}> needs <path> because …")" ;;
+    step_criteria_failed)
+      # a step's own labelled criterion is not a brief point: no PM deferral, only a fix
+      if [[ ! "${_sc_label:-AC}" =~ ^AC[0-9]*$ ]]; then
+        next="fix the step so its own criterion holds, commit, then: $inc"
+      else
+      next="fix the step and commit, or render the Decision card (lib/aid-decision-card.sh) and wait for the PM, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words>" --finding-card "<card>")"
+      fi ;;
+    streamlined_cp3_off)
+      next="keep CP3 for this project (cp3_integration_review: true + an epic_review block in .aid-o/config/policies/review-checkpoints.yaml) and run the EPIC review, or run the plan in plan_branch mode, then: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-review}" "${to_phase:-release}" "$sf")" ;;
+    defer_refused)
+      next="render the Decision card quoting ${_sc_label:-the point} (lib/aid-decision-card.sh), wait for the PM's answer, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words, 20+ chars>" --finding-card "<card>")" ;;
     missing_lenses|done_advance_preconditions)
-      next="correct what the lines above name, then run the same done-advance again: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-<from>}" "${to_phase:-<to>}" "$sf")" ;;
+      next="correct what the lines above name, then run the same done-advance again: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-<from>}" "${to_phase:-<to>}" "$sf")$([[ "${direct_flag:-}" == true ]] && printf ' --direct')" ;;
     *) return 1 ;;
   esac
   printf 'next: %s\n(pipeline.md §When AID refuses: %s)\n' "$next" "$reason" >&2
@@ -1501,7 +1527,9 @@ _fsm_routed_findings_check() {
   # "nothing to reconcile" once a cp3 round closed (verdict pass or fail). A
   # skipped or no_change cp3 ran no reviewer and passes with an audit line;
   # a run with no cp3 index at all keeps the legacy zero-cost path.
-  if [[ ! -f "$review_json" && -f "${evidence_dir}/cp3/rounds.json" ]]; then
+  # (a leftover cp3/ of a run started before CP3 was switched off is not read: P110)
+  if [[ ! -f "$review_json" && -f "${evidence_dir}/cp3/rounds.json" ]] \
+     && ! aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review >/dev/null; then
     local cp3_verdict; cp3_verdict="$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)"
     case "$cp3_verdict" in
       pass|fail)
@@ -1523,7 +1551,10 @@ _fsm_routed_findings_check() {
   fi
   # A jq failure here must NOT read as "no findings": an unreadable review is
   # the one input whose silence would pass this whole check open.
-  if ! findings="$(jq -r '.semantic_review.findings[]? | select((.target_path // "") != "") | "\(.fingerprint)\t\(.target_path)"' "$review_json" 2>&1)"; then
+  # A finding the review itself closed (status resolved: fixed and confirmed by
+  # a later round, or dismissed by the PM) owes no route — P103 had to route and
+  # resolve five of them by hand after a clean confirmation.
+  if ! findings="$(jq -r '.semantic_review.findings[]? | select((.target_path // "") != "" and (.status // "open") != "resolved") | "\(.fingerprint)\t\(.target_path)"' "$review_json" 2>&1)"; then
     echo "PRECONDITION FAIL: cannot read findings from ${review_json} (${findings}) — refusing to complete ${epic_id} on a review artifact that will not parse." >&2
     return 1
   fi
@@ -1684,8 +1715,24 @@ fsm_check_streamlined_integration_review() {
     gates_source="legacy_flat"
     echo "NOTE: streamlined integration review read gates_report.json from the legacy flat path (${gates_flat})." >&2
   fi
-  local missing=()
-  [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] || missing+=("cp3/rounds.json with verdict pass (the closed EPIC review round)")
+  local missing=() cp3_off pmode=""
+  # P110: CP3 switched off (the default since 2.116.0) needs no cp3 round here
+  # — but a streamlined run skips every step review, so without CP3 it is
+  # reviewed only when the whole-plan round (CP7, plan_branch) follows; a
+  # legacy-mode streamlined run with CP3 off would ship unreviewed and is refused.
+  IFS=$'\t' read -r pmode _ _ < <(_fsm_declared_plan_mode "${epic_id:-}" 2>/dev/null) || true
+  local cp3_pass=false
+  [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] && cp3_pass=true
+  if cp3_off="$(aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review)" && [[ "$pmode" != plan_branch && "$cp3_pass" != true ]]; then
+    echo "REFUSED (streamlined_cp3_off): streamlined run with the EPIC review (CP3) off and no whole-plan review after it (plan mode: ${pmode:-legacy}) — nothing would review this code." >&2
+    echo "next: set cp3_integration_review: true with an epic_review block in .aid-o/config/policies/review-checkpoints.yaml and run the EPIC review (aid-step-check.sh --checkpoint cp3, aid-review-round.sh), or run the plan in plan_branch mode (CP7 reads it) (pipeline.md §When AID refuses: streamlined_cp3_off)" >&2
+    fsm_emit_audit_log "streamlined_integration_review_fail" --evidence-dir "$evidence_dir" --reason "streamlined, cp3 off, mode ${pmode:-legacy}" 2>/dev/null || true
+    return 1
+  elif [[ -n "$cp3_off" ]]; then
+    fsm_emit_audit_log review_checkpoint_disabled --evidence-dir "$evidence_dir" --reason "cp3_integration_review off (${cp3_off//$'\t'/ in }): streamlined done-advance proceeds from the steps' reviews and the gates" 2>/dev/null || true
+  else
+    [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] || missing+=("cp3/rounds.json with verdict pass (the closed EPIC review round)")
+  fi
   [[ -n "$gates" ]]    || missing+=("gates_report.json (searched ${gates_canonical} and ${gates_flat})")
   if [[ ${#missing[@]} -gt 0 ]]; then
     local joined
@@ -2046,7 +2093,8 @@ evaluate_compliance_checks() {
   # Session A scope; Sessions B/C may relax the regex.
   local branch_value branch_correct
   branch_value=$(yaml_field "$state_file" branch)
-  if [[ "$branch_value" =~ ^task/E- ]]; then
+  if [[ "$branch_value" =~ ^task/E- ]] \
+     || { [[ "$(yaml_field "$state_file" direct 2>/dev/null)" == "true" ]] && [[ "$branch_value" =~ ^plan/P[0-9]+$ ]]; }; then   # P111: a direct run runs on plan/<id>
     branch_correct=true
   else
     branch_correct=false
@@ -2105,7 +2153,9 @@ evaluate_compliance_checks() {
     cp3_round_json='{"verdict":null,"rounds":0}'; cp3_d=false; cp3_v=null
   fi
   if [[ "$cp2_dispatched" == null ]]; then aggregate=null
-  elif [[ "$cp2_dispatched" == true && "$cp3_d" == true && "$cp3_v" == '"pass"' && "$cp2_verdict" == '"pass"' ]]; then aggregate=true
+  elif [[ "$cp2_dispatched" == true && "$cp2_verdict" == '"pass"' ]] \
+       && { [[ "$cp3_d" == true && "$cp3_v" == '"pass"' ]] \
+            || aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review >/dev/null; }; then aggregate=true   # P110: CP3 off needs no cp3 pass
   else aggregate=false; fi
 
   # Phase 2 (P037) — plan_ac_match dimension
@@ -3386,6 +3436,7 @@ cmd_init() {
   local plan_path_arg=""
   local force="false"
   local streamlined=false
+  local direct=false
   local i=8
   while [[ $i -le $# ]]; do
     case "${!i}" in
@@ -3398,6 +3449,11 @@ cmd_init() {
         ;;
       --streamlined)
         streamlined=true
+        ;;
+      --direct)
+        # P111: the one run of a plan run straight from the plan — it runs
+        # on plan/<id> itself, no task branch (aid-plan-fsm.sh plan-run).
+        direct=true
         ;;
       --force)
         # D1 (IMP-232 v2.58.0): the old global cross-plan ca-review pre-scan is
@@ -3445,7 +3501,7 @@ cmd_init() {
           : # a known force-payload flag, already consumed above
         else
           echo "ERROR: Unknown flag for init: ${!i}" >&2
-          echo "  init accepts: --plan <path>, --streamlined, --force --reason <text>" >&2
+          echo "  init accepts: --plan <path>, --streamlined, --direct, --force --reason <text>" >&2
           exit 2
         fi
         ;;
@@ -3509,6 +3565,17 @@ cmd_init() {
   _pb_nnn="$(_fsm_epic_plan_nnn "$epic_id")"
   local _pb_plan_id=""
   [[ -n "$_pb_nnn" ]] && _pb_plan_id="P${_pb_nnn}"
+  # P111: a direct run's branch IS the plan branch.
+  [[ "$direct" == true && -n "$_pb_plan_id" ]] && _plan_expected_branch="plan/${_pb_plan_id}"
+  if [[ "$direct" == true ]]; then
+    local _dr_mode=""
+    [[ -n "$_pb_plan_id" ]] && IFS=$'\t' read -r _dr_mode _ _ < <(_fsm_declared_plan_mode "$epic_id") || true
+    if [[ "$_dr_mode" != "plan_branch" ]]; then
+      echo "PRECONDITION FAIL: init --direct ${epic_id}: a direct run runs on plan/<id>, but ${_pb_plan_id:-<no plan id>} is not a plan_branch plan (mode '${_dr_mode:-<unresolved>}') — there is no plan branch to run on." >&2
+      _fsm_refusal_next direct_run_needs_plan_branch
+      exit 1
+    fi
+  fi
 
   if [[ -n "$_pb_plan_id" ]]; then
     # Resolve the plan's DECLARED release mode through the ONE committed-tree,
@@ -3594,7 +3661,11 @@ cmd_init() {
             elif [[ "$_pb_lineage" != "proven" || "$_pb_epic_source_ref" != "plan/${_pb_plan_id}" ]]; then
               _pb_reason="epic_lineage_unproven"
               _pb_detail="${epic_id}'s manifest entry has lineage='${_pb_lineage:-<empty>}' and epic_source_ref='${_pb_epic_source_ref:-<empty>}' — refusing to treat it as authoritative (must be proven with epic_source_ref=plan/${_pb_plan_id} to execute within this plan). Use 'aid-plan-fsm.sh epic-start ${_pb_plan_id} ${epic_id}' to create a new proven entry, or attest this entry with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --attest-source-ref <ref> --reason \"<reason>\" --epic ${epic_id}'. If the old task branch is fully contained in the target (git branch --merged shows it), the shortest safe path is: git branch -d <task_branch>, then epic-start."
-            elif [[ "$_pb_task_branch" != "$_plan_expected_branch" ]]; then
+            elif [[ "$direct" == true && "$(jq -r '.direct // false' <<<"$_pb_entry" 2>/dev/null)" != "true" ]]; then
+              # P111: a direct run's entry has no task branch; it must say direct.
+              _pb_reason="plan_branch_mismatch"
+              _pb_detail="init --direct ${epic_id}: ${_pb_plan_id}'s manifest entry is not a direct run (task_branch=${_pb_task_branch:-<empty>}) — it belongs to the EPIC path; run it with /aid-run ${epic_id}."
+            elif [[ "$direct" != true && "$_pb_task_branch" != "$_plan_expected_branch" ]]; then
               _pb_reason="plan_branch_mismatch"
               _pb_detail="${_pb_plan_id}'s manifest records task_branch=${_pb_task_branch:-<empty>} for ${epic_id}, but this run expects ${_plan_expected_branch}."
             else
@@ -3751,7 +3822,7 @@ cmd_init() {
         delivered-but-unreconciled) _unrec+=" ${_pid}";;
         legacy-unverifiable)        _legacy_n=$((_legacy_n+1));;
       esac
-    done < <(ls "$_plans_dir"/P*-*.md 2>/dev/null)
+    done < <(for _pf in "$_plans_dir"/P*-*.md; do [[ -f "$_pf" ]] && ! aid_is_brief_file "$_pf" && printf '%s\n' "$_pf"; done)   # a brief is not a second plan (P109)
     if [[ -n "$_unrec" ]]; then
       echo "ADVISORY: plan(s) delivered but not reconciled:${_unrec}. Reconcile with:" >&2
       echo "  aid-fsm.sh plan-reconcile <PNN> --apply" >&2
@@ -3828,7 +3899,18 @@ Fix: restore ${_wt_plan_branch} (e.g. 'git branch ${_wt_plan_branch} <the merge 
     fi
   fi
 
-  if is_worktree && [[ -z "$_wt_plan_branch" ]]; then
+  if [[ "$direct" == true ]]; then
+    # P111: no task branch is created — the run's branch is plan/<id> and HEAD
+    # must already be it (plan-run runs init inside the plan worktree).
+    local _dr_head=""
+    _dr_head="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    if [[ "$_dr_head" != "plan/${_pb_plan_id}" ]]; then
+      echo "PRECONDITION FAIL: init --direct ${epic_id}: HEAD is '${_dr_head:-<detached>}', but a direct run starts on plan/${_pb_plan_id} (its plan worktree)." >&2
+      log_event "$timeline_path" "fsm_init_blocked" reason="direct_run_needs_plan_branch" epic_id="$epic_id" current_branch="$_dr_head"
+      _fsm_refusal_next direct_run_needs_plan_branch
+      exit 1
+    fi
+  elif is_worktree && [[ -z "$_wt_plan_branch" ]]; then
     log_info "Worktree mode detected (git_dir under .git/worktrees/) — skipping branch enforcement"
   else
     local current_branch expected_branch
@@ -4008,6 +4090,7 @@ streamlined_mode: $streamlined
 started_at: "${_now_iso}"
 created_at: ${_now_iso}
 EOF
+  [[ "$direct" == true ]] && echo "direct: true" >> "$state_file"
 
   # ─── PRE-FLIGHT: cache staleness — consumer controller recording ─────────
   # anchor: cache_preflight_init_record
@@ -4163,6 +4246,77 @@ read_steps_array() {
   else
     echo "[]"
   fi
+}
+
+# ---------------------------------------------------------------------------
+# cmd_abandon <state_file> --reason <text> [--epic <epic_id>]   (P111 Step 5)
+#   The run ends in the FSM: ERROR through the transition table (DONE:ERROR only
+#   from done_phase review — a run at release is finished), abandoned: true with
+#   the reason and the time, the timeline event `abandoned`, and its entry
+#   removed from active-runs.json (aid_active_boundary_sync, which also refreshes
+#   active.md). Idempotent: a rerun completes whatever an interruption left.
+#   A gone state file: --epic names the map entry to remove.
+# ---------------------------------------------------------------------------
+cmd_abandon() {
+  local state_file="${1:-}" reason="" epic_opt=""
+  shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reason) reason="${2:-}"; shift 2 ;;
+      --epic) epic_opt="${2:-}"; shift 2 ;;
+      *) echo "ERROR: abandon: unknown argument: $1" >&2; exit 2 ;;
+    esac
+  done
+  if [[ -z "${reason//[[:space:]]/}" ]]; then
+    echo "ERROR: abandon: a run is abandoned with a reason — it is recorded in the state, the manifest and the timeline." >&2
+    _fsm_refusal_next abandon_needs_reason
+    exit 1
+  fi
+  [[ -n "$state_file" ]] || { echo "Usage: aid-fsm.sh abandon <state_file> --reason <text> [--epic <epic_id>]" >&2; exit 2; }
+  local root; root="$(aid_state_root 2>/dev/null || pwd)"
+  if [[ ! -f "$state_file" ]]; then
+    if [[ -n "$epic_opt" ]] && declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+      aid_active_boundary_sync "$root" "$epic_opt" abandon || true
+    fi
+    echo "abandon: ${state_file} is gone — the run's map entry ${epic_opt:-<unnamed>} was removed; nothing else to end." >&2
+    exit 0
+  fi
+  state_file="$(_fsm_resolve_state_file "$state_file")"
+  local epic_id run_id cur dp
+  epic_id="$(yaml_field "$state_file" epic_id)"; run_id="$(yaml_field "$state_file" run_id)"
+  _fsm_require_plan_worktree "$epic_id"
+  cur="$(yaml_field "$state_file" state)"; dp="$(yaml_field "$state_file" done_phase 2>/dev/null || true)"
+  if [[ "$cur" == "DONE" && "$dp" == "release" ]]; then
+    echo "ERROR: abandon: ${epic_id} is DONE at done_phase release — the run is finished; there is nothing to abandon (close the plan instead)." >&2
+    exit 1
+  fi
+  if [[ "$cur" != "ERROR" ]]; then
+    ( cmd_transition "$cur" ERROR "$state_file" ) >/dev/null \
+      || { echo "ERROR: abandon: ${epic_id} could not move ${cur} → ERROR (see above) — nothing else was written." >&2; exit 1; }
+  fi
+  if [[ "$(yaml_field "$state_file" abandoned 2>/dev/null || true)" != "true" ]]; then
+    R="$reason" T="$(date -u +%Y-%m-%dT%H:%M:%SZ)" yq -i '.abandoned = true | .abandon_reason = strenv(R) | .abandoned_at = strenv(T)' "$state_file" \
+      || { echo "ERROR: abandon: could not record the abandon fields in ${state_file} — rerun converges." >&2; exit 1; }
+    local timeline; timeline="$(derive_timeline "$state_file")" || true
+    [[ -n "$timeline" ]] && log_event "$timeline" "abandoned" epic_id="$epic_id" run_id="$run_id" from_state="$cur" reason="$reason"
+  fi
+  if [[ "${AID_PLAN_FSM_CRASH_AFTER:-}" == fsm ]]; then   # test seam: the FSM written, the map not yet
+    echo "CRASH SEAM: AID_PLAN_FSM_CRASH_AFTER=fsm — exiting 99 after the FSM write, before the map." >&2; exit 99
+  fi
+  if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
+    aid_active_boundary_sync "$root" "$epic_id" abandon "$state_file" || true
+  fi
+  # The map entry is what /aid-status and the main-branch guard read: success
+  # is reported only once it is really gone (the sync itself is best-effort).
+  local _map="${root}/.aid-o/work/active-runs.json"
+  if [[ -f "$_map" ]] && jq -e --arg e "$epic_id" 'has($e)' "$_map" >/dev/null 2>&1; then
+    echo "ERROR: abandon: ${epic_id} is ERROR and abandoned in its state, but its active-runs.json entry could not be removed (lock or write failure) — run the same command again; it completes the removal." >&2
+    exit 1
+  fi
+  # A direct run's foreign worktrees are the PM's to remove (named, never copied).
+  local fw=""
+  fw="$(jq -r '[.repo_roots[]?.worktree] | join(", ")' "$(dirname "$state_file")/plan.json" 2>/dev/null || true)"
+  echo "abandoned: ${epic_id} (${run_id}) is ERROR, out of active-runs.json; stop any agent still working on its branch${fw:+; foreign worktrees to remove by hand: ${fw}}" >&2
 }
 
 cmd_transition() {
@@ -4556,6 +4710,76 @@ _increment_binding_verified() {
   return 0
 }
 
+# _fsm_step_measure <evidence_dir> <step> <state_file> — run the step's points
+# (aid-plan-diff.sh --step) unless cp2/step-N/plan-diff.json is bound to HEAD.
+# Prints nothing; returns 4 when the run has no plan (Fast Mode), 3 when the
+# plan file or plan.json is missing, never fails
+# on an absent point (that is the caller's refusal).
+_fsm_step_measure() {
+  local ev="$1" n="$2" sf="$3" pp base pd rc=0
+  pp="$(yq -r '.plan_path // ""' "$sf" 2>/dev/null)"
+  [[ -n "$pp" && "$pp" != null ]] || return 4   # Fast Mode: no plan, nothing to measure
+  [[ -f "$pp" && -f "${ev}/plan.json" ]] || return 3
+  # the criteria come from the plan the EPIC was generated from: a plan edited
+  # since (a criterion weakened or deleted) is not measured (P110 security review)
+  local want; want="$(jq -r '.source_plan_sha256 // ""' "${ev}/plan.json")"
+  if [[ -n "$want" && "$(sha256sum "$pp" | cut -d' ' -f1)" != "$want" ]]; then
+    echo "REFUSED (step_criteria_failed): ${pp} changed since the EPIC was generated (source_plan_sha256) — its criteria are not measured from an edited plan" >&2
+    return 1
+  fi
+  pd="${ev}/cp2/step-${n}/plan-diff.json"
+  # Reused only when bound to HEAD AND written by the measurer: the run's
+  # timeline holds its plan_diff_complete event with the file's sha256 (a
+  # hand-written file is measured again, never trusted).
+  if [[ -f "$pd" && "$(jq -r '.head_commit // ""' "$pd" 2>/dev/null)" == "$(git rev-parse HEAD 2>/dev/null)" ]] \
+     && grep -F '"event":"plan_diff_complete"' "${ev}/timeline.jsonl" 2>/dev/null \
+        | jq -e --arg s "$(sha256sum "$pd" | cut -d' ' -f1)" --arg n "$n" 'select((.step | tostring) == $n and .sha256 == $s)' >/dev/null 2>&1; then
+    return 0
+  fi
+  base="$(yaml_field "$sf" base_commit)"
+  bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$pp" --evidence-dir "$ev" --base-commit "${base:-HEAD}" \
+    --step "$n" --plan-json "${ev}/plan.json" >/dev/null || rc=$?   # stderr through: a dropped deferral says why
+  (( rc <= 2 )) || { echo "step ${n}: the measurer failed (aid-plan-diff.sh exit ${rc})" >&2; return 1; }
+  return 0
+}
+
+# _fsm_step_absent <evidence_dir> <step> — "<label>\t<text>\t<evidence>" per
+# point of the step that is absent and neither deferred by an answered card
+# nor measured at a later step (P110).
+_fsm_step_absent() {
+  local pd="${1}/cp2/step-${2}/plan-diff.json"
+  [[ -f "$pd" ]] || return 0
+  jq -r '.results[] | select(.verdict == "absent" and .deferred == null and .deferred_to_step == null) | "\(.ac_label)\t\(.ac_text)\t\(.evidence)"' "$pd"
+}
+
+# _fsm_defer_criterion <evidence_dir> <step> <label> <reason> <card> — the one
+# way out of step_criteria_failed: the PM's answer on a Decision card that
+# quotes the point (aid_pm_card_check, the same check dispute --pm accepted
+# makes). Writes cp2/step-N/deferred.json and the timeline event.
+_fsm_defer_criterion() {
+  local ev="$1" n="$2" label="$3" reason="$4" card="$5" pd df why
+  pd="${ev}/cp2/step-${n}/plan-diff.json"; df="${ev}/cp2/step-${n}/deferred.json"
+  _sc_label="$label"
+  declare -F aid_pm_card_check >/dev/null || source "${SCRIPT_DIR}/lib/aid-decision-card.sh"
+  _defer_fail() { echo "REFUSED (defer_refused): --defer-criterion ${label}: $1" >&2; _fsm_refusal_next defer_refused || true; exit 1; }
+  [[ "$label" =~ ^AC[0-9]+$ ]] || _defer_fail "takes a brief point AC<n> (got '${label}')"
+  (( ${#reason} >= 20 )) || _defer_fail "--reason must carry the PM's words, at least 20 characters (got ${#reason})"
+  jq -e --arg l "$label" '[.results[] | select(.ac_label == $l)] | length > 0' "$pd" >/dev/null 2>&1 \
+    || _defer_fail "the step does not close ${label} (not among the points measured in ${pd})"
+  why="$(aid_pm_card_check "$card" "$label")" || _defer_fail "$why"
+  if jq -e --arg l "$label" 'has($l)' "$df" >/dev/null 2>&1; then
+    echo "--defer-criterion ${label}: already deferred (${df}); nothing changed"; return 0
+  fi
+  [[ -f "$df" ]] || echo '{}' > "$df"
+  jq --arg l "$label" --arg r "$reason" --arg c "$card" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '. + {($l): {by: "pm", reason: $r, card: $c, at: $at}}' "$df" > "${df}.tmp" && mv "${df}.tmp" "$df"
+  local tl; tl=$(derive_timeline "$state_file") || true
+  [[ -n "$tl" ]] && log_event "$tl" "step_criterion_deferred" step="$n" criterion="$label" card="$card"
+  # the measurement merges it (and re-checks the card) on its next run
+  rm -f "$pd"
+  echo "--defer-criterion ${label}: deferred by the PM (${df}); measured again at the close"
+}
+
 cmd_increment_step() {
   local state_file="${1:-}"
   if [[ -z "$state_file" ]]; then
@@ -4703,6 +4927,46 @@ cmd_increment_step() {
     printf '  - %s\n' "${_vf_lines[@]}" >&2
     _fsm_refusal_next "${_vf_reasons[0]}"
     exit 1
+  fi
+
+  # P110: the step's brief points and own labelled criteria run after the step;
+  # one absent and not deferred on a card the PM answered stops the step.
+  # --force does not waive it: the way out is --defer-criterion.
+  local _sc_label="" _sc_reason="" _sc_card="" _sc_a=("${@:2}") _sc_i
+  for (( _sc_i=0; _sc_i<${#_sc_a[@]}; _sc_i++ )); do
+    case "${_sc_a[$_sc_i]}" in
+      --defer-criterion) _sc_label="${_sc_a[$((_sc_i+1))]:-}" ;;
+      --finding-card)    _sc_card="${_sc_a[$((_sc_i+1))]:-}" ;;
+      --reason)          _sc_reason="${_sc_a[$((_sc_i+1))]:-}" ;;
+    esac
+  done
+  local _sc_rc=0
+  _fsm_step_measure "$evidence_dir" "$step" "$state_file" || _sc_rc=$?
+  if (( _sc_rc == 4 )); then
+    [[ -n "$_sc_label" ]] && echo "--defer-criterion ${_sc_label}: the run has no plan (Fast Mode); nothing to defer" >&2
+  elif (( _sc_rc == 3 )); then
+    echo "REFUSED (step_criteria_failed): step ${step} cannot be measured — the run names a plan but the plan file or ${evidence_dir}/plan.json is missing" >&2
+    exit 1
+  elif (( _sc_rc != 0 )); then
+    exit 1
+  else
+    if [[ -n "$_sc_label" ]]; then
+      _fsm_defer_criterion "$evidence_dir" "$step" "$_sc_label" "$_sc_reason" "$_sc_card"
+      _fsm_step_measure "$evidence_dir" "$step" "$state_file" || exit 1
+    fi
+    local _sc_absent; _sc_absent="$(_fsm_step_absent "$evidence_dir" "$step")"
+    if [[ -n "$_sc_absent" ]]; then
+      _sc_label="$(head -1 <<< "$_sc_absent" | cut -f1)"
+      local _sc_tl; _sc_tl=$(derive_timeline "$state_file") || true
+      [[ -n "$_sc_tl" ]] && log_event "$_sc_tl" "fsm_increment_fail" step="$step" reason="step_criteria_failed"
+      {
+        echo "REFUSED (step_criteria_failed): step ${step} leaves brief points or its own criteria absent (${evidence_dir}/cp2/step-${step}/plan-diff.json):"
+        awk -F'\t' '{printf "  - %s \"%s\" (%s)\n", $1, $2, $3}' <<< "$_sc_absent"
+        echo "--force does not waive this: fix the step, or defer the point on the PM's answered Decision card."
+      } >&2
+      _fsm_refusal_next step_criteria_failed || true
+      exit 1
+    fi
   fi
 
   if [[ "$force" != "true" ]]; then
@@ -5424,6 +5688,33 @@ cmd_amend_scope() {
     EXECUTE|GATES) ;;
     *) die "amend-scope: the run is in ${state:-<unknown>} — scope is amended while a step is being worked (EXECUTE) or while a gate is asking for a file the step does not declare (GATES), never after the run is terminal" ;;
   esac
+  # P109 Step 5: a plan bound to a brief (plan.json carries zadani_sha256) widens
+  # only for a point of the brief, named in --reason: the current step's points
+  # in EXECUTE, any step's in GATES (a gate fix serves the whole plan). Checked
+  # BEFORE anything is retired or written. A plan without a brief traces null.
+  local _zp_plan _zp_cs _zp_total _zp_point="" _zp_set=""
+  _zp_plan="$(cd "$(dirname "$state_file")" && pwd)/plan.json"
+  if [[ -f "$_zp_plan" ]] && [[ -n "$(jq -r '.zadani_sha256 // ""' "$_zp_plan" 2>/dev/null)" ]]; then
+    _zp_cs=$(yaml_field "$state_file" current_step); _zp_cs="${_zp_cs:-0}"
+    _zp_total=$(jq '.steps | length' "$_zp_plan")
+    (( _zp_cs >= _zp_total && _zp_total > 0 )) && _zp_cs=$(( _zp_total - 1 ))
+    if [[ "$state" == GATES ]]; then
+      _zp_set="$(jq -r '[.steps[].zavira[]?] | unique | .[]' "$_zp_plan")"
+    else
+      _zp_set="$(jq -r --argjson i "$_zp_cs" '.steps[$i].zavira[]? // empty' "$_zp_plan")"
+    fi
+    if [[ -z "$_zp_set" ]]; then
+      echo "amend-scope: step $(( _zp_cs + 1 )) closes no point of the brief — a widening here is a scope change for the PM (rule 11)" >&2
+      _fsm_refusal_next amend_scope_no_brief_point || true
+      exit 1
+    fi
+    _zp_point="$(grep -Eow 'AC[0-9]+' <<< "$reason" | grep -xF -f <(printf '%s\n' "$_zp_set") | head -1 || true)"
+    if [[ -z "$_zp_point" ]]; then
+      echo "amend-scope: --reason must name the brief point this widening serves (one of: $(paste -sd, <<< "$_zp_set" | sed 's/,/, /g'))" >&2
+      _ZP_SET="$(paste -sd, <<< "$_zp_set")" _fsm_refusal_next amend_scope_reason_names_no_point || true
+      exit 1
+    fi
+  fi
   if [[ "$state" == "GATES" ]]; then
     # A widened scope during GATES invalidates what the gates already decided:
     # the tree they judged is not the tree that will exist. SAYING so was not
@@ -5471,7 +5762,12 @@ cmd_amend_scope() {
   local cs; cs=$(yaml_field "$state_file" current_step); cs="${cs:-0}"
   local total; total=$(jq '.steps | length' "$plan")
   [[ "$total" -gt 0 ]] || die "amend-scope: ${plan} has no steps — nothing to widen"
-  (( cs < total )) || cs=$(( total - 1 ))
+  if (( cs >= total )); then
+    # Past the last step (a fix round after CP3, say): the widening lands on the
+    # last step, and the controller is told which one (agents E-009-1_3).
+    cs=$(( total - 1 ))
+    echo "amend-scope: the run is past its last step — widening step $(( cs + 1 )) ($(jq -r --argjson i "$cs" '.steps[$i].id // "?"' "$plan"))" >&2
+  fi
   # Files, not subtrees, and never a path the step is forbidden: a widening
   # is a named file with a reason, not "scripts/" with a sentence.
   local p forbidden
@@ -5506,8 +5802,8 @@ cmd_amend_scope() {
   local step_dir="${evidence_dir}/steps/${step_id}"; mkdir -p "$step_dir"
   local amend="${step_dir}/scope-amendment.json"
   local now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  local entry; entry="$(jq -n --arg at "$now" --argjson step "$cs" --arg sid "$step_id" --argjson paths "$add_json" --arg reason "$reason" \
-    '{at:$at, step:$step, step_id:$sid, paths:$paths, reason:$reason}')"
+  local entry; entry="$(jq -n --arg at "$now" --argjson step "$cs" --arg sid "$step_id" --argjson paths "$add_json" --arg reason "$reason" --arg zp "$_zp_point" \
+    '{at:$at, step:$step, step_id:$sid, paths:$paths, reason:$reason, zadani_point: (if $zp == "" then null else $zp end)}')"
   local tmp_amend tmp_plan; tmp_amend="$(mktemp)"; tmp_plan="$(mktemp)"
   if [[ -f "$amend" ]]; then
     jq --argjson e "$entry" '. + [$e]' "$amend" > "$tmp_amend" || { rm -f "$tmp_amend" "$tmp_plan"; die "amend-scope: ${amend} is not a JSON array — repair or remove it first; nothing was changed"; }
@@ -5537,7 +5833,7 @@ cmd_amend_scope() {
   # Known limit: the generation-time D5 gate (gates/aid-contract-validate.sh)
   # compares plan.json against the EPIC's scope blocks; it runs at generation,
   # not mid-EPIC, and a REGENERATION resets the amendment by design.
-  log_event "${evidence_dir}/timeline.jsonl" "scope_amended" step="$cs" step_id="$step_id" paths="$(jq -r 'join(",")' <<<"$add_json")" reason="$reason"
+  log_event "${evidence_dir}/timeline.jsonl" "scope_amended" step="$cs" step_id="$step_id" paths="$(jq -r 'join(",")' <<<"$add_json")" reason="$reason" zadani_point="${_zp_point:-null}"
   fsm_emit_audit_log "scope_amended" --evidence-dir "$evidence_dir" --step "$cs" --paths "$(jq -r 'join(",")' <<<"$add_json")" --reason "$reason" 2>/dev/null || true
   echo "amend-scope: step ${cs} (${step_id}) may now also change: $(jq -r 'join(", ")' <<<"$add_json") — recorded in ${amend#${evidence_dir}/} and the timeline; plan_json_hash re-stamped. Continue the step; the agent's return must list these files like any other."
 }
@@ -5754,8 +6050,13 @@ _fsm_declared_plan_mode() {
 
 cmd_done_advance() {
   local from_phase="$1" to_phase="$2" state_file="$3"
-  local force="false" _archive_task="" _tasks_dir=""
-  [[ "${4:-}" == "--force" ]] && force="true"
+  local force="false" _archive_task="" _tasks_dir="" direct_flag="false" _a
+  for _a in "${@:4}"; do
+    case "$_a" in
+      --force) force="true" ;;
+      --direct) direct_flag="true" ;;   # P111: the direct run's done-advance
+    esac
+  done
 
   # P074 Step 8: re-anchor a RELATIVE state file to the state root BEFORE the
   # existence test. `.aid-o` exists only in the primary checkout, so the old
@@ -5808,6 +6109,21 @@ cmd_done_advance() {
     echo "ERROR: illegal done_phase transition: $from_phase -> $to_phase (only review -> release is allowed)" >&2
     exit 1
   }
+
+  # P111: --direct is required on a direct run and refused on any other — the
+  # flag is what makes this call record merged_to_plan instead of handing over
+  # to epic-merge-to-plan.
+  local _da_state_direct; _da_state_direct="$(yaml_field "$state_file" direct 2>/dev/null || true)"
+  [[ "$_da_state_direct" == "true" ]] || _da_state_direct="false"
+  if [[ "$_da_state_direct" != "$direct_flag" ]]; then
+    if [[ "$_da_state_direct" == "true" ]]; then
+      echo "ERROR: done-advance: $(yaml_field "$state_file" epic_id) is a direct run (plan/<id>) — its done-advance records merged_to_plan and needs --direct." >&2
+    else
+      echo "ERROR: done-advance --direct: $(yaml_field "$state_file" epic_id) is not a direct run — its task branch is merged by epic-merge-to-plan; drop --direct." >&2
+    fi
+    _fsm_refusal_next done_advance_needs_direct
+    exit 1
+  fi
 
   # ── P064 plan Step 9: resolve the owning plan's DECLARED release model ────
   # Runs on the review→release edge and nowhere else (it is the only legal
@@ -5914,7 +6230,9 @@ cmd_done_advance() {
     local _pb_wt
     _pb_wt="$(_fsm_plan_worktree_for_epic "$_pb_epic_id")"
     if [[ -n "$_pb_wt" ]]; then
+      if [[ "${direct_flag:-}" == true ]]; then echo "NOTE: ${_pb_epic_id} is the DIRECT run of ${_pb_mode_plan} — this advance evaluates the plan worktree ${_pb_wt} and records merged_to_plan on plan/${_pb_mode_plan} (no task branch to merge)." >&2; else
       echo "NOTE: ${_pb_epic_id} is a plan_branch EPIC of ${_pb_mode_plan} — this advance evaluates the PLAN WORKTREE ${_pb_wt} (its HEAD and its base..HEAD diff), and the next step merges task/${_pb_epic_id}/main into plan/${_pb_mode_plan} THERE, not into the target branch." >&2
+      fi
       log_event "$_pb_mode_timeline" "done_advance_plan_worktree" \
         epic_id="$_pb_epic_id" plan_id="$_pb_mode_plan" worktree_path="$_pb_wt"
     fi
@@ -6192,6 +6510,23 @@ EOF
       echo "archived the EPIC task file: ${_tasks_dir}/archive/$(basename "$_archive_task") (a tracked file is staged as a rename in that checkout)" >&2
     else
       echo "WARN: could not archive ${_archive_task} — move it to ${_tasks_dir}/archive/ by hand" >&2
+    fi
+  fi
+
+  # P111: a direct run is recorded merged_to_plan (at the tip of plan/<id>)
+  # and its plan moved to PLAN_SYNC BEFORE release is written — the hook guards
+  # the branch until release, so no commit slips between DONE and the record.
+  # A failure leaves done_phase review: the same done-advance is legal again.
+  if [[ "$direct_flag" == "true" ]]; then
+    local _da_epic _da_out _da_rc=0
+    _da_epic="$(yaml_field "$state_file" epic_id)"
+    _da_out="$(bash "${SCRIPT_DIR}/aid-plan-fsm.sh" epic-complete "P$(_fsm_epic_plan_nnn "$_da_epic")" "$_da_epic" --direct 2>&1)" || _da_rc=$?
+    printf '%s\n' "$_da_out" >&2
+    if [[ "$_da_rc" -ne 0 ]]; then
+      echo "ERROR: done-advance --direct: epic-complete --direct failed (rc=${_da_rc}) — done_phase stays review; fix what it names and run the same done-advance again." >&2
+      echo "next: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-fsm.sh" done-advance review release "$state_file" --direct)" >&2
+      echo "(pipeline.md §When AID refuses: done_advance_preconditions)" >&2
+      exit 1
     fi
   fi
 
@@ -7336,6 +7671,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     amend-scope)       shift; cmd_amend_scope "$@" ;;
     rebase-plan)       shift; cmd_rebase_plan "$@" ;;
     done-advance)               shift; cmd_done_advance "$@" ;;
+    abandon)                    shift; cmd_abandon "$@" ;;
     promote-check)              shift; cmd_promote_check "$@" ;;
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
     plan-close)                 shift; cmd_plan_close "$@" ;;

@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.109.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.111.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -123,7 +123,16 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v2.109.0** (current) — méně kol revize u zdroje: nález nese porušené pravidlo, opravář opraví celou třídu, bezpečnostní revizor u každého kroku
+- **v2.117.0** (current) — běh rovnou z plánu: `/aid-run P<NNN>` jako jeden běh na `plan/<id>` bez EPIC souborů, `repo_roots` (cizí repo jako worktree), zrušení plánu až do FSM (P111)
+- **v2.116.1** — oprava: revize kroků zastupují revizi EPICu jen při vypnutém CP3
+- **v2.116.0** — levnější běh: revize kroku podle druhu změny, body hotovo po kroku a izolovaně v uzávěru, uzávěr se zadáním a dvěma rolemi, brány s testy projektu, CP3 vypnuté, cena běhu a plánu
+- **v2.115.0** — plán drží zadání: zadání jako soubor, plán nese body doslova, povinný kritik, jedno kolo kontroly plánu se zadáním, oprava po kole i rozšíření rozsahu proti zadání
+- **v2.114.0** — zavření plánu rozhodnutím (dispute CP7), retry před collect, cancel dispatch startu, měření zavírání, neměřená kritéria nahlas, companion na pevném portu a vždy nad skutečným snímkem aplikace
+- **v2.113.0** — pět pastí z P010 zavřených mechanismem: close --at, retry bez bracketu, fix-check --also-steps, dvojí kopie plánu, lint v packetu CP1
+- **v2.112.0** — nezávislý kritik ve dvou úrovních, Sonnet na psaní kódu, úklid karet agentů, inventura promptů revizorů
+- **v2.111.0** — méně zastavení v automatickém režimu: stálý pokyn PM, plný revizor pro dlouhé zadání, upozornění na starou verzi pluginu
+- **v2.110.0** — pracovní kopie čtou nastavení z hlavního checkoutu; stránka PM podle obsahu plánu; soubory z jiného repozitáře
+- **v2.109.0** — méně kol revize u zdroje: nález nese porušené pravidlo, opravář opraví celou třídu, bezpečnostní revizor u každého kroku
 - **v2.108.0** — `/aid-ui` umí vizi a slogany, identitu, SEO a obrázkové komposice pod bránou PM; stránka značky má skutečné kapitoly (IMP-663)
 - **v2.107.1** — administrativní uzavření ručně sloučeného plánu vydá potvrzenku (P101 → P102 odblokováno)
 - **v2.107.0** — mantinely místo slepých uliček: každé odmítnutí jmenuje příkaz, který pokračuje; revizní kola bez slepých uliček a spor k PM; autor plánu pouští kontrolu generování; rozsah, kandidát a uzavření plánu pokrývají, co kroky legitimně dělají

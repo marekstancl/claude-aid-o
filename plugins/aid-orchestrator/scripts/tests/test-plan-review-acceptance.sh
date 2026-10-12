@@ -41,14 +41,23 @@ _round() {
   bash "$ROUND" close --plan "$PLAN" --round "$n" --tokens $(jq -r 'to_entries[] | "\(.key)=\(.value)"' "$rec/tokens.json") >/dev/null 2>&1
 }
 
+# P109: the recorded reviewer answers cite plan.md by LINE, so the plan cannot
+# gain a brief binding (frontmatter + Zavírá lines) without breaking every
+# citation. It is replayed as a legacy plan instead — `lifecycle_strict: false`
+# in place of `true`, the same line count — and the critic check the round
+# needs is seeded for the plan entering round 1.
+# shellcheck source=lib/aid-test-plan-fixture.sh
+source "${SCRIPT_DIR}/lib/aid-test-plan-fixture.sh"
+_legacy() { sed -i 's/^lifecycle_strict: true$/lifecycle_strict: false/' "$PLAN"; }
 echo "TEST: the recorded flow replays to a gate PASS"
-cp "$FX/acta-p025.md" "$PLAN"; _check
+cp "$FX/acta-p025.md" "$PLAN"; _legacy; _check
+aid_fixture_seed_critic_check "$PWD" "$PLAN"
 _round 1 && ok "round 1 replayed" || bad "round 1 did not replay"
-cp "$FX/recorded/plan-round-2.md" "$PLAN"
+cp "$FX/recorded/plan-round-2.md" "$PLAN"; _legacy
 bash "$ROUND" fix-check --plan "$PLAN" --round 1 >/dev/null 2>&1 && ok "the round-1 fix passes fix-check" || bad "fix-check refused the recorded fix"
 _check
 _round 2 && ok "round 2 replayed" || bad "round 2 did not replay"
-cp "$FX/recorded/plan-final.md" "$PLAN"
+cp "$FX/recorded/plan-final.md" "$PLAN"; _legacy
 bash "$ROUND" finalize --plan "$PLAN" >/dev/null 2>&1 && ok "finalize accepts the last edit" || bad "finalize refused the last edit"
 bash "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" --plan "$PLAN" >/dev/null 2>&1 && ok "the gate passes" || bad "the gate refused"
 

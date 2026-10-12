@@ -22,6 +22,9 @@ setup() {
   E="$TEST_EVIDENCE_DIR"; : > "$E/timeline.jsonl"
   mkdir -p src; echo a > src/app.py; git add -A; git commit -qm step0
   jq -n '{steps: [{id: "s0", role: "backend", objective: "o", outputs: ["Modify: `src/app.py` — x"]}, {id: "s1", role: "backend", objective: "o"}]}' > "$E/plan.json"
+  # the cp3 cases are a project that keeps CP3 (off by default since 2.116.0, P110)
+  mkdir -p .aid-o/config/policies; echo '.aid-o/config/policies/' >> "$(git rev-parse --git-dir)/info/exclude"
+  printf 'review_checkpoints:\n  cp3_integration_review: true\n  epic_review:\n    rounds_default: 1\n    reviewers:\n      - {role: epic_generalist, provider: claude, model: opus}\n' > .aid-o/config/policies/review-checkpoints.yaml
 }
 teardown() { unset CP3_FRESHNESS_POLICY || true; teardown_test_evidence_dir; }
 
@@ -83,16 +86,37 @@ _check() {
   [[ "$output" == *"next: bash $AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint cp2 --step 0 --evidence-dir $E && bash $AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare --checkpoint cp2 --step 0 --evidence-dir $E --round 2"* ]]
   [[ "$output" == *"(pipeline.md §When AID refuses: review_round_stale)"* ]]
 }
-@test "drift: every measured reason in aid-fsm.sh has a next: line and a row in pipeline.md" {
+@test "drift: every measured reason has a row in pipeline.md and, where a script prints it, a next: line" {
+  # P109 Step 7: four scripts print refusal codes. aid-fsm.sh through the arms
+  # of _fsm_refusal_next (as before); aid-review-round.sh, aid-cp1-gate.sh and
+  # lib/aid-plan-review-packet.sh at the refusal site — a `next:` within the
+  # three lines that end with the code's `(pipeline.md §When AID refuses: …)`
+  # suffix. A fixture reason no scanned script prints stays row-only.
   local tsv="$AID_PLUGIN_PATH/scripts/tests/fixtures/refusals/measured-2026-09.tsv"
-  local table="$AID_PLUGIN_PATH/skills/pipeline.md" arms r missing=""
+  local table="$AID_PLUGIN_PATH/skills/pipeline.md" arms r missing="" f ln
+  local -a sites=("$AID_PLUGIN_PATH/scripts/aid-review-round.sh" "$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh" "$AID_PLUGIN_PATH/scripts/lib/aid-plan-review-packet.sh"
+                  "$AID_PLUGIN_PATH/scripts/aid-run-gates.sh" "$AID_PLUGIN_PATH/scripts/aid-plan-diff.sh" "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh"   # + P110
+                  "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh" "$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh" "$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh"
+                  "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" "$AID_PLUGIN_PATH/defaults/hooks/pre-commit")   # + P111
   arms="$(sed -n '/^_fsm_refusal_next()/,/^}/p' "$FSM")"
   while IFS=$'\t' read -r _ _ r; do
     r="${r%%_[0-9]*}"   # gates_runner_exit_1 → its row gates_runner_exit_<n>
     grep -q "\`${r}" "$table" || missing+=" row:$r"
-    grep -q "$r" "$FSM" || continue
-    [[ "$arms" == *"$r"* ]] || missing+=" next:$r"
+    if grep -q "$r" "$FSM"; then [[ "$arms" == *"$r"* ]] || missing+=" next:$r"; fi
+    for f in "${sites[@]}"; do
+      while IFS=: read -r ln _; do
+        [[ -n "$ln" ]] || continue
+        sed -n "$(( ln > 2 ? ln - 2 : 1 )),${ln}p" "$f" | grep -q 'next:' || missing+=" next:$r@${f##*/}:$ln"
+      done < <(grep -n "When AID refuses: ${r})" "$f")
+    done
   done < <(grep -v '^#' "$tsv")
+  # and the other direction: every code those three scripts print is in the
+  # fixture and has its row — a new refusal cannot skip both
+  local code
+  while IFS= read -r code; do
+    grep -qP "\t${code}$" "$tsv" || missing+=" fixture:$code"
+    grep -q "\`${code}" "$table" || missing+=" row:$code"
+  done < <(grep -ohE 'When AID refuses: [a-z_]+\)' "${sites[@]}" | sed -E 's/.*: ([a-z_]+)\)/\1/' | sort -u)
   [[ -z "$missing" ]] || { echo "missing:$missing"; false; }
 }
 @test "cp3 without the semantic file blocks; a missing index names the step check command" {

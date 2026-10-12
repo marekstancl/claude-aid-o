@@ -210,3 +210,56 @@ _json() { jq -r "$1" "$E/$2/step-check.json"; }
   [ "$status" -eq 2 ]
   run _run --checkpoint cp4; [ "$status" -eq 2 ]
 }
+
+# ── P110 security review ────────────────────────────────────────────────────
+@test "security: a small in-scope step that adds an entry point (handler pattern) is review, never skip" {
+  printf 'import argparse\np = argparse.ArgumentParser()\n' >> "$R/src/app.py"; _commit s0 >/dev/null
+  run _run --checkpoint cp2 --step 0; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = review ]
+  [[ "$(_json .reason cp2/step-0)" == *"handler pattern: command_entry_point"* ]]
+}
+@test "security: a string handed to a shell (bash -c, eval of a variable, execSync) is review+security" {
+  printf 'bash -c "$cmd"\n' >> "$R/src/app.py"; _commit s0 >/dev/null
+  run _run --checkpoint cp2 --step 0; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = "review+security" ]
+  [[ "$(_json .reason cp2/step-0)" == *shell_string_exec* ]]
+}
+
+# ── P111 Step 4: a repo_roots repository is checked in its worktree ─────────
+_rr_step() {   # a declared foreign repository "docs" with a worktree on plan/P111-repo
+  O="$T/docs-repo"; mkdir -p "$O/guide"; git -C "$O" init -q -b main
+  git -C "$O" config user.email t@t; git -C "$O" config user.name t
+  echo a > "$O/guide/page.md"; git -C "$O" add -A; git -C "$O" commit -qm base
+  OB="$(git -C "$O" rev-parse HEAD)"
+  WT="$O/.aid-worktrees/plan-P111--docs"; git -C "$O" worktree add -q -b plan/P111-repo "$WT" main
+  jq --arg o "$O" --arg w "$WT" '.direct = true | .repo_roots = [{name: "docs", path: $o, worktree: $w, branch: "plan/P111-repo", base: "x"}]
+     | .steps[2].allowed_paths = ["\($o)/guide"]' "$E/plan.json" > "$E/p" && mv "$E/p" "$E/plan.json"
+  mkdir -p "$E/steps/s2"
+}
+
+@test "repo-roots: a return naming the repository by its slug is checked in the worktree, files named under the declared path" {
+  _rr_step
+  echo b >> "$WT/guide/page.md"; git -C "$WT" commit -qam step
+  jq -n --arg g "${OB}..$(git -C "$WT" rev-parse HEAD)" '{repo_commits: [{repo: "docs", range: $g}]}' > "$E/steps/s2/return.json"
+  run _run --checkpoint cp2 --step 2
+  [ "$status" -eq 0 ]
+  [ "$(_json '.files.in_scope[0]' cp2/step-2)" = "$O/guide/page.md" ]
+  [[ "$(_json .reason cp2/step-2)" != *"OTHER"* && "$(_json .reason cp2/step-2)" != *"no commits named"* ]]
+}
+
+@test "repo-roots: a missing range gives the repository's slug as missing" {
+  _rr_step
+  echo '{}' > "$E/steps/s2/return.json"
+  run _run --checkpoint cp2 --step 2
+  [ "$status" -eq 0 ]
+  [[ "$(_json .reason cp2/step-2)" == *"repo_commits): docs"* ]]
+}
+
+@test "repo-roots: a range whose commits exist only in the live checkout (same objects, not on the branch) is missing too" {
+  _rr_step
+  echo c >> "$O/guide/page.md"; git -C "$O" commit -qam "live checkout"
+  jq -n --arg g "${OB}..$(git -C "$O" rev-parse HEAD)" '{repo_commits: [{repo: "docs", range: $g}]}' > "$E/steps/s2/return.json"
+  run _run --checkpoint cp2 --step 2
+  [ "$status" -eq 0 ]
+  [[ "$(_json .reason cp2/step-2)" == *"repo_commits): docs"* ]]
+}

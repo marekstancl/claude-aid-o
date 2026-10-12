@@ -105,6 +105,19 @@ aid_invoke_root() {
   printf '%s\n' "$top"
 }
 
+# _aid_roots_is_linked_worktree_top <abs_dir> — 0 when <abs_dir> is the top
+# level of a LINKED worktree (its git dir is not the common dir). A nested
+# fixture directory inside a worktree is not its top level; a primary checkout
+# and a standalone repository have git dir == common dir.
+_aid_roots_is_linked_worktree_top() {
+  local abs="$1" gd="" cd="" top=""
+  gd="$(git -C "$abs" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || return 1
+  cd="$(git -C "$abs" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  [[ "$gd" != "$cd" ]] || return 1
+  top="$(git -C "$abs" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [[ "$(cd "$top" 2>/dev/null && pwd -P)" == "$abs" ]]
+}
+
 aid_canonicalize_project_root() {
   local given="${1:-}" abs="" rc=0
   if [[ -z "$given" ]]; then
@@ -125,7 +138,12 @@ aid_canonicalize_project_root() {
   # local `.aid-o/config` fork must still canonicalize to the primary, never
   # be honoured. Fixture state roots must carry (or create) the plan-state
   # dir to claim the escape.
-  if [[ -d "${abs}/.aid-o/work/plan-state" ]]; then
+  # A LINKED WORKTREE never takes the escape, even when it carries plan-state:
+  # acta, agents and wan track `.aid-o/work/plan-state` in git, so every plan
+  # and EPIC worktree of theirs has the directory, and honouring it made each
+  # worktree its own state root — reviews and step checks read the branch's
+  # stale `.aid-o/config` (agents P009, 28. 9. 2026: step_security on 0 of 7).
+  if [[ -d "${abs}/.aid-o/work/plan-state" ]] && ! _aid_roots_is_linked_worktree_top "$abs"; then
     printf '%s\n' "$abs"
     return 0
   fi
@@ -218,6 +236,23 @@ aid_run_checkout_root() {
   printf '%s\n' "$fallback"
 }
 
+# aid_plan_files <dir> <plan_id> — the plan file(s) of <plan_id> in <dir>, one per
+# line, sorted: every `<plan_id>-*.md` EXCEPT the brief `<plan_id>-zadani.md`
+# (P109). The brief sits beside the plan under the same id, so a bare
+# `<plan_id>-*.md` glob can hand the brief to whoever asked for the plan — and a
+# plan_diff over the brief finds no `## Acceptance Criteria` and skips green.
+aid_plan_files() {
+  local f
+  for f in "$1/$2"-*.md; do
+    [[ -f "$f" ]] || continue
+    aid_is_brief_file "$f" && continue
+    printf '%s\n' "$f"
+  done
+}
+
+# aid_is_brief_file <path> — is this a brief `P<NNN>-zadani.md`, not a plan?
+aid_is_brief_file() { [[ "${1##*/}" =~ ^P[A-Za-z0-9_]+-zadani\.md$ ]]; }
+
 # _aid_fm_get <plan> <key> — one scalar from the plan's YAML frontmatter block
 # (first `---` to its closing `---`), trimmed and unquoted. Nothing when the
 # key, or the block, is absent.
@@ -265,4 +300,32 @@ aid_orchestration_value() {
   fi
   v="$(yq -r "${2} // \"\"" "$plugin_default" 2>/dev/null)" || return 1
   printf '%s\tplugin default\n' "$v"
+}
+
+# aid_dotaid_twin_check <state_root> <tree_root> <path> — a `.aid-o` file that
+# exists in BOTH trees (the primary checkout and a plan worktree) with different
+# contents is always an operator error, never an intent (P010, 2026-09-30, twice
+# in one day: the plan edited in the main checkout, the round reading the
+# worktree's copy, the fix reported "not fixed"). <path> is absolute under
+# either tree or relative to a tree. Prints nothing and returns 0 when the trees
+# are one, the file exists in at most one of them, or the copies are identical;
+# returns 3 and names both paths, and the newer one, when they differ.
+aid_dotaid_twin_check() {
+  local state="${1%/}" tree="${2%/}" path="$3" rel a b
+  [[ -n "$state" && -n "$tree" && -n "$path" ]] || return 0
+  [[ "$state" != "$tree" ]] || return 0
+  # the worktree usually lives INSIDE the primary tree (.aid-worktrees/…), so its
+  # prefix is matched first or a worktree path would strip to a primary-relative one
+  case "$path" in
+    "$tree"/*)  rel="${path#"$tree"/}" ;;
+    "$state"/*) rel="${path#"$state"/}" ;;
+    /*)         return 0 ;;                       # outside both trees: nothing to compare
+    *)          rel="$path" ;;
+  esac
+  a="$state/$rel"; b="$tree/$rel"
+  [[ -f "$a" && -f "$b" ]] || return 0
+  cmp -s "$a" "$b" && return 0
+  local newer="$a"; [[ "$b" -nt "$a" ]] && newer="$b"
+  echo "two different contents under one name: ${rel} differs between the primary checkout (${a}) and the worktree (${b}); the newer copy is ${newer} — make them one before the round reads either (during a run, edit the worktree's copy)" >&2
+  return 3
 }

@@ -109,7 +109,7 @@ graph TB
 <!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the run context. -->
 {Describe what this phase solves — not just "extract X" but why, what it enables, what changes.}
 
-**Agent / Role:** {role name — e.g., architect, backend, qa}
+**Agent / Role:** {role name — e.g., backend, backend, qa}
 
 **Inputs:**
 <!-- Files, context, or outputs from previous phases that this phase needs. -->

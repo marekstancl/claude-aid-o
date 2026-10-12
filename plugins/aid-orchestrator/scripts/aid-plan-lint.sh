@@ -40,7 +40,21 @@
 # advisory for a legacy one — the same two-tier treatment the Files grammar
 # gets, and for the same reason.
 #
-# Usage: aid-plan-lint.sh <plan.md> [--strict|--legacy] [--quiet]
+# THE BRIEF FILE (P109 Step 1)
+# `--zadani <file>` lints a brief alone (lib/aid-zadani.sh reads it, the block
+# validator of lib/aid-verification-pattern.sh checks its points); no plan is
+# read. Every finding is an ERROR.
+#
+# THE PLAN CARRIES THE BRIEF (P109 Step 2)
+# A plan naming `zadani:` in its frontmatter is held to the brief: every point
+# AC<n> of the brief stands in ## Acceptance Criteria with the same label, text
+# and block (read by the same parser on both sides), every point is closed by
+# some step's **Zavírá:**, `zadani_sha256` is the brief's sha, and the design
+# sections open with **Odvozeno z:** AC<n>. A lifecycle_strict plan without a
+# brief is refused. `--only zadani` runs this pass alone (fix-check does).
+#
+# Usage: aid-plan-lint.sh <plan.md> [--strict|--legacy] [--quiet] [--only zadani]
+#        aid-plan-lint.sh --zadani <brief.md> [--quiet]
 # Exit:  0 = no blocking violations   1 = blocking violation(s)   2 = usage/IO
 # =============================================================================
 set -uo pipefail
@@ -60,8 +74,14 @@ source "${SCRIPT_DIR}/lib/aid-standards-map.sh"
 PLAN=""
 FORCE_MODE=""     # "strict" | "legacy" | "" (=auto from frontmatter)
 QUIET=0
+ZADANI=""
+ONLY=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --only) [[ "${2:-}" == zadani ]] || { echo "aid-plan-lint: --only takes one value: zadani" >&2; exit 2; }
+            ONLY="$2"; shift 2 ;;
+    --zadani) [[ -n "${2:-}" ]] || { echo "aid-plan-lint: --zadani needs a file" >&2; exit 2; }
+              ZADANI="$2"; shift 2 ;;
     --strict) FORCE_MODE="strict"; shift ;;
     --legacy) FORCE_MODE="legacy"; shift ;;
     --quiet)  QUIET=1; shift ;;
@@ -70,7 +90,31 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$PLAN" ]] || { echo "Usage: aid-plan-lint.sh <plan.md> [--strict|--legacy] [--quiet]" >&2; exit 2; }
+# --zadani: the brief alone. Each reader lists every finding it sees (never
+# only the first), so one run shows the author everything to fix.
+if [[ -n "$ZADANI" ]]; then
+  [[ -f "$ZADANI" ]] || { echo "aid-plan-lint: file not found: $ZADANI" >&2; exit 2; }
+  # shellcheck source=lib/aid-zadani.sh
+  source "${SCRIPT_DIR}/lib/aid-zadani.sh"
+  z_err="$(mktemp)"; z_bad=0
+  aid_zadani_sections "$ZADANI" >/dev/null 2>>"$z_err" || z_bad=1
+  aid_zadani_stakes "$ZADANI" >/dev/null 2>>"$z_err" || z_bad=1
+  z_points="$(aid_zadani_points "$ZADANI" 2>>"$z_err")" || z_bad=1
+  z_verze="$(_aid_fm_get "$ZADANI" verze)"
+  if [[ ! "$z_verze" =~ ^[1-9][0-9]*$ ]]; then
+    echo "zadani: $ZADANI: frontmatter verze '${z_verze}' is not a positive integer — the plan binds to a version" >>"$z_err"; z_bad=1
+  fi
+  if (( z_bad )); then
+    [[ "$QUIET" -eq 0 ]] && { sed 's/^/ERROR /' "$z_err" >&2
+      echo "aid-plan-lint: zadani FAIL — template: defaults/templates/zadani.md; grammar of a point: skills/plan-writing.md #20" >&2; }
+    rm -f "$z_err"; exit 1
+  fi
+  rm -f "$z_err"
+  [[ "$QUIET" -eq 0 ]] && echo "aid-plan-lint: zadani OK ($(grep -c . <<< "$z_points") points)"
+  exit 0
+fi
+
+[[ -n "$PLAN" ]] || { echo "Usage: aid-plan-lint.sh <plan.md> [--strict|--legacy] [--quiet] | --zadani <brief.md>" >&2; exit 2; }
 [[ -f "$PLAN" ]] || { echo "aid-plan-lint: file not found: $PLAN" >&2; exit 2; }
 
 # Strict cohort = plans that opted into the lifecycle model (new template default).
@@ -177,6 +221,162 @@ _strict_finding() {
 # names a new suite, and the Reuse-check and documentation passes read it.
 _project_root="$(_aid_plan_project_root "$PLAN")" || _project_root=""
 
+# ---------------------------------------------------------------------------
+# The plan carries the brief (P109 Step 2). ERRORs in both modes, except a
+# legacy plan that names no brief, which gets the legacy warning.
+# ---------------------------------------------------------------------------
+_zadani_err() {   # <location-suffix> <message>
+  errors=$((errors+1))
+  [[ "$QUIET" -eq 0 ]] && echo "${PLAN}${1}: ERROR ${2}" >&2
+  return 0
+}
+_zadani_trim() { local v="$1"; v="${v%"${v##*[![:space:]]}"}"; printf '%s' "$v"; }
+# ---------------------------------------------------------------------------
+# repo_roots (P111 Step 1): every foreign repository the plan declares is a git
+# repository outside the project, under a unique slug, with a base branch that
+# resolves there. ERRORs in both modes; plan-run refuses the same entries.
+# ---------------------------------------------------------------------------
+_repo_roots_pass() {
+  local raw n i name path bb proj real seen=" "
+  # The word nowhere in the frontmatter, no yq (the lint runs several times per
+  # generated phase). Any spelling of the key — quoted, flow — still reaches yq.
+  awk 'NR==1 && !/^---/ {exit} NR>1 && /^---/ {exit} /repo_roots/ {f=1; exit} END {exit !f}' "$PLAN" || return 0
+  raw="$(yq --front-matter=extract -o=json '.repo_roots // []' "$PLAN" 2>/dev/null)" || raw="[]"
+  [[ -n "$raw" && "$raw" != "null" ]] || return 0
+  if [[ "$(jq -r 'type' <<< "$raw" 2>/dev/null)" != "array" ]]; then
+    _zadani_err "" "repo_root_invalid: repo_roots must be a list of {name, path[, base_branch]}"; return 0
+  fi
+  proj="$(realpath -e "${_project_root:-$(dirname "$PLAN")}" 2>/dev/null)" || proj=""
+  n="$(jq 'length' <<< "$raw")"
+  for (( i=0; i<n; i++ )); do
+    name="$(jq -r --argjson i "$i" '.[$i].name // ""' <<< "$raw")"
+    path="$(jq -r --argjson i "$i" '.[$i].path // ""' <<< "$raw")"
+    bb="$(jq -r --argjson i "$i" '.[$i].base_branch // ""' <<< "$raw")"
+    if [[ ! "$name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+      _zadani_err "" "repo_root_invalid: repo_roots[$i].name '${name}' must be a slug ([a-z0-9_-])"; continue
+    fi
+    if [[ "$seen" == *" ${name} "* ]]; then
+      _zadani_err "" "repo_root_invalid: repo_roots name '${name}' is declared twice"; continue
+    fi
+    seen+="${name} "
+    real="$(realpath -e "$path" 2>/dev/null)" || real=""
+    if [[ -z "$real" ]] || ! git -C "$real" rev-parse --git-dir >/dev/null 2>&1; then
+      _zadani_err "" "repo_root_invalid: repo_roots '${name}' path '${path}' is not a git repository"; continue
+    fi
+    if [[ -n "$proj" ]] && { [[ "$real" == "$proj" || "$real" == "$proj"/* ]] \
+         || [[ "$(git -C "$real" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" == "$(git -C "$proj" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ]]; }; then
+      _zadani_err "" "repo_root_invalid: repo_roots '${name}' path '${path}' is the project itself or inside it — repo_roots names OTHER repositories"; continue
+    fi
+    if [[ -n "$bb" ]] && ! git -C "$real" rev-parse --verify --quiet "${bb}^{commit}" >/dev/null 2>&1; then
+      _zadani_err "" "repo_root_invalid: repo_roots '${name}' base_branch '${bb}' does not resolve in ${path}"; continue
+    fi
+  done
+  return 0
+}
+_zadani_pass() {
+  local z zpath root zsha want rec label text type cmd file regex xexit f
+  local -A plan_rec=() brief_ids=() plan_ids=() closed=()
+  z="$(_aid_fm_get "$PLAN" zadani)"
+  if [[ -z "$z" ]]; then
+    if [[ "$mode" == "strict" ]]; then
+      _zadani_err "" "strict plan without zadani: — write the brief first (aid-plan-lint.sh --zadani <brief>; template defaults/templates/zadani.md)"
+    else
+      _strict_finding "" "plan names no brief (zadani:) — a lifecycle_strict plan would be refused"
+    fi
+    return 0
+  fi
+  # shellcheck source=lib/aid-plan-state.sh
+  declare -F _plan_path_inside_root >/dev/null || source "${SCRIPT_DIR}/lib/aid-plan-state.sh"
+  # shellcheck source=lib/aid-zadani.sh
+  source "${SCRIPT_DIR}/lib/aid-zadani.sh"
+  root="$(realpath -m "${_project_root:-$PWD}")"
+  [[ "$z" == /* ]] && zpath="$z" || zpath="${root}/${z}"
+  zpath="$(realpath -m "$zpath")"
+  _plan_path_inside_root "$zpath" "$root" || { _zadani_err "" "zadani: path escapes the project: ${z}"; return 0; }
+  [[ -f "$zpath" ]] || { _zadani_err "" "zadani: the brief ${z} does not exist"; return 0; }
+  local zver bver
+  zver="$(_aid_fm_get "$PLAN" zadani_verze)"; bver="$(_aid_fm_get "$zpath" verze)"
+  if [[ ! "$zver" =~ ^[1-9][0-9]*$ ]]; then
+    _zadani_err "" "zadani_verze '${zver:-<absent>}' is not a positive integer — the plan names the version of the brief it carries"
+  elif [[ "$zver" != "$bver" ]]; then
+    _zadani_err "" "zadani_verze ${zver} but the brief ${z} is verze ${bver:-<absent>} — update the plan's zadani_verze and zadani_sha256 together"
+  fi
+  zsha="$(_aid_fm_get "$PLAN" zadani_sha256)"
+  want="$(aid_zadani_sha256 "$zpath")"
+  [[ "$zsha" == "$want" ]] || _zadani_err "" "zadani_sha256 '${zsha:-<absent>}' is not the sha of ${z} (${want}) — the brief changed: bump its verze and update the plan's zadani_sha256"
+  # the plan's criteria, by label (the SAME parser the brief is read with)
+  while IFS= read -r rec; do
+    [[ -n "$rec" ]] || continue
+    label="${rec%%$'\x1f'*}"
+    plan_ids[$label]=1
+    plan_rec[$label]="$rec"
+  done < <(_aid_vp_parse_ac "$PLAN" "Acceptance Criteria")
+  local brief_recs
+  if ! brief_recs="$(aid_zadani_points "$zpath" 2>/dev/null)"; then
+    _zadani_err "" "the brief ${z} is not in shape — run aid-plan-lint.sh --zadani ${z}"
+    return 0
+  fi
+  while IFS= read -r rec; do
+    [[ -n "$rec" ]] || continue
+    IFS=$'\x1f' read -r label text type cmd file regex xexit <<< "$rec"
+    brief_ids[$label]=1
+    local mine="${plan_rec[$label]:-}" same=1 a b i
+    if [[ -z "$mine" ]]; then
+      same=0
+    else
+      IFS=$'\x1f' read -r -a a <<< "$rec"
+      IFS=$'\x1f' read -r -a b <<< "$mine"
+      for i in 0 1 2 3 4 5 6 7; do   # 7: timeout (P110)
+        [[ "$(_zadani_trim "${a[$i]:-}")" == "$(_zadani_trim "${b[$i]:-}")" ]] || same=0
+      done
+    fi
+    (( same )) || _zadani_err "" "${label} missing or rewritten in ## Acceptance Criteria — the brief says: \"${text}\" (its line and its verification_pattern block go in verbatim; a change is a new verze of the brief)"
+  done <<< "$brief_recs"
+  # every step says what it closes; every point is closed
+  local s e head val id
+  while IFS=$'\t' read -r s e head; do
+    [[ -n "${s:-}" ]] || continue
+    if ! val="$(_aid_plan_step_field "$PLAN" "$s" "$e" "Zavírá")"; then
+      _zadani_err ":${s}" "${head} has no **Zavírá:** field — name the brief point(s) it closes, or — when it closes none"
+      continue
+    fi
+    [[ "$val" == "—" || "$val" == "-" ]] && continue
+    if [[ ! "$val" =~ ^AC[0-9]+(,[[:space:]]*AC[0-9]+)*$ ]]; then
+      _zadani_err ":${s}" "${head}: **Zavírá:** '${val}' is not \"AC<n>[, AC<m>]\" or \"—\""
+      continue
+    fi
+    for id in $(tr ',' ' ' <<< "$val"); do
+      if [[ -z "${brief_ids[$id]:-}" ]]; then
+        _zadani_err ":${s}" "${head}: **Zavírá:** names ${id}, which the brief does not have — a step closes brief points; the plan's own criteria are checked at the end of the run"
+      else
+        closed[$id]=1
+      fi
+    done
+  done < <(_aid_plan_step_bounds "$PLAN")
+  for id in "${!brief_ids[@]}"; do
+    [[ -n "${closed[$id]:-}" ]] || _zadani_err "" "${id} of the brief is closed by no step — add it to the **Zavírá:** of the step that delivers it"
+  done
+  # the design sections say which points they come from
+  local sec first
+  for sec in "Architecture" "Data Model" "API Design"; do
+    grep -qE "^## ${sec}([^[:alnum:]]|$)" < <(_aid_blank_fenced < "$PLAN") || continue
+    first="$(_aid_plan_section "$PLAN" "$sec" | grep -v '^[[:space:]]*$' | head -1)"
+    [[ "$first" =~ ^\*\*Odvozeno\ z:\*\*\ AC[0-9]+(,[[:space:]]*AC[0-9]+)*([[:space:][:punct:]]|$) ]] \
+      || _zadani_err "" "## ${sec} does not open with **Odvozeno z:** AC<n> — name the brief points this design comes from"
+  done
+  return 0
+}
+
+if [[ "$ONLY" == zadani ]]; then
+  _zadani_pass
+  if [[ "$errors" -gt 0 ]]; then
+    [[ "$QUIET" -eq 0 ]] && echo "aid-plan-lint: zadani FAIL (${errors} error(s)) — the plan does not carry its brief; see skills/plan-writing.md §\"The brief file\"" >&2
+    exit 1
+  fi
+  [[ "$QUIET" -eq 0 ]] && echo "aid-plan-lint: zadani OK" >&2
+  exit 0
+fi
+
 # Every Files bullet, once: the grammar pass below walks it, and so does the
 # per-step Reuse-check pass (P085), which needs to know WHICH step a bullet
 # belongs to. Extracting twice would mean two readers of the same text.
@@ -210,11 +410,28 @@ for _bi in "${!_bullet_lns[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
+# The verification-only marker belongs on `Test:` bullets only (P107 Step 2): a
+# production file marked "delete before plan-final" would be deleted by the
+# gates-stage check's rule, not by anyone's intent. An ERROR in both modes.
+# ---------------------------------------------------------------------------
+while IFS=$'\t' read -r _vo_verb _vo_body; do
+  [[ -n "${_vo_verb:-}" ]] || continue
+  [[ "$_vo_verb" == "Test" ]] && continue
+  errors=$((errors+1))
+  [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: ERROR verification-only marker allowed on Test: bullets only (found on ${_vo_verb}:): ${_vo_body}" >&2
+done < <(_aid_files_verification_only "$PLAN" --any-verb)
+# Under legacy_epic_release_mode there is no plan-final gates stage, so the marker
+# is prose there: say so once, so a legacy plan does not read it as enforced.
+if [[ "$mode" == "legacy" ]] && [[ -n "$(_aid_files_verification_only "$PLAN")" ]]; then
+  _advisory "" "this legacy plan marks a verification-only test, but the check that refuses a leftover marked file runs only in plan-finalize --stage gates (plan_branch mode) — in legacy_epic_release_mode the marker is a note, not a mechanism"
+fi
+
+# ---------------------------------------------------------------------------
 # AID Role is a closed set — the same list aid-epic-to-json.sh enforces. A step
 # naming a role outside it (fullstack, devops, docs) used to pass this lint,
 # CP1 and every review, and fail only inside generation, phase 1.
 # ---------------------------------------------------------------------------
-_VALID_ROLES="architect domain backend frontend qa security observability docs-writer release e2e"
+_VALID_ROLES="backend frontend qa security docs docs-writer release e2e"
 while IFS=$'\t' read -r _rl_ln _rl_role; do
   [[ -n "${_rl_role:-}" ]] || continue
   case " ${_VALID_ROLES} " in *" ${_rl_role} "*) continue;; esac
@@ -469,6 +686,43 @@ _deviation_cell() {
   }'
 }
 
+# Another repository's file (P009, agents 27. 9. 2026): a step may edit a file
+# outside this repository only when ITS Files declare it — amend-scope refuses
+# anything else and the step contract cannot commit it here. An absolute path
+# a step names only in its prose (outside this repository, not under one of
+# the same step's declared absolute paths) is reported. Per step: another
+# step's declaration does not cover it.
+while IFS=$'\t' read -r _fx_ln _fx_path _fx_head; do
+  [[ -n "$_fx_path" ]] || continue
+  if [[ -n "${_project_root:-}" ]]; then
+    case "$_fx_path" in "${_project_root%/}"/*) continue ;; esac
+  fi
+  _advisory ":${_fx_ln}" "\`${_fx_path}\` names another repository's file only in prose — declare it in this step's Files (absolute path) or the step cannot touch it; the controller commits it in that repository: ${_fx_head}"
+done < <(awk '
+  function flush(   i, j, ok) {
+    for (i = 1; i <= np; i++) {
+      ok = 0
+      for (j = 1; j <= nd; j++) if (pp[i] == dd[j] || index(pp[i], dd[j] "/") == 1) ok = 1
+      if (!ok) printf "%s\t%s\t%s\n", pl[i], pp[i], head
+    }
+    np = 0; nd = 0
+  }
+  /^```/ { fence = !fence; next }
+  fence { next }
+  /^### Step / { if (head != "") flush(); head = $0; next }
+  /^## / { if (head != "") flush(); head = ""; next }
+  head == "" { next }
+  {
+    line = $0; files = (line ~ /^- (Create|Modify|Test|Rewrite): /)
+    while (match(line, /`\/[^` ]+`/)) {
+      path = substr(line, RSTART + 1, RLENGTH - 2); line = substr(line, RSTART + RLENGTH)
+      sub(/\/+$/, "", path)
+      if (files) dd[++nd] = path; else { pp[++np] = path; pl[np] = NR }
+    }
+  }
+  END { if (head != "") flush() }
+' "$PLAN")
+
 _std_derived="$(aid_standards_derive "$PLAN" "${_project_root:-}")"; _std_rc=$?
 case "$_std_rc" in
   1) [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: [NOTE] no standards map configured for this project (project.yaml -> standards.map_path), so no '## Standards' section is owed." >&2 ;;
@@ -681,6 +935,8 @@ while IFS= read -r _ts_name; do
 done < <(_ts_names)
 
 # Blocking = any ERROR (both modes), or any STRICT on a strict-cohort plan.
+_zadani_pass
+_repo_roots_pass
 blocking=$errors
 [[ "$mode" == "strict" ]] && blocking=$((blocking + strict_hits))
 

@@ -290,9 +290,12 @@ cmd_gate() {
       # Before the design the proposal's BASIS must exist (the viewports and
       # the screen or design system it is drawn from); its renderings are the
       # design's output, which aid_ui_proposal_check judges afterwards.
-      local prop; prop="$(state_dir "$plan_id")/proposal.json"
-      if ! jq -e '(.basis | IN("live-screen", "design-system")) and (.viewports | type == "array" and length > 0
-                  and all(.[]; (.name | type == "string") and (.width | type == "number") and (.height | type == "number")))' "$prop" >/dev/null 2>&1; then
+      local prop why; prop="$(state_dir "$plan_id")/proposal.json"
+      # one check for the gate and the companion start (lib/aid-ui-proposal.sh, 2.114.0)
+      # shellcheck source=lib/aid-ui-proposal.sh
+      source "${PLUGIN_ROOT}/scripts/lib/aid-ui-proposal.sh"
+      if ! why="$(aid_ui_proposal_basis_check "$prop" "$(aid_state_root)" 2>&1)"; then
+        echo "REFUSED: ${why}" >&2
         echo "REFUSED: ${plan_id} is a UI topic and has no proposal basis built from the application — build it: source \$AID_PLUGIN_PATH/scripts/lib/aid-ui-proposal.sh && aid_ui_proposal_build <project root> $(state_dir "$plan_id") (skills/visual-companion/SKILL.md)" >&2
         return 1
       fi

@@ -47,10 +47,28 @@ one at a time:
    ```
 
    A step round's `close` refuses a reviewer file with no such start/complete
-   bracket in `<round dir>/timeline.jsonl` (`no_dispatch_record`): a file
+   bracket in `<round dir>/timeline.jsonl` (`no_dispatch_record`; `prepare` prints the
+   exact start/complete commands per role — copy them, never write a bracket after the
+   answer; a valid answer without one is re-dispatched via `retry --role <r>`): a file
    nobody dispatched does not close a round. Only a round prepared with
    `--stub` by the acceptance suite skips that check, and the FSM refuses to
    advance on such a round.
+
+   A start for a role the round does not ask is refused on the spot (the focus
+   must name one of `reviewers_expected`; `prepare` printed them). A start that
+   will never get a complete — the reviewer was stopped, the role was dispatched
+   by mistake — is withdrawn, never faked:
+
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" cancel --focus <focus> \
+     --evidence-dir <round dir> --reason "<why, 20+ characters>"
+   ```
+
+   A cancelled start is not a complete: an answer filed under it has no
+   provenance and `close` still refuses it. A role that gave nothing (a codex
+   record `answered: false`, or a start with no complete) is retried before
+   `collect` with `retry --role <r>`, which withdraws its open start itself;
+   nobody waits for the other roles to answer first.
 
 ## Stand-in for a Codex role
 
@@ -84,7 +102,7 @@ When `close` reports `fail` on a step or EPIC round and a round remains
 ```
 Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,
       model: <the **Model:** of the step's role card in skills/role-cards.md>,
-      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the reviewer's example plus two other variants of the same rule. Touch nothing outside the rules the findings name.")
+      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
 ```
 
 Then `aid-step-check.sh` again (the range now ends at the fix commit) and

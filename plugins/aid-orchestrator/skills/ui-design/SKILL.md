@@ -8,6 +8,10 @@ user_invocable: false
 
 **Last Updated:** 2026-10-07
 
+> **Model okna.** Návrh vzhledu dělá sama session, žádný dispatchnutý agent. Před spuštěním
+> `/aid-ui` přepni okno na Fable (`/model fable`); plugin to za tebe přepnout neumí. Vývoj podle
+> plánu (kroky role `frontend`) běží na Sonnetu s prahem návratu (`docs/plans/P107-model-measurement.md`).
+
 Vede PM od varianty produktu přes produkt, strukturu, obsahový plán, vzory
 a tři směry jako skutečné stránky až k postavenému a ověřenému webu nebo
 aplikaci; výsledky skládá do brand stránky projektu (`<project>/docs/brand/`).

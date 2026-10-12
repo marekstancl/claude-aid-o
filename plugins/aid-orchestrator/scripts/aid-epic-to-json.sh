@@ -21,6 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"  # _aid_parse_scoping_line, _aid_split_path_entry, _aid_allowed_paths_from_files_json (shared with gates/aid-contract-validate.sh, v2.58.0 IMP-232)
+source "${SCRIPT_DIR}/lib/aid-roots.sh"   # _aid_fm_get, aid_state_root — the source plan's brief binding (P109)
 source "${SCRIPT_DIR}/lib/aid-generation-ids.sh"  # aid_gen_run_id — THE run_id derivation, shared with aid-auto-pipeline.sh (which seals it into the transaction) and aid-plan-to-epic.sh (which re-derives and verifies it)
 check_prerequisites
 
@@ -60,7 +61,7 @@ mkdir -p "$output_dir" 2>/dev/null || error_exit "Cannot create output directory
 # =============================================================================
 # Valid roles enum (must match plan.schema.json)
 # =============================================================================
-VALID_ROLES="architect domain backend frontend qa security observability docs-writer release e2e"
+VALID_ROLES="backend frontend qa security docs docs-writer release e2e"   # one list; the jq validation below reads it too (P107)
 
 validate_role() {
   local role="$1"
@@ -79,10 +80,12 @@ frontmatter="$(parse_frontmatter "$epic")"
 fm_plan_ref=""
 fm_plan_epics_total=""
 fm_status=""
+fm_source_step_ids=""
 
 while IFS='=' read -r key val; do
   case "$key" in
     plan_ref)          fm_plan_ref="$val" ;;
+    source_step_ids)   fm_source_step_ids="${val//\"/}" ;;
     plan_epics_total)  fm_plan_epics_total="$val" ;;
     status)            fm_status="$val" ;;
   esac
@@ -141,6 +144,7 @@ declare -a step_roles=()
 declare -a step_objectives=()
 declare -a step_depends=()
 declare -a step_parallel=()
+declare -a step_closes=()
 
 # Parse table using awk — extract data rows (skip header/separator)
 table_data="$(echo "$steps_section" | awk '
@@ -213,9 +217,12 @@ while IFS= read -r row; do
 
   # Hard arity check (P074 Step 17). The old path silently padded short rows
   # with `---`, which masked genuinely broken rows as no-dependency steps.
-  if [[ "${#fields[@]}" -ne 5 ]]; then
-    error_exit "EPIC Steps table row has ${#fields[@]} fields, expected 5 (| # | Role | Objective | Depends On | Parallel Group |): ${row}" 1
-  fi
+  # Five fields = an EPIC generated before P109 (no Closes column, zavira []).
+  case "${#fields[@]}" in
+    5) closes="—" ;;
+    6) closes="$(echo "${fields[5]}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')" ;;
+    *) error_exit "EPIC Steps table row has ${#fields[@]} fields, expected 5 or 6 (| # | Role | Objective | Depends On | Parallel Group | Closes |): ${row}" 1 ;;
+  esac
 
   # Trim whitespace from each field
   num="$(echo "${fields[0]}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
@@ -231,7 +238,7 @@ while IFS= read -r row; do
 
   # Validate role
   if ! validate_role "$role"; then
-    error_exit "Invalid role '$role' in step $num. Valid roles: $VALID_ROLES" 1
+    error_exit "Invalid role '$role' in step $num. Valid roles: $VALID_ROLES (a step that is both backend and frontend — 'fullstack' — is two steps; architect, domain and observability were removed in 2.112.0: use backend)" 1
   fi
 
   # Validate objective length (schema requires minLength: 10)
@@ -244,6 +251,7 @@ while IFS= read -r row; do
   step_objectives+=("$objective")
   step_depends+=("$depends_on")
   step_parallel+=("$parallel_group")
+  step_closes+=("$closes")
   row_count=$(( row_count + 1 ))
 done <<< "$table_data"
 
@@ -280,240 +288,19 @@ if [[ "$row_count" -gt 1 && "$ac_count" -lt "$row_count" ]]; then
 fi
 
 # =============================================================================
-# Step 4: Generate step IDs
-# =============================================================================
-declare -a step_ids=()
-for i in "${!step_nums[@]}"; do
-  # Sanitize the role for use in the step ID: the plan.schema step.id pattern
-  # (^step_[a-z0-9_]+$) forbids hyphens, but valid roles like "docs-writer"
-  # contain one. Map hyphens to underscores so the generated ID validates while
-  # the step.role field below keeps its canonical hyphenated value.
-  role_id="${step_roles[$i]//-/_}"
-  step_ids+=("step_${step_nums[$i]}_${role_id}")
-done
-
-# Build lookup: step number -> index for dependency resolution
-declare -A num_to_idx=()
-declare -A role_to_idx=()
-for i in "${!step_nums[@]}"; do
-  num_to_idx["${step_nums[$i]}"]="$i"
-  # For role-based deps, store the first (or only) step with that role
-  # If multiple steps share a role, the last one wins (consistent with EPIC intent)
-  role_to_idx["${step_roles[$i]}"]="$i"
-done
-
-# =============================================================================
-# Step 5: Build dependencies array
-# =============================================================================
-deps_json="[]"
-declare -A dep_edges=()  # for cycle detection: "before_idx->after_idx"
-
-for i in "${!step_nums[@]}"; do
-  dep_val="${step_depends[$i]}"
-  step_id="${step_ids[$i]}"
-
-  # Normalize dashes (em-dash, en-dash, triple-dash, single-dash)
-  # These all mean "no dependency"
-  if [[ "$dep_val" == "—" || "$dep_val" == "–" || "$dep_val" == "---" || "$dep_val" == "-" || "$dep_val" == "—" || -z "$dep_val" ]]; then
-    continue
-  fi
-
-  # Split on comma for multiple dependencies
-  IFS=',' read -ra dep_parts <<< "$dep_val"
-
-  for dep_part in "${dep_parts[@]}"; do
-    dep_part="$(echo "$dep_part" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-    [[ -z "$dep_part" ]] && continue
-
-    dep_step_id=""
-
-    # Try to resolve: is it a step number?
-    if [[ "$dep_part" =~ ^[0-9]+$ ]]; then
-      dep_num="$dep_part"
-      if [[ -n "${num_to_idx[$dep_num]+_}" ]]; then
-        dep_idx="${num_to_idx[$dep_num]}"
-        dep_step_id="${step_ids[$dep_idx]}"
-      else
-        error_exit "Step ${step_nums[$i]} depends on step $dep_num which does not exist" 1
-      fi
-    # Try to resolve: is it a role name?
-    elif validate_role "$dep_part"; then
-      if [[ -n "${role_to_idx[$dep_part]+_}" ]]; then
-        dep_idx="${role_to_idx[$dep_part]}"
-        dep_step_id="${step_ids[$dep_idx]}"
-      else
-        error_exit "Step ${step_nums[$i]} depends on role '$dep_part' which has no matching step" 1
-      fi
-    else
-      error_exit "Step ${step_nums[$i]} has unresolvable dependency: '$dep_part'" 1
-    fi
-
-    # Add dependency edge
-    deps_json="$(echo "$deps_json" | jq \
-      --arg before "$dep_step_id" \
-      --arg after "$step_id" \
-      --arg reason "Declared in EPIC steps table" \
-      '. + [{"before": $before, "after": $after, "reason": $reason}]')"
-
-    # Record edge for cycle detection
-    dep_edges["${dep_step_id}->${step_id}"]=1
-  done
-done
-
-# =============================================================================
-# Step 6: Cycle detection — via shared lib
-# =============================================================================
-# Source shared lib and call build_plan_graph
-# shellcheck source=lib/aid-plan-graph.sh
-source "${SCRIPT_DIR}/lib/aid-plan-graph.sh"
-
-# Build newline-joined inputs for build_plan_graph
-step_ids_nl="$(printf '%s\n' "${step_ids[@]}")"
-edges_nl="$(printf '%s\n' "${!dep_edges[@]}")"
-
-pg_result="$(build_plan_graph "$step_ids_nl" "$edges_nl")"
-pg_status=$?
-
-if [[ $pg_status -ne 0 ]]; then
-  error_exit "build_plan_graph failed (exit $pg_status)" 1
-fi
-
-# Check for cycles in the result
-cycles_count="$(echo "$pg_result" | jq '.cycles | length')"
-if [[ "$cycles_count" -gt 0 ]]; then
-  cycle_nodes="$(echo "$pg_result" | jq -r '.cycles | join(", ")')"
-  error_exit "Circular dependency detected among steps: $cycle_nodes" 1
-fi
-
-# =============================================================================
-# Step 7: Build parallel_groups array
-# =============================================================================
-declare -A pg_members=()  # group_name -> space-separated step_ids
-
-for i in "${!step_nums[@]}"; do
-  pg="${step_parallel[$i]}"
-  # Normalize dashes
-  if [[ "$pg" == "—" || "$pg" == "–" || "$pg" == "---" || "$pg" == "-" || -z "$pg" ]]; then
-    continue
-  fi
-  pg_members["$pg"]="${pg_members[$pg]:-} ${step_ids[$i]}"
-done
-
-parallel_json="[]"
-for group_name in "${!pg_members[@]}"; do
-  members="${pg_members[$group_name]}"
-  # Trim leading space
-  members="$(echo "$members" | sed 's/^[[:space:]]+//')"
-
-  # Count members — only include groups with 2+
-  member_count=$(echo "$members" | wc -w | tr -d ' ')
-  if [[ "$member_count" -ge 2 ]]; then
-    # Build JSON array of step IDs
-    member_arr="[]"
-    for mid in $members; do
-      member_arr="$(echo "$member_arr" | jq --arg m "$mid" '. + [$m]')"
-    done
-    parallel_json="$(echo "$parallel_json" | jq --argjson arr "$member_arr" '. + [$arr]')"
-  fi
-done
-
-# =============================================================================
-# Step 8: Build analysis_groups array (auto-trigger rules)
-# =============================================================================
-analysis_json="[]"
-analysis_counter=0
-
-for i in "${!step_nums[@]}"; do
-  objective_lower="$(echo "${step_objectives[$i]}" | tr '[:upper:]' '[:lower:]')"
-  step_role="${step_roles[$i]}"
-  step_id="${step_ids[$i]}"
-
-  # Rule 1: Security patterns trigger security review
-  if echo "$objective_lower" | grep -qE '(auth|token|encrypt|sql|inject|secret|password|credential)'; then
-    if [[ "$step_role" != "security" ]]; then
-      analysis_counter=$(( analysis_counter + 1 ))
-      analysis_json="$(echo "$analysis_json" | jq \
-        --arg id "analysis_${analysis_counter}_security_review" \
-        --arg target "$step_id" \
-        '. + [{"id": $id, "target": $target, "agents": ["security"], "mode": "review", "merge_strategy": "union", "trigger": "auto"}]')"
-    fi
-  fi
-
-  # Rule 2: Migration/schema/database patterns trigger backend+security validation
-  if echo "$objective_lower" | grep -qE '(migrat|schema|database|model)'; then
-    agents="[]"
-    if [[ "$step_role" != "backend" ]]; then
-      agents="$(echo "$agents" | jq '. + ["backend"]')"
-    fi
-    if [[ "$step_role" != "security" ]]; then
-      agents="$(echo "$agents" | jq '. + ["security"]')"
-    fi
-    agent_count="$(echo "$agents" | jq 'length')"
-    if [[ "$agent_count" -gt 0 ]]; then
-      analysis_counter=$(( analysis_counter + 1 ))
-      analysis_json="$(echo "$analysis_json" | jq \
-        --arg id "analysis_${analysis_counter}_db_validation" \
-        --arg target "$step_id" \
-        --argjson agents "$agents" \
-        '. + [{"id": $id, "target": $target, "agents": $agents, "mode": "validation", "merge_strategy": "consensus", "trigger": "auto"}]')"
-    fi
-  fi
-
-  # Rule 3: Contract/ADR patterns trigger backend+frontend validation
-  if echo "$objective_lower" | grep -qE '(contract|adr|api design|interface)'; then
-    agents="[]"
-    if [[ "$step_role" != "backend" ]]; then
-      agents="$(echo "$agents" | jq '. + ["backend"]')"
-    fi
-    if [[ "$step_role" != "frontend" ]]; then
-      agents="$(echo "$agents" | jq '. + ["frontend"]')"
-    fi
-    agent_count="$(echo "$agents" | jq 'length')"
-    if [[ "$agent_count" -gt 0 ]]; then
-      analysis_counter=$(( analysis_counter + 1 ))
-      analysis_json="$(echo "$analysis_json" | jq \
-        --arg id "analysis_${analysis_counter}_contract_validation" \
-        --arg target "$step_id" \
-        --argjson agents "$agents" \
-        '. + [{"id": $id, "target": $target, "agents": $agents, "mode": "validation", "merge_strategy": "union", "trigger": "auto"}]')"
-    fi
-  fi
-
-  # Rule 4: Complex outputs (objective mentions 5+ distinct items) trigger architect review
-  # Count items separated by +, commas, or "and"
-  item_count="$(echo "${step_objectives[$i]}" | { grep -oE '[+,]|( and )' || true; } | wc -l | tr -d ' ')"
-  if [[ "$item_count" -ge 4 && "$step_role" != "architect" ]]; then
-    analysis_counter=$(( analysis_counter + 1 ))
-    analysis_json="$(echo "$analysis_json" | jq \
-      --arg id "analysis_${analysis_counter}_complexity_review" \
-      --arg target "$step_id" \
-      '. + [{"id": $id, "target": $target, "agents": ["architect"], "mode": "review", "merge_strategy": "union", "trigger": "auto"}]')"
-  fi
-done
-
-# =============================================================================
-# Step 9: Extract per-step detail from EPIC sections
+# Step 4: Per-step detail from the EPIC's own sections — the prepared fields of
+# the step list handed to the shared builder (lib/aid-plan-json.sh, P111).
 # =============================================================================
 
-# Helper: parse Step UI Contracts section from EPIC
-# Returns the raw content of the ## Step UI Contracts section
-parse_step_ui_contracts() {
-  local epic_content="$1"
-  echo "$epic_content" | awk '
-    /^## Step UI Contracts/ { found=1; next }
-    found && /^## / { exit }
-    found { print }
-  '
-}
-
-# Extract the Step UI Contracts section once (used per-step in the loop below)
-ui_contracts_section="$(parse_step_ui_contracts "$(cat "$epic")")"
+# The ## Step UI Contracts section (per-step scoping and ui_change blocks).
+ui_contracts_section="$(echo "$(cat "$epic")" | awk '
+  /^## Step UI Contracts/ { found=1; next }
+  found && /^## / { exit }
+  found { print }
+')"
 
 # _aid_append_ac_items <raw \x1f-joined AC text> — appends each trimmed,
-# non-empty AC item to the caller's $step_ac_json (shared scope, not a
-# subshell — deliberately not `local`). Used by the no-block fallback path
-# for both the role-specific and _global accumulators, which were
-# byte-identical loops before this extraction (simplifier SMP-003).
+# non-empty AC item to the caller's $step_ac_json (shared scope, not local).
 _aid_append_ac_items() {
   local raw="$1" ac_item
   IFS=$'\x1f' read -ra ac_items <<< "$raw"
@@ -524,23 +311,16 @@ _aid_append_ac_items() {
   done
 }
 
-
-# Extract Scope sections
+# Scope sections. Allowed paths go through the same D4 cleaner as the per-step
+# block — an ambiguous multi-path entry fails loudly instead of authorizing
+# only its first path.
 scope_allowed_raw="$(extract_subsection "$epic" "Scope" "Allowed files/paths")"
 scope_forbidden_raw="$(extract_subsection "$epic" "Scope" "Forbidden zones")"
-
-# Parse allowed paths into array. Runs each bullet through the same D4
-# cleaner as the per-step block (lib/aid-scoping.sh) — this is the fallback
-# source for step_allowed_paths_json (see step_has_block==0 below), so an
-# ambiguous multi-path entry here (e.g. a comma-separated list) must fail
-# loudly instead of silently authorizing only the first path.
 allowed_paths_json="[]"
 while IFS= read -r line; do
   line="$(echo "$line" | sed 's/\r$//')"
-  # Match lines starting with - that contain a path (not HTML comments)
   if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+(.*)$ ]]; then
     path_entry="$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]*$//')"
-    # Skip HTML comments and empty
     [[ "$path_entry" == "<!--"* ]] && continue
     [[ -z "$path_entry" ]] && continue
     if ! parsed_scope_paths="$(_aid_split_path_entry "$path_entry")"; then
@@ -554,7 +334,6 @@ while IFS= read -r line; do
   fi
 done <<< "$scope_allowed_raw"
 
-# Parse forbidden paths into array
 forbidden_paths_json="[]"
 while IFS= read -r line; do
   line="$(echo "$line" | sed 's/\r$//')"
@@ -563,13 +342,11 @@ while IFS= read -r line; do
     path_val="${path_val//\`/}"
     [[ "$path_val" == "<!--"* ]] && continue
     [[ -z "$path_val" ]] && continue
-    # Strip trailing comment like " (command rewrites are EPIC 2)"
     path_val="$(echo "$path_val" | sed 's/[[:space:]]*(.*)[[:space:]]*$//')"
     forbidden_paths_json="$(echo "$forbidden_paths_json" | jq --arg p "$path_val" '. + [$p]')"
   fi
 done <<< "$scope_forbidden_raw"
 
-# Extract constraints
 constraints_raw="$(extract_section "$epic" "Constraints")"
 constraints_json="[]"
 while IFS= read -r line; do
@@ -582,25 +359,15 @@ while IFS= read -r line; do
   fi
 done <<< "$constraints_raw"
 
-# Extract acceptance criteria (grouped by role prefix)
+# Acceptance criteria grouped by role prefix. Joined with 0x1f, not "|||":
+# bash's IFS is a character class, so "|||" would split on every "|" (D3).
 ac_raw="$(extract_section "$epic" "Acceptance Criteria")"
 declare -A ac_by_role=()
-
 while IFS= read -r line; do
   line="$(echo "$line" | sed 's/\r$//')"
-  # Match lines like: - [ ] [role] criterion text
   if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\[[[:space:]]*\][[:space:]]*\[([a-z]+)\][[:space:]]*(.*) ]]; then
-    ac_role="${BASH_REMATCH[1]}"
-    ac_text="${BASH_REMATCH[2]}"
-    # D3: join with the unit-separator sentinel (0x1f), NOT the literal "|||"
-    # string — bash's IFS is a character CLASS, not a multi-char literal, so
-    # IFS='|||' on the split side collapses to IFS='|' and fragments any AC
-    # text containing a literal "|" (e.g. a jq expression). 0x1f cannot
-    # appear in normal markdown/AC text and splits unambiguously as a single
-    # character class.
-    ac_by_role["$ac_role"]="${ac_by_role[$ac_role]:-}"$'\x1f'"$ac_text"
+    ac_by_role["${BASH_REMATCH[1]}"]="${ac_by_role[${BASH_REMATCH[1]}]:-}"$'\x1f'"${BASH_REMATCH[2]}"
   elif [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\[[[:space:]]*\][[:space:]]*(.*) ]]; then
-    # AC without role prefix — assign to all roles
     ac_text="${BASH_REMATCH[1]}"
     [[ "$ac_text" == "<!--"* ]] && continue
     [[ -z "$ac_text" ]] && continue
@@ -608,7 +375,6 @@ while IFS= read -r line; do
   fi
 done <<< "$ac_raw"
 
-# Extract artifacts section
 artifacts_raw="$(extract_section "$epic" "Artifacts")"
 artifacts_json="[]"
 while IFS= read -r line; do
@@ -621,78 +387,38 @@ while IFS= read -r line; do
   fi
 done <<< "$artifacts_raw"
 
-# =============================================================================
-# Step 10: Build steps array
-# =============================================================================
-steps_json="[]"
-
+steps_list="[]"
 for i in "${!step_nums[@]}"; do
-  step_id="${step_ids[$i]}"
   step_role="${step_roles[$i]}"
-  step_objective="${step_objectives[$i]}"
   step_n="${step_nums[$i]}"
-
-  # Build inputs: EPIC spec + outputs from dependency steps
-  inputs_json='["EPIC specification"]'
-  dep_val="${step_depends[$i]}"
-  if [[ "$dep_val" != "—" && "$dep_val" != "–" && "$dep_val" != "---" && "$dep_val" != "-" && -n "$dep_val" ]]; then
-    IFS=',' read -ra dep_parts <<< "$dep_val"
-    for dp in "${dep_parts[@]}"; do
-      dp="$(echo "$dp" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-      [[ -z "$dp" ]] && continue
-      if [[ "$dp" =~ ^[0-9]+$ ]]; then
-        if [[ -n "${num_to_idx[$dp]+_}" ]]; then
-          dep_idx="${num_to_idx[$dp]}"
-          dep_sid="${step_ids[$dep_idx]}"
-          inputs_json="$(echo "$inputs_json" | jq --arg s "Output from $dep_sid" '. + [$s]')"
-        fi
-      elif validate_role "$dp"; then
-        if [[ -n "${role_to_idx[$dp]+_}" ]]; then
-          dep_idx="${role_to_idx[$dp]}"
-          dep_sid="${step_ids[$dep_idx]}"
-          inputs_json="$(echo "$inputs_json" | jq --arg s "Output from $dep_sid" '. + [$s]')"
-        fi
-      fi
-    done
+  # P109: the brief points this step closes, from the table's Closes column
+  step_zavira_json="$( { grep -oE '\bAC[0-9]+\b' <<< "${step_closes[$i]:-}" || true; } | jq -R . | jq -sc .)"
+  # P110: the plan's global step number — source_step_ids at the local index;
+  # null for an EPIC generated before 2.116.0.
+  step_plan_step=null
+  if [[ -n "$fm_source_step_ids" ]]; then
+    IFS=',' read -ra __ssids <<< "$fm_source_step_ids"
+    [[ "${__ssids[$i]:-}" =~ ^[[:space:]]*([0-9]+)[[:space:]]*$ ]] && step_plan_step="${BASH_REMATCH[1]}"
   fi
 
-  # ---------------------------------------------------------------------
-  # D2 — per-step scoping block lookup (Step UI Contracts section). This is
-  # a SEPARATE "<!-- step-N: files=...; ac=... -->" line from the
-  # "ui_change_mode=" line handled below (Step 2 of P058 emits it as its
-  # own line, not merged). If found and it parses cleanly, THIS step's
-  # outputs/acceptance_criteria/allowed_paths come from the block — files[]
-  # verbatim as outputs, ac[] verbatim as acceptance_criteria, and files[]
-  # run through the ported D4 cleaner for allowed_paths. If no block exists
-  # for this step, or it fails to parse, fall back to TODAY's exact
-  # broadcast behavior (never emit an empty array just because the block is
-  # absent/malformed — that would be a regression, not a fix; contract
-  # enforcement belongs to a later step's gate, not this parser).
-  # ---------------------------------------------------------------------
+  # D2 — the per-step scoping block (`<!-- step-N: files=...; ac=... -->`):
+  # files[] verbatim as outputs, ac[] as acceptance_criteria, files[] through
+  # the D4 cleaner for allowed_paths. No block, or one that does not parse →
+  # today's broadcast (never an empty array just because the block is absent).
   step_has_block=0
   outputs_json="[]"
   step_ac_json="[]"
   step_allowed_paths_json="[]"
-
   if [[ -n "$ui_contracts_section" ]]; then
-    # -m1 -F: match aid-contract-validate.sh's _ac_block_count() convention
-    # (fixed-string, first-match-only) — without them, a self-referential
-    # prose line elsewhere in the section that happens to contain this
-    # exact literal prefix (e.g. text describing this very block syntax)
-    # could make this grep return multiple/wrong lines, diverging from the
-    # gate's own lookup for the same step (CP3 code-review finding).
+    # -m1 -F: the same first-match fixed-string lookup aid-contract-validate.sh uses.
     scoping_line="$(echo "$ui_contracts_section" | grep -m1 -F "<!-- step-${step_n}: files=" || true)"
     if [[ -n "$scoping_line" ]]; then
       scoping_parsed="$(_aid_parse_scoping_line "$scoping_line" "$step_n" || true)"
       if [[ -n "$scoping_parsed" ]]; then
-        files_json_raw="$(echo "$scoping_parsed" | sed -n '1p')"
-        ac_json_raw="$(echo "$scoping_parsed" | sed -n '2p')"
-        # Reverse the @@AID_ARROW@@ sentinel encoding aid-plan-to-epic.sh
-        # applies before JSON-encoding, so a literal "-->" inside a value
-        # (e.g. an AC describing a "start --> middle --> end" flow) can
-        # never truncate the HTML comment block early.
-        files_json_decoded="$(echo "$files_json_raw" | sed 's/@@AID_ARROW@@/-->/g')"
-        ac_json_decoded="$(echo "$ac_json_raw" | sed 's/@@AID_ARROW@@/-->/g')"
+        # Reverse the @@AID_ARROW@@ encoding aid-plan-to-epic.sh applies so a
+        # literal "-->" in a value cannot close the comment early.
+        files_json_decoded="$(echo "$scoping_parsed" | sed -n '1p' | sed 's/@@AID_ARROW@@/-->/g')"
+        ac_json_decoded="$(echo "$scoping_parsed" | sed -n '2p' | sed 's/@@AID_ARROW@@/-->/g')"
         if files_json_valid="$(echo "$files_json_decoded" | jq -c . 2>/dev/null)" \
            && ac_json_valid="$(echo "$ac_json_decoded" | jq -c . 2>/dev/null)"; then
           outputs_json="$files_json_valid"
@@ -705,25 +431,16 @@ for i in "${!step_nums[@]}"; do
       fi
     fi
   fi
-
   if [[ "$step_has_block" -eq 0 ]]; then
-    # No-block fallback — preserve today's exact broadcast behavior for
-    # backward compatibility with legacy/hand-authored EPICs and the
-    # existing goldens (minimal-plan.golden.json, ui-contract-plan), which
-    # predate this feature and carry no scoping block at all.
-    outputs_json="$(echo "$artifacts_json" | jq '.')"
-
-    # Add role-specific AC, then global AC (both no-block fallback sources)
+    outputs_json="$artifacts_json"
     [[ -n "${ac_by_role[$step_role]+_}" ]] && _aid_append_ac_items "${ac_by_role[$step_role]}"
     [[ -n "${ac_by_role[_global]+_}" ]] && _aid_append_ac_items "${ac_by_role[_global]}"
-
     step_allowed_paths_json="$allowed_paths_json"
   fi
 
-  # Extract ui_change fields for this step from the Step UI Contracts section
+  # ui_change fields from the Step UI Contracts section.
   step_ui_mode="null"
   step_ui_contract="null"
-
   if [[ -n "$ui_contracts_section" ]]; then
     ui_meta_line="$(echo "$ui_contracts_section" | grep "<!-- step-${step_n}:" || true)"
     if [[ -n "$ui_meta_line" ]]; then
@@ -734,62 +451,35 @@ for i in "${!step_nums[@]}"; do
         ui_sha256="$(echo "$ui_meta_line" | sed -n "s/.*| sha256=\([^|]*\).*/\1/p" | tr -d ' ')"
         ui_schema_v="$(echo "$ui_meta_line" | sed -n "s/.*| schema_version=\([^| >]*\).*/\1/p" | tr -d ' ')"
         if [[ -n "$ui_path" ]]; then
-          step_ui_contract="$(jq -n \
-            --arg path "$ui_path" \
-            --arg sha256 "$ui_sha256" \
-            --arg schema_version "$ui_schema_v" \
+          step_ui_contract="$(jq -n --arg path "$ui_path" --arg sha256 "$ui_sha256" --arg schema_version "$ui_schema_v" \
             '{path: $path, sha256: $sha256, schema_version: $schema_version}')"
         fi
       fi
     fi
   fi
 
-  # Assemble step object
-  step_obj="$(jq -n \
-    --arg id "$step_id" \
-    --arg role "$step_role" \
-    --arg objective "$step_objective" \
-    --argjson inputs "$inputs_json" \
-    --argjson outputs "$outputs_json" \
+  steps_list="$(jq -c \
+    --argjson number "$step_n" --arg role "$step_role" --arg objective "${step_objectives[$i]}" \
+    --arg depends_on "${step_depends[$i]}" --arg parallel_group "${step_parallel[$i]}" \
+    --argjson zavira "$step_zavira_json" --argjson plan_step "$step_plan_step" \
+    --argjson outputs "$outputs_json" --argjson ac "$step_ac_json" \
+    --argjson allowed "$step_allowed_paths_json" --argjson forbidden "$forbidden_paths_json" \
     --argjson constraints "$constraints_json" \
-    --argjson allowed_paths "$step_allowed_paths_json" \
-    --argjson forbidden_paths "$forbidden_paths_json" \
-    --argjson acceptance_criteria "$step_ac_json" \
-    --argjson ui_change_mode "$step_ui_mode" \
-    --argjson ui_change_contract "$step_ui_contract" \
-    '{
-      id: $id,
-      role: $role,
-      objective: $objective,
-      inputs: $inputs,
-      outputs: $outputs,
-      constraints: $constraints,
-      allowed_paths: $allowed_paths,
-      forbidden_paths: $forbidden_paths,
-      acceptance_criteria: $acceptance_criteria,
-      ui_change_mode: $ui_change_mode,
-      ui_change_contract: $ui_change_contract
-    }')"
-
-  steps_json="$(echo "$steps_json" | jq --argjson step "$step_obj" '. + [$step]')"
+    --argjson ui_mode "$step_ui_mode" --argjson ui_contract "$step_ui_contract" \
+    '. + [{number: $number, role: $role, objective: $objective, depends_on: $depends_on,
+           parallel_group: $parallel_group, zavira: $zavira, plan_step: $plan_step,
+           outputs: $outputs, acceptance_criteria: $ac, allowed_paths: $allowed,
+           forbidden_paths: $forbidden, constraints: $constraints,
+           ui_change_mode: $ui_mode, ui_change_contract: $ui_contract}]' <<< "$steps_list")"
 done
 
 # =============================================================================
-# Step 11: Extract DoD Gates
+# Step 5: DoD Gates — not filtered against a fixed list (P061 E1 Step 1); the
+# builder checks the names' shape, aid-run-gates.sh reconciles them against
+# execution.yaml at run time (undefined_gate).
 # =============================================================================
-# Gate names are NOT filtered against a fixed list here — plan.schema.json's
-# gates[] accepts any non-empty string (P061 E1 Step 1: the old hardcoded
-# 4-value list silently dropped every self-host/per-project gate name, making
-# them untestable). Every non-empty, trimmed name found under "## DoD Gates"
-# is passed through to gates_json. The authoritative check is dynamic and
-# happens later: aid-run-gates.sh reconciles each declared name against the
-# gate definitions in execution.yaml and fails loud (undefined_gate) if a
-# declared gate has no matching definition there. Step 14 below still rejects
-# structurally malformed gate names (empty / non-identifier-like) fail-loud
-# at conversion time, before that dynamic reconciliation ever runs.
 gates_raw="$(extract_section "$epic" "DoD Gates")"
 gates_json="[]"
-
 while IFS= read -r line; do
   line="$(echo "$line" | sed 's/\r$//')"
   if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+ ]]; then
@@ -800,157 +490,29 @@ while IFS= read -r line; do
 done <<< "$gates_raw"
 
 # =============================================================================
-# Step 12: Build budget
+# Step 6: Build plan.json through the shared builder (lib/aid-plan-json.sh)
 # =============================================================================
-budget_json='{"max_retries_per_gate": 3}'
-
-# =============================================================================
-# Step 13: Assemble full plan.json
-# =============================================================================
-plan_source_arg="null"
-if [[ -n "$plan_source" && "$plan_source" != "null" ]]; then
-  plan_source_arg="$(jq -n --arg s "$plan_source" '$s')"
-fi
-
-# NOTE: large structured pieces (steps especially) are passed to jq via temp
-# files + --slurpfile, NOT via --argjson on the command line. A fully-detailed
-# plan can make $steps_json exceed the per-argument limit (MAX_ARG_STRLEN, 128KB
-# on Linux), which fails with "jq: Argument list too long". --slurpfile reads the
-# file's single JSON value into an array, so we dereference $var[0].
+source "${SCRIPT_DIR}/lib/aid-plan-json.sh"
 __pj_tmp="$(mktemp -d)"
-printf '%s' "$steps_json"    > "${__pj_tmp}/steps.json"
-printf '%s' "$deps_json"     > "${__pj_tmp}/deps.json"
-printf '%s' "$parallel_json" > "${__pj_tmp}/parallel.json"
-printf '%s' "$analysis_json" > "${__pj_tmp}/analysis.json"
-printf '%s' "$gates_json"    > "${__pj_tmp}/gates.json"
-printf '%s' "$budget_json"   > "${__pj_tmp}/budget.json"
-plan_json="$(jq -n \
-  --arg epic_id "$epic_id" \
-  --argjson source_plan "$plan_source_arg" \
-  --slurpfile steps "${__pj_tmp}/steps.json" \
-  --slurpfile deps "${__pj_tmp}/deps.json" \
-  --slurpfile parallel "${__pj_tmp}/parallel.json" \
-  --slurpfile analysis "${__pj_tmp}/analysis.json" \
-  --slurpfile gates "${__pj_tmp}/gates.json" \
-  --slurpfile budget "${__pj_tmp}/budget.json" \
-  '{
-    epic_id: $epic_id,
-    source_plan: $source_plan,
-    version: 1,
-    created_at: (now | todate),
-    steps: $steps[0],
-    dependencies: $deps[0],
-    parallel_groups: $parallel[0],
-    analysis_groups: $analysis[0],
-    gates: $gates[0],
-    budget: $budget[0]
-  }')"
-rm -rf "${__pj_tmp}"
+trap 'rm -rf "$__pj_tmp"' EXIT
+printf '%s' "$steps_list" > "${__pj_tmp}/steps.json"
+printf '%s' "$gates_json" > "${__pj_tmp}/gates.json"
+aid_plan_json_build --steps-json "${__pj_tmp}/steps.json" --out "${__pj_tmp}/plan.json" \
+  --epic-id "$epic_id" --plan "$plan_source" --gates-json "${__pj_tmp}/gates.json"
 
 # =============================================================================
-# Step 14: Validate against schema (structural jq-based check)
-#
-# We validate the critical structural requirements from plan.schema.json:
-#   - Required top-level fields: epic_id, version, steps, dependencies
-#   - steps[].id pattern: ^step_[a-z0-9_]+$
-#   - steps[].role in enum
-#   - steps[].objective minLength 10
-#   - dependencies[].before and .after reference existing step IDs
-#   - parallel_groups items have minItems 2
-#   - analysis_groups required fields and patterns
-#   - gates[] items are well-formed identifiers (no fixed enum — see
-#     plan.schema.json; the actual gate-existence check is dynamic, done by
-#     aid-run-gates.sh against execution.yaml at run time)
-# =============================================================================
-validation_errors="$(echo "$plan_json" | jq -r '
-  def valid_roles: ["architect","domain","backend","frontend","qa","security","observability","docs-writer","release","e2e"];
-  # NOTE: gates[] intentionally has NO fixed enum (see plan.schema.json) —
-  # any project/self-host gate name is valid here. This only checks the name
-  # is a well-formed identifier (non-empty, starts alpha, alnum/_/- after);
-  # whether the name actually maps to a gate defined in execution.yaml is a
-  # dynamic reconciliation done later by aid-run-gates.sh, not here.
-  def valid_gate_name($g): ($g | type) == "string" and ($g | test("^[A-Za-z][A-Za-z0-9_-]*$"));
-
-  . as $root |
-  [
-    # Required top-level fields
-    (if .epic_id == null or (.epic_id | type) != "string" then "missing or invalid epic_id" else empty end),
-    (if .version == null or (.version | type) != "number" then "missing or invalid version" else empty end),
-    (if .steps == null or (.steps | type) != "array" or (.steps | length) == 0 then "steps must be non-empty array" else empty end),
-    (if .dependencies == null or (.dependencies | type) != "array" then "dependencies must be array" else empty end),
-
-    # Step validation
-    (.steps // [] | to_entries[] |
-      .value as $step | .key as $idx |
-      (
-        (if ($step.id | test("^step_[a-z0-9_]+$") | not) then "step[\($idx)].id invalid: \($step.id)" else empty end),
-        (if ([valid_roles[] | select(. == $step.role)] | length) == 0 then "step[\($idx)].role invalid: \($step.role)" else empty end),
-        (if ($step.objective | length) < 10 then "step[\($idx)].objective too short" else empty end)
-      )
-    ),
-
-    # Step IDs collection for reference validation
-    (.steps | map(.id)) as $step_ids |
-
-    # Dependency validation
-    (.dependencies // [] | to_entries[] |
-      .value as $dep | .key as $idx |
-      (
-        (if ($step_ids | index($dep.before)) == null then "dependencies[\($idx)].before references unknown step: \($dep.before)" else empty end),
-        (if ($step_ids | index($dep.after)) == null then "dependencies[\($idx)].after references unknown step: \($dep.after)" else empty end)
-      )
-    ),
-
-    # Parallel groups validation
-    (.parallel_groups // [] | to_entries[] |
-      .value as $pg | .key as $idx |
-      (if ($pg | length) < 2 then "parallel_groups[\($idx)] must have at least 2 items" else empty end)
-    ),
-
-    # Analysis groups validation
-    (.analysis_groups // [] | to_entries[] |
-      .value as $ag | .key as $idx |
-      (
-        (if ($ag.id | test("^analysis_[0-9]+_[a-z_]+$") | not) then "analysis_groups[\($idx)].id invalid: \($ag.id)" else empty end),
-        (if ($step_ids | index($ag.target)) == null then "analysis_groups[\($idx)].target references unknown step: \($ag.target)" else empty end)
-      )
-    ),
-
-    # Gates validation — well-formed identifier check only (see valid_gate_name
-    # above); this used to be a dead no-op (`select(. == .)` always true).
-    (.gates // [] | to_entries[] |
-      .value as $gate | .key as $idx |
-      if (valid_gate_name($gate) | not) then "gates[\($idx)] invalid gate name: \($gate)" else empty end
-    )
-  ] | if length > 0 then join("; ") else empty end
-')"
-
-if [[ -n "$validation_errors" ]]; then
-  error_exit "Schema validation failed: $validation_errors" 1
-fi
-
-# =============================================================================
-# Step 15: Generate run_id and evidence directory
+# Step 7: run_id, evidence directory, plan.json, epic_input.md, manifest
 # =============================================================================
 run_id="$(aid_gen_run_id "$epic_id")"
 
 evidence_dir="${output_dir}/work/evidence/${epic_id}/${run_id}"
 mkdir -p "$evidence_dir" 2>/dev/null || error_exit "Cannot create evidence directory: $evidence_dir" 3
 
-# =============================================================================
-# Step 16: Save plan.json
-# =============================================================================
 plan_json_path="${evidence_dir}/plan.json"
-echo "$plan_json" > "$plan_json_path" || error_exit "Cannot write plan.json to $plan_json_path" 3
+cat "${__pj_tmp}/plan.json" > "$plan_json_path" || error_exit "Cannot write plan.json to $plan_json_path" 3
 
-# =============================================================================
-# Step 18: Copy EPIC to evidence as epic_input.md
-# =============================================================================
 cp "$epic" "${evidence_dir}/epic_input.md" 2>/dev/null || error_exit "Cannot copy EPIC to evidence directory" 3
 
-# =============================================================================
-# Step 19: Output JSON manifest to stdout
-# =============================================================================
 jq -n \
   --arg plan_json "$plan_json_path" \
   --arg run_id "$run_id" \

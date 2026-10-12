@@ -21,6 +21,9 @@ depends_on_plans: []     # IMP-232 D1 dependency gate. List the plan IDs this pl
                          # `closed` before this plan's EPICs can init (override:
                          # aid-fsm.sh init … --force --reason '<why>'). Written into
                          # the tracked manifest at scaffold; empty = no hard deps.
+zadani: .aid-o/plans/P{NNN}-zadani.md   # P109: the brief this plan carries (written first,
+zadani_verze: 1                         # template defaults/templates/zadani.md). Required for a
+zadani_sha256: {sha256 of the brief}    # lifecycle_strict plan; aid-plan-lint.sh checks all three.
 ---
 
 # Plan: {Title}
@@ -46,6 +49,9 @@ every section below and, per step, Objective / Files / Architecture Context /
 Error Handling / Edge Cases / Acceptance Criteria / Dependencies / Effort /
 AID Role; a step that founds something new (a `Create:` bullet) also owes
 **Reuse check**. An absent **Parallel group** means `---`, "runs alone".
+A plan bound to a brief (`zadani:`) also owes, per step, **Zavírá:** — the
+brief points AC<n> the step closes, or `—` — and its `## Architecture`,
+`## Data Model` and `## API Design` open with `**Odvozeno z:** AC<n>`.
 
 ## Context
 
@@ -135,6 +141,10 @@ size)*
 - [ ] PM acknowledges any ABSENT items as out-of-scope risks (with rationale)
 
 ## Acceptance Criteria
+
+*(the brief's points AC1..ACn come FIRST, copied verbatim — line and
+`verification_pattern` block — from `## 6. Hotovo, když` of the brief; the plan
+may add its own from AC<n+1>, never reword one: aid-plan-lint.sh refuses that)*
 
 *(universal — the AC themselves; the `verification_pattern` blocks below are
 optional, and aid-plan-check.sh validates each one that is present)*

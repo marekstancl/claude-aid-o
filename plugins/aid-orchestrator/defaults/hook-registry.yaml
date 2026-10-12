@@ -193,6 +193,26 @@ rules:
     handler: aid_hook_rule_worktree_registry
     description: reports plan worktree records that need a decision — a recorded tree that is gone, a closed plan's tree still on disk — with the audited command for each; nothing is ever removed by it
 
+  - id: plugin_version_notice_start
+    event: SessionStart
+    owner: any
+    degree: 3
+    failure: open
+    timeout_s: 5
+    lib: scripts/lib/aid-plugin-version.sh
+    handler: aid_plugin_version_notice_handler
+    description: a NOTICE — when the plugin this session loaded is not the installed one, say so and ask for /reload-plugins before any dispatch (P103 ran 2.108.0 agent cards under an installed 2.109.0); silent when they agree
+
+  - id: plugin_version_notice_prompt
+    event: UserPromptSubmit
+    owner: any
+    degree: 3
+    failure: open
+    timeout_s: 5
+    lib: scripts/lib/aid-plugin-version.sh
+    handler: aid_plugin_version_notice_handler
+    description: the same notice on every PM prompt, so an update installed during a long session is noticed without a restart; after /reload-plugins the hooks run from the new plugin and fall silent
+
   - id: plugin_issues_reminder
     event: Stop
     owner: controller

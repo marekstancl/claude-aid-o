@@ -47,3 +47,15 @@ teardown() { [[ -n "${T:-}" ]] && find "$T" -delete; }
                CODEX_MODEL=model-b aid_codex_probe | jq -e '.model == \"model-b\"' >/dev/null && grep -qx model-b '$SPY_ARGS'"
   [ "$status" -eq 0 ]
 }
+
+# P109 Step 6 — defect: a probe file dirtying the plan's worktree and tripping
+# the contract validator (agents 7. 10. 2026, P013-12).
+@test "the probe cache lands at the state root when called from a linked worktree" {
+  git -C "$T/project" init -q -b main && git -C "$T/project" -c user.email=t@t -c user.name=t commit -q --allow-empty -m seed
+  mkdir -p "$T/project/.aid-o/work"
+  git -C "$T/project" worktree add -q "$T/wt" -b wtb
+  run bash -c "cd '$T/wt'; AID_PROJECT_ROOT='$T/wt' bash -c 'source \"$LIB\"; CODEX_MODEL=model-a aid_codex_probe >/dev/null'"
+  [ -f "$T/project/.aid-o/work/codex-probe.json" ]
+  [ ! -e "$T/wt/.aid-o/work/codex-probe.json" ]
+  git -C "$T/project" worktree remove --force "$T/wt"
+}

@@ -1555,7 +1555,7 @@ misdiagnosed as an AID gate.
 > index with named writers, and the audited `plan-state --recreate-worktree`
 > repair.
 > This is NOT the archived intra-plan parallelism plan
-> (`docs/plans/archive/AID-parallelism-re-enable-plan.md`, multiple agents
+> (`docs/archive/2026-07-08-aid-parallelism-re-enable-plan.md`, multiple agents
 > inside one plan) — that remains deferred.
 >
 > **STILL OPEN after P074 (counts refreshed 2026-08-08):** 19 class-B
@@ -1723,4 +1723,4 @@ To je selhání naruby v ploše, která má PM říkat pravdu.
 
 Testovací patra (§1–§9 se jich dotýkají) jsou zavedená, ale **merge cesta je
 81 % nad rozpočtem** a jedna sada je 47 % celého portfolia — viz
-`docs/plans/HANDOFF-2026-08-14.md`, okno A.
+`docs/plans/2026-08-14-handoff.md`, okno A.

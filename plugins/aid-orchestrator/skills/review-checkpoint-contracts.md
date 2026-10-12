@@ -7,7 +7,7 @@ user_invocable: false
 # Review Checkpoint Contracts
 
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
-Additive to the canonical verifier output format (`agents/verifier.md`).
+Additive to the review answer contract (`defaults/schemas/review-finding.schema.json`, `skills/step-review-roles.md`).
 
 **Last Updated:** 2026-09-20
 
@@ -97,7 +97,8 @@ command, is the "Step review (CP2) and EPIC review (CP3)" section of
 ## CP1 Contract — Plan Review
 
 Plan review is not a verifier dispatch. Six reviewer roles answer from one
-template, in at most two rounds by default, and a deterministic adjudicator
+template, in one round by default (a second after a blocker and a passing
+fix-check, P109), and a deterministic adjudicator
 merges what survives the evidence rule:
 
 - the roles, their questions, the evidence rule and the answer shape:
@@ -121,7 +122,7 @@ Evidence format: `semantic-review-final.json` wrapping findings via `aid-finding
 
 | Mode | When dispatched | Producer |
 |------|----------------|----------|
-| `final` | the plan-final boundary (`aid-plan-fsm.sh plan-finalize`) | the verifier, filling the generated envelope |
+| `final` | the plan-final boundary (`aid-plan-fsm.sh plan-finalize`) | the plan-final review round (cp7), filling the generated envelope |
 
 The `local`, `wiring` and `behavior` modes went with P094: a step's or an
 EPIC's semantic evidence is the reviewer round's merged findings, and the cp3

@@ -247,8 +247,19 @@ _aid_qc_jobs_busy() {
 _aid_qc_bg_pending() {
   # Two passes over the transcript whatever its length: the ids launched in the
   # background, minus the ids a notification answered.
+  # An Agent call runs in the background BY DEFAULT, with no run_in_background
+  # in its input (P103, agents P008): its tool_result then says it was launched
+  # in the background. That text is the harness's, so both known phrasings are
+  # accepted; a foreground Agent's result is its output and is never pending.
   [[ -n "$(comm -23 \
-    <(jq -r 'select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and .input.run_in_background? == true) | .id' "$1" 2>/dev/null | sort -u) \
+    <( { jq -r 'select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and .input.run_in_background? == true) | .id' "$1" 2>/dev/null
+         # only results of an Agent/Task call count: another tool's output may quote the phrase
+         comm -12 \
+           <(jq -r 'select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and (.name == "Agent" or .name == "Task")) | .id' "$1" 2>/dev/null | sort -u) \
+           <(jq -r 'select(.type == "user") | .message.content | arrays | .[] | select(.type? == "tool_result")
+                    | select((.content | if type == "string" then . else ([.[]? | .text? // empty] | join(" ")) end)
+                             | test("Async agent launched|working in the background")) | .tool_use_id' "$1" 2>/dev/null | sort -u)
+       } | sort -u) \
     <(grep -o '<tool-use-id>[^<]*' "$1" | cut -d'>' -f2 | sort -u))" ]]
 }
 

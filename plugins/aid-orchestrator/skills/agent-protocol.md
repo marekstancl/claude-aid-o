@@ -316,8 +316,8 @@ path whenever they redirect.
 
 ## Controller boundary (non-negotiable)
 
-This contract binds **every** dispatched agent — implementer, verifier, gate-fixer, auditor,
-simplifier, project-scanner. It is stated here once and
+This contract binds **every** dispatched agent — implementer, implementer-light, gate-fixer,
+reviewer-light, project-scanner, and the critic (`skills/critic.md`). It is stated here once and
 nowhere else; each agent card points at this section instead of restating it, so there is exactly
 one text to read and exactly one text to change.
 

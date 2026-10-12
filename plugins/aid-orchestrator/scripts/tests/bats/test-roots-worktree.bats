@@ -141,6 +141,37 @@ _plant_tripwire() {
   [ "$output" = "$(_phys "$TEST_TMPDIR/dogfood")" ]
 }
 
+# _mk_tracking_primary <dir> — a project that TRACKS .aid-o/work/plan-state in
+# git, as acta, agents and wan do: every linked worktree carries the directory.
+_mk_tracking_primary() {
+  local d="$1"
+  mkdir -p "$d/.aid-o/work/plan-state/P001" "$d/.aid-o/config/policies"
+  printf 'x\n' > "$d/.aid-o/work/plan-state/P001/plan-state.yaml"
+  printf 'review_checkpoints: {}\n' > "$d/.aid-o/config/policies/review-checkpoints.yaml"
+  ( cd "$d" && git init -q -b main && git config user.email t@t && git config user.name t && git add -A && git commit -qm seed )
+}
+
+@test "a project that tracks plan-state: its LINKED worktree resolves to the primary, not to itself (agents P009)" {
+  _mk_tracking_primary "$TEST_TMPDIR/tp"
+  _mk_worktree "$TEST_TMPDIR/tp" "$TEST_TMPDIR/tpwt"
+  [ -d "$TEST_TMPDIR/tpwt/.aid-o/work/plan-state" ]
+  run bash -c "source '$ROOTS' && aid_state_root '$TEST_TMPDIR/tpwt'"
+  [ "$status" -eq 0 ]; [ "$output" = "$(_phys "$TEST_TMPDIR/tp")" ]
+  run bash -c "cd / && source '$ROOTS' && AID_PROJECT_ROOT='$TEST_TMPDIR/tpwt' aid_state_root"
+  [ "$status" -eq 0 ]; [ "$output" = "$(_phys "$TEST_TMPDIR/tp")" ]
+  # the primary checkout itself keeps resolving to itself
+  run bash -c "source '$ROOTS' && aid_state_root '$TEST_TMPDIR/tp'"
+  [ "$output" = "$(_phys "$TEST_TMPDIR/tp")" ]
+}
+
+@test "a nested fixture dir with its own plan-state INSIDE a linked worktree still takes the escape" {
+  _mk_tracking_primary "$TEST_TMPDIR/tp"
+  _mk_worktree "$TEST_TMPDIR/tp" "$TEST_TMPDIR/tpwt"
+  mkdir -p "$TEST_TMPDIR/tpwt/fixtures/proj/.aid-o/work/plan-state"
+  run bash -c "source '$ROOTS' && aid_state_root '$TEST_TMPDIR/tpwt/fixtures/proj'"
+  [ "$status" -eq 0 ]; [ "$output" = "$(_phys "$TEST_TMPDIR/tpwt/fixtures/proj")" ]
+}
+
 @test "AID_PROJECT_ROOT naming neither a repo root nor a plan-state carrier fails naming both accepted forms" {
   mkdir -p "$TEST_TMPDIR/junk"
   run bash -c "source '$ROOTS' && AID_PROJECT_ROOT='$TEST_TMPDIR/junk' aid_state_root"
@@ -295,6 +326,8 @@ _plant_tripwire() {
   ( cd "$primary" && source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh" \
     && aid_plan_summary_render "$primary/.aid-o/plans/P099-multi.md" \
          "$primary/.aid-o/work/evidence/P099/plan-summary-artifact.html" ) >/dev/null 2>&1
+  # P109: the gate owes the critic even with the review off — in the state root
+  aid_fixture_seed_critic_check "$primary" "$primary/.aid-o/plans/P099-multi.md"
 
   run bash -c "cd '$TEST_TMPDIR/wt' && bash '$PIPELINE' --plan '$primary/.aid-o/plans/P099-multi.md' --queue-mode chain" 3>&-
   [ "$status" -eq 0 ]
@@ -385,6 +418,8 @@ _plant_tripwire() {
   _mk_primary "$TEST_TMPDIR/fnew"
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$TEST_TMPDIR/fold/.aid-o/plans/P099-multi.md"
   cp "$FIXTURES/multi-phase-plan-numeric.md" "$TEST_TMPDIR/fnew/.aid-o/plans/P099-multi.md"
+  aid_fixture_seed_critic_check "$TEST_TMPDIR/fold" "$TEST_TMPDIR/fold/.aid-o/plans/P099-multi.md"
+  aid_fixture_seed_critic_check "$TEST_TMPDIR/fnew" "$TEST_TMPDIR/fnew/.aid-o/plans/P099-multi.md"
 
   _golden_seq "$OLD_S" "$TEST_TMPDIR/fold" | _golden_norm "$(_phys "$TEST_TMPDIR/fold")" > "$TEST_TMPDIR/out-old.txt"
   _golden_seq "$NEW_S" "$TEST_TMPDIR/fnew" | _golden_norm "$(_phys "$TEST_TMPDIR/fnew")" > "$TEST_TMPDIR/out-new.txt"
@@ -775,4 +810,18 @@ EOF
       false
     fi
   done
+}
+
+@test "aid_dotaid_twin_check: identical or single copies pass; differing copies return 3 naming both and the newer one; one tree is a no-op" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-roots.sh"
+  local T; T="$(mktemp -d)"; mkdir -p "$T/main/.aid-o/plans" "$T/wt/.aid-o/plans"
+  printf 'same\n' > "$T/main/.aid-o/plans/P1-x.md"; printf 'same\n' > "$T/wt/.aid-o/plans/P1-x.md"
+  run aid_dotaid_twin_check "$T/main" "$T/wt" "$T/wt/.aid-o/plans/P1-x.md"; [ "$status" -eq 0 ]; [ -z "$output" ]
+  run aid_dotaid_twin_check "$T/main" "$T/wt" ".aid-o/plans/P2-only-here.md"; [ "$status" -eq 0 ]
+  run aid_dotaid_twin_check "$T/main" "$T/main" ".aid-o/plans/P1-x.md"; [ "$status" -eq 0 ]
+  sleep 1; printf 'changed\n' > "$T/wt/.aid-o/plans/P1-x.md"
+  run aid_dotaid_twin_check "$T/main" "$T/wt" ".aid-o/plans/P1-x.md"
+  [ "$status" -eq 3 ]; [[ "$output" == *"two different contents under one name: .aid-o/plans/P1-x.md"* ]]; [[ "$output" == *"the newer copy is $T/wt/.aid-o/plans/P1-x.md"* ]]
+  run aid_dotaid_twin_check "$T/main" "$T/wt" "/elsewhere/file.md"; [ "$status" -eq 0 ]
+  rm -rf "$T"
 }

@@ -260,7 +260,7 @@ stop_classes:
     ladder_entry_status: planned
     emitter:
       - file: plugins/aid-orchestrator/scripts/aid-review-round.sh
-        anchor: "exceeds rounds_default"
+        anchor: "exceeds the round budget"
         note: "plan review refuses a round beyond rounds_default without the PM's recorded override"
     allowed_actions: []
     budget: {attempts: 0, wall_clock_seconds: 0}
@@ -333,12 +333,16 @@ existing_loops:
     authority: existing
     governed_by_ladder: false
     budget_key: "review_checkpoints.plan_review.rounds_default"
-    budget_value: 2
+    budget_value: 1
     budget_file: plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml
     budget_kind: policy_key
     note: >-
       aid-review-round.sh prepare refuses a round beyond it unless the
       PM's words are recorded with `override`; the gate refuses such a round too.
+      Since 2.115.0 (P109) the budget is one round, and the one second round
+      the policy allows without an override (round 1 found a blocker, its fix
+      passed fix-check — second_round_when) is decided by
+      aid_review_second_round_allowed in both places.
 
   - id: gate_retry
     what: "Per-gate retry inside aid-run-gates.sh"

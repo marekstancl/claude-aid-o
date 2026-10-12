@@ -365,7 +365,7 @@ per enforcement type is:
 | Type | Enforcement | Canonical instruction home |
 |------|-------------|---------------------------|
 | 1 | FSM-precondition (orchestrator) | `skills/pipeline.md` (state/transition sections) |
-| 2 | FSM-precondition (subagent output) | `agents/verifier.md` or `skills/agent-protocol.md` |
+| 2 | FSM-precondition (subagent output) | `skills/step-review-roles.md` or `skills/agent-protocol.md` |
 | 3 | Dispatch-wrapper | `skills/pipeline.md §4 Dispatch Protocol` |
 | 4 | Structural-check | `skills/pipeline.md` (relevant §) or generating script header |
 | 5 | Pre-filter-regex | `defaults/pre-filter-rules.yaml` (self) + `pipeline.md §13` |

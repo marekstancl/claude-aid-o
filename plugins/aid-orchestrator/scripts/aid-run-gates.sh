@@ -104,6 +104,8 @@ source "${SCRIPT_DIR}/lib/aid-resume-artifact.sh"
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
 # P097 Step 4 — the one profile resolver (names, ranks, refusals).
 source "${SCRIPT_DIR}/lib/aid-gate-profile-select.sh"
+# shellcheck source=lib/aid-ancillary.sh
+source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # _aid_ancillary_glob_match — project_tests globs (P110)
 
 # ─── State paths vs the tree under test (P079 Step 2, IMP-479) ──────────────
 # Two different roots meet in this file and used to be the same one by
@@ -1029,6 +1031,200 @@ _gate_bats_units() {
   done
 }
 
+# ─── P110: the gates run the project's tests ───────────────────────────────
+# _gates_evidence_path <resolved command> — the path after --evidence-file, or nothing.
+_gates_evidence_path() {
+  { grep -oE -- '--evidence-file[= ]+[^ ;&|)]+' <<< "$1" || true; } | head -1 | sed -E 's/^--evidence-file[= ]+//'
+}
+
+# _gates_project_tests_check <yaml> <profile> <base> <epic> <run> <gates_json> <plugin_path> <plan_path>
+#   After the profile ran: did a gate flagged `runs_project_tests: true` prove,
+#   through its evidence file ({ran_tests|selected_tests, skipped_by_tier}),
+#   that it ran the test files this change touched (`project_tests:` globs over
+#   `git diff --name-only <base>..HEAD`, plus AID_CHANGED_PATHS)? Prints
+#   {row: <a row for gates.project_tests, or null>, summary: <gates_report.project_tests>}.
+#   Rows: profile_skips_project_tests / project_tests_evidence_missing /
+#   project_tests_not_selected (fail, required), gate_failed (skip: the flagged
+#   gate failed on its own), project_tests_undeclared (skip, advisory: no
+#   `project_tests:` key and a change in a usual test path), exit_0 (pass).
+#   A flagged gate trimmed out as carried (AID_GATES_REUSE_OF) is proven by the
+#   previous attempt's evidence. Exit 2 when `project_tests` is not a list.
+_gates_project_tests_check() {
+  local yaml="$1" profile="$2" base="$3" epic="$4" run="$5" gates="$6" plugin="$7" plan="$8"
+  local ptype changed="" globs g path t ev_path st
+  ptype="$(yq -r '.project_tests | type' "$yaml" 2>/dev/null)"
+  case "$ptype" in
+    '!!seq'|'!!null') ;;
+    *) echo "ERROR: aid-run-gates.sh: project_tests must be a list of globs (found ${ptype#\!\!})" >&2; return 2 ;;
+  esac
+  local declared=false; [[ "$ptype" == '!!seq' ]] && declared=true
+  local diff_note=""
+  if [[ -n "$base" && "$base" != null ]] && changed="$(git diff --name-only "${base}..HEAD" 2>/dev/null)"; then :; else
+    changed=""; diff_note="no base commit or git diff failed: no changed paths"
+  fi
+  [[ -n "${AID_CHANGED_PATHS:-}" && -f "${AID_CHANGED_PATHS}" ]] && changed+=$'\n'"$(cat "$AID_CHANGED_PATHS")"
+  changed="$(grep -v '^$' <<< "$changed" | sort -u || true)"
+  local -a tests=()
+  if [[ "$declared" == true ]]; then
+    mapfile -t globs < <(yq -r '.project_tests[]' "$yaml")
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      for g in "${globs[@]}"; do _aid_ancillary_glob_match "$path" "$g" && { tests+=("$path"); break; }; done
+    done <<< "$changed"
+  else
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      [[ "$path" =~ (^|/)tests/|(^|/)test_[^/]*\.py$|\.bats$|\.test\.[^/]+$ ]] && tests+=("$path")
+    done <<< "$changed"
+  fi
+  local tests_json; tests_json="$(printf '%s\n' ${tests[@]+"${tests[@]}"} | jq -R . | jq -sc 'map(select(. != ""))')"
+  local summary row=null reason="" status="" detail=""
+  if [[ "$declared" != true ]]; then
+    summary="$(jq -nc --argjson c "$tests_json" '{declared: false, changed_test_files: $c, covered_by: null, nightly_covers: []}')"
+    if (( ${#tests[@]} > 0 )); then
+      row="$(jq -nc --arg o "the change touches test files ($(IFS=,; echo "${tests[*]}")) and execution.yaml declares no project_tests:
+next: declare project_tests: (globs of the project's test files) and flag the gate that runs them runs_project_tests: true with --evidence-file {evidence_dir}/gates/<gate>.evidence.json — aid-run-gates.sh --lint-profiles <execution.yaml> checks it" \
+        '{gate: "project_tests", result: "skip", reason: "project_tests_undeclared", exit_code: null, duration_ms: 0, output: $o, attempts: 0, required: false, required_source: "explicit"}')"
+    fi
+    jq -nc --argjson r "$row" --argjson s "$summary" '{row: $r, summary: $s}'; return 0
+  fi
+  # the flagged gates of this run, and the carried ones of a reuse attempt
+  local -a flagged=() carried=()
+  mapfile -t flagged < <(gate_profile_flagged_gates "$yaml" "$profile")
+  # carried = the gates whose rows plan-fsm actually copied forward (P110 review)
+  if [[ -n "${AID_GATES_REUSE_OF:-}" ]]; then
+    local fg; for fg in ${AID_GATES_REUSE_CARRIED:-}; do
+      [[ "$(GATE="$fg" yq -r '.gates[strenv(GATE)].runs_project_tests // false' "$yaml")" == true ]] && carried+=("$fg")
+    done
+  fi
+  local ran='[]' skipped='[]' covered_by=null missing=() failed=() failed_optional=() gate cmd
+  local cur_ev; cur_ev="$(_gates_evidence_dir "$epic" "$run")"
+  for gate in ${flagged[@]+"${flagged[@]}"} ${carried[@]+"${carried[@]}"}; do
+    cmd="$(GATE="$gate" yq -r '.gates[strenv(GATE)].command // ""' "$yaml")"
+    ev_path="$(_gates_evidence_path "$(resolve_placeholders "$cmd" "$epic" "$run" "$base" "$plan" "$plugin" 2>/dev/null)")"
+    # a carried gate's evidence is the previous run's (its evidence dir, not ours)
+    if printf '%s\n' ${carried[@]+"${carried[@]}"} | grep -qxF "$gate"; then
+      [[ -n "$ev_path" && -n "${AID_GATES_REUSE_DIR:-}" ]] && ev_path="${AID_GATES_REUSE_DIR}${ev_path#"$cur_ev"}"
+    fi
+    st="$(jq -r --arg g "$gate" '.[$g].status // .[$g].result // ""' <<< "$gates")"
+    if [[ "$st" == fail ]]; then
+      failed+=("$gate")
+      [[ "$(GATE="$gate" yq -r '.gates[strenv(GATE)].required // false' "$yaml")" == true ]] || failed_optional+=("$gate")
+      continue
+    fi
+    if [[ -z "$ev_path" || ! -s "$ev_path" ]] || ! jq -e . "$ev_path" >/dev/null 2>&1; then missing+=("$gate"); continue; fi
+    ran="$(jq -c --slurpfile e "$ev_path" '. + ($e[0].ran_tests // []) + ($e[0].selected_tests // [])' <<< "$ran")"
+    skipped="$(jq -c --slurpfile e "$ev_path" '. + ($e[0].skipped_by_tier // [])' <<< "$skipped")"
+    [[ "$covered_by" == null ]] && covered_by="\"$gate\""
+  done
+  # a changed test is covered by its path, or by a listed suite of the same name
+  local notsel nightly
+  read -r notsel nightly < <(jq -rn --argjson c "$tests_json" --argjson r "$ran" --argjson s "$skipped" '
+    def hit($l): . as $p | any($l[]; . == $p or (split("/") | last) == ($p | split("/") | last));
+    [$c[] | select(hit($r) | not)] as $u
+    | ([$u[] | select(hit($s) | not)] | tojson) + " " + ([$u[] | select(hit($s))] | tojson)')
+  summary="$(jq -nc --argjson c "$tests_json" --argjson cb "$covered_by" --argjson n "$nightly" --arg note "$diff_note" \
+    '{declared: true, changed_test_files: $c, covered_by: $cb, nightly_covers: $n} + (if $note == "" then {} else {note: $note} end)')"
+  (( ${#tests[@]} == 0 )) && { jq -nc --argjson s "$summary" '{row: null, summary: $s}'; return 0; }
+  if (( ${#flagged[@]} + ${#carried[@]} == 0 )); then
+    reason=profile_skips_project_tests status=fail
+    detail="the change touches the project's tests ($(IFS=,; echo "${tests[*]}")) and profile '${profile:-<none>}' has no gate flagged runs_project_tests
+next: add the gate that runs the project's tests to the profile's include[] (flagged runs_project_tests: true, with --evidence-file {evidence_dir}/gates/<gate>.evidence.json), or waive this run: aid-gate-waiver.sh issue project_tests --evidence-dir <run evidence> --reason \"<the PM's words>\" (pipeline.md §When AID refuses: profile_skips_project_tests)"
+  elif (( ${#failed_optional[@]} > 0 )); then
+    # a flagged gate that is not required would let the run pass with the changed tests failing
+    reason=gate_failed status=fail detail="flagged gate(s) failed and are not required, so nothing else blocks: ${failed_optional[*]} — the changed tests failed"
+  elif (( ${#failed[@]} > 0 )); then
+    reason=gate_failed status=skip detail="flagged gate(s) failed on their own: ${failed[*]} — their own row blocks"
+  elif (( ${#missing[@]} > 0 )); then
+    reason=project_tests_evidence_missing status=fail
+    detail="flagged gate(s) wrote no evidence of what they ran: ${missing[*]}
+next: give the gate's command --evidence-file {evidence_dir}/gates/<gate>.evidence.json (run-all-tests.sh and aid-select-tests.sh write it), then run the gates again (pipeline.md §When AID refuses: project_tests_evidence_missing)"
+  elif [[ "$notsel" != "[]" ]]; then
+    reason=project_tests_not_selected status=fail
+    detail="changed test files no flagged gate ran: $(jq -r 'join(", ")' <<< "$notsel")
+next: run them in the flagged gate (a flag on a gate that does not run them proves nothing), or waive: aid-gate-waiver.sh issue project_tests --evidence-dir <run evidence> --reason \"<the PM's words>\" (pipeline.md §When AID refuses: project_tests_not_selected)"
+  else
+    reason=exit_0 status=pass detail="every changed test file was run by ${covered_by//\"/}$( [[ "$nightly" != "[]" ]] && echo "; left to the nightly tier: $(jq -r 'join(", ")' <<< "$nightly")")"
+  fi
+  row="$(jq -nc --arg st "$status" --arg r "$reason" --arg o "$detail" \
+    '{gate: "project_tests", result: $st, reason: $r, exit_code: (if $st == "pass" then 0 else null end), duration_ms: 0, output: $o, attempts: 0, required: ($st == "fail"), required_source: "explicit"}')"
+  jq -nc --argjson r "$row" --argjson s "$summary" '{row: $r, summary: $s}'
+}
+
+# record_tests --evidence-file <path> [--glob <g>]… [--execution-yaml <file>] -- <command…>
+#   For a gate that runs the project's WHOLE suite with a runner that writes no
+#   evidence of its own (pytest -q, go test ./..., cargo test, npm test): runs
+#   the command, then records as ran_tests every tracked file matching its own
+#   --glob patterns (the runner's test files; without them the project_tests:
+#   globs of the state root's execution.yaml unless named), with
+#   the command's exit status, which it returns. A runner that selects tests
+#   writes its own evidence instead (run-all-tests.sh, aid-select-tests.sh).
+record_tests() {
+  local ev="" yaml="" rc=0 g f
+  local -a globs=() ran=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --evidence-file) ev="$2"; shift 2 ;;
+      --glob) globs+=("$2"); shift 2 ;;
+      --execution-yaml) yaml="$2"; shift 2 ;;
+      --) shift; break ;;
+      *) echo "record-tests: unknown option $1" >&2; return 2 ;;
+    esac
+  done
+  [[ -n "$ev" && $# -gt 0 ]] || { echo "Usage: aid-run-gates.sh record-tests --evidence-file <path> [--execution-yaml <file>] -- <command…>" >&2; return 2; }
+  # a runner told to run a subset proves nothing about the rest (P110 security
+  # review). Read over the WHOLE command text — a selector inside `bash -c '…'`
+  # or glued to its value (-mfoo, -k=x) counts — and over the runners' own
+  # option variables. A best-effort guard, not a proof: a wrapper script can
+  # still select; only evidence the runner writes itself (run-all-tests.sh
+  # --evidence-file, aid-select-tests.sh) proves the selection (IMP-691 note).
+  local cmdtext=" $* "
+  cmdtext="$(sed -E 's/python[0-9.]*[[:space:]]+-m[[:space:]]+[A-Za-z_.]+//g' <<< "$cmdtext")"   # `python -m pytest` names a module, not a marker
+  if grep -qE -- '(^|[[:space:]"'"'"'=])(-k|-m|-t|--filter|-run|--grep|--testNamePattern|--only|--deselect|--lf|--last-failed|--exitfirst)([[:space:]=]|[^[:space:]-]|$)' <<< "$cmdtext" \
+     || [[ -n "${PYTEST_ADDOPTS:-}${BATS_TEST_FILTER:-}${GOFLAGS:-}" ]]; then
+    echo "record-tests: the command selects a subset (or PYTEST_ADDOPTS/BATS_TEST_FILTER/GOFLAGS is set) — record-tests claims the whole suite ran; let the runner write its own evidence instead" >&2
+    return 2
+  fi
+  [[ -n "$yaml" ]] || yaml="$(aid_state_root 2>/dev/null || pwd)/.aid-o/config/execution.yaml"
+  "$@" || rc=$?
+  # the runner's own test files (--glob, written per stack): a flag on a gate
+  # that runs other tests must not claim these (P110 review)
+  (( ${#globs[@]} )) || mapfile -t globs < <(yq -r '.project_tests // [] | .[]' "$yaml" 2>/dev/null)
+  while IFS= read -r f; do
+    for g in ${globs[@]+"${globs[@]}"}; do _aid_ancillary_glob_match "$f" "$g" && { ran+=("$f"); break; }; done
+  done < <(git ls-files 2>/dev/null)
+  mkdir -p "$(dirname "$ev")"
+  printf '%s\n' ${ran[@]+"${ran[@]}"} | jq -R . | jq -s --argjson rc "$rc" \
+    '{ran_tests: map(select(. != "")), skipped_by_tier: [], tier: null, exit_status: $rc, recorded_by: "record-tests (the whole suite)"}' > "$ev"
+  return "$rc"
+}
+
+# lint_profiles <execution.yaml> — the project-test rule read statically (P110):
+# per profile, whether it holds a gate flagged runs_project_tests whose command
+# names --evidence-file. Exit 1 when project_tests: is declared and a profile
+# has none; without the key, an advisory line and exit 0.
+lint_profiles() {
+  local yaml="${1:?--lint-profiles <execution.yaml>}" p g bad=0 declared
+  [[ -f "$yaml" ]] || { echo "ERROR: no execution.yaml at ${yaml}" >&2; return 2; }
+  declared="$(yq -r '.project_tests | type' "$yaml")"
+  if [[ "$declared" != '!!seq' ]]; then
+    echo "project_tests: not declared — no profile is checked (next: declare project_tests: and flag the gate that runs them)"
+    return 0
+  fi
+  while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
+    local ok=""
+    while IFS= read -r g; do
+      [[ -n "$g" ]] || continue
+      if [[ -n "$(_gates_evidence_path "$(GATE="$g" yq -r '.gates[strenv(GATE)].command // ""' "$yaml")")" ]]; then ok="$g"; break; fi
+      echo "profile ${p}: gate ${g} is flagged runs_project_tests but its command names no --evidence-file"
+    done < <(gate_profile_flagged_gates "$yaml" "$p")
+    if [[ -n "$ok" ]]; then echo "profile ${p}: ok (${ok})"
+    else echo "profile ${p}: profile_skips_project_tests — no gate flagged runs_project_tests with --evidence-file"; bad=1; fi
+  done < <(gate_profile_table "$yaml")
+  return "$bad"
+}
+
 run_all_gates() {
   local execution_yaml="$1"
   local epic_id="$2"
@@ -1466,6 +1662,13 @@ run_all_gates() {
       continue
     fi
 
+    # P110: a flagged gate's evidence is its own, from this run — stale
+    # evidence proves nothing, so it is removed before the gate runs.
+    if [[ "$(GATE="$gate_name" yq -r '.gates[strenv(GATE)].runs_project_tests // false' "$execution_yaml")" == true ]]; then
+      local _pt_ev; _pt_ev="$(_gates_evidence_path "$resolved_cmd")"
+      [[ -n "$_pt_ev" ]] && rm -f "$_pt_ev"
+    fi
+
     # P087 Step 6 — the branch under test carries every script its gates name.
     local _missing_scripts
     _missing_scripts="$(_gate_scripts_missing_in_tree "$resolved_cmd" "$_plugin_project_root")"
@@ -1862,6 +2065,34 @@ run_all_gates() {
     done < <(jq -r '.gates // [] | .[]' "$plan_json" 2>/dev/null)
   fi
 
+  # ─── P110: did the gates run the project's tests? ──────────────────────
+  local _pt _pt_row project_tests_json='{"declared":false,"changed_test_files":[],"covered_by":null,"nightly_covers":[]}' _pt_rc=0
+  _pt="$(_gates_project_tests_check "$execution_yaml" "$profile" "$base_commit_resolved" "$epic_id" "$run_id" "${gates_json}}" "$plugin_path_resolved" "$plan_path_resolved")" || _pt_rc=$?
+  (( _pt_rc == 2 )) && return 2
+  if [[ -n "$_pt" ]]; then
+    project_tests_json="$(jq -c .summary <<< "$_pt")"
+    _pt_row="$(jq -c .row <<< "$_pt")"
+    if [[ "$_pt_row" != null ]]; then
+      # waivable like a gate (IMP-270): a valid project_tests waiver for this run
+      if [[ "$(jq -r .result <<< "$_pt_row")" == fail && -f "${_evidence_dir}/waivers/gate-waiver-project_tests.json" ]]; then
+        local _ptw _ptsha; _ptsha="$(printf '%s' "project_tests:$(yq -o=json -I=0 '.project_tests // null' "$execution_yaml")" | sha256sum | cut -d' ' -f1)"
+        _ptw="$("${SCRIPT_DIR}/aid-gate-waiver.sh" check project_tests --evidence-dir "$_evidence_dir" \
+          --head "$(git rev-parse HEAD 2>/dev/null)" --command-sha "$_ptsha" --epic "$epic_id" --run "$run_id" 2>/dev/null)" || true
+        if [[ "$_ptw" == valid ]] && "${SCRIPT_DIR}/aid-gate-waiver.sh" consume project_tests --evidence-dir "$_evidence_dir" --by-run "$run_id" >/dev/null 2>&1; then
+          _pt_row="$(jq -c '.waived = true | .result = "waived" | .waiver_ref = "waivers/gate-waiver-project_tests.json"' <<< "$_pt_row")"
+          waived_gates+=("project_tests")
+        else
+          _pt_row="$(jq -c --arg v "${_ptw:-unreadable}" '.waiver_rejected = $v' <<< "$_pt_row")"
+        fi
+      fi
+      [[ "$(jq -r .result <<< "$_pt_row")" == fail ]] && overall="fail"
+      log_event "$timeline_file" "gate_complete" gate="project_tests" result="$(jq -r .result <<< "$_pt_row")" reason="$(jq -r .reason <<< "$_pt_row")"
+      $first || gates_json+=","
+      first=false
+      gates_json+="\"project_tests\":${_pt_row}"
+    fi
+  fi
+
   gates_json+="}"
 
   # ─── every row is a version-2 row, checked against the vocabulary ────────
@@ -2011,7 +2242,8 @@ run_all_gates() {
               --argjson proftable "$profile_table_json" \
               --argjson excl "$excluded_gates_json" \
               --argjson waived "$waived_gates_json" \
-              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev, profile: $prof, profile_source: $profsrc, profile_table: $proftable, excluded_gates: $excl, waived_gates: $waived}' \
+              --argjson pt "$project_tests_json" \
+              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev, profile: $prof, profile_source: $profsrc, profile_table: $proftable, excluded_gates: $excl, waived_gates: $waived, project_tests: $pt}' \
               <<< "$report")
 
   # ─── P069 Step 14 — targeted_tests escalation: full-profile substitute ──
@@ -2104,6 +2336,8 @@ run_all_gates() {
 case "${1:-}" in
   run-gate)  shift; run_gate "$@" ;;
   run-all)   shift; run_all_gates "$@" ;;
+  --lint-profiles) shift; lint_profiles "$@" ;;
+  record-tests) shift; record_tests "$@" ;;
   *)
     # Source mode — functions available to caller
     [[ "${BASH_SOURCE[0]}" != "${0}" ]] && return 0

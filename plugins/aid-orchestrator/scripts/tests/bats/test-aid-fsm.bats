@@ -372,10 +372,17 @@ PLAN
   ! assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_transition"
 }
 
+# _cp3_on — the project keeps CP3 (P110: off by default): the toggle and an epic_review block
+_cp3_on() {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
+  printf 'review_checkpoints:\n  cp3_integration_review: true\n  epic_review:\n    rounds_default: 1\n    reviewers:\n      - {role: epic_generalist, provider: claude, model: opus}\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/config/policies/review-checkpoints.yaml"
+}
 @test "advance-to-gates: missing cp3 round index → cmd_transition fails after gates pass" {
   seed_test_state_files "EXECUTE" "5" "5"
   # NOTE: NO cp3/rounds.json (intentional — gates run, transition rejects)
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  _cp3_on   # P110: CP3 is off by default; this project keeps it
   setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
@@ -671,7 +678,7 @@ EOF
 }
 
 @test "streamlined: integration-review without a passing cp3 round blocks" {
-  _streamlined_seed_state true
+  _streamlined_seed_state true; _cp3_on   # P110: a project that keeps CP3
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _write_three_event_timeline
   # gates_report present; the cp3 round closed with verdict fail.
@@ -1604,6 +1611,7 @@ EOS
   : > "$td/timeline.jsonl"
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add docs/plans/finding.md --reason "the gate fix names a file no step listed"
   [ "$status" -eq 0 ]
+  [[ "$output" == *"past its last step — widening step 2 (s1)"* ]]
   [ "$(jq -c '.steps[1].allowed_paths | index("docs/plans/finding.md") != null' "$td/plan.json")" = true ]
   [ "$(jq -r '.[0].step_id' "$td/steps/s1/scope-amendment.json")" = s1 ]
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add "$other/guide/page.md" --reason "the docs page the plan declares for this step"
@@ -1835,4 +1843,337 @@ YAML
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -eq 0 ]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
+}
+
+# ─── P109 Step 5: amend-scope on a brief-bound plan names the point it serves ──
+# The plan.json is PRODUCED by aid-epic-to-json.sh from a six-column EPIC table
+# and a source plan with zadani_sha256 — not hand-written — so the binding the
+# generator writes is the one this reads. Defects: P014 C — six scope_amended
+# events, none tied to a point of the brief; a plan.json the generator never binds.
+_zp_plan_json() {   # <td> — generate plan.json (step 1 closes AC2, step 2 closes AC3) into <td>
+  local td="$1" g; g="$(mktemp -d)"
+  printf -- '---\nid: P930\nzadani: .aid-o/plans/P930-zadani.md\nzadani_sha256: %s\n---\n# Plan\n' "$(printf brief | sha256sum | cut -d' ' -f1)" > "$g/P930-plan.md"
+  { printf -- '---\nepic_id: E-930-1_1\ntitle: Brief-bound\nplan_ref: %s\n---\n## Acceptance Criteria\n\n' "$g/P930-plan.md"
+    printf -- '- [ ] [backend] step one deliverable verified\n- [ ] [qa] step two deliverable verified\n\n## Steps (Role Pipeline)\n\n'
+    printf '| # | Role | Objective | Depends On | Parallel Group | Closes |\n|---|------|-----------|------------|----------------|--------|\n'
+    printf '| 1 | backend | do the first thing properly | - | - | AC2 |\n| 2 | qa | verify the first thing works | 1 | - | AC3 |\n'
+  } > "$g/E-930-1_1-x.md"
+  local m; m="$(bash "$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh" --epic "$g/E-930-1_1-x.md" \
+    --schema "$AID_PLUGIN_PATH/defaults/templates/plan.schema.json" --output-dir "$g/out" 2>/dev/null)"
+  cp "$(jq -r .plan_json <<< "$m")" "$td/plan.json"
+  rm -rf "$g"
+}
+_zp_state() {   # <td> <state> <current_step>
+  printf 'epic_id: E-930-1_1\nrun_id: R-930\nstate: %s\ncurrent_step: %s\ntotal_steps: 2\nplan_json_hash: %s\n' \
+    "$2" "$3" "$(sha256sum "$1/plan.json" | awk '{print $1}')" > "$1/fsm-state.yaml"
+  : > "$1/timeline.jsonl"
+}
+
+@test "amend-scope-zadani: in EXECUTE the reason must name the current step's point; the record carries it" {
+  local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"; _zp_state "$td" EXECUTE 0
+  [ "$(jq -c '.steps[0].zavira' "$td/plan.json")" = '["AC2"]' ]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_h.py --reason "need the helper file for the test"
+  [ "$status" -ne 0 ]; [[ "$output" == *"--reason must name the brief point this widening serves (one of: AC2)"* ]]
+  [[ "$output" == *"(pipeline.md §When AID refuses: amend_scope_reason_names_no_point)"* ]]; [[ "$output" == *"next: "* ]]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_h.py --reason "AC3 needs the helper file for the test"
+  [ "$status" -ne 0 ]                       # AC3 is step 2's, not this step's
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_h.py --reason "AC2 needs the helper file for the test"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.[-1].zadani_point' "$td/steps/step_1_backend/scope-amendment.json")" = AC2 ]
+  grep -q '"zadani_point":"AC2"' "$td/timeline.jsonl"
+}
+
+@test "amend-scope-zadani: in GATES a point of any step is accepted (the union); a step closing no point is refused naming rule 11" {
+  local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"; _zp_state "$td" GATES 1
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src/fix.py --reason "AC2 fails its gate without this file fixed"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.[-1].zadani_point' "$td/steps/step_2_qa/scope-amendment.json")" = AC2 ]
+  jq '.steps[0].zavira = [] | .steps[1].zavira = []' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"
+  _zp_state "$td" EXECUTE 0
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src/x.py --reason "AC2 needs it, but the step closes nothing"
+  [ "$status" -ne 0 ]; [[ "$output" == *"closes no point of the brief"*"rule 11"* ]]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
+}
+
+@test "amend-scope-zadani: a plan.json without zadani_sha256 records zadani_point null" {
+  local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"
+  jq 'del(.zadani, .zadani_sha256)' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"
+  _zp_state "$td" EXECUTE 0
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_h.py --reason "the helper file for the test is needed"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[-1].zadani_point' "$td/steps/step_1_backend/scope-amendment.json")" = null ]
+}
+
+# ── P110 Step 2: the step's brief points run before increment-step ─────────
+# _sc_seed [zavira] — a bound step 0 whose plan.json names a plan (plan_path)
+# with AC1 (`test -f ok.txt`) closed by plan step 1.
+_sc_seed() {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml" z="${1-AC1}"
+  write_post_deploy_state_yaml "$state_file"
+  sed -i 's/^current_step: .*/current_step: 0/; s/^total_steps: .*/total_steps: 2/' "$state_file"
+  SC_PLAN="$BATS_TEST_TMPDIR/plan-sc.md"
+  printf -- '---\nid: P960\n---\n# Plan\n\n### Step 1: one\n\n**Zavírá:** AC1\n\n### Step 2: two\n\n**Zavírá:** —\n\n## Acceptance Criteria\n\n- [ ] AC1: the ok file exists\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "test -f ok.txt"\n    expected_exit: 0\n  ```\n' > "$SC_PLAN"
+  echo "plan_path: $SC_PLAN" >> "$state_file"
+  jq -n --arg z "$z" '{epic_id: "E-test", version: "1.0", dependencies: [],
+    steps: [{id: "step_1_backend", role: "backend", objective: "a", plan_step: 1, zavira: ($z | split(",") | map(select(. != "")))},
+            {id: "step_2_backend", role: "backend", objective: "b", plan_step: 2, zavira: []}]}' > "$TEST_EVIDENCE_DIR/plan.json"
+  _imp263_write_bound_verify "$TEST_EVIDENCE_DIR/step-0-verify.md" 0 step_1_backend \
+    "$(_imp263_plan_step_hash "$TEST_EVIDENCE_DIR/plan.json" 0)" "$(git rev-parse HEAD)" TOK-SC
+  _imp263_write_verifier_output 0
+  SF="$state_file"
+}
+# _sc_card [answered] — a Decision card quoting AC1
+_sc_card() {
+  SC_CARD="$BATS_TEST_TMPDIR/card-$RANDOM.md"; echo "Rozhodnutí 1: AC1 počká na uzávěr" > "$SC_CARD"; touch -d '-10 seconds' "$SC_CARD"
+  export AID_HOOK_AUDIT="$BATS_TEST_TMPDIR/audit.jsonl"; : > "$AID_HOOK_AUDIT"
+  [[ "${1:-}" == answered ]] && printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  return 0
+}
+_cur() { grep '^current_step:' "$SF" | awk '{print $2}'; }
+SC_WHY="the PM moved this point to the close of the plan"
+
+@test "step-criteria: an absent point stops increment-step, naming the point, with next:" {
+  _sc_seed
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"step_criteria_failed"*'AC1 "the ok file exists"'* ]]
+  [[ "$output" == *"next: fix the step and commit"*"--defer-criterion AC1"* ]]
+  [ "$(_cur)" = 0 ]
+}
+@test "step-criteria: --force does not waive an absent point" {
+  _sc_seed
+  run "$FSM" increment-step "$SF" --force --reason "the PM said to move on regardless of this"
+  [ "$status" -eq 1 ]; [[ "$output" == *"step_criteria_failed"* ]]; [ "$(_cur)" = 0 ]
+}
+@test "step-criteria: --defer-criterion without a card is refused defer_refused" {
+  _sc_seed
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"*"--finding-card names no card file"* ]]
+}
+@test "step-criteria: --defer-criterion with a card that does not quote the point is refused" {
+  _sc_seed; _sc_card answered; echo "Rozhodnutí 1: jiná věc" > "$SC_CARD"; touch -d '-10 seconds' "$SC_CARD"
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"*"does not quote AC1"* ]]
+}
+@test "step-criteria: --defer-criterion with a card the PM has not answered is refused" {
+  _sc_seed; _sc_card
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"*"no PM prompt after"* ]]
+}
+@test "step-criteria: --defer-criterion naming a point the step does not close is refused" {
+  _sc_seed; _sc_card answered; echo "AC7" >> "$SC_CARD"; touch -d '-10 seconds' "$SC_CARD"
+  run "$FSM" increment-step "$SF" --defer-criterion AC7 --reason "$SC_WHY" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"*"the step does not close AC7"* ]]
+}
+@test "step-criteria: --defer-criterion with a reason under 20 characters is refused" {
+  _sc_seed; _sc_card answered
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "later" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"*"at least 20 characters"* ]]
+}
+@test "step-criteria: a valid answered card defers the point, the step advances, a re-measurement keeps the deferral" {
+  _sc_seed; _sc_card answered
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY" --finding-card "$SC_CARD"; echo "$output"
+  [ "$status" -eq 0 ]; [ "$(_cur)" = 1 ]
+  [ "$(jq -r .AC1.by "$TEST_EVIDENCE_DIR/cp2/step-0/deferred.json")" = pm ]
+  [ "$(jq -r '.results[0].deferred.card' "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json")" = "$SC_CARD" ]
+  grep -q '"step_criterion_deferred"' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+}
+@test "step-criteria: a hand-written deferred.json without an answered card defers nothing" {
+  _sc_seed; _sc_card
+  mkdir -p "$TEST_EVIDENCE_DIR/cp2/step-0"
+  jq -n --arg c "$SC_CARD" '{AC1: {by: "pm", reason: "x", card: $c}}' > "$TEST_EVIDENCE_DIR/cp2/step-0/deferred.json"
+  run "$FSM" increment-step "$SF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"step_criteria_failed"* ]]
+}
+@test "step-criteria: all points present → the step advances" {
+  _sc_seed; touch ok.txt
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 0 ]; [ "$(_cur)" = 1 ]
+  [ "$(jq -r '.results[0].verdict' "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json")" = present ]
+}
+@test "step-criteria: a step with no points and no own criteria (unmeasured_step) advances" {
+  _sc_seed ""
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .unmeasured_step "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json")" = true ]
+}
+@test "step-criteria: a plan-diff.json bound to another commit is measured again" {
+  _sc_seed; touch ok.txt
+  mkdir -p "$TEST_EVIDENCE_DIR/cp2/step-0"
+  echo '{"head_commit":"0000000","results":[{"ac_label":"AC1","ac_text":"x","verdict":"absent","evidence":"old"}]}' > "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .head_commit "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json")" = "$(git rev-parse HEAD)" ]
+}
+@test "step-criteria: a hand-written plan-diff.json bound to HEAD but without the measurer's timeline event is measured again" {
+  _sc_seed
+  mkdir -p "$TEST_EVIDENCE_DIR/cp2/step-0"
+  jq -n --arg h "$(git rev-parse HEAD)" '{head_commit: $h, results: [{ac_label: "AC1", ac_text: "x", verdict: "present", evidence: "forged"}]}' > "$TEST_EVIDENCE_DIR/cp2/step-0/plan-diff.json"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"step_criteria_failed"* ]]
+}
+@test "step-criteria: a card quoting AC10 does not defer AC1 (whole-word quote)" {
+  _sc_seed; _sc_card answered; echo "Rozhodnutí 1: AC10 počká" > "$SC_CARD"; touch -d '-10 seconds' "$SC_CARD"
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not quote AC1"* ]]
+}
+@test "step-criteria: an absent own labelled criterion gets a fix-only next: (no deferral of a non-brief criterion)" {
+  _sc_seed ""
+  printf '\n### Step 1: own\n' >> /dev/null
+  sed -i 's/^\*\*Zavírá:\*\* AC1$/- [ ] [backend] own file exists\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "test -f own.txt"\n    expected_exit: 0\n  ```\n\n**Zavírá:** —/' "$SC_PLAN"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"step_criteria_failed"* ]]
+  [[ "$output" == *"next: fix the step so its own criterion holds"* ]]
+  [[ "$output" != *"--defer-criterion"* ]]
+}
+@test "step-criteria: a run naming a plan whose plan.json is missing is refused, not advanced" {
+  _sc_seed; rm "$TEST_EVIDENCE_DIR/plan.json"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"cannot be measured"* ]]
+}
+@test "step-criteria: a plan-diff.json the measurer wrote at HEAD is reused, not measured again" {
+  _sc_seed; touch ok.txt
+  bash "$AID_PLUGIN_PATH/scripts/aid-plan-diff.sh" --plan "$SC_PLAN" --evidence-dir "$TEST_EVIDENCE_DIR" --base-commit HEAD --step 0 --plan-json "$TEST_EVIDENCE_DIR/plan.json" >/dev/null
+  [ "$(grep -c '"event":"plan_diff_complete"' "$TEST_EVIDENCE_DIR/timeline.jsonl")" -eq 1 ]
+  run "$FSM" increment-step "$SF"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(grep -c '"event":"plan_diff_complete"' "$TEST_EVIDENCE_DIR/timeline.jsonl")" -eq 1 ]
+}
+
+# ── P110 Step 6: CP3 off by default ─────────────────────────────────────────
+@test "cp3-off: advance-to-gates with the default toggle and no cp3 directory moves to GATES and writes review_checkpoint_disabled" {
+  seed_test_state_files "EXECUTE" "5" "5"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  [ ! -d "$TEST_EVIDENCE_DIR/cp3" ]
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  grep -q 'review_checkpoint_disabled' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+@test "cp3-off: a legacy-mode streamlined run with the toggle off and no cp3 round is refused — nothing would review it" {
+  _streamlined_seed_state true
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _write_three_event_timeline
+  echo '{}' > "$TEST_EVIDENCE_DIR/gates_report.json"
+  _run_streamlined_check fsm_check_streamlined_integration_review "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
+  echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"nothing would review this code"* ]]
+  grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+@test "cp3-off: the toggle is read from the state root, not from a linked worktree without .aid-o" {
+  _cp3_on
+  git -C "$TEST_PROJECT_ROOT" worktree add -q "$TEST_PROJECT_ROOT/../wt-cp3" -b wt-cp3 2>/dev/null || skip "no git repo in the fixture"
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-roots.sh'; source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_switched_off '$TEST_PROJECT_ROOT/../wt-cp3' cp3_integration_review"
+  git -C "$TEST_PROJECT_ROOT" worktree remove --force "$TEST_PROJECT_ROOT/../wt-cp3"
+  [ "$status" -eq 1 ]   # not off: the state root's policy keeps CP3
+}
+@test "cp3-off: the toggle on without an epic_review block is refused naming the block" {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
+  printf 'review_checkpoints:\n  cp3_integration_review: true\n' > "$TEST_PROJECT_ROOT/.aid-o/config/policies/review-checkpoints.yaml"
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_config_load '$TEST_PROJECT_ROOT' epic_review '$AID_PLUGIN_PATH/skills/step-review-roles.md'"
+  [ "$status" -eq 1 ]; [[ "$output" == *"cannot read epic_review"* ]]
+}
+@test "step-criteria: a plan edited since the EPIC was generated (source_plan_sha256) is not measured — refused" {
+  _sc_seed; touch ok.txt
+  jq --arg s "$(sha256sum "$SC_PLAN" | cut -d' ' -f1)" '. + {source_plan_sha256: $s}' "$TEST_EVIDENCE_DIR/plan.json" > "$TEST_EVIDENCE_DIR/p.tmp" && mv "$TEST_EVIDENCE_DIR/p.tmp" "$TEST_EVIDENCE_DIR/plan.json"
+  _imp263_write_bound_verify "$TEST_EVIDENCE_DIR/step-0-verify.md" 0 step_1_backend "$(_imp263_plan_step_hash "$TEST_EVIDENCE_DIR/plan.json" 0)" "$(git rev-parse HEAD)" TOK-SC
+  sed -i 's/cmd: "test -f ok.txt"/cmd: "true"/' "$SC_PLAN"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"changed since the EPIC was generated"* ]]
+}
+
+# ── P111 Step 3: done-advance --direct records the direct run on plan/<id> ───
+_direct_done() {   # a direct run of P910 in DONE/review (aid_fixture_direct_run)
+  source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"
+  DSF="$(aid_fixture_direct_run "$TEST_PROJECT_ROOT" P910 DONE review)" || return 1
+  DMF="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P910/plan-boundary-manifest.json"
+  PFSM="$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"
+}
+
+@test "direct: done-advance review release --direct records merged_to_plan at the plan tip, PLAN_SYNC and release" {
+  _direct_done
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.plan_boundary_manifest.epic_runs[0].status' "$DMF")" = "merged_to_plan" ]
+  [ "$(jq -r '.plan_boundary_manifest.epic_runs[0].epic_merge_commit' "$DMF")" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P910)" ]
+  [ "$(yq -r '.plan_state' "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P910/plan-state.yaml")" = "PLAN_SYNC" ]
+  [ "$(yq -r '.done_phase' "$DSF")" = "release" ]
+}
+
+@test "direct: a failed epic-complete call leaves done_phase review, names the rerun, and the same done-advance then succeeds" {
+  _direct_done
+  cp "$DMF" "$DMF.keep"
+  jq '.plan_boundary_manifest.epic_runs = []' "$DMF.keep" > "$DMF"
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 1 ]
+  [ "$(yq -r '.done_phase' "$DSF")" = "review" ]
+  [[ "$output" == *"next: "*"done-advance review release"*"--direct"* ]]
+  cp "$DMF.keep" "$DMF"
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.done_phase' "$DSF")" = "release" ]
+}
+
+@test "direct: done-advance without --direct on a direct state, and with it on a non-direct state, is refused done_advance_needs_direct" {
+  _direct_done
+  run "$FSM" done-advance review release "$DSF"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: done_advance_needs_direct)"* ]]
+  sed -i '/^direct: true$/d' "$DSF"
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"done_advance_needs_direct"* ]]
+  [ "$(yq -r '.done_phase' "$DSF")" = "review" ]
+}
+
+@test "direct: a second epic-complete --direct is a no-op with a line" {
+  _direct_done
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 0 ]
+  run bash "$PFSM" epic-complete P910 E-910-1_1 --direct --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"E-910-1_1 merged_to_plan"* ]]
+}
+
+@test "direct: epic-complete --direct on a non-direct run is refused naming its task branch" {
+  _direct_done
+  jq '.plan_boundary_manifest.epic_runs[0] |= (del(.direct) | .task_branch = "task/E-910-1_1/main")' "$DMF" > "$DMF.t" && mv "$DMF.t" "$DMF"
+  run bash "$PFSM" epic-complete P910 E-910-1_1 --direct --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not a direct run"*"task/E-910-1_1/main"* ]]
+}
+
+@test "direct: epic-complete --direct derives the gate floor from the plan branch's diff" {
+  _direct_done
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" <<'YML'
+gates:
+  lint: {command: "true", required: true}
+  tests: {command: "true", required: true}
+gate_profiles:
+  docs: {include: [lint], when_paths: ["docs/**"]}
+  full: {include: [lint, tests]}
+default_profile: full
+YML
+  local wt="$TEST_PROJECT_ROOT/.aid-worktrees/plan-P910"
+  mkdir -p "$wt/src"; echo x > "$wt/src/code.sh"; git -C "$wt" add src/code.sh; git -C "$wt" commit -qm "a code change on the plan branch"
+  run bash "$PFSM" epic-complete P910 E-910-1_1 --direct --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.plan_boundary_manifest.epic_runs[0].epic_completion_sha' "$DMF")" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P910)" ]
+  [ "$(jq -r '.plan_boundary_manifest.epic_runs[0].epic_final_profile_floor' "$DMF")" = "full" ]
+}
+
+@test "direct: epic-merge-to-plan on a direct run is refused direct_run_no_epic_merge" {
+  _direct_done
+  run bash "$PFSM" epic-merge-to-plan P910 E-910-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: direct_run_no_epic_merge)"* && "$output" == *"next: "* ]]
+}
+
+@test "direct: a rerun of epic-complete --direct on a merged run still moves the plan to PLAN_SYNC" {
+  _direct_done
+  run "$FSM" done-advance review release "$DSF" --direct
+  [ "$status" -eq 0 ]
+  yq -i '.plan_state = "EPIC_INTEGRATION"' "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P910/plan-state.yaml"
+  run bash "$PFSM" epic-complete P910 E-910-1_1 --direct --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.plan_state' "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P910/plan-state.yaml")" = "PLAN_SYNC" ]
 }

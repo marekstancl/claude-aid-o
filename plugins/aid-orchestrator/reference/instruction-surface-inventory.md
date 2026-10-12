@@ -23,14 +23,13 @@ that is absent from a clean checkout.
 
 | Surface | Disposition | Note |
 |---------|-------------|------|
-| `commands/aid-run.md` | `update` | PM options now fork on mode; the pre-merge review note states Curator/Auditor are plan-final roles under `plan_branch`. P094: the section "Step review (CP2) and EPIC review (CP3)" (adapter quoted between `adapter:begin`/`adapter:end`) replaced the CP2/CP3 items of the EXECUTE list, the E7 fix loop and every `verifier-output-*` passage. |
-| `commands/aid-plan.md` | `update` | States the plan-mode declaration and the plan-final boundary where it describes plan lifecycle. |
+| `commands/aid-run.md` | `update` | PM options now fork on mode; the pre-merge review note states Curator/Auditor are plan-final roles under `plan_branch`. P094: the section "Step review (CP2) and EPIC review (CP3)" (adapter quoted between `adapter:begin`/`adapter:end`) replaced the CP2/CP3 items of the EXECUTE list, the E7 fix loop and every `verifier-output-*` passage. P111: PRE-FLIGHT branches on the argument — `/aid-run P<NNN>` = `aid-plan-fsm.sh plan-run` (the direct run: one run on `plan/<id>`, `aid-fsm.sh init --direct`, `done-advance review release --direct` → `epic-complete --direct`), `repo_roots` (foreign worktrees, `foreign_repo_undeclared`, `foreign_branch_unverified`), the cancellation (`aid-fsm.sh abandon`, `run_abandoned`); `/aid-run E-…` is the old path until P112. |
+| `commands/aid-plan.md` | `update` | States the plan-mode declaration and the plan-final boundary where it describes plan lifecycle. P111: a reviewed plan ends "ready to run: `/aid-run P<NNN>`"; Generate EPIC is the old path until P112. |
 | `commands/aid-init.md` | `update` | Documents the lifecycle `mode` field and the hook reinstall requirement. |
-| `commands/aid-status.md` | `update` | Surfaces plan state, mode and candidate SHA alongside EPIC state. |
+| `commands/aid-status.md` | `update` | Surfaces plan state, mode and candidate SHA alongside EPIC state. P111: a direct run renders `běh 1/1 (přímý)`; abandoned runs and their queue entries are not shown. |
 | `commands/aid-do.md` | `update` | States that Fast Mode neither creates nor releases a plan branch. P094: "Review Check (CP6)" runs the step check and the reviewer round under `evidence/do/<id>/cp6/`, advisory. |
 | `commands/aid-verify-plan.md` | `verified` | CP1 is a plan-level review already; no per-EPIC release instruction. |
 | `commands/aid-verify-implementation.md` | `verified` | Reviews an implementation, not a release cadence. |
-| `commands/aid-audit.md` | `verified` | Health audit; no lifecycle instruction. |
 | `commands/aid-help.md` | `verified` | Routes to other surfaces; carries no lifecycle instruction of its own. |
 | `commands/aid-setup.md` | `verified` | Configuration; no release cadence. |
 | `commands/aid-stop.md` | `verified` | Emergency stop; no release cadence. |
@@ -49,7 +48,10 @@ that is absent from a clean checkout.
 | `skills/run-management.md` | `update` | `active.md` guidance made mode-aware. |
 | `skills/plan-writing.md` | `update` | Documentation-step rule and lifecycle references made mode-aware. |
 | `skills/planner.md` | `verified` | Plans work; does not instruct on release cadence. |
-| `skills/brainstorming.md` | `verified` | Pre-plan activity. |
+| `skills/brainstorming.md` | `verified` | Pre-plan activity. P109: RULE 1b — the brief file is written at Step 8 and survives the interim. |
+| `skills/critic.md` | `verified` | P107/P109: the critic's role; mandatory before CP1, read from the brief file at the plan moment; no release cadence. |
+| `defaults/templates/zadani.md` | `verified` | P109: the brief file template `/aid-plan` copies; six sections and AC points; no lifecycle instruction. |
+| `evidence/<plan>/critic/<moment>/prompt.md`, `prompt-codex.md` | `verified` | P109: rendered by `lib/aid-critic.sh` (Claude writes the file; Codex prints and writes nothing); no lifecycle instruction. |
 | `skills/memory.md`, `skills/memory-mcp.md` | `verified` | Memory protocol; no lifecycle instruction. |
 | `skills/skill-writing.md`, `skills/command-writing.md` | `verified` | Authoring standards; no lifecycle instruction. |
 | `skills/communication.md` | `verified` | P080. Card shapes and the publish-before-present clause; says nothing about release cadence, so neither mode changes what it instructs. |
@@ -59,9 +61,6 @@ that is absent from a clean checkout.
 
 | Surface | Disposition | Note |
 |---------|-------------|------|
-| `agents/auditor.md` | `update` | The project-health audit of `/aid-audit`; no plan-final contract (P096). |
-| `agents/simplifier.md` | `update` | An agent the PM may invoke after a plan; no required report (P096). |
-| `agents/verifier.md` | `update` | P094: CP2/CP3/CP6 are reviewer rounds, not verifier dispatches; the card keeps CP4, `section-review`, `cross-section-review` and the plan-final `c2_mode: final` producer. |
 | `agents/implementer.md` | `verified` | Implements a step; no release cadence. |
 | `agents/implementer-light.md` | `verified` | P099: the implementer at `effort: low` for roles whose card says so; same protocol, no release cadence. |
 | `agents/reviewer-light.md` | `verified` | P099: a review-round reviewer at `effort: low`; reads its prompt file, writes its answer, no lifecycle instruction. |
@@ -75,6 +74,10 @@ that is absent from a clean checkout.
 | `CHANGELOG.md` | `no-scope` | History. Rewriting it to match current behaviour would destroy the audit trail. |
 | `README.md`, `plugins/aid-orchestrator/README.md` | `update` | Human-facing, but they describe the lifecycle, so they are kept correct. |
 | `defaults/enforcement-registry.yaml` | `no-scope` | Records enforcements, including superseded ones, by design. |
+| `scripts/lib/aid-zadani.sh`, `scripts/lib/aid-verification-pattern.sh` | `no-scope` | P109: code — the brief reader and the one criterion parser/validator; agents act on the lint's messages, not on these files. |
+| `scripts/aid-plan-diff.sh` (`--step`, `--plan-json`, `--isolated`, `--cwd`), `scripts/aid-fsm.sh increment-step` (`--defer-criterion`, `--finding-card`), `scripts/aid-run-gates.sh` (`--lint-profiles`, `record-tests`), `scripts/tests/run-all-tests.sh --evidence-file` | `verified` | P110: new options; every refusal they print carries `next:` and a row of `skills/pipeline.md` §When AID refuses (drift test in `test-review-round-fsm.bats`). |
+| `defaults/policies/review-checkpoints.yaml` (`full_when`, `second_round_when: open_finding_and_fix`, `cp3_integration_review: false`, optional `epic_review`), `defaults/execution.yaml` (`verification_env`, `project_tests`, `runs_project_tests`), `verification_pattern` `timeout:`, `plan.json` `plan_step` | `verified` | P110: new keys, each documented where it is read (the policy and template comments, `commands/aid-run.md`, `skills/plan-writing.md` #20b3/#20b4, `plan.schema.json`). |
+| `scripts/tests/lib/aid-test-plan-fixture.sh` (`aid_fixture_write_brief`, `aid_fixture_seed_critic_check`) | `no-scope` | P109: test fixtures — a brief from a fixture plan's own criteria, a passed critic check; never read by an agent at work. |
 
 ## Backward compatibility
 
