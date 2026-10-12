@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hodnocení kritika (P113a)",
+  "type": "object",
+  "required": ["criteria", "findings", "readiness", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "criteria": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "score", "anchor", "evidence", "missing_for_next"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "score": {"type": ["integer", "null"], "minimum": 1, "maximum": 10},
+          "anchor": {"type": ["integer", "null"], "enum": [4, 6, 8, 10, null]},
+          "evidence": {"type": "string", "minLength": 10},
+          "missing_for_next": {"type": "string"},
+          "not_assessable": {"type": "string"}
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "criterion", "severity", "owner", "text", "fix"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string"},
+          "criterion": {"type": "string"},
+          "severity": {"enum": ["blocking", "major", "minor"]},
+          "owner": {"enum": ["agent", "client"]},
+          "text": {"type": "string", "minLength": 5},
+          "fix": {"type": "string", "minLength": 5},
+          "where": {"type": "string"}
+        }
+      }
+    },
+    "readiness": {
+      "type": "array",
+      "items": {"type": "object", "required": ["item"], "additionalProperties": false,
+                "properties": {"item": {"type": "string"}, "why": {"type": "string"}}}
+    },
+    "summary": {"type": "string", "minLength": 10}
+  }
+}

@@ -1,0 +1,84 @@
+# Měřítko kritika pro typ „prezentační web lokální služby“ (P113a, 12. 10. 2026).
+# Kritik práh akceptace NEZNÁ (je jen v aid-ui-critic.py); hodnotí podle kotev s důkazem.
+# Kotva = pozorovatelné podmínky. Mezihodnota (5, 7, 9) = splněná nižší kotva a část podmínek vyšší.
+type: web-local
+title: "Prezentační web lokální služby"
+persona:
+  who: "majitel/ka podniku, pro který se web staví; platí studiu a rozhoduje, jestli zaplatí"
+  wants: "nové zákazníky z okolí, snadné objednání, první místa ve vyhledávání na hlavní dotaz, web, který vypadá jako od drahého studia"
+  rules:
+    - "Žádné vymyšlené fakty o podniku; co nesedí s podklady, je vada."
+    - "Co může dodat jen majitel (vlastní fotky, právní kontrola, IČO, doména) a má hotové zadání, nehodnotíš jako vadu návrhu; uvedeš to v readiness."
+    - "Hodnotíš živý web očima zákazníka a Googlu, ne technické zprávy studia."
+criteria:
+  - id: first_impression
+    name: "První dojem a atmosféra"
+    weight: 20
+    anchors:
+      4: "Působí jako šablona: obecné plochy nebo cizí fotky, žádná nálada podniku; nic se neliší od konkurence."
+      6: "Čistý a jednotný vzhled značky, ale sterilní: chybí obraz místa, lidí nebo práce; první obrazovka neřekne, proč právě sem."
+      8: "První obrazovka má vlastní atmosféru (obraz, motiv nebo pohyb vázaný na podnik) a do 5 s řekne co, kde a proč sem; vzhled je jednotný na všech stránkách."
+      10: "Nezaměnitelné: atmosféra podniku je cítit z každé stránky, obraz i pohyb mají důvod, detailní řemeslo (typografie, rytmus, mikrointerakce) bez jediné šablonovité části."
+  - id: trust
+    name: "Důvěra a doklady"
+    weight: 15
+    anchors:
+      4: "Chybí kdo za podnikem stojí, kontakty nebo údaje firmy; tvrzení bez dokladu."
+      6: "Kontakty a kdo podnik vede jsou, ale doklady slabé (žádná hodnocení, kvalifikace jen zmíněná, chybí identifikace firmy)."
+      8: "Kdo za podnikem stojí, kvalifikace, hodnocení se zdrojem a datem, úplné údaje firmy; každé tvrzení dohledatelné."
+      10: "Navíc konkrétní důkazy práce (postupy, výsledky, ocenění) podané přirozeně, bez přehánění; důvěra roste s každou stránkou."
+  - id: offer_prices
+    name: "Jasnost nabídky a cen"
+    weight: 15
+    anchors:
+      4: "Není jasné, co podnik dělá a za kolik."
+      6: "Služby a ceny jsou, ale hledá se v nich (dlouhé seznamy, nevysvětlené zkratky, nejasné jednotky)."
+      8: "Služby přehledně podle potřeby zákazníka, ceny u služeb i v úplném ceníku, zkratky a jednotky vysvětlené, co je v ceně a co ne."
+      10: "Zákazník bez otázky ví, co ho čeká a kolik zaplatí; srovnání nebo průvodce výběrem služby."
+  - id: booking
+    name: "Cesta k objednání"
+    weight: 15
+    anchors:
+      4: "Objednání nejde nebo jen přes e-mailovou aplikaci; telefon schovaný."
+      6: "Telefon a formulář jsou, ale formulář nic nedoručí nebo chybí stavy; cesta má zbytečné kroky."
+      8: "Z každé stránky do 2 kroků k objednání; formulář doručí zprávu a ukáže výsledek; telefon a e-mail klikací; je jasné, co se stane po odeslání."
+      10: "Objednání je nejsnazší věc na webu, i na mobilu jednou rukou; zákazník ví termín nebo kdy se ozvou."
+  - id: mobile
+    name: "Mobil"
+    weight: 10
+    anchors:
+      4: "Na mobilu se rozpadá rozložení nebo se nedá ovládat."
+      6: "Funguje, ale je dlouhé, s malými cíli nebo prázdnými plochami."
+      8: "Mobil je promyšlený: hlavní akce v dosahu palce, dotykové cíle ≥ 44 px, žádné prázdné plochy, rychlé načtení."
+      10: "Mobil je lepší zážitek než počítač: zkratky, volání a navigace jedním dotykem."
+  - id: copy
+    name: "Texty"
+    weight: 10
+    anchors:
+      4: "Obecné fráze, chyby, cizí slova, tvrzení bez dokladu."
+      6: "Správně, ale ploše; opakování, technická slova, chybí odpovědi na obavy zákazníka."
+      8: "Krátké, konkrétní texty v jazyce zákazníka, odpovídají na jeho otázky a obavy, bez chyb a bez nepodložených slibů."
+      10: "Texty mají hlas podniku, zákazník se v nich pozná a chce se objednat."
+  - id: findability
+    name: "Rychlost a dohledatelnost"
+    weight: 10
+    anchors:
+      4: "Pomalé, chybí titulky a popisy, vyhledávač nepozná místo a služby."
+      6: "Rychlé, ale titulky a popisy nevyužité (délka, místo, služba), varování SEO."
+      8: "Rychlé, každá stránka má vlastní titulek a popis s místem a službou, strukturovaná data podniku, žádné varování SEO."
+      10: "Navíc obsah na hlavní dotazy zákazníků a místní signály (profil, katalogy, odkazy) sladěné."
+  - id: accessibility
+    name: "Přístupnost"
+    weight: 5
+    anchors:
+      4: "Bez klávesnice nejde, kontrast nečitelný, obsah se ztrácí."
+      6: "Základ funguje, ale něco vypadne (fokus, kontrast, omezení pohybu)."
+      8: "Klávesnice, čtečka, kontrast a omezení pohybu fungují na všech stránkách."
+      10: "Navíc srozumitelné pro starší a nervózní zákazníky (velikost textu, jasná struktura)."
+task_test:
+  - id: price
+    task: "Najdi cenu {price_item}."
+  - id: hours
+    task: "Zjisti, kdy je otevřeno v pátek."
+  - id: booking
+    task: "Objednej se (vyplň a odešli formulář)."
