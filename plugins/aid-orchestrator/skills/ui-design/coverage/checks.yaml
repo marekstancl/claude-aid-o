@@ -29,6 +29,7 @@ applies:
   reduced_motion: {browsers: [chromium], viewports: [1440]}
   content_without_js: {browsers: [chromium], viewports: [1440]}
   first_paint_visible: {browsers: [chromium], viewports: [1440, 390]}
+  form_states: {browsers: [chromium], viewports: [390], flows: false}
   privacy_before_consent: {browsers: [chromium], viewports: [1440], flows: false}
   touch_targets: {viewports: [390]}
 checks:
@@ -53,6 +54,7 @@ checks:
   reduced_motion: nothing animates or transitions over 10 ms under prefers-reduced-motion (design-system-standard "Tokeny - Pohyb")
   content_without_js: with scripts off the page shows every text the scripted page shows after its motion settled and a scroll; a text only a script reveals is named (FB-27)
   first_paint_visible: right after load, before any scroll or motion, the h1 and the first content block are readable and nothing readable is faded; under prefers-reduced-motion nothing stays faded (FB-27)
+  form_states: a form never posts to mailto:; sent by script it locks the submit button while sending, shows an error with a clickable phone or e-mail when the endpoint fails and a message of its own when it succeeds (FB-28)
   touch_targets: at phone width every control is at least 44 x 44 px, inline text links excepted (design-system-standard "Co se na platformách liší - Dotyk")
   safe_area: a PWA's fixed panels at a screen edge use env(safe-area-inset-*); not a PWA = N/A (design-system-standard "Systémové okraje")
   privacy_before_consent: before any consent no third-party request, no cookie (public web) and no consent banner over 30 % of the screen (seo-audit-agent-standard "Privacy", seo/technicke-seo)

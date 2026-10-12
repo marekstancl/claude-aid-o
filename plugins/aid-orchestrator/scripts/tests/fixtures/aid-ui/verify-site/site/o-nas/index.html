@@ -21,6 +21,6 @@
 <p style="font-family: monospace">Příliš žluťoučký kůň úpěl ďábelské ódy.</p>
 <p>Lorem ipsum dolor sit amet.</p>
 <p><a href="/neni.html">Stará stránka</a></p>
-</main>
+<form class="obj" action="/api/zprava" method="post"><style>form.obj,form.obj *{font:inherit;color:inherit;background:transparent;border:1px solid currentColor}form.obj label,form.obj p,form.obj small,form.obj a{border:0}</style><label>Telefon <input type="tel" name="tel" required style="min-height:44px"></label><button type="submit" style="min-height:44px;min-width:44px">Odeslat</button><p class="msg" role="status" hidden></p><small><a href="/o-nas/#udaje" style="display:inline-block;min-height:44px">Ochrana osobních údajů</a></small></form><script>(function(){var f=document.querySelector("form.obj"),m=f.querySelector(".msg"),b=f.querySelector("button");f.addEventListener("submit",function(e){e.preventDefault();b.disabled=true;m.hidden=false;m.textContent="Odesílám…";fetch(f.action,{method:"POST",body:new FormData(f)}).then(function(r){if(!r.ok)throw 0;m.textContent="Odesláno, ozveme se.";}).catch(function(){m.innerHTML='Nepovedlo se. Zavolejte <a href="tel:+420777123456">+420 777 123 456</a>.';}).finally(function(){b.disabled=false;});});})();</script></main>
 </body>
 </html>

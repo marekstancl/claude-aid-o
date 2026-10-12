@@ -302,10 +302,11 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   // H1 (12. 10. 2026, klient-Codex retro): what the visitor sees without scripts and before any scroll
   {
     const vp = page.viewportSize();
-    res.content_without_js = applies('content_without_js') ? await contentWithoutJs(ctx.browser(), url, vp, await page.evaluate(VISIBLE_TEXTS_JS))
+    res.content_without_js = applies('content_without_js') ? await contentWithoutJs(ctx.browser(), url, vp, await page.evaluate(READABLE_JS, 'texts'))
       : NA('runs at the viewport and browser of its row only');
     res.first_paint_visible = applies('first_paint_visible') ? await firstPaintVisible(ctx.browser(), url, vp)
       : NA('runs at the viewport and browser of its row only');
+    res.form_states = applies('form_states') ? await formStates(ctx.browser(), url, vp) : NA('runs at the viewport and browser of its row only');
   }
   const o = await inPage(page);
   res.no_overflow = o.overflow ? ['fail', 'the page scrolls sideways'] : ['pass', ''];
@@ -543,72 +544,115 @@ async function moreRows(page, url, requested, applies) {
 }
 
 // ---- H1: content without JS, first paint (12. 10. 2026) ---------------------------------
-// Texts a visitor can read: every element with text of its own whose effective opacity (its own times its
-// ancestors') is at least 0.5, is displayed, and has a box. Clip-paths and transforms that move a box off
-// the page count through the box test. The copy subject is not reused: it takes opacity 0 as visible.
-const VISIBLE_TEXTS_JS = () => {
-  const eff = e => { let o = 1; for (let n = e; n && n.nodeType === 1; n = n.parentElement) { o *= parseFloat(getComputedStyle(n).opacity); if (o < 0.5) return o; } return o; };
-  const out = [];
-  // content elements only: menus, buttons and form messages may legitimately differ with scripts off
-  for (const e of document.body.querySelectorAll('p, li, h1, h2, h3, td, dt, dd, summary, blockquote')) {
-    if (e.closest('script, style, noscript, template, svg, [data-aid-intro], [aria-hidden="true"]')) continue;
-    const own = [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim();
-    if (own.length < 3) continue;
-    const s = getComputedStyle(e), r = e.getBoundingClientRect();
-    if (s.display === 'none' || s.visibility === 'hidden' || r.width < 1 || r.height < 1) continue;
-    if (r.right + scrollX <= 0 || r.bottom + scrollY <= 0) continue;
-    if (eff(e) < 0.5) continue;
-    out.push(own.slice(0, 80));
-  }
-  return out;
+// One visibility rule for both checks (Codex review 12. 10.): a content element (p, li, h1-h3, td, dt, dd,
+// summary, blockquote) with text of its own is readable when no ancestor hides it (display none, visibility
+// hidden, content-visibility hidden), its effective opacity (product over ancestors) is at least 0.5 and its box
+// overlaps the document on both axes (or, for first paint, the viewport). Full text is compared; it is cut only
+// for the message.
+const READABLE_JS = (mode) => {
+  const SEL = 'p, li, h1, h2, h3, td, dt, dd, summary, blockquote';
+  const own = e => [...e.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim();
+  const hidden = e => { for (let n = e; n && n.nodeType === 1; n = n.parentElement) { const c = getComputedStyle(n);
+      if (c.display === 'none' || c.visibility === 'hidden' || c.visibility === 'collapse' || c.contentVisibility === 'hidden') return true; } return false; };
+  const opac = e => { let o = 1; for (let n = e; n && n.nodeType === 1; n = n.parentElement) o *= parseFloat(getComputedStyle(n).opacity); return o; };
+  const W = Math.max(document.documentElement.scrollWidth, innerWidth), H = Math.max(document.documentElement.scrollHeight, innerHeight);
+  const box = (e, vp) => { const r = e.getBoundingClientRect(); if (r.width < 1 || r.height < 1) return false;
+    return vp ? (r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight)
+              : (r.right + scrollX > 0 && r.left + scrollX < W && r.bottom + scrollY > 0 && r.top + scrollY < H); };
+  const all = [...document.body.querySelectorAll(SEL)].filter(e => !e.closest('script, style, noscript, template, svg, nav, header, footer, form, [data-aid-intro], [aria-hidden="true"]'))
+    .map(e => ({ e, t: own(e) })).filter(x => x.t.length >= 3);
+  const ok = (e, vp) => !hidden(e) && opac(e) >= 0.5 && box(e, vp);
+  const name = e => `${e.tagName.toLowerCase()} "${own(e).slice(0, 40)}"`;
+  if (mode === 'texts') return all.filter(x => ok(x.e, false)).map(x => x.t);
+  if (mode === 'faded') return all.filter(x => !ok(x.e, false)).map(x => name(x.e));          // the whole document
+  // first paint: the h1 and the first content block in document order must be readable in the viewport
+  const h1 = all.find(x => x.e.tagName === 'H1'), first = all.find(x => x.e.tagName !== 'H1');
+  const fadedInView = all.filter(x => { const r = x.e.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth && !ok(x.e, true); }).map(x => name(x.e));
+  return { h1: h1 ? ok(h1.e, true) : null, first: first ? ok(first.e, true) : null, firstName: first ? name(first.e) : '', fadedInView };
 };
-// content_without_js: the page with scripts off shows every text the scripted page shows (after its motion settled
-// and it was scrolled); a text the visitor only gets after a script ran is named
+const loaded = async (p, url) => { await p.goto(url, { waitUntil: 'load', timeout: 30000 }); await p.evaluate(() => document.fonts.ready).catch(() => {}); await p.waitForTimeout(400); };
+// content_without_js: with scripts off the page shows every content text the scripted page shows after its motion
+// settled and a scroll (a multiset: a repeated text counts each time)
 async function contentWithoutJs(browser, url, viewport, withJs) {
   const ctx = await browser.newContext({ viewport, javaScriptEnabled: false });
   try {
     const p = await ctx.newPage();
-    await p.goto(url, { waitUntil: 'load', timeout: 30000 });
-    await p.waitForTimeout(300);
-    const seen = new Set(await p.evaluate(VISIBLE_TEXTS_JS));   // no scripts: page.evaluate still runs
-    const missing = [...new Set(withJs)].filter(t => !seen.has(t));
-    return missing.length ? ['fail', `${missing.length} text(s) only a script shows (no JS: hidden or missing): ${missing.slice(0, 4).map(t => `"${t.slice(0, 40)}"`).join(', ')}`] : ['pass', `${seen.size} texts visible without JS`];
+    await loaded(p, url);   // page.evaluate runs even with the page's scripts off
+    const left = new Map(); for (const t of await p.evaluate(READABLE_JS, 'texts')) left.set(t, (left.get(t) || 0) + 1);
+    const missing = []; for (const t of withJs) { const n = left.get(t) || 0; if (n) left.set(t, n - 1); else missing.push(t); }
+    return missing.length ? ['fail', `${missing.length} text(s) only a script shows (hidden or missing without JS): ${missing.slice(0, 4).map(t => `"${t.slice(0, 50)}"`).join(', ')}`]
+      : ['pass', `${withJs.length} content texts visible without JS`];
   } catch (e) { return ['fail', `no-JS load failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
 }
-// first_paint_visible: right after load, no scroll, no waiting for motion: the h1 and the first content block
-// in the viewport are readable; and under prefers-reduced-motion nothing readable stays faded
+// first_paint_visible: after load and fonts, no scroll: the h1 and the first content block are readable in the
+// viewport and nothing readable in the viewport is faded. An entrance that finishes on its own within 1.5 s counts
+// as motion (the hero of a reference runs 1 s): only what stays hidden after that fails. Under prefers-reduced-motion
+// no content text anywhere in the document stays faded.
 async function firstPaintVisible(browser, url, viewport) {
-  const look = () => {
-    const eff = e => { let o = 1; for (let n = e; n && n.nodeType === 1; n = n.parentElement) { o *= parseFloat(getComputedStyle(n).opacity); } return o; };
-    const inView = e => { const r = e.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight && r.width > 0 && r.height > 0; };
-    const h1 = document.querySelector('h1');
-    const blocks = [...document.querySelectorAll('main p, main li, main td, main h2, main h3, p, li, h2')].filter(e => e !== h1 && (e.innerText || '').trim().length >= 20 && inView(e));
-    const faded = [...document.querySelectorAll('h1, h2, h3, p, li, td, a, button')].filter(e => (e.innerText || '').trim().length >= 3 && inView(e) && eff(e) < 0.5)
-      .map(e => `${e.tagName.toLowerCase()} "${(e.innerText || '').trim().slice(0, 30)}"`);
-    return { h1: h1 ? (inView(h1) ? eff(h1) : -1) : null, firstBlock: blocks.length ? eff(blocks[0]) : null, faded };
-  };
+  const ctx = await browser.newContext({ viewport });
+  try {
+    const p = await ctx.newPage();
+    await loaded(p, url);
+    let a = await p.evaluate(READABLE_JS, 'first');
+    for (let t = 400; t < 1500 && (a.h1 === false || a.first === false || a.fadedInView.length); t += 250) { await p.waitForTimeout(250); a = await p.evaluate(READABLE_JS, 'first'); }
+    await p.emulateMedia({ reducedMotion: 'reduce' });
+    await loaded(p, url);
+    const b = await p.evaluate(READABLE_JS, 'faded');
+    const why = [];
+    if (a.h1 === null) why.push('no h1');
+    else if (!a.h1) why.push('h1 not readable in the first screen');
+    if (a.first === null) why.push('no content block');
+    else if (!a.first) why.push(`first content block not readable in the first screen: ${a.firstName}`);
+    if (a.fadedInView.length) why.push(`${a.fadedInView.length} element(s) in the first screen faded or hidden before any scroll: ${a.fadedInView.slice(0, 3).join(', ')}`);
+    if (b.length) why.push(`under prefers-reduced-motion ${b.length} element(s) stay faded or hidden: ${b.slice(0, 3).join(', ')}`);
+    return why.length ? ['fail', why.join('; ')] : ['pass', 'h1 and first block readable at first paint, nothing faded under reduced motion'];
+  } catch (e) { return ['fail', `first-paint load failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
+}
+
+// form_states (H3, 12. 10. 2026): a form on the page never posts to mailto:; sent by script it shows its state in a
+// live region (role status/alert or aria-live): while sending the submit button is locked (no double send), a failed
+// send (the endpoint answers 404) shows an error with a clickable tel: or mailto: contact, a successful one (200)
+// a different message. The endpoint is stubbed by the gate; whether it exists on the host is the open item, not this row.
+async function formStates(browser, url, viewport) {
   const ctx = await browser.newContext({ viewport });
   try {
     const p = await ctx.newPage();
     await p.goto(url, { waitUntil: 'load', timeout: 30000 });
-    await p.evaluate(() => document.fonts.ready).catch(() => {});
-    // no scroll, no settling of the whole page: an entrance that finishes on its own within 1.5 s is motion,
-    // a text still faded after that only a scroll (or nothing) would reveal
-    let a = await p.evaluate(look);
-    for (let t = 0; t < 1500 && (a.faded.length || (a.h1 !== null && a.h1 >= 0 && a.h1 < 0.5) || (a.firstBlock !== null && a.firstBlock < 0.5)); t += 250) { await p.waitForTimeout(250); a = await p.evaluate(look); }
-    await p.emulateMedia({ reducedMotion: 'reduce' });
-    await p.reload({ waitUntil: 'load' });
-    await p.waitForTimeout(400);   // reduced motion: readable at once, no entrance to wait for
-    const b = await p.evaluate(look);
+    const f = await p.evaluate(() => { const fm = [...document.querySelectorAll('form')].find(x => x.querySelector('input:not([type=hidden]):not([tabindex="-1"]), textarea'));
+      return fm ? { action: fm.getAttribute('action') || '', abs: fm.action } : null; });
+    if (!f) return NA('no form on the page');
+    if (/^mailto:/i.test(f.action)) return ['fail', `the form posts to ${f.action.slice(0, 40)}: it opens the visitor's mail app instead of sending (FB-27/H3)`];
+    const fill = () => p.evaluate(() => { const fm = [...document.querySelectorAll('form')].find(x => x.querySelector('input:not([type=hidden]), textarea'));
+      for (const el of fm.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea')) {
+        if (el.tabIndex === -1 || el.closest('[aria-hidden="true"]')) continue;
+        el.value = el.type === 'email' ? 'test@example.org' : el.type === 'tel' ? '+420777123456' : 'Test zprávy'; }
+      for (const el of fm.querySelectorAll('input[type=checkbox][required]')) el.checked = true; });
+    const live = () => p.evaluate(() => { const r = [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].filter(e => {
+        const b = e.getBoundingClientRect(), c = getComputedStyle(e); return b.width > 0 && b.height > 0 && c.visibility !== 'hidden' && (e.innerText || '').trim(); });
+      return { text: r.map(e => e.innerText.trim()).join(' | '), links: r.flatMap(e => [...e.querySelectorAll('a[href]')].map(a => a.getAttribute('href'))) }; });
+    const submit = async (status) => {
+      await p.route(f.abs, async route => { await new Promise(r => setTimeout(r, 600)); await route.fulfill({ status, contentType: 'application/json', body: status === 200 ? '{"ok":true}' : '{"error":"x"}' }); });
+      await fill();
+      const btn = p.locator('form button[type=submit], form input[type=submit]').first();
+      await btn.click({ timeout: 5000 });
+      await p.waitForTimeout(150);
+      const locked = await btn.evaluate(b => b.disabled || b.getAttribute('aria-busy') === 'true' || b.getAttribute('aria-disabled') === 'true').catch(() => false);
+      await p.waitForTimeout(1500);
+      const stayed = p.url().split('#')[0] === url.split('#')[0];
+      await p.unroute(f.abs);
+      return { locked, stayed, ...(stayed ? await live() : { text: '', links: [] }) };
+    };
+    const err = await submit(404);
+    await p.goto(url, { waitUntil: 'load' });
+    const ok = await submit(200);
     const why = [];
-    if (a.h1 === null) why.push('no h1');
-    else if (a.h1 === -1) why.push('h1 outside the first screen');
-    else if (a.h1 < 0.5) why.push(`h1 still faded (opacity ${a.h1.toFixed(2)}) right after load`);
-    if (a.firstBlock !== null && a.firstBlock < 0.5) why.push(`first content block faded (opacity ${a.firstBlock.toFixed(2)}) right after load`);
-    if (a.faded.length) why.push(`${a.faded.length} readable element(s) faded before any scroll: ${a.faded.slice(0, 3).join(', ')}`);
-    if (b.faded.length) why.push(`under prefers-reduced-motion ${b.faded.length} element(s) stay faded: ${b.faded.slice(0, 3).join(', ')}`);
-    return why.length ? ['fail', why.join('; ')] : ['pass', 'h1 and first block readable at first paint, nothing faded under reduced motion'];
-  } catch (e) { return ['fail', `first-paint load failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
+    if (!err.stayed || !ok.stayed) why.push('the form leaves the page on submit (a native post): no state is shown');
+    if (!err.locked || !ok.locked) why.push('the submit button stays active while sending (a second click sends twice)');
+    if (err.stayed && !err.text) why.push('a failed send shows no message in a live region');
+    else if (err.stayed && !err.links.some(h => /^(tel|mailto):/i.test(h || ''))) why.push('the error message offers no clickable phone or e-mail');
+    if (ok.stayed && (!ok.text || ok.text === err.text)) why.push('a successful send shows no message of its own');
+    return why.length ? ['fail', why.join('; ')] : ['pass', `error: "${err.text.slice(0, 50)}" · sent: "${ok.text.slice(0, 50)}"`];
+  } catch (e) { return ['fail', `form check failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
 }
 
 // ---- matrix -------------------------------------------------------------------------
@@ -617,7 +661,7 @@ const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls'
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
   'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review', 'motion_settled', 'motion_fidelity',
-  'content_without_js', 'first_paint_visible'];
+  'content_without_js', 'first_paint_visible', 'form_states'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -804,7 +848,7 @@ if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json')
 
 const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
   'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
-  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible'];
+  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states'];
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
 for (const b of BRS) {

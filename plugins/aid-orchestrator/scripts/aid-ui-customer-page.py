@@ -235,7 +235,8 @@ def gather(proj):
     OWNER = {"PM": "zadavateľ", "klient": "klient", "agent": "zhotoviteľ"}
     def customer_words(s):
         return re.sub(r"(?<![\wÀ-ž-])(schváleno|SCHVÁLENO)(?![\wÀ-ž-])", "odsúhlasené", re.sub(r"(?<![\wÀ-ž-])schválení(?![\wÀ-ž-])", "odsúhlasenie", re.sub(r"(?<![\wÀ-ž-])PM(?![\wÀ-ž-])", "zadavateľ", str(s))))
-    opened = [{"text": customer_words(i.get("text") or ""), "owner": OWNER.get(str(i.get("owner") or ""), str(i.get("owner") or "")), "due": str(i.get("due") or "")}
+    opened = [{"text": customer_words(i.get("text") or ""), "owner": OWNER.get(str(i.get("owner") or ""), str(i.get("owner") or "")), "due": str(i.get("due") or ""),
+               "critical": i.get("critical") is True}
               for i in st.get("open_items") or [] if isinstance(i, dict) and i.get("status") != "done"]
     known = {str(i.get("id")) for i in st.get("open_items") or [] if isinstance(i, dict)}
     decided = []
@@ -396,14 +397,16 @@ def render(D):
     # what stays open and what was decided (P108)
     z = D.get("zbyva") or {}
     rows = []
-    for i in z.get("open", []):
-        rows.append(f'<li>{E(i["text"])}{(" · " + E(i["owner"])) if i.get("owner") else ""}{(" · do " + E(i["due"])) if i.get("due") else ""}</li>')
+    crit = [i for i in z.get("open", []) if i.get("critical")]
+    for i in sorted(z.get("open", []), key=lambda i: not i.get("critical")):
+        rows.append(f'<li>{"<b>Blokuje zveřejnění:</b> " if i.get("critical") else ""}{E(i["text"])}{(" · " + E(i["owner"])) if i.get("owner") else ""}{(" · do " + E(i["due"])) if i.get("due") else ""}</li>')
     for d in z.get("deferred", []):
         rows.append(f'<li>{E(d["need"])} - doplní se po dodání{(" („" + E(d["words"]) + "“)") if d.get("words") else ""}</li>')
     for e in z.get("exceptions", []):
         rows.append(f'<li>Výjimka zadavatele: {E(e["check"])}{(" (" + E(e["page"]) + ")") if e.get("page") else ""}{(" - " + E(e["reason"])) if e.get("reason") else ""}</li>')
     dec = "".join(f'<li>{E(d["at"])}: {E(d["outcome"])}</li>' for d in z.get("decided", []))
-    zb = (f'<ul class="zbyva-list">{"".join(rows)}</ul>' if rows else '<p style="margin:0">Nic otevřeného.</p>') + \
+    zb = (f'<div class="zbyva"><b>Publikace blokovaná</b>, dokud nejsou splněny body označené „Blokuje zveřejnění“ ({len(crit)}).</div>' if crit else "") + \
+         (f'<ul class="zbyva-list">{"".join(rows)}</ul>' if rows else '<p style="margin:0">Nic otevřeného.</p>') + \
          (f'<details><summary>Přijatá rozhodnutí ({len(z.get("decided", []))})</summary><ul>{dec}</ul></details>' if dec else "")
     n_open = len(rows)
     areas.append(("zbyva", "Co zbývá a co bylo rozhodnuto", f"{n_open} {cz(n_open, 'otevřený bod', 'otevřené body', 'otevřených bodů')}, {len(z.get('decided', []))} {cz(len(z.get('decided', [])), 'rozhodnutí', 'rozhodnutí', 'rozhodnutí')}", "",

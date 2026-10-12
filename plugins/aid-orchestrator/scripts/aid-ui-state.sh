@@ -169,7 +169,9 @@
 #   links <project> --web <url> --customer <url>   (P108) the addresses the PM opens (both 200 after
 #                                        redirects, no login) -> .aid-ui/links.json; the studio
 #                                        refuses a handover question without them in its body
-#   open-item <project> add --text <t> --owner <PM|klient|agent> [--due <date>] | done <id>
+#   open-item <project> add --text <t> --owner <PM|klient|agent> [--due <date>] [--critical] [--evidence <t>]
+#                          | critical <id> [--off] | done <id>   (H7: a critical open item blocks publication:
+#                          finish writes publish_blocked_by, the customer page says so)
 #                                        (P108) what stays open after the run (customer page)
 #   open-items-sync <project>            (P108) the PM's own items from the studio history (by pm)
 #   chapter-all-target / chapter-all     (P108) refused before the final gate: the customer page must
@@ -505,10 +507,24 @@ def build(d):
     digest = lambda names: hashlib.sha256("".join("%s %s\n" % (n, sha[n]) for n in sorted(names)).encode()).hexdigest()
     pages = [f for f in files if f.endswith(".html") and os.path.basename(f) != "404.html"]
     fps = {}
+    # H4 (12. 10. 2026): an inline <style>/<script> block whose bytes appear on two or more pages is the shared
+    # look, not the page: it leaves the page fingerprint (a shared CSS fix no longer voids every approval) and
+    # gets its own fingerprint, `shared`, approved once as `_shared`
+    texts = {p: open(os.path.join(d, p), encoding="utf-8", errors="replace").read() for p in pages}
+    blk = re.compile(r"<(style|script)\b[^>]*>.*?</\1>", re.S | re.I)
+    seen = {}
+    for p, t in texts.items():
+        for b in set(m.group(0) for m in blk.finditer(t)):
+            seen.setdefault(b, set()).add(p)
+    shared = sorted(b for b, ps in seen.items() if len(ps) >= 2)
     # ponytail: href/src attributes only; srcset and url() inside CSS are not followed (they count in _site)
     for p in pages:
         refs = {p}
-        text = open(os.path.join(d, p), encoding="utf-8", errors="replace").read()
+        text = texts[p]
+        own = text
+        for b in shared:
+            own = own.replace(b, "")
+        sha[p] = hashlib.sha256(own.encode("utf-8", "surrogatepass")).hexdigest()
         for u in re.findall(r'''(?:href|src)\s*=\s*["']([^"']+)["']''', text, re.I):
             s = urlsplit(u)
             path = unquote(s.path)
@@ -519,7 +535,10 @@ def build(d):
                 refs.add(t)
         fps[p] = digest(refs)
     fps["_site"] = digest([f for f in files if f not in pages])
-    return {"id": digest(files), "fingerprints": fps}
+    out = {"id": hashlib.sha256("".join("%s %s\n" % (f, sha_file(os.path.join(d, f))) for f in files).encode()).hexdigest(), "fingerprints": fps}
+    if shared:
+        out["shared"] = hashlib.sha256("".join(shared).encode("utf-8", "surrogatepass")).hexdigest()
+    return out
 
 def val(x):
     return "" if x is None else str(x)
@@ -554,6 +573,17 @@ def missing(st, ck, res, fps):
 def matches(sel, row):
     return sel.get("check") == row.get("check") and all(sel.get(k) in ("*", val(row.get(k))) for k in AX)
 
+def reason_of(row):   # the check's reason without its numbers and specifics: text before the first ":" or "("
+    d = val(row.get("detail")).strip().lower()
+    return re.split(r"[:(]", d, 1)[0].strip()
+
+def covers(st, fps, e, r):   # H4: a page-"*" exception holds while the row fails for the reason the PM excused
+    if not matches(e["selector"], r):
+        return False
+    if e["selector"].get("page") == "*" and e.get("reasons"):
+        return reason_of(r) in e["reasons"]
+    return e.get("fingerprints", {}).get(val(r.get("page"))) == fp_of(st, fps, val(r.get("page")))
+
 STATUSES = ("pass", "fail", "warn", "not_covered")
 
 def bad_rows(res):   # external gate output: a row of any other status is refused, never counted
@@ -576,6 +606,10 @@ if mode == "exfp":
     sel, fps = json.loads(args[1]), st["build"]["fingerprints"]
     keys = list(fps) + [val(f.get("id")) for f in (st.get("structure") or {}).get("flows") or []]
     print(json.dumps({k: fp_of(st, fps, k) for k in keys if sel["page"] in ("*", k)}, sort_keys=True))
+elif mode == "exreasons":   # the reasons of the gate's open rows this selector matches (page "*" exceptions)
+    sel, res = json.loads(args[1]), (load(args[2]) if len(args) > 2 and os.path.isfile(args[2]) else {})
+    print(json.dumps(sorted({reason_of(r) for r in res.get("rows") or [] if isinstance(r, dict)
+                             and r.get("status") in ("fail", "warn", "not_covered") and matches(sel, r)}), ensure_ascii=False))
 elif mode == "gate":
     ck, res = load(args[1]), load(args[2])
     b = st["build"]
@@ -594,8 +628,7 @@ elif mode == "covered":   # open rows (as finish counts them) that a live PM exc
     ck = load(args[2]) if len(args) > 2 and os.path.isfile(args[2]) else {}
     live = [e for e in st.get("exceptions") or [] if not e.get("resolved")]
     for r in open_rows(ck, res):
-        hit = next((e for e in live if matches(e["selector"], r)
-                    and e.get("fingerprints", {}).get(val(r.get("page"))) == fp_of(st, fps, val(r.get("page")))), None)
+        hit = next((e for e in live if covers(st, fps, e, r)), None)
         if hit:
             print(json.dumps({"row": {k: r.get(k) for k in ("check",) + AX}, "reason": hit.get("reason", ""), "answer": hit.get("answer")},
                              ensure_ascii=False, sort_keys=True))
@@ -629,14 +662,15 @@ elif mode == "finish":
             bad += bad_rows(res) + ["missing row: " + m for m in missing(st, ck, res, fps)]
             live = [e for e in st.get("exceptions") or [] if not e.get("resolved")]
             for r in open_rows(ck, res):
-                if not any(matches(e["selector"], r) and e.get("fingerprints", {}).get(val(r.get("page"))) == fp_of(st, fps, val(r.get("page")))
-                           for e in live):
+                if not any(covers(st, fps, e, r) for e in live):
                     bad.append("%s row without a live exception: %s %s" % (r.get("status"), r.get("check"),
                                "/".join(val(r.get(k)) or "-" for k in AX)))
     appr = st.get("approvals") or {}
     for p in sorted(fps):
         if p != "_site" and (appr.get(p) or {}).get("fingerprint") != fps[p]:
             bad.append("page %s is not approved at its current fingerprint" % p)
+    if b and b.get("shared") and (appr.get("_shared") or {}).get("fingerprint") != b["shared"]:
+        bad.append("the shared look (_shared: inline style and script on every page) is not approved at its current fingerprint")
     ans = st.get("answers") or {}
     for q in list(st.get("consumed") or []) + ([drift] if drift else []):
         a = ans.get(q) or {}
@@ -949,7 +983,7 @@ case "$VERB" in
   approve-page)
     need_state
     (( $# == 1 )) || usage "approve-page needs <page>"
-    fp="$(jq -r --arg p "$1" 'if $p == "_site" then empty else .build.fingerprints[$p] // empty end' "$STATE")"
+    fp="$(jq -r --arg p "$1" 'if $p == "_site" then empty elif $p == "_shared" then .build.shared // empty else .build.fingerprints[$p] // empty end' "$STATE")"
     [[ -n "$fp" ]] || die "approve-page refused: $1 is not a page of the recorded build"
     build_current
     take_answer approve_page "$1@$fp"
@@ -1014,9 +1048,15 @@ case "$VERB" in
     build_current
     take_answer exception "$sel"
     fps="$(bpy exfp "$STATE" "$sel")"
-    jq_write --argjson s "$sel" --argjson f "$fps" --arg q "$ANSWER" --arg at "$(now)" \
-      '.exceptions += [{selector: $s, fingerprints: $f, answer: $q, reason: (.answers[$q].comment // ""), at: $at}] | .consumed += [$q]'
-    echo "EXCEPTION: $sel"
+    reasons='[]'
+    if [[ "$(jq -r .page <<<"$sel")" == "*" ]]; then
+      reasons="$(bpy exreasons "$STATE" "$sel" "$PROJECT/.aid-ui/verify/result.json")"
+      [[ "$reasons" != "[]" ]] || die "exception refused: a page-* exception is bound to the reason the gate gives; the recorded result has no open $check row (run the gate first)"
+    fi
+    jq_write --argjson s "$sel" --argjson f "$fps" --argjson r "$reasons" --arg q "$ANSWER" --arg at "$(now)" \
+      '.exceptions += [{selector: $s, fingerprints: $f, answer: $q, reason: (.answers[$q].comment // ""), at: $at}
+        + (if ($r | length) > 0 then {reasons: $r} else {} end)] | .consumed += [$q]'
+    echo "EXCEPTION: $sel${reasons:+ reasons $reasons}"
     ;;
 
   brand-waive-target|brand-waive)
@@ -1071,10 +1111,14 @@ case "$VERB" in
         die "build-record refused: the build does not carry the reference's motion: $motion_note"
     fi
     b="$(bpy build "$site")"
-    rec="$(jq -c --arg d "$site" --arg at "$(now)" '{id, dir: $d, fingerprints, at: $at}' <<<"$b")"
+    rec="$(jq -c --arg d "$site" --arg at "$(now)" '{id, dir: $d, fingerprints, at: $at} + (if .shared then {shared} else {} end)' <<<"$b")"
     mkdir -p "$PROJECT/.aid-ui"
     tmp="$(tmpfile build.json)"; jq . <<<"$rec" > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/build.json"
+    # H4: say which approvals the new build voids and why (a page's own content, or the shared look)
+    lost="$(jq -r --argjson r "$rec" '(.approvals // {}) as $a | [($a | to_entries[] | select(.key != "_shared")
+      | select(($r.fingerprints[.key] // "") != .value.fingerprint) | .key)] + (if ($a._shared and ($a._shared.fingerprint != ($r.shared // ""))) then ["_shared (společný styl)"] else [] end) | join(", ")' "$STATE")"
     jq_write --argjson r "$rec" '.build = $r | .finished = null'
+    [[ -z "$lost" ]] || echo "APPROVALS VOID (their page changed): $lost"
     rm -f "$PROJECT/.aid-ui/finish.json" "$PROJECT/.aid-ui/links.json"   # a new build: the end starts over
     echo "BUILD: $(jq -r .id <<<"$rec")${motion_note:+ · ${motion_note%%$'\n'*}}"
     ;;
@@ -1243,21 +1287,29 @@ case "$VERB" in
     sub="${1:-}"; shift || true
     case "$sub" in
       add)
-        text="$(opt text "$@")"; owner="$(opt owner "$@")"; due="$(opt due "$@")"
+        text="$(opt text "$@")"; owner="$(opt owner "$@")"; due="$(opt due "$@")"; evidence="$(opt evidence "$@")"
+        critical=false; for x in "$@"; do [[ "$x" == --critical ]] && critical=true; done
         [[ -n "${text//[[:space:]]/}" && ${#text} -le 500 ]] || usage "open-item add needs --text (1-500 characters)"
         [[ "$owner" =~ ^(PM|klient|agent)$ ]] || usage "open-item add needs --owner PM|klient|agent"
         [[ -z "$due" || "$due" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || usage "open-item --due is a date YYYY-MM-DD"
         n="$(jq '[.open_items[]? | select(.id | startswith("oi-"))] | length + 1' "$STATE")"
-        jq_write --arg id "oi-$n" --arg t "$text" --arg o "$owner" --arg d "$due" --arg at "$(now)" \
-          '.open_items += [{id: $id, text: $t, owner: $o, due: (if $d == "" then null else $d end), by: "agent", at: $at, status: "open"}]'
-        echo "OPEN ITEM: oi-$n"
+        jq_write --arg id "oi-$n" --arg t "$text" --arg o "$owner" --arg d "$due" --arg at "$(now)" --arg ev "$evidence" --argjson c "$critical" \
+          '.open_items += [{id: $id, text: $t, owner: $o, due: (if $d == "" then null else $d end), by: "agent", at: $at, status: "open",
+            critical: $c, evidence: (if $ev == "" then null else $ev end)}]'
+        echo "OPEN ITEM: oi-$n${critical/false/}"
         ;;
       done)
         id="${1:-}"; [[ -n "$id" ]] || usage "open-item done needs <id>"
         jq -e --arg i "$id" 'any(.open_items[]?; .id == $i)' "$STATE" >/dev/null || die "open-item: no item $id"
         jq_write --arg i "$id" --arg at "$(now)" '.open_items |= map(if .id == $i then .status = "done" | .done_at = $at else . end)'
         ;;
-      *) usage "open-item needs add --text <t> --owner <PM|klient|agent> [--due <date>] | done <id>" ;;
+      critical)   # H7: mark an item as blocking publication (or --off to lift it)
+        id="${1:-}"; [[ -n "$id" ]] || usage "open-item critical needs <id> [--off]"
+        jq -e --arg i "$id" 'any(.open_items[]?; .id == $i)' "$STATE" >/dev/null || die "open-item: no item $id"
+        v=true; [[ "${2:-}" == --off ]] && v=false
+        jq_write --arg i "$id" --argjson v "$v" '.open_items |= map(if .id == $i then .critical = $v else . end)'
+        ;;
+      *) usage "open-item needs add --text <t> --owner <PM|klient|agent> [--due <date>] [--critical] [--evidence <what proves it done>] | critical <id> [--off] | done <id>" ;;
     esac
     ;;
 
@@ -1301,9 +1353,11 @@ case "$VERB" in
     # the PM's handover verdict (card prevzit | vyhrada | vratit) and the links the Hotovo panel shows
     verdict="$(jq -r '.handover.verdict // "approve"' "$STATE")"; rating="$(jq -r '.handover.rating // ""' "$STATE")"
     tmp="$(tmpfile finish.json)"
-    jq -n --arg at "$(now)" --arg d "$(today)" --arg w "$web" --arg c "$customer" --arg v "$verdict" --arg r "$rating" \
-      '{finished: $d, at: $at, web: $w, customer: $c, verdict: $v, rating: (if $r == "" then null else $r end)}' > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/finish.json"
+    blocked="$(jq -c '[.open_items[]? | select(.status != "done" and .critical == true) | {id, text, owner}]' "$STATE")"
+    jq -n --arg at "$(now)" --arg d "$(today)" --arg w "$web" --arg c "$customer" --arg v "$verdict" --arg r "$rating" --argjson b "$blocked" \
+      '{finished: $d, at: $at, web: $w, customer: $c, verdict: $v, rating: (if $r == "" then null else $r end), publish_blocked_by: $b}' > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/finish.json"
     echo "FINISHED: $(today) · $web · $customer · verdict $verdict${rating:+ ($rating/10)}"
+    [[ "$blocked" == "[]" ]] || echo "PUBLISH BLOCKED by $(jq length <<<"$blocked") critical open item(s): $(jq -r 'map(.id) | join(", ")' <<<"$blocked")"
     ;;
 
   exception-covered)

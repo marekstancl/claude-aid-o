@@ -248,16 +248,33 @@ def run(a):
     if os.path.exists(ans):
         os.remove(ans)   # only an answer written by this run counts
     model = os.environ.get("AID_UI_COPY_CODEX_MODEL", "")
+    env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}   # text never on the API key (PM 12. 10. 2026)
     cmd = ["codex", "exec", "--skip-git-repo-check", "-s", "read-only", "-C", d, "-o", ans] + (["-m", model] if model else []) + ["-"]
     started = now()
-    try:
-        with open(os.path.join(d, "prompt.md"), encoding="utf-8") as fin, open(os.path.join(d, "codex.log"), "w") as log:
-            rc = subprocess.run(cmd, stdin=fin, stdout=log, stderr=subprocess.STDOUT, timeout=int(os.environ.get("AID_UI_COPY_TIMEOUT", "1800"))).returncode
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-        rc = 127 if isinstance(e, FileNotFoundError) else 124
+
+    def attempt(mode):
+        try:
+            with open(os.path.join(d, "prompt.md"), encoding="utf-8") as fin, open(os.path.join(d, "codex.log"), mode) as log:
+                return subprocess.run(cmd, stdin=fin, stdout=log, stderr=subprocess.STDOUT, env=env,
+                                      timeout=int(os.environ.get("AID_UI_COPY_TIMEOUT", "1800"))).returncode
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            return 127 if isinstance(e, FileNotFoundError) else 124
+
+    def readable():
+        try:
+            load_answer(ans); return True
+        except (OSError, ValueError):
+            return False
+    rc = attempt("w")
+    tries = 1
+    refused = re.search(r"usage limit|quota|rate limit|429|insufficient_quota", open(os.path.join(d, "codex.log"), errors="replace").read()[-4000:], re.I)
+    if rc == 0 and not readable() and not refused:   # an empty or unreadable answer: Codex gets one more try
+        if os.path.exists(ans):
+            os.remove(ans)
+        rc = attempt("a"); tries = 2
     no_answer = not (os.path.isfile(ans) and os.path.getsize(ans) > 0)
     rec = {"provider": None if (rc or no_answer) else "codex", "model": model or "codex-default", "command": " ".join(cmd),
-           "rc": rc, "started_at": started, "ended_at": now(), "codex_attempt": {"rc": rc, "no_answer": no_answer, "at": started}}
+           "rc": rc, "started_at": started, "ended_at": now(), "codex_attempt": {"rc": rc, "no_answer": no_answer, "at": started, "tries": tries}}
     wj(runf, rec)
     bad = None
     if not (rc or no_answer):
@@ -303,6 +320,7 @@ def standin_claude(d, ans, why):
     try:
         with open(os.path.join(d, "claude.log"), "w") as log:
             r = subprocess.run(cmd, input=prompt, cwd=d, capture_output=True, text=True,
+                               env={k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"},
                                timeout=int(os.environ.get("AID_UI_COPY_TIMEOUT", "1800")))
             log.write((r.stderr or "")[-4000:])
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
@@ -317,6 +335,10 @@ def standin_claude(d, ans, why):
         return False, f"claude rc {r.returncode}, no JSON in its answer"
     with open(out, "w", encoding="utf-8") as fo:
         fo.write(m.group(0))
+    try:
+        load_answer(out)
+    except ValueError as e:
+        return False, f"claude answer is not valid JSON ({e})"
     try:
         subprocess.run(["bash", emit, "complete", "--focus", STANDIN_FOCUS, "--output-file", out, "--evidence-dir", d],
                        check=True, capture_output=True, text=True, timeout=60)
@@ -496,6 +518,12 @@ def record(a):
         if man.get(rel) != sha(os.path.join(proj, cur)):
             die(f"the bundle's {rel} is not the project's current {cur}; bundle again")
     _, out = compute(d)
+    # H6 (12. 10. 2026): a phrase the client quoted when returning the texts must not come back anywhere - body,
+    # title, description, og, alt; checked here, without a model (Coufal: "ceny vopred" came back in meta and OG)
+    for p, hit in rejected_hits(rj(os.path.join(proj, "docs/design/brand-state.json")), subject).items():
+        if p in out:
+            out[p]["verdict"] = "fail"
+            out[p]["blocking"] = [f"věta vrácená klientem se vrátila: „{h}“" for h in hit] + out[p]["blocking"]
     model_v = (answer.get("verdict") if isinstance(answer, dict) else None)
     if model_v is not None:
         with open(os.path.join(d, "verdict.log"), "a", encoding="utf-8") as f:
@@ -523,6 +551,36 @@ def record(a):
     for p, v in new.items():
         print(f"{v['verdict'].upper()} {p}" + (f": {'; '.join(v['blocking'][:3])}" if v["blocking"] else ""))
     return 0
+
+
+QUOTED = re.compile(r"„([^“”\"]{4,120})[“”]|\"([^\"]{4,120})\"")
+
+
+def norm(t):
+    return re.sub(r"\s+", " ", (t or "").replace("\u00a0", " ").replace("–", "-")).strip().lower()
+
+
+def rejected_phrases(st):
+    """phrases the client quoted in a returned copy_verdict comment (Slovak/Czech „…“ or straight quotes)"""
+    out = []
+    for a in (st.get("answers") or {}).values():
+        if isinstance(a, dict) and a.get("kind") == "copy_verdict" and a.get("decision") == "return":
+            for m in QUOTED.finditer(a.get("comment") or ""):
+                ph = norm(m.group(1) or m.group(2))
+                if ph and ph not in out:
+                    out.append(ph)
+    return out
+
+
+def rejected_hits(st, subject):
+    """page -> the rejected phrases found in any of its blocks (every block kind counts)"""
+    phs, hits = rejected_phrases(st), {}
+    for p, v in (subject.get("pages") or {}).items():
+        text = " \n ".join(norm(b.get("text")) for b in v.get("blocks") or [])
+        found = [ph for ph in phs if ph in text]
+        if found:
+            hits[p] = found
+    return hits
 
 
 def main():

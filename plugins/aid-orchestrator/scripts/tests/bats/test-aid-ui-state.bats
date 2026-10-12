@@ -242,6 +242,16 @@ serve_200() {
   [ "$(grep -c 'rel="icon"' "$HTML")" -eq 1 ]
 }
 
+@test "H5: payload-check refuses cards nested inside a question (they belong in the top-level cards[])" {
+  studio
+  pl="$PROJ/.aid-ui/studio/payload.json"; mkdir -p "$PROJ/.aid-ui/studio"
+  o="$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)"
+  jq -n --arg o "$o" '{now:{title:"x",text:"y",at:$o,part:"technicka"},questions:[{id:"q-e",kind:"exception",part:"technicka",target:"{\"check\":\"axe\",\"page\":\"*\"}",opened_at:$o,title:"Výjimka?",body:["b"],next:"n",outcome:"Výjimka zapsána.",cards:[{id:"a",title:"A"}]}],cards:[]}' > "$pl"
+  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"carries its own \"cards\""* ]]
+  jq 'del(.questions[0].cards)' "$pl" > "$pl.t" && mv "$pl.t" "$pl"
+  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
 @test "payload-check: the rebuilt-logo question (target logo:rebuilt:<slot>, 1i mode full) carries exactly one card of that slot; other identity questions still one card per slot" {
   studio
   echo '{"situation":"redesign","slots":[{"id":"W","kind":"wordmark"},{"id":"WC","kind":"name+sign"}]}' > "$PROJ/.aid-ui/logo/route.json"
@@ -1103,6 +1113,19 @@ PY
   [ "$(jq -c '[.open_items[] | select(.by == "pm") | .id]' "$STATE")" == '["pm-20261010080000123456"]' ]
 }
 
+@test "H7: a critical open item does not stop finish but blocks publication in finish.json; lifting it clears the block" {
+  ready
+  "$SCRIPT" open-item "$PROJ" add --text "IČO do patičky" --owner klient --critical --evidence "IČO na každé stránce" >/dev/null
+  "$SCRIPT" open-item "$PROJ" add --text "Vizitka" --owner agent >/dev/null
+  jq -e '.open_items | (.[0].critical == true and .[0].evidence == "IČO na každé stránce" and .[1].critical == false)' "$STATE" >/dev/null
+  run "$SCRIPT" finish "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"PUBLISH BLOCKED by 1 critical open item(s): oi-1"* ]]
+  jq -e '.publish_blocked_by == [{"id":"oi-1","text":"IČO do patičky","owner":"klient"}]' "$PROJ/.aid-ui/finish.json" >/dev/null
+  "$SCRIPT" open-item "$PROJ" critical oi-1 --off
+  run "$SCRIPT" finish "$PROJ"; [ "$status" -eq 0 ]; [[ "$output" != *"PUBLISH BLOCKED"* ]]
+  jq -e '.publish_blocked_by == []' "$PROJ/.aid-ui/finish.json" >/dev/null
+}
+
 @test "all conditions met: finish succeeds; a backward step clears finished" {
   ready
   run "$SCRIPT" finish "$PROJ"
@@ -1240,6 +1263,31 @@ PY
   [[ "$output" == *"page kontakt.html is not approved"* ]]
   [[ "$output" == *"fail row without a live exception: axe kontakt.html"* ]]
   [[ "$output" != *"page index.html"* ]]
+}
+
+@test "H4: a change to the shared inline style voids only the _shared approval; a page-* exception holds while the row fails for the same reason" {
+  echo '<html><style>.b{color:red}</style><link href="style.css" rel="stylesheet"><a href="kontakt.html">k</a></html>' > "$SITE/index.html"
+  echo '<html><style>.b{color:red}</style><img src="/logo.webp"></html>' > "$SITE/kontakt.html"
+  ready
+  result '.rows |= map(if .check == "axe" then .status = "fail" | .detail = "critical color-contrast (2)" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  ans e1 exception '{"check":"axe","page":"*"}'
+  run "$SCRIPT" exception "$PROJ" --check axe --answer e1; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.exceptions[0].reasons == ["critical color-contrast"]' "$STATE" >/dev/null
+  shared="$(jq -r .build.shared "$STATE")"; [ -n "$shared" ] && [ "$shared" != null ]
+  ans s1 approve_page "_shared@$shared"; "$SCRIPT" approve-page "$PROJ" _shared --answer s1 >/dev/null
+  run "$SCRIPT" finish "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  # the shared style changes on both pages: page approvals hold, _shared is void, the exception still covers
+  sed -i 's/color:red/color:blue/' "$SITE/index.html" "$SITE/kontakt.html"
+  run "$SCRIPT" build-record "$PROJ" "$SITE"; [[ "$output" == *"APPROVALS VOID"*"_shared"* ]]; [[ "$output" != *"index.html"* ]]
+  result '.rows |= map(if .check == "axe" then .status = "fail" | .detail = "critical color-contrast (5)" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  run "$SCRIPT" finish "$PROJ"; [ "$status" -eq 1 ]
+  [[ "$output" == *"shared look"* ]]; [[ "$output" != *"page index.html is not approved"* ]]; [[ "$output" != *"without a live exception"* ]]
+  # a new reason on the same check is not excused
+  result '.rows |= map(if .check == "axe" then .status = "fail" | .detail = "serious image-alt (1)" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  run "$SCRIPT" finish "$PROJ"; [[ "$output" == *"fail row without a live exception: axe"* ]]
 }
 
 @test "an exception whose check passes at the next gate is kept as resolved and covers no more" {

@@ -61,6 +61,9 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   done
   jq -e '[.rows[] | select(.check == "content_without_js" and .page == "index.html") | .detail] | all(contains("Pečeme od čtyř"))' "$RES" >/dev/null
   jq -e '[.rows[] | select(.check == "first_paint_visible" and .page == "index.html") | .detail] | all(contains("faded"))' "$RES" >/dev/null
+  # H3: a mailto form fails; a script-sent form with a live status, a locked button and a clickable phone passes
+  [ "$(st form_states index.html)" == fail ]; [ "$(st form_states o-nas/index.html)" == pass ]
+  jq -e '[.rows[] | select(.check == "form_states" and .page == "index.html") | .detail] | all(contains("mailto"))' "$RES" >/dev/null
   # P108: invented count, percentage, years and e-mail are named in facts_match
   d="$(jq -r '[.rows[] | select(.check == "facts_match" and .page == "index.html") | .detail][0]' "$RES")"
   for c in "200 klientům" "40 %" "15 let" "info@neexistuje.cz"; do [[ "$d" == *"$c"* ]] || { echo "facts_match misses $c: $d"; return 1; }; done

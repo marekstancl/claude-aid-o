@@ -65,6 +65,15 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   [ ! -e "$RUN/references/copy-sk.md" ]
 }
 
+@test "H6: a phrase the client quoted when returning the texts fails every page it comes back on, without the model" {
+  jq '.answers.cv1 = {kind:"copy_verdict", decision:"return", comment:"Vety „z kvásku“ a \"Nikdy ne\" sú zavádzajúce."}' "$ST" > "$T/s" && mv "$T/s" "$ST"
+  review
+  run "$STATE_SH" copy-record "$P" "$RUN"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"FAIL index.html"*"věta vrácená klientem se vrátila: „z kvásku“"* ]]
+  [[ "$output" == *"PASS ochrana-udaju/index.html"* ]]
+  jq -e '.copy_review.pages["index.html"].verdict == "fail"' "$ST" >/dev/null
+}
+
 @test "every verdict rule fails a page by name; the model's own verdict is ignored" {
   for edit in 'del(.pages["index.html"].sweeps.voice)|.verdict="pass"' 'del(.pages["index.html"].cro.trust)' \
               '.pages["index.html"].cro.cta = {status:"netyka_se", reason:"x", findings:[]}' \
@@ -191,7 +200,7 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
 @test "H2: a refused codex hands the bundle to an independent Claude stand-in by itself, inside the dispatch bracket; no claude = both failed" {
   export AID_UI_STANDIN=on AID_UI_STANDIN_CLAUDE="$T/bin/claude"
   answer; RUN="$(bundle)"
-  printf '#!/usr/bin/env bash\ncat >/dev/null; python3 -c "import json;print(json.dumps({\\"result\\": \\"odpoved: \\" + open(\\"%s\\").read()}))"\n' "$T/answer.json" > "$T/bin/claude"
+  printf '#!/usr/bin/env bash\n[[ -z "${OPENAI_API_KEY:-}" ]] || exit 9\ncat >/dev/null; python3 -c "import json;print(json.dumps({\\"result\\": \\"odpoved: \\" + open(\\"%s\\").read()}))"\n' "$T/answer.json" > "$T/bin/claude"
   chmod +x "$T/bin/claude"
   CODEX_RC=3 run python3 "$COPY" run "$RUN"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"claude stand-in answered"* ]]
@@ -199,10 +208,17 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   grep -q '"verifier_dispatch_start"' "$RUN/timeline.jsonl"; grep -q '"verifier_dispatch_complete"' "$RUN/timeline.jsonl"
   run "$STATE_SH" copy-record "$P" "$RUN"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.copy_review.pages["index.html"].provider == "claude"' "$ST" >/dev/null
-  # an unusable codex answer (invalid JSON) goes to the stand-in too
+  # an unreadable codex answer gets a second Codex try, then goes to the stand-in
   RUN3="$(bundle)"; printf '{"pages": {' > "$T/bad.json"
   CODEX_ANSWER="$T/bad.json" run python3 "$COPY" run "$RUN3"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  jq -e '.provider == "claude" and (.stand_in_reason | contains("unusable"))' "$RUN3/run.json" >/dev/null
+  jq -e '.provider == "claude" and (.stand_in_reason | contains("unusable")) and .codex_attempt.tries == 2' "$RUN3/run.json" >/dev/null
+  # a usage limit goes to the stand-in at once (one try); neither process ever sees OPENAI_API_KEY
+  printf '#!/usr/bin/env bash\n[[ -z "${OPENAI_API_KEY:-}" ]] || exit 9\ncat >/dev/null; echo "ERROR: You hit your usage limit"; exit 1\n' > "$T/bin/codex"
+  RUN5="$(bundle)"; OPENAI_API_KEY=sk-test run python3 "$COPY" run "$RUN5"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.provider == "claude" and .codex_attempt.tries == 1 and .codex_attempt.rc == 1' "$RUN5/run.json" >/dev/null
+  # a stand-in whose answer is not JSON is no answer
+  printf '#!/usr/bin/env bash\ncat >/dev/null; echo "{\\"result\\": \\"{nope\\"}"\n' > "$T/bin/claude"; RUN6="$(bundle)"
+  CODEX_RC=3 run python3 "$COPY" run "$RUN6"; [ "$status" -eq 1 ]; [[ "$output" == *"stand-in failed too"* ]]
   # no claude on PATH: both providers failed, nothing recorded as a review
   rm "$T/bin/claude"; RUN4="$(bundle)"
   CODEX_RC=3 run python3 "$COPY" run "$RUN4"; [ "$status" -eq 1 ]; [[ "$output" == *"stand-in failed too"* ]]

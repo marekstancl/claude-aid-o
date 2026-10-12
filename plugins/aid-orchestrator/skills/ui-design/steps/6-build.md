@@ -98,6 +98,10 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
    při `prefers-reduced-motion` je vše čitelné hned. Brána to hlídá řádky `content_without_js` (bez skriptu
    stejné obsahové texty) a `first_paint_visible` (h1 a první blok čitelné hned po načtení, nic zesláblé);
    oba blokují.
+   **FB-28 formulář:** nikdy `action="mailto:"`; odeslání skriptem na koncový bod z `DESIGN.md`, tlačítko
+   zamčené během odesílání, stav v `role="status"`, chyba s klikacím telefonem/e-mailem, úspěch se nepředstírá.
+   Dokud koncový bod na hostingu neběží: `aid-ui-state.sh open-item <project> add --text "Koncový bod formuláře"
+   --owner agent --critical --evidence "odeslání doručí zprávu"`. Brána: `form_states`.
    (nástroj build servíruje sám a otisk složky zapíše sám);
    `build-record` pak sám pustí `aid-ui-motion.py check` nad tím záznamem a odmítne, když
    kterýkoli převzatý pohyb v buildu neběžel (vyjmenuje je) nebo build od pozorování změnil.

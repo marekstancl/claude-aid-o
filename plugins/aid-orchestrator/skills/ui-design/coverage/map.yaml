@@ -197,6 +197,9 @@ items:
   - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > How — fáze a kdo rozhoduje > Pohyb a měření (FB-25, FB-26, FB-27; 10.–12. 10. 2026)#c9852617"
     text: "**FB-27 Obsah je vidět bez skriptu, bez posunu a při omezeném pohybu.** Skryté výchozí "
     do: "script:content_without_js"   # first_paint_visible is the second half of FB-27, reported beside it
+  - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > How — fáze a kdo rozhoduje > Pohyb a měření (FB-25, FB-26, FB-27; 10.–12. 10. 2026)#6d7bc9ef"
+    text: "**FB-28 Formulář odesílá, nebo poctivě říká, co dělat.** Nikdy `mailto:` (otevře "
+    do: "script:form_states"
   - id: "ecosystem/specs/design-system-standard.md#Design systém aplikací > Kontrola před nasazením#9fbc1652"
     text: "Prázdný, chybový a načítací stav existují (ne jen šťastná cesta)."
     do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}

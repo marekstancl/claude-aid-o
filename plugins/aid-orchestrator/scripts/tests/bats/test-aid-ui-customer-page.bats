@@ -261,6 +261,11 @@ text() { python3 -c 'import re,sys,html;t=open(sys.argv[1]).read();t=re.sub(r"<s
   t="$(text)"
   [[ "$t" == *"Co zbývá a co bylo rozhodnuto"* && "$t" == *"Fotka lékaře · klient · do 2026-11-01"* && "$t" == *"Výjimka zadavatele: kontrola textů (ochrana/index.html) - lhůta pro právníka"* && "$t" == *"Přijatá rozhodnutí (2)"* ]]
   [[ "$t" != *"hotovo"* ]]
+  [[ "$t" != *"Publikace blokovaná"* ]]
+  # H7: a critical item heads the list and the area says publication is blocked
+  jq '.open_items[0].critical = true' "$P/docs/design/brand-state.json" > "$P/s.t" && mv "$P/s.t" "$P/docs/design/brand-state.json"
+  run python3 "$GEN" "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  t="$(text)"; [[ "$t" == *"Publikace blokovaná"*"Blokuje zveřejnění:"*"Fotka lékaře"* ]]
   # 3A (PM 11. 10. 2026): with a brand book address in links.json every area links into its chapter; the web button opens the preview
   mkdir -p "$P/.aid-ui"; echo '{"web":"http://10.0.0.1:3917/","customer":"http://10.0.0.1:3918/","brand":"http://10.0.0.1:3916/"}' > "$P/.aid-ui/links.json"
   run python3 "$GEN" "$P"; [ "$status" -eq 0 ]

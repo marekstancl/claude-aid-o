@@ -602,6 +602,9 @@ def load():
         if bad:
             raise ValueError("payload.json: question %s: card %s needs a source from sections.json sources (%s)"
                              % (q["id"], ", ".join(bad), ", ".join(SECTIONS["sources"])))
+    for q in qs:   # H5 (12. 10. 2026): cards nested in a question were silently dropped; they belong in cards[]
+        if "cards" in q:
+            raise ValueError("payload.json: question %s carries its own \"cards\"; cards go in the top-level cards[] with \"question\": \"%s\"" % (q["id"], q["id"]))
     for q in qs:   # the method before the output, and the PM's earlier choice carried into the next question
         try:
             check_method(q, [c for c in cards if c["question"] == q["id"]])
