@@ -238,6 +238,9 @@ _zadani_trim() { local v="$1"; v="${v%"${v##*[![:space:]]}"}"; printf '%s' "$v";
 # ---------------------------------------------------------------------------
 _repo_roots_pass() {
   local raw n i name path bb proj real seen=" "
+  # The word nowhere in the frontmatter, no yq (the lint runs several times per
+  # generated phase). Any spelling of the key — quoted, flow — still reaches yq.
+  awk 'NR==1 && !/^---/ {exit} NR>1 && /^---/ {exit} /repo_roots/ {f=1; exit} END {exit !f}' "$PLAN" || return 0
   raw="$(yq --front-matter=extract -o=json '.repo_roots // []' "$PLAN" 2>/dev/null)" || raw="[]"
   [[ -n "$raw" && "$raw" != "null" ]] || return 0
   if [[ "$(jq -r 'type' <<< "$raw" 2>/dev/null)" != "array" ]]; then

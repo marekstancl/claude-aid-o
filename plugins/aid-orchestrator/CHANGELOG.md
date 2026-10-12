@@ -19,6 +19,7 @@ Běh rovnou z plánu (P111, první půlka vydání 3 roadmapy po experimentu P01
 - Pečeť CP1, její ověření, zámek a zapisovač transakce generace jsou knihovna `lib/aid-generation-authority.sh` (přesunuté beze změny; pipeline a generátor ji volají).
 - `/aid-run P<NNN>` je výchozí cesta pro nový plán; `/aid-plan` končí „plán je připraven ke spuštění `/aid-run P<NNN>`“, režim Generate EPIC je stará cesta do P112. `/aid-status` ukáže přímý běh jako „běh 1/1 (přímý)“ a opuštěné běhy ani jejich položky fronty neukazuje.
 - `skills/pipeline.md` §„When AID refuses“: 16 nových řádků s `next:`; kontrola souladu skenuje i `aid-plan-fsm.sh`, `aid-auto-pipeline.sh`, `lib/aid-dispatch-contract.sh`, `aid-plan-lint.sh` a pre-commit hook. Registr vynucení: 14 nových řádků (628). Docusaurus `/aid/` (aid-run, aid-plan, architektura) v repu docs. Testbed: lany `direct_run` (přímý běh na klonu testbedu: tři skutečné kroky, brány, `done-advance --direct` a uzávěr až k rozhodnutí AWAITING_PM, bez `--force`) a `repo_roots` (worktree cizího repa, odmítnutí nedeklarovaného repa a rozsahu z živého checkoutu při uzávěru).
+- Generace zrychlená skoro zpět na 2.116.1: sdílená čtečka kroků a stavitel `plan.json` čtou krok jedním voláním `jq` místo jednoho na pole a lint spouští `yq` pro `repo_roots` jen tehdy, když hlavička to slovo obsahuje (fixture o třech fázích 62 s → 58 s, 2.116.1 55 s; test souběžné generace čekal na zámek 60 s a padal). Test souběhu má vlastní delší čekání, čekání na zámek zkouší samostatný test. Opravena zestárlá očekávaná hodnota v `test-plan-fixture-contract.bats` (šestý sloupec Zavírá od 2.115.0).
 
 ### Security
 - Rozsah z cizího repa musí být neprázdný a dopředný (začátek předkem konce) — i na staré cestě s absolutní cestou; jinak by prázdný rozsah schoval cizí změnu před revizí (nález automatické bezpečnostní revize commitu).
@@ -27,7 +28,7 @@ Běh rovnou z plánu (P111, první půlka vydání 3 roadmapy po experimentu P01
 
 | část | před | po |
 |---|---|---|
-| scripts | 73 115 | 74 067 |
+| scripts | 73 115 | 74 076 |
 | skills | 8 332 | 8 348 |
 | commands | 5 896 | 6 003 |
 

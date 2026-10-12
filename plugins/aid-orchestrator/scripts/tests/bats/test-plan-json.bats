@@ -228,6 +228,11 @@ PY
   run bash "$LINT" "$PLAN"
   [[ "$output" == *"ERROR repo_root_invalid: repo_roots 'docs' path"*"is not a git repository"* ]]
   [ "$status" -eq 1 ]
+  # A quoted key is the same key — the lint's no-yq fast path must not skip it.
+  _write_plan "\"repo_roots\": [{name: docs, path: $TEST_TMPDIR/not-a-repo}]"
+  run bash "$LINT" "$PLAN"
+  [[ "$output" == *"ERROR repo_root_invalid: repo_roots 'docs' path"*"is not a git repository"* ]]
+  [ "$status" -eq 1 ]
 }
 
 @test "json: the lint and the builder refuse a repo_roots path inside the project (repo_root_invalid)" {

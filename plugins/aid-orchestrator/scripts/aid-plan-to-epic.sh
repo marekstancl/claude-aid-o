@@ -574,14 +574,29 @@ fi
 
 for sn in "${phase_steps[@]}"; do
   step_counter=$(( step_counter + 1 ))
-  _st="$(jq -c --argjson i "$(( step_counter - 1 ))" '.[$i]' <<< "$_phase_steps_json")"
-  objective="$(jq -r '.objective' <<< "$_st")"
-  role="$(jq -r '.role' <<< "$_st")"
+  # Every field of this step in ONE jq, NUL-separated (a field may hold
+  # newlines): generation runs under the plan's lock, a jq per field adds up.
+  { IFS= read -r -d '' objective; IFS= read -r -d '' role; IFS= read -r -d '' step_ac_raw
+    IFS= read -r -d '' step_artifacts; IFS= read -r -d '' step_files
+    IFS= read -r -d '' ui_change_mode; IFS= read -r -d '' ui_change_path
+    IFS= read -r -d '' _ui_sha; IFS= read -r -d '' _ui_sv
+    IFS= read -r -d '' step_files_json; IFS= read -r -d '' step_ac_json
+    IFS= read -r -d '' step_deps; IFS= read -r -d '' parallel_group; IFS= read -r -d '' safe_closes
+  } < <(jq -j --argjson i "$(( step_counter - 1 ))" --arg s "$AID_ARROW_SENTINEL" '.[$i]
+        | (.objective | tostring), "\u0000", (.role | tostring), "\u0000",
+          (.acceptance_criteria | join("\n")), "\u0000", (.artifacts | join("\n")), "\u0000",
+          (.allowed_paths | join("\n")), "\u0000",
+          (.ui_change_mode | tostring), "\u0000", (.ui_change_path | tostring), "\u0000",
+          (.ui_change_sha256 | tostring), "\u0000", (.ui_change_schema_version | tostring), "\u0000",
+          (.files | map(gsub("-->"; $s)) | tojson), "\u0000",
+          (.acceptance_criteria | map(gsub("-->"; $s)) | tojson), "\u0000",
+          (.depends_on | tostring), "\u0000", (.parallel_group | tostring), "\u0000",
+          (.zavira | join(", ")), "\u0000"' <<< "$_phase_steps_json") \
+    || error_exit "EPIC generation: could not read step ${sn} from the plan reader's output" 1
   [[ -z "$role" ]] && role="backend"
 
   # Acceptance criteria: flattened with a `- [ ] [role] ` wrapper into all_ac,
   # and RAW into the per-step scoping block's ac[] below (D2).
-  step_ac_raw="$(jq -r '.acceptance_criteria[]' <<< "$_st")"
   if [[ -n "$step_ac_raw" ]]; then
     while IFS= read -r ac_line; do
       # A criterion that already carries its own [role] prefix keeps it.
@@ -592,20 +607,16 @@ for sn in "${phase_steps[@]}"; do
 
   # Every Files bullet into the flattened `## Artifacts`; the cleaned paths of
   # the top-level bullets into `## Scope > Allowed files/paths`.
-  step_artifacts="$(jq -r '.artifacts[]' <<< "$_st")"
   [[ -n "$step_artifacts" ]] && all_artifacts="${all_artifacts}${step_artifacts}"$'\n'
-  step_files="$(jq -r '.allowed_paths[]' <<< "$_st")"
   [[ -n "$step_files" ]] && all_allowed_paths="${all_allowed_paths}${step_files}"$'\n'
 
   # Per-step UI metadata comment line.
-  ui_change_mode="$(jq -r '.ui_change_mode' <<< "$_st")"
-  ui_change_path="$(jq -r '.ui_change_path' <<< "$_st")"
   if [[ -n "$ui_change_mode" ]]; then
     step_ui_meta="<!-- step-${step_counter}: ui_change_mode=${ui_change_mode}"
     if [[ -n "$ui_change_path" ]]; then
       step_ui_meta="${step_ui_meta} | path=${ui_change_path}"
-      step_ui_meta="${step_ui_meta} | sha256=$(jq -r '.ui_change_sha256' <<< "$_st")"
-      step_ui_meta="${step_ui_meta} | schema_version=$(jq -r '.ui_change_schema_version' <<< "$_st")"
+      step_ui_meta="${step_ui_meta} | sha256=${_ui_sha}"
+      step_ui_meta="${step_ui_meta} | schema_version=${_ui_sv}"
     fi
     step_ui_meta="${step_ui_meta} -->"
     all_step_ui_meta="${all_step_ui_meta}${step_ui_meta}"$'\n'
@@ -616,8 +627,6 @@ for sn in "${phase_steps[@]}"; do
   # files[] = the RAW top-level Files bullets, ac[] = the RAW criteria (no
   # [role] prefix); a literal "-->" in a value is encoded as $AID_ARROW_SENTINEL
   # so the block's own closer cannot be truncated (aid-epic-to-json.sh decodes).
-  step_files_json="$(jq -c --arg s "$AID_ARROW_SENTINEL" '.files | map(gsub("-->"; $s))' <<< "$_st")"
-  step_ac_json="$(jq -c --arg s "$AID_ARROW_SENTINEL" '.acceptance_criteria | map(gsub("-->"; $s))' <<< "$_st")"
   step_scoping_meta="<!-- step-${step_counter}: files=${step_files_json}; ac=${step_ac_json} -->"
   all_step_scoping_meta="${all_step_scoping_meta}${step_scoping_meta}"$'\n'
 
@@ -627,7 +636,6 @@ for sn in "${phase_steps[@]}"; do
 
   # Dependencies (global numbers from the reader): cross-phase references are
   # stripped, the rest remapped to the EPIC-local numbers of the # column.
-  step_deps="$(jq -r '.depends_on' <<< "$_st")"
   if [[ -n "$step_deps" ]]; then
     step_deps="$(strip_cross_phase_deps "$step_deps" "${phase_steps[*]}")"
   fi
@@ -669,11 +677,8 @@ for sn in "${phase_steps[@]}"; do
     [[ -z "$depends_on_str" ]] && depends_on_str="---"
   fi
 
-  parallel_group="$(jq -r '.parallel_group' <<< "$_st")"
-
   # P109: the brief points this step closes (**Zavírá:**), the sixth column —
   # the only road a step field has into plan.json. `—` when it names none.
-  safe_closes="$(jq -r '.zavira | join(", ")' <<< "$_st")"
   [[ -n "$safe_closes" ]] || safe_closes="—"
 
   steps_table_rows="${steps_table_rows}| ${step_counter} | ${role} | ${safe_objective} | ${depends_on_str} | ${parallel_group} | ${safe_closes} |"$'\n'

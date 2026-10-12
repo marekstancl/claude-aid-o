@@ -261,26 +261,23 @@ ${dropped}Every top-level Files bullet must read \`- <Create|Modify|Test|Rewrite
       fi
     fi
 
-    local files_json="[]" ac_json="[]" allowed_json="[]" artifacts_json="[]"
-    [[ -n "$top" ]] && files_json="$(printf '%s\n' "$top" | sed 's/^- //' | jq -R -s -c 'split("\n") | map(select(length > 0))')"
-    [[ -n "$ac_raw" ]] && ac_json="$(printf '%s\n' "$ac_raw" | jq -R -s -c 'split("\n") | map(select(length > 0))')"
-    [[ -n "$artifacts" ]] && artifacts_json="$(printf '%s\n' "$artifacts" | jq -R -s -c 'split("\n") | map(select(length > 0))')"
-    if [[ "$files_json" != "[]" ]]; then
-      allowed_json="$(_aid_allowed_paths_from_files_json "$files_json")" \
-        || error_exit "Invalid Files entry in step ${sn}. Canonical multi-path form: \`a\` + \`b\` — description." 1
-    fi
-
+    # Files bullets, criteria, artifacts and the allowed paths (the loop above
+    # already split and checked every bullet; first occurrence wins) are turned
+    # into arrays inside the one jq below — no jq per list.
     out="$(jq -c \
       --argjson number "$sn" --arg role "$role" --arg objective "$objective" \
       --arg depends_on "$deps" --arg parallel_group "$pg" --argjson zavira "$closes_json" \
       --arg s "${s:-0}" --arg e "${e:-0}" \
-      --argjson files "$files_json" --argjson artifacts "$artifacts_json" \
-      --argjson ac "$ac_json" --argjson allowed "$allowed_json" \
+      --arg top "$top" --arg artifacts_raw "$artifacts" --arg ac_raw "$ac_raw" --arg step_files "$step_files" \
       --arg ui_mode "$ui_mode" \
       --arg ui_path "$(echo "$ui_raw" | sed -n "s/.*path:[[:space:]]*\([^|]*\).*/\1/p" | tr -d ' ')" \
       --arg ui_sha "$(echo "$ui_raw" | sed -n "s/.*sha256:[[:space:]]*\([^|]*\).*/\1/p" | tr -d ' ')" \
       --arg ui_sv "$(echo "$ui_raw" | sed -n "s/.*schema_version:[[:space:]]*\([^|]*\).*/\1/p" | tr -d ' ')" \
-      '. + [{number: $number, role: $role, objective: $objective, depends_on: $depends_on,
+      'def lines: split("\n") | map(select(length > 0));
+       ($top | split("\n") | map(sub("^- "; "")) | map(select(length > 0))) as $files
+       | ($artifacts_raw | lines) as $artifacts | ($ac_raw | lines) as $ac
+       | ($step_files | lines | reduce .[] as $p ([]; if index($p) then . else . + [$p] end)) as $allowed
+       | . + [{number: $number, role: $role, objective: $objective, depends_on: $depends_on,
              parallel_group: $parallel_group, zavira: $zavira, plan_step: $number,
              section_start: ($s | tonumber), section_end: ($e | tonumber),
              files: $files, artifacts: $artifacts, outputs: $files,
@@ -445,13 +442,13 @@ aid_plan_json_build() {
     error_exit "aid_plan_json_build: duplicate step number in the step list: $(jq -r '[.[].number] | group_by(.) | map(select(length > 1) | .[0]) | map(tostring) | join(", ")' "$steps_file")" 1
   fi
 
-  local -a step_nums=() step_roles=() step_objectives=() step_depends=() step_parallel=()
-  for (( i=0; i<n; i++ )); do
-    local st num role objective
-    st="$(jq -c --argjson i "$i" '.[$i]' "$steps_file")"
-    num="$(jq -r '.number' <<< "$st")"
-    role="$(jq -r '.role // ""' <<< "$st")"
-    objective="$(jq -r '.objective // ""' <<< "$st")"
+  # One jq for the whole list, NUL-separated (an objective may hold newlines):
+  # generation holds the plan's lock while this runs once per phase, and a jq
+  # per field per step cost the concurrent-resume test its 60 s lock budget.
+  local -a step_nums=() step_roles=() step_objectives=() step_depends=() step_parallel=() step_complete=()
+  local num role objective dep par cpl
+  while IFS= read -r -d '' num && IFS= read -r -d '' role && IFS= read -r -d '' objective \
+        && IFS= read -r -d '' dep && IFS= read -r -d '' par && IFS= read -r -d '' cpl; do
     if [[ "$direct" -eq 1 ]]; then
       [[ -n "$role" ]] || error_exit "Step ${num} names no **AID Role:** — every step of a directly run plan names its role (${AID_PLAN_JSON_ROLES})" 1
       _aid_pj_valid_role "$role" || error_exit "Invalid role '$role' in step $num. Valid roles: $AID_PLAN_JSON_ROLES" 1
@@ -461,9 +458,13 @@ aid_plan_json_build() {
     step_nums+=("$num")
     step_roles+=("$role")
     step_objectives+=("$objective")
-    step_depends+=("$(jq -r '.depends_on // ""' <<< "$st")")
-    step_parallel+=("$(jq -r '.parallel_group // ""' <<< "$st")")
-  done
+    step_depends+=("$dep")
+    step_parallel+=("$par")
+    step_complete+=("$cpl")
+  done < <(jq -j '.[] | (.number | tostring), "\u0000", (.role // ""), "\u0000", (.objective // ""), "\u0000",
+                  (.depends_on // "" | tostring), "\u0000", (.parallel_group // "" | tostring), "\u0000",
+                  (has("outputs") and has("acceptance_criteria") and has("allowed_paths") | tostring), "\u0000"' "$steps_file")
+  [[ "${#step_nums[@]}" -eq "$n" ]] || error_exit "aid_plan_json_build: could not read the step list: ${steps_file}" 1
 
   # Step ids — the schema's id pattern forbids hyphens, roles like docs-writer carry one.
   local -a step_ids=()
@@ -581,24 +582,25 @@ aid_plan_json_build() {
   done
 
   # Steps.
-  local steps_json="[]" spec_label="EPIC specification" st inputs_json dp dep_sid step_obj src_plan_file="" sr
+  local steps_json="[]" spec_label="EPIC specification" st dp step_obj src_plan_file="" sr
   [[ "$direct" -eq 1 ]] && spec_label="Plan specification"
   if [[ -n "$plan_source" && "$plan_source" != "null" ]]; then
     if [[ -f "$plan_source" ]]; then src_plan_file="$plan_source"
     elif sr="$(aid_state_root 2>/dev/null)" && [[ -f "${sr}/${plan_source}" ]]; then src_plan_file="${sr}/${plan_source}"
     fi
   fi
+  local -a step_objs=() inputs=()
   for i in "${!step_nums[@]}"; do
     st="$(jq -c --argjson i "$i" '.[$i]' "$steps_file")"
     # A step list without its prepared Files/criteria fields: derive them from
     # the plan's own step section through the shared reader.
-    if [[ -n "$src_plan_file" ]] && ! jq -e 'has("outputs") and has("acceptance_criteria") and has("allowed_paths")' <<< "$st" >/dev/null; then
+    if [[ -n "$src_plan_file" && "${step_complete[$i]}" != "true" ]]; then
       local derived
       derived="$(aid_plan_json_steps_from_plan "$src_plan_file" "${step_nums[$i]}")" || exit $?
       st="$(jq -c --argjson d "$derived" '. as $s | $d[0] as $p
         | $s + {outputs: ($s.outputs // $p.outputs), acceptance_criteria: ($s.acceptance_criteria // $p.acceptance_criteria), allowed_paths: ($s.allowed_paths // $p.allowed_paths)}' <<< "$st")"
     fi
-    inputs_json="$(jq -nc --arg s "$spec_label" '[$s]')"
+    inputs=("$spec_label")
     dep_val="${step_depends[$i]}"
     if ! _aid_pj_is_none "$dep_val"; then
       IFS=',' read -ra dep_parts <<< "$dep_val"
@@ -607,21 +609,19 @@ aid_plan_json_build() {
         [[ -z "$dp" ]] && continue
         if [[ "$dp" =~ ^[0-9]+$ ]]; then
           if [[ -n "${num_to_idx[$dp]+_}" ]]; then
-            dep_sid="${step_ids[${num_to_idx[$dp]}]}"
-            inputs_json="$(echo "$inputs_json" | jq --arg s "Output from $dep_sid" '. + [$s]')"
+            inputs+=("Output from ${step_ids[${num_to_idx[$dp]}]}")
           fi
         elif _aid_pj_valid_role "$dp"; then
           if [[ -n "${role_to_idx[$dp]+_}" ]]; then
-            dep_sid="${step_ids[${role_to_idx[$dp]}]}"
-            inputs_json="$(echo "$inputs_json" | jq --arg s "Output from $dep_sid" '. + [$s]')"
+            inputs+=("Output from ${step_ids[${role_to_idx[$dp]}]}")
           fi
         fi
       done
     fi
-    step_obj="$(jq -n \
+    step_obj="$(jq -nc \
       --arg id "${step_ids[$i]}" --arg role "${step_roles[$i]}" --arg objective "${step_objectives[$i]}" \
-      --argjson inputs "$inputs_json" --argjson st "$st" \
-      '{
+      --argjson st "$st" \
+      '$ARGS.positional as $inputs | {
         id: $id,
         role: $role,
         objective: $objective,
@@ -635,9 +635,10 @@ aid_plan_json_build() {
         ui_change_contract: ($st.ui_change_contract // (if ($st.ui_change_path // "") == "" then null else {path: $st.ui_change_path, sha256: ($st.ui_change_sha256 // ""), schema_version: ($st.ui_change_schema_version // "")} end)),
         zavira: ($st.zavira // []),
         plan_step: ($st.plan_step // null)
-      }')"
-    steps_json="$(echo "$steps_json" | jq --argjson step "$step_obj" '. + [$step]')"
+      }' --args "${inputs[@]}")"
+    step_objs+=("$step_obj")
   done
+  steps_json="$(printf '%s\n' "${step_objs[@]}" | jq -s .)"
 
   # Gates: the EPIC's DoD Gates, or (direct) what the project's execution.yaml defines.
   local gates_json="[]"
