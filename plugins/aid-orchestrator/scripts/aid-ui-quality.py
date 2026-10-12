@@ -20,13 +20,16 @@ studio shows), verdict.json (the closing audit).
       An accepted finding is fixed; the evidence names what changed and where (checked again by the next round).
   status <project>
       {decision, why, rounds, repair_rounds, scores, best} with decision one of
-      triage | fix | round | audit | stop:conflict | stop:stagnation | stop:round_cap | done.
+      triage | fix | round | close | audit | stop:conflict | stop:stagnation | stop:round_cap | done.
       Rules: repair rounds at most ROUND_CAP (5); improvement = quality_score +0.3 or fewer blocking+major
-      findings with no criterion lower; two repair rounds in a row without improvement = stop:stagnation (or
-      audit when the last round is accepted); after acceptance the loop goes on toward 10 while it improves.
+      findings with no criterion lower; two repair rounds in a row without improvement = stop:stagnation.
+      After acceptance the loop goes on toward 10 while it improves; when it stops improving (or the cap, or
+      nothing accepted to fix) the best accepted round is audited - `close` first asks to set accepted findings
+      not fixed yet to superseded. Every round and audit runs on the critic and the address of round 1.
   audit <project> --web <url>
-      The closing check (not a repair round): three blind ratings (aid-ui-client.py critic --audit) of the same
-      site, aid-ui-critic.py verdict -> verdict.json. Exit 0 accepted, 3 not accepted, 1 refused/failed.
+      The closing check (not a repair round): the site must be the best accepted round's web; three blind ratings
+      (aid-ui-client.py critic --audit), aid-ui-critic.py verdict -> verdict.json. Not accepted: the auditors'
+      findings become an audit round to triage (not counted as a repair round). Exit 0 accepted, 3 not, 1 refused.
 """
 import json, os, subprocess, sys, time
 
@@ -65,6 +68,7 @@ def rounds(p):
 
 
 def save_round(p, r):
+    os.makedirs(os.path.join(cdir(p), "rounds", str(r["n"])), exist_ok=True)
     wj(os.path.join(cdir(p), "rounds", str(r["n"]), "round.json"), r)
 
 
@@ -79,15 +83,34 @@ def improved(prev, cur):
     return heavy(cur) < heavy(prev) and not lower
 
 
+def site_sha(p):
+    sys.path.insert(0, HERE)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("aid_ui_client", CLIENT)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m.site_sha(os.path.join(p, "site"))
+
+
+def verdict(p):
+    vf = os.path.join(cdir(p), "verdict.json")
+    return json.load(open(vf, encoding="utf-8")) if os.path.isfile(vf) else None
+
+
+def target_of(rs):
+    """The web the audit rates: the best accepted repair round (the latest of equal scores)."""
+    accs = [r for r in rs if not r.get("audit") and r["score"]["accepted"]]
+    return max(accs, key=lambda r: (r["score"]["quality_score"], r["n"])) if accs else None
+
+
 def status(p):
     rs = rounds(p)
-    out = {"rounds": len(rs), "repair_rounds": max(len(rs) - 1, 0), "scores": [r["score"]["quality_score"] for r in rs]}
-    if rs:
-        best = max(rs, key=lambda r: r["score"]["quality_score"])
-        out["best"] = {"round": best["n"], "quality_score": best["score"]["quality_score"], "site_sha": best["site_sha"]}
-    vf = os.path.join(cdir(p), "verdict.json")
-    v = json.load(open(vf, encoding="utf-8")) if os.path.isfile(vf) else None
-    if v and rs and v.get("site_sha") == rs[-1]["site_sha"] and v.get("accepted"):
+    reps = [r for r in rs if not r.get("audit")]   # an audit's findings are triaged like a round but never count as one
+    out = {"rounds": len(rs), "repair_rounds": max(len(reps) - 1, 0), "scores": [r["score"]["quality_score"] for r in rs]}
+    target, v = target_of(rs), verdict(p)
+    if target:
+        out["best"] = {"round": target["n"], "quality_score": target["score"]["quality_score"], "site_sha": target["site_sha"]}
+    if v and target and v.get("site_sha") == target["site_sha"] and v.get("accepted"):
         return dict(out, decision="done", why=v["verdict"])
     if not rs:
         return dict(out, decision="round", why="no round yet")
@@ -99,25 +122,27 @@ def status(p):
     open_ = [f["id"] for f in last["findings"] if not f.get("state")]
     if open_:
         return dict(out, decision="triage", why="findings without a state: " + ", ".join(open_))
-    acc = last["score"]["accepted"]
-    audited = v and v.get("site_sha") == last["site_sha"]   # an audit that did not confirm this web: repair on
-    fixing = any(f.get("evidence") for f in last["findings"])
-    # the audit rates exactly the web of the last round, so it comes before any fix of that round
-    if acc and not audited and not fixing and (len(rs) >= 2 and not improved(rs[-2], last) or out["repair_rounds"] >= ROUND_CAP
-                                               or not any(f.get("state") == "accepted" for f in last["findings"])):
-        return dict(out, decision="audit", why="accepted at %.1f and no further gain in reach; rate this web blind three times, change nothing"
-                    % last["score"]["quality_score"])
     todo = [f["id"] for f in last["findings"] if f.get("state") == "accepted" and not f.get("evidence")]
+    accepted_any = any(f.get("state") == "accepted" for f in last["findings"])
+    cap = out["repair_rounds"] >= ROUND_CAP
+    audited = bool(v and target and v.get("site_sha") == target["site_sha"])   # an audit that did not confirm it: repair on
+    no_gain = len(reps) >= 2 and not improved(reps[-2], reps[-1])
+    if target and not audited and not last.get("audit") and (cap or no_gain or not accepted_any):
+        if todo:   # improvement ends here: what was accepted is closed explicitly, never skipped
+            return dict(out, decision="close", why="improvement ends (best: round %d, %.1f); set %s superseded with the reason, then audit"
+                        % (target["n"], target["score"]["quality_score"], ", ".join(todo)))
+        return dict(out, decision="audit", why="audit the best accepted web: round %d (%.1f); the site must be exactly that web - restore it if a later round changed it"
+                    % (target["n"], target["score"]["quality_score"]))
     if todo:
         return dict(out, decision="fix", why="accepted findings not fixed yet: " + ", ".join(todo))
-    flat = len(rs) >= 3 and not improved(rs[-2], rs[-1]) and not improved(rs[-3], rs[-2])
-    if flat:
-        return dict(out, decision="stop:stagnation", why="two repair rounds without improvement (scores %s)" % out["scores"][-3:])
-    if out["repair_rounds"] >= ROUND_CAP:
+    if len(reps) >= 3 and not improved(reps[-2], reps[-1]) and not improved(reps[-3], reps[-2]):
+        return dict(out, decision="stop:stagnation", why="two repair rounds without improvement (scores %s)" % [r["score"]["quality_score"] for r in reps[-3:]])
+    if cap:
         return dict(out, decision="stop:round_cap", why="%d repair rounds done, last %.1f, lowest criterion %s"
                     % (ROUND_CAP, last["score"]["quality_score"], last["score"]["min_criterion"]))
-    if not any(f.get("state") == "accepted" for f in last["findings"]):
-        return dict(out, decision="stop:stagnation", why="below acceptance and no finding accepted for a fix")
+    if not accepted_any:
+        return dict(out, decision="stop:stagnation", why=("the audit did not confirm the web and " if last.get("audit") else "below acceptance and ")
+                    + "no finding was accepted for a fix")
     return dict(out, decision="round", why="fixes recorded; rate again")
 
 
@@ -138,6 +163,35 @@ def gate_ok(p):
     return r.returncode == 0, (r.stderr or r.stdout).strip()
 
 
+def task_row(p):
+    """The gate's task_test row of the recorded gate (step 4): the task test of this build, as the round saw it."""
+    try:
+        st = json.load(open(os.path.join(p, "docs", "design", "brand-state.json"), encoding="utf-8"))
+        res = json.load(open(st["gate"]["result_file"], encoding="utf-8"))
+        r = next((x for x in res.get("rows") or [] if x.get("check") == "task_test"), None)
+        return {"status": r["status"], "detail": r.get("detail", "")} if r else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def frozen_sha(p):
+    try:
+        return json.load(open(os.path.join(cdir(p), "frozen.json"), encoding="utf-8"))["sha256"]
+    except (OSError, ValueError, KeyError):
+        die("no frozen critic (aid-ui-critic.py freeze first)")
+
+
+def same_loop(p, web):
+    """The whole loop runs on one frozen critic and one address; a round or an audit off either is refused."""
+    rs = rounds(p)
+    if not rs:
+        return
+    if frozen_sha(p) != rs[0]["frozen_sha"]:
+        die("the frozen critic changed since round 1 (%s, the loop started with %s)" % (frozen_sha(p)[:12], rs[0]["frozen_sha"][:12]))
+    if web.rstrip("/") != rs[0]["web"].rstrip("/"):
+        die("the loop rates %s; %s is another address" % (rs[0]["web"], web))
+
+
 def usd_since(p, at):
     try:
         rows = [json.loads(x) for x in open(os.path.join(p, ".aid-ui", "costs.jsonl"), encoding="utf-8") if x.strip()]
@@ -146,10 +200,17 @@ def usd_since(p, at):
     return round(sum(r.get("usd") or 0 for r in rows if r.get("at", "") >= at), 4)
 
 
+def mark_client(f):
+    if f["owner"] == "client":
+        f.update(state="blocked", reason="client supplies it (readiness)")
+    return f
+
+
 def do_round(p, web):
     st = status(p)
-    if st["decision"] not in ("round",):
+    if st["decision"] != "round":
         die("no round now: %s (%s)" % (st["decision"], st["why"]))
+    same_loop(p, web)
     ok, msg = gate_ok(p)
     if not ok:
         die("the site does not pass the regression check (aid-ui-state.sh gate-check); rebuild, build-record and run the gate first:\n" + msg)
@@ -159,18 +220,13 @@ def do_round(p, web):
     at = now()
     r = subprocess.run([sys.executable, CLIENT, "critic", p, "--web", web, "--out", os.path.join(d, "critic")], text=True)
     if r.returncode:
-        os.rmdir(d) if not os.listdir(d) else None
-        die("the critic gave no rating (record in %s/critic/run.json)" % d)
+        os.rename(d, d + "-failed-" + at.replace(":", ""))   # a failed rating is kept for the record but is no round
+        die("the critic gave no rating (record in %s-failed-*/critic/run.json)" % d)
     run = json.load(open(os.path.join(d, "critic", "run.json"), encoding="utf-8"))
     ans = json.load(open(os.path.join(d, "critic", "answer.json"), encoding="utf-8"))
-    finds = []
-    for f in ans["findings"]:
-        f = dict(f, id="r%d-%s" % (n, f["id"]), state=None)
-        if f["owner"] == "client":
-            f.update(state="blocked", reason="client supplies it (readiness)")
-        finds.append(f)
+    finds = [mark_client(dict(f, id="r%d-%s" % (n, f["id"]), state=None)) for f in ans["findings"]]
     rec = {"n": n, "at": at, "web": web, "site_sha": run["site_sha"], "frozen_sha": run["frozen_sha"], "provider": run.get("provider"),
-           "score": run["score"], "findings": finds, "readiness": run["score"]["readiness"], "usd_equiv": usd_since(p, at)}
+           "score": run["score"], "findings": finds, "readiness": run["score"]["readiness"], "task_test": task_row(p), "usd_equiv": usd_since(p, at)}
     save_round(p, rec)
     st = write_loop(p)
     print(json.dumps({"round": n, "quality_score": rec["score"]["quality_score"], "min_criterion": rec["score"]["min_criterion"],
@@ -195,8 +251,12 @@ def triage(p, fid, state, opts):
     need = {"accepted": "expected", "rejected_with_reason": "reason", "duplicate": "of", "blocked": "reason", "superseded": "reason"}[state]
     if not (opts.get(need) or "").strip():
         die("%s needs --%s" % (state, need), 2)
-    if opts.get("conflict-with") and not any(x["id"] == opts["conflict-with"] for x in last["findings"]):
-        die("no finding %s to conflict with" % opts["conflict-with"])
+    ids = {x["id"] for x in last["findings"]}
+    for k in ("of", "conflict-with"):
+        if opts.get(k) and (opts[k] not in ids or opts[k] == fid):
+            die("--%s %s: no other finding of round %d with that id" % (k, opts[k], last["n"]))
+    if opts.get("conflict-with") and state != "blocked":
+        die("--conflict-with goes with blocked only (the finding cannot be fixed without making the other worse)", 2)
     for k in ("reason", "expected", "of", "conflict_with", "evidence"):
         f.pop(k, None)
     f["state"] = state
@@ -225,26 +285,41 @@ def audit(p, web):
     st = status(p)
     if st["decision"] != "audit":
         die("no audit now: %s (%s)" % (st["decision"], st["why"]))
+    same_loop(p, web)
+    rs = rounds(p)
+    tgt = target_of(rs)
+    cur = site_sha(p)
+    if cur != tgt["site_sha"]:
+        die("the site is not the best accepted web (round %d, %s; the site now %s): restore that web, rebuild, record and gate it, then audit"
+            % (tgt["n"], tgt["site_sha"][:12], cur[:12]))
     ok, msg = gate_ok(p)
     if not ok:
         die("the site does not pass the regression check:\n" + msg)
-    last = rounds(p)[-1]
-    d = os.path.join(cdir(p), "audits", last["site_sha"][:16])
-    files = []
+    d = os.path.join(cdir(p), "audits", tgt["site_sha"][:16] + "-" + now().replace(":", ""))
+    files, answers = [], []
     for k in (1, 2, 3):
         out = os.path.join(d, "a%d" % k)
         r = subprocess.run([sys.executable, CLIENT, "critic", p, "--web", web, "--audit", "--out", out], text=True)
         if r.returncode:
             die("audit rating %d failed (record in %s/run.json)" % (k, out))
         run = json.load(open(os.path.join(out, "run.json"), encoding="utf-8"))
-        if run["site_sha"] != last["site_sha"]:
-            die("the site changed during the audit (rating %d rated %s, the round %s)" % (k, run["site_sha"][:12], last["site_sha"][:12]))
+        if run["site_sha"] != tgt["site_sha"] or run["frozen_sha"] != rs[0]["frozen_sha"]:
+            die("audit rating %d rated another web or another critic (site %s, critic %s)" % (k, run["site_sha"][:12], run["frozen_sha"][:12]))
         files.append(os.path.join(out, "answer.json"))
+        answers.append(json.load(open(files[-1], encoding="utf-8")))
     r = subprocess.run([sys.executable, CRITIC, "verdict", p] + files, capture_output=True, text=True)
     if r.returncode not in (0, 3):
         die("verdict failed: " + (r.stderr or r.stdout).strip())
-    v = dict(json.loads(r.stdout), site_sha=last["site_sha"], round=last["n"], at=now(), ratings_dir=d)
+    v = dict(json.loads(r.stdout), site_sha=tgt["site_sha"], round=tgt["n"], at=now(), ratings_dir=d)
     wj(os.path.join(cdir(p), "verdict.json"), v)
+    if not v["accepted"]:   # the auditors' findings become a round to triage; it is no repair round
+        n = rs[-1]["n"] + 1
+        crit = v["criteria_median"]
+        finds = [mark_client(dict(f, id="r%d-a%d-%s" % (n, k + 1, f["id"]), state=None)) for k, a in enumerate(answers) for f in a["findings"]]
+        save_round(p, {"n": n, "at": v["at"], "web": web, "audit": True, "site_sha": tgt["site_sha"], "frozen_sha": rs[0]["frozen_sha"],
+                       "score": {"quality_score": v["median_quality_score"], "criteria": crit, "min_criterion": min(crit.values()) if crit else 0,
+                                 "accepted": False, "readiness": v["publish_blocked_by"]},
+                       "findings": finds, "readiness": v["publish_blocked_by"], "task_test": task_row(p), "usd_equiv": None})
     write_loop(p)
     print(json.dumps(v, ensure_ascii=False))
     sys.exit(0 if v["accepted"] else 3)

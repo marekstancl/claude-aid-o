@@ -52,21 +52,28 @@ cat > "$BATS_TEST_TMPDIR/claude-prompt"; pwd > "$BATS_TEST_TMPDIR/claude-cwd"; e
 python3 -c 'import json,sys; print(json.dumps({"result": "tady je: " + open(sys.argv[1]).read(), "usage": {"input_tokens": 500, "output_tokens": 100}, "total_cost_usd": 0.02}))' "${CLAUDE_ANS:-$ANS}"
 EOF
   chmod +x "$T/bin/"*
+  serve_site
 }
 
-teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; }
+# the critic rates only an address that serves this site: a small server on the site directory
+serve_site() {
+  WPORT=$(( 38000 + RANDOM % 900 )); python3 -m http.server "$WPORT" --bind 127.0.0.1 --directory "$P/site" >/dev/null 2>&1 & WEBSRV=$!
+  W="http://127.0.0.1:$WPORT/"; for _ in $(seq 50); do curl -s "$W" >/dev/null && return 0; sleep 0.1; done; return 1
+}
+
+teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WEBSRV:-}" ]] || kill "$WEBSRV" 2>/dev/null || true; }
 
 @test "critic: Codex rates from a bundle of the web only; score, record and cost book; no key, no threshold, no history" {
-  run python3 "$CL" critic "$P" --web http://127.0.0.1:1/ --out "$T/r1"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  run python3 "$CL" critic "$P" --web "$W" --out "$T/r1"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.provider == "codex" and .quality_score == 8' <<<"${lines[-1]}" >/dev/null
   [ "$(cat "$T/codex-cwd")" = "$T/r1/bundle" ]; [ -f "$T/r1/bundle/site/cennik/index.html" ]; [ ! -e "$T/r1/bundle/.aid-ui" ]
   [ "$(cat "$T/codex-key")" = none ]
   jq -e '.kind == "critic" and (.site_sha | length) == 64 and .frozen_sha == $f and (.images | length) == 4 and .score.accepted == true
-         and (.pages | index("http://127.0.0.1:1/cennik/")) != null' --arg f "$(jq -r .sha256 "$P/.aid-ui/critic/frozen.json")" "$T/r1/run.json" >/dev/null
+         and (.pages | index($w + "cennik/")) != null' --arg w "$W" --arg f "$(jq -r .sha256 "$P/.aid-ui/critic/frozen.json")" "$T/r1/run.json" >/dev/null
   grep -q "cennik-390.png" "$T/r1/prompt.md"; ! grep -qiE "akcept|threshold|8/10" "$T/r1/prompt.md"
   jq -se 'length == 1 and .[0].provider == "codex" and .[0].billing == "subscription" and .[0].purpose == "critic:critic" and .[0].usd > 0' "$P/.aid-ui/costs.jsonl" >/dev/null
   # an audit is the same bundle, recorded as an audit
-  run python3 "$CL" critic "$P" --web http://127.0.0.1:1/ --audit --out "$T/r2"; [ "$status" -eq 0 ]
+  run python3 "$CL" critic "$P" --web "$W" --audit --out "$T/r2"; [ "$status" -eq 0 ]
   jq -e '.kind == "audit"' "$T/r2/run.json" >/dev/null
   [ "$(jq -r .site_sha "$T/r1/run.json")" = "$(jq -r .site_sha "$T/r2/run.json")" ]
 }
@@ -74,7 +81,7 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; }
 @test "critic: a limit, an empty answer and an invalid answer twice each hand the same prompt and directory to the Claude stand-in" {
   for mode in limit empty invalid; do
     rm -f "$T/codex-n" "$T/claude-prompt"
-    FAKE_CODEX=$mode run python3 "$CL" critic "$P" --web http://127.0.0.1:1/ --out "$T/s-$mode"; [ "$status" -eq 0 ] || { echo "$mode: $output"; return 1; }
+    FAKE_CODEX=$mode run python3 "$CL" critic "$P" --web "$W" --out "$T/s-$mode"; [ "$status" -eq 0 ] || { echo "$mode: $output"; return 1; }
     jq -e '.provider == "claude" and (.stand_in_reason | length) > 0' "$T/s-$mode/run.json" >/dev/null
     # the stand-in got the Codex bundle: the same prompt (plus where the images are) and the same working directory
     head -c "$(stat -c %s "$T/codex-prompt-1")" "$T/claude-prompt" | cmp -s - "$T/codex-prompt-1"
@@ -88,18 +95,22 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; }
 }
 
 @test "critic: both providers failing, an answer off the frozen schema, or no frozen critic -> exit 1 with the record" {
-  FAKE_CODEX=limit FAKE_CLAUDE=fail run python3 "$CL" critic "$P" --web http://127.0.0.1:1/ --out "$T/f1"
+  FAKE_CODEX=limit FAKE_CLAUDE=fail run python3 "$CL" critic "$P" --web "$W" --out "$T/f1"
   [ "$status" -eq 1 ]; [[ "$output" == *"no valid rating"* ]]; jq -e '.provider == null and (.score | not)' "$T/f1/run.json" >/dev/null
   jq '.criteria[0].anchor = 4' "$ANS" > "$T/bad.json"
-  CODEX_ANS="$T/bad.json" CLAUDE_ANS="$T/bad.json" run python3 "$CL" critic "$P" --web http://127.0.0.1:1/ --out "$T/f2"
+  CODEX_ANS="$T/bad.json" CLAUDE_ANS="$T/bad.json" run python3 "$CL" critic "$P" --web "$W" --out "$T/f2"
   [ "$status" -eq 1 ]; jq -e '.attempts[0].error | contains("does not sit on its anchor")' "$T/f2/run.json" >/dev/null
-  AID_UI_STANDIN=off FAKE_CODEX=limit run python3 "$CL" critic "$P" --web http://127.0.0.1:1/ --out "$T/f3"
+  AID_UI_STANDIN=off FAKE_CODEX=limit run python3 "$CL" critic "$P" --web "$W" --out "$T/f3"
   [ "$status" -eq 1 ]; [ ! -e "$T/claude-prompt" ] || [ "$(jq '.attempts | length' "$T/f3/run.json")" -eq 1 ]
   # a page without its mobile shot: no rating, the model is never asked
-  rm -f "$T/codex-n"; FAKE_SHOT_DROP=cennik-390 run python3 "$CL" critic "$P" --web http://127.0.0.1:1/ --out "$T/f4"
+  rm -f "$T/codex-n"; FAKE_SHOT_DROP=cennik-390 run python3 "$CL" critic "$P" --web "$W" --out "$T/f4"
   [ "$status" -eq 1 ]; [[ "$output" == *"missing: cennik-390.png"* ]]; [ ! -e "$T/codex-n" ]
+  # an address that does not serve this site is refused before any model is asked
+  rm -f "$T/codex-n"
+  run python3 "$CL" critic "$P" --web "http://127.0.0.1:1/"; [ "$status" -eq 1 ]; [[ "$output" == *"does not answer"* ]]
+  run python3 "$CL" critic "$P" --web "${W}cennik/" --out "$T/f5"; [ "$status" -eq 1 ]; [[ "$output" == *"does not serve"* ]]; [ ! -e "$T/codex-n" ]
   Q="$T/q"; mkdir -p "$Q/site"; echo x > "$Q/site/index.html"
-  run python3 "$CL" critic "$Q" --web http://127.0.0.1:1/; [ "$status" -eq 1 ]; [[ "$output" == *"frozen"* ]]
+  run python3 "$CL" critic "$Q" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"frozen"* ]]
 }
 
 @test "answer: the client agent logs in, answers the first open question with a card, a refused answer goes back once; costs summarised" {

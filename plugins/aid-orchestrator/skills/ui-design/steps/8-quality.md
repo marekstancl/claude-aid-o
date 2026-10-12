@@ -31,7 +31,8 @@ Hotový běh (`aid-ui-state.sh finish` prošel), živý web (`.aid-ui/links.json
 2. **Kolo:** `aid-ui-quality.py round <project> --web <url>`. Před kolem musí projít
    `aid-ui-state.sh gate-check` (web je zaznamenaný build a brána nad ním nemá nepokrytý řádek).
    Kritik (`aid-ui-client.py critic`) dostane jen kopii webu, snímky každé stránky na 1440 a 390 px
-   a zmrazenou roli. Codex na předplatném, při limitu, prázdné nebo dvakrát neplatné odpovědi záskok
+   a zmrazenou roli. Adresa musí obsluhovat právě tento web (domovská stránka shodná se `site/index.html`)
+   a celá smyčka běží na adrese a kritikovi z prvního kola. Codex na předplatném, při limitu, prázdné nebo dvakrát neplatné odpovědi záskok
    Claude se stejným zadáním; text nikdy přes placené API.
 3. **Roztřiď každý nález** (`aid-ui-quality.py triage <project> <id> <stav>`):
    - `accepted --expected "<co se zlepší>"`,
@@ -46,6 +47,8 @@ Hotový běh (`aid-ui-state.sh finish` prošel), živý web (`.aid-ui/links.json
    `aid-ui-quality.py fixed <project> <id> --evidence "<co se změnilo a kde>"`.
 5. **Další krok říká** `aid-ui-quality.py status <project>`:
    - `triage`, `fix` a `round` znamenají pokračovat podle bodů 2 až 4,
+   - `close` znamená, že se zlepšování zastavilo a zbývají přijaté neopravené nálezy. Nastav jim
+     `superseded --reason` a pokračuj auditem.
    - `audit` znamená bod 6,
    - `stop:*` znamená zprávu PM s důvodem a stavem,
    - `done` znamená konec.
@@ -53,10 +56,12 @@ Hotový běh (`aid-ui-state.sh finish` prošel), živý web (`.aid-ui/links.json
    - nejvýš 5 opravných kol;
    - zlepšení je +0,3 známky, nebo méně závažných nálezů a žádné kritérium níž;
    - dvě kola bez zlepšení znamenají stop.
-6. **Audit:** `aid-ui-quality.py audit <project> --web <url>`. Jde o tři slepá hodnocení téhož webu,
-   na kterém mezitím nic neměň. Přijato je při mediánu ≥ 8, žádném hodnocení < 7,5 a žádném kritériu < 7.
+6. **Audit:** `aid-ui-quality.py audit <project> --web <url>`. Jde o tři slepá hodnocení nejlepší přijaté
+   verze (`status` → `best`). Když pozdější kolo web zhoršilo, vrať tu nejlepší verzi (zdroj webu, přestavba,
+   `build-record`, brána), jinak audit odmítne. Během auditu na webu nic neměň. Přijato je při mediánu ≥ 8, žádném hodnocení < 7,5 a žádném kritériu < 7.
    Výsledek se zapíše do `.aid-ui/critic/verdict.json` včetně `publish_blocked_by`, tedy co musí dodat
-   klient. Nepotvrzený audit vrací smyčku k opravám.
+   klient. Nepotvrzený audit vrací smyčku k opravám: nálezy auditorů se stanou kolem k roztřídění
+   (`r<n>-a<k>-…`), které se nepočítá do stropu opravných kol.
 
 ## Náklady
 

@@ -245,6 +245,15 @@ def critic(project, web, audit, out):
     shutil.copytree(site, os.path.join(bundle, "site"), dirs_exist_ok=True)   # the critic's whole world: the web
     pages = site_pages(site)
     base = web.rstrip("/") + "/"
+    # the address must serve this site: its home page is byte for byte site/index.html (or the rating would be
+    # of another web than the one recorded and audited)
+    try:
+        with urllib.request.urlopen(base, timeout=30) as resp:
+            live = hashlib.sha256(resp.read()).hexdigest()
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        die(f"{base} does not answer ({e}); serve the site (aid-ui-serve.sh) first")
+    if live != sha_file(os.path.join(site, "index.html")):
+        die(f"{base} does not serve {site}: its home page differs from site/index.html")
     urls = [base + p for p in pages[:MAX_PAGES]]
     images = shots(os.path.join(out, "shots"), urls)
     names = {os.path.basename(i) for i in images}
