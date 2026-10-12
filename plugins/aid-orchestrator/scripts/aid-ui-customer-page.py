@@ -280,7 +280,8 @@ CHECK_WORDS = {"http_200": "dostupnost stránek", "glyph_coverage": "písmo a di
                "reduced_motion": "omezení pohybu", "touch_targets": "velikost ovládacích prvků na mobilu",
                "safe_area": "okraje displeje telefonu", "privacy_before_consent": "soukromí před souhlasem",
                "vision_doc": "vize produktu", "coverage": "soulad se standardy", "customer_page": "stránka pro zákazníka",
-               "copy_review": "kontrola textů", "motion_settled": "doběhnutí animací před měřením", "motion_fidelity": "pohyb podle vzoru"}
+               "copy_review": "kontrola textů", "motion_settled": "doběhnutí animací před měřením", "motion_fidelity": "pohyb podle vzoru",
+               "content_without_js": "obsah viditelný i bez skriptu", "first_paint_visible": "obsah viditelný hned po načtení", "form_states": "odeslání formuláře a jeho stavy"}
 
 
 def cz(n, one, few, many):

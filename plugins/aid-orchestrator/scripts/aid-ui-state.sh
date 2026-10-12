@@ -523,8 +523,8 @@ def build(d):
         refs = {p}
         text = texts[p]
         own = text
-        for b in shared:
-            own = own.replace(b, "")
+        for b in shared:   # a marker, not nothing: a page that drops the shared block changes its own fingerprint,
+            own = own.replace(b, "<shared-block>")   # while a change inside the block (the shared look) does not
         sha[p] = hashlib.sha256(own.encode("utf-8", "surrogatepass")).hexdigest()
         for u in re.findall(r'''(?:href|src)\s*=\s*["']([^"']+)["']''', text, re.I):
             s = urlsplit(u)
@@ -575,7 +575,7 @@ def matches(sel, row):
     return sel.get("check") == row.get("check") and all(sel.get(k) in ("*", val(row.get(k))) for k in AX)
 
 def reason_of(row):   # the check's reason without its numbers and specifics: text before the first ":" or "("
-    d = val(row.get("detail")).strip().lower()
+    d = re.sub(r"\s+", " ", val(row.get("detail"))).strip().lower()
     return re.split(r"[:(]", d, 1)[0].strip()
 
 def covers(st, fps, e, r):   # H4: a page-"*" exception holds while the row fails for the reason the PM excused
@@ -624,6 +624,16 @@ elif mode == "gate":
         rows = open_rows(ck, res)
         print(json.dumps([i for i, e in enumerate(st.get("exceptions") or [])
                           if not e.get("resolved") and not any(matches(e["selector"], r) for r in rows)]))
+elif mode == "migrate":   # H4: a live page-* exception from before reasons gets the reasons of the gate it is recorded with
+    ck, res = load(args[1]), load(args[2])
+    rows = open_rows(ck, res)
+    out = {}
+    for i, e in enumerate(st.get("exceptions") or []):
+        if not e.get("resolved") and e["selector"].get("page") == "*" and not e.get("reasons"):
+            rs = sorted({reason_of(r) for r in rows if matches(e["selector"], r)})
+            if rs:
+                out[str(i)] = rs
+    print(json.dumps(out, ensure_ascii=False))
 elif mode == "covered":   # open rows (as finish counts them) that a live PM exception covers
     res, fps = load(args[1]), (st.get("build") or {}).get("fingerprints") or {}
     ck = load(args[2]) if len(args) > 2 and os.path.isfile(args[2]) else {}
@@ -1120,6 +1130,10 @@ case "$VERB" in
       | select(($r.fingerprints[.key] // "") != .value.fingerprint) | .key)] + (if ($a._shared and ($a._shared.fingerprint != ($r.shared // ""))) then ["_shared (společný styl)"] else [] end) | join(", ")' "$STATE")"
     jq_write --argjson r "$rec" '.build = $r | .finished = null'
     [[ -z "$lost" ]] || echo "APPROVALS VOID (their page changed): $lost"
+    exlost="$(jq -r --argjson r "$rec" '[.exceptions[]? | select(.resolved == null and ((.reasons // []) | length) == 0)
+      | select(any(.fingerprints | to_entries[]; ($r.fingerprints[.key] // null) != null and $r.fingerprints[.key] != .value))
+      | "\(.selector.check) \(.selector.page)"] | unique | join(", ")' "$STATE")"
+    [[ -z "$exlost" ]] || echo "EXCEPTIONS VOID (their page changed; ask again or let the next gate migrate page-*): $exlost"
     rm -f "$PROJECT/.aid-ui/finish.json" "$PROJECT/.aid-ui/links.json"   # a new build: the end starts over
     echo "BUILD: $(jq -r .id <<<"$rec")${motion_note:+ · ${motion_note%%$'\n'*}}"
     ;;
@@ -1134,8 +1148,14 @@ case "$VERB" in
       die "gate-record refused: this result (run_at $(jq -r .run_at "$res")) is already the recorded gate; the gate did not run again (aid-ui-verify.sh without --copy-subject)"
     ck="$(checks_json)"
     rc=0; resolve="$(bpy gate "$STATE" "$ck" "$res")" || rc=$?
+    mig="{}"; [[ "$rc" -ne 0 ]] || mig="$(bpy migrate "$STATE" "$ck" "$res")"
     rm -f "$ck"
     [[ "$rc" -eq 0 ]] || exit 1
+    if [[ "$mig" != "{}" ]]; then   # once per old exception, visibly: from now on it holds while its reason holds
+      jq_write --argjson m "$mig" 'reduce ($m | to_entries[]) as $x (.; .exceptions[($x.key | tonumber)].reasons = $x.value
+        | .exceptions[($x.key | tonumber)].reasons_migrated = true)'
+      echo "MIGRATED page-* exception(s) to their reasons: $(jq -c . <<<"$mig")"
+    fi
     jq_write --arg f "$res" --arg sha "$(sha256sum "$res" | cut -d' ' -f1)" --argjson r "$(jq -c '{run_at, build_id}' "$res")" \
       --argjson idx "$resolve" '.gate = {run_at: $r.run_at, result_file: $f, result_sha256: $sha, build_id: $r.build_id}
       | reduce $idx[] as $i (.; .exceptions[$i].resolved = $r.run_at) | .finished = null'
@@ -1290,6 +1310,7 @@ case "$VERB" in
       add)
         text="$(opt text "$@")"; owner="$(opt owner "$@")"; due="$(opt due "$@")"; evidence="$(opt evidence "$@")"
         critical=false; for x in "$@"; do [[ "$x" == --critical ]] && critical=true; done
+        [[ "$critical" == false || -n "${evidence//[[:space:]]/}" ]] || usage "open-item add --critical needs --evidence <what will prove it done>"
         [[ -n "${text//[[:space:]]/}" && ${#text} -le 500 ]] || usage "open-item add needs --text (1-500 characters)"
         [[ "$owner" =~ ^(PM|klient|agent)$ ]] || usage "open-item add needs --owner PM|klient|agent"
         [[ -z "$due" || "$due" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || usage "open-item --due is a date YYYY-MM-DD"
@@ -1311,9 +1332,12 @@ case "$VERB" in
         ;;
       critical)   # H7: mark an item as blocking publication. There is no way back: a block ends only when the
                   # item is done with its evidence (security review 12. 10.: an agent could lift a block by itself)
-        id="${1:-}"; [[ -n "$id" ]] || usage "open-item critical needs <id>"
+        id="${1:-}"; [[ -n "$id" ]] || usage "open-item critical needs <id> --evidence <what will prove it done>"
         jq -e --arg i "$id" 'any(.open_items[]?; .id == $i)' "$STATE" >/dev/null || die "open-item: no item $id"
-        jq_write --arg i "$id" '.open_items |= map(if .id == $i then .critical = true else . end)'
+        ev="$(opt evidence "$@")"
+        [[ -n "${ev//[[:space:]]/}" ]] || jq -e --arg i "$id" 'any(.open_items[]?; .id == $i and ((.evidence // "") != ""))' "$STATE" >/dev/null ||
+          usage "open-item critical needs --evidence <what will prove it done>"
+        jq_write --arg i "$id" --arg ev "$ev" '.open_items |= map(if .id == $i then .critical = true | (if $ev != "" then .evidence = $ev else . end) else . end)'
         ;;
       *) usage "open-item needs add --text <t> --owner <PM|klient|agent> [--due <date>] [--critical] [--evidence <what proves it done>] | critical <id> | done <id> [--evidence <t>]" ;;
     esac

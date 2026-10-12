@@ -1117,6 +1117,7 @@ PY
   ready
   "$SCRIPT" open-item "$PROJ" add --text "IČO do patičky" --owner klient --critical --evidence "IČO na každé stránce" >/dev/null
   "$SCRIPT" open-item "$PROJ" add --text "Vizitka" --owner agent >/dev/null
+  run "$SCRIPT" open-item "$PROJ" add --text "Doména" --owner agent --critical; [ "$status" -eq 2 ]; [[ "$output" == *"needs --evidence"* ]]
   jq -e '.open_items | (.[0].critical == true and .[0].evidence == "IČO na každé stránce" and .[1].critical == false)' "$STATE" >/dev/null
   run "$SCRIPT" finish "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"PUBLISH BLOCKED by 1 critical open item(s): oi-1"* ]]
@@ -1287,10 +1288,29 @@ PY
   "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
   run "$SCRIPT" finish "$PROJ"; [ "$status" -eq 1 ]
   [[ "$output" == *"shared look"* ]]; [[ "$output" != *"page index.html is not approved"* ]]; [[ "$output" != *"without a live exception"* ]]
+  # the same reason with other spacing is still the same reason
+  result '.rows |= map(if .check == "axe" then .status = "fail" | .detail = "critical   color-contrast  (7)" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  run "$SCRIPT" finish "$PROJ"; [[ "$output" != *"without a live exception"* ]]
   # a new reason on the same check is not excused
   result '.rows |= map(if .check == "axe" then .status = "fail" | .detail = "serious image-alt (1)" else . end)'
   "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
   run "$SCRIPT" finish "$PROJ"; [[ "$output" == *"fail row without a live exception: axe"* ]]
+  # a page that drops the shared block changes its own fingerprint (the block is a marker, not nothing)
+  echo '<html><img src="/logo.webp"></html>' > "$SITE/kontakt.html"; echo '<html><style>.b{color:blue}</style><p>x</p></html>' > "$SITE/tretí.html"
+  run "$SCRIPT" build-record "$PROJ" "$SITE"; [[ "$output" == *"APPROVALS VOID"*"kontakt.html"* ]]; [[ "$output" != *"index.html"* ]]
+}
+
+@test "H4: an old page-* exception without reasons is migrated once to the reasons of the next recorded gate, visibly" {
+  ready
+  result '.rows |= map(if .check == "axe" then .status = "fail" | .detail = "critical color-contrast (2)" else . end)'
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  ans e1 exception '{"check":"axe","page":"*"}'
+  "$SCRIPT" exception "$PROJ" --check axe --answer e1 >/dev/null
+  jq '.exceptions[0] |= del(.reasons)' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"   # as written before 12. 10. 2026
+  result '.rows |= map(if .check == "axe" then .status = "fail" | .detail = "critical color-contrast (3)" else . end)'
+  run "$SCRIPT" gate-record "$PROJ" "$RES"; [[ "$output" == *"MIGRATED page-* exception(s) to their reasons"*"critical color-contrast"* ]]
+  jq -e '.exceptions[0].reasons == ["critical color-contrast"] and .exceptions[0].reasons_migrated == true' "$STATE" >/dev/null
 }
 
 @test "an exception whose check passes at the next gate is kept as resolved and covers no more" {

@@ -559,7 +559,9 @@ const READABLE_JS = (mode) => {
   const box = (e, vp) => { const r = e.getBoundingClientRect(); if (r.width < 1 || r.height < 1) return false;
     return vp ? (r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight)
               : (r.right + scrollX > 0 && r.left + scrollX < W && r.bottom + scrollY > 0 && r.top + scrollY < H); };
-  const all = [...document.body.querySelectorAll(SEL)].filter(e => !e.closest('script, style, noscript, template, svg, nav, header, footer, form, [data-aid-intro], [aria-hidden="true"]'))
+  // an answer folded in a closed <details> is collapsed on purpose (the visitor opens it), not hidden by motion
+  const all = [...document.body.querySelectorAll(SEL)].filter(e => !e.closest('script, style, noscript, template, svg, nav, header, footer, form, [data-aid-intro], [aria-hidden="true"]')
+      && !(e.closest('details:not([open])') && !e.matches('summary')))
     .map(e => ({ e, t: own(e) })).filter(x => x.t.length >= 3);
   const ok = (e, vp) => !hidden(e) && opac(e) >= 0.5 && box(e, vp);
   const name = e => `${e.tagName.toLowerCase()} "${own(e).slice(0, 40)}"`;
@@ -612,42 +614,56 @@ async function firstPaintVisible(browser, url, viewport) {
 // form_states (H3, 12. 10. 2026): a form on the page never posts to mailto:; sent by script it shows its state in a
 // live region (role status/alert or aria-live): while sending the submit button is locked (no double send), a failed
 // send (the endpoint answers 404) shows an error with a clickable tel: or mailto: contact, a successful one (200)
-// a different message. The endpoint is stubbed by the gate; whether it exists on the host is the open item, not this row.
+// a different message; an empty required form sends nothing; a double click sends once. Every non-GET request the
+// page makes is taken as the send and stubbed (404, then 200); whether the endpoint exists on the host is the open item.
 async function formStates(browser, url, viewport) {
   const ctx = await browser.newContext({ viewport });
   try {
     const p = await ctx.newPage();
     await p.goto(url, { waitUntil: 'load', timeout: 30000 });
     const f = await p.evaluate(() => { const fm = [...document.querySelectorAll('form')].find(x => x.querySelector('input:not([type=hidden]):not([tabindex="-1"]), textarea'));
-      return fm ? { action: fm.getAttribute('action') || '', abs: fm.action } : null; });
+      return fm ? { action: fm.getAttribute('action') || '', required: !!fm.querySelector('[required]') } : null; });
     if (!f) return NA('no form on the page');
-    if (/^mailto:/i.test(f.action)) return ['fail', `the form posts to ${f.action.slice(0, 40)}: it opens the visitor's mail app instead of sending (FB-27/H3)`];
+    if (/^mailto:/i.test(f.action)) return ['fail', `the form posts to ${f.action.slice(0, 40)}: it opens the visitor's mail app instead of sending (FB-28)`];
+    const origin = new URL(url).origin;
+    // every non-GET request the page makes is the send (whatever URL the script uses): stubbed, never real, counted
+    let sends = 0, status = 404;
+    await p.route(r => true, async route => {
+      const rq = route.request();
+      if (rq.method() === 'GET' || rq.isNavigationRequest() && rq.method() === 'GET') return route.continue();
+      sends += 1;
+      if (rq.isNavigationRequest()) return route.fulfill({ status: 200, contentType: 'text/html', body: '<p>posted</p>' });
+      await new Promise(r => setTimeout(r, 600));
+      return route.fulfill({ status, contentType: 'application/json', body: status === 200 ? '{"ok":true}' : '{"error":"x"}' });
+    });
+    const btn = () => p.locator('form button[type=submit], form input[type=submit]').first();
+    const live = () => p.evaluate(() => { const r = [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].filter(e => {
+        const b = e.getBoundingClientRect(), c = getComputedStyle(e); return b.width > 0 && b.height > 0 && c.visibility !== 'hidden' && (e.innerText || '').trim(); });
+      return { text: r.map(e => e.innerText.trim()).join(' | '), links: r.flatMap(e => [...e.querySelectorAll('a[href]')].map(a => a.getAttribute('href'))) }; });
     const fill = () => p.evaluate(() => { const fm = [...document.querySelectorAll('form')].find(x => x.querySelector('input:not([type=hidden]), textarea'));
       for (const el of fm.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea')) {
         if (el.tabIndex === -1 || el.closest('[aria-hidden="true"]')) continue;
         el.value = el.type === 'email' ? 'test@example.org' : el.type === 'tel' ? '+420777123456' : 'Test zprávy'; }
       for (const el of fm.querySelectorAll('input[type=checkbox][required]')) el.checked = true; });
-    const live = () => p.evaluate(() => { const r = [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].filter(e => {
-        const b = e.getBoundingClientRect(), c = getComputedStyle(e); return b.width > 0 && b.height > 0 && c.visibility !== 'hidden' && (e.innerText || '').trim(); });
-      return { text: r.map(e => e.innerText.trim()).join(' | '), links: r.flatMap(e => [...e.querySelectorAll('a[href]')].map(a => a.getAttribute('href'))) }; });
-    const submit = async (status) => {
-      await p.route(f.abs, async route => { await new Promise(r => setTimeout(r, 600)); await route.fulfill({ status, contentType: 'application/json', body: status === 200 ? '{"ok":true}' : '{"error":"x"}' }); });
-      await fill();
-      const btn = p.locator('form button[type=submit], form input[type=submit]').first();
-      await btn.click({ timeout: 5000 });
+    const why = [];
+    // empty: a form with required fields sends nothing
+    if (f.required) { await btn().click({ timeout: 5000 }); await p.waitForTimeout(400); if (sends) why.push('an empty form with required fields was sent'); }
+    const submit = async (st) => {
+      status = st; sends = 0;
+      await p.goto(url, { waitUntil: 'load' }); await fill();
+      await btn().click({ timeout: 5000 });
+      await btn().click({ timeout: 2000, force: true }).catch(() => {});   // a second click while sending
       await p.waitForTimeout(150);
-      const locked = await btn.evaluate(b => b.disabled || b.getAttribute('aria-busy') === 'true' || b.getAttribute('aria-disabled') === 'true').catch(() => false);
+      const sending = await live();
       await p.waitForTimeout(1500);
-      const stayed = p.url().split('#')[0] === url.split('#')[0];
-      await p.unroute(f.abs);
-      return { locked, stayed, ...(stayed ? await live() : { text: '', links: [] }) };
+      const stayed = p.url().split('#')[0].startsWith(origin) && !(await p.content()).includes('<p>posted</p>');
+      return { sends, stayed, sending: sending.text, ...(stayed ? await live() : { text: '', links: [] }) };
     };
     const err = await submit(404);
-    await p.goto(url, { waitUntil: 'load' });
     const ok = await submit(200);
-    const why = [];
     if (!err.stayed || !ok.stayed) why.push('the form leaves the page on submit (a native post): no state is shown');
-    if (!err.locked || !ok.locked) why.push('the submit button stays active while sending (a second click sends twice)');
+    if (err.sends > 1 || ok.sends > 1) why.push(`a double click sent the form ${Math.max(err.sends, ok.sends)}×`);
+    if (err.stayed && !err.sending) why.push('nothing says the form is being sent');
     if (err.stayed && !err.text) why.push('a failed send shows no message in a live region');
     else if (err.stayed && !err.links.some(h => /^(tel|mailto):/i.test(h || ''))) why.push('the error message offers no clickable phone or e-mail');
     if (ok.stayed && (!ok.text || ok.text === err.text)) why.push('a successful send shows no message of its own');

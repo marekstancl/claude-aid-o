@@ -453,6 +453,7 @@
   .info-pop { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 26rem; max-width: 80vw; padding: 12px 14px; border: 1px solid var(--ks-rule); border-radius: 8px; background: var(--ks-paper-raised); box-shadow: var(--ks-lift); font-size: 13px; color: var(--ks-text); display: flex; flex-direction: column; gap: 6px; }
   .info-pop[hidden] { display: none; }
   .stp-wrap:nth-child(n+4) .info-pop { left: auto; right: 0; }
+.done .blocked{margin:8px 0 12px;padding:10px 12px;border:1px solid #e0b4b4;border-radius:8px;background:#fdf1f1;font-weight:600}
 </style>
 <header class="top">
   <p class="brand">/aid-ui · <span id="project"></span></p>
@@ -1133,7 +1134,11 @@ function donePanel(sec) {
       cust ? el("a", { class: "hbtn-ghost", href: cust, target: "_blank", rel: "noopener" }, "Co jste dostali") : null),
     hand ? el("p", { class: "muted" }, hand.outcome) : null,
     el("h3", {}, "Co zbývá před zveřejněním"),
-    items.length ? el("ul", { class: "open-items" }, items.map(i => el("li", {}, String(i.text || ""),
+    // H7: a critical open item blocks publication - said once above the list, and the item is marked
+    items.some(i => i.critical === true) ? el("p", { class: "blocked", role: "status" },
+      "Publikace blokovaná, dokud nejsou splněné body označené „Blokuje zveřejnění“.") : null,
+    items.length ? el("ul", { class: "open-items" }, items.slice().sort((a, b) => (b.critical === true) - (a.critical === true)).map(i => el("li", {},
+      i.critical === true ? el("b", {}, "Blokuje zveřejnění: ") : null, String(i.text || ""),
       el("span", { class: "muted" }, " · " + (i.owner || "") + (i.due ? " · do " + i.due : ""))))) : el("p", { class: "muted" }, "Nic otevřeného."),
     el("div", { class: "add-item" }, ta, btn)));
 }
