@@ -1113,7 +1113,7 @@ PY
   [ "$(jq -c '[.open_items[] | select(.by == "pm") | .id]' "$STATE")" == '["pm-20261010080000123456"]' ]
 }
 
-@test "H7: a critical open item does not stop finish but blocks publication in finish.json; lifting it clears the block" {
+@test "H7: a critical open item does not stop finish but blocks publication in finish.json; only done with evidence clears it" {
   ready
   "$SCRIPT" open-item "$PROJ" add --text "IČO do patičky" --owner klient --critical --evidence "IČO na každé stránce" >/dev/null
   "$SCRIPT" open-item "$PROJ" add --text "Vizitka" --owner agent >/dev/null
@@ -1121,7 +1121,10 @@ PY
   run "$SCRIPT" finish "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"PUBLISH BLOCKED by 1 critical open item(s): oi-1"* ]]
   jq -e '.publish_blocked_by == [{"id":"oi-1","text":"IČO do patičky","owner":"klient"}]' "$PROJ/.aid-ui/finish.json" >/dev/null
-  "$SCRIPT" open-item "$PROJ" critical oi-1 --off
+  # no way to un-mark it; done without evidence is refused, done with evidence clears the block
+  "$SCRIPT" open-item "$PROJ" critical oi-1 --off >/dev/null; jq -e '.open_items[0].critical == true' "$STATE" >/dev/null
+  run "$SCRIPT" open-item "$PROJ" done oi-1; [ "$status" -eq 1 ]; [[ "$output" == *"blocks publication"* ]]
+  "$SCRIPT" open-item "$PROJ" done oi-1 --evidence "IČO 12345678 v patičce všech stránek" >/dev/null
   run "$SCRIPT" finish "$PROJ"; [ "$status" -eq 0 ]; [[ "$output" != *"PUBLISH BLOCKED"* ]]
   jq -e '.publish_blocked_by == []' "$PROJ/.aid-ui/finish.json" >/dev/null
 }

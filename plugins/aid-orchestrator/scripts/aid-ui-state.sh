@@ -170,8 +170,9 @@
 #                                        redirects, no login) -> .aid-ui/links.json; the studio
 #                                        refuses a handover question without them in its body
 #   open-item <project> add --text <t> --owner <PM|klient|agent> [--due <date>] [--critical] [--evidence <t>]
-#                          | critical <id> [--off] | done <id>   (H7: a critical open item blocks publication:
-#                          finish writes publish_blocked_by, the customer page says so)
+#                          | critical <id> | done <id> [--evidence <t>]   (H7: a critical open item blocks
+#                          publication: finish writes publish_blocked_by, the customer page says so; it ends only
+#                          as done with --evidence, never by being un-marked)
 #                                        (P108) what stays open after the run (customer page)
 #   open-items-sync <project>            (P108) the PM's own items from the studio history (by pm)
 #   chapter-all-target / chapter-all     (P108) refused before the final gate: the customer page must
@@ -1299,17 +1300,22 @@ case "$VERB" in
         echo "OPEN ITEM: oi-$n${critical/false/}"
         ;;
       done)
-        id="${1:-}"; [[ -n "$id" ]] || usage "open-item done needs <id>"
+        id="${1:-}"; [[ -n "$id" ]] || usage "open-item done needs <id> [--evidence <what proves it>]"
         jq -e --arg i "$id" 'any(.open_items[]?; .id == $i)' "$STATE" >/dev/null || die "open-item: no item $id"
-        jq_write --arg i "$id" --arg at "$(now)" '.open_items |= map(if .id == $i then .status = "done" | .done_at = $at else . end)'
+        ev="$(opt evidence "$@")"
+        if jq -e --arg i "$id" 'any(.open_items[]?; .id == $i and .critical == true)' "$STATE" >/dev/null; then
+          [[ -n "${ev//[[:space:]]/}" ]] || die "open-item done refused: $id blocks publication; say what proves it done (--evidence)"
+        fi
+        jq_write --arg i "$id" --arg at "$(now)" --arg ev "$ev" '.open_items |= map(if .id == $i then .status = "done" | .done_at = $at
+          | (if $ev != "" then .done_evidence = $ev else . end) else . end)'
         ;;
-      critical)   # H7: mark an item as blocking publication (or --off to lift it)
-        id="${1:-}"; [[ -n "$id" ]] || usage "open-item critical needs <id> [--off]"
+      critical)   # H7: mark an item as blocking publication. There is no way back: a block ends only when the
+                  # item is done with its evidence (security review 12. 10.: an agent could lift a block by itself)
+        id="${1:-}"; [[ -n "$id" ]] || usage "open-item critical needs <id>"
         jq -e --arg i "$id" 'any(.open_items[]?; .id == $i)' "$STATE" >/dev/null || die "open-item: no item $id"
-        v=true; [[ "${2:-}" == --off ]] && v=false
-        jq_write --arg i "$id" --argjson v "$v" '.open_items |= map(if .id == $i then .critical = $v else . end)'
+        jq_write --arg i "$id" '.open_items |= map(if .id == $i then .critical = true else . end)'
         ;;
-      *) usage "open-item needs add --text <t> --owner <PM|klient|agent> [--due <date>] [--critical] [--evidence <what proves it done>] | critical <id> [--off] | done <id>" ;;
+      *) usage "open-item needs add --text <t> --owner <PM|klient|agent> [--due <date>] [--critical] [--evidence <what proves it done>] | critical <id> | done <id> [--evidence <t>]" ;;
     esac
     ;;
 
