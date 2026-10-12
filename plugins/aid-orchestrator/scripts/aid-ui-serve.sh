@@ -63,8 +63,8 @@ DEADLINE=604800   # 7 days (P108, 11. 10. 2026: the studio died after exactly 8 
 # The preview server: http.server without dotfiles (.env, .git; only .well-known passes)
 # and without directory listings (a directory serves its index.html or 404).
 # aid-job.sh stores argv one line per element, so the script is one line (exec of an escaped string).
-PREVIEW_PY="exec('import functools, http.server, sys, urllib.parse\\nclass H(http.server.SimpleHTTPRequestHandler):\\n    def send_head(self):\\n        segs = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).split(\"/\")\\n        if any(x.startswith(\".\") and x != \".well-known\" for x in segs):\\n            self.send_error(404); return None\\n        return super().send_head()\\n    def list_directory(self, path):\\n        self.send_error(404); return None\\nhttp.server.ThreadingHTTPServer((sys.argv[2], int(sys.argv[1])), functools.partial(H, directory=sys.argv[3])).serve_forever()\\n')"
-usage() { echo "usage: aid-ui-serve.sh studio <project> | brand <dir> | preview <dir> | stop <studio|brand|preview>" >&2; exit 2; }
+PREVIEW_PY="$(dirname "${BASH_SOURCE[0]}")/aid-ui-preview.py"   # static site + the form receiver (P113a)
+usage() { echo "usage: aid-ui-serve.sh studio <project> | brand <dir> | preview <dir> | stop <studio|brand|preview>   (preview: aid-ui-preview.py, with the form receiver of <project>/.aid-ui/form.json)" >&2; exit 2; }
 die() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 1; }
 refuse() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 2; }
 
@@ -156,10 +156,10 @@ case "$1" in
     l="$(find "$dir" -mindepth 1 -type l -printf '%P' -quit)"
     [[ -z "$l" ]] || refuse "$dir/$l is a symlink; the preview serves no symlinks (it could point outside the site)"
     id="$(job_id preview)"
-    if alive "$id" && listening "$PREVIEW_PORT" && [[ "$(jq -r '.command[-1]' "$JOBS/$id/job.json")" == "$dir" ]]; then
+    if alive "$id" && listening "$PREVIEW_PORT" && [[ "$(jq -r '.command[4]' "$JOBS/$id/job.json")" == "$dir" ]]; then
       echo "URL: http://$HOST:$PREVIEW_PORT/"; echo "JOB: $id"; exit 0
     fi
-    start preview python3 -c "$PREVIEW_PY" "$PREVIEW_PORT" "$HOST" "$dir"
+    start preview python3 "$(realpath "$PREVIEW_PY")" "$PREVIEW_PORT" "$HOST" "$dir" "$(realpath -m "$PROJECT")"
     ;;
   stop)
     [[ "$2" == studio || "$2" == brand || "$2" == preview ]] || usage

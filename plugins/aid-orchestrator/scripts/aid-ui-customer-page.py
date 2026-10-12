@@ -290,7 +290,7 @@ CHECK_WORDS = {"http_200": "dostupnost stránek", "glyph_coverage": "písmo a di
                "safe_area": "okraje displeje telefonu", "privacy_before_consent": "soukromí před souhlasem",
                "vision_doc": "vize produktu", "coverage": "soulad se standardy", "customer_page": "stránka pro zákazníka",
                "copy_review": "kontrola textů", "motion_settled": "doběhnutí animací před měřením", "motion_fidelity": "pohyb podle vzoru",
-               "content_without_js": "obsah viditelný i bez skriptu", "first_paint_visible": "obsah viditelný hned po načtení", "form_states": "odeslání formuláře a jeho stavy", "task_test": "zákazník najde cenu, otevírací dobu a objednání do dvou kroků", "photo_slots": "místa pro fotky v přesném tvaru"}
+               "content_without_js": "obsah viditelný i bez skriptu", "first_paint_visible": "obsah viditelný hned po načtení", "form_states": "odeslání formuláře a jeho stavy", "task_test": "zákazník najde cenu, otevírací dobu a objednání do dvou kroků", "photo_slots": "místa pro fotky v přesném tvaru", "form_delivery": "zpráva z formuláře opravdu dojde"}
 
 
 def cz(n, one, few, many):

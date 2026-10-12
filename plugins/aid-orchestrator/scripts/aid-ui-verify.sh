@@ -64,8 +64,10 @@ if [[ -f "$PROJECT/docs/content/photos.yaml" ]]; then   # P113a: the photos the 
 fi
 
 export AID_UI_PROJECT="$PROJECT"
-srv="$(bash "$HERE/aid-ui-serve.sh" preview "$dir")" || exit 1
-trap 'bash "$HERE/aid-ui-serve.sh" stop preview >/dev/null 2>&1 || true; [[ -z "$subject" ]] || rm -rf "$OUT"' EXIT
+srv="$(AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" preview "$dir")" || exit 1   # the project: the form receiver reads .aid-ui/form.json
+plog="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}/$(sed -n 's/^JOB: //p' <<<"$srv")/stdout.log"   # form_delivery: no sent value in it
+[[ -f "$plog" ]] && facts+=(--preview-log "$plog")
+trap 'AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" stop preview >/dev/null 2>&1 || true; [[ -z "$subject" ]] || rm -rf "$OUT"' EXIT
 url="$(sed -n 's/^URL: //p' <<<"$srv")"
 if [[ -n "$subject" ]]; then
   mkdir -p "$(dirname "$subject")"

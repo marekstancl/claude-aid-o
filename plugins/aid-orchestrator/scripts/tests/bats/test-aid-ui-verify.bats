@@ -74,6 +74,8 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   [ "$(st photo_slots o-nas/index.html)" == pass ]; [ "$(st photo_slots index.html)" == fail ]
   d="$(jq -r '[.rows[] | select(.check == "photo_slots" and .page == "index.html") | .detail][0]' "$RES")"
   for c in "slot pekar is not in photos.yaml" ; do [[ "$d" == *"$c"* ]] || { echo "photo_slots misses $c: $d"; return 1; }; done
+  # P113a AC8: forms on the site but no receiver for the preview: form_delivery names it
+  [ "$(st form_delivery index.html)" == fail ]; jq -e '.rows[] | select(.check == "form_delivery") | .detail | contains("no .aid-ui/form.json")' "$RES" >/dev/null
   # P108: invented count, percentage, years and e-mail are named in facts_match
   d="$(jq -r '[.rows[] | select(.check == "facts_match" and .page == "index.html") | .detail][0]' "$RES")"
   for c in "200 klientům" "40 %" "15 let" "info@neexistuje.cz"; do [[ "$d" == *"$c"* ]] || { echo "facts_match misses $c: $d"; return 1; }; done
@@ -129,6 +131,8 @@ copy_reviewed() {
     "$PROJ/docs/design/brand-state.json" >"$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
   # the customer tasks without the invented one (FB-29): the fixed site shows the 65 Kč loaf
   printf -- '- {id: hours, task: "Kdy", expect: ["7:00 až 18:00"]}\n- {id: price, task: "Bochník", expect: ["Bochník", "65 Kč"]}\n- {id: booking, task: "Objednat", form: true}\n' > "$PROJ/docs/content/tasks.yaml"
+  # the preview's form receiver (AC8): o-nas sends its telephone to /api/zprava
+  echo '{"endpoint": "/api/zprava", "required": ["tel"], "honeypot": "website"}' > "$PROJ/.aid-ui/form.json"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   measured
   copy_reviewed
@@ -140,6 +144,9 @@ copy_reviewed() {
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass")' "$RES" | head; return 1; }
   [ "$(jq '[.rows[] | select(.status != "pass")] | length' "$RES")" -eq 0 ]
+  # the real send went through and the test messages are gone again; the log names no value
+  jq -e '.rows[] | select(.check == "form_delivery") | .detail | startswith("delivered and removed again")' "$RES" >/dev/null
+  [ -z "$(ls -A "$PROJ/.aid-ui/inbox" 2>/dev/null)" ]
   jq -e '.gate.build_id' "$PROJ/docs/design/brand-state.json" >/dev/null
   # ai_search ran (not N/A) and its findings stay out of the seo row
   [ "$(jq '[.rows[] | select(.check == "ai_search")] | length' "$RES")" -gt 0 ]

@@ -672,6 +672,63 @@ async function formStates(browser, url, viewport) {
   } catch (e) { return ['fail', `form check failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
 }
 
+// form_delivery (P113a step 6, AC8): the site's form, sent for real through the preview's receiver
+// (.aid-ui/form.json; aid-ui-preview.py): filled the way a visitor fills it at 390 px and sent with its own button,
+// it shows a message and the message lands in .aid-ui/inbox (the test message is removed again); the receiver
+// refuses an incomplete message (422), drops a filled spam trap without delivering, delivers a repeated message
+// once; the preview's log holds none of the sent values. A failing receiver (FB-28) is form_states' row.
+// No form on the site = N/A. On the client's domain only the endpoint changes; the same row checks it there.
+async function formDelivery(browser) {
+  const withForm = [];
+  for (const p of pages) { try { if (/<form[\s>]/i.test(fs.readFileSync(path.join(site, p), 'utf8'))) withForm.push(p); } catch { /* not a file */ } }
+  if (!withForm.length) return NA('no form on the site');
+  if (!project) return ['not_covered', 'no --project'];
+  let cfg; try { cfg = readJson(path.join(project, '.aid-ui/form.json')); } catch { return ['fail', 'no .aid-ui/form.json: the preview has no receiver (endpoint, required, honeypot)'] }
+  const box = path.join(project, '.aid-ui/inbox'), inbox = () => { try { return fs.readdirSync(box); } catch { return []; } };
+  const token = `AIDTEST${Date.now().toString(36)}`, mail = `${token.toLowerCase()}@example.invalid`, tel = '+421900000999';
+  const why = [], ctx = await browser.newContext({ viewport: { width: 390, height: HEIGHT[390] } });
+  try {
+    const p = await ctx.newPage();
+    await loaded(p, urlOf(withForm[0]));
+    const before = inbox();
+    const form = p.locator('form').first();
+    for (const el of await form.locator('input, textarea, select').all()) {
+      const t = ((await el.getAttribute('type')) || '').toLowerCase(), name = await el.getAttribute('name'), tag = await el.evaluate(e => e.tagName);
+      if (['hidden', 'submit', 'button', 'reset', 'file'].includes(t) || (cfg.honeypot && name === cfg.honeypot) || !(await el.isVisible())) continue;
+      if (t === 'checkbox' || t === 'radio') { if (await el.evaluate(e => e.required)) await el.check(); continue; }
+      if (tag === 'SELECT') { const v = await el.evaluate(e => [...e.options].map(o => o.value).find(x => x)); if (v) await el.selectOption(v); continue; }
+      await el.fill(t === 'email' ? mail : t === 'tel' ? tel : t === 'date' ? '2030-01-15' : t === 'number' ? '1' : `${token} test`);
+    }
+    await form.locator('button:not([type=button]), input[type=submit]').first().click();
+    await p.waitForFunction(() => [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].some(e => (e.innerText || '').trim() && !/odosiel|odesíl|sending/i.test(e.innerText)), null, { timeout: 12000 }).catch(() => {});
+    const msg = await p.evaluate(() => [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].map(e => (e.innerText || '').trim()).filter(Boolean).join(' | '));
+    const fresh = inbox().filter(x => !before.includes(x));
+    const mine = fresh.filter(x => { const m = fs.readFileSync(path.join(box, x), 'utf8'); return [token, mail, tel].some(v => m.includes(v)); });
+    if (!mine.length) why.push(`a filled form sent with its button delivered nothing (message on the page: "${msg.slice(0, 80)}")`);
+    else if (!msg) why.push('delivered, but the page shows no message');
+    for (const x of mine) fs.rmSync(path.join(box, x), { force: true });   // the test message is not the client's
+    // the receiver itself: an incomplete message, a filled spam trap, the same message twice
+    const send = body => p.evaluate(async ({ ep, body }) => { const r = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: r.status, json: await r.json().catch(() => ({})) }; }, { ep: cfg.endpoint, body });
+    const full = Object.fromEntries((cfg.required || []).map(k => [k, `${token} ${k}`]));
+    const empty = await send({});
+    if ((cfg.required || []).length && empty.status !== 422) why.push(`an empty message got ${empty.status}, not 422`);
+    if (cfg.honeypot) {
+      const n0 = inbox().length, spam = await send({ ...full, [cfg.honeypot]: 'http://spam.example' });
+      if (spam.status !== 200 || inbox().length !== n0) why.push('a filled spam trap was delivered or refused visibly');
+    } else why.push('no honeypot field in .aid-ui/form.json (spam trap)');
+    const n1 = inbox().length, a = await send({ ...full, note: token + 'dup' }), b = await send({ ...full, note: token + 'dup' });
+    const dup = inbox().filter(x => fs.readFileSync(path.join(box, x), 'utf8').includes(token + 'dup'));
+    if (a.status !== 200 || b.status !== 200 || dup.length !== 1 || !b.json.duplicate) why.push(`the same message twice: ${a.status}/${b.status}, delivered ${dup.length}×`);
+    for (const x of inbox().filter(x => fs.readFileSync(path.join(box, x), 'utf8').includes(token))) fs.rmSync(path.join(box, x), { force: true });
+    if (opt['preview-log']) {
+      const logText = fs.readFileSync(opt['preview-log'], 'utf8');
+      if ([token, mail, tel].some(v => logText.includes(v))) why.push('the preview log holds a sent value (personal data in the log)');
+    } else why.push('no --preview-log: the log was not checked for personal data');
+    return why.length ? ['fail', why.join('; ')] : ['pass', `delivered and removed again; page said "${msg.slice(0, 60)}"; empty 422, spam dropped, a repeat delivered once, log clean`];
+  } catch (e) { return ['fail', `form delivery check failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
+}
+
 // photo_slots (P113a, FB-30, PM 1A 12. 10. 2026): a photo the client still owes has a slot of its exact shape and
 // ratio (docs/content/photos.yaml: {id, page, where, what, shape rect|round, ratio "w:h", min_px "WxH"}),
 // marked data-aid-photo="<id>". Empty: aria-hidden="true", a camera icon (svg), no text, nothing focusable.
@@ -845,7 +902,7 @@ const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls'
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
   'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review', 'motion_settled', 'motion_fidelity',
-  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots'];
+  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -1100,6 +1157,7 @@ for (const b of BRS) {
       if (coverageRow) put(m, 'coverage', ...coverageRow);
       if (customerPage) put(m, 'customer_page', ...customerPage);
       if (want('task_test') && applies('task_test', m)) put(m, 'task_test', ...(await taskTest(browser)));
+      if (want('form_delivery') && applies('form_delivery', m)) put(m, 'form_delivery', ...(await formDelivery(browser)));
       if (want('copy_review') && applies('copy_review', m)) put(m, 'copy_review', ...(await copyRow(browser, m.page)));
     }
     await ctx.close();

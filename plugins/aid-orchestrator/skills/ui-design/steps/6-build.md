@@ -109,6 +109,11 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
    zamčené během odesílání, stav v `role="status"`, chyba s klikacím telefonem/e-mailem, úspěch se nepředstírá.
    Dokud koncový bod na hostingu neběží: `aid-ui-state.sh open-item <project> add --text "Koncový bod formuláře"
    --owner agent --critical --evidence "odeslání doručí zprávu"`. Brána: `form_states`.
+   **Příjemce v náhledu (P113a):** `.aid-ui/form.json` `{"endpoint": "/api/…", "required": [pole…], "honeypot":
+   "<skryté pole proti spamu>", "max_field": 2000}`; náhled (`aid-ui-serve.sh preview`) pak zprávy přijímá do
+   `.aid-ui/inbox/` (jen vlastník, do logu nic z obsahu). Formulář má skryté pole proti spamu se stejným jménem.
+   Brána `form_delivery` formulář skutečně vyplní a odešle a ověří doručení, odmítnutí neúplné zprávy, zahození
+   spamu a jedno doručení opakované zprávy. Na doméně klienta se mění jen adresa příjemce.
    (nástroj build servíruje sám a otisk složky zapíše sám);
    `build-record` pak sám pustí `aid-ui-motion.py check` nad tím záznamem a odmítne, když
    kterýkoli převzatý pohyb v buildu neběžel (vyjmenuje je) nebo build od pozorování změnil.
