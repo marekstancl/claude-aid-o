@@ -94,7 +94,7 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
    `aid-ui-tool.sh motion --dir <složka buildu> <project>/.aid-ui/build.motion.json`
    **FB-27 (12. 10. 2026, retro klienta Coufal: „prázdné stránky“):** skryté výchozí stavy pohybu
    (`opacity:0`, posun, ořez) piš jen pod `html.js` (`<script>document.documentElement.className+=" js"</script>`
-   v `<head>`), pozorovatel odhalení se spouští hned po načtení (prvky ve výřezu se odhalí bez kolečka),
+   v `<head>`), pozorovatel odhalení se spouští hned po načtení s prahem 0 (i sekce, která do výřezu zasahuje kouskem, se odhalí bez kolečka - Coufal 12. 10.: práh 0,15 nechal zesláblé tabulky cenníku),
    při `prefers-reduced-motion` je vše čitelné hned. Brána to hlídá řádky `content_without_js` (bez skriptu
    stejné obsahové texty) a `first_paint_visible` (h1 a první blok čitelné hned po načtení, nic zesláblé);
    oba blokují.
