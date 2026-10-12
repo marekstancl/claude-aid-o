@@ -19,7 +19,7 @@
 # 4. `aid-ui-state.sh gate-record <project> <result.json>`.
 #
 # Inputs the checks read (all optional; missing -> the check's rows are not_covered):
-# docs/content/facts.yaml, docs/design/brand-package/, .aid-ui/scenarios/<flow id>.mjs,
+# docs/content/facts.yaml, docs/content/tasks.yaml (P113a task test), docs/content/photos.yaml (P113a photo slots), docs/design/brand-package/, .aid-ui/scenarios/<flow id>.mjs,
 # .aid-ui/test-credentials.json (test accounts only, never real ones), docs/seo/brief.md,
 # DESIGN.md, docs/design/design-standard.md, docs/product-vision.md, docs/zakaznik/.
 # Exit: 0 recorded with no open row, 3 recorded with open rows, 1 refused or failed, 2 usage.
@@ -53,6 +53,14 @@ facts=()
 if [[ -f "$PROJECT/docs/content/facts.yaml" ]]; then
   yq -o=json . "$PROJECT/docs/content/facts.yaml" > "$OUT/facts.json" || die "cannot read docs/content/facts.yaml"
   facts=(--facts "$OUT/facts.json")
+fi
+if [[ -f "$PROJECT/docs/content/tasks.yaml" ]]; then   # P113a: the task test (task_test row)
+  yq -o=json . "$PROJECT/docs/content/tasks.yaml" > "$OUT/tasks.json" || die "cannot read docs/content/tasks.yaml"
+  facts+=(--tasks "$OUT/tasks.json")
+fi
+if [[ -f "$PROJECT/docs/content/photos.yaml" ]]; then   # P113a: the photos the client owes (photo_slots row)
+  yq -o=json . "$PROJECT/docs/content/photos.yaml" > "$OUT/photos.json" || die "cannot read docs/content/photos.yaml"
+  facts+=(--photos "$OUT/photos.json")
 fi
 
 export AID_UI_PROJECT="$PROJECT"

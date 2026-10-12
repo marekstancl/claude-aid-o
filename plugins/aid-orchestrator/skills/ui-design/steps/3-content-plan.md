@@ -40,6 +40,17 @@ Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 
    brána porovná strukturovaná data webu: `brand` (název), `ico`, `email`, `telephone`,
    `domain` (`https://…`), `place`. Klíč, který firma nemá (telefon), se vynechá; bez
    `brand` a `ico` brána firmu jen varuje jako nezkontrolovanou.
+2a. **Úkoly zákazníka** `docs/content/tasks.yaml` (FB-29, P113a): s čím zákazník na web přijde, jako seznam
+   `{id, task, expect: [texty]}` nebo `{id, task, form: true}`. Pro web lokální služby aspoň `price`
+   (konkrétní výkon a jeho cena), `hours` (otevírací doba v den, na který se lidé ptají), `booking`
+   (`form: true`); id musí sedět s `task_test` měřítka kritika (`critic/web-local.yaml`). Každý text
+   z `expect` musí být v registru faktů. Brána (`task_test`) ho hledá do dvou kroků od úvodní stránky
+   na počítači i mobilu. Příklad:
+   `- {id: price, task: "Najdi cenu preventivní prohlídky", expect: ["Preventivní prohlídka", "56 €"]}`.
+2b. **Fotky, které dodá klient** `docs/content/photos.yaml` (FB-30): každá fotka, kterou web potřebuje
+   a podklady ji nemají, jako `{id, page, where, what, shape: rect|round, ratio: "4:5", min_px: "1600x2000"}`
+   (`page` = soubor stavby, např. `o-nas/index.html`). Stavba z ní udělá rámeček v přesném tvaru
+   (krok 6, bod 4a), stránka „co jste dostali“ z ní ukáže zadání fotek pro klienta.
 3. Agent smí psát `draft` jen z faktů registru a podle „Jak psát vizi,
    slogany a texty" (`steps/1v-vision.md`); `confirmed_client` dává jen PM.
    Pořadí a obsah sekcí každé stránky navrhni podle rámce stránky z
@@ -70,7 +81,7 @@ schválený verdikt textů (`confirm-content`, krok 7 bod 1b) nebo odpověď na 
 
 ## Zápis
 
-`content_plan` ve stavu (jen skript), `docs/content/facts.yaml`, kapitola
+`content_plan` ve stavu (jen skript), `docs/content/facts.yaml`, `docs/content/tasks.yaml`, `docs/content/photos.yaml`, kapitola
 `obsah`.
 
 ## Když krok selže

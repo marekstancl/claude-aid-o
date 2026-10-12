@@ -138,11 +138,11 @@ case "$1" in
     while IFS= read -r -d '' f; do
       case "$f" in
         state.json|*/state.json|*.tmp|*.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;;
-        index.html|assets/*|fonts/*) continue ;;
+        index.html|favicon.svg|assets/*|fonts/*) continue ;;   # favicon.svg: the client's tab icon aid-ui-state.sh copies here (P108)
         */*) ;;
         *.css) continue ;;
       esac
-      refuse "$dir/$f must not be served (state.json must not be served, nor anything internal; the brand page serves only index.html, *.css, assets/, fonts/)"
+      refuse "$dir/$f must not be served (state.json must not be served, nor anything internal; the brand page serves only index.html, favicon.svg, *.css, assets/, fonts/)"
     done < <(find "$dir" -mindepth 1 ! -type d -printf '%P\0')
     id="$(job_id brand)"
     if alive "$id" && listening "$BRAND_PORT" && [[ "$(jq -r '.command[-1]' "$JOBS/$id/job.json")" == "$dir" ]]; then

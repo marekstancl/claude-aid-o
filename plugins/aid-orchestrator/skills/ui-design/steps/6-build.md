@@ -61,6 +61,13 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
 4. Obrázky: `aid-ui-tool.sh webp <src> <out.webp> <šířka> [kvalita]` pro
    každý obrázek; limit 200 kB hlídá nástroj (exit 1 → menší šířka nebo
    kvalita).
+4a. **Fotka, kterou klient dodá později (FB-30, PM 1A):** žádná cizí fotka a žádný text „sem přijde
+   fotka“. Místo ní rámeček z `docs/content/photos.yaml` (id, stránka, tvar, poměr):
+   `<div class="aid-photo" data-aid-photo="<id>" aria-hidden="true"><svg …ikona fotoaparátu…></svg></div>`
+   se stylem `position:relative; overflow:hidden; aspect-ratio:<w>/<h>` (u `round` navíc
+   `border-radius:50%`) a pozadím z tokenu. Dodaná fotka se jen vloží:
+   `<img src=… alt="<co je na ní>" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">`
+   a `aria-hidden` se z rámečku odebere. Brána `photo_slots` to zkouší vložením zkušební fotky.
 5. Písma: build servíruj lokálně jen na 127.0.0.1 - volný port
    `port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')`,
    `python3 -m http.server --bind 127.0.0.1 --directory <složka buildu> "$port" &`

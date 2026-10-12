@@ -307,6 +307,7 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
     res.first_paint_visible = applies('first_paint_visible') ? await firstPaintVisible(ctx.browser(), url, vp)
       : NA('runs at the viewport and browser of its row only');
     res.form_states = applies('form_states') ? await formStates(ctx.browser(), url, vp) : NA('runs at the viewport and browser of its row only');
+    res.photo_slots = applies('photo_slots') ? await photoSlots(ctx.browser(), url, vp) : NA('runs at the viewport and browser of its row only');
   }
   const o = await inPage(page);
   res.no_overflow = o.overflow ? ['fail', 'the page scrolls sideways'] : ['pass', ''];
@@ -671,13 +672,149 @@ async function formStates(browser, url, viewport) {
   } catch (e) { return ['fail', `form check failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
 }
 
+// photo_slots (P113a, FB-30, PM 1A 12. 10. 2026): a photo the client still owes has a slot of its exact shape and
+// ratio (docs/content/photos.yaml: {id, page, where, what, shape rect|round, ratio "w:h", min_px "WxH"}),
+// marked data-aid-photo="<id>". Empty: aria-hidden="true", a camera icon (svg), no text, nothing focusable.
+// Filled: <img> with alt (unless the slot stays aria-hidden), object-fit cover. A test photo of another shape
+// put into each empty slot the standard way (absolutely over the slot, cover) must keep the slot's size and
+// the page's height, and cover the slot exactly - the photo is only put in, nothing is redesigned.
+const PHOTO_TOL = 0.02;
+async function photoSlots(browser, url, viewport) {
+  const specs = opt.photos ? readJson(opt.photos) : null;
+  const key = keyOfUrl(new URL(url).pathname.slice(new URL(base).pathname.length - 1));
+  const ctx = await browser.newContext({ viewport });
+  try {
+    const p = await ctx.newPage();
+    await loaded(p, url);
+    const slots = await p.evaluate(() => [...document.querySelectorAll('[data-aid-photo]')].map(e => {
+      const r = e.getBoundingClientRect(), s = getComputedStyle(e), img = e.querySelector('img');
+      const FOC = 'a[href],button,input,select,textarea,[tabindex]';
+      return { id: e.dataset.aidPhoto, w: r.width, h: r.height, radius: s.borderTopLeftRadius, hidden: e.getAttribute('aria-hidden') === 'true',
+        text: (e.innerText || '').trim(), focusable: e.matches(FOC) || !!e.querySelector(FOC), svg: !!e.querySelector('svg'),
+        img: img ? { alt: (img.getAttribute('alt') || '').trim(), fit: getComputedStyle(img).objectFit } : null };
+    }));
+    const mine = Array.isArray(specs) ? specs.filter(x => x && x.page === key) : [];
+    if (!slots.length && !mine.length) return NA('no photo on this page');
+    if (!Array.isArray(specs)) return ['fail', `${slots.length} photo slot(s) but no docs/content/photos.yaml`];
+    const why = [];
+    for (const x of mine) if (!slots.some(y => y.id === x.id)) why.push(`photo ${x.id} (${x.where || ''}) has no slot on the page`);
+    for (const x of slots) {
+      const sp = mine.find(y => y.id === x.id);
+      if (!sp) { why.push(`slot ${x.id} is not in photos.yaml for ${key}`); continue; }
+      const [a, b] = String(sp.ratio || '').split(':').map(Number);
+      if (!(a > 0 && b > 0)) { why.push(`${x.id}: ratio "${sp.ratio}" is not w:h`); continue; }
+      if (!(x.w > 0 && x.h > 0)) { why.push(`${x.id}: the slot has no size`); continue; }
+      if (Math.abs(x.w / x.h - a / b) > (a / b) * PHOTO_TOL) why.push(`${x.id}: ${Math.round(x.w)}×${Math.round(x.h)} is not ${sp.ratio}`);
+      const rad = x.radius.endsWith('%') ? parseFloat(x.radius) * Math.min(x.w, x.h) / 100 : parseFloat(x.radius) || 0;
+      if (sp.shape === 'round' && rad < Math.min(x.w, x.h) / 2 - 1) why.push(`${x.id}: the slot is not round`);
+      if (!x.img) {
+        if (!x.hidden) why.push(`${x.id}: an empty slot needs aria-hidden="true"`);
+        if (x.text) why.push(`${x.id}: an empty slot carries text ("${x.text.slice(0, 30)}")`);
+        if (x.focusable) why.push(`${x.id}: an empty slot is focusable`);
+        if (!x.svg) why.push(`${x.id}: an empty slot shows no camera icon (svg)`);
+      } else {
+        if (!x.hidden && !x.img.alt) why.push(`${x.id}: the photo has no alt text`);
+        if (x.img.fit !== 'cover') why.push(`${x.id}: the photo is not object-fit: cover`);
+      }
+    }
+    const swap = await p.evaluate(async () => {
+      const height = () => document.documentElement.scrollHeight, before = height(), moved = [];
+      const c = document.createElement('canvas'); c.width = 300; c.height = 97;
+      for (const e of document.querySelectorAll('[data-aid-photo]')) {
+        if (e.querySelector('img')) continue;
+        const r0 = e.getBoundingClientRect();
+        const img = new Image(); img.alt = ''; img.src = c.toDataURL();
+        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
+        e.replaceChildren(img); await img.decode().catch(() => {}); await new Promise(r => requestAnimationFrame(r));
+        const r1 = e.getBoundingClientRect(), ri = img.getBoundingClientRect();
+        if (Math.abs(r1.width - r0.width) > 1 || Math.abs(r1.height - r0.height) > 1) moved.push(`${e.dataset.aidPhoto}: the slot changes ${Math.round(r0.width)}×${Math.round(r0.height)} -> ${Math.round(r1.width)}×${Math.round(r1.height)}`);
+        else if (Math.abs(ri.width - r1.width) > 1 || Math.abs(ri.height - r1.height) > 1 || Math.abs(ri.top - r1.top) > 1) moved.push(`${e.dataset.aidPhoto}: the photo does not cover the slot (the slot needs position: relative)`);
+      }
+      return { moved, grew: height() - before };
+    });
+    why.push(...swap.moved);
+    if (Math.abs(swap.grew) > 1) why.push(`putting the photos in changes the page height by ${swap.grew} px`);
+    return why.length ? ['fail', why.join('; ')] : ['pass', `${slots.length} slot(s): ${slots.map(x => x.id).join(', ')}`];
+  } catch (e) { return ['fail', `photo slot check failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
+}
+
+// task_test (P113a, 12. 10. 2026): what a customer comes for is found within two steps from the home page, at 1440
+// and at 390 px. docs/content/tasks.yaml lists the tasks: {id, task, expect: [texts]} (one visible element on a
+// page holds every text, case and spacing ignored) or {id, task, form: true} (a visible form with a field and a
+// submit control). Every expect text must be in the facts register, so a task cannot be made easy by inventing
+// it; the task ids of the project's frozen critic rubric (.aid-ui/critic/frozen.json task_test) must all be there.
+// Steps = links followed from the home page (ponytail: every same-site link counts, also one inside a closed
+// menu on the phone; a click that opens the menu is not counted). Detail: per task and width the page and steps.
+const TASK_HOPS = 2;
+async function taskTest(browser) {
+  if (isApp) return NA('an application: its tasks are the flows (app_task_states)');
+  if (!opt.tasks) return ['not_covered', 'no docs/content/tasks.yaml (step 3: what a customer comes for, from the facts)'];
+  const tasks = readJson(opt.tasks);
+  if (!Array.isArray(tasks) || !tasks.length) return ['fail', 'docs/content/tasks.yaml is not a list of tasks'];
+  const why = [];
+  const factsText = opt.facts ? JSON.stringify(readJson(opt.facts)).toLowerCase() : '';
+  const norm = x => String(x || '').replace(/[\s\u00a0]+/g, ' ').trim().toLowerCase();
+  const ok = [];   // a task with a bad definition is named and not searched for
+  for (const t of tasks) {
+    if (!t?.id || !(t.form === true || (Array.isArray(t.expect) && t.expect.length))) { why.push(`task ${t?.id || '?'} needs expect texts or form: true`); continue; }
+    const bad = (t.expect || []).filter(e => !factsText.includes(norm(e).replace(/"/g, '\\"')));
+    for (const e of bad) why.push(`task ${t.id}: "${e}" is not in the facts register`);
+    if (!bad.length) ok.push(t);
+  }
+  if (project) {
+    try { const fz = readJson(path.join(project, '.aid-ui/critic/frozen.json'));
+      for (const id of (fz.rubric?.task_test || []).map(x => x.id)) if (!tasks.some(t => t.id === id)) why.push(`task ${id} of the critic's rubric is missing`);
+    } catch { /* no frozen critic yet: the tasks file alone */ }
+  }
+  const found = {};
+  for (const w of [1440, 390]) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: HEIGHT[w] || 900 } });
+    const p = await ctx.newPage();
+    const seen = new Map([[home, 0]]), queue = [home];
+    try {
+      while (queue.length) {
+        const key = queue.shift(), hops = seen.get(key);
+        await loaded(p, urlOf(key));
+        await p.evaluate(async () => { document.querySelectorAll('details').forEach(d => { d.open = true; });
+          for (let y = 0; y < document.documentElement.scrollHeight; y += 600) { scrollTo(0, y); await new Promise(r => setTimeout(r, 40)); } scrollTo(0, 0); });
+        await p.waitForTimeout(1500);   // entrance motion settles, as content_without_js waits
+        const r = await p.evaluate(({ tasks }) => {
+          const n = x => (x || '').replace(/[\s\u00a0]+/g, ' ').trim().toLowerCase();
+          const vis = e => { const b = e.getBoundingClientRect(), s = getComputedStyle(e); return b.width > 0 && b.height > 0 && s.visibility !== 'hidden' && Number(s.opacity) > 0.5; };
+          const hit = {};
+          for (const t of tasks) {
+            if (t.form) hit[t.id] = [...document.forms].some(f => vis(f) && f.querySelector('input:not([type=hidden]), textarea, select') && f.querySelector('button:not([type=button]), input[type=submit]'));
+            else { const want = t.expect.map(n); hit[t.id] = [...document.body.querySelectorAll('*')].some(e => vis(e) && want.every(x => n(e.innerText).includes(x))); }
+          }
+          return { hit, links: [...document.querySelectorAll('a[href]')].map(a => a.href) };
+        }, { tasks: ok });
+        for (const [id, ok] of Object.entries(r.hit)) if (ok && !(found[`${id}@${w}`])) found[`${id}@${w}`] = { page: key, hops };
+        if (hops >= TASK_HOPS) continue;
+        for (const h of r.links) {
+          let u; try { u = new URL(h); } catch { continue; }
+          if (u.origin !== new URL(base).origin) continue;
+          const k = keyOfUrl(u.pathname.slice(new URL(base).pathname.length - 1));
+          if (pages.includes(k) && !seen.has(k)) { seen.set(k, hops + 1); queue.push(k); }
+        }
+      }
+    } catch (e) { why.push(`${w} px: ${String(e.message || e).slice(0, 100)}`); } finally { await ctx.close(); }
+  }
+  const say = [];
+  for (const t of ok) for (const w of [1440, 390]) {
+    const f = found[`${t.id}@${w}`];
+    if (!f) why.push(`${t.id} at ${w} px: not found within ${TASK_HOPS} steps from the home page`);
+    else say.push(`${t.id} ${w}: ${f.page} (${f.hops})`);
+  }
+  return why.length ? ['fail', why.join('; ') + (say.length ? `; found: ${say.join('; ')}` : '')] : ['pass', say.join('; ')];
+}
+
 // ---- matrix -------------------------------------------------------------------------
 const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match',
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
   'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review', 'motion_settled', 'motion_fidelity',
-  'content_without_js', 'first_paint_visible', 'form_states'];
+  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -864,7 +1001,7 @@ if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json')
 
 const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
   'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
-  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states'];
+  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots'];
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
 for (const b of BRS) {
@@ -931,6 +1068,7 @@ for (const b of BRS) {
       if (visionDoc) put(m, 'vision_doc', ...visionDoc);
       if (coverageRow) put(m, 'coverage', ...coverageRow);
       if (customerPage) put(m, 'customer_page', ...customerPage);
+      if (want('task_test') && applies('task_test', m)) put(m, 'task_test', ...(await taskTest(browser)));
       if (want('copy_review') && applies('copy_review', m)) put(m, 'copy_review', ...(await copyRow(browser, m.page)));
     }
     await ctx.close();
