@@ -10,13 +10,14 @@ Form receiver (only with <project>/.aid-ui/form.json {endpoint, required: [field
   - a required field empty, a field over max_field -> 422 {"error": "...", "field": "<name>"}
   - the same message again within 10 minutes -> 200 {"ok": true, "duplicate": true}, delivered once
   - otherwise delivered: <project>/.aid-ui/inbox/<utc>-<id>.json (mode 600) -> 200 {"ok": true, "id": "<id>"}
+  No or a bad Content-Length -> 411/413 (the body is never read to its end); a full inbox (500) -> 503.
   Any other POST -> 404. The log (stderr) carries the status and the message id, never a field value.
 On the client's domain the form posts to the hosting's receiver instead; only the endpoint in DESIGN.md / form.json
 changes and the same gate row (form_delivery) checks it.
 """
 import email.parser, email.policy, functools, hashlib, http.server, json, os, secrets, sys, threading, time, urllib.parse
 
-MAX_BODY, DUP_SECONDS = 32 * 1024, 600
+MAX_BODY, DUP_SECONDS, MAX_INBOX = 32 * 1024, 600, 500   # a preview inbox never grows past MAX_INBOX messages
 _seen, _lock = {}, threading.Lock()
 
 
@@ -74,8 +75,11 @@ class H(http.server.SimpleHTTPRequestHandler):
         cfg = form_cfg(self.project) if self.project else None
         if not cfg or urllib.parse.urlsplit(self.path).path != cfg["endpoint"]:
             return self.send_error(404)
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > MAX_BODY:
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+        except ValueError:
+            return self.reply(411, {"error": "length required"}, "no length")   # chunked or missing: never read to EOF
+        if n < 0 or n > MAX_BODY:
             return self.reply(413, {"error": "too long"}, "too long")
         try:
             f = fields_of(self.headers.get("Content-Type") or "", self.rfile.read(n))
@@ -103,6 +107,10 @@ class H(http.server.SimpleHTTPRequestHandler):
         mid = secrets.token_hex(4)
         box = os.path.join(self.project, ".aid-ui", "inbox")
         os.makedirs(box, mode=0o700, exist_ok=True)
+        if len(os.listdir(box)) >= MAX_INBOX:
+            with _lock:
+                _seen.pop(key, None)
+            return self.reply(503, {"error": "inbox full"}, "inbox full")
         p = os.path.join(box, "%s-%s.json" % (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()), mid))
         fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:

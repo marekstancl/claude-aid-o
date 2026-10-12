@@ -31,6 +31,11 @@ post() { curl -s -o "$T/body" -w '%{http_code}' -X POST "$@"; }
   [ "$(post "$U/api/objednanie" -d 'meno=Bot&telefon=1&website=http://spam')" = 200 ]; [ "$(ls "$P/.aid-ui/inbox" | wc -l)" -eq 3 ]
   head -c 40000 /dev/zero | tr '\0' 'a' > "$T/big"; [ "$(post "$U/api/objednanie" --data-binary "@$T/big" --max-time 5)" = 413 ]
   [ "$(post "$U/api/jine" -d 'a=b')" = 404 ]
+  # a negative or a missing length is refused without reading the body; a full inbox refuses more
+  [ "$(post "$U/api/objednanie" -H 'Content-Length: -5' -d '')" = 413 ] || [ "$(post "$U/api/objednanie" -H 'Content-Length: -5' -d '')" = 400 ]
+  [ "$(post "$U/api/objednanie" -H 'Transfer-Encoding: chunked' -d 'meno=a&telefon=b')" = 411 ]
+  for i in $(seq 1 497); do : > "$P/.aid-ui/inbox/x$i.json"; done
+  [ "$(post "$U/api/objednanie" -d 'meno=Plna&telefon=9')" = 503 ]; rm "$P/.aid-ui/inbox/"x*.json
   [ "$(curl -s -o /dev/null -w '%{http_code}' "$U/.env")" = 404 ]
   # no value in the log, only status and id
   ! grep -qE "Jana|421905111222|bolí|Peter|Eva|0911|Bot|spam" "$T/log"
