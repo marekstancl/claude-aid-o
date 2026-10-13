@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.1.0] — 2026-10-13
+
+Testy s hodnotou (PM 13. 10. 2026, 2A): plánový test se po plánu maže, trvalý test se jmenuje podle chování, které hlídá. Do té doby každý plán testy jen přidával — testy pluginu měly víc řádků než plugin a 654 z 3 678 případů neslo v názvu číslo plánu, nálezu nebo položky backlogu.
+
+### Added
+- **Kontrola názvů nových testů** (`aid_test_names_plan_refs`, `lib/aid-test-tier.sh`): případ přidaný od základu plánu nebo od posledního tagu, jehož název nese číslo plánu (`P111`), nálezu revize (`CP2 F3`) nebo položky backlogu (`IMP-612`), zastaví `plan-finalize --stage gates` i `aid-release.sh` (`test_named_after_plan`). Čte bats `@test`, pytest `def test_` a JS/TS `it|test|describe`; necommitnuté změny sledovaných souborů se počítají, protože by je vydání přibralo; diff, který nejde přečíst, odmítne stejně jako nález. Číslo kroku se nehlídá (`step 0` je v AIDu doménový pojem). Staré případy si název nechávají, dokud se nezmění jejich řádek s názvem. `aid-release.sh` kontroluje jako první krok (i v režimu `auto`, který jinak může skončit dřív), tedy před `--dry-run` a před změnou souborů; `--force` ji neobchází.
+
+### Changed
+- `skills/plan-writing.md`: Testing Strategy má čtvrtou otázku „Které testy plán maže?“; jednorázová kontrola žije ve vlastním souboru (značka verification-only platí pro celý soubor); výčet druhů, které jsou vždy jednorázové (důkaz, že krok proběhl, zmrazený seznam starých jmen, hlídač jakékoli změny, hledání věty v návodu, pokud ji kód necituje doslova).
+- Revize kroku (`skills/step-review-roles.md` otázka 3, `skills/review-checkpoint-contracts.md`) se ptá i obráceně: který existující test změna zneplatnila — jmenuje se a maže v tomtéž kroku.
+- `CONTRIBUTING.md`: solo stavba značí jednorázové testy stejně jako plán a vydání odmítne případ pojmenovaný po plánu. Docusaurus: ekosystémový testovací standard (pravidlo 2 platí i pro název případu, „Plánový test není trvalý“) a `/aid/testing` (oddíl Plánové a trvalé testy).
+
 ## [3.0.0] — 2026-10-13
 
 Bez EPIC cesty (P114, vydání 3 roadmapy P109; PM 12. 10. 2026, 13. 10. 2026 1A). Plán běží jako jeden běh přímo ze souboru (`/aid-run P<NNN>` = `aid-plan-fsm.sh plan-run`, od 2.117.0); generátory EPICů, fronta, task větve, slučování EPICu do větve plánu a revize EPICu (CP3) jsou z pluginu pryč. Major verze: staré vstupy odmítnou s cestou ven, nic se tiše nechová jinak.

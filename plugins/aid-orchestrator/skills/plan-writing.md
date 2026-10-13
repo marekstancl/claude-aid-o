@@ -518,6 +518,9 @@ questions in plain sentences:
    cheapest move, and the plan should say so explicitly. A NEW suite is a
    decision that costs a tier declaration and a name, so it is stated as a
    decision, not slipped in.
+4. **Which tests does it delete?** A test of behaviour the plan removes or
+   changes is deleted or rewritten in the step that changes it, and the plan
+   names it. "None" is a valid answer when it is true.
 
 **A one-off check is marked, and it is gone before plan-final.** A `Test:`
 bullet whose prose after the dash BEGINS with `verification-only, delete
@@ -529,6 +532,24 @@ allowed on `Test:` bullets only (`aid-plan-lint.sh` blocks it on any other
 verb), and `plan-finalize --stage gates` refuses a frozen candidate on which a
 marked path still exists, tracked or not — so the file is deleted on the plan
 branch before plan-final, not after the merge.
+
+The marker covers a whole FILE (the gate reads whether the path exists), so a
+one-off check lives in its own file, never as a case inside a lasting suite.
+These kinds are one-off by nature and are always marked, never kept:
+
+- a proof that a step happened ("X no longer exists", "the old command is gone");
+- a frozen list of old names or ids the plan retired;
+- a check that fails on ANY change of a file, right or wrong (a change detector);
+- a search for a sentence in a skill or doc — unless code quotes that text
+  byte for byte, which makes the sentence a contract.
+
+**A lasting test is named after what it guards, not where it came from.**
+`refuses a plan without a PM page` — not `P111 step 4: …`, `CP2 F3: …` or
+`IMP-612: …`; the plan, finding or backlog number goes in the commit message.
+`plan-finalize --stage gates` refuses a candidate that ADDS a case whose name
+carries one (`test_named_after_plan`, `aid_test_names_plan_refs` in
+`lib/aid-test-tier.sh`), and so does `aid-release.sh` for a solo release since
+the last tag. An old case keeps its name until its declaration line changes.
 
 Unchanged, deliberately: a `Test:` bullet naming a suite that does not exist yet
 MUST declare its tier (`plan-run` refuses without it). Making tests

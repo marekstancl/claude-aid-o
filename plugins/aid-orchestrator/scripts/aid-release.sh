@@ -57,6 +57,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"   # P073 Step 14 — the ONE ancillary/delivery classifier
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-release-scope.sh" 2>/dev/null || true  # P089 Step 9 — the ONE release-scope authority
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/aid-test-tier.sh"   # aid_test_names_plan_refs — the test-name guard
 
 # Find repo root (walk up from CWD, not from script location)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -953,6 +955,7 @@ echo "Released v${NEW_VERSION} (tagged locally). Push main (git push origin main
 # detect version → dry-run exit → update files → commit + tag.
 # =============================================================================
 _release_legacy_bump() {
+  _release_test_names_guard   # first: `auto` can exit 0 inside the parser (exempt range, test:/docs: only)
   _release_parse_args_and_resolve_bump "$@"
   _release_fsm_guard
   _release_detect_version
@@ -964,6 +967,32 @@ _release_legacy_bump() {
 
   _release_update_files
   _release_commit_and_tag
+}
+
+# ─── Test names: a case added since the last tag says what it guards ───────
+# A solo release never passes plan-finalize, so the same check runs here, on
+# the range this release ships plus the tracked edits `git add -u` would take.
+# Before the parser (whose `auto` arm can exit 0), --dry-run's exit and any
+# file change; --force does not
+# bypass it (renaming a case is a minute's work).
+_release_test_names_guard() {
+  local tag out rc=0 file name
+  tag="$(git -C "$REPO_ROOT" describe --tags --abbrev=0 2>/dev/null)" || tag=""
+  if [[ -z "$tag" ]]; then
+    echo "INFO [test_named_after_plan] no previous tag — nothing to compare the test names against" >&2
+    return 0
+  fi
+  out="$(aid_test_names_plan_refs "$REPO_ROOT" "$tag")" || rc=$?
+  (( rc == 0 )) && return 0
+  if (( rc == 1 )); then
+    while IFS=$'\t' read -r file name; do
+      echo "FAIL [test_named_after_plan] ${file}: \"${name}\" — name the behaviour it guards; the plan, finding or backlog number belongs in the commit message" >&2
+    done <<<"$out"
+  else
+    echo "FAIL [test_named_after_plan] cannot diff ${tag} against the working tree — the names of the added tests were not checked" >&2
+  fi
+  echo "PRECONDITION FAIL: test names to fix first — nothing was changed." >&2
+  exit 1
 }
 
 # =============================================================================

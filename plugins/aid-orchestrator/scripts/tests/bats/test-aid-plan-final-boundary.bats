@@ -4496,3 +4496,36 @@ _seed_vo_project() {
   run jq -r '.overall' "$(_report)"
   [ "$output" = "pass" ]
 }
+
+# _seed_named_project <name> — a candidate that adds tests/test-x.bats with one
+# case of that name (written through printf so this file never declares it).
+_seed_named_project() {
+  _bootstrap
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans" "$TEST_PROJECT_ROOT/tests"
+  printf '# %s\n\n### Step 1: guard\n\n**Files:**\n- Test: `tests/test-x.bats` (tier: t0) — the guard\n\n## Acceptance Criteria\n- [ ] something\n' "$PLAN_ID" \
+    > "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-test-plan.md"
+  printf '%s "%s" {\n  true\n}\n' '@test' "$1" > "$TEST_PROJECT_ROOT/tests/test-x.bats"
+  git -C "$TEST_PROJECT_ROOT" add -A -- .aid-o/plans tests
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "the plan and its test"
+  git -C "$TEST_PROJECT_ROOT" branch -f "plan/${PLAN_ID}" main
+  _finalize "$PLAN_ID" freeze
+}
+
+@test "test names: --stage gates refuses a candidate adding a case named after a plan, and runs when the name says the behaviour" {
+  _seed_named_project "P321 keeps the guard"
+  _write_exec_yaml
+  local receipt; receipt="$(_write_receipt bats_all)"
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'FAIL [test_named_after_plan] tests/test-x.bats: "P321 keeps the guard"'* ]]
+  [ ! -f "$(_report)" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_GATES" ]
+
+  _seed_named_project "keeps the guard"
+  _write_exec_yaml
+  receipt="$(_write_receipt bats_all)"
+  _gates --substitute-receipt "bats_all=${receipt}"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS [test_named_after_plan]"* ]]
+}
