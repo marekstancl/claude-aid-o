@@ -11040,6 +11040,11 @@ _pr_main() {
   cd "$PR_ROOT" || exit 3   # plan.json's source_plan is relative to the state root
   ev_rel=".aid-o/work/evidence/${PR_EPIC}/${PR_RUN}"; ev_dir="${PR_ROOT}/${ev_rel}"; pj="${ev_dir}/plan.json"
   tx="$(_pr_tx)"; gd="$(dirname "$tx")"
+  # P114: a plan of the removed EPIC path is refused before anything is
+  # created or locked (checked again under the lock below).
+  local trace0; trace0="$(_pr_generation_trace)"
+  [[ -z "$trace0" ]] || _pr_refuse epic_path_removed "${plan_id} was generated the EPIC way: ${trace0} — the EPIC path was removed in AID 3.0.0" \
+    "finish it on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close it (aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" 1
   mkdir -p "$gd" || exit 3
 
   # ── ONE hold for the whole transaction: the generation lock ───────────────

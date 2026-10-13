@@ -46,19 +46,24 @@ _refused() {
   mkdir -p "$R/.aid-o/tasks"; echo x > "$R/.aid-o/tasks/E-950-1_1-old.md"
   run bash "$PFSM" plan-run P950 --project-root "$R"; _refused 1
   [[ "$output" == *"E-950-1_1-old.md"* ]]
+  [ ! -e "$R/.aid-o/work/evidence/P950" ]          # refused before any lock or write
 }
 @test "removed: plan-run on a plan with only its own queue entry refuses epic_path_removed" {
   printf 'queue:\n  - epic_id: E-950-1_1\n    status: pending\n  - epic_id: E-951-1_1\n    status: pending\n' > "$R/.aid-o/config/queue.yaml"
   run bash "$PFSM" plan-run P950 --project-root "$R"; _refused 1
   [[ "$output" == *"1 entr(ies) of the plan in .aid-o/config/queue.yaml"* ]]
+  [ ! -e "$R/.aid-o/work/evidence/P950" ]
 }
 @test "removed: a queue that holds only OTHER plans' entries, or none, does not refuse plan-run" {
   printf 'queue:\n  - epic_id: E-951-1_1\n    status: pending\n' > "$R/.aid-o/config/queue.yaml"
   run bash "$PFSM" plan-run P950 --project-root "$R"
   [[ "$output" != *"epic_path_removed"* ]]
+  [ -f "$R/.aid-o/work/evidence/P950/generation/transaction.json" ]   # it went past the check and opened its transaction
+  rm -rf "$R/.aid-o/work"
   printf 'queue: []\n' > "$R/.aid-o/config/queue.yaml"
   run bash "$PFSM" plan-run P950 --project-root "$R"
   [[ "$output" != *"epic_path_removed"* ]]
+  [ -f "$R/.aid-o/work/evidence/P950/generation/transaction.json" ]
 }
 @test "removed: the direct path still starts — init --direct over a direct plan's manifest entry" {
   source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"
