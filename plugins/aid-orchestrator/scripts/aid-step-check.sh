@@ -50,6 +50,8 @@ source "$SCRIPT_DIR/lib/aid-ancillary.sh"
 source "$SCRIPT_DIR/lib/aid-test-tier.sh"
 # shellcheck source=lib/aid-dispatch-contract.sh
 source "$SCRIPT_DIR/lib/aid-dispatch-contract.sh"   # aid_dispatch_repo_range_ok
+# shellcheck source=lib/aid-repo-roots.sh
+source "$SCRIPT_DIR/lib/aid-repo-roots.sh"          # aid_rr_phys_repo, aid_rr_entries
 # shellcheck source=lib/aid-roots.sh
 source "$SCRIPT_DIR/lib/aid-roots.sh"               # aid_run_checkout_root, aid_state_root
 
@@ -148,17 +150,18 @@ if [[ "$CHECKPOINT" == cp2 && -f "$PLAN_JSON" ]]; then
   ret="$EVID/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON")/return.json"
   declare -A seen_repo=(); root_phys="$(cd "$ROOT" && pwd -P)"
   while IFS= read -r ap; do
-    d="$ap"; while [[ ! -d "$d" && "$d" != / ]]; do d="$(dirname "$d")"; done
-    repo="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" || continue
+    repo="$(aid_rr_phys_repo "$ap")"; [[ -n "$repo" ]] || continue
     [[ "$repo" != "$root_phys" && -z "${seen_repo[$repo]:-}" ]] || continue
     seen_repo[$repo]=1
     # P111: a repository the plan declares in repo_roots is named by its slug
     # in the return and reviewed in its worktree; its range must be reachable
     # from the worktree's branch (a commit only in the live checkout shares the
-    # object store and is still refused).
-    slug="$(jq -r --arg r "$repo" 'first(.repo_roots[]? | select((.path | sub("/+$"; "")) == $r) | .name) // ""' "$PLAN_JSON" 2>/dev/null || true)"
+    # object store and is still refused). P112: the slug comes from the one mapping.
+    slug="" wt="" br=""
+    while IFS=$'\t' read -r e_name e_path e_wt e_br; do
+      [[ -n "$e_name" && "$e_path" == "$repo" ]] && { slug="$e_name" wt="$e_wt" br="$e_br"; break; }
+    done <<< "$(aid_rr_entries "$PLAN_JSON")"
     if [[ -n "$slug" ]]; then
-      IFS=$'\t' read -r wt br < <(aid_dispatch_repo_resolve "$PLAN_JSON" "$slug")
       r="$(jq -r --arg r "$slug" 'first(.repo_commits[]? | select(.repo == $r) | .range) // ""' "$ret" 2>/dev/null || true)"
       aid_dispatch_repo_range_ok "$wt" "$r" "$br" || { OTHER_MISSING+=("$slug"); continue; }
       src="$wt"   # diffed in the worktree, named under the declared path (plan.json's scope)

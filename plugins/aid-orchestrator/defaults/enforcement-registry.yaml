@@ -4282,7 +4282,7 @@ enforcements:
     test: "scripts/tests/bats/test-aid-fsm.bats"
   - id: repo_roots_mapping
     type: 12
-    source: "scripts/lib/aid-dispatch-contract.sh (_aid_dc_rewrite_foreign, aid_dispatch_repo_resolve, aid_dispatch_repo_range_ok) + scripts/aid-step-check.sh"
+    source: "scripts/lib/aid-repo-roots.sh (aid_rr_entries, aid_rr_path, aid_rr_text, aid_rr_resolve, aid_rr_rewrite_files) + scripts/lib/aid-dispatch-contract.sh (aid_dispatch_repo_range_ok) + scripts/aid-step-check.sh"
     instruction: "commands/aid-run.md (repo_roots)"
     severity: blocking
     surface: llm-facing
@@ -4296,7 +4296,7 @@ enforcements:
     test: "scripts/tests/bats/test-dispatch-contract.bats"
   - id: foreign_repo_undeclared
     type: 12
-    source: "scripts/lib/aid-dispatch-contract.sh (_aid_dc_rewrite_foreign)"
+    source: "scripts/lib/aid-repo-roots.sh (aid_rr_rewrite_files) + scripts/lib/aid-dispatch-contract.sh"
     instruction: "skills/pipeline.md §When AID refuses (foreign_repo_undeclared)"
     severity: blocking
     surface: llm-facing
