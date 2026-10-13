@@ -61,6 +61,9 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
 4. Obrázky: `aid-ui-tool.sh webp <src> <out.webp> <šířka> [kvalita]` pro
    každý obrázek; limit 200 kB hlídá nástroj (exit 1 → menší šířka nebo
    kvalita).
+3b. **Dělicí čáry (FB-31):** svislá čára mezi sloupci nebo bloky dostane vnitřní odstup aspoň 16 px na obou
+   stranách (padding u sloupce před čarou i za ní, nebo `gap` místo okraje). Text nikdy nezačíná těsně u čáry.
+   Brána `text_clearance` to měří na každé stránce a šířce.
 4a. **Fotka, kterou klient dodá později (FB-30, PM 1A):** žádná cizí fotka a žádný text „sem přijde
    fotka“. Místo ní rámeček z `docs/content/photos.yaml` (id, stránka, tvar, poměr):
    `<div class="aid-photo" data-aid-photo="<id>" aria-hidden="true"><svg data-aid-icon="camera" …ikona fotoaparátu…></svg></div>`

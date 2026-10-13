@@ -74,6 +74,9 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   [ "$(st photo_slots o-nas/index.html)" == pass ]; [ "$(st photo_slots index.html)" == fail ]
   d="$(jq -r '[.rows[] | select(.check == "photo_slots" and .page == "index.html") | .detail][0]' "$RES")"
   for c in "slot pekar is not in photos.yaml" ; do [[ "$d" == *"$c"* ]] || { echo "photo_slots misses $c: $d"; return 1; }; done
+  # FB-31: text glued to a column divider (the planted home page); o-nas has none
+  [ "$(st text_clearance index.html)" == fail ]; [ "$(st text_clearance o-nas/index.html)" == pass ]
+  jq -e '[.rows[] | select(.check == "text_clearance" and .page == "index.html") | .detail] | all(contains("Chleba i rohlíky"))' "$RES" >/dev/null
   # P113a AC8: forms on the site but no receiver for the preview: form_delivery names it
   [ "$(st form_delivery index.html)" == fail ]; jq -e '.rows[] | select(.check == "form_delivery") | .detail | contains("no .aid-ui/form.json")' "$RES" >/dev/null
   # P108: invented count, percentage, years and e-mail are named in facts_match

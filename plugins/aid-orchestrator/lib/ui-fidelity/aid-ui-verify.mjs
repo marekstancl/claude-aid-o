@@ -239,6 +239,33 @@ async function inPage(page) {
       const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left), h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
       if (w > 2 && h > 2) { o.overlaps.push(`${name(a.e)} x ${name(b.e)}`); if (o.overlaps.length >= 5) break; }
     }
+    // text_clearance (FB-31, PM 13. 10. 2026 - Coufal: answers glued to the column dividers): a vertical divider line
+    // (a left or right border of a block that is not boxed on all four sides, not a control) and a text line beside
+    // it, sharing at least half the text's height, keep at least 12 px between them
+    const ctl = /^(INPUT|BUTTON|SELECT|TEXTAREA|A|IMG|SVG)$/i;
+    const lines = [];
+    for (const e of document.querySelectorAll('body *')) {
+      if (ctl.test(e.tagName) || !vis(e)) continue;
+      const s = getComputedStyle(e), r = e.getBoundingClientRect();
+      const side = k => parseFloat(s['border' + k + 'Width']) >= 1 && s['border' + k + 'Style'] !== 'none' && !/rgba\(.*,\s*0\)$|transparent/.test(s['border' + k + 'Color']);
+      if (side('Top') && side('Bottom') && side('Left') && side('Right')) continue;   // a boxed card or field: its padding is another matter
+      if (r.height < 24) continue;
+      if (side('Left')) lines.push({ x: r.left, top: r.top, bottom: r.bottom, e });
+      if (side('Right')) lines.push({ x: r.right, top: r.top, bottom: r.bottom, e });
+    }
+    o.glued = [];
+    if (lines.length) {
+      for (const e of document.querySelectorAll('body *')) {
+        if (!own(e) || !vis(e) || o.glued.length >= 5) continue;
+        const rg = document.createRange(); rg.selectNodeContents(e);
+        for (const t of rg.getClientRects()) {
+          if (t.width < 2 || t.height < 2) continue;
+          const l = lines.find(L => Math.min(L.bottom, t.bottom) - Math.max(L.top, t.top) >= t.height / 2
+            && ((t.left >= L.x - 1 && t.left - L.x < 12) || (t.right <= L.x + 1 && L.x - t.right < 12)));
+          if (l) { o.glued.push(`"${(e.textContent || '').trim().slice(0, 30)}" ${Math.round(Math.min(Math.abs(t.left - l.x), Math.abs(l.x - t.right)))} px from the line of ${l.e.tagName.toLowerCase()}${l.e.className && typeof l.e.className === 'string' ? '.' + l.e.className.trim().split(/\s+/)[0] : ''}`); break; }
+        }
+      }
+    }
     // brand_consistency: the first family of every text element is a webfont the site declares
     const declared = new Set([...document.fonts].map(f => f.family.replace(/["']/g, '').toLowerCase()));
     o.fontFamilies = [...new Set([...document.querySelectorAll('body *')].filter(e => vis(e) && own(e))
@@ -349,6 +376,7 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
     .concat(imgs.filter(i => i.len > 200 * 1024).map(i => `${i.url.replace(base, '/')} is ${Math.round(i.len / 1024)} kB`));
   res.image_weight = heavy.length ? ['fail', heavy.join(', ')] : ['pass', ''];
   res.no_overlap = o.overlaps.length ? ['fail', `overlaps: ${o.overlaps.join(' | ')}`] : ['pass', ''];
+  res.text_clearance = o.glued.length ? ['fail', `text closer than 12 px to a divider line: ${o.glued.join(' | ')}`] : ['pass', ''];
   res.brand_consistency = o.undeclaredFonts.length ? ['fail', `fonts not from the site's own @font-face: ${o.undeclaredFonts.join(', ')}`] : ['pass', `fonts: ${o.fontFamilies.join(', ')}`];
   res.header = o.header; res.footer = o.footer;
   const heavyPage = [];
@@ -932,7 +960,7 @@ const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls'
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
   'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review', 'motion_settled', 'motion_fidelity',
-  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery'];
+  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery', 'text_clearance'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -1119,7 +1147,7 @@ if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json')
 
 const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
   'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
-  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots'];
+  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots', 'text_clearance'];
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
 for (const b of BRS) {

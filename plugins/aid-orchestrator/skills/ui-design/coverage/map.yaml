@@ -206,6 +206,9 @@ items:
   - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > How — fáze a kdo rozhoduje > Pohyb a měření (FB-25, FB-26, FB-27; 10.–12. 10. 2026)#6b810507"
     text: "**FB-30 Fotka, kterou klient teprve dodá, má místo v přesném tvaru.** Každá tak"
     do: "script:photo_slots"
+  - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > How — fáze a kdo rozhoduje > Pohyb a měření (FB-25, FB-26, FB-27; 10.–12. 10. 2026)#58a179fe"
+    text: "**FB-31 Text má odstup od dělicích čar.** Svislá dělicí čára mezi sloupci nebo b"
+    do: "script:text_clearance"
   - id: "ecosystem/specs/design-system-standard.md#Design systém aplikací > Kontrola před nasazením#9fbc1652"
     text: "Prázdný, chybový a načítací stav existují (ne jen šťastná cesta)."
     do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
