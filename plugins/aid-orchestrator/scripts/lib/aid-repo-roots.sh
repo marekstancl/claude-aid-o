@@ -89,8 +89,8 @@ aid_rr_entries() {
   for (( i=0; i<n; i++ )); do
     name="$(jq -r --argjson i "$i" '.[$i].name // ""' <<< "$raw")"
     path="$(jq -r --argjson i "$i" '.[$i].path // ""' <<< "$raw")"
-    if ! path="$(realpath -e "$path" 2>/dev/null)" || ! git -C "$path" rev-parse --git-dir >/dev/null 2>&1; then
-      echo "repo_roots '${name}': $(jq -r --argjson i "$i" '.[$i].path // ""' <<< "$raw") is not a git repository" >&2
+    if ! path="$(realpath -e "$path" 2>/dev/null)" || [[ "$(aid_rr_phys_repo "$path")" != "$path" ]]; then
+      echo "repo_roots '${name}': $(jq -r --argjson i "$i" '.[$i].path // ""' <<< "$raw") is not the top of a git repository" >&2
       rc=1; continue
     fi
     printf '%s\t%s\t%s\n' "$name" "$path" "$(_aid_rr_derive "$path" "$pid" "$name" "$proj")"

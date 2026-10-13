@@ -369,8 +369,8 @@ aid_plan_repo_roots_json() {
     bb="$(jq -r --argjson i "$i" '.[$i].base_branch // ""' <<< "$raw")"
     [[ "$name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] \
       || error_exit "repo_root_invalid: repo_roots[$i].name '${name}' must be a slug ([a-z0-9_-]). next: fix the plan's repo_roots frontmatter (pipeline.md §When AID refuses: repo_root_invalid)" 1
-    path="$(realpath -e "$path" 2>/dev/null)" && git -C "$path" rev-parse --git-dir >/dev/null 2>&1 \
-      || error_exit "repo_root_invalid: repo_roots[$i] '${name}' path is not a git repository. next: fix the plan's repo_roots frontmatter (pipeline.md §When AID refuses: repo_root_invalid)" 1
+    path="$(realpath -e "$path" 2>/dev/null)" && [[ "$(aid_rr_phys_repo "$path")" == "$path" ]] \
+      || error_exit "repo_root_invalid: repo_roots[$i] '${name}' path is not the top of a git repository. next: fix the plan's repo_roots frontmatter (pipeline.md §When AID refuses: repo_root_invalid)" 1
     [[ -z "$own" || "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" != "$own" ]] \
       || error_exit "repo_root_invalid: repo_roots[$i] '${name}' is the project itself (or one of its worktrees) — repo_roots names OTHER repositories. next: fix the plan's repo_roots frontmatter (pipeline.md §When AID refuses: repo_root_invalid)" 1
     bb="$(aid_plan_repo_base_branch "$path" "$bb")"

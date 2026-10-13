@@ -74,10 +74,14 @@ teardown() { rm -rf "$TEST_DIR"; }
   run aid_rr_path bare.json "$X/docs/f";                [ "$output" = "$X/docs/f" ]
 }
 
-@test "rr: a declared path that is not a git repository is named and fails" {
+@test "rr: a declared path that is not the top of a git repository (none, or a subdirectory) is named and fails" {
   printf -- '---\nid: P902\nrepo_roots: [{name: gone, path: %s/none}]\n---\n' "$X" > proj/bad.md
   run aid_rr_entries proj/bad.md P902 proj
-  [ "$status" -eq 1 ] && [[ "$output" == *"repo_roots 'gone'"*"not a git repository"* ]]
+  [ "$status" -eq 1 ] && [[ "$output" == *"repo_roots 'gone'"*"not the top of a git repository"* ]]
+  mkdir -p "$X/docs/sub"
+  printf -- '---\nid: P903\nrepo_roots: [{name: sub, path: %s/docs/sub}]\n---\n' "$X" > proj/sub.md
+  run aid_rr_entries proj/sub.md P903 proj
+  [ "$status" -eq 1 ] && [[ "$output" == *"repo_roots 'sub'"*"not the top"* ]]
 }
 
 @test "rr: aid_rr_load caches the mapping for the shell" {

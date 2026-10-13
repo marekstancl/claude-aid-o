@@ -267,6 +267,9 @@ _repo_roots_pass() {
          || [[ "$(git -C "$real" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" == "$(git -C "$proj" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ]]; }; then
       _zadani_err "" "repo_root_invalid: repo_roots '${name}' path '${path}' is the project itself or inside it — repo_roots names OTHER repositories"; continue
     fi
+    if [[ "$(git -C "$real" rev-parse --show-toplevel 2>/dev/null | xargs -r realpath 2>/dev/null)" != "$real" ]]; then
+      _zadani_err "" "repo_root_invalid: repo_roots '${name}' path '${path}' is a directory inside a git repository, not its top — declare the repository's top"; continue
+    fi
     if [[ -n "$bb" ]] && ! git -C "$real" rev-parse --verify --quiet "${bb}^{commit}" >/dev/null 2>&1; then
       _zadani_err "" "repo_root_invalid: repo_roots '${name}' base_branch '${bb}' does not resolve in ${path}"; continue
     fi
