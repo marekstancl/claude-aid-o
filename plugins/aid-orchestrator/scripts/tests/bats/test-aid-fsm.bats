@@ -745,30 +745,6 @@ EOF
   fi
 }
 
-# Helper: structured lifecycle manifest declaring depends_on_plans.
-# COMMITTED on the target branch (like plan-start writes it in production):
-# IMP-273 routes cmd_init's mode decision through the committed-tree authority
-# `_fsm_declared_plan_mode`, which treats an uncommitted (working-tree-only)
-# manifest as `unresolved` and hard-blocks BEFORE the D1 dependency gate. A real
-# plan's lifecycle manifest is always committed, so committing here keeps this a
-# faithful legacy-plan fixture: the committed manifest carries no plan_branch
-# mode, so the authority resolves legacy_epic_release_mode (a no-op) and control
-# reaches the depends_on_plans gate these tests exercise.
-_seed_manifest() {
-  local plan_id="$1" deps_yaml="$2"   # deps_yaml e.g. "[P045]" or "[]"
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests"
-  cat > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/${plan_id}.yaml" <<EOF
-schema_version: aid-lifecycle-1.0
-repo_id: test
-plan_id: ${plan_id}
-mode: legacy_epic_release_mode
-declared_epics:
-  - {id: E-${plan_id#P}-1_1, scope: required}
-depends_on_plans: ${deps_yaml}
-EOF
-  git -C "$TEST_PROJECT_ROOT" add ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1
-  git -C "$TEST_PROJECT_ROOT" commit -q -m "lifecycle manifest ${plan_id}"
-}
 
 # Helper: committed closed receipt (=> aid_plan_closure_state == closed).
 _seed_closed_receipt() {
@@ -792,30 +768,39 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "D1: init BLOCKS when a structured depends_on_plans target is not closed" {
-  _seed_manifest "P046" "[P045]"    # P045 has no receipt => not closed
-  run "$FSM" init $(build_default_init_args "E-046-1_1")
+# _d1_direct <extra init args…> — the plan's direct run (plan-run's init) of
+# P046, whose lifecycle manifest declares depends_on_plans: [P045]. Since 3.0.0
+# (P114) a plan's run is the direct run, so the dependency gate is tested there.
+_d1_direct() {
+  ( export AID_PLUGIN_PATH; source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"
+    aid_fixture_direct_run "$TEST_PROJECT_ROOT" P046 READY >/dev/null ) || return 1
+  local sf="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-046-1_1/R-E046-1/fsm-state.yaml"; rm -f "$sf"
+  yq -i '.depends_on_plans = ["P045"]' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P046.yaml"
+  run bash -c "cd '$TEST_PROJECT_ROOT/.aid-worktrees/plan-P046' && '$FSM' init E-046-1_1 R-E046-1 2 full plan/P046 \"\$(git -C '$TEST_PROJECT_ROOT' rev-parse plan/P046)\" '$sf' --plan '$TEST_PROJECT_ROOT/.aid-o/plans/P046-direct.md' --direct $*"
+}
+
+@test "D1: the plan's run BLOCKS at init when a structured depends_on_plans target is not closed" {
+  _d1_direct                         # P045 has no receipt => not closed
   [ "$status" -ne 0 ]
   [[ "$output" == *"depends_on_plans: P045"* ]]
 }
 
-@test "D1: init SUCCEEDS when the depends_on_plans target is closed" {
-  _seed_manifest "P046" "[P045]"
+@test "D1: the plan's run SUCCEEDS at init when the depends_on_plans target is closed" {
   _seed_closed_receipt "P045"
-  run "$FSM" init $(build_default_init_args "E-046-1_1")
-  [ "$status" -eq 0 ]
+  _d1_direct
+  echo "$output"; [ "$status" -eq 0 ]
 }
 
 @test "D1: --force overrides the depends_on_plans block (audited)" {
-  _seed_manifest "P046" "[P045]"    # P045 not closed
-  run "$FSM" init $(build_default_init_args "E-046-1_1") --force --reason "P045 need not close first for this independent scaffolding step"
-  [ "$status" -eq 0 ]
+  _d1_direct --force --reason "'P045 need not close first for this independent scaffolding step'"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"skipping the depends_on_plans init gate (D1)"* ]]
 }
 
 # v2.58.2 hotfix #3: a real dependency declared in the plan FRONTMATTER (not a
 # hand-seeded manifest) must propagate into the tracked manifest via ensure_manifest
 # and then actually block init end-to-end.
-@test "D1: a frontmatter depends_on_plans is written into the manifest by ensure_manifest and blocks init end-to-end" {
+@test "D1: a frontmatter depends_on_plans is written into the manifest by ensure_manifest" {
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
   cat > "$TEST_PROJECT_ROOT/.aid-o/plans/P046-x.md" <<'PLAN'
 ---
@@ -831,10 +816,7 @@ PLAN
   ( cd "$TEST_PROJECT_ROOT" && source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_ensure_manifest P046 . )
   run yq -r '.depends_on_plans[]' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P046.yaml"
   [[ "$output" == *"P045"* ]]                       # dep reached the manifest via the NORMAL path
-  # and init hard-blocks because P045 is not closed (D1 reads the tracked manifest)
-  run "$FSM" init $(build_default_init_args "E-046-1_1")
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"depends_on_plans: P045"* ]]
+  # (the gate that reads it is tested on the plan's run above)
 }
 
 # v2.58.2 audit hardening: a stray leading blank line before the `---` fence must
@@ -846,9 +828,6 @@ PLAN
   ( cd "$TEST_PROJECT_ROOT" && source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_ensure_manifest P047 . )
   run yq -r '.depends_on_plans[]' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P047.yaml"
   [[ "$output" == *"P045"* ]]                       # dependency survived the leading blank line
-  run "$FSM" init $(build_default_init_args "E-047-1_1")
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"depends_on_plans: P045"* ]]
 }
 
 # ─── E-046-1_3 Step 2: _generated_at required in CP2 verifier output ─────────
