@@ -18,7 +18,8 @@ clinic and nobody saw them, because only its text was fetched).
       follows). target = photo@<slot>@<sha of the cards>. Writes the previews into .aid-ui/studio/previews/.
   apply <project> --answer <question id>
       The client's answer (brand-state.json answers, kind photos, this question's target). choose <candidate>:
-      the photo becomes docs/content/photos/<slot>.webp (at most 1600 px, 200 kB, aid-ui-tool.sh webp) and every
+      the photo becomes docs/content/photos/<slot>.webp (at most 1600 px, 200 kB, aid-ui-tool.sh webp) and
+      <slot>-800.webp for phones (srcset), and every
       photos.yaml entry of the slot gets src, src_from and alt (the agent's --describe of what is on the photo, else
       the old site's alt; neither = refused: the brief's "what" is not a description of the photo). choose keep: nothing changes. An answer
       is used once.
@@ -194,12 +195,16 @@ def apply(p, qid):
             break
     if r.returncode:
         die("the photo did not fit 200 kB as WebP: " + (r.stderr or r.stdout).strip()[-200:])
+    small = os.path.join(os.path.dirname(out), slot + "-800.webp")   # the phone's size: the gate wants a srcset (page_weight)
+    r = subprocess.run(["bash", TOOL, "webp", c["file"], small, "800", "0.78"], capture_output=True, text=True)
+    if r.returncode:
+        die("the 800 px photo did not fit 200 kB as WebP: " + (r.stderr or r.stdout).strip()[-200:])
     spec = slot_spec(p, slot)[0]
     rel = os.path.relpath(out, p)
     alt = c.get("describe") or c.get("alt")
     if not alt:
         die("%s has no description for screen readers: mark %s --describe '<what is on the photo>' first" % (c["id"], c["id"]))
-    for k, v in (("src", rel), ("src_from", c["url"]), ("alt", alt)):
+    for k, v in (("src", rel), ("src_800", os.path.relpath(small, p)), ("src_from", c["url"]), ("alt", alt)):
         subprocess.run(["yq", "-i", '(.[] | select(.id == "%s")).%s = %s' % (slot, k, json.dumps(v, ensure_ascii=False)),
                         os.path.join(p, "docs", "content", "photos.yaml")], check=True)
     save(p, d)

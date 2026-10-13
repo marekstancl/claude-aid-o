@@ -85,7 +85,8 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
    `border-radius:50%`) a pozadím z tokenu. Ikona fotoaparátu nese `data-aid-icon="camera"`, bez ní brána rámeček nepozná. Dodaná fotka se jen vloží:
    `<img src=… alt="<co je na ní>" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">`
    a `aria-hidden` se z rámečku odebere. Brána `photo_slots` to zkouší vložením zkušební fotky.
-   Má-li místo v `photos.yaml` `src` (klient vybral fotku, krok 3 bod 2c), stavba ji vloží s `alt` z `photos.yaml`;
+   Má-li místo v `photos.yaml` `src` (klient vybral fotku, krok 3 bod 2c), stavba ji vloží s `alt` z `photos.yaml`
+   a se `srcset` (`src_800` 800w, `src` 1600w) a `sizes`;
    brána prázdné místo s `src` hlásí jako selhání.
 5. Písma: build servíruj lokálně jen na 127.0.0.1 - volný port
    `port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')`,

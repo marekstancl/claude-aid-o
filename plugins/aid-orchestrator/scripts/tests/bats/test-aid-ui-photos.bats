@@ -41,7 +41,8 @@ answer() { jq --arg q "$1" --arg c "$2" --arg t "$3" '.answers[$q] = {kind: "pho
   t="$(jq -r .question.target <<<"$q")"
   answer old c1 "photo@ambulancia@0000"; run python3 "$PH" apply "$P" --answer old; [ "$status" -eq 1 ]; [[ "$output" == *"another question"* ]]
   answer a1 c1 "$t"; run python3 "$PH" apply "$P" --answer a1; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [ -f "$P/docs/content/photos/ambulancia.webp" ]
+  [ -f "$P/docs/content/photos/ambulancia.webp" ]; [ -f "$P/docs/content/photos/ambulancia-800.webp" ]
+  yq -e '.[0].src_800 == "docs/content/photos/ambulancia-800.webp"' "$P/docs/content/photos.yaml" >/dev/null
   yq -e '.[0].src == "docs/content/photos/ambulancia.webp" and .[0].src_from == "https://cdn.example/ordinacia.jpg" and .[0].alt == "Ordinácia so zubárskym kreslom"' "$P/docs/content/photos.yaml" >/dev/null
   run python3 "$PH" apply "$P" --answer a1; [ "$status" -eq 1 ]; [[ "$output" == *"already used"* ]]
   # keep: nothing changes
