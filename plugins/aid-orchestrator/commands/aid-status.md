@@ -77,9 +77,9 @@ linked worktree has no `.aid-o` of its own.
    "The controller column" and "Stalled runs" below. A direct run (one run of
    the whole plan on `plan/<id>`, P111) shows `běh 1/1 (přímý)` after its
    branch; a run whose state file says `abandoned: true` is not shown (P111).
-3. **Derive each stream's next actionable EPIC** — recipe **`next-epic`**, the
+3. **Derive each stream's next actionable run** — recipe **`next-epic`**, the
    single definition `/aid-run`'s multi-plan selection also uses. See
-   "Next actionable EPIC" below for the rule.
+   "Next actionable run" below for the rule.
 4. **Scan quick logs** — recipe **`quick-tasks`**: the three newest
    `.aid-o/work/quick/Q-*.md` by mtime (ties broken by filename), rendered as
    id + title.
@@ -91,7 +91,11 @@ linked worktree has no `.aid-o` of its own.
 **Example render.** This is the literal output of `render_overview` against the
 two-stream fixture in `scripts/tests/bats/test-status-two-streams.bats`; that
 suite compares the assembled output with this block byte-for-byte, so what you
-read here is what the recipes actually produce:
+read here is what the recipes actually produce. Since 3.0.0 a plan has ONE run
+(`E-<nnn>-1_1` on `plan/<id>`, shown `běh 1/1 (přímý)`); the fixture keeps
+several rows on task branches only to show every controller state the column
+can render (a project updated from 2.118.x may also list an old EPIC run until
+it is abandoned):
 
 ```
 AID Status
@@ -300,7 +304,7 @@ the run's `timeline.jsonl`. Three consequences worth knowing:
 collapses to the single line `plan <id>: state unreadable — run plan-state <id>
 --repair` and every other block still renders.
 
-**Next actionable EPIC.** One rule, used by this surface and by `/aid-run`'s
+**Next actionable run.** One rule, used by this surface and by `/aid-run`'s
 multi-plan selection, deterministic so two agents always name the same EPIC:
 
 1. **Live runs first.** Take the plan's entries in `active-runs.json` whose
@@ -906,7 +910,7 @@ planless_epics() {
 
 ```bash
 # recipe: next-epic — defines next_epic <plan_id>: the plan's next actionable
-# EPIC by the rule documented in "Next actionable EPIC" above. Live runs
+# run by the rule documented in "Next actionable run" above. Live runs
 # (READY/EXECUTE/GATES) win, lowest epic_id first; otherwise "(none)".
 next_epic() {
   local _p="${1:-}" _cand
