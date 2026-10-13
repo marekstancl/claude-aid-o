@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - **Technik** hodnotí vyhledávače a hloubku obsahu, strukturovaná data, rychlost, přístupnost, mobil, doručení formuláře a připravenost ke spuštění. Dostává výsledky brány pro dané sestavení (`podklady/overenie.json`).
   - **Autorství měřítek:** `critic/web-local.owner.yaml` napsal Codex, `critic/web-local.tech.yaml` nezávislý Claude. Každý psal jen ze zadání role (`critic/role-briefs/`) a každé měřítko zrevidoval ten druhý. `critic/AUTHORS.yaml` drží autora, revizora a otisk. `freeze` odmítne měřítko, které otisku neodpovídá.
   - **Zmrazení:** jedno zmrazení drží obě role. Starší zmrazení s jedním kritikem se odmítne.
+- **Práce studia, ne to, co klient nedodal:** drží-li kritérium dole jen otevřený bod klienta (`oi-…` v `podklady/overenie.json`, majitel je nově vidí taky), kritik dá vedle `score` (web teď) i `studio_score` s `limited_by`. Smyčka a audit počítají práci studia, `quality_now` a studio ukazují web, jak je. `limited_by` mimo otevřené body klienta je neplatná odpověď. `studio_score` pod `score` taky.
+- **Cesta k 10:** každé kritérium pod 10 nese `to_ten` (kroky studia a klienta: co, kde, jak to bude vypadat). Bez kroku je odpověď neplatná. `fix` u nálezu má být tak konkrétní, aby šel udělat bez dotazu.
+- **Po každém kole hlášení PM:** návrhy kritiků, co a jak se udělalo, podle jakého postupu (nebo z hlavy a proč), známky, cena a čas (`steps/8-quality.md` bod 5).
+  - `fixed` vyžaduje `--method`: krok, dovednost, nebo `z hlavy: <proč postup nebyl>`.
+  - `round` vypíše pro hlášení opravy předchozího kola s postupem (`fixed_before`) a cestu k 10 od obou rolí.
+- **Kritický otevřený bod klienta blokuje zveřejnění vždy:** verdikt auditu ho přidá do `publish_blocked_by`, i když ho kritici nevyjmenují.
 - **Kritici si pamatují:** každá role dostane své nálezy z minulých kol a co se s nimi stalo. Vyřešený nebo zamítnutý nález smí zopakovat jen jako `regression_of` s důkazem, jiné id je neplatná odpověď. Audit paměť nedostává.
 - **Majitel srovnává s konkurencí:** nový příkaz `aid-ui-client.py competitors` jednou za smyčku nafotí domovské stránky 3-5 konkurentů z `.aid-ui/critic/competitors.json`. Bez snímků 1440 a 390 aktuálního seznamu majitel nehodnotí.
 - **Smyčka: nejvýš 3 kola oprav, nebo obě role ≥ 8,5** a žádné kritérium pod 7. Pak opravy končí a přijde audit: 3 slepá hodnocení od každé role. Za role platí medián ≥ 8,5, žádné hodnocení pod 8 a žádné kritérium pod 7.

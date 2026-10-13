@@ -18,7 +18,7 @@ import sys, json, yaml, os
 s = int(sys.argv[1]); r = yaml.safe_load(open(os.environ["K"] + "/web-local." + os.environ.get("ROLE", "owner") + ".yaml"))
 anchor = lambda x: max(a for a in (4, 6, 8, 10) if a <= x) if x >= 4 else None
 print(json.dumps({"criteria": [{"id": c["id"], "score": s, "anchor": anchor(s), "evidence": "úvod: nadpis a fotka pece",
-  "missing_for_next": "více obrazu"} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": r["criteria"][0]["id"], "severity": "minor",
+  "missing_for_next": "více obrazu", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"] if s < 10 else [], "client": []}} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": r["criteria"][0]["id"], "severity": "minor",
   "owner": "agent", "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}], "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
   [ -z "${2:-}" ] || { jq "$2" "$BATS_TEST_TMPDIR/a.json" > "$BATS_TEST_TMPDIR/b.json" && mv "$BATS_TEST_TMPDIR/b.json" "$BATS_TEST_TMPDIR/a.json"; }
@@ -77,7 +77,7 @@ score() { python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json" --role "${ROLE:-own
     jq -e '.quality_score == 9 and .accepted == true and .findings_by_owner.agent == 1 and .readiness == ["vlastní fotky"]' <<<"$output" >/dev/null
     answer 8; run score; jq -e '.quality_score == 8 and .accepted == false' <<<"$output" >/dev/null   # 8 is under 8.5
     # one criterion 6 but a high mean: the floor of 7 refuses it
-    answer 10 "(.criteria[0]) |= (.score = 6 | .anchor = 6)"
+    answer 10 '(.criteria[0]) |= (.score = 6 | .anchor = 6 | .to_ten.studio = ["úvod: vlastní fotka ordinace přes celou šířku"])'
     run score; jq -e '.quality_score >= 9 and .min_criterion == 6 and .accepted == false' <<<"$output" >/dev/null
     # not assessable: left out and the weights re-normalised; without a reason refused
     answer 9 '(.criteria[0]) |= (.score = null | .anchor = null | .not_assessable = "nešlo ověřit")'
@@ -93,6 +93,18 @@ score() { python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json" --role "${ROLE:-own
   answer 8 '.criteria[0].not_assessable = "nešlo"'; run score; [ "$status" -eq 1 ]; [[ "$output" == *"schema"* ]]
   answer 8 '.criteria[0].missing_for_next = ""'; run score; [ "$status" -eq 1 ]
   answer 8 '.findings[0].owner = "studio"'; run score; [ "$status" -eq 1 ]; [[ "$output" == *"schema"* ]]
+  # the path to 10 is required below 10
+  answer 8 '.criteria[0].to_ten = {"studio": [], "client": []}'; run score; [ "$status" -eq 1 ]; [[ "$output" == *"no step to 10"* ]]
+  answer 10; run score; [ "$status" -eq 0 ]
+  # two scores where an open client item holds the criterion down: the loop counts the studio's, quality_now the web as it is
+  answer 9 '.criteria[0] |= (.score = 5 | .anchor = 4 | .studio_score = 9 | .studio_anchor = 8 | .limited_by = ["oi-4"] | .to_ten.client = ["vlastné fotky lekára a tímu"])'
+  run score; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.quality_score == 9 and .quality_now < 9 and .min_criterion == 9 and .limited_by == ["oi-4"] and .accepted == true' <<<"$output" >/dev/null
+  answer 9 '.criteria[0] |= (.studio_score = 9 | .studio_anchor = 8)'; run score; [ "$status" -eq 1 ]; [[ "$output" == *"schema"* ]]   # no limited_by
+  answer 9 '.criteria[0] |= (.score = 5 | .anchor = 4 | .studio_score = 9 | .studio_anchor = 8 | .limited_by = ["oi-4"])'; run score; [ "$status" -eq 1 ]; [[ "$output" == *"to_ten.client"* ]]
+  answer 10 '.criteria[0].to_ten.studio = ["úvod: ještě jedna fotka navíc"]'; run score; [ "$status" -eq 1 ]; [[ "$output" == *"to_ten must be empty"* ]]
+  answer 9 '.criteria[0] |= (.score = 9 | .studio_score = 6 | .studio_anchor = 6 | .limited_by = ["oi-4"] | .to_ten.client = ["vlastné fotky lekára"])'; run score; [ "$status" -eq 1 ]; [[ "$output" == *"under score"* ]]
+  answer 9 '.criteria[0] |= (.score = 5 | .anchor = 4 | .studio_score = 9 | .studio_anchor = 6 | .limited_by = ["oi-4"] | .to_ten.client = ["vlastné fotky lekára"])'; run score; [ "$status" -eq 1 ]; [[ "$output" == *"studio_score 9 does not sit"* ]]
   answer 8 '.findings[0].regression_of = "r1-owner-f2"'; run score; [ "$status" -eq 0 ]   # the field is allowed; the client checks the id
   # a tech criterion in an owner answer is refused
   answer 8 ".findings[0].criterion = \"$(ROLE=tech first)\""; run score; [ "$status" -eq 1 ]; [[ "$output" == *"unknown criterion"* ]]

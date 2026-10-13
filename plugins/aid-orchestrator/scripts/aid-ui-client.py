@@ -264,7 +264,7 @@ def checks_seen(project, site):
         st = json.load(open(os.path.join(project, "docs", "design", "brand-state.json"), encoding="utf-8"))
     except (OSError, ValueError):
         st = {}
-    items = [{k: i.get(k) for k in ("text", "owner", "critical")} for i in st.get("open_items") or [] if i.get("status") == "open"]
+    items = [{k: i.get(k) for k in ("id", "text", "owner", "critical")} for i in st.get("open_items") or [] if i.get("status") == "open"]
     return {"gate": list(gate.values()), "open_items": items} if gate or items else None
 
 
@@ -332,7 +332,10 @@ def critic(project, web, audit, out, role, history=None):
         os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
         shutil.copyfile(facts_src, os.path.join(bundle, "podklady", "facts.yaml"))
         facts_sha = sha_file(facts_src)
-    checked = checks_seen(project, site) if role == "tech" else None
+    checked = checks_seen(project, site)
+    if checked and role == "owner":   # the owner sees what the client still owes, not the gate's numbers
+        checked = {"gate": [], "open_items": checked["open_items"]} if checked["open_items"] else None
+    client_items = {i["id"] for i in (checked or {}).get("open_items", []) if i.get("id") and i.get("owner") in ("klient", "client")}
     hist_ids = set()
     if history and not audit:   # an audit is blind: no memory
         h = json.load(open(history, encoding="utf-8"))
@@ -370,9 +373,11 @@ def critic(project, web, audit, out, role, history=None):
                  " kvůli textům stránek; kód a metadata nehodnotíš). Nic mimo pracovní adresář nečti.")
               + ("\n\nRegistr faktů, které podnik potvrdil (hodnota, zdroj, kdo a kdy potvrdil), je v `podklady/facts.yaml`."
                  " Má přednost před staršími podklady výše: co je v něm potvrzené, není nepodložené tvrzení." if facts_sha else "")
-              + ("\n\nCo ze souborů vidět není, ověřila brána na tomto sestavení a stojí v `podklady/overenie.json`"
-                 " (např. skutečné odeslání formuláře přes testovacího příjemce), spolu s otevřenými body ke spuštění."
-                 " Co je tam otevřený bod (nasazení, údaje od klienta), patří do readiness, ne do nálezů." if checked else "")
+              + (("\n\nCo ze souborů vidět není, ověřila brána na tomto sestavení a stojí v `podklady/overenie.json`"
+                  " (např. skutečné odeslání formuláře přes testovacího příjemce), spolu s otevřenými body ke spuštění."
+                  if role == "tech" else "\n\nOtevřené body ke spuštění (co ještě dodá podnik) jsou v `podklady/overenie.json`.")
+                 + " Co je tam otevřený bod (nasazení, údaje od klienta), patří do readiness, ne do nálezů; drží-li kritérium"
+                   " dole otevřený bod klienta, dej i `studio_score` s `limited_by` (pravidla v části Jak hodnotíš)." if checked else "")
               + ("\n\nTvé nálezy z minulých kol a co s nimi studio udělalo: `podklady/historie.json` (pravidla v části Paměť)."
                  if hist_ids or (history and not audit) else "")
               + ("\n\nWeby konkurence (domovské stránky, nafocené %s): %s. Snímky jsou přiložené a v `podklady/konkurence/`."
@@ -396,6 +401,9 @@ def critic(project, web, audit, out, role, history=None):
         bad = [x["regression_of"] for x in a.get("findings") or [] if x.get("regression_of") and x["regression_of"] not in hist_ids]
         if bad:
             return None, "regression_of %s: no fixed or rejected finding with that id in podklady/historie.json" % ", ".join(bad)
+        lim = sorted({i for c in a.get("criteria") or [] for i in c.get("limited_by") or [] if i not in client_items})
+        if lim:   # a second score only where an open item of the client holds the web down
+            return None, "limited_by %s: no open item of the client with that id in podklady/overenie.json" % ", ".join(lim)
         return {"answer": a, "score": json.loads(s.stdout)}, None
 
     got, rec = ask(project, prompt, images + comp, bundle, out, valid, "critic:%s:%s" % (kind, role))

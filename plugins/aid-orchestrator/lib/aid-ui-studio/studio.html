@@ -1164,7 +1164,8 @@ function qualityBlock() {
       const fs = Array.isArray(r.findings) ? r.findings.filter(f => f.owner === "agent") : [];
       const done = fs.filter(f => f.evidence).length;
       const c = r.cost && typeof r.cost === "object" ? r.cost : null;
-      const sc = r.owner != null ? "majitel " + n1(r.owner) + " · technik " + n1(r.tech) : n1(r.quality_score) + "/10";
+      const now = (a, b) => b != null && b !== a ? " (web teď " + n1(b) + ", chybí podklady klienta)" : "";
+      const sc = r.owner != null ? "majitel " + n1(r.owner) + now(r.owner, r.owner_now) + " · technik " + n1(r.tech) + now(r.tech, r.tech_now) : n1(r.quality_score) + "/10";
       return el("li", {}, el("b", {}, (r.audit ? "Audit" : "Kolo " + r.n) + ": " + sc),
         el("span", { class: "muted" }, " · nejslabší kritérium " + n1(r.min_criterion) + " · opraveno " + done + " z " + fs.length + " připomínek"
           + (c ? " · " + n1(c.usd) + " USD, " + c.minutes + " min" + (c.agent_measured ? "" : " (práce AI neměřena)") : "")));

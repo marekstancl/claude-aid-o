@@ -157,9 +157,20 @@ def check(rec, ans):
             if not (c.get("not_assessable") or "").strip():
                 return f"{c['id']}: no score and no reason (not_assessable)"
             continue
-        want_anchor = None if c["score"] < 4 else max(a for a in (4, 6, 8, 10) if a <= c["score"])
-        if c["anchor"] != want_anchor:
-            return f"{c['id']}: score {c['score']} does not sit on its anchor {c['anchor']} (1-3 null, 4-5 4, 6-7 6, 8-9 8, 10 10)"
+        for sk, ak in (("score", "anchor"), ("studio_score", "studio_anchor")):
+            if c.get(sk) is None:
+                continue
+            want_anchor = None if c[sk] < 4 else max(a for a in (4, 6, 8, 10) if a <= c[sk])
+            if c[ak] != want_anchor:
+                return f"{c['id']}: {sk} {c[sk]} does not sit on its anchor {c[ak]} (1-3 null, 4-5 4, 6-7 6, 8-9 8, 10 10)"
+        if c.get("studio_score") is not None and c["studio_score"] < c["score"]:
+            return f"{c['id']}: studio_score {c['studio_score']} under score {c['score']} (the studio's part is never worse than the whole)"
+        if c["score"] < 10 and not (c["to_ten"]["studio"] or c["to_ten"]["client"]):
+            return f"{c['id']}: score {c['score']} and no step to 10 (to_ten)"
+        if c["score"] == 10 and (c["to_ten"]["studio"] or c["to_ten"]["client"]):
+            return f"{c['id']}: score 10 with steps to 10 (to_ten must be empty)"
+        if c.get("studio_score") is not None and not c["to_ten"]["client"]:   # what holds it down is named as the client's part
+            return f"{c['id']}: studio_score without what the client supplies (to_ten.client)"
     for f in ans["findings"]:
         if f["criterion"] not in want:
             return f"finding {f['id']}: unknown criterion {f['criterion']}"
@@ -167,15 +178,20 @@ def check(rec, ans):
 
 
 def score(rec, ans):
+    """The loop's measure is the studio's work: a criterion held down only by an open client item counts with its
+    studio_score (PM 13. 10. 2026: what the owner did not deliver is no criterion of the agent's work); quality_now is
+    the web as it is."""
     w = {c["id"]: c["weight"] for c in rec["rubric"]["criteria"]}
-    sc = {c["id"]: c["score"] for c in ans["criteria"] if c["score"] is not None}
+    now = {c["id"]: c["score"] for c in ans["criteria"] if c["score"] is not None}
+    sc = {c["id"]: (c.get("studio_score") or c["score"]) for c in ans["criteria"] if c["score"] is not None}
     tot = sum(w[k] for k in sc)
-    q = round(sum(sc[k] * w[k] for k in sc) / tot, 1) if tot else 0.0
-    mn = min(sc.values()) if sc else 0
+    mean = lambda d: round(sum(d[k] * w[k] for k in d) / tot, 1) if tot else 0.0
+    q, mn = mean(sc), (min(sc.values()) if sc else 0)
     owners = {"agent": 0, "client": 0}
     for f in ans["findings"]:
         owners[f["owner"]] += 1
-    return {"quality_score": q, "criteria": sc, "min_criterion": mn,
+    return {"quality_score": q, "quality_now": mean(now), "criteria": sc, "criteria_now": now, "min_criterion": mn,
+            "limited_by": sorted({i for c in ans["criteria"] for i in c.get("limited_by") or []}),
             "accepted": q >= ACCEPT and mn >= FLOOR, "findings_by_owner": owners,
             "readiness": [r["item"] for r in ans["readiness"]]}
 
@@ -229,7 +245,8 @@ def main(a):
         ok = med >= ACCEPT and low >= ACCEPT_ANY and (min(crit.values()) if crit else 0) >= FLOOR
         ready = sorted({i for r in runs for i in r["readiness"]})
         text = ("přijato" + (", zveřejnění blokuje: " + "; ".join(ready) if ready else ", připraveno ke zveřejnění")) if ok else "nepřijato"
-        print(json.dumps({"role": role, "ratings": len(runs), "median_quality_score": med, "lowest_rating": low, "criteria_median": crit,
+        print(json.dumps({"role": role, "ratings": len(runs), "median_quality_score": med,
+                          "median_quality_now": statistics.median(r["quality_now"] for r in runs), "lowest_rating": low, "criteria_median": crit,
                           "accepted": ok, "publish_blocked_by": ready, "verdict": text}, ensure_ascii=False))
         sys.exit(0 if ok else 3)
     die("usage: freeze <project> --type <type> [--force] | prompt|score|verdict <project> --role owner|tech [<retro.json>...]", 2)

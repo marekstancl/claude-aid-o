@@ -21,6 +21,15 @@ Obě měřítka (`critic/<typ>.owner.yaml`, `critic/<typ>.tech.yaml`) napsali dv
 nové zadání role, nového autora a revizi.
 
 - **Kolo je přijaté**, když oba dají aspoň 8,5 a žádné kritérium není pod 7.
+- **Hodnotí se práce studia, ne to, co klient nedodal** (PM 13. 10. 2026). Drží-li kritérium dole jen otevřený bod
+  klienta (vlastní fotky, přístup k hostingu…), kritik dá dvě známky:
+  - `score`: jak web vypadá teď,
+  - `studio_score` s `limited_by` (id bodů `oi-…`): jak dobře studio naložilo s tím, co mělo.
+
+  Smyčka počítá `studio_score`. Studio i hlášení ukazují obojí („web teď …“). Zveřejnění dál blokují kritické
+  otevřené body klienta. Kód odmítne `limited_by`, které není otevřeným bodem klienta.
+- **Cesta k 10:** každé kritérium pod 10 nese `to_ten`, tedy konkrétní kroky rozdělené na „udělá studio“
+  a „dodá klient“. Bez kroku je odpověď neplatná.
 - **Strop:** nejvýš tři kola oprav. Jakmile je kolo přijaté, opravy končí a přijde audit.
 - **Práh zná jen kód** (`aid-ui-critic.py`). Kritici ho neznají a nevidí ani minulé známky.
 
@@ -66,10 +75,17 @@ a čas každého kola. Zprávu dostane jen při zastavení (rozpor nálezů, nic
    - `superseded --reason`.
 
    Nálezy vlastníka `client` (fotky, právník, IČO) jsou rovnou `blocked` a patří do připravenosti, ne do známky.
-5. **Oprav přijaté** stejnou cestou jako v kroku 6 a 7: zdroj webu, přestavba, `build-record`, brána,
+5. **Oprav přijaté** podle `to_ten` a `fix` kritika stejnou cestou jako v kroku 6 a 7: zdroj webu, přestavba, `build-record`, brána,
    `gate-record`, při změně textů kontrola textů. Každou opravu zapiš:
-   `aid-ui-quality.py fixed <project> <id> --evidence "<co se změnilo a kde>"`.
+   `aid-ui-quality.py fixed <project> <id> --evidence "<co se změnilo a kde>" --method "<krok nebo dovednost | z hlavy: proč postup nebyl>"`.
    Důkaz uvidí příští kolo autor nálezu.
+   **Po každém kole zastav a pošli PM hlášení** (PM 13. 10. 2026). Obsahuje:
+   - co navrhl majitel a technik (první tři nálezy každého a cestu k 10),
+   - co jsi udělal a jak,
+   - podle jakého postupu (krok, převzatá dovednost), nebo „z hlavy“ a proč postup nebyl či co na něm bylo špatné,
+   - známky obou rolí (i „web teď“), cenu a čas kola.
+
+   Mezery v postupech zapiš do deníku tření.
 6. **Další krok řekne** `aid-ui-quality.py status <project>`:
    - `triage`, `fix` a `round`: pokračuj podle bodů 3 až 5.
    - `close`: cíl je splněný nebo kola došla a zbývají přijaté neopravené nálezy. Nastav jim

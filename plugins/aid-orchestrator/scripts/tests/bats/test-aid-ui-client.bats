@@ -18,7 +18,7 @@ setup() {
 import sys, json, yaml
 r = yaml.safe_load(open(sys.argv[1]))
 print(json.dumps({"criteria": [{"id": c["id"], "score": 8, "anchor": 8, "evidence": "úvod: nadpis a fotka pece",
-  "missing_for_next": "vlastní motiv"} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": r["criteria"][0]["id"], "severity": "minor",
+  "missing_for_next": "vlastní motiv", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"], "client": []}} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": r["criteria"][0]["id"], "severity": "minor",
   "owner": "agent", "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}],
   "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
@@ -87,7 +87,7 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WE
   grep -q "podklady/overenie.json" "$T/r1g/prompt.md"; jq -e '.role == "tech" and .score.quality_score == 8' "$T/r1g/run.json" >/dev/null
   [ ! -e "$T/r1g/bundle/podklady/konkurence" ]   # the competition is the owner's
   python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/r1o" >/dev/null
-  [ ! -e "$T/r1o/bundle/podklady/overenie.json" ]   # the gate's numbers are the technician's
+  jq -e '.gate == [] and (.open_items | length) == 1' "$T/r1o/bundle/podklady/overenie.json" >/dev/null   # the gate's numbers are the technician's, the open items both
   [ "$(ls "$T/r1o/bundle/podklady/konkurence" | wc -l)" -eq 6 ]; grep -q "Weby konkurence" "$T/r1o/prompt.md"
   jq '.build_id = "stale"' "$P/.aid-ui/verify/result.json" > "$T/x" && mv "$T/x" "$P/.aid-ui/verify/result.json"
   CODEX_ANS="$T/ans-tech.json" python3 "$CL" critic "$P" --role tech --web "$W" --out "$T/r1h" >/dev/null
@@ -102,6 +102,16 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WE
   jq '.findings[0].regression_of = "r9-owner-nic"' "$ANS" > "$T/ans-bad.json"
   CODEX_ANS="$T/ans-bad.json" CLAUDE_ANS="$ANS" python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist.json" --out "$T/r1n" >/dev/null
   jq -e '.provider == "claude" and ([.attempts[] | select(.error != null and (.error | contains("regression_of")))] | length) == 2' "$T/r1n/run.json" >/dev/null
+  # a second score only where an open item of the CLIENT holds the web down (the owner sees the open items too)
+  echo '{"open_items": [{"id": "oi-4", "text": "vlastné fotky", "owner": "klient", "status": "open"}, {"id": "oi-11", "text": "príjem na hostingu", "owner": "agent", "status": "open"}]}' > "$P/docs/design/brand-state.json"
+  jq '.criteria[0] |= (.score = 5 | .anchor = 4 | .studio_score = 8 | .studio_anchor = 8 | .limited_by = ["oi-4"] | .to_ten.client = ["vlastné fotky"])' "$ANS" > "$T/ans-lim.json"
+  CODEX_ANS="$T/ans-lim.json" python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/r1l" >/dev/null
+  jq -e '.provider == "codex" and .score.limited_by == ["oi-4"] and .score.quality_now < .score.quality_score' "$T/r1l/run.json" >/dev/null
+  jq -e '(.open_items | map(.id)) == ["oi-4", "oi-11"] and .gate == []' "$T/r1l/bundle/podklady/overenie.json" >/dev/null
+  jq '.criteria[0] |= (.score = 5 | .anchor = 4 | .studio_score = 8 | .studio_anchor = 8 | .limited_by = ["oi-11"] | .to_ten.client = ["prístup k hostingu"])' "$ANS" > "$T/ans-lim2.json"
+  CODEX_ANS="$T/ans-lim2.json" CLAUDE_ANS="$ANS" python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/r1k" >/dev/null
+  jq -e '.provider == "claude" and (.attempts[0].error | contains("limited_by oi-11"))' "$T/r1k/run.json" >/dev/null   # oi-11 is the studio's own
+  rm "$P/docs/design/brand-state.json"
   # an audit is blind: no memory even when a history is passed
   python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist.json" --audit --out "$T/r1a" >/dev/null
   [ ! -e "$T/r1a/bundle/podklady/historie.json" ]

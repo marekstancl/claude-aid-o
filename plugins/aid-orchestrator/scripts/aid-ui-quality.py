@@ -19,8 +19,9 @@ rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memo
       accepted (--expected: what it should raise), rejected_with_reason (--reason), duplicate (--of, also across the
       roles), blocked (--reason; with --conflict-with <id> the loop stops for the PM: fixing one makes the other
       worse - the gate always wins), superseded (--reason).
-  fixed <project> <finding> --evidence <t>
-      An accepted finding is fixed; the evidence names what changed and where (the role sees it next round).
+  fixed <project> <finding> --evidence <t> --method <t>
+      An accepted finding is fixed; the evidence names what changed and where (the role sees it next round), the
+      method which procedure made it (a step, an adopted skill) or "z hlavy: <why none>" - the round report to the PM.
   status <project>
       {decision, why, rounds, repair_rounds, scores, best} with decision one of
       triage | fix | round | close | audit | stop:conflict | stop:stagnation | stop:round_cap | done.
@@ -37,7 +38,7 @@ rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memo
       {accepted = both roles accepted, roles}. A failed rating decides nothing (exit 1). Not accepted: the auditors'
       findings become an audit round to triage (not counted as a repair round). Exit 0 accepted, 3 not, 1 refused.
 """
-import json, os, subprocess, sys, time
+import json, os, re, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLIENT, CRITIC = (os.path.join(HERE, x) for x in ("aid-ui-client.py", "aid-ui-critic.py"))
@@ -187,9 +188,10 @@ def write_loop(p):
     rs = rounds(p)
     cost = round_costs(p, rs)
     st["history"] = [{"n": r["n"], "at": r["at"], "audit": bool(r.get("audit")), "quality_score": r["score"]["quality_score"],
-                      "owner": r["score"].get("owner"), "tech": r["score"].get("tech"), "min_criterion": r["score"]["min_criterion"],
+                      "owner": r["score"].get("owner"), "tech": r["score"].get("tech"), "owner_now": r["score"].get("owner_now"),
+                      "tech_now": r["score"].get("tech_now"), "min_criterion": r["score"]["min_criterion"],
                       "accepted": r["score"]["accepted"], "provider": r.get("provider"), "cost": c,
-                      "findings": [{k: f.get(k) for k in ("id", "role", "criterion", "severity", "owner", "text", "state", "reason", "expected", "evidence")}
+                      "findings": [{k: f.get(k) for k in ("id", "role", "criterion", "severity", "owner", "text", "state", "reason", "expected", "evidence", "method")}
                                    for f in r["findings"]]} for r, c in zip(rs, cost)]
     st["cost_total_usd"] = round(sum(c["usd"] for c in cost), 2)
     first = costs.ts(rs[0]["at"]) if rs else None   # the build before the loop: not a round's cost, said apart
@@ -277,6 +279,8 @@ def merge(runs):
     sc = {role: runs[role]["score"] for role in ROLES}
     crit = {"%s.%s" % (role, k): v for role in ROLES for k, v in sc[role]["criteria"].items()}
     return {"quality_score": min(sc[r]["quality_score"] for r in ROLES), "owner": sc["owner"]["quality_score"], "tech": sc["tech"]["quality_score"],
+            "owner_now": sc["owner"].get("quality_now"), "tech_now": sc["tech"].get("quality_now"),   # the web as it is, client items missing
+            "limited_by": sorted({i for r in ROLES for i in sc[r].get("limited_by") or []}),
             "criteria": crit, "min_criterion": min(crit.values()) if crit else 0, "accepted": all(sc[r]["accepted"] for r in ROLES),
             "readiness": sorted({i for r in ROLES for i in sc[r]["readiness"]})}
 
@@ -315,10 +319,20 @@ def do_round(p, web):
     save_round(p, rec)
     st = write_loop(p)
     top = {role: [f["text"] for f in finds if f["role"] == role and f["owner"] == "agent"][:3] for role in ROLES}   # the critics rank by impact
-    print(json.dumps({"round": n, "owner": score["owner"], "tech": score["tech"], "min_criterion": score["min_criterion"],
+    to_ten = {}
+    for role, (_, out) in res.items():
+        a = json.load(open(os.path.join(out, "answer.json"), encoding="utf-8"))
+        to_ten[role] = {c["id"]: c["to_ten"] for c in a["criteria"] if c.get("to_ten") and (c["to_ten"]["studio"] or c["to_ten"]["client"])}
+    prev = [r for r in rounds(p) if r["n"] < n]
+    done = [{k: f.get(k) for k in ("id", "text", "evidence", "method")} for f in (prev[-1]["findings"] if prev else []) if f.get("evidence")]
+    rec["to_ten"] = to_ten
+    save_round(p, rec)
+    print(json.dumps({"round": n, "owner": score["owner"], "tech": score["tech"], "owner_now": score["owner_now"], "tech_now": score["tech_now"],
+                      "limited_by": score["limited_by"], "min_criterion": score["min_criterion"],
                       "findings": len(finds), "top3": top, "decision": st["decision"], "loop_usd": st["cost_total_usd"],
                       "loop_minutes": sum(h["cost"]["minutes"] for h in st["history"]),
-                      "previous_round": st["history"][-2]["cost"] if len(st["history"]) > 1 else None}, ensure_ascii=False))
+                      "previous_round": st["history"][-2]["cost"] if len(st["history"]) > 1 else None,
+                      "fixed_before": done, "to_ten": to_ten}, ensure_ascii=False))
 
 
 def find(p, fid):
@@ -358,13 +372,20 @@ def triage(p, fid, state, opts):
     print("%s: %s -> %s" % (fid, state, write_loop(p)["decision"]))
 
 
-def fixed(p, fid, evidence):
+def fixed(p, fid, evidence, method):
     last, f = find(p, fid)
     if f.get("state") != "accepted":
         die("%s is %s; only an accepted finding is fixed" % (fid, f.get("state")))
     if not (evidence or "").strip():
         die("fixed needs --evidence", 2)
-    f["evidence"], f["fixed_at"] = evidence.strip(), now()
+    # PM 13. 10. 2026: every fix says which procedure made it, or that none did and why (the round report and the
+    # gaps in the plugin's procedures come from this)
+    m = (method or "").strip()
+    why = m[len("z hlavy:"):].strip() if m.lower().startswith("z hlavy:") else None
+    named = re.search(r"(steps/|adopted/|skills?/|references/|SKILL\.md|aid-ui-[a-z-]+)", m)
+    if not ((why is not None and len(why) >= 10) or (why is None and named)):
+        die('fixed needs --method "<step or skill, e.g. steps/6-build.md 3a | adopted/emil-skills/...>" or "z hlavy: <why there was no procedure>"', 2)
+    f["evidence"], f["method"], f["fixed_at"] = evidence.strip(), m, now()
     save_round(p, last)
     print("%s fixed -> %s" % (fid, write_loop(p)["decision"]))
 
@@ -402,7 +423,12 @@ def audit(p, web):
             die("verdict (%s) failed: %s" % (role, (r.stderr or r.stdout).strip()))
         vs[role] = json.loads(r.stdout)
     ok = all(vs[r]["accepted"] for r in ROLES)
-    ready = sorted({i for r in ROLES for i in vs[r]["publish_blocked_by"]})
+    try:   # a critical open item blocks publishing whatever the critics listed
+        crit_items = [i["text"] for i in json.load(open(os.path.join(p, "docs", "design", "brand-state.json"), encoding="utf-8")).get("open_items") or []
+                      if i.get("status") == "open" and i.get("critical") is True]
+    except (OSError, ValueError):
+        crit_items = []
+    ready = sorted({i for r in ROLES for i in vs[r]["publish_blocked_by"]} | set(crit_items))
     v = {"accepted": ok, "roles": vs, "median_quality_score": min(vs[r]["median_quality_score"] for r in ROLES),
          "publish_blocked_by": ready, "verdict": ("přijato" + (", zveřejnění blokuje: " + "; ".join(ready) if ready else ", připraveno ke zveřejnění")) if ok else "nepřijato",
          "site_sha": tgt["site_sha"], "round": tgt["n"], "at": now(), "ratings_dir": d}
@@ -461,10 +487,10 @@ def main(a):
     elif cmd == "reopen":
         reopen(p, opts.get("reason"))
     elif cmd == "fixed" and len(rest) == 1:
-        fixed(p, rest[0], opts.get("evidence"))
+        fixed(p, rest[0], opts.get("evidence"), opts.get("method"))
     else:
         die("usage: round <p> --web <url> | triage <p> <finding> <state> [--reason|--expected|--of|--conflict-with] | "
-            "fixed <p> <finding> --evidence <t> | status <p> | audit <p> --web <url>", 2)
+            "fixed <p> <finding> --evidence <t> --method <step|skill|z hlavy: why> | status <p> | audit <p> --web <url>", 2)
 
 
 if __name__ == "__main__":

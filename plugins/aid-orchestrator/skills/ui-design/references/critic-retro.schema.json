@@ -20,7 +20,8 @@
           "score",
           "anchor",
           "evidence",
-          "missing_for_next"
+          "missing_for_next",
+          "to_ten"
         ],
         "additionalProperties": false,
         "properties": {
@@ -58,6 +59,61 @@
           },
           "not_assessable": {
             "type": "string"
+          },
+          "to_ten": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "studio",
+              "client"
+            ],
+            "description": "konkrétní kroky k 10: co, kde a jak to bude vypadat; studio = co udělá studio, client = co dodá jen podnik",
+            "properties": {
+              "studio": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 15
+                }
+              },
+              "client": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 10
+                }
+              }
+            }
+          },
+          "studio_score": {
+            "type": [
+              "integer"
+            ],
+            "minimum": 1,
+            "maximum": 10,
+            "description": "jen když kritérium brzdí otevřený bod klienta (limited_by): jak dobře studio naložilo s tím, co mělo"
+          },
+          "studio_anchor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "enum": [
+              4,
+              6,
+              8,
+              10,
+              null
+            ]
+          },
+          "limited_by": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^oi-[0-9]+$"
+            },
+            "description": "id otevřených bodů klienta z podklady/overenie.json, které známku teď drží dole"
           }
         },
         "allOf": [
@@ -87,6 +143,35 @@
               "not": {
                 "required": [
                   "not_assessable"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "studio_score"
+              ]
+            },
+            "then": {
+              "required": [
+                "studio_anchor",
+                "limited_by"
+              ]
+            },
+            "else": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "studio_anchor"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "limited_by"
+                    ]
+                  }
                 ]
               }
             }
