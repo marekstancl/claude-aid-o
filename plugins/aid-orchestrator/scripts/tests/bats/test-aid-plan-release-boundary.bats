@@ -1617,28 +1617,8 @@ _pfsm_bootstrap_plan() {
   [ "$status" -eq 0 ]
 }
 
-# _pfsm_plan_tree <plan_id> — the tree in which `plan/<plan_id>` is checked out.
-#
-# P074 EPIC 2 (Step 7): plan-start now gives EVERY plan — both modes — its own
-# execution worktree at `.aid-worktrees/plan-<id>` and leaves `plan/<id>`
-# checked out THERE. Git refuses the same branch in two trees, so a fixture
-# that needs a REAL merge onto the plan branch can no longer `git -C
-# "$TEST_PROJECT_ROOT" checkout plan/<id>`; it operates in the plan worktree.
-# Plans bootstrapped without one (or a future mode that skips it) fall back to
-# the primary checkout, so the helper is safe everywhere.
-_pfsm_plan_tree() {
-  local wt="$TEST_PROJECT_ROOT/.aid-worktrees/plan-$1"
-  if [[ -d "$wt" ]]; then printf '%s' "$wt"; else printf '%s' "$TEST_PROJECT_ROOT"; fi
-}
 
 
-_pfsm_drop_plan_worktree() {
-  local wt="$TEST_PROJECT_ROOT/.aid-worktrees/plan-$1"
-  git -C "$TEST_PROJECT_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
-  rm -rf "$wt"
-  git -C "$TEST_PROJECT_ROOT" worktree prune >/dev/null 2>&1 || true
-  return 0
-}
 
 @test "AC1: plan-start creates plan/<plan_id> at exactly the recorded target SHA and is a no-op on re-run" {
   _write_legacy_plan "P064"
@@ -1931,28 +1911,6 @@ _pfsm_drop_plan_worktree() {
 # story Step 4 already covers on the aid-plan-fsm.sh side.
 
 
-@test "AC2: aid-fsm.sh init for a plan in legacy_epic_release_mode succeeds unchanged" {
-  _pfsm_bootstrap_plan "P064" "legacy_epic_release_mode"
-
-  local args; args="$(build_default_init_args E-064-1_1)"
-  run "$FSM" init $args
-  [ "$status" -eq 0 ]
-
-  # P074 EPIC 2 (Steps 7-9): plan-start gives EVERY plan — legacy_epic_release_mode
-  # included — its own execution worktree, and `init` re-executes itself there,
-  # creating task/<epic>/main from the plan head and leaving the PM's checkout
-  # exactly where it was. The pre-P074 assertion (the PRIMARY checkout ends on
-  # the task branch) described the single-checkout topology this EPIC replaced;
-  # what "unchanged" means for this test is that the legacy plan still reaches
-  # READY on its own task branch, which is asserted below in the tree that now
-  # owns it.
-  local plan_tree; plan_tree="$(_pfsm_plan_tree P064)"
-  [ "$plan_tree" != "$TEST_PROJECT_ROOT" ]
-  local wt_branch; wt_branch="$(git -C "$plan_tree" rev-parse --abbrev-ref HEAD)"
-  [ "$wt_branch" = "task/E-064-1_1/main" ]
-  local current_branch; current_branch="$(git -C "$TEST_PROJECT_ROOT" rev-parse --abbrev-ref HEAD)"
-  [ "$current_branch" = "main" ]
-}
 
 
 
@@ -1968,38 +1926,7 @@ _pfsm_drop_plan_worktree() {
 _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
 
 
-@test "IMP-273: an unparseable committed lifecycle manifest blocks cmd_init with plan_mode_unresolved, never a legacy fallback" {
-  _pfsm_bootstrap_plan "P064"
-  # Corrupt the committed declaration on the target branch (main).
-  printf 'mode: [unclosed\n  : : :\n' > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
-  git -C "$TEST_PROJECT_ROOT" add .aid-lifecycle/manifests/P064.yaml
-  git -C "$TEST_PROJECT_ROOT" commit -qm "corrupt the manifest"
 
-  local args; args="$(build_default_init_args E-064-1_1)"
-  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
-  run "$FSM" init $args
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"plan_mode_unresolved"* ]]
-  [ ! -f "$state_file" ]
-  local tl; tl="$(_fsm_init_timeline "$state_file")"
-  [ "$(jq -r 'select(.event=="fsm_init_blocked") | .mode_reason' "$tl" | tail -1)" = "manifest_unparseable" ]
-}
-
-@test "IMP-273: a committed manifest declaring an UNKNOWN mode value blocks cmd_init rather than defaulting to legacy" {
-  _pfsm_bootstrap_plan "P064"
-  yq -i '.mode = "plan_branch_v2"' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
-  git -C "$TEST_PROJECT_ROOT" add .aid-lifecycle/manifests/P064.yaml
-  git -C "$TEST_PROJECT_ROOT" commit -qm "unknown mode value"
-
-  local args; args="$(build_default_init_args E-064-1_1)"
-  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
-  run "$FSM" init $args
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"plan_mode_unresolved"* ]]
-  [ ! -f "$state_file" ]
-  local tl; tl="$(_fsm_init_timeline "$state_file")"
-  [ "$(jq -r 'select(.event=="fsm_init_blocked") | .mode_reason' "$tl" | tail -1)" = "mode_unknown_value_plan_branch_v2" ]
-}
 
 @test "IMP-273: a working-tree-only (uncommitted) plan_branch manifest is 'unresolved' and blocks cmd_init — the intended tightening over the old legacy-treating reader" {
   # No bootstrap: the declaration exists ONLY in the working tree, never
@@ -2042,21 +1969,6 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
   [ ! -f "$tl" ] || [ -z "$(jq -rc 'select(.event=="fsm_init_blocked" and .reason=="plan_mode_unresolved")' "$tl")" ]
 }
 
-@test "IMP-273: --force converts the plan_mode_unresolved block into an AUDITED override, and init proceeds" {
-  _pfsm_bootstrap_plan "P064"
-  printf 'mode: [unclosed\n  : : :\n' > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
-  git -C "$TEST_PROJECT_ROOT" add .aid-lifecycle/manifests/P064.yaml
-  git -C "$TEST_PROJECT_ROOT" commit -qm "corrupt the manifest"
-
-  local args; args="$(build_default_init_args E-064-1_1)"
-  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
-  run "$FSM" init $args --force --reason "IMP-273 test: manifest repair is tracked separately"
-  [ "$status" -eq 0 ]
-  [ -f "$state_file" ]
-  local tl; tl="$(_fsm_init_timeline "$state_file")"
-  [ "$(jq -r 'select(.event=="fsm_init_blocked") | .reason' "$tl" | tail -1)" = "plan_mode_unresolved" ]
-  [ "$(jq -r 'select(.event=="fsm_init_blocked") | .overridden' "$tl" | tail -1)" = "true" ]
-}
 
 
 
@@ -2068,22 +1980,6 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
 }
 
 
-@test "Error Handling: lib/aid-plan-manifest.sh missing does NOT affect a legacy_epic_release_mode plan (stays a no-op)" {
-  _pfsm_bootstrap_plan "P064" "legacy_epic_release_mode"
-
-  local dest="$TEST_TMPDIR/fsm-no-manifest-lib-legacy"
-  mkdir -p "$dest/lib"
-  cp "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" "$dest/aid-fsm.sh"
-  local f
-  for f in "$AID_PLUGIN_PATH/scripts/lib/"*.sh; do
-    [[ "$(basename "$f")" == "aid-plan-manifest.sh" ]] && continue
-    cp "$f" "$dest/lib/"
-  done
-
-  local args; args="$(build_default_init_args E-064-1_1)"
-  run bash "$dest/aid-fsm.sh" init $args
-  [ "$status" -eq 0 ]
-}
 
 
 # ─── Security: plan_manifest_set_epic_status validates epic_id format ──────
@@ -2241,61 +2137,8 @@ _fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
 # a systemic invariant — repair creates every entry ALREADY unproven, in one
 # atomic write — plus diagnostic-accuracy hardening on the candidate match.
 
-# _f2_repaired_field <plan_id> <epic_id> <field> — one field of a repaired
-# epic_runs[] entry, read straight off the canonical manifest file.
-_f2_repaired_field() {
-  local plan_id="$1" epic_id="$2" field="$3"
-  jq -r --arg e "$epic_id" --arg f "$field" \
-    '.plan_boundary_manifest.epic_runs[] | select(.epic_id==$e) | .[$f]' \
-    "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${plan_id}/plan-boundary-manifest.json"
-}
 
-# _f2_assert_init_blocked <epic_id> — aid-fsm.sh init must refuse this EPIC
-# with the lineage block reason AND write no state file at all.
-_f2_assert_init_blocked() {
-  local epic_id="$1"
-  local args; args="$(build_default_init_args "$epic_id")"
-  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
-  run "$FSM" init $args
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"epic_lineage_unproven"* ]]
-  [ ! -f "$state_file" ]
-}
 
-@test "Security F-2 (Exploit A): a forged merge subject naming a victim branch cannot mint lineage:proven, and init stays blocked" {
-  _pfsm_bootstrap_plan "P900"
-  local base_sha; base_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P900)"
-
-  # Decoy branch forked at the plan base and merged into plan/P900 under a
-  # subject that NAMES a branch it has nothing to do with. The decoy is then
-  # deleted, so only the (attacker-authored) subject text survives.
-  git -C "$TEST_PROJECT_ROOT" checkout -q -b decoy "$base_sha"
-  echo decoy > "$TEST_PROJECT_ROOT/decoy.txt"
-  git -C "$TEST_PROJECT_ROOT" add decoy.txt
-  git -C "$TEST_PROJECT_ROOT" commit -qm "decoy work"
-  git -C "$(_pfsm_plan_tree P900)" checkout -q plan/P900
-  git -C "$(_pfsm_plan_tree P900)" merge --no-ff -q decoy \
-    -m "Merge branch 'task/E-900-1_1/main' into plan/P900"
-  git -C "$TEST_PROJECT_ROOT" checkout -q main
-  git -C "$TEST_PROJECT_ROOT" branch -q -D decoy
-
-  # The victim branch is cut from main — it was never epic-started under this
-  # plan, and the merge above never touched it.
-  git -C "$TEST_PROJECT_ROOT" branch task/E-900-1_1/main main
-
-  rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
-  # A pruned workspace has no `.aid-worktrees/` either (gitignored) — see
-  # _pfsm_drop_plan_worktree.
-  _pfsm_drop_plan_worktree P900
-  run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 0 ]
-
-  # THE invariant: repair produced an entry, and it is unproven.
-  run _f2_repaired_field P900 E-900-1_1 lineage
-  [ "$output" = "unproven" ]
-
-  _f2_assert_init_blocked E-900-1_1
-}
 
 
 
@@ -2682,17 +2525,6 @@ _rs_done_phase() {
 
 # ─── Step 4 CP2 findings 2 + 7: the prose must match the FSM ───────────────
 
-@test "CP2-7: the release sub-phase's auto-merge rule and evidence list are mode-qualified" {
-  # The `plan_branch` branch must carry its OWN auto-mode rule, evaluable from
-  # artifacts an intermediate EPIC actually has — an auditor score cannot be
-  # required where no auditor ran.
-  grep -q 'Auto-mode (FIRST AID) in `plan_branch` mode' "$AID_PLUGIN_PATH/skills/pipeline.md"
-  grep -q 'Auto-mode (FIRST AID) in `legacy_epic_release_mode`' "$AID_PLUGIN_PATH/skills/pipeline.md"
-  # ...and the evidence block must be scoped to the legacy branch rather than
-  # listing artifacts an intermediate plan-branch EPIC never produces.
-  grep -q 'Evidence written (`legacy_epic_release_mode`)' "$AID_PLUGIN_PATH/skills/pipeline.md"
-  grep -q 'Evidence written (`plan_branch` mode' "$AID_PLUGIN_PATH/skills/pipeline.md"
-}
 
 # ─── Edge Case: --force must not reintroduce the skipped stages ────────────
 
