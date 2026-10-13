@@ -229,6 +229,28 @@ def site_sha(site):
     return h.hexdigest()
 
 
+SEEN_ONLY_BY_GATE = ("form_delivery",)   # what a read of the files and the shots cannot show
+
+
+def checks_seen(project, site):
+    """The gate's rows a static read cannot see, for THIS build only, and the open items still in the way of
+    launch (Coufal round 7 found 'no proof the form is delivered' while the gate had delivered it)."""
+    try:
+        res = json.load(open(os.path.join(project, ".aid-ui", "verify", "result.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        res = {}
+    b = subprocess.run(["bash", os.path.join(HERE, "aid-ui-state.sh"), "build-id", site], capture_output=True, text=True)
+    rows = [{k: r.get(k) for k in ("check", "status", "detail")} for r in res.get("rows") or []
+            if r.get("check") in SEEN_ONLY_BY_GATE and b.returncode == 0 and res.get("build_id") == b.stdout.strip()]
+    rows = list({json.dumps(r, sort_keys=True): r for r in rows}.values())
+    try:
+        st = json.load(open(os.path.join(project, "docs", "design", "brand-state.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    items = [{k: i.get(k) for k in ("text", "owner", "critical")} for i in st.get("open_items") or [] if i.get("status") == "open"]
+    return {"gate": rows, "open_items": items} if rows or items else None
+
+
 def critic(project, web, audit, out):
     r = subprocess.run([sys.executable, CRITIC, "prompt", project], capture_output=True, text=True)
     if r.returncode:
@@ -251,6 +273,10 @@ def critic(project, web, audit, out):
         os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
         shutil.copyfile(facts_src, os.path.join(bundle, "podklady", "facts.yaml"))
         facts_sha = sha_file(facts_src)
+    checked = checks_seen(project, site)
+    if checked:
+        os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
+        wj(os.path.join(bundle, "podklady", "overenie.json"), checked)
     pages = site_pages(site)
     base = web.rstrip("/") + "/"
     # the address must serve this site: its home page is byte for byte site/index.html (or the rating would be
@@ -275,6 +301,9 @@ def critic(project, web, audit, out):
                 " pracovní adresář nečti."
               + ("\n\nRegistr faktů, které podnik potvrdil (hodnota, zdroj, kdo a kdy potvrdil), je v `podklady/facts.yaml`."
                  " Má přednost před staršími podklady výše: co je v něm potvrzené, není nepodložené tvrzení." if facts_sha else "")
+              + ("\n\nCo ze souborů vidět není, ověřila brána na tomto sestavení a stojí v `podklady/overenie.json`"
+                 " (např. skutečné odeslání formuláře přes testovacího příjemce), spolu s otevřenými body ke spuštění."
+                 " Co je tam otevřený bod (nasazení, údaje od klienta), patří do readiness, ne do nálezů." if checked else "")
               + "\n\n# Přiložené snímky (celá stránka; 1440 = počítač, 390 = mobil)\n"
               + "\n".join("- " + os.path.basename(i) for i in images))
     with open(os.path.join(out, "prompt.md"), "w", encoding="utf-8") as f:

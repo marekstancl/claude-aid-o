@@ -74,6 +74,17 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WE
   python3 "$CL" critic "$P" --web "$W" --out "$T/r1f" >/dev/null
   cmp -s "$P/docs/content/facts.yaml" "$T/r1f/bundle/podklady/facts.yaml"; grep -q "podklady/facts.yaml" "$T/r1f/prompt.md"
   jq -e '.facts_sha | length == 64' "$T/r1f/run.json" >/dev/null; rm "$P/docs/content/facts.yaml"
+  # what only the gate saw goes too, for this build only, with the open items (Coufal round 7)
+  mkdir -p "$P/.aid-ui/verify" "$P/docs/design"; B="$(bash "$SC/aid-ui-state.sh" build-id "$P/site")"
+  jq -n --arg b "$B" '{build_id: $b, rows: [{check: "form_delivery", status: "pass", detail: "delivered"}, {check: "form_delivery", status: "pass", detail: "delivered"}, {check: "no_overlap", status: "pass"}]}' > "$P/.aid-ui/verify/result.json"
+  echo '{"open_items": [{"text": "príjem na hostingu", "owner": "agent", "critical": true, "status": "open"}, {"text": "hotovo", "status": "done"}]}' > "$P/docs/design/brand-state.json"
+  python3 "$CL" critic "$P" --web "$W" --out "$T/r1g" >/dev/null
+  jq -e '(.gate | length) == 1 and .gate[0].check == "form_delivery" and (.open_items | length) == 1' "$T/r1g/bundle/podklady/overenie.json" >/dev/null
+  grep -q "podklady/overenie.json" "$T/r1g/prompt.md"
+  jq '.build_id = "stale"' "$P/.aid-ui/verify/result.json" > "$T/x" && mv "$T/x" "$P/.aid-ui/verify/result.json"
+  python3 "$CL" critic "$P" --web "$W" --out "$T/r1h" >/dev/null
+  jq -e '(.gate | length) == 0' "$T/r1h/bundle/podklady/overenie.json" >/dev/null   # another build's gate never vouches
+  rm -r "$P/.aid-ui/verify" "$P/docs/design/brand-state.json"
   [ "$(cat "$T/codex-key")" = none ]
   jq -e '.kind == "critic" and (.site_sha | length) == 64 and .frozen_sha == $f and (.images | length) == 4 and .score.accepted == true
          and (.pages | index($w + "cennik/")) != null' --arg w "$W" --arg f "$(jq -r .sha256 "$P/.aid-ui/critic/frozen.json")" "$T/r1/run.json" >/dev/null
