@@ -606,6 +606,9 @@ def load():
         if "cards" in q:
             raise ValueError("payload.json: question %s carries its own \"cards\"; cards go in the top-level cards[] with \"question\": \"%s\"" % (q["id"], q["id"]))
     for q in qs:   # the method before the output, and the PM's earlier choice carried into the next question
+        if q["kind"] != "no_method" and valid_answer(q) is not None:
+            continue   # answered as it stands: history, not checked again against today's files (P113a 13. 10. 2026:
+                       # a step file edited later made every old question - and so the whole studio - invalid)
         try:
             check_method(q, [c for c in cards if c["question"] == q["id"]])
             check_prior(q, [c for c in cards if c["question"] == q["id"]])
