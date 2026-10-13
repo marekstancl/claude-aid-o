@@ -1779,7 +1779,7 @@ cross-repo act this repo has no authority to perform). In short:
 
 Each renderer has its own suite (`test-aid-artifact-render.bats`,
 `test-aid-plan-close-summary.bats`, the gate outcome card's cases); the golden
-harness that drove all three over checked-in fixtures was retired in 3.2.0 — its
+harness that drove all three over checked-in fixtures was retired in 3.1.1 — its
 byte goldens went stale unnoticed, and what it proved structurally is in those
 suites, secrets redaction included.
 

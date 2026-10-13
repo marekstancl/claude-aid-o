@@ -2932,14 +2932,14 @@ enforcements:
     test: "scripts/tests/bats/test-help-index-coverage.bats"
   - id: handoff_renderer_contract
     type: 3
-    source: "removed (3.2.0 test triage)"
+    source: "removed (3.1.1 test triage)"
     instruction: "skills/communication.md"
     severity: blocking
     surface: internal-guard
     status: removed_scoped
     replacement_guard: "artifact_template_caps + artifact_secret_redaction"
     verdict: ALIGNED
-    description: "RETIRED in 3.2.0 (test triage, PM 13. 10. 2026 1B): the golden harness over the three renderers (P080 Step 15) went red when a cost line joined the cards and nobody saw it for weeks — it ran nightly only. Block order, caps, overflow, escaping and secrets redaction are proved per renderer in test-aid-artifact-render.bats and test-aid-plan-close-summary.bats."
+    description: "RETIRED in 3.1.1 (test triage, PM 13. 10. 2026 1B): the golden harness over the three renderers (P080 Step 15) went red when a cost line joined the cards and nobody saw it for weeks — it ran nightly only. Block order, caps, overflow, escaping and secrets redaction are proved per renderer in test-aid-artifact-render.bats and test-aid-plan-close-summary.bats."
   - id: artifact_template_caps
     type: 4
     source: "scripts/lib/aid-artifact-render.sh (grep: '_AID_ARTIFACT_CAP_ITEMS')"

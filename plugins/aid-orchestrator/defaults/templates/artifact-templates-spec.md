@@ -146,8 +146,8 @@ kartu i **záložní** kartu.
 | `test-aid-artifact-render.bats` | pořadí bloků, stropy, přetečení, escapování, redakce | t1 (cesta k merge) |
 | `test-communication-wiring.sh` | doslovná věta o publikaci u každého volajícího rendereru | t0 (cesta k merge) |
 
-Obě jsou zapsané v registru vynucení (`artifact_template_caps`,
-`artifact_secret_redaction`, `artifact_publication_wiring`) — každá se svým patrem.
+Co hlídají, je zapsané ve třech řádcích registru vynucení (`artifact_template_caps`,
+`artifact_secret_redaction`, `artifact_publication_wiring`).
 
 ## `{{prose:deliverables_heading}}` — the deliverables block's own heading
 

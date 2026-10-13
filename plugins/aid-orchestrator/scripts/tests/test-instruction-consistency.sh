@@ -17,7 +17,7 @@
 #   7. orchestration.yaml states match aid-fsm.sh
 #   9. AUTO liveness/ownership contract remains present and role boundaries do not drift
 # (Retired-name sweeps — v1 states, old commands, P094/P096/P097 names — went in
-# the 3.2.0 test triage: a check that a removed name stays removed is archaeology.)
+# the 3.1.1 test triage: a check that a removed name stays removed is archaeology.)
 # =============================================================================
 set -uo pipefail
 

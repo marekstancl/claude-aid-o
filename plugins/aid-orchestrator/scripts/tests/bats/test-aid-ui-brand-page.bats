@@ -99,3 +99,7 @@ JSON
   [ "$status" -eq 0 ]
   grep -q -- '--color-paper:' "$BATS_TEST_TMPDIR/brand/tokens.css"
 }
+
+@test "studio links the internal report route" {
+  grep -qF '<a href="/report">' "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"
+}

@@ -3,6 +3,23 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.1.1] — 2026-10-13
+
+Úklid nočního patra testů, první kolo (PM 13. 10. 2026, 1B). Nic se nemění pro uživatele pluginu; mění se, co hlídá noční běh, a tři nepravdy, které ty testy našly.
+
+### Removed
+- Osm celých sad, které hlídaly jen to, že nějaký plán proběhl, nebo text místo chování: `test-backlog-verdicts`, `test-deferred-work-registration`, `test-release-policy-surface-check` (i se skriptem `release-policy-surface-check.sh`), `test-aid-lock-target-audit`, `test-control-boundary.sh`, `test-review-successors.sh`, `test-integration-handoff-rendering.sh` (vzorové výstupy porovnávané znak po znaku, týdny červené bez povšimnutí, a integrační kontroly karet, které kryjí sady jednotlivých rendererů) a `test-registry-epic-inventory` (účetnictví P114). S nimi jejich vzorové soubory.
+- 46 jednotlivých případů téhož druhu: hledání vět v návodech, čtení zdrojového textu místo spuštění, zmrazená porovnání s výstupem z doby před P076 (dvě vzájemné kopie), účetnictví plánů P073 a P076. Z kontroly souladu instrukcí oddíly, které jen hledaly vyřazené názvy (v1 stavy, staré příkazy, P094/P096/P097).
+- Řádek registru `handoff_renderer_contract` je vyřazený (`removed_scoped`, náhrada `artifact_template_caps` + `artifact_secret_redaction`).
+
+### Fixed
+- Zásady automatické obnovy uváděly pro revizi kroku dvě kola; skutečné nastavení má od 2.116.0 jedno (`cp2_fix_loop`, dřív `cp2_cp3_fix_loop`).
+- Řádek registru `plan_lint_epic_grammar` po 3.0.0 tvrdil, že kontrola blokuje, citoval neexistující text a jako nápravu radil psát značky EPICů — teď upozornění, správné citace a náprava „značku smazat“.
+- `skills/pipeline.md` neuváděl přechod DONE → ERROR (ukončení běhu zaseklého v DONE, od 2.117.0).
+- Sady kontroly plánu (`test-standards-map`, `test-plan-reuse-check`, `test-plan-writing-rules`) byly od 2.115.0 červené na zastaralých vzorových plánech bez zadání; vzorový plán teď dostane nejmenší platné zadání (`bind_plan_to_brief` v `test-helpers.bash`).
+
+Velikost: 247 → 239 sad, 3 687 → 3 614 případů bats, testy a vzorové soubory o ≈ 3,6 tisíce řádků méně (≈ 3,5 %). Každá sada, kterou poslední noční běh (11. 10.) hlásil červeně — 12, některé 17 nocí po sobě — je zelená.
+
 ## [3.1.0] — 2026-10-13
 
 Testy s hodnotou (PM 13. 10. 2026, 2A): plánový test se po plánu maže, trvalý test se jmenuje podle chování, které hlídá. Do té doby každý plán testy jen přidával — testy pluginu měly víc řádků než plugin a 654 z 3 678 případů neslo v názvu číslo plánu, nálezu nebo položky backlogu.
