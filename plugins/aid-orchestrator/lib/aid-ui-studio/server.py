@@ -474,13 +474,19 @@ def check_method(q, cards):
         except (OSError, ValueError, KeyError, TypeError):
             raise ValueError("%s: no .aid-ui/logo/route.json; run: aid-ui-logo-route.py <project> --write (step 1i Rozcestník)" % who)
         have = sorted(str(c.get("slot")) for c in cards)
+        refine = str(q.get("target") or "").startswith("logo:refine:")   # P113a: variants of the chosen direction's mark
+        if refine:                                                         # (e.g. made symmetric): 2+ cards, all of that slot
+            want = q["target"].split(":", 2)[2].split("@")[0]
+            if len(cards) < 2 or set(have) != {want} or want not in slots:
+                raise ValueError("%s: a refine question (target logo:refine:<slot>[@tag]) carries two or more cards, all of slot %s; the cards name %s"
+                                 % (who, want, ", ".join(have)))
         rebuilt = str(q.get("target") or "").startswith("logo:rebuilt:")   # the second identity question of 1i (mode full):
-        if rebuilt:                                                        # the chosen direction rebuilt (vector, real type) - ONE card of that slot
+        if rebuilt and not refine:                                         # the chosen direction rebuilt (vector, real type) - ONE card of that slot
             want = q["target"].split(":", 2)[2]
             if have != [want] or want not in slots:
                 raise ValueError("%s: a rebuilt-logo question (target logo:rebuilt:<slot>) carries exactly one card of that slot (%s); the cards name %s"
                                  % (who, want, ", ".join(have) or "none"))
-        elif have != sorted(slots):
+        elif not refine and have != sorted(slots):
             raise ValueError("%s: the route has slots %s, the cards name %s - one card per slot, `slot` on every card"
                              % (who, ", ".join(slots), ", ".join(have) or "none"))
     names = [os.path.basename(x) for x in m["files"]]

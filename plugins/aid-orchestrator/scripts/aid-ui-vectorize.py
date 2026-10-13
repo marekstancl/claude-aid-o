@@ -99,7 +99,7 @@ def main():
     ty = (size - (maxy - miny) * scale) / 2 - miny * scale
     body = "".join('    <path fill="#111" fill-rule="evenodd" transform="translate(%.2f %.2f)" d="%s"/>\n' % (tx0, ty0, d)
                    for d, tx0, ty0 in paths)
-    out = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" role="img" aria-labelledby="t">\n'
+    out = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d">\n'
            '  <title id="t">%s</title>\n  <!-- aid-ui-vectorize: vtracer binary/spline speckle=%d corner=%d length=%s from %s -->\n'
            '  <g transform="translate(%.2f %.2f) scale(%.5f)">\n%s  </g>\n</svg>\n'
            % (size, size, size, size, os.path.splitext(os.path.basename(dst))[0], opts["speckle"], opts["corner"], opts["length"],
