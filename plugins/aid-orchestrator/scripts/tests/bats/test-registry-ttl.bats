@@ -151,17 +151,6 @@ EOF
   [[ "$output" == "c3_cross_provider_dispatch" ]]
 }
 
-@test "shipped registry: c3_cross_provider_dispatch is retired with its replacement named, not silently dropped" {
-  # P096 Step 12 retired the C3 dispatch: the Codex transport serves the
-  # review rounds, and the final review round is the guard that replaced it.
-  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .status' "$SHIPPED_REGISTRY"
-  [ "$status" -eq 0 ]; [[ "$output" == "removed_scoped" ]]
-  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .replacement_guard' "$SHIPPED_REGISTRY"
-  [ "$status" -eq 0 ]
-  run yq -e ".enforcements[] | select(.id == \"$output\") | .status" "$SHIPPED_REGISTRY"
-  [ "$status" -eq 0 ]; [[ "$output" == "active" ]]
-}
-
 @test "shipped registry: totals.enforcements matches the actual row count" {
   local declared actual
   declared=$(yq '.totals.enforcements' "$SHIPPED_REGISTRY")

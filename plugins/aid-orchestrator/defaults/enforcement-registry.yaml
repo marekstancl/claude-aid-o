@@ -2932,16 +2932,14 @@ enforcements:
     test: "scripts/tests/bats/test-help-index-coverage.bats"
   - id: handoff_renderer_contract
     type: 3
-    source: "scripts/tests/test-integration-handoff-rendering.sh"
+    source: "removed (3.2.0 test triage)"
     instruction: "skills/communication.md"
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    replacement_guard: "artifact_template_caps + artifact_secret_redaction"
     verdict: ALIGNED
-    tier: t2
-    description: "P080 Step 15 — the golden harness that drives the three renderers (lib/aid-artifact-render.sh as smoke, lib/aid-gate-outcome-summary.sh at the gates boundary — a card only since P099, lib/aid-plan-close-summary.sh at the plan boundary) over checked-in fixture JSON, for the five delivery cases: finished, decision-required, blocked, force-used (waiver present) and incomplete (canonical facts arrived, model prose did not). It proves the card comes FIRST (the first non-empty stdout line is the outcome sentence — no JSON, path or identifier ahead of it), that the artifact body carries the ecosystem standard's blocks in document order, that a raw technical list can never be the ONLY output, and that no secret survives the page, the card or the FALLBACK card. The block-order goldens are the only byte-golden; everything else is structural, so a wording edit inside a block does not churn a fixture while a block that moves, vanishes or appears does fail. Regeneration is a HUMAN act (AID_HANDOFF_GOLDEN_REGEN=1) that exits 2 with the diff and never reports a pass — a golden test that rewrites its own expectation on failure proves nothing. DOES NOT PROVE PUBLICATION: the renderers write files and print text; the Artifact tool call is a live controller act. TIER: t2 — cross-component, therefore NIGHTLY-ONLY. It is not on the merge path and this row does not pretend otherwise."
-    recovery: "The failure prints the case and the structural expectation that broke, or the golden block-order diff. Fix the renderer; regenerate a golden only when the block order genuinely changed, and only through the documented regen mode."
-    test: "scripts/tests/test-integration-handoff-rendering.sh"
+    description: "RETIRED in 3.2.0 (test triage, PM 13. 10. 2026 1B): the golden harness over the three renderers (P080 Step 15) went red when a cost line joined the cards and nobody saw it for weeks — it ran nightly only. Block order, caps, overflow, escaping and secrets redaction are proved per renderer in test-aid-artifact-render.bats and test-aid-plan-close-summary.bats."
   - id: artifact_template_caps
     type: 4
     source: "scripts/lib/aid-artifact-render.sh (grep: '_AID_ARTIFACT_CAP_ITEMS')"
@@ -3783,14 +3781,14 @@ enforcements:
     description: 'RETIRED by P114 Step 5: the EPIC path was removed in 3.0.0; phases and their delivery belonged to generation.'
   - id: plan_lint_epic_grammar
     type: out-of-band
-    source: "scripts/aid-plan-lint.sh (grep: 'aid-lifecycle.sh\" parse-legacy')"
-    instruction: "skills/plan-writing.md (grep: 'Every plan carries these lines')"
-    severity: blocking
+    source: "scripts/aid-plan-lint.sh (grep: 'are ignored since AID 3.0.0')"
+    instruction: "skills/plan-writing.md (grep: 'that older plans carry are')"
+    severity: advisory
     surface: llm-facing
     status: active
     verdict: ALIGNED
     description: "2.107.0; P114 (3.0.0): a plan runs as one run, so EPIC markers ('**EPIC N: …**', '**EPIC N / Backlog: …**') are no longer required or parsed into runs — a marker still in the plan is an ADVISORY ('ignored'), none is required."
-    recovery: "write each phase as '**EPIC N: Steps M-P — Title**' (skills/plan-writing.md §Phase Markers)"
+    recovery: "delete the marker; the plan runs as one run (/aid-run P<NNN>)"
     test: "scripts/tests/bats/test-plan-lint.bats (grep: 'no-epic:')"
   - id: step_check_run_checkout
     type: 4

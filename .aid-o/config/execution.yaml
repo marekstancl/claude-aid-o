@@ -52,7 +52,7 @@ gates:
     required: true
     # A docs-only fix does not re-run the tests at plan-final (P101: 5 attempts,
     # ~1.5 h): nothing t0/t1 reads these paths — true while their readers
-    # (test-backlog-verdicts, test-queue-registry-rows, verify-version-files …)
+    # (verify-version-files …)
     # stay t2. Promote one of them and this list lies. Never on
     # shell_pipeline_smoke (the whole portfolio).
     inputs: ["**", "!docs/**", "!cockpit/**", "!README.md", "!CHANGELOG.md", "!CHANGELOG-archive.md", "!CONTRIBUTING.md", "!.aid-o/plans/**", "!plugins/aid-orchestrator/CHANGELOG*.md"]

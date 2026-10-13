@@ -124,8 +124,7 @@ kartu i **záložní** kartu.
    knihovně — volající do něj nesmí dosáhnout.
 4. Nový strop patří jako konstanta vedle stávajících, ne jako věta v promptu.
 5. Přidejte případ do `scripts/tests/bats/test-aid-artifact-render.bats`
-   (pořadí bloků, chybějící próza, přetečení, escapování) a fixture do
-   `scripts/tests/fixtures/handoff/` s golden souborem pořadí bloků.
+   (pořadí bloků, chybějící próza, přetečení, escapování).
 6. Vykreslení **nikdy nepublikuje**. Publikaci zapojte na místě volajícího a
    doslovnou větou z `skills/communication.md` — `test-communication-wiring.sh`
    ji hlídá znak po znaku.
@@ -146,12 +145,9 @@ kartu i **záložní** kartu.
 |---|---|---|
 | `test-aid-artifact-render.bats` | pořadí bloků, stropy, přetečení, escapování, redakce | t1 (cesta k merge) |
 | `test-communication-wiring.sh` | doslovná věta o publikaci u každého volajícího rendereru | t0 (cesta k merge) |
-| `test-integration-handoff-rendering.sh` | tři renderery přes pět případů doručení, golden pořadí bloků | t2 (jen noční) |
 
-Všechny tři jsou zapsané v registru vynucení (`artifact_template_caps`,
-`artifact_secret_redaction`, `artifact_publication_wiring`,
-`handoff_renderer_contract`) — každá se svým patrem, takže je z registru vidět,
-která z nich merge opravdu blokuje a která ne.
+Obě jsou zapsané v registru vynucení (`artifact_template_caps`,
+`artifact_secret_redaction`, `artifact_publication_wiring`) — každá se svým patrem.
 
 ## `{{prose:deliverables_heading}}` — the deliverables block's own heading
 

@@ -316,3 +316,32 @@ aid_fixture_seed_step_review() {
     *) return 2 ;;
   esac
 }
+
+# bind_plan_to_brief <plan> — a strict plan names its brief (zadani:, since
+# 2.115.0); a fixture that tests ANOTHER lint obligation gets the smallest brief
+# that passes, so its outcome is decided by the obligation it is about. Writes
+# <plans-dir>/<id>-zadani.md (one point AC1), binds the plan by path, verze and
+# sha, carries AC1 verbatim and lets the first step close it (the rest close —).
+# The plan's path is relative to the project root, as the lint reads it.
+bind_plan_to_brief() {
+  local plan="$1" id brief sha
+  id="$(awk '/^id:/{print $2; exit}' "$plan")"
+  brief="$(dirname "$plan")/${id}-zadani.md"
+  local ac='- [ ] AC1: the fixture plan is bound to a brief
+  ```yaml
+  verification_pattern:
+    type: cmd
+    cmd: "true"
+    expected_exit: 0
+  ```'
+  printf -- '---\nzadani: %s\nverze: 1\n---\n# %s\n\n## 6. Hotovo, když\n\n%s\n' "$id" "$id" "$ac" > "$brief"
+  sha="$(sha256sum "$brief" | cut -d' ' -f1)"
+  awk -v b="$brief" -v s="$sha" -v ac="$ac" '
+    NR == 1 && /^---$/ { print; fm = 1; next }
+    fm && /^---$/ { printf "zadani: %s\nzadani_verze: 1\nzadani_sha256: %s\n---\n", b, s; fm = 0; next }
+    /^## Acceptance Criteria/ { print; print ""; print ac; had = 1; next }
+    /^### Step [0-9]+/ { print; printf "\n**Zavírá:** %s\n", (closed ? "—" : "AC1"); closed = 1; next }
+    { print }
+    END { if (!had) printf "\n## Acceptance Criteria\n\n%s\n", ac }
+  ' "$plan" > "$plan.tmp" && mv "$plan.tmp" "$plan"
+}

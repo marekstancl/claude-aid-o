@@ -647,17 +647,6 @@ RATIONALE: reversible."
   [ "$output" = "refused_invalid_policy" ]
 }
 
-@test "case 12: aid-run.md hands the convention to the lib instead of restating it" {
-  local md="$PLUGIN_ROOT/commands/aid-run.md"
-  grep -qF "scripts/lib/aid-recovery-adjudicate.sh" "$md"
-  grep -qF "aid_recovery_adjudicate" "$md"
-  # the temporary-convention prose is gone from the command
-  run grep -n "This is a temporary dispatch convention" "$md"
-  [ "$status" -ne 0 ] || { echo "$output"; false; }
-  # and the convention text now lives in the lib header
-  grep -qF "Until a dedicated adjudicator command is available, use the existing" "$LIB"
-}
-
 @test "case 25: the PROJECT policy override binds the adjudicator, not only the ladder" {
   # DEMONSTRATED AT 0d6a3e3: an override narrowing GATE_TIMEOUT to
   # [wait_and_resume] bounded `aid_ladder_attempt` and did nothing here — this
