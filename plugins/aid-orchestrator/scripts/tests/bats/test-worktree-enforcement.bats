@@ -120,6 +120,15 @@ _seed_plan() {
 }
 
 
+# _seed_run — the plan's run as plan-run leaves it (READY, direct, on plan/<id>),
+# its state in the PRIMARY .aid-o. Since 3.0.0 (P114) init without --direct is
+# the removed EPIC path, so the cases that only need a run start from this.
+_seed_run() {
+  local d="$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1"; mkdir -p "$d"
+  printf 'epic_id: %s\nrun_id: R-%s-1\nstate: READY\ncurrent_step: 0\ntotal_steps: 2\nmode: manual\nbranch: plan/%s\nbase_commit: %s\ndirect: true\n' \
+    "$EPIC_ID" "$EPIC_ID" "$PLAN_ID" "$(git -C "$ROOT" rev-parse main)" > "$d/fsm-state.yaml"
+}
+
 # ─── 1-3. the redirect: the worktree moves, the primary checkout does not ──
 
 @test "P074 Step 8: plan-finalize --stage freeze invoked FROM THE PRIMARY CHECKOUT executes in the plan worktree" {
@@ -138,7 +147,7 @@ _seed_plan() {
 }
 
 
-@test "P074 Step 8: aid-fsm.sh init invoked FROM THE PRIMARY CHECKOUT creates the task branch in the plan worktree" {
+@test "P074 Step 8: aid-fsm.sh init invoked FROM THE PRIMARY CHECKOUT redirects into the plan worktree (and, without --direct, is refused there: P114)" {
   _mk_project
   _seed_plan 1
   local before_head before_branch
@@ -146,16 +155,14 @@ _seed_plan() {
 
   run _from "$ROOT" "$FSM" init "$EPIC_ID" "R-${EPIC_ID}-1" 2 manual main HEAD \
     ".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"executes in its own worktree"* ]]
-  # The task branch exists and is CHECKED OUT in the worktree...
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"executes in its own worktree"* && "$output" == *"epic_path_removed"* ]]
+  # no task branch, the worktree still on plan/<id>, the PM's checkout untouched
   run bash -c "git -C '$(_wt)' symbolic-ref --short HEAD" 3>&-
-  [ "$output" = "task/${EPIC_ID}/main" ]
-  # ...while the PM's checkout is untouched.
+  [ "$output" = "plan/${PLAN_ID}" ]
   [ "$(_primary_branch)" = "$before_branch" ]
   [ "$(_primary_head)" = "$before_head" ]
-  # State still lives in the PRIMARY .aid-o, never in the worktree.
-  [ -f "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml" ]
+  [ ! -f "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml" ]
   [ ! -d "$(_wt)/.aid-o" ]
 }
 
@@ -163,13 +170,12 @@ _seed_plan() {
   _mk_project
   _seed_plan 1
   local sf=".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"
-  run _from "$ROOT" "$FSM" init "$EPIC_ID" "R-${EPIC_ID}-1" 2 manual main HEAD "$sf"
-  [ "$status" -eq 0 ]
+  _seed_run
   # done-advance's own DONE-state precondition will refuse (the run is READY) —
   # what this case proves is that the refusal is reported from the WORKTREE,
   # i.e. the redirect happened before the first tree/state read, and that the
   # RELATIVE state-file path survived the change of directory.
-  run _from "$ROOT" "$FSM" done-advance review release "$sf"
+  run _from "$ROOT" "$FSM" done-advance review release "$sf" --direct
   [ "$status" -ne 0 ]
   [[ "$output" == *"executes in its own worktree"* ]]
   [[ "$output" == *"done-advance requires state DONE"* ]]
@@ -328,14 +334,13 @@ _seed_plan() {
   _mk_project
   _seed_plan 1
   local sf=".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"
-  run _from "$ROOT" "$FSM" init "$EPIC_ID" "R-${EPIC_ID}-1" 2 manual main HEAD "$sf"
-  [ "$status" -eq 0 ]
+  _seed_run
   [ -f "$ROOT/$sf" ]
 
   # `.aid-o` exists ONLY in the primary checkout, so before the state-root
   # re-anchoring this died on "state_file not found" — making the in-worktree
   # flow, which IS the normal case in worktree mode, impossible.
-  run _from "$(_wt)" "$FSM" done-advance review release "$sf"
+  run _from "$(_wt)" "$FSM" done-advance review release "$sf" --direct
   [ "$status" -ne 0 ]
   [[ "$output" != *"state_file not found"* ]]
   [[ "$output" == *"done-advance requires state DONE"* ]]
@@ -343,13 +348,13 @@ _seed_plan() {
   [ ! -d "$(_wt)/.aid-o" ]
 }
 
-@test "P074 Step 8: init invoked FROM INSIDE the plan worktree writes state to the PRIMARY .aid-o, not a forked one" {
+@test "P074 Step 8: init invoked FROM INSIDE the plan worktree without --direct is refused (P114) and forks no .aid-o there" {
   _mk_project
   _seed_plan 1
   run _from "$(_wt)" "$FSM" init "$EPIC_ID" "R-${EPIC_ID}-1" 2 manual main HEAD \
     ".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"
-  [ "$status" -eq 0 ]
-  [ -f "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml" ]
+  [ "$status" -eq 2 ]; [[ "$output" == *"epic_path_removed"* ]]
+  [ ! -f "$ROOT/.aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml" ]
   [ ! -d "$(_wt)/.aid-o" ]
 }
 
@@ -527,8 +532,7 @@ _from_no_yq() {
   _mk_project
   _seed_plan 1
   local sf=".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"
-  run _from "$ROOT" "$FSM" init "$EPIC_ID" "R-${EPIC_ID}-1" 2 manual main HEAD "$sf"
-  [ "$status" -eq 0 ]
+  _seed_run
   # the run is READY: EXECUTE→GATES is refused — from the WORKTREE, i.e. after the redirect
   run _from "$ROOT" "$FSM" transition EXECUTE GATES "$sf"
   [ "$status" -ne 0 ]
@@ -539,18 +543,16 @@ _from_no_yq() {
   _mk_project
   _seed_plan 1
   local sf=".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"
-  run _from "$ROOT" "$FSM" init "$EPIC_ID" "R-${EPIC_ID}-1" 2 manual main HEAD "$sf"
-  [ "$status" -eq 0 ]
+  _seed_run
   run _from "$ROOT" "$FSM" increment-step "$sf"
   [[ "$output" == *"executes in its own worktree"* ]]
 }
 
-@test "v2.95.8 (agents #8): transition GATES→DONE from the primary checkout also redirects (CP3 freshness reads the worktree's HEAD)" {
+@test "v2.95.8 (agents #8): transition GATES→DONE from the primary checkout also redirects (the gates read the worktree's HEAD)" {
   _mk_project
   _seed_plan 1
   local sf=".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"
-  run _from "$ROOT" "$FSM" init "$EPIC_ID" "R-${EPIC_ID}-1" 2 manual main HEAD "$sf"
-  [ "$status" -eq 0 ]
+  _seed_run
   run _from "$ROOT" "$FSM" transition GATES DONE "$sf"
   [ "$status" -ne 0 ]
   [[ "$output" == *"executes in its own worktree"* ]]
