@@ -5,6 +5,10 @@
 type: web-local
 title: "Prezentační web lokální služby"
 # persona and criteria: web-local.owner.yaml and web-local.tech.yaml (two roles, PM 13. 10. 2026; authors in AUTHORS.yaml)
+# Criteria judged only once the web is deployed (PM 13. 10. 2026: the hosting is no criterion of the studio's work
+# until it is relevant): left out of the critic's prompt and the score while the phase is `build` (freeze --phase).
+launch_only:
+  tech: [bezpecnost_spusteni]
 task_test:
   - id: price
     task: "Najdi cenu {price_item}."

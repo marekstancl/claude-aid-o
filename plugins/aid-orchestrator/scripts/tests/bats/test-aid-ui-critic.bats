@@ -16,6 +16,8 @@ answer() {
   ROLE="${ROLE:-owner}" python3 - "$1" > "$BATS_TEST_TMPDIR/a.json" <<'PY'
 import sys, json, yaml, os
 s = int(sys.argv[1]); r = yaml.safe_load(open(os.environ["K"] + "/web-local." + os.environ.get("ROLE", "owner") + ".yaml"))
+lo = (yaml.safe_load(open(os.environ["K"] + "/web-local.yaml")).get("launch_only") or {}).get(os.environ.get("ROLE", "owner")) or []
+r["criteria"] = [c for c in r["criteria"] if c["id"] not in lo]
 anchor = lambda x: max(a for a in (4, 6, 8, 10) if a <= x) if x >= 4 else None
 print(json.dumps({"criteria": [{"id": c["id"], "score": s, "anchor": anchor(s), "evidence": "úvod: nadpis a fotka pece",
   "missing_for_next": "více obrazu", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"] if s < 10 else [], "client": []}} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": r["criteria"][0]["id"], "severity": "minor",
@@ -49,6 +51,16 @@ score() { python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json" --role "${ROLE:-own
   # --force is refused once a loop has rounds
   mkdir -p "$P/.aid-ui/critic/rounds/r1"
   run python3 "$C" freeze "$P" --type web-local --force; [ "$status" -eq 1 ]; [[ "$output" == *"cannot change under it"* ]]
+}
+
+@test "phase: before the deployment the launch-only criteria are out of the role, the prompt and the score; at launch they are in" {
+  lo="$(yq -r '.launch_only.tech[0]' "$K/web-local.yaml")"; [ -n "$lo" ] && [ "$lo" != null ]
+  python3 "$C" freeze "$P" --type web-local >/dev/null
+  jq -e --arg lo "$lo" '.phase == "build" and ([.roles.tech.rubric.criteria[].id] | index($lo)) == null and (.roles.tech.role | contains("Fáze: stavba"))' "$P/.aid-ui/critic/frozen.json" >/dev/null
+  ROLE=tech; answer 9; run score; [ "$status" -eq 0 ] || { echo "$output"; return 1; }; jq -e --arg lo "$lo" '.criteria | has($lo) | not' <<<"$output" >/dev/null
+  python3 "$C" freeze "$P" --type web-local --phase launch --force >/dev/null
+  jq -e --arg lo "$lo" '.phase == "launch" and ([.roles.tech.rubric.criteria[].id] | index($lo)) != null and (.roles.tech.role | contains("Fáze: stavba") | not)' "$P/.aid-ui/critic/frozen.json" >/dev/null
+  run python3 "$C" freeze "$P" --type web-local --phase nic --force; [ "$status" -eq 2 ]
 }
 
 @test "freeze drops context lines that talk about scores or acceptance" {

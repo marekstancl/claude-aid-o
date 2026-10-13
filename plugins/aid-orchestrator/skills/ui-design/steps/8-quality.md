@@ -28,6 +28,9 @@ nové zadání role, nového autora a revizi.
 
   Smyčka počítá `studio_score`. Studio i hlášení ukazují obojí („web teď …“). Zveřejnění dál blokují kritické
   otevřené body klienta. Kód odmítne `limited_by`, které není otevřeným bodem klienta.
+- **Fáze stavby** (PM 13. 10. 2026): dokud web není nasazený, kritéria `launch_only` z `critic/<typ>.yaml`
+  (u technika `bezpecnost_spusteni`) se nehodnotí vůbec. Kritik je nedostane, nepíše k nim nálezy a do známky se
+  nepočítají. Při nasazení se zmrazí znovu s `--phase launch` (backlog IMP-694: konfigurace hostingu).
 - **Cesta k 10:** každé kritérium pod 10 nese `to_ten`, tedy konkrétní kroky rozdělené na „udělá studio“
   a „dodá klient“. Bez kroku je odpověď neplatná.
 - **Strop:** nejvýš tři kola oprav. Jakmile je kolo přijaté, opravy končí a přijde audit.
@@ -47,7 +50,7 @@ a čas každého kola. Zprávu dostane jen při zastavení (rozpor nálezů, nic
 
 ## Postup
 
-1. **Zmraz kritiky** (jednou na projekt): `aid-ui-critic.py freeze <project> --type web-local`.
+1. **Zmraz kritiky** (jednou na projekt): `aid-ui-critic.py freeze <project> --type web-local` (fáze `build`).
    - Obě role se složí ze svých měřítek a z kontextu projektu.
    - Řádky kontextu, které mluví o známkách nebo přijetí, se vyřadí.
    - Jakmile má smyčka kolo, měřítka už nejde změnit. Starší zmrazení s jedním kritikem se odmítne:

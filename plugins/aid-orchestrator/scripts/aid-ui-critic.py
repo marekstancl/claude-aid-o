@@ -6,12 +6,13 @@ the competition, photos, selling texts, trust, price and booking as seen) and th
 data, speed, accessibility, mobile, form delivery, launch readiness - what the owner cannot judge). Each rubric was
 written from its role brief by its own author and reviewed by the other (critic/AUTHORS.yaml, critic/role-briefs/).
 
-  freeze <project> --type <type> [--force]
-      Builds both roles from skills/ui-design/critic/<type>.owner.yaml and <type>.tech.yaml (persona, criteria with
+  freeze <project> --type <type> [--phase build|launch] [--force]
+      Phase build (default, before the deployment): the type's launch_only criteria are left out of the role, its
+      prompt says what is judged only after the deployment. Builds both roles from skills/ui-design/critic/<type>.owner.yaml and <type>.tech.yaml (persona, criteria with
       weights summing to 100 and anchors) and the project's context (docs/content/product-context.md,
       docs/product-vision.md, docs/seo/brief.md); the type's common part (<type>.yaml: task_test, launch_inputs,
       components) is stored as `rubric` with the owner's persona (the client agent plays the owner). Writes
-      <project>/.aid-ui/critic/frozen.json {type, rubric, roles: {owner|tech: {rubric, role, sha256}}, schema, sha256, at}.
+      <project>/.aid-ui/critic/frozen.json {type, phase, rubric, roles: {owner|tech: {rubric, role, sha256}}, schema, sha256, at}.
       Never rewritten without --force, and never while a loop has rounds; a context line that mentions scores or
       acceptance is dropped (the critics are blind to both). A frozen critic without roles is refused.
   prompt <project> --role owner|tech
@@ -65,7 +66,7 @@ def frozen_path(proj):
 ROLES = ("owner", "tech")   # the owner (impression, uniqueness, photos, texts) and the technician (search, speed, access, form)
 
 
-def freeze(proj, typ, force):
+def freeze(proj, typ, force, phase="build"):
     out = frozen_path(proj)
     if os.path.exists(out) and not force:
         die(f"{out} exists: the rubric does not move during a loop (--force to rebuild it)")
@@ -104,17 +105,26 @@ def freeze(proj, typ, force):
     schema = read(os.path.join(SKILL, "references", "critic-retro.schema.json"), 10 ** 6)
     tpl = read(os.path.join(SKILL, "critic", "role-template.md"))
     roles = {}
+    if phase not in ("build", "launch"):
+        die("--phase is build (before the deployment) or launch", 2)
     for r in ROLES:
         rub = json.loads(json.dumps(load_yaml(paths[r])))
         if sum(c["weight"] for c in rub["criteria"]) != 100 or any(not re.fullmatch(r"[a-z0-9_]+", c["id"]) for c in rub["criteria"]):
             die(f"{paths[r]}: weights must sum to 100 and ids be ascii snake_case")
+        held = (common.get("launch_only") or {}).get(r) or [] if phase == "build" else []
+        if held:   # judged after the deployment only; the weights of the rest re-normalise in score()
+            rub["criteria"] = [c for c in rub["criteria"] if c["id"] not in held]
         crit = "\n\n".join(f"### {c['id']} - {c['name']}\n" + "\n".join(f"- {k}: {v}" for k, v in sorted(c["anchors"].items(), key=lambda x: int(x[0])))
                            for c in rub["criteria"])
         role = tpl.format(persona_who=rub["persona"]["who"], persona_wants=rub["persona"]["wants"],
                           persona_rules="\n".join("- " + x for x in rub["persona"]["rules"]), criteria=crit, context=ctx, lang=lang, schema=schema)
+        if phase == "build":
+            role += ("\n\n# Fáze: stavba (před nasazením)\n\nWeb ještě není nasazený na hosting klienta. Co se dá ověřit až po nasazení"
+                     " (HTTPS a přesměrování, hlavičky serveru, chybová stránka a zákazy na serveru, ostrý příjem formuláře,"
+                     " doména), teď nehodnotíš: nepiš k tomu nálezy, nesnižuj kvůli tomu žádné kritérium a nedávej to do cesty k 10.")
         roles[r] = {"rubric": rub, "role": role, "authors": authors[os.path.basename(paths[r])]}
         roles[r]["sha256"] = digest({"rubric": rub, "role": role, "schema": json.loads(schema)})
-    rec = {"type": typ, "rubric": dict(common, persona=roles["owner"]["rubric"]["persona"]),   # the client agent plays the owner
+    rec = {"type": typ, "phase": phase, "rubric": dict(common, persona=roles["owner"]["rubric"]["persona"]),   # the client agent plays the owner
            "roles": roles, "schema": json.loads(schema), "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     rec["sha256"] = digest(rec)
     os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -215,7 +225,7 @@ def main(a):
     if cmd != "freeze" and not role:
         die("--role owner|tech", 2)
     if cmd == "freeze" and len(a) >= 4 and a[2] == "--type":
-        return freeze(os.path.abspath(a[1]), a[3], "--force" in a)
+        return freeze(os.path.abspath(a[1]), a[3], "--force" in a, a[a.index("--phase") + 1] if "--phase" in a and a.index("--phase") + 1 < len(a) else "build")
     if cmd == "prompt" and len(a) == 2:
         print(of_role(frozen(os.path.abspath(a[1])), role)["role"])
         return

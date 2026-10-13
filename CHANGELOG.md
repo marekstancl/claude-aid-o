@@ -12,6 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - **Autorství měřítek:** `critic/web-local.owner.yaml` napsal Codex, `critic/web-local.tech.yaml` nezávislý Claude. Každý psal jen ze zadání role (`critic/role-briefs/`) a každé měřítko zrevidoval ten druhý. `critic/AUTHORS.yaml` drží autora, revizora a otisk. `freeze` odmítne měřítko, které otisku neodpovídá.
   - **Zmrazení:** jedno zmrazení drží obě role. Starší zmrazení s jedním kritikem se odmítne.
 - **Práce studia, ne to, co klient nedodal:** drží-li kritérium dole jen otevřený bod klienta (`oi-…` v `podklady/overenie.json`, majitel je nově vidí taky), kritik dá vedle `score` (web teď) i `studio_score` s `limited_by`. Smyčka a audit počítají práci studia, `quality_now` a studio ukazují web, jak je. `limited_by` mimo otevřené body klienta je neplatná odpověď. `studio_score` pod `score` taky.
+- **Fáze stavby:** před nasazením se kritéria `launch_only` (technik: bezpečnost a spuštění) nehodnotí vůbec. Kritik je nedostane a do známky se nepočítají. `freeze --phase launch` je vrátí.
 - **Cesta k 10:** každé kritérium pod 10 nese `to_ten` (kroky studia a klienta: co, kde, jak to bude vypadat). Bez kroku je odpověď neplatná. `fix` u nálezu má být tak konkrétní, aby šel udělat bez dotazu.
 - **Po každém kole hlášení PM:** návrhy kritiků, co a jak se udělalo, podle jakého postupu (nebo z hlavy a proč), známky, cena a čas (`steps/8-quality.md` bod 5).
   - `fixed` vyžaduje `--method`: krok, dovednost, nebo `z hlavy: <proč postup nebyl>`.
