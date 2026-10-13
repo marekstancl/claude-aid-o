@@ -10964,6 +10964,9 @@ _pr_generation_trace() {
     n="$(plan_manifest_get "$PR_PLAN_ID" '[.plan_boundary_manifest.epic_runs[]? | select(.direct != true) | .epic_id] | join(",")' 2>/dev/null || true)"
     [[ -n "$n" ]] && { echo "a generated EPIC run in the plan manifest (${n})"; return 0; }
   fi
+  # P114: the plan's own entries in the old queue (.aid-o/config/queue.yaml)
+  local qtotal; read -r qtotal _ _ <<< "$(_pfsm_inv_epic_states "$PR_PLAN_ID" "$PR_ROOT")"
+  [[ "${qtotal:-0}" -gt 0 ]] && { echo "${qtotal} entr(ies) of the plan in .aid-o/config/queue.yaml"; return 0; }
   for f in "${PR_ROOT}/.aid-o/tasks/E-${PR_NNN}-"*.md "${PR_ROOT}/.aid-o/tasks/archive/E-${PR_NNN}-"*.md; do
     [[ -e "$f" ]] && { echo "an EPIC file ($(basename "$f"))"; return 0; }
   done
@@ -11049,8 +11052,8 @@ _pr_main() {
   # ── the two roads exclude each other by their artefacts ───────────────────
   local trace dead
   trace="$(_pr_generation_trace)"
-  [[ -z "$trace" ]] || _pr_refuse generation_already_started "${plan_id} was already generated the EPIC way: ${trace} — the two roads never mix on one plan" \
-    "finish it on the old path (/aid-run ${PR_EPIC%_*}_<K>), or close it administratively and write a new plan" 1
+  [[ -z "$trace" ]] || _pr_refuse epic_path_removed "${plan_id} was generated the EPIC way: ${trace} — the EPIC path was removed in AID 3.0.0" \
+    "finish it on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close it (aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" 1
   # P112: a run that made no step is set aside and the plan runs again
   PR_RESTART_DIR=""
   [[ "$restart" -eq 1 ]] && { _pr_restart "$plan" "$force_reason" || exit $?; }
@@ -11396,23 +11399,31 @@ _pr_repo_roots_worktrees() {
 
 cmd_plan_run() { ( _pr_main "$@" ); }
 
+# _pfsm_epic_path_removed <command> — P114: every entry of the removed EPIC
+# path answers the same way, before any lock or write.
+_pfsm_epic_path_removed() {
+  echo "REFUSED (epic_path_removed): '${1}' belonged to the EPIC path, removed in AID 3.0.0 — a plan runs straight from its file as one run (/aid-run P<NNN>)." >&2
+  echo "next: finish an old EPIC run on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close its plan (aid-plan-fsm.sh plan-close P<NNN> --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" >&2
+  echo "(pipeline.md §When AID refuses: epic_path_removed)" >&2
+  exit 2
+}
+
 main() {
   local sub="${1:-}"
   [[ $# -gt 0 ]] && shift
   case "$sub" in
     plan-start) cmd_plan_start "$@" ;;
     plan-run) cmd_plan_run "$@" ;;
-    epic-start) cmd_epic_start "$@" ;;
+    # P114 (3.0.0): the EPIC path's entries refuse with the way out (kept one
+    # release as thin refusals); epic-complete stays for --direct and --abandon.
+    epic-start|epic-merge-to-plan|next-epic|epic-base) _pfsm_epic_path_removed "$sub" ;;
     epic-complete) cmd_epic_complete "$@" ;;
-    epic-merge-to-plan) cmd_epic_merge_to_plan "$@" ;;
-    next-epic) cmd_next_epic "$@" ;;
     plan-finalize) cmd_plan_finalize "$@" ;;
     plan-record-decision) cmd_plan_record_decision "$@" ;;
     plan-merge-to-main) cmd_plan_merge_to_main "$@" ;;
     plan-close) cmd_plan_close "$@" ;;
     plan-rollback) cmd_plan_rollback "$@" ;;
     plan-state) cmd_plan_state "$@" ;;
-    epic-base) cmd_epic_base "$@" ;;
     worktrees)  cmd_worktrees "$@" ;;
     plan-scratch) cmd_plan_scratch "$@" ;;
     inventory) cmd_inventory "$@" ;;

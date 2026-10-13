@@ -2179,11 +2179,11 @@ YML
   [ "$(jq -r '.plan_boundary_manifest.epic_runs[0].epic_final_profile_floor' "$DMF")" = "full" ]
 }
 
-@test "direct: epic-merge-to-plan on a direct run is refused direct_run_no_epic_merge" {
+@test "direct: epic-merge-to-plan on a direct run is refused (P114: the command was removed, epic_path_removed)" {
   _direct_done
   run bash "$PFSM" epic-merge-to-plan P910 E-910-1_1 --project-root "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"(pipeline.md §When AID refuses: direct_run_no_epic_merge)"* && "$output" == *"next: "* ]]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: epic_path_removed)"* && "$output" == *"next: "* ]]
 }
 
 @test "direct: a rerun of epic-complete --direct on a merged run still moves the plan to PLAN_SYNC" {

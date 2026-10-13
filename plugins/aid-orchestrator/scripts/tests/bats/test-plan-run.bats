@@ -112,21 +112,21 @@ _pipe() { run bash "$PIPE" --plan "$PLAN" "$@"; }
 
 # ── the two roads exclude each other, each trace alone ───────────────────────
 
-@test "direct: plan-run is refused generation_already_started by an archived generation transaction alone" {
+@test "direct: plan-run is refused epic_path_removed by an archived generation transaction alone" {
   mkdir -p "$GEN"; echo '{}' > "$GEN/transaction.json.completed-1"
   _run
   [ "$status" -eq 1 ]
-  [[ "$output" == *"(pipeline.md §When AID refuses: generation_already_started)"* ]]
+  [[ "$output" == *"(pipeline.md §When AID refuses: epic_path_removed)"* ]]
 }
 
-@test "direct: plan-run is refused generation_already_started by an EPIC file alone" {
+@test "direct: plan-run is refused epic_path_removed by an EPIC file alone" {
   mkdir -p "$R/.aid-o/tasks"; echo x > "$R/.aid-o/tasks/E-900-1_2-old.md"
   _run
   [ "$status" -eq 1 ]
-  [[ "$output" == *"generation_already_started"* && "$output" == *"E-900-1_2-old.md"* ]]
+  [[ "$output" == *"epic_path_removed"* && "$output" == *"E-900-1_2-old.md"* ]]
 }
 
-@test "direct: plan-run is refused generation_already_started by a non-direct manifest entry alone" {
+@test "direct: plan-run is refused epic_path_removed by a non-direct manifest entry alone" {
   run bash "$PFSM" plan-start P900 --mode plan_branch --plan-file "$PLAN" --declared-epics E-900-1_1
   [ "$status" -eq 0 ]
   run bash -c 'source "$PLUGIN_DIR/scripts/lib/aid-plan-manifest.sh"; export AID_PLAN_MANIFEST_PROJECT_ROOT="$R"
@@ -134,7 +134,7 @@ _pipe() { run bash "$PIPE" --plan "$PLAN" "$@"; }
   [ "$status" -eq 0 ]
   _run
   [ "$status" -eq 1 ]
-  [[ "$output" == *"generation_already_started"* && "$output" == *"E-900-1_2"* ]]
+  [[ "$output" == *"epic_path_removed"* && "$output" == *"E-900-1_2"* ]]
 }
 
 @test "direct: the lock and the atomic writer's temp file are not generation traces" {
@@ -437,7 +437,7 @@ _seed_rr() {   # <project> <foreign> [base_branch] — the fixture plan declarin
   mv "$GEN/transaction.json" "$GEN/transaction.json.superseded-1"
   _run
   [ "$status" -eq 0 ]
-  [[ "$output" != *generation_already_started* ]]
+  [[ "$output" != *epic_path_removed* ]]
 }
 
 @test "direct: plan-run resumed from another directory (the plan worktree) passes its receipt check" {

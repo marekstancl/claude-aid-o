@@ -1185,6 +1185,8 @@ _fsm_refusal_next() {
       fi ;;
     abandon_needs_reason)
       next="$(_fsm_cmd bash "$fsm" abandon "$sf" --reason "<why the run is abandoned>")" ;;
+    epic_path_removed)
+      next="finish an old EPIC run on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close its plan (aid-plan-fsm.sh plan-close P<NNN> --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" ;;
     active_runs_write_failed)
       next="fix what blocks .aid-o/work/active-runs.json (lock, permissions, a broken file), then run the same init again (a direct init is idempotent; plan-run resumes it)" ;;
     direct_run_needs_plan_branch)
@@ -7709,7 +7711,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     promote-check)              shift; cmd_promote_check "$@" ;;
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
     plan-close)                 shift; cmd_plan_close "$@" ;;
-    queue-revalidate)           shift; cmd_queue_revalidate "$@" ;;
+    queue-revalidate)           echo "REFUSED (epic_path_removed): 'queue-revalidate' belonged to the EPIC path (the queue), removed in AID 3.0.0 — a plan runs straight from its file as one run." >&2
+                                _fsm_refusal_next epic_path_removed; exit 2 ;;
     alloc)                      shift; cmd_alloc "$@" ;;   # alloc plan-id | alloc epic-id (P074 Step 3)
     active-runs)                shift; cmd_active_runs "$@" ;;   # active-runs list | active-runs prune | active-runs stalled (P074 Step 4 / P076 Step 6)
     # IMP-232 lifecycle (v2.58.1) — delegate to the sourced lib so the surface the

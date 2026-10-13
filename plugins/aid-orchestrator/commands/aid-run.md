@@ -326,9 +326,9 @@ PRE-FLIGHT branches on the argument:
   the worktrees of the plan's `repo_roots` → the manifest entry (`direct: true`,
   no task branch) → the receipt check → `aid-fsm.sh init … plan/<id> … --direct`.
   It prints the state file; the run is one run of every step, on `plan/<id>`.
-  It refuses a plan generated the old way (`generation_already_started`) and a
-  second start (`plan_run_already_started`); the old pipeline refuses a plan
-  with a direct run the same way. `--force --reason` passes a forceable CP1
+  It refuses a plan generated the old way (`epic_path_removed`: the EPIC path
+  was removed in 3.0.0 — finish such a plan on 2.118.x, or close it and start a
+  new plan) and a second start (`plan_run_already_started`). `--force --reason` passes a forceable CP1
   refusal (the PM's call, as below).
 
 **Restarting a run that made no step (P112).** A run that stopped before its
