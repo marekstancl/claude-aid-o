@@ -23,6 +23,9 @@ Bez EPIC cesty (P114, vydání 3 roadmapy P109; PM 12. 10. 2026, 13. 10. 2026 1A
 
 ### Fixed
 - `done-advance` běhu bez plánu odmítal jako starou EPIC cestu (prázdné pole odpovědi resolveru se při čtení tabulátorem slilo) — chyba vzniklá a opravená během P114, s regresním případem.
+- `plan-run` od 2.117.0 nekontroloval stránku pro PM (kontrolu držel jen generátor EPICů) — teď ji vyžaduje při každém spuštění i pokračování.
+- Kapitola „Escalations settled by an independent agent“ (2.118.1) ležela uvnitř bloku, který `commands/aid-run.md` cituje bajt po bajtu z `scripts/lib/aid-review-adapter-claude.md`, takže `test-review-finding-schema` (t2) byl na 2.118.1 červený; kapitola stojí za blokem.
+- Stav revize běhu pro lifecycle bere poslední běh (starý `audit-report.json` už nepřebije novější kola kroků).
 
 Velikost (jen hlášení; `wc -l` jako v 2.118.1, testy navíc):
 
@@ -33,7 +36,7 @@ Velikost (jen hlášení; `wc -l` jako v 2.118.1, testy navíc):
 | commands | 6 114 | 5 563 |
 | testy (`scripts/tests`, soubory / případy bats) | 283 / 4 047 | 258 / 3 685 |
 
-Testbed: lane `generation_refuses_without_page` je teď `plan_run_refuses_without_page` na `plan-run` (repo testbedu nemá remote: commit TESTBED_SHA).
+Testbed: lane `generation_refuses_without_page` je teď `plan_run_refuses_without_page` na `plan-run` (repo testbedu nemá remote: commit 68ee406; testbed 42/42 na kandidátu). Testbed teď vykresluje stránku pro PM i v klonech přímého běhu (`plan-run` ji vyžaduje).
 
 ## [2.118.1] — 2026-10-13
 
