@@ -10,7 +10,7 @@ author: PM + AI
 
 ## Context
 
-Meta-plan that quotes AID syntax. Used to verify aid-plan-to-epic.sh does
+Meta-plan that quotes AID syntax. Used to verify aid-plan-lint.sh does
 NOT count ### Step / **EPIC** lines inside fenced code blocks.
 
 Pre-fix behaviour: the fenced **EPIC 7: Steps 99-100** marker corrupts

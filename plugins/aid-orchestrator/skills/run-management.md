@@ -58,7 +58,7 @@ run: 8        # next allocated: R-009
 
 ```
 Plan:           P{NNN}                     (P001)
-EPIC from plan: E-{NNN}-{phase}_{total}    (E-005-1_4)
+A plan's run:   E-{NNN}-1_1                (E-005-1_1; the plan's one run, P114)
 Ad-hoc EPIC:    E-{NNN}                    (E-001)
 Run:            R-{EPIC_ID}-{run_number}   (R-005-1_4-1)
 ```
@@ -98,7 +98,7 @@ between concurrent sessions.
 |------|------|:---------:|--------|
 | Simple Task | < 3 changes, single file | No | TodoList |
 | Standard Run | Multiple changes, clear scope | Yes | Copy template, track progress |
-| Epic Run | 3+ conversations | Yes + Task file | Task breakdown + sub-runs |
+| Plan run | 3+ conversations | Plan file | `/aid-plan`, then `/aid-run P<NNN>` (one run of the plan) |
 | Verification | E2E testing / QA | Yes | Test scenarios + results |
 | Handoff | Mid-implementation pause | Yes + Handoff block | Context preservation |
 
@@ -108,14 +108,14 @@ between concurrent sessions.
 
 ### Phase 1: Initialization
 
-1. Read `.aid-o/work/active.md` — the GENERATED index of active streams (plans, EPIC runs, queue), regenerated at each lifecycle boundary; read-only orientation, per-stream detail lives in `.aid-o/work/plan-state/<plan_id>/`
+1. Read `.aid-o/work/active.md` — the GENERATED index of active streams (plans and their runs), regenerated at each lifecycle boundary; read-only orientation, per-stream detail lives in `.aid-o/work/plan-state/<plan_id>/`
 2. Read `.aid-o/work/command-history.md` and `.aid-o/work/lessons-learned.md`
 3. Read `.aid-o/config/project.yaml` — if missing or >7 days old, run `/aid-setup`
 4. If NEW run:
-   a. Assess complexity — 3+ runs needed? → suggest Epic workflow to PM first
+   a. Assess complexity — 3+ runs needed? → suggest a plan (`/aid-plan`) to PM first
    b. Generate run ID (see ID System section above)
    c. Create run file in `.aid-o/work/tasks/` from `.aid-o/config/templates/run-{type}.md`
-      - **EPIC runs:** run file pre-created by `scripts/aid-json-to-run.sh`; Controller reads it
+      - **A plan's run** has no run file: `plan-run` writes its `fsm-state.yaml` and `plan.json`
    d. Fill with DETAILED plan — objectives, affected files, approach, risks
    e. Ask PM for approval → create branch `run/{id}-{topic}`
 5. If CONTINUATION:
@@ -155,8 +155,8 @@ Loop:
 
 **Violating this checkpoint = AI error.**
 
-> **EPIC MODE note:** In EPIC MODE, phase-end maps to the FSM `EXECUTE → GATES` transition,
-> whose preconditions (per-step verify file, gates report, CP3 reviews) the Controller DOES
+> **Plan-run note:** In a plan's run, phase-end maps to the FSM `EXECUTE → GATES` transition,
+> whose preconditions (per-step verify file, the step review rounds, gates report) the Controller DOES
 > enforce. The "STOP and wait for PM GO" part above is NOT a hard FSM gate, though — in manual
 > mode it is a convention the orchestrator follows; in `--auto` mode there is no PM-GO gate and
 > the escalation rules govern instead (L-effort / security escalate to PM, S-effort auto-proceeds).
@@ -167,10 +167,8 @@ Loop:
 
 1. [ ] Write `fsm-state.yaml`: `state: DONE`
 2. [ ] Append to `timeline.jsonl`: `{"eventType": "fsm_transition", "state": "DONE"}`
-3. [ ] EPIC review round (CP3) closed
-4. [ ] Deferred findings recorded (`aid_obligation_add`, or a backlog row)
-5. [ ] Archive task file to `.aid-o/tasks/archive/`
-6. [ ] `active.md` refreshes automatically at the done-advance boundary — do not hand-edit it
+3. [ ] Deferred findings recorded (`aid_obligation_add`, or a backlog row)
+4. [ ] `active.md` refreshes automatically at the done-advance boundary — do not hand-edit it
 
 ### Phase 3: Run-End Protocol
 
@@ -188,12 +186,12 @@ Standard run:
   If you agree: move to completed/, commit, merge to main, write continuation text
   Or: issues to resolve? proceed differently?
 
-Last epic run:
-  If you agree: move run + task to archive/, update task status, commit, merge
+Last run of a plan:
+  If you agree: the plan goes to its close (plan-finalize), commit, merge
   Or: issues to resolve? proceed differently?
 ```
 
-6. If PM approves: archive run, update task (if last epic run), add entry to run-log.md, commit + merge (active.md regenerates itself at the boundary)
+6. If PM approves: archive run, add entry to run-log.md, commit + merge (active.md regenerates itself at the boundary)
 
 ### Phase 4: Handoff (Optional)
 
@@ -213,7 +211,7 @@ Last epic run:
 
 **Quality check:** Handoff is self-contained if next AI can continue without asking questions.
 
-**Where to put:** Run file (Handoff Notes section) + task file (if epic). Never active.md — it is a generated index.
+**Where to put:** Run file (Handoff Notes section). Never active.md — it is a generated index.
 
 ---
 
@@ -222,11 +220,10 @@ Last epic run:
 ### End of Brainstorming
 
 1. Write summary of what was explored and decided
-2. Assess scope: one run → Standard run; 3+ runs → Epic; design only → Plan
-3. Present recommendation: "I recommend [Plan/Run/Epic] because [reason]. What do you prefer?"
+2. Assess scope: one run → Standard run; bigger or design first → Plan
+3. Present recommendation: "I recommend [Plan/Run] because [reason]. What do you prefer?"
 4. PM chooses:
-   - Plan → create in `.aid-o/plans/`
-   - Epic → create Task file in `.aid-o/tasks/` from template
+   - Plan → create in `.aid-o/plans/`, run it with `/aid-run P<NNN>`
    - Run → proceed to Phase 1
 
 ### Context Window
@@ -239,18 +236,6 @@ Every 2-3 phases: re-read TL;DR, verify lifecycle steps not skipped, self-correc
 
 ---
 
-## Epic Runs
-
-**Epic = 3+ conversations.** Task file in `.aid-o/tasks/`, run files in `.aid-o/work/tasks/`.
-
-```
-.aid-o/tasks/E-005-1_4-gui-foundation.md   ← task file
-.aid-o/work/tasks/R-005-1_4-1-*.md         ← run files (epic_id in frontmatter)
-```
-
-Workflow: create task file → per-run: create run file with `epic_id` reference → on run done: update task (run log, progress), append to `timeline.jsonl` → all runs done: move task to `.aid-o/tasks/archive/`.
-
----
 
 ## Bug Tracking
 
@@ -286,8 +271,7 @@ Discover → bugs.md → run file Blockers section (if blocking) → continue wo
 | Skill | How |
 |-------|-----|
 | agent-protocol | Run init protocol, role detection |
-| pipeline.md | FSM states and transitions for EPIC orchestration |
-| aid-json-to-run.sh | Generates run files from plan.json |
+| pipeline.md | FSM states and transitions of a plan's run |
 
 For `.aid-o/` workspace layout, see `commands/aid-init.md`.
 
@@ -299,5 +283,5 @@ For `.aid-o/` workspace layout, see `commands/aid-init.md`.
 
 Under `plan_branch` the whole delivery is read once per plan, by the whole-plan
 round (CP7) against the frozen candidate (`commands/aid-run.md`, "Closing a plan
-(plan-final)"). CP2 and CP3 remain per EPIC in both modes. Mode is read from the
-plan's committed lifecycle manifest, never inferred.
+(plan-final)"); every step is reviewed before it (CP2). The EPIC review (CP3) was
+removed in 3.0.0. Mode is read from the plan's committed lifecycle manifest, never inferred.

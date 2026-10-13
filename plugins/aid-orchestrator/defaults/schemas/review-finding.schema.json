@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/review-finding.schema.json",
-  "title": "AID review — reviewer answer (plan review CP1, step review CP2, EPIC review CP3, fast-mode review CP6)",
+  "title": "AID review — reviewer answer (plan review CP1, step review CP2, fast-mode review CP6, whole-plan review CP7)",
   "$comment": "producer: a reviewer (reviewer-<role>.json), consumers: aid-review-round.sh collect (answer shape) and aid-review-adjudicate.sh (each finding's proof). Both read the role lists and the two patterns from this file, so the contract has one source. The role set depends on the checkpoint: an answer without a checkpoint is a plan-review answer (cp1), which is what every answer recorded before P094 is.",
   "description": "One reviewer's answer for one review round. A finding without a read-only command (or a reproduction under the round's repro/ directory) and a path:line evidence does not exist.",
   "type": "object",
@@ -30,12 +30,12 @@
     }
   ],
   "$defs": {
-    "checkpoint": { "enum": ["cp1", "cp2", "cp3", "cp6", "cp7"] },
+    "checkpoint": { "enum": ["cp1", "cp2", "cp6", "cp7"] },
     "roles_cp1": {
       "enum": ["generalist_a", "generalist_b", "behaviour_edges", "feasibility_deps", "reuse", "enforcement_tests"]
     },
     "roles_step": {
-      "enum": ["step_generalist", "step_security", "epic_generalist", "epic_behaviour", "epic_security", "final_criteria", "final_claims", "final_generalist"]
+      "enum": ["step_generalist", "step_security", "final_criteria", "final_claims", "final_generalist"]
     },
     "finding": {
       "type": "object",

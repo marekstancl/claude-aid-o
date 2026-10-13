@@ -156,3 +156,13 @@ successor is an ACTIVE registry id, or `none (…)` naming the recorded decision
 | the service library (`services:` lifecycle, per-run port registry, env-name denylist) | none (P097 Step 6 made it unreachable, Step 9 deleted it; no consumer declared a service) |
 | the old risk-classification library (fixed five-name rank, hard-coded high-risk paths, `boundary=epic` cap) | `scripts/lib/aid-gate-profile-select.sh` (`gate_profile_from_caller`) |
 | recovery stop class `SERVICE_UNHEALTHY` and its service-restart action | none (P097 Step 9: its only emitter was the service library; the policy has six classes) |
+
+## Registry ids renamed by P114 (3.0.0)
+
+The rows P114 retired with the EPIC path carry their successor in the P111
+inventory (`docs/reference/2026-10-p111-inventura-epic-cesty.md`, checked by
+`test-registry-epic-inventory.bats`); this table names only a renamed row.
+
+| Former id | Successor | Note |
+|-----------------------|-----------|------|
+| `queue_continuation_notice` | `auto_continuation_notice` | the autonomous Stop rule, renamed with its library (`lib/aid-auto-continuation.sh`); the hook rule keeps the old id |

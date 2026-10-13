@@ -2,8 +2,8 @@
 # =============================================================================
 # common.sh — Shared bash library for AID pipeline scripts
 #
-# Sourced by: aid-plan-to-epic.sh, aid-epic-to-json.sh, aid-json-to-run.sh,
-#             aid-queue-add.sh, aid-auto-pipeline.sh
+# Sourced by: the former EPIC generator, the former EPIC-to-plan.json converter, the former run renderer,
+#             the former queue writer, the former generation pipeline
 #
 # Provides: parse_frontmatter, extract_section, extract_subsection,
 #           slugify, check_prerequisites, error_exit, iso_timestamp

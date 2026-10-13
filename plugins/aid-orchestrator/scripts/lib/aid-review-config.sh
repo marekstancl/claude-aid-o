@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # aid-review-config.sh — the one reader of a review_checkpoints.<block>
-# reviewer block: plan_review (CP1), step_review (CP2, CP6), epic_review (CP3),
-# final_review (CP7).
+# reviewer block: plan_review (CP1), step_review (CP2, CP6), final_review (CP7).
+# (The EPIC review, CP3, was removed in 3.0.0 with the EPIC path, P114: its
+# toggle and its block are legacy keys a project file is warned about.)
 #
 # Precedence: the project's .aid-o/config/policies/review-checkpoints.yaml when
 # it carries the block, otherwise the plugin default. The roles a block may
@@ -35,14 +36,14 @@
 #
 # The toggle key of each block: plan_review → cp1_plan_review,
 # step_review → cp2_step_review (cp6_fast_mode_review when RC_CHECKPOINT=cp6),
-# epic_review → cp3_integration_review, final_review → cp7_plan_final_review.
+# final_review → cp7_plan_final_review.
 #
 # One reader for every checkpoint (P094 Step 4); registry row
 # review_config_valid; tested by scripts/tests/bats/test-review-config.bats.
 
 _AID_RC_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 _AID_RC_KNOWN_KEYS="rounds_default second_round_when min_answers docs_type_reviewers banned_models reviewers skip_threshold stand_in_model light_max_prompt_lines"
-_AID_RC_LEGACY_KEYS="ceremony_bands cp1_codex_review fix_loop skip_trivial trivial_threshold pre_filter"
+_AID_RC_LEGACY_KEYS="ceremony_bands cp1_codex_review fix_loop skip_trivial trivial_threshold pre_filter cp3_integration_review epic_review"
 
 # aid_policy_file <project_root> <basename> [<yq probe>] [<warning label>]
 #   Prints the policy file to read: the project's .aid-o/config/policies/<basename>
@@ -86,7 +87,6 @@ _aid_rc_toggle_key() {
   case "$1" in
     plan_review) echo cp1_plan_review ;;
     step_review) [[ "${RC_CHECKPOINT:-}" == cp6 ]] && echo cp6_fast_mode_review || echo cp2_step_review ;;
-    epic_review) echo cp3_integration_review ;;
     final_review) echo cp7_plan_final_review ;;
     *) echo "" ;;
   esac
@@ -104,7 +104,7 @@ aid_review_config_load() {
   RC_CONFIG_FILE="$(aid_policy_file "$root" review-checkpoints.yaml ".review_checkpoints.${block}" "${block} config")"
 
   local err
-  # P110: a block the policy no longer ships (epic_review) is fine while its
+  # P110: a block the policy does not ship is fine while its
   # checkpoint is switched off; switched on without the block is still exit 1.
   if ! yq -e ".review_checkpoints.${block}" "$RC_CONFIG_FILE" >/dev/null 2>&1 \
      && aid_review_switched_off "$root" "$(_aid_rc_toggle_key "$block")" >/dev/null; then
@@ -125,10 +125,12 @@ aid_review_config_load() {
   for key in $(yq -r ".review_checkpoints.${block} | keys | .[]" "$RC_CONFIG_FILE"); do
     [[ " $_AID_RC_KNOWN_KEYS " == *" $key "* ]] || echo "${block} config: ignored unknown key ${block}.${key}" >&2
   done
-  # Only a project file is the PM's to clean up; the plugin default is not.
-  if [[ "$RC_CONFIG_FILE" == "$project" ]]; then
+  # Only a project file is the PM's to clean up; the plugin default is not. It
+  # is read whether or not the loader fell back to the default: a project file
+  # whose only content is a removed key (CP3's, P114) is warned about too.
+  if [[ -f "$project" ]]; then
     for key in $_AID_RC_LEGACY_KEYS; do
-      yq -e ".review_checkpoints.${key}" "$RC_CONFIG_FILE" >/dev/null 2>&1 \
+      yq -e ".review_checkpoints.${key}" "$project" >/dev/null 2>&1 \
         && echo "${block} config: ignored legacy key ${key}" >&2
     done
   fi

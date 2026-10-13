@@ -45,16 +45,16 @@ setup() {
   cd "$R"
   FSM="$PLUGIN_DIR/scripts/aid-fsm.sh"
   PFSM="$PLUGIN_DIR/scripts/aid-plan-fsm.sh"
-  PIPE="$PLUGIN_DIR/scripts/aid-auto-pipeline.sh"
   PLAN="$R/.aid-o/plans/P900-direct.md"
   GEN="$R/.aid-o/work/evidence/P900/generation"
   EV="$R/.aid-o/work/evidence/E-900-1_1/R-E900-1"
   MF="$R/.aid-o/work/plan-state/P900/plan-boundary-manifest.json"
-  export R FSM PFSM PIPE PLAN GEN EV MF PLUGIN_DIR
+  export R FSM PFSM PLAN GEN EV MF PLUGIN_DIR
 }
 
 _run()  { run bash "$PFSM" plan-run P900 "$@"; }
-_pipe() { run bash "$PIPE" --plan "$PLAN" "$@"; }
+# _page — re-render the PM page after a test edits the plan (plan-run refuses a stale page, as production does)
+_page() { ( source "$PLUGIN_DIR/scripts/lib/aid-plan-summary.sh" && aid_plan_summary_render "$PLAN" "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html" >/dev/null 2>&1 ); }
 
 # ── the start ────────────────────────────────────────────────────────────────
 
@@ -90,43 +90,25 @@ _pipe() { run bash "$PIPE" --plan "$PLAN" "$@"; }
   [[ "$output" == *"next: "* ]]
 }
 
-@test "direct: the pipeline on a plan with a direct run is refused plan_run_already_started" {
-  _run; [ "$status" -eq 0 ]
-  _pipe
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"plan_run_already_started"* ]]
-}
 
-@test "direct: the pipeline on a plan EDITED after plan-run is refused before the mode stamp and the rollover" {
-  _run; [ "$status" -eq 0 ]
-  local mode_before; mode_before="$(git -C "$R" show main:.aid-lifecycle/manifests/P900.yaml | yq -r '.mode')"
-  echo "edited" >> "$PLAN"
-  git -C "$R" add -f "$PLAN" && git -C "$R" commit -qm "the plan edited after plan-run"   # past the committed-source preflight
-  _pipe
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"plan_run_already_started"* ]]
-  [ "$(jq -r '.kind' "$GEN/transaction.json")" = "plan_run" ]
-  [ -z "$(ls "$GEN"/transaction.json.* 2>/dev/null | grep -v lock || true)" ]
-  [ "$(git -C "$R" show main:.aid-lifecycle/manifests/P900.yaml | yq -r '.mode')" = "$mode_before" ]
-}
 
 # ── the two roads exclude each other, each trace alone ───────────────────────
 
-@test "direct: plan-run is refused generation_already_started by an archived generation transaction alone" {
+@test "direct: plan-run is refused epic_path_removed by an archived generation transaction alone" {
   mkdir -p "$GEN"; echo '{}' > "$GEN/transaction.json.completed-1"
   _run
   [ "$status" -eq 1 ]
-  [[ "$output" == *"(pipeline.md §When AID refuses: generation_already_started)"* ]]
+  [[ "$output" == *"(pipeline.md §When AID refuses: epic_path_removed)"* ]]
 }
 
-@test "direct: plan-run is refused generation_already_started by an EPIC file alone" {
+@test "direct: plan-run is refused epic_path_removed by an EPIC file alone" {
   mkdir -p "$R/.aid-o/tasks"; echo x > "$R/.aid-o/tasks/E-900-1_2-old.md"
   _run
   [ "$status" -eq 1 ]
-  [[ "$output" == *"generation_already_started"* && "$output" == *"E-900-1_2-old.md"* ]]
+  [[ "$output" == *"epic_path_removed"* && "$output" == *"E-900-1_2-old.md"* ]]
 }
 
-@test "direct: plan-run is refused generation_already_started by a non-direct manifest entry alone" {
+@test "direct: plan-run is refused epic_path_removed by a non-direct manifest entry alone" {
   run bash "$PFSM" plan-start P900 --mode plan_branch --plan-file "$PLAN" --declared-epics E-900-1_1
   [ "$status" -eq 0 ]
   run bash -c 'source "$PLUGIN_DIR/scripts/lib/aid-plan-manifest.sh"; export AID_PLAN_MANIFEST_PROJECT_ROOT="$R"
@@ -134,7 +116,7 @@ _pipe() { run bash "$PIPE" --plan "$PLAN" "$@"; }
   [ "$status" -eq 0 ]
   _run
   [ "$status" -eq 1 ]
-  [[ "$output" == *"generation_already_started"* && "$output" == *"E-900-1_2"* ]]
+  [[ "$output" == *"epic_path_removed"* && "$output" == *"E-900-1_2"* ]]
 }
 
 @test "direct: the lock and the atomic writer's temp file are not generation traces" {
@@ -143,29 +125,8 @@ _pipe() { run bash "$PIPE" --plan "$PLAN" "$@"; }
   [ "$status" -eq 0 ]
 }
 
-@test "direct: the pipeline is refused by a plan_run transaction alone" {
-  mkdir -p "$GEN"
-  jq -n '{schema:"aid-generation-transaction/v1", kind:"plan_run", plan_id:"P900", plan_sha256:"x", target_head:"", phase_derivation_version:1, total_phases:1, phases:{}}' > "$GEN/transaction.json"
-  _pipe
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"plan_run_already_started"* && "$output" == *"plan-run"* ]]
-}
 
-@test "direct: the pipeline is refused by a direct manifest entry alone (transaction removed)" {
-  _run; [ "$status" -eq 0 ]
-  rm -f "$GEN/transaction.json"
-  _pipe
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"plan_run_already_started"* && "$output" == *"direct run"* ]]
-}
 
-@test "direct: supersede-generation refuses a plan_run transaction" {
-  _run; [ "$status" -eq 0 ]
-  run bash "$PIPE" supersede-generation --plan "$PLAN" --reason "testing that a plan-run is never superseded"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"plan_run_already_started"* ]]
-  [ -f "$GEN/transaction.json" ]
-}
 
 # ── the lifecycle declares the one run ───────────────────────────────────────
 
@@ -269,6 +230,41 @@ _pipe() { run bash "$PIPE" --plan "$PLAN" "$@"; }
   _run
   [ "$status" -eq 1 ]
   [[ "$output" == *"(pipeline.md §When AID refuses: plan_changed_since_seal)"* ]]
+  [ ! -f "$EV/fsm-state.yaml" ]
+}
+
+@test "direct: a broadcast-shaped plan never starts a run — readiness refuses it before the seal (D5 shifted left)" {
+  rm -rf "$R" && _mk_project "$R" >/dev/null
+  sed 's|^- Modify: `prirucka/README.md` — .*|- Create: `src/core/lengths.py` — funkce `tally_by_length(items)`|' "$FIXTURE_PLAN" > "$BATS_TEST_TMPDIR/bad.md"   # both steps broadcast one output
+  _seed "$R" "$BATS_TEST_TMPDIR/bad.md"
+  _run
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"nothing was sealed"* ]]
+  [ ! -f "$GEN/generation-authority.json" ] && [ ! -f "$EV/fsm-state.yaml" ]
+}
+
+@test "direct: a failing D5 contract check stops plan-run before init and keeps its evidence" {
+  local sh="$BATS_TEST_TMPDIR/plugin" f   # a shadow plugin whose contract check fails
+  mkdir -p "$sh/scripts/gates"
+  for f in "$PLUGIN_DIR/scripts"/*; do [[ "$(basename "$f")" =~ ^(tests|gates)$ ]] || ln -s "$f" "$sh/scripts/"; done
+  for f in "$PLUGIN_DIR/scripts/gates"/*; do ln -s "$f" "$sh/scripts/gates/"; done
+  for f in "$PLUGIN_DIR"/*; do [[ "$(basename "$f")" == scripts ]] || ln -s "$f" "$sh/"; done
+  rm "$sh/scripts/gates/aid-contract-validate.sh"
+  printf '#!/usr/bin/env bash\necho %s; exit 1\n' "'{\"result\":\"fail\"}'" > "$sh/scripts/gates/aid-contract-validate.sh"
+  run env AID_PLUGIN_PATH="$sh" bash "$sh/scripts/aid-plan-fsm.sh" plan-run P900
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"the D5 contract check failed"* ]]
+  [ "$(jq -r .result "$GEN/c0/contract-validate.json")" = fail ]
+  [ ! -f "$EV/fsm-state.yaml" ]
+}
+
+@test "direct: a resume after the seal still refuses when the PM page went missing" {
+  AID_PLAN_FSM_CRASH_AFTER=seal _run
+  [ "$status" -eq 99 ]
+  rm -f "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html"
+  _run
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: plan_page_missing)"* ]]
   [ ! -f "$EV/fsm-state.yaml" ]
 }
 
@@ -431,13 +427,13 @@ _seed_rr() {   # <project> <foreign> [base_branch] — the fixture plan declarin
   [ "$status" -eq 99 ]
   echo "edited after the seal" >> "$PLAN"
   git -C "$R" add -f "$PLAN" && git -C "$R" commit -qm "edited plan"
-  ( export AID_PLUGIN_PATH="$PLUGIN_DIR"; source "$PLUGIN_DIR/scripts/tests/lib/aid-test-plan-fixture.sh"; aid_fixture_seed_plan_review "$R" "$PLAN" >/dev/null )
+  ( export AID_PLUGIN_PATH="$PLUGIN_DIR"; source "$PLUGIN_DIR/scripts/tests/lib/aid-test-plan-fixture.sh"; aid_fixture_seed_plan_review "$R" "$PLAN" >/dev/null ); _page
   _run
   [ "$status" -eq 1 ]; [[ "$output" == *plan_changed_since_seal* ]]
   mv "$GEN/transaction.json" "$GEN/transaction.json.superseded-1"
   _run
   [ "$status" -eq 0 ]
-  [[ "$output" != *generation_already_started* ]]
+  [[ "$output" != *epic_path_removed* ]]
 }
 
 @test "direct: plan-run resumed from another directory (the plan worktree) passes its receipt check" {
@@ -497,7 +493,7 @@ _ev_add() { printf '{"ts":"%s","event":"%s"}\n' "${2:-$(date -u +%Y-%m-%dT%H:%M:
   local F="$BATS_TEST_TMPDIR/docs"; _mk_foreign "$F"
   sed -i "s|^lifecycle_strict: true$|lifecycle_strict: true\nrepo_roots:\n  - name: docs\n    path: $F|" "$PLAN"
   git -C "$R" add -f "$PLAN" && git -C "$R" commit -qm "the plan declares its foreign repository"
-  ( export AID_PLUGIN_PATH="$PLUGIN_DIR"; source "$PLUGIN_DIR/scripts/tests/lib/aid-test-plan-fixture.sh"; aid_fixture_seed_plan_review "$R" "$PLAN" >/dev/null )
+  ( export AID_PLUGIN_PATH="$PLUGIN_DIR"; source "$PLUGIN_DIR/scripts/tests/lib/aid-test-plan-fixture.sh"; aid_fixture_seed_plan_review "$R" "$PLAN" >/dev/null ); _page
   _rs; echo "$output"; [ "$status" -eq 0 ]
   [ "$(git -C "$F/.aid-worktrees/plan-P900--docs" rev-parse --abbrev-ref HEAD)" = "plan/P900-p" ]
   [ "$(jq -r '.repo_roots[0].name' "$EV/plan.json")" = docs ]
@@ -594,4 +590,18 @@ _ev_add() { printf '{"ts":"%s","event":"%s"}\n' "${2:-$(date -u +%Y-%m-%dT%H:%M:
   [ ! -f "$GEN/transaction.json" ]
   _rs; echo "$output"; [ "$status" -eq 0 ]
   [ "$(yq -r .state "$EV/fsm-state.yaml")" = READY ] && [ "$(jq -r .state "$(_sr)/restart.json")" = done ]
+}
+
+# ── P114 Step 3: a direct plan needs no EPIC marker ──────────────────────────
+@test "no-epic: plan-run starts a plan that has no EPIC marker" {
+  local R2="$BATS_TEST_TMPDIR/noepic"
+  _mk_project "$R2" >/dev/null
+  sed '/^\*\*EPIC 1: Steps 1-2\*\*$/d' "$FIXTURE_PLAN" > "$BATS_TEST_TMPDIR/noepic.md"
+  ! grep -q '^\*\*EPIC' "$BATS_TEST_TMPDIR/noepic.md"
+  _seed "$R2" "$BATS_TEST_TMPDIR/noepic.md"
+  cd "$R2"
+  run bash "$PFSM" plan-run P900; echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.direct' "$R2/.aid-o/work/evidence/E-900-1_1/R-E900-1/fsm-state.yaml")" = true ]
+  [ "$(jq '.steps | length' "$R2/.aid-o/work/evidence/E-900-1_1/R-E900-1/plan.json")" = 2 ]
 }

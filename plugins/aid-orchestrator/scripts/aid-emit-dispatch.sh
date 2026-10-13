@@ -31,7 +31,7 @@ EOF
 }
 
 # The one focus allowlist (the start check and its error text read this).
-AID_DISPATCH_FOCUS_RE='^(copy-review-standin|cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp3-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|critic-(brainstorm|plan)|adjudicator-delegated-[0-9a-f]{16})$'
+AID_DISPATCH_FOCUS_RE='^(copy-review-standin|cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|critic-(brainstorm|plan)|adjudicator-delegated-[0-9a-f]{16})$'
 
 # Focus default duration table (resolved when --expected-duration-max not given).
 default_duration_for_focus() {
@@ -39,7 +39,6 @@ default_duration_for_focus() {
   case "$focus" in
     cp1*)  echo 1200 ;;
     cp2-*) echo 600 ;;
-    cp3-*) echo 900 ;;
     cp6-*) echo 600 ;;
     cp7-*) echo 1200 ;;
     critic-*) echo 900 ;;
@@ -87,8 +86,8 @@ cmd_start() {
   # injection, but we reject malformed focuses outright so they never enter the ledger.
   # Allowlist (one variable, used by the check and the error text): cp1-<role>,
   # cp2-step-N-<role> (P094: the role suffix is mandatory, the bare cp2-step-N
-  # form is refused so the ledger never mixes two shapes), cp3-<role>,
-  # cp6-<role>, cp7-<role>.
+  # form is refused so the ledger never mixes two shapes), cp6-<role>,
+  # cp7-<role>. (CP3-<role> left with the EPIC review in 3.0.0.)
   if [[ ! "$focus" =~ $AID_DISPATCH_FOCUS_RE ]]; then
     echo "ERROR: --focus does not match allowed pattern ${AID_DISPATCH_FOCUS_RE} (got: $focus)" >&2
     exit 1
@@ -104,7 +103,7 @@ cmd_start() {
     local role_of_focus roles
     jq -e '.reviewers_expected | type == "array"' "${evidence_dir}/round.json" >/dev/null 2>&1 \
       || { echo "ERROR: ${evidence_dir}/round.json has no reviewers_expected list — not a review round this script can check; repair the round (prepare) before dispatching" >&2; exit 1; }
-    role_of_focus="$(sed -E 's/^cp2-step-[0-9]+-//; s/^cp[1367]-//' <<< "$focus" | tr '-' '_')"
+    role_of_focus="$(sed -E 's/^cp2-step-[0-9]+-//; s/^cp[167]-//' <<< "$focus" | tr '-' '_')"
     if ! jq -e --arg r "$role_of_focus" '.reviewers_expected | index($r)' "${evidence_dir}/round.json" >/dev/null 2>&1; then
       roles="$(jq -r '.reviewers_expected | join(", ")' "${evidence_dir}/round.json")"
       echo "ERROR: focus ${focus} names role ${role_of_focus}, which this round does not ask (reviewers_expected: ${roles}); dispatch only the roles prepare printed" >&2

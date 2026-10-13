@@ -2,8 +2,8 @@
 # =============================================================================
 # lib/aid-scoping.sh — shared per-step scoping helpers (single source of truth)
 #
-# Extracted (v2.58.0, IMP-232 commit 1) from aid-epic-to-json.sh so that BOTH
-# the generator (aid-epic-to-json.sh, which DERIVES a step's allowed_paths from
+# Extracted (v2.58.0, IMP-232 commit 1) from the former EPIC-to-plan.json converter so that BOTH
+# the generator (the former EPIC-to-plan.json converter, which DERIVES a step's allowed_paths from
 # its per-step block) AND the contract gate (gates/aid-contract-validate.sh,
 # which VERIFIES the generated allowed_paths against that same block) clean paths
 # with identical logic. Keeping one copy removes the drift hazard the
@@ -18,7 +18,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/aid-test-tier.sh"   # AID_TEST_TIER_TAG_R
 
 # _aid_parse_scoping_line — split a per-step scoping HTML-comment line into its
 # files=[...] and ac=[...] JSON-array substrings (D2).
-# Shape (frozen by aid-plan-to-epic.sh / E-TEST-005 fixture, P058 Step 2):
+# Shape (frozen by the former EPIC generator / E-TEST-005 fixture, P058 Step 2):
 #   <!-- step-N: files=["Create: `path` — desc", ...]; ac=["AC text", ...] -->
 # Anchors the split on the LAST "; ac=[" (a files[] value may itself contain
 # that literal). Returns 1 if the line does not match the expected shape
@@ -118,13 +118,13 @@ _aid_path_shape_ok() {
 }
 
 # _AID_FILES_BULLETS_AWK — the ONE awk program that finds top-level **Files:** block
-# bullets. Shared by aid-plan-to-epic.sh (which turns them into a step's block
+# bullets. Shared by the former EPIC generator (which turns them into a step's block
 # files[]) and scripts/aid-plan-lint.sh, so "which lines count as a Files entry"
 # can never drift between the generator and the lint. A Files entry is a line whose
 # "-" sits at column 0 INSIDE a **Files:** block; a further-indented "-" is prose
 # continuation of the entry above it, NOT a separate file. With emit_lineno=1 each
 # match is prefixed "<lineno>\t" (for the lint's diagnostics); with 0 the output is
-# byte-identical to aid-plan-to-epic.sh's historical inline extraction.
+# byte-identical to the former EPIC generator's historical inline extraction.
 read -r -d '' _AID_FILES_BULLETS_AWK <<'AWK' || true
 BEGIN { in_files = 0 }
 {
@@ -146,7 +146,7 @@ AWK
 # `file:lineno` and a stripped stream would name the wrong line. Readers that
 # scan for `### Step N:` or `**EPIC N:**` need this — AID's own plans and skills
 # quote that syntax inside fences, and a meta-plan then counts steps it does not
-# have. aid-plan-to-epic.sh:445 has carried the same in_fence toggle since P039
+# have. the former EPIC generator:445 has carried the same in_fence toggle since P039
 # for exactly this reason; this is that rule as something other files can call.
 _aid_blank_fenced() {
   awk '
@@ -346,7 +346,7 @@ _aid_plan_step_field() {
 
 _aid_classify_files_bullet() {
   local bullet="${1#- }"
-  # P079 Step 5: the two shapes GENERATION refuses outright (aid-plan-to-epic.sh
+  # P079 Step 5: the two shapes GENERATION refuses outright (the former EPIC generator
   # — an unlabelled bullet, and a verb with no path) are ERROR tier here, or
   # this lint would green-light a plan the generator then rejects, which is the
   # one promise this file's header makes.

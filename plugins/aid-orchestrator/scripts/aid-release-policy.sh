@@ -27,7 +27,9 @@
 #                           and at the candidate. Switched off, it blocks
 #                           (final_review_disabled) unless the PM waived it for this
 #                           candidate; a switch flipped inside the plan's own range is
-#                           ignored. EPIC mode reads the EPIC's own cp3 round instead.
+#                           ignored. EPIC mode (a plan-less run) has no whole-delivery
+#                           round since the EPIC review (CP3) left in 3.0.0: an
+#                           advisory row says its steps were reviewed one by one (CP2).
 #   * obligations         — an open release_blocker of the plan blocks.
 #   * epic roll-up        — every EPIC merged into the plan must be named in the
 #                           plan-level acceptance-evidence sources[] and
@@ -49,7 +51,7 @@
 #   REQUIRED (missing → blocked): review-profile, semantic-review-final,
 #     acceptance-evidence, gates_report (root, fallback gates/), plan-review (plan_ref hop),
 #     verification-report (aid-evidence-verify.sh --at-head; fail OR unverifiable both block).
-#     final_review (cp7/rounds.json; cp3/rounds.json in EPIC mode), obligations (plan mode).
+#     final_review (cp7/rounds.json; advisory in EPIC mode), obligations (plan mode).
 #   OPTIONAL: waiver-*.json → waivers_applied[] (Waived != pass).
 #
 # Exit codes:
@@ -342,8 +344,9 @@ _read_autonomous_mode() { aid_autonomous_mode "$PROJECT_ROOT"; }
 
 # ---------------------------------------------------------------------------
 # compute_final_review — the independent reading of the whole delivery.
-# Plan mode: the cp7 round of the run directory. EPIC mode (legacy release
-# mode): the EPIC's own cp3 round, which already reads base_commit..HEAD.
+# Plan mode: the cp7 round of the run directory. EPIC mode (a plan-less run):
+# an advisory row — the EPIC review (CP3) that stood here left in 3.0.0, and
+# the run's steps were reviewed one by one (CP2).
 #   pass     the index says pass (or no_change/skip from the step check) at HEAD
 #   blocked  no closed round, a failed round (the open blockers are named), a
 #            round of another head, or the review switched off without the PM's
@@ -353,7 +356,10 @@ _read_autonomous_mode() { aid_autonomous_mode "$PROJECT_ROOT"; }
 # ---------------------------------------------------------------------------
 compute_final_review() {
   local cp=cp7 toggle=cp7_plan_final_review
-  [[ "$MODE" == "plan" ]] || { cp=cp3; toggle=cp3_integration_review; }
+  if [[ "$MODE" != "plan" ]]; then
+    add_input final_review "cp2" "advisory" "no whole-delivery review: the EPIC review (CP3) was removed in 3.0.0; the run's steps were reviewed one by one (CP2)" true
+    return 0
+  fi
   local index="${EVIDENCE_DIR}/${cp}/rounds.json" artifact="${cp}/rounds.json"
   local rel=".aid-o/config/policies/review-checkpoints.yaml" policy="" value="" at_base
   policy="$(aid_review_switched_off "$PROJECT_ROOT" "$toggle")" && { value=false; policy="${policy#*$'\t'}"; }
@@ -365,9 +371,7 @@ compute_final_review() {
 
   if [[ "$value" == false ]]; then
     local waiver="${EVIDENCE_DIR}/final-review-waiver.json"
-    if [[ "$MODE" != "plan" ]]; then
-      add_input final_review "$artifact" "advisory" "the EPIC review (${toggle}) is switched off in ${policy#"${PROJECT_ROOT}/"}" true
-    elif [[ "$(jq -r '.candidate_sha // ""' "$waiver" 2>/dev/null)" == "$CANDIDATE_SHA" ]] \
+    if [[ "$(jq -r '.candidate_sha // ""' "$waiver" 2>/dev/null)" == "$CANDIDATE_SHA" ]] \
          && jq -es --arg p "$PLAN_ID" --arg c "$CANDIDATE_SHA" 'any(.[]; .event == "final_review_waived" and .epic_id == $p and .candidate_sha == $c)' \
               "${PROJECT_ROOT}/.aid-o/work/audit-log.jsonl" >/dev/null 2>&1; then
       add_input final_review "final-review-waiver.json" "advisory" "NOT READ AS A WHOLE: the whole-plan review is switched off and the PM waived it for this candidate: $(jq -r .reason "$waiver")" true
@@ -993,7 +997,7 @@ main() {
       gates_result="$(jq -r '(.overall // .gates_report.result // .status // "unknown")' "$gates_report_path" 2>/dev/null || echo unknown)"
     fi
     # P110: what the run and the plan cost, from the rounds where they live
-    # (the EPIC runs' cp2/cp3, the close attempts' cp7; CP1 and the critic).
+    # (the runs' cp2, the close attempts' cp7; CP1 and the critic).
     local run_cost plan_cost _cost_rc=0 _e _cost_err; _cost_err="$(mktemp)"
     local -a _epic_dirs=()
     # the EPIC's dir, not its last run: an EPIC run twice (R-1, R-2) cost both runs

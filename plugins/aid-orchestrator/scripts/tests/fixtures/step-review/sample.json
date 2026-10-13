@@ -393,7 +393,7 @@
     "acceptance_criteria": [
      "`test-help-index-coverage.bats` passes on the rewritten file.",
      "`grep -c '^### Topic:' commands/aid-help.md` equals the router-table row count.",
-     "`grep -n 'execution.yaml.*lazy-created' commands/aid-help.md` returns nothing — narrowed deliberately: :263 (execution.yaml) is the stale claim, but :264 (queue.yaml, genuinely created by `aid-queue-add.sh`) is TRUE and a blanket ban on the phrase would delete a correct line.",
+     "`grep -n 'execution.yaml.*lazy-created' commands/aid-help.md` returns nothing — narrowed deliberately: :263 (execution.yaml) is the stale claim, but :264 (queue.yaml, genuinely created by `aid-run-gates.sh`) is TRUE and a blanket ban on the phrase would delete a correct line.",
      "The plan-lifecycle topic contains both mode names verbatim (`plan_branch`, `legacy_epic_release_mode`).",
      "P076's landed text survives the move: a distinctive P076 literal (`awaiting_host_resume`) appears exactly once in the rewritten file.",
      "`bash scripts/aid-lint-skill.sh commands/aid-help.md` reports zero findings, and the file no longer appears in the GRANDFATHERED list inside `scripts/tests/test-skill-lint.sh`."

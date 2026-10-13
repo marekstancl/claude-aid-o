@@ -20,16 +20,12 @@ setup() {
   export AID_TEST_MODE=1 AID_QUIET=1 AID_CI=1
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
-  PLAN_TO_EPIC="$AID_PLUGIN_PATH/scripts/aid-plan-to-epic.sh"
-  EPIC_TEMPLATE="$AID_PLUGIN_PATH/defaults/templates/epic.md"
   TEST_TMPDIR="$(mktemp -d)"
   ROOT="$TEST_TMPDIR/project"
-  export PLAN_TO_EPIC EPIC_TEMPLATE TEST_TMPDIR ROOT
+  export TEST_TMPDIR ROOT
   unset AID_PROJECT_ROOT
   aid_test_mk_repo "$ROOT"
-  mkdir -p "$ROOT/scripts/tests/bats" "$ROOT/scripts/tests/fixtures" \
-           "$ROOT/output"
-  printf 'counter: 0\n' > "$ROOT/epic-counter.yaml"
+  mkdir -p "$ROOT/scripts/tests/bats" "$ROOT/scripts/tests/fixtures"
   # An existing, TAGGED suite — this is what makes the tree "tiered", and what
   # a Test bullet may point at without declaring anything.
   printf '#!/usr/bin/env bats\n# aid-tier: t0\n' \
@@ -61,11 +57,14 @@ _plan() {
   printf '%s\n' "$f"
 }
 
+# _generate — what plan-run does before it builds anything (P114: the EPIC
+# generator is gone): readiness (the plan lint inside it) and the shared
+# plan.json reader, which refuses a NEW suite without its tier.
 _generate() {
   aid_fixture_seed_plan_review "$ROOT" "$1" || return 1
-  run bash "$PLAN_TO_EPIC" --plan "$1" --phase 1 --total 1 \
-    --epic-template "$EPIC_TEMPLATE" --output-dir "$ROOT/output" \
-    --counter-yaml "$ROOT/epic-counter.yaml" 3>&-
+  run bash -c 'bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" "$1" --total 1 --project-root "$ROOT" \
+    && source "$AID_PLUGIN_PATH/scripts/lib/common.sh" && source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh" \
+    && aid_plan_json_steps_from_plan "$1" >/dev/null' _ "$1" 3>&-
 }
 
 @test "1: a NEW suite with no tier stops generation, naming the line" {
@@ -88,7 +87,6 @@ _generate() {
 @test "2: the same bullet with a tier generates" {
   _generate "$(_plan 'Test: `scripts/tests/bats/test-brand-new.bats` (tier: t1) — what it proves')"
   [ "$status" -eq 0 ]
-  [ -n "$(ls "$ROOT/output"/E-*.md 2>/dev/null)" ]
 }
 
 @test "3: an unknown tier value is refused, not silently ignored" {
@@ -160,7 +158,9 @@ _plan_no_test() {
   # requirement bites. Legacy plans get the same finding as an advisory.
   sed -i 's/^status: approved$/status: approved\nlifecycle_strict: true/' "$plan"
   sed -i '/^## Testing Strategy$/,+2d' "$plan"
-  _generate "$plan"
+  # No review can be seeded for it (the review's own lint refuses it first),
+  # so readiness — what plan-run runs before anything — is asked directly.
+  run bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" "$plan" --total 1 --project-root "$ROOT" 3>&-
   [ "$status" -ne 0 ]
   [[ "$output" == *"Testing Strategy"* ]]
 }

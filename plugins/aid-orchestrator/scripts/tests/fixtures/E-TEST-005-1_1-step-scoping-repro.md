@@ -10,7 +10,7 @@ runs_completed: 0
 
 ## Context
 
-Regression fixture for the P057/P058 per-step scoping bug: `aid-epic-to-json.sh`
+Regression fixture for the P057/P058 per-step scoping bug: `aid-plan-diff.sh`
 currently BROADCASTS the flat `## Artifacts` list and the flat
 `## Scope > Allowed files/paths` list to EVERY step, instead of assigning each
 step only its own outputs/allowed_paths. It also splits Acceptance Criteria on
@@ -56,8 +56,8 @@ per-step z Implementation Steps `**Files:**`, ne z tohoto seznamu.
 ## Implementation Steps
 
 <!--
-  NOT parsed by today's aid-epic-to-json.sh (no code path reads this H2 —
-  confirmed via grep, only aid-plan-to-epic.sh reads "**Files:**" and it reads
+  NOT parsed by today's aid-plan-diff.sh (no code path reads this H2 —
+  confirmed via grep, only aid-plan-lint.sh reads "**Files:**" and it reads
   it from plan.md, not from EPIC.md). Kept here as the per-step ground truth
   that P058 Steps 2-3 will wire into the real per-step HTML-comment block
   (see plan Step 2) without needing to touch this fixture. Distinct Files
@@ -116,7 +116,7 @@ depends_on: []
 <!-- Per-step files/ac ground truth for the P058 Step 3 fix (Data Model D2 —
      per-step scoping blok v EPIC.md, placed after the Steps table, reusing
      this section's HTML-comment-block pattern the same way the existing
-     ui_change_mode= line does). Today's aid-epic-to-json.sh only reads
+     ui_change_mode= line does). Today's aid-plan-diff.sh only reads
      "ui_change_mode=" out of a matched "<!-- step-N:" line (see
      parse_step_ui_contracts() + the grep in Step 9 of that script) — it
      greps the whole line, then seds for ui_change_mode=, finds none in the

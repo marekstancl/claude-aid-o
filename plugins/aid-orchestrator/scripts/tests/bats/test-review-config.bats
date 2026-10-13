@@ -6,7 +6,7 @@
 # asserts its own CP1 case count equals the old suite's while both exist); a
 # step_review block with one role loads; a role absent from the checkpoint's
 # roles skill, a bad `when`, a block with only conditional roles, the master
-# switch and the answer floor are covered.
+# switch and the answer floor are covered; the removed EPIC review (CP3) keys warn (P114).
 # Origin: P094 Step 4 (step review rebuild); the old suite goes in Step 14.
 
 setup() {
@@ -25,7 +25,6 @@ teardown() { rm -rf "$ROOT"; }
 _project() { yq "$1" "$DEFAULT" > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"; }
 _load_cp1() { aid_review_config_load "$ROOT" plan_review "$PLAN_SKILL" && aid_review_config_validate; }
 _load_step() { aid_review_config_load "$ROOT" step_review "$STEP_SKILL" && aid_review_config_validate; }
-_load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_review_config_validate; }
 
 # ── the CP1 cases (mirror test-plan-review-config.bats; count asserted below) ──
 @test "cp1: the plugin default loads with six roles and validates" {
@@ -109,13 +108,9 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   [ "$RC_EXTRA_SKIP_THRESHOLD_FILES" = 3 ]; [ "$RC_EXTRA_SKIP_THRESHOLD_LINES" = 120 ]   # P110 threshold
   aid_review_config_validate
 }
-@test "step_review: a single-role block passes; a project's epic_review (the commented block, CP3 on) loads three roles" {
-  _project '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"}]
-    | .review_checkpoints.cp3_integration_review = true
-    | .review_checkpoints.epic_review = {"rounds_default": 2, "reviewers": [{"role":"epic_generalist","provider":"claude","model":"opus","effort":"low"},{"role":"epic_behaviour","provider":"claude","model":"opus","effort":"low"},{"role":"epic_security","provider":"codex","model":"gpt-6-sol"}]}'
+@test "step_review: a single-role block passes" {
+  _project '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"}]'
   run _load_step; [ "$status" -eq 0 ]
-  aid_review_config_load "$ROOT" epic_review "$STEP_SKILL"
-  [ "${#RC_ROLE[@]}" -eq 3 ]; [ "$RC_MIN_ANSWERS" = 3 ]; aid_review_config_validate
 }
 @test "step_review: a role absent from step-review-roles.md is refused naming the skill" {
   _project '.review_checkpoints.step_review.reviewers[0].role = "reuse"'
@@ -239,9 +234,31 @@ _load_epic() { aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" && aid_r
   [ "${RC_ROLE[*]}" = "final_criteria final_generalist final_claims" ]
 }
 
-@test "cp3-off: epic_review absent with the toggle false loads as disabled (the shipped default since 2.116.0)" {
-  [ "$(yq -r '.review_checkpoints.cp3_integration_review' "$DEFAULT")" = false ]
-  ! yq -e '.review_checkpoints.epic_review' "$DEFAULT" >/dev/null
-  aid_review_config_load "$ROOT" epic_review "$STEP_SKILL" 2>/dev/null
-  [ "$RC_ENABLED" = 0 ] && [ "${#RC_ROLE[@]}" -eq 0 ]
+# ── 3.0.0 (P114): the EPIC review (CP3) is gone; its keys are legacy keys ──
+@test "cp3-removed: a project that still sets cp3_integration_review: true loads with the legacy-key warning" {
+  _project '.review_checkpoints.cp3_integration_review = true'
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_config_load '$ROOT' step_review '$STEP_SKILL' && aid_review_config_validate"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ignored legacy key cp3_integration_review"* ]]
+}
+@test "cp3-removed: a project epic_review block loads with the legacy-key warning and is never read" {
+  _project '.review_checkpoints.epic_review = {"rounds_default": 2, "reviewers": [{"role":"epic_generalist","provider":"claude","model":"opus"}]}'
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_config_load '$ROOT' step_review '$STEP_SKILL' && aid_review_config_validate && echo \"roles=\${RC_ROLE[*]}\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ignored legacy key epic_review"* && "$output" != *epic_generalist* ]]
+}
+@test "cp3-removed: a project file whose only content is the removed key loads the plugin default and warns" {
+  printf 'review_checkpoints:\n  cp3_integration_review: true\n' > "$ROOT/.aid-o/config/policies/review-checkpoints.yaml"
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_config_load '$ROOT' step_review '$STEP_SKILL' && aid_review_config_validate && echo \"file=\$RC_CONFIG_FILE\""
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ignored legacy key cp3_integration_review"* ]]
+  [[ "$output" == *"file=$DEFAULT"* ]]
+}
+@test "cp3-removed: aid-review-round.sh --checkpoint cp3 is refused naming CP2 and CP7" {
+  mkdir -p "$ROOT/run"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" prepare --checkpoint cp3 --evidence-dir "$ROOT/run" --round 1
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"CP3 was removed in 3.0.0"* && "$output" == *CP2* && "$output" == *CP7* ]]
+  run bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint cp3 --evidence-dir "$ROOT/run"
+  [ "$status" -eq 2 ]; [[ "$output" == *"CP3 was removed in 3.0.0"* ]]
 }

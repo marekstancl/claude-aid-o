@@ -1159,11 +1159,11 @@ _fsm_refusal_next() {
       if [[ "$(jq -r '.status // ""' "${rd}/collect.json" 2>/dev/null)" == valid ]]; then
         next="$(_fsm_cmd bash "$rr" close "${where[@]}" --round "${last:-1}") --tokens <role>=<n|unknown> …"
       else
-        next="dispatch the round's reviewers (commands/aid-run.md CP2/CP3), then: $(_fsm_cmd bash "$rr" collect "${where[@]}" --round "${last:-1}")"
+        next="dispatch the round's reviewers (commands/aid-run.md CP2), then: $(_fsm_cmd bash "$rr" collect "${where[@]}" --round "${last:-1}")"
       fi ;;
     review_round_failed)
       next="the step's role fixes the open findings and commits, then: $nextround" ;;
-    review_round_stale|cp3_stale_review)
+    review_round_stale)
       next="$nextround" ;;
     no_change_without_outputs)
       next="commit the step's work, then: $chk" ;;
@@ -1181,16 +1181,18 @@ _fsm_refusal_next() {
       if [[ "${_da_state_direct:-}" == "true" ]]; then
         next="$(_fsm_cmd bash "$fsm" done-advance review release "$sf" --direct)"
       else
-        next="$(_fsm_cmd bash "$fsm" done-advance review release "$sf"), then epic-merge-to-plan as today"
+        next="$(_fsm_cmd bash "$fsm" done-advance review release "$sf")"
       fi ;;
     abandon_needs_reason)
       next="$(_fsm_cmd bash "$fsm" abandon "$sf" --reason "<why the run is abandoned>")" ;;
+    epic_path_removed)
+      next="finish an old EPIC run on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close its plan (aid-plan-fsm.sh plan-close P<NNN> --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" ;;
     active_runs_write_failed)
       next="fix what blocks .aid-o/work/active-runs.json (lock, permissions, a broken file), then run the same init again (a direct init is idempotent; plan-run resumes it)" ;;
     direct_run_needs_plan_branch)
       next="start the plan in plan_branch mode and run from its plan worktree: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}")" ;;
     plan_manifest_missing|plan_branch_mismatch)
-      next="start the EPIC through its plan (task branch and manifest entry), then init again: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" epic-start "${_pb_plan_id:-<plan>}" "${epic_id:-<epic>}" --run-id "${run_id:-<run>}")" ;;
+      next="start the plan's run again through plan-run, which writes the manifest entry and runs init: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}" --restart --reason "<why>")" ;;
     contract_return_missing|contract_return_not_done)
       next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent or hand over with a Blocked card), then: $inc" ;;
     missing_step_verify|verify_no_ac_checklist|verify_no_memory_used|verify_no_memory_written|step_verify_not_pass|verify_no_commit_ref)
@@ -1209,7 +1211,7 @@ _fsm_refusal_next() {
       next="fix the step and commit, or render the Decision card (lib/aid-decision-card.sh) and wait for the PM, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words>" --finding-card "<card>")"
       fi ;;
     streamlined_cp3_off)
-      next="keep CP3 for this project (cp3_integration_review: true + an epic_review block in .aid-o/config/policies/review-checkpoints.yaml) and run the EPIC review, or run the plan in plan_branch mode, then: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-review}" "${to_phase:-release}" "$sf")" ;;
+      next="run the plan as one run in plan_branch mode (aid-plan-fsm.sh plan-run P<NNN>; CP7 reviews it at the close) — the EPIC review (CP3) was removed in 3.0.0" ;;
     defer_refused)
       next="render the Decision card quoting ${_sc_label:-the point} (lib/aid-decision-card.sh), wait for the PM's answer, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words, 20+ chars>" --finding-card "<card>")" ;;
     missing_lenses|done_advance_preconditions)
@@ -1275,12 +1277,12 @@ fsm_count_recent_fails_epic() {
   fsm_count_fails_matching '.reason==$r' --arg r "$1"
 }
 
-# fsm_check_review_round <evidence_dir> <checkpoint> [<step>] [--freshness [<tree_root>]] [--head <sha>]
+# fsm_check_review_round <evidence_dir> <checkpoint> [<step>] [--head <sha>]
 #   --head: the commit the round must have read, when it is not the tree's HEAD
 #   (plan close: the frozen candidate, while the tree may stand on an accepted
 #   ancillary-only move past it).
-#   The one precondition of the step review (cp2), the EPIC review (cp3) and
-#   the whole-plan review (cp7, <evidence_dir> = the plan-final run directory,
+#   The one precondition of the step review (cp2) and the whole-plan review
+#   (cp7, <evidence_dir> = the plan-final run directory,
 #   called by plan-finalize --stage decide). Reads <cp dir>/rounds.json written by aid-step-check.sh (a
 #   skip or no_change verdict) or by aid-review-round.sh close (pass or fail):
 #     skip       passes only with a step_check timeline event whose head_sha and
@@ -1289,24 +1291,20 @@ fsm_count_recent_fails_epic() {
 #     no_change  passes only when the step declares at least one `outputs` path
 #                and every declared path exists at HEAD (no_change_without_outputs)
 #     pass       the last round is closed (measurement.json, closed_at), was not
-#                stubbed (stubbed_round), and its head_sha is HEAD; with
-#                --freshness HEAD may be ahead by the D4 exception only: test,
-#                fixture or evidence churn with a CP3-Freshness-Exception trailer
-#                on every commit past the reviewed head (P060 Step 4, kept)
+#                stubbed (stubbed_round), and its head_sha is HEAD (the D4
+#                freshness exception of the EPIC review left with CP3 in 3.0.0)
 #     fail       blocks naming the index
-#   cp3 and cp7 additionally require <evidence_dir>/semantic-review-final.json
-#   when a round ran (the routed-findings reconciliation and the release
-#   decision read it).
+#   cp7 additionally requires <evidence_dir>/semantic-review-final.json when a
+#   round ran (the release decision reads it).
 #   A disabled checkpoint (review_checkpoints.enabled or its own toggle false)
 #   passes with a review_checkpoint_disabled audit line.
 #   Registry: fsm_review_round_required, fsm_review_round_head_bound,
 #   fsm_review_round_skip_bound. Tested by test-review-round-fsm.bats.
 fsm_check_review_round() {
-  local evidence_dir="$1" cp="$2" step="${3:-}" freshness=0 tree_root="$PWD" expected_head=""
+  local evidence_dir="$1" cp="$2" step="${3:-}" tree_root="$PWD" expected_head=""
   shift 3 2>/dev/null || shift $#
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --freshness) freshness=1; [[ -n "${2:-}" && "${2:-}" != --* ]] && { tree_root="$2"; shift; }; shift ;;
       --head) expected_head="${2:-}"; shift 2 ;;
       *) shift ;;
     esac
@@ -1314,7 +1312,6 @@ fsm_check_review_round() {
   local cpdir index timeline="${evidence_dir}/timeline.jsonl" toggle
   case "$cp" in
     cp2) cpdir="${evidence_dir}/cp2/step-${step}"; toggle=cp2_step_review ;;
-    cp3) cpdir="${evidence_dir}/cp3"; toggle=cp3_integration_review ;;
     cp7) cpdir="${evidence_dir}/cp7"; toggle=cp7_plan_final_review ;;
     *) echo "PRECONDITION FAIL: fsm_check_review_round: unknown checkpoint ${cp}" >&2; return 1 ;;
   esac
@@ -1337,7 +1334,7 @@ fsm_check_review_round() {
     return 0
   fi
 
-  local how_to="run: bash \$AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint ${cp}${step:+ --step $step} --evidence-dir ${evidence_dir}; then, for a review verdict, aid-review-round.sh prepare/collect/close (commands/aid-run.md \"Step review (CP2) and EPIC review (CP3)\")"
+  local how_to="run: bash \$AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint ${cp}${step:+ --step $step} --evidence-dir ${evidence_dir}; then, for a review verdict, aid-review-round.sh prepare/collect/close (commands/aid-run.md \"Step review (CP2)\")"
   [[ "$cp" == cp7 ]] && how_to="run: plan-finalize --stage produce, then bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare|collect|close --checkpoint cp7 --evidence-dir ${evidence_dir} --round 1"
   if [[ ! -f "$index" ]]; then
     _PRECONDITION_FAIL_REASON="review_round_missing"
@@ -1397,7 +1394,7 @@ fsm_check_review_round() {
       return 1 ;;
   esac
 
-  # pass: the last round must be closed, unstubbed, at HEAD (or D4-fresh).
+  # pass: the last round must be closed, unstubbed, at HEAD.
   local dir="${cpdir}/round-${last}"
   if [[ -z "$last" || ! -f "${dir}/measurement.json" || "$(jq -r '.closed_at // ""' "${dir}/round.json" 2>/dev/null)" == "" ]]; then
     _PRECONDITION_FAIL_REASON="round_not_closed"
@@ -1417,58 +1414,10 @@ fsm_check_review_round() {
     return 1
   fi
   [[ "$reviewed_head" == "$current_head" ]] && return 0
-  if (( ! freshness )); then
-    _PRECONDITION_FAIL_REASON="review_round_stale"
-    echo "PRECONDITION FAIL: ${cp}${step:+ step $step} round ${last} reviewed ${reviewed_head:0:12}, HEAD is ${current_head:0:12} (review_round_stale): the reviewers did not see the current tree." >&2
-    _fsm_refusal_next review_round_stale
-    return 1
-  fi
-
-  # --freshness (GATES→DONE, done-advance): the D4 narrow exception (P060 Step 4).
-  local policy="${CP3_FRESHNESS_POLICY:-blocking}"
-  _fresh_fail() {
-    [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_would_block" reason="$1" enforcement="$policy"
-    if [[ "$policy" == "blocking" ]]; then _PRECONDITION_FAIL_REASON="cp3_stale_review"; printf '%s\n' "${@:2}" >&2; _fsm_refusal_next cp3_stale_review; return 1; fi
-    return 0
-  }
-  if ! git -C "$tree_root" rev-parse --verify "${reviewed_head}^{commit}" >/dev/null 2>&1 \
-     || ! git -C "$tree_root" merge-base --is-ancestor "$reviewed_head" "$current_head" 2>/dev/null; then
-    _fresh_fail reviewed_head_not_ancestor "PRECONDITION FAIL: the cp3 round's head ${reviewed_head} is not an ancestor of HEAD ${current_head}." "Fix: run the cp3 review again against the current HEAD."
-    return $?
-  fi
-  local changed_files=() pth
-  while IFS= read -r -d '' pth; do changed_files+=("$pth"); done < <(git -C "$tree_root" diff --name-only -z "${reviewed_head}..${current_head}" 2>/dev/null)
-  local violating="" base
-  for pth in "${changed_files[@]}"; do
-    base="${pth##*/}"
-    case "$base" in
-      verifier-output-*.md|gates_report.json|fsm-state.yaml|rounds.json|round.json|measurement.json|step-check.json)
-        violating="$pth (verdict-bearing)"; break ;;
-    esac
-    case "$pth" in
-      */tests/*|tests/*|*/fixtures/*|fixtures/*) : ;;
-      "$evidence_dir"/*) : ;;
-      *) violating="$pth (out-of-scope)"; break ;;
-    esac
-  done
-  if [[ -n "$violating" ]]; then
-    _fresh_fail path_out_of_scope "PRECONDITION FAIL: commit(s) past the reviewed cp3 head touch a non-exempt path: ${violating}." "Reason: the D4 exception permits only test/fixture/evidence churn; verdict-bearing files never qualify. A production change past the reviewed head means the review never saw it." "Fix: run the cp3 review again against HEAD, re-run gates, then retry. OR (PM-authorized, audited): --force --reason '<≥20 chars>'."
-    return $?
-  fi
-  local c missing_trailer="" tr
-  while IFS= read -r c; do
-    [[ -z "$c" ]] && continue
-    tr=$(git -C "$tree_root" log -1 --format='%(trailers:key=CP3-Freshness-Exception,valueonly)' "$c" 2>/dev/null)
-    [[ -z "$tr" ]] && { missing_trailer="$c"; break; }
-  done < <(git -C "$tree_root" rev-list "${reviewed_head}..${current_head}" 2>/dev/null)
-  if [[ -n "$missing_trailer" ]]; then
-    _fresh_fail missing_exception_trailer "PRECONDITION FAIL: commit ${missing_trailer} past the reviewed cp3 head lacks a 'CP3-Freshness-Exception: <reason>' git trailer (D4 condition b)." "Fix: annotate the commit(s) with the trailer, OR run the cp3 review again against HEAD."
-    return $?
-  fi
-  local files_csv=""
-  (( ${#changed_files[@]} )) && { files_csv=$(printf '%s,' "${changed_files[@]}"); files_csv="${files_csv%,}"; }
-  [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_exception" reviewed_head="$reviewed_head" head="$current_head" changed_file_count="${#changed_files[@]}" changed_files="$files_csv"
-  return 0
+  _PRECONDITION_FAIL_REASON="review_round_stale"
+  echo "PRECONDITION FAIL: ${cp}${step:+ step $step} round ${last} reviewed ${reviewed_head:0:12}, HEAD is ${current_head:0:12} (review_round_stale): the reviewers did not see the current tree." >&2
+  _fsm_refusal_next review_round_stale
+  return 1
 }
 
 # _fsm_routed_recorded_set <plan_id> — every fingerprint the routed-findings
@@ -1483,20 +1432,10 @@ _fsm_routed_recorded_set() {
 # ---------------------------------------------------------------------------
 # _fsm_routed_findings_check <epic_id> <evidence_dir>  (P079 Step 7, IMP-473)
 #
-# TWO halves, because either alone is a half-truth:
-#
-#   CONSUMER — a finding routed to THIS epic (or one of its steps) that is not
-#   yet resolved blocks completion. This is the ordinary carrier check.
-#
-#   PRODUCER RECONCILIATION — every finding in the run's canonical CP3
-#   artifact whose target file lies OUTSIDE the union of all steps'
-#   allowed_paths must have a journal entry, open or resolved. Without this the
-#   carrier only remembers what the controller chose to write down, and the
-#   live failure was precisely a controller that wrote nothing.
-#
-# ZERO-COST when the run never routed anything and its CP3 findings are all
-# in scope: no journal and no out-of-scope findings means no work and no
-# behaviour change, which is what every legacy run looks like.
+# A finding routed to THIS epic (or one of its steps) that is not yet resolved
+# blocks completion. (Its second half, the reconciliation of the EPIC review's
+# findings against the steps' scope, left with CP3 in 3.0.0, P114: the step
+# rounds route what they leave open themselves, aid_step_review_route_open.)
 #
 # Returns 0 when the EPIC may complete, 1 when it may not (message on stderr).
 # ---------------------------------------------------------------------------
@@ -1530,84 +1469,14 @@ _fsm_routed_findings_check() {
     done <<< "$open_out"
   fi
 
-  # ── Producer reconciliation against the canonical CP3 artifact ────────────
-  local review_json="${evidence_dir}/semantic-review-final.json"
-  local plan_json="${evidence_dir}/plan.json"
-  # P094 Step 7: the cp3 close writes the file, so its absence is no longer
-  # "nothing to reconcile" once a cp3 round closed (verdict pass or fail). A
-  # skipped or no_change cp3 ran no reviewer and passes with an audit line;
-  # a run with no cp3 index at all keeps the legacy zero-cost path.
-  # (a leftover cp3/ of a run started before CP3 was switched off is not read: P110)
-  if [[ ! -f "$review_json" && -f "${evidence_dir}/cp3/rounds.json" ]] \
-     && ! aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review >/dev/null; then
-    local cp3_verdict; cp3_verdict="$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)"
-    case "$cp3_verdict" in
-      pass|fail)
-        echo "PRECONDITION FAIL: the cp3 review round of ${epic_id} closed (verdict ${cp3_verdict}) but ${review_json} is missing, so its findings cannot be reconciled against the steps' scope; run aid-review-round.sh close --checkpoint cp3 again (it writes the file)." >&2
-        return 1 ;;
-      skip|no_change)
-        fsm_emit_audit_log "cp3_reconciliation_skipped" --evidence-dir "$evidence_dir" --reason "cp3 verdict ${cp3_verdict}: no reviewer ran, no semantic file to reconcile" 2>/dev/null || true ;;
-    esac
-  fi
-  [[ -f "$review_json" && -f "$plan_json" ]] || { [[ "$failed" -eq 1 ]] && return 1; return 0; }
-
-  # The scope union is the same one the pre-commit hook computes for GATES and
-  # DONE: every step's allowed_paths, flattened. A finding inside it had an
-  # authorized place to be fixed and needs no route.
-  local scope_list findings
-  if ! scope_list="$(jq -r '[ .steps[]?.allowed_paths[]? ] | unique | .[]' "$plan_json" 2>&1)"; then
-    echo "PRECONDITION FAIL: cannot read allowed_paths from ${plan_json} (${scope_list}) — refusing to decide which review findings were in scope from a file that will not parse." >&2
-    return 1
-  fi
-  # A jq failure here must NOT read as "no findings": an unreadable review is
-  # the one input whose silence would pass this whole check open.
-  # A finding the review itself closed (status resolved: fixed and confirmed by
-  # a later round, or dismissed by the PM) owes no route — P103 had to route and
-  # resolve five of them by hand after a clean confirmation.
-  if ! findings="$(jq -r '.semantic_review.findings[]? | select((.target_path // "") != "" and (.status // "open") != "resolved") | "\(.fingerprint)\t\(.target_path)"' "$review_json" 2>&1)"; then
-    echo "PRECONDITION FAIL: cannot read findings from ${review_json} (${findings}) — refusing to complete ${epic_id} on a review artifact that will not parse." >&2
-    return 1
-  fi
-
-  # The journal is read ONCE into a newline blob; `aid_finding_recorded` would
-  # otherwise re-parse the whole file for every out-of-scope finding.
-  local recorded_fps=""
-  recorded_fps="$(_fsm_routed_recorded_set "$plan_id")" || recorded_fps=""
-
-  local fp tp in_scope pat
-  while IFS=$'\t' read -r fp tp; do
-    [[ -n "$fp" && -n "$tp" ]] || continue
-    in_scope=0
-    while IFS= read -r pat; do
-      [[ -n "$pat" ]] || continue
-      # `_aid_ancillary_glob_match` (lib/aid-ancillary.sh) is the shipped
-      # path-vs-pattern predicate, permissive mode: a bash GLOB (`scripts/**`,
-      # `src/*.ts`) or a plain directory prefix (`src` covering
-      # `src/nested/thing.ts`). Reused rather than restated — a private copy
-      # here would make "in scope" mean one thing to this check and another to
-      # every other consumer of the same allowed_paths.
-      if _aid_ancillary_glob_match "$tp" "$pat"; then in_scope=1; break; fi
-    done <<< "$scope_list"
-    [[ "$in_scope" -eq 1 ]] && continue
-    if [[ $'\n'"$recorded_fps"$'\n' != *$'\n'"$fp"$'\n'* ]]; then
-      echo "PRECONDITION FAIL: CP3 finding ${fp} targets ${tp}, which no step of ${epic_id} was allowed to touch, and nothing recorded what happens to it. Route it before completing: aid_finding_route ${plan_id} ${fp} cp3 <step:<n>|epic:<id>|backlog:IMP-<n>> ${epic_id}" >&2
-      failed=1
-    fi
-  done <<< "$findings"
-
   [[ "$failed" -eq 1 ]] && return 1
   return 0
 }
 
-# Route a CP3-freshness violation through the enforcement policy (P060 Step 4).
-# Emits cp3_freshness_would_block, then: blocking → print recovery, return 1;
-# observe → return 0 (logged, non-blocking). Sets _PRECONDITION_FAIL_REASON so
-# cmd_transition can group the failure in the timeline (like other preconditions).
-# Args: $1 timeline  $2 policy  $3 reason  $4.. stderr recovery lines.
 # fsm_check_orphan_dispatches — Component B of P040 (Dispatch Lifecycle Enforcement Bundle).
 # Reads <evidence_dir>/pending-dispatches.jsonl and refuses transition if any
 # start event lacks matching complete within expected_duration_max (default 600s
-# for CP2, 900s for CP3, 600s for CP4, 1200s for CP1, hard ceiling 1800s).
+# for CP2, 600s for CP4, 1200s for CP1, hard ceiling 1800s).
 #
 # Empirical anchor: NR 8/10/13/14 fabricated provenance class across 4 projects.
 # Enforcement principle: AID-v3-principles.md §1.
@@ -1725,34 +1594,27 @@ fsm_check_streamlined_integration_review() {
     gates_source="legacy_flat"
     echo "NOTE: streamlined integration review read gates_report.json from the legacy flat path (${gates_flat})." >&2
   fi
-  local missing=() cp3_off pmode=""
-  # P110: CP3 switched off (the default since 2.116.0) needs no cp3 round here
-  # — but a streamlined run skips every step review, so without CP3 it is
-  # reviewed only when the whole-plan round (CP7, plan_branch) follows; a
-  # legacy-mode streamlined run with CP3 off would ship unreviewed and is refused.
+  local missing=() pmode=""
+  # A streamlined run skips every step review; since the EPIC review (CP3)
+  # left in 3.0.0 (P114; off by default since 2.116.0, P110) it is reviewed
+  # only by the whole-plan round (CP7, plan_branch) that follows it — a
+  # streamlined run of any other mode would ship unreviewed and is refused.
   IFS=$'\t' read -r pmode _ _ < <(_fsm_declared_plan_mode "${epic_id:-}" 2>/dev/null) || true
-  local cp3_pass=false
-  [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] && cp3_pass=true
-  if cp3_off="$(aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review)" && [[ "$pmode" != plan_branch && "$cp3_pass" != true ]]; then
-    echo "REFUSED (streamlined_cp3_off): streamlined run with the EPIC review (CP3) off and no whole-plan review after it (plan mode: ${pmode:-legacy}) — nothing would review this code." >&2
-    echo "next: set cp3_integration_review: true with an epic_review block in .aid-o/config/policies/review-checkpoints.yaml and run the EPIC review (aid-step-check.sh --checkpoint cp3, aid-review-round.sh), or run the plan in plan_branch mode (CP7 reads it) (pipeline.md §When AID refuses: streamlined_cp3_off)" >&2
-    fsm_emit_audit_log "streamlined_integration_review_fail" --evidence-dir "$evidence_dir" --reason "streamlined, cp3 off, mode ${pmode:-legacy}" 2>/dev/null || true
+  if [[ "$pmode" != plan_branch ]]; then
+    echo "REFUSED (streamlined_cp3_off): streamlined run with no whole-plan review after it (plan mode: ${pmode:-legacy}) — the EPIC review (CP3) was removed in 3.0.0, so nothing would review this code." >&2
+    echo "next: run the plan as one run in plan_branch mode (aid-plan-fsm.sh plan-run P<NNN>; CP7 reads it at the close) (pipeline.md §When AID refuses: streamlined_cp3_off)" >&2
+    fsm_emit_audit_log "streamlined_integration_review_fail" --evidence-dir "$evidence_dir" --reason "streamlined, no CP7 after it, mode ${pmode:-legacy}" 2>/dev/null || true
     return 1
-  elif [[ -n "$cp3_off" ]]; then
-    fsm_emit_audit_log review_checkpoint_disabled --evidence-dir "$evidence_dir" --reason "cp3_integration_review off (${cp3_off//$'\t'/ in }): streamlined done-advance proceeds from the steps' reviews and the gates" 2>/dev/null || true
-  else
-    [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] || missing+=("cp3/rounds.json with verdict pass (the closed EPIC review round)")
   fi
   [[ -n "$gates" ]]    || missing+=("gates_report.json (searched ${gates_canonical} and ${gates_flat})")
   if [[ ${#missing[@]} -gt 0 ]]; then
     local joined
     joined=$(IFS=', '; echo "${missing[*]}")
     echo "ERROR: Streamlined run missing required integration-review evidence: ${joined}" >&2
-    echo "The streamlined contract requires a closed passing EPIC review round (cp3/rounds.json)" >&2
-    echo "+ gates_report.json (at ${gates_canonical} or ${gates_flat}) in:" >&2
+    echo "The streamlined contract requires gates_report.json (at ${gates_canonical} or ${gates_flat}) in:" >&2
     echo "  ${evidence_dir}" >&2
     echo "" >&2
-    echo "Fix: run the EPIC review (aid-step-check.sh --checkpoint cp3, aid-review-round.sh) and the gates, then retry done-advance." >&2
+    echo "Fix: run the gates, then retry done-advance." >&2
     echo "" >&2
     echo "OR (PM-authorized override, audited):" >&2
     echo "  aid-fsm.sh done-advance review release <state_file> --force \\" >&2
@@ -2129,11 +1991,12 @@ evaluate_compliance_checks() {
     gates_genby=false
   fi
 
-  # P094: verifier_outputs from the review round indexes (cp2 per step, cp3 once).
-  # A step's index says skip, no_change, pass or fail; aggregate is true when
-  # every step with a step-*-verify.md has a passing (or skipped) index and the
-  # cp3 index passes, null when the run has no steps yet, false otherwise.
-  local cp2_rounds_json cp2_dispatched cp2_verdict cp3_round_json cp3_d cp3_v aggregate
+  # P094: verifier_outputs from the review round indexes (cp2 per step; the
+  # EPIC review, CP3, left in 3.0.0). A step's index says skip, no_change, pass
+  # or fail; aggregate is true when every step with a step-*-verify.md has a
+  # passing (or skipped) index, null when the run has no steps yet, false
+  # otherwise.
+  local cp2_rounds_json cp2_dispatched cp2_verdict aggregate
   cp2_rounds_json='[]'
   local v step_n idx
   for v in "$evidence_dir"/step-*-verify.md; do
@@ -2155,17 +2018,8 @@ evaluate_compliance_checks() {
   else
     cp2_dispatched=false; cp2_verdict=null
   fi
-  idx="${evidence_dir}/cp3/rounds.json"
-  if [[ -f "$idx" ]]; then
-    cp3_round_json="$(jq -c '{verdict: (.verdict // null), rounds: ((.rounds // []) | length)}' "$idx")"
-    cp3_d=true; cp3_v="$(jq -c '.verdict' <<<"$cp3_round_json")"
-  else
-    cp3_round_json='{"verdict":null,"rounds":0}'; cp3_d=false; cp3_v=null
-  fi
   if [[ "$cp2_dispatched" == null ]]; then aggregate=null
-  elif [[ "$cp2_dispatched" == true && "$cp2_verdict" == '"pass"' ]] \
-       && { [[ "$cp3_d" == true && "$cp3_v" == '"pass"' ]] \
-            || aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review >/dev/null; }; then aggregate=true   # P110: CP3 off needs no cp3 pass
+  elif [[ "$cp2_dispatched" == true && "$cp2_verdict" == '"pass"' ]]; then aggregate=true
   else aggregate=false; fi
 
   # Phase 2 (P037) — plan_ac_match dimension
@@ -2201,9 +2055,6 @@ evaluate_compliance_checks() {
     --argjson cp2_d       "$cp2_dispatched" \
     --argjson cp2_v       "$cp2_verdict" \
     --argjson cp2_rounds  "$cp2_rounds_json" \
-    --argjson cp3d        "$cp3_d" \
-    --argjson cp3v        "$cp3_v" \
-    --argjson cp3_round   "$cp3_round_json" \
     --argjson agg         "$aggregate" \
     '{
       branch_correct:         $bc,
@@ -2215,9 +2066,6 @@ evaluate_compliance_checks() {
         cp2_per_step_dispatched:    $cp2_d,
         cp2_per_step_verdict:       $cp2_v,
         cp2_rounds:                 $cp2_rounds,
-        cp3_dispatched:             $cp3d,
-        cp3_verdict:                $cp3v,
-        cp3_round:                  $cp3_round,
         aggregate:                  $agg
       },
       dod_present: null
@@ -2525,12 +2373,6 @@ EOF
             return 1
           fi
         fi
-
-        # P094: the EPIC review (cp3) is one closed passing round at HEAD.
-        if ! fsm_check_review_round "$evidence_dir" cp3 ""; then
-          _PRECONDITION_FAIL_REASON="${_PRECONDITION_FAIL_REASON:-cp3_review_round}"
-          return 1
-        fi
       fi
       ;;
 
@@ -2561,7 +2403,7 @@ EOF
         # accepts it as self-consumed evidence; a stale HEAD, a forged/tampered
         # waiver, a cross-run copy, or a missing waiver_ref each fail closed.
         # This waives exactly one gate's result — every OTHER precondition below
-        # (plan-gate floor, risk profile, cp3 freshness) stays fully enforced.
+        # (plan-gate floor, risk profile) stays fully enforced.
         local waived_rows report_head
         report_head=$(jq -r '.revision.head_sha // empty' "$report" 2>/dev/null)
         waived_rows=$(jq -r "${AID_GATE_ROW_JQ}"'(.gates // {}) | gate_rows_normalize | to_entries[] | select((.value|type) == "object" and .value.status == "fail" and .value.waived == true) | .key' "$report" 2>/dev/null)
@@ -2737,15 +2579,6 @@ EOF
         # Fail loud, never silent-pass: without jq we cannot verify overall==pass,
         # and a missing verifier must block the DONE transition (OBS-20260708-07).
         echo "PRECONDITION FAIL: jq required to verify gates overall but not found." >&2
-        return 1
-      fi
-
-      # P060 Step 4: CP3 review freshness (OBS-20260702-03). The probe lives HERE
-      # (GATES:DONE) — a stale CP3 review (HEAD moved past its Reviewed-Head) must
-      # not pass as DONE evidence unless the D4 narrow exception holds. Grandfather
-      # + policy handled inside; default BLOCKING (D9).
-      if ! fsm_check_review_round "$evidence_dir" cp3 "" --freshness "$PWD"; then
-        _PRECONDITION_FAIL_REASON="${_PRECONDITION_FAIL_REASON:-cp3_stale_review}"
         return 1
       fi
       ;;
@@ -3418,7 +3251,7 @@ cmd_resume() {
 
 cmd_init() {
   if [[ $# -lt 7 ]]; then
-    echo "Usage: aid-fsm.sh init <epic_id> <run_id> <total_steps> <mode> <branch> <base_commit> <state_file> [--force] — got $# argument(s). All seven are positional; aid-json-to-run.sh is the normal caller, a manual re-init must pass the same seven." >&2
+    echo "Usage: aid-fsm.sh init <epic_id> <run_id> <total_steps> <mode> <branch> <base_commit> <state_file> [--force] — got $# argument(s). All seven are positional; plan-run is the normal caller, a manual re-init must pass the same seven." >&2
     exit 2
   fi
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
@@ -3447,6 +3280,24 @@ cmd_init() {
   local force="false"
   local streamlined=false
   local direct=false
+  # P114 (3.0.0): a run of a plan is the direct run. init without --direct for
+  # an EPIC of a plan (a committed lifecycle manifest, or its plan worktree) is
+  # the removed EPIC path — refused before anything is written, --force's audit
+  # record included (it is written as the flag is parsed, below). An EPIC id
+  # that names no declared plan (the plan-less run on main, which the FSM's own
+  # suites drive) is unchanged.
+  local _ep_a _ep_direct=false _ep_nnn _ep_mode="" _ep_reason=""
+  for _ep_a in "${@:8}"; do [[ "$_ep_a" == --direct ]] && _ep_direct=true; done
+  _ep_nnn="$(_fsm_epic_plan_nnn "$epic_id")"
+  if [[ "$_ep_direct" != true && -n "$_ep_nnn" ]]; then
+    IFS=$'\t' read -r _ep_mode _ _ep_reason < <(_fsm_declared_plan_mode "$epic_id") || true
+    if [[ ( "$_ep_mode" == plan_branch || "$_ep_mode" == legacy_epic_release_mode ) && -z "$_ep_reason" ]] \
+       || _fsm_in_plan_worktree "$epic_id"; then
+      echo "REFUSED (epic_path_removed): init ${epic_id} without --direct would run an EPIC of P${_ep_nnn} on its own task branch — the EPIC path, removed in AID 3.0.0; a plan runs straight from its file as one run (aid-plan-fsm.sh plan-run P${_ep_nnn})." >&2
+      _fsm_refusal_next epic_path_removed
+      exit 2
+    fi
+  fi
   local i=8
   while [[ $i -le $# ]]; do
     case "${!i}" in
@@ -3656,7 +3507,7 @@ cmd_init() {
             _pb_detail="Runtime plan-boundary-manifest.json for ${_pb_plan_id} at ${_pb_manifest_path} is present but unparseable."
           elif [[ -z "$_pb_entry" ]]; then
             _pb_reason="plan_manifest_missing"
-            _pb_detail="No epic_runs[] entry for ${epic_id} in ${_pb_plan_id}'s plan-boundary-manifest.json (never epic-started under this plan, or the entry was lost). Run 'aid-plan-fsm.sh epic-start ${_pb_plan_id} ${epic_id}' first, or repair with: aid-plan-fsm.sh plan-state ${_pb_plan_id} --repair"
+            _pb_detail="No epic_runs[] entry for ${epic_id} in ${_pb_plan_id}'s plan-boundary-manifest.json (the run was never started by plan-run, or the entry was lost). Start it with 'aid-plan-fsm.sh plan-run ${_pb_plan_id}', or repair with: aid-plan-fsm.sh plan-state ${_pb_plan_id} --repair"
           else
             local _pb_status="" _pb_task_branch="" _pb_base="" _pb_lineage="" _pb_epic_source_ref=""
             _pb_status="$(jq -r '.status // empty' <<<"$_pb_entry" 2>/dev/null)" || true
@@ -3670,14 +3521,11 @@ cmd_init() {
               _pb_detail="${epic_id} is recorded status=abandoned in ${_pb_plan_id}'s plan-boundary-manifest.json — restarting an abandoned EPIC without a PM decision would silently resurrect it."
             elif [[ "$_pb_lineage" != "proven" || "$_pb_epic_source_ref" != "plan/${_pb_plan_id}" ]]; then
               _pb_reason="epic_lineage_unproven"
-              _pb_detail="${epic_id}'s manifest entry has lineage='${_pb_lineage:-<empty>}' and epic_source_ref='${_pb_epic_source_ref:-<empty>}' — refusing to treat it as authoritative (must be proven with epic_source_ref=plan/${_pb_plan_id} to execute within this plan). Use 'aid-plan-fsm.sh epic-start ${_pb_plan_id} ${epic_id}' to create a new proven entry, or attest this entry with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --attest-source-ref <ref> --reason \"<reason>\" --epic ${epic_id}'. If the old task branch is fully contained in the target (git branch --merged shows it), the shortest safe path is: git branch -d <task_branch>, then epic-start."
+              _pb_detail="${epic_id}'s manifest entry has lineage='${_pb_lineage:-<empty>}' and epic_source_ref='${_pb_epic_source_ref:-<empty>}' — refusing to treat it as authoritative (must be proven with epic_source_ref=plan/${_pb_plan_id} to execute within this plan). Start the plan again with 'aid-plan-fsm.sh plan-run ${_pb_plan_id} --restart --reason \"<why>\"', or attest this entry with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --attest-source-ref <ref> --reason \"<reason>\" --epic ${epic_id}'."
             elif [[ "$direct" == true && "$(jq -r '.direct // false' <<<"$_pb_entry" 2>/dev/null)" != "true" ]]; then
               # P111: a direct run's entry has no task branch; it must say direct.
               _pb_reason="plan_branch_mismatch"
               _pb_detail="init --direct ${epic_id}: ${_pb_plan_id}'s manifest entry is not a direct run (task_branch=${_pb_task_branch:-<empty>}) — it belongs to the EPIC path; run it with /aid-run ${epic_id}."
-            elif [[ "$direct" != true && "$_pb_task_branch" != "$_plan_expected_branch" ]]; then
-              _pb_reason="plan_branch_mismatch"
-              _pb_detail="${_pb_plan_id}'s manifest records task_branch=${_pb_task_branch:-<empty>} for ${epic_id}, but this run expects ${_plan_expected_branch}."
             else
               local _pb_actual_base=""
               _pb_actual_base="$(git merge-base "$_plan_expected_branch" "plan/${_pb_plan_id}" 2>/dev/null)" || _pb_actual_base=""
@@ -3875,40 +3723,6 @@ cmd_init() {
     exit 1
   fi
 
-  # ── P074 Step 9: the plan worktree is NOT a foreign worktree ─────────────
-  # is_worktree()'s blanket skip exists for worktrees whose branch the CALLER
-  # controls (superpowers:using-git-worktrees and friends). The plan's OWN
-  # execution worktree is the opposite: it is that plan's "main", the one place
-  # its EPICs are supposed to run, and skipping enforcement there would leave
-  # init sitting on `plan/<id>` with no task branch — so done-advance would
-  # attribute an empty diff to the EPIC. Inside it, enforcement RUNS, with two
-  # differences from the primary checkout: `plan/<id>` is an accepted starting
-  # HEAD, and a task branch auto-created there is based on the PLAN branch head
-  # rather than on whatever the current branch happens to be.
-  local _wt_plan_branch=""
-  if _fsm_in_plan_worktree "$epic_id"; then
-    _wt_plan_branch="plan/P$(_fsm_epic_plan_nnn "$epic_id")"
-    # THE BASE REF MUST EXIST. Inside the plan worktree every task branch is
-    # cut from `plan/<id>`; if manual surgery deleted it the worktree is left
-    # detached, which used to fall through to the "unusual branch" warn-and-
-    # accept arm — init would proceed with NO task branch on an unowned
-    # detached tree, and done-advance would then attribute a meaningless diff.
-    # That is a hard fail: the topology this worktree exists to serve is gone.
-    #
-    # `--recreate-worktree` is deliberately NOT the remedy and is not offered:
-    # the worktree is intact, its BASE REF is missing. Recreating the tree would
-    # fail on the same missing ref and would look like the operator had tried
-    # the sanctioned repair.
-    if ! git -C "$PWD" rev-parse --verify --quiet "refs/heads/${_wt_plan_branch}" >/dev/null 2>&1; then
-      die "ERROR: ${_wt_plan_branch} does not exist, but this is ${_wt_plan_branch#plan/}'s execution worktree and every EPIC branch here is cut from it.
-
-Reason: the plan branch was deleted (manual surgery, or a post-merge cleanup that ran early). Without it there is no base for task/${epic_id}/main and no integration target for done-advance — continuing would execute on an unowned tree with broken diff attribution.
-
-Fix: restore ${_wt_plan_branch} (e.g. 'git branch ${_wt_plan_branch} <the merge or candidate sha>', or 'git reflog' to find its last position), then retry.
-       This is NOT a worktree problem: the worktree is intact, so 'plan-state ${_wt_plan_branch#plan/} --recreate-worktree' is the wrong tool. Repair the branch, or the plan-state record naming it."
-    fi
-  fi
-
   if [[ "$direct" == true ]]; then
     # P111: no task branch is created — the run's branch is plan/<id> and HEAD
     # must already be it (plan-run runs init inside the plan worktree).
@@ -3920,41 +3734,20 @@ Fix: restore ${_wt_plan_branch} (e.g. 'git branch ${_wt_plan_branch} <the merge 
       _fsm_refusal_next direct_run_needs_plan_branch
       exit 1
     fi
-  elif is_worktree && [[ -z "$_wt_plan_branch" ]]; then
+  elif is_worktree; then
     log_info "Worktree mode detected (git_dir under .git/worktrees/) — skipping branch enforcement"
   else
     local current_branch expected_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || die "Not in a git repository"
     expected_branch="task/${epic_id}/main"
-    # A sentinel, never a real branch name, so the case arm below is inert when
-    # we are NOT in the plan worktree (an empty pattern would match an empty
-    # current_branch).
-    local _wt_plan_case="${_wt_plan_branch:-__aid_no_plan_worktree__}"
 
     case "$current_branch" in
       "$expected_branch")
         log_info "Resume case: HEAD already on $expected_branch"
         ;;
-      "$_wt_plan_case")
-        # The plan worktree at rest sits on `plan/<id>` — this is the fresh-init
-        # case there, and the direct analogue of `main` in the primary checkout.
-        if git show-ref --verify --quiet "refs/heads/${expected_branch}"; then
-          log_info "Resume case: checking out existing $expected_branch in the plan worktree"
-          git checkout "$expected_branch" >/dev/null 2>&1 \
-            || die "Failed to checkout existing branch $expected_branch in the plan worktree $PWD (check 'git status' for details)"
-        else
-          log_info "Auto-creating branch: $expected_branch from ${_wt_plan_branch} (plan worktree)"
-          # Explicit base: a second EPIC of the same plan must start from the
-          # ADVANCED plan head (after the first EPIC merged), never from main.
-          git checkout -b "$expected_branch" "$_wt_plan_branch" >/dev/null 2>&1 \
-            || die "Failed to create branch $expected_branch from ${_wt_plan_branch} in the plan worktree $PWD.
-Reason: the plan branch must exist and be resolvable — this is the base every EPIC of ${_wt_plan_branch#plan/} starts from.
-If ${_wt_plan_branch} is gone, --recreate-worktree is NOT the remedy: the worktree is fine, its base ref is not. Repair the plan branch (or the plan-state record naming it) first."
-        fi
-        ;;
       main|master|develop)
         # P040 Component E: if the EPIC's task branch already exists (e.g. a
-        # prior aid-json-to-run.sh generation pass created it, or a re-init of
+        # prior the former run renderer generation pass created it, or a re-init of
         # the same EPIC), resume onto it instead of failing on `checkout -b`.
         if git show-ref --verify --quiet "refs/heads/${expected_branch}"; then
           log_info "Resume case: checking out existing $expected_branch"
@@ -3983,13 +3776,7 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
         # PM context-aware (e.g., manual exploration on feat/ branch) — accept with warning.
         log_event "$timeline_path" "fsm_branch_unusual_detected" \
           current_branch="$current_branch" expected_branch="$expected_branch" epic_id="$epic_id"
-        if [[ -n "$_wt_plan_branch" ]]; then
-          # P074 Step 9: inside the plan worktree the expected topology is
-          # known exactly, so the warning names it instead of shrugging.
-          log_warn "Unusual branch in the plan worktree: $current_branch. The expected topology here is ${_wt_plan_branch} at rest and ${expected_branch} while ${epic_id} runs. Continuing — PM-controlled context assumed."
-        else
-          log_warn "Unusual branch: $current_branch (expected $expected_branch). Continuing — PM-controlled context assumed."
-        fi
+        log_warn "Unusual branch: $current_branch (expected $expected_branch). Continuing — PM-controlled context assumed."
         ;;
     esac
   fi
@@ -3998,10 +3785,9 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # PRE-FLIGHT must start from clean tree so done-advance merge has a clear
   # diff to attribute to the EPIC.
   #
-  # AID's own runtime queue file (.aid-o/config/queue.yaml) is excluded: the
-  # auto-pipeline mutates it between phases, and in projects initialized before
-  # it was gitignored (v2.1.1) it may be tracked, which would otherwise trip
-  # this guard on every multi-phase run. The `^.. ` anchor matches only the
+  # AID's old runtime queue file (.aid-o/config/queue.yaml) is excluded: the
+  # EPIC path (removed in 3.0.0) mutated it, and a project initialized before
+  # it was gitignored (v2.1.1) may still track a leftover copy. The `^.. ` anchor matches only the
   # two porcelain status columns + space, so it never hides a real file renamed
   # into a queue.yaml name (rename lines contain " -> "). --untracked-files=no
   # preserves the original behaviour of ignoring untracked files; no pathspec is
@@ -4148,19 +3934,6 @@ EOF
   if [[ -n "$timeline" ]]; then
     mkdir -p "$(dirname "$timeline")"
     log_event "$timeline" "fsm_init" epic_id="$epic_id" run_id="$run_id" total_steps="$total_steps" mode="$mode"
-  fi
-
-  # ─── Queue dependency revalidation (P060 Step 7, NEW read path) ──────────
-  # OBS-20260709-06: revalidate this EPIC's queue depends_on against LIVE git so
-  # a stale "awaiting merge" flag can never hold a dependent EPIC blocked after
-  # its dep merged (branch deleted = the norm). This is the FIRST time aid-fsm.sh
-  # reads the queue; it is deliberately NON-FATAL to init — a blocked/unresolved
-  # dep is a queue-scheduling signal for the consumer (pipeline §12 / /aid-run
-  # pre-start), not an init failure. Missing queue / no entry / no deps = no-op.
-  local _queue_yaml_path
-  _queue_yaml_path="$(aid_state_path ".aid-o/config/queue.yaml")"
-  if [[ -f "$_queue_yaml_path" ]]; then
-    queue_revalidate "$epic_id" "$_queue_yaml_path" "$timeline_path" >/dev/null 2>&1 || true
   fi
 
   # Validate plan.json step content (warning only)
@@ -5891,16 +5664,13 @@ VALID_DONE_PHASES="review release"
 #
 # WHAT IS NOT HERE, ON PURPOSE. The EPIC-LOCAL validations still run in
 # plan_branch mode: the streamlined integration review (which, under
-# `streamlined_mode: true`, still HARD-REQUIRES this EPIC's own CP3 code-review
-# + CP3 security outputs — only the CP3 FRESHNESS RE-CHECK is skipped, never
-# the CP3 pair itself), the abandoned-but-shipped check, the tiered-severity
+# `streamlined_mode: true`, requires the gates report), the abandoned-but-shipped check, the tiered-severity
 # compliance precondition (which is what reads the
 # run's CP2 verifier outputs), `pm_decision == merge`, the archived-task-file
 # check and the routed-findings check. The skip is scoped to the per-EPIC RELEASE stack —
 # the stages that only make sense once, at the plan boundary — not to local
 # verification.
 AID_PLAN_BRANCH_SKIPPED_STAGES=(
-  cp3_freshness_recheck
   release_decision
 )
 
@@ -6153,7 +5923,7 @@ cmd_done_advance() {
     if [[ "$_da_state_direct" == "true" ]]; then
       echo "ERROR: done-advance: $(yaml_field "$state_file" epic_id) is a direct run (plan/<id>) — its done-advance records merged_to_plan and needs --direct." >&2
     else
-      echo "ERROR: done-advance --direct: $(yaml_field "$state_file" epic_id) is not a direct run — its task branch is merged by epic-merge-to-plan; drop --direct." >&2
+      echo "ERROR: done-advance --direct: $(yaml_field "$state_file" epic_id) is not a direct run; drop --direct." >&2
     fi
     _fsm_refusal_next done_advance_needs_direct
     exit 1
@@ -6180,6 +5950,19 @@ cmd_done_advance() {
   IFS=$'\t' read -r _pb_mode _pb_mode_plan _pb_mode_reason \
     < <(_fsm_declared_plan_mode "$_pb_epic_id") || true
   [[ "$_pb_mode" == "plan_branch" ]] && _pb_plan_branch="true"
+
+  # P114 (3.0.0): a run of a plan that is not the direct run is an EPIC-path
+  # run (a task branch merged by epic-merge-to-plan or by hand), removed —
+  # refused before anything is checked or written. Finish it on 2.118.x, or
+  # abandon it (aid-plan-fsm.sh epic-complete <plan> <epic> --abandon).
+  # (a plan id must be derivable: with none the resolver prints an EMPTY middle
+  # field, which a tab read collapses — the reason then lands in the plan slot)
+  if [[ "$_da_state_direct" != true && -n "$(_fsm_epic_plan_nnn "$_pb_epic_id")" \
+        && ( "$_pb_mode" == plan_branch || "$_pb_mode" == legacy_epic_release_mode ) && -z "$_pb_mode_reason" ]]; then
+    echo "REFUSED (epic_path_removed): done-advance ${_pb_epic_id} is a run of the EPIC path (plan ${_pb_mode_plan}, a task branch), removed in AID 3.0.0." >&2
+    _fsm_refusal_next epic_path_removed
+    exit 2
+  fi
 
   if [[ "$_pb_mode" == "unresolved" ]]; then
     mkdir -p "$(dirname "$_pb_mode_timeline")" 2>/dev/null || true
@@ -6254,9 +6037,8 @@ cmd_done_advance() {
       forced="$force" skipped_stages="$_pb_stages_json"
 
     # ── P074 Step 9: name the tree and the merge target ───────────────────
-    # A plan_branch EPIC never merges into the target branch here; the merge
-    # that matters is `task/<epic>/main` -> `plan/<id>`, performed by
-    # `aid-plan-fsm.sh epic-merge-to-plan` in the plan's own worktree. The
+    # A plan's run (the direct run since 3.0.0) never merges into the target
+    # branch here; it is recorded merged_to_plan on `plan/<id>`. The
     # Step 8 enforcer above has already put THIS process in that tree, so the
     # diff attributed to the EPIC below is the worktree's. Say so: the single
     # most confusing thing about a two-tree setup is not knowing which tree a
@@ -6264,9 +6046,7 @@ cmd_done_advance() {
     local _pb_wt
     _pb_wt="$(_fsm_plan_worktree_for_epic "$_pb_epic_id")"
     if [[ -n "$_pb_wt" ]]; then
-      if [[ "${direct_flag:-}" == true ]]; then echo "NOTE: ${_pb_epic_id} is the DIRECT run of ${_pb_mode_plan} — this advance evaluates the plan worktree ${_pb_wt} and records merged_to_plan on plan/${_pb_mode_plan} (no task branch to merge)." >&2; else
-      echo "NOTE: ${_pb_epic_id} is a plan_branch EPIC of ${_pb_mode_plan} — this advance evaluates the PLAN WORKTREE ${_pb_wt} (its HEAD and its base..HEAD diff), and the next step merges task/${_pb_epic_id}/main into plan/${_pb_mode_plan} THERE, not into the target branch." >&2
-      fi
+      echo "NOTE: ${_pb_epic_id} is the DIRECT run of ${_pb_mode_plan} — this advance evaluates the plan worktree ${_pb_wt} and records merged_to_plan on plan/${_pb_mode_plan} (no task branch to merge)." >&2
       log_event "$_pb_mode_timeline" "done_advance_plan_worktree" \
         epic_id="$_pb_epic_id" plan_id="$_pb_mode_plan" worktree_path="$_pb_wt"
     fi
@@ -6478,18 +6258,6 @@ EOF
       # AID_PLAN_BRANCH_SKIPPED_STAGES, which the timeline event and the spy test read.
       if [[ "$_pb_plan_branch" != "true" ]]; then
 
-        # P060 Step 4: CP3 freshness re-check at review→release. The GATES:DONE probe
-        # is the primary gate, but review-phase commits can land AFTER DONE and
-        # move HEAD past the reviewed CP3 head — this re-check catches that class.
-        # Grandfather + policy (default BLOCKING, D9) handled inside.
-        # PURE TREE consumer (every use of its third arg is a git probe against
-        # the reviewed HEAD) — it gets the invoking tree, not the state root.
-        if ! fsm_check_review_round "$evidence_dir" cp3 "" --freshness "$_tree_root"; then
-          log_event "${evidence_dir}/timeline.jsonl" "fsm_done_advance_fail" \
-            check="cp3_freshness" reason="${_PRECONDITION_FAIL_REASON:-cp3_stale_review}"
-          return 1
-        fi
-
         # ─── The release decision (aid-release-policy.sh, EPIC scope) ───────────
         # Observe by default (release-decision-policy.yaml); `blocking` turns a
         # release_ready=false into a refusal. A crash of the aggregator is logged
@@ -6577,7 +6345,7 @@ EOF
     local epic_id run_id evidence_dir project_root
     epic_id=$(yaml_field "$state_file" epic_id)
     run_id=$(yaml_field "$state_file" run_id)
-    # P074 Step 1: compliance.json + epic-summary.md are STATE —
+    # P074 Step 1: compliance.json is STATE —
     # both land in the PRIMARY evidence dir even when the release edge is
     # crossed (forced or not) from inside a linked worktree. Same legacy
     # cwd-relative fallback as derive_timeline.
@@ -6586,10 +6354,6 @@ EOF
     project_root="$(aid_state_root 2>/dev/null || pwd)"
     write_compliance_json "$epic_id" "$run_id" "$state_file" "$evidence_dir" "$project_root"
 
-    # IMP-090: best-effort epic-summary.md generation after compliance write.
-    # Failure logs a warning but never aborts the release path.
-    bash "$SCRIPT_DIR/aid-epic-summary.sh" generate "$evidence_dir" \
-      2>/dev/null || log_warn "epic-summary.md generation failed (non-fatal)"
 
     _fsm_pre_2103_services_note "$evidence_dir" "done-advance"
   fi
@@ -6979,537 +6743,6 @@ cmd_plan_close() {
   fi
 }
 
-# ─── Queue Dependency Revalidation (P060 Step 7) ─────────────────────────
-# OBS-20260709-06: a stale "awaiting merge" flag held a dependent EPIC blocked
-# after its dependency had actually merged (and its task branch was deleted —
-# the NORM). A human had to catch the false-BLOCK. This is the dual of the
-# bookkeeping-staleness class: a stale record producing a false NEGATIVE.
-#
-# The fix revalidates a queue entry's `depends_on` (the REAL schema field —
-# epic IDs, NOT a non-existent `blocked_on`) against LIVE git at start, with a
-# 4-output contract per dep (D8):
-#   1. dep branch exists + is-ancestor of main/HEAD → unblock
-#   2. dep branch exists + NOT ancestor            → blocked (correct)
-#   3. dep branch DELETED after merge (the norm)   → merged-detection fallback
-#   4. no signal at all                            → fail-loud
-#
-# New read path: aid-fsm.sh did not read the queue before this (cmd_init only
-# excluded queue.yaml from its dirty-tree guard). Registry: queue_dep_revalidation.
-#
-# P064 Step 7 amends outputs 1-3 for an entry that declares a `merge_target`
-# (written by lib/aid-queue-write.sh): ancestry is checked against THAT ref
-# instead of the main|master|HEAD guess, and outputs 3's evidence-based
-# fallback chain is unavailable — a plan-branch dependency is proven by
-# ancestry or it is blocked. Registry: plan_branch_merge_target.
-
-# _queue_parse_to_json <file> — awk parser copied from aid-queue-add.sh
-# (lines ~104-211). The live dogfood .aid-o/config/queue.yaml is NOT
-# yq-parseable (mixed indentation: a top-level `- epic_id:` list with 2-space
-# keys, interleaved with a 4-space quoted block). This awk handles both the
-# inline `depends_on: ["E-xxx"]` and the multi-line YAML-list form, and emits a
-# JSON array of {epic_id,status,depends_on}. Invalid JSON out (jq -e fails) =
-# unparseable queue → the caller fail-louds with queue_parse_failed.
-_queue_parse_to_json() {
-  local file="$1"
-  if [[ ! -f "$file" ]]; then
-    echo "[]"
-    return
-  fi
-
-  awk '
-    function close_entry() {
-      if (!in_entry) return
-      if (in_depends && !depends_closed) {
-        if (dep_count > 0) printf "]"
-        else printf "[]"
-      }
-      printf "}"
-    }
-
-    BEGIN {
-      entry_count = 0
-      in_entry = 0
-      in_depends = 0
-      depends_closed = 0
-      dep_count = 0
-      printf "["
-    }
-
-    /^[[:space:]]*#/ { next }
-    /^[[:space:]]*$/ { next }
-
-    /^[[:space:]]*-[[:space:]]+epic_id:/ {
-      close_entry()
-      in_entry = 1
-      in_depends = 0
-      depends_closed = 0
-      dep_count = 0
-      entry_count++
-      if (entry_count > 1) printf ","
-
-      val = $0
-      sub(/^[[:space:]]*-[[:space:]]+epic_id:[[:space:]]*/, "", val)
-      gsub(/"/, "", val)
-      sub(/[[:space:]]*$/, "", val)
-      printf "{\"epic_id\":\"%s\"", val
-      next
-    }
-
-    in_entry && /^[[:space:]]+[a-z_]+:/ {
-      if (in_depends && !depends_closed) {
-        if (dep_count > 0) printf "]"
-        else printf "[]"
-        depends_closed = 1
-      }
-      in_depends = 0
-
-      line = $0
-      sub(/^[[:space:]]+/, "", line)
-
-      colon_pos = index(line, ":")
-      key = substr(line, 1, colon_pos - 1)
-      val = substr(line, colon_pos + 1)
-      sub(/^[[:space:]]+/, "", val)
-      sub(/[[:space:]]+$/, "", val)
-      gsub(/"/, "", val)
-
-      if (key == "status") {
-        printf ",\"status\":\"%s\"", val
-      } else if (key == "plan_id" || key == "merge_target") {
-        # P064 Step 7 — the two fields lib/aid-queue-write.sh adds. Emitted as
-        # strings exactly like `status` (the YAML literal `null` therefore
-        # arrives as the four-character string "null", which the bash side
-        # treats as absent — see _queue_entry_merge_target).
-        printf ",\"%s\":\"%s\"", key, val
-      } else if (key == "depends_on") {
-        printf ",\"depends_on\":"
-        in_depends = 1
-        depends_closed = 0
-        dep_count = 0
-
-        if (val ~ /\[/) {
-          inner = val
-          gsub(/[\[\]]/, "", inner)
-          gsub(/"/, "", inner)
-          sub(/^[[:space:]]+/, "", inner)
-          sub(/[[:space:]]+$/, "", inner)
-          if (inner == "") {
-            printf "[]"
-          } else {
-            printf "["
-            n = split(inner, items, ",")
-            for (i = 1; i <= n; i++) {
-              sub(/^[[:space:]]+/, "", items[i])
-              sub(/[[:space:]]+$/, "", items[i])
-              if (items[i] != "") {
-                if (dep_count > 0) printf ","
-                printf "\"%s\"", items[i]
-                dep_count++
-              }
-            }
-            printf "]"
-          }
-          depends_closed = 1
-          in_depends = 0
-        }
-      }
-      next
-    }
-
-    in_entry && in_depends && !depends_closed && /^[[:space:]]*-[[:space:]]/ {
-      val = $0
-      sub(/^[[:space:]]*-[[:space:]]*/, "", val)
-      gsub(/"/, "", val)
-      sub(/[[:space:]]*$/, "", val)
-      if (dep_count == 0) printf "["
-      if (dep_count > 0) printf ","
-      printf "\"%s\"", val
-      dep_count++
-      next
-    }
-
-    END {
-      close_entry()
-      printf "]"
-    }
-  ' "$file"
-}
-
-# _queue_merge_target — echo the ref the dep branch should be an ancestor of.
-# Prefers main, then master, else HEAD (detached/CI checkout).
-#
-# P064 Step 7 NOTE: this is now the FALLBACK only, used for a queue entry that
-# declares no `merge_target`. It is exactly the guess that made an EPIC merged
-# into `plan/Pxxx` but not yet released report `blocked` forever — see
-# _queue_entry_merge_target below for the declared-target path that supersedes
-# it.
-_queue_merge_target() {
-  if git show-ref --verify --quiet refs/heads/main; then echo main
-  elif git show-ref --verify --quiet refs/heads/master; then echo master
-  else echo HEAD; fi
-}
-
-# _queue_entry_merge_target <dep> <queue_json> — the ref THIS dependency
-# declares it was (or will be) merged into: `plan/<plan_id>` while its plan is
-# open, the target branch once the plan is released to main. Empty when the
-# entry carries no merge_target (a legacy, pre-P064 entry) — that empty answer
-# is what re-enables the fallback chain below.
-_queue_entry_merge_target() {
-  local dep="$1" queue_json="$2" mt
-  mt=$(echo "$queue_json" | jq -r --arg d "$dep" \
-    '[.[] | select(.epic_id==$d) | (.merge_target // "")] | .[0] // ""' 2>/dev/null)
-  [[ "$mt" == "null" || "$mt" == "~" ]] && mt=""
-  printf '%s' "$mt"
-}
-
-# _queue_entry_plan_id <dep> <queue_json> — the `plan_id` THIS dependency
-# declares it belongs to. Empty when the entry carries no plan_id, or carries
-# the YAML literal `null` (which _queue_parse_to_json emits as the four-char
-# string "null" — see the awk block above). Used only to decide, in
-# _dep_merge_target_authorized, whether a declared `plan/<x>` target names the
-# entry's OWN plan.
-_queue_entry_plan_id() {
-  local dep="$1" queue_json="$2" pid
-  pid=$(echo "$queue_json" | jq -r --arg d "$dep" \
-    '[.[] | select(.epic_id==$d) | (.plan_id // "")] | .[0] // ""' 2>/dev/null)
-  [[ "$pid" == "null" || "$pid" == "~" ]] && pid=""
-  printf '%s' "$pid"
-}
-
-# _dep_merge_target_authorized <declared> <dep> — IMP-272 (+ HIGH hardening).
-#
-# A `merge_target` is read straight out of the hand-editable queue file, and
-# ancestry is proven AGAINST it — so a value the attacker controls is the ref
-# the proof is anchored to. `_dep_valid_branch_ref` only asks "is this a legal
-# ref name?"; it happily accepts the dependency's OWN task branch, whose
-# ancestry against itself is trivially true, so pointing a dependency at
-# `task/<its own id>/main` self-satisfied the check and unblocked work that was
-# provably never in `plan/<plan>`. This predicate constrains the value to the
-# only two refs the substrate ever legitimately writes there:
-#   * `plan/<id-derived plan>` — a same-plan dependency, still on its plan branch;
-#   * the resolved target branch (`_queue_merge_target`) — a cross-plan
-#     dependency already released to main/master.
-# Any OTHER ref that resolves (an EPIC task branch, another plan's branch, an
-# arbitrary feature branch) is refused fail-loud by the caller, never treated
-# as proof. An entry with `plan_id: null` has no owning plan, so `plan/<...>` is
-# impossible for it and only the target branch is legal.
-#
-# IMP-272 HARDENING (post-review HIGH): the owning plan MUST be derived from
-# the dependency's epic id — the record KEY, bound to the very identity the
-# ancestry check runs against — NOT read from the entry's own `plan_id` field.
-# Both `merge_target` and `plan_id` are hand-editable values in the same entry,
-# so trusting `plan_id` let an attacker set `plan_id: P999` + `merge_target:
-# plan/P999` and have the substrate agree `plan/P999` was "its own" plan branch,
-# self-authorizing the anchor again one field over. `_dep_derived_plan` derives
-# `P<nnn>` from the epic id (empty for an ad-hoc id that names no plan), and the
-# entry's declared `plan_id`, when present, is fail-closed cross-checked against
-# that derivation by the caller — a disagreement is corruption/attack, refused.
-#
-# CONTRACT TWIN of lib/aid-queue-write.sh:_queue_merge_target_authorized, which
-# enforces the same rule for the WRITE side (queue_claim_next). CHANGE BOTH.
-_dep_derived_plan() {
-  local nnn; nnn="$(_fsm_epic_plan_nnn "${1:-}")"
-  [[ -n "$nnn" ]] && printf 'P%s' "$nnn"
-}
-_dep_merge_target_authorized() {
-  local declared="$1" dep="$2"
-  [[ "$declared" == "$(_queue_merge_target)" ]] && return 0
-  local derived; derived="$(_dep_derived_plan "$dep")"
-  [[ -n "$derived" && "$declared" == "plan/${derived}" ]] && return 0
-  return 1
-}
-
-# _dep_evidence_state <dep> — echo "DONE" if ANY of the dep's evidence runs is
-# state: DONE, else the last-seen state, else empty. Never fails (find on a
-# missing dir yields nothing).
-_dep_evidence_state() {
-  local dep="$1" f st found=""
-  while IFS= read -r f; do
-    st=$(yaml_field "$f" state)
-    if [[ "$st" == "DONE" ]]; then echo "DONE"; return 0; fi
-    [[ -z "$found" && -n "$st" ]] && found="$st"
-  done < <(find "$(aid_state_path ".aid-o/work/evidence/${dep}" 2>/dev/null || printf '%s' ".aid-o/work/evidence/${dep}")" -name fsm-state.yaml 2>/dev/null)
-  echo "$found"
-}
-
-# _dep_evidence_branch <dep> — echo the branch field from the dep's first
-# evidence fsm-state (D8 fallback for a dep whose branch did not follow the
-# task/<id>/main convention). Empty when no evidence.
-_dep_evidence_branch() {
-  local dep="$1" f br
-  while IFS= read -r f; do
-    br=$(yaml_field "$f" branch)
-    [[ -n "$br" ]] && { echo "$br"; return 0; }
-  done < <(find "$(aid_state_path ".aid-o/work/evidence/${dep}" 2>/dev/null || printf '%s' ".aid-o/work/evidence/${dep}")" -name fsm-state.yaml 2>/dev/null)
-  echo ""
-}
-
-# _dep_valid_branch_ref <ref> — is <ref> a name git itself accepts?
-#
-# CONTRACT TWIN of lib/aid-queue-write.sh:_queue_valid_branch_ref, byte for
-# byte in behaviour (CP2 iteration 2, finding 2). The writer used to apply a
-# hand-rolled `^[A-Za-z0-9][A-Za-z0-9._/-]*$` here and this reader applied
-# NOTHING, so for a dep that ran on a git-legal but regex-illegal branch — the
-# verifier's repro is `_wip` — `queue-revalidate` said `unblocked` while
-# `queue_claim_next` wrote `dependency_no_ancestry_proof` on the same fact.
-# `git check-ref-format` is the authority precisely so neither half can drift
-# from git again. On top of it: a leading `-` is refused (git accepts it as a
-# ref name, but `git merge-base --is-ancestor "$ref" …` would read it as an
-# OPTION), as is a `"`/backslash/control character, so the name stays safe if
-# it is ever written back into the queue as a YAML scalar. CHANGE BOTH.
-_dep_valid_branch_ref() {
-  local r="${1:-}"
-  [[ -n "$r" ]]                     || return 1
-  [[ "$r" != -* ]]                  || return 1
-  [[ "$r" != *'"'* ]]               || return 1
-  [[ "$r" != *'\'* ]]               || return 1
-  [[ "$r" != *[$'\001'-$'\037']* ]] || return 1
-  [[ "$r" != *$'\177'* ]]           || return 1
-  git check-ref-format "refs/heads/${r}" >/dev/null 2>&1
-}
-
-# _resolve_dep_branch <dep> — echo the LIVE branch to ancestor-check for a dep:
-# the task/<dep>/main convention if it exists, else the evidence fsm-state
-# branch field if that ref exists (never main/master — a legacy branch:main
-# would false-unblock). Empty = branch deleted (merged-detection path).
-#
-# CONTRACT TWIN: lib/aid-queue-write.sh:_queue_resolve_dep_branch implements
-# this same rule for the WRITE side (queue_claim_next). The two halves must
-# answer the same question the same way — a writer that knew only the
-# task/<dep>/main convention wrote `blocked:…:dependency_no_ancestry_proof` on
-# a dep this reader reported `unblocked`, leaving the dependent unclaimable
-# through the queue while the FSM said it was ready (CP2 finding 3). aid-fsm.sh
-# is a command script, not a sourceable library, so the rule is duplicated
-# rather than shared: CHANGE BOTH.
-_resolve_dep_branch() {
-  local dep="$1"
-  local conv="task/${dep}/main"
-  if _dep_valid_branch_ref "$conv" \
-     && git show-ref --verify --quiet "refs/heads/${conv}"; then echo "$conv"; return 0; fi
-  local ev; ev=$(_dep_evidence_branch "$dep")
-  if [[ -n "$ev" && "$ev" != "main" && "$ev" != "master" ]] \
-     && _dep_valid_branch_ref "$ev" \
-     && git show-ref --verify --quiet "refs/heads/${ev}"; then
-    echo "$ev"; return 0
-  fi
-  echo ""; return 0
-}
-
-# _revalidate_one_dep <dep> <queue_json> <timeline_path>
-# Implements the D8 4-output contract for a single dependency. Echoes exactly
-# one of: unblocked | blocked | failed. Emits the corresponding timeline event.
-# All git calls use the rc-capture pattern so a raw git fatal (128) NEVER
-# aborts under `set -e` — it falls through to merged-detection.
-_revalidate_one_dep() {
-  local dep="$1" queue_json="$2" timeline_path="$3"
-
-  # ── P064 Step 7: a DECLARED merge_target changes both the ref and the rules ─
-  # For an entry that carries `merge_target`, ancestry against THAT ref is the
-  # only accepted answer. The evidence-based fallback chain further down (queue
-  # `status: completed`, an evidence `state: DONE`, a merge-log grep) is
-  # unavailable to it — every one of those is a claim ABOUT a merge rather than
-  # the merge itself, and `status: completed` in particular has only ever been
-  # written by hand. A queue entry is a derived view, never evidence.
-  local declared; declared=$(_queue_entry_merge_target "$dep" "$queue_json")
-
-  local target
-  if [[ -n "$declared" ]]; then
-    # A merge_target read out of the hand-editable queue file is untrusted
-    # input (CP2 iteration 2, LOW note): validate it with the same predicate as
-    # the writer BEFORE it becomes an argv element of `git`, where a leading
-    # `-` would be read as an option. An unusable target is the same broken
-    # record as a non-resolving one — reported, never treated as proof.
-    if ! _dep_valid_branch_ref "$declared"; then
-      log_event "$timeline_path" "queue_dep_unresolved" \
-        epic_id="$dep" reason="merge_target_invalid"
-      echo "failed"; return 1
-    fi
-    if ! git rev-parse --verify --quiet "${declared}^{commit}" >/dev/null 2>&1; then
-      # A declared target that does not resolve is a broken record, not a
-      # "blocked" answer — treating it as blocked would hide it forever.
-      log_event "$timeline_path" "queue_dep_unresolved" \
-        epic_id="$dep" reason="merge_target_missing" merge_target="$declared"
-      echo "failed"; return 1
-    fi
-    # IMP-272: syntactic legality is not authorization. A merge_target may only
-    # be the entry's own plan branch or the resolved target branch; any OTHER
-    # resolvable ref (the dep's own task branch, another plan's branch, a
-    # feature branch) would self-satisfy the ancestry check, so it is refused
-    # fail-loud rather than believed. reason names the illegal value class.
-    # ORDER MATTERS (IMP-272 review finding): resolvability is checked FIRST,
-    # exactly like the writer twin (_queue_dep_state), so a target that is both
-    # unauthorized and non-resolving yields the SAME reason class on both
-    # halves (target_missing/merge_target_missing), never divergent codes for
-    # one queue state. CHANGE BOTH.
-    # Fail-closed cross-check (post-review HIGH): if the entry declares a
-    # plan_id, it MUST agree with the id-derived plan; a disagreement means the
-    # hand-editable plan_id was set to launder an unauthorized merge_target and
-    # is refused. An absent plan_id (legacy entry) skips this and relies on the
-    # derivation-based authorization below.
-    local _decl_pid _der_plan
-    _decl_pid="$(_queue_entry_plan_id "$dep" "$queue_json")"
-    _der_plan="$(_dep_derived_plan "$dep")"
-    if [[ -n "$_decl_pid" && "$_decl_pid" != "$_der_plan" ]]; then
-      log_event "$timeline_path" "queue_dep_unresolved" \
-        epic_id="$dep" reason="merge_target_unauthorized" merge_target="$declared" \
-        declared_plan="$_decl_pid" derived_plan="$_der_plan"
-      echo "failed"; return 1
-    fi
-    # IMP-272: syntactic legality is not authorization. A merge_target may only
-    # be the entry's own (id-DERIVED) plan branch or the resolved target branch;
-    # any OTHER resolvable ref (the dep's own task branch, another plan's branch,
-    # a feature branch) would self-satisfy the ancestry check, so it is refused
-    # fail-loud rather than believed. The owning plan is derived from the epic
-    # id, never read from the entry's own plan_id field. ORDER MATTERS (IMP-272
-    # review finding): resolvability is checked FIRST, exactly like the writer
-    # twin (_queue_dep_state), so a target that is both unauthorized and
-    # non-resolving yields the SAME reason class on both halves. CHANGE BOTH.
-    if ! _dep_merge_target_authorized "$declared" "$dep"; then
-      log_event "$timeline_path" "queue_dep_unresolved" \
-        epic_id="$dep" reason="merge_target_unauthorized" merge_target="$declared"
-      echo "failed"; return 1
-    fi
-    target="$declared"
-  else
-    target=$(_queue_merge_target)
-  fi
-
-  local branch; branch=$(_resolve_dep_branch "$dep")
-
-  if [[ -n "$branch" ]]; then
-    local rc=0
-    git merge-base --is-ancestor "$branch" "$target" >/dev/null 2>&1 || rc=$?
-    case "$rc" in
-      0)  # output 1: branch exists + is ancestor → merged → unblock
-        log_event "$timeline_path" "queue_dep_revalidated" \
-          epic_id="$dep" resolution="ancestor" branch="$branch" merge_target="$target"
-        echo "unblocked"; return 0 ;;
-      1)  # output 2: branch exists + NOT ancestor → genuinely unmerged → blocked
-        log_event "$timeline_path" "queue_dep_blocked" \
-          epic_id="$dep" branch="$branch" merge_target="$target"
-        echo "blocked"; return 0 ;;
-      *)  # 128 = bad-ref/fatal → do NOT crash; fall through to merged-detection
-        if [[ -n "$declared" ]]; then
-          log_event "$timeline_path" "queue_dep_unresolved" \
-            epic_id="$dep" reason="ancestry_check_failed" merge_target="$target" branch="$branch"
-          echo "failed"; return 1
-        fi
-        : ;;
-    esac
-  fi
-
-  if [[ -n "$declared" ]]; then
-    # Declared target, no live branch to prove ancestry with. A deleted branch
-    # is not proof, and neither is a hand-edited `completed`. This is a
-    # determinate "not merged", not a fail-loud: the answer is knowable and it
-    # is "no".
-    log_event "$timeline_path" "queue_dep_blocked" \
-      epic_id="$dep" merge_target="$target" reason="no_ancestry_proof"
-    echo "blocked"; return 0
-  fi
-
-  # output 3: branch deleted after merge (the NORM) → merged-detection fallback.
-  # Unblock if ANY signal says the dep is done.
-  local qstatus
-  qstatus=$(echo "$queue_json" | jq -r --arg d "$dep" \
-    '[.[] | select(.epic_id==$d) | .status] | .[0] // ""' 2>/dev/null)
-  if [[ "$qstatus" == "completed" ]]; then
-    log_event "$timeline_path" "queue_dep_revalidated" \
-      epic_id="$dep" resolution="merged_completed"
-    echo "unblocked"; return 0
-  fi
-
-  local evstate; evstate=$(_dep_evidence_state "$dep")
-  if [[ "$evstate" == "DONE" ]]; then
-    log_event "$timeline_path" "queue_dep_revalidated" \
-      epic_id="$dep" resolution="merged_done"
-    echo "unblocked"; return 0
-  fi
-
-  # P060 per-plan C+A: anchor the epic_id so a hierarchical sibling can't false-unblock
-  # (bare --grep="E-016-1" substring-matched "E-016-1_3"). -E with non-[alnum_] boundaries
-  # requires the id to appear as a whole token; epic_ids are controller-authored `E-<digits>...`
-  # (no regex metacharacters but `-`, which is literal in ERE), so this is safe from injection.
-  local hits _dep_re="(^|[^[:alnum:]_])${dep}([^[:alnum:]_]|\$)"
-  hits=$(git log --merges -E --grep="$_dep_re" "$target" --oneline 2>/dev/null | head -1 || true)
-  if [[ -n "$hits" ]]; then
-    log_event "$timeline_path" "queue_dep_revalidated" \
-      epic_id="$dep" resolution="merged_log"
-    echo "unblocked"; return 0
-  fi
-
-  # output 4: no signal at all → fail-loud
-  log_event "$timeline_path" "queue_dep_unresolved" epic_id="$dep"
-  echo "failed"; return 1
-}
-
-# queue_revalidate <epic_id> [queue_file] [timeline_path]
-# Revalidate one queue entry's depends_on against live git. Echoes the overall
-# revalidated status: unblocked | blocked | failed | noop.
-#   - failed if ANY dep is unresolved (fail-loud) — return 1
-#   - blocked if ANY dep is genuinely unmerged (and none failed)
-#   - unblocked if all deps are merged
-#   - noop (no event) for: missing queue, no entry for this epic, or no deps
-# Missing-queue / no-entry are NEVER fail-loud (D8): they are a clean no-op.
-queue_revalidate() {
-  local epic_id="$1"
-  # P074 Step 1: defaults resolve under the state root (with the same legacy
-  # cwd-relative fallback as derive_timeline for non-resolvable fixture cwds);
-  # explicit caller-provided paths are honoured as given.
-  local queue_file="${2:-$(aid_state_path ".aid-o/config/queue.yaml" 2>/dev/null || printf '%s' ".aid-o/config/queue.yaml")}"
-  local timeline_path="${3:-$(aid_state_path ".aid-o/work/evidence/${epic_id}/queue-revalidate.jsonl" 2>/dev/null || printf '%s' ".aid-o/work/evidence/${epic_id}/queue-revalidate.jsonl")}"
-
-  # scenario f: missing queue file → no-op, no event
-  [[ -f "$queue_file" ]] || { echo "noop"; return 0; }
-
-  local queue_json
-  queue_json=$(_queue_parse_to_json "$queue_file")
-  if ! echo "$queue_json" | jq -e . >/dev/null 2>&1; then
-    # scenario e: unparseable queue → fail-loud
-    mkdir -p "$(dirname "$timeline_path")"
-    log_event "$timeline_path" "queue_parse_failed" queue_file="$queue_file" epic_id="$epic_id"
-    echo "failed"; return 1
-  fi
-
-  # scenario f: no entry for this epic → no-op, no event
-  local present
-  present=$(echo "$queue_json" | jq -r --arg e "$epic_id" '[.[] | select(.epic_id==$e)] | length')
-  [[ "${present:-0}" -gt 0 ]] || { echo "noop"; return 0; }
-
-  # no depends_on → nothing to revalidate → no-op, no event
-  local deps
-  deps=$(echo "$queue_json" | jq -r --arg e "$epic_id" \
-    '.[] | select(.epic_id==$e) | (.depends_on // []) | .[]' 2>/dev/null)
-  [[ -n "$deps" ]] || { echo "noop"; return 0; }
-
-  mkdir -p "$(dirname "$timeline_path")"
-
-  local overall="unblocked" dep res
-  while IFS= read -r dep; do
-    [[ -n "$dep" ]] || continue
-    res=$(_revalidate_one_dep "$dep" "$queue_json" "$timeline_path") || true
-    case "$res" in
-      failed)    overall="failed"; break ;;
-      blocked)   [[ "$overall" != "failed" ]] && overall="blocked" ;;
-      unblocked) : ;;
-    esac
-  done <<< "$deps"
-
-  echo "$overall"
-  [[ "$overall" == "failed" ]] && return 1
-  return 0
-}
-
-# cmd_queue_revalidate — dispatch entrypoint: `aid-fsm.sh queue-revalidate <epic_id>`
-# Callable standalone by consumers (pipeline.md §12 queue pickup, /aid-run
-# pre-start) BEFORE respecting a blocked queue status. Prints the revalidated
-# status to stdout; exit 1 on fail-loud (unresolved dep / unparseable queue).
-cmd_queue_revalidate() {
-  local epic_id="${1:?Usage: aid-fsm.sh queue-revalidate <epic_id> [queue_file] [timeline_path]}"
-  shift
-  queue_revalidate "$epic_id" "$@"
-}
-
 # ─── P074 Step 3: locked counter allocation ─────────────────────────────
 # cmd_alloc — `aid-fsm.sh alloc plan-id` / `aid-fsm.sh alloc epic-id`
 #
@@ -7709,7 +6942,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     promote-check)              shift; cmd_promote_check "$@" ;;
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
     plan-close)                 shift; cmd_plan_close "$@" ;;
-    queue-revalidate)           shift; cmd_queue_revalidate "$@" ;;
+    queue-revalidate)           echo "REFUSED (epic_path_removed): 'queue-revalidate' belonged to the EPIC path (the queue), removed in AID 3.0.0 — a plan runs straight from its file as one run." >&2
+                                _fsm_refusal_next epic_path_removed; exit 2 ;;
     alloc)                      shift; cmd_alloc "$@" ;;   # alloc plan-id | alloc epic-id (P074 Step 3)
     active-runs)                shift; cmd_active_runs "$@" ;;   # active-runs list | active-runs prune | active-runs stalled (P074 Step 4 / P076 Step 6)
     # IMP-232 lifecycle (v2.58.1) — delegate to the sourced lib so the surface the
@@ -7747,7 +6981,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                                 [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
                                 aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|resume|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|step-evidence-dir|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate|alloc plan-id|alloc epic-id|active-runs list|active-runs prune|active-runs stalled> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|resume|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|step-evidence-dir|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|plan-reconcile|plan-record-delivery|plan-state|alloc plan-id|alloc epic-id|active-runs list|active-runs prune|active-runs stalled> [args...]" >&2
       exit 1 ;;
   esac
 fi

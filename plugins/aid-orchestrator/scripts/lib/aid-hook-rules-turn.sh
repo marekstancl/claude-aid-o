@@ -204,7 +204,7 @@ aid_hook_rule_turn_write_scope() {
   # A reviewer writes its answer into the review round's own directory while
   # the step is still open; that is the round's path, not the step's.
   case "$path" in
-    *.aid-o/work/evidence/*/cp[2367]/*) echo "a review round's own directory" >&2; return 3 ;;
+    *.aid-o/work/evidence/*/cp[267]/*) echo "a review round's own directory" >&2; return 3 ;;
   esac
 
   # The same attribution as the Stop rule, when the payload names a readable

@@ -12,13 +12,13 @@ Two card sets for AID agents:
 
 - **Step roles (8)** — the roles that may appear in a `plan.json` step `role` field and are
   dispatched as workers during EXECUTE. These MUST stay in sync with the role enum in
-  `defaults/templates/plan.schema.json`, `VALID_ROLES` in `scripts/aid-epic-to-json.sh` and
+  `defaults/templates/plan.schema.json`, the roles `lib/aid-plan-json.sh` accepts and
   `_VALID_ROLES` in `scripts/aid-plan-lint.sh`:
   `backend, frontend, qa, e2e, security, docs, docs-writer, release` (`docs-writer` is the older
   spelling of `docs`, kept for plans that already use it). Roles architect, domain and
   observability were removed in 2.112.0 (P107): no plan in any project ever used them; a design
   step is `backend`, an instrumentation step is `backend` too.
-- **Reviews** are not cards here: the plan, step and EPIC reviewer roles live in
+- **Reviews** are not cards here: the plan, step and whole-plan reviewer roles live in
   `skills/plan-review-roles.md` and `skills/step-review-roles.md`, the critic in
   `skills/critic.md`. The six verifier focus cards and the VULCAN overlays that used to follow
   the step roles were removed in 2.112.0 (P107): nothing had dispatched them since the review
@@ -79,8 +79,8 @@ cleanup pass to rely on.
 **Stay on the branch you were given.** Never `checkout`, `switch` or `reset` a
 branch in the tree you work in — it is shared with the controller and, in a
 plan, with the other steps. Read another branch with `git show <branch>:<path>`.
-The controller's step commit refuses any branch but the run's task branch
-(`task/<epic>/main`), or the step's own `step/<id>` branch in a wave.
+The controller's step commit refuses any branch but the run's branch
+(`plan/<id>`), or the step's own `step/<id>` branch in a wave.
 
 ---
 
@@ -339,9 +339,8 @@ before 2.112.0 and generation refused them).
 
 **Constraints:**
 - MUST work down the ladder in "Write the least code that works" (above) before adding anything
-- NEVER bump version without confirming it's the last EPIC in the release series
+- NEVER bump version outside the plan's close (the plan releases once, at plan-final)
 - MUST follow semver — breaking change = major bump
-- Intermediate EPIC → defer version bump (orchestrator will confirm)
 
 **Improvement Hints:**
 - Look for: version mismatches between package.json / pyproject.toml / VERSION file
@@ -357,7 +356,7 @@ before 2.112.0 and generation refused them).
 ## Plan-boundary note
 
 Under `plan_branch` a plan is read as a whole once, at its close, by the
-whole-plan review round (CP7, `skills/step-review-roles.md`); CP2 and CP3 remain
-per EPIC. What stays open after that round is fixed by the role that wrote the
+whole-plan review round (CP7, `skills/step-review-roles.md`); every step is
+reviewed before it (CP2). What stays open after that round is fixed by the role that wrote the
 code, then confirmed. Mode is read from the plan's committed lifecycle manifest,
 never inferred.

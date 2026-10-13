@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # aid-ac-extract.sh — shared Acceptance Criteria extractor (P083 Step 2)
 #
-# Replaces the two copy-pasted awk blocks in aid-plan-to-epic.sh
+# Replaces the two copy-pasted awk blocks in the former EPIC generator
 # (step_ac / step_ac_raw) that only matched flush-left `- ` lines and
 # silently dropped every indented continuation line — truncating a
 # multi-line criterion mid-sentence in both the human EPIC section and

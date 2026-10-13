@@ -26,10 +26,14 @@ echo "TEST: the pre-P094 id fixture and the successor table exist"
 live_active="$(yq -r '.enforcements[] | select(.status == "active") | .id' "$REG" | sort -u)"
 live_all="$(yq -r '.enforcements[].id' "$REG" | sort -u)"
 retired="$(yq -r '.enforcements[] | select(.status == "removed_scoped") | .id' "$REG" | sort -u)"
+# P114 (3.0.0) retired the EPIC path's rows by the P111 inventory; their successor
+# (replacement_guard) is checked there (test-registry-epic-inventory.bats), not here.
+p114_retired="$(yq -r '.enforcements[] | select(.status == "removed_scoped" and ((.description // "") | test("^RETIRED by P114"))) | .id' "$REG" | sort -u)"
 gone="$(comm -23 <(sort -u "$FIX") <(printf '%s\n' "$live_all"))"
 # retired ids that the fixture knew (P087's max_parallel_one predates this table and is exempt by name)
 retired_p094="$(comm -12 <(sort -u "$FIX") <(printf '%s\n' "$retired") | grep -v '^max_parallel_one$' \
-  | grep -vE '^(scheduler_|test_audit_|test_catalog_|test_lane_|plan_start_clean|epic_start_clean|plan_merge_to_main|delegated_suite)' || true)"
+  | grep -vE '^(scheduler_|test_audit_|test_catalog_|test_lane_|plan_start_clean|epic_start_clean|plan_merge_to_main|delegated_suite)' \
+  | { grep -vxFf <(printf '%s\n' "$p114_retired") || true; } || true)"
 
 echo "TEST: every removed or retired id has a successor row"
 while IFS= read -r id; do
@@ -39,6 +43,7 @@ while IFS= read -r id; do
   succ="$(printf '%s' "$row" | awk -F'|' '{print $3}' | sed 's/^ *//;s/ *$//;s/`//g')"
   if [[ "$succ" == "none ("*")" ]]; then ok "${id} → ${succ}"
   elif grep -qxF "$succ" <<< "$live_active"; then ok "${id} → ${succ} (active)"
+  elif grep -qxF "$succ" <<< "$p114_retired"; then ok "${id} → ${succ} (retired by P114; its successor is in the P111 inventory)"
   else bad "${id} → '${succ}' is neither an active registry id nor a recorded 'none (…)' decision"; fi
 done <<< "$(printf '%s\n%s\n' "$gone" "$retired_p094" | sort -u)"
 

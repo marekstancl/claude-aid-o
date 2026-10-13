@@ -3,6 +3,41 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.0.0] — 2026-10-13
+
+Bez EPIC cesty (P114, vydání 3 roadmapy P109; PM 12. 10. 2026, 13. 10. 2026 1A). Plán běží jako jeden běh přímo ze souboru (`/aid-run P<NNN>` = `aid-plan-fsm.sh plan-run`, od 2.117.0); generátory EPICů, fronta, task větve, slučování EPICu do větve plánu a revize EPICu (CP3) jsou z pluginu pryč. Major verze: staré vstupy odmítnou s cestou ven, nic se tiše nechová jinak.
+
+### Removed
+- **Generování EPICů** — `aid-plan-to-epic.sh`, `aid-epic-to-json.sh`, `aid-json-to-run.sh`, `aid-queue-add.sh`, `aid-auto-pipeline.sh` (i `supersede-generation`), `aid-generation-finalize.sh`, `aid-epic-summary.sh`, šablony `epic.md` a `run-*.md`; režim `/aid-plan epic`. Jedinou kontrolu, kterou držel jen generátor — stránku pro PM — přebírá `plan-run` (`plan_page_missing`, při každém spuštění i pokračování).
+- **Fronta a pokračování** — `lib/aid-queue-write.sh`, `aid-plan-continue.sh`, `next-epic`, `queue-revalidate`, kontrola fronty v `aid-plan-close-check.sh` (Check 4), řádek fronty v `active.md`, fronta v `/aid-status` (souhrn, kandidát, `/aid-status queue …`), připomínka fronty při startu session. Nastavení `autonomy.spawn_next_epic`, `max_spawned_epics`, `spawn_deadline_sec` v `project.yaml` už nic nečte (lze smazat; `/aid-init` je nezapisuje).
+- **Task větve a slučování EPICu** — `epic-start`, `epic-merge-to-plan`, `epic-base`; `init` bez `--direct` pro EPIC deklarovaného plánu, `done-advance` takového běhu; `epic-complete` bez `--direct` (a jeho `--supersede-by`, `--full-tests`). Zůstává `epic-complete --direct` (zápis přímého běhu, volá ho `done-advance --direct`) a `--abandon` (ukončení běhu). Běh bez plánu (EPIC id bez čísla plánu) zůstává jako zkušební běh testů FSM.
+- **Revize EPICu (CP3)** — `--checkpoint cp3` (odmítne a jmenuje CP2 a CP7), role `epic_generalist`, `epic_behaviour`, `epic_security`, kontrola čerstvosti D4 (`CP3-Freshness-Exception`), rekonciliace sémantického souboru EPICu s rozsahem kroků. Každý krok má revizi (CP2), celý plán se čte jednou při uzávěru (CP7). Streamlined běh mimo `plan_branch` odmítne (`streamlined_cp3_off`): nic jiného by jeho kód nečetlo.
+
+**Odmítnutí a cesta ven** (`epic_path_removed`, řádek v `skills/pipeline.md` §When AID refuses): `epic-start`, `epic-merge-to-plan`, `next-epic`, `epic-base`, `queue-revalidate`, `init` bez `--direct`, `done-advance` a `epic-complete` starého běhu, `plan-run` nad plánem generovaným po staru (soubor EPICu, nepřímý záznam v manifestu, transakce generace, vlastní záznamy ve frontě). Rozpracovaný starý běh se dokončí na 2.118.x (`plugin_path` připnutý na checkout 2.118.x), nebo se jeho plán uzavře (`aid-plan-fsm.sh plan-close P<NNN> --administrative --reason "<proč>"`, starý běh ukončí `epic-complete … --abandon`) a začne NOVÝ plán s novým číslem. Zbylý `.aid-o/config/queue.yaml` čte jen tohle odmítnutí `plan-run` — smažte ho, až žádný starý plán nepoběží. Projektový `review-checkpoints.yaml` s `cp3_integration_review` nebo blokem `epic_review` se načte s varováním „ignored legacy key“, ne s chybou.
+
+### Changed
+- `plan-run` odmítne `--reason` bez `--force`/`--restart`; stránku pro PM kontroluje při každém spuštění.
+- Pravidlo Stop pro autonomní běh žije v `lib/aid-auto-continuation.sh` (`aid_hook_rule_auto_continuation_stop`), řádek registru `auto_continuation_notice`; pravidlo hooku si nechalo id `queue_continuation_notice`, takže `AID_HOOKS_OFF_RULES` i auditní řádky platí dál.
+- Registr vynucení: řádky EPIC cesty vyřazené podle inventury P111 (`docs/reference/2026-10-p111-inventura-epic-cesty.md`, sloupec „P114“), nový `epic_path_removed`; 662 řádků, aktivních 466 (před 520).
+- Texty pro agenty a dokumentace znají jednu cestu: `/aid-run`, `/aid-plan`, `/aid-status`, `/aid-help`, `/aid-stop`, skilly `pipeline`, `planner` (přepsaný na `plan-run`), `plan-writing` (značky `**EPIC N: Steps …**` se ignorují, lint je jmenuje jedním řádkem ADVISORY), `run-management`, `agent-protocol`, `role-cards`, `review-checkpoint-contracts`, `step-review-roles`; Docusaurus `/aid/commands/aid-run|aid-plan|aid-status`, `/aid/architecture/overview`, stránky `aid-epic-queue`, `aid-epic-status`, `aid-plan-epic`, `aid-run-epic` smazané.
+
+### Fixed
+- `done-advance` běhu bez plánu odmítal jako starou EPIC cestu (prázdné pole odpovědi resolveru se při čtení tabulátorem slilo) — chyba vzniklá a opravená během P114, s regresním případem.
+- `plan-run` od 2.117.0 nekontroloval stránku pro PM (kontrolu držel jen generátor EPICů) — teď ji vyžaduje při každém spuštění i pokračování.
+- Kapitola „Escalations settled by an independent agent“ (2.118.1) ležela uvnitř bloku, který `commands/aid-run.md` cituje bajt po bajtu z `scripts/lib/aid-review-adapter-claude.md`, takže `test-review-finding-schema` (t2) byl na 2.118.1 červený; kapitola stojí za blokem.
+- Stav revize běhu pro lifecycle bere poslední běh (starý `audit-report.json` už nepřebije novější kola kroků).
+
+Velikost (jen hlášení; `wc -l` jako v 2.118.1, testy navíc):
+
+| Část | Před (2.118.1) | Po (3.0.0) |
+|---|---|---|
+| scripts (`scripts/*.sh`, `scripts/lib/*.sh`) | 76 377 | 66 080 |
+| skills (`skills/*.md`, `skills/*/SKILL.md`) | 8 582 | 7 915 |
+| commands | 6 114 | 5 563 |
+| testy (`scripts/tests`, soubory / případy bats) | 283 / 4 047 | 258 / 3 685 |
+
+Testbed: lane `generation_refuses_without_page` je teď `plan_run_refuses_without_page` na `plan-run` (repo testbedu nemá remote: commit 68ee406; testbed 42/42 na kandidátu). Testbed teď vykresluje stránku pro PM i v klonech přímého běhu (`plan-run` ji vyžaduje).
+
 ## [2.118.1] — 2026-10-13
 
 Cizí repo do konce a eskalace na nezávislého agenta (P112, opravné vydání po prvním skutečném plánu na přímé cestě Agents P016; PM 12. 10. 2026 1A + 2A, 13. 10. 2026 delegace v `--auto`). Plán s druhým repem (`repo_roots`) dojde do rozhodnutí o vydání bez ručního sloučení a bez zastavení na PM kvůli vadě nástroje.

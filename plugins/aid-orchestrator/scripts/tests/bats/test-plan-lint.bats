@@ -3,7 +3,7 @@
 # test-plan-lint.bats — plan-time Files-shape lint (v2.58.3; P079 Step 5).
 # Unit: every violation class, the two blocking tiers + legacy tolerance, and
 # the non-blocking description-path advisory.
-# Integration: lint-clean plan flows through aid-plan-to-epic -> aid-epic-to-json
+# Integration: lint-clean plan flows through the former EPIC generator -> the former EPIC-to-plan.json converter
 # -> contract gate with all three agreeing (proves the lint and the generator do
 # not have a different reality), and the preflight fail-fasts BEFORE any write.
 
@@ -11,8 +11,6 @@ setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH AID_QUIET=1 AID_TEST_MODE=1
   LINT="$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh"
-  P2E="$AID_PLUGIN_PATH/scripts/aid-plan-to-epic.sh"
-  E2J="$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh"
   GATE="$AID_PLUGIN_PATH/scripts/gates/aid-contract-validate.sh"
   TEST_DIR="$(mktemp -d)"; cd "$TEST_DIR"
   # A plan always lives inside a project. Since v2.88.2 an unresolvable project
@@ -34,7 +32,7 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
     # The Testing Strategy section is what a plan owes since P084 Step 4 (a
     # `Test:` bullet per step no longer is). It is here so these fixtures keep
     # testing the FILES grammar and nothing else.
-    printf '# Plan: P900\n\n## Testing Strategy\n\nNo new verification — this fixture exercises the Files grammar only.\n\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
+    printf '# Plan: P900\n\n## Testing Strategy\n\nNo new verification — this fixture exercises the Files grammar only.\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
     printf '%s\n' "$@"
     # P085: a step with a `Create:` bullet owes a **Reuse check:**. These
     # fixtures are about the FILES grammar, so the field is present, valid and
@@ -95,13 +93,19 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   _plan pl.md legacy '- Modify: src/nobacktick.ts — no backticks'
   run "$LINT" pl.md; [ "$status" -eq 0 ]
 }
-@test "lint STRICT: an EPIC line plan-start cannot parse ('**EPIC 1**', no colon) blocks strict, warns legacy" {
+@test "no-epic: a plan without an EPIC marker lints clean (P114: one plan = one run)" {
   _plan p.md strict '- Create: `src/a.ts` — new'
-  sed -i 's/^\*\*EPIC 1: Steps 1-1\*\*$/**EPIC 1**/' p.md
-  run "$LINT" p.md; [ "$status" -ne 0 ]; [[ "$output" == *"STRICT the EPIC lines do not follow the lifecycle grammar"* ]]
-  _plan p.md legacy '- Create: `src/a.ts` — new'
-  sed -i 's/^\*\*EPIC 1: Steps 1-1\*\*$/**EPIC 1**/' p.md
-  run "$LINT" p.md; [ "$status" -eq 0 ]; [[ "$output" == *"[WARN legacy] the EPIC lines"* ]]
+  sed -i '/^\*\*EPIC 1: Steps 1-1\*\*$/d' p.md
+  ! grep -q '^\*\*EPIC' p.md
+  run "$LINT" p.md; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" != *"EPIC"* ]]
+}
+@test "no-epic: a plan that still carries EPIC markers (any form) gets one ADVISORY that they are ignored, never a finding" {
+  _plan p.md strict '- Create: `src/a.ts` — new'
+  sed -i 's/^### Step 1: work$/**EPIC 1**\n\n### Step 1: work/' p.md; grep -q '^\*\*EPIC 1\*\*$' p.md
+  run "$LINT" p.md; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"[ADVISORY] EPIC markers"*"are ignored since AID 3.0.0"* ]]
+  [ "$(grep -c 'EPIC markers' <<< "$output")" -eq 1 ]
 }
 @test "lint: an EPIC line quoted in a fenced block is an example, not a declaration" {
   _plan p.md strict '- Create: `src/a.ts` — new'
@@ -158,47 +162,8 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
 }
 
 # ── INTEGRATION: lint-clean plan flows clean through the WHOLE generator chain ─
-@test "integration: a lint-clean plan passes aid-plan-to-epic -> aid-epic-to-json -> contract gate" {
-  _plan clean.md strict '- Create: `src/a.ts` — new file' '- Modify: `src/b.ts` (lines ~1-9) — edit'
-  run "$LINT" clean.md; [ "$status" -eq 0 ]                    # lint says clean
-  mkdir -p out
-  # IMP-503: DoD gate resolution requires a real execution.yaml at the
-  # project's state root (fail-closed). TEST_DIR is a plain tmpdir (not a
-  # git repo); the plan-state marker lets aid_canonicalize_project_root
-  # honour it as-given without one.
-  mkdir -p .aid-o/work/plan-state .aid-o/config
-  printf 'gates: {}\n' > .aid-o/config/execution.yaml
-  export AID_PROJECT_ROOT="$TEST_DIR"
-  # The CP1 gate needs a closed plan-review round (P093).
-  source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"
-  aid_fixture_seed_plan_review "$TEST_DIR" "$TEST_DIR/clean.md"
-  run "$P2E" --plan clean.md --phase 1 --total 1 \
-    --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
-    --output-dir out --counter-yaml counter.yaml
-  [ "$status" -eq 0 ]                                          # generation succeeds
-  local epic; epic="$(ls out/E-*.md | head -1)"; [ -n "$epic" ]
-  run "$E2J" --epic "$epic" --schema "$AID_PLUGIN_PATH/defaults/templates/plan.schema.json" \
-    --output-dir aidout --plan-source clean.md
-  [ "$status" -eq 0 ]                                          # EPIC.md -> plan.json OK
-  local pj; pj="$(echo "$output" | jq -r '.plan_json')"; [ -f "$pj" ]
-  run "$GATE" "$pj" "$epic"
-  [ "$status" -eq 0 ]                                          # contract gate agrees: clean
-  [[ "$(echo "$output" | jq -r '.result')" == "pass" ]]
-}
 
 # ── INTEGRATION: the preflight fail-fasts BEFORE any EPIC/counter write ──────
-@test "integration: a strict plan with an ERROR entry is blocked by the preflight; NO EPIC written, NO counter bumped" {
-  _plan dirty.md strict '- Modify: the 6 remaining version files.'
-  mkdir -p out
-  run "$P2E" --plan dirty.md --phase 1 --total 1 \
-    --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
-    --output-dir out --counter-yaml counter.yaml
-  [ "$status" -eq 7 ]                                         # documented lint-fail code (NOT a bare set -e exit 1)
-  [[ "$output" == *"ERROR"* ]]                                # the violation is actually listed (not silent)
-  [[ "$output" == *"Generation readiness failed"* ]]         # + the error_exit reason
-  [ -z "$(ls out/ 2>/dev/null)" ]                             # NO EPIC file written
-  [ ! -f counter.yaml ]                                       # counter not created/bumped
-}
 
 # ── INTEGRATION: lint ERROR set == what the contract gate would reject ───────
 @test "integration: an ERROR entry the lint blocks is ALSO one the contract gate rejects (same reality)" {
@@ -212,34 +177,7 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
 # outright rather than silently narrowing allowed_paths to the first path
 # (the historical bug this test guards against). Legacy plan, so this proves
 # the fail-closed behavior is NOT gated behind lifecycle_strict.
-@test "P079 Step 5: the lint and generation agree on both new refusals (the seam's whole promise)" {
-  # aid-plan-lint.sh's header promises "a plan that passes this lint provably
-  # passes the gate". Making generation refuse a shape the lint called clean
-  # would have broken exactly that, so both shapes are ERROR tier in the shared
-  # classifier — asserted here as one fact, in both directions.
-  local shape
-  for shape in '- `src/forgotten.ts` — no verb label' '- Modify:'; do
-    _plan p.md legacy '- Create: `src/a.ts` — fine' "$shape"
-    run "$LINT" p.md
-    [ "$status" -ne 0 ]                                       # lint refuses
-    mkdir -p out && rm -rf out && mkdir -p out
-    run "$P2E" --plan p.md --phase 1 --total 1 \
-      --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
-      --output-dir out --counter-yaml counter.yaml
-    [ "$status" -ne 0 ]                                       # generation too
-    [ -z "$(ls out/ 2>/dev/null)" ]
-  done
-}
 
-@test "integration: comma-separated Files entry fails aid-plan-to-epic generation (legacy plan), never silently narrows" {
-  _plan dirty.md legacy '- Modify: `src/a.ts`, `src/b.ts`'
-  mkdir -p out
-  run "$P2E" --plan dirty.md --phase 1 --total 1 \
-    --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
-    --output-dir out --counter-yaml counter.yaml
-  [ "$status" -ne 0 ]
-  [ -z "$(ls out/ 2>/dev/null)" ]                             # NO EPIC file silently written with narrowed scope
-}
 
 # ── human-audience sections (P084 Step 5) ───────────────────────────────────
 # The PM's page is rendered from the plan (lib/aid-plan-summary.sh), so a

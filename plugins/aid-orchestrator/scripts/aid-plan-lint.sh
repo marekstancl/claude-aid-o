@@ -432,7 +432,7 @@ if [[ "$mode" == "legacy" ]] && [[ -n "$(_aid_files_verification_only "$PLAN")" 
 fi
 
 # ---------------------------------------------------------------------------
-# AID Role is a closed set — the same list aid-epic-to-json.sh enforces. A step
+# AID Role is a closed set — the same list the former EPIC-to-plan.json converter enforces. A step
 # naming a role outside it (fullstack, devops, docs) used to pass this lint,
 # CP1 and every review, and fail only inside generation, phase 1.
 # ---------------------------------------------------------------------------
@@ -443,7 +443,7 @@ while IFS=$'\t' read -r _rl_ln _rl_role; do
   errors=$((errors+1))
   [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rl_ln}: ERROR AID Role '${_rl_role}' is not an AID role — one of: ${_VALID_ROLES} (a step that is both backend and frontend is two steps)" >&2
 done < <(_aid_blank_fenced < "$PLAN" | awk '/^\*\*AID Role:?\*\*/ { s=$0; sub(/^\*\*AID Role:?\*\*[[:space:]]*/, "", s); gsub(/[[:space:]]+$/, "", s); print NR "\t" tolower(s) }')
-# ^ same header grammar and same whole-line value as aid-plan-to-epic.sh's
+# ^ same header grammar and same whole-line value as the former EPIC generator's
 #   extractor (colon optional, rest of the line is the role) — so what the
 #   lint accepts is exactly what generation will accept.
 
@@ -512,16 +512,11 @@ _has_testing_strategy() {
   ' "$PLAN"
 }
 
-# plan-start writes the lifecycle manifest from the plan's bold EPIC lines
-# (lib/aid-lifecycle.sh aid_lifecycle_parse_legacy_epics, a stricter grammar
-# than EPIC generation reads) and refuses the plan when they do not parse — so
-# the same parser says it here, before review and generation are spent on it.
-if _lint_plan_id="$(_aid_plan_id_of "$PLAN" 2>/dev/null)" \
-   && ! bash "${SCRIPT_DIR}/aid-lifecycle.sh" parse-legacy "$_lint_plan_id" "$PLAN" >/dev/null 2>&1; then
-  _lint_epic_what="the EPIC lines do not follow the lifecycle grammar"
-  grep -qE '^\*\*EPIC [0-9]+' <(_aid_blank_fenced < "$PLAN") || _lint_epic_what="the plan has no EPIC line (a single-phase plan has one too)"
-  [[ "$_lint_plan_id" =~ ^P[0-9]+$ ]] || _lint_epic_what="the plan id '${_lint_plan_id}' is not P<number>, which the lifecycle manifest needs"
-  _strict_finding "" "${_lint_epic_what} — each EPIC is one bold line '**EPIC N: title**' (or '**EPIC N / Backlog: title**'), numbered 1..K; plan-start refuses the plan otherwise (skills/plan-writing.md §Phase Markers)."
+# P114 (3.0.0): a plan runs as ONE run (plan-run declares E-<nnn>-1_1 itself),
+# so EPIC markers are neither required nor parsed into runs; one that is still
+# there is named as ignored.
+if grep -qE '^\*\*EPIC [0-9]+' <(_aid_blank_fenced < "$PLAN"); then
+  _advisory "" "EPIC markers ('**EPIC N: …**') are ignored since AID 3.0.0 — a plan runs as one run (/aid-run P<NNN>); the marker can go."
 fi
 
 if ! _has_testing_strategy; then

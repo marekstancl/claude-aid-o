@@ -16,9 +16,10 @@
 #
 # Covered: the full two-stream render (plan blocks, worktree column, the
 # `missing!` marker, `Closing:`, the unreadable-state degradation line, the
-# unassigned-runs block, quick tasks, the queue summary), the plan-less flat
-# render, the deterministic `next-epic` rule (live runs by epic_id order, then
-# the queue candidate, then `(none)`), and the individual recipes. P076 Step 15
+# unassigned-runs block, quick tasks), the plan-less flat render, the
+# deterministic `next-epic` rule (live runs by epic_id order, then `(none)`;
+# the queue left in 3.0.0 and a leftover queue.yaml is not read),
+# and the individual recipes. P076 Step 15
 # adds the controller column: the five pinned row shapes (active, a legacy
 # entry defaulting to manual, blocked_for_pm, the DERIVED awaiting_host_resume,
 # and a stalled run), the verbatim `safe_next_action` line and its inert
@@ -50,7 +51,7 @@ setup() {
   export DOC
   TEST_TMPDIR="$(mktemp -d)"
   export TEST_TMPDIR
-  unset AID_PROJECT_ROOT AID_QUEUE_FILE AID_QUEUE_WRITE_PROJECT_ROOT
+  unset AID_PROJECT_ROOT
 
   # THE NIGHTLY'S RESULT IS AN INPUT TO THIS RENDER, AND IT MUST BE THIS TEST'S
   # INPUT — not the machine's.
@@ -185,8 +186,8 @@ _run_state() {
 }
 
 # _fixture <root> full|flat — THE fixture the published example renders were
-# produced from. `full`: P901 (worktree present, two runs, one queue row),
-# P902 (worktree recorded but absent, no runs, one queue row with a dep),
+# produced from. `full`: P901 (worktree present, two runs), P902 (worktree
+# recorded but absent, no runs) — and a leftover queue.yaml nothing reads,
 # P903 (PLAN_MERGING → closing), P904 (unparseable state file), one plan-less
 # run, four quick logs with fixed mtimes. `flat`: no plan-state at all.
 _fixture() {
@@ -349,10 +350,10 @@ YAML
   [ "$status" -eq 0 ]
   # the rendered overview is real content, not two identically-empty renders
   grep -q '^Plan P901 — EPIC_INTEGRATION$' "$TEST_TMPDIR/worktree.txt"
-  grep -q '^Queue: 2 queued, 0 running, 1 done | Auto-pickup: active$' "$TEST_TMPDIR/worktree.txt"
+  grep -q '^Use /aid-status <id> for details\.$' "$TEST_TMPDIR/worktree.txt"
 }
 
-@test "each active stream renders its own block: header, worktree, EPIC rows, queue rows, next" {
+@test "each active stream renders its own block: header, worktree, EPIC rows, next" {
   local d="$TEST_TMPDIR/root"
   _fixture "$d" full
   _render "$d"
@@ -362,12 +363,12 @@ YAML
   [[ "$output" == *"Plan P901 — EPIC_INTEGRATION"$'\n'"  worktree: .aid-worktrees/plan-P901"$'\n'"  EPICs:"* ]]
   [[ "$output" == *"    E-901-1_2  [EXECUTE]  run=R-A  branch=task/E-901-1_2/main  ctl=active  governs-main"* ]]
   [[ "$output" == *"    E-901-2_2  [READY]  run=R-B  branch=task/E-901-2_2/main  ctl=manual"* ]]
-  [[ "$output" == *"  Queue:"$'\n'"    E-901-3_3  [pending]  high"* ]]
+  [[ "$output" != *"Queue"* ]]   # a leftover queue.yaml is not read (P114)
   [[ "$output" == *"  next: E-901-1_2  [EXECUTE]"* ]]
-  # the second stream: no live runs, so the queue candidate is the next EPIC
+  # the second stream: no live runs, so nothing is next
   [[ "$output" == *"Plan P902 — PLAN_GATES"* ]]
   [[ "$output" == *"  EPICs:"$'\n'"    (none active)"* ]]
-  [[ "$output" == *"  next: E-902-2_2  [queue:pending, 1 dep(s) unverified]"* ]]
+  [[ "$output" == *"  EPICs:"$'\n'"    (none active)"$'\n'"  next: (none)"* ]]
   # the plan-less run is visible, and not attached to either plan
   [[ "$output" == *"Unassigned EPIC runs (no plan):"$'\n'"  E-900-1_1  [GATES]"* ]]
 }
@@ -427,68 +428,7 @@ YAML
   [[ "$output" != *"Q-004"* ]]
 }
 
-@test "queue summary counts by the queue layer's status vocabulary and reports the auto-pickup flag" {
-  local d="$TEST_TMPDIR/root"
-  _fixture "$d" full
-  _call "$d" queue_summary
-  [ "$status" -eq 0 ]
-  # pending + legacy `queued` = queued; legacy `completed` = done
-  [ "$output" = "2 queued, 0 running, 1 done | Auto-pickup: active" ]
-  sed -i 's/^paused: false/paused: true/' "$d/.aid-o/config/queue.yaml"
-  _call "$d" queue_summary
-  [[ "$output" == *"Auto-pickup: paused"* ]]
-  # a blocked entry gets its own count
-  sed -i '0,/status: pending/s//status: blocked/' "$d/.aid-o/config/queue.yaml"
-  _call "$d" queue_summary
-  [ "$output" = "1 queued, 0 running, 1 done, 1 blocked | Auto-pickup: paused" ]
-}
 
-@test "no queue status vanishes from the totals — every enum value is counted, unknown values land in 'other'" {
-  local d="$TEST_TMPDIR/vocab"
-  _repo "$d"
-  mkdir -p "$d/.aid-o/config"
-  # a queue holding ONLY terminal-but-not-delivered rows must never render
-  # "0 queued, 0 running, 0 done" and hide them
-  cat > "$d/.aid-o/config/queue.yaml" <<'YAML'
-queue:
-  - epic_id: E-1-1_1
-    status: abandoned
-  - epic_id: E-1-2_2
-    status: superseded
-YAML
-  _call "$d" queue_summary
-  [ "$status" -eq 0 ]
-  [ "$output" = "0 queued, 0 running, 0 done, 2 abandoned | Auto-pickup: active" ]
-  # the full vocabulary of lib/aid-queue-write.sh, plus a hand-edited value
-  cat > "$d/.aid-o/config/queue.yaml" <<'YAML'
-queue:
-  - epic_id: E-2-1_9
-    status: pending
-  - epic_id: E-2-2_9
-    status: queued
-  - epic_id: E-2-3_9
-    status: running
-  - epic_id: E-2-4_9
-    status: merged_to_plan
-  - epic_id: E-2-5_9
-    status: released_to_main
-  - epic_id: E-2-6_9
-    status: completed
-  - epic_id: E-2-7_9
-    status: blocked
-  - epic_id: E-2-8_9
-    status: abandoned
-  - epic_id: E-2-9_9
-    status: superseded
-  - epic_id: E-2-10_9
-    status: hand_edited_nonsense
-YAML
-  _call "$d" queue_summary
-  [ "$output" = "2 queued, 1 running, 3 done, 1 blocked, 2 abandoned, 1 other | Auto-pickup: active" ]
-  # the buckets sum to the number of entries — nothing dropped
-  _call "$d" 'queue_summary | grep -oE "[0-9]+ [a-z]+" | awk "{s+=\$1} END {print s}"'
-  [ "$output" = "10" ]
-}
 
 # ─── the controller column: four states, and the two DERIVED ones ─────────
 
@@ -1119,7 +1059,7 @@ JSON
   [ "$output" = "E-901-3_9  [GATES]" ]
 }
 
-@test "next_epic falls back to the queue candidate (claimability test of queue_claim_next), then to (none)" {
+@test "next_epic reads no queue: with no live run a leftover queue.yaml still gives (none) (the queue left in 3.0.0)" {
   local d="$TEST_TMPDIR/fallback"
   _repo "$d"
   mkdir -p "$d/.aid-o/work" "$d/.aid-o/config"
@@ -1136,11 +1076,7 @@ queue:
     depends_on: ["E-902-1_1"]
     plan_id: "P902"
 YAML
-  # `running` is not claimable and is skipped; the legacy `queued` reads pending
   _call "$d" 'next_epic P902'
-  [ "$output" = "E-902-2_2  [queue:pending, 1 dep(s) unverified]" ]
-  # no live run and no claimable queue row → the documented (none)
-  _call "$d" 'next_epic P903'
   [ "$output" = "(none)" ]
 }
 
@@ -1200,23 +1136,9 @@ JSON
   [ "$status" -eq 0 ]; [ -z "$output" ]
 }
 
-@test "queue-rows: rows split per plan_id through the queue layer's own reader; missing queue file is not an error" {
-  local d="$TEST_TMPDIR/root"
-  _fixture "$d" full
-  _call "$d" 'queue_rows P901'
-  [ "${#lines[@]}" -eq 1 ]
-  [ "${lines[0]}" = "    E-901-3_3  [pending]  high" ]
-  _call "$d" 'queue_rows P902'
-  [ "${lines[0]}" = "    E-902-2_2  [pending]  low" ]   # legacy `queued` normalized
-  _call "$d" 'queue_rows ""'
-  [ "${lines[0]}" = "    E-000-1_1  [completed]  medium" ]
-  rm -f "$d/.aid-o/config/queue.yaml"
-  _call "$d" 'queue_rows P901'
-  [ "$status" -eq 0 ]; [ -z "$output" ]
-}
 
 @test "aid-status.md carries every named recipe the render composes, plus both example renders" {
-  for r in state-root plan-rows stalled-runs controller-state plan-epics planless-epics queue-rows queue-summary next-epic quick-tasks render-overview; do
+  for r in state-root plan-rows stalled-runs controller-state plan-epics planless-epics next-epic quick-tasks render-overview; do
     run _recipes "$r"
     [ "$status" -eq 0 ]
     [ -n "$output" ]
@@ -1247,31 +1169,6 @@ JSON
   [ "$output" = "E-080-3_3  [READY]" ]
 }
 
-@test "abandon: queue_rows and queue_candidate skip a queue entry whose EPIC the manifest records abandoned (the P080 shape)" {
-  local d="$TEST_TMPDIR/ab2"
-  _repo "$d"; mkdir -p "$d/.aid-o/work/plan-state/P080" "$d/.aid-o/config"
-  _plan "$d" P080 EPIC_INTEGRATION
-  echo '{}' > "$d/.aid-o/work/active-runs.json"
-  jq -n '{plan_boundary_manifest: {epic_runs: [{epic_id: "E-080-2_3", status: "abandoned"}, {epic_id: "E-080-3_3", status: "pending"}]}}' \
-    > "$d/.aid-o/work/plan-state/P080/plan-boundary-manifest.json"
-  cat > "$d/.aid-o/config/queue.yaml" <<'YAML'
-queue:
-  - epic_id: E-080-2_3
-    status: pending
-    priority: high
-    depends_on: []
-    plan_id: "P080"
-  - epic_id: E-080-3_3
-    status: pending
-    priority: low
-    depends_on: []
-    plan_id: "P080"
-YAML
-  _call "$d" 'queue_rows P080'
-  [[ "$output" != *"E-080-2_3"* && "$output" == *"E-080-3_3"* ]]
-  _call "$d" 'next_epic P080'
-  [ "$output" = "E-080-3_3  [queue:pending]" ]
-}
 
 @test "direct: plan_epics renders a direct run as běh 1/1 (přímý) and next_epic still picks it" {
   local d="$TEST_TMPDIR/dr"

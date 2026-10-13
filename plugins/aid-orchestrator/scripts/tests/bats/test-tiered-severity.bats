@@ -40,7 +40,7 @@ setup() {
   mkdir -p "$EVIDENCE_DIR" "$CONFIG_DIR" "$(dirname "$AUDIT_LOG")"
   mkdir -p "${PROJECT_ROOT}/.aid-o/tasks"           # cmd_done_advance does `find .aid-o/tasks/`; missing dir → set -e crash
   mkdir -p "${EVIDENCE_DIR}/gates"
-  # done-advance re-checks the cp3 round against HEAD, so the fixture is a repository.
+  # done-advance reads git state, so the fixture is a repository.
   git -C "$PROJECT_ROOT" init -q -b main 2>/dev/null || git -C "$PROJECT_ROOT" init -q
   git -C "$PROJECT_ROOT" config user.email t@t; git -C "$PROJECT_ROOT" config user.name t
   echo seed > "$PROJECT_ROOT/README.md"; git -C "$PROJECT_ROOT" add README.md; git -C "$PROJECT_ROOT" commit -qm seed
@@ -90,10 +90,9 @@ EOF
   # a fixture removes one (fixtures 1 and 3 drop gates_report.json's _generated_by):
   #   - execution_yaml_present requires .aid-o/config/execution.yaml
   #   - gates_generated_by requires evidence_dir/gates/gates_report.json with ._generated_by
-  #   - the cp3 review round precondition needs a closed passing round at HEAD
+
   touch "${CONFIG_DIR}/execution.yaml"
   printf '{"_generated_by":"aid-run-gates.sh@test-fixture"}\n' > "${EVIDENCE_DIR}/gates/gates_report.json"
-  aid_fixture_seed_step_review "$EVIDENCE_DIR" cp3 "" pass "$(git -C "$PROJECT_ROOT" rev-parse HEAD)"
 
   # Empty timeline + audit-log so fixtures can append controlled events.
   : > "${EVIDENCE_DIR}/timeline.jsonl"

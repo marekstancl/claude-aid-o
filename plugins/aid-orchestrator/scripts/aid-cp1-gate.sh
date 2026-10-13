@@ -31,7 +31,7 @@
 #
 # Exit: 0 pass
 #       1 a review condition fails (forceable by the PM through
-#         aid-auto-pipeline.sh --force; every failure is named)
+#         the former generation pipeline --force; every failure is named)
 #       2 usage error
 #       3 a hard condition --force must not cover: jq or yq missing, the plan file or its id,
 #         an invalid plan_review config, unreadable round evidence, a round the
@@ -73,7 +73,7 @@ if [[ -z "$project_root" ]]; then
   project_root="$(_aid_plan_project_root "$plan")" || project_root="$(pwd)"
 fi
 # Given or found, the plan may sit in a brainstorm, generation or plan worktree
-# (aid-plan-to-epic.sh passes its own tree); review evidence and configuration
+# (the former EPIC generator passes its own tree); review evidence and configuration
 # live in the state root, the primary checkout.
 project_root="$(aid_state_root "$project_root" 2>/dev/null || echo "$project_root")"
 # The id becomes a directory name below; a plan without a usable one is a hard

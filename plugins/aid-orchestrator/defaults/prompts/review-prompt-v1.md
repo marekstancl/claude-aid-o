@@ -44,7 +44,7 @@ roles; answer only the questions of your role below.
 - `major` — the work will be wrong or incomplete.
 - `minor` — anything else worth fixing.
 
-A `blocker` or `major` outside plan review (cp2, cp3, cp6, cp7) also names its
+A `blocker` or `major` outside plan review (cp2, cp6, cp7) also names its
 `rule`: the invariant it breaks, stated so it can be checked everywhere, not
 only at the line you cite ("every served path resolves inside the brand root").
 The author fixes the rule, and the next round checks it holds everywhere. A

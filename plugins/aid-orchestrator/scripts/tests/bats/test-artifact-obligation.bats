@@ -130,10 +130,10 @@ render_page() {
   [ "$status" -eq 0 ]
 }
 
-@test "AC11: EPIC generation refuses a plan whose page was never rendered — the gate has a caller" {
+@test "AC11: plan-run refuses a plan whose page was never rendered — the gate has a caller" {
   # The finding this test exists for: a gate nobody invokes is decoration. The
-  # caller is aid-plan-to-epic.sh, at the point where a plan stops being a
-  # document and becomes work.
+  # caller is plan-run (since P114; the EPIC generator before it), at the point
+  # where a plan stops being a document and becomes work.
   cat >> "$PLAN" <<'P'
 
 ## Implementation Steps
@@ -142,14 +142,12 @@ render_page() {
 **AID Role:** backend
 P
   aid_fixture_seed_critic_check "$ROOT" "$PLAN"
-  mkdir -p "$TMP/out"
-  printf 'plan: 900\nepic: 0\n' > "$TMP/counter.yaml"
-  run bash "$PLUGIN_ROOT/scripts/aid-plan-to-epic.sh" --plan "$PLAN" --phase 1 --total 1 --epic-template "$PLUGIN_ROOT/defaults/templates/epic.md" --output-dir "$TMP/out" --counter-yaml "$TMP/counter.yaml"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-fsm.sh" plan-run P900 --project-root "$ROOT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"no current PM page"* ]]
+  [[ "$output" == *"no current PM page"* && "$output" == *"(pipeline.md §When AID refuses: plan_page_missing)"* ]]
 }
 
-@test "the same generation proceeds past that check once the page is there" {
+@test "the same plan-run proceeds past that check once the page is there" {
   cat >> "$PLAN" <<'P'
 
 ## Implementation Steps
@@ -158,9 +156,7 @@ P
 **AID Role:** backend
 P
   render_page
-  mkdir -p "$TMP/out"
-  printf 'plan: 900\nepic: 0\n' > "$TMP/counter.yaml"
-  run bash "$PLUGIN_ROOT/scripts/aid-plan-to-epic.sh" --plan "$PLAN" --phase 1 --total 1 --epic-template "$PLUGIN_ROOT/defaults/templates/epic.md" --output-dir "$TMP/out" --counter-yaml "$TMP/counter.yaml"
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-fsm.sh" plan-run P900 --project-root "$ROOT"
   # It may still fail further down for reasons this fixture does not satisfy —
   # what must not appear is the page refusal.
   [[ "$output" != *"no current PM page"* ]]

@@ -8,4 +8,4 @@ test-review-round-fsm.bats       # a step cannot advance past an unclosed review
 test-cp1-gate.bats               # generation refuses an unreviewed plan
 test-step-check.bats             # the step check every step review starts from
 test-dispatch-contract.bats      # what an agent is handed and must return
-test-queue-continuation.bats     # an autonomous run keeps going
+test-auto-continuation.bats      # an autonomous run keeps going

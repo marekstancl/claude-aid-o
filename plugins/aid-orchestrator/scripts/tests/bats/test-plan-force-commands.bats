@@ -95,9 +95,9 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
 # step ends. These assert the flag is understood — not that the command then
 # succeeds, which depends on its own state.
 
-@test "P073 Step 8: all eight lifecycle commands accept --force (none rejects it as an unknown flag)" {
+@test "P073 Step 8: every lifecycle command accepts --force (none rejects it as an unknown flag; P114: epic-start and epic-merge-to-plan were removed)" {
   local cmd
-  for cmd in plan-start epic-start epic-complete epic-merge-to-plan \
+  for cmd in plan-start epic-complete \
              plan-finalize plan-merge-to-main plan-close plan-rollback; do
     run _pf "$cmd" P900 --force --force-reason "$REASON"
     [[ "$output" != *"unknown flag: --force"* ]] || {
@@ -113,7 +113,7 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
 
 @test "P073 Step 8: --reason is a force synonym only where the command owns no business --reason" {
   local cmd
-  for cmd in plan-start epic-start epic-merge-to-plan plan-finalize \
+  for cmd in plan-start plan-finalize \
              plan-merge-to-main plan-close; do
     run _pf "$cmd" P900 --force --reason "$REASON"
     [[ "$output" != *"unknown flag: --reason"* ]]
@@ -201,26 +201,8 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
 }
 
 # ─── epic-start ───────────────────────────────────────────────────────────
-
-@test "P074 Step 5: epic-start SUCCEEDS on a dirty worktree without --force, and a --force there bypasses nothing" {
-  _seed_lifecycle
-  run _pf plan-start P900 --mode legacy_epic_release_mode
-  [ "$status" -eq 0 ]
-  _dirty
-
-  # The P074 headline behavior: the removed preflight no longer refuses, and
-  # nothing else in epic-start minds the unrelated tracked edit.
-  run _pf epic-start P900 E-900-1_1 --run-id R-1
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"uncommitted changes present"* ]]
-  [ "$(_receipts)" = "0" ]
-
-  # With nothing left to bypass, a forced epic-start says so and mints
-  # NO receipt — the no-op-flag contract, same as plan-start's.
-  run _pf epic-start P900 E-900-2_1 --run-id R-1 --force --force-reason "$REASON"
-  [[ "$output" == *"bypassed nothing"* ]]
-  [ "$(_receipts)" = "0" ]
-}
+# P114 (3.0.0): epic-start was removed; it refuses epic_path_removed
+# (test-epic-path-removed.bats).
 
 # ─── the audit trail is complete for every forced run ─────────────────────
 
@@ -260,7 +242,7 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
 
 @test "P073 Step 8 (review finding 1): --force requires a reason on EVERY command, routed or not" {
   local cmd
-  for cmd in plan-start epic-start epic-complete epic-merge-to-plan \
+  for cmd in plan-start epic-complete \
              plan-finalize plan-merge-to-main plan-close plan-rollback; do
     run _pf "$cmd" P900 --force
     [ "$status" -ne 0 ]
@@ -275,7 +257,7 @@ _receipts() { find "$ROOT/.aid-o" -name 'waiver-plan-*.json' 2>/dev/null | wc -l
   # Previously --reason/--force-reason parsed fine on their own and were
   # ignored, so the invocation looked accepted while forcing nothing.
   local cmd
-  for cmd in plan-start epic-start epic-merge-to-plan plan-finalize \
+  for cmd in plan-start plan-finalize \
              plan-merge-to-main plan-close; do
     run _pf "$cmd" P900 --reason "$REASON"
     [ "$status" -ne 0 ]

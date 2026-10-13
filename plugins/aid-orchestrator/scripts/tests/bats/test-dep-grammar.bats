@@ -5,7 +5,7 @@
 #
 # Before this step three parsers had three grammars: the canonical
 # lib/aid-source-plan-graph.sh accepted only `---` (undocumented), while
-# aid-plan-to-epic.sh silently DROPPED any token it did not recognise and
+# the EPIC generator (removed in 3.0.0) silently DROPPED any token it did not recognise and
 # rendered `none` as no-dependency — the exact interpretation plan-writing.md
 # forbids. A typo therefore became "no dependency" and generation continued
 # against a graph the author never wrote.
@@ -22,8 +22,7 @@ setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
   GRAPH_LIB="$AID_PLUGIN_PATH/scripts/lib/aid-source-plan-graph.sh"
-  PLAN_TO_EPIC="$AID_PLUGIN_PATH/scripts/aid-plan-to-epic.sh"
-  export GRAPH_LIB PLAN_TO_EPIC
+  export GRAPH_LIB
   PLAN="$TEST_PROJECT_ROOT/plan.md"
   export PLAN
   # IMP-503: DoD gate resolution requires a real execution.yaml at the
@@ -112,18 +111,6 @@ _graph() {
   ' _ "$AID_PLUGIN_PATH/scripts/lib" "$PLAN"
 }
 
-# _to_epic — runs aid-plan-to-epic.sh over $PLAN with its real CLI.
-_to_epic() {
-  local out="$TEST_PROJECT_ROOT/epics"
-  mkdir -p "$out"
-  aid_fixture_seed_plan_review "$TEST_PROJECT_ROOT" "$PLAN" || return 1
-  bash "$PLAN_TO_EPIC" \
-    --plan "$PLAN" --phase 1 --total 1 \
-    --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
-    --output-dir "$out" \
-    --counter-yaml "$TEST_PROJECT_ROOT/counter.yaml" \
-    --project-root "$TEST_PROJECT_ROOT"
-}
 
 # ─── both no-dependency markers, in both parsers ──────────────────────────
 
@@ -216,20 +203,11 @@ _to_epic() {
   [ "$deps" = "step-1" ]
 }
 
-# ─── the second parser: aid-plan-to-epic.sh ───────────────────────────────
+# ─── the second parser: the plan.json reader (lib/aid-plan-json.sh) ───────────────────────────────
 
-@test "P073 Step 5: aid-plan-to-epic.sh ABORTS on an unrecognised token with a non-zero exit and writes no EPIC" {
-  _write_plan "nothing"
-  run _to_epic
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"unrecognised dependency token 'nothing'"* ]]
-  # No EPIC file was written for this plan (no partial output).
-  run bash -c "ls '$TEST_PROJECT_ROOT/epics' 2>/dev/null | wc -l"
-  [ "$output" = "0" ]
-}
 
 @test "P073 Step 5: parse_step_deps itself returns non-zero on an unrecognised token (defence in depth behind the readiness precheck)" {
-  # aid-plan-to-epic.sh runs aid-generation-readiness.sh first, so in practice
+  # plan-run runs aid-generation-readiness.sh first, so in practice
   # the canonical parser catches a bad token before parse_step_deps ever sees
   # it. This asserts the SECOND parser is loud on its own — the readiness
   # precheck must not be the only thing standing between a typo and a silently
@@ -241,7 +219,7 @@ _to_epic() {
     # source time), bounded by the next function definition.
     source "$(dirname "$1")/lib/aid-plan-json.sh"; parse_step_deps() { aid_plan_parse_step_deps "$@"; }   # moved to the library (P111)
     parse_step_deps "Step 1, banana"
-  ' _ "$PLAN_TO_EPIC"
+  ' _ "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"
   [ "$status" -ne 0 ]
   [[ "$output" == *"step 2: unrecognised dependency token 'banana'"* ]]
 }
@@ -254,31 +232,15 @@ _to_epic() {
     parse_step_deps "none" && echo "none-ok"
     parse_step_deps "---" && echo "dashes-ok"
     printf "refs=%s\n" "$(parse_step_deps "Step 1, Steps 3-4")"
-  ' _ "$PLAN_TO_EPIC"
+  ' _ "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"none-ok"* ]]
   [[ "$output" == *"dashes-ok"* ]]
   [[ "$output" == *"refs=1, 3, 4"* ]]
 }
 
-@test "P073 Step 5: aid-plan-to-epic.sh accepts 'none' as no-dependency" {
-  _write_plan "none"
-  run _to_epic
-  [ "$status" -eq 0 ]
-}
 
-@test "P073 Step 5: aid-plan-to-epic.sh accepts a real reference with an em-dash annotation" {
-  _write_plan "Step 1 — needs the fixture file it creates"
-  run _to_epic
-  [ "$status" -eq 0 ]
-}
 
-@test "P073 Step 5: aid-plan-to-epic.sh rejects a valid reference mixed with an invalid token" {
-  _write_plan "Step 1, banana"
-  run _to_epic
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"banana"* ]]
-}
 
 # ─── the readiness message names both markers ─────────────────────────────
 
@@ -370,7 +332,7 @@ _to_epic() {
     printf "paren=%s\n" "$(parse_step_deps "Step 1 (note)")"
     printf "range=%s\n" "$(parse_step_deps "Steps 1-3")"
     parse_step_deps "Steps 1-3 and 5" && echo "UNANCHORED-LEAK" || echo "anchored-ok"
-  ' _ "$PLAN_TO_EPIC"
+  ' _ "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"
   [ "$status" -eq 0 ]
   [[ "$output" == *"em=1"* ]]
   [[ "$output" == *"en=1"* ]]

@@ -72,7 +72,6 @@ _fsm_to_gates() {
   "$FSM" init E-1 R-1 1 manual main "$HEAD_SHA" "$sf" >/dev/null 2>&1
   sed -i 's/^state: .*/state: GATES/' "$sf"
   # P094: GATES→DONE reads the EPIC review round index at HEAD.
-  aid_fixture_seed_step_review "$EV" cp3 "" pass "$HEAD_SHA"
   echo "$sf"
 }
 

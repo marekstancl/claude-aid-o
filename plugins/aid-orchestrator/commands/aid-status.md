@@ -1,10 +1,10 @@
 ---
 name: aid-status
-description: Show EPIC status, queue, and pipeline overview
+description: Show plan and run status and the pipeline overview
 user_invocable: true
 ---
 
-Show pipeline status, EPIC details, and queue management — unified view of everything running, queued, or completed.
+Show pipeline status and run details — one view of everything running or closing.
 
 ## Usage
 
@@ -30,13 +30,9 @@ Show pipeline status, EPIC details, and queue management — unified view of eve
 
 
 ```
-/aid-status                                  # overview: active EPICs + queue summary
-/aid-status <epic-id>                        # detailed EPIC status (reads fsm-state.yaml)
-/aid-status queue                            # queue management view
-/aid-status queue add <path> [--priority]    # add EPIC to queue
+/aid-status                                  # overview: active plans and runs
+/aid-status <epic-id>                        # detailed run status (reads fsm-state.yaml)
 ```
-
-**Priority levels:** `critical` | `high` | `medium` (default) | `low`
 
 ## Flow
 
@@ -80,30 +76,26 @@ linked worktree has no `.aid-o` of its own.
    `STALLED?` marker (recipe **`stalled-runs`**) and the resume lines — see
    "The controller column" and "Stalled runs" below. A direct run (one run of
    the whole plan on `plan/<id>`, P111) shows `běh 1/1 (přímý)` after its
-   branch; a run whose state file says `abandoned: true`, and a queue entry whose
-   EPIC the plan manifest records `abandoned`, are not shown (P111).
-3. **Read the queue** — recipe **`queue-rows`** (which defines both
-   `queue_rows`, the plan's rows, and `queue_candidate`, its next claimable
-   entry) and recipe **`queue-summary`** (the `N queued, N running, N done`
-   line plus the auto-pickup flag). Both go through the queue layer's OWN
-   readers in
-   `scripts/lib/aid-queue-write.sh` — the surface never parses `queue.yaml` a
-   second time.
-4. **Derive each stream's next actionable EPIC** — recipe **`next-epic`**, the
+   branch; a run whose state file says `abandoned: true` is not shown (P111).
+3. **Derive each stream's next actionable run** — recipe **`next-epic`**, the
    single definition `/aid-run`'s multi-plan selection also uses. See
-   "Next actionable EPIC" below for the rule.
-5. **Scan quick logs** — recipe **`quick-tasks`**: the three newest
+   "Next actionable run" below for the rule.
+4. **Scan quick logs** — recipe **`quick-tasks`**: the three newest
    `.aid-o/work/quick/Q-*.md` by mtime (ties broken by filename), rendered as
    id + title.
-6. **Display** — recipe **`render-overview`** composes the above: plan blocks in
+5. **Display** — recipe **`render-overview`** composes the above: plan blocks in
    plan-id order, then the unassigned-runs block, then `Closing:`, then quick
-   tasks and the queue summary. No pagination: more than three streams simply
+   tasks. No pagination: more than three streams simply
    prints more blocks.
 
 **Example render.** This is the literal output of `render_overview` against the
 two-stream fixture in `scripts/tests/bats/test-status-two-streams.bats`; that
 suite compares the assembled output with this block byte-for-byte, so what you
-read here is what the recipes actually produce:
+read here is what the recipes actually produce. Since 3.0.0 a plan has ONE run
+(`E-<nnn>-1_1` on `plan/<id>`, shown `běh 1/1 (přímý)`); the fixture keeps
+several rows on task branches only to show every controller state the column
+can render (a project updated from 2.118.x may also list an old EPIC run until
+it is abandoned):
 
 ```
 AID Status
@@ -121,17 +113,13 @@ Plan P901 — EPIC_INTEGRATION
       STALLED? no progress within the stall threshold — if a long foreground gate is running this is expected; consider run_mode: background. Recover with: aid-fsm.sh resume E-901-5_5
     E-901-6_6  [EXECUTE]  run=R-G  branch=task/E-901-6_6/main  ctl=active  STALLED?
       STALLED? no progress within the stall threshold — if a long foreground gate is running this is expected; consider run_mode: background. Recover with: aid-fsm.sh resume E-901-6_6
-  Queue:
-    E-901-3_3  [pending]  high
   next: E-901-1_2  [EXECUTE]
 
 Plan P902 — PLAN_GATES
   worktree: .aid-worktrees/plan-P902   missing!
   EPICs:
     (none active)
-  Queue:
-    E-902-2_2  [pending]  low
-  next: E-902-2_2  [queue:pending, 1 dep(s) unverified]
+  next: (none)
 
 plan P904: state unreadable — run plan-state P904 --repair
 
@@ -146,8 +134,7 @@ Recent Quick Tasks:
   Q-006 — Fix README typo
   Q-005 — Older thing
 
-Queue: 2 queued, 0 running, 1 done | Auto-pickup: active
-Use /aid-status <id> for details, /aid-status queue for queue management.
+Use /aid-status <id> for details.
 ```
 
 **Plan-less projects keep today's flat shape.** When `plan_rows` returns nothing
@@ -167,8 +154,7 @@ Recent Quick Tasks:
   Q-006 — Fix README typo
   Q-005 — Older thing
 
-Queue: 2 queued, 0 running, 1 done | Auto-pickup: active
-Use /aid-status <id> for details, /aid-status queue for queue management.
+Use /aid-status <id> for details.
 ```
 
 In that shape the run list is `planless_epics` — runs that declare no `plan_id`.
@@ -318,24 +304,15 @@ the run's `timeline.jsonl`. Three consequences worth knowing:
 collapses to the single line `plan <id>: state unreadable — run plan-state <id>
 --repair` and every other block still renders.
 
-**Next actionable EPIC.** One rule, used by this surface and by `/aid-run`'s
+**Next actionable run.** One rule, used by this surface and by `/aid-run`'s
 multi-plan selection, deterministic so two agents always name the same EPIC:
 
 1. **Live runs first.** Take the plan's entries in `active-runs.json` whose
    `state` is `READY`, `EXECUTE` or `GATES` — the states `/aid-run` can advance
    — and pick the **lowest `epic_id` in byte order**. Object key order is not
    an ordering; the sort is what makes this reproducible.
-2. **Otherwise the queue candidate.** Take the first entry **in queue file
-   order** that belongs to the plan and whose normalized status is `pending`
-   (the legacy literal `queued` reads as `pending`) or `blocked` — exactly the
-   claimability test `queue_claim_next` applies (`scripts/lib/aid-queue-write.sh`,
-   `queue_claim_next`). It is rendered as a *candidate*, with its
-   `depends_on` count when non-empty, because full eligibility includes a live
-   `git merge-base --is-ancestor` check per dependency that only
-   `queue_claim_next` performs — and that function CLAIMS (it writes `running`
-   or `blocked`), so a read-only surface must not call it. The label says so:
-   `[queue:pending, N dep(s) unverified]`.
-3. **Otherwise** `(none)`.
+2. **Otherwise** `(none)`. (The queue candidate it once fell back to left with
+   the queue in 3.0.0, P114.)
 
 ## Rendering Recipe
 
@@ -351,8 +328,7 @@ byte-for-byte. An instruction deleted here turns that suite red.
 Preconditions: run anywhere inside the repository (the recipes resolve the
 state root themselves — see `state-root` below), `yq` + `jq` on PATH, and
 `$AID_PLUGIN_PATH` pointing at the installed plugin (the recipes source
-`lib/aid-roots.sh`, and the queue reads source the queue layer's own library
-instead of parsing `queue.yaml` a second time).
+`lib/aid-roots.sh`).
 
 ```bash
 # recipe: state-root — the preamble every recipe below depends on. `.aid-o`
@@ -503,7 +479,7 @@ final_review_line() {
 }
 
 # recipe: epic-review-line — defines epic_review_line <epic_id> <run_id>: what
-# the run's step reviews (cp2) and EPIC review (cp3) cost, in tokens and USD
+# the run's step reviews (cp2) cost, in tokens and USD
 # from defaults/prices.yaml (a project's .aid-o/config/prices.yaml wins), from
 # the same library. A run with no review evidence renders NOTHING.
 epic_review_line() {
@@ -933,123 +909,12 @@ planless_epics() {
 ```
 
 ```bash
-# recipe: queue-rows — defines _queue_reader(), queue_rows <plan_id> and
-# queue_candidate <plan_id>. Every read goes through the queue layer's own
-# library: the live queue.yaml is line-oriented and yq is the wrong tool for it
-# (see that library's "FILE FORMAT" header). A plan_id of "" selects the rows
-# that declare none.
-_queue_reader() {
-  local _root
-  _root="$(aid_state_root)" || return 1
-  [ -f "$_root/.aid-o/config/queue.yaml" ] || return 1
-  AID_QUEUE_FILE="$_root/.aid-o/config/queue.yaml"
-  AID_QUEUE_WRITE_PROJECT_ROOT="$_root"
-  export AID_QUEUE_FILE AID_QUEUE_WRITE_PROJECT_ROOT
-  # shellcheck disable=SC1091
-  source "${AID_PLUGIN_PATH:?AID_PLUGIN_PATH must point at the installed plugin}/scripts/lib/aid-queue-write.sh"
-}
-
-# _epic_abandoned <plan_id> <epic_id> — the plan manifest records the EPIC
-# abandoned (P111: a queue entry an abandon left behind is not work).
-_epic_abandoned() {
-  local _mf
-  _mf="$(aid_state_root)/.aid-o/work/plan-state/${1}/plan-boundary-manifest.json"
-  [ -f "$_mf" ] && jq -e --arg e "$2" 'any(.plan_boundary_manifest.epic_runs[]?; .epic_id == $e and .status == "abandoned")' "$_mf" >/dev/null 2>&1
-}
-
-queue_rows() {
-  local _want="${1:-}" _id _st _pr
-  _queue_reader || return 0
-  while IFS= read -r _id; do
-    [ -n "$_id" ] || continue
-    [ "$(queue_get_field "$_id" plan_id)" = "$_want" ] || continue
-    _epic_abandoned "$_want" "$_id" && continue
-    _st="$(queue_get_status "$_id")"
-    _pr="$(queue_get_field "$_id" priority)"
-    printf '    %s  [%s]  %s\n' "$_id" "${_st:-pending}" "${_pr:--}"
-  done <<EOF
-$(queue_entry_ids)
-EOF
-}
-
-# The claimability test of queue_claim_next (lib/aid-queue-write.sh), applied
-# READ-ONLY and in the same file order: status pending/blocked/absent. The
-# dependency ancestry check is deliberately NOT duplicated here — see
-# "Next actionable EPIC".
-queue_candidate() {
-  local _want="${1:-}" _id _st _nd
-  _queue_reader || return 0
-  while IFS= read -r _id; do
-    [ -n "$_id" ] || continue
-    [ "$(queue_get_field "$_id" plan_id)" = "$_want" ] || continue
-    _st="$(queue_get_status "$_id")"
-    case "$_st" in pending|blocked|"") ;; *) continue ;; esac
-    _epic_abandoned "$_want" "$_id" && continue
-    _nd="$(queue_get_deps "$_id" | grep -c '[^[:space:]]' || true)"
-    if [ "${_nd:-0}" -gt 0 ]; then
-      printf '%s  [queue:%s, %s dep(s) unverified]\n' "$_id" "${_st:-pending}" "$_nd"
-    else
-      printf '%s  [queue:%s]\n' "$_id" "${_st:-pending}"
-    fi
-    return 0
-  done <<EOF
-$(queue_entry_ids)
-EOF
-}
-```
-
-```bash
-# recipe: queue-summary — defines queue_summary(): the closing status line,
-# "<n> queued, <n> running, <n> done[, <n> blocked][, <n> abandoned]
-#  [, <n> other] | Auto-pickup: active|paused".
-#
-# EVERY status in lib/aid-queue-write.sh's STATUS ENUM header is accounted for
-# — a queue row must never vanish from the totals, so the buckets always sum to
-# the number of entries:
-#   queued    = pending, the legacy literal `queued` (normalized to pending by
-#               queue_get_status), and an entry with no status line at all
-#   running   = running
-#   done      = merged_to_plan, released_to_main, legacy completed
-#   blocked   = blocked
-#   abandoned = abandoned, superseded (terminal, not delivered)
-#   other     = any value outside the enum (a hand edit) — surfaced, never
-#               dropped, so the row stays visible in the count
-# The optional buckets print only when non-zero.
-queue_summary() {
-  local _id _q=0 _r=0 _d=0 _b=0 _a=0 _o=0 _pick="active" _line
-  if _queue_reader; then
-    while IFS= read -r _id; do
-      [ -n "$_id" ] || continue
-      case "$(queue_get_status "$_id")" in
-        pending|"")                                _q=$((_q + 1)) ;;
-        running)                                   _r=$((_r + 1)) ;;
-        merged_to_plan|released_to_main|completed) _d=$((_d + 1)) ;;
-        blocked)                                   _b=$((_b + 1)) ;;
-        abandoned|superseded)                      _a=$((_a + 1)) ;;
-        *)                                         _o=$((_o + 1)) ;;
-      esac
-    done <<EOF
-$(queue_entry_ids)
-EOF
-    grep -qE '^paused:[[:space:]]*true' "$AID_QUEUE_FILE" 2>/dev/null && _pick="paused"
-  fi
-  _line="$(printf '%s queued, %s running, %s done' "$_q" "$_r" "$_d")"
-  [ "$_b" -gt 0 ] && _line="${_line}$(printf ', %s blocked' "$_b")"
-  [ "$_a" -gt 0 ] && _line="${_line}$(printf ', %s abandoned' "$_a")"
-  [ "$_o" -gt 0 ] && _line="${_line}$(printf ', %s other' "$_o")"
-  printf '%s | Auto-pickup: %s\n' "$_line" "$_pick"
-}
-```
-
-```bash
 # recipe: next-epic — defines next_epic <plan_id>: the plan's next actionable
-# EPIC by the rule documented in "Next actionable EPIC" above. Live runs
-# (READY/EXECUTE/GATES) win, lowest epic_id first; otherwise the queue
-# candidate; otherwise "(none)".
+# run by the rule documented in "Next actionable run" above. Live runs
+# (READY/EXECUTE/GATES) win, lowest epic_id first; otherwise "(none)".
 next_epic() {
   local _p="${1:-}" _cand
   _cand="$(plan_epics "$_p" | awk '$2 == "[READY]" || $2 == "[EXECUTE]" || $2 == "[GATES]" { print $1 "  " $2; exit }')"
-  if [ -z "$_cand" ]; then _cand="$(queue_candidate "$_p")"; fi
   printf '%s\n' "${_cand:-(none)}"
 }
 ```
@@ -1108,9 +973,6 @@ render_overview() {
       printf '  EPICs:\n'
       _body="$(plan_epics "$_id")"
       printf '%s\n' "${_body:-    (none active)}"
-      printf '  Queue:\n'
-      _body="$(queue_rows "$_id")"
-      printf '%s\n' "${_body:-    (none)}"
       printf '  next: %s\n\n' "$(next_epic "$_id")"
     done <<EOF
 $_rows
@@ -1126,13 +988,12 @@ EOF
   printf 'Recent Quick Tasks:\n'
   _body="$(quick_tasks)"
   printf '%s\n\n' "${_body:-  (none)}"
-  printf 'Queue: %s\n' "$(queue_summary)"
-  printf 'Use /aid-status <id> for details, /aid-status queue for queue management.\n'
+  printf 'Use /aid-status <id> for details.\n'
 }
 ```
 
 
-### `/aid-status <epic-id>` — Detailed EPIC Status
+### `/aid-status <run-id>` — Detailed Run Status
 
 1. **Find evidence:**
    - Look in `.aid-o/work/evidence/{epic_id}/`
@@ -1143,12 +1004,12 @@ EOF
 2. **Display:**
 
 ```
-EPIC Status: E-003-1_2 — Add Auth System
+Run Status: E-003-1_1 (P003 — Add Auth System)
 ====================================
 State: EXECUTE          ← from fsm-state.yaml .state
 Step: 4/7               ← executing_step / total_steps (see the rule below)
 Controller: manual (mode: manual)   ← ctl from active-runs.json (see the rule below), mode from fsm-state.yaml .mode
-Branch: task/E-003-1_2  ← from fsm-state.yaml .branch
+Branch: plan/P003      ← from fsm-state.yaml .branch
 Gate retries: 0/2       ← gate_retries
 Escalations: 1          ← escalation_count
 Started: 2026-03-03T10:00Z
@@ -1160,7 +1021,7 @@ Recent events (last 5 from timeline.jsonl):
   09:58 step_dispatch step_1_architect — dispatched
   09:55 fsm_init — READY
 
-Evidence: .aid-o/work/evidence/E-003-1_2/{run_id}/
+Evidence: .aid-o/work/evidence/E-003-1_1/{run_id}/
 ```
 
 **Controller rendering rule.** The old `Mode:` line named only half of what a
@@ -1172,7 +1033,7 @@ otherwise; `manual` when the entry has no such field and the run's mode is not
 `auto`), and `<mode>` is `fsm-state.yaml`'s own `.mode`, unchanged. An
 `awaiting_host_resume` detail view repeats the overview's resume lines — the
 artifact path, `aid-fsm.sh resume <epic_id>`, and the recorded action verbatim.
-When the EPIC has no entry in the map at all, render `Controller: (no active
+When the run has no entry in the map at all, render `Controller: (no active
 run entry) (mode: <mode>)` — never a value nothing recorded.
 
 **Step rendering rule.** How a step number is rendered to a human, and which machine fields stay frozen, are defined by the Step rendering rule in skills/pipeline.md. Read it there and follow it; this surface deliberately carries the pointer and not the rule, so a correction to the definition cannot leave a stale copy behind here.
@@ -1180,64 +1041,29 @@ run entry) (mode: <mode>)` — never a value nothing recorded.
 
 **Status when no run started:**
 ```
-EPIC: E-003-1_2 — Add Auth System
+Plan: P003 — Add Auth System
 Status: Plan ready, not started
 
-Run /aid-run E-003-1_2 to start execution.
+Run /aid-run P003 to start execution.
 ```
-
-### `/aid-status queue` — Queue Management View
-
-1. Read `.aid-o/config/queue.yaml`
-   - If not found: "No queue configured. Use `/aid-status queue add` to start."
-2. Compute eligibility for each entry
-3. Display:
-
-```
-EPIC Queue
-====================================
-  [READY]    E-015-1_2  (high)   — no dependencies
-  [RUN]      E-014-1_2  (high)   — started 2h ago
-  [WAITING]  E-015-2_2  (medium) — waiting on: E-015-1_2
-  [BLOCKED]  E-013-1_1  (medium) — blocked by failed: E-012-1_1
-  [DONE]     E-014-1_2  (high)   — completed 3h ago
-
-Auto-pickup: Active (1 READY, 1 WAITING, 1 BLOCKED)
-```
-
-**Eligibility tags:**
-- `[READY]` — eligible for pickup (no deps or all deps completed)
-- `[WAITING]` — deps in progress
-- `[BLOCKED]` — deps failed or missing
-- `[RUN]` — currently running
-- `[DONE]` — completed
-- `[FAIL]` — failed
-
-### `/aid-status queue add <path> [--priority <level>]`
-
-1. Validate EPIC file exists and has required sections
-2. Reject if duplicate (already queued or running)
-3. Create `.aid-o/config/queue.yaml` if it doesn't exist (lazy-create)
-4. Add entry with default priority `medium`
-5. Confirm: `Added to queue: {epic_id} (priority: {level}), position {N}`
 
 ## Edge Cases
 
-**No EPICs found:**
+**No runs found:**
 ```
-No EPICs found.
+No runs found.
 
 Get started:
   /aid-do "quick task"     — implement something small
   /aid-plan                — plan something bigger
 ```
 
-**EPIC exists but no evidence:**
+**Plan exists but no run:**
 ```
-EPIC: {id} — {title}
+Plan: {plan_id} — {title}
 Status: Not started (no evidence directory)
 
-Run /aid-run {id} to start execution.
+Run /aid-run {plan_id} to start execution.
 ```
 
 ## Evidence Paths
@@ -1246,10 +1072,8 @@ Run /aid-run {id} to start execution.
 .aid-o/work/evidence/{epic_id}/{run_id}/   — run evidence root
   fsm-state.yaml                                — FSM state (replaces plan_progress.json)
   timeline.jsonl                            — event log (replaces stage_log.jsonl)
-.aid-o/tasks/                               — EPIC files (replaces 02-epics/)
-.aid-o/config/queue.yaml                    — queue (replaces 04-engine/epic-queue.yaml)
 .aid-o/work/plan-state/{plan_id}/plan-state.yaml  — per-plan phase + worktree_path
-.aid-o/work/active-runs.json                — map of active EPIC runs (keyed by epic_id)
+.aid-o/work/active-runs.json                — map of active runs (keyed by the run id E-<nnn>-1_1)
 ```
 
 ## Reference Files
@@ -1260,9 +1084,7 @@ Run /aid-run {id} to start execution.
 
 ## Important
 
-- **Read-only by default** — `/aid-status` and `/aid-status <id>` never modify files
-- **Queue subcommands modify** — `add` writes to queue.yaml
-- **Lazy queue creation** — `.aid-o/config/queue.yaml` created on first `queue add`
+- **Read-only** — `/aid-status` and `/aid-status <id>` never modify files
 - **v2 paths only** — reads `fsm-state.yaml` (not `plan_progress.json`), `timeline.jsonl` (not `stage_log.jsonl`)
 - **State root, not cwd** — every read resolves under the primary checkout (`aid_state_root`); a plan worktree has no `.aid-o` and must never be scanned as one
 - **One bad file degrades one block** — an unparseable plan-state renders its own `state unreadable` line; the rest of the overview still renders
@@ -1273,12 +1095,9 @@ Run /aid-run {id} to start execution.
 
 ## Plan mode
 
-A plan declares its release model in its committed lifecycle manifest
-(`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`). Under `plan_branch` an
-EPIC merges into the plan branch and only the plan releases, once, at the
-plan-final boundary; under `legacy_epic_release_mode` each EPIC releases as
-before. New plans default to `plan_branch` when the project declares a
-`gate_profiles` table, and otherwise fall back to legacy with a logged
-`plan_branch_unavailable: no_gate_profiles`. Fast Mode (`/aid-do`) neither
+A plan runs in `plan_branch` mode (its committed lifecycle manifest,
+`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`): its one run works on the
+plan branch and the plan releases once, at the plan-final boundary. The
+per-EPIC release (`legacy_epic_release_mode`) left with the EPIC path in 3.0.0. Fast Mode (`/aid-do`) neither
 creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.

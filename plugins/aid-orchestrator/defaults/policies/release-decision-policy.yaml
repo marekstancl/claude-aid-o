@@ -28,8 +28,9 @@
 # separate so it can be promoted, or refused promotion, on its
 # own evidence.
 #
-#   The defect: aid-fsm.sh's CP3 freshness check has a narrow, audited exception (the D4
-#   `CP3-Freshness-Exception` trailer plus a path scope) for a trailing cosmetic commit.
+#   The defect (historical: the CP3 freshness check and its D4 exception left with the
+#   EPIC review in 3.0.0, P114): aid-fsm.sh's CP3 freshness check had a narrow, audited
+#   exception (the D4 trailer plus a path scope) for a trailing cosmetic commit.
 #   `_artifact_head_match` in aid-release-policy.sh has no counterpart — it compares the
 #   stamped head_sha to HEAD for exact equality — so the SAME commit that CP3 adjudicated
 #   cosmetic still stamps gates_report.json one commit behind and reads as a hard blocker.

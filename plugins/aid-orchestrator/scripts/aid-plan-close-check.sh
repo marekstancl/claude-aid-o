@@ -2,7 +2,6 @@
 # aid-plan-close-check.sh — mechanical plan-close self-check.
 #
 # One invokable script for what used to be fixed by hand at a plan close:
-# queue.yaml/active.md claiming "waiting for merge" long after the merge,
 # fsm-state.yaml showing DONE with pending steps, an open carried obligation,
 # and (with --plan-branch) the plan-branch close boundary. It passes cleanly
 # or fails loud with a specific reason.
@@ -16,13 +15,9 @@
 # Exit code: 0 = all checks pass (or are non-blocking), non-zero = at least
 # one blocking failure. Never silent — every check prints PASS/FAIL/INFO.
 #
-# Reuses (never reimplements):
-#   - aid-fsm.sh's `queue_revalidate` / `_queue_parse_to_json` / `yaml_field`
-#     for all queue.yaml parsing and dependency merge-detection (Check 4).
-#     aid-fsm.sh is sourced, not shelled out to, so this script shares the
-#     exact same mixed-indentation-tolerant queue parser aid-fsm.sh itself
-#     uses (a plain `yq` pass over queue.yaml is known to choke on the live
-#     dogfood format — see test-queue-revalidation.bats scenario (g)).
+# Reuses (never reimplements) aid-fsm.sh's `yaml_field`; aid-fsm.sh is
+# sourced, not shelled out to. Check 4 (the queue) left with the EPIC path in
+# 3.0.0 (P114); the numbering of the other checks is kept.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -94,10 +89,8 @@ command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required" >&2; exit 2; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "ERROR: not a git repository: $PROJECT_ROOT" >&2; exit 2; }
 [[ -f "$AID_FSM" ]] || { echo "ERROR: aid-fsm.sh not found at $AID_FSM" >&2; exit 2; }
 
-# Source (not exec) aid-fsm.sh so we share its exact queue parser
-# (_queue_parse_to_json), its dependency-revalidation logic (queue_revalidate,
-# _revalidate_one_dep) and its simple scalar-field reader (yaml_field), rather
-# than re-implementing any of it. The BASH_SOURCE guard at the bottom of
+# Source (not exec) aid-fsm.sh so we share its simple scalar-field reader
+# (yaml_field) rather than re-implementing it. The BASH_SOURCE guard at the bottom of
 # aid-fsm.sh skips CLI dispatch when sourced (same mechanism its own bats
 # suite relies on), so sourcing here is safe and side-effect-free.
 # shellcheck source=/dev/null
@@ -130,11 +123,6 @@ if [[ "$PLAN_BRANCH_MODE" -eq 1 ]]; then
 fi
 
 PLAN_NUM="${PLAN_ID#P}"
-# These are PROJECT_ROOT-relative by construction: the `cd "$PROJECT_ROOT"`
-# above pins the cwd to the resolved state root (P074 Step 1), so ACTIVE_FILE
-# and friends follow PROJECT_ROOT wherever the script was invoked from.
-QUEUE_FILE=".aid-o/config/queue.yaml"
-ACTIVE_FILE=".aid-o/work/active.md"
 
 RESULT_LINES=()
 OVERALL_RC=0
@@ -185,92 +173,6 @@ check3_fsm_done_pending() {
   done < <(find "$evidence_root" -maxdepth 1 -type d -name "E-${PLAN_NUM}-*" 2>/dev/null)
 
   [[ "$found_any" -eq 1 ]] || _info "check3" "no evidence dirs matching E-${PLAN_NUM}-* under ${evidence_root}/ — Check 3 N/A"
-}
-
-# ═══════════════════════════════════════════════════════════════════════
-# Check 4 — queue.yaml / active.md revalidation
-# ═══════════════════════════════════════════════════════════════════════
-
-# _probe_epic_merged <epic_id> — reuses queue_revalidate (never reimplements
-# its ancestor/merged-log detection) to answer "is <epic_id>'s own branch
-# actually merged?" queue_revalidate's public contract only revalidates the
-# depends_on of the epic_id you pass it, so we append one throwaway queue
-# entry that depends_on exactly the epic under test, in the SAME top-level
-# "- epic_id:" list-item shape the live dogfood queue.yaml and
-# test-queue-revalidation.bats fixtures already use, then ask
-# queue_revalidate to resolve THAT synthetic entry's single dependency.
-# Echoes: unblocked | blocked | failed | noop.
-_probe_epic_merged() {
-  local epic="$1"
-  local tmp_queue tmp_tl result rc=0
-  tmp_queue=$(mktemp)
-  tmp_tl=$(mktemp)
-  {
-    cat "$QUEUE_FILE" 2>/dev/null
-    echo
-    cat <<YAML
-- epic_id: __aid_plan_close_probe__
-  path: p
-  status: queued
-  depends_on: ["${epic}"]
-YAML
-  } > "$tmp_queue"
-  result=$(queue_revalidate "__aid_plan_close_probe__" "$tmp_queue" "$tmp_tl") || rc=$?
-  rm -f "$tmp_queue" "$tmp_tl"
-  echo "$result"
-  return "$rc"
-}
-
-check4_queue_revalidate() {
-  if [[ ! -f "$QUEUE_FILE" ]]; then
-    _info "check4" "no ${QUEUE_FILE} — Check 4 N/A"
-    return 0
-  fi
-
-  local queue_json
-  queue_json=$(_queue_parse_to_json "$QUEUE_FILE")
-  if ! echo "$queue_json" | jq -e . >/dev/null 2>&1; then
-    _fail "check4" "${QUEUE_FILE} is unparseable — cannot revalidate"
-    return 0
-  fi
-
-  local epics
-  epics=$(echo "$queue_json" | jq -r --arg re "^E-${PLAN_NUM}-" '.[] | select(.epic_id | test($re)) | .epic_id')
-  if [[ -z "$epics" ]]; then
-    _info "check4" "no queue.yaml entries matching E-${PLAN_NUM}-* — Check 4 N/A"
-    return 0
-  fi
-
-  local epic
-  while IFS= read -r epic; do
-    [[ -n "$epic" ]] || continue
-    local status_text
-    status_text=$(echo "$queue_json" | jq -r --arg e "$epic" '[.[] | select(.epic_id==$e) | .status] | .[0] // ""')
-
-    local active_hit=""
-    if [[ -f "$ACTIVE_FILE" ]] && grep -qiE "${epic}.*(blocked|waiting[ _-]?for[ _-]?merge)" "$ACTIVE_FILE"; then
-      active_hit="yes"
-    fi
-
-    if ! echo "$status_text" | grep -qiE 'blocked|waiting' && [[ -z "$active_hit" ]]; then
-      _info "check4" "$epic: queue status='${status_text:-n/a}' — no blocked/waiting claim, nothing to revalidate"
-      continue
-    fi
-
-    local rc=0 result
-    result=$(_probe_epic_merged "$epic") || rc=$?
-    case "$result" in
-      unblocked)
-        _fail "check4" "$epic: queue/active claims blocked/waiting-for-merge (status='${status_text}', active.md hit=${active_hit:-no}) but queue_revalidate confirms the branch IS merged (ancestor of main) — sync queue.yaml/active.md"
-        ;;
-      blocked)
-        _pass "check4" "$epic: queue/active claims blocked/waiting-for-merge — queue_revalidate confirms genuinely unmerged, consistent"
-        ;;
-      failed|noop|*)
-        _info "check4" "$epic: queue/active claims blocked/waiting-for-merge but queue_revalidate could not determine merge status (result='${result}', rc=${rc}) — inconclusive, not flagged"
-        ;;
-    esac
-  done <<< "$epics"
 }
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -751,7 +653,7 @@ check5_plan_branch_boundary() {
     if [[ "$PLAN_BRANCH_MODE" -eq 1 ]]; then
       _fail "check5" "no lifecycle manifest at ${lc_manifest} for a plan-branch close — the receipt is MANDATORY for this mode, so its absence blocks rather than downgrading the close to the legacy no-receipt path"
     else
-      _info "check5" "lifecycle_manifest_absent — ${lc_manifest} does not exist; this is a legacy-mode plan predating the lifecycle layer, so close completes with that reason recorded (aid-auto-pipeline.sh creates one for every plan made under the new model)"
+      _info "check5" "lifecycle_manifest_absent — ${lc_manifest} does not exist; this is a legacy-mode plan predating the lifecycle layer, so close completes with that reason recorded (the former generation pipeline creates one for every plan made under the new model)"
     fi
   elif [[ "$CLOSE_MODE" == "abort" ]]; then
     _info "check5" "abort close: an aborted plan writes NO lifecycle receipt (aid_lifecycle_plan_close refuses while any required EPIC is undelivered, which is always true before a merge) — the manifest is marked aborted instead"
@@ -790,7 +692,6 @@ check5_plan_branch_boundary() {
 
 main() {
   check3_fsm_done_pending
-  check4_queue_revalidate
   check6_carried_obligations
   if [[ "$PLAN_BRANCH_MODE" -eq 1 ]]; then
     check5_plan_branch_boundary

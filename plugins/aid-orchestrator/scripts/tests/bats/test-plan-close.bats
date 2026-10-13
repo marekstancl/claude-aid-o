@@ -2,7 +2,7 @@
 # aid-tier: t2
 # test-plan-close.bats — cmd_plan_close in aid-fsm.sh: it runs
 # aid-plan-close-check.sh and writes ca-review-complete only when that passes.
-# The fixture is a real git repo, since the queue check reads branch state.
+# The fixture is a real git repo.
 
 PLUGIN_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/../../.." && pwd)"
 AID_FSM="$PLUGIN_DIR/scripts/aid-fsm.sh"
@@ -55,20 +55,6 @@ YAML
   [[ "$output" =~ "aid-plan-close-check.sh" ]]
 }
 
-@test "plan-close: queue.yaml claims blocked but the branch is merged -> exit 1, no marker" {
-  # A branch for E-046-2_3 that IS an ancestor of current HEAD (merged), while
-  # queue.yaml still claims it is blocked — the stale-queue drift Check 4 catches.
-  git -C "$TMP" branch task/E-046-2_3/main HEAD
-  cat > "$TMP/.aid-o/config/queue.yaml" <<'YAML'
-- epic_id: E-046-2_3
-  path: p
-  status: blocked
-  depends_on: []
-YAML
-  run bash "$AID_FSM" plan-close "$EPIC_ID" "$TMP" "$TMP"
-  [ "$status" -ne 0 ]
-  [ ! -f "$TMP/ca-review-complete" ]
-}
 
 @test "plan-close: a report nobody writes any more is not asked for" {
   run bash "$AID_FSM" plan-close "$EPIC_ID" "$TMP" "$TMP"

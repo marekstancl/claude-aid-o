@@ -192,23 +192,6 @@ An ALREADY-INITIALISED project gets them from `/aid-setup scan`, never from
 here: init creates and migrates, mutation belongs to `/aid-setup`. Both absent
 → the guard keeps today's label behaviour and prints one hint.
 
-**A new workspace also gets the `autonomy` block (P090)** — three keys that
-decide whether a finished EPIC starts the next one by itself:
-
-```yaml
-autonomy:
-  spawn_next_epic: false            # the default, and it stays false unless a
-                                    # human says otherwise
-  max_spawned_epics: 3
-  spawn_deadline_sec: 3600
-```
-
-Seed them at their defaults and **do not propose `true`**: starting sessions
-that start sessions is a decision about money and trust, and nothing in a
-repository's shape can make it. Their meaning is defined once, in
-`skills/setup/project-scan.md`; an already-initialised project changes them
-through `/aid-setup scan`, never here.
-
 ### execution.yaml Generation
 
 After auto-detection, generate `.aid-o/config/execution.yaml` from per-stack template fragments under `defaults/execution-stacks/`. Idempotent: existing file is **not** overwritten.
@@ -796,7 +779,6 @@ These files/dirs are created on first use of the feature that needs them:
 
 | File | Created by | Trigger |
 |------|-----------|---------|
-| `config/queue.yaml` | `/aid-status queue add` | First queue entry |
 | `config/policies/review-checkpoints.yaml` | `/aid-run` | First review checkpoint dispatch |
 
 `config/execution.yaml` is deliberately NOT in this table — it is part of the base manifest and is
@@ -850,7 +832,7 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 | `.aid-o/03-config/` | `.aid-o/config/` |
 | `.aid-o/04-engine/memory/` | `.aid-o/work/` |
 | `.aid-o/04-engine/evidence/` | `.aid-o/work/evidence/` |
-| `.aid-o/04-engine/epic-queue.yaml` | `.aid-o/config/queue.yaml` |
+| `.aid-o/04-engine/epic-queue.yaml` | — (the queue was removed in 3.0.0) |
 | `plan_progress.json` | `fsm-state.yaml` |
 | `stage_log.jsonl` | `timeline.jsonl` |
 
@@ -885,7 +867,7 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - `skills/pipeline.md` — workspace structure reference
 - `commands/aid-do.md` — uses `work/quick/` (lazy-created at init)
 - `commands/aid-run.md` — uses `config/execution.yaml` (base manifest, written at init)
-- `commands/aid-status.md` — uses `config/queue.yaml` (lazy-created)
+- `commands/aid-status.md` — reads `work/plan-state/` and `work/active-runs.json` (written at run time)
 - `commands/aid-setup.md` — owns every later change to the files init creates
 - `lib/aid-roots.sh` — state-root resolution (primary checkout, never a linked worktree)
 

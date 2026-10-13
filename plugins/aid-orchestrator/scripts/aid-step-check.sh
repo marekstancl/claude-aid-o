@@ -3,12 +3,12 @@
 # aid-step-check.sh — everything about a change that needs no model, before a
 # reviewer sees it (P094 Step 3).
 #
-#   aid-step-check.sh --checkpoint cp2|cp3|cp6|cp7 --evidence-dir <run dir>
+#   aid-step-check.sh --checkpoint cp2|cp6|cp7 --evidence-dir <run dir>
 #                     [--step N] [--state-file <fsm-state.yaml>] [--plan-json <plan.json>]
 #                     [--worktree] [--dod-file <path>] [--base <sha>] [--project-root <dir>]
 #
-# Computes, for the diff of one step (cp2), one EPIC (cp3), the working tree
-# (cp6) or a whole plan (cp7, --base <plan_base_commit>..HEAD, no declared
+# Computes, for the diff of one step (cp2), the working tree (cp6) or a whole
+# plan (cp7, --base <plan_base_commit>..HEAD, no declared
 # scope, never skipped): the range and where it came from; every changed file classified
 # against the step's declared scope (outputs, allowed_paths, forbidden_paths);
 # the security patterns of defaults/pre-filter-rules.yaml matched in added
@@ -27,11 +27,12 @@
 # index that already records a closed round: a re-run can never turn a
 # recorded `fail` into a skip.
 #
-# <cp dir> is <run dir>/cp2/step-<N>, <run dir>/cp3, <run dir>/cp6 or <run dir>/cp7.
+# <cp dir> is <run dir>/cp2/step-<N>, <run dir>/cp6 or <run dir>/cp7. (CP3, the
+# EPIC review, was removed in 3.0.0, P114.)
 #
 # Exit: 0 written; 1 refused (named); 2 tooling (jq/yq/git/rules missing);
 #       22 range_undetermined (cp2 without a step_commit or base_commit,
-#       cp3 without a base_commit, cp7 without --base).
+#       cp7 without --base).
 #
 # Successor of the retired pre-filter classify (P060 range rule kept; the
 # verifier-output seed is gone) and of the trivial-skip rule of
@@ -76,15 +77,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 for t in jq yq git sha256sum; do command -v "$t" >/dev/null 2>&1 || die "$t not installed" 2; done
-[[ "$CHECKPOINT" =~ ^cp[2367]$ ]] || die "--checkpoint must be cp2, cp3, cp6 or cp7" 2
+[[ "$CHECKPOINT" =~ ^cp[267]$ ]] || die "--checkpoint must be cp2, cp6 or cp7 (CP3 was removed in 3.0.0)" 2
 [[ -n "$EVID" ]] || die "--evidence-dir is required" 2
 [[ -f "$RULES_FILE" ]] || die "rules file not found: $RULES_FILE" 2
 STATE="${STATE:-$EVID/fsm-state.yaml}"
 if [[ -z "$ROOT" ]]; then
   ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-  # A step or EPIC is diffed in the tree its run's branch is checked out in,
+  # A step is diffed in the tree its run's branch is checked out in,
   # wherever the check is run from.
-  if [[ -n "$ROOT" && "$CHECKPOINT" =~ ^cp[23]$ ]]; then ROOT="$(aid_run_checkout_root "$STATE" "$ROOT")" || exit 2; fi
+  if [[ -n "$ROOT" && "$CHECKPOINT" == cp2 ]]; then ROOT="$(aid_run_checkout_root "$STATE" "$ROOT")" || exit 2; fi
 fi
 [[ -n "$ROOT" && -d "$ROOT/.git" || -f "$ROOT/.git" ]] || die "not inside a git repository (or --project-root is not one)" 2
 # the review config belongs to the state root (a linked worktree has none, or a stale copy)
@@ -93,7 +94,6 @@ PLAN_JSON="${PLAN_JSON:-$EVID/plan.json}"
 TIMELINE="$EVID/timeline.jsonl"
 case "$CHECKPOINT" in
   cp2) [[ "$STEP" =~ ^[0-9]+$ ]] || die "--step N is required for cp2" 2; CPDIR="$EVID/cp2/step-$STEP" ;;
-  cp3) CPDIR="$EVID/cp3" ;;
   cp6) CPDIR="$EVID/cp6"; WORKTREE=1 ;;
   cp7) CPDIR="$EVID/cp7" ;;
 esac
@@ -119,9 +119,6 @@ elif [[ "$CHECKPOINT" == cp2 ]]; then
     range_base="$(yq -r '.base_commit // ""' "$STATE" 2>/dev/null || true)"
     [[ -n "$range_base" && "$range_base" != null ]] && range_source=base_commit
   fi
-else
-  [[ -f "$STATE" ]] && range_base="$(yq -r '.base_commit // ""' "$STATE" 2>/dev/null || true)"
-  [[ -n "$range_base" && "$range_base" != null ]] && range_source=base_commit
 fi
 if [[ -z "$range_source" ]]; then
   log_event "$TIMELINE" "step_check_range_undetermined" checkpoint="$CHECKPOINT" step="${STEP:-null}" head_sha="$HEAD_SHA"

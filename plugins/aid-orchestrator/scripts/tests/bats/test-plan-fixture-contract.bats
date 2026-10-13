@@ -22,8 +22,7 @@ setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
   FIXTURES="$AID_PLUGIN_PATH/scripts/tests/fixtures"
-  PLAN_TO_EPIC="$AID_PLUGIN_PATH/scripts/aid-plan-to-epic.sh"
-  export FIXTURES PLAN_TO_EPIC
+  export FIXTURES
   TEST_TMPDIR="$(mktemp -d)"; export TEST_TMPDIR
   unset AID_PROJECT_ROOT
 }
@@ -44,35 +43,29 @@ _repo() {
     git add -A && git commit -q -m "seed" )
 }
 
-# _generate <root> — the REAL generator, with every argument it requires. A
-# partial invocation dies in argument validation and proves nothing about the
-# preconditions this file exists to hold.
+# _generate <root> — the REAL entry point a plan meets: plan-run (since P114
+# the only road from a plan to a run). A partial invocation would die in
+# argument validation and prove nothing about the preconditions this file
+# exists to hold.
 _generate() {
   local d="$1"
-  run bash "$PLAN_TO_EPIC" --plan "$d/.aid-o/plans/P099-multi.md" --phase 1 --total 3 \
-    --epic-template "$AID_PLUGIN_PATH/defaults/templates/epic.md" \
-    --output-dir "$d/.aid-o/tasks" \
-    --counter-yaml "$d/.aid-o/config/counter.yaml" \
-    --project-root "$d"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh" plan-run P099 --project-root "$d"
 }
+_run_state() { printf '%s\n' "$1/.aid-o/work/evidence/E-099-1_1/R-E099-1"; }
 
-@test "CONTRACT: a seeded plan passes the REAL generation entry point (tracked .aid-o)" {
+@test "CONTRACT: a seeded plan passes the REAL entry point, plan-run (tracked .aid-o)" {
   local d="$TEST_TMPDIR/tracked"; _repo "$d" tracked
   run aid_fixture_seed_plan "$d" "$FIXTURES/multi-phase-plan-numeric.md" P099-multi.md
   [ "$status" -eq 0 ]
-  # The generator is what decides whether the seeding was enough. If a FOURTH
+  # plan-run is what decides whether the seeding was enough. If a further
   # precondition lands, this line is where it is reported.
   cd "$d"
   _generate "$d"
-  # SUCCESS, not the absence of three strings. The first cut passed every
-  # argument-less invocation: aid-plan-to-epic.sh exited at argument validation,
-  # and asserting that three later messages were absent is true of any early
-  # exit whatsoever. It was a contract test that could not fail — the exact
-  # defect it exists to catch elsewhere (cross-model review, 2026-08-26).
+  # SUCCESS, not the absence of some strings (an early exit would pass that —
+  # cross-model review, 2026-08-26).
   [ "$status" -eq 0 ] || { echo "$output"; false; }
-  # And the EPIC really exists: generation ran, it did not merely not-refuse.
-  run bash -c "ls '$d'/.aid-o/tasks/*.md 2>/dev/null | wc -l"
-  [ "$output" -ge 1 ]
+  # And the run really exists: plan-run started it, it did not merely not-refuse.
+  [ -f "$(_run_state "$d")/fsm-state.yaml" ]
 }
 
 @test "CONTRACT: the same holds when .aid-o is gitignored — no commit is required" {
@@ -86,8 +79,7 @@ _generate() {
   cd "$d"
   _generate "$d"
   [ "$status" -eq 0 ] || { echo "$output"; false; }
-  run bash -c "ls '$d'/.aid-o/tasks/*.md 2>/dev/null | wc -l"
-  [ "$output" -ge 1 ]
+  [ -f "$(_run_state "$d")/fsm-state.yaml" ]
 }
 
 @test "a renderable plan gets a real page, and the production obligation accepts it" {
@@ -140,7 +132,7 @@ _generate() {
   [ "$status" -eq 2 ]
 }
 
-@test "P099: a wave declared in the plan reaches the EPIC table and plan.json parallel_groups" {
+@test "P099: a wave declared in the plan reaches plan.json parallel_groups" {
   local d="$TEST_TMPDIR/waves"; _repo "$d"
   # Steps 1 and 2 of the fixture name disjoint files: one wave of two.
   # (2.112.0 removed the architect and domain roles; steps 1 and 2 are backend now, so the
@@ -153,11 +145,5 @@ _generate() {
   [ "$status" -eq 0 ] || { echo "$output"; false; }
   cd "$d"; _generate "$d"
   [ "$status" -eq 0 ] || { echo "$output"; false; }
-  local epic; epic="$(ls "$d"/.aid-o/tasks/*.md | head -1)"
-  # P109 (2.115.0) added the Closes column after Parallel group — `—` when the step closes none.
-  [ "$(grep -cE '^\| [12] \| .* \| wave-1 \| — \|$' "$epic")" -eq 2 ]
-  run bash "$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh" --epic "$epic" \
-    --schema "$AID_PLUGIN_PATH/defaults/templates/plan.schema.json" --output-dir "$TEST_TMPDIR/json"
-  [ "$status" -eq 0 ] || { echo "$output"; false; }
-  [ "$(jq -c '[.parallel_groups[] | length]' "$(jq -r .plan_json <<< "$output")")" = "[2]" ]
+  [ "$(jq -c '[.parallel_groups[] | length]' "$(_run_state "$d")/plan.json")" = "[2]" ]
 }

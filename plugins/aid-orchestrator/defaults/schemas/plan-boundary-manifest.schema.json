@@ -174,7 +174,7 @@
               "task_branch": {
                 "type": ["string", "null"],
                 "pattern": "^task/E-[0-9]{3}-[0-9]+_[0-9]+/main$",
-                "description": "null only on a direct run (direct: true, P111) — the validator enforces the pairing."
+                "description": "null on a direct run (direct: true, P111) — every entry plan-run writes since 3.0.0 (P114); a string only on an entry written before 3.0.0 by the removed EPIC path (or reconstructed by plan-state --repair from its task branch), kept and validated as before. The validator enforces the pairing."
               },
               "direct": {
                 "type": "boolean",

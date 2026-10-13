@@ -2,15 +2,11 @@
 # =============================================================================
 # lib/aid-plan-json.sh — THE plan.json builder and THE per-step plan reader (P111)
 #
-# One builder for both roads to a run until P112 removes the old one:
-#   * the direct run (`aid-plan-fsm.sh plan-run`) reads the WHOLE plan through
-#     aid_plan_json_steps_from_plan and builds with aid_plan_json_build --direct;
-#   * the EPIC path keeps its own table parser (the EPIC-to-plan.json converter) and hands
-#     the parsed rows over as a step list; the plan-to-EPIC generator reads its phase's
-#     steps through aid_plan_json_steps_from_plan and only formats the EPIC.
-# The builder body is the EPIC converter's former "Step 4 .. Step 14"
-# moved here unchanged, so the EPIC path's golden output is byte-identical
-# (scripts/tests/test-epic-to-json-regression.sh).
+# `aid-plan-fsm.sh plan-run` reads the WHOLE plan through
+# aid_plan_json_steps_from_plan and builds the run's plan.json with
+# aid_plan_json_build --direct. (The builder body was the EPIC converter's
+# former "Step 4 .. Step 14"; the EPIC path and its converter were removed in
+# 3.0.0, P114.)
 #
 # Callers source lib/common.sh first (error_exit, extract_section).
 # =============================================================================

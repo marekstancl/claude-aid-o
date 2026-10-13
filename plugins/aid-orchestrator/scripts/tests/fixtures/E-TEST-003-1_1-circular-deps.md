@@ -11,12 +11,12 @@ runs_completed: 0
 ## Context
 
 This EPIC fixture is intentionally malformed to test cycle detection in
-the aid-epic-to-json.sh script. Steps 1 and 2 declare mutual dependencies,
+the aid-plan-diff.sh script. Steps 1 and 2 declare mutual dependencies,
 which Kahn's algorithm must detect and report as a circular dependency error.
 
 ## Goal
 
-Intentionally trigger circular dependency detection in aid-epic-to-json.sh
+Intentionally trigger circular dependency detection in aid-plan-diff.sh
 to verify the script exits with code 1 and emits a JSON error on stderr.
 
 ## Scope

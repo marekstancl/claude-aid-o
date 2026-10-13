@@ -3,7 +3,7 @@
 # test-committed-source.bats — P073 Step 11: the committed-source preflight
 # (P083).
 #
-# The gap was end-to-end. aid-auto-pipeline.sh checked only that the plan file
+# The gap was end-to-end. the former generation pipeline checked only that the plan file
 # existed on disk; cmd_plan_start never saw a path at all; and the
 # clean-worktree preflight runs with `--untracked-files=no`, so a plan that was
 # never `git add`ed was invisible to every layer. Generation then created a
@@ -260,12 +260,6 @@ _no_mutation() {
   _no_mutation
 }
 
-@test "P073 Step 11: the pipeline preflight logs which binding is in force on every skip path" {
-  # The skips are informative, never silent — that is what keeps the carve-outs
-  # auditable rather than a hole nobody can see.
-  run grep -c 'plan_source_binding' "$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh"
-  [ "$output" -ge 3 ]
-}
 
 # ─── Codex-review findings on the first cut of this step ──────────────────
 

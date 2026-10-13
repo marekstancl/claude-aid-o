@@ -13,8 +13,8 @@
 #      every path the Initial mapping DOES cover.
 #   2. Surface every production-surface path the Initial mapping does NOT
 #      cover as a recommendation:fix finding (category: selector-gap) — this
-#      is how the known 4-path gap (aid-plan-fsm.sh, lib/aid-queue-write.sh,
-#      the gate-profile library, aid-queue-add.sh) is sourced from the real
+#      is how the known gaps (aid-plan-fsm.sh, the gate-profile library) are
+#      sourced from the real
 #      function, not a hand-written comment.
 #
 # Usage:

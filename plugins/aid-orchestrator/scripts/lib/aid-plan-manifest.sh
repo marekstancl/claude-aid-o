@@ -973,6 +973,11 @@ plan_manifest_update() {
 #
 # The OPTIONAL 9th positional `direct` (P111) marks the one run of a plan run
 # straight from the plan on plan/<id>: `direct: true`, `task_branch: null`.
+# Since 3.0.0 (P114) plan-run is the only producer of new entries and always
+# passes it; a non-null task_branch is written only by `plan-state --repair`
+# reconstructing an entry of the removed EPIC path from its task branch, and an
+# existing such entry stays valid (epic-complete --abandon, plan-close
+# --administrative).
 #
 # Upserts one `epic_runs[]` entry (Edge Case: a second call for the SAME
 # epic_id updates the existing entry in place, never appends a duplicate),
@@ -982,7 +987,7 @@ plan_manifest_update() {
 # The OPTIONAL 8th positional `lineage` defaults to "unproven" (IMP-265:
 # fail-closed by default). An omitted lineage argument is NOT an authorisation
 # claim — only the legitimate producer that actually observed the branch's
-# origin at branch-creation time (epic-start, via `_pfsm_epic_finish_write`)
+# origin at creation time (plan-run, since 3.0.0; epic-start before it)
 # may assert "proven", and it now does so EXPLICITLY by passing the 8th
 # positional. A forgetful or future caller that omits it gets "unproven", so a
 # missing argument can never silently mint provenance. Callers that cannot

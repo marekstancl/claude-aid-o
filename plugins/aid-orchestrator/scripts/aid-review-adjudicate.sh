@@ -7,7 +7,7 @@
 #                            [--plan <packet/plan.md>] [--step-check <step-check.json>]
 #                            [--previous <round_dir>]
 #
-#   <ns>  plan_review (CP1) | step_review (CP2) | epic_review (CP3) | do_review (CP6)
+#   <ns>  plan_review (CP1) | step_review (CP2) | do_review (CP6)
 #
 # Deterministic, no model call. For every finding of every answer that collect
 # accepted (collect.json .valid):
@@ -64,9 +64,9 @@ while [[ $# -gt 0 ]]; do
     *)  DIR="$1"; shift ;;
   esac
 done
-usage() { echo "Usage: aid-review-adjudicate.sh <round_dir> --project-root <dir> --namespace plan_review|step_review|epic_review|do_review|final_review [--plan <plan.md>] [--step-check <json>] [--previous <round_dir>]" >&2; exit 2; }
+usage() { echo "Usage: aid-review-adjudicate.sh <round_dir> --project-root <dir> --namespace plan_review|step_review|do_review|final_review [--plan <plan.md>] [--step-check <json>] [--previous <round_dir>]" >&2; exit 2; }
 [[ -n "$DIR" && -n "$ROOT" && -n "$NS" ]] || usage
-case "$NS" in plan_review|step_review|epic_review|do_review|final_review) ;; *) usage ;; esac
+case "$NS" in plan_review|step_review|do_review|final_review) ;; *) usage ;; esac
 [[ -r "${DIR}/round.json" && -r "${DIR}/collect.json" ]] || { echo "adjudicate: cannot read ${DIR}" >&2; exit 1; }
 [[ -z "$PLAN" || -r "$PLAN" ]] || { echo "adjudicate: cannot read ${PLAN}" >&2; exit 1; }
 [[ -z "$STEP_CHECK" || -r "$STEP_CHECK" ]] || { echo "adjudicate: cannot read ${STEP_CHECK}" >&2; exit 1; }
@@ -242,7 +242,6 @@ _third() {
   case "$NS" in
     plan_review) jq -r '.step // "plan"' <<< "$1" ;;
     step_review) jq -r '.step // "step"' <<< "$1" ;;
-    epic_review) echo epic ;;
     do_review)   echo do ;;
     final_review) echo plan ;;
   esac

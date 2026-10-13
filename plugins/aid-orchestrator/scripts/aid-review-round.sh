@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
 # aid-review-round.sh — one review round at a time, for every checkpoint:
-# the plan review (CP1), the step review (CP2), the EPIC review (CP3), the
-# fast-mode review (CP6) and the whole-plan review at plan close (CP7).
+# the plan review (CP1), the step review (CP2), the fast-mode review (CP6) and
+# the whole-plan review at plan close (CP7). (The EPIC review, CP3, was removed
+# in 3.0.0 with the EPIC path, P114.)
 #
 # Which review a call is about is the first option group:
 #   --plan <file>                                       CP1: evidence/<plan_id>/cp1/
 #   --checkpoint cp2 --evidence-dir <run dir> --step N  evidence/<run>/cp2/step-N/
-#   --checkpoint cp3 --evidence-dir <run dir>           evidence/<run>/cp3/
 #   --checkpoint cp6 --evidence-dir <do dir>            evidence/do/<id>/cp6/
 #   --checkpoint cp7 --evidence-dir <final run dir>     evidence/<plan>/<R-…-final-N>/cp7/
 #
@@ -34,25 +34,25 @@
 #       clear one invalid or missing reviewer so it can answer again
 #   override … --rounds 1|2|3 --reason "<the PM's words>"
 #       record the PM's instruction to run one round, or a third
-#   standing --checkpoint cp2|cp3 --evidence-dir <run> --reason "<the PM's words>"
+#   standing --checkpoint cp2 --evidence-dir <run> --reason "<the PM's words>"
 #       record, once per plan, the PM's "don't ask, finish it": two more
-#       fix-and-confirm rounds after any step or EPIC budget of the plan
+#       fix-and-confirm rounds after any step budget of the plan
 #   standing --plan <plan> | --checkpoint … --delegate --reason "<the PM's words>"
 #       record the PM's delegation for a manual plan: escalations are settled by
 #       an independent agent (a plan whose state says autonomy: auto has it already)
 #   delegate … --round K --pending | --fingerprint <fp> [--verdict <file>]
-#       CP2, CP3, CP7 with delegation in force (P112): --pending lists the
+#       CP2, CP7 with delegation in force (P112): --pending lists the
 #       escalations without a verdict; --fingerprint runs Codex on one (exit 4 +
 #       STAND-IN: an independent Claude agent in the bracket
 #       adjudicator-delegated-<fp16>), --verdict records its answer
 #   dispute … --round K --fingerprint <fp> --reason "<why>" [--pm accepted|rejected [--finding-card <card>]]
-#       CP1, CP2, CP3, CP7: a disputed finding stays blocking; only the PM's answer
-#       clears it, and at CP2/CP3 `--pm accepted` needs the Decision card that
+#       CP1, CP2, CP7: a disputed finding stays blocking; only the PM's answer
+#       clears it, and at CP2 `--pm accepted` needs the Decision card that
 #       quotes the finding and a PM prompt after it (the hook audit)
 #   fix-check | finalize                                 CP1 only (see below)
 #
 # Every subcommand loads and validates the checkpoint's reviewer block first
-# (review_checkpoints.plan_review / step_review / epic_review / final_review). A step round
+# (review_checkpoints.plan_review / step_review / final_review). A step round
 # is prepared only from a step-check.json computed at HEAD, and closed only at
 # the same HEAD, with a recorded dispatch bracket for every claude reviewer
 # (unless the round was prepared --stub, which the FSM refuses to advance on).
@@ -136,7 +136,7 @@ done
 
 # ── which review ─────────────────────────────────────────────────────────────
 MODE="" BASE="" NS="" BLOCK="" ROLES_SKILL="" PLAN_ID="" STEPCHECK=""
-if [[ -n "$PLAN" && -n "$CHECKPOINT" ]]; then _die "give --plan (CP1) or --checkpoint (CP2/CP3/CP6), not both" 2; fi
+if [[ -n "$PLAN" && -n "$CHECKPOINT" ]]; then _die "give --plan (CP1) or --checkpoint (CP2/CP6/CP7), not both" 2; fi
 if [[ -n "$PLAN" ]]; then
   MODE=plan; CHECKPOINT=cp1
   [[ -f "$PLAN" ]] || _die "plan file required (got '${PLAN}')" 2
@@ -148,25 +148,24 @@ if [[ -n "$PLAN" ]]; then
   NS=plan_review; BLOCK=plan_review; ROLES_SKILL="${AID_PLUGIN_PATH}/skills/plan-review-roles.md"
 elif [[ -n "$CHECKPOINT" ]]; then
   MODE=step
-  [[ "$CHECKPOINT" =~ ^cp[2367]$ ]] || _die "--checkpoint must be cp2, cp3, cp6 or cp7" 2
+  [[ "$CHECKPOINT" =~ ^cp[267]$ ]] || _die "--checkpoint must be cp2, cp6 or cp7 (CP1 is --plan; CP3 was removed in 3.0.0 — a plan's one run is reviewed per step, CP2, and at the close, CP7)" 2
   [[ -n "$EVID" && -d "$EVID" ]] || _die "--evidence-dir <dir> required and must exist" 2
   EVID="$(realpath "$EVID")"
   if [[ -z "$ROOT" ]]; then
     ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || _die "not inside a git repository; pass --project-root" 2
     # the tree the run's branch is checked out in, as aid-step-check.sh diffs it
-    if [[ "$CHECKPOINT" =~ ^cp[23]$ ]]; then ROOT="$(aid_run_checkout_root "${EVID}/fsm-state.yaml" "$ROOT")" || exit 2; fi
+    if [[ "$CHECKPOINT" == cp2 ]]; then ROOT="$(aid_run_checkout_root "${EVID}/fsm-state.yaml" "$ROOT")" || exit 2; fi
   fi
   ROOT="$(realpath "$ROOT")"
   case "$CHECKPOINT" in
     cp2) [[ "$STEP" =~ ^[0-9]+$ ]] || _die "--step N required for cp2" 2; BASE="${EVID}/cp2/step-${STEP}"; NS=step_review; BLOCK=step_review ;;
-    cp3) BASE="${EVID}/cp3"; NS=epic_review; BLOCK=epic_review ;;
     cp6) BASE="${EVID}/cp6"; NS=do_review; BLOCK=step_review; export RC_CHECKPOINT=cp6 ;;
     cp7) BASE="${EVID}/cp7"; NS=final_review; BLOCK=final_review ;;
   esac
   ROLES_SKILL="${AID_PLUGIN_PATH}/skills/step-review-roles.md"
   STEPCHECK="${BASE}/step-check.json"
 else
-  _die "give --plan <file> (CP1) or --checkpoint cp2|cp3|cp6|cp7 --evidence-dir <dir> [--step N]" 2
+  _die "give --plan <file> (CP1) or --checkpoint cp2|cp6|cp7 --evidence-dir <dir> [--step N]" 2
 fi
 
 # the review config belongs to the state root (a linked worktree has none, or a stale copy)
@@ -213,7 +212,7 @@ _override_rounds() { [[ -f "${BASE}/override.json" ]] && jq -r '.rounds // empty
 # _standing_file — the PM's standing "don't ask, finish it" for the plan this
 # step or EPIC run belongs to (plan id from the run's own plan_path), or nothing.
 _standing_file() {
-  [[ "$MODE" == step && "$CHECKPOINT" =~ ^cp[23]$ ]] || return 1
+  [[ "$MODE" == step && "$CHECKPOINT" == cp2 ]] || return 1
   local pp pid; pp="$(yq -r '.plan_path // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"
   [[ -n "$pp" && "$pp" != null && -f "$pp" ]] || return 1
   pid="$(_aid_plan_id_of "$pp")" || return 1
@@ -950,7 +949,7 @@ _dispatch_recorded() {
     | grep -Eq "reviewer-${2}\.(json|missing)$"
 }
 
-# ── the semantic file of a whole-EPIC (cp3) or whole-plan (cp7) round ─────────
+# ── the semantic file of a whole-plan (cp7) round ─────────────────────────────
 # _semantic_final_write <verdict> — <run>/semantic-review-final.json, the
 # artifact the boundary consumers keep reading where it always was (aid-fsm.sh
 # routed-findings reconciliation, aid-release-policy.sh input row,
@@ -962,8 +961,8 @@ _dispatch_recorded() {
 # says so in merge_meta.merged_from.
 #   severity  blocker → critical, major → medium, minor → low
 #   status    fixed → resolved, carried → deferred, everything else → open
-#   base_sha and range come from step-check.json (the EPIC's base_commit at cp3,
-#   the plan's base commit at cp7), so the file names what the reviewers saw
+#   base_sha and range come from step-check.json (the plan's base commit), so
+#   the file names what the reviewers saw
 _semantic_final_write() {
   local verdict="$1" out="${EVID}/semantic-review-final.json" tmp base range schema="${AID_PLUGIN_PATH}/defaults/schemas/semantic-review.schema.json"
   range="$(jq -r '.range // ""' "$STEPCHECK")"; base="${range%%..*}"
@@ -1215,7 +1214,7 @@ to close the round at the revision the reviewers saw; the fix is confirmed by th
     # P112: with delegation in force, no escalation reaches the PM's card before
     # the independent agent answered it (delegate --pending empty).
     local dlg_pid dlg_open
-    if [[ "$CHECKPOINT" =~ ^cp[237]$ ]] && dlg_pid="$(_dlg_plan_id)" && aid_delegate_in_force "$(_dlg_root)" "$dlg_pid"; then
+    if [[ "$CHECKPOINT" =~ ^cp[27]$ ]] && dlg_pid="$(_dlg_plan_id)" && aid_delegate_in_force "$(_dlg_root)" "$dlg_pid"; then
       dlg_open="$(_dlg_pending "$dir" "$(( ROUND >= last_allowed ? 1 : 0 ))")"
       [[ -z "$dlg_open" ]] || _die "$(wc -l <<< "$dlg_open") escalation(s) await an independent verdict (delegation in force for ${dlg_pid}); nothing was closed.
 next: bash ${SCRIPT_DIR}/aid-review-round.sh delegate --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --fingerprint <fp> for each of: $(paste -sd' ' <<< "$dlg_open"), then close again"
@@ -1223,7 +1222,7 @@ next: bash ${SCRIPT_DIR}/aid-review-round.sh delegate --checkpoint ${CHECKPOINT}
     aid_step_review_route_open "$ROOT" "$EVID" "$CHECKPOINT" "$STEP" "$dir" "$(( ROUND >= last_allowed ? 1 : 0 ))" \
       || _die "routing the open findings failed; close can be run again"
     jq --arg at "$(_now)" '. + {routed_at: $at}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
-    if [[ "$CHECKPOINT" == cp3 || "$CHECKPOINT" == cp7 ]]; then
+    if [[ "$CHECKPOINT" == cp7 ]]; then
       _semantic_final_write "$verdict" || _die "the ${CHECKPOINT} round cannot close: ${EVID}/semantic-review-final.json was not written; close can be run again"
     fi
   fi
@@ -1371,10 +1370,10 @@ cmd_finalize() {
 cmd_dispute() {
   # cp7 since 2.114.0: a whole-plan finding the author refuted by measurement or
   # the PM consciously deferred had no path but "fix it" (P010 closed by a manual
-  # merge). The same card-and-answer rule as cp2/cp3 applies; a form_invalid
+  # merge). The same card-and-answer rule as cp2 applies; a form_invalid
   # finding (evidence outside the candidate's repository) is disputed the same way.
-  [[ "$MODE" == plan || "$CHECKPOINT" =~ ^cp[237]$ ]] \
-    || _die "dispute is for the plan (CP1), step (CP2), EPIC (CP3) and whole-plan (CP7) reviews" 2
+  [[ "$MODE" == plan || "$CHECKPOINT" =~ ^cp[27]$ ]] \
+    || _die "dispute is for the plan (CP1), step (CP2) and whole-plan (CP7) reviews" 2
   local dir; dir="$(_existing_round)" || exit 1
   [[ -n "$FINGERPRINT" && ${#REASON} -ge 20 ]] || _die "--fingerprint and a --reason of at least 20 characters required" 2
   [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
@@ -1409,7 +1408,7 @@ cmd_dispute() {
     done
     jq --argjson r "$ROUND" --arg v "$v" '.rounds |= map(if .round == $r then .verdict = $v else . end)
       | if ([.rounds[].round] | max) == $r then .verdict = $v else . end' "$index" > "${index}.tmp" && mv "${index}.tmp" "$index"
-    [[ "$CHECKPOINT" == cp3 || "$CHECKPOINT" == cp7 ]] && { _semantic_final_write "$v" || _die "${EVID}/semantic-review-final.json was not rewritten; run the dispute again"; }
+    [[ "$CHECKPOINT" == cp7 ]] && { _semantic_final_write "$v" || _die "${EVID}/semantic-review-final.json was not rewritten; run the dispute again"; }
     # A cp7 dispute rewrites files the close stage recorded; the decision's
     # integrity check reads the LAST record per path, so the dispute records
     # its own stage — the audit shows who changed the verdict and when.
@@ -1424,13 +1423,13 @@ cmd_dispute() {
     | if .dispute.pm.answer == "accepted" then "dismissed by the PM (dispute accepted)" else .status end' "${dir}/merged.json")"
 }
 
-# standing --checkpoint cp2|cp3 --evidence-dir <run> --reason "<the PM's words>"
+# standing --checkpoint cp2 --evidence-dir <run> --reason "<the PM's words>"
 # Records, once per plan, the PM's standing instruction to finish without
 # asking: every step and EPIC review of the plan may then run up to two
 # fix-and-confirm rounds after its budget before routing what stays open.
 cmd_standing() {
   if (( DELEGATE )); then _standing_delegate; return; fi
-  [[ "$MODE" == step && "$CHECKPOINT" =~ ^cp[23]$ ]] || _die "standing is recorded from a step (cp2) or EPIC (cp3) run of the plan: --checkpoint cp2|cp3 --evidence-dir <run>" 2
+  [[ "$MODE" == step && "$CHECKPOINT" == cp2 ]] || _die "standing is recorded from a step (cp2) run of the plan: --checkpoint cp2 --evidence-dir <run>" 2
   (( ${#REASON} >= 20 )) || _die "--reason must quote the PM's words (at least 20 characters)" 2
   local f; f="$(_standing_file)" || _die "cannot find the plan of ${EVID} (its fsm-state.yaml names no readable plan_path)"
   [[ -f "$f" ]] && _die "the PM's standing instruction is already recorded (${f})"
@@ -1444,12 +1443,12 @@ cmd_standing() {
 # ── delegation (P112 Step 7) ─────────────────────────────────────────────────
 _dlg_root() { aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT"; }
 # _dlg_plan_id — the plan this round belongs to: the plan file (CP1), the run's
-# plan_path (cp2/cp3), the brief record of the close (cp7).
+# plan_path (cp2), the brief record of the close (cp7).
 _dlg_plan_id() {
   local pp=""
   if [[ "$MODE" == plan ]]; then printf '%s' "$PLAN_ID"; return 0; fi
   case "$CHECKPOINT" in
-    cp2|cp3) pp="$(yq -r '.plan_path // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)" ;;
+    cp2) pp="$(yq -r '.plan_path // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)" ;;
     cp7) pp="$(jq -r '.plan // ""' "${EVID}/cp7/brief.json" 2>/dev/null)" ;;
   esac
   [[ -n "$pp" && "$pp" != null && -f "$pp" ]] || return 1
@@ -1495,7 +1494,7 @@ _dlg_resync() {
   done
   [[ -f "$index" ]] && jq --argjson r "$ROUND" --arg v "$v" '.rounds |= map(if .round == $r then .verdict = $v else . end)
     | if ([.rounds[].round] | max) == $r then .verdict = $v else . end' "$index" > "${index}.tmp" && mv "${index}.tmp" "$index"
-  [[ "$CHECKPOINT" == cp3 || "$CHECKPOINT" == cp7 ]] && { _semantic_final_write "$v" || _die "${EVID}/semantic-review-final.json was not rewritten; record the verdict again"; }
+  [[ "$CHECKPOINT" == cp7 ]] && { _semantic_final_write "$v" || _die "${EVID}/semantic-review-final.json was not rewritten; record the verdict again"; }
   if [[ "$CHECKPOINT" == cp7 ]]; then
     aid_stage_writes_record "$EVID" "cp7-delegated-$2" \
       "cp7/round-${ROUND}/merged.json" "cp7/round-${ROUND}/measurement.json" "cp7/round-${ROUND}/round.json" "cp7/rounds.json" semantic-review-final.json
@@ -1504,8 +1503,8 @@ _dlg_resync() {
 }
 
 cmd_delegate() {
-  [[ "$MODE" == step && "$CHECKPOINT" =~ ^cp[237]$ ]] \
-    || _die "delegate is for the step (CP2), EPIC (CP3) and whole-plan (CP7) rounds; the plan review (CP1) stays the PM's" 2
+  [[ "$MODE" == step && "$CHECKPOINT" =~ ^cp[27]$ ]] \
+    || _die "delegate is for the step (CP2) and whole-plan (CP7) rounds; the plan review (CP1) stays the PM's" 2
   local dir; dir="$(_existing_round)" || exit 1
   [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
   local pid root last
