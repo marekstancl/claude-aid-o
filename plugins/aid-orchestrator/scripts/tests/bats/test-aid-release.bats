@@ -96,3 +96,46 @@ EOF
   # Skipped message
   [[ "$output" == *"already"* ]] || [[ "$output" == *"Skipped"* ]]
 }
+
+@test "aid-release: a case added since the last tag and named after a plan refuses before any file changes, committed or only edited" {
+  seed_release_fixture "2.19.0" "2.19.0"
+  cd "$TEST_PROJECT_ROOT"
+  mkdir -p tests
+  printf '%s "keeps the guard" {\n}\n' '@test' > tests/test-x.bats
+  git add -A && git commit -qm "a test" && git tag v2.19.0
+  run bash "$RELEASE" patch --dry-run
+  [ "$status" -eq 0 ]
+
+  printf '%s "P321 the guard" {\n}\n' '@test' >> tests/test-x.bats
+  run bash "$RELEASE" patch --dry-run
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'FAIL [test_named_after_plan] tests/test-x.bats: "P321 the guard"'* ]]
+  [[ "$output" != *"Would update version"* ]]
+
+  git commit -qam "the plan-named case"
+  run bash "$RELEASE" patch
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"test_named_after_plan"* ]]
+  [ -z "$(git status --porcelain)" ]
+  [ "$(git rev-list --count v2.19.0..HEAD)" -eq 1 ]
+}
+
+@test "aid-release: auto checks the names before it can decide there is nothing to release" {
+  seed_release_fixture "2.19.0" "2.19.0"
+  cd "$TEST_PROJECT_ROOT"
+  git tag v2.19.0
+  mkdir -p tests
+  printf '%s "P321 the guard" {\n}\n' '@test' > tests/test-x.bats
+  git add -A && git commit -qm "test: a plan-named case"
+  run bash "$RELEASE" auto --dry-run
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL [test_named_after_plan]"* ]]
+}
+
+@test "aid-release: a repository without a tag skips the test-name guard with a note" {
+  seed_release_fixture "2.19.0" "2.19.0"
+  cd "$TEST_PROJECT_ROOT"
+  run bash "$RELEASE" patch --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INFO [test_named_after_plan] no previous tag"* ]]
+}

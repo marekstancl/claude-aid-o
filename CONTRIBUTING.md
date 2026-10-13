@@ -326,7 +326,12 @@ A tag and not a `tests/t0|t1|t2/` directory: directories were costed at ≈420
 literal path references (registry `test:` fields, catalog join keys, CI jobs,
 gate commands). Re-open only with a plan that counts again.
 
-A suite filename states its subject, never the plan that produced it.
+A suite filename states its subject, never the plan that produced it, and so
+does a case name: a case added since the last tag whose name carries a plan,
+finding or backlog number (`P111`, `CP2 F3`, `IMP-612`) stops `aid-release.sh`
+before it changes anything, as `plan-finalize --stage gates` stops a plan. A
+solo build marks its one-off checks exactly as a plan does (`skills/plan-writing.md`,
+"Tests are designed, not counted") and deletes them before the merge.
 Provenance goes in the header. `scripts/tests/tier-lint-allowlist.txt` holds
 sanctioned exceptions and is currently empty.
 

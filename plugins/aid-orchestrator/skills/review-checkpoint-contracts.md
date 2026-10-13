@@ -68,6 +68,11 @@ answer NAMES the covering test — file and case — or it concedes the test is
 needed. An unnamed claim of coverage is how a duplicate suite gets waved
 through, and it costs the portfolio the same as the duplicate it excuses.
 
+The same question looks backwards: **which existing test does this change make
+obsolete** (it guards behaviour the diff removes, or a frozen list or text the
+diff edits)? It is named and deleted in the same step — otherwise it is the
+next plan's archaeology.
+
 A new suite must also carry a tier tag (`# aid-tier: t0|t1|t2`) matching what
 its plan declared; `aid-test-tier-lint.sh` is the mechanical half, and review
 is where an over-cheap or over-expensive CHOICE gets questioned.

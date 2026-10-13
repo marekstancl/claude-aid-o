@@ -3953,6 +3953,22 @@ _pfsm_finalize_gates_body() {
   if (( vo_n == 0 )); then echo "INFO [verification_only_removed] the plan marks no verification-only test" >&2
   else echo "PASS [verification_only_removed] ${vo_n} marked path(s), none present on the candidate" >&2; fi
 
+  # ── A test the plan adds is named after what it guards, not after the plan ─
+  local tn_out tn_rc=0 tn_file tn_name
+  tn_out="$(aid_test_names_plan_refs "$troot" "$base_commit")" || tn_rc=$?
+  if (( tn_rc != 0 )); then
+    if (( tn_rc == 1 )); then
+      while IFS=$'\t' read -r tn_file tn_name; do
+        echo "FAIL [test_named_after_plan] ${tn_file}: \"${tn_name}\" — name the behaviour it guards; the plan, finding or backlog number belongs in the commit message" >&2
+      done <<<"$tn_out"
+    else
+      echo "FAIL [test_named_after_plan] cannot diff ${base_commit} against the candidate — the names of the added tests were not checked" >&2
+    fi
+    echo "PRECONDITION FAIL: plan-finalize --stage gates: test names to fix first — no gates were run." >&2
+    return 1
+  fi
+  echo "PASS [test_named_after_plan] no added test is named after a plan, finding or backlog item" >&2
+
   local run_dir_abs="${root}/${run_dir_rel}"
   local report_file="${run_dir_abs}/gates_report.json"
   local timeline_file="${run_dir_abs}/timeline.jsonl"
