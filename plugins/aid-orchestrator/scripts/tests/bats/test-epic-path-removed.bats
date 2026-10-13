@@ -72,3 +72,46 @@ _refused() {
       --plan "$R/.aid-o/plans/P952-direct.md" --direct ) > "$BATS_TEST_TMPDIR/init.log" 2>&1 || { cat "$BATS_TEST_TMPDIR/init.log"; false; }
   [ "$(yq -r .state "$sf")" = READY ] && [ "$(yq -r .direct "$sf")" = true ]
 }
+
+# _old_entry <plan> — a plan_branch plan whose manifest holds an EPIC-path
+# entry written by 2.118.x (a task branch, proven on plan/<id>), the shape an
+# update to 3.0.0 finds.
+_old_entry() {
+  local pid="$1" nnn="${1#P}" tip
+  printf -- '---\nid: %s\n---\n# Plan\n\n### Step 1: one\n\n**AID Role:** backend\n' "$pid" > "$R/.aid-o/plans/${pid}-old.md"
+  git -C "$R" add -f .aid-o/plans >/dev/null 2>&1; git -C "$R" commit -qm "old plan" >/dev/null 2>&1 || true
+  bash "$PFSM" plan-start "$pid" --mode plan_branch --project-root "$R" --declared-epics "E-${nnn}-1_1" >/dev/null 2>&1 || return 1
+  tip="$(git -C "$R" rev-parse "plan/${pid}")"; git -C "$R" branch "task/E-${nnn}-1_1/main" "$tip"
+  ( export AID_PLAN_MANIFEST_PROJECT_ROOT="$R"; source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-manifest.sh"
+    plan_manifest_add_epic "$pid" "E-${nnn}-1_1" "R-E${nnn}-1" "task/E-${nnn}-1_1/main" "$tip" "plan/${pid}" ".aid-o/work/evidence/E-${nnn}-1_1/R-E${nnn}-1" proven >/dev/null )
+}
+
+@test "removed: init without --direct for an EPIC of a declared plan refuses epic_path_removed before any write" {
+  _old_entry P953
+  local sf="$R/.aid-o/work/evidence/E-953-1_1/R-E953-1/fsm-state.yaml"
+  run bash "$FSM" init E-953-1_1 R-E953-1 1 full task/E-953-1_1/main "$(git -C "$R" rev-parse plan/P953)" "$sf"; _refused
+  [ ! -e "$R/.aid-o/work/evidence/E-953-1_1/R-E953-1/fsm-state.yaml" ]
+  [ -z "$(git -C "$R" branch --show-current | grep '^task/')" ]
+}
+@test "removed: done-advance on an old EPIC run's state refuses epic_path_removed" {
+  _old_entry P954
+  local sf="$R/.aid-o/work/evidence/E-954-1_1/R-E954-1/fsm-state.yaml"; mkdir -p "$(dirname "$sf")"
+  printf 'epic_id: E-954-1_1\nrun_id: R-E954-1\nstate: DONE\ndone_phase: review\nbranch: task/E-954-1_1/main\npm_decision: merge\n' > "$sf"
+  run bash "$FSM" done-advance review release "$sf"; _refused
+  [ "$(yq -r .done_phase "$sf")" = review ]
+}
+@test "removed: epic-complete without --direct refuses; --abandon still ends an old entry with a task branch" {
+  _old_entry P955
+  run bash "$PFSM" epic-complete P955 E-955-1_1 --project-root "$R"; _refused
+  run bash "$PFSM" epic-complete P955 E-955-1_1 --abandon --reason "left over from 2.118.x" --project-root "$R"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.plan_boundary_manifest.epic_runs[0] | .status + " " + .task_branch' "$R/.aid-o/work/plan-state/P955/plan-boundary-manifest.json")" = "abandoned task/E-955-1_1/main" ]
+}
+@test "removed: plan-close --administrative still closes a plan whose manifest holds an old entry with a task branch" {
+  _old_entry P956
+  run bash "$PFSM" plan-close P956 --administrative --reason "the EPIC path was removed in 3.0.0; closed by hand" --project-root "$R"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(yq -r .plan_state "$R/.aid-o/work/plan-state/P956/plan-state.yaml")" = CLOSED ]
+}
+

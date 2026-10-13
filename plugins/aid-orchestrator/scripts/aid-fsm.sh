@@ -1181,7 +1181,7 @@ _fsm_refusal_next() {
       if [[ "${_da_state_direct:-}" == "true" ]]; then
         next="$(_fsm_cmd bash "$fsm" done-advance review release "$sf" --direct)"
       else
-        next="$(_fsm_cmd bash "$fsm" done-advance review release "$sf"), then epic-merge-to-plan as today"
+        next="$(_fsm_cmd bash "$fsm" done-advance review release "$sf")"
       fi ;;
     abandon_needs_reason)
       next="$(_fsm_cmd bash "$fsm" abandon "$sf" --reason "<why the run is abandoned>")" ;;
@@ -1192,7 +1192,7 @@ _fsm_refusal_next() {
     direct_run_needs_plan_branch)
       next="start the plan in plan_branch mode and run from its plan worktree: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}")" ;;
     plan_manifest_missing|plan_branch_mismatch)
-      next="start the EPIC through its plan (task branch and manifest entry), then init again: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" epic-start "${_pb_plan_id:-<plan>}" "${epic_id:-<epic>}" --run-id "${run_id:-<run>}")" ;;
+      next="start the plan's run again through plan-run, which writes the manifest entry and runs init: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}" --restart --reason "<why>")" ;;
     contract_return_missing|contract_return_not_done)
       next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent or hand over with a Blocked card), then: $inc" ;;
     missing_step_verify|verify_no_ac_checklist|verify_no_memory_used|verify_no_memory_written|step_verify_not_pass|verify_no_commit_ref)
@@ -3420,7 +3420,7 @@ cmd_resume() {
 
 cmd_init() {
   if [[ $# -lt 7 ]]; then
-    echo "Usage: aid-fsm.sh init <epic_id> <run_id> <total_steps> <mode> <branch> <base_commit> <state_file> [--force] — got $# argument(s). All seven are positional; the former run renderer is the normal caller, a manual re-init must pass the same seven." >&2
+    echo "Usage: aid-fsm.sh init <epic_id> <run_id> <total_steps> <mode> <branch> <base_commit> <state_file> [--force] — got $# argument(s). All seven are positional; plan-run is the normal caller, a manual re-init must pass the same seven." >&2
     exit 2
   fi
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
@@ -3589,6 +3589,22 @@ cmd_init() {
     fi
   fi
 
+  # P114 (3.0.0): a run of a plan is the direct run. init without --direct for
+  # an EPIC of a plan (a committed lifecycle manifest, or its plan worktree) is
+  # the removed EPIC path — refused before anything is written. An EPIC id that
+  # names no declared plan (the plan-less run on main, which the FSM's own
+  # suites drive) is unchanged.
+  if [[ "$direct" != true && -n "$_pb_plan_id" ]]; then
+    local _ep_mode="" _ep_reason=""
+    IFS=$'\t' read -r _ep_mode _ _ep_reason < <(_fsm_declared_plan_mode "$epic_id") || true
+    if [[ ( "$_ep_mode" == plan_branch || "$_ep_mode" == legacy_epic_release_mode ) && -z "$_ep_reason" ]] \
+       || _fsm_in_plan_worktree "$epic_id"; then
+      echo "REFUSED (epic_path_removed): init ${epic_id} without --direct would run an EPIC of ${_pb_plan_id} on its own task branch — the EPIC path, removed in AID 3.0.0; a plan runs straight from its file as one run (aid-plan-fsm.sh plan-run ${_pb_plan_id})." >&2
+      _fsm_refusal_next epic_path_removed
+      exit 2
+    fi
+  fi
+
   if [[ -n "$_pb_plan_id" ]]; then
     # Resolve the plan's DECLARED release mode through the ONE committed-tree,
     # fail-closed authority — `_fsm_declared_plan_mode` (bottom of this file) —
@@ -3658,7 +3674,7 @@ cmd_init() {
             _pb_detail="Runtime plan-boundary-manifest.json for ${_pb_plan_id} at ${_pb_manifest_path} is present but unparseable."
           elif [[ -z "$_pb_entry" ]]; then
             _pb_reason="plan_manifest_missing"
-            _pb_detail="No epic_runs[] entry for ${epic_id} in ${_pb_plan_id}'s plan-boundary-manifest.json (never epic-started under this plan, or the entry was lost). Run 'aid-plan-fsm.sh epic-start ${_pb_plan_id} ${epic_id}' first, or repair with: aid-plan-fsm.sh plan-state ${_pb_plan_id} --repair"
+            _pb_detail="No epic_runs[] entry for ${epic_id} in ${_pb_plan_id}'s plan-boundary-manifest.json (the run was never started by plan-run, or the entry was lost). Start it with 'aid-plan-fsm.sh plan-run ${_pb_plan_id}', or repair with: aid-plan-fsm.sh plan-state ${_pb_plan_id} --repair"
           else
             local _pb_status="" _pb_task_branch="" _pb_base="" _pb_lineage="" _pb_epic_source_ref=""
             _pb_status="$(jq -r '.status // empty' <<<"$_pb_entry" 2>/dev/null)" || true
@@ -3672,14 +3688,11 @@ cmd_init() {
               _pb_detail="${epic_id} is recorded status=abandoned in ${_pb_plan_id}'s plan-boundary-manifest.json — restarting an abandoned EPIC without a PM decision would silently resurrect it."
             elif [[ "$_pb_lineage" != "proven" || "$_pb_epic_source_ref" != "plan/${_pb_plan_id}" ]]; then
               _pb_reason="epic_lineage_unproven"
-              _pb_detail="${epic_id}'s manifest entry has lineage='${_pb_lineage:-<empty>}' and epic_source_ref='${_pb_epic_source_ref:-<empty>}' — refusing to treat it as authoritative (must be proven with epic_source_ref=plan/${_pb_plan_id} to execute within this plan). Use 'aid-plan-fsm.sh epic-start ${_pb_plan_id} ${epic_id}' to create a new proven entry, or attest this entry with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --attest-source-ref <ref> --reason \"<reason>\" --epic ${epic_id}'. If the old task branch is fully contained in the target (git branch --merged shows it), the shortest safe path is: git branch -d <task_branch>, then epic-start."
+              _pb_detail="${epic_id}'s manifest entry has lineage='${_pb_lineage:-<empty>}' and epic_source_ref='${_pb_epic_source_ref:-<empty>}' — refusing to treat it as authoritative (must be proven with epic_source_ref=plan/${_pb_plan_id} to execute within this plan). Start the plan again with 'aid-plan-fsm.sh plan-run ${_pb_plan_id} --restart --reason \"<why>\"', or attest this entry with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --attest-source-ref <ref> --reason \"<reason>\" --epic ${epic_id}'."
             elif [[ "$direct" == true && "$(jq -r '.direct // false' <<<"$_pb_entry" 2>/dev/null)" != "true" ]]; then
               # P111: a direct run's entry has no task branch; it must say direct.
               _pb_reason="plan_branch_mismatch"
               _pb_detail="init --direct ${epic_id}: ${_pb_plan_id}'s manifest entry is not a direct run (task_branch=${_pb_task_branch:-<empty>}) — it belongs to the EPIC path; run it with /aid-run ${epic_id}."
-            elif [[ "$direct" != true && "$_pb_task_branch" != "$_plan_expected_branch" ]]; then
-              _pb_reason="plan_branch_mismatch"
-              _pb_detail="${_pb_plan_id}'s manifest records task_branch=${_pb_task_branch:-<empty>} for ${epic_id}, but this run expects ${_plan_expected_branch}."
             else
               local _pb_actual_base=""
               _pb_actual_base="$(git merge-base "$_plan_expected_branch" "plan/${_pb_plan_id}" 2>/dev/null)" || _pb_actual_base=""
@@ -3877,40 +3890,6 @@ cmd_init() {
     exit 1
   fi
 
-  # ── P074 Step 9: the plan worktree is NOT a foreign worktree ─────────────
-  # is_worktree()'s blanket skip exists for worktrees whose branch the CALLER
-  # controls (superpowers:using-git-worktrees and friends). The plan's OWN
-  # execution worktree is the opposite: it is that plan's "main", the one place
-  # its EPICs are supposed to run, and skipping enforcement there would leave
-  # init sitting on `plan/<id>` with no task branch — so done-advance would
-  # attribute an empty diff to the EPIC. Inside it, enforcement RUNS, with two
-  # differences from the primary checkout: `plan/<id>` is an accepted starting
-  # HEAD, and a task branch auto-created there is based on the PLAN branch head
-  # rather than on whatever the current branch happens to be.
-  local _wt_plan_branch=""
-  if _fsm_in_plan_worktree "$epic_id"; then
-    _wt_plan_branch="plan/P$(_fsm_epic_plan_nnn "$epic_id")"
-    # THE BASE REF MUST EXIST. Inside the plan worktree every task branch is
-    # cut from `plan/<id>`; if manual surgery deleted it the worktree is left
-    # detached, which used to fall through to the "unusual branch" warn-and-
-    # accept arm — init would proceed with NO task branch on an unowned
-    # detached tree, and done-advance would then attribute a meaningless diff.
-    # That is a hard fail: the topology this worktree exists to serve is gone.
-    #
-    # `--recreate-worktree` is deliberately NOT the remedy and is not offered:
-    # the worktree is intact, its BASE REF is missing. Recreating the tree would
-    # fail on the same missing ref and would look like the operator had tried
-    # the sanctioned repair.
-    if ! git -C "$PWD" rev-parse --verify --quiet "refs/heads/${_wt_plan_branch}" >/dev/null 2>&1; then
-      die "ERROR: ${_wt_plan_branch} does not exist, but this is ${_wt_plan_branch#plan/}'s execution worktree and every EPIC branch here is cut from it.
-
-Reason: the plan branch was deleted (manual surgery, or a post-merge cleanup that ran early). Without it there is no base for task/${epic_id}/main and no integration target for done-advance — continuing would execute on an unowned tree with broken diff attribution.
-
-Fix: restore ${_wt_plan_branch} (e.g. 'git branch ${_wt_plan_branch} <the merge or candidate sha>', or 'git reflog' to find its last position), then retry.
-       This is NOT a worktree problem: the worktree is intact, so 'plan-state ${_wt_plan_branch#plan/} --recreate-worktree' is the wrong tool. Repair the branch, or the plan-state record naming it."
-    fi
-  fi
-
   if [[ "$direct" == true ]]; then
     # P111: no task branch is created — the run's branch is plan/<id> and HEAD
     # must already be it (plan-run runs init inside the plan worktree).
@@ -3922,37 +3901,16 @@ Fix: restore ${_wt_plan_branch} (e.g. 'git branch ${_wt_plan_branch} <the merge 
       _fsm_refusal_next direct_run_needs_plan_branch
       exit 1
     fi
-  elif is_worktree && [[ -z "$_wt_plan_branch" ]]; then
+  elif is_worktree; then
     log_info "Worktree mode detected (git_dir under .git/worktrees/) — skipping branch enforcement"
   else
     local current_branch expected_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || die "Not in a git repository"
     expected_branch="task/${epic_id}/main"
-    # A sentinel, never a real branch name, so the case arm below is inert when
-    # we are NOT in the plan worktree (an empty pattern would match an empty
-    # current_branch).
-    local _wt_plan_case="${_wt_plan_branch:-__aid_no_plan_worktree__}"
 
     case "$current_branch" in
       "$expected_branch")
         log_info "Resume case: HEAD already on $expected_branch"
-        ;;
-      "$_wt_plan_case")
-        # The plan worktree at rest sits on `plan/<id>` — this is the fresh-init
-        # case there, and the direct analogue of `main` in the primary checkout.
-        if git show-ref --verify --quiet "refs/heads/${expected_branch}"; then
-          log_info "Resume case: checking out existing $expected_branch in the plan worktree"
-          git checkout "$expected_branch" >/dev/null 2>&1 \
-            || die "Failed to checkout existing branch $expected_branch in the plan worktree $PWD (check 'git status' for details)"
-        else
-          log_info "Auto-creating branch: $expected_branch from ${_wt_plan_branch} (plan worktree)"
-          # Explicit base: a second EPIC of the same plan must start from the
-          # ADVANCED plan head (after the first EPIC merged), never from main.
-          git checkout -b "$expected_branch" "$_wt_plan_branch" >/dev/null 2>&1 \
-            || die "Failed to create branch $expected_branch from ${_wt_plan_branch} in the plan worktree $PWD.
-Reason: the plan branch must exist and be resolvable — this is the base every EPIC of ${_wt_plan_branch#plan/} starts from.
-If ${_wt_plan_branch} is gone, --recreate-worktree is NOT the remedy: the worktree is fine, its base ref is not. Repair the plan branch (or the plan-state record naming it) first."
-        fi
         ;;
       main|master|develop)
         # P040 Component E: if the EPIC's task branch already exists (e.g. a
@@ -3985,13 +3943,7 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
         # PM context-aware (e.g., manual exploration on feat/ branch) — accept with warning.
         log_event "$timeline_path" "fsm_branch_unusual_detected" \
           current_branch="$current_branch" expected_branch="$expected_branch" epic_id="$epic_id"
-        if [[ -n "$_wt_plan_branch" ]]; then
-          # P074 Step 9: inside the plan worktree the expected topology is
-          # known exactly, so the warning names it instead of shrugging.
-          log_warn "Unusual branch in the plan worktree: $current_branch. The expected topology here is ${_wt_plan_branch} at rest and ${expected_branch} while ${epic_id} runs. Continuing — PM-controlled context assumed."
-        else
-          log_warn "Unusual branch: $current_branch (expected $expected_branch). Continuing — PM-controlled context assumed."
-        fi
+        log_warn "Unusual branch: $current_branch (expected $expected_branch). Continuing — PM-controlled context assumed."
         ;;
     esac
   fi
@@ -6141,7 +6093,7 @@ cmd_done_advance() {
     if [[ "$_da_state_direct" == "true" ]]; then
       echo "ERROR: done-advance: $(yaml_field "$state_file" epic_id) is a direct run (plan/<id>) — its done-advance records merged_to_plan and needs --direct." >&2
     else
-      echo "ERROR: done-advance --direct: $(yaml_field "$state_file" epic_id) is not a direct run — its task branch is merged by epic-merge-to-plan; drop --direct." >&2
+      echo "ERROR: done-advance --direct: $(yaml_field "$state_file" epic_id) is not a direct run; drop --direct." >&2
     fi
     _fsm_refusal_next done_advance_needs_direct
     exit 1
@@ -6168,6 +6120,16 @@ cmd_done_advance() {
   IFS=$'\t' read -r _pb_mode _pb_mode_plan _pb_mode_reason \
     < <(_fsm_declared_plan_mode "$_pb_epic_id") || true
   [[ "$_pb_mode" == "plan_branch" ]] && _pb_plan_branch="true"
+
+  # P114 (3.0.0): a run of a plan that is not the direct run is an EPIC-path
+  # run (a task branch merged by epic-merge-to-plan or by hand), removed —
+  # refused before anything is checked or written. Finish it on 2.118.x, or
+  # abandon it (aid-plan-fsm.sh epic-complete <plan> <epic> --abandon).
+  if [[ "$_da_state_direct" != true && ( "$_pb_mode" == plan_branch || "$_pb_mode" == legacy_epic_release_mode ) && -z "$_pb_mode_reason" ]]; then
+    echo "REFUSED (epic_path_removed): done-advance ${_pb_epic_id} is a run of the EPIC path (plan ${_pb_mode_plan}, a task branch), removed in AID 3.0.0." >&2
+    _fsm_refusal_next epic_path_removed
+    exit 2
+  fi
 
   if [[ "$_pb_mode" == "unresolved" ]]; then
     mkdir -p "$(dirname "$_pb_mode_timeline")" 2>/dev/null || true
@@ -6242,9 +6204,8 @@ cmd_done_advance() {
       forced="$force" skipped_stages="$_pb_stages_json"
 
     # ── P074 Step 9: name the tree and the merge target ───────────────────
-    # A plan_branch EPIC never merges into the target branch here; the merge
-    # that matters is `task/<epic>/main` -> `plan/<id>`, performed by
-    # `aid-plan-fsm.sh epic-merge-to-plan` in the plan's own worktree. The
+    # A plan's run (the direct run since 3.0.0) never merges into the target
+    # branch here; it is recorded merged_to_plan on `plan/<id>`. The
     # Step 8 enforcer above has already put THIS process in that tree, so the
     # diff attributed to the EPIC below is the worktree's. Say so: the single
     # most confusing thing about a two-tree setup is not knowing which tree a
@@ -6252,9 +6213,7 @@ cmd_done_advance() {
     local _pb_wt
     _pb_wt="$(_fsm_plan_worktree_for_epic "$_pb_epic_id")"
     if [[ -n "$_pb_wt" ]]; then
-      if [[ "${direct_flag:-}" == true ]]; then echo "NOTE: ${_pb_epic_id} is the DIRECT run of ${_pb_mode_plan} — this advance evaluates the plan worktree ${_pb_wt} and records merged_to_plan on plan/${_pb_mode_plan} (no task branch to merge)." >&2; else
-      echo "NOTE: ${_pb_epic_id} is a plan_branch EPIC of ${_pb_mode_plan} — this advance evaluates the PLAN WORKTREE ${_pb_wt} (its HEAD and its base..HEAD diff), and the next step merges task/${_pb_epic_id}/main into plan/${_pb_mode_plan} THERE, not into the target branch." >&2
-      fi
+      echo "NOTE: ${_pb_epic_id} is the DIRECT run of ${_pb_mode_plan} — this advance evaluates the plan worktree ${_pb_wt} and records merged_to_plan on plan/${_pb_mode_plan} (no task branch to merge)." >&2
       log_event "$_pb_mode_timeline" "done_advance_plan_worktree" \
         epic_id="$_pb_epic_id" plan_id="$_pb_mode_plan" worktree_path="$_pb_wt"
     fi

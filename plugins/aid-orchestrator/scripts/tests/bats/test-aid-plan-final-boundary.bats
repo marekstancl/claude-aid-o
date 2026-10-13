@@ -2932,31 +2932,6 @@ YAML
   [ ! -f "$(_marker)" ]
 }
 
-@test "AC7: the owned-lock exception is PATH-scoped — a different lock held by the SAME process still blocks" {
-  _seed_closable
-  # Source the CLI so the probe runs IN THIS process: the "same process holds a
-  # different lock" case cannot be produced through a subprocess.
-  # shellcheck disable=SC1090
-  source "$PLAN_FSM_CLI"
-  export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
-
-  # (a) Holding ONLY our own close lock: the probe passes.
-  aid_lock_acquire "$(_close_lock)" 5
-  local own_fd="$AID_LOCK_FD"
-  run _pfsm_close_lock_contended "$PLAN_ID" "$(_close_lock)"
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
-
-  # (c) The SAME process additionally holds a DIFFERENT lock: still blocked.
-  aid_lock_acquire "$(_manifest_lock)" 5
-  local other_fd="$AID_LOCK_FD"
-  run _pfsm_close_lock_contended "$PLAN_ID" "$(_close_lock)"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"plan-boundary-manifest.json.lock"* ]]
-
-  aid_lock_release "$other_fd" || true
-  aid_lock_release "$own_fd" || true
-}
 
 # ─── AC7: crash resume ─────────────────────────────────────────────────────
 

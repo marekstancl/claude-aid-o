@@ -119,42 +119,6 @@ _seed_plan() {
     fi"
 }
 
-# _seed_completed_epic — an epic_runs[] entry, a real task branch carrying one
-# marker commit made IN THE WORKTREE, and the full completion evidence
-# epic-merge-to-plan's F2 gate demands: the recorded completion sha / run id /
-# evidence dir, a DONE fsm-state.yaml in that dir, and an `epic-complete`
-# operation ledger record at `state_committed`. Built through the real library
-# entry points, because the merge verifies all of it.
-_seed_completed_epic() {
-  _in_root "set -e
-    source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-state.sh'
-    source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-manifest.sh'
-    ev='.aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1'
-    base=\$(git -C '$ROOT' rev-parse plan/${PLAN_ID})
-    git -C '$ROOT' branch task/${EPIC_ID}/main \"\$base\"
-    plan_manifest_add_epic ${PLAN_ID} ${EPIC_ID} R-${EPIC_ID}-1 \
-      task/${EPIC_ID}/main \"\$base\" plan/${PLAN_ID} \"\$ev\" proven >/dev/null
-    # The delivery, committed in the plan worktree.
-    git -C '$(_wt)' checkout -q task/${EPIC_ID}/main
-    printf 'epic marker\n' > '$(_wt)/epic-marker.txt'
-    git -C '$(_wt)' add epic-marker.txt
-    git -C '$(_wt)' commit -q -m 'the EPIC delivery'
-    git -C '$(_wt)' checkout -q plan/${PLAN_ID}
-    tip=\$(git -C '$ROOT' rev-parse task/${EPIC_ID}/main)
-    mkdir -p '$ROOT'/\"\$ev\"
-    printf 'state: DONE\ndone_phase: release\n' > '$ROOT'/\"\$ev\"/fsm-state.yaml
-    plan_manifest_update ${PLAN_ID} \".plan_boundary_manifest.epic_runs |= map(
-        if .epic_id == \\\"${EPIC_ID}\\\"
-        then . + {merge_status: \\\"pending\\\",
-                  epic_completion_sha: \\\"\$tip\\\",
-                  epic_completion_run_id: \\\"R-${EPIC_ID}-1\\\",
-                  epic_completion_evidence_dir: \\\"\$ev\\\"}
-        else . end)\" >/dev/null
-    op=\$(plan_op_key epic-complete ${PLAN_ID} - 0 ${EPIC_ID})
-    plan_op_begin ${PLAN_ID} \"\$op\" epic-complete ${EPIC_ID} \"\$tip\" >/dev/null
-    plan_op_mark_git_applied ${PLAN_ID} \"\$op\" \"\$tip\" >/dev/null
-    plan_op_commit ${PLAN_ID} \"\$op\" >/dev/null"
-}
 
 # ─── 1-3. the redirect: the worktree moves, the primary checkout does not ──
 
@@ -173,24 +137,6 @@ _seed_completed_epic() {
   [ "$(_primary_head)" = "$before_head" ]
 }
 
-@test "P074 Step 8: epic-merge-to-plan invoked FROM THE PRIMARY CHECKOUT merges in the plan worktree, not in the PM's tree" {
-  _mk_project
-  _seed_plan 1
-  _seed_completed_epic
-  local before_head before_branch
-  before_head="$(_primary_head)"; before_branch="$(_primary_branch)"
-
-  run _from "$ROOT" "$PLAN_FSM" epic-merge-to-plan "$PLAN_ID" "$EPIC_ID" --project-root "$ROOT"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"executes in its own worktree"* ]]
-  # The merge landed on the plan branch and the marker is present in the
-  # WORKTREE's tree...
-  [ -f "$(_wt)/epic-marker.txt" ]
-  # ...and nowhere near the PM's checkout, which is still on main at main.
-  [ ! -f "$ROOT/epic-marker.txt" ]
-  [ "$(_primary_branch)" = "$before_branch" ]
-  [ "$(_primary_head)" = "$before_head" ]
-}
 
 @test "P074 Step 8: aid-fsm.sh init invoked FROM THE PRIMARY CHECKOUT creates the task branch in the plan worktree" {
   _mk_project
