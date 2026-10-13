@@ -1054,8 +1054,19 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
 
       20b3. A block may carry `timeout:` — whole seconds, 1-1800 (default 120):
            the runner (aid-plan-diff.sh) kills the command after it and the
-           point is `absent (reason=timeout)`; another value is refused by the
-           shared validator (lib/aid-verification-pattern.sh, P110).
+           point is unmeasured (`reason: timeout`, its limit — never a met
+           point, never a missing change, P112); another value is refused by the
+           shared validator (lib/aid-verification-pattern.sh, P110). A point that
+           runs a whole test suite carries `timeout:` sized to the suite.
+
+      20b5. A path in ANOTHER git repository (an absolute path in a step's
+           Files or in a criterion's `file:`/`cmd`) needs that repository in
+           the plan's frontmatter `repo_roots: [{name, path[, base_branch]}]`
+           (P111) — the plan lint refuses it otherwise (`foreign_repo_undeclared`,
+           P112). Write the LIVE absolute path; the contract, the review packets
+           and the measurer read the plan's worktree there
+           (`<path>/.aid-worktrees/plan-<id>--<name>`) through one mapping, so a
+           point can never measure the live checkout by design.
 
       20b4. A step's own measurable criterion is a labelled bullet under the
            step's **Acceptance Criteria:** — `- [ ] [<role>] <text>` with a

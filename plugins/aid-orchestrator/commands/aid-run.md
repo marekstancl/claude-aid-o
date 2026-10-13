@@ -330,6 +330,23 @@ PRE-FLIGHT branches on the argument:
   second start (`plan_run_already_started`); the old pipeline refuses a plan
   with a direct run the same way. `--force --reason` passes a forceable CP1
   refusal (the PM's call, as below).
+
+**Restarting a run that made no step (P112).** A run that stopped before its
+first step (a plan that needed `repo_roots` after all, a plan fixed after its
+CP1) starts again with ONE command:
+`{plugin_path}/scripts/aid-plan-fsm.sh plan-run P<NNN> --restart --reason "<why, 20+ chars>"`.
+It abandons the old run (`aid-fsm.sh abandon`), records the restart like
+`supersede-generation` (a record, a timeline event, the audit-log line), moves
+the run's evidence and its transaction into
+`.aid-o/work/superseded-runs/<plan>-<UTC ts>/` (outside `evidence/`, so no hook
+or status reader finds them) and runs `plan-run` again over the current plan
+(seal and CP1 gate again; a foreign worktree is adopted and keeps its fork
+point). Refused after any step (`restart_after_step` — resume the run, or close
+the plan administratively), over uncommitted work or commits outside a step in
+the plan's worktree (`restart_plan_dirty`) or a foreign worktree
+(`restart_foreign_dirty`), and while a controller is still working on the run
+(`restart_controller_live`). An interrupted restart resumes with the same
+command (`restart.json`: moving → moved → done). Nothing is deleted.
 - **An EPIC id (`/aid-run E-…`) — the old EPIC path, kept until P112** for plans
   already generated: the pipeline below, unchanged.
 
@@ -358,6 +375,31 @@ worktree, a branch that moved after freeze, or a reported range not on it
 list the foreign branches (name, branch, head, commits). **Merging them is the
 PM's, by hand, after MERGE** — their gates are not run. The old EPIC path does
 not read `repo_roots` (absolute paths as before).
+
+**Foreign repositories in review and measurement (P112).** Every reader of a
+step's files or of a brief point reads the plan's worktree through ONE mapping
+(`lib/aid-repo-roots.sh`), never the live checkout: the step review packet
+carries `foreign-<name>.patch` with the ranges the step check verified
+(`step-check.json` `other_repos`) and `files.json` with worktree paths; the
+whole-plan packet carries each foreign branch from its frozen base; the prompt
+names the worktree and forbids the live checkout. The measurer
+(`aid-plan-diff.sh`, after a step and at the close) rewrites a point's `file:`
+and every declared path in its `cmd` to the worktree, so the `plan_diff` gate
+passes on what the plan built without merging the foreign branch first. A
+missing worktree is `foreign_worktree_missing` (fail closed). The plan lint
+refuses an absolute path into an undeclared repository before CP1
+(`foreign_repo_undeclared`). A point that runs out of time is **unmeasured**
+(`reason: timeout`, its limit), not absent: `increment-step` and the close name
+it; re-measure a step with `AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=<s>` (it raises even a
+point's own `timeout:`, max 1800) — the plan is not edited mid-run; the next
+plan gives the point `timeout:`.
+
+**The pre-commit hook guards only the live run (P112).** The run that governs
+a commit on a branch is taken ONLY from `.aid-o/work/active-runs.json` (the
+entry whose state names that branch); a set-aside copy of a state never
+governs. `init` fails without its map entry (`active_runs_write_failed`), the
+map keeps a direct run until DONE/release, and an unreadable map refuses a
+commit on `plan/*` or `task/*` (`active_runs_unreadable`).
 
 **Plugin path verification:**
 1. Read `plugin_path` from `.aid-o/config/plugin.yaml`
@@ -602,6 +644,49 @@ one at a time:
    record `answered: false`, or a start with no complete) is retried before
    `collect` with `retry --role <r>`, which withdraws its open start itself;
    nobody waits for the other roles to answer first.
+
+## Escalations settled by an independent agent (P112)
+
+PM 13. 10. 2026: in a plan that runs `--auto` (its plan state says
+`autonomy: auto`) every escalation that would stop the run on the PM is decided
+by an independent agent — automatically, with no instruction before each plan.
+A manual plan gets the same when the PM records it once:
+`aid-review-round.sh standing --plan <plan> --delegate --reason "<the PM's words>"`
+(`evidence/<plan>/delegate.json`; it grants no extra rounds). A PM stop
+(`/aid-stop`) ends the automatic delegation.
+
+What is delegated: a disputed finding (`dispute` without `--pm`, CP2/CP3/CP7)
+and every blocker or major still open after the last round the step, EPIC or
+plan allows. Minor findings never reach the PM's card and are listed at the
+close as before. The plan review (CP1) is never delegated.
+
+The controller's loop, per round, before `close` (close refuses while one is
+pending and prints the list):
+
+1. `aid-review-round.sh delegate … --round K --pending` — the fingerprints that
+   await a verdict; empty → `close`.
+2. `aid-review-round.sh delegate … --round K --fingerprint <fp>` — runs Codex
+   through the round's own runner on `adjudicator-delegated-<fp16>.prompt.md`
+   (`<fp16>` = the 16 hex characters after `sha256:`) and records its verdict.
+   **Exit 4 + `STAND-IN:`** — Codex is out (absent, over its limit, no answer):
+   dispatch the prompt to an independent `general-purpose` agent with a clean
+   context inside the bracket
+   `aid-emit-dispatch.sh start --focus adjudicator-delegated-<fp16> --agent-id claude:adjudicator-delegated --evidence-dir <round dir>` … `complete … --output-file <verdict>`,
+   then record: `… delegate … --fingerprint <fp> --verdict <verdict file>`.
+3. Next fingerprint; never a PM turn in between.
+
+The verdict (`defaults/templates/adjudicator-delegated.md`): `accepted` /
+`rejected` for a dispute, `dismiss` / `fix` for a finding open after the rounds
+(`fix` grants one more fix-and-confirm round; a finding still open after it gets
+a second verdict, `dismiss` or class `brief`), a class and, for a technical
+dispute about a check, the re-run command with its exit and output. Class
+`technical` is the delegate's to decide; **`brief`, `money` and `data` go to the
+PM's card** (`delegation_out_of_scope` — the brief, money and live data stay the
+PM's) and `--defer-criterion` never takes a delegate. A Claude verdict counts
+only under its closed bracket and a Codex verdict only with the runner's
+`delegate_codex_verdict` event of its sha256 (`delegation_missing` otherwise).
+Every settlement is a line of `evidence/<plan>/delegated-disputes.jsonl`; the
+close card and page list them.
 
 ## Stand-in for a Codex role
 

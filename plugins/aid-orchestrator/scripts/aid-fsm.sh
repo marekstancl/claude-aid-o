@@ -1185,6 +1185,8 @@ _fsm_refusal_next() {
       fi ;;
     abandon_needs_reason)
       next="$(_fsm_cmd bash "$fsm" abandon "$sf" --reason "<why the run is abandoned>")" ;;
+    active_runs_write_failed)
+      next="fix what blocks .aid-o/work/active-runs.json (lock, permissions, a broken file), then run the same init again (a direct init is idempotent; plan-run resumes it)" ;;
     direct_run_needs_plan_branch)
       next="start the plan in plan_branch mode and run from its plan worktree: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}")" ;;
     plan_manifest_missing|plan_branch_mismatch)
@@ -4269,8 +4271,7 @@ read_steps_array() {
 # _fsm_init_map_refuse <state_file> — P112: init without its active-runs entry.
 _fsm_init_map_refuse() {
   echo "REFUSED (active_runs_write_failed): $1 was written but its active-runs.json entry could not be — the pre-commit hook takes a run's guard only from that map, so the run would go unguarded." >&2
-  echo "next: fix what blocks the map (lock, permissions, a broken .aid-o/work/active-runs.json), then run the same init again (a direct init is idempotent; plan-run resumes it)" >&2
-  echo "(pipeline.md §When AID refuses: active_runs_write_failed)" >&2
+  _fsm_refusal_next active_runs_write_failed
   exit 1
 }
 
