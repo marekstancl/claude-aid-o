@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 661 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 662 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
   # ── Plan amendments recorded here because this file is the TRACKED authority ──
   # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
   # `git check-ignore`; `docs/extending-aid.md` is the tracked exception), so an
@@ -203,7 +203,7 @@ enforcements:
   - {id: epic_template_found, type: 4, source: removed (P114), instruction: n/a, severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: 'none (no EPIC file, so no EPIC template)', verdict: unmapped, description: 'RETIRED by P114 Step 5: the EPIC path was removed in 3.0.0; no EPIC file, so no EPIC template.'}
   - {id: plan_frontmatter_id, type: 4, source: removed (P114), instruction: n/a, severity: blocking, surface: llm-facing, status: removed_scoped, replacement_guard: plan_run_direct, verdict: unmapped, description: 'RETIRED by P114 Step 5: the EPIC path was removed in 3.0.0; plan-run finds the plan by its id and refuses a plan it cannot find (plan_not_found).'}
   - {id: steps_section_fence_aware, type: 4, source: "scripts/lib/aid-plan-json.sh:aid_plan_step_content (headers inside fences ignored)", instruction: "skills/plan-writing.md", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "steps-section presence (fence-aware awk, F13)", test: scripts/tests/bats/test-plan-json.bats}
-  - {id: dep_range_reversed, type: 4, source: "scripts/lib/aid-plan-json.sh:aid_plan_parse_step_deps (reversed range skipped with a warning)", instruction: "skills/planner.md", severity: advisory, surface: internal-guard, status: active, verdict: unmapped, description: "reversed dependency range (start>end) rejected", test: scripts/tests/bats/test-plan-json.bats}
+  - {id: dep_range_reversed, type: 4, source: "scripts/lib/aid-plan-json.sh:aid_plan_parse_step_deps (reversed range skipped with a warning)", instruction: "skills/planner.md", severity: advisory, surface: internal-guard, status: active, verdict: unmapped, description: "a reversed dependency range (start>end) is named with a WARNING and skipped (no edge is invented)", test: scripts/tests/bats/test-plan-json.bats}
   - {id: cross_phase_dep_strip, type: 4, source: removed (P114), instruction: n/a, severity: advisory, surface: internal-guard, status: removed_scoped, replacement_guard: none (phases belonged to generation), verdict: unmapped, description: 'RETIRED by P114 Step 5: the EPIC path was removed in 3.0.0; phases belonged to generation.'}
   - {id: json_to_run_writable, type: 4, source: removed (P114), instruction: n/a, severity: blocking, surface: internal-guard, status: removed_scoped, replacement_guard: none (a direct run renders no run.md), verdict: unmapped, description: 'RETIRED by P114 Step 5: the EPIC path was removed in 3.0.0; a direct run renders no run.md.'}
   - {id: json_to_run_zero_steps, type: 4, source: removed (P114), instruction: n/a, severity: blocking, surface: internal-guard, status: removed_scoped, replacement_guard: plan_json_shared_builder, verdict: unmapped, description: 'RETIRED by P114 Step 5: the EPIC path was removed in 3.0.0; the builder refuses a plan without steps.'}
@@ -358,7 +358,7 @@ enforcements:
   - {id: cp7_reads_zadani, type: 11, source: "scripts/lib/aid-plan-review-packet.sh:aid_plan_review_brief_resolve + scripts/lib/aid-step-review-packet.sh (cp7 packet and prompt) + scripts/aid-review-round.sh:cmd_prepare (cp7_brief_sha_mismatch, cp7_measurement_stale)", instruction: "skills/step-review-roles.md (final_criteria, final_generalist) + commands/aid-run.md (Closing a plan)", severity: blocker, surface: llm-facing, status: active, verdict: ALIGNED, description: "2.116.0 (P110): the whole-plan round has two default roles — final_criteria answers point by point of the brief against the isolated measurement, final_generalist carries the claims and a security and operations checklist; final_claims stays optional. The packet and the prompt carry zadani.md through the CP1 resolver and its refusals; prepare refuses a brief that is not the plan's (sha) and a measurement without isolation. Cases 'cp7-zadani:'.", test: "scripts/tests/bats/test-review-round.bats (grep: 'cp7-zadani:')"}
   - {id: profile_skips_project_tests, type: 11, source: "scripts/aid-run-gates.sh:_gates_project_tests_check + lint_profiles + record_tests + scripts/lib/aid-init-execution-yaml.sh (project_tests)", instruction: "defaults/execution.yaml (project_tests) + commands/aid-init.md (1a) + skills/pipeline.md (profile_skips_project_tests)", severity: blocker, surface: internal-guard, status: active, verdict: ALIGNED, description: "2.116.0 (P110, experiment P014: the full profile skipped the assistant's tests): with project_tests: declared, a change to the project's test files (git diff base..HEAD) and a profile without a gate flagged runs_project_tests is a failing row profile_skips_project_tests (waivable by the PM); without the key nothing is refused, only advised (project_tests_undeclared); --lint-profiles checks it statically. Cases 'project-tests:'.", test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'project-tests:')"}
   - {id: project_tests_not_selected, type: 11, source: "scripts/aid-run-gates.sh:_gates_project_tests_check + scripts/tests/run-all-tests.sh (--evidence-file)", instruction: "skills/pipeline.md (project_tests_not_selected, project_tests_evidence_missing)", severity: blocker, surface: internal-guard, status: active, verdict: ALIGNED, description: "2.116.0 (P110): a flag proves nothing by itself — a flagged gate writes what it ran (--evidence-file: ran_tests or selected_tests, skipped_by_tier), stale evidence is deleted before it runs, a carried gate is proven by the previous run's evidence; a changed test file missing from it is project_tests_not_selected, no evidence is project_tests_evidence_missing, a suite left to the nightly tier is nightly_covers. Cases 'project-tests:' and 'evidence:'.", test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'project-tests:')"}
-  - {id: cp3_default_off, type: 11, source: "defaults/policies/review-checkpoints.yaml (cp3_integration_review: false) + scripts/lib/aid-review-config.sh (absent block disabled) + scripts/aid-fsm.sh (streamlined check, aggregate)", instruction: "commands/aid-run.md (EPIC review CP3) + skills/pipeline.md (EPIC review CP3)", severity: major, surface: internal-guard, status: active, verdict: ALIGNED, description: "2.116.0 (P110, PM 2B): the EPIC review is off by default and its block optional; EXECUTE→GATES and done-advance record review_checkpoint_disabled; a streamlined run (no step review) with CP3 off is refused unless the whole-plan round follows (plan_branch) — it would ship unreviewed; the switches are read from the state root. A project keeps CP3 with the toggle and an epic_review block. Cases 'cp3-off:'.", test: "scripts/tests/bats/test-aid-fsm.bats (grep: 'cp3-off:')"}
+  - {id: cp3_default_off, type: 11, source: removed (P114), instruction: n/a, severity: major, surface: internal-guard, status: removed_scoped, replacement_guard: none (CP3 removed; the key cp3_integration_review is ignored with a warning), verdict: ALIGNED, description: 'RETIRED by P114 Step 8: the EPIC path was removed in 3.0.0; CP3 removed; the key cp3_integration_review is ignored with a warning.'}
   - {id: run_cost_recorded, type: 11, source: "scripts/lib/aid-review-summary.sh:aid_plan_run_cost + aid_plan_plan_cost + aid_review_tokens_from_events + scripts/aid-release-policy.sh (plan_summary.run_cost, plan_cost)", instruction: "skills/communication.md (Finished card) + scripts/aid-pm-brief.sh + scripts/lib/aid-plan-close-summary.sh", severity: major, surface: internal-guard, status: active, verdict: ALIGNED, description: "2.116.0 (P110): release-decision.json carries what the run cost (every closed round of every EPIC run and of the close attempts) and what planning cost (CP1 rounds and the critic priced from its Codex events, null with the reason for a stand-in); the brief, the close page and the card print Cena běhu and Cena plánu from it; an unreadable measurement.json is measurement_unreadable. Cases 'cost:'.", test: "scripts/tests/bats/test-review-summary.bats (grep: 'cost:')"}
   - {id: cp1_reads_zadani, type: 11, source: "scripts/lib/aid-plan-review-packet.sh (packet/zadani.md, zadani_sha256) + scripts/aid-review-adjudicate.sh (zadani.md:<line>)", instruction: "skills/plan-review-roles.md (question 1 of every role)", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "2.115.0 (P109): every CP1 reviewer gets the brief line-numbered and answers first, point by point, whether the plan keeps, softens, drops or contradicts it (a blocker unless kept); a strict plan without a brief and a brief outside the project are refused by the packet.", test: "scripts/tests/bats/test-review-round.bats (grep: 'zadani:')"}
   - {id: cp1_second_round_rule, type: 11, source: "scripts/lib/aid-review-config.sh:aid_review_second_round_allowed + scripts/aid-review-round.sh:cmd_prepare + scripts/aid-cp1-gate.sh (round loop)", instruction: "commands/aid-plan.md (Round count, item 6) + defaults/policies/review-checkpoints.yaml (rounds_default 1, second_round_when)", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "2.115.0 (P109, P014: three rounds, 45 USD, the softening unseen): one plan-review round by default; round 2 without an override only when round 1 found a blocker the PM did not dismiss and its fix passed fix-check — one function prepare and the gate both ask; any other round past the default needs the PM's override.", test: "scripts/tests/bats/test-cp1-gate.bats (grep: 'round-2:') + scripts/tests/bats/test-review-round.bats (grep: 'prepare --round 2')"}
@@ -1419,14 +1419,14 @@ enforcements:
   # caller yet — it must not be recorded as active enforcement until it does.
   - id: plan_branch_merge_target
     type: 1
-    source: "scripts/aid-fsm.sh (grep: '_queue_entry_merge_target')"
+    source: removed (P114)
     instruction: n/a
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    replacement_guard: none (no queue; a direct run's base is the tip of plan/<id>)
     verdict: ALIGNED
-    description: "READER half — wired: aid-fsm.sh `queue-revalidate` / `init` run it on every dependency check. Dependency readiness resolves ancestry against the ref the dependency's queue entry DECLARES in merge_target (plan/<plan_id> while its plan is open, the target branch once released) instead of _queue_merge_target()'s main|master|HEAD guess, which reported an EPIC merged into plan/Pxxx but not yet released as blocked forever. For an entry that carries a merge_target the evidence-based fallback chain is UNAVAILABLE: queue `status: completed`, an evidence `state: DONE` and the merge-log grep are all claims ABOUT a merge rather than the merge itself, and `completed` in particular has only ever been written by hand — a queue entry is a derived view, never evidence. A deleted task branch therefore yields `blocked` (reason no_ancestry_proof), and a declared merge_target that does not resolve yields fail-loud `failed` (reason merge_target_missing) rather than a comfortable blocked. Entries with no merge_target keep the pre-P064 behaviour byte for byte. Branch resolution (_resolve_dep_branch) is a CONTRACT TWIN of the former queue library:_queue_resolve_dep_branch — both halves must answer the same question the same way, or a dependent is unclaimable through the queue while the FSM reports it ready. The ref-charset half of that twin is now ONE predicate whose authority is `git check-ref-format` (aid-fsm.sh:_dep_valid_branch_ref == the former queue library:_queue_valid_branch_ref, plus a leading-`-` and quote/control-character refusal): a hand-rolled regex on the writer with NOTHING on the reader made the two halves give opposite answers for every git-legal name outside the regex (repro: a dependency merged from branch `_wip` — reader `unblocked`, writer `dependency_no_ancestry_proof`). A merge_target read back out of the hand-editable queue file goes through the same predicate before it reaches git as an argv element."
-    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
+    description: 'RETIRED by P114 Step 6: the EPIC path was removed in 3.0.0; no queue; a direct run''s base is the tip of plan/<id>.'
   - id: plan_queue_append_locked
     type: 4
     source: removed (P114)
@@ -2442,9 +2442,9 @@ enforcements:
     surface: internal-guard
     status: active
     verdict: ALIGNED
-    description: "P074 Step 17 sibling fix — under `set -euo pipefail` a `| head -1` probe could take SIGPIPE and abort the gate with empty stdout, which the caller then reported as a MALFORMED plan.json/EPIC.md contract: a false diagnosis on a clean contract, measured at roughly 4% of runs on a loaded box. First-line extraction is now pure bash, and a gate that dies without a verdict is reported as a GATE failure rather than as a bad contract."
+    description: "P074 Step 17 sibling fix — under `set -euo pipefail` a `| head -1` probe could take SIGPIPE and abort the gate with empty stdout, which the caller then reported as a MALFORMED plan.json contract: a false diagnosis on a clean contract, measured at roughly 4% of runs on a loaded box. First-line extraction is now pure bash, and a gate that dies without a verdict is reported as a GATE failure rather than as a bad contract."
     recovery: "n/a — the false diagnosis is removed; a genuine gate crash now names itself."
-    test: "scripts/tests/bats/test-generation-resume.bats"
+    test: "scripts/tests/bats/test-contract-validate.bats"
   - id: test_aggregate_truncated_tap
     type: 9
     source: "scripts/tests/run-all-tests.sh (TRUNCATED_SUITES: the TAP plan line is held as a contract)"
@@ -3902,24 +3902,20 @@ enforcements:
     verdict: ALIGNED
     tier: t2
     enforcement_degree: 2
-    description: "P111 — plan-run records its stages in the one generation/transaction.json (kind: plan_run) under the generation lock; a rerun skips recorded stages, refuses a plan edited after the seal (plan_changed_since_seal) and a plan.json that is not the one the plan_json stage built or that disagrees with the plan's graph (plan_json_unverified)."
+    description: "P111 — plan-run records its stages in the one generation/transaction.json (kind: plan_run) under the generation lock; a rerun skips recorded stages, refuses a plan edited after the seal (plan_changed_since_seal) and a plan.json that is not the one the plan_json stage built or that disagrees with the plan's graph (plan_json_unverified); the D5 contract check of the built plan.json is kept in generation/c0/contract-validate.json and recorded as its own stage (contract_validate)."
     recovery: "Restore the sealed plan bytes, or archive the transaction as the refusal says, and run plan-run again."
     test_covers: "crashes after the seal, after init and after the manifest stage resume; an edited plan and a tampered plan.json are refused before init (test-plan-run.bats direct:)."
     test: "scripts/tests/bats/test-plan-run.bats"
   - id: plan_run_excludes_generation
     type: 12
-    source: "scripts/aid-plan-fsm.sh (_pr_generation_trace) + the former generation pipeline (_gen_refuse_plan_run)"
-    instruction: "skills/pipeline.md §When AID refuses (plan_run_already_started, generation_already_started)"
+    source: removed (P114)
+    instruction: n/a
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    replacement_guard: epic_path_removed
     verdict: ALIGNED
-    tier: t2
-    enforcement_degree: 2
-    description: "P111 — the two roads never mix on one plan: plan-run refuses a plan with any generation trace (generation_already_started) and the pipeline and supersede-generation refuse a plan with a direct run (plan_run_already_started), checked under the shared generation lock before anything moves."
-    recovery: "Finish the plan on the road it started on, or close it administratively and write a new plan."
-    test_covers: "each trace alone refuses plan-run, each plan-run trace alone refuses the pipeline, an edited plan is refused before the mode stamp (test-plan-run.bats direct:)."
-    test: "scripts/tests/bats/test-plan-run.bats"
+    description: 'RETIRED by P114 Step 2: the EPIC path was removed in 3.0.0, so there is no second road to exclude; plan-run on a plan generated the EPIC way refuses epic_path_removed.'
   - id: plan_json_shared_builder
     type: 12
     source: "scripts/lib/aid-plan-json.sh"
@@ -4500,3 +4496,15 @@ enforcements:
     recovery: "aid-ui-state.sh open-item add / done; open-items-sync before the customer page and finish."
     test_covers: "add needs text and owner; done; sync takes the PM's history lines once each and skips a line without a time; POST /open-item 422 empty or over 500, 403 without auth, 200 appends the history line and /state lists it; the customer page lists open, deferred, exceptions and decisions and hides done items"
     test: "scripts/tests/bats/test-aid-ui-state.bats; scripts/tests/bats/test-aid-ui-studio.bats; scripts/tests/bats/test-aid-ui-customer-page.bats"
+  - id: epic_path_removed
+    type: 12
+    source: scripts/aid-plan-fsm.sh (_pfsm_epic_path_removed; plan-run _pr_generation_trace) + scripts/aid-fsm.sh (queue-revalidate arm)
+    instruction: skills/pipeline.md §When AID refuses (epic_path_removed)
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    description: '3.0.0 (P114): every entry of the removed EPIC path — epic-start, epic-merge-to-plan, next-epic, epic-base, queue-revalidate, and plan-run on a plan generated the EPIC way (an EPIC file, a non-direct manifest entry, a generation transaction or its archive, the plan own entries in the old queue) — refuses epic_path_removed before any lock or write, with the way out: finish on 2.118.x, or close the plan and start a NEW plan with a new id.'
+    test: scripts/tests/bats/test-epic-path-removed.bats

@@ -73,10 +73,18 @@ _p114_rows() { jq -c '.[] | select(.status == "removed_scoped" and ((.descriptio
   [ -z "$hits" ] || { echo "names a removed file: $hits"; false; }
 }
 
-@test "inventory: no active row's test_covers names a suite that goes with the EPIC path" {
+@test "inventory: no active row names a removed script anywhere (source, description, test, recovery, runtime_check, not_guaranteed, test_covers)" {
+  local hits
+  hits="$(jq -r --arg re "$REMOVED_RE" '.[] | select(.status == "active")
+    | select([.source, .description, .test, .recovery, .runtime_check, .not_guaranteed, .test_covers, .instruction] | map(. // "" | tostring) | join(" ") | test($re)) | .id' "$ROWS")"
+  [ -z "$hits" ] || { echo "names a removed script: $hits"; false; }
+}
+
+@test "inventory: no active row's test_covers or test names a suite that goes with the EPIC path" {
   local gone='generation-fixture|test-plan-to-epic|test-epic-to-json|test-json-to-run|test-queue-add|test-full-pipeline|test-generation-finalize|test-aid-epic-summary|test-aid-plan-to-epic-fence|test-generation-resume|test-generation-labels|test-supersede-generation|test-generation-parsers|test-queue-continuation|test-queue-peek|test-queue-registry-rows|test-queue-revalidation|test-next-epic|test-plan-continue|test-continue-artifact|test-continue-spawn|test-epic-chain-freshness|test-epic-start-run-id'
   local hits
-  hits="$(jq -r --arg re "$gone" '.[] | select(.status == "active") | select(((.test_covers // "") | test($re))) | .id' "$ROWS")"
+  hits="$(jq -r --arg re "$gone" '.[] | select(.status == "active") | select(((.test_covers // "") + " " + (.test // "") | test($re))) | .id' "$ROWS" \
+    | grep -vx 'queue_continuation_notice' || true)"   # re-pointed in Step 6 with the library rename
   [ -z "$hits" ] || { echo "test_covers names a leaving suite: $hits"; false; }
 }
 
