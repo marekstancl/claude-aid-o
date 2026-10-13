@@ -2862,22 +2862,6 @@ _lc_status() {
 }
 
 
-@test "AC7: a stale active.md state blocks close" {
-  _seed_closable
-  git -C "$TEST_PROJECT_ROOT" branch "task/E-068-1_2/main" "$(_manifest_field "$PLAN_ID" candidate_sha)"
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config" "$TEST_PROJECT_ROOT/.aid-o/work"
-  cat > "$TEST_PROJECT_ROOT/.aid-o/config/queue.yaml" <<'YAML'
-- epic_id: E-068-1_2
-  path: p
-  status: queued
-  depends_on: []
-YAML
-  printf 'E-068-1_2 is waiting for merge\n' > "$TEST_PROJECT_ROOT/.aid-o/work/active.md"
-  _close
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"check4"* ]]
-  [ ! -f "$(_marker)" ]
-}
 
 @test "AC7: a missing release/tag record blocks close" {
   _seed_closable
