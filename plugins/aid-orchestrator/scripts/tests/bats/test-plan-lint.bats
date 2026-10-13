@@ -34,7 +34,7 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
     # The Testing Strategy section is what a plan owes since P084 Step 4 (a
     # `Test:` bullet per step no longer is). It is here so these fixtures keep
     # testing the FILES grammar and nothing else.
-    printf '# Plan: P900\n\n## Testing Strategy\n\nNo new verification — this fixture exercises the Files grammar only.\n\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
+    printf '# Plan: P900\n\n## Testing Strategy\n\nNo new verification — this fixture exercises the Files grammar only.\n\n### Step 1: work\n\n**Objective:** implement the thing properly for this step.\n\n**Files:**\n'
     printf '%s\n' "$@"
     # P085: a step with a `Create:` bullet owes a **Reuse check:**. These
     # fixtures are about the FILES grammar, so the field is present, valid and
@@ -95,13 +95,19 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
   _plan pl.md legacy '- Modify: src/nobacktick.ts — no backticks'
   run "$LINT" pl.md; [ "$status" -eq 0 ]
 }
-@test "lint STRICT: an EPIC line plan-start cannot parse ('**EPIC 1**', no colon) blocks strict, warns legacy" {
+@test "no-epic: a plan without an EPIC marker lints clean (P114: one plan = one run)" {
   _plan p.md strict '- Create: `src/a.ts` — new'
-  sed -i 's/^\*\*EPIC 1: Steps 1-1\*\*$/**EPIC 1**/' p.md
-  run "$LINT" p.md; [ "$status" -ne 0 ]; [[ "$output" == *"STRICT the EPIC lines do not follow the lifecycle grammar"* ]]
-  _plan p.md legacy '- Create: `src/a.ts` — new'
-  sed -i 's/^\*\*EPIC 1: Steps 1-1\*\*$/**EPIC 1**/' p.md
-  run "$LINT" p.md; [ "$status" -eq 0 ]; [[ "$output" == *"[WARN legacy] the EPIC lines"* ]]
+  sed -i '/^\*\*EPIC 1: Steps 1-1\*\*$/d' p.md
+  ! grep -q '^\*\*EPIC' p.md
+  run "$LINT" p.md; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" != *"EPIC"* ]]
+}
+@test "no-epic: a plan that still carries EPIC markers (any form) gets one ADVISORY that they are ignored, never a finding" {
+  _plan p.md strict '- Create: `src/a.ts` — new'
+  sed -i 's/^### Step 1: work$/**EPIC 1**\n\n### Step 1: work/' p.md; grep -q '^\*\*EPIC 1\*\*$' p.md
+  run "$LINT" p.md; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"[ADVISORY] EPIC markers"*"are ignored since AID 3.0.0"* ]]
+  [ "$(grep -c 'EPIC markers' <<< "$output")" -eq 1 ]
 }
 @test "lint: an EPIC line quoted in a fenced block is an example, not a declaration" {
   _plan p.md strict '- Create: `src/a.ts` — new'

@@ -3792,7 +3792,7 @@ enforcements:
     verdict: ALIGNED
     description: "2.107.0; P114 (3.0.0): a plan runs as one run, so EPIC markers ('**EPIC N: …**', '**EPIC N / Backlog: …**') are no longer required or parsed into runs — a marker still in the plan is an ADVISORY ('ignored'), none is required."
     recovery: "write each phase as '**EPIC N: Steps M-P — Title**' (skills/plan-writing.md §Phase Markers)"
-    test: "scripts/tests/bats/test-plan-lint.bats"
+    test: "scripts/tests/bats/test-plan-lint.bats (grep: 'no-epic:')"
   - id: step_check_run_checkout
     type: 4
     source: "scripts/lib/aid-roots.sh (grep: 'aid_run_checkout_root()')"

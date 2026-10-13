@@ -595,3 +595,17 @@ _ev_add() { printf '{"ts":"%s","event":"%s"}\n' "${2:-$(date -u +%Y-%m-%dT%H:%M:
   _rs; echo "$output"; [ "$status" -eq 0 ]
   [ "$(yq -r .state "$EV/fsm-state.yaml")" = READY ] && [ "$(jq -r .state "$(_sr)/restart.json")" = done ]
 }
+
+# ── P114 Step 3: a direct plan needs no EPIC marker ──────────────────────────
+@test "no-epic: plan-run starts a plan that has no EPIC marker" {
+  local R2="$BATS_TEST_TMPDIR/noepic"
+  _mk_project "$R2" >/dev/null
+  sed '/^\*\*EPIC 1: Steps 1-2\*\*$/d' "$FIXTURE_PLAN" > "$BATS_TEST_TMPDIR/noepic.md"
+  ! grep -q '^\*\*EPIC' "$BATS_TEST_TMPDIR/noepic.md"
+  _seed "$R2" "$BATS_TEST_TMPDIR/noepic.md"
+  cd "$R2"
+  run bash "$PFSM" plan-run P900; echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.direct' "$R2/.aid-o/work/evidence/E-900-1_1/R-E900-1/fsm-state.yaml")" = true ]
+  [ "$(jq '.steps | length' "$R2/.aid-o/work/evidence/E-900-1_1/R-E900-1/plan.json")" = 2 ]
+}
