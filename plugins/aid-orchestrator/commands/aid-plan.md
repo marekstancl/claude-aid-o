@@ -76,7 +76,7 @@ What would you like to do?
 ```
 
 (Generating EPICs, `/aid-plan epic`, is the old path for plans generated
-already; P112 removes it.)
+already; P114 removes it.)
 
 ## Working while another plan is live
 
@@ -466,7 +466,7 @@ plan, one run on `plan/<id>`, with no EPIC generation.
 ## Mode: Generate EPIC — the old path (until P114)
 
 New plans do not need this mode: `/aid-run P<NNN>` runs them directly (P111).
-It stays for plans that are generated already, and P112 removes it.
+It stays for plans that are generated already, and P114 removes it.
 
 Parse a Plan file, generate every EPIC and plan.json first, verify one complete
 generation receipt, then create run files/FSM state and queue entries.
