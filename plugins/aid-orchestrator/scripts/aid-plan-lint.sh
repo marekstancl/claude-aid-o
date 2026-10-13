@@ -70,6 +70,8 @@ source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 source "${SCRIPT_DIR}/lib/aid-reuse-verdict.sh"
 # shellcheck source=lib/aid-standards-map.sh
 source "${SCRIPT_DIR}/lib/aid-standards-map.sh"
+# shellcheck source=lib/aid-repo-roots.sh
+source "${SCRIPT_DIR}/lib/aid-repo-roots.sh"   # aid_rr_phys_repo — the contract's own lookup (P112)
 
 PLAN=""
 FORCE_MODE=""     # "strict" | "legacy" | "" (=auto from frontmatter)
@@ -937,9 +939,50 @@ while IFS= read -r _ts_name; do
   _advisory "" "\`${_ts_name}\` is named in ## Testing Strategy, is in no \`Test:\` bullet and does not exist in the repository — declare it with a Test: bullet and a tier, or say in one sentence why the suite is not being written."
 done < <(_ts_names)
 
+# A path into another repository the plan does not declare (P112, agents P016):
+# an absolute path in a step's Files or in a criterion's file:/cmd that lies in
+# a git repository other than the project's (compared by --git-common-dir, so
+# a project worktree under .aid-worktrees/ is the project) and is not one of
+# repo_roots is the step contract's refusal, given here before CP1. A path
+# outside any git repository (/tmp/x) is not judged.
+_foreign_repo_pass() {
+  grep -qE '(^|[^A-Za-z0-9._/$-])/[A-Za-z0-9._-]' "$PLAN" || return 0
+  local own="" decl=" " p repo cd raw n i seen=" "
+  own="$(git -C "${_project_root:-$(dirname "$PLAN")}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || own=""
+  raw="$(aid_plan_repo_roots_raw "$PLAN")"; n="$(jq 'length' <<< "$raw")"
+  for (( i=0; i<n; i++ )); do
+    p="$(jq -r --argjson i "$i" '.[$i].path // ""' <<< "$raw")"
+    cd="$(git -C "$p" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && decl+="${cd} "
+  done
+  declare -F _aid_vp_parse_ac >/dev/null || source "${SCRIPT_DIR}/lib/aid-verification-pattern.sh"
+  local d
+  while IFS= read -r p; do
+    [[ -n "$p" && "$seen" != *" ${p} "* ]] || continue
+    seen+="${p} "
+    d="$p"; while [[ -n "$d" && ! -e "$d" ]]; do d="${d%/*}"; done; [[ -n "$d" ]] || d=/
+    [[ -d "$d" ]] || d="${d%/*}"
+    if [[ ! -r "${d:-/}" || ! -x "${d:-/}" ]]; then
+      _advisory "" "\`${p}\`: ${d} cannot be read, so its repository is unknown — not judged for repo_roots"; continue
+    fi
+    repo="$(aid_rr_phys_repo "$p")"; [[ -n "$repo" ]] || continue
+    cd="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || {
+      _advisory "" "\`${p}\`: its repository could not be read; not judged for repo_roots"; continue; }
+    [[ "$cd" == "$own" || "$decl" == *" ${cd} "* ]] && continue
+    _zadani_err "" "foreign_repo_undeclared: ${p} lies in ${repo}, which repo_roots does not declare. next: declare it in the plan's frontmatter (repo_roots: [{name: <slug>, path: ${repo}}]) or drop the path (pipeline.md §When AID refuses: foreign_repo_undeclared)"
+  done < <(
+    # a step's Files bullets, and the file:/cmd of every criterion the measurer
+    # runs (brief points and each step's own), read by the measurer's parser
+    { awk '/^### Step / { step = 1 } /^## / { step = 0 } step && /^- (Create|Modify|Test|Rewrite): / { print }' "$PLAN"
+      { _aid_vp_parse_ac "$PLAN" "Acceptance Criteria|Success Criteria"; _aid_vp_parse_ac "$PLAN" "Step [0-9]+:"; } 2>/dev/null \
+        | awk -F $'\x1f' '{ print $4; print $5 }'
+    } | grep -oE '(^|[^A-Za-z0-9._/$-])/[A-Za-z0-9._/-]+' | sed -E 's|^[^/]||; s|/+$||')
+  return 0
+}
+
 # Blocking = any ERROR (both modes), or any STRICT on a strict-cohort plan.
 _zadani_pass
 _repo_roots_pass
+_foreign_repo_pass
 blocking=$errors
 [[ "$mode" == "strict" ]] && blocking=$((blocking + strict_hits))
 
