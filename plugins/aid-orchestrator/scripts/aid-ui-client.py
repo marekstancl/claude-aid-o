@@ -149,7 +149,8 @@ def claude(prompt, images, cwd, out):
 
 
 def ask(project, prompt, images, cwd, out, valid, purpose):
-    """Codex first; an invalid answer once more with the reason; then the Claude stand-in on the same bundle.
+    """Codex first; an invalid answer once more with the reason; then the Claude stand-in on the same bundle, which
+    gets the same second chance.
     valid(text) -> (answer, error). Returns (answer or None, record)."""
     rec = {"prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(), "attempts": []}
 
@@ -177,7 +178,12 @@ def ask(project, prompt, images, cwd, out, valid, purpose):
         rec["provider"] = None
         return None, rec
     log("Codex refused (%s); the Claude stand-in takes the same bundle" % why)
-    r, a, err = run(claude, prompt)
+    p = prompt
+    for n in (1, 2):   # the stand-in gets the same second chance with the reason as Codex (Coufal 13. 10.: a wrong anchor)
+        r, a, err = run(claude, p)
+        if a is not None or r["rc"] or not r["text"]:
+            break
+        p = prompt + "\n\nPředchozí odpověď nebyla platná (%s). Vrať jen JSON podle zadání." % err
     rec["provider"] = "claude" if a is not None else None
     return a, rec
 

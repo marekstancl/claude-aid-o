@@ -50,7 +50,9 @@ EOF
 #!/usr/bin/env bash
 cat > "$BATS_TEST_TMPDIR/claude-prompt"; pwd > "$BATS_TEST_TMPDIR/claude-cwd"; echo "${OPENAI_API_KEY:-none}${ANTHROPIC_API_KEY:-}" > "$BATS_TEST_TMPDIR/claude-key"
 [[ "${FAKE_CLAUDE:-ok}" == fail ]] && exit 1
-python3 -c 'import json,sys; print(json.dumps({"result": "tady je: " + open(sys.argv[1]).read(), "usage": {"input_tokens": 500, "output_tokens": 100}, "total_cost_usd": 0.02}))' "${CLAUDE_ANS:-$ANS}"
+cn=$(( $(cat "$BATS_TEST_TMPDIR/claude-n" 2>/dev/null || echo 0) + 1 )); echo "$cn" > "$BATS_TEST_TMPDIR/claude-n"
+a="${CLAUDE_ANS:-$ANS}"; [[ -n "${CLAUDE_ANS2:-}" && "$cn" -ge 2 ]] && a="$CLAUDE_ANS2"
+python3 -c 'import json,sys; print(json.dumps({"result": "tady je: " + open(sys.argv[1]).read(), "usage": {"input_tokens": 500, "output_tokens": 100}, "total_cost_usd": 0.02}))' "$a"
 EOF
   chmod +x "$T/bin/"*
   serve_site
@@ -111,6 +113,11 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WE
   jq '.criteria[0] |= (.score = 5 | .anchor = 4 | .studio_score = 8 | .studio_anchor = 8 | .limited_by = ["oi-11"] | .to_ten.client = ["prístup k hostingu"])' "$ANS" > "$T/ans-lim2.json"
   CODEX_ANS="$T/ans-lim2.json" CLAUDE_ANS="$ANS" python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/r1k" >/dev/null
   jq -e '.provider == "claude" and (.attempts[0].error | contains("limited_by oi-11"))' "$T/r1k/run.json" >/dev/null   # oi-11 is the studio's own
+  # the stand-in gets the same second chance with the reason as Codex
+  rm -f "$T/claude-n"; jq '.criteria[0].anchor = 4' "$ANS" > "$T/ans-anchor.json"
+  FAKE_CODEX=limit CLAUDE_ANS="$T/ans-anchor.json" CLAUDE_ANS2="$ANS" python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/r1s" >/dev/null
+  jq -e '.provider == "claude" and (.attempts | length) == 3 and (.attempts[1].error | contains("does not sit on its anchor")) and .attempts[2].error == null' "$T/r1s/run.json" >/dev/null
+  grep -q "Předchozí odpověď nebyla platná" "$T/claude-prompt"
   rm "$P/docs/design/brand-state.json"
   # an audit is blind: no memory even when a history is passed
   python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist.json" --audit --out "$T/r1a" >/dev/null
