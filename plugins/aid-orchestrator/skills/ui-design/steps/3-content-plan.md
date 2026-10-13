@@ -53,7 +53,7 @@ Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 
    (krok 6, bod 4a), stránka „co jste dostali“ z ní ukáže zadání fotek pro klienta.
 2c. **Vlastní fotky klienta ze starého webu (P113a, PM 13. 10. 2026):** `aid-ui-photos.py candidates <project>`;
    každou fotku si prohlédni (Read) a vyznač, jestli je na ní rozpoznatelný člověk:
-   `aid-ui-photos.py mark <project> <c> --people yes|no [--note]`. Pak pro každé místo z `photos.yaml`
+   `aid-ui-photos.py mark <project> <c> --people yes|no --describe "<co na ní je>" [--note]` (popis jde do `alt`). Pak pro každé místo z `photos.yaml`
    `aid-ui-photos.py question <project> <id>` → otázka `photos` (část Obsah) s kartami podle tvaru a kartou
    „ponechat rámeček“; po odpovědi `aid-ui-photos.py apply <project> --answer <id>` (WebP do 200 kB,
    `src` v `photos.yaml`). Fotka s člověkem nese riziko „jen s jeho souhlasem“.

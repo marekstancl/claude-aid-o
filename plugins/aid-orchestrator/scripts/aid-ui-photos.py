@@ -7,7 +7,7 @@ clinic and nobody saw them, because only its text was fetched).
       into .aid-ui/photos/candidates.json {id c1.., file, url, page, alt, width, height, people: null}.
       Kept marks survive a rerun (same file). The same picture in a smaller size (a CDN size segment such as
       /700/ in the path) is dropped for the largest.
-  mark <project> <candidate> --people yes|no [--note <t>] | --skip
+  mark <project> <candidate> --people yes|no [--note <t>] [--describe <what is on it>] | --skip
       (--skip: not a photo, e.g. a logo or a graphic; never offered)
       The agent LOOKED at the photo: is a recognisable person on it (consent needed)? A question shows only
       candidates the agent has looked at.
@@ -19,7 +19,8 @@ clinic and nobody saw them, because only its text was fetched).
   apply <project> --answer <question id>
       The client's answer (brand-state.json answers, kind photos, this question's target). choose <candidate>:
       the photo becomes docs/content/photos/<slot>.webp (at most 1600 px, 200 kB, aid-ui-tool.sh webp) and every
-      photos.yaml entry of the slot gets src, src_from and alt (= what). choose keep: nothing changes. An answer
+      photos.yaml entry of the slot gets src, src_from and alt (the agent's --describe of what is on the photo, else
+      the old site's alt; neither = refused: the brief's "what" is not a description of the photo). choose keep: nothing changes. An answer
       is used once.
 Exit 0 done, 1 refused, 2 usage.
 """
@@ -72,7 +73,7 @@ def candidates(p):
                 continue
             f = os.path.join(base, site, im["file"])
             keep = old.get(f, {})
-            out.append({"file": f, "url": im["url"], "page": im.get("page"), "alt": im.get("alt") or "",
+            out.append({"file": f, "url": im["url"], "page": im.get("page"), "alt": im.get("alt") or "", "describe": keep.get("describe"),
                         "width": im["width"], "height": im["height"], "people": keep.get("people"), "note": keep.get("note"),
                         "skip": keep.get("skip")})
     # the same picture in a smaller size (a CDN size segment such as /700/ in its path): only the largest stays
@@ -101,7 +102,7 @@ def find(d, cid):
     return c
 
 
-def mark(p, cid, people, note, skip=False):
+def mark(p, cid, people, note, skip=False, describe=None):
     if people not in ("yes", "no") and not skip:
         die("--people yes|no, or --skip (not a photo: a logo, a graphic)", 2)
     d = load(p)
@@ -111,6 +112,8 @@ def mark(p, cid, people, note, skip=False):
     else:
         c["people"], c["skip"] = people == "yes", None
     c["note"] = (note or "").strip() or None
+    if describe is not None:
+        c["describe"] = describe.strip() or None
     save(p, d)
     print("%s people=%s" % (cid, c["people"]))
 
@@ -193,7 +196,10 @@ def apply(p, qid):
         die("the photo did not fit 200 kB as WebP: " + (r.stderr or r.stdout).strip()[-200:])
     spec = slot_spec(p, slot)[0]
     rel = os.path.relpath(out, p)
-    for k, v in (("src", rel), ("src_from", c["url"]), ("alt", spec["what"])):
+    alt = c.get("describe") or c.get("alt")
+    if not alt:
+        die("%s has no description for screen readers: mark %s --describe '<what is on the photo>' first" % (c["id"], c["id"]))
+    for k, v in (("src", rel), ("src_from", c["url"]), ("alt", alt)):
         subprocess.run(["yq", "-i", '(.[] | select(.id == "%s")).%s = %s' % (slot, k, json.dumps(v, ensure_ascii=False)),
                         os.path.join(p, "docs", "content", "photos.yaml")], check=True)
     save(p, d)
@@ -205,7 +211,7 @@ def main(a):
     if len(a) == 2 and a[0] == "candidates":
         return candidates(os.path.abspath(a[1]))
     if len(a) >= 3 and a[0] == "mark":
-        return mark(os.path.abspath(a[1]), a[2], opt("--people"), opt("--note"), "--skip" in a)
+        return mark(os.path.abspath(a[1]), a[2], opt("--people"), opt("--note"), "--skip" in a, opt("--describe"))
     if len(a) == 3 and a[0] == "question":
         return question(os.path.abspath(a[1]), a[2])
     if len(a) >= 2 and a[0] == "apply" and opt("--answer"):

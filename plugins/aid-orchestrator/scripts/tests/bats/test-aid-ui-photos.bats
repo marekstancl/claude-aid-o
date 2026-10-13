@@ -27,7 +27,7 @@ answer() { jq --arg q "$1" --arg c "$2" --arg t "$3" '.answers[$q] = {kind: "pho
 @test "candidates, marks before any question, cards by shape with keep, one answer places the photo" {
   run python3 "$PH" candidates "$P"; [ "$status" -eq 0 ]; [ "$(jq '.candidates | length' "$P/.aid-ui/photos/candidates.json")" -eq 4 ]   # the 700 px copy of the first is gone
   run python3 "$PH" question "$P" ambulancia; [ "$status" -eq 1 ]; [[ "$output" == *"look at the photos first"* ]]
-  python3 "$PH" mark "$P" c1 --people no >/dev/null; python3 "$PH" mark "$P" c2 --people yes --note "recepčná" >/dev/null
+  python3 "$PH" mark "$P" c1 --people no --describe "Ordinácia so zubárskym kreslom" >/dev/null; python3 "$PH" mark "$P" c2 --people yes --note "recepčná" >/dev/null
   python3 "$PH" mark "$P" c4 --skip --note "logo" >/dev/null   # not a photo: never offered
   # c3 (700 px) is under half of min_px 1600: never offered, so it needs no mark
   run python3 "$PH" question "$P" ambulancia; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -42,7 +42,7 @@ answer() { jq --arg q "$1" --arg c "$2" --arg t "$3" '.answers[$q] = {kind: "pho
   answer old c1 "photo@ambulancia@0000"; run python3 "$PH" apply "$P" --answer old; [ "$status" -eq 1 ]; [[ "$output" == *"another question"* ]]
   answer a1 c1 "$t"; run python3 "$PH" apply "$P" --answer a1; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ -f "$P/docs/content/photos/ambulancia.webp" ]
-  yq -e '.[0].src == "docs/content/photos/ambulancia.webp" and .[0].src_from == "https://cdn.example/ordinacia.jpg" and .[0].alt == "ordinácia bez ľudí"' "$P/docs/content/photos.yaml" >/dev/null
+  yq -e '.[0].src == "docs/content/photos/ambulancia.webp" and .[0].src_from == "https://cdn.example/ordinacia.jpg" and .[0].alt == "Ordinácia so zubárskym kreslom"' "$P/docs/content/photos.yaml" >/dev/null
   run python3 "$PH" apply "$P" --answer a1; [ "$status" -eq 1 ]; [[ "$output" == *"already used"* ]]
   # keep: nothing changes
   answer k1 keep "$t"; sed -i 's|src: docs/content/photos/ambulancia.webp|src: x|' "$P/docs/content/photos.yaml"
