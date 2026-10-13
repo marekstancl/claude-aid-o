@@ -131,3 +131,28 @@ manifest() {
   cp -r "$REF" "$BATS_TEST_TMPDIR/ref2"; printf ' ' >> "$BATS_TEST_TMPDIR/ref2/adopted/logo-design/SKILL.md"
   run manifest "$BATS_TEST_TMPDIR/ref2" logo-design; [ "$status" -eq 1 ]; [[ "$output" == *"changed: SKILL.md"* ]]
 }
+
+@test "P113a: the emil-skills snapshot is byte for byte what its MANIFEST lists" {
+  run manifest "$REF" emil-skills
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
+@test "P113a (PM 13. 10. 2026: no dead skill): every adopted guidance file is required reading of a step method, or named here with why not" {
+  python3 - "$REF/../sections.json" "$REF/adopted" <<'PY'
+import json, glob, os, sys
+d = json.load(open(sys.argv[1]))
+read = {os.path.normpath(f) for m in d["methods"].values() if m for f in m["files"]}
+NOT_GUIDANCE = {   # why each is not a method file
+    "logo-design/TRADEMARKS.md": "a trademark notice, not a procedure",
+    "logo-design/references/library-guide.md": "guides the logo library, which the snapshot does not ship",
+}
+dead = []
+for f in sorted(glob.glob(sys.argv[2] + "/**/*.md", recursive=True)):
+    rel = os.path.relpath(f, sys.argv[2])
+    if rel in NOT_GUIDANCE:
+        continue
+    if os.path.normpath(os.path.join("skills/ui-design/references/adopted", rel)) not in read:
+        dead.append(rel)
+assert not dead, "adopted but read by no step method (sections.json methods): " + ", ".join(dead)
+PY
+}

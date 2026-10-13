@@ -1683,11 +1683,11 @@ decide_payload() {
 
 @test "P108 method: prints the method files, writes the receipt; the live studio and payload-check refuse a question opened before it" {
   run "$SCRIPT" method "$PROJ" identity; [ "$status" -eq 0 ]
-  [ "$(grep -c '^===== ' <<<"$output")" -eq 5 ]
+  [ "$(grep -c '^===== ' <<<"$output")" -eq 15 ]   # P113a: critique, principles and the rest of logo-design are required reading too
   grep -q '^===== skills/ui-design/references/adopted/logo-design/SKILL.md' <<<"$output"
   grep -q 'Phase 3 — Concepts' <<<"$output"                    # the text itself was printed, not just named
   R="$PROJ/.aid-ui/method/identity.json"
-  [ "$(jq -r '.files | length' "$R")" -eq 5 ]
+  [ "$(jq -r '.files | length' "$R")" -eq 15 ]
   [ "$(jq -r '.files[0].sha256' "$R")" = "$(sha256sum "$BATS_TEST_DIRNAME/../../../skills/ui-design/references/adopted/logo-design/SKILL.md" | cut -d' ' -f1)" ]
   run "$SCRIPT" method "$PROJ" nonsense; [ "$status" -eq 2 ]
   studio   # fresh receipts now

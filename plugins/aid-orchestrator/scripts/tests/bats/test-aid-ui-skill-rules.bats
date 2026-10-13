@@ -201,7 +201,7 @@ setup() {
   ! grep -q 'tři koncepty jako SVG (geometrický' "$f"
   grep -q '8-12 konceptů' "$f"; grep -q 'klišé' "$f"; grep -q 'search_library.py' "$f"   # the library gap is said, not hidden
   # the map's identity method is exactly the adopted entry and its four references, in this order
-  [ "$(jq -r '.methods.identity.files | map(sub("skills/ui-design/references/adopted/logo-design/"; "")) | join(" ")' "$SK/sections.json")" = "SKILL.md references/process.md references/mark-types.md references/svg-construction.md references/testing-checklist.md" ]
+  [ "$(jq -r '.methods.identity.files | map(sub("skills/ui-design/references/adopted/logo-design/"; "")) | join(" ")' "$SK/sections.json")" = "SKILL.md references/process.md references/mark-types.md references/svg-construction.md references/testing-checklist.md references/critique.md references/principles.md references/discovery-brief.md references/redesign.md references/color.md references/typography.md references/identity-system.md references/visual-techniques.md references/presentation-delivery.md templates/brand-guidelines-template.md" ]
   grep -qF 'aid-ui-state.sh method' "$SK/SKILL.md"; grep -qF 'payload-check' "$SK/SKILL.md"; grep -qF 'no_method' "$SK/SKILL.md"
   grep -q '^12\. The method before the output' "$SK/SKILL.md"
 }

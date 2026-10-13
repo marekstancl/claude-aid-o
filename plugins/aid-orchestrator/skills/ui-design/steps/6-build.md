@@ -61,6 +61,12 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
 4. Obrázky: `aid-ui-tool.sh webp <src> <out.webp> <šířka> [kvalita]` pro
    každý obrázek; limit 200 kB hlídá nástroj (exit 1 → menší šířka nebo
    kvalita).
+3a. **Řemeslo podle převzatých dovedností (P113a, PM 13. 10. 2026; stvrzenka postupu stavby je vyžaduje):**
+   pohyb stav podle `emil-skills/animate` (smí se to hýbat, účel, vlastnosti, křivka, délka, přerušení) a jeho
+   receptů; před `build-record` projdi vlastní pohyb podle `review-animations` (standardy, verdikt);
+   mobilní chování podle `mobile-native` (hover jen pro myš, `100dvh`, pole aspoň 16 px, výřez displeje);
+   formuláře a texty z dat vyzkoušej nejhoršími daty podle `break-ui` (dlouhá jména, prázdná pole, extrémní
+   čísla). Při rozporu platí design systém a brána (`reduced_motion`).
 3b. **Dělicí čáry (FB-31):** svislá čára mezi sloupci nebo bloky dostane vnitřní odstup aspoň 16 px na obou
    stranách (padding u sloupce před čarou i za ní, nebo `gap` místo okraje). Text nikdy nezačíná těsně u čáry.
    Brána `text_clearance` to měří na každé stránce a šířce.

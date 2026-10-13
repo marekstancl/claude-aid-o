@@ -381,7 +381,9 @@
   "product_context": {
    "files": [
     "skills/ui-design/references/adopted/marketingskills/product-marketing/SKILL.md",
-    "skills/ui-design/references/adopted/marketingskills/customer-research/SKILL.md"
+    "skills/ui-design/references/adopted/marketingskills/customer-research/SKILL.md",
+    "skills/ui-design/references/adopted/marketingskills/customer-research/references/interviews-and-surveys.md",
+    "skills/ui-design/references/adopted/marketingskills/copy-editing/references/content-refresh.md"
    ],
    "receipt": true
   },
@@ -422,7 +424,17 @@
     "skills/ui-design/references/adopted/logo-design/references/process.md",
     "skills/ui-design/references/adopted/logo-design/references/mark-types.md",
     "skills/ui-design/references/adopted/logo-design/references/svg-construction.md",
-    "skills/ui-design/references/adopted/logo-design/references/testing-checklist.md"
+    "skills/ui-design/references/adopted/logo-design/references/testing-checklist.md",
+    "skills/ui-design/references/adopted/logo-design/references/critique.md",
+    "skills/ui-design/references/adopted/logo-design/references/principles.md",
+    "skills/ui-design/references/adopted/logo-design/references/discovery-brief.md",
+    "skills/ui-design/references/adopted/logo-design/references/redesign.md",
+    "skills/ui-design/references/adopted/logo-design/references/color.md",
+    "skills/ui-design/references/adopted/logo-design/references/typography.md",
+    "skills/ui-design/references/adopted/logo-design/references/identity-system.md",
+    "skills/ui-design/references/adopted/logo-design/references/visual-techniques.md",
+    "skills/ui-design/references/adopted/logo-design/references/presentation-delivery.md",
+    "skills/ui-design/references/adopted/logo-design/templates/brand-guidelines-template.md"
    ],
    "receipt": true
   },
@@ -481,14 +493,19 @@
    "files": [
     "skills/ui-design/steps/5-directions.md",
     "skills/ui-design/references/adopted/frontend-design-SKILL.md",
-    "skills/ui-design/references/adopted/impeccable-craft-floor.md"
+    "skills/ui-design/references/adopted/impeccable-craft-floor.md",
+    "skills/ui-design/references/adopted/emil-skills/animate/SKILL.md",
+    "skills/ui-design/references/adopted/emil-skills/emil-design-eng/SKILL.md",
+    "skills/ui-design/references/adopted/emil-skills/review-animations/STANDARDS.md"
    ],
    "receipt": true
   },
   "copy_verdict": {
    "files": [
     "skills/ui-design/references/adopted/marketingskills/copy-editing/SKILL.md",
-    "skills/ui-design/references/adopted/marketingskills/copy-editing/references/checklist.md"
+    "skills/ui-design/references/adopted/marketingskills/copy-editing/references/checklist.md",
+    "skills/ui-design/references/adopted/marketingskills/copy-editing/references/plain-english-alternatives.md",
+    "skills/ui-design/references/adopted/marketingskills/cro/references/form.md"
    ],
    "receipt": false
   },
@@ -527,7 +544,19 @@
     "skills/ui-design/steps/6-build.md",
     "skills/ui-design/references/adopted/frontend-design-SKILL.md",
     "skills/ui-design/references/adopted/impeccable-craft-floor.md",
-    "/opt/eco/docs/docs/ecosystem/specs/frontend-build-standard.md"
+    "/opt/eco/docs/docs/ecosystem/specs/frontend-build-standard.md",
+    "skills/ui-design/references/adopted/emil-skills/animate/SKILL.md",
+    "skills/ui-design/references/adopted/emil-skills/animate/RECIPES.md",
+    "skills/ui-design/references/adopted/emil-skills/review-animations/SKILL.md",
+    "skills/ui-design/references/adopted/emil-skills/review-animations/STANDARDS.md",
+    "skills/ui-design/references/adopted/emil-skills/emil-design-eng/SKILL.md",
+    "skills/ui-design/references/adopted/emil-skills/mobile-native/SKILL.md",
+    "skills/ui-design/references/adopted/emil-skills/break-ui/SKILL.md",
+    "skills/ui-design/references/adopted/emil-skills/break-ui/CATALOG.md",
+    "skills/ui-design/references/adopted/marketingskills/copywriting/SKILL.md",
+    "skills/ui-design/references/adopted/marketingskills/copywriting/references/copy-frameworks.md",
+    "skills/ui-design/references/adopted/marketingskills/copywriting/references/ai-tells.md",
+    "skills/ui-design/references/adopted/marketingskills/copywriting/references/natural-transitions.md"
    ],
    "receipt": true
   }
