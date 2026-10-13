@@ -3,9 +3,9 @@
 # aid-queue-write.sh — THE single writer for .aid-o/config/queue.yaml
 # (P064 "Plan Branch Substrate", EPIC E-064-2_2, Step 2 = plan Step 7).
 #
-# WHY THIS EXISTS: until this file, `aid-queue-add.sh` was the only script that
+# WHY THIS EXISTS: until this file, `the former queue writer` was the only script that
 # ever wrote a queue entry, and it always wrote the literal `status: queued`
-# (aid-queue-add.sh:447). Every other status in the live queue — 34 entries
+# (the former queue writer:447). Every other status in the live queue — 34 entries
 # reading `status: completed` at the time of writing — got there by HAND. That
 # is exactly why `aid-fsm.sh`'s `_revalidate_one_dep` could unblock a dependent
 # on `status == completed`: a hand edit was, in practice, an unblock button.
@@ -28,7 +28,7 @@
 #
 # ── STATUS ENUM (source of truth: .aid-o/plans/P064-plan-branch-substrate.md
 #    → "## Data Model" → "Queue entry — added statuses") ──────────────────────
-#   pending           aid-queue-add.sh              queued, not claimed
+#   pending           the former queue writer              queued, not claimed
 #   running           THIS FILE (queue_claim_next)  claimed by a live run
 #                     — `aid-plan-fsm.sh epic-start` registers the branch and the
 #                       manifest record; it does NOT write the queue (the one-way
@@ -57,7 +57,7 @@
 #
 # READ-ONLY LEGACY VALUES — accepted when reading an existing entry, never
 # written by this library:
-#   queued     the historical literal written by aid-queue-add.sh; read as
+#   queued     the historical literal written by the former queue writer; read as
 #              `pending` so the 43 pre-existing entries stay claimable.
 #   completed  never written by any script; 34 live entries carry it from hand
 #              edits. Read as a legacy synonym of "done" ONLY for entries with
@@ -80,7 +80,7 @@
 # `queue_claim_next` while its merge is still owed. The queue's mirror of
 # "merge owed" is simply the entry STAYING at `running` until
 # `epic-merge-to-plan` writes `merged_to_plan`. The only writer of queue
-# `pending` is `aid-queue-add.sh`, exactly as the plan's enum table states.
+# `pending` is `the former queue writer`, exactly as the plan's enum table states.
 #
 # ── FILE FORMAT: WHY LINE-ORIENTED awk AND NOT yq ───────────────────────────
 # The live `.aid-o/config/queue.yaml` is NOT yq-parseable (mixed indentation: a
@@ -89,7 +89,7 @@
 # is why that function is a hand-written awk parser. Every read and write here
 # is therefore line-oriented awk that preserves untouched lines byte for byte,
 # and every write goes through the same `mktemp`-in-place + `mv` shape used at
-# `aid-queue-add.sh:459-489`.
+# `the former queue writer:459-489`.
 #
 # ── LOCKING ─────────────────────────────────────────────────────────────────
 # All three public mutators acquire `<queue_file>.lock` (a sidecar, never the
@@ -159,7 +159,7 @@
 # DOOR 2 — `queue_append_entry`, and the STRUCTURE layer (CP2 iteration 2,
 # finding 1). Door 1's three layers say NOTHING about door 2: an appended
 # entry arrives as a pre-rendered YAML block, and until this fix the block was
-# written byte-for-byte with no validation at all. `aid-queue-add.sh` builds
+# written byte-for-byte with no validation at all. `the former queue writer` builds
 # that block by interpolating six argument-reachable values into it, so
 # `--merge-target 'plan/P800"<newline>    status: completed<newline>…'` appended
 # a SECOND `status:` line to the entry — after which `queue_get_field` (first
@@ -174,7 +174,7 @@
 #      this library's own writer can emit. Key-shape, value-shape, exactly one
 #      `epic_id` line, no repeated key, and the block's id must equal the id
 #      argument the duplicate check was run against. Callers are still expected
-#      to validate their own inputs (aid-queue-add.sh does, and reports a usage
+#      to validate their own inputs (the former queue writer does, and reports a usage
 #      error), but the LIBRARY no longer depends on them doing so — this door
 #      cannot be walked through by any present or future caller.
 #
@@ -402,7 +402,7 @@ queue_get_status() {
 
 # queue_get_deps <epic_id> [file] — the entry's depends_on ids, one per line.
 # Handles BOTH shapes the queue uses: the inline `depends_on: ["E-x", "E-y"]`
-# that aid-queue-add.sh writes and the multi-line YAML list form.
+# that the former queue writer writes and the multi-line YAML list form.
 queue_get_deps() {
   local epic_id="${1:-}" file="${2:-$(queue_write_path)}"
   [[ -n "$epic_id" ]] || return 2
@@ -469,10 +469,10 @@ queue_get_deps() {
 #
 # Returns 1 without writing when <epic_id> has no entry, and 2 without writing
 # for a malformed k=v payload. Writes via `mktemp`-in-place + `mv`, the same
-# atomic shape as aid-queue-add.sh:459-489.
+# atomic shape as the former queue writer:459-489.
 #
 # EXACTLY ONE ENTRY (CP2 finding 2): when the file carries more than one entry
-# with <epic_id> — which aid-queue-add.sh:272-275 permits, because its
+# with <epic_id> — which the former queue writer:272-275 permits, because its
 # duplicate guard only rejects queued|pending|blocked|running — only the FIRST
 # is rewritten, because the FIRST is what queue_get_field reads. A duplicate id
 # is warned about, not refused: refusing would wedge the legitimate re-add of an
@@ -525,7 +525,7 @@ _queue_apply_fields() {
   # awk rc that the rejection codes 8/9 below depend on.
   #
   # `last_modified` is a top-level scalar refreshed with the same sed shape
-  # aid-queue-add.sh:471 uses (piped, not `sed -i`, which is not portable).
+  # the former queue writer:471 uses (piped, not `sed -i`, which is not portable).
   #
   # ENVIRON, never -v — see the header. `target`/`kvs` both carry data that can
   # originate outside this library, and -v would escape-process both.
@@ -987,7 +987,7 @@ queue_set_plan() {
 # for <epic_id>, and 2 (with a warning naming the offending line) otherwise.
 #
 # WHY THIS IS NOT THE CALLER'S JOB: it is the caller's job TOO, but the library
-# may not depend on it. `aid-queue-add.sh` renders this block by interpolating
+# may not depend on it. `the former queue writer` renders this block by interpolating
 # six argument-reachable values into a heredoc; before this check existed, ONE
 # unguarded value containing a newline appended a second `status:` line to the
 # entry and split the two queue readers' answers apart (`queue_get_field` is
@@ -1054,9 +1054,9 @@ _queue_validate_entry_block() {
 }
 
 # queue_append_entry <epic_id> <entry_yaml_block> [transaction_path]
-#   The append half of the write path, delegated here from aid-queue-add.sh so
+#   The append half of the write path, delegated here from the former queue writer so
 #   BOTH the append and every later transition happen under the same lock. The
-#   duplicate check is re-run INSIDE the lock: aid-queue-add.sh's own check
+#   duplicate check is re-run INSIDE the lock: the former queue writer's own check
 #   runs before it, and two concurrent adds would otherwise both pass it.
 #
 #   The block itself is STRUCTURALLY validated before anything is staged — see
@@ -1067,7 +1067,7 @@ _queue_validate_entry_block() {
 #   P074 STEP 15 — TRANSACTION-OWNED DUPLICATES. This second, previously
 #   status-blind duplicate refusal is the one that actually decides, because it
 #   is the one holding the lock. It therefore gains the SAME ownership
-#   awareness as aid-queue-add.sh's unlocked pre-check: when <transaction_path>
+#   awareness as the former queue writer's unlocked pre-check: when <transaction_path>
 #   records this epic_id AND the already-present entry's plan_ref is the plan
 #   that transaction was generated from, the duplicate is a VERIFIED IDEMPOTENT
 #   SKIP (rc 4) instead of a refusal (rc 1). Making the CLI layer pass and this

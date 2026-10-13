@@ -300,7 +300,7 @@ enforcements:
   - {id: step_verify_template, type: 10, source: "defaults/templates/step-verify-template.md:44", instruction: "skills/pipeline.md:348", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "AC checklist format consumed by plan_ac_match"}
   - {id: plan_run_templates, type: 10, source: "defaults/templates/plan.md", instruction: "skills/plan-writing.md", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "plan + run templates shape generator-expected structure"}
   - {id: epic_template_contract, type: 10, source: removed (P114), instruction: n/a, severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: 'none (a step''s scope comes from plan.json, not from an EPIC block)', verdict: unmapped, description: 'RETIRED by P114 Step 5: the EPIC path was removed in 3.0.0; a step''s scope comes from plan.json, not from an EPIC block.'}
-  - {id: run_completion_contracts, type: 10, source: "defaults/templates/run-new-feature.md:187", instruction: "skills/run-management.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "run-* completion contracts (no TODO, conventions, handoff, testing proposal)"}
+  - {id: run_completion_contracts, type: 10, source: removed (P114), instruction: n/a, severity: advisory, surface: llm-facing, status: removed_scoped, replacement_guard: none (the run.md templates were rendered only by the removed run renderer; a direct run has no run.md), verdict: unmapped, description: 'RETIRED by P114 Step 5: the EPIC path was removed in 3.0.0; the run-* completion contracts lived in the run.md templates of the removed run renderer.'}
   - {id: design_sections_e2e, type: 10, source: "defaults/templates/design-sections.md:113", instruction: "skills/plan-writing.md", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "E2E verification: >=1 happy + >=1 negative scenario"}
   - {id: stack_detect_threshold, type: 10, source: "scripts/lib/aid-init-execution-yaml.sh:66", instruction: "skills/pipeline.md", severity: advisory, surface: internal-guard, status: active, verdict: unmapped, description: "bash stack gated on strict >5 .sh files (noise filter)", test: "scripts/tests/bats/test-aid-init.bats:51"}
   - {id: cp4_paths_layout_aware, type: 10, source: "removed (reference/review-successors.md)", instruction: "n/a", severity: advisory, surface: internal-guard, status: removed_scoped, replacement_guard: "fsm_review_round_required", verdict: unmapped, description: "RETIRED by P096 Step 12: same; /aid-init no longer derives the glob."}
@@ -1927,15 +1927,14 @@ enforcements:
     test: "scripts/tests/bats/test-dep-grammar.bats"
   - id: branch_restore_hard_stop
     type: 1
-    source: "scripts/aid-fsm.sh (branch restore after a failed transition)"
-    instruction: "docs/extending-aid.md — recovery transactions (P073)"
+    source: removed (P114)
+    instruction: n/a
     severity: blocking
     surface: internal-guard
-    status: active
+    status: removed_scoped
+    replacement_guard: none (the branch restore belonged to the removed run renderer, which switched branches around init; a direct run never switches branches)
     verdict: ALIGNED
-    description: "P073 Step 6 — a failed branch restore stops the run instead of continuing on whatever branch the worktree happens to be on. Continuing after a failed restore means every subsequent command operates on an unintended branch while believing it is on the intended one — the worst kind of silent divergence, because each individual command succeeds."
-    recovery: "The stop names the branch it could not restore; restore it manually and rerun."
-    test: "scripts/tests/bats/test-branch-restore.bats"
+    description: 'RETIRED by P114 Step 5: the EPIC path was removed in 3.0.0; the branch restore after a failed init belonged to the removed run renderer.'
   - id: plan_force_framework
     type: 1
     source: "scripts/aid-plan-fsm.sh:_pfsm_precondition / _pfsm_handle_force / _pfsm_commit_force / _pfsm_force_arg_check"
@@ -3156,7 +3155,7 @@ enforcements:
     test: "scripts/tests/bats/test-plan-lint.bats"
   - id: milestone_artifact_rendered
     type: 12
-    source: "scripts/lib/aid-artifact-obligation.sh:aid_artifact_obligation_check / _close_check + defaults/hook-registry.yaml (rule milestone_artifact_rendered)"
+    source: "scripts/lib/aid-artifact-obligation.sh:aid_artifact_obligation_check / _close_check + defaults/hook-registry.yaml (rule milestone_artifact_rendered) + scripts/aid-plan-fsm.sh (plan-run, plan_page_missing — the door the EPIC generator held until P114)"
     instruction: "commands/aid-plan.md (Plan review, item 10) + skills/pipeline.md (DONE telemetry)"
     severity: blocking
     surface: llm-facing

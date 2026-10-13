@@ -29,7 +29,7 @@ status: draft
 - Modify: `plugins/aid-orchestrator/agents/gate-fixer.md` — add a `simplifier` row to
 - Modify: evidence-file list in §7 to include `simplifier-report.md`,
 - Modify: `plugins/aid-orchestrator/commands/aid-run.md` — extend the PM summary
-- Modify: `plugins/aid-orchestrator/defaults/templates/epic.md` — add `.aid-o/reports/`
+- Modify: `plugins/aid-orchestrator/defaults/templates/plan.md` — add `.aid-o/reports/`
 - Modify: `docs/plans/AID-audit-2026-06/enforcement-registry.yaml` — append the 7
 - Modify: `CLAUDE.md` — add the new agents to any agent inventory; add/confirm the
 - Create: `docs/extending-aid.md` — sections: (1) the type→instruction-home table

@@ -10,7 +10,7 @@ runs_completed: 0
 
 ## Context
 
-Regression fixture for the `aid-epic-to-json.sh` Files-verb parser: before
+Regression fixture for the `aid-plan-diff.sh` Files-verb parser: before
 v2.57.2 the label-strip step only removed `Create:` / `Modify:` prefixes, so a
 Files entry using the plan-template-sanctioned `Test:` or `Rewrite:` verb kept
 its label and produced a non-path-like allowed_paths entry

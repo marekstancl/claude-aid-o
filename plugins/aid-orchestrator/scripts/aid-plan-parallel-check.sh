@@ -4,7 +4,7 @@
 # out of each other's files? (P085 Step 7)
 #
 # `Parallel Group` has existed in the EPIC table since P039 and the generator
-# writes it into plan.json (aid-epic-to-json.sh) — but nothing ever produced a
+# writes it into plan.json (the former EPIC-to-plan.json converter) — but nothing ever produced a
 # value and nothing ever checked one. This is the producer's other half: the
 # plan declares a wave per step, and this program proves the declaration is
 # safe by the only mechanical measure there is — two steps in one wave must not

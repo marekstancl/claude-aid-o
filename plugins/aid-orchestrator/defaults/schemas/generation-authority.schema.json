@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "aid-generation-authority/v1",
   "title": "AID Generation Authority Receipt",
-  "description": "The SEALED, plan-scoped CP1 decision written once per plan by aid-auto-pipeline.sh before any generation output exists, and verified (never re-decided) by every phase generator via aid-plan-to-epic.sh --generation-authority. HONEST CLASSIFICATION (AID-v3 principles §1): this receipt is forgeable by a Bash-capable actor. The enforcement is the binding — plan bytes, target head, phase set, and the owning transaction's authority_sha256 — plus audit detectability, never actor impossibility.",
+  "description": "The SEALED, plan-scoped CP1 decision written once per plan by the former generation pipeline before any generation output exists, and verified (never re-decided) by every phase generator via the former EPIC generator --generation-authority. HONEST CLASSIFICATION (AID-v3 principles §1): this receipt is forgeable by a Bash-capable actor. The enforcement is the binding — plan bytes, target head, phase set, and the owning transaction's authority_sha256 — plus audit detectability, never actor impossibility.",
   "type": "object",
   "additionalProperties": false,
   "required": [

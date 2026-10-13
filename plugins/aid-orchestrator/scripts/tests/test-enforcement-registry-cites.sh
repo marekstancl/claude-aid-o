@@ -50,7 +50,7 @@ done
 #   scripts/aid-plan-fsm.sh:cmd_plan_finalize --stage gates   (:identifier)
 #   scripts/lib/review-profile-check.sh:~84                   (:~digits)
 #   scripts/aid-fsm.sh's existing ESCALATION precondition     (possessive)
-#   scripts/aid-plan-to-epic.sh (search: '…') + lib/aid-scoping.sh:_fn  (+ join)
+#   scripts/aid-plan-lint.sh (search: '…') + lib/aid-scoping.sh:_fn  (+ join)
 #
 # A value is split on `;` and ` + `; the LEADING whitespace-delimited token of
 # each part is the path candidate. A candidate containing no `/` is a prose

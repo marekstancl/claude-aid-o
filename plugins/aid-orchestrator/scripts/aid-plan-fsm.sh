@@ -1094,7 +1094,7 @@ _pfsm_reconcile_task_branch_locked() {
 # comparison cannot go stale between them.
 #
 # An ABSENT state file is not an error — planless and not-yet-initialized runs
-# are the normal case, and aid-json-to-run.sh initializes those from the task
+# are the normal case, and the former run renderer initializes those from the task
 # branch head itself.
 # ---------------------------------------------------------------------------
 _pfsm_update_fsm_state_base() {
@@ -2161,7 +2161,7 @@ cmd_plan_start() {
       --op-id) op_id_opt="${2:-}"; shift 2 ;;
       # P073 Step 11 (P083): the path of the source plan this lifecycle is
       # being created FROM. Optional so legacy callers are unchanged; the
-      # production caller (aid-auto-pipeline.sh) always passes it, and it is
+      # production caller (the former generation pipeline) always passes it, and it is
       # what lets this command verify the source is committed before it
       # creates a branch or a manifest.
       --plan-file) plan_file_opt="${2:-}"; shift 2 ;;
@@ -2560,7 +2560,7 @@ cmd_epic_start() {
 
   # THE RUN ID IS READ, NOT INVENTED.
   # `R-${epic_id}-plan` used to be the default, and it is a guess: when
-  # `aid-json-to-run.sh --run-id R-E020-2` had already created the state and the
+  # `the former run renderer --run-id R-E020-2` had already created the state and the
   # evidence under THAT id, epic-start recorded a different one in the manifest,
   # and `epic-complete` could no longer find its own run (ACTA, 2026-08-31).
   # An id given on the command line wins; otherwise the id is taken from the run
@@ -2577,7 +2577,7 @@ cmd_epic_start() {
     fi
     case "${#_found[@]}" in
       1) run_id="${_found[0]}" ;;
-      0) echo "PRECONDITION FAIL: epic-start ${epic_id}: no run exists on disk and no --run-id was given. Pass --run-id explicitly (aid-json-to-run.sh creates the run and names it); epic-start no longer invents one, because an invented id splits the evidence from the manifest." >&2
+      0) echo "PRECONDITION FAIL: epic-start ${epic_id}: no run exists on disk and no --run-id was given. Pass --run-id explicitly (the former run renderer creates the run and names it); epic-start no longer invents one, because an invented id splits the evidence from the manifest." >&2
          exit 1 ;;
       *) echo "PRECONDITION FAIL: epic-start ${epic_id}: ${#_found[@]} runs exist on disk (${_found[*]}) — pass --run-id to say which one this manifest entry is for." >&2
          exit 1 ;;
@@ -10862,7 +10862,7 @@ EOF
 # Read-only: print the EPIC's recorded cut point (`epic_base_commit`) from the
 # plan-boundary manifest, after proving the entry is one we may trust.
 #
-# Why this exists (2026-09-02, WAN report). `aid-json-to-run.sh` used to write
+# Why this exists (2026-09-02, WAN report). `the former run renderer` used to write
 # each EPIC's fsm-state `base_commit` from `git rev-parse HEAD` in whatever
 # checkout generation ran in — for a plan_branch plan generated from the
 # primary checkout that is main's head, which is not on the plan branch at
@@ -11008,6 +11008,9 @@ _pr_main() {
   if [[ "$force" == true && ${#force_reason} -lt 20 ]]; then
     echo "ERROR: plan-run: --force needs --reason of at least 20 characters (the waiver records it)." >&2; exit 2
   fi
+  if [[ -n "$force_reason" && "$force" != true && "$restart" -ne 1 ]]; then
+    echo "ERROR: plan-run: --reason without --force or --restart records nothing — a reason is refused rather than silently ignored (P073)." >&2; exit 2
+  fi
   if [[ "$restart" -eq 1 && ${#force_reason} -lt 20 ]]; then
     echo "ERROR: plan-run: --restart needs --reason of at least 20 characters (the restart record and the audit log carry it); nothing was moved." >&2
     echo "next: aid-plan-fsm.sh plan-run ${plan_id:-<plan>} --restart --reason \"<why the run starts again, 20+ chars>\"" >&2; exit 2
@@ -11098,6 +11101,16 @@ _pr_main() {
     [[ "$ps_rc" -eq 0 ]] || { echo "ERROR: plan-run: plan-start ${plan_id} failed (rc=${ps_rc}) — see above; nothing else was started." >&2; exit "$ps_rc"; }
   fi
   _pr_stage_done plan_start || _pr_stage_record plan_start
+
+  # The PM's page is a precondition of the run (P086 Step 4; carried over from
+  # the removed EPIC generator by P114): band-independent, so a light plan
+  # cannot slip past it the way it could past the band-scoped CP1 gate. The
+  # turn gate prints the exact render command.
+  if [[ -f "${SCRIPT_DIR}/aid-turn-gate.sh" ]] && ! _pr_stage_done seal; then
+    bash "${SCRIPT_DIR}/aid-turn-gate.sh" --plan "$plan" \
+      || _pr_refuse plan_page_missing "${plan_id} has no current PM page — the page is what the PM reads instead of the plan" \
+           "render it with the command in the line above, then run plan-run again" 1
+  fi
 
   # Stage 2 — readiness (the canonical pre-generation contract), one run.
   if ! _pr_stage_done readiness; then

@@ -68,7 +68,7 @@
 # Requirements: bash 4.0+, jq, awk, sed, grep
 set -euo pipefail
 
-# Shared per-step scoping cleaner (single source of truth with aid-epic-to-json.sh)
+# Shared per-step scoping cleaner (single source of truth with the former EPIC-to-plan.json converter)
 # — used by the block-authoritative per_step_scoping check below. v2.58.0 IMP-232.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/aid-scoping.sh
@@ -122,8 +122,8 @@ _add_check() {
 #      field match is legitimate sequential refinement -> PASS.
 #   4. The genuine P057/P058 broadcast bug (broadcasts BOTH fields, no honored
 #      per-step blocks) still FAILs via rule 1 (mismatch) or rule 3 (both equal).
-# Two-independent-stages assumption: aid-plan-to-epic.sh emits the blocks;
-# aid-epic-to-json.sh derives allowed_paths from them. This gate re-derives with
+# Two-independent-stages assumption: the former EPIC generator emits the blocks;
+# the former EPIC-to-plan.json converter derives allowed_paths from them. This gate re-derives with
 # the SAME lib so rule 1 is a real cross-check, not a tautology.
 ps_status="pass"
 ps_detail="single-step plan or all steps distinctly scoped — nothing broadcast"
@@ -213,7 +213,7 @@ _add_check "per_step_scoping" "$ps_status" "$ps_detail"
 
 # _ac_block_count <epic_md> <step_num>
 #   Parses the per-step "<!-- step-N: files=[...]; ac=[...] -->" HTML
-#   comment block (same shape aid-epic-to-json.sh's _aid_parse_scoping_line
+#   comment block (same shape the former EPIC-to-plan.json converter's _aid_parse_scoping_line
 #   consumes) and echoes the length of its ac=[...] JSON array. Echoes
 #   nothing (empty string) if no such block is found for this step, or it
 #   doesn't parse — caller treats that as "no block" and falls back.
@@ -235,7 +235,7 @@ _ac_block_count() {
   # literal substring (e.g. prose describing this very block's own syntax —
   # this is exactly what P058's own plan text does, and is why its
   # self-consistency regen surfaced this). Same fix as
-  # aid-epic-to-json.sh's _aid_parse_scoping_line — keep both in sync.
+  # the former EPIC-to-plan.json converter's _aid_parse_scoping_line — keep both in sync.
   ac_part="${body##*"; ac="}"
 
   jq 'length' <<< "$ac_part" 2>/dev/null || true

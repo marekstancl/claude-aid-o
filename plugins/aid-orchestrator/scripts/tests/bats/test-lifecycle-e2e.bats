@@ -44,16 +44,6 @@ _merge_epic() {
 }
 
 # ── #1: manifest at official scaffold (committed manifest + identity) ─────────
-@test "E2E #1: scaffold ensures a committed manifest + identity (pipeline call path)" {
-  _repo r; mkdir -p r/.aid-o/plans
-  printf '**EPIC 1: a (Steps 1-1)**\n**EPIC 2: b (Steps 2-2)**\n' > r/.aid-o/plans/P800-x.md
-  ( cd r && source "$LIB" && aid_lifecycle_ensure_manifest P800 . )
-  run bash -c "cd r && git ls-files .aid-lifecycle/manifests/P800.yaml .aid-lifecycle/repo-identity.yaml"
-  [[ "$output" == *"manifests/P800.yaml"* ]]
-  [[ "$output" == *"repo-identity.yaml"* ]]
-  # and the pipeline actually wires this call
-  grep -q 'aid_lifecycle_ensure_manifest' "$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh"
-}
 
 # ── #3 + #4: real merge -> recorded provenance; last required -> receipt+closed ─
 @test "E2E #3/#4: post-merge record-delivery records provenance; last required -> closed" {
@@ -193,20 +183,6 @@ _user_index_fp() { ( cd "$1" && { git diff --cached --name-status; echo "--"; gi
 
 # F1 corollary: a strict plan's real pipeline must not proceed to EPIC generation
 # with a non-durable manifest present on disk.
-@test "E2E F1b: a strict plan whose manifest is present-but-uncommitted is re-committed durably at scaffold" {
-  _repo r
-  _mkplan r '**EPIC 1: a (Steps 1-1)**' strict
-  # seed a durable manifest, then break its durability (file on disk, not on ref)
-  ( cd r && source "$LIB" && aid_lifecycle_ensure_manifest P900 . )
-  ( cd r && git rm -q --cached .aid-lifecycle/manifests/P900.yaml && git commit -q -m "drop tracking" )
-  run bash -c "cd r && git cat-file -e main:.aid-lifecycle/manifests/P900.yaml"
-  [ "$status" -ne 0 ]
-  # run the REAL pipeline: it must NOT log 'ensured' over a non-durable manifest;
-  # by scaffold end the manifest is durable again.
-  run bash -c "cd r && \"$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh\" --plan .aid-o/plans/P900-x.md --queue-mode chain"
-  run bash -c "cd r && git cat-file -e main:.aid-lifecycle/manifests/P900.yaml"
-  [ "$status" -eq 0 ]
-}
 
 # ── external-audit regression (v2.58.1): unstaged (not just staged) collisions ──
 # The isolated commit builds its tree from the worktree files on disk, so an
@@ -316,30 +292,8 @@ $2
 PLAN
 }
 
-@test "E2E #1b: the REAL pipeline commits the manifest at scaffold for a valid plan" {
-  _repo r; _mkplan r '**EPIC 1: alpha (Steps 1-1)**'
-  run bash -c "cd r && \"$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh\" --plan .aid-o/plans/P900-x.md --queue-mode chain"
-  # (generation may or may not fully complete in this minimal fixture; the scaffold
-  #  step runs first) — the manifest must be a durable commit on target_branch.
-  run bash -c "cd r && git cat-file -e main:.aid-lifecycle/manifests/P900.yaml && echo OK"
-  [[ "$output" == *OK* ]]
-}
 
-@test "E2E scaffold FAIL-CLOSED: a lifecycle_strict plan with an ambiguous declaration aborts the real pipeline" {
-  _repo r; _mkplan r '**EPIC 1 ambiguous no colon no backlog form**' strict
-  run bash -c "cd r && \"$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh\" --plan .aid-o/plans/P900-x.md --queue-mode chain"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"MUST have a durable"* ]]
-  [ ! -d r/.aid-o/tasks ] || [ -z "$(ls r/.aid-o/tasks 2>/dev/null | grep E- || true)" ]
-}
 
-@test "E2E scaffold: a LEGACY (non-strict) ambiguous plan proceeds in loud audited migration (not fail-closed, not silent)" {
-  _repo r; _mkplan r '**EPIC 1 ambiguous no colon**'
-  run bash -c "cd r && \"$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh\" --plan .aid-o/plans/P900-x.md --queue-mode chain"
-  [[ "$output" != *"MUST have a durable"* ]]      # not fail-closed at the manifest step
-  [[ "$output" == *"AUDITED migration"* ]]         # loud, never silent
-  [ -f r/.aid-o/work/lifecycle-migration.log ]     # audit marker recorded
-}
 
 # ── entrypoint sanity: the advisory's command actually exists ────────────────
 @test "E2E: aid-fsm.sh plan-reconcile (referenced by the init advisory) exists + runs" {

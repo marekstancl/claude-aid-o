@@ -432,7 +432,7 @@ if [[ "$mode" == "legacy" ]] && [[ -n "$(_aid_files_verification_only "$PLAN")" 
 fi
 
 # ---------------------------------------------------------------------------
-# AID Role is a closed set — the same list aid-epic-to-json.sh enforces. A step
+# AID Role is a closed set — the same list the former EPIC-to-plan.json converter enforces. A step
 # naming a role outside it (fullstack, devops, docs) used to pass this lint,
 # CP1 and every review, and fail only inside generation, phase 1.
 # ---------------------------------------------------------------------------
@@ -443,7 +443,7 @@ while IFS=$'\t' read -r _rl_ln _rl_role; do
   errors=$((errors+1))
   [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rl_ln}: ERROR AID Role '${_rl_role}' is not an AID role — one of: ${_VALID_ROLES} (a step that is both backend and frontend is two steps)" >&2
 done < <(_aid_blank_fenced < "$PLAN" | awk '/^\*\*AID Role:?\*\*/ { s=$0; sub(/^\*\*AID Role:?\*\*[[:space:]]*/, "", s); gsub(/[[:space:]]+$/, "", s); print NR "\t" tolower(s) }')
-# ^ same header grammar and same whole-line value as aid-plan-to-epic.sh's
+# ^ same header grammar and same whole-line value as the former EPIC generator's
 #   extractor (colon optional, rest of the line is the role) — so what the
 #   lint accepts is exactly what generation will accept.
 

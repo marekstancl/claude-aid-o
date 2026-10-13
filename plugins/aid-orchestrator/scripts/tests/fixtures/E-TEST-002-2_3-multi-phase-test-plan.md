@@ -13,7 +13,7 @@ runs_completed: 0
 This is the Phase 2 EPIC from the multi-phase test plan fixture.
 It covers the implementation phase where backend and frontend work in parallel,
 then qa validates the outputs. This EPIC tests parallel group detection and
-dependency resolution in the aid-epic-to-json.sh script.
+dependency resolution in the aid-plan-diff.sh script.
 
 This EPIC covers Phase 2 of 3 from plan P-TEST-002.
 

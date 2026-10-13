@@ -763,47 +763,13 @@ EOF
   [ "$(echo "$output" | jq 'length')" = "0" ]
 }
 
-# ─── CP3 activation gap: --streamlined THROUGH aid-json-to-run.sh ─────────
+# ─── CP3 activation gap: --streamlined THROUGH the former run renderer ─────────
 # Guards the integration path the CP3 gap exposed: streamlined is activated
-# via aid-json-to-run.sh (the sole auto-init entry point), NOT by calling
+# via the former run renderer (the sole auto-init entry point), NOT by calling
 # aid-fsm.sh init --streamlined directly. setup_test_evidence_dir() already
 # put us in a clean git repo on main, so Step 18 auto-init runs for real.
 
-@test "CP3: aid-json-to-run.sh --streamlined → fsm-state.yaml streamlined_mode true" {
-  local j2r="$AID_PLUGIN_PATH/scripts/aid-json-to-run.sh"
-  local fixtures="$AID_PLUGIN_PATH/scripts/tests/fixtures"
-  local plan_json="$fixtures/minimal-plan.json"
-  local epic="$fixtures/E-TEST-001-1_1-minimal-test-plan.md"
-  local tmpl="$AID_PLUGIN_PATH/defaults/templates/run-new-feature.md"
-  local out_dir="$TEST_PROJECT_ROOT/.aid-o/work/runs/R-CP3-ON"
-  mkdir -p "$out_dir"
 
-  run "$j2r" --plan-json "$plan_json" --run-template "$tmpl" \
-    --epic "$epic" --output-dir "$out_dir" --run-id "R-CP3-ON" --streamlined
-  [ "$status" -eq 0 ]
-
-  local state_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-TEST-001-1_1/R-CP3-ON/fsm-state.yaml"
-  [ -f "$state_file" ]
-  [ "$(yq -r '.streamlined_mode' "$state_file")" = "true" ]
-}
-
-@test "CP3: aid-json-to-run.sh WITHOUT --streamlined → streamlined_mode false" {
-  local j2r="$AID_PLUGIN_PATH/scripts/aid-json-to-run.sh"
-  local fixtures="$AID_PLUGIN_PATH/scripts/tests/fixtures"
-  local plan_json="$fixtures/minimal-plan.json"
-  local epic="$fixtures/E-TEST-001-1_1-minimal-test-plan.md"
-  local tmpl="$AID_PLUGIN_PATH/defaults/templates/run-new-feature.md"
-  local out_dir="$TEST_PROJECT_ROOT/.aid-o/work/runs/R-CP3-OFF"
-  mkdir -p "$out_dir"
-
-  run "$j2r" --plan-json "$plan_json" --run-template "$tmpl" \
-    --epic "$epic" --output-dir "$out_dir" --run-id "R-CP3-OFF"
-  [ "$status" -eq 0 ]
-
-  local state_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-TEST-001-1_1/R-CP3-OFF/fsm-state.yaml"
-  [ -f "$state_file" ]
-  [ "$(yq -r '.streamlined_mode' "$state_file")" = "false" ]
-}
 
 # ─── D1 (IMP-232 v2.58.0): dependency-scoped init gate ──────────────────────
 # The old global cross-plan ca-review-complete hard-block is REMOVED: an
@@ -1846,21 +1812,61 @@ YAML
 }
 
 # ─── P109 Step 5: amend-scope on a brief-bound plan names the point it serves ──
-# The plan.json is PRODUCED by aid-epic-to-json.sh from a six-column EPIC table
+# The plan.json is PRODUCED by the former EPIC-to-plan.json converter from a six-column EPIC table
 # and a source plan with zadani_sha256 — not hand-written — so the binding the
 # generator writes is the one this reads. Defects: P014 C — six scope_amended
 # events, none tied to a point of the brief; a plan.json the generator never binds.
-_zp_plan_json() {   # <td> — generate plan.json (step 1 closes AC2, step 2 closes AC3) into <td>
+_zp_plan_json() {   # <td> — build plan.json (step 1 closes AC2, step 2 closes AC3) into <td> with the shared builder
   local td="$1" g; g="$(mktemp -d)"
-  printf -- '---\nid: P930\nzadani: .aid-o/plans/P930-zadani.md\nzadani_sha256: %s\n---\n# Plan\n' "$(printf brief | sha256sum | cut -d' ' -f1)" > "$g/P930-plan.md"
-  { printf -- '---\nepic_id: E-930-1_1\ntitle: Brief-bound\nplan_ref: %s\n---\n## Acceptance Criteria\n\n' "$g/P930-plan.md"
-    printf -- '- [ ] [backend] step one deliverable verified\n- [ ] [qa] step two deliverable verified\n\n## Steps (Role Pipeline)\n\n'
-    printf '| # | Role | Objective | Depends On | Parallel Group | Closes |\n|---|------|-----------|------------|----------------|--------|\n'
-    printf '| 1 | backend | do the first thing properly | - | - | AC2 |\n| 2 | qa | verify the first thing works | 1 | - | AC3 |\n'
-  } > "$g/E-930-1_1-x.md"
-  local m; m="$(bash "$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh" --epic "$g/E-930-1_1-x.md" \
-    --schema "$AID_PLUGIN_PATH/defaults/templates/plan.schema.json" --output-dir "$g/out" 2>/dev/null)"
-  cp "$(jq -r .plan_json <<< "$m")" "$td/plan.json"
+  printf 'gates: {}\n' > "$g/execution.yaml"
+  cat > "$g/P930-plan.md" <<PLAN
+---
+id: P930
+zadani: .aid-o/plans/P930-zadani.md
+zadani_sha256: $(printf brief | sha256sum | cut -d' ' -f1)
+---
+# Plan
+
+## Implementation Steps
+
+### Step 1: one
+
+**Objective:** do the first thing properly
+
+**Files:**
+- Modify: \`src/a.py\` — the thing
+
+**Dependencies:**
+- Depends on: none
+
+**Acceptance Criteria:**
+- [ ] step one deliverable verified
+
+**AID Role:** backend
+
+**Zavírá:** AC2
+
+### Step 2: two
+
+**Objective:** verify the first thing works
+
+**Files:**
+- Test: \`tests/test_a.py\` — the check
+
+**Dependencies:**
+- Depends on: Step 1
+
+**Acceptance Criteria:**
+- [ ] step two deliverable verified
+
+**AID Role:** qa
+
+**Zavírá:** AC3
+PLAN
+  ( source "$AID_PLUGIN_PATH/scripts/lib/common.sh"; source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh"
+    aid_plan_json_steps_from_plan "$g/P930-plan.md" > "$g/steps.json"
+    aid_plan_json_build --steps-json "$g/steps.json" --out "$td/plan.json" --epic-id E-930-1_1 --plan "$g/P930-plan.md" \
+      --direct --execution "$g/execution.yaml" ) >/dev/null 2>&1
   rm -rf "$g"
 }
 _zp_state() {   # <td> <state> <current_step>

@@ -45,16 +45,14 @@ setup() {
   cd "$R"
   FSM="$PLUGIN_DIR/scripts/aid-fsm.sh"
   PFSM="$PLUGIN_DIR/scripts/aid-plan-fsm.sh"
-  PIPE="$PLUGIN_DIR/scripts/aid-auto-pipeline.sh"
   PLAN="$R/.aid-o/plans/P900-direct.md"
   GEN="$R/.aid-o/work/evidence/P900/generation"
   EV="$R/.aid-o/work/evidence/E-900-1_1/R-E900-1"
   MF="$R/.aid-o/work/plan-state/P900/plan-boundary-manifest.json"
-  export R FSM PFSM PIPE PLAN GEN EV MF PLUGIN_DIR
+  export R FSM PFSM PLAN GEN EV MF PLUGIN_DIR
 }
 
 _run()  { run bash "$PFSM" plan-run P900 "$@"; }
-_pipe() { run bash "$PIPE" --plan "$PLAN" "$@"; }
 
 # ── the start ────────────────────────────────────────────────────────────────
 
@@ -90,25 +88,7 @@ _pipe() { run bash "$PIPE" --plan "$PLAN" "$@"; }
   [[ "$output" == *"next: "* ]]
 }
 
-@test "direct: the pipeline on a plan with a direct run is refused plan_run_already_started" {
-  _run; [ "$status" -eq 0 ]
-  _pipe
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"plan_run_already_started"* ]]
-}
 
-@test "direct: the pipeline on a plan EDITED after plan-run is refused before the mode stamp and the rollover" {
-  _run; [ "$status" -eq 0 ]
-  local mode_before; mode_before="$(git -C "$R" show main:.aid-lifecycle/manifests/P900.yaml | yq -r '.mode')"
-  echo "edited" >> "$PLAN"
-  git -C "$R" add -f "$PLAN" && git -C "$R" commit -qm "the plan edited after plan-run"   # past the committed-source preflight
-  _pipe
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"plan_run_already_started"* ]]
-  [ "$(jq -r '.kind' "$GEN/transaction.json")" = "plan_run" ]
-  [ -z "$(ls "$GEN"/transaction.json.* 2>/dev/null | grep -v lock || true)" ]
-  [ "$(git -C "$R" show main:.aid-lifecycle/manifests/P900.yaml | yq -r '.mode')" = "$mode_before" ]
-}
 
 # ── the two roads exclude each other, each trace alone ───────────────────────
 
@@ -143,29 +123,8 @@ _pipe() { run bash "$PIPE" --plan "$PLAN" "$@"; }
   [ "$status" -eq 0 ]
 }
 
-@test "direct: the pipeline is refused by a plan_run transaction alone" {
-  mkdir -p "$GEN"
-  jq -n '{schema:"aid-generation-transaction/v1", kind:"plan_run", plan_id:"P900", plan_sha256:"x", target_head:"", phase_derivation_version:1, total_phases:1, phases:{}}' > "$GEN/transaction.json"
-  _pipe
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"plan_run_already_started"* && "$output" == *"plan-run"* ]]
-}
 
-@test "direct: the pipeline is refused by a direct manifest entry alone (transaction removed)" {
-  _run; [ "$status" -eq 0 ]
-  rm -f "$GEN/transaction.json"
-  _pipe
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"plan_run_already_started"* && "$output" == *"direct run"* ]]
-}
 
-@test "direct: supersede-generation refuses a plan_run transaction" {
-  _run; [ "$status" -eq 0 ]
-  run bash "$PIPE" supersede-generation --plan "$PLAN" --reason "testing that a plan-run is never superseded"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"plan_run_already_started"* ]]
-  [ -f "$GEN/transaction.json" ]
-}
 
 # ── the lifecycle declares the one run ───────────────────────────────────────
 

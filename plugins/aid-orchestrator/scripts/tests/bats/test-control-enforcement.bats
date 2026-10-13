@@ -39,7 +39,7 @@ teardown() { teardown_test_evidence_dir; }
 
 @test "every reader in the shipped code goes through the shared resolver" {
   # The assertion is the INVARIANT, not a headcount of files: aid-fsm.sh is the
-  # only caller left (aid-auto-pipeline.sh stopped reading the policy when CP1
+  # only caller left (the former generation pipeline stopped reading the policy when CP1
   # became the generation gate, and this case kept naming it long afterwards),
   # and nothing anywhere reads a control's enforcement without the resolver.
   grep -q 'aid_control_enforcement' "$AID_PLUGIN_PATH/scripts/aid-fsm.sh"

@@ -18,7 +18,7 @@
 #     F6  a short (<20 char) reason FAILS (audit-grade reason enforced)
 #     F7  other init checks stay ACTIVE under --force (dirty tree still blocks)
 #
-#   Pipeline flag plumbing (aid-json-to-run.sh --force-init-reason):
+#   Pipeline flag plumbing (aid-step-check.sh --force-init-reason):
 #     E1  WITHOUT the flag, a depends_on-blocked init fails the run generation
 #     E2  WITH a valid --force-init-reason, run generation succeeds
 #
@@ -32,10 +32,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 FSM="$REPO_ROOT/plugins/aid-orchestrator/scripts/aid-fsm.sh"
-JSON_TO_RUN="$REPO_ROOT/plugins/aid-orchestrator/scripts/aid-json-to-run.sh"
 FIXTURES_DIR="$SCRIPT_DIR/fixtures"
 TEMPLATES_DIR="$REPO_ROOT/plugins/aid-orchestrator/defaults/templates"
-RUN_TEMPLATE="$TEMPLATES_DIR/run-new-feature.md"
 MINIMAL_PLAN="$FIXTURES_DIR/minimal-plan.json"
 MINIMAL_EPIC="$FIXTURES_DIR/E-TEST-001-1_1-minimal-test-plan.md"
 
@@ -54,7 +52,7 @@ _fail() { echo "FAIL: $1"; FAIL=$((FAIL + 1)); }
 # ---------------------------------------------------------------------------
 # Prerequisites
 # ---------------------------------------------------------------------------
-for f in "$FSM" "$JSON_TO_RUN" "$RUN_TEMPLATE" "$MINIMAL_PLAN" "$MINIMAL_EPIC"; do
+for f in "$FSM" "$MINIMAL_PLAN"; do
   if [[ ! -f "$f" ]]; then
     echo "ERROR: required file not found: $f" >&2
     exit 1
@@ -190,48 +188,6 @@ echo "TEST: F7 — dirty worktree still blocks under --force"
     _pass "F7 — clean-worktree guard NOT masked by --force (exit $ec, Uncommitted changes)"
   else
     _fail "F7 — expected clean-tree block; got exit=$ec, err=$(printf '%s' "$err" | tr '\n' '|' | head -c 200)"
-  fi
-}
-
-# ===========================================================================
-# E1/E2: aid-json-to-run.sh --force-init-reason flag plumbs through to init.
-# Uses a numeric-epic plan.json (E-900-1_1) so the cross-plan gate fires.
-# ===========================================================================
-echo "TEST: E1/E2 — aid-json-to-run.sh --force-init-reason plumbing"
-{
-  repo="$(fresh_repo_with_prior)"
-  plan900="$repo/plan-900.json"
-  jq '.epic_id = "E-900-1_1"' "$MINIMAL_PLAN" > "$plan900"
-  out_dir="$repo/run-out"
-  mkdir -p "$out_dir"
-
-  # E1: WITHOUT the flag → cross-plan gate blocks → generation fails
-  ec=0
-  ( cd "$repo" && "$JSON_TO_RUN" \
-      --plan-json "$plan900" --run-template "$RUN_TEMPLATE" \
-      --epic "$MINIMAL_EPIC" --output-dir "$out_dir" --run-id "$UNDER_TEST_RUN" \
-      >/dev/null 2>&1 ) || ec=$?
-  if [[ "$ec" -ne 0 && ! -f "$repo/$STATE_REL" ]]; then
-    _pass "E1 — json-to-run without flag is blocked by depends_on gate (exit $ec)"
-  else
-    _fail "E1 — expected block; got exit=$ec, state_exists=$([[ -f "$repo/$STATE_REL" ]] && echo yes || echo no)"
-  fi
-
-  # E2: WITH a valid --force-init-reason → generation succeeds
-  repo2="$(fresh_repo_with_prior)"
-  plan900b="$repo2/plan-900.json"
-  jq '.epic_id = "E-900-1_1"' "$MINIMAL_PLAN" > "$plan900b"
-  out_dir2="$repo2/run-out"
-  mkdir -p "$out_dir2"
-  ec=0
-  run_path="$( cd "$repo2" && "$JSON_TO_RUN" \
-      --plan-json "$plan900b" --run-template "$RUN_TEMPLATE" \
-      --epic "$MINIMAL_EPIC" --output-dir "$out_dir2" --run-id "$UNDER_TEST_RUN" \
-      --force-init-reason "$VALID_REASON" 2>/dev/null )" || ec=$?
-  if [[ "$ec" -eq 0 && -f "$repo2/$STATE_REL" && -n "$run_path" && -f "$run_path" ]]; then
-    _pass "E2 — json-to-run --force-init-reason forwards override; generation succeeds"
-  else
-    _fail "E2 — expected success; got exit=$ec, state_exists=$([[ -f "$repo2/$STATE_REL" ]] && echo yes || echo no), run_path=${run_path:-none}"
   fi
 }
 

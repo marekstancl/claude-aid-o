@@ -751,7 +751,7 @@ check5_plan_branch_boundary() {
     if [[ "$PLAN_BRANCH_MODE" -eq 1 ]]; then
       _fail "check5" "no lifecycle manifest at ${lc_manifest} for a plan-branch close — the receipt is MANDATORY for this mode, so its absence blocks rather than downgrading the close to the legacy no-receipt path"
     else
-      _info "check5" "lifecycle_manifest_absent — ${lc_manifest} does not exist; this is a legacy-mode plan predating the lifecycle layer, so close completes with that reason recorded (aid-auto-pipeline.sh creates one for every plan made under the new model)"
+      _info "check5" "lifecycle_manifest_absent — ${lc_manifest} does not exist; this is a legacy-mode plan predating the lifecycle layer, so close completes with that reason recorded (the former generation pipeline creates one for every plan made under the new model)"
     fi
   elif [[ "$CLOSE_MODE" == "abort" ]]; then
     _info "check5" "abort close: an aborted plan writes NO lifecycle receipt (aid_lifecycle_plan_close refuses while any required EPIC is undelivered, which is always true before a merge) — the manifest is marked aborted instead"

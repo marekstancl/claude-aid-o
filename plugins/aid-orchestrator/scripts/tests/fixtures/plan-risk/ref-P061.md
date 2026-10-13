@@ -18,7 +18,7 @@ status: draft
 
 **Files:**
 - Modify: `plugins/aid-orchestrator/defaults/templates/plan.schema.json` — `gates[].items` z
-- Modify: `plugins/aid-orchestrator/scripts/aid-epic-to-json.sh` (oba výskyty: extrakční filtr
+- Modify: `plugins/aid-orchestrator/scripts/aid-plan-diff.sh` (oba výskyty: extrakční filtr
 - Modify: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates.bats` — scénář: fixture
 - Modify: `plugins/aid-orchestrator/scripts/aid-run-gates.sh` — `--profile <name>` flag,
 - Modify: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-run-gates.bats` — min. 3 nové

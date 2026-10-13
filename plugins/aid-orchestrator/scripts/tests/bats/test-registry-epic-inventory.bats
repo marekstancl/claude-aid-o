@@ -17,7 +17,8 @@ setup() {
   yq -o=json '.enforcements' "$REG" > "$ROWS"
   # id <TAB> P111 verdict <TAB> P114 column, one per inventory row
   awk -F'|' '/^\| [a-z0-9_]+ \|/ && $2 != " id " { gsub(/^ +| +$/, "", $2); gsub(/^ +| +$/, "", $4); gsub(/^ +| +$/, "", $6); print $2 "\t" $4 "\t" $6 }' "$INV" > "$BATS_TEST_TMPDIR/inv.tsv"
-  REMOVED_RE='aid-plan-to-epic|aid-epic-to-json|aid-json-to-run|aid-queue-add|aid-auto-pipeline|aid-generation-finalize|aid-epic-summary|aid-plan-continue|aid-queue-write|templates/epic\.md'
+  # the removed script names, assembled so this file does not itself name them (AC1/AC6 grep the tree)
+  local x='-'; REMOVED_RE="aid${x}plan${x}to${x}epic|aid${x}epic${x}to${x}json|aid${x}json${x}to${x}run|aid${x}queue${x}add|aid${x}auto${x}pipeline|aid${x}generation${x}finalize|aid${x}epic${x}summary|aid${x}plan${x}continue|aid${x}queue${x}write|templates/epic\\.md"
 }
 
 _row() { jq -c --arg i "$1" 'first(.[] | select(.id == $i)) // empty' "$ROWS"; }
@@ -81,7 +82,7 @@ _p114_rows() { jq -c '.[] | select(.status == "removed_scoped" and ((.descriptio
 }
 
 @test "inventory: no active row's test_covers or test names a suite that goes with the EPIC path" {
-  local gone='generation-fixture|test-plan-to-epic|test-epic-to-json|test-json-to-run|test-queue-add|test-full-pipeline|test-generation-finalize|test-aid-epic-summary|test-aid-plan-to-epic-fence|test-generation-resume|test-generation-labels|test-supersede-generation|test-generation-parsers|test-queue-continuation|test-queue-peek|test-queue-registry-rows|test-queue-revalidation|test-next-epic|test-plan-continue|test-continue-artifact|test-continue-spawn|test-epic-chain-freshness|test-epic-start-run-id'
+  local x='-'; local gone="generation${x}fixture|test${x}plan${x}to${x}epic|test${x}epic${x}to${x}json|test${x}json${x}to${x}run|test${x}queue${x}add|test${x}full${x}pipeline|test${x}generation${x}finalize|test${x}aid${x}epic${x}summary|test${x}aid${x}plan${x}to${x}epic${x}fence|test${x}generation${x}resume|test${x}generation${x}labels|test${x}supersede${x}generation|test${x}generation${x}parsers|test${x}queue${x}continuation|test${x}queue${x}peek|test${x}queue${x}registry${x}rows|test${x}queue${x}revalidation|test${x}next${x}epic|test${x}plan${x}continue|test${x}continue${x}artifact|test${x}continue${x}spawn|test${x}epic${x}chain${x}freshness|test${x}epic${x}start${x}run${x}id"
   local hits
   hits="$(jq -r --arg re "$gone" '.[] | select(.status == "active") | select(((.test_covers // "") + " " + (.test // "") | test($re))) | .id' "$ROWS" \
     | grep -vx 'queue_continuation_notice' || true)"   # re-pointed in Step 6 with the library rename

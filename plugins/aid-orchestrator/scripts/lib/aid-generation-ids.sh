@@ -2,11 +2,11 @@
 # =============================================================================
 # aid-generation-ids.sh — THE derivation of a generation's per-phase ids.
 #
-# One definition, sourced by every script that needs it: aid-auto-pipeline.sh
+# One definition, sourced by every script that needs it: the former generation pipeline
 # (which pre-registers every phase's ids in the transaction skeleton, before
-# any generator runs), aid-plan-to-epic.sh (which re-derives them at verify
+# any generator runs), the former EPIC generator (which re-derives them at verify
 # time and compares them against what the transaction recorded) and
-# aid-epic-to-json.sh (which derives the run_id it writes into plan.json).
+# the former EPIC-to-plan.json converter (which derives the run_id it writes into plan.json).
 #
 # WHY THE VERIFIER STILL COMPARES. The recorded id and the freshly derived id
 # are INDEPENDENT inputs even though one function produces both: the recorded
@@ -18,7 +18,7 @@
 # before any id is even compared.
 #
 # phase_derivation_version — a LITERAL CONSTANT, bumped only when the phase
-# detection algorithm in aid-auto-pipeline.sh ("Detect phase count from plan")
+# detection algorithm in the former generation pipeline ("Detect phase count from plan")
 # or any derivation below changes semantically. It exists so a resumed
 # transaction can detect that a plugin upgrade changed how phases would be
 # derived, instead of silently mixing artifacts from two derivations.
@@ -29,7 +29,7 @@ AID_GEN_PHASE_DERIVATION_VERSION=1
 # aid_gen_plan_num <plan_id> — the bare plan number.
 # Strips the leading P, then any leading "-": a plan id like P-TEST-999 would
 # otherwise leave "-TEST-999", producing a double-dash epic_id
-# "E--TEST-999-..." that breaks aid-auto-pipeline.sh's EPIC-ID regex (curator
+# "E--TEST-999-..." that breaks the former generation pipeline's EPIC-ID regex (curator
 # IMP-166; latent while all real plan ids are numeric-only).
 aid_gen_plan_num() { printf '%s\n' "$1" | sed 's/^P//; s/^-//'; }
 

@@ -90,7 +90,7 @@ Results: 5/7 passed, 2 failed"
 @test "the previously-uncounted suites still in the portfolio emit a canonical Results line" {
   local suites=(test-semantic-review test-instruction-consistency
                 test-control-boundary test-instruction-sweep
-                test-generation-finalize test-plan-quality-enforcement)
+                test-plan-quality-enforcement)
   local missing=()
   for s in "${suites[@]}"; do
     grep -qE 'echo "Results: ' "$TESTS_DIR/$s.sh" || missing+=("$s")

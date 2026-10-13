@@ -4248,7 +4248,7 @@ _qw_revalidate() {
 }
 
 # _qw_append <epic_id> <block> — the library's append door called DIRECTLY,
-# i.e. with aid-queue-add.sh's own input guards out of the picture, the way any
+# i.e. with the former queue writer's own input guards out of the picture, the way any
 # future caller would reach it.
 _qw_append() {
   run bash -c '
@@ -4259,12 +4259,6 @@ _qw_append() {
   ' _ "$(_qw_queue)" "$TEST_PROJECT_ROOT" "$(_qw_lib)" "$1" "$2"
 }
 
-# _qw_add [args...] — the real aid-queue-add.sh CLI against this test's queue.
-# The APPEND half of the write path, i.e. the second of the two doors into the
-# file (lib/aid-queue-write.sh's header, "THE TWO DOORS").
-_qw_add() {
-  run bash "$AID_PLUGIN_PATH/scripts/aid-queue-add.sh" --queue-yaml "$(_qw_queue)" "$@"
-}
 
 # _qw_json_status <epic_id> — the status aid-fsm.sh's OWN queue parser reports.
 #
@@ -4999,39 +4993,7 @@ YAML
   [ "$(_qw_field E-064-1_1 status)" = "released_to_main" ]
 }
 
-# ─── aid-queue-add.sh emits the new fields ────────────────────────────────
-@test "aid-queue-add.sh writes status pending plus plan_id and merge_target, and stays CLI-compatible" {
-  _pfsm_bootstrap_plan "P064"
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config" "$TEST_PROJECT_ROOT/.aid-o/tasks"
-  : > "$TEST_PROJECT_ROOT/.aid-o/tasks/E-064-1_1.md"
-
-  run bash "$AID_PLUGIN_PATH/scripts/aid-queue-add.sh" \
-    --epic-id E-064-1_1 --epic-path .aid-o/tasks/E-064-1_1.md \
-    --queue-yaml "$(_qw_queue)"
-  [ "$status" -eq 0 ]
-  [ "$output" = "queued:E-064-1_1" ]
-
-  [ "$(_qw_field E-064-1_1 status)" = "pending" ]
-  [ "$(_qw_field E-064-1_1 plan_id)" = "P064" ]
-  # plan/P064 exists (bootstrap created it), so the entry declares it.
-  [ "$(_qw_field E-064-1_1 merge_target)" = "plan/P064" ]
-
-  # An EPIC of a plan with NO plan branch gets a null merge_target — the
-  # documented legacy shape that keeps aid-fsm.sh's old fallback in charge.
-  run bash "$AID_PLUGIN_PATH/scripts/aid-queue-add.sh" \
-    --epic-id E-099-1_1 --epic-path .aid-o/tasks/E-064-1_1.md \
-    --queue-yaml "$(_qw_queue)"
-  [ "$status" -eq 0 ]
-  [ "$(_qw_field E-099-1_1 plan_id)" = "P099" ]
-  [ "$(_qw_field E-099-1_1 merge_target)" = "" ]
-
-  # The duplicate guard still sees an entry this script itself wrote.
-  run bash "$AID_PLUGIN_PATH/scripts/aid-queue-add.sh" \
-    --epic-id E-064-1_1 --epic-path .aid-o/tasks/E-064-1_1.md \
-    --queue-yaml "$(_qw_queue)"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"already in the queue"* ]]
-}
+# ─── the former queue writer emits the new fields ────────────────────────────────
 
 # =============================================================================
 # ─── CP2 regression block: the queue writer's untrusted-input surface
@@ -5209,33 +5171,6 @@ status=released_to_main\"
 }
 
 # ─── Finding 2: the writer mutates exactly the entry the reader reads ──────
-@test "CP2 F2: with two entries sharing an epic_id only the FIRST is rewritten — the one queue_get_field reads" {
-  # aid-queue-add.sh:272-275 permits this shape: its duplicate guard only
-  # rejects queued|pending|blocked|running, so re-adding an EPIC whose earlier
-  # entry is already terminal legitimately creates a second entry.
-  _qw_write_queue <<'YAML'
-paused: false
-last_modified: "2026-01-01T00:00:00Z"
-
-queue:
-  - epic_id: "E-1"
-    status: pending
-    depends_on: []
-
-  - epic_id: "E-1"
-    status: completed
-    depends_on: []
-YAML
-  _qw set-status E-1 running
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"entries carry epic_id"* ]]   # duplicate is visible, not silent
-
-  # Exactly one entry moved, and it is the one the reader sees.
-  [ "$(_qw_field E-1 status)" = "running" ]
-  [ "$(grep -c '^[[:space:]]*status: running' "$(_qw_queue)")" -eq 1 ]
-  [ "$(grep -c '^[[:space:]]*status: completed' "$(_qw_queue)")" -eq 1 ]
-  _qw_yaml_parses
-}
 
 # ─── Finding 3: writer and reader resolve a dep's branch by the SAME rule ──
 @test "CP2 F3: a dependency on a non-conventional branch resolves identically for aid-fsm queue-revalidate and queue_claim_next" {
@@ -5436,7 +5371,7 @@ YAML
 # The block above pins the MUTATE door (`_queue_apply_fields`). Every one of
 # those layers said nothing about the second door: `queue_append_entry` used to
 # write its `$block` argument byte-for-byte with no validation, and
-# `aid-queue-add.sh` renders that block by interpolating six argument-reachable
+# `the former queue writer` renders that block by interpolating six argument-reachable
 # values into a heredoc with no charset guard on any of them.
 #
 # The payload below is the verifier's, executed end to end. Before the fix it
@@ -5466,189 +5401,8 @@ queue:
 YAML
 }
 
-@test "CP2 F1 (iteration 2): the aid-queue-add.sh append door rejects the injection payload, writes nothing, and leaves both queue readers agreeing" {
-  _qw_seed_queue
-  local before; before="$(md5sum "$(_qw_queue)" | cut -d' ' -f1)"
 
-  # THE verifier payload, verbatim: a merge_target that closes its own quote
-  # and opens two further entry lines, the last of which is `merge_target`
-  # itself (so the block still ends on a plausible key).
-  _qw_add --epic-id E-800 --epic-path ".aid-o/tasks/E-800.md" --plan-id P800 \
-    --merge-target 'plan/P800"
-    status: completed
-    merge_target: null
-    trailer: "x'
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Invalid --merge-target"* ]]
 
-  # Nothing written at all — not even last_modified.
-  [ "$(md5sum "$(_qw_queue)" | cut -d' ' -f1)" = "$before" ]
-  ! grep -q 'E-800' "$(_qw_queue)"
-  ! grep -q 'status: completed' "$(_qw_queue)"
-  _qw_yaml_parses
-
-  # THE assertion the iteration-1 fix would have passed on and this one must
-  # not: the two readers agree. E-800 exists for neither of them …
-  [ "$(_qw_field E-800 status)" = "" ]
-  [ "$(_qw_json_status E-800)" = "" ]
-  # … and the pre-existing entry reads identically through both.
-  [ "$(_qw_field E-SEED status)" = "pending" ]
-  [ "$(_qw_json_status E-SEED)" = "pending" ]
-
-  # Positive control: the same add without the payload succeeds, and THAT entry
-  # also reads identically through both readers — the guard rejects the attack,
-  # not the feature.
-  _qw_add --epic-id E-800 --epic-path ".aid-o/tasks/E-800.md" --plan-id P800 \
-    --merge-target 'plan/P800'
-  [ "$status" -eq 0 ]
-  [ "$output" = "queued:E-800" ]
-  [ "$(_qw_field E-800 status)" = "pending" ]
-  [ "$(_qw_json_status E-800)" = "pending" ]
-  [ "$(_qw_field E-800 merge_target)" = "plan/P800" ]
-  _qw_yaml_parses
-}
-
-@test "CP2 F1 (iteration 2): every argument-reachable field of the entry block is guarded, not just merge_target" {
-  # The injection is a CLASS, not one field: the block interpolates six values
-  # and finding 1 named only one of them. Each case below wrote a corrupt entry
-  # at commit 5611dbc.
-  local nl_payload
-  nl_payload='a.md"
-    status: completed
-    trailer: "x'
-
-  _qw_seed_queue
-  local before; before="$(md5sum "$(_qw_queue)" | cut -d' ' -f1)"
-
-  # epic_id — `^E-` was the ONLY check, so a newline sailed straight through.
-  _qw_add --epic-id "E-810${nl_payload}" --epic-path "a.md"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Invalid EPIC ID format"* ]]
-
-  # epic_path — no check at all.
-  _qw_add --epic-id E-811 --epic-path "$nl_payload"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Invalid --epic-path"* ]]
-
-  # plan_ref — no check at all.
-  _qw_add --epic-id E-812 --epic-path "a.md" --plan-ref "$nl_payload"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Invalid --plan-ref"* ]]
-
-  # plan_id — the other half of finding 1's anchor pair.
-  _qw_add --epic-id E-813 --epic-path "a.md" --plan-id "P1${nl_payload}"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Invalid --plan-id"* ]]
-
-  # depends_on — `read` happens to stop at the first line, but the reference
-  # check was a BRE, so `E-SEE.` matched the real `E-SEED` and wrote a
-  # dependency on an id that does not exist (a permanent block).
-  _qw_add --epic-id E-814 --epic-path "a.md" --depends-on 'E-SEE.'
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"not found in queue"* ]]
-
-  # priority stays an enum match; added_at is generated, never argument-reachable.
-  _qw_add --epic-id E-815 --epic-path "a.md" --priority 'medium
-    status: completed'
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"Invalid priority"* ]]
-
-  # Not one of them wrote a byte.
-  [ "$(md5sum "$(_qw_queue)" | cut -d' ' -f1)" = "$before" ]
-  ! grep -q 'status: completed' "$(_qw_queue)"
-  [ "$(_qw_field E-SEED status)" = "pending" ]
-  [ "$(_qw_json_status E-SEED)" = "pending" ]
-  _qw_yaml_parses
-}
-
-@test "CP2 F1 (iteration 2): queue_append_entry structurally refuses a block no matter which caller hands it over" {
-  # The caller-side guards above are the usage-error layer. THIS is the class
-  # closer: the library validates the shape of the block it is handed, so the
-  # door cannot be walked through by a future caller that forgets to validate —
-  # which is exactly how aid-queue-add.sh arrived at the defect twice.
-  _qw_seed_queue
-  local before; before="$(md5sum "$(_qw_queue)" | cut -d' ' -f1)"
-
-  # Exactly what aid-queue-add.sh WOULD have rendered from the verifier payload.
-  local injected
-  injected='
-  - epic_id: "E-800"
-    path: ".aid-o/tasks/E-800.md"
-    priority: medium
-    status: pending
-    depends_on: []
-    plan_id: "P800"
-    merge_target: "plan/P800"
-    status: completed
-    merge_target: null
-    trailer: "x"'
-
-  _qw_append E-800 "$injected"
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"appears twice"* ]]
-  [ "$(md5sum "$(_qw_queue)" | cut -d' ' -f1)" = "$before" ]
-
-  # A block whose id is not the id the duplicate check ran against.
-  _qw_append E-800 '
-  - epic_id: "E-OTHER"
-    status: pending'
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"declares epic_id"* ]]
-
-  # Two entries smuggled in through one append.
-  _qw_append E-800 '
-  - epic_id: "E-800"
-    status: pending
-  - epic_id: "E-801"
-    status: completed'
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"more than one"* ]]
-
-  # A value outside the shapes this library writes.
-  _qw_append E-800 '
-  - epic_id: "E-800"
-    status: pending
-    evil: {a: b}'
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"is not a shape this library writes"* ]]
-
-  # A line that is not an entry line at all.
-  _qw_append E-800 'queue: []'
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"is neither"* ]]
-
-  # A key line with no preceding epic_id line.
-  _qw_append E-800 '
-    status: completed'
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"does not start with"* ]]
-
-  # Five refusals, zero bytes, and the readers still agree.
-  [ "$(md5sum "$(_qw_queue)" | cut -d' ' -f1)" = "$before" ]
-  [ "$(_qw_field E-SEED status)" = "pending" ]
-  [ "$(_qw_json_status E-SEED)" = "pending" ]
-  [ "$(_qw_field E-800 status)" = "" ]
-  [ "$(_qw_json_status E-800)" = "" ]
-  _qw_yaml_parses
-
-  # And a well-formed block from the same door is still accepted.
-  _qw_append E-800 '
-  - epic_id: "E-800"
-    path: "a.md"
-    priority: medium
-    status: pending
-    depends_on: ["E-SEED"]
-    added_at: "2026-01-01T00:00:00Z"
-    started_at: null
-    completed_at: null
-    plan_ref: null
-    plan_id: "P800"
-    merge_target: "plan/P800"'
-  [ "$status" -eq 0 ]
-  [ "$(_qw_field E-800 status)" = "pending" ]
-  [ "$(_qw_json_status E-800)" = "pending" ]
-  _qw_yaml_parses
-}
 
 @test "CP2 F1 (iteration 2): _queue_apply_fields preserves the file byte for byte, trailing blank lines included" {
   # The header claimed "preserves untouched lines byte for byte"; the
@@ -6858,66 +6612,6 @@ _decl_commit() {
 # second EPIC. These tests walk the DOCUMENTED sequence and assert the plan
 # keeps moving.
 
-@test "CP3-F1: the documented plan_branch sequence claims the next EPIC end to end" {
-  _pfsm_bootstrap_plan "P064"
-  _pfsm_epic_with_commit "P064" "E-064-1_1"
-  _pfsm_epic_with_commit "P064" "E-064-2_1"
-  _pfsm_write_epic_evidence "E-064-1_1" "DONE" "standard"
-
-  # The queue in the shape `aid-queue-add.sh` really writes for a plan whose
-  # branch did not exist yet at queue-add time (the `aid-auto-pipeline.sh`
-  # ordering): plan_id recorded, merge_target still null.
-  _qw_write_queue <<'YAML'
-paused: false
-last_modified: "2026-01-01T00:00:00Z"
-
-queue:
-  - epic_id: E-064-1_1
-    status: running
-    plan_id: "P064"
-    merge_target: null
-    depends_on: []
-
-  - epic_id: E-064-2_1
-    status: pending
-    plan_id: "P064"
-    merge_target: null
-    depends_on: ["E-064-1_1"]
-YAML
-
-  # ── step 15 ──
-  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 0 ]
-  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 0 ]
-
-  # The premise: the work IS on plan/P064 and is provably NOT on main — the
-  # exact state this plan exists to create.
-  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor task/E-064-1_1/main plan/P064
-  [ "$status" -eq 0 ]
-  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor task/E-064-1_1/main main
-  [ "$status" -ne 0 ]
-
-  # …and step 15 alone leaves the queue entry at `running`.
-  [ "$(_qw_field E-064-1_1 status)" = "running" ]
-
-  # ── what step 16 does WITHOUT 16a: the hand-off refuses ──
-  _qw claim-next P064
-  [ "$status" -eq 1 ]
-  [ "$output" = "blocked:E-064-2_1:dependency_unmerged:E-064-1_1" ]
-  [ "$(_qw_field E-064-2_1 status)" = "blocked" ]
-
-  # ── step 16a: mirror the merge into the queue ──
-  _qw set-status E-064-1_1 merged_to_plan
-  [ "$status" -eq 0 ]
-  [ "$(_qw_field E-064-1_1 status)" = "merged_to_plan" ]
-
-  # ── step 16b: the next EPIC is claimable ──
-  _qw claim-next P064
-  [ "$status" -eq 0 ]
-  [ "$output" = "E-064-2_1" ]
-  [ "$(_qw_field E-064-2_1 status)" = "running" ]
-}
 
 @test "CP3-F1: 16a cannot unblock a dependency that did not really merge — ancestry still decides" {
   # The compensating half: mirroring is a DERIVED VIEW. For an entry that
@@ -7036,7 +6730,7 @@ YAML
 #
 # WHY REPO-WIDE. E-064-2_2 removed `grep -oP` from aid-fsm.sh (CP3 fix,
 # 936322f) and in the SAME EPIC reintroduced the identical construct in
-# aid-queue-add.sh (61ddef2, fixed in f60efab) — the regression test above
+# the former queue writer (61ddef2, fixed in f60efab) — the regression test above
 # inspects only $FSM, so the defect class simply moved to a file the detector
 # could not see. `-P` is a GNU-grep BUILD option: on a grep without PCRE
 # support the command FAILS (it does not "not match"), and every historical

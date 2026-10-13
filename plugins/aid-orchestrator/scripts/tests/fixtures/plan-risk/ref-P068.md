@@ -59,7 +59,7 @@ status: draft
 - Modify: `plugins/aid-orchestrator/scripts/aid-plan-fsm.sh` — add the `inventory` subcommand and the mode default.
 - Create: `plugins/aid-orchestrator/defaults/policies/plan-boundary-policy.yaml` — the mode default, the lock lease seconds and the plan-final profile floor.
 - Test: `plugins/aid-orchestrator/defaults/templates/plan.md` (lines ~10-20) — verify the existing `lifecycle_strict: true` emission still holds; no edit expected.
-- Modify: `plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh` (lines ~250-290) — call `plan-start` for new plans and stamp `mode` into the lifecycle manifest it already writes.
+- Modify: `plugins/aid-orchestrator/scripts/aid-plan-fsm.sh` (lines ~250-290) — call `plan-start` for new plans and stamp `mode` into the lifecycle manifest it already writes.
 - Modify: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats` — add AC8 mode cases.
 - Modify: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats` — add the AC9 resilience matrix.
 - Modify: `plugins/aid-orchestrator/scripts/aid-plan-fsm.sh` — add the `AID_PLAN_FSM_CRASH_AFTER` test seam.

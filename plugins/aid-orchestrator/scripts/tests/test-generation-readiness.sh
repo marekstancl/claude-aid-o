@@ -5,8 +5,6 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 READY="$ROOT/plugins/aid-orchestrator/scripts/aid-generation-readiness.sh"
-GEN="$ROOT/plugins/aid-orchestrator/scripts/aid-plan-to-epic.sh"
-T="$ROOT/plugins/aid-orchestrator/defaults/templates/epic.md"
 F="$ROOT/plugins/aid-orchestrator/scripts/tests/fixtures/multi-phase-plan.md"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 pass=0; fail=0
@@ -45,15 +43,15 @@ cp "$F" "$tmp/two-paths.md"
 sed -i '0,/Create: `docs\/adr\/ADR-001-api-design.md`/s//Create: `docs\/adr\/ADR-001-api-design.md`, `docs\/adr\/ADR-002.md`/' "$tmp/two-paths.md"
 expect_fail "comma-separated Files paths never silently lose the second path" bash "$READY" "$tmp/two-paths.md" --total 3
 
-# The permitted ` + ` form must preserve BOTH paths in the generated EPIC.
+# The permitted ` + ` form must preserve BOTH paths in plan.json (the shared
+# reader plan-run builds it with; the EPIC generator went in 3.0.0).
 cp "$F" "$tmp/plus-paths.md"
 sed -i '0,/Create: `docs\/adr\/ADR-001-api-design.md`/s//Create: `docs\/adr\/ADR-001-api-design.md` + `docs\/adr\/ADR-002.md`/' "$tmp/plus-paths.md"
-mkdir -p "$tmp/out"; printf 'counter: 0\n' > "$tmp/counter.yaml"
-generated="$(bash "$GEN" --plan "$tmp/plus-paths.md" --phase 1 --total 3 --epic-template "$T" --output-dir "$tmp/out" --counter-yaml "$tmp/counter.yaml" 2>/dev/null)"
-if [[ -f "$generated" ]] && grep -q '`docs/adr/ADR-001-api-design.md`' "$generated" && grep -q '`docs/adr/ADR-002.md`' "$generated"; then
-  ok "explicit + Files paths both survive EPIC generation"
+generated="$( ( source "$ROOT/plugins/aid-orchestrator/scripts/lib/common.sh"; source "$ROOT/plugins/aid-orchestrator/scripts/lib/aid-plan-json.sh"; aid_plan_json_steps_from_plan "$tmp/plus-paths.md" ) 2>/dev/null)"
+if jq -e '[.[].allowed_paths[]] | (index("docs/adr/ADR-001-api-design.md") != null) and (index("docs/adr/ADR-002.md") != null)' <<< "$generated" >/dev/null 2>&1; then
+  ok "explicit + Files paths both survive into plan.json"
 else
-  bad "explicit + Files paths both survive EPIC generation" "one path was lost"
+  bad "explicit + Files paths both survive into plan.json" "one path was lost"
 fi
 
 # The shapes three plans passed the author's old check with and were refused at

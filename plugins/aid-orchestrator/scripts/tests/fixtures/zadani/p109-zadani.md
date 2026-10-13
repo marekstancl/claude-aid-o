@@ -80,8 +80,8 @@ vydání v `.aid-o/work/interim-P109.md` „Stav po každém vydání“):
 - **Lint plánu nesrovnává kritéria se zadáním**: `aid-plan-lint.sh` (772 řádků) kontroluje tvar
   Files, Reuse check, zakázané sekce (ř. 339), standardy a dokumentační plochy. Čtečka frontmatteru
   existuje jedna: `_aid_fm_get` (`lib/aid-roots.sh:248`).
-- **„AID Role“ kroku jde do `plan.json` přes tabulku EPICu**: `aid-plan-to-epic.sh:901-906` čte
-  pole z kroku a staví řádek tabulky (ř. 1166, hlavička ř. 1485, pět sloupců), `aid-epic-to-json.sh:214-222`
+- **„AID Role“ kroku jde do `plan.json` přes tabulku EPICu**: `aid-plan-lint.sh:901-906` čte
+  pole z kroku a staví řádek tabulky (ř. 1166, hlavička ř. 1485, pět sloupců), `aid-plan-diff.sh:214-222`
   tabulku čte s tvrdou kontrolou pěti sloupců; kořen `plan.json` nese `source_plan` (ř. 821-830).
 - **Změna plánu po kole** (`aid-review-round.sh fix-check`, ř. 1120-1158) odmítne jen krok, Files
   a akceptační kritérium mimo seznam oprav. **Rozšíření rozsahu za běhu** (`aid-fsm.sh cmd_amend_scope`,
@@ -194,7 +194,7 @@ běhů (PM: dokončí mimo AID), paralelní vlny, „perky Claude Code“, /aid-
 | transport Codexu | `plugins/aid-orchestrator/scripts/lib/aid-codex-transport.sh` (`aid_codex_probe` ř. 61, sonda ř. 57-68, `_run_codex_isolated` ř. 115) |
 | lint, kontrola plánu, běžec kritérií | `plugins/aid-orchestrator/scripts/aid-plan-lint.sh`, `aid-plan-check.sh` (A6 ř. 278-296), `aid-plan-diff.sh`, `aid-generation-readiness.sh` |
 | čtečky | `plugins/aid-orchestrator/scripts/lib/aid-roots.sh` (`_aid_fm_get` ř. 248, `aid_state_root`), `lib/aid-scoping.sh` (`_aid_plan_section` ř. 224, `_aid_plan_step_field` ř. 329) |
-| generace | `plugins/aid-orchestrator/scripts/aid-plan-to-epic.sh` (role ř. 901-906, řádek tabulky ř. 1166, hlavička ř. 1485), `aid-epic-to-json.sh` (tabulka ř. 214-222, kořen ř. 821-830), `defaults/templates/plan.schema.json` |
+| generace | `plugins/aid-orchestrator/scripts/aid-plan-lint.sh` (role ř. 901-906, řádek tabulky ř. 1166, hlavička ř. 1485), `aid-plan-diff.sh` (tabulka ř. 214-222, kořen ř. 821-830), `defaults/templates/plan.schema.json` |
 | rozšíření rozsahu za běhu | `plugins/aid-orchestrator/scripts/aid-fsm.sh` `cmd_amend_scope` ř. 5405-5549 (GATES ř. 5477-5481, záznam ř. 5515) |
 | politika kol a její čtečka | `plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml` ř. 26-31, `scripts/lib/aid-review-config.sh` ř. 43 |
 | deník | `plugins/aid-orchestrator/scripts/lib/aid-plugin-issues.sh` (`aid_plugin_issues_path` ř. 32) |

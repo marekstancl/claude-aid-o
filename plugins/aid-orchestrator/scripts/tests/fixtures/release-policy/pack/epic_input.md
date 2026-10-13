@@ -1,6 +1,6 @@
 <!--
   epic_input.md fixture — copy of the EPIC md placed in the run evidence dir by
-  aid-epic-to-json.sh. The C4 aggregator reads the frontmatter plan_ref to run the
+  aid-plan-diff.sh. The C4 aggregator reads the frontmatter plan_ref to run the
   plan-review hop: plan_id = basename(plan_ref) minus .md.
 -->
 ---

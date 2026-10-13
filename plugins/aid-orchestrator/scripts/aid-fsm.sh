@@ -3420,7 +3420,7 @@ cmd_resume() {
 
 cmd_init() {
   if [[ $# -lt 7 ]]; then
-    echo "Usage: aid-fsm.sh init <epic_id> <run_id> <total_steps> <mode> <branch> <base_commit> <state_file> [--force] — got $# argument(s). All seven are positional; aid-json-to-run.sh is the normal caller, a manual re-init must pass the same seven." >&2
+    echo "Usage: aid-fsm.sh init <epic_id> <run_id> <total_steps> <mode> <branch> <base_commit> <state_file> [--force] — got $# argument(s). All seven are positional; the former run renderer is the normal caller, a manual re-init must pass the same seven." >&2
     exit 2
   fi
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
@@ -3956,7 +3956,7 @@ If ${_wt_plan_branch} is gone, --recreate-worktree is NOT the remedy: the worktr
         ;;
       main|master|develop)
         # P040 Component E: if the EPIC's task branch already exists (e.g. a
-        # prior aid-json-to-run.sh generation pass created it, or a re-init of
+        # prior the former run renderer generation pass created it, or a re-init of
         # the same EPIC), resume onto it instead of failing on `checkout -b`.
         if git show-ref --verify --quiet "refs/heads/${expected_branch}"; then
           log_info "Resume case: checking out existing $expected_branch"
@@ -6579,7 +6579,7 @@ EOF
     local epic_id run_id evidence_dir project_root
     epic_id=$(yaml_field "$state_file" epic_id)
     run_id=$(yaml_field "$state_file" run_id)
-    # P074 Step 1: compliance.json + epic-summary.md are STATE —
+    # P074 Step 1: compliance.json is STATE —
     # both land in the PRIMARY evidence dir even when the release edge is
     # crossed (forced or not) from inside a linked worktree. Same legacy
     # cwd-relative fallback as derive_timeline.
@@ -6588,10 +6588,6 @@ EOF
     project_root="$(aid_state_root 2>/dev/null || pwd)"
     write_compliance_json "$epic_id" "$run_id" "$state_file" "$evidence_dir" "$project_root"
 
-    # IMP-090: best-effort epic-summary.md generation after compliance write.
-    # Failure logs a warning but never aborts the release path.
-    bash "$SCRIPT_DIR/aid-epic-summary.sh" generate "$evidence_dir" \
-      2>/dev/null || log_warn "epic-summary.md generation failed (non-fatal)"
 
     _fsm_pre_2103_services_note "$evidence_dir" "done-advance"
   fi
@@ -7004,7 +7000,7 @@ cmd_plan_close() {
 # fallback chain is unavailable — a plan-branch dependency is proven by
 # ancestry or it is blocked. Registry: plan_branch_merge_target.
 
-# _queue_parse_to_json <file> — awk parser copied from aid-queue-add.sh
+# _queue_parse_to_json <file> — awk parser copied from the former queue writer
 # (lines ~104-211). The live dogfood .aid-o/config/queue.yaml is NOT
 # yq-parseable (mixed indentation: a top-level `- epic_id:` list with 2-space
 # keys, interleaved with a 4-space quoted block). This awk handles both the

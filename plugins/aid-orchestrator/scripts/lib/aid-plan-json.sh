@@ -10,7 +10,7 @@
 #     steps through aid_plan_json_steps_from_plan and only formats the EPIC.
 # The builder body is the EPIC converter's former "Step 4 .. Step 14"
 # moved here unchanged, so the EPIC path's golden output is byte-identical
-# (scripts/tests/test-epic-to-json-regression.sh).
+# (P114: the EPIC path and its golden test were removed in 3.0.0).
 #
 # Callers source lib/common.sh first (error_exit, extract_section).
 # =============================================================================
