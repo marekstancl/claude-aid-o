@@ -119,6 +119,12 @@ cycle() {   # triage and fix the last round's agent finding
   cp "$T/best.html" "$P/site/index.html"
   run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.round == 1 and .accepted' "$P/.aid-ui/critic/verdict.json" >/dev/null; [ "$(dec)" = done ]
+  # reopened on purpose: the verdict is archived, the changed web is rated, and only that round can be audited
+  run python3 "$Q" reopen "$P"; [ "$status" -eq 2 ]
+  python3 "$Q" reopen "$P" --reason "PM: odstup od čar" >/dev/null; [ "$(dec)" = round ]; ls "$P/.aid-ui/critic/verdicts/"*.json >/dev/null
+  run python3 "$Q" reopen "$P" --reason x; [ "$status" -eq 1 ]
+  ans 8 minor; python3 "$Q" round "$P" --web "$W" >/dev/null; python3 "$Q" triage "$P" r3-f1 rejected_with_reason --reason x >/dev/null
+  python3 "$Q" status "$P" | jq -e '.decision == "audit" and .best.round == 3' >/dev/null
 }
 
 @test "one loop, one critic, one address; links between findings must point at another finding of the round" {

@@ -26,6 +26,9 @@ studio shows), verdict.json (the closing audit).
       After acceptance the loop goes on toward 10 while it improves; when it stops improving (or the cap, or
       nothing accepted to fix) the best accepted round is audited - `close` first asks to set accepted findings
       not fixed yet to superseded. Every round and audit runs on the critic and the address of round 1.
+  reopen <project> --reason <why>
+      A done loop opened again on purpose: the verdict goes to verdicts/, the reason to loop-reopened.json; the next
+      round rates the changed web and only rounds since the reopen are audited.
   audit <project> --web <url>
       The closing check (not a repair round): the site must be the best accepted round's web; three blind ratings
       (aid-ui-client.py critic --audit), aid-ui-critic.py verdict -> verdict.json. Not accepted: the auditors'
@@ -97,9 +100,17 @@ def verdict(p):
     return json.load(open(vf, encoding="utf-8")) if os.path.isfile(vf) else None
 
 
-def target_of(rs):
-    """The web the audit rates: the best accepted repair round (the latest of equal scores)."""
-    accs = [r for r in rs if not r.get("audit") and r["score"]["accepted"]]
+def reopened_at(p):
+    try:
+        return json.load(open(os.path.join(cdir(p), "loop-reopened.json"), encoding="utf-8"))[-1]["at"]
+    except (OSError, ValueError, IndexError, KeyError):
+        return ""
+
+
+def target_of(rs, since=""):
+    """The web the audit rates: the best accepted repair round (the latest of equal scores); after a reopen, only
+    rounds rated since then count (the reopened web is a new web)."""
+    accs = [r for r in rs if not r.get("audit") and r["score"]["accepted"] and r["at"] >= since]
     return max(accs, key=lambda r: (r["score"]["quality_score"], r["n"])) if accs else None
 
 
@@ -107,7 +118,8 @@ def status(p):
     rs = rounds(p)
     reps = [r for r in rs if not r.get("audit")]   # an audit's findings are triaged like a round but never count as one
     out = {"rounds": len(rs), "repair_rounds": max(len(reps) - 1, 0), "scores": [r["score"]["quality_score"] for r in rs]}
-    target, v = target_of(rs), verdict(p)
+    since = reopened_at(p)
+    target, v = target_of(rs, since), verdict(p)
     if target:
         out["best"] = {"round": target["n"], "quality_score": target["score"]["quality_score"], "site_sha": target["site_sha"]}
     if v and target and v.get("site_sha") == target["site_sha"] and v.get("accepted"):
@@ -115,6 +127,8 @@ def status(p):
     if not rs:
         return dict(out, decision="round", why="no round yet")
     last = rs[-1]
+    if since and last["at"] < since:
+        return dict(out, decision="round", why="reopened %s: rate the changed web" % since)
     conflict = [f for f in last["findings"] if f.get("state") == "blocked" and f.get("conflict_with")]
     if conflict:
         f = conflict[0]
@@ -287,7 +301,7 @@ def audit(p, web):
         die("no audit now: %s (%s)" % (st["decision"], st["why"]))
     same_loop(p, web)
     rs = rounds(p)
-    tgt = target_of(rs)
+    tgt = target_of(rs, reopened_at(p))
     cur = site_sha(p)
     if cur != tgt["site_sha"]:
         die("the site is not the best accepted web (round %d, %s; the site now %s): restore that web, rebuild, record and gate it, then audit"
@@ -325,6 +339,24 @@ def audit(p, web):
     sys.exit(0 if v["accepted"] else 3)
 
 
+def reopen(p, reason):
+    """A done loop opened again on purpose (the PM wants more changes): the verdict is archived, the reason kept,
+    the next round rates the changed web and only rounds from now on can be audited."""
+    if not (reason or "").strip():
+        die("reopen needs --reason", 2)
+    if status(p)["decision"] != "done":
+        die("only a done loop is reopened (now: %s)" % status(p)["decision"])
+    at = now()
+    vf = os.path.join(cdir(p), "verdict.json")
+    os.makedirs(os.path.join(cdir(p), "verdicts"), exist_ok=True)
+    os.replace(vf, os.path.join(cdir(p), "verdicts", at.replace(":", "") + ".json"))
+    lf = os.path.join(cdir(p), "loop-reopened.json")
+    log = json.load(open(lf, encoding="utf-8")) if os.path.isfile(lf) else []
+    log.append({"at": at, "reason": reason.strip()})
+    wj(lf, log)
+    print("reopened -> %s" % write_loop(p)["decision"])
+
+
 def main(a):
     if len(a) < 2:
         die("usage: round|triage|fixed|status|audit <project> ... (see the header)", 2)
@@ -345,6 +377,8 @@ def main(a):
         audit(p, opts["web"])
     elif cmd == "triage" and len(rest) == 2:
         triage(p, rest[0], rest[1], opts)
+    elif cmd == "reopen":
+        reopen(p, opts.get("reason"))
     elif cmd == "fixed" and len(rest) == 1:
         fixed(p, rest[0], opts.get("evidence"))
     else:
