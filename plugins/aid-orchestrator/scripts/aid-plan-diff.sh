@@ -57,6 +57,10 @@ source "${SCRIPT_DIR}/lib/aid-verification-pattern.sh"
 source "${SCRIPT_DIR}/lib/aid-scoping.sh"   # _aid_plan_step_bounds, _aid_plan_step_field (P110 --step)
 # shellcheck source=lib/aid-decision-card.sh
 source "${SCRIPT_DIR}/lib/aid-decision-card.sh"   # aid_pm_card_check — a deferral the PM answered (P110)
+# shellcheck source=lib/aid-repo-roots.sh
+source "${SCRIPT_DIR}/lib/aid-repo-roots.sh"      # aid_rr_path, aid_rr_text — a foreign point reads the plan's worktree (P112)
+# shellcheck source=lib/aid-unmeasured.sh
+source "${SCRIPT_DIR}/lib/aid-unmeasured.sh"      # AID_PD_UNMEASURED_RE
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.67.0}"
 
@@ -167,6 +171,30 @@ GEN_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # full unbounded test suite inside a single AC is an anti-pattern — bound it or
 # raise this (added 2026-07-10; matches aid-run-gates.sh's per-gate timeout model).
 AC_CMD_TIMEOUT="${AID_PLAN_DIFF_AC_TIMEOUT:-120}"
+# P112: a floor that raises EVERY point's limit, its own timeout: included — the
+# re-measurement of a step whose point ran out of time (the plan is not edited
+# mid-run, so AID_PLAN_DIFF_AC_TIMEOUT, which only fills a missing timeout:, would
+# change nothing for a point that declares one).
+AC_TIMEOUT_FLOOR="${AID_PLAN_DIFF_AC_TIMEOUT_FLOOR:-}"
+if [[ -n "$AC_TIMEOUT_FLOOR" ]] && { ! [[ "$AC_TIMEOUT_FLOOR" =~ ^[1-9][0-9]*$ ]] || (( AC_TIMEOUT_FLOOR > 1800 )); }; then
+  echo "AID_PLAN_DIFF_AC_TIMEOUT_FLOOR='${AC_TIMEOUT_FLOOR}' must be whole seconds from 1 to 1800" >&2; exit 10
+fi
+
+# ── foreign repositories (P112) ─────────────────────────────────────────────
+# A plan with repo_roots measures a point naming a declared foreign path in the
+# plan's worktree there, after a step and at the close — never the live
+# checkout. The mapping comes from the run's plan.json when given, else from
+# the plan file (its id and this project's name).
+RR_SRC=""
+if [[ -n "$PLAN_JSON" && -f "$PLAN_JSON" ]]; then
+  jq -e '(.repo_roots // []) | length > 0' "$PLAN_JSON" >/dev/null 2>&1 && RR_SRC="$PLAN_JSON"
+elif awk 'NR==1 && !/^---/ {exit} NR>1 && /^---/ {exit} /repo_roots/ {f=1; exit} END {exit !f}' "$PLAN"; then
+  RR_SRC="$PLAN"
+fi
+if [[ -n "$RR_SRC" ]] && ! aid_rr_load "$RR_SRC" "" "$(basename "$STATE_ROOT")"; then
+  echo "aid-plan-diff: the repo_roots mapping of ${RR_SRC} does not load — no foreign point is measured against a live checkout instead" >&2
+  exit 4
+fi
 
 # ── isolation (P110, --isolated) ────────────────────────────────────────────
 # PD_NET: unshare | host | none | env_stripped:<VAR> | verification_env_unset:<VAR>
@@ -271,6 +299,7 @@ run_pattern() {
   local type=$1 cmd=$2 file=$3 regex=$4 expected_exit=$5 t="${6:-}" label="${7:-ac}"
   # the block's own timeout: (P110, 1..1800 s) or the runner's default
   [[ "$t" =~ ^[1-9][0-9]*$ ]] || t="$AC_CMD_TIMEOUT"
+  [[ -n "$AC_TIMEOUT_FLOOR" ]] && (( t < AC_TIMEOUT_FLOOR )) && t="$AC_TIMEOUT_FLOOR"
 
   local start_ms end_ms duration_ms
   start_ms=$(date +%s%3N)
@@ -311,7 +340,7 @@ run_pattern() {
         timeout "$t" bash -c "$cmd" </dev/null >/dev/null 2>&1 || actual_exit=$?
       fi
       if [[ "$actual_exit" -eq 124 && "$expected_exit" -ne 124 ]]; then
-        verdict="absent"; evidence="timeout after ${t}s (reason=timeout)"
+        verdict="absent"; evidence="neměřeno: limit ${t} s (reason=timeout)"
       elif [[ "$actual_exit" -eq "$expected_exit" ]]; then
         verdict="present"; evidence="exit=$actual_exit"
       else
@@ -429,7 +458,25 @@ while IFS= read -r line; do
   ac_timeout=""
   IFS=$'\x1f' read -r ac_label ac_text pat_type cmd file regex expected_exit ac_timeout <<< "$line"
 
-  IFS=$'\x1f' read -r verdict evidence duration_ms <<< "$(run_pattern "$pat_type" "$cmd" "$file" "$regex" "$expected_exit" "$ac_timeout" "$ac_label")"
+  # P112: a declared foreign path → the plan's worktree; a worktree that is gone
+  # is named, never replaced by a read of the live checkout.
+  fw=0 fnote=""
+  if [[ -n "$RR_SRC" ]]; then
+    case "$pat_type" in
+      must_contain|must_not_exist) f2="$(aid_rr_path "$RR_SRC" "$file")" || fw=1; [[ "$f2" == "$file" ]] || fnote=" (foreign: read ${f2}, the plan's worktree)"; file="$f2" ;;
+      cmd) c2="$(aid_rr_text "$RR_SRC" "$cmd")" || fw=1
+           if [[ "$c2" != "$cmd" ]]; then
+             fnote=" (foreign paths read in:$(cut -f3 <<< "$_AID_RR_CACHE" | while IFS= read -r w; do [[ -n "$w" && "$c2" == *"$w"* ]] && printf ' %s' "$w"; done))"
+           fi
+           cmd="$c2" ;;
+    esac
+  fi
+  if (( fw )); then
+    verdict=absent; evidence="the plan's foreign worktree is gone: ${file:-$cmd} (reason=foreign_worktree_missing)"; duration_ms=0
+  else
+    IFS=$'\x1f' read -r verdict evidence duration_ms <<< "$(run_pattern "$pat_type" "$cmd" "$file" "$regex" "$expected_exit" "$ac_timeout" "$ac_label")"
+    evidence+="$fnote"
+  fi
 
   [[ "$verdict" == "present" ]] && present_count=$((present_count + 1))
   [[ "$verdict" == "absent"  ]] && absent_count=$((absent_count + 1))
@@ -454,7 +501,9 @@ while IFS= read -r line; do
     --arg dts "$([[ "$pat_type" == deferred ]] && echo "$cmd")" \
     '{ac_label: $lbl, ac_text: $text, pattern_type: $ptype, verdict: $vrd, evidence: $evidence, duration_ms: $dur}
      + (if $dts == "" then {} else {deferred_to_step: ($dts | tonumber)} end)
-     + ([$evidence | capture("\\(reason=(?<r>[^)]+)\\)")] | if length > 0 then {reason: .[0].r} else {} end)')")
+     + ([$evidence | capture("\\(reason=(?<r>[^)]+)\\)")] | if length > 0 then {reason: .[0].r} else {} end)
+     | . + (if (.reason // "") == "timeout" then {unmeasured: true, timeout_s: ($evidence | capture("limit (?<s>[0-9]+) s").s | tonumber)}
+        elif ((.reason // "") | test($um_re)) then {unmeasured: true} else {} end)' --arg um_re "$AID_PD_UNMEASURED_RE")")
 done <<< "$ac_lines"
 
 # Single jq slurp builds final results array — O(1) jq invocation vs O(n).

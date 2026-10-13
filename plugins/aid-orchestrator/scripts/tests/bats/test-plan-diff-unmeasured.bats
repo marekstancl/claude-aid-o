@@ -29,3 +29,18 @@ teardown() { rm -rf "$R"; }
   [ "$(jq -r .ac_count ev/plan-diff.json)" = 2 ]
   [ "$(jq -c .summary.unmeasured ev/plan-diff.json)" = '{"summary_prose":1,"summary_unparsed":0,"step_bullets":1}' ]
 }
+
+@test "timeout: a point out of time is unmeasured (reason, limit, neměřeno), not a plain absent" {
+  printf -- '---\nid: P3\n---\n# Plan\n\n## Acceptance Criteria\n\n- [ ] AC1: slow\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "sleep 5"\n    expected_exit: 0\n    timeout: 1\n  ```\n' > .aid-o/plans/P3.md
+  run bash "$PD" --plan .aid-o/plans/P3.md --evidence-dir ev --base-commit "$BASE"; [ "$status" -eq 1 ]
+  [ "$(jq -c '.results[0] | {verdict, unmeasured, reason, timeout_s}' ev/plan-diff.json)" = '{"verdict":"absent","unmeasured":true,"reason":"timeout","timeout_s":1}' ]
+  [[ "$(jq -r '.results[0].evidence' ev/plan-diff.json)" == "neměřeno: limit 1 s"* ]]
+}
+
+@test "timeout: the close's sentence names the limit and the timeout: remedy (one sentence, lib/aid-unmeasured.sh)" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-unmeasured.sh"
+  run aid_pd_unmeasured_line '{"ac_label":"AC4","reason":"timeout","timeout_s":120}'
+  [[ "$output" == "AC4 (timeout: neměřeno, limit 120 s"*"AID_PLAN_DIFF_AC_TIMEOUT_FLOOR"*"timeout:)" ]]
+  grep -q 'aid_pd_unmeasured_line' "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh"
+  [[ timeout =~ $AID_PD_UNMEASURED_RE ]]
+}

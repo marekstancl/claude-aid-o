@@ -72,6 +72,8 @@ source "${SCRIPT_DIR}/lib/aid-review-summary.sh"
 source "${SCRIPT_DIR}/lib/aid-review-config.sh"    # aid_review_switched_off
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-permissions.sh"   # the ONE autonomous_mode reader
+# shellcheck source=lib/aid-unmeasured.sh
+source "${SCRIPT_DIR}/lib/aid-unmeasured.sh"    # AID_PD_UNMEASURED_RE, aid_pd_unmeasured_line (P112)
 
 # ---------------------------------------------------------------------------
 # Accumulators (globals mutated by add_input / add_blocker / waiver loop)
@@ -698,15 +700,17 @@ main() {
           fail)            pd_row_verdict="blocked" ;;
         esac
         add_input plan_diff "plan-diff.json" "$pd_row_verdict" "bound plan AC verdict=${pd_verdict}" true
-        # P110: a point the close could not run in isolation (no_isolation,
-        # no_verification_env, verification_env_unset, env_stripped) is
-        # UNMEASURED — named as such, never counted as verified.
-        local pd_um
-        pd_um="$(jq -r '[.results[] | select(.verdict == "absent" and ((.reason // "") | test("^(no_isolation|no_verification_env|verification_env_unset|env_stripped)"))) | "\(.ac_label) (\(.reason))"] | join(", ")' "$pd" 2>/dev/null || true)"
-        [[ -n "$pd_um" ]] && add_blocker plan_diff "blocking" "plan-diff: criteria unmeasured, the close could not run them isolated: ${pd_um}"
+        # P110: a point the close could not run (no_isolation, no_verification_env,
+        # verification_env_unset, env_stripped; P112: timeout) is UNMEASURED —
+        # named as such with its limit and remedy, never counted as verified.
+        local pd_um="" pd_row
+        while IFS= read -r pd_row; do
+          [[ -n "$pd_row" ]] && pd_um+="${pd_um:+; }$(aid_pd_unmeasured_line "$pd_row")"
+        done < <(jq -c --arg re "$AID_PD_UNMEASURED_RE" '.results[] | select(.verdict == "absent" and ((.reason // "") | test($re)))' "$pd" 2>/dev/null || true)
+        [[ -n "$pd_um" ]] && add_blocker plan_diff "blocking" "plan-diff: criteria unmeasured: ${pd_um}"
         case "$pd_verdict" in
           pass|skipped|partial) : ;;
-          *) [[ -n "$pd_um" ]] && (( $(jq '[.results[] | select(.verdict == "absent")] | length' "$pd") == $(jq '[.results[] | select(.verdict == "absent" and ((.reason // "") | test("^(no_isolation|no_verification_env|verification_env_unset|env_stripped)")))] | length' "$pd") )) \
+          *) [[ -n "$pd_um" ]] && (( $(jq '[.results[] | select(.verdict == "absent")] | length' "$pd") == $(jq --arg re "$AID_PD_UNMEASURED_RE" '[.results[] | select(.verdict == "absent" and ((.reason // "") | test($re)))] | length' "$pd") )) \
                || add_blocker plan_diff "blocking" "plan-diff reports absent acceptance criteria" ;;
         esac
       fi

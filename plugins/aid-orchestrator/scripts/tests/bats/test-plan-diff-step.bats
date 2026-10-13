@@ -104,7 +104,7 @@ _card() {
 @test "step: a block's timeout: is used — sleep 5 with timeout 2 is absent (reason=timeout)" {
   _pj "5:AC4"
   _run --step 0; [ "$status" -eq 1 ]
-  [[ "$(_out 0 | jq -r '.results[] | select(.ac_label == "AC4") | .evidence')" == *"timeout after 2s (reason=timeout)"* ]]
+  [[ "$(_out 0 | jq -r '.results[] | select(.ac_label == "AC4") | .evidence')" == *"neměřeno: limit 2 s (reason=timeout)"* ]]
 }
 @test "step: timeout: 2000 is refused by the shared validator, 900 accepted" {
   source "$AID_PLUGIN_PATH/scripts/lib/aid-verification-pattern.sh"
@@ -259,4 +259,70 @@ _unlisten() { kill "$LPID" 2>/dev/null || true; }
 @test "isolation: --cwd on a directory that does not exist exits 3 cwd_not_worktree" {
   _iplan '"true"'
   _irun --cwd /nonexistent-p110; [ "$status" -eq 3 ]; [[ "$output" == *"cwd_not_worktree"* ]]
+}
+
+# ── foreign repositories (P112 Step 2) ───────────────────────────────────────
+# _foreign [repo_roots] — a second repository F declared in repo_roots (unless
+# "bare"), its plan worktree WT holding only-wt.md (absent from the live
+# checkout) and lacking gone.md (present live); three points name the LIVE path.
+_foreign() {
+  FAR="$(mktemp -d)"; F="$FAR/docs"; mkdir -p "$F"; git -C "$F" init -q -b main
+  git -C "$F" config user.email t@t; git -C "$F" config user.name t
+  echo live > "$F/gone.md"; git -C "$F" add gone.md; git -C "$F" commit -qm init
+  WT="$F/.aid-worktrees/plan-P953--docs"
+  git -C "$F" worktree add -q -b "plan/P953-$(basename "$ROOT")" "$WT" main
+  echo marker > "$WT/only-wt.md"; git -C "$WT" rm -q gone.md; git -C "$WT" add only-wt.md; git -C "$WT" commit -qm work
+  local rr=""; [[ "${1:-}" == bare ]] || rr="repo_roots: [{name: docs, path: $F}]"
+  { printf -- '---\nid: P953\n%s\n---\n# Plan\n\n### Step 1: one\n\n**Zavírá:** AC1, AC2, AC3\n\n## Acceptance Criteria\n\n' "$rr"
+    printf -- '- [ ] AC1: in the worktree\n  ```yaml\n  verification_pattern:\n    type: must_contain\n    file: %s/only-wt.md\n    regex: marker\n  ```\n' "$F"
+    printf -- '- [ ] AC2: deleted in the worktree\n  ```yaml\n  verification_pattern:\n    type: must_not_exist\n    file: %s/gone.md\n  ```\n' "$F"
+    printf -- '- [ ] AC3: a command on the live path\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "grep -q marker %s/only-wt.md && test ! -e %s/gone.md"\n    expected_exit: 0\n  ```\n' "$F" "$F"
+  } > "$PLAN"
+}
+_verdicts() { jq -c '[.results[] | .verdict]' "$1"; }
+
+@test "foreign-read: after a step (plan.json with repo_roots) every point is measured in the plan's worktree" {
+  _foreign
+  jq -n --arg f "$F" --arg wt "$WT" --arg br "plan/P953-$(basename "$ROOT")" \
+    '{repo_roots: [{name: "docs", path: $f, worktree: $wt, branch: $br}], steps: [{id: "step_1_backend", plan_step: 1, zavira: ["AC1", "AC2", "AC3"]}]}' > "$ROOT/plan.json"
+  _run --step 0; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_verdicts "$EV/cp2/step-0/plan-diff.json")" = '["present","present","present"]' ]
+  [[ "$(_out 0 | jq -r '.results[0].evidence')" == *"$WT/only-wt.md"*"plan's worktree"* ]]
+  [ ! -e "$F/only-wt.md" ] && [ -e "$F/gone.md" ]     # the live checkout is untouched
+  rm -rf "$FAR"
+}
+@test "foreign-read: the plan-scope measurement maps from the plan file's own repo_roots" {
+  _foreign
+  run bash "$PD" --plan "$PLAN" --evidence-dir "$EV" --base-commit HEAD; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_verdicts "$EV/plan-diff.json")" = '["present","present","present"]' ]
+  rm -rf "$FAR"
+}
+@test "foreign-read: at the close (--isolated --cwd <candidate>) the points read the foreign worktree too" {
+  _nsprobe; _foreign
+  git worktree add -q -b cand "$ROOT/cand"
+  _irun --cwd "$ROOT/cand"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_verdicts "$EV/plan-diff.json")" = '["present","present","present"]' ]
+  grep -q "$WT/only-wt.md" "$EV/cmd-AC3.sh" && ! grep -q "$F/only-wt.md" "$EV/cmd-AC3.sh"   # the isolated command file carries the rewrite
+  [[ "$(_e AC2)" == *"read $WT/gone.md"* && "$(_e AC3)" == *"read in: $WT"* ]]                # the evidence names what was read
+  rm -rf "$FAR"
+}
+@test "foreign-read: a declared repository whose worktree is gone gives foreign_worktree_missing, never a live read" {
+  _foreign
+  git -C "$F" worktree remove --force "$WT"
+  echo marker > "$F/only-wt.md"; rm "$F/gone.md"        # the live checkout would pass
+  run bash "$PD" --plan "$PLAN" --evidence-dir "$EV" --base-commit HEAD; [ "$status" -eq 1 ]
+  [ "$(jq -r '[.results[] | .reason] | unique | join(",")' "$EV/plan-diff.json")" = foreign_worktree_missing ]
+  rm -rf "$FAR"
+}
+@test "foreign-read: a plan without repo_roots measures the live path as before" {
+  _foreign bare
+  run bash "$PD" --plan "$PLAN" --evidence-dir "$EV" --base-commit HEAD; [ "$status" -eq 1 ]
+  [ "$(_verdicts "$EV/plan-diff.json")" = '["absent","absent","absent"]' ]
+  rm -rf "$FAR"
+}
+@test "timeout: the floor raises a point's own timeout: 1 so sleep 2 is measured present" {
+  { printf -- '---\nid: P954\n---\n# Plan\n\n## Acceptance Criteria\n\n- [ ] AC1: slow\n'; _blk "sleep 2" 1; } > "$PLAN"
+  AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=5 run bash "$PD" --plan "$PLAN" --evidence-dir "$EV" --base-commit HEAD; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.results[0].verdict' "$EV/plan-diff.json")" = present ]
+  AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=2000 run bash "$PD" --plan "$PLAN" --evidence-dir "$EV" --base-commit HEAD; [ "$status" -eq 10 ]
 }

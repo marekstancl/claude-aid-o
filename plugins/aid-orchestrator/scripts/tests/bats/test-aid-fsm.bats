@@ -1939,6 +1939,16 @@ SC_WHY="the PM moved this point to the close of the plan"
   [[ "$output" == *"next: fix the step and commit"*"--defer-criterion AC1"* ]]
   [ "$(_cur)" = 0 ]
 }
+@test "timeout: increment-step names a timed-out point as unmeasured with the AID_PLAN_DIFF_AC_TIMEOUT_FLOOR re-measurement" {
+  _sc_seed
+  sed -i 's|cmd: "test -f ok.txt"|cmd: "sleep 3"|; s|    expected_exit: 0|    expected_exit: 0\n    timeout: 1|' "$SC_PLAN"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"step_criteria_failed"*"absent or unmeasured"* ]]
+  [[ "$output" == *"AC1 (timeout: neměřeno, limit 1 s"*"AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=<s>"*"prepare --checkpoint cp2 --step <N>"*"<N> = 0"* ]]
+  [[ "$output" != *'AC1 "the ok file exists"'* ]]      # not listed as a missing change
+  [ "$(_cur)" = 0 ]
+}
 @test "step-criteria: --force does not waive an absent point" {
   _sc_seed
   run "$FSM" increment-step "$SF" --force --reason "the PM said to move on regardless of this"
