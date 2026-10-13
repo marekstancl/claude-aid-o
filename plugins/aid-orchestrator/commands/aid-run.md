@@ -30,7 +30,7 @@ and nothing said why.
 /aid-run P<NNN>                 # the direct run: start the plan straight from its file (plan-run, P111)
 /aid-run --auto P<NNN>          # the direct run, autonomous
 /aid-run                        # manual mode — start or auto-detect active EPIC
-/aid-run <epic-id>              # manual mode — start specific EPIC (the old EPIC path, removed by P112)
+/aid-run <epic-id>              # manual mode — start specific EPIC (the old EPIC path, removed by P114)
 /aid-run --auto                 # autonomous mode — auto-approve S-effort fixes
 /aid-run --auto --epic <id>     # autonomous mode for specific EPIC
 /aid-run --resume               # resume interrupted run from fsm-state.yaml
@@ -347,7 +347,7 @@ the plan's worktree (`restart_plan_dirty`) or a foreign worktree
 (`restart_foreign_dirty`), and while a controller is still working on the run
 (`restart_controller_live`). An interrupted restart resumes with the same
 command (`restart.json`: moving → moved → done). Nothing is deleted.
-- **An EPIC id (`/aid-run E-…`) — the old EPIC path, kept until P112** for plans
+- **An EPIC id (`/aid-run E-…`) — the old EPIC path, kept until P114** for plans
   already generated: the pipeline below, unchanged.
 
 **`repo_roots` — another repository is a worktree, never its live checkout
@@ -407,7 +407,7 @@ commit on `plan/*` or `task/*` (`active_runs_unreadable`).
 3. If stale or missing → re-discover: `glob ~/.claude/plugins/**/aid-orchestrator/scripts/aid-fsm.sh` → update `plugin.yaml`
 4. If still not found → abort with: "Plugin scripts not found. Run `/aid-init` to refresh."
 
-**Bash pipeline — the old EPIC path (until P112)** (using resolved `plugin_path`) — when running from a plan,
+**Bash pipeline — the old EPIC path (until P114)** (using resolved `plugin_path`) — when running from a plan,
 steps 1–3 are ONE TRANSACTION held under a single lock:
 1. `{plugin_path}/scripts/aid-cp1-gate.sh` — the ONE CP1 call for the whole plan, before any output exists (skipped when a valid sealed authority already binds this identity).
 2. `generation-authority.json` + `transaction.json` — the sealed decision and the per-phase record, written under `.aid-o/work/evidence/<plan_id>/generation/`.
