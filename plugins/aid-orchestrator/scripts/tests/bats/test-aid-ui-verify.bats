@@ -74,6 +74,10 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   [ "$(st photo_slots o-nas/index.html)" == pass ]; [ "$(st photo_slots index.html)" == fail ]
   d="$(jq -r '[.rows[] | select(.check == "photo_slots" and .page == "index.html") | .detail][0]' "$RES")"
   for c in "slot pekar is not in photos.yaml" ; do [[ "$d" == *"$c"* ]] || { echo "photo_slots misses $c: $d"; return 1; }; done
+  # FB-32: a heading that skips a level and a focus ring without contrast (the planted home page)
+  [ "$(st a11y_basics index.html)" == fail ]; [ "$(st a11y_basics o-nas/index.html)" == pass ]
+  d="$(jq -r '[.rows[] | select(.check == "a11y_basics" and .page == "index.html") | .detail][0]' "$RES")"
+  [[ "$d" == *"heading h4"* && "$d" == *"focus ring under 3:1"* ]] || { echo "a11y_basics: $d"; return 1; }
   # FB-31: text glued to a column divider (the planted home page); o-nas has none
   [ "$(st text_clearance index.html)" == fail ]; [ "$(st text_clearance o-nas/index.html)" == pass ]
   jq -e '[.rows[] | select(.check == "text_clearance" and .page == "index.html") | .detail] | all(contains("Chleba i rohlíky"))' "$RES" >/dev/null

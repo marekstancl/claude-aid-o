@@ -95,3 +95,11 @@ launch_inputs:
   - {id: legal, name: "Ochrana osobních údajů a právní texty", public: false, critical: true, brief: "kontrola právníkem nebo hotové texty klienta"}
   - {id: form, name: "Příjem zpráv z formuláře na hostingu", public: false, critical: true, owner: agent, brief: "koncový bod na hostingu klienta, test doručení (form_delivery)"}
   - {id: domain, name: "Doména a hosting", public: false, critical: true, brief: "přístup k doméně a hostingu nebo kontakt na správce"}
+  - {id: terms, name: "Vysvětlení odborných pojmů a zkratek ve službách a ceníku", public: false, critical: false, brief: "jedna věta ke každému pojmu, který zákazník nezná; agent pošle seznam pojmů z webu"}
+# Výchozí součásti webu lokální služby (P113a, PM 13. 10. 2026: co kritik u Coufalu žádal ručně, má typ mít od
+# začátku). Krok 6 je postaví, pokud je projekt výslovně nevyloučí v DESIGN.md.
+components:
+  - {id: call_header, what: "Volat jedním dotykem z mobilní hlavičky (ikona s popisem pro čtečku, vedle hlavní výzvy)"}
+  - {id: route_everywhere, what: "Trasa k podniku z každé stránky (patička), ne jen z kontaktu"}
+  - {id: prices_services_linked, what: "Ceník a služby odkazují na sebe navzájem (kategorie ceníku → služba, služba → ceník)"}
+  - {id: hours_visible, what: "Otevírací doba v patičce každé stránky"}

@@ -64,6 +64,13 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
 3b. **Dělicí čáry (FB-31):** svislá čára mezi sloupci nebo bloky dostane vnitřní odstup aspoň 16 px na obou
    stranách (padding u sloupce před čarou i za ní, nebo `gap` místo okraje). Text nikdy nezačíná těsně u čáry.
    Brána `text_clearance` to měří na každé stránce a šířce.
+3d. **Výchozí součásti typu:** web lokální služby postaví součásti ze seznamu `components` v
+   `critic/web-local.yaml` (volat z mobilní hlavičky, trasa z každé stránky, ceník a služby propojené,
+   hodiny v patičce), pokud je `DESIGN.md` projektu výslovně nevylučuje s důvodem.
+3c. **Základy přístupnosti (FB-32):** první prvek stránky s navigací je odkaz „Přeskočit na obsah“ (`#main`,
+   vidět při zaměření); nadpisy jdou h1 > h2 > h3 bez skoku (skrytý h2 nad blokem s h3, když blok nemá
+   vlastní); obrys zaměření v barvě s kontrastem aspoň 3:1 proti pozadí, na světlém i tmavém (dvoubarevný
+   prstenec). Brána `a11y_basics`.
 4a. **Fotka, kterou klient dodá později (FB-30, PM 1A):** žádná cizí fotka a žádný text „sem přijde
    fotka“. Místo ní rámeček z `docs/content/photos.yaml` (id, stránka, tvar, poměr):
    `<div class="aid-photo" data-aid-photo="<id>" aria-hidden="true"><svg data-aid-icon="camera" …ikona fotoaparátu…></svg></div>`

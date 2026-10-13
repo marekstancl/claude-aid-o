@@ -548,6 +548,49 @@ async function moreRows(page, url, requested, applies) {
       : invisible.length ? ['fail', `focus not visible (no change from the resting look) on: ${invisible.slice(0, 5).join(', ')}`]
       : ['pass', `${seen.size} controls, focus visible`];
   }
+  // a11y_basics (FB-32, PM 13. 10. 2026 - what the Coufal critic found by hand and the gate did not): a page with a
+  // navigation starts with a skip link to an existing target; headings never skip a level (h1 > h3 without an h2);
+  // the focus ring has at least 3:1 against what is behind the control (outline colour, or the box-shadow ring).
+  if (!applies('a11y_basics')) res.a11y_basics = NA('runs at the viewport and browser of its row only');
+  else {
+    const a = await page.evaluate(() => {
+      const why = [];
+      const lum = c => { const m = String(c).match(/[\d.]+/g); if (!m) return null; const [r, g, b] = m.slice(0, 3).map(v => { v = +v / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+      const ratio = (x, y) => { const p = lum(x), q = lum(y); if (p === null || q === null) return 21; return (Math.max(p, q) + 0.05) / (Math.min(p, q) + 0.05); };
+      const opaque = c => { const m = String(c).match(/[\d.]+/g); return m && (m.length < 4 || +m[3] > 0.5); };
+      const bgOf = e => { for (let x = e.parentElement; x; x = x.parentElement) { const c = getComputedStyle(x).backgroundColor; if (opaque(c)) return c; } return 'rgb(255, 255, 255)'; };
+      // skip link: with a nav of 3+ links, the first focusable element is an in-page link whose target exists
+      const nav = document.querySelector('nav'); const first = [...document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')][0];
+      if (nav && nav.querySelectorAll('a[href]').length >= 3) {
+        const h = first && first.tagName === 'A' ? first.getAttribute('href') || '' : '';
+        if (!h.startsWith('#') || !document.getElementById(h.slice(1))) why.push('no skip link to the content as the first focusable element');
+      }
+      // heading order
+      let prev = 0;
+      for (const hd of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) { const l = +hd.tagName[1]; if (prev && l > prev + 1) { why.push(`heading h${l} "${hd.textContent.trim().slice(0, 30)}" follows h${prev}`); break; } prev = l; }
+      return why;
+    });
+    // the focus ring of each control (only the first 40) against its background
+    const low = await page.evaluate(() => {
+      const lum = c => { const m = String(c).match(/[\d.]+/g); if (!m) return null; const [r, g, b] = m.slice(0, 3).map(v => { v = +v / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+      const ratio = (x, y) => { const p = lum(x), q = lum(y); if (p === null || q === null) return 21; return (Math.max(p, q) + 0.05) / (Math.min(p, q) + 0.05); };
+      const opaque = c => { const m = String(c).match(/[\d.]+/g); return m && (m.length < 4 || +m[3] > 0.5); };
+      const bgOf = e => { for (let x = e.parentElement; x; x = x.parentElement) { const c = getComputedStyle(x).backgroundColor; if (opaque(c)) return c; } return 'rgb(255, 255, 255)'; };
+      const out = [];
+      for (const e of [...document.querySelectorAll('a[href], button, input, select, textarea, summary')].slice(0, 40)) {
+        e.focus({ focusVisible: true }); if (document.activeElement !== e) continue;
+        const s = getComputedStyle(e);
+        if (s.outlineStyle === 'none' || parseFloat(s.outlineWidth) < 1) continue;   // a ring by other means: keyboard row's business
+        const ring = s.boxShadow !== 'none' ? (s.boxShadow.match(/rgba?\([^)]*\)/) || [])[0] : null;
+        const best = Math.max(ratio(s.outlineColor, bgOf(e)), ring ? ratio(ring, bgOf(e)) : 0);
+        if (best < 3) out.push(`${e.tagName.toLowerCase()} "${(e.innerText || e.getAttribute('aria-label') || '').trim().slice(0, 20)}" ${best.toFixed(1)}:1`);
+      }
+      document.activeElement?.blur();
+      return out;
+    });
+    if (low.length) a.push(`focus ring under 3:1 on ${low.slice(0, 3).join(', ')}`);
+    res.a11y_basics = a.length ? ['fail', a.join('; ')] : ['pass', 'skip link, heading order, focus ring contrast'];
+  }
   if (!applies('reduced_motion')) res.reduced_motion = NA('runs at the viewport and browser of its row only');
   else {
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -960,7 +1003,7 @@ const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls'
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
   'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review', 'motion_settled', 'motion_fidelity',
-  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery', 'text_clearance'];
+  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery', 'text_clearance', 'a11y_basics'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -1147,7 +1190,7 @@ if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json')
 
 const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
   'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
-  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots', 'text_clearance'];
+  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots', 'text_clearance', 'a11y_basics'];
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
 for (const b of BRS) {

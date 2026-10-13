@@ -18,7 +18,7 @@ answer() {   # answer <qid> <decision> [target]
 
 @test "card, lookups with source and date, the question, one confirmation into open items" {
   run python3 "$L" card "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  jq -e '(.items | length) == 7 and (.items[] | select(.id == "company") | .status == "needed") and (.items[] | select(.id == "photos") | .status == "client")' "$P/.aid-ui/launch.json" >/dev/null
+  jq -e '(.items | length) == 8 and (.items[] | select(.id == "company") | .status == "needed") and (.items[] | select(.id == "photos") | .status == "client")' "$P/.aid-ui/launch.json" >/dev/null
   run python3 "$L" record "$P" photos --value x --source y --date 2026-10-12; [ "$status" -eq 1 ]   # the client's, not looked up
   run python3 "$L" record "$P" company --value "IČO 12345678" --source "https://www.orsr.sk/x"; [ "$status" -eq 2 ]
   python3 "$L" record "$P" company --value "Coufal Clinic s.r.o., IČO 12345678" --source "https://www.orsr.sk/x" --date 2026-10-12 >/dev/null
@@ -33,10 +33,10 @@ answer() {   # answer <qid> <decision> [target]
   answer a1 approve; run python3 "$L" confirm "$P" --answer a1; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.items[] | select(.id == "company") | .status == "confirmed"' "$P/.aid-ui/launch.json" >/dev/null
   yq -e '.launch_company.value == "Coufal Clinic s.r.o., IČO 12345678" and .launch_company.source == "https://www.orsr.sk/x" and .launch_company.read_at == "2026-10-12" and .launch_company.confirmed_by == "klient"' "$P/docs/content/facts.yaml" >/dev/null
-  # six missing items became open items, all critical (an unconfirmed fact is only ever a critical item); the form is the agent's
-  jq -e '(.open_items | length) == 6 and ([.open_items[] | select(.critical)] | length) == 6 and (.open_items[] | select(.text | startswith("Příjem zpráv")) | .owner == "agent")
+  # seven missing items became open items, the six critical ones (an unconfirmed fact is only ever a critical item); the form is the agent's
+  jq -e '(.open_items | length) == 7 and ([.open_items[] | select(.critical)] | length) == 6 and (.open_items[] | select(.text | startswith("Příjem zpráv")) | .owner == "agent")
          and (.open_items[] | select(.text | startswith("Ceník")) | .critical == true) and ([.open_items[] | .due | test("^[0-9]{4}-")] | all)' "$ST" >/dev/null
   # a second card run keeps the items' open-item ids; no duplicate items on a later confirmation
   python3 "$L" card "$P" >/dev/null; answer a2 approve; python3 "$L" confirm "$P" --answer a2 >/dev/null
-  [ "$(jq '.open_items | length' "$ST")" -eq 6 ]
+  [ "$(jq '.open_items | length' "$ST")" -eq 7 ]
 }
