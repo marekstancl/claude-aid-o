@@ -146,6 +146,7 @@ fi
 # step: the step's return names its commits there (repo_commits), and a
 # declared repository the return names no commits in is reported, never skipped.
 OTHER_MISSING=()
+OTHER_REPOS=()   # P112: the verified ranges in declared repositories — the review packet takes them
 if [[ "$CHECKPOINT" == cp2 && -f "$PLAN_JSON" ]]; then
   ret="$EVID/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON")/return.json"
   declare -A seen_repo=(); root_phys="$(cd "$ROOT" && pwd -P)"
@@ -165,6 +166,7 @@ if [[ "$CHECKPOINT" == cp2 && -f "$PLAN_JSON" ]]; then
       r="$(jq -r --arg r "$slug" 'first(.repo_commits[]? | select(.repo == $r) | .range) // ""' "$ret" 2>/dev/null || true)"
       aid_dispatch_repo_range_ok "$wt" "$r" "$br" || { OTHER_MISSING+=("$slug"); continue; }
       src="$wt"   # diffed in the worktree, named under the declared path (plan.json's scope)
+      OTHER_REPOS+=("$(jq -nc --arg n "$slug" --arg w "$wt" --arg r "$r" '{name: $n, worktree: $w, range: $r}')")
     else
       r="$(jq -r --arg r "$repo" 'first(.repo_commits[]? | select(.repo == $r) | .range) // ""' "$ret" 2>/dev/null || true)"
       aid_dispatch_repo_range_ok "$repo" "$r" || { OTHER_MISSING+=("$repo"); continue; }
@@ -293,14 +295,16 @@ jq -n --arg cp "$CHECKPOINT" --argjson step "${STEP:-null}" --arg head "$HEAD_SH
   --argjson tadded "$(_jarr "${tests_added[@]}")" --argjson tchanged "$(_jarr "${tests_changed[@]}")" \
   --argjson nfiles "${#FILES[@]}" --argjson nlines "$LINES" --argjson handlers "$(_arr "${handler_ids[@]}")" \
   --arg verdict "$verdict" --arg reason "$reason" --argjson sf "$script_findings" --argjson dod "$dod_json" \
-  --arg streamlined "$STREAMLINED" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+  --arg streamlined "$STREAMLINED" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson other "$(_jarr "${OTHER_REPOS[@]}")" '
   {checkpoint: $cp, step: $step, head_sha: $head, range: $range, range_source: $src,
    files: {in_scope: $in, outside_files: $out, forbidden_touched: $forb, scope_declared: ($scope_declared == 1)},
    security: {matched_rules: $rules, lines: $rlines},
    tests: {added: $tadded, changed: $tchanged},
    size: {files: $nfiles, lines: $nlines}, handler_patterns: $handlers,
    streamlined: ($streamlined == "true"), script_findings: $sf, dod: $dod,
-   verdict: $verdict, reason: $reason, generated_at: $now}' > "$tmp"
+   verdict: $verdict, reason: $reason, generated_at: $now}
+  + (if ($other | length) > 0 then {other_repos: $other} else {} end)' > "$tmp"
 sha="$(sha256sum "$tmp" | cut -d' ' -f1)"
 jq --arg s "$sha" '. + {sha256: $s}' "$tmp" > "$tmp.2" && mv -f "$tmp.2" "$CPDIR/step-check.json" && rm -f "$tmp"
 log_event "$TIMELINE" "step_check" checkpoint="$CHECKPOINT" step="${STEP:-null}" head_sha="$HEAD_SHA" verdict="$verdict" sha256="$sha"

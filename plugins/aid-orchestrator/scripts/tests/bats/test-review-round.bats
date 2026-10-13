@@ -1726,3 +1726,95 @@ _rebind() {   # the plan follows the brief: verze and sha
   bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
   [ "$(jq -c '.epics[0] | {cp3, s: [.findings[].status]}' "$E/cp7/epic-findings.json")" = '{"cp3":"off","s":["dismissed_by_pm"]}' ]
 }
+
+# ── foreign repositories in the review packets (P112 Step 3) ─────────────────
+# _foreign_repo <plan_id> <project> — a second repository F with the plan's
+# worktree WT on plan/<plan_id>-<project>; the worktree holds one commit
+# (FBASE_F..FHEAD_F) the live checkout does not.
+_foreign_repo() {
+  F="$ROOT/far/docs"; mkdir -p "$F"; git -C "$F" init -q -b main
+  git -C "$F" config user.email t@t; git -C "$F" config user.name t
+  printf 'live line\n' > "$F/page.md"; git -C "$F" add page.md; git -C "$F" commit -qm init
+  WT="$F/.aid-worktrees/plan-$1--docs"; FBR="plan/$1-$2"
+  git -C "$F" worktree add -q -b "$FBR" "$WT" main
+  FBASE_F="$(git -C "$WT" rev-parse HEAD)"
+  printf 'worktree only line\n' >> "$WT/page.md"; git -C "$WT" commit -qam "docs: the plan's page"
+  FHEAD_F="$(git -C "$WT" rev-parse HEAD)"
+}
+# _frr [empty] — the step-0 plan.json declares F and names its page; the return
+# names the worktree commit (or, given "empty", the empty range the check refuses)
+_frr() {
+  _foreign_repo P900 repo
+  jq --arg f "$F" --arg w "$WT" --arg b "$FBR" '.repo_roots = [{name: "docs", path: $f, worktree: $w, branch: $b, base: "x"}]
+     | .steps[0].allowed_paths = ["src/**", "\($f)/page.md"] | .steps[0].outputs += ["Modify: `\($f)/page.md` — the page"]' "$E/plan.json" > "$E/p.tmp" && mv "$E/p.tmp" "$E/plan.json"
+  mkdir -p "$E/steps/step_1_backend"
+  local r="${FBASE_F}..${FHEAD_F}"; [[ "${1:-}" == empty ]] && r="${FBASE_F}..${FBASE_F}"
+  jq -n --arg r "$r" '{repo_commits: [{repo: "docs", range: $r}]}' > "$E/steps/step_1_backend/return.json"
+}
+
+@test "foreign-read: the step packet carries the foreign diff of the verified range and worktree paths in files.json" {
+  _repo; _frr; _sc
+  [ "$(jq -c '.other_repos' "$E/cp2/step-0/step-check.json")" = "$(jq -nc --arg w "$WT" --arg r "${FBASE_F}..${FHEAD_F}" '[{name: "docs", worktree: $w, range: $r}]')" ]
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  grep -q '^+worktree only line' "$(D 1)/packet/foreign-docs.patch"
+  jq -e --arg w "$WT" '(.allowed_paths | index("\($w)/page.md")) and (.outputs | any(contains("\($w)/page.md")))' "$(D 1)/packet/files.json"
+  ! grep -q "\"$F/page.md\"" "$(D 1)/packet/files.json"
+  [ "$(jq -r '.foreign[0].patch' "$(D 1)/packet/packet.json")" = foreign-docs.patch ]
+  jq -e '.files | any(.file == "foreign-docs.patch")' "$(D 1)/packet/manifest.json"
+}
+@test "foreign-read: the rendered prompt names the worktree and forbids the live checkout" {
+  _repo; _frr; _sc
+  _S prepare --round 1 >/dev/null
+  grep -q "the plan's work is in the worktree ${WT} (branch ${FBR})" "$(D 1)/prompt-step_generalist.md"
+  grep -q "The live checkout at ${F} is not this plan's work — never read it" "$(D 1)/prompt-step_generalist.md"
+  grep -q '^+worktree only line' "$(D 1)/prompt-step_generalist.md"
+}
+@test "foreign-read: a range the step check refused is left out of other_repos and gets no patch" {
+  _repo; _frr empty; _sc
+  [ "$(jq -r '.other_repos // "none"' "$E/cp2/step-0/step-check.json")" = none ]
+  [[ "$(jq -r .reason "$E/cp2/step-0/step-check.json")" == *"repo_commits"*docs* ]]
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ ! -e "$(D 1)/packet/foreign-docs.patch" ]
+  [ "$(jq -r '.foreign[0].patch' "$(D 1)/packet/packet.json")" = null ]
+  grep -q "this step made no commits there" "$(D 1)/prompt-step_generalist.md"
+}
+@test "foreign-read: a missing foreign worktree fails the packet build with foreign_worktree_missing" {
+  _repo; _frr; _sc
+  git -C "$F" worktree remove --force "$WT"
+  run _S prepare --round 1; [ "$status" -ne 0 ]
+  [[ "$output" == *"foreign_worktree_missing"*"$WT"* ]]
+  [ ! -d "$(D 1)/packet" ]
+}
+@test "foreign-read: a plan without repo_roots gets the packet it always got" {
+  _repo; _sc
+  run _S prepare --round 1; [ "$status" -eq 0 ]
+  [ ! -e "$(D 1)/packet/packet.json" ]
+  ! ls "$(D 1)/packet"/foreign-*.patch 2>/dev/null
+  ! grep -q "Foreign repositories" "$(D 1)/prompt-step_generalist.md"
+}
+@test "foreign-read: the whole-plan packet carries each foreign branch from its frozen base and its files as worktree paths" {
+  _frepo
+  _foreign_repo P901 frepo
+  sed -i "s|^type: feature|type: feature\nrepo_roots: [{name: docs, path: $F}]|" "$R/.aid-o/plans/P901-x.md"
+  mkdir -p "$R/.aid-o/work/plan-state/P901"
+  jq -n --arg b "$FBASE_F" --arg h "$FHEAD_F" --arg br "$FBR" '{plan_boundary_manifest: {repo_roots: [{name: "docs", branch: $br, base: $b, head: $h, commits: 1}]}}' \
+    > "$R/.aid-o/work/plan-state/P901/plan-boundary-manifest.json"
+  _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  grep -q '^+worktree only line' "$(FD 1)/packet/foreign-docs.patch"
+  [ "$(jq -c .outputs "$(FD 1)/packet/files.json")" = "$(jq -nc --arg w "$WT" '["\($w)/page.md"]')" ]
+  [ "$(jq -r '.foreign[0].commits' "$(FD 1)/packet/packet.json")" = 1 ]
+  grep -q "never read it" "$(FD 1)/prompt-final_generalist.md" 2>/dev/null || grep -lq "never read it" "$(FD 1)"/prompt-*.md
+}
+@test "foreign-read: a foreign branch with no commits at the close says so by its commit count" {
+  _frepo
+  _foreign_repo P901 frepo
+  sed -i "s|^type: feature|type: feature\nrepo_roots: [{name: docs, path: $F}]|" "$R/.aid-o/plans/P901-x.md"
+  mkdir -p "$R/.aid-o/work/plan-state/P901"
+  jq -n --arg b "$FHEAD_F" --arg br "$FBR" '{plan_boundary_manifest: {repo_roots: [{name: "docs", branch: $br, base: $b, head: $b, commits: 0}]}}' \
+    > "$R/.aid-o/work/plan-state/P901/plan-boundary-manifest.json"
+  _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.foreign[0].commits' "$(FD 1)/packet/packet.json")" = 0 ]
+  grep -q "(no commits on ${FBR})" "$(FD 1)"/prompt-*.md
+}
