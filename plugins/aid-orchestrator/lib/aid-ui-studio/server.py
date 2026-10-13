@@ -99,7 +99,7 @@ from urllib.parse import urlsplit, parse_qs
 KINDS = {"variant", "vision", "identity", "seo_brief", "structure", "task_map",
          "content_plan", "defer_content", "facts", "references", "direction",
          "approve_page", "exception", "coverage_drift", "design_standard", "handover", "notifications",
-         "sources", "product_context", "copy_verdict", "no_method", "launch_inputs"}   # launch_inputs: P113a step 7
+         "sources", "product_context", "copy_verdict", "no_method", "launch_inputs", "photos"}   # launch_inputs: P113a step 7
 # Card fields the page shows (a step may turn any into state); snapshotted with the answer.
 CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "preview2", "preview2_label", "palette", "risk", "uniqueness", "value", "method", "slot", "honours")
 # A question that builds on what the PM chose earlier carries that choice and the PM's words (`prior`), and every

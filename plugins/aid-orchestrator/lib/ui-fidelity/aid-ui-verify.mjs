@@ -860,6 +860,7 @@ async function photoSlots(browser, url, viewport) {
       if (!['rect', 'round'].includes(sp.shape)) why.push(`${x.id}: shape "${sp.shape}" is not rect or round`);
       else if (sp.shape === 'round' && rad < Math.min(x.w, x.h) / 2 - 1) why.push(`${x.id}: the slot is not round`);
       else if (sp.shape === 'rect' && rad >= Math.min(x.w, x.h) / 4) why.push(`${x.id}: a rectangular photo's slot is rounded like a circle`);
+      if (!x.img && sp.src) why.push(`${x.id}: the client chose a photo (${sp.src}) but the slot is still empty`);
       if (!x.img) {
         if (!x.hidden) why.push(`${x.id}: an empty slot needs aria-hidden="true"`);
         if (x.text) why.push(`${x.id}: an empty slot carries text ("${x.text.slice(0, 30)}")`);

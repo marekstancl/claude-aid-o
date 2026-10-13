@@ -51,6 +51,12 @@ Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 
    a podklady ji nemají, jako `{id, page, where, what, shape: rect|round, ratio: "4:5", min_px: "1600x2000"}`
    (`page` = soubor stránky ve stavbě, jak ho jmenuje brána). Stavba z ní udělá rámeček v přesném tvaru
    (krok 6, bod 4a), stránka „co jste dostali“ z ní ukáže zadání fotek pro klienta.
+2c. **Vlastní fotky klienta ze starého webu (P113a, PM 13. 10. 2026):** `aid-ui-photos.py candidates <project>`;
+   každou fotku si prohlédni (Read) a vyznač, jestli je na ní rozpoznatelný člověk:
+   `aid-ui-photos.py mark <project> <c> --people yes|no [--note]`. Pak pro každé místo z `photos.yaml`
+   `aid-ui-photos.py question <project> <id>` → otázka `photos` (část Obsah) s kartami podle tvaru a kartou
+   „ponechat rámeček“; po odpovědi `aid-ui-photos.py apply <project> --answer <id>` (WebP do 200 kB,
+   `src` v `photos.yaml`). Fotka s člověkem nese riziko „jen s jeho souhlasem“.
 3. Agent smí psát `draft` jen z faktů registru a podle „Jak psát vizi,
    slogany a texty" (`steps/1v-vision.md`); `confirmed_client` dává jen PM.
    Pořadí a obsah sekcí každé stránky navrhni podle rámce stránky z

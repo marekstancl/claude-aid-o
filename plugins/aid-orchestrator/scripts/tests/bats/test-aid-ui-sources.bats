@@ -79,7 +79,15 @@ idof() { jq -r --arg p "$1" '[.sources[], .candidates[]?] | map(select((.path //
 @test "--fetch-site: the home page and its same-host links are saved with fetch.json; --old-site tells a live download from a backup" {
   site="$T/site"; mkdir -p "$site/o-nas"
   printf '<html><body><a href="/o-nas/">O nás</a> <a href="https://jiny.example/x">cizí</a> <p>Rohlíky každé ráno</p></body></html>' > "$site/index.html"
-  printf '<html><body><p>Pekárna od roku 2015</p></body></html>' > "$site/o-nas/index.html"
+  printf '<html><body><p>Pekárna od roku 2015</p><img src="/pec.png" alt="Pec"><img src="/ikona.png"><div style="background:url(/pec.png)"></div></body></html>' > "$site/o-nas/index.html"
+  python3 - "$site" <<'PY'
+import sys, zlib, struct
+def png(w, h, path):
+    raw = b"".join(b"\x00" + b"\x80\x60\x40" * w for _ in range(h))
+    ch = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+    open(path, "wb").write(b"\x89PNG\r\n\x1a\n" + ch(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + ch(b"IDAT", zlib.compress(raw)) + ch(b"IEND", b""))
+png(800, 600, sys.argv[1] + "/pec.png"); png(40, 40, sys.argv[1] + "/ikona.png")
+PY
   PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
   python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$site" >/dev/null 2>&1 & HP=$!   # python itself, so kill reaches it
   for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 0.1; done
@@ -95,6 +103,10 @@ idof() { jq -r --arg p "$1" '[.sources[], .candidates[]?] | map(select((.path //
   ls "$d" | grep -q '^index-[0-9a-f]\{8\}\.html$'; ls "$d" | grep -q '^o-nas-[0-9a-f]\{8\}\.html$'
   [ "$(stat -c %a "$d/fetch.json")" = 600 ]
   jq -e '.version == 1 and .url and .final_url and .fetched_at and ([.pages[] | select(.file)] | length == 2) and ([.pages[].url] | all(startswith("http://127.0.0.1")))' "$d/fetch.json" >/dev/null
+  # P113a: the old site's photos come along with their size and page; a tiny icon is listed, not kept; one file per picture
+  jq -e '[.images[] | select(.file)] | length == 1 and .[0].width == 800 and .[0].height == 600 and .[0].alt == "Pec" and (.[0].page | endswith("/o-nas/"))' "$d/fetch.json" >/dev/null
+  jq -e '[.images[] | select(.status == "too small or unreadable")] | length == 1' "$d/fetch.json" >/dev/null
+  [ "$(ls "$d/img" | wc -l)" -eq 1 ]; [ "$(stat -c %a "$d/img/"*)" = 600 ]
   # a home page that is not HTML fails, nothing is recorded as live
   mkdir -p "$T/bin"; printf 'just text' > "$T/bin/index.html"
   python3 -c '

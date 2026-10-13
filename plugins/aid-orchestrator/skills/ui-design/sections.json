@@ -165,7 +165,8 @@
      "kinds": [
       "content_plan",
       "defer_content",
-      "facts"
+      "facts",
+      "photos"
      ],
      "files": [
       "3-content-plan.md"
@@ -395,6 +396,13 @@
    "files": [
     "skills/ui-design/steps/0-start.md",
     "scripts/aid-ui-launch.py"
+   ],
+   "receipt": false
+  },
+  "photos": {
+   "files": [
+    "skills/ui-design/steps/3-content-plan.md",
+    "scripts/aid-ui-photos.py"
    ],
    "receipt": false
   },

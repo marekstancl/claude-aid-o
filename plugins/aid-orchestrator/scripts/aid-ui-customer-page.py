@@ -267,7 +267,7 @@ def gather(proj):
     pf = os.path.join(proj, "docs/content/photos.yaml")
     ph = yq(pf, ".") if os.path.exists(pf) else []
     D["photos"] = [{k: str(x.get(k) or "") for k in ("id", "page", "where", "what", "shape", "ratio", "min_px")}
-                   for x in (ph if isinstance(ph, list) else []) if isinstance(x, dict)]
+                   for x in (ph if isinstance(ph, list) else []) if isinstance(x, dict) and not x.get("src")]   # placed photos are not owed
     for x in D["photos"]:   # the client gets every part of each photo's brief, or the page is not made
         if not all(x[k].strip() for k in x) or x["shape"] not in ("rect", "round") or not re.fullmatch(r"\d+:\d+", x["ratio"]) \
                 or not re.fullmatch(r"\d+x\d+", x["min_px"]):
