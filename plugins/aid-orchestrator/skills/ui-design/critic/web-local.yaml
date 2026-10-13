@@ -103,3 +103,4 @@ components:
   - {id: route_everywhere, what: "Trasa k podniku z každé stránky (patička), ne jen z kontaktu"}
   - {id: prices_services_linked, what: "Ceník a služby odkazují na sebe navzájem (kategorie ceníku → služba, služba → ceník)"}
   - {id: hours_visible, what: "Otevírací doba v patičce každé stránky"}
+  - {id: booking_lands_on_form, what: "Každá výzva k objednání vede přímo na formulář (kotva #objednani), i na stránce Kontakt"}

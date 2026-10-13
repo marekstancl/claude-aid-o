@@ -565,6 +565,18 @@ async function moreRows(page, url, requested, applies) {
         const h = first && first.tagName === 'A' ? first.getAttribute('href') || '' : '';
         if (!h.startsWith('#') || !document.getElementById(h.slice(1))) why.push('no skip link to the content as the first focusable element');
       }
+      // link purpose (WCAG 2.4.4, Coufal round 6: four "o službe" links to four services): one visible link text
+      // never leads to two different places (an aria-label that tells them apart counts as the name)
+      const byName = new Map();
+      for (const a of document.querySelectorAll('a[href]')) {
+        const r = a.getBoundingClientRect(); if (!r.width) continue;
+        const name = (a.getAttribute('aria-label') || a.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        if (!name) continue;
+        const to = new URL(a.href, location.href); to.hash = to.hash || '';
+        (byName.get(name) || byName.set(name, new Set()).get(name)).add(to.pathname + to.hash);
+      }
+      const amb = [...byName].filter(([, t]) => t.size > 1).map(([n, t]) => `"${n.slice(0, 25)}" -> ${t.size} places`);
+      if (amb.length) why.push(`the same link text leads to different places: ${amb.slice(0, 3).join(', ')}`);
       // heading order
       let prev = 0;
       for (const hd of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) { const l = +hd.tagName[1]; if (prev && l > prev + 1) { why.push(`heading h${l} "${hd.textContent.trim().slice(0, 30)}" follows h${prev}`); break; } prev = l; }
