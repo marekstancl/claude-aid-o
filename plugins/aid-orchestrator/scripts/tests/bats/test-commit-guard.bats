@@ -58,6 +58,15 @@ _write_state() {
     echo "base_commit: $(git rev-parse HEAD)"
     if [[ -n "$done_phase" ]]; then echo "done_phase: $done_phase"; fi
   } > "$sf"
+  _map_entry E-test "$sf"
+}
+
+# _map_entry <epic> <state_file> — the run's active-runs.json entry, as init
+# writes it (P112: the hook takes a branch's run only from this map).
+_map_entry() {
+  local map="$TEST_PROJECT_ROOT/.aid-o/work/active-runs.json"
+  mkdir -p "$(dirname "$map")"; [[ -s "$map" ]] || echo '{}' > "$map"
+  jq --arg e "$1" --arg sf "$2" '.[$e] = {state_file: $sf, governs_main: true, auto_controller: "unknown"}' "$map" > "$map.t" && mv "$map.t" "$map"
 }
 
 # _write_plan — default 2-step plan (step0=src/a.txt, step1=src/b.txt).
@@ -270,17 +279,20 @@ _farm_excluding() {
   grep -q '"reason":"versioning_absent"' "$TEST_EVIDENCE_DIR/timeline.jsonl"
 }
 
-# ─── (f) jq missing → warn + skip scope check (not blocked by absent tooling) ─
-@test "f: jq missing warns and skips the scope check (commit not blocked)" {
+# ─── (f) jq missing: a run branch is refused (P112 — the map cannot be read,
+#     so the run is unknown); any other branch passes with a line ─────────────
+@test "hook-map: jq missing on a run branch refuses active_runs_unreadable; elsewhere it passes" {
   git checkout -q -b task/E-test/main
   _write_plan
   _write_state EXECUTE task/E-test/main "" 1
-  _stage src/a.txt                # would FAIL scope if jq were present
+  _stage src/a.txt
   local farm; farm=$(_farm_excluding jq)
   run env PATH="$farm" bash "$HOOK"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"jq not found"* ]]
-  grep -q '"reason":"jq_absent"' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: active_runs_unreadable)"* && "$output" == *"next: "* ]]
+  git checkout -q -b feature/x
+  run env PATH="$farm" bash "$HOOK"
+  [ "$status" -eq 0 ]; [[ "$output" == *"cannot be read"* ]]
 }
 
 # ─── (g) plan.json declares no allowed_paths → warn + pass + disclosure ───────────────────────
@@ -474,4 +486,54 @@ _write_direct() { _write_state "$@"; echo "direct: true" >> "$TEST_EVIDENCE_DIR/
   run bash "$HOOK"
   [ "$status" -eq 1 ]
   [[ "$output" == *"run_abandoned"* ]]
+}
+
+# ── P112 Step 6: the governing run comes from active-runs.json only ───────────
+# _set_aside <dir> <step> — a set-aside copy of the run's state (same branch,
+# an older step) where P016's copies lay, never in the map
+_set_aside() {
+  mkdir -p "$1"; sed "s/^current_step: .*/current_step: $2/" "$TEST_EVIDENCE_DIR/fsm-state.yaml" > "$1/fsm-state.yaml"
+  cp "$TEST_EVIDENCE_DIR/plan.json" "$1/plan.json"
+}
+
+@test "hook-map: a set-aside copy of the state on the same branch does not govern — the live run's scope does" {
+  git checkout -q -b plan/P111
+  _write_plan; _write_state EXECUTE plan/P111 "" 1          # live: step 1 = src/b.txt
+  _set_aside "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-test/A-early.superseded-1" 0   # sorts first; step 0 = src/a.txt
+  _stage src/b.txt
+  run bash "$HOOK"; echo "$output"
+  [ "$status" -eq 0 ]
+  git reset -q; _stage src/a.txt
+  run bash "$HOOK"
+  [ "$status" -eq 1 ]; [[ "$output" == *"outside EXECUTE step 1 scope"* ]]
+}
+@test "hook-map: the set-aside copy alone (no map entry) governs nothing" {
+  git checkout -q -b plan/P111
+  _write_plan; _write_state EXECUTE plan/P111 "" 1
+  echo '{}' > "$TEST_PROJECT_ROOT/.aid-o/work/active-runs.json"
+  _stage src/a.txt
+  run bash "$HOOK"
+  [ "$status" -eq 0 ]
+}
+@test "hook-map: an unreadable map refuses a commit on plan/<id> and lets a commit on another branch through" {
+  git checkout -q -b plan/P111
+  _write_plan; _write_state EXECUTE plan/P111 "" 1
+  echo 'not json' > "$TEST_PROJECT_ROOT/.aid-o/work/active-runs.json"
+  export AID_HOOK_AUDIT="$BATS_TEST_TMPDIR/audit.jsonl"
+  _stage src/b.txt
+  run bash "$HOOK"
+  [ "$status" -eq 1 ]; [[ "$output" == *"active_runs_unreadable"* ]]
+  git checkout -q -b feature/y
+  run bash "$HOOK"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.rule, .outcome] | join(":")' "$AID_HOOK_AUDIT" | paste -sd' ')" = "active_runs_unreadable:block active_runs_unreadable:pass" ]
+}
+@test "hook-map: an abandoned run (not in the map) still refuses run_abandoned" {
+  git checkout -q -b plan/P111
+  _write_plan; _write_direct ERROR plan/P111 "" 1
+  printf 'abandoned: true\nabandon_reason: the PM stopped it\n' >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  echo '{}' > "$TEST_PROJECT_ROOT/.aid-o/work/active-runs.json"
+  _stage src/a.txt
+  run bash "$HOOK"
+  [ "$status" -eq 1 ]; [[ "$output" == *"run_abandoned"* ]]
 }

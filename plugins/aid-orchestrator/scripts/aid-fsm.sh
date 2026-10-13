@@ -557,6 +557,12 @@ prune_active_runs() {
         case "$state" in
           DONE|ERROR) reason="terminal state ${state}" ;;
         esac
+        # P112: a direct run at DONE/review is still guarded by the hook (P111)
+        # — the map keeps it until done_phase: release.
+        if [[ "$state" == DONE && "$(yaml_field "$abs" direct 2>/dev/null)" == true \
+              && "$(yaml_field "$abs" done_phase 2>/dev/null | tr -d '"')" != release ]]; then
+          reason=""
+        fi
       fi
     fi
     if [[ -n "$reason" ]]; then
@@ -4220,15 +4226,16 @@ except: pass
   # OBS-20260712-01 → P074 Step 4: this run becomes ONE ENTRY in the
   # multi-run active-runs map the commit-scope guard consults for
   # main-fallback governance (the old single slot let a second init hide this
-  # run). Best-effort: never fails init — a crash/failure before the upsert
-  # leaves no entry, identical exposure to the old crash-before-pointer-write.
+  # run). P112: the map is the ONLY source the pre-commit hook takes a run's
+  # branch guard from, so init fails when the entry cannot be written (a live
+  # run missing from the map would go unguarded); a rerun converges.
   # P074 Step 6: init is WRITER 1 of the generated active.md index — the
   # shared post-boundary helper performs the upsert, the stale-entry sweep,
   # and the index refresh in one place; a render failure warns, never blocks.
   if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
-    aid_active_boundary_sync "$(aid_state_root 2>/dev/null || pwd)" "$epic_id" init "$state_file" || true
+    aid_active_boundary_sync "$(aid_state_root 2>/dev/null || pwd)" "$epic_id" init "$state_file" || _fsm_init_map_refuse "$state_file"
   else
-    upsert_active_run "$state_file" || true
+    upsert_active_run "$state_file" || _fsm_init_map_refuse "$state_file"
   fi
 
   echo "Initialized state: READY" >&2
@@ -4259,6 +4266,14 @@ read_steps_array() {
 #   active.md). Idempotent: a rerun completes whatever an interruption left.
 #   A gone state file: --epic names the map entry to remove.
 # ---------------------------------------------------------------------------
+# _fsm_init_map_refuse <state_file> — P112: init without its active-runs entry.
+_fsm_init_map_refuse() {
+  echo "REFUSED (active_runs_write_failed): $1 was written but its active-runs.json entry could not be — the pre-commit hook takes a run's guard only from that map, so the run would go unguarded." >&2
+  echo "next: fix what blocks the map (lock, permissions, a broken .aid-o/work/active-runs.json), then run the same init again (a direct init is idempotent; plan-run resumes it)" >&2
+  echo "(pipeline.md §When AID refuses: active_runs_write_failed)" >&2
+  exit 1
+}
+
 cmd_abandon() {
   local state_file="${1:-}" reason="" epic_opt=""
   shift || true

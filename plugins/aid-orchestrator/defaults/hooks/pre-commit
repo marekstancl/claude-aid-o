@@ -24,7 +24,10 @@
 # (commit_scope_violation event at step-advance).
 #
 # Fail-open philosophy: absent tooling (jq/yq) or unreadable config never
-# hard-blocks a commit — it warns, passes, and emits a disclosure event.
+# hard-blocks a commit — it warns, passes, and emits a disclosure event —
+# EXCEPT on a run branch (plan/*, task/*): there an unreadable active-runs.json
+# or a missing jq refuses (active_runs_unreadable, P112), because the map is
+# the only source of the run that guards the branch.
 # Fail-open covers MISSING TOOLING only — "wrong directory" is handled by the
 # state-root resolver below and is no longer a silent pass (P074 Step 2).
 
@@ -213,46 +216,75 @@ _aid_run_scope_check() {
   _aid_enforce_scope "$_label"
 }
 
-# ── Discover the run governing THIS branch (exact match) ──────────────────
+# ── Discover the run governing THIS branch: active-runs.json only (P112) ──
 #
-# A run declared on a task/epic branch matches ONLY that exact branch name —
-# unique by construction (one epic ↔ one branch) — so taking the first
-# (sorted) match is safe: two different runs can never legitimately share a
-# branch name. All state-file paths are sorted before scanning purely so the
-# outcome never depends on find(1)'s incidental filesystem traversal order.
-_AID_STATE_FILE=""
-_AID_ALL_STATE_FILES=()
+# The run that governs a commit is the active-runs.json entry whose live state
+# names this branch — never a state file a glob happens to find first (agents
+# P016 lost two commits to a set-aside copy of the run's state). The map holds
+# every live run: init refuses without its entry and prune keeps a direct run
+# until DONE/release. No entry for the branch → no run governs the commit.
+# A map that cannot be read on a run branch (plan/*, task/*) refuses the commit
+# (a broken map must not unguard a live run); elsewhere it passes with a line.
+_aid_branch_state_from_map() {   # prints the governing state file, or nothing; rc 3 = map unreadable
+  local map="$_AID_ROOT/.aid-o/work/active-runs.json" e sf br st hit="" hit_e=""
+  [[ -e "$map" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 3
+  [[ -s "$map" ]] && jq -e 'type == "object"' "$map" >/dev/null 2>&1 || return 3
+  while IFS=$'\t' read -r e sf; do
+    [[ -n "$sf" ]] || continue
+    [[ "$sf" != /* ]] && sf="$_AID_ROOT/$sf"
+    [[ -r "$sf" ]] || continue
+    br=$(grep '^branch:' "$sf" 2>/dev/null | awk '{print $2}' | tr -d '"')
+    [[ -n "$_AID_BRANCH" && "$br" == "$_AID_BRANCH" ]] || continue
+    st=$(grep '^state:' "$sf" 2>/dev/null | awk '{print $2}')
+    case "$st" in EXECUTE|GATES|DONE) ;; *) continue ;; esac
+    # P111: a direct run is finished for the hook at DONE/release.
+    if [[ "$st" == "DONE" ]] && grep -q '^direct: true' "$sf" 2>/dev/null \
+       && [[ "$(grep '^done_phase:' "$sf" 2>/dev/null | awk '{print $2}' | tr -d '"')" == "release" ]]; then
+      continue
+    fi
+    if [[ -n "$hit" ]]; then
+      echo "AID HOOK: warning — active-runs.json has two runs on ${_AID_BRANCH} (${hit_e}, ${e}); the first governs this commit" >&2
+      continue
+    fi
+    hit="$sf"; hit_e="$e"
+  done < <(jq -r 'to_entries[] | select((.value|type) == "object") | [.key, (.value.state_file // "")] | @tsv' "$map" 2>/dev/null)
+  printf '%s' "$hit"
+}
+
+# The abandoned-run refusal (P111) still scans state files: an abandoned run
+# is not in the map. A set-aside copy (superseded-runs/, *.superseded*) is
+# never read.
 for _dir in "$_AID_ROOT/.aid-o/work/runs/" "$_AID_ROOT/.aid-o/work/evidence/"; do
   [[ -d "$_dir" ]] || continue
   while IFS= read -r _sf; do
-    _AID_ALL_STATE_FILES+=("$_sf")
+    case "$_sf" in */superseded-runs/*|*.superseded*) continue ;; esac
+    _br=$(grep '^branch:' "$_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')
+    if [[ -n "$_AID_BRANCH" && "$_br" == "$_AID_BRANCH" ]] && grep -q '^abandoned: true' "$_sf" 2>/dev/null; then
+      echo "AID HOOK: BLOCKED — ${_AID_BRANCH} belongs to the abandoned run $(grep '^epic_id:' "$_sf" | awk '{print $2}') ($(grep '^abandon_reason:' "$_sf" | sed 's/^abandon_reason: *//')); it takes no more commits." >&2
+      echo "next: stop the agent working on it; continue in a new plan (the abandoned plan is closed administratively)" >&2
+      echo "(pipeline.md §When AID refuses: run_abandoned)" >&2
+      exit 1
+    fi
   done < <(find "$_dir" \( -name "state.yaml" -o -name "fsm-state.yaml" \) 2>/dev/null | sort)
 done
-for _sf in "${_AID_ALL_STATE_FILES[@]}"; do
-  _br=$(grep '^branch:' "$_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')
-  # P111: the branch of an abandoned run takes no more commits — checked before
-  # the state filter, because abandon writes ERROR (task branch or plan/<id>).
-  if [[ -n "$_AID_BRANCH" && "$_br" == "$_AID_BRANCH" ]] && grep -q '^abandoned: true' "$_sf" 2>/dev/null; then
-    echo "AID HOOK: BLOCKED — ${_AID_BRANCH} belongs to the abandoned run $(grep '^epic_id:' "$_sf" | awk '{print $2}') ($(grep '^abandon_reason:' "$_sf" | sed 's/^abandon_reason: *//')); it takes no more commits." >&2
-    echo "next: stop the agent working on it; continue in a new plan (the abandoned plan is closed administratively)" >&2
-    echo "(pipeline.md §When AID refuses: run_abandoned)" >&2
-    exit 1
-  fi
-  _st=$(grep '^state:' "$_sf" 2>/dev/null | awk '{print $2}')
-  case "$_st" in EXECUTE|GATES|DONE) ;; *) continue ;; esac
-  # P111: a direct run (plan/<id>) is finished for the hook at DONE with
-  # done_phase: release — the close's commits on plan/<id> are plan-finalize's.
-  # At DONE/review it is still guarded (merged_to_plan is recorded before
-  # release is written, so there is no unguarded window).
-  if [[ "$_st" == "DONE" ]] && grep -q '^direct: true' "$_sf" 2>/dev/null \
-     && [[ "$(grep '^done_phase:' "$_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')" == "release" ]]; then
-    continue
-  fi
-  if [[ -n "$_AID_BRANCH" && "$_br" == "$_AID_BRANCH" ]]; then
-    _AID_STATE_FILE="$_sf"
-    break
-  fi
-done
+
+_AID_STATE_FILE=""
+_AID_MAP_RC=0
+_AID_STATE_FILE="$(_aid_branch_state_from_map)" || _AID_MAP_RC=$?
+if [[ "$_AID_MAP_RC" -eq 3 ]]; then
+  # the hook audit, when the session names one (AID_HOOK_AUDIT, as aid-hook.sh writes it)
+  [[ -n "${AID_HOOK_AUDIT:-}" ]] && printf '{"ts":"%s","event":"PreCommit","rule":"active_runs_unreadable","outcome":"%s","reason":"%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(case "$_AID_BRANCH" in plan/*|task/*) echo block ;; *) echo pass ;; esac)" "${_AID_BRANCH:-detached}" >> "$AID_HOOK_AUDIT" 2>/dev/null
+  case "$_AID_BRANCH" in
+    plan/*|task/*)
+      echo "AID HOOK: BLOCKED — .aid-o/work/active-runs.json cannot be read (or jq is missing), so the run that governs ${_AID_BRANCH} is unknown; a run branch is never committed to unguarded." >&2
+      echo "next: fix or remove the map (aid-fsm.sh active-runs prune rebuilds what it can), or install jq, then commit again" >&2
+      echo "(pipeline.md §When AID refuses: active_runs_unreadable)" >&2
+      exit 1 ;;
+    *) echo "AID pre-commit: active-runs.json cannot be read (or jq is missing) — no run governs ${_AID_BRANCH:-this commit}; passing" >&2 ;;
+  esac
+fi
 
 # ── Active-runs map for MAIN-governance fallback (OBS-20260712-01 → P074) ──
 #

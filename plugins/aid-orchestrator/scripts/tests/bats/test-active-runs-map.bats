@@ -244,15 +244,16 @@ JSON
 
 # ─── Error handling: corruption fails closed at the writer, open at the guard ─
 
-@test "corrupt map: the writer refuses (init still succeeds; garbage left byte-identical; error names the file)" {
+@test "hook-map: corrupt map — the writer refuses and init fails active_runs_write_failed (garbage left byte-identical; error names the file)" {
   _mk_primary "$TEST_TMPDIR/primary"
   mkdir -p "$TEST_TMPDIR/primary/.aid-o/work"
   echo "{this is not json" > "$TEST_TMPDIR/primary/.aid-o/work/active-runs.json"
   cp "$TEST_TMPDIR/primary/.aid-o/work/active-runs.json" "$TEST_TMPDIR/map.before"
   run bash -c "cd '$TEST_TMPDIR/primary' \
     && '$FSM' init E-901-1_1 R-A 1 manual main HEAD '.aid-o/work/evidence/E-901-1_1/R-A/fsm-state.yaml'" 3>&-
-  [ "$status" -eq 0 ]   # best-effort: a map failure must never block init
+  [ "$status" -ne 0 ]   # P112: the hook reads only the map, so init without its entry fails
   [[ "$output" == *"active-runs.json is not a parseable JSON object"* ]]
+  [[ "$output" == *"(pipeline.md §When AID refuses: active_runs_write_failed)"* && "$output" == *"next: "* ]]
   cmp "$TEST_TMPDIR/map.before" "$TEST_TMPDIR/primary/.aid-o/work/active-runs.json"
 }
 
@@ -319,14 +320,14 @@ JSON
   [[ "$output" == *"HEAD is 'main'"* ]]
 }
 
-@test "zero-byte map at the writer: refuses fail-closed naming the file (init still succeeds; file stays zero-byte)" {
+@test "zero-byte map at the writer: refuses fail-closed naming the file (init fails active_runs_write_failed; file stays zero-byte)" {
   _mk_primary "$TEST_TMPDIR/primary"
   mkdir -p "$TEST_TMPDIR/primary/.aid-o/work"
   : > "$TEST_TMPDIR/primary/.aid-o/work/active-runs.json"
   run bash -c "cd '$TEST_TMPDIR/primary' \
     && '$FSM' init E-901-1_1 R-A 1 manual main HEAD '.aid-o/work/evidence/E-901-1_1/R-A/fsm-state.yaml'" 3>&-
-  [ "$status" -eq 0 ]   # best-effort: a map failure must never block init
-  [[ "$output" == *"active-runs.json is not a parseable JSON object"* ]]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"active-runs.json is not a parseable JSON object"* && "$output" == *"active_runs_write_failed"* ]]
   [ -e "$TEST_TMPDIR/primary/.aid-o/work/active-runs.json" ]
   [ ! -s "$TEST_TMPDIR/primary/.aid-o/work/active-runs.json" ]
 }
@@ -377,4 +378,29 @@ JSON
   [ "$(jq -r 'has("E-001-1_1")' "$d/.aid-o/work/active-runs.json")" = "false" ]
   ! grep -q 'E-001-1_1' "$d/.aid-o/work/active.md"
   [[ "$output" != *"unknown boundary"* ]]
+}
+
+# ── P112 Step 6: the map keeps every live run ─────────────────────────────────
+@test "hook-map: prune keeps a direct run at DONE/review and drops it at DONE/release" {
+  _mk_primary "$TEST_TMPDIR/primary"
+  _seed_state "$TEST_TMPDIR/primary" E-811-1_1 R-A DONE plan/P811
+  printf 'direct: true\ndone_phase: review\n' >> "$TEST_TMPDIR/primary/.aid-o/work/evidence/E-811-1_1/R-A/fsm-state.yaml"
+  echo '{"E-811-1_1": {"state_file": ".aid-o/work/evidence/E-811-1_1/R-A/fsm-state.yaml", "governs_main": true}}' > "$TEST_TMPDIR/primary/.aid-o/work/active-runs.json"
+  run bash -c "cd '$TEST_TMPDIR/primary' && '$FSM' active-runs prune" 3>&-
+  [ "$status" -eq 0 ]; [[ "$output" != *"removed E-811-1_1"* ]]
+  sed -i 's/^done_phase: review/done_phase: release/' "$TEST_TMPDIR/primary/.aid-o/work/evidence/E-811-1_1/R-A/fsm-state.yaml"
+  run bash -c "cd '$TEST_TMPDIR/primary' && '$FSM' active-runs prune" 3>&-
+  [[ "$output" == *"removed E-811-1_1 (terminal state DONE)"* ]]
+}
+@test "hook-map: init whose map cannot be written (read-only work dir) exits non-zero with active_runs_write_failed" {
+  [ "$(id -u)" -ne 0 ] || skip "root writes anywhere"
+  _mk_primary "$TEST_TMPDIR/primary"
+  mkdir -p "$TEST_TMPDIR/primary/.aid-o/work/evidence/E-912-1_1/R-A"
+  echo '{}' > "$TEST_TMPDIR/primary/.aid-o/work/active-runs.json"; chmod 444 "$TEST_TMPDIR/primary/.aid-o/work/active-runs.json"
+  chmod 555 "$TEST_TMPDIR/primary/.aid-o/work"
+  run bash -c "cd '$TEST_TMPDIR/primary' \
+    && '$FSM' init E-912-1_1 R-A 1 manual main HEAD '.aid-o/work/evidence/E-912-1_1/R-A/fsm-state.yaml'" 3>&-
+  chmod 755 "$TEST_TMPDIR/primary/.aid-o/work"; chmod 644 "$TEST_TMPDIR/primary/.aid-o/work/active-runs.json"
+  echo "$output"
+  [ "$status" -ne 0 ]; [[ "$output" == *"active_runs_write_failed"* ]]
 }
