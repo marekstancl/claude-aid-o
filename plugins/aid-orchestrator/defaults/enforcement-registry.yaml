@@ -1221,7 +1221,7 @@ enforcements:
     severity: blocking
     surface: "plan-close precondition"
     status: active
-    description: "Plan-close-consistency wiring: aid-plan-close-check.sh (fsm-state DONE-but-pending, queue/active revalidation, carried obligations) was a standalone tool the PM had to run by hand; cmd_plan_close invokes it UNCONDITIONALLY before writing ca-review-complete — a non-zero exit refuses the marker."
+    description: "Plan-close-consistency wiring: aid-plan-close-check.sh (fsm-state DONE-but-pending, carried obligations; its queue revalidation left with the queue in 3.0.0, P114) was a standalone tool the PM had to run by hand; cmd_plan_close invokes it UNCONDITIONALLY before writing ca-review-complete — a non-zero exit refuses the marker."
     test: "scripts/tests/bats/test-plan-close.bats (grep: 'aid-plan-close-check.sh')"
   - id: gate_timeout_policy_block
     type: 1
@@ -3624,10 +3624,10 @@ enforcements:
     enforcement_degree: 2
     description: "PM-requested route (2026-09-02) for closing a plan that never produced an evidence chain — work developed outside AID, or a plugin defect that strands a plan. It writes NO candidate, run id or verdict; it records closure_kind and lists what could not be confirmed. Refused whenever the manifest carries both candidate_sha and plan_final_run_id, so a plan whose evidence exists and says `fail` cannot be closed around; refused together with --force, which means the opposite thing (real data, stuck check); and requires a reason of 20+ characters, recorded verbatim. P100 Step 9: it closes from any open state (P097 stood in PLAN_GATES), and a plan whose branch is already inside the target is closed with its plan-final evidence listed as partial; before 2.107.0 no administrative close passed its own argument check (the reason was refused as a force reason without --force). 2.107.1: a plan git shows merged into the target also gets a lifecycle receipt (verdict: administrative per non-accepted EPIC, hash-only waiver naming the merge and plan-close-administrative.json, which keeps the PM's reason), so plans that depend on it can start."
     not_guaranteed: "that the plan was delivered, reviewed, or is releasable. It guarantees only that the closure is RECORDED as evidence-free and is never presented as an ordinary close — where an evidence-backed close is required, this one does not satisfy it."
-  - id: queue_continuation_notice
+  - id: auto_continuation_notice
     type: 12
-    source: "scripts/lib/aid-queue-continuation.sh"
-    instruction: "defaults/hook-registry.yaml (queue_continuation_notice, queue_continuation_resume, pm_reply_marker) + commands/aid-run.md (--auto binds the session)"
+    source: "scripts/lib/aid-auto-continuation.sh"
+    instruction: "defaults/hook-registry.yaml (queue_continuation_notice, pm_reply_marker) + commands/aid-run.md (--auto binds the session)"
     severity: blocking
     surface: llm-facing
     status: active
@@ -3635,9 +3635,9 @@ enforcements:
     tier: t0
     enforcement_degree: 2
     not_guaranteed: "That the agent does useful work after a refusal — it is sent back with the next action, and the budget (autonomy.continuation_budget, 40 per plan until the PM answers) bounds a loop that keeps failing the same way. Nothing holds a session that is not the plan's `auto_session`, a turn that ends on an account limit (no Stop event arrives), or a layer without a fresh canary verdict (the row is `failure: closed`, so it degrades to open and says so in the audit). A turn that hands over with a card, or ends `AID-WAIT:` while an AID background job is live, is let go by design."
-    description: "P090 Step 5, a refusal since P099 Step 5 — the agent ended its turn in the middle of an autonomous run about ten times in P097. On `Stop` of the session bound to an autonomous plan, a turn with work left is refused with the next action; the row declares `blocks_when_active`, so the refusal holds under stop_hook_active and the rule counts instead. A card or the spent budget ends the run with one `agent-waiting` message; the PM's prompt (`pm_reply_marker`) resets the count and re-arms the message. On `SessionStart` it reads back the continuation guidance an interrupted run left. It asks through `peek`, never `claim`."
+    description: "P090 Step 5, a refusal since P099 Step 5 — the agent ended its turn in the middle of an autonomous run about ten times in P097. On `Stop` of the session bound to an autonomous plan, a turn with work left is refused with the next action; the row declares `blocks_when_active`, so the refusal holds under stop_hook_active and the rule counts instead. A card or the spent budget ends the run with one `agent-waiting` message; the PM's prompt (`pm_reply_marker`) resets the count and re-arms the message. P114 (3.0.0): was the row `queue_continuation_notice` (the hook rule keeps that id, so AID_HOOKS_OFF_RULES and the audit lines read the same); the library was renamed and the SessionStart reminder built on the queue left with it."
     recovery: "The refusal names the plan, its state and the ways a turn may end. AID_HOOKS_OFF_RULES=queue_continuation_notice switches it off without a release."
-    test: "scripts/tests/bats/test-queue-continuation.bats"
+    test: "scripts/tests/bats/test-auto-continuation.bats"
   - id: codex_transport_read_only
     type: 1
     source: "scripts/lib/aid-codex-transport.sh:_run_codex_isolated"

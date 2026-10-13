@@ -6,8 +6,8 @@
 # THE GROUNDED FAILURE MODE UNDER TEST: active.md was agent-written prose
 # read by five surfaces as "authoritative current state" — a single
 # narrative two concurrent streams corrupt with lost updates. Step 6 makes
-# it a GENERATED index rendered from plan-state + the active-runs map +
-# the queue by exactly four lifecycle writers (init, done-advance,
+# it a GENERATED index rendered from plan-state and the active-runs map
+# (once also the queue) by exactly four lifecycle writers (init, done-advance,
 # plan-close, plan-rollback), all funneled through ONE shared helper
 # (`aid_active_boundary_sync` in lib/aid-active-index.sh) that also lands
 # Step 4's deferred prune wiring. The direct PLAN-layer close/rollback
@@ -113,7 +113,7 @@ _refresh() {
   ! grep -q '^- P903' "$idx"
 }
 
-@test "missing plan-state dir + no map + no queue renders a valid 'no active streams' index" {
+@test "missing plan-state dir + no map renders a valid 'no active streams' index" {
   local d="$TEST_TMPDIR/root"
   mkdir -p "$d"
   _refresh "$d"
@@ -122,7 +122,7 @@ _refresh() {
   [ "$(head -1 "$idx")" = "$HEADER" ]
   grep -q 'No active plan streams\.' "$idx"
   grep -q 'No active EPIC runs\.' "$idx"
-  grep -q 'No queue file\.' "$idx"
+  [ -z "$(grep -i queue "$idx")" ]   # the queue left with the EPIC path (P114)
 }
 
 @test "legacy hand-written active.md is preserved ONCE as active.md.pre-index; a later hand edit is overwritten and NOT re-preserved" {

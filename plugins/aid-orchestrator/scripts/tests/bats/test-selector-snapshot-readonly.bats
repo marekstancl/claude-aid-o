@@ -24,7 +24,7 @@ setup() {
   [ "$before_hash" = "$after_hash" ]
 }
 
-@test "the 3 known selector gap paths appear as recommendation:fix findings sourced from the real function" {
+@test "the 2 known selector gap paths appear as recommendation:fix findings sourced from the real function" {
   run "$SNAPSHOT_SCRIPT" --project-root "$REPO_ROOT"
   [ "$status" -eq 0 ]
 
@@ -32,7 +32,6 @@ setup() {
   gap_ids="$(echo "$output" | jq -r '.findings[].run_unit_id')"
 
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/aid-plan-fsm.sh"* ]]
-  [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/lib/aid-queue-write.sh"* ]]
   [[ "$gap_ids" == *"selector-gap:plugins/aid-orchestrator/scripts/lib/aid-gate-profile-select.sh"* ]]
   [[ "$gap_ids" != *"the former queue writer"* ]]   # the queue writer left with the EPIC path (P114)
   # the registry is mapped since 2.107.0 (the suites that read it)

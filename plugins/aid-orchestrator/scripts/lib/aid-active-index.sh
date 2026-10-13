@@ -5,8 +5,8 @@
 #
 # `active.md` is a GENERATED index of active streams — never hand-written,
 # because a single narrative file loses updates once two streams write it.
-# It is rendered from state that already exists (plan-state, the active-runs
-# map, the queue) by four named lifecycle writers; plan-state remains the
+# It is rendered from state that already exists (plan-state and the
+# active-runs map) by four named lifecycle writers; plan-state remains the
 # sole per-stream detail source and this lib introduces no new state.
 #
 # TWO SOURCEABLE FUNCTIONS — one definition, BOTH FSM layers source this file:
@@ -14,8 +14,7 @@
 #   aid_active_index_refresh <state_root>
 #     Renders <state_root>/.aid-o/work/active.md from
 #     work/plan-state/*/plan-state.yaml (+ each plan's
-#     plan-boundary-manifest.json for the EPIC set), work/active-runs.json,
-#     and a one-line queue summary. One line per active (non-terminal) plan:
+#     plan-boundary-manifest.json for the EPIC set), and work/active-runs.json. One line per active (non-terminal) plan:
 #     id, phase, worktree path, EPIC states. The first line is a header
 #     naming the file as generated, so any agent reading it learns the
 #     contract in-band. Atomic write (mktemp + mv in the file's own dir)
@@ -136,20 +135,6 @@ aid_active_index_refresh() {
     runs="No active EPIC runs."
   fi
 
-  # ── Queue summary (one line; the file itself stays the detail source) ─────
-  # Deliberately a TOTAL, not a per-status breakdown: entries here include
-  # terminal ones, and status vocabulary belongs to the queue layer. Anything
-  # that needs counts by status reads them through lib/aid-queue-write.sh, as
-  # /aid-status does — this index never becomes a second queue parser.
-  local queue="${state_root}/.aid-o/config/queue.yaml" queue_line qn
-  if [[ -f "$queue" ]]; then
-    qn="$(grep -c 'epic_id:' "$queue" 2>/dev/null || true)"
-    [[ "$qn" =~ ^[0-9]+$ ]] || qn=0
-    queue_line="${qn} queue entry(ies) (all statuses) — see .aid-o/config/queue.yaml"
-  else
-    queue_line="No queue file."
-  fi
-
   # ── One-time preservation of a legacy hand-written active.md ──────────────
   if [[ -f "$index" && ! -e "${index}.pre-index" ]]; then
     local first_line=""
@@ -176,7 +161,6 @@ aid_active_index_refresh() {
     printf 'Per-stream detail lives in `.aid-o/work/plan-state/<plan_id>/`.\n\n'
     printf '## Active plans\n%s\n' "$plans"
     printf '## Active EPIC runs\n%s\n\n' "$runs"
-    printf '## Queue\n%s\n\n' "$queue_line"
     printf '_Rendered: %s_\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "$tmp" 2>/dev/null || rc=1
   if [[ "$rc" -eq 0 ]]; then

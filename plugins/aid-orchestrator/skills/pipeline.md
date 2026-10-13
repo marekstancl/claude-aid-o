@@ -1489,64 +1489,8 @@ run (P068). The FSM enforces the skip structurally; these instructions must matc
 15b. **Report to the PM, in these words:** "EPIC complete and merged into
     `plan/{plan_id}`; plan remains open; no plan-final release decision has run yet."
     Do not describe this as a release, a delivery or a merge to `{target_branch}`.
-16. **Queue — the continuation is a program now; you do not perform it by hand.**
-    Since P090 this whole sequence lives in `scripts/aid-plan-continue.sh`, and
-    `epic-merge-to-plan` calls it ITSELF after a successful merge whenever the plan's
-    `autonomy` field (written by `plan-start`) says `auto`. In an autonomous plan there
-    is nothing for you to do at step 16: the merge you ran at step 15 already printed
-    what it did.
-
-    ```bash
-    # Only when you are driving a MANUAL plan, or re-running after a failure.
-    # Same sequence, same guarantees; --no-continue on epic-merge-to-plan turns
-    # the automatic call off.
-    bash {plugin_path}/scripts/aid-plan-continue.sh {plan_id} {epic_id} \
-      --project-root {project_root}
-    ```
-
-    **What it does, in order** — and it stops at the first link that fails:
-
-    | # | Link | What it guarantees |
-    |---|------|--------------------|
-    | 0 | **proof** | `git merge-base --is-ancestor <task branch> plan/{plan_id}`. Nothing is written before this passes |
-    | 1 | **mirror** | `set-status {epic_id} merged_to_plan`; skipped if already there, which is what makes a re-run harmless |
-    | 2 | **ask** | `aid-plan-fsm.sh next-epic {plan_id}` — changes nothing, records the answer in the plan timeline. `none`/`blocked:` ends here, queue unclaimed |
-    | 3 | **claim** | `claim-next {plan_id}`; if the queue moved since the ask, the claim wins and the difference is recorded |
-    | 4 | **start** | `epic-start` on exactly what the claim took. If it fails, the claim is undone back to `pending` |
-
-    **Link 1 is not optional bookkeeping — without it a multi-EPIC plan stalls at its
-    second EPIC.** `epic-merge-to-plan` leaves the queue entry at `running`. When the
-    dependency entry carries no `merge_target` — the shape `aid-queue-add.sh` writes
-    whenever `plan/{plan_id}` did not yet exist at queue-add time, which is the normal
-    ordering in `aid-auto-pipeline.sh` — `claim-next` resolves that dependency from its
-    STATUS, sees `running`, and durably records
-    `blocked:{next_epic_id}:dependency_unmerged:{epic_id}` on the dependent. The work is
-    provably contained in `plan/{plan_id}` and provably absent from `{target_branch}` —
-    exactly the state the plan exists to create — and the hand-off refuses it anyway.
-
-    **A queue entry is a DERIVED VIEW, never evidence.** Link 1 mirrors the ancestry fact
-    step 15 established in Git; it does not create it. That is why link 0 exists: for an
-    entry with no `merge_target` the status IS the readiness answer, so the mirror has to
-    be earned against Git before it is written. For an entry that DOES carry a
-    `merge_target`, `claim-next` proves readiness with its own live
-    `git merge-base --is-ancestor` check and ignores the status field entirely.
-
-    **`aid-plan-fsm.sh` still does not write the queue.** The boundary at
-    `aid-plan-fsm.sh:89-92` is unchanged: `epic-merge-to-plan` moves Git and the plan
-    manifest and hands control to a separate program that establishes its own proof.
-
-    | Exit | `aid-plan-continue.sh` |
-    |------|------------------------|
-    | 0 | The plan moved on — or ended cleanly (`none` / `blocked:` / nothing owed). On `none` it names `plan-finalize`, `plan-merge-to-main`, `plan-close` and stops; closing a plan is a decision, and it does not make it |
-    | 1 | A link failed and was named; the plan did not move. A refusal at link 1 because the entry is terminal means the queue and the manifest disagree — report it, never hand-edit the queue to force agreement |
-    | 2 | Usage |
-    | 3 | Transient: a lock was unavailable. Retry. **Never read as an end** |
-
-    **The one state it will not clean up.** If a process dies between claim and start,
-    the entry is left `running` with nothing running. `peek` deliberately does not return
-    such an entry and the script will not silently reset one — it may be somebody else's
-    live run. Release it explicitly with
-    `aid-plan-continue.sh --reclaim <epic_id>`, which no automation ever calls.
+16. **Nothing to continue.** The queue and the continuation left with the EPIC path in 3.0.0
+    (P114): a plan runs as one run, so there is no next EPIC to claim.
 
 #### `legacy_epic_release_mode` — the per-EPIC release ritual
 
@@ -1597,9 +1541,7 @@ artifacts an intermediate EPIC really has:
 2. `gates_report.json` → `overall: pass`.
 
 Both true → proceed automatically through steps 14-16 (`epic-complete` →
-`epic-merge-to-plan`, which then calls `aid-plan-continue.sh` itself: mirror → ask →
-claim → start. The mirror is never skipped in auto-mode — skipping it blocks the next
-EPIC — and since P090 nothing has to remember to do it). Any
+`epic-merge-to-plan`). Any
 one false → stop and show the summary; the
 merge into `plan/{plan_id}` needs a PM decision. **`epic-merge-to-plan` exiting 1/4/5 is
 never auto-retried** — report the printed reason as documented in step 15.
@@ -1813,7 +1755,7 @@ is the authoritative source — the YAML config files do not duplicate it.
 
 **The bound session keeps going (P099).** `/aid-run --auto` records the session in the plan's
 state (`plan-state <id> --bind-session`), and the Stop rule `queue_continuation_notice`
-(`scripts/lib/aid-queue-continuation.sh`) refuses a turn of that session that ends with work left,
+(`scripts/lib/aid-auto-continuation.sh`) refuses a turn of that session that ends with work left,
 up to `orchestration.yaml → autonomy.continuation_budget` refusals; the PM's next prompt resets the
 count. A Decision or Blocked card, a last line `AID-WAIT: <what>` while an AID background job is
 live, or the spent budget lets the turn end; the card and the budget send the PM one "agent is
@@ -1882,55 +1824,9 @@ because the previous controller process disappeared.
 
 ## §12 Queue Management
 
-**Queue file:** `.aid-o/config/queue.yaml`
-
-**Add to queue:**
-```bash
-aid-queue-add.sh <epic_file> [--priority high|medium|low] [--depends-on E-xxx,E-yyy]
-```
-Validates EPIC file, checks for duplicates, runs Kahn's cycle detection, appends entry.
-
-**Queue pickup** (DONE state, action 7):
-1. `aid-queue-add.sh next` → returns next READY epic_id or empty
-2. If READY epic found: auto-load and start new PRE-FLIGHT→READY cycle
-3. If queue paused or empty: log, present "Queue empty" to PM
-
-**Eligibility:** READY (deps completed) | WAITING (deps in progress) | BLOCKED (deps failed)
-Only READY entries are eligible for pickup.
-
-**Dependency revalidation before respecting a blocked/waiting status (P060, OBS-20260709-06):**
-A queue entry's `depends_on` (the real schema field — epic IDs) is revalidated against
-**live git** before any consumer treats the entry as blocked. This closes the false-BLOCK
-dual of bookkeeping staleness: a stale "awaiting merge" flag once held a dependent EPIC
-blocked long after its dependency had merged (and its task branch was deleted — the norm),
-and a human had to catch it.
-
-- **Consumer contract:** BEFORE respecting a blocked/waiting status at queue pickup — and at
-  `/aid-run` pre-start, before honoring a blocked queue entry — call:
-  ```bash
-  aid-fsm.sh queue-revalidate <epic_id>   # → unblocked | blocked | failed | noop
-  ```
-  Respect the *revalidated* verdict, not the stored flag. `unblocked` → eligible; `blocked` →
-  a genuinely-unmerged dep, keep waiting; `failed` (fail-loud) → stop and surface to PM;
-  `noop` → nothing to revalidate (missing queue / no entry / no deps), fall through to the
-  stored status.
-- **4-output logic per dep (D8):** (1) dep branch exists + is-ancestor of main/HEAD → unblock
-  (`queue_dep_revalidated`); (2) branch exists + NOT ancestor → blocked (correct — dep not
-  merged); (3) branch **deleted after merge (the norm)** → merged-detection: unblock if the
-  dep's queue `status: completed`, OR its evidence fsm-state is DONE, OR `git log --merges
-  --grep` shows it reachable from main; (4) no signal at all → fail-loud (`queue_dep_unresolved`).
-  Unparseable queue → `queue_parse_failed` fail-loud.
-- **Also wired at init:** `aid-fsm.sh init` runs the same revalidation as a non-fatal new read
-  path (a blocked/unresolved dep is a scheduling signal, not an init failure). During a live
-  dogfood run the controller may execute a *cached* aid-fsm.sh that predates this — so the
-  consumer call above is the enforcement surface, not init alone.
-
-**Priority order:** critical > high > medium > low; within same priority: FIFO (added_at).
-
-**Safety guards:**
-- Max 1 concurrent EPIC
-- Failed EPIC → queue auto-pauses (PM must investigate before next pickup)
-- Conflict detection on mutations (`last_modified` check)
+Removed in 3.0.0 (P114) with the EPIC path: a plan runs as one run (`plan-run`), so there is
+no queue, no pickup and no dependency revalidation. A leftover `.aid-o/config/queue.yaml` is
+read only by `plan-run`'s refusal of a plan that still has entries in it.
 
 ---
 

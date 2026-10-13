@@ -53,6 +53,8 @@ setup() {
 }
 
 _run()  { run bash "$PFSM" plan-run P900 "$@"; }
+# _page — re-render the PM page after a test edits the plan (plan-run refuses a stale page, as production does)
+_page() { ( source "$PLUGIN_DIR/scripts/lib/aid-plan-summary.sh" && aid_plan_summary_render "$PLAN" "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html" >/dev/null 2>&1 ); }
 
 # ── the start ────────────────────────────────────────────────────────────────
 
@@ -425,7 +427,7 @@ _seed_rr() {   # <project> <foreign> [base_branch] — the fixture plan declarin
   [ "$status" -eq 99 ]
   echo "edited after the seal" >> "$PLAN"
   git -C "$R" add -f "$PLAN" && git -C "$R" commit -qm "edited plan"
-  ( export AID_PLUGIN_PATH="$PLUGIN_DIR"; source "$PLUGIN_DIR/scripts/tests/lib/aid-test-plan-fixture.sh"; aid_fixture_seed_plan_review "$R" "$PLAN" >/dev/null )
+  ( export AID_PLUGIN_PATH="$PLUGIN_DIR"; source "$PLUGIN_DIR/scripts/tests/lib/aid-test-plan-fixture.sh"; aid_fixture_seed_plan_review "$R" "$PLAN" >/dev/null ); _page
   _run
   [ "$status" -eq 1 ]; [[ "$output" == *plan_changed_since_seal* ]]
   mv "$GEN/transaction.json" "$GEN/transaction.json.superseded-1"
@@ -491,7 +493,7 @@ _ev_add() { printf '{"ts":"%s","event":"%s"}\n' "${2:-$(date -u +%Y-%m-%dT%H:%M:
   local F="$BATS_TEST_TMPDIR/docs"; _mk_foreign "$F"
   sed -i "s|^lifecycle_strict: true$|lifecycle_strict: true\nrepo_roots:\n  - name: docs\n    path: $F|" "$PLAN"
   git -C "$R" add -f "$PLAN" && git -C "$R" commit -qm "the plan declares its foreign repository"
-  ( export AID_PLUGIN_PATH="$PLUGIN_DIR"; source "$PLUGIN_DIR/scripts/tests/lib/aid-test-plan-fixture.sh"; aid_fixture_seed_plan_review "$R" "$PLAN" >/dev/null )
+  ( export AID_PLUGIN_PATH="$PLUGIN_DIR"; source "$PLUGIN_DIR/scripts/tests/lib/aid-test-plan-fixture.sh"; aid_fixture_seed_plan_review "$R" "$PLAN" >/dev/null ); _page
   _rs; echo "$output"; [ "$status" -eq 0 ]
   [ "$(git -C "$F/.aid-worktrees/plan-P900--docs" rev-parse --abbrev-ref HEAD)" = "plan/P900-p" ]
   [ "$(jq -r '.repo_roots[0].name' "$EV/plan.json")" = docs ]

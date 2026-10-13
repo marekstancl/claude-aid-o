@@ -21,7 +21,8 @@ setup() {
   local x='-'; REMOVED_RE="aid${x}plan${x}to${x}epic|aid${x}epic${x}to${x}json|aid${x}json${x}to${x}run|aid${x}queue${x}add|aid${x}auto${x}pipeline|aid${x}generation${x}finalize|aid${x}epic${x}summary|aid${x}plan${x}continue|aid${x}queue${x}write|templates/epic\\.md"
 }
 
-_row() { jq -c --arg i "$1" 'first(.[] | select(.id == $i)) // empty' "$ROWS"; }
+# _row <id> — the row, or the row P114 renamed it to (its description says "was the row `<id>`")
+_row() { jq -c --arg i "$1" 'first(.[] | select(.id == $i)) // first(.[] | select((.description // "") | contains("was the row `" + $i + "`"))) // empty' "$ROWS"; }
 _p114_rows() { jq -c '.[] | select(.status == "removed_scoped" and ((.description // "") | startswith("RETIRED by P114")))' "$ROWS"; }
 
 @test "inventory: the inventory has its 52 rows and every one is in the registry" {
@@ -84,13 +85,12 @@ _p114_rows() { jq -c '.[] | select(.status == "removed_scoped" and ((.descriptio
 @test "inventory: no active row's test_covers or test names a suite that goes with the EPIC path" {
   local x='-'; local gone="generation${x}fixture|test${x}plan${x}to${x}epic|test${x}epic${x}to${x}json|test${x}json${x}to${x}run|test${x}queue${x}add|test${x}full${x}pipeline|test${x}generation${x}finalize|test${x}aid${x}epic${x}summary|test${x}aid${x}plan${x}to${x}epic${x}fence|test${x}generation${x}resume|test${x}generation${x}labels|test${x}supersede${x}generation|test${x}generation${x}parsers|test${x}queue${x}continuation|test${x}queue${x}peek|test${x}queue${x}registry${x}rows|test${x}queue${x}revalidation|test${x}next${x}epic|test${x}plan${x}continue|test${x}continue${x}artifact|test${x}continue${x}spawn|test${x}epic${x}chain${x}freshness|test${x}epic${x}start${x}run${x}id"
   local hits
-  hits="$(jq -r --arg re "$gone" '.[] | select(.status == "active") | select(((.test_covers // "") + " " + (.test // "") | test($re))) | .id' "$ROWS" \
-    | grep -vx 'queue_continuation_notice' || true)"   # re-pointed in Step 6 with the library rename
+  hits="$(jq -r --arg re "$gone" '.[] | select(.status == "active") | select(((.test_covers // "") + " " + (.test // "") | test($re))) | .id' "$ROWS")"
   [ -z "$hits" ] || { echo "test_covers names a leaving suite: $hits"; false; }
 }
 
-@test "inventory: the two corrected verdicts — the autonomous Stop rule stays, the generation exclusion is handed to epic_path_removed" {
-  [ "$(_row queue_continuation_notice | jq -r .status)" = active ]
+@test "inventory: the two corrected verdicts — the autonomous Stop rule stays (renamed auto_continuation_notice), the generation exclusion is handed to epic_path_removed" {
+  [ "$(_row queue_continuation_notice | jq -r '.id + " " + .status + " " + .source')" = "auto_continuation_notice active scripts/lib/aid-auto-continuation.sh" ]
   local row; row="$(_row plan_run_excludes_generation)"
   [[ "$(jq -r .status <<< "$row")" == active || "$(jq -r .replacement_guard <<< "$row")" == epic_path_removed ]]
 }

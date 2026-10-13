@@ -1529,17 +1529,6 @@ _ran() { wc -l < "$TEST_PROJECT_ROOT/.aid-o/work/ran_$1" | tr -d ' '; }
 # keeps what surrounds them: the freeze and gate stages above, the merge and the
 # close below, which start from a SEEDED decided plan (_seed_plan_final_evidence).
 
-# _write_plan_review [head_override] — the plan's sealed generation authority, which
-# carries the plan review (CP1) verdict the aggregator reads. Its target_head is
-# plan_base_commit by default: a plan-time artifact is stale by construction, so
-# the aggregator's basis for it is ANCESTRY, not equality.
-_write_plan_review() {
-  local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${PLAN_ID}/generation"
-  mkdir -p "$dir"
-  local h="${1:-$(_manifest_field "$PLAN_ID" plan_base_commit)}"
-  jq -n --arg h "$h" '{cp1: {verdict: "pass"}, target_head: $h}' > "$dir/generation-authority.json"
-}
-_decision() { printf '%s/release-decision.json' "$(_run_dir)"; }
 
 # =============================================================================
 # ─── aid-plan-fsm.sh plan-merge-to-main (Step 5) ─────────────────────────
@@ -2872,23 +2861,6 @@ _lc_status() {
   [ ! -f "$(_marker)" ]
 }
 
-@test "AC7: a stale queue state blocks close" {
-  _seed_closable
-  # The EPIC's task branch really IS merged (it points at the candidate, which
-  # the plan merge published on main), while the queue still claims blocked.
-  git -C "$TEST_PROJECT_ROOT" branch "task/E-068-1_2/main" "$(_manifest_field "$PLAN_ID" candidate_sha)"
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
-  cat > "$TEST_PROJECT_ROOT/.aid-o/config/queue.yaml" <<'YAML'
-- epic_id: E-068-1_2
-  path: p
-  status: blocked
-  depends_on: []
-YAML
-  _close
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"check4"* ]]
-  [ ! -f "$(_marker)" ]
-}
 
 @test "AC7: a stale active.md state blocks close" {
   _seed_closable
