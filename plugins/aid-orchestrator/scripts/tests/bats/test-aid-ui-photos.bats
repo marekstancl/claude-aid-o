@@ -7,11 +7,13 @@
 setup() {
   PH="$BATS_TEST_DIRNAME/../../aid-ui-photos.py"; T="$BATS_TEST_TMPDIR"; P="$T/p"
   O="$P/.aid-ui/old-site/www.example.sk"; mkdir -p "$O/img" "$P/docs/content" "$P/docs/design" "$T/bin"
-  for f in a b c; do echo "$f" > "$O/img/$f.jpg"; done
+  for f in a b c d e; do echo "$f" > "$O/img/$f.jpg"; done
   cat > "$O/fetch.json" <<'J'
 {"images": [{"url": "https://cdn.example/ordinacia.jpg", "page": "https://www.example.sk/", "alt": "Ordinácia", "file": "img/a.jpg", "width": 1920, "height": 1440},
  {"url": "https://cdn.example/recepcia.jpg", "page": "https://www.example.sk/o-nas/", "alt": "", "file": "img/b.jpg", "width": 1920, "height": 1440},
  {"url": "https://cdn.example/pruh.jpg", "page": "https://www.example.sk/", "alt": "", "file": "img/c.jpg", "width": 700, "height": 233},
+ {"url": "https://cdn.example/700/ordinacia.jpg", "page": "https://www.example.sk/", "alt": "", "file": "img/d.jpg", "width": 700, "height": 525},
+ {"url": "https://cdn.example/logo.jpg", "page": "https://www.example.sk/", "alt": "Logo", "file": "img/e.jpg", "width": 1920, "height": 1440},
  {"url": "https://cdn.example/ikona.png", "page": "https://www.example.sk/", "status": "too small or unreadable"}]}
 J
   printf -- '- {id: ambulancia, page: index.html, where: "Úvod", what: "ordinácia bez ľudí", shape: rect, ratio: "4:3", min_px: "1600x1200"}\n' > "$P/docs/content/photos.yaml"
@@ -23,9 +25,10 @@ J
 answer() { jq --arg q "$1" --arg c "$2" --arg t "$3" '.answers[$q] = {kind: "photos", decision: "choose", choice: $c, target: $t}' "$P/docs/design/brand-state.json" > "$T/s" && mv "$T/s" "$P/docs/design/brand-state.json"; }
 
 @test "candidates, marks before any question, cards by shape with keep, one answer places the photo" {
-  run python3 "$PH" candidates "$P"; [ "$status" -eq 0 ]; [ "$(jq '.candidates | length' "$P/.aid-ui/photos/candidates.json")" -eq 3 ]
+  run python3 "$PH" candidates "$P"; [ "$status" -eq 0 ]; [ "$(jq '.candidates | length' "$P/.aid-ui/photos/candidates.json")" -eq 4 ]   # the 700 px copy of the first is gone
   run python3 "$PH" question "$P" ambulancia; [ "$status" -eq 1 ]; [[ "$output" == *"look at the photos first"* ]]
   python3 "$PH" mark "$P" c1 --people no >/dev/null; python3 "$PH" mark "$P" c2 --people yes --note "recepčná" >/dev/null
+  python3 "$PH" mark "$P" c4 --skip --note "logo" >/dev/null   # not a photo: never offered
   # c3 (700 px) is under half of min_px 1600: never offered, so it needs no mark
   run python3 "$PH" question "$P" ambulancia; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   q="$output"

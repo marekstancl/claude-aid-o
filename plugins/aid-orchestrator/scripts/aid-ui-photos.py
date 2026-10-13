@@ -5,8 +5,10 @@ clinic and nobody saw them, because only its text was fetched).
   candidates <project>
       Every photo the sources step fetched from the old site (.aid-ui/old-site/*/fetch.json images with a file)
       into .aid-ui/photos/candidates.json {id c1.., file, url, page, alt, width, height, people: null}.
-      Kept marks survive a rerun (same file).
-  mark <project> <candidate> --people yes|no [--note <t>]
+      Kept marks survive a rerun (same file). The same picture in a smaller size (a CDN size segment such as
+      /700/ in the path) is dropped for the largest.
+  mark <project> <candidate> --people yes|no [--note <t>] | --skip
+      (--skip: not a photo, e.g. a logo or a graphic; never offered)
       The agent LOOKED at the photo: is a recognisable person on it (consent needed)? A question shows only
       candidates the agent has looked at.
   question <project> <slot id>
@@ -21,7 +23,7 @@ clinic and nobody saw them, because only its text was fetched).
       is used once.
 Exit 0 done, 1 refused, 2 usage.
 """
-import hashlib, json, os, subprocess, sys
+import hashlib, json, os, re, subprocess, sys, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.environ.get("AID_UI_TOOL") or os.path.join(HERE, "aid-ui-tool.sh")
@@ -71,14 +73,23 @@ def candidates(p):
             f = os.path.join(base, site, im["file"])
             keep = old.get(f, {})
             out.append({"file": f, "url": im["url"], "page": im.get("page"), "alt": im.get("alt") or "",
-                        "width": im["width"], "height": im["height"], "people": keep.get("people"), "note": keep.get("note")})
+                        "width": im["width"], "height": im["height"], "people": keep.get("people"), "note": keep.get("note"),
+                        "skip": keep.get("skip")})
+    # the same picture in a smaller size (a CDN size segment such as /700/ in its path): only the largest stays
+    same = lambda c: re.sub(r"/\d{2,4}(?=/)", "", urllib.parse.urlsplit(c["url"]).path)
+    big = {}
+    for c in out:
+        k = same(c)
+        if k not in big or c["width"] * c["height"] > big[k]["width"] * big[k]["height"]:
+            big[k] = c
+    out = [c for c in out if big[same(c)] is c]
     for i, c in enumerate(out, 1):
         c["id"] = "c%d" % i
     d = load(p)
     d["candidates"] = out
     save(p, d)
     for c in out:
-        print("%-4s %5dx%-5d people=%-5s %s" % (c["id"], c["width"], c["height"], c["people"], c["url"][-60:]))
+        print("%-4s %5dx%-5d people=%-5s%s %s" % (c["id"], c["width"], c["height"], c["people"], " SKIP" if c.get("skip") else "", c["url"][-60:]))
     if not out:
         print("no photos from the old site (fetch the old site with aid-ui-sources.py --fetch-site)")
 
@@ -90,12 +101,16 @@ def find(d, cid):
     return c
 
 
-def mark(p, cid, people, note):
-    if people not in ("yes", "no"):
-        die("--people yes|no", 2)
+def mark(p, cid, people, note, skip=False):
+    if people not in ("yes", "no") and not skip:
+        die("--people yes|no, or --skip (not a photo: a logo, a graphic)", 2)
     d = load(p)
     c = find(d, cid)
-    c["people"], c["note"] = people == "yes", (note or "").strip() or None
+    if skip:
+        c["skip"], c["people"] = True, False
+    else:
+        c["people"], c["skip"] = people == "yes", None
+    c["note"] = (note or "").strip() or None
     save(p, d)
     print("%s people=%s" % (cid, c["people"]))
 
@@ -118,7 +133,7 @@ def question(p, slot):
     want = ratio(spec["ratio"])
     minw, minh = (int(x) for x in str(spec["min_px"]).split("x"))
     d = load(p)
-    fit = [c for c in d["candidates"] if max(c["width"], c["height"]) >= max(minw, minh) / 2]
+    fit = [c for c in d["candidates"] if max(c["width"], c["height"]) >= max(minw, minh) / 2 and not c.get("skip")]
     unseen = [c["id"] for c in fit if c["people"] is None]
     if unseen:
         die("look at the photos first and mark them (mark <candidate> --people yes|no): " + ", ".join(unseen))
@@ -190,7 +205,7 @@ def main(a):
     if len(a) == 2 and a[0] == "candidates":
         return candidates(os.path.abspath(a[1]))
     if len(a) >= 3 and a[0] == "mark":
-        return mark(os.path.abspath(a[1]), a[2], opt("--people"), opt("--note"))
+        return mark(os.path.abspath(a[1]), a[2], opt("--people"), opt("--note"), "--skip" in a)
     if len(a) == 3 and a[0] == "question":
         return question(os.path.abspath(a[1]), a[2])
     if len(a) >= 2 and a[0] == "apply" and opt("--answer"):
