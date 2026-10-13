@@ -1949,6 +1949,14 @@ SC_WHY="the PM moved this point to the close of the plan"
   [[ "$output" != *'AC1 "the ok file exists"'* ]]      # not listed as a missing change
   [ "$(_cur)" = 0 ]
 }
+@test "delegate: --defer-criterion still needs the PM's answered card in an --auto plan" {
+  _sc_seed
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P960"; echo 'autonomy: auto' > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P960/plan-state.yaml"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/evidence/P960"; echo '{"delegate": true}' > "$TEST_PROJECT_ROOT/.aid-o/work/evidence/P960/delegate.json"
+  _sc_card                                       # a card nobody answered
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"* ]]; [ "$(_cur)" = 0 ]
+}
 @test "step-criteria: --force does not waive an absent point" {
   _sc_seed
   run "$FSM" increment-step "$SF" --force --reason "the PM said to move on regardless of this"

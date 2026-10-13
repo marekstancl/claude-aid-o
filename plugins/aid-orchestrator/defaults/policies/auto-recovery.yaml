@@ -255,6 +255,11 @@ stop_classes:
       A bounded review loop spent its budget and is still blocking. The budget
       itself belongs to that loop (see `existing_loops`) — this class covers
       only what the AUTO run does AFTER the loop declares itself terminal.
+      P112: in a plan with delegation in force (plan state autonomy: auto, or
+      the PM's `standing --delegate`) the round does not close on an open
+      escalation — each goes first to `aid-review-round.sh delegate` (Codex,
+      or an independent Claude agent when Codex is out); only a verdict of
+      class brief, money or data reaches the PM's card.
     detector: mechanical
     ladder_entry: instruction
     ladder_entry_status: planned
