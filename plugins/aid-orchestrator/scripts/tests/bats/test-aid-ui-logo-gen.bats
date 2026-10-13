@@ -72,6 +72,8 @@ PY
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -q 'viewBox="0 0 256 256"' "$P/c.svg"; grep -q 'fill="#111"' "$P/c.svg"; ! grep -qiE '<image|<text|href=' "$P/c.svg"
   grep -q 'aid-ui-vectorize: vtracer' "$P/c.svg"
+  # P113a: the C (a ring cut on the right) mirrors top-bottom: measured, above 0.92
+  [[ "$output" == *"SYMMETRY"* ]]; jq -e '.symmetry.tb > 0.95 and .symmetry.axis == "horizontal"' "$P/c.svg.json" >/dev/null
   run python3 "$PLUGIN/skills/ui-design/references/adopted/logo-design/scripts/svg_audit.py" "$P/c.svg"
   [ "$status" -eq 0 ]; ! grep -q 'FAIL' <<<"$output"
   run bash "$PLUGIN/scripts/aid-ui-tool.sh" vectorize "$P/speck.png" "$P/speck.svg"; [ "$status" -eq 1 ]; [[ "$output" == *"speck"* ]]
@@ -89,4 +91,9 @@ PY
   run sheet .aid-ui/logo/wrap.svg; [ "$status" -eq 1 ]; [[ "$output" == *"plain vector SVG"* ]]
   run sheet .aid-ui/logo/raster.png; [ "$status" -eq 1 ]
   run sheet .aid-ui/logo/ok.svg; [ "$status" -eq 0 ] || { echo "$output"; return 1; }; [ -s "$P/.aid-ui/studio/logo-a.png" ]
+  # P113a: a symbol measured as asymmetric stops the sheet unless the direction states why
+  echo '{"symmetry": {"lr": 0.58, "tb": 0.82, "best": 0.82, "axis": "horizontal"}}' > "$P/.aid-ui/logo/ok.svg.json"
+  run sheet .aid-ui/logo/ok.svg; [ "$status" -eq 1 ]; [[ "$output" == *"only 0.82 symmetric"* ]]
+  printf '{"name":"F","out_dir":".aid-ui/studio","directions":[{"id":"a","title":"A","asymmetry":"zub v otvore C, zámerne","lockup":".aid-ui/logo/lock.svg","symbol":".aid-ui/logo/ok.svg"}]}' > "$P/.aid-ui/logo/sheet.json"
+  run bash "$PLUGIN/scripts/aid-ui-tool.sh" logo-sheet --spec .aid-ui/logo/sheet.json --root "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
