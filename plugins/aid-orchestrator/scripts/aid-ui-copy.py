@@ -84,7 +84,8 @@ Pro KAŽDOU stránku ze `subject.json`:
 3. Ohodnoť stránku pěti personami z `copy-rules.md` (konverzní copywriter, UX písař, cílový
    zákazník, skeptický zákazník, strážce značky) skóre 1–10 podle kotev, u každé citace místa.
 4. Vypiš každé faktické tvrzení (číslo, jméno, reference, záruka, výsledek, kontakt) s klíčem
-   z `facts.yaml`, o který se opírá; když v registru není, `fact_key: null`.
+   z `facts.yaml`, o který se opírá; když v registru není, `fact_key: null`. Věta, která vyjmenovává víc údajů
+   (název, adresa, telefon), má `fact_key` jako seznam všech klíčů.
 
 Odpověz JEN jedním objektem JSON podle tohoto tvaru (žádný text okolo):
 
@@ -439,7 +440,9 @@ def page_verdict(page, ans, subj, keys):
     for c in ans.get("claims") or []:
         if not known(c.get("block")):
             bad.append(f"tvrzení odkazuje na blok, který stránka nemá: {c.get('block')}")
-        if not c.get("fact_key") or str(c.get("fact_key")) not in keys:
+        fk = c.get("fact_key")
+        fks = [str(x) for x in fk] if isinstance(fk, list) else ([str(fk)] if fk else [])
+        if not fks or any(k not in keys for k in fks):   # a list of data (name, address, phone) rests on every key it names
             bad.append(f"tvrzení bez faktu v registru: {c.get('text', '')[:120]}")
     lang = subj.get("lang", "")
     if not lang or not os.path.isfile(os.path.join(REF, f"copy-{lang}.md")):

@@ -79,7 +79,8 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
               '.pages["index.html"].cro.cta = {status:"netyka_se", reason:"x", findings:[]}' \
               '.pages["index.html"].sweeps.so_what.findings = [{block:"b1", text:"prázdná fráze", severity:"blokujici"}]' \
               '.pages["index.html"].personas[0].score = 4' '.pages["index.html"].claims[0].fact_key = null' \
-              '.pages["index.html"].claims[0].fact_key = "neexistuje"' '.pages["index.html"].personas = []' \
+              '.pages["index.html"].claims[0].fact_key = "neexistuje"' '.pages["index.html"].claims[0].fact_key = ["klienti", "neexistuje"]' \
+              '.pages["index.html"].claims[0].fact_key = []' '.pages["index.html"].personas = []' \
               '.pages["index.html"].personas += [.pages["index.html"].personas[0]]' \
               '.pages["index.html"].sweeps.voice = {status:"netyka_se", reason:"x", findings:[]}' \
               '.pages["index.html"].claims[0].block = "b99"' \
@@ -89,6 +90,9 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
     run python3 "$COPY" verdict "$RUN"
     jq -e '.["index.html"].verdict == "fail"' <<<"$output" >/dev/null || { echo "not failed by: $edit"; echo "$output"; return 1; }
   done
+  # P113a: a sentence listing several data rests on all their keys (Coufal: "name, address, phone and e-mail")
+  review '.pages["index.html"].claims[0].fact_key = ["klienti", "telefon"]'; run python3 "$COPY" verdict "$RUN"
+  jq -e '.["index.html"].verdict == "pass"' <<<"$output" >/dev/null || { echo "$output"; return 1; }
   review 'del(.pages["index.html"].sweeps.voice)'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"chybí průchod voice"* ]]
   review '.pages["index.html"].personas[0].score = 4'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"skóre 4"* ]]
   review '.pages["index.html"].personas = []'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"persona strážce značky: chybí"* ]]
