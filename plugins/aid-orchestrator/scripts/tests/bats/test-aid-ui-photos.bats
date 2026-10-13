@@ -17,7 +17,7 @@ setup() {
  {"url": "https://cdn.example/ikona.png", "page": "https://www.example.sk/", "status": "too small or unreadable"}]}
 J
   printf -- '- {id: ambulancia, page: index.html, where: "Úvod", what: "ordinácia bez ľudí", shape: rect, ratio: "4:3", min_px: "1600x1200"}\n' > "$P/docs/content/photos.yaml"
-  echo '{"answers": {}}' > "$P/docs/design/brand-state.json"
+  echo '{"answers": {}}' > "$P/docs/design/brand-state.json"; echo 'brand: {value: X, source: PM}' > "$P/docs/content/facts.yaml"
   # the image tool: webp <src> <out> <width> [q] -> a small file
   printf '#!/usr/bin/env bash\n[[ "$1" == webp ]] || exit 2; echo "webp $4" > "$3"\n' > "$T/bin/tool"; chmod +x "$T/bin/tool"
   export AID_UI_TOOL="$T/bin/tool"
@@ -44,6 +44,7 @@ answer() { jq --arg q "$1" --arg c "$2" --arg t "$3" '.answers[$q] = {kind: "pho
   [ -f "$P/docs/content/photos/ambulancia.webp" ]; [ -f "$P/docs/content/photos/ambulancia-800.webp" ]
   yq -e '.[0].src_800 == "docs/content/photos/ambulancia-800.webp"' "$P/docs/content/photos.yaml" >/dev/null
   yq -e '.[0].src == "docs/content/photos/ambulancia.webp" and .[0].src_from == "https://cdn.example/ordinacia.jpg" and .[0].alt == "Ordinácia so zubárskym kreslom"' "$P/docs/content/photos.yaml" >/dev/null
+  yq -e '.foto_ambulancia.value == "Ordinácia so zubárskym kreslom" and .foto_ambulancia.answer == "a1" and .brand.value == "X"' "$P/docs/content/facts.yaml" >/dev/null
   run python3 "$PH" apply "$P" --answer a1; [ "$status" -eq 1 ]; [[ "$output" == *"already used"* ]]
   # keep: nothing changes
   answer k1 keep "$t"; sed -i 's|src: docs/content/photos/ambulancia.webp|src: x|' "$P/docs/content/photos.yaml"

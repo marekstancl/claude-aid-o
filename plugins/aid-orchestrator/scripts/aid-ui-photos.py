@@ -21,7 +21,8 @@ clinic and nobody saw them, because only its text was fetched).
       the photo becomes docs/content/photos/<slot>.webp (at most 1600 px, 200 kB, aid-ui-tool.sh webp) and
       <slot>-800.webp for phones (srcset), and every
       photos.yaml entry of the slot gets src, src_from and alt (the agent's --describe of what is on the photo, else
-      the old site's alt; neither = refused: the brief's "what" is not a description of the photo). choose keep: nothing changes. An answer
+      the old site's alt; neither = refused: the brief's "what" is not a description of the photo). The description is
+      registered in docs/content/facts.yaml as foto_<slot> (the photo's address, chosen by the client) - it is copy. choose keep: nothing changes. An answer
       is used once.
 Exit 0 done, 1 refused, 2 usage.
 """
@@ -207,6 +208,11 @@ def apply(p, qid):
     for k, v in (("src", rel), ("src_800", os.path.relpath(small, p)), ("src_from", c["url"]), ("alt", alt)):
         subprocess.run(["yq", "-i", '(.[] | select(.id == "%s")).%s = %s' % (slot, k, json.dumps(v, ensure_ascii=False)),
                         os.path.join(p, "docs", "content", "photos.yaml")], check=True)
+    # the description is a claim on the web (alt): the client's own photo, chosen by the client, is its fact
+    facts = os.path.join(p, "docs", "content", "facts.yaml")
+    if os.path.isfile(facts):
+        entry = {"value": alt, "source": c["url"], "confirmed_by": "klient", "answer": qid}
+        subprocess.run(["yq", "-i", '.["foto_%s"] = %s' % (slot, json.dumps(entry, ensure_ascii=False)), facts], check=True)
     save(p, d)
     print("%s: %s -> %s" % (slot, c["id"], rel))
 
