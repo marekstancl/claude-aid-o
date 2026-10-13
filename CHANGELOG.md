@@ -3,6 +3,36 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.118.1] — 2026-10-13
+
+Cizí repo do konce a eskalace na nezávislého agenta (P112, opravné vydání po prvním skutečném plánu na přímé cestě Agents P016; PM 12. 10. 2026 1A + 2A, 13. 10. 2026 delegace v `--auto`). Plán s druhým repem (`repo_roots`) dojde do rozhodnutí o vydání bez ručního sloučení a bez zastavení na PM kvůli vadě nástroje.
+
+### Added
+- **Jedno mapování cizích rep** — `lib/aid-repo-roots.sh` (`aid_rr_entries`, `aid_rr_path`, `aid_rr_text`, `aid_rr_resolve`, `aid_rr_rewrite_files`): kterému worktree patří cesta v deklarovaném repu, z plánu i z `plan.json`; čte ho kontrakt kroku, kontrola kroku, oba balíčky revize, měřič bodů i lint. Funkce mapování v kontraktu zmizely (přesunuté beze změny chování). Cesta v `repo_roots`, která není vrchol repa, je `repo_root_invalid`.
+- **`plan-run --restart --reason`** — běh, který neudělal žádný krok, se odloží (abandon, auditní záznam jako `supersede-generation`, přesun do `.aid-o/work/superseded-runs/<plán>-<čas>/`) a plán se spustí znovu nad aktuálním plánem; po kroku `restart_after_step`, se špinavým worktree plánu `restart_plan_dirty`, cizího repa `restart_foreign_dirty`, s živým řadičem `restart_controller_live`; přerušený restart pokračuje týmž příkazem. Archivační a auditní pomocníci pipeline jsou knihovna `lib/aid-generation-authority.sh`.
+- **Eskalace rozhoduje nezávislý agent** — v plánu `autonomy: auto` automaticky, v ručním po `aid-review-round.sh standing --plan <plán> --delegate --reason "<slova PM>"`: rozpor k nálezu (CP2/CP3/CP7) a každý blokující nebo závažný nález otevřený po posledním kole jde přes `aid-review-round.sh delegate` (`--pending`, `--fingerprint`, `--verdict`) — Codex přes runner kola, při jeho výpadku nezávislý Claude agent v závorce `adjudicator-delegated-<fp16>` (agent `claude:adjudicator-delegated`); kolo se neuzavře, dokud čeká verdikt. Verdikt třídy `brief|money|data` jde na kartu PM (`delegation_out_of_scope`), `--defer-criterion` delegáta nepřijme; verdikt bez původu je `delegation_missing`. Kniha `evidence/<plán>/delegated-disputes.jsonl`, karta i stránka uzávěru je vyjmenují. Šablona `defaults/templates/adjudicator-delegated.md`.
+- Odmítnutí s `next:` a řádkem v `skills/pipeline.md`: `restart_after_step`, `restart_plan_dirty`, `restart_foreign_dirty`, `restart_controller_live`, `active_runs_write_failed`, `active_runs_unreadable`, `delegation_missing`, `delegation_out_of_scope`; registr vynucení +4 řádky (`foreign_review_reads_worktree`, `measure_timeout_unmeasured`, `plan_run_restart_no_step`, `delegated_escalation`), 661.
+
+### Changed
+- **Revize čte worktree** — balíček revize kroku nese `foreign-<name>.patch` z rozsahů, které ověřila kontrola kroku (`step-check.json` `other_repos`), `files.json` s cestami ve worktree a `packet.json`; balíček celého plánu nese každou cizí větev od zmrazeného základu; prompt jmenuje worktree a zakazuje živou kopii. Chybějící worktree = `foreign_worktree_missing`.
+- **Měření bodů čte worktree** — `aid-plan-diff.sh` přepíše `file:` a cesty v `cmd` bodu do worktree plánu po kroku i při uzávěru (`--isolated`), takže brána `plan_diff` projde bez sloučení cizí větve.
+- **Hook hlídá jen živý běh** — pre-commit bere běh větve jen z `active-runs.json` (odložená kopie stavu nikdy nehlídá; glob zůstal pro `run_abandoned`); nečitelná mapa na `plan/*` a `task/*` commit odmítne (`active_runs_unreadable`), jinde projde s řádkem. `init` bez záznamu v mapě selže (`active_runs_write_failed`), úklid mapy drží přímý běh do `DONE`/`release`. Projekty dostanou hook přes `/aid-init` (upgrade).
+- **Lint odmítne nedeklarované cizí repo** — absolutní cesta v `Files` nebo v `file:`/`cmd` bodu do jiného git repa než projekt, které `repo_roots` nedeklaruje, je `foreign_repo_undeclared` už před CP1 (repa se porovnávají `--git-common-dir`, body čte parser měřiče).
+
+### Fixed
+- **Timeout je neměřený bod** — bod, který nedoběhne v limitu, nese `unmeasured: true`, `reason: timeout`, `timeout_s`; `increment-step` i uzávěr ho jmenují jako neměřený s limitem a radou (`AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=<s>` pro přeměření, zvedne i vlastní `timeout:` bodu; příští plán dá bodu `timeout:`), ne jako chybějící změnu. Neměřené důvody jsou jedna konstanta (`lib/aid-unmeasured.sh`).
+- Registr vynucení: dva řádky /aid-ui (2.118.0) citovaly neexistující soubory (`sections.json`, `gen.json`) — `test-enforcement-registry-cites` byl červený už na 2.118.0.
+
+Velikost (jen hlášení):
+
+| Část | Před | Po |
+|---|---|---|
+| scripts | 75 432 | 76 377 |
+| skills | 8 563 | 8 582 |
+| commands | 6 029 | 6 114 |
+
+Testbed: lane `repo_roots` měří dva body v cizím repu (soubor i příkaz) a dojde přes `plan-finalize` k rozhodnutí o vydání s živou kopií cizího repa beze změny (repo testbedu nemá remote: commit c596889; testbed 42/42 na kandidátu).
+
 ## [2.118.0] — 2026-10-12
 
 /aid-ui do vydání: P103 (produkční web, studio jako průběh stavby, brána nad buildem, stránka pro zákazníka, pohyb vzoru) a P108 (texty podle převzatých postupů, kontrola textů, design standard, předání). Nahoře opravy z testu s nezávislým klientem-agentem na Coufal Clinic (11.–12. 10. 2026, retro 3/10): obsah viditelný bez skriptu (FB-27), formulář (FB-28), schválení podle rozsahu změny, zadrátovaný záskok Claude za Codex, blokace publikace kritickými body.
