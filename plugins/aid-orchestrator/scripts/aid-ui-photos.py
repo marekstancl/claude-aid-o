@@ -147,7 +147,7 @@ def question(p, slot):
         r = subprocess.run(["bash", TOOL, "webp", c["file"], out, "640", "0.8"], capture_output=True, text=True)
         if r.returncode:
             die("preview of %s failed: %s" % (c["id"], (r.stderr or r.stdout).strip()[-200:]))
-        page = (c.get("page") or "").rstrip("/").rsplit("/", 1)[-1] or "úvod"
+        page = urllib.parse.urlsplit(c.get("page") or "").path.strip("/").rsplit("/", 1)[-1] or "úvod"
         cards.append({"id": c["id"], "question": "photo-" + slot, "title": "Fotka zo starého webu (%s)" % page,
                       "thesis": "%d×%d px%s" % (c["width"], c["height"], " · " + c["alt"] if c["alt"] else ""),
                       "preview": os.path.relpath(out, os.path.join(p, ".aid-ui", "studio")),
