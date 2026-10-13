@@ -35,7 +35,7 @@
       "enum": ["generalist_a", "generalist_b", "behaviour_edges", "feasibility_deps", "reuse", "enforcement_tests"]
     },
     "roles_step": {
-      "enum": ["step_generalist", "step_security", "epic_generalist", "epic_behaviour", "epic_security", "final_criteria", "final_claims", "final_generalist"]
+      "enum": ["step_generalist", "step_security", "final_criteria", "final_claims", "final_generalist"]
     },
     "finding": {
       "type": "object",

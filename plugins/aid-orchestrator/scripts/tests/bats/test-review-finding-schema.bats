@@ -104,11 +104,11 @@ _cp2() {  # a valid cp2 answer, then a jq filter applied to it
   done
   [ "$n" -eq 4 ]
 }
-@test "skills: eight step/epic/final roles with Questions and a Stop rule, matching the schema's roles_step list" {
+@test "skills: five step/final roles with Questions and a Stop rule, matching the schema's roles_step list (the three EPIC roles left with CP3 in 3.0.0)" {
   local s="$AID_PLUGIN_PATH/skills/step-review-roles.md"
-  [ "$(grep -c '^## Role: ' "$s")" -eq 8 ]
-  [ "$(grep -c '^### Questions$' "$s")" -eq 8 ]
-  [ "$(grep -c '^### Stop rule$' "$s")" -eq 8 ]
+  [ "$(grep -c '^## Role: ' "$s")" -eq 5 ]
+  [ "$(grep -c '^### Questions$' "$s")" -eq 5 ]
+  [ "$(grep -c '^### Stop rule$' "$s")" -eq 5 ]
   diff <(grep '^## Role: ' "$s" | sed 's/^## Role: //' | sort) <(jq -r '.["$defs"].roles_step.enum[]' "$SCHEMA" | sort)
   diff <(grep '^## Role: ' "$AID_PLUGIN_PATH/skills/plan-review-roles.md" | sed 's/^## Role: //' | sort) \
        <(jq -r '.["$defs"].roles_cp1.enum[]' "$SCHEMA" | sort)
