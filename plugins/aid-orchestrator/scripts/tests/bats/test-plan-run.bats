@@ -231,6 +231,41 @@ _run()  { run bash "$PFSM" plan-run P900 "$@"; }
   [ ! -f "$EV/fsm-state.yaml" ]
 }
 
+@test "direct: a broadcast-shaped plan never starts a run — readiness refuses it before the seal (D5 shifted left)" {
+  rm -rf "$R" && _mk_project "$R" >/dev/null
+  sed 's|^- Modify: `prirucka/README.md` — .*|- Create: `src/core/lengths.py` — funkce `tally_by_length(items)`|' "$FIXTURE_PLAN" > "$BATS_TEST_TMPDIR/bad.md"   # both steps broadcast one output
+  _seed "$R" "$BATS_TEST_TMPDIR/bad.md"
+  _run
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"nothing was sealed"* ]]
+  [ ! -f "$GEN/generation-authority.json" ] && [ ! -f "$EV/fsm-state.yaml" ]
+}
+
+@test "direct: a failing D5 contract check stops plan-run before init and keeps its evidence" {
+  local sh="$BATS_TEST_TMPDIR/plugin" f   # a shadow plugin whose contract check fails
+  mkdir -p "$sh/scripts/gates"
+  for f in "$PLUGIN_DIR/scripts"/*; do [[ "$(basename "$f")" =~ ^(tests|gates)$ ]] || ln -s "$f" "$sh/scripts/"; done
+  for f in "$PLUGIN_DIR/scripts/gates"/*; do ln -s "$f" "$sh/scripts/gates/"; done
+  for f in "$PLUGIN_DIR"/*; do [[ "$(basename "$f")" == scripts ]] || ln -s "$f" "$sh/"; done
+  rm "$sh/scripts/gates/aid-contract-validate.sh"
+  printf '#!/usr/bin/env bash\necho %s; exit 1\n' "'{\"result\":\"fail\"}'" > "$sh/scripts/gates/aid-contract-validate.sh"
+  run env AID_PLUGIN_PATH="$sh" bash "$sh/scripts/aid-plan-fsm.sh" plan-run P900
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"the D5 contract check failed"* ]]
+  [ "$(jq -r .result "$GEN/c0/contract-validate.json")" = fail ]
+  [ ! -f "$EV/fsm-state.yaml" ]
+}
+
+@test "direct: a resume after the seal still refuses when the PM page went missing" {
+  AID_PLAN_FSM_CRASH_AFTER=seal _run
+  [ "$status" -eq 99 ]
+  rm -f "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html"
+  _run
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: plan_page_missing)"* ]]
+  [ ! -f "$EV/fsm-state.yaml" ]
+}
+
 @test "direct: a plan.json whose dependencies disagree with the plan's step graph is refused before init" {
   AID_PLAN_FSM_CRASH_AFTER=contract_validate _run
   [ "$status" -eq 99 ]

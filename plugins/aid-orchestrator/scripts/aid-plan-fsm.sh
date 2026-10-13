@@ -11106,7 +11106,7 @@ _pr_main() {
   # the removed EPIC generator by P114): band-independent, so a light plan
   # cannot slip past it the way it could past the band-scoped CP1 gate. The
   # turn gate prints the exact render command.
-  if [[ -f "${SCRIPT_DIR}/aid-turn-gate.sh" ]] && ! _pr_stage_done seal; then
+  if [[ -f "${SCRIPT_DIR}/aid-turn-gate.sh" ]]; then   # every invocation, a resume too: the page can go missing after the seal
     bash "${SCRIPT_DIR}/aid-turn-gate.sh" --plan "$plan" \
       || _pr_refuse plan_page_missing "${plan_id} has no current PM page — the page is what the PM reads instead of the plan" \
            "render it with the command in the line above, then run plan-run again" 1
