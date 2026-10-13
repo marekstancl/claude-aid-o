@@ -26,6 +26,7 @@ EOF
 out=""; while (( $# )); do [[ "$1" == -o ]] && { out="$2"; shift; }; shift; done
 cat >/dev/null
 [[ -n "${CODEX_ANSWER:-}" && -n "$out" ]] && cp "$CODEX_ANSWER" "$out"
+echo '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":50}}'
 exit "${CODEX_RC:-0}"
 EOF
   chmod +x "$T/bin/codex"; export PATH="$T/bin:$PATH"
@@ -57,6 +58,8 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   jq -e '.copy_review.pages["index.html"] | .verdict == "pass" and .provider == "codex" and .subject_sha256 == "aaa"
          and (.facts_sha256 | length) == 64 and (.context_sha256 | length) == 64 and .failed_reviews == 0' "$ST" >/dev/null
   jq -e '.provider == "codex" and .codex_attempt.rc == 0' "$RUN/run.json" >/dev/null
+  # its tokens are in the project's cost book (Coufal: 33 reviews were missing from it)
+  jq -se 'map(select(.purpose == "copy:review")) | length == 1 and .[0].units.input == 1000 and .[0].usd > 0' "$P/.aid-ui/costs.jsonl" >/dev/null
   # the bundle holds only what the reviewer may read
   for f in prompt.md subject.json facts.yaml product-context.md references/copy-rules.md references/copy-cs.md \
            references/adopted/marketingskills/copy-editing/SKILL.md references/adopted/marketingskills/cro/SKILL.md; do

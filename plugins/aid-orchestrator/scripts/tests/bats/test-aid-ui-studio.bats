@@ -976,7 +976,7 @@ PY
   echo '{"decision": "fix", "history": [{"n": 1, "quality_score": 6.4, "min_criterion": 5, "findings": [{"owner": "agent", "evidence": "x"}, {"owner": "agent"}]}]}' > "$P/.aid-ui/critic/loop.json"
   code -H "X-AID-Token: $TOKEN" "$URL/state" >/dev/null
   jq -e '.quality.decision == "fix" and .quality.history[0].quality_score == 6.4' "$BATS_TEST_TMPDIR/body" >/dev/null
-  f="$(PAGE_HTML)"; grep -qF 'qualityBlock(),' "$f"; grep -qF '"Hodnocení nezávislého kritika"' "$f"
+  f="$(PAGE_HTML)"; grep -qF 'qualityBlock(),' "$f"; grep -qF '"Hodnocení majitele a technika"' "$f"; grep -qF "práce AI neměřena" "$f"; grep -qF "majitel " "$f"
   # every decision aid-ui-quality.py can give has its sentence on the page
   for d in $(grep -oE 'decision="[a-z_:]+"' "$BATS_TEST_DIRNAME/../../aid-ui-quality.py" | cut -d'"' -f2 | sort -u); do
     grep -qE "(\"$d\"|[ {]$d): \"" "$f" || { echo "no words for $d"; return 1; }

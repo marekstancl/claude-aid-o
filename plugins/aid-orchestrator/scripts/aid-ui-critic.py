@@ -1,34 +1,39 @@
 #!/usr/bin/env python3
-"""aid-ui-critic.py - the critic's frozen role and rubric, its score and the verdict (P113a, 12. 10. 2026).
+"""aid-ui-critic.py - the two critics' frozen roles and rubrics, their scores and the verdict (P113a, 12./13. 10. 2026).
+
+Two roles rate every web (PM 13. 10. 2026): the OWNER (a demanding business owner: impression, uniqueness against
+the competition, photos, selling texts, trust, price and booking as seen) and the TECHNICIAN (search, structured
+data, speed, accessibility, mobile, form delivery, launch readiness - what the owner cannot judge). Each rubric was
+written from its role brief by its own author and reviewed by the other (critic/AUTHORS.yaml, critic/role-briefs/).
 
   freeze <project> --type <type> [--force]
-      Builds the critic's role from skills/ui-design/critic/<type>.yaml (persona, criteria with weights and
-      anchors) and the project's own context (docs/content/product-context.md, docs/product-vision.md,
-      docs/seo/brief.md), writes <project>/.aid-ui/critic/frozen.json {type, rubric, role, schema, sha256, at}.
-      A frozen role is never rewritten without --force, and never while a loop has rounds; a context that
-      line that mentions scores or acceptance is dropped (the critic is blind to both). Answers are validated against
-      the frozen schema, not the plugin's current one.
-  prompt <project>
-      The prompt the critic gets: the frozen role only - no acceptance threshold, no earlier scores, no fixes.
-  score <project> <retro.json>
-      Validates the critic's answer (references/critic-retro.schema.json; every frozen criterion answered
-      once, anchors consistent with scores) and prints {quality_score, criteria, min_criterion, accepted,
+      Builds both roles from skills/ui-design/critic/<type>.owner.yaml and <type>.tech.yaml (persona, criteria with
+      weights summing to 100 and anchors) and the project's context (docs/content/product-context.md,
+      docs/product-vision.md, docs/seo/brief.md); the type's common part (<type>.yaml: task_test, launch_inputs,
+      components) is stored as `rubric` with the owner's persona (the client agent plays the owner). Writes
+      <project>/.aid-ui/critic/frozen.json {type, rubric, roles: {owner|tech: {rubric, role, sha256}}, schema, sha256, at}.
+      Never rewritten without --force, and never while a loop has rounds; a context line that mentions scores or
+      acceptance is dropped (the critics are blind to both). A frozen critic without roles is refused.
+  prompt <project> --role owner|tech
+      The role's prompt: the frozen role only - no acceptance threshold, no earlier scores.
+  score <project> <retro.json> --role owner|tech
+      Validates the role's answer (references/critic-retro.schema.json; every criterion of the role answered once,
+      anchors consistent with scores) and prints {quality_score, criteria, min_criterion, accepted,
       findings_by_owner, readiness}. quality_score = weighted mean over the assessable criteria (weights
-      re-normalised), one decimal. Exit 0 valid, 1 invalid answer, 2 usage.
-  verdict <project> <retro.json>...
-      Several blind ratings of one web (the closing audit): median quality_score and median per criterion,
-      accepted when the median score >= ACCEPT, no single rating below ACCEPT_ANY and no criterion median
-      below FLOOR; exactly RATINGS ratings. Readiness items (only the owner can supply them) never lower the
-      quality verdict; they come back as publish_blocked_by. Exit 0 accepted, 3 not accepted, 1 invalid answer.
+      re-normalised), one decimal; accepted = quality_score >= ACCEPT and no criterion under FLOOR.
+  verdict <project> --role owner|tech <retro.json> x3
+      Three blind ratings of one web by one role (the closing audit): accepted when the median >= ACCEPT, no rating
+      below ACCEPT_ANY and no criterion median below FLOOR. Readiness items never lower the verdict; they come back
+      as publish_blocked_by. Exit 0 accepted, 3 not accepted, 1 invalid answer.
 
-The threshold lives here and in nothing the critic reads (PM 12. 10. 2026: goal 10/10, smallest acceptable
-8/10 'for now').
+The thresholds live here and in nothing the critics read (PM 13. 10. 2026: owner and technician each 8.5; at most
+three repair rounds - aid-ui-quality.py).
 """
 import hashlib, json, os, re, statistics, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.join(HERE, "..", "skills", "ui-design")
-ACCEPT, ACCEPT_ANY, FLOOR = 8.0, 7.5, 7.0   # ponytail: one global threshold; per-type thresholds when a second type needs another
+ACCEPT, ACCEPT_ANY, FLOOR = 8.5, 8.0, 7.0   # PM 13. 10. 2026: owner and tech each 8.5; ponytail: one threshold for every type
 RATINGS = 3   # blind closing ratings of one web
 # what the critic must not read: scores, thresholds, acceptance (the context docs are written by the agent)
 LEAK = re.compile(r"\b\d{1,2}(?:[.,]\d)?\s*/\s*10\b|quality_score|akcept|accept|threshold|\bprah|\bpráh|známk", re.I)
@@ -57,6 +62,9 @@ def frozen_path(proj):
     return os.path.join(proj, ".aid-ui", "critic", "frozen.json")
 
 
+ROLES = ("owner", "tech")   # the owner (impression, uniqueness, photos, texts) and the technician (search, speed, access, form)
+
+
 def freeze(proj, typ, force):
     out = frozen_path(proj)
     if os.path.exists(out) and not force:
@@ -64,10 +72,18 @@ def freeze(proj, typ, force):
     rounds = os.path.join(proj, ".aid-ui", "critic", "rounds")
     if force and os.path.isdir(rounds) and os.listdir(rounds):
         die(f"a quality loop has rounds in {rounds}: the rubric cannot change under it (archive the rounds to start a new loop)")
-    rp = os.path.join(SKILL, "critic", f"{typ}.yaml")
-    if not os.path.isfile(rp):
-        die(f"no rubric for type {typ} ({rp})", 2)
-    rub = json.loads(json.dumps(load_yaml(rp)))   # the JSON form (anchor keys as strings) is what is stored and re-hashed
+    paths = {r: os.path.join(SKILL, "critic", f"{typ}.{r}.yaml") for r in ("",) + ROLES}
+    paths[""] = os.path.join(SKILL, "critic", f"{typ}.yaml")
+    miss = [p for p in paths.values() if not os.path.isfile(p)]
+    if miss:
+        die(f"no rubric for type {typ} ({', '.join(miss)})", 2)
+    authors = json.loads(json.dumps(load_yaml(os.path.join(SKILL, "critic", "AUTHORS.yaml")) or {}, default=str))   # dates as text
+    for r in ROLES:   # a rubric changed after its authors' record is not the reviewed one
+        a = authors.get(os.path.basename(paths[r])) or {}
+        if not (a.get("author") and a.get("reviewer")) or a.get("sha256") != hashlib.sha256(open(paths[r], "rb").read()).hexdigest():
+            die(f"{os.path.basename(paths[r])}: not the rubric critic/AUTHORS.yaml records (author, reviewer, sha256); "
+                "a changed rubric needs its author and a review first")
+    common = json.loads(json.dumps(load_yaml(paths[""])))   # task_test, launch_inputs, components: the type's, both roles'
     ctx_parts = [("Kontext produktu", "docs/content/product-context.md"), ("Vize", "docs/product-vision.md"),
                  ("Zadání pro vyhledávání", "docs/seo/brief.md")]
     ctx = "\n\n".join(f"## {t}\n\n{read(os.path.join(proj, p))}" for t, p in ctx_parts if read(os.path.join(proj, p)))
@@ -85,22 +101,29 @@ def freeze(proj, typ, force):
         pass
     m = re.search(r'<html[^>]*\blang="([a-z]{2})', read(os.path.join(proj, "site", "index.html"), 4000))
     lang = m.group(1) if m else lang
-    crit = "\n\n".join(f"### {c['id']} - {c['name']}\n" + "\n".join(f"- {k}: {v}" for k, v in sorted(c["anchors"].items(), key=lambda x: int(x[0])))
-                       for c in rub["criteria"])
     schema = read(os.path.join(SKILL, "references", "critic-retro.schema.json"), 10 ** 6)
-    role = read(os.path.join(SKILL, "critic", "role-template.md")).format(
-        persona_who=rub["persona"]["who"], persona_wants=rub["persona"]["wants"],
-        persona_rules="\n".join("- " + r for r in rub["persona"]["rules"]),
-        criteria=crit, context=ctx, lang=lang, schema=schema)
-    rec = {"type": typ, "rubric": rub, "role": role, "schema": json.loads(schema), "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    tpl = read(os.path.join(SKILL, "critic", "role-template.md"))
+    roles = {}
+    for r in ROLES:
+        rub = json.loads(json.dumps(load_yaml(paths[r])))
+        if sum(c["weight"] for c in rub["criteria"]) != 100 or any(not re.fullmatch(r"[a-z0-9_]+", c["id"]) for c in rub["criteria"]):
+            die(f"{paths[r]}: weights must sum to 100 and ids be ascii snake_case")
+        crit = "\n\n".join(f"### {c['id']} - {c['name']}\n" + "\n".join(f"- {k}: {v}" for k, v in sorted(c["anchors"].items(), key=lambda x: int(x[0])))
+                           for c in rub["criteria"])
+        role = tpl.format(persona_who=rub["persona"]["who"], persona_wants=rub["persona"]["wants"],
+                          persona_rules="\n".join("- " + x for x in rub["persona"]["rules"]), criteria=crit, context=ctx, lang=lang, schema=schema)
+        roles[r] = {"rubric": rub, "role": role, "authors": authors[os.path.basename(paths[r])]}
+        roles[r]["sha256"] = digest({"rubric": rub, "role": role, "schema": json.loads(schema)})
+    rec = {"type": typ, "rubric": dict(common, persona=roles["owner"]["rubric"]["persona"]),   # the client agent plays the owner
+           "roles": roles, "schema": json.loads(schema), "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     rec["sha256"] = digest(rec)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     json.dump(rec, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    print(f"FROZEN {typ} {rec['sha256'][:12]} -> {out}")
+    print(f"FROZEN {typ} {rec['sha256'][:12]} -> {out} (owner {roles['owner']['sha256'][:12]}, tech {roles['tech']['sha256'][:12]})")
 
 
 def digest(rec):
-    return hashlib.sha256(json.dumps({k: rec[k] for k in ("rubric", "role", "schema")}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return hashlib.sha256(json.dumps({k: rec[k] for k in ("rubric", "role", "roles", "schema") if k in rec}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def frozen(proj):
@@ -108,9 +131,15 @@ def frozen(proj):
     if not os.path.isfile(p):
         die(f"no frozen critic in {p} (freeze first)")
     rec = json.load(open(p, encoding="utf-8"))
-    if "schema" not in rec or digest(rec) != rec.get("sha256"):
-        die("the frozen critic was edited after freezing (sha mismatch)")
+    if "schema" not in rec or "roles" not in rec or digest(rec) != rec.get("sha256"):
+        die("the frozen critic was edited after freezing, or predates the two roles (sha mismatch or no roles; archive the rounds and freeze again)")
     return rec
+
+
+def of_role(rec, role):
+    if role not in ROLES:
+        die("--role must be one of " + ", ".join(ROLES), 2)
+    return {"rubric": rec["roles"][role]["rubric"], "role": rec["roles"][role]["role"], "schema": rec["schema"]}
 
 
 def check(rec, ans):
@@ -164,13 +193,18 @@ def main(a):
     if not a:
         die("usage: freeze|prompt|score|verdict (see the header)", 2)
     cmd = a[0]
+    role = a[a.index("--role") + 1] if "--role" in a and a.index("--role") + 1 < len(a) else None
+    if role:
+        i = a.index("--role"); a = a[:i] + a[i + 2:]
+    if cmd != "freeze" and not role:
+        die("--role owner|tech", 2)
     if cmd == "freeze" and len(a) >= 4 and a[2] == "--type":
         return freeze(os.path.abspath(a[1]), a[3], "--force" in a)
     if cmd == "prompt" and len(a) == 2:
-        print(frozen(os.path.abspath(a[1]))["role"])
+        print(of_role(frozen(os.path.abspath(a[1])), role)["role"])
         return
     if cmd == "score" and len(a) == 3:
-        rec = frozen(os.path.abspath(a[1]))
+        rec = of_role(frozen(os.path.abspath(a[1])), role)
         ans = load_answer(a[2])
         bad = check(rec, ans)
         if bad:
@@ -180,7 +214,7 @@ def main(a):
     if cmd == "verdict" and len(a) >= 3:
         if len(a) - 2 != RATINGS:
             die(f"the closing verdict takes exactly {RATINGS} blind ratings, got {len(a) - 2}")
-        rec = frozen(os.path.abspath(a[1]))
+        rec = of_role(frozen(os.path.abspath(a[1])), role)
         runs = []
         for p in a[2:]:
             ans = load_answer(p)
@@ -195,10 +229,10 @@ def main(a):
         ok = med >= ACCEPT and low >= ACCEPT_ANY and (min(crit.values()) if crit else 0) >= FLOOR
         ready = sorted({i for r in runs for i in r["readiness"]})
         text = ("přijato" + (", zveřejnění blokuje: " + "; ".join(ready) if ready else ", připraveno ke zveřejnění")) if ok else "nepřijato"
-        print(json.dumps({"ratings": len(runs), "median_quality_score": med, "lowest_rating": low, "criteria_median": crit,
+        print(json.dumps({"role": role, "ratings": len(runs), "median_quality_score": med, "lowest_rating": low, "criteria_median": crit,
                           "accepted": ok, "publish_blocked_by": ready, "verdict": text}, ensure_ascii=False))
         sys.exit(0 if ok else 3)
-    die("usage: freeze <project> --type <type> [--force] | prompt <project> | score <project> <retro.json> | verdict <project> <retro.json>...", 2)
+    die("usage: freeze <project> --type <type> [--force] | prompt|score|verdict <project> --role owner|tech [<retro.json>...]", 2)
 
 
 if __name__ == "__main__":

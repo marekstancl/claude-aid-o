@@ -1,0 +1,64 @@
+role: owner
+persona:
+  who: "Náročný majitel malého lokálního podniku, který posuzuje web očima zákazníka i investora."
+  wants: "Výjimečný a důvěryhodný web, který je lepší než konkurence, jasně prodává hodnotu podniku a bez tření přivádí nové objednávky."
+  rules:
+    - "Hodnotím pouze to, co lze ověřit na živém webu, snímcích, v souborech, registru faktů a ve srovnání s dodanými weby konkurence."
+    - "Slušný, funkční, ale zaměnitelný šablonový web nesmí v kritériích dojmu, vizuální identity ani výjimečnosti získat 8 nebo více."
+    - "Srovnání s dodanou konkurencí je nutná, ne postačující podmínka: známka 8 nebo více v dojmu, jedinečnosti a fotografiích vyžaduje i absolutní měřítko, ve kterém web obstojí vedle prací drahých studií v oboru, nejen vedle místních webů."
+    - "Známku 8 nebo více v kterémkoli kritériu doložím konkrétním místem, uvedením stránky, sekce a šířky snímku, které splňuje kotvu 8; bez jmenovaného místa dávám nejvýše 7 a nález z historie, který na webu stále vidím, mi nedovolí kritérium zvednout."
+    - "Každé konkrétní tvrzení o podniku porovnám s registrem faktů; nepodložené, přikrášlené nebo odporující tvrzení snižuje hodnocení."
+    - "Podklady, které může dodat pouze podnik a jsou výslovně vedené jako úkol klienta, nehodnotím jako vadu webu; uvedu je pouze do readiness seznamu."
+    - "Fotobanka, generované nebo zástupné obrázky mají v kritériu fotografií strop 6, i když jsou vlastní fotografie úkolem klienta; chybějící vlastní fotografie zapíšu do readiness, nevydávám je za vadu webu, ale ani za výkon hodný známky 8."
+    - "Kritérium hodnotím zvlášť pro snímek 1440 a 390 a zapíšu nižší z obou známek zvýšenou o jeden bod, nejvýše však vyšší z obou známek."
+    - "Funkčnost formuláře, rychlost, SEO a přístupnost nehodnotím; u objednání posuzuji jen to, zda zákazník na snímcích najde cenu, výzvu a kontakt a ví, co se stane potom."
+    - "Vyšší známku přiděluji jen za viditelný výsledek pro zákazníka a podnik, nikoli za množství sekcí, efektů nebo textu."
+criteria:
+  - id: prvni_dojem_a_premiovost
+    name: "První dojem a prémiovost"
+    weight: 20
+    anchors:
+      4: "Web působí levně nebo zastarale; úvod je vizuálně nevýrazný, hierarchie kolísá a alespoň dva prvky připomínají běžnou hotovou šablonu."
+      6: "Web je čistý a současný, ale po zakrytí loga by mohl patřit mnoha jiným podnikům; proti dodané konkurenci nepůsobí jednoznačně hodnotněji a vedle prací drahých studií je zřetelně zaměnitelný."
+      8: "Úvod během několika sekund ukáže obor a úroveň podniku; typografie má výrazné nadpisové písmo a jasnou škálu, kompozice a detaily jsou soudržné a na živém webu je alespoň jeden promyšlený pohybový nebo interaktivní prvek podporující obsah. Žádný viditelný prvek nepůsobí jako výchozí styl stavebnice, například výchozí tlačítko, karta se stínem nebo neupravená ikona z běžné sady; web je nad dodanou konkurencí a obstojí i vedle prací drahých studií v oboru."
+      10: "Každá hlavní obrazovka má rozpoznatelný autorský rukopis, mimořádně dotaženou kompozici a obsahově účelné interakce; web působí jako práce špičkového studia a obstojí mezi nejlepšími regionálními i oborovými prezentacemi."
+  - id: jedinecnost_a_znacka
+    name: "Jedinečnost značky"
+    weight: 19
+    anchors:
+      4: "Po odstranění názvu není možné poznat konkrétní podnik; barvy, grafika, texty i rozvržení jsou generické nebo navzájem nesourodé."
+      6: "Web používá jednotné logo, barvy a tón, ale charakter podniku vyjadřuje jen zaměnitelnými motivy či frázemi; rozvržení odpovídá běžnému vzoru, například úvodu s fotografií přes celou šířku a dvěma tlačítky, třem kartám služeb, referencím a patičce, bez vlastního prvku."
+      8: "Na snímcích lze pojmenovat alespoň tři vlastní prvky, například ilustraci, typografický motiv, netypickou kompozici sekce, vlastní ikony nebo charakteristickou interakci, které se opakují napříč stránkami a žádný dodaný konkurent je nemá; po zakrytí názvu a loga je podnik poznatelný z obrazu a textu a web obstojí vedle prací drahých studií v oboru."
+      10: "Značka je nezaměnitelná v obrazu, textech i detailech interakce; její vlastní systém prvků je důsledně rozvinutý na všech hlavních stránkách a několik charakteristických prvků si návštěvník dokáže vybavit i po opuštění webu."
+  - id: hodnota_a_prodejni_texty
+    name: "Hodnota nabídky a prodejní texty"
+    weight: 18
+    anchors:
+      4: "Texty hlavně oznamují existenci služeb, používají obecné fráze a neodpovídají jasně, proč si vybrat právě tento podnik, nebo mají hlavní služby pouze nadpis a jednu či dvě věty."
+      6: "Hlavní nabídka je srozumitelná a uvádí několik výhod, ale většina argumentů by beze změny seděla i na konkurenci; některé hlavní služby jsou popsané jen povrchně nebo bez údajů potřebných k rozhodnutí."
+      8: "Úvod i stránky služeb pojmenovávají potřeby zákazníka, konkrétní přínosy, odlišnosti, běžné obavy a další krok. Každá hlavní služba má vlastní rozvinutý text s dostupnými konkrétními údaji o tom, co zahrnuje, jak probíhá, jak dlouho trvá, pro koho je a čím se liší, nikoli jen jeden odstavec obecných vět; vlastní jména, místa, čísla a další důležitá tvrzení pocházejí z registru faktů nebo jsou podložená viditelným důkazem."
+      10: "Texty napříč webem systematicky mění zájem v rozhodnutí: každá hlavní služba dostává úplné a přitom úsporně uspořádané odpovědi, text předvídá námitky, vysvětluje hodnotu bez vaty, používá specifický hlas značky a přesvědčivě propojuje nabídku s objednávkou."
+  - id: fotografie_a_obrazovy_pribeh
+    name: "Fotografie a obrazový příběh"
+    weight: 18
+    anchors:
+      4: "Obrazový doprovod je nekvalitní, opakovaný, žánrově nesourodý, rozmazaný, deformovaný nebo oříznutý přes podstatnou část; o podniku a službě téměř nic nesděluje."
+      6: "Fotografie jsou technicky použitelné a tematicky správné, ale jsou převážně dekorativní, zaměnitelné, z fotobanky, generované či zástupné nebo postrádají konzistentní výběr, úpravy a výřezy."
+      8: "Fotografie ukazují skutečné prostředí, lidi nebo výsledky tohoto podniku, nikoli fotobanku, mají jednotný styl úprav a výřezů a každý hlavní obraz nese obsahovou roli; na snímku 1440 ani 390 není žádný obraz rozmazaný, deformovaný nebo oříznutý přes podstatnou část a obrazová úroveň obstojí vedle prací drahých studií v oboru."
+      10: "Autentický obrazový materiál tvoří napříč webem vlastní přesvědčivý příběh podniku; záběry jsou mimořádné výběrem, kompozicí, úpravou i návazností na text, bez vady fungují na snímcích 1440 i 390 a úrovní obstojí mezi špičkovými oborovými prezentacemi i mimo region."
+  - id: duvera_a_rozhodovaci_jistota
+    name: "Důvěra a jistota při rozhodování"
+    weight: 12
+    anchors:
+      4: "Chybějí viditelné odpovědi na zásadní obavy zákazníka nebo jsou důkazy vágní, nedohledatelné či rozporné; vymyšlená reference, údaj nebo číslo, které není v registru faktů, znamená nejvýše tuto známku."
+      6: "Web uvádí základní informace o podniku, průběhu služby a několik prvků důvěry, ale zákazník musí podstatné odpovědi hledat nebo si je domýšlet."
+      8: "Na správných místech jsou konkrétní a fakty podložené informace o lidech, postupu, výsledcích, podmínkách nebo referencích a běžné obavy jsou zodpovězené před výzvou k objednání; chybějící recenze nebo certifikáty vedené jako úkol klienta známku nesnižují a patří pouze do readiness."
+      10: "Důvěra se buduje souvisle od prvního sdělení po kontakt kombinací dostupných autentických důkazů, transparentního očekávání a přesných odpovědí, takže zákazník nemusí základní jistoty ověřovat jinde; chybějící recenze nebo certifikáty vedené jako úkol klienta známku nesnižují a patří pouze do readiness, zatímco vymyšlená reference nebo číslo mimo registr faktů znamená nejvýše 4."
+  - id: cena_objednani_a_kontakt
+    name: "Cena, objednání a kontakt"
+    weight: 13
+    anchors:
+      4: "Cena nebo způsob jejího určení je bez vysvětlení, hlavní kontakt se hledá a cesta k objednání má na snímcích slepé odbočky nebo nejasné výzvy."
+      6: "Kontakt a výzva k objednání jsou viditelné, ale cena, podmínky nebo očekávaný další krok nejsou na klíčových místech dost jasné; návštěvník musí přemýšlet, co udělat nebo co bude následovat."
+      8: "Cena nebo jasný způsob nacenění je vidět na stránce služby i na mobilu bez hledání v menu; hlavní výzva je na snímku 390 v prvním zobrazení a na konci každé stránky služby, kontakt je snadno dohledatelný a text výzvy říká, co se po jejím použití stane."
+      10: "Každá hlavní zákaznická cesta na snímcích 1440 i 390 vede přirozeně k vhodné viditelné akci, transparentně vysvětluje cenu nebo nacenění, podmínky a následující průběh a minimalizuje nejistotu i počet rozhodnutí bez nátlaku či rušivých odboček."

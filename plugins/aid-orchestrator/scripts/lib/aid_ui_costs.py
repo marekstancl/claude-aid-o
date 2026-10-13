@@ -89,3 +89,68 @@ def summary(project):
     return {"calls": len(rs), "by": by, "api_usd": spent, "image_budget_usd": image_budget(),
             "image_budget_left_usd": round(image_budget() - spent, 4),
             "subscription_usd_equiv": round(sum(r.get("usd") or 0 for r in rs if r.get("billing") == "subscription"), 4)}
+
+
+def ts(s):
+    """An ISO UTC time ('...Z', with or without fractions) as epoch seconds; '' -> 0."""
+    import calendar
+    if not s:
+        return 0.0
+    base, _, frac = s.rstrip("Z").partition(".")
+    return calendar.timegm(time.strptime(base, "%Y-%m-%dT%H:%M:%S")) + (float("0." + frac) if frac else 0.0)
+
+
+def iso_now():
+    t = time.time()
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".%03dZ" % int((t % 1) * 1000)
+
+
+def agent_transcripts(session=None):
+    """The controlling Claude Code session's transcript and its subagents' (CLAUDE_CODE_SESSION_ID), or []."""
+    import glob
+    sid = session or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not sid:
+        return []
+    base = os.path.expanduser(os.environ.get("AID_UI_CLAUDE_PROJECTS", "~/.claude/projects"))
+    return glob.glob(os.path.join(base, "*", sid + ".jsonl")) + glob.glob(os.path.join(base, "*", sid, "subagents", "*.jsonl"))
+
+
+def book_agent(project, purpose, session=None):
+    """The agent's own work since the last agent row of this project (or the first row of the book) up to now,
+    one row per model, at list-price equivalent. None when no transcript is known (then status says 'neměřeno')."""
+    files = agent_transcripts(session)
+    if not files:
+        return None
+    rs = rows(project)
+    since = max([r.get("until") for r in rs if r.get("provider") == "agent" and r.get("until")] or [rs[0]["at"] if rs else ""], key=ts)
+    until = iso_now()
+    t0, t1 = ts(since), ts(until)
+    seen, use = set(), {}
+    for fp in files:
+        with open(fp, encoding="utf-8", errors="replace") as f:
+            for ln in f:
+                try:
+                    e = json.loads(ln)
+                except ValueError:
+                    continue
+                m = e.get("message") if isinstance(e, dict) and e.get("type") == "assistant" else None
+                if not m or not m.get("usage") or m.get("id") in seen or not (t0 <= ts(e.get("timestamp") or "") < t1):
+                    continue
+                seen.add(m.get("id"))
+                u, mod = m["usage"], m.get("model") or "opus"
+                a = use.setdefault(mod, {"input": 0, "cached": 0, "output": 0})
+                a["cached"] += u.get("cache_read_input_tokens") or 0
+                a["input"] += (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0)
+                a["output"] += u.get("output_tokens") or 0
+    out = []
+    for mod, u in use.items():
+        key = "claude:" + ("sonnet" if "sonnet" in mod else "opus")   # ponytail: opus price for any other model (fable, haiku), add a row when it matters
+        p = TOKEN_PRICES[key]
+        est = round(((u["input"] - u["cached"]) * p["input"] + u["cached"] * p["cached"] + u["output"] * p["output"]) / 1e6, 4)
+        out.append(add(project, {"provider": "agent", "model": mod, "billing": "subscription", "purpose": purpose, "since": since,
+                                 "until": until, "units": u, "unit_usd_per_1m": {k: p[k] for k in ("input", "cached", "output")},
+                                 "price_list": p["list"] + " (estimate; cache writes at input price)", "usd": est}))
+    if not out:   # an empty interval still moves the mark
+        out.append(add(project, {"provider": "agent", "model": None, "billing": "subscription", "purpose": purpose, "since": since,
+                                 "until": until, "units": {}, "usd": 0.0}))
+    return out

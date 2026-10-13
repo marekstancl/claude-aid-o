@@ -250,7 +250,7 @@ def run(a):
         os.remove(ans)   # only an answer written by this run counts
     model = os.environ.get("AID_UI_COPY_CODEX_MODEL", "")
     env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}   # text never on the API key (PM 12. 10. 2026)
-    cmd = ["codex", "exec", "--skip-git-repo-check", "-s", "read-only", "-C", d, "-o", ans] + (["-m", model] if model else []) + ["-"]
+    cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "-s", "read-only", "-C", d, "-o", ans] + (["-m", model] if model else []) + ["-"]
     started = now()
 
     def attempt(mode):
@@ -274,6 +274,7 @@ def run(a):
             os.remove(ans)
         rc = attempt("a"); tries = 2
     no_answer = not (os.path.isfile(ans) and os.path.getsize(ans) > 0)
+    book_codex(d, model)
     rec = {"provider": None if (rc or no_answer) else "codex", "model": model or "codex-default", "command": " ".join(cmd),
            "rc": rc, "started_at": started, "ended_at": now(), "codex_attempt": {"rc": rc, "no_answer": no_answer, "at": started, "tries": tries}}
     wj(runf, rec)
@@ -302,6 +303,26 @@ def run(a):
         return 0
     print(f"codex answered: {ans}")
     return 0
+
+
+def book_codex(d, model):
+    """The review's Codex tokens (every attempt's turn.completed in codex.log) into the project's cost book."""
+    parts = os.path.normpath(d).split(os.sep)
+    if parts[-4:-1] != [".aid-ui", "copy", "runs"]:
+        return   # a bundle outside a project: nothing to book against
+    use = {"input": 0, "cached": 0, "output": 0}
+    for ln in open(os.path.join(d, "codex.log"), errors="replace"):
+        try:
+            e = json.loads(ln)
+        except ValueError:
+            continue
+        u = e.get("usage") if isinstance(e, dict) and e.get("type") == "turn.completed" else None
+        for k, src in (("input", "input_tokens"), ("cached", "cached_input_tokens"), ("output", "output_tokens")):
+            use[k] += int((u or {}).get(src) or 0)
+    if any(use.values()):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+        import aid_ui_costs
+        aid_ui_costs.tokens(os.sep.join(parts[:-4]) or os.sep, "codex", model or "default", use, "copy:review")
 
 
 def standin_claude(d, ans, why):

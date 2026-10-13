@@ -9,13 +9,19 @@
       A refused answer goes back once with the studio's reason. Every turn: .aid-ui/client/turns/<q>-<n>/
       (prompt.md, images, turn.json); feedback for the tool: .aid-ui/client/feedback.jsonl. --watch loops every
       <seconds> until .aid-ui/client/stop exists (one loop per project, flock).
-  critic <project> --web <url> [--audit] [--out <dir>]
-      One rating of the web by the frozen critic (aid-ui-critic.py prompt; freeze first). The critic gets a
-      bundle and nothing else: a copy of site/ as its working directory, full-page shots of every page (1440
-      and 390), the live URL; no history, no earlier scores, no fixes - the same for --audit (a closing blind
-      rating). The answer is validated with aid-ui-critic.py score. Record: <out>/run.json {kind, web,
-      site_sha, frozen_sha, prompt_sha256, images, provider, attempts, score}; default out
-      .aid-ui/critic/runs/<time>-<kind>/. Exit 0 rated, 1 no valid answer from any provider, 2 usage.
+  critic <project> --web <url> --role owner|tech [--history <json>] [--audit] [--out <dir>]
+      One rating of the web by one frozen role (aid-ui-critic.py prompt --role; freeze first). The role gets a bundle
+      and nothing else: a copy of site/ as its working directory, full-page shots of every page (1440 and 390), the
+      live URL and podklady/facts.yaml; the owner also the competitors' home pages (podklady/konkurence/, required:
+      `competitors` first), the technician the gate's rows of this build that the files cannot show and the open
+      launch items (podklady/overenie.json); with --history (not for --audit: an audit is blind) the role's own
+      earlier findings and their states (podklady/historie.json) - a finding may repeat one only as
+      regression_of <its id>, an id not in the history is an invalid answer. No earlier scores. Validated with
+      aid-ui-critic.py score --role. Record: <out>/run.json {kind, role, web, site_sha, frozen_sha, role_sha,
+      bundle_sha, history, prompt_sha256, images, provider, attempts, score}. Exit 0 rated, 1 no valid answer, 2 usage.
+  competitors <project>
+      Shoots the home pages (1440/390) of the 3-5 competitors in .aid-ui/critic/competitors.json ({name, url, why})
+      into .aid-ui/critic/competitors/<host>/ with manifest.json (the date of the shots); once per loop.
   costs <project>
       The project's cost book in one JSON line (aid_ui_costs.summary).
 
@@ -229,39 +235,92 @@ def site_sha(site):
     return h.hexdigest()
 
 
-SEEN_ONLY_BY_GATE = ("form_delivery",)   # what a read of the files and the shots cannot show
+# what a read of the files and the shots cannot show; the technician gets these of THIS build
+SEEN_ONLY_BY_GATE = ("form_delivery", "form_states", "lighthouse_mobile", "axe", "seo", "keyboard", "page_weight", "image_weight",
+                     "a11y_basics", "touch_targets", "reduced_motion", "http_200", "links_resources", "privacy_before_consent",
+                     "content_without_js", "mobile_native", "ai_search", "facts_match", "task_test")
 
 
 def checks_seen(project, site):
-    """The gate's rows a static read cannot see, for THIS build only, and the open items still in the way of
-    launch (Coufal round 7 found 'no proof the form is delivered' while the gate had delivered it)."""
+    """The gate's rows a static read cannot see, for THIS build only (per check: pass/fail/warn counts and up to three
+    distinct details), and the open items still in the way of launch (Coufal round 7 found 'no proof the form is
+    delivered' while the gate had delivered it)."""
     try:
         res = json.load(open(os.path.join(project, ".aid-ui", "verify", "result.json"), encoding="utf-8"))
     except (OSError, ValueError):
         res = {}
     b = subprocess.run(["bash", os.path.join(HERE, "aid-ui-state.sh"), "build-id", site], capture_output=True, text=True)
-    rows = [{k: r.get(k) for k in ("check", "status", "detail")} for r in res.get("rows") or []
-            if r.get("check") in SEEN_ONLY_BY_GATE and b.returncode == 0 and res.get("build_id") == b.stdout.strip()]
-    rows = list({json.dumps(r, sort_keys=True): r for r in rows}.values())
+    same = b.returncode == 0 and res.get("build_id") == b.stdout.strip()
+    gate = {}
+    for r in (res.get("rows") or []) if same else []:
+        if r.get("check") not in SEEN_ONLY_BY_GATE:
+            continue
+        g = gate.setdefault(r["check"], {"check": r["check"], "pass": 0, "fail": 0, "warn": 0, "details": []})
+        g[r.get("status")] = g.get(r.get("status"), 0) + 1
+        d = (r.get("detail") or "")[:300]
+        if d and d not in g["details"] and len(g["details"]) < 3:
+            g["details"].append(d)
     try:
         st = json.load(open(os.path.join(project, "docs", "design", "brand-state.json"), encoding="utf-8"))
     except (OSError, ValueError):
         st = {}
     items = [{k: i.get(k) for k in ("text", "owner", "critical")} for i in st.get("open_items") or [] if i.get("status") == "open"]
-    return {"gate": rows, "open_items": items} if rows or items else None
+    return {"gate": list(gate.values()), "open_items": items} if gate or items else None
 
 
-def critic(project, web, audit, out):
-    r = subprocess.run([sys.executable, CRITIC, "prompt", project], capture_output=True, text=True)
+def competitors(project):
+    """Shots of the local competitors' home pages, once per loop (.aid-ui/critic/competitors.json: 3-5 of
+    {name, url, why}); the owner compares the web with them. Prints the manifest."""
+    cd = os.path.join(project, ".aid-ui", "critic")
+    try:
+        lst = json.load(open(os.path.join(cd, "competitors.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        die("no .aid-ui/critic/competitors.json (3-5 local competitors: name, url, why)")
+    if not (isinstance(lst, list) and 3 <= len(lst) <= 5 and all(str(c.get("url", "")).startswith("http") and c.get("name") for c in lst)):
+        die("competitors.json: 3-5 entries, each with name and an http(s) url")
+    out = os.path.join(cd, "competitors")
+    os.makedirs(out, exist_ok=True)
+    man = {"at": now(), "competitors": []}
+    for c in lst:   # one folder each: the shot tool names files by the page path, every home page is "index"
+        slug = re.sub(r"[^a-z0-9]+", "-", urlsplit(c["url"]).netloc.lower()).strip("-")
+        files = shots(os.path.join(out, slug), [c["url"]])
+        man["competitors"].append(dict(c, shots=sorted(os.path.join(slug, os.path.basename(f)) for f in files)))
+    if sum(1 for c in man["competitors"] if c["shots"]) < 3:
+        die("fewer than three competitors could be shot: " + ", ".join(c["name"] for c in man["competitors"] if not c["shots"]))
+    wj(os.path.join(out, "manifest.json"), man)
+    print(json.dumps(man, ensure_ascii=False))
+
+
+def comp_shots(project):
+    d = os.path.join(project, ".aid-ui", "critic", "competitors")
+    try:
+        man = json.load(open(os.path.join(d, "manifest.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        return None, []
+    return man, [os.path.join(d, f) for c in man["competitors"] for f in c["shots"] if os.path.isfile(os.path.join(d, f))]
+
+
+def critic(project, web, audit, out, role, history=None):
+    r = subprocess.run([sys.executable, CRITIC, "prompt", project, "--role", role], capture_output=True, text=True)
     if r.returncode:
         die("no usable frozen critic: " + (r.stderr or r.stdout).strip())
-    role = r.stdout
+    role_text = r.stdout
     frozen = json.load(open(os.path.join(project, ".aid-ui", "critic", "frozen.json"), encoding="utf-8"))
     site = os.path.join(project, "site")
     if not os.path.isdir(site):
         die(f"no site directory {site}")
     kind = "audit" if audit else "critic"
-    out = out or os.path.join(project, ".aid-ui", "critic", "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + kind)
+    out = out or os.path.join(project, ".aid-ui", "critic", "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + kind + "-" + role)
+    man, comp = comp_shots(project) if role == "owner" else (None, [])
+    if role == "owner":
+        try:
+            want = sorted(c["url"] for c in json.load(open(os.path.join(project, ".aid-ui", "critic", "competitors.json"), encoding="utf-8")))
+        except (OSError, ValueError, KeyError, TypeError):
+            want = None
+        have = [c for c in (man or {}).get("competitors", []) if {"1440", "390"} <= {re.sub(r"^.*-(\d+)\.png$", r"\1", x) for x in c["shots"]}]
+        if not man or want != sorted(c["url"] for c in man["competitors"]) or len(have) < 3:
+            die("the owner compares with the competition: shots at 1440 and 390 of at least three competitors of the current "
+                ".aid-ui/critic/competitors.json are missing (aid-ui-client.py competitors <project>)")
     os.makedirs(out, exist_ok=True)
     bundle = os.path.join(out, "bundle")
     shutil.copytree(site, os.path.join(bundle, "site"), dirs_exist_ok=True)   # the critic's whole world: the web
@@ -273,7 +332,16 @@ def critic(project, web, audit, out):
         os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
         shutil.copyfile(facts_src, os.path.join(bundle, "podklady", "facts.yaml"))
         facts_sha = sha_file(facts_src)
-    checked = checks_seen(project, site)
+    checked = checks_seen(project, site) if role == "tech" else None
+    hist_ids = set()
+    if history and not audit:   # an audit is blind: no memory
+        h = json.load(open(history, encoding="utf-8"))
+        hist_ids = {f["id"] for f in h if f.get("state") in ("fixed", "rejected_with_reason", "superseded")}   # what may come back as a regression
+        os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
+        wj(os.path.join(bundle, "podklady", "historie.json"), h)
+    for f in comp:
+        os.makedirs(os.path.join(bundle, "podklady", "konkurence"), exist_ok=True)
+        shutil.copyfile(f, os.path.join(bundle, "podklady", "konkurence", os.path.basename(os.path.dirname(f)) + "-" + os.path.basename(f)))
     if checked:
         os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
         wj(os.path.join(bundle, "podklady", "overenie.json"), checked)
@@ -296,16 +364,22 @@ def critic(project, web, audit, out):
         wj(os.path.join(out, "run.json"), {"kind": kind, "web": base, "pages": urls, "at": now(), "error": "missing shots",
                                           "missing": [n for n in want if n not in names]})
         die("no rating without a desktop and a mobile shot of every page; missing: " + ", ".join(n for n in want if n not in names))
-    prompt = (role + "\n\n# Hodnocený web\n\nŽivý web: " + base + "\nStránky:\n" + "\n".join("- " + u for u in urls)
-              + "\n\nSoubory webu máš v pracovním adresáři v `site/` (jen ke čtení; texty, titulky, popisy). Nic mimo"
-                " pracovní adresář nečti."
+    prompt = (role_text + "\n\n# Hodnocený web\n\nŽivý web: " + base + "\nStránky:\n" + "\n".join("- " + u for u in urls)
+              + ("\n\nSoubory webu máš v pracovním adresáři v `site/` (jen ke čtení; texty, titulky, popisy). Nic mimo"
+                 " pracovní adresář nečti." if role == "tech" else "\n\nSoubory webu máš v pracovním adresáři v `site/` (jen ke čtení,"
+                 " kvůli textům stránek; kód a metadata nehodnotíš). Nic mimo pracovní adresář nečti.")
               + ("\n\nRegistr faktů, které podnik potvrdil (hodnota, zdroj, kdo a kdy potvrdil), je v `podklady/facts.yaml`."
                  " Má přednost před staršími podklady výše: co je v něm potvrzené, není nepodložené tvrzení." if facts_sha else "")
               + ("\n\nCo ze souborů vidět není, ověřila brána na tomto sestavení a stojí v `podklady/overenie.json`"
                  " (např. skutečné odeslání formuláře přes testovacího příjemce), spolu s otevřenými body ke spuštění."
                  " Co je tam otevřený bod (nasazení, údaje od klienta), patří do readiness, ne do nálezů." if checked else "")
+              + ("\n\nTvé nálezy z minulých kol a co s nimi studio udělalo: `podklady/historie.json` (pravidla v části Paměť)."
+                 if hist_ids or (history and not audit) else "")
+              + ("\n\nWeby konkurence (domovské stránky, nafocené %s): %s. Snímky jsou přiložené a v `podklady/konkurence/`."
+                 % (man["at"][:10], "; ".join("%s (%s) - %s" % (c["name"], c["url"], c.get("why", "")) for c in man["competitors"])) if comp else "")
               + "\n\n# Přiložené snímky (celá stránka; 1440 = počítač, 390 = mobil)\n"
-              + "\n".join("- " + os.path.basename(i) for i in images))
+              + "\n".join("- " + os.path.basename(i) for i in images)
+              + ("\n\n# Snímky konkurence\n" + "\n".join("- " + os.path.basename(os.path.dirname(i)) + "/" + os.path.basename(i) for i in comp) if comp else ""))
     with open(os.path.join(out, "prompt.md"), "w", encoding="utf-8") as f:
         f.write(prompt)
 
@@ -315,14 +389,18 @@ def critic(project, web, audit, out):
             return None, "not JSON"
         with tempfile.NamedTemporaryFile("w", suffix=".json", dir=out, delete=False, encoding="utf-8") as f:
             json.dump(a, f, ensure_ascii=False)
-        s = subprocess.run([sys.executable, CRITIC, "score", project, f.name], capture_output=True, text=True)
+        s = subprocess.run([sys.executable, CRITIC, "score", project, f.name, "--role", role], capture_output=True, text=True)
         os.unlink(f.name)
         if s.returncode:
             return None, (s.stderr or s.stdout).strip().replace("ERROR: aid-ui-critic.py: ", "")[:300]
+        bad = [x["regression_of"] for x in a.get("findings") or [] if x.get("regression_of") and x["regression_of"] not in hist_ids]
+        if bad:
+            return None, "regression_of %s: no fixed or rejected finding with that id in podklady/historie.json" % ", ".join(bad)
         return {"answer": a, "score": json.loads(s.stdout)}, None
 
-    got, rec = ask(project, prompt, images, bundle, out, valid, "critic:" + kind)
-    run = {"kind": kind, "web": base, "site_sha": site_sha(site), "frozen_sha": frozen["sha256"], "facts_sha": facts_sha, "images": image_meta(images),
+    got, rec = ask(project, prompt, images + comp, bundle, out, valid, "critic:%s:%s" % (kind, role))
+    run = {"kind": kind, "role": role, "web": base, "site_sha": site_sha(site), "frozen_sha": frozen["sha256"],
+           "role_sha": frozen["roles"][role]["sha256"], "bundle_sha": site_sha(bundle), "history": len(json.load(open(history, encoding="utf-8"))) if history and not audit else None, "facts_sha": facts_sha, "images": image_meta(images),
            "pages": urls, "at": now(), **rec}
     if got:
         wj(os.path.join(out, "answer.json"), got["answer"])
@@ -415,7 +493,7 @@ def client_role(project):
     if os.path.isfile(fz):
         rub = json.load(open(fz, encoding="utf-8"))["rubric"]
     else:
-        rub = yaml.safe_load(open(os.path.join(SKILL, "critic", os.environ.get("AID_UI_CLIENT_TYPE", "web-local") + ".yaml"), encoding="utf-8"))
+        rub = yaml.safe_load(open(os.path.join(SKILL, "critic", os.environ.get("AID_UI_CLIENT_TYPE", "web-local") + ".owner.yaml"), encoding="utf-8"))
     lang = "sk"
     try:
         m = re.search(r'<html[^>]*\blang="([a-z]{2})', open(os.path.join(project, "site", "index.html"), encoding="utf-8").read(4000))
@@ -548,12 +626,14 @@ def main(a):
         print(json.dumps(costs.summary(os.path.abspath(a[1])), ensure_ascii=False))
         return
     opt = lambda k: a[a.index(k) + 1] if k in a and a.index(k) + 1 < len(a) else None
-    if len(a) >= 2 and a[0] == "critic" and opt("--web"):
-        return critic(os.path.abspath(a[1]), opt("--web"), "--audit" in a, opt("--out"))
+    if len(a) >= 2 and a[0] == "critic" and opt("--web") and opt("--role"):
+        return critic(os.path.abspath(a[1]), opt("--web"), "--audit" in a, opt("--out"), opt("--role"), opt("--history"))
+    if len(a) == 2 and a[0] == "competitors":
+        return competitors(os.path.abspath(a[1]))
     if len(a) >= 2 and a[0] == "answer" and opt("--studio"):
         w = opt("--watch")
         return answer(os.path.abspath(a[1]), opt("--studio"), "--once" in a, "--dry" in a, int(w) if w else 0)
-    die("usage: answer <project> --studio <url> [--once] [--dry] [--watch <s>] | critic <project> --web <url> [--audit] [--out <dir>] | costs <project>", 2)
+    die("usage: answer <project> --studio <url> [--once] [--dry] [--watch <s>] | critic <project> --web <url> --role owner|tech [--history <json>] [--audit] [--out <dir>] | competitors <project> | costs <project>", 2)
 
 
 if __name__ == "__main__":

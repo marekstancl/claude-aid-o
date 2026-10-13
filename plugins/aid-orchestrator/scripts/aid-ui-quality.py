@@ -1,37 +1,40 @@
 #!/usr/bin/env python3
-"""aid-ui-quality.py - the quality loop of /aid-ui (P113a step 3, 12. 10. 2026).
+"""aid-ui-quality.py - the quality loop of /aid-ui (P113a step 3, 12. 10. 2026; two roles 13. 10. 2026).
 
-The loop: the critic rates the web -> the agent triages every finding -> fixes what it accepted -> rebuild, gate
-(and the copy review when texts changed) -> the next round. Goal 10/10; smallest acceptable 8/10 (aid-ui-critic.py
-holds the threshold, the critic never sees it). Everything lives in <project>/.aid-ui/critic/:
-rounds/<n>/round.json, rounds/<n>/critic/ (the rating), audits/<site sha>/a1..a3/, loop.json (the summary the
-studio shows), verdict.json (the closing audit).
+The loop: the OWNER and the TECHNICIAN rate the web at once (aid-ui-client.py critic --role, each with the memory
+of its own findings) -> the agent triages every finding -> fixes what it accepted -> rebuild, gate (and the copy
+review when texts changed) -> the next round. A round is accepted when both roles reach 8.5 with no criterion under
+7 (aid-ui-critic.py holds the threshold, the critics never see it); then the repairs stop and the accepted web is
+audited. At most three repair rounds. Everything lives in <project>/.aid-ui/critic/: rounds/<n>/round.json,
+rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memory each got), audits/<site sha>/a1..a3/
+{owner,tech}/, loop.json (the summary the studio shows, with every round's cost and time), verdict.json.
 
   round <project> --web <url>
-      One critic round on the current site. Refused while the previous round has a finding without a state, an
-      accepted finding without --evidence, or the site fails `aid-ui-state.sh gate-check` (the regression check
-      after fixes; also for round 1), or when status says stop/audit. Findings get ids r<n>-<id>; findings the
-      critic gave the owner (client) start as blocked "client supplies it" (readiness, not the agent's).
+      One round on the current site. Refused while the previous round has a finding without a state, an accepted
+      finding without --evidence, or the site fails `aid-ui-state.sh gate-check` (also for round 1), or when status
+      says stop/audit. Books the agent's own work since the last round first (aid_ui_costs.book_agent: the Claude
+      Code transcript of CLAUDE_CODE_SESSION_ID and its subagents). Findings get ids r<n>-<role>-<id>; findings a
+      role gave the owner (client) start as blocked "client supplies it" (readiness, not the agent's).
   triage <project> <finding> <state> [--reason <t>] [--expected <t>] [--of <id>] [--conflict-with <id>]
-      accepted (--expected: what it should raise), rejected_with_reason (--reason), duplicate (--of),
-      blocked (--reason; with --conflict-with <id> the loop stops for the PM: fixing one makes the other worse),
-      superseded (--reason).
+      accepted (--expected: what it should raise), rejected_with_reason (--reason), duplicate (--of, also across the
+      roles), blocked (--reason; with --conflict-with <id> the loop stops for the PM: fixing one makes the other
+      worse - the gate always wins), superseded (--reason).
   fixed <project> <finding> --evidence <t>
-      An accepted finding is fixed; the evidence names what changed and where (checked again by the next round).
+      An accepted finding is fixed; the evidence names what changed and where (the role sees it next round).
   status <project>
       {decision, why, rounds, repair_rounds, scores, best} with decision one of
       triage | fix | round | close | audit | stop:conflict | stop:stagnation | stop:round_cap | done.
-      Rules: repair rounds at most ROUND_CAP (5); improvement = quality_score +0.3 or fewer blocking+major
-      findings with no criterion lower; two repair rounds in a row without improvement = stop:stagnation.
-      After acceptance the loop goes on toward 10 while it improves; when it stops improving (or the cap, or
-      nothing accepted to fix) the best accepted round is audited - `close` first asks to set accepted findings
-      not fixed yet to superseded. Every round and audit runs on the critic and the address of round 1.
+      Round 1 is the first rating, rounds 2-4 the repair rounds (ROUND_CAP 3); an audit is no round. The best round:
+      the higher lower-role score, then the lowest criterion, then the mean (best_key). Accepted, or the rounds
+      spent with an accepted web -> `close` first asks to set accepted findings not fixed yet to superseded, then
+      the audit. A web whose audit failed is never the target again. Spent without acceptance -> stop:round_cap.
   reopen <project> --reason <why>
       A done loop opened again on purpose: the verdict goes to verdicts/, the reason to loop-reopened.json; the next
-      round rates the changed web and only rounds since the reopen are audited.
+      round rates the changed web; the counts and the memory start again from the reopen.
   audit <project> --web <url>
-      The closing check (not a repair round): the site must be the best accepted round's web; three blind ratings
-      (aid-ui-client.py critic --audit), aid-ui-critic.py verdict -> verdict.json. Not accepted: the auditors'
+      The closing check: the site must be the best accepted round's web; three blind ratings per role, both roles at
+      once and without memory (aid-ui-client.py critic --audit), aid-ui-critic.py verdict per role -> verdict.json
+      {accepted = both roles accepted, roles}. A failed rating decides nothing (exit 1). Not accepted: the auditors'
       findings become an audit round to triage (not counted as a repair round). Exit 0 accepted, 3 not, 1 refused.
 """
 import json, os, subprocess, sys, time
@@ -39,7 +42,10 @@ import json, os, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLIENT, CRITIC = (os.path.join(HERE, x) for x in ("aid-ui-client.py", "aid-ui-critic.py"))
 STATE = os.environ.get("AID_UI_STATE_SH") or os.path.join(HERE, "aid-ui-state.sh")
-ROUND_CAP, GAIN = 5, 0.3
+ROUND_CAP = 3   # PM 13. 10. 2026: at most three repair rounds, or both roles at 8.5
+ROLES = ("owner", "tech")
+sys.path.insert(0, os.path.join(HERE, "lib"))
+import aid_ui_costs as costs   # noqa: E402
 STATES = ("accepted", "rejected_with_reason", "duplicate", "blocked", "superseded")
 
 
@@ -75,17 +81,6 @@ def save_round(p, r):
     wj(os.path.join(cdir(p), "rounds", str(r["n"]), "round.json"), r)
 
 
-def heavy(r):
-    return sum(1 for f in r["findings"] if f["severity"] in ("blocking", "major"))
-
-
-def improved(prev, cur):
-    if cur["score"]["quality_score"] >= prev["score"]["quality_score"] + GAIN - 1e-9:
-        return True
-    lower = any(cur["score"]["criteria"].get(k, 99) < v for k, v in prev["score"]["criteria"].items())
-    return heavy(cur) < heavy(prev) and not lower
-
-
 def site_sha(p):
     sys.path.insert(0, HERE)
     import importlib.util
@@ -110,8 +105,15 @@ def reopened_at(p):
 def target_of(rs, since=""):
     """The web the audit rates: the best accepted repair round (the latest of equal scores); after a reopen, only
     rounds rated since then count (the reopened web is a new web)."""
-    accs = [r for r in rs if not r.get("audit") and r["score"]["accepted"] and r["at"] >= since]
-    return max(accs, key=lambda r: (r["score"]["quality_score"], r["n"])) if accs else None
+    failed = {r["site_sha"] for r in rs if r.get("audit")}   # a web an audit did not confirm is no target again
+    accs = [r for r in rs if not r.get("audit") and r["score"]["accepted"] and r["at"] >= since and r["site_sha"] not in failed]
+    return max(accs, key=best_key) if accs else None
+
+
+def best_key(r):
+    """The better web: the higher of the two roles' lower score, then the lowest criterion, then their mean, then the later."""
+    s = r["score"]
+    return (s["quality_score"], s["min_criterion"], (s.get("owner", 0) + s.get("tech", 0)) / 2, r["n"])
 
 
 def status(p):
@@ -123,7 +125,8 @@ def status(p):
     out = {"rounds": len(rs), "repair_rounds": max(len(reps) - 1, 0), "scores": [r["score"]["quality_score"] for r in rs]}
     target, v = target_of(rs, since), verdict(p)
     if target:
-        out["best"] = {"round": target["n"], "quality_score": target["score"]["quality_score"], "site_sha": target["site_sha"]}
+        out["best"] = {"round": target["n"], "quality_score": target["score"]["quality_score"], "owner": target["score"].get("owner"),
+                       "tech": target["score"].get("tech"), "site_sha": target["site_sha"]}
     if v and target and v.get("site_sha") == target["site_sha"] and v.get("accepted"):
         return dict(out, decision="done", why=v["verdict"])
     if not rs:
@@ -142,33 +145,56 @@ def status(p):
     accepted_any = any(f.get("state") == "accepted" for f in last["findings"])
     cap = out["repair_rounds"] >= ROUND_CAP
     audited = bool(v and target and v.get("site_sha") == target["site_sha"])   # an audit that did not confirm it: repair on
-    no_gain = len(reps) >= 2 and not improved(reps[-2], reps[-1])
-    if target and not audited and not last.get("audit") and (cap or no_gain or not accepted_any):
-        if todo:   # improvement ends here: what was accepted is closed explicitly, never skipped
-            return dict(out, decision="close", why="improvement ends (best: round %d, %.1f); set %s superseded with the reason, then audit"
-                        % (target["n"], target["score"]["quality_score"], ", ".join(todo)))
-        return dict(out, decision="audit", why="audit the best accepted web: round %d (%.1f); the site must be exactly that web - restore it if a later round changed it"
-                    % (target["n"], target["score"]["quality_score"]))
+    if target and not audited and (last["score"]["accepted"] or cap):
+        if todo:   # the goal is reached (or the rounds are spent): what was accepted is closed explicitly, never skipped
+            return dict(out, decision="close", why="%s (best: round %d, owner %.1f, tech %.1f); set %s superseded with the reason, then audit"
+                        % ("both roles reached the goal" if last["score"]["accepted"] else "%d repair rounds done" % ROUND_CAP,
+                           target["n"], target["score"]["owner"], target["score"]["tech"], ", ".join(todo)))
+        return dict(out, decision="audit", why="audit the best accepted web: round %d (owner %.1f, tech %.1f); the site must be exactly that web - restore it if a later round changed it"
+                    % (target["n"], target["score"]["owner"], target["score"]["tech"]))
+    if cap:
+        best = max([r for r in reps if not r.get("audit")], key=best_key)
+        return dict(out, decision="stop:round_cap", why="%d repair rounds done without acceptance; best round %d: owner %.1f, tech %.1f, lowest criterion %s"
+                    % (ROUND_CAP, best["n"], best["score"]["owner"], best["score"]["tech"], best["score"]["min_criterion"]))
     if todo:
         return dict(out, decision="fix", why="accepted findings not fixed yet: " + ", ".join(todo))
-    if len(reps) >= 3 and not improved(reps[-2], reps[-1]) and not improved(reps[-3], reps[-2]):
-        return dict(out, decision="stop:stagnation", why="two repair rounds without improvement (scores %s)" % [r["score"]["quality_score"] for r in reps[-3:]])
-    if cap:
-        return dict(out, decision="stop:round_cap", why="%d repair rounds done, last %.1f, lowest criterion %s"
-                    % (ROUND_CAP, last["score"]["quality_score"], last["score"]["min_criterion"]))
     if not accepted_any:
         return dict(out, decision="stop:stagnation", why=("the audit did not confirm the web and " if last.get("audit") else "below acceptance and ")
                     + "no finding was accepted for a fix")
     return dict(out, decision="round", why="fixes recorded; rate again")
 
 
+def round_costs(p, rs):
+    """Per round: list-price USD of everything booked from its start to the next round's start (critics, copy review,
+    the agent's own work, images) and the wall time of that interval in minutes."""
+    book = costs.rows(p)
+    out = []
+    for i, r in enumerate(rs):
+        a, end = costs.ts(r["at"]), (costs.ts(rs[i + 1]["at"]) if i + 1 < len(rs) else time.time())
+        # the agent's row is booked when the next round starts and covers the work after this one (the fixes)
+        rows = [x for x in book if (a < costs.ts(x.get("until")) <= end + 1 if x.get("provider") == "agent" else a <= costs.ts(x.get("at")) < end)]
+        by = {}
+        for x in rows:
+            k = "agent" if x.get("provider") == "agent" else (x.get("purpose") or "?").split(":")[0]
+            by[k] = round(by.get(k, 0) + (x.get("usd") or 0), 4)
+        out.append({"usd": round(sum(by.values()), 2), "by": by, "minutes": round((end - a) / 60),
+                    "agent_measured": any(x.get("provider") == "agent" for x in rows)})
+    return out
+
+
 def write_loop(p):
     st = status(p)
     rs = rounds(p)
-    st["history"] = [{"n": r["n"], "at": r["at"], "quality_score": r["score"]["quality_score"], "min_criterion": r["score"]["min_criterion"],
-                      "accepted": r["score"]["accepted"], "provider": r.get("provider"), "usd_equiv": r.get("usd_equiv"),
-                      "findings": [{k: f.get(k) for k in ("id", "criterion", "severity", "owner", "text", "state", "reason", "expected", "evidence")}
-                                   for f in r["findings"]]} for r in rs]
+    cost = round_costs(p, rs)
+    st["history"] = [{"n": r["n"], "at": r["at"], "audit": bool(r.get("audit")), "quality_score": r["score"]["quality_score"],
+                      "owner": r["score"].get("owner"), "tech": r["score"].get("tech"), "min_criterion": r["score"]["min_criterion"],
+                      "accepted": r["score"]["accepted"], "provider": r.get("provider"), "cost": c,
+                      "findings": [{k: f.get(k) for k in ("id", "role", "criterion", "severity", "owner", "text", "state", "reason", "expected", "evidence")}
+                                   for f in r["findings"]]} for r, c in zip(rs, cost)]
+    st["cost_total_usd"] = round(sum(c["usd"] for c in cost), 2)
+    first = costs.ts(rs[0]["at"]) if rs else None   # the build before the loop: not a round's cost, said apart
+    st["cost_before_loop_usd"] = round(sum(x.get("usd") or 0 for x in costs.rows(p) if first is not None and
+                                           costs.ts(x.get("until") if x.get("provider") == "agent" else x.get("at")) <= first), 2)
     st["at"] = now()
     wj(os.path.join(cdir(p), "loop.json"), st)
     return st
@@ -222,6 +248,39 @@ def mark_client(f):
     return f
 
 
+def history(p, role):
+    """The role's own findings of this loop (since a reopen) and what the studio did with them - the critic's memory."""
+    since = reopened_at(p)
+    return [{"id": f["id"], "round": r["n"], "criterion": f["criterion"], "where": f.get("where"), "text": f["text"],
+             "state": "fixed" if f.get("state") == "accepted" and f.get("evidence") else f.get("state"),
+             "reason": f.get("reason"), "evidence": f.get("evidence")}
+            for r in rounds(p) if r["at"] >= since and not r.get("audit") for f in r["findings"] if f.get("role") == role]
+
+
+def rate(p, web, d, audit=False, hist=None):
+    """Both roles at once, each in its own directory; {role: (rc, out dir)}."""
+    procs = {}
+    for role in ROLES:
+        out = os.path.join(d, role)
+        cmd = [sys.executable, CLIENT, "critic", p, "--web", web, "--role", role, "--out", out] + (["--audit"] if audit else [])
+        if hist is not None:
+            hf = os.path.join(d, "history-%s.json" % role)
+            os.makedirs(d, exist_ok=True)
+            wj(hf, hist[role])
+            cmd += ["--history", hf]
+        procs[role] = (subprocess.Popen(cmd, text=True), out)
+    return {role: (pr.wait(), out) for role, (pr, out) in procs.items()}
+
+
+def merge(runs):
+    """The round's score from both roles: quality_score = the lower role score; accepted = both accepted."""
+    sc = {role: runs[role]["score"] for role in ROLES}
+    crit = {"%s.%s" % (role, k): v for role in ROLES for k, v in sc[role]["criteria"].items()}
+    return {"quality_score": min(sc[r]["quality_score"] for r in ROLES), "owner": sc["owner"]["quality_score"], "tech": sc["tech"]["quality_score"],
+            "criteria": crit, "min_criterion": min(crit.values()) if crit else 0, "accepted": all(sc[r]["accepted"] for r in ROLES),
+            "readiness": sorted({i for r in ROLES for i in sc[r]["readiness"]})}
+
+
 def do_round(p, web):
     st = status(p)
     if st["decision"] != "round":
@@ -233,20 +292,33 @@ def do_round(p, web):
     n = st["rounds"] + 1
     d = os.path.join(cdir(p), "rounds", str(n))
     os.makedirs(d, exist_ok=True)
+    costs.book_agent(p, "agent:before-round-%d" % n)   # the agent's own work since the last round (fixes, rebuilds)
     at = now()
-    r = subprocess.run([sys.executable, CLIENT, "critic", p, "--web", web, "--out", os.path.join(d, "critic")], text=True)
-    if r.returncode:
+    res = rate(p, web, d, hist={role: history(p, role) for role in ROLES})
+    bad = [role for role, (rc, _) in res.items() if rc]
+    if bad:
         os.rename(d, d + "-failed-" + at.replace(":", ""))   # a failed rating is kept for the record but is no round
-        die("the critic gave no rating (record in %s-failed-*/critic/run.json)" % d)
-    run = json.load(open(os.path.join(d, "critic", "run.json"), encoding="utf-8"))
-    ans = json.load(open(os.path.join(d, "critic", "answer.json"), encoding="utf-8"))
-    finds = [mark_client(dict(f, id="r%d-%s" % (n, f["id"]), state=None)) for f in ans["findings"]]
-    rec = {"n": n, "at": at, "web": web, "site_sha": run["site_sha"], "frozen_sha": run["frozen_sha"], "provider": run.get("provider"),
-           "score": run["score"], "findings": finds, "readiness": run["score"]["readiness"], "task_test": task_row(p), "usd_equiv": usd_since(p, at)}
+        die("no rating from %s (record in %s-failed-*/<role>/run.json)" % (", ".join(bad), d))
+    runs = {role: json.load(open(os.path.join(out, "run.json"), encoding="utf-8")) for role, (_, out) in res.items()}
+    if len({(x["site_sha"], x["frozen_sha"]) for x in runs.values()}) != 1:
+        os.rename(d, d + "-failed-" + at.replace(":", ""))
+        die("the roles rated different webs or critics (the site changed during the round?): " + ", ".join(
+            "%s %s/%s" % (r, x["site_sha"][:12], x["frozen_sha"][:12]) for r, x in runs.items()))
+    finds = []
+    for role, (_, out) in res.items():
+        ans = json.load(open(os.path.join(out, "answer.json"), encoding="utf-8"))
+        finds += [mark_client(dict(f, id="r%d-%s-%s" % (n, role, f["id"]), role=role, state=None)) for f in ans["findings"]]
+    score = merge(runs)
+    rec = {"n": n, "at": at, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
+           "provider": {r: runs[r].get("provider") for r in ROLES}, "score": score, "findings": finds, "readiness": score["readiness"],
+           "task_test": task_row(p), "usd_equiv": usd_since(p, at)}
     save_round(p, rec)
     st = write_loop(p)
-    print(json.dumps({"round": n, "quality_score": rec["score"]["quality_score"], "min_criterion": rec["score"]["min_criterion"],
-                      "findings": len(finds), "decision": st["decision"]}, ensure_ascii=False))
+    top = {role: [f["text"] for f in finds if f["role"] == role and f["owner"] == "agent"][:3] for role in ROLES}   # the critics rank by impact
+    print(json.dumps({"round": n, "owner": score["owner"], "tech": score["tech"], "min_criterion": score["min_criterion"],
+                      "findings": len(finds), "top3": top, "decision": st["decision"], "loop_usd": st["cost_total_usd"],
+                      "loop_minutes": sum(h["cost"]["minutes"] for h in st["history"]),
+                      "previous_round": st["history"][-2]["cost"] if len(st["history"]) > 1 else None}, ensure_ascii=False))
 
 
 def find(p, fid):
@@ -311,34 +383,41 @@ def audit(p, web):
     ok, msg = gate_ok(p)
     if not ok:
         die("the site does not pass the regression check:\n" + msg)
+    costs.book_agent(p, "agent:before-audit")
     d = os.path.join(cdir(p), "audits", tgt["site_sha"][:16] + "-" + now().replace(":", ""))
-    files, answers = [], []
-    for k in (1, 2, 3):
-        out = os.path.join(d, "a%d" % k)
-        r = subprocess.run([sys.executable, CLIENT, "critic", p, "--web", web, "--audit", "--out", out], text=True)
-        if r.returncode:
-            die("audit rating %d failed (record in %s/run.json)" % (k, out))
-        run = json.load(open(os.path.join(out, "run.json"), encoding="utf-8"))
-        if run["site_sha"] != tgt["site_sha"] or run["frozen_sha"] != rs[0]["frozen_sha"]:
-            die("audit rating %d rated another web or another critic (site %s, critic %s)" % (k, run["site_sha"][:12], run["frozen_sha"][:12]))
-        files.append(os.path.join(out, "answer.json"))
-        answers.append(json.load(open(files[-1], encoding="utf-8")))
-    r = subprocess.run([sys.executable, CRITIC, "verdict", p] + files, capture_output=True, text=True)
-    if r.returncode not in (0, 3):
-        die("verdict failed: " + (r.stderr or r.stdout).strip())
-    v = dict(json.loads(r.stdout), site_sha=tgt["site_sha"], round=tgt["n"], at=now(), ratings_dir=d)
+    files, answers = {r: [] for r in ROLES}, []
+    for k in (1, 2, 3):   # three blind ratings per role, both roles at once; no memory
+        for role, (rc, out) in rate(p, web, os.path.join(d, "a%d" % k), audit=True).items():
+            if rc:
+                die("audit rating %d (%s) failed (record in %s/run.json): the audit decides nothing" % (k, role, out))
+            run = json.load(open(os.path.join(out, "run.json"), encoding="utf-8"))
+            if run["site_sha"] != tgt["site_sha"] or run["frozen_sha"] != rs[0]["frozen_sha"]:
+                die("audit rating %d (%s) rated another web or another critic (site %s, critic %s)" % (k, role, run["site_sha"][:12], run["frozen_sha"][:12]))
+            files[role].append(os.path.join(out, "answer.json"))
+            answers.append((k, role, json.load(open(files[role][-1], encoding="utf-8"))))
+    vs = {}
+    for role in ROLES:
+        r = subprocess.run([sys.executable, CRITIC, "verdict", p, "--role", role] + files[role], capture_output=True, text=True)
+        if r.returncode not in (0, 3):
+            die("verdict (%s) failed: %s" % (role, (r.stderr or r.stdout).strip()))
+        vs[role] = json.loads(r.stdout)
+    ok = all(vs[r]["accepted"] for r in ROLES)
+    ready = sorted({i for r in ROLES for i in vs[r]["publish_blocked_by"]})
+    v = {"accepted": ok, "roles": vs, "median_quality_score": min(vs[r]["median_quality_score"] for r in ROLES),
+         "publish_blocked_by": ready, "verdict": ("přijato" + (", zveřejnění blokuje: " + "; ".join(ready) if ready else ", připraveno ke zveřejnění")) if ok else "nepřijato",
+         "site_sha": tgt["site_sha"], "round": tgt["n"], "at": now(), "ratings_dir": d}
     wj(os.path.join(cdir(p), "verdict.json"), v)
-    if not v["accepted"]:   # the auditors' findings become a round to triage; it is no repair round
+    if not ok:   # the auditors' findings become a round to triage; it is no repair round
         n = rs[-1]["n"] + 1
-        crit = v["criteria_median"]
-        finds = [mark_client(dict(f, id="r%d-a%d-%s" % (n, k + 1, f["id"]), state=None)) for k, a in enumerate(answers) for f in a["findings"]]
+        crit = {"%s.%s" % (role, k): x for role in ROLES for k, x in vs[role]["criteria_median"].items()}
+        finds = [mark_client(dict(f, id="r%d-a%d-%s-%s" % (n, k, role, f["id"]), role=role, state=None)) for k, role, a in answers for f in a["findings"]]
         save_round(p, {"n": n, "at": v["at"], "web": web, "audit": True, "site_sha": tgt["site_sha"], "frozen_sha": rs[0]["frozen_sha"],
-                       "score": {"quality_score": v["median_quality_score"], "criteria": crit, "min_criterion": min(crit.values()) if crit else 0,
-                                 "accepted": False, "readiness": v["publish_blocked_by"]},
-                       "findings": finds, "readiness": v["publish_blocked_by"], "task_test": task_row(p), "usd_equiv": None})
+                       "score": {"quality_score": v["median_quality_score"], "owner": vs["owner"]["median_quality_score"], "tech": vs["tech"]["median_quality_score"],
+                                 "criteria": crit, "min_criterion": min(crit.values()) if crit else 0, "accepted": False, "readiness": ready},
+                       "findings": finds, "readiness": ready, "task_test": task_row(p), "usd_equiv": None})
     write_loop(p)
     print(json.dumps(v, ensure_ascii=False))
-    sys.exit(0 if v["accepted"] else 3)
+    sys.exit(0 if ok else 3)
 
 
 def reopen(p, reason):

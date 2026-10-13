@@ -14,14 +14,15 @@ setup() {
   echo '<html lang="cs"><title>Ceník</title><body>ceny</body></html>' > "$P/site/cennik/index.html"
   python3 "$CR" freeze "$P" --type web-local >/dev/null
   export OPENAI_API_KEY=sk-should-never-reach-text ANTHROPIC_API_KEY=sk-ant-never PATH="$T/bin:$PATH" AID_UI_TOOL="$T/bin/tool" ANS="$T/ans.json"
-  python3 - "$SC/../skills/ui-design/critic/web-local.yaml" > "$ANS" <<'PY'
+  for role in tech owner; do python3 - "$SC/../skills/ui-design/critic/web-local.$role.yaml" > "$T/ans-$role.json" <<'PY'
 import sys, json, yaml
 r = yaml.safe_load(open(sys.argv[1]))
 print(json.dumps({"criteria": [{"id": c["id"], "score": 8, "anchor": 8, "evidence": "úvod: nadpis a fotka pece",
-  "missing_for_next": "vlastní motiv"} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": "copy", "severity": "minor",
+  "missing_for_next": "vlastní motiv"} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": r["criteria"][0]["id"], "severity": "minor",
   "owner": "agent", "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}],
   "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
+  done; cp "$T/ans-owner.json" "$ANS"
   # screenshots: one tiny png per page and width
   cat > "$T/bin/tool" <<'EOF'
 #!/usr/bin/env bash
@@ -53,6 +54,9 @@ python3 -c 'import json,sys; print(json.dumps({"result": "tady je: " + open(sys.
 EOF
   chmod +x "$T/bin/"*
   serve_site
+  # the owner compares with three competitors, shot once per loop
+  echo '[{"name":"A","url":"https://a.example/","why":"blízko"},{"name":"B","url":"https://b.example/","why":"cena"},{"name":"C","url":"https://c.example/","why":"online"}]' > "$P/.aid-ui/critic/competitors.json"
+  python3 "$CL" competitors "$P" >/dev/null
 }
 
 # the critic rates only an address that serves this site: a small server on the site directory
@@ -64,33 +68,49 @@ serve_site() {
 teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WEBSRV:-}" ]] || kill "$WEBSRV" 2>/dev/null || true; }
 
 @test "critic: Codex rates from a bundle of the web only; score, record and cost book; no key, no threshold, no history" {
-  run python3 "$CL" critic "$P" --web "$W" --out "$T/r1"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/r1"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.provider == "codex" and .quality_score == 8' <<<"${lines[-1]}" >/dev/null
   [ "$(cat "$T/codex-cwd")" = "$T/r1/bundle" ]; [ -f "$T/r1/bundle/site/cennik/index.html" ]; [ ! -e "$T/r1/bundle/.aid-ui" ]
-  jq -se 'length == 1 and .[0].provider == "codex" and .[0].billing == "subscription" and .[0].purpose == "critic:critic" and .[0].usd > 0' "$P/.aid-ui/costs.jsonl" >/dev/null
-  [ ! -e "$T/r1/bundle/podklady" ]; ! grep -q "podklady/facts.yaml" "$T/r1/prompt.md"   # no facts register: none in the bundle
+  jq -se 'length == 1 and .[0].provider == "codex" and .[0].billing == "subscription" and .[0].purpose == "critic:critic:owner" and .[0].usd > 0' "$P/.aid-ui/costs.jsonl" >/dev/null
+  [ ! -e "$T/r1/bundle/podklady/facts.yaml" ]; ! grep -q "podklady/facts.yaml" "$T/r1/prompt.md"   # no facts register: none in the bundle
   # the confirmed facts go with the web (the frozen context may be older than a confirmation)
   echo 'novi: {value: "áno", source: "klient 11. 10."}' > "$P/docs/content/facts.yaml"
-  python3 "$CL" critic "$P" --web "$W" --out "$T/r1f" >/dev/null
+  python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/r1f" >/dev/null
   cmp -s "$P/docs/content/facts.yaml" "$T/r1f/bundle/podklady/facts.yaml"; grep -q "podklady/facts.yaml" "$T/r1f/prompt.md"
   jq -e '.facts_sha | length == 64' "$T/r1f/run.json" >/dev/null; rm "$P/docs/content/facts.yaml"
   # what only the gate saw goes too, for this build only, with the open items (Coufal round 7)
   mkdir -p "$P/.aid-ui/verify" "$P/docs/design"; B="$(bash "$SC/aid-ui-state.sh" build-id "$P/site")"
   jq -n --arg b "$B" '{build_id: $b, rows: [{check: "form_delivery", status: "pass", detail: "delivered"}, {check: "form_delivery", status: "pass", detail: "delivered"}, {check: "no_overlap", status: "pass"}]}' > "$P/.aid-ui/verify/result.json"
   echo '{"open_items": [{"text": "príjem na hostingu", "owner": "agent", "critical": true, "status": "open"}, {"text": "hotovo", "status": "done"}]}' > "$P/docs/design/brand-state.json"
-  python3 "$CL" critic "$P" --web "$W" --out "$T/r1g" >/dev/null
-  jq -e '(.gate | length) == 1 and .gate[0].check == "form_delivery" and (.open_items | length) == 1' "$T/r1g/bundle/podklady/overenie.json" >/dev/null
-  grep -q "podklady/overenie.json" "$T/r1g/prompt.md"
+  CODEX_ANS="$T/ans-tech.json" python3 "$CL" critic "$P" --role tech --web "$W" --out "$T/r1g" >/dev/null
+  jq -e '(.gate | length) == 1 and .gate[0].check == "form_delivery" and .gate[0].pass == 2 and .gate[0].details == ["delivered"] and (.open_items | length) == 1' "$T/r1g/bundle/podklady/overenie.json" >/dev/null
+  grep -q "podklady/overenie.json" "$T/r1g/prompt.md"; jq -e '.role == "tech" and .score.quality_score == 8' "$T/r1g/run.json" >/dev/null
+  [ ! -e "$T/r1g/bundle/podklady/konkurence" ]   # the competition is the owner's
+  python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/r1o" >/dev/null
+  [ ! -e "$T/r1o/bundle/podklady/overenie.json" ]   # the gate's numbers are the technician's
+  [ "$(ls "$T/r1o/bundle/podklady/konkurence" | wc -l)" -eq 6 ]; grep -q "Weby konkurence" "$T/r1o/prompt.md"
   jq '.build_id = "stale"' "$P/.aid-ui/verify/result.json" > "$T/x" && mv "$T/x" "$P/.aid-ui/verify/result.json"
-  python3 "$CL" critic "$P" --web "$W" --out "$T/r1h" >/dev/null
+  CODEX_ANS="$T/ans-tech.json" python3 "$CL" critic "$P" --role tech --web "$W" --out "$T/r1h" >/dev/null
   jq -e '(.gate | length) == 0' "$T/r1h/bundle/podklady/overenie.json" >/dev/null   # another build's gate never vouches
   rm -r "$P/.aid-ui/verify" "$P/docs/design/brand-state.json"
+  # memory: the role's own past findings go along; a regression_of an id not in them is not a valid answer
+  echo '[{"id":"r1-owner-f9","round":1,"criterion":"x","text":"stará vada","state":"fixed","evidence":"opraveno"}]' > "$T/hist.json"
+  jq '.findings[0].regression_of = "r1-owner-f9"' "$ANS" > "$T/ans-reg.json"
+  CODEX_ANS="$T/ans-reg.json" python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist.json" --out "$T/r1m" >/dev/null
+  cmp -s "$T/hist.json" <(jq . "$T/r1m/bundle/podklady/historie.json" | jq -c . | jq .) || jq -e '.[0].id == "r1-owner-f9"' "$T/r1m/bundle/podklady/historie.json" >/dev/null
+  grep -q "podklady/historie.json" "$T/r1m/prompt.md"; jq -e '.history == 1 and .provider == "codex"' "$T/r1m/run.json" >/dev/null
+  jq '.findings[0].regression_of = "r9-owner-nic"' "$ANS" > "$T/ans-bad.json"
+  CODEX_ANS="$T/ans-bad.json" CLAUDE_ANS="$ANS" python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist.json" --out "$T/r1n" >/dev/null
+  jq -e '.provider == "claude" and ([.attempts[] | select(.error != null and (.error | contains("regression_of")))] | length) == 2' "$T/r1n/run.json" >/dev/null
+  # an audit is blind: no memory even when a history is passed
+  python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist.json" --audit --out "$T/r1a" >/dev/null
+  [ ! -e "$T/r1a/bundle/podklady/historie.json" ]
   [ "$(cat "$T/codex-key")" = none ]
-  jq -e '.kind == "critic" and (.site_sha | length) == 64 and .frozen_sha == $f and (.images | length) == 4 and .score.accepted == true
+  jq -e '.kind == "critic" and (.site_sha | length) == 64 and .frozen_sha == $f and (.images | length) == 4 and .score.quality_score == 8 and .score.accepted == false
          and (.pages | index($w + "cennik/")) != null' --arg w "$W" --arg f "$(jq -r .sha256 "$P/.aid-ui/critic/frozen.json")" "$T/r1/run.json" >/dev/null
   grep -q "cennik-390.png" "$T/r1/prompt.md"; ! grep -qiE "akcept|threshold|8/10" "$T/r1/prompt.md"
   # an audit is the same bundle, recorded as an audit
-  run python3 "$CL" critic "$P" --web "$W" --audit --out "$T/r2"; [ "$status" -eq 0 ]
+  run python3 "$CL" critic "$P" --role owner --web "$W" --audit --out "$T/r2"; [ "$status" -eq 0 ]
   jq -e '.kind == "audit"' "$T/r2/run.json" >/dev/null
   [ "$(jq -r .site_sha "$T/r1/run.json")" = "$(jq -r .site_sha "$T/r2/run.json")" ]
 }
@@ -98,7 +118,7 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WE
 @test "critic: a limit, an empty answer and an invalid answer twice each hand the same prompt and directory to the Claude stand-in" {
   for mode in limit empty invalid; do
     rm -f "$T/codex-n" "$T/claude-prompt"
-    FAKE_CODEX=$mode run python3 "$CL" critic "$P" --web "$W" --out "$T/s-$mode"; [ "$status" -eq 0 ] || { echo "$mode: $output"; return 1; }
+    FAKE_CODEX=$mode run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/s-$mode"; [ "$status" -eq 0 ] || { echo "$mode: $output"; return 1; }
     jq -e '.provider == "claude" and (.stand_in_reason | length) > 0' "$T/s-$mode/run.json" >/dev/null
     # the stand-in got the Codex bundle: the same prompt (plus where the images are) and the same working directory
     head -c "$(stat -c %s "$T/codex-prompt-1")" "$T/claude-prompt" | cmp -s - "$T/codex-prompt-1"
@@ -112,22 +132,22 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WE
 }
 
 @test "critic: both providers failing, an answer off the frozen schema, or no frozen critic -> exit 1 with the record" {
-  FAKE_CODEX=limit FAKE_CLAUDE=fail run python3 "$CL" critic "$P" --web "$W" --out "$T/f1"
+  FAKE_CODEX=limit FAKE_CLAUDE=fail run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/f1"
   [ "$status" -eq 1 ]; [[ "$output" == *"no valid rating"* ]]; jq -e '.provider == null and (.score | not)' "$T/f1/run.json" >/dev/null
   jq '.criteria[0].anchor = 4' "$ANS" > "$T/bad.json"
-  CODEX_ANS="$T/bad.json" CLAUDE_ANS="$T/bad.json" run python3 "$CL" critic "$P" --web "$W" --out "$T/f2"
+  CODEX_ANS="$T/bad.json" CLAUDE_ANS="$T/bad.json" run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/f2"
   [ "$status" -eq 1 ]; jq -e '.attempts[0].error | contains("does not sit on its anchor")' "$T/f2/run.json" >/dev/null
-  AID_UI_STANDIN=off FAKE_CODEX=limit run python3 "$CL" critic "$P" --web "$W" --out "$T/f3"
+  AID_UI_STANDIN=off FAKE_CODEX=limit run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/f3"
   [ "$status" -eq 1 ]; [ ! -e "$T/claude-prompt" ] || [ "$(jq '.attempts | length' "$T/f3/run.json")" -eq 1 ]
   # a page without its mobile shot: no rating, the model is never asked
-  rm -f "$T/codex-n"; FAKE_SHOT_DROP=cennik-390 run python3 "$CL" critic "$P" --web "$W" --out "$T/f4"
+  rm -f "$T/codex-n"; FAKE_SHOT_DROP=cennik-390 run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/f4"
   [ "$status" -eq 1 ]; [[ "$output" == *"missing: cennik-390.png"* ]]; [ ! -e "$T/codex-n" ]
   # an address that does not serve this site is refused before any model is asked
   rm -f "$T/codex-n"
-  run python3 "$CL" critic "$P" --web "http://127.0.0.1:1/"; [ "$status" -eq 1 ]; [[ "$output" == *"does not answer"* ]]
-  run python3 "$CL" critic "$P" --web "${W}cennik/" --out "$T/f5"; [ "$status" -eq 1 ]; [[ "$output" == *"does not serve"* ]]; [ ! -e "$T/codex-n" ]
+  run python3 "$CL" critic "$P" --role tech --web "http://127.0.0.1:1/"; [ "$status" -eq 1 ]; [[ "$output" == *"does not answer"* ]]
+  run python3 "$CL" critic "$P" --role tech --web "${W}cennik/" --out "$T/f5"; [ "$status" -eq 1 ]; [[ "$output" == *"does not serve"* ]]; [ ! -e "$T/codex-n" ]
   Q="$T/q"; mkdir -p "$Q/site"; echo x > "$Q/site/index.html"
-  run python3 "$CL" critic "$Q" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"frozen"* ]]
+  run python3 "$CL" critic "$Q" --role tech --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"frozen"* ]]
 }
 
 @test "answer: the client agent logs in, answers the first open question with a card, a refused answer goes back once; costs summarised" {

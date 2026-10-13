@@ -3,6 +3,27 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — P113a (smyčka kvality /aid-ui)
+
+### Changed
+- **Dva kritici místo jednoho: majitel a technik** (PM 13. 10. 2026 po Coufalu, kde jeden technický kritik dal 7 kol 7,2-8,4 a web se viditelně skoro neměnil).
+  - **Majitel** hodnotí dojem, výjimečnost proti konkurenci, fotky, prodejní texty, důvěru a cestu k objednání tak, jak ji vidí zákazník.
+  - **Technik** hodnotí vyhledávače a hloubku obsahu, strukturovaná data, rychlost, přístupnost, mobil, doručení formuláře a připravenost ke spuštění. Dostává výsledky brány pro dané sestavení (`podklady/overenie.json`).
+  - **Autorství měřítek:** `critic/web-local.owner.yaml` napsal Codex, `critic/web-local.tech.yaml` nezávislý Claude. Každý psal jen ze zadání role (`critic/role-briefs/`) a každé měřítko zrevidoval ten druhý. `critic/AUTHORS.yaml` drží autora, revizora a otisk. `freeze` odmítne měřítko, které otisku neodpovídá.
+  - **Zmrazení:** jedno zmrazení drží obě role. Starší zmrazení s jedním kritikem se odmítne.
+- **Kritici si pamatují:** každá role dostane své nálezy z minulých kol a co se s nimi stalo. Vyřešený nebo zamítnutý nález smí zopakovat jen jako `regression_of` s důkazem, jiné id je neplatná odpověď. Audit paměť nedostává.
+- **Majitel srovnává s konkurencí:** nový příkaz `aid-ui-client.py competitors` jednou za smyčku nafotí domovské stránky 3-5 konkurentů z `.aid-ui/critic/competitors.json`. Bez snímků 1440 a 390 aktuálního seznamu majitel nehodnotí.
+- **Smyčka: nejvýš 3 kola oprav, nebo obě role ≥ 8,5** a žádné kritérium pod 7. Pak opravy končí a přijde audit: 3 slepá hodnocení od každé role. Za role platí medián ≥ 8,5, žádné hodnocení pod 8 a žádné kritérium pod 7.
+  - **Zrušeno** pravidlo „+0,3 zlepšení“ a stagnace dvou kol. Šum kritika na stejném webu byl 0,6.
+  - Web, jehož audit neprošel, už znovu cílem auditu není.
+- **Cena a čas každého kola** v `loop.json` a ve studiu (panel Hotovo):
+  - kritici,
+  - kontrola textů (nově v knize nákladů: `copy:review`),
+  - práce agenta, tedy tokeny z přepisu sezení Claude Code `CLAUDE_CODE_SESSION_ID` včetně podagentů, zapsané před každým kolem a auditem,
+  - obrázky.
+
+  Všechno v ceníkovém ekvivalentu, práce před první kolem zvlášť.
+
 ## [2.118.0] — 2026-10-12
 
 /aid-ui do vydání: P103 (produkční web, studio jako průběh stavby, brána nad buildem, stránka pro zákazníka, pohyb vzoru) a P108 (texty podle převzatých postupů, kontrola textů, design standard, předání). Nahoře opravy z testu s nezávislým klientem-agentem na Coufal Clinic (11.–12. 10. 2026, retro 3/10): obsah viditelný bez skriptu (FB-27), formulář (FB-28), schválení podle rozsahu změny, zadrátovaný záskok Claude za Codex, blokace publikace kritickými body.
