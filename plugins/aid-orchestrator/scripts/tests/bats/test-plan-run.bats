@@ -464,3 +464,134 @@ _seed_rr() {   # <project> <foreign> [base_branch] — the fixture plan declarin
   grep -q 'approved lineage recovery; with spaces & a semicolon' "$EV/timeline.jsonl" \
     || grep -rq 'approved lineage recovery; with spaces & a semicolon' "$R/.aid-o/work/audit-log.jsonl"
 }
+
+# ── P112 Step 5: plan-run --restart — a run that made no step starts again ────
+WHY="the run needs the corrected plan before step 1"
+_rs()   { run bash "$PFSM" plan-run P900 --restart --reason "$WHY" "$@"; }
+_sr()   { ls -d "$R/.aid-o/work/superseded-runs/P900-"* 2>/dev/null | tail -1; }
+_states() { find "$R/.aid-o/work/evidence" -name fsm-state.yaml | wc -l; }
+_ev_add() { printf '{"ts":"%s","event":"%s"}\n' "${2:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$1" >> "$EV/timeline.jsonl"; }
+
+@test "restart: a run that made no step restarts — one READY state, one map entry, the old run abandoned under superseded-runs/" {
+  _run; [ "$status" -eq 0 ]
+  _rs; echo "$output"; [ "$status" -eq 0 ]
+  local sr; sr="$(_sr)"; [ -n "$sr" ]
+  [ "$(yq -r .state "$EV/fsm-state.yaml")" = READY ]
+  [ "$(_states)" = 1 ]                                                    # the set-aside run is invisible to evidence readers
+  [ "$(jq -r 'keys | join(",")' "$R/.aid-o/work/active-runs.json")" = "E-900-1_1" ]
+  [ "$(yq -r .abandoned "$sr/evidence-E-900-1_1-R-E900-1/fsm-state.yaml")" = true ]
+  [ -f "$sr/transaction.json" ] && [ "$(jq -r .state "$sr/restart.json")" = done ]
+  [ "$(jq -r .restarted_from "$GEN/transaction.json")" = "${sr#"$R/"}" ]
+  [ "$(jq -r .reason "$sr/restart.json")" = "$WHY" ]
+}
+@test "restart: the restart leaves the audit record, the timeline event and the audit-log line supersede-generation leaves" {
+  _run; _rs; [ "$status" -eq 0 ]
+  local ep; ep="$(jq -r .epoch "$(_sr)/restart.json")"
+  jq -e '.schema == "aid-generation-supersede/v1" and .plan_id == "P900" and (.reason | startswith("restart: "))' "$GEN/generation-superseded-${ep}.json"
+  grep -q "\"event\":\"generation_superseded\".*\"epoch\":\"${ep}\"" "$GEN/timeline.jsonl"
+  grep -q '"event":"generation_superseded"' "$R/.aid-o/work/audit-log.jsonl"
+  [ "$(jq -r .archived_transaction "$GEN/generation-superseded-${ep}.json")" = "$(_sr)/transaction.json" ]
+}
+@test "restart: a plan edited between the runs (repo_roots added, CP1 again) restarts and creates the foreign worktree" {
+  _run; [ "$status" -eq 0 ]
+  local F="$BATS_TEST_TMPDIR/docs"; _mk_foreign "$F"
+  sed -i "s|^lifecycle_strict: true$|lifecycle_strict: true\nrepo_roots:\n  - name: docs\n    path: $F|" "$PLAN"
+  git -C "$R" add -f "$PLAN" && git -C "$R" commit -qm "the plan declares its foreign repository"
+  ( export AID_PLUGIN_PATH="$PLUGIN_DIR"; source "$PLUGIN_DIR/scripts/tests/lib/aid-test-plan-fixture.sh"; aid_fixture_seed_plan_review "$R" "$PLAN" >/dev/null )
+  _rs; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(git -C "$F/.aid-worktrees/plan-P900--docs" rev-parse --abbrev-ref HEAD)" = "plan/P900-p" ]
+  [ "$(jq -r '.repo_roots[0].name' "$EV/plan.json")" = docs ]
+}
+@test "restart: a run past its first step is refused restart_after_step and nothing moves" {
+  _run; yq -i '.current_step = 1' "$EV/fsm-state.yaml"
+  _rs; [ "$status" -eq 1 ]
+  [[ "$output" == *"current_step is 1"*"(pipeline.md §When AID refuses: restart_after_step)"* && "$output" == *"next: "* ]]
+  [ -z "$(_sr)" ] && [ -f "$GEN/transaction.json" ]
+}
+@test "restart: a step_commit in the timeline is refused restart_after_step" {
+  _run; _ev_add step_commit
+  _rs; [ "$status" -eq 1 ]; [[ "$output" == *"step_commit"*"restart_after_step"* ]]
+}
+@test "restart: a return naming repo_commits without increment-step is refused restart_after_step" {
+  _run; mkdir -p "$EV/steps/step_1_backend"; echo '{"repo_commits":[{"repo":"docs","range":"a..b"}]}' > "$EV/steps/step_1_backend/return.json"
+  _rs; [ "$status" -eq 1 ]; [[ "$output" == *"repo_commits"*"restart_after_step"* ]]
+}
+@test "restart: a DONE run is refused restart_after_step" {
+  _run; yq -i '.state = "DONE"' "$EV/fsm-state.yaml"
+  _rs; [ "$status" -eq 1 ]; [[ "$output" == *"DONE"*"restart_after_step"* ]]
+}
+@test "restart: an uncommitted edit in the plan's worktree is refused restart_plan_dirty" {
+  _run; echo dirt > "$R/.aid-worktrees/plan-P900/dirt.txt"
+  _rs; [ "$status" -eq 1 ]; [[ "$output" == *"(pipeline.md §When AID refuses: restart_plan_dirty)"* ]]
+}
+@test "restart: a commit on plan/<id> above the run's base made outside a step is refused restart_plan_dirty" {
+  _run; local W="$R/.aid-worktrees/plan-P900"
+  echo x > "$W/hand.txt"; git -C "$W" add hand.txt; git -C "$W" commit -qm "by hand"
+  _rs; [ "$status" -eq 1 ]; [[ "$output" == *"1 commit(s) above the run's base"*"restart_plan_dirty"* ]]
+}
+@test "restart: a foreign worktree with an untracked file is refused restart_foreign_dirty" {
+  local F="$BATS_TEST_TMPDIR/docs" R2="$BATS_TEST_TMPDIR/proj"
+  _mk_foreign "$F"; _seed_rr "$R2" "$F"
+  run bash "$PFSM" plan-run P900; [ "$status" -eq 0 ]
+  echo u > "$F/.aid-worktrees/plan-P900--docs/untracked.md"
+  run bash "$PFSM" plan-run P900 --restart --reason "$WHY"; [ "$status" -eq 1 ]
+  [[ "$output" == *"uncommitted changes"*"(pipeline.md §When AID refuses: restart_foreign_dirty)"* ]]
+}
+@test "restart: a foreign branch with a commit above its base is refused restart_foreign_dirty" {
+  local F="$BATS_TEST_TMPDIR/docs" R2="$BATS_TEST_TMPDIR/proj"
+  _mk_foreign "$F"; _seed_rr "$R2" "$F"
+  run bash "$PFSM" plan-run P900; [ "$status" -eq 0 ]
+  local W="$F/.aid-worktrees/plan-P900--docs"; echo c >> "$W/index.md"; git -C "$W" commit -qam "foreign work"
+  run bash "$PFSM" plan-run P900 --restart --reason "$WHY"; [ "$status" -eq 1 ]
+  [[ "$output" == *"commits above its base"*"restart_foreign_dirty"* ]]
+}
+@test "restart: an adopted foreign worktree keeps its fork point as base when the base branch moved on" {
+  local F="$BATS_TEST_TMPDIR/docs" R2="$BATS_TEST_TMPDIR/proj"
+  _mk_foreign "$F"; _seed_rr "$R2" "$F"
+  run bash "$PFSM" plan-run P900; [ "$status" -eq 0 ]
+  local fork; fork="$(git -C "$F" rev-parse main)"
+  echo later > "$F/later.md"; git -C "$F" add later.md; git -C "$F" commit -qm "main moves on"
+  run bash "$PFSM" plan-run P900 --restart --reason "$WHY"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.repo_roots[0].base' "$R2/.aid-o/work/evidence/E-900-1_1/R-E900-1/plan.json")" = "$fork" ]
+  [ "$(git -C "$F" worktree list | grep -c 'plan-P900--docs')" = 1 ]
+}
+@test "restart: a run whose controller is active with a fresh timeline event is refused restart_controller_live" {
+  _run
+  jq '.["E-900-1_1"].auto_controller = "active"' "$R/.aid-o/work/active-runs.json" > m.t && mv m.t "$R/.aid-o/work/active-runs.json"
+  _ev_add heartbeat
+  _rs; [ "$status" -eq 1 ]; [[ "$output" == *"(pipeline.md §When AID refuses: restart_controller_live)"* ]]
+}
+@test "restart: the same active controller whose last event is an hour old (the P016 case) restarts" {
+  _run
+  jq '.["E-900-1_1"].auto_controller = "active"' "$R/.aid-o/work/active-runs.json" > m.t && mv m.t "$R/.aid-o/work/active-runs.json"
+  _ev_add heartbeat "$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)"
+  _rs; echo "$output"; [ "$status" -eq 0 ]
+}
+@test "restart: --restart without a reason of 20 characters is refused before anything moves" {
+  _run
+  run bash "$PFSM" plan-run P900 --restart; [ "$status" -eq 2 ]
+  run bash "$PFSM" plan-run P900 --restart --reason "too short"; [ "$status" -eq 2 ]; [[ "$output" == *"nothing was moved"* ]]
+  [ -z "$(_sr)" ] && [ -f "$EV/fsm-state.yaml" ]
+}
+@test "restart: plan_run_already_started on a run without a step names --restart in its next:" {
+  _run; _run
+  [ "$status" -eq 1 ]; [[ "$output" == *"next: "*"plan-run P900 --restart --reason"* ]]
+}
+@test "restart: nothing to restart without a transaction" {
+  _rs; [ "$status" -eq 2 ]; [[ "$output" == *"nothing to restart"* ]]
+}
+@test "restart: interrupted after the evidence moved, the same command finishes the restart" {
+  _run
+  AID_PLAN_FSM_CRASH_AFTER=restart_moved_evidence _rs; [ "$status" -eq 99 ]
+  [ "$(jq -r .state "$(_sr)/restart.json")" = moving ] && [ -f "$GEN/transaction.json" ]
+  _rs; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_states)" = 1 ] && [ "$(jq -r .state "$(_sr)/restart.json")" = done ]
+  [ "$(ls -d "$R/.aid-o/work/superseded-runs/P900-"* | wc -l)" = 1 ]
+}
+@test "restart: interrupted after the transaction moved, the same command finishes the restart" {
+  _run
+  AID_PLAN_FSM_CRASH_AFTER=restart_moved_tx _rs; [ "$status" -eq 99 ]
+  [ ! -f "$GEN/transaction.json" ]
+  _rs; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(yq -r .state "$EV/fsm-state.yaml")" = READY ] && [ "$(jq -r .state "$(_sr)/restart.json")" = done ]
+}

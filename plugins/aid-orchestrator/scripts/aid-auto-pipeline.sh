@@ -214,17 +214,6 @@ _gen_identity_of() {
   jq -r '[(.plan_sha256 // ""), (.target_head // ""), ((.phase_derivation_version // 0) | tostring), ((.total_phases // 0) | tostring)] | join("|")' "$1" 2>/dev/null
 }
 
-# _gen_archive_pair <plan_id> <suffix> — atomically move the transaction and
-# the authority to `<name>.<suffix>` siblings sharing ONE epoch, so the pair is
-# identifiable. Nothing is ever deleted.
-_gen_archive_pair() {
-  local plan_id="$1" suffix="$2" txp auth
-  txp="$(_gen_transaction_path "$plan_id")"; auth="$(_gen_authority_path "$plan_id")"
-  [[ -f "$txp" ]] && { mv -- "$txp" "${txp}.${suffix}" || return 3; }
-  [[ -f "$auth" ]] && { mv -- "$auth" "${auth}.${suffix}" || return 3; }
-  return 0
-}
-
 # =============================================================================
 # P074 Step 16 — supersede-generation recovery (a SEPARATE invocation)
 # =============================================================================
@@ -249,168 +238,10 @@ _gen_plan_id_of() {
   return 1
 }
 
-# ---------------------------------------------------------------------------
-# _gen_supersede_audit_preflight <gdir>
-#
-# WHY A PREFLIGHT AND NOT "WRITE, THEN CHECK". The three records are the
-# enforcement surface for this mechanism
-# — the enforcement registry says so — so a supersession that cannot be
-# recorded must not happen at all. Two of the three sinks are APPEND-ONLY
-# (timeline.jsonl, audit-log.jsonl): once a line is in them it cannot be taken
-# back, so "archive, then record, then roll back on failure" would either
-# leave an unaudited archive or leave a line describing an archive that never
-# happened. Probing the sinks first — a zero-byte append, which proves
-# openability without committing any content — lets the refusal happen while
-# NOTHING has been touched, which is the state the operator can reason about.
-#
-# Returns 0 when all three sinks are writable; 3 (naming the sink) otherwise.
-# ---------------------------------------------------------------------------
-_gen_supersede_audit_preflight() {
-  local gdir="$1"
-  local alog; alog="$(_gen_audit_log_path)"
-  local probe=""
-  if ! mkdir -p "$gdir" 2>/dev/null; then
-    echo "[ERROR] supersede-generation: the evidence directory ${gdir} cannot be created — the supersession record has nowhere to go." >&2
-    return 3
-  fi
-  if ! probe="$(mktemp "${gdir}/.supersede-probe.XXXXXX" 2>/dev/null)"; then
-    echo "[ERROR] supersede-generation: ${gdir} is not writable — the supersession record (generation-superseded-<epoch>.json) cannot be written there." >&2
-    return 3
-  fi
-  rm -f "$probe" 2>/dev/null || true
-  if ! : >> "${gdir}/timeline.jsonl" 2>/dev/null; then
-    echo "[ERROR] supersede-generation: ${gdir}/timeline.jsonl cannot be appended to — the timeline event cannot be recorded." >&2
-    return 3
-  fi
-  if ! mkdir -p "$(dirname "$alog")" 2>/dev/null || ! : >> "$alog" 2>/dev/null; then
-    echo "[ERROR] supersede-generation: ${alog} cannot be appended to — the cross-plan audit-log entry cannot be recorded." >&2
-    return 3
-  fi
-  return 0
-}
-
-# ---------------------------------------------------------------------------
-# _gen_supersede_record_present <file> <plan_id> <epoch>
-#
-# "Is THIS plan's supersession for THIS epoch already recorded in <file>?"
-#
-# KEYED ON plan_id AND epoch AND event, never on epoch alone.
-# `audit-log.jsonl` is CROSS-PLAN and the epoch is only
-# second-resolution, while two plans superseding at the same moment hold
-# DIFFERENT per-plan locks and genuinely run concurrently. An epoch-only match
-# therefore let plan B read plan A's line as its own, skip its append, and
-# report success with no entry of its own — the exact unaudited supersession
-# the fail-closed rewrite exists to prevent.
-#
-# PARSED, NOT PATTERN-MATCHED. `reason` is free operator text on the same
-# line, so a substring match could be satisfied by a reason that merely
-# CONTAINS the key. Each line is parsed and its fields compared exactly; a
-# line that is not valid JSON is skipped rather than aborting the scan, so one
-# pre-existing corrupt line in an append-only log cannot make every later
-# supersession unverifiable.
-# ---------------------------------------------------------------------------
-_gen_supersede_record_present() {
-  local file="$1" plan_id="$2" epoch="$3"
-  [[ -f "$file" ]] || return 1
-  jq -e -nR --arg p "$plan_id" --arg e "$epoch" '
-    any(inputs;
-      ((try fromjson catch null) // null) as $j
-      | $j != null
-        and ($j.event? == "generation_superseded")
-        and ($j.plan_id? == $p)
-        and ((($j.epoch? // "") | tostring) == $e))' "$file" >/dev/null 2>&1
-}
-
-# ---------------------------------------------------------------------------
-# _gen_supersede_audit <plan_id> <plan_path> <reason> <operator> <epoch> \
-#                      <gdir> <txp> <auth> <identity> <generated_json>
-#
-# Writes the P073 three-record trail for ONE epoch and VERIFIES each record by
-# reading it back (aid-audit-log.sh swallows its own write failures by design
-# and always returns 0, so its exit code proves nothing — the forced-authority
-# path above solves this the same way). IDEMPOTENT: a record that is already
-# present for this epoch is verified, not duplicated, which is what makes the
-# half-archived retry path produce one trail rather than two.
-#
-# Returns 0 only when all three records are durable; 3 (naming the missing
-# one) otherwise. Callers must treat 3 as fail-closed.
-# ---------------------------------------------------------------------------
-_gen_supersede_audit() {
-  local plan_id="$1" plan_path="$2" reason="$3" operator="$4" epoch="$5"
-  local gdir="$6" txp="$7" auth="$8" identity="$9" generated="${10}"
-  local rec_file="${gdir}/generation-superseded-${epoch}.json"
-  local tl="${gdir}/timeline.jsonl"
-  local alog; alog="$(_gen_audit_log_path)"
-  local now; now="$(_gen_now)"
-  local head_sha; head_sha="$(git -C "$_aid_pipeline_state_root" rev-parse HEAD 2>/dev/null || echo unknown)"
-
-  # The archived names are deterministic, so the record can be rendered
-  # whichever side of the rename we are called from: hash the file under
-  # whichever of its two names exists right now.
-  local arch_tx="${txp}.superseded-${epoch}" arch_auth="" tx_src="" auth_src=""
-  if [[ -e "$arch_tx" ]]; then tx_src="$arch_tx"; elif [[ -f "$txp" ]]; then tx_src="$txp"; fi
-  if [[ -e "${auth}.superseded-${epoch}" ]]; then
-    auth_src="${auth}.superseded-${epoch}"; arch_auth="${auth}.superseded-${epoch}"
-  elif [[ -f "$auth" ]]; then
-    auth_src="$auth"; arch_auth="${auth}.superseded-${epoch}"
-  fi
-
-  # Record 1 — the authoritative forensic artifact.
-  if [[ ! -f "$rec_file" ]]; then
-    local rec
-    rec="$(jq -n \
-      --arg schema "aid-generation-supersede/v1" --arg created_at "$now" \
-      --arg plan_id "$plan_id" --arg plan_path "$plan_path" \
-      --arg reason "$reason" --arg operator "$operator" --arg head_sha "$head_sha" \
-      --arg archived_transaction "$arch_tx" \
-      --arg archived_authority "$arch_auth" \
-      --arg tx_sha256 "$( [[ -n "$tx_src" ]] && _gen_sha256_file "$tx_src" )" \
-      --arg auth_sha256 "$( [[ -n "$auth_src" ]] && _gen_sha256_file "$auth_src" )" \
-      --arg archived_identity "$identity" \
-      --arg current_identity "$(_gen_sha256_file "$plan_path")|$(_gen_target_head)|${AID_GEN_PHASE_DERIVATION_VERSION}" \
-      --argjson generated "$generated" \
-      '{schema:$schema, created_at:$created_at, plan_id:$plan_id, plan_path:$plan_path,
-        reason:$reason, operator:$operator, head_sha:$head_sha,
-        archived_transaction:$archived_transaction, archived_authority:(if $archived_authority == "" then null else $archived_authority end),
-        transaction_sha256:$tx_sha256, authority_sha256:(if $auth_sha256 == "" then null else $auth_sha256 end),
-        archived_identity:$archived_identity,
-        current_identity:$current_identity,
-        generated:$generated, deletes_nothing:true, actor_semantics:"instruction_only"}')" || rec=""
-    [[ -n "$rec" ]] || { echo "[ERROR] supersede-generation: cannot render the supersession record for epoch ${epoch}." >&2; return 3; }
-    _gen_write_atomic "$rec_file" "$rec" \
-      || { echo "[ERROR] supersede-generation: cannot write the supersession record ${rec_file}." >&2; return 3; }
-  fi
-  # Read back keyed on THIS plan, for the same reason the JSONL checks are:
-  # a record that belongs to another plan is not this plan's evidence, even
-  # when it sits at the expected path.
-  jq -e --arg p "$plan_id" '.schema == "aid-generation-supersede/v1" and .plan_id == $p' "$rec_file" >/dev/null 2>&1 \
-    || { echo "[ERROR] supersede-generation: the supersession record ${rec_file} could not be read back as a valid record for ${plan_id}." >&2; return 3; }
-
-  # Record 2 — the per-plan timeline event.
-  if ! _gen_supersede_record_present "$tl" "$plan_id" "$epoch"; then
-    printf '%s\n' "$(jq -nc --arg ts "$now" --arg ev "generation_superseded" --arg plan "$plan_id" \
-      --arg reason "$reason" --arg op "$operator" --arg epoch "$epoch" --arg id "$identity" \
-      '{ts:$ts, event:$ev, plan_id:$plan, reason:$reason, operator:$op, epoch:$epoch, archived_identity:$id}')" \
-      >> "$tl" 2>/dev/null || true
-  fi
-  _gen_supersede_record_present "$tl" "$plan_id" "$epoch" \
-    || { echo "[ERROR] supersede-generation: the generation_superseded timeline event for ${plan_id} epoch ${epoch} could not be read back from ${tl}." >&2; return 3; }
-
-  # Record 3 — the cross-plan audit log, VERIFIED BY READING IT BACK.
-  if ! _gen_supersede_record_present "$alog" "$plan_id" "$epoch"; then
-    bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
-      --epic-id "$plan_id" --run-id "supersede-generation" \
-      --event "generation_superseded" \
-      --plan-id "$plan_id" --reason "$reason" --operator "$operator" \
-      --archived-identity "$identity" --epoch "$epoch" \
-      --output "$alog" >/dev/null 2>&1 || true
-  fi
-  _gen_supersede_record_present "$alog" "$plan_id" "$epoch" \
-    || { echo "[ERROR] supersede-generation: the generation_superseded entry for ${plan_id} epoch ${epoch} could not be read back from ${alog}." >&2; return 3; }
-
-  printf '%s' "$rec_file"
-  return 0
-}
+# The archive and the three-record audit trail (aidaid_gen_archive_pair,
+# aidaid_gen_supersede_audit_preflight, aidaid_gen_supersede_record_present,
+# aid_gen_supersede_audit) live in lib/aid-generation-authority.sh (P112: the
+# direct run's restart leaves the same trail).
 
 _gen_supersede() {
   local sup_plan="" sup_reason=""
@@ -478,7 +309,7 @@ _gen_supersede() {
     # written here too, under the original epoch, and idempotently: whatever
     # the failed first call already recorded is verified rather than
     # duplicated.
-    _gen_supersede_audit_preflight "$gdir" \
+    aid_gen_supersede_audit_preflight "$gdir" \
       || error_exit "supersede-generation: the supersession cannot be recorded (see above), so the half-archived pair for ${sup_plan_id} was LEFT AS IT IS — nothing was renamed. Repair the audit sinks and re-run; the retry completes the rename and writes the trail under the original epoch ${half_epoch}." 3
     [[ -f "$txp"  && ! -e "${txp}.superseded-${half_epoch}"  ]] && mv -- "$txp"  "${txp}.superseded-${half_epoch}"
     [[ -f "$auth" && ! -e "${auth}.superseded-${half_epoch}" ]] && mv -- "$auth" "${auth}.superseded-${half_epoch}"
@@ -491,8 +322,8 @@ _gen_supersede() {
       half_generated="$(jq -c '[.phases | to_entries[] | {phase: .key, epic_id: .value.epic_id, run_id: .value.run_id, epic_path: (.value.epic_path // null), generated: ((.value.epic_sha256 // "") != "")}] | sort_by(.phase)' "$half_src" 2>/dev/null || echo '[]')"
     fi
     local half_rec=""
-    half_rec="$(_gen_supersede_audit "$sup_plan_id" "$sup_plan" "$sup_reason" "${USER:-unknown}" \
-      "$half_epoch" "$gdir" "$txp" "$auth" "$half_identity" "$half_generated")" \
+    half_rec="$(aid_gen_supersede_audit "$sup_plan_id" "$sup_plan" "$sup_reason" "${USER:-unknown}" \
+      "$half_epoch" "$gdir" "$txp" "$auth" "$half_identity" "$half_generated" "$_aid_pipeline_state_root")" \
       || error_exit "supersede-generation: the half-archived pair for ${sup_plan_id} was completed under epoch ${half_epoch}, but the supersession could NOT be fully recorded (see above). The archive is real and unaudited: repair the audit sinks and re-run — the retry is idempotent and writes only the missing records." 3
 
     echo "[INFO] supersede-generation: completed the missing rename of a half-archived pair under the original epoch ${half_epoch} — no fresh epoch was created." >&2
@@ -527,8 +358,8 @@ _gen_supersede() {
   # enforcement surface, so an unrecordable supersession must not happen.
   # Two of the three sinks are append-only, so the check that CAN fail
   # harmlessly is a preflight, not a rollback — see
-  # _gen_supersede_audit_preflight.
-  _gen_supersede_audit_preflight "$gdir" \
+  # aid_gen_supersede_audit_preflight.
+  aid_gen_supersede_audit_preflight "$gdir" \
     || error_exit "supersede-generation: the supersession cannot be recorded (see above), so NOTHING was archived — the transaction and authority for ${sup_plan_id} are exactly as they were. The audit record is this command's enforcement surface; an unrecordable supersession is refused, not performed silently. Repair the sink named above and re-run." 3
 
   # RENAME, retry the second once, then report the exact mv to finish.
@@ -547,8 +378,8 @@ _gen_supersede() {
   # printed an audit-record path, so a supersession could report a forensic
   # artifact that did not exist.
   local rec_file=""
-  rec_file="$(_gen_supersede_audit "$sup_plan_id" "$sup_plan" "$sup_reason" "$operator" \
-    "$epoch" "$gdir" "$txp" "$auth" "$identity" "$generated")" \
+  rec_file="$(aid_gen_supersede_audit "$sup_plan_id" "$sup_plan" "$sup_reason" "$operator" \
+    "$epoch" "$gdir" "$txp" "$auth" "$identity" "$generated" "$_aid_pipeline_state_root")" \
     || error_exit "supersede-generation: the pair for ${sup_plan_id} is archived under epoch ${epoch}, but the supersession could NOT be fully recorded (see above) — the archive is real and unaudited. Repair the sink named above and re-run supersede-generation: it is idempotent, completes nothing that is already done, and writes only the missing records under the same epoch." 3
 
   echo "[INFO] supersede-generation: archived the incomplete transaction for ${sup_plan_id} (epoch ${epoch})." >&2
@@ -1190,7 +1021,7 @@ if [[ -f "$_gen_tx_path" ]]; then
     # live path: the pair is archived to `.completed-<epoch>` siblings sharing
     # one epoch, and the changed plan starts a fresh transaction.
     _gen_rollover_epoch="$(date -u +%s)"
-    _gen_archive_pair "$plan_id" "completed-${_gen_rollover_epoch}" || {
+    aid_gen_archive_pair "$plan_id" "completed-${_gen_rollover_epoch}" || {
       _gen_unlock
       error_exit "cannot archive the COMPLETED generation pair for ${plan_id} to .completed-${_gen_rollover_epoch} siblings — refusing to clobber a completed record." 3
     }
@@ -1204,11 +1035,11 @@ if [[ -f "$_gen_tx_path" ]]; then
     # under the lock this run already holds) and generation goes on.
     _gen_ae="$(date -u +%s)"
     _gen_ad="$(realpath -m -- "$_gen_dir_path")"
-    { _gen_supersede_audit_preflight "$_gen_ad" \
-        && _gen_archive_pair "$plan_id" "superseded-${_gen_ae}" \
-        && _gen_supersede_audit "$plan_id" "$plan" "automatic: the incomplete transaction generated no phase and the plan identity changed" \
+    { aid_gen_supersede_audit_preflight "$_gen_ad" \
+        && aid_gen_archive_pair "$plan_id" "superseded-${_gen_ae}" \
+        && aid_gen_supersede_audit "$plan_id" "$plan" "automatic: the incomplete transaction generated no phase and the plan identity changed" \
              "${USER:-unknown}" "$_gen_ae" "$_gen_ad" "${_gen_ad}/transaction.json" "${_gen_ad}/generation-authority.json" \
-             "$_gen_existing_identity" '[]' >/dev/null; } || {
+             "$_gen_existing_identity" '[]' "$_aid_pipeline_state_root" >/dev/null; } || {
       _gen_unlock
       error_exit "the incomplete transaction for ${plan_id} generated nothing, but archiving it automatically failed (see above). Archive it by hand: aid-auto-pipeline.sh supersede-generation --plan '${plan}' --reason \"<at least 20 characters>\"" 3
     }

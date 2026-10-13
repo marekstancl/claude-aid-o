@@ -374,9 +374,14 @@ aid_plan_repo_roots_json() {
     [[ -z "$own" || "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" != "$own" ]] \
       || error_exit "repo_root_invalid: repo_roots[$i] '${name}' is the project itself (or one of its worktrees) — repo_roots names OTHER repositories. next: fix the plan's repo_roots frontmatter (pipeline.md §When AID refuses: repo_root_invalid)" 1
     bb="$(aid_plan_repo_base_branch "$path" "$bb")"
-    base="$(git -C "$path" rev-parse --verify --quiet "${bb}^{commit}" 2>/dev/null)" \
-      || error_exit "repo_root_invalid: repo_roots[$i] '${name}' base branch '${bb}' does not resolve in ${path}. next: set base_branch in the plan's repo_roots entry (pipeline.md §When AID refuses: repo_root_invalid)" 1
     IFS=$'\t' read -r wt br < <(_aid_rr_derive "$path" "$plan_id" "$name" "$project")
+    # P112: a branch the run already has (a restart adopts it) keeps its own
+    # base — the fork point — never a newer head of the base branch.
+    base=""
+    git -C "$path" rev-parse --verify --quiet "refs/heads/${br}" >/dev/null 2>&1 \
+      && base="$(git -C "$path" merge-base "$br" "$bb" 2>/dev/null)"
+    [[ -n "$base" ]] || base="$(git -C "$path" rev-parse --verify --quiet "${bb}^{commit}" 2>/dev/null)" \
+      || error_exit "repo_root_invalid: repo_roots[$i] '${name}' base branch '${bb}' does not resolve in ${path}. next: set base_branch in the plan's repo_roots entry (pipeline.md §When AID refuses: repo_root_invalid)" 1
     out="$(jq -c --arg name "$name" --arg path "$path" \
       --arg wt "$wt" --arg br "$br" --arg base "$base" \
       '. + [{name: $name, path: $path, worktree: $wt, branch: $br, base: $base}]' <<< "$out")"

@@ -775,3 +775,197 @@ aid_gen_unlock()             { _gen_unlock "$@"; }
 aid_gen_lock_holder()        { _gen_lock_holder "$@"; }
 aid_gen_write_atomic()       { _gen_write_atomic "$@"; }
 aid_gen_tx_update()          { _gen_tx_update "$@"; }
+
+# =============================================================================
+# The archive of a transaction and its audited supersession (moved from
+# aid-auto-pipeline.sh, P112): the pipeline's supersede-generation and the
+# direct run's `plan-run --restart` leave the same trail.
+# =============================================================================
+
+# aid_gen_archive_pair <plan_id> <suffix> [<dest_dir>] — atomically move the
+# transaction and the authority to `<name>.<suffix>` siblings sharing ONE
+# epoch, so the pair is identifiable; given <dest_dir> (P112, the direct run's
+# restart), into that directory under their own names. Nothing is ever deleted.
+aid_gen_archive_pair() {
+  local plan_id="$1" suffix="$2" dest="${3:-}" txp auth
+  txp="$(_gen_transaction_path "$plan_id")"; auth="$(_gen_authority_path "$plan_id")"
+  if [[ -n "$dest" ]]; then
+    mkdir -p "$dest" || return 3
+    [[ -f "$txp" ]] && { mv -- "$txp" "${dest}/$(basename "$txp")" || return 3; }
+    [[ -f "$auth" ]] && { mv -- "$auth" "${dest}/$(basename "$auth")" || return 3; }
+    return 0
+  fi
+  [[ -f "$txp" ]] && { mv -- "$txp" "${txp}.${suffix}" || return 3; }
+  [[ -f "$auth" ]] && { mv -- "$auth" "${auth}.${suffix}" || return 3; }
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# aid_gen_supersede_audit_preflight <gdir>
+#
+# WHY A PREFLIGHT AND NOT "WRITE, THEN CHECK". The three records are the
+# enforcement surface for this mechanism
+# — the enforcement registry says so — so a supersession that cannot be
+# recorded must not happen at all. Two of the three sinks are APPEND-ONLY
+# (timeline.jsonl, audit-log.jsonl): once a line is in them it cannot be taken
+# back, so "archive, then record, then roll back on failure" would either
+# leave an unaudited archive or leave a line describing an archive that never
+# happened. Probing the sinks first — a zero-byte append, which proves
+# openability without committing any content — lets the refusal happen while
+# NOTHING has been touched, which is the state the operator can reason about.
+#
+# Returns 0 when all three sinks are writable; 3 (naming the sink) otherwise.
+# ---------------------------------------------------------------------------
+aid_gen_supersede_audit_preflight() {
+  local gdir="$1"
+  local alog; alog="$(_gen_audit_log_path)"
+  local probe=""
+  if ! mkdir -p "$gdir" 2>/dev/null; then
+    echo "[ERROR] supersede-generation: the evidence directory ${gdir} cannot be created — the supersession record has nowhere to go." >&2
+    return 3
+  fi
+  if ! probe="$(mktemp "${gdir}/.supersede-probe.XXXXXX" 2>/dev/null)"; then
+    echo "[ERROR] supersede-generation: ${gdir} is not writable — the supersession record (generation-superseded-<epoch>.json) cannot be written there." >&2
+    return 3
+  fi
+  rm -f "$probe" 2>/dev/null || true
+  if ! : >> "${gdir}/timeline.jsonl" 2>/dev/null; then
+    echo "[ERROR] supersede-generation: ${gdir}/timeline.jsonl cannot be appended to — the timeline event cannot be recorded." >&2
+    return 3
+  fi
+  if ! mkdir -p "$(dirname "$alog")" 2>/dev/null || ! : >> "$alog" 2>/dev/null; then
+    echo "[ERROR] supersede-generation: ${alog} cannot be appended to — the cross-plan audit-log entry cannot be recorded." >&2
+    return 3
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# aid_gen_supersede_record_present <file> <plan_id> <epoch>
+#
+# "Is THIS plan's supersession for THIS epoch already recorded in <file>?"
+#
+# KEYED ON plan_id AND epoch AND event, never on epoch alone.
+# `audit-log.jsonl` is CROSS-PLAN and the epoch is only
+# second-resolution, while two plans superseding at the same moment hold
+# DIFFERENT per-plan locks and genuinely run concurrently. An epoch-only match
+# therefore let plan B read plan A's line as its own, skip its append, and
+# report success with no entry of its own — the exact unaudited supersession
+# the fail-closed rewrite exists to prevent.
+#
+# PARSED, NOT PATTERN-MATCHED. `reason` is free operator text on the same
+# line, so a substring match could be satisfied by a reason that merely
+# CONTAINS the key. Each line is parsed and its fields compared exactly; a
+# line that is not valid JSON is skipped rather than aborting the scan, so one
+# pre-existing corrupt line in an append-only log cannot make every later
+# supersession unverifiable.
+# ---------------------------------------------------------------------------
+aid_gen_supersede_record_present() {
+  local file="$1" plan_id="$2" epoch="$3"
+  [[ -f "$file" ]] || return 1
+  jq -e -nR --arg p "$plan_id" --arg e "$epoch" '
+    any(inputs;
+      ((try fromjson catch null) // null) as $j
+      | $j != null
+        and ($j.event? == "generation_superseded")
+        and ($j.plan_id? == $p)
+        and ((($j.epoch? // "") | tostring) == $e))' "$file" >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
+# aid_gen_supersede_audit <plan_id> <plan_path> <reason> <operator> <epoch> \
+#                      <gdir> <txp> <auth> <identity> <generated_json> \
+#                      [<state_root>] [<archive_dir>]
+#
+# <state_root> (default: aid_state_root) names the repository whose HEAD the
+# record carries; <archive_dir> (P112 restart) is where the pair was moved by
+# `aid_gen_archive_pair <plan> <suffix> <dir>` instead of the sibling names.
+#
+# Writes the P073 three-record trail for ONE epoch and VERIFIES each record by
+# reading it back (aid-audit-log.sh swallows its own write failures by design
+# and always returns 0, so its exit code proves nothing — the forced-authority
+# path above solves this the same way). IDEMPOTENT: a record that is already
+# present for this epoch is verified, not duplicated, which is what makes the
+# half-archived retry path produce one trail rather than two.
+#
+# Returns 0 only when all three records are durable; 3 (naming the missing
+# one) otherwise. Callers must treat 3 as fail-closed.
+# ---------------------------------------------------------------------------
+aid_gen_supersede_audit() {
+  local plan_id="$1" plan_path="$2" reason="$3" operator="$4" epoch="$5"
+  local gdir="$6" txp="$7" auth="$8" identity="$9" generated="${10}" sroot="${11:-}" adir="${12:-}"
+  [[ -n "$sroot" ]] || sroot="$(aid_state_root 2>/dev/null || pwd)"
+  local rec_file="${gdir}/generation-superseded-${epoch}.json"
+  local tl="${gdir}/timeline.jsonl"
+  local alog; alog="$(_gen_audit_log_path)"
+  local now; now="$(_gen_now)"
+  local head_sha; head_sha="$(git -C "$sroot" rev-parse HEAD 2>/dev/null || echo unknown)"
+
+  # The archived names are deterministic, so the record can be rendered
+  # whichever side of the rename we are called from: hash the file under
+  # whichever of its two names exists right now.
+  local arch_tx="${txp}.superseded-${epoch}" arch_auth_name="${auth}.superseded-${epoch}" arch_auth="" tx_src="" auth_src=""
+  if [[ -n "$adir" ]]; then arch_tx="${adir}/$(basename "$txp")"; arch_auth_name="${adir}/$(basename "$auth")"; fi
+  if [[ -e "$arch_tx" ]]; then tx_src="$arch_tx"; elif [[ -f "$txp" ]]; then tx_src="$txp"; fi
+  if [[ -e "$arch_auth_name" ]]; then
+    auth_src="$arch_auth_name"; arch_auth="$arch_auth_name"
+  elif [[ -f "$auth" ]]; then
+    auth_src="$auth"; arch_auth="$arch_auth_name"
+  fi
+
+  # Record 1 — the authoritative forensic artifact.
+  if [[ ! -f "$rec_file" ]]; then
+    local rec
+    rec="$(jq -n \
+      --arg schema "aid-generation-supersede/v1" --arg created_at "$now" \
+      --arg plan_id "$plan_id" --arg plan_path "$plan_path" \
+      --arg reason "$reason" --arg operator "$operator" --arg head_sha "$head_sha" \
+      --arg archived_transaction "$arch_tx" \
+      --arg archived_authority "$arch_auth" \
+      --arg tx_sha256 "$( [[ -n "$tx_src" ]] && _gen_sha256_file "$tx_src" )" \
+      --arg auth_sha256 "$( [[ -n "$auth_src" ]] && _gen_sha256_file "$auth_src" )" \
+      --arg archived_identity "$identity" \
+      --arg current_identity "$(_gen_sha256_file "$plan_path")|$(_gen_target_head)|${AID_GEN_PHASE_DERIVATION_VERSION}" \
+      --argjson generated "$generated" \
+      '{schema:$schema, created_at:$created_at, plan_id:$plan_id, plan_path:$plan_path,
+        reason:$reason, operator:$operator, head_sha:$head_sha,
+        archived_transaction:$archived_transaction, archived_authority:(if $archived_authority == "" then null else $archived_authority end),
+        transaction_sha256:$tx_sha256, authority_sha256:(if $auth_sha256 == "" then null else $auth_sha256 end),
+        archived_identity:$archived_identity,
+        current_identity:$current_identity,
+        generated:$generated, deletes_nothing:true, actor_semantics:"instruction_only"}')" || rec=""
+    [[ -n "$rec" ]] || { echo "[ERROR] supersede-generation: cannot render the supersession record for epoch ${epoch}." >&2; return 3; }
+    _gen_write_atomic "$rec_file" "$rec" \
+      || { echo "[ERROR] supersede-generation: cannot write the supersession record ${rec_file}." >&2; return 3; }
+  fi
+  # Read back keyed on THIS plan, for the same reason the JSONL checks are:
+  # a record that belongs to another plan is not this plan's evidence, even
+  # when it sits at the expected path.
+  jq -e --arg p "$plan_id" '.schema == "aid-generation-supersede/v1" and .plan_id == $p' "$rec_file" >/dev/null 2>&1 \
+    || { echo "[ERROR] supersede-generation: the supersession record ${rec_file} could not be read back as a valid record for ${plan_id}." >&2; return 3; }
+
+  # Record 2 — the per-plan timeline event.
+  if ! aid_gen_supersede_record_present "$tl" "$plan_id" "$epoch"; then
+    printf '%s\n' "$(jq -nc --arg ts "$now" --arg ev "generation_superseded" --arg plan "$plan_id" \
+      --arg reason "$reason" --arg op "$operator" --arg epoch "$epoch" --arg id "$identity" \
+      '{ts:$ts, event:$ev, plan_id:$plan, reason:$reason, operator:$op, epoch:$epoch, archived_identity:$id}')" \
+      >> "$tl" 2>/dev/null || true
+  fi
+  aid_gen_supersede_record_present "$tl" "$plan_id" "$epoch" \
+    || { echo "[ERROR] supersede-generation: the generation_superseded timeline event for ${plan_id} epoch ${epoch} could not be read back from ${tl}." >&2; return 3; }
+
+  # Record 3 — the cross-plan audit log, VERIFIED BY READING IT BACK.
+  if ! aid_gen_supersede_record_present "$alog" "$plan_id" "$epoch"; then
+    bash "${_AID_GEN_SCRIPTS_DIR}/aid-audit-log.sh" append \
+      --epic-id "$plan_id" --run-id "supersede-generation" \
+      --event "generation_superseded" \
+      --plan-id "$plan_id" --reason "$reason" --operator "$operator" \
+      --archived-identity "$identity" --epoch "$epoch" \
+      --output "$alog" >/dev/null 2>&1 || true
+  fi
+  aid_gen_supersede_record_present "$alog" "$plan_id" "$epoch" \
+    || { echo "[ERROR] supersede-generation: the generation_superseded entry for ${plan_id} epoch ${epoch} could not be read back from ${alog}." >&2; return 3; }
+
+  printf '%s' "$rec_file"
+  return 0
+}
