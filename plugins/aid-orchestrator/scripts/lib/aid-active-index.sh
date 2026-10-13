@@ -202,8 +202,10 @@ aid_active_boundary_sync() {
   #    which sweeps every terminal/gone run at close/rollback time). ──────────
   case "$boundary" in
     init)
+      # P112: the init entry is mandatory (the hook reads only the map);
+      # every other boundary stays best-effort.
       if [[ -n "$state_file" ]] && declare -F upsert_active_run >/dev/null 2>&1; then
-        upsert_active_run "$state_file" || true
+        upsert_active_run "$state_file" || return 1
       fi
       ;;
     done-advance|plan-close|abandon)   # abandon: P111 Step 5

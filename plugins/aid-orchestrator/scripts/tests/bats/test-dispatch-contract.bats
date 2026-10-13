@@ -397,11 +397,11 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [[ "$output" == *"${WT} of repo_roots 'docs' is gone"* && "$output" == *"worktree add ${WT} plan/P111-proj"* ]]
 }
 
-@test "repo-roots: aid_dispatch_repo_resolve prints the worktree and the branch; range_ok with a branch demands reachability" {
+@test "repo-roots: aid_rr_resolve prints the worktree and the branch; range_ok with a branch demands reachability" {
   _rr_setup
-  run aid_dispatch_repo_resolve rr-plan.json docs
+  run aid_rr_resolve rr-plan.json docs
   [ "$output" = "$(printf '%s\t%s' "$WT" plan/P111-proj)" ]
-  run aid_dispatch_repo_resolve rr-plan.json nope
+  run aid_rr_resolve rr-plan.json nope
   [ "$status" -eq 1 ]
   local base; base="$(git -C "$WT" rev-parse HEAD)"
   echo b >> "$WT/page.md"; git -C "$WT" commit -qam "on the worktree branch"

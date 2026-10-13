@@ -558,3 +558,22 @@ _blockers_two() {
   grep -qF 'Cena běhu: 12.5 USD, 7 kol, 2 pokus(ů) + neznámá u: final_generalist' "$OUT_DIR/plan-close-artifact.html"
   grep -qF 'Cena plánu: 53.1 USD (CP1 3 kol, kritik 1.2 USD)' "$OUT_DIR/plan-close-artifact.html"
 }
+
+# ── P112 Step 7: what an independent agent settled is read at the close ──────
+_ledger() {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/evidence/P080"
+  jq -nc '{checkpoint: "cp2", round_dir: "x", fingerprint: "sha256:aa", kind: "dispute", provider: "claude", answer: "accepted", class: "technical", reason: "the reviewer read the live checkout, the worktree has the change", verdict_file: "v.json", at: "2026-10-13T00:00:00Z"}' \
+    > "$TEST_PROJECT_ROOT/.aid-o/work/evidence/P080/delegated-disputes.jsonl"
+}
+@test "delegate: the close card lists a delegated settlement" {
+  _brief true auto '[]'; _decision '"3333333333333333333333333333333333333333"' tagged; _ledger
+  run aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"Delegovaná rozhodnutí (nezávislý agent místo PM): 1"* ]]
+  [[ "$output" == *"cp2 rozpor: claude → accepted — the reviewer read the live checkout"* ]]
+}
+@test "delegate: the close page lists a delegated settlement" {
+  _brief true auto '[]'; _decision '"3333333333333333333333333333333333333333"' tagged; _ledger
+  aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR" >/dev/null
+  grep -q 'delegovaná rozhodnutí: 1 — cp2 rozpor: claude → accepted — the reviewer read the live checkout' "$OUT_DIR/plan-close-artifact.html"
+}

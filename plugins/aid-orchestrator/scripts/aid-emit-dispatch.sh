@@ -31,7 +31,7 @@ EOF
 }
 
 # The one focus allowlist (the start check and its error text read this).
-AID_DISPATCH_FOCUS_RE='^(copy-review-standin|cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp3-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|critic-(brainstorm|plan))$'
+AID_DISPATCH_FOCUS_RE='^(copy-review-standin|cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp3-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|critic-(brainstorm|plan)|adjudicator-delegated-[0-9a-f]{16})$'
 
 # Focus default duration table (resolved when --expected-duration-max not given).
 default_duration_for_focus() {
@@ -99,7 +99,8 @@ cmd_start() {
   # ways out were --force or a fabricated output. When the evidence dir is a
   # review round (round.json with reviewers_expected), the focus must name one
   # of its roles — the error falls here, not at close.
-  if [[ -f "${evidence_dir}/round.json" ]]; then
+  # P112: the delegated adjudicator is no reviewer of the round
+  if [[ -f "${evidence_dir}/round.json" && "$focus" != adjudicator-delegated-* ]]; then
     local role_of_focus roles
     jq -e '.reviewers_expected | type == "array"' "${evidence_dir}/round.json" >/dev/null 2>&1 \
       || { echo "ERROR: ${evidence_dir}/round.json has no reviewers_expected list — not a review round this script can check; repair the round (prepare) before dispatching" >&2; exit 1; }

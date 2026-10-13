@@ -66,3 +66,11 @@
 0	p111_new	generation_lock_held
 0	p111_new	plan_not_found
 0	p111_new	done_advance_preconditions
+0	p112_new	restart_after_step
+0	p112_new	restart_plan_dirty
+0	p112_new	restart_foreign_dirty
+0	p112_new	restart_controller_live
+0	p112_new	active_runs_write_failed
+0	p112_new	active_runs_unreadable
+0	p112_new	delegation_missing
+0	p112_new	delegation_out_of_scope

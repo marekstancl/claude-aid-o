@@ -502,3 +502,51 @@ _bound() { _plan p.md strict '- Modify: `src/a.ts` — edit'; }
   run "$LINT" p.md --only zadani
   [ "$status" -eq 1 ]; [[ "$output" == *"## Data Model does not open with"* ]]
 }
+
+# ── P112 Step 4: an absolute path into an undeclared repository ───────────────
+# outside the project (a repository inside it is repo_root_invalid); bats removes BATS_TEST_TMPDIR
+_other_repo() { O="$BATS_TEST_TMPDIR/other"; mkdir -p "$O"; git -C "$O" init -q -b main; git -C "$O" -c user.email=t@t -c user.name=T commit -q --allow-empty -m init; }
+_declare() { sed -i "0,/^risk: low/s||risk: low\nrepo_roots: [{name: other, path: $O}]|" p.md; }
+_ac_cmd() { printf '\n## Acceptance Criteria\n\n- [ ] AC1: it is there\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "%s"\n    expected_exit: 0\n  ```\n' "$1" >> p.md; }
+
+@test "lint-foreign: a Files bullet into a git repository repo_roots does not declare is an error" {
+  _other_repo; _plan p.md strict "- Modify: \`$O/page.md\` — edit"
+  run bash "$LINT" p.md
+  [ "$status" -ne 0 ]; [[ "$output" == *"ERROR foreign_repo_undeclared: $O/page.md lies in $O"*"next:"*"(pipeline.md §When AID refuses: foreign_repo_undeclared)"* ]]
+}
+@test "lint-foreign: the same path with the repository declared in repo_roots passes" {
+  _other_repo; _plan p.md strict "- Modify: \`$O/page.md\` — edit"; _declare
+  run bash "$LINT" p.md; echo "$output"
+  [ "$status" -eq 0 ]; [[ "$output" != *"foreign_repo_undeclared"* ]]
+}
+@test "lint-foreign: a criterion's cmd reading a file in the undeclared repository is an error" {
+  _other_repo; _plan p.md strict '- Modify: `src/a.ts` — edit'; _ac_cmd "grep -q x $O/page.md"
+  run bash "$LINT" p.md
+  [ "$status" -ne 0 ]; [[ "$output" == *"ERROR foreign_repo_undeclared: $O/page.md"* ]]
+}
+@test "lint-foreign: a path outside any git repository (/tmp-like) is not judged" {
+  mkdir -p "$TEST_DIR/nogit"; _plan p.md strict '- Modify: `src/a.ts` — edit'; _ac_cmd "test -d $TEST_DIR/nogit/x"
+  run bash "$LINT" p.md; echo "$output"
+  [[ "$output" != *"foreign_repo_undeclared"* ]]   # (the fixture's own brief binding fails on the appended criterion, not on this)
+}
+@test "lint-foreign: a path into the project's own .aid-worktrees/ worktree is the project (same common dir)" {
+  git init -q -b main .; git -c user.email=t@t -c user.name=T commit -q --allow-empty -m seed
+  git worktree add -q -b plan/x .aid-worktrees/plan-x
+  _plan p.md strict "- Modify: \`$TEST_DIR/.aid-worktrees/plan-x/src/a.ts\` — edit"
+  run bash "$LINT" p.md; echo "$output"
+  [[ "$output" != *"foreign_repo_undeclared"* ]]
+}
+@test "lint-foreign: a YAML example in prose that is no criterion is not judged" {
+  _other_repo; _plan p.md strict '- Modify: `src/a.ts` — edit'
+  printf '\n## Notes\n\n```yaml\ncmd: "grep x %s/page.md"\n```\n' "$O" >> p.md
+  run bash "$LINT" p.md; echo "$output"
+  [ "$status" -eq 0 ]; [[ "$output" != *"foreign_repo_undeclared"* ]]
+}
+@test "lint-foreign: a path whose directory cannot be read is an advisory, not judged" {
+  [ "$(id -u)" -ne 0 ] || skip "root reads everything"
+  mkdir -p "$TEST_DIR/locked/in"; chmod 000 "$TEST_DIR/locked"
+  _plan p.md strict '- Modify: `src/a.ts` — edit'; _ac_cmd "test -f $TEST_DIR/locked/in/f"
+  run bash "$LINT" p.md; chmod 755 "$TEST_DIR/locked"; echo "$output"
+  [[ "$output" == *"[ADVISORY]"*"cannot be read"*"not judged for repo_roots"* ]]
+  [[ "$output" != *"foreign_repo_undeclared"* ]]
+}

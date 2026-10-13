@@ -557,6 +557,12 @@ prune_active_runs() {
         case "$state" in
           DONE|ERROR) reason="terminal state ${state}" ;;
         esac
+        # P112: a direct run at DONE/review is still guarded by the hook (P111)
+        # — the map keeps it until done_phase: release.
+        if [[ "$state" == DONE && "$(yaml_field "$abs" direct 2>/dev/null)" == true \
+              && "$(yaml_field "$abs" done_phase 2>/dev/null | tr -d '"')" != release ]]; then
+          reason=""
+        fi
       fi
     fi
     if [[ -n "$reason" ]]; then
@@ -1082,6 +1088,8 @@ _fsm_require_plan_worktree() {
 # wording. Behaviour, name and this file's three call sites are unchanged.
 # shellcheck source=lib/aid-human-step.sh
 source "${SCRIPT_DIR}/lib/aid-human-step.sh"
+# shellcheck source=lib/aid-unmeasured.sh
+source "${SCRIPT_DIR}/lib/aid-unmeasured.sh"   # AID_PD_UNMEASURED_RE (P112)
 
 # _aid_sup_restore — EXIT trap installed while a supersede reservation is held
 # (P073 EPIC 2 review). Puts the reservation back under its original name so a
@@ -1177,6 +1185,8 @@ _fsm_refusal_next() {
       fi ;;
     abandon_needs_reason)
       next="$(_fsm_cmd bash "$fsm" abandon "$sf" --reason "<why the run is abandoned>")" ;;
+    active_runs_write_failed)
+      next="fix what blocks .aid-o/work/active-runs.json (lock, permissions, a broken file), then run the same init again (a direct init is idempotent; plan-run resumes it)" ;;
     direct_run_needs_plan_branch)
       next="start the plan in plan_branch mode and run from its plan worktree: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}")" ;;
     plan_manifest_missing|plan_branch_mismatch)
@@ -4218,15 +4228,16 @@ except: pass
   # OBS-20260712-01 → P074 Step 4: this run becomes ONE ENTRY in the
   # multi-run active-runs map the commit-scope guard consults for
   # main-fallback governance (the old single slot let a second init hide this
-  # run). Best-effort: never fails init — a crash/failure before the upsert
-  # leaves no entry, identical exposure to the old crash-before-pointer-write.
+  # run). P112: the map is the ONLY source the pre-commit hook takes a run's
+  # branch guard from, so init fails when the entry cannot be written (a live
+  # run missing from the map would go unguarded); a rerun converges.
   # P074 Step 6: init is WRITER 1 of the generated active.md index — the
   # shared post-boundary helper performs the upsert, the stale-entry sweep,
   # and the index refresh in one place; a render failure warns, never blocks.
   if declare -F aid_active_boundary_sync >/dev/null 2>&1; then
-    aid_active_boundary_sync "$(aid_state_root 2>/dev/null || pwd)" "$epic_id" init "$state_file" || true
+    aid_active_boundary_sync "$(aid_state_root 2>/dev/null || pwd)" "$epic_id" init "$state_file" || _fsm_init_map_refuse "$state_file"
   else
-    upsert_active_run "$state_file" || true
+    upsert_active_run "$state_file" || _fsm_init_map_refuse "$state_file"
   fi
 
   echo "Initialized state: READY" >&2
@@ -4257,6 +4268,13 @@ read_steps_array() {
 #   active.md). Idempotent: a rerun completes whatever an interruption left.
 #   A gone state file: --epic names the map entry to remove.
 # ---------------------------------------------------------------------------
+# _fsm_init_map_refuse <state_file> — P112: init without its active-runs entry.
+_fsm_init_map_refuse() {
+  echo "REFUSED (active_runs_write_failed): $1 was written but its active-runs.json entry could not be — the pre-commit hook takes a run's guard only from that map, so the run would go unguarded." >&2
+  _fsm_refusal_next active_runs_write_failed
+  exit 1
+}
+
 cmd_abandon() {
   local state_file="${1:-}" reason="" epic_opt=""
   shift || true
@@ -4746,10 +4764,22 @@ _fsm_step_measure() {
 # _fsm_step_absent <evidence_dir> <step> — "<label>\t<text>\t<evidence>" per
 # point of the step that is absent and neither deferred by an answered card
 # nor measured at a later step (P110).
+# Unmeasured points (lib/aid-unmeasured.sh: no isolation, timeout …) are left
+# out: _fsm_step_unmeasured names them on their own line (P112).
 _fsm_step_absent() {
   local pd="${1}/cp2/step-${2}/plan-diff.json"
   [[ -f "$pd" ]] || return 0
-  jq -r '.results[] | select(.verdict == "absent" and .deferred == null and .deferred_to_step == null) | "\(.ac_label)\t\(.ac_text)\t\(.evidence)"' "$pd"
+  jq -r --arg re "$AID_PD_UNMEASURED_RE" '.results[] | select(.verdict == "absent" and .deferred == null and .deferred_to_step == null and ((.reason // "") | test($re) | not)) | "\(.ac_label)\t\(.ac_text)\t\(.evidence)"' "$pd"
+}
+
+# _fsm_step_unmeasured <evidence_dir> <step> — one line per point the step's
+# measurement could not run (aid_pd_unmeasured_line).
+_fsm_step_unmeasured() {
+  local pd="${1}/cp2/step-${2}/plan-diff.json" row
+  [[ -f "$pd" ]] || return 0
+  while IFS= read -r row; do
+    [[ -n "$row" ]] && aid_pd_unmeasured_line "$row"
+  done < <(jq -c --arg re "$AID_PD_UNMEASURED_RE" '.results[] | select(.verdict == "absent" and .deferred == null and .deferred_to_step == null and ((.reason // "") | test($re)))' "$pd")
 }
 
 # _fsm_defer_criterion <evidence_dir> <step> <label> <reason> <card> — the one
@@ -4954,14 +4984,18 @@ cmd_increment_step() {
       _fsm_defer_criterion "$evidence_dir" "$step" "$_sc_label" "$_sc_reason" "$_sc_card"
       _fsm_step_measure "$evidence_dir" "$step" "$state_file" || exit 1
     fi
-    local _sc_absent; _sc_absent="$(_fsm_step_absent "$evidence_dir" "$step")"
-    if [[ -n "$_sc_absent" ]]; then
-      _sc_label="$(head -1 <<< "$_sc_absent" | cut -f1)"
+    local _sc_absent _sc_um; _sc_absent="$(_fsm_step_absent "$evidence_dir" "$step")"; _sc_um="$(_fsm_step_unmeasured "$evidence_dir" "$step")"
+    if [[ -n "$_sc_absent" || -n "$_sc_um" ]]; then
+      _sc_label="$(head -1 <<< "${_sc_absent:-$_sc_um}" | cut -f1 | cut -d' ' -f1)"
       local _sc_tl; _sc_tl=$(derive_timeline "$state_file") || true
       [[ -n "$_sc_tl" ]] && log_event "$_sc_tl" "fsm_increment_fail" step="$step" reason="step_criteria_failed"
       {
-        echo "REFUSED (step_criteria_failed): step ${step} leaves brief points or its own criteria absent (${evidence_dir}/cp2/step-${step}/plan-diff.json):"
-        awk -F'\t' '{printf "  - %s \"%s\" (%s)\n", $1, $2, $3}' <<< "$_sc_absent"
+        echo "REFUSED (step_criteria_failed): step ${step} leaves brief points or its own criteria absent or unmeasured (${evidence_dir}/cp2/step-${step}/plan-diff.json):"
+        [[ -n "$_sc_absent" ]] && awk -F'\t' '{printf "  - %s \"%s\" (%s)\n", $1, $2, $3}' <<< "$_sc_absent"
+        [[ -n "$_sc_um" ]] && {
+          sed 's/^/  - /' <<< "$_sc_um"
+          echo "  An unmeasured point is not a met point (step ${step}: <N> = ${step})."
+        }
         echo "--force does not waive this: fix the step, or defer the point on the PM's answered Decision card."
       } >&2
       _fsm_refusal_next step_criteria_failed || true

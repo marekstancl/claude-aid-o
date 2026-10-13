@@ -123,7 +123,7 @@ Ask for any of these with `/aid-help <topic>`:
 ```
 /aid-help do              → /aid-do deep dive (scope detection, escalation triggers)
 /aid-help run             → /aid-run deep dive (the direct run /aid-run P<NNN>, repo_roots, cancelling, 6-state FSM)
-/aid-help generation      → PRE-FLIGHT: the direct run's transaction; the old plan → EPIC path (until P112)
+/aid-help generation      → PRE-FLIGHT: the direct run's transaction; the old plan → EPIC path (until P114)
 /aid-help plan            → /aid-plan deep dive (brainstorm, write, epic modes)
 /aid-help plan-lifecycle  → plan branches, release model, verification commands
 /aid-help ui              → /aid-ui: UI from product type to an approved brand page
@@ -168,7 +168,7 @@ is `plan-finalize`. A plan that changes another repository declares
 `plan/<id>-<project>` (never the live checkout); the PM merges those branches by
 hand after MERGE. `plan-close --administrative` (and `epic-complete --abandon`)
 end the run in the FSM and `active-runs.json`. `/aid-run E-…` runs one EPIC of
-a plan generated the old way (until P112); see `/aid-help generation`.
+a plan generated the old way (until P114); see `/aid-help generation`.
 
 ```
 /aid-run — EPIC Pipeline

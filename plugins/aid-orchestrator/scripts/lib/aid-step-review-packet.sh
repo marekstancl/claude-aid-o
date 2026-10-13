@@ -35,6 +35,8 @@
 _AID_SR_PLUGIN="${AID_PLUGIN_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 # shellcheck source=aid-gate-row.sh
 [[ -n "${AID_GATE_ROW_JQ:-}" ]] || source "${_AID_SR_PLUGIN}/scripts/lib/aid-gate-row.sh"   # P097 Step 2 — gate rows read through gate_row_normalize
+# shellcheck source=aid-repo-roots.sh
+source "${_AID_SR_PLUGIN}/scripts/lib/aid-repo-roots.sh"   # P112 — a foreign repository is reviewed in the plan's worktree
 AID_SR_TEMPLATE="${_AID_SR_PLUGIN}/defaults/prompts/review-prompt-v1.md"
 AID_SR_ROLES_SKILL="${_AID_SR_PLUGIN}/skills/step-review-roles.md"
 # step_name(index) on a plan.json step: the plan's own number from its id
@@ -78,8 +80,76 @@ aid_step_review_packet_build() {
       jq -r "${_AID_SR_STEP_NAME_JQ}"' "# EPIC: \(.epic_id // .id // "")\n\n" + ((.objective // .goal // "") | tostring) + "\n\n" + ([.steps | to_entries[] | "## \(.key as $k | .value | step_name($k)): \(.value.objective // "")\n" + ((.value.acceptance_criteria // []) | map("- " + .) | join("\n"))] | join("\n\n"))' "$plan_json" > "$dir/dod.md"
       jq 'def notier: map(gsub(" ?\\(tier: t[0-9]\\)"; "")); {outputs: ([.steps[].outputs[]?] | notier), allowed_paths: [.steps[].allowed_paths[]?], forbidden_paths: [.steps[].forbidden_paths[]?], scope_declared: true}' "$plan_json" > "$dir/files.json"
     fi
+    _aid_sr_foreign_step "$dir" "$plan_json" || return 1
   fi
   _aid_sr_packet_finish "$root" "$dir" "$prev"
+}
+
+# _aid_sr_foreign_missing <name> <worktree> — the packet is not built over a
+# foreign worktree that is gone (never a silent read of the live checkout).
+_aid_sr_foreign_missing() {
+  echo "prepare: REFUSED (foreign_worktree_missing): the worktree $2 of repo_roots '$1' is gone — the review would read the live checkout instead" >&2
+  echo "next: recreate it on its recorded branch (git -C <path> worktree add $2 <branch>), then prepare again" >&2
+  return 1
+}
+
+# _aid_sr_foreign_step <packet_dir> <plan.json> — P112: a plan with repo_roots.
+# The ranges the step check verified (step-check.json other_repos) go into
+# foreign-<name>.patch, files.json names the worktree paths, packet.json lists
+# every declared repository (touched or not) for the prompt.
+_aid_sr_foreign_step() {
+  local dir="$1" pj="$2" name path wt br patch out='[]' rng
+  jq -e '(.repo_roots // []) | length > 0' "$pj" >/dev/null 2>&1 || return 0
+  aid_rr_load "$pj" || return 1
+  while IFS=$'\t' read -r name path wt br; do
+    [[ -n "$name" ]] || continue
+    [[ -d "$wt" ]] || { _aid_sr_foreign_missing "$name" "$wt"; return 1; }
+    patch=""
+    rng="$(jq -r --arg n "$name" 'first(.other_repos[]? | select(.name == $n) | .range) // ""' "$dir/step-check.json")"
+    if [[ -n "$rng" ]]; then
+      patch="foreign-${name}.patch"
+      git -C "$wt" diff "$rng" > "$dir/$patch" || { echo "prepare: the range ${rng} does not resolve in ${wt}" >&2; return 1; }
+    fi
+    out="$(jq -c --arg n "$name" --arg p "$path" --arg w "$wt" --arg b "$br" --arg f "$patch" \
+      '. + [{name: $n, live: $p, worktree: $w, branch: $b, patch: (if $f == "" then null else $f end)}]' <<< "$out")"
+  done <<< "$_AID_RR_CACHE"
+  local fj; fj="$(cat "$dir/files.json")"
+  # every declared path in the scope → its worktree (outputs are bullets: the text rewrite)
+  local k v
+  for k in outputs allowed_paths forbidden_paths; do
+    v="$(jq -c --arg k "$k" '.[$k] // []' <<< "$fj")"
+    v="$(jq -r '.[]' <<< "$v" | while IFS= read -r line; do aid_rr_text "$pj" "$line" || true; done | jq -Rsc 'split("\n") | map(select(length > 0))')"
+    fj="$(jq -c --arg k "$k" --argjson v "$v" '.[$k] = $v' <<< "$fj")"
+  done
+  printf '%s\n' "$fj" > "$dir/files.json"
+  jq -n --argjson f "$out" '{foreign: $f}' > "$dir/packet.json"
+}
+
+# _aid_sr_foreign_final <packet_dir> <run_dir> — P112: the whole-plan round
+# reads each foreign branch from its frozen base to its frozen head (the
+# candidate manifest, written at freeze), in the plan's worktree.
+_aid_sr_foreign_final() {
+  local dir="$1" run="$2" plan root pid man name path wt br base head out='[]' files='[]' f
+  [[ -f "${run}/cp7/brief.json" ]] || return 0
+  plan="$(jq -r .plan "${run}/cp7/brief.json")"; root="$(jq -r .root "${run}/cp7/brief.json")"
+  awk 'NR==1 && !/^---/ {exit} NR>1 && /^---/ {exit} /repo_roots/ {f=1; exit} END {exit !f}' "$plan" 2>/dev/null || return 0
+  aid_rr_load "$plan" "" "$(basename "$root")" || return 1
+  pid="$(yq --front-matter=extract -r '.id // ""' "$plan" 2>/dev/null)"
+  man="${root}/.aid-o/work/plan-state/${pid}/plan-boundary-manifest.json"
+  while IFS=$'\t' read -r name path wt br; do
+    [[ -n "$name" ]] || continue
+    [[ -d "$wt" ]] || { _aid_sr_foreign_missing "$name" "$wt"; return 1; }
+    IFS=$'\t' read -r base head < <(jq -r --arg n "$name" 'first(.plan_boundary_manifest.repo_roots[]? | select(.name == $n) | [.base, .head] | @tsv) // ""' "$man" 2>/dev/null)
+    [[ -n "${base:-}" && -n "${head:-}" ]] || { echo "prepare: the candidate manifest records no frozen base/head for repo_roots '${name}' (${man}); run plan-finalize --stage freeze" >&2; return 1; }
+    git -C "$wt" diff "${base}..${head}" > "$dir/foreign-${name}.patch" || { echo "prepare: ${base}..${head} does not resolve in ${wt}" >&2; return 1; }
+    while IFS= read -r f; do [[ -n "$f" ]] && files="$(jq -c --arg p "${wt}/${f}" '. + [$p]' <<< "$files")"; done \
+      < <(git -C "$wt" diff --name-only "${base}..${head}")
+    out="$(jq -c --arg n "$name" --arg p "$path" --arg w "$wt" --arg b "$br" --arg f "foreign-${name}.patch" \
+      --arg c "$(git -C "$wt" rev-list --count "${base}..${head}")" \
+      '. + [{name: $n, live: $p, worktree: $w, branch: $b, patch: $f, commits: ($c | tonumber)}]' <<< "$out")"
+  done <<< "$_AID_RR_CACHE"
+  jq -c --argjson f "$files" '.outputs = $f' "$dir/files.json" > "$dir/files.json.tmp" && mv "$dir/files.json.tmp" "$dir/files.json"
+  jq -n --argjson f "$out" '{foreign: $f}' > "$dir/packet.json"
 }
 
 # _aid_sr_packet_finish <root> <packet_dir> <prev_round_dir> — what every packet
@@ -167,6 +237,7 @@ aid_final_review_packet_build() {
       git -C "$root" log --format=%H --grep="$epic" "$range" | while IFS= read -r f; do git -C "$root" show "$f"; done > "$dir/diff-${epic}.patch"
     done < <(jq -r '.epics[].epic' "$dir/epic-findings.json")
   fi
+  _aid_sr_foreign_final "$dir" "$run" || return 1
   _aid_sr_packet_finish "$root" "$dir" "$prev"
 }
 
@@ -288,6 +359,23 @@ aid_step_review_prompt_render() {
       for part in "${dir}"/packet/diff-*.patch; do
         [[ -f "$part" ]] && echo "The range is large; one part per EPIC is on disk: ${part}"
       done
+    fi
+    if [[ -f "${dir}/packet/packet.json" ]] && (( $(jq '.foreign | length' "${dir}/packet/packet.json") > 0 )); then
+      echo "## Foreign repositories of this plan (repo_roots)"
+      echo
+      local fname fwt fbr fpatch flive
+      local fcommits
+      while IFS=$'\t' read -r fname flive fwt fbr fpatch fcommits; do
+        echo "### ${fname}: the plan's work is in the worktree ${fwt} (branch ${fbr})"
+        echo "The live checkout at ${flive} is not this plan's work — never read it; read and cite files under ${fwt}."
+        if [[ -n "$fpatch" ]]; then
+          _aid_sr_patch "${dir}/packet/${fpatch}" "${fname} diff (${fpatch})" | sed 's/^## /#### /'
+          [[ "$fcommits" == 0 ]] && echo "(no commits on ${fbr})"
+        else
+          echo "(this step made no commits there)"
+        fi
+        echo
+      done < <(jq -r '.foreign[] | [.name, .live, .worktree, .branch, (.patch // ""), (.commits // "" | tostring)] | @tsv' "${dir}/packet/packet.json")
     fi
     if (( narrow )); then
       echo "The whole step's diff is on disk (${dir}/packet/diff.patch) for a variant the fix may have missed; it is not repeated here."

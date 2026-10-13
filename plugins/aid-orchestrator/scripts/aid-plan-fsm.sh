@@ -10987,10 +10987,11 @@ _pr_dead_run() {
 }
 
 _pr_main() {
-  local plan_id="" auto=0 force=false force_reason="" force_init_reason="" project_root_opt=""
+  local plan_id="" auto=0 force=false force_reason="" force_init_reason="" project_root_opt="" restart=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --auto) auto=1; shift ;;
+      --restart) restart=1; shift ;;
       --force) force=true; shift ;;
       --reason) force_reason="${2:-}"; shift 2 ;;
       --force-init-reason) force_init_reason="${2:-}"; shift 2 ;;
@@ -10999,10 +11000,14 @@ _pr_main() {
       *) if [[ -z "$plan_id" ]]; then plan_id="$1"; else echo "ERROR: plan-run: unexpected argument: $1" >&2; exit 2; fi; shift ;;
     esac
   done
-  [[ -n "$plan_id" ]] || { echo "Usage: aid-plan-fsm.sh plan-run <plan_id> [--auto] [--force --reason <text>] [--force-init-reason <text>] [--project-root <dir>]" >&2; exit 2; }
+  [[ -n "$plan_id" ]] || { echo "Usage: aid-plan-fsm.sh plan-run <plan_id> [--auto] [--force --reason <text>] [--restart --reason <text>] [--force-init-reason <text>] [--project-root <dir>]" >&2; exit 2; }
   _pfsm_validate_plan_id "$plan_id" || { echo "ERROR: plan-run: plan_id must match ^P[0-9]{3}\$ (got '${plan_id}')" >&2; exit 2; }
   if [[ "$force" == true && ${#force_reason} -lt 20 ]]; then
     echo "ERROR: plan-run: --force needs --reason of at least 20 characters (the waiver records it)." >&2; exit 2
+  fi
+  if [[ "$restart" -eq 1 && ${#force_reason} -lt 20 ]]; then
+    echo "ERROR: plan-run: --restart needs --reason of at least 20 characters (the restart record and the audit log carry it); nothing was moved." >&2
+    echo "next: aid-plan-fsm.sh plan-run ${plan_id:-<plan>} --restart --reason \"<why the run starts again, 20+ chars>\"" >&2; exit 2
   fi
 
   # shellcheck source=lib/common.sh
@@ -11046,12 +11051,15 @@ _pr_main() {
   trace="$(_pr_generation_trace)"
   [[ -z "$trace" ]] || _pr_refuse generation_already_started "${plan_id} was already generated the EPIC way: ${trace} — the two roads never mix on one plan" \
     "finish it on the old path (/aid-run ${PR_EPIC%_*}_<K>), or close it administratively and write a new plan" 1
+  # P112: a run that made no step is set aside and the plan runs again
+  PR_RESTART_DIR=""
+  [[ "$restart" -eq 1 ]] && { _pr_restart "$plan" "$force_reason" || exit $?; }
   dead="$(_pr_dead_run)"
   if [[ -n "$dead" ]]; then
     local fw
     fw="$(jq -r '[.repo_roots[]?.worktree] | join(", ")' "$pj" 2>/dev/null || true)"
     _pr_refuse plan_run_already_started "${plan_id}: ${dead}${fw:+ — foreign worktrees to remove by hand: ${fw}}" \
-      "/aid-run --resume ${plan_id}, or close the plan administratively: aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\"" 1
+      "/aid-run --resume ${plan_id}; when the run made no step: aid-plan-fsm.sh plan-run ${plan_id} --restart --reason \"<why, 20+ chars>\"; else close the plan administratively: aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\"" 1
   fi
 
   # ── the transaction file (kind: plan_run) ─────────────────────────────────
@@ -11068,6 +11076,7 @@ _pr_main() {
         authority_sha256:null, phases:{"1": {epic_id:$e, run_id:$r}}, stages:[],
         direct:{epic_id:$e, run_id:$r, repo_roots:[]}, created_at:$now, updated_at:$now}')"
     aid_gen_write_atomic "$tx" "$skel" || exit 3
+    [[ -n "$PR_RESTART_DIR" ]] && aid_gen_tx_update "$plan_id" '.restarted_from = $d' --arg d "${PR_RESTART_DIR#"${PR_ROOT}/"}"
   elif [[ "$(jq -r '.plan_sha256 // ""' "$tx")" != "$plan_sha" ]]; then
     _pr_refuse plan_changed_since_seal "${plan} changed since this plan-run sealed it (recorded $(jq -r '.plan_sha256' "$tx"), now ${plan_sha}) — a run never starts from a plan other than the one CP1 passed" \
       "restore the sealed plan bytes and rerun, or (no run started yet) archive the transaction: mv ${tx} ${tx}.superseded-\$(date +%s), then rerun plan-run — CP1 is consulted again" 1
@@ -11198,8 +11207,152 @@ _pr_main() {
   _pr_stage_done init || _pr_stage_record init
   [[ "$auto" -eq 1 ]] && plan_state_set_autonomy "$plan_id" auto >/dev/null 2>&1 || true
   _pr_stage_record done
+  _pr_restart_done
   echo "plan-run: ${plan_id} runs as ${PR_EPIC} (${PR_RUN}) on plan/${plan_id} — state ${state_file}" >&2
   printf '%s\n' "$state_file"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# plan-run --restart (P112): a direct run that made no step starts again.
+#
+# Refused after any step (restart_after_step), over a plan worktree with work
+# outside a step (restart_plan_dirty), over a foreign worktree that is not
+# clean at its base (restart_foreign_dirty) and while a controller is working
+# (restart_controller_live). Otherwise the old run is abandoned (aid-fsm.sh
+# abandon), audited like supersede-generation (record, timeline event, audit
+# log) and its evidence and transaction are MOVED into
+# .aid-o/work/superseded-runs/<plan>-<ts>/ (outside evidence/, so no reader of
+# runs finds them); plan-run then continues as a first run over the current
+# plan (seal and CP1 gate again). restart.json (moving → moved → done) makes
+# an interrupted restart resume with the same command. Nothing is deleted.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_pr_restart_refuse_foreign() {   # <tx> — the foreign worktrees must be clean at their base
+  local tx="$1" name path wt br base
+  while IFS=$'\t' read -r name path wt br base; do
+    [[ -n "$name" && -d "$wt" ]] || continue
+    if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then
+      _pr_refuse restart_foreign_dirty "repo_roots '${name}': ${wt} has uncommitted changes — a restart would leave them on a branch the new run adopts" \
+        "commit them on a step after a normal resume, or remove them by hand (git -C ${wt} status), then run --restart again" 1
+    fi
+    if [[ -n "$base" ]] && (( $(git -C "$path" rev-list --count "${base}..${br}" 2>/dev/null || echo 0) > 0 )); then
+      _pr_refuse restart_foreign_dirty "repo_roots '${name}': ${br} has commits above its base ${base:0:12} — work the old run made would be taken over silently" \
+        "this run made work: resume it (/aid-run --resume ${PR_PLAN_ID}) or close the plan administratively" 1
+    fi
+  done < <(jq -r '.direct.repo_roots[]? | [.name, .path, .worktree, .branch, (.base // "")] | @tsv' "$tx" 2>/dev/null)
+}
+
+# _pr_restart_finish <dest> — the idempotent part: abandon, audit, move. A
+# rerun after any interruption does what is still missing.
+_pr_restart_finish() {
+  local dest="$1" rj="$1/restart.json" epic run ev_dir state wt tx gd epoch reason ident
+  epic="$(jq -r .from_run.epic_id "$rj")"; run="$(jq -r .from_run.run_id "$rj")"
+  epoch="$(jq -r .epoch "$rj")"; reason="$(jq -r .reason "$rj")"
+  ev_dir="${PR_ROOT}/.aid-o/work/evidence/${epic}/${run}"; state="${ev_dir}/fsm-state.yaml"
+  tx="$(_pr_tx)"; gd="$(dirname "$tx")"
+  wt="$(plan_state_get "$PR_PLAN_ID" worktree_path 2>/dev/null || true)"
+  [[ -n "$wt" && -d "$wt" ]] || wt="${PR_ROOT}/.aid-worktrees/plan-${PR_PLAN_ID}"
+  [[ -d "$wt" ]] || wt="$PR_ROOT"
+  if [[ "$(jq -r .state "$rj")" == moving ]]; then
+    if [[ -f "$state" && "$(yq -r '.abandoned // false' "$state" 2>/dev/null)" != true ]] || [[ ! -f "$state" ]]; then
+      ( cd "$wt" && bash "${SCRIPT_DIR}/aid-fsm.sh" abandon "$state" --reason "restart: ${reason}" --epic "$epic" ) >&2 \
+        || { echo "ERROR: plan-run --restart: the old run ${epic} could not be abandoned (see above); nothing was moved — rerun the same command." >&2; return 1; }
+    fi
+    ident="$(jq -r '[(.plan_sha256 // ""), (.target_head // ""), ((.phase_derivation_version // 0) | tostring), ((.total_phases // 0) | tostring)] | join("|")' "${dest}/$(basename "$tx")" 2>/dev/null || true)"
+    [[ -n "$ident" ]] || ident="$(jq -r '[(.plan_sha256 // ""), (.target_head // ""), ((.phase_derivation_version // 0) | tostring), ((.total_phases // 0) | tostring)] | join("|")' "$tx" 2>/dev/null || true)"
+    aid_gen_supersede_audit "$PR_PLAN_ID" "$(jq -r .plan_path "$rj")" "restart: ${reason}" "$(jq -r .by "$rj")" "$epoch" "$gd" \
+      "$tx" "$(aid_gen_authority_path "$PR_PLAN_ID")" "$ident" '[]' "$PR_ROOT" "$dest" >/dev/null \
+      || { echo "ERROR: plan-run --restart: the restart could not be recorded in the audit trail (see above); nothing was moved — repair the sink and rerun." >&2; return 3; }
+    if [[ -d "$ev_dir" ]]; then mv -- "$ev_dir" "${dest}/evidence-${epic}-${run}" || return 3; fi
+    _pfsm_crash_seam restart_moved_evidence
+    aid_gen_archive_pair "$PR_PLAN_ID" restart "$dest" || return 3
+    _pfsm_crash_seam restart_moved_tx
+    jq '.state = "moved"' "$rj" > "${rj}.tmp" && mv -- "${rj}.tmp" "$rj" || return 3
+  fi
+  PR_RESTART_DIR="$dest"
+}
+
+# _pr_restart <plan> <reason>
+_pr_restart() {
+  local plan="$1" reason="$2" sr="${PR_ROOT}/.aid-o/work/superseded-runs" tx f rj=""
+  tx="$(_pr_tx)"
+  for f in "${sr}/${PR_PLAN_ID}"-*/restart.json; do
+    [[ -f "$f" && "$(jq -r .state "$f" 2>/dev/null)" != done ]] || continue
+    # moved and the new run's transaction complete: that restart is over
+    if [[ "$(jq -r .state "$f")" == moved && -f "$tx" ]] && _pr_stage_done done; then
+      jq '.state = "done"' "$f" > "${f}.tmp" && mv -- "${f}.tmp" "$f"; continue
+    fi
+    rj="$f"
+  done
+  if [[ -n "$rj" ]]; then
+    echo "plan-run --restart: resuming the unfinished restart $(dirname "$rj")" >&2
+    _pr_restart_finish "$(dirname "$rj")"; return $?
+  fi
+  [[ -f "$tx" ]] || { echo "ERROR: plan-run --restart: ${PR_PLAN_ID} has no plan-run transaction and no unfinished restart — nothing to restart." >&2
+    echo "next: aid-plan-fsm.sh plan-run ${PR_PLAN_ID} (a first start)" >&2; return 2; }
+  local epic run ev_dir state why="" cs st wt base cnt
+  epic="$(jq -r '.direct.epic_id // empty' "$tx")"; run="$(jq -r '.direct.run_id // empty' "$tx")"
+  [[ -n "$epic" && -n "$run" ]] || { echo "ERROR: plan-run --restart: ${tx} names no direct run" >&2; return 2; }
+  ev_dir="${PR_ROOT}/.aid-o/work/evidence/${epic}/${run}"; state="${ev_dir}/fsm-state.yaml"
+  # ── after a step? ─────────────────────────────────────────────────────────
+  if [[ -f "$state" ]]; then
+    cs="$(yq -r '.current_step // 0' "$state" 2>/dev/null)"; st="$(yq -r '.state // ""' "$state" 2>/dev/null)"
+    [[ "$cs" =~ ^[0-9]+$ ]] && (( cs > 0 )) && why="current_step is ${cs}"
+    [[ "$st" == DONE ]] && why="the run is DONE"
+  fi
+  [[ -z "$why" && -f "${ev_dir}/timeline.jsonl" ]] \
+    && jq -e -nR 'any(inputs; (try fromjson catch null) as $j | $j != null and $j.event? == "step_commit")' "${ev_dir}/timeline.jsonl" >/dev/null 2>&1 \
+    && why="the timeline records a step_commit"
+  if [[ -z "$why" ]]; then
+    for f in "${ev_dir}"/steps/*/return.json; do
+      [[ -f "$f" ]] && jq -e '(.repo_commits // []) | length > 0' "$f" >/dev/null 2>&1 && { why="a step's return names repo_commits ($(basename "$(dirname "$f")"))"; break; }
+    done
+  fi
+  [[ -z "$why" ]] || _pr_refuse restart_after_step "${epic} made a step (${why}) — a restart would drop that work" \
+    "resume it (/aid-run --resume ${PR_PLAN_ID}), or close the plan administratively (aid-plan-fsm.sh plan-close ${PR_PLAN_ID} --administrative --reason \"<why>\") and write a new plan" 1
+  # ── the plan's own worktree: no work outside a step ───────────────────────
+  wt="$(plan_state_get "$PR_PLAN_ID" worktree_path 2>/dev/null || true)"
+  [[ -n "$wt" && -d "$wt" ]] || wt="${PR_ROOT}/.aid-worktrees/plan-${PR_PLAN_ID}"
+  if [[ -d "$wt" && -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then
+    _pr_refuse restart_plan_dirty "${wt} has uncommitted changes — work outside a step would be taken over by the new run" \
+      "commit or remove them by hand (git -C ${wt} status), then run --restart again" 1
+  fi
+  base="$(plan_manifest_get "$PR_PLAN_ID" ".plan_boundary_manifest.epic_runs[]? | select(.epic_id == \"${epic}\") | .epic_base_commit" 2>/dev/null || true)"
+  if [[ -n "$base" && "$base" != null ]]; then
+    cnt="$(git -C "$PR_ROOT" rev-list --count "${base}..plan/${PR_PLAN_ID}" 2>/dev/null || echo 0)"
+    (( cnt > 0 )) && _pr_refuse restart_plan_dirty "plan/${PR_PLAN_ID} has ${cnt} commit(s) above the run's base ${base:0:12} made outside a step" \
+      "inspect them (git log ${base}..plan/${PR_PLAN_ID}); resume the run, or move them off the branch by hand, then run --restart again" 1
+  fi
+  _pr_restart_refuse_foreign "$tx"
+  # ── the audit sinks first: an archive that cannot be audited never happens ─
+  aid_gen_supersede_audit_preflight "$(dirname "$tx")" || return 3
+  # ── a controller still working ────────────────────────────────────────────
+  local map="${PR_ROOT}/.aid-o/work/active-runs.json" last age
+  if [[ "$(jq -r --arg e "$epic" '.[$e].auto_controller // ""' "$map" 2>/dev/null)" == active ]]; then
+    last="$(tail -n 1 "${ev_dir}/timeline.jsonl" 2>/dev/null | jq -r '.ts // empty' 2>/dev/null)"
+    if [[ -n "$last" ]]; then
+      age=$(( $(date -u +%s) - $(date -u -d "$last" +%s 2>/dev/null || echo 0) ))
+      (( age < 900 )) && _pr_refuse restart_controller_live "${epic} is marked auto_controller: active and its timeline moved ${age} s ago — a controller is still working on it" \
+        "stop it (/aid-stop), wait until it is quiet for 15 minutes, then run --restart again" 1
+    fi
+  fi
+  # ── set aside ─────────────────────────────────────────────────────────────
+  local dest epoch
+  epoch="$(date -u +%s)"; dest="${PR_ROOT}/.aid-o/work/superseded-runs/${PR_PLAN_ID}-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$dest" || return 3
+  jq -n --arg p "$PR_PLAN_ID" --arg r "$reason" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg e "$epic" --arg run "$run" \
+    --arg by "${USER:-unknown}" --arg ep "$epoch" --arg pp "$plan" \
+    '{plan_id: $p, reason: $r, at: $at, from_run: {epic_id: $e, run_id: $run}, by: $by, epoch: $ep, plan_path: $pp, state: "moving"}' > "${dest}/restart.json" || return 3
+  _pr_restart_finish "$dest" || return $?
+  local fw; fw="$(jq -r '[.direct.repo_roots[]?.worktree] | join(", ")' "${dest}/$(basename "$tx")" 2>/dev/null || true)"
+  echo "plan-run --restart: ${epic} set aside in ${dest} (abandoned, audited)${fw:+; foreign worktrees adopted by the new run if the plan still declares them: ${fw}}" >&2
+}
+
+# _pr_restart_done — the new run's transaction is complete: the restart is over.
+_pr_restart_done() {
+  [[ -n "${PR_RESTART_DIR:-}" && -f "${PR_RESTART_DIR}/restart.json" ]] || return 0
+  jq '.state = "done"' "${PR_RESTART_DIR}/restart.json" > "${PR_RESTART_DIR}/restart.json.tmp" \
+    && mv -- "${PR_RESTART_DIR}/restart.json.tmp" "${PR_RESTART_DIR}/restart.json"
 }
 
 # _pr_repo_roots_worktrees <plan.json> — every repo_roots entry gets its
