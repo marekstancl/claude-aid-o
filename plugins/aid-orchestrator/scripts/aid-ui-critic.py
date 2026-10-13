@@ -111,6 +111,9 @@ def freeze(proj, typ, force, phase="build"):
         rub = json.loads(json.dumps(load_yaml(paths[r])))
         if sum(c["weight"] for c in rub["criteria"]) != 100 or any(not re.fullmatch(r"[a-z0-9_]+", c["id"]) for c in rub["criteria"]):
             die(f"{paths[r]}: weights must sum to 100 and ids be ascii snake_case")
+        unknown = [x for x in (common.get("launch_only") or {}).get(r) or [] if x not in [c["id"] for c in rub["criteria"]]]
+        if unknown:   # a typo would quietly bring a launch criterion back into the score
+            die(f"{os.path.basename(paths[''])}: launch_only.{r} names {unknown}, not criteria of {os.path.basename(paths[r])}")
         held = (common.get("launch_only") or {}).get(r) or [] if phase == "build" else []
         if held:   # judged after the deployment only; the weights of the rest re-normalise in score()
             rub["criteria"] = [c for c in rub["criteria"] if c["id"] not in held]
@@ -121,7 +124,10 @@ def freeze(proj, typ, force, phase="build"):
         if phase == "build":
             role += ("\n\n# Fáze: stavba (před nasazením)\n\nWeb ještě není nasazený na hosting klienta. Co se dá ověřit až po nasazení"
                      " (HTTPS a přesměrování, hlavičky serveru, chybová stránka a zákazy na serveru, ostrý příjem formuláře,"
-                     " doména), teď nehodnotíš: nepiš k tomu nálezy, nesnižuj kvůli tomu žádné kritérium a nedávej to do cesty k 10.")
+                     " doména), teď nehodnotíš: nepiš k tomu nálezy, nesnižuj kvůli tomu žádné kritérium a nedávej to do cesty k 10."
+                     " Chce-li kotva něco z toho (např. přesměrování, kompresi a cache na serveru, ostré doručení), tu část kotvy"
+                     " v této fázi nepočítáš a kritérium hodnotíš podle zbytku. Doručení formuláře doložené kontrolou studia na"
+                     " náhledu (`podklady/overenie.json`, form_delivery) je v této fázi plný důkaz doručení.")
         roles[r] = {"rubric": rub, "role": role, "authors": authors[os.path.basename(paths[r])]}
         roles[r]["sha256"] = digest({"rubric": rub, "role": role, "schema": json.loads(schema)})
     rec = {"type": typ, "phase": phase, "rubric": dict(common, persona=roles["owner"]["rubric"]["persona"]),   # the client agent plays the owner

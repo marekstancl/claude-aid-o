@@ -30,7 +30,10 @@ nové zadání role, nového autora a revizi.
   otevřené body klienta. Kód odmítne `limited_by`, které není otevřeným bodem klienta.
 - **Fáze stavby** (PM 13. 10. 2026): dokud web není nasazený, kritéria `launch_only` z `critic/<typ>.yaml`
   (u technika `bezpecnost_spusteni`) se nehodnotí vůbec. Kritik je nedostane, nepíše k nim nálezy a do známky se
-  nepočítají. Při nasazení se zmrazí znovu s `--phase launch` (backlog IMP-694: konfigurace hostingu).
+  nepočítají. Části jiných kotev, které jdou ověřit až na hostingu (přesměrování, komprese, ostré doručení), kritik
+  v této fázi nepočítá. Doručení formuláře ověřené branou na náhledu platí jako plný důkaz.
+  **Při nasazení** začíná nová smyčka: přesuň `.aid-ui/critic/rounds`, `loop.json`, `verdict.json` a `frozen.json`
+  do `.aid-ui/critic/archive-<datum>-stavba/` a zmraz s `--phase launch` (backlog IMP-694: konfigurace hostingu).
 - **Cesta k 10:** každé kritérium pod 10 nese `to_ten`, tedy konkrétní kroky rozdělené na „udělá studio“
   a „dodá klient“. Bez kroku je odpověď neplatná.
 - **Strop:** nejvýš tři kola oprav. Jakmile je kolo přijaté, opravy končí a přijde audit.
