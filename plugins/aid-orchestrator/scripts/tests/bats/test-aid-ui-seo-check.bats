@@ -354,6 +354,18 @@ ai() { run python3 "$CHECK" "$S" --ai --facts "$BATS_TEST_TMPDIR/facts.json" --b
   grep -q '^WARN praha/index.html hreflang site has 2 languages' <<<"$output"
 }
 
+@test "P113a site WARN: with --facts place, a description without the place is named; legal pages and pages naming it pass" {
+  ai_site
+  ai_page "$S/cennik" "Ceník chleba - Pekárna" "$ORG" '<meta name="description" content="Ceny chleba a pečiva Pekárny.">'
+  ai_page "$S/onas" "O nás - Pekárna" "$ORG" '<meta name="description" content="Pekárna v Brně peče od roku 2015.">'
+  ai_page "$S/ochrana-udaju" "Ochrana údajů - Pekárna" "$ORG" '<meta name="description" content="Jak zpracujeme osobní údaje.">'
+  echo '{"brand":{"value":"Pekárna"},"ico":{"value":"12345678"},"place":{"value":"Brno"}}' >"$BATS_TEST_TMPDIR/facts.json"
+  run python3 "$CHECK" "$S" --facts "$BATS_TEST_TMPDIR/facts.json"
+  grep -q '^WARN cennik/index.html description-place the description does not name Brno' <<<"$output"
+  grep -q '^OK onas/index.html description-place names Brno' <<<"$output"   # "Brně" counts
+  ! grep -q 'ochrana-udaju/index.html description-place' <<<"$output"
+}
+
 @test "K2 --ai: the policy counts only when the PM approved this brief (--state seo_brief answer for its sha256)" {
   ai_site
   sha="$(sha256sum "$BATS_TEST_TMPDIR/brief.md" | cut -d' ' -f1)"

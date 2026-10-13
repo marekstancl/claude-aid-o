@@ -589,7 +589,17 @@ async function moreRows(page, url, requested, applies) {
       return out;
     });
     if (low.length) a.push(`focus ring under 3:1 on ${low.slice(0, 3).join(', ')}`);
-    res.a11y_basics = a.length ? ['fail', a.join('; ')] : ['pass', 'skip link, heading order, focus ring contrast'];
+    // reflow (WCAG 1.4.10): at 320 CSS px - 400 % zoom of a 1280 px window - nothing scrolls sideways
+    const rc = await page.context().browser().newContext({ viewport: { width: 320, height: 640 } });
+    try {
+      const rp = await rc.newPage(); await loaded(rp, page.url());
+      const wide = await rp.evaluate(() => { const vw = document.documentElement.clientWidth;
+        if (document.documentElement.scrollWidth <= vw + 1) return null;
+        const e = [...document.querySelectorAll('body *')].find(x => { const b = x.getBoundingClientRect(); return b.width && b.right > vw + 1; });
+        return e ? `${e.tagName.toLowerCase()}${e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/)[0] : ''} "${(e.textContent || '').trim().slice(0, 25)}"` : 'the page'; });
+      if (wide) a.push(`at 320 px (400 % zoom) the page scrolls sideways: ${wide}`);
+    } finally { await rc.close(); }
+    res.a11y_basics = a.length ? ['fail', a.join('; ')] : ['pass', 'skip link, heading order, focus ring contrast, reflow at 320 px'];
   }
   if (!applies('reduced_motion')) res.reduced_motion = NA('runs at the viewport and browser of its row only');
   else {

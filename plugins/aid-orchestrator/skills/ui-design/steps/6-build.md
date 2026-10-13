@@ -70,7 +70,7 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
 3c. **Základy přístupnosti (FB-32):** první prvek stránky s navigací je odkaz „Přeskočit na obsah“ (`#main`,
    vidět při zaměření); nadpisy jdou h1 > h2 > h3 bez skoku (skrytý h2 nad blokem s h3, když blok nemá
    vlastní); obrys zaměření v barvě s kontrastem aspoň 3:1 proti pozadí, na světlém i tmavém (dvoubarevný
-   prstenec). Brána `a11y_basics`.
+   prstenec); při 320 px (přiblížení 400 %) nic nepřetéká do strany (logo, tabulky, dlouhá slova). Brána `a11y_basics`.
 4a. **Fotka, kterou klient dodá později (FB-30, PM 1A):** žádná cizí fotka a žádný text „sem přijde
    fotka“. Místo ní rámeček z `docs/content/photos.yaml` (id, stránka, tvar, poměr):
    `<div class="aid-photo" data-aid-photo="<id>" aria-hidden="true"><svg data-aid-icon="camera" …ikona fotoaparátu…></svg></div>`

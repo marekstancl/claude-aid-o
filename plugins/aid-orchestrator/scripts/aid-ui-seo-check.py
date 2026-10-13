@@ -21,7 +21,8 @@ are compared with the page (WARN); a missing column skips that comparison with a
 A directory with no *.html page is a BLOCKER.
 
 Also on a site root (WARN, from the coverage map, P103 extension K1/K2): the brand stands
-after the topic in the title (needs --facts brand); every indexable page links to the contact
+after the topic in the title (needs --facts brand); with --facts place, every page but the legal ones names the
+place in its description (description-place, P113a); every indexable page links to the contact
 page or a mailto:/tel:; two pages whose text differs only a little (a city swapped, the
 doorway pattern); text hidden by an inline style (not the hidden attribute: menus, dialogs); a page further than
 3 clicks from the home page or not linked at all; on a site with pages in more than one
@@ -329,7 +330,10 @@ def resolve(rel, href):
     return url_path(os.path.normpath(os.path.join(base, u.path)) if not u.path.startswith("/") else u.path)
 
 
-def check_site_extras(out, parsed, brand):
+LEGAL_PATH = re.compile(r"ochrana|osobn|gdpr|privacy|cookie|podmienk|podmink|terms|impressum|imprint", re.I)
+
+
+def check_site_extras(out, parsed, brand, place=""):
     """WARN-level checks over the whole site (title order, contact path, near-duplicates,
     hidden text, click depth). parsed = [(rel, Page)]."""
     from difflib import SequenceMatcher
@@ -346,6 +350,11 @@ def check_site_extras(out, parsed, brand):
         if url_path(rel) != contact:
             out.append(("OK" if to_contact else "WARN", rel, "contact-path",
                         "links to the contact page" if to_contact else "no link to the contact page, mailto: or tel:"))
+        # a local business: every page but the legal ones names the place in its description (P113a, Coufal critic)
+        if place and pg.desc is not None and not LEGAL_PATH.search(rel):
+            stem = place.lower()[:max(3, len(place) - 1)]   # Trenčín/Trenčíne, Brno/Brně; ponytail: Praha/Praze needs a declension table
+            has = stem in pg.desc.lower()
+            out.append(("OK" if has else "WARN", rel, "description-place", f"names {place}" if has else f"the description does not name {place}"))
         hidden = " ".join(" ".join(pg.hidden_text).split())
         out.append(("WARN" if len(hidden) > 30 else "OK", rel, "hidden-text",
                     f"{len(hidden)} characters hidden by style: {hidden[:60]}" if len(hidden) > 30 else "none"))
@@ -648,7 +657,7 @@ def main():
                 out.append(("BLOCKER", t, "pages", "no pages found"))
             check_duplicates(out, parsed)
             check_site(out, t, pages)
-            check_site_extras(out, parsed, (facts.get("brand") or "").strip())
+            check_site_extras(out, parsed, (facts.get("brand") or "").strip(), str(facts.get("place") or "").strip())
             site_pages += parsed
             if a.ai:
                 with open(a.crawlers, encoding="utf-8") as f:
