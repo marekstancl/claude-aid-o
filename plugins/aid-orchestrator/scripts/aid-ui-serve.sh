@@ -121,13 +121,16 @@ case "$1" in
     code="$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
     rm -f "$dir/.aid-ui/studio.code"; (umask 077; printf '%s\n' "$code" > "$dir/.aid-ui/studio.code")
     LINK_QS="?k=$code"
+    # reused only when it serves this project WITH THIS PLUGIN's server: a studio left running by an older plugin
+    # version would otherwise keep refusing what the new version writes (P113a 13. 10. 2026)
     if alive "$id" && listening "$STUDIO_PORT" \
-       && [[ "$(jq -r '.command as $c | $c[($c | index("--project")) + 1]' "$JOBS/$id/job.json")" == "$dir" ]]; then
+       && [[ "$(jq -r '.command as $c | $c[($c | index("--project")) + 1]' "$JOBS/$id/job.json")" == "$dir" ]] \
+       && [[ "$(jq -r '.command[1]' "$JOBS/$id/job.json")" == "$(realpath "$STUDIO_PY")" ]]; then
       echo "URL: http://$HOST:$STUDIO_PORT/$LINK_QS"; echo "JOB: $id"; exit 0
     fi
     tok="$dir/.aid-ui/studio.token"
     (umask 077; od -An -tx1 -N16 /dev/urandom | tr -d ' \n' > "$tok")
-    start studio python3 "$STUDIO_PY" --project "$dir" --host "$HOST" --port "$STUDIO_PORT" --token-file "$tok"
+    start studio python3 "$(realpath "$STUDIO_PY")" --project "$dir" --host "$HOST" --port "$STUDIO_PORT" --token-file "$tok"
     ;;
   brand)
     dir="$(realpath -e "$2" 2>/dev/null || true)"
@@ -156,7 +159,8 @@ case "$1" in
     l="$(find "$dir" -mindepth 1 -type l -printf '%P' -quit)"
     [[ -z "$l" ]] || refuse "$dir/$l is a symlink; the preview serves no symlinks (it could point outside the site)"
     id="$(job_id preview)"
-    if alive "$id" && listening "$PREVIEW_PORT" && [[ "$(jq -r '.command[4]' "$JOBS/$id/job.json")" == "$dir" ]]; then
+    if alive "$id" && listening "$PREVIEW_PORT" && [[ "$(jq -r '.command[4]' "$JOBS/$id/job.json")" == "$dir" ]] \
+       && [[ "$(jq -r '.command[1]' "$JOBS/$id/job.json")" == "$(realpath "$PREVIEW_PY")" ]]; then
       echo "URL: http://$HOST:$PREVIEW_PORT/"; echo "JOB: $id"; exit 0
     fi
     start preview python3 "$(realpath "$PREVIEW_PY")" "$PREVIEW_PORT" "$HOST" "$dir" "$(realpath -m "$PROJECT")"
