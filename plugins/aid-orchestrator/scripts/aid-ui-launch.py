@@ -143,7 +143,8 @@ def confirm(p, qid):
             os.makedirs(os.path.dirname(facts), exist_ok=True)
             if not os.path.exists(facts):
                 open(facts, "w").write("{}\n")
-            r = subprocess.run(["yq", "-i", '.["launch_%s"] = %s' % (i["id"], json.dumps(entry, ensure_ascii=False)), facts], capture_output=True, text=True)
+            r = subprocess.run(["yq", "-i", '.[strenv(AID_KEY)] = env(AID_VAL)', facts], capture_output=True, text=True,   # values via the environment
+                               env={**os.environ, "AID_KEY": "launch_" + i["id"], "AID_VAL": json.dumps(entry, ensure_ascii=False)})
             if r.returncode:
                 die("cannot write %s to docs/content/facts.yaml (a mapping register): %s" % (i["id"], r.stderr.strip()))
             i["status"] = "confirmed"

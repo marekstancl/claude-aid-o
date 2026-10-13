@@ -55,6 +55,14 @@ def save(p, d):
     os.replace(tmp, cpath(p))
 
 
+SLOT_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
+
+
+def yq_set(path, expr, **env):
+    """yq -i with every value passed through the environment (strenv/env), never pasted into the expression."""
+    subprocess.run(["yq", "-i", expr, path], check=True, env={**os.environ, **{k: str(v) for k, v in env.items()}})
+
+
 def yq(path):
     r = subprocess.run(["yq", "-o=json", ".", path], capture_output=True, text=True)
     if r.returncode:
@@ -121,6 +129,8 @@ def mark(p, cid, people, note, skip=False, describe=None):
 
 
 def slot_spec(p, slot):
+    if not SLOT_ID.match(slot or ""):
+        die("slot id %r is not [a-z0-9_-]" % slot, 2)
     ph = yq(os.path.join(p, "docs", "content", "photos.yaml"))
     entries = [x for x in (ph or []) if isinstance(x, dict) and x.get("id") == slot]
     if not entries:
@@ -206,13 +216,13 @@ def apply(p, qid):
     if not alt:
         die("%s has no description for screen readers: mark %s --describe '<what is on the photo>' first" % (c["id"], c["id"]))
     for k, v in (("src", rel), ("src_800", os.path.relpath(small, p)), ("src_from", c["url"]), ("alt", alt)):
-        subprocess.run(["yq", "-i", '(.[] | select(.id == "%s")).%s = %s' % (slot, k, json.dumps(v, ensure_ascii=False)),
-                        os.path.join(p, "docs", "content", "photos.yaml")], check=True)
+        yq_set(os.path.join(p, "docs", "content", "photos.yaml"), '(.[] | select(.id == strenv(AID_SLOT)))[strenv(AID_KEY)] = strenv(AID_VAL)',
+               AID_SLOT=slot, AID_KEY=k, AID_VAL=v)
     # the description is a claim on the web (alt): the client's own photo, chosen by the client, is its fact
     facts = os.path.join(p, "docs", "content", "facts.yaml")
     if os.path.isfile(facts):
         entry = {"value": alt, "source": c["url"], "confirmed_by": "klient", "answer": qid}
-        subprocess.run(["yq", "-i", '.["foto_%s"] = %s' % (slot, json.dumps(entry, ensure_ascii=False)), facts], check=True)
+        yq_set(facts, '.[strenv(AID_KEY)] = env(AID_VAL)', AID_KEY="foto_" + slot, AID_VAL=json.dumps(entry, ensure_ascii=False))
     save(p, d)
     print("%s: %s -> %s" % (slot, c["id"], rel))
 
