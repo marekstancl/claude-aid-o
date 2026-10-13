@@ -66,7 +66,8 @@ vyplutí přes `opacity` je v pořádku; nikdy pohyb neosekávej kvůli bráně,
    receptů; před `build-record` projdi vlastní pohyb podle `review-animations` (standardy, verdikt);
    mobilní chování podle `mobile-native` (hover jen pro myš, `100dvh`, pole aspoň 16 px, výřez displeje);
    formuláře a texty z dat vyzkoušej nejhoršími daty podle `break-ui` (dlouhá jména, prázdná pole, extrémní
-   čísla). Při rozporu platí design systém a brána (`reduced_motion`).
+   čísla). Při rozporu platí design systém a brána (`reduced_motion`). Brána `mobile_native` (FB-33) měří hover jen
+   pro myš (`@media (hover: hover)`), povolené přiblížení a písmo polí aspoň 16 px.
 3b. **Dělicí čáry (FB-31):** svislá čára mezi sloupci nebo bloky dostane vnitřní odstup aspoň 16 px na obou
    stranách (padding u sloupce před čarou i za ní, nebo `gap` místo okraje). Text nikdy nezačíná těsně u čáry.
    Brána `text_clearance` to měří na každé stránce a šířce.

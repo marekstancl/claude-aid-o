@@ -116,9 +116,11 @@ def target_of(rs, since=""):
 
 def status(p):
     rs = rounds(p)
-    reps = [r for r in rs if not r.get("audit")]   # an audit's findings are triaged like a round but never count as one
-    out = {"rounds": len(rs), "repair_rounds": max(len(reps) - 1, 0), "scores": [r["score"]["quality_score"] for r in rs]}
     since = reopened_at(p)
+    # an audit's findings are triaged like a round but never count as one; after a reopen the changed web starts its
+    # own count (stagnation and the round cap), the earlier rounds stay in the history
+    reps = [r for r in rs if not r.get("audit") and r["at"] >= since]
+    out = {"rounds": len(rs), "repair_rounds": max(len(reps) - 1, 0), "scores": [r["score"]["quality_score"] for r in rs]}
     target, v = target_of(rs, since), verdict(p)
     if target:
         out["best"] = {"round": target["n"], "quality_score": target["score"]["quality_score"], "site_sha": target["site_sha"]}

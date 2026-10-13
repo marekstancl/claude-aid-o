@@ -124,7 +124,7 @@ cycle() {   # triage and fix the last round's agent finding
   python3 "$Q" reopen "$P" --reason "PM: odstup od čar" >/dev/null; [ "$(dec)" = round ]; ls "$P/.aid-ui/critic/verdicts/"*.json >/dev/null
   run python3 "$Q" reopen "$P" --reason x; [ "$status" -eq 1 ]
   ans 8 minor; python3 "$Q" round "$P" --web "$W" >/dev/null; python3 "$Q" triage "$P" r3-f1 rejected_with_reason --reason x >/dev/null
-  python3 "$Q" status "$P" | jq -e '.decision == "audit" and .best.round == 3' >/dev/null
+  python3 "$Q" status "$P" | jq -e '.decision == "audit" and .best.round == 3 and .repair_rounds == 0' >/dev/null   # the count restarts at the reopen
 }
 
 @test "one loop, one critic, one address; links between findings must point at another finding of the round" {

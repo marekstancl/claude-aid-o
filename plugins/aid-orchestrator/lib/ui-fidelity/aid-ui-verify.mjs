@@ -601,6 +601,29 @@ async function moreRows(page, url, requested, applies) {
     } finally { await rc.close(); }
     res.a11y_basics = a.length ? ['fail', a.join('; ')] : ['pass', 'skip link, heading order, focus ring contrast, reflow at 320 px'];
   }
+  // mobile_native (FB-33, adopted emil-skills/mobile-native, PM 13. 10. 2026): hover styles only where a mouse
+  // hovers (a :hover rule inside @media (hover: hover)), zoom never disabled, form fields at least 16 px (else iOS
+  // zooms into them)
+  if (!applies('mobile_native')) res.mobile_native = NA('runs at the viewport and browser of its row only');
+  else {
+    const m = await page.evaluate(() => {
+      const why = [], loose = [];
+      const walk = (rules, gated) => { for (const r of rules) {
+        if (r instanceof CSSMediaRule) walk(r.cssRules, gated || /hover\s*:\s*hover/.test(r.conditionText || r.media.mediaText));
+        else if (r.cssRules && !(r instanceof CSSStyleRule)) walk(r.cssRules, gated);
+        else if (r instanceof CSSStyleRule && /:hover/.test(r.selectorText) && !gated) loose.push(r.selectorText);
+      } };
+      for (const sh of document.styleSheets) { try { walk(sh.cssRules, false); } catch { /* a foreign sheet: not ours to judge */ } }
+      if (loose.length) why.push(`${loose.length} :hover rule(s) outside @media (hover: hover), e.g. ${loose.slice(0, 3).join(' | ')}`);
+      const vp = document.querySelector('meta[name="viewport"]')?.content || '';
+      if (/user-scalable\s*=\s*(no|0)|maximum-scale\s*=\s*1(\.0)?\b/.test(vp)) why.push('zoom is disabled in the viewport meta');
+      const small = [...document.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea, select')]
+        .filter(e => e.getBoundingClientRect().width && parseFloat(getComputedStyle(e).fontSize) < 16).map(e => e.name || e.tagName.toLowerCase());
+      if (small.length) why.push(`form field text under 16 px (iOS zooms in): ${small.slice(0, 3).join(', ')}`);
+      return why;
+    });
+    res.mobile_native = m.length ? ['fail', m.join('; ')] : ['pass', 'hover gated, zoom allowed, fields 16 px'];
+  }
   if (!applies('reduced_motion')) res.reduced_motion = NA('runs at the viewport and browser of its row only');
   else {
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -1014,7 +1037,7 @@ const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls'
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
   'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review', 'motion_settled', 'motion_fidelity',
-  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery', 'text_clearance', 'a11y_basics'];
+  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery', 'text_clearance', 'a11y_basics', 'mobile_native'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -1201,7 +1224,7 @@ if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json')
 
 const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
   'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
-  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots', 'text_clearance', 'a11y_basics'];
+  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots', 'text_clearance', 'a11y_basics', 'mobile_native'];
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
 for (const b of BRS) {
