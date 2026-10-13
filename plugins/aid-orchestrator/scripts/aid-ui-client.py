@@ -429,7 +429,7 @@ def critic(project, web, audit, out, role, history=None):
 
 class Studio:
     def __init__(self, project, url):
-        self.project, self.url = project, url.rstrip("/")
+        self.project, self.url = project, url.split("?")[0].rstrip("/")   # the PM link with ?k= works too
         self.dir = os.path.join(project, ".aid-ui", "client")
         self.turns, self.cookie_f = os.path.join(self.dir, "turns"), os.path.join(self.dir, "cookie.txt")
         os.makedirs(self.turns, exist_ok=True)

@@ -594,6 +594,9 @@ def check_brief(out, brief, found):
     for cells in rows:
         if len(cells) < 2 or not cells[0].startswith("/"):
             continue
+        if len(cells) != len(header):   # a "|" inside a cell shifts every later column (Coufal 13. 10.: the description became "Coufal Clinic")
+            out.append(("BLOCKER", url_path(cells[0]), "brief-row", f"{len(cells)} cells, the header has {len(header)} (a '|' inside a cell?)"))
+            continue
         url, h1 = url_path(cells[0]), cells[1]
         pg = found.get(url)
         if pg is None:
