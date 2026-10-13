@@ -95,8 +95,8 @@
 #   Do NOT "fix" this by adding a naive prose-vs-index assertion to the bats suite: the
 #   prose lists live inside code fences and that suite's helpers strip fenced content, so
 #   such a check inspects nothing and passes green. Any real check must read fences on
-#   purpose and compare file-to-index, not file-to-topic (`queue.yaml` is documented under
-#   the `config` topic, not under `status`).
+#   purpose and compare file-to-index, not file-to-topic (a file is documented under the
+#   topic that owns it, not under every command that reads it).
 #
 # ONE NAMED EXEMPTION: `/aid-help` carries `topic: none` though it is `update` — the
 # router cannot route to itself. Step 2 encodes this by command name, not as a general
@@ -152,7 +152,7 @@ surfaces:
 
   - command: /aid-run
     file: plugins/aid-orchestrator/commands/aid-run.md
-    purpose: "Run a plan — /aid-run P<NNN> starts it straight from the plan (the direct run, P111; repo_roots, cancellation; P112: plan-run --restart for a run that made no step, escalations settled by an independent agent — automatic in --auto, standing --delegate otherwise, delegate --pending/--fingerprint); /aid-run E-… the old EPIC path — 6-state FSM with optional autonomous mode"
+    purpose: "Run a plan — /aid-run P<NNN> starts it straight from the plan (the direct run, P111; repo_roots, cancellation; P112: plan-run --restart for a run that made no step, escalations settled by an independent agent — automatic in --auto, standing --delegate otherwise, delegate --pending/--fingerprint) — 6-state FSM with optional autonomous mode; an EPIC id is refused epic_path_removed (3.0.0)"
     topic: run
     audience: beginner
     disposition: current
@@ -160,9 +160,9 @@ surfaces:
     final_turn: "card:finished"
 
   - { command: /aid-status, file: plugins/aid-orchestrator/commands/aid-status.md,
-      purpose: "Show EPIC status, queue, and pipeline overview",
+      purpose: "Show plan and run status and the pipeline overview",
       topic: status, audience: beginner, disposition: current,
-      writes: ["creates:.aid-o/config/queue.yaml", "mutates:.aid-o/config/queue.yaml"], final_turn: "card:progress" }
+      writes: [], final_turn: "card:progress" }
 
   - { command: /aid-stop, file: plugins/aid-orchestrator/commands/aid-stop.md,
       purpose: "Emergency stop — disengage FIRST AID auto-mode immediately",
@@ -198,7 +198,7 @@ surfaces:
       final_turn: "card:finished" }
 
   - { command: /aid-plan, file: plugins/aid-orchestrator/commands/aid-plan.md,
-      purpose: "Plan a task — brainstorm, write plan, or generate EPIC (auto-detected or forced)",
+      purpose: "Plan a task — brainstorm or write a plan (auto-detected or forced); a reviewed plan runs with /aid-run P<NNN>",
       topic: plan, audience: regular, disposition: update,
       writes: [], final_turn: "renderer:scripts/lib/aid-plan-close-summary.sh" }
 

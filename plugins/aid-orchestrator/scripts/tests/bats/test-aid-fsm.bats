@@ -187,7 +187,6 @@ teardown() {
   jq -n '{overall:"pass", gates:{}, _generated_by:"aid-run-gates.sh@v2.16.0", _generated_at:"2026-05-04T00:00:00Z", _command_log:[]}' \
     > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   # P094: a closed passing EPIC review round (cp3/rounds.json) is the precondition.
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
 
   run "$FSM" transition EXECUTE GATES "$state_file"
   [ "$status" -eq 0 ]
@@ -345,7 +344,6 @@ PLAN
 
 @test "advance-to-gates: success path EXECUTE→GATES via cmd_transition" {
   seed_test_state_files "EXECUTE" "5" "5"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
@@ -359,7 +357,6 @@ PLAN
 
 @test "advance-to-gates: failure path leaves state at EXECUTE" {
   seed_test_state_files "EXECUTE" "5" "5"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   setup_failing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
@@ -372,28 +369,6 @@ PLAN
   ! assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_transition"
 }
 
-# _cp3_on — the project keeps CP3 (P110: off by default): the toggle and an epic_review block
-_cp3_on() {
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
-  printf 'review_checkpoints:\n  cp3_integration_review: true\n  epic_review:\n    rounds_default: 1\n    reviewers:\n      - {role: epic_generalist, provider: claude, model: opus}\n' \
-    > "$TEST_PROJECT_ROOT/.aid-o/config/policies/review-checkpoints.yaml"
-}
-@test "advance-to-gates: missing cp3 round index → cmd_transition fails after gates pass" {
-  seed_test_state_files "EXECUTE" "5" "5"
-  # NOTE: NO cp3/rounds.json (intentional — gates run, transition rejects)
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
-  _cp3_on   # P110: CP3 is off by default; this project keeps it
-  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
-
-  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  [ "$status" -ne 0 ]
-  # Gates ran independently of CP3 — runner exits 0
-  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "gate_runner_complete"
-  # cmd_transition's check_preconditions sees no cp3 round index and rejects
-  [[ "$output" == *"no review round index for cp3"* ]]
-  # State stayed EXECUTE because cmd_transition didn't commit
-  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
-}
 
 # ─── P097 Step 5: no repeated-timeout policy block ──────────────────────────
 # A timed-out gate is a `job_timeout` row like any other failure: GATES→EXECUTE
@@ -677,33 +652,7 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "streamlined: integration-review without a passing cp3 round blocks" {
-  _streamlined_seed_state true; _cp3_on   # P110: a project that keeps CP3
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  _write_three_event_timeline
-  # gates_report present; the cp3 round closed with verdict fail.
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" fail
-  echo '{}' > "$TEST_EVIDENCE_DIR/gates_report.json"
 
-  _run_streamlined_check fsm_check_streamlined_integration_review "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"cp3/rounds.json with verdict pass"* ]]
-  grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-
-@test "streamlined: integration-review with a passing cp3 round and the gates report passes" {
-  _streamlined_seed_state true
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  _write_three_event_timeline
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
-  echo '{}'   > "$TEST_EVIDENCE_DIR/gates_report.json"
-
-  _run_streamlined_check fsm_check_streamlined_integration_review "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 0 ]
-  # No integration-review-fail audit recorded.
-  [ ! -f "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl" ] || \
-    ! grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
 
 # ─── P040 Component E: steps[] array absorption + read_steps_array ────────
 
@@ -1796,7 +1745,6 @@ YAML
   [ "$status" -eq 0 ]
   run jq -r '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$output" == "null" ]
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -ne 0 ]
   [[ "$output" == *"risk_profile_unresolvable"* ]]
@@ -2063,17 +2011,7 @@ SC_WHY="the PM moved this point to the close of the plan"
 }
 
 # ── P110 Step 6: CP3 off by default ─────────────────────────────────────────
-@test "cp3-off: advance-to-gates with the default toggle and no cp3 directory moves to GATES and writes review_checkpoint_disabled" {
-  seed_test_state_files "EXECUTE" "5" "5"
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
-  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
-  [ ! -d "$TEST_EVIDENCE_DIR/cp3" ]
-  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  echo "$output"; [ "$status" -eq 0 ]
-  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
-  grep -q 'review_checkpoint_disabled' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-@test "cp3-off: a legacy-mode streamlined run with the toggle off and no cp3 round is refused — nothing would review it" {
+@test "streamlined: a legacy-mode streamlined run is refused — the EPIC review (CP3) was removed in 3.0.0, nothing would review it" {
   _streamlined_seed_state true
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _write_three_event_timeline
@@ -2082,19 +2020,6 @@ SC_WHY="the PM moved this point to the close of the plan"
   echo "$output"; [ "$status" -ne 0 ]
   [[ "$output" == *"nothing would review this code"* ]]
   grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-@test "cp3-off: the toggle is read from the state root, not from a linked worktree without .aid-o" {
-  _cp3_on
-  git -C "$TEST_PROJECT_ROOT" worktree add -q "$TEST_PROJECT_ROOT/../wt-cp3" -b wt-cp3 2>/dev/null || skip "no git repo in the fixture"
-  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-roots.sh'; source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_switched_off '$TEST_PROJECT_ROOT/../wt-cp3' cp3_integration_review"
-  git -C "$TEST_PROJECT_ROOT" worktree remove --force "$TEST_PROJECT_ROOT/../wt-cp3"
-  [ "$status" -eq 1 ]   # not off: the state root's policy keeps CP3
-}
-@test "cp3-off: the toggle on without an epic_review block is refused naming the block" {
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
-  printf 'review_checkpoints:\n  cp3_integration_review: true\n' > "$TEST_PROJECT_ROOT/.aid-o/config/policies/review-checkpoints.yaml"
-  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_config_load '$TEST_PROJECT_ROOT' epic_review '$AID_PLUGIN_PATH/skills/step-review-roles.md'"
-  [ "$status" -eq 1 ]; [[ "$output" == *"cannot read epic_review"* ]]
 }
 @test "step-criteria: a plan edited since the EPIC was generated (source_plan_sha256) is not measured — refused" {
   _sc_seed; touch ok.txt

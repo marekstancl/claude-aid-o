@@ -253,7 +253,7 @@ RULE 3: Structure the analysis with these elements:
         - "Dimensions" — technical, organizational, integration, risk dimensions
         - "Challenges" — what could go wrong, what needs careful decisions
         - "To clarify" — preview of question areas (not the questions themselves)
-        - "Prior work" — related plans/EPICs found (only if matches exist)
+        - "Prior work" — related plans found (only if matches exist)
 RULE 4: After presenting the analysis, WAIT for PM confirmation before proceeding.
         Ask: "Is this understanding correct, or should I adjust my focus?"
 RULE 5: If PM corrects misunderstandings, ACKNOWLEDGE and restate corrected
@@ -296,7 +296,7 @@ RULE 9: ASSESS SCOPE SIZE. If the topic describes multiple independent subsystem
         (e.g., "platform with chat, file storage, billing, and analytics"), flag this
         BEFORE asking detail questions. Present decomposition: list independent pieces,
         relationships, and recommended build order. Each sub-project gets its own
-        brainstorming → plan → EPIC cycle. Proceed with the first sub-project.
+        brainstorming → plan → run cycle. Proceed with the first sub-project.
 ```
 
 ### Example Output
@@ -530,8 +530,8 @@ RULE 4: Pass all approved design details to plan-writing — do not summarize or
 RULE 5: Generate plan IDs per `skills/run-management.md` → ID System section:
         Plan: P{NNN} via `bash {plugin_path}/scripts/aid-fsm.sh alloc plan-id`
         (locked allocator, pre-allocated at Step 1 — never hand-edit counter.yaml).
-RULE 6: Brainstorming does NOT create EPICs. EPIC creation is handled by /aid-plan --epic
-        (offered in plan-writing handoff), which delegates file creation to `aid-plan-to-epic.sh`.
+RULE 6: Brainstorming does NOT start the run. A reviewed plan runs with /aid-run P<NNN>
+        (offered in the plan-writing handoff), which `plan-run` starts straight from the plan.
 RULE 7: **MVP / multi-phase plans:** If the brainstormed plan has 3+ phases or is explicitly
         an MVP plan:
         (a) This is a ROADMAP, not an executable plan. Save to `docs/plans/`, NOT `.aid-o/plans/`.
@@ -675,8 +675,7 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 
 - `commands/aid-plan.md` — unified command that invokes this skill (9-step flow)
 - `skills/plan-writing.md` — Step 8 delegation (exhaustive plan doc, quality gates, handoff)
-- `commands/aid-plan.md --epic` — next step: EPIC creation from plan
-- `{plugin_path}/scripts/aid-auto-pipeline.sh` — Plan.md → all EPIC.md/plan.json → generation receipt → run.md/FSM → queue
+- `commands/aid-run.md` — next step: `/aid-run P<NNN>` runs the reviewed plan (`plan-run`: the CP1 seal → plan.json → FSM)
 - `defaults/templates/plan.md` — base plan document template
 - `defaults/templates/design-sections.md` — design section templates for Step 5
 - `skills/planner.md` — how plans become Plan JSON

@@ -368,7 +368,6 @@ gates:
     max_retries: 0
 EOF
   # A closed passing EPIC review round for the EXECUTE→GATES precondition (post-deploy mode).
-  aid_fixture_seed_step_review "$ev" cp3 "" pass "$(git -C "$primary" rev-parse HEAD)"
 
   run bash -c "cd '$TEST_TMPDIR/wt' && AID_DEPLOY_DATE='2026-04-01T00:00:00Z' '$FSM' advance-to-gates '$ev/fsm-state.yaml'" 3>&-
   [ "$status" -eq 0 ]
@@ -598,7 +597,6 @@ gates:
     timeout_seconds: 30
     max_retries: 0
 EOF
-  aid_fixture_seed_step_review "$ev" cp3 "" pass "$(git -C "$primary" rev-parse HEAD)"
   printf '%s' "$ev"
 }
 

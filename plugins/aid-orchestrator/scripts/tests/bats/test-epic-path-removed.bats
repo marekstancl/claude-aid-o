@@ -91,6 +91,9 @@ _old_entry() {
   local sf="$R/.aid-o/work/evidence/E-953-1_1/R-E953-1/fsm-state.yaml"
   run bash "$FSM" init E-953-1_1 R-E953-1 1 full task/E-953-1_1/main "$(git -C "$R" rev-parse plan/P953)" "$sf"; _refused
   [ ! -e "$R/.aid-o/work/evidence/E-953-1_1/R-E953-1/fsm-state.yaml" ]
+  # with --force too: refused before --force writes its audit record (Codex, step 7)
+  run bash "$FSM" init E-953-1_1 R-E953-1 1 full task/E-953-1_1/main "$(git -C "$R" rev-parse plan/P953)" "$sf" --force --reason "an old run forced through the removed path"; _refused
+  [ ! -e "$R/.aid-o/work/evidence/E-953-1_1" ]
   [ -z "$(git -C "$R" branch --show-current | grep '^task/')" ]
 }
 @test "removed: done-advance on an old EPIC run's state refuses epic_path_removed" {
@@ -99,6 +102,11 @@ _old_entry() {
   printf 'epic_id: E-954-1_1\nrun_id: R-E954-1\nstate: DONE\ndone_phase: review\nbranch: task/E-954-1_1/main\npm_decision: merge\n' > "$sf"
   run bash "$FSM" done-advance review release "$sf"; _refused
   [ "$(yq -r .done_phase "$sf")" = review ]
+  # a plan-less run (no plan id in its EPIC id) is the FSM's own harness, never refused
+  local sh="$R/.aid-o/work/evidence/E-test/R-1/fsm-state.yaml"; mkdir -p "$(dirname "$sh")"
+  printf 'epic_id: E-test\nrun_id: R-1\nstate: DONE\ndone_phase: review\nbranch: task/E-test/main\npm_decision: merge\n' > "$sh"
+  run bash "$FSM" done-advance review release "$sh"
+  [[ "$output" != *epic_path_removed* ]]
 }
 @test "removed: epic-complete without --direct refuses; --abandon still ends an old entry with a task branch" {
   _old_entry P955

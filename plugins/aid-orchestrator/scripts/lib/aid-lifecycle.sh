@@ -994,20 +994,15 @@ aid_lifecycle_ensure_manifest() {
   return 0
 }
 
-# _aid_lc_epic_review_file <epic_id> <root> — the EPIC's review record in its
-# gitignored evidence: the EPIC round index (cp3/rounds.json), else the
-# audit-report.json an EPIC closed before 2.101.0 left behind. Empty if neither.
+# _aid_lc_epic_review_file <epic_id> <root> — the run's review record in its
+# gitignored evidence: the audit-report.json an EPIC closed before 2.101.0 left
+# behind, else the step rounds' indexes (cp2/step-*/rounds.json). Empty if
+# neither. (The EPIC round index stood first until the EPIC review, CP3, left
+# in 3.0.0, P114; an old run's EPIC-review directory is not read.)
 _aid_lc_epic_review_file() {
-  local cp2=""
-  # the CP2 indexes stand in for the EPIC review ONLY while CP3 is switched off
-  # (2.116.0); a project that keeps CP3 and has no cp3 record stays unverifiable,
-  # never accepted from its step rounds (fail-closed; 2.116.1)
-  declare -F aid_review_switched_off >/dev/null || source "${_AID_LC_LIB_DIR}/aid-review-config.sh"
-  aid_review_switched_off "${2:-.}" cp3_integration_review >/dev/null 2>&1 \
-    && cp2="$(ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp2/step-*/rounds.json 2>/dev/null)"
-  { ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp3/rounds.json 2>/dev/null \
-    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null \
-    || { [[ -n "$cp2" ]] && printf '%s\n' "$cp2"; } || true; } | sort -V | tail -1   # the latest run
+  { ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null \
+    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp2/step-*/rounds.json 2>/dev/null \
+    || true; } | sort -V | tail -1   # the latest run
 }
 
 # _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the review
@@ -1042,20 +1037,12 @@ _aid_lc_epic_review_status() {
   rep="$(_aid_lc_epic_review_file "$epic_id" "$root")"
   [[ -z "$rep" ]] && { echo "none"; return 0; }
   if [[ "$rep" == */cp2/step-*/rounds.json ]]; then
-    # CP3 off (2.116.0): every step of that run decides — one fail rejects, a state
-    # other than pass/skip/no_change leaves it unverifiable (P110 security review)
+    # every step of that run decides — one fail rejects, a state other than
+    # pass/skip/no_change leaves it unverifiable (P110 security review)
     local vs; vs="$(jq -rs '[.[].verdict // "none"] | unique | join(" ")' "${rep%/step-*/rounds.json}"/step-*/rounds.json 2>/dev/null)"
     if [[ " $vs " == *" fail "* ]]; then echo rejected
     elif [[ -n "$vs" && -z "$(tr ' ' '\n' <<< "$vs" | grep -vxE 'pass|skip|no_change')" ]]; then echo accepted
     else echo unverifiable; fi
-    return 0
-  fi
-  if [[ "$rep" == */cp3/rounds.json ]]; then
-    case "$(jq -r '.verdict // ""' "$rep" 2>/dev/null)" in
-      pass|skip|no_change) echo "accepted" ;;
-      fail)                echo "rejected" ;;
-      *)                   echo "unverifiable" ;;
-    esac
     return 0
   fi
   local st bf

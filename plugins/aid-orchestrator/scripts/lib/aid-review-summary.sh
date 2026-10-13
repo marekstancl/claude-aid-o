@@ -10,14 +10,14 @@
 #       USD from the model's `blended` rate — for a figure reported as one total.
 #   aid_review_prices_file        prints the table in use (AID_REVIEW_PRICES, project, default), or nothing
 #   aid_review_summary <cp dir>   one line (≤ 120 chars) for one checkpoint directory
-#       (<evidence>/cp1, <run>/cp2/step-N, <run>/cp3, <do>/cp6):
+#       (<evidence>/cp1, <run>/cp2/step-N, <do>/cp6):
 #         review: none | review: legacy evidence
 #         review: skip (small, clean, in scope)          (a skip/no_change index)
 #         review: 2 rounds, 812000 tokens, 1 unknown, 4.1200 USD, missing: generalist_b, degraded: yes[, round 2 not closed][, verdict fail]
 #         review: 2 rounds, measurement unreadable (round 1)
 #   aid_epic_review_summary <run dir>
-#       one line over every cp2/step-*/ and cp3/:
-#         steps: 5 (3 skip, 2 rounds), cp3: pass, 1234567 tokens, 2 unknown, 9.8765 USD[, step 3 round 1 not closed]
+#       one line over every cp2/step-*/ (an old run's EPIC-review directory is not read: CP3 left in 3.0.0):
+#         steps: 5 (3 skip, 2 rounds), 1234567 tokens, 2 unknown, 9.8765 USD[, step 3 round 1 not closed]
 #   A token value a reviewer could not report is counted as unknown, never
 #   summed as zero, so an unmeasured round never looks free.
 #   aid_plan_close_time <project_root> <plan_id> [epic_run_dir...]
@@ -131,7 +131,7 @@ aid_review_summary() {
 
 aid_epic_review_summary() {
   local run="${1:?aid_epic_review_summary: run directory required}" d n skips=0 rounds=0 open="" files=() v
-  local steps=() cp3="none"
+  local steps=()
   for d in "$run"/cp2/step-*/; do
     [[ -d "$d" ]] || continue
     n="${d%/}"; n="${n##*-}"; steps+=("$n")
@@ -142,15 +142,8 @@ aid_epic_review_summary() {
       else open="${open:+${open}, }step ${n} round ${r} not closed"; fi
     done
   done
-  if [[ -d "$run/cp3" ]]; then
-    cp3="$(jq -r '.verdict // "open"' "$run/cp3/rounds.json" 2>/dev/null || echo open)"
-    for r in $(_aid_rs_rounds "$run/cp3"); do
-      if [[ -f "$run/cp3/round-${r}/measurement.json" ]]; then files+=("$run/cp3/round-${r}/measurement.json")
-      else open="${open:+${open}, }cp3 round ${r} not closed"; fi
-    done
-  fi
-  (( ${#steps[@]} == 0 )) && [[ "$cp3" == none ]] && { echo "steps: none reviewed"; return 0; }
-  local line="steps: ${#steps[@]} (${skips} skip, ${rounds} rounds), cp3: ${cp3}"
+  (( ${#steps[@]} == 0 )) && { echo "steps: none reviewed"; return 0; }
+  local line="steps: ${#steps[@]} (${skips} skip, ${rounds} rounds)"
   if (( ${#files[@]} )); then
     local tok unk usd usd_unk; read -r tok unk usd usd_unk <<< "$(_aid_rs_sum "${files[@]}")"
     line+=", ${tok} tokens, ${unk} unknown"
@@ -211,8 +204,8 @@ _aid_rs_cost_json() {
 }
 
 # aid_plan_run_cost <plan evidence dir> <plan_id> <epic evidence dir>… — what
-# the RUN of the plan cost (P110): every closed round of every EPIC run (cp2 per
-# step, cp3) plus the close attempts' cp7 rounds. {usd, usd_unknown_roles,
+# the RUN of the plan cost (P110): every closed round of every run (cp2 per
+# step) plus the close attempts' cp7 rounds. {usd, usd_unknown_roles,
 # tokens, rounds, attempts}; attempts_partial when an EPIC dir is missing.
 # Returns 3 on an unreadable measurement.json (measurement_unreadable).
 aid_plan_run_cost() {
@@ -220,7 +213,7 @@ aid_plan_run_cost() {
   local -a files=()
   for e in "$@"; do
     [[ -d "$e" ]] || { partial=true; continue; }
-    while IFS= read -r f; do files+=("$f"); done < <(find "$e" \( -path '*/cp2/step-*/round-*/measurement.json' -o -path '*/cp3/round-*/measurement.json' \) 2>/dev/null | sort)
+    while IFS= read -r f; do files+=("$f"); done < <(find "$e" -path '*/cp2/step-*/round-*/measurement.json' 2>/dev/null | sort)
   done
   while IFS= read -r f; do files+=("$f"); done < <(ls "$dir"/R-"${plan_id}"-final-*/cp7/round-*/measurement.json 2>/dev/null)
   out="$(_aid_rs_cost_json ${files[@]+"${files[@]}"})" || return 3
@@ -267,7 +260,7 @@ aid_plan_plan_cost() {
 #   {work_min, review_min, gates_min, waiting_pm_min, outage_min}; a number
 #   nobody could measure is null ("neměřeno" on the page), never 0.
 #     review   every review round's own start..end (measurement.json): CP1,
-#              the EPICs' CP2/CP3, the plan-final CP7
+#              the runs' CP2, the plan-final CP7
 #     gates    gate_runner_start..gate_runner_complete in the EPIC and plan-final
 #              timelines
 #     waiting  from a Stop the continuation rule let end with a card or a spent
@@ -294,7 +287,7 @@ aid_plan_close_time() {
   local ev="${root}/.aid-o/work/evidence/${plan}" d audit sids
   local -a m=() tl=()
   mapfile -t m < <(ls "$ev"/cp1/round-*/measurement.json "$ev"/R-"${plan}"-final-*/cp7/round-*/measurement.json 2>/dev/null
-                   for d; do find "${root}/${d}" -path '*/cp[23]/*' -name measurement.json 2>/dev/null; done)
+                   for d; do find "${root}/${d}" -path '*/cp2/*' -name measurement.json 2>/dev/null; done)
   for d; do [[ -f "${root}/${d}/timeline.jsonl" ]] && tl+=("${root}/${d}/timeline.jsonl"); done
   for d in "$ev"/R-"${plan}"-final-*/timeline.jsonl; do [[ -f "$d" ]] && tl+=("$d"); done
   audit="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}"

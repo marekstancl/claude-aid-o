@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# aid-step-review-packet.sh — what goes to a step, EPIC or fast-mode reviewer
+# aid-step-review-packet.sh — what goes to a step, fast-mode or whole-plan reviewer
 # (P094 Step 6). The plan reviewer's packet is lib/aid-plan-review-packet.sh;
 # the two builders share the template, the answer contract and the adapter,
 # and differ in what they put in the packet.
@@ -12,8 +12,9 @@
 #   What a whole-plan round (cp7) reads besides the diff, written once per
 #   attempt by plan-finalize --stage produce into <run_dir>/cp7/: criteria.md
 #   (the plan's acceptance and success criteria) and epic-findings.json (what
-#   every contributing EPIC's cp3 round left open, carried or routed; an EPIC
-#   with no cp3 evidence is listed as `cp3: absent`).
+#   the step rounds of every run of the plan left open, `review: "steps"`; the
+#   EPIC review, CP3, left in 3.0.0 and an old run's EPIC-review directory is
+#   not read).
 # aid_final_review_packet_build <root> <round_dir> <step_check> <run_dir> [<prev_round_dir>]
 #   The cp7 packet: diff.patch, claims.patch (CHANGELOG, README and docs hunks),
 #   dod.md (criteria.md), epic-findings.json, plan-diff.json, gates_report.json,
@@ -61,8 +62,8 @@ aid_step_review_packet_build() {
   else
     git -C "$root" diff "$range" > "$dir/diff.patch" || return 1
   fi
-  # The DoD: the step's objective and criteria (cp2), every step's (cp3), or
-  # the task text the step check recorded (cp6).
+  # The DoD: the step's objective and criteria (cp2), or the task text the
+  # step check recorded (cp6).
   if [[ "$cp" == cp6 ]]; then
     { echo "# Task"; echo; jq -r '.dod // "(no task text recorded)"' "$sc"; } > "$dir/dod.md"
     echo '{"outputs": [], "allowed_paths": [], "forbidden_paths": [], "scope_declared": false}' > "$dir/files.json"
@@ -171,7 +172,7 @@ _aid_sr_packet_finish() {
 }
 
 aid_final_review_inputs_build() {
-  local state_root="$1" out="$2/cp7" plan_file="$3" plan_id="$4" epic_dir run
+  local state_root="$1" out="$2/cp7" plan_file="$3" plan_id="$4" epic_dir
   [[ -f "$plan_file" ]] || { echo "produce: plan file not found: ${plan_file}" >&2; return 1; }
   mkdir -p "$out" || return 1
   # Every "**Acceptance Criteria:**" block under its step heading, and the
@@ -187,26 +188,15 @@ aid_final_review_inputs_build() {
   [[ -s "$out/criteria.md" ]] || { echo "produce: ${plan_file} has no acceptance or success criteria" >&2; return 1; }
   for epic_dir in "${state_root}/.aid-o/work/evidence/E-${plan_id#P}-"*; do
     [[ -d "$epic_dir" ]] || continue
-    declare -F aid_review_switched_off >/dev/null || source "${_AID_SR_PLUGIN}/scripts/lib/aid-review-config.sh"
-    # CP3 off: a leftover or stray cp3/ is not read — it would hide what the steps left open
-    if aid_review_switched_off "$state_root" cp3_integration_review >/dev/null 2>&1; then run=""
-    else run="$(ls -dt "$epic_dir"/*/cp3 2>/dev/null | head -n1)"; fi
-    if [[ -z "$run" ]] && aid_review_switched_off "$state_root" cp3_integration_review >/dev/null 2>&1; then
-      # P110: CP3 off — what the step rounds of the EPIC's latest run left open
-      # reaches the close instead (the last round of each step, open blockers and majors)
-      local lrun; lrun="$(ls -dt "$epic_dir"/*/cp2 2>/dev/null | head -n1)"
-      { for st in ${lrun:+"$lrun"/step-*}; do
-          ls "$st"/round-*/merged.json 2>/dev/null | sort -V | tail -1
-        done; } | xargs -r cat | jq -sc --arg e "$(basename "$epic_dir")" \
-        '{epic: $e, cp3: "off", findings: [.[].findings[]? | select(((.status | IN("open", "disputed", "carried", "routed", "form_invalid")) or (.dispute.pm.answer == "accepted")) and (.severity == "blocker" or .severity == "major"))
+    # What the step rounds of the run's latest run left open reaches the close
+    # (the last round of each step, open blockers and majors; P110, the only
+    # path since CP3 left in 3.0.0, P114).
+    local lrun; lrun="$(ls -dt "$epic_dir"/*/cp2 2>/dev/null | head -n1)"
+    { for st in ${lrun:+"$lrun"/step-*}; do
+        ls "$st"/round-*/merged.json 2>/dev/null | sort -V | tail -1
+      done; } | xargs -r cat | jq -sc --arg e "$(basename "$epic_dir")" \
+      '{epic: $e, review: "steps", findings: [.[].findings[]? | select(((.status | IN("open", "disputed", "carried", "routed", "form_invalid")) or (.dispute.pm.answer == "accepted")) and (.severity == "blocker" or .severity == "major"))
            | {severity, status: (if .dispute.pm.answer == "accepted" then "dismissed_by_pm" else .status end), claim, evidence, fix} + (if .rule then {rule} else {} end)]}'
-    elif [[ -z "$run" ]]; then
-      jq -nc --arg e "$(basename "$epic_dir")" '{epic: $e, cp3: "absent", findings: []}'
-    else
-      jq -c --arg e "$(basename "$epic_dir")" -s '{epic: $e, cp3: "reviewed",
-        findings: (sort_by(.round) | map(.findings[]) | group_by(.fingerprint) | map(last)
-                   | map(select(.status | IN("open", "disputed", "carried", "routed", "form_invalid")) | {severity, status, claim, evidence, fix} + (if .rule then {rule} else {} end)))}' "$run"/round-*/merged.json
-    fi
   done | jq -s '{epics: .}' > "$out/epic-findings.json"
   # P110: which brief the whole-plan round reads — resolved again at every
   # prepare (aid_plan_review_brief_resolve), so the packet carries the file as it is.
@@ -272,7 +262,6 @@ aid_step_review_prompt_render() {
   local what
   case "$cp" in
     cp2) what="the diff of one implementation step (step ${step}) against its acceptance criteria" ;;
-    cp3) what="the diff of one whole EPIC against its acceptance criteria" ;;
     cp6) what="a working-tree change made in fast mode against its task" ;;
     cp7) what="the diff of one whole plan, every EPIC together, against the plan's acceptance criteria" ;;
   esac
@@ -331,10 +320,8 @@ aid_step_review_prompt_render() {
       echo
     fi
     if [[ "$cp" == cp7 ]]; then
-      echo "## What the per-EPIC reviews already judged (do not repeat; read ACROSS the EPICs)"
-      jq -r '.epics[] | if .cp3 == "absent" then "- \(.epic): NOT reviewed as a whole (closed before the EPIC review existed)"
-                        elif .cp3 == "off" then "- \(.epic): EPIC review switched off; its steps were reviewed one by one — \(.findings | length) finding(s) the step rounds left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join("")))
-                        else "- \(.epic): \(.findings | length) finding(s) left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join(""))) end' "${dir}/packet/epic-findings.json"
+      echo "## What the step reviews already judged (do not repeat; read ACROSS the steps)"
+      jq -r '.epics[] | "- \(.epic): its steps were reviewed one by one — \(.findings | length) finding(s) the step rounds left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join("")))' "${dir}/packet/epic-findings.json"
       echo
       echo "## Gates at the candidate (gates_report.json on disk: ${dir}/packet/gates_report.json)"
       jq -r "${AID_GATE_ROW_JQ}"'.gates | gate_rows_normalize | to_entries[] | select((.key|startswith("_")|not) and (.value|type) == "object")
@@ -416,7 +403,7 @@ _aid_sr_later_step_covers() {
 #     cp2, a later step of the plan covers the file → aid_obligation_add
 #          (release_blocker for a blocker, followup for a major); merged status
 #          `carried`
-#     cp2 otherwise, and always cp3                → aid_finding_route to
+#     cp2 otherwise                                → aid_finding_route to
 #          epic:<this EPIC>, keyed by fingerprint (aid_finding_recorded first,
 #          so a re-run adds no second entry); merged status `routed`; the FSM's
 #          done-advance then blocks until the PM resolves or backlogs it

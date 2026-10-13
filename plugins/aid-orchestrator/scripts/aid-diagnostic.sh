@@ -32,7 +32,7 @@ Options:
 
 Reported sections (markdown mode):
   - File counts (fsm-state.yaml, timeline.jsonl, gates_report.json, compliance.json,
-    cp3/rounds.json, step-N-verify.md)
+    cp2/step-N/rounds.json, step-N-verify.md)
   - Branch hygiene distribution (task/E-* vs main vs other)
   - Gate authenticity (_generated_by present vs hand-written/missing)
   - Compliance overall verdict distribution
@@ -77,7 +77,7 @@ collect_run() {
   has_timeline=$([[ -f "$timeline" ]] && echo true || echo false)
   has_gates=$([[ -f "$gates_report" ]] && echo true || echo false)
   has_compliance=$([[ -f "$compliance" ]] && echo true || echo false)
-  has_review=$([[ -f "${run_dir}/cp3/rounds.json" ]] && echo true || echo false)
+  has_review=$(compgen -G "${run_dir}/cp2/step-*/rounds.json" >/dev/null && echo true || echo false)
   verify_count=$(find "$run_dir" -maxdepth 1 -name 'step-*-verify.md' 2>/dev/null | wc -l)
 
   local gates_genby=false gates_overall="missing"

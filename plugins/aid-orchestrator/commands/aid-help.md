@@ -41,7 +41,7 @@ Auto-detect user level from workspace state:
 | Condition | Level |
 |-----------|-------|
 | No `.aid-o/` or 0 completed tasks | Level 0: Getting Started |
-| 1–4 completed tasks (Q-NNN + done EPICs) | Level 1: Working with Tasks |
+| 1–4 completed tasks (Q-NNN + done runs) | Level 1: Working with Tasks |
 | 5+ completed tasks | Level 2: Configuration |
 | Custom gates configured OR `autonomous_mode: true` | Level 3: Power User |
 
@@ -60,7 +60,7 @@ In this order:
   /aid-init         → create the .aid-o/ workspace. Nothing else runs without it.
   /aid-setup        → permissions, integrations, CLAUDE.md, stack scan.
   /aid-do "task"    → implement something small in < 2 min. No planning overhead.
-  /aid-status       → see what is running, queued, or finished.
+  /aid-status       → see what is running or finished.
 
 Start here: /aid-init, then /aid-setup, then /aid-do "your first task"
 Bigger than one sitting? /aid-plan writes the plan, /aid-run executes it.
@@ -73,13 +73,10 @@ preference.
 ## Level 1: Working with Tasks (1–4 tasks completed)
 
 ```
-Queue management:
-  /aid-status queue add .aid-o/tasks/E-001.md   → queue EPIC
-
 Planning:
   /aid-plan                → brainstorm + write plan (auto-detect)
   /aid-plan write spec.md  → write plan from spec file
-  /aid-plan epic plan.md   → generate EPICs from plan
+  /aid-run P<NNN>          → run the reviewed plan
 
 Before you trust either end:
   /aid-verify-plan             → one plan reviewer, by hand (not a review round)
@@ -110,7 +107,7 @@ Tests:  /aid-help tests  → test tiers, what runs on the merge path
 
 ```
 FSM debugging:
-  /aid-status <epic-id>                    → shows fsm-state.yaml FSM state
+  /aid-status <run-id>                     → shows fsm-state.yaml FSM state
   cat .aid-o/work/evidence/{id}/*/timeline.jsonl | jq .  → full event log
 
 Emergency: /aid-stop → halt auto-mode and return control to you
@@ -123,11 +120,11 @@ Ask for any of these with `/aid-help <topic>`:
 ```
 /aid-help do              → /aid-do deep dive (scope detection, escalation triggers)
 /aid-help run             → /aid-run deep dive (the direct run /aid-run P<NNN>, repo_roots, cancelling, 6-state FSM)
-/aid-help generation      → PRE-FLIGHT: the direct run's transaction; the old plan → EPIC path (until P114)
-/aid-help plan            → /aid-plan deep dive (brainstorm, write, epic modes)
+/aid-help generation      → PRE-FLIGHT: the direct run's transaction (EPICs were removed in 3.0.0)
+/aid-help plan            → /aid-plan deep dive (brainstorm, write modes)
 /aid-help plan-lifecycle  → plan branches, release model, verification commands
 /aid-help ui              → /aid-ui: UI from product type to an approved brand page
-/aid-help status          → /aid-status deep dive (overview, EPIC detail, queue)
+/aid-help status          → /aid-status deep dive (overview, run detail)
 /aid-help gates           → gate types, execution.yaml configuration, retry logic
 /aid-help tests           → test tiers, what runs on the merge path, the nightly
 /aid-help recovery        → /aid-stop, resume, escalation, PM overrides
@@ -143,7 +140,7 @@ Ask for any of these with `/aid-help <topic>`:
 ### Topic: do
 
 `/aid-do "task"` is Fast Mode — one small change, implemented and logged, with no
-EPIC, no FSM and no evidence directory. It escalates to `/aid-plan` when the work
+plan, no FSM and no evidence directory. It escalates to `/aid-plan` when the work
 turns out to be bigger than Fast Mode should carry.
 
 ```
@@ -158,20 +155,20 @@ Post-check: verifies actual scope after implementation, warns if exceeded
 
 ### Topic: run
 
-`/aid-run P<NNN>` runs a reviewed plan **directly** (P111, AID 2.117.0):
-`aid-plan-fsm.sh plan-run` does generation's duties in one resumable
-transaction and starts ONE run of the whole plan on `plan/<id>` — no EPIC file,
-no queue, no task branch. Steps commit on `plan/<id>`; the last step's
+`/aid-run P<NNN>` runs a reviewed plan **directly** (P111; the only path since
+3.0.0, P114): `aid-plan-fsm.sh plan-run` seals the plan in one resumable
+transaction and starts ONE run of the whole plan on `plan/<id>`. Steps commit on `plan/<id>`; the last step's
 `done-advance review release <state> --direct` records the run and the close
 is `plan-finalize`. A plan that changes another repository declares
 `repo_roots:` in its frontmatter and works there in a worktree on
 `plan/<id>-<project>` (never the live checkout); the PM merges those branches by
 hand after MERGE. `plan-close --administrative` (and `epic-complete --abandon`)
-end the run in the FSM and `active-runs.json`. `/aid-run E-…` runs one EPIC of
-a plan generated the old way (until P114); see `/aid-help generation`.
+end the run in the FSM and `active-runs.json`. An EPIC id, or a plan generated
+the old way, is refused `epic_path_removed`: finish it on 2.118.x, or close the
+plan and start a new one.
 
 ```
-/aid-run — EPIC Pipeline
+/aid-run — the plan's run
 ====================================
 6-State FSM:
   READY → EXECUTE → GATES → DONE
@@ -182,7 +179,6 @@ a plan generated the old way (until P114); see `/aid-help generation`.
 Flags:
   --auto    Autonomous mode (S-effort auto-fix, L-effort always escalates)
   --resume  Resume from fsm-state.yaml after crash
-  --epic    Specify EPIC ID
 ```
 
 Since 2.116.0 (P110) a step buys the review its change needs: a small step
@@ -193,56 +189,45 @@ open_finding_and_fix`). The step's own points run after it
 (`aid-plan-diff.sh --step N --plan-json`; a block may carry `timeout:` up to
 1800 s); `increment-step` refuses an absent point (`step_criteria_failed`) and
 lets it pass only on the PM's answered card (`--defer-criterion AC<n> --reason
-… --finding-card <card>`). The EPIC review (CP3) is off by default. The close
+… --finding-card <card>`). The EPIC review (CP3) was removed in 3.0.0. The close
 measures every point in isolation (`aid-plan-diff.sh --isolated --cwd`,
 `verification_env:` for a host database), reads the brief with two roles and
 writes what the run and the plan cost (`plan_summary.run_cost`, `plan_cost`).
 
 ### Topic: generation
 
-Generation is what `/aid-run` does before the FSM exists, and what `/aid-plan epic`
-drives directly: a plan becomes EPIC files, then `plan.json`, then a run.
+Generation is what `/aid-run P<NNN>` does before the FSM exists: `plan-run`
+turns the reviewed plan into ONE run. EPIC files, the queue and task branches
+were removed in 3.0.0 (P114) — an old EPIC run is finished on 2.118.x, or its
+plan is closed and a new plan started.
 
 ```
-PRE-FLIGHT (bash, before FSM):
-  1. generation-readiness validates the source plan + provisional graph
-  2. transaction skeleton written under the generation lock
-  3. CP1 gate — ONCE per plan → generation-authority.json (needs closed
-     plan review rounds: six reviewer roles, one round by default, a second
-     after a blocker and a passing fix-check, any other on the PM's recorded
-     override; and a passed critic check — hard, --force does not waive it)
-  4. aid-plan-to-epic.sh → every EPIC file (verifies the authority,
-     never re-runs the gate)
-  5. aid-epic-to-json.sh → every plan.json + contract validation
-  6. aid-generation-finalize.sh → one generation receipt
-  7. aid-plan-fsm.sh epic-start → plan_branch plans ONLY: registers
-     task/<epic>/main as a ref with lineage back to plan/<plan_id>,
-     which init's lineage check requires (legacy plans skip this)
-  8. aid-json-to-run.sh → execution.yaml + fsm-state.yaml, only after receipt
+PRE-FLIGHT (bash, before FSM) — aid-plan-fsm.sh plan-run P<NNN>:
+  1. plan-start (plan_branch, the one run E-<nnn>-1_1 declared)
+  2. generation-readiness validates the plan
+  3. CP1 gate → the seal (needs closed plan review rounds and a passed
+     critic check — hard, --force does not waive it) and the PM page
+  4. plan.json of the whole plan (lib/aid-plan-json.sh) + contract check (D5)
+  5. the worktrees of the plan's repo_roots, the manifest entry, the receipt
+  6. aid-fsm.sh init … plan/<id> … --direct → fsm-state.yaml
 
-Generation is ONE TRANSACTION: one PM decision covers every phase, a crash
-resumes instead of duplicating, and no FSM state or queue entry exists until
-the complete EPIC package has been verified and sealed.
-
-A FAILING init still restores the caller's branch before the failure is
-reported — your checkout is never left on a task branch init auto-created on
-its way to refusing.
+ONE resumable transaction: rerun the same command after a crash; a run that
+made no step starts again with plan-run --restart --reason.
 ```
 
 ### Topic: plan
 
-`/aid-plan` brainstorms a topic, writes a plan from a spec, or generates EPICs
-from a plan — the mode is auto-detected from what you pass. When a brainstorm is
+`/aid-plan` brainstorms a topic or writes a plan from a spec — the mode is
+auto-detected from what you pass; a reviewed plan runs with `/aid-run P<NNN>`. When a brainstorm is
 about something visual, `/visual-companion` opens the browser-based mockup
 companion; you can also invoke `/visual-companion` on its own as a smoke test.
 
 ```
-/aid-plan — Brainstorm, Write, Generate
+/aid-plan — Brainstorm, Write
 ====================================
-Three modes, auto-detected from what you pass:
+Two modes, auto-detected from what you pass:
   /aid-plan "topic"        → brainstorm (9 steps, interactive)
   /aid-plan write spec.md  → write a plan from a spec
-  /aid-plan epic plan.md   → generate EPICs from a plan
 
 Plan IDs come from the locked allocator, never a hand edit:
   aid-fsm.sh alloc plan-id     → prints the next P{NNN}
@@ -262,22 +247,18 @@ might cut or add (a suggestion on the scope card, never a verdict). Its prompt
 is assembled by code from the brief file (or, in a brainstorm, the interim's
 `## Zadání PM` and `## Účel a co je v sázce`) — cost figures never reach it —
 and its answer is refused without the two headings, with more than five items,
-or unanswered. Since 2.115.0 it is MANDATORY: no review round and no EPIC
-generation without a passed check (--force does not waive it):
+or unanswered. Since 2.115.0 it is MANDATORY: no review round and no run
+without a passed check (--force does not waive it):
   source scripts/lib/aid-critic.sh
   aid_critic_prepare  P{NNN} --moment brainstorm|plan [--plan <path>]
   aid_critic_dispatch P{NNN} --moment brainstorm|plan    (Codex; STAND-IN → Claude)
   aid_critic_check    P{NNN} --moment brainstorm|plan [--plan <path>]
-
-NOT YET SUPPORTED
-Concurrent plan GENERATION works. STARTING a newly generated plan's EPIC
-while another stream is live does not — that is a known limitation.
 ```
 
 ### Topic: plan-lifecycle
 
 A plan owns a git worktree and a branch, and declares how it releases.
-Before EPIC generation a plan goes through plan review (CP1): six reviewer
+Before its run a plan goes through plan review (CP1): six reviewer
 roles answer the same packet, each finding needs a command and a file:line or
 it is rejected, one round by default (2.115.0) — a second when round 1 found a
 blocker and its fix passed fix-check — any other only on the PM's recorded
@@ -287,27 +268,19 @@ runs one of those reviewers by hand, outside the rounds; `/aid-verify-implementa
 reviews a result that claims to be done. Both dispatch an independent agent in a
 fresh context, so neither is grading its own homework.
 
-Inside a run the same mechanism reviews every step (CP2) and the whole EPIC
-(CP3): a deterministic step check first (small, clean, in-scope diffs skip the
+Inside a run the same mechanism reviews every step (CP2) and, at the close,
+the whole plan (CP7): a deterministic step check first (small, clean, in-scope diffs skip the
 round; every reviewed step gets a security reviewer), then a round of
 independent reviewers whose answers need a command and a file:line, merged by
 fingerprint. A failed round is fixed by the step's own role and confirmed by
 the next round; the FSM advances only on a closed passing round at HEAD. Fast
 mode (`/aid-do`) runs the same review over the working tree, advisory.
 
-**Release model.** A plan declares its mode in its committed lifecycle manifest
-(`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`):
-
-- `plan_branch` — EPICs merge into the plan branch and **the plan releases once**,
-  at the plan-final boundary.
-- `legacy_epic_release_mode` — **each EPIC releases** as before.
-
-New plans default to `plan_branch` only when the project declares a `gate_profiles`
-table in `execution.yaml`. Declining that upgrade at `/aid-init` time therefore
-selects legacy mode — silently, from the user's point of view: the fallback is
-logged as `plan_branch_unavailable: no_gate_profiles`, not raised as a question.
-If you are already mid-flight on a legacy plan, it stays legacy; the mode is never
-retroactively re-declared as `plan_branch`.
+**Release model.** A plan runs in `plan_branch` mode (its committed lifecycle
+manifest, `.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`): its one run
+works on the plan branch and **the plan releases once**, at the plan-final
+boundary. The per-EPIC release (`legacy_epic_release_mode`) left with the EPIC
+path in 3.0.0.
 
 ```
 Each plan implements in its own git worktree:
@@ -316,7 +289,7 @@ Each plan implements in its own git worktree:
   .aid-worktrees/plan-P080/           one plan, on its plan/<id> branch
   .aid-worktrees/plan-P081/           another plan, on its own branch
 
-So you can write and fully generate a new plan while another one implements —
+So you can write and start a new plan while another one implements —
 with uncommitted work in your checkout, and without your HEAD moving. An edit
 you make during another plan's review window no longer invalidates that review.
 
@@ -327,7 +300,7 @@ the worktree they are about to remove — run those from your own checkout.
 See what is running:
   /aid-status                          both streams, per plan
   git worktree list                    every tree, including yours
-  aid-fsm.sh active-runs list          which EPICs are live
+  aid-fsm.sh active-runs list          which runs are live
 
 If a plan's worktree is missing or broken:
   aid-plan-fsm.sh plan-state <id> --recreate-worktree --reason "<why>"
@@ -350,18 +323,15 @@ kompozici) bere skript jen z odpovědi na stránce, stejně jako směr.
 
 ### Topic: status
 
-`/aid-status` is the one place that answers "what is happening". It has four
-sub-surfaces, and its overview is grouped by plan stream — two concurrent plans
-show as two streams.
+`/aid-status` is the one place that answers "what is happening". Its overview
+is grouped by plan stream — two concurrent plans show as two streams.
 
 ```
-/aid-status                                  overview: active plans + EPICs + queue
-/aid-status <epic-id>                        one EPIC in detail (reads fsm-state.yaml)
-/aid-status queue                            queue management view
-/aid-status queue add <path> [--priority]    add an EPIC to the queue
+/aid-status                                  overview: active plans and their runs
+/aid-status <run-id>                         one run in detail (reads fsm-state.yaml)
 ```
 
-**What to do next:** run `/aid-status` — its next-EPIC line is computed by the
+**What to do next:** run `/aid-status` — its next line is computed by the
 shipped `next-epic` recipe from real state files, so it is the answer, not a
 guess to be re-derived by hand.
 
@@ -430,14 +400,14 @@ its one real run (2026-08-05) produced no decision the PM accepted.
 
 `/aid-audit` (the 0-100 health score, categories A–J) was removed in 2.112.0
 (P107): it ran once in its life. What it scored is checked where the work
-happens — the EPIC review (CP3) reads every diff, the plan-final review reads
+happens — the step review (CP2) reads every diff, the plan-final review reads
 the whole plan, and `/aid-status` shows the nightly result.
 
 ### Topic: recovery
 
 Something is stuck, wrong, or running when it should not be. `/aid-stop`
 disengages autonomous mode immediately and hands control back to you. The FSM has
-already written the run's position (EPIC, completed step, state) to
+already written the run's position (run, completed step, state) to
 `fsm-state.yaml`, so `/aid-run --resume` picks it up — `/aid-stop` itself saves
 nothing. The step that was mid-flight is not checkpointed and runs again on
 resume, so check what it had already done before you resume.
@@ -502,8 +472,7 @@ Run state lives in .aid-o/work/active-runs.json as auto_controller:
 ### Topic: config
 
 The config files you will actually touch live under `.aid-o/config/`. `/aid-init`
-creates them at workspace setup — except `queue.yaml`, which appears on the first
-`/aid-status queue add` — and `/aid-setup` is what changes them afterwards. The
+creates them at workspace setup, and `/aid-setup` is what changes them afterwards. The
 full list of what a fresh init produces is in `/aid-help init`; the four below are
 the ones worth knowing by name.
 
@@ -514,7 +483,6 @@ config/project.yaml       — project stack, commands (auto-detected by /aid-ini
 config/permissions.yaml   — autonomous mode, auto-commit, auto-push
 config/execution.yaml     — gate definitions (generated eagerly by /aid-init;
                             aid-fsm.sh init recreates it if it is missing)
-config/queue.yaml         — EPIC queue (lazy-created on first /aid-status queue add)
 ```
 
 `/aid-init` never overwrites an existing `execution.yaml` — a project's gate
@@ -532,8 +500,7 @@ Creates: config/project.yaml, config/permissions.yaml, config/execution.yaml,
          config/plugin.yaml, config/check-severity.yaml
          and, only when Qdrant memory is detected, config/integrations.yaml
 Upgrade: offers the gate_profiles block if execution.yaml predates it —
-         declining keeps the project on legacy_epic_release_mode, one
-         release per EPIC rather than one per plan (see plan-lifecycle)
+         declining runs every gate at every boundary (see gates)
 Re-installs the git hooks, so run it again after upgrading the plugin.
 ```
 
@@ -558,7 +525,7 @@ Permission presets:
 
 ### Topic: fsm
 
-The six states an EPIC run moves through. `/aid-status <epic-id>` shows where a run
+The six states a plan's run moves through. `/aid-status <epic-id>` shows where a run
 currently sits. The list below is the normal path; on top of it, READY, EXECUTE, GATES
 and ESCALATION can each go to the terminal `ERROR` state on an unrecoverable failure
 or a PM abort.
@@ -644,7 +611,7 @@ turn is degraded to fail-open, and the degradation is written to the audit trail
 |---|---|---|---|
 | `hook_canary` | SessionStart | 4 | leaves one audit line per start, so the canary can prove a harness reached AID |
 | `decision_card_complete` | Stop | 2 | refuses a turn whose card asks you to decide with no options, recommendation or reason |
-| `milestone_artifact_rendered` | Stop | 2 | refuses a turn that finished a milestone — a written plan or a closed plan — without rendering your page for it; an EPIC, a step and a failed step owe nothing |
+| `milestone_artifact_rendered` | Stop | 2 | refuses a turn that finished a milestone — a written plan or a closed plan — without rendering your page for it; a step and a failed step owe nothing |
 | `queue_continuation_notice` | Stop | 2 | sends the session that drives an autonomous plan back to work while work is left, up to a budget; a card or the spent budget ends it with one "agent is waiting" message |
 | `pm_reply_marker` | UserPromptSubmit | 3 | your reply gives the budget back and re-arms the "agent is waiting" message |
 | `continuity_capture` / `continuity_restore` | PreCompact / SessionStart | 3 | saves the run's bearings before a compaction and puts them back after |

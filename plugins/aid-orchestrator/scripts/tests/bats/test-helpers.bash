@@ -284,16 +284,16 @@ refute_grep() {
   esac
 }
 
-# aid_fixture_seed_step_review <evidence_dir> <cp2|cp3> <step|""> <verdict> [<head_sha>]
-#   P094: seeds the review-round evidence the FSM reads for a step (cp2) or an
-#   EPIC (cp3): <cp dir>/rounds.json with the verdict, and for pass|fail one
+# aid_fixture_seed_step_review <evidence_dir> cp2 <step> <verdict> [<head_sha>]
+#   P094: seeds the review-round evidence the FSM reads for a step (cp2; the
+#   EPIC review, CP3, left in 3.0.0): <cp dir>/rounds.json with the verdict, and for pass|fail one
 #   closed round (round.json with head_sha and closed_at, measurement.json,
 #   merged.json); for skip|no_change a step-check.json plus the step_check
 #   timeline event that binds it. <head_sha> defaults to HEAD of the cwd.
 aid_fixture_seed_step_review() {
   local evid="$1" cp="$2" step="${3:-}" verdict="$4" head="${5:-$(git rev-parse HEAD)}"
   local dir
-  case "$cp" in cp2) dir="$evid/cp2/step-$step" ;; cp3) dir="$evid/cp3" ;; *) return 2 ;; esac
+  case "$cp" in cp2) dir="$evid/cp2/step-$step" ;; *) return 2 ;; esac
   mkdir -p "$dir"
   case "$verdict" in
     skip|no_change)
@@ -312,9 +312,6 @@ aid_fixture_seed_step_review() {
       jq -n --arg v "$verdict" '{round: 1, reviewers: {step_generalist: {provider: "claude", model: "fixture", answered: true, tokens: 1}}, degraded: false, dispatch_check: "recorded", verdict: $v}' > "$dir/round-1/measurement.json"
       jq -n --arg v "$verdict" '{round: 1, findings: (if $v == "fail" then [{fingerprint: "sha256:0000000000000000000000000000000000000000000000000000000000000000", severity: "blocker", status: "open", claim: "fixture", evidence: "x:1", reported_by: ["step_generalist"]}] else [] end), blockers_open: (if $v == "fail" then 1 else 0 end)}' > "$dir/round-1/merged.json"
       jq -n --arg v "$verdict" --arg h "$head" '{verdict: $v, head_sha: $h, rounds: [{round: 1, head_sha: $h, prepared_at: "2026-09-19T00:00:00Z", verdict: $v}]}' > "$dir/rounds.json"
-      if [[ "$cp" == cp3 ]]; then
-        jq -n --arg h "$head" '{artifact_type: "semantic_review", revision: {head_sha: $h, base_sha: "x"}, semantic_review: {mode: "final", range: "x..y", lenses_run: ["epic_generalist"], findings: []}}' > "$evid/semantic-review-final.json"
-      fi
       ;;
     *) return 2 ;;
   esac

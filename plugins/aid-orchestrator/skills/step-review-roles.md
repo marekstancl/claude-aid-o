@@ -1,6 +1,6 @@
 ---
 name: step-review-roles
-description: Reviewer contract for the step review (CP2), the EPIC review (CP3), the fast-mode review (CP6) and the whole-plan review at plan close (CP7) — the packet, the eight reviewer roles with their questions and stop rules, the evidence rule and the output file shape
+description: Reviewer contract for the step review (CP2), the fast-mode review (CP6) and the whole-plan review at plan close (CP7) — the packet, the five reviewer roles with their questions and stop rules, the evidence rule and the output file shape
 user_invocable: false
 required_roles: none
 ---
@@ -10,11 +10,11 @@ required_roles: none
 **Last Updated:** 2026-09-20
 
 The step review (CP2) puts one step's diff in front of one or two reviewers
-before the step is closed; the EPIC review (CP3) puts the whole EPIC diff in
-front of two or three before the EPIC goes to its gates; the fast-mode review
+before the step is closed; the fast-mode review
 (CP6) reviews a `/aid-do` working tree the same way, advisory; the whole-plan
-review (CP7) reads the range of a finished plan, every EPIC together, once
-before the decision to merge. Every reviewer
+review (CP7) reads the range of a finished plan once before the decision to
+merge. (The EPIC review, CP3, and its three roles were removed in 3.0.0 with
+the EPIC path, P114.) Every reviewer
 of a round gets the same packet and the same rules; only the role section
 differs. This file is the source of the role sections: the round engine cuts
 one `## Role:` section out of it per reviewer and renders it into
@@ -23,9 +23,9 @@ with the plan review (`skills/plan-review-roles.md`).
 
 ## When to Invoke
 
-Invoke when changing what a step or EPIC reviewer is asked, how a finding must
+Invoke when changing what a step or whole-plan reviewer is asked, how a finding must
 look, or which roles exist. The controller does not read this file during a
-round — it follows the "Step review (CP2) and EPIC review (CP3)" section of
+round — it follows the "Step review (CP2)" section of
 `commands/aid-run.md` — and the reviewers get their role section inside the
 rendered prompt. Do NOT invoke for the plan review (`skills/plan-review-roles.md`).
 
@@ -37,7 +37,7 @@ after the `--- PACKET ---` marker:
 | Part | Source | Why the reviewer gets it |
 |---|---|---|
 | `step-check.json` | `scripts/aid-step-check.sh` | the deterministic script already ran: range, files outside the step's scope, forbidden paths touched, security patterns, tests and their tiers, handler patterns |
-| `dod.md` | `plan.json` (the step's objective and acceptance criteria; the EPIC's for CP3; the task text for CP6) | what the change had to deliver |
+| `dod.md` | `plan.json` (the step's objective and acceptance criteria; the task text for CP6) | what the change had to deliver |
 | `files.json` | `plan.json` (`outputs`, `allowed_paths`, `forbidden_paths`) | what the step was allowed to touch |
 | `diff.patch` | `git diff <range>` from `step-check.json` | the change under review |
 | `open-findings.json`, `fix.patch` | the previous round (confirmation rounds only) | what was still open, and what the fix changed |
@@ -45,8 +45,8 @@ after the `--- PACKET ---` marker:
 At CP7 `dod.md` is the plan's acceptance and success criteria, `files.json`
 declares no scope, and the packet adds `plan-diff.json` (which executed test
 proves which criterion), `gates_report.json` (the gates at the candidate),
-`epic-findings.json` (what each EPIC's CP3 round left open — with CP3 off,
-what its step rounds left open — so it is not judged twice) and `claims.patch` (the CHANGELOG, README and docs hunks).
+`epic-findings.json` (what the step rounds of each run left open, so it is
+not judged twice) and `claims.patch` (the CHANGELOG, README and docs hunks).
 
 Reviewers may read the repository at the reviewed commit with read-only tools
 beyond the packet; the findings worth paying for usually lie in callers and
@@ -132,7 +132,7 @@ With nothing to report, `findings` is empty and the reason is mandatory:
 {"role": "step_security", "checkpoint": "cp2", "findings": [], "no_findings_reason": "The diff adds no input boundary, secret, query or shell call; the two matched rules are in test fixtures."}
 ```
 
-`step` is the step number under review (`null` for CP3 and CP6). `id` is
+`step` is the step number under review (`null` for CP6 and CP7). `id` is
 `<role>-<n>`. `provider` and `model` may be added; the round records them from
 configuration either way.
 
@@ -183,78 +183,6 @@ where the later rounds of P101/P102 found their holes.
 A blocker is an exploitable path: unvalidated input reaching a sink, a missing
 authorization check, or a secret in the tree.
 
-## Role: epic_generalist
-
-The whole EPIC diff as the reviewer who signs off before the gates. This role
-checks that the steps add up to the EPIC.
-
-### Questions
-
-1. Does the EPIC diff deliver every acceptance criterion of the EPIC, end to end, with the steps' outputs wired to each other?
-2. Do two steps' changes conflict (one overwrites or undoes another, two definitions of one thing)?
-3. Across the whole added test surface, which tests overlap, and which behaviour the EPIC promises has no test?
-4. Is anything in the EPIC diff outside every step's scope, or in a forbidden path?
-5. Does the diff leave dead code, a stale comment or a document that now disagrees with the code?
-6. What did the step reviews route or carry forward, and is it still open?
-7. Across the steps of this EPIC, is the same logic or helper written twice, or does a block of one step duplicate a helper another step added or that already lives in this repository? Name both places and the one to keep.
-8. Did a step found an abstraction, wrapper or configuration that ends the EPIC with one real caller? Name what to inline. (Never propose removing an abstraction with more than one real caller, and never a change of a public signature, output or behaviour — that is a design change, not a simplification.)
-9. What can be cut or deferred from the whole diff so the EPIC does the same with less code? Name file and lines. A structural change across files is reported with an S/M/L estimate.
-
-(Question 5 — dead code, stale comments, documents that disagree — and `step_generalist`
-question 7 — more than the step needs — stay where they are and are not repeated here; questions
-7-9 ask only what no single step review can see. They took over the simplifier card in 2.112.0.)
-
-### Stop rule
-
-A blocker is an EPIC acceptance criterion not delivered, two steps in conflict,
-or a forbidden path touched. For questions 7-9: `major` when the diff would be
-materially shorter or a step duplicates an existing helper (the fix round does the
-deletion); a structural change across files is `minor` with `route: backlog` and its
-estimate, never fixed in the round.
-
-## Role: epic_behaviour
-
-Behaviour of what the EPIC built, at its edges. This role asks what happens on
-inputs and states the acceptance criteria do not describe.
-
-### Questions
-
-1. For each new or changed handler, command or job, which input makes it misbehave (empty, duplicate, stale, concurrent, oversized)? Trace the request path and every branch.
-2. Is every operation that may be repeated or retried idempotent, and is a mutation guarded where the acceptance criteria require at most once?
-3. What happens to a half-finished state (started but never completed, edited between two runs, a crash between two writes)?
-4. Who has authority over each artifact or resource the EPIC writes, and can the wrong actor or tenant write it?
-5. What does the user see when something fails or is degraded, and is it recorded, not only shown?
-
-### Stop rule
-
-A blocker is an edge where the behaviour is undefined or unsafe (silent pass,
-double effect, lost data, a write across an ownership boundary).
-
-## Role: epic_security
-
-The whole EPIC diff as the reviewer who assumes the input is hostile; the same
-questions as `step_security` over the EPIC's whole surface, plus the joints
-between steps.
-
-### Questions
-
-1. For every input boundary the EPIC adds or changes, is the input validated before it reaches a shell, a query, a template, a file path or a deserializer?
-2. Does any new endpoint, command or job skip authorization, tenant isolation or a permission check its neighbours perform?
-3. Is a secret, token or credential written into code, a fixture, a log or an error message anywhere in the EPIC?
-4. Do two steps together open a path that neither opens alone (one adds an input, another adds a sink)?
-5. Does the EPIC widen what a caller can read or write beyond what its acceptance criteria ask?
-
-### Stop rule
-
-A blocker is an exploitable path across the EPIC: unvalidated input reaching a
-sink, a missing authorization check, or a secret in the tree.
-
-A whole-plan finding the author refuted by measurement, the PM deferred to
-the backlog, or the adjudicator kept as `form_invalid` (evidence outside the
-candidate's repository) is settled by the controller's `dispute --checkpoint
-cp7 … --pm accepted --finding-card` with the PM's answer on record — never by
-editing the finding and never by merging around it (2.114.0).
-
 ## Role: final_criteria
 
 The finished plan against what it promised. You hold the PM's brief
@@ -302,16 +230,16 @@ does not do, or a binding instruction exists only outside what is delivered.
 ## Role: final_generalist
 
 The whole range as a colleague from another provider reads it, across the
-EPICs. The per-EPIC reviews already judged each EPIC alone
-(`epic-findings.json`); you look for what none of them could see.
+steps. The step reviews already judged each step alone (`epic-findings.json`,
+what they left open); you look for what none of them could see.
 
 ### Questions
 
-1. Does a change of one EPIC break a caller, a consumer or a test that another EPIC of the same plan touched or relied on?
-2. Is anything half-done across the EPICs: a function one EPIC adds and no EPIC calls, a flag one EPIC reads and none sets?
-3. Was an EPIC of the plan closed before the EPIC review existed (`cp3: absent`)? Then read its part of the range as its EPIC reviewer would have. (`cp3: off` — the EPIC review switched off, the default since 2.116.0 — is no such case: its steps were reviewed and what they left open is listed; question 1 and 2 are the cross-step read.)
+1. Does a change of one step break a caller, a consumer or a test that another step of the same plan touched or relied on?
+2. Is anything half-done across the steps: a function one step adds and no step calls, a flag one step reads and none sets?
+3. What the step reviews left open is listed in `epic-findings.json`; questions 1 and 2 are the cross-step read.
 4. Does the range remove or weaken an existing behaviour that no criterion of the plan asked to change?
-5. Is a finding the per-EPIC reviews left open still true at the candidate? Report it once, with today's evidence.
+5. Is a finding the step reviews left open still true at the candidate? Report it once, with today's evidence.
 6. Claims (`claims.patch`: CHANGELOG, README and docs hunks): does the code at the candidate do every behavioural claim, and does a binding instruction for whoever deploys or operates this live only outside the delivered files? (A project that keeps `final_claims` has that role ask this too.)
 7. Security and operations, across the range — answer each, `none` when it does not apply:
    - a new personal datum: where is it stored, and how is it deleted (retention, the user's request)?
@@ -326,7 +254,7 @@ EPICs. The per-EPIC reviews already judged each EPIC alone
 
 ### Stop rule
 
-A blocker is a break that exists only when the EPICs are read together (a
+A blocker is a break that exists only when the steps are read together (a
 broken consumer, an unwired half, a behaviour lost that nobody asked to lose),
 a false claim, or an exploitable path or data leak from the checklist.
 

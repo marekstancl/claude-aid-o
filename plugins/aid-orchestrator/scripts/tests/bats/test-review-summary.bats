@@ -73,7 +73,7 @@ _measure() {
   mkdir -p "$RUN/cp2/step-0"; jq -n '{verdict: "skip", reason: "small, clean, in scope", rounds: []}' > "$RUN/cp2/step-0/rounds.json"
   [ "$(aid_review_summary "$RUN/cp2/step-0")" = "review: skip (small, clean, in scope)" ]
 }
-@test "epic: two step rounds and one cp3 round sum tokens and USD, count skips, and name a step whose round is not closed" {
+@test "epic: the step rounds sum tokens and USD, count skips, and name a step whose round is not closed; an old run's EPIC-review directory is not read" {
   mkdir -p "$RUN/cp2/step-0" "$RUN/cp2/step-3/round-1"
   jq -n '{verdict: "skip", reason: "x", rounds: []}' > "$RUN/cp2/step-0/rounds.json"
   _measure "$RUN/cp2/step-1" 1 '{"step_generalist": {"tokens": 1000, "usd": 0.0066, "answered": true}}'
@@ -83,13 +83,13 @@ _measure() {
   jq -n '{verdict: "fail", rounds: [{round: 1}]}' > "$RUN/cp2/step-3/rounds.json"   # prepared, never closed
   _measure "$RUN/cp3" 1 '{"epic_generalist": {"tokens": 5000, "usd": 0.0328, "answered": true}}'
   jq -n '{verdict: "pass"}' > "$RUN/cp3/rounds.json"
-  [ "$(aid_epic_review_summary "$RUN")" = "steps: 4 (1 skip, 3 rounds), cp3: pass, 8000 tokens, 0 unknown, 0.0394 USD + 1 unknown, step 3 round 1 not closed" ]
+  [ "$(aid_epic_review_summary "$RUN")" = "steps: 4 (1 skip, 3 rounds), 3000 tokens, 0 unknown, 0.0066 USD + 1 unknown, step 3 round 1 not closed" ]
   [ "$(aid_epic_review_summary "$ROOT/nowhere")" = "steps: none reviewed" ]
 }
 @test "epic: a missing price table is named, exit 0" {
   rm "$ROOT/.aid-o/config/prices.yaml"
-  _measure "$RUN/cp3" 1 '{"epic_generalist": {"tokens": 5000, "usd": "unknown", "answered": true}}'
-  jq -n '{verdict: "pass"}' > "$RUN/cp3/rounds.json"
+  _measure "$RUN/cp2/step-0" 1 '{"step_generalist": {"tokens": 5000, "usd": "unknown", "answered": true}}'
+  jq -n '{verdict: "pass"}' > "$RUN/cp2/step-0/rounds.json"
   AID_REVIEW_PRICES=/nonexistent/prices.yaml run aid_epic_review_summary "$RUN"
   [ "$status" -eq 0 ]; [[ "$output" == *"prices.yaml missing"* ]]; [[ "$output" == *"USD unknown"* ]]
 }
@@ -105,7 +105,7 @@ _measure() {
 
 # ── P110 Step 7: the run and the plan costed ────────────────────────────────
 _r() { _measure "$@"; }
-@test "cost: aid_plan_run_cost sums two EPIC runs (three cp2 rounds, one cp3) and two close attempts, counting rounds and attempts" {
+@test "cost: aid_plan_run_cost sums two runs (three cp2 rounds; an old EPIC-review round is not counted) and two close attempts, counting rounds and attempts" {
   local e1="$ROOT/.aid-o/work/evidence/E-900-1_2/R-1" e2="$ROOT/.aid-o/work/evidence/E-900-2_2/R-1"
   _r "$e1/cp2/step-0" 1 '{"step_generalist": {"tokens": 1000, "usd": 1.5}}'
   _r "$e1/cp2/step-0" 2 '{"step_generalist": {"tokens": 500, "usd": 0.5}}'
@@ -114,7 +114,7 @@ _r() { _measure "$@"; }
   _r "$EV/R-P900-final-1/cp7" 1 '{"final_criteria": {"tokens": 300, "usd": 3}}'
   mkdir -p "$EV/R-P900-final-2/cp7"; _r "$EV/R-P900-final-2/cp7" 1 '{"final_criteria": {"tokens": 200, "usd": 1}}'
   run aid_plan_run_cost "$EV" P900 "$e1" "$e2"; echo "$output"; [ "$status" -eq 0 ]
-  [ "$(jq -c '{usd, tokens, rounds, attempts}' <<< "$output")" = '{"usd":8.25,"tokens":4100,"rounds":6,"attempts":2}' ]
+  [ "$(jq -c '{usd, tokens, rounds, attempts}' <<< "$output")" = '{"usd":8,"tokens":4000,"rounds":5,"attempts":2}' ]
 }
 @test "cost: a role with an unknown USD lands in usd_unknown_roles and the known sum is kept" {
   local e1="$ROOT/.aid-o/work/evidence/E-900-1_1/R-1"

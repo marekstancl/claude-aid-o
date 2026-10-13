@@ -318,7 +318,7 @@ _round1_closed() {
   grep -q '^+text changed by the fix$' "$p"
 }
 
-# ── step rounds (cp2, cp3, cp6) ────────────────────────────────────────────
+# ── step rounds (cp2, cp6) ─────────────────────────────────────────────────
 # _repo — a fixture repository with a step-0 diff that needs review (2 files, > 50 lines),
 # plan.json, fsm-state.yaml and an empty timeline; sets R (repo) and E (run evidence dir)
 _repo() {
@@ -332,12 +332,11 @@ _repo() {
   # Round mechanics are tested with one reviewer: the project gates step_security
   # on a pattern, as the default did before 2.109.0 (the default is tested at "prepare needs").
   # The project keeps the pre-2.116.0 step budget (3B): threshold 1/50, two
-  # rounds, CP3 on — the step-kind cases set the shipped defaults back.
+  # rounds — the step-kind cases set the shipped defaults back.
   mkdir -p "$R/.aid-o/config/policies"
   yq '.review_checkpoints.step_review.reviewers[1].when = "review+security"
       | .review_checkpoints.step_review.skip_threshold = {"max_files": 1, "max_lines": 50}
-      | .review_checkpoints.step_review.rounds_default = 2 | del(.review_checkpoints.step_review.second_round_when)
-      | .review_checkpoints.cp3_integration_review = true' \
+      | .review_checkpoints.step_review.rounds_default = 2 | del(.review_checkpoints.step_review.second_round_when)' \
     "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
 }
 _sc() { (cd "$R" && bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint "${1:-cp2}" --step "${2:-0}" --evidence-dir "$E" "${@:3}") >/dev/null; }
@@ -800,7 +799,7 @@ _probe() {
   [ "$status" -eq 2 ]; [[ "$output" == *"plan-review (CP1) subcommand"* ]]
 }
 
-# ── Step 7: what stays open after the last round, and the cp3 semantic file ──
+# ── Step 7: what stays open after the last round ──────────────────────────────
 # _erepo — like _repo, but the run lives under evidence/E-900-1_2/R-1 so the
 # round knows its EPIC and plan (P900); a second step covers src/later.py.
 _erepo() {
@@ -810,15 +809,11 @@ _erepo() {
   jq -n '{steps: [{id: "s0", role: "backend", objective: "add the thing", acceptance_criteria: ["it works"], outputs: ["Modify: `src/app.py` — x", "Create: `src/new.py` — y"], allowed_paths: ["src/app.py", "src/new.py"]},
                   {id: "s1", role: "backend", objective: "later", outputs: ["Modify: `src/new.py` — z"], allowed_paths: ["src/new.py"]}]}' > "$E/plan.json"
   : > "$E/timeline.jsonl"
-  # cp3 with one claude role and one round, so the last round is round 1 and no codex launcher is needed
-  mkdir -p "$R/.aid-o/config/policies"
-  yq -i '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
-     "$R/.aid-o/config/policies/review-checkpoints.yaml"
 }
 _J() { printf '%s/.aid-o/work/plan-state/P900/%s' "$R" "$1"; }
 # _close1 <checkpoint> [answer jq] — one round: prepare, one generalist answer, bracket, collect, close
 _close1() {
-  local cp="$1" role=step_generalist f="cp2-step-0-step-generalist"; [[ "$cp" == cp3 ]] && { role=epic_generalist; f="cp3-epic-generalist"; }
+  local cp="$1" role=step_generalist f="cp2-step-0-step-generalist"
   local args=(--checkpoint "$cp" --evidence-dir "$E" --project-root "$R"); [[ "$cp" == cp2 ]] && args+=(--step 0)
   "$ROUND_SH" prepare "${args[@]}" --round "${ROUND_N:-1}" >/dev/null || return 1
   local d="$E/${cp}$([[ "$cp" == cp2 ]] && echo /step-0)/round-${ROUND_N:-1}"
@@ -869,98 +864,11 @@ _close1() {
   [ "$(wc -l < "$(_J routed-findings.jsonl)")" -eq 1 ]
   [ "$(grep -c '"op":"add"' "$(_J carried-obligations.jsonl)")" -eq 1 ]
 }
-@test "routing: the last cp3 round routes every open blocker or major to the EPIC; a run of no plan and fast mode leave them open and say so" {
-  _erepo; _sc cp3 ""
-  run _close1 cp3; echo "$output"; [ "$status" -eq 0 ]
-  [[ "$output" == *"2 routed"* ]]
-  [ "$(wc -l < "$(_J routed-findings.jsonl)")" -eq 2 ]
-  [ "$(jq -r '.source_checkpoint' "$(_J routed-findings.jsonl)" | sort -u)" = cp3 ]
-  [ "$(jq -r '.findings[] | select(.severity == "minor") | .status' "$E/cp3/round-1/merged.json")" = open ]
-  # an EPIC that belongs to no plan (the same one-role, one-round cp3 as _erepo)
-  _repo; E="$ROOT/ev/adhoc/R-1"; mkdir -p "$E"; : > "$E/timeline.jsonl"
-  yq -i '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
-     "$R/.aid-o/config/policies/review-checkpoints.yaml"
-  jq -n '{steps: [{id: "s0", role: "backend", objective: "x", outputs: ["Modify: `src/app.py` — x"]}]}' > "$E/plan.json"
-  printf 'base_commit: %s\n' "$(git -C "$R" rev-parse HEAD~1)" > "$E/fsm-state.yaml"
-  _sc cp3 ""
-  run _close1 cp3; [ "$status" -eq 0 ]; [[ "$output" == *"belongs to no plan"* ]]
-  [ "$(jq -r '.findings[0].status' "$E/cp3/round-1/merged.json")" = open ]
-}
 @test "collect: an answer naming a role outside the round is invalid with unknown_role" {
   _repo; _sc; _S prepare --round 1 >/dev/null
   _sanswer 1 step_generalist '.role = "epic_behaviour"'
   run _S collect --round 1
   jq -e '.invalid[] | select(.role == "step_generalist" and (.reason | startswith("unknown_role")))' "$(D 1)/collect.json"
-}
-@test "cp3 close refuses a semantic file whose lens is not a reviewer of the round" {
-  _erepo; _sc cp3 ""
-  local args=(--checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1)
-  "$ROUND_SH" prepare "${args[@]}" >/dev/null
-  local d="$E/cp3/round-1"
-  jq -n '{role: "epic_generalist", checkpoint: "cp3", findings: [{id: "g-1", checkpoint: "cp3", step: 0, severity: "minor",
-      claim: "naming", command: "grep -n x src/new.py", evidence: "src/new.py:1", fix: "rename"}]}' > "$d/reviewer-epic_generalist.json"
-  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
-  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus cp3-epic-generalist --output-file "$d/reviewer-epic_generalist.json" --evidence-dir "$d" >/dev/null
-  "$ROUND_SH" collect "${args[@]}" >/dev/null
-  jq '.findings |= map(.reported_by = ["merge_integrity"])' "$d/merged.json" > "$d/m" && mv "$d/m" "$d/merged.json"
-  run "$ROUND_SH" close "${args[@]}" --tokens epic_generalist=5
-  [ "$status" -ne 0 ]; [[ "$output" == *"merge_integrity"* ]]
-  [ ! -f "$E/semantic-review-final.json" ]
-}
-@test "cp3 close writes <run>/semantic-review-final.json in the protocol shape, valid against its schema, and refuses to close when it cannot" {
-  _erepo; _sc cp3 ""
-  run _close1 cp3; [ "$status" -eq 0 ]
-  local f="$E/semantic-review-final.json"; [ -f "$f" ]
-  [ "$(jq -r .artifact_type "$f")" = semantic_review ]
-  [ "$(jq -r .revision.base_sha "$f")" = "$(git -C "$R" rev-parse HEAD~1)" ]
-  [ "$(jq -r .revision.head_sha "$f")" = "$(git -C "$R" rev-parse HEAD)" ]
-  [ "$(jq -r .semantic_review.mode "$f")" = final ]
-  [ "$(jq -r .semantic_review.range "$f")" = "$(jq -r .range "$E/cp3/step-check.json")" ]
-  [ "$(jq -c .semantic_review.lenses_run "$f")" = '["epic_generalist"]' ]
-  [ "$(jq -r '.semantic_review.findings | map(.severity) | sort | join(",")' "$f")" = "critical,low,medium" ]
-  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "critical") | .target_path' "$f")" = src/app.py ]
-  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "low") | .status' "$f")" = open ]
-  jq -e '.semantic_review.findings | all(.fingerprint | test("^sha256:[0-9a-f]{64}$"))' "$f" >/dev/null
-  # every finding carries the schema's required keys
-  jq -e --slurpfile s "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json" \
-    '($s[0].properties.semantic_review.properties.findings.items.required) as $req | .semantic_review.findings | all(. as $x | $req | all(. as $k | $x | has($k)))' "$f" >/dev/null
-  # round 2 (PM override) after a fix: the fixed finding is resolved, the routed one open, the file rewritten
-  "$ROUND_SH" override --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --rounds 2 --reason "PM: confirm the fix in a second round" >/dev/null
-  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"; _sc cp3 ""
-  ROUND_N=2 run _close1 cp3 '.findings |= map(select(.id != "g-1"))'; echo "$output"; [ "$status" -eq 0 ]
-  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "critical") | .status' "$f")" = resolved ]
-  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "medium") | .status' "$f")" = open ]
-  # the fixed finding's route is resolved in the journal; the still-open major keeps its route
-  local fp_fixed; fp_fixed="$(jq -r '.findings[] | select(.severity == "blocker") | .fingerprint' "$E/cp3/round-1/merged.json")"
-  [ "$(jq -r --arg fp "$fp_fixed" 'select(.op == "resolve" and .fingerprint == $fp) | .resolution' "$(_J routed-findings.jsonl)" | head -c 6)" = "fixed:" ]
-  run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/lib/aid-routed-findings.sh' && aid_finding_open_for_epic P900 E-900-1_2 | wc -l"
-  [ "${output##* }" -eq 1 ]
-  [ "$(jq -r '.revision.head_sha' "$f")" = "$(git -C "$R" rev-parse HEAD)" ]
-  # a finding the PM dismissed is closed as "fixed", and the file says it was dismissed
-  local fp_med card="$ROOT/card3.md"; fp_med="$(jq -r '.findings[] | select(.severity == "major") | .fingerprint' "$E/cp3/round-2/merged.json")"
-  echo "nález $fp_med" > "$card"; touch -d '-10 seconds' "$card"
-  export AID_HOOK_AUDIT="$ROOT/audit3.jsonl"
-  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
-  run "$ROUND_SH" dispute --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 2 --fingerprint "$fp_med" \
-    --reason "PM: the contract is met, dismiss it" --pm accepted --finding-card "$card"
-  echo "$output"; [ "$status" -eq 0 ]
-  [[ "$(jq -r '.semantic_review.findings[] | select(.severity == "medium") | .detail' "$f")" == *"dismissed by the PM (dispute accepted)"* ]]
-  # a write that cannot satisfy the schema fails close before closed_at
-  rm -rf "$E/cp3" "$f"; _sc cp3 ""
-  "$ROUND_SH" prepare --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 >/dev/null
-  jq -n '{role: "epic_generalist", checkpoint: "cp3", findings: [], no_findings_reason: "none"}' > "$E/cp3/round-1/reviewer-epic_generalist.json"
-  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$E/cp3/round-1" >/dev/null
-  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus cp3-epic-generalist --output-file "$E/cp3/round-1/reviewer-epic_generalist.json" --evidence-dir "$E/cp3/round-1" >/dev/null
-  "$ROUND_SH" collect --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 >/dev/null
-  # the broken schema lives in a copy of the plugin: an interrupted run must
-  # never leave the real one broken (it did once)
-  local plug="$ROOT/plugin-copy"; mkdir -p "$plug"
-  cp -r "$AID_PLUGIN_PATH"/{scripts,defaults,skills,.claude-plugin} "$plug"/
-  jq '.properties.semantic_review.properties.mode.enum = ["local"]' "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json" \
-    > "$plug/defaults/schemas/semantic-review.schema.json"
-  AID_PLUGIN_PATH="$plug" run "$plug/scripts/aid-review-round.sh" close --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 --tokens epic_generalist=1
-  [ "$status" -eq 1 ]; [[ "$output" == *"semantic_review.mode"* ]]
-  [ ! -f "$f" ]; [ "$(jq -r '.closed_at // "none"' "$E/cp3/round-1/round.json")" = none ]
 }
 
 # ── Step 9: fast mode on the same mechanism ──
@@ -1709,22 +1617,22 @@ _rebind() {   # the plan follows the brief: verze and sha
   run "$ROUND_SH" prepare "$wt/.aid-o/plans/p.md" --round 1
   [ "$status" -eq 1 ]; [[ "$output" == *"two different contents under one name"* ]]
 }
-@test "cp7-zadani: with CP3 off an EPIC is cp3: off and carries what its step rounds left open; the prompt says so" {
+@test "cp7-zadani: a run carries what its step rounds left open (review: steps); the prompt says so" {
   _frepo
   local ep="$R/.aid-o/work/evidence/E-901-1_1/R-1/cp2/step-0"; mkdir -p "$ep/round-1"
   jq -n '{findings: [{severity: "major", status: "open", claim: "the import is never used", evidence: "src/app.py:1", fix: "use it"}, {severity: "minor", status: "open", claim: "style", evidence: "src/app.py:2", fix: "x"}]}' > "$ep/round-1/merged.json"
   bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
-  [ "$(jq -c '.epics[0] | {cp3, n: (.findings | length)}' "$E/cp7/epic-findings.json")" = '{"cp3":"off","n":1}' ]
+  [ "$(jq -c '.epics[0] | {review, n: (.findings | length)}' "$E/cp7/epic-findings.json")" = '{"review":"steps","n":1}' ]
   _fsc; _F prepare --round 1 >/dev/null
-  grep -q 'EPIC review switched off; its steps were reviewed one by one — 1 finding' "$(FD 1)/prompt-final_generalist.md"
+  grep -q 'its steps were reviewed one by one — 1 finding' "$(FD 1)/prompt-final_generalist.md"
 }
-@test "cp7-zadani: with CP3 off a leftover cp3/ is not read, and a finding the PM dismissed is listed for the close" {
+@test "cp7-zadani: an old run's EPIC-review directory is not read, and a finding the PM dismissed is listed for the close" {
   _frepo
   local base="$R/.aid-o/work/evidence/E-901-1_1"; mkdir -p "$base/R-1/cp3/round-1" "$base/R-2/cp2/step-0/round-1"
   echo '{"findings": []}' > "$base/R-1/cp3/round-1/merged.json"
   jq -n '{findings: [{severity: "blocker", status: "fixed", claim: "shell injection in run", evidence: "src/app.py:1", fix: "quote it", dispute: {pm: {answer: "accepted"}}}]}' > "$base/R-2/cp2/step-0/round-1/merged.json"
   bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
-  [ "$(jq -c '.epics[0] | {cp3, s: [.findings[].status]}' "$E/cp7/epic-findings.json")" = '{"cp3":"off","s":["dismissed_by_pm"]}' ]
+  [ "$(jq -c '.epics[0] | {review, s: [.findings[].status]}' "$E/cp7/epic-findings.json")" = '{"review":"steps","s":["dismissed_by_pm"]}' ]
 }
 
 # ── foreign repositories in the review packets (P112 Step 3) ─────────────────

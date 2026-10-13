@@ -139,8 +139,6 @@ _build_healthy() {
   done
   mkdir -p "$(dirname "$AUTH")"
   jq -n --arg h "$HEAD_SHA" '{cp1: {verdict: "pass"}, target_head: $h}' > "$AUTH"
-  # the EPIC's own whole-diff round (cp3), closed and passed at HEAD: the final_review input in EPIC mode
-  mkdir -p "$EVID/cp3"; jq -n --arg h "$HEAD_SHA" '{verdict: "pass", head_sha: $h, rounds: []}' > "$EVID/cp3/rounds.json"
 }
 
 # Run the aggregator to $OUT (bats `run` sets $status/$output).
@@ -454,7 +452,6 @@ EOF
   git -C "$PROJ" commit -q -m init
   cd "$PROJ"
   # P094: done-advance re-checks the EPIC review round at HEAD.
-  aid_fixture_seed_step_review "$EVID" cp3 "" pass "$(git -C "$PROJ" rev-parse HEAD)"
 }
 
 @test "decision: done-advance records release_decision (observe → advances) with head_sha and the verdict" {

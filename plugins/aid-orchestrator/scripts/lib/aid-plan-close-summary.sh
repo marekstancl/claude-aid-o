@@ -136,7 +136,7 @@ _apcs_short() {
 # is the record, this is the nudge to look at it while the plan is fresh.
 # _apcs_standing_line <plan_id> — when the PM gave the plan a standing "don't
 # ask, finish it", how many review rounds ran under it (round.json standing:
-# true in the plan's step and EPIC runs). Nothing when there is no instruction.
+# true in the plan's runs). Nothing when there is no instruction.
 _apcs_standing_line() {
   local plan_id="$1" num="${1#P}" root f n=0
   root="$(aid_state_root 2>/dev/null || pwd)"

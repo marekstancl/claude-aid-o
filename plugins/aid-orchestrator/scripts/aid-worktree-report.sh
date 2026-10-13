@@ -16,8 +16,9 @@
 #   • trees made by hand or by an older convention — on 2026-08-11 two such
 #     siblings sat in /opt/eco/projects/ since 2 and 10 August, both with
 #     merged branches and nothing uncommitted;
-#   • the frozen CP3 copies — `cp3-frozen` appears in NO script and NO skill
-#     of this plugin. They exist because CP3 requires two reviews to agree on
+#   • the frozen copies of the EPIC review (CP3, removed in 3.0.0) —
+#     `.aid-worktrees/<checkpoint>-frozen-*`, made by no script and no skill
+#     of this plugin. They existed because CP3 required two reviews to agree on
 #     one commit, which a live branch cannot offer, so a controller freezes a
 #     tree by hand. An established practice with no mechanism, therefore no
 #     cleanup.
@@ -82,7 +83,7 @@ while IFS= read -r line; do
         kind="main"; note="hlavni checkout"
       elif [[ "$wt" == "$MAIN_ROOT/.aid-worktrees/plan-"* ]]; then
         kind="owned"; note="AID ji vytvoril a pri plan-close ji sam odstrani"
-      elif [[ "$wt" == *"/.aid-worktrees/cp3-frozen-"* ]]; then
+      elif [[ "$wt" == *"/.aid-worktrees/"*"-frozen-"* ]]; then
         kind="frozen"; note="zmrazena kopie pro CP3 — DUKAZ, nemazat automaticky; zadny mechanismus ji neuklidi"
       else
         kind="foreign"; note="mimo kanonickou cestu — AID o ni nevi a nikdy ji neuklidi"

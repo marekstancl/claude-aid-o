@@ -2539,7 +2539,6 @@ YAML
   # Bound to the root commit, an ancestor of every tree the advance may
   # evaluate; a case that needs the freshness check to see no later commit
   # re-seeds it at the head it advances from.
-  (cd "$TEST_PROJECT_ROOT" && aid_fixture_seed_step_review "$dir" cp3 "" pass "$(git rev-list --max-parents=0 HEAD | tail -1)")
   cat > "$TEST_PROJECT_ROOT/.aid-o/config/plugin.yaml" <<YAML
 plugin_path: "$AID_PLUGIN_PATH"
 dispatch_mode: subagent

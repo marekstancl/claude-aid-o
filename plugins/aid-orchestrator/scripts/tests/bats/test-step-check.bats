@@ -135,18 +135,6 @@ _json() { jq -r "$1" "$E/$2/step-check.json"; }
   [ "$status" -eq 0 ]; [[ "$output" == "verdict: skip (streamlined)"* ]]
   [ "$(jq -r .reason "$E/cp2/step-0/rounds.json")" = streamlined ]
 }
-@test "cp3 ranges from base_commit over every step's scope; a base that is not an ancestor is refused" {
-  echo "s0" >> "$R/src/app.py"; c0="$(_commit s0)"; _event 0 "$c0"
-  echo "h" > "$R/src/api/handler.py"; _commit s1 >/dev/null
-  run _run --checkpoint cp3
-  [ "$status" -eq 0 ]; [[ "$(_json .range cp3)" == "$BASE"..* ]]
-  [ "$(_json '.files.outside_files|length' cp3)" -eq 0 ]
-  # a foreign base
-  git -C "$R" checkout -q -b other "$BASE"; echo f > "$R/f"; foreign="$(_commit foreign)"; git -C "$R" checkout -q main
-  printf 'base_commit: %s\n' "$foreign" > "$E/fsm-state.yaml"; rm -rf "$E/cp3"
-  run _run --checkpoint cp3
-  [ "$status" -eq 1 ]; [[ "$output" == *"not an ancestor"* ]]
-}
 @test "cp6 sees the working tree (unstaged and untracked) and takes the DoD from --dod-file" {
   echo "wip" >> "$R/src/app.py"; echo "new" > "$R/src/new.py"
   echo "Task: do the thing" > "$T/dod.txt"

@@ -207,7 +207,6 @@ YAML
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
   seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   # execution.yaml defines only always_pass — NOT 'ghost'
   setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
@@ -234,7 +233,6 @@ YAML
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
   seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
   # NO plan.json → reconciliation cannot run; behavior unchanged, marker absent/false
@@ -257,7 +255,6 @@ YAML
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
   local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
   seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config" "$TEST_EVIDENCE_DIR/gates"
   setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
   # plan.json exists → reconciliation is REQUIRED
@@ -497,7 +494,6 @@ YAML
   [ "$status" -eq 0 ]
 
   # GATES→DONE must refuse — a plan-required gate was excluded by the profile.
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass   # P094: GATES→DONE reads the cp3 round at HEAD
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -ne 0 ]
   [[ "$output" == *"plan_gate_profile_excluded"* ]]
@@ -534,7 +530,6 @@ YAML
   run jq -e '.excluded_gates == []' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$status" -eq 0 ]
 
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass   # P094: GATES→DONE reads the cp3 round at HEAD
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -eq 0 ]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
@@ -560,7 +555,6 @@ YAML
     --plan-json "$TEST_EVIDENCE_DIR/plan.json"
   [ "$status" -eq 0 ]
 
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass   # P094: GATES→DONE reads the cp3 round at HEAD
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -eq 0 ]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
@@ -597,7 +591,6 @@ YAML
   [ "$status" -eq 0 ]
 
   # GATES→DONE must refuse because plan.json is malformed/corrupt
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass   # P094: GATES→DONE reads the cp3 round at HEAD
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -ne 0 ]
   [[ "$output" == *"plan_json_malformed"* ]]
@@ -651,7 +644,6 @@ YAML
 
   # GATES→DONE must refuse — the type-check in the jq expression now catches
   # the non-array .gates and treats it as malformed JSON (via error())
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass   # P094: GATES→DONE reads the cp3 round at HEAD
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -ne 0 ]
   [[ "$output" == *"plan_json_malformed"* ]]
@@ -754,7 +746,6 @@ YAML
   run jq -re '.overall' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$output" == "pass" ]
 
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -ne 0 ]
   [[ "$output" == *"risk_profile_below_required"* ]]
@@ -783,7 +774,6 @@ YAML
     --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile full
   [ "$status" -eq 0 ]
 
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -eq 0 ]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
@@ -811,7 +801,6 @@ YAML
   run jq -r '.profile_source' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$output" == "none" ]
 
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -eq 0 ]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
@@ -826,7 +815,6 @@ YAML
 
   seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
   echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
 
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   _write_table_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
@@ -851,7 +839,6 @@ YAML
 
   seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
   echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   _write_table_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
@@ -872,7 +859,6 @@ YAML
 
   seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
   echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
 
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
@@ -893,7 +879,6 @@ YAML
   local base; base="$(_seed_high_risk_diff)"
   seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
   echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   _write_table_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
   yq -i 'del(.default_profile)' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
@@ -928,7 +913,6 @@ YAML
   run jq -re '.overall' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$output" == "pass" ]
 
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -ne 0 ]
   [[ "$output" == *"risk_profile_unresolvable"* ]]
@@ -954,7 +938,6 @@ YAML
   [ "$status" -eq 0 ]
   # Reorder: full first, standard second.
   yq -i '.gate_profiles = {"full": .gate_profiles.full, "standard": .gate_profiles.standard}' "$exec_yaml"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -ne 0 ]
   [[ "$output" == *"profile_table_changed"* ]]

@@ -40,7 +40,7 @@ never re-derives them.
 ## Per-Checkpoint Diff Scope
 
 `step-check.json.range` (and `range_source`) is the diff a round reviews:
-`<previous step commit>..HEAD` for cp2, `base_commit..HEAD` for cp3, the
+`<previous step commit>..HEAD` for cp2, the
 working tree for cp6, `plan_base_commit..candidate_sha` for cp7.
 
 ## Structural Gate: behaviour trace
@@ -51,7 +51,7 @@ sink, branches with outcomes) as `skills/step-review-roles.md` requires; the
 adjudicator rejects such a finding without one (`trace_missing`). The gate is
 structural: it checks presence, never trace quality.
 
-## The Two Test Questions (CP2 and CP3, both mandatory)
+## The Two Test Questions (every generalist role, both mandatory)
 
 Review has always asked the first one. The second is what stops a portfolio
 growing forever, and it is answered with the SAME weight as the first.
@@ -72,9 +72,9 @@ A new suite must also carry a tier tag (`# aid-tier: t0|t1|t2`) matching what
 its plan declared; `aid-test-tier-lint.sh` is the mechanical half, and review
 is where an over-cheap or over-expensive CHOICE gets questioned.
 
-## CP2, CP3 and CP6 Contracts — Step, EPIC and Fast-Mode Review
+## CP2 and CP6 Contracts — Step and Fast-Mode Review
 
-These three checkpoints are one mechanism: reviewer roles from
+These two checkpoints are one mechanism (with the whole-plan round, CP7): reviewer roles from
 `skills/step-review-roles.md` answer from the shared template
 (`defaults/prompts/review-prompt-v1.md`) in the shape of
 `defaults/schemas/review-finding.schema.json`, and the deterministic
@@ -84,13 +84,12 @@ adjudicator keeps only findings with a command and a `path:line` (or
 | Checkpoint | Diff under review | Roles | Blocks |
 |---|---|---|---|
 | CP2 | the step: last `step_commit` → HEAD (else `base_commit` → HEAD) | `step_generalist`, plus `step_security` when the step check reports a security pattern | `increment-step` |
-| CP3 | the EPIC: `base_commit` → HEAD | `epic_generalist`, `epic_behaviour`, `epic_security` | EXECUTE → GATES |
 | CP6 | the `/aid-do` working tree | `step_generalist` (+ `step_security`) | nothing (advisory) |
 
-The two test questions above are asked by every generalist role; the behaviour
+(The EPIC review, CP3, was removed in 3.0.0.) The two test questions above are asked by every generalist role; the behaviour
 trace is required from a generalist's blocker or major finding whenever the
 step check reports a handler pattern. The controller's procedure, command by
-command, is the "Step review (CP2) and EPIC review (CP3)" section of
+command, is the "Step review (CP2)" section of
 `commands/aid-run.md`; the round evidence is described there and in
 `skills/step-review-roles.md`.
 
@@ -102,16 +101,16 @@ fix-check, P109), and a deterministic adjudicator
 merges what survives the evidence rule:
 
 - the roles, their questions, the evidence rule and the answer shape:
-  `skills/plan-review-roles.md` (schema `defaults/schemas/review-finding.schema.json`, shared with CP2/CP3/CP6);
+  `skills/plan-review-roles.md` (schema `defaults/schemas/review-finding.schema.json`, shared with CP2/CP6/CP7);
 - the controller's procedure, command by command: "Plan review (CP1)" in
   `commands/aid-plan.md`;
 - the rounds, the adjudicator and the round evidence under
   `.aid-o/work/evidence/<plan_id>/cp1/`: `scripts/aid-review-round.sh --plan`
   and `scripts/aid-review-adjudicate.sh`;
-- the gate before EPIC generation: `scripts/aid-cp1-gate.sh`, which reads only
+- the gate before the run: `scripts/aid-cp1-gate.sh`, which reads only
   that round evidence.
 
-**Where the gate is called from — once per TRANSACTION, never once per phase.** A plan's generation is one transaction. `scripts/aid-auto-pipeline.sh` calls this gate exactly ONCE per plan, before any EPIC, `plan.json`, run, FSM state or queue entry exists, and seals the decision into `.aid-o/work/evidence/<plan_id>/generation/generation-authority.json`. Every phase then VERIFIES that sealed authority (schema, self-hash, plan bytes, target head, phase range, re-derived ids) instead of re-running the gate. A standalone `scripts/aid-plan-to-epic.sh` invocation — one given neither `--generation-authority` nor `--transaction` — still runs the full gate per invocation; that is the only surface where a per-invocation gate call remains.
+**Where the gate is called from.** `aid-plan-fsm.sh plan-run` calls this gate once, before `plan.json`, the run or its FSM state exists, and seals the decision into `.aid-o/work/evidence/<plan_id>/generation/generation-authority.json`; a resumed `plan-run` reuses the seal while it still binds the plan bytes and the target head.
 
 ## C2 Semantic Review — Lens Catalog
 
@@ -124,9 +123,8 @@ Evidence format: `semantic-review-final.json` wrapping findings via `aid-finding
 |------|----------------|----------|
 | `final` | the plan-final boundary (`aid-plan-fsm.sh plan-finalize`) | the plan-final review round (cp7), filling the generated envelope |
 
-The `local`, `wiring` and `behavior` modes went with P094: a step's or an
-EPIC's semantic evidence is the reviewer round's merged findings, and the cp3
-`close` writes the per-EPIC `semantic-review-final.json` itself.
+The `local`, `wiring` and `behavior` modes went with P094: a step's semantic
+evidence is the reviewer round's merged findings.
 
 **No-mega-prompt rule (D2):** Verifier dispatches C2 with a profile-selected subset of lenses, not all 12 at once. The `review-profile.required_lenses[]` field governs which lenses run per dispatch.
 
@@ -169,5 +167,5 @@ detail: "<human-readable explanation>"
 
 Under `plan_branch` the whole delivery is read once per plan, by the whole-plan
 round (CP7) against the frozen candidate (`commands/aid-run.md`, "Closing a plan
-(plan-final)"). CP2 and CP3 remain per EPIC in both modes. Mode is read from the
+(plan-final)"); every step is reviewed before it (CP2). Mode is read from the
 plan's committed lifecycle manifest, never inferred.

@@ -9,13 +9,12 @@
 # remaining step's allowed_paths. There was nowhere legitimate to fix it, so it
 # lived in the controller's prose until the prose ended.
 #
-# The NEGATIVE producer case is the important one: an out-of-scope finding in
-# the canonical CP3 artifact with NO journal entry must fail. A carrier that
-# only remembers what the controller chose to write down would have recorded
-# nothing in the live incident either.
+# (The producer half — an out-of-scope finding of the EPIC review's artifact
+# with no journal entry — left with the EPIC review, CP3, in 3.0.0, P114; the
+# step rounds route what they leave open themselves.)
 #
 # FD-3 HYGIENE: every FSM invocation runs with `3>&-`. After any edit:
-#   bats --tap test-routed-findings.bats | grep -cE '^(ok|not ok)'   # == 11
+#   bats --tap test-routed-findings.bats | grep -cE '^(ok|not ok)'   # == 7
 
 load test-helpers.bash
 
@@ -79,15 +78,6 @@ _seed_plan_json() {
 EOF
 }
 
-# _seed_review <target_path> [fingerprint] — the canonical CP3 artifact.
-_seed_review() {
-  local tp="$1" fp="${2:-$FP_A}"
-  cat > "$EV/semantic-review-final.json" <<EOF
-{"artifact_type":"semantic_review","semantic_review":{"mode":"final","findings":[
-  {"fingerprint":"${fp}","severity":"medium","lens":"code-review","check_id":"c1",
-   "target_path":"${tp}","finding_class":"correctness"}]}}
-EOF
-}
 
 _done_advance() {
   bash -c "cd '$ROOT' && exec bash '$FSM' done-advance review release '$EV/fsm-state.yaml'" 3>&-
@@ -124,7 +114,6 @@ _done_advance() {
   [ -f "$ROOT/.aid-o/tasks/${EPIC}-thing.md" ]            # a refused advance leaves it where it is
   [[ "$output" != *"not archived"* ]]                      # and it is no refusal of its own
   _lib "aid_finding_resolve P900 '$FP_A' 'fixed in step 2'"
-  (cd "$ROOT" && aid_fixture_seed_step_review "$EV" cp3 "" pass)
   run _done_advance
   echo "$output"; [ "$status" -eq 0 ]
   [ -f "$ROOT/.aid-o/tasks/archive/${EPIC}-thing.md" ]; [ ! -f "$ROOT/.aid-o/tasks/${EPIC}-thing.md" ]
@@ -168,45 +157,9 @@ _done_advance() {
 
 # ─── the producer half: the one that catches what nobody wrote down ────────
 
-@test "P079 Step 7: an OUT-OF-SCOPE CP3 finding with NO journal entry is refused by fingerprint" {
-  _seed_done_review
-  _seed_plan_json "src/in-scope.ts"
-  _seed_review "docs/somewhere-else.md"
 
-  run _done_advance
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"$FP_A"* ]]
-  [[ "$output" == *"docs/somewhere-else.md"* ]]
-  [[ "$output" == *"no step of ${EPIC} was allowed to touch"* ]]
-}
 
-@test "an out-of-scope CP3 finding the review itself resolved (fixed and confirmed) owes no route (P103)" {
-  _seed_done_review
-  _seed_plan_json "src/in-scope.ts"
-  _seed_review "docs/somewhere-else.md"
-  jq '.semantic_review.findings[0].status = "resolved"' "$EV/semantic-review-final.json" > "$EV/s" && mv "$EV/s" "$EV/semantic-review-final.json"
-  run _done_advance
-  [[ "$output" != *"no step of ${EPIC} was allowed to touch"* ]]
-}
 
-@test "P079 Step 7: an out-of-scope finding that WAS routed satisfies the producer check" {
-  _seed_done_review
-  _seed_plan_json "src/in-scope.ts"
-  _seed_review "docs/somewhere-else.md"
-  _lib "aid_finding_route P900 '$FP_A' cp3-code-review backlog:IMP-501 '$EPIC' 2"
-
-  run _done_advance
-  [[ "$output" != *"no step of"* ]]
-}
-
-@test "P079 Step 7: an IN-SCOPE finding needs no route (a path under an allowed directory counts)" {
-  _seed_done_review
-  _seed_plan_json "src"
-  _seed_review "src/nested/thing.ts"
-
-  run _done_advance
-  [[ "$output" != *"$FP_A"* ]]
-}
 
 # ─── the zero-cost path every legacy run takes ─────────────────────────────
 
@@ -220,34 +173,5 @@ _done_advance() {
 
 # ─── review-round regressions (P079 EPIC 2 review) ─────────────────────────
 
-@test "P079 Step 7: a step: route with NO epic id is refused — it would satisfy the producer check while blocking nothing" {
-  _seed_done_review
-  run _lib "aid_finding_route P900 '$FP_A' cp3-code-review step:2"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"must name the EPIC"* ]]
 
-  # And nothing was recorded, so the producer check still catches the finding.
-  _seed_plan_json "src/in-scope.ts"
-  _seed_review "docs/somewhere-else.md"
-  run _done_advance
-  [[ "$output" == *"no step of"* ]]
-}
 
-@test "P079 Step 7: an UNREADABLE CP3 artifact fails closed — silence is not 'no findings'" {
-  _seed_done_review
-  _seed_plan_json "src/in-scope.ts"
-  printf 'this is not json\n' > "$EV/semantic-review-final.json"
-
-  run _done_advance
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"will not parse"* ]]
-}
-
-@test "P079 Step 7: a GLOB allowed_path counts as scope (scripts/** covers scripts/x.sh)" {
-  _seed_done_review
-  _seed_plan_json "scripts/**"
-  _seed_review "scripts/x.sh"
-
-  run _done_advance
-  [[ "$output" != *"no step of"* ]]
-}

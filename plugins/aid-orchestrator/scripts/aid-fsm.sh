@@ -1159,11 +1159,11 @@ _fsm_refusal_next() {
       if [[ "$(jq -r '.status // ""' "${rd}/collect.json" 2>/dev/null)" == valid ]]; then
         next="$(_fsm_cmd bash "$rr" close "${where[@]}" --round "${last:-1}") --tokens <role>=<n|unknown> …"
       else
-        next="dispatch the round's reviewers (commands/aid-run.md CP2/CP3), then: $(_fsm_cmd bash "$rr" collect "${where[@]}" --round "${last:-1}")"
+        next="dispatch the round's reviewers (commands/aid-run.md CP2), then: $(_fsm_cmd bash "$rr" collect "${where[@]}" --round "${last:-1}")"
       fi ;;
     review_round_failed)
       next="the step's role fixes the open findings and commits, then: $nextround" ;;
-    review_round_stale|cp3_stale_review)
+    review_round_stale)
       next="$nextround" ;;
     no_change_without_outputs)
       next="commit the step's work, then: $chk" ;;
@@ -1211,7 +1211,7 @@ _fsm_refusal_next() {
       next="fix the step and commit, or render the Decision card (lib/aid-decision-card.sh) and wait for the PM, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words>" --finding-card "<card>")"
       fi ;;
     streamlined_cp3_off)
-      next="keep CP3 for this project (cp3_integration_review: true + an epic_review block in .aid-o/config/policies/review-checkpoints.yaml) and run the EPIC review, or run the plan in plan_branch mode, then: $(_fsm_cmd bash "$fsm" done-advance "${from_phase:-review}" "${to_phase:-release}" "$sf")" ;;
+      next="run the plan as one run in plan_branch mode (aid-plan-fsm.sh plan-run P<NNN>; CP7 reviews it at the close) — the EPIC review (CP3) was removed in 3.0.0" ;;
     defer_refused)
       next="render the Decision card quoting ${_sc_label:-the point} (lib/aid-decision-card.sh), wait for the PM's answer, then: $(_fsm_cmd bash "$fsm" increment-step "$sf" --defer-criterion "${_sc_label:-AC<n>}" --reason "<the PM's words, 20+ chars>" --finding-card "<card>")" ;;
     missing_lenses|done_advance_preconditions)
@@ -1277,12 +1277,12 @@ fsm_count_recent_fails_epic() {
   fsm_count_fails_matching '.reason==$r' --arg r "$1"
 }
 
-# fsm_check_review_round <evidence_dir> <checkpoint> [<step>] [--freshness [<tree_root>]] [--head <sha>]
+# fsm_check_review_round <evidence_dir> <checkpoint> [<step>] [--head <sha>]
 #   --head: the commit the round must have read, when it is not the tree's HEAD
 #   (plan close: the frozen candidate, while the tree may stand on an accepted
 #   ancillary-only move past it).
-#   The one precondition of the step review (cp2), the EPIC review (cp3) and
-#   the whole-plan review (cp7, <evidence_dir> = the plan-final run directory,
+#   The one precondition of the step review (cp2) and the whole-plan review
+#   (cp7, <evidence_dir> = the plan-final run directory,
 #   called by plan-finalize --stage decide). Reads <cp dir>/rounds.json written by aid-step-check.sh (a
 #   skip or no_change verdict) or by aid-review-round.sh close (pass or fail):
 #     skip       passes only with a step_check timeline event whose head_sha and
@@ -1291,24 +1291,20 @@ fsm_count_recent_fails_epic() {
 #     no_change  passes only when the step declares at least one `outputs` path
 #                and every declared path exists at HEAD (no_change_without_outputs)
 #     pass       the last round is closed (measurement.json, closed_at), was not
-#                stubbed (stubbed_round), and its head_sha is HEAD; with
-#                --freshness HEAD may be ahead by the D4 exception only: test,
-#                fixture or evidence churn with a CP3-Freshness-Exception trailer
-#                on every commit past the reviewed head (P060 Step 4, kept)
+#                stubbed (stubbed_round), and its head_sha is HEAD (the D4
+#                freshness exception of the EPIC review left with CP3 in 3.0.0)
 #     fail       blocks naming the index
-#   cp3 and cp7 additionally require <evidence_dir>/semantic-review-final.json
-#   when a round ran (the routed-findings reconciliation and the release
-#   decision read it).
+#   cp7 additionally requires <evidence_dir>/semantic-review-final.json when a
+#   round ran (the release decision reads it).
 #   A disabled checkpoint (review_checkpoints.enabled or its own toggle false)
 #   passes with a review_checkpoint_disabled audit line.
 #   Registry: fsm_review_round_required, fsm_review_round_head_bound,
 #   fsm_review_round_skip_bound. Tested by test-review-round-fsm.bats.
 fsm_check_review_round() {
-  local evidence_dir="$1" cp="$2" step="${3:-}" freshness=0 tree_root="$PWD" expected_head=""
+  local evidence_dir="$1" cp="$2" step="${3:-}" tree_root="$PWD" expected_head=""
   shift 3 2>/dev/null || shift $#
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --freshness) freshness=1; [[ -n "${2:-}" && "${2:-}" != --* ]] && { tree_root="$2"; shift; }; shift ;;
       --head) expected_head="${2:-}"; shift 2 ;;
       *) shift ;;
     esac
@@ -1316,7 +1312,6 @@ fsm_check_review_round() {
   local cpdir index timeline="${evidence_dir}/timeline.jsonl" toggle
   case "$cp" in
     cp2) cpdir="${evidence_dir}/cp2/step-${step}"; toggle=cp2_step_review ;;
-    cp3) cpdir="${evidence_dir}/cp3"; toggle=cp3_integration_review ;;
     cp7) cpdir="${evidence_dir}/cp7"; toggle=cp7_plan_final_review ;;
     *) echo "PRECONDITION FAIL: fsm_check_review_round: unknown checkpoint ${cp}" >&2; return 1 ;;
   esac
@@ -1339,7 +1334,7 @@ fsm_check_review_round() {
     return 0
   fi
 
-  local how_to="run: bash \$AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint ${cp}${step:+ --step $step} --evidence-dir ${evidence_dir}; then, for a review verdict, aid-review-round.sh prepare/collect/close (commands/aid-run.md \"Step review (CP2) and EPIC review (CP3)\")"
+  local how_to="run: bash \$AID_PLUGIN_PATH/scripts/aid-step-check.sh --checkpoint ${cp}${step:+ --step $step} --evidence-dir ${evidence_dir}; then, for a review verdict, aid-review-round.sh prepare/collect/close (commands/aid-run.md \"Step review (CP2)\")"
   [[ "$cp" == cp7 ]] && how_to="run: plan-finalize --stage produce, then bash \$AID_PLUGIN_PATH/scripts/aid-review-round.sh prepare|collect|close --checkpoint cp7 --evidence-dir ${evidence_dir} --round 1"
   if [[ ! -f "$index" ]]; then
     _PRECONDITION_FAIL_REASON="review_round_missing"
@@ -1399,7 +1394,7 @@ fsm_check_review_round() {
       return 1 ;;
   esac
 
-  # pass: the last round must be closed, unstubbed, at HEAD (or D4-fresh).
+  # pass: the last round must be closed, unstubbed, at HEAD.
   local dir="${cpdir}/round-${last}"
   if [[ -z "$last" || ! -f "${dir}/measurement.json" || "$(jq -r '.closed_at // ""' "${dir}/round.json" 2>/dev/null)" == "" ]]; then
     _PRECONDITION_FAIL_REASON="round_not_closed"
@@ -1419,58 +1414,10 @@ fsm_check_review_round() {
     return 1
   fi
   [[ "$reviewed_head" == "$current_head" ]] && return 0
-  if (( ! freshness )); then
-    _PRECONDITION_FAIL_REASON="review_round_stale"
-    echo "PRECONDITION FAIL: ${cp}${step:+ step $step} round ${last} reviewed ${reviewed_head:0:12}, HEAD is ${current_head:0:12} (review_round_stale): the reviewers did not see the current tree." >&2
-    _fsm_refusal_next review_round_stale
-    return 1
-  fi
-
-  # --freshness (GATES→DONE, done-advance): the D4 narrow exception (P060 Step 4).
-  local policy="${CP3_FRESHNESS_POLICY:-blocking}"
-  _fresh_fail() {
-    [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_would_block" reason="$1" enforcement="$policy"
-    if [[ "$policy" == "blocking" ]]; then _PRECONDITION_FAIL_REASON="cp3_stale_review"; printf '%s\n' "${@:2}" >&2; _fsm_refusal_next cp3_stale_review; return 1; fi
-    return 0
-  }
-  if ! git -C "$tree_root" rev-parse --verify "${reviewed_head}^{commit}" >/dev/null 2>&1 \
-     || ! git -C "$tree_root" merge-base --is-ancestor "$reviewed_head" "$current_head" 2>/dev/null; then
-    _fresh_fail reviewed_head_not_ancestor "PRECONDITION FAIL: the cp3 round's head ${reviewed_head} is not an ancestor of HEAD ${current_head}." "Fix: run the cp3 review again against the current HEAD."
-    return $?
-  fi
-  local changed_files=() pth
-  while IFS= read -r -d '' pth; do changed_files+=("$pth"); done < <(git -C "$tree_root" diff --name-only -z "${reviewed_head}..${current_head}" 2>/dev/null)
-  local violating="" base
-  for pth in "${changed_files[@]}"; do
-    base="${pth##*/}"
-    case "$base" in
-      verifier-output-*.md|gates_report.json|fsm-state.yaml|rounds.json|round.json|measurement.json|step-check.json)
-        violating="$pth (verdict-bearing)"; break ;;
-    esac
-    case "$pth" in
-      */tests/*|tests/*|*/fixtures/*|fixtures/*) : ;;
-      "$evidence_dir"/*) : ;;
-      *) violating="$pth (out-of-scope)"; break ;;
-    esac
-  done
-  if [[ -n "$violating" ]]; then
-    _fresh_fail path_out_of_scope "PRECONDITION FAIL: commit(s) past the reviewed cp3 head touch a non-exempt path: ${violating}." "Reason: the D4 exception permits only test/fixture/evidence churn; verdict-bearing files never qualify. A production change past the reviewed head means the review never saw it." "Fix: run the cp3 review again against HEAD, re-run gates, then retry. OR (PM-authorized, audited): --force --reason '<≥20 chars>'."
-    return $?
-  fi
-  local c missing_trailer="" tr
-  while IFS= read -r c; do
-    [[ -z "$c" ]] && continue
-    tr=$(git -C "$tree_root" log -1 --format='%(trailers:key=CP3-Freshness-Exception,valueonly)' "$c" 2>/dev/null)
-    [[ -z "$tr" ]] && { missing_trailer="$c"; break; }
-  done < <(git -C "$tree_root" rev-list "${reviewed_head}..${current_head}" 2>/dev/null)
-  if [[ -n "$missing_trailer" ]]; then
-    _fresh_fail missing_exception_trailer "PRECONDITION FAIL: commit ${missing_trailer} past the reviewed cp3 head lacks a 'CP3-Freshness-Exception: <reason>' git trailer (D4 condition b)." "Fix: annotate the commit(s) with the trailer, OR run the cp3 review again against HEAD."
-    return $?
-  fi
-  local files_csv=""
-  (( ${#changed_files[@]} )) && { files_csv=$(printf '%s,' "${changed_files[@]}"); files_csv="${files_csv%,}"; }
-  [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_exception" reviewed_head="$reviewed_head" head="$current_head" changed_file_count="${#changed_files[@]}" changed_files="$files_csv"
-  return 0
+  _PRECONDITION_FAIL_REASON="review_round_stale"
+  echo "PRECONDITION FAIL: ${cp}${step:+ step $step} round ${last} reviewed ${reviewed_head:0:12}, HEAD is ${current_head:0:12} (review_round_stale): the reviewers did not see the current tree." >&2
+  _fsm_refusal_next review_round_stale
+  return 1
 }
 
 # _fsm_routed_recorded_set <plan_id> — every fingerprint the routed-findings
@@ -1485,20 +1432,10 @@ _fsm_routed_recorded_set() {
 # ---------------------------------------------------------------------------
 # _fsm_routed_findings_check <epic_id> <evidence_dir>  (P079 Step 7, IMP-473)
 #
-# TWO halves, because either alone is a half-truth:
-#
-#   CONSUMER — a finding routed to THIS epic (or one of its steps) that is not
-#   yet resolved blocks completion. This is the ordinary carrier check.
-#
-#   PRODUCER RECONCILIATION — every finding in the run's canonical CP3
-#   artifact whose target file lies OUTSIDE the union of all steps'
-#   allowed_paths must have a journal entry, open or resolved. Without this the
-#   carrier only remembers what the controller chose to write down, and the
-#   live failure was precisely a controller that wrote nothing.
-#
-# ZERO-COST when the run never routed anything and its CP3 findings are all
-# in scope: no journal and no out-of-scope findings means no work and no
-# behaviour change, which is what every legacy run looks like.
+# A finding routed to THIS epic (or one of its steps) that is not yet resolved
+# blocks completion. (Its second half, the reconciliation of the EPIC review's
+# findings against the steps' scope, left with CP3 in 3.0.0, P114: the step
+# rounds route what they leave open themselves, aid_step_review_route_open.)
 #
 # Returns 0 when the EPIC may complete, 1 when it may not (message on stderr).
 # ---------------------------------------------------------------------------
@@ -1532,84 +1469,14 @@ _fsm_routed_findings_check() {
     done <<< "$open_out"
   fi
 
-  # ── Producer reconciliation against the canonical CP3 artifact ────────────
-  local review_json="${evidence_dir}/semantic-review-final.json"
-  local plan_json="${evidence_dir}/plan.json"
-  # P094 Step 7: the cp3 close writes the file, so its absence is no longer
-  # "nothing to reconcile" once a cp3 round closed (verdict pass or fail). A
-  # skipped or no_change cp3 ran no reviewer and passes with an audit line;
-  # a run with no cp3 index at all keeps the legacy zero-cost path.
-  # (a leftover cp3/ of a run started before CP3 was switched off is not read: P110)
-  if [[ ! -f "$review_json" && -f "${evidence_dir}/cp3/rounds.json" ]] \
-     && ! aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review >/dev/null; then
-    local cp3_verdict; cp3_verdict="$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)"
-    case "$cp3_verdict" in
-      pass|fail)
-        echo "PRECONDITION FAIL: the cp3 review round of ${epic_id} closed (verdict ${cp3_verdict}) but ${review_json} is missing, so its findings cannot be reconciled against the steps' scope; run aid-review-round.sh close --checkpoint cp3 again (it writes the file)." >&2
-        return 1 ;;
-      skip|no_change)
-        fsm_emit_audit_log "cp3_reconciliation_skipped" --evidence-dir "$evidence_dir" --reason "cp3 verdict ${cp3_verdict}: no reviewer ran, no semantic file to reconcile" 2>/dev/null || true ;;
-    esac
-  fi
-  [[ -f "$review_json" && -f "$plan_json" ]] || { [[ "$failed" -eq 1 ]] && return 1; return 0; }
-
-  # The scope union is the same one the pre-commit hook computes for GATES and
-  # DONE: every step's allowed_paths, flattened. A finding inside it had an
-  # authorized place to be fixed and needs no route.
-  local scope_list findings
-  if ! scope_list="$(jq -r '[ .steps[]?.allowed_paths[]? ] | unique | .[]' "$plan_json" 2>&1)"; then
-    echo "PRECONDITION FAIL: cannot read allowed_paths from ${plan_json} (${scope_list}) — refusing to decide which review findings were in scope from a file that will not parse." >&2
-    return 1
-  fi
-  # A jq failure here must NOT read as "no findings": an unreadable review is
-  # the one input whose silence would pass this whole check open.
-  # A finding the review itself closed (status resolved: fixed and confirmed by
-  # a later round, or dismissed by the PM) owes no route — P103 had to route and
-  # resolve five of them by hand after a clean confirmation.
-  if ! findings="$(jq -r '.semantic_review.findings[]? | select((.target_path // "") != "" and (.status // "open") != "resolved") | "\(.fingerprint)\t\(.target_path)"' "$review_json" 2>&1)"; then
-    echo "PRECONDITION FAIL: cannot read findings from ${review_json} (${findings}) — refusing to complete ${epic_id} on a review artifact that will not parse." >&2
-    return 1
-  fi
-
-  # The journal is read ONCE into a newline blob; `aid_finding_recorded` would
-  # otherwise re-parse the whole file for every out-of-scope finding.
-  local recorded_fps=""
-  recorded_fps="$(_fsm_routed_recorded_set "$plan_id")" || recorded_fps=""
-
-  local fp tp in_scope pat
-  while IFS=$'\t' read -r fp tp; do
-    [[ -n "$fp" && -n "$tp" ]] || continue
-    in_scope=0
-    while IFS= read -r pat; do
-      [[ -n "$pat" ]] || continue
-      # `_aid_ancillary_glob_match` (lib/aid-ancillary.sh) is the shipped
-      # path-vs-pattern predicate, permissive mode: a bash GLOB (`scripts/**`,
-      # `src/*.ts`) or a plain directory prefix (`src` covering
-      # `src/nested/thing.ts`). Reused rather than restated — a private copy
-      # here would make "in scope" mean one thing to this check and another to
-      # every other consumer of the same allowed_paths.
-      if _aid_ancillary_glob_match "$tp" "$pat"; then in_scope=1; break; fi
-    done <<< "$scope_list"
-    [[ "$in_scope" -eq 1 ]] && continue
-    if [[ $'\n'"$recorded_fps"$'\n' != *$'\n'"$fp"$'\n'* ]]; then
-      echo "PRECONDITION FAIL: CP3 finding ${fp} targets ${tp}, which no step of ${epic_id} was allowed to touch, and nothing recorded what happens to it. Route it before completing: aid_finding_route ${plan_id} ${fp} cp3 <step:<n>|epic:<id>|backlog:IMP-<n>> ${epic_id}" >&2
-      failed=1
-    fi
-  done <<< "$findings"
-
   [[ "$failed" -eq 1 ]] && return 1
   return 0
 }
 
-# Route a CP3-freshness violation through the enforcement policy (P060 Step 4).
-# Emits cp3_freshness_would_block, then: blocking → print recovery, return 1;
-# observe → return 0 (logged, non-blocking). Sets _PRECONDITION_FAIL_REASON so
-# cmd_transition can group the failure in the timeline (like other preconditions).
-# Args: $1 timeline  $2 policy  $3 reason  $4.. stderr recovery lines.
 # fsm_check_orphan_dispatches — Component B of P040 (Dispatch Lifecycle Enforcement Bundle).
 # Reads <evidence_dir>/pending-dispatches.jsonl and refuses transition if any
 # start event lacks matching complete within expected_duration_max (default 600s
-# for CP2, 900s for CP3, 600s for CP4, 1200s for CP1, hard ceiling 1800s).
+# for CP2, 600s for CP4, 1200s for CP1, hard ceiling 1800s).
 #
 # Empirical anchor: NR 8/10/13/14 fabricated provenance class across 4 projects.
 # Enforcement principle: AID-v3-principles.md §1.
@@ -1727,34 +1594,27 @@ fsm_check_streamlined_integration_review() {
     gates_source="legacy_flat"
     echo "NOTE: streamlined integration review read gates_report.json from the legacy flat path (${gates_flat})." >&2
   fi
-  local missing=() cp3_off pmode=""
-  # P110: CP3 switched off (the default since 2.116.0) needs no cp3 round here
-  # — but a streamlined run skips every step review, so without CP3 it is
-  # reviewed only when the whole-plan round (CP7, plan_branch) follows; a
-  # legacy-mode streamlined run with CP3 off would ship unreviewed and is refused.
+  local missing=() pmode=""
+  # A streamlined run skips every step review; since the EPIC review (CP3)
+  # left in 3.0.0 (P114; off by default since 2.116.0, P110) it is reviewed
+  # only by the whole-plan round (CP7, plan_branch) that follows it — a
+  # streamlined run of any other mode would ship unreviewed and is refused.
   IFS=$'\t' read -r pmode _ _ < <(_fsm_declared_plan_mode "${epic_id:-}" 2>/dev/null) || true
-  local cp3_pass=false
-  [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] && cp3_pass=true
-  if cp3_off="$(aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review)" && [[ "$pmode" != plan_branch && "$cp3_pass" != true ]]; then
-    echo "REFUSED (streamlined_cp3_off): streamlined run with the EPIC review (CP3) off and no whole-plan review after it (plan mode: ${pmode:-legacy}) — nothing would review this code." >&2
-    echo "next: set cp3_integration_review: true with an epic_review block in .aid-o/config/policies/review-checkpoints.yaml and run the EPIC review (aid-step-check.sh --checkpoint cp3, aid-review-round.sh), or run the plan in plan_branch mode (CP7 reads it) (pipeline.md §When AID refuses: streamlined_cp3_off)" >&2
-    fsm_emit_audit_log "streamlined_integration_review_fail" --evidence-dir "$evidence_dir" --reason "streamlined, cp3 off, mode ${pmode:-legacy}" 2>/dev/null || true
+  if [[ "$pmode" != plan_branch ]]; then
+    echo "REFUSED (streamlined_cp3_off): streamlined run with no whole-plan review after it (plan mode: ${pmode:-legacy}) — the EPIC review (CP3) was removed in 3.0.0, so nothing would review this code." >&2
+    echo "next: run the plan as one run in plan_branch mode (aid-plan-fsm.sh plan-run P<NNN>; CP7 reads it at the close) (pipeline.md §When AID refuses: streamlined_cp3_off)" >&2
+    fsm_emit_audit_log "streamlined_integration_review_fail" --evidence-dir "$evidence_dir" --reason "streamlined, no CP7 after it, mode ${pmode:-legacy}" 2>/dev/null || true
     return 1
-  elif [[ -n "$cp3_off" ]]; then
-    fsm_emit_audit_log review_checkpoint_disabled --evidence-dir "$evidence_dir" --reason "cp3_integration_review off (${cp3_off//$'\t'/ in }): streamlined done-advance proceeds from the steps' reviews and the gates" 2>/dev/null || true
-  else
-    [[ "$(jq -r '.verdict // ""' "${evidence_dir}/cp3/rounds.json" 2>/dev/null)" == pass ]] || missing+=("cp3/rounds.json with verdict pass (the closed EPIC review round)")
   fi
   [[ -n "$gates" ]]    || missing+=("gates_report.json (searched ${gates_canonical} and ${gates_flat})")
   if [[ ${#missing[@]} -gt 0 ]]; then
     local joined
     joined=$(IFS=', '; echo "${missing[*]}")
     echo "ERROR: Streamlined run missing required integration-review evidence: ${joined}" >&2
-    echo "The streamlined contract requires a closed passing EPIC review round (cp3/rounds.json)" >&2
-    echo "+ gates_report.json (at ${gates_canonical} or ${gates_flat}) in:" >&2
+    echo "The streamlined contract requires gates_report.json (at ${gates_canonical} or ${gates_flat}) in:" >&2
     echo "  ${evidence_dir}" >&2
     echo "" >&2
-    echo "Fix: run the EPIC review (aid-step-check.sh --checkpoint cp3, aid-review-round.sh) and the gates, then retry done-advance." >&2
+    echo "Fix: run the gates, then retry done-advance." >&2
     echo "" >&2
     echo "OR (PM-authorized override, audited):" >&2
     echo "  aid-fsm.sh done-advance review release <state_file> --force \\" >&2
@@ -2131,11 +1991,12 @@ evaluate_compliance_checks() {
     gates_genby=false
   fi
 
-  # P094: verifier_outputs from the review round indexes (cp2 per step, cp3 once).
-  # A step's index says skip, no_change, pass or fail; aggregate is true when
-  # every step with a step-*-verify.md has a passing (or skipped) index and the
-  # cp3 index passes, null when the run has no steps yet, false otherwise.
-  local cp2_rounds_json cp2_dispatched cp2_verdict cp3_round_json cp3_d cp3_v aggregate
+  # P094: verifier_outputs from the review round indexes (cp2 per step; the
+  # EPIC review, CP3, left in 3.0.0). A step's index says skip, no_change, pass
+  # or fail; aggregate is true when every step with a step-*-verify.md has a
+  # passing (or skipped) index, null when the run has no steps yet, false
+  # otherwise.
+  local cp2_rounds_json cp2_dispatched cp2_verdict aggregate
   cp2_rounds_json='[]'
   local v step_n idx
   for v in "$evidence_dir"/step-*-verify.md; do
@@ -2157,17 +2018,8 @@ evaluate_compliance_checks() {
   else
     cp2_dispatched=false; cp2_verdict=null
   fi
-  idx="${evidence_dir}/cp3/rounds.json"
-  if [[ -f "$idx" ]]; then
-    cp3_round_json="$(jq -c '{verdict: (.verdict // null), rounds: ((.rounds // []) | length)}' "$idx")"
-    cp3_d=true; cp3_v="$(jq -c '.verdict' <<<"$cp3_round_json")"
-  else
-    cp3_round_json='{"verdict":null,"rounds":0}'; cp3_d=false; cp3_v=null
-  fi
   if [[ "$cp2_dispatched" == null ]]; then aggregate=null
-  elif [[ "$cp2_dispatched" == true && "$cp2_verdict" == '"pass"' ]] \
-       && { [[ "$cp3_d" == true && "$cp3_v" == '"pass"' ]] \
-            || aid_review_switched_off "${AID_PROJECT_ROOT:-$PWD}" cp3_integration_review >/dev/null; }; then aggregate=true   # P110: CP3 off needs no cp3 pass
+  elif [[ "$cp2_dispatched" == true && "$cp2_verdict" == '"pass"' ]]; then aggregate=true
   else aggregate=false; fi
 
   # Phase 2 (P037) — plan_ac_match dimension
@@ -2203,9 +2055,6 @@ evaluate_compliance_checks() {
     --argjson cp2_d       "$cp2_dispatched" \
     --argjson cp2_v       "$cp2_verdict" \
     --argjson cp2_rounds  "$cp2_rounds_json" \
-    --argjson cp3d        "$cp3_d" \
-    --argjson cp3v        "$cp3_v" \
-    --argjson cp3_round   "$cp3_round_json" \
     --argjson agg         "$aggregate" \
     '{
       branch_correct:         $bc,
@@ -2217,9 +2066,6 @@ evaluate_compliance_checks() {
         cp2_per_step_dispatched:    $cp2_d,
         cp2_per_step_verdict:       $cp2_v,
         cp2_rounds:                 $cp2_rounds,
-        cp3_dispatched:             $cp3d,
-        cp3_verdict:                $cp3v,
-        cp3_round:                  $cp3_round,
         aggregate:                  $agg
       },
       dod_present: null
@@ -2527,12 +2373,6 @@ EOF
             return 1
           fi
         fi
-
-        # P094: the EPIC review (cp3) is one closed passing round at HEAD.
-        if ! fsm_check_review_round "$evidence_dir" cp3 ""; then
-          _PRECONDITION_FAIL_REASON="${_PRECONDITION_FAIL_REASON:-cp3_review_round}"
-          return 1
-        fi
       fi
       ;;
 
@@ -2563,7 +2403,7 @@ EOF
         # accepts it as self-consumed evidence; a stale HEAD, a forged/tampered
         # waiver, a cross-run copy, or a missing waiver_ref each fail closed.
         # This waives exactly one gate's result — every OTHER precondition below
-        # (plan-gate floor, risk profile, cp3 freshness) stays fully enforced.
+        # (plan-gate floor, risk profile) stays fully enforced.
         local waived_rows report_head
         report_head=$(jq -r '.revision.head_sha // empty' "$report" 2>/dev/null)
         waived_rows=$(jq -r "${AID_GATE_ROW_JQ}"'(.gates // {}) | gate_rows_normalize | to_entries[] | select((.value|type) == "object" and .value.status == "fail" and .value.waived == true) | .key' "$report" 2>/dev/null)
@@ -2739,15 +2579,6 @@ EOF
         # Fail loud, never silent-pass: without jq we cannot verify overall==pass,
         # and a missing verifier must block the DONE transition (OBS-20260708-07).
         echo "PRECONDITION FAIL: jq required to verify gates overall but not found." >&2
-        return 1
-      fi
-
-      # P060 Step 4: CP3 review freshness (OBS-20260702-03). The probe lives HERE
-      # (GATES:DONE) — a stale CP3 review (HEAD moved past its Reviewed-Head) must
-      # not pass as DONE evidence unless the D4 narrow exception holds. Grandfather
-      # + policy handled inside; default BLOCKING (D9).
-      if ! fsm_check_review_round "$evidence_dir" cp3 "" --freshness "$PWD"; then
-        _PRECONDITION_FAIL_REASON="${_PRECONDITION_FAIL_REASON:-cp3_stale_review}"
         return 1
       fi
       ;;
@@ -3449,6 +3280,24 @@ cmd_init() {
   local force="false"
   local streamlined=false
   local direct=false
+  # P114 (3.0.0): a run of a plan is the direct run. init without --direct for
+  # an EPIC of a plan (a committed lifecycle manifest, or its plan worktree) is
+  # the removed EPIC path — refused before anything is written, --force's audit
+  # record included (it is written as the flag is parsed, below). An EPIC id
+  # that names no declared plan (the plan-less run on main, which the FSM's own
+  # suites drive) is unchanged.
+  local _ep_a _ep_direct=false _ep_nnn _ep_mode="" _ep_reason=""
+  for _ep_a in "${@:8}"; do [[ "$_ep_a" == --direct ]] && _ep_direct=true; done
+  _ep_nnn="$(_fsm_epic_plan_nnn "$epic_id")"
+  if [[ "$_ep_direct" != true && -n "$_ep_nnn" ]]; then
+    IFS=$'\t' read -r _ep_mode _ _ep_reason < <(_fsm_declared_plan_mode "$epic_id") || true
+    if [[ ( "$_ep_mode" == plan_branch || "$_ep_mode" == legacy_epic_release_mode ) && -z "$_ep_reason" ]] \
+       || _fsm_in_plan_worktree "$epic_id"; then
+      echo "REFUSED (epic_path_removed): init ${epic_id} without --direct would run an EPIC of P${_ep_nnn} on its own task branch — the EPIC path, removed in AID 3.0.0; a plan runs straight from its file as one run (aid-plan-fsm.sh plan-run P${_ep_nnn})." >&2
+      _fsm_refusal_next epic_path_removed
+      exit 2
+    fi
+  fi
   local i=8
   while [[ $i -le $# ]]; do
     case "${!i}" in
@@ -3586,22 +3435,6 @@ cmd_init() {
       echo "PRECONDITION FAIL: init --direct ${epic_id}: a direct run runs on plan/<id>, but ${_pb_plan_id:-<no plan id>} is not a plan_branch plan (mode '${_dr_mode:-<unresolved>}') — there is no plan branch to run on." >&2
       _fsm_refusal_next direct_run_needs_plan_branch
       exit 1
-    fi
-  fi
-
-  # P114 (3.0.0): a run of a plan is the direct run. init without --direct for
-  # an EPIC of a plan (a committed lifecycle manifest, or its plan worktree) is
-  # the removed EPIC path — refused before anything is written. An EPIC id that
-  # names no declared plan (the plan-less run on main, which the FSM's own
-  # suites drive) is unchanged.
-  if [[ "$direct" != true && -n "$_pb_plan_id" ]]; then
-    local _ep_mode="" _ep_reason=""
-    IFS=$'\t' read -r _ep_mode _ _ep_reason < <(_fsm_declared_plan_mode "$epic_id") || true
-    if [[ ( "$_ep_mode" == plan_branch || "$_ep_mode" == legacy_epic_release_mode ) && -z "$_ep_reason" ]] \
-       || _fsm_in_plan_worktree "$epic_id"; then
-      echo "REFUSED (epic_path_removed): init ${epic_id} without --direct would run an EPIC of ${_pb_plan_id} on its own task branch — the EPIC path, removed in AID 3.0.0; a plan runs straight from its file as one run (aid-plan-fsm.sh plan-run ${_pb_plan_id})." >&2
-      _fsm_refusal_next epic_path_removed
-      exit 2
     fi
   fi
 
@@ -5831,16 +5664,13 @@ VALID_DONE_PHASES="review release"
 #
 # WHAT IS NOT HERE, ON PURPOSE. The EPIC-LOCAL validations still run in
 # plan_branch mode: the streamlined integration review (which, under
-# `streamlined_mode: true`, still HARD-REQUIRES this EPIC's own CP3 code-review
-# + CP3 security outputs — only the CP3 FRESHNESS RE-CHECK is skipped, never
-# the CP3 pair itself), the abandoned-but-shipped check, the tiered-severity
+# `streamlined_mode: true`, requires the gates report), the abandoned-but-shipped check, the tiered-severity
 # compliance precondition (which is what reads the
 # run's CP2 verifier outputs), `pm_decision == merge`, the archived-task-file
 # check and the routed-findings check. The skip is scoped to the per-EPIC RELEASE stack —
 # the stages that only make sense once, at the plan boundary — not to local
 # verification.
 AID_PLAN_BRANCH_SKIPPED_STAGES=(
-  cp3_freshness_recheck
   release_decision
 )
 
@@ -6125,7 +5955,10 @@ cmd_done_advance() {
   # run (a task branch merged by epic-merge-to-plan or by hand), removed —
   # refused before anything is checked or written. Finish it on 2.118.x, or
   # abandon it (aid-plan-fsm.sh epic-complete <plan> <epic> --abandon).
-  if [[ "$_da_state_direct" != true && ( "$_pb_mode" == plan_branch || "$_pb_mode" == legacy_epic_release_mode ) && -z "$_pb_mode_reason" ]]; then
+  # (a plan id must be derivable: with none the resolver prints an EMPTY middle
+  # field, which a tab read collapses — the reason then lands in the plan slot)
+  if [[ "$_da_state_direct" != true && -n "$(_fsm_epic_plan_nnn "$_pb_epic_id")" \
+        && ( "$_pb_mode" == plan_branch || "$_pb_mode" == legacy_epic_release_mode ) && -z "$_pb_mode_reason" ]]; then
     echo "REFUSED (epic_path_removed): done-advance ${_pb_epic_id} is a run of the EPIC path (plan ${_pb_mode_plan}, a task branch), removed in AID 3.0.0." >&2
     _fsm_refusal_next epic_path_removed
     exit 2
@@ -6424,18 +6257,6 @@ EOF
       # at the plan's close (plan-finalize). The skipped names are
       # AID_PLAN_BRANCH_SKIPPED_STAGES, which the timeline event and the spy test read.
       if [[ "$_pb_plan_branch" != "true" ]]; then
-
-        # P060 Step 4: CP3 freshness re-check at review→release. The GATES:DONE probe
-        # is the primary gate, but review-phase commits can land AFTER DONE and
-        # move HEAD past the reviewed CP3 head — this re-check catches that class.
-        # Grandfather + policy (default BLOCKING, D9) handled inside.
-        # PURE TREE consumer (every use of its third arg is a git probe against
-        # the reviewed HEAD) — it gets the invoking tree, not the state root.
-        if ! fsm_check_review_round "$evidence_dir" cp3 "" --freshness "$_tree_root"; then
-          log_event "${evidence_dir}/timeline.jsonl" "fsm_done_advance_fail" \
-            check="cp3_freshness" reason="${_PRECONDITION_FAIL_REASON:-cp3_stale_review}"
-          return 1
-        fi
 
         # ─── The release decision (aid-release-policy.sh, EPIC scope) ───────────
         # Observe by default (release-decision-policy.yaml); `blocking` turns a

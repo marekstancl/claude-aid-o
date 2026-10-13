@@ -475,7 +475,7 @@ final_review_line() {
 }
 
 # recipe: epic-review-line — defines epic_review_line <epic_id> <run_id>: what
-# the run's step reviews (cp2) and EPIC review (cp3) cost, in tokens and USD
+# the run's step reviews (cp2) cost, in tokens and USD
 # from defaults/prices.yaml (a project's .aid-o/config/prices.yaml wins), from
 # the same library. A run with no review evidence renders NOTHING.
 epic_review_line() {
@@ -989,7 +989,7 @@ EOF
 ```
 
 
-### `/aid-status <epic-id>` — Detailed EPIC Status
+### `/aid-status <run-id>` — Detailed Run Status
 
 1. **Find evidence:**
    - Look in `.aid-o/work/evidence/{epic_id}/`
@@ -1000,12 +1000,12 @@ EOF
 2. **Display:**
 
 ```
-EPIC Status: E-003-1_2 — Add Auth System
+Run Status: E-003-1_1 (P003 — Add Auth System)
 ====================================
 State: EXECUTE          ← from fsm-state.yaml .state
 Step: 4/7               ← executing_step / total_steps (see the rule below)
 Controller: manual (mode: manual)   ← ctl from active-runs.json (see the rule below), mode from fsm-state.yaml .mode
-Branch: task/E-003-1_2  ← from fsm-state.yaml .branch
+Branch: plan/P003      ← from fsm-state.yaml .branch
 Gate retries: 0/2       ← gate_retries
 Escalations: 1          ← escalation_count
 Started: 2026-03-03T10:00Z
@@ -1017,7 +1017,7 @@ Recent events (last 5 from timeline.jsonl):
   09:58 step_dispatch step_1_architect — dispatched
   09:55 fsm_init — READY
 
-Evidence: .aid-o/work/evidence/E-003-1_2/{run_id}/
+Evidence: .aid-o/work/evidence/E-003-1_1/{run_id}/
 ```
 
 **Controller rendering rule.** The old `Mode:` line named only half of what a
@@ -1029,7 +1029,7 @@ otherwise; `manual` when the entry has no such field and the run's mode is not
 `auto`), and `<mode>` is `fsm-state.yaml`'s own `.mode`, unchanged. An
 `awaiting_host_resume` detail view repeats the overview's resume lines — the
 artifact path, `aid-fsm.sh resume <epic_id>`, and the recorded action verbatim.
-When the EPIC has no entry in the map at all, render `Controller: (no active
+When the run has no entry in the map at all, render `Controller: (no active
 run entry) (mode: <mode>)` — never a value nothing recorded.
 
 **Step rendering rule.** How a step number is rendered to a human, and which machine fields stay frozen, are defined by the Step rendering rule in skills/pipeline.md. Read it there and follow it; this surface deliberately carries the pointer and not the rule, so a correction to the definition cannot leave a stale copy behind here.
@@ -1037,29 +1037,29 @@ run entry) (mode: <mode>)` — never a value nothing recorded.
 
 **Status when no run started:**
 ```
-EPIC: E-003-1_2 — Add Auth System
+Plan: P003 — Add Auth System
 Status: Plan ready, not started
 
-Run /aid-run E-003-1_2 to start execution.
+Run /aid-run P003 to start execution.
 ```
 
 ## Edge Cases
 
-**No EPICs found:**
+**No runs found:**
 ```
-No EPICs found.
+No runs found.
 
 Get started:
   /aid-do "quick task"     — implement something small
   /aid-plan                — plan something bigger
 ```
 
-**EPIC exists but no evidence:**
+**Plan exists but no run:**
 ```
-EPIC: {id} — {title}
+Plan: {plan_id} — {title}
 Status: Not started (no evidence directory)
 
-Run /aid-run {id} to start execution.
+Run /aid-run {plan_id} to start execution.
 ```
 
 ## Evidence Paths
@@ -1068,9 +1068,8 @@ Run /aid-run {id} to start execution.
 .aid-o/work/evidence/{epic_id}/{run_id}/   — run evidence root
   fsm-state.yaml                                — FSM state (replaces plan_progress.json)
   timeline.jsonl                            — event log (replaces stage_log.jsonl)
-.aid-o/tasks/                               — EPIC files (replaces 02-epics/)
 .aid-o/work/plan-state/{plan_id}/plan-state.yaml  — per-plan phase + worktree_path
-.aid-o/work/active-runs.json                — map of active EPIC runs (keyed by epic_id)
+.aid-o/work/active-runs.json                — map of active runs (keyed by the run id E-<nnn>-1_1)
 ```
 
 ## Reference Files
@@ -1092,12 +1091,9 @@ Run /aid-run {id} to start execution.
 
 ## Plan mode
 
-A plan declares its release model in its committed lifecycle manifest
-(`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`). Under `plan_branch` an
-EPIC merges into the plan branch and only the plan releases, once, at the
-plan-final boundary; under `legacy_epic_release_mode` each EPIC releases as
-before. New plans default to `plan_branch` when the project declares a
-`gate_profiles` table, and otherwise fall back to legacy with a logged
-`plan_branch_unavailable: no_gate_profiles`. Fast Mode (`/aid-do`) neither
+A plan runs in `plan_branch` mode (its committed lifecycle manifest,
+`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`): its one run works on the
+plan branch and the plan releases once, at the plan-final boundary. The
+per-EPIC release (`legacy_epic_release_mode`) left with the EPIC path in 3.0.0. Fast Mode (`/aid-do`) neither
 creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.

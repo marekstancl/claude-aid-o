@@ -202,7 +202,7 @@ YML
   [ "$output" = "main" ]
 }
 
-@test "review status: with CP3 off the last step's CP2 index is the EPIC's review record — pass is accepted, fail rejected (P110)" {
+@test "review status: the last step's CP2 index is the run's review record — pass is accepted, fail rejected (P110; the only record since CP3 left in 3.0.0)" {
   mkdir -p .aid-o/work/evidence/E-950-1_1/R-1/cp2/step-0 .aid-o/work/evidence/E-950-1_1/R-1/cp2/step-1
   echo '{"verdict":"pass","head_sha":"x"}' > .aid-o/work/evidence/E-950-1_1/R-1/cp2/step-0/rounds.json
   echo '{"verdict":"pass","head_sha":"y"}' > .aid-o/work/evidence/E-950-1_1/R-1/cp2/step-1/rounds.json
@@ -213,17 +213,10 @@ YML
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; _aid_lc_epic_review_status E-950-1_1 ."
   [[ "$output" == *rejected* ]]
 }
-@test "review status: with CP3 off one failed step of the run rejects it, whichever step is last (P110 security review)" {
+@test "review status: one failed step of the run rejects it, whichever step is last (P110 security review)" {
   mkdir -p .aid-o/work/evidence/E-951-1_1/R-1/cp2/step-0 .aid-o/work/evidence/E-951-1_1/R-1/cp2/step-1
   echo '{"verdict":"fail"}' > .aid-o/work/evidence/E-951-1_1/R-1/cp2/step-0/rounds.json
   echo '{"verdict":"pass"}' > .aid-o/work/evidence/E-951-1_1/R-1/cp2/step-1/rounds.json
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; _aid_lc_epic_review_status E-951-1_1 ."
   [[ "$output" == *rejected* ]]
-}
-@test "review status: a project that keeps CP3 and has only CP2 indexes is unverifiable, never accepted from its step rounds (2.116.1, fail-closed)" {
-  mkdir -p .aid-o/work/evidence/E-952-1_1/R-1/cp2/step-0 .aid-o/config/policies
-  echo '{"verdict":"pass"}' > .aid-o/work/evidence/E-952-1_1/R-1/cp2/step-0/rounds.json
-  printf 'review_checkpoints:\n  cp3_integration_review: true\n' > .aid-o/config/policies/review-checkpoints.yaml
-  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; _aid_lc_epic_review_status E-952-1_1 ."
-  [[ "$output" == *none* ]]
 }
