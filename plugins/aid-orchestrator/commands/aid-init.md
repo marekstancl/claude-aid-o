@@ -779,7 +779,6 @@ These files/dirs are created on first use of the feature that needs them:
 
 | File | Created by | Trigger |
 |------|-----------|---------|
-| `config/queue.yaml` | `/aid-status queue add` | First queue entry |
 | `config/policies/review-checkpoints.yaml` | `/aid-run` | First review checkpoint dispatch |
 
 `config/execution.yaml` is deliberately NOT in this table — it is part of the base manifest and is
@@ -833,7 +832,7 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 | `.aid-o/03-config/` | `.aid-o/config/` |
 | `.aid-o/04-engine/memory/` | `.aid-o/work/` |
 | `.aid-o/04-engine/evidence/` | `.aid-o/work/evidence/` |
-| `.aid-o/04-engine/epic-queue.yaml` | `.aid-o/config/queue.yaml` |
+| `.aid-o/04-engine/epic-queue.yaml` | — (the queue was removed in 3.0.0) |
 | `plan_progress.json` | `fsm-state.yaml` |
 | `stage_log.jsonl` | `timeline.jsonl` |
 
@@ -868,7 +867,7 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - `skills/pipeline.md` — workspace structure reference
 - `commands/aid-do.md` — uses `work/quick/` (lazy-created at init)
 - `commands/aid-run.md` — uses `config/execution.yaml` (base manifest, written at init)
-- `commands/aid-status.md` — uses `config/queue.yaml` (lazy-created)
+- `commands/aid-status.md` — reads `work/plan-state/` and `work/active-runs.json` (written at run time)
 - `commands/aid-setup.md` — owns every later change to the files init creates
 - `lib/aid-roots.sh` — state-root resolution (primary checkout, never a linked worktree)
 

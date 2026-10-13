@@ -623,6 +623,50 @@ through `retry`, then this procedure for that role alone. A reason that starts
 to the same reviewer; it is asked once, and a second malformed finding is dropped.
 <!-- adapter:end -->
 
+## Escalations settled by an independent agent (P112)
+
+PM 13. 10. 2026: in a plan that runs `--auto` (its plan state says
+`autonomy: auto`) every escalation that would stop the run on the PM is decided
+by an independent agent — automatically, with no instruction before each plan.
+A manual plan gets the same when the PM records it once:
+`aid-review-round.sh standing --plan <plan> --delegate --reason "<the PM's words>"`
+(`evidence/<plan>/delegate.json`; it grants no extra rounds). A PM stop
+(`/aid-stop`) ends the automatic delegation.
+
+What is delegated: a disputed finding (`dispute` without `--pm`, CP2/CP7)
+and every blocker or major still open after the last round the step or
+plan allows. Minor findings never reach the PM's card and are listed at the
+close as before. The plan review (CP1) is never delegated.
+
+The controller's loop, per round, before `close` (close refuses while one is
+pending and prints the list):
+
+1. `aid-review-round.sh delegate … --round K --pending` — the fingerprints that
+   await a verdict; empty → `close`.
+2. `aid-review-round.sh delegate … --round K --fingerprint <fp>` — runs Codex
+   through the round's own runner on `adjudicator-delegated-<fp16>.prompt.md`
+   (`<fp16>` = the 16 hex characters after `sha256:`) and records its verdict.
+   **Exit 4 + `STAND-IN:`** — Codex is out (absent, over its limit, no answer):
+   dispatch the prompt to an independent `general-purpose` agent with a clean
+   context inside the bracket
+   `aid-emit-dispatch.sh start --focus adjudicator-delegated-<fp16> --agent-id claude:adjudicator-delegated --evidence-dir <round dir>` … `complete … --output-file <verdict>`,
+   then record: `… delegate … --fingerprint <fp> --verdict <verdict file>`.
+3. Next fingerprint; never a PM turn in between.
+
+The verdict (`defaults/templates/adjudicator-delegated.md`): `accepted` /
+`rejected` for a dispute, `dismiss` / `fix` for a finding open after the rounds
+(`fix` grants one more fix-and-confirm round; a finding still open after it gets
+a second verdict, `dismiss` or class `brief`), a class and, for a technical
+dispute about a check, the re-run command with its exit and output. Class
+`technical` is the delegate's to decide; **`brief`, `money` and `data` go to the
+PM's card** (`delegation_out_of_scope` — the brief, money and live data stay the
+PM's) and `--defer-criterion` never takes a delegate. A Claude verdict counts
+only under its closed bracket and a Codex verdict only with the runner's
+`delegate_codex_verdict` event of its sha256 (`delegation_missing` otherwise).
+Every settlement is a line of `evidence/<plan>/delegated-disputes.jsonl`; the
+close card and page list them.
+
+
 ### State: READY
 
 **Entry:** PRE-FLIGHT completed, `fsm-state.yaml` initialized.

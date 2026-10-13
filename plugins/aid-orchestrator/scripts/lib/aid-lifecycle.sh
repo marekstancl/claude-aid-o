@@ -996,13 +996,15 @@ aid_lifecycle_ensure_manifest() {
 
 # _aid_lc_epic_review_file <epic_id> <root> — the run's review record in its
 # gitignored evidence: the audit-report.json an EPIC closed before 2.101.0 left
-# behind, else the step rounds' indexes (cp2/step-*/rounds.json). Empty if
-# neither. (The EPIC round index stood first until the EPIC review, CP3, left
+# behind, or the step rounds' indexes (cp2/step-*/rounds.json) — whichever the
+# latest run holds. Empty if neither. (The EPIC round index stood first until the EPIC review, CP3, left
 # in 3.0.0, P114; an old run's EPIC-review directory is not read.)
 _aid_lc_epic_review_file() {
-  { ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null \
-    || ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp2/step-*/rounds.json 2>/dev/null \
-    || true; } | sort -V | tail -1   # the latest run
+  # both kinds in one list, so the LATEST run decides (an old run's audit
+  # report never shadows a newer run's step rounds; Codex, P114 steps 8-9)
+  { ls "${2:-.}/.aid-o/work/evidence/${1}"/*/audit-report.json 2>/dev/null
+    ls "${2:-.}/.aid-o/work/evidence/${1}"/*/cp2/step-*/rounds.json 2>/dev/null
+    true; } | sort -V | tail -1   # the latest run
 }
 
 # _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the review

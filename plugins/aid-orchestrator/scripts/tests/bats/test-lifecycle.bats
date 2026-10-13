@@ -220,3 +220,10 @@ YML
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; _aid_lc_epic_review_status E-951-1_1 ."
   [[ "$output" == *rejected* ]]
 }
+@test "review status: the latest run decides — an old run's audit report never shadows a newer run's step rounds (P114)" {
+  mkdir -p .aid-o/work/evidence/E-952-1_1/R-1 .aid-o/work/evidence/E-952-1_1/R-2/cp2/step-0
+  echo '{"blocking_findings": true}' > .aid-o/work/evidence/E-952-1_1/R-1/audit-report.json
+  echo '{"verdict":"pass"}' > .aid-o/work/evidence/E-952-1_1/R-2/cp2/step-0/rounds.json
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh'; _aid_lc_epic_review_status E-952-1_1 ."
+  [[ "$output" == *accepted* ]]
+}
