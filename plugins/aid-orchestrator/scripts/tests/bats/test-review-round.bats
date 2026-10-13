@@ -866,7 +866,7 @@ _close1() {
 }
 @test "collect: an answer naming a role outside the round is invalid with unknown_role" {
   _repo; _sc; _S prepare --round 1 >/dev/null
-  _sanswer 1 step_generalist '.role = "epic_behaviour"'
+  _sanswer 1 step_generalist '.role = "final_criteria"'
   run _S collect --round 1
   jq -e '.invalid[] | select(.role == "step_generalist" and (.reason | startswith("unknown_role")))' "$(D 1)/collect.json"
 }
