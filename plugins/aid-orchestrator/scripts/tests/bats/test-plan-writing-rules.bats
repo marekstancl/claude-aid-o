@@ -10,6 +10,8 @@
 # that runs BEFORE LLM judgment. These tests validate pattern detection only,
 # not the LLM verdict.
 
+load test-helpers
+
 setup() {
   TMPDIR_TEST="$(mktemp -d)"
   mkdir -p "$TMPDIR_TEST"
@@ -215,7 +217,8 @@ EOF
     >> "${TMPDIR_TEST}/fenced.md"
   printf '\n## Appendix\n\n```markdown\n### Step 99: quoted example\n\n**Objective:** nothing real.\n```\n' \
     >> "${TMPDIR_TEST}/fenced.md"
-  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" "${TMPDIR_TEST}/fenced.md"
+  cd "$TMPDIR_TEST" && bind_plan_to_brief fenced.md
+  run bash "$PLUGIN_ROOT/scripts/aid-plan-lint.sh" fenced.md
   [ "$status" -eq 0 ]
   [[ "$output" != *"Step 99"* ]]
 }
@@ -244,6 +247,7 @@ _doc_plan() {   # <type> <files-bullets…>
     printf -- '- %s\n' "$@"
     printf '\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nn/a\n\n**Edge Cases:**\n- none\n'
   } > "$DOCPLAN"
+  ( cd "$DOCDIR" && bind_plan_to_brief .aid-o/plans/P903-fixture.md )
 }
 
 @test "P085: a behaviour-changing plan with no path into help or docs is refused" {

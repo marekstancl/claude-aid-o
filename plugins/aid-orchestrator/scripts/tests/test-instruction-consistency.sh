@@ -15,8 +15,9 @@
 #   5. File references in skills/commands point to existing files
 #   6. Step-verify template contains all required sections
 #   7. orchestration.yaml states match aid-fsm.sh
-#   8. Old command names do not return to active instructions
 #   9. AUTO liveness/ownership contract remains present and role boundaries do not drift
+# (Retired-name sweeps — v1 states, old commands, P094/P096/P097 names — went in
+# the 3.1.1 test triage: a check that a removed name stays removed is archaeology.)
 # =============================================================================
 set -uo pipefail
 
@@ -166,7 +167,7 @@ for ref in $SKILL_REFS; do
 done
 
 # Check agent files
-AGENT_REFS=$(grep -rohP 'agents/[a-z_-]+\.md' "$PLUGIN_DIR/skills/" "$PLUGIN_DIR/commands/" 2>/dev/null | sort -u)
+AGENT_REFS=$(grep -rohP '(?<![.\w-])agents/[a-z_-]+\.md' "$PLUGIN_DIR/skills/" "$PLUGIN_DIR/commands/" 2>/dev/null | sort -u)
 
 for ref in $AGENT_REFS; do
   if [[ -f "$PLUGIN_DIR/$ref" ]]; then
@@ -187,38 +188,6 @@ for ref in $SCRIPT_REFS; do
   fi
 done
 
-# ─── 6. v1 State Names ────────────────────────────────────────────────────
-
-echo ""
-echo "=== 6. v1 State Names (should not appear in active files) ==="
-
-V1_STATES="IDLE PLANNING PLAN_REVIEW PHASE_CHECK CURATOR_RESOLVE PM_APPROVAL DEPLOY_CHECK FINALIZING GATE_RETRY NEXT_PHASE"
-
-for v1state in $V1_STATES; do
-  # Check only active instruction files (skip CHANGELOG, skip files with legacy notice)
-  # Also exclude "No v1 states" negation patterns
-  HITS=$(grep -rl "\b${v1state}\b" "$PLUGIN_DIR/skills/" "$PLUGIN_DIR/commands/" "$PLUGIN_DIR/agents/" 2>/dev/null | grep -v CHANGELOG || true)
-  # Filter out files where the state only appears in "No v1 states" or "no ... STATE" context
-  REAL_HITS=""
-  for hit in $HITS; do
-    # Count lines with v1 state that are NOT in a "no/No" negation context
-    NON_NEG=$(grep -c "\b${v1state}\b" "$hit" 2>/dev/null || echo 0)
-    NEG=$(grep -cE "(no |No |NOT |not ).*\b${v1state}\b|→.*\b${v1state}\b" "$hit" 2>/dev/null || echo 0)
-    [[ $((NON_NEG - NEG)) -gt 0 ]] && REAL_HITS="$REAL_HITS $hit"
-  done
-  HITS="$REAL_HITS"
-  if [[ -n "$HITS" ]]; then
-    for hit in $HITS; do
-      # Skip files with v1 legacy notice
-      if grep -q "v1 Legacy Notice\|v1 legacy" "$hit" 2>/dev/null; then
-        warn "v1 state '$v1state' in $(basename $hit) (has legacy notice)"
-      else
-        fail "v1 state '$v1state' in $(basename $hit) (NO legacy notice)"
-      fi
-    done
-  fi
-done
-
 # ─── 7. DONE Sub-Phases ───────────────────────────────────────────────────
 
 echo ""
@@ -235,85 +204,6 @@ if [[ -n "$BASH_PHASES" ]]; then
       fail "pipeline.md MISSING done_phase: $phase"
     fi
   done
-fi
-
-# ─── 8. Old Command Names ─────────────────────────────────────────────────
-
-echo ""
-echo "=== 8. Old Command Names ==="
-
-OLD_COMMANDS="/aid-brainstorm /aid-write-plan /aid-plan-epic /aid-run-epic /aid-first-aid /aid-epic-status /aid-epic-queue"
-
-# The boundary is deliberately NOT `\b`: `-` counts as a word boundary to grep,
-# so `/aid-brainstorm` matched the path `scripts/aid-brainstorm-state.sh` and
-# reported a live script as a retired command (P086). A retired command name is
-# followed by whitespace, punctuation or end of line — never by `-` or another
-# name character.
-OLD_CMD_BOUNDARY='([^A-Za-z0-9_-]|$)'
-
-for cmd in $OLD_COMMANDS; do
-  HITS=$(grep -rlE "${cmd}${OLD_CMD_BOUNDARY}" "$PLUGIN_DIR/skills/" "$PLUGIN_DIR/commands/" "$PLUGIN_DIR/agents/" "$PLUGIN_DIR/defaults/" 2>/dev/null | grep -v CHANGELOG || true)
-  if [[ -n "$HITS" ]]; then
-    for hit in $HITS; do
-      # Skip "replaces" / "old" / "No v1" context
-      ACTIVE_REFS=$(grep -E "${cmd}${OLD_CMD_BOUNDARY}" "$hit" 2>/dev/null | grep -vcE "replaces|Replaces|old |No v1|no |→" 2>/dev/null || true)
-      ACTIVE_REFS="${ACTIVE_REFS:-0}"
-      [[ "$ACTIVE_REFS" -gt 0 ]] && fail "Old command '${cmd}' referenced in $(basename $hit)"
-    done
-  fi
-done
-
-# ─── 10. Retired review mechanisms (P094) ─────────────────────────────────
-# The per-step verifier file, the pre-filter classify, the gate-fixer fix loop
-# of cp2/cp3 and the invalidation hook were replaced by the review round (one
-# section in commands/aid-run.md). A live instruction surface that still
-# teaches one of them would send a controller to files the FSM no longer reads.
-
-echo ""
-echo "=== 10. Retired review mechanisms (P094) ==="
-
-for pat in 'verifier-output-step-' 'aid-prefilter.sh classify' 'verifier-output-cp3-' 'Invalidation-Map Post-Fix Hook' 'aid-invalidation-map.sh'; do
-  HITS=$(grep -rlF -- "$pat" "$PLUGIN_DIR/skills/" "$PLUGIN_DIR/commands/" "$PLUGIN_DIR/agents/" 2>/dev/null || true)
-  if [[ -n "$HITS" ]]; then
-    for hit in $HITS; do fail "retired mechanism '${pat}' still taught in $(basename "$hit")"; done
-  else
-    pass "no live surface teaches '${pat}'"
-  fi
-done
-
-# the section ends at the next `## ` heading (since P095 that is the stand-in section, not READY)
-SECTION_LINES=$(awk '/^## Step review \(CP2\) and EPIC review \(CP3\)$/{on=1; next} on && /^## /{exit} on' "$PLUGIN_DIR/commands/aid-run.md" | wc -l)
-if [[ "$SECTION_LINES" -gt 0 && "$SECTION_LINES" -le 150 ]]; then
-  pass "aid-run.md review section is ${SECTION_LINES} lines (≤ 150, adapter included)"
-else
-  fail "aid-run.md review section is ${SECTION_LINES} lines (must exist and be ≤ 150)"
-fi
-
-# ─── 11. Clean code at the source (P096) ──────────────────────────────────
-# The role that writes a step is told how to write less, and the step reviewer
-# asks about needless complexity while the diff is small: there is no cleanup
-# pass at the plan boundary to rely on.
-
-echo ""
-echo "=== 11. Clean code at the source (P096) ==="
-
-CARDS="$PLUGIN_DIR/skills/role-cards.md"
-if [[ "$(grep -c '^### Write the least code that works$' "$CARDS")" -eq 1 ]]; then
-  pass "the least-code ladder exists exactly once in role-cards.md"
-else
-  fail "role-cards.md must carry the '### Write the least code that works' ladder exactly once"
-fi
-for role in $(awk '/^## Step Roles/{on=1} /^## Verifier Focus Cards/{on=0} on && /^## Role: /{print $3}' "$CARDS"); do
-  if awk -v h="## Role: ${role}" '$0 == h {on=1; next} on && /^## /{exit} on' "$CARDS" | grep -q 'Write the least code that works'; then
-    pass "step role ${role} references the ladder"
-  else
-    fail "step role ${role} does not reference the least-code ladder"
-  fi
-done
-if awk '/^## Role: step_generalist$/{on=1; next} on && /^## /{exit} on' "$PLUGIN_DIR/skills/step-review-roles.md" | grep -q '^7\. Is anything here more than the step needs'; then
-  pass "step_generalist asks question 7 (needless complexity)"
-else
-  fail "step_generalist in step-review-roles.md lacks question 7 (needless complexity)"
 fi
 
 # ─── Summary ───────────────────────────────────────────────────────────────
@@ -359,89 +249,6 @@ assert_instruction "$PLUGIN_DIR/skills/agent-protocol.md" \
   'Do not detach long-running work with `nohup`, `disown`, `tail -f`' \
   "dispatched agents cannot orphan long-running work"
 
-
-REPO_ROOT="$(cd "${PLUGIN_DIR}/../.." && pwd)"
-
-# ─── P072 Step 23, inverted by P078 ─────────────────────────────────────────
-#
-# The original guard banned "no scheduler consumes this" while a scheduler
-# existed. P078 deleted the scheduler outright, so the truthful sentence
-# changed sides: shipped files must not claim a parallel consumer EXISTS.
-# The banned phrases below are the pre-P078 present-tense consumer claims;
-# the P078 removal notice ("parallelism was removed", past tense, naming
-# P078) is the correct wording and is not banned.
-#
-# The scope is `plugins/` and the LIVE docs tree. Archived plans under
-# docs/plans/archive/ legitimately record the boundary as it was at the time
-# and must not be rewritten to match the present.
-echo ""
-echo "TEST: no shipped file claims a parallel-execution consumer still exists"
-STALE_CLAIM_HITS=""
-while IFS= read -r hit; do
-  [[ -z "$hit" ]] && continue
-  STALE_CLAIM_HITS="${STALE_CLAIM_HITS}${STALE_CLAIM_HITS:+$'\n'}${hit}"
-done < <(grep -rIl -E 'scheduler consumes it|consumed by the scheduler|parallel lane runs|aid-bats-parallel-lane\.sh dispatches' \
-           "$PLUGIN_DIR" "$REPO_ROOT/docs" 2>/dev/null \
-         | grep -v '/docs/plans/archive/' \
-         | grep -v 'test-instruction-consistency.sh' || true)
-if [[ -z "$STALE_CLAIM_HITS" ]]; then
-  PASS=$((PASS + 1)); echo "  ✓ no file claims a parallel-execution consumer still exists"
-else
-  FAIL=$((FAIL + 1))
-  echo "  ✗ these files still claim a live parallel-execution consumer:"
-  printf '      %s\n' $STALE_CLAIM_HITS
-  echo "      Correct the file rather than excluding it — an exclusion list is how"
-  echo "      the contradictory sentence survived three releases in the first place."
-fi
-
-echo ""
-echo "TEST: an ARCHIVED document keeps its historical claim (the check is scoped)"
-ARCHIVE_FIXTURE="$REPO_ROOT/docs/plans/archive/.p072-scope-fixture.md"
-mkdir -p "$(dirname "$ARCHIVE_FIXTURE")"
-printf 'Historical record: the scheduler consumes it via the parallel lane.\n' > "$ARCHIVE_FIXTURE"
-if grep -rIl -E 'scheduler consumes it' "$PLUGIN_DIR" "$REPO_ROOT/docs" 2>/dev/null \
-     | grep -v '/docs/plans/archive/' | grep -v 'test-instruction-consistency.sh' | grep -q .; then
-  FAIL=$((FAIL + 1)); echo "  ✗ the scoped check fired on an archived file"
-else
-  PASS=$((PASS + 1)); echo "  ✓ an archived record carrying the old sentence is left alone"
-fi
-rm -f "$ARCHIVE_FIXTURE"
-
-echo ""
-echo "TEST: no instruction names a mechanism P096 retired, or a former plan-finalize stage"
-# Precise names, not the bare words: "the reporters of a finding" is plain English.
-RETIRED_RE='agents/(reporter|curator|auditor|verifier|simplifier)\.md|commands/aid-audit\.md|curator-report|-delivery\.md|delivery-report|aid-c3-dispatch|c3-audit-policy|aid-delivery-gate|\bCP4\b|\bCP5\b|cp4_curator|--stage (sync|inputs|review|c4|summary|accept-ancillary)\b|--focus (reporter|simplifier)'
-RETIRED_HITS="$(grep -rnE "$RETIRED_RE" "$PLUGIN_DIR/commands" "$PLUGIN_DIR/skills" "$PLUGIN_DIR/agents" \
-                  "$PLUGIN_DIR/scripts/lib/aid-review-adapter-claude.md" 2>/dev/null || true)"
-if [[ -z "$RETIRED_HITS" ]]; then
-  PASS=$((PASS + 1)); echo "  ✓ commands, skills and agents name no retired mechanism (the successor table is reference/review-successors.md)"
-else
-  FAIL=$((FAIL + 1)); echo "  ✗ retired names still instructed:"; printf '%s\n' "$RETIRED_HITS" | cut -c1-160 | sed 's/^/      /'
-fi
-
-echo ""
-echo "TEST: the gate instruction uses the row vocabulary the runner emits (P097 Step 7)"
-# The version-1 words the runner no longer writes: a row is `status: skip,
-# reason: not_in_profile`, the report's `profile_source` is caller|none, and
-# `profile_reason` does not exist. An instruction still teaching the old words
-# sends the controller looking for fields no report carries. The hygiene sweep
-# (test-gates-hygiene.sh, t0) covers the removed LAYERS; this covers the
-# renamed ROW words, on the two files the controller reads for gates.
-# Word-bounded: `plan_gate_profile_excluded` is a live GATES:DONE reason.
-OLD_ROW_RE='\bprofile_excluded\b|"cli_flag"|\bprofile_reason\b'
-OLD_ROW_HITS="$(grep -nE "$OLD_ROW_RE" "$PLUGIN_DIR/skills/pipeline.md" "$PLUGIN_DIR/commands/aid-run.md" 2>/dev/null || true)"
-if [[ -z "$OLD_ROW_HITS" ]]; then
-  PASS=$((PASS + 1)); echo "  ✓ pipeline.md and aid-run.md name no version-1 profile vocabulary"
-else
-  FAIL=$((FAIL + 1)); echo "  ✗ version-1 profile vocabulary still instructed:"; printf '%s\n' "$OLD_ROW_HITS" | cut -c1-160 | sed 's/^/      /'
-fi
-# The §5 section the controller reads is ONE section, and short enough to be read.
-GATES_LINES="$(awk '/^## §5 Gates$/ { on = 1; next } on && /^## / { exit } on { n++ } END { print n + 0 }' "$PLUGIN_DIR/skills/pipeline.md")"
-if (( GATES_LINES > 0 && GATES_LINES <= 120 )); then
-  PASS=$((PASS + 1)); echo "  ✓ pipeline.md '## §5 Gates' is one section of ${GATES_LINES} lines (max 120)"
-else
-  FAIL=$((FAIL + 1)); echo "  ✗ pipeline.md '## §5 Gates' is ${GATES_LINES} lines (expected 1..120)"
-fi
 
 echo ""
 echo "=================================="

@@ -10,6 +10,8 @@
 #
 # Everything here is text plus a grep over a two-file fixture tree: t0.
 
+load test-helpers
+
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH AID_QUIET=1 AID_TEST_MODE=1
@@ -34,6 +36,7 @@ _plan() {
     [[ -n "$reuse" ]] && printf '\n**Reuse check:** %s\n' "$reuse"
     printf '\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nn/a\n\n**Edge Cases:**\n- none\n'
   } > "$PLAN"
+  [[ "$strict" == "strict" ]] && bind_plan_to_brief "$PLAN"; return 0
 }
 
 # ── AC1: a founding step with no field is refused ───────────────────────────

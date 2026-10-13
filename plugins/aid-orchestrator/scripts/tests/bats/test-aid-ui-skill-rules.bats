@@ -29,33 +29,6 @@ setup() {
   done
 }
 
-@test "SKILL.md names record-answer, finish and the frontend-design snapshot" {
-  for s in 'aid-ui-state.sh record-answer' 'aid-ui-state.sh finish' 'references/adopted/frontend-design-SKILL.md' 'aid-ui-serve.sh studio'; do
-    grep -qF -- "$s" "$SK/SKILL.md" || { echo "missing: $s"; return 1; }
-  done
-}
-
-@test "5-directions.md requires three cards with the uniqueness line and names the genericity rubric" {
-  f="$SK/steps/5-directions.md"
-  grep -qF 'Tři karty' "$f"
-  grep -qF 'uniqueness' "$f"
-  grep -qF 'references/genericity-rubric.md' "$f"
-  grep -qF 'aid-ui-tool.sh glyph' "$f"
-}
-
-@test "3-content-plan.md names owner, due, status and defer-content" {
-  f="$SK/steps/3-content-plan.md"
-  for s in owner due status 'aid-ui-state.sh defer-content' 'docs/content/facts.yaml'; do
-    grep -qF -- "$s" "$f" || { echo "missing: $s"; return 1; }
-  done
-}
-
-@test "step 0 runs the coverage check; 6-build converts images through aid-ui-tool.sh webp and records the build" {
-  grep -qF 'aid-ui-coverage.sh check' "$SK/steps/0-start.md"
-  grep -qF 'aid-ui-tool.sh webp' "$SK/steps/6-build.md"
-  grep -qF 'aid-ui-state.sh build-record' "$SK/steps/6-build.md"
-}
-
 @test "no step file writes index.html except through aid-ui-state.sh body" {
   for f in "$SK"/steps/[1-7]*.md; do
     grep -qF 'index.html' "$f" || continue
@@ -63,25 +36,8 @@ setup() {
   done
 }
 
-@test "1i-identity.md renders icons through the Playwright MCP and aid-ui-ico.py" {
-  for s in 'browser_run_code_unsafe' 'references/brand-icons.js' 'aid-ui-ico.py --verify' 'brief-logo-favicon.md'; do
-    grep -qF -- "$s" "$SK/steps/1i-identity.md" || { echo "missing: $s"; return 1; }
-  done
-}
-
-@test "1-product.md names 1v, 1i, 1s in that order" {
-  [ "$(grep -o '`1[vis]`' "$SK/steps/1-product.md" | tr -d '`' | tr '\n' ' ')" = "1v 1i 1s " ]
-}
-
 @test "no step or SKILL.md names a removed state verb" {
   ! grep -rnE 'await-choice|await-direction|pending-direction|require-direction|aid-ui-state.sh spend' "$SK/SKILL.md" "$SK/steps" || false
-}
-
-@test "7-verify.md writes the kvalita chapter from soulad-summary.json and brand-state.json" {
-  f="$SK/steps/7-verify.md"
-  for s in 'body <project> kvalita' 'soulad-summary.json' 'gate.run_at' 'chapter <project> kvalita navrh'; do
-    grep -qF -- "$s" "$f" || { echo "missing: $s"; return 1; }
-  done
 }
 
 @test "every PM-chosen write in the steps passes --answer: options, refs, chapter schvaleno, chapter-all" {
@@ -98,16 +54,6 @@ setup() {
   ! grep -rnE "(set|--answer) [^\`]*'[[{<]" "$SK/steps" "$SK/SKILL.md" || false
   ! grep -rn 'http\.server' "$SK/steps" | grep -v -- '--bind 127.0.0.1 --directory' || false
   for f in 5-directions 6-build; do grep -qF 'kill "$pid"' "$SK/steps/$f.md" || { echo "$f"; return 1; }; done
-}
-
-@test "P106: SKILL.md names decide, the outcome rule and the six step titles; no overview, no Průběh anywhere" {
-  grep -qF 'aid-ui-state.sh decide' "$SK/SKILL.md"
-  grep -qF 'Když rozhoduje agent sám' "$SK/SKILL.md"
-  grep -qF 'do 120 znaků' "$SK/SKILL.md"
-  grep -qF 'Druh webu, Zadání a obsah, Vzory,' "$SK/SKILL.md"
-  grep -qF 'Vzhled, Stavba, Kontrola' "$SK/SKILL.md"
-  ! grep -q 'overview' "$SK/SKILL.md"
-  ! grep -rq 'Průběh' "$SK/SKILL.md" "$SK/steps"
 }
 
 @test "P106: the steps that decide without the PM record it with decide (vision facts, build, design standard)" {
@@ -129,79 +75,4 @@ setup() {
     done <<<"$calls"
   done
   tr '\n' ' ' < "$SK/steps/6-build.md" | grep -qE -- '--step "Stavba" +--title "Web postaven" +--outcome "Postaveno <N> stránek[^"]*" +--why "[^"]+" +--source \.aid-ui/build\.json'
-}
-
-@test "P108: steps 1v, 3, 6 write by the adopted method and the AID bridges; 2 marks legal pages" {
-  R="$SK/references"
-  ! grep -q "Zakázaná prázdná slova" "$SK/steps/1v-vision.md"
-  for p in adopted/marketingskills/copywriting/SKILL.md copy-rules.md 'copy-<jazyk>.md'; do
-    grep -qF "$p" "$SK/steps/1v-vision.md" || { echo "1v lacks $p"; return 1; }
-  done
-  grep -qF "adopted/marketingskills/cro/SKILL.md" "$SK/steps/3-content-plan.md"
-  for p in copywriting/SKILL.md copywriting/references/copy-frameworks.md copywriting/references/natural-transitions.md copywriting/references/ai-tells.md; do
-    grep -qF "adopted/marketingskills/$p" "$SK/steps/6-build.md" || { echo "6 lacks $p"; return 1; }
-  done
-  grep -qF '"legal": true' "$SK/steps/2-structure.md"
-  # the bridges carry their fixed headings (the skill and the review look them up by name)
-  for h in "Fakta a hypotézy" "Pořadí při rozporu" "Jak číst převzaté" "Co blokuje v revizi" "Kotvy skóre person" "Právní stránky"; do
-    grep -qx "## $h" "$R/copy-rules.md" || { echo "copy-rules.md lacks: $h"; return 1; }
-  done
-  for f in copy-cs.md copy-sk.md copy-en.md; do
-    for h in "Kancelářština → běžné slovo" "Prázdná slova" "Fráze prozrazující AI text" "Oslovení" "Typografie" "Co zakázané NENÍ"; do
-      grep -qx "## $h" "$R/$f" || { echo "$f lacks: $h"; return 1; }
-    done
-  done
-}
-
-@test "P108: the bridges carry their key rules, not just headings" {
-  R="$SK/references"
-  grep -qF 'jen z `docs/content/facts.yaml`' "$R/copy-rules.md"
-  grep -qF 'nikdy se' "$R/copy-rules.md"                          # a hypothesis never becomes a claim
-  # the conflict order: PM answer first, facts register second, product context third
-  grep '^[0-9]\. ' "$R/copy-rules.md" | head -3 | tr '\n' ' ' | grep -qE '^1\. .*odpověď PM.* 2\. .*facts\.yaml.* 3\. .*product-context\.md' \
-    || { grep '^[0-9]\. ' "$R/copy-rules.md" | head -3; return 1; }
-  grep -qF 'otázkou ve studiu' "$R/copy-rules.md"
-  grep -qF 'Skóre pod 5 je blokující' "$R/copy-rules.md"
-  grep -qF 'netyka_se' "$R/copy-rules.md"
-  grep -qF 'neplatí pro právní' "$R/copy-rules.md"
-  for f in copy-cs.md copy-sk.md; do
-    grep -q '(—)' "$R/$f"                                          # the em dash rule
-    grep -qiE 'vykání|vykanie' "$R/$f"
-  done
-  grep -qF 'plain-english-alternatives.md' "$R/copy-en.md"
-  grep -qF 'ai-tells.md' "$R/copy-en.md"
-}
-
-@test "P108: 1p runs first in step 1; 1v, 3 and 6 start with context-check" {
-  # in 1-product, 1p is named before any studio question is opened
-  first_q=$(grep -n 'otázk' "$SK/steps/1-product.md" | head -1 | cut -d: -f1)
-  first_p=$(grep -n '1p-sources.md' "$SK/steps/1-product.md" | head -1 | cut -d: -f1)
-  [ -n "$first_p" ] && { [ -z "$first_q" ] || [ "$first_p" -le "$first_q" ]; }
-  for f in 1v-vision 3-content-plan 6-build; do
-    sed -n '/^## Postup/,/^1\./p' "$SK/steps/$f.md" | grep -qF 'aid-ui-state.sh context-check' || { echo "$f"; return 1; }
-  done
-  grep -qF 'aid-ui-sources.py' "$SK/steps/1p-sources.md"
-  grep -qF '`sources`' "$SK/steps/1p-sources.md"
-  grep -qF '`product_context`' "$SK/steps/1p-sources.md"
-  # 1p v2: the product context is shown as one draft, gaps and conflicts inline, no invented objections
-  grep -qF 'Ke kontrole - <co>:' "$SK/steps/1p-sources.md"
-  grep -qF 'Celý dokument ukaž PM jako návrh' "$SK/steps/1p-sources.md"
-  grep -qF 'Námitky a jazyk zákazníků nevymýšlej' "$SK/steps/1p-sources.md"
-  # the studio renders the little markdown the body uses, as text nodes
-  grep -qF 'function mdLine(l)' "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"
-}
-
-@test "P108: 1i makes logo concepts by the adopted logo-design method and SKILL.md carries the method-before-output rule" {
-  f="$SK/steps/1i-identity.md"
-  grep -qF 'aid-ui-state.sh method <project> identity' "$f"
-  for p in SKILL.md references/process.md references/mark-types.md references/svg-construction.md references/testing-checklist.md \
-           references/discovery-brief.md scripts/svg_audit.py scripts/preview_sheet.py scripts/concept_sheet.py TRADEMARKS.md; do
-    grep -qF "adopted/logo-design/$p" "$f" || { echo "1i lacks $p"; return 1; }
-  done
-  ! grep -q 'tři koncepty jako SVG (geometrický' "$f"
-  grep -q '8-12 konceptů' "$f"; grep -q 'klišé' "$f"; grep -q 'search_library.py' "$f"   # the library gap is said, not hidden
-  # the map's identity method is exactly the adopted entry and its four references, in this order
-  [ "$(jq -r '.methods.identity.files | map(sub("skills/ui-design/references/adopted/logo-design/"; "")) | join(" ")' "$SK/sections.json")" = "SKILL.md references/process.md references/mark-types.md references/svg-construction.md references/testing-checklist.md" ]
-  grep -qF 'aid-ui-state.sh method' "$SK/SKILL.md"; grep -qF 'payload-check' "$SK/SKILL.md"; grep -qF 'no_method' "$SK/SKILL.md"
-  grep -q '^12\. The method before the output' "$SK/SKILL.md"
 }

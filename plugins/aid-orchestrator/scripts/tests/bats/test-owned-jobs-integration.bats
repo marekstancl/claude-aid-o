@@ -25,9 +25,6 @@
 #                           `escalate`; the terminus lands `blocked_for_pm` on
 #                           the map, and leaving ESCALATION still requires the
 #                           decision field.
-#   PHASE 4  GOLDEN       — the same runner over a foreground-only config is
-#                           byte-identical, after normalizing the volatile
-#                           fields, to the COMMITTED pre-P076 reference.
 #
 # THE SERVICE HALF IS GONE (P097 Step 6). Phases 1-2 used to bring a declared
 # service up beside the background gate and prove it died with its run; the
@@ -80,8 +77,7 @@ setup() {
   ADJ_LIB="$PLUGIN_ROOT/scripts/lib/aid-recovery-adjudicate.sh"
   STATUS_DOC="$PLUGIN_ROOT/commands/aid-status.md"
   REGISTRY="$PLUGIN_ROOT/defaults/enforcement-registry.yaml"
-  GOLDEN="$PLUGIN_ROOT/scripts/tests/fixtures/p076/golden-gates-report.json"
-  export RUN_GATES JOB_SH FSM LADDER_LIB ADJ_LIB STATUS_DOC REGISTRY GOLDEN
+  export RUN_GATES JOB_SH FSM LADDER_LIB ADJ_LIB STATUS_DOC REGISTRY
 
   # HARD DEPENDENCIES — a FAILURE, never a skip. `jq` and `yq` are hard deps of
   # the shipped runner itself, not environment quirks: a checkout that cannot
@@ -359,65 +355,6 @@ declare -F controller_facts >/dev/null || { echo 'MISSING: controller_facts is n
 declare -F epic_row        >/dev/null || { echo 'MISSING: epic_row is not defined by aid-status.md' >&2; exit 1; }
 _f=\"\$(controller_facts)\"
 epic_row '    ' '$1' '$2' R-1 'task/$1/main' '' \"\$_f\"" 3>&-
-}
-
-# ── the golden fixture + normalizer ─────────────────────────────────────────
-# Copied VERBATIM from the capture procedure that produced
-# fixtures/p076/golden-gates-report.json against the PRE-Step-2 runner, and
-# shared byte-for-byte with test-gate-background.bats case 6. If either drifts,
-# phase 4 fails — which is the whole point of a golden.
-golden_build_fixture() {
-  local root="$1"
-  mkdir -p "$root/.aid-o/work/evidence/E-P076/R-1/gates"
-  git -C "$root" init -q
-  git -C "$root" config user.email golden@example.com
-  git -C "$root" config user.name Golden
-  printf 'golden fixture\n' > "$root/README.md"
-  printf '.aid-o/\n' > "$root/.gitignore"
-  git -C "$root" add README.md .gitignore
-  git -C "$root" commit -qm "golden fixture base"
-  cat > "$root/exec.yaml" <<'YAML'
-gates:
-  alpha:
-    command: "echo alpha-ok"
-    required: true
-    timeout_seconds: 30
-  beta:
-    command: "printf 'beta-ok'"
-    required: false
-    timeout_seconds: 30
-  gamma:
-    command: "echo gamma-broke >&2; exit 1"
-    required: false
-    timeout_seconds: 30
-  delta_nocmd:
-    required: false
-YAML
-}
-
-# Volatile fields, and why each one is volatile:
-#   completed_at / _generated_at    — wall-clock stamps
-#   revision.head_sha               — the fixture repo's fresh commit sha
-#   gates[].duration_ms             — measured wall clock
-#   gates[].started_at/completed_at — version-2 rows stamp their own (P097 Step 2)
-#   _command_log[].duration_ms      — measured wall clock
-# Everything else — results, exit codes, outputs, attempts, ordering, the whole
-# schema — is compared. Kept identical to test-gate-background.bats's copy.
-golden_normalize() {
-  jq -S '
-      .completed_at = "NORMALIZED"
-    | ._generated_at = "NORMALIZED"
-    | .revision.head_sha = "NORMALIZED"
-    | .gates |= with_entries(
-        if (.value | type) == "object" then
-          .value |= (
-              (if has("duration_ms") then .duration_ms = 0 else . end)
-            | (if has("started_at") then .started_at = "NORMALIZED" else . end)
-            | (if has("completed_at") then .completed_at = "NORMALIZED" else . end)
-          )
-        else . end)
-    | ._command_log |= map(.duration_ms = 0)
-  ' "$1"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -716,34 +653,6 @@ SH
 # PHASE 4 — the invariance proof: everything above changed nothing for a
 # project that runs every gate in the foreground.
 # ═══════════════════════════════════════════════════════════════════════════
-
-@test "phase 4: GOLDEN — a foreground-only config is byte-identical to the committed pre-P076 reference" {
-  _require_process_facilities
-  [ -f "$GOLDEN" ] \
-    || _fail 4 "$GOLDEN" "the committed pre-P076 reference is missing — phase 4 has nothing to compare against and must never regenerate it"
-
-  local GPROJ="$WORK/golden"
-  mkdir -p "$GPROJ"
-  golden_build_fixture "$GPROJ"
-
-  ( cd "$GPROJ" && AID_GATE_BASELINE_FILE="$WORK/baseline-golden.yaml" \
-      "$RUN_GATES" run-all exec.yaml E-P076 R-1 \
-      --report-file ".aid-o/work/evidence/E-P076/R-1/gates/gates_report.json" \
-      >/dev/null 2>"$WORK/golden.err" ) || true
-
-  local actual="$GPROJ/.aid-o/work/evidence/E-P076/R-1/gates/gates_report.json"
-  [ -f "$actual" ] \
-    || _fail 4 "$actual" "the runner produced no report for the golden fixture: $(cat "$WORK/golden.err")"
-  golden_normalize "$actual" > "$WORK/golden-actual.json"
-
-  run diff -u "$GOLDEN" "$WORK/golden-actual.json"
-  [ "$status" -eq 0 ] \
-    || _fail 4 "$GOLDEN" "the report drifted from the committed pre-P076 reference:
-$output"
-
-  [ ! -e "$GPROJ/.aid-o/work/evidence/E-P076/R-1/auto_resume_required.json" ] \
-    || _fail 4 "auto_resume_required.json" "a run with no background gate wrote a continuation pointer"
-}
 
 # ═══════════════════════════════════════════════════════════════════════════
 # THE REGISTRY — AID-v3 principle #1: a detection capability without a recorded

@@ -48,10 +48,6 @@ JSON
   grep -qF '<!-- body:obsah --><!-- /body:obsah -->' "$P/docs/brand/index.html"
 }
 
-@test "studio links the internal report route" {
-  grep -qF '<a href="/report">' "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"
-}
-
 @test "fonts markers inside head" {
   sed -n '/<head>/,/<\/head>/p' "$PAGE/index.html" | grep -qx '<!-- fonts -->'
   sed -n '/<head>/,/<\/head>/p' "$PAGE/index.html" | grep -qx '<!-- /fonts -->'
@@ -102,4 +98,8 @@ JSON
   run "$SCRIPT" "$FIX/DESIGN.md" "$BATS_TEST_TMPDIR/brand/tokens.css"
   [ "$status" -eq 0 ]
   grep -q -- '--color-paper:' "$BATS_TEST_TMPDIR/brand/tokens.css"
+}
+
+@test "studio links the internal report route" {
+  grep -qF '<a href="/report">' "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/studio.html"
 }

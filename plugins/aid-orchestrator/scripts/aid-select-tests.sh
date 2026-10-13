@@ -230,10 +230,7 @@ map_path_to_tests() {
       ;;
     "${PLUGIN_PREFIX}/scripts/aid-release-policy.sh")
       # test-release-policy.bats is the suite that directly exercises
-      # aid-release-policy.sh (the C4 release aggregator). The sibling
-      # test-release-policy-surface-check.bats covers a DIFFERENT script
-      # (release-policy-surface-check.sh — a manual bootstrap precedent for
-      # this very selector, see its header comment) and is not selected here.
+      # aid-release-policy.sh (the C4 release aggregator).
       printf 'bats\t%s/scripts/tests/bats/test-release-policy.bats\n' "$PLUGIN_PREFIX"
       ;;
     "${PLUGIN_PREFIX}/scripts/aid-fsm.sh")

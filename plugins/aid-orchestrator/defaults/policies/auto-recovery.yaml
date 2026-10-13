@@ -324,12 +324,12 @@ existing_loops:
     budget_kind: instruction
     note: "LLM-facing instruction budget, not a mechanical constant; role-cards.md states the same 3."
 
-  - id: cp2_cp3_fix_loop
-    what: "CP2 review rounds: fix by the step's role, then a confirmation round (P094)"
+  - id: cp2_fix_loop
+    what: "CP2 review rounds: one round; a second only when a finding is open and its fix is in (second_round_when: open_finding_and_fix)"
     authority: existing
     governed_by_ladder: false
     budget_key: "review_checkpoints.step_review.rounds_default"
-    budget_value: 2
+    budget_value: 1
     budget_file: plugins/aid-orchestrator/defaults/policies/review-checkpoints.yaml
     budget_kind: policy_key
 

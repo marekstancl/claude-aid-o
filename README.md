@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v3.1.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v3.1.1
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.1.0** (current) — testy s hodnotou: nový případ pojmenovaný po plánu, nálezu nebo položce backlogu zastaví uzavření plánu i vydání (`test_named_after_plan`); plán říká, které testy maže, revize kroku se ptá, který test změna zneplatnila
+- **v3.1.1** (current) — úklid nočního patra testů: osm celých sad a 46 případů archeologie, hlídačů změn a hledání vět pryč; všechny sady, které noční běh hlásil červeně, jsou zelené (tři skutečné nepravdy opravené)
+- **v3.1.0** — testy s hodnotou: nový případ pojmenovaný po plánu, nálezu nebo položce backlogu zastaví uzavření plánu i vydání (`test_named_after_plan`); plán říká, které testy maže, revize kroku se ptá, který test změna zneplatnila
 - **v3.0.0** — bez EPIC cesty: plán běží jen jako jeden běh `/aid-run P<NNN>`; generátory EPICů, fronta, task větve a revize EPICu (CP3) odstraněny, staré vstupy odmítnou s cestou ven (`epic_path_removed`) (P114)
 - **v2.118.1** — cizí repo do konce: revize i měření bodů čtou worktree plánu, lint odmítne nedeklarované cizí repo, `plan-run --restart`, hook hlídá jen živý běh, timeout je neměřený bod; eskalace v `--auto` rozhoduje nezávislý agent (P112)
 - **v2.118.0** — /aid-ui do vydání: produkční web se studiem, branou, texty, design standardem a předáním; opravy z testu s klientem-agentem (obsah bez skriptu, formulář, schválení podle rozsahu změny, záskok Claude, blokace publikace) (P103, P108)

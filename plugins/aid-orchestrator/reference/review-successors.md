@@ -4,10 +4,9 @@
 EPIC review rebuild, and one per mechanism that had no registry row of its own.
 The successor column names an ACTIVE registry id, a file, or the literal
 `none (PM 2026-09-19 7A)` — the PM's decision that the invalidation map goes
-with no replacement. `scripts/tests/test-review-successors.sh` checks that every
-id present in `scripts/tests/fixtures/review-successors/registry-ids-pre-P094.txt`
-and absent or retired in the live registry has a row here whose successor is
-an active id or that literal.
+with no replacement. A historical record: the check that kept it complete
+against the pre-P094 id list was retired in 3.1.1 with the rest of the
+plan-bound archaeology.
 
 ## Registry ids
 

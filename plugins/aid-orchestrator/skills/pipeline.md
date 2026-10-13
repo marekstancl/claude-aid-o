@@ -360,6 +360,7 @@ READY → EXECUTE | ERROR
 EXECUTE → EXECUTE | GATES | ESCALATION | ERROR
 GATES → DONE | EXECUTE | ESCALATION | ERROR
 ESCALATION → EXECUTE | GATES | ERROR
+DONE → ERROR        (only `aid-fsm.sh abandon` of a run stuck in DONE; never after release)
 ```
 
 ---

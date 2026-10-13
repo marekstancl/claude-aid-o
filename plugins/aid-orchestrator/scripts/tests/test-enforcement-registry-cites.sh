@@ -439,8 +439,8 @@ fi
 echo "TEST: the test: check FIRES on a row naming a deleted suite"
 cat > "${fixture_dir}/tests.yaml" <<'FIXTURE'
 enforcements:
-  - {id: t_good, status: active, test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'P097 rows'), scripts/tests/test-review-successors.sh"}
-  - {id: t_bad, status: active, test: "scripts/tests/test-control-boundary.sh, scripts/tests/bats/test-aid-service.bats:29"}
+  - {id: t_good, status: active, test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'P097 rows'), scripts/tests/test-communication-wiring.sh"}
+  - {id: t_bad, status: active, test: "scripts/tests/test-instruction-sweep.sh, scripts/tests/bats/test-aid-service.bats:29"}
   - {id: t_retired, status: removed_scoped, test: "scripts/tests/bats/test-aid-service.bats"}
 FIXTURE
 tctl="$(_test_field_violations "${fixture_dir}/tests.yaml" "$PLUGIN_DIR" "$REPO_DIR")"

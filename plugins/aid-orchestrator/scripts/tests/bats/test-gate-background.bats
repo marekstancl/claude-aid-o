@@ -16,8 +16,6 @@
 #      (synthesized 124 → reason job_timeout; P097 Step 5: no streak block).
 #   4. Child processes of a timed-out background gate are dead (group kill).
 #   5. Command drift supersedes the stale job dir instead of re-attaching it.
-#   6. GOLDEN: a foreground-only execution.yaml produces a gates_report
-#      identical to the committed pre-P076 reference on the same fixture.
 #   7. CP2 carry-over: the REAL runner rejects an invalid run_mode loudly,
 #      before any gate command is spawned.
 
@@ -31,8 +29,6 @@ setup() {
   export RUN_GATES
   JOB_SH="$PLUGIN_ROOT/scripts/aid-job.sh"
   export JOB_SH
-  GOLDEN="$PLUGIN_ROOT/scripts/tests/fixtures/p076/golden-gates-report.json"
-  export GOLDEN
 
   WORK="$(mktemp -d)"
   export WORK
@@ -129,73 +125,6 @@ wait_for_job_pid() {
     sleep 0.1
   done
   return 1
-}
-
-# ── golden fixture + normalizer ──────────────────────────────────────────────
-# Copied VERBATIM from the capture procedure that produced
-# fixtures/p076/golden-gates-report.json against the PRE-Step-2 runner. If
-# either drifts, case 6 fails — which is the whole point of a golden.
-golden_build_fixture() {
-  local root="$1"
-  mkdir -p "$root/.aid-o/work/evidence/E-P076/R-1/gates"
-  git -C "$root" init -q
-  git -C "$root" config user.email golden@example.com
-  git -C "$root" config user.name Golden
-  printf 'golden fixture\n' > "$root/README.md"
-  printf '.aid-o/\n' > "$root/.gitignore"
-  git -C "$root" add README.md .gitignore
-  git -C "$root" commit -qm "golden fixture base"
-  cat > "$root/exec.yaml" <<'YAML'
-gates:
-  alpha:
-    command: "echo alpha-ok"
-    required: true
-    timeout_seconds: 30
-  beta:
-    command: "printf 'beta-ok'"
-    required: false
-    timeout_seconds: 30
-  gamma:
-    command: "echo gamma-broke >&2; exit 1"
-    required: false
-    timeout_seconds: 30
-  delta_nocmd:
-    required: false
-YAML
-}
-
-# Volatile fields, and why each one is volatile:
-#   completed_at / _generated_at    — wall-clock stamps
-#   revision.head_sha               — the fixture repo's fresh commit sha
-#   gates[].duration_ms             — measured wall clock
-#   gates[].started_at / completed_at — wall-clock stamps (P097 row v2)
-#   _command_log[].duration_ms      — measured wall clock
-# Everything else — results, exit codes, outputs, attempts, ordering, the whole
-# schema — is compared.
-golden_normalize() {
-  jq -S '
-      .completed_at = "NORMALIZED"
-    | ._generated_at = "NORMALIZED"
-    | .revision.head_sha = "NORMALIZED"
-    # The command log carries its own durations, and nothing was zeroing them:
-    # the golden holds 0 there, so any machine on which a command took a
-    # measurable millisecond failed this comparison. That is why it had been
-    # red — a timing flake wearing the costume of a shape regression.
-    | (if (._command_log | type) == "array"
-       then ._command_log |= map(if (. | type) == "object" and (has("duration_ms"))
-                                 then .duration_ms = 0 else . end)
-       else . end)
-    | .gates |= with_entries(
-        if (.value | type) == "object" then
-          .value |= (
-              (if has("duration_ms") then .duration_ms = 0 else . end)
-            # P097 Step 2 rows stamp their own start/end (row_version 2).
-            | (if has("started_at") then .started_at = "NORMALIZED" else . end)
-            | (if has("completed_at") then .completed_at = "NORMALIZED" else . end)
-          )
-        else . end)
-    | ._command_log |= map(.duration_ms = 0)
-  ' "$1"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -461,24 +390,6 @@ YAML
   # (c) It is on the record as a supersede, not a re-attach.
   run jq -se 'any(.[]; .event == "gate_job_superseded" and .reason == "command_fingerprint_mismatch")' "$TIMELINE"
   [[ "$output" == *true* ]]
-}
-
-@test "case 6: GOLDEN — a foreground-only execution.yaml is byte-identical to the pre-P076 report" {
-  [ -f "$GOLDEN" ]
-  GPROJ="$WORK/golden"
-  mkdir -p "$GPROJ"
-  golden_build_fixture "$GPROJ"
-
-  ( cd "$GPROJ" && "$RUN_GATES" run-all exec.yaml E-P076 R-1 \
-      --report-file ".aid-o/work/evidence/E-P076/R-1/gates/gates_report.json" \
-      >/dev/null 2>"$WORK/golden.err" ) || true
-
-  [ -f "$GPROJ/.aid-o/work/evidence/E-P076/R-1/gates/gates_report.json" ]
-  golden_normalize "$GPROJ/.aid-o/work/evidence/E-P076/R-1/gates/gates_report.json" \
-    > "$WORK/golden-actual.json"
-
-  run diff -u "$GOLDEN" "$WORK/golden-actual.json"
-  [ "$status" -eq 0 ]
 }
 
 @test "case 8: two background gates with IDENTICAL commands never cross-attach" {

@@ -391,9 +391,3 @@ _simulate_kill_after_branch() {
 }
 
 # ─── 5. the installed template ─────────────────────────────────────────────
-
-@test "P074 Step 7: .aid-worktrees/ is in the installed gitignore template and the aid-init upgrade note" {
-  grep -qx '\.aid-worktrees/' "$AID_PLUGIN_PATH/defaults/.gitignore"
-  grep -q '\.aid-worktrees/' "$AID_PLUGIN_PATH/commands/aid-init.md"
-  grep -qi 'upgrade note' "$AID_PLUGIN_PATH/commands/aid-init.md"
-}

@@ -37,12 +37,3 @@ _fm() { sed -n '2,/^---$/p' "$1" | sed '$d'; }   # the frontmatter lines between
   done
   [ "$(_fm "$AID_PLUGIN_PATH/agents/implementer.md" | sed -n 's/^effort: *//p')" = high ]
 }
-
-@test "a card with an unknown model is what this suite refuses (proved on a copy)" {
-  local t; t="$(mktemp -d)"; cp "$AID_PLUGIN_PATH/agents/implementer.md" "$t/x.md"
-  sed -i 's/^model: sonnet/model: gpt-6/' "$t/x.md"
-  run bash -c "sed -n '2,/^---\$/p' '$t/x.md' | sed -n 's/^model: *//p'"
-  [ "$output" = "gpt-6" ]
-  case "$output" in sonnet|opus|fable) false ;; *) true ;; esac
-  rm -rf "$t"
-}

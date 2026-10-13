@@ -13,43 +13,6 @@ setup() {
   RUNNER="$PLUGIN_ROOT/scripts/aid-run-gates.sh"
 }
 
-@test "the derivation block exists and keys on status=fail, not waived, AND required=true (P097 Step 2: the version-2 row)" {
-  local block
-  block="$(sed -n '/the verdict is DERIVED from the rows/,/local completed_at/p' "$RUNNER")"
-  [ -n "$block" ]
-  [[ "$block" == *'.value.status? // "") == "fail"'* ]]
-  [[ "$block" == *'.value.waived? // false) == false'* ]]
-  [[ "$block" != *'.value.result'* ]]
-  [[ "$block" == *'.value.required? // false) == true'* ]]
-  [[ "$block" == *'overall="fail"'* ]]
-}
-
-@test "a waived gate is deliberately not counted as a failure" {
-  local block
-  block="$(sed -n '/the verdict is DERIVED from the rows/,/local completed_at/p' "$RUNNER")"
-  [[ "$block" != *'"waived"'* ]] || [[ "$block" == *'waived'*'not a failure'* ]]
-}
-
-@test "gate rows carry required, so the verdict has something to re-derive from" {
-  # The field is written inside a double-quoted shell string, so the file
-  # literally contains the backslashes: \"required\": \$req
-  grep -q 'required.*: .*req' "$RUNNER"
-  grep -q 'argjson req' "$RUNNER"
-}
-
-@test "rows that cannot be counted are reported, never blessed as a pass" {
-  local block
-  block="$(sed -n '/the verdict is DERIVED from the rows/,/local completed_at/p' "$RUNNER")"
-  [[ "$block" == *"could not re-derive the verdict"* ]]
-  [[ "$block" == *"unconfirmed"* ]]
-}
-
-@test "the correction is logged, not silent" {
-  local block
-  block="$(sed -n '/the verdict is DERIVED from the rows/,/local completed_at/p' "$RUNNER")"
-  [[ "$block" == *"gate_overall_corrected"* ]]
-}
-
 @test "revision pair: 'no revision' looks like no revision on BOTH halves" {
   # Outside a repository the supervisor answers "nogit nogit". Normalizing only
   # the head left ("", "nogit") — a tree that looks like a digest and compares

@@ -193,14 +193,6 @@ EOF
   [ "$output" = "0" ]
 }
 
-@test "P073 Step 9: the guard no longer advertises an unaudited bypass" {
-  run grep -c 'Or use --force to bypass' "$RELEASE"
-  [ "$output" = "0" ]
-  # It advertises the audited form instead.
-  run grep -c "force --reason" "$RELEASE"
-  [ "$output" -ge 1 ]
-}
-
 # ─── Codex-review finding on the first cut of this step ───────────────────
 # The review read "receipt plus audit-log entry" as two fail-closed records.
 # They are deliberately not: the WAIVER RECEIPT is the authoritative record
