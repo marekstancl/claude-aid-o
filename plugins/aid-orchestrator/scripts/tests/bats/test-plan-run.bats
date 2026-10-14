@@ -40,7 +40,10 @@ setup_file() {
 
 setup() {
   export AID_TEST_MODE=1 AID_PLUGIN_PATH="$PLUGIN_DIR"
-  R="$BATS_TEST_TMPDIR/p"
+  # one fixed path per file, so the state _run_ok saves (absolute paths, the plan's
+  # worktree inside the project) is valid when the next case restores it
+  R="$BATS_FILE_TMPDIR/p"
+  cd /; rm -rf "$R"
   cp -a "$TPL" "$R"
   cd "$R"
   FSM="$PLUGIN_DIR/scripts/aid-fsm.sh"
@@ -53,13 +56,26 @@ setup() {
 }
 
 _run()  { run bash "$PFSM" plan-run P900 "$@"; }
+# _run_ok — a plain plan-run that must succeed. The first case runs it (~25 s) and saves the
+# project with its output; every later case restores that copy (state, worktree and output),
+# so only the cases about the run itself pay for it.
+_run_ok() {
+  local saved="$BATS_FILE_TMPDIR/after-run"
+  if [[ -d "$saved" ]]; then
+    cd /; rm -rf "$R"; cp -a "$saved/p" "$R" || return 1; cd "$R"
+    status=0; output="$(cat "$saved/output")"; lines=(); mapfile -t lines <<<"$output"
+  else
+    _run; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+    mkdir -p "$saved"; cp -a "$R" "$saved/p"; printf '%s' "$output" > "$saved/output"
+  fi
+}
 # _page — re-render the PM page after a test edits the plan (plan-run refuses a stale page, as production does)
 _page() { ( source "$PLUGIN_DIR/scripts/lib/aid-plan-summary.sh" && aid_plan_summary_render "$PLAN" "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html" >/dev/null 2>&1 ); }
 
 # ── the start ────────────────────────────────────────────────────────────────
 
 @test "direct: plan-run starts one run on plan/<id> with no EPIC artefact, no queue entry and no task branch" {
-  _run
+  _run_ok
   [ "$status" -eq 0 ]
   [ ! -d "$R/.aid-o/tasks" ] || [ -z "$(ls -A "$R/.aid-o/tasks")" ]
   [ -z "$(find "$GEN" -name 'E-*' 2>/dev/null)" ]
@@ -75,7 +91,7 @@ _page() { ( source "$PLUGIN_DIR/scripts/lib/aid-plan-summary.sh" && aid_plan_sum
 }
 
 @test "direct: init --direct records branch plan/<id> and creates no task/ branch" {
-  _run
+  _run_ok
   [ "$status" -eq 0 ]
   [ -z "$(git -C "$R" branch --list 'task/*')" ]
   [ "$(jq -r '.kind' "$GEN/transaction.json")" = "plan_run" ]
@@ -83,7 +99,7 @@ _page() { ( source "$PLUGIN_DIR/scripts/lib/aid-plan-summary.sh" && aid_plan_sum
 }
 
 @test "direct: a second plan-run is refused plan_run_already_started" {
-  _run; [ "$status" -eq 0 ]
+  _run_ok; [ "$status" -eq 0 ]
   _run
   [ "$status" -eq 1 ]
   [[ "$output" == *"(pipeline.md §When AID refuses: plan_run_already_started)"* ]]
@@ -141,7 +157,7 @@ _page() { ( source "$PLUGIN_DIR/scripts/lib/aid-plan-summary.sh" && aid_plan_sum
 }
 
 @test "direct: plan-start --declared-epics declares exactly E-<nnn>-1_1 for a plan with no EPIC marker" {
-  _run
+  _run_ok
   [ "$status" -eq 0 ]
   [ "$(git -C "$R" show main:.aid-lifecycle/manifests/P900.yaml | yq -r '[.declared_epics[].id] | join(",")')" = "E-900-1_1" ]
   # the template carries one marker; prove the argument, not the parse: no marker
@@ -175,7 +191,7 @@ _page() { ( source "$PLUGIN_DIR/scripts/lib/aid-plan-summary.sh" && aid_plan_sum
 # ── the manifest learns the null task branch only for direct entries ─────────
 
 @test "direct: the manifest validator still refuses a non-direct entry with a null task_branch" {
-  _run; [ "$status" -eq 0 ]
+  _run_ok; [ "$status" -eq 0 ]
   jq '.plan_boundary_manifest.epic_runs[0].direct = false' "$MF" > "$MF.t" && mv "$MF.t" "$MF"
   run bash -c 'source "$PLUGIN_DIR/scripts/lib/aid-plan-manifest.sh"; export AID_PLAN_MANIFEST_PROJECT_ROOT="$R"; plan_manifest_validate P900'
   [ "$status" -ne 0 ]
@@ -469,7 +485,7 @@ _states() { find "$R/.aid-o/work/evidence" -name fsm-state.yaml | wc -l; }
 _ev_add() { printf '{"ts":"%s","event":"%s"}\n' "${2:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" "$1" >> "$EV/timeline.jsonl"; }
 
 @test "restart: a run that made no step restarts — one READY state, one map entry, the old run abandoned under superseded-runs/" {
-  _run; [ "$status" -eq 0 ]
+  _run_ok; [ "$status" -eq 0 ]
   _rs; echo "$output"; [ "$status" -eq 0 ]
   local sr; sr="$(_sr)"; [ -n "$sr" ]
   [ "$(yq -r .state "$EV/fsm-state.yaml")" = READY ]
@@ -481,7 +497,7 @@ _ev_add() { printf '{"ts":"%s","event":"%s"}\n' "${2:-$(date -u +%Y-%m-%dT%H:%M:
   [ "$(jq -r .reason "$sr/restart.json")" = "$WHY" ]
 }
 @test "restart: the restart leaves the audit record, the timeline event and the audit-log line supersede-generation leaves" {
-  _run; _rs; [ "$status" -eq 0 ]
+  _run_ok; _rs; [ "$status" -eq 0 ]
   local ep; ep="$(jq -r .epoch "$(_sr)/restart.json")"
   jq -e '.schema == "aid-generation-supersede/v1" and .plan_id == "P900" and (.reason | startswith("restart: "))' "$GEN/generation-superseded-${ep}.json"
   grep -q "\"event\":\"generation_superseded\".*\"epoch\":\"${ep}\"" "$GEN/timeline.jsonl"
@@ -489,7 +505,7 @@ _ev_add() { printf '{"ts":"%s","event":"%s"}\n' "${2:-$(date -u +%Y-%m-%dT%H:%M:
   [ "$(jq -r .archived_transaction "$GEN/generation-superseded-${ep}.json")" = "$(_sr)/transaction.json" ]
 }
 @test "restart: a plan edited between the runs (repo_roots added, CP1 again) restarts and creates the foreign worktree" {
-  _run; [ "$status" -eq 0 ]
+  _run_ok; [ "$status" -eq 0 ]
   local F="$BATS_TEST_TMPDIR/docs"; _mk_foreign "$F"
   sed -i "s|^lifecycle_strict: true$|lifecycle_strict: true\nrepo_roots:\n  - name: docs\n    path: $F|" "$PLAN"
   git -C "$R" add -f "$PLAN" && git -C "$R" commit -qm "the plan declares its foreign repository"
@@ -499,29 +515,29 @@ _ev_add() { printf '{"ts":"%s","event":"%s"}\n' "${2:-$(date -u +%Y-%m-%dT%H:%M:
   [ "$(jq -r '.repo_roots[0].name' "$EV/plan.json")" = docs ]
 }
 @test "restart: a run past its first step is refused restart_after_step and nothing moves" {
-  _run; yq -i '.current_step = 1' "$EV/fsm-state.yaml"
+  _run_ok; yq -i '.current_step = 1' "$EV/fsm-state.yaml"
   _rs; [ "$status" -eq 1 ]
   [[ "$output" == *"current_step is 1"*"(pipeline.md §When AID refuses: restart_after_step)"* && "$output" == *"next: "* ]]
   [ -z "$(_sr)" ] && [ -f "$GEN/transaction.json" ]
 }
 @test "restart: a step_commit in the timeline is refused restart_after_step" {
-  _run; _ev_add step_commit
+  _run_ok; _ev_add step_commit
   _rs; [ "$status" -eq 1 ]; [[ "$output" == *"step_commit"*"restart_after_step"* ]]
 }
 @test "restart: a return naming repo_commits without increment-step is refused restart_after_step" {
-  _run; mkdir -p "$EV/steps/step_1_backend"; echo '{"repo_commits":[{"repo":"docs","range":"a..b"}]}' > "$EV/steps/step_1_backend/return.json"
+  _run_ok; mkdir -p "$EV/steps/step_1_backend"; echo '{"repo_commits":[{"repo":"docs","range":"a..b"}]}' > "$EV/steps/step_1_backend/return.json"
   _rs; [ "$status" -eq 1 ]; [[ "$output" == *"repo_commits"*"restart_after_step"* ]]
 }
 @test "restart: a DONE run is refused restart_after_step" {
-  _run; yq -i '.state = "DONE"' "$EV/fsm-state.yaml"
+  _run_ok; yq -i '.state = "DONE"' "$EV/fsm-state.yaml"
   _rs; [ "$status" -eq 1 ]; [[ "$output" == *"DONE"*"restart_after_step"* ]]
 }
 @test "restart: an uncommitted edit in the plan's worktree is refused restart_plan_dirty" {
-  _run; echo dirt > "$R/.aid-worktrees/plan-P900/dirt.txt"
+  _run_ok; echo dirt > "$R/.aid-worktrees/plan-P900/dirt.txt"
   _rs; [ "$status" -eq 1 ]; [[ "$output" == *"(pipeline.md §When AID refuses: restart_plan_dirty)"* ]]
 }
 @test "restart: a commit on plan/<id> above the run's base made outside a step is refused restart_plan_dirty" {
-  _run; local W="$R/.aid-worktrees/plan-P900"
+  _run_ok; local W="$R/.aid-worktrees/plan-P900"
   echo x > "$W/hand.txt"; git -C "$W" add hand.txt; git -C "$W" commit -qm "by hand"
   _rs; [ "$status" -eq 1 ]; [[ "$output" == *"1 commit(s) above the run's base"*"restart_plan_dirty"* ]]
 }
@@ -552,32 +568,32 @@ _ev_add() { printf '{"ts":"%s","event":"%s"}\n' "${2:-$(date -u +%Y-%m-%dT%H:%M:
   [ "$(git -C "$F" worktree list | grep -c 'plan-P900--docs')" = 1 ]
 }
 @test "restart: a run whose controller is active with a fresh timeline event is refused restart_controller_live" {
-  _run
+  _run_ok
   jq '.["E-900-1_1"].auto_controller = "active"' "$R/.aid-o/work/active-runs.json" > m.t && mv m.t "$R/.aid-o/work/active-runs.json"
   _ev_add heartbeat
   _rs; [ "$status" -eq 1 ]; [[ "$output" == *"(pipeline.md §When AID refuses: restart_controller_live)"* ]]
 }
 @test "restart: the same active controller whose last event is an hour old (the P016 case) restarts" {
-  _run
+  _run_ok
   jq '.["E-900-1_1"].auto_controller = "active"' "$R/.aid-o/work/active-runs.json" > m.t && mv m.t "$R/.aid-o/work/active-runs.json"
   _ev_add heartbeat "$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)"
   _rs; echo "$output"; [ "$status" -eq 0 ]
 }
 @test "restart: --restart without a reason of 20 characters is refused before anything moves" {
-  _run
+  _run_ok
   run bash "$PFSM" plan-run P900 --restart; [ "$status" -eq 2 ]
   run bash "$PFSM" plan-run P900 --restart --reason "too short"; [ "$status" -eq 2 ]; [[ "$output" == *"nothing was moved"* ]]
   [ -z "$(_sr)" ] && [ -f "$EV/fsm-state.yaml" ]
 }
 @test "restart: plan_run_already_started on a run without a step names --restart in its next:" {
-  _run; _run
+  _run_ok; _run
   [ "$status" -eq 1 ]; [[ "$output" == *"next: "*"plan-run P900 --restart --reason"* ]]
 }
 @test "restart: nothing to restart without a transaction" {
   _rs; [ "$status" -eq 2 ]; [[ "$output" == *"nothing to restart"* ]]
 }
 @test "restart: interrupted after the evidence moved, the same command finishes the restart" {
-  _run
+  _run_ok
   AID_PLAN_FSM_CRASH_AFTER=restart_moved_evidence _rs; [ "$status" -eq 99 ]
   [ "$(jq -r .state "$(_sr)/restart.json")" = moving ] && [ -f "$GEN/transaction.json" ]
   _rs; echo "$output"; [ "$status" -eq 0 ]
@@ -585,7 +601,7 @@ _ev_add() { printf '{"ts":"%s","event":"%s"}\n' "${2:-$(date -u +%Y-%m-%dT%H:%M:
   [ "$(ls -d "$R/.aid-o/work/superseded-runs/P900-"* | wc -l)" = 1 ]
 }
 @test "restart: interrupted after the transaction moved, the same command finishes the restart" {
-  _run
+  _run_ok
   AID_PLAN_FSM_CRASH_AFTER=restart_moved_tx _rs; [ "$status" -eq 99 ]
   [ ! -f "$GEN/transaction.json" ]
   _rs; echo "$output"; [ "$status" -eq 0 ]
