@@ -73,6 +73,9 @@ fix_site() {
   [ "$(grep -c '^BLOCKER ' <<<"$output")" -eq 1 ]
   grep -qx 'BLOCKER /kontakt brief-page confirmed page not built' <<<"$output"
   grep -qx 'OK /o-nas brief-h1 O nás' <<<"$output"
+  # a nested page without breadcrumbs is a warning (step 6, Coufal 13. 10.)
+  sed -i 's|"@type":"BreadcrumbList"|"@type":"ItemList"|' "$SITE/o-nas/index.html"
+  run python3 "$CHECK" "$SITE"; grep -qx 'WARN o-nas/index.html breadcrumbs nested page without BreadcrumbList in its JSON-LD' <<<"$output"
   # a "|" inside a cell breaks the row: a blocker, never a quietly shifted column
   printf '| URL | H1 | dotaz |\n|---|---|---|\n| / | Pekárna U Mlýna | pekárna | brno |\n| /o-nas | O nás | odhad |\n' >"$BATS_TEST_TMPDIR/brief.md"
   run python3 "$CHECK" "$SITE" --brief "$BATS_TEST_TMPDIR/brief.md"; [ "$status" -eq 1 ]

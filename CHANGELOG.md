@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased] — P113a (smyčka kvality /aid-ui)
 
+### Added
+- **Postupy, které na Coufalovi chyběly (5 ze 6 oprav kola 1 bylo „z hlavy“):**
+  - **Krok 3, web lokální služby:**
+    - stránka nebo sekce služby (Pro koho / Co zahrnuje / Jak postupujeme / Ceny z ceníku a odkazy; jen z faktů, chybějící průběh = otevřený bod klienta),
+    - závěrečná výzva říká, co se stane po odeslání, a nabízí telefon,
+    - nejsilnější ověřený důkaz stojí u hlavní výzvy úvodu.
+  - **Krok 6:**
+    - `Service` pro služby a `BreadcrumbList` na vnořených stránkách (`aid-ui-seo-check.py` hlásí chybějící drobečky jako WARN `breadcrumbs`),
+    - hlavní obraz první obrazovky bez výchozí neprůhlednosti a zpoždění; pohyb vzoru patří na doprovodný prvek.
+- **Id výtek se nezdvojují:** předponu kola a role, kterou si kritik opsal z paměti, smyčka odřízne. Kdyby se dvě id jedné odpovědi tím shodla, zůstanou, jak byla.
+
 ### Changed
 - **Dva kritici místo jednoho: majitel a technik** (PM 13. 10. 2026 po Coufalu, kde jeden technický kritik dal 7 kol 7,2-8,4 a web se viditelně skoro neměnil).
   - **Majitel** hodnotí dojem, výjimečnost proti konkurenci, fotky, prodejní texty, důvěru a cestu k objednání tak, jak ji vidí zákazník.

@@ -37,6 +37,7 @@ language, a page without <link rel="alternate" hreflang>.
                ai-crawlers.json) are not blocked; every ai_search and training robot has its own
                User-agent group and the group follows the policy (Disallow: / = blocked)
   ai-llms      no llms.txt unless the brief says "llms.txt: ano" (SEO standard: never by default)
+  breadcrumbs  WARN: an indexable nested page has no BreadcrumbList in its JSON-LD
   ai-jsonld    every indexable page has JSON-LD with a WebPage-like node whose publisher (inline
                or by @id anywhere on the site) names the organisation
   ai-entity    that publisher matches --facts (mapping keys brand, ico, email, telephone, domain;
@@ -273,6 +274,9 @@ def check_page(out, path, rel, base_url):
         for x in items:
             if isinstance(x, dict):
                 pg.items += [g for g in x.get("@graph", []) if isinstance(g, dict)] or [x]
+    if rel and rel.replace("\\", "/") != "index.html" and not pg.noindex and not nf:   # a nested page of a site says where it is (step 6, Coufal 13. 10.)
+        r(any("BreadcrumbList" in types(i) for i in pg.items), "breadcrumbs", "BreadcrumbList" if any("BreadcrumbList" in types(i) for i in pg.items)
+          else "nested page without BreadcrumbList in its JSON-LD")
     for item in pg.items:
         if "aggregateRating" in item and not types(item) & RATEABLE:
             r(False, "aggregate-rating", f"self-serving on {'/'.join(sorted(types(item)))}")

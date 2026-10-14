@@ -195,3 +195,11 @@ work() {   # the agent works: one assistant turn in its transcript, now
   run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.accepted and .publish_blocked_by == ["vlastné fotky"] and (.verdict | contains("zveřejnění blokuje"))' "$P/.aid-ui/critic/verdict.json" >/dev/null
 }
+
+@test "a prefix the critic copied from its memory is not doubled; ids that would clash keep their own form" {
+  ans 6
+  jq '.findings[0].id = "r1-owner-r1-01" | .findings[1].id = "r1-owner-r1-02"' "$T/ans-owner.json" > "$T/x" && mv "$T/x" "$T/ans-owner.json"
+  jq '.findings[0].id = "r1-01" | .findings[1].id = "r2-01"' "$T/ans-tech.json" > "$T/x" && mv "$T/x" "$T/ans-tech.json"
+  python3 "$Q" round "$P" --web "$W" >/dev/null
+  jq -e '([.findings[].id] | sort) == ["r1-owner-01", "r1-owner-02", "r1-tech-r1-01", "r1-tech-r2-01"]' "$P/.aid-ui/critic/rounds/1/round.json" >/dev/null
+}

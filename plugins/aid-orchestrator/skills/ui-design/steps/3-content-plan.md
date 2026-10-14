@@ -62,7 +62,17 @@ Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 
    Pořadí a obsah sekcí každé stránky navrhni podle rámce stránky z
    `references/adopted/marketingskills/cro/SKILL.md` (Page-Specific Frameworks: Homepage,
    Landing Page, Pricing Page, Feature Page; stránka služby nebo produktu jde podle Feature Page) a podle „Page Structure Framework"
-   převzatého copywritingu; právní stránka (`legal: true` z kroku 2) rámec nemá. Jazyk stránky
+   převzatého copywritingu; právní stránka (`legal: true` z kroku 2) rámec nemá.
+   **Web lokální služby navíc (P113a, kritici Coufal 13. 10. 2026; dřív se psalo „z hlavy“):**
+   - **Stránka nebo sekce služby:** bloky Pro koho / Co zahrnuje / Jak postupujeme / Ceny (3–5 typických
+     položek z ceníku, u každé cena pro pojišťovnu i přímou platbu, kde ji ceník má) a odkazy na úplný ceník,
+     objednání a telefon. Všechno jen z registru faktů. Chybí-li fakta o průběhu (počet návštěv, doba, péče po
+     výkonu), vznikne otevřený bod pro klienta, ne vymyšlená věta.
+   - **Závěrečná výzva každé stránky** říká, co se stane po odeslání (např. „zavoláme nebo napíšeme a domluvíme
+     termín“), a vedle hlavního tlačítka nabízí telefon jako druhou akci.
+   - **Nejsilnější ověřený důkaz** (hodnocení se zdrojem a datem, kvalifikace) stojí u hlavní výzvy úvodu,
+     ne až na konci stránky.
+   Jazyk stránky
    bez `references/copy-<jazyk>.md`: piš podle `copy-rules.md` a převzatých anglických pravidel
    a PM ve studiu jednou řekni, že kontrola textů takovou stránku pustí jen s jeho výjimkou.
 4. Otázka `content_plan` ve studiu: tabulka položek (stránka, sekce,

@@ -274,6 +274,13 @@ def rate(p, web, d, audit=False, hist=None):
     return {role: (pr.wait(), out) for role, (pr, out) in procs.items()}
 
 
+def bare(fid, ids):
+    """The critic's own id without a round or role prefix it copied from its memory (Coufal 13. 10.:
+    r2-owner-r2-owner-r2-01); kept as given when stripping would make two ids of one answer the same."""
+    cut = lambda x: re.sub(r"^(?:(?:r\d+|a\d+|owner|tech)-)+", "", x) or x
+    return cut(fid) if len({cut(x) for x in ids}) == len(set(ids)) else fid
+
+
 def merge(runs):
     """The round's score from both roles: quality_score = the lower role score; accepted = both accepted."""
     sc = {role: runs[role]["score"] for role in ROLES}
@@ -311,7 +318,7 @@ def do_round(p, web):
     finds = []
     for role, (_, out) in res.items():
         ans = json.load(open(os.path.join(out, "answer.json"), encoding="utf-8"))
-        finds += [mark_client(dict(f, id="r%d-%s-%s" % (n, role, f["id"]), role=role, state=None)) for f in ans["findings"]]
+        finds += [mark_client(dict(f, id="r%d-%s-%s" % (n, role, bare(f["id"], [x["id"] for x in ans["findings"]])), role=role, state=None)) for f in ans["findings"]]
     score = merge(runs)
     rec = {"n": n, "at": at, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
            "provider": {r: runs[r].get("provider") for r in ROLES}, "score": score, "findings": finds, "readiness": score["readiness"],
@@ -436,7 +443,7 @@ def audit(p, web):
     if not ok:   # the auditors' findings become a round to triage; it is no repair round
         n = rs[-1]["n"] + 1
         crit = {"%s.%s" % (role, k): x for role in ROLES for k, x in vs[role]["criteria_median"].items()}
-        finds = [mark_client(dict(f, id="r%d-a%d-%s-%s" % (n, k, role, f["id"]), role=role, state=None)) for k, role, a in answers for f in a["findings"]]
+        finds = [mark_client(dict(f, id="r%d-a%d-%s-%s" % (n, k, role, bare(f["id"], [x["id"] for x in a["findings"]])), role=role, state=None)) for k, role, a in answers for f in a["findings"]]
         save_round(p, {"n": n, "at": v["at"], "web": web, "audit": True, "site_sha": tgt["site_sha"], "frozen_sha": rs[0]["frozen_sha"],
                        "score": {"quality_score": v["median_quality_score"], "owner": vs["owner"]["median_quality_score"], "tech": vs["tech"]["median_quality_score"],
                                  "criteria": crit, "min_criterion": min(crit.values()) if crit else 0, "accepted": False, "readiness": ready},
