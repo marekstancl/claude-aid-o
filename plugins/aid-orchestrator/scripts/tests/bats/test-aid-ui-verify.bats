@@ -28,6 +28,19 @@ teardown() {
   [[ -z "${HOLD:-}" ]] || kill "$HOLD" 2>/dev/null || true
 }
 
+# narrow <check>… — the gate over the phone and desktop viewports (no 768; NARROW_VP for one)
+# and only these checks, with their applies: rules unchanged (a check pinned to 390 or 1440
+# keeps its rows). The coverage row compares the map with the WHOLE list, so it is asserted
+# only where the whole gate runs. A case about one check does not pay for 38 checks x 3 viewports
+# x 2 browsers (2.5 min a run); "planted defects" and "the fixed copy" keep the whole gate.
+narrow() {
+  local cov; cov="$(cd "$SC/../skills/ui-design/coverage" && pwd)"
+  mkdir -p "$T/cov"; cp "$cov"/* "$T/cov/"
+  local sel; sel="$(printf '.key == "%s" or ' "$@")"
+  yq -i ".viewports = [${NARROW_VP:-390, 1440}] | .checks |= with_entries(select(${sel% or }))" "$T/cov/checks.yaml"
+  export AID_UI_COVERAGE_MAP="$T/cov/map.yaml"
+}
+
 # row status of <check> <page> over every viewport and browser, unique, comma-joined
 st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page == $p) | .status] | unique | join(",")' "$RES"; }
 
@@ -174,6 +187,7 @@ copy_reviewed() {
 }
 
 @test "ai_search: N/A without options.seo; with it a missing policy fails the home page only, page findings on their page" {
+  NARROW_VP=1440 narrow ai_search seo   # ai_search applies at 1440 only
   cp -r "$FX/fixed/." "$SITE/"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
@@ -190,6 +204,7 @@ copy_reviewed() {
 }
 
 @test "brand_package: one row on the home page; a missing part fails it with its name" {
+  NARROW_VP=390 narrow brand_package
   cp -r "$FX/fixed/." "$SITE/"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
@@ -202,6 +217,7 @@ copy_reviewed() {
 }
 
 @test "design_standard_doc: one row; a missing section fails it; a broken DESIGN.md is not_covered, never a pass" {
+  NARROW_VP=390 narrow design_standard_doc
   cp -r "$FX/fixed/." "$SITE/"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   sed -i 's/^## Vynucení$/## Jinak/' "$PROJ/docs/design/design-standard.md"
@@ -214,6 +230,7 @@ copy_reviewed() {
 }
 
 @test "K1b page checks: an off-token colour, a small control, a third-party request, a tall sticky panel and motion are each reported" {
+  narrow token_usage touch_targets privacy_before_consent sticky_panels reduced_motion vision_doc
   cp -r "$FX/fixed/." "$SITE/"
   sed -i 's|</main>|<p style="color:#ff0000">Akce</p><button style="width:30px;height:30px;padding:0;background:#1a1a1a;color:#faf6ee">x</button>\
 <aside style="position:sticky;top:0;height:3000px;background:#faf6ee">panel</aside>\
@@ -229,12 +246,12 @@ copy_reviewed() {
   jq -e '[.rows[] | select(.check == "sticky_panels" and .page == "index.html") | .status] | unique == ["fail"]' "$RES" >/dev/null
   jq -e '[.rows[] | select(.check == "sticky_panels" and .page == "o-nas/index.html") | .detail] | all(startswith("N/A"))' "$RES" >/dev/null
   jq -e '.rows[] | select(.check == "reduced_motion" and .page == "index.html") | .status == "fail"' "$RES" >/dev/null
-  # project rows: vision N/A without options.vision, the coverage map matches the standards
+  # project row: vision N/A without options.vision
   jq -e '.rows[] | select(.check == "vision_doc") | .status == "pass" and (.detail | startswith("N/A"))' "$RES" >/dev/null
-  jq -e '.rows[] | select(.check == "coverage") | .status == "pass"' "$RES" >/dev/null
 }
 
 @test "K1b edge cases: invisible focus fails; honeypot, checked radio, frame, fading focus, label, translucent token, hidden dropdown, decorative layer do not; a cookie on load fails privacy" {
+  narrow keyboard touch_targets token_usage sticky_panels privacy_before_consent
   cp -r "$FX/fixed/." "$SITE/"
   # a button whose focus looks like rest; a honeypot (tabindex -1 in aria-hidden); one radio group of
   # three; a checkbox in a 44 px label; token colours written as oklch and color-mix; a tall fixed
@@ -267,6 +284,7 @@ copy_reviewed() {
 }
 
 @test "K1b keyboard: a control that keeps Tab (a trap) leaves the rest unreached" {
+  narrow keyboard
   cp -r "$FX/fixed/." "$SITE/"
   sed -i 's|<nav>|<input aria-label="past" style="min-height:44px" onkeydown="if(event.key===\x27Tab\x27)event.preventDefault()"><nav>|' "$SITE/index.html"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
@@ -318,6 +336,7 @@ copy_reviewed() {
 }
 
 @test "P108: copy_review: not_covered without a record, pass with one, fail after a text, facts or context change or a failed review" {
+  NARROW_VP=1440 narrow copy_review   # copy_review applies at 1440 only
   cp -r "$FX/fixed/." "$SITE/"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
@@ -345,6 +364,7 @@ copy_reviewed() {
 }
 
 @test "P108: registered facts make the planted counts pass in the real gate; only the unregistered price stays" {
+  narrow facts_match
   cat >> "$PROJ/docs/content/facts.yaml" <<'YML'
 - claim: klienti
   value: "200"
