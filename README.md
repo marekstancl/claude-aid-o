@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v3.2.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v3.2.1
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.2.0** (current) — smyčka kvality /aid-ui: dva nezávislí kritici (majitel a technik) s pamětí a cestou k 10, hodnotí se práce studia, ne to, co klient nedodal; 3 kola nebo 8,5 u obou a audit; cena a čas každého kola; ve studiu jen rozdíly proti minulé verzi a milníky místo otázky na každou stránku
+- **v3.2.1** (current) — rychlejší noční běh testů: strop úlohy 10 h, sdílené kopie přípravků, sady konce plánu, spuštění plánu a ověření UI zrychlené; opravy po první noci s 3.0.0
+- **v3.2.0** — smyčka kvality /aid-ui: dva nezávislí kritici (majitel a technik) s pamětí a cestou k 10, hodnotí se práce studia, ne to, co klient nedodal; 3 kola nebo 8,5 u obou a audit; cena a čas každého kola; ve studiu jen rozdíly proti minulé verzi a milníky místo otázky na každou stránku
 - **v3.1.1** — úklid nočního patra testů: osm celých sad a 46 případů archeologie, hlídačů změn a hledání vět pryč; všechny sady, které noční běh hlásil červeně, jsou zelené (tři skutečné nepravdy opravené)
 - **v3.1.0** — testy s hodnotou: nový případ pojmenovaný po plánu, nálezu nebo položce backlogu zastaví uzavření plánu i vydání (`test_named_after_plan`); plán říká, které testy maže, revize kroku se ptá, který test změna zneplatnila
 - **v3.0.0** — bez EPIC cesty: plán běží jen jako jeden běh `/aid-run P<NNN>`; generátory EPICů, fronta, task větve a revize EPICu (CP3) odstraněny, staré vstupy odmítnou s cestou ven (`epic_path_removed`) (P114)
