@@ -448,6 +448,7 @@ YML
 }
 
 @test "an inline SVG logo passes only with the brand package's drawing; colour, whitespace and ids do not count" {
+  NARROW_VP=390 narrow brand_assets
   cp -r "$FX/fixed/." "$SITE/"
   # ok*: brand logo.svg geometry recoloured/reformatted; bad*: one coordinate moved, an extra
   # shape, another viewBox, a hand-drawn mark; deco: an SVG outside any logo context is not a logo
@@ -558,6 +559,7 @@ YML
 }
 
 @test "P108 motion rows: motion_settled passes once the intro (data-aid-intro) and finite animations ended and fails when they do not; motion_fidelity is N/A without a reference, fails on a missing inventory or a lost motion, passes with the motion seen" {
+  narrow motion_settled motion_fidelity
   MP="$SC/aid-ui-motion.py"; FXR="$BATS_TEST_DIRNAME/../fixtures/aid-ui/motion-record.json"; MS="$BATS_TEST_DIRNAME/../fixtures/aid-ui/motion-site"
   # the motion fixture as the site: its intro ends after 1.8 s, the reveals through opacity
   rm -rf "$SITE"; cp -r "$MS" "$SITE"

@@ -5,14 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [3.2.1] — 2026-10-14
 
-Rychlejší noční běh testů, druhé kolo úklidu (PM 14. 10. 2026). Nic se nemění pro uživatele pluginu.
+Rychlejší noční běh testů, druhé kolo úklidu (PM 14. 10. 2026). Postaveno nad 3.2.0. Nic se nemění pro uživatele pluginu.
 
 ### Changed
 - Noční úloha má vlastní časový strop 600 minut. Její výchozí strop 360 minut (žádný limit platformy) ji 12. a 13. 10. ukončil po 6 h 1 min a hlášení nevzniklo.
 - Mechanismus „postav přípravek jednou, pro každý případ obnov kopii“ je sdílený (`scripts/tests/bats/snapshot.bash`, dřív jen uvnitř sady uzavření plánu). Selhání stavitele přípravku teď sadu zastaví, místo aby se uložil poloviční stav.
 - `test-plan-final-decide`: projekt a konec plánu bez mezikroku se staví jednou na vstup a obnovují se (26,7 → 20,2 min na vytíženém stroji).
 - `test-plan-run`: případy, které začínají úspěšným spuštěním plánu, obnoví jeho uloženou kopii včetně výstupu, místo aby ho opakovaly (23,9 → 17,4 min). Sada odmítne paralelní bats.
-- `test-aid-ui-verify`: případ, který se ptá na jednu kontrolu brány, pustí jen tu kontrolu (`narrow`). Celou bránu (38 kontrol × 3 šířky × 2 prohlížeče) pouštějí jen dva případy, které se ptají na bránu jako celek. Nejdražší případ (kontrola textů) 8,3 → 2,7 min.
+- `test-aid-ui-verify`: případ, který se ptá na jednu kontrolu brány, pustí jen tu kontrolu (`narrow`). Celou bránu (38 kontrol × 3 šířky × 2 prohlížeče) pouštějí jen dva případy, které se ptají na bránu jako celek. Nejdražší případ (kontrola textů) 8,3 → 2,7 min. Po 3.2.0 i případ pohybu (11,9 → 5,6 min) a loga (1,8 → 0,5 min).
 
 ### Fixed
 - `scripts/aid-ui-coverage.sh` a `scripts/aid-ui-verify.sh` byly v gitu bez práva ke spuštění (od 2.118.0), takže přímé spuštění podle návodu skončilo chybou 126.
