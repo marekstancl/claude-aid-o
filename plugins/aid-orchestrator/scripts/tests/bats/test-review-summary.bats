@@ -36,6 +36,9 @@ _measure() {
   [ "$(aid_review_usd opus 1000000 100000 2000000 0)" = "8.5" ]
   [ "$(aid_review_usd sonnet 500000 50000 0 100000)" = "1.75" ]
   [ "$(aid_review_usd_blended opus 1000000)" = "16.4" ]
+  local n; for n in "0 0:0" "2000000 0:10" "20000000 0:100" "20000 0:0.1" "210000 0:1.05"; do   # opus input 5 USD/M
+    [ "$(aid_review_usd opus ${n%%:*} 0 0)" = "${n##*:}" ] || { echo "$n -> $(aid_review_usd opus ${n%%:*} 0 0)"; return 1; }
+  done
   [ "$(aid_review_usd gpt-9 10 10 0 0)" = unknown ]
   [ "$(aid_review_usd opus unknown 10 0 0)" = unknown ]
   [ "$(aid_review_usd_blended opus unknown)" = unknown ]

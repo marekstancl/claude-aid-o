@@ -3,7 +3,7 @@
 # One library for every checkpoint (P094 Step 11).
 #
 #   aid_review_usd <model> <in> <out> <cache_read> <cache_write>
-#       USD (four decimals) from defaults/prices.yaml (a project's
+#       USD (rounded to four decimals, no trailing zeros: 8.5, 10, 0) from defaults/prices.yaml (a project's
 #       .aid-o/config/prices.yaml wins); "unknown" for an unlisted model, a
 #       missing table or a non-numeric count.
 #   aid_review_usd_blended <model> <tokens>
