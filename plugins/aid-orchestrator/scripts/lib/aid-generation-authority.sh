@@ -5,8 +5,8 @@
 # atomic writer, the target branch and head, the CP1 seal and its verifier, and
 # the plan.json-versus-source-graph receipt check.
 #
-# Moved UNCHANGED from aid-auto-pipeline.sh (229-375, the inline seal
-# ~1470-1715) and aid-plan-to-epic.sh (_verify_generation_authority 270-372),
+# Moved UNCHANGED from the former generation pipeline (229-375, the inline seal
+# ~1470-1715) and the former EPIC generator (_verify_generation_authority 270-372),
 # so the pipeline and `aid-plan-fsm.sh plan-run` hold ONE lock, write ONE
 # transaction file and seal through ONE body: the two roads to a run exclude
 # each other by mechanism (P111). The pipeline keeps calling the `_gen_*`
@@ -163,7 +163,7 @@ _gen_audit_log_path()   { aid_state_path ".aid-o/work/audit-log.jsonl"; }
 
 # _gen_target_branch — the configured integration branch. Deliberately a local
 # copy of lib/aid-lifecycle.sh's `aid_target_branch` (same rule, same default):
-# aid-auto-pipeline.sh sources that lib far below its committed-source
+# the former generation pipeline sources that lib far below its committed-source
 # preflight, and sourcing it earlier (through this library) would change the
 # preflight's behaviour as a side effect — so this library never sources it.
 _gen_target_branch() {
@@ -295,7 +295,7 @@ _gen_tx_update() {
 aid_gen_seal() {
   local plan="$1" plan_id="$2" total_phases="$3" queue_mode="$4" force_generation="$5" force_reason="$6" _seal_override="${7:-}"
   local _aid_pipeline_state_root="${_aid_pipeline_state_root:-$(aid_state_root 2>/dev/null || pwd)}"
-  [[ -n "$_seal_override" ]] || _seal_override="$(printf "aid-auto-pipeline.sh --plan %q --queue-mode %q --force --reason %q" "$plan" "$queue_mode" "<why, at least 20 characters>")"
+  [[ -n "$_seal_override" ]] || _seal_override="$(printf "aid-plan-fsm.sh plan-run %q --force --reason %q" "$plan_id" "<why, at least 20 characters>")"
   local _gen_plan_sha256 _gen_target_branch_name _gen_target_head_sha _gen_dir_path _gen_tx_path _gen_auth_path
   _gen_plan_sha256="$(_gen_sha256_file "$plan")"
   _gen_target_branch_name="$(_gen_target_branch)"
@@ -472,14 +472,14 @@ if [[ "$_gen_authority_valid" != true ]]; then
       --arg by "${USER:-unknown}" --arg subject "sha256:${_gen_auth_self}" \
       --argjson cp1 "$_gen_cp1_json" \
       '{schema_version:"aid-2.0", artifact_type:"waiver",
-        producer:"aid-auto-pipeline.sh@generation-force-override",
+        producer:"aid-plan-fsm.sh plan-run@generation-force-override",
         created_at:$created_at, control_protocol:"aid-2.0",
         identity:{project_id:null, epic_id:$plan_id, run_id:"generation", step_id:null},
         subject:{subject_hash:$subject},
         revision:{head_sha:$head_sha, head_is_current:true, freshness:"current"},
         status:"blocked", verdict:{kind:"none", ready:false},
-        provenance:{dispatch_mode:"deterministic", generated_by_tool:"aid-auto-pipeline.sh"},
-        waiver:{waived_check:"aid-auto-pipeline:cp1-gate", reason:$reason, waived_by:$by, waived_at:$created_at, scope:"run", visible:true},
+        provenance:{dispatch_mode:"deterministic", generated_by_tool:"aid-plan-fsm.sh plan-run"},
+        waiver:{waived_check:"plan-run:cp1-gate", reason:$reason, waived_by:$by, waived_at:$created_at, scope:"run", visible:true},
         forced_override:true, records:"precondition_bypass", actor_semantics:"instruction_only",
         bypassed_preconditions:($cp1.bypassed_conditions // [])}')" || _gen_waiver_json=""
     [[ -n "$_gen_waiver_json" ]] || { _gen_unlock; error_exit "cannot render the generation force receipt — refusing a silent bypass." 3; }
@@ -551,181 +551,9 @@ _gen_tx_bound="$(jq --arg h "$_gen_auth_sha" --arg u "$(_gen_now)" '.authority_s
 _gen_write_atomic "$_gen_tx_path" "$_gen_tx_bound" || { _gen_unlock; error_exit "cannot write the generation transaction manifest at ${_gen_tx_path}" 3; }
 }
 
-# _validate_against_schema <document> <schema.json> <label>
-#   A small, dependency-free draft-07 subset validator: `required`, `type`,
-#   `const`, `pattern`, `minimum`, `minLength`, `additionalProperties: false`,
-#   and one level of `additionalProperties: {object schema}` (the transaction's
-#   phases map). Enough to make "fails its schema" a real statement about these
-#   two documents rather than a spot check, and it fails CLOSED if the schema
-#   file itself is missing.
-_validate_against_schema() {
-  local doc="$1" schema="$2" label="$3"
-  [[ -f "$schema" ]] \
-    || error_exit "cannot validate the ${label}: schema ${schema} is missing — the verifier is fail-closed and will not accept an unvalidated document." 2
-  local errs rc=0
-  errs="$(jq -r -n --slurpfile d "$doc" --slurpfile s "$schema" '
-    def typeok($v; $t):
-      if $t == null then true
-      elif ($t | type) == "array" then ([ $t[] | typeok($v; .) ] | any)
-      elif $t == "integer" then (($v | type) == "number" and (($v | floor) == $v))
-      elif $t == "null" then ($v == null)
-      else (($v | type) == $t) end;
-
-    # NOT `$sch.additionalProperties // true`: jq treats FALSE as empty for
-    # `//`, so the literal `false` this validator exists to honour would
-    # silently become `true` and every unknown property would be allowed.
-    def ap($sch): if ($sch | has("additionalProperties")) then $sch.additionalProperties else true end;
-
-    def check($val; $sch; $path):
-      ( if ($sch | has("const")) and ($val != $sch.const)
-          then ["\($path): must be \($sch.const | tojson)"] else [] end )
-      + ( if ($sch.type != null) and (typeok($val; $sch.type) | not)
-            then ["\($path): expected \($sch.type | tojson), got \($val | type)"] else [] end )
-      + ( if ($sch.pattern != null) and (($val | type) == "string") and (($val | test($sch.pattern)) | not)
-            then ["\($path): does not match /\($sch.pattern)/"] else [] end )
-      + ( if ($sch.minLength != null) and (($val | type) == "string") and (($val | length) < $sch.minLength)
-            then ["\($path): shorter than minLength \($sch.minLength)"] else [] end )
-      + ( if ($sch.minimum != null) and (($val | type) == "number") and ($val < $sch.minimum)
-            then ["\($path): below minimum \($sch.minimum)"] else [] end )
-      + ( if ($val | type) == "object"
-            then [ ($sch.required // [])[] as $k | select(($val | has($k)) | not)
-                   | "\($path).\($k): required property is missing" ]
-            else [] end )
-      + ( if ($val | type) == "object" and (ap($sch) == false)
-            then [ ($val | keys_unsorted[]) as $k | select((($sch.properties // {}) | has($k)) | not)
-                   | "\($path).\($k): property is not allowed (additionalProperties: false)" ]
-            else [] end )
-      + ( if ($val | type) == "object"
-            then ( [ ($val | keys_unsorted[]) as $k | select((($sch.properties // {}) | has($k))) | $k ]
-                   | map(. as $k | check($val[$k]; $sch.properties[$k]; "\($path).\($k)")) | add // [] )
-            else [] end )
-      + ( if ($val | type) == "object" and ((ap($sch) | type) == "object")
-            then ( [ ($val | keys_unsorted[]) as $k | select((($sch.properties // {}) | has($k)) | not) | $k ]
-                   | map(. as $k | check($val[$k]; ap($sch); "\($path).\($k)")) | add // [] )
-            else [] end );
-
-    check($d[0]; $s[0]; "$") | unique | join("; ")
-  ' 2>/dev/null)" || rc=$?
-  if [[ "$rc" -ne 0 ]]; then
-    error_exit "cannot validate the ${label} ${doc} against ${schema} (unreadable or malformed JSON) — the verifier is fail-closed." 1
-  fi
-  [[ -z "$errs" ]] && return 0
-  error_exit "${label} ${doc} fails its schema ($(jq -r '."$id" // "unknown"' "$schema")): ${errs}" 1
-}
-
-# aid_gen_verify_authority <auth> <tx> <plan> <plan_id> <total> <phase> <project_root>
-#   The sealed authority verified for one phase (P074 Step 14; moved from
-#   aid-plan-to-epic.sh by P111): schema, self-hash, plan bytes, target branch
-#   and head, phase range, derivation version, transaction linkage, identity
-#   tuple, re-derived ids. Fail-closed (error_exit) on any mismatch.
-aid_gen_verify_authority() {
-  local auth="$1" tx="$2" plan="$3" plan_id="$4" total="$5" phase="$6" _project_root="$7"
-  # FAIL-CLOSED BY DEFINITION: no jq, no verification, no generation.
-  command -v jq >/dev/null 2>&1 \
-    || error_exit "generation authority verification requires jq, which is unavailable — the verifier is fail-closed by definition and will not fall back to gate-less generation." 2
-  [[ -f "$auth" ]] || error_exit "generation authority not readable: ${auth} — run generation through aid-auto-pipeline.sh (never a gate-less fallback)." 1
-  [[ -f "$tx" ]]   || error_exit "generation transaction not readable: ${tx} — a transaction is never implicitly recreated mid-run. Run generation through aid-auto-pipeline.sh." 1
-
-  # SCHEMA VALIDATION of BOTH documents against the shipped schemas: every
-  # `required` key present with the declared type, and `additionalProperties:
-  # false` honoured. Field-presence spot checks are not enough — a document
-  # could carry an unknown field, a wrong type, or a missing required key and
-  # still pass. The schemas are the source of truth;
-  # jq walks them so no external validator is required (and a missing
-  # validator can never become a silent skip).
-  local schema_dir="${_AID_GEN_SCRIPTS_DIR}/../defaults/schemas"
-  _validate_against_schema "$auth" "${schema_dir}/generation-authority.schema.json" "generation authority"
-  _validate_against_schema "$tx"   "${schema_dir}/generation-transaction.schema.json" "generation transaction"
-
-  # self_sha256 — canonical JSON (`jq -S -c`) with the hash field NULLED.
-  local recorded computed
-  recorded="$(jq -r '.self_sha256' "$auth")"
-  computed="$(jq -S -c '.self_sha256 = null' "$auth" | sha256sum | awk '{print $1}')"
-  [[ "$recorded" == "$computed" ]] \
-    || error_exit "generation authority self_sha256 mismatch: recorded ${recorded}, recomputed ${computed} — ${auth} was modified after it was sealed." 1
-
-  # plan bytes
-  local plan_now; plan_now="$(sha256sum "$plan" | awk '{print $1}')"
-  [[ "$(jq -r '.plan_sha256' "$auth")" == "$plan_now" ]] \
-    || error_exit "generation authority plan_sha256 does not match the plan on disk (sealed $(jq -r '.plan_sha256' "$auth"), current ${plan_now}) — the plan was edited after the authority was sealed. Supersede the transaction and regenerate." 1
-
-  # target head — resolved the same way aid-auto-pipeline.sh resolves it.
-  local orch tb head_now
-  orch="${_AID_GEN_SCRIPTS_DIR}/../defaults/orchestration.yaml"; tb=""
-  if [[ -f "$orch" ]] && command -v yq >/dev/null 2>&1; then
-    tb="$(yq -r '.lifecycle.target_branch // ""' "$orch" 2>/dev/null || true)"
-  fi
-  [[ -z "$tb" || "$tb" == "null" ]] && tb="main"
-  # The BRANCH itself, not only the commit it points at: an authority sealed
-  # against a different integration branch that happens to share a head today
-  # would otherwise verify.
-  [[ "$(jq -r '.target_branch' "$auth")" == "$tb" ]] \
-    || error_exit "generation authority target_branch is '$(jq -r '.target_branch' "$auth")' but this workspace's configured integration branch is '${tb}' — the authority was sealed for a different branch. Supersede the transaction and regenerate." 1
-  head_now="$(git -C "$_project_root" rev-parse --verify --quiet "${tb}^{commit}" 2>/dev/null || true)"
-  [[ "$(jq -r '.target_head' "$auth")" == "$head_now" ]] \
-    || error_exit "generation authority target_head does not match ${tb} (sealed $(jq -r '.target_head' "$auth"), current ${head_now:-<unresolved>}) — the target branch moved after the authority was sealed. Supersede the transaction and regenerate." 1
-
-  # phase range + derivation version
-  local sealed_total sealed_pdv
-  sealed_total="$(jq -r '.total_phases' "$auth")"
-  sealed_pdv="$(jq -r '.phase_derivation_version' "$auth")"
-  [[ "$sealed_total" == "$total" ]] \
-    || error_exit "generation authority total_phases (${sealed_total}) does not match this invocation's --total (${total})." 1
-  [[ "$phase" -ge 1 && "$phase" -le "$sealed_total" ]] \
-    || error_exit "phase ${phase} is outside the authorized range 1..${sealed_total}." 1
-  [[ "$sealed_pdv" == "$AID_GEN_PHASE_DERIVATION_VERSION" ]] \
-    || error_exit "generation authority was sealed under phase_derivation_version ${sealed_pdv} but this script derives phases at version ${AID_GEN_PHASE_DERIVATION_VERSION} — plugin upgraded mid-transaction; supersede and regenerate." 1
-
-  # transaction linkage — a leaked authority is useless outside its own
-  # transaction, and a foreign transaction cannot adopt it.
-  [[ "$(jq -r '.authority_sha256 // ""' "$tx")" == "$recorded" ]] \
-    || error_exit "transaction ${tx} is not bound to this authority (transaction.authority_sha256 $(jq -r '.authority_sha256 // "<null>"' "$tx"), authority.self_sha256 ${recorded}) — a replayed or foreign receipt." 1
-  [[ "$(jq -r '.plan_id' "$tx")" == "$(jq -r '.plan_id' "$auth")" ]] \
-    || error_exit "transaction plan_id $(jq -r '.plan_id' "$tx") does not match authority plan_id $(jq -r '.plan_id' "$auth")." 1
-
-  # THE FULL IDENTITY TUPLE, both documents. The linkage hash alone only proves
-  # the transaction NAMES this authority; a transaction whose own recorded
-  # identity has drifted (a hand-edited or stale manifest) would otherwise
-  # still pass. Identity is (plan_sha256, target_head,
-  # phase_derivation_version, total_phases) — the exact tuple the authority
-  # seals — so the two can never disagree about what is being generated.
-  local a_id t_id
-  a_id="$(jq -r '[.plan_sha256, .target_head, (.phase_derivation_version|tostring), (.total_phases|tostring)] | join("|")' "$auth")"
-  t_id="$(jq -r '[.plan_sha256, .target_head, (.phase_derivation_version|tostring), (.total_phases|tostring)] | join("|")' "$tx")"
-  [[ "$a_id" == "$t_id" ]] \
-    || error_exit "transaction identity '${t_id}' does not match authority identity '${a_id}' (plan_sha256|target_head|phase_derivation_version|total_phases) — the pair describes two different generations. Supersede the transaction and regenerate." 1
-  [[ "$t_id" == "${plan_now}|${head_now}|${AID_GEN_PHASE_DERIVATION_VERSION}|${total}" ]] \
-    || error_exit "the sealed identity '${t_id}' does not describe this invocation ('${plan_now}|${head_now}|${AID_GEN_PHASE_DERIVATION_VERSION}|${total}')." 1
-
-  # per-phase ids: RE-DERIVED here, NOW, from plan_id+phase+total and compared
-  # against what the transaction recorded, so derivation drift between plugin
-  # versions is caught at verify time rather than at queue time.
-  #
-  # THE TWO SIDES REMAIN INDEPENDENT even though one function produces both:
-  # the recorded id was written by an earlier process from a possibly different
-  # plugin version into a file an actor can edit, and the derived id is
-  # computed here from this invocation's arguments. The sealed
-  # phase_derivation_version (checked above) is what rules out the remaining
-  # case — a transaction recorded under a DIFFERENT derivation — before these
-  # ids are compared at all.
-  local d_epic d_run r_epic r_run
-  d_epic="$(aid_gen_epic_id "$plan_id" "$phase" "$total")"
-  d_run="$(aid_gen_run_id "$d_epic")"
-  r_epic="$(jq -r --arg p "$phase" '.phases[$p].epic_id // ""' "$tx")"
-  r_run="$(jq -r --arg p "$phase" '.phases[$p].run_id // ""' "$tx")"
-  [[ -n "$r_epic" ]] \
-    || error_exit "transaction ${tx} has no record for phase ${phase} — the phase is not part of this transaction." 1
-  [[ "$r_epic" == "$d_epic" ]] \
-    || error_exit "phase ${phase} epic_id mismatch: transaction records ${r_epic}, this script derives ${d_epic}." 1
-  [[ "$r_run" == "$d_run" ]] \
-    || error_exit "phase ${phase} run_id mismatch: transaction records ${r_run}, this script derives ${d_run}." 1
-
-  echo "[INFO] generation_authority: verified ${auth} for phase ${phase}/${total} (plan bytes, ${tb} head, phase range, re-derived ids, transaction linkage) — the CP1 gate is not re-run for this phase." >&2
-}
-
 # aid_gen_receipt_check <graph-json> <phase> <plan.json> <plan_abs>
 #   The plan.json-versus-source-graph half of the generation receipt (moved
-#   from aid-generation-finalize.sh, P111): step count, dependency edges and the
+#   from the former generation finaliser, P111): step count, dependency edges and the
 #   binding to the source plan file. Prints the first disagreement and returns 1.
 aid_gen_receipt_check() {
   local graph="$1" phase="$2" plan_json="$3" plan_abs="$4"
@@ -775,3 +603,197 @@ aid_gen_unlock()             { _gen_unlock "$@"; }
 aid_gen_lock_holder()        { _gen_lock_holder "$@"; }
 aid_gen_write_atomic()       { _gen_write_atomic "$@"; }
 aid_gen_tx_update()          { _gen_tx_update "$@"; }
+
+# =============================================================================
+# The archive of a transaction and its audited supersession (moved from
+# the former generation pipeline, P112): the pipeline's supersede-generation and the
+# direct run's `plan-run --restart` leave the same trail.
+# =============================================================================
+
+# aid_gen_archive_pair <plan_id> <suffix> [<dest_dir>] — atomically move the
+# transaction and the authority to `<name>.<suffix>` siblings sharing ONE
+# epoch, so the pair is identifiable; given <dest_dir> (P112, the direct run's
+# restart), into that directory under their own names. Nothing is ever deleted.
+aid_gen_archive_pair() {
+  local plan_id="$1" suffix="$2" dest="${3:-}" txp auth
+  txp="$(_gen_transaction_path "$plan_id")"; auth="$(_gen_authority_path "$plan_id")"
+  if [[ -n "$dest" ]]; then
+    mkdir -p "$dest" || return 3
+    [[ -f "$txp" ]] && { mv -- "$txp" "${dest}/$(basename "$txp")" || return 3; }
+    [[ -f "$auth" ]] && { mv -- "$auth" "${dest}/$(basename "$auth")" || return 3; }
+    return 0
+  fi
+  [[ -f "$txp" ]] && { mv -- "$txp" "${txp}.${suffix}" || return 3; }
+  [[ -f "$auth" ]] && { mv -- "$auth" "${auth}.${suffix}" || return 3; }
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# aid_gen_supersede_audit_preflight <gdir>
+#
+# WHY A PREFLIGHT AND NOT "WRITE, THEN CHECK". The three records are the
+# enforcement surface for this mechanism
+# — the enforcement registry says so — so a supersession that cannot be
+# recorded must not happen at all. Two of the three sinks are APPEND-ONLY
+# (timeline.jsonl, audit-log.jsonl): once a line is in them it cannot be taken
+# back, so "archive, then record, then roll back on failure" would either
+# leave an unaudited archive or leave a line describing an archive that never
+# happened. Probing the sinks first — a zero-byte append, which proves
+# openability without committing any content — lets the refusal happen while
+# NOTHING has been touched, which is the state the operator can reason about.
+#
+# Returns 0 when all three sinks are writable; 3 (naming the sink) otherwise.
+# ---------------------------------------------------------------------------
+aid_gen_supersede_audit_preflight() {
+  local gdir="$1"
+  local alog; alog="$(_gen_audit_log_path)"
+  local probe=""
+  if ! mkdir -p "$gdir" 2>/dev/null; then
+    echo "[ERROR] supersede-generation: the evidence directory ${gdir} cannot be created — the supersession record has nowhere to go." >&2
+    return 3
+  fi
+  if ! probe="$(mktemp "${gdir}/.supersede-probe.XXXXXX" 2>/dev/null)"; then
+    echo "[ERROR] supersede-generation: ${gdir} is not writable — the supersession record (generation-superseded-<epoch>.json) cannot be written there." >&2
+    return 3
+  fi
+  rm -f "$probe" 2>/dev/null || true
+  if ! : >> "${gdir}/timeline.jsonl" 2>/dev/null; then
+    echo "[ERROR] supersede-generation: ${gdir}/timeline.jsonl cannot be appended to — the timeline event cannot be recorded." >&2
+    return 3
+  fi
+  if ! mkdir -p "$(dirname "$alog")" 2>/dev/null || ! : >> "$alog" 2>/dev/null; then
+    echo "[ERROR] supersede-generation: ${alog} cannot be appended to — the cross-plan audit-log entry cannot be recorded." >&2
+    return 3
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# aid_gen_supersede_record_present <file> <plan_id> <epoch>
+#
+# "Is THIS plan's supersession for THIS epoch already recorded in <file>?"
+#
+# KEYED ON plan_id AND epoch AND event, never on epoch alone.
+# `audit-log.jsonl` is CROSS-PLAN and the epoch is only
+# second-resolution, while two plans superseding at the same moment hold
+# DIFFERENT per-plan locks and genuinely run concurrently. An epoch-only match
+# therefore let plan B read plan A's line as its own, skip its append, and
+# report success with no entry of its own — the exact unaudited supersession
+# the fail-closed rewrite exists to prevent.
+#
+# PARSED, NOT PATTERN-MATCHED. `reason` is free operator text on the same
+# line, so a substring match could be satisfied by a reason that merely
+# CONTAINS the key. Each line is parsed and its fields compared exactly; a
+# line that is not valid JSON is skipped rather than aborting the scan, so one
+# pre-existing corrupt line in an append-only log cannot make every later
+# supersession unverifiable.
+# ---------------------------------------------------------------------------
+aid_gen_supersede_record_present() {
+  local file="$1" plan_id="$2" epoch="$3"
+  [[ -f "$file" ]] || return 1
+  jq -e -nR --arg p "$plan_id" --arg e "$epoch" '
+    any(inputs;
+      ((try fromjson catch null) // null) as $j
+      | $j != null
+        and ($j.event? == "generation_superseded")
+        and ($j.plan_id? == $p)
+        and ((($j.epoch? // "") | tostring) == $e))' "$file" >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
+# aid_gen_supersede_audit <plan_id> <plan_path> <reason> <operator> <epoch> \
+#                      <gdir> <txp> <auth> <identity> <generated_json> \
+#                      [<state_root>] [<archive_dir>]
+#
+# <state_root> (default: aid_state_root) names the repository whose HEAD the
+# record carries; <archive_dir> (P112 restart) is where the pair was moved by
+# `aid_gen_archive_pair <plan> <suffix> <dir>` instead of the sibling names.
+#
+# Writes the P073 three-record trail for ONE epoch and VERIFIES each record by
+# reading it back (aid-audit-log.sh swallows its own write failures by design
+# and always returns 0, so its exit code proves nothing — the forced-authority
+# path above solves this the same way). IDEMPOTENT: a record that is already
+# present for this epoch is verified, not duplicated, which is what makes the
+# half-archived retry path produce one trail rather than two.
+#
+# Returns 0 only when all three records are durable; 3 (naming the missing
+# one) otherwise. Callers must treat 3 as fail-closed.
+# ---------------------------------------------------------------------------
+aid_gen_supersede_audit() {
+  local plan_id="$1" plan_path="$2" reason="$3" operator="$4" epoch="$5"
+  local gdir="$6" txp="$7" auth="$8" identity="$9" generated="${10}" sroot="${11:-}" adir="${12:-}"
+  [[ -n "$sroot" ]] || sroot="$(aid_state_root 2>/dev/null || pwd)"
+  local rec_file="${gdir}/generation-superseded-${epoch}.json"
+  local tl="${gdir}/timeline.jsonl"
+  local alog; alog="$(_gen_audit_log_path)"
+  local now; now="$(_gen_now)"
+  local head_sha; head_sha="$(git -C "$sroot" rev-parse HEAD 2>/dev/null || echo unknown)"
+
+  # The archived names are deterministic, so the record can be rendered
+  # whichever side of the rename we are called from: hash the file under
+  # whichever of its two names exists right now.
+  local arch_tx="${txp}.superseded-${epoch}" arch_auth_name="${auth}.superseded-${epoch}" arch_auth="" tx_src="" auth_src=""
+  if [[ -n "$adir" ]]; then arch_tx="${adir}/$(basename "$txp")"; arch_auth_name="${adir}/$(basename "$auth")"; fi
+  if [[ -e "$arch_tx" ]]; then tx_src="$arch_tx"; elif [[ -f "$txp" ]]; then tx_src="$txp"; fi
+  if [[ -e "$arch_auth_name" ]]; then
+    auth_src="$arch_auth_name"; arch_auth="$arch_auth_name"
+  elif [[ -f "$auth" ]]; then
+    auth_src="$auth"; arch_auth="$arch_auth_name"
+  fi
+
+  # Record 1 — the authoritative forensic artifact.
+  if [[ ! -f "$rec_file" ]]; then
+    local rec
+    rec="$(jq -n \
+      --arg schema "aid-generation-supersede/v1" --arg created_at "$now" \
+      --arg plan_id "$plan_id" --arg plan_path "$plan_path" \
+      --arg reason "$reason" --arg operator "$operator" --arg head_sha "$head_sha" \
+      --arg archived_transaction "$arch_tx" \
+      --arg archived_authority "$arch_auth" \
+      --arg tx_sha256 "$( [[ -n "$tx_src" ]] && _gen_sha256_file "$tx_src" )" \
+      --arg auth_sha256 "$( [[ -n "$auth_src" ]] && _gen_sha256_file "$auth_src" )" \
+      --arg archived_identity "$identity" \
+      --arg current_identity "$(_gen_sha256_file "$plan_path")|$(_gen_target_head)|${AID_GEN_PHASE_DERIVATION_VERSION}" \
+      --argjson generated "$generated" \
+      '{schema:$schema, created_at:$created_at, plan_id:$plan_id, plan_path:$plan_path,
+        reason:$reason, operator:$operator, head_sha:$head_sha,
+        archived_transaction:$archived_transaction, archived_authority:(if $archived_authority == "" then null else $archived_authority end),
+        transaction_sha256:$tx_sha256, authority_sha256:(if $auth_sha256 == "" then null else $auth_sha256 end),
+        archived_identity:$archived_identity,
+        current_identity:$current_identity,
+        generated:$generated, deletes_nothing:true, actor_semantics:"instruction_only"}')" || rec=""
+    [[ -n "$rec" ]] || { echo "[ERROR] supersede-generation: cannot render the supersession record for epoch ${epoch}." >&2; return 3; }
+    _gen_write_atomic "$rec_file" "$rec" \
+      || { echo "[ERROR] supersede-generation: cannot write the supersession record ${rec_file}." >&2; return 3; }
+  fi
+  # Read back keyed on THIS plan, for the same reason the JSONL checks are:
+  # a record that belongs to another plan is not this plan's evidence, even
+  # when it sits at the expected path.
+  jq -e --arg p "$plan_id" '.schema == "aid-generation-supersede/v1" and .plan_id == $p' "$rec_file" >/dev/null 2>&1 \
+    || { echo "[ERROR] supersede-generation: the supersession record ${rec_file} could not be read back as a valid record for ${plan_id}." >&2; return 3; }
+
+  # Record 2 — the per-plan timeline event.
+  if ! aid_gen_supersede_record_present "$tl" "$plan_id" "$epoch"; then
+    printf '%s\n' "$(jq -nc --arg ts "$now" --arg ev "generation_superseded" --arg plan "$plan_id" \
+      --arg reason "$reason" --arg op "$operator" --arg epoch "$epoch" --arg id "$identity" \
+      '{ts:$ts, event:$ev, plan_id:$plan, reason:$reason, operator:$op, epoch:$epoch, archived_identity:$id}')" \
+      >> "$tl" 2>/dev/null || true
+  fi
+  aid_gen_supersede_record_present "$tl" "$plan_id" "$epoch" \
+    || { echo "[ERROR] supersede-generation: the generation_superseded timeline event for ${plan_id} epoch ${epoch} could not be read back from ${tl}." >&2; return 3; }
+
+  # Record 3 — the cross-plan audit log, VERIFIED BY READING IT BACK.
+  if ! aid_gen_supersede_record_present "$alog" "$plan_id" "$epoch"; then
+    bash "${_AID_GEN_SCRIPTS_DIR}/aid-audit-log.sh" append \
+      --epic-id "$plan_id" --run-id "supersede-generation" \
+      --event "generation_superseded" \
+      --plan-id "$plan_id" --reason "$reason" --operator "$operator" \
+      --archived-identity "$identity" --epoch "$epoch" \
+      --output "$alog" >/dev/null 2>&1 || true
+  fi
+  aid_gen_supersede_record_present "$alog" "$plan_id" "$epoch" \
+    || { echo "[ERROR] supersede-generation: the generation_superseded entry for ${plan_id} epoch ${epoch} could not be read back from ${alog}." >&2; return 3; }
+
+  printf '%s' "$rec_file"
+  return 0
+}

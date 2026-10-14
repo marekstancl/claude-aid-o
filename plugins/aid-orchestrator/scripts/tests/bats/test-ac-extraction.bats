@@ -2,7 +2,7 @@
 # aid-tier: t2
 # P083 Step 2 — the shared AC extractor (aid-ac-extract.sh) must not drop
 # continuation lines the way the two copy-pasted awk blocks in
-# aid-plan-to-epic.sh did (flush-left-only bullet match truncated every
+# the former EPIC generator did (flush-left-only bullet match truncated every
 # multi-line criterion mid-sentence).
 
 load test-helpers.bash
@@ -12,8 +12,6 @@ setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
   AC_EXTRACT="$AID_PLUGIN_PATH/scripts/lib/aid-ac-extract.sh"
-  PLAN_TO_EPIC="$AID_PLUGIN_PATH/scripts/aid-plan-to-epic.sh"
-  EPIC_TEMPLATE="$AID_PLUGIN_PATH/defaults/templates/epic.md"
   FIXTURE="$AID_PLUGIN_PATH/scripts/tests/fixtures/plan-with-multiline-ac.md"
   OUTPUT_DIR="$TEST_TMPDIR/output"
   COUNTER="$TEST_TMPDIR/epic-counter.yaml"
@@ -138,38 +136,5 @@ _extract() {
   [[ "$output" == *'```yaml key: value ```'* ]]
 }
 
-# ─── End-to-end: both aid-plan-to-epic.sh call sites agree ────────────────
+# ─── End-to-end: both the former EPIC generator call sites agree ────────────────
 
-@test "both call sites (flattened AC section and per-step ac[] scoping) produce the same criterion set" {
-  # The plan lives in the test project, so generation resolves that workspace.
-  local plan="$TEST_PROJECT_ROOT/.aid-o/plans/plan-with-multiline-ac.md"
-  mkdir -p "$(dirname "$plan")" && cp "$FIXTURE" "$plan"
-  aid_fixture_seed_plan_review "$TEST_PROJECT_ROOT" "$plan"
-  run "$PLAN_TO_EPIC" \
-    --plan "$plan" \
-    --phase 1 --total 1 \
-    --epic-template "$EPIC_TEMPLATE" \
-    --output-dir "$OUTPUT_DIR" \
-    --counter-yaml "$COUNTER"
-  [ "$status" -eq 0 ]
-
-  local epic_file
-  epic_file="$(ls "$OUTPUT_DIR"/E-*.md | head -1)"
-  [ -f "$epic_file" ]
-
-  # The multi-line criterion reaches the flattened ## Acceptance Criteria section whole.
-  grep -q "Every quarantined gate satisfied by a substitute has a matching \`quarantine_substitutes\[\]\` entry carrying \`gate_id\`, \`targeted_substitute\`, \`receipt_path\` + \`receipt_sha256\`\." "$epic_file"
-
-  # The per-step ac[] scoping comment carries the same whole criterion (unprefixed).
-  local scoping_line
-  scoping_line="$(grep '<!-- step-1: files=' "$epic_file")"
-  [ -n "$scoping_line" ]
-  [[ "$scoping_line" == *"Every quarantined gate satisfied by a substitute has a matching"*"receipt_sha256"* ]]
-
-  # Terminator cases from Step 2: the flush-left-prose criterion and the
-  # **-terminated criterion both appear, and the "Some Other Section" bullet
-  # (outside any Acceptance Criteria block) does not leak in as an AC.
-  grep -q "A criterion followed by a flush-left prose line stops there\." "$epic_file"
-  grep -q "A criterion followed by a \`\*\*\`-prefixed terminator stops there\." "$epic_file"
-  refute_grep -q "This must not be treated as AC" "$epic_file"
-}

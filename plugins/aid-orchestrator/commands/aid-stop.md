@@ -85,7 +85,7 @@ Execute these steps in order. Each step is independent — if one fails, log the
    - Log ERROR: "Failed to update auto-mode-state.yaml: {error}"
    - Continue (do NOT abort).
 
-> Execution progress (current EPIC, step, FSM state) is ALREADY persisted by the FSM in the
+> Execution progress (current run, step, FSM state) is ALREADY persisted by the FSM in the
 > run's `fsm-state.yaml` — `/aid-run --resume` reads it to continue. `/aid-stop` does not copy
 > progress anywhere; it only flips the autonomous mode off.
 
@@ -127,15 +127,15 @@ FIRST AID disengaged.
 
 Mode:        manual (auto-mode disengaged)
 
-  EPIC:  {epic_id}
+  Plan:  {plan_id} (run {epic_id})
   Step:  {executing_step} of {total_steps} ({state})
 
   Run:   {run_id}
 
 Resume options:
   /aid-run --resume      Resume from the saved FSM state (fsm-state.yaml)
-  /aid-run {id}          Continue this EPIC manually (step by step)
-  /aid-status {id}       Check current EPIC status
+  /aid-run {plan_id}     Continue this plan's run manually (step by step)
+  /aid-status {epic_id}  Check the run's status
 ```
 
 **Step rendering rule.** How a step number is rendered to a human, and which machine fields stay frozen, are defined by the Step rendering rule in skills/pipeline.md. Read it there and follow it; this surface deliberately carries the pointer and not the rule, so a correction to the definition cannot leave a stale copy behind here.
@@ -172,17 +172,13 @@ The `/aid-stop` command does NOT attempt to interrupt a running agent. The agent
 
 This is by design — killing an agent mid-execution could leave files in an inconsistent state.
 
-### Queue has remaining EPICs
-
-Remaining EPICs in `.aid-o/config/queue.yaml` are untouched. They remain queued. When PM resumes with `/aid-run`, the queue continues from where it stopped.
-
 ---
 
 ## Reference Files
 
 - `skills/pipeline.md` — Controller state machine, evidence store structure
 - `commands/aid-run.md` — The inverse command (start auto-mode / resume)
-- `commands/aid-status.md` — Check EPIC progress after stopping
+- `commands/aid-status.md` — Check the run's progress after stopping
 
 ## Important
 

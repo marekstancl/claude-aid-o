@@ -229,19 +229,9 @@ rules:
     failure: closed
     blocks_when_active: true
     timeout_s: 10
-    lib: scripts/lib/aid-queue-continuation.sh
-    handler: aid_hook_rule_queue_continuation_stop
+    lib: scripts/lib/aid-auto-continuation.sh
+    handler: aid_hook_rule_auto_continuation_stop
     description: refuses the stop of the session that drives an autonomous plan (its plan-state auto_session) while the turn ends with no Decision or Blocked card and no `AID-WAIT:` on a live background job, up to autonomy.continuation_budget refusals; at the budget or on a card it lets the turn end and sends the PM one "agent is waiting" message. It refuses under stop_hook_active too (blocks_when_active), and its own timeout or error never blocks
-
-  - id: queue_continuation_resume
-    event: SessionStart
-    owner: controller
-    degree: 3
-    failure: open
-    timeout_s: 10
-    lib: scripts/lib/aid-queue-continuation.sh
-    handler: aid_hook_rule_queue_continuation_start
-    description: on a new session, reads the continuation guidance an interrupted run left and says what the queue has next — the only reader of that guidance after a controller dies
 
   - id: pm_reply_marker
     event: UserPromptSubmit
@@ -249,6 +239,6 @@ rules:
     degree: 3
     failure: open
     timeout_s: 5
-    lib: scripts/lib/aid-queue-continuation.sh
+    lib: scripts/lib/aid-auto-continuation.sh
     handler: aid_hook_rule_pm_reply_marker
     description: the PM answered — every autonomous plan this session drives gets its continuation budget back and its "agent is waiting" message re-armed; the dispatcher's audit line of this event is the mark of the PM's reply in time

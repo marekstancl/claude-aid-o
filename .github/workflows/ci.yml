@@ -23,8 +23,8 @@ on:
     # `plan:`/`docs:` commits. `.aid-o/plans` and `.aid-o/work` are read by NO
     # suite against the real repository — every suite that mentions them builds
     # its own fixture under TEST_PROJECT_ROOT (checked file by file).
-    # `docs/**` is deliberately NOT ignored: test-deferred-work-registration
-    # reads the real `docs/plans/2026-06-29-BACKLOG.md` at line 35.
+    # `docs/**` is deliberately NOT ignored: suites read real files under it
+    # (e.g. test-instruction-consistency.sh, docs/extending-aid.md).
     paths-ignore:
       - '.aid-o/plans/**'
       - '.aid-o/work/**'

@@ -29,15 +29,14 @@ streamlined_mode: true
 EOF
 }
 
-_write_cp3_evidence() {
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
-}
-
 _run_check() {
   local ev_dir="$1" state_file="$2" proj_root="$3"
   run bash -c '
     set -euo pipefail
     source "'"$FSM"'"
+    # a streamlined run is reviewed only by the close (CP7), so it runs in
+    # plan_branch mode; the gate-report paths are what this suite is about
+    _fsm_declared_plan_mode() { printf "plan_branch\tP900\t\n"; }
     epic_id=E-test run_id=R-test project_root="'"$proj_root"'"
     fsm_check_streamlined_integration_review "'"$ev_dir"'" "'"$state_file"'"
   '
@@ -45,7 +44,6 @@ _run_check() {
 
 @test "canonical gates/gates_report.json passes done-advance without --force" {
   _seed_streamlined_state
-  _write_cp3_evidence
   mkdir -p "$TEST_EVIDENCE_DIR/gates"
   echo '{}' > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
 
@@ -57,7 +55,6 @@ _run_check() {
 
 @test "report missing at both paths fails naming both paths searched" {
   _seed_streamlined_state
-  _write_cp3_evidence
   # No gates_report.json anywhere.
 
   _run_check "$TEST_EVIDENCE_DIR" "$TEST_EVIDENCE_DIR/fsm-state.yaml" "$TEST_PROJECT_ROOT"
@@ -68,7 +65,6 @@ _run_check() {
 
 @test "legacy flat gates_report.json passes and logs the fallback" {
   _seed_streamlined_state
-  _write_cp3_evidence
   echo '{}' > "$TEST_EVIDENCE_DIR/gates_report.json"
 
   _run_check "$TEST_EVIDENCE_DIR" "$TEST_EVIDENCE_DIR/fsm-state.yaml" "$TEST_PROJECT_ROOT"
@@ -80,7 +76,6 @@ _run_check() {
 
 @test "both paths present prefers canonical and notes the flat sibling exists" {
   _seed_streamlined_state
-  _write_cp3_evidence
   mkdir -p "$TEST_EVIDENCE_DIR/gates"
   echo '{"marker":"canonical"}' > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   echo '{"marker":"flat"}' > "$TEST_EVIDENCE_DIR/gates_report.json"

@@ -9,6 +9,8 @@
 # derivation still agrees with the LIVE map is a separate, deliberately
 # invocation-time claim — `aid-standards-map.sh --self-test`.
 
+load test-helpers
+
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH AID_QUIET=1 AID_TEST_MODE=1
@@ -73,6 +75,7 @@ _plan() {
     printf -- '- %s\n' "$bullet"
     printf '\n**Architecture Context:**\nn/a\n\n**Error Handling:**\nn/a\n\n**Edge Cases:**\n- none\n'
   } > "$PLAN"
+  bind_plan_to_brief "$PLAN"
   # `risk: high` puts the fixture in `full`, where the obligation lives.
 }
 
@@ -175,6 +178,7 @@ _plan() {
     # so the fixture carries them instead of failing for an unrelated reason.
     printf '# Plan: P902\n\n## Standards\n\n| Standard | Why it binds | Deviation |\n|---|---|---|\n| `/ecosystem/specs/test-standard` | the step edits a test suite | none |\n\n## Testing Strategy\n\nnone\n\n**EPIC 1: Steps 1-1**\n\n### Step 1: work\n\n**Objective:** implement the thing properly.\n\n**Files:**\n- Modify: `scripts/tests/x.bats` — edit\n\n**Architecture Context:** the suite keeps its one subject.\n\n**Error Handling:** a failing case fails the suite.\n\n**Edge Cases:**\n- none beyond the case itself\n'
   } > "$PLAN"
+  bind_plan_to_brief "$PLAN"
   run "$LINT" "$PLAN"
   [ "$status" -eq 0 ]
   [[ "$output" != *"touches the 'testy' area"* ]]

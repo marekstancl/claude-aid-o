@@ -23,19 +23,16 @@
 #     (--mode is MANDATORY — IMP-271; plan_branch is refused until the P068
 #      plan-final commands are installed — no override, the refusal lifts
 #      automatically when those commands land)
-#   aid-plan-fsm.sh epic-start <plan_id> <epic_id> [--run-id <id>]
-#                    [--project-root <path>] [--op-id <id>]
+#   aid-plan-fsm.sh plan-run <plan_id> [...]   # P111: the plan's one run (epic-start left in 3.0.0, P114)
 #   aid-plan-fsm.sh plan-state <plan_id>
 #   aid-plan-fsm.sh plan-state <plan_id> --repair
 #   aid-plan-fsm.sh plan-state <plan_id> --attest-source-ref <ref> --reason <text> --epic <epic_id>
 #   aid-plan-fsm.sh worktrees [--project-root <path>]      # P087 Step 7: the registry, judged, read-only
 #
 # P064 EPIC E-064-2_2 (Step 1 = the parent plan's Step 6) adds the merge half:
-#   aid-plan-fsm.sh epic-complete <plan_id> <epic_id> [--abandon --reason <text>]
-#                    [--supersede-by <epic_id> --reason <text>]
-#                    [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]
-#   aid-plan-fsm.sh epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>]
+#   aid-plan-fsm.sh epic-complete <plan_id> <epic_id> --direct | --abandon --reason <text>
 #                    [--project-root <path>] [--op-id <id>]
+#   (epic-merge-to-plan left with the EPIC path in 3.0.0, P114.)
 # — see the dedicated section header above cmd_epic_complete for their model
 # (ancestry proof as the only accepted evidence, why epic-complete writes no
 # `pending` status and no lifecycle artifact, and the lock discipline).
@@ -72,17 +69,11 @@
 # `plan-merge-to-main` in the dispatcher before `--mode plan_branch` is
 # allowed, so adding only the first one deliberately does NOT lift the
 # plan-start refusal — a plan_branch plan still could not be CLOSED.
-# Neither `epic-start` NOR `epic-merge-to-plan` performs a queue write — Step 7
-# owns every queue write and wires itself into both (the manifest is the
-# authority for EPIC status, the queue a derived view; that one-way edge is
-# what keeps Steps 6 and 7 free of a producer/consumer cycle).
-# P090 Step 3 DID NOT WEAKEN THIS. `epic-merge-to-plan` still writes nothing to
-# the queue; on an autonomous plan it hands over to `scripts/aid-plan-continue.sh`,
-# a separate program that establishes its own `git merge-base --is-ancestor`
-# proof before it mirrors anything. The write stays something a program earned
-# rather than something the merge path asserted, so the one-way edge holds.
-#
 # ── LINEAGE MODEL ─────────────────────────────────────────────────────────
+# Since 3.0.0 (P114) a plan has one run, the direct run on `plan/<plan_id>`
+# itself (plan-run); `epic-start` and its task branches left with the EPIC
+# path. What follows is the model those commands used; `plan-start`'s half and
+# the recorded-base check (epic_base_commit on the direct entry) still hold.
 # `plan-start` creates `plan/<plan_id>` from EXACTLY `target_branch_head_at_start
 # = git rev-parse <target_branch>`. `epic-start` creates `task/<epic_id>/main`
 # from EXACTLY the plan head read ONCE inside the plan lock. Both record the
@@ -889,340 +880,6 @@ _pfsm_last_resulting_sha() {
   return 0
 }
 
-# ---------------------------------------------------------------------------
-# _pfsm_task_branch_worktree <project_root> <task_branch>
-# The worktree path <task_branch> is checked out in, or empty. `branch -f` is
-# refused by git for a checked-out branch, so the fast-forward below has to
-# know which mechanism applies.
-# ---------------------------------------------------------------------------
-_pfsm_task_branch_worktree() {
-  local root="$1" branch="$2"
-  git -C "$root" worktree list --porcelain 2>/dev/null | awk -v b="refs/heads/${branch}" '
-    /^worktree /  { wt = substr($0, 10) }
-    /^branch /    { if (substr($0, 8) == b) { print wt; exit } }
-  '
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_epic_evidence_dir <project_root> <entry_json> — the EPIC's evidence
-# directory as an absolute path, or nothing when the manifest entry does not
-# name one. The manifest stores it relative to the project root.
-# ---------------------------------------------------------------------------
-_pfsm_epic_evidence_dir() {
-  local root="$1" ev_dir
-  ev_dir="$(jq -r '.evidence_dir // empty' <<<"$2" 2>/dev/null)" || return 0
-  [[ -n "$ev_dir" ]] || return 0
-  [[ "$ev_dir" == /* ]] || ev_dir="${root}/${ev_dir}"
-  printf '%s' "$ev_dir"
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_reconcile_task_branch <project_root> <plan_id> <epic_id> <task_branch>
-#                              <entry_json>
-#
-# P079 Step 3 (IMP-478): a chained EPIC executes on a branch that is too old.
-#
-# Chain generation registers EVERY EPIC of a plan at once, and epic-start cuts
-# `task/<epic>/main` from the plan head at REGISTRATION time. That cut is
-# correct when it happens and stale by the time a later chain member starts:
-# its predecessors have merged into `plan/<id>` since. The existing lineage
-# check cannot see this — merge-base(stale branch, plan) still equals the
-# recorded base, which is exactly what "merely behind" means — so EPIC 2 ran
-# against a tree without EPIC 1's work in it.
-#
-# Runs BEFORE the lineage precondition, deliberately: after a crash mid-repair
-# the merge-base no longer equals the recorded base, and an untouched lineage
-# check would refuse before any repair code could run. The precondition itself
-# is unchanged and still runs afterwards — the reconciliation restores its
-# invariant rather than replacing it.
-#
-# Three shapes converge here, so every crash window re-runs cleanly:
-#   (a) branch strictly BEHIND the plan head  -> fast-forward, then both writes
-#   (b) branch AT the plan head, manifest behind (crash after the ff)
-#                                             -> the two writes only
-#   (c) manifest at the plan head, fsm-state behind (crash after the CAS)
-#                                             -> the fsm-state write only
-# A branch with unique commits that does not contain the plan head has
-# DIVERGED: refused by name, never merged automatically.
-#
-# Returns 0 when the branch is usable (reconciled or already fresh), 1 on a
-# refusal or a failed repair — the caller exits on 1.
-# ---------------------------------------------------------------------------
-_pfsm_reconcile_task_branch() {
-  # THE PLAN LOCK COVERS THE WHOLE RECONCILIATION, not just the writes. Reading
-  # the plan head outside it lets a predecessor's merge land between the
-  # snapshot and the fast-forward: this EPIC would start on the stale head, and
-  # once it made its own commit the next epic-start would see divergence and
-  # refuse — the original defect, now with a dead end attached. The same lock
-  # `cmd_epic_start`'s branch-creation path takes for the same reason.
-  local plan_id="$2" task_branch="$4"
-  local lock_path fd rc=0
-  # Set by the body whenever the manifest's recorded base needed reconciling —
-  # including the idempotent no-op when a prior crashed run already moved it, in
-  # which case the caller's in-memory entry is stale and the re-read is exactly
-  # what is required. Left at 0 on the common path, where nothing was touched.
-  _PFSM_RECONCILE_MUTATED=0
-  lock_path="$(_pfsm_plan_lock_path "$plan_id")"
-  aid_lock_acquire "$lock_path" "$AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S" || {
-    echo "PRECONDITION FAIL: could not acquire the plan lock for ${plan_id} to check ${task_branch}'s freshness." >&2
-    return 1
-  }
-  fd="$AID_LOCK_FD"
-  _pfsm_reconcile_task_branch_locked "$@" || rc=$?
-  aid_lock_release "$fd"
-  return "$rc"
-}
-
-# The body, with the plan lock held by the caller above.
-_pfsm_reconcile_task_branch_locked() {
-  local root="$1" plan_id="$2" epic_id="$3" task_branch="$4" entry_json="$5"
-  local plan_branch="plan/${plan_id}"
-
-  local plan_head branch_head recorded_base
-  plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
-  branch_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${task_branch}" 2>/dev/null)" || branch_head=""
-  recorded_base="$(jq -r '.epic_base_commit // empty' <<<"$entry_json" 2>/dev/null)" || recorded_base=""
-  # Nothing to reconcile against — leave the diagnosis to the lineage check,
-  # which names these cases already.
-  [[ -n "$plan_head" && -n "$branch_head" && -n "$recorded_base" ]] || return 0
-
-  if [[ "$branch_head" != "$plan_head" ]]; then
-    # Does the branch already CONTAIN the plan head? That is the normal
-    # mid-execution shape (the EPIC has its own commits on a fresh base) and
-    # must never be touched.
-    local rc=0
-    git -C "$root" merge-base --is-ancestor "$plan_head" "$branch_head" >/dev/null 2>&1 || rc=$?
-    if [[ "$rc" -eq 0 ]]; then return 0; fi
-    if [[ "$rc" -gt 1 ]]; then
-      echo "PRECONDITION FAIL: git merge-base --is-ancestor ${plan_head} ${branch_head} failed (rc=${rc}) — refusing to guess whether ${task_branch} is fresh." >&2
-      return 1
-    fi
-
-    # Strictly behind (an ancestor of the plan head, no unique commits) is the
-    # repairable shape. Anything else has diverged.
-    rc=0
-    git -C "$root" merge-base --is-ancestor "$branch_head" "$plan_head" >/dev/null 2>&1 || rc=$?
-    if [[ "$rc" -gt 1 ]]; then
-      echo "PRECONDITION FAIL: git merge-base --is-ancestor ${branch_head} ${plan_head} failed (rc=${rc}) — refusing to guess whether ${task_branch} is fresh." >&2
-      return 1
-    fi
-    if [[ "$rc" -eq 1 ]]; then
-      echo "PRECONDITION FAIL: ${task_branch} (${branch_head}) has diverged from ${plan_branch} (${plan_head}) — it carries commits the plan branch does not, and it is missing commits the plan branch has. ${epic_id} must not execute on either half. Repair by hand: merge ${plan_branch} into ${task_branch}, or re-cut the branch after saving its work." >&2
-      return 1
-    fi
-
-    # A branch that is BEHIND is not automatically a branch that is HONEST.
-    # (2026-08-14, cross-model adjudication.) P079 Step 3 added the
-    # fast-forward and, by running before the lineage check, swallowed the case
-    # the older guard existed for: a task branch whose ACTUAL base no longer
-    # matches its RECORDED epic_base_commit. Forced onto an earlier commit, such
-    # a branch is "strictly behind" like any other, so it was silently repaired
-    # AND its recorded base rewritten to match — the one record that could have
-    # revealed the move. The regression sat on main from 2026-08-10 with its own
-    # test failing (AC4 in test-aid-plan-release-boundary.bats) and nobody saw
-    # it: that suite is `aid-tier: t2` and the nightly has not completed since.
-    #
-    # In this arm the branch is an ancestor of the plan head, so its merge-base
-    # with the plan IS its head — and "the recorded lineage still describes this
-    # branch" reduces to head == recorded_base. Weaker predicates were tried and
-    # refuted: "recorded_base is an ancestor of head" admits a move onto a
-    # DIFFERENT descendant of that base (B..C is the task's real tip, B..D is
-    # someone else's, both reach the plan head through a merge).
-    #
-    # An EPIC whose work already merged is NOT the case this refuses — that
-    # entry is `merged_to_plan`, a terminal status, and cmd_epic_start declines
-    # it before reconciliation ever runs.
-    #
-    # The refusal says "lineage broken" deliberately: that is the vocabulary the
-    # older lineage check downstream already uses, and one operator-facing name
-    # per condition is worth more than a fresh phrasing per site.
-    if [[ "$branch_head" != "$recorded_base" ]]; then
-      echo "PRECONDITION FAIL: lineage broken — ${task_branch} (${branch_head}) is behind ${plan_branch}, but its recorded epic_base_commit for ${epic_id} is ${recorded_base}, so the branch is not where the manifest says it was cut. Refusing to fast-forward it to ${plan_head}: that would repair the branch AND rewrite the one record that shows it moved. Restore the branch to ${recorded_base}, or re-cut it and let epic-start record the new base." >&2
-      return 1
-    fi
-
-    local wt; wt="$(_pfsm_task_branch_worktree "$root" "$task_branch")"
-    [[ -n "$wt" ]] && wt="$(_pfsm_phys "$wt")"
-    local ff_err="" ff_rc=0
-    if [[ -n "$wt" ]]; then
-      ff_err="$(git -C "$wt" merge --ff-only "$plan_branch" 2>&1)" || ff_rc=$?
-    else
-      ff_err="$(git -C "$root" branch -f "$task_branch" "$plan_head" 2>&1)" || ff_rc=$?
-    fi
-    if [[ "$ff_rc" -ne 0 ]]; then
-      echo "PRECONDITION FAIL: could not fast-forward ${task_branch} to ${plan_branch} (${plan_head}): ${ff_err}" >&2
-      return 1
-    fi
-    echo "NOTE: ${task_branch} was behind ${plan_branch} — fast-forwarded ${branch_head} -> ${plan_head} so ${epic_id} executes on its predecessors' work." >&2
-  fi
-
-  # Both persisted base records must follow the branch. Each write is
-  # idempotent on the value it would set, so a crash between them converges.
-  if [[ "$recorded_base" != "$plan_head" ]]; then
-    local mrc=0
-    plan_manifest_update_epic_base "$plan_id" "$epic_id" "$recorded_base" "$plan_head" >/dev/null || mrc=$?
-    if [[ "$mrc" -ne 0 ]]; then
-      echo "PRECONDITION FAIL: ${task_branch} is at ${plan_head} but the manifest's epic_base_commit for ${epic_id} could not be moved from ${recorded_base} (rc=${mrc}) — refusing to run on records that disagree." >&2
-      return 1
-    fi
-    _PFSM_RECONCILE_MUTATED=1
-  fi
-  _pfsm_update_fsm_state_base "$root" "$epic_id" "$entry_json" "$recorded_base" "$plan_head" || return 1
-
-  [[ "$branch_head" != "$plan_head" ]] && \
-    _pfsm_log_branch_fastforward "$root" "$plan_id" "$epic_id" "$entry_json" \
-      "$task_branch" "$branch_head" "$plan_head"
-  return 0
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_update_fsm_state_base <project_root> <epic_id> <entry_json>
-#                              <old_base> <new_base>
-# The SECOND persisted base record. Generation creates every chain member's
-# fsm-state.yaml before EPIC 1 even merges, so a chained EPIC's `base_commit`
-# is written long before the branch it describes is fast-forwarded — and the
-# gate runner's diff, the risk resolver and the pre-commit hook all read it.
-#
-# GUARDED like the manifest mutator, with the one relaxation the crash windows
-# require: no-op when the file already reads <new_base> (the post-write re-run),
-# write when the recorded value is an ANCESTOR of <new_base> — that is
-# <old_base> in the ordinary case and, after a crash between the manifest CAS
-# and this write, the pre-fast-forward base the manifest no longer remembers —
-# and REFUSE anything else rather than overwrite a decision this reconciliation
-# never saw. <old_base> is carried only to name what this run saw in that
-# refusal. The caller holds the plan lock across the read and the write, so the
-# comparison cannot go stale between them.
-#
-# An ABSENT state file is not an error — planless and not-yet-initialized runs
-# are the normal case, and aid-json-to-run.sh initializes those from the task
-# branch head itself.
-# ---------------------------------------------------------------------------
-_pfsm_update_fsm_state_base() {
-  local root="$1" epic_id="$2" entry_json="$3" old_base="$4" new_base="$5"
-  local ev_dir state_file current
-  ev_dir="$(_pfsm_epic_evidence_dir "$root" "$entry_json")"
-  [[ -n "$ev_dir" ]] || return 0
-  state_file="${ev_dir}/fsm-state.yaml"
-  [[ -f "$state_file" ]] || return 0
-
-  current="$(yq -r '.base_commit // ""' "$state_file" 2>/dev/null)" || current=""
-  [[ "$current" == "$new_base" ]] && return 0
-  # ACCEPTABLE PRIOR VALUES are exactly the commits the fast-forward supersedes:
-  # any ANCESTOR of the new base. That is <old_base> in the ordinary case and,
-  # after a crash between the manifest CAS and this write, the pre-fast-forward
-  # base the manifest no longer remembers. A value that is NOT an ancestor is
-  # someone else's decision — refused, never overwritten.
-  if ! _pfsm_is_ancestor "$root" "$current" "$new_base"; then
-    echo "PRECONDITION FAIL: ${epic_id}'s fsm-state base_commit is ${current:-<empty>}, which is not an ancestor of the ${new_base} this reconciliation would write (the base it saw was ${old_base}) — something else moved it. Refusing to overwrite a base this run cannot explain (${state_file})." >&2
-    return 1
-  fi
-
-  local tmp="${state_file}.p079.$$"
-  if ! sed "s|^base_commit:.*|base_commit: ${new_base}|" "$state_file" > "$tmp" 2>/dev/null \
-     || ! mv -- "$tmp" "$state_file"; then
-    rm -f "$tmp"
-    echo "PRECONDITION FAIL: could not rewrite base_commit in ${state_file}." >&2
-    return 1
-  fi
-  return 0
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_log_branch_fastforward — the audit trail for a repair that silently
-# changes which commits an EPIC executes on. Best-effort, exactly like every
-# other timeline write in this file: a missing evidence dir must not fail a
-# reconciliation that already succeeded.
-# ---------------------------------------------------------------------------
-_pfsm_log_branch_fastforward() {
-  local root="$1" plan_id="$2" epic_id="$3" entry_json="$4" \
-        task_branch="$5" old_head="$6" new_head="$7"
-  local ev_dir
-  ev_dir="$(_pfsm_epic_evidence_dir "$root" "$entry_json")"
-  [[ -n "$ev_dir" && -d "$ev_dir" ]] || return 0
-  local ev
-  ev="$(jq -nc --arg ts "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-    --arg plan "$plan_id" --arg epic "$epic_id" --arg branch "$task_branch" \
-    --arg old "$old_head" --arg new "$new_head" \
-    '{ts:$ts, event:"task_branch_fastforward", plan_id:$plan, epic_id:$epic,
-      task_branch:$branch, old_head:$old, new_head:$new}' 2>/dev/null)" || return 0
-  [[ -n "$ev" ]] && printf '%s\n' "$ev" >> "${ev_dir}/timeline.jsonl" 2>/dev/null
-  return 0
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_verify_epic_lineage <project_root> <plan_id> <epic_id> <task_branch>
-#                            <entry_json>
-# The lineage check for an ALREADY-EXISTING task branch. `entry_json` is the
-# epic_runs[] entry object (as JSON text) already looked up by the caller.
-# Prints the task branch on success.
-# ---------------------------------------------------------------------------
-_pfsm_verify_epic_lineage() {
-  local root="$1" plan_id="$2" epic_id="$3" task_branch="$4" entry_json="$5"
-  local expect_ref="plan/${plan_id}"
-  local lineage source_ref recorded_base
-  lineage="$(jq -r '.lineage // empty' <<<"$entry_json" 2>/dev/null)"
-  source_ref="$(jq -r '.epic_source_ref // empty' <<<"$entry_json" 2>/dev/null)"
-  recorded_base="$(jq -r '.epic_base_commit // empty' <<<"$entry_json" 2>/dev/null)"
-
-  if [[ "$lineage" != "proven" ]]; then
-    echo "PRECONDITION FAIL: ${task_branch}'s manifest entry has lineage='${lineage:-<empty>}' (must be proven) — refusing to treat it as authoritative." >&2
-    return 1
-  fi
-  if [[ "$source_ref" != "$expect_ref" ]]; then
-    echo "PRECONDITION FAIL: ${task_branch}'s manifest entry has epic_source_ref='${source_ref:-<null>}' (unproven or foreign lineage) — refusing to treat it as authoritative." >&2
-    return 1
-  fi
-  if [[ -z "$recorded_base" ]]; then
-    echo "PRECONDITION FAIL: ${task_branch}'s manifest entry has no epic_base_commit recorded." >&2
-    return 1
-  fi
-
-  local actual_base=""
-  actual_base="$(git -C "$root" merge-base "$task_branch" "plan/${plan_id}" 2>/dev/null)" || actual_base=""
-  if [[ -z "$actual_base" ]]; then
-    echo "PRECONDITION FAIL: cannot compute merge-base(${task_branch}, plan/${plan_id})." >&2
-    return 1
-  fi
-  if [[ "$actual_base" != "$recorded_base" ]]; then
-    echo "PRECONDITION FAIL: ${task_branch}'s actual base (${actual_base}) does not match its recorded epic_base_commit (${recorded_base}) — lineage broken (stale/foreign base)." >&2
-    return 1
-  fi
-
-  echo "$task_branch"
-  return 0
-}
-
-# _pfsm_epic_finish_write <plan_id> <epic_id> <run_id> <task_branch>
-#                          <epic_base_commit> <plan_branch> <evidence_dir> <op_id>
-# The shared "write the manifest entry, then commit the op record" tail used
-# by both the fresh-creation path and the crash-resume path (Edge Case: a
-# crash between branch creation and manifest write repeats ONLY this).
-_pfsm_epic_finish_write() {
-  local plan_id="$1" epic_id="$2" run_id="$3" task_branch="$4" \
-        epic_base_commit="$5" plan_branch_ref="$6" evidence_dir="$7" op_id="$8"
-
-  # IMP-265: epic-start is the legitimate producer that observed this branch's
-  # origin at creation time, so it asserts lineage=proven EXPLICITLY — the
-  # 8th positional is no longer defaulted (an omitted lineage now fails closed
-  # to "unproven" in plan_manifest_add_epic).
-  local arc=0
-  plan_manifest_add_epic "$plan_id" "$epic_id" "$run_id" "$task_branch" \
-    "$epic_base_commit" "$plan_branch_ref" "$evidence_dir" "proven" >/dev/null || arc=$?
-  if [[ "$arc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: could not write manifest entry for ${epic_id} (rc=${arc}) — op remains at git_applied, retry to converge." >&2
-    return "$arc"
-  fi
-
-  local crc=0
-  plan_op_commit "$plan_id" "$op_id" || crc=$?
-  if [[ "$crc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: could not record epic-start state_committed for ${epic_id} (rc=${crc})." >&2
-    return "$crc"
-  fi
-
-  echo "$task_branch"
-  return 0
-}
 
 # ---------------------------------------------------------------------------
 # _pfsm_plan_final_installed — mechanical probe (IMP-271): does THIS running
@@ -2161,7 +1818,7 @@ cmd_plan_start() {
       --op-id) op_id_opt="${2:-}"; shift 2 ;;
       # P073 Step 11 (P083): the path of the source plan this lifecycle is
       # being created FROM. Optional so legacy callers are unchanged; the
-      # production caller (aid-auto-pipeline.sh) always passes it, and it is
+      # production caller (the former generation pipeline) always passes it, and it is
       # what lets this command verify the source is committed before it
       # creates a branch or a manifest.
       --plan-file) plan_file_opt="${2:-}"; shift 2 ;;
@@ -2493,237 +2150,6 @@ cmd_plan_start() {
 }
 
 # =============================================================================
-# cmd_epic_start <plan_id> <epic_id> [--run-id ...] [--project-root ...] [--op-id ...]
-# =============================================================================
-cmd_epic_start() {
-  local plan_id="" epic_id="" run_id_opt="" project_root_opt="" op_id_opt=""
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --run-id) run_id_opt="${2:-}"; shift 2 ;;
-      --project-root) project_root_opt="${2:-}"; shift 2 ;;
-      --op-id) op_id_opt="${2:-}"; shift 2 ;;
-      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
-      # every state-TRANSITION command; what it can BYPASS is bounded by the
-      # forceable/hard classification in _pfsm_precondition.
-      #
-      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
-      # commands and is never ambiguous. `--reason` is accepted as a synonym
-      # only on the commands that have no business `--reason` of their own;
-      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
-      # already own `--reason`, so there it is deliberately absent. The plan
-      # named only plan-rollback as the collision — epic-complete is a second
-      # one, found while wiring.
-      --force) _PFSM_FORCE=1; shift ;;
-      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
-      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
-      --*) echo "ERROR: epic-start: unknown flag: $1" >&2; exit 2 ;;
-      *)
-        if [[ -z "$plan_id" ]]; then plan_id="$1";
-        elif [[ -z "$epic_id" ]]; then epic_id="$1";
-        else echo "ERROR: epic-start: unexpected argument: $1" >&2; exit 2; fi
-        shift ;;
-    esac
-  done
-  # P073 Step 8 (review finding): a force reason without --force is an
-  # error, never a silently discarded argument.
-  _pfsm_force_arg_check "epic-start" || exit 2
-  if [[ -z "$plan_id" || -z "$epic_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh epic-start <plan_id> <epic_id> [--run-id <id>] [--project-root <path>] [--op-id <id>]" >&2
-    exit 2
-  fi
-  if ! _pfsm_validate_plan_id "$plan_id"; then
-    echo "ERROR: epic-start: plan_id must match ^P[0-9]{3}\$ (got '${plan_id}')" >&2
-    exit 2
-  fi
-  if ! _pfsm_validate_epic_id "$epic_id"; then
-    echo "ERROR: epic-start: epic_id must match ^E-[0-9]{3}-[0-9]+_[0-9]+\$ (got '${epic_id}')" >&2
-    exit 2
-  fi
-
-  local invoke_root project_root
-  invoke_root="$(_pfsm_resolve_invoke_root "$project_root_opt")"
-  project_root="$(_pfsm_resolve_project_root "$project_root_opt")"
-  export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
-  export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
-
-  # P074 Step 5: epic-start creates refs only (`git branch` below — no
-  # checkout, no tracked writes), so the clean-worktree half of the preflight
-  # is dropped (needs_clean_tree=0); the detached-HEAD check stays, forceable
-  # as before (P073 Step 8) — the check still prints its own recovery first.
-  _pfsm_precondition "detached_head" forceable _pfsm_preflight "$invoke_root" 0 || exit 1
-  _pfsm_commit_force "epic-start" "$plan_id" "$project_root" || exit 1
-
-  if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
-    echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
-    exit 1
-  fi
-
-  # THE RUN ID IS READ, NOT INVENTED.
-  # `R-${epic_id}-plan` used to be the default, and it is a guess: when
-  # `aid-json-to-run.sh --run-id R-E020-2` had already created the state and the
-  # evidence under THAT id, epic-start recorded a different one in the manifest,
-  # and `epic-complete` could no longer find its own run (ACTA, 2026-08-31).
-  # An id given on the command line wins; otherwise the id is taken from the run
-  # that already exists on disk for this EPIC. Two candidates, or none, is a
-  # refusal — inventing a third is what produced the split.
-  local run_id="${run_id_opt:-}"
-  if [[ -z "$run_id" ]]; then
-    local _ev_base=".aid-o/work/evidence/${epic_id}" _found=() _d
-    if [[ -d "${project_root}/${_ev_base}" ]]; then
-      for _d in "${project_root}/${_ev_base}"/*/; do
-        [[ -f "${_d}fsm-state.yaml" ]] || continue
-        _found+=("$(basename "${_d%/}")")
-      done
-    fi
-    case "${#_found[@]}" in
-      1) run_id="${_found[0]}" ;;
-      0) echo "PRECONDITION FAIL: epic-start ${epic_id}: no run exists on disk and no --run-id was given. Pass --run-id explicitly (aid-json-to-run.sh creates the run and names it); epic-start no longer invents one, because an invented id splits the evidence from the manifest." >&2
-         exit 1 ;;
-      *) echo "PRECONDITION FAIL: epic-start ${epic_id}: ${#_found[@]} runs exist on disk (${_found[*]}) — pass --run-id to say which one this manifest entry is for." >&2
-         exit 1 ;;
-    esac
-  fi
-  local task_branch="task/${epic_id}/main"
-  local plan_branch="plan/${plan_id}"
-  local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
-  local op_id="${op_id_opt:-$(plan_op_key "epic-start" "$plan_id" "-" "0" "$epic_id")}"
-
-  # Existing epic_runs[] entry, if any (lock-free read — direct file read
-  # mirrors plan_manifest_get's own convention; a single call is used here
-  # because more than one field of the SAME entry is needed, which
-  # plan_manifest_get's one-jq_path-per-call contract does not return).
-  local entry_json="" erc=0
-  entry_json="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.epic_runs[] | select(.epic_id==\"${epic_id}\")")" || erc=$?
-  if [[ "$erc" -eq 5 ]]; then
-    echo "PRECONDITION FAIL: manifest for ${plan_id} is corrupt." >&2
-    exit 5
-  fi
-
-  local branch_exists=1
-  if git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1; then
-    branch_exists=0
-  fi
-
-  # A TERMINAL entry is not a thing to start. `merged_to_plan` (and the
-  # abandoned/superseded pair) have no outgoing edge, so re-entering epic-start
-  # would reconcile and re-cut a branch whose work is already in the plan — and
-  # it is the shape that pushed the lineage check below toward a weaker
-  # predicate before this refusal existed (2026-08-14). Named, not silent: the
-  # PM's next move differs per status.
-  if [[ -n "$entry_json" ]]; then
-    local _entry_status
-    _entry_status="$(jq -r '.status // empty' <<<"$entry_json" 2>/dev/null)" || _entry_status=""
-    case "$_entry_status" in
-      merged_to_plan)
-        echo "PRECONDITION FAIL: ${epic_id} is already merged_to_plan for ${plan_id} — a terminal status with no outgoing edge. Its work is on ${plan_branch:-plan/$plan_id}; starting it again would reconcile a branch whose commits the plan already carries. Open a new EPIC if there is more to do." >&2
-        exit 1 ;;
-      abandoned|superseded)
-        echo "PRECONDITION FAIL: ${epic_id} is ${_entry_status} for ${plan_id} — a terminal status. Re-scope it in the git-tracked lifecycle manifest (plan-reconcile) before starting anything under this id." >&2
-        exit 1 ;;
-    esac
-  fi
-
-  if [[ "$branch_exists" -eq 0 ]]; then
-    if [[ -n "$entry_json" ]]; then
-      # P079 Step 3: bring a stale chained branch up to the live plan head
-      # BEFORE the lineage check reads the merge-base it is about to assert on
-      # (see _pfsm_reconcile_task_branch for why the order matters). NOT
-      # forceable: a --force here would run the EPIC on a tree missing its
-      # predecessors' work, which is the defect, not a bookkeeping obstacle.
-      _pfsm_reconcile_task_branch "$project_root" "$plan_id" "$epic_id" "$task_branch" "$entry_json" || exit 1
-      # Re-read ONLY when the reconciliation actually moved epic_base_commit —
-      # the lineage check below compares against that value. The common case
-      # (a fresh branch, nothing to repair) pays nothing.
-      if [[ "${_PFSM_RECONCILE_MUTATED:-0}" -eq 1 ]]; then
-        entry_json="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.epic_runs[] | select(.epic_id==\"${epic_id}\")")" || true
-      fi
-
-      # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
-      # bookkeeping obstacle, not a physical impossibility, so an audited
-      # --force may pass it. The check still prints its own recovery first.
-      _pfsm_precondition "epic_lineage" forceable _pfsm_verify_epic_lineage "$project_root" "$plan_id" "$epic_id" "$task_branch" "$entry_json" || exit 1
-      _pfsm_commit_force "epic-start" "$plan_id" "$project_root" || exit 1
-      exit 0
-    fi
-
-    # No manifest entry — the only legitimate reason the branch can exist
-    # anyway is a prior run crashing between branch creation and the
-    # manifest write (Edge Case). Verify via THIS run's own op record.
-    local reconcile_status=""
-    reconcile_status="$(plan_op_reconcile "$plan_id" "$op_id" 2>/dev/null)" || true
-    if [[ "$reconcile_status" == "git_applied" ]]; then
-      local resulting_sha="" branch_sha=""
-      resulting_sha="$(_pfsm_last_resulting_sha "$plan_id" "$op_id")"
-      branch_sha="$(git -C "$project_root" rev-parse "$task_branch" 2>/dev/null)" || branch_sha=""
-      if [[ -n "$resulting_sha" && "$branch_sha" == "$resulting_sha" ]]; then
-        local wrc=0
-        _pfsm_epic_finish_write "$plan_id" "$epic_id" "$run_id" "$task_branch" "$branch_sha" "$plan_branch" "$evidence_dir" "$op_id" || wrc=$?
-        exit "$wrc"
-      fi
-    fi
-
-    echo "PRECONDITION FAIL: ${task_branch} exists with no manifest entry for ${plan_id} and no matching in-flight operation record — cannot prove lineage (manually created, or belongs to a different plan)." >&2
-    exit 1
-  fi
-
-  # ── Branch does not exist — fresh creation path ──────────────────────────
-  local reconcile_status=""
-  reconcile_status="$(plan_op_reconcile "$plan_id" "$op_id" 2>/dev/null)" || true
-  if [[ "$reconcile_status" == "git_applied" || "$reconcile_status" == "state_committed" ]]; then
-    echo "PRECONDITION FAIL: operation record for ${plan_id}/${epic_id} epic-start claims '${reconcile_status}' but ${task_branch} does not exist — manual reconciliation required." >&2
-    exit 5
-  fi
-
-  local brc=0
-  plan_op_begin "$plan_id" "$op_id" "epic-start" "$epic_id" "" || brc=$?
-  if [[ "$brc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: could not record epic-start intent for ${epic_id} (rc=${brc})." >&2
-    exit "$brc"
-  fi
-
-  local lock_path; lock_path="$(_pfsm_plan_lock_path "$plan_id")"
-  aid_lock_acquire "$lock_path" "$AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S" || {
-    echo "PRECONDITION FAIL: could not acquire plan lock for ${plan_id}." >&2
-    exit 3
-  }
-  local fd="$AID_LOCK_FD"
-
-  # Read the plan head ONCE inside the plan lock.
-  local plan_head=""
-  plan_head="$(git -C "$project_root" rev-parse --verify --quiet "$plan_branch" 2>/dev/null)" || plan_head=""
-  if [[ -z "$plan_head" ]]; then
-    aid_lock_release "$fd"
-    echo "PRECONDITION FAIL: ${plan_branch} not found — run plan-start first." >&2
-    exit 1
-  fi
-
-  if git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1; then
-    aid_lock_release "$fd"
-    echo "PRECONDITION FAIL: ${task_branch} appeared concurrently while acquiring the lock — retry." >&2
-    exit 1
-  fi
-
-  if ! git -C "$project_root" branch "$task_branch" "$plan_head" >/dev/null 2>&1; then
-    aid_lock_release "$fd"
-    echo "PRECONDITION FAIL: git branch ${task_branch} ${plan_head} failed (name collision or permission) — op record stays at intent, retry when resolved." >&2
-    exit 1
-  fi
-
-  aid_lock_release "$fd"
-
-  local grc=0
-  plan_op_mark_git_applied "$plan_id" "$op_id" "$plan_head" || grc=$?
-  if [[ "$grc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: ${task_branch} created but could not record git_applied (rc=${grc}) — retry to converge." >&2
-    exit "$grc"
-  fi
-
-  local wrc=0
-  _pfsm_epic_finish_write "$plan_id" "$epic_id" "$run_id" "$task_branch" "$plan_head" "$plan_branch" "$evidence_dir" "$op_id" || wrc=$?
-  exit "$wrc"
-}
-
-# =============================================================================
 # ── STEP 6 (P064 EPIC E-064-2_2): epic-complete / epic-merge-to-plan ─────────
 #
 # `epic-complete` finalizes ONE EPIC without any release action; then
@@ -2901,33 +2327,6 @@ _pfsm_entry_update() {
     >/dev/null
 }
 
-# ---------------------------------------------------------------------------
-# _pfsm_find_merge_commit <root> <task_ref> <plan_branch>
-# For a task branch whose tip is ALREADY an ancestor of the plan branch,
-# recovers the merge commit that brought it in: the OLDEST merge on the
-# ancestry path whose second parent contains the task tip. Used only to record
-# a merge that provably already happened (convergence), never to authorize a
-# new one. Returns 1 when the plan branch contains the work through no merge
-# commit at all (a fast-forward or an identical tip) — that case is reported
-# as `unproven_merge` rather than credited with a fabricated commit.
-# ---------------------------------------------------------------------------
-_pfsm_find_merge_commit() {
-  local root="$1" task_ref="$2" plan_branch="$3"
-  local tip=""
-  tip="$(git -C "$root" rev-parse --verify --quiet "$task_ref" 2>/dev/null)" || return 1
-  [[ -n "$tip" ]] || return 1
-  local m p2
-  while IFS= read -r m; do
-    [[ -z "$m" ]] && continue
-    p2="$(git -C "$root" rev-parse --verify --quiet "${m}^2" 2>/dev/null)" || continue
-    [[ -n "$p2" ]] || continue
-    if [[ "$p2" == "$tip" ]] || _pfsm_is_ancestor "$root" "$tip" "$p2"; then
-      printf '%s' "$m"
-      return 0
-    fi
-  done < <(git -C "$root" rev-list --merges --ancestry-path --reverse "${tip}..${plan_branch}" 2>/dev/null)
-  return 1
-}
 
 # ---------------------------------------------------------------------------
 # _pfsm_record_merged <plan_id> <epic_id> <merge_commit> <current_status>
@@ -2959,14 +2358,15 @@ _pfsm_record_merged() {
 }
 
 # =============================================================================
-# cmd_epic_complete <plan_id> <epic_id> [--abandon --reason <text>]
-#                    [--supersede-by <epic_id> --reason <text>]
-#                    [--full-tests --reason <text>] [--project-root ...] [--op-id ...]
+# cmd_epic_complete <plan_id> <epic_id> --direct | --abandon --reason <text>
+#                    [--project-root ...] [--op-id ...]
 #
-# NO Git action whatsoever — this command only finalizes runtime bookkeeping,
-# which is why it deliberately runs no worktree-cleanliness preflight: an EPIC
-# is completed from its own task branch, where a dirty tree is the operator's
-# business and blocking would buy nothing.
+# NO Git action whatsoever — this command only finalizes runtime bookkeeping.
+# Since 3.0.0 (P114) it has two uses: `--direct` records the direct run
+# merged_to_plan (done-advance --direct calls it), and `--abandon` ends a run
+# (a direct one, or an EPIC-path run left over from 2.118.x). The EPIC path's
+# own completion (task branch, then epic-merge-to-plan) and `--supersede-by` /
+# `--full-tests` left with it.
 # =============================================================================
 # _pm_abandon_run <root> <plan_id> <epic_id> <reason> — P111 Step 5: ONE
 # resumable transition manifest → FSM → map for one run. Each write is
@@ -3022,19 +2422,15 @@ _pm_abandon_unfinished() {
 }
 
 cmd_epic_complete() {
-  local plan_id="" epic_id="" abandon=0 supersede_by="" reason="" full_tests=0 \
+  local plan_id="" epic_id="" abandon=0 reason="" \
         project_root_opt="" op_id_opt="" direct=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --abandon) abandon=1; shift ;;
       --direct) direct=1; shift ;;   # P111: the direct run's record (done-advance --direct calls it)
-      --supersede-by)
-        _pfsm_require_optval "epic-complete" "$1" "$#" || exit 2
-        supersede_by="$2"; shift 2 ;;
       --reason)
         _pfsm_require_optval "epic-complete" "$1" "$#" || exit 2
         reason="$2"; shift 2 ;;
-      --full-tests) full_tests=1; shift ;;
       --project-root)
         _pfsm_require_optval "epic-complete" "$1" "$#" || exit 2
         project_root_opt="$2"; shift 2 ;;
@@ -3060,7 +2456,7 @@ cmd_epic_complete() {
   # error, never a silently discarded argument.
   _pfsm_force_arg_check "epic-complete" || exit 2
   if [[ -z "$plan_id" || -z "$epic_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]" >&2
+    echo "Usage: aid-plan-fsm.sh epic-complete <plan_id> <epic_id> --direct | --abandon --reason <text> [--project-root <path>] [--op-id <id>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -3071,27 +2467,14 @@ cmd_epic_complete() {
     echo "ERROR: epic-complete: epic_id must match ^E-[0-9]{3}-[0-9]+_[0-9]+\$ (got '${epic_id}')" >&2
     exit 2
   fi
-  if [[ "$abandon" -eq 1 && -n "$supersede_by" ]]; then
-    echo "ERROR: epic-complete: --abandon and --supersede-by are mutually exclusive — an EPIC has exactly one terminal reason." >&2
-    exit 2
-  fi
-  if [[ -n "$supersede_by" ]] && ! _pfsm_validate_epic_id "$supersede_by"; then
-    echo "ERROR: epic-complete: --supersede-by must be an EPIC id matching ^E-[0-9]{3}-[0-9]+_[0-9]+\$ (got '${supersede_by}')" >&2
-    exit 2
-  fi
   if [[ "$abandon" -eq 1 && -z "${reason//[[:space:]]/}" ]]; then
     echo "ERROR: epic-complete: --abandon requires --reason <text> — the reason is recorded in the manifest, the run's state and its timeline; nothing was written." >&2
     echo "next: aid-plan-fsm.sh epic-complete ${plan_id:-<plan>} ${epic_id:-<epic>} --abandon --reason \"<why>\"" >&2
     echo "(pipeline.md §When AID refuses: abandon_needs_reason)" >&2
     exit 2
   fi
-  if [[ -n "$supersede_by" && -z "$reason" ]]; then
-    echo "ERROR: epic-complete: --supersede-by requires --reason <text>." >&2
-    exit 2
-  fi
-  if [[ "$full_tests" -eq 1 && -z "$reason" ]]; then
-    echo "ERROR: epic-complete: --full-tests requires --reason <text> (a PM-approved mid-plan full gate run is recorded as an exception, never silently)." >&2
-    exit 2
+  if [[ "$abandon" -eq 0 && "$direct" -eq 0 ]]; then
+    _pfsm_epic_path_removed "epic-complete without --direct (an EPIC's completion on its task branch; an old run is ended with --abandon --reason)"
   fi
 
   local project_root
@@ -3119,21 +2502,15 @@ cmd_epic_complete() {
   cur_status="$(jq -r '.status // empty' <<<"$entry_json" 2>/dev/null)"
   local entry_direct; entry_direct="$(jq -r '.direct // false' <<<"$entry_json" 2>/dev/null)"
   if [[ "$direct" -eq 1 && "$entry_direct" != "true" ]]; then
-    echo "PRECONDITION FAIL: epic-complete --direct: ${epic_id} is not a direct run of ${plan_id} — it completes on its task branch $(jq -r '.task_branch // "<none>"' <<<"$entry_json"): epic-complete ${plan_id} ${epic_id}" >&2
+    echo "PRECONDITION FAIL: epic-complete --direct: ${epic_id} is not a direct run of ${plan_id} (an EPIC-path run on $(jq -r '.task_branch // "<none>"' <<<"$entry_json"), removed in 3.0.0 — abandon it: epic-complete ${plan_id} ${epic_id} --abandon --reason \"<why>\")" >&2
     exit 1
   fi
 
-  local now esc_now esc_reason
+  local now esc_now
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   esc_now="$(jq -Rn --arg s "$now" '$s')"
-  esc_reason="$(jq -Rn --arg s "$reason" '$s')"
 
   local op_id="${op_id_opt:-$(plan_op_key "epic-complete" "$plan_id" "-" "0" "$epic_id")}"
-
-  # ── Terminal path: --abandon / --supersede-by ────────────────────────────
-  local target_status=""
-  [[ "$abandon" -eq 1 ]] && target_status="abandoned"
-  [[ -n "$supersede_by" ]] && target_status="superseded"
 
   # P111 Step 5: --abandon ends the run in the FSM and active-runs.json too —
   # one resumable transition (manifest → FSM → map); a rerun completes it.
@@ -3149,56 +2526,14 @@ cmd_epic_complete() {
     exit 0
   fi
 
-  if [[ -n "$target_status" ]]; then
-    local brc=0
-    plan_op_begin "$plan_id" "$op_id" "epic-complete" "$epic_id" "" || brc=$?
-    if [[ "$brc" -ne 0 ]]; then
-      echo "PRECONDITION FAIL: could not record epic-complete intent for ${epic_id} (rc=${brc})." >&2
-      exit "$brc"
-    fi
-
-    if [[ "$cur_status" != "$target_status" ]]; then
-      local src=0
-      plan_manifest_set_epic_status "$plan_id" "$epic_id" "$target_status" >/dev/null || src=$?
-      if [[ "$src" -ne 0 ]]; then
-        echo "PRECONDITION FAIL: could not set ${epic_id} to ${target_status} (rc=${src}) — status is '${cur_status}'." >&2
-        exit "$src"
-      fi
-    fi
-
-    local assign=".terminal_reason = ${esc_reason} | .terminal_recorded_at = ${esc_now}"
-    if [[ -n "$supersede_by" ]]; then
-      local esc_sb; esc_sb="$(jq -Rn --arg s "$supersede_by" '$s')"
-      assign="${assign} | .superseded_by = ${esc_sb}"
-    fi
-    local urc=0
-    _pfsm_entry_update "$plan_id" "$epic_id" "$assign" || urc=$?
-    if [[ "$urc" -ne 0 ]]; then
-      echo "PRECONDITION FAIL: could not record the terminal reason for ${epic_id} (rc=${urc}) — retry converges." >&2
-      exit "$urc"
-    fi
-
-    local crc=0
-    plan_op_commit "$plan_id" "$op_id" || crc=$?
-    if [[ "$crc" -ne 0 ]]; then
-      echo "PRECONDITION FAIL: could not record epic-complete state_committed for ${epic_id} (rc=${crc})." >&2
-      exit "$crc"
-    fi
-
-    # DELIBERATELY no lifecycle write — see this section's header. The
-    # git-tracked re-scope of an abandoned/superseded EPIC is P068's CF1.
-    echo "${epic_id} ${target_status}"
-    exit 0
-  fi
-
-  # ── Normal completion path ───────────────────────────────────────────────
+  # ── The direct run's completion ──────────────────────────────────────────
   case "$cur_status" in
     abandoned|superseded)
       echo "PRECONDITION FAIL: ${epic_id} is already '${cur_status}' (terminal) — refusing to complete it." >&2
       exit 1
       ;;
     merged_to_plan)
-      if [[ "$direct" -eq 1 ]] && ! _pfsm_plan_state_set "$plan_id" PLAN_SYNC; then
+      if ! _pfsm_plan_state_set "$plan_id" PLAN_SYNC; then
         echo "PRECONDITION FAIL: epic-complete --direct: ${epic_id} is merged_to_plan but ${plan_id} could not move to PLAN_SYNC — rerun." >&2
         exit 1
       fi
@@ -3237,17 +2572,12 @@ cmd_epic_complete() {
   epic_done_phase="$(yq -r '.done_phase // ""' "$state_file" 2>/dev/null)" || epic_done_phase=""
   # P111: a direct run is recorded by done-advance BEFORE release is written,
   # so its precondition is done_phase review.
-  if [[ "$direct" -eq 1 ]]; then
-    if [[ "$(yq -r '.direct // false' "$state_file" 2>/dev/null)" != "true" ]]; then
-      echo "PRECONDITION FAIL: epic-complete --direct: ${state_file} is not a direct run's state (direct: true)." >&2
-      exit 1
-    fi
-    if [[ "$epic_done_phase" != "review" ]]; then
-      echo "PRECONDITION FAIL: epic-complete --direct: ${epic_id} is DONE at done_phase='${epic_done_phase:-<empty>}' (must be review — done-advance review release --direct records it)." >&2
-      exit 1
-    fi
-  elif [[ "$epic_done_phase" != "release" ]]; then
-    echo "PRECONDITION FAIL: ${epic_id} is DONE at done_phase='${epic_done_phase:-<empty>}' (must be release) at ${state_file} — run done-advance review release first." >&2
+  if [[ "$(yq -r '.direct // false' "$state_file" 2>/dev/null)" != "true" ]]; then
+    echo "PRECONDITION FAIL: epic-complete --direct: ${state_file} is not a direct run's state (direct: true)." >&2
+    exit 1
+  fi
+  if [[ "$epic_done_phase" != "review" ]]; then
+    echo "PRECONDITION FAIL: epic-complete --direct: ${epic_id} is DONE at done_phase='${epic_done_phase:-<empty>}' (must be review — done-advance review release --direct records it)." >&2
     exit 1
   fi
 
@@ -3274,9 +2604,8 @@ cmd_epic_complete() {
   local final_floor=""
   local _ec_base _ec_task_branch
   _ec_base="$(jq -r '.epic_base_commit // empty' <<<"$entry_json" 2>/dev/null)" || _ec_base=""
-  _ec_task_branch="$(jq -r '.task_branch // empty' <<<"$entry_json" 2>/dev/null)" || _ec_task_branch=""
   # P111: a direct run's work is on plan/<id>; the gate floor reads its diff there.
-  [[ "$direct" -eq 1 ]] && _ec_task_branch="plan/${plan_id}"
+  _ec_task_branch="plan/${plan_id}"
   if [[ -f "$_ec_exec_yaml" && -n "$_ec_base" && -n "$_ec_task_branch" ]] \
      && git -C "$project_root" rev-parse --verify --quiet "$_ec_task_branch" >/dev/null 2>&1; then
     local _ec_paths _ec_rc=0
@@ -3354,9 +2683,7 @@ cmd_epic_complete() {
 
   if [[ -n "$final_floor" ]]; then
     # Monotonic by construction (plan_manifest_raise_final_profile only ever
-    # moves the floor UP), which is what makes `--full-tests` safe to record
-    # as an exception "without lowering the plan-final floor": nothing here
-    # CAN lower it.
+    # moves the floor UP): nothing here CAN lower it.
     local prc=0
     plan_manifest_raise_final_profile "$plan_id" "$final_floor" >/dev/null || prc=$?
     if [[ "$prc" -ne 0 ]]; then
@@ -3405,13 +2732,6 @@ cmd_epic_complete() {
   [[ -n "$evidence_dir" ]] && esc_evd="$(jq -Rn --arg s "$evidence_dir" '$s')"
 
   local assign=".merge_status = \"pending\" | .epic_completed_at = ${esc_now} | .epic_completion_sha = ${esc_tip} | .epic_completion_evidence_dir = ${esc_evd} | .epic_completion_run_id = $(jq -Rn --arg s "$run_id" '$s') | .epic_completion_profile = ${esc_profile} | .epic_final_profile_floor = ${esc_floor} | .unknown_production_path = ${unknown_production_path} | .plan_final_required_gates = ${excluded_plan_gates}"
-  if [[ "$full_tests" -eq 1 ]]; then
-    # The PM-approved mid-plan broad run, audited: reason + the boundary that
-    # requested it. Named `epic_full_test_exception` (plan Step 8) — the
-    # `epic_` prefix keeps it distinct from a plan-final exception, which is a
-    # different act by a different actor.
-    assign="${assign} | .epic_full_test_exception = {reason: ${esc_reason}, at: ${esc_now}, boundary: \"epic\"}"
-  fi
 
   local urc=0
   _pfsm_entry_update "$plan_id" "$epic_id" "$assign" || urc=$?
@@ -3420,17 +2740,15 @@ cmd_epic_complete() {
     exit "$urc"
   fi
 
-  if [[ "$direct" -eq 1 ]]; then
-    # P111: the steps committed on plan/<id> — the run IS on the plan branch.
-    # merged_to_plan at its tip (the state half of a merge), then PLAN_SYNC:
-    # plan-finalize reads exactly what it reads after the last EPIC merged.
-    local mrc=0
-    _pfsm_record_merged "$plan_id" "$epic_id" "$_ec_tip" "$cur_status" || mrc=$?
-    [[ "$mrc" -eq 0 ]] || exit "$mrc"
-    if ! _pfsm_plan_state_set "$plan_id" PLAN_SYNC; then
-      echo "PRECONDITION FAIL: epic-complete --direct: ${epic_id} is merged_to_plan but ${plan_id} could not move to PLAN_SYNC (plan state $(plan_state_get "$plan_id" plan_state 2>/dev/null)) — rerun converges." >&2
-      exit 1
-    fi
+  # P111: the steps committed on plan/<id> — the run IS on the plan branch.
+  # merged_to_plan at its tip (the state half of a merge), then PLAN_SYNC:
+  # plan-finalize reads exactly what it reads after the last EPIC merged.
+  local mrc=0
+  _pfsm_record_merged "$plan_id" "$epic_id" "$_ec_tip" "$cur_status" || mrc=$?
+  [[ "$mrc" -eq 0 ]] || exit "$mrc"
+  if ! _pfsm_plan_state_set "$plan_id" PLAN_SYNC; then
+    echo "PRECONDITION FAIL: epic-complete --direct: ${epic_id} is merged_to_plan but ${plan_id} could not move to PLAN_SYNC (plan state $(plan_state_get "$plan_id" plan_state 2>/dev/null)) — rerun converges." >&2
+    exit 1
   fi
 
   local crc=0
@@ -3440,602 +2758,8 @@ cmd_epic_complete() {
     exit "$crc"
   fi
 
-  if [[ "$direct" -eq 1 ]]; then echo "${epic_id} merged_to_plan (direct, plan/${plan_id} at ${_ec_tip})"; else echo "${epic_id} pending"; fi
+  echo "${epic_id} merged_to_plan (direct, plan/${plan_id} at ${_ec_tip})"
   exit 0
-}
-
-# =============================================================================
-# cmd_epic_merge_to_plan <plan_id> <epic_id> [--expected-plan-sha <sha>]
-#                         [--project-root ...] [--op-id ...]
-# =============================================================================
-cmd_epic_merge_to_plan() {
-  local plan_id="" epic_id="" expected_sha="" project_root_opt="" op_id_opt="" continue_opt=""
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --expected-plan-sha)
-        _pfsm_require_optval "epic-merge-to-plan" "$1" "$#" || exit 2
-        expected_sha="$2"; shift 2 ;;
-      --project-root)
-        _pfsm_require_optval "epic-merge-to-plan" "$1" "$#" || exit 2
-        project_root_opt="$2"; shift 2 ;;
-      --op-id)
-        _pfsm_require_optval "epic-merge-to-plan" "$1" "$#" || exit 2
-        op_id_opt="$2"; shift 2 ;;
-      # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
-      # every state-TRANSITION command; what it can BYPASS is bounded by the
-      # forceable/hard classification in _pfsm_precondition.
-      #
-      # TWO SPELLINGS, ONE MEANING. `--force-reason` works on ALL eight
-      # commands and is never ambiguous. `--reason` is accepted as a synonym
-      # only on the commands that have no business `--reason` of their own;
-      # epic-complete (abandon/supersede/full-tests) and plan-rollback both
-      # already own `--reason`, so there it is deliberately absent. The plan
-      # named only plan-rollback as the collision — epic-complete is a second
-      # one, found while wiring.
-      --force) _PFSM_FORCE=1; shift ;;
-      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
-      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
-      # P090 Step 3 — override the plan's own `autonomy` field, in either
-      # direction, for this one merge.
-      --continue) continue_opt="yes"; shift ;;
-      --no-continue) continue_opt="no"; shift ;;
-      --*) echo "ERROR: epic-merge-to-plan: unknown flag: $1" >&2; exit 2 ;;
-      *)
-        if [[ -z "$plan_id" ]]; then plan_id="$1";
-        elif [[ -z "$epic_id" ]]; then epic_id="$1";
-        else echo "ERROR: epic-merge-to-plan: unexpected argument: $1" >&2; exit 2; fi
-        shift ;;
-    esac
-  done
-  # P073 Step 8 (review finding): a force reason without --force is an
-  # error, never a silently discarded argument.
-  _pfsm_force_arg_check "epic-merge-to-plan" || exit 2
-  if [[ -z "$plan_id" || -z "$epic_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]" >&2
-    exit 2
-  fi
-  if ! _pfsm_validate_plan_id "$plan_id"; then
-    echo "ERROR: epic-merge-to-plan: plan_id must match ^P[0-9]{3}\$ (got '${plan_id}')" >&2
-    exit 2
-  fi
-  if ! _pfsm_validate_epic_id "$epic_id"; then
-    echo "ERROR: epic-merge-to-plan: epic_id must match ^E-[0-9]{3}-[0-9]+_[0-9]+\$ (got '${epic_id}')" >&2
-    exit 2
-  fi
-
-  local project_root
-  project_root="$(_pfsm_resolve_project_root "$project_root_opt")"
-  export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
-  export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
-
-  # ── P074 Step 8: run where the plan's tree is ────────────────────────────
-  # This command checks out `plan/<id>` and merges in a tree. Before it touches
-  # one it re-executes itself inside the plan's execution worktree (or refuses
-  # naming the repair). Placed AFTER parsing (it needs plan_id) and BEFORE
-  # every preflight that inspects a tree.
-  _pfsm_require_plan_worktree "$plan_id" "$project_root" || exit 1
-
-  # The checks are about the worktree this command actually CHECKS OUT AND
-  # MERGES IN. P074 Step 8: that is `tree_root` — the plan's execution
-  # worktree when it has one, the state root for a legacy plan. `project_root`
-  # stays the STATE root (`.aid-o` never moves into a worktree); refs and
-  # objects are shared, so only the tree/HEAD legs of these git calls change.
-  # P074 Step 5: the clean-worktree check is KEPT (this command really does
-  # check out and merge in a tree) and is evaluated via `git -C` against it.
-  local tree_root
-  tree_root="$(_pfsm_plan_tree_root "$project_root" "$plan_id")"
-  _pfsm_check_detached_head "$tree_root" || exit 1
-  _pfsm_check_no_merge_in_progress "$tree_root" || exit 1
-  # P073 Step 8: forceable — a dirty tree or an unproven lineage is a
-  # bookkeeping obstacle, not a physical impossibility, so an audited
-  # --force may pass it. The check still prints its own recovery first.
-  _pfsm_precondition "clean_worktree" forceable _pfsm_check_clean_worktree "$tree_root" || exit 1
-  _pfsm_commit_force "epic-merge-to-plan" "$plan_id" "$project_root" || exit 1
-
-  if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
-    echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
-    exit 1
-  fi
-
-  local entry_json="" erc=0
-  entry_json="$(_pfsm_epic_entry "$plan_id" "$epic_id")" || erc=$?
-  if [[ "$erc" -eq 5 ]]; then
-    echo "PRECONDITION FAIL: manifest for ${plan_id} is corrupt." >&2
-    exit 5
-  fi
-  if [[ "$(jq -r '.direct // false' <<<"$entry_json" 2>/dev/null)" == "true" ]]; then
-    # P111: a direct run's commits are already on plan/<id> — nothing to merge.
-    echo "PRECONDITION FAIL: ${epic_id} is a direct run of ${plan_id} (its steps committed on plan/${plan_id}) — there is no task branch to merge." >&2
-    echo "next: aid-fsm.sh done-advance review release <state_file> --direct (it records merged_to_plan)" >&2
-    echo "(pipeline.md §When AID refuses: direct_run_no_epic_merge)" >&2
-    exit 1
-  fi
-  if [[ -z "$entry_json" ]]; then
-    echo "PRECONDITION FAIL: no epic_runs entry for ${epic_id} in ${plan_id}'s manifest — nothing to merge (run epic-start first)." >&2
-    exit 1
-  fi
-
-  local cur_status recorded_mc
-  cur_status="$(jq -r '.status // empty' <<<"$entry_json" 2>/dev/null)"
-  recorded_mc="$(jq -r '.epic_merge_commit // empty' <<<"$entry_json" 2>/dev/null)"
-
-  case "$cur_status" in
-    abandoned|superseded)
-      echo "PRECONDITION FAIL: ${epic_id} is '${cur_status}' (terminal) — refusing to merge it into plan/${plan_id}." >&2
-      exit 1
-      ;;
-  esac
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # F2 (2026-07-27) — THE COMPLETION GATE, before any Git mutation.
-  #
-  # Found by the P067 live dogfood: `epic-complete` refused an EPIC ("cannot
-  # confirm the EPIC reached DONE") and this command merged it into the plan
-  # branch anyway, because `pending -> merged_to_plan` was a permitted
-  # transition and nothing here asked whether completion had ever succeeded.
-  # An unfinished EPIC therefore reached the candidate, and the only thing that
-  # noticed was C4, four stages downstream. The check at the door was missing:
-  # a status, a lineage record and an existing task branch are not completion
-  # proof.
-  #
-  # Completion proof is all four of these, together:
-  #   1. the EPIC is `running` — `pending` never completed anything;
-  #   2. `merge_status` is `pending`, which only a successful epic-complete writes;
-  #   3. that epic-complete's operation record reached `state_committed`;
-  #   4. the task tip TODAY equals the tip epic-complete verified.
-  # (4) is what makes the authorization about a commit rather than about a
-  # branch name: work pushed after the check was never verified, and merging it
-  # would launder it into the candidate.
-  # ─────────────────────────────────────────────────────────────────────────
-  if [[ "$cur_status" != "merged_to_plan" ]]; then
-    if [[ "$cur_status" != "running" ]]; then
-      echo "PRECONDITION FAIL: epic_completion_missing: ${epic_id} is '${cur_status}', not 'running' — only an EPIC that started and then completed may merge into plan/${plan_id}. Run epic-start, finish the EPIC, then epic-complete." >&2
-      exit 1
-    fi
-    local _mg_ms _mg_csha _mg_run
-    _mg_ms="$(jq -r '.merge_status // empty' <<<"$entry_json" 2>/dev/null)" || _mg_ms=""
-    _mg_csha="$(jq -r '.epic_completion_sha // empty' <<<"$entry_json" 2>/dev/null)" || _mg_csha=""
-    _mg_run="$(jq -r '.epic_completion_run_id // .run_id // empty' <<<"$entry_json" 2>/dev/null)" || _mg_run=""
-    if [[ "$_mg_ms" != "pending" ]]; then
-      echo "PRECONDITION FAIL: epic_completion_missing: ${epic_id} carries merge_status '${_mg_ms:-<unset>}', not 'pending' — only a SUCCESSFUL epic-complete writes that, so this EPIC has no merge authorization. Nothing was merged." >&2
-      exit 1
-    fi
-    if [[ -z "$_mg_csha" ]]; then
-      echo "PRECONDITION FAIL: epic_completion_missing: ${epic_id} records no epic_completion_sha — its completion is not bound to any commit, so there is nothing to verify the task branch against. Re-run epic-complete. Nothing was merged." >&2
-      exit 1
-    fi
-    # The epic-complete operation must have REACHED state_committed. A record
-    # stuck at intent/git_applied means completion was interrupted, and an
-    # interrupted verification is not a verification.
-    local _mg_ops _mg_phase=""
-    _mg_ops="$(_pfsm_ops_path "$plan_id")"
-    if [[ -f "$_mg_ops" ]]; then
-      _mg_phase="$(jq -rs --arg e "$epic_id" \
-        '[ .[] | select(type == "object" and .command == "epic-complete" and .subject == $e) ]
-         | if length == 0 then "" else (.[-1].phase // "") end' "$_mg_ops" 2>/dev/null || true)"
-    fi
-    if [[ "$_mg_phase" != "state_committed" ]]; then
-      echo "PRECONDITION FAIL: epic_completion_missing: the epic-complete operation for ${epic_id} is recorded at phase '${_mg_phase:-<none>}', not 'state_committed' — an interrupted completion is not a completion. Re-run epic-complete. Nothing was merged." >&2
-      exit 1
-    fi
-    # The EPIC's own FSM must still say DONE. Two fail-open holes were closed
-    # here on 2026-07-27, both found by review rather than by a test:
-    #
-    #   (a) the check only ran when the state file EXISTED, so deleting it after
-    #       completion skipped the check entirely — the one thing an attacker or
-    #       a careless cleanup would do to make an unfinished EPIC mergeable;
-    #   (b) the path was DERIVED from the run id instead of read from the
-    #       `epic_completion_evidence_dir` completion recorded, which was written
-    #       and then never used. A derived path can point somewhere completion
-    #       never looked.
-    #
-    # Both the run id and the evidence dir are now required, must still match the
-    # manifest entry, and the FSM is read ONLY from the recorded directory. A
-    # missing state file is `epic_completion_stale`, not a skipped check.
-    local _mg_evd _mg_entry_run _mg_entry_evd
-    _mg_evd="$(jq -r '.epic_completion_evidence_dir // empty' <<<"$entry_json" 2>/dev/null)" || _mg_evd=""
-    _mg_entry_run="$(jq -r '.run_id // empty' <<<"$entry_json" 2>/dev/null)" || _mg_entry_run=""
-    _mg_entry_evd="$(jq -r '.evidence_dir // empty' <<<"$entry_json" 2>/dev/null)" || _mg_entry_evd=""
-    if [[ -z "$_mg_run" || -z "$_mg_evd" ]]; then
-      echo "PRECONDITION FAIL: epic_completion_missing: ${epic_id} records no epic_completion_run_id/epic_completion_evidence_dir (run='${_mg_run:-<unset>}', dir='${_mg_evd:-<unset>}') — completion that names no evidence cannot be re-checked, so it authorizes nothing. Re-run epic-complete. Nothing was merged." >&2
-      exit 1
-    fi
-    if [[ -n "$_mg_entry_run" && "$_mg_run" != "$_mg_entry_run" ]] \
-       || [[ -n "$_mg_entry_evd" && "$_mg_evd" != "$_mg_entry_evd" ]]; then
-      echo "PRECONDITION FAIL: epic_completion_stale: ${epic_id}'s completion names run '${_mg_run}' / dir '${_mg_evd}', but the manifest entry now records run '${_mg_entry_run}' / dir '${_mg_entry_evd}' — the EPIC was re-run since completion, so that completion describes a different run. Re-run epic-complete. Nothing was merged." >&2
-      exit 1
-    fi
-    local _mg_state_file="${project_root}/${_mg_evd}/fsm-state.yaml"
-    if [[ ! -f "$_mg_state_file" ]]; then
-      echo "PRECONDITION FAIL: epic_completion_stale: ${epic_id}'s FSM state file is missing at ${_mg_evd}/fsm-state.yaml — the completion this merge relies on can no longer be verified. An absent file is never a passed check. Nothing was merged." >&2
-      exit 1
-    fi
-    local _mg_st; _mg_st="$(grep -E '^state:' "$_mg_state_file" 2>/dev/null | awk '{print $2}' | head -1)"
-    local _mg_dp; _mg_dp="$(grep -E '^done_phase:' "$_mg_state_file" 2>/dev/null | awk '{print $2}' | head -1 || true)"
-    if [[ "$_mg_st" != "DONE" || "$_mg_dp" != "release" ]]; then
-      echo "PRECONDITION FAIL: epic_completion_stale: ${epic_id}'s FSM now reports state '${_mg_st:-<empty>}' / done_phase '${_mg_dp:-<empty>}', not DONE / release — the completion this merge relies on no longer holds. Nothing was merged." >&2
-      exit 1
-    fi
-    # The tip TODAY must be the tip completion verified.
-    local _mg_tip=""
-    _mg_tip="$(git -C "$tree_root" rev-parse --verify --quiet "refs/heads/task/${epic_id}/main" 2>/dev/null || true)"
-    if [[ -z "$_mg_tip" ]]; then
-      echo "PRECONDITION FAIL: epic_completion_stale: task/${epic_id}/main does not resolve, so the completed commit ${_mg_csha:0:8} cannot be confirmed as its tip. Nothing was merged." >&2
-      exit 1
-    fi
-    if [[ "$_mg_tip" != "$_mg_csha" ]]; then
-      echo "PRECONDITION FAIL: epic_completion_stale: task/${epic_id}/main is at ${_mg_tip:0:8} but epic-complete verified ${_mg_csha:0:8} — work landed after the completion check and has never been verified. Re-run epic-complete against the current tip. Nothing was merged." >&2
-      exit 1
-    fi
-  fi
-
-  local plan_branch="plan/${plan_id}" task_branch="task/${epic_id}/main"
-  local plan_head=""
-  plan_head="$(git -C "$tree_root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
-  if [[ -z "$plan_head" ]]; then
-    echo "PRECONDITION FAIL: ${plan_branch} not found — run plan-start first." >&2
-    exit 1
-  fi
-
-  # The concurrent-writer guard, BEFORE anything is recorded or merged.
-  if [[ -n "$expected_sha" ]]; then
-    local expected_norm=""
-    expected_norm="$(git -C "$tree_root" rev-parse --verify --quiet "${expected_sha}^{commit}" 2>/dev/null)" || expected_norm="$expected_sha"
-    if [[ "$expected_norm" != "$plan_head" ]]; then
-      echo "PRECONDITION FAIL: --expected-plan-sha ${expected_sha} does not match the observed ${plan_branch} head ${plan_head} — another writer moved the plan branch; refusing before the merge." >&2
-      exit 1
-    fi
-  fi
-
-  # ── `merged_to_plan` IS TERMINAL — converge or refuse, never re-merge ────
-  # plan_manifest_set_epic_status's transition table gives merged_to_plan no
-  # outgoing edge, so there is no honest way to record a SECOND merge commit
-  # behind that status. This command therefore either converges read-only on
-  # the fact already recorded (the recorded merge commit is still an ancestor
-  # of the plan branch and the task branch, if it still exists, is still
-  # contained in it) or refuses outright. Silently creating a second merge
-  # commit while `epic_merge_commit` keeps naming the first one — which is
-  # what Step 7's queue writer mirrors — is the one outcome not allowed.
-  if [[ "$cur_status" == "merged_to_plan" ]]; then
-    if [[ -z "$recorded_mc" ]] || ! _pfsm_is_ancestor "$tree_root" "$recorded_mc" "$plan_branch"; then
-      echo "PRECONDITION FAIL: ${epic_id} is already 'merged_to_plan' but its recorded merge commit '${recorded_mc:-<none>}' is not an ancestor of ${plan_branch} — the manifest status is terminal and this command will not create a second merge; reconcile the manifest against Git by hand." >&2
-      exit 1
-    fi
-    local merged_tip=""
-    merged_tip="$(git -C "$tree_root" rev-parse --verify --quiet "refs/heads/${task_branch}" 2>/dev/null)" || merged_tip=""
-    if [[ -n "$merged_tip" ]] && ! _pfsm_is_ancestor "$tree_root" "$merged_tip" "$plan_branch"; then
-      echo "PRECONDITION FAIL: ${epic_id} is already merged_to_plan at ${recorded_mc} but its task branch has moved to ${merged_tip}, which is not contained in ${plan_branch}; the manifest status is terminal and this command will not create a second merge. Land the newer work through its own EPIC." >&2
-      exit 1
-    fi
-    _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$recorded_mc"
-  fi
-
-  # ── Provenance gate ──────────────────────────────────────────────────────
-  # EVERY path below this point writes `merged_to_plan`, and that write is
-  # what downstream consumers (Step 7's queue writer, aid-fsm.sh's dependency
-  # resolution) read as "this EPIC's work is delivered". epic-start already
-  # refuses an entry whose lineage is not proven; minting the delivery claim
-  # is at least as authoritative, so it refuses too — a true ancestry claim
-  # about a branch of unestablished provenance is not a delivery proof.
-  # A narrow check on purpose: _pfsm_verify_epic_lineage additionally demands
-  # epic_source_ref == plan/<plan_id> and re-derives the merge-base against
-  # the plan branch, which is wrong for a branch that is already merged in;
-  # weakening THAT helper would weaken epic-start's own guard.
-  # DELIBERATELY not applied to the terminal convergence above: that path
-  # writes nothing and only reads back a fact the manifest already records,
-  # so refusing it would wedge exactly the `plan-state --repair` recovery
-  # whose entries are unproven by construction.
-  local lineage=""
-  lineage="$(jq -r '.lineage // empty' <<<"$entry_json" 2>/dev/null)"
-  if [[ "$lineage" != "proven" ]]; then
-    echo "PRECONDITION FAIL: epic_lineage_unproven — ${epic_id}'s manifest entry has lineage='${lineage:-<empty>}' (must be proven); refusing to record a merge into ${plan_branch} on unestablished provenance. Sanctioned recovery: attest the origin explicitly — 'aid-plan-fsm.sh plan-state ${plan_id} --attest-source-ref ${plan_branch} --reason <text> --epic ${epic_id}'. You do not need '--repair' first: attestation's precondition IS an unproven entry. (Since IMP-265, --repair is a byte-identical no-op on a healthy manifest and preserves proven siblings' attestation — it only reconstructs genuinely damaged entries, always as unproven; it is neither required nor harmful here, but attestation is the direct fix.)" >&2
-    exit 1
-  fi
-
-  local op_id="${op_id_opt:-$(plan_op_key "epic-merge-to-plan" "$plan_id" "-" "0" "$epic_id")}"
-
-  # ── The task branch is gone ──────────────────────────────────────────────
-  # Branch deletion is not evidence by itself, but it does not invalidate a
-  # merge that is already proven.
-  if ! git -C "$tree_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1; then
-    if [[ -n "$recorded_mc" ]] && _pfsm_is_ancestor "$tree_root" "$recorded_mc" "$plan_branch"; then
-      local wrc=0
-      _pfsm_record_merged "$plan_id" "$epic_id" "$recorded_mc" "$cur_status" || wrc=$?
-      [[ "$wrc" -ne 0 ]] && exit "$wrc"
-      _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$recorded_mc"
-    fi
-    echo "PRECONDITION FAIL: unproven_merge — ${task_branch} does not exist and no recorded merge commit is an ancestor of ${plan_branch}. A deleted branch, a 'state: DONE' run and a queue entry claiming completion are NOT proof; re-create the branch or record a proven merge." >&2
-    exit 1
-  fi
-
-  local task_tip
-  task_tip="$(git -C "$tree_root" rev-parse "$task_branch" 2>/dev/null)" || task_tip=""
-  if [[ -z "$task_tip" ]]; then
-    echo "PRECONDITION FAIL: cannot resolve ${task_branch}." >&2
-    exit 1
-  fi
-
-  # ── Crash resume: the Git merge landed, the state write did not ──────────
-  local reconcile_status=""
-  reconcile_status="$(plan_op_reconcile "$plan_id" "$op_id" 2>/dev/null)" || true
-  if [[ "$reconcile_status" == "git_applied" ]]; then
-    local resulting_sha=""
-    resulting_sha="$(_pfsm_last_resulting_sha "$plan_id" "$op_id")"
-    if [[ -z "$resulting_sha" ]] || ! _pfsm_is_ancestor "$tree_root" "$resulting_sha" "$plan_branch"; then
-      echo "PRECONDITION FAIL: operation record for ${plan_id}/${epic_id} claims git_applied with resulting_sha '${resulting_sha:-<none>}', which is not an ancestor of ${plan_branch} — state/Git divergence, manual reconciliation required." >&2
-      exit 5
-    fi
-    local wrc=0
-    _pfsm_record_merged "$plan_id" "$epic_id" "$resulting_sha" "$cur_status" || wrc=$?
-    [[ "$wrc" -ne 0 ]] && exit "$wrc"
-    local crc=0
-    plan_op_commit "$plan_id" "$op_id" || crc=$?
-    if [[ "$crc" -ne 0 ]]; then
-      echo "PRECONDITION FAIL: could not record epic-merge-to-plan state_committed for ${epic_id} (rc=${crc})." >&2
-      exit "$crc"
-    fi
-    _pfsm_plan_state_set "$plan_id" "EPIC_INTEGRATION" || true
-    _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$resulting_sha"
-  fi
-
-  # ── Already merged: converge, never a second merge commit ────────────────
-  if _pfsm_is_ancestor "$tree_root" "$task_tip" "$plan_branch"; then
-    local proven=""
-    if [[ -n "$recorded_mc" ]] && _pfsm_is_ancestor "$tree_root" "$recorded_mc" "$plan_branch"; then
-      proven="$recorded_mc"
-    else
-      proven="$(_pfsm_find_merge_commit "$tree_root" "$task_branch" "$plan_branch")" || proven=""
-    fi
-    if [[ -z "$proven" ]]; then
-      echo "PRECONDITION FAIL: unproven_merge — ${task_branch} is contained in ${plan_branch} but through no merge commit (fast-forward or identical tip), so there is nothing to record as ancestry proof." >&2
-      exit 1
-    fi
-    # Unreachable belt: cur_status == merged_to_plan already returned above.
-    if [[ "$cur_status" == "merged_to_plan" && "$recorded_mc" == "$proven" ]]; then
-      _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$proven"
-    fi
-    local brc=0
-    plan_op_begin "$plan_id" "$op_id" "epic-merge-to-plan" "$epic_id" "$plan_head" || brc=$?
-  _pfsm_crash_seam intent
-    if [[ "$brc" -ne 0 ]]; then
-      echo "PRECONDITION FAIL: could not record epic-merge-to-plan intent for ${epic_id} (rc=${brc})." >&2
-      exit "$brc"
-    fi
-    plan_op_mark_git_applied "$plan_id" "$op_id" "$proven" >/dev/null 2>&1 || true
-    local wrc=0
-    _pfsm_record_merged "$plan_id" "$epic_id" "$proven" "$cur_status" || wrc=$?
-    [[ "$wrc" -ne 0 ]] && exit "$wrc"
-    local crc=0
-    plan_op_commit "$plan_id" "$op_id" || crc=$?
-    if [[ "$crc" -ne 0 ]]; then
-      echo "PRECONDITION FAIL: could not record epic-merge-to-plan state_committed for ${epic_id} (rc=${crc})." >&2
-      exit "$crc"
-    fi
-    _pfsm_plan_state_set "$plan_id" "EPIC_INTEGRATION" || true
-    _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$proven"
-  fi
-
-  # ── The real merge ───────────────────────────────────────────────────────
-  local brc=0
-  plan_op_begin "$plan_id" "$op_id" "epic-merge-to-plan" "$epic_id" "$plan_head" || brc=$?
-  if [[ "$brc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: could not record epic-merge-to-plan intent for ${epic_id} (rc=${brc})." >&2
-    exit "$brc"
-  fi
-
-  local lock_path; lock_path="$(_pfsm_plan_lock_path "$plan_id")"
-  aid_lock_acquire "$lock_path" "$AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S" || {
-    echo "PRECONDITION FAIL: could not acquire plan lock for ${plan_id}." >&2
-    exit 3
-  }
-  local fd="$AID_LOCK_FD"
-
-  # Re-read the plan head under the lock — the same concurrent-writer guard,
-  # now against a racer that moved the branch since the pre-lock read.
-  local locked_head=""
-  locked_head="$(git -C "$tree_root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || locked_head=""
-  if [[ "$locked_head" != "$plan_head" ]]; then
-    aid_lock_release "$fd"
-    echo "PRECONDITION FAIL: ${plan_branch} moved from ${plan_head} to ${locked_head:-<gone>} while acquiring the lock — retry." >&2
-    exit 1
-  fi
-
-  local orig_branch=""
-  orig_branch="$(git -C "$tree_root" symbolic-ref --short HEAD 2>/dev/null)" || orig_branch=""
-
-  if ! git -C "$tree_root" checkout -q "$plan_branch" >/dev/null 2>&1; then
-    aid_lock_release "$fd"
-    echo "PRECONDITION FAIL: cannot check out ${plan_branch} (checked out in another worktree?) — nothing merged, op stays at intent." >&2
-    exit 1
-  fi
-
-  local merge_out="" mrc=0
-  merge_out="$(git -C "$tree_root" merge --no-ff --no-edit \
-    -m "merge(epic): ${epic_id} into ${plan_branch}" "$task_branch" 2>&1)" || mrc=$?
-
-  if [[ "$mrc" -ne 0 ]]; then
-    # Error Handling: NOT every merge failure is a conflict. A real conflict
-    # leaves evidence behind — a MERGE_HEAD, or unmerged (stage != 0) index
-    # entries — and is fixed by resolving it. Everything else (an untracked
-    # file that would be overwritten, a refusing hook, an unreadable index)
-    # leaves nothing to abort and no conflict to resolve, so it must NOT be
-    # reported as one and must NOT drive the plan to CONFLICT: an automated
-    # controller branching on exit 4 would run a conflict-resolution path
-    # against an operator-hygiene problem `git merge --abort` cannot fix.
-    local git_dir="" is_conflict=0
-    git_dir="$(git -C "$tree_root" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || git_dir=""
-    if [[ -n "$git_dir" && -f "${git_dir}/MERGE_HEAD" ]]; then
-      is_conflict=1
-    elif [[ -n "$(git -C "$tree_root" ls-files --unmerged 2>/dev/null)" ]]; then
-      is_conflict=1
-    fi
-
-    if [[ "$is_conflict" -eq 1 ]]; then
-      local abort_out="" arc=0
-      abort_out="$(git -C "$tree_root" merge --abort 2>&1)" || arc=$?
-      if [[ "$arc" -ne 0 ]]; then
-        echo "ERROR: 'git merge --abort' failed (rc=${arc}) in ${tree_root} — that tree is STILL mid-merge and needs manual cleanup:" >&2
-        printf '%s\n' "$abort_out" >&2
-      fi
-    fi
-
-    # Loud, never swallowed: if HEAD cannot go back, say where it really is.
-    _pfsm_restore_head "$tree_root" "$orig_branch" || true
-    aid_lock_release "$fd"
-    # `aborted` has no public plan_op_* setter (the library exposes begin /
-    # git_applied / commit only); the append helper is the single writer for
-    # every phase, so it is used directly here rather than hand-rolling a
-    # second, unlocked JSONL writer.
-    _plan_op_append "$plan_id" "$op_id" "epic-merge-to-plan" "$epic_id" "aborted" "" "" || true
-
-    if [[ "$is_conflict" -eq 1 ]]; then
-      _pfsm_plan_state_set "$plan_id" "CONFLICT" || true
-      echo "MERGE CONFLICT: ${task_branch} does not merge cleanly into ${plan_branch} — plan state is CONFLICT, no completion recorded, ${plan_branch} unchanged." >&2
-      printf '%s\n' "$merge_out" >&2
-      exit 4
-    fi
-
-    echo "MERGE FAILED (not a conflict): git refused to merge ${task_branch} into ${plan_branch} — no MERGE_HEAD and no unmerged index entries, so there is nothing to resolve or abort. The plan state is left where it was, no completion recorded, ${plan_branch} unchanged; fix the repository condition git names below and re-run." >&2
-    printf '%s\n' "$merge_out" >&2
-    exit 1
-  fi
-
-  local merge_commit=""
-  merge_commit="$(git -C "$tree_root" rev-parse "$plan_branch" 2>/dev/null)" || merge_commit=""
-  # A failed restore does not invalidate the merge that just landed, but it is
-  # never silent — the operator is told where HEAD actually is.
-  _pfsm_restore_head "$tree_root" "$orig_branch" || true
-  aid_lock_release "$fd"
-
-  if [[ -z "$merge_commit" || "$merge_commit" == "$plan_head" ]]; then
-    echo "PRECONDITION FAIL: ${plan_branch} did not advance to a new merge commit (still ${plan_head}) — refusing to record a merge that produced nothing." >&2
-    exit 5
-  fi
-
-  local grc=0
-  plan_op_mark_git_applied "$plan_id" "$op_id" "$merge_commit" || grc=$?
-  _pfsm_crash_seam git_applied
-  if [[ "$grc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: merge ${merge_commit} created but could not record git_applied (rc=${grc}) — retry converges." >&2
-    exit "$grc"
-  fi
-
-  # Ancestry proof — the ONLY accepted evidence, checked against Git itself
-  # rather than against what we believe we just did.
-  if ! _pfsm_is_ancestor "$tree_root" "$merge_commit" "$plan_branch"; then
-    echo "PRECONDITION FAIL: ${merge_commit} is not an ancestor of ${plan_branch} after the merge — state/Git divergence, manual reconciliation required." >&2
-    exit 5
-  fi
-
-  local wrc=0
-  _pfsm_record_merged "$plan_id" "$epic_id" "$merge_commit" "$cur_status" || wrc=$?
-  [[ "$wrc" -ne 0 ]] && exit "$wrc"
-
-  local crc=0
-  plan_op_commit "$plan_id" "$op_id" || crc=$?
-  if [[ "$crc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: could not record epic-merge-to-plan state_committed for ${epic_id} (rc=${crc})." >&2
-    exit "$crc"
-  fi
-
-  _pfsm_plan_state_set "$plan_id" "EPIC_INTEGRATION" || true
-
-  # ── P090 Step 3: continue the plan, if the plan is autonomous ────────────
-  # The merge is DONE and recorded above; nothing below can undo it, and
-  # nothing below is allowed to change this command's exit code, which reports
-  # the merge and only the merge.
-  #
-  # THE BOUNDARY AT :89-92 IS INTACT. This command still does not write the
-  # queue. It hands control to `aid-plan-continue.sh`, a separate program that
-  # establishes its OWN ancestry proof before it mirrors anything — so the
-  # queue write remains something a program earned, not something the merge
-  # path asserted.
-  #
-  # IMPLICIT, NOT OPT-IN. If continuing needed a flag, the main path would stay
-  # callable without it and "nobody has to remember" would be false the first
-  # time somebody typed the command by hand. The plan's own `autonomy` field
-  # decides; `--no-continue` overrides it, `--continue` forces it for a manual
-  # plan.
-  #
-  # Through the SAME door as the five convergence exits above — see
-  # _pfsm_merge_success for why there is only one.
-  _pfsm_merge_success "$project_root" "$plan_id" "$epic_id" "$continue_opt" "$merge_commit"
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_merge_success <project_root> <plan_id> <epic_id> <continue_opt> <sha>
-# (P090 Step 3.) THE one way `epic-merge-to-plan` succeeds.
-#
-# It exists because the command has SIX successful exits, not one: a fresh
-# merge, and five convergence paths (already merged_to_plan; the task branch
-# gone but the recorded merge still proven; a crash resumed from an operation
-# record at git_applied; the unreachable belt; and the tip already contained in
-# the plan branch). The first cut wired the continuation into the fresh-merge
-# exit alone — which left the two paths a resumed or re-run controller actually
-# takes (the crash recovery and the "already contained" convergence) silently
-# back on "somebody has to remember", in exactly the situation P090 exists for.
-# Routing every success through here makes that impossible to forget again, and
-# test-plan-continue.bats asserts that no `exit 0` in the command bypasses it.
-#
-# Prints the SHA on stdout first — that is this command's contract and nothing
-# below may disturb it — then hands over. Never returns.
-# ---------------------------------------------------------------------------
-_pfsm_merge_success() {
-  local root="$1" plan_id="$2" epic_id="$3" opt="$4" sha="$5"
-  printf '%s\n' "$sha"
-  _pfsm_maybe_continue "$root" "$plan_id" "$epic_id" "$opt"
-  exit 0
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_maybe_continue <project_root> <plan_id> <epic_id> <continue_opt>
-# (P090 Step 3.) <continue_opt> is "", "yes" or "no".
-#
-# Best-effort by construction: the merge it follows has already landed and been
-# recorded, so a continuation that cannot run must be VISIBLE and must not turn
-# a successful merge into a failure. Always returns 0.
-# ---------------------------------------------------------------------------
-_pfsm_maybe_continue() {
-  local root="$1" plan_id="$2" epic_id="$3" opt="$4"
-
-  if [[ "$opt" == "no" ]]; then
-    echo "continue: skipped (--no-continue)." >&2
-    return 0
-  fi
-
-  if [[ "$opt" != "yes" ]]; then
-    # The plan-level flag, read from the file — never from the environment, and
-    # never from the run record, which by this point has already removed its own
-    # entry (aid-fsm.sh:286).
-    local autonomy=""
-    autonomy="$(plan_state_get "$plan_id" autonomy 2>/dev/null)" || autonomy=""
-    if [[ -z "$autonomy" ]]; then
-      # ABSENCE IS NOT "manual". Every plan started before P090 has no field —
-      # and reading that as manual meant a project with `autonomous_mode: true`
-      # silently stopped after every EPIC, which is exactly what P090 set out to
-      # end (WAN P099, started 2026-08-27, reported the same day: field absent,
-      # config `autonomous_mode: true`, plan stopped after each EPIC anyway).
-      # Fall back to the project's own setting — the SAME function `plan-start`
-      # uses when it stamps the field in the first place.
-      autonomy="$(aid_autonomous_mode "$root" 2>/dev/null)" || autonomy="manual"
-      echo "continue: ${plan_id} predates the plan-level autonomy flag; using the project setting (${autonomy}). Stamp it with: aid-plan-fsm.sh plan-state ${plan_id} --set-autonomy auto|manual" >&2
-    fi
-    if [[ "$autonomy" != "auto" ]]; then
-      return 0
-    fi
-  fi
-
-  local cont="${SCRIPT_DIR}/aid-plan-continue.sh"
-  if [[ ! -x "$cont" && ! -f "$cont" ]]; then
-    echo "continue: ${cont} is missing — the merge landed, but the plan did not advance." >&2
-    return 0
-  fi
-
-  echo "continue: advancing ${plan_id} after ${epic_id}…" >&2
-  bash "$cont" "$plan_id" "$epic_id" --project-root "$root" >&2 || {
-    echo "continue: aid-plan-continue.sh did not advance ${plan_id} (see above). The merge itself is recorded and unaffected." >&2
-  }
-  return 0
 }
 
 # =============================================================================
@@ -5229,6 +3953,22 @@ _pfsm_finalize_gates_body() {
   if (( vo_n == 0 )); then echo "INFO [verification_only_removed] the plan marks no verification-only test" >&2
   else echo "PASS [verification_only_removed] ${vo_n} marked path(s), none present on the candidate" >&2; fi
 
+  # ── A test the plan adds is named after what it guards, not after the plan ─
+  local tn_out tn_rc=0 tn_file tn_name
+  tn_out="$(aid_test_names_plan_refs "$troot" "$base_commit")" || tn_rc=$?
+  if (( tn_rc != 0 )); then
+    if (( tn_rc == 1 )); then
+      while IFS=$'\t' read -r tn_file tn_name; do
+        echo "FAIL [test_named_after_plan] ${tn_file}: \"${tn_name}\" — name the behaviour it guards; the plan, finding or backlog number belongs in the commit message" >&2
+      done <<<"$tn_out"
+    else
+      echo "FAIL [test_named_after_plan] cannot diff ${base_commit} against the candidate — the names of the added tests were not checked" >&2
+    fi
+    echo "PRECONDITION FAIL: plan-finalize --stage gates: test names to fix first — no gates were run." >&2
+    return 1
+  fi
+  echo "PASS [test_named_after_plan] no added test is named after a plan, finding or backlog item" >&2
+
   local run_dir_abs="${root}/${run_dir_rel}"
   local report_file="${run_dir_abs}/gates_report.json"
   local timeline_file="${run_dir_abs}/timeline.jsonl"
@@ -5538,9 +4278,6 @@ _pfsm_review_required_outputs() {
   printf '%s\n' acceptance-evidence.json gates_report.json plan-diff.json review-profile.json \
     semantic-review-final.json cp7/rounds.json release-decision.json
 }
-
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -6371,10 +5108,6 @@ _pfsm_seal_plan_final_close_evidence() {
   [[ "$actual_hash" == "$expected_hash" ]] || { echo "PRECONDITION FAIL: durable close evidence receipt read-back differs after sealing ${ref}." >&2; return 1; }
   printf '%s|%s|%s' "$ref" "$commit" "$expected_hash"
 }
-
-
-
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -7602,51 +6335,6 @@ _pfsm_close_marker_path() {
   printf '%s/plan-close-complete' "$(dirname "$(plan_state_path "$1")")"
 }
 
-# _pfsm_lock_held <path> — 0 iff a non-blocking flock acquire FAILS, i.e. the
-# advisory lock is still held by a live open file description. Existence of the
-# sidecar is deliberately NOT the signal (flock releases on descriptor close,
-# not on unlink, so the sidecars persist by design).
-_pfsm_lock_held() {
-  local p="$1" fd
-  command -v flock >/dev/null 2>&1 || return 1
-  [[ -e "$p" ]] || return 1
-  exec {fd}<>"$p" 2>/dev/null || return 1
-  if flock -n "$fd" 2>/dev/null; then
-    flock -u "$fd" 2>/dev/null || true
-    eval "exec ${fd}>&-" 2>/dev/null || true
-    return 1
-  fi
-  eval "exec ${fd}>&-" 2>/dev/null || true
-  return 0
-}
-
-# _pfsm_close_lock_contended <plan_id> <excluded_path>... — echoes the first
-# RELEVANT sidecar that is still HELD, skipping the excluded canonical paths.
-# Returns 1 when one is contended, 0 when none are. Extracted as its own
-# function so the owned-lock exception is directly testable: the path-scoped
-# nature of the exclusion (case c: a different lock held by the SAME process
-# still blocks) cannot be exercised through a subprocess.
-_pfsm_close_lock_contended() {
-  local plan_id="$1"; shift
-  local -a excl=("$@")
-  local dir; dir="$(dirname "$(plan_state_path "$plan_id")")"
-  [[ -d "$dir" ]] || return 0
-  local lp e skip canon
-  while IFS= read -r lp; do
-    [[ -n "$lp" ]] || continue
-    canon="$(readlink -f -- "$lp" 2>/dev/null || printf '%s' "$lp")"
-    skip=0
-    for e in ${excl[@]+"${excl[@]}"}; do
-      [[ "$canon" == "$(readlink -f -- "$e" 2>/dev/null || printf '%s' "$e")" ]] && skip=1
-    done
-    [[ "$skip" -eq 1 ]] && continue
-    if _pfsm_lock_held "$lp"; then
-      printf '%s (pid recorded in the sidecar: %s)' "$lp" "$(tr -d '\n' < "$lp" 2>/dev/null || echo unknown)"
-      return 1
-    fi
-  done < <(find "$dir" -maxdepth 1 -name '*.lock' 2>/dev/null | sort)
-  return 0
-}
 
 # _pfsm_admin_close_evidence <root> <plan_id>
 #   Echoes every piece of plan-final EVIDENCE that exists for this plan; echoes
@@ -7717,72 +6405,6 @@ _pfsm_admin_close_evidence() {
   printf '%s' "$found"
 }
 
-# _pfsm_admin_close_blockers <close_check_output>
-#   Echoes every line that BLOCKS an administrative close; echoes nothing when
-#   the close may proceed. THE classifier — cmd_plan_close calls it, and the
-#   test suite calls this same function rather than a copy of its logic.
-#
-#   The check emits three prefixes and nothing else: `PASS  [checkN]`,
-#   `INFO  [checkN]`, `FAIL  [checkN]` (aid-plan-close-check.sh:194-196).
-#     · PASS / INFO      — not a blocker.
-#     · FAIL + absence   — the plan never produced this. Not a blocker.
-#     · FAIL + anything  — something is WRONG. Blocker.
-#     · any other line   — an output shape this does not know. BLOCKER.
-#
-#   That last rule is the one an earlier cut got backwards: it filtered for
-#   lines containing FAIL or checkN and SKIPPED everything else, so a line like
-#   `ERROR: frozen candidate abc123 has a negative plan-final verdict: fail`
-#   was neither classified nor refused and the close proceeded (Codex,
-#   2026-09-02). Unknown means unknown, and unknown refuses.
-_pfsm_admin_close_blockers() {
-  local ccout="${1-}" line bad=""
-  while IFS= read -r line; do
-    [[ -n "${line//[[:space:]]/}" ]] || continue
-    # CONTENT IS READ BEFORE THE PREFIX.
-    # Classifying by prefix first meant a refusal wearing an INFO label went
-    # through untouched — Codex, 2026-09-02:
-    #   INFO [check5] frozen candidate abc123 has a negative plan-final verdict: fail
-    # `_info` is not supposed to carry a refusal (only `_fail` sets the check's
-    # own exit code), but "supposed to" is not a guard. The words a refusal is
-    # made of block the close whatever severity is stamped on them. An INFO line
-    # that merely mentions one of them blocks too — for an operation this rare,
-    # a needless refusal costs a sentence and the other direction costs the
-    # whole point of the flag.
-    case "$line" in
-      *";"*|*" verdict"*|*"ancestry"*|*"unparseable"*|*"non-terminal"*|*"status:pending"*)
-        case "$line" in
-          "PASS "*|"INFO "*) bad+="  · ${line}"$'\n'; continue ;;
-        esac ;;
-    esac
-    case "$line" in
-      "PASS "*|"INFO "*) continue ;;
-      "FAIL "*)
-        # A COMPOSITE LINE IS NEVER AN ABSENCE.
-        # The allowlist matches substrings, so a line carrying an absence phrase
-        # AND a refusal was skipped whole — Codex, 2026-09-02:
-        #   FAIL  [check5] the plan-final candidate binding is gone; frozen
-        #   candidate abc123 has a negative plan-final verdict: fail
-        # A real absence is one short statement. A line that also carries a
-        # second clause, or any of the words a REFUSAL is made of, is judged as
-        # the refusal it contains — the direction that cannot lose one.
-        case "$line" in
-          *";"*|*" verdict"*|*"ancestry"*|*"unparseable"*|*"non-terminal"*|*"status:pending"*)
-            bad+="  · ${line}"$'\n'; continue ;;
-        esac
-        case "$line" in
-          *"there is nothing to close against"*|\
-          *"the plan-final candidate binding is gone"*|\
-          *"does not exist and no valid durable close-evidence"*|\
-          *"report never generated"*|\
-          *"the lifecycle layer resolves to"*|\
-          *"has no Head field"*) continue ;;
-        esac
-        bad+="  · ${line}"$'\n' ;;
-      *) bad+="  · ${line}"$'\n' ;;
-    esac
-  done <<< "$ccout"
-  printf '%s' "$bad"
-}
 
 cmd_plan_close() {
   local plan_id="" project_root_opt="" op_id_opt=""
@@ -10736,115 +9358,13 @@ cmd_plan_scratch() {
   return 0
 }
 
-# ===========================================================================
-# cmd_next_epic <plan_id> [--project-root <path>]  (P090 Step 2)
-#
-# ASK the queue what a claim would take — and take nothing. This is the READ
-# half of the split introduced in `lib/aid-queue-write.sh` (`queue_peek_next`),
-# surfaced as a plan-FSM subcommand so a controller can ask in one line and so
-# the answer leaves a trace.
-#
-# WHY IT IS ITS OWN SUBCOMMAND, and not folded into `epic-merge-to-plan`:
-# the one-way edge this file declares at the top (neither `epic-start` nor
-# `epic-merge-to-plan` writes the queue; the manifest is the authority and the
-# queue a derived view) exists to keep producer and consumer from forming a
-# cycle. `next-epic` respects it by being a pure READ: it never writes the
-# queue, and the claim still happens where it always did.
-#
-# WHY IT IS A SUBPROCESS CALL and not a `source`: pulling the queue WRITER's
-# functions into this file's namespace would put `queue_set_status` and
-# `queue_claim_next` one typo away from every command here — precisely the
-# edge the header forbids. A subprocess gets the read and nothing else.
-#
-# Exit codes are the ones `claim-next` already uses (skills/pipeline.md carries
-# the table), so two questions this similar never answer differently:
-#   0  printed <epic_id>                — there is work
-#   1  printed `blocked:<id>:<reason>`  — nothing claimable; NOT an error
-#      or `none`
-#   2  bad plan_id or usage
-#   3  the queue lock was unavailable, or the timeline write failed. NEVER to
-#      be read as `none`: "I could not look" ending a plan is the one failure
-#      mode this whole plan exists to prevent.
-# ===========================================================================
-cmd_next_epic() {
-  local plan_id="" root_arg=""
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --project-root) root_arg="${2:-}"; shift 2 ;;
-      -*) echo "ERROR: next-epic: unknown option: $1" >&2; return 2 ;;
-      *)  if [[ -z "$plan_id" ]]; then plan_id="$1"; shift
-          else echo "ERROR: next-epic: unexpected argument: $1" >&2; return 2; fi ;;
-    esac
-  done
-
-  if [[ -z "$plan_id" ]]; then
-    echo "ERROR: next-epic: usage: aid-plan-fsm.sh next-epic <plan_id> [--project-root <path>]" >&2
-    return 2
-  fi
-  if ! _pfsm_validate_plan_id "$plan_id"; then
-    echo "ERROR: next-epic: '${plan_id}' is not a plan id (expected P<NNN>)." >&2
-    return 2
-  fi
-
-  local root; root="$(_pfsm_resolve_project_root "$root_arg")"
-  export AID_PLAN_STATE_PROJECT_ROOT="$root"
-
-  # A well-formed id for a plan that does not exist is NOT an empty queue.
-  # Without this check `next-epic P999` prints `none`, and `none` is the word a
-  # continuation loop reads as "this plan is finished" (Codex review, EPIC 1).
-  # A plan that exists but has no queue entries still answers `none` — that is
-  # the documented edge case, and the two are told apart by the plan-state file
-  # `plan-start` writes, not by the queue.
-  if [[ ! -f "$(plan_state_path "$plan_id")" ]]; then
-    echo "ERROR: next-epic: no plan-state for ${plan_id} in ${root} — that plan was never started here. Refusing to answer 'none' for a plan that does not exist." >&2
-    return 2
-  fi
-
-  local out rc=0
-  out="$(bash "${SCRIPT_DIR}/lib/aid-queue-write.sh" peek-next "$plan_id" \
-          --project-root "$root")" || rc=$?
-
-  # rc 3 (or anything unexpected) is reported AS a failure, with no result
-  # line: a caller that saw `none` here would conclude the plan is finished.
-  # rc 0 and 1 are the only codes that carry an answer, and both always print
-  # one — so there is no "succeeded but said nothing" case to guard against.
-  if [[ "$rc" -ne 0 && "$rc" -ne 1 ]]; then
-    echo "ERROR: next-epic: could not read the queue for ${plan_id} (aid-queue-write.sh peek-next exited ${rc})." >&2
-    return 3
-  fi
-
-  # The trace, through the SHARED plan-timeline writer (lib/aid-stage-log.sh),
-  # so this event carries the same `ts` field as every other event in the same
-  # file — a hand-rolled copy here stamped `at`, and anything reading the
-  # timeline by time would have skipped it.
-  #
-  # Unlike the best-effort timeline writes elsewhere in this file, a failure is
-  # fatal (rc 3): the whole point of the subcommand is that WHY a plan continued
-  # — or stopped — is recoverable afterwards, and an answer nobody recorded
-  # cannot serve that. What is checked is that the timeline has a writable HOME;
-  # `log_event`'s own contract is that it never fails a pipeline, so the append
-  # itself is not a second failure mode to test for.
-  local tl
-  if ! tl="$(aid_plan_timeline "$root" "$plan_id")"; then
-    echo "ERROR: next-epic: read ${out} for ${plan_id} but could not open ${root}/.aid-o/work/evidence/${plan_id}/timeline.jsonl — reporting a failure rather than an unrecorded answer." >&2
-    return 3
-  fi
-  log_event "$tl" "queue_peek" "plan_id=${plan_id}" "result=${out}"
-
-  printf '%s\n' "$out"
-  return "$rc"
-}
-
 _aid_plan_fsm_usage() {
   cat <<'EOF'
 Usage: aid-plan-fsm.sh <subcommand> [args...]
 
 Subcommands:
   plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode [--autonomy auto|manual] [--project-root <path>] [--op-id <id>]
-  epic-start <plan_id> <epic_id> [--run-id <id>] [--project-root <path>] [--op-id <id>]
-  epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]
-  epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--continue|--no-continue] [--project-root <path>] [--op-id <id>]
-  next-epic <plan_id> [--project-root <path>]
+  epic-complete <plan_id> <epic_id> --direct | --abandon --reason <text> [--project-root <path>] [--op-id <id>]
   plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary|accept-ancillary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
   plan-record-decision <plan_id> MERGE|FIX|ABORT --by <who> [--reason <text>] [--project-root <path>]
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
@@ -10854,61 +9374,6 @@ Subcommands:
   inventory [--apply] [--plan <id>] [--project-root <path>]
   plan-state <plan_id> [--repair] [--recreate-worktree --reason <text>] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]
 EOF
-}
-
-
-# ---------------------------------------------------------------------------
-# cmd_epic_base <plan_id> <epic_id> [--project-root <dir>]
-# Read-only: print the EPIC's recorded cut point (`epic_base_commit`) from the
-# plan-boundary manifest, after proving the entry is one we may trust.
-#
-# Why this exists (2026-09-02, WAN report). `aid-json-to-run.sh` used to write
-# each EPIC's fsm-state `base_commit` from `git rev-parse HEAD` in whatever
-# checkout generation ran in — for a plan_branch plan generated from the
-# primary checkout that is main's head, which is not on the plan branch at
-# all. The plan then could not advance itself: reconciliation refused EPIC 2
-# because its base was not an ancestor of anything it could explain.
-#
-# The right value is NOT "the task branch's current head" either. On a resume
-# (branch exists and already carries EPIC commits) that would collapse every
-# `base_commit..HEAD` range the FSM computes — gate profile, production paths,
-# review scope — to empty. The invariant is the EPIC's recorded CUT POINT, and
-# the manifest is the only place that records it. The two coincide only for a
-# freshly cut branch, which is exactly why using the head looked correct.
-#
-# Deliberately undocumented in the usage text: a resolver other scripts
-# consult, not an operator command.
-# ---------------------------------------------------------------------------
-cmd_epic_base() {
-  local plan_id="${1:-}" epic_id="${2:-}"
-  shift 2 2>/dev/null || true
-  local project_root=""
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --project-root) project_root="${2:-}"; shift 2 ;;
-      *) shift ;;
-    esac
-  done
-  [[ -n "$plan_id" && -n "$epic_id" ]] || {
-    echo "usage: aid-plan-fsm.sh epic-base <plan_id> <epic_id> [--project-root <dir>]" >&2; return 2; }
-  local root; root="$(_pfsm_resolve_project_root "$project_root")" || return 2
-
-  local entry_json="" erc=0
-  entry_json="$(plan_manifest_get "$plan_id" ".plan_boundary_manifest.epic_runs[] | select(.epic_id==\"${epic_id}\")")" || erc=$?
-  if [[ "$erc" -ne 0 ]]; then
-    echo "PRECONDITION FAIL: manifest for ${plan_id} is corrupt or unreadable — refusing to guess ${epic_id}'s base." >&2
-    return 1
-  fi
-  if [[ -z "$entry_json" ]]; then
-    echo "PRECONDITION FAIL: ${plan_id}'s manifest has no entry for ${epic_id}, so no base was ever recorded for it." >&2
-    return 1
-  fi
-
-  # Proves lineage, source ref, a recorded base, and that the branch really is
-  # cut where the manifest says. Same authority epic-start itself uses.
-  _pfsm_verify_epic_lineage "$root" "$plan_id" "$epic_id" "task/${epic_id}/main" "$entry_json" >/dev/null || return 1
-
-  jq -r '.epic_base_commit' <<<"$entry_json"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -10964,6 +9429,9 @@ _pr_generation_trace() {
     n="$(plan_manifest_get "$PR_PLAN_ID" '[.plan_boundary_manifest.epic_runs[]? | select(.direct != true) | .epic_id] | join(",")' 2>/dev/null || true)"
     [[ -n "$n" ]] && { echo "a generated EPIC run in the plan manifest (${n})"; return 0; }
   fi
+  # P114: the plan's own entries in the old queue (.aid-o/config/queue.yaml)
+  local qtotal; read -r qtotal _ _ <<< "$(_pfsm_inv_epic_states "$PR_PLAN_ID" "$PR_ROOT")"
+  [[ "${qtotal:-0}" -gt 0 ]] && { echo "${qtotal} entr(ies) of the plan in .aid-o/config/queue.yaml"; return 0; }
   for f in "${PR_ROOT}/.aid-o/tasks/E-${PR_NNN}-"*.md "${PR_ROOT}/.aid-o/tasks/archive/E-${PR_NNN}-"*.md; do
     [[ -e "$f" ]] && { echo "an EPIC file ($(basename "$f"))"; return 0; }
   done
@@ -10987,10 +9455,11 @@ _pr_dead_run() {
 }
 
 _pr_main() {
-  local plan_id="" auto=0 force=false force_reason="" force_init_reason="" project_root_opt=""
+  local plan_id="" auto=0 force=false force_reason="" force_init_reason="" project_root_opt="" restart=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --auto) auto=1; shift ;;
+      --restart) restart=1; shift ;;
       --force) force=true; shift ;;
       --reason) force_reason="${2:-}"; shift 2 ;;
       --force-init-reason) force_init_reason="${2:-}"; shift 2 ;;
@@ -10999,10 +9468,17 @@ _pr_main() {
       *) if [[ -z "$plan_id" ]]; then plan_id="$1"; else echo "ERROR: plan-run: unexpected argument: $1" >&2; exit 2; fi; shift ;;
     esac
   done
-  [[ -n "$plan_id" ]] || { echo "Usage: aid-plan-fsm.sh plan-run <plan_id> [--auto] [--force --reason <text>] [--force-init-reason <text>] [--project-root <dir>]" >&2; exit 2; }
+  [[ -n "$plan_id" ]] || { echo "Usage: aid-plan-fsm.sh plan-run <plan_id> [--auto] [--force --reason <text>] [--restart --reason <text>] [--force-init-reason <text>] [--project-root <dir>]" >&2; exit 2; }
   _pfsm_validate_plan_id "$plan_id" || { echo "ERROR: plan-run: plan_id must match ^P[0-9]{3}\$ (got '${plan_id}')" >&2; exit 2; }
   if [[ "$force" == true && ${#force_reason} -lt 20 ]]; then
     echo "ERROR: plan-run: --force needs --reason of at least 20 characters (the waiver records it)." >&2; exit 2
+  fi
+  if [[ -n "$force_reason" && "$force" != true && "$restart" -ne 1 ]]; then
+    echo "ERROR: plan-run: --reason without --force or --restart records nothing — a reason is refused rather than silently ignored (P073)." >&2; exit 2
+  fi
+  if [[ "$restart" -eq 1 && ${#force_reason} -lt 20 ]]; then
+    echo "ERROR: plan-run: --restart needs --reason of at least 20 characters (the restart record and the audit log carry it); nothing was moved." >&2
+    echo "next: aid-plan-fsm.sh plan-run ${plan_id:-<plan>} --restart --reason \"<why the run starts again, 20+ chars>\"" >&2; exit 2
   fi
 
   # shellcheck source=lib/common.sh
@@ -11032,6 +9508,11 @@ _pr_main() {
   cd "$PR_ROOT" || exit 3   # plan.json's source_plan is relative to the state root
   ev_rel=".aid-o/work/evidence/${PR_EPIC}/${PR_RUN}"; ev_dir="${PR_ROOT}/${ev_rel}"; pj="${ev_dir}/plan.json"
   tx="$(_pr_tx)"; gd="$(dirname "$tx")"
+  # P114: a plan of the removed EPIC path is refused before anything is
+  # created or locked (checked again under the lock below).
+  local trace0; trace0="$(_pr_generation_trace)"
+  [[ -z "$trace0" ]] || _pr_refuse epic_path_removed "${plan_id} was generated the EPIC way: ${trace0} — the EPIC path was removed in AID 3.0.0" \
+    "finish it on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close it (aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" 1
   mkdir -p "$gd" || exit 3
 
   # ── ONE hold for the whole transaction: the generation lock ───────────────
@@ -11044,14 +9525,17 @@ _pr_main() {
   # ── the two roads exclude each other by their artefacts ───────────────────
   local trace dead
   trace="$(_pr_generation_trace)"
-  [[ -z "$trace" ]] || _pr_refuse generation_already_started "${plan_id} was already generated the EPIC way: ${trace} — the two roads never mix on one plan" \
-    "finish it on the old path (/aid-run ${PR_EPIC%_*}_<K>), or close it administratively and write a new plan" 1
+  [[ -z "$trace" ]] || _pr_refuse epic_path_removed "${plan_id} was generated the EPIC way: ${trace} — the EPIC path was removed in AID 3.0.0" \
+    "finish it on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close it (aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" 1
+  # P112: a run that made no step is set aside and the plan runs again
+  PR_RESTART_DIR=""
+  [[ "$restart" -eq 1 ]] && { _pr_restart "$plan" "$force_reason" || exit $?; }
   dead="$(_pr_dead_run)"
   if [[ -n "$dead" ]]; then
     local fw
     fw="$(jq -r '[.repo_roots[]?.worktree] | join(", ")' "$pj" 2>/dev/null || true)"
     _pr_refuse plan_run_already_started "${plan_id}: ${dead}${fw:+ — foreign worktrees to remove by hand: ${fw}}" \
-      "/aid-run --resume ${plan_id}, or close the plan administratively: aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\"" 1
+      "/aid-run --resume ${plan_id}; when the run made no step: aid-plan-fsm.sh plan-run ${plan_id} --restart --reason \"<why, 20+ chars>\"; else close the plan administratively: aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\"" 1
   fi
 
   # ── the transaction file (kind: plan_run) ─────────────────────────────────
@@ -11068,6 +9552,7 @@ _pr_main() {
         authority_sha256:null, phases:{"1": {epic_id:$e, run_id:$r}}, stages:[],
         direct:{epic_id:$e, run_id:$r, repo_roots:[]}, created_at:$now, updated_at:$now}')"
     aid_gen_write_atomic "$tx" "$skel" || exit 3
+    [[ -n "$PR_RESTART_DIR" ]] && aid_gen_tx_update "$plan_id" '.restarted_from = $d' --arg d "${PR_RESTART_DIR#"${PR_ROOT}/"}"
   elif [[ "$(jq -r '.plan_sha256 // ""' "$tx")" != "$plan_sha" ]]; then
     _pr_refuse plan_changed_since_seal "${plan} changed since this plan-run sealed it (recorded $(jq -r '.plan_sha256' "$tx"), now ${plan_sha}) — a run never starts from a plan other than the one CP1 passed" \
       "restore the sealed plan bytes and rerun, or (no run started yet) archive the transaction: mv ${tx} ${tx}.superseded-\$(date +%s), then rerun plan-run — CP1 is consulted again" 1
@@ -11081,6 +9566,16 @@ _pr_main() {
     [[ "$ps_rc" -eq 0 ]] || { echo "ERROR: plan-run: plan-start ${plan_id} failed (rc=${ps_rc}) — see above; nothing else was started." >&2; exit "$ps_rc"; }
   fi
   _pr_stage_done plan_start || _pr_stage_record plan_start
+
+  # The PM's page is a precondition of the run (P086 Step 4; carried over from
+  # the removed EPIC generator by P114): band-independent, so a light plan
+  # cannot slip past it the way it could past the band-scoped CP1 gate. The
+  # turn gate prints the exact render command.
+  if [[ -f "${SCRIPT_DIR}/aid-turn-gate.sh" ]]; then   # every invocation, a resume too: the page can go missing after the seal
+    bash "${SCRIPT_DIR}/aid-turn-gate.sh" --plan "$plan" \
+      || _pr_refuse plan_page_missing "${plan_id} has no current PM page — the page is what the PM reads instead of the plan" \
+           "render it with the command in the line above, then run plan-run again" 1
+  fi
 
   # Stage 2 — readiness (the canonical pre-generation contract), one run.
   if ! _pr_stage_done readiness; then
@@ -11198,8 +9693,152 @@ _pr_main() {
   _pr_stage_done init || _pr_stage_record init
   [[ "$auto" -eq 1 ]] && plan_state_set_autonomy "$plan_id" auto >/dev/null 2>&1 || true
   _pr_stage_record done
+  _pr_restart_done
   echo "plan-run: ${plan_id} runs as ${PR_EPIC} (${PR_RUN}) on plan/${plan_id} — state ${state_file}" >&2
   printf '%s\n' "$state_file"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# plan-run --restart (P112): a direct run that made no step starts again.
+#
+# Refused after any step (restart_after_step), over a plan worktree with work
+# outside a step (restart_plan_dirty), over a foreign worktree that is not
+# clean at its base (restart_foreign_dirty) and while a controller is working
+# (restart_controller_live). Otherwise the old run is abandoned (aid-fsm.sh
+# abandon), audited like supersede-generation (record, timeline event, audit
+# log) and its evidence and transaction are MOVED into
+# .aid-o/work/superseded-runs/<plan>-<ts>/ (outside evidence/, so no reader of
+# runs finds them); plan-run then continues as a first run over the current
+# plan (seal and CP1 gate again). restart.json (moving → moved → done) makes
+# an interrupted restart resume with the same command. Nothing is deleted.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_pr_restart_refuse_foreign() {   # <tx> — the foreign worktrees must be clean at their base
+  local tx="$1" name path wt br base
+  while IFS=$'\t' read -r name path wt br base; do
+    [[ -n "$name" && -d "$wt" ]] || continue
+    if [[ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then
+      _pr_refuse restart_foreign_dirty "repo_roots '${name}': ${wt} has uncommitted changes — a restart would leave them on a branch the new run adopts" \
+        "commit them on a step after a normal resume, or remove them by hand (git -C ${wt} status), then run --restart again" 1
+    fi
+    if [[ -n "$base" ]] && (( $(git -C "$path" rev-list --count "${base}..${br}" 2>/dev/null || echo 0) > 0 )); then
+      _pr_refuse restart_foreign_dirty "repo_roots '${name}': ${br} has commits above its base ${base:0:12} — work the old run made would be taken over silently" \
+        "this run made work: resume it (/aid-run --resume ${PR_PLAN_ID}) or close the plan administratively" 1
+    fi
+  done < <(jq -r '.direct.repo_roots[]? | [.name, .path, .worktree, .branch, (.base // "")] | @tsv' "$tx" 2>/dev/null)
+}
+
+# _pr_restart_finish <dest> — the idempotent part: abandon, audit, move. A
+# rerun after any interruption does what is still missing.
+_pr_restart_finish() {
+  local dest="$1" rj="$1/restart.json" epic run ev_dir state wt tx gd epoch reason ident
+  epic="$(jq -r .from_run.epic_id "$rj")"; run="$(jq -r .from_run.run_id "$rj")"
+  epoch="$(jq -r .epoch "$rj")"; reason="$(jq -r .reason "$rj")"
+  ev_dir="${PR_ROOT}/.aid-o/work/evidence/${epic}/${run}"; state="${ev_dir}/fsm-state.yaml"
+  tx="$(_pr_tx)"; gd="$(dirname "$tx")"
+  wt="$(plan_state_get "$PR_PLAN_ID" worktree_path 2>/dev/null || true)"
+  [[ -n "$wt" && -d "$wt" ]] || wt="${PR_ROOT}/.aid-worktrees/plan-${PR_PLAN_ID}"
+  [[ -d "$wt" ]] || wt="$PR_ROOT"
+  if [[ "$(jq -r .state "$rj")" == moving ]]; then
+    if [[ -f "$state" && "$(yq -r '.abandoned // false' "$state" 2>/dev/null)" != true ]] || [[ ! -f "$state" ]]; then
+      ( cd "$wt" && bash "${SCRIPT_DIR}/aid-fsm.sh" abandon "$state" --reason "restart: ${reason}" --epic "$epic" ) >&2 \
+        || { echo "ERROR: plan-run --restart: the old run ${epic} could not be abandoned (see above); nothing was moved — rerun the same command." >&2; return 1; }
+    fi
+    ident="$(jq -r '[(.plan_sha256 // ""), (.target_head // ""), ((.phase_derivation_version // 0) | tostring), ((.total_phases // 0) | tostring)] | join("|")' "${dest}/$(basename "$tx")" 2>/dev/null || true)"
+    [[ -n "$ident" ]] || ident="$(jq -r '[(.plan_sha256 // ""), (.target_head // ""), ((.phase_derivation_version // 0) | tostring), ((.total_phases // 0) | tostring)] | join("|")' "$tx" 2>/dev/null || true)"
+    aid_gen_supersede_audit "$PR_PLAN_ID" "$(jq -r .plan_path "$rj")" "restart: ${reason}" "$(jq -r .by "$rj")" "$epoch" "$gd" \
+      "$tx" "$(aid_gen_authority_path "$PR_PLAN_ID")" "$ident" '[]' "$PR_ROOT" "$dest" >/dev/null \
+      || { echo "ERROR: plan-run --restart: the restart could not be recorded in the audit trail (see above); nothing was moved — repair the sink and rerun." >&2; return 3; }
+    if [[ -d "$ev_dir" ]]; then mv -- "$ev_dir" "${dest}/evidence-${epic}-${run}" || return 3; fi
+    _pfsm_crash_seam restart_moved_evidence
+    aid_gen_archive_pair "$PR_PLAN_ID" restart "$dest" || return 3
+    _pfsm_crash_seam restart_moved_tx
+    jq '.state = "moved"' "$rj" > "${rj}.tmp" && mv -- "${rj}.tmp" "$rj" || return 3
+  fi
+  PR_RESTART_DIR="$dest"
+}
+
+# _pr_restart <plan> <reason>
+_pr_restart() {
+  local plan="$1" reason="$2" sr="${PR_ROOT}/.aid-o/work/superseded-runs" tx f rj=""
+  tx="$(_pr_tx)"
+  for f in "${sr}/${PR_PLAN_ID}"-*/restart.json; do
+    [[ -f "$f" && "$(jq -r .state "$f" 2>/dev/null)" != done ]] || continue
+    # moved and the new run's transaction complete: that restart is over
+    if [[ "$(jq -r .state "$f")" == moved && -f "$tx" ]] && _pr_stage_done done; then
+      jq '.state = "done"' "$f" > "${f}.tmp" && mv -- "${f}.tmp" "$f"; continue
+    fi
+    rj="$f"
+  done
+  if [[ -n "$rj" ]]; then
+    echo "plan-run --restart: resuming the unfinished restart $(dirname "$rj")" >&2
+    _pr_restart_finish "$(dirname "$rj")"; return $?
+  fi
+  [[ -f "$tx" ]] || { echo "ERROR: plan-run --restart: ${PR_PLAN_ID} has no plan-run transaction and no unfinished restart — nothing to restart." >&2
+    echo "next: aid-plan-fsm.sh plan-run ${PR_PLAN_ID} (a first start)" >&2; return 2; }
+  local epic run ev_dir state why="" cs st wt base cnt
+  epic="$(jq -r '.direct.epic_id // empty' "$tx")"; run="$(jq -r '.direct.run_id // empty' "$tx")"
+  [[ -n "$epic" && -n "$run" ]] || { echo "ERROR: plan-run --restart: ${tx} names no direct run" >&2; return 2; }
+  ev_dir="${PR_ROOT}/.aid-o/work/evidence/${epic}/${run}"; state="${ev_dir}/fsm-state.yaml"
+  # ── after a step? ─────────────────────────────────────────────────────────
+  if [[ -f "$state" ]]; then
+    cs="$(yq -r '.current_step // 0' "$state" 2>/dev/null)"; st="$(yq -r '.state // ""' "$state" 2>/dev/null)"
+    [[ "$cs" =~ ^[0-9]+$ ]] && (( cs > 0 )) && why="current_step is ${cs}"
+    [[ "$st" == DONE ]] && why="the run is DONE"
+  fi
+  [[ -z "$why" && -f "${ev_dir}/timeline.jsonl" ]] \
+    && jq -e -nR 'any(inputs; (try fromjson catch null) as $j | $j != null and $j.event? == "step_commit")' "${ev_dir}/timeline.jsonl" >/dev/null 2>&1 \
+    && why="the timeline records a step_commit"
+  if [[ -z "$why" ]]; then
+    for f in "${ev_dir}"/steps/*/return.json; do
+      [[ -f "$f" ]] && jq -e '(.repo_commits // []) | length > 0' "$f" >/dev/null 2>&1 && { why="a step's return names repo_commits ($(basename "$(dirname "$f")"))"; break; }
+    done
+  fi
+  [[ -z "$why" ]] || _pr_refuse restart_after_step "${epic} made a step (${why}) — a restart would drop that work" \
+    "resume it (/aid-run --resume ${PR_PLAN_ID}), or close the plan administratively (aid-plan-fsm.sh plan-close ${PR_PLAN_ID} --administrative --reason \"<why>\") and write a new plan" 1
+  # ── the plan's own worktree: no work outside a step ───────────────────────
+  wt="$(plan_state_get "$PR_PLAN_ID" worktree_path 2>/dev/null || true)"
+  [[ -n "$wt" && -d "$wt" ]] || wt="${PR_ROOT}/.aid-worktrees/plan-${PR_PLAN_ID}"
+  if [[ -d "$wt" && -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]]; then
+    _pr_refuse restart_plan_dirty "${wt} has uncommitted changes — work outside a step would be taken over by the new run" \
+      "commit or remove them by hand (git -C ${wt} status), then run --restart again" 1
+  fi
+  base="$(plan_manifest_get "$PR_PLAN_ID" ".plan_boundary_manifest.epic_runs[]? | select(.epic_id == \"${epic}\") | .epic_base_commit" 2>/dev/null || true)"
+  if [[ -n "$base" && "$base" != null ]]; then
+    cnt="$(git -C "$PR_ROOT" rev-list --count "${base}..plan/${PR_PLAN_ID}" 2>/dev/null || echo 0)"
+    (( cnt > 0 )) && _pr_refuse restart_plan_dirty "plan/${PR_PLAN_ID} has ${cnt} commit(s) above the run's base ${base:0:12} made outside a step" \
+      "inspect them (git log ${base}..plan/${PR_PLAN_ID}); resume the run, or move them off the branch by hand, then run --restart again" 1
+  fi
+  _pr_restart_refuse_foreign "$tx"
+  # ── the audit sinks first: an archive that cannot be audited never happens ─
+  aid_gen_supersede_audit_preflight "$(dirname "$tx")" || return 3
+  # ── a controller still working ────────────────────────────────────────────
+  local map="${PR_ROOT}/.aid-o/work/active-runs.json" last age
+  if [[ "$(jq -r --arg e "$epic" '.[$e].auto_controller // ""' "$map" 2>/dev/null)" == active ]]; then
+    last="$(tail -n 1 "${ev_dir}/timeline.jsonl" 2>/dev/null | jq -r '.ts // empty' 2>/dev/null)"
+    if [[ -n "$last" ]]; then
+      age=$(( $(date -u +%s) - $(date -u -d "$last" +%s 2>/dev/null || echo 0) ))
+      (( age < 900 )) && _pr_refuse restart_controller_live "${epic} is marked auto_controller: active and its timeline moved ${age} s ago — a controller is still working on it" \
+        "stop it (/aid-stop), wait until it is quiet for 15 minutes, then run --restart again" 1
+    fi
+  fi
+  # ── set aside ─────────────────────────────────────────────────────────────
+  local dest epoch
+  epoch="$(date -u +%s)"; dest="${PR_ROOT}/.aid-o/work/superseded-runs/${PR_PLAN_ID}-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$dest" || return 3
+  jq -n --arg p "$PR_PLAN_ID" --arg r "$reason" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg e "$epic" --arg run "$run" \
+    --arg by "${USER:-unknown}" --arg ep "$epoch" --arg pp "$plan" \
+    '{plan_id: $p, reason: $r, at: $at, from_run: {epic_id: $e, run_id: $run}, by: $by, epoch: $ep, plan_path: $pp, state: "moving"}' > "${dest}/restart.json" || return 3
+  _pr_restart_finish "$dest" || return $?
+  local fw; fw="$(jq -r '[.direct.repo_roots[]?.worktree] | join(", ")' "${dest}/$(basename "$tx")" 2>/dev/null || true)"
+  echo "plan-run --restart: ${epic} set aside in ${dest} (abandoned, audited)${fw:+; foreign worktrees adopted by the new run if the plan still declares them: ${fw}}" >&2
+}
+
+# _pr_restart_done — the new run's transaction is complete: the restart is over.
+_pr_restart_done() {
+  [[ -n "${PR_RESTART_DIR:-}" && -f "${PR_RESTART_DIR}/restart.json" ]] || return 0
+  jq '.state = "done"' "${PR_RESTART_DIR}/restart.json" > "${PR_RESTART_DIR}/restart.json.tmp" \
+    && mv -- "${PR_RESTART_DIR}/restart.json.tmp" "${PR_RESTART_DIR}/restart.json"
 }
 
 # _pr_repo_roots_worktrees <plan.json> — every repo_roots entry gets its
@@ -11243,23 +9882,31 @@ _pr_repo_roots_worktrees() {
 
 cmd_plan_run() { ( _pr_main "$@" ); }
 
+# _pfsm_epic_path_removed <command> — P114: every entry of the removed EPIC
+# path answers the same way, before any lock or write.
+_pfsm_epic_path_removed() {
+  echo "REFUSED (epic_path_removed): '${1}' belonged to the EPIC path, removed in AID 3.0.0 — a plan runs straight from its file as one run (/aid-run P<NNN>)." >&2
+  echo "next: finish an old EPIC run on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close its plan (aid-plan-fsm.sh plan-close P<NNN> --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" >&2
+  echo "(pipeline.md §When AID refuses: epic_path_removed)" >&2
+  exit 2
+}
+
 main() {
   local sub="${1:-}"
   [[ $# -gt 0 ]] && shift
   case "$sub" in
     plan-start) cmd_plan_start "$@" ;;
     plan-run) cmd_plan_run "$@" ;;
-    epic-start) cmd_epic_start "$@" ;;
+    # P114 (3.0.0): the EPIC path's entries refuse with the way out (kept one
+    # release as thin refusals); epic-complete stays for --direct and --abandon.
+    epic-start|epic-merge-to-plan|next-epic|epic-base) _pfsm_epic_path_removed "$sub" ;;
     epic-complete) cmd_epic_complete "$@" ;;
-    epic-merge-to-plan) cmd_epic_merge_to_plan "$@" ;;
-    next-epic) cmd_next_epic "$@" ;;
     plan-finalize) cmd_plan_finalize "$@" ;;
     plan-record-decision) cmd_plan_record_decision "$@" ;;
     plan-merge-to-main) cmd_plan_merge_to_main "$@" ;;
     plan-close) cmd_plan_close "$@" ;;
     plan-rollback) cmd_plan_rollback "$@" ;;
     plan-state) cmd_plan_state "$@" ;;
-    epic-base) cmd_epic_base "$@" ;;
     worktrees)  cmd_worktrees "$@" ;;
     plan-scratch) cmd_plan_scratch "$@" ;;
     inventory) cmd_inventory "$@" ;;

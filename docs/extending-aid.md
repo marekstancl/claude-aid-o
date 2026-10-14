@@ -879,9 +879,9 @@ because a field was empty, you have found the bug this layer exists to prevent.
 
 `plugins/aid-orchestrator/defaults/enforcement-registry.yaml` is the tracked
 authority. Every detection capability you add needs a row there with its type,
-source, severity, surface and verdict, and `test-control-boundary.sh` asserts
-that the required rows exist, that planned rows stay planned, and that the header
-total is derived rather than hand-written.
+source, severity, surface and verdict; `test-enforcement-registry-cites.sh`
+checks that what an active row cites exists, and `test-registry-ttl.bats` that
+the header total is derived rather than hand-written.
 
 ### Roadmap position
 
@@ -1777,14 +1777,11 @@ cross-repo act this repo has no authority to perform). In short:
   applied AFTER redaction, never instead of it. Failing closed here would
   swallow the very message telling the PM a run broke.
 
-`test-integration-handoff-rendering.sh` (t2, **nightly only**) drives all three
-renderers over checked-in fixtures for five delivery cases — finished,
-decision-required, blocked, force-used, and incomplete (facts arrived, prose did
-not). Its goldens record BLOCK ORDER only, so a wording edit inside a block does
-not churn a fixture while a block that moves, vanishes or appears does fail, and
-regeneration is a human act that exits 2 with the diff and never reports a pass.
-Its malicious fixtures carry synthetic secret-shaped strings on purpose, so
-leakage is proven impossible rather than merely absent.
+Each renderer has its own suite (`test-aid-artifact-render.bats`,
+`test-aid-plan-close-summary.bats`, the gate outcome card's cases); the golden
+harness that drove all three over checked-in fixtures was retired in 3.1.1 — its
+byte goldens went stale unnoticed, and what it proved structurally is in those
+suites, secrets redaction included.
 
 One more single-authority repair belongs here. The rule turning the FSM's
 0-based `current_step` into a human "Plan Step N of T" existed as six full prose

@@ -57,10 +57,6 @@ and `.aid-o/work/active-runs.json`, then report what is running and continue.
 `commands/aid-plan.md` § "Working while another plan is live" carries the full
 situation table (missing worktree, unregistered directory, three-plus streams).
 
-One limit worth naming to the PM up front: concurrent plan GENERATION is
-supported; *starting* a newly generated plan's EPIC while another stream is
-live is not yet.
-
 ### Plan Types — Roadmap vs Executable
 
 | Type | What it is | Where it lives | Plan ID? | Runs via /aid-run? |
@@ -209,74 +205,11 @@ When brainstorming produces a multi-phase MVP plan (detected by: 4+ weeks effort
 
 ## Phase Markers
 
-Each phase (EPIC) of a plan is delimited by a phase marker so the pipeline scripts can slice steps correctly. The marker format is:
-
-```
-**EPIC N: Steps M-P — Title**
-```
-
-Where:
-- `N` is the phase number (1, 2, 3, ...)
-- `M` is the first step number in this phase
-- `P` is the last step number in this phase
-- `Title` is a short human-readable label (optional but recommended)
-
-**Example:**
-
-```markdown
-**EPIC 1: Steps 1-4 — Foundation**
-
-### Step 1: ...
-### Step 2: ...
-### Step 3: ...
-### Step 4: ...
-
-**EPIC 2: Steps 5-8 — Feature Build**
-
-### Step 5: ...
-...
-```
-
-**Backlog phase** (declared, not required for closing the plan): `**EPIC N / Backlog: Title**`.
-
-Every plan carries these lines, a single-phase plan too (`**EPIC 1: Steps 1-N — Title**`): plan-start writes the plan's lifecycle manifest from them (`lib/aid-lifecycle.sh` `aid_lifecycle_parse_legacy_epics`) and refuses a plan without them, or with an EPIC line in any other form (`**EPIC 1**` without a colon included). `aid-plan-lint.sh` reports it before review.
-
-**Rules:**
-
-| Scenario | Rule |
-|----------|------|
-| Any plan | MUST include a phase marker per phase, numbered 1..K in order — a single-phase plan has one |
-| Marker placement | Place each marker on its own line, immediately before the first step of that phase |
-| Step numbering | Step numbers in the marker range MUST match actual `### Step N:` headers; ranges with gaps are invalid |
-
-**Do NOT use these formats — they will not be parsed:**
-
-```markdown
-# WRONG — uses heading syntax instead of bold text
-## Phase 1: Foundation
-### Phase 2: Build
-
-# WRONG — uses dash list and wrong keyword
-- Phase 1: Steps 1-4
-
-# WRONG — missing asterisks, not bold
-EPIC 1: Steps 1-4
-*EPIC 1: Steps 1-4*
-
-# WRONG — uses "Phase" keyword instead of "EPIC"
-**Phase 1: Steps 1-4 — Foundation**
-
-# WRONG — missing colon between EPIC N and Steps
-**EPIC 1 Steps 1-4**
-```
-
-**Why format matters:** The `aid-plan-to-epic.sh` script uses a bash regex to identify phase boundaries:
-
-```
-^\*\*EPIC[[:space:]]+([0-9]+)(:[[:space:]]+Steps[[:space:]]+([0-9]+)-([0-9]+))?
-```
-
-Only lines that match this regex are recognised as phase markers. Any other format is silently ignored, causing the script to fall back to even step distribution across phases — which produces incorrect EPIC splits when steps are not evenly distributed.
+A plan runs as ONE run since 3.0.0 (P114): there are no phases to slice. Lines
+like `**EPIC N: Steps M-P — Title**` that older plans carry are **ignored** —
+`aid-plan-lint.sh` names them in one ADVISORY line ("EPIC markers … are ignored
+since AID 3.0.0") and nothing reads them. A new plan does not write them; split
+a plan too big for one run into separate plans instead.
 
 ---
 
@@ -309,8 +242,8 @@ take it "via amend-scope" — does not work: amend-scope refuses an undeclared a
 the lint reports it.
 
 **Files-entry grammar (enforced — `aid-plan-lint.sh` runs at plan write time AND as a
-hard pre-flight in `aid-plan-to-epic.sh`; a violation stops generation with the exact
-line).** Each Files bullet MUST be exactly:
+hard pre-flight of `plan-run` (readiness); a violation stops the run's start with the
+exact line).** Each Files bullet MUST be exactly:
 
 ```
 - <Create|Modify|Test|Rewrite>: `path` [ + `path`]* [(lines ~N-M)] [(tier: t0|t1|t2)] [— prose]
@@ -321,7 +254,7 @@ line).** Each Files bullet MUST be exactly:
 - The only parentheticals allowed before the `—` are a `(lines ~N-M)` range and a
   `(tier: t0|t1|t2)` declaration; put every other note AFTER the `—`.
 - A `Test:` bullet naming a suite that **does not exist yet** MUST declare its tier.
-  Generation refuses without it (`aid-plan-to-epic.sh`), because a portfolio that can
+  `plan-run` (readiness) refuses without it, because a portfolio that can
   grow untiered is a portfolio that grows back onto the merge path. A bullet pointing
   at an EXISTING suite needs no declaration — it inherits that file's own
   `# aid-tier:` tag, which `aid-test-tier-lint.sh` guards. Adding a case to a suite
@@ -417,16 +350,16 @@ how to recover. Include error codes, fallback behavior, retry logic.}
   check before generation refuses a forward dependency, so order the steps now)
 - Blocks: Step {Y} — {what it produces that the next step needs}
 
-**Dependency grammar (enforced before EPIC generation).** Put dependencies in
+**Dependency grammar (enforced before the run starts).** Put dependencies in
 the `**Dependencies:**` block as `Depends on: Step N`, `Depends on: Step N,
 Step M`, or `Depends on: Steps N-M`. The value may continue on an indented
 line.
 
 There are exactly two accepted ways to say “no dependency”, and both mean the
 same thing: **`Depends on: none`** is the authoring form, and **`Depends on:
----`** is the generated-canonical form that EPIC generation emits. Nothing
+---`** is the canonical form the plan.json builder writes. Nothing
 else counts — `Depends on: nothing`, an empty value, or a marker mixed with a
-real reference (`none, Step 3`) all block generation.
+real reference (`none, Step 3`) all block the run's start.
 
 An optional human annotation may follow the references, introduced by an em
 dash, an en dash, a spaced ASCII hyphen, or an opening parenthesis — all four
@@ -502,7 +435,7 @@ Skip E2E step if: pure refactoring, docs-only, library with no runtime output.
 
 ### MVP Plans — Session Prompt Generation (auto-added for multi-phase plans)
 
-When a plan has multiple phases/subfases (MVP plan, large EPIC with sub-phases), the plan writer
+When a plan has multiple phases/subfases (MVP plan, a roadmap of several plans), the plan writer
 MUST generate TWO additional outputs:
 
 **1. Commands section at end of plan** — per subfáze, one-liner command + context for writer:
@@ -585,6 +518,9 @@ questions in plain sentences:
    cheapest move, and the plan should say so explicitly. A NEW suite is a
    decision that costs a tier declaration and a name, so it is stated as a
    decision, not slipped in.
+4. **Which tests does it delete?** A test of behaviour the plan removes or
+   changes is deleted or rewritten in the step that changes it, and the plan
+   names it. "None" is a valid answer when it is true.
 
 **A one-off check is marked, and it is gone before plan-final.** A `Test:`
 bullet whose prose after the dash BEGINS with `verification-only, delete
@@ -597,8 +533,26 @@ verb), and `plan-finalize --stage gates` refuses a frozen candidate on which a
 marked path still exists, tracked or not — so the file is deleted on the plan
 branch before plan-final, not after the merge.
 
+The marker covers a whole FILE (the gate reads whether the path exists), so a
+one-off check lives in its own file, never as a case inside a lasting suite.
+These kinds are one-off by nature and are always marked, never kept:
+
+- a proof that a step happened ("X no longer exists", "the old command is gone");
+- a frozen list of old names or ids the plan retired;
+- a check that fails on ANY change of a file, right or wrong (a change detector);
+- a search for a sentence in a skill or doc — unless code quotes that text
+  byte for byte, which makes the sentence a contract.
+
+**A lasting test is named after what it guards, not where it came from.**
+`refuses a plan without a PM page` — not `P111 step 4: …`, `CP2 F3: …` or
+`IMP-612: …`; the plan, finding or backlog number goes in the commit message.
+`plan-finalize --stage gates` refuses a candidate that ADDS a case whose name
+carries one (`test_named_after_plan`, `aid_test_names_plan_refs` in
+`lib/aid-test-tier.sh`), and so does `aid-release.sh` for a solo release since
+the last tag. An old case keeps its name until its declaration line changes.
+
 Unchanged, deliberately: a `Test:` bullet naming a suite that does not exist yet
-MUST declare its tier (`aid-plan-to-epic.sh` refuses without it). Making tests
+MUST declare its tier (`plan-run` refuses without it). Making tests
 optional per step and letting untiered suites in are two different things, and
 only the first is intended here.
 
@@ -640,7 +594,7 @@ An explanation may follow the name — only the first word is graded.
 measure there is: **two steps in the same wave must not name the same file.**
 The check is advisory while the plan is being written (`--advisory`) and
 BLOCKING inside `aid-generation-readiness.sh`, which is the last point before
-the plan becomes EPICs — the same two-stage model the `Files:` grammar has.
+the plan becomes a run — the same two-stage model the `Files:` grammar has.
 
 Compute the waves by hand from the declared `Files:` and `Depends on:` — the
 check VERIFIES a schedule, it does not produce one, and verification is not a
@@ -1054,8 +1008,19 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
 
       20b3. A block may carry `timeout:` — whole seconds, 1-1800 (default 120):
            the runner (aid-plan-diff.sh) kills the command after it and the
-           point is `absent (reason=timeout)`; another value is refused by the
-           shared validator (lib/aid-verification-pattern.sh, P110).
+           point is unmeasured (`reason: timeout`, its limit — never a met
+           point, never a missing change, P112); another value is refused by the
+           shared validator (lib/aid-verification-pattern.sh, P110). A point that
+           runs a whole test suite carries `timeout:` sized to the suite.
+
+      20b5. A path in ANOTHER git repository (an absolute path in a step's
+           Files or in a criterion's `file:`/`cmd`) needs that repository in
+           the plan's frontmatter `repo_roots: [{name, path[, base_branch]}]`
+           (P111) — the plan lint refuses it otherwise (`foreign_repo_undeclared`,
+           P112). Write the LIVE absolute path; the contract, the review packets
+           and the measurer read the plan's worktree there
+           (`<path>/.aid-worktrees/plan-<id>--<name>`) through one mapping, so a
+           point can never measure the live checkout by design.
 
       20b4. A step's own measurable criterion is a labelled bullet under the
            step's **Acceptance Criteria:** — `- [ ] [<role>] <text>` with a
@@ -1104,7 +1069,7 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
 
       21c. "Undeclared branch" verdict is LLM-judgment — not hard-gated. Frame it
            honestly: "Possible undeclared branch detected — PM should confirm or add
-           explicit outcome." Do NOT block EPIC generation on #21 alone.
+           explicit outcome." Do NOT block the run on #21 alone.
 
       Pre-screening heuristic (mechanical, before LLM judgment) — auto-activates on
       handler-adding diffs (same pattern as #19 handler regex):
@@ -1306,9 +1271,9 @@ RULE AC-2: DO NOT use the plan template's "High-Level Steps" table format.
   Failure mode: AI reverts to the simple table format because it's easier.
   Fix: Every step MUST use the detailed per-step template from this skill.
 
-RULE AC-3: DO NOT defer detail to the EPIC.
-  Failure mode: AI writes "details will be specified in the EPIC."
-  Fix: The plan IS the detail source. The EPIC is a structural wrapper.
+RULE AC-3: DO NOT defer detail to a later document.
+  Failure mode: AI writes "details will be specified later."
+  Fix: The plan IS the detail source; the run reads it directly.
 
 RULE AC-4: DO NOT skip sections because "it's obvious."
   Failure mode: AI omits error handling because "standard HTTP errors."
@@ -1354,7 +1319,7 @@ RULE AC-10: DO NOT provide less detail for "simple" steps.
 4. **ALWAYS run Forbidden Phrase Detection before writing** — hard gate, no exceptions
 5. **ALWAYS run Traceability Verification in post-brainstorming mode** — every brainstorming output must map to a plan section
 6. **NEVER summarize or compress approved brainstorming sections** — copy and expand, never condense
-7. **NEVER defer detail to the EPIC or other documents** — the plan is self-contained
+7. **NEVER defer detail to other documents** — the plan is self-contained
 8. **NEVER skip sections that were discussed in brainstorming** — if it was discussed, it's in the plan
 9. **NEVER use any phrase from the Forbidden Shortcuts table** — hard failure
 10. **NEVER write the plan without verifying AC-1 through AC-10** — each rule must be satisfied
@@ -1381,7 +1346,7 @@ The plan document is consumed by `skills/pipeline.md` § 4 → Source Plan Integ
 
 **Implication for this skill:** Step headers MUST follow the pattern `### Step {N}: {Name}` to enable reliable section matching. The `{N}` must be a sequential integer starting from 1.
 
-**Pipeline compatibility:** The bash pipeline scripts (`aid-auto-pipeline.sh`, `aid-plan-to-epic.sh`) require:
+**Pipeline compatibility:** The plan.json builder (`lib/aid-plan-json.sh`, called by `plan-run`) requires:
 - A `## Implementation Steps` (or `## High-Level Steps`) section header — or at minimum step/task headers directly in the document
 - Step headers as `### Step {N}: {Descriptive Name}` (preferred) — `## Task {N}:` and `## Step {N}:` are also accepted but not recommended
 - Each step should have an `**Objective:**` field — the pipeline falls back to the header text after the colon, then to the first non-empty line of step content
@@ -1409,41 +1374,36 @@ Steps: {step_count} | Roles: {unique roles}
 Quality gates: passed (forbidden phrases: 0, completeness: {N}/{total})
 
 Next Steps:
-(A) /aid-plan --epic {plan_path} — generate EPIC + execution artifacts
-(B) /aid-run {plan_path} — generate EPIC and start execution (manual mode)
-(C) /aid-run --auto {plan_path} — generate EPIC and start autonomous execution
+(A) /aid-run {plan_id} — start the plan's run (manual mode)
+(B) /aid-run --auto {plan_id} — start the plan's run, autonomous
     ⚠ Requires autonomous_mode: true in .aid-o/config/permissions.yaml
-(D) Review plan — open .aid-o/plans/{plan_id}-{topic}.md
-(E) Re-open brainstorming — add/modify requirements (interim doc preserved)
-(F) Stop — plan saved, resume anytime with /aid-plan --resume {plan_id}
+(C) Review plan — open .aid-o/plans/{plan_id}-{topic}.md
+(D) Re-open brainstorming — add/modify requirements (interim doc preserved)
+(E) Stop — plan saved, resume anytime with /aid-plan --resume {plan_id}
 ```
 
-**Option A — Generate EPIC:**
-Runs `aid-auto-pipeline.sh` (via Script Execution Protocol) which creates all artifacts
-deterministically: EPIC files, plan.json, run.md, and queue entries.
-
-**Option B — Manual Execution:**
-Generates EPIC (same as A) then immediately starts `/aid-run` in manual mode.
+**Option A — Manual Execution:**
+`plan-run` starts the plan's one run, then `/aid-run` in manual mode.
 PM approves each escalation.
 
-**Option C — Autonomous Execution:**
-Generates EPIC then starts `/aid-run --auto`. S-effort fixes auto-approved,
+**Option B — Autonomous Execution:**
+The same, then `/aid-run --auto`. S-effort fixes auto-approved,
 M-effort uses defaults, L-effort always escalates to PM.
 Requires `autonomous_mode: true` in `.aid-o/config/permissions.yaml`.
 
-**Option D — Review plan:**
-PM reviews the plan file, makes edits if needed, then runs option A/B/C when ready.
+**Option C — Review plan:**
+PM reviews the plan file, makes edits if needed, then runs option A/B when ready.
 
-**Option E — Re-open brainstorming (Mode A only):**
+**Option D — Re-open brainstorming (Mode A only):**
 If invoked from brainstorming, return to brainstorming Step 3 with existing context.
 New requirements ADD to the plan (never overwrite approved sections).
 If invoked standalone (Mode B), suggest `/aid-plan` to explore alternatives.
 
-**Option F — Stop here:**
+**Option E — Stop here:**
 ```
 Plan saved: .aid-o/plans/{plan_id}-{topic}.md
 Resume anytime: /aid-plan --resume {plan_id}
-Or generate EPIC later: /aid-plan --epic {plan_path}
+Or run it later: /aid-run {plan_id}
 ```
 
 ---
@@ -1467,7 +1427,7 @@ obligations (a `Reuse check:` on a delivered step is answered truthfully by
 - `commands/aid-plan.md` — unified command that invokes this skill (write mode or brainstorm Step 8)
 - `skills/brainstorming.md` — brainstorming skill (upstream — provides approved sections)
 - `skills/pipeline.md` § 4 — agent dispatch (downstream — injects plan sections into agent prompts)
-- `{plugin_path}/scripts/aid-auto-pipeline.sh` — pipeline script that creates EPIC files, plan.json, run.md, and queue entries from the plan document
+- `{plugin_path}/scripts/aid-plan-fsm.sh plan-run` — starts the reviewed plan's one run (plan.json through `lib/aid-plan-json.sh`)
 - `defaults/templates/plan.md` — base plan template (this skill extends it)
 - `skills/run-management.md` — plan lifecycle (archiving, location rules)
 - `defaults/orchestration.yaml` — `language.document_language`, the only home of the document
@@ -1481,7 +1441,7 @@ obligations (a `Reuse check:` on a delivered step is answered truthfully by
 
 Under `plan_branch` the whole delivery is read once per plan, by the whole-plan
 round (CP7) against the frozen candidate (`commands/aid-run.md`, "Closing a plan
-(plan-final)"). CP2 and CP3 remain per EPIC in both modes. Mode is read from the
+(plan-final)"); every step is reviewed before it (CP2). Mode is read from the
 plan's committed lifecycle manifest, never inferred.
 
 **The release under `plan_branch`.** The last step writes the release content

@@ -78,7 +78,7 @@ Fix gates_no_generated_by precondition fail.
 
 ## Implementation Steps
 
-### Sample Step (test fixture — not parsed by aid-plan-to-epic.sh)
+### Sample Step (test fixture — not parsed by aid-plan-lint.sh)
 
 **Implementation Detail:**
 

@@ -70,6 +70,8 @@ source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 source "${SCRIPT_DIR}/lib/aid-reuse-verdict.sh"
 # shellcheck source=lib/aid-standards-map.sh
 source "${SCRIPT_DIR}/lib/aid-standards-map.sh"
+# shellcheck source=lib/aid-repo-roots.sh
+source "${SCRIPT_DIR}/lib/aid-repo-roots.sh"   # aid_rr_phys_repo — the contract's own lookup (P112)
 
 PLAN=""
 FORCE_MODE=""     # "strict" | "legacy" | "" (=auto from frontmatter)
@@ -267,6 +269,9 @@ _repo_roots_pass() {
          || [[ "$(git -C "$real" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" == "$(git -C "$proj" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ]]; }; then
       _zadani_err "" "repo_root_invalid: repo_roots '${name}' path '${path}' is the project itself or inside it — repo_roots names OTHER repositories"; continue
     fi
+    if [[ "$(git -C "$real" rev-parse --show-toplevel 2>/dev/null | xargs -r realpath 2>/dev/null)" != "$real" ]]; then
+      _zadani_err "" "repo_root_invalid: repo_roots '${name}' path '${path}' is a directory inside a git repository, not its top — declare the repository's top"; continue
+    fi
     if [[ -n "$bb" ]] && ! git -C "$real" rev-parse --verify --quiet "${bb}^{commit}" >/dev/null 2>&1; then
       _zadani_err "" "repo_root_invalid: repo_roots '${name}' base_branch '${bb}' does not resolve in ${path}"; continue
     fi
@@ -427,7 +432,7 @@ if [[ "$mode" == "legacy" ]] && [[ -n "$(_aid_files_verification_only "$PLAN")" 
 fi
 
 # ---------------------------------------------------------------------------
-# AID Role is a closed set — the same list aid-epic-to-json.sh enforces. A step
+# AID Role is a closed set — the same list the former EPIC-to-plan.json converter enforces. A step
 # naming a role outside it (fullstack, devops, docs) used to pass this lint,
 # CP1 and every review, and fail only inside generation, phase 1.
 # ---------------------------------------------------------------------------
@@ -438,7 +443,7 @@ while IFS=$'\t' read -r _rl_ln _rl_role; do
   errors=$((errors+1))
   [[ "$QUIET" -eq 0 ]] && echo "${PLAN}:${_rl_ln}: ERROR AID Role '${_rl_role}' is not an AID role — one of: ${_VALID_ROLES} (a step that is both backend and frontend is two steps)" >&2
 done < <(_aid_blank_fenced < "$PLAN" | awk '/^\*\*AID Role:?\*\*/ { s=$0; sub(/^\*\*AID Role:?\*\*[[:space:]]*/, "", s); gsub(/[[:space:]]+$/, "", s); print NR "\t" tolower(s) }')
-# ^ same header grammar and same whole-line value as aid-plan-to-epic.sh's
+# ^ same header grammar and same whole-line value as the former EPIC generator's
 #   extractor (colon optional, rest of the line is the role) — so what the
 #   lint accepts is exactly what generation will accept.
 
@@ -507,16 +512,11 @@ _has_testing_strategy() {
   ' "$PLAN"
 }
 
-# plan-start writes the lifecycle manifest from the plan's bold EPIC lines
-# (lib/aid-lifecycle.sh aid_lifecycle_parse_legacy_epics, a stricter grammar
-# than EPIC generation reads) and refuses the plan when they do not parse — so
-# the same parser says it here, before review and generation are spent on it.
-if _lint_plan_id="$(_aid_plan_id_of "$PLAN" 2>/dev/null)" \
-   && ! bash "${SCRIPT_DIR}/aid-lifecycle.sh" parse-legacy "$_lint_plan_id" "$PLAN" >/dev/null 2>&1; then
-  _lint_epic_what="the EPIC lines do not follow the lifecycle grammar"
-  grep -qE '^\*\*EPIC [0-9]+' <(_aid_blank_fenced < "$PLAN") || _lint_epic_what="the plan has no EPIC line (a single-phase plan has one too)"
-  [[ "$_lint_plan_id" =~ ^P[0-9]+$ ]] || _lint_epic_what="the plan id '${_lint_plan_id}' is not P<number>, which the lifecycle manifest needs"
-  _strict_finding "" "${_lint_epic_what} — each EPIC is one bold line '**EPIC N: title**' (or '**EPIC N / Backlog: title**'), numbered 1..K; plan-start refuses the plan otherwise (skills/plan-writing.md §Phase Markers)."
+# P114 (3.0.0): a plan runs as ONE run (plan-run declares E-<nnn>-1_1 itself),
+# so EPIC markers are neither required nor parsed into runs; one that is still
+# there is named as ignored.
+if grep -qE '^\*\*EPIC [0-9]+' <(_aid_blank_fenced < "$PLAN"); then
+  _advisory "" "EPIC markers ('**EPIC N: …**') are ignored since AID 3.0.0 — a plan runs as one run (/aid-run P<NNN>); the marker can go."
 fi
 
 if ! _has_testing_strategy; then
@@ -934,9 +934,50 @@ while IFS= read -r _ts_name; do
   _advisory "" "\`${_ts_name}\` is named in ## Testing Strategy, is in no \`Test:\` bullet and does not exist in the repository — declare it with a Test: bullet and a tier, or say in one sentence why the suite is not being written."
 done < <(_ts_names)
 
+# A path into another repository the plan does not declare (P112, agents P016):
+# an absolute path in a step's Files or in a criterion's file:/cmd that lies in
+# a git repository other than the project's (compared by --git-common-dir, so
+# a project worktree under .aid-worktrees/ is the project) and is not one of
+# repo_roots is the step contract's refusal, given here before CP1. A path
+# outside any git repository (/tmp/x) is not judged.
+_foreign_repo_pass() {
+  grep -qE '(^|[^A-Za-z0-9._/$-])/[A-Za-z0-9._-]' "$PLAN" || return 0
+  local own="" decl=" " p repo cd raw n i seen=" "
+  own="$(git -C "${_project_root:-$(dirname "$PLAN")}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || own=""
+  raw="$(aid_plan_repo_roots_raw "$PLAN")"; n="$(jq 'length' <<< "$raw")"
+  for (( i=0; i<n; i++ )); do
+    p="$(jq -r --argjson i "$i" '.[$i].path // ""' <<< "$raw")"
+    cd="$(git -C "$p" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && decl+="${cd} "
+  done
+  declare -F _aid_vp_parse_ac >/dev/null || source "${SCRIPT_DIR}/lib/aid-verification-pattern.sh"
+  local d
+  while IFS= read -r p; do
+    [[ -n "$p" && "$seen" != *" ${p} "* ]] || continue
+    seen+="${p} "
+    d="$p"; while [[ -n "$d" && ! -e "$d" ]]; do d="${d%/*}"; done; [[ -n "$d" ]] || d=/
+    [[ -d "$d" ]] || d="${d%/*}"
+    if [[ ! -r "${d:-/}" || ! -x "${d:-/}" ]]; then
+      _advisory "" "\`${p}\`: ${d} cannot be read, so its repository is unknown — not judged for repo_roots"; continue
+    fi
+    repo="$(aid_rr_phys_repo "$p")"; [[ -n "$repo" ]] || continue
+    cd="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || {
+      _advisory "" "\`${p}\`: its repository could not be read; not judged for repo_roots"; continue; }
+    [[ "$cd" == "$own" || "$decl" == *" ${cd} "* ]] && continue
+    _zadani_err "" "foreign_repo_undeclared: ${p} lies in ${repo}, which repo_roots does not declare. next: declare it in the plan's frontmatter (repo_roots: [{name: <slug>, path: ${repo}}]) or drop the path (pipeline.md §When AID refuses: foreign_repo_undeclared)"
+  done < <(
+    # a step's Files bullets, and the file:/cmd of every criterion the measurer
+    # runs (brief points and each step's own), read by the measurer's parser
+    { awk '/^### Step / { step = 1 } /^## / { step = 0 } step && /^- (Create|Modify|Test|Rewrite): / { print }' "$PLAN"
+      { _aid_vp_parse_ac "$PLAN" "Acceptance Criteria|Success Criteria"; _aid_vp_parse_ac "$PLAN" "Step [0-9]+:"; } 2>/dev/null \
+        | awk -F $'\x1f' '{ print $4; print $5 }'
+    } | grep -oE '(^|[^A-Za-z0-9._/$-])/[A-Za-z0-9._/-]+' | sed -E 's|^[^/]||; s|/+$||')
+  return 0
+}
+
 # Blocking = any ERROR (both modes), or any STRICT on a strict-cohort plan.
 _zadani_pass
 _repo_roots_pass
+_foreign_repo_pass
 blocking=$errors
 [[ "$mode" == "strict" ]] && blocking=$((blocking + strict_hits))
 

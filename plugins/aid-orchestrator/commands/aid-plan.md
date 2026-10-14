@@ -1,10 +1,10 @@
 ---
 name: aid-plan
-description: Plan a task — brainstorm, write plan, or generate EPIC (auto-detected or forced)
+description: Plan a task — brainstorm or write a plan (auto-detected or forced); a reviewed plan runs with /aid-run P<NNN>
 user_invocable: true
 ---
 
-Unified planning command — merges brainstorming, plan writing, and EPIC generation into a single entry point with auto-detection.
+Unified planning command — brainstorming and plan writing in a single entry point with auto-detection. A plan that passed its review runs straight from its file: `/aid-run P<NNN>` (EPIC generation was removed in 3.0.0, P114).
 
 ## Usage
 
@@ -34,10 +34,9 @@ Unified planning command — merges brainstorming, plan writing, and EPIC genera
 ```
 
 **Modes:**
-- `/aid-plan` — auto-detect: brainstorm if unclear, write plan if spec provided, generate EPIC if plan exists
+- `/aid-plan` — auto-detect: brainstorm if unclear, write plan if spec provided
 - `/aid-plan brainstorm [topic]` — force 8-step interactive brainstorm
 - `/aid-plan write [spec-file]` — force plan writing from specification
-- `/aid-plan epic [plan-file]` — force EPIC generation from plan
 
 Whichever mode runs, a `plan_branch` plan's LAST PM-facing turn is the one
 described in **"Plan-final / close boundary"** below — a rendered card and page,
@@ -49,8 +48,6 @@ never a hand-written file listing. Read that section before closing a plan.
 /aid-plan "add user authentication"          # auto → brainstorm (topic, no spec)
 /aid-plan brainstorm "migrate to PostgreSQL" # force brainstorm
 /aid-plan write requirements.md              # write plan from spec file
-/aid-plan write .aid-o/tasks/E-015.md        # write plan from EPIC draft
-/aid-plan epic .aid-o/plans/P005-auth.md     # generate EPICs from plan
 ```
 
 ## Auto-Detection Logic
@@ -62,8 +59,7 @@ When mode is not specified, detect from input:
 | No input | `brainstorm` | No context → explore interactively |
 | Topic string (not a file) | `brainstorm` | Idea → needs exploration |
 | Spec/requirements file | `write` | Has `type: spec` or no plan/epic markers |
-| EPIC draft file | `write` | Has `type: epic` or `# EPIC:` header |
-| Plan file | `epic` | Has `type: plan` or `# Plan:` header |
+| Plan file | — | Has `type: plan` or `# Plan:` header: offer to run it (`/aid-run P<NNN>`) or revise it |
 
 If detection is ambiguous, ask PM:
 ```
@@ -75,9 +71,6 @@ What would you like to do?
   (C) Run it — the plan is reviewed: /aid-run P<NNN> (the direct run, P111)
 ```
 
-(Generating EPICs, `/aid-plan epic`, is the old path for plans generated
-already; P112 removes it.)
-
 ## Working while another plan is live
 
 Planning a new plan never has to wait for another one. Each plan implements in
@@ -85,8 +78,7 @@ its own git worktree under `.aid-worktrees/plan-<id>`, so an active plan does
 not hold the PM's checkout, and the PM's own uncommitted work does not block
 plan creation. Say so plainly rather than asking the PM to stash or wait.
 
-Brainstorming and generation get their own copies the same way —
-`.aid-worktrees/brainstorm-<id>` and `.aid-worktrees/generation-<id>`, both
+Brainstorming gets its own copy the same way — `.aid-worktrees/brainstorm-<id>`
 from `plan-scratch` (below). They are scratch checkouts: created before any
 plan-state exists, recorded nowhere, released by whoever asked for them. What
 they isolate is the TREE. State does not fork and is not meant to: `.aid-o/`
@@ -98,7 +90,7 @@ plan-id counter, one run history and one evidence tree.
 ```bash
 git worktree list                       # every tree: the PM's, and one per active plan
 ls .aid-o/work/plan-state/*/plan-state.yaml 2>/dev/null   # which plans exist and their phase
-cat .aid-o/work/active-runs.json 2>/dev/null              # which EPICs are actually running
+cat .aid-o/work/active-runs.json 2>/dev/null              # which runs are actually running
 cat "${AID_NIGHTLY_DIR:-/opt/eco/data/aid-nightly/aid-orchestrator}/latest.json" 2>/dev/null  # last nightly result
 ```
 
@@ -116,7 +108,7 @@ shape `/aid-status` renders) and carry on. No artifact at all: say nothing.
 | What the reads show | What to say and do |
 |---|---|
 | No plan-state files, no `.aid-worktrees/` | Nothing else is running. Proceed silently — do not narrate an empty check. |
-| Another plan active, its worktree present | Name it and its phase, say this plan can be written and generated anyway, proceed. |
+| Another plan active, its worktree present | Name it and its phase, say this plan can be written and started anyway, proceed. |
 | PM's checkout has uncommitted work | Irrelevant to planning and to `plan-start`. Do not ask them to clean it. |
 | The plan file is not committed on `main` | `plan-start --plan-file` commits it for you (only that path, index untouched) when the checkout is ON `main`; from another branch it refuses and says so — do not commit plans by hand as a ritual. |
 | A plan records `worktree_path` but the directory is gone | Name it and the repair — `aid-plan-fsm.sh plan-state <id> --recreate-worktree --reason "<why>"` — then continue; a broken sibling does not block a new plan. |
@@ -126,10 +118,10 @@ shape `/aid-status` renders) and carry on. No artifact at all: say nothing.
 | A brief `.aid-o/plans/P{NNN}-zadani.md` and no plan file beside it (no `P{NNN}-*.md` other than the brief itself) | "Brief without plan" — a brainstorm stopped after Step 8 wrote the brief. Name it, and offer to continue from it (Mode: Write Plan takes it as the specification) or delete it. Never delete it unasked. |
 | The nightly artifact is red, stale or unreadable | One line, then continue. Naming it is the whole obligation: planning is never blocked by a test result, and a red night the PM never hears about is the failure this read exists to prevent. |
 
-**Generating AND starting both work.** A newly generated plan's EPICs are
-registered (`epic-start`) and initialised inside that plan's own worktree, so a
-second stream can be taken all the way to a queued, READY EPIC while the first
-one implements — with the PM's checkout dirty and its HEAD unmoved throughout.
+**Starting works too.** A plan's run is initialised inside that plan's own
+worktree (`plan-run`), so a second plan can be taken all the way to a READY run
+while the first one implements — with the PM's checkout dirty and its HEAD
+unmoved throughout.
 What still serializes is the CONTROLLER, not the streams: one session drives one
 run at a time, so two streams progress by alternating or from two sessions —
 inside a run, a wave may dispatch several agents at once (`pipeline.md §4`).
@@ -333,11 +325,11 @@ Pass all approved sections. Plan written to `.aid-o/plans/P{NNN}-{topic}.md`.
 Output: `=== Step 8/9: Document ===`
 
 **The generation check (automatic — run BEFORE CP1, immediately after the plan
-is written).** The author runs the same check generation runs, so a plan that
+is written).** The author runs the same check `plan-run` runs, so a plan that
 passes here is not refused there:
 
 ```bash
-bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total <EPIC count>
+bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total 1
 ```
 
 A plan whose frontmatter names `depends_on_plans` and stands on an unmerged
@@ -415,7 +407,7 @@ names it (minors too); an open plan-level blocker or major makes the list
 ### Step 9: Plan review (CP1)
 Run "Plan review (CP1)" below, from item 1.
 Output: `=== Step 9/9: Plan review ===`, then the PM card of its item 5.
-When it passes, the plan is ready to run: `/aid-run P<NNN>` (no EPIC generation).
+When it passes, the plan is ready to run: `/aid-run P<NNN>`.
 
 **Rules (hard failures if violated):**
 1. ONE question at a time — never batch
@@ -430,7 +422,7 @@ When it passes, the plan is ready to run: `/aid-run P<NNN>` (no EPIC generation)
 
 Write an exhaustive implementation plan from specification or topic.
 
-1. **Input resolution** — read spec file, detect format (brief/EPIC/plan/free-form);
+1. **Input resolution** — read spec file, detect format (brief/plan/free-form);
    a brief file (frontmatter `zadani:`, the six sections of `defaults/templates/zadani.md`)
    IS the specification — lint it with `aid-plan-lint.sh --zadani <file>` and keep it
 2. **Context** — read `config/project.yaml`, `work/active.md` (generated index — read-only), scan related plans
@@ -449,7 +441,7 @@ Write an exhaustive implementation plan from specification or topic.
 8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`; the interim stays until
    the CP1 gate passes (Plan review item 10 deletes it)
 8a. **The generation check and the critic (automatic, before CP1)** — run
-    `bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total <EPIC count>`,
+    `bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" ".aid-o/plans/P{NNN}-{topic}.md" --total 1`,
     as in Step 8 above: every finding at once; fix and re-run until it passes. Then the
     critic at the plan moment exactly as Step 8 above describes (`aid_critic_prepare
     P{NNN} --moment plan --plan .aid-o/plans/P{NNN}-{topic}.md`, dispatch, response,
@@ -461,100 +453,7 @@ Write an exhaustive implementation plan from specification or topic.
 Output: plan path, step count, quality gate results, plan review verdict.
 When the plan review passes, **the plan is ready to run: `/aid-run P<NNN>`** —
 the direct run (`aid-plan-fsm.sh plan-run`, P111) starts it straight from the
-plan, one run on `plan/<id>`, with no EPIC generation.
-
-## Mode: Generate EPIC — the old path (until P112)
-
-New plans do not need this mode: `/aid-run P<NNN>` runs them directly (P111).
-It stays for plans that are generated already, and P112 removes it.
-
-Parse a Plan file, generate every EPIC and plan.json first, verify one complete
-generation receipt, then create run files/FSM state and queue entries.
-All deterministic operations are bash pipeline scripts — LLM handles only dialog and validation.
-
-0. **Take this generation's own working copy** — generation COMMITS (the plan,
-   the lifecycle manifest, whatever EPIC files the project tracks), so two
-   generations in one checkout collide on one index and one HEAD:
-
-   ```bash
-   bash {plugin_path}/scripts/aid-plan-fsm.sh plan-scratch <plan_id> --phase generation
-   ```
-
-   `cd` to what it prints and run the pipeline from there. A warning plus the
-   primary checkout is a valid answer — generation proceeds, only a second
-   concurrent stream is unsafe until the copy exists. Release it after the
-   transaction completes (`--release`); a copy holding uncommitted work is
-   refused rather than discarded.
-1. **Validate** — confirm input is a Plan file (`type: plan` or `# Plan:` header)
-2. **Analyze** — count phases, extract plan ID and title
-3. **Queue mode** — ask PM: chain (A), separate (B), or custom (C) dependencies
-4. **Run pipeline** — `bash {plugin_path}/scripts/aid-auto-pipeline.sh --plan <path> --queue-mode <mode>`
-5. **Validate output** — check JSON manifest, verify all files created
-6. **Report** — show created EPICs, queue status, next steps
-
-**Next steps after EPIC generation:**
-- `/aid-run` — start execution
-- `/aid-run --auto` — start autonomous execution
-- Review created files
-
-### Generation is one transaction
-
-Generation for a plan is a single transaction, not N independent phase runs.
-Two files under `.aid-o/work/evidence/<plan_id>/generation/` hold it together:
-
-| File | What it is |
-|------|-----------|
-| `generation-authority.json` | The CP1 decision, made **once per plan** before any output exists, sealed to the exact plan bytes, target head and phase set. Every phase verifies it instead of re-running the gate. |
-| `transaction.json` | Identity plus one record per phase. Phase status is **derived** by re-hashing the recorded outputs and reading queue membership — the files and the queue are the truth. |
-
-**CP1 blocked the plan.** Generation stops before anything is created. The
-refusal carries one of exactly two AID-owned labels, and the gate's own output
-follows it verbatim:
-
-| Label | What it means | What to do |
-|-------|---------------|-----------|
-| `aid_generation_force_required:` | The failure is a plan review condition — a missing or unclosed round, open blockers without a second round or an acceptance criterion, a plan changed after its last round. A PM may deliberately waive it. | Fix the conditions, or run the force command the label prints (it already carries your `--plan` and `--queue-mode`). |
-| `aid_cp1_blocked:` | The failure is one `--force` cannot cover — the gate was mis-invoked, the plan's own identity is broken, the plan review configuration is invalid, or the round evidence is unreadable or tampered with. The hard condition is named first. | Fix the named condition. `--force` is **refused in the same place** on this class, not merely unadvertised: it seals no authority, writes no waiver, and says so by name. |
-
-```bash
-bash {plugin_path}/scripts/aid-auto-pipeline.sh --plan <path> --queue-mode <mode> --force --reason "<at least 20 characters>"
-```
-
-The force is invocation-scoped and audited three ways (timeline event,
-cross-plan audit log, HEAD-bound waiver artifact). The CP1 evidence on disk is
-never rewritten as clean. A `--force` on a plan that passes anyway is recorded
-as unused and writes no waiver.
-
-**A run was interrupted.** Just rerun the same command. Phases whose outputs
-still verify are skipped, only what fails verification is regenerated, ids stay
-identical, and an EPIC already in the queue is a verified idempotent skip rather
-than a duplicate error.
-
-**The plan changed.** A different identity (plan bytes, target head, phase
-count, or derivation version) is never mixed with the old one:
-
-- the previous transaction was **complete** → it rolls over automatically, the
-  finished pair is archived to `.completed-<epoch>` siblings, and a fresh
-  transaction starts;
-- the previous transaction was **incomplete** → generation refuses, naming both
-  identities. Archive it deliberately first:
-
-```bash
-bash {plugin_path}/scripts/aid-auto-pipeline.sh supersede-generation \
-  --plan <path> --reason "<at least 20 characters>"
-```
-
-`supersede-generation` archives the authority/transaction pair to
-`.superseded-<epoch>` siblings, writes the audit record, and prints what the
-abandoned generation had already produced. **It deletes nothing** — removing
-EPIC files, branches or queue entries stays with `plan-rollback` and the
-queue-removal path.
-
-It takes the same per-plan generation lock the pipeline takes, so it refuses
-by name (`a generation is in progress for <plan_id> (holder pid N)`) while a
-generation for that plan is running, and archives nothing. It also refuses
-when the supersession cannot be recorded — the audit trail is what makes this
-command accountable, so an unrecordable archive is not performed.
+plan, one run on `plan/<id>`.
 
 ## Plan review (CP1)
 
@@ -563,7 +462,7 @@ reviewer roles (`skills/plan-review-roles.md`) answer the same packet — the pl
 AND the PM's brief (`zadani.md`, P109), which each role checks point by point
 first — in one round by default, two when round 1 found a blocker;
 `aid-review-round.sh` runs the rounds and
-`aid-cp1-gate.sh` refuses EPIC generation until the evidence is complete. Every
+`aid-cp1-gate.sh` (called by `plan-run`) refuses the run until the evidence is complete. Every
 item below is a command. You never write, edit or complete a reviewer's answer.
 
 Skip this section when `review_checkpoints.cp1_plan_review` (or `enabled`) is
@@ -577,7 +476,7 @@ skipped. The gate then passes with a notice.
    revision makes it stale; rerun it after every edit):
 
    ```bash
-   bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" <plan> --total <EPIC count>   # + --project-root .aid-worktrees/plan-<dep> for a plan on another plan's branch
+   bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" <plan> --total 1   # + --project-root .aid-worktrees/plan-<dep> for a plan on another plan's branch
    ```
 
 2. Prepare round 1. It prints the round directory and one prompt per reviewer:
@@ -607,12 +506,12 @@ skipped. The gate then passes with a notice.
 
 The Agent tool is not callable from bash, so the controller dispatches every
 reviewer whose provider is `claude`, at every checkpoint: the plan review
-(`commands/aid-plan.md` "Plan review (CP1)") and the step, EPIC and fast-mode
-reviews (`commands/aid-run.md` "Step review (CP2) and EPIC review (CP3)",
-`commands/aid-do.md`) include this text verbatim. `<round dir>` is the
+(`commands/aid-plan.md` "Plan review (CP1)") and the step and fast-mode
+reviews (`commands/aid-run.md` "Step review (CP2)", `commands/aid-do.md`)
+include this text verbatim. `<round dir>` is the
 directory `prepare` printed, and `prepare` prints each role's `<focus>` next
 to its prompt: `cp1-<role>` for a plan, `cp2-step-<N>-<role>` for a step,
-`cp3-<role>` for an EPIC, `cp6-<role>` in fast mode, `cp7-<role>` at plan
+`cp6-<role>` in fast mode, `cp7-<role>` at plan
 close, the role with `_` replaced by `-` (the dispatch wrapper allows no
 underscore in `--focus` or `--agent-id`).
 
@@ -652,10 +551,28 @@ one at a time:
    ```
 
    A step round's `close` refuses a reviewer file with no such start/complete
-   bracket in `<round dir>/timeline.jsonl` (`no_dispatch_record`): a file
+   bracket in `<round dir>/timeline.jsonl` (`no_dispatch_record`; `prepare` prints the
+   exact start/complete commands per role — copy them, never write a bracket after the
+   answer; a valid answer without one is re-dispatched via `retry --role <r>`): a file
    nobody dispatched does not close a round. Only a round prepared with
    `--stub` by the acceptance suite skips that check, and the FSM refuses to
    advance on such a round.
+
+   A start for a role the round does not ask is refused on the spot (the focus
+   must name one of `reviewers_expected`; `prepare` printed them). A start that
+   will never get a complete — the reviewer was stopped, the role was dispatched
+   by mistake — is withdrawn, never faked:
+
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" cancel --focus <focus> \
+     --evidence-dir <round dir> --reason "<why, 20+ characters>"
+   ```
+
+   A cancelled start is not a complete: an answer filed under it has no
+   provenance and `close` still refuses it. A role that gave nothing (a codex
+   record `answered: false`, or a start with no complete) is retried before
+   `collect` with `retry --role <r>`, which withdraws its open start itself;
+   nobody waits for the other roles to answer first.
 
 ## Stand-in for a Codex role
 
@@ -674,8 +591,7 @@ After ALL reviewers of the round (claude and codex) have been dispatched, run
 `collect`. Only when `collect` exits 0, run `close` once with a token value for
 every claude role; when it reports the round invalid, retry the roles it names
 first (`close` refuses an invalid round). `<review>` is `--plan <plan>` for
-CP1, `--checkpoint cp2 --evidence-dir <run dir> --step <N>` for a step,
-`--checkpoint cp3 --evidence-dir <run dir>` for an EPIC:
+CP1, `--checkpoint cp2 --evidence-dir <run dir> --step <N>` for a step:
 
 ```bash
 bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" collect <review> --round K
@@ -683,7 +599,7 @@ bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" close <review> --round K \
   --tokens <role>=<n|unknown> ...
 ```
 
-When `close` reports `fail` on a step or EPIC round and a round remains
+When `close` reports `fail` on a step round and a round remains
 (`rounds_default`, or the PM's `override`), the fix is the step's own role's:
 
 ```
@@ -691,13 +607,6 @@ Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role 
       model: <the **Model:** of the step's role card in skills/role-cards.md>,
       prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
 ```
-
-**Close the round BEFORE the fix.** When the fix was committed first (the natural
-reflex on a clear finding — P010 did it twice in one day), `close` refuses with
-"head moved" and names the way out: `close … --at <sha the reviewers saw>`. The
-round then closes bound to that revision (`measurement.json` `revision.head_sha`,
-`closed_with_at: true`), and the fix is what the confirmation round confirms. `--at`
-takes only the round's recorded head, and only while HEAD still descends from it.
 
 Then `aid-step-check.sh` again (the range now ends at the fix commit) and
 `prepare --round K+1`: the confirmation round asks only the reporters of what
@@ -708,8 +617,8 @@ fixer's model and tokens on the next `close` with
 When `close` reports `fail` on the LAST allowed round, it has already written
 what stays open where the plan-final boundary reads it: a blocker or major a
 later step's declared files cover becomes a carried obligation
-(`carried` in merged.json); any other, and every one at cp3, is routed to the
-EPIC (`routed`) and done-advance refuses until the PM resolves or backlogs it
+(`carried` in merged.json); any other is routed to the run
+(`routed`) and done-advance refuses until the PM resolves or backlogs it
 (`skills/pipeline.md` §13). Say so on the PM card; do not route by hand what
 `close` routed.
 
@@ -882,8 +791,7 @@ The renderer exits 1 without writing a page when the brief lacks one of its
 eight required fields or the decision carries no
 `.release_decision.plan_summary`. If the brief is missing entirely, report the
 Blocked card "plan-close brief missing — run aid-pm-brief.sh" rather than
-assembling a summary from evidence files. `legacy_epic_release_mode` plans keep
-their existing per-EPIC release text unchanged.
+assembling a summary from evidence files.
 
 ## The brief changes
 
@@ -903,11 +811,11 @@ confirmation round never reads a different brief than round 1 (`brief_changed_af
 
 ## The PM page goes stale with every plan edit
 
-`aid-plan-to-epic.sh` refuses to generate when the PM page is older than the plan file
-("has no current PM page"). That is by design — the page is what the PM approved. An edit
-also un-passes the plan review gate, so after every plan edit run the review to a passing
-gate again ("Plan review (CP1)" items 6-9), then re-render the page (item 10) before
-generation.
+`plan-run` refuses to start (`plan_page_missing`) when the PM page is older than the
+plan file ("has no current PM page") — on a resume too. That is by design — the page is
+what the PM approved. An edit also un-passes the plan review gate, so after every plan
+edit run the review to a passing gate again ("Plan review (CP1)" items 6-9), then
+re-render the page (item 10) before `/aid-run P<NNN>`.
 
 ## When AID itself misbehaves
 
@@ -919,10 +827,10 @@ A gate that refuses a valid plan, a script that crashes, a message that tells yo
 - `skills/plan-writing.md` — plan writing quality gates and format
 - `skills/planner.md` — dependency graph and parallel groups
 - `skills/plan-review-roles.md` — the six plan reviewer roles, the evidence rule and the answer shape
-- `{plugin_path}/scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
+- `{plugin_path}/scripts/aid-plan-fsm.sh plan-run` — starts the reviewed plan's one run (`/aid-run P<NNN>`)
 - `{plugin_path}/scripts/aid-review-round.sh` — plan review rounds (prepare, dispatch, collect, close, retry, fix-check, dispute, finalize, override)
 - `{plugin_path}/scripts/aid-review-adjudicate.sh` — merges a round's answers, rejects findings without proof
-- `{plugin_path}/scripts/aid-cp1-gate.sh` — the plan review gate (called once per generation transaction by aid-auto-pipeline.sh; per invocation by a standalone aid-plan-to-epic.sh)
+- `{plugin_path}/scripts/aid-cp1-gate.sh` — the plan review gate (called by plan-run when it seals the plan)
 - `{plugin_path}/scripts/lib/aid-plan-summary.sh` — renders the PM page for a plan that passed its review (Plan review item 10)
 - `defaults/policies/review-checkpoints.yaml` — `plan_review`: reviewers, providers, models, rounds
 - `defaults/templates/plan.md` — base plan template
@@ -933,21 +841,20 @@ A gate that refuses a valid plan, a script that crashes, a message that tells yo
 ## Important
 
 - **Auto-detect by default** — mode selection only when explicitly specified or ambiguous
-- **One output per mode** — brainstorm produces a plan; write produces a plan; epic produces EPICs + plan.json (interim docs are temporary)
+- **One output per mode** — brainstorm produces a plan; write produces a plan (interim docs are temporary)
 - **Quality gates are mandatory** — plans not written until gates pass
 - **Language split** — conversation in PM's language; documents per `config/project.yaml`
 - **YAGNI** — never propose over-engineered solutions
-- If PM aborts at any step → end gracefully, no final plan/EPIC files written (interim doc preserved for recovery)
+- If PM aborts at any step → end gracefully, no final plan file written (interim doc preserved for recovery)
 - If `.aid-o/` missing → suggest `/aid-init` but proceed anyway
 
 ### Streamlined Mode Advisory
 
-`--streamlined` mode (P040 Component D) is appropriate for low-risk EPICs that
-skip per-step CP2 in favor of a single integration-review checkpoint at
-`done-advance`. These criteria are advisory — the planner surfaces them as a
+`--streamlined` mode (P040 Component D) is appropriate for low-risk plans that
+skip per-step CP2 in favour of the whole-plan review at the close (CP7). These criteria are advisory — the planner surfaces them as a
 recommendation; the PM decides whether to pass `--streamlined` to `/aid-run`.
 
-An EPIC is a candidate for streamlined mode when ALL of the following hold:
+A plan is a candidate for streamlined mode when ALL of the following hold:
 
 - **0 logic-changing files** — only docs, config, fixtures, or pure data edits;
   no changes to control-flow or business logic.
@@ -965,12 +872,10 @@ abandoned-run enforcement at `done-advance`.
 
 ## Plan mode
 
-A plan declares its release model in its committed lifecycle manifest
-(`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`). Under `plan_branch` an
-EPIC merges into the plan branch and only the plan releases, once, at the
-plan-final boundary; under `legacy_epic_release_mode` each EPIC releases as
-before. New plans default to `plan_branch` when the project declares a
-`gate_profiles` table, and otherwise fall back to legacy with a logged
-`plan_branch_unavailable: no_gate_profiles`. Fast Mode (`/aid-do`) neither
+A plan runs in `plan_branch` mode (its committed lifecycle manifest,
+`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`): its one run works on the
+plan branch and the plan releases once, at the plan-final boundary. `plan-run`
+starts every plan that way; the per-EPIC release of `legacy_epic_release_mode`
+left with the EPIC path in 3.0.0. Fast Mode (`/aid-do`) neither
 creates nor releases a plan branch. Reinstall the Git hooks after upgrading
 (`/aid-init`) so the commit-scope and pre-push guards match the new model.

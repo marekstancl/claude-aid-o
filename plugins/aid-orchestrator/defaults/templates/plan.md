@@ -13,12 +13,12 @@ created: YYYY-MM-DD
 author: PM + AI
 lifecycle_strict: true   # IMP-232 plan-level closure. When true, the pipeline
                          # REQUIRES a durable git-tracked lifecycle manifest at
-                         # scaffold time (fail-closed on ambiguous EPIC grammar).
+                         # scaffold time (fail-closed on an ambiguous plan).
                          # New plans are strict by default. Legacy plans without
                          # this flag proceed under a loud, audited migration.
 depends_on_plans: []     # IMP-232 D1 dependency gate. List the plan IDs this plan
                          # HARD-depends on, e.g. [P061]. Each listed plan must be
-                         # `closed` before this plan's EPICs can init (override:
+                         # `closed` before this plan's run can init (override:
                          # aid-fsm.sh init … --force --reason '<why>'). Written into
                          # the tracked manifest at scaffold; empty = no hard deps.
 zadani: .aid-o/plans/P{NNN}-zadani.md   # P109: the brief this plan carries (written first,
@@ -43,7 +43,7 @@ This plan is type: `{regular | bug-fix | refactor | docs}` (per frontmatter `typ
 
 ## Plan review
 
-Before EPIC generation this plan is put to six reviewer roles (two for
+Before its run this plan is put to six reviewer roles (two for
 `type: docs`): `commands/aid-plan.md` "Plan review (CP1)". Every plan owes
 every section below and, per step, Objective / Files / Architecture Context /
 Error Handling / Edge Cases / Acceptance Criteria / Dependencies / Effort /
@@ -197,7 +197,7 @@ optional, and aid-plan-check.sh validates each one that is present)*
 
 ## Next Steps
 
-- [ ] Create Epic(s) from this plan
+- [ ] Run it: `/aid-run P{NNN}`
 - [ ] {Additional preparation steps}
 
 ---

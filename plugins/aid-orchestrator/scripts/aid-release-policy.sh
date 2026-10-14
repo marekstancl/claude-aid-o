@@ -27,7 +27,9 @@
 #                           and at the candidate. Switched off, it blocks
 #                           (final_review_disabled) unless the PM waived it for this
 #                           candidate; a switch flipped inside the plan's own range is
-#                           ignored. EPIC mode reads the EPIC's own cp3 round instead.
+#                           ignored. EPIC mode (a plan-less run) has no whole-delivery
+#                           round since the EPIC review (CP3) left in 3.0.0: an
+#                           advisory row says its steps were reviewed one by one (CP2).
 #   * obligations         — an open release_blocker of the plan blocks.
 #   * epic roll-up        — every EPIC merged into the plan must be named in the
 #                           plan-level acceptance-evidence sources[] and
@@ -49,7 +51,7 @@
 #   REQUIRED (missing → blocked): review-profile, semantic-review-final,
 #     acceptance-evidence, gates_report (root, fallback gates/), plan-review (plan_ref hop),
 #     verification-report (aid-evidence-verify.sh --at-head; fail OR unverifiable both block).
-#     final_review (cp7/rounds.json; cp3/rounds.json in EPIC mode), obligations (plan mode).
+#     final_review (cp7/rounds.json; advisory in EPIC mode), obligations (plan mode).
 #   OPTIONAL: waiver-*.json → waivers_applied[] (Waived != pass).
 #
 # Exit codes:
@@ -72,6 +74,8 @@ source "${SCRIPT_DIR}/lib/aid-review-summary.sh"
 source "${SCRIPT_DIR}/lib/aid-review-config.sh"    # aid_review_switched_off
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-permissions.sh"   # the ONE autonomous_mode reader
+# shellcheck source=lib/aid-unmeasured.sh
+source "${SCRIPT_DIR}/lib/aid-unmeasured.sh"    # AID_PD_UNMEASURED_RE, aid_pd_unmeasured_line (P112)
 
 # ---------------------------------------------------------------------------
 # Accumulators (globals mutated by add_input / add_blocker / waiver loop)
@@ -340,8 +344,9 @@ _read_autonomous_mode() { aid_autonomous_mode "$PROJECT_ROOT"; }
 
 # ---------------------------------------------------------------------------
 # compute_final_review — the independent reading of the whole delivery.
-# Plan mode: the cp7 round of the run directory. EPIC mode (legacy release
-# mode): the EPIC's own cp3 round, which already reads base_commit..HEAD.
+# Plan mode: the cp7 round of the run directory. EPIC mode (a plan-less run):
+# an advisory row — the EPIC review (CP3) that stood here left in 3.0.0, and
+# the run's steps were reviewed one by one (CP2).
 #   pass     the index says pass (or no_change/skip from the step check) at HEAD
 #   blocked  no closed round, a failed round (the open blockers are named), a
 #            round of another head, or the review switched off without the PM's
@@ -351,7 +356,10 @@ _read_autonomous_mode() { aid_autonomous_mode "$PROJECT_ROOT"; }
 # ---------------------------------------------------------------------------
 compute_final_review() {
   local cp=cp7 toggle=cp7_plan_final_review
-  [[ "$MODE" == "plan" ]] || { cp=cp3; toggle=cp3_integration_review; }
+  if [[ "$MODE" != "plan" ]]; then
+    add_input final_review "cp2" "advisory" "no whole-delivery review: the EPIC review (CP3) was removed in 3.0.0; the run's steps were reviewed one by one (CP2)" true
+    return 0
+  fi
   local index="${EVIDENCE_DIR}/${cp}/rounds.json" artifact="${cp}/rounds.json"
   local rel=".aid-o/config/policies/review-checkpoints.yaml" policy="" value="" at_base
   policy="$(aid_review_switched_off "$PROJECT_ROOT" "$toggle")" && { value=false; policy="${policy#*$'\t'}"; }
@@ -363,9 +371,7 @@ compute_final_review() {
 
   if [[ "$value" == false ]]; then
     local waiver="${EVIDENCE_DIR}/final-review-waiver.json"
-    if [[ "$MODE" != "plan" ]]; then
-      add_input final_review "$artifact" "advisory" "the EPIC review (${toggle}) is switched off in ${policy#"${PROJECT_ROOT}/"}" true
-    elif [[ "$(jq -r '.candidate_sha // ""' "$waiver" 2>/dev/null)" == "$CANDIDATE_SHA" ]] \
+    if [[ "$(jq -r '.candidate_sha // ""' "$waiver" 2>/dev/null)" == "$CANDIDATE_SHA" ]] \
          && jq -es --arg p "$PLAN_ID" --arg c "$CANDIDATE_SHA" 'any(.[]; .event == "final_review_waived" and .epic_id == $p and .candidate_sha == $c)' \
               "${PROJECT_ROOT}/.aid-o/work/audit-log.jsonl" >/dev/null 2>&1; then
       add_input final_review "final-review-waiver.json" "advisory" "NOT READ AS A WHOLE: the whole-plan review is switched off and the PM waived it for this candidate: $(jq -r .reason "$waiver")" true
@@ -698,15 +704,17 @@ main() {
           fail)            pd_row_verdict="blocked" ;;
         esac
         add_input plan_diff "plan-diff.json" "$pd_row_verdict" "bound plan AC verdict=${pd_verdict}" true
-        # P110: a point the close could not run in isolation (no_isolation,
-        # no_verification_env, verification_env_unset, env_stripped) is
-        # UNMEASURED — named as such, never counted as verified.
-        local pd_um
-        pd_um="$(jq -r '[.results[] | select(.verdict == "absent" and ((.reason // "") | test("^(no_isolation|no_verification_env|verification_env_unset|env_stripped)"))) | "\(.ac_label) (\(.reason))"] | join(", ")' "$pd" 2>/dev/null || true)"
-        [[ -n "$pd_um" ]] && add_blocker plan_diff "blocking" "plan-diff: criteria unmeasured, the close could not run them isolated: ${pd_um}"
+        # P110: a point the close could not run (no_isolation, no_verification_env,
+        # verification_env_unset, env_stripped; P112: timeout) is UNMEASURED —
+        # named as such with its limit and remedy, never counted as verified.
+        local pd_um="" pd_row
+        while IFS= read -r pd_row; do
+          [[ -n "$pd_row" ]] && pd_um+="${pd_um:+; }$(aid_pd_unmeasured_line "$pd_row")"
+        done < <(jq -c --arg re "$AID_PD_UNMEASURED_RE" '.results[] | select(.verdict == "absent" and ((.reason // "") | test($re)))' "$pd" 2>/dev/null || true)
+        [[ -n "$pd_um" ]] && add_blocker plan_diff "blocking" "plan-diff: criteria unmeasured: ${pd_um}"
         case "$pd_verdict" in
           pass|skipped|partial) : ;;
-          *) [[ -n "$pd_um" ]] && (( $(jq '[.results[] | select(.verdict == "absent")] | length' "$pd") == $(jq '[.results[] | select(.verdict == "absent" and ((.reason // "") | test("^(no_isolation|no_verification_env|verification_env_unset|env_stripped)")))] | length' "$pd") )) \
+          *) [[ -n "$pd_um" ]] && (( $(jq '[.results[] | select(.verdict == "absent")] | length' "$pd") == $(jq --arg re "$AID_PD_UNMEASURED_RE" '[.results[] | select(.verdict == "absent" and ((.reason // "") | test($re)))] | length' "$pd") )) \
                || add_blocker plan_diff "blocking" "plan-diff reports absent acceptance criteria" ;;
         esac
       fi
@@ -989,7 +997,7 @@ main() {
       gates_result="$(jq -r '(.overall // .gates_report.result // .status // "unknown")' "$gates_report_path" 2>/dev/null || echo unknown)"
     fi
     # P110: what the run and the plan cost, from the rounds where they live
-    # (the EPIC runs' cp2/cp3, the close attempts' cp7; CP1 and the critic).
+    # (the runs' cp2, the close attempts' cp7; CP1 and the critic).
     local run_cost plan_cost _cost_rc=0 _e _cost_err; _cost_err="$(mktemp)"
     local -a _epic_dirs=()
     # the EPIC's dir, not its last run: an EPIC run twice (R-1, R-2) cost both runs

@@ -318,7 +318,7 @@ _round1_closed() {
   grep -q '^+text changed by the fix$' "$p"
 }
 
-# ── step rounds (cp2, cp3, cp6) ────────────────────────────────────────────
+# ── step rounds (cp2, cp6) ─────────────────────────────────────────────────
 # _repo — a fixture repository with a step-0 diff that needs review (2 files, > 50 lines),
 # plan.json, fsm-state.yaml and an empty timeline; sets R (repo) and E (run evidence dir)
 _repo() {
@@ -332,12 +332,11 @@ _repo() {
   # Round mechanics are tested with one reviewer: the project gates step_security
   # on a pattern, as the default did before 2.109.0 (the default is tested at "prepare needs").
   # The project keeps the pre-2.116.0 step budget (3B): threshold 1/50, two
-  # rounds, CP3 on — the step-kind cases set the shipped defaults back.
+  # rounds — the step-kind cases set the shipped defaults back.
   mkdir -p "$R/.aid-o/config/policies"
   yq '.review_checkpoints.step_review.reviewers[1].when = "review+security"
       | .review_checkpoints.step_review.skip_threshold = {"max_files": 1, "max_lines": 50}
-      | .review_checkpoints.step_review.rounds_default = 2 | del(.review_checkpoints.step_review.second_round_when)
-      | .review_checkpoints.cp3_integration_review = true' \
+      | .review_checkpoints.step_review.rounds_default = 2 | del(.review_checkpoints.step_review.second_round_when)' \
     "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
 }
 _sc() { (cd "$R" && bash "$AID_PLUGIN_PATH/scripts/aid-step-check.sh" --checkpoint "${1:-cp2}" --step "${2:-0}" --evidence-dir "$E" "${@:3}") >/dev/null; }
@@ -800,7 +799,7 @@ _probe() {
   [ "$status" -eq 2 ]; [[ "$output" == *"plan-review (CP1) subcommand"* ]]
 }
 
-# ── Step 7: what stays open after the last round, and the cp3 semantic file ──
+# ── Step 7: what stays open after the last round ──────────────────────────────
 # _erepo — like _repo, but the run lives under evidence/E-900-1_2/R-1 so the
 # round knows its EPIC and plan (P900); a second step covers src/later.py.
 _erepo() {
@@ -810,15 +809,11 @@ _erepo() {
   jq -n '{steps: [{id: "s0", role: "backend", objective: "add the thing", acceptance_criteria: ["it works"], outputs: ["Modify: `src/app.py` — x", "Create: `src/new.py` — y"], allowed_paths: ["src/app.py", "src/new.py"]},
                   {id: "s1", role: "backend", objective: "later", outputs: ["Modify: `src/new.py` — z"], allowed_paths: ["src/new.py"]}]}' > "$E/plan.json"
   : > "$E/timeline.jsonl"
-  # cp3 with one claude role and one round, so the last round is round 1 and no codex launcher is needed
-  mkdir -p "$R/.aid-o/config/policies"
-  yq -i '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
-     "$R/.aid-o/config/policies/review-checkpoints.yaml"
 }
 _J() { printf '%s/.aid-o/work/plan-state/P900/%s' "$R" "$1"; }
 # _close1 <checkpoint> [answer jq] — one round: prepare, one generalist answer, bracket, collect, close
 _close1() {
-  local cp="$1" role=step_generalist f="cp2-step-0-step-generalist"; [[ "$cp" == cp3 ]] && { role=epic_generalist; f="cp3-epic-generalist"; }
+  local cp="$1" role=step_generalist f="cp2-step-0-step-generalist"
   local args=(--checkpoint "$cp" --evidence-dir "$E" --project-root "$R"); [[ "$cp" == cp2 ]] && args+=(--step 0)
   "$ROUND_SH" prepare "${args[@]}" --round "${ROUND_N:-1}" >/dev/null || return 1
   local d="$E/${cp}$([[ "$cp" == cp2 ]] && echo /step-0)/round-${ROUND_N:-1}"
@@ -869,98 +864,11 @@ _close1() {
   [ "$(wc -l < "$(_J routed-findings.jsonl)")" -eq 1 ]
   [ "$(grep -c '"op":"add"' "$(_J carried-obligations.jsonl)")" -eq 1 ]
 }
-@test "routing: the last cp3 round routes every open blocker or major to the EPIC; a run of no plan and fast mode leave them open and say so" {
-  _erepo; _sc cp3 ""
-  run _close1 cp3; echo "$output"; [ "$status" -eq 0 ]
-  [[ "$output" == *"2 routed"* ]]
-  [ "$(wc -l < "$(_J routed-findings.jsonl)")" -eq 2 ]
-  [ "$(jq -r '.source_checkpoint' "$(_J routed-findings.jsonl)" | sort -u)" = cp3 ]
-  [ "$(jq -r '.findings[] | select(.severity == "minor") | .status' "$E/cp3/round-1/merged.json")" = open ]
-  # an EPIC that belongs to no plan (the same one-role, one-round cp3 as _erepo)
-  _repo; E="$ROOT/ev/adhoc/R-1"; mkdir -p "$E"; : > "$E/timeline.jsonl"
-  yq -i '.review_checkpoints.epic_review.rounds_default = 1 | .review_checkpoints.epic_review.reviewers = [{"role":"epic_generalist","provider":"claude","model":"opus"}]' \
-     "$R/.aid-o/config/policies/review-checkpoints.yaml"
-  jq -n '{steps: [{id: "s0", role: "backend", objective: "x", outputs: ["Modify: `src/app.py` — x"]}]}' > "$E/plan.json"
-  printf 'base_commit: %s\n' "$(git -C "$R" rev-parse HEAD~1)" > "$E/fsm-state.yaml"
-  _sc cp3 ""
-  run _close1 cp3; [ "$status" -eq 0 ]; [[ "$output" == *"belongs to no plan"* ]]
-  [ "$(jq -r '.findings[0].status' "$E/cp3/round-1/merged.json")" = open ]
-}
 @test "collect: an answer naming a role outside the round is invalid with unknown_role" {
   _repo; _sc; _S prepare --round 1 >/dev/null
-  _sanswer 1 step_generalist '.role = "epic_behaviour"'
+  _sanswer 1 step_generalist '.role = "final_criteria"'
   run _S collect --round 1
   jq -e '.invalid[] | select(.role == "step_generalist" and (.reason | startswith("unknown_role")))' "$(D 1)/collect.json"
-}
-@test "cp3 close refuses a semantic file whose lens is not a reviewer of the round" {
-  _erepo; _sc cp3 ""
-  local args=(--checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1)
-  "$ROUND_SH" prepare "${args[@]}" >/dev/null
-  local d="$E/cp3/round-1"
-  jq -n '{role: "epic_generalist", checkpoint: "cp3", findings: [{id: "g-1", checkpoint: "cp3", step: 0, severity: "minor",
-      claim: "naming", command: "grep -n x src/new.py", evidence: "src/new.py:1", fix: "rename"}]}' > "$d/reviewer-epic_generalist.json"
-  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
-  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus cp3-epic-generalist --output-file "$d/reviewer-epic_generalist.json" --evidence-dir "$d" >/dev/null
-  "$ROUND_SH" collect "${args[@]}" >/dev/null
-  jq '.findings |= map(.reported_by = ["merge_integrity"])' "$d/merged.json" > "$d/m" && mv "$d/m" "$d/merged.json"
-  run "$ROUND_SH" close "${args[@]}" --tokens epic_generalist=5
-  [ "$status" -ne 0 ]; [[ "$output" == *"merge_integrity"* ]]
-  [ ! -f "$E/semantic-review-final.json" ]
-}
-@test "cp3 close writes <run>/semantic-review-final.json in the protocol shape, valid against its schema, and refuses to close when it cannot" {
-  _erepo; _sc cp3 ""
-  run _close1 cp3; [ "$status" -eq 0 ]
-  local f="$E/semantic-review-final.json"; [ -f "$f" ]
-  [ "$(jq -r .artifact_type "$f")" = semantic_review ]
-  [ "$(jq -r .revision.base_sha "$f")" = "$(git -C "$R" rev-parse HEAD~1)" ]
-  [ "$(jq -r .revision.head_sha "$f")" = "$(git -C "$R" rev-parse HEAD)" ]
-  [ "$(jq -r .semantic_review.mode "$f")" = final ]
-  [ "$(jq -r .semantic_review.range "$f")" = "$(jq -r .range "$E/cp3/step-check.json")" ]
-  [ "$(jq -c .semantic_review.lenses_run "$f")" = '["epic_generalist"]' ]
-  [ "$(jq -r '.semantic_review.findings | map(.severity) | sort | join(",")' "$f")" = "critical,low,medium" ]
-  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "critical") | .target_path' "$f")" = src/app.py ]
-  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "low") | .status' "$f")" = open ]
-  jq -e '.semantic_review.findings | all(.fingerprint | test("^sha256:[0-9a-f]{64}$"))' "$f" >/dev/null
-  # every finding carries the schema's required keys
-  jq -e --slurpfile s "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json" \
-    '($s[0].properties.semantic_review.properties.findings.items.required) as $req | .semantic_review.findings | all(. as $x | $req | all(. as $k | $x | has($k)))' "$f" >/dev/null
-  # round 2 (PM override) after a fix: the fixed finding is resolved, the routed one open, the file rewritten
-  "$ROUND_SH" override --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --rounds 2 --reason "PM: confirm the fix in a second round" >/dev/null
-  echo "import new" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review): import"; _sc cp3 ""
-  ROUND_N=2 run _close1 cp3 '.findings |= map(select(.id != "g-1"))'; echo "$output"; [ "$status" -eq 0 ]
-  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "critical") | .status' "$f")" = resolved ]
-  [ "$(jq -r '.semantic_review.findings[] | select(.severity == "medium") | .status' "$f")" = open ]
-  # the fixed finding's route is resolved in the journal; the still-open major keeps its route
-  local fp_fixed; fp_fixed="$(jq -r '.findings[] | select(.severity == "blocker") | .fingerprint' "$E/cp3/round-1/merged.json")"
-  [ "$(jq -r --arg fp "$fp_fixed" 'select(.op == "resolve" and .fingerprint == $fp) | .resolution' "$(_J routed-findings.jsonl)" | head -c 6)" = "fixed:" ]
-  run bash -c "cd '$R' && source '$AID_PLUGIN_PATH/scripts/lib/aid-routed-findings.sh' && aid_finding_open_for_epic P900 E-900-1_2 | wc -l"
-  [ "${output##* }" -eq 1 ]
-  [ "$(jq -r '.revision.head_sha' "$f")" = "$(git -C "$R" rev-parse HEAD)" ]
-  # a finding the PM dismissed is closed as "fixed", and the file says it was dismissed
-  local fp_med card="$ROOT/card3.md"; fp_med="$(jq -r '.findings[] | select(.severity == "major") | .fingerprint' "$E/cp3/round-2/merged.json")"
-  echo "nález $fp_med" > "$card"; touch -d '-10 seconds' "$card"
-  export AID_HOOK_AUDIT="$ROOT/audit3.jsonl"
-  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
-  run "$ROUND_SH" dispute --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 2 --fingerprint "$fp_med" \
-    --reason "PM: the contract is met, dismiss it" --pm accepted --finding-card "$card"
-  echo "$output"; [ "$status" -eq 0 ]
-  [[ "$(jq -r '.semantic_review.findings[] | select(.severity == "medium") | .detail' "$f")" == *"dismissed by the PM (dispute accepted)"* ]]
-  # a write that cannot satisfy the schema fails close before closed_at
-  rm -rf "$E/cp3" "$f"; _sc cp3 ""
-  "$ROUND_SH" prepare --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 >/dev/null
-  jq -n '{role: "epic_generalist", checkpoint: "cp3", findings: [], no_findings_reason: "none"}' > "$E/cp3/round-1/reviewer-epic_generalist.json"
-  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$E/cp3/round-1" >/dev/null
-  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus cp3-epic-generalist --output-file "$E/cp3/round-1/reviewer-epic_generalist.json" --evidence-dir "$E/cp3/round-1" >/dev/null
-  "$ROUND_SH" collect --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 >/dev/null
-  # the broken schema lives in a copy of the plugin: an interrupted run must
-  # never leave the real one broken (it did once)
-  local plug="$ROOT/plugin-copy"; mkdir -p "$plug"
-  cp -r "$AID_PLUGIN_PATH"/{scripts,defaults,skills,.claude-plugin} "$plug"/
-  jq '.properties.semantic_review.properties.mode.enum = ["local"]' "$AID_PLUGIN_PATH/defaults/schemas/semantic-review.schema.json" \
-    > "$plug/defaults/schemas/semantic-review.schema.json"
-  AID_PLUGIN_PATH="$plug" run "$plug/scripts/aid-review-round.sh" close --checkpoint cp3 --evidence-dir "$E" --project-root "$R" --round 1 --tokens epic_generalist=1
-  [ "$status" -eq 1 ]; [[ "$output" == *"semantic_review.mode"* ]]
-  [ ! -f "$f" ]; [ "$(jq -r '.closed_at // "none"' "$E/cp3/round-1/round.json")" = none ]
 }
 
 # ── Step 9: fast mode on the same mechanism ──
@@ -1709,20 +1617,323 @@ _rebind() {   # the plan follows the brief: verze and sha
   run "$ROUND_SH" prepare "$wt/.aid-o/plans/p.md" --round 1
   [ "$status" -eq 1 ]; [[ "$output" == *"two different contents under one name"* ]]
 }
-@test "cp7-zadani: with CP3 off an EPIC is cp3: off and carries what its step rounds left open; the prompt says so" {
+@test "cp7-zadani: a run carries what its step rounds left open (review: steps); the prompt says so" {
   _frepo
   local ep="$R/.aid-o/work/evidence/E-901-1_1/R-1/cp2/step-0"; mkdir -p "$ep/round-1"
   jq -n '{findings: [{severity: "major", status: "open", claim: "the import is never used", evidence: "src/app.py:1", fix: "use it"}, {severity: "minor", status: "open", claim: "style", evidence: "src/app.py:2", fix: "x"}]}' > "$ep/round-1/merged.json"
   bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
-  [ "$(jq -c '.epics[0] | {cp3, n: (.findings | length)}' "$E/cp7/epic-findings.json")" = '{"cp3":"off","n":1}' ]
+  [ "$(jq -c '.epics[0] | {review, n: (.findings | length)}' "$E/cp7/epic-findings.json")" = '{"review":"steps","n":1}' ]
   _fsc; _F prepare --round 1 >/dev/null
-  grep -q 'EPIC review switched off; its steps were reviewed one by one — 1 finding' "$(FD 1)/prompt-final_generalist.md"
+  grep -q 'its steps were reviewed one by one — 1 finding' "$(FD 1)/prompt-final_generalist.md"
 }
-@test "cp7-zadani: with CP3 off a leftover cp3/ is not read, and a finding the PM dismissed is listed for the close" {
+@test "cp7-zadani: an old run's EPIC-review directory is not read, and a finding the PM dismissed is listed for the close" {
   _frepo
   local base="$R/.aid-o/work/evidence/E-901-1_1"; mkdir -p "$base/R-1/cp3/round-1" "$base/R-2/cp2/step-0/round-1"
   echo '{"findings": []}' > "$base/R-1/cp3/round-1/merged.json"
   jq -n '{findings: [{severity: "blocker", status: "fixed", claim: "shell injection in run", evidence: "src/app.py:1", fix: "quote it", dispute: {pm: {answer: "accepted"}}}]}' > "$base/R-2/cp2/step-0/round-1/merged.json"
   bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-step-review-packet.sh' && aid_final_review_inputs_build '$R' '$E' '$R/.aid-o/plans/P901-x.md' P901"
-  [ "$(jq -c '.epics[0] | {cp3, s: [.findings[].status]}' "$E/cp7/epic-findings.json")" = '{"cp3":"off","s":["dismissed_by_pm"]}' ]
+  [ "$(jq -c '.epics[0] | {review, s: [.findings[].status]}' "$E/cp7/epic-findings.json")" = '{"review":"steps","s":["dismissed_by_pm"]}' ]
+}
+
+# ── foreign repositories in the review packets (P112 Step 3) ─────────────────
+# _foreign_repo <plan_id> <project> — a second repository F with the plan's
+# worktree WT on plan/<plan_id>-<project>; the worktree holds one commit
+# (FBASE_F..FHEAD_F) the live checkout does not.
+_foreign_repo() {
+  F="$ROOT/far/docs"; mkdir -p "$F"; git -C "$F" init -q -b main
+  git -C "$F" config user.email t@t; git -C "$F" config user.name t
+  printf 'live line\n' > "$F/page.md"; git -C "$F" add page.md; git -C "$F" commit -qm init
+  WT="$F/.aid-worktrees/plan-$1--docs"; FBR="plan/$1-$2"
+  git -C "$F" worktree add -q -b "$FBR" "$WT" main
+  FBASE_F="$(git -C "$WT" rev-parse HEAD)"
+  printf 'worktree only line\n' >> "$WT/page.md"; git -C "$WT" commit -qam "docs: the plan's page"
+  FHEAD_F="$(git -C "$WT" rev-parse HEAD)"
+}
+# _frr [empty] — the step-0 plan.json declares F and names its page; the return
+# names the worktree commit (or, given "empty", the empty range the check refuses)
+_frr() {
+  _foreign_repo P900 repo
+  jq --arg f "$F" --arg w "$WT" --arg b "$FBR" '.repo_roots = [{name: "docs", path: $f, worktree: $w, branch: $b, base: "x"}]
+     | .steps[0].allowed_paths = ["src/**", "\($f)/page.md"] | .steps[0].outputs += ["Modify: `\($f)/page.md` — the page"]' "$E/plan.json" > "$E/p.tmp" && mv "$E/p.tmp" "$E/plan.json"
+  mkdir -p "$E/steps/step_1_backend"
+  local r="${FBASE_F}..${FHEAD_F}"; [[ "${1:-}" == empty ]] && r="${FBASE_F}..${FBASE_F}"
+  jq -n --arg r "$r" '{repo_commits: [{repo: "docs", range: $r}]}' > "$E/steps/step_1_backend/return.json"
+}
+
+@test "foreign-read: the step packet carries the foreign diff of the verified range and worktree paths in files.json" {
+  _repo; _frr; _sc
+  [ "$(jq -c '.other_repos' "$E/cp2/step-0/step-check.json")" = "$(jq -nc --arg w "$WT" --arg r "${FBASE_F}..${FHEAD_F}" '[{name: "docs", worktree: $w, range: $r}]')" ]
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  grep -q '^+worktree only line' "$(D 1)/packet/foreign-docs.patch"
+  jq -e --arg w "$WT" '(.allowed_paths | index("\($w)/page.md")) and (.outputs | any(contains("\($w)/page.md")))' "$(D 1)/packet/files.json"
+  ! grep -q "\"$F/page.md\"" "$(D 1)/packet/files.json"
+  [ "$(jq -r '.foreign[0].patch' "$(D 1)/packet/packet.json")" = foreign-docs.patch ]
+  jq -e '.files | any(.file == "foreign-docs.patch")' "$(D 1)/packet/manifest.json"
+}
+@test "foreign-read: the rendered prompt names the worktree and forbids the live checkout" {
+  _repo; _frr; _sc
+  _S prepare --round 1 >/dev/null
+  grep -q "the plan's work is in the worktree ${WT} (branch ${FBR})" "$(D 1)/prompt-step_generalist.md"
+  grep -q "The live checkout at ${F} is not this plan's work — never read it" "$(D 1)/prompt-step_generalist.md"
+  grep -q '^+worktree only line' "$(D 1)/prompt-step_generalist.md"
+}
+@test "foreign-read: a range the step check refused is left out of other_repos and gets no patch" {
+  _repo; _frr empty; _sc
+  [ "$(jq -r '.other_repos // "none"' "$E/cp2/step-0/step-check.json")" = none ]
+  [[ "$(jq -r .reason "$E/cp2/step-0/step-check.json")" == *"repo_commits"*docs* ]]
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ ! -e "$(D 1)/packet/foreign-docs.patch" ]
+  [ "$(jq -r '.foreign[0].patch' "$(D 1)/packet/packet.json")" = null ]
+  grep -q "this step made no commits there" "$(D 1)/prompt-step_generalist.md"
+}
+@test "foreign-read: a missing foreign worktree fails the packet build with foreign_worktree_missing" {
+  _repo; _frr; _sc
+  git -C "$F" worktree remove --force "$WT"
+  run _S prepare --round 1; [ "$status" -ne 0 ]
+  [[ "$output" == *"foreign_worktree_missing"*"$WT"* ]]
+  [ ! -d "$(D 1)/packet" ]
+}
+@test "foreign-read: a plan without repo_roots gets the packet it always got" {
+  _repo; _sc
+  run _S prepare --round 1; [ "$status" -eq 0 ]
+  [ ! -e "$(D 1)/packet/packet.json" ]
+  ! ls "$(D 1)/packet"/foreign-*.patch 2>/dev/null
+  ! grep -q "Foreign repositories" "$(D 1)/prompt-step_generalist.md"
+}
+@test "foreign-read: the whole-plan packet carries each foreign branch from its frozen base and its files as worktree paths" {
+  _frepo
+  _foreign_repo P901 frepo
+  sed -i "s|^type: feature|type: feature\nrepo_roots: [{name: docs, path: $F}]|" "$R/.aid-o/plans/P901-x.md"
+  mkdir -p "$R/.aid-o/work/plan-state/P901"
+  jq -n --arg b "$FBASE_F" --arg h "$FHEAD_F" --arg br "$FBR" '{plan_boundary_manifest: {repo_roots: [{name: "docs", branch: $br, base: $b, head: $h, commits: 1}]}}' \
+    > "$R/.aid-o/work/plan-state/P901/plan-boundary-manifest.json"
+  _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  grep -q '^+worktree only line' "$(FD 1)/packet/foreign-docs.patch"
+  [ "$(jq -c .outputs "$(FD 1)/packet/files.json")" = "$(jq -nc --arg w "$WT" '["\($w)/page.md"]')" ]
+  [ "$(jq -r '.foreign[0].commits' "$(FD 1)/packet/packet.json")" = 1 ]
+  grep -q "never read it" "$(FD 1)/prompt-final_generalist.md" 2>/dev/null || grep -lq "never read it" "$(FD 1)"/prompt-*.md
+}
+@test "foreign-read: a foreign branch with no commits at the close says so by its commit count" {
+  _frepo
+  _foreign_repo P901 frepo
+  sed -i "s|^type: feature|type: feature\nrepo_roots: [{name: docs, path: $F}]|" "$R/.aid-o/plans/P901-x.md"
+  mkdir -p "$R/.aid-o/work/plan-state/P901"
+  jq -n --arg b "$FHEAD_F" --arg br "$FBR" '{plan_boundary_manifest: {repo_roots: [{name: "docs", branch: $br, base: $b, head: $b, commits: 0}]}}' \
+    > "$R/.aid-o/work/plan-state/P901/plan-boundary-manifest.json"
+  _fsc
+  run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.foreign[0].commits' "$(FD 1)/packet/packet.json")" = 0 ]
+  grep -q "(no commits on ${FBR})" "$(FD 1)"/prompt-*.md
+}
+
+# ── P112 Step 7: escalations settled by an independent agent ─────────────────
+# _dlg [auto|manual] [n findings] — a step-0 round of plan P950 (one round
+# allowed, so what stays open is an escalation), collected; FP = first finding.
+# step_security is a codex role the round does not ask (verdict review), so the
+# delegate has a codex model to run.
+_dlg() {
+  _repo
+  yq -i '.review_checkpoints.step_review.rounds_default = 1 | .review_checkpoints.step_review.reviewers[1].provider = "codex" | .review_checkpoints.step_review.reviewers[1].model = "gpt-5"' \
+    "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  mkdir -p "$R/.aid-o/plans"
+  printf -- '---\nid: P950\n---\n# Plan\n' > "$R/.aid-o/plans/P950-x.md"
+  echo "plan_path: $R/.aid-o/plans/P950-x.md" >> "$E/fsm-state.yaml"
+  if [[ "${1:-auto}" == auto ]]; then mkdir -p "$R/.aid-o/work/plan-state/P950"; echo 'autonomy: auto' > "$R/.aid-o/work/plan-state/P950/plan-state.yaml"; fi
+  _sc; _S prepare --round 1 >/dev/null
+  if [[ "${2:-1}" == 2 ]]; then
+    _sanswer 1 step_generalist '.findings += [.findings[0] | .id = "g-2" | .claim = "a second module is never imported" | .evidence = "src/new.py:1" | .severity = "blocker"]'
+  else
+    _sanswer 1 step_generalist
+  fi
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist
+  FP="$(jq -r '.findings[0].fingerprint' "$(D 1)/merged.json")"; F16="$(sed 's/^sha256://' <<< "$FP" | cut -c1-16)"
+  VF="$(D 1)/adjudicator-delegated-${F16}.json"
+}
+_DLG() { "$ROUND_SH" delegate --checkpoint cp2 --evidence-dir "$E" --step 0 --project-root "$R" --round 1 "$@"; }
+# _verdict <file> <answer> [class] [provider] [fp] — a verdict as an adjudicator writes it
+_verdict() { jq -n --arg f "${5:-$FP}" --arg a "$2" --arg c "${3:-technical}" --arg p "${4:-claude}" \
+  '{fingerprint: $f, kind: (if $a | IN("accepted", "rejected") then "dispute" else "open_after_rounds" end), answer: $a, class: $c,
+    reason: "the reviewer read the live checkout; the worktree has it", rerun: {cmd: "grep -n new src/app.py", exit: 0, output_tail: "3:new"}, provider: $p}' > "$1"; }
+_adj_bracket() {   # <fp16> <verdict file>
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-$1" --agent-id claude:adjudicator-delegated --evidence-dir "$(D 1)" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "adjudicator-delegated-$1" --output-file "$2" --evidence-dir "$(D 1)" >/dev/null
+}
+# _fake_codex — a codex that answers with $CODEX_VERDICT through --output-last-message
+_fake_codex() {
+  _probe true; mkdir -p "$ROOT/bin"
+  cat > "$ROOT/bin/codex" <<'SH'
+#!/usr/bin/env bash
+while [[ $# -gt 0 ]]; do [[ "$1" == --output-last-message ]] && out="$2"; shift; done
+cat > /dev/null; printf '%s\n' "$CODEX_VERDICT" > "$out"
+SH
+  chmod +x "$ROOT/bin/codex"; export PATH="$ROOT/bin:$PATH"
+}
+_dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktree has the import, the reviewer read the live tree" >/dev/null; }
+
+@test "delegate: in an --auto plan a disputed finding is settled by a Codex verdict, with no standing record" {
+  _dlg auto; _dispute; _fake_codex
+  export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "the import is there in the worktree", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]
+  [ ! -e "$R/.aid-o/work/evidence/P950/standing-pm.json" ] && [ ! -e "$R/.aid-o/work/evidence/P950/delegate.json" ]
+  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | "\(.status) \(.dispute.delegated.provider)"' "$(D 1)/merged.json")" = "fixed codex" ]
+  [ "$(jq -r .provider "$R/.aid-o/work/evidence/P950/delegated-disputes.jsonl")" = codex ]
+}
+@test "delegate: with Codex unavailable it exits 4 STAND-IN, and a Claude verdict in its bracket is recorded" {
+  _dlg auto; _dispute; _probe false rate_limited
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 4 ]
+  [[ "$output" == *"STAND-IN"*"rate_limited"*"adjudicator-delegated-${F16}"* ]]
+  [ -f "$(D 1)/adjudicator-delegated-${F16}.prompt.md" ]
+  _verdict "$VF" accepted; _adj_bracket "$F16" "$VF"
+  run _DLG --fingerprint "$FP" --verdict "$VF"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .dispute.delegated.provider' "$(D 1)/merged.json")" = claude ]
+}
+@test "delegate: a Claude verdict without its closed bracket is refused delegation_missing" {
+  _dlg auto; _dispute; _verdict "$VF" accepted
+  run _DLG --fingerprint "$FP" --verdict "$VF"; [ "$status" -eq 1 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: delegation_missing)"* && "$output" == *"next: "* ]]
+  [ "$(jq -r '.findings[0].status' "$(D 1)/merged.json")" = disputed ]
+}
+@test "delegate: a manual plan without standing --delegate is refused delegation_missing; after it the verdict is accepted" {
+  _dlg manual; _dispute; _verdict "$VF" accepted; _adj_bracket "$F16" "$VF"
+  run _DLG --fingerprint "$FP" --verdict "$VF"; [ "$status" -eq 1 ]; [[ "$output" == *delegation_missing* ]]
+  run "$ROUND_SH" standing --plan "$R/.aid-o/plans/P950-x.md" --delegate --reason "PM: ať eskalace rozhodne nezávislý agent"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .delegate "$R/.aid-o/work/evidence/P950/delegate.json")" = true ]
+  [ ! -e "$R/.aid-o/work/evidence/P950/standing-pm.json" ]     # no extra rounds granted
+  run _DLG --fingerprint "$FP" --verdict "$VF"; echo "$output"; [ "$status" -eq 0 ]
+}
+@test "delegate: close waits while an escalation has no verdict, and closes after the delegate dismissed it (not routed to the PM)" {
+  _dlg auto
+  run _S close --round 1 --tokens step_generalist=1; [ "$status" -eq 1 ]
+  [[ "$output" == *"1 escalation(s) await an independent verdict"*"$FP"* ]]
+  [ ! -f "$(D 1)/measurement.json" ]
+  run _DLG --pending; [ "$output" = "$FP" ]
+  _verdict "$VF" dismiss; _adj_bracket "$F16" "$VF"
+  run _DLG --fingerprint "$FP" --verdict "$VF"; [ "$status" -eq 0 ]
+  run _DLG --pending; [ -z "$output" ]
+  run _S close --round 1 --tokens step_generalist=1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .verdict "$(D 1)/measurement.json")" = pass ]
+  [ "$(jq -r '.findings[0].status' "$(D 1)/merged.json")" = fixed ]
+}
+@test "delegate: a fix answer grants one more round; a second fix for the same finding is refused (dismiss or brief only)" {
+  _dlg auto
+  _verdict "$VF" fix; _adj_bracket "$F16" "$VF"
+  run _DLG --fingerprint "$FP" --verdict "$VF"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .grants "$E/cp2/step-0/delegate-rounds.json")" = 1 ]
+  run _DLG --pending; [ -z "$output" ]                          # round 1 is no longer the last one
+  run _S close --round 1 --tokens step_generalist=1; [ "$status" -eq 0 ]; [ "$(jq -r '.findings[0].status' "$(D 1)/merged.json")" = open ]
+  # the round after the fix: the same finding still open — a second fix is refused
+  rm "$E/cp2/step-0/delegate-rounds.json"
+  jq '.findings[0] |= del(.delegated)' "$(D 1)/merged.json" > m.t && mv m.t "$(D 1)/merged.json"
+  _verdict "$VF" fix; jq '.reason = "a second fix asked"' "$VF" > v.t && mv v.t "$VF"; _adj_bracket "$F16" "$VF"
+  run _DLG --fingerprint "$FP" --verdict "$VF"; [ "$status" -eq 1 ]; [[ "$output" == *"already had its delegated fix round"* ]]
+}
+@test "delegate: a provider codex verdict edited by hand after a genuine run is refused (its sha256 is not the runner's)" {
+  _dlg auto; _dispute; _fake_codex
+  export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "rejected", class: "technical", reason: "the finding stands on the worktree", rerun: {cmd: "grep", exit: 1, output_tail: ""}}')"
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 0 ]
+  jq '.answer = "accepted"' "$VF" > v.t && mv v.t "$VF"
+  jq '.findings[0] |= del(.dispute.delegated) | .findings[0].status = "disputed"' "$(D 1)/merged.json" > m.t && mv m.t "$(D 1)/merged.json"
+  run _DLG --fingerprint "$FP" --verdict "$VF"; [ "$status" -eq 1 ]
+  [[ "$output" == *"codex verdict without the runner's record"*delegation_missing* ]]
+}
+@test "delegate: a second delegate for the same finding does not dispatch again" {
+  _dlg auto; _dispute; _fake_codex
+  export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fine on the worktree", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
+  _DLG --fingerprint "$FP" >/dev/null
+  rm "$ROOT/bin/codex"
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 0 ]; [[ "$output" == *"already settled"*"nothing dispatched"* ]]
+  [ "$(grep -c . "$R/.aid-o/work/evidence/P950/delegated-disputes.jsonl")" = 1 ]
+}
+@test "delegate: after /aid-stop (the run declared manual) the automatic delegation is not in force" {
+  _dlg auto; _dispute
+  mkdir -p "$R/.aid-o/work"; echo 'mode: manual' > "$R/.aid-o/work/auto-mode-state.yaml"
+  run _DLG --pending; [ "$status" -eq 1 ]; [[ "$output" == *delegation_missing* ]]
+}
+@test "delegate: two findings open after the last round, Codex out — two stand-in verdicts in turn, then the round closes without a PM card" {
+  _dlg auto 2; _probe false codex_absent
+  local fps; fps="$(_DLG --pending)"; [ "$(wc -l <<< "$fps")" = 2 ]
+  local f f16 v
+  for f in $fps; do
+    run _DLG --fingerprint "$f"; [ "$status" -eq 4 ]
+    f16="$(sed 's/^sha256://' <<< "$f" | cut -c1-16)"; v="$(D 1)/adjudicator-delegated-${f16}.json"
+    _verdict "$v" dismiss technical claude "$f"; _adj_bracket "$f16" "$v"
+    _DLG --fingerprint "$f" --verdict "$v" >/dev/null
+    [[ "$(_DLG --pending)" != *"$f"* ]]
+  done
+  [ -z "$(_DLG --pending)" ]
+  run _S close --round 1 --tokens step_generalist=1; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" != *"routed"* ]]
+}
+@test "delegate: a verdict of class brief is refused delegation_out_of_scope and the finding goes to the PM at close" {
+  _dlg auto; _verdict "$VF" dismiss brief; _adj_bracket "$F16" "$VF"
+  run _DLG --fingerprint "$FP" --verdict "$VF"; [ "$status" -eq 1 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: delegation_out_of_scope)"* && "$output" == *"next: "* ]]
+  [ "$(jq -r '.findings[0].delegated.to_pm' "$(D 1)/merged.json")" = true ]
+  run _DLG --pending; [ -z "$output" ]
+  run _S close --round 1 --tokens step_generalist=1; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"the PM decides on them"* ]]                       # this fixture run belongs to no plan journal: the PM's card
+  [ "$(jq -r '.findings[0].status' "$(D 1)/merged.json")" = open ]
+}
+@test "delegate: a real fingerprint sha256:<64 hex> gives the focus adjudicator-delegated-<16 hex>, which the bracket accepts outside the round's roles" {
+  _dlg auto; _dispute; _probe false codex_absent
+  [[ "$FP" =~ ^sha256:[0-9a-f]{64}$ ]]
+  run _DLG --fingerprint "$FP"; [[ "$output" == *"--focus adjudicator-delegated-${F16} "* ]]
+  run bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-${F16}" --agent-id claude:adjudicator-delegated --evidence-dir "$(D 1)"; [ "$status" -eq 0 ]
+  run bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-${F16:0:15}" --agent-id claude:adjudicator-delegated --evidence-dir "$(D 1)"; [ "$status" -ne 0 ]
+}
+@test "delegate: the plan review (CP1) is never delegated" {
+  run "$ROUND_SH" delegate "$PLAN" --round 1 --pending
+  [ "$status" -eq 2 ]; [[ "$output" == *"plan review (CP1) stays the PM's"* ]]
+}
+@test "delegate: an open CP7 blocker in an --auto plan is settled before the round closes (and so before decide)" {
+  _frepo; _fsc
+  mkdir -p "$R/.aid-o/work/plan-state/P901"; echo 'autonomy: auto' > "$R/.aid-o/work/plan-state/P901/plan-state.yaml"
+  _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_BLOCKER"
+  _F collect --round 1 >/dev/null
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5; [ "$status" -eq 1 ]; [[ "$output" == *"await an independent verdict"* ]]
+  local fp f16 v; fp="$(_F delegate --round 1 --pending)"; f16="$(sed 's/^sha256://' <<< "$fp" | cut -c1-16)"; v="$(FD 1)/adjudicator-delegated-${f16}.json"
+  _verdict "$v" dismiss technical claude "$fp"
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-${f16}" --agent-id claude:adjudicator-delegated --evidence-dir "$(FD 1)" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "adjudicator-delegated-${f16}" --output-file "$v" --evidence-dir "$(FD 1)" >/dev/null
+  run _F delegate --round 1 --fingerprint "$fp" --verdict "$v"; echo "$output"; [ "$status" -eq 0 ]
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .verdict "$E/cp7/rounds.json")" = pass ]
+  [ "$(jq -r .checkpoint "$R/.aid-o/work/evidence/P901/delegated-disputes.jsonl")" = cp7 ]
+}
+@test "delegate: a delegate.json that is not the PM's record (empty, no words) puts nothing in force" {
+  _dlg manual; _dispute
+  mkdir -p "$R/.aid-o/work/evidence/P950"; echo '{}' > "$R/.aid-o/work/evidence/P950/delegate.json"
+  run _DLG --pending; [ "$status" -eq 1 ]; [[ "$output" == *delegation_missing* ]]
+  echo '{"delegate": true, "by": "PM", "words": "short"}' > "$R/.aid-o/work/evidence/P950/delegate.json"
+  run _DLG --pending; [ "$status" -eq 1 ]
+}
+@test "delegate: a Claude verdict bracketed under another agent, or filed under another name, is refused delegation_missing" {
+  _dlg auto; _dispute; _verdict "$VF" accepted
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-$F16" --agent-id aid-orchestrator:review --evidence-dir "$(D 1)" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "adjudicator-delegated-$F16" --output-file "$VF" --evidence-dir "$(D 1)" >/dev/null
+  run _DLG --fingerprint "$FP" --verdict "$VF"; [ "$status" -eq 1 ]; [[ "$output" == *"agent claude:adjudicator-delegated"* ]]
+  cp "$VF" "$(D 1)/other.json"
+  run _DLG --fingerprint "$FP" --verdict "$(D 1)/other.json"; [ "$status" -eq 1 ]; [[ "$output" == *"not $(D 1)/other.json"* ]]
+}
+@test "delegate: a codex event of another round does not vouch for this round's verdict (no replay)" {
+  _dlg auto; _dispute; _verdict "$VF" accepted technical codex
+  printf '{"ts":"2026-10-13T00:00:00Z","event":"delegate_codex_verdict","fp16":"%s","round":"7","sha256":"%s"}\n' "$F16" "$(sha256sum "$VF" | cut -d' ' -f1)" >> "$E/timeline.jsonl"
+  run _DLG --fingerprint "$FP" --verdict "$VF"; [ "$status" -eq 1 ]; [[ "$output" == *"runner's record"* ]]
+}
+@test "delegate: a technical dispute verdict without the re-run of the check is not usable" {
+  _dlg auto; _dispute; _verdict "$VF" accepted; jq 'del(.rerun)' "$VF" > v.t && mv v.t "$VF"; _adj_bracket "$F16" "$VF"
+  run _DLG --fingerprint "$FP" --verdict "$VF"; [ "$status" -eq 1 ]; [[ "$output" == *"re-run of the check"* ]]
+}
+@test "delegate: one fix answer grants ONE more round for the whole round — the other open finding waits for it, no second grant" {
+  _dlg auto 2
+  local fps f f16 v; fps="$(_DLG --pending)"; [ "$(wc -l <<< "$fps")" = 2 ]
+  f="$(head -1 <<< "$fps")"; f16="$(sed 's/^sha256://' <<< "$f" | cut -c1-16)"; v="$(D 1)/adjudicator-delegated-${f16}.json"
+  _verdict "$v" fix technical claude "$f"; _adj_bracket "$f16" "$v"
+  _DLG --fingerprint "$f" --verdict "$v" >/dev/null
+  [ "$(jq -r .grants "$E/cp2/step-0/delegate-rounds.json")" = 1 ]
+  run _DLG --pending; [ -z "$output" ]                       # the second finding goes to the extra round, not to a verdict now
+  f="$(tail -1 <<< "$fps")"
+  run _DLG --fingerprint "$f"; [ "$status" -eq 1 ]; [[ "$output" == *"not the last one"* ]]
 }

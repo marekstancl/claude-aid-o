@@ -49,6 +49,8 @@ _AID_DISPATCH_CONTRACT_SH_LOADED=1
 _AID_DCT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-scoping.sh
 source "${_AID_DCT_LIB_DIR}/aid-scoping.sh"
+# shellcheck source=aid-repo-roots.sh
+source "${_AID_DCT_LIB_DIR}/aid-repo-roots.sh"   # aid_rr_rewrite_files, aid_rr_resolve
 
 # The tag on the fenced block the agent returns. One spelling, used by the
 # prompt that asks for it and the reader that finds it.
@@ -117,14 +119,13 @@ aid_dispatch_contract_build() {
   # expected artifacts alike), so the agent is never sent into the live
   # checkout. On a direct plan, a path in an undeclared foreign repository is
   # refused (exit 4); the EPIC path keeps today's absolute paths.
-  local rr direct rr_out
-  rr="$(jq -c '.repo_roots // []' "$plan" 2>/dev/null || echo '[]')"
+  local direct rr_out
   direct="$(jq -r '.direct // false' "$plan" 2>/dev/null || echo false)"
   if [[ "$direct" == "true" ]]; then
-    rr_out="$(_aid_dc_rewrite_foreign "$plan" "$rr" "$(jq -c '.allowed_paths // []' <<< "$step")")" || return 4
+    rr_out="$(aid_rr_rewrite_files "$plan" "$(jq -c '.allowed_paths // []' <<< "$step")")" || return 4
     step="$(jq -c --argjson a "$rr_out" '.allowed_paths = $a' <<< "$step")"
     if [[ "$artifacts" != "[]" ]]; then
-      artifacts="$(_aid_dc_rewrite_foreign "$plan" "$rr" "$artifacts")" || return 4
+      artifacts="$(aid_rr_rewrite_files "$plan" "$artifacts")" || return 4
     fi
   fi
 
@@ -243,66 +244,6 @@ aid_dispatch_repo_range_ok() {
     && [[ "$(git -C "$1" rev-parse "${2%%..*}^{commit}" 2>/dev/null)" != "$(git -C "$1" rev-parse "${2##*..}^{commit}" 2>/dev/null)" ]] \
     && git -C "$1" merge-base --is-ancestor "${2%%..*}" "${2##*..}" 2>/dev/null \
     && { [[ -z "${3:-}" ]] || git -C "$1" merge-base --is-ancestor "${2##*..}" "$3" 2>/dev/null; }
-}
-
-# aid_dispatch_repo_resolve <plan.json> <slug> — prints "<worktree>\t<branch>"
-# of the repo_roots entry named <slug> (P111: the one mapping the contract, the
-# step's return and the step check read). Exit 1 when the plan declares none.
-aid_dispatch_repo_resolve() {
-  local out
-  out="$(jq -r --arg n "$2" 'first(.repo_roots[]? | select(.name == $n) | [.worktree, .branch] | @tsv) // empty' "$1" 2>/dev/null)"
-  [[ -n "$out" ]] || return 1
-  printf '%s\n' "$out"
-}
-
-# _aid_dc_phys_repo <path> — the physical toplevel of the git repository a
-# (possibly not yet existing) path lies in, or nothing.
-_aid_dc_phys_repo() {
-  local d="$1"
-  while [[ -n "$d" && ! -d "$d" ]]; do d="${d%/*}"; done
-  [[ -n "$d" ]] || d=/
-  ( cd "$d" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null ) | xargs -r realpath 2>/dev/null
-}
-
-# _aid_dc_rewrite_foreign <plan.json> <repo_roots-json> <paths-json> — the paths
-# with every one under a declared repo_roots path rewritten to its worktree.
-# Refuses (exit 1, foreign_repo_undeclared) a path in a foreign git repository
-# the plan does not declare, and a declared one whose worktree is gone.
-_aid_dc_rewrite_foreign() {
-  local plan="$1" rr="$2" paths="$3" own out="[]" p repo n i rp wt hit
-  own="$(_aid_dc_phys_repo "$(dirname "$(realpath "$plan")")")"
-  n="$(jq 'length' <<< "$rr")"
-  while IFS= read -r p; do
-    [[ -n "$p" ]] || continue
-    if [[ "$p" != /* ]]; then out="$(jq -c --arg p "$p" '. + [$p]' <<< "$out")"; continue; fi
-    repo="$(_aid_dc_phys_repo "$p")"
-    if [[ -z "$repo" || "$repo" == "$own" ]]; then out="$(jq -c --arg p "$p" '. + [$p]' <<< "$out")"; continue; fi
-    hit=""
-    for (( i=0; i<n; i++ )); do
-      rp="$(realpath -m "$(jq -r --argjson i "$i" '.[$i].path' <<< "$rr")")"
-      [[ "$repo" == "$rp" ]] || continue
-      wt="$(jq -r --argjson i "$i" '.[$i].worktree' <<< "$rr")"
-      if [[ ! -d "$wt" ]]; then
-        echo "contract: the worktree ${wt} of repo_roots '$(jq -r --argjson i "$i" '.[$i].name' <<< "$rr")' is gone — no step is sent into ${rp}'s live checkout instead." >&2
-        echo "next: recreate it on its recorded branch: git -C ${rp} worktree add ${wt} $(jq -r --argjson i "$i" '.[$i].branch' <<< "$rr")" >&2
-        echo "(pipeline.md §When AID refuses: foreign_repo_undeclared)" >&2
-        return 1
-      fi
-      # the physical spelling of p (symlinks, trailing slash), then the tail under the repo
-      local pp; pp="$(realpath -m "$p")"
-      hit="${wt}${pp#"$rp"}"
-      [[ "$p" == */ ]] && hit="${hit%/}/"
-      break
-    done
-    if [[ -z "$hit" ]]; then
-      echo "contract: ${p} lies in ${repo}, a git repository outside the project that the plan does not declare in repo_roots — a direct run works in a foreign repository only through its worktree." >&2
-      echo "next: declare it in the plan's frontmatter (repo_roots: [{name: <slug>, path: ${repo}}]) and restart the run, or drop the path from the step" >&2
-      echo "(pipeline.md §When AID refuses: foreign_repo_undeclared)" >&2
-      return 1
-    fi
-    out="$(jq -c --arg p "$hit" '. + [$p]' <<< "$out")"
-  done < <(jq -r '.[]' <<< "$paths")
-  printf '%s\n' "$out"
 }
 
 # _aid_dc_path_allowed <path> <allowed-json> <own_evidence_suffix> — bash glob
@@ -427,7 +368,7 @@ aid_dispatch_contract_validate() {
   while IFS=$'\t' read -r rc_repo rc_range; do
     [[ -n "$rc_repo" ]] || continue
     if [[ "$rc_repo" != /* ]]; then
-      if [[ -z "$rc_pj" ]] || ! IFS=$'\t' read -r rc_wt rc_br < <(aid_dispatch_repo_resolve "$rc_pj" "$rc_repo"); then
+      if [[ -z "$rc_pj" ]] || ! IFS=$'\t' read -r rc_wt rc_br < <(aid_rr_resolve "$rc_pj" "$rc_repo"); then
         _add reasons "repo_commits names '${rc_repo}', which is no repo_roots entry of this plan"; continue
       fi
       aid_dispatch_repo_range_ok "$rc_wt" "$rc_range" "$rc_br" \

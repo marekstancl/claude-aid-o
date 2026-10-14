@@ -15,7 +15,7 @@ author: PM + AI
 
 This test plan exercises cross-plan dependency handling in the pipeline script
 test suite. It references external EPICs and Plans in its Dependencies section,
-verifying that aid-plan-to-epic.sh correctly extracts external references and
+verifying that aid-plan-lint.sh correctly extracts external references and
 populates the Queue Implications section of the generated EPIC.
 
 This plan intentionally depends on a hypothetical P-TEST-001 plan output,

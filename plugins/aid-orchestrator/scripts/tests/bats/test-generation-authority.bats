@@ -1,15 +1,9 @@
 #!/usr/bin/env bats
 # aid-tier: t2
-# test-generation-authority.bats — P074 Step 13: CP1 runs ONCE per plan and the
-# decision is sealed into a generation-authority receipt.
-#
-# THE FAILURE THIS PINS, observed live on 2026-08-04: aid-plan-to-epic.sh calls the CP1
-# gate unconditionally PER INVOCATION and the gate's one-shot PM-override memo
-# is function-local, so a 3-phase plan demanded 3 PM artifacts — worked around
-# with a watcher, the anti-pattern §16a forbids normalizing. The pipeline now
-# runs the gate once per plan, before any EPIC/plan.json/run/FSM/queue artifact
-# exists, and seals the verdict (or the audited bypass) into a receipt bound to
-# the exact plan bytes, target head and phase set.
+# test-generation-authority.bats — P074 Step 13, on the direct path since P114
+# (3.0.0): CP1 is consulted ONCE per plan and the decision is sealed into a
+# generation-authority receipt by `plan-run` (lib/aid-generation-authority.sh
+# aid_gen_seal), before any run state exists.
 #
 # HONEST CLASSIFICATION (AID-v3 §1): the receipt is forgeable by a Bash-capable
 # actor. What these tests pin is the BINDING and the AUDIT — not any claim of
@@ -18,53 +12,68 @@
 # GATE CALL COUNTING. The CP1 gate is resolved through the calling script's own
 # SCRIPT_DIR, so counting invocations needs a shadow plugin: a directory of
 # SYMLINKS to the real scripts/defaults with ONE real file substituted — the
-# counting stub for aid-cp1-gate.sh. Symlinks, not a 32 MB copy, so setup stays
-# cheap. Every other script is byte-identical to the shipped one.
+# counting stub for aid-cp1-gate.sh.
 #
-# FD-3 HYGIENE: bats reports results over fd 3; a child holding it open
-# truncates the suite's TAP output. Every pipeline invocation runs with `3>&-`.
-# A `run` whose command is MISSING exits 127 and bats writes a warning to fd 3
-# — with fd 3 closed that destroys the whole file's output, so no `run` here is
-# ever handed a path that might not exist.
-# After any edit, verify the result count:
-#   bats --tap test-generation-authority.bats | grep -cE '^(ok|not ok)'   # == 11
+# FD-3 HYGIENE: every plan-run invocation runs with `3>&-`.
 
 load test-helpers.bash
-load generation-fixture.bash
 
 setup() {
-  gen_setup
-  gen_shadow_farm
-  gen_cp1_counting_stub
+  export AID_TEST_MODE=1 AID_QUIET=1 AID_CI=1
+  REPO_PLUGIN="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  FIXTURES="$REPO_PLUGIN/scripts/tests/fixtures"
+  TEST_TMPDIR="$(mktemp -d)"; export REPO_PLUGIN FIXTURES TEST_TMPDIR
+  unset AID_PROJECT_ROOT AID_PLAN_STATE_PROJECT_ROOT AID_PLAN_MANIFEST_PROJECT_ROOT AID_TEST_CP1_FAIL
+  # the shadow plugin: symlinks, with aid-cp1-gate.sh replaced by the counting stub
+  SHADOW="$TEST_TMPDIR/plugin"; mkdir -p "$SHADOW/scripts"
+  local f b
+  for f in "$REPO_PLUGIN/scripts"/*; do b="$(basename "$f")"; [[ "$b" == tests ]] || ln -s "$f" "$SHADOW/scripts/$b"; done
+  ln -s "$REPO_PLUGIN/defaults" "$SHADOW/defaults"
+  rm -f "$SHADOW/scripts/aid-cp1-gate.sh"
+  cat > "$SHADOW/scripts/aid-cp1-gate.sh" <<'STUB'
+#!/usr/bin/env bash
+[[ -n "${AID_TEST_CP1_COUNTER:-}" ]] && printf 'call\n' >> "$AID_TEST_CP1_COUNTER"
+if [[ -n "${AID_TEST_CP1_FAIL:-}" ]]; then
+  echo "CP1-gate FAIL: round-1 left 1 blocker(s) open and there is no round-2" >&2
+  exit 1
+fi
+echo "CP1-gate: plan PASS — round 1 closed"
+exit 0
+STUB
+  chmod +x "$SHADOW/scripts/aid-cp1-gate.sh"
+  PFSM="$SHADOW/scripts/aid-plan-fsm.sh"
+  CP1_COUNT="$TEST_TMPDIR/cp1.count"; : > "$CP1_COUNT"; export AID_TEST_CP1_COUNTER="$CP1_COUNT"
   REASON="the PM accepts this bypass because the blocking condition is a known false positive"
-  export REASON
+  export REASON SHADOW PFSM
 }
 
-teardown() { gen_teardown; }
+teardown() { cd /; [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"; }
 
-_seed_plan() {   # <project> [risk]
-  local d="$1" risk="${2:-}"
-  # THE shared seeder (scripts/tests/aid-fixture-plan.sh): it satisfies every
-  # generation precondition at once — execution.yaml, the plan committed, the PM
-  # page rendered — so the next precondition is one edit there and not fifteen
-  # here. A `risk:` variant re-seeds afterwards, because editing the plan makes
-  # its page STALE and the obligation refuses a page older than its plan.
-  aid_fixture_seed_plan "$d" "$FIXTURES/multi-phase-plan-numeric.md" P099-multi.md >/dev/null
-  if [[ -n "$risk" ]]; then
-    sed -i "0,/^author: /s//risk: ${risk}\nauthor: /" "$d/.aid-o/plans/P099-multi.md"
-    aid_fixture_seed_plan "$d" "$d/.aid-o/plans/P099-multi.md" P099-multi.md >/dev/null
-  fi
-  printf '%s\n' "$d/.aid-o/plans/P099-multi.md"
+_cp1_calls() { wc -l < "$CP1_COUNT" | tr -d ' '; }
+
+# _seed_plan <project> — a git project with the direct fixture plan bound to its
+# brief and a closed CP1 round (the shared seeder of test-plan-run.bats).
+_seed_plan() {
+  local d="$1"
+  mkdir -p "$d" && git -C "$d" init -q -b main && git -C "$d" config user.email t@t && git -C "$d" config user.name t
+  mkdir -p "$d/src/core" "$d/prirucka" "$d/.aid-o/config"
+  echo "def tally(i): pass" > "$d/src/core/counter.py"; echo "# Příručka" > "$d/prirucka/README.md"
+  printf 'gates:\n  docs_updated:\n    command: "true"\n' > "$d/.aid-o/config/execution.yaml"
+  git -C "$d" add -A && git -C "$d" commit -qm init
+  ( export AID_PLUGIN_PATH="$REPO_PLUGIN"; source "$REPO_PLUGIN/scripts/tests/lib/aid-test-plan-fixture.sh"
+    aid_fixture_seed_plan "$d" "$FIXTURES/plan-direct-two-step.md" P900-direct.md >/dev/null )
+  printf '%s\n' "$d/.aid-o/plans/P900-direct.md"
 }
+_run_pr() { run bash -c "cd '$TEST_TMPDIR/p' && $* bash '$PFSM' plan-run P900 ${PR_ARGS:-}" 3>&-; }
+_state() { printf '%s\n' "$TEST_TMPDIR/p/.aid-o/work/evidence/E-900-1_1/R-E900-1/fsm-state.yaml"; }
 
-_auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-authority.json"; }
+_auth() { printf '%s\n' "$1/.aid-o/work/evidence/P900/generation/generation-authority.json"; }
 
 # ─── the happy path: a sealed, verdict-bearing authority ─────────────────
 
 @test "a passing plan writes a verdict-bearing authority bound to plan bytes, target head and phase set" {
-  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
-  run bash -c "cd '$TEST_TMPDIR/p' && bash '$PIPELINE' --plan '$plan' --queue-mode chain" 3>&-
+  _run_pr
   [ "$status" -eq 0 ]
 
   local a; a="$(_auth "$TEST_TMPDIR/p")"
@@ -72,7 +81,7 @@ _auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-auth
   [ "$(jq -r '.schema' "$a")" = "aid-generation-authority/v1" ]
   [ "$(jq -r '.cp1.verdict' "$a")" = "pass" ]
   [ "$(jq -r '.forced_override' "$a")" = "false" ]
-  [ "$(jq -r '.total_phases' "$a")" = "3" ]
+  [ "$(jq -r '.total_phases' "$a")" = "1" ]   # one run per plan (P111)
   [ "$(jq -r '.phase_derivation_version' "$a")" = "1" ]
   # Bound to the EXACT plan bytes and the target head, not to a name.
   [ "$(jq -r '.plan_sha256' "$a")" = "$(sha256sum "$plan" | awk '{print $1}')" ]
@@ -80,9 +89,8 @@ _auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-auth
 }
 
 @test "the authority's self_sha256 is the canonical-JSON hash of itself with the field nulled" {
-  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
-  run bash -c "cd '$TEST_TMPDIR/p' && bash '$PIPELINE' --plan '$plan' --queue-mode chain" 3>&-
+  _run_pr
   [ "$status" -eq 0 ]
   local a; a="$(_auth "$TEST_TMPDIR/p")"
   local recorded computed
@@ -91,24 +99,19 @@ _auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-auth
   [ "$recorded" = "$computed" ]
 }
 
-@test "the CP1 gate is invoked EXACTLY ONCE for a 3-phase plan (the F2 regression)" {
-  gen_mk_project "$TEST_TMPDIR/p"
+@test "the CP1 gate is invoked EXACTLY ONCE per plan (the F2 regression)" {
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
-  run bash -c "cd '$TEST_TMPDIR/p' && bash '$PIPELINE' --plan '$plan' --queue-mode chain" 3>&-
+  _run_pr
   [ "$status" -eq 0 ]
-  # Three phases were really generated (counted on disk — `run` merges stderr
-  # into $output, so the stdout manifest is not parseable from here)...
-  [ "$(ls "$TEST_TMPDIR/p/.aid-o/tasks"/E-099-*.md | wc -l | tr -d ' ')" = "3" ]
-  # ...and the gate ran once, not once per phase.
-  [ "$(gen_cp1_calls)" = "1" ]
+  [ -f "$(_state)" ]
+  [ "$(_cp1_calls)" = "1" ]
 }
 
 # ─── the blocked path ────────────────────────────────────────────────────
 
 @test "a blocked gate without --force refuses, prints the exact public force command, and generates nothing" {
-  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
-  run bash -c "cd '$TEST_TMPDIR/p' && AID_TEST_CP1_FAIL=1 bash '$PIPELINE' --plan '$plan' --queue-mode chain" 3>&-
+  _run_pr AID_TEST_CP1_FAIL=1
   [ "$status" -ne 0 ]
   # P074 Step 18 relabelled this class: the stub's rc-1 refusal IS a CP1
   # condition verdict, which a deliberate --force CAN cover, so the honest
@@ -118,33 +121,30 @@ _auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-auth
   [[ "$output" == *"--force --reason"* ]]
   # No authority was sealed and no EPIC exists.
   [ ! -f "$(_auth "$TEST_TMPDIR/p")" ]
-  run bash -c "ls '$TEST_TMPDIR/p/.aid-o/tasks'/E-099-*.md 2>/dev/null | wc -l"
+  run bash -c "ls '$TEST_TMPDIR/p/.aid-o/tasks'/E-900-*.md 2>/dev/null | wc -l"
   [ "$output" = "0" ]
 }
 
 @test "--force without --reason, and with a short reason, both die with the P073-consistent message" {
-  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
-  run bash -c "cd '$TEST_TMPDIR/p' && bash '$PIPELINE' --plan '$plan' --force" 3>&-
+  PR_ARGS="--force" _run_pr
   [ "$status" -ne 0 ]
   [[ "$output" == *"at least 20 characters"* ]]
-  run bash -c "cd '$TEST_TMPDIR/p' && bash '$PIPELINE' --plan '$plan' --force --reason 'too short'" 3>&-
+  PR_ARGS="--force --reason 'too short'" _run_pr
   [ "$status" -ne 0 ]
   [[ "$output" == *"at least 20 characters"* ]]
-  [[ "$output" == *"forensic record"* ]]
   # A reason without a force records nothing and is refused rather than ignored.
-  run bash -c "cd '$TEST_TMPDIR/p' && bash '$PIPELINE' --plan '$plan' --reason '$REASON'" 3>&-
+  PR_ARGS="--reason '$REASON'" _run_pr
   [ "$status" -ne 0 ]
   [[ "$output" == *"without --force"* ]]
 }
 
 @test "a blocked gate WITH --force --reason writes a forced authority plus all three P073 audit records" {
-  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
-  run bash -c "cd '$TEST_TMPDIR/p' && AID_TEST_CP1_FAIL=1 bash '$PIPELINE' --plan '$plan' --queue-mode chain --force --reason '$REASON'" 3>&-
+  PR_ARGS="--force --reason '$REASON'" _run_pr AID_TEST_CP1_FAIL=1
   [ "$status" -eq 0 ]
 
-  local gen="$TEST_TMPDIR/p/.aid-o/work/evidence/P099/generation"
+  local gen="$TEST_TMPDIR/p/.aid-o/work/evidence/P900/generation"
   # Record 0 — the authority itself records the bypass and every failed condition.
   [ "$(jq -r '.forced_override' "$gen/generation-authority.json")" = "true" ]
   [ "$(jq -r '.force_reason' "$gen/generation-authority.json")" = "$REASON" ]
@@ -168,15 +168,14 @@ _auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-auth
 }
 
 @test "a forced run leaves the CP1 artifacts on disk BYTE-IDENTICAL (they are never rewritten as clean)" {
-  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
-  local ev="$TEST_TMPDIR/p/.aid-o/work/evidence/P099"
+  local ev="$TEST_TMPDIR/p/.aid-o/work/evidence/P900"
   # A round that left a blocker open: the evidence a forced run bypasses.
   jq '.findings = [{fingerprint: "f", step: 1, severity: "blocker", claim: "a real blocker", status: "open", reported_by: ["reuse"]}] | .blockers_open = 1' \
     "$ev/cp1/round-1/merged.json" > "$ev/m" && mv "$ev/m" "$ev/cp1/round-1/merged.json"
   local before; before="$(find "$ev/cp1" -type f -exec sha256sum {} \; | sort)"
 
-  run bash -c "cd '$TEST_TMPDIR/p' && AID_TEST_CP1_FAIL=1 bash '$PIPELINE' --plan '$plan' --queue-mode chain --force --reason '$REASON'" 3>&-
+  PR_ARGS="--force --reason '$REASON'" _run_pr AID_TEST_CP1_FAIL=1
   [ "$status" -eq 0 ]
 
   local after; after="$(find "$ev/cp1" -type f -exec sha256sum {} \; | sort)"
@@ -195,33 +194,31 @@ _auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-auth
   # the bypass permanent and invisible. No kill is needed to reach that window
   # any more: the records come first and are fail-closed, so an unwritable
   # audit path fails the run right there.
-  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
   # A DIRECTORY where the append expects a file: the write genuinely fails, and
   # aid-audit-log.sh swallows its own failure by design, so only the read-back
   # verification can catch it.
   mkdir -p "$TEST_TMPDIR/p/.aid-o/work/audit-log.jsonl"
 
-  run bash -c "cd '$TEST_TMPDIR/p' && AID_TEST_CP1_FAIL=1 bash '$PIPELINE' --plan '$plan' --queue-mode chain --force --reason '$REASON'" 3>&-
+  PR_ARGS="--force --reason '$REASON'" _run_pr AID_TEST_CP1_FAIL=1
   [ "$status" -ne 0 ]
   [[ "$output" == *"could not be read back"* ]]
   [[ "$output" == *"no authority was sealed"* ]]
   # THE POINT: no authority, so no later run can inherit an unrecorded bypass.
   [ ! -f "$(_auth "$TEST_TMPDIR/p")" ]
   # And the half-written waiver was rolled back rather than left as a decoy.
-  run bash -c "ls '$TEST_TMPDIR/p/.aid-o/work/evidence/P099/generation'/waiver-generation-*.json 2>/dev/null | wc -l"
+  run bash -c "ls '$TEST_TMPDIR/p/.aid-o/work/evidence/P900/generation'/waiver-generation-*.json 2>/dev/null | wc -l"
   [ "$output" = "0" ]
-  run bash -c "ls '$TEST_TMPDIR/p/.aid-o/tasks'/E-099-*.md 2>/dev/null | wc -l"
+  run bash -c "ls '$TEST_TMPDIR/p/.aid-o/tasks'/E-900-*.md 2>/dev/null | wc -l"
   [ "$output" = "0" ]
 }
 
 @test "AUDIT-BEFORE-AUTHORITY: an unwritable timeline aborts the forced run and leaves NO authority behind" {
-  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
-  local gen="$TEST_TMPDIR/p/.aid-o/work/evidence/P099/generation"
+  local gen="$TEST_TMPDIR/p/.aid-o/work/evidence/P900/generation"
   mkdir -p "$gen/timeline.jsonl"    # a directory: the append cannot succeed
 
-  run bash -c "cd '$TEST_TMPDIR/p' && AID_TEST_CP1_FAIL=1 bash '$PIPELINE' --plan '$plan' --queue-mode chain --force --reason '$REASON'" 3>&-
+  PR_ARGS="--force --reason '$REASON'" _run_pr AID_TEST_CP1_FAIL=1
   [ "$status" -ne 0 ]
   [[ "$output" == *"timeline event"* ]]
   [[ "$output" == *"No authority was sealed"* ]]
@@ -231,11 +228,10 @@ _auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-auth
 }
 
 @test "--force on a plan whose gate PASSES is recorded as UNUSED: no waiver, nothing claimed as bypassed" {
-  gen_mk_project "$TEST_TMPDIR/p"
   local plan; plan="$(_seed_plan "$TEST_TMPDIR/p")"
-  run bash -c "cd '$TEST_TMPDIR/p' && bash '$PIPELINE' --plan '$plan' --queue-mode chain --force --reason '$REASON'" 3>&-
+  PR_ARGS="--force --reason '$REASON'" _run_pr
   [ "$status" -eq 0 ]
-  local gen="$TEST_TMPDIR/p/.aid-o/work/evidence/P099/generation"
+  local gen="$TEST_TMPDIR/p/.aid-o/work/evidence/P900/generation"
   [ "$(jq -r '.forced_override' "$gen/generation-authority.json")" = "false" ]
   [ "$(jq -r '.cp1.force_unused' "$gen/generation-authority.json")" = "true" ]
   # A receipt for nothing would be noise in waivers_applied[] — none is written.
@@ -244,22 +240,5 @@ _auth() { printf '%s\n' "$1/.aid-o/work/evidence/P099/generation/generation-auth
   grep -q '"force_unused":true' "$gen/timeline.jsonl"
 }
 
-# ─── the REAL gate, not the stub: the wiring is genuinely live ────────────
-
-@test "with the REAL (unstubbed) gate a plan without a plan-review round is blocked before any EPIC exists" {
-  # The stub proves counting and audit shape; this proves the pipeline really
-  # calls the shipped gate and honours its refusal.
-  gen_mk_project "$TEST_TMPDIR/p"
-  local plan; plan="$(_seed_plan "$TEST_TMPDIR/p" high)"
-  # The seeding gives every fixture a closed plan-review round; this case is
-  # about a plan WITHOUT one.
-  rm -rf "$TEST_TMPDIR/p/.aid-o/work/evidence/P099/cp1"
-  run bash -c "cd '$TEST_TMPDIR/p' && bash '$REPO_PLUGIN/scripts/aid-auto-pipeline.sh' --plan '$plan' --queue-mode chain" 3>&-
-  [ "$status" -ne 0 ]
-  # A missing plan-review round is the REAL gate's rc-1 condition verdict, so
-  # P074 Step 18 labels it force-required, not hard-blocked.
-  [[ "$output" == *"aid_generation_force_required"* ]]
-  [ ! -f "$(_auth "$TEST_TMPDIR/p")" ]
-  run bash -c "ls '$TEST_TMPDIR/p/.aid-o/tasks'/E-099-*.md 2>/dev/null | wc -l"
-  [ "$output" = "0" ]
-}
+# The REAL (unstubbed) gate refusing a plan without a review round is pinned
+# by test-plan-run.bats ("a plan without a passed CP1 round is refused by the gate").

@@ -401,8 +401,8 @@ gate_profiles:
   #     do — it can only restate a conclusion already reached.
   #   * Including it anyway would plant a permanent `fail` row in every `full`
   #     run of this repository: the Initial mapping currently covers none of
-  #     `scripts/aid-plan-fsm.sh`, `scripts/lib/aid-queue-write.sh`,
-  #     `scripts/lib/aid-gate-profile.sh`, `scripts/aid-queue-add.sh` or
+  #     `scripts/aid-plan-fsm.sh`,
+  #     `scripts/lib/aid-gate-profile.sh`, `scripts/aid-run-gates.sh` or
   #     `defaults/enforcement-registry.yaml`, so exit 3 is guaranteed. A red
   #     row that carries no information the run does not already have is
   #     noise, and noise is what makes real red rows get ignored.

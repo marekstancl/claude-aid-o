@@ -9,8 +9,7 @@
 # `<data_file>.lock` sidecar via `exec {fd}>lockfile` and calling
 # `flock -x -w <n> <fd>` inside a subshell scoped to that one critical
 # section. This file generalizes that idiom into two functions so the next
-# consumers (`aid-plan-state.sh`, below; `lib/aid-queue-write.sh`, a later
-# step; the P068 plan-final runner) don't re-derive it a fourth time.
+# consumers (`aid-plan-state.sh`, below; the P068 plan-final runner) don't re-derive it a fourth time.
 #
 # WHY A SIDECAR FILE, NEVER THE DATA FILE ITSELF: every writer in this
 # codebase rotates its data file's inode on write (`mktemp` + `mv`, so the

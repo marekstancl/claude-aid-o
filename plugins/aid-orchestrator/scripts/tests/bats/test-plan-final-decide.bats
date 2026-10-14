@@ -222,6 +222,17 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   jq -e '.release_decision.blockers | any(.reason | test("criteria unmeasured.*verification_env_unset"))' "$(_run_dir)/release-decision.json"
   ! jq -e '.release_decision.blockers | any(.reason == "plan-diff reports absent acceptance criteria")' "$(_run_dir)/release-decision.json"
 }
+@test "timeout: a point that ran out of time at the close is unmeasured with its limit and remedy, never absent or verified (P112)" {
+  PLAN_EXTRA="$(printf -- '- [ ] AC1: slow\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "sleep 5"\n    expected_exit: 0\n    timeout: 1\n  ```')" _project
+  _stage freeze; _stage gates; _stage produce; echo "$output"; [ "$status" -eq 0 ]
+  local r; r="$(jq -r '.results[0].reason' "$(_run_dir)/plan-diff.json")"
+  [[ "$r" == timeout || "$r" == no_isolation ]]        # a host without nested unshare cannot run it at all
+  _round; _stage decide; [ "$status" -eq 1 ]
+  if [[ "$r" == timeout ]]; then
+    jq -e '.release_decision.blockers | any(.reason | test("criteria unmeasured.*AC1 \\(timeout: neměřeno, limit 1 s.*AID_PLAN_DIFF_AC_TIMEOUT_FLOOR"))' "$(_run_dir)/release-decision.json"
+  fi
+  ! jq -e '.release_decision.blockers | any(.reason == "plan-diff reports absent acceptance criteria")' "$(_run_dir)/release-decision.json"
+}
 @test "cost: the decision carries plan_summary.run_cost and plan_cost with the fixture's figures (P110)" {
   _project
   mkdir -p "$R/.aid-o/work/evidence/E-900-1_1/R-E-900-1_1-1/cp2/step-0/round-1"

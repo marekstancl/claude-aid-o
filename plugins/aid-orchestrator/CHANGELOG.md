@@ -3,6 +3,100 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.1.1] — 2026-10-13
+
+Úklid nočního patra testů, první kolo (PM 13. 10. 2026, 1B). Nic se nemění pro uživatele pluginu; mění se, co hlídá noční běh, a tři nepravdy, které ty testy našly.
+
+### Removed
+- Osm celých sad, které hlídaly jen to, že nějaký plán proběhl, nebo text místo chování: `test-backlog-verdicts`, `test-deferred-work-registration`, `test-release-policy-surface-check` (i se skriptem `release-policy-surface-check.sh`), `test-aid-lock-target-audit`, `test-control-boundary.sh`, `test-review-successors.sh`, `test-integration-handoff-rendering.sh` (vzorové výstupy porovnávané znak po znaku, týdny červené bez povšimnutí, a integrační kontroly karet, které kryjí sady jednotlivých rendererů) a `test-registry-epic-inventory` (účetnictví P114). S nimi jejich vzorové soubory.
+- 46 jednotlivých případů téhož druhu: hledání vět v návodech, čtení zdrojového textu místo spuštění, zmrazená porovnání s výstupem z doby před P076 (dvě vzájemné kopie), účetnictví plánů P073 a P076. Z kontroly souladu instrukcí oddíly, které jen hledaly vyřazené názvy (v1 stavy, staré příkazy, P094/P096/P097).
+- Řádek registru `handoff_renderer_contract` je vyřazený (`removed_scoped`, náhrada `artifact_template_caps` + `artifact_secret_redaction`).
+
+### Fixed
+- Zásady automatické obnovy uváděly pro revizi kroku dvě kola; skutečné nastavení má od 2.116.0 jedno (`cp2_fix_loop`, dřív `cp2_cp3_fix_loop`).
+- Řádek registru `plan_lint_epic_grammar` po 3.0.0 tvrdil, že kontrola blokuje, citoval neexistující text a jako nápravu radil psát značky EPICů — teď upozornění, správné citace a náprava „značku smazat“.
+- `skills/pipeline.md` neuváděl přechod DONE → ERROR (ukončení běhu zaseklého v DONE, od 2.117.0).
+- Sady kontroly plánu (`test-standards-map`, `test-plan-reuse-check`, `test-plan-writing-rules`) byly od 2.115.0 červené na zastaralých vzorových plánech bez zadání; vzorový plán teď dostane nejmenší platné zadání (`bind_plan_to_brief` v `test-helpers.bash`).
+
+Velikost: 247 → 239 sad, 3 687 → 3 614 případů bats, testy a vzorové soubory o ≈ 3,6 tisíce řádků méně (≈ 3,5 %). Každá sada, kterou poslední noční běh (11. 10.) hlásil červeně — 12, některé 17 nocí po sobě — je zelená.
+
+## [3.1.0] — 2026-10-13
+
+Testy s hodnotou (PM 13. 10. 2026, 2A): plánový test se po plánu maže, trvalý test se jmenuje podle chování, které hlídá. Do té doby každý plán testy jen přidával — testy pluginu měly víc řádků než plugin a 654 z 3 678 případů neslo v názvu číslo plánu, nálezu nebo položky backlogu.
+
+### Added
+- **Kontrola názvů nových testů** (`aid_test_names_plan_refs`, `lib/aid-test-tier.sh`): případ přidaný od základu plánu nebo od posledního tagu, jehož název nese číslo plánu (`P111`), nálezu revize (`CP2 F3`) nebo položky backlogu (`IMP-612`), zastaví `plan-finalize --stage gates` i `aid-release.sh` (`test_named_after_plan`). Čte bats `@test`, pytest `def test_` a JS/TS `it|test|describe`; necommitnuté změny sledovaných souborů se počítají, protože by je vydání přibralo; diff, který nejde přečíst, odmítne stejně jako nález. Číslo kroku se nehlídá (`step 0` je v AIDu doménový pojem). Staré případy si název nechávají, dokud se nezmění jejich řádek s názvem. `aid-release.sh` kontroluje jako první krok (i v režimu `auto`, který jinak může skončit dřív), tedy před `--dry-run` a před změnou souborů; `--force` ji neobchází.
+
+### Changed
+- `skills/plan-writing.md`: Testing Strategy má čtvrtou otázku „Které testy plán maže?“; jednorázová kontrola žije ve vlastním souboru (značka verification-only platí pro celý soubor); výčet druhů, které jsou vždy jednorázové (důkaz, že krok proběhl, zmrazený seznam starých jmen, hlídač jakékoli změny, hledání věty v návodu, pokud ji kód necituje doslova).
+- Revize kroku (`skills/step-review-roles.md` otázka 3, `skills/review-checkpoint-contracts.md`) se ptá i obráceně: který existující test změna zneplatnila — jmenuje se a maže v tomtéž kroku.
+- `CONTRIBUTING.md`: solo stavba značí jednorázové testy stejně jako plán a vydání odmítne případ pojmenovaný po plánu. Docusaurus: ekosystémový testovací standard (pravidlo 2 platí i pro název případu, „Plánový test není trvalý“) a `/aid/testing` (oddíl Plánové a trvalé testy).
+
+## [3.0.0] — 2026-10-13
+
+Bez EPIC cesty (P114, vydání 3 roadmapy P109; PM 12. 10. 2026, 13. 10. 2026 1A). Plán běží jako jeden běh přímo ze souboru (`/aid-run P<NNN>` = `aid-plan-fsm.sh plan-run`, od 2.117.0); generátory EPICů, fronta, task větve, slučování EPICu do větve plánu a revize EPICu (CP3) jsou z pluginu pryč. Major verze: staré vstupy odmítnou s cestou ven, nic se tiše nechová jinak.
+
+### Removed
+- **Generování EPICů** — `aid-plan-to-epic.sh`, `aid-epic-to-json.sh`, `aid-json-to-run.sh`, `aid-queue-add.sh`, `aid-auto-pipeline.sh` (i `supersede-generation`), `aid-generation-finalize.sh`, `aid-epic-summary.sh`, šablony `epic.md` a `run-*.md`; režim `/aid-plan epic`. Jedinou kontrolu, kterou držel jen generátor — stránku pro PM — přebírá `plan-run` (`plan_page_missing`, při každém spuštění i pokračování).
+- **Fronta a pokračování** — `lib/aid-queue-write.sh`, `aid-plan-continue.sh`, `next-epic`, `queue-revalidate`, kontrola fronty v `aid-plan-close-check.sh` (Check 4), řádek fronty v `active.md`, fronta v `/aid-status` (souhrn, kandidát, `/aid-status queue …`), připomínka fronty při startu session. Nastavení `autonomy.spawn_next_epic`, `max_spawned_epics`, `spawn_deadline_sec` v `project.yaml` už nic nečte (lze smazat; `/aid-init` je nezapisuje).
+- **Task větve a slučování EPICu** — `epic-start`, `epic-merge-to-plan`, `epic-base`; `init` bez `--direct` pro EPIC deklarovaného plánu, `done-advance` takového běhu; `epic-complete` bez `--direct` (a jeho `--supersede-by`, `--full-tests`). Zůstává `epic-complete --direct` (zápis přímého běhu, volá ho `done-advance --direct`) a `--abandon` (ukončení běhu). Běh bez plánu (EPIC id bez čísla plánu) zůstává jako zkušební běh testů FSM.
+- **Revize EPICu (CP3)** — `--checkpoint cp3` (odmítne a jmenuje CP2 a CP7), role `epic_generalist`, `epic_behaviour`, `epic_security`, kontrola čerstvosti D4 (`CP3-Freshness-Exception`), rekonciliace sémantického souboru EPICu s rozsahem kroků. Každý krok má revizi (CP2), celý plán se čte jednou při uzávěru (CP7). Streamlined běh mimo `plan_branch` odmítne (`streamlined_cp3_off`): nic jiného by jeho kód nečetlo.
+
+**Odmítnutí a cesta ven** (`epic_path_removed`, řádek v `skills/pipeline.md` §When AID refuses): `epic-start`, `epic-merge-to-plan`, `next-epic`, `epic-base`, `queue-revalidate`, `init` bez `--direct`, `done-advance` a `epic-complete` starého běhu, `plan-run` nad plánem generovaným po staru (soubor EPICu, nepřímý záznam v manifestu, transakce generace, vlastní záznamy ve frontě). Rozpracovaný starý běh se dokončí na 2.118.x (`plugin_path` připnutý na checkout 2.118.x), nebo se jeho plán uzavře (`aid-plan-fsm.sh plan-close P<NNN> --administrative --reason "<proč>"`, starý běh ukončí `epic-complete … --abandon`) a začne NOVÝ plán s novým číslem. Zbylý `.aid-o/config/queue.yaml` čte jen tohle odmítnutí `plan-run` — smažte ho, až žádný starý plán nepoběží. Projektový `review-checkpoints.yaml` s `cp3_integration_review` nebo blokem `epic_review` se načte s varováním „ignored legacy key“, ne s chybou.
+
+### Changed
+- `plan-run` odmítne `--reason` bez `--force`/`--restart`; stránku pro PM kontroluje při každém spuštění.
+- Pravidlo Stop pro autonomní běh žije v `lib/aid-auto-continuation.sh` (`aid_hook_rule_auto_continuation_stop`), řádek registru `auto_continuation_notice`; pravidlo hooku si nechalo id `queue_continuation_notice`, takže `AID_HOOKS_OFF_RULES` i auditní řádky platí dál.
+- Registr vynucení: řádky EPIC cesty vyřazené podle inventury P111 (`docs/reference/2026-10-p111-inventura-epic-cesty.md`, sloupec „P114“), nový `epic_path_removed`; 662 řádků, aktivních 466 (před 520).
+- Texty pro agenty a dokumentace znají jednu cestu: `/aid-run`, `/aid-plan`, `/aid-status`, `/aid-help`, `/aid-stop`, skilly `pipeline`, `planner` (přepsaný na `plan-run`), `plan-writing` (značky `**EPIC N: Steps …**` se ignorují, lint je jmenuje jedním řádkem ADVISORY), `run-management`, `agent-protocol`, `role-cards`, `review-checkpoint-contracts`, `step-review-roles`; Docusaurus `/aid/commands/aid-run|aid-plan|aid-status`, `/aid/architecture/overview`, stránky `aid-epic-queue`, `aid-epic-status`, `aid-plan-epic`, `aid-run-epic` smazané.
+
+### Fixed
+- `done-advance` běhu bez plánu odmítal jako starou EPIC cestu (prázdné pole odpovědi resolveru se při čtení tabulátorem slilo) — chyba vzniklá a opravená během P114, s regresním případem.
+- `plan-run` od 2.117.0 nekontroloval stránku pro PM (kontrolu držel jen generátor EPICů) — teď ji vyžaduje při každém spuštění i pokračování.
+- Kapitola „Escalations settled by an independent agent“ (2.118.1) ležela uvnitř bloku, který `commands/aid-run.md` cituje bajt po bajtu z `scripts/lib/aid-review-adapter-claude.md`, takže `test-review-finding-schema` (t2) byl na 2.118.1 červený; kapitola stojí za blokem.
+- Stav revize běhu pro lifecycle bere poslední běh (starý `audit-report.json` už nepřebije novější kola kroků).
+
+Velikost (jen hlášení; `wc -l` jako v 2.118.1, testy navíc):
+
+| Část | Před (2.118.1) | Po (3.0.0) |
+|---|---|---|
+| scripts (`scripts/*.sh`, `scripts/lib/*.sh`) | 76 377 | 66 080 |
+| skills (`skills/*.md`, `skills/*/SKILL.md`) | 8 582 | 7 915 |
+| commands | 6 114 | 5 563 |
+| testy (`scripts/tests`, soubory / případy bats) | 283 / 4 047 | 258 / 3 685 |
+
+Testbed: lane `generation_refuses_without_page` je teď `plan_run_refuses_without_page` na `plan-run` (repo testbedu nemá remote: commit 68ee406; testbed 42/42 na kandidátu). Testbed teď vykresluje stránku pro PM i v klonech přímého běhu (`plan-run` ji vyžaduje).
+
+## [2.118.1] — 2026-10-13
+
+Cizí repo do konce a eskalace na nezávislého agenta (P112, opravné vydání po prvním skutečném plánu na přímé cestě Agents P016; PM 12. 10. 2026 1A + 2A, 13. 10. 2026 delegace v `--auto`). Plán s druhým repem (`repo_roots`) dojde do rozhodnutí o vydání bez ručního sloučení a bez zastavení na PM kvůli vadě nástroje.
+
+### Added
+- **Jedno mapování cizích rep** — `lib/aid-repo-roots.sh` (`aid_rr_entries`, `aid_rr_path`, `aid_rr_text`, `aid_rr_resolve`, `aid_rr_rewrite_files`): kterému worktree patří cesta v deklarovaném repu, z plánu i z `plan.json`; čte ho kontrakt kroku, kontrola kroku, oba balíčky revize, měřič bodů i lint. Funkce mapování v kontraktu zmizely (přesunuté beze změny chování). Cesta v `repo_roots`, která není vrchol repa, je `repo_root_invalid`.
+- **`plan-run --restart --reason`** — běh, který neudělal žádný krok, se odloží (abandon, auditní záznam jako `supersede-generation`, přesun do `.aid-o/work/superseded-runs/<plán>-<čas>/`) a plán se spustí znovu nad aktuálním plánem; po kroku `restart_after_step`, se špinavým worktree plánu `restart_plan_dirty`, cizího repa `restart_foreign_dirty`, s živým řadičem `restart_controller_live`; přerušený restart pokračuje týmž příkazem. Archivační a auditní pomocníci pipeline jsou knihovna `lib/aid-generation-authority.sh`.
+- **Eskalace rozhoduje nezávislý agent** — v plánu `autonomy: auto` automaticky, v ručním po `aid-review-round.sh standing --plan <plán> --delegate --reason "<slova PM>"`: rozpor k nálezu (CP2/CP3/CP7) a každý blokující nebo závažný nález otevřený po posledním kole jde přes `aid-review-round.sh delegate` (`--pending`, `--fingerprint`, `--verdict`) — Codex přes runner kola, při jeho výpadku nezávislý Claude agent v závorce `adjudicator-delegated-<fp16>` (agent `claude:adjudicator-delegated`); kolo se neuzavře, dokud čeká verdikt. Verdikt třídy `brief|money|data` jde na kartu PM (`delegation_out_of_scope`), `--defer-criterion` delegáta nepřijme; verdikt bez původu je `delegation_missing`. Kniha `evidence/<plán>/delegated-disputes.jsonl`, karta i stránka uzávěru je vyjmenují. Šablona `defaults/templates/adjudicator-delegated.md`.
+- Odmítnutí s `next:` a řádkem v `skills/pipeline.md`: `restart_after_step`, `restart_plan_dirty`, `restart_foreign_dirty`, `restart_controller_live`, `active_runs_write_failed`, `active_runs_unreadable`, `delegation_missing`, `delegation_out_of_scope`; registr vynucení +4 řádky (`foreign_review_reads_worktree`, `measure_timeout_unmeasured`, `plan_run_restart_no_step`, `delegated_escalation`), 661.
+
+### Changed
+- **Revize čte worktree** — balíček revize kroku nese `foreign-<name>.patch` z rozsahů, které ověřila kontrola kroku (`step-check.json` `other_repos`), `files.json` s cestami ve worktree a `packet.json`; balíček celého plánu nese každou cizí větev od zmrazeného základu; prompt jmenuje worktree a zakazuje živou kopii. Chybějící worktree = `foreign_worktree_missing`.
+- **Měření bodů čte worktree** — `aid-plan-diff.sh` přepíše `file:` a cesty v `cmd` bodu do worktree plánu po kroku i při uzávěru (`--isolated`), takže brána `plan_diff` projde bez sloučení cizí větve.
+- **Hook hlídá jen živý běh** — pre-commit bere běh větve jen z `active-runs.json` (odložená kopie stavu nikdy nehlídá; glob zůstal pro `run_abandoned`); nečitelná mapa na `plan/*` a `task/*` commit odmítne (`active_runs_unreadable`), jinde projde s řádkem. `init` bez záznamu v mapě selže (`active_runs_write_failed`), úklid mapy drží přímý běh do `DONE`/`release`. Projekty dostanou hook přes `/aid-init` (upgrade).
+- **Lint odmítne nedeklarované cizí repo** — absolutní cesta v `Files` nebo v `file:`/`cmd` bodu do jiného git repa než projekt, které `repo_roots` nedeklaruje, je `foreign_repo_undeclared` už před CP1 (repa se porovnávají `--git-common-dir`, body čte parser měřiče).
+
+### Fixed
+- **Timeout je neměřený bod** — bod, který nedoběhne v limitu, nese `unmeasured: true`, `reason: timeout`, `timeout_s`; `increment-step` i uzávěr ho jmenují jako neměřený s limitem a radou (`AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=<s>` pro přeměření, zvedne i vlastní `timeout:` bodu; příští plán dá bodu `timeout:`), ne jako chybějící změnu. Neměřené důvody jsou jedna konstanta (`lib/aid-unmeasured.sh`).
+- Registr vynucení: dva řádky /aid-ui (2.118.0) citovaly neexistující soubory (`sections.json`, `gen.json`) — `test-enforcement-registry-cites` byl červený už na 2.118.0.
+
+Velikost (jen hlášení):
+
+| Část | Před | Po |
+|---|---|---|
+| scripts | 75 432 | 76 377 |
+| skills | 8 563 | 8 582 |
+| commands | 6 029 | 6 114 |
+
+Testbed: lane `repo_roots` měří dva body v cizím repu (soubor i příkaz) a dojde přes `plan-finalize` k rozhodnutí o vydání s živou kopií cizího repa beze změny (repo testbedu nemá remote: commit c596889; testbed 42/42 na kandidátu).
+
 ## [2.118.0] — 2026-10-12
 
 /aid-ui do vydání: P103 (produkční web, studio jako průběh stavby, brána nad buildem, stránka pro zákazníka, pohyb vzoru) a P108 (texty podle převzatých postupů, kontrola textů, design standard, předání). Nahoře opravy z testu s nezávislým klientem-agentem na Coufal Clinic (11.–12. 10. 2026, retro 3/10): obsah viditelný bez skriptu (FB-27), formulář (FB-28), schválení podle rozsahu změny, zadrátovaný záskok Claude za Codex, blokace publikace kritickými body.

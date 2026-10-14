@@ -152,3 +152,54 @@ aid_test_tier_list() {
   done < <(aid_test_discover_suites "$dir")
   return 0
 }
+
+# aid_test_names_plan_refs <repo> <base>
+#   Test cases ADDED since <base> — commits, index and the working tree of
+#   tracked files, which is what `git add -u` would sweep in — whose NAME cites
+#   a plan (P123), a review finding (CP2 F3) or a backlog item (IMP-612). A
+#   name says what the test guards; where it came from is in git log. Prints
+#   "<file>\t<name>"; 0 none, 1 found, 2 cannot tell (bad base, git failed) —
+#   callers refuse on 2 as on 1. Declarations read: bats `@test`, pytest
+#   `def test_`, JS/TS `it|test|describe[.each|only|skip|todo|concurrent]("…"`,
+#   one line each, under a test path, never under fixtures/. The step number is
+#   NOT a plan reference: "step 0" is a domain word here.
+# ponytail: one-line literal names only; multi-line or computed names pass unread.
+aid_test_names_plan_refs() {
+  local repo="$1" base="$2" diff hits
+  git -C "$repo" rev-parse -q --verify "${base}^{commit}" >/dev/null 2>&1 || return 2
+  diff="$(git -C "$repo" -c core.quotePath=false diff -M --unified=0 --no-color --no-ext-diff "$base" -- 2>/dev/null)" || return 2
+  hits="$(awk '
+    # the name inside the quote q that opens at r[1]; "" when it never closes
+    function lit(r, q,   i, c) {
+      for (i = 1; i <= length(r); i++) {
+        c = substr(r, i, 1)
+        if (c == "\\") { i++; continue }
+        if (c == q) return substr(r, 1, i - 1)
+      }
+      return ""
+    }
+    /^\+\+\+ / { f = substr($0, 5); sub(/\t$/, "", f)
+                 if (f ~ /^".*"$/) f = substr(f, 2, length(f) - 2)
+                 sub(/^b\//, "", f)
+                 t = (f != "/dev/null" && f !~ /(^|\/)fixtures\// &&
+                      (f ~ /(^|\/)(test|tests|spec|__tests__)\// || f ~ /(^|\/)test[-_][^\/]*$/ ||
+                       f ~ /_test\.[^\/]*$/ || f ~ /\.(test|spec)\.[^\/]*$/ || f ~ /\.bats$/)); next }
+    !t || !/^\+/ { next }
+    { l = substr($0, 2); n = "" }
+    match(l, /^[ \t]*@test[ \t]+["\047]/) ||
+    match(l, /^[ \t]*(it|test|describe)(\.(each|only|skip|todo|concurrent))?\([ \t]*["\047`]/) {
+      n = lit(substr(l, RLENGTH + 1), substr(l, RLENGTH, 1))
+    }
+    n == "" && match(l, /^[ \t]*(async[ \t]+)?def[ \t]+test_[A-Za-z0-9_]*/) {
+      n = substr(l, RSTART, RLENGTH); sub(/^.*def[ \t]+/, "", n)
+    }
+    n == "" { next }
+    { m = tolower(n)
+      if (m ~ /(^|[^a-z0-9])p[0-9][0-9][0-9]([^a-z0-9]|$)/ ||
+          m ~ /(^|[^a-z0-9])cp[0-9]+[ _\/-]?f[0-9]+([^a-z0-9]|$)/ ||
+          m ~ /(^|[^a-z0-9])imp-[0-9]+([^a-z0-9]|$)/) printf "%s\t%s\n", f, n }
+  ' <<<"$diff")" || return 2
+  [[ -z "$hits" ]] && return 0
+  printf '%s\n' "$hits"
+  return 1
+}

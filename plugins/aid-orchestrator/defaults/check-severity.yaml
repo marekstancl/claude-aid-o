@@ -61,4 +61,4 @@ checks:
   streamlined_integration_review:
     severity: blocking
     promoted_at: "2026-05-31"
-    promoted_reason: "P040 — streamlined contract requires verifier-output-cp3-code-review.md + verifier-output-cp3-security.md + gates_report.json; this check enforces all three present at done-advance time"
+    promoted_reason: "P040 — streamlined contract requires gates_report.json at done-advance time and, since 3.0.0 (the EPIC review CP3 removed), a whole-plan review after it (plan_branch mode); the EPIC review outputs it once required left with CP3"

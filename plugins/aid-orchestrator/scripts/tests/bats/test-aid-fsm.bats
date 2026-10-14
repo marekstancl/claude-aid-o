@@ -187,7 +187,6 @@ teardown() {
   jq -n '{overall:"pass", gates:{}, _generated_by:"aid-run-gates.sh@v2.16.0", _generated_at:"2026-05-04T00:00:00Z", _command_log:[]}' \
     > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   # P094: a closed passing EPIC review round (cp3/rounds.json) is the precondition.
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
 
   run "$FSM" transition EXECUTE GATES "$state_file"
   [ "$status" -eq 0 ]
@@ -345,7 +344,6 @@ PLAN
 
 @test "advance-to-gates: success path EXECUTE→GATES via cmd_transition" {
   seed_test_state_files "EXECUTE" "5" "5"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
@@ -359,7 +357,6 @@ PLAN
 
 @test "advance-to-gates: failure path leaves state at EXECUTE" {
   seed_test_state_files "EXECUTE" "5" "5"
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   setup_failing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 
@@ -372,28 +369,6 @@ PLAN
   ! assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_transition"
 }
 
-# _cp3_on — the project keeps CP3 (P110: off by default): the toggle and an epic_review block
-_cp3_on() {
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
-  printf 'review_checkpoints:\n  cp3_integration_review: true\n  epic_review:\n    rounds_default: 1\n    reviewers:\n      - {role: epic_generalist, provider: claude, model: opus}\n' \
-    > "$TEST_PROJECT_ROOT/.aid-o/config/policies/review-checkpoints.yaml"
-}
-@test "advance-to-gates: missing cp3 round index → cmd_transition fails after gates pass" {
-  seed_test_state_files "EXECUTE" "5" "5"
-  # NOTE: NO cp3/rounds.json (intentional — gates run, transition rejects)
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
-  _cp3_on   # P110: CP3 is off by default; this project keeps it
-  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
-
-  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  [ "$status" -ne 0 ]
-  # Gates ran independently of CP3 — runner exits 0
-  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "gate_runner_complete"
-  # cmd_transition's check_preconditions sees no cp3 round index and rejects
-  [[ "$output" == *"no review round index for cp3"* ]]
-  # State stayed EXECUTE because cmd_transition didn't commit
-  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
-}
 
 # ─── P097 Step 5: no repeated-timeout policy block ──────────────────────────
 # A timed-out gate is a `job_timeout` row like any other failure: GATES→EXECUTE
@@ -677,33 +652,7 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "streamlined: integration-review without a passing cp3 round blocks" {
-  _streamlined_seed_state true; _cp3_on   # P110: a project that keeps CP3
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  _write_three_event_timeline
-  # gates_report present; the cp3 round closed with verdict fail.
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" fail
-  echo '{}' > "$TEST_EVIDENCE_DIR/gates_report.json"
 
-  _run_streamlined_check fsm_check_streamlined_integration_review "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"cp3/rounds.json with verdict pass"* ]]
-  grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-
-@test "streamlined: integration-review with a passing cp3 round and the gates report passes" {
-  _streamlined_seed_state true
-  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  _write_three_event_timeline
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
-  echo '{}'   > "$TEST_EVIDENCE_DIR/gates_report.json"
-
-  _run_streamlined_check fsm_check_streamlined_integration_review "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 0 ]
-  # No integration-review-fail audit recorded.
-  [ ! -f "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl" ] || \
-    ! grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
 
 # ─── P040 Component E: steps[] array absorption + read_steps_array ────────
 
@@ -763,47 +712,13 @@ EOF
   [ "$(echo "$output" | jq 'length')" = "0" ]
 }
 
-# ─── CP3 activation gap: --streamlined THROUGH aid-json-to-run.sh ─────────
+# ─── CP3 activation gap: --streamlined THROUGH the former run renderer ─────────
 # Guards the integration path the CP3 gap exposed: streamlined is activated
-# via aid-json-to-run.sh (the sole auto-init entry point), NOT by calling
+# via the former run renderer (the sole auto-init entry point), NOT by calling
 # aid-fsm.sh init --streamlined directly. setup_test_evidence_dir() already
 # put us in a clean git repo on main, so Step 18 auto-init runs for real.
 
-@test "CP3: aid-json-to-run.sh --streamlined → fsm-state.yaml streamlined_mode true" {
-  local j2r="$AID_PLUGIN_PATH/scripts/aid-json-to-run.sh"
-  local fixtures="$AID_PLUGIN_PATH/scripts/tests/fixtures"
-  local plan_json="$fixtures/minimal-plan.json"
-  local epic="$fixtures/E-TEST-001-1_1-minimal-test-plan.md"
-  local tmpl="$AID_PLUGIN_PATH/defaults/templates/run-new-feature.md"
-  local out_dir="$TEST_PROJECT_ROOT/.aid-o/work/runs/R-CP3-ON"
-  mkdir -p "$out_dir"
 
-  run "$j2r" --plan-json "$plan_json" --run-template "$tmpl" \
-    --epic "$epic" --output-dir "$out_dir" --run-id "R-CP3-ON" --streamlined
-  [ "$status" -eq 0 ]
-
-  local state_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-TEST-001-1_1/R-CP3-ON/fsm-state.yaml"
-  [ -f "$state_file" ]
-  [ "$(yq -r '.streamlined_mode' "$state_file")" = "true" ]
-}
-
-@test "CP3: aid-json-to-run.sh WITHOUT --streamlined → streamlined_mode false" {
-  local j2r="$AID_PLUGIN_PATH/scripts/aid-json-to-run.sh"
-  local fixtures="$AID_PLUGIN_PATH/scripts/tests/fixtures"
-  local plan_json="$fixtures/minimal-plan.json"
-  local epic="$fixtures/E-TEST-001-1_1-minimal-test-plan.md"
-  local tmpl="$AID_PLUGIN_PATH/defaults/templates/run-new-feature.md"
-  local out_dir="$TEST_PROJECT_ROOT/.aid-o/work/runs/R-CP3-OFF"
-  mkdir -p "$out_dir"
-
-  run "$j2r" --plan-json "$plan_json" --run-template "$tmpl" \
-    --epic "$epic" --output-dir "$out_dir" --run-id "R-CP3-OFF"
-  [ "$status" -eq 0 ]
-
-  local state_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-TEST-001-1_1/R-CP3-OFF/fsm-state.yaml"
-  [ -f "$state_file" ]
-  [ "$(yq -r '.streamlined_mode' "$state_file")" = "false" ]
-}
 
 # ─── D1 (IMP-232 v2.58.0): dependency-scoped init gate ──────────────────────
 # The old global cross-plan ca-review-complete hard-block is REMOVED: an
@@ -830,30 +745,6 @@ EOF
   fi
 }
 
-# Helper: structured lifecycle manifest declaring depends_on_plans.
-# COMMITTED on the target branch (like plan-start writes it in production):
-# IMP-273 routes cmd_init's mode decision through the committed-tree authority
-# `_fsm_declared_plan_mode`, which treats an uncommitted (working-tree-only)
-# manifest as `unresolved` and hard-blocks BEFORE the D1 dependency gate. A real
-# plan's lifecycle manifest is always committed, so committing here keeps this a
-# faithful legacy-plan fixture: the committed manifest carries no plan_branch
-# mode, so the authority resolves legacy_epic_release_mode (a no-op) and control
-# reaches the depends_on_plans gate these tests exercise.
-_seed_manifest() {
-  local plan_id="$1" deps_yaml="$2"   # deps_yaml e.g. "[P045]" or "[]"
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests"
-  cat > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/${plan_id}.yaml" <<EOF
-schema_version: aid-lifecycle-1.0
-repo_id: test
-plan_id: ${plan_id}
-mode: legacy_epic_release_mode
-declared_epics:
-  - {id: E-${plan_id#P}-1_1, scope: required}
-depends_on_plans: ${deps_yaml}
-EOF
-  git -C "$TEST_PROJECT_ROOT" add ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1
-  git -C "$TEST_PROJECT_ROOT" commit -q -m "lifecycle manifest ${plan_id}"
-}
 
 # Helper: committed closed receipt (=> aid_plan_closure_state == closed).
 _seed_closed_receipt() {
@@ -877,30 +768,39 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "D1: init BLOCKS when a structured depends_on_plans target is not closed" {
-  _seed_manifest "P046" "[P045]"    # P045 has no receipt => not closed
-  run "$FSM" init $(build_default_init_args "E-046-1_1")
+# _d1_direct <extra init args…> — the plan's direct run (plan-run's init) of
+# P046, whose lifecycle manifest declares depends_on_plans: [P045]. Since 3.0.0
+# (P114) a plan's run is the direct run, so the dependency gate is tested there.
+_d1_direct() {
+  ( export AID_PLUGIN_PATH; source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"
+    aid_fixture_direct_run "$TEST_PROJECT_ROOT" P046 READY >/dev/null ) || return 1
+  local sf="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-046-1_1/R-E046-1/fsm-state.yaml"; rm -f "$sf"
+  yq -i '.depends_on_plans = ["P045"]' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P046.yaml"
+  run bash -c "cd '$TEST_PROJECT_ROOT/.aid-worktrees/plan-P046' && '$FSM' init E-046-1_1 R-E046-1 2 full plan/P046 \"\$(git -C '$TEST_PROJECT_ROOT' rev-parse plan/P046)\" '$sf' --plan '$TEST_PROJECT_ROOT/.aid-o/plans/P046-direct.md' --direct $*"
+}
+
+@test "D1: the plan's run BLOCKS at init when a structured depends_on_plans target is not closed" {
+  _d1_direct                         # P045 has no receipt => not closed
   [ "$status" -ne 0 ]
   [[ "$output" == *"depends_on_plans: P045"* ]]
 }
 
-@test "D1: init SUCCEEDS when the depends_on_plans target is closed" {
-  _seed_manifest "P046" "[P045]"
+@test "D1: the plan's run SUCCEEDS at init when the depends_on_plans target is closed" {
   _seed_closed_receipt "P045"
-  run "$FSM" init $(build_default_init_args "E-046-1_1")
-  [ "$status" -eq 0 ]
+  _d1_direct
+  echo "$output"; [ "$status" -eq 0 ]
 }
 
 @test "D1: --force overrides the depends_on_plans block (audited)" {
-  _seed_manifest "P046" "[P045]"    # P045 not closed
-  run "$FSM" init $(build_default_init_args "E-046-1_1") --force --reason "P045 need not close first for this independent scaffolding step"
-  [ "$status" -eq 0 ]
+  _d1_direct --force --reason "'P045 need not close first for this independent scaffolding step'"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"skipping the depends_on_plans init gate (D1)"* ]]
 }
 
 # v2.58.2 hotfix #3: a real dependency declared in the plan FRONTMATTER (not a
 # hand-seeded manifest) must propagate into the tracked manifest via ensure_manifest
 # and then actually block init end-to-end.
-@test "D1: a frontmatter depends_on_plans is written into the manifest by ensure_manifest and blocks init end-to-end" {
+@test "D1: a frontmatter depends_on_plans is written into the manifest by ensure_manifest" {
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
   cat > "$TEST_PROJECT_ROOT/.aid-o/plans/P046-x.md" <<'PLAN'
 ---
@@ -916,10 +816,7 @@ PLAN
   ( cd "$TEST_PROJECT_ROOT" && source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_ensure_manifest P046 . )
   run yq -r '.depends_on_plans[]' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P046.yaml"
   [[ "$output" == *"P045"* ]]                       # dep reached the manifest via the NORMAL path
-  # and init hard-blocks because P045 is not closed (D1 reads the tracked manifest)
-  run "$FSM" init $(build_default_init_args "E-046-1_1")
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"depends_on_plans: P045"* ]]
+  # (the gate that reads it is tested on the plan's run above)
 }
 
 # v2.58.2 audit hardening: a stray leading blank line before the `---` fence must
@@ -931,9 +828,6 @@ PLAN
   ( cd "$TEST_PROJECT_ROOT" && source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_ensure_manifest P047 . )
   run yq -r '.depends_on_plans[]' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P047.yaml"
   [[ "$output" == *"P045"* ]]                       # dependency survived the leading blank line
-  run "$FSM" init $(build_default_init_args "E-047-1_1")
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"depends_on_plans: P045"* ]]
 }
 
 # ─── E-046-1_3 Step 2: _generated_at required in CP2 verifier output ─────────
@@ -1830,7 +1724,6 @@ YAML
   [ "$status" -eq 0 ]
   run jq -r '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
   [ "$output" == "null" ]
-  aid_fixture_seed_step_review "$TEST_EVIDENCE_DIR" cp3 "" pass
   AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$status" -ne 0 ]
   [[ "$output" == *"risk_profile_unresolvable"* ]]
@@ -1846,21 +1739,61 @@ YAML
 }
 
 # ─── P109 Step 5: amend-scope on a brief-bound plan names the point it serves ──
-# The plan.json is PRODUCED by aid-epic-to-json.sh from a six-column EPIC table
+# The plan.json is PRODUCED by the former EPIC-to-plan.json converter from a six-column EPIC table
 # and a source plan with zadani_sha256 — not hand-written — so the binding the
 # generator writes is the one this reads. Defects: P014 C — six scope_amended
 # events, none tied to a point of the brief; a plan.json the generator never binds.
-_zp_plan_json() {   # <td> — generate plan.json (step 1 closes AC2, step 2 closes AC3) into <td>
+_zp_plan_json() {   # <td> — build plan.json (step 1 closes AC2, step 2 closes AC3) into <td> with the shared builder
   local td="$1" g; g="$(mktemp -d)"
-  printf -- '---\nid: P930\nzadani: .aid-o/plans/P930-zadani.md\nzadani_sha256: %s\n---\n# Plan\n' "$(printf brief | sha256sum | cut -d' ' -f1)" > "$g/P930-plan.md"
-  { printf -- '---\nepic_id: E-930-1_1\ntitle: Brief-bound\nplan_ref: %s\n---\n## Acceptance Criteria\n\n' "$g/P930-plan.md"
-    printf -- '- [ ] [backend] step one deliverable verified\n- [ ] [qa] step two deliverable verified\n\n## Steps (Role Pipeline)\n\n'
-    printf '| # | Role | Objective | Depends On | Parallel Group | Closes |\n|---|------|-----------|------------|----------------|--------|\n'
-    printf '| 1 | backend | do the first thing properly | - | - | AC2 |\n| 2 | qa | verify the first thing works | 1 | - | AC3 |\n'
-  } > "$g/E-930-1_1-x.md"
-  local m; m="$(bash "$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh" --epic "$g/E-930-1_1-x.md" \
-    --schema "$AID_PLUGIN_PATH/defaults/templates/plan.schema.json" --output-dir "$g/out" 2>/dev/null)"
-  cp "$(jq -r .plan_json <<< "$m")" "$td/plan.json"
+  printf 'gates: {}\n' > "$g/execution.yaml"
+  cat > "$g/P930-plan.md" <<PLAN
+---
+id: P930
+zadani: .aid-o/plans/P930-zadani.md
+zadani_sha256: $(printf brief | sha256sum | cut -d' ' -f1)
+---
+# Plan
+
+## Implementation Steps
+
+### Step 1: one
+
+**Objective:** do the first thing properly
+
+**Files:**
+- Modify: \`src/a.py\` — the thing
+
+**Dependencies:**
+- Depends on: none
+
+**Acceptance Criteria:**
+- [ ] step one deliverable verified
+
+**AID Role:** backend
+
+**Zavírá:** AC2
+
+### Step 2: two
+
+**Objective:** verify the first thing works
+
+**Files:**
+- Test: \`tests/test_a.py\` — the check
+
+**Dependencies:**
+- Depends on: Step 1
+
+**Acceptance Criteria:**
+- [ ] step two deliverable verified
+
+**AID Role:** qa
+
+**Zavírá:** AC3
+PLAN
+  ( source "$AID_PLUGIN_PATH/scripts/lib/common.sh"; source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh"
+    aid_plan_json_steps_from_plan "$g/P930-plan.md" > "$g/steps.json"
+    aid_plan_json_build --steps-json "$g/steps.json" --out "$td/plan.json" --epic-id E-930-1_1 --plan "$g/P930-plan.md" \
+      --direct --execution "$g/execution.yaml" ) >/dev/null 2>&1
   rm -rf "$g"
 }
 _zp_state() {   # <td> <state> <current_step>
@@ -1938,6 +1871,24 @@ SC_WHY="the PM moved this point to the close of the plan"
   [[ "$output" == *"step_criteria_failed"*'AC1 "the ok file exists"'* ]]
   [[ "$output" == *"next: fix the step and commit"*"--defer-criterion AC1"* ]]
   [ "$(_cur)" = 0 ]
+}
+@test "timeout: increment-step names a timed-out point as unmeasured with the AID_PLAN_DIFF_AC_TIMEOUT_FLOOR re-measurement" {
+  _sc_seed
+  sed -i 's|cmd: "test -f ok.txt"|cmd: "sleep 3"|; s|    expected_exit: 0|    expected_exit: 0\n    timeout: 1|' "$SC_PLAN"
+  run "$FSM" increment-step "$SF"; echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"step_criteria_failed"*"absent or unmeasured"* ]]
+  [[ "$output" == *"AC1 (timeout: neměřeno, limit 1 s"*"AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=<s>"*"prepare --checkpoint cp2 --step <N>"*"<N> = 0"* ]]
+  [[ "$output" != *'AC1 "the ok file exists"'* ]]      # not listed as a missing change
+  [ "$(_cur)" = 0 ]
+}
+@test "delegate: --defer-criterion still needs the PM's answered card in an --auto plan" {
+  _sc_seed
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P960"; echo 'autonomy: auto' > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P960/plan-state.yaml"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/evidence/P960"; echo '{"delegate": true}' > "$TEST_PROJECT_ROOT/.aid-o/work/evidence/P960/delegate.json"
+  _sc_card                                       # a card nobody answered
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "$SC_WHY" --finding-card "$SC_CARD"
+  [ "$status" -eq 1 ]; [[ "$output" == *"defer_refused"* ]]; [ "$(_cur)" = 0 ]
 }
 @test "step-criteria: --force does not waive an absent point" {
   _sc_seed
@@ -2039,17 +1990,7 @@ SC_WHY="the PM moved this point to the close of the plan"
 }
 
 # ── P110 Step 6: CP3 off by default ─────────────────────────────────────────
-@test "cp3-off: advance-to-gates with the default toggle and no cp3 directory moves to GATES and writes review_checkpoint_disabled" {
-  seed_test_state_files "EXECUTE" "5" "5"
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
-  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
-  [ ! -d "$TEST_EVIDENCE_DIR/cp3" ]
-  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
-  echo "$output"; [ "$status" -eq 0 ]
-  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
-  grep -q 'review_checkpoint_disabled' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-@test "cp3-off: a legacy-mode streamlined run with the toggle off and no cp3 round is refused — nothing would review it" {
+@test "streamlined: a legacy-mode streamlined run is refused — the EPIC review (CP3) was removed in 3.0.0, nothing would review it" {
   _streamlined_seed_state true
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _write_three_event_timeline
@@ -2058,19 +1999,6 @@ SC_WHY="the PM moved this point to the close of the plan"
   echo "$output"; [ "$status" -ne 0 ]
   [[ "$output" == *"nothing would review this code"* ]]
   grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
-}
-@test "cp3-off: the toggle is read from the state root, not from a linked worktree without .aid-o" {
-  _cp3_on
-  git -C "$TEST_PROJECT_ROOT" worktree add -q "$TEST_PROJECT_ROOT/../wt-cp3" -b wt-cp3 2>/dev/null || skip "no git repo in the fixture"
-  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-roots.sh'; source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_switched_off '$TEST_PROJECT_ROOT/../wt-cp3' cp3_integration_review"
-  git -C "$TEST_PROJECT_ROOT" worktree remove --force "$TEST_PROJECT_ROOT/../wt-cp3"
-  [ "$status" -eq 1 ]   # not off: the state root's policy keeps CP3
-}
-@test "cp3-off: the toggle on without an epic_review block is refused naming the block" {
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
-  printf 'review_checkpoints:\n  cp3_integration_review: true\n' > "$TEST_PROJECT_ROOT/.aid-o/config/policies/review-checkpoints.yaml"
-  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-review-config.sh'; aid_review_config_load '$TEST_PROJECT_ROOT' epic_review '$AID_PLUGIN_PATH/skills/step-review-roles.md'"
-  [ "$status" -eq 1 ]; [[ "$output" == *"cannot read epic_review"* ]]
 }
 @test "step-criteria: a plan edited since the EPIC was generated (source_plan_sha256) is not measured — refused" {
   _sc_seed; touch ok.txt
@@ -2161,11 +2089,11 @@ YML
   [ "$(jq -r '.plan_boundary_manifest.epic_runs[0].epic_final_profile_floor' "$DMF")" = "full" ]
 }
 
-@test "direct: epic-merge-to-plan on a direct run is refused direct_run_no_epic_merge" {
+@test "direct: epic-merge-to-plan on a direct run is refused (P114: the command was removed, epic_path_removed)" {
   _direct_done
   run bash "$PFSM" epic-merge-to-plan P910 E-910-1_1 --project-root "$TEST_PROJECT_ROOT"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"(pipeline.md §When AID refuses: direct_run_no_epic_merge)"* && "$output" == *"next: "* ]]
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"(pipeline.md §When AID refuses: epic_path_removed)"* && "$output" == *"next: "* ]]
 }
 
 @test "direct: a rerun of epic-complete --direct on a merged run still moves the plan to PLAN_SYNC" {

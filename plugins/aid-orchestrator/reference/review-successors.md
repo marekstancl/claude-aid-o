@@ -4,10 +4,9 @@
 EPIC review rebuild, and one per mechanism that had no registry row of its own.
 The successor column names an ACTIVE registry id, a file, or the literal
 `none (PM 2026-09-19 7A)` — the PM's decision that the invalidation map goes
-with no replacement. `scripts/tests/test-review-successors.sh` checks that every
-id present in `scripts/tests/fixtures/review-successors/registry-ids-pre-P094.txt`
-and absent or retired in the live registry has a row here whose successor is
-an active id or that literal.
+with no replacement. A historical record: the check that kept it complete
+against the pre-P094 id list was retired in 3.1.1 with the rest of the
+plan-bound archaeology.
 
 ## Registry ids
 
@@ -156,3 +155,13 @@ successor is an ACTIVE registry id, or `none (…)` naming the recorded decision
 | the service library (`services:` lifecycle, per-run port registry, env-name denylist) | none (P097 Step 6 made it unreachable, Step 9 deleted it; no consumer declared a service) |
 | the old risk-classification library (fixed five-name rank, hard-coded high-risk paths, `boundary=epic` cap) | `scripts/lib/aid-gate-profile-select.sh` (`gate_profile_from_caller`) |
 | recovery stop class `SERVICE_UNHEALTHY` and its service-restart action | none (P097 Step 9: its only emitter was the service library; the policy has six classes) |
+
+## Registry ids renamed by P114 (3.0.0)
+
+The rows P114 retired with the EPIC path carry their successor in the P111
+inventory (`docs/reference/2026-10-p111-inventura-epic-cesty.md`, checked by
+`test-registry-epic-inventory.bats`); this table names only a renamed row.
+
+| Former id | Successor | Note |
+|-----------------------|-----------|------|
+| `queue_continuation_notice` | `auto_continuation_notice` | the autonomous Stop rule, renamed with its library (`lib/aid-auto-continuation.sh`); the hook rule keeps the old id |

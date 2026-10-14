@@ -1,8 +1,9 @@
 #!/usr/bin/env bats
 # aid-tier: t2
 #
-# T1 BY MEASUREMENT (P099): 82 s over 6 cases (nightly journal, 2026-09-23) —
-# every case runs the real generator; T0 is under 2 s per case.
+# P114 (3.0.0): the check lives in the shared plan.json builder
+# (lib/aid-plan-json.sh aid_plan_json_gate_name), which plan-run calls; the
+# cases ask it directly.
 #
 # The DoD gate is chosen from execution.yaml's `gates:` map and written into
 # plan.json; the GATES -> DONE precondition then judges the run against the
@@ -22,26 +23,15 @@ setup() {
   setup_test_evidence_dir
   AID_PLUGIN_PATH="$(cd "${BATS_TEST_DIRNAME}/../../.." && pwd)"
   export AID_PLUGIN_PATH
-  PLAN_TO_EPIC="$AID_PLUGIN_PATH/scripts/aid-plan-to-epic.sh"
-  # The plan lives in the test project, so generation resolves that workspace.
-  FIXTURE="$TEST_PROJECT_ROOT/.aid-o/plans/plan-with-fenced-steps.md"
-  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
-  cp "$AID_PLUGIN_PATH/scripts/tests/fixtures/plan-with-fenced-steps.md" "$FIXTURE"
-  EPIC_TEMPLATE="$AID_PLUGIN_PATH/defaults/templates/epic.md"
-  OUTPUT_DIR="$TEST_TMPDIR/output"
-  COUNTER="$TEST_TMPDIR/epic-counter.yaml"
-  mkdir -p "$OUTPUT_DIR" "$TEST_PROJECT_ROOT/.aid-o/config"
-  printf 'counter: 0\n' > "$COUNTER"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
   EXEC="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
 }
 
 teardown() { teardown_test_evidence_dir; }
 
+# _generate — what plan-run's plan_json stage asks: the DoD gate it may write.
 _generate() {
-  aid_fixture_seed_plan_review "$TEST_PROJECT_ROOT" "$FIXTURE" || return 1
-  run "$PLAN_TO_EPIC" --plan "$FIXTURE" --phase 1 --total 1 \
-    --epic-template "$EPIC_TEMPLATE" --output-dir "$OUTPUT_DIR" \
-    --counter-yaml "$COUNTER"
+  run bash -c 'source "$AID_PLUGIN_PATH/scripts/lib/common.sh"; source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh"; aid_plan_json_gate_name "$1"' _ "$EXEC"
 }
 
 @test "generation refuses when an auto-resolvable profile excludes the DoD gate" {

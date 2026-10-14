@@ -3,12 +3,12 @@
 # aid-step-check.sh — everything about a change that needs no model, before a
 # reviewer sees it (P094 Step 3).
 #
-#   aid-step-check.sh --checkpoint cp2|cp3|cp6|cp7 --evidence-dir <run dir>
+#   aid-step-check.sh --checkpoint cp2|cp6|cp7 --evidence-dir <run dir>
 #                     [--step N] [--state-file <fsm-state.yaml>] [--plan-json <plan.json>]
 #                     [--worktree] [--dod-file <path>] [--base <sha>] [--project-root <dir>]
 #
-# Computes, for the diff of one step (cp2), one EPIC (cp3), the working tree
-# (cp6) or a whole plan (cp7, --base <plan_base_commit>..HEAD, no declared
+# Computes, for the diff of one step (cp2), the working tree (cp6) or a whole
+# plan (cp7, --base <plan_base_commit>..HEAD, no declared
 # scope, never skipped): the range and where it came from; every changed file classified
 # against the step's declared scope (outputs, allowed_paths, forbidden_paths);
 # the security patterns of defaults/pre-filter-rules.yaml matched in added
@@ -27,11 +27,12 @@
 # index that already records a closed round: a re-run can never turn a
 # recorded `fail` into a skip.
 #
-# <cp dir> is <run dir>/cp2/step-<N>, <run dir>/cp3, <run dir>/cp6 or <run dir>/cp7.
+# <cp dir> is <run dir>/cp2/step-<N>, <run dir>/cp6 or <run dir>/cp7. (CP3, the
+# EPIC review, was removed in 3.0.0, P114.)
 #
 # Exit: 0 written; 1 refused (named); 2 tooling (jq/yq/git/rules missing);
 #       22 range_undetermined (cp2 without a step_commit or base_commit,
-#       cp3 without a base_commit, cp7 without --base).
+#       cp7 without --base).
 #
 # Successor of the retired pre-filter classify (P060 range rule kept; the
 # verifier-output seed is gone) and of the trivial-skip rule of
@@ -50,6 +51,8 @@ source "$SCRIPT_DIR/lib/aid-ancillary.sh"
 source "$SCRIPT_DIR/lib/aid-test-tier.sh"
 # shellcheck source=lib/aid-dispatch-contract.sh
 source "$SCRIPT_DIR/lib/aid-dispatch-contract.sh"   # aid_dispatch_repo_range_ok
+# shellcheck source=lib/aid-repo-roots.sh
+source "$SCRIPT_DIR/lib/aid-repo-roots.sh"          # aid_rr_phys_repo, aid_rr_entries
 # shellcheck source=lib/aid-roots.sh
 source "$SCRIPT_DIR/lib/aid-roots.sh"               # aid_run_checkout_root, aid_state_root
 
@@ -74,15 +77,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 for t in jq yq git sha256sum; do command -v "$t" >/dev/null 2>&1 || die "$t not installed" 2; done
-[[ "$CHECKPOINT" =~ ^cp[2367]$ ]] || die "--checkpoint must be cp2, cp3, cp6 or cp7" 2
+[[ "$CHECKPOINT" =~ ^cp[267]$ ]] || die "--checkpoint must be cp2, cp6 or cp7 (CP3 was removed in 3.0.0)" 2
 [[ -n "$EVID" ]] || die "--evidence-dir is required" 2
 [[ -f "$RULES_FILE" ]] || die "rules file not found: $RULES_FILE" 2
 STATE="${STATE:-$EVID/fsm-state.yaml}"
 if [[ -z "$ROOT" ]]; then
   ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-  # A step or EPIC is diffed in the tree its run's branch is checked out in,
+  # A step is diffed in the tree its run's branch is checked out in,
   # wherever the check is run from.
-  if [[ -n "$ROOT" && "$CHECKPOINT" =~ ^cp[23]$ ]]; then ROOT="$(aid_run_checkout_root "$STATE" "$ROOT")" || exit 2; fi
+  if [[ -n "$ROOT" && "$CHECKPOINT" == cp2 ]]; then ROOT="$(aid_run_checkout_root "$STATE" "$ROOT")" || exit 2; fi
 fi
 [[ -n "$ROOT" && -d "$ROOT/.git" || -f "$ROOT/.git" ]] || die "not inside a git repository (or --project-root is not one)" 2
 # the review config belongs to the state root (a linked worktree has none, or a stale copy)
@@ -91,7 +94,6 @@ PLAN_JSON="${PLAN_JSON:-$EVID/plan.json}"
 TIMELINE="$EVID/timeline.jsonl"
 case "$CHECKPOINT" in
   cp2) [[ "$STEP" =~ ^[0-9]+$ ]] || die "--step N is required for cp2" 2; CPDIR="$EVID/cp2/step-$STEP" ;;
-  cp3) CPDIR="$EVID/cp3" ;;
   cp6) CPDIR="$EVID/cp6"; WORKTREE=1 ;;
   cp7) CPDIR="$EVID/cp7" ;;
 esac
@@ -117,9 +119,6 @@ elif [[ "$CHECKPOINT" == cp2 ]]; then
     range_base="$(yq -r '.base_commit // ""' "$STATE" 2>/dev/null || true)"
     [[ -n "$range_base" && "$range_base" != null ]] && range_source=base_commit
   fi
-else
-  [[ -f "$STATE" ]] && range_base="$(yq -r '.base_commit // ""' "$STATE" 2>/dev/null || true)"
-  [[ -n "$range_base" && "$range_base" != null ]] && range_source=base_commit
 fi
 if [[ -z "$range_source" ]]; then
   log_event "$TIMELINE" "step_check_range_undetermined" checkpoint="$CHECKPOINT" step="${STEP:-null}" head_sha="$HEAD_SHA"
@@ -144,24 +143,27 @@ fi
 # step: the step's return names its commits there (repo_commits), and a
 # declared repository the return names no commits in is reported, never skipped.
 OTHER_MISSING=()
+OTHER_REPOS=()   # P112: the verified ranges in declared repositories — the review packet takes them
 if [[ "$CHECKPOINT" == cp2 && -f "$PLAN_JSON" ]]; then
   ret="$EVID/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON")/return.json"
   declare -A seen_repo=(); root_phys="$(cd "$ROOT" && pwd -P)"
   while IFS= read -r ap; do
-    d="$ap"; while [[ ! -d "$d" && "$d" != / ]]; do d="$(dirname "$d")"; done
-    repo="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" || continue
+    repo="$(aid_rr_phys_repo "$ap")"; [[ -n "$repo" ]] || continue
     [[ "$repo" != "$root_phys" && -z "${seen_repo[$repo]:-}" ]] || continue
     seen_repo[$repo]=1
     # P111: a repository the plan declares in repo_roots is named by its slug
     # in the return and reviewed in its worktree; its range must be reachable
     # from the worktree's branch (a commit only in the live checkout shares the
-    # object store and is still refused).
-    slug="$(jq -r --arg r "$repo" 'first(.repo_roots[]? | select((.path | sub("/+$"; "")) == $r) | .name) // ""' "$PLAN_JSON" 2>/dev/null || true)"
+    # object store and is still refused). P112: the slug comes from the one mapping.
+    slug="" wt="" br=""
+    while IFS=$'\t' read -r e_name e_path e_wt e_br; do
+      [[ -n "$e_name" && "$e_path" == "$repo" ]] && { slug="$e_name" wt="$e_wt" br="$e_br"; break; }
+    done <<< "$(aid_rr_entries "$PLAN_JSON")"
     if [[ -n "$slug" ]]; then
-      IFS=$'\t' read -r wt br < <(aid_dispatch_repo_resolve "$PLAN_JSON" "$slug")
       r="$(jq -r --arg r "$slug" 'first(.repo_commits[]? | select(.repo == $r) | .range) // ""' "$ret" 2>/dev/null || true)"
       aid_dispatch_repo_range_ok "$wt" "$r" "$br" || { OTHER_MISSING+=("$slug"); continue; }
       src="$wt"   # diffed in the worktree, named under the declared path (plan.json's scope)
+      OTHER_REPOS+=("$(jq -nc --arg n "$slug" --arg w "$wt" --arg r "$r" '{name: $n, worktree: $w, range: $r}')")
     else
       r="$(jq -r --arg r "$repo" 'first(.repo_commits[]? | select(.repo == $r) | .range) // ""' "$ret" 2>/dev/null || true)"
       aid_dispatch_repo_range_ok "$repo" "$r" || { OTHER_MISSING+=("$repo"); continue; }
@@ -290,14 +292,16 @@ jq -n --arg cp "$CHECKPOINT" --argjson step "${STEP:-null}" --arg head "$HEAD_SH
   --argjson tadded "$(_jarr "${tests_added[@]}")" --argjson tchanged "$(_jarr "${tests_changed[@]}")" \
   --argjson nfiles "${#FILES[@]}" --argjson nlines "$LINES" --argjson handlers "$(_arr "${handler_ids[@]}")" \
   --arg verdict "$verdict" --arg reason "$reason" --argjson sf "$script_findings" --argjson dod "$dod_json" \
-  --arg streamlined "$STREAMLINED" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+  --arg streamlined "$STREAMLINED" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson other "$(_jarr "${OTHER_REPOS[@]}")" '
   {checkpoint: $cp, step: $step, head_sha: $head, range: $range, range_source: $src,
    files: {in_scope: $in, outside_files: $out, forbidden_touched: $forb, scope_declared: ($scope_declared == 1)},
    security: {matched_rules: $rules, lines: $rlines},
    tests: {added: $tadded, changed: $tchanged},
    size: {files: $nfiles, lines: $nlines}, handler_patterns: $handlers,
    streamlined: ($streamlined == "true"), script_findings: $sf, dod: $dod,
-   verdict: $verdict, reason: $reason, generated_at: $now}' > "$tmp"
+   verdict: $verdict, reason: $reason, generated_at: $now}
+  + (if ($other | length) > 0 then {other_repos: $other} else {} end)' > "$tmp"
 sha="$(sha256sum "$tmp" | cut -d' ' -f1)"
 jq --arg s "$sha" '. + {sha256: $s}' "$tmp" > "$tmp.2" && mv -f "$tmp.2" "$CPDIR/step-check.json" && rm -f "$tmp"
 log_event "$TIMELINE" "step_check" checkpoint="$CHECKPOINT" step="${STEP:-null}" head_sha="$HEAD_SHA" verdict="$verdict" sha256="$sha"

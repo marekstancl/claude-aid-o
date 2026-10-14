@@ -180,7 +180,7 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   run "$ADJ_BIN" "$R2" --project-root "$ROOT" --namespace step_review --step-check "$ROOT/sc.json"
   [ "$(jq -c '[.[] | select(.reason == "trace_missing")] | length' "$R2/rejected.json")" = 0 ]
 }
-@test "namespaces: the same claim is a different fingerprint at cp1 and cp2; a cp2 match is the fingerprint without the line; cp3 uses the literal epic" {
+@test "namespaces: the same claim is a different fingerprint at cp1 and cp2; a cp2 match is the fingerprint without the line; the removed epic_review namespace (CP3) is refused" {
   _git_root >/dev/null
   _finding "$R1" reuse '.'
   ADJ "$R1" --project-root "$ROOT" >/dev/null
@@ -192,10 +192,8 @@ _step_round() {  # <dir> <n> <roles...> — a collected step round (head_sha ins
   local key="step one reads a file nothing writes"
   [ "$(jq -r '.findings[0].fingerprint' "$R2/merged.json")" = "$(fingerprint "$(basename "$ROOT")" step_review 1 scripts/a.sh:2 "$key")" ]
   [ "$(jq -r '.findings[0].match' "$R2/merged.json")" = "$(fingerprint "$(basename "$ROOT")" step_review 1 scripts/a.sh "$key")" ]
-  R3="$ROOT/round-3"; _step_round "$R3" 1 epic_generalist
-  _finding "$R3" epic_generalist '.step = null'
-  "$ADJ_BIN" "$R3" --project-root "$ROOT" --namespace epic_review >/dev/null
-  [ "$(jq -r '.findings[0].fingerprint' "$R3/merged.json")" = "$(fingerprint "$(basename "$ROOT")" epic_review epic scripts/a.sh:2 "$key")" ]
+  run "$ADJ_BIN" "$R2" --project-root "$ROOT" --namespace epic_review
+  [ "$status" -eq 2 ]
 }
 @test "cp2: the step check's own forbidden-path finding enters the list as role step_check without a command" {
   _git_root >/dev/null

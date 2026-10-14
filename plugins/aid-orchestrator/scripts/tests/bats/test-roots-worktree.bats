@@ -36,9 +36,8 @@ setup() {
   SCRIPTS="$AID_PLUGIN_PATH/scripts"
   ROOTS="$SCRIPTS/lib/aid-roots.sh"
   FSM="$SCRIPTS/aid-fsm.sh"
-  PIPELINE="$SCRIPTS/aid-auto-pipeline.sh"
   FIXTURES="$SCRIPTS/tests/fixtures"
-  export SCRIPTS ROOTS FSM PIPELINE FIXTURES
+  export SCRIPTS ROOTS FSM FIXTURES
   TEST_TMPDIR="$(mktemp -d)"
   export TEST_TMPDIR
   # The resolver honours AID_PROJECT_ROOT — a stray value from the invoking
@@ -313,41 +312,6 @@ _mk_tracking_primary() {
 
 # ─── full generation chain from inside the worktree ──────────────────────
 
-@test "full generation chain (auto-pipeline → plan-to-epic → epic-to-json → json-to-run → queue-add) from a worktree touches only the primary .aid-o" {
-  _mk_primary "$TEST_TMPDIR/primary"
-  _mk_worktree "$TEST_TMPDIR/primary" "$TEST_TMPDIR/wt"
-  _plant_tripwire "$TEST_TMPDIR/wt"
-  local primary
-  primary="$(_phys "$TEST_TMPDIR/primary")"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$primary/.aid-o/plans/P099-multi.md"
-  # P089 made a rendered PM page a generation precondition. Rendered here with
-  # the real renderer, through the exact command the refusal prints.
-  mkdir -p "$primary/.aid-o/work/evidence/P099"
-  ( cd "$primary" && source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh" \
-    && aid_plan_summary_render "$primary/.aid-o/plans/P099-multi.md" \
-         "$primary/.aid-o/work/evidence/P099/plan-summary-artifact.html" ) >/dev/null 2>&1
-  # P109: the gate owes the critic even with the review off — in the state root
-  aid_fixture_seed_critic_check "$primary" "$primary/.aid-o/plans/P099-multi.md"
-
-  run bash -c "cd '$TEST_TMPDIR/wt' && bash '$PIPELINE' --plan '$primary/.aid-o/plans/P099-multi.md' --queue-mode chain" 3>&-
-  [ "$status" -eq 0 ]
-
-  # The tripwire FILE is still a file — no chain member forked a workspace
-  # inside the worktree at ANY point (a single mkdir would have aborted).
-  [ -f "$TEST_TMPDIR/wt/.aid-o" ]
-  [ ! -d "$TEST_TMPDIR/wt/.aid-o" ]
-
-  # Every stage's artefacts landed in the PRIMARY workspace:
-  ls "$primary/.aid-o/tasks/"E-099-*.md >/dev/null                       # plan-to-epic
-  find "$primary/.aid-o/work/evidence" -name plan.json | grep -q .       # epic-to-json
-  find "$primary/.aid-o/work/runs" -name 'R-*.md' | grep -q .            # json-to-run
-  find "$primary/.aid-o/work/evidence" -name fsm-state.yaml | grep -q .  # FSM init
-  grep -q 'E-099-1_3' "$primary/.aid-o/config/queue.yaml"                # queue-add
-  # the primary counter file is still the one and only counter (numeric-ID
-  # plans derive EPIC ids from the plan id, so its VALUE is untouched — the
-  # tripwire above already proves no forked counter exists in the worktree)
-  [ -f "$primary/.aid-o/config/counter.yaml" ]
-}
 
 # ─── golden: primary-checkout behaviour preserved ────────────────────────
 
@@ -368,103 +332,7 @@ _mk_tracking_primary() {
   [[ "$output" == *READY* ]]
 }
 
-@test "golden: primary-checkout scripted sequence is byte-identical old (git-archive HEAD) vs new (working tree) scripts" {
-  # A REAL before/after: the committed HEAD scripts are extracted via
-  # `git archive` and the identical scripted sequence (full pipeline +
-  # get-state + init + relative layout listing) runs against twin fixtures,
-  # one per script tree. Combined stdout+stderr must be byte-identical after
-  # normalizing ONLY controller_hash, timestamps/dates, duration_ms, commit
-  # SHAs and the (necessarily different) fixture tmp roots.
-  local repo_root="$AID_PLUGIN_PATH/../.."
-  mkdir -p "$TEST_TMPDIR/old"
-  git -C "$repo_root" archive HEAD plugins/aid-orchestrator | tar -x -C "$TEST_TMPDIR/old"
-  local OLD_S="$TEST_TMPDIR/old/plugins/aid-orchestrator/scripts"
-  local NEW_S="$SCRIPTS"
 
-  _golden_seq() {  # $1=scripts dir  $2=fixture dir
-    local S="$1" d="$2"
-    (
-      exec 3>&- 2>/dev/null || true   # never hand bats' report fd to the chain
-      cd "$d"
-      # AID_PLUGIN_PATH must not leak the NEW tree into the OLD run — each
-      # tree derives its own plugin root from its scripts dir.
-      unset AID_PLUGIN_PATH
-      bash "$S/aid-auto-pipeline.sh" --plan "$PWD/.aid-o/plans/P099-multi.md" --queue-mode chain
-      echo "pipeline_rc=$?"
-      bash "$S/aid-fsm.sh" get-state ".aid-o/work/evidence/E-099-1_3/R-E099-1/fsm-state.yaml"
-      echo "getstate_rc=$?"
-      bash "$S/aid-fsm.sh" init E-910-1_1 R-910 2 manual main HEAD ".aid-o/work/evidence/E-910-1_1/R-910/fsm-state.yaml"
-      echo "init_rc=$?"
-      # P074 Step 15 adds the generation-transaction artifacts, which the old
-      # (pre-migration) script tree cannot produce — they are a deliberate new
-      # behaviour, not a migration side effect. This golden compares ROOT
-      # RESOLUTION, so they are filtered out of the layout listing.
-      find .aid-o -type f \
-        | grep -vE 'generation/(transaction\.json(\.lock)?|generation-authority\.json)$' \
-        | sort
-      cat .aid-o/work/evidence/E-910-1_1/R-910/fsm-state.yaml
-    ) 2>&1
-  }
-  _golden_norm() {  # $1=fixture root to blank
-    sed -E "s#$1#FIXROOT#g; \
-            s/controller_hash: [0-9a-f]+/controller_hash: H/; \
-            s/\"duration_ms\": [0-9]+/\"duration_ms\": N/; \
-            s/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}(\.[0-9]+)?Z?/TS/g; \
-            s/[0-9a-f]{40}/SHA/g; \
-            s/[0-9]{4}-[0-9]{2}-[0-9]{2}/DATE/g"
-  }
-
-  _mk_primary "$TEST_TMPDIR/fold"
-  _mk_primary "$TEST_TMPDIR/fnew"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$TEST_TMPDIR/fold/.aid-o/plans/P099-multi.md"
-  cp "$FIXTURES/multi-phase-plan-numeric.md" "$TEST_TMPDIR/fnew/.aid-o/plans/P099-multi.md"
-  aid_fixture_seed_critic_check "$TEST_TMPDIR/fold" "$TEST_TMPDIR/fold/.aid-o/plans/P099-multi.md"
-  aid_fixture_seed_critic_check "$TEST_TMPDIR/fnew" "$TEST_TMPDIR/fnew/.aid-o/plans/P099-multi.md"
-
-  _golden_seq "$OLD_S" "$TEST_TMPDIR/fold" | _golden_norm "$(_phys "$TEST_TMPDIR/fold")" > "$TEST_TMPDIR/out-old.txt"
-  _golden_seq "$NEW_S" "$TEST_TMPDIR/fnew" | _golden_norm "$(_phys "$TEST_TMPDIR/fnew")" > "$TEST_TMPDIR/out-new.txt"
-
-  if ! diff -u "$TEST_TMPDIR/out-old.txt" "$TEST_TMPDIR/out-new.txt" >&2; then
-    false
-  fi
-}
-
-@test "queue dependency revalidation FROM the worktree reads the PRIMARY dependency evidence (merged_done)" {
-  # Regression test for the worktree-forked dependency-evidence read: the dep
-  # has NO live branch, queue status is NOT completed, and no merge commit
-  # names it — the ONLY unblock signal is the dep's fsm-state `state: DONE`
-  # under the PRIMARY .aid-o. A cwd-relative read from the worktree finds
-  # nothing and misreports the dependency as unresolved/failed.
-  _mk_primary "$TEST_TMPDIR/primary"
-  _mk_worktree "$TEST_TMPDIR/primary" "$TEST_TMPDIR/wt"
-  _plant_tripwire "$TEST_TMPDIR/wt"
-  local primary
-  primary="$(_phys "$TEST_TMPDIR/primary")"
-  mkdir -p "$primary/.aid-o/work/evidence/E-770-1_2/R-1"
-  printf 'epic_id: E-770-1_2\nrun_id: R-1\nstate: DONE\n' \
-    > "$primary/.aid-o/work/evidence/E-770-1_2/R-1/fsm-state.yaml"
-  cat > "$primary/.aid-o/config/queue.yaml" <<'YAML'
-paused: false
-last_modified: "x"
-queue:
-- epic_id: E-770-1_2
-  path: p
-  status: queued
-  depends_on: []
-- epic_id: E-770-2_2
-  path: p
-  status: queued
-  depends_on: ["E-770-1_2"]
-YAML
-  # No explicit queue/timeline args: the DEFAULTS must resolve to the primary
-  # root from inside the worktree too.
-  run bash -c "cd '$TEST_TMPDIR/wt' && '$FSM' queue-revalidate E-770-2_2" 3>&-
-  [ "$status" -eq 0 ]
-  [ "$output" = "unblocked" ]
-  grep -q '"resolution":"merged_done"' \
-    "$primary/.aid-o/work/evidence/E-770-2_2/queue-revalidate.jsonl"
-  [ ! -d "$TEST_TMPDIR/wt/.aid-o" ]
-}
 
 @test "advance-to-gates invoked from the worktree completes INCLUDING the EXECUTE→GATES transition (report + precondition on the primary root)" {
   # Regression test for the round-3 blocker: advance-to-gates writes
@@ -500,7 +368,6 @@ gates:
     max_retries: 0
 EOF
   # A closed passing EPIC review round for the EXECUTE→GATES precondition (post-deploy mode).
-  aid_fixture_seed_step_review "$ev" cp3 "" pass "$(git -C "$primary" rev-parse HEAD)"
 
   run bash -c "cd '$TEST_TMPDIR/wt' && AID_DEPLOY_DATE='2026-04-01T00:00:00Z' '$FSM' advance-to-gates '$ev/fsm-state.yaml'" 3>&-
   [ "$status" -eq 0 ]
@@ -730,7 +597,6 @@ gates:
     timeout_seconds: 30
     max_retries: 0
 EOF
-  aid_fixture_seed_step_review "$ev" cp3 "" pass "$(git -C "$primary" rev-parse HEAD)"
   printf '%s' "$ev"
 }
 
@@ -799,18 +665,6 @@ EOF
   [ "$status" -ne 0 ]   # zero matches
 }
 
-@test "guard grep: zero unresolved .aid-o literals in the two generation entrypoints outside resolver-routed helpers" {
-  for f in "$SCRIPTS/aid-auto-pipeline.sh" "$SCRIPTS/aid-json-to-run.sh"; do
-    # Every non-comment line mentioning .aid-o must route through the
-    # resolver (aid_state_path / aid_state_root).
-    run bash -c "grep -n '\\.aid-o' '$f' | grep -v 'aid_state_path\\|aid_state_root' | grep -v '^[0-9]*:[[:space:]]*#'"
-    if [ "$status" -eq 0 ]; then
-      echo "unresolved .aid-o literal(s) in $f:" >&2
-      echo "$output" >&2
-      false
-    fi
-  done
-}
 
 @test "aid_dotaid_twin_check: identical or single copies pass; differing copies return 3 naming both and the newer one; one tree is a no-op" {
   source "$AID_PLUGIN_PATH/scripts/lib/aid-roots.sh"

@@ -2,12 +2,12 @@
 
 The Agent tool is not callable from bash, so the controller dispatches every
 reviewer whose provider is `claude`, at every checkpoint: the plan review
-(`commands/aid-plan.md` "Plan review (CP1)") and the step, EPIC and fast-mode
-reviews (`commands/aid-run.md` "Step review (CP2) and EPIC review (CP3)",
-`commands/aid-do.md`) include this text verbatim. `<round dir>` is the
+(`commands/aid-plan.md` "Plan review (CP1)") and the step and fast-mode
+reviews (`commands/aid-run.md` "Step review (CP2)", `commands/aid-do.md`)
+include this text verbatim. `<round dir>` is the
 directory `prepare` printed, and `prepare` prints each role's `<focus>` next
 to its prompt: `cp1-<role>` for a plan, `cp2-step-<N>-<role>` for a step,
-`cp3-<role>` for an EPIC, `cp6-<role>` in fast mode, `cp7-<role>` at plan
+`cp6-<role>` in fast mode, `cp7-<role>` at plan
 close, the role with `_` replaced by `-` (the dispatch wrapper allows no
 underscore in `--focus` or `--agent-id`).
 
@@ -87,8 +87,7 @@ After ALL reviewers of the round (claude and codex) have been dispatched, run
 `collect`. Only when `collect` exits 0, run `close` once with a token value for
 every claude role; when it reports the round invalid, retry the roles it names
 first (`close` refuses an invalid round). `<review>` is `--plan <plan>` for
-CP1, `--checkpoint cp2 --evidence-dir <run dir> --step <N>` for a step,
-`--checkpoint cp3 --evidence-dir <run dir>` for an EPIC:
+CP1, `--checkpoint cp2 --evidence-dir <run dir> --step <N>` for a step:
 
 ```bash
 bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" collect <review> --round K
@@ -96,7 +95,7 @@ bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" close <review> --round K \
   --tokens <role>=<n|unknown> ...
 ```
 
-When `close` reports `fail` on a step or EPIC round and a round remains
+When `close` reports `fail` on a step round and a round remains
 (`rounds_default`, or the PM's `override`), the fix is the step's own role's:
 
 ```
@@ -114,8 +113,8 @@ fixer's model and tokens on the next `close` with
 When `close` reports `fail` on the LAST allowed round, it has already written
 what stays open where the plan-final boundary reads it: a blocker or major a
 later step's declared files cover becomes a carried obligation
-(`carried` in merged.json); any other, and every one at cp3, is routed to the
-EPIC (`routed`) and done-advance refuses until the PM resolves or backlogs it
+(`carried` in merged.json); any other is routed to the run
+(`routed`) and done-advance refuses until the PM resolves or backlogs it
 (`skills/pipeline.md` §13). Say so on the PM card; do not route by hand what
 `close` routed.
 

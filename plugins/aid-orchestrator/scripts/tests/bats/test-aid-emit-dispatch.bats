@@ -161,14 +161,14 @@ teardown() {
 #     EXPIRED such entry still fires (injection can no longer flip event to complete).
 @test "HIGH-1 pending entry is well-formed JSON and orphan check still fires" {
   # Valid focus, but force it expired so the orphan check would normally die.
-  bash "$SCRIPT" start --focus cp3-security --agent-id aid-orchestrator:verifier \
+  bash "$SCRIPT" start --focus cp7-security --agent-id aid-orchestrator:verifier \
     --evidence-dir "$EVID" --expected-duration-max 1
 
   # Pending line: event is literally "start", focus is the exact string, nonce present.
   run jq -r '.event' "$PENDING"
   [ "$output" = "start" ]
   run jq -r '.focus' "$PENDING"
-  [ "$output" = "cp3-security" ]
+  [ "$output" = "cp7-security" ]
   run jq -e '.nonce != null' "$PENDING"
   [ "$status" -eq 0 ]
   # Exactly one "event" key (no injected duplicate).
@@ -193,8 +193,8 @@ teardown() {
 @test "MEDIUM-1 two same-focus starts + one complete keeps exactly one entry" {
   touch "${TMPDIR_TEST}/out.md"
   # Two starts for the same focus, back-to-back (likely same wall-clock second).
-  bash "$SCRIPT" start --focus cp3-security --agent-id aid-orchestrator:verifier --evidence-dir "$EVID"
-  bash "$SCRIPT" start --focus cp3-security --agent-id aid-orchestrator:verifier --evidence-dir "$EVID"
+  bash "$SCRIPT" start --focus cp7-security --agent-id aid-orchestrator:verifier --evidence-dir "$EVID"
+  bash "$SCRIPT" start --focus cp7-security --agent-id aid-orchestrator:verifier --evidence-dir "$EVID"
 
   # Force identical ts on both lines to reproduce the same-second collision exactly.
   tmp="$(mktemp)"
@@ -203,12 +203,12 @@ teardown() {
   run bash -c "grep -c . '$PENDING'"
   [ "$output" = "2" ]
 
-  bash "$SCRIPT" complete --focus cp3-security --output-file "${TMPDIR_TEST}/out.md" --evidence-dir "$EVID"
+  bash "$SCRIPT" complete --focus cp7-security --output-file "${TMPDIR_TEST}/out.md" --evidence-dir "$EVID"
 
   # Exactly one start survives (not zero) — the second, never-completed dispatch.
   run bash -c "grep -c . '$PENDING'"
   [ "$output" = "1" ]
-  run jq -e 'select(.event == "start" and .focus == "cp3-security")' "$PENDING"
+  run jq -e 'select(.event == "start" and .focus == "cp7-security")' "$PENDING"
   [ "$status" -eq 0 ]
 }
 
@@ -232,20 +232,20 @@ teardown() {
 
 # 2.114.0 — a start names a role the round asks; cancel withdraws a start without a complete
 @test "start: a focus naming a role the round does not ask is refused with the round's roles; a round's own role and a dir without round.json pass" {
-  jq -n '{round: 4, reviewers_expected: ["epic_security"]}' > "$EVID/round.json"
-  run bash "$SCRIPT" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID"
-  [ "$status" -eq 1 ]; [[ "$output" == *"does not ask"* && "$output" == *"epic_security"* ]]
+  jq -n '{round: 4, reviewers_expected: ["final_criteria"]}' > "$EVID/round.json"
+  run bash "$SCRIPT" start --focus cp7-final-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID"
+  [ "$status" -eq 1 ]; [[ "$output" == *"does not ask"* && "$output" == *"final_criteria"* ]]
   [ ! -f "$PENDING" ]
-  run bash "$SCRIPT" start --focus cp3-epic-security --agent-id aid-orchestrator:review --evidence-dir "$EVID"
+  run bash "$SCRIPT" start --focus cp7-final-criteria --agent-id aid-orchestrator:review --evidence-dir "$EVID"
   [ "$status" -eq 0 ]
   mkdir -p "$EVID/free" "$EVID/broken"
-  run bash "$SCRIPT" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID/free"
+  run bash "$SCRIPT" start --focus cp7-final-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID/free"
   [ "$status" -eq 0 ]
   mkdir -p "$EVID/six"; jq -n '{reviewers_expected: ["step_generalist"]}' > "$EVID/six/round.json"
   run bash "$SCRIPT" start --focus cp6-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID/six"
   [ "$status" -eq 0 ]                                          # every checkpoint prefix is known, cp6 included
   echo '{"round": 1}' > "$EVID/broken/round.json"
-  run bash "$SCRIPT" start --focus cp3-epic-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID/broken"
+  run bash "$SCRIPT" start --focus cp7-final-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID/broken"
   [ "$status" -eq 1 ]; [[ "$output" == *"no reviewers_expected"* ]]
 }
 

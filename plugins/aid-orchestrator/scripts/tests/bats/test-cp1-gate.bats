@@ -245,13 +245,6 @@ _bind_round1() { jq --arg c "${1:-$(sha256sum "$PLAN" | cut -d' ' -f1)}" -n '{pl
   [ "$status" -eq 0 ]; [[ "$output" == *"switched off"* ]]
 }
 
-@test "critic: a missing critic reaches generation as aid_cp1_blocked, never as forceable" {
-  ( cd "$ROOT" && git init -q -b main && git config user.email t@t && git config user.name t && printf '.aid-o/\n' > .gitignore && git add -A && git commit -qm seed )
-  run bash -c "cd '$ROOT' && bash '$AID_PLUGIN_PATH/scripts/aid-auto-pipeline.sh' --plan '$PLAN' --force --reason 'the PM forces generation past the gate here'"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"aid_cp1_blocked"* ]]
-  [[ "$output" != *"aid_generation_force_required"* ]]
-}
 
 # ── P109 Step 4: one round by default, the second only after a blocker ──────
 # Defect: P014 — three rounds, 45 USD, the softening of point 2 unseen; a

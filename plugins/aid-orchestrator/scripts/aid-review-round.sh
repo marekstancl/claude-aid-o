@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
 # aid-review-round.sh — one review round at a time, for every checkpoint:
-# the plan review (CP1), the step review (CP2), the EPIC review (CP3), the
-# fast-mode review (CP6) and the whole-plan review at plan close (CP7).
+# the plan review (CP1), the step review (CP2), the fast-mode review (CP6) and
+# the whole-plan review at plan close (CP7). (The EPIC review, CP3, was removed
+# in 3.0.0 with the EPIC path, P114.)
 #
 # Which review a call is about is the first option group:
 #   --plan <file>                                       CP1: evidence/<plan_id>/cp1/
 #   --checkpoint cp2 --evidence-dir <run dir> --step N  evidence/<run>/cp2/step-N/
-#   --checkpoint cp3 --evidence-dir <run dir>           evidence/<run>/cp3/
 #   --checkpoint cp6 --evidence-dir <do dir>            evidence/do/<id>/cp6/
 #   --checkpoint cp7 --evidence-dir <final run dir>     evidence/<plan>/<R-…-final-N>/cp7/
 #
@@ -34,17 +34,25 @@
 #       clear one invalid or missing reviewer so it can answer again
 #   override … --rounds 1|2|3 --reason "<the PM's words>"
 #       record the PM's instruction to run one round, or a third
-#   standing --checkpoint cp2|cp3 --evidence-dir <run> --reason "<the PM's words>"
+#   standing --checkpoint cp2 --evidence-dir <run> --reason "<the PM's words>"
 #       record, once per plan, the PM's "don't ask, finish it": two more
-#       fix-and-confirm rounds after any step or EPIC budget of the plan
+#       fix-and-confirm rounds after any step budget of the plan
+#   standing --plan <plan> | --checkpoint … --delegate --reason "<the PM's words>"
+#       record the PM's delegation for a manual plan: escalations are settled by
+#       an independent agent (a plan whose state says autonomy: auto has it already)
+#   delegate … --round K --pending | --fingerprint <fp> [--verdict <file>]
+#       CP2, CP7 with delegation in force (P112): --pending lists the
+#       escalations without a verdict; --fingerprint runs Codex on one (exit 4 +
+#       STAND-IN: an independent Claude agent in the bracket
+#       adjudicator-delegated-<fp16>), --verdict records its answer
 #   dispute … --round K --fingerprint <fp> --reason "<why>" [--pm accepted|rejected [--finding-card <card>]]
-#       CP1, CP2, CP3, CP7: a disputed finding stays blocking; only the PM's answer
-#       clears it, and at CP2/CP3 `--pm accepted` needs the Decision card that
+#       CP1, CP2, CP7: a disputed finding stays blocking; only the PM's answer
+#       clears it, and at CP2 `--pm accepted` needs the Decision card that
 #       quotes the finding and a PM prompt after it (the hook audit)
 #   fix-check | finalize                                 CP1 only (see below)
 #
 # Every subcommand loads and validates the checkpoint's reviewer block first
-# (review_checkpoints.plan_review / step_review / epic_review / final_review). A step round
+# (review_checkpoints.plan_review / step_review / final_review). A step round
 # is prepared only from a step-check.json computed at HEAD, and closed only at
 # the same HEAD, with a recorded dispatch bracket for every claude reviewer
 # (unless the round was prepared --stub, which the FSM refuses to advance on).
@@ -78,12 +86,14 @@ source "${SCRIPT_DIR}/lib/aid-obligations.sh"
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"
 # shellcheck source=lib/aid-decision-card.sh
 source "${SCRIPT_DIR}/lib/aid-decision-card.sh"   # aid_pm_card_check (dispute --pm accepted; P110)
+# shellcheck source=lib/aid-delegate.sh
+source "${SCRIPT_DIR}/lib/aid-delegate.sh"        # escalations settled by an independent agent (P112)
 
 usage() { sed -n '4,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 CMD="${1:-}"; [[ -n "$CMD" && "$CMD" != -h && "$CMD" != --help ]] || usage
 shift
-AT_SHA="" ALSO_STEPS="" CLOSE_HEAD="" RESTART=0
+AT_SHA="" ALSO_STEPS="" CLOSE_HEAD="" RESTART=0 DELEGATE=0 PENDING=0 VERDICT=""
 PLAN="" CHECKPOINT="" EVID="" STEP="" ROUND="" ROOT="" ONLY="" MANUAL=0 STUB=0 ROLE="" PROVIDER="" FINGERPRINT="" REASON="" ROUNDS="" PM_ANSWER="" FIXER="" CARD=""
 TOKENS=()
 while [[ $# -gt 0 ]]; do
@@ -108,6 +118,9 @@ while [[ $# -gt 0 ]]; do
     --at)           AT_SHA="${2:-}"; shift 2 ;;        # close: the revision the reviewers saw (a fix committed before close)
     --also-steps)   ALSO_STEPS="${2:-}"; shift 2 ;;    # fix-check: steps edited as a consequence of the fix, with --reason
     --restart)      RESTART=1; shift ;;                # prepare --round 1: a new review attempt (P109)
+    --delegate)     DELEGATE=1; shift ;;               # standing: the PM delegates escalations (P112)
+    --pending)      PENDING=1; shift ;;                # delegate: list what awaits a verdict
+    --verdict)      VERDICT="${2:-}"; shift 2 ;;       # delegate: record an adjudicator's verdict
     --tokens)       shift; while [[ $# -gt 0 && "$1" != --* ]]; do TOKENS+=("$1"); shift; done ;;
     -*) echo "${CMD}: unknown option $1" >&2; exit 2 ;;
     *)  [[ -z "$PLAN" ]] && PLAN="$1"; shift ;;   # a bare path is the plan (CP1 compatibility)
@@ -123,7 +136,7 @@ done
 
 # ── which review ─────────────────────────────────────────────────────────────
 MODE="" BASE="" NS="" BLOCK="" ROLES_SKILL="" PLAN_ID="" STEPCHECK=""
-if [[ -n "$PLAN" && -n "$CHECKPOINT" ]]; then _die "give --plan (CP1) or --checkpoint (CP2/CP3/CP6), not both" 2; fi
+if [[ -n "$PLAN" && -n "$CHECKPOINT" ]]; then _die "give --plan (CP1) or --checkpoint (CP2/CP6/CP7), not both" 2; fi
 if [[ -n "$PLAN" ]]; then
   MODE=plan; CHECKPOINT=cp1
   [[ -f "$PLAN" ]] || _die "plan file required (got '${PLAN}')" 2
@@ -135,25 +148,24 @@ if [[ -n "$PLAN" ]]; then
   NS=plan_review; BLOCK=plan_review; ROLES_SKILL="${AID_PLUGIN_PATH}/skills/plan-review-roles.md"
 elif [[ -n "$CHECKPOINT" ]]; then
   MODE=step
-  [[ "$CHECKPOINT" =~ ^cp[2367]$ ]] || _die "--checkpoint must be cp2, cp3, cp6 or cp7" 2
+  [[ "$CHECKPOINT" =~ ^cp[267]$ ]] || _die "--checkpoint must be cp2, cp6 or cp7 (CP1 is --plan; CP3 was removed in 3.0.0 — a plan's one run is reviewed per step, CP2, and at the close, CP7)" 2
   [[ -n "$EVID" && -d "$EVID" ]] || _die "--evidence-dir <dir> required and must exist" 2
   EVID="$(realpath "$EVID")"
   if [[ -z "$ROOT" ]]; then
     ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || _die "not inside a git repository; pass --project-root" 2
     # the tree the run's branch is checked out in, as aid-step-check.sh diffs it
-    if [[ "$CHECKPOINT" =~ ^cp[23]$ ]]; then ROOT="$(aid_run_checkout_root "${EVID}/fsm-state.yaml" "$ROOT")" || exit 2; fi
+    if [[ "$CHECKPOINT" == cp2 ]]; then ROOT="$(aid_run_checkout_root "${EVID}/fsm-state.yaml" "$ROOT")" || exit 2; fi
   fi
   ROOT="$(realpath "$ROOT")"
   case "$CHECKPOINT" in
     cp2) [[ "$STEP" =~ ^[0-9]+$ ]] || _die "--step N required for cp2" 2; BASE="${EVID}/cp2/step-${STEP}"; NS=step_review; BLOCK=step_review ;;
-    cp3) BASE="${EVID}/cp3"; NS=epic_review; BLOCK=epic_review ;;
     cp6) BASE="${EVID}/cp6"; NS=do_review; BLOCK=step_review; export RC_CHECKPOINT=cp6 ;;
     cp7) BASE="${EVID}/cp7"; NS=final_review; BLOCK=final_review ;;
   esac
   ROLES_SKILL="${AID_PLUGIN_PATH}/skills/step-review-roles.md"
   STEPCHECK="${BASE}/step-check.json"
 else
-  _die "give --plan <file> (CP1) or --checkpoint cp2|cp3|cp6|cp7 --evidence-dir <dir> [--step N]" 2
+  _die "give --plan <file> (CP1) or --checkpoint cp2|cp6|cp7 --evidence-dir <dir> [--step N]" 2
 fi
 
 # the review config belongs to the state root (a linked worktree has none, or a stale copy)
@@ -200,7 +212,7 @@ _override_rounds() { [[ -f "${BASE}/override.json" ]] && jq -r '.rounds // empty
 # _standing_file — the PM's standing "don't ask, finish it" for the plan this
 # step or EPIC run belongs to (plan id from the run's own plan_path), or nothing.
 _standing_file() {
-  [[ "$MODE" == step && "$CHECKPOINT" =~ ^cp[23]$ ]] || return 1
+  [[ "$MODE" == step && "$CHECKPOINT" == cp2 ]] || return 1
   local pp pid; pp="$(yq -r '.plan_path // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"
   [[ -n "$pp" && "$pp" != null && -f "$pp" ]] || return 1
   pid="$(_aid_plan_id_of "$pp")" || return 1
@@ -212,8 +224,16 @@ _base_rounds() { local o; o="$(_override_rounds)"; [[ -n "$o" && "$o" -gt "$RC_R
 # under the PM's standing instruction (P103: "už se neptej a dodělej" could not
 # be recorded, so every finding after the last round cost a new card).
 _allowed_rounds() {
-  local f b; b="$(_base_rounds)"
-  if f="$(_standing_file)" && [[ -f "$f" ]]; then echo $(( b + 2 )); else echo "$b"; fi
+  local f b g=0; b="$(_base_rounds)"
+  # P112: a delegate's `fix` grants one more fix-and-confirm round
+  [[ -f "${BASE}/delegate-rounds.json" ]] && g="$(jq -r '.grants // 0' "${BASE}/delegate-rounds.json" 2>/dev/null || echo 0)"
+  if f="$(_standing_file)" && [[ -f "$f" ]]; then echo $(( b + 2 + g )); else echo $(( b + g )); fi
+}
+# _last_allowed — the round after which what stays open is routed (close and delegate agree).
+_last_allowed() {
+  local l; l="$(_allowed_rounds)"
+  [[ "${RC_SECOND_ROUND_WHEN:-}" == open_finding_and_fix ]] && (( l <= RC_ROUNDS_DEFAULT )) && l=$(( RC_ROUNDS_DEFAULT + 1 ))
+  echo "$l"
 }
 
 # _expected_roles <round> — the reviewers a round asks, one per line.
@@ -683,36 +703,46 @@ cmd_dispatch() {
   _stand_in "$dir" "$ROLE" && _die "a stand-in was already ordered for ${ROLE}; codex is asked again only through retry"
 
   [[ -r "${dir}/prompt-${ROLE}.md" ]] || _die "cannot read ${dir}/prompt-${ROLE}.md; prepare the round again" 2
-  local probe why
-  probe="$(_codex_probe "${RC_MODEL[$i]}")"
+  local why rc=0
+  why="$(_codex_run "${dir}/prompt-${ROLE}.md" "$answer" "$usage" "${dir}/codex-${ROLE}" "${RC_MODEL[$i]}" "${RC_EFFORT[$i]}")" || rc=$?
+  if (( rc == 0 )); then
+    echo "dispatched ${ROLE} (codex ${RC_MODEL[$i]}): answer in ${answer}"
+  else
+    _stand_in_line "$dir" "$ROLE" "$why"
+  fi
+}
+
+# _codex_run <prompt> <answer> <usage> <prefix> <model> <effort> — the round's
+# one codex runner (a reviewer, P112: the delegated adjudicator): probe, one
+# isolated run, the answer unfenced into <answer>, the usage record. 0 answered;
+# 4 no answer (the reason on stdout, the usage record says fallback: claude) —
+# a usage limit or any transport failure falls back to the Claude stand-in.
+_codex_run() {
+  local prompt="$1" answer="$2" usage="$3" pfx="$4" model="$5" effort="$6" probe why rc=0
+  probe="$(_codex_probe "$model")"
   if [[ "$(jq -r '.available' <<< "$probe")" != true ]]; then
     why="$(jq -r '.reason' <<< "$probe")"
     jq -n --arg r "$why" '{answered: false, reason: $r, fallback: "claude"}' > "$usage"
-    _stand_in_line "$dir" "$ROLE" "$why"
-    return 0
+    echo "$why"; return 4
   fi
-  local events="${dir}/codex-${ROLE}.events.jsonl" last="${dir}/codex-${ROLE}.last.txt" rc=0
+  local events="${pfx}.events.jsonl" last="${pfx}.last.txt"
   # In a subshell: the launcher's library sets its own shell options on load.
   ( # shellcheck source=lib/aid-codex-transport.sh
     source "${SCRIPT_DIR}/lib/aid-codex-transport.sh"
-    CODEX_MODEL="${RC_MODEL[$i]}" CODEX_EFFORT="${RC_EFFORT[$i]}"
-    _run_codex_isolated "$ROOT" "${dir}/prompt-${ROLE}.md" "$events" "${dir}/codex-${ROLE}.stderr.txt" "$last"
+    CODEX_MODEL="$model" CODEX_EFFORT="$effort"
+    _run_codex_isolated "$ROOT" "$prompt" "$events" "${pfx}.stderr.txt" "$last"
   ) || rc=$?
-
   [[ -s "$last" ]] && aid_plan_review_unfence "$last" "$answer"
   if [[ -s "$answer" ]]; then
     aid_review_tokens_from_events "$events" 2>/dev/null | jq -c '{answered: true} + .' > "$usage" 2>/dev/null \
       || jq -n '{answered: true, tokens_in: "unknown", tokens_out: "unknown"}' > "$usage"
-    echo "dispatched ${ROLE} (codex ${RC_MODEL[$i]}): answer in ${answer}"
-  else
-    rm -f "$answer"
-    local why=no_file; (( rc != 0 )) && why="exit_${rc}"; (( rc == 124 )) && why=timeout
-    grep -qiE 'usage limit|rate.?limit|429' "${dir}/codex-${ROLE}.stderr.txt" 2>/dev/null && why=rate_limited
-    # Any run that leaves no answer falls back to the stand-in: a transport
-    # failure never costs the round its second opinion.
-    jq -n --arg why "$why" '{answered: false, reason: $why, fallback: "claude"}' > "$usage"
-    _stand_in_line "$dir" "$ROLE" "$why"
+    return 0
   fi
+  rm -f "$answer"
+  why=no_file; (( rc != 0 )) && why="exit_${rc}"; (( rc == 124 )) && why=timeout
+  grep -qiE 'usage limit|rate.?limit|429' "${pfx}.stderr.txt" 2>/dev/null && why=rate_limited
+  jq -n --arg why "$why" '{answered: false, reason: $why, fallback: "claude"}' > "$usage"
+  echo "$why"; return 4
 }
 
 # _retry_uncollected <round dir> — 2.114.0 (agents P010, CP7: the account limit
@@ -899,23 +929,27 @@ _token_value() {
 # counts is the current one: a complete that an older start got does not vouch
 # for a file written after a newer start was withdrawn (2.114.0, Codex review).
 _bracket_last() {
-  local tl="$1/timeline.jsonl" focus; focus="$(_focus "$2")"
+  local tl="$1/timeline.jsonl" focus; focus="${3:-$(_focus "$2")}"   # P112: an exact focus (the delegate's)
   [[ -f "$tl" ]] || { echo none; return 0; }
   jq -r --arg f "$focus" 'select(.focus == $f and (.event | IN("verifier_dispatch_start", "verifier_dispatch_complete", "verifier_dispatch_cancel"))) | .event' "$tl" 2>/dev/null \
     | tail -1 | sed 's/^verifier_dispatch_//; s/^$/none/' | grep . || echo none
 }
 _dispatch_recorded() {
-  local tl="$1/timeline.jsonl" focus; focus="$(_focus "$2")"
+  local tl="$1/timeline.jsonl" focus; focus="${3:-$(_focus "$2")}"
   [[ -f "$tl" ]] || return 1
-  [[ "$(_bracket_last "$1" "$2")" == complete ]] || return 1
+  [[ "$(_bracket_last "$1" "$2" "$focus")" == complete ]] || return 1
   # No `jq -e`: under pipefail it exits 4 when the LAST input yields nothing, which is the usual case.
   jq -c --arg f "$focus" 'select(.event == "verifier_dispatch_start" and .focus == $f)' "$tl" 2>/dev/null | grep -q . || return 1
   # the LAST complete of the focus is the one that counts, and it must name this role's file
+  if [[ -n "${4:-}" ]]; then   # P112: the complete names exactly this file
+    [[ "$(jq -r --arg f "$focus" 'select(.event == "verifier_dispatch_complete" and .focus == $f) | .output_file // ""' "$tl" 2>/dev/null | tail -1)" == "$4" ]]
+    return
+  fi
   jq -r --arg f "$focus" 'select(.event == "verifier_dispatch_complete" and .focus == $f) | .output_file // ""' "$tl" 2>/dev/null | tail -1 \
     | grep -Eq "reviewer-${2}\.(json|missing)$"
 }
 
-# ── the semantic file of a whole-EPIC (cp3) or whole-plan (cp7) round ─────────
+# ── the semantic file of a whole-plan (cp7) round ─────────────────────────────
 # _semantic_final_write <verdict> — <run>/semantic-review-final.json, the
 # artifact the boundary consumers keep reading where it always was (aid-fsm.sh
 # routed-findings reconciliation, aid-release-policy.sh input row,
@@ -927,8 +961,8 @@ _dispatch_recorded() {
 # says so in merge_meta.merged_from.
 #   severity  blocker → critical, major → medium, minor → low
 #   status    fixed → resolved, carried → deferred, everything else → open
-#   base_sha and range come from step-check.json (the EPIC's base_commit at cp3,
-#   the plan's base commit at cp7), so the file names what the reviewers saw
+#   base_sha and range come from step-check.json (the plan's base commit), so
+#   the file names what the reviewers saw
 _semantic_final_write() {
   local verdict="$1" out="${EVID}/semantic-review-final.json" tmp base range schema="${AID_PLUGIN_PATH}/defaults/schemas/semantic-review.schema.json"
   range="$(jq -r '.range // ""' "$STEPCHECK")"; base="${range%%..*}"
@@ -1176,13 +1210,19 @@ to close the round at the revision the reviewers saw; the fix is confirmed by th
     # the round is marked closed, so an interrupted close is run again, not lost.
     # Under second_round_when: open_finding_and_fix (P110) the confirmation round
     # rounds_default + 1 is still to come: routing waits for it.
-    local last_allowed; last_allowed="$(_allowed_rounds)"
-    [[ "${RC_SECOND_ROUND_WHEN:-}" == open_finding_and_fix ]] && (( last_allowed <= RC_ROUNDS_DEFAULT )) \
-      && last_allowed=$(( RC_ROUNDS_DEFAULT + 1 ))
+    local last_allowed; last_allowed="$(_last_allowed)"
+    # P112: with delegation in force, no escalation reaches the PM's card before
+    # the independent agent answered it (delegate --pending empty).
+    local dlg_pid dlg_open
+    if [[ "$CHECKPOINT" =~ ^cp[27]$ ]] && dlg_pid="$(_dlg_plan_id)" && aid_delegate_in_force "$(_dlg_root)" "$dlg_pid"; then
+      dlg_open="$(_dlg_pending "$dir" "$(( ROUND >= last_allowed ? 1 : 0 ))")"
+      [[ -z "$dlg_open" ]] || _die "$(wc -l <<< "$dlg_open") escalation(s) await an independent verdict (delegation in force for ${dlg_pid}); nothing was closed.
+next: bash ${SCRIPT_DIR}/aid-review-round.sh delegate --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --fingerprint <fp> for each of: $(paste -sd' ' <<< "$dlg_open"), then close again"
+    fi
     aid_step_review_route_open "$ROOT" "$EVID" "$CHECKPOINT" "$STEP" "$dir" "$(( ROUND >= last_allowed ? 1 : 0 ))" \
       || _die "routing the open findings failed; close can be run again"
     jq --arg at "$(_now)" '. + {routed_at: $at}' "${dir}/round.json" > "${dir}/round.json.tmp" && mv "${dir}/round.json.tmp" "${dir}/round.json"
-    if [[ "$CHECKPOINT" == cp3 || "$CHECKPOINT" == cp7 ]]; then
+    if [[ "$CHECKPOINT" == cp7 ]]; then
       _semantic_final_write "$verdict" || _die "the ${CHECKPOINT} round cannot close: ${EVID}/semantic-review-final.json was not written; close can be run again"
     fi
   fi
@@ -1330,10 +1370,10 @@ cmd_finalize() {
 cmd_dispute() {
   # cp7 since 2.114.0: a whole-plan finding the author refuted by measurement or
   # the PM consciously deferred had no path but "fix it" (P010 closed by a manual
-  # merge). The same card-and-answer rule as cp2/cp3 applies; a form_invalid
+  # merge). The same card-and-answer rule as cp2 applies; a form_invalid
   # finding (evidence outside the candidate's repository) is disputed the same way.
-  [[ "$MODE" == plan || "$CHECKPOINT" =~ ^cp[237]$ ]] \
-    || _die "dispute is for the plan (CP1), step (CP2), EPIC (CP3) and whole-plan (CP7) reviews" 2
+  [[ "$MODE" == plan || "$CHECKPOINT" =~ ^cp[27]$ ]] \
+    || _die "dispute is for the plan (CP1), step (CP2) and whole-plan (CP7) reviews" 2
   local dir; dir="$(_existing_round)" || exit 1
   [[ -n "$FINGERPRINT" && ${#REASON} -ge 20 ]] || _die "--fingerprint and a --reason of at least 20 characters required" 2
   [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
@@ -1368,7 +1408,7 @@ cmd_dispute() {
     done
     jq --argjson r "$ROUND" --arg v "$v" '.rounds |= map(if .round == $r then .verdict = $v else . end)
       | if ([.rounds[].round] | max) == $r then .verdict = $v else . end' "$index" > "${index}.tmp" && mv "${index}.tmp" "$index"
-    [[ "$CHECKPOINT" == cp3 || "$CHECKPOINT" == cp7 ]] && { _semantic_final_write "$v" || _die "${EVID}/semantic-review-final.json was not rewritten; run the dispute again"; }
+    [[ "$CHECKPOINT" == cp7 ]] && { _semantic_final_write "$v" || _die "${EVID}/semantic-review-final.json was not rewritten; run the dispute again"; }
     # A cp7 dispute rewrites files the close stage recorded; the decision's
     # integrity check reads the LAST record per path, so the dispute records
     # its own stage — the audit shows who changed the verdict and when.
@@ -1383,12 +1423,13 @@ cmd_dispute() {
     | if .dispute.pm.answer == "accepted" then "dismissed by the PM (dispute accepted)" else .status end' "${dir}/merged.json")"
 }
 
-# standing --checkpoint cp2|cp3 --evidence-dir <run> --reason "<the PM's words>"
+# standing --checkpoint cp2 --evidence-dir <run> --reason "<the PM's words>"
 # Records, once per plan, the PM's standing instruction to finish without
 # asking: every step and EPIC review of the plan may then run up to two
 # fix-and-confirm rounds after its budget before routing what stays open.
 cmd_standing() {
-  [[ "$MODE" == step && "$CHECKPOINT" =~ ^cp[23]$ ]] || _die "standing is recorded from a step (cp2) or EPIC (cp3) run of the plan: --checkpoint cp2|cp3 --evidence-dir <run>" 2
+  if (( DELEGATE )); then _standing_delegate; return; fi
+  [[ "$MODE" == step && "$CHECKPOINT" == cp2 ]] || _die "standing is recorded from a step (cp2) run of the plan: --checkpoint cp2 --evidence-dir <run>" 2
   (( ${#REASON} >= 20 )) || _die "--reason must quote the PM's words (at least 20 characters)" 2
   local f; f="$(_standing_file)" || _die "cannot find the plan of ${EVID} (its fsm-state.yaml names no readable plan_path)"
   [[ -f "$f" ]] && _die "the PM's standing instruction is already recorded (${f})"
@@ -1397,6 +1438,201 @@ cmd_standing() {
     '{by: "PM", at: $at, words: $why, recorded_from: $run, grants: "up to 2 fix-and-confirm rounds after each step or EPIC review budget", recorded_by: "controller"}' > "$f"
   _log review_standing checkpoint="$CHECKPOINT"
   echo "recorded the PM's standing instruction for the plan (${f})"
+}
+
+# ── delegation (P112 Step 7) ─────────────────────────────────────────────────
+_dlg_root() { aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT"; }
+# _dlg_plan_id — the plan this round belongs to: the plan file (CP1), the run's
+# plan_path (cp2), the brief record of the close (cp7).
+_dlg_plan_id() {
+  local pp=""
+  if [[ "$MODE" == plan ]]; then printf '%s' "$PLAN_ID"; return 0; fi
+  case "$CHECKPOINT" in
+    cp2) pp="$(yq -r '.plan_path // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)" ;;
+    cp7) pp="$(jq -r '.plan // ""' "${EVID}/cp7/brief.json" 2>/dev/null)" ;;
+  esac
+  [[ -n "$pp" && "$pp" != null && -f "$pp" ]] || return 1
+  _aid_plan_id_of "$pp"
+}
+_dlg_refuse() {   # <code> <message> <next>
+  echo "${CMD}: REFUSED ($1): $2" >&2
+  echo "next: $3" >&2
+  echo "(pipeline.md §When AID refuses: $1)" >&2
+  exit 1
+}
+# _dlg_kind <finding-json> — dispute | open_after_rounds
+_dlg_kind() { [[ "$(jq -r .status <<< "$1")" == disputed ]] && echo dispute || echo open_after_rounds; }
+# _dlg_pending <round dir> <last 0|1> — fingerprints that await a verdict: every
+# disputed finding, and after the last round every open blocker or major
+# (minor findings never reach the PM's card, so they are no escalation); a
+# finding already answered in this round, or classed brief|money|data, is not.
+_dlg_pending() {
+  jq -r --argjson last "$2" '.findings[]
+    | select(.delegated == null and (.dispute.delegated // null) == null)
+    | select(.status == "disputed" or ($last == 1 and (.status | IN("open", "form_invalid")) and (.severity == "blocker" or .severity == "major")))
+    | .fingerprint' "$1/merged.json" 2>/dev/null
+}
+_standing_delegate() {
+  (( ${#REASON} >= 20 )) || _die "--reason must quote the PM's words (at least 20 characters)" 2
+  local pid f; pid="$(_dlg_plan_id)" || _die "cannot tell which plan this is; pass --plan <plan file>"
+  f="$(_dlg_root)/.aid-o/work/evidence/${pid}/delegate.json"
+  [[ -f "$f" ]] && _die "the PM's delegation is already recorded (${f})"
+  mkdir -p "$(dirname "$f")"
+  jq -n --arg at "$(_now)" --arg why "$REASON" '{delegate: true, by: "PM", words: $why, at: $at, recorded_by: "controller"}' > "$f"
+  echo "recorded the PM's delegation for ${pid}: escalations are settled by an independent agent (${f})"
+}
+# _dlg_resync <round dir> <answer label> — the round's verdict in its four
+# places after a finding changed (the same rewrite a dispute does).
+_dlg_resync() {
+  local dir="$1" v f index="${BASE}/rounds.json"
+  jq '.blockers_open = ([.findings[] | select(.severity == "blocker" and (.status == "open" or .status == "disputed"))] | length)' \
+    "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  [[ -f "${dir}/measurement.json" ]] || return 0
+  v="$(_round_verdict "${dir}/merged.json")"
+  for f in "${dir}/measurement.json" "${dir}/round.json"; do
+    jq --arg v "$v" '.verdict = $v' "$f" > "${f}.tmp" && mv "${f}.tmp" "$f"
+  done
+  [[ -f "$index" ]] && jq --argjson r "$ROUND" --arg v "$v" '.rounds |= map(if .round == $r then .verdict = $v else . end)
+    | if ([.rounds[].round] | max) == $r then .verdict = $v else . end' "$index" > "${index}.tmp" && mv "${index}.tmp" "$index"
+  [[ "$CHECKPOINT" == cp7 ]] && { _semantic_final_write "$v" || _die "${EVID}/semantic-review-final.json was not rewritten; record the verdict again"; }
+  if [[ "$CHECKPOINT" == cp7 ]]; then
+    aid_stage_writes_record "$EVID" "cp7-delegated-$2" \
+      "cp7/round-${ROUND}/merged.json" "cp7/round-${ROUND}/measurement.json" "cp7/round-${ROUND}/round.json" "cp7/rounds.json" semantic-review-final.json
+  fi
+  return 0
+}
+
+cmd_delegate() {
+  [[ "$MODE" == step && "$CHECKPOINT" =~ ^cp[27]$ ]] \
+    || _die "delegate is for the step (CP2) and whole-plan (CP7) rounds; the plan review (CP1) stays the PM's" 2
+  local dir; dir="$(_existing_round)" || exit 1
+  [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
+  local pid root last
+  pid="$(_dlg_plan_id)" || _die "cannot tell which plan ${EVID} belongs to"
+  root="$(_dlg_root)"
+  aid_delegate_in_force "$root" "$pid" \
+    || _dlg_refuse delegation_missing "no delegation is in force for ${pid}: its plan state is not autonomy: auto (or the PM stopped the run) and the PM recorded no standing --delegate" \
+         "the PM decides (dispute --pm … --finding-card <card>), or the PM records: aid-review-round.sh standing --plan <plan> --delegate --reason \"<the PM's words>\""
+  last=$(( ROUND >= $(_last_allowed) ? 1 : 0 ))
+  if (( PENDING )); then _dlg_pending "$dir" "$last"; return 0; fi
+  [[ -n "$FINGERPRINT" ]] || _die "--fingerprint <fp> or --pending required" 2
+  local finding kind fp16 vfile
+  finding="$(jq -c --arg f "$FINGERPRINT" 'first(.findings[] | select(.fingerprint == $f)) // empty' "${dir}/merged.json")"
+  [[ -n "$finding" ]] || _die "no finding ${FINGERPRINT} in round ${ROUND}"
+  if [[ -z "$VERDICT" ]] && jq -e '.delegated != null or .dispute.delegated != null' <<< "$finding" >/dev/null; then
+    echo "finding ${FINGERPRINT}: already settled in round ${ROUND}; nothing dispatched"; return 0
+  fi
+  [[ "$(jq -r .status <<< "$finding")" == fixed && -z "$VERDICT" ]] && _die "finding ${FINGERPRINT} is fixed — nothing to settle"
+  kind="$(_dlg_kind "$finding")"
+  [[ "$kind" == dispute ]] || (( last )) \
+    || _die "finding ${FINGERPRINT} is open but round ${ROUND} is not the last one the plan allows — the fix loop goes on; nothing is escalated yet"
+  fp16="$(aid_delegate_fp16 "$FINGERPRINT")"
+  vfile="${dir}/adjudicator-delegated-${fp16}.json"
+  local ledger; ledger="$(aid_delegate_ledger "$root" "$pid")"
+
+  if [[ -z "$VERDICT" ]]; then
+    if jq -e '.delegated != null or .dispute.delegated != null' <<< "$finding" >/dev/null; then
+      echo "finding ${FINGERPRINT}: already settled in round ${ROUND}; nothing dispatched"; return 0
+    fi
+    if [[ -s "$ledger" ]] && jq -e -s --arg f "$FINGERPRINT" --arg rd "$dir" 'any(.[]; .fingerprint == $f and .round_dir == $rd)' "$ledger" >/dev/null 2>&1; then
+      echo "finding ${FINGERPRINT}: the ledger already records a settlement in this round; nothing dispatched"; return 0
+    fi
+    if [[ -s "$vfile" ]]; then
+      echo "finding ${FINGERPRINT}: a verdict is already on disk (${vfile}); nothing dispatched — record it: delegate … --fingerprint ${FINGERPRINT} --verdict ${vfile}"; return 0
+    fi
+    local brief prompt="${dir}/adjudicator-delegated-${fp16}.prompt.md"
+    brief="$(jq -r '.plan // ""' "${EVID}/cp7/brief.json" 2>/dev/null)"
+    [[ -n "$brief" ]] || brief="$(yq -r '.plan_path // ""' "${EVID}/fsm-state.yaml" 2>/dev/null)"
+    brief="$( [[ -f "$brief" ]] && _aid_fm_get "$brief" zadani 2>/dev/null || true)"
+    aid_delegate_prompt "$dir" "$finding" "$kind" "$brief" "$prompt"
+    local i model="" effort=medium why rc=0
+    for (( i = 0; i < ${#RC_PROVIDER[@]}; i++ )); do
+      [[ "${RC_PROVIDER[$i]}" == codex ]] && { model="${RC_MODEL[$i]}"; effort="${RC_EFFORT[$i]}"; break; }
+    done
+    if [[ -n "$model" ]]; then
+      why="$(_codex_run "$prompt" "$vfile" "${dir}/codex-adjudicator-${fp16}.usage.json" "${dir}/codex-adjudicator-${fp16}" "$model" "$effort")" || rc=$?
+    else
+      why="no codex role configured for ${CHECKPOINT}"; rc=4
+    fi
+    if (( rc != 0 )); then
+      echo "STAND-IN: no codex verdict (${why}); dispatch ${prompt} to an independent general-purpose agent at model ${RC_STAND_IN_MODEL} inside the bracket adjudicator-delegated-${fp16} (aid-emit-dispatch.sh start --focus adjudicator-delegated-${fp16} --agent-id claude:adjudicator-delegated --evidence-dir ${dir}; complete … --output-file ${vfile}), have it write ${vfile} with \"provider\": \"claude\", then: aid-review-round.sh delegate --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --fingerprint ${FINGERPRINT} --verdict ${vfile}"
+      exit 4
+    fi
+    jq '.provider = "codex"' "$vfile" > "${vfile}.tmp" && mv "${vfile}.tmp" "$vfile"
+    _log delegate_codex_verdict fp16="$fp16" round="$ROUND" sha256="$(sha256sum "$vfile" | cut -d' ' -f1)"
+    VERDICT="$vfile"
+  fi
+
+  # ── record ──────────────────────────────────────────────────────────────────
+  [[ -f "$VERDICT" ]] || _die "no verdict file at ${VERDICT}" 2
+  VERDICT="$(realpath "$VERDICT")"
+  # the verdict of THIS escalation is this round's own file — an older round's
+  # verdict (or bracket) never vouches for a later one
+  [[ "$VERDICT" == "$(realpath -m "$vfile")" ]] \
+    || _dlg_refuse delegation_missing "the verdict for ${FINGERPRINT} in round ${ROUND} is ${vfile}, not ${VERDICT}" \
+         "have the adjudicator write ${vfile}, then record it"
+  local bad; bad="$(aid_delegate_check "$VERDICT" "$kind")"
+  [[ -z "$bad" ]] || _die "the verdict ${VERDICT} is not usable: ${bad}"
+  [[ "$(jq -r .fingerprint "$VERDICT")" == "$FINGERPRINT" ]] || _die "the verdict names $(jq -r .fingerprint "$VERDICT"), not ${FINGERPRINT}"
+  if jq -e '.delegated.verdict_file == $v or .dispute.delegated.verdict_file == $v' --arg v "$VERDICT" <<< "$finding" >/dev/null; then
+    echo "finding ${FINGERPRINT}: this verdict is already recorded"; return 0
+  fi
+  local provider; provider="$(jq -r .provider "$VERDICT")"
+  if [[ "$provider" == codex ]]; then
+    jq -e -nR --arg f "$fp16" --arg s "$(sha256sum "$VERDICT" | cut -d' ' -f1)" \
+      --arg rd "$ROUND" 'any(inputs; (try fromjson catch null) as $j | $j != null and $j.event? == "delegate_codex_verdict" and $j.fp16? == $f and $j.sha256? == $s and (($j.round? // "") | tostring) == $rd)' \
+      "${EVID}/timeline.jsonl" >/dev/null 2>&1 \
+      || _dlg_refuse delegation_missing "a codex verdict without the runner's record (no delegate_codex_verdict event with this file's sha256 in ${EVID}/timeline.jsonl)" \
+           "let delegate --fingerprint ${FINGERPRINT} run Codex, or record a Claude stand-in's verdict filed under its bracket"
+  else
+    { _dispatch_recorded "$dir" "" "adjudicator-delegated-${fp16}" "$VERDICT" \
+      && [[ "$(jq -r --arg f "adjudicator-delegated-${fp16}" 'select(.event == "verifier_dispatch_start" and .focus == $f) | .agent_id // ""' "${dir}/timeline.jsonl" 2>/dev/null | tail -1)" == claude:adjudicator-delegated ]]; } \
+      || _dlg_refuse delegation_missing "a Claude verdict without its closed bracket adjudicator-delegated-${fp16} (agent claude:adjudicator-delegated) naming ${VERDICT}" \
+           "dispatch the stand-in inside the bracket (aid-emit-dispatch.sh start/complete --focus adjudicator-delegated-${fp16}), then record again"
+  fi
+  local answer class reason entry at
+  answer="$(jq -r .answer "$VERDICT")"; class="$(jq -r .class "$VERDICT")"; reason="$(jq -r .reason "$VERDICT")"; at="$(_now)"
+  if [[ "$kind" == open_after_rounds && "$answer" == fix ]] && [[ -f "$ledger" ]] \
+     && jq -e -s --arg f "$FINGERPRINT" --arg cp "$CHECKPOINT" 'any(.[]; .fingerprint == $f and .checkpoint == $cp and .kind == "open_after_rounds" and .answer == "fix")' "$ledger" >/dev/null 2>&1; then
+    _die "finding ${FINGERPRINT} already had its delegated fix round and is still open: the second verdict is dismiss, or class brief for the PM"
+  fi
+  entry="$(jq -nc --arg p "$provider" --arg a "$answer" --arg c "$class" --arg r "$reason" --arg v "$VERDICT" --arg at "$at" --argjson rd "$ROUND" \
+    '{provider: $p, answer: $a, class: $c, reason: $r, verdict_file: $v, at: $at, round: $rd}')"
+  local filter
+  if [[ "$class" != technical ]]; then
+    filter='.delegated = ($e + {to_pm: true})'
+  elif [[ "$kind" == dispute ]]; then
+    case "$answer" in
+      accepted) filter='.status = "fixed" | .dispute.delegated = $e' ;;
+      rejected) filter='.status = "open" | .dispute.delegated = $e' ;;
+    esac
+  else
+    case "$answer" in
+      dismiss) filter='.status = "fixed" | .delegated = $e' ;;
+      fix)     filter='.delegated = $e' ;;
+    esac
+  fi
+  jq --arg f "$FINGERPRINT" --argjson e "$entry" ".findings |= map(if .fingerprint == \$f then (${filter}) else . end)" \
+    "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  if [[ "$class" == technical && "$kind" == open_after_rounds && "$answer" == fix ]]; then
+    # ONE more fix-and-confirm round after this round, however many findings ask for it
+    local g=0 rf="${BASE}/delegate-rounds.json"
+    [[ -f "$rf" ]] && g="$(jq -r '.grants // 0' "$rf")"
+    if ! { [[ -f "$rf" ]] && jq -e --argjson r "$ROUND" '(.after_rounds // []) | index($r) != null' "$rf" >/dev/null 2>&1; }; then
+      jq -n --argjson g "$(( g + 1 ))" --argjson r "$ROUND" --arg at "$at" --arg f "$FINGERPRINT" --slurpfile old <( [[ -f "$rf" ]] && cat "$rf" || echo '{}' ) \
+        '{grants: $g, after_rounds: ((($old[0].after_rounds) // []) + [$r]), last: {fingerprint: $f, at: $at}, by: "delegate"}' > "${rf}.tmp" && mv "${rf}.tmp" "$rf"
+    fi
+  fi
+  _dlg_resync "$dir" "$answer"
+  mkdir -p "$(dirname "$ledger")"
+  jq -nc --arg cp "$CHECKPOINT" --arg rd "$dir" --arg f "$FINGERPRINT" --arg k "$kind" --argjson e "$entry" \
+    '{checkpoint: $cp, round_dir: $rd, fingerprint: $f, kind: $k} + ($e | {provider, answer, class, reason, verdict_file, at})' >> "$ledger"
+  _log delegate_recorded fingerprint="$FINGERPRINT" kind="$kind" answer="$answer" class="$class" provider="$provider"
+  if [[ "$class" != technical ]]; then
+    _dlg_refuse delegation_out_of_scope "the delegate classed ${FINGERPRINT} as ${class} (${reason}) — the brief, money and live data are the PM's" \
+      "the finding goes to the PM's card as before (close routes it); the PM answers with dispute --pm … --finding-card <card>"
+  fi
+  echo "finding ${FINGERPRINT}: ${kind} settled by ${provider} — ${answer} (${reason})"
 }
 
 cmd_override() {
@@ -1429,5 +1665,6 @@ case "$CMD" in
   dispute)   cmd_dispute ;;
   override)  cmd_override ;;
   standing)  cmd_standing ;;
+  delegate)  cmd_delegate ;;
   *) echo "unknown subcommand: ${CMD}" >&2; usage ;;
 esac

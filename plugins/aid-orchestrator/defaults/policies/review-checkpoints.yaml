@@ -6,13 +6,11 @@ review_checkpoints:
   enabled: true                    # master switch — disables all checkpoints when false
 
   # Per-checkpoint toggles
-  cp1_plan_review: true            # plan review before EPIC generation (plan_review below)
+  cp1_plan_review: true            # plan review before the run (plan_review below)
   cp2_step_review: true            # per-step review round (skills/step-review-roles.md)
-  cp3_integration_review: false    # pre-GATES EPIC review — off since 2.116.0 (P110, PM 2B): the
-                                   # step review covers security on every reviewed step and the close
-                                   # reads the whole plan; the EPIC review leaves with the EPICs in
-                                   # release 3. A project keeps it: set true AND add an epic_review
-                                   # block (the commented one below) to its own file.
+  # (cp3_integration_review, the EPIC review, was removed in 3.0.0 with the EPIC
+  #  path, P114; a project file that still sets it, or an epic_review block, is
+  #  warned about as a legacy key and ignored.)
   cp6_fast_mode_review: true       # post-/aid-do review round
   cp7_plan_final_review: true      # the whole plan read once before the merge decision (final_review below);
                                    # switched off, plan-finalize --stage decide blocks until the PM waives it
@@ -43,7 +41,7 @@ review_checkpoints:
       - {role: reuse,             provider: claude, model: opus}
       - {role: enforcement_tests, provider: claude, model: opus}
 
-  # Step review (CP2), EPIC review (CP3) and fast-mode review (CP6): reviewer
+  # Step review (CP2) and fast-mode review (CP6): reviewer
   # roles of skills/step-review-roles.md, read by scripts/lib/aid-review-config.sh
   # (P094). The review a step buys follows the verdict of aid-step-check.sh
   # (P110, 2.116.0):
@@ -72,18 +70,6 @@ review_checkpoints:
     reviewers:
       - {role: step_generalist, provider: claude, model: opus, effort: low}
       - {role: step_security,   provider: claude, model: opus, effort: low, full_when: review+security}
-  # epic_review (CP3) — optional since 2.116.0; a project that keeps CP3 copies
-  # this block into its own .aid-o/config/policies/review-checkpoints.yaml with
-  # cp3_integration_review: true:
-  # epic_review:
-  #   rounds_default: 2
-  #   light_max_prompt_lines: 800
-  #   banned_models: [haiku, gpt-5-mini, gpt-4o-mini]
-  #   stand_in_model: opus
-  #   reviewers:
-  #     - {role: epic_generalist, provider: claude, model: opus, effort: low}
-  #     - {role: epic_behaviour,  provider: claude, model: opus, effort: low}
-  #     - {role: epic_security,   provider: codex,  model: gpt-6-sol, effort: medium}
   # Whole-plan review (CP7): one round over plan_base_commit..candidate before
   # plan-finalize --stage decide. A fix moves the candidate, so its confirmation
   # is round 1 of the next attempt (carrying what stayed open and the fix diff).

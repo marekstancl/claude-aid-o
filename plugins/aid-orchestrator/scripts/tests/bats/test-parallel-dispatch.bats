@@ -153,10 +153,3 @@ _plan() {
   [[ "$output" == *"uncommitted work"* && "$output" == *"$wt"* ]]
   [ -f "$wt/wip.txt" ]
 }
-
-@test "dispatch: AC12 — pipeline.md no longer carries the temporary brake" {
-  run grep -c 'TEMPORARY: Sequential execution enforced' "$AID_PLUGIN_PATH/skills/pipeline.md"
-  [ "$output" = "0" ]
-  run yq -r '.dispatch.max_parallel' "$AID_PLUGIN_PATH/defaults/orchestration.yaml"
-  [ "$output" -gt 1 ]
-}

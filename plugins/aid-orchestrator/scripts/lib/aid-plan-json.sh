@@ -2,15 +2,11 @@
 # =============================================================================
 # lib/aid-plan-json.sh — THE plan.json builder and THE per-step plan reader (P111)
 #
-# One builder for both roads to a run until P112 removes the old one:
-#   * the direct run (`aid-plan-fsm.sh plan-run`) reads the WHOLE plan through
-#     aid_plan_json_steps_from_plan and builds with aid_plan_json_build --direct;
-#   * the EPIC path keeps its own table parser (the EPIC-to-plan.json converter) and hands
-#     the parsed rows over as a step list; the plan-to-EPIC generator reads its phase's
-#     steps through aid_plan_json_steps_from_plan and only formats the EPIC.
-# The builder body is the EPIC converter's former "Step 4 .. Step 14"
-# moved here unchanged, so the EPIC path's golden output is byte-identical
-# (scripts/tests/test-epic-to-json-regression.sh).
+# `aid-plan-fsm.sh plan-run` reads the WHOLE plan through
+# aid_plan_json_steps_from_plan and builds the run's plan.json with
+# aid_plan_json_build --direct. (The builder body was the EPIC converter's
+# former "Step 4 .. Step 14"; the EPIC path and its converter were removed in
+# 3.0.0, P114.)
 #
 # Callers source lib/common.sh first (error_exit, extract_section).
 # =============================================================================
@@ -24,6 +20,8 @@ source "${_AID_PJ_LIB_DIR}/aid-ac-extract.sh"
 source "${_AID_PJ_LIB_DIR}/aid-roots.sh"
 # shellcheck source=aid-plan-graph.sh
 source "${_AID_PJ_LIB_DIR}/aid-plan-graph.sh"
+# shellcheck source=aid-repo-roots.sh
+source "${_AID_PJ_LIB_DIR}/aid-repo-roots.sh"
 
 AID_PLAN_JSON_ROLES="backend frontend qa security docs docs-writer release e2e"   # one list; must match plan.schema.json (P107)
 
@@ -347,25 +345,8 @@ aid_plan_json_gates() {
 # repo_roots (P111 Step 1/4): foreign repositories a plan works in, as worktrees
 # =============================================================================
 
-# aid_plan_repo_roots_raw <plan> — the frontmatter `repo_roots` list as JSON
-# ([] when absent).
-aid_plan_repo_roots_raw() {
-  local out
-  out="$(yq --front-matter=extract -o=json '.repo_roots // []' "$1" 2>/dev/null)" || out="[]"
-  [[ -n "$out" && "$out" != "null" ]] || out="[]"
-  jq -c 'if type == "array" then . else [] end' <<< "$out" 2>/dev/null || echo '[]'
-}
-
-# aid_plan_repo_base_branch <path> [<base_branch>] — the foreign base branch:
-# the declared one, else what origin/HEAD points at, else main.
-aid_plan_repo_base_branch() {
-  local path="$1" bb="${2:-}"
-  if [[ -z "$bb" ]]; then
-    bb="$(git -C "$path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" || bb=""
-    [[ -n "$bb" ]] || bb="main"
-  fi
-  printf '%s\n' "$bb"
-}
+# aid_plan_repo_roots_raw and aid_plan_repo_base_branch live in
+# lib/aid-repo-roots.sh (P112: the one mapping), sourced at the top.
 
 # aid_plan_repo_roots_json <plan> <plan_id> <project> — the closed plan.json
 # entries {name, path, worktree, branch, base}: path is physical (realpath),
@@ -374,7 +355,7 @@ aid_plan_repo_base_branch() {
 # foreign base branch. Refuses repo_root_invalid (error_exit 1) on an entry it
 # cannot resolve; the plan lint reports the same entries before CP1.
 aid_plan_repo_roots_json() {
-  local plan="$1" plan_id="$2" project="$3" raw n i name path bb base out="[]" own
+  local plan="$1" plan_id="$2" project="$3" raw n i name path bb base out="[]" own wt br
   raw="$(aid_plan_repo_roots_raw "$plan")"
   own="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || own=""
   n="$(jq 'length' <<< "$raw")"
@@ -384,16 +365,21 @@ aid_plan_repo_roots_json() {
     bb="$(jq -r --argjson i "$i" '.[$i].base_branch // ""' <<< "$raw")"
     [[ "$name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] \
       || error_exit "repo_root_invalid: repo_roots[$i].name '${name}' must be a slug ([a-z0-9_-]). next: fix the plan's repo_roots frontmatter (pipeline.md §When AID refuses: repo_root_invalid)" 1
-    path="$(realpath -e "$path" 2>/dev/null)" && git -C "$path" rev-parse --git-dir >/dev/null 2>&1 \
-      || error_exit "repo_root_invalid: repo_roots[$i] '${name}' path is not a git repository. next: fix the plan's repo_roots frontmatter (pipeline.md §When AID refuses: repo_root_invalid)" 1
+    path="$(realpath -e "$path" 2>/dev/null)" && [[ "$(aid_rr_phys_repo "$path")" == "$path" ]] \
+      || error_exit "repo_root_invalid: repo_roots[$i] '${name}' path is not the top of a git repository. next: fix the plan's repo_roots frontmatter (pipeline.md §When AID refuses: repo_root_invalid)" 1
     [[ -z "$own" || "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" != "$own" ]] \
       || error_exit "repo_root_invalid: repo_roots[$i] '${name}' is the project itself (or one of its worktrees) — repo_roots names OTHER repositories. next: fix the plan's repo_roots frontmatter (pipeline.md §When AID refuses: repo_root_invalid)" 1
     bb="$(aid_plan_repo_base_branch "$path" "$bb")"
-    base="$(git -C "$path" rev-parse --verify --quiet "${bb}^{commit}" 2>/dev/null)" \
+    IFS=$'\t' read -r wt br < <(_aid_rr_derive "$path" "$plan_id" "$name" "$project")
+    # P112: a branch the run already has (a restart adopts it) keeps its own
+    # base — the fork point — never a newer head of the base branch.
+    base=""
+    git -C "$path" rev-parse --verify --quiet "refs/heads/${br}" >/dev/null 2>&1 \
+      && base="$(git -C "$path" merge-base "$br" "$bb" 2>/dev/null)"
+    [[ -n "$base" ]] || base="$(git -C "$path" rev-parse --verify --quiet "${bb}^{commit}" 2>/dev/null)" \
       || error_exit "repo_root_invalid: repo_roots[$i] '${name}' base branch '${bb}' does not resolve in ${path}. next: set base_branch in the plan's repo_roots entry (pipeline.md §When AID refuses: repo_root_invalid)" 1
     out="$(jq -c --arg name "$name" --arg path "$path" \
-      --arg wt "${path}/.aid-worktrees/plan-${plan_id}--${name}" \
-      --arg br "plan/${plan_id}-${project}" --arg base "$base" \
+      --arg wt "$wt" --arg br "$br" --arg base "$base" \
       '. + [{name: $name, path: $path, worktree: $wt, branch: $br, base: $base}]' <<< "$out")"
   done
   printf '%s\n' "$out"

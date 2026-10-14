@@ -5,7 +5,7 @@
 #
 #   aid-prompt-inventory.sh <evidence root>... [--json <out>] [--md <out>]
 #
-# Walks every review round under the evidence roots (cp1, cp2, cp3), splits
+# Walks every review round under the evidence roots (cp1, cp2), splits
 # each `prompt-<role>.md` by its `## ` headings into sections and counts lines
 # per section, then reads the round's merged.json and maps every citation of
 # every finding to the section it came from:
@@ -14,7 +14,7 @@
 #   diff.patch…          → diff.patch
 #   files.json           → Declared scope
 #   a repository path    → diff.patch when the round's packet/diff.patch touches
-#                          that file (cp2/cp3), else "repository (outside the prompt)"
+#                          that file (cp2), else "repository (outside the prompt)"
 #                          — a cp1 reviewer has no diff, so always the latter
 #   absent:path, other   → other
 # The citation grammar is the adjudicator's (aid_plan_review_citation_parts),
@@ -70,7 +70,7 @@ for root in "${roots[@]}"; do
   root="${root%/}"
   [[ -d "$root" ]] || { echo "skipped: no such directory ${root}" >&2; skipped=$((skipped+1)); continue; }
   project="$(basename "$(cd "$root/../../.." 2>/dev/null && pwd || echo "$root")")"
-  if ! find "$root" \( -path '*/cp1/round-*/prompt-*.md' -o -path '*/cp2/step-*/round-*/prompt-*.md' -o -path '*/cp3/round-*/prompt-*.md' \) -print -quit 2>/dev/null | grep -q .; then
+  if ! find "$root" \( -path '*/cp1/round-*/prompt-*.md' -o -path '*/cp2/step-*/round-*/prompt-*.md' \) -print -quit 2>/dev/null | grep -q .; then
     empty_roots+=("${project} (${root})"); continue
   fi
   while IFS= read -r prompt; do
@@ -79,7 +79,6 @@ for root in "${roots[@]}"; do
     case "$rd" in
       */cp1/round-*) cp=cp1; step="" ;;
       */cp2/step-*/round-*) cp=cp2; step="$(basename "$(dirname "$rd")")" ;;
-      */cp3/round-*) cp=cp3; step="" ;;
       *) continue ;;
     esac
     round="$(basename "$rd")"
@@ -116,7 +115,7 @@ for root in "${roots[@]}"; do
     jq -nc --arg p "$project" --arg cp "$cp" --arg role "$role" --arg round "$round" --arg step "$step" \
            --argjson total "$total" --argjson secs "$sections" --argjson f "$findings" --argjson c "$cites" \
       '{project:$p, checkpoint:$cp, role:$role, round:$round, step:$step, lines_total:$total, lines_by_section:$secs, findings:$f, citations_by_section:$c}' >> "$tmp"
-  done < <(find "$root" \( -path '*/cp1/round-*/prompt-*.md' -o -path '*/cp2/step-*/round-*/prompt-*.md' -o -path '*/cp3/round-*/prompt-*.md' \) 2>/dev/null | sort)
+  done < <(find "$root" \( -path '*/cp1/round-*/prompt-*.md' -o -path '*/cp2/step-*/round-*/prompt-*.md' \) 2>/dev/null | sort)
 done
 
 [[ -s "$tmp" ]] || { echo "no review prompts found under: ${roots[*]} (rounds skipped: ${skipped})" >&2; exit 1; }
@@ -142,7 +141,7 @@ md="$( {
   echo
   printf 'Generated %s by `aid-prompt-inventory.sh %s`. ' "$(date -u +%Y-%m-%d)" "${roots[*]}"
   printf '%s\n' 'Lines per section are the mean over the role'"'"'s prompts (median total). `repository (outside the prompt)` counts citations of files the reviewer opened itself; `never cited` lists sections no finding of the role ever cited. Rounds before 2.98.0 appended the plan without a `## plan.md` heading, so their plan sections appear under their own names (Goal, Scope, Step N …) and their `plan.md:N` citations count towards `plan.md`. This report measures; it recommends nothing.'
-  for cp in cp1 cp2 cp3; do
+  for cp in cp1 cp2; do
     rows="$(jq -r --arg cp "$cp" '.[] | select(.checkpoint == $cp)' <<< "$agg")"
     [[ -n "$rows" ]] || continue
     echo; echo "## ${cp}"; echo

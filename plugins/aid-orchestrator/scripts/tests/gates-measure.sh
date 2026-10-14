@@ -59,8 +59,6 @@ AREA_FILES=(
   scripts/tests/bats/test-owned-jobs-docs-closure.bats
   scripts/tests/bats/test-aid-plan-final-boundary.bats
   scripts/tests/test-enforcement-registry-cites.sh
-  scripts/tests/test-control-boundary.sh
-  scripts/tests/test-review-successors.sh
   commands/aid-run.md
   defaults/execution.yaml
   defaults/enforcement-registry.yaml

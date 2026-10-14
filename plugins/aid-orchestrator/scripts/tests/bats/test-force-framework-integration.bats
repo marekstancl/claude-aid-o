@@ -163,29 +163,6 @@ _head() { ( cd "$ROOT" && git rev-parse HEAD ); }
 
 # ─── THE OTHER HALF: exact-only consumers are UNCHANGED ──────────────────
 
-@test "P073 integration: the pre-commit scope guard is unchanged — ancillary is not a scope exemption" {
-  # gates/scope-check.sh answers "is this path in the step's allowed_paths",
-  # a different question from "does this path describe the delivery". A path
-  # being ancillary must not exempt it from scope.
-  run grep -c 'aid_ancillary' "$AID_PLUGIN_PATH/scripts/gates/scope-check.sh"
-  [ "$output" = "0" ]
-}
-
-@test "P073 integration: the release script keeps the LEGACY five-path filter" {
-  # Step 14 was behaviour-neutral at the four existing call sites; only the
-  # drift detector moved to the full policy. A release preparing its staging
-  # through the wider set would stage files nobody classified.
-  run grep -c 'aid_ancillary_filter_porcelain --mode legacy5' "$AID_PLUGIN_PATH/scripts/aid-release.sh"
-  [ "$output" -ge 1 ]
-  run grep -c 'aid_ancillary_filter_porcelain --mode policy' "$AID_PLUGIN_PATH/scripts/aid-release.sh"
-  [ "$output" = "0" ]
-}
-
-@test "P073 integration: aid-fsm.sh keeps its FOUR-entry legacy set" {
-  run grep -c 'aid_ancillary_filter_porcelain --mode legacy4' "$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
-  [ "$output" -ge 1 ]
-}
-
 @test "P073 integration: plan-close-check accepts BOTH close-receipt shapes and nothing else" {
   local f="$AID_PLUGIN_PATH/scripts/aid-plan-close-check.sh"
   run grep -c 'merged_head' "$f"
@@ -195,15 +172,6 @@ _head() { ( cd "$ROOT" && git rev-parse HEAD ); }
   [ "$output" -ge 1 ]
 }
 
-@test "P073 integration: the ancillary filter mode is mandatory at every call site" {
-  # A call site that omitted the mode would inherit whatever default existed.
-  # There is none: the function returns 2. This pins that no caller has been
-  # added without one.
-  run bash -c "grep -rn 'aid_ancillary_filter_porcelain' '$AID_PLUGIN_PATH/scripts' --include='*.sh' \
-                 | grep -v 'lib/aid-ancillary.sh' | grep -vc -- '--mode '"
-  [ "$output" = "0" ]
-}
-
 # ─── EPIC 1 and EPIC 2 behaviours on the same fixture ────────────────────
 
 @test "P073 integration: --force without --force-reason is a usage error" {
@@ -211,22 +179,6 @@ _head() { ( cd "$ROOT" && git rev-parse HEAD ); }
     --project-root "$ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"force-reason"* ]]
-}
-
-@test "P073 integration: every P073 enforcement is registered" {
-  local reg="$AID_PLUGIN_PATH/defaults/enforcement-registry.yaml"
-  local id
-  for id in release_changelog_entry_validation release_detection_exit_triage \
-            dependency_token_grammar_hard_fail branch_restore_hard_stop \
-            plan_force_framework init_strict_flag_rejection \
-            pm_override_single_use_claim ancillary_path_classifier \
-            protected_surface_at_freeze review_equivalence_predicate \
-            review_equivalence_acceptance drift_equivalence_wiring \
-            merge_equivalence_reverification plan_source_committed_preflight \
-            epic_supersede_bound_reinit; do
-    run grep -c "id: ${id}\$" "$reg"
-    [ "$output" = "1" ]
-  done
 }
 
 # --- EPIC 3 whole-diff review finding ------------------------------------

@@ -260,7 +260,7 @@ aid_plan_review_unfence() {
 
 # aid_plan_review_answer_error <answer.json> [<checkpoint>]
 #   The SHAPE of an answer: an object with a known role (the roles of the
-#   checkpoint: cp1 or absent → $defs.roles_cp1, cp2/cp3/cp6 → $defs.roles_step),
+#   checkpoint: cp1 or absent → $defs.roles_cp1, cp2/cp6 → $defs.roles_step),
 #   a findings array (or a no_findings_reason) and findings that carry id, step,
 #   severity, claim and fix. Prints the first rule the answer breaks and returns 1, or returns 0.
 #   Whether each finding has a read-only command and a path:line evidence is

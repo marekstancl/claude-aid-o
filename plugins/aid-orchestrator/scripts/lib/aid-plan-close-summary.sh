@@ -136,7 +136,7 @@ _apcs_short() {
 # is the record, this is the nudge to look at it while the plan is fresh.
 # _apcs_standing_line <plan_id> — when the PM gave the plan a standing "don't
 # ask, finish it", how many review rounds ran under it (round.json standing:
-# true in the plan's step and EPIC runs). Nothing when there is no instruction.
+# true in the plan's runs). Nothing when there is no instruction.
 _apcs_standing_line() {
   local plan_id="$1" num="${1#P}" root f n=0
   root="$(aid_state_root 2>/dev/null || pwd)"
@@ -145,6 +145,29 @@ _apcs_standing_line() {
   n="$(find "${root}/.aid-o/work/evidence" -path "*/E-${num}-*/*/round.json" 2>/dev/null \
        | xargs -r jq -r 'select(.standing == true) | 1' 2>/dev/null | wc -l)"
   printf 'Stálý pokyn PM („%s“): pod ním proběhlo %s kol oprav a potvrzení navíc.\n' "$(jq -r '.words' "$f")" "$n"
+}
+
+# _apcs_delegated_lines <plan_id> — P112: every escalation an independent agent
+# settled during the plan (evidence/<plan>/delegated-disputes.jsonl), one line
+# each, so the PM reads at the close what was decided in their place.
+_apcs_delegated_lines() {
+  local root f; root="$(aid_state_root 2>/dev/null || pwd)"
+  f="${root}/.aid-o/work/evidence/${1}/delegated-disputes.jsonl"
+  [[ -s "$f" ]] || return 0
+  printf 'Delegovaná rozhodnutí (nezávislý agent místo PM): %s\n' "$(grep -c . "$f")"
+  jq -r '"  - \(.checkpoint) \(.kind | if . == "dispute" then "rozpor" else "otevřené po kolech" end): \(.provider) → \(.answer)\(if .class != "technical" then " (\(.class) → karta PM)" else "" end) — \(.reason)"' "$f" 2>/dev/null
+}
+_apcs_delegated_count() {
+  local root f; root="$(aid_state_root 2>/dev/null || pwd)"
+  f="${root}/.aid-o/work/evidence/${1}/delegated-disputes.jsonl"
+  [[ -s "$f" ]] && grep -c . "$f" || echo 0
+}
+# _apcs_delegated_inline <plan_id> — the same settlements on one page row.
+_apcs_delegated_inline() {
+  local root f; root="$(aid_state_root 2>/dev/null || pwd)"
+  f="${root}/.aid-o/work/evidence/${1}/delegated-disputes.jsonl"
+  [[ -s "$f" ]] || return 0
+  jq -rs 'map("\(.checkpoint) \(.kind | if . == "dispute" then "rozpor" else "otevřené po kolech" end): \(.provider) → \(.answer)\(if .class != "technical" then " (\(.class) → PM)" else "" end) — \(.reason)") | join("; ")' "$f" 2>/dev/null
 }
 
 _apcs_plugin_issues_line() {
@@ -450,13 +473,13 @@ aid_plan_close_render() {
     --arg fr "$final_review" --arg cost "$close_cost" --arg time "$time_spent" \
     --arg rcost "$run_cost" --arg pcost "$plan_cost" \
     --arg ev "$ev_status" --arg evh "$ev_at_head" \
-    --arg wv "$waivers_n" --arg bl "$backlog_n" '[
+    --arg wv "$waivers_n" --arg bl "$backlog_n" --arg dlg "$(_apcs_delegated_count "$plan_id")" --arg dlgl "$(_apcs_delegated_inline "$plan_id")" '[
       "Recenzovaný kandidát: " + $cand + " → schválený cíl " + $tgt + " (" + $tref + "), merge do main: " + $merge
         + (if $foreign == "" then "" else "; cizí větve k ručnímu merge: " + $foreign end),
       "Kam šel čas: " + $time,
       "Cena běhu: " + $rcost + "; Cena plánu: " + $pcost,   # one row: the block shows six
       "Plan-final brány: " + $gres + " (report: " + $grep_ + ")",
-      "Čtení celku: " + $fr + "; uzavření: " + $cost,
+      "Čtení celku: " + $fr + "; uzavření: " + $cost + (if $dlg == "0" then "" else "; delegovaná rozhodnutí: " + $dlg + " — " + $dlgl end),
       "Evidence: " + $ev + " (ověřeno na HEAD: " + $evh + "), waiverů " + $wv + ", zbývá v backlogu " + $bl
     ]')"
 
@@ -566,6 +589,7 @@ aid_plan_close_render() {
     printf 'Další krok: %s\n' "$opt_a"
     _apcs_plugin_issues_line "$plan_id"
     _apcs_standing_line "$plan_id"
+    _apcs_delegated_lines "$plan_id"
   else
     printf 'Potřebuji tvoje rozhodnutí: jak uzavřít plán %s?\n' "$plan_id"
     printf 'Proč teď: %s\n' "$why"
@@ -578,6 +602,7 @@ aid_plan_close_render() {
     printf 'Riziko / co není ověřeno: %s\n' "$risk"
     _apcs_plugin_issues_line "$plan_id"
     _apcs_standing_line "$plan_id"
+    _apcs_delegated_lines "$plan_id"
   fi
   printf 'Artifact body: %s\n' "$out_path"
   return 0

@@ -12,7 +12,7 @@ author: PM + AI
 
 This is a multi-phase test plan used by the integration and regression test
 suites. It uses a numeric plan ID (P099) compatible with the EPIC ID extraction
-regex in aid-auto-pipeline.sh (which requires E-NNN-N_N format).
+regex in aid-plan-fsm.sh (which requires E-NNN-N_N format).
 
 It exercises phase detection, parallel group handling, and role diversity
 across three distinct phases with six steps total.

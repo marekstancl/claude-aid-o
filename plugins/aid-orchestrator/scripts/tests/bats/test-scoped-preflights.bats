@@ -94,23 +94,6 @@ _seed_lifecycle() {
   [[ "$output" == *".gitkeep"* ]]
 }
 
-@test "P074 Step 5: epic-start SUCCEEDS with an unrelated dirty tracked file (the headline case)" {
-  _seed_lifecycle
-  run _pf plan-start "$PLAN_ID" --mode legacy_epic_release_mode
-  [ "$status" -eq 0 ]
-  _dirty
-  run _pf epic-start "$PLAN_ID" E-900-1_1 --run-id R-E900-1
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"uncommitted changes present"* ]]
-  # The task branch was created as a ref — no checkout happened, HEAD stayed
-  # on main and the dirty edit survived untouched.
-  run bash -c "git -C '$ROOT' branch --list 'task/E-900-1_1/main'"
-  [ -n "$output" ]
-  [ "$(git -C "$ROOT" symbolic-ref --short HEAD)" = "main" ]
-  run bash -c "git -C '$ROOT' status --porcelain --untracked-files=no"
-  [[ "$output" == *".gitkeep"* ]]
-}
-
 # ─── 1b. the targeted survivor: plan-start's own lifecycle write surface ───
 
 @test "P074 Step 5: a dirty LIFECYCLE path refuses plan-start BEFORE any mutation, while unrelated dirt does not" {
@@ -191,26 +174,7 @@ _seed_lifecycle() {
   [ -z "$output" ]
 }
 
-@test "P074 Step 5: epic-start still refuses on a detached HEAD" {
-  run _pf plan-start "$PLAN_ID" --mode legacy_epic_release_mode
-  git -C "$ROOT" checkout -q --detach
-  run _pf epic-start "$PLAN_ID" E-900-1_1
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"detached HEAD"* ]]
-}
-
-# ─── 3. the kept check: epic-merge-to-plan refuses on ITS dirty target tree ─
-
-@test "P074 Step 5: epic-merge-to-plan still refuses when its target tree is dirty, naming the tree it evaluated" {
-  run _pf plan-start "$PLAN_ID" --mode legacy_epic_release_mode
-  run _pf epic-start "$PLAN_ID" E-900-1_1
-  _dirty
-  run _pf epic-merge-to-plan "$PLAN_ID" E-900-1_1
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"uncommitted changes present"* ]]
-  # The kept message now names the tree the check evaluated.
-  [[ "$output" == *"tree evaluated: ${ROOT}"* ]]
-}
+# ─── 3. (P114) epic-start and epic-merge-to-plan were removed in 3.0.0 ─────
 
 # ═══════════════════════════════════════════════════════════════════════════
 # plan-merge-to-main with a dirty primary tree — the merge fixture.
