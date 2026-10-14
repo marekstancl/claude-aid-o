@@ -3,7 +3,9 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — P113a (smyčka kvality /aid-ui)
+## [3.2.0] — 2026-10-14
+
+Smyčka kvality /aid-ui (P113a): web po předání hodnotí dva nezávislí kritici, majitel a technik, s pamětí a cestou k 10; hodnotí se práce studia, ne to, co klient nedodal; nejvýš 3 kola oprav nebo oba 8,5, pak audit. Cena a čas každého kola včetně práce agenta. Postupy, které na pilotu Coufal chyběly, a „méně kol, víc rozdílů“ ve studiu.
 
 ### Added
 - **Smyčka kvality po předání (`aid-ui-quality.py`)** (P113a kroky 1–3, 12. 10. 2026):
