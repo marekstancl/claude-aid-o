@@ -171,3 +171,32 @@ EOF
   [ "$(jq -r '.failed | length' "$NIGHTLY_DIR/latest.json")" -ge 1 ]
   [ "$(jq -r '.flaky | length' "$NIGHTLY_DIR/latest.json")" = "0" ]
 }
+
+@test "budget: a night over the merge-path budget sends one message with the figures and the streak; the night it ends sends one ok; a quiet night after that sends nothing" {
+  cat > "$STUB_TG" <<'STUB'
+send_alert() { printf 'alert|%s|%s|%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" "$5" "${10:-}" >> "$SENT"; }
+send_ok() { printf 'ok|%s|%s\n' "$1" "$2" >> "$SENT"; }
+STUB
+  local log; log="$(_log 1 1)"
+  run bash "$REPORT" --runner-log "$log" --tests-dir "$FIXTURE_TESTS" --t0-seconds 171 --t1-seconds 484
+  [ "$status" -eq 0 ]
+  [ "$(jq .merge_path_budget.over_streak "$NIGHTLY_DIR/latest.json")" -eq 1 ]
+  [ "$(grep -c '^alert|' "$SENT")" -eq 1 ]
+  IFS='|' read -r _ sev scope id co akce area < "$SENT"
+  [ "$sev" = warning ]; [ "$id" = rozpocet-testu ]; [ "$scope" = project-testy ]; [ "$area" = AID ]
+  [[ "$co" != *[0-9]* ]]                                       # the sentence is human, the figures are in akce
+  [[ "$akce" == *"T0 171 s z 120 s"*"celkem 655 s z 600 s"*"1. noc po sobě"* ]]
+
+  run bash "$REPORT" --runner-log "$log" --tests-dir "$FIXTURE_TESTS" --t0-seconds 171 --t1-seconds 484
+  [ "$(jq .merge_path_budget.over_streak "$NIGHTLY_DIR/latest.json")" -eq 2 ]
+  [[ "$(tail -1 "$SENT")" == *"2. noc po sobě"* ]]
+
+  : > "$SENT"
+  run bash "$REPORT" --runner-log "$log" --tests-dir "$FIXTURE_TESTS" --t0-seconds 90 --t1-seconds 400
+  [ "$(jq .merge_path_budget.over_streak "$NIGHTLY_DIR/latest.json")" -eq 0 ]
+  [ "$(cat "$SENT")" = "ok|project-testy|rozpocet-testu" ]
+
+  : > "$SENT"
+  run bash "$REPORT" --runner-log "$log" --tests-dir "$FIXTURE_TESTS" --t0-seconds 90 --t1-seconds 400
+  [ ! -s "$SENT" ]
+}

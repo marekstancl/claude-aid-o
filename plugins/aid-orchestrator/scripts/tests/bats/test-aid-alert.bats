@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # aid-tier: t0
-# test-aid-alert.bats — AID sends two messages and only two: the agent is
-# waiting for the PM, and the plan is delivered (P099 Step 3). Both carry the
+# test-aid-alert.bats — AID sends three messages and only three: the agent is
+# waiting for the PM, the plan is delivered (P099 Step 3), and the merge-path
+# tests are over their budget (the nightly, 14. 10. 2026). All three carry the
 # ecosystem standard's mandatory fields; a waiting message goes out once per
 # stop whichever session ends its turn, and again only after the PM answered.
 
@@ -92,8 +93,9 @@ _sent() { grep -c '^id=' "$SENT" 2>/dev/null || echo 0; }
   [ "$status" -eq 0 ]
 }
 
-@test "the library sends exactly two kinds of message, and no AID script sends another" {
-  [ "$(grep -c '^  _aid_alert_once ' "$LIB")" -eq 2 ]
+@test "the library sends exactly three kinds of message, and no AID script sends another" {
+  # the public functions ARE the kinds; a fourth needs this list changed on purpose
+  [ "$(grep -oE '^aid_alert_[a-z_]+\(\)' "$LIB" | sort | tr '\n' ' ')" = "aid_alert_delivered() aid_alert_test_budget() aid_alert_waiting() aid_alert_waiting_clear() " ]
   local scripts; scripts="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   run grep -rnE 'aid_alert_(run|nightly)|try_telegram_alert|send_alert ' "$scripts" --include=*.sh
   [ -z "$(echo "$output" | grep -v '/tests/\|lib/aid-alert.sh')" ]

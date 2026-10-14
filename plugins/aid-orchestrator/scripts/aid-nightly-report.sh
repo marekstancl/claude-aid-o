@@ -248,6 +248,10 @@ if [[ "$T0_SECONDS" =~ ^[0-9]+$ || "$T1_SECONDS" =~ ^[0-9]+$ ]]; then
       merge_path_seconds:(($t0//0)+($t1//0)),
       merge_path_budget_s:$t1b,
       merge_path_over:((($t0//0)+($t1//0)) > $t1b)}')"
+  # The overrun is an episode: how many nights in a row, from last night's artifact.
+  _prev_streak="$(jq -r '.merge_path_budget.over_streak // 0' "$LATEST" 2>/dev/null)"; [[ "$_prev_streak" =~ ^[0-9]+$ ]] || _prev_streak=0
+  budget_json="$(jq -c --argjson p "$_prev_streak" \
+    '(.t0_over or .t1_over or .merge_path_over) as $o | . + {over_streak: (if $o then $p + 1 else 0 end)}' <<<"$budget_json")"
 else
   # Not measured is NOT within budget. Say so, the way the runner watchdog does.
   echo "aid-nightly-report: tier durations were not supplied — the merge-path budget check DID NOT RUN (this is not a pass)." >&2
@@ -274,6 +278,22 @@ write_artifact() {
 write_artifact || { echo "aid-nightly-report: could not write '$ARTIFACT'" >&2; exit 2; }
 
 echo "aid-nightly-report: $ARTIFACT ($(jq 'length' <<<"$failed_json") failed, $(jq 'length' <<<"$flaky_json") flaky)"
+
+# ─── The budget, told to someone (PM 14. 10. 2026) ──────────────────────────
+# Measured since 2026-08-15 and over budget every night, but only ever written
+# to the artifact. Now it goes to the alert intake: one message a night while
+# it lasts, one "ok" the night it ends. Not measured sends nothing (see above).
+if [[ "$budget_json" != null ]]; then
+  # shellcheck source=lib/aid-alert.sh
+  source "$SCRIPT_DIR/lib/aid-alert.sh"
+  _streak="$(jq -r .over_streak <<<"$budget_json")"
+  if (( _streak > 0 )); then
+    aid_alert_test_budget over "$(jq -r --argjson n "$_streak" \
+      '"T0 \(.t0_seconds // "neměřeno") s z \(.t0_budget_s) s, T1 \(.t1_seconds // "neměřeno") s z \(.t1_budget_s) s, celkem \(.merge_path_seconds) s z \(.merge_path_budget_s) s; přes rozpočet \($n). noc po sobě. Do týdne rozhodni: zrychlit nejpomalejší sady (časy v test-durations.jsonl vedle nočního výsledku), nebo změnit rozpočet ve standardu testů."' <<<"$budget_json")" || true
+  elif (( _prev_streak > 0 )); then
+    aid_alert_test_budget within || true
+  fi
+fi
 
 # ─── Once a month, what could go ─────────────────────────────────────────────
 # Attached to the report: the reaper's list is a proposal a PM reads beside the

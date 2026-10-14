@@ -2,11 +2,13 @@
 # =============================================================================
 # lib/aid-alert.sh — THE one way AID speaks to a human outside the terminal
 #
-# Two messages, and only two (PM, P098 brainstorm, 2026-09-23): the agent has
-# stopped and needs the PM (`aid_alert_waiting`), and a plan is delivered
-# (`aid_alert_delivered`). Everything else AID knows lives in the timeline and
-# on the pages; a message the PM does not act on teaches them to mute the
-# channel. A third kind of message needs a visible change to this file.
+# Three messages, and only three: the agent has stopped and needs the PM
+# (`aid_alert_waiting`), a plan is delivered (`aid_alert_delivered`) — both PM,
+# P098 brainstorm, 2026-09-23 — and the tests a merge waits for take longer than
+# their budget (`aid_alert_test_budget`, PM 14. 10. 2026: the nightly measured an
+# overrun for 44 nights in a row and told nobody). Everything else AID knows
+# lives in the timeline and on the pages; a message the PM does not act on
+# teaches them to mute the channel. A fourth kind needs a visible change here.
 #
 # THE STANDARD: /ecosystem/operations/alerting-and-automation §2. The shared
 # `send_alert()` in /opt/eco/services/scripts/lib/telegram-notify.sh assembles
@@ -54,11 +56,13 @@ _aid_alert_project() {
   printf '%s' "${name:-projekt}"
 }
 
-# _aid_alert_send <severity> <scope> <id> <what> <action> <state> <source>
+# _aid_alert_send <severity> <scope> <id> <what> <action> <state> <source> [area]
 #
-# Returns the truth about delivery: 0 delivered, 1 not delivered, 2 suppressed.
+# <area> is the standard's `oblast`; empty = the intake takes it from its table
+# of kinds. Returns the truth about delivery: 0 delivered, 1 not delivered,
+# 2 suppressed.
 _aid_alert_send() {
-  local severity="$1" scope="$2" id="$3" what="$4" action="$5" state="$6" source="$7"
+  local severity="$1" scope="$2" id="$3" what="$4" action="$5" state="$6" source="$7" area="${8:-}"
   local lib="${AID_TELEGRAM_LIB:-$_AID_ALERT_PRODUCTION_LIB}"
 
   # Test mode refuses the production library, not a stub: a fixture that
@@ -78,7 +82,7 @@ _aid_alert_send() {
     # shellcheck source=/dev/null
     source "$lib" 2>/dev/null || exit 3
     declare -F send_alert >/dev/null 2>&1 || exit 4
-    send_alert "$severity" "$scope" "$id" "$what" "$action" "" "" "$state" "$source"
+    send_alert "$severity" "$scope" "$id" "$what" "$action" "" "" "$state" "$source" "$area"
   )
   local rc=$?
   case "$rc" in
@@ -139,4 +143,28 @@ aid_alert_delivered() {
   local what="${1} dodán"
   [[ "${3:-}" == forced ]] && what="${1} dodán (uzavřen vynuceně)"
   _aid_alert_once "$1" delivered info plan-delivered "PLÁN DODÁN" "$what" "stránka dodávky: ${2}"
+}
+
+# aid_alert_test_budget over <detail> | aid_alert_test_budget within
+#   The tests a merge waits for (T0 + T1) against their budget, once a night
+#   from the nightly report. `over` is one message per night while the overrun
+#   lasts (an episode, standard rule 2h: the intake counts the repeats); `within`
+#   ends the episode (`send_ok`) and is sent only the night it ends. <detail> is
+#   the measured figures and the streak — technique, so it goes to `akce`.
+aid_alert_test_budget() {
+  local project; project="$(_aid_alert_project)"
+  case "$1" in
+    over)
+      _aid_alert_send warning "${project}-testy" rozpocet-testu \
+        "Testy, na které čeká každé sloučení do hlavní větve, trvají déle, než dovoluje jejich rozpočet." \
+        "${2:-}" "" "AID · ${project}" AID ;;
+    within)
+      local lib="${AID_TELEGRAM_LIB:-$_AID_ALERT_PRODUCTION_LIB}"
+      [[ "${AID_TEST_MODE:-0}" == "1" && "$lib" == "$_AID_ALERT_PRODUCTION_LIB" ]] && return 2
+      [[ -f "$lib" ]] || return 1
+      ( source "$lib" >/dev/null 2>&1 || exit 3
+        declare -F send_ok >/dev/null 2>&1 || exit 4
+        send_ok "${project}-testy" rozpocet-testu ) ;;
+    *) echo "aid_alert_test_budget: over <detail> | within" >&2; return 2 ;;
+  esac
 }
