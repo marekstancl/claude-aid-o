@@ -52,7 +52,11 @@ def save(p, d):
 
 
 def target(d):
-    return "launch@" + hashlib.sha256(json.dumps(d["items"], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    """The list the client answered: its content, not the progress of the confirmation (a confirmed item counts as
+    found, an open-item id is left out), so a confirmation that stopped half-way is resumed by the same answer."""
+    canon = [dict({k: v for k, v in i.items() if k != "item"}, status="found" if i.get("status") == "confirmed" else i.get("status"))
+             for i in d["items"]]
+    return "launch@" + hashlib.sha256(json.dumps(canon, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def card(p, typ):
@@ -127,11 +131,13 @@ def confirm(p, qid):
         die("answer %s is not for this list (kind %s, target %s)" % (qid, a.get("kind"), str(a.get("target"))[:20]))
     if qid in d["used_answers"]:
         die("answer %s is already used" % qid)
-    d["used_answers"].append(qid)
     if a.get("decision") != "approve":
+        d["used_answers"].append(qid)
         save(p, d)
         print("returned: %s" % (a.get("comment") or ""))
         return
+    # every item is saved as soon as it is done and the answer is marked used only at the end: a run that stops
+    # half-way is resumed by the same answer, nothing done twice (confirmed facts and created items are skipped)
     due = (datetime.date.today() + datetime.timedelta(days=14)).isoformat()
     facts = os.path.join(p, "docs", "content", "facts.yaml")
     for i in d["items"]:
@@ -148,6 +154,7 @@ def confirm(p, qid):
             if r.returncode:
                 die("cannot write %s to docs/content/facts.yaml (a mapping register): %s" % (i["id"], r.stderr.strip()))
             i["status"] = "confirmed"
+            save(p, d)
             continue
         if i["status"] in ("needed", "client") and not i.get("item"):
             cmd = ["bash", os.path.join(HERE, "aid-ui-state.sh"), "open-item", p, "add", "--text", i["name"] + (": " + i["brief"] if i.get("brief") else ""),
@@ -158,6 +165,8 @@ def confirm(p, qid):
             if r.returncode:
                 die("open-item for %s failed: %s" % (i["id"], (r.stderr or r.stdout).strip()))
             i["item"] = r.stdout.strip().split()[-1]
+            save(p, d)
+    d["used_answers"].append(qid)
     save(p, d)
     for i in d["items"]:
         print("%-8s %-9s %s" % (i["id"], i["status"], i.get("item") or ""))

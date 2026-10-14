@@ -158,7 +158,7 @@ def ask(project, prompt, images, cwd, out, valid, purpose):
         r = fn(p, images, cwd, out)
         costs.tokens(project, r["provider"], r.get("model"), r["usage"], purpose, r.get("usd"))
         a, err = valid(r["text"]) if (r["text"] and not r["rc"]) else (None, None)
-        rec["attempts"].append({"provider": r["provider"], "rc": r["rc"], "refused": r.get("refused", False),
+        rec["attempts"].append({"provider": r["provider"], "model": r.get("model") or "default", "rc": r["rc"], "refused": r.get("refused", False),
                                 "error": err, "prompt_sha256": hashlib.sha256(p.encode()).hexdigest(), "log_tail": r["log"][-300:]})
         return r, a, err
 
@@ -166,7 +166,7 @@ def ask(project, prompt, images, cwd, out, valid, purpose):
     for n in (1, 2):
         r, a, err = run(codex, p)
         if a is not None:
-            rec.update(provider="codex", commands=r.get("commands", []))
+            rec.update(provider="codex", model=r.get("model") or "default", commands=r.get("commands", []))
             return a, rec
         if r["refused"] or r["rc"] or not r["text"]:
             why = "limit" if r["refused"] else ("rc %d" % r["rc"] if r["rc"] else "no answer")
@@ -185,6 +185,7 @@ def ask(project, prompt, images, cwd, out, valid, purpose):
             break
         p = prompt + "\n\nPředchozí odpověď nebyla platná (%s). Vrať jen JSON podle zadání." % err
     rec["provider"] = "claude" if a is not None else None
+    rec["model"] = r.get("model") if a is not None else None
     return a, rec
 
 
@@ -286,7 +287,7 @@ def competitors(project):
         die("competitors.json: 3-5 entries, each with name and an http(s) url")
     out = os.path.join(cd, "competitors")
     os.makedirs(out, exist_ok=True)
-    man = {"at": now(), "competitors": []}
+    man = {"at": now(), "list_sha256": sha_file(os.path.join(cd, "competitors.json")), "competitors": []}
     for c in lst:   # one folder each: the shot tool names files by the page path, every home page is "index"
         slug = re.sub(r"[^a-z0-9]+", "-", urlsplit(c["url"]).netloc.lower()).strip("-")
         files = shots(os.path.join(out, slug), [c["url"]])
@@ -319,17 +320,15 @@ def critic(project, web, audit, out, role, history=None):
     out = out or os.path.join(project, ".aid-ui", "critic", "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + kind + "-" + role)
     man, comp = comp_shots(project) if role == "owner" else (None, [])
     if role == "owner":
-        try:
-            want = sorted(c["url"] for c in json.load(open(os.path.join(project, ".aid-ui", "critic", "competitors.json"), encoding="utf-8")))
-        except (OSError, ValueError, KeyError, TypeError):
-            want = None
+        lp = os.path.join(project, ".aid-ui", "critic", "competitors.json")
         have = [c for c in (man or {}).get("competitors", []) if {"1440", "390"} <= {re.sub(r"^.*-(\d+)\.png$", r"\1", x) for x in c["shots"]}]
-        if not man or want != sorted(c["url"] for c in man["competitors"]) or len(have) < 3:
+        if not man or not os.path.isfile(lp) or man.get("list_sha256") != sha_file(lp) or len(have) < 3:   # shot from this very list
             die("the owner compares with the competition: shots at 1440 and 390 of at least three competitors of the current "
                 ".aid-ui/critic/competitors.json are missing (aid-ui-client.py competitors <project>)")
     os.makedirs(out, exist_ok=True)
     bundle = os.path.join(out, "bundle")
     shutil.copytree(site, os.path.join(bundle, "site"), dirs_exist_ok=True)   # the critic's whole world: the web
+    rated_sha = site_sha(os.path.join(bundle, "site"))   # the web the critic read, not the live folder after the rating
     # and the facts the client confirmed (the frozen context may predate a confirmation: Coufal round 1 flagged two
     # facts the client had confirmed the day before as unconfirmed)
     facts_src = os.path.join(project, "docs", "content", "facts.yaml")
@@ -358,13 +357,14 @@ def critic(project, web, audit, out, role, history=None):
     base = web.rstrip("/") + "/"
     # the address must serve this site: its home page is byte for byte site/index.html (or the rating would be
     # of another web than the one recorded and audited)
-    try:
-        with urllib.request.urlopen(base, timeout=30) as resp:
-            live = hashlib.sha256(resp.read()).hexdigest()
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        die(f"{base} does not answer ({e}); serve the site (aid-ui-serve.sh) first")
-    if live != sha_file(os.path.join(site, "index.html")):
-        die(f"{base} does not serve {site}: its home page differs from site/index.html")
+    for pg in pages[:MAX_PAGES]:   # every rated page, not only the home page, is the site's file byte for byte
+        try:
+            with urllib.request.urlopen(base + pg, timeout=30) as resp:
+                live = hashlib.sha256(resp.read()).hexdigest()
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            die(f"{base + pg} does not answer ({e}); serve the site (aid-ui-serve.sh) first")
+        if live != sha_file(os.path.join(site, pg, "index.html")):
+            die(f"{base} does not serve {site}: {pg or 'its home page'} differs from site/{pg}index.html")
     urls = [base + p for p in pages[:MAX_PAGES]]
     images = shots(os.path.join(out, "shots"), urls)
     names = {os.path.basename(i) for i in images}
@@ -413,7 +413,9 @@ def critic(project, web, audit, out, role, history=None):
         return {"answer": a, "score": json.loads(s.stdout)}, None
 
     got, rec = ask(project, prompt, images + comp, bundle, out, valid, "critic:%s:%s" % (kind, role))
-    run = {"kind": kind, "role": role, "web": base, "site_sha": site_sha(site), "frozen_sha": frozen["sha256"],
+    if site_sha(site) != rated_sha:   # the site changed while the critic was rating: the rating belongs to no build
+        die("the site changed during the rating (site/ differs from the copy the critic read); rate again")
+    run = {"kind": kind, "role": role, "web": base, "site_sha": rated_sha, "frozen_sha": frozen["sha256"],
            "role_sha": frozen["roles"][role]["sha256"], "bundle_sha": site_sha(bundle), "history": len(json.load(open(history, encoding="utf-8"))) if history and not audit else None, "facts_sha": facts_sha, "images": image_meta(images),
            "pages": urls, "at": now(), **rec}
     if got:

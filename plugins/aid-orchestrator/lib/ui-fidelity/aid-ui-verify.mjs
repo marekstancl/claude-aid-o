@@ -838,13 +838,16 @@ async function formDelivery(browser) {
     const form = p.locator('form').first();
     const live = () => p.evaluate(() => [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].map(e => (e.innerText || '').trim()).filter(Boolean).join(' | '));
     const shown = await live();   // what the live regions say before the send: the success message must be new
-    for (const el of await form.locator('input, textarea, select').all()) {
-      const t = ((await el.getAttribute('type')) || '').toLowerCase(), name = await el.getAttribute('name'), tag = await el.evaluate(e => e.tagName);
-      if (['hidden', 'submit', 'button', 'reset', 'file'].includes(t) || (cfg.honeypot && name === cfg.honeypot) || !(await el.isVisible())) continue;
-      if (t === 'checkbox' || t === 'radio') { if (await el.evaluate(e => e.required)) await el.check(); continue; }
-      if (tag === 'SELECT') { const v = await el.evaluate(e => [...e.options].map(o => o.value).find(x => x)); if (v) await el.selectOption(v); continue; }
-      await el.fill(t === 'email' ? mail : t === 'tel' ? tel : t === 'date' ? '2030-01-15' : t === 'number' ? '1' : `${token} test`);
-    }
+    const fill = async word => {   // every visible field as a person fills it (required boxes, radios, selects too)
+      for (const el of await form.locator('input, textarea, select').all()) {
+        const t = ((await el.getAttribute('type')) || '').toLowerCase(), name = await el.getAttribute('name'), tag = await el.evaluate(e => e.tagName);
+        if (['hidden', 'submit', 'button', 'reset', 'file'].includes(t) || (cfg.honeypot && name === cfg.honeypot) || !(await el.isVisible())) continue;
+        if (t === 'checkbox' || t === 'radio') { if (await el.evaluate(e => e.required)) await el.check(); continue; }
+        if (tag === 'SELECT') { const v = await el.evaluate(e => [...e.options].map(o => o.value).find(x => x)); if (v) await el.selectOption(v); continue; }
+        await el.fill(t === 'email' ? mail : t === 'tel' ? tel : t === 'date' ? '2030-01-15' : t === 'number' ? '1' : `${token} ${word}`);
+      }
+    };
+    await fill('test');
     await form.locator('button:not([type=button]), input[type=submit]').first().dblclick();   // a double click: one message
     await p.waitForFunction(old => { const t = [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].map(e => (e.innerText || '').trim()).filter(Boolean).join(' | ');
       return t && t !== old && !/odosiel|odesíl|sending/i.test(t); }, shown, { timeout: 12000 }).catch(() => {});
@@ -858,12 +861,18 @@ async function formDelivery(browser) {
     if (cfg.honeypot) {
       await loaded(p, urlOf(withForm[0]));
       const n0 = inbox().length;
-      for (const el of await form.locator('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea').all())
-        if (await el.isVisible()) await el.fill(((await el.getAttribute('type')) || '') === 'email' ? mail : ((await el.getAttribute('type')) || '') === 'tel' ? tel + '1' : `${token} bot`).catch(() => {});
+      await fill('bot');   // as complete as the real send, so native validation cannot be what stopped it
       const trap = await p.evaluate(n => { const f = document.forms[0], e = f && f.elements[n]; if (!e) return false; e.value = 'http://spam.example'; return true; }, cfg.honeypot);
       if (!trap) why.push(`the form has no spam trap field "${cfg.honeypot}"`);
-      else { await form.locator('button:not([type=button]), input[type=submit]').first().click(); await p.waitForTimeout(1500);
-        if (inbox().length !== n0) why.push('a form with its spam trap filled was delivered'); }
+      else {
+        const posts = [];   // the send must really happen: one POST to the endpoint answered 200, and nothing delivered
+        const onResp = r => { if (r.request().method() === 'POST' && new URL(r.url()).pathname === cfg.endpoint) posts.push(r.status()); };
+        p.on('response', onResp);
+        await form.locator('button:not([type=button]), input[type=submit]').first().click(); await p.waitForTimeout(1500);
+        p.off('response', onResp);
+        if (posts.length !== 1 || posts[0] !== 200) why.push(`the spam-trap send made ${posts.length} POST(s) to ${cfg.endpoint} (${posts.join(',') || 'none'}), not one answered 200`);
+        else if (inbox().length !== n0) why.push('a form with its spam trap filled was delivered');
+      }
     }
     for (const x of mine) fs.rmSync(path.join(box, x), { force: true });   // the test message is not the client's
     // the receiver itself: an incomplete message, a filled spam trap, the same message twice

@@ -648,7 +648,8 @@ function diffView(d, heading) {
   if (!Array.isArray(d.lines)) return null;
   return el("div", { class: "diff" }, heading ? el("h3", {}, heading) : null,
     el("pre", {}, d.lines.map(l => el("span", { class: l[0] === "+" ? "add" : l[0] === "-" ? "del" : l.startsWith("@@") ? "hunk" : "ctx" }, String(l) + "\n"))),
-    d.truncated ? el("p", { class: "tier" }, "… a dalších " + d.truncated + " řádků změn") : null);
+    d.truncated ? el("p", { class: "tier" }, "… a dalších " + d.truncated + " řádků změn") : null,
+    str(d.full) ? el("details", {}, el("summary", {}, "Celé znění"), el("pre", {}, d.full)) : null);
 }
 function diffBlock(q) { return diffView(q.diff, "Co se změnilo od minula"); }
 // a milestone: one question, several pages or exceptions; each can go back with its own note
@@ -1147,7 +1148,7 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
         send: [["Souhlasím, s poznámkou", t => answer("approve", undefined, t)], ["Odeslat", t => answer("return", undefined, t)]] });
   const yes = () => exc ? ask({ key: q.id + ":yes", title: "Proč výjimku udělit?", hint: "Důvod se uloží k rozhodnutí.", send: [["Udělit výjimku", t => answer("approve", undefined, t)]] }) : answer("approve");
   body.append(el("div", { class: "bar" },
-    el("button", { type: "button", class: "reroll-btn", on: { click: other } }, exc ? "Neudělit" : page ? "Chci změny" : "Chci to jinak"),
+    milestone ? null : el("button", { type: "button", class: "reroll-btn", on: { click: other } }, exc ? "Neudělit" : page ? "Chci změny" : "Chci to jinak"),
     gallery ? notesBtn : null,
     milestone ? itemsBtn : null,
     el("span", { class: "spacer" }),

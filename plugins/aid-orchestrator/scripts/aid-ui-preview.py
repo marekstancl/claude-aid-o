@@ -106,23 +106,25 @@ class H(http.server.SimpleHTTPRequestHandler):
         f.pop(hp, None) if hp else None
         key = hashlib.sha256(json.dumps(f, sort_keys=True).encode()).hexdigest()
         now = time.time()
-        with _lock:
+        mid = secrets.token_hex(4)
+        box = os.path.join(self.project, ".aid-ui", "inbox")
+        with _lock:   # the duplicate check, the capacity and the write are one step; a failed write marks nothing as seen
             for k in [k for k, t in _seen.items() if now - t > DUP_SECONDS]:
                 del _seen[k]
             if key in _seen:
                 return self.reply(200, {"ok": True, "duplicate": True}, "duplicate")
+            try:
+                os.makedirs(box, mode=0o700, exist_ok=True)
+                if len(os.listdir(box)) >= MAX_INBOX:
+                    return self.reply(503, {"error": "inbox full"}, "inbox full")
+                p = os.path.join(box, "%s-%s.json" % (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()), mid))
+                fd = os.open(p + ".part", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump({"id": mid, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "fields": f}, fh, ensure_ascii=False)
+                os.rename(p + ".part", p)
+            except OSError as e:
+                return self.reply(500, {"error": "not delivered"}, "write failed: %s" % e.__class__.__name__)
             _seen[key] = now
-        mid = secrets.token_hex(4)
-        box = os.path.join(self.project, ".aid-ui", "inbox")
-        os.makedirs(box, mode=0o700, exist_ok=True)
-        if len(os.listdir(box)) >= MAX_INBOX:
-            with _lock:
-                _seen.pop(key, None)
-            return self.reply(503, {"error": "inbox full"}, "inbox full")
-        p = os.path.join(box, "%s-%s.json" % (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()), mid))
-        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump({"id": mid, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "fields": f}, fh, ensure_ascii=False)
         self.reply(200, {"ok": True, "id": mid}, "delivered " + mid)
 
 

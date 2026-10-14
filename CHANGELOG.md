@@ -6,6 +6,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased] — P113a (smyčka kvality /aid-ui)
 
 ### Added
+- **Smyčka kvality po předání (`aid-ui-quality.py`)** (P113a kroky 1–3, 12. 10. 2026):
+  - Zmrazený nezávislý kritik (`aid-ui-critic.py`) hodnotí živý web podle měřítka typu s kotvami 4/6/8/10 a odpovídá JSON podle schématu (`critic-retro.schema.json`). Práh zná jen kód.
+  - Každá výtka se roztřídí (`accepted`, `rejected_with_reason`, `duplicate`, `blocked`, `superseded`). Oprava se zapíše s důkazem.
+  - Před každým kolem projde `aid-ui-state.sh gate-check` (stejná kontrola jako `finish`).
+  - Na konci audit slepými hodnoceními a `verdict.json` s tím, co blokuje zveřejnění. Smyčku lze znovu otevřít (`reopen`).
+  - Studio ukazuje kola v panelu Hotovo.
+- **Klient-agent a kritik v pluginu (`aid-ui-client.py`):**
+  - Codex na předplatném. Při limitu, prázdné nebo neplatné odpovědi nastoupí nezávislý Claude se stejným zadáním a snímky. Klíče API se z prostředí textových procesů odstraní.
+  - Kritik hodnotí jen adresu, která obsluhuje právě tento web, a jen se snímky každé stránky na 1440 i 390 px (nástroj snímků teď opravdu fotí mobil).
+  - Kniha nákladů projektu `.aid-ui/costs.jsonl`. Placené API jen pro obrázky, se stropem 2 USD na projekt (`AID_UI_IMAGE_BUDGET_USD`), rezervace pod zámkem.
+- **Nové řádky brány a standardy FB-29 až FB-33** (`frontend-build-standard.md`):
+  - `task_test`: úkoly zákazníka v prohlížeči (cena, otevírací doba, objednání do dvou kroků),
+  - `photo_slots`: místo pro fotku v přesném poměru, s ikonou a bez textu,
+  - `form_delivery`: skutečné odeslání formuláře přes příjemce náhledu,
+  - `text_clearance`: text nesmí být nalepený na dělicí čáru,
+  - `a11y_basics`: odkaz na obsah, pořadí nadpisů, obrys zaměření 3:1, přetečení při 320 px, stejný text odkazu na různé cíle,
+  - `mobile_native`.
+- **Náhled s příjemcem formuláře (`aid-ui-preview.py`):** podle `.aid-ui/form.json` přijímá zprávy do `.aid-ui/inbox`. Má past na spam, kontrolu povinných polí a délky, opakování doručí jednou, omezení velikosti, počtu zpráv a schránky a v logu nejsou hodnoty.
+- **Podklady ke spuštění hned po zadání (`aid-ui-launch.py`, otázka `launch_inputs`):**
+  - karta podle typu (IČO, hodiny, ceník, fotky, právník, příjem formuláře, doména),
+  - veřejné údaje se zdrojem a datem,
+  - po potvrzení klienta do registru faktů, chybějící jako otevřené body s termínem (kritické blokují zveřejnění).
+- **Fotky klienta ze starého webu (`aid-ui-photos.py`, otázka `photos`):** krok podkladů stahuje i obrázky starého webu. Agent je prohlédne, popíše a vyznačí lidi, klient vybere. Použitá fotka jde jako WebP 1600/800 px s popisem do místa pro fotku.
+- **Logo:** `aid-ui-vectorize.py` měří souměrnost značky. List log odmítne značku pod 0,92 bez uvedeného záměru asymetrie.
+- **Převzaté dovednosti emilkowalski/skills (MIT, 5 dovedností, `references/adopted/emil-skills/`):** kroky je vyžadují stvrzenkou postupu. Test hlídá, že žádná převzatá dovednost není mrtvá.
+- **Studio:** zodpovězené otázky se jako historie znovu nekontrolují. `aid-ui-serve.sh` znovu použije běžící studio jen se stejným serverem pluginu.
 - **Postupy, které na Coufalovi chyběly (5 ze 6 oprav kola 1 bylo „z hlavy“):**
   - **Krok 3, web lokální služby:**
     - stránka nebo sekce služby (Pro koho / Co zahrnuje / Jak postupujeme / Ceny z ceníku a odkazy; jen z faktů, chybějící průběh = otevřený bod klienta),

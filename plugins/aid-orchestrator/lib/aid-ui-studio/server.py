@@ -730,7 +730,7 @@ def diff_of(q, prev):
     if not lines:
         return {"same": True}
     cut = max(0, len(lines) - 60)
-    return {"lines": lines[:60], "truncated": cut}
+    return {"lines": lines[:60], "truncated": cut, "full": new[:20000]}   # the whole text folded under the change (the page shows it, the client agent gets the sha)
 
 
 def check_previous(q, qs):

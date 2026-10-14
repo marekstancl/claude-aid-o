@@ -39,4 +39,10 @@ answer() {   # answer <qid> <decision> [target]
   # a second card run keeps the items' open-item ids; no duplicate items on a later confirmation
   python3 "$L" card "$P" >/dev/null; answer a2 approve; python3 "$L" confirm "$P" --answer a2 >/dev/null
   [ "$(jq '.open_items | length' "$ST")" -eq 7 ]
+  # a confirmation that stopped half-way (its answer not yet marked used) is resumed by the same answer, nothing twice
+  jq '.used_answers -= ["a2"] | (.items[] | select(.id == "terms")) |= del(.item)' "$P/.aid-ui/launch.json" > "$P/l.t" && mv "$P/l.t" "$P/.aid-ui/launch.json"
+  n="$(jq '.open_items | length' "$ST")"
+  run python3 "$L" confirm "$P" --answer a2; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq '.open_items | length' "$ST")" -eq $((n + 1)) ]   # only the item without its id was made again
+  jq -e '.used_answers | index("a2") != null' "$P/.aid-ui/launch.json" >/dev/null
 }

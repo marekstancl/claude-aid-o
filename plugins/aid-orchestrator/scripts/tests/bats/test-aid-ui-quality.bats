@@ -16,7 +16,7 @@ setup() {
   # three competitors already shot (aid-ui-client.py competitors)
   for c in a b c; do mkdir -p "$P/.aid-ui/critic/competitors/$c"; printf x > "$P/.aid-ui/critic/competitors/$c/index-1440.png"; printf x > "$P/.aid-ui/critic/competitors/$c/index-390.png"; done
   echo '[{"name":"A","url":"https://a.example/"},{"name":"B","url":"https://b.example/"},{"name":"C","url":"https://c.example/"}]' > "$P/.aid-ui/critic/competitors.json"
-  echo '{"at":"2026-10-13T08:00:00Z","competitors":[{"name":"A","url":"https://a.example/","shots":["a/index-1440.png","a/index-390.png"]},{"name":"B","url":"https://b.example/","shots":["b/index-1440.png","b/index-390.png"]},{"name":"C","url":"https://c.example/","shots":["c/index-1440.png","c/index-390.png"]}]}' > "$P/.aid-ui/critic/competitors/manifest.json"
+  echo '{"at":"2026-10-13T08:00:00Z","list_sha256":"'"$(sha256sum "$P/.aid-ui/critic/competitors.json" | cut -c1-64)"'","competitors":[{"name":"A","url":"https://a.example/","shots":["a/index-1440.png","a/index-390.png"]},{"name":"B","url":"https://b.example/","shots":["b/index-1440.png","b/index-390.png"]},{"name":"C","url":"https://c.example/","shots":["c/index-1440.png","c/index-390.png"]}]}' > "$P/.aid-ui/critic/competitors/manifest.json"
   # the agent's own session: a transcript the cost book reads
   export CLAUDE_CODE_SESSION_ID=test-sid AID_UI_CLAUDE_PROJECTS="$T/cc"; mkdir -p "$T/cc/proj"; : > "$T/cc/proj/test-sid.jsonl"
   export PATH="$T/bin:$PATH" AID_UI_TOOL="$T/bin/tool" AID_UI_STATE_SH="$T/bin/state"
