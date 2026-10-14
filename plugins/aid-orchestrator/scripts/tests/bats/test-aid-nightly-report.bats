@@ -9,13 +9,15 @@
 # is under 2 s per case. Each case drives the real reporter over a real runner
 # log.
 # test-aid-nightly-report.bats — P081 Step 7: the nightly result is durable;
-# since P099 it sends no message at all.
+# since P099 a red night sends no message, and since 14. 10. 2026 only the
+# merge-path budget overrun does (one per night, an "ok" when it ends).
 #
 # WHAT THIS SUITE PROVES, in the order it matters:
 #   * the artifact is written on every night, green or red, and it lands on the
 #     SHARED host path — not under `.aid-o/`, which no CI job could ever write
 #     somewhere the PM's checkout can read;
-#   * no night, green or red, reaches Telegram;
+#   * no green or red night sends a message; the budget overrun is an episode
+#     that survives an unmeasured night and a second run of the same night;
 #   * the SAME failure the next night counts a streak;
 #   * a suite that passes on its single retry is flaky and quarantined — a
 #     third state, neither a failure nor a green run.
@@ -23,7 +25,7 @@
 # Fixture suites are written with printf, never a heredoc (IMP-494).
 #
 # Result count after any edit:
-#   bats --tap test-aid-nightly-report.bats | grep -cE '^(ok|not ok)'   # == 8
+#   bats --tap test-aid-nightly-report.bats | grep -cE '^(ok|not ok)'   # == 11
 
 load test-helpers.bash
 
@@ -170,4 +172,62 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(jq -r '.failed | length' "$NIGHTLY_DIR/latest.json")" -ge 1 ]
   [ "$(jq -r '.flaky | length' "$NIGHTLY_DIR/latest.json")" = "0" ]
+}
+
+_budget_stub() {
+  cat > "$STUB_TG" <<'STUB'
+send_alert() { printf 'alert|%s|%s|%s|%s|%s|%s\n' "$1" "$2" "$3" "$4" "$5" "${10:-}" >> "$SENT"; }
+send_ok() { printf 'ok|%s|%s\n' "$1" "$2" >> "$SENT"; }
+STUB
+}
+# _night <date> [t0 t1] — one nightly report on that date; no times = not measured
+_night() {
+  local d="$1"; shift
+  AID_NIGHTLY_TODAY="$d" run bash "$REPORT" --runner-log "$(_log 1 1)" --tests-dir "$FIXTURE_TESTS" ${1:+--t0-seconds "$1"} ${2:+--t1-seconds "$2"}
+  [ "$status" -eq 0 ]
+}
+_streak() { jq .budget_episode.over_streak "$NIGHTLY_DIR/latest.json"; }
+
+@test "budget: an overrun is one message a night with the figures and the night count; a second run of the same night sends nothing; the night it ends sends one ok, then nothing" {
+  _budget_stub
+  _night 2026-10-14 171 484
+  [ "$(_streak)" -eq 1 ]; [ "$(grep -c '^alert|' "$SENT")" -eq 1 ]
+  IFS='|' read -r _ sev scope id co akce area < "$SENT"
+  [ "$sev" = warning ]; [ "$id" = rozpocet-testu ]; [ "$scope" = project-testy ]; [ "$area" = AID ]
+  [[ "$co" != *[0-9]* ]]                                       # the sentence is human, the figures are in akce
+  [[ "$akce" == *"T0 171 s z 120 s"*"celkem 655 s z 600 s"*"1. noc po sobě"* ]]
+  _night 2026-10-14 171 484                                    # the workflow re-run the same night
+  [ "$(_streak)" -eq 1 ]; [ "$(grep -c '^alert|' "$SENT")" -eq 1 ]
+  _night 2026-10-15 171 484
+  [ "$(_streak)" -eq 2 ]; [[ "$(tail -1 "$SENT")" == *"2. noc po sobě"* ]]
+  : > "$SENT"; _night 2026-10-16 90 400
+  [ "$(_streak)" -eq 0 ]; [ "$(cat "$SENT")" = "ok|project-testy|rozpocet-testu" ]
+  : > "$SENT"; _night 2026-10-17 90 400
+  [ ! -s "$SENT" ]
+}
+
+@test "budget: a night without both tiers measured neither raises nor ends the episode and sends nothing; the same night measured later counts once" {
+  _budget_stub
+  _night 2026-10-14 171 484; : > "$SENT"
+  _night 2026-10-15                                            # not measured
+  [ "$(_streak)" -eq 1 ]; [ "$(jq .merge_path_budget "$NIGHTLY_DIR/latest.json")" = null ]; [ ! -s "$SENT" ]
+  _night 2026-10-16 90                                         # T0 alone is not the merge path
+  [ "$(_streak)" -eq 1 ]; [ ! -s "$SENT" ]
+  _night 2026-10-16 171 484                                    # the same night measured after all: its one message
+  [ "$(_streak)" -eq 2 ]; [ "$(grep -c '^alert|' "$SENT")" -eq 1 ]
+  _night 2026-10-16 171 484                                    # and a third run of that night adds nothing
+  [ "$(_streak)" -eq 2 ]; [ "$(grep -c '^alert|' "$SENT")" -eq 1 ]
+  : > "$SENT"
+  _night 2026-10-17 90 400                                     # measured and within: the episode ends
+  [ "$(cat "$SENT")" = "ok|project-testy|rozpocet-testu" ]
+}
+
+@test "budget: an unreadable previous result is said in the overrun message, and a night within budget closes any open case" {
+  _budget_stub
+  echo 'not json' > "$NIGHTLY_DIR/latest.json"
+  _night 2026-10-14 171 484
+  [[ "$(cat "$SENT")" == *"nešel přečíst"* ]]; [ "$(_streak)" -eq 1 ]
+  : > "$SENT"; echo 'not json' > "$NIGHTLY_DIR/latest.json"
+  _night 2026-10-15 90 400
+  [ "$(cat "$SENT")" = "ok|project-testy|rozpocet-testu" ]
 }

@@ -3,6 +3,16 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.3.0] — 2026-10-14
+
+Noční běh hlásí, když testy před sloučením přetáhnou rozpočet (PM 14. 10. 2026, 2A). Do té doby se překročení jen zapisovalo do nočního výsledku: T0 bylo přes rozpočet 44 nocí po sobě a nikdo to nevěděl.
+
+### Added
+- Třetí zpráva AID `rozpocet-testu` (`aid_alert_test_budget` v `lib/aid-alert.sh`, rozsah `<projekt>-testy`, oblast AID, `warning` → K rozhodnutí): noc, kdy T0, T1 nebo celá cesta ke sloučení přetáhne rozpočet, pošle jednu zprávu s lidskou větou a v `akce` naměřené časy, kolikátá noc po sobě to je a co rozhodnout do týdne. Noc, kdy se vrátí pod rozpočet, pošle `ok` (`send_ok`), které případ uzavře. Stav epizody nese noční výsledek v poli `budget_episode`: noc bez změřených obou pater ho přenese a nic nepošle, druhý běh téže noci nic nepočítá ani neposílá, nečitelný předchozí výsledek se řekne ve zprávě o překročení a v noci pod rozpočtem pošle `ok`. `--t0-seconds`/`--t1-seconds` bez hodnoty skončí chybou (dřív se parser zacyklil). Na `critical` se vědomě nestupňuje (to je Poplach, pomalé testy nikdy); řádek `*:rozpocet-testu` v `infra-druhy.json` (repo `agents`).
+
+### Changed
+- `_aid_alert_send` předává oblast (`oblast`, 10. pole standardu). Hlídač druhů zpráv v `test-aid-alert.bats` kontroluje seznam ID zpráv, které knihovna posílá, a že `send_alert`/`send_ok` nevolá žádný jiný skript (dřív počítal jen jeden způsob odeslání a třetí druh by minul). Soupis `/aid/alerty`.
+
 ## [3.2.2] — 2026-10-14
 
 Ceny bez koncových nul, aby AID počítal stejně s `jq` 1.6 i 1.7 (PM 14. 10. 2026).
