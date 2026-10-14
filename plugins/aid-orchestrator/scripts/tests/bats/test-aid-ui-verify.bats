@@ -577,3 +577,19 @@ PY
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   jq -e '[.rows[] | select(.check == "motion_fidelity")] | all(.[]; .status == "fail" and (.detail | contains("spin")))' "$RES" >/dev/null || { jq -c '.rows[] | select(.check == "motion_fidelity")' "$RES"; return 1; }
 }
+
+@test "first_paint_visible: the first screen's main image faded in after a delay fails; shown at once it passes (tech critic Coufal 13. 10.)" {
+  mkdir -p "$T/out"
+  echo '{"viewports":[1440],"browsers":["chromium"],"checks":{"first_paint_visible":"x"}}' > "$T/ck.json"
+  echo '{"variant":{"type":"web"},"build":{"id":"x","fingerprints":{"index.html":"a","_site":"c"}}}' > "$T/state.json"
+  cp "$FX/fixed/index.html" "$SITE/index.html"
+  img='<img id="hero" alt="Pec" width="1200" height="500" style="display:block;width:100%;height:500px" src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221200%22 height=%22500%22%3E%3Crect width=%221200%22 height=%22500%22 fill=%22%23963%22/%3E%3C/svg%3E">'
+  sed -i "s|<main>|<main><style>@keyframes up{from{opacity:0}to{opacity:1}}#hero{animation:up 1s .8s both}</style>$img|" "$SITE/index.html"
+  url="$(AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" | sed -n 's/^URL: //p')"
+  verify() { bash "$SC/aid-ui-tool.sh" verify --state "$T/state.json" --checks "$T/ck.json" --site "$SITE" --base "$url" --out "$T/out" --seo "$SC/aid-ui-seo-check.py" >/dev/null; }
+  verify; RES="$T/out/result.json"
+  [ "$(st first_paint_visible index.html)" == fail ] || { jq -c '.rows[]' "$RES"; return 1; }
+  jq -e '[.rows[] | select(.check == "first_paint_visible" and .page == "index.html") | .detail][0] | contains("main image") and contains("delayed fade")' "$RES" >/dev/null
+  sed -i 's|#hero{animation:up 1s .8s both}|#hero{animation:none}|' "$SITE/index.html"
+  verify; [ "$(st first_paint_visible index.html)" == pass ] || { jq -c '.rows[] | select(.check == "first_paint_visible")' "$RES"; return 1; }
+}

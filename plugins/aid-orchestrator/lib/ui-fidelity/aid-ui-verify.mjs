@@ -714,6 +714,26 @@ async function firstPaintVisible(browser, url, viewport) {
   try {
     const p = await ctx.newPage();
     await loaded(p, url);
+    // the first screen's main image shows at once: no opacity start, no delayed fade (LCP; tech critic Coufal 13. 10.)
+    const hero = await p.evaluate(() => {
+      const vh = innerHeight, vw = innerWidth;
+      const imgs = [...document.querySelectorAll('img, video, picture > img')].map(e => ({ e, r: e.getBoundingClientRect() }))
+        .filter(x => x.r.top < vh && x.r.bottom > 0 && x.r.width > 0)
+        .map(x => ({ ...x, area: Math.max(0, Math.min(x.r.right, vw) - Math.max(x.r.left, 0)) * Math.max(0, Math.min(x.r.bottom, vh) - Math.max(x.r.top, 0)) }))
+        .sort((a, b) => b.area - a.area);
+      const m = imgs[0];
+      if (!m || m.area < vw * vh * 0.08) return null;   // no main image in the first screen
+      let op = 1, delayed = [];
+      for (let n = m.e; n && n.nodeType === 1; n = n.parentElement) {
+        op *= parseFloat(getComputedStyle(n).opacity) || 0;
+        for (const an of n.getAnimations ? n.getAnimations() : []) {
+          const kf = an.effect && an.effect.getKeyframes ? an.effect.getKeyframes() : [];
+          const d = an.effect && an.effect.getTiming ? an.effect.getTiming().delay : 0;
+          if (d > 0 && kf.some(k => k.opacity !== undefined && parseFloat(k.opacity) < 0.9)) delayed.push((an.animationName || 'animation') + ' ' + d + 'ms');
+        }
+      }
+      return { name: (m.e.getAttribute('src') || m.e.tagName).split('/').pop().slice(0, 40), op: Math.round(op * 100) / 100, delayed };
+    });
     let a = await p.evaluate(READABLE_JS, 'first');
     for (let t = 400; t < 1500 && (a.h1 === false || a.first === false || a.fadedInView.length); t += 250) { await p.waitForTimeout(250); a = await p.evaluate(READABLE_JS, 'first'); }
     await p.emulateMedia({ reducedMotion: 'reduce' });
@@ -726,6 +746,7 @@ async function firstPaintVisible(browser, url, viewport) {
     else if (!a.first) why.push(`first content block not readable in the first screen: ${a.firstName}`);
     if (a.fadedInView.length) why.push(`${a.fadedInView.length} element(s) in the first screen faded or hidden before any scroll: ${a.fadedInView.slice(0, 3).join(', ')}`);
     if (b.length) why.push(`under prefers-reduced-motion ${b.length} element(s) stay faded or hidden: ${b.slice(0, 3).join(', ')}`);
+    if (hero && (hero.op < 0.9 || hero.delayed.length)) why.push(`the first screen's main image ${hero.name} is not shown at once (opacity ${hero.op}${hero.delayed.length ? '; delayed fade ' + hero.delayed.join(', ') : ''}): it delays the largest paint`);
     return why.length ? ['fail', why.join('; ')] : ['pass', 'h1 and first block readable at first paint, nothing faded under reduced motion'];
   } catch (e) { return ['fail', `first-paint load failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
 }

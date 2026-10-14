@@ -275,8 +275,18 @@ def check_page(out, path, rel, base_url):
             if isinstance(x, dict):
                 pg.items += [g for g in x.get("@graph", []) if isinstance(g, dict)] or [x]
     if rel and rel.replace("\\", "/") != "index.html" and not pg.noindex and not nf:   # a nested page of a site says where it is (step 6, Coufal 13. 10.)
-        r(any("BreadcrumbList" in types(i) for i in pg.items), "breadcrumbs", "BreadcrumbList" if any("BreadcrumbList" in types(i) for i in pg.items)
-          else "nested page without BreadcrumbList in its JSON-LD")
+        def walk(x):
+            if isinstance(x, dict):
+                yield x
+                for v in x.values():
+                    yield from walk(v)
+            elif isinstance(x, list):
+                for v in x:
+                    yield from walk(v)
+        crumbs = [i for i in walk(pg.items) if "BreadcrumbList" in types(i)]   # also WebPage -> breadcrumb -> BreadcrumbList
+        good = [c for c in crumbs if isinstance(c.get("itemListElement"), list) and len(c["itemListElement"]) >= 2]
+        r(bool(good), "breadcrumbs", "BreadcrumbList" if good else ("BreadcrumbList with fewer than two items" if crumbs
+          else "nested page without BreadcrumbList in its JSON-LD"))
     for item in pg.items:
         if "aggregateRating" in item and not types(item) & RATEABLE:
             r(False, "aggregate-rating", f"self-serving on {'/'.join(sorted(types(item)))}")

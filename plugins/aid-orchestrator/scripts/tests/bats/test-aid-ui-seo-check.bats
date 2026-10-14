@@ -76,6 +76,11 @@ fix_site() {
   # a nested page without breadcrumbs is a warning (step 6, Coufal 13. 10.)
   sed -i 's|"@type":"BreadcrumbList"|"@type":"ItemList"|' "$SITE/o-nas/index.html"
   run python3 "$CHECK" "$SITE"; grep -qx 'WARN o-nas/index.html breadcrumbs nested page without BreadcrumbList in its JSON-LD' <<<"$output"
+  # nested under the page node counts; an empty list does not
+  sed -i 's|<script type="application/ld+json">{"@context":"https://schema.org","@type":"ItemList"|<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","breadcrumb":{"@type":"BreadcrumbList"|; s|"item":"https://example.cz/o-nas"}]}</script>|"item":"https://example.cz/o-nas"}]}}</script>|' "$SITE/o-nas/index.html"
+  run python3 "$CHECK" "$SITE"; grep -qx 'OK o-nas/index.html breadcrumbs BreadcrumbList' <<<"$output"
+  sed -i 's|"itemListElement":\[.*\]}}</script>|"itemListElement":[]}}</script>|' "$SITE/o-nas/index.html"
+  run python3 "$CHECK" "$SITE"; grep -qx 'WARN o-nas/index.html breadcrumbs BreadcrumbList with fewer than two items' <<<"$output"
   # a "|" inside a cell breaks the row: a blocker, never a quietly shifted column
   printf '| URL | H1 | dotaz |\n|---|---|---|\n| / | Pekárna U Mlýna | pekárna | brno |\n| /o-nas | O nás | odhad |\n' >"$BATS_TEST_TMPDIR/brief.md"
   run python3 "$CHECK" "$SITE" --brief "$BATS_TEST_TMPDIR/brief.md"; [ "$status" -eq 1 ]

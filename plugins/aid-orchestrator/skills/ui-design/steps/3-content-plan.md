@@ -65,9 +65,10 @@ Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 
    převzatého copywritingu; právní stránka (`legal: true` z kroku 2) rámec nemá.
    **Web lokální služby navíc (P113a, kritici Coufal 13. 10. 2026; dřív se psalo „z hlavy“):**
    - **Stránka nebo sekce služby:** bloky Pro koho / Co zahrnuje / Jak postupujeme / Ceny (3–5 typických
-     položek z ceníku, u každé cena pro pojišťovnu i přímou platbu, kde ji ceník má) a odkazy na úplný ceník,
-     objednání a telefon. Všechno jen z registru faktů. Chybí-li fakta o průběhu (počet návštěv, doba, péče po
-     výkonu), vznikne otevřený bod pro klienta, ne vymyšlená věta.
+     položek z ceníku ve sloupcích, které ceník podniku má) a odkazy na úplný ceník, objednání a telefon.
+     Všechno jen z registru faktů. Chybí-li fakta o průběhu, která daná služba má (doba, počet návštěv,
+     co si zákazník připraví, co následuje), vznikne otevřený bod pro klienta, ne vymyšlená věta. Podnik
+     bez ceníku dá místo cen způsob nacenění (např. prohlídka zdarma, cena po zaměření).
    - **Závěrečná výzva každé stránky** říká, co se stane po odeslání (např. „zavoláme nebo napíšeme a domluvíme
      termín“), a vedle hlavního tlačítka nabízí telefon jako druhou akci.
    - **Nejsilnější ověřený důkaz** (hodnocení se zdrojem a datem, kvalifikace) stojí u hlavní výzvy úvodu,
