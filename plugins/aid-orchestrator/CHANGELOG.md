@@ -3,6 +3,16 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.2.2] — 2026-10-14
+
+Ceny bez koncových nul, aby AID počítal stejně s `jq` 1.6 i 1.7 (PM 14. 10. 2026).
+
+### Fixed
+- `aid_review_usd` a součty ceny kritika vracely číslo ve tvaru `%.4f` (`2.0000`). `jq` 1.7 zachovává zápis čísla, které dostane, takže v souhrnech a záznamech zůstalo `2.0000` místo `2` (s `jq` 1.6 se zápis sjednotil sám). Teď se koncové nuly odstraní u zdroje (`lib/aid-review-summary.sh`); hodnoty jsou stejné.
+
+### Changed
+- Na eco-dev běží testy a runnery s `jq` 1.7.1 (`~/.local/bin`): `jq` 1.6 z Debianu 12 stojí 34 ms na spuštění, 1.7.1 4,7 ms. T1 1 016 → 656 s, cesta ke sloučení 21,3 → 15,0 min. Postup a vrácení: runbook ekosystému, měsíční údržba; `/aid/testing`.
+
 ## [3.2.1] — 2026-10-14
 
 Rychlejší noční běh testů, druhé kolo úklidu (PM 14. 10. 2026). Postaveno nad 3.2.0. Nic se nemění pro uživatele pluginu.

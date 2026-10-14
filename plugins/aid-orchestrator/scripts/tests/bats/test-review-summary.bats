@@ -32,9 +32,10 @@ _measure() {
 }
 
 @test "usd: a known model and count give a known figure; an unlisted model, a missing count and a missing table are unknown" {
-  [ "$(aid_review_usd opus 1000000 100000 2000000 0)" = "8.5000" ]
-  [ "$(aid_review_usd sonnet 500000 50000 0 100000)" = "1.7500" ]
-  [ "$(aid_review_usd_blended opus 1000000)" = "16.4000" ]
+  # a plain number (no trailing zeros): jq 1.7 keeps a literal as written
+  [ "$(aid_review_usd opus 1000000 100000 2000000 0)" = "8.5" ]
+  [ "$(aid_review_usd sonnet 500000 50000 0 100000)" = "1.75" ]
+  [ "$(aid_review_usd_blended opus 1000000)" = "16.4" ]
   [ "$(aid_review_usd gpt-9 10 10 0 0)" = unknown ]
   [ "$(aid_review_usd opus unknown 10 0 0)" = unknown ]
   [ "$(aid_review_usd_blended opus unknown)" = unknown ]
