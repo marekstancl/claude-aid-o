@@ -3,7 +3,7 @@
 # One library for every checkpoint (P094 Step 11).
 #
 #   aid_review_usd <model> <in> <out> <cache_read> <cache_write>
-#       USD (four decimals) from defaults/prices.yaml (a project's
+#       USD (rounded to four decimals, no trailing zeros: 8.5, 10, 0) from defaults/prices.yaml (a project's
 #       .aid-o/config/prices.yaml wins); "unknown" for an unlisted model, a
 #       missing table or a non-numeric count.
 #   aid_review_usd_blended <model> <tokens>
@@ -54,7 +54,7 @@ aid_review_usd() {
   rr="$(_aid_rs_rate "$model" cache_read)"; rw="$(_aid_rs_rate "$model" cache_write)"
   [[ -n "$ri" && -n "$ro" ]] || { echo unknown; return 0; }
   awk -v i="$in" -v o="$out" -v c="$cr" -v w="$cw" -v ri="$ri" -v ro="$ro" -v rr="${rr:-0}" -v rw="${rw:-0}" \
-    'BEGIN { printf "%.4f\n", (i*ri + o*ro + c*rr + w*rw) / 1000000 }'
+    'BEGIN { s = sprintf("%.4f", (i*ri + o*ro + c*rr + w*rw) / 1000000); sub(/\.?0+$/, "", s); print s }'
 }
 
 aid_review_usd_blended() {
@@ -62,7 +62,7 @@ aid_review_usd_blended() {
   [[ "$t" =~ ^[0-9]+$ ]] || { echo unknown; return 0; }
   r="$(_aid_rs_rate "$model" blended)"
   [[ -n "$r" ]] || { echo unknown; return 0; }
-  awk -v t="$t" -v r="$r" 'BEGIN { printf "%.4f\n", t*r/1000000 }'
+  awk -v t="$t" -v r="$r" 'BEGIN { s = sprintf("%.4f", t*r/1000000); sub(/\.?0+$/, "", s); print s }'
 }
 
 # _aid_rs_rounds <cp dir> — the round numbers, sorted
@@ -244,7 +244,7 @@ aid_plan_plan_cost() {
     t="$(aid_review_tokens_from_events "$ev")"
     local p; p="$(aid_review_usd "${model:-unknown}" "$(jq -r .tokens_in <<< "$t")" "$(jq -r .tokens_out <<< "$t")" "$(jq -r .cache_read <<< "$t")" 0)"
     cfound=$((cfound + 1))
-    if [[ "$p" == unknown ]]; then cunknown=$((cunknown + 1)); else cusd="$(awk -v a="$cusd" -v b="$p" 'BEGIN { printf "%.4f", a + b }')"; fi
+    if [[ "$p" == unknown ]]; then cunknown=$((cunknown + 1)); else cusd="$(awk -v a="$cusd" -v b="$p" 'BEGIN { s = sprintf("%.4f", a + b); sub(/\.?0+$/, "", s); print s }')"; fi
     ctok="$(jq -n --argjson a "$ctok" --argjson t "$t" '$a + ([$t.tokens_in, $t.tokens_out] | map(select(type == "number")) | add // 0)')"
   done
   jq -c --argjson f "$cfound" --argjson u "$cunknown" --argjson cu "$cusd" --argjson ct "$ctok" --argjson rj "$crejected" '
