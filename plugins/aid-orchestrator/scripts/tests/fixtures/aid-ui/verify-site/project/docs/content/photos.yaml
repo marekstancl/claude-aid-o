@@ -1,0 +1,2 @@
+# Photos the client owes (FB-30): o-nas has its slot right; the planted home page has an unlisted slot with text
+- {id: pec, page: o-nas/index.html, where: "O nás, pod textem", what: "pec s chlebem", shape: rect, ratio: "4:3", min_px: "1600x1200"}

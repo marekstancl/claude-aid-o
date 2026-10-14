@@ -1,0 +1,6 @@
+# Customer tasks of the gate fixture (FB-29): hours and booking are found, the price of a loaf is not on the
+# site (the page says 999 Kč), and "Doprava zdarma" is invented (not in the facts register)
+- {id: hours, task: "Kdy máte otevřeno", expect: ["7:00 až 18:00"]}
+- {id: price, task: "Kolik stojí bochník", expect: ["Bochník", "65 Kč"]}
+- {id: booking, task: "Objednej se", form: true}
+- {id: delivery, task: "Vozíte zdarma?", expect: ["Doprava zdarma"]}
