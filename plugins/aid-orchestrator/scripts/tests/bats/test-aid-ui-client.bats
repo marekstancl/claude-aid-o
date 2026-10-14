@@ -278,8 +278,12 @@ PY
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("cl", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 t = m.diff_text({"target": "docs/seo/brief.md@ab", "diff": {"lines": ["@@ -3 +3 @@", "-titulok: Krátky", "+titulok: Dlhší"], "truncated": 4}})
-assert "Co se změnilo od minula" in t and "+titulok: Dlhší" in t and "docs/seo/brief.md" in t and "dalších 4" in t, t
-assert "Nic" in m.diff_text({"diff": {"same": True}}) and "Předchozí verzi studio nemá" in m.diff_text({"diff": {"missing": True}})
+assert "Co se změnilo od minula" in t and "+titulok: Dlhší" in t and "docs/seo/brief.md@ab" in t and "dalších 4" in t, t
+assert "Nic" in m.diff_text({"diff": {"same": True}})
+t = m.diff_text({"target": "docs/seo/brief.md@" + "a" * 64, "diff": {"missing": True, "full": "celý text"}})
+assert "Předchozí verzi studio nemá" in t and "celý text" in t and "a" * 64 in t, t
+t = m.diff_text({"items": [{"id": "index.html", "target": "index.html@f2"}], "item_diffs": {"index.html": {"lines": ["-a", "+b"]}}})
+assert "## index.html" in t and "+b" in t and "index.html@f2" in t, t
 assert m.diff_text({}) == ""
 print("ok")
 PY

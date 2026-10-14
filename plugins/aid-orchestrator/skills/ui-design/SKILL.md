@@ -116,7 +116,10 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
      (`.aid-ui/studio/snapshots/`).
    - **Milník:** několik stránek nebo výjimek z jednoho okruhu je jedna otázka `approve_page` nebo `exception`
      s `items` a `target` `items@<sha položek>`. Každou položku spotřebuj
-     `--answer <id> --answer-item <položka>` (kroky 7 bod 3 a 5).
+     `--answer <id> --answer-item <položka>` (kroky 7 bod 3 a 5). Studio odmítne payload s víc než jednou
+     otevřenou samostatnou otázkou `approve_page`.
+   - `previous` musí být zodpovězená otázka (rozdíl je proti tomu, na co čtenář odpověděl). U milníku
+     se porovnávají položky se stejným id, společný styl (`_shared`) nese větu „změnil se vzhled, viz náhled“.
    - Ostatní druhy otázek zatím slučované nejsou (IMP-698).
 1. Zapiš nebo obnov `<project>/.aid-ui/studio/payload.json`:
    `now` (`title`, `text` = co právě děláš, např. „Připravuji tři návrhy vzhledu…", `at` = kdy jsi to

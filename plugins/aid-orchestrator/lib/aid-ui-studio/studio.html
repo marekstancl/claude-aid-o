@@ -640,15 +640,17 @@ const SELECTOR = { check: "kontrola", page: "stránka", viewport: "velikost obra
 const KNOWN = new Set(["id", "question", "title", "preview", "preview2", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source", "method", "slot", "value", "preview2_label", "honours", "dir"]);
 // the PM's earlier choice this question builds on (checked by the server against the recorded answer)
 // P113a bod 8: a follow-up question shows only what changed since the version answered last time
-function diffBlock(q) {
-  const d = q.diff; if (!d || typeof d !== "object") return null;
+function diffView(d, heading) {
+  if (!d || typeof d !== "object") return null;
   if (d.same) return el("p", { class: "prior" }, "Beze změny proti verzi, kterou jste viděli.");
-  if (d.missing) return el("p", { class: "prior" }, "Předchozí verzi nemám, ukazuji celé znění.");
+  if (d.missing) return el("div", { class: "diff" }, el("p", { class: "prior" }, "Předchozí verzi nemám, ukazuji celé znění."),
+    str(d.full) ? el("details", {}, el("summary", {}, "Celé znění"), el("pre", {}, d.full)) : null);
   if (!Array.isArray(d.lines)) return null;
-  return el("div", { class: "diff" }, el("h3", {}, "Co se změnilo od minula"),
+  return el("div", { class: "diff" }, heading ? el("h3", {}, heading) : null,
     el("pre", {}, d.lines.map(l => el("span", { class: l[0] === "+" ? "add" : l[0] === "-" ? "del" : l.startsWith("@@") ? "hunk" : "ctx" }, String(l) + "\n"))),
     d.truncated ? el("p", { class: "tier" }, "… a dalších " + d.truncated + " řádků změn") : null);
 }
+function diffBlock(q) { return diffView(q.diff, "Co se změnilo od minula"); }
 // a milestone: one question, several pages or exceptions; each can go back with its own note
 const ITEMNOTES = {};
 function itemsBlock(q, refresh) {
@@ -658,7 +660,10 @@ function itemsBlock(q, refresh) {
     el("button", { type: "button", class: "chip", on: { click: () => ask({ key: q.id + ":item:" + it.id, title: "Co má být u „" + it.title + "“ jinak?",
       hint: "Poznámka zůstane u položky; ostatní položky se schválí. Odejde tlačítkem „Vrátit vybrané“.",
       send: [["Uložit", t => { notes[it.id] = t; refresh(); }]], extra: notes[it.id] ? [["Smazat", () => { delete notes[it.id]; refresh(); }]] : [] }) } }, "Vrátit…"),
-    el("span", { class: "item-note" }, notes[it.id] ? "Vrátit: " + notes[it.id] : ""))));
+    el("span", { class: "item-note" }, notes[it.id] ? "Vrátit: " + notes[it.id] : ""),
+    it.id === "_shared" ? el("p", { class: "tier" }, "Změnil se vzhled, viz náhled ",
+      S.links && str(S.links.web) ? el("a", { href: S.links.web, target: "_blank", rel: "noopener" }, "na webu") : "webu", ".") : null,
+    q.item_diffs && q.item_diffs[it.id] ? diffView(q.item_diffs[it.id], null) : null)));
 }
 
 function priorLine(q) {

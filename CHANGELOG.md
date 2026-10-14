@@ -23,6 +23,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
     - `approve` schválí všechny, `return` vrátí jen jmenované položky s komentářem, ostatní se schválí.
     - Položka se spotřebuje `--answer <id> --answer-item <položka>` jen jednou.
     - Rozhodnutí položek se ověřují proti studiu, ne jen jejich otisk.
+    - Studio odmítne víc než jednu otevřenou samostatnou otázku na schválení stránky.
+    - Opakovaný milník ukáže rozdíl každé stránky zvlášť a u společného stylu odkaz na náhled.
   - Na Coufalu se schvalovaly stránky 21× a výjimky 9×. Slučování faktů, plánu obsahu a SEO je IMP-698.
 - **Id výtek se nezdvojují:** předponu kola a role, kterou si kritik opsal z paměti, smyčka odřízne. Kdyby se dvě id jedné odpovědi tím shodla, zůstanou, jak byla.
 

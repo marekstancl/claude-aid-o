@@ -99,7 +99,7 @@ opened_at now; the agent lists that id in the payload with the new cards.
 [auth] = the X-AID-Token header (the agent) or the session cookie (the PM's page).
 Neither: 403 {"error": "token"}.
 """
-import argparse, difflib, fcntl, hashlib, hmac, html, html.parser, json, os, re, secrets, sys, threading
+import argparse, difflib, fcntl, hashlib, hmac, html, html.parser, json, os, re, secrets, stat, sys, tempfile, threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
@@ -564,6 +564,14 @@ ITEM_KINDS = {"approve_page", "exception"}   # P113a bod 8: one milestone questi
 ITEM_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
+def no_dup(pairs):
+    """json object_pairs_hook: a key twice (an item named twice) is refused, never merged last-one-wins."""
+    keys = [k for k, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def items_sha(items):
     """sha256 of a milestone's items as {id, kind, target}, sorted by id; the same bytes as
     jq -cS '[.[] | {id, kind, target}] | sort_by(.id)' (aid-ui-state.sh checks it)."""
@@ -642,12 +650,18 @@ def snapshot_text(q):
         return None
     path, _, digest = t.rpartition("@")
     if q["kind"] == "approve_page":
+        fps = ((read_state().get("build") or {}).get("fingerprints") or {})
+        if fps.get(path) != digest:   # only the recorded build's page stands for this target
+            return None
         path = os.path.join("site", path)
     full = os.path.realpath(os.path.join(PROJECT, path))
-    if not full.startswith(PROJECT + os.sep) or os.path.islink(os.path.join(PROJECT, path)) or not os.path.isfile(full):
-        return None
+    if not full.startswith(PROJECT + os.sep) or full != os.path.normpath(os.path.join(PROJECT, path)):
+        return None   # outside the project, or a symlink somewhere on the way
     try:
-        with open(full, "rb") as f:
+        fd = os.open(full, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as f:
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                return None
             data = f.read(2_000_000)
     except OSError:
         return None
@@ -674,8 +688,8 @@ def take_snapshot(q):
     if text is None:
         return
     os.makedirs(SNAP, exist_ok=True)
-    tmp = sp + ".%d.part" % os.getpid()
-    with open(tmp, "w", encoding="utf-8") as f:
+    fd, tmp = tempfile.mkstemp(dir=SNAP, suffix=".part")   # one per write: the server is threaded
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
     try:
         os.link(tmp, sp)   # atomic and never over an existing snapshot
@@ -685,16 +699,32 @@ def take_snapshot(q):
         os.unlink(tmp)
 
 
+def take_snapshots(q):
+    """The question's own target, or each item of a milestone (pages: their reader text)."""
+    for x in ([dict(i, kind=q["kind"]) for i in q["items"]] if q.get("items") else [q]):
+        take_snapshot(x)
+
+
+def diffs(q, prev):
+    """diff for a question; for a milestone one per item that the earlier milestone had (by id)."""
+    if not q.get("items"):
+        return {"diff": diff_of(q, prev)}
+    before = {i["id"]: i for i in prev.get("items") or []}
+    return {"item_diffs": {i["id"]: diff_of(dict(i, kind=q["kind"]), dict(before[i["id"]], kind=q["kind"]))
+                           for i in q["items"] if i["id"] in before}}
+
+
 def diff_of(q, prev):
-    """Only what changed since the version the reader answered last time (P113a bod 8)."""
+    """Only what changed since the version the reader answered last time (P113a bod 8); without the earlier
+    version the whole text (capped) so nothing is shown blind."""
+    new = snapshot_text(q)
     try:
         with open(snap_path(prev["target"]), encoding="utf-8") as f:
             old = f.read()
     except OSError:
-        return {"missing": True}
-    new = snapshot_text(q)
+        return {"missing": True, "full": (new or "")[:20000]}
     if new is None:
-        return {"missing": True}
+        return {"missing": True, "full": ""}
     lines = [l for l in difflib.unified_diff(old.splitlines(), new.splitlines(), n=2, lineterm="")
              if not l.startswith(("---", "+++"))]
     if not lines:
@@ -715,6 +745,10 @@ def check_previous(q, qs):
         raise ValueError("question %s: previous %s is another kind or another file" % (q["id"], pid))
     if parse_time(prev["opened_at"]) >= parse_time(q["opened_at"]):
         raise ValueError("question %s: previous %s is not older" % (q["id"], pid))
+    if not (valid_answer(prev) or prev.get("done") is True):
+        raise ValueError("question %s: previous %s has no answer yet; the difference is to what the reader answered" % (q["id"], pid))
+    if bool(q.get("items")) != bool(prev.get("items")):
+        raise ValueError("question %s: previous %s is a milestone and this one not, or the other way round" % (q["id"], pid))
 
 
 def load():
@@ -761,6 +795,11 @@ def load():
             check_previous(q, qs)
         except (ValueError, TypeError) as e:
             raise ValueError("payload.json: %s" % e)
+    single = [q["id"] for q in qs if q["kind"] == "approve_page" and not q.get("items") and not q.get("done")
+              and not valid_answer(q)]
+    if len(single) > 1:   # P113a bod 8: several pages are one milestone question, not one question each
+        raise ValueError("payload.json: %d open page approvals (%s): ask them as one approve_page question with items (SKILL.md 0c)"
+                         % (len(single), ", ".join(single[:5])))
     shown = set()  # (question, card id): a choice names exactly one card the PM saw
     for c in cards:
         if not (isinstance(c, dict) and isinstance(c.get("id"), str) and c["id"]
@@ -959,7 +998,7 @@ class Studio(BaseHTTPRequestHandler):
         if not self.gate(True) or (p := self.payload()) is None:
             return
         try:
-            b = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"null")
+            b = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"null", object_pairs_hook=no_dup)
         except (ValueError, json.JSONDecodeError):
             b = None
         qid = b.get("question") if isinstance(b, dict) else None
@@ -1068,9 +1107,9 @@ class Studio(BaseHTTPRequestHandler):
             for x in p["questions"]:   # P113a bod 8: what the reader sees now is kept; a follow-up shows only the change
                 try:
                     if not valid_answer(x):
-                        take_snapshot(x)
+                        take_snapshots(x)
                     if x.get("previous") in byid:
-                        x["diff"] = diff_of(x, byid[x["previous"]])
+                        x.update(diffs(x, byid[x["previous"]]))
                 except OSError as e:
                     self.log_message("snapshot: %s", e)
             with LOCK:
@@ -1206,7 +1245,7 @@ class Studio(BaseHTTPRequestHandler):
         if not self.gate(True):
             return
         try:
-            b = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"null")
+            b = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"null", object_pairs_hook=no_dup)
         except (ValueError, json.JSONDecodeError):
             b = None
         text = str((b or {}).get("text") or "").strip() if isinstance(b, dict) else ""
@@ -1237,7 +1276,7 @@ class Studio(BaseHTTPRequestHandler):
         if not self.gate(True) or (p := self.payload()) is None:
             return
         try:
-            b = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"null")
+            b = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"null", object_pairs_hook=no_dup)
         except (ValueError, json.JSONDecodeError):
             b = None
         if not isinstance(b, dict) or b.get("decision") not in DECISIONS:

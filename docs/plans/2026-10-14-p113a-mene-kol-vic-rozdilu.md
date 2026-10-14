@@ -104,3 +104,25 @@ Klient-agent dostal ve studiu přes 85 otázek, 33 z nich vrátil. Nejvíc opako
     - opakovaná souborová otázka dá klientovi v promptu **jen rozdíl + sha celého znění**; celé znění jen bez snímku
       (test délky promptu),
     - slučování dalších druhů (fakta, plán obsahu, SEO) jde do backlogu jako IMP-698 pro P113.
+
+## Revize implementace (Codex, 14. 10. 2026)
+
+Přijato a opraveno:
+- rozdíl po položkách milníku,
+- celé znění, když chybí snímek,
+- `previous` musí být zodpovězená,
+- snímek stránky jen pro otisk zaznamenaného buildu,
+- duplicitní klíče v odpovědi dávají 422 (u všech těl požadavků),
+- dočasný soubor snímku je jedinečný pro každý zápis,
+- sha celého znění je v promptu klienta,
+- žádný symlink na cestě a čtení s `O_NOFOLLOW`,
+- věta u společného stylu.
+
+Bod „N stránek = 1 otázka“ je místo testu na počet **vynucený kódem**: studio odmítne víc než jednu otevřenou
+samostatnou otázku `approve_page`.
+
+*Nepřebráno:* výtah textu stránky ze subjektu kontroly textů (`--copy-subject`). Studio ho neumí spustit (jde
+o prohlížečový běh brány), proto má vlastní výtah textu „čtenář v1“ (title, description, text bloků bez skriptů
+a stylů). Rozdíl slouží člověku k orientaci, ne kontrole textů.
+
+Krok 6 se nemění: schvalování stránek je v kroku 7 (bod 5), proto „kroky 6 a 7“ v Hotovo 7 = kroky 1s a 7.

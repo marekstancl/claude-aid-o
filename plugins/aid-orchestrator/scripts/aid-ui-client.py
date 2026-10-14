@@ -519,19 +519,26 @@ def client_role(project):
     return t.format(persona_who=p["who"], persona_wants=p["wants"], persona_rules="\n".join("- " + r for r in p["rules"]), lang=lang)
 
 
-def diff_text(q):
-    """P113a bod 8: a follow-up question carries only what changed since the version answered last time."""
-    d = q.get("diff")
-    if not isinstance(d, dict):
-        return ""
+def one_diff(d, target):
     if d.get("same"):
-        return "\n\n# Co se změnilo od minula\nNic: stejné znění, jaké jsi viděl/a v minulé otázce."
+        return "Nic: stejné znění, jaké jsi viděl/a minule."
     if d.get("missing"):
-        return "\n\n# Co se změnilo od minula\nPředchozí verzi studio nemá; posuď celé znění (soubor podle cíle otázky)."
-    lines = d.get("lines") or []
-    return ("\n\n# Co se změnilo od minula (jen změněné řádky; - = dřív, + = teď; celé znění je soubor podle cíle otázky %s)\n"
-            % str(q.get("target", "")).rpartition("@")[0] + "\n".join(str(x) for x in lines)
+        return "Předchozí verzi studio nemá; celé znění (%s):\n%s" % (target, d.get("full") or "(nečitelné)")
+    return ("Jen změněné řádky (- = dřív, + = teď; celé znění: %s):\n" % target + "\n".join(str(x) for x in d.get("lines") or [])
             + ("\n… a dalších %d řádků změn" % d["truncated"] if d.get("truncated") else ""))
+
+
+def diff_text(q):
+    """P113a bod 8: a follow-up question carries only what changed since the version answered last time (per item
+    of a milestone); the target with its sha names the whole text."""
+    d, items = q.get("diff"), q.get("item_diffs")
+    if isinstance(d, dict):
+        return "\n\n# Co se změnilo od minula\n" + one_diff(d, q.get("target", ""))
+    if isinstance(items, dict) and items:
+        tgt = {i.get("id"): i.get("target") for i in q.get("items") or []}
+        return "\n\n# Co se změnilo od minula (po položkách)\n" + "\n\n".join(
+            "## %s\n%s" % (k, one_diff(v, tgt.get(k, ""))) for k, v in items.items() if isinstance(v, dict))
+    return ""
 
 
 def card_text(c):
