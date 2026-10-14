@@ -84,7 +84,8 @@ Pro KAŽDOU stránku ze `subject.json`:
 3. Ohodnoť stránku pěti personami z `copy-rules.md` (konverzní copywriter, UX písař, cílový
    zákazník, skeptický zákazník, strážce značky) skóre 1–10 podle kotev, u každé citace místa.
 4. Vypiš každé faktické tvrzení (číslo, jméno, reference, záruka, výsledek, kontakt) s klíčem
-   z `facts.yaml`, o který se opírá; když v registru není, `fact_key: null`.
+   z `facts.yaml`, o který se opírá; když v registru není, `fact_key: null`. Věta, která vyjmenovává víc údajů
+   (název, adresa, telefon), má `fact_key` jako seznam všech klíčů.
 
 Odpověz JEN jedním objektem JSON podle tohoto tvaru (žádný text okolo):
 
@@ -248,8 +249,8 @@ def run(a):
     if os.path.exists(ans):
         os.remove(ans)   # only an answer written by this run counts
     model = os.environ.get("AID_UI_COPY_CODEX_MODEL", "")
-    env = {k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"}   # text never on the API key (PM 12. 10. 2026)
-    cmd = ["codex", "exec", "--skip-git-repo-check", "-s", "read-only", "-C", d, "-o", ans] + (["-m", model] if model else []) + ["-"]
+    env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}   # text never on the API key (PM 12. 10. 2026)
+    cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "-s", "read-only", "-C", d, "-o", ans] + (["-m", model] if model else []) + ["-"]
     started = now()
 
     def attempt(mode):
@@ -273,6 +274,7 @@ def run(a):
             os.remove(ans)
         rc = attempt("a"); tries = 2
     no_answer = not (os.path.isfile(ans) and os.path.getsize(ans) > 0)
+    book_codex(d, model)
     rec = {"provider": None if (rc or no_answer) else "codex", "model": model or "codex-default", "command": " ".join(cmd),
            "rc": rc, "started_at": started, "ended_at": now(), "codex_attempt": {"rc": rc, "no_answer": no_answer, "at": started, "tries": tries}}
     wj(runf, rec)
@@ -303,6 +305,26 @@ def run(a):
     return 0
 
 
+def book_codex(d, model):
+    """The review's Codex tokens (every attempt's turn.completed in codex.log) into the project's cost book."""
+    parts = os.path.normpath(d).split(os.sep)
+    if parts[-4:-1] != [".aid-ui", "copy", "runs"]:
+        return   # a bundle outside a project: nothing to book against
+    use = {"input": 0, "cached": 0, "output": 0}
+    for ln in open(os.path.join(d, "codex.log"), errors="replace"):
+        try:
+            e = json.loads(ln)
+        except ValueError:
+            continue
+        u = e.get("usage") if isinstance(e, dict) and e.get("type") == "turn.completed" else None
+        for k, src in (("input", "input_tokens"), ("cached", "cached_input_tokens"), ("output", "output_tokens")):
+            use[k] += int((u or {}).get(src) or 0)
+    if any(use.values()):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+        import aid_ui_costs
+        aid_ui_costs.tokens(os.sep.join(parts[:-4]) or os.sep, "codex", model or "default", use, "copy:review")
+
+
 def standin_claude(d, ans, why):
     """Run the review with an independent Claude Code (clean context, read-only tools, the bundle as cwd), inside
     the dispatch bracket copy-record demands. Writes <d>/standin-answer.json and copies it to answer.json."""
@@ -320,7 +342,7 @@ def standin_claude(d, ans, why):
     try:
         with open(os.path.join(d, "claude.log"), "w") as log:
             r = subprocess.run(cmd, input=prompt, cwd=d, capture_output=True, text=True,
-                               env={k: v for k, v in os.environ.items() if k != "OPENAI_API_KEY"},
+                               env={k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")},
                                timeout=int(os.environ.get("AID_UI_COPY_TIMEOUT", "1800")))
             log.write((r.stderr or "")[-4000:])
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
@@ -439,7 +461,9 @@ def page_verdict(page, ans, subj, keys):
     for c in ans.get("claims") or []:
         if not known(c.get("block")):
             bad.append(f"tvrzení odkazuje na blok, který stránka nemá: {c.get('block')}")
-        if not c.get("fact_key") or str(c.get("fact_key")) not in keys:
+        fk = c.get("fact_key")
+        fks = [str(x) for x in fk] if isinstance(fk, list) else ([str(fk)] if fk else [])
+        if not fks or any(k not in keys for k in fks):   # a list of data (name, address, phone) rests on every key it names
             bad.append(f"tvrzení bez faktu v registru: {c.get('text', '')[:120]}")
     lang = subj.get("lang", "")
     if not lang or not os.path.isfile(os.path.join(REF, f"copy-{lang}.md")):

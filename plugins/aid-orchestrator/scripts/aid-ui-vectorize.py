@@ -6,6 +6,8 @@ vtracer (binary mode, splines) traces the dark shape; the result is rewritten as
 viewBox 0 0 <size> <size> (default 256), the paths scaled into it with a 6 % margin, fill #111,
 no stroke, a <title>, nothing else (vtracer's own colours, transforms and metadata are dropped).
 A raster is a concept: this vector is what the card, the audit and the 16 px test use.
+Also measures the shape's mirror symmetry (left-right and top-bottom overlap with its mirror) into <out.svg>.json
+and a SYMMETRY line; under 0.92 the logo sheet wants the direction's stated asymmetry intent (P113a).
 Exit: 0, 1 unreadable input or no shape found, 2 usage.
 """
 import os, re, sys, tempfile
@@ -97,7 +99,7 @@ def main():
     ty = (size - (maxy - miny) * scale) / 2 - miny * scale
     body = "".join('    <path fill="#111" fill-rule="evenodd" transform="translate(%.2f %.2f)" d="%s"/>\n' % (tx0, ty0, d)
                    for d, tx0, ty0 in paths)
-    out = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" role="img" aria-labelledby="t">\n'
+    out = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d">\n'
            '  <title id="t">%s</title>\n  <!-- aid-ui-vectorize: vtracer binary/spline speckle=%d corner=%d length=%s from %s -->\n'
            '  <g transform="translate(%.2f %.2f) scale(%.5f)">\n%s  </g>\n</svg>\n'
            % (size, size, size, size, os.path.splitext(os.path.basename(dst))[0], opts["speckle"], opts["corner"], opts["length"],
@@ -105,6 +107,44 @@ def main():
     with open(dst, "w", encoding="utf-8") as f:
         f.write(out)
     print("%s: %d path(s), %d points, from %s" % (dst, len(paths), len(xs), src))
+    sym = symmetry(src)
+    if sym:
+        with open(dst + ".json", "w", encoding="utf-8") as f:
+            f.write('{"symmetry": {"lr": %.3f, "tb": %.3f, "best": %.3f, "axis": "%s"}}\n' % (sym["lr"], sym["tb"], sym["best"], sym["axis"]))
+        print("SYMMETRY lr=%.3f tb=%.3f best=%.3f (%s axis)%s" % (sym["lr"], sym["tb"], sym["best"], sym["axis"],
+              "" if sym["best"] >= SYMMETRY_MIN else " - under %.2f: the sheet needs the direction's asymmetry intent" % SYMMETRY_MIN))
+
+
+SYMMETRY_MIN = 0.92   # P113a (PM 13. 10. 2026, Coufal: a C whose ends and counter wobbled read as 'deformed')
+
+
+def symmetry(src):
+    """Mirror symmetry of the dark shape: overlap (intersection over union) with its left-right and its top-bottom
+    mirror. A mark that is meant to be asymmetric says why in the logo sheet; one that is not shows up here."""
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return None
+    im = Image.open(src).convert("RGBA")
+    bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
+    gray = Image.alpha_composite(bg, im).convert("L")
+    mask = gray.point(lambda v: 255 if v < 128 else 0)
+    box = mask.getbbox()
+    if not box:
+        return None
+    mask = mask.crop(box)
+    if max(mask.size) > 400:
+        k = 400 / max(mask.size)
+        mask = mask.resize((max(1, int(mask.size[0] * k)), max(1, int(mask.size[1] * k))))
+    data = list(mask.getdata())
+
+    def iou(other):
+        o = list(other.getdata())
+        inter = sum(1 for p, q in zip(data, o) if p > 127 and q > 127)
+        union = sum(1 for p, q in zip(data, o) if p > 127 or q > 127)
+        return inter / union if union else 0.0
+    lr, tb = iou(ImageOps.mirror(mask)), iou(ImageOps.flip(mask))
+    return {"lr": lr, "tb": tb, "best": max(lr, tb), "axis": "vertical" if lr >= tb else "horizontal"}
 
 
 def _is_background(d, w, h, tx0=0.0, ty0=0.0):

@@ -64,6 +64,28 @@ st() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page
   # H3: a mailto form fails; a script-sent form with a live status, a locked button and a clickable phone passes
   [ "$(st form_states index.html)" == fail ]; [ "$(st form_states o-nas/index.html)" == pass ]
   jq -e '[.rows[] | select(.check == "form_states" and .page == "index.html") | .detail] | all(contains("mailto"))' "$RES" >/dev/null
+  # FB-29 task test (P113a): one row; the price of a loaf is not on the planted site, an invented text is named,
+  # hours and booking are found within two steps at both widths
+  [ "$(jq '[.rows[] | select(.check == "task_test")] | length' "$RES")" -eq 1 ]; [ "$(st task_test index.html)" == fail ]
+  d="$(jq -r '.rows[] | select(.check == "task_test") | .detail' "$RES")"
+  for c in "price at 1440 px: not found" "price at 390 px: not found" '"Doprava zdarma" is not in the facts register' "hours 1440: index.html (0)" "booking 390: index.html (0)"; do
+    [[ "$d" == *"$c"* ]] || { echo "task_test misses $c: $d"; return 1; }; done
+  # FB-30 photo slots (P113a, PM 1A): o-nas keeps its slot through a test photo; the home page's slot is unlisted and carries text
+  [ "$(st photo_slots o-nas/index.html)" == pass ]; [ "$(st photo_slots index.html)" == fail ]
+  d="$(jq -r '[.rows[] | select(.check == "photo_slots" and .page == "index.html") | .detail][0]' "$RES")"
+  for c in "slot pekar is not in photos.yaml" ; do [[ "$d" == *"$c"* ]] || { echo "photo_slots misses $c: $d"; return 1; }; done
+  # FB-32: a heading that skips a level and a focus ring without contrast (the planted home page)
+  [ "$(st a11y_basics index.html)" == fail ]; [ "$(st a11y_basics o-nas/index.html)" == pass ]
+  d="$(jq -r '[.rows[] | select(.check == "a11y_basics" and .page == "index.html") | .detail][0]' "$RES")"
+  [[ "$d" == *"heading h4"* && "$d" == *"focus ring under 3:1"* && "$d" == *'"více" -> 2 places'* ]] || { echo "a11y_basics: $d"; return 1; }
+  # FB-33: an ungated :hover rule (the planted home page)
+  [ "$(st mobile_native index.html)" == fail ]; [ "$(st mobile_native o-nas/index.html)" == pass ]
+  jq -e '[.rows[] | select(.check == "mobile_native" and .page == "index.html") | .detail] | all(contains("a.lepi:hover"))' "$RES" >/dev/null
+  # FB-31: text glued to a column divider (the planted home page); o-nas has none
+  [ "$(st text_clearance index.html)" == fail ]; [ "$(st text_clearance o-nas/index.html)" == pass ]
+  jq -e '[.rows[] | select(.check == "text_clearance" and .page == "index.html") | .detail] | all(contains("Chleba i rohlíky"))' "$RES" >/dev/null
+  # P113a AC8: forms on the site but no receiver for the preview: form_delivery names it
+  [ "$(st form_delivery index.html)" == fail ]; jq -e '.rows[] | select(.check == "form_delivery") | .detail | contains("no .aid-ui/form.json")' "$RES" >/dev/null
   # P108: invented count, percentage, years and e-mail are named in facts_match
   d="$(jq -r '[.rows[] | select(.check == "facts_match" and .page == "index.html") | .detail][0]' "$RES")"
   for c in "200 klientům" "40 %" "15 let" "info@neexistuje.cz"; do [[ "$d" == *"$c"* ]] || { echo "facts_match misses $c: $d"; return 1; }; done
@@ -117,6 +139,10 @@ copy_reviewed() {
   sha="$(sha256sum "$PROJ/docs/seo/brief.md" | cut -d' ' -f1)"
   jq --arg t "docs/seo/brief.md@$sha" '.options.seo = true | .answers["q-seo"] = {kind: "seo_brief", decision: "approve", target: $t}' \
     "$PROJ/docs/design/brand-state.json" >"$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
+  # the customer tasks without the invented one (FB-29): the fixed site shows the 65 Kč loaf
+  printf -- '- {id: hours, task: "Kdy", expect: ["7:00 až 18:00"]}\n- {id: price, task: "Bochník", expect: ["Bochník", "65 Kč"]}\n- {id: booking, task: "Objednat", form: true}\n' > "$PROJ/docs/content/tasks.yaml"
+  # the preview's form receiver (AC8): o-nas sends its telephone to /api/zprava
+  echo '{"endpoint": "/api/zprava", "required": ["tel"], "honeypot": "website"}' > "$PROJ/.aid-ui/form.json"
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   measured
   copy_reviewed
@@ -128,6 +154,17 @@ copy_reviewed() {
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass")' "$RES" | head; return 1; }
   [ "$(jq '[.rows[] | select(.status != "pass")] | length' "$RES")" -eq 0 ]
+  # the real send went through and the test messages are gone again; the log names no value
+  jq -e '.rows[] | select(.check == "form_delivery") | .detail | startswith("delivered and removed again")' "$RES" >/dev/null
+  [ -z "$(ls -A "$PROJ/.aid-ui/inbox" 2>/dev/null)" ]
+  # the receiver down for the form (it posts to /api/zprava, the receiver waits elsewhere): nothing delivered, the row fails
+  echo '{"endpoint": "/api/jinde", "required": ["tel"], "honeypot": "website"}' > "$PROJ/.aid-ui/form.json"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"; [ "$status" -eq 3 ]
+  jq -e '.rows[] | select(.check == "form_delivery") | .status == "fail" and (.detail | contains("delivered nothing"))' "$RES" >/dev/null
+  # a broken receiver config is named
+  echo '{"endpoint": "/api/zprava", "required": "tel"}' > "$PROJ/.aid-ui/form.json"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '.rows[] | select(.check == "form_delivery") | .detail | contains("needs endpoint")' "$RES" >/dev/null
   jq -e '.gate.build_id' "$PROJ/docs/design/brand-state.json" >/dev/null
   # ai_search ran (not N/A) and its findings stay out of the seo row
   [ "$(jq '[.rows[] | select(.check == "ai_search")] | length' "$RES")" -gt 0 ]
@@ -251,6 +288,33 @@ copy_reviewed() {
   verify; [ "$(st safe_area index.html)" == pass ]
   echo '{"variant":{"type":"web"},"build":{"id":"x","fingerprints":{"index.html":"a","_site":"c"}}}' > "$T/state.json"
   verify; jq -e '.rows[] | select(.check == "safe_area") | .detail | startswith("N/A")' "$RES" >/dev/null
+}
+
+@test "FB-30 photo_slots: ratio, round shape, text, screen reader, icon, focus, a photo that moves the page; the right slot passes" {
+  mkdir -p "$T/out"
+  echo '{"viewports":[390,1440],"browsers":["chromium"],"checks":{"photo_slots":"x"}}' > "$T/ck.json"
+  echo '{"variant":{"type":"web"},"build":{"id":"x","fingerprints":{"index.html":"a","_site":"c"}}}' > "$T/state.json"
+  w='"where":"Úvod","what":"x","min_px":"1200x1200"'
+  echo "[{\"id\":\"a\",\"page\":\"index.html\",\"ratio\":\"4:5\",\"shape\":\"rect\",$w},{\"id\":\"b\",\"page\":\"index.html\",\"ratio\":\"1:1\",\"shape\":\"round\",$w},{\"id\":\"c\",\"page\":\"index.html\",\"ratio\":\"3:2\",\"shape\":\"rect\",$w},{\"id\":\"d\",\"page\":\"index.html\",\"ratio\":\"1:1\",\"shape\":\"rect\",$w}]" > "$T/photos.json"
+  cam='<svg data-aid-icon="camera" viewBox="0 0 24 24" width="40" height="40"><path d="M4 7h16v12H4z"/></svg>'
+  sed -i "s|</main>|<div data-aid-photo=\"a\" style=\"aspect-ratio:1/1;width:200px\">Foto lékaře</div><div data-aid-photo=\"b\" aria-hidden=\"true\" style=\"position:relative;aspect-ratio:1/1;width:120px\">$cam</div><div data-aid-photo=\"c\" aria-hidden=\"true\" style=\"width:300px;height:200px\"><a href=\"/\">x</a>$cam</div><div data-aid-photo=\"d\" aria-hidden=\"true\" style=\"width:150px\">$cam</div></main>|" "$SITE/index.html"
+  url="$(AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" | sed -n 's/^URL: //p')"
+  verify() { bash "$SC/aid-ui-tool.sh" verify --state "$T/state.json" --checks "$T/ck.json" --site "$SITE" \
+    --base "$url" --out "$T/out" --seo "$SC/aid-ui-seo-check.py" --photos "$T/photos.json" >/dev/null; }
+  verify; RES="$T/out/result.json"
+  d="$(jq -r '[.rows[] | select(.check == "photo_slots")][0].detail' "$RES")"
+  for c in "a: 200×200 is not 4:5" 'a: an empty slot needs aria-hidden' 'a: an empty slot carries text' 'a: an empty slot shows no camera icon' \
+           'b: the slot is not round' 'c: an empty slot is focusable' 'c: the photo does not cover the slot' 'd: 150×' ; do
+    [[ "$d" == *"$c"* ]] || { echo "missing: $c in $d"; return 1; }; done
+  # the right slots: exact ratio, round, aria-hidden, icon only, position relative; a photo put in moves nothing
+  cp "$FX/fixed/index.html" "$SITE/index.html"
+  sed -i "s|</main>|<div data-aid-photo=\"a\" aria-hidden=\"true\" style=\"position:relative;overflow:hidden;aspect-ratio:4/5;width:200px\">$cam</div><div data-aid-photo=\"b\" aria-hidden=\"true\" style=\"position:relative;overflow:hidden;aspect-ratio:1/1;width:120px;border-radius:50%\">$cam</div><div data-aid-photo=\"c\" aria-hidden=\"true\" style=\"position:relative;aspect-ratio:3/2;width:300px\">$cam</div><div data-aid-photo=\"d\" aria-hidden=\"true\" style=\"position:relative;aspect-ratio:1/1;width:150px\">$cam</div></main>|" "$SITE/index.html"
+  # a fixed progress bar and an element that moves by itself are not the photo's doing
+  sed -i 's|</main>|<div id="pb" style="position:fixed;top:0;left:0;height:3px;width:10%;background:#1a1a1a"></div><p id="mv" style="position:relative">pohyb</p><script>setInterval(function(){pb.style.width=(Math.random()*100)+"%";mv.style.left=(Math.random()*20)+"px"},40)</script></main>|' "$SITE/index.html"
+  verify; [ "$(st photo_slots index.html)" == pass ] || { jq -c '.rows[] | select(.check == "photo_slots")' "$RES"; return 1; }
+  # no photos register but a slot on the page: fail; no slot and no register: N/A
+  bash "$SC/aid-ui-tool.sh" verify --state "$T/state.json" --checks "$T/ck.json" --site "$SITE" --base "$url" --out "$T/out" --seo "$SC/aid-ui-seo-check.py" >/dev/null
+  jq -e '[.rows[] | select(.check == "photo_slots")][0] | .status == "fail" and (.detail | contains("no docs/content/photos.yaml"))' "$RES" >/dev/null
 }
 
 @test "P108: copy_review: not_covered without a record, pass with one, fail after a text, facts or context change or a failed review" {
@@ -512,4 +576,20 @@ PY
   jq '.refs = [{"id":"fx","url":"http://127.0.0.1:39931/index.html","picked":true}]' "$PROJ/docs/design/brand-state.json" > "$PROJ/s.t" && mv "$PROJ/s.t" "$PROJ/docs/design/brand-state.json"
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   jq -e '[.rows[] | select(.check == "motion_fidelity")] | all(.[]; .status == "fail" and (.detail | contains("spin")))' "$RES" >/dev/null || { jq -c '.rows[] | select(.check == "motion_fidelity")' "$RES"; return 1; }
+}
+
+@test "first_paint_visible: the first screen's main image faded in after a delay fails; shown at once it passes (tech critic Coufal 13. 10.)" {
+  mkdir -p "$T/out"
+  echo '{"viewports":[1440],"browsers":["chromium"],"checks":{"first_paint_visible":"x"}}' > "$T/ck.json"
+  echo '{"variant":{"type":"web"},"build":{"id":"x","fingerprints":{"index.html":"a","_site":"c"}}}' > "$T/state.json"
+  cp "$FX/fixed/index.html" "$SITE/index.html"
+  img='<img id="hero" alt="Pec" width="1200" height="500" style="display:block;width:100%;height:500px" src="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221200%22 height=%22500%22%3E%3Crect width=%221200%22 height=%22500%22 fill=%22%23963%22/%3E%3C/svg%3E">'
+  sed -i "s|<main>|<main><style>@keyframes up{from{opacity:0}to{opacity:1}}#hero{animation:up 1s .8s both}</style>$img|" "$SITE/index.html"
+  url="$(AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" | sed -n 's/^URL: //p')"
+  verify() { bash "$SC/aid-ui-tool.sh" verify --state "$T/state.json" --checks "$T/ck.json" --site "$SITE" --base "$url" --out "$T/out" --seo "$SC/aid-ui-seo-check.py" >/dev/null; }
+  verify; RES="$T/out/result.json"
+  [ "$(st first_paint_visible index.html)" == fail ] || { jq -c '.rows[]' "$RES"; return 1; }
+  jq -e '[.rows[] | select(.check == "first_paint_visible" and .page == "index.html") | .detail][0] | contains("main image") and contains("delayed fade")' "$RES" >/dev/null
+  sed -i 's|#hero{animation:up 1s .8s both}|#hero{animation:none}|' "$SITE/index.html"
+  verify; [ "$(st first_paint_visible index.html)" == pass ] || { jq -c '.rows[] | select(.check == "first_paint_visible")' "$RES"; return 1; }
 }

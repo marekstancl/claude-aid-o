@@ -234,8 +234,37 @@ async function inPage(page) {
     for (let i = 0; i < boxes.length && o.overlaps.length < 5; i++) for (let j = i + 1; j < boxes.length; j++) {
       const a = boxes[i], b = boxes[j];
       if (a.e.contains(b.e) || b.e.contains(a.e)) continue;
+      // inside one photo slot (FB-30) the icon over the brand mark is the slot's decoration, not an overlap
+      const sa = a.e.closest('[data-aid-photo]'); if (sa && sa === b.e.closest('[data-aid-photo]')) continue;
       const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left), h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
       if (w > 2 && h > 2) { o.overlaps.push(`${name(a.e)} x ${name(b.e)}`); if (o.overlaps.length >= 5) break; }
+    }
+    // text_clearance (FB-31, PM 13. 10. 2026 - Coufal: answers glued to the column dividers): a vertical divider line
+    // (a left or right border of a block that is not boxed on all four sides, not a control) and a text line beside
+    // it, sharing at least half the text's height, keep at least 12 px between them
+    const ctl = /^(INPUT|BUTTON|SELECT|TEXTAREA|A|IMG|SVG)$/i;
+    const lines = [];
+    for (const e of document.querySelectorAll('body *')) {
+      if (ctl.test(e.tagName) || !vis(e)) continue;
+      const s = getComputedStyle(e), r = e.getBoundingClientRect();
+      const side = k => parseFloat(s['border' + k + 'Width']) >= 1 && s['border' + k + 'Style'] !== 'none' && !/rgba\(.*,\s*0\)$|transparent/.test(s['border' + k + 'Color']);
+      if (side('Top') && side('Bottom') && side('Left') && side('Right')) continue;   // a boxed card or field: its padding is another matter
+      if (r.height < 24) continue;
+      if (side('Left')) lines.push({ x: r.left, top: r.top, bottom: r.bottom, e });
+      if (side('Right')) lines.push({ x: r.right, top: r.top, bottom: r.bottom, e });
+    }
+    o.glued = [];
+    if (lines.length) {
+      for (const e of document.querySelectorAll('body *')) {
+        if (!own(e) || !vis(e) || o.glued.length >= 5) continue;
+        const rg = document.createRange(); rg.selectNodeContents(e);
+        for (const t of rg.getClientRects()) {
+          if (t.width < 2 || t.height < 2) continue;
+          const l = lines.find(L => Math.min(L.bottom, t.bottom) - Math.max(L.top, t.top) >= t.height / 2
+            && ((t.left >= L.x - 1 && t.left - L.x < 12) || (t.right <= L.x + 1 && L.x - t.right < 12)));
+          if (l) { o.glued.push(`"${(e.textContent || '').trim().slice(0, 30)}" ${Math.round(Math.min(Math.abs(t.left - l.x), Math.abs(l.x - t.right)))} px from the line of ${l.e.tagName.toLowerCase()}${l.e.className && typeof l.e.className === 'string' ? '.' + l.e.className.trim().split(/\s+/)[0] : ''}`); break; }
+        }
+      }
     }
     // brand_consistency: the first family of every text element is a webfont the site declares
     const declared = new Set([...document.fonts].map(f => f.family.replace(/["']/g, '').toLowerCase()));
@@ -307,6 +336,7 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
     res.first_paint_visible = applies('first_paint_visible') ? await firstPaintVisible(ctx.browser(), url, vp)
       : NA('runs at the viewport and browser of its row only');
     res.form_states = applies('form_states') ? await formStates(ctx.browser(), url, vp) : NA('runs at the viewport and browser of its row only');
+    res.photo_slots = applies('photo_slots') ? await photoSlots(ctx.browser(), url, vp) : NA('runs at the viewport and browser of its row only');
   }
   const o = await inPage(page);
   res.no_overflow = o.overflow ? ['fail', 'the page scrolls sideways'] : ['pass', ''];
@@ -346,6 +376,7 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
     .concat(imgs.filter(i => i.len > 200 * 1024).map(i => `${i.url.replace(base, '/')} is ${Math.round(i.len / 1024)} kB`));
   res.image_weight = heavy.length ? ['fail', heavy.join(', ')] : ['pass', ''];
   res.no_overlap = o.overlaps.length ? ['fail', `overlaps: ${o.overlaps.join(' | ')}`] : ['pass', ''];
+  res.text_clearance = o.glued.length ? ['fail', `text closer than 12 px to a divider line: ${o.glued.join(' | ')}`] : ['pass', ''];
   res.brand_consistency = o.undeclaredFonts.length ? ['fail', `fonts not from the site's own @font-face: ${o.undeclaredFonts.join(', ')}`] : ['pass', `fonts: ${o.fontFamilies.join(', ')}`];
   res.header = o.header; res.footer = o.footer;
   const heavyPage = [];
@@ -517,6 +548,94 @@ async function moreRows(page, url, requested, applies) {
       : invisible.length ? ['fail', `focus not visible (no change from the resting look) on: ${invisible.slice(0, 5).join(', ')}`]
       : ['pass', `${seen.size} controls, focus visible`];
   }
+  // a11y_basics (FB-32, PM 13. 10. 2026 - what the Coufal critic found by hand and the gate did not): a page with a
+  // navigation starts with a skip link to an existing target; headings never skip a level (h1 > h3 without an h2);
+  // the focus ring has at least 3:1 against what is behind the control (outline colour, or the box-shadow ring).
+  if (!applies('a11y_basics')) res.a11y_basics = NA('runs at the viewport and browser of its row only');
+  else {
+    const a = await page.evaluate(() => {
+      const why = [];
+      const lum = c => { const m = String(c).match(/[\d.]+/g); if (!m) return null; const [r, g, b] = m.slice(0, 3).map(v => { v = +v / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+      const ratio = (x, y) => { const p = lum(x), q = lum(y); if (p === null || q === null) return 21; return (Math.max(p, q) + 0.05) / (Math.min(p, q) + 0.05); };
+      const opaque = c => { const m = String(c).match(/[\d.]+/g); return m && (m.length < 4 || +m[3] > 0.5); };
+      const bgOf = e => { for (let x = e.parentElement; x; x = x.parentElement) { const c = getComputedStyle(x).backgroundColor; if (opaque(c)) return c; } return 'rgb(255, 255, 255)'; };
+      // skip link: with a nav of 3+ links, the first focusable element is an in-page link whose target exists
+      const nav = document.querySelector('nav'); const first = [...document.querySelectorAll('a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])')][0];
+      if (nav && nav.querySelectorAll('a[href]').length >= 3) {
+        const h = first && first.tagName === 'A' ? first.getAttribute('href') || '' : '';
+        if (!h.startsWith('#') || !document.getElementById(h.slice(1))) why.push('no skip link to the content as the first focusable element');
+      }
+      // link purpose (WCAG 2.4.4, Coufal round 6: four "o službe" links to four services): one visible link text
+      // never leads to two different places (an aria-label that tells them apart counts as the name)
+      const byName = new Map();
+      for (const a of document.querySelectorAll('a[href]')) {
+        const r = a.getBoundingClientRect(); if (!r.width) continue;
+        const name = (a.getAttribute('aria-label') || a.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        if (!name) continue;
+        const to = new URL(a.href, location.href); to.hash = to.hash || '';
+        (byName.get(name) || byName.set(name, new Set()).get(name)).add(to.pathname + to.hash);
+      }
+      const amb = [...byName].filter(([, t]) => t.size > 1).map(([n, t]) => `"${n.slice(0, 25)}" -> ${t.size} places`);
+      if (amb.length) why.push(`the same link text leads to different places: ${amb.slice(0, 3).join(', ')}`);
+      // heading order
+      let prev = 0;
+      for (const hd of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) { const l = +hd.tagName[1]; if (prev && l > prev + 1) { why.push(`heading h${l} "${hd.textContent.trim().slice(0, 30)}" follows h${prev}`); break; } prev = l; }
+      return why;
+    });
+    // the focus ring of each control (only the first 40) against its background
+    const low = await page.evaluate(() => {
+      const lum = c => { const m = String(c).match(/[\d.]+/g); if (!m) return null; const [r, g, b] = m.slice(0, 3).map(v => { v = +v / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+      const ratio = (x, y) => { const p = lum(x), q = lum(y); if (p === null || q === null) return 21; return (Math.max(p, q) + 0.05) / (Math.min(p, q) + 0.05); };
+      const opaque = c => { const m = String(c).match(/[\d.]+/g); return m && (m.length < 4 || +m[3] > 0.5); };
+      const bgOf = e => { for (let x = e.parentElement; x; x = x.parentElement) { const c = getComputedStyle(x).backgroundColor; if (opaque(c)) return c; } return 'rgb(255, 255, 255)'; };
+      const out = [];
+      for (const e of [...document.querySelectorAll('a[href], button, input, select, textarea, summary')].slice(0, 40)) {
+        e.focus({ focusVisible: true }); if (document.activeElement !== e) continue;
+        const s = getComputedStyle(e);
+        if (s.outlineStyle === 'none' || parseFloat(s.outlineWidth) < 1) continue;   // a ring by other means: keyboard row's business
+        const ring = s.boxShadow !== 'none' ? (s.boxShadow.match(/rgba?\([^)]*\)/) || [])[0] : null;
+        const best = Math.max(ratio(s.outlineColor, bgOf(e)), ring ? ratio(ring, bgOf(e)) : 0);
+        if (best < 3) out.push(`${e.tagName.toLowerCase()} "${(e.innerText || e.getAttribute('aria-label') || '').trim().slice(0, 20)}" ${best.toFixed(1)}:1`);
+      }
+      document.activeElement?.blur();
+      return out;
+    });
+    if (low.length) a.push(`focus ring under 3:1 on ${low.slice(0, 3).join(', ')}`);
+    // reflow (WCAG 1.4.10): at 320 CSS px - 400 % zoom of a 1280 px window - nothing scrolls sideways
+    const rc = await page.context().browser().newContext({ viewport: { width: 320, height: 640 } });
+    try {
+      const rp = await rc.newPage(); await loaded(rp, page.url());
+      const wide = await rp.evaluate(() => { const vw = document.documentElement.clientWidth;
+        if (document.documentElement.scrollWidth <= vw + 1) return null;
+        const e = [...document.querySelectorAll('body *')].find(x => { const b = x.getBoundingClientRect(); return b.width && b.right > vw + 1; });
+        return e ? `${e.tagName.toLowerCase()}${e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/)[0] : ''} "${(e.textContent || '').trim().slice(0, 25)}"` : 'the page'; });
+      if (wide) a.push(`at 320 px (400 % zoom) the page scrolls sideways: ${wide}`);
+    } finally { await rc.close(); }
+    res.a11y_basics = a.length ? ['fail', a.join('; ')] : ['pass', 'skip link, heading order, focus ring contrast, reflow at 320 px'];
+  }
+  // mobile_native (FB-33, adopted emil-skills/mobile-native, PM 13. 10. 2026): hover styles only where a mouse
+  // hovers (a :hover rule inside @media (hover: hover)), zoom never disabled, form fields at least 16 px (else iOS
+  // zooms into them)
+  if (!applies('mobile_native')) res.mobile_native = NA('runs at the viewport and browser of its row only');
+  else {
+    const m = await page.evaluate(() => {
+      const why = [], loose = [];
+      const walk = (rules, gated) => { for (const r of rules) {
+        if (r instanceof CSSMediaRule) walk(r.cssRules, gated || /hover\s*:\s*hover/.test(r.conditionText || r.media.mediaText));
+        else if (r.cssRules && !(r instanceof CSSStyleRule)) walk(r.cssRules, gated);
+        else if (r instanceof CSSStyleRule && /:hover/.test(r.selectorText) && !gated) loose.push(r.selectorText);
+      } };
+      for (const sh of document.styleSheets) { try { walk(sh.cssRules, false); } catch { /* a foreign sheet: not ours to judge */ } }
+      if (loose.length) why.push(`${loose.length} :hover rule(s) outside @media (hover: hover), e.g. ${loose.slice(0, 3).join(' | ')}`);
+      const vp = document.querySelector('meta[name="viewport"]')?.content || '';
+      if (/user-scalable\s*=\s*(no|0)|maximum-scale\s*=\s*1(\.0)?\b/.test(vp)) why.push('zoom is disabled in the viewport meta');
+      const small = [...document.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea, select')]
+        .filter(e => e.getBoundingClientRect().width && parseFloat(getComputedStyle(e).fontSize) < 16).map(e => e.name || e.tagName.toLowerCase());
+      if (small.length) why.push(`form field text under 16 px (iOS zooms in): ${small.slice(0, 3).join(', ')}`);
+      return why;
+    });
+    res.mobile_native = m.length ? ['fail', m.join('; ')] : ['pass', 'hover gated, zoom allowed, fields 16 px'];
+  }
   if (!applies('reduced_motion')) res.reduced_motion = NA('runs at the viewport and browser of its row only');
   else {
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -595,6 +714,26 @@ async function firstPaintVisible(browser, url, viewport) {
   try {
     const p = await ctx.newPage();
     await loaded(p, url);
+    // the first screen's main image shows at once: no opacity start, no delayed fade (LCP; tech critic Coufal 13. 10.)
+    const hero = await p.evaluate(() => {
+      const vh = innerHeight, vw = innerWidth;
+      const imgs = [...document.querySelectorAll('img, video, picture > img')].map(e => ({ e, r: e.getBoundingClientRect() }))
+        .filter(x => x.r.top < vh && x.r.bottom > 0 && x.r.width > 0)
+        .map(x => ({ ...x, area: Math.max(0, Math.min(x.r.right, vw) - Math.max(x.r.left, 0)) * Math.max(0, Math.min(x.r.bottom, vh) - Math.max(x.r.top, 0)) }))
+        .sort((a, b) => b.area - a.area);
+      const m = imgs[0];
+      if (!m || m.area < vw * vh * 0.08) return null;   // no main image in the first screen
+      let op = 1, delayed = [];
+      for (let n = m.e; n && n.nodeType === 1; n = n.parentElement) {
+        op *= parseFloat(getComputedStyle(n).opacity) || 0;
+        for (const an of n.getAnimations ? n.getAnimations() : []) {
+          const kf = an.effect && an.effect.getKeyframes ? an.effect.getKeyframes() : [];
+          const d = an.effect && an.effect.getTiming ? an.effect.getTiming().delay : 0;
+          if (d > 0 && kf.some(k => k.opacity !== undefined && parseFloat(k.opacity) < 0.9)) delayed.push((an.animationName || 'animation') + ' ' + d + 'ms');
+        }
+      }
+      return { name: (m.e.getAttribute('src') || m.e.tagName).split('/').pop().slice(0, 40), op: Math.round(op * 100) / 100, delayed };
+    });
     let a = await p.evaluate(READABLE_JS, 'first');
     for (let t = 400; t < 1500 && (a.h1 === false || a.first === false || a.fadedInView.length); t += 250) { await p.waitForTimeout(250); a = await p.evaluate(READABLE_JS, 'first'); }
     await p.emulateMedia({ reducedMotion: 'reduce' });
@@ -607,6 +746,7 @@ async function firstPaintVisible(browser, url, viewport) {
     else if (!a.first) why.push(`first content block not readable in the first screen: ${a.firstName}`);
     if (a.fadedInView.length) why.push(`${a.fadedInView.length} element(s) in the first screen faded or hidden before any scroll: ${a.fadedInView.slice(0, 3).join(', ')}`);
     if (b.length) why.push(`under prefers-reduced-motion ${b.length} element(s) stay faded or hidden: ${b.slice(0, 3).join(', ')}`);
+    if (hero && (hero.op < 0.9 || hero.delayed.length)) why.push(`the first screen's main image ${hero.name} is not shown at once (opacity ${hero.op}${hero.delayed.length ? '; delayed fade ' + hero.delayed.join(', ') : ''}): it delays the largest paint`);
     return why.length ? ['fail', why.join('; ')] : ['pass', 'h1 and first block readable at first paint, nothing faded under reduced motion'];
   } catch (e) { return ['fail', `first-paint load failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
 }
@@ -671,13 +811,275 @@ async function formStates(browser, url, viewport) {
   } catch (e) { return ['fail', `form check failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
 }
 
+// form_delivery (P113a step 6, AC8): the site's form, sent for real through the preview's receiver
+// (.aid-ui/form.json; aid-ui-preview.py): filled the way a visitor fills it at 390 px and sent with its own button,
+// it shows a message and the message lands in .aid-ui/inbox (the test message is removed again); the receiver
+// refuses an incomplete message (422), drops a filled spam trap without delivering, delivers a repeated message
+// once; the preview's log holds none of the sent values. Through the real form too: a double click delivers once, a
+// filled spam trap delivers nothing. No receiver (no form.json, or the endpoint down) = the form delivers nothing and
+// the row fails. No form on the site = N/A. The client's domain receiver is checked after deployment (not here).
+async function formDelivery(browser) {
+  const withForm = [];
+  for (const p of pages) { try { if (/<form[\s>]/i.test(fs.readFileSync(path.join(site, p), 'utf8'))) withForm.push(p); } catch { /* not a file */ } }
+  if (!withForm.length) return NA('no form on the site');
+  if (!project) return ['not_covered', 'no --project'];
+  let cfg; try { cfg = readJson(path.join(project, '.aid-ui/form.json')); } catch { return ['fail', 'no .aid-ui/form.json: the preview has no receiver (endpoint, required, honeypot)'] }
+  const okName = x => typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x);
+  if (!(typeof cfg?.endpoint === 'string' && cfg.endpoint.startsWith('/') && Array.isArray(cfg.required) && cfg.required.length && cfg.required.every(okName)
+        && okName(cfg.honeypot) && !(cfg.max_field !== undefined && !(Number.isInteger(cfg.max_field) && cfg.max_field > 0))))
+    return ['fail', '.aid-ui/form.json needs endpoint "/…", required [field names], honeypot (a field name) and max_field > 0 if given'];
+  const box = path.join(project, '.aid-ui/inbox'), inbox = () => { try { return fs.readdirSync(box); } catch { return []; } };
+  const token = `AIDTEST${Date.now().toString(36)}`, mail = `${token.toLowerCase()}@example.invalid`, tel = '+421900000999';
+  const why = [], ctx = await browser.newContext({ viewport: { width: 390, height: HEIGHT[390] } });
+  try {
+    const p = await ctx.newPage();
+    await loaded(p, urlOf(withForm[0]));
+    const before = inbox();
+    const form = p.locator('form').first();
+    const live = () => p.evaluate(() => [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].map(e => (e.innerText || '').trim()).filter(Boolean).join(' | '));
+    const shown = await live();   // what the live regions say before the send: the success message must be new
+    const fill = async word => {   // every visible field as a person fills it (required boxes, radios, selects too)
+      for (const el of await form.locator('input, textarea, select').all()) {
+        const t = ((await el.getAttribute('type')) || '').toLowerCase(), name = await el.getAttribute('name'), tag = await el.evaluate(e => e.tagName);
+        if (['hidden', 'submit', 'button', 'reset', 'file'].includes(t) || (cfg.honeypot && name === cfg.honeypot) || !(await el.isVisible())) continue;
+        if (t === 'checkbox' || t === 'radio') { if (await el.evaluate(e => e.required)) await el.check(); continue; }
+        if (tag === 'SELECT') { const v = await el.evaluate(e => [...e.options].map(o => o.value).find(x => x)); if (v) await el.selectOption(v); continue; }
+        await el.fill(t === 'email' ? mail : t === 'tel' ? tel : t === 'date' ? '2030-01-15' : t === 'number' ? '1' : `${token} ${word}`);
+      }
+    };
+    await fill('test');
+    await form.locator('button:not([type=button]), input[type=submit]').first().dblclick();   // a double click: one message
+    await p.waitForFunction(old => { const t = [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')].map(e => (e.innerText || '').trim()).filter(Boolean).join(' | ');
+      return t && t !== old && !/odosiel|odesíl|sending/i.test(t); }, shown, { timeout: 12000 }).catch(() => {});
+    const msg = await live();
+    const fresh = inbox().filter(x => !before.includes(x));
+    const mine = fresh.filter(x => { const m = fs.readFileSync(path.join(box, x), 'utf8'); return [token, mail, tel].some(v => m.includes(v)); });
+    if (!mine.length) why.push(`a filled form sent with its button delivered nothing (message on the page: "${msg.slice(0, 80)}")`);
+    else if (mine.length > 1) why.push(`a double click delivered ${mine.length} messages`);
+    else if (!msg || msg === shown) why.push('delivered, but the page shows no new message');
+    // the spam trap through the real form: filled by a bot (a hidden field), the message is not delivered
+    if (cfg.honeypot) {
+      await loaded(p, urlOf(withForm[0]));
+      const n0 = inbox().length;
+      await fill('bot');   // as complete as the real send, so native validation cannot be what stopped it
+      const trap = await p.evaluate(n => { const f = document.forms[0], e = f && f.elements[n]; if (!e) return false; e.value = 'http://spam.example'; return true; }, cfg.honeypot);
+      if (!trap) why.push(`the form has no spam trap field "${cfg.honeypot}"`);
+      else {
+        const posts = [];   // the send must really happen: one POST to the endpoint answered 200, and nothing delivered
+        const onResp = r => { if (r.request().method() === 'POST' && new URL(r.url()).pathname === cfg.endpoint) posts.push(r.status()); };
+        p.on('response', onResp);
+        await form.locator('button:not([type=button]), input[type=submit]').first().click(); await p.waitForTimeout(1500);
+        p.off('response', onResp);
+        if (posts.length !== 1 || posts[0] !== 200) why.push(`the spam-trap send made ${posts.length} POST(s) to ${cfg.endpoint} (${posts.join(',') || 'none'}), not one answered 200`);
+        else if (inbox().length !== n0) why.push('a form with its spam trap filled was delivered');
+      }
+    }
+    for (const x of mine) fs.rmSync(path.join(box, x), { force: true });   // the test message is not the client's
+    // the receiver itself: an incomplete message, a filled spam trap, the same message twice
+    const send = body => p.evaluate(async ({ ep, body }) => { const r = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: r.status, json: await r.json().catch(() => ({})) }; }, { ep: cfg.endpoint, body });
+    const full = Object.fromEntries((cfg.required || []).map(k => [k, `${token} ${k}`]));
+    const empty = await send({});
+    if ((cfg.required || []).length && empty.status !== 422) why.push(`an empty message got ${empty.status}, not 422`);
+    if (cfg.honeypot) {
+      const n0 = inbox().length, spam = await send({ ...full, [cfg.honeypot]: 'http://spam.example' });
+      if (spam.status !== 200 || inbox().length !== n0) why.push('a filled spam trap was delivered or refused visibly');
+    } else why.push('no honeypot field in .aid-ui/form.json (spam trap)');
+    const n1 = inbox().length, a = await send({ ...full, note: token + 'dup' }), b = await send({ ...full, note: token + 'dup' });
+    const dup = inbox().filter(x => fs.readFileSync(path.join(box, x), 'utf8').includes(token + 'dup'));
+    if (a.status !== 200 || b.status !== 200 || dup.length !== 1 || !b.json.duplicate) why.push(`the same message twice: ${a.status}/${b.status}, delivered ${dup.length}×`);
+    for (const x of inbox().filter(x => fs.readFileSync(path.join(box, x), 'utf8').includes(token))) fs.rmSync(path.join(box, x), { force: true });
+    if (opt['preview-log']) {
+      const logText = fs.readFileSync(opt['preview-log'], 'utf8');
+      if ([token, mail, tel].some(v => logText.includes(v))) why.push('the preview log holds a sent value (personal data in the log)');
+    } else why.push('no --preview-log: the log was not checked for personal data');
+    return why.length ? ['fail', why.join('; ')] : ['pass', `delivered and removed again; page said "${msg.slice(0, 60)}"; empty 422, spam dropped, a repeat delivered once, log clean`];
+  } catch (e) { return ['fail', `form delivery check failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
+}
+
+// photo_slots (P113a, FB-30, PM 1A 12. 10. 2026): a photo the client still owes has a slot of its exact shape and
+// ratio (docs/content/photos.yaml: {id, page, where, what, shape rect|round, ratio "w:h", min_px "WxH"}),
+// marked data-aid-photo="<id>". Empty: aria-hidden="true", a camera icon (svg), no text, nothing focusable.
+// Filled: <img> with alt (unless the slot stays aria-hidden), object-fit cover. A test photo of another shape
+// put into each empty slot the standard way (absolutely over the slot, cover) must keep the slot's size and
+// the page's height, and cover the slot exactly - the photo is only put in, nothing is redesigned.
+const PHOTO_TOL = 0.02;
+async function photoSlots(browser, url, viewport) {
+  const specs = opt.photos ? readJson(opt.photos) : null;
+  const key = keyOfUrl(new URL(url).pathname.slice(new URL(base).pathname.length - 1));
+  const ctx = await browser.newContext({ viewport });
+  try {
+    const p = await ctx.newPage();
+    await loaded(p, url);
+    const slots = await p.evaluate(() => [...document.querySelectorAll('[data-aid-photo]')].map(e => {
+      const r = e.getBoundingClientRect(), s = getComputedStyle(e), img = e.querySelector('img');
+      const FOC = 'a[href],button,input,select,textarea,iframe,audio[controls],video[controls],[contenteditable]:not([contenteditable="false"]),[tabindex]:not([tabindex="-1"])';
+      return { id: e.dataset.aidPhoto, w: r.width, h: r.height, radius: s.borderTopLeftRadius, hidden: e.getAttribute('aria-hidden') === 'true',
+        text: (e.innerText || '').trim(), focusable: e.matches(FOC) || !!e.querySelector(FOC), svg: !!e.querySelector('svg[data-aid-icon="camera"]'),
+        img: img ? { alt: (img.getAttribute('alt') || '').trim(), fit: getComputedStyle(img).objectFit, hidden: !!img.closest('[aria-hidden="true"]') } : null };
+    }));
+    const mine = Array.isArray(specs) ? specs.filter(x => x && x.page === key) : [];
+    const incomplete = mine.filter(x => !['id', 'where', 'what', 'shape', 'ratio', 'min_px'].every(k => String(x[k] || '').trim()) || !/^\d+x\d+$/.test(String(x.min_px)));
+    if (!slots.length && !mine.length) return NA('no photo on this page');
+    if (!Array.isArray(specs)) return ['fail', `${slots.length} photo slot(s) but no docs/content/photos.yaml`];
+    const why = incomplete.map(x => `photos.yaml ${x.id || '?'}: needs id, where, what, shape, ratio and min_px as WxH`);
+    for (const x of mine) if (!slots.some(y => y.id === x.id)) why.push(`photo ${x.id} (${x.where || ''}) has no slot on the page`);
+    for (const x of slots) {
+      const sp = mine.find(y => y.id === x.id);
+      if (!sp) { why.push(`slot ${x.id} is not in photos.yaml for ${key}`); continue; }
+      const [a, b] = String(sp.ratio || '').split(':').map(Number);
+      if (!(a > 0 && b > 0)) { why.push(`${x.id}: ratio "${sp.ratio}" is not w:h`); continue; }
+      if (!(x.w > 0 && x.h > 0)) { why.push(`${x.id}: the slot has no size`); continue; }
+      if (Math.abs(x.w / x.h - a / b) > (a / b) * PHOTO_TOL) why.push(`${x.id}: ${Math.round(x.w)}×${Math.round(x.h)} is not ${sp.ratio}`);
+      const rad = x.radius.endsWith('%') ? parseFloat(x.radius) * Math.min(x.w, x.h) / 100 : parseFloat(x.radius) || 0;
+      if (!['rect', 'round'].includes(sp.shape)) why.push(`${x.id}: shape "${sp.shape}" is not rect or round`);
+      else if (sp.shape === 'round' && rad < Math.min(x.w, x.h) / 2 - 1) why.push(`${x.id}: the slot is not round`);
+      else if (sp.shape === 'rect' && rad >= Math.min(x.w, x.h) / 4) why.push(`${x.id}: a rectangular photo's slot is rounded like a circle`);
+      if (!x.img && sp.src) why.push(`${x.id}: the client chose a photo (${sp.src}) but the slot is still empty`);
+      if (!x.img) {
+        if (!x.hidden) why.push(`${x.id}: an empty slot needs aria-hidden="true"`);
+        if (x.text) why.push(`${x.id}: an empty slot carries text ("${x.text.slice(0, 30)}")`);
+        if (x.focusable) why.push(`${x.id}: an empty slot is focusable`);
+        if (!x.svg) why.push(`${x.id}: an empty slot shows no camera icon (svg data-aid-icon="camera")`);
+      } else {
+        if (!x.img.alt) why.push(`${x.id}: the photo has no alt text`);
+        if (x.hidden || x.img.hidden) why.push(`${x.id}: the delivered photo is hidden from screen readers (aria-hidden)`);
+        if (x.img.fit !== 'cover') why.push(`${x.id}: the photo is not object-fit: cover`);
+      }
+    }
+    const swap = await p.evaluate(async () => {
+      const height = () => document.documentElement.scrollHeight, before = height(), moved = [];
+      // every element outside the slots: where it is before the photos go in (a shift of any of them is a layout shift)
+      // fixed panels (a scroll progress bar) and anything that moves on its own (motion still running) are left out:
+      // the baseline is taken twice, and an element that moved between the two is not the photo's doing
+      const at = e => { const b = e.getBoundingClientRect(); return [b.left + scrollX, b.top + scrollY, b.width, b.height]; };
+      const differs = (a, b) => a.some((v, k) => Math.abs(v - b[k]) > 1);
+      let others = [...document.body.querySelectorAll('*')].filter(e => !e.closest('[data-aid-photo]')
+        && ![e, ...(function* up(x) { while ((x = x.parentElement)) yield x; })(e)].some(x => ['fixed', 'sticky'].includes(getComputedStyle(x).position))).slice(0, 2000);
+      const p0 = others.map(at);
+      await new Promise(r => setTimeout(r, 300));
+      const keep = others.map((e, i) => !differs(at(e), p0[i]));
+      others = others.filter((e, i) => keep[i]);
+      const pos = others.map(at);
+      const c = document.createElement('canvas'); c.width = 300; c.height = 97;
+      for (const e of document.querySelectorAll('[data-aid-photo]')) {
+        if (e.querySelector('img')) continue;
+        const r0 = e.getBoundingClientRect();
+        const img = new Image(); img.alt = ''; img.src = c.toDataURL();
+        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
+        e.replaceChildren(img); await img.decode().catch(() => {}); await new Promise(r => requestAnimationFrame(r));
+        const r1 = e.getBoundingClientRect(), ri = img.getBoundingClientRect();
+        if (Math.abs(r1.width - r0.width) > 1 || Math.abs(r1.height - r0.height) > 1) moved.push(`${e.dataset.aidPhoto}: the slot changes ${Math.round(r0.width)}×${Math.round(r0.height)} -> ${Math.round(r1.width)}×${Math.round(r1.height)}`);
+        else if (Math.abs(ri.width - r1.width) > 1 || Math.abs(ri.height - r1.height) > 1 || Math.abs(ri.top - r1.top) > 1 || Math.abs(ri.left - r1.left) > 1)
+          moved.push(`${e.dataset.aidPhoto}: the photo does not cover the slot (the slot needs position: relative)`);
+        else if (getComputedStyle(e).overflow === 'visible' && getComputedStyle(e).borderTopLeftRadius !== '0px') moved.push(`${e.dataset.aidPhoto}: a rounded slot does not clip the photo (overflow: hidden)`);
+      }
+      const shifted = others.filter((e, i) => differs(at(e), pos[i]));
+      if (shifted.length) moved.push(`putting the photos in moves ${shifted.length} other element(s), first ${shifted[0].tagName.toLowerCase()}${shifted[0].className ? '.' + String(shifted[0].className).split(' ')[0] : ''}`);
+      return { moved, grew: height() - before };
+    });
+    why.push(...swap.moved);
+    if (Math.abs(swap.grew) > 1) why.push(`putting the photos in changes the page height by ${swap.grew} px`);
+    return why.length ? ['fail', why.join('; ')] : ['pass', `${slots.length} slot(s): ${slots.map(x => x.id).join(', ')}`];
+  } catch (e) { return ['fail', `photo slot check failed: ${String(e.message || e).slice(0, 120)}`]; } finally { await ctx.close(); }
+}
+
+// task_test (P113a, 12. 10. 2026): what a customer comes for is found within two steps from the home page, at 1440
+// and at 390 px. docs/content/tasks.yaml lists the tasks: {id, task, expect: [texts]} (one visible element on a
+// page holds every text, case and spacing ignored) or {id, task, form: true} (a visible form with a field and a
+// submit control). Every expect text must be in the facts register, so a task cannot be made easy by inventing
+// it; the task ids of the project's frozen critic rubric (.aid-ui/critic/frozen.json task_test) must all be there.
+// Steps = links followed from the home page (ponytail: every same-site link counts, also one inside a closed
+// menu on the phone; a click that opens the menu is not counted). Detail: per task and width the page and steps.
+const TASK_HOPS = 2;
+async function taskTest(browser) {
+  if (isApp) return NA('an application: its tasks are the flows (app_task_states)');
+  if (!opt.tasks) return ['fail', 'no docs/content/tasks.yaml (step 3: what a customer comes for, from the facts)'];
+  const tasks = readJson(opt.tasks);
+  if (!Array.isArray(tasks) || !tasks.length) return ['fail', 'docs/content/tasks.yaml is not a list of tasks'];
+  const why = [];
+  const factsText = opt.facts ? JSON.stringify(readJson(opt.facts)).toLowerCase() : '';
+  const norm = x => String(x || '').replace(/[\s\u00a0]+/g, ' ').trim().toLowerCase();
+  const ok = [];   // a task with a bad definition is named and not searched for
+  // the shape of the required tasks: a price names the service and the amount, hours at least the day, booking is a form
+  const SHAPE = { price: t => !t.form && (t.expect || []).length >= 2, hours: t => !t.form && (t.expect || []).length >= 1, booking: t => t.form === true };
+  for (const t of tasks) {
+    if (!t?.id || !(t.form === true || (Array.isArray(t.expect) && t.expect.length))) { why.push(`task ${t?.id || '?'} needs expect texts or form: true`); continue; }
+    if (SHAPE[t.id] && !SHAPE[t.id](t)) { why.push(`task ${t.id}: ${t.id === 'booking' ? 'is form: true' : t.id === 'price' ? 'expects the service and its price (two texts)' : 'expects the day and its hours'}`); continue; }
+    const bad = (t.expect || []).filter(e => !factsText.includes(norm(e).replace(/"/g, '\\"')));
+    for (const e of bad) why.push(`task ${t.id}: "${e}" is not in the facts register`);
+    if (!bad.length) ok.push(t);
+  }
+  // required ids: the frozen critic's rubric when the loop has one, else those of a local-service web (web-local.yaml)
+  let need = ['price', 'hours', 'booking'];
+  const fzp = project && path.join(project, '.aid-ui/critic/frozen.json');
+  if (fzp && fs.existsSync(fzp)) {
+    try { need = (readJson(fzp).rubric?.task_test || []).map(x => x.id); } catch { return ['fail', '.aid-ui/critic/frozen.json is unreadable'] }
+  }
+  for (const id of need) if (!tasks.some(t => t?.id === id)) why.push(`task ${id} is missing`);
+  const found = {};
+  for (const w of [1440, 390]) {
+    const ctx = await browser.newContext({ viewport: { width: w, height: HEIGHT[w] || 900 } });
+    const p = await ctx.newPage();
+    const seen = new Map([[home, 0]]), queue = [home];
+    try {
+      while (queue.length) {
+        const key = queue.shift(), hops = seen.get(key);
+        await loaded(p, urlOf(key));
+        await p.evaluate(async () => { document.querySelectorAll('details').forEach(d => { d.open = true; });
+          for (let y = 0; y < document.documentElement.scrollHeight; y += 600) { scrollTo(0, y); await new Promise(r => setTimeout(r, 40)); } scrollTo(0, 0); });
+        await p.waitForTimeout(1500);   // entrance motion settles, as content_without_js waits
+        // a closed menu (a button with aria-expanded="false") is opened first: on the phone its links are the way on
+        for (const b of await p.$$('button[aria-expanded="false"]')) await b.click().catch(() => {});
+        await p.waitForTimeout(200);
+        const r = await p.evaluate(async ({ tasks }) => {
+          const n = x => (x || '').replace(/[\s\u00a0]+/g, ' ').trim().toLowerCase();
+          // seen = laid out, not transparent, inside the page and not covered at its centre once scrolled to
+          const seen = async e => { const s = getComputedStyle(e); if (s.visibility === 'hidden' || Number(s.opacity) <= 0.5) return false;
+            e.scrollIntoView({ block: 'center' }); await new Promise(r => requestAnimationFrame(r));
+            const b = e.getBoundingClientRect(); if (!(b.width > 0 && b.height > 0) || b.right < 0 || b.bottom < 0 || b.left > innerWidth) return false;
+            const top = document.elementFromPoint(Math.min(Math.max(b.left + b.width / 2, 0), innerWidth - 1), Math.min(Math.max(b.top + b.height / 2, 0), innerHeight - 1));
+            return !!top && (e.contains(top) || top.contains(e)); };
+          const hit = {};
+          for (const t of tasks) {
+            if (t.form) { hit[t.id] = false; for (const f of document.forms) if (f.querySelector('input:not([type=hidden]), textarea, select') && f.querySelector('button:not([type=button]), input[type=submit]') && await seen(f)) { hit[t.id] = true; break; } continue; }
+            // one short block holds every text (a table row, a list item, a paragraph): the price beside its service
+            const want = t.expect.map(n);
+            const blocks = [...document.body.querySelectorAll('*')].filter(e => { const x = n(e.innerText); return x.length <= 300 && want.every(w => x.includes(w)); });
+            hit[t.id] = false; for (const e of blocks) if (await seen(e)) { hit[t.id] = true; break; }
+          }
+          const links = [];
+          for (const a of document.querySelectorAll('a[href]')) if (await seen(a)) links.push(a.href);   // only links a visitor can see and press
+          scrollTo(0, 0);
+          return { hit, links };
+        }, { tasks: ok });
+        for (const [id, ok] of Object.entries(r.hit)) if (ok && !(found[`${id}@${w}`])) found[`${id}@${w}`] = { page: key, hops };
+        if (hops >= TASK_HOPS) continue;
+        for (const h of r.links) {
+          let u; try { u = new URL(h); } catch { continue; }
+          if (u.origin !== new URL(base).origin) continue;
+          const k = keyOfUrl(u.pathname.slice(new URL(base).pathname.length - 1));
+          if (pages.includes(k) && !seen.has(k)) { seen.set(k, hops + 1); queue.push(k); }
+        }
+      }
+    } catch (e) { why.push(`${w} px: ${String(e.message || e).slice(0, 100)}`); } finally { await ctx.close(); }
+  }
+  const say = [];
+  for (const t of ok) for (const w of [1440, 390]) {
+    const f = found[`${t.id}@${w}`];
+    if (!f) why.push(`${t.id} at ${w} px: not found within ${TASK_HOPS} steps from the home page`);
+    else say.push(`${t.id} ${w}: ${f.page} (${f.hops})`);
+  }
+  return why.length ? ['fail', why.join('; ') + (say.length ? `; found: ${say.join('; ')}` : '')] : ['pass', say.join('; ')];
+}
+
 // ---- matrix -------------------------------------------------------------------------
 const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match',
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
   'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review', 'motion_settled', 'motion_fidelity',
-  'content_without_js', 'first_paint_visible', 'form_states'];
+  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery', 'text_clearance', 'a11y_basics', 'mobile_native'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -864,7 +1266,7 @@ if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json')
 
 const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
   'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
-  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states'];
+  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots', 'text_clearance', 'a11y_basics', 'mobile_native'];
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
 for (const b of BRS) {
@@ -931,6 +1333,8 @@ for (const b of BRS) {
       if (visionDoc) put(m, 'vision_doc', ...visionDoc);
       if (coverageRow) put(m, 'coverage', ...coverageRow);
       if (customerPage) put(m, 'customer_page', ...customerPage);
+      if (want('task_test') && applies('task_test', m)) put(m, 'task_test', ...(await taskTest(browser)));
+      if (want('form_delivery') && applies('form_delivery', m)) put(m, 'form_delivery', ...(await formDelivery(browser)));
       if (want('copy_review') && applies('copy_review', m)) put(m, 'copy_review', ...(await copyRow(browser, m.page)));
     }
     await ctx.close();

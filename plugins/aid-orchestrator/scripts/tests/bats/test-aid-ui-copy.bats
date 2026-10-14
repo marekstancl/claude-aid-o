@@ -26,6 +26,7 @@ EOF
 out=""; while (( $# )); do [[ "$1" == -o ]] && { out="$2"; shift; }; shift; done
 cat >/dev/null
 [[ -n "${CODEX_ANSWER:-}" && -n "$out" ]] && cp "$CODEX_ANSWER" "$out"
+echo '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":50}}'
 exit "${CODEX_RC:-0}"
 EOF
   chmod +x "$T/bin/codex"; export PATH="$T/bin:$PATH"
@@ -57,6 +58,8 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   jq -e '.copy_review.pages["index.html"] | .verdict == "pass" and .provider == "codex" and .subject_sha256 == "aaa"
          and (.facts_sha256 | length) == 64 and (.context_sha256 | length) == 64 and .failed_reviews == 0' "$ST" >/dev/null
   jq -e '.provider == "codex" and .codex_attempt.rc == 0' "$RUN/run.json" >/dev/null
+  # its tokens are in the project's cost book (Coufal: 33 reviews were missing from it)
+  jq -se 'map(select(.purpose == "copy:review")) | length == 1 and .[0].units.input == 1000 and .[0].usd > 0' "$P/.aid-ui/costs.jsonl" >/dev/null
   # the bundle holds only what the reviewer may read
   for f in prompt.md subject.json facts.yaml product-context.md references/copy-rules.md references/copy-cs.md \
            references/adopted/marketingskills/copy-editing/SKILL.md references/adopted/marketingskills/cro/SKILL.md; do
@@ -79,7 +82,8 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
               '.pages["index.html"].cro.cta = {status:"netyka_se", reason:"x", findings:[]}' \
               '.pages["index.html"].sweeps.so_what.findings = [{block:"b1", text:"prázdná fráze", severity:"blokujici"}]' \
               '.pages["index.html"].personas[0].score = 4' '.pages["index.html"].claims[0].fact_key = null' \
-              '.pages["index.html"].claims[0].fact_key = "neexistuje"' '.pages["index.html"].personas = []' \
+              '.pages["index.html"].claims[0].fact_key = "neexistuje"' '.pages["index.html"].claims[0].fact_key = ["klienti", "neexistuje"]' \
+              '.pages["index.html"].claims[0].fact_key = []' '.pages["index.html"].personas = []' \
               '.pages["index.html"].personas += [.pages["index.html"].personas[0]]' \
               '.pages["index.html"].sweeps.voice = {status:"netyka_se", reason:"x", findings:[]}' \
               '.pages["index.html"].claims[0].block = "b99"' \
@@ -89,6 +93,9 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
     run python3 "$COPY" verdict "$RUN"
     jq -e '.["index.html"].verdict == "fail"' <<<"$output" >/dev/null || { echo "not failed by: $edit"; echo "$output"; return 1; }
   done
+  # P113a: a sentence listing several data rests on all their keys (Coufal: "name, address, phone and e-mail")
+  review '.pages["index.html"].claims[0].fact_key = ["klienti", "telefon"]'; run python3 "$COPY" verdict "$RUN"
+  jq -e '.["index.html"].verdict == "pass"' <<<"$output" >/dev/null || { echo "$output"; return 1; }
   review 'del(.pages["index.html"].sweeps.voice)'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"chybí průchod voice"* ]]
   review '.pages["index.html"].personas[0].score = 4'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"skóre 4"* ]]
   review '.pages["index.html"].personas = []'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"persona strážce značky: chybí"* ]]

@@ -63,6 +63,18 @@ podle názvu projektu), zamítnuté návrhy.
    `aid-ui-state.sh set <project> options "$(cat <project>/.aid-ui/options.json)" --answer <id>`
    (odpověď na otázku voleb; jen v kroku 0).
 9. `aid-ui-serve.sh brand docs/brand` → odkaz na brand stránku pro PM.
+10. **Podklady ke spuštění (P113a), hned po volbě druhu webu:**
+    - `aid-ui-launch.py card <project> --type web-local` vytvoří seznam podle typu: IČO a údaje firmy,
+      hodiny, ceník, fotky, právní texty, příjem formuláře a doména.
+    - Veřejné údaje dohledej sám a zapiš se zdrojem a dnem čtení:
+      `aid-ui-launch.py record <project> <id> --value … --source <adresa> --date RRRR-MM-DD`.
+      Zdroje jsou rejstřík, starý web, profil a katalog. Odhad se nezapisuje.
+    - `aid-ui-launch.py question <project>` vypíše otázku `launch_inputs` (část Podklady) do `payload.json`.
+      Klient ji potvrdí jednou odpovědí, v pilotu za něj odpovídá klient-agent.
+    - Po odpovědi `aid-ui-launch.py confirm <project> --answer <id>`. Potvrzené údaje zapíše sám do
+      `docs/content/facts.yaml` jako `launch_<id>` (zdroj, den čtení, potvrzení klientem). Z chybějících vzniknou otevřené body
+      s vlastníkem a termínem. Kritické blokují zveřejnění, ne stavbu ani smyčku kvality.
+    - Nepotvrzený údaj se na web nedostane.
 
 ## Co PM rozhoduje
 

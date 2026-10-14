@@ -1,0 +1,18 @@
+# Who wrote each critic rubric (P113a, 13. 10. 2026). Every rubric is written from its role brief alone by one
+# author and reviewed by the other; the author folds the review in. The briefs are in role-briefs/.
+web-local.owner.yaml:
+  author: "codex exec (default model), clean context"
+  brief: "role-briefs/owner.md + role-briefs/common.md"
+  brief_sha256: "aeb03e5bda2ba7a858c1d660fb37db3eeb8167419a5a3d74113f34a687f909fe"
+  reviewer: "Claude Opus subagent, clean context (read only the brief and the rubric)"
+  review_applied_by: author
+  date: 2026-10-13
+  sha256: "224483401f51e65f325f8a4dfb7fcfde5c5082db9a4a5055f6ec41c565186a23"
+web-local.tech.yaml:
+  author: "Claude Opus subagent, clean context (read only the brief)"
+  brief: "role-briefs/tech.md + role-briefs/common.md"
+  brief_sha256: "6101b12a89af8a4a915f43d3fb81c05991123b719a9af203d1061a7db94c5395"
+  reviewer: "codex exec (default model), clean context"
+  review_applied_by: author
+  date: 2026-10-13
+  sha256: "3e36f2bd90ec4a9c544a7770422b536d7ed2fb3373f654f664d7e8794e42bd8b"

@@ -60,6 +60,11 @@ Blokující je:
 Vážný nález (obecnost, slabý důkaz, opakovaná fráze) se opraví, stránku sám nezastaví;
 drobný je doporučení.
 
+Vážný je i **odborná zkratka nebo termín bez vysvětlení v jazyce zákazníka** (B2C web, ceník, služby;
+PM 13. 10. 2026 po Coufalu: RVG, Endo, 1pl., kofferdam). Oprava: rozepsat v názvu tím, co už v registru je
+(„Malý röntgenový snímok (RVG)“), nebo vysvětlivka, kterou potvrdil klient (`facts.yaml`, položka karty
+podkladů „vysvětlení odborných pojmů“). Vysvětlivka bez faktu v registru je tvrzení bez faktu (blokující).
+
 ## Kotvy skóre person
 
 Revize hodnotí každou stránku pohledem pěti person (konverzní copywriter, UX písař, cílový

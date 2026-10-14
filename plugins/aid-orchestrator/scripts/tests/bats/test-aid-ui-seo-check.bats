@@ -38,6 +38,14 @@ fix_site() {
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d and all(x["level"]=="OK" for x in d)' "$BATS_TEST_TMPDIR/out.json"
 }
 
+@test "an inline SVG with its own <title> in the body does not replace the document title (Coufal 12. 10. 2026)" {
+  fix_site
+  sed -i 's|<body>|<body><svg role="img"><title>WC-symbol-v1</title><path d="M0 0"/></svg>|' "$SITE/index.html" "$SITE/o-nas/index.html"
+  run python3 "$CHECK" "$SITE" --base-url https://example.cz
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  ! grep -q "WC-symbol" <<<"$output"
+}
+
 @test "404.html with noindex absent from the sitemap is OK" {
   fix_site
   sed -e 's|<title>.*</title>|<title>Stránka nenalezena</title>|' \
@@ -65,6 +73,18 @@ fix_site() {
   [ "$(grep -c '^BLOCKER ' <<<"$output")" -eq 1 ]
   grep -qx 'BLOCKER /kontakt brief-page confirmed page not built' <<<"$output"
   grep -qx 'OK /o-nas brief-h1 O nás' <<<"$output"
+  # a nested page without breadcrumbs is a warning (step 6, Coufal 13. 10.)
+  sed -i 's|"@type":"BreadcrumbList"|"@type":"ItemList"|' "$SITE/o-nas/index.html"
+  run python3 "$CHECK" "$SITE"; grep -qx 'WARN o-nas/index.html breadcrumbs nested page without BreadcrumbList in its JSON-LD' <<<"$output"
+  # nested under the page node counts; an empty list does not
+  sed -i 's|<script type="application/ld+json">{"@context":"https://schema.org","@type":"ItemList"|<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","breadcrumb":{"@type":"BreadcrumbList"|; s|"item":"https://example.cz/o-nas"}]}</script>|"item":"https://example.cz/o-nas"}]}}</script>|' "$SITE/o-nas/index.html"
+  run python3 "$CHECK" "$SITE"; grep -qx 'OK o-nas/index.html breadcrumbs BreadcrumbList' <<<"$output"
+  sed -i 's|"itemListElement":\[.*\]}}</script>|"itemListElement":[]}}</script>|' "$SITE/o-nas/index.html"
+  run python3 "$CHECK" "$SITE"; grep -qx 'WARN o-nas/index.html breadcrumbs BreadcrumbList with fewer than two items' <<<"$output"
+  # a "|" inside a cell breaks the row: a blocker, never a quietly shifted column
+  printf '| URL | H1 | dotaz |\n|---|---|---|\n| / | Pekárna U Mlýna | pekárna | brno |\n| /o-nas | O nás | odhad |\n' >"$BATS_TEST_TMPDIR/brief.md"
+  run python3 "$CHECK" "$SITE" --brief "$BATS_TEST_TMPDIR/brief.md"; [ "$status" -eq 1 ]
+  grep -qx "BLOCKER / brief-row 4 cells, the header has 3 (a '|' inside a cell?)" <<<"$output"
 }
 
 @test "canonical pointing elsewhere is a BLOCKER; malformed HTML and unreadable paths do not crash" {
@@ -344,6 +364,18 @@ ai() { run python3 "$CHECK" "$S" --ai --facts "$BATS_TEST_TMPDIR/facts.json" --b
   sed -i 's/lang="cs"/lang="en"/' "$S/praha/index.html"
   run python3 "$CHECK" "$S"
   grep -q '^WARN praha/index.html hreflang site has 2 languages' <<<"$output"
+}
+
+@test "P113a site WARN: with --facts place, a description without the place is named; legal pages and pages naming it pass" {
+  ai_site
+  ai_page "$S/cennik" "Ceník chleba - Pekárna" "$ORG" '<meta name="description" content="Ceny chleba a pečiva Pekárny.">'
+  ai_page "$S/onas" "O nás - Pekárna" "$ORG" '<meta name="description" content="Pekárna v Brně peče od roku 2015.">'
+  ai_page "$S/ochrana-udaju" "Ochrana údajů - Pekárna" "$ORG" '<meta name="description" content="Jak zpracujeme osobní údaje.">'
+  echo '{"brand":{"value":"Pekárna"},"ico":{"value":"12345678"},"place":{"value":"Brno"}}' >"$BATS_TEST_TMPDIR/facts.json"
+  run python3 "$CHECK" "$S" --facts "$BATS_TEST_TMPDIR/facts.json"
+  grep -q '^WARN cennik/index.html description-place the description does not name Brno' <<<"$output"
+  grep -q '^OK onas/index.html description-place names Brno' <<<"$output"   # "Brně" counts
+  ! grep -q 'ochrana-udaju/index.html description-place' <<<"$output"
 }
 
 @test "K2 --ai: the policy counts only when the PM approved this brief (--state seo_brief answer for its sha256)" {

@@ -8,7 +8,7 @@
 //    "fonts": ["https://fonts.googleapis.com/css2?family=…&display=swap"],   // optional stylesheets
 //    "out_dir": ".aid-ui/studio",                       // PNGs go here: logo-<id>.png, logo-prehled.png
 //    "recommend": "b",                                   // id of the first (recommended) direction
-//    "directions": [{"id": "a", "title": "A · Nápis", "note": "one sentence",
+//    "directions": [{"id": "a", "title": "A · Nápis", "note": "one sentence", "asymmetry": "why, when the symbol is meant asymmetric",
 //                    "lockup": "…/a-lockup.svg", "symbol": "…/a-symbol.svg", "small": "…/a-small.svg"}],
 //    "competitors": [{"name": "Dental Machine", "image": ".aid-ui/refs/competitors/dm.png"}]}
 // `small` (the 16 px cut) is optional and falls back to `symbol`. Symbols and competitor images are
@@ -56,6 +56,18 @@ try { spec = JSON.parse(fs.readFileSync(path.resolve(root, specPath), 'utf8')); 
 catch (e) { console.error(`ERROR: ${specPath}: ${e.message}`); process.exit(1); }
 if (!spec.name || !Array.isArray(spec.directions) || !spec.directions.length || !spec.out_dir) {
   console.error('ERROR: sheet.json needs name, out_dir and a non-empty directions list'); process.exit(2);
+}
+// P113a (PM 13. 10. 2026): a symbol the vectorizer measured as asymmetric (<symbol>.json symmetry.best under 0.92)
+// is shown only when its direction says why the asymmetry is meant ("asymmetry": "<why>"); a mark that wobbles by
+// accident stops here instead of reaching the client and the web
+for (const d of spec.directions) {
+  const sj = d.symbol && path.resolve(root, d.symbol) + '.json';
+  if (!sj || !fs.existsSync(sj)) continue;
+  const sym = JSON.parse(fs.readFileSync(sj, 'utf8')).symmetry || {};
+  if (sym.best < 0.92 && !(typeof d.asymmetry === 'string' && d.asymmetry.trim())) {
+    console.error(`ERROR: direction ${d.id}: its symbol is only ${sym.best} symmetric (${sym.axis} axis best); fix the mark or state the intent ("asymmetry": "<why>")`);
+    process.exit(1);
+  }
 }
 const MIME = { '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
 function uri(p, invert = false, vectorOnly = false) {

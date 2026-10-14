@@ -171,7 +171,14 @@ Pravidla, která route.json nese:
      (binarizace, vtracer; parametry v komentáři SVG; `--speckle`, `--corner` když je tvar
      roztřepený), potom `svg_audit.py` bez FAIL (složitost smí být INFO; při stovkách bodů zvyš
      `--length`), vykreslení 16/32 px a pohled; nesedí-li vektor na koncept (ořez, slitý otvor),
-     změň parametry, ne koncept. Malý řez pro 16 px uděláš stejně z téhož PNG s vyšším
+     změň parametry, ne koncept. **Souměrnost (P113a, PM 13. 10. 2026):** `vectorize` vypíše řádek `SYMMETRY`
+     a zapíše `<symbol>.svg.json`; pod 0,92 `logo-sheet` značku odmítne, dokud směr neuvede záměr
+     (`"asymmetry": "<proč>"`). Nezáměrně křivá značka (useknuté konce, vlnitý obrys) se opraví: jiný koncept, jiný výřez
+     nebo parametry, ne vysvětlení. Karta volby značky nese i značku samotnou zvětšenou na 512 px
+     (`aid-ui-tool.sh png <symbol>.svg <out>.png 512` jako `preview2`), ať klient posoudí tvar, ne jen 16 px.
+     Upřesnění už zvolené značky (např. když ji souměrnost zastaví až po předání) je otázka `identity` s cílem
+     `logo:refine:<slot>[@štítek]`: dvě a více variant téhož směru, každá karta se `slot`, a karta „ponechat
+     současnou“ s nameranou souměrností jako rizikem. Malý řez pro 16 px uděláš stejně z téhož PNG s vyšším
      `--speckle`, nebo rukou zjednodušením cest. Rukou psané SVG zůstává jen pro mikroznačku
      z iniciál (slot W) a drobné úpravy vektoru.
    - **logo s názvem** (`<slot>-lockup.svg`, výška 256: symbol z vektoru + název písmem slotu;

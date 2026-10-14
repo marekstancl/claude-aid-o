@@ -131,6 +131,19 @@ text() { python3 -c 'import re,sys,html;t=open(sys.argv[1]).read();t=re.sub(r"<s
   [ "$(cat "$P/docs/zakaznik/www/favicon.svg")" = '<svg id="client"/>' ]
 }
 
+@test "FB-30: the photos the client owes are listed with where, what, shape, ratio and size and a frame of that shape; none = no list" {
+  python3 "$GEN" "$P" >/dev/null; ! grep -q "Fotky, které dodáte" "$OUT"
+  mkdir -p "$P/docs/content"
+  printf -- '- {id: lekar, page: o-nas/index.html, where: "O nás, vedle textu", what: "portrét lékaře", shape: round, ratio: "1:1", min_px: "1200x1200"}\n- {id: pec, page: index.html, where: "Úvod", what: "pec", shape: rect, ratio: "4:5", min_px: "1600x2000"}\n' > "$P/docs/content/photos.yaml"
+  python3 "$GEN" "$P" >/dev/null
+  grep -qF "Fotky, které dodáte (2)" "$OUT"; grep -qF "O nás, vedle textu" "$OUT"; grep -qF "kulatá 1:1" "$OUT"; grep -qF "1600x2000 px" "$OUT"
+  grep -qF "aspect-ratio:4/5;border-radius:6px" "$OUT"; grep -qF "aspect-ratio:1/1;border-radius:50%" "$OUT"
+  run python3 "$GEN" "$P" --check; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  # a brief without what is on the photo: no page
+  printf -- '- {id: pec, page: index.html, where: "Úvod", shape: rect, ratio: "4:5", min_px: "1600x2000"}\n' > "$P/docs/content/photos.yaml"
+  run python3 "$GEN" "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"photos.yaml pec: needs"* ]]
+}
+
 @test "the SEO tiles are outside <details>; the AI tile follows the policy; no internal word" {
   python3 "$GEN" "$P" >/dev/null
   # the visibility panel up to its own <details>

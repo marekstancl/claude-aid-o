@@ -263,6 +263,15 @@ def gather(proj):
             decided.append({"at": str(d.get("at") or "")[:10], "outcome": customer_words(d.get("outcome") or d.get("title"))})
     decided = [dict(x) for x in {json.dumps(d, sort_keys=True): d for d in decided}.values()]
     D["zbyva"] = {"open": opened, "deferred": deferred, "exceptions": exc, "decided": decided}
+    # FB-30 (P113a): the photos the client still owes, each with where, what, shape, ratio and smallest size
+    pf = os.path.join(proj, "docs/content/photos.yaml")
+    ph = yq(pf, ".") if os.path.exists(pf) else []
+    D["photos"] = [{k: str(x.get(k) or "") for k in ("id", "page", "where", "what", "shape", "ratio", "min_px")}
+                   for x in (ph if isinstance(ph, list) else []) if isinstance(x, dict) and not x.get("src")]   # placed photos are not owed
+    for x in D["photos"]:   # the client gets every part of each photo's brief, or the page is not made
+        if not all(x[k].strip() for k in x) or x["shape"] not in ("rect", "round") or not re.fullmatch(r"\d+:\d+", x["ratio"]) \
+                or not re.fullmatch(r"\d+x\d+", x["min_px"]):
+            die(f"docs/content/photos.yaml {x['id'] or '?'}: needs id, page, where, what, shape rect|round, ratio W:H and min_px WxH")
     return D, res_file
 
 
@@ -281,7 +290,7 @@ CHECK_WORDS = {"http_200": "dostupnost stránek", "glyph_coverage": "písmo a di
                "safe_area": "okraje displeje telefonu", "privacy_before_consent": "soukromí před souhlasem",
                "vision_doc": "vize produktu", "coverage": "soulad se standardy", "customer_page": "stránka pro zákazníka",
                "copy_review": "kontrola textů", "motion_settled": "doběhnutí animací před měřením", "motion_fidelity": "pohyb podle vzoru",
-               "content_without_js": "obsah viditelný i bez skriptu", "first_paint_visible": "obsah viditelný hned po načtení", "form_states": "odeslání formuláře a jeho stavy"}
+               "content_without_js": "obsah viditelný i bez skriptu", "first_paint_visible": "obsah viditelný hned po načtení", "form_states": "odeslání formuláře a jeho stavy", "task_test": "zákazník najde cenu, otevírací dobu a objednání do dvou kroků", "photo_slots": "místa pro fotky v přesném tvaru", "form_delivery": "zpráva z formuláře opravdu dojde", "text_clearance": "text má odstup od dělicích čar", "a11y_basics": "přeskočení na obsah, pořadí nadpisů a viditelný obrys pro klávesnici", "mobile_native": "web se na telefonu chová jako na telefonu"}
 
 
 def cz(n, one, few, many):
@@ -409,6 +418,18 @@ def render(D):
     zb = (f'<div class="zbyva"><b>Publikace blokovaná</b>, dokud nejsou splněny body označené „Blokuje zveřejnění“ ({len(crit)}).</div>' if crit else "") + \
          (f'<ul class="zbyva-list">{"".join(rows)}</ul>' if rows else '<p style="margin:0">Nic otevřeného.</p>') + \
          (f'<details><summary>Přijatá rozhodnutí ({len(z.get("decided", []))})</summary><ul>{dec}</ul></details>' if dec else "")
+    photos = D.get("photos") or []
+    if photos:   # a frame of the photo's exact shape beside its brief: the client sees what to bring
+        def frame(x):
+            w, h = (x["ratio"].split(":") + ["1"])[:2] if ":" in x["ratio"] else ("1", "1")
+            rad = "50%" if x["shape"] == "round" else "6px"
+            return (f'<span aria-hidden="true" style="display:inline-block;width:56px;aspect-ratio:{E(w)}/{E(h)};border-radius:{rad};'
+                    'border:1.5px dashed currentColor;vertical-align:middle"></span>')
+        trs = "".join(f'<tr><td>{frame(x)}</td><td>{E(x["where"] or x["page"])}</td><td>{E(x["what"])}</td>'
+                      f'<td>{"kulatá" if x["shape"] == "round" else "obdélník"} {E(x["ratio"])}</td><td>{E(x["min_px"])} px</td></tr>' for x in photos)
+        zb += (f'<h3 style="margin:18px 0 6px">Fotky, které dodáte ({len(photos)})</h3><p style="margin:0 0 8px">Na webu je pro každou '
+               f'místo v přesném tvaru; fotka se jen vloží.</p><table class="fotky"><thead><tr><th></th><th>Kde</th><th>Co na ní</th>'
+               f'<th>Tvar</th><th>Nejmenší rozměr</th></tr></thead><tbody>{trs}</tbody></table>')
     n_open = len(rows)
     areas.append(("zbyva", "Co zbývá a co bylo rozhodnuto", f"{n_open} {cz(n_open, 'otevřený bod', 'otevřené body', 'otevřených bodů')}, {len(z.get('decided', []))} {cz(len(z.get('decided', [])), 'rozhodnutí', 'rozhodnutí', 'rozhodnutí')}", "",
                   "Co ještě přijde a kdo to dodá; pod tím každé rozhodnutí zadavatele s datem.", zb))

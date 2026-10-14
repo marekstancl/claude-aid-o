@@ -1,0 +1,37 @@
+# Měřítko kritika pro typ „prezentační web lokální služby“ (P113a, 12. 10. 2026).
+# Kritik práh akceptace NEZNÁ (je jen v aid-ui-critic.py); hodnotí podle kotev s důkazem.
+# Kotva = pozorovatelné podmínky. Mezihodnota (5, 7, 9) = splněná nižší kotva a část podmínek vyšší; 1-3 = ani kotva 4 (anchor null).
+# Rychlost načtení měří brána (aid-ui-verify), ne kritik.
+type: web-local
+title: "Prezentační web lokální služby"
+# persona and criteria: web-local.owner.yaml and web-local.tech.yaml (two roles, PM 13. 10. 2026; authors in AUTHORS.yaml)
+# Criteria judged only once the web is deployed (PM 13. 10. 2026: the hosting is no criterion of the studio's work
+# until it is relevant): left out of the critic's prompt and the score while the phase is `build` (freeze --phase).
+launch_only:
+  tech: [bezpecnost_spusteni]
+task_test:
+  - id: price
+    task: "Najdi cenu {price_item}."
+  - id: hours
+    task: "Zjisti, kdy je otevřeno v pátek."
+  - id: booking
+    task: "Objednej se (vyplň a odešli formulář)."
+# Podklady ke spuštění (P113a krok 7): karta hned po zadání. public = agent dohledá sám se zdrojem a datem
+# (klient potvrdí), jinak dodá klient (vlastník, termín, zadání). critical = bez toho se web nezveřejní.
+launch_inputs:
+  - {id: company, name: "IČO a údaje firmy (název, sídlo)", public: true, critical: true, where: "obchodní / živnostenský rejstřík"}
+  - {id: hours, name: "Otevírací / ordinační hodiny pro každý den", public: true, critical: true, where: "starý web, Google profil, katalogy"}
+  - {id: prices, name: "Ceník služeb", public: true, critical: true, where: "starý web"}
+  - {id: photos, name: "Vlastní fotky (místo, lidé, práce)", public: false, critical: true, brief: "podle zadání fotek na stránce „co jste dostali“"}
+  - {id: legal, name: "Ochrana osobních údajů a právní texty", public: false, critical: true, brief: "kontrola právníkem nebo hotové texty klienta"}
+  - {id: form, name: "Příjem zpráv z formuláře na hostingu", public: false, critical: true, owner: agent, brief: "koncový bod na hostingu klienta, test doručení (form_delivery)"}
+  - {id: domain, name: "Doména a hosting", public: false, critical: true, brief: "přístup k doméně a hostingu nebo kontakt na správce"}
+  - {id: terms, name: "Vysvětlení odborných pojmů a zkratek ve službách a ceníku", public: false, critical: false, brief: "jedna věta ke každému pojmu, který zákazník nezná; agent pošle seznam pojmů z webu"}
+# Výchozí součásti webu lokální služby (P113a, PM 13. 10. 2026: co kritik u Coufalu žádal ručně, má typ mít od
+# začátku). Krok 6 je postaví, pokud je projekt výslovně nevyloučí v DESIGN.md.
+components:
+  - {id: call_header, what: "Volat jedním dotykem z mobilní hlavičky (ikona s popisem pro čtečku, vedle hlavní výzvy)"}
+  - {id: route_everywhere, what: "Trasa k podniku z každé stránky (patička), ne jen z kontaktu"}
+  - {id: prices_services_linked, what: "Ceník a služby odkazují na sebe navzájem (kategorie ceníku → služba, služba → ceník)"}
+  - {id: hours_visible, what: "Otevírací doba v patičce každé stránky"}
+  - {id: booking_lands_on_form, what: "Každá výzva k objednání vede přímo na formulář (kotva #objednani), i na stránce Kontakt"}

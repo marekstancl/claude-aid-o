@@ -3,6 +3,84 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.2.0] — 2026-10-14
+
+Smyčka kvality /aid-ui (P113a): web po předání hodnotí dva nezávislí kritici, majitel a technik, s pamětí a cestou k 10; hodnotí se práce studia, ne to, co klient nedodal; nejvýš 3 kola oprav nebo oba 8,5, pak audit. Cena a čas každého kola včetně práce agenta. Postupy, které na pilotu Coufal chyběly, a „méně kol, víc rozdílů“ ve studiu.
+
+### Added
+- **Smyčka kvality po předání (`aid-ui-quality.py`)** (P113a kroky 1–3, 12. 10. 2026):
+  - Zmrazený nezávislý kritik (`aid-ui-critic.py`) hodnotí živý web podle měřítka typu s kotvami 4/6/8/10 a odpovídá JSON podle schématu (`critic-retro.schema.json`). Práh zná jen kód.
+  - Každá výtka se roztřídí (`accepted`, `rejected_with_reason`, `duplicate`, `blocked`, `superseded`). Oprava se zapíše s důkazem.
+  - Před každým kolem projde `aid-ui-state.sh gate-check` (stejná kontrola jako `finish`).
+  - Na konci audit slepými hodnoceními a `verdict.json` s tím, co blokuje zveřejnění. Smyčku lze znovu otevřít (`reopen`).
+  - Studio ukazuje kola v panelu Hotovo.
+- **Klient-agent a kritik v pluginu (`aid-ui-client.py`):**
+  - Codex na předplatném. Při limitu, prázdné nebo neplatné odpovědi nastoupí nezávislý Claude se stejným zadáním a snímky. Klíče API se z prostředí textových procesů odstraní.
+  - Kritik hodnotí jen adresu, která obsluhuje právě tento web, a jen se snímky každé stránky na 1440 i 390 px (nástroj snímků teď opravdu fotí mobil).
+  - Kniha nákladů projektu `.aid-ui/costs.jsonl`. Placené API jen pro obrázky, se stropem 2 USD na projekt (`AID_UI_IMAGE_BUDGET_USD`), rezervace pod zámkem.
+- **Nové řádky brány a standardy FB-29 až FB-33** (`frontend-build-standard.md`):
+  - `task_test`: úkoly zákazníka v prohlížeči (cena, otevírací doba, objednání do dvou kroků),
+  - `photo_slots`: místo pro fotku v přesném poměru, s ikonou a bez textu,
+  - `form_delivery`: skutečné odeslání formuláře přes příjemce náhledu,
+  - `text_clearance`: text nesmí být nalepený na dělicí čáru,
+  - `a11y_basics`: odkaz na obsah, pořadí nadpisů, obrys zaměření 3:1, přetečení při 320 px, stejný text odkazu na různé cíle,
+  - `mobile_native`.
+- **Náhled s příjemcem formuláře (`aid-ui-preview.py`):** podle `.aid-ui/form.json` přijímá zprávy do `.aid-ui/inbox`. Má past na spam, kontrolu povinných polí a délky, opakování doručí jednou, omezení velikosti, počtu zpráv a schránky a v logu nejsou hodnoty.
+- **Podklady ke spuštění hned po zadání (`aid-ui-launch.py`, otázka `launch_inputs`):**
+  - karta podle typu (IČO, hodiny, ceník, fotky, právník, příjem formuláře, doména),
+  - veřejné údaje se zdrojem a datem,
+  - po potvrzení klienta do registru faktů, chybějící jako otevřené body s termínem (kritické blokují zveřejnění).
+- **Fotky klienta ze starého webu (`aid-ui-photos.py`, otázka `photos`):** krok podkladů stahuje i obrázky starého webu. Agent je prohlédne, popíše a vyznačí lidi, klient vybere. Použitá fotka jde jako WebP 1600/800 px s popisem do místa pro fotku.
+- **Logo:** `aid-ui-vectorize.py` měří souměrnost značky. List log odmítne značku pod 0,92 bez uvedeného záměru asymetrie.
+- **Převzaté dovednosti emilkowalski/skills (MIT, 5 dovedností, `references/adopted/emil-skills/`):** kroky je vyžadují stvrzenkou postupu. Test hlídá, že žádná převzatá dovednost není mrtvá.
+- **Studio:** zodpovězené otázky se jako historie znovu nekontrolují. `aid-ui-serve.sh` znovu použije běžící studio jen se stejným serverem pluginu.
+- **Postupy, které na Coufalovi chyběly (5 ze 6 oprav kola 1 bylo „z hlavy“):**
+  - **Krok 3, web lokální služby:**
+    - stránka nebo sekce služby (Pro koho / Co zahrnuje / Jak postupujeme / Ceny z ceníku a odkazy; jen z faktů, chybějící průběh = otevřený bod klienta),
+    - závěrečná výzva říká, co se stane po odeslání, a nabízí telefon,
+    - nejsilnější ověřený důkaz stojí u hlavní výzvy úvodu.
+  - **Krok 6:**
+    - `Service` pro služby a `BreadcrumbList` na vnořených stránkách (`aid-ui-seo-check.py` hlásí chybějící drobečky jako WARN `breadcrumbs`; najde je i vnořené pod stránkou a chce aspoň dvě položky),
+    - hlavní obraz první obrazovky bez výchozí neprůhlednosti a zpoždění; pohyb vzoru patří na doprovodný prvek. Brána to vynucuje: `first_paint_visible` selže, když největší obrázek první obrazovky začíná zprůhledněný nebo čeká na zpožděné prolnutí.
+- **Méně kol, víc rozdílů (bod 8 zadání P113a):**
+  - **Rozdíl:** otázka s `previous` (dřívější otázka stejného druhu na tentýž soubor nebo stránku) ukáže ve studiu
+    i klientovi-agentovi jen to, co se změnilo: řádky souboru, nebo text stránky u schválení stránky. Celé znění je
+    jen bez snímku předchozí verze, s vysvětlující větou. Snímky ukládá studio při prvním zobrazení otázky do
+    `.aid-ui/studio/snapshots/`, jen ze souboru uvnitř projektu a jen když sedí jeho sha.
+  - **Milník:** několik stránek nebo výjimek je jedna otázka s `items` (cíl `items@<sha položek>`).
+    - `approve` schválí všechny, `return` vrátí jen jmenované položky s komentářem, ostatní se schválí.
+    - Položka se spotřebuje `--answer <id> --answer-item <položka>` jen jednou.
+    - Rozhodnutí položek se ověřují proti studiu, ne jen jejich otisk.
+    - Studio odmítne víc než jednu otevřenou samostatnou otázku na schválení stránky.
+    - Opakovaný milník ukáže rozdíl každé stránky zvlášť a u společného stylu odkaz na náhled.
+  - Na Coufalu se schvalovaly stránky 21× a výjimky 9×. Slučování faktů, plánu obsahu a SEO je IMP-698.
+- **Id výtek se nezdvojují:** předponu kola a role, kterou si kritik opsal z paměti, smyčka odřízne. Kdyby se dvě id jedné odpovědi tím shodla, zůstanou, jak byla.
+
+### Changed
+- **Dva kritici místo jednoho: majitel a technik** (PM 13. 10. 2026 po Coufalu, kde jeden technický kritik dal 7 kol 7,2-8,4 a web se viditelně skoro neměnil).
+  - **Majitel** hodnotí dojem, výjimečnost proti konkurenci, fotky, prodejní texty, důvěru a cestu k objednání tak, jak ji vidí zákazník.
+  - **Technik** hodnotí vyhledávače a hloubku obsahu, strukturovaná data, rychlost, přístupnost, mobil, doručení formuláře a připravenost ke spuštění. Dostává výsledky brány pro dané sestavení (`podklady/overenie.json`).
+  - **Autorství měřítek:** `critic/web-local.owner.yaml` napsal Codex, `critic/web-local.tech.yaml` nezávislý Claude. Každý psal jen ze zadání role (`critic/role-briefs/`) a každé měřítko zrevidoval ten druhý. `critic/AUTHORS.yaml` drží autora, revizora a otisk. `freeze` odmítne měřítko, které otisku neodpovídá.
+  - **Zmrazení:** jedno zmrazení drží obě role. Starší zmrazení s jedním kritikem se odmítne.
+- **Práce studia, ne to, co klient nedodal:** drží-li kritérium dole jen otevřený bod klienta (`oi-…` v `podklady/overenie.json`, majitel je nově vidí taky), kritik dá vedle `score` (web teď) i `studio_score` s `limited_by`. Smyčka a audit počítají práci studia, `quality_now` a studio ukazují web, jak je. `limited_by` mimo otevřené body klienta je neplatná odpověď. `studio_score` pod `score` taky.
+- **Fáze stavby:** před nasazením se kritéria `launch_only` (technik: bezpečnost a spuštění) nehodnotí vůbec. Kritik je nedostane a do známky se nepočítají. `freeze --phase launch` je vrátí.
+- **Cesta k 10:** každé kritérium pod 10 nese `to_ten` (kroky studia a klienta: co, kde, jak to bude vypadat). Bez kroku je odpověď neplatná. `fix` u nálezu má být tak konkrétní, aby šel udělat bez dotazu.
+- **Po každém kole hlášení PM:** návrhy kritiků, co a jak se udělalo, podle jakého postupu (nebo z hlavy a proč), známky, cena a čas (`steps/8-quality.md` bod 5).
+  - `fixed` vyžaduje `--method`: krok, dovednost, nebo `z hlavy: <proč postup nebyl>`.
+  - `round` vypíše pro hlášení opravy předchozího kola s postupem (`fixed_before`) a cestu k 10 od obou rolí.
+- **Kritický otevřený bod klienta blokuje zveřejnění vždy:** verdikt auditu ho přidá do `publish_blocked_by`, i když ho kritici nevyjmenují.
+- **Kritici si pamatují:** každá role dostane své nálezy z minulých kol a co se s nimi stalo. Vyřešený nebo zamítnutý nález smí zopakovat jen jako `regression_of` s důkazem, jiné id je neplatná odpověď. Audit paměť nedostává.
+- **Majitel srovnává s konkurencí:** nový příkaz `aid-ui-client.py competitors` jednou za smyčku nafotí domovské stránky 3-5 konkurentů z `.aid-ui/critic/competitors.json`. Bez snímků 1440 a 390 aktuálního seznamu majitel nehodnotí.
+- **Smyčka: nejvýš 3 kola oprav, nebo obě role ≥ 8,5** a žádné kritérium pod 7. Pak opravy končí a přijde audit: 3 slepá hodnocení od každé role. Za role platí medián ≥ 8,5, žádné hodnocení pod 8 a žádné kritérium pod 7.
+  - **Zrušeno** pravidlo „+0,3 zlepšení“ a stagnace dvou kol. Šum kritika na stejném webu byl 0,6.
+  - Web, jehož audit neprošel, už znovu cílem auditu není.
+- **Cena a čas každého kola** v `loop.json` a ve studiu (panel Hotovo):
+  - kritici,
+  - kontrola textů (nově v knize nákladů: `copy:review`),
+  - práce agenta, tedy tokeny z přepisu sezení Claude Code `CLAUDE_CODE_SESSION_ID` včetně podagentů, zapsané před každým kolem a auditem,
+  - obrázky.
+
+  Všechno v ceníkovém ekvivalentu, práce před první kolem zvlášť.
 ## [3.1.1] — 2026-10-13
 
 Úklid nočního patra testů, první kolo (PM 13. 10. 2026, 1B). Nic se nemění pro uživatele pluginu; mění se, co hlídá noční běh, a tři nepravdy, které ty testy našly.

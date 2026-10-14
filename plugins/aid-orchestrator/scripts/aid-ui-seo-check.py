@@ -21,7 +21,8 @@ are compared with the page (WARN); a missing column skips that comparison with a
 A directory with no *.html page is a BLOCKER.
 
 Also on a site root (WARN, from the coverage map, P103 extension K1/K2): the brand stands
-after the topic in the title (needs --facts brand); every indexable page links to the contact
+after the topic in the title (needs --facts brand); with --facts place, every page but the legal ones names the
+place in its description (description-place, P113a); every indexable page links to the contact
 page or a mailto:/tel:; two pages whose text differs only a little (a city swapped, the
 doorway pattern); text hidden by an inline style (not the hidden attribute: menus, dialogs); a page further than
 3 clicks from the home page or not linked at all; on a site with pages in more than one
@@ -36,6 +37,7 @@ language, a page without <link rel="alternate" hreflang>.
                ai-crawlers.json) are not blocked; every ai_search and training robot has its own
                User-agent group and the group follows the policy (Disallow: / = blocked)
   ai-llms      no llms.txt unless the brief says "llms.txt: ano" (SEO standard: never by default)
+  breadcrumbs  WARN: an indexable nested page has no BreadcrumbList in its JSON-LD
   ai-jsonld    every indexable page has JSON-LD with a WebPage-like node whose publisher (inline
                or by @id anywhere on the site) names the organisation
   ai-entity    that publisher matches --facts (mapping keys brand, ico, email, telephone, domain;
@@ -162,7 +164,8 @@ class Page(HTMLParser):
         if self._in and tag == ("script" if self._in == "jsonld" else self._in):
             text = "".join(self._buf).strip()
             if self._in == "title":
-                self.title = text
+                if self.title is None:   # the document's title is the first one; an inline SVG's <title> later is not it (Coufal 12. 10. 2026)
+                    self.title = text
             elif self._in == "h1":
                 self.h1[-1] = " ".join(text.split())
             else:
@@ -271,6 +274,19 @@ def check_page(out, path, rel, base_url):
         for x in items:
             if isinstance(x, dict):
                 pg.items += [g for g in x.get("@graph", []) if isinstance(g, dict)] or [x]
+    if rel and rel.replace("\\", "/") != "index.html" and not pg.noindex and not nf:   # a nested page of a site says where it is (step 6, Coufal 13. 10.)
+        def walk(x):
+            if isinstance(x, dict):
+                yield x
+                for v in x.values():
+                    yield from walk(v)
+            elif isinstance(x, list):
+                for v in x:
+                    yield from walk(v)
+        crumbs = [i for i in walk(pg.items) if "BreadcrumbList" in types(i)]   # also WebPage -> breadcrumb -> BreadcrumbList
+        good = [c for c in crumbs if isinstance(c.get("itemListElement"), list) and len(c["itemListElement"]) >= 2]
+        r(bool(good), "breadcrumbs", "BreadcrumbList" if good else ("BreadcrumbList with fewer than two items" if crumbs
+          else "nested page without BreadcrumbList in its JSON-LD"))
     for item in pg.items:
         if "aggregateRating" in item and not types(item) & RATEABLE:
             r(False, "aggregate-rating", f"self-serving on {'/'.join(sorted(types(item)))}")
@@ -328,7 +344,10 @@ def resolve(rel, href):
     return url_path(os.path.normpath(os.path.join(base, u.path)) if not u.path.startswith("/") else u.path)
 
 
-def check_site_extras(out, parsed, brand):
+LEGAL_PATH = re.compile(r"ochrana|osobn|gdpr|privacy|cookie|podmienk|podmink|terms|impressum|imprint", re.I)
+
+
+def check_site_extras(out, parsed, brand, place=""):
     """WARN-level checks over the whole site (title order, contact path, near-duplicates,
     hidden text, click depth). parsed = [(rel, Page)]."""
     from difflib import SequenceMatcher
@@ -345,6 +364,11 @@ def check_site_extras(out, parsed, brand):
         if url_path(rel) != contact:
             out.append(("OK" if to_contact else "WARN", rel, "contact-path",
                         "links to the contact page" if to_contact else "no link to the contact page, mailto: or tel:"))
+        # a local business: every page but the legal ones names the place in its description (P113a, Coufal critic)
+        if place and pg.desc is not None and not LEGAL_PATH.search(rel):
+            stem = place.lower()[:max(3, len(place) - 1)]   # Trenčín/Trenčíne, Brno/Brně; ponytail: Praha/Praze needs a declension table
+            has = stem in pg.desc.lower()
+            out.append(("OK" if has else "WARN", rel, "description-place", f"names {place}" if has else f"the description does not name {place}"))
         hidden = " ".join(" ".join(pg.hidden_text).split())
         out.append(("WARN" if len(hidden) > 30 else "OK", rel, "hidden-text",
                     f"{len(hidden)} characters hidden by style: {hidden[:60]}" if len(hidden) > 30 else "none"))
@@ -584,6 +608,9 @@ def check_brief(out, brief, found):
     for cells in rows:
         if len(cells) < 2 or not cells[0].startswith("/"):
             continue
+        if len(cells) != len(header):   # a "|" inside a cell shifts every later column (Coufal 13. 10.: the description became "Coufal Clinic")
+            out.append(("BLOCKER", url_path(cells[0]), "brief-row", f"{len(cells)} cells, the header has {len(header)} (a '|' inside a cell?)"))
+            continue
         url, h1 = url_path(cells[0]), cells[1]
         pg = found.get(url)
         if pg is None:
@@ -647,7 +674,7 @@ def main():
                 out.append(("BLOCKER", t, "pages", "no pages found"))
             check_duplicates(out, parsed)
             check_site(out, t, pages)
-            check_site_extras(out, parsed, (facts.get("brand") or "").strip())
+            check_site_extras(out, parsed, (facts.get("brand") or "").strip(), str(facts.get("place") or "").strip())
             site_pages += parsed
             if a.ai:
                 with open(a.crawlers, encoding="utf-8") as f:

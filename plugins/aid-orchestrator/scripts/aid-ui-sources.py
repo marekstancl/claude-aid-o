@@ -286,18 +286,101 @@ def approval(proj):
 
 
 MAX_PAGES = 40
+MAX_IMAGES, MAX_IMAGE_BYTES, MIN_IMAGE_PX = 40, 8 * 1024 * 1024, 600   # photos worth showing the client
+
+
+def image_size(data):
+    """(width, height) of a JPEG, PNG or WebP from its bytes, or None."""
+    import struct
+    try:
+        if data[:8] == b"\x89PNG\r\n\x1a\n":
+            return struct.unpack(">II", data[16:24])
+        if data[:2] == b"\xff\xd8":
+            i = 2
+            while i + 9 < len(data):
+                if data[i] != 0xFF:
+                    return None
+                m, ln = data[i + 1], struct.unpack(">H", data[i + 2:i + 4])[0]
+                if m in (0xC0, 0xC1, 0xC2, 0xC3):
+                    h, w = struct.unpack(">HH", data[i + 5:i + 9])
+                    return w, h
+                i += 2 + ln
+        if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            k = data[12:16]
+            if k == b"VP8 ":
+                return struct.unpack("<HH", data[26:30])[0] & 0x3FFF, struct.unpack("<HH", data[26:30])[1] & 0x3FFF
+            if k == b"VP8L":
+                b = int.from_bytes(data[21:25], "little")
+                return (b & 0x3FFF) + 1, ((b >> 14) & 0x3FFF) + 1
+            if k == b"VP8X":
+                return int.from_bytes(data[24:27], "little") + 1, int.from_bytes(data[27:30], "little") + 1
+    except Exception:  # noqa: BLE001 - an unreadable header is just no size
+        return None
+    return None
+
+
+def fetch_images(outdir, found, allow_local):
+    """The old site's images (any public host - photos often sit on a CDN), each at most 8 MB, image/* only, no
+    redirect into a private network; kept when at least MIN_IMAGE_PX on the longer side. Saved as img/<sha8>.<ext>.
+    Returns the list for fetch.json: url, page, alt, file, bytes, width, height (or status when not kept)."""
+    out, done = [], set()
+    imgdir = os.path.join(outdir, "img")
+    os.makedirs(imgdir, mode=0o700, exist_ok=True)
+    for url, page, alt in found:
+        if url in done or len([x for x in out if x.get("file")]) >= MAX_IMAGES:
+            continue
+        done.add(url)
+        rec = {"url": url, "page": page, "alt": alt}
+        try:
+            k = site_key(url, allow_local)
+            opener = urllib.request.build_opener(_SameSite(k, allow_local))
+            with opener.open(urllib.request.Request(url, headers={"User-Agent": "aid-ui-sources"}), timeout=30) as r:
+                ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                if not ctype.startswith("image/") or ctype == "image/svg+xml":
+                    out.append(rec | {"status": "skipped (%s)" % (ctype or "unknown type")}); continue
+                data = r.read(MAX_IMAGE_BYTES + 1)
+            if len(data) > MAX_IMAGE_BYTES:
+                out.append(rec | {"status": "over 8 MB"}); continue
+            size = image_size(data)
+            if not size or max(size) < MIN_IMAGE_PX:
+                out.append(rec | {"status": "too small or unreadable", "width": size[0] if size else None, "height": size[1] if size else None}); continue
+            ext = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}.get(ctype, "img")
+            sha8 = hashlib.sha256(data).hexdigest()[:8]
+            name = "img/%s.%s" % (sha8, ext)
+            if any(x.get("file") == name for x in out):   # the same picture under another address
+                continue
+            with _open_new(os.path.join(outdir, name)) as fh:
+                fh.write(data)
+            out.append(rec | {"file": name, "bytes": len(data), "width": size[0], "height": size[1], "sha256": hashlib.sha256(data).hexdigest()})
+        except Exception as e:  # noqa: BLE001 - a failed image is a listed image, not a crash
+            out.append(rec | {"status": str(e)[:160]})
+    return out
 
 
 class _Links(html.parser.HTMLParser):
-    """href values of <a> and <base> - a parser, not a regex, so case, quoting and entities do not matter."""
+    """href values of <a> and <base> - a parser, not a regex, so case, quoting and entities do not matter -
+    and the images of the page (P113a, 13. 10. 2026: the old site's own photos were never fetched): <img> src and
+    the largest srcset entry with its alt, og:image, and url(...) in inline styles."""
     def __init__(self):
-        super().__init__(); self.hrefs = []; self.base = None
+        super().__init__(); self.hrefs = []; self.base = None; self.images = []
     def handle_starttag(self, tag, attrs):
         d = dict(attrs)
         if tag == "a" and d.get("href"):
             self.hrefs.append(d["href"])
         elif tag == "base" and d.get("href") and self.base is None:
             self.base = d["href"]
+        if tag == "img":
+            src = d.get("src") or d.get("data-src")
+            if d.get("srcset"):   # the widest candidate
+                best = max(((p.strip().split() + ["0w"])[:2] for p in d["srcset"].split(",") if p.strip()),
+                           key=lambda x: int(re.sub(r"\D", "", x[1]) or 0), default=None)
+                src = best[0] if best else src
+            if src:
+                self.images.append((src, d.get("alt") or ""))
+        if tag == "meta" and (d.get("property") or "").lower() == "og:image" and d.get("content"):
+            self.images.append((d["content"], ""))
+        for m in re.finditer(r"url\(['\"]?([^'\")]+)['\"]?\)", d.get("style") or ""):
+            self.images.append((m.group(1), ""))
 
 
 def site_key(url, allow_local):
@@ -385,7 +468,13 @@ def fetch_site(proj, url, allow_local=False):
         f = os.path.join(outdir, old)
         if os.path.isfile(f) and not os.path.islink(f):
             os.remove(f)
-    seen, queue, pages, names = set(), [url], [], set()
+    imgold = os.path.join(outdir, "img")
+    if os.path.isdir(imgold) and not os.path.islink(imgold):
+        for old in os.listdir(imgold):
+            f = os.path.join(imgold, old)
+            if os.path.isfile(f) and not os.path.islink(f):
+                os.remove(f)
+    seen, queue, pages, names, found = set(), [url], [], set(), []
     home = None
     while queue and len(pages) < MAX_PAGES:
         u = queue.pop(0).split("#")[0]
@@ -409,6 +498,13 @@ def fetch_site(proj, url, allow_local=False):
         with _open_new(os.path.join(outdir, name)) as fh:
             fh.write(raw)
         pages.append({"url": u, "final_url": final, "status": status, "file": name, "sha256": hashlib.sha256(raw).hexdigest()})
+        ip = _Links()   # the images of every page
+        try:
+            ip.feed(raw.decode("utf-8", errors="replace"))
+        except Exception:  # noqa: BLE001
+            pass
+        iroot = urllib.parse.urljoin(final, ip.base) if ip.base else final
+        found += [(urllib.parse.urljoin(iroot, src.replace("&amp;", "&")), u, alt) for src, alt in ip.images]
         if home is None:   # links from the home page only
             home = final
             parser = _Links()
@@ -431,7 +527,8 @@ def fetch_site(proj, url, allow_local=False):
                     queue.append(full)
     if home is None:
         die(f"--fetch-site {url}: the home page was not fetched as HTML ({pages[0]['status'] if pages else 'no response'})", 1)
-    rec = {"version": 1, "url": url, "final_url": home, "fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), "pages": pages}
+    rec = {"version": 1, "url": url, "final_url": home, "fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), "pages": pages,
+           "images": fetch_images(outdir, found, allow_local)}
     with _open_new(os.path.join(outdir, "fetch.json")) as fh:
         fh.write(json.dumps(rec, ensure_ascii=False, indent=1).encode("utf-8"))
     return outdir
@@ -461,7 +558,9 @@ def listing(proj, a, outdir):
     entries = [("project", p, None) for p in project_files(proj)]
     if a.old_site:
         root_rec = os.path.realpath(os.path.join(a.old_site, "fetch.json"))
-        entries += [("old_site", p, r) for p, r in walk(a.old_site, budget) if not (p and os.path.realpath(p) == root_rec)]
+        imgdir = os.path.realpath(os.path.join(a.old_site, "img")) + os.sep   # photos: fetch.json lists them, they are no text
+        entries += [("old_site", p, r) for p, r in walk(a.old_site, budget)
+                    if not (p and (os.path.realpath(p) == root_rec or os.path.realpath(p).startswith(imgdir)))]
         origin = site_origin(a.old_site)
     for f in a.from_:
         entries += [("from", p, r) for p, r in walk(f, budget)]

@@ -6,7 +6,7 @@
 setup() {
   SK="$BATS_TEST_DIRNAME/../../../skills/ui-design"
   LINT="$BATS_TEST_DIRNAME/../../aid-lint-skill.sh"
-  STEPS="0-start 1-product 1p-sources 1v-vision 1i-identity 1s-seo 2-structure 3-content-plan 4-references 5-directions 6-build 7-verify"
+  STEPS="0-start 1-product 1p-sources 1v-vision 1i-identity 1s-seo 2-structure 3-content-plan 4-references 5-directions 6-build 7-verify 8-quality"
 }
 
 @test "no step names Impeccable or voice-standard" {

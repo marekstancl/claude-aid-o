@@ -19,7 +19,7 @@
 # 4. `aid-ui-state.sh gate-record <project> <result.json>`.
 #
 # Inputs the checks read (all optional; missing -> the check's rows are not_covered):
-# docs/content/facts.yaml, docs/design/brand-package/, .aid-ui/scenarios/<flow id>.mjs,
+# docs/content/facts.yaml, docs/content/tasks.yaml (P113a task test), docs/content/photos.yaml (P113a photo slots), docs/design/brand-package/, .aid-ui/scenarios/<flow id>.mjs,
 # .aid-ui/test-credentials.json (test accounts only, never real ones), docs/seo/brief.md,
 # DESIGN.md, docs/design/design-standard.md, docs/product-vision.md, docs/zakaznik/.
 # Exit: 0 recorded with no open row, 3 recorded with open rows, 1 refused or failed, 2 usage.
@@ -54,10 +54,20 @@ if [[ -f "$PROJECT/docs/content/facts.yaml" ]]; then
   yq -o=json . "$PROJECT/docs/content/facts.yaml" > "$OUT/facts.json" || die "cannot read docs/content/facts.yaml"
   facts=(--facts "$OUT/facts.json")
 fi
+if [[ -f "$PROJECT/docs/content/tasks.yaml" ]]; then   # P113a: the task test (task_test row)
+  yq -o=json . "$PROJECT/docs/content/tasks.yaml" > "$OUT/tasks.json" || die "cannot read docs/content/tasks.yaml"
+  facts+=(--tasks "$OUT/tasks.json")
+fi
+if [[ -f "$PROJECT/docs/content/photos.yaml" ]]; then   # P113a: the photos the client owes (photo_slots row)
+  yq -o=json . "$PROJECT/docs/content/photos.yaml" > "$OUT/photos.json" || die "cannot read docs/content/photos.yaml"
+  facts+=(--photos "$OUT/photos.json")
+fi
 
 export AID_UI_PROJECT="$PROJECT"
-srv="$(bash "$HERE/aid-ui-serve.sh" preview "$dir")" || exit 1
-trap 'bash "$HERE/aid-ui-serve.sh" stop preview >/dev/null 2>&1 || true; [[ -z "$subject" ]] || rm -rf "$OUT"' EXIT
+srv="$(AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" preview "$dir")" || exit 1   # the project: the form receiver reads .aid-ui/form.json
+plog="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}/$(sed -n 's/^JOB: //p' <<<"$srv")/stdout.log"   # form_delivery: no sent value in it
+[[ -f "$plog" ]] && facts+=(--preview-log "$plog")
+trap 'AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" stop preview >/dev/null 2>&1 || true; [[ -z "$subject" ]] || rm -rf "$OUT"' EXIT
 url="$(sed -n 's/^URL: //p' <<<"$srv")"
 if [[ -n "$subject" ]]; then
   mkdir -p "$(dirname "$subject")"

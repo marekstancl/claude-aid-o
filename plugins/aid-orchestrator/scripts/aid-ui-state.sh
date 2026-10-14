@@ -89,6 +89,10 @@
 #                          copy_review.pages (see the header of aid-ui-copy.py for every refusal).
 #     approve-page <project> <page>               kind approve_page, target <page>@<fingerprint
 #                          of the page in the recorded build>; refused when the site changed
+#     Milestones (P113a bod 8): an approve_page or exception question may list items (one answer for several
+#                          pages or exceptions; its target is items@<sha of the items>). record-answer keeps
+#                          the items with their decisions; each is used with --answer <q> --answer-item <id>
+#                          (the item's kind, target and approve are checked; .consumed records <q>#<id>).
 #     defer-content <project> <item id>           kind defer_content, target <item id>;
 #                          the content item's status -> deferred_by_pm
 #     confirm-content <project> [--item <id>]     (P108) the PM's approved copy verdict (kind
@@ -178,6 +182,8 @@
 #   chapter-all-target / chapter-all     (P108) refused before the final gate: the customer page must
 #                                        be the one the recorded gate checked and the coverage report
 #                                        not older than the gate result
+#   gate-check <project>                 (P113a) exit 0 when the site is the recorded build, the gate ran on it and
+#                                        every open row has a live exception (finish without approvals/answers/content)
 #   finish <project>                     needs .aid-ui/links.json (both 200 again) and writes
 #                                        .aid-ui/finish.json {finished, web, customer, verdict};
 #                                        refuses unless: aid-ui-coverage.sh check exits 0 (3 only
@@ -216,11 +222,14 @@ now() { date -u +%Y-%m-%dT%H:%M:%S.%3NZ; }
 
 (( $# >= 2 )) || usage "need <verb> <project>"
 VERB="$1"; PROJECT="$2"; shift 2
-ANSWER=""; LIVE_ANSWER=""; rest=()   # --answer <id> may stand anywhere after <project>
+ANSWER=""; ITEM=""; LIVE_ANSWER=""; rest=()   # --answer <id> [--answer-item <id>] may stand anywhere after <project>
 while (( $# )); do
   if [[ "$1" == --answer ]]; then (( $# >= 2 )) || usage "--answer needs a question id"; ANSWER="$2"; shift 2
+  elif [[ "$1" == --answer-item ]]; then (( $# >= 2 )) || usage "--answer-item needs an item id"; ITEM="$2"; shift 2
+    [[ "$ITEM" =~ ^[A-Za-z0-9._-]+$ ]] || usage "--answer-item: letters, digits, . _ -"
   else rest+=("$1"); shift; fi
 done
+USED="$ANSWER${ITEM:+#$ITEM}"   # what .consumed records: one item of a milestone is used once (P113a bod 8)
 set -- "${rest[@]+"${rest[@]}"}"
 BRAND="$PROJECT/docs/brand"
 HTML="$BRAND/index.html"
@@ -643,7 +652,7 @@ elif mode == "covered":   # open rows (as finish counts them) that a live PM exc
         if hit:
             print(json.dumps({"row": {k: r.get(k) for k in ("check",) + AX}, "reason": hit.get("reason", ""), "answer": hit.get("answer")},
                              ensure_ascii=False, sort_keys=True))
-elif mode == "finish":
+elif mode in ("finish", "gatecheck"):   # gatecheck (P113a): only the build and the gate, for the quality loop
     ck, project = load(args[1]), args[2]
     drift = args[3] if len(args) > 3 else ""
     b, g = st.get("build"), st.get("gate")
@@ -676,19 +685,19 @@ elif mode == "finish":
                 if not any(covers(st, fps, e, r) for e in live):
                     bad.append("%s row without a live exception: %s %s" % (r.get("status"), r.get("check"),
                                "/".join(val(r.get(k)) or "-" for k in AX)))
-    appr = st.get("approvals") or {}
-    for p in sorted(fps):
+    appr = st.get("approvals") or {} if mode == "finish" else {}
+    for p in sorted(fps) if mode == "finish" else []:
         if p != "_site" and (appr.get(p) or {}).get("fingerprint") != fps[p]:
             bad.append("page %s is not approved at its current fingerprint" % p)
-    if b and b.get("shared") and (appr.get("_shared") or {}).get("fingerprint") != b["shared"]:
+    if mode == "finish" and b and b.get("shared") and (appr.get("_shared") or {}).get("fingerprint") != b["shared"]:
         bad.append("the shared look (_shared: inline style and script on every page) is not approved at its current fingerprint")
     ans = st.get("answers") or {}
-    for q in list(st.get("consumed") or []) + ([drift] if drift else []):
+    for q in (list(st.get("consumed") or []) + ([drift] if drift else [])) if mode == "finish" else []:
         a = ans.get(q) or {}
         f = os.path.join(project, a.get("answer_file") or "-")
         if not os.path.isfile(f) or sha_file(f) != a.get("answer_sha256"):
             bad.append("the answer file of %s changed or is missing since it was recorded" % q)
-    for it in st.get("content_plan") or []:
+    for it in st.get("content_plan") or [] if mode == "finish" else []:
         if it.get("status") not in ("confirmed_client", "deferred_by_pm"):
             bad.append("content item %s is %s (needs confirmed_client or deferred_by_pm)" % (it.get("id"), it.get("status")))
 for m in bad:
@@ -710,15 +719,19 @@ checks_json() {   # checks.yaml next to the coverage map, as JSON in a temp file
 take_answer() {
   local kind="$1" target="$2" why file sha
   [[ -n "$ANSWER" ]] || die "$VERB refused: needs --answer <question id>, the PM's answer on the studio page"
-  why="$(jq -r --arg id "$ANSWER" --arg k "$kind" --arg t "$target" '
+  why="$(jq -r --arg id "$ANSWER" --arg it "$ITEM" --arg used "$USED" --arg k "$kind" --arg t "$target" '
     .answers[$id] as $a
+    | (if $a != null and $it != "" then (first($a.items[]? | select(.id == $it)) // null) else $a end) as $x
     | if $a == null then "no recorded answer \($id); run: aid-ui-state.sh record-answer --question \($id)"
-      elif $a.kind != $k then "answer \($id) is a \($a.kind) answer, not \($k)"
-      elif (if $k == "exception" then ((try ($a.target | fromjson) catch null) | if type == "object" then with_entries(select(.value != "*")) else . end)
-              != (($t | fromjson) | with_entries(select(.value != "*"))) else $a.target != $t end)
-        then "answer \($id) is for \($a.target | tojson), not \($t)"
-      elif ($a.decision | IN("approve", "choose") | not) then "answer \($id) decided \($a.decision), not approve or choose"
-      elif any(.consumed[]?; . == $id) then "answer \($id) is already used"
+      elif $it == "" and ($a.items | type) == "array" then "answer \($id) is a milestone: name its item with --answer-item <id>"
+      elif $it != "" and ($a.items | type) != "array" then "answer \($id) has no items; --answer-item \($it) does not apply"
+      elif $x == null then "answer \($id) has no item \($it)"
+      elif $x.kind != $k then "answer \($used) is a \($x.kind) answer, not \($k)"
+      elif (if $k == "exception" then ((try ($x.target | fromjson) catch null) | if type == "object" then with_entries(select(.value != "*")) else . end)
+              != (($t | fromjson) | with_entries(select(.value != "*"))) else $x.target != $t end)
+        then "answer \($used) is for \($x.target | tojson), not \($t)"
+      elif ($x.decision | IN("approve", "choose") | not) then "answer \($used) decided \($x.decision), not approve or choose"
+      elif any(.consumed[]?; . == $used) then "answer \($used) is already used"
       else "ok \($a.answer_sha256) \($a.answer_file)" end' "$STATE")"
   [[ "$why" == "ok "* ]] || die "$VERB refused: $why"
   why="${why#ok }"; sha="${why%% *}"; file="${why#* }"
@@ -729,7 +742,8 @@ take_answer() {
   [[ "$STUDIO_CODE" == 200 ]] || { rm -f "$body"; die "$VERB refused: the studio does not hold answer $ANSWER (HTTP $STUDIO_CODE); the recorded answer is not confirmed by the PM's page"; }
   jq -e --arg id "$ANSWER" --argjson s "$(jq -c --arg id "$ANSWER" '.answers[$id]' "$STATE")" \
     'type == "object" and .question == $id and .kind == $s.kind and .target == $s.target and .decision == $s.decision
-     and (.cards | type) == "array" and (.cards_sha256 | type) == "string" and .cards_sha256 == $s.cards_sha256' \
+     and (.cards | type) == "array" and (.cards_sha256 | type) == "string" and .cards_sha256 == $s.cards_sha256
+     and .items_sha256 == $s.items_sha256 and .items == $s.items' \
     "$body" >/dev/null 2>&1 || { rm -f "$body"; die "$VERB refused: the studio's answer $ANSWER differs from the recorded one"; }
   LIVE_ANSWER="$(<"$body")"   # the studio's answer, with the cards it showed (set refs)
   rm -f "$body"
@@ -906,7 +920,7 @@ case "$VERB" in
     jq -e --arg q "$qid" 'any(.consumed[]?; . == $q)' "$STATE" >/dev/null && die "answer $qid is already used; it is not recorded again"
     [[ -r "$PROJECT/.aid-ui/studio.token" ]] || die "no studio token $PROJECT/.aid-ui/studio.token; start the studio (aid-ui-serve.sh studio); $qid stays pending"
     pq="$(jq -c --arg q "$qid" 'first(.questions[]? | select(.id == $q and (.opened_at | type) == "string"))
-      | {kind, target, opened_at}' "$PROJECT/.aid-ui/studio/payload.json" 2>/dev/null)" || pq=""
+      | {kind, target, opened_at, items}' "$PROJECT/.aid-ui/studio/payload.json" 2>/dev/null)" || pq=""
     [[ -n "$pq" ]] || die "question $qid is not listed in .aid-ui/studio/payload.json; nothing recorded"
     opened="$(jq -r .opened_at <<<"$pq")"
     body="$(tmpfile answer.json)"
@@ -920,6 +934,12 @@ case "$VERB" in
     jq -e --argjson p "$pq" '.kind == $p.kind and .target == $p.target' <<<"$ans" >/dev/null ||
       { rm -f "$body"; die "the studio's answer to $qid is for $(jq -c '[.kind, .target]' <<<"$ans"), not the listed question $(jq -c '[.kind, .target]' <<<"$pq"); nothing recorded"; }
     rm -f "$body"
+    if [[ "$(jq -r '.items | type' <<<"$pq")" == array ]]; then   # a milestone: its items exactly as listed, hashed both ways
+      isha() { jq -cS --arg k "$(jq -r .kind <<<"$pq")" '[.[] | {id, kind: (.kind // $k), target}] | sort_by(.id)' | tr -d '\n' | sha256sum | cut -d' ' -f1; }
+      psha="$(jq -c '.items' <<<"$pq" | isha)"; asha="$(jq -c '.items // []' <<<"$ans" | isha)"
+      [[ "$(jq -r .target <<<"$pq")" == "items@$psha" && "$(jq -r '.items_sha256 // ""' <<<"$ans")" == "$psha" && "$asha" == "$psha" ]] ||
+        die "the studio's answer to $qid does not carry the listed items (sha $psha); nothing recorded"
+    fi
     at="$(jq -r .at <<<"$ans")"
     [[ "$(date -u -d "$at" +%s%N 2>/dev/null || echo 0)" -gt "$(date -u -d "$opened" +%s%N 2>/dev/null || echo 0)" ]] ||
       die "the answer to $qid ($at) is not newer than its round ($opened); nothing recorded"
@@ -930,7 +950,8 @@ case "$VERB" in
     jq_write --arg q "$qid" --arg f "$file" --arg sha "$sha" --arg o "$opened" --argjson a "$ans" \
       '.answers[$q] = {kind: $a.kind, target: $a.target, decision: $a.decision, choice: $a.choice,
                        comment: $a.comment, cards: $a.cards, cards_sha256: $a.cards_sha256,
-                       answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at}'
+                       answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at}
+                      + (if ($a.items | type) == "array" then {items: $a.items, items_sha256: $a.items_sha256} else {} end)'
     echo "ANSWER $qid: $(jq -c '{kind, target, decision, choice}' <<<"$ans")"
     ;;
 
@@ -999,7 +1020,7 @@ case "$VERB" in
     build_current
     take_answer approve_page "$1@$fp"
     jq_write --arg p "$1" --arg f "$fp" --arg q "$ANSWER" --arg at "$(now)" \
-      '.approvals[$p] = {fingerprint: $f, answer: $q, at: $at} | .consumed += [$q]'
+      --arg u "$USED" '.approvals[$p] = {fingerprint: $f, answer: $q, at: $at} + (if $u != $q then {item: ($u | split("#")[1])} else {} end) | .consumed += [$u]'
     echo "APPROVED: $1 at ${fp:0:12}"
     ;;
 
@@ -1064,9 +1085,10 @@ case "$VERB" in
       reasons="$(bpy exreasons "$STATE" "$sel" "$PROJECT/.aid-ui/verify/result.json")"
       [[ "$reasons" != "[]" ]] || die "exception refused: a page-* exception is bound to the reason the gate gives; the recorded result has no open $check row (run the gate first)"
     fi
-    jq_write --argjson s "$sel" --argjson f "$fps" --argjson r "$reasons" --arg q "$ANSWER" --arg at "$(now)" \
-      '.exceptions += [{selector: $s, fingerprints: $f, answer: $q, reason: (.answers[$q].comment // ""), at: $at}
-        + (if ($r | length) > 0 then {reasons: $r} else {} end)] | .consumed += [$q]'
+    jq_write --argjson s "$sel" --argjson f "$fps" --argjson r "$reasons" --arg q "$ANSWER" --arg it "$ITEM" --arg u "$USED" --arg at "$(now)" \
+      '(if $it != "" then (first(.answers[$q].items[]? | select(.id == $it)).comment // "") else "" end) as $ic
+       | .exceptions += [{selector: $s, fingerprints: $f, answer: $q, reason: (if $ic != "" then $ic else (.answers[$q].comment // "") end), at: $at}
+        + (if $it != "" then {item: $it} else {} end) + (if ($r | length) > 0 then {reasons: $r} else {} end)] | .consumed += [$u]'
     echo "EXCEPTION: $sel${reasons:+ reasons $reasons}"
     ;;
 
@@ -1388,6 +1410,16 @@ case "$VERB" in
       '{finished: $d, at: $at, web: $w, customer: $c, verdict: $v, rating: (if $r == "" then null else $r end), publish_blocked_by: $b}' > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/finish.json"
     echo "FINISHED: $(today) · $web · $customer · verdict $verdict${rating:+ ($rating/10)}"
     [[ "$blocked" == "[]" ]] || echo "PUBLISH BLOCKED by $(jq length <<<"$blocked") critical open item(s): $(jq -r 'map(.id) | join(", ")' <<<"$blocked")"
+    ;;
+
+  gate-check)
+    # P113a: the quality loop's regression check after a fix - the site is the recorded build, the gate ran on it
+    # and every open row has a live exception; approvals and answers are the handover's business (finish)
+    need_state
+    ck="$(checks_json)"; rc=0; bpy gatecheck "$STATE" "$ck" "$PROJECT" "" || rc=$?
+    rm -f "$ck"
+    [[ "$rc" -eq 0 ]] || exit 1
+    echo "GATE OK: build $(jq -r '.build.id[0:12]' "$STATE")"
     ;;
 
   exception-covered)

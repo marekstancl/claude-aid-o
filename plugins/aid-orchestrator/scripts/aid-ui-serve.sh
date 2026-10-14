@@ -63,8 +63,8 @@ DEADLINE=604800   # 7 days (P108, 11. 10. 2026: the studio died after exactly 8 
 # The preview server: http.server without dotfiles (.env, .git; only .well-known passes)
 # and without directory listings (a directory serves its index.html or 404).
 # aid-job.sh stores argv one line per element, so the script is one line (exec of an escaped string).
-PREVIEW_PY="exec('import functools, http.server, sys, urllib.parse\\nclass H(http.server.SimpleHTTPRequestHandler):\\n    def send_head(self):\\n        segs = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).split(\"/\")\\n        if any(x.startswith(\".\") and x != \".well-known\" for x in segs):\\n            self.send_error(404); return None\\n        return super().send_head()\\n    def list_directory(self, path):\\n        self.send_error(404); return None\\nhttp.server.ThreadingHTTPServer((sys.argv[2], int(sys.argv[1])), functools.partial(H, directory=sys.argv[3])).serve_forever()\\n')"
-usage() { echo "usage: aid-ui-serve.sh studio <project> | brand <dir> | preview <dir> | stop <studio|brand|preview>" >&2; exit 2; }
+PREVIEW_PY="$(dirname "${BASH_SOURCE[0]}")/aid-ui-preview.py"   # static site + the form receiver (P113a)
+usage() { echo "usage: aid-ui-serve.sh studio <project> | brand <dir> | preview <dir> | stop <studio|brand|preview>   (preview: aid-ui-preview.py, with the form receiver of <project>/.aid-ui/form.json)" >&2; exit 2; }
 die() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 1; }
 refuse() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 2; }
 
@@ -121,13 +121,16 @@ case "$1" in
     code="$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
     rm -f "$dir/.aid-ui/studio.code"; (umask 077; printf '%s\n' "$code" > "$dir/.aid-ui/studio.code")
     LINK_QS="?k=$code"
+    # reused only when it serves this project WITH THIS PLUGIN's server: a studio left running by an older plugin
+    # version would otherwise keep refusing what the new version writes (P113a 13. 10. 2026)
     if alive "$id" && listening "$STUDIO_PORT" \
-       && [[ "$(jq -r '.command as $c | $c[($c | index("--project")) + 1]' "$JOBS/$id/job.json")" == "$dir" ]]; then
+       && [[ "$(jq -r '.command as $c | $c[($c | index("--project")) + 1]' "$JOBS/$id/job.json")" == "$dir" ]] \
+       && [[ "$(jq -r '.command[1]' "$JOBS/$id/job.json")" == "$(realpath "$STUDIO_PY")" ]]; then
       echo "URL: http://$HOST:$STUDIO_PORT/$LINK_QS"; echo "JOB: $id"; exit 0
     fi
     tok="$dir/.aid-ui/studio.token"
     (umask 077; od -An -tx1 -N16 /dev/urandom | tr -d ' \n' > "$tok")
-    start studio python3 "$STUDIO_PY" --project "$dir" --host "$HOST" --port "$STUDIO_PORT" --token-file "$tok"
+    start studio python3 "$(realpath "$STUDIO_PY")" --project "$dir" --host "$HOST" --port "$STUDIO_PORT" --token-file "$tok"
     ;;
   brand)
     dir="$(realpath -e "$2" 2>/dev/null || true)"
@@ -138,11 +141,11 @@ case "$1" in
     while IFS= read -r -d '' f; do
       case "$f" in
         state.json|*/state.json|*.tmp|*.[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]) ;;
-        index.html|assets/*|fonts/*) continue ;;
+        index.html|favicon.svg|assets/*|fonts/*) continue ;;   # favicon.svg: the client's tab icon aid-ui-state.sh copies here (P108)
         */*) ;;
         *.css) continue ;;
       esac
-      refuse "$dir/$f must not be served (state.json must not be served, nor anything internal; the brand page serves only index.html, *.css, assets/, fonts/)"
+      refuse "$dir/$f must not be served (state.json must not be served, nor anything internal; the brand page serves only index.html, favicon.svg, *.css, assets/, fonts/)"
     done < <(find "$dir" -mindepth 1 ! -type d -printf '%P\0')
     id="$(job_id brand)"
     if alive "$id" && listening "$BRAND_PORT" && [[ "$(jq -r '.command[-1]' "$JOBS/$id/job.json")" == "$dir" ]]; then
@@ -156,10 +159,11 @@ case "$1" in
     l="$(find "$dir" -mindepth 1 -type l -printf '%P' -quit)"
     [[ -z "$l" ]] || refuse "$dir/$l is a symlink; the preview serves no symlinks (it could point outside the site)"
     id="$(job_id preview)"
-    if alive "$id" && listening "$PREVIEW_PORT" && [[ "$(jq -r '.command[-1]' "$JOBS/$id/job.json")" == "$dir" ]]; then
+    if alive "$id" && listening "$PREVIEW_PORT" && [[ "$(jq -r '.command[4]' "$JOBS/$id/job.json")" == "$dir" ]] \
+       && [[ "$(jq -r '.command[1]' "$JOBS/$id/job.json")" == "$(realpath "$PREVIEW_PY")" ]]; then
       echo "URL: http://$HOST:$PREVIEW_PORT/"; echo "JOB: $id"; exit 0
     fi
-    start preview python3 -c "$PREVIEW_PY" "$PREVIEW_PORT" "$HOST" "$dir"
+    start preview python3 "$(realpath "$PREVIEW_PY")" "$PREVIEW_PORT" "$HOST" "$dir" "$(realpath -m "$PROJECT")"
     ;;
   stop)
     [[ "$2" == studio || "$2" == brand || "$2" == preview ]] || usage

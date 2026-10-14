@@ -21,6 +21,9 @@ Vybrané vzory a styly v `.aid-ui/refs/`, brand balíček, vize a tón,
 
 ## Postup
 
+Pohyb každého směru navrhni podle převzatých dovedností `emil-skills/animate` a `emil-design-eng` (proč se
+co hýbe, křivka, délka) a hlídej standardy `review-animations`; stvrzenka postupu je vyžaduje (P113a).
+
 1. Tři směry, každý jako HTML první obrazovky domovské stránky (u aplikace
    hlavní obrazovky) v `.aid-ui/directions/<n>/`: skutečné texty z obsahového
    plánu a registru faktů, skutečné logo, žádný zástupný text (MUST 5).

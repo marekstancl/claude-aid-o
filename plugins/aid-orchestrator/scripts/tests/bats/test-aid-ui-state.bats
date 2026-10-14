@@ -1361,6 +1361,15 @@ PY
   [ "$status" -eq 1 ]; [[ "$output" == *"content item team is missing"* ]]
 }
 
+@test "P113a gate-check: the build and the gate only - a missing content item passes it, a site edited after the gate does not" {
+  ready
+  cp='[{"id":"hero","status":"confirmed_client"},{"id":"team","status":"missing"}]'
+  ans c2 content_plan "$(sha_of "$cp")"; "$SCRIPT" set "$PROJ" content-plan "$cp" --answer c2 >/dev/null
+  run "$SCRIPT" gate-check "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }; [[ "$output" == "GATE OK: build "* ]]
+  echo 'User-agent: x' > "$SITE/robots.txt"; "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  run "$SCRIPT" gate-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"gate result is for build"* ]]
+}
+
 @test "attest records {note, at} only for an agent: item of the coverage map" {
   run "$SCRIPT" attest "$PROJ" 'ecosystem/specs/a.md#Standard A > Rules#0ec58950' --note "prošel jsem klávesnicí"
   [ "$status" -eq 0 ]
@@ -1674,11 +1683,11 @@ decide_payload() {
 
 @test "P108 method: prints the method files, writes the receipt; the live studio and payload-check refuse a question opened before it" {
   run "$SCRIPT" method "$PROJ" identity; [ "$status" -eq 0 ]
-  [ "$(grep -c '^===== ' <<<"$output")" -eq 5 ]
+  [ "$(grep -c '^===== ' <<<"$output")" -eq 15 ]   # P113a: critique, principles and the rest of logo-design are required reading too
   grep -q '^===== skills/ui-design/references/adopted/logo-design/SKILL.md' <<<"$output"
   grep -q 'Phase 3 — Concepts' <<<"$output"                    # the text itself was printed, not just named
   R="$PROJ/.aid-ui/method/identity.json"
-  [ "$(jq -r '.files | length' "$R")" -eq 5 ]
+  [ "$(jq -r '.files | length' "$R")" -eq 15 ]
   [ "$(jq -r '.files[0].sha256' "$R")" = "$(sha256sum "$BATS_TEST_DIRNAME/../../../skills/ui-design/references/adopted/logo-design/SKILL.md" | cut -d' ' -f1)" ]
   run "$SCRIPT" method "$PROJ" nonsense; [ "$status" -eq 2 ]
   studio   # fresh receipts now
@@ -1703,4 +1712,33 @@ decide_payload() {
   jqw '.answers.w1.choice = "c"'
   run "$D/scripts/aid-ui-state.sh" method "$PROJ" vision; [ "$status" -eq 0 ]; [[ "$output" == *"waived by the PM's answer w1 (without)"* ]]
   [ "$(jq -r '.waived + " " + .mode + " " + (.files | length | tostring)' "$PROJ/.aid-ui/method/vision.json")" = "w1 without 0" ]
+}
+
+@test "P113a bod 8: a milestone answer is recorded with its items; each approved item is used once with --answer-item, a returned one never" {
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  studio
+  it="$(jq -nc --arg a "index.html@$(fp index.html)" --arg b "kontakt.html@$(fp kontakt.html)" \
+    '[{id: "index.html", title: "Úvod", target: $a}, {id: "kontakt.html", title: "Kontakt", target: $b}]')"
+  sha="$(jq -cS '[.[] | {id, kind: "approve_page", target}] | sort_by(.id)' <<<"$it" | tr -d '\n' | sha256sum | cut -d' ' -f1)"
+  p="$PROJ/.aid-ui/studio/payload.json"
+  jq --argjson it "$it" --arg t "items@$sha" --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" \
+    '.questions += [{id: "m1", kind: "approve_page", target: $t, opened_at: $o, items: $it}]' "$p" > "$p.t" && mv "$p.t" "$p"
+  curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg t "items@$sha" '{question: "m1", kind: "approve_page", target: $t, decision: "return", items: {"kontakt.html": "telefón hore"}}')" "$AID_UI_STUDIO_URL/answer"
+  run "$SCRIPT" record-answer "$PROJ" --question m1; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e --arg s "$sha" '.answers.m1 | .items_sha256 == $s and (.items | length) == 2' "$STATE" >/dev/null
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer m1; [ "$status" -eq 1 ]; [[ "$output" == *"--answer-item"* ]]
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer m1 --answer-item index.html; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.approvals["index.html"] | .answer == "m1" and .item == "index.html"' "$STATE" >/dev/null
+  jq -e '.consumed | index("m1#index.html") != null and index("m1") == null' "$STATE" >/dev/null
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer m1 --answer-item index.html; [ "$status" -eq 1 ]; [[ "$output" == *"already used"* ]]
+  run "$SCRIPT" approve-page "$PROJ" kontakt.html --answer m1 --answer-item kontakt.html; [ "$status" -eq 1 ]; [[ "$output" == *"decided return"* ]]
+  run "$SCRIPT" approve-page "$PROJ" kontakt.html --answer m1 --answer-item index.html; [ "$status" -eq 1 ]; [[ "$output" == *"is for"* ]]
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer m1 --answer-item nic; [ "$status" -eq 1 ]; [[ "$output" == *"has no item nic"* ]]
+  # a single answer takes no item
+  ans a1 approve_page "kontakt.html@$(fp kontakt.html)"
+  run "$SCRIPT" approve-page "$PROJ" kontakt.html --answer a1 --answer-item kontakt.html; [ "$status" -eq 1 ]; [[ "$output" == *"has no items"* ]]
+  # a returned item turned into an approval in the state is refused against the studio (the decisions are compared, not only the sha)
+  jq '.answers.m1.items[1].decision = "approve"' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  run "$SCRIPT" approve-page "$PROJ" kontakt.html --answer m1 --answer-item kontakt.html; [ "$status" -eq 1 ]; [[ "$output" == *"differs from the recorded one"* ]]
 }

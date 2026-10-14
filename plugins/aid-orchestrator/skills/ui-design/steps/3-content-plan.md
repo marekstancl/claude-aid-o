@@ -40,12 +40,40 @@ Nejdřív `aid-ui-state.sh context-check <project>`; neprojde → zpět na krok 
    brána porovná strukturovaná data webu: `brand` (název), `ico`, `email`, `telephone`,
    `domain` (`https://…`), `place`. Klíč, který firma nemá (telefon), se vynechá; bez
    `brand` a `ico` brána firmu jen varuje jako nezkontrolovanou.
+2a. **Úkoly zákazníka** `docs/content/tasks.yaml` (FB-29, P113a): s čím zákazník na web přijde, jako seznam
+   `{id, task, expect: [texty]}` nebo `{id, task, form: true}`. Pro web lokální služby aspoň `price`
+   (konkrétní výkon a jeho cena), `hours` (otevírací doba v den, na který se lidé ptají), `booking`
+   (`form: true`); id musí sedět s `task_test` měřítka kritika (`critic/web-local.yaml`). Každý text
+   z `expect` musí být v registru faktů. Brána (`task_test`) ho hledá do dvou kroků od úvodní stránky
+   na počítači i mobilu. Příklad:
+   `- {id: price, task: "Najdi cenu preventivní prohlídky", expect: ["Preventivní prohlídka", "56 €"]}`.
+2b. **Fotky, které dodá klient** `docs/content/photos.yaml` (FB-30): každá fotka, kterou web potřebuje
+   a podklady ji nemají, jako `{id, page, where, what, shape: rect|round, ratio: "4:5", min_px: "1600x2000"}`
+   (`page` = soubor stránky ve stavbě, jak ho jmenuje brána). Stavba z ní udělá rámeček v přesném tvaru
+   (krok 6, bod 4a), stránka „co jste dostali“ z ní ukáže zadání fotek pro klienta.
+2c. **Vlastní fotky klienta ze starého webu (P113a, PM 13. 10. 2026):** `aid-ui-photos.py candidates <project>`;
+   každou fotku si prohlédni (Read) a vyznač, jestli je na ní rozpoznatelný člověk:
+   `aid-ui-photos.py mark <project> <c> --people yes|no --describe "<co na ní je>" [--note]` (popis jde do `alt`). Pak pro každé místo z `photos.yaml`
+   `aid-ui-photos.py question <project> <id>` → otázka `photos` (část Obsah) s kartami podle tvaru a kartou
+   „ponechat rámeček“; po odpovědi `aid-ui-photos.py apply <project> --answer <id>` (WebP do 200 kB,
+   `src` v `photos.yaml`). Fotka s člověkem nese riziko „jen s jeho souhlasem“.
 3. Agent smí psát `draft` jen z faktů registru a podle „Jak psát vizi,
    slogany a texty" (`steps/1v-vision.md`); `confirmed_client` dává jen PM.
    Pořadí a obsah sekcí každé stránky navrhni podle rámce stránky z
    `references/adopted/marketingskills/cro/SKILL.md` (Page-Specific Frameworks: Homepage,
    Landing Page, Pricing Page, Feature Page; stránka služby nebo produktu jde podle Feature Page) a podle „Page Structure Framework"
-   převzatého copywritingu; právní stránka (`legal: true` z kroku 2) rámec nemá. Jazyk stránky
+   převzatého copywritingu; právní stránka (`legal: true` z kroku 2) rámec nemá.
+   **Web lokální služby navíc (P113a, kritici Coufal 13. 10. 2026; dřív se psalo „z hlavy“):**
+   - **Stránka nebo sekce služby:** bloky Pro koho / Co zahrnuje / Jak postupujeme / Ceny (3–5 typických
+     položek z ceníku ve sloupcích, které ceník podniku má) a odkazy na úplný ceník, objednání a telefon.
+     Všechno jen z registru faktů. Chybí-li fakta o průběhu, která daná služba má (doba, počet návštěv,
+     co si zákazník připraví, co následuje), vznikne otevřený bod pro klienta, ne vymyšlená věta. Podnik
+     bez ceníku dá místo cen způsob nacenění (např. prohlídka zdarma, cena po zaměření).
+   - **Závěrečná výzva každé stránky** říká, co se stane po odeslání (např. „zavoláme nebo napíšeme a domluvíme
+     termín“), a vedle hlavního tlačítka nabízí telefon jako druhou akci.
+   - **Nejsilnější ověřený důkaz** (hodnocení se zdrojem a datem, kvalifikace) stojí u hlavní výzvy úvodu,
+     ne až na konci stránky.
+   Jazyk stránky
    bez `references/copy-<jazyk>.md`: piš podle `copy-rules.md` a převzatých anglických pravidel
    a PM ve studiu jednou řekni, že kontrola textů takovou stránku pustí jen s jeho výjimkou.
 4. Otázka `content_plan` ve studiu: tabulka položek (stránka, sekce,
@@ -70,7 +98,7 @@ schválený verdikt textů (`confirm-content`, krok 7 bod 1b) nebo odpověď na 
 
 ## Zápis
 
-`content_plan` ve stavu (jen skript), `docs/content/facts.yaml`, kapitola
+`content_plan` ve stavu (jen skript), `docs/content/facts.yaml`, `docs/content/tasks.yaml`, `docs/content/photos.yaml`, kapitola
 `obsah`.
 
 ## Když krok selže

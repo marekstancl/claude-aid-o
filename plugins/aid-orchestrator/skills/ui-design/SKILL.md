@@ -82,6 +82,7 @@ typu „2.5". Cíl a smysl nepiš do jednotlivých otázek - patří kroku a č�
 | `steps/7-verify.md` bod 4 | 6 Kontrola | Pravidla vzhledu |
 | `steps/7-verify.md` bod 5 | 6 Kontrola | Schválení stránek |
 | `steps/7-verify.md` bod 6-9 | 6 Kontrola | Předání |
+| `steps/8-quality.md` | po předání (panel Hotovo) | Hodnocení majitele a technika |
 
 ## Jak se ptá PM (studio)
 
@@ -107,6 +108,19 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    Studio hlídá, že `prior` je přesně zaznamenaná odpověď a že `honours` jmenuje id volby; zda karta
    slova PM opravdu ctí, hlídá jen tvůj úsudek. Volbu i slova PM ukáže nad otázkou - PM nemá znovu
    vysvětlovat, co už řekl.
+0c. **Méně kol, víc rozdílů (P113a bod 8).**
+   - **Rozdíl:** otázka, která se vrací k věci, kterou PM nebo klient už jednou viděl (po vrácení nebo po změně),
+     nese `previous` = id té dřívější otázky (stejný druh, stejný soubor nebo stránka). Studio i klient-agent
+     dostanou jen to, co se změnilo: řádky souboru u souborového cíle (`<cesta>@<sha256>`), text stránky
+     u `approve_page`. Snímek verze ukládá studio při prvním zobrazení otázky
+     (`.aid-ui/studio/snapshots/`).
+   - **Milník:** několik stránek nebo výjimek z jednoho okruhu je jedna otázka `approve_page` nebo `exception`
+     s `items` a `target` `items@<sha položek>`. Každou položku spotřebuj
+     `--answer <id> --answer-item <položka>` (kroky 7 bod 3 a 5). Studio odmítne payload s víc než jednou
+     otevřenou samostatnou otázkou `approve_page`.
+   - `previous` musí být zodpovězená otázka (rozdíl je proti tomu, na co čtenář odpověděl). U milníku
+     se porovnávají položky se stejným id, společný styl (`_shared`) nese větu „změnil se vzhled, viz náhled“.
+   - Ostatní druhy otázek zatím slučované nejsou (IMP-698).
 1. Zapiš nebo obnov `<project>/.aid-ui/studio/payload.json`:
    `now` (`title`, `text` = co právě děláš, např. „Připravuji tři návrhy vzhledu…", `at` = kdy jsi to
    napsal, `part` = id části, pro kterou platí; studio tvou poznámku ukáže jen dokud je novější než
@@ -279,6 +293,7 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 | 5 | `steps/5-directions.md` - tři směry jako stránky |
 | 6 | `steps/6-build.md` - stavba |
 | 7 | `steps/7-verify.md` - ověření, schválení, `finish` |
+| po `finish` | `steps/8-quality.md` - smyčka kvality se dvěma kritiky (majitel a technik, souběžně, s pamětí) do 8,5 u obou nebo tří kol oprav (není krok stavu, `step 8` neexistuje) |
 
 Skripty (`$AID_PLUGIN_PATH/scripts/`): `aid-ui-state.sh` (jediný zapisovatel
 stavu a těl kapitol v `docs/brand/index.html`), `aid-ui-serve.sh`,
@@ -287,7 +302,8 @@ stavu a těl kapitol v `docs/brand/index.html`), `aid-ui-serve.sh`,
 `aid-ui-brand-package.py` (balíček značky), `aid-ui-design-standard.py` (design standard, krok 7),
 `aid-ui-vision-check.py` (vize), `aid-ui-customer-page.py` (stránka pro zákazníka po bráně, krok 7 bod 7b),
 `aid-ui-sources.py` (podklady, krok 1p), `aid-ui-copy.py` (kontrola textů, krok 7 bod 1a; texty stránek dává
-`aid-ui-verify.sh <project> --copy-subject`).
+`aid-ui-verify.sh <project> --copy-subject`), `aid-ui-critic.py` (měřítka majitele a technika, zmrazení), `aid-ui-client.py`
+(klient-agent ve studiu, hodnocení kritika, kniha nákladů), `aid-ui-quality.py` (smyčka kvality po předání), `aid-ui-launch.py` (podklady ke spuštění, krok 0 bod 10), `aid-ui-photos.py` (vlastní fotky klienta ze starého webu, krok 3 bod 2c), `aid-ui-preview.py` (náhled a příjemce formuláře).
 
 ## Zprávy PM
 
@@ -350,7 +366,7 @@ Před posunem kroku:
 
 ## Reference Files
 
-- `steps/0-start.md` … `steps/7-verify.md` - postup kroků (tabulka výše).
+- `steps/0-start.md` … `steps/7-verify.md` - postup kroků (tabulka výše); `steps/8-quality.md` - smyčka kvality po předání.
 - `references/adopted/frontend-design-SKILL.md`, `references/adopted/impeccable-craft-floor.md`.
 - `references/genericity-rubric.md` - vyřazení generických vzorů a směrů.
 - `references/adopted/marketingskills/` - převzaté postupy textů (product-marketing, copywriting,
