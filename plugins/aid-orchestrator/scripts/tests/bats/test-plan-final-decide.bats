@@ -18,8 +18,16 @@ load test-helpers.bash
 
 PLAN_ID="P900"
 
+# The project and the close up to decide are built ONCE per distinct input and
+# restored per case (snapshot.bash): every stage is a real command, and the
+# replay cost ~35 s of a ~55 s case. Everything a builder reads goes into the
+# key — its arguments here, these variables through _SNAP_ENV_VARS.
+_SNAP_ENV_VARS=(PLAN_EXTRA EXEC_EXTRA AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB)
+load snapshot.bash
+_key() { printf '%s' "$*" | sha256sum | cut -c1-12; }
+
 setup() {
-  setup_test_evidence_dir
+  _snap_setup_live
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; export AID_PLUGIN_PATH
   FSM="$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"; ROUND="$AID_PLUGIN_PATH/scripts/aid-review-round.sh"
   export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT" AID_PLAN_MANIFEST_PROJECT_ROOT="$TEST_PROJECT_ROOT"
@@ -34,7 +42,8 @@ teardown() { teardown_test_evidence_dir; }
 # _project [<yq edit of the review policy>] — main with a plan branch carrying
 # one merged EPIC's work, the plan file, a CHANGELOG, a two-gate execution
 # config and a sealed plan review. The policy edit lands BEFORE the plan branch.
-_project() {
+_project() { _PROJECT_KEY="project:$(_key "${1:-.}")"; _snap_fixture "$_PROJECT_KEY" _project_build "$@"; }
+_project_build() {
   printf '.aid-o/work/\n.aid-o/reports/\n' > "$R/.gitignore"
   mkdir -p "$R/.aid-o/plans" "$R/.aid-o/config/policies" "$R/docs"
   printf -- '---\nid: %s\ntype: feature\n---\n# Plan\n\n### Step 1: the work\n\n**Acceptance Criteria:**\n- [ ] the app greets\n\n**Effort:** S\n\n## Success Criteria\n\n- it runs\n%s' "$PLAN_ID" "${PLAN_EXTRA:-}" > "$R/.aid-o/plans/${PLAN_ID}-x.md"
@@ -106,6 +115,11 @@ _close_up_to_decide() {
   _stage produce; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   _round "${1:-.}"
 }
+# _project_closed [claims filter] — _project then _close_up_to_decide with nothing in
+# between, built once per claims filter. A case that changes the project before the
+# close calls the two itself: its change would not be in the copy.
+_project_closed() { _snap_fixture "closed:$(_key "${1:-.}")" _project_closed_build "$@"; }
+_project_closed_build() { _project_build && _close_up_to_decide "$@"; }
 _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims a greeting the app never prints", command: "grep -n hello app.py", evidence: "app.py:1", fix: "print it", rule: "every change the changelog claims is in the code"}] | del(.no_findings_reason)'
 
 # ── the sabotage set ─────────────────────────────────────────────────────────
@@ -149,8 +163,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
 }
 
 @test "open blocker: refused naming the finding; the plan stays in PLAN_REVIEW with the page rendered" {
-  _project
-  _close_up_to_decide "$_BLOCKER"
+  _project_closed "$_BLOCKER"
   _stage decide; [ "$status" -eq 1 ]
   [ "$(_decision release_ready)" = false ]; [ "$(_blockers)" = final_review ]
   [[ "$(jq -r '.release_decision.blockers[0].reason' "$(_run_dir)/release-decision.json")" == *"a greeting the app never prints"* ]]
@@ -276,8 +289,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
 
 # ── a fix after the freeze ───────────────────────────────────────────────────
 @test "a docs-only fix: one command mints attempt 2, the test gate is copied, both default roles are asked again (final_criteria never carried, final_generalist reads the claims)" {
-  _project
-  _close_up_to_decide "$_BLOCKER"; _stage decide; [ "$status" -eq 1 ]
+  _project_closed "$_BLOCKER"; _stage decide; [ "$status" -eq 1 ]
   local first; first="$(_run_dir)"
   echo "- **Greeting** — the app prints hello" > "$R/CHANGELOG.md"; git -C "$R" commit -qam "docs: say what it does"
   _stage freeze; echo "$output"; [ "$status" -eq 0 ]; [[ "$(_field plan_final_run_id)" == *-final-2 ]]
@@ -293,8 +305,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
 }
 
 @test "a code fix re-reads everything; an edit of the plan's criteria re-reads final_criteria; a rewritten branch carries nothing" {
-  _project
-  _close_up_to_decide; _stage decide; [ "$status" -eq 0 ]
+  _project_closed; _stage decide; [ "$status" -eq 0 ]
   echo 'print("hello!")' > "$R/app.py"; git -C "$R" commit -qam "fix: louder"
   _stage freeze; [ "$status" -eq 0 ]
   [ "$(jq -c '.invalidated_feeds' "$(_run_dir)/fix-class.json")" = '["diff"]' ]
@@ -323,8 +334,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
 
 # ── integrity of the run directory ───────────────────────────────────────────
 @test "a decision input edited by hand is refused by name; a file a stage rewrote is a recorded write" {
-  _project
-  _close_up_to_decide
+  _project_closed
   _stage produce; [ "$status" -eq 0 ]                         # produce twice in one attempt: both writes recorded
   _round 2>/dev/null || true                                  # (round 1 is already closed; nothing changes)
   local f="$(_run_dir)/cp7/round-1/reviewer-final_criteria.json"
@@ -348,8 +358,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
 }
 
 @test "forgery: a decision rewritten by hand does not merge" {
-  _project
-  _close_up_to_decide; _stage decide; [ "$status" -eq 0 ]
+  _project_closed; _stage decide; [ "$status" -eq 0 ]
   local dec; dec="$(_run_dir)/release-decision.json"
   jq '.release_decision.blockers = []' "$dec" > "$dec.t" && mv "$dec.t" "$dec"
   run bash "$FSM" plan-merge-to-main "$PLAN_ID" --decision "$dec" --project-root "$R"
@@ -357,8 +366,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
 }
 
 @test "forgery: a candidate moved after the review is not decided" {
-  _project
-  _close_up_to_decide
+  _project_closed
   echo 'print("moved")' > "$R/app.py"; git -C "$R" commit -qam "a change after the review"
   _stage decide; [ "$status" -eq 6 ]; [[ "$output" == *"--stage freeze"* ]]
 }
@@ -455,8 +463,7 @@ _with_epic_bound_gate() {
 
 # ── 2.114.0: the closing measurement ─────────────────────────────────────────
 @test "closing measure: attempt 1 counts no line as written during the closing; a finding on a line the fix wrote counts in attempt 2, an uncited one is named" {
-  _project
-  _close_up_to_decide "$_BLOCKER"                                 # evidence app.py:1, a line of the base
+  _project_closed "$_BLOCKER"                                 # evidence app.py:1, a line of the base
   local m1="$(_run_dir)/cp7/round-1/measurement.json"
   [ "$(jq -c '.closing | [.attempt, .findings_on_lines_changed_at_close, .uncited_lines, .unblamed_lines, .codex_form_invalid, (.error // "none")]' "$m1")" = '[1,0,0,0,0,"none"]' ]
   [ "$(jq -r .closing.first_candidate "$m1")" = "$(jq -r .head_sha "$(_run_dir)/cp7/rounds.json")" ]

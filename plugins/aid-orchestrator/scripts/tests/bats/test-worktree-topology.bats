@@ -14,6 +14,9 @@
 # role and `task/<epic>/main` cut FROM IT (not from main, which is what makes a
 # second EPIC start from the ADVANCED plan head). A foreign worktree keeps the
 # old skip, and the primary checkout is byte-identical to pre-P074.
+# Since 3.0.0 no task branch is cut any more (a plan runs as one run on
+# plan/<id>, test-plan-run.bats); the cases left here guard the foreign-worktree skip and
+# the plan-less run in the primary checkout.
 #
 # FD-3 HYGIENE: bats reports results over fd 3; a child that inherits and holds
 # it truncates the suite's TAP output (missing results still exit 0). Every
@@ -21,7 +24,7 @@
 # helper that can never itself be a missing command — a `run` child exiting 127
 # writes a bats warning to fd 3, which with `3>&-` destroys the whole file's
 # output. After any edit verify:
-#   bats --tap test-worktree-topology.bats | grep -cE '^(ok|not ok)'   # == 8
+#   bats --tap test-worktree-topology.bats | grep -cE '^(ok|not ok)'   # == 2
 
 load test-helpers.bash
 
@@ -109,54 +112,6 @@ _seed_plan() {
     fi"
 }
 
-# ─── 1. the fresh-init case inside the plan worktree ──────────────────────
-
-@test "P074 Step 9: init inside the plan worktree cuts task/<epic>/main FROM the plan head and checks it out THERE" {
-  _mk_project
-  _seed_plan 1
-  local plan_head; plan_head="$(git -C "$ROOT" rev-parse "plan/${PLAN_ID}" 3>&-)"
-  local primary_before; primary_before="$(_head_of "$ROOT")"
-
-  run _init_in "$(_wt)" "$EPIC_A"
-  [ "$status" -eq 0 ]
-  # Enforcement RAN (it did not take the foreign-worktree skip)...
-  [[ "$output" != *"skipping branch enforcement"* ]]
-  [[ "$output" == *"from plan/${PLAN_ID} (plan worktree)"* ]]
-  # ...the branch exists, is based on the plan head, and is checked out in the
-  # WORKTREE.
-  [ "$(_head_of "$(_wt)")" = "task/${EPIC_A}/main" ]
-  run bash -c "git -C '$ROOT' rev-parse 'task/${EPIC_A}/main'" 3>&-
-  [ "$output" = "$plan_head" ]
-  # The primary checkout never moved.
-  [ "$(_head_of "$ROOT")" = "$primary_before" ]
-}
-
-# ─── 2. the second EPIC starts from the ADVANCED plan head ────────────────
-
-@test "P074 Step 9: a second EPIC's branch is cut from the plan head AFTER the first EPIC merged, not from main" {
-  _mk_project
-  _seed_plan 1
-  run _init_in "$(_wt)" "$EPIC_A"
-  [ "$status" -eq 0 ]
-  # EPIC A delivers and its work lands on the plan branch.
-  _in_root "set -e
-    printf 'A delivered\n' > '$(_wt)/a.txt'
-    git -C '$(_wt)' add a.txt
-    git -C '$(_wt)' commit -q -m 'EPIC A'
-    git -C '$(_wt)' checkout -q plan/${PLAN_ID}
-    git -C '$(_wt)' merge -q --no-ff --no-edit task/${EPIC_A}/main"
-  local advanced; advanced="$(git -C "$ROOT" rev-parse "plan/${PLAN_ID}" 3>&-)"
-  [ "$advanced" != "$(git -C "$ROOT" rev-parse main 3>&-)" ]
-
-  run _init_in "$(_wt)" "$EPIC_B"
-  [ "$status" -eq 0 ]
-  run bash -c "git -C '$ROOT' rev-parse 'task/${EPIC_B}/main'" 3>&-
-  [ "$output" = "$advanced" ]
-  # EPIC A's delivery is visible from EPIC B's branch — the whole point of
-  # basing on the plan head instead of on main.
-  [ -f "$(_wt)/a.txt" ]
-}
-
 # ─── 3. a foreign worktree keeps the old blanket skip ─────────────────────
 
 @test "P074 Step 9: init inside a FOREIGN worktree still skips branch enforcement" {
@@ -172,33 +127,6 @@ _seed_plan() {
   [ "$(_head_of "$foreign")" = "someone-elses/branch" ]
 }
 
-# ─── 4. the full in-worktree cycle ────────────────────────────────────────
-
-@test "P074 Step 9: the full cycle (task branch -> commit -> merge to plan) runs in the worktree and leaves it on the plan branch" {
-  _mk_project
-  _seed_plan 1
-  local primary_before_branch primary_before_head
-  primary_before_branch="$(_head_of "$ROOT")"
-  primary_before_head="$(git -C "$ROOT" rev-parse HEAD 3>&-)"
-
-  run _init_in "$(_wt)" "$EPIC_A"
-  [ "$status" -eq 0 ]
-  _in_root "set -e
-    printf 'the delivery\n' > '$(_wt)/delivered-by-epic.txt'
-    git -C '$(_wt)' add delivered-by-epic.txt
-    git -C '$(_wt)' commit -q -m 'EPIC A delivery'
-    git -C '$(_wt)' checkout -q plan/${PLAN_ID}
-    git -C '$(_wt)' merge -q --no-ff --no-edit task/${EPIC_A}/main"
-
-  # The merge is on the plan branch, the worktree ends on the plan branch...
-  [ "$(_head_of "$(_wt)")" = "plan/${PLAN_ID}" ]
-  [ -f "$(_wt)/delivered-by-epic.txt" ]
-  # ...and the PM's checkout is untouched throughout.
-  [ "$(_head_of "$ROOT")" = "$primary_before_branch" ]
-  [ "$(git -C "$ROOT" rev-parse HEAD 3>&-)" = "$primary_before_head" ]
-  [ ! -f "$ROOT/delivered-by-epic.txt" ]
-}
-
 # ─── 5. legacy primary-checkout behaviour, regression-asserted ────────────
 
 @test "P074 Step 9 regression: a legacy plan in the primary checkout auto-creates from main exactly as before" {
@@ -211,56 +139,4 @@ _seed_plan() {
   [ "$(_head_of "$ROOT")" = "task/${EPIC_A}/main" ]
   run bash -c "git -C '$ROOT' rev-parse 'task/${EPIC_A}/main'" 3>&-
   [ "$output" = "$main_head" ]
-}
-
-# ─── 6. the different-EPIC hard fail still fires inside the worktree ──────
-
-@test "P074 Step 9: task/E-<other>/main inside the plan worktree still hard-fails (EPICs stay sequential)" {
-  _mk_project
-  _seed_plan 1
-  run _init_in "$(_wt)" "$EPIC_A"
-  [ "$status" -eq 0 ]
-  [ "$(_head_of "$(_wt)")" = "task/${EPIC_A}/main" ]
-  # A second EPIC init while the worktree still sits on the first EPIC's branch.
-  run _init_in "$(_wt)" "$EPIC_B"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"expected task/${EPIC_B}/main"* ]]
-}
-
-# ─── 7. the plan branch deleted under a surviving worktree ────────────────
-
-@test "P074 Step 9: with plan/<id> deleted, init inside the worktree HARD-FAILS naming the plan branch, not --recreate-worktree" {
-  _mk_project
-  _seed_plan 1
-  # Manual surgery: the branch goes, the worktree (now detached) stays
-  # registered and recorded, so the Step 8 enforcer is satisfied and only the
-  # base-ref resolution can fail. Warn-and-accept here would leave execution on
-  # an unowned detached tree with NO task branch — done-advance would then
-  # attribute a meaningless diff, which is the failure this refusal prevents.
-  _in_root "git -C '$(_wt)' checkout -q --detach plan/${PLAN_ID}
-            git -C '$ROOT' branch -D plan/${PLAN_ID}"
-  run _init_in "$(_wt)" "$EPIC_A"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"plan/${PLAN_ID} does not exist"* ]]
-  [[ "$output" == *"every EPIC branch here is cut from it"* ]]
-  # The remedy is branch repair, and the message says so explicitly...
-  [[ "$output" == *"Repair the branch"* ]]
-  # ...while NOT sending the operator at a worktree that is perfectly fine.
-  [[ "$output" != *"plan-state ${PLAN_ID} --recreate-worktree --reason"* ]]
-  # Nothing was created on the way out.
-  run bash -c "git -C '$ROOT' rev-parse --verify --quiet 'refs/heads/task/${EPIC_A}/main' || true" 3>&-
-  [ -z "$output" ]
-}
-
-# ─── 8. an unusual branch inside the plan worktree names the topology ─────
-
-@test "P074 Step 9: an unrelated branch inside the plan worktree warns naming the expected topology" {
-  _mk_project
-  _seed_plan 1
-  _in_root "git -C '$(_wt)' checkout -q -b scratch/manual-poking"
-  run _init_in "$(_wt)" "$EPIC_A"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Unusual branch in the plan worktree"* ]]
-  [[ "$output" == *"plan/${PLAN_ID} at rest"* ]]
-  [[ "$output" == *"task/${EPIC_A}/main"* ]]
 }

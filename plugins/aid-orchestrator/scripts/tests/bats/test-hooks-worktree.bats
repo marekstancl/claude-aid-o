@@ -90,6 +90,8 @@ JSON
     echo "branch: $branch"
     echo "base_commit: HEAD"
   } > "$ev/fsm-state.yaml"
+  # the hook finds the governing run in active-runs.json only (P112), as init writes it
+  printf '{"E-777-1_1": {"state_file": ".aid-o/work/evidence/E-777-1_1/R-777/fsm-state.yaml"}}\n' > "$d/.aid-o/work/active-runs.json"
 }
 
 # _stage_in <tree> <file> — create + git add <file> inside <tree>.
