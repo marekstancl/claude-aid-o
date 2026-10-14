@@ -119,7 +119,7 @@ _close_up_to_decide() {
 # between, built once per claims filter. A case that changes the project before the
 # close calls the two itself: its change would not be in the copy.
 _project_closed() { _snap_fixture "closed:$(_key "${1:-.}")" _project_closed_build "$@"; }
-_project_closed_build() { _project_build; _close_up_to_decide "$@"; }
+_project_closed_build() { _project_build && _close_up_to_decide "$@"; }
 _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims a greeting the app never prints", command: "grep -n hello app.py", evidence: "app.py:1", fix: "print it", rule: "every change the changelog claims is in the code"}] | del(.no_findings_reason)'
 
 # ── the sabotage set ─────────────────────────────────────────────────────────

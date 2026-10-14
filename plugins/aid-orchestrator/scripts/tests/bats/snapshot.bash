@@ -156,7 +156,7 @@ _snap_fixture() {
     _snap_env_load "${tpl}.env"
   else
     _SNAP_LAST_ACTION="build"
-    "$@"
+    "$@" || { echo "_snap: builder for $key failed — nothing was published" >&2; return 1; }
     _snap_eligible || return 1
     mkdir -p "$(dirname "$tpl")"
     local staging="${tpl}.staging.$$"

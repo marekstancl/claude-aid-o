@@ -31,6 +31,8 @@ _seed() {   # <root> <plan-source> — the fixture plan, its brief, critic and C
 }
 
 setup_file() {
+  # _run_ok and the fixed project path are per file: parallel cases would share them
+  [[ "${BATS_NUMBER_OF_PARALLEL_JOBS:-1}" -eq 1 ]] || { echo "test-plan-run.bats needs serial bats (--jobs 1)" >&2; return 1; }
   export AID_TEST_MODE=1
   TPL="$BATS_FILE_TMPDIR/tpl"
   _mk_project "$TPL" >/dev/null
@@ -56,17 +58,26 @@ setup() {
 }
 
 _run()  { run bash "$PFSM" plan-run P900 "$@"; }
-# _run_ok — a plain plan-run that must succeed. The first case runs it (~25 s) and saves the
-# project with its output; every later case restores that copy (state, worktree and output),
-# so only the cases about the run itself pay for it.
+# _run_ok — a plain plan-run on the untouched template, which must succeed. The first case
+# runs it (~25 s) and publishes the project with its output; every later case restores that
+# copy (state, worktree and output), so only the cases about the run itself pay for it.
+# Refused when the project is no longer the template or a crash point is set: the copy is
+# the result of exactly one input.
 _run_ok() {
   local saved="$BATS_FILE_TMPDIR/after-run"
+  [[ $# -eq 0 && -z "${AID_PLAN_FSM_CRASH_AFTER:-}" ]] || { echo "_run_ok: a plain run only" >&2; return 1; }
+  diff -rq "$TPL" "$R" >/dev/null || { echo "_run_ok: the project is not the template — call _run" >&2; return 1; }
   if [[ -d "$saved" ]]; then
+    [[ -d "$saved/p" && -f "$saved/output" ]] || { echo "_run_ok: incomplete saved run" >&2; return 1; }
     cd /; rm -rf "$R"; cp -a "$saved/p" "$R" || return 1; cd "$R"
-    status=0; output="$(cat "$saved/output")"; lines=(); mapfile -t lines <<<"$output"
+    output="$(cat "$saved/output")" || return 1
+    status=0; lines=(); mapfile -t lines <<<"$output"
   else
     _run; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-    mkdir -p "$saved"; cp -a "$R" "$saved/p"; printf '%s' "$output" > "$saved/output"
+    local staging="$saved.staging.$$"
+    rm -rf "$staging"; mkdir -p "$staging"
+    cp -a "$R" "$staging/p" && printf '%s' "$output" > "$staging/output" && mv "$staging" "$saved" \
+      || { echo "_run_ok: publishing the saved run failed" >&2; return 1; }
   fi
 }
 # _page — re-render the PM page after a test edits the plan (plan-run refuses a stale page, as production does)

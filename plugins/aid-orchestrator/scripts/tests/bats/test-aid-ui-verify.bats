@@ -230,7 +230,7 @@ copy_reviewed() {
 }
 
 @test "K1b page checks: an off-token colour, a small control, a third-party request, a tall sticky panel and motion are each reported" {
-  narrow token_usage touch_targets privacy_before_consent sticky_panels reduced_motion vision_doc
+  NARROW_VP="390, 768, 1440" narrow token_usage touch_targets privacy_before_consent sticky_panels reduced_motion vision_doc
   cp -r "$FX/fixed/." "$SITE/"
   sed -i 's|</main>|<p style="color:#ff0000">Akce</p><button style="width:30px;height:30px;padding:0;background:#1a1a1a;color:#faf6ee">x</button>\
 <aside style="position:sticky;top:0;height:3000px;background:#faf6ee">panel</aside>\
@@ -251,7 +251,7 @@ copy_reviewed() {
 }
 
 @test "K1b edge cases: invisible focus fails; honeypot, checked radio, frame, fading focus, label, translucent token, hidden dropdown, decorative layer do not; a cookie on load fails privacy" {
-  narrow keyboard touch_targets token_usage sticky_panels privacy_before_consent
+  NARROW_VP="390, 768, 1440" narrow keyboard touch_targets token_usage sticky_panels privacy_before_consent
   cp -r "$FX/fixed/." "$SITE/"
   # a button whose focus looks like rest; a honeypot (tabindex -1 in aria-hidden); one radio group of
   # three; a checkbox in a 44 px label; token colours written as oklch and color-mix; a tall fixed
