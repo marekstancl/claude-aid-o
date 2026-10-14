@@ -12,8 +12,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
     - závěrečná výzva říká, co se stane po odeslání, a nabízí telefon,
     - nejsilnější ověřený důkaz stojí u hlavní výzvy úvodu.
   - **Krok 6:**
-    - `Service` pro služby a `BreadcrumbList` na vnořených stránkách (`aid-ui-seo-check.py` hlásí chybějící drobečky jako WARN `breadcrumbs`),
-    - hlavní obraz první obrazovky bez výchozí neprůhlednosti a zpoždění; pohyb vzoru patří na doprovodný prvek.
+    - `Service` pro služby a `BreadcrumbList` na vnořených stránkách (`aid-ui-seo-check.py` hlásí chybějící drobečky jako WARN `breadcrumbs`; najde je i vnořené pod stránkou a chce aspoň dvě položky),
+    - hlavní obraz první obrazovky bez výchozí neprůhlednosti a zpoždění; pohyb vzoru patří na doprovodný prvek. Brána to vynucuje: `first_paint_visible` selže, když největší obrázek první obrazovky začíná zprůhledněný nebo čeká na zpožděné prolnutí.
 - **Id výtek se nezdvojují:** předponu kola a role, kterou si kritik opsal z paměti, smyčka odřízne. Kdyby se dvě id jedné odpovědi tím shodla, zůstanou, jak byla.
 
 ### Changed
