@@ -206,18 +206,23 @@ _streak() { jq .budget_episode.over_streak "$NIGHTLY_DIR/latest.json"; }
   [ ! -s "$SENT" ]
 }
 
-@test "budget: a night without both tiers measured neither raises nor ends the episode, and sends nothing" {
+@test "budget: a night without both tiers measured neither raises nor ends the episode and sends nothing; the same night measured later counts once" {
   _budget_stub
   _night 2026-10-14 171 484; : > "$SENT"
   _night 2026-10-15                                            # not measured
   [ "$(_streak)" -eq 1 ]; [ "$(jq .merge_path_budget "$NIGHTLY_DIR/latest.json")" = null ]; [ ! -s "$SENT" ]
   _night 2026-10-16 90                                         # T0 alone is not the merge path
   [ "$(_streak)" -eq 1 ]; [ ! -s "$SENT" ]
+  _night 2026-10-16 171 484                                    # the same night measured after all: its one message
+  [ "$(_streak)" -eq 2 ]; [ "$(grep -c '^alert|' "$SENT")" -eq 1 ]
+  _night 2026-10-16 171 484                                    # and a third run of that night adds nothing
+  [ "$(_streak)" -eq 2 ]; [ "$(grep -c '^alert|' "$SENT")" -eq 1 ]
+  : > "$SENT"
   _night 2026-10-17 90 400                                     # measured and within: the episode ends
   [ "$(cat "$SENT")" = "ok|project-testy|rozpocet-testu" ]
 }
 
-@test "budget: an unreadable previous result is said in the alert, and a night within budget closes any open case" {
+@test "budget: an unreadable previous result is said in the overrun message, and a night within budget closes any open case" {
   _budget_stub
   echo 'not json' > "$NIGHTLY_DIR/latest.json"
   _night 2026-10-14 171 484

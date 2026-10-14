@@ -36,7 +36,7 @@
 # Exit codes: 0 = the artifact was written (whatever the night's colour),
 #             2 = usage / the artifact could not be written.
 #
-# **Last Updated:** 2026-08-10
+# **Last Updated:** 2026-10-14
 # =============================================================================
 set -uo pipefail
 
@@ -62,8 +62,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --runner-log) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --runner-log needs a value" >&2; exit 2; }
                   RUNNER_LOG="$2"; shift 2 ;;
-    --t0-seconds) T0_SECONDS="${2:-}"; shift 2 ;;
-    --t1-seconds) T1_SECONDS="${2:-}"; shift 2 ;;
+    --t0-seconds|--t1-seconds) [[ $# -ge 2 ]] || { echo "aid-nightly-report: $1 needs a value (empty is allowed: not measured)" >&2; exit 2; }
+                  [[ "$1" == --t0-seconds ]] && T0_SECONDS="$2" || T1_SECONDS="$2"; shift 2 ;;
     --exit-code) [[ $# -ge 2 ]] || { echo "aid-nightly-report: --exit-code needs a value" >&2; exit 2; }
                  EXIT_CODE="$2"; shift 2 ;;
                  # NOTE: an EMPTY or non-numeric value is handled below, not
@@ -257,8 +257,10 @@ fi
 # ─── The overrun episode (PM 14. 10. 2026) ──────────────────────────────────
 # Its own field, carried from night to night: a night without a measurement
 # keeps it as it was (never "ended"), a second run of the same night counts
-# nothing and sends nothing, and a previous artifact that cannot be read is
-# said, not taken for a clean slate (standard rule 2h: lost state is a message).
+# nothing and sends nothing (a measured re-run after an unmeasured first run is
+# that night's first count, and its only message), and a previous artifact that
+# cannot be read is said in the overrun message and closes any open case on a
+# night within budget — never taken for a clean slate (standard rule 2h).
 _ep_prev='{"over_streak":0}'; _ep_lost=0
 if [[ -f "$LATEST" ]]; then
   _ep_prev="$(jq -ce '.budget_episode // {over_streak: 0}' "$LATEST" 2>/dev/null)" || { _ep_prev='{"over_streak":0}'; _ep_lost=1; }
