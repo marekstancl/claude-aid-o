@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
 # aid-nightly-report.sh — turn a nightly portfolio run into a durable result
-# (P081 Step 7). The result is a file that `/aid-status` reads; since P099 the
-# nightly sends no Telegram message — the PM gets one only when an agent waits
-# for them and when a plan is delivered.
+# (P081 Step 7). The result is a file that `/aid-status` reads. Since P099 a red
+# or unfinished night sends no message; since 14. 10. 2026 one thing does: the
+# merge-path tests over their budget (an episode — see "The overrun episode").
 #
 # WHERE THE ARTIFACT LIVES, AND WHY NOT `.aid-o/`: the CI job runs in the
 # self-hosted runner's own `_work` checkout, so `aid_state_root()` there
@@ -89,7 +89,7 @@ mkdir -p "$NIGHTLY_DIR" 2>/dev/null || {
   echo "aid-nightly-report: cannot create '$NIGHTLY_DIR' — the result would have nowhere durable to live" >&2
   exit 2; }
 
-TODAY="$(date -u +%Y-%m-%d)"
+TODAY="${AID_NIGHTLY_TODAY:-$(date -u +%Y-%m-%d)}"   # override only for the budget-episode tests
 ARTIFACT="$NIGHTLY_DIR/$TODAY.json"
 LATEST="$NIGHTLY_DIR/latest.json"
 
@@ -238,9 +238,10 @@ done < <(aid_durations_by_suite "$TESTS_DIR")
 # and a gate that stops work over it gets routed around (the lesson the
 # quarantined advisory gate already taught this project).
 budget_json='null'
-if [[ "$T0_SECONDS" =~ ^[0-9]+$ || "$T1_SECONDS" =~ ^[0-9]+$ ]]; then
-  _t0="${T0_SECONDS:-null}"; [[ "$_t0" =~ ^[0-9]+$ ]] || _t0=null
-  _t1="${T1_SECONDS:-null}"; [[ "$_t1" =~ ^[0-9]+$ ]] || _t1=null
+# Measured means BOTH tiers: one tier alone is not the merge path, and a partial
+# figure must neither raise nor end an overrun episode.
+if [[ "$T0_SECONDS" =~ ^[0-9]+$ && "$T1_SECONDS" =~ ^[0-9]+$ ]]; then
+  _t0="$T0_SECONDS"; _t1="$T1_SECONDS"
   budget_json="$(jq -nc --argjson t0 "$_t0" --argjson t1 "$_t1" \
                        --argjson t0b "$T0_BUDGET_S" --argjson t1b "$T1_BUDGET_S" \
     '{t0_seconds:$t0, t0_budget_s:$t0b, t0_over:(($t0//0) > $t0b),
@@ -248,13 +249,30 @@ if [[ "$T0_SECONDS" =~ ^[0-9]+$ || "$T1_SECONDS" =~ ^[0-9]+$ ]]; then
       merge_path_seconds:(($t0//0)+($t1//0)),
       merge_path_budget_s:$t1b,
       merge_path_over:((($t0//0)+($t1//0)) > $t1b)}')"
-  # The overrun is an episode: how many nights in a row, from last night's artifact.
-  _prev_streak="$(jq -r '.merge_path_budget.over_streak // 0' "$LATEST" 2>/dev/null)"; [[ "$_prev_streak" =~ ^[0-9]+$ ]] || _prev_streak=0
-  budget_json="$(jq -c --argjson p "$_prev_streak" \
-    '(.t0_over or .t1_over or .merge_path_over) as $o | . + {over_streak: (if $o then $p + 1 else 0 end)}' <<<"$budget_json")"
 else
   # Not measured is NOT within budget. Say so, the way the runner watchdog does.
   echo "aid-nightly-report: tier durations were not supplied — the merge-path budget check DID NOT RUN (this is not a pass)." >&2
+fi
+
+# ─── The overrun episode (PM 14. 10. 2026) ──────────────────────────────────
+# Its own field, carried from night to night: a night without a measurement
+# keeps it as it was (never "ended"), a second run of the same night counts
+# nothing and sends nothing, and a previous artifact that cannot be read is
+# said, not taken for a clean slate (standard rule 2h: lost state is a message).
+_ep_prev='{"over_streak":0}'; _ep_lost=0
+if [[ -f "$LATEST" ]]; then
+  _ep_prev="$(jq -ce '.budget_episode // {over_streak: 0}' "$LATEST" 2>/dev/null)" || { _ep_prev='{"over_streak":0}'; _ep_lost=1; }
+fi
+_prev_streak="$(jq -r '.over_streak // 0' <<<"$_ep_prev")"; [[ "$_prev_streak" =~ ^[0-9]+$ ]] || { _prev_streak=0; _ep_lost=1; }
+_prev_date="$(jq -r '.date // ""' <<<"$_ep_prev")"
+episode_json="$_ep_prev"; budget_send=""                    # over | within | ""
+if [[ "$budget_json" != null && "$_prev_date" != "$TODAY" ]]; then
+  if [[ "$(jq -r '.t0_over or .t1_over or .merge_path_over' <<<"$budget_json")" == true ]]; then
+    episode_json="$(jq -nc --argjson n $(( _prev_streak + 1 )) --arg d "$TODAY" '{over_streak: $n, date: $d}')"; budget_send=over
+  else
+    episode_json="$(jq -nc --arg d "$TODAY" '{over_streak: 0, date: $d}')"
+    (( _prev_streak > 0 || _ep_lost )) && budget_send=within
+  fi
 fi
 
 # ─── The artifact ───────────────────────────────────────────────────────────
@@ -266,9 +284,9 @@ write_artifact() {
         --argjson exit_code "$EXIT_CODE" --argjson censored "$censored" \
         --argjson quarantine_unreadable "$quarantine_unreadable" \
         --argjson quarantine_write_failed "$quarantine_write_failed" \
-        --argjson merge_path_budget "$budget_json" \
+        --argjson merge_path_budget "$budget_json" --argjson budget_episode "$episode_json" \
     '{date:$date, suites_run:$suites_run, passed:$passed, failed:$failed,
-      merge_path_budget:$merge_path_budget,
+      merge_path_budget:$merge_path_budget, budget_episode:$budget_episode,
       flaky:$flaky, quarantined:$quarantined, duration_ms:$duration_ms,
       exit_code:$exit_code, censored:$censored, log_url:$log_url,
       quarantine_unreadable:$quarantine_unreadable,
@@ -282,15 +300,15 @@ echo "aid-nightly-report: $ARTIFACT ($(jq 'length' <<<"$failed_json") failed, $(
 # ─── The budget, told to someone (PM 14. 10. 2026) ──────────────────────────
 # Measured since 2026-08-15 and over budget every night, but only ever written
 # to the artifact. Now it goes to the alert intake: one message a night while
-# it lasts, one "ok" the night it ends. Not measured sends nothing (see above).
-if [[ "$budget_json" != null ]]; then
+# it lasts, one "ok" the night it ends. Not measured sends nothing.
+if [[ -n "$budget_send" ]]; then
   # shellcheck source=lib/aid-alert.sh
   source "$SCRIPT_DIR/lib/aid-alert.sh"
-  _streak="$(jq -r .over_streak <<<"$budget_json")"
-  if (( _streak > 0 )); then
-    aid_alert_test_budget over "$(jq -r --argjson n "$_streak" \
-      '"T0 \(.t0_seconds // "neměřeno") s z \(.t0_budget_s) s, T1 \(.t1_seconds // "neměřeno") s z \(.t1_budget_s) s, celkem \(.merge_path_seconds) s z \(.merge_path_budget_s) s; přes rozpočet \($n). noc po sobě. Do týdne rozhodni: zrychlit nejpomalejší sady (časy v test-durations.jsonl vedle nočního výsledku), nebo změnit rozpočet ve standardu testů."' <<<"$budget_json")" || true
-  elif (( _prev_streak > 0 )); then
+  if [[ "$budget_send" == over ]]; then
+    _lost_note=""; (( _ep_lost )) && _lost_note=" Předchozí noční výsledek nešel přečíst, pořadí noci začíná znovu."
+    aid_alert_test_budget over "$(jq -r --argjson n "$(jq .over_streak <<<"$episode_json")" --arg lost "$_lost_note" \
+      '"T0 \(.t0_seconds) s z \(.t0_budget_s) s, T1 \(.t1_seconds) s z \(.t1_budget_s) s, celkem \(.merge_path_seconds) s z \(.merge_path_budget_s) s; přes rozpočet \($n). noc po sobě.\($lost) Do týdne rozhodni: zrychlit nejpomalejší sady (časy v test-durations.jsonl vedle nočního výsledku), nebo změnit rozpočet ve standardu testů."' <<<"$budget_json")" || true
+  else
     aid_alert_test_budget within || true
   fi
 fi

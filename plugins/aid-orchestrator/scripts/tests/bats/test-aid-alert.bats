@@ -94,11 +94,13 @@ _sent() { grep -c '^id=' "$SENT" 2>/dev/null || echo 0; }
 }
 
 @test "the library sends exactly three kinds of message, and no AID script sends another" {
-  # the public functions ARE the kinds; a fourth needs this list changed on purpose
-  [ "$(grep -oE '^aid_alert_[a-z_]+\(\)' "$LIB" | sort | tr '\n' ' ')" = "aid_alert_delivered() aid_alert_test_budget() aid_alert_waiting() aid_alert_waiting_clear() " ]
+  # the kinds are the message ids the library hands to the senders; a fourth needs this list changed on purpose
+  local ids; ids="$(grep -oE '(_aid_alert_once "\$1" [a-z]+ [a-z]+|_aid_alert_send [a-z]+ "[^"]*"|send_ok "[^"]*") [a-z-]+' "$LIB" | awk '{print $NF}' | sort -u | tr '\n' ' ')"
+  [ "$ids" = "agent-waiting plan-delivered rozpocet-testu " ] || { echo "ids: $ids"; return 1; }
   local scripts; scripts="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
-  run grep -rnE 'aid_alert_(run|nightly)|try_telegram_alert|send_alert ' "$scripts" --include=*.sh
-  [ -z "$(echo "$output" | grep -v '/tests/\|lib/aid-alert.sh')" ]
+  # a call, not a mention: nothing commented or double-quoted before the name
+  run grep -rnE '^[^#"]*\b(send_(alert|ok|alert_prose|telegram_alert)|try_telegram_alert)\b' "$scripts" --include=*.sh
+  [ -z "$(echo "$output" | grep -v '/tests/\|lib/aid-alert.sh')" ] || { echo "$output"; return 1; }
 }
 
 @test "two sessions ending turns at the same moment send one message; an unwritable store still sends" {
