@@ -519,6 +519,21 @@ def client_role(project):
     return t.format(persona_who=p["who"], persona_wants=p["wants"], persona_rules="\n".join("- " + r for r in p["rules"]), lang=lang)
 
 
+def diff_text(q):
+    """P113a bod 8: a follow-up question carries only what changed since the version answered last time."""
+    d = q.get("diff")
+    if not isinstance(d, dict):
+        return ""
+    if d.get("same"):
+        return "\n\n# Co se změnilo od minula\nNic: stejné znění, jaké jsi viděl/a v minulé otázce."
+    if d.get("missing"):
+        return "\n\n# Co se změnilo od minula\nPředchozí verzi studio nemá; posuď celé znění (soubor podle cíle otázky)."
+    lines = d.get("lines") or []
+    return ("\n\n# Co se změnilo od minula (jen změněné řádky; - = dřív, + = teď; celé znění je soubor podle cíle otázky %s)\n"
+            % str(q.get("target", "")).rpartition("@")[0] + "\n".join(str(x) for x in lines)
+            + ("\n… a dalších %d řádků změn" % d["truncated"] if d.get("truncated") else ""))
+
+
 def card_text(c):
     keep = ("id", "title", "eyebrow", "thesis", "uniqueness", "risk", "source", "method", "honours", "url", "palette", "tags", "preview2_label")
     return {k: c[k] for k in keep if c.get(k) not in (None, "", [])}
@@ -562,6 +577,10 @@ def answer_one(s, role, dry):
     links = d.get("links") or {}
     prompt = (role + "\n\n# Otázka ze studia\n\n" + json.dumps(qtext, ensure_ascii=False, indent=1)
               + ("\n\n# Tvoje dřívější volba, na kterou otázka navazuje\n" + json.dumps(q["prior"], ensure_ascii=False) if q.get("prior") else "")
+              + diff_text(q)
+              + ("\n\n# Položky (jedna odpověď pro všechny; approve = všechny schváleny, return = jen položky, které vrátíš"
+                 " v answer.items {\"<id položky>\": \"<co jinak>\"}, ostatní se schválí)\n"
+                 + json.dumps([{k: i.get(k) for k in ("id", "title", "preview")} for i in q["items"]], ensure_ascii=False, indent=1) if q.get("items") else "")
               + ("\n\n# Karty (náhledy jsou v přiložených obrázcích; živé stránky karet jsou nafocené na počítači i mobilu)\n"
                  + json.dumps([card_text(c) for c in cards], ensure_ascii=False, indent=1) if cards else "\n\n(otázka bez karet: rozhodnutí approve nebo return)")
               + ("\n\n# Odkazy, které studio ukazuje\n" + json.dumps(links, ensure_ascii=False) if links else "")
@@ -598,6 +617,8 @@ def answer_one(s, role, dry):
         ans = a["answer"]
         body = {"question": q["id"], "kind": q["kind"], "target": q.get("target"), "decision": ans.get("decision"),
                 "choice": ans.get("choice") or None, "comment": str(ans.get("comment") or "").strip()}
+        if q.get("items") and isinstance(ans.get("items"), dict):
+            body["items"] = {str(k): str(v) for k, v in ans["items"].items()}
         st, resp = s.req("/answer", body)
         rec.update(answer=ans, feedback=a.get("feedback"), post_status=st, post_resp=resp)
         wj(os.path.join(out, "turn.json"), rec)

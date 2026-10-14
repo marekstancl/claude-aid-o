@@ -69,6 +69,14 @@ the link from another app, whose Referer is foreign):
                               serves), no scripts (CSP); the studio's "Značka a produkt" link
   POST /open-item             [auth] JSON {text}: the PM's own open point -> history.jsonl (by pm,
                               kind open_item); aid-ui-state.sh open-items-sync takes it into the state
+  P113a bod 8: a question may carry `previous` (the id of an older question of the same kind on the same file or
+                              page): /state adds `diff` = {lines (unified, 2 lines of context, at most 60), truncated}
+                              | {same} | {missing} against the snapshot kept when that question was first served
+                              (.aid-ui/studio/snapshots/, file targets <path>@<sha256 of the bytes>, approve_page the
+                              page's reader text). An approve_page or exception question may carry `items`
+                              [{id, title, target}] with target items@<sha of {id, kind, target}>: approve takes every
+                              item, return names items {<id>: <comment>}; the answer keeps `items` with each decision
+                              and `items_sha256`.
   POST /answer                [auth] JSON {question, kind, target, decision,
                               choice, comment}; kind and target must be the open
                               question's own (a stale page gets 409).
@@ -91,7 +99,7 @@ opened_at now; the agent lists that id in the payload with the new cards.
 [auth] = the X-AID-Token header (the agent) or the session cookie (the PM's page).
 Neither: 403 {"error": "token"}.
 """
-import argparse, fcntl, hashlib, hmac, html, json, os, re, secrets, sys, threading
+import argparse, difflib, fcntl, hashlib, hmac, html, html.parser, json, os, re, secrets, sys, threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
@@ -552,6 +560,163 @@ def sections_view(questions):
     return {"steps": steps, "sources": SECTIONS["sources"]}
 
 
+ITEM_KINDS = {"approve_page", "exception"}   # P113a bod 8: one milestone question with items instead of one per page
+ITEM_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def items_sha(items):
+    """sha256 of a milestone's items as {id, kind, target}, sorted by id; the same bytes as
+    jq -cS '[.[] | {id, kind, target}] | sort_by(.id)' (aid-ui-state.sh checks it)."""
+    canon = sorted(({"id": i["id"], "kind": i["kind"], "target": i["target"]} for i in items), key=lambda i: i["id"])
+    return hashlib.sha256(json.dumps(canon, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def check_items(q):
+    """A milestone (approve_page or exception with items): unique ids, each with a title and a target; the question's
+    target is items@<items_sha>, so an answer binds exactly this list."""
+    items = q.get("items")
+    if items is None:
+        return
+    if q["kind"] not in ITEM_KINDS:
+        raise ValueError("question %s: items only for %s" % (q["id"], ", ".join(sorted(ITEM_KINDS))))
+    if not (isinstance(items, list) and items):
+        raise ValueError("question %s: items must be a non-empty list" % q["id"])
+    ids = set()
+    for i in items:
+        if not (isinstance(i, dict) and isinstance(i.get("id"), str) and ITEM_ID.match(i["id"]) and isinstance(i.get("title"), str)
+                and i["title"] and isinstance(i.get("target"), str) and i["target"]):
+            raise ValueError("question %s: every item needs an id (letters, digits, . _ -), a title and a target" % q["id"])
+        if i["id"] in ids:
+            raise ValueError("question %s: item id %s twice" % (q["id"], i["id"]))
+        ids.add(i["id"])
+        i["kind"] = q["kind"]
+    if q["target"] != "items@" + items_sha(items):
+        raise ValueError("question %s: target must be items@%s (the sha of its items)" % (q["id"], items_sha(items)))
+
+
+SNAP = os.path.join(STUDIO, "snapshots")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+class _Text(html.parser.HTMLParser):
+    """What a reader of the page sees, for the page diff: title, description, visible text by block (extractor v1)."""
+    BLOCK = {"p", "li", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th", "dt", "dd", "summary", "a", "button", "label", "figcaption", "blockquote"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.lines, self.cur, self.skip, self.title, self.desc = [], [], 0, "", ""
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag in ("script", "style", "noscript", "template", "svg"):
+            self.skip += 1
+        if tag == "meta" and (a.get("name") or "").lower() == "description":
+            self.desc = a.get("content") or ""
+        if tag in self.BLOCK or tag == "title":
+            self.flush()
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style", "noscript", "template", "svg"):
+            self.skip = max(0, self.skip - 1)
+        if tag == "title":
+            self.title = " ".join("".join(self.cur).split()); self.cur = []
+        elif tag in self.BLOCK:
+            self.flush()
+
+    def handle_data(self, d):
+        if not self.skip:
+            self.cur.append(d)
+
+    def flush(self):
+        t = " ".join("".join(self.cur).split())
+        if t:
+            self.lines.append(t)
+        self.cur = []
+
+
+def snapshot_text(q):
+    """The text a question's target stands for, or None: a file inside the project whose sha256 is the target's
+    (read once, the bytes read are the ones hashed), or for approve_page the page's reader text."""
+    t = q.get("target")
+    if not isinstance(t, str) or "@" not in t or t.startswith("items@"):
+        return None
+    path, _, digest = t.rpartition("@")
+    if q["kind"] == "approve_page":
+        path = os.path.join("site", path)
+    full = os.path.realpath(os.path.join(PROJECT, path))
+    if not full.startswith(PROJECT + os.sep) or os.path.islink(os.path.join(PROJECT, path)) or not os.path.isfile(full):
+        return None
+    try:
+        with open(full, "rb") as f:
+            data = f.read(2_000_000)
+    except OSError:
+        return None
+    if q["kind"] == "approve_page":
+        x = _Text()
+        x.feed(data.decode("utf-8", "replace"))
+        x.flush()
+        return "\n".join(["title: " + x.title, "description: " + x.desc, ""] + x.lines)
+    if not _HEX64.match(digest) or hashlib.sha256(data).hexdigest() != digest:
+        return None   # the file moved on since the question was written
+    return data.decode("utf-8", "replace")
+
+
+def snap_path(target):
+    return os.path.join(SNAP, hashlib.sha256(target.encode()).hexdigest() + ".txt")
+
+
+def take_snapshot(q):
+    """Kept the first time a question is served: what the reader saw then (never overwritten)."""
+    sp = snap_path(q["target"])
+    if os.path.exists(sp):
+        return
+    text = snapshot_text(q)
+    if text is None:
+        return
+    os.makedirs(SNAP, exist_ok=True)
+    tmp = sp + ".%d.part" % os.getpid()
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    try:
+        os.link(tmp, sp)   # atomic and never over an existing snapshot
+    except FileExistsError:
+        pass
+    finally:
+        os.unlink(tmp)
+
+
+def diff_of(q, prev):
+    """Only what changed since the version the reader answered last time (P113a bod 8)."""
+    try:
+        with open(snap_path(prev["target"]), encoding="utf-8") as f:
+            old = f.read()
+    except OSError:
+        return {"missing": True}
+    new = snapshot_text(q)
+    if new is None:
+        return {"missing": True}
+    lines = [l for l in difflib.unified_diff(old.splitlines(), new.splitlines(), n=2, lineterm="")
+             if not l.startswith(("---", "+++"))]
+    if not lines:
+        return {"same": True}
+    cut = max(0, len(lines) - 60)
+    return {"lines": lines[:60], "truncated": cut}
+
+
+def check_previous(q, qs):
+    """previous = an earlier question of the same kind on the same path (its target before the @)."""
+    pid = q.get("previous")
+    if pid is None:
+        return
+    prev = next((x for x in qs if x.get("id") == pid), None)
+    if not prev or prev is q:
+        raise ValueError("question %s: previous %r is not another question of the payload" % (q["id"], pid))
+    if prev["kind"] != q["kind"] or str(prev["target"]).rpartition("@")[0] != str(q["target"]).rpartition("@")[0]:
+        raise ValueError("question %s: previous %s is another kind or another file" % (q["id"], pid))
+    if parse_time(prev["opened_at"]) >= parse_time(q["opened_at"]):
+        raise ValueError("question %s: previous %s is not older" % (q["id"], pid))
+
+
 def load():
     """Payload with in-memory re-roll questions merged in; raises ValueError."""
     try:
@@ -588,7 +753,13 @@ def load():
             raise ValueError("payload.json: question %s (%s) must name its part" % (q["id"], q["kind"]))
         try:
             q["part"] = part_of(q)
+            check_items(q)
         except ValueError as e:
+            raise ValueError("payload.json: %s" % e)
+    for q in qs:
+        try:
+            check_previous(q, qs)
+        except (ValueError, TypeError) as e:
             raise ValueError("payload.json: %s" % e)
     shown = set()  # (question, card id): a choice names exactly one card the PM saw
     for c in cards:
@@ -893,6 +1064,15 @@ class Studio(BaseHTTPRequestHandler):
         elif u.path == "/state":
             if not self.gate(True) or (p := self.payload()) is None:
                 return
+            byid = {x["id"]: x for x in p["questions"]}
+            for x in p["questions"]:   # P113a bod 8: what the reader sees now is kept; a follow-up shows only the change
+                try:
+                    if not valid_answer(x):
+                        take_snapshot(x)
+                    if x.get("previous") in byid:
+                        x["diff"] = diff_of(x, byid[x["previous"]])
+                except OSError as e:
+                    self.log_message("snapshot: %s", e)
             with LOCK:
                 for x in p["questions"]:
                     a = valid_answer(x)
@@ -1080,6 +1260,22 @@ class Studio(BaseHTTPRequestHandler):
                                      and c.get("id") == choice for c in p["cards"]):
             self.send(422, {"error": "choose needs the id of one of this question's cards"})
             return
+        items = None
+        if cur.get("items"):   # a milestone: approve = every item; return = the named items with a comment each
+            if d not in ("approve", "return"):
+                self.send(422, {"error": "a question with items is approved or returned"})
+                return
+            ret = b.get("items") if d == "return" else {}
+            known = {i["id"] for i in cur["items"]}
+            if d == "return" and not (isinstance(ret, dict) and ret and set(ret) <= known
+                                      and all(isinstance(v, str) and v.strip() for v in ret.values())):
+                self.send(422, {"error": "return of a question with items needs items: {<item id>: <comment>} for at least one known item"})
+                return
+            items = [{"id": i["id"], "kind": i["kind"], "target": i["target"], "title": i["title"],
+                      "decision": "return" if i["id"] in ret else "approve", "comment": str(ret.get(i["id"], "")).strip()}
+                     for i in cur["items"]]
+            if d == "return" and not comment:
+                comment = "; ".join("%s: %s" % (i["title"], i["comment"]) for i in items if i["decision"] == "return")
         if d == "return" and not comment:
             self.send(422, {"error": "return needs a comment"})
             return
@@ -1099,6 +1295,8 @@ class Studio(BaseHTTPRequestHandler):
                  "choice": choice if d == "choose" else None, "comment": comment, "at": iso(t),
                  "cards": cards, "cards_sha256": hashlib.sha256(json.dumps(
                      cards, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()}
+            if items is not None:
+                a["items"], a["items_sha256"] = items, items_sha(cur["items"])
             if d.startswith("reroll"):
                 n = next_id(qid)
                 a["next_question"] = n

@@ -32,6 +32,9 @@ Studio nabízí tato rozhodnutí (`decision`):
 - `return` + povinný `comment` - vrátit s připomínkou, co změnit;
 - `reroll` / `reroll_safer` / `reroll_bolder` + `comment` - nové návrhy ve stejném duchu / bezpečnější /
   odvážnější, podle tvé poznámky.
+- otázka s **položkami** (několik stránek nebo výjimek najednou): `approve` schválí všechny, `return` vrátí jen ty,
+  které vypíšeš v `answer.items` jako `{{"<id položky>": "<co jinak>"}}`, ostatní se schválí;
+- otázka s částí **„Co se změnilo od minula“**: posuzuj hlavně změnu; zbytek už jsi jednou posoudil/a.
 
 Při předání webu (karty převzít / s výhradou / vrátit) vyber podle toho, jestli bys web dnes pustil svým
 zákazníkům; „s výhradou“ potřebuje komentář, co přesně.
@@ -42,7 +45,7 @@ Jen JSON, nic kolem (žádný text, žádné ```). `comment` piš jazykem webu (
 jazykem webu:
 
 {{
-  "answer": {{"decision": "...", "choice": "<id karty nebo null>", "comment": "..."}},
+  "answer": {{"decision": "...", "choice": "<id karty nebo null>", "comment": "...", "items": {{"<id položky>": "<co jinak>"}} }},
   "feedback": {{
     "question_clear": 1-5, "enough_to_decide": 1-5, "cards_real_choice": 1-5, "output_quality": 1-5,
     "what_was_missing": "<co ti chybělo k rozhodnutí, nebo prázdné>",

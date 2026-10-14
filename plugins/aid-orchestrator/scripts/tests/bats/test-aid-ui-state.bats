@@ -1713,3 +1713,32 @@ decide_payload() {
   run "$D/scripts/aid-ui-state.sh" method "$PROJ" vision; [ "$status" -eq 0 ]; [[ "$output" == *"waived by the PM's answer w1 (without)"* ]]
   [ "$(jq -r '.waived + " " + .mode + " " + (.files | length | tostring)' "$PROJ/.aid-ui/method/vision.json")" = "w1 without 0" ]
 }
+
+@test "P113a bod 8: a milestone answer is recorded with its items; each approved item is used once with --answer-item, a returned one never" {
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  studio
+  it="$(jq -nc --arg a "index.html@$(fp index.html)" --arg b "kontakt.html@$(fp kontakt.html)" \
+    '[{id: "index.html", title: "Úvod", target: $a}, {id: "kontakt.html", title: "Kontakt", target: $b}]')"
+  sha="$(jq -cS '[.[] | {id, kind: "approve_page", target}] | sort_by(.id)' <<<"$it" | tr -d '\n' | sha256sum | cut -d' ' -f1)"
+  p="$PROJ/.aid-ui/studio/payload.json"
+  jq --argjson it "$it" --arg t "items@$sha" --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" \
+    '.questions += [{id: "m1", kind: "approve_page", target: $t, opened_at: $o, items: $it}]' "$p" > "$p.t" && mv "$p.t" "$p"
+  curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
+    -d "$(jq -nc --arg t "items@$sha" '{question: "m1", kind: "approve_page", target: $t, decision: "return", items: {"kontakt.html": "telefón hore"}}')" "$AID_UI_STUDIO_URL/answer"
+  run "$SCRIPT" record-answer "$PROJ" --question m1; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e --arg s "$sha" '.answers.m1 | .items_sha256 == $s and (.items | length) == 2' "$STATE" >/dev/null
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer m1; [ "$status" -eq 1 ]; [[ "$output" == *"--answer-item"* ]]
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer m1 --answer-item index.html; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.approvals["index.html"] | .answer == "m1" and .item == "index.html"' "$STATE" >/dev/null
+  jq -e '.consumed | index("m1#index.html") != null and index("m1") == null' "$STATE" >/dev/null
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer m1 --answer-item index.html; [ "$status" -eq 1 ]; [[ "$output" == *"already used"* ]]
+  run "$SCRIPT" approve-page "$PROJ" kontakt.html --answer m1 --answer-item kontakt.html; [ "$status" -eq 1 ]; [[ "$output" == *"decided return"* ]]
+  run "$SCRIPT" approve-page "$PROJ" kontakt.html --answer m1 --answer-item index.html; [ "$status" -eq 1 ]; [[ "$output" == *"is for"* ]]
+  run "$SCRIPT" approve-page "$PROJ" index.html --answer m1 --answer-item nic; [ "$status" -eq 1 ]; [[ "$output" == *"has no item nic"* ]]
+  # a single answer takes no item
+  ans a1 approve_page "kontakt.html@$(fp kontakt.html)"
+  run "$SCRIPT" approve-page "$PROJ" kontakt.html --answer a1 --answer-item kontakt.html; [ "$status" -eq 1 ]; [[ "$output" == *"has no items"* ]]
+  # a returned item turned into an approval in the state is refused against the studio (the decisions are compared, not only the sha)
+  jq '.answers.m1.items[1].decision = "approve"' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  run "$SCRIPT" approve-page "$PROJ" kontakt.html --answer m1 --answer-item kontakt.html; [ "$status" -eq 1 ]; [[ "$output" == *"differs from the recorded one"* ]]
+}

@@ -108,6 +108,16 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
    Studio hlídá, že `prior` je přesně zaznamenaná odpověď a že `honours` jmenuje id volby; zda karta
    slova PM opravdu ctí, hlídá jen tvůj úsudek. Volbu i slova PM ukáže nad otázkou - PM nemá znovu
    vysvětlovat, co už řekl.
+0c. **Méně kol, víc rozdílů (P113a bod 8).**
+   - **Rozdíl:** otázka, která se vrací k věci, kterou PM nebo klient už jednou viděl (po vrácení nebo po změně),
+     nese `previous` = id té dřívější otázky (stejný druh, stejný soubor nebo stránka). Studio i klient-agent
+     dostanou jen to, co se změnilo: řádky souboru u souborového cíle (`<cesta>@<sha256>`), text stránky
+     u `approve_page`. Snímek verze ukládá studio při prvním zobrazení otázky
+     (`.aid-ui/studio/snapshots/`).
+   - **Milník:** několik stránek nebo výjimek z jednoho okruhu je jedna otázka `approve_page` nebo `exception`
+     s `items` a `target` `items@<sha položek>`. Každou položku spotřebuj
+     `--answer <id> --answer-item <položka>` (kroky 7 bod 3 a 5).
+   - Ostatní druhy otázek zatím slučované nejsou (IMP-698).
 1. Zapiš nebo obnov `<project>/.aid-ui/studio/payload.json`:
    `now` (`title`, `text` = co právě děláš, např. „Připravuji tři návrhy vzhledu…", `at` = kdy jsi to
    napsal, `part` = id části, pro kterou platí; studio tvou poznámku ukáže jen dokud je novější než

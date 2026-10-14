@@ -982,3 +982,64 @@ PY
     grep -qE "(\"$d\"|[ {]$d): \"" "$f" || { echo "no words for $d"; return 1; }
   done
 }
+
+# P113a bod 8: milestones and diffs
+isha() { python3 -c 'import hashlib,json,sys; it=json.loads(sys.argv[1]); k=sys.argv[2]
+c=sorted(({"id":i["id"],"kind":k,"target":i["target"]} for i in it), key=lambda i:i["id"])
+print(hashlib.sha256(json.dumps(c,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest())' "$1" "$2"; }
+qpayload() {   # <questions json array>
+  for k in approve_page exception seo_brief; do receipt "$k" 2020-01-01T00:00:00Z; done
+  printf '{"steps": [{"id": "s1", "title": "Stavba", "status": "current"}], "questions": %s, "cards": []}\n' "$1" > "$P/.aid-ui/studio/payload.json"
+}
+
+@test "P113a bod 8: a milestone question - items bound by their sha; approve takes all, return names items with a comment each" {
+  it='[{"id":"index.html","title":"Úvod","target":"index.html@f1"},{"id":"_shared","title":"Společný styl","target":"_shared@s1"}]'
+  sha="$(isha "$it" approve_page)"
+  qpayload "[{\"id\":\"m1\",\"kind\":\"approve_page\",\"target\":\"items@deadbeef\",\"opened_at\":\"2020-01-01T00:00:00Z\",\"items\":$it}]"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]; grep -q "items@$sha" "$BATS_TEST_TMPDIR/body"
+  qpayload "[{\"id\":\"m1\",\"kind\":\"approve_page\",\"target\":\"items@$sha\",\"opened_at\":\"2020-01-01T00:00:00Z\",\"items\":$it},
+             {\"id\":\"m2\",\"kind\":\"approve_page\",\"target\":\"items@$sha\",\"opened_at\":\"2020-01-01T00:00:00Z\",\"items\":$it},
+             {\"id\":\"q9\",\"kind\":\"seo_brief\",\"target\":\"x@1\",\"opened_at\":\"2020-01-01T00:00:00Z\",\"items\":$it}]"
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]; grep -q "items only for" "$BATS_TEST_TMPDIR/body"   # not on another kind
+  qpayload "[{\"id\":\"m1\",\"kind\":\"approve_page\",\"target\":\"items@$sha\",\"opened_at\":\"2020-01-01T00:00:00Z\",\"items\":$it},
+             {\"id\":\"m2\",\"kind\":\"approve_page\",\"target\":\"items@$sha\",\"opened_at\":\"2020-01-01T00:00:00Z\",\"items\":$it}]"
+  [ "$(answer "{\"question\":\"m1\",\"kind\":\"approve_page\",\"target\":\"items@$sha\",\"decision\":\"approve\"}")" = 200 ]
+  jq -e --arg s "$sha" '.items_sha256 == $s and ([.items[].decision] | unique) == ["approve"] and (.items | length) == 2' "$BATS_TEST_TMPDIR/body" >/dev/null
+  # return: only known items, each with words; the rest approved explicitly
+  for bad in '{}' '{"nic":"x"}' '{"index.html":" "}'; do
+    [ "$(answer "{\"question\":\"m2\",\"kind\":\"approve_page\",\"target\":\"items@$sha\",\"decision\":\"return\",\"items\":$bad}")" = 422 ] || { echo "accepted $bad"; return 1; }
+  done
+  [ "$(answer "{\"question\":\"m2\",\"kind\":\"approve_page\",\"target\":\"items@$sha\",\"decision\":\"choose\",\"choice\":\"a\"}")" = 422 ]
+  [ "$(answer "{\"question\":\"m2\",\"kind\":\"approve_page\",\"target\":\"items@$sha\",\"decision\":\"return\",\"items\":{\"index.html\":\"menší nadpis\"}}")" = 200 ]
+  jq -e '(.items[] | select(.id == "index.html") | .decision == "return" and .comment == "menší nadpis")
+         and (.items[] | select(.id == "_shared") | .decision == "approve") and (.comment | contains("Úvod: menší nadpis"))' "$BATS_TEST_TMPDIR/body" >/dev/null
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/answer?question=m2")" = 200 ]; jq -e '.items | length == 2' "$BATS_TEST_TMPDIR/body" >/dev/null
+}
+
+@test "P113a bod 8: a follow-up shows only what changed since the version answered; a page by its reader text; no snapshot says so" {
+  mkdir -p "$P/docs/seo" "$P/site"
+  printf 'riadok 1\nriadok 2\ntitulok: Krátky\nriadok 4\n' > "$P/docs/seo/brief.md"; s1="$(sha256sum "$P/docs/seo/brief.md" | cut -c1-64)"
+  printf '<html><head><title>Úvod</title><meta name="description" content="Popis"></head><body><h1>Vitajte</h1><p>Starý text</p><script>x=1</script></body></html>' > "$P/site/index.html"
+  qpayload '[{"id":"s1","kind":"seo_brief","target":"docs/seo/brief.md@'"$s1"'","opened_at":"2020-01-01T00:00:00Z"},
+             {"id":"p1","kind":"approve_page","target":"index.html@f1","opened_at":"2020-01-01T00:00:00Z"}]'
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]; [ "$(ls "$P/.aid-ui/studio/snapshots" | wc -l)" -eq 2 ]   # kept when served
+  printf 'riadok 1\nriadok 2\ntitulok: Dlhší titulok so službou\nriadok 4\n' > "$P/docs/seo/brief.md"; s2="$(sha256sum "$P/docs/seo/brief.md" | cut -c1-64)"
+  sed -i 's|Starý text|Nový text|' "$P/site/index.html"
+  qpayload '[{"id":"s1","kind":"seo_brief","target":"docs/seo/brief.md@'"$s1"'","opened_at":"2020-01-01T00:00:00Z"},
+             {"id":"p1","kind":"approve_page","target":"index.html@f1","opened_at":"2020-01-01T00:00:00Z"},
+             {"id":"s2","kind":"seo_brief","target":"docs/seo/brief.md@'"$s2"'","opened_at":"2020-01-01T00:00:01Z","previous":"s1"},
+             {"id":"p2","kind":"approve_page","target":"index.html@f2","opened_at":"2020-01-01T00:00:01Z","previous":"p1"},
+             {"id":"x1","kind":"seo_brief","target":"docs/seo/brief.md@'"$(printf 0%.0s $(seq 64))"'","opened_at":"2020-01-01T00:00:00Z"},
+             {"id":"s3","kind":"seo_brief","target":"docs/seo/brief.md@'"$s2"'","opened_at":"2020-01-01T00:00:02Z","previous":"x1"}]'
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ] || { cat "$BATS_TEST_TMPDIR/body"; return 1; }
+  jq -e '.questions[] | select(.id == "s2") | .diff.lines | index("-titulok: Krátky") != null and index("+titulok: Dlhší titulok so službou") != null and (map(select(startswith("+") or startswith("-"))) | length) == 2' "$BATS_TEST_TMPDIR/body" >/dev/null
+  jq -e '.questions[] | select(.id == "p2") | .diff.lines | index("-Starý text") != null and index("+Nový text") != null and (map(select(contains("x=1"))) | length) == 0' "$BATS_TEST_TMPDIR/body" >/dev/null
+  jq -e '.questions[] | select(.id == "s3") | .diff.missing == true' "$BATS_TEST_TMPDIR/body" >/dev/null   # the earlier version never matched its file
+  # previous must be an older question of the same kind on the same file
+  qpayload '[{"id":"s1","kind":"seo_brief","target":"docs/seo/brief.md@'"$s1"'","opened_at":"2020-01-01T00:00:00Z"},
+             {"id":"p3","kind":"approve_page","target":"index.html@f3","opened_at":"2020-01-01T00:00:01Z","previous":"s1"}]'
+  [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 422 ]; grep -q "another kind or another file" "$BATS_TEST_TMPDIR/body"
+  # a target outside the project is never read
+  qpayload '[{"id":"e1","kind":"seo_brief","target":"../../etc/passwd@'"$s1"'","opened_at":"2020-01-01T00:00:00Z"}]'
+  n="$(ls "$P/.aid-ui/studio/snapshots" | wc -l)"; code -H "X-AID-Token: $TOKEN" "$URL/state" >/dev/null; [ "$(ls "$P/.aid-ui/studio/snapshots" | wc -l)" -eq "$n" ]
+}

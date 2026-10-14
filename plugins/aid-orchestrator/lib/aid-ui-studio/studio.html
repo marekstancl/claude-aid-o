@@ -388,6 +388,10 @@
   .lb-bar button.choose { margin: 0; }
   .lb-bar .chip[aria-pressed="true"] { outline: 2px solid var(--ks-accent, #222); }
   .lb-bar [hidden] { display: none; }
+  .diff pre { white-space: pre-wrap; font-size: .85rem; padding: .6rem .9rem; background: var(--ks-paper-raised); border-radius: 6px; max-height: 24rem; overflow: auto; }
+  .diff .add { color: #1d6b3a; } .diff .del { color: #9a2b2b; text-decoration: line-through; } .diff .hunk { color: var(--ks-ink-soft, #666); }
+  ul.items { list-style: none; padding: 0; margin: .6rem 0; } ul.items li { padding: .4rem 0; border-bottom: 1px solid rgba(0,0,0,.08); }
+  ul.items li.noted b { text-decoration: underline wavy #9a2b2b; } ul.items .item-note { display: block; font-size: .9rem; color: #9a2b2b; }
   .prior { margin: 0 0 .8rem; padding: .6rem .9rem; border-left: 3px solid var(--ks-kinpaku); background: var(--ks-paper-raised); font-size: .95rem; }   /* .chip sets display, so the attribute alone did not hide the contexts button on a card without a second picture */
   .links { padding: 1rem 0 1.4rem; border-top: 1px solid var(--ks-rule); font-size: .8125rem; display: flex; gap: 1.2rem; flex-wrap: wrap; }
 
@@ -635,6 +639,28 @@ const SELECTOR = { check: "kontrola", page: "stránka", viewport: "velikost obra
 // Card fields rendered by name; any other string field shows on the card's back as "key: value".
 const KNOWN = new Set(["id", "question", "title", "preview", "preview2", "thesis", "palette", "risk", "uniqueness", "url", "eyebrow", "tags", "source", "method", "slot", "value", "preview2_label", "honours", "dir"]);
 // the PM's earlier choice this question builds on (checked by the server against the recorded answer)
+// P113a bod 8: a follow-up question shows only what changed since the version answered last time
+function diffBlock(q) {
+  const d = q.diff; if (!d || typeof d !== "object") return null;
+  if (d.same) return el("p", { class: "prior" }, "Beze změny proti verzi, kterou jste viděli.");
+  if (d.missing) return el("p", { class: "prior" }, "Předchozí verzi nemám, ukazuji celé znění.");
+  if (!Array.isArray(d.lines)) return null;
+  return el("div", { class: "diff" }, el("h3", {}, "Co se změnilo od minula"),
+    el("pre", {}, d.lines.map(l => el("span", { class: l[0] === "+" ? "add" : l[0] === "-" ? "del" : l.startsWith("@@") ? "hunk" : "ctx" }, String(l) + "\n"))),
+    d.truncated ? el("p", { class: "tier" }, "… a dalších " + d.truncated + " řádků změn") : null);
+}
+// a milestone: one question, several pages or exceptions; each can go back with its own note
+const ITEMNOTES = {};
+function itemsBlock(q, refresh) {
+  const notes = ITEMNOTES[q.id] = ITEMNOTES[q.id] || {};
+  return el("ul", { class: "items" }, q.items.map(it => el("li", { "data-item": it.id, class: it.id in notes ? "noted" : "" },
+    el("b", {}, String(it.title)), str(it.preview) ? el("span", { class: "tier" }, " " + it.preview) : null,
+    el("button", { type: "button", class: "chip", on: { click: () => ask({ key: q.id + ":item:" + it.id, title: "Co má být u „" + it.title + "“ jinak?",
+      hint: "Poznámka zůstane u položky; ostatní položky se schválí. Odejde tlačítkem „Vrátit vybrané“.",
+      send: [["Uložit", t => { notes[it.id] = t; refresh(); }]], extra: notes[it.id] ? [["Smazat", () => { delete notes[it.id]; refresh(); }]] : [] }) } }, "Vrátit…"),
+    el("span", { class: "item-note" }, notes[it.id] ? "Vrátit: " + notes[it.id] : ""))));
+}
+
 function priorLine(q) {
   const p = q.prior; if (!p || typeof p !== "object") return null;
   return el("p", { class: "prior" }, "Vaše volba, ze které vycházím: ", el("b", {}, String(p.choice || p.question)),
@@ -972,11 +998,11 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
     count ? el("span", { class: "q-count" }, "Otázka " + count.k + (/^[234]$|^[234]\d\d$/.test(String(count.n)) ? " ze " : " z ") + count.n) : null,
     (S.sections ? null : el("span", { class: "tier" }, kind)), extra);
   let sync = () => {};
-  const answer = async (decision, choice, comment) => {
+  const answer = async (decision, choice, comment, items) => {
     const btns = sec.querySelectorAll("button:not(.chip):not(.nav):not(.tick)");
     btns.forEach(b => b.disabled = true);
     try {
-      const r = await call("POST", "/answer", { question: q.id, kind: q.kind, target: q.target, decision, choice, comment: comment || "" });
+      const r = await call("POST", "/answer", Object.assign({ question: q.id, kind: q.kind, target: q.target, decision, choice, comment: comment || "" }, items ? { items } : {}));
       if (r.status === 200) { askDlg.dataset.key = ""; if (!/^reroll/.test(decision)) await leave(sec); last = ""; tick(); return; }
       status.textContent = r.status === 409 ? "Otázka se mezitím změnila nebo už má odpověď. Obnovte stránku."
         : "Odpověď se nepodařilo uložit. Zkuste to prosím znovu.";
@@ -1001,6 +1027,7 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
       str(S.links.web) ? el("a", { class: "choose go", href: S.links.web, target: "_blank", rel: "noopener" }, "Otevřít web") : null,
       str(S.links.customer) ? el("a", { class: "reroll-btn", href: S.links.customer, target: "_blank", rel: "noopener" }, "Co jste dostali") : null));
     const lines = bodyLines(q.body); if (lines) sec.append(el("div", { class: "head" }, lines));
+    const dif = diffBlock(q); if (dif) sec.append(dif);
     if (partNote) sec.append(partNote);
     if (!cards.length) {
       sec.append(el("p", { class: "tier" }, "Připravují se nové návrhy…"), deck(q, [0, 1, 2].map(skeleton)));
@@ -1062,7 +1089,8 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
   }
 
   // One panel: text question, page approval or exception.
-  const page = q.kind === "approve_page", exc = q.kind === "exception";
+  const milestone = Array.isArray(q.items) && q.items.length > 0;
+  const page = q.kind === "approve_page" && !milestone, exc = q.kind === "exception" && !milestone;
   const shot = page && cards[0] ? media(q, cards[0], false) : null;
   let meta = null;
   if (page) {
@@ -1080,6 +1108,8 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
     str(q.prompt) ? el("p", { class: "lede" }, q.prompt) : null,
     meta, exc ? selectorChips(q.target) : null,
     (lines => lines ? el("div", { class: "head" }, lines) : null)(bodyLines(q.body)),
+    diffBlock(q),
+    milestone ? itemsBlock(q, () => (live()?.refreshItems || refreshItems)()) : null,
     partNote,
     galleryEl];
   // Notes to single pages (lightbox "Chci jinak", PM 9. 10. 2026): kept here until "Vrátit s poznámkami" sends them
@@ -1097,6 +1127,12 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
     send: [["Uložit poznámku", t => { notes[id] = t; (live()?.refreshNotes || refreshNotes)(); if (then) then(); }]],
     extra: notes[id] ? [["Smazat poznámku", () => { delete notes[id]; (live()?.refreshNotes || refreshNotes)(); if (then) then(); }]] : [] }); };
   sec.refreshNotes = refreshNotes; refreshNotes();
+  const inotes = ITEMNOTES[q.id] = ITEMNOTES[q.id] || {};
+  const itemsBtn = el("button", { type: "button", class: "reroll-btn", hidden: true, on: { click: () => answer("return", undefined, "", Object.assign({}, inotes)) } });
+  const refreshItems = () => { const n = Object.keys(inotes).length; itemsBtn.hidden = !n; itemsBtn.textContent = "Vrátit vybrané (" + n + ")";
+    sec.querySelectorAll("li[data-item]").forEach(li => { const id = li.getAttribute("data-item"); li.classList.toggle("noted", id in inotes);
+      const t = li.querySelector(".item-note"); if (t) t.textContent = inotes[id] ? "Vrátit: " + inotes[id] : ""; }); };
+  sec.refreshItems = refreshItems;
   // a page approval keeps its box with the screenshot; every other question reads like the ones with cards
   const body = page ? el("div", { class: "body" }, parts) : sec;
   if (page) sec.append(el("div", { class: "panel face wide" }, shot, body)); else sec.append(...parts.filter(Boolean));
@@ -1108,6 +1144,7 @@ function question(q, cards, count, partNote, extra) {   // partNote: the part's 
   body.append(el("div", { class: "bar" },
     el("button", { type: "button", class: "reroll-btn", on: { click: other } }, exc ? "Neudělit" : page ? "Chci změny" : "Chci to jinak"),
     gallery ? notesBtn : null,
+    milestone ? itemsBtn : null,
     el("span", { class: "spacer" }),
     el("button", { type: "button", class: "choose go", on: { click: yes } },
       exc ? "Udělit výjimku" : q.kind === "handover" ? "Ano, předat" : page ? "V pořádku, další →" : "Ano, další →"),

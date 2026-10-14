@@ -56,7 +56,8 @@ a stavba (krok 6) z něj vycházejí. Kapitola `seo` to nese.
    („Doporučuji povolit AI vyhledávání a citace (ChatGPT, Perplexity, Claude najdou
    a ocitují web) a zakázat trénink modelů (texty nejdou zadarmo do dalších modelů)."),
    v briefu zapsaná jako tento návrh; `target` = `docs/seo/brief.md@<sha256
-   souboru>`. `return` s komentářem → uprav brief, otevři znovu (nejvýš dvě
+   souboru>`. `return` s komentářem → uprav brief, otevři znovu s `previous` = id vrácené otázky (studio ukáže
+   jen změněné řádky, SKILL.md 0c; nejvýš dvě
    kola, pak nabídni jen domovskou stránku jako minimum - nikdy bez PM).
 3. Po `approve` tělo kapitoly (potvrzené stránky s H1, co je odhad) do
    souboru v `.aid-ui/`, `aid-ui-state.sh body <project> seo --file <soubor>`,

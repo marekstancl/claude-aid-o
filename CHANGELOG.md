@@ -14,6 +14,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - **Krok 6:**
     - `Service` pro služby a `BreadcrumbList` na vnořených stránkách (`aid-ui-seo-check.py` hlásí chybějící drobečky jako WARN `breadcrumbs`; najde je i vnořené pod stránkou a chce aspoň dvě položky),
     - hlavní obraz první obrazovky bez výchozí neprůhlednosti a zpoždění; pohyb vzoru patří na doprovodný prvek. Brána to vynucuje: `first_paint_visible` selže, když největší obrázek první obrazovky začíná zprůhledněný nebo čeká na zpožděné prolnutí.
+- **Méně kol, víc rozdílů (bod 8 zadání P113a):**
+  - **Rozdíl:** otázka s `previous` (dřívější otázka stejného druhu na tentýž soubor nebo stránku) ukáže ve studiu
+    i klientovi-agentovi jen to, co se změnilo: řádky souboru, nebo text stránky u schválení stránky. Celé znění je
+    jen bez snímku předchozí verze, s vysvětlující větou. Snímky ukládá studio při prvním zobrazení otázky do
+    `.aid-ui/studio/snapshots/`, jen ze souboru uvnitř projektu a jen když sedí jeho sha.
+  - **Milník:** několik stránek nebo výjimek je jedna otázka s `items` (cíl `items@<sha položek>`).
+    - `approve` schválí všechny, `return` vrátí jen jmenované položky s komentářem, ostatní se schválí.
+    - Položka se spotřebuje `--answer <id> --answer-item <položka>` jen jednou.
+    - Rozhodnutí položek se ověřují proti studiu, ne jen jejich otisk.
+  - Na Coufalu se schvalovaly stránky 21× a výjimky 9×. Slučování faktů, plánu obsahu a SEO je IMP-698.
 - **Id výtek se nezdvojují:** předponu kola a role, kterou si kritik opsal z paměti, smyčka odřízne. Kdyby se dvě id jedné odpovědi tím shodla, zůstanou, jak byla.
 
 ### Changed

@@ -272,3 +272,17 @@ cs = m.question_cards(S(), {"cards": []}, {"id": "q1"})
 assert cs[0]["_file"].endswith("previews/a.png") and cs[1]["_file"] is None, cs
 PY
 }
+
+@test "P113a bod 8: the client's prompt carries only the change since its last answer, or says why the whole text" {
+  run python3 - "$CL" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("cl", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+t = m.diff_text({"target": "docs/seo/brief.md@ab", "diff": {"lines": ["@@ -3 +3 @@", "-titulok: Krátky", "+titulok: Dlhší"], "truncated": 4}})
+assert "Co se změnilo od minula" in t and "+titulok: Dlhší" in t and "docs/seo/brief.md" in t and "dalších 4" in t, t
+assert "Nic" in m.diff_text({"diff": {"same": True}}) and "Předchozí verzi studio nemá" in m.diff_text({"diff": {"missing": True}})
+assert m.diff_text({}) == ""
+print("ok")
+PY
+  [ "$status" -eq 0 ] && [ "${lines[-1]}" = ok ] || { echo "$output"; return 1; }
+  grep -q 'answer.items' "$CL" && grep -q '"items"' "$SC/../skills/ui-design/critic/client-template.md"
+}

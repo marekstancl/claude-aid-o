@@ -78,6 +78,11 @@ a `frontend-build-standard.md` (čti živě).
    selektor jako JSON: `check`, `page`, `viewport`, `browser`, `role`,
    `state`; klíč vynechaný nebo `"*"` = všechno, obě podoby se berou stejně); důvod = komentář PM. Po `approve`
    `aid-ui-state.sh exception <project> --check <c> [--page …] --answer <id>`.
+   **Víc řádků najednou (milník, P113a bod 8):** všechny výjimky jednoho okruhu jako jedna otázka `exception`
+   s `items` (`[{id, title, target}]`, `target` položky = její selektor jako JSON) a `target` otázky
+   `items@<sha položek>` (studio řekne správný sha, když nesedí). Po odpovědi každou schválenou položku zvlášť:
+   `aid-ui-state.sh exception <project> --check <c> … --answer <id> --answer-item <položka>`; vrácená položka
+   (komentář PM u ní) se neudělí.
 4. Projektový design standard (před schvalováním stránek, protože jeho úpravy mění build): `DESIGN.md` doplněný o platformní kontrakt
    (řádky Předěl, Navigace, Dotyk/kurzor, Formuláře, Systémové okraje, Gesta; u aplikace
    i Okna), přístupnost, vzory a pravidla textů. Pak změř postavený web: náhled po bráně
@@ -104,6 +109,12 @@ a `frontend-build-standard.md` (čti živě).
    karta); po `approve`
    `aid-ui-state.sh approve-page <project> <stránka> --answer <id>`.
    Změna buildu schválení té stránky zruší.
+   **Po přestavbě (milník, P113a bod 8):** změněné stránky a společný styl (`_shared`) se ptají **jednou otázkou**
+   `approve_page` s `items` (položka = stránka, `target` = `<stránka>@<otisk>`), ne otázkou na každou stránku.
+   Když se otázka vrací k verzi, kterou klient už viděl, nese `previous` = id té otázky: studio i klient-agent
+   pak dostanou jen rozdíl textu stránky (u souborových otázek jako SEO zadání rozdíl souboru). Schválení:
+   `aid-ui-state.sh approve-page <project> <stránka> --answer <id> --answer-item <stránka>` pro každou
+   schválenou položku; vrácenou oprav a polož novou otázku s `previous`.
 6. `aid-ui-coverage.sh report <project>` → `docs/design/soulad-se-standardy.md`
    a `docs/design/soulad-summary.json`; položky s dispozicí `agent:` po ověření
    `aid-ui-state.sh attest <project> <item id> --note <co bylo ověřeno>`
