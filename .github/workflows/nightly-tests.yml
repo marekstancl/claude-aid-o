@@ -34,6 +34,11 @@ on:
 jobs:
   nightly-portfolio:
     runs-on: [self-hosted, eco-dev]
+    # The JOB's own cap. Its default is 360 minutes, and that default — not a
+    # platform limit — cancelled the nights of 2026-10-12 and 10-13 at 6 h 1 min
+    # with no report written. A self-hosted job may run for days; 600 leaves the
+    # step caps below (480 + 90) room and still ends before the working day.
+    timeout-minutes: 600
     steps:
       - uses: actions/checkout@v5
         with:
@@ -137,7 +142,7 @@ jobs:
   # ── Its own job, and this is why ──────────────────────────────────────────
   # The isolation run started life as a step of nightly-portfolio and cancelled
   # the whole job on its first night (2026-08-15): portfolio 285 min + tiers
-  # 21 + report 2 + isolation 50 = 358, and GitHub cancels a job at 360. The
+  # 21 + report 2 + isolation 50 = 358, and a job's DEFAULT cap is 360. The
   # step's own `timeout-minutes: 120` was never reached — the JOB ran out of
   # time, which reads as "cancelled", not as "this check is too slow".
   #
