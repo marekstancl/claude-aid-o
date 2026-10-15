@@ -87,7 +87,9 @@ resolve_subject() {
   if [[ -n "$path" ]]; then
     declared="$(sed -n '1,15{s/^#[[:space:]]*aid-subject:[[:space:]]*//p}' "$path" | head -1)"
     if [[ -n "$declared" ]]; then
-      [[ -f "$PLUGIN_ROOT/$declared" ]] && { printf '%s\n' "$declared"; return 0; }
+      # inside the plugin only: no absolute path, no `..`
+      [[ "$declared" != /* && "/$declared/" != */../* && -f "$PLUGIN_ROOT/$declared" ]] \
+        && { printf '%s\n' "$declared"; return 0; }
       printf 'unresolvable\n'; return 0
     fi
   fi

@@ -243,7 +243,16 @@ _streak() { jq .budget_episode.over_streak "$NIGHTLY_DIR/latest.json"; }
       '{suite:$s, runner:"bats", duration_ms:$d, cases:1, exit_code:0, source:"bats_timing", censored:$c, host:"h", at:"2026-10-14T00:00:00Z"}' \
       >> "$AID_DURATIONS_DIR/test-durations.jsonl"
   done
+  # a valid measurement stays the suite's figure when a newer run of it was cut short
+  printf '#!/usr/bin/env bats\n# aid-tier: t1\n@test "x" { true; }\n' > "$FIXTURE_TESTS/bats/test-i.bats"
+  jq -nc '{suite:"test-i.bats", runner:"bats", duration_ms:8000, cases:1, exit_code:0, source:"bats_timing", censored:false, host:"h", at:"2026-10-13T00:00:00Z"}' >> "$AID_DURATIONS_DIR/test-durations.jsonl"
+  jq -nc '{suite:"test-i.bats", runner:"bats", duration_ms:500, cases:1, exit_code:0, source:"bats_timing", censored:true, host:"h", at:"2026-10-14T00:00:00Z"}' >> "$AID_DURATIONS_DIR/test-durations.jsonl"
   _night 2026-10-14 171 484
   IFS='|' read -r _ _ _ _ _ akce _ < "$SENT"
-  [[ "$akce" == *"Nejdražší sady: test-a.bats 9 s, test-b.bats 7 s, test-c.bats 7 s, test-d.bats 5 s, test-e.bats 4 s."* ]] || { echo "$akce"; return 1; }
+  [[ "$akce" == *"Nejdražší sady: test-a.bats 9 s, test-i.bats 8 s, test-b.bats 7 s, test-c.bats 7 s, test-d.bats 5 s."* ]] || { echo "$akce"; return 1; }
+  # an unreadable journal is said, not passed off as nothing measured
+  echo '{"suite": broken' >> "$AID_DURATIONS_DIR/test-durations.jsonl"; : > "$SENT"
+  _night 2026-10-15 171 484
+  IFS='|' read -r _ _ _ _ _ akce _ < "$SENT"
+  [[ "$akce" == *"Nejdražší sady nejdou přečíst"* && "$akce" != *"Nejdražší sady: "* ]] || { echo "$akce"; return 1; }
 }

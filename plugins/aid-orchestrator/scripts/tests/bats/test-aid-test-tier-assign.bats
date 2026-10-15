@@ -13,7 +13,7 @@
 # "everything is cheap", which is the state this whole plan exists to end.
 #
 # Result count after any edit:
-#   bats --tap test-aid-test-tier-assign.bats | grep -cE '^(ok|not ok)'   # == 11
+#   bats --tap test-aid-test-tier-assign.bats | grep -cE '^(ok|not ok)'   # == 12
 
 load test-helpers.bash
 
@@ -176,4 +176,16 @@ _tier_of() { awk -F'\t' -v s="$2" '$1 == s { print $7 }' <<<"$1"; }
   run _assign
   [ "$status" -eq 1 ]
   [[ "$output" == *"alone exceeds the T1 budget"* ]]
+}
+
+@test "12: a suite names its subject in its header; a path outside the plugin is no subject" {
+  printf '#!/usr/bin/env bats\n# aid-tier: t1\n# aid-subject: scripts/lib/aid-test-tier.sh\n' > "$FIXTURE_TESTS/bats/test-whatever-name.bats"
+  printf '#!/usr/bin/env bats\n# aid-tier: t1\n# aid-subject: ../../../../etc/hostname\n' > "$FIXTURE_TESTS/bats/test-escape.bats"
+  _measure test-whatever-name.bats 100 1
+  _measure test-escape.bats 100 1
+  run _assign
+  [ "$status" -eq 0 ]
+  [ "$(awk -F'\t' '$1 == "test-whatever-name.bats" { print $3 }' <<<"$output")" = "scripts/lib/aid-test-tier.sh" ]
+  [ "$(_tier_of "$output" test-whatever-name.bats)" = "t1" ]
+  [ "$(_tier_of "$output" test-escape.bats)" = "t2" ]
 }
