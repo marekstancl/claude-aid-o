@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.3.0** (current) — noční běh hlásí, když testy před sloučením přetáhnou rozpočet (`rozpocet-testu`, jedna zpráva za noc, `ok` po návratu)
+- **v3.4.0** (current) — testy před sloučením zpět pod 10 min (919 → 544 s): T0 jen statické kontroly, přetečení do nočního běhu se záznamem, kontrola pater i při vydání, rychlejší skrývání tajných údajů
+- **v3.3.0** — noční běh hlásí, když testy před sloučením přetáhnou rozpočet (`rozpocet-testu`, jedna zpráva za noc, `ok` po návratu)
 - **v3.2.2** — ceny bez koncových nul, stejně s `jq` 1.6 i 1.7; testy a runnery na eco-dev s `jq` 1.7.1 (cesta ke sloučení −30 %)
 - **v3.2.1** — rychlejší noční běh testů: strop úlohy 10 h, sdílené kopie přípravků, sady konce plánu, spuštění plánu a ověření UI zrychlené; opravy po první noci s 3.0.0
 - **v3.2.0** — smyčka kvality /aid-ui: dva nezávislí kritici (majitel a technik) s pamětí a cestou k 10, hodnotí se práce studia, ne to, co klient nedodal; 3 kola nebo 8,5 u obou a audit; cena a čas každého kola; ve studiu jen rozdíly proti minulé verzi a milníky místo otázky na každou stránku
