@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and this is among the dearest
+# suites outside the core (tier-core.txt); a regression here is caught by the next night instead of at merge.
 # test-aid-gate-runtime-baseline.bats — P097 Step 5: `propose` arithmetic on a
 # fixture history of gates_rows/<gate>.json files. The library never runs
 # during a gate run and never writes; these cases prove the number it prints

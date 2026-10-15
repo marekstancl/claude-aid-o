@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
+# aid-subject: scripts/lib/aid-zadani.sh
 # The brief file (P109 Step 1): `aid-plan-lint.sh --zadani` refuses a brief out
 # of shape, one case per branch of the reader (lib/aid-zadani.sh) and of the
 # block validator shared with the plan check's A6 (lib/aid-verification-pattern.sh).

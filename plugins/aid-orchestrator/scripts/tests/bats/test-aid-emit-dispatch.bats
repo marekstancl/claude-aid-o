@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-aid-emit-dispatch.bats — Component A of P040 coverage.
 #
 # Proves the pending-ledger semantics of aid-emit-dispatch.sh start/complete:

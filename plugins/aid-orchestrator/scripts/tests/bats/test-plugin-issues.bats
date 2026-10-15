@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # The project's record of AID's own defects: the file exists from the first
 # run on, the Stop-hook reminder speaks only when AID refused or was bypassed
 # and nothing was written, and the owner's collector lists the entries nobody

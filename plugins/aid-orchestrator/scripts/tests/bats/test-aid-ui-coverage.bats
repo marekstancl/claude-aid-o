@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and the /aid-ui studio is the
+# dearest area outside the core; no plan run passes through it, so a regression here shows the next morning.
 # P103 Step 2 — aid-ui-coverage.sh: item ids, map check exit codes, and a report where
 # every disposition kind reads its own evidence.
 

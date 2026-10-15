@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
 # aid-tier: t1
+# aid-subject: scripts/aid-plan-diff.sh
 # test-plan-diff-step.bats — the brief's points run after every step
 # (aid-plan-diff.sh --step N --plan-json, P110 Step 2) and in isolation at the
 # close (--isolated --cwd, P110 Step 3). Local commands only (true, false,

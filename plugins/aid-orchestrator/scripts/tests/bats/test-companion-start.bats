@@ -1,5 +1,8 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and the /aid-ui studio is the
+# dearest area outside the core; no plan run passes through it, so a regression here shows the next morning.
+# aid-subject: lib/brainstorm-server/start-server.sh
 # 2.114.0 — lib/brainstorm-server/start-server.sh: installs its own dependencies
 # after a plugin update, takes a fixed companion slot from the AID range off
 # loopback (the VPN passes those, a random high port does not), never takes a

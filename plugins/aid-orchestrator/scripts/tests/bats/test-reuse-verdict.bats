@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-reuse-verdict.bats — the N+1 rule and its verdict (P085 Step 3).
 #
 # aid_reuse_verdict is a pure function over two strings: the **Reuse check:**

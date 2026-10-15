@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-plan-parallel-check.bats — are the steps a plan declares as concurrent
 # actually disjoint? (P085 Step 7)
 #

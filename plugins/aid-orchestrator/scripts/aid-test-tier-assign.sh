@@ -13,13 +13,16 @@
 # is a reviewed diff.
 #
 # THE RULE, both halves:
-#   cost   — per case  <2 s ⇒ t0,  <30 s ⇒ t1,  otherwise t2. The comparison
+#   kind   — t0 is the static checks only (they parse and lint, nothing of AID
+#            runs; ecosystem standard, PM 15. 10. 2026). Cost never proposes t0:
+#            a suite keeps t0 only when it declares it and stays under 2 s per case.
+#   cost   — per case <30 s ⇒ t1, otherwise t2. The comparison
 #            is strictly `<`, so a suite sitting exactly on a threshold falls
 #            into the MORE EXPENSIVE tier.
 #   scope  — a suite whose subject cannot be resolved to an existing file is
 #            t2 whatever it costs.
 #   budget — the measured sums must fit AID_TIER_T0_BUDGET_MS and
-#            AID_TIER_T1_BUDGET_MS (lib/aid-test-tier.sh: 90 s and 390 s, so
+#            AID_TIER_T1_BUDGET_MS (lib/aid-test-tier.sh: 30 s and 450 s, so
 #            the real T0 + T1 run stays under the standard's 10 minutes). While
 #            a tier overflows, its most expensive member is demoted and the
 #            demotion is printed with its reason; the core (tests/tier-core.txt)
@@ -78,11 +81,23 @@ esac
 # confident wrong subjects. An unresolved subject is an honest answer with a
 # defined consequence (t2), not a failure.
 resolve_subject() {
-  local base="$1" stem candidate
+  local base="$1" path="${2:-}" stem candidate declared
+  # A suite whose name is not its subject's says so in its header:
+  # `# aid-subject: lib/brainstorm-server/start-server.sh` (paths from the plugin root).
+  if [[ -n "$path" ]]; then
+    declared="$(sed -n '1,15{s/^#[[:space:]]*aid-subject:[[:space:]]*//p}' "$path" | head -1)"
+    if [[ -n "$declared" ]]; then
+      # inside the plugin only: no absolute path, no `..`
+      [[ "$declared" != /* && "/$declared/" != */../* && -f "$PLUGIN_ROOT/$declared" ]] \
+        && { printf '%s\n' "$declared"; return 0; }
+      printf 'unresolvable\n'; return 0
+    fi
+  fi
   stem="${base#test-}"; stem="${stem%.bats}"; stem="${stem%.sh}"
   for candidate in \
     "scripts/${stem}.sh" "scripts/lib/${stem}.sh" \
     "scripts/aid-${stem}.sh" "scripts/lib/aid-${stem}.sh" \
+    "scripts/${stem}.py" "scripts/${stem}.mjs" "scripts/aid-${stem}.py" "scripts/aid-${stem}.mjs" \
     "skills/${stem}.md" "commands/${stem}.md" "agents/${stem}.md"; do
     if [[ -f "$PLUGIN_ROOT/$candidate" ]]; then
       printf '%s\n' "$candidate"
@@ -115,8 +130,9 @@ while IFS= read -r suite; do
   fi
 
   jq -c --arg suite "$base" --arg runner "$runner" \
-        --arg subject "$(resolve_subject "$base")" \
-    '{suite:$suite, runner:$runner, subject:$subject,
+        --arg subject "$(resolve_subject "$base" "$suite")" \
+        --arg declared "$(aid_test_tier_of "$suite" 2>/dev/null)" \
+    '{suite:$suite, runner:$runner, subject:$subject, declared:$declared,
       duration_ms:.duration_ms, cases:.cases, exit_code:.exit_code,
       host:(.host // "unknown"), at:.at}' <<<"$rec" >> "$rows"
 done < <(aid_test_discover_suites "$TESTS_DIR")
@@ -141,9 +157,10 @@ assigned="$(jq -sc --argjson t0 "$AID_TIER_T0_MAX_MS" --argjson t1 "$AID_TIER_T1
   def per_case: if .cases > 0 then (.duration_ms / .cases) else .duration_ms end;
   def secs($ms): ($ms / 1000 | tostring);
   def base_tier:
-    if .subject == "unresolvable" and (.pinned | not)
+    # a static check reads the whole plugin by design: its scope is not a subject file
+    if (.declared == "t0" and per_case < $t0) then {tier:"t0", reason:("a static check under " + secs($t0) + "s per case")}
+    elif .subject == "unresolvable" and (.pinned | not)
       then {tier:"t2", reason:"unresolvable subject — cross-component by the standard scope rule"}
-    elif (per_case < $t0) then {tier:"t0", reason:("under " + secs($t0) + "s per case")}
     elif (per_case < $t1) then {tier:"t1", reason:("under " + secs($t1) + "s per case")}
     else                       {tier:"t2", reason:(secs($t1) + "s or more per case")}
     end;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 #
 # Proves the worktree report classifies by OWNERSHIP, not by looks.
 #

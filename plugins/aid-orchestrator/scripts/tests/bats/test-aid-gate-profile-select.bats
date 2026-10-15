@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and this is among the dearest
+# suites outside the core (tier-core.txt); a regression here is caught by the next night instead of at merge.
 # WHY THIS FILE EXISTS (P097 Step 4): lib/aid-gate-profile-select.sh is the one
 # resolver over a project's own gate_profiles table. This suite proves the
 # selection rule (widest match wins, else default_profile), the refusals

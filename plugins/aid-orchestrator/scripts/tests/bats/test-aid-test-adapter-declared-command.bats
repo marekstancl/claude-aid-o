@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-aid-test-adapter-declared-command.bats — P066 Step 3.
 
 load test-helpers.bash

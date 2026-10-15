@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # aid-release.sh — IMP-093 fix: CHANGELOG header detection + prepend logic.
 # Verifies the script does not silently collapse a pre-written CHANGELOG entry
 # when bumping the version (3x-observed bug across v2.18.3 + v2.19.0 releases).
@@ -138,4 +138,27 @@ EOF
   run bash "$RELEASE" patch --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *"INFO [test_named_after_plan] no previous tag"* ]]
+}
+
+@test "aid-release: the project's tier check runs before any file changes, and a failing one stops the release" {
+  seed_release_fixture "2.19.0" "2.19.0"
+  cd "$TEST_PROJECT_ROOT"
+  git tag v2.19.0
+  printf 'gates:\n  tier_lint:\n    command: "echo T0 over its budget; exit 1"\n' > .aid-o/config/execution.yaml
+  git add -A && git commit -qm "a tier gate"
+  run bash "$RELEASE" patch --force --reason "the FSM guard is not what this release is about"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"T0 over its budget"* && "$output" == *"FAIL [tier_lint]"* ]]
+  [ -z "$(git status --porcelain)" ]
+  [ "$(git rev-list --count v2.19.0..HEAD)" -eq 1 ]
+
+  printf 'gates:\n  tier_lint:\n    command: "false"\n' > .aid-o/config/execution.yaml
+  run bash "$RELEASE" patch --dry-run
+  [ "$status" -eq 1 ]; [[ "$output" == *"FAIL [tier_lint]"* ]]   # a silent failure is still explained
+
+  printf 'gates:\n  tier_lint:\n    command: "touch tier-checked"\n' > .aid-o/config/execution.yaml
+  run bash "$RELEASE" patch --dry-run
+  [ "$status" -eq 0 ]
+  [ -f tier-checked ]
+  [[ "$output" == *"Would update version"* ]]
 }

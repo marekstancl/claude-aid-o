@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-review-summary.bats — the /aid-status lines for a checkpoint's review
 # rounds and for an EPIC's step reviews, and the USD figure behind them.
 # Known tokens are summed, unknown ones are counted and never summed as zero,

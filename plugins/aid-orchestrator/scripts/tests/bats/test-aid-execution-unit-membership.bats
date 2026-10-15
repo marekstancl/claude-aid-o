@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-aid-execution-unit-membership.bats — P069 Step 2.
 #
 # Proves execution_unit_membership_verify:

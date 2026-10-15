@@ -60,11 +60,14 @@ AID_TEST_TIER_TAG_RE='^[[:space:]]*#[[:space:]]*aid-tier:'
 AID_TIER_T0_MAX_MS="${AID_TIER_T0_MAX_MS:-2000}"
 AID_TIER_T1_MAX_MS="${AID_TIER_T1_MAX_MS:-30000}"
 # Budgets of the merge path, as sums of measured suites. The standard allows
-# T0 + T1 together 10 minutes of REAL run; the runner adds 1-2 s per suite
-# (24. 9. 2026: 11.9 min of suites ran 12.8 min; 8.5 min ran 10.6 min), so the sums are set
-# below it: T0 90 s + T1 390 s leaves the overhead its ~2 min.
-AID_TIER_T0_BUDGET_MS="${AID_TIER_T0_BUDGET_MS:-90000}"
-AID_TIER_T1_BUDGET_MS="${AID_TIER_T1_BUDGET_MS:-390000}"
+# T0 + T1 together 10 minutes of REAL run; the runner adds its own time per suite
+# (night of 15. 10. 2026: 791 s of suites ran 919 s, 1.5 s for each of 83 suites).
+# With 62 suites on the merge path that is ~95 s, so T0 30 s (the static checks)
+# + T1 450 s + 95 s = 575 s leaves 25 s of margin. The lint reads the night's
+# measurements, 7 % slower than the day's; the real run is what counts, and the
+# nightly measures it and says when it is over.
+AID_TIER_T0_BUDGET_MS="${AID_TIER_T0_BUDGET_MS:-30000}"
+AID_TIER_T1_BUDGET_MS="${AID_TIER_T1_BUDGET_MS:-450000}"
 
 aid_test_default_tests_dir() {
   printf '%s\n' "$(cd "${_AID_TT_LIB_DIR}/../tests" && pwd)"

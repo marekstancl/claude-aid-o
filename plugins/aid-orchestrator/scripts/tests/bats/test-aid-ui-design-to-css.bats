@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # P101 Step 1 — aid-ui-design-to-css.sh maps DESIGN.md tokens to CSS variables
 # and never overwrites a previous tokens.css on failure.
 

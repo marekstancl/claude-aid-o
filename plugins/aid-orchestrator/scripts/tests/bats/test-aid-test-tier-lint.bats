@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-aid-test-tier-lint.bats — P081 Step 3: the tag keeps telling the truth.
 #
 # WHAT THIS SUITE PROVES: each of the lint's three checks fires on the thing it
@@ -158,5 +158,5 @@ _lint() { bash "$LINT" --tests-dir "$FIXTURE_TESTS" --allowlist "$ALLOWLIST" "$@
   _measure test-aid-test-durations.bats 300000 30
   run _lint
   [ "$status" -eq 1 ]
-  [[ "$output" == *"T1 measures 700s in total, over its budget of 390s"* ]]
+  [[ "$output" == *"T1 measures 700s in total, over its budget of 450s"* ]]
 }

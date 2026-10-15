@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and the /aid-ui studio is the
+# dearest area outside the core; no plan run passes through it, so a regression here shows the next morning.
 # P108 Step 5 — the copy review: bundle, run (a stub codex on PATH, no model call), verdict computed
 # by the script, copy-record refusals and the failed-review series.
 

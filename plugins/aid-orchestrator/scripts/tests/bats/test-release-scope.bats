@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and this is among the dearest
+# suites outside the core (tier-core.txt); a regression here is caught by the next night instead of at merge.
 # test-release-scope.bats — a release is required by what CHANGED, never by
 # what a commit message promised (P089 Step 7).
 #

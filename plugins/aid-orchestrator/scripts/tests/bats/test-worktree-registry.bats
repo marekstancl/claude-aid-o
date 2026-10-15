@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and this is among the dearest
+# suites outside the core (tier-core.txt); a regression here is caught by the next night instead of at merge.
 # test-worktree-registry.bats — a plan's execution worktree is recorded when
 # it is made, cleared when the plan finishes, and after a crash the record
 # outlives the tree and OFFERS a cleanup that nothing performs (P087 Step 7).

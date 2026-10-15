@@ -1,5 +1,7 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and the /aid-ui studio is the
+# dearest area outside the core; no plan run passes through it, so a regression here shows the next morning.
 # Step 1i, concepts by an image model (PM 7. 10. 2026): aid-ui-logo-gen.py sends only the fixed
 # constraints plus the slot's concept, never without the key, never over the caps; --dry-run writes
 # plan.json and sends nothing; aid-ui-tool.sh vectorize turns a concept PNG into one plain black

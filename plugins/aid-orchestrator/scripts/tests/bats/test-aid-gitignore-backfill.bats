@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-aid-gitignore-backfill.bats — aid-gitignore-backfill.sh, the per-line
 # gitignore backfill substrate /aid-init sources inline (commands/aid-init.md).
 #

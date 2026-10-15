@@ -956,6 +956,7 @@ echo "Released v${NEW_VERSION} (tagged locally). Push main (git push origin main
 # =============================================================================
 _release_legacy_bump() {
   _release_test_names_guard   # first: `auto` can exit 0 inside the parser (exempt range, test:/docs: only)
+  _release_tier_guard
   _release_parse_args_and_resolve_bump "$@"
   _release_fsm_guard
   _release_detect_version
@@ -993,6 +994,29 @@ _release_test_names_guard() {
   fi
   echo "PRECONDITION FAIL: test names to fix first — nothing was changed." >&2
   exit 1
+}
+
+# ─── Test tiers: the project's own tier check, before anything changes ──────
+# The tier check is a gate of every plan, and every solo release since 3.0.0
+# went out without it: the merge path grew to 15 min over a 10-min budget and
+# the check said so to nobody (PM, 15. 10. 2026). So a release runs the
+# project's `tier_lint` gate command when its execution.yaml defines one;
+# a project without it is not checked. Not bypassed by --force.
+_release_tier_guard() {
+  local cfg="$REPO_ROOT/.aid-o/config/execution.yaml" cmd out
+  [[ -f "$cfg" ]] || return 0
+  if ! cmd="$(yq -r '.gates.tier_lint.command // ""' "$cfg" 2>/dev/null)"; then
+    echo "FAIL [tier_lint] cannot read $cfg — the test tiers were not checked" >&2
+    echo "PRECONDITION FAIL: nothing was changed." >&2
+    exit 1
+  fi
+  [[ -n "$cmd" ]] || return 0
+  if ! out="$(cd "$REPO_ROOT" && bash -c "$cmd" 2>&1)"; then
+    printf '%s\n' "$out" | grep -vE '^\s*$' | tail -12 >&2 || true
+    echo "FAIL [tier_lint] the test tiers break the standard — move or speed up the suites it names; a suite already sped up is re-measured with run-all-tests.sh --tier <t> --timing (AID_DURATIONS_DIR = the nightly journal)" >&2
+    echo "PRECONDITION FAIL: nothing was changed." >&2
+    exit 1
+  fi
 }
 
 # =============================================================================

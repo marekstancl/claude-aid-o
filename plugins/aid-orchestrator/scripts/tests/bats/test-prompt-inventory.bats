@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # The prompt inventory (P107 Step 6): lines per prompt section, and every
 # citation of every finding mapped to the section it came from. Defect it
 # catches: a citation mapped to the wrong section — a CP1 reviewer's repository
