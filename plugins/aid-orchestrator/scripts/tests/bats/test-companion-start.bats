@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # 2.114.0 — lib/brainstorm-server/start-server.sh: installs its own dependencies
 # after a plugin update, takes a fixed companion slot from the AID range off
 # loopback (the VPN passes those, a random high port does not), never takes a

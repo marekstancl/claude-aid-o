@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # Step 1i Rozcestník (PM 7. 10. 2026: "to musí říkat ten skill"): aid-ui-logo-route.py decides the
 # situation, the direction slots, the contexts and the scoring from the project state alone; the
 # studio refuses an identity question whose cards are not one per slot; aid-ui-tool.sh logo-sheet

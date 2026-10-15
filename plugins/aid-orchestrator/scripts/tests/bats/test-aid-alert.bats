@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-aid-alert.bats — AID sends three messages and only three: the agent is
 # waiting for the PM, the plan is delivered (P099 Step 3), and the merge-path
 # tests are over their budget (the nightly, 14. 10. 2026). All three carry the

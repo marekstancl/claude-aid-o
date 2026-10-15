@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # P103 extension K1b - aid-ui-vision-check.py: docs/product-vision.md carries the parts of the
 # product-vision template, FAKT labels, an owner and a date (the gate's vision_doc row).
 

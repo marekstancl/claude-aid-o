@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 #
 # Proves aid-gate-name-lint.sh is a control and not a comment.
 #

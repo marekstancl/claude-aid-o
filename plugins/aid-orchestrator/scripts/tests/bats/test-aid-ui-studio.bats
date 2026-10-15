@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-aid-ui-studio.bats — the /aid-ui studio server (P103 Step 3) over real
 # HTTP on a free loopback port: token and Host/Origin rule, answers only after
 # the round opened, once, for the question's own kind and target, kept in

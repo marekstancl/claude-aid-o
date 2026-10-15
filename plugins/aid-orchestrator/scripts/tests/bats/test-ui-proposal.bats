@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-ui-proposal.bats — a UI proposal starts from the application's real
 # screen when there is one, is MARKED when there is not, never captures
 # production data, and covers every viewport the project owes

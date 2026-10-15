@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # P108 Step 4 — aid-ui-facts.mjs (the gate's facts_match): counted numbers, percentages, years and
 # e-mails need a register entry with the same number and a stem of the same meaning; no browser.
 

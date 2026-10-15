@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-aid-test-reaper.bats — P081 Step 11: the way out of the portfolio.
 #
 # WHAT THIS SUITE PROVES: each candidate class arrives with its own reason,

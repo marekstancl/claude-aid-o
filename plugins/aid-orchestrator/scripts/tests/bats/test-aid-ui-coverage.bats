@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # P103 Step 2 — aid-ui-coverage.sh: item ids, map check exit codes, and a report where
 # every disposition kind reads its own evidence.
 

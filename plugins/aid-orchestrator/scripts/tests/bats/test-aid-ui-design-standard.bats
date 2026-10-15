@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # P103 extension K4 - aid-ui-design-standard.py: the project design standard in the WAN
 # structure, written from DESIGN.md + a measurement of the built site, checked for its sections,
 # DESIGN.md colour tokens and platform rows. A working document: nothing goes to Docusaurus.

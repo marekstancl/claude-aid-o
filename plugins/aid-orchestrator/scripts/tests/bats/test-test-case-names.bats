@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # aid_test_names_plan_refs (lib/aid-test-tier.sh): a test case added since a
 # base may not carry a plan, review-finding or backlog number in its name —
 # the name says what it guards. Declarations are written through printf here

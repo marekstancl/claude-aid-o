@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-repo-roots.bats — the one mapping of a plan's foreign repositories
 # (P112 Step 1): which worktree a declared path lives in, for a plan file and
 # a plan.json alike, and the rewrite of a command text.

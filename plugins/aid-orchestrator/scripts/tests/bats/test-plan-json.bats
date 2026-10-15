@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-plan-json.bats — P111 Step 1: THE plan.json builder (lib/aid-plan-json.sh).
 #
 # The direct run builds plan.json of the WHOLE plan from the shared per-step

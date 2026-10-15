@@ -50,6 +50,8 @@ teardown() {
 
 # _suite <name> — an empty discovered suite of that name.
 _suite() { : > "$FIXTURE_TESTS/bats/$1"; }
+# _static <name> — a suite that declares itself a static check (t0)
+_static() { printf '#!/usr/bin/env bats\n# aid-tier: t0\n' > "$FIXTURE_TESTS/bats/$1"; }
 
 # _measure <name> <duration_ms> <cases> [censored] — one journal record.
 _measure() {
@@ -65,12 +67,15 @@ _assign() { bash "$ASSIGN" --tests-dir "$FIXTURE_TESTS" "$@"; }
 # _tier_of <tsv output> <suite> — the assigned tier column.
 _tier_of() { awk -F'\t' -v s="$2" '$1 == s { print $7 }' <<<"$1"; }
 
-@test "1: cost decides the tier — under 2s per case is t0" {
+@test "1: cost never proposes t0 — a cheap behaviour suite is t1, a static check under 2s per case keeps t0" {
   _suite test-aid-test-durations.bats
-  _measure test-aid-test-durations.bats 1999 1
+  _static test-aid-test-tier.bats
+  _measure test-aid-test-durations.bats 5 1
+  _measure test-aid-test-tier.bats 1999 1
   run _assign
   [ "$status" -eq 0 ]
-  [ "$(_tier_of "$output" test-aid-test-durations.bats)" = "t0" ]
+  [ "$(_tier_of "$output" test-aid-test-durations.bats)" = "t1" ]
+  [ "$(_tier_of "$output" test-aid-test-tier.bats)" = "t0" ]
 }
 
 @test "2: a suite exactly on a threshold falls into the MORE expensive tier" {
@@ -85,7 +90,7 @@ _tier_of() { awk -F'\t' -v s="$2" '$1 == s { print $7 }' <<<"$1"; }
 }
 
 @test "3: the threshold is per CASE, not per suite" {
-  _suite test-aid-test-durations.bats
+  _static test-aid-test-durations.bats
   _measure test-aid-test-durations.bats 20000 20
   run _assign
   [ "$status" -eq 0 ]
@@ -102,10 +107,10 @@ _tier_of() { awk -F'\t' -v s="$2" '$1 == s { print $7 }' <<<"$1"; }
 }
 
 @test "5: an overflowing T0 demotes its most expensive member, with a reason" {
-  _suite test-aid-test-durations.bats
-  _suite test-aid-test-tier.bats
+  _static test-aid-test-durations.bats
+  _static test-aid-test-tier.bats
   _measure test-aid-test-durations.bats 79960 40   # 1999 ms/case
-  _measure test-aid-test-tier.bats      59970 30   # 1999 ms/case
+  _measure test-aid-test-tier.bats      19990 10   # 1999 ms/case, within the 30 s budget alone
   run _assign
   [ "$status" -eq 0 ]
   [ "$(_tier_of "$output" test-aid-test-durations.bats)" = "t1" ]
@@ -140,7 +145,7 @@ _tier_of() { awk -F'\t' -v s="$2" '$1 == s { print $7 }' <<<"$1"; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"| Suite | Runner |"* ]]
   [[ "$output" == *"test-host"* ]]
-  [[ "$output" == *"T0: 1 suite(s), 1000 ms total"* ]]
+  [[ "$output" == *"T1: 1 suite(s), 1000 ms total"* ]]
 }
 
 @test "9: a suite named after its unit without the aid- prefix still resolves" {

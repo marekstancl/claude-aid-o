@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-parallel-dispatch.bats — the brake comes off: a wave is run at once
 # only when code says so, and a merge conflict is a retry (P087 Step 4).
 #

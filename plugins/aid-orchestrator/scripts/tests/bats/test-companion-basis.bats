@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # 2.114.0 — lib/brainstorm-server/basis.js composes the companion page of a UI
 # brainstorm over the application's real screenshot: today (the capture at its
 # real width) beside the proposal (the agent's screen in a frame at the same

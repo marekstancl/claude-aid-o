@@ -299,11 +299,16 @@ Every test suite declares its tier in its leading comment block, once:
     #!/usr/bin/env bats
     # aid-tier: t1
 
-| Tier | Cost per case | Whole-tier budget | When it runs |
-|------|---------------|-------------------|--------------|
-| `t0` | under 2 s     | T0 + T1 together under 10 min of real run | merge path (the pulse) |
-| `t1` | under 30 s    | (the lint holds the sums to 90 s + 390 s, leaving the runner's overhead) | merge path — this is what blocks a merge |
-| `t2` | more, **or cross-component at any cost** | none | nightly, 21:00 UTC = 23:00 Prague |
+| Tier | What it is | Cost per case | Whole-tier budget | When it runs |
+|------|------------|---------------|-------------------|--------------|
+| `t0` | **static checks only** — files parse, lint; nothing of AID runs (`test-static.bats`) | under 2 s | T0 + T1 together under 10 min of real run (the lint holds the sums to 30 s + 450 s, leaving the runner's overhead) | merge path (the pulse) |
+| `t1` | every behaviour test of one subject | under 30 s | (see T0) | merge path — this is what blocks a merge |
+| `t2` | more, **or cross-component at any cost** | — | none | nightly, 21:00 UTC = 23:00 Prague |
+
+T0 is a kind, not a price: a fast behaviour test is still T1 (ecosystem standard;
+PM 15. 10. 2026, when 51 behaviour suites sat in T0 and it ran 4 min of its 2).
+A solo release runs the project's `tier_lint` gate too (`aid-release.sh`), so a
+release outside a plan cannot ship a merge path over its budget.
 
 Tier follows measured cost and scope — never importance, and never a wish to
 avoid blocking. `aid-test-tier-assign.sh` proposes from measurements and

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-permissions.bats — aid_autonomous_mode, the ONE reader of auto-vs-manual
 # (lib/aid-permissions.sh, declared as such by P090).
 #

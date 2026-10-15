@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t0
+# aid-tier: t1
 # test-codex-transport.bats — lib/aid-codex-transport.sh: the one way AID talks
 # to the Codex CLI. What its callers rely on and nothing asserts elsewhere: the
 # process is read-only and rooted in the project, the prompt arrives whole on
