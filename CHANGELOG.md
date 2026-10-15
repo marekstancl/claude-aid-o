@@ -3,6 +3,24 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.4.0] — 2026-10-15
+
+Testy před sloučením se vracejí pod 10 minut a patra odpovídají ekosystémovému standardu (PM 15. 10. 2026, 1A + 2A). Noc 15. 10. naměřila T0 252 s z 120 s a celou cestu 919 s z 600 s; kontrola pater to hlásila, ale běžela jen v branách plánů a ruční vydání od 3.0.0 ji obcházela.
+
+### Changed
+- **T0 jsou jen statické kontroly**, jak říká standard: nová sada `test-static.bats` (každý shell skript včetně hooků bez přípony, JavaScript, Python, JSON a YAML pluginu se dá načíst; chybějící soubor daného druhu nebo chybějící parser je pád) plus karty agentů a registr převzatých souborů. 51 sad chování, které v T0 byly jen proto, že byly levné, je v T1. Nástroj na přeřazení (`aid-test-tier-assign.sh`) už cenou T0 nenavrhuje. Tabulka pater v CONTRIBUTING.
+- **22 sad jde do nočního běhu podle pravidla standardu** (přetečení patra: nejdražší sady mimo jádro), každá s řádkem v hlavičce, proč: 11 sad studia `/aid-ui` a companionu, deset menších pomocných sad a `test-epic-path-removed` (prochází dva stavové automaty). Čtyři sady, kterými prochází každý plán (sestavení `plan.json`, kontrola zadání, kritik, rozdíl kroku), jsou nově v jádru (`tier-core.txt`) a cestu k merge neopustí.
+- Rozpočty kontroly pater jako součty sad: T0 30 s, T1 450 s, odvozeno z naměřené režie runneru v noci (1,5 s na sadu).
+- Noční zpráva o rozpočtu jmenuje 5 nejdražších sad cesty k merge (poslední platné měření každé) a říká obě cesty ven; nečitelný deník měření řekne, místo aby ho zamlčela.
+
+### Added
+- `aid-release.sh` spustí před vydáním kontrolu pater projektu (brána `tier_lint` z jeho `execution.yaml`, pokud ji má) a při porušení nic nezmění; `--force` ji neobchází.
+- Sada může v hlavičce jmenovat svůj předmět (`# aid-subject: <cesta v pluginu>`), když jméno sady neodpovídá souboru; přiřazení předmětu zná i skripty `.py` a `.mjs`. Dřív by 28 sad s jedním předmětem odešlo z cesty k merge jako „mezikomponentní“ jen kvůli jménu.
+
+### Fixed
+- Skrývání tajných údajů (`_aid_artifact_redact`) nejdřív zkusí všechny detektory jedním `grep` a celý průchod udělá jen při nálezu; `aid-ui-sources.py` drží pro celý běh jeden proces redakce. 55 ms na text → ~3 ms; sada zdrojů 90 → 20 s a stejně se zrychlilo každé vykreslení stránky a čtení zdrojů pro uživatele.
+- Otisk pluginu v kontrole zastaralé kopie (`aid-cache-preflight.sh`) vynechává `scripts/tests`: žádný test z kopie neběží, byl to 626 z 802 souborů a úprava testu v repu AID zastavila každý běh jako „zastaralá kopie“.
+
 ## [3.3.0] — 2026-10-14
 
 Noční běh hlásí, když testy před sloučením přetáhnou rozpočet (PM 14. 10. 2026, 2A). Do té doby se překročení jen zapisovalo do nočního výsledku: T0 bylo přes rozpočet 44 nocí po sobě a nikdo to nevěděl.
