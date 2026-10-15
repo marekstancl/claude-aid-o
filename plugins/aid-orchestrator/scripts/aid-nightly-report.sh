@@ -308,8 +308,17 @@ if [[ -n "$budget_send" ]]; then
   source "$SCRIPT_DIR/lib/aid-alert.sh"
   if [[ "$budget_send" == over ]]; then
     _lost_note=""; (( _ep_lost )) && _lost_note=" Předchozí noční výsledek nešel přečíst, pořadí noci začíná znovu."
-    aid_alert_test_budget over "$(jq -r --argjson n "$(jq .over_streak <<<"$episode_json")" --arg lost "$_lost_note" \
-      '"T0 \(.t0_seconds) s z \(.t0_budget_s) s, T1 \(.t1_seconds) s z \(.t1_budget_s) s, celkem \(.merge_path_seconds) s z \(.merge_path_budget_s) s; přes rozpočet \($n). noc po sobě.\($lost) Do týdne rozhodni: zrychlit nejpomalejší sady (časy v test-durations.jsonl vedle nočního výsledku), nebo změnit rozpočet ve standardu testů."' <<<"$budget_json")" || true
+    # Where to fix it (PM 15. 10. 2026): the five dearest suites the merge path
+    # runs — newest uncensored measurement of each suite tagged t0/t1, dearest
+    # first, ties by name. None measured = the sentence is left out.
+    _mp_suites="$(while IFS= read -r _s; do
+        case "$(aid_test_tier_of "$_s" 2>/dev/null)" in t0|t1) basename "$_s" ;; esac
+      done < <(aid_test_discover_suites "$TESTS_DIR") | jq -Rsc 'split("\n") | map(select(length > 0))')"
+    _top="$(aid_durations_latest_all 2>/dev/null | jq -r --argjson m "$_mp_suites" '
+      [to_entries[] | select(.key as $k | any($m[]; . == $k)) | .value | select(.censored != true)]
+      | sort_by(-.duration_ms, .suite) | .[:5] | map("\(.suite) \(.duration_ms / 1000 | floor) s") | join(", ")' 2>/dev/null)" || _top=""
+    aid_alert_test_budget over "$(jq -r --argjson n "$(jq .over_streak <<<"$episode_json")" --arg lost "$_lost_note" --arg top "$_top" \
+      '"T0 \(.t0_seconds) s z \(.t0_budget_s) s, T1 \(.t1_seconds) s z \(.t1_budget_s) s, celkem \(.merge_path_seconds) s z \(.merge_path_budget_s) s; přes rozpočet \($n). noc po sobě.\($lost)\(if $top != "" then " Nejdražší sady: \($top)." else "" end) Do týdne rozhodni: zrychlit nejpomalejší sady, nebo je podle standardu přesunout do nočního běhu se záznamem (aid-test-tier-assign.sh)."' <<<"$budget_json")" || true
   else
     aid_alert_test_budget within || true
   fi

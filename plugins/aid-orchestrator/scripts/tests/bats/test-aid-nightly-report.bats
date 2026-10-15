@@ -25,7 +25,7 @@
 # Fixture suites are written with printf, never a heredoc (IMP-494).
 #
 # Result count after any edit:
-#   bats --tap test-aid-nightly-report.bats | grep -cE '^(ok|not ok)'   # == 11
+#   bats --tap test-aid-nightly-report.bats | grep -cE '^(ok|not ok)'   # == 12
 
 load test-helpers.bash
 
@@ -230,4 +230,20 @@ _streak() { jq .budget_episode.over_streak "$NIGHTLY_DIR/latest.json"; }
   : > "$SENT"; echo 'not json' > "$NIGHTLY_DIR/latest.json"
   _night 2026-10-15 90 400
   [ "$(cat "$SENT")" = "ok|project-testy|rozpocet-testu" ]
+}
+
+@test "budget: the overrun names the five dearest merge-path suites, dearest first, never a nightly-only or a censored one" {
+  _budget_stub
+  export AID_DURATIONS_DIR="$TEST_TMPDIR/dur"; mkdir -p "$AID_DURATIONS_DIR"
+  local s ms
+  for s in a:9000:t1 b:7000:t1 c:7000:t0 d:5000:t1 e:4000:t1 f:3000:t1 g:99000:t2 h:98000:t1:cut; do
+    IFS=: read -r name ms tier cut <<<"$s"
+    printf '#!/usr/bin/env bats\n# aid-tier: %s\n@test "x" { true; }\n' "$tier" > "$FIXTURE_TESTS/bats/test-$name.bats"
+    jq -nc --arg s "test-$name.bats" --argjson d "$ms" --argjson c "$([[ -n "$cut" ]] && echo true || echo false)" \
+      '{suite:$s, runner:"bats", duration_ms:$d, cases:1, exit_code:0, source:"bats_timing", censored:$c, host:"h", at:"2026-10-14T00:00:00Z"}' \
+      >> "$AID_DURATIONS_DIR/test-durations.jsonl"
+  done
+  _night 2026-10-14 171 484
+  IFS='|' read -r _ _ _ _ _ akce _ < "$SENT"
+  [[ "$akce" == *"Nejdražší sady: test-a.bats 9 s, test-b.bats 7 s, test-c.bats 7 s, test-d.bats 5 s, test-e.bats 4 s."* ]] || { echo "$akce"; return 1; }
 }
