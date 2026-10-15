@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # P113a step 3 - aid-ui-quality.py: rounds of the two frozen critics (owner and tech, at once) over the current site,
 # each with the memory of its own findings; every finding triaged (accepted needs the expected gain, fixed needs
 # evidence), the regression check before each round, stop rules (conflict, nothing to fix, three repair rounds);

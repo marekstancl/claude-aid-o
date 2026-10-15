@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): it crosses the plan and EPIC state machines (standard scope rule).
 # test-epic-path-removed.bats — 3.0.0 (P114): the EPIC path is gone and every
 # way into it answers epic_path_removed with the way out (finish the run on
 # 2.118.x, or close the plan and start a NEW plan), before any lock or write.

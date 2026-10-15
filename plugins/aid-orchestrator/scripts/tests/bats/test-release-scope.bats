@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # test-release-scope.bats — a release is required by what CHANGED, never by
 # what a commit message promised (P089 Step 7).
 #

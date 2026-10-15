@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # aid-subject: lib/ui-fidelity/aid-ui-verify.mjs
 # P103 extension K5 — aid-ui-customer-page.py: the customer page is made only after a green
 # gate of this build, every number follows its source, the SEO tiles are always visible, no

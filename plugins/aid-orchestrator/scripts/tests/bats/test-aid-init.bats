@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # P032 Step 7 — execution.yaml composer + stack auto-detection (Step 1).
 # 4 assertions covering the per-stack template fragment system.
 

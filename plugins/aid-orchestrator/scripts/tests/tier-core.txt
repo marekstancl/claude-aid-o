@@ -9,3 +9,7 @@ test-cp1-gate.bats               # generation refuses an unreviewed plan
 test-step-check.bats             # the step check every step review starts from
 test-dispatch-contract.bats      # what an agent is handed and must return
 test-auto-continuation.bats      # an autonomous run keeps going
+test-plan-json.bats              # the plan.json every run is built from (3.4.0, PM 15. 10. 2026)
+test-zadani-lint.bats            # the brief file every plan starts from
+test-critic.bats                 # the critic every /aid-plan runs
+test-plan-diff-step.bats         # the diff every step closes on

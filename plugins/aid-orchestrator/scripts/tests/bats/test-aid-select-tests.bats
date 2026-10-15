@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # test-aid-select-tests.bats — aid-select-tests.sh targeted test selector
 # (P061 EPIC 3 Step 9). Covers the Initial mapping, CHECKPOINT 3 (a single
 # aid-plan-diff.sh change selects ONLY test-plan-diff.sh), the D-selector-1

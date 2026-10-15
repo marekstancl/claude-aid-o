@@ -301,7 +301,7 @@ Every test suite declares its tier in its leading comment block, once:
 
 | Tier | What it is | Cost per case | Whole-tier budget | When it runs |
 |------|------------|---------------|-------------------|--------------|
-| `t0` | **static checks only** — files parse, lint; nothing of AID runs (`test-static.bats`) | under 2 s | T0 + T1 together under 10 min of real run (the lint holds the sums to 30 s + 420 s, leaving the runner's overhead) | merge path (the pulse) |
+| `t0` | **static checks only** — files parse, lint; nothing of AID runs (`test-static.bats`) | under 2 s | T0 + T1 together under 10 min of real run (the lint holds the sums to 30 s + 450 s, leaving the runner's overhead) | merge path (the pulse) |
 | `t1` | every behaviour test of one subject | under 30 s | (see T0) | merge path — this is what blocks a merge |
 | `t2` | more, **or cross-component at any cost** | — | none | nightly, 21:00 UTC = 23:00 Prague |
 

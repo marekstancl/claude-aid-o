@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # P108 Step 5 — the copy review: bundle, run (a stub codex on PATH, no model call), verdict computed
 # by the script, copy-record refusals and the failed-review series.
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # test-continuity-capsule.bats — surviving a compaction (P086 Step 5).
 #
 # THE GROUNDED FAILURE MODE: after a compaction a session's own bearings —

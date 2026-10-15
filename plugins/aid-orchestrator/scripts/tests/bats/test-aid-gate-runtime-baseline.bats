@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # test-aid-gate-runtime-baseline.bats — P097 Step 5: `propose` arithmetic on a
 # fixture history of gates_rows/<gate>.json files. The library never runs
 # during a gate run and never writes; these cases prove the number it prints

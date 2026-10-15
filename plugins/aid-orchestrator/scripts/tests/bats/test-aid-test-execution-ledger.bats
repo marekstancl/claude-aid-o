@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # test-aid-test-execution-ledger.bats — P072 Step 26.
 #
 # The ledger answers one question: did anything run twice? Its value is

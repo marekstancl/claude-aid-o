@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # P103 Step 2 — aid-ui-coverage.sh: item ids, map check exit codes, and a report where
 # every disposition kind reads its own evidence.
 

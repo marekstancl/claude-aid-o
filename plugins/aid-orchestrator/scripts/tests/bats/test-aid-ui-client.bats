@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # P113a step 2 - aid-ui-client.py: the critic rates the web from a bundle (a copy of site/, page shots, the
 # frozen role; no history), Codex first and the Claude stand-in on a limit, an empty or an invalid answer, with
 # the same prompt and working directory; text never sees OPENAI_API_KEY; every call goes to the cost book; the

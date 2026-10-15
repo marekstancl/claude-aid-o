@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # test-aid-hook-verify.bats — the canary (P086 Step 2).
 #
 # THE GROUNDED FAILURE MODE: both harnesses fail silently and in opposite

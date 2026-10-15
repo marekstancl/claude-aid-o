@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # P108 Step 3 (+ 1p v2, 4. 10. 2026) — aid-ui-sources.py: candidates are listed with redacted
 # excerpts and never enter the sources; documents named with --from are read into redacted
 # snapshots, internal ones and symlinks are not; ONE approval of the manifest snapshot lets the

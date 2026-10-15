@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
 # aid-subject: lib/brainstorm-server/start-server.sh
 # 2.114.0 — lib/brainstorm-server/start-server.sh: installs its own dependencies
 # after a plugin update, takes a fixed companion slot from the AID range off
