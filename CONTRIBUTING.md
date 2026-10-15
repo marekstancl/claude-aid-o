@@ -299,11 +299,15 @@ Every test suite declares its tier in its leading comment block, once:
     #!/usr/bin/env bats
     # aid-tier: t1
 
-| Tier | What it is | Cost per case | Whole-tier budget | When it runs |
-|------|------------|---------------|-------------------|--------------|
-| `t0` | **static checks only** — files parse, lint; nothing of AID runs (`test-static.bats`) | under 2 s | T0 + T1 together under 10 min of real run (the lint holds the sums to 30 s + 450 s, leaving the runner's overhead) | merge path (the pulse) |
-| `t1` | every behaviour test of one subject | under 30 s | (see T0) | merge path — this is what blocks a merge |
-| `t2` | more, **or cross-component at any cost** | — | none | nightly, 21:00 UTC = 23:00 Prague |
+What each tier holds, and the per-case limits, are the standard's — read them
+there, they are not copied here (a copy drifted once: AID kept only "under 2 s"
+and filled T0 with 51 behaviour suites; PM 15. 10. 2026). What is AID's own:
+
+| Tier | In AID | Budget as measured sums (the lint) | When it runs |
+|------|--------|------------------------------------|--------------|
+| `t0` | `test-static.bats` and the agent cards | 30 s | merge path |
+| `t1` | every behaviour suite of one subject | 450 s (T0 + T1 + the runner's ~95 s ≤ 10 min of real run) | merge path — this is what blocks a merge |
+| `t2` | cross-component, or over the T1 budget (header says why) | none | nightly, 21:00 UTC = 23:00 Prague |
 
 T0 is a kind, not a price: a fast behaviour test is still T1 (ecosystem standard;
 PM 15. 10. 2026, when 51 behaviour suites sat in T0 and it ran 4 min of its 2).
