@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # aid-tier: t2
-# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and the /aid-ui studio is the
+# dearest area outside the core; no plan run passes through it, so a regression here shows the next morning.
 # P113a step 1 - aid-ui-critic.py: the critic's role is built from the type's rubric and the project's
 # context and frozen; the prompt carries no threshold; the score is a weighted mean the script computes;
 # the closing verdict needs the median, no low rating and no low criterion. Two roles, owner and tech (13. 10. 2026),

@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # aid-tier: t2
-# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and the /aid-ui studio is the
+# dearest area outside the core; no plan run passes through it, so a regression here shows the next morning.
 # aid-subject: lib/ui-fidelity/aid-ui-verify.mjs
 # P103 extension K5 — aid-ui-customer-page.py: the customer page is made only after a green
 # gate of this build, every number follows its source, the SEO tiles are always visible, no

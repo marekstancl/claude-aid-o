@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # aid-tier: t2
-# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and this is among the dearest
+# suites outside the core (tier-core.txt); a regression here is caught by the next night instead of at merge.
 # test-continuity-capsule.bats — surviving a compaction (P086 Step 5).
 #
 # THE GROUNDED FAILURE MODE: after a compaction a session's own bearings —

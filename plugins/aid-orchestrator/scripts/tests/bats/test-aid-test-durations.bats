@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # aid-tier: t2
-# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and this is among the dearest
+# suites outside the core (tier-core.txt); a regression here is caught by the next night instead of at merge.
 # test-aid-test-durations.bats — P081 Step 1: the per-suite duration journal.
 #
 # WHAT THIS SUITE PROVES: a tier is only as honest as the measurement behind

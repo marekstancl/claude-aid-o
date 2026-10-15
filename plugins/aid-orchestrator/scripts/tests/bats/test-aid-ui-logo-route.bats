@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # aid-tier: t2
-# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and the /aid-ui studio is the
+# dearest area outside the core; no plan run passes through it, so a regression here shows the next morning.
 # Step 1i Rozcestník (PM 7. 10. 2026: "to musí říkat ten skill"): aid-ui-logo-route.py decides the
 # situation, the direction slots, the contexts and the scoring from the project state alone; the
 # studio refuses an identity question whose cards are not one per slot; aid-ui-tool.sh logo-sheet

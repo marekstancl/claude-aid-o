@@ -38,10 +38,11 @@ _unparsable() {
   command -v "$tool" >/dev/null || { echo "no $tool to parse $kind"; return 1; }
   [[ -n "$files" ]] || { echo "no $kind file found under $root"; return 1; }
   if [[ "$kind" == py ]]; then   # one interpreter for all of them: a start per file costs seconds
+    local list; mapfile -t list <<<"$files"   # a name with a space stays one name
     python3 -c 'import sys
 for f in sys.argv[1:]:
     try: compile(open(f, encoding="utf-8").read(), f, "exec")
-    except (SyntaxError, ValueError): print("does not parse: " + f)' $files
+    except (SyntaxError, ValueError): print("does not parse: " + f)' "${list[@]}"
     return 0
   fi
   while IFS= read -r f; do

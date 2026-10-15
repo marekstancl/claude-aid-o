@@ -5,10 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [3.4.0] — 2026-10-15
 
-Testy před sloučením se vracejí pod 10 minut a patra odpovídají ekosystémovému standardu (PM 15. 10. 2026, 1A + 2A). Noc 15. 10. naměřila T0 252 s z 120 s a celou cestu 919 s z 600 s; kontrola pater to hlásila, ale běžela jen v branách plánů a ruční vydání od 3.0.0 ji obcházela.
+Testy před sloučením se vracejí pod 10 minut a patra odpovídají ekosystémovému standardu (PM 15. 10. 2026, 1A + 2A). Noc 15. 10. naměřila T0 252 s z 120 s a celou cestu 919 s z 600 s, ověřovací běh po změně 544 s (T0 + T1, 713 testů); kontrola pater to hlásila, ale běžela jen v branách plánů a ruční vydání od 3.0.0 ji obcházela.
 
 ### Changed
-- **T0 jsou jen statické kontroly**, jak říká standard: nová sada `test-static.bats` (každý shell skript včetně hooků bez přípony, JavaScript, Python, JSON a YAML pluginu se dá načíst; chybějící soubor daného druhu nebo chybějící parser je pád) plus karty agentů a registr převzatých souborů. 51 sad chování, které v T0 byly jen proto, že byly levné, je v T1. Nástroj na přeřazení (`aid-test-tier-assign.sh`) už cenou T0 nenavrhuje. Tabulka pater v CONTRIBUTING.
+- **T0 jsou jen statické kontroly**, jak říká standard: nová sada `test-static.bats` (každý shell skript včetně hooků bez přípony, JavaScript, Python, JSON a YAML pluginu se dá načíst; chybějící soubor daného druhu nebo chybějící parser je pád) plus karty agentů. 51 sad chování, které v T0 byly jen proto, že byly levné, je v T1. Nástroj na přeřazení (`aid-test-tier-assign.sh`) už cenou T0 nenavrhuje. Tabulka pater v CONTRIBUTING.
 - **22 sad jde do nočního běhu podle pravidla standardu** (přetečení patra: nejdražší sady mimo jádro), každá s řádkem v hlavičce, proč: 11 sad studia `/aid-ui` a companionu, deset menších pomocných sad a `test-epic-path-removed` (prochází dva stavové automaty). Čtyři sady, kterými prochází každý plán (sestavení `plan.json`, kontrola zadání, kritik, rozdíl kroku), jsou nově v jádru (`tier-core.txt`) a cestu k merge neopustí.
 - Rozpočty kontroly pater jako součty sad: T0 30 s, T1 450 s, odvozeno z naměřené režie runneru v noci (1,5 s na sadu).
 - Noční zpráva o rozpočtu jmenuje 5 nejdražších sad cesty k merge (poslední platné měření každé) a říká obě cesty ven; nečitelný deník měření řekne, místo aby ho zamlčela.

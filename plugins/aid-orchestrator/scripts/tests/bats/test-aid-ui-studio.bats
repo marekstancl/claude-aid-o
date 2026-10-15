@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 # aid-tier: t2
-# Nightly since 3.4.0 (15. 10. 2026): over the T1 budget, the dearest suites outside the core go nightly (standard).
+# Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and the /aid-ui studio is the
+# dearest area outside the core; no plan run passes through it, so a regression here shows the next morning.
 # aid-subject: lib/aid-ui-studio/server.py
 # test-aid-ui-studio.bats — the /aid-ui studio server (P103 Step 3) over real
 # HTTP on a free loopback port: token and Host/Origin rule, answers only after
