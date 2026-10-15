@@ -45,8 +45,11 @@
 #   Env override:  AID_CACHE_PREFLIGHT_OVERRIDE=1 → continue + logged event.
 #
 # Deterministic tree hash (EXACT — relative paths, fixed C locale):
-#   cd <tree> && find . -type f -print0 | LC_ALL=C sort -z \
+#   cd <tree> && find . -path ./tests -prune -o -type f -print0 | LC_ALL=C sort -z \
 #     | xargs -0 sha256sum | sha256sum   (leading hash field)
+#   `scripts/tests` is not hashed: no test runs from a plugin cache, it was 626
+#   of the 802 files (0.2 s of every FSM start), and an edited test in the
+#   dogfood repo stopped every run as a stale cache (15. 10. 2026).
 #
 # Dogfood detection: the running plugin's `.name` (read from the running
 # script's own plugin.json) is looked up at
@@ -114,7 +117,7 @@ _AID_CP_TREES=(scripts agents skills defaults)
 _aid_cp_tree_hash() {
   local dir="$1"
   [[ -n "$dir" && -d "$dir" ]] || { printf '%s' ""; return 0; }
-  ( cd "$dir" && find . -type f -print0 | LC_ALL=C sort -z \
+  ( cd "$dir" && find . -path ./tests -prune -o -type f -print0 | LC_ALL=C sort -z \
       | xargs -0 sha256sum | sha256sum ) 2>/dev/null | awk '{print $1}'
 }
 

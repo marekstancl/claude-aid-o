@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
 # aid-tier: t1
+# aid-subject: lib/brainstorm-server/lifetime.js
 # 2.114.0 — lib/brainstorm-server/lifetime.js: a companion ends itself after
 # 12 h with no browser and no new screen, not while the PM keeps it (Držet,
 # a .keep file), and 60 days after it started whatever the PM pressed. Plain

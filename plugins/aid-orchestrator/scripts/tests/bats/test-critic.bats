@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
 # aid-tier: t1
+# aid-subject: scripts/lib/aid-critic.sh
 # The independent critic (P107): the prompt is assembled by code from the
 # interim's brief and purpose sections (never a cost figure), and the answer's
 # shape is checked by code — two headings, at most five `**N.` items, no

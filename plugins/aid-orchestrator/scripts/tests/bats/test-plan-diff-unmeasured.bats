@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
 # aid-tier: t1
+# aid-subject: scripts/lib/aid-unmeasured.sh
 # 2.114.0 — aid-plan-diff.sh counts what it does NOT measure: summary criteria
 # without a verification pattern, summary bullets it never parses (no AC<N>:
 # mark) and step-level **Acceptance Criteria:** bullets. Defect caught: a plan

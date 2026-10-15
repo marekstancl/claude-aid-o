@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
 # aid-tier: t1
+# aid-subject: lib/ui-fidelity/aid-ui-verify.mjs
 # P103 extension K5 — aid-ui-customer-page.py: the customer page is made only after a green
 # gate of this build, every number follows its source, the SEO tiles are always visible, no
 # internal word reaches the customer, and --check (the gate row customer_page) tells a missing,

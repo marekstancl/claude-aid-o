@@ -356,3 +356,13 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"HARD STOP"* ]]
 }
+
+@test "the tree hash leaves out scripts/tests — no test runs from a cache — and still sees every other file" {
+  local d="$BATS_TEST_TMPDIR/scripts"; mkdir -p "$d/tests" "$d/lib"
+  echo a > "$d/lib/x.sh"; echo t > "$d/tests/test-x.bats"
+  h1="$(bash "$LIB" --tree-hash "$d")"
+  echo changed > "$d/tests/test-x.bats"; echo new > "$d/tests/test-y.bats"
+  [ "$(bash "$LIB" --tree-hash "$d")" = "$h1" ]
+  echo b > "$d/lib/x.sh"
+  [ "$(bash "$LIB" --tree-hash "$d")" != "$h1" ]
+}

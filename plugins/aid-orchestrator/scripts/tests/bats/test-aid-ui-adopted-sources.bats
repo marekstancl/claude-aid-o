@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t0
 # P103 Step 1 — every adopted third-party file has a register row, every licence has its text.
 # P108 Step 1 — the marketingskills snapshot (adopted/marketingskills/MANIFEST: git blob id per
 # file) is byte-identical to upstream dda3841, nothing is added or missing, no symlink, and every

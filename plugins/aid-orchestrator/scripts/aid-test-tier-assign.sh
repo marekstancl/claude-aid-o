@@ -81,11 +81,21 @@ esac
 # confident wrong subjects. An unresolved subject is an honest answer with a
 # defined consequence (t2), not a failure.
 resolve_subject() {
-  local base="$1" stem candidate
+  local base="$1" path="${2:-}" stem candidate declared
+  # A suite whose name is not its subject's says so in its header:
+  # `# aid-subject: lib/brainstorm-server/start-server.sh` (paths from the plugin root).
+  if [[ -n "$path" ]]; then
+    declared="$(sed -n '1,15{s/^#[[:space:]]*aid-subject:[[:space:]]*//p}' "$path" | head -1)"
+    if [[ -n "$declared" ]]; then
+      [[ -f "$PLUGIN_ROOT/$declared" ]] && { printf '%s\n' "$declared"; return 0; }
+      printf 'unresolvable\n'; return 0
+    fi
+  fi
   stem="${base#test-}"; stem="${stem%.bats}"; stem="${stem%.sh}"
   for candidate in \
     "scripts/${stem}.sh" "scripts/lib/${stem}.sh" \
     "scripts/aid-${stem}.sh" "scripts/lib/aid-${stem}.sh" \
+    "scripts/${stem}.py" "scripts/${stem}.mjs" "scripts/aid-${stem}.py" "scripts/aid-${stem}.mjs" \
     "skills/${stem}.md" "commands/${stem}.md" "agents/${stem}.md"; do
     if [[ -f "$PLUGIN_ROOT/$candidate" ]]; then
       printf '%s\n' "$candidate"
@@ -118,7 +128,7 @@ while IFS= read -r suite; do
   fi
 
   jq -c --arg suite "$base" --arg runner "$runner" \
-        --arg subject "$(resolve_subject "$base")" \
+        --arg subject "$(resolve_subject "$base" "$suite")" \
         --arg declared "$(aid_test_tier_of "$suite" 2>/dev/null)" \
     '{suite:$suite, runner:$runner, subject:$subject, declared:$declared,
       duration_ms:.duration_ms, cases:.cases, exit_code:.exit_code,

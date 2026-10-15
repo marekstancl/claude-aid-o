@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t0
 # Every agent card under agents/ carries a name, a model the Agent tool knows
 # and an effort the harness reads (P107 Step 5). Defect it catches: a card
 # dispatched on a model or effort the harness refuses — after the plan was
