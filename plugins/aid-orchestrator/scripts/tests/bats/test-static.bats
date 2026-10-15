@@ -17,12 +17,19 @@ _files() {
   find "$root" \( -name node_modules -o -name fixtures \) -prune -o -type f \( "${args[@]:1}" \) -print
 }
 
+# _shebang_scripts <root> — files without an extension that start as a shell script (git hooks)
+_shebang_scripts() {
+  local f
+  while IFS= read -r f; do head -1 "$f" | grep -qE '^#!.*\b(ba)?sh\b' && printf '%s\n' "$f"; done \
+    < <(find "$1" \( -name node_modules -o -name fixtures \) -prune -o -type f ! -name '*.*' -print)
+}
+
 # _unparsable <root> <kind> — prints every file of <kind> under <root> that does not parse;
 # returns 1 when there is none of that kind to check or its parser is missing
 _unparsable() {
   local root="$1" kind="$2" f files tool
   case "$kind" in
-    sh)   files="$(_files "$root" '*.sh' '*.bash')"; tool=bash ;;
+    sh)   files="$(_files "$root" '*.sh' '*.bash'; _shebang_scripts "$root")"; tool=bash ;;
     js)   files="$(_files "$root" '*.js' '*.mjs')"; tool=node ;;
     py)   files="$(_files "$root" '*.py')"; tool=python3 ;;
     json) files="$(_files "$root" '*.json')"; tool=jq ;;
@@ -31,9 +38,9 @@ _unparsable() {
   command -v "$tool" >/dev/null || { echo "no $tool to parse $kind"; return 1; }
   [[ -n "$files" ]] || { echo "no $kind file found under $root"; return 1; }
   if [[ "$kind" == py ]]; then   # one interpreter for all of them: a start per file costs seconds
-    python3 -c 'import ast, sys
+    python3 -c 'import sys
 for f in sys.argv[1:]:
-    try: ast.parse(open(f, encoding="utf-8").read(), f)
+    try: compile(open(f, encoding="utf-8").read(), f, "exec")
     except (SyntaxError, ValueError): print("does not parse: " + f)' $files
     return 0
   fi
@@ -60,10 +67,14 @@ _parses() { run _unparsable "$PLUGIN" "$1"; [ "$status" -eq 0 ] && [ -z "$output
 @test "a broken file of each kind is caught, and a kind with no file fails" {
   local d="$BATS_TEST_TMPDIR/p" kind; mkdir -p "$d"
   printf 'if then\n' > "$d/a.sh"; printf 'function (\n' > "$d/a.js"; printf 'def (\n' > "$d/a.py"
-  printf '{"a":\n' > "$d/a.json"; printf 'a: [\n' > "$d/a.yaml"
+  printf '{"a":\n' > "$d/a.json"; printf 'a: [\n' > "$d/a.yaml"; printf '#!/bin/sh\nif then\n' > "$d/hook"
   for kind in sh js py json yaml; do
     run _unparsable "$d" "$kind"; [[ "$output" == *"does not parse: $d/a."* ]] || { echo "$kind: $output"; return 1; }
   done
+  run _unparsable "$d" sh; [[ "$output" == *"does not parse: $d/hook"* ]]   # a hook has no extension
+  printf 'return 1\n' > "$d/a.py"; run _unparsable "$d" py; [[ "$output" == *"does not parse: $d/a.py"* ]]   # parses, does not compile
   rm "$d/a.py"; run _unparsable "$d" py
   [ "$status" -eq 1 ]; [[ "$output" == *"no py file found"* ]]
+  PATH="$BATS_TEST_TMPDIR/nothing" run _unparsable "$d" js
+  [ "$status" -eq 1 ]; [[ "$output" == *"no node to parse js"* ]]
 }

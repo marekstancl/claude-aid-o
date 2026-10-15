@@ -99,8 +99,9 @@ jobs:
   # block a merge. It exists to answer one question with evidence instead of
   # opinion — does the merge path pass off this machine?
   #
-  # Why it might not: T0 and T1 are defined as touching no service and no
-  # network, so in principle they need nothing local. In practice a suite can
+  # Why it might not: T0 is the static checks and T1 the behaviour tests of one
+  # subject; neither touches a service or the network beyond loopback, so in
+  # principle they need nothing local. In practice a suite can
   # quietly depend on a path, an installed tool or a shared directory that only
   # exists on eco-dev. Such a suite passes at home and fails here, and that
   # divergence is the finding.

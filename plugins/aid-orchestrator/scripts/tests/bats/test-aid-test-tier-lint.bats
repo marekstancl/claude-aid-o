@@ -158,5 +158,5 @@ _lint() { bash "$LINT" --tests-dir "$FIXTURE_TESTS" --allowlist "$ALLOWLIST" "$@
   _measure test-aid-test-durations.bats 300000 30
   run _lint
   [ "$status" -eq 1 ]
-  [[ "$output" == *"T1 measures 700s in total, over its budget of 450s"* ]]
+  [[ "$output" == *"T1 measures 700s in total, over its budget of 420s"* ]]
 }

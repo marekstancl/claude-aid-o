@@ -22,7 +22,7 @@
 #   scope  — a suite whose subject cannot be resolved to an existing file is
 #            t2 whatever it costs.
 #   budget — the measured sums must fit AID_TIER_T0_BUDGET_MS and
-#            AID_TIER_T1_BUDGET_MS (lib/aid-test-tier.sh: 30 s and 450 s, so
+#            AID_TIER_T1_BUDGET_MS (lib/aid-test-tier.sh: 30 s and 420 s, so
 #            the real T0 + T1 run stays under the standard's 10 minutes). While
 #            a tier overflows, its most expensive member is demoted and the
 #            demotion is printed with its reason; the core (tests/tier-core.txt)
