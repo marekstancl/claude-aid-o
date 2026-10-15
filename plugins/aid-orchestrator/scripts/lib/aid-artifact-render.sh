@@ -171,7 +171,15 @@ _AID_ARTIFACT_DETECTORS=(
 _aid_artifact_redact() {
   local -n _rd_text="$1"
   local -n _rd_count="$2"
-  local entry name re hits
+  local entry name re hits pats=()
+  # One grep with every detector first: most texts hold no secret, and the
+  # per-detector loop below costs ~24 processes, 55 ms a text (15. 10. 2026).
+  # A here-string, not a pipe: `printf | grep -q` can lose the race to SIGPIPE
+  # under pipefail and read "no secret" — the one answer this must never fake.
+  for entry in "${_AID_ARTIFACT_DETECTORS[@]}"; do pats+=(-e "${entry#*|}"); done
+  # Only "no match" (1) skips; an error (2) falls through to the full loop.
+  local rc=0; grep -qE "${pats[@]}" <<<"$_rd_text" || rc=$?
+  (( rc == 1 )) && return 0
   for entry in "${_AID_ARTIFACT_DETECTORS[@]}"; do
     name="${entry%%|*}"
     re="${entry#*|}"

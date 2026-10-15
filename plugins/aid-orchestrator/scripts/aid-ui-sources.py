@@ -67,14 +67,44 @@ def sha(path):
     return h.hexdigest()
 
 
+_REDACTOR = None
+
+
 def redact(text):
-    """(redacted text, hits) through the plugin's own detector table."""
-    script = 'source "$1"; t="$(cat)"; c=0; _aid_artifact_redact t c; printf "%s\\n%s" "$c" "$t"'
-    r = subprocess.run(["bash", "-c", script, "_", RENDER_LIB], input=text, capture_output=True, text=True)
-    if r.returncode != 0:
-        die(f"redaction failed: {r.stderr.strip()[:200]}")
-    count, _, out = r.stdout.partition("\n")
-    return out, int(count or 0)
+    """(redacted text, hits) through the plugin's own detector table.
+
+    One bash keeps the detector library loaded for every text of the run: a bash
+    per text cost 20 ms, 6 s for 300 documents (15. 10. 2026). Texts go in and
+    out NUL-separated; trailing newlines are dropped as `$(cat)` dropped them."""
+    global _REDACTOR
+    if _REDACTOR is None:
+        script = ('source "$1" || exit 3; while IFS= read -r -d "" t; do c=0; '
+                  '_aid_artifact_redact t c || exit 4; printf "%s\\0%s\\0" "$c" "$t"; done')
+        _REDACTOR = subprocess.Popen(["bash", "-c", script, "_", RENDER_LIB], stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        _REDACTOR.buf = b""
+    p = _REDACTOR
+
+    def failed():
+        p.kill()
+        die(f"redaction failed: {p.stderr.read().decode(errors='replace').strip()[:200]}")
+
+    def field():
+        while b"\0" not in p.buf:
+            chunk = p.stdout.read1(1 << 16)
+            if not chunk:
+                failed()
+            p.buf += chunk
+        out, _, p.buf = p.buf.partition(b"\0")
+        return out.decode()
+
+    try:
+        p.stdin.write(text.replace("\0", "").rstrip("\n").encode() + b"\0")
+        p.stdin.flush()
+    except BrokenPipeError:
+        failed()
+    count = field()
+    return field(), int(count or 0)
 
 
 def human_records(path, roots):
