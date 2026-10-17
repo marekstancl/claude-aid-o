@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 3 - Obsahový plán
 
+**Vrstva dílny (P113):** `references/local/struktura-postup.md` má přednost před plánem obsahu a seznamem „Co dodáte vy“ (dopad, čas klienta, co se stane, když nedodá). Místo: `struktura`.
+
 **Last Updated:** 2026-10-03
 
 ## Cíl

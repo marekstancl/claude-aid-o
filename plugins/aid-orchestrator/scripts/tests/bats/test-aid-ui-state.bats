@@ -67,8 +67,11 @@ studio() {
   python3 "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/server.py" --project "$PROJ" --host 127.0.0.1 --port "$port" \
     --token-file "$PROJ/.aid-ui/studio.token" >"$T/studio.log" 2>&1 3>&- &
   STUDIO_PID=$!
-  local i; for i in $(seq 1 50); do curl -s -o /dev/null "$AID_UI_STUDIO_URL/" && return 0; sleep 0.1; done
-  return 1
+  local i; for i in $(seq 1 50); do curl -s -o /dev/null "$AID_UI_STUDIO_URL/" && break; sleep 0.1; done
+  # the PM's page session (P113: only an answer through it is the PM's; the token is an agent's)
+  echo pmcode0123456789abcdef > "$PROJ/.aid-ui/studio.code"
+  PCOOKIE="$(curl -s -o /dev/null -D - "$AID_UI_STUDIO_URL/?k=pmcode0123456789abcdef" | sed -n 's/^[Ss]et-[Cc]ookie: \([^;]*\).*/\1/p' | head -1)"
+  [[ -n "$PCOOKIE" ]]
 }
 
 # ans <id> <kind> <target> [decision] [cards] — the PM answers question <id> on the real
@@ -87,7 +90,7 @@ ans() {
   jq --arg q "$1" --arg k "$2" --arg t "$3" --argjson c "$c" --argjson hb "$hb" --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" \
     '.questions += [{id: $q, kind: $k, target: $t, opened_at: $o} + (if $k == "facts" then {part: "obsah"} elif $k == "handover" then {body: $hb} else {} end)]
     | .cards += [$c[] | .question = $q | .method = (.method // "SKILL.md, 4-references.md") | (if $k == "identity" then .slot = "W" else . end)]' "$p" > "$p.t" && mv "$p.t" "$p"
-  curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
+  curl -sf -o /dev/null -H "Cookie: $PCOOKIE" -H "Referer: $AID_UI_STUDIO_URL/" -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg q "$1" --arg k "$2" --arg t "$3" --arg d "$d" \
           '{question: $q, kind: $k, target: $t, decision: $d, choice: "x", comment: "PM"}')" "$AID_UI_STUDIO_URL/answer"
   # P113: an accepting answer of a place's question needs the place's verdict (the gates' own cases are below)
@@ -1820,6 +1823,13 @@ decide_payload() {
   "$SCRIPT" record-answer "$PROJ" --question c1 >/dev/null
   jq -e '.answers.c1.by == "client"' "$STATE" >/dev/null
   run "$SCRIPT" place-record "$PROJ" --place pohyb --without c1; [ "$status" -ne 0 ]; [[ "$output" == *"by pm"* ]]
+  # the agent token without the role header is an agent's answer, never the PM's (positive attribution)
+  jq --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" '.questions += [{id: "c2", kind: "exception", target: "pohyb@without", opened_at: $o}] | .cards += [{id: "x", question: "c2", method: "SKILL.md"}]' "$p" > "$p.t" && mv "$p.t" "$p"
+  curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
+    -d '{"question":"c2","kind":"exception","target":"pohyb@without","decision":"approve","comment":"agent"}' "$AID_UI_STUDIO_URL/answer"
+  "$SCRIPT" record-answer "$PROJ" --question c2 >/dev/null
+  jq -e '.answers.c2.by == "agent"' "$STATE" >/dev/null
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without c2; [ "$status" -ne 0 ]
 }
 
 @test "gates: without - a return decision is refused" {

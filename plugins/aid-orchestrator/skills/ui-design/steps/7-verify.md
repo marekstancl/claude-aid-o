@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 7 - Ověření a převzetí
 
+**Vrstva dílny (P113):** `references/local/kontrola-postup.md` má přednost před výběrem vzorku: brána jde přes každou stránku a každou šířku a doplňuje dnešní řádky, nenahrazuje je. Místo: `web`; předání (`handover`) jde jen s verdiktem místa `web`.
+
 **Last Updated:** 2026-10-03
 
 ## Cíl

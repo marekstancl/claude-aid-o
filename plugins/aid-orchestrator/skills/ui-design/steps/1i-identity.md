@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 1i - Identita a brand balíček
 
+**Vrstva dílny (P113):** `references/local/logo-postup.md` má přednost před fázemi 2–4b (koncepty, generování, kurátorství) a `references/local/pohyb-znacky.md` doplňuje bod 5 o animované logo. **Obrazový model kreslí skici, výslednou značku stav geometricky v kódu** (pravidlo fáze 4 „celé logo kreslí obrazový model“ platí pro skici, ne pro výslednou značku). Karty směrů: `aid-ui-tool.sh logo-sheet --cards`. Místa: `logo` (otázka `identity`) a `pohyb` (guard na `build-record`), kola `aid-ui-quality.py round <projekt> --place logo|pohyb`.
+
 **Last Updated:** 2026-10-07
 
 ## Cíl

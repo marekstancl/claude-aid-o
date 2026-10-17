@@ -53,7 +53,7 @@ r["criteria"] += [dict(c, id=k + "." + c["id"]) for k in ("vzhled", "struktura")
 a = None if s < 4 else max(x for x in (4, 6, 8, 10) if x <= s)
 print(json.dumps({"criteria": [{"id": c["id"], "score": s, "anchor": a, "evidence": "úvod: nadpis a fotka pece", "missing_for_next": "víc", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"], "client": []}}
   for c in r["criteria"]], "findings": [
-  {"id": "f1", "criterion": c0, "severity": sys.argv[3], "owner": "agent", "kind": "remeslo", "text": "obecná věta", "fix": "konkrétně", "where": "úvod"},
+  {"id": "f1", "criterion": c0, "severity": sys.argv[3], "owner": "agent", "kind": "remeslo", "blocking": False, "text": "obecná věta", "fix": "konkrétně", "where": "úvod"},
   {"id": "f2", "criterion": c0, "severity": "major", "owner": "client", "kind": "volba", "text": "chybí fotky", "fix": "dodat", "where": "o nás"}],
   "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
@@ -219,7 +219,7 @@ fz = json.load(open(p + "/.aid-ui/critic/frozen/%s.json" % place))
 ids = [c["id"] for c in fz["roles"][role]["rubrics"][0]["rubric"]["criteria"]]
 a = None if s < 4 else max(x for x in (4, 6, 8, 10) if x <= s)
 print(json.dumps({"criteria": [{"id": i, "score": s, "anchor": a, "evidence": "dokument, oddíl 1", "missing_for_next": "víc", "to_ten": {"studio": ["oddíl 1: doložit odlišení zakázkou"], "client": []}} for i in ids],
-  "findings": [{"id": "f1", "criterion": ids[0], "severity": "major", "owner": "agent", "kind": "remeslo", "text": "obecná věta", "fix": "konkrétně", "where": "oddíl 1"}],
+  "findings": [{"id": "f1", "criterion": ids[0], "severity": "major", "owner": "agent", "kind": "remeslo", "blocking": False, "text": "obecná věta", "fix": "konkrétně", "where": "oddíl 1"}],
   "readiness": [], "summary": "Místo pro test smyčky."}))
 PY
   done

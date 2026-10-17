@@ -274,7 +274,7 @@ def of_role(rec, role):
     if role not in ROLES:
         die("--role must be one of " + ", ".join(ROLES), 2)
     x = rec["roles"][role]
-    return {"place": rec.get("place", "web"), "rubric": x["rubric"], "rubrics": x["rubrics"], "gates": x["gates"],
+    return {"role_id": role, "place": rec.get("place", "web"), "rubric": x["rubric"], "rubrics": x["rubrics"], "gates": x["gates"],
             "role": x["role"], "schema": rec["schema"]}
 
 
@@ -331,6 +331,8 @@ def check(rec, ans):
             if c.get("studio_score") is not None and not c["to_ten"]["client"]:   # what holds it down is named as the client's part
                 return f"{c['id']}: studio_score without what the client supplies (to_ten.client)"
     for f in ans["findings"]:
+        if rec.get("role_id") == "tech" and not isinstance(f.get("blocking"), bool):   # D5: the expert says it, never implied
+            return f"finding {f['id']}: the expert's finding needs blocking true|false"
         if f["criterion"] not in want:
             return f"finding {f['id']}: unknown criterion {f['criterion']}"
         if f.get("direction") is not None and f["direction"] not in ids:

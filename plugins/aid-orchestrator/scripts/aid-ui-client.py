@@ -544,7 +544,9 @@ class Studio:
     def req(self, path, body=None, raw=False):
         h = {"Cookie": self.cookie(), "Content-Type": "application/json", "Referer": self.url + "/"}
         tf = os.path.join(self.project, ".aid-ui", "studio.token")
-        if body is not None and os.path.isfile(tf):   # P113: the client's answers carry who gave them (by: client)
+        if body is not None:   # P113: the client's answers say who gave them (by: client); never the PM's session alone
+            if not os.path.isfile(tf):
+                die(f"no studio token {tf}: the client answers with the agent token, never as the PM (start the studio with aid-ui-serve.sh studio)")
             h.update({"X-AID-Token": open(tf).read().strip(), "X-AID-Role": "client"})
         r = urllib.request.Request(self.url + path, data=json.dumps(body).encode() if body is not None else None,
                                    headers=h, method="POST" if body is not None else "GET")

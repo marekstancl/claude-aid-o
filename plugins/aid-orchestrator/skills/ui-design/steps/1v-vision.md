@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 1v - Vize, tón a slogan
 
+**Vrstva dílny (P113):** `references/local/sdeleni-postup.md` má přednost před generováním sloganů (pět směrů, test dosazení); ostatní platí. Otázku `vision` v autonomním běhu rozhoduje klient-role výběrem (`choose`) z karet, ne holým schválením (oprava 29). Místo: `sdeleni`; schválit vizi jde jen s verdiktem místa (`aid-ui-state.sh place-record --place sdeleni`).
+
 **Last Updated:** 2026-09-28
 
 ## Cíl

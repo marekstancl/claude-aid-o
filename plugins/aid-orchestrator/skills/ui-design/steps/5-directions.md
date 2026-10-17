@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 5 - Tři směry
 
+**Vrstva dílny (P113):** `references/local/vzhled-postup.md` (s `vzhled-vzor/`) má přednost před zadáním tří směrů: směry ze značky a tezí rovnou jako stránky kostry, naslepo; `references/local/pohyb-znacky.md` dává hero z loga jako jednu z možností. Místo: `vzhled`, kolo `aid-ui-quality.py round <projekt> --place vzhled`.
+
 **Last Updated:** 2026-09-28
 
 ## Cíl

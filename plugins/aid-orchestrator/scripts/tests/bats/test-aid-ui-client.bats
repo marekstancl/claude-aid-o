@@ -27,7 +27,7 @@ import os; _r = __import__("re").search(r"\.(owner|tech)\.yaml$", sys.argv[1]).g
 r["criteria"] += [dict(c, id=k + "." + c["id"]) for k in ("vzhled", "struktura") for c in yaml.safe_load(open(os.path.dirname(sys.argv[1]) + "/web-local.%s.%s.yaml" % (_r, k)))["criteria"]]
 print(json.dumps({"criteria": [{"id": c["id"], "score": 8, "anchor": 8, "evidence": "úvod: nadpis a fotka pece",
   "missing_for_next": "vlastní motiv", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"], "client": []}} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": r["criteria"][0]["id"], "severity": "minor",
-  "owner": "agent", "kind": "remeslo", "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}],
+  "owner": "agent", "kind": "remeslo", "blocking": False, "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}],
   "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
   done; cp "$T/ans-owner.json" "$ANS"

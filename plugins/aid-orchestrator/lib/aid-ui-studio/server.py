@@ -79,8 +79,8 @@ the link from another app, whose Referer is foreign):
                               and `items_sha256`.
   POST /answer                [auth] JSON {question, kind, target, decision,
                               choice, comment}; kind and target must be the open
-                              question's own; by = "client" when sent with the agent token and
-                              X-AID-Role: client (the client agent, P113), else "pm".
+                              question's own; by = "pm" only for the PM's page (session cookie, no
+                              token); a token answer is "client" (X-AID-Role: client, P113) or "agent".
                               (a stale page gets 409).
                               200 recorded; 409 = question closed, superseded
                               (not in the payload), not yet open (opened_at in the
@@ -893,7 +893,7 @@ def answer_from_history(qid):
                     e = json.loads(line)
                 except ValueError:
                     continue
-                if not (isinstance(e, dict) and e.get("by") in ("pm", "client") and isinstance(e.get("question"), dict)
+                if not (isinstance(e, dict) and e.get("by") in ("pm", "client", "agent") and isinstance(e.get("question"), dict)
                         and e["question"].get("id") == qid and isinstance(e.get("answer"), dict)):
                     continue
                 migrated = False
@@ -1332,9 +1332,12 @@ class Studio(BaseHTTPRequestHandler):
             # later payload.json edit cannot change what the PM's choice refers to.
             cards = sorted((dict({k: c.get(k) for k in CARD_FIELDS}, preview_sha256=preview_sha(c))
                             for c in p["cards"] if c.get("question") == qid), key=lambda c: c["id"])
-            # P113: the client agent answers with the agent token and X-AID-Role: client; the PM's page with its cookie
-            by = "client" if (self.headers.get("X-AID-Role") == "client"
-                              and hmac.compare_digest(self.headers.get("X-AID-Token") or "", TOKEN)) else "pm"
+            # P113: who answered, positively - the PM only through the PM's page (its session cookie, no agent token);
+            # any token-authenticated answer is the client agent's (X-AID-Role: client) or another agent's, never the PM's
+            if hmac.compare_digest(self.headers.get("X-AID-Token") or "", TOKEN):
+                by = "client" if self.headers.get("X-AID-Role") == "client" else "agent"
+            else:
+                by = "pm"
             a = {"question": qid, "kind": cur["kind"], "target": cur["target"], "decision": d, "by": by,
                  "choice": choice if d == "choose" else None, "comment": comment, "at": iso(t),
                  "cards": cards, "cards_sha256": hashlib.sha256(json.dumps(

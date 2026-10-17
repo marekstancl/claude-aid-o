@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 1p - Podklady
 
+**Vrstva dílny (P113):** `references/local/sdeleni-postup.md` má přednost před bodem 5 tohoto kroku (osnova dokumentu o podniku); schvalování podkladů a průzkumu v běhu s rolemi nahrazuje místo rozhodnutí „sdělení“. Místo: `sdeleni`, kolo `aid-ui-quality.py round <projekt> --place sdeleni`.
+
 **Last Updated:** 2026-10-04
 
 ## Cíl

@@ -6,6 +6,8 @@ user_invocable: false
 
 # Po předání - smyčka kvality
 
+**Vrstva dílny (P113):** `references/local/kontrola-postup.md` má přednost: hotový web hodnotí každá role i měřítky vzhledu a struktury (šest známek). Kolo: `aid-ui-quality.py round <projekt> --place web --web <url>`, rozhodnutí `aid-ui-critic.py place-verdict --place web`.
+
 **Last Updated:** 2026-10-13 (P113a, dva kritici)
 
 ## Cíl

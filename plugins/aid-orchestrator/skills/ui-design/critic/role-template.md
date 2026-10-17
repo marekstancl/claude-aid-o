@@ -50,7 +50,8 @@ Co studio udělat mohlo a neudělalo, `studio_score` nezvedá. Bez otevřeného 
 
 Nález = konkrétní vada s místem (`where`), závažností (blocking/major/minor), vlastníkem (`agent` = opraví studio,
 `client` = může dodat jen majitel), druhem (`kind`: `fakt` = nepravdivé nebo nedoložené tvrzení, `zakon` = právní
-riziko, `remeslo` = vada řemesla, `volba` = věc vkusu nebo volby klienta), u víc směrů i směrem (`direction`)
+riziko, `remeslo` = vada řemesla, `volba` = věc vkusu nebo volby klienta), odborník i tím, zda je vada blokující (`blocking`: true = s touto vadou směr ke klientovi nesmí), u víc směrů
+i směrem (`direction`)
 a návrhem opravy (`fix`: co, kde a jak to bude vypadat, tak konkrétně, aby to studio mohlo udělat bez dalšího
 dotazu). Co je jen na majiteli a má hotové zadání, dej do `readiness`, ne do nálezů. Ve známce `score` se projeví
 (výsledek teď), ve `studio_score` ne.

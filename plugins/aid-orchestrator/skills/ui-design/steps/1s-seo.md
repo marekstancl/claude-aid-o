@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 1s - SEO zadání
 
+**Vrstva dílny (P113):** `references/local/struktura-postup.md` má přednost před inventurou starého webu a přesměrováním (ze sitemap, cíl musí ve stromu existovat). Místo: `struktura`.
+
 **Last Updated:** 2026-10-03
 
 ## Cíl

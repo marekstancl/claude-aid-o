@@ -55,6 +55,29 @@ Do NOT invoke for:
    frontend-design) a řemeslné minimum `references/adopted/impeccable-craft-floor.md`;
    generické vzory vyřazuje `references/genericity-rubric.md`.
 
+## Vrstva dílny a místa rozhodnutí (P113, 17. 10. 2026)
+
+**Vrstva:** `references/local/` drží postupy, které dílna PM ověřila naslepo proti krokům studia (sdělení, logo,
+pohyb značky, struktura, vzhled, kontrola). **Postup má přednost před tou částí kroku, kterou jmenuje** v řádku
+„Nahrazuje“ - a jen před ní; všechno ostatní z kroku (vstupy, brány, zápisy stavu, nástroje) platí dál. Krok, který
+postup nahrazuje, na něj odkazuje v bloku „Vrstva dílny“ a `sections.json` ho jmenuje mezi soubory metody (stvrzenka
+`aid-ui-state.sh method` ho tedy vyžaduje).
+
+**Šest míst rozhodnutí** (kolo `aid-ui-quality.py round <projekt> --place <místo>`, nejvýš první hodnocení + tři kola
+oprav): `sdeleni` (otázka `vision`), `logo` (`identity`), `pohyb` (hlídá `build-record`), `struktura` (`structure`),
+`vzhled` (`direction`), `web` (`handover`; každá role hodnotí měřítky hotového webu, vzhledu i struktury = šest známek).
+Na každém místě dvě nezávislé role na Claude Opus (Codex záskok), obě s pamětí hodnotitele: **odborník** (síto:
+řemeslo, fakta, zákon) a **klient** (majitel; jedna role přes všechna místa i odpovědi ve studiu). Brány
+(`critic/<typ>.<role>.<místo>.gates.yaml`) zná jen kód, role ani studio je nevidí.
+
+**Rozhodnutí místa** (`aid-ui-critic.py place-verdict`, zápis `aid-ui-state.sh place-record`): fakta a zákon > vada
+řemesla od odborníka > volba klienta (D5); klient vybírá jen mezi směry, které prošly oběma rolemi (D2; v ručním
+režimu vybírá PM `--pm-choice`, PM má vždy veto `--pm-veto`). Drží-li bránu jen chybějící vstup klienta (`studio_score`
+s `to_ten.client`), místo končí `accepted_with_reservation` - „schváleno s výhradou, čeká na klienta“ (D1); chybějící
+vstup klienta není kritérium práce studia. Schválit otázku místa jde jen s verdiktem nad aktuálními soubory místa
+i míst, na kterých stojí. Projekt bez pohybu značky jen výjimkou PM (`place-record --place pohyb --without <odpověď>`).
+`aid-ui-state.sh decide --step` bere přesný název kroku z `sections.json` (sdělení i logo patří do „Zadání a obsah“).
+
 ## Kroky a části (jak o nich mluvit)
 
 Jediný zdroj číslování a smyslu je mapa `sections.json`: šest kroků studia
@@ -352,6 +375,10 @@ a odkaz.
    from the agent's own head ("Jak se ptá PM", point 0).
 
 ---
+
+13. P113: a procedure under `references/local/` wins over the part of a step it names ("Nahrazuje") and only that
+    part; an accepting answer of a decision place's question (vision, identity, structure, direction, handover) and
+    `build-record` need that place's current verdict (`aid-ui-state.sh place-record`); the roles never see the gates.
 
 ## Completeness Gate
 

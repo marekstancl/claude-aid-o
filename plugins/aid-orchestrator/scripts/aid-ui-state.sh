@@ -962,7 +962,7 @@ case "$VERB" in
     jq_write --arg q "$qid" --arg f "$file" --arg sha "$sha" --arg o "$opened" --argjson a "$ans" \
       '.answers[$q] = {kind: $a.kind, target: $a.target, decision: $a.decision, choice: $a.choice,
                        comment: $a.comment, cards: $a.cards, cards_sha256: $a.cards_sha256,
-                       answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at, by: ($a.by // "pm")}
+                       answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at, by: $a.by}
                       + (if ($a.items | type) == "array" then {items: $a.items, items_sha256: $a.items_sha256} else {} end)'
     echo "ANSWER $qid: $(jq -c '{kind, target, decision, choice}' <<<"$ans")"
     ;;

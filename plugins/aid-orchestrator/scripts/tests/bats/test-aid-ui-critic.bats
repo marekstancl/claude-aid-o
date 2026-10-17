@@ -29,7 +29,7 @@ except (OSError, KeyError):
 anchor = lambda x: max(a for a in (4, 6, 8, 10) if a <= x) if x >= 4 else None
 print(json.dumps({"criteria": [{"id": c["id"], "score": s, "anchor": anchor(s), "evidence": "úvod: nadpis a fotka pece",
   "missing_for_next": "více obrazu", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"] if s < 10 else [], "client": []}} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": r["criteria"][0]["id"], "severity": "minor",
-  "owner": "agent", "kind": "remeslo", "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}], "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
+  "owner": "agent", "kind": "remeslo", "blocking": False, "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}], "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
   [ -z "${2:-}" ] || { jq "$2" "$BATS_TEST_TMPDIR/a.json" > "$BATS_TEST_TMPDIR/b.json" && mv "$BATS_TEST_TMPDIR/b.json" "$BATS_TEST_TMPDIR/a.json"; }
 }
@@ -246,10 +246,10 @@ verdict_of() {   # verdict_of <place> [args]: both roles' scores of $T/owner.jso
   run verdict_of logo; [ "$status" -eq 3 ]; jq -e '.error == "client_choice_failed" and .passing == ["b"]' <<<"$output" >/dev/null
   DIRS="a b" mk logo owner 8 '.choice = "b"'; run verdict_of logo; jq -e '.status == "accepted" and .chosen == "b"' <<<"$output" >/dev/null
   # a fact without a direction (the whole place): returned whatever the scores
-  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t2", "criterion": "typografie", "severity": "major", "owner": "agent", "kind": "fakt", "text": "rok založení na značce nesedí", "fix": "opravit", "where": "logo s názvem"}]'
+  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t2", "criterion": "typografie", "severity": "major", "owner": "agent", "kind": "fakt", "blocking": true, "text": "rok založení na značce nesedí", "fix": "opravit", "where": "logo s názvem"}]'
   run verdict_of logo; [ "$status" -eq 0 ]; jq -e '.status == "returned" and (.blocked_by | map(.kind) | index("fakt")) != null' <<<"$output" >/dev/null
   # both roles report the same fact: listed once
-  DIRS="a b" mk logo owner 8 '.choice = "b" | .findings = [{"id": "o2", "criterion": "muj_podnik", "severity": "major", "owner": "agent", "kind": "fakt", "text": "rok založení na značce nesedí", "fix": "opravit", "where": "logo"}]'
+  DIRS="a b" mk logo owner 8 '.choice = "b" | .findings = [{"id": "o2", "criterion": "muj_podnik", "severity": "major", "owner": "agent", "kind": "fakt", "blocking": true, "text": "rok založení na značce nesedí", "fix": "opravit", "where": "logo"}]'
   run verdict_of logo; [ "$(jq '[.blocked_by[] | select(.kind == "fakt")] | length' <<<"$output")" -eq 1 ]
 }
 
@@ -259,7 +259,7 @@ verdict_of() {   # verdict_of <place> [args]: both roles' scores of $T/owner.jso
   DIRS="a b x" mk logo tech 8; run sc logo tech; [ "$status" -eq 1 ]
   # a craft finding without blocking: true does not take the direction out
   DIRS="a b" mk logo owner 8 '.choice = "a"'
-  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t1", "criterion": "remeslo_tvaru", "severity": "blocking", "owner": "agent", "kind": "remeslo", "direction": "a", "text": "drobná nerovnost", "fix": "srovnat", "where": "značka 512"}]'
+  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t1", "criterion": "remeslo_tvaru", "severity": "blocking", "owner": "agent", "kind": "remeslo", "blocking": false, "direction": "a", "text": "drobná nerovnost", "fix": "srovnat", "where": "značka 512"}]'
   run verdict_of logo; [ "$status" -eq 0 ]; jq -e '.chosen == "a" and .status == "accepted"' <<<"$output" >/dev/null
   # a finding without kind is not a valid answer
   DIRS="a b" mk logo tech 8 '.findings = [{"id": "t1", "criterion": "remeslo_tvaru", "severity": "major", "owner": "agent", "direction": "a", "text": "x", "fix": "srovnat", "where": "značka 512"}]'
