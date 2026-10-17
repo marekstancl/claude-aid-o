@@ -61,6 +61,9 @@ teardown() {
   [[ -z "${CUST_PID:-}" ]] || kill "$CUST_PID" 2>/dev/null || true
   [[ -z "${SPID:-}" ]] || kill "$SPID" 2>/dev/null || true
   [[ -z "${STUDIO_PID:-}" ]] || kill "$STUDIO_PID" 2>/dev/null || true
+  [[ ! -f "$T/studio.pids" ]] || while read -r p; do kill "$p" 2>/dev/null || true; done < "$T/studio.pids"
+  # P113: a studio a command started through aid-ui-serve.sh - only this case's project (the pointer names it)
+  AID_UI_PROJECT="$PROJ" bash "$BATS_TEST_DIRNAME/../../aid-ui-serve.sh" stop studio >/dev/null 2>&1 || true
 }
 
 jqw() { jq "$@" "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"; }
@@ -82,6 +85,7 @@ studio() {
   python3 "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/server.py" --project "$PROJ" --host 127.0.0.1 --port "$port" \
     --token-file "$PROJ/.aid-ui/studio.token" >"$T/studio.log" 2>&1 3>&- &
   STUDIO_PID=$!
+  echo "$STUDIO_PID" >> "$T/studio.pids"   # P113: `run ans` starts it in a subshell, whose STUDIO_PID teardown never sees
   local i; for i in $(seq 1 50); do curl -s -o /dev/null "$AID_UI_STUDIO_URL/" && break; sleep 0.1; done
   # the PM's page session (P113: only an answer through it is the PM's; the token is an agent's)
   echo pmcode0123456789abcdef > "$PROJ/.aid-ui/studio.code"
@@ -1861,4 +1865,41 @@ decide_payload() {
 @test "gates: without - a return decision is refused" {
   ans r1 exception "pohyb@without" return
   run "$SCRIPT" place-record "$PROJ" --place pohyb --without r1; [ "$status" -ne 0 ]; [[ "$output" == *"not one"* ]]
+}
+
+# ---------------------------------------------------------------- P113 step 10: the machine part of a repair cycle
+@test "cycle: stops at the first failing stage and names it, nothing after it runs; the site defaults to the recorded build" {
+  run "$SCRIPT" cycle "$PROJ"
+  [ "$status" -eq 2 ]; [[ "$output" == *"cycle needs <site dir> (or a recorded build"* ]]
+  rm "$PROJ/.aid-ui/method/build.json"   # build-record wants the build method receipt
+  run "$SCRIPT" cycle "$PROJ" "$SITE"
+  [ "$status" -eq 1 ]; [[ "$output" == *"cycle: FAIL build-record build-record refused: no method receipt for build"* ]] || { echo "$output"; return 1; }
+  [ ! -e "$PROJ/.aid-ui/copy/subject.json" ]; jq -e '.build == null and .gate == null' "$STATE" >/dev/null
+  # no motion stage without a picked reference; with one, the built site's motion is recorded first, then build-record
+  ! [[ "$output" == *"motion"* ]]
+  "$SCRIPT" method "$PROJ" build >/dev/null; "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  jqw '.refs = [{"id":"r1","url":"http://127.0.0.1:9/","picked":true}]'
+  export AID_UI_HOST=127.0.0.1 AID_UI_PREVIEW_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+  run "$SCRIPT" cycle "$PROJ"   # the recorded build's folder
+  [ "$status" -eq 1 ]; [[ "$output" == *"cycle: $(realpath "$SITE")"$'\n'"cycle: motion recorded"$'\n'"cycle: FAIL build-record build-record refused: a reference is picked but there is no .aid-ui/motion.json"* ]] || { echo "$output"; return 1; }
+  [ -f "$PROJ/.aid-ui/build.motion.json" ]
+}
+
+@test "cycle: the copy stage names every page that needs a review and stops before the measurement and the gate" {
+  # the cycle serves the site: on this test's own free port and the loopback, never a real preview's 3917
+  export AID_UI_HOST=127.0.0.1 AID_UI_PREVIEW_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+  run "$SCRIPT" cycle "$PROJ" "$SITE"
+  [ "$status" -eq 1 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"cycle: BUILD:"* ]]
+  [[ "$output" == *"cycle: FAIL copy STALE index.html: no copy review STALE kontakt.html: no copy review copy: 2 of 2 page(s) need a review"* ]]
+  [ -f "$PROJ/.aid-ui/copy/subject.json" ]; [ ! -e "$PROJ/.aid-ui/measure.json" ]; jq -e '.gate == null' "$STATE" >/dev/null
+  # the reviewed pages pass the stage; the next one (measurement) runs
+  jq --slurpfile s "$PROJ/.aid-ui/copy/subject.json" --arg c "$(sha256sum "$PROJ/docs/content/product-context.md" 2>/dev/null | cut -d' ' -f1)" \
+    '.copy_review.pages = ($s[0].pages | map_values({subject_sha256: .sha256, verdict: "pass", facts_used: {}, context_sha256: (if $c == "" then null else $c end)}))' \
+    "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  run "$SCRIPT" cycle "$PROJ" "$SITE"
+  [[ "$output" == *"cycle: copy: every page reviewed and current"* ]] || { echo "$output"; return 1; }
+  [[ "$output" != *"FAIL copy"* ]]
+  # no preview of the cycle is left running
+  [ -z "$(ss -ltnH "sport = :$AID_UI_PREVIEW_PORT")" ]
 }

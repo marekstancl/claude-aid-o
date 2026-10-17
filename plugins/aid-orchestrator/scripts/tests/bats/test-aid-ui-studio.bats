@@ -20,7 +20,11 @@ setup() {
   start_server
 }
 
-teardown() { kill "$SPID" 2>/dev/null || true; wait 2>/dev/null || true; }
+teardown() {
+  kill "$SPID" 2>/dev/null || true; wait 2>/dev/null || true
+  # P113: a studio started through aid-ui-serve.sh - only this case's project (the pointer names it)
+  AID_UI_PROJECT="$P" bash "$BATS_TEST_DIRNAME/../../aid-ui-serve.sh" stop studio >/dev/null 2>&1 || true
+}
 
 start_server() {
   python3 "$SERVER" --project "$P" --host 127.0.0.1 --port "$PORT" \

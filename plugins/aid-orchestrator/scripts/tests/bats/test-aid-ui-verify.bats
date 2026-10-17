@@ -147,7 +147,8 @@ copy_reviewed() {
     "$PROJ/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
 }
 
-@test "all-pages: one pass - the fixed copy passes every row at every width; gate-record makes and checks the customer page from that gate" {
+# fixed_project — the fixed copy as a finished project: SEO brief approved, customer tasks, the form receiver
+fixed_project() {
   cp -r "$FX/fixed/." "$SITE/"
   # the SEO brief: page table (H1 as built) and the PM's AI robot policy the fixed robots.txt follows
   mkdir -p "$PROJ/docs/seo"
@@ -160,6 +161,10 @@ copy_reviewed() {
   printf -- '- {id: hours, task: "Kdy", expect: ["7:00 až 18:00"]}\n- {id: price, task: "Bochník", expect: ["Bochník", "65 Kč"]}\n- {id: booking, task: "Objednat", form: true}\n' > "$PROJ/docs/content/tasks.yaml"
   # the preview's form receiver (AC8): o-nas sends its telephone to /api/zprava
   echo '{"endpoint": "/api/zprava", "required": ["tel"], "honeypot": "website"}' > "$PROJ/.aid-ui/form.json"
+}
+
+@test "all-pages: one pass - the fixed copy passes every row at every width; gate-record makes and checks the customer page from that gate" {
+  fixed_project
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   measured
   copy_reviewed
@@ -723,4 +728,16 @@ vst() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .pag
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   jq -e '.rows[] | select(.check == "copy_review" and .page == "index.html") | .status == "fail" and (.detail | contains("fakta stránky se změnila po kontrole textů: telefon"))' "$RES" >/dev/null
   [ "$(st copy_review o-nas/index.html)" = pass ]
+}
+
+@test "cycle: one command runs the machine stages in order over the fixed copy and ends OK - build, copy, measurement, gate with its customer page, gate-check" {
+  fixed_project
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null; copy_reviewed
+  run "$SC/aid-ui-state.sh" cycle "$PROJ" "$SITE"
+  [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass")' "$RES" 2>/dev/null | head; return 1; }
+  grep -q '^cycle: OK$' <<<"$output"
+  # the stages in their order, each said once
+  [ "$(grep -oP '^cycle: \K[A-Za-z]+' <<<"$output" | paste -sd' ')" == "BUILD copy measured GATE OK" ] || { echo "$output"; return 1; }
+  jq -e '.gate.customer_page == "pass"' "$PROJ/docs/design/brand-state.json" >/dev/null
+  [ -f "$PROJ/.aid-ui/measure.json" ]
 }

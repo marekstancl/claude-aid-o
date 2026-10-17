@@ -80,6 +80,12 @@
 #                          decision approve, targets docs/content/product-context.md@<sha256 of
 #                          the file now> (step 1p); 1 naming why (no file, no approval, changed
 #                          since approval). Steps 1v, 3 and 6 call it first.
+#     cycle <project> [<site dir>]                (P113, IMP-695) the machine part of a repair cycle in order:
+#                          motion record (a picked reference), build-record, copy check (aid-ui-copy.py stale -
+#                          which pages need a review; no model), measure + design standard, gate (aid-ui-verify.sh,
+#                          which records it with its customer page),
+#                          gate-check; stops at the first failure: `cycle: FAIL <stage> <reason>`, exit 1;
+#                          `cycle: OK`. Calls no role (the place round does). The site defaults to the build's.
 #     exception-covered <project> <result.json>   (P108) prints one JSON line per open row of the
 #                          result (fail, not_covered, warn outside warn_only of the checks.json next to
 #                          it, as finish counts them) that a live PM exception covers (same selector and
@@ -235,7 +241,7 @@ BRAND="$PROJECT/docs/brand"
 HTML="$BRAND/index.html"
 STATE="$PROJECT/docs/design/brand-state.json"
 OLD="$BRAND/state.json"   # P101 location, migrated by init
-if [[ "$VERB" != build-id && "$VERB" != exception-covered ]]; then   # one mutation at a time (exception-covered only reads: gate-record's customer page calls it under the lock)
+if [[ "$VERB" != build-id && "$VERB" != exception-covered && "$VERB" != cycle ]]; then   # one mutation at a time (exception-covered only reads: gate-record's customer page calls it under the lock; cycle only calls verbs that lock themselves)
   [[ "$VERB" != init ]] || mkdir -p "${STATE%/*}"
   if [[ -d "${STATE%/*}" ]]; then
     exec 9<"${STATE%/*}"   # read-only fd of the directory: a project symlink cannot make us write
@@ -1484,6 +1490,55 @@ case "$VERB" in
       '{finished: $d, at: $at, web: $w, customer: $c, verdict: $v, rating: (if $r == "" then null else $r end), publish_blocked_by: $b}' > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/finish.json"
     echo "FINISHED: $(today) · $web · $customer · verdict $verdict${rating:+ ($rating/10)}"
     [[ "$blocked" == "[]" ]] || echo "PUBLISH BLOCKED by $(jq length <<<"$blocked") critical open item(s): $(jq -r 'map(.id) | join(", ")' <<<"$blocked")"
+    ;;
+
+  cycle)
+    # P113 (IMP-695): the machine part of a repair cycle in its order - motion record (a picked reference only),
+    # build-record, copy check, measurement, gate (aid-ui-verify.sh records it with its customer page), gate-check; stops at the first
+    # failure. No role and no model is called: the copy check only says which pages need a review, the rating is the
+    # place round (aid-ui-quality.py round --place), the handover is guarded by the web verdict.
+    need_state
+    (( $# <= 1 )) || usage "cycle <project> [<site dir>]"
+    site="${1:-$(jq -r '.build.dir // empty' "$STATE")}"
+    [[ -n "$site" && -d "$site" ]] || usage "cycle needs <site dir> (or a recorded build to take it from)"
+    site="$(realpath "$site")"
+    out="$(tmpfile cycle.out)"
+    fail() { echo "cycle: FAIL $1 $(tr '\n' ' ' <"$out" | sed -E 's/ERROR: ([a-z-]+\.(sh|py): )?//g' | head -c 400)"; rm -f "$out"; exit 1; }
+    me="$HERE/aid-ui-state.sh"; url=""
+    trap 'AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" stop preview >/dev/null 2>&1 || true' EXIT
+    serve() {   # the preview of the site, reused when it already serves this folder
+      [[ -n "$url" ]] && return 0
+      url="$(AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" preview "$site" 2>"$out" | sed -n 's/^URL: //p')"
+      [[ -n "$url" ]]
+    }
+    echo "cycle: $site"
+    if jq -e 'any(.refs[]?; .picked == true)' "$STATE" >/dev/null; then
+      serve || fail motion
+      bash "$HERE/aid-ui-tool.sh" motion "$url" "$PROJECT/.aid-ui/build.motion.json" \
+        --dir-sha256 "$(python3 "$HERE/aid-ui-motion.py" dirsha "$site")" >"$out" 2>&1 || fail motion
+      echo "cycle: motion recorded"
+    fi
+    "$me" build-record "$PROJECT" "$site" >"$out" 2>&1 || fail build-record
+    echo "cycle: $(grep -m1 '^BUILD:' "$out")"
+    mkdir -p "$PROJECT/.aid-ui/copy"
+    bash "$HERE/aid-ui-verify.sh" "$PROJECT" --copy-subject "$PROJECT/.aid-ui/copy/subject.json" >"$out" 2>&1 || fail copy
+    url=""   # aid-ui-verify.sh stops the preview it served
+    python3 "$HERE/aid-ui-copy.py" stale "$PROJECT" --subject "$PROJECT/.aid-ui/copy/subject.json" >"$out" 2>&1 || fail copy
+    echo "cycle: $(tail -1 "$out")"
+    serve || fail measure
+    pages=(); while IFS= read -r p; do pages+=("$p"); done < <(jq -r '.build.fingerprints | keys[] | select(. != "_site")
+      | "/" + (sub("index\\.html$"; "") | sub("\\.html$"; ""))' "$STATE")
+    bash "$HERE/aid-ui-tool.sh" measure --build "$(jq -r .build.id "$STATE")" "$url" "$PROJECT/.aid-ui/measure.json" "${pages[@]}" >"$out" 2>&1 || fail measure
+    python3 "$HERE/aid-ui-design-standard.py" write "$PROJECT" --measure "$PROJECT/.aid-ui/measure.json" >"$out" 2>&1 || fail measure
+    echo "cycle: measured ${#pages[@]} page(s), design standard written"
+    rc=0; bash "$HERE/aid-ui-verify.sh" "$PROJECT" >"$out" 2>&1 || rc=$?; url=""
+    # aid-ui-verify.sh records the gate itself (gate-record, with the customer page); 3 = rows open, recorded all the
+    # same - gate-check decides with the exceptions
+    (( rc == 0 || rc == 3 )) || fail gate
+    echo "cycle: $(grep -m1 '^GATE:' "$out") · customer page $(jq -r '.gate.customer_page' "$STATE")"
+    "$me" gate-check "$PROJECT" >"$out" 2>&1 || fail gate-check
+    rm -f "$out"
+    echo "cycle: OK"
     ;;
 
   gate-check)

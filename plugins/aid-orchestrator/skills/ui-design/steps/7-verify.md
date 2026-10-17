@@ -74,8 +74,9 @@ a `references/standards/frontend-build-standard.md` (kopie v pluginu).
 2. Otevřený řádek (fail, not_covered, warn mimo `warn_only`) → oprav kód,
    kromě `design_standard_doc` (při prvním běhu otevřený záměrně, řeší ho bod 4) a `customer_page`
    (píše ho `gate-record`, bod 7b);
-   znovu `aid-ui-state.sh build-record` a bránu (bod 1). Opakuj, dokud
-   zbývají jen řádky, které oprava neřeší.
+   znovu `aid-ui-state.sh build-record` a bránu (bod 1) - po opravě to celé (pohyb, build, texty, měření, brána,
+   `gate-check`) udělá `aid-ui-state.sh cycle <project> <složka buildu>` a zastaví na prvním neúspěchu (P113); kolo
+   místa `web` pak `aid-ui-quality.py round --place web`. Opakuj, dokud zbývají jen řádky, které oprava neřeší.
 3. Zbylý řádek, který PM přijme: otázka `exception` ve studiu (`target` =
    selektor jako JSON: `check`, `page`, `viewport`, `browser`, `role`,
    `state`; klíč vynechaný nebo `"*"` = všechno, obě podoby se berou stejně); důvod = komentář PM. Po `approve`
