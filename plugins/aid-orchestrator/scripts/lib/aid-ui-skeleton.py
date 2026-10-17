@@ -193,15 +193,23 @@ def build(p):
     except (OSError, ValueError):
         before = set()
     removed = []
+    removed_root = os.path.realpath(os.path.join(rd, "removed"))
     for rel in sorted(before - want):   # only what the skeleton wrote itself; a foreign page stays where it is
+        # an entry of the shape the skeleton writes, inside site/ - a hand-edited manifest moves nothing else
+        if (not isinstance(rel, str) or os.path.isabs(rel) or ".." in rel.split("/") or not (rel == "index.html" or rel.endswith("/index.html"))
+                or page_file(site, "/" + rel[:-len("index.html")]) != os.path.join(site, rel)):
+            warn(f"manifest entry {rel!r} is not a skeleton page path: skipped")
+            continue
         src = os.path.join(site, rel)
-        if not os.path.isfile(src):
+        if not os.path.isfile(src) or os.path.islink(src) or not os.path.realpath(src).startswith(real + os.sep):
             continue
         dst = os.path.join(rd, "removed", rel)
         n = 1
         while os.path.exists(dst):   # an older removed version is kept, never overwritten
             dst = os.path.join(rd, "removed", rel + ".%d" % n); n += 1
         os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if not os.path.realpath(os.path.dirname(dst)).startswith(removed_root):
+            die(f"{dst} resolves outside {removed_root}", 2)
         os.replace(src, dst)
         removed.append(rel)
     write_atomic(mf, json.dumps({"pages": sorted(want)}, ensure_ascii=False))
@@ -230,7 +238,13 @@ def facts_row(p, site, pages, facts, tmp):
     json.dump(ck, open(os.path.join(tmp, "checks.json"), "w"))
     json.dump(st, open(os.path.join(tmp, "state.json"), "w"))
     json.dump(facts, open(os.path.join(tmp, "facts.json"), "w"), default=str)
-    h = functools.partial(http.server.SimpleHTTPRequestHandler, directory=site)
+    served = os.path.join(tmp, "site")   # only the skeleton pages, copied: nothing else of the project is served
+    for f in pages:
+        dst = os.path.join(served, os.path.relpath(f, site))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(f, dst)
+    site = served
+    h = functools.partial(http.server.SimpleHTTPRequestHandler, directory=served)
     h.log_message = lambda *a: None
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), h)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -254,6 +268,7 @@ def facts_row(p, site, pages, facts, tmp):
 def check(p):
     s, facts = load(p)
     site = os.path.join(p, "site")
+    no_symlinks(p, "site", ".aid-ui/skeleton")
     tree = {href(x.get("url") or "/") for x in s["pages"]}
     bad = []
     rf = os.path.join(p, ".aid-ui", "skeleton", "redirects.csv")
