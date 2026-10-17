@@ -741,3 +741,28 @@ vst() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .pag
   jq -e '.gate.customer_page == "pass"' "$PROJ/docs/design/brand-state.json" >/dev/null
   [ -f "$PROJ/.aid-ui/measure.json" ]
 }
+
+@test "p113: the workshop's procedure - a content image with alt=\"\" needs role or aria-hidden, a form needs its notice beside it, touch targets count at 768 px" {
+  S="$T/s9"; mkdir -p "$S/img" "$S/ok"; cp "$FX/site/img/modra-1200.webp" "$S/img/m.webp"
+  H='<!doctype html><html lang="cs"><head><meta name="viewport" content="width=device-width"><title>x</title></head><body><h1>x</h1><p>IČO 27074358</p>'
+  printf '%s<img src="/img/m.webp" alt="" width="300" height="150"><form action="/api"><label>Tel <input name="tel"></label><button style="min-height:44px">Odeslat</button></form><footer><a href="/gdpr/">Ochrana osobních údajů</a></footer><nav><a href="/a/" style="font-size:11px;line-height:1">A</a> <a href="/b/" style="font-size:11px;line-height:1">B</a></nav></body></html>' "$H" > "$S/index.html"
+  printf '%s<img src="/img/m.webp" alt="" role="presentation" width="300" height="150"><section><form action="/api"><label>Tel <input name="tel"></label><button style="min-height:44px;min-width:44px">Odeslat</button></form><p>Odesláním souhlasíte se <a href="/gdpr/">zpracováním údajů</a>.</p></section></body></html>' "$H" > "$S/ok/index.html"
+  vrun "$S" a11y_basics,business_minimum,touch_targets 768,1440
+  jq -e '[.rows[] | select(.check == "a11y_basics" and .page == "index.html") | .detail][0] | contains("content image with an empty alt")' "$T/vr/result.json" >/dev/null
+  jq -e '[.rows[] | select(.check == "business_minimum" and .page == "index.html") | .detail][0] | contains("without information about personal data next to it")' "$T/vr/result.json" >/dev/null
+  jq -e '[.rows[] | select(.check == "touch_targets" and .page == "index.html" and .viewport == "768") | .status][0] == "fail"' "$T/vr/result.json" >/dev/null
+  ! jq -r '.rows[] | select(.page == "ok/index.html" and (.check == "business_minimum" or .check == "touch_targets")) | .status' "$T/vr/result.json" | grep -qv pass
+  ! jq -r '.rows[] | select(.page == "ok/index.html" and .check == "a11y_basics") | .detail' "$T/vr/result.json" | grep -q 'empty alt'
+}
+
+@test "p113: a brief finding lands on its own page (its URL), not on every page" {
+  NARROW_VP=1440 narrow seo
+  fixed_project
+  sed -i 's#| /o-nas | O nás |#| /o-nas | Jiný nadpis |#' "$PROJ/docs/seo/brief.md"
+  sha="$(sha256sum "$PROJ/docs/seo/brief.md" | cut -d' ' -f1)"
+  jq --arg t "docs/seo/brief.md@$sha" '.answers["q-seo"].target = $t' "$PROJ/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '.rows[] | select(.check == "seo" and .page == "o-nas/index.html") | .status == "fail" and (.detail | contains("brief-h1"))' "$RES" >/dev/null || { jq -c '.rows[] | select(.check == "seo")' "$RES"; return 1; }
+  ! jq -r '.rows[] | select(.check == "seo" and .page != "o-nas/index.html") | .detail' "$RES" | grep -q 'brief-h1: expected'
+}

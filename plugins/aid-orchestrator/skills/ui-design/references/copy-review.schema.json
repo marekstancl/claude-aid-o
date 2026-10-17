@@ -162,9 +162,13 @@
                   {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
-                    "minItems": 1
+                    "minItems": 1,
+                    "description": "P113: a sentence naming several data cites every key; a datum the register lacks is null in the list (the claim then fails as unregistered)"
                   }
                 ]
               }

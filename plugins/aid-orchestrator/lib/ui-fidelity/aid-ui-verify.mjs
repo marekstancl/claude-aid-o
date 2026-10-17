@@ -287,7 +287,14 @@ async function inPage(page) {
     // business_minimum: seller identification (IČO/IČ + 8 digits) and, next to a form, a link about personal data
     o.ico = /\bI[ČC]O?\s*:?\s*\d{8}\b/.test(document.body.innerText.replace(/\u00a0/g, ' '));
     o.form = !!document.querySelector('form input:not([type=hidden]), form textarea');
-    o.privacyLink = [...document.querySelectorAll('a[href]')].some(a => /osobn(?:[ií]ch|[ýy]ch)\s+[úu]daj|osobnych[-_ ]udaj|zpracov[áa]n[íi]\s+[úu]daj|sprac[úu]van|ochrana\s+[úu]daj|ochrana[-_ ]osobn|GDPR|soukrom[íi]|s[úu]krom|privacy/i.test(a.textContent + ' ' + a.getAttribute('href')));
+    const PRIV = /osobn(?:[ií]ch|[ýy]ch)\s+[úu]daj|osobnych[-_ ]udaj|zpracov[áa]n[íi]\s+[úu]daj|sprac[úu]van|ochrana\s+[úu]daj|ochrana[-_ ]osobn|GDPR|soukrom[íi]|s[úu]krom|privacy/i;
+    o.privacyLink = [...document.querySelectorAll('a[href]')].some(a => PRIV.test(a.textContent + ' ' + a.getAttribute('href')));
+    // P113 (the workshop's V9): the notice belongs at the form - a link or a sentence about personal data inside the form
+    // or its own container; one in the footer does not tell the sender what happens to what they type
+    o.formsWithoutNotice = [...document.querySelectorAll('form')].filter(fm => fm.querySelector('input:not([type=hidden]), textarea'))
+      // the container counts unless it is the page itself (body, main): a footer link is not beside the form
+      .filter(fm => ![fm, fm.parentElement].filter(c => c && !['BODY', 'MAIN', 'HTML'].includes(c.tagName)).some(c => PRIV.test(c.innerText || '') || [...c.querySelectorAll('a[href]')].some(a => PRIV.test(a.getAttribute('href') || ''))))
+      .map(fm => fm.getAttribute('action') || fm.id || 'form');
     return o;
   });
 }
@@ -411,6 +418,7 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   const biz = [];
   if (!o.ico) biz.push('no seller identification (IČO with 8 digits) on the page');
   if (o.form && !o.privacyLink) biz.push('a form without a link to how personal data are processed');
+  else if (o.formsWithoutNotice.length) biz.push(`a form without information about personal data next to it (only elsewhere on the page): ${o.formsWithoutNotice.slice(0, 3).join(', ')}`);
   res.business_minimum = biz.length ? ['fail', biz.join('; ')] : ['pass', ''];
   const shot = inside(path.join(out, 'shots'), path.join(...key));
   if (!shot) throw new Error(`screenshot path ${key.join('/')} leaves the output directory`);
@@ -613,6 +621,12 @@ async function moreRows(page, url, requested, applies) {
       }
       const amb = [...byName].filter(([, t]) => t.size > 1).map(([n, t]) => `"${n.slice(0, 25)}" -> ${t.size} places`);
       if (amb.length) why.push(`the same link text leads to different places: ${amb.slice(0, 3).join(', ')}`);
+      // a content image (40 px and more) with an empty alt is decorative only when it says so - role presentation/none or
+      // aria-hidden (P113, the workshop's check procedure: a card photo with alt="" said nothing to a screen reader)
+      const mute = [...document.querySelectorAll('img[alt=""]')].filter(im => im.getBoundingClientRect().width >= 40
+        && !['presentation', 'none'].includes((im.getAttribute('role') || '').toLowerCase()) && !im.closest('[aria-hidden="true"]'))
+        .map(im => (im.getAttribute('src') || '').split('/').pop());
+      if (mute.length) why.push(`content image with an empty alt and no role=presentation or aria-hidden: ${mute.slice(0, 3).join(', ')}`);
       // one H1 per page (P113, the workshop's check procedure: a second H1 is a defect, not only an SEO warning)
       const h1s = [...document.querySelectorAll('h1')].filter(h => !h.closest('[hidden], template'));
       if (h1s.length !== 1) why.push(`${h1s.length} h1 on the page, exactly one expected`);
@@ -1252,8 +1266,12 @@ const seo = want('seo') || want('ai_search') ? runSeo() : null;
 const seoRow = (p, ai = false) => {
   if (seo.error) return ['not_covered', seo.error];
   if (ai && !st.options?.seo) return ['pass', 'N/A: SEO is not part of this project (options.seo false)'];
+  // P113: a brief finding names a URL ("/projekty/ochoz") - its page is that URL's file; a finding of no page of the
+  // site is the home page's (it was put on every page, so one wrong H1 failed the seo row of all of them)
+  const fileOf = q => { if (pages.includes(q)) return q; const u = String(q || '').replace(/^\/+|\/+$/g, '');
+    const c = [u ? `${u}/index.html` : 'index.html', `${u}.html`].find(x => pages.includes(x)); return c || null; };
   const mine = seo.findings.filter(f => f.check.startsWith('ai-') === ai
-    && (f.page === p || (!pages.includes(f.page) && (!ai || p === home || p === '_site'))));
+    && (fileOf(f.page) === p || (!fileOf(f.page) && (p === home || p === '_site'))));
   const bl = mine.filter(f => f.level === 'BLOCKER'), wn = mine.filter(f => f.level === 'WARN');
   const txt = xs => xs.map(f => `${f.check}: ${f.detail}`).join('; ');
   return bl.length ? ['fail', `BLOCKER ${txt(bl)}`] : ['pass', wn.length ? `WARN ${txt(wn)}` : ''];

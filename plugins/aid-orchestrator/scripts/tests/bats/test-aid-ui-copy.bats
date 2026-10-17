@@ -105,6 +105,10 @@ assert m.fact_value(r, "klienti") == r[0] and m.fact_value(r, "x") is None and m
   # P113a: a sentence listing several data rests on all their keys (Coufal: "name, address, phone and e-mail")
   review '.pages["index.html"].claims[0].fact_key = ["klienti", "telefon"]'; run python3 "$COPY" verdict "$RUN"
   jq -e '.["index.html"].verdict == "pass"' <<<"$output" >/dev/null || { echo "$output"; return 1; }
+  # P113 (the workshop's V4 run): one registered and one unregistered datum in a sentence - null in the list is valid
+  # schema and fails the claim as unregistered
+  review '.pages["index.html"].claims[0].fact_key = ["klienti", null]'; run python3 "$COPY" verdict "$RUN"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }; jq -e '.["index.html"].verdict == "fail"' <<<"$output" >/dev/null; [[ "$output" == *"tvrzení bez faktu v registru"* ]]
   review 'del(.pages["index.html"].sweeps.voice)'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"chybí průchod voice"* ]]
   review '.pages["index.html"].personas[0].score = 4'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"skóre 4"* ]]
   review '.pages["index.html"].personas = []'; run python3 "$COPY" verdict "$RUN"; [[ "$output" == *"persona strážce značky: chybí"* ]]

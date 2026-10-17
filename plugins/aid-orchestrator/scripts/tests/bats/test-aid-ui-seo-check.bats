@@ -409,3 +409,12 @@ ai() { run python3 "$CHECK" "$S" --ai --facts "$BATS_TEST_TMPDIR/facts.json" --b
   grep -q '^OK kontakt/index.html ai-snippet nosnippet (agreed in the brief)' <<<"$output"
   grep -q '^WARN index.html ai-entity organisation not checked: the facts register has no brand' <<<"$output"
 }
+
+@test "p113: brief-h1 - a second H1 beside the brief's one is a BLOCKER (the workshop's V12), the brief's one alone passes" {
+  printf '| URL | H1 |\n|---|---|\n| / | Pekárna U Mlýna |\n| /o-nas | O nás |\n' >"$BATS_TEST_TMPDIR/brief.md"
+  run python3 "$CHECK" "$SITE" --brief "$BATS_TEST_TMPDIR/brief.md"
+  grep -qx 'OK /o-nas brief-h1 O nás' <<<"$output" || { echo "$output"; return 1; }
+  sed -i 's|<h1>O nás</h1>|<h1>O nás</h1><h1>Pečeme rychle a levně</h1>|' "$SITE/o-nas/index.html"
+  run python3 "$CHECK" "$SITE" --brief "$BATS_TEST_TMPDIR/brief.md"
+  [ "$status" -eq 1 ]; grep -qF "BLOCKER /o-nas brief-h1 expected 'O nás', got ['O nás', 'Pečeme rychle a levně']" <<<"$output" || { echo "$output"; return 1; }
+}
