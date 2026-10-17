@@ -321,6 +321,16 @@ projekt už má: vize a slogany, identita (logo a ikony), SEO a obrázkové náv
 SEO kontrola se přidá ke kroku 6. Každou volbu PM (slogan, logo, seznam stránek,
 kompozici) bere skript jen z odpovědi na stránce, stejně jako směr.
 
+Od 3.5.0 má studio šest míst rozhodnutí: sdělení, logo, pohyb, struktura, vzhled
+a hotový web. Na každém hodnotí dvě role na Claude Opus s pamětí: klient (majitel)
+a odborník; brány zná jen kód (`critic/*.gates.yaml`) a kolo místa je
+`aid-ui-quality.py round <projekt> --place <místo>` (nejvýš tři opravná kola).
+Odpověď ve studiu ani zápis buildu nejdou bez přijatého verdiktu místa, na kterém
+stojí. Struktura se hodnotí na živé kostře (`aid-ui-serve.sh skeleton`, port 3918).
+Po opravě udělá strojovou část jeden příkaz `aid-ui-state.sh cycle <projekt>`
+(pohyb, build, kontrola textů, měření, brána a stránka pro zákazníka, gate-check)
+a zastaví na prvním neúspěchu.
+
 ### Topic: status
 
 `/aid-status` is the one place that answers "what is happening". Its overview
@@ -643,4 +653,4 @@ Adding a rule is a row plus a handler — never an edit to `aid-hook.sh`. See
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-09-24
+**Last Updated:** 2026-10-17
